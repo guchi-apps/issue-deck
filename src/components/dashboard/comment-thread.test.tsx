@@ -115,11 +115,11 @@ describe("CommentThread ボットの役割表示", () => {
     expect(screen.getByText("m-guchi")).not.toBeNull();
   });
 
-  it("マーカーの無いbotコメントにはヘッダにloginをそのまま表示する（汎用ボット扱い）", () => {
+  it("マーカーの無いbotコメントにはヘッダに汎用の「自動投稿ボット」を表示する（#3756）", () => {
     renderThread([
       makeComment({ author: { login: "github-actions[bot]" }, body: "マーカーの無いコメント" }),
     ]);
-    expect(screen.getByText("github-actions[bot]")).not.toBeNull();
+    expect(screen.getByText("自動投稿ボット")).not.toBeNull();
   });
 });
 
@@ -144,7 +144,7 @@ describe("CommentThread 左右の吹き出し", () => {
     expect(row?.className).toContain("flex-row-reverse");
   });
 
-  it("currentUserLoginと一致しないコメントは左寄せのままになる", () => {
+  it("currentUserLoginと一致しない人のコメントも右寄せになる（#3756）", () => {
     render(
       <CommentThread
         comments={[makeComment({ author: { login: "other-user" }, body: "他の人のコメント" })]}
@@ -157,7 +157,7 @@ describe("CommentThread 左右の吹き出し", () => {
       />,
     );
     const row = screen.getByText("他の人のコメント").closest("li")?.querySelector(":scope > div");
-    expect(row?.className).not.toContain("flex-row-reverse");
+    expect(row?.className).toContain("flex-row-reverse");
   });
 
   // ローカル（サブPC）セッションのコメントは`gh`がユーザー本人のトークンで動くため、
@@ -727,5 +727,59 @@ describe("CommentThread ローカルセッションが担当しているとき",
     renderLocal({ mergeApprovalPending: true });
     expect(screen.getByText("Pull Requestのマージが必要です")).not.toBeNull();
     expect(screen.queryByRole("button", { name: "確認待ちを外す" })).toBeNull();
+  });
+});
+
+// #3756: ユーザー名義で投稿された自動投稿は左・役割アイコン、人の指示は右にする
+describe("CommentThread ボットと人の出し分け（#3756）", () => {
+  afterEach(() => {
+    cleanup();
+  });
+
+  function rowOf(text: string) {
+    return screen.getByText(text).closest("li")?.querySelector(":scope > div");
+  }
+
+  it("ユーザー名義の計画レビュー（マーカー付き）は左寄せで、GitHubの画像を出さない", () => {
+    renderThread([
+      makeComment({
+        author: { login: "m-guchi" },
+        body: "指摘です\n\n<!-- supervisor:plan-review -->\n\n<!-- issue-deck-agent:reviewer -->",
+      }),
+    ]);
+    expect(rowOf("指摘です")?.className).not.toContain("flex-row-reverse");
+    expect(screen.getByText("レビューボット")).not.toBeNull();
+    expect(document.querySelector("img")).toBeNull();
+  });
+
+  it("agentマーカーの無いユーザー名義の計画レビューも「計画レビューボット」として左に出す", () => {
+    renderThread([
+      makeComment({ author: { login: "m-guchi" }, body: "指摘\n\n<!-- supervisor:plan-review -->" }),
+    ]);
+    expect(screen.getByText("計画レビューボット")).not.toBeNull();
+  });
+
+  it("posted-byで人へ寄せたコメントは、引用中のボット用マーカーがあっても右寄せで本人の名前になる", () => {
+    renderThread([
+      makeComment({
+        author: { login: "m-guchi" },
+        postedOnBehalfOfHuman: true,
+        body: "修正を送りました\n> <!-- issue-deck-agent:plan-reviser -->",
+      }),
+    ]);
+    expect(rowOf("修正を送りました")?.className).toContain("flex-row-reverse");
+    expect(screen.queryByText("レビュー反映ボット")).toBeNull();
+    expect(screen.getByText("m-guchi")).not.toBeNull();
+  });
+
+  it("[bot]名義の絵文字推測コメントは左、他の人の🔧始まりは右になる", () => {
+    renderThread([
+      makeComment({ id: "1", author: { login: "x[bot]" }, body: "🔧 bot側" }),
+      makeComment({ id: "2", author: { login: "other-user" }, body: "🔧 人側" }),
+    ]);
+    expect(rowOf("🔧 bot側")?.className).not.toContain("flex-row-reverse");
+    expect(rowOf("🔧 人側")?.className).toContain("flex-row-reverse");
+    // 役割（実装ボット）が付くのは[bot]側の1件だけ
+    expect(screen.getAllByText("実装ボット")).toHaveLength(1);
   });
 });

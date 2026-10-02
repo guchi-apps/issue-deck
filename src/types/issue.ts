@@ -26,6 +26,11 @@ export type IssueComment = {
    * 本文のマーカーだけで判定する表示（計画レビューの未反映など）は、これがtrueのコメントだけを見る
    */
   authorTrusted?: boolean;
+  /**
+   * `posted-by`マーカーで操作者の人へ寄せて表示しているコメントか（#3756）。App名義で投稿されるが
+   * 実際は人の操作（画面の承認・修正など）で、本文の引用にボット用マーカーが含まれていても人として扱う
+   */
+  postedOnBehalfOfHuman?: boolean;
   createdAtLabel: string;
   body: string;
   reactionCount: number;
