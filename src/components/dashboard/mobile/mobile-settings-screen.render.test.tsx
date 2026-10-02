@@ -119,7 +119,7 @@ describe("MobileSettingsScreen", () => {
   it("PCの設定ダイアログと同じ区分を一覧に出す（#1539・#1552）", () => {
     renderScreen();
 
-    for (const label of ["表示", "実行設定", "フリート運用", "状態", "更新履歴"]) {
+    for (const label of ["表示", "実行設定", "フリート運用", "使用量と障害状況", "更新履歴"]) {
       expect(screen.getByRole("button", { name: new RegExp(label) })).toBeTruthy();
     }
     // 「アカウント」は区分に並べず、アカウント名のカードから開く（#3744）

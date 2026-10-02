@@ -183,6 +183,8 @@ export function ExecutionSettingsSection({
 
   return (
     <div className="flex flex-col gap-4">
+      <h3 className="border-b pb-1 text-xs font-semibold tracking-wide text-muted-foreground">実行の動かし方</h3>
+
       <div className="flex flex-col gap-1.5">
         <Label htmlFor="auto-retry-limit">自動リトライ回数</Label>
         <Input
@@ -263,6 +265,25 @@ export function ExecutionSettingsSection({
           </p>
         </div>
       </div>
+
+      <div className="flex flex-col gap-1.5 border-t pt-4">
+        <Label htmlFor="dispatch-concurrency">サブPCの同時実行数</Label>
+        <Input
+          id="dispatch-concurrency"
+          type="number"
+          min={DISPATCH_CONCURRENCY_MIN}
+          max={DISPATCH_CONCURRENCY_MAX}
+          value={dispatchConcurrency}
+          onChange={(e) => setDispatchConcurrency(Number(e.target.value))}
+        />
+        <p className="text-xs text-muted-foreground">
+          サブPCへディスパッチしたジョブを同時に何本まで走らせるかの上限です。CPUの実力に
+          合わせて変えられるよう設定値にしています（既定の3は載せ替え後のCPU実測にもとづく上限で、
+          4本にするとメモリが足りずビルドが2倍以上遅くなります）。
+        </p>
+      </div>
+
+      <h3 className="border-b pb-1 text-xs font-semibold tracking-wide text-muted-foreground">使うAIモデル</h3>
 
       <div className="flex flex-col gap-1.5">
         <Label htmlFor="claude-model">GitHub Actions（Claude）：計画・実装・レビュー</Label>
@@ -442,29 +463,6 @@ export function ExecutionSettingsSection({
         </p>
       </div>
 
-      <div className="flex flex-col gap-1.5">
-        <Label htmlFor="dispatch-concurrency">サブPCの同時実行数</Label>
-        <Input
-          id="dispatch-concurrency"
-          type="number"
-          min={DISPATCH_CONCURRENCY_MIN}
-          max={DISPATCH_CONCURRENCY_MAX}
-          value={dispatchConcurrency}
-          onChange={(e) => setDispatchConcurrency(Number(e.target.value))}
-        />
-        <p className="text-xs text-muted-foreground">
-          サブPCへディスパッチしたジョブを同時に何本まで走らせるかの上限です。CPUの実力に
-          合わせて変えられるよう設定値にしています（既定の3は載せ替え後のCPU実測にもとづく上限で、
-          4本にするとメモリが足りずビルドが2倍以上遅くなります）。
-        </p>
-      </div>
-
-      <ReleasePrepIntervalField />
-
-      <CodeReviewRecommendField />
-
-      <PlanReviewAutoReflectField />
-
       {error && <p className="text-sm text-destructive">{error}</p>}
 
       <div className="flex items-center gap-3 border-t pt-4">
@@ -478,6 +476,19 @@ export function ExecutionSettingsSection({
           <span className="text-xs text-muted-foreground">未保存の変更があります</span>
         )}
       </div>
+
+      <h3 className="border-b pb-1 text-xs font-semibold tracking-wide text-muted-foreground">
+        その場で保存される設定
+      </h3>
+      <p className="-mt-2 text-xs text-muted-foreground">
+        上の「保存」の対象ではありません。選んだ時点か、各項目の専用ボタンで保存されます。
+      </p>
+
+      <ReleasePrepIntervalField />
+
+      <CodeReviewRecommendField />
+
+      <PlanReviewAutoReflectField />
     </div>
   );
 }
