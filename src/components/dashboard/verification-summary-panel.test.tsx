@@ -66,3 +66,25 @@ describe("VerificationSummaryPanel（#2838）", () => {
     expect(onCreateFixIssue.mock.calls[0][0].issueNumber).toBe(2443);
   });
 });
+
+describe("VerificationSummaryPanelの作り直しの案内（#3760）", () => {
+  it("開いているリリースPRで要確認・要修正の行があれば、作り直しの案内を出す", () => {
+    render(
+      <VerificationSummaryPanel
+        verification={verification()}
+        repositoryFullName="guchi-apps/aide"
+        showRebuildGuide
+      />,
+    );
+
+    expect(screen.getByTestId("verification-rebuild-guide")).toBeTruthy();
+  });
+
+  it("showRebuildGuideを渡さなければ（マージ済みなど）案内を出さない", () => {
+    render(
+      <VerificationSummaryPanel verification={verification()} repositoryFullName="guchi-apps/aide" />,
+    );
+
+    expect(screen.queryByTestId("verification-rebuild-guide")).toBeNull();
+  });
+});
