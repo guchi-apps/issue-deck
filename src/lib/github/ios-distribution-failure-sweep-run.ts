@@ -208,12 +208,29 @@ async function applyDecision({
     await createComment(owner, repo, decision.issueNumber, token, {
       body: buildIosDistributionFailureUpdateComment(meta),
     });
+    // 過去に追跡したrunが再び最新になると(repositoryFullName, runId)の一意制約に当たるため、
+    // その場合はrunIdを書き換えず、それ以外の項目だけ更新する
+    const closedSameRun = await db.iosDistributionFailureIssue.findFirst({
+      where: { repositoryFullName, runId: BigInt(run.id), state: "closed" },
+    });
     await db.iosDistributionFailureIssue.updateMany({
       where: { repositoryFullName, state: "open" },
-      data: { runId: BigInt(run.id), runUrl: run.htmlUrl, failedStage: meta.failedStage, detectedAt: now },
+      data: {
+        ...(closedSameRun ? {} : { runId: BigInt(run.id) }),
+        runUrl: run.htmlUrl,
+        failedStage: meta.failedStage,
+        detectedAt: now,
+      },
     });
     return { repositoryFullName, kind: "updated", issueNumber: decision.issueNumber };
   }
+
+  // 人が追跡Issueを先に閉じると行は`closed`のまま残り、同じ失敗のrunが最新だと再びcreateと判定される。
+  // 同じrunIdの行が既にあれば起票を見送る（Issue作成後にDBの一意制約で落ちて毎回起票し直す連鎖を防ぐ）
+  const existing = await db.iosDistributionFailureIssue.findFirst({
+    where: { repositoryFullName, runId: BigInt(run.id) },
+  });
+  if (existing) return null;
 
   const created = await createIssue(owner, repo, token, {
     title: buildIosDistributionFailureIssueTitle(meta),
