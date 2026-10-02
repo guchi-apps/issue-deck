@@ -46,6 +46,8 @@ export function PlanReviewFindings({
   isSubmitting = false,
   remainingMs,
   deemphasizeSubmit = false,
+  approveHint = DEFAULT_APPROVE_HINT,
+  unavailable,
   onSubmit,
 }: {
   review: ParsedPlanReview;
@@ -67,6 +69,10 @@ export function PlanReviewFindings({
   remainingMs?: number;
   /** 推奨が「このまま承認」のとき、出し直しのボタンを主ボタンにしない（#3670） */
   deemphasizeSubmit?: boolean;
+  /** 「そのまま承認する」操作の場所と文言（例: 「承認して実装へ進む」を押す）。経路ごとに承認ボタンの位置が違うので呼び出し側が渡す */
+  approveHint?: string;
+  /** 承認・修正が届かない理由（セッション終了／計画待ちの期限切れ）。無ければ送れる状態 */
+  unavailable?: PlanReviewUnavailable;
   onSubmit: (text: string) => void | Promise<void>;
 }) {
   // 番号ごとの判断。**無い番号は「反映する」**として扱う（既定を全件反映にするため）
@@ -75,6 +81,8 @@ export function PlanReviewFindings({
   const [isBodyOpen, setIsBodyOpen] = useState(false);
   // 判断ごとの選択（#3660）。**無い番号は未選択**で、全件選ぶまで送れない（指摘と違い既定を持たない）
   const [choices, setChoices] = useState<Record<number, string>>({});
+  // 推奨の理由とレビュー要約は細かい文字で読まれないので、既定は閉じておく（#3754）
+  const [isDetailOpen, setIsDetailOpen] = useState(false);
 
   const { findings, decisions } = review;
   const hasFindings = findings.length > 0 || decisions.length > 0;
@@ -111,6 +119,20 @@ export function PlanReviewFindings({
         ? "すべて見送る場合は、この計画のまま承認してください。"
         : `${decisions.length > 0 ? `判断 ${decisions.length}件・` : ""}反映 ${applyCount}件・見送り ${skipCount}件${skipCount > 0 ? "。見送る理由も一緒に送ります" : ""}`;
 
+  const hasDetail = Boolean(review.recommendation?.reason) || (hasFindings && Boolean(review.summary));
+  const effectiveSubmitLabel = decisions.length > 0 ? submitLabel.replace("選んだ指摘", "選んだ内容") : submitLabel;
+  const nextSteps = buildNextSteps({
+    hasFindings,
+    noFindings: review.noFindings,
+    undecidedCount,
+    decisionCount: decisions.length,
+    applyCount,
+    approveRecommended: deemphasizeSubmit,
+    submitLabel: effectiveSubmitLabel,
+    fallbackSubmitLabel,
+    approveHint,
+  });
+
   return (
     <section className="overflow-hidden rounded-md border bg-card" aria-label="計画レビュー">
       <header className="flex flex-wrap items-center gap-2 border-b bg-blue-500/10 px-3 py-2">
@@ -137,25 +159,44 @@ export function PlanReviewFindings({
         )}
       </header>
 
+      <NextActionBand steps={nextSteps} unavailable={unavailable} />
+
       {review.recommendation && (
-        <div className="flex flex-wrap items-start gap-2 border-b px-3 py-2 text-xs">
-          <span
-            className={cn(
-              "shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium",
-              RECOMMENDATION_TONE[review.recommendation.kind],
+        <div className="flex flex-col gap-1 border-b px-3 py-2 text-xs">
+          <div className="flex flex-wrap items-center gap-2">
+            <span
+              className={cn(
+                "shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium",
+                RECOMMENDATION_TONE[review.recommendation.kind],
+              )}
+            >
+              推奨: {recommendationLabel(review.recommendation.kind, review.recommendation.text)}
+            </span>
+            {hasDetail && (
+              <button
+                type="button"
+                onClick={() => setIsDetailOpen((prev) => !prev)}
+                className="flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground"
+                aria-expanded={isDetailOpen}
+              >
+                {isDetailOpen ? (
+                  <ChevronDown aria-hidden className="size-3" />
+                ) : (
+                  <ChevronRight aria-hidden className="size-3" />
+                )}
+                推奨の理由とレビュー要約
+              </button>
             )}
-          >
-            推奨: {recommendationLabel(review.recommendation.kind, review.recommendation.text)}
-          </span>
-          {review.recommendation.reason && (
-            <span className="min-w-0 flex-1 text-muted-foreground">{review.recommendation.reason}</span>
+          </div>
+          {isDetailOpen && review.recommendation.reason && (
+            <span className="text-muted-foreground">{review.recommendation.reason}</span>
           )}
         </div>
       )}
 
       {hasFindings ? (
         <>
-          {review.summary && (
+          {isDetailOpen && review.summary && (
             <div className="border-b px-3 py-2">
               <MarkdownBody
                 content={review.summary}
@@ -216,7 +257,7 @@ export function PlanReviewFindings({
               onClick={submitDecisions}
             >
               {isSubmitting ? <Loader2 className="animate-spin" /> : <ScanSearch />}
-              {decisions.length > 0 ? submitLabel.replace("選んだ指摘", "選んだ内容") : submitLabel}
+              {effectiveSubmitLabel}
             </Button>
           </footer>
         </>
@@ -265,6 +306,89 @@ export function PlanReviewFindings({
         </>
       )}
     </section>
+  );
+}
+
+/** 承認・修正が届かない理由。呼び出し側（セッション・残り時間を知っている側）が決めて渡す */
+export type PlanReviewUnavailable = "session-gone" | "expired";
+
+const DEFAULT_APPROVE_HINT = "そのまま進めるなら承認する";
+
+export type NextStep = { text: string; done?: boolean };
+
+/**
+ * 人がこのカードで次に何をするかを、押すボタンの名前つきの短い手順にする（#3754）。
+ * 細かい文字の本文を読まなくても、操作だけが分かるようにするためのもの。
+ */
+export function buildNextSteps(input: {
+  hasFindings: boolean;
+  noFindings: boolean;
+  undecidedCount: number;
+  decisionCount: number;
+  applyCount: number;
+  approveRecommended: boolean;
+  submitLabel: string;
+  fallbackSubmitLabel: string;
+  approveHint: string;
+}): NextStep[] {
+  const push = { text: `「${input.submitLabel}」を押す` };
+  if (!input.hasFindings) {
+    if (input.noFindings) return [{ text: `指摘はありません。${input.approveHint}` }];
+    return [
+      { text: `指摘ごとに分けられませんでした。「${input.fallbackSubmitLabel}」を押すか、${input.approveHint}` },
+    ];
+  }
+  if (input.undecidedCount > 0) {
+    return [{ text: `下の判断${input.undecidedCount}件で選択肢を選ぶ` }, push];
+  }
+  if (input.approveRecommended) {
+    return [{ text: `操作は承認だけです。${input.approveHint}` }];
+  }
+  if (input.decisionCount > 0) {
+    return [{ text: `判断${input.decisionCount}件を選んだ`, done: true }, push];
+  }
+  if (input.applyCount === 0) {
+    return [{ text: `すべて見送る場合は、${input.approveHint}` }];
+  }
+  return [
+    { text: "各指摘を「反映する」か「見送る」で選ぶ（初期は全件「反映する」）" },
+    push,
+  ];
+}
+
+function NextActionBand({ steps, unavailable }: { steps: NextStep[]; unavailable?: PlanReviewUnavailable }) {
+  if (unavailable) {
+    return (
+      <div className="border-b border-amber-500/50 bg-amber-500/10 px-3 py-2.5 text-xs text-amber-700 dark:text-amber-400">
+        <p className="text-sm font-bold">いまはここから送れません</p>
+        <p className="mt-0.5">
+          {unavailable === "expired"
+            ? "計画待ちの時間が切れました。端末かRemote Controlで答えてください。"
+            : "セッションが終了しています。続きを頼むには「セッションを復旧」から起こし直してください。"}
+        </p>
+      </div>
+    );
+  }
+  return (
+    <div className="border-b border-amber-500/50 bg-amber-500/10 px-3 py-2.5" aria-label="あなたの操作">
+      <p className="text-sm font-bold text-amber-700 dark:text-amber-400">あなたの操作が必要です</p>
+      <ol className="mt-1.5 flex flex-col gap-1">
+        {steps.map((step, index) => (
+          <li key={index} className="flex items-baseline gap-2 text-xs text-foreground">
+            <span
+              aria-hidden
+              className={cn(
+                "inline-flex size-5 shrink-0 items-center justify-center rounded-full text-[11px] font-bold",
+                step.done ? "bg-emerald-600 text-white" : "bg-amber-500 text-amber-950",
+              )}
+            >
+              {step.done ? "✓" : steps.length === 1 ? "!" : index + 1}
+            </span>
+            <span className="min-w-0">{step.text}</span>
+          </li>
+        ))}
+      </ol>
+    </div>
   );
 }
 
