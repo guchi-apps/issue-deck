@@ -627,6 +627,15 @@ export function IssueDeckShell({
    * （一括作成・コードレビュー・横断質問）が使う。新規作成ダイアログは
    * `registerCreatedIssue`と`selectIssue`を別々に受け取る。
    */
+  /**
+   * iOS拡張画面から起票したIssueの詳細を開く（#3743）。`handleIssueCreated`の`selectIssue`は
+   * `pane`を消さず、PCではiOS拡張パネルが残るため、`pane`を消す`openIssueUrl`で開く。
+   */
+  function handleIosExtensionIssueCreated(issue: Issue) {
+    setAllIssues((prev) => upsertIssue(prev, issue));
+    openIssueUrl(issue.id);
+  }
+
   function handleIssueCreated(issue: Issue) {
     registerCreatedIssue(issue);
     // PC・スマホのどちらの現在地も1回のURL更新で詳細画面へ進める（#192・#1396）。
@@ -2151,7 +2160,7 @@ export function IssueDeckShell({
 
               {mobileScreen.kind === "ios-extensions" && (
                 <div className="h-full overflow-y-auto p-4">
-                  <IosExtensionsPanel onBack={goBack} />
+                  <IosExtensionsPanel onBack={goBack} onIssueCreated={handleIosExtensionIssueCreated} />
                 </div>
               )}
 
@@ -2489,7 +2498,7 @@ export function IssueDeckShell({
 
           {filters.pane === "ios-extensions" ? (
             <div className="hidden flex-1 overflow-y-auto p-4 md:block">
-              <div className="mx-auto max-w-5xl"><IosExtensionsPanel /></div>
+              <div className="mx-auto max-w-5xl"><IosExtensionsPanel onIssueCreated={handleIosExtensionIssueCreated} /></div>
             </div>
           ) : filters.pane === "ideas" ? (
             <div className="hidden flex-1 overflow-y-auto p-4 md:block">

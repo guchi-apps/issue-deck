@@ -1,6 +1,5 @@
 "use client";
 
-import { ExternalLink } from "lucide-react";
 import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
@@ -13,6 +12,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
+import type { Issue } from "@/types/issue";
 import {
   buildIosExtensionIssue,
   IOS_EXTENSION_KINDS,
@@ -35,15 +35,17 @@ export function IosExtensionIssueDialog({
   target,
   repositories,
   onClose,
+  onCreated,
 }: {
   target: IosExtensionIssueTarget | null;
   repositories: string[];
   onClose: () => void;
+  onCreated: (issue: Issue) => void;
 }) {
   return (
     <Dialog open={target !== null} onOpenChange={(open) => !open && onClose()}>
       <DialogContent>
-        {target && <DialogForm key={`${target.repositoryFullName}:${target.extension?.path}:${target.extension?.name}`} target={target} repositories={repositories} onClose={onClose} />}
+        {target && <DialogForm key={`${target.repositoryFullName}:${target.extension?.path}:${target.extension?.name}`} target={target} repositories={repositories} onClose={onClose} onCreated={onCreated} />}
       </DialogContent>
     </Dialog>
   );
@@ -53,10 +55,12 @@ function DialogForm({
   target,
   repositories,
   onClose,
+  onCreated,
 }: {
   target: IosExtensionIssueTarget;
   repositories: string[];
   onClose: () => void;
+  onCreated: (issue: Issue) => void;
 }) {
   const isEdit = target.extension !== null;
   const [repositoryFullName, setRepositoryFullName] = useState(target.repositoryFullName);
@@ -64,7 +68,7 @@ function DialogForm({
   const [description, setDescription] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [created, setCreated] = useState<{ number: number; url: string } | null>(null);
+  const [created, setCreated] = useState<Issue | null>(null);
 
   const draft = buildIosExtensionIssue({
     mode: isEdit ? "edit" : "add",
@@ -83,9 +87,9 @@ function DialogForm({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ repositoryFullName, title: draft.title, body: draft.body, labels: ["50.feature"] }),
       });
-      const json = (await response.json().catch(() => null)) as { issue?: { number: number } } | null;
+      const json = (await response.json().catch(() => null)) as { issue?: Issue } | null;
       if (!response.ok || !json?.issue) throw new Error(`Issueを起票できませんでした (${response.status})`);
-      setCreated({ number: json.issue.number, url: `https://github.com/${repositoryFullName}/issues/${json.issue.number}` });
+      setCreated(json.issue);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Issueを起票できませんでした");
     } finally {
@@ -103,9 +107,7 @@ function DialogForm({
       {created ? (
         <div className="space-y-3 text-sm">
           <p>Issue #{created.number} を起票しました。</p>
-          <Button variant="outline" size="sm" asChild>
-            <a href={created.url} target="_blank" rel="noreferrer">GitHubで開く<ExternalLink /></a>
-          </Button>
+          <Button variant="outline" size="sm" onClick={() => { onCreated(created); onClose(); }}>Issueを開く</Button>
         </div>
       ) : (
         <div className="space-y-3 text-sm">
