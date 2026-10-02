@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronDown, ChevronRight, FilePlus2 } from "lucide-react";
+import { CheckCheck, ChevronDown, ChevronRight, FilePlus2, Undo2 } from "lucide-react";
 import { useState } from "react";
 
 import { GithubReferenceLink } from "@/components/dashboard/github-reference-link";
@@ -25,17 +25,49 @@ function canRequestFixIssue(kind: ReviewVerdictKind): boolean {
   return kind === "changes-requested" || kind === "needs-check";
 }
 
+/** 「確認済み・対応しない」を出す判定（#3739）。要確認・要修正の行だけ */
+function canAcknowledge(kind: ReviewVerdictKind): boolean {
+  return kind === "changes-requested" || kind === "needs-check";
+}
+
 function Row({
   row,
   repositoryFullName,
   onCreateFixIssue,
+  onAcknowledge,
+  onRevokeAcknowledgement,
 }: {
   row: ReleaseVerificationRow;
   repositoryFullName: string;
   /** 指摘を新規Issueの下書きにして開く（#2838）。渡さない画面ではボタンを出さない */
   onCreateFixIssue?: (row: ReleaseVerificationRow) => void;
+  /** 指摘を確認して「対応しない」と記録する（#3739）。理由を添えて呼ぶ。渡さない画面ではボタンを出さない */
+  onAcknowledge?: (row: ReleaseVerificationRow, reason: string) => Promise<void>;
+  /** 記録を取り消す */
+  onRevokeAcknowledgement?: (row: ReleaseVerificationRow) => Promise<void>;
 }) {
   const [isOpen, setIsOpen] = useState(false);
+  const [isAcknowledging, setIsAcknowledging] = useState(false);
+  const [reason, setReason] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const showAcknowledgeButton =
+    onAcknowledge !== undefined && row.acknowledgement === null && canAcknowledge(row.reviewKind);
+  const showRevokeButton = onRevokeAcknowledgement !== undefined && row.acknowledgement !== null;
+
+  const submit = async (action: () => Promise<void>) => {
+    setIsSubmitting(true);
+    setSubmitError(null);
+    try {
+      await action();
+      setIsAcknowledging(false);
+      setReason("");
+    } catch (error) {
+      setSubmitError(error instanceof Error ? error.message : "記録できませんでした");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
   const showFixButton = onCreateFixIssue !== undefined && canRequestFixIssue(row.reviewKind);
 
   return (
@@ -71,8 +103,25 @@ function Row({
         >
           リスク{row.riskLabel}
         </span>
-        {(showFixButton || row.reviewBody) && (
-          <div className="ml-auto flex shrink-0 items-center gap-2">
+        {(showFixButton || showAcknowledgeButton || showRevokeButton || row.reviewBody) && (
+          <div className="ml-auto flex shrink-0 flex-wrap items-center gap-2">
+            {showAcknowledgeButton && !isAcknowledging && (
+              <Button size="xs" variant="outline" onClick={() => setIsAcknowledging(true)}>
+                <CheckCheck />
+                確認済み・対応しない
+              </Button>
+            )}
+            {showRevokeButton && (
+              <Button
+                size="xs"
+                variant="outline"
+                disabled={isSubmitting}
+                onClick={() => void submit(() => onRevokeAcknowledgement(row))}
+              >
+                <Undo2 />
+                取り消す
+              </Button>
+            )}
             {showFixButton && (
               <Button
                 size="xs"
@@ -105,6 +154,36 @@ function Row({
           </div>
         )}
       </div>
+      {isAcknowledging && onAcknowledge && (
+        <div className="mt-2 flex flex-col gap-2 rounded-md border bg-muted/40 p-2.5">
+          <label htmlFor={`ack-reason-${row.issueNumber}`} className="text-muted-foreground">
+            対応しない理由（PRのコメントとして残ります）
+          </label>
+          <textarea
+            id={`ack-reason-${row.issueNumber}`}
+            value={reason}
+            maxLength={500}
+            onChange={(event) => setReason(event.target.value)}
+            className="min-h-11 resize-none rounded-md border bg-background p-1.5 text-xs"
+          />
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              size="xs"
+              disabled={isSubmitting}
+              onClick={() => void submit(() => onAcknowledge(row, reason))}
+            >
+              対応しないと記録する
+            </Button>
+            <Button size="xs" variant="outline" disabled={isSubmitting} onClick={() => setIsAcknowledging(false)}>
+              やめる
+            </Button>
+            <span className="text-muted-foreground">
+              追いコミットで再レビューされると、この記録は引き継がれません。
+            </span>
+          </div>
+        </div>
+      )}
+      {submitError && <p className="mt-1 text-destructive">{submitError}</p>}
       {row.reviewBody && isOpen && (
         <MarkdownBody
           content={row.reviewBody}
@@ -133,6 +212,8 @@ export function VerificationSummaryPanel({
   verification,
   repositoryFullName,
   onCreateFixIssue,
+  onAcknowledge,
+  onRevokeAcknowledgement,
 }: {
   verification: ReleaseVerification;
   repositoryFullName: string;
@@ -141,6 +222,9 @@ export function VerificationSummaryPanel({
    * 渡さない画面ではボタンを出さない。
    */
   onCreateFixIssue?: (row: ReleaseVerificationRow) => void;
+  /** 「確認済み・対応しない」の記録・取り消し（#3739）。渡さない画面ではボタンを出さない */
+  onAcknowledge?: (row: ReleaseVerificationRow, reason: string) => Promise<void>;
+  onRevokeAcknowledgement?: (row: ReleaseVerificationRow) => Promise<void>;
 }) {
   const { rows, tally } = verification;
 
@@ -171,6 +255,8 @@ export function VerificationSummaryPanel({
             row={row}
             repositoryFullName={repositoryFullName}
             onCreateFixIssue={onCreateFixIssue}
+            onAcknowledge={onAcknowledge}
+            onRevokeAcknowledgement={onRevokeAcknowledgement}
           />
         ))}
       </ul>

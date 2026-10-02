@@ -153,6 +153,7 @@ describe("toPullRequestSummary（レビュー判定。#2843）", () => {
         riskLabel: "該当なし",
         // 一覧の応答を膨らませないため、指摘の本文は画面へ渡さない
         reviewBody: null,
+        acknowledgement: null,
       },
     ]);
   });

@@ -16,6 +16,8 @@
  * ワークフローと突き合わせる。
  */
 
+import { parseAcknowledgedCell, type AcknowledgeableVerdict } from "@/lib/github/review-acknowledgement";
+
 /** リリースPR本文でこの見出しの下に表がある。ワークフロー側と対（CIで突き合わせる） */
 const TABLE_HEADING = "## コードレビューの検証結果";
 
@@ -70,6 +72,12 @@ export type ReleaseVerificationRow = {
    * （ローカルのレビュー・統合エージェントがマージしたPRにはレビューコメントが無い）。
    */
   reviewBody: string | null;
+  /**
+   * 「確認済み・対応しない」と記録されている行なら、元の判定と記録者（#3739）。
+   * 表のセルが`✅ 確認済み（元の判定: 要確認、記録: guchi）`の形のときだけ。画面は`reviewKind`が
+   * `ok`でも、この値があれば「取り消す」を出す。
+   */
+  acknowledgement: { verdict: AcknowledgeableVerdict; recordedBy: string | null } | null;
 };
 
 export type ReleaseVerificationTally = {
@@ -243,6 +251,7 @@ export function parseReleaseVerification(body: string | null | undefined): Relea
       riskKind: risk.kind,
       riskLabel: risk.label,
       reviewBody: bodies.get(issueNumber) ?? null,
+      acknowledgement: parseAcknowledgedCell(review.label),
     });
   }
 
