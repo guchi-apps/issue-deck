@@ -106,6 +106,13 @@ Actionsの一覧にはワークフロー名の代わりに`.github/workflows/<�
 | 起動フラグ | [scripts/lib/agent-language.sh](../../scripts/lib/agent-language.sh) の`AGENT_LANGUAGE_SYSTEM_PROMPT`を`--append-system-prompt`で渡す | サブPCのローカルセッション（`run-issue-session.sh`・`start-reviewer.sh`から起こしたもの） |
 | プロンプト本文 | 各プロンプトの「## 出力言語」（`.github/prompts/`・`scripts/prompts/`） | 無人実行を含む全経路 |
 
+**PR作成の明示指示（#3752）は言語指示と別枠。** 個人設定の「明示的な指示があるまでPRを作らない」が
+プロンプトの「PRを作成する」に勝ってPR未作成のまま止まる事象への対策で、`AGENT_PR_SYSTEM_PROMPT`
+（同ファイル。専用関数`append_pr_system_prompt`）を`run-issue-session.sh`が**実装セッションで、PRを
+自動で作るリポジトリ（`pr_policy_is_manual`が偽）のときだけ**渡す。レビュー・統合エージェント・横断質問・
+手作業・`guchi-apps/ideas`には付けない。本文側は`implementation-agent.md`の「責務」節（固定文）と、
+generic側の`generic-start-issue.sh`・`src/lib/prompts/pr-policy.ts`のauto分岐（両方そろえる）。
+
 **文面は2か所に同じものを置いている。変えるときは両方を揃える。** 片方だけ変えると、起動経路に
 よって指示が食い違う。
 

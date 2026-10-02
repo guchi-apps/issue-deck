@@ -66,6 +66,9 @@ source "$SCRIPT_DIR/lib/tailscale-serve.sh"
 # セッションの出力言語（#1395）。レビューセッション（scripts/start-reviewer.sh）と共有する。
 # shellcheck source=scripts/lib/agent-language.sh
 source "$SCRIPT_DIR/lib/agent-language.sh"
+# PRを人の指示で作るリポジトリの判定（#3752）。判定の正は scripts/lib/pr-policy.sh だけ。
+# shellcheck source=scripts/lib/pr-policy.sh
+source "$SCRIPT_DIR/lib/pr-policy.sh"
 # キックオフ文面へ差し込む概要・オプション・開発環境（#1559）。
 # shellcheck source=scripts/lib/kickoff-prompt.sh
 source "$SCRIPT_DIR/lib/kickoff-prompt.sh"
@@ -668,6 +671,19 @@ if [[ "$AGENT_KIND" == "claude" ]]; then
   append_language_system_prompt "#$ISSUE_NUMBER: "
 fi
 
+# PR作成の明示指示（#3752）。個人設定の「明示的な指示があるまでPRを作らない」に負けて、PRを
+# 作らないまま止まるのを防ぐ。**実装セッションで、PRを自動で作るリポジトリのときだけ**付ける。
+# 横断質問・手作業はPRを作らず、`guchi-apps/ideas`のような人の指示で作るリポジトリでは
+# プロンプト本文と矛盾する。tmuxを挟むと環境変数は届かないため、ここで自分で判定する。
+SEND_PR_INSTRUCTION=0
+if [[ "${ISSUE_DECK_SESSION_KIND:-implementation}" == "implementation" ]] &&
+  ! pr_policy_is_manual "$(current_repo_slug)"; then
+  SEND_PR_INSTRUCTION=1
+  if [[ "$AGENT_KIND" == "claude" ]]; then
+    append_pr_system_prompt "#$ISSUE_NUMBER: "
+  fi
+fi
+
 # セッション名（プロンプトボックス・`/resume`の一覧・ターミナルのタイトルに出る）。
 # どのリポジトリのどのIssueかがタブから分かるよう「<リポジトリ名> #<Issue番号>」にする（#1105）。
 REPO_NAME="$(basename -s .git "$(git config --get remote.origin.url 2>/dev/null || true)")"
@@ -1073,6 +1089,9 @@ fi
 # 無い**ため、ここに置かないと指示が個人設定と対象リポジトリのCLAUDE.md任せに戻る。
 # 文面は`scripts/lib/agent-language.sh`の1か所から取る（Claude側と食い違わせない）。
 if [[ "$AGENT_KIND" != "claude" ]]; then
+  if [[ "$SEND_PR_INSTRUCTION" == "1" ]]; then
+    KICKOFF_PROMPT="$AGENT_PR_SYSTEM_PROMPT"$'\n\n'"$KICKOFF_PROMPT"
+  fi
   KICKOFF_PROMPT="$AGENT_LANGUAGE_SYSTEM_PROMPT"$'\n\n'"$KICKOFF_PROMPT"
 fi
 
