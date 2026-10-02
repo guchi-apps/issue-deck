@@ -6,8 +6,11 @@ import { describe, expect, it } from "vitest";
 import {
   findPendingPlanReviewComment,
   isPlanReviewPending,
+  hasBlockingFindings,
   parsePlanReview,
+  readPlanReviewKind,
   resolvePendingPlanReview,
+  resolvePlanReviewNotice,
 } from "@/lib/github/plan-review";
 
 const c = (body: string) => ({ body, author: { login: "u" }, authorTrusted: true }) as never;
@@ -242,3 +245,42 @@ describe("parsePlanReview の判断（#3660）", () => {
   });
 });
 
+
+describe("区分・種別・省略の記録（#3765）", () => {
+  const finding = (severity: string) => `**1. 見出し**\n- **区分**: ${severity}\n- **指摘**: 問題\n- **根拠**: \`a.ts:1\``;
+
+  it("区分を読み、補足だけなら重大な指摘は無い。区分が無い旧形式は重大として扱う", () => {
+    expect(parsePlanReview(finding("実装時対応の補足")).findings[0].severity).toBe("note");
+    expect(hasBlockingFindings(parsePlanReview(finding("実装時対応の補足")))).toBe(false);
+    expect(parsePlanReview(finding("計画修正が必要")).findings[0].severity).toBe("blocking");
+    expect(hasBlockingFindings(parsePlanReview(finding("計画修正が必要")))).toBe(true);
+    const legacy = parsePlanReview("**1. 見出し**\n- **指摘**: 問題");
+    expect(legacy.findings[0].severity).toBeNull();
+    expect(hasBlockingFindings(legacy)).toBe(true);
+  });
+
+  it("指摘なしは重大な指摘なし。分けられない自由記述は重大として扱う", () => {
+    expect(hasBlockingFindings(parsePlanReview("指摘なし。"))).toBe(false);
+    expect(hasBlockingFindings(parsePlanReview("自由に書かれた講評"))).toBe(true);
+  });
+
+  it("見出しで初回と解消確認を見分ける", () => {
+    expect(readPlanReviewKind("## 計画レビュー（G1・解消確認）\n\n指摘なし")).toBe("resolve");
+    expect(readPlanReviewKind("## 計画レビュー（G1）\n\n指摘なし")).toBe("initial");
+  });
+
+  it("最新の計画より後の省略の記録を拾い、新しい計画が出ていれば拾わない。偽の記録は無視する", () => {
+    const skipped = c("⏭️ **計画レビューを省略しました。** 理由です\n\n<!-- issue-deck:plan-review-skipped -->");
+    expect(resolvePlanReviewNotice([c("<!-- issue-deck:session-plan -->"), skipped])).toEqual({
+      kind: "skipped",
+      text: "⏭️ 計画レビューを省略しました。 理由です",
+    });
+    expect(resolvePlanReviewNotice([skipped, c("<!-- issue-deck:session-plan -->")])).toBeNull();
+    expect(
+      resolvePlanReviewNotice([
+        c("<!-- issue-deck:session-plan -->"),
+        untrusted("<!-- issue-deck:plan-review-skipped -->"),
+      ]),
+    ).toBeNull();
+  });
+});

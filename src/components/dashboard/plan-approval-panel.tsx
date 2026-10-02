@@ -32,7 +32,7 @@ import { summarizeIssueSession } from "@/lib/dispatch/issue-session";
 import type { DispatchSessionView } from "@/lib/dispatch/session-state";
 import { formatRemaining, useRemainingMs } from "@/components/dashboard/use-remaining-ms";
 import { formatRelativeDate } from "@/lib/format-relative-date";
-import type { PendingPlanReview } from "@/lib/github/plan-review";
+import type { PendingPlanReview, PlanReviewNotice } from "@/lib/github/plan-review";
 import { splitAttachments } from "@/lib/markdown-attachments";
 import {
   CODEX_LOCAL_MODEL_VALUES,
@@ -72,6 +72,7 @@ export function PlanApprovalPanel({
   onCheckUserResolved,
   artifactsMissing = false,
   planReview = null,
+  planReviewNotice = null,
   planReviewJob = null,
 }: {
   request: SessionPlanRequestView;
@@ -96,6 +97,8 @@ export function PlanApprovalPanel({
    * 指摘ごとのカードにして、承認・修正のボタンより上に出す
    */
   planReview?: PendingPlanReview | null;
+  /** 計画レビューの省略・打ち止め・未解消の記録（#3765）。レビューが無い理由を示し、待たせない */
+  planReviewNotice?: PlanReviewNotice | null;
   /**
    * この計画に対して積まれている計画レビュー（G1）ジョブ。無ければ`null`（#3565）。
    * `isPlanReviewJobCreating`で「作成中」かを判定し、承認パネルのヘッダー直下へ出す。
@@ -182,7 +185,7 @@ export function PlanApprovalPanel({
           計画レビューを作成中
         </div>
         <p className="px-3 py-2 text-xs text-muted-foreground">
-          届くとJevが指摘を採用するか判断し、採用なら自動で計画へ反映します（指摘がなくなるか上限に達するまで繰り返します。不採用・判断できないとき、人が選ぶ「判断」を含むレビューは、ここで選んでもらいます）。採否が決まるまでPush通知は送りません。
+          届くとJevが重大な指摘を採用するか判断し、採用なら自動で計画へ反映します（反映後の解消確認は1回だけで、自動の見直しはそこで終わります。不採用・判断できないとき、人が選ぶ「判断」を含むレビューは、ここで選んでもらいます）。採否が決まるまでPush通知は送りません。
         </p>
       </section>
     );
@@ -295,6 +298,15 @@ export function PlanApprovalPanel({
           </div>
         ) : (
           <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+            {planReview === null && planReviewNotice && (
+              <p
+                role="status"
+                className="w-full rounded-md border bg-muted/50 px-3 py-2 text-xs text-muted-foreground"
+              >
+                {planReviewNotice.kind === "skipped" ? "レビュー省略: " : ""}
+                {planReviewNotice.text}
+              </p>
+            )}
             {planReview && (
               /* 指摘を読んで、どれを取り込ませるかをここで決める（#3554）。承認・修正のボタンより
                  上に置く——読んでから押す順にする */
@@ -304,6 +316,7 @@ export function PlanApprovalPanel({
                   review={planReview.review}
                   reviewedAtLabel={planReview.createdAtLabel}
                   round={planReview.round}
+                  kind={planReview.kind}
                   repositoryFullName={request.repositoryFullName}
                   submitLabel="選んだ指摘で計画を出し直す"
                   remainingMs={remainingMs}

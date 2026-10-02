@@ -27,6 +27,9 @@ import {
   enqueueSelfUpdateJob,
   listDispatchState,
 } from "@/lib/dispatch/jobs";
+import { resolveInstallationToken } from "@/lib/dispatch/installation-token";
+import { buildPlanReviewKindCommentBody } from "@/lib/dispatch/plan-review-kind";
+import { createComment } from "@/lib/github/issues-api";
 import { parseRepositoryFullName } from "@/lib/local-session";
 import { MANUAL_STEP_COMMAND_MAX_LENGTH } from "@/lib/manual-step-command";
 import { listManualStepRunViews } from "@/lib/manual-step-run";
@@ -352,6 +355,21 @@ export async function POST(request: NextRequest) {
         { error: planReviewResult.rejection, message: planReviewResult.message },
         { status, headers: { "Cache-Control": "no-store" } },
       );
+    }
+    // 人が押したレビューは新しい初回として数える（#3765）。直前の解消確認の印を打ち消す。
+    // 失敗しても依頼自体は成功として返す（印が無ければ、セッションは初回として読む）
+    const repoParts = parseRepositoryFullName(target.repositoryFullName);
+    if (repoParts) {
+      try {
+        const token = await resolveInstallationToken(target.repositoryFullName);
+        if (token) {
+          await createComment(repoParts.owner, repoParts.repo, target.issueNumber, token, {
+            body: buildPlanReviewKindCommentBody("initial", "人の依頼により、全体を確認します。"),
+          });
+        }
+      } catch (error) {
+        console.error("[dispatch] 計画レビューの種別をIssueへ残せませんでした", error);
+      }
     }
     return NextResponse.json(
       { ok: true, job: planReviewResult.job },

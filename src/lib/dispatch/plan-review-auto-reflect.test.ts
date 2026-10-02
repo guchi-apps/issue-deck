@@ -8,6 +8,7 @@ const decide = vi.fn();
 const resolveCheckUser = vi.fn();
 const createComment = vi.fn();
 const pickByJev = vi.fn();
+const findJobs = vi.fn();
 
 vi.mock("@/lib/db", () => ({
   db: {
@@ -16,7 +17,10 @@ vi.mock("@/lib/db", () => ({
       count: (...a: unknown[]) => countRequests(...a),
     },
     appSetting: { findUnique: (...a: unknown[]) => findAppSetting(...a) },
-    dispatchJob: { update: (...a: unknown[]) => updateJob(...a) },
+    dispatchJob: {
+      update: (...a: unknown[]) => updateJob(...a),
+      findMany: (...a: unknown[]) => findJobs(...a),
+    },
   },
 }));
 vi.mock("@/lib/claude/plan-review-pick", () => ({
@@ -75,6 +79,7 @@ describe("autoReflectPlanReview", () => {
       resolveCheckUser,
       createComment,
       pickByJev,
+      findJobs,
     ]) {
       m.mockReset();
     }
@@ -83,6 +88,8 @@ describe("autoReflectPlanReview", () => {
       args.where.status === "WAITING" ? { id: "req-1", createdAt: PLAN_CREATED_AT } : null,
     );
     findAppSetting.mockResolvedValue({ planReviewAutoReflectEnabled: true, planReviewAutoReflectMaxRounds: 5 });
+    // 既定は「このIssueで届いたレビューは初回の1件だけ」
+    findJobs.mockResolvedValue([{ id: "job-2", createdAt: NEW_JOB.createdAt, requestedByUserId: null }]);
     countRequests.mockResolvedValue(0);
     pickByJev.mockResolvedValue(true);
     decide.mockResolvedValue({ ok: true });
@@ -206,7 +213,7 @@ describe("autoReflectPlanReview", () => {
     findRequest.mockResolvedValueOnce(null);
     expect((await autoReflectPlanReview(params(WITH_FINDINGS))).reflected).toBe(false);
 
-    countRequests.mockResolvedValueOnce(5);
+    countRequests.mockResolvedValueOnce(1);
     expect(await autoReflectPlanReview(params(WITH_FINDINGS))).toEqual({
       reflected: false,
       reason: "limit",
@@ -220,15 +227,14 @@ describe("autoReflectPlanReview", () => {
     expect(createComment).not.toHaveBeenCalled();
   });
 
-  it("上限は設定値で、人が最後に決めた計画待ちより後の自動反映だけを数える", async () => {
-    findAppSetting.mockResolvedValue({ planReviewAutoReflectEnabled: true, planReviewAutoReflectMaxRounds: 2 });
+  it("旧設定の上限5でも、自動反映は連続1回までで、人が最後に決めた計画待ちより後だけを数える", async () => {
     const humanDecidedAt = new Date("2026-09-30T11:00:00Z");
     findRequest.mockImplementation(async (args: { where: { status?: string; decidedByUserId?: unknown } }) =>
       args.where.status === "WAITING"
         ? { id: "req-1", createdAt: PLAN_CREATED_AT }
         : { decidedAt: humanDecidedAt },
     );
-    countRequests.mockResolvedValue(1);
+    countRequests.mockResolvedValue(0);
 
     expect(await autoReflectPlanReview(params(WITH_FINDINGS))).toEqual({ reflected: true });
     expect(countRequests).toHaveBeenCalledWith({
@@ -239,10 +245,70 @@ describe("autoReflectPlanReview", () => {
       }),
     });
 
-    countRequests.mockResolvedValue(2);
+    countRequests.mockResolvedValue(1);
     expect(await autoReflectPlanReview(params(WITH_FINDINGS))).toEqual({
       reflected: false,
       reason: "limit",
     });
+  });
+
+  const NOTE_ONLY = [
+    "## 計画レビュー（G1）",
+    "",
+    "**1. 実装時に直す**",
+    "- **区分**: 実装時対応の補足",
+    "- **指摘**: なにか",
+    "- **根拠**: `a.ts:1`",
+    "- **提案**: 直す",
+    "",
+    "<!-- supervisor:plan-review -->",
+  ].join("\n");
+
+  it("実装時対応の補足だけのレビューは、Jevに聞かず反映しない（自動修正ループを起こさない）", async () => {
+    expect(await autoReflectPlanReview(params(NOTE_ONLY))).toEqual({
+      reflected: false,
+      reason: "no_blocking",
+    });
+    expect(pickByJev).not.toHaveBeenCalled();
+    expect(decide).not.toHaveBeenCalled();
+    expect(updateJob).toHaveBeenCalled();
+  });
+
+  it("解消確認（2回目のレビュー）で重大な問題が残れば、反映せず未解消点をまとめて人へ引き継ぐ", async () => {
+    findJobs.mockResolvedValue([
+      { id: "job-1", createdAt: OLD_JOB.createdAt, requestedByUserId: null },
+      { id: "job-2", createdAt: NEW_JOB.createdAt, requestedByUserId: null },
+    ]);
+    expect(await autoReflectPlanReview(params(WITH_FINDINGS))).toEqual({
+      reflected: false,
+      reason: "unresolved",
+    });
+    expect(pickByJev).not.toHaveBeenCalled();
+    expect(decide).not.toHaveBeenCalled();
+    const body = createComment.mock.calls[0][4].body as string;
+    expect(body).toContain("issue-deck:plan-review-unresolved");
+    expect(body).toContain("1. 見出し");
+    expect(updateJob).toHaveBeenCalled();
+  });
+
+  it("解消確認で補足だけ・指摘なしなら、何も投稿せず終える", async () => {
+    findJobs.mockResolvedValue([
+      { id: "job-1", createdAt: OLD_JOB.createdAt, requestedByUserId: null },
+      { id: "job-2", createdAt: NEW_JOB.createdAt, requestedByUserId: null },
+    ]);
+    expect(await autoReflectPlanReview(params(NOTE_ONLY))).toEqual({
+      reflected: false,
+      reason: "no_blocking",
+    });
+    expect(createComment).not.toHaveBeenCalled();
+  });
+
+  it("人が手動で積んだレビューは新しい初回として数え直し、自動反映の対象になる", async () => {
+    findJobs.mockResolvedValue([
+      { id: "job-0", createdAt: new Date("2026-09-30T10:00:00Z"), requestedByUserId: null },
+      { id: "job-1", createdAt: OLD_JOB.createdAt, requestedByUserId: null },
+      { id: "job-2", createdAt: NEW_JOB.createdAt, requestedByUserId: "user-1" },
+    ]);
+    expect(await autoReflectPlanReview(params(WITH_FINDINGS))).toEqual({ reflected: true });
   });
 });
