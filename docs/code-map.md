@@ -3468,7 +3468,7 @@ export function POST(request: NextRequest) {
   判定は受け口とpollerが`scripts/lib/local-repo-resolve.sh`で共有する。設計は
   [multi-agent/subpc-dispatch.md](multi-agent/subpc-dispatch.md)。
   **一覧の行には計画レビューの状態バッジ**（作成中／提示済。#3607）が出る。判定は`lib/dispatch/plan-review-list-state.ts`、
-  表示は`components/dashboard/plan-review-state-badge.tsx`。「提示済」はコメントの実在ではなく、成功したジョブ＋`01.check-plan`ラベルで見る
+  表示は`components/dashboard/plan-review-state-badge.tsx`。**対象判定は`lib/dispatch/plan-review-scope.ts`、種別・打ち止めは`lib/dispatch/plan-review-kind.ts`**（#3765。`requestPlanReview`が使う）。「提示済」はコメントの実在ではなく、成功したジョブ＋`01.check-plan`ラベルで見る
   （`WAITING`は30分で一覧から消えるため）。
 - **サブPCで起動するリポジトリは、対象リポジトリ側に何も置かない**（#1224）。契約適合の
   `scripts/start-issue.sh`を持つリポジトリ（issue-deck自身）だけが自前のスクリプトで起動し、

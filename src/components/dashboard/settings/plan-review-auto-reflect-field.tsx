@@ -64,8 +64,9 @@ export function PlanReviewAutoReflectField() {
           Jevが判断して、計画レビューの指摘を自動で反映する
         </Label>
         <p className="mt-1 text-xs text-muted-foreground">
-          ONにすると、Jevが指摘を採用するか判断します。採用なら通知なしで計画を修正して再レビューし、
-          指摘がなくなるまで繰り返します。不採用・判断できないときは人へ通知します。OFFのときは、
+          ONにすると、Jevが初回レビューの重大な指摘を採用するか判断します。採用なら通知なしで計画を修正し、
+          解消確認を1回だけ行って自動の見直しを終えます（#3765）。解消確認の後も重大な問題が残れば、
+          未解消点をまとめて人へ通知します。不採用・判断できないときも人へ通知します。OFFのときは、
           レビューが届いてから通知し、反映するかは承認パネルで選びます。ローカルのClaude Code
           セッションだけが対象です。
         </p>
@@ -110,8 +111,9 @@ export function PlanReviewAutoReflectField() {
           <span className="text-sm text-muted-foreground">回</span>
         </div>
         <p className="text-xs text-muted-foreground">
-          人の修正を挟まずに連続して自動反映する回数です。達したら、指摘が残っていても人へ通知します。
-          人が画面から修正を送ると数え直します。
+          人の修正を挟まずに連続して自動反映する回数です。実際に効くのは1回までです（以前の既定の5を
+          設定していても、初回レビュー1回→解消確認1回で終わります）。人が画面から修正を送っても、
+          全体レビューは自動では再開しません。
         </p>
       </div>
       {error && <p className="text-sm text-destructive">{error}</p>}

@@ -11,6 +11,7 @@ const addCheckUserWithReason = vi.fn();
 const removeCheckUserWithReason = vi.fn();
 const resolveInstallationToken = vi.fn();
 const enqueuePlanReviewJob = vi.fn();
+const listCountedPlanReviewJobs = vi.fn();
 
 vi.mock("@/lib/github/issues-api", () => ({
   createComment: (...args: unknown[]) => createComment(...args),
@@ -24,6 +25,11 @@ vi.mock("@/lib/dispatch/installation-token", () => ({
 }));
 vi.mock("@/lib/dispatch/jobs", () => ({
   enqueuePlanReviewJob: (...args: unknown[]) => enqueuePlanReviewJob(...args),
+}));
+
+vi.mock("@/lib/dispatch/plan-review-kind", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/dispatch/plan-review-kind")>()),
+  listCountedPlanReviewJobs: (...args: unknown[]) => listCountedPlanReviewJobs(...args),
 }));
 
 const { postSessionPlan } = await import("@/lib/dispatch/session-plan");
@@ -42,6 +48,7 @@ beforeEach(() => {
   addCheckUserWithReason.mockReset().mockResolvedValue(["00.check-user", "21.plan-required"]);
   resolveInstallationToken.mockReset().mockResolvedValue("token");
   enqueuePlanReviewJob.mockReset().mockResolvedValue({ ok: true, job: { id: "job1" } });
+  listCountedPlanReviewJobs.mockReset().mockResolvedValue([]);
 });
 
 describe("postSessionPlan の計画レビュー起動", () => {
@@ -133,5 +140,50 @@ describe("postSessionPlan の計画レビュー起動", () => {
     await expect(postSessionPlan(PLAN)).resolves.toBe(true);
 
     error.mockRestore();
+  });
+
+  const commentBodies = () => createComment.mock.calls.map((call) => String(call[4].body));
+
+  it("判定不能な計画は理由付きで初回レビューを積み、初回の印を残す", async () => {
+    await postSessionPlan(PLAN);
+
+    expect(enqueuePlanReviewJob).toHaveBeenCalledTimes(1);
+    expect(commentBodies().some((body) => body.includes("plan-review-kind:initial"))).toBe(true);
+  });
+
+  it("表示・文言だけの小さな変更は、レビューを積まず省略の理由を残す", async () => {
+    const plan = "## 要約\n**ボタンの文言を修正する**\n\n## 変更するファイル\n- `src/components/dashboard/foo.tsx`: 文言を直す";
+    await expect(postSessionPlan({ ...PLAN, plan })).resolves.toBe(true);
+
+    expect(enqueuePlanReviewJob).not.toHaveBeenCalled();
+    expect(commentBodies().some((body) => body.includes("plan-review-skipped"))).toBe(true);
+  });
+
+  it("小さな変更でも認証に関わる計画は初回レビューを積む", async () => {
+    const plan = "## 要約\n**文言を修正する**\n認証の権限判定にも触る\n\n## 変更するファイル\n- `src/components/dashboard/foo.tsx`: 文言を直す";
+    await postSessionPlan({ ...PLAN, plan });
+
+    expect(enqueuePlanReviewJob).toHaveBeenCalledTimes(1);
+  });
+
+  it("初回が済んだ後の計画（人の修正でも自動反映でも）は解消確認を積む", async () => {
+    listCountedPlanReviewJobs.mockResolvedValue([
+      { id: "j1", createdAt: new Date("2026-10-01T00:00:00Z"), requestedByUserId: null },
+    ]);
+    await postSessionPlan(PLAN);
+
+    expect(enqueuePlanReviewJob).toHaveBeenCalledTimes(1);
+    expect(commentBodies().some((body) => body.includes("plan-review-kind:resolve"))).toBe(true);
+  });
+
+  it("解消確認まで済んでいれば、全体レビューを積まず人へ引き継ぐ", async () => {
+    listCountedPlanReviewJobs.mockResolvedValue([
+      { id: "j1", createdAt: new Date("2026-10-01T00:00:00Z"), requestedByUserId: null },
+      { id: "j2", createdAt: new Date("2026-10-01T01:00:00Z"), requestedByUserId: null },
+    ]);
+    await postSessionPlan(PLAN);
+
+    expect(enqueuePlanReviewJob).not.toHaveBeenCalled();
+    expect(commentBodies().some((body) => body.includes("plan-review-limit"))).toBe(true);
   });
 });

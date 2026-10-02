@@ -46,7 +46,7 @@ function session(overrides: Partial<DispatchSessionView> = {}): DispatchSessionV
 }
 
 function pendingReview(body: string): PendingPlanReview {
-  return { commentId: "c-1", review: parsePlanReview(body), createdAtLabel: "4分前", round: 2 };
+  return { commentId: "c-1", review: parsePlanReview(body), createdAtLabel: "4分前", round: 2, kind: "initial" };
 }
 
 function planReviewJob(overrides: Partial<DispatchJobView> = {}): DispatchJobView {
