@@ -2616,3 +2616,36 @@ describe("Xcodeで実機へ反映するリポジトリ（#3468）", () => {
     expect(screen.queryByRole("button", { name: /マージ/ })).toBeNull();
   });
 });
+
+describe("iOS自動配布の印（#3759）", () => {
+  afterEach(cleanup);
+
+  function renderRepositories(fullNames: string[]) {
+    const flow = buildBranchFlow({
+      repositories: fullNames.map((fullName) => ({ fullName, private: false })),
+      pullRequests: [],
+      issues: [],
+      branchStatuses: [],
+    });
+    return render(
+      <BranchFlowView
+        flow={flow}
+        fetchedAt="2026-08-15T10:30:00Z"
+        isLoading={false}
+        error={null}
+        failedRepositories={[]}
+        mergedPullRequestsLoaded
+        onRefresh={vi.fn()}
+      />,
+    );
+  }
+
+  it("iOSアプリを持つリポジトリの畳んだ行にだけ、文字なしの印を出す", () => {
+    renderRepositories(["guchi-apps/yoteiflow", "guchi-apps/car-care"]);
+
+    const marks = screen.getAllByLabelText("iOS自動配布");
+    expect(marks).toHaveLength(1);
+    expect(marks[0].closest("button")?.textContent).toContain("yoteiflow");
+    expect(marks[0].textContent).toBe("");
+  });
+});
