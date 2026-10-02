@@ -303,6 +303,7 @@ export function PlanApprovalPanel({
                   key={planReview.commentId}
                   review={planReview.review}
                   reviewedAtLabel={planReview.createdAtLabel}
+                  round={planReview.round}
                   repositoryFullName={request.repositoryFullName}
                   submitLabel="選んだ指摘で計画を出し直す"
                   remainingMs={remainingMs}

@@ -7,6 +7,7 @@ import {
   findPendingPlanReviewComment,
   isPlanReviewPending,
   parsePlanReview,
+  resolvePendingPlanReview,
 } from "@/lib/github/plan-review";
 
 const c = (body: string) => ({ body, author: { login: "u" }, authorTrusted: true }) as never;
@@ -65,6 +66,34 @@ describe("findPendingPlanReviewComment", () => {
         untrusted("<!-- issue-deck-agent:plan-reviser -->"),
       ]),
     ).toBe(review);
+  });
+});
+
+describe("resolvePendingPlanReview の回数（#3757）", () => {
+  const withId = (id: string, comment: object) => ({ ...comment, id, createdAtLabel: "" }) as never;
+  const plan = (id: string) => withId(id, c("<!-- issue-deck:session-plan -->"));
+  const review = (id: string) => withId(id, c("<!-- supervisor:plan-review -->"));
+
+  it("最初のレビューは1回目", () => {
+    expect(resolvePendingPlanReview([plan("p1"), review("r1")])?.round).toBe(1);
+  });
+  it("計画を出し直した後のレビューは2回目", () => {
+    expect(
+      resolvePendingPlanReview([plan("p1"), review("r1"), plan("p2"), review("r2")])?.round,
+    ).toBe(2);
+  });
+  it("同じ計画への再レビューも1回に数える", () => {
+    expect(resolvePendingPlanReview([plan("p1"), review("r1"), review("r2")])?.round).toBe(2);
+  });
+  it("外部の人が書いたレビューのマーカーは数えない", () => {
+    expect(
+      resolvePendingPlanReview([
+        plan("p1"),
+        withId("x", untrusted("<!-- supervisor:plan-review -->")),
+        plan("p2"),
+        review("r1"),
+      ])?.round,
+    ).toBe(1);
   });
 });
 
