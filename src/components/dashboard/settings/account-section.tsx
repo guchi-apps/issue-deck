@@ -1,9 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { LogOut, Trash2 } from "lucide-react";
+import { LogOut } from "lucide-react";
 
-import { DeleteAccountDialog } from "@/components/dashboard/delete-account-dialog";
 import { UserAvatar } from "@/components/dashboard/user-avatar";
 import { Button } from "@/components/ui/button";
 import { useAccountActions } from "@/hooks/use-account-actions";
@@ -12,13 +10,13 @@ import type { CurrentUser } from "@/types/user";
 /**
  * 設定の「アカウント」区分（#1539）。以前は独立した`ProfileDialog`だったが、
  * 設定ダイアログの中からさらにダイアログを開く入れ子をやめてここへ展開した。
+ * 区分の一覧には並べず、アカウント名の行を押して開く（#3744）。
  *
  * バージョン表示はここの末尾にあったが、この区分を開かないと見えなかったため、
  * 区分の外（`AppVersionButton`）へ移した（#1764）。
  */
 export function AccountSection({ currentUser }: { currentUser: CurrentUser | null }) {
-  const { handleLogout, handleDeleteAccount } = useAccountActions();
-  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const { handleLogout } = useAccountActions();
 
   return (
     <div className="flex flex-col gap-4">
@@ -40,27 +38,6 @@ export function AccountSection({ currentUser }: { currentUser: CurrentUser | nul
         <LogOut />
         ログアウト
       </Button>
-
-      <div className="flex flex-col gap-1.5 border-t pt-4">
-        <Button
-          variant="destructive"
-          className="justify-start"
-          onClick={() => setDeleteDialogOpen(true)}
-        >
-          <Trash2 />
-          アカウントを削除
-        </Button>
-        <p className="text-xs text-muted-foreground">
-          このアプリに保存したアカウント情報を削除してログアウトします。GitHub側のIssueや
-          リポジトリには影響しません。
-        </p>
-      </div>
-
-      <DeleteAccountDialog
-        open={deleteDialogOpen}
-        onOpenChange={setDeleteDialogOpen}
-        onConfirm={handleDeleteAccount}
-      />
     </div>
   );
 }

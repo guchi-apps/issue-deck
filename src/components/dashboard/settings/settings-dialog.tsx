@@ -18,10 +18,12 @@ import { PostCreateDestinationSection } from "@/components/dashboard/settings/po
 import { RepositoryVisibilitySection } from "@/components/dashboard/settings/repository-visibility-section";
 import {
   DEFAULT_SETTINGS_SECTION,
+  SETTINGS_LIST_SECTIONS,
   SETTINGS_SECTIONS,
   type SettingsSectionKey,
 } from "@/components/dashboard/settings/settings-sections";
 import { StatusSection } from "@/components/dashboard/settings/status-section";
+import { UserAvatar } from "@/components/dashboard/user-avatar";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useSettingsData } from "@/hooks/use-settings-data";
 import { cn } from "@/lib/utils";
@@ -115,7 +117,34 @@ export function SettingsDialog({
 
         <div className="grid min-h-0 grid-cols-[10rem_1fr]">
           <nav className="flex flex-col gap-0.5 overflow-y-auto border-r bg-muted/30 p-2">
-            {SETTINGS_SECTIONS.map((item) => {
+            {/* アカウント設定は区分の一覧に並べず、アカウント名の行から開く（#3744） */}
+            <button
+              type="button"
+              onClick={() => setSection("account")}
+              aria-current={section === "account" ? "page" : undefined}
+              aria-label="アカウント設定"
+              className={cn(
+                "mb-1.5 flex items-center gap-2 rounded-md border bg-background px-2 py-2 text-left",
+                section === "account"
+                  ? "border-primary ring-1 ring-primary"
+                  : "hover:bg-accent",
+              )}
+            >
+              <UserAvatar
+                login={currentUser?.login ?? "?"}
+                image={currentUser?.image}
+                className="size-7 shrink-0"
+              />
+              <span className="min-w-0">
+                <span className="block truncate text-sm font-medium">
+                  {currentUser?.name ?? currentUser?.login}
+                </span>
+                <span className="block truncate text-xs text-muted-foreground">
+                  アカウント設定
+                </span>
+              </span>
+            </button>
+            {SETTINGS_LIST_SECTIONS.map((item) => {
               const Icon = item.icon;
               const isActive = item.key === section;
               return (

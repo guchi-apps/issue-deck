@@ -82,4 +82,11 @@ export const SETTINGS_SECTIONS = [
 
 export type SettingsSectionKey = (typeof SETTINGS_SECTIONS)[number]["key"];
 
+/**
+ * 区分の一覧（PCの左タブ・スマホの一覧）に並べるもの（#3744）。「アカウント」は一覧に並べず、
+ * アカウント名の行を押して開く。定義（`SETTINGS_SECTIONS`）には残してあるので、見出し・説明文・
+ * 戻る先の判定は全区分から引ける。
+ */
+export const SETTINGS_LIST_SECTIONS = SETTINGS_SECTIONS.filter((item) => item.key !== "account");
+
 export const DEFAULT_SETTINGS_SECTION: SettingsSectionKey = "execution";

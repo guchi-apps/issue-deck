@@ -148,11 +148,23 @@ describe("SettingsDialog", () => {
   it("区分をタブとして出し、既定では実行設定を開く（#1539・#1552）", () => {
     renderDialog();
 
-    for (const label of ["アカウント", "表示", "実行設定", "フリート運用", "状態", "更新履歴"]) {
+    for (const label of ["表示", "実行設定", "フリート運用", "状態", "更新履歴"]) {
       expect(screen.getByRole("button", { name: new RegExp(label) })).toBeTruthy();
     }
+    // 「アカウント」は区分に並べず、アカウント名の行から開く（#3744）
+    expect(screen.queryByRole("button", { name: /^アカウント$/ })).toBeNull();
     expect(screen.getByLabelText("自動リトライ回数")).toBeTruthy();
     expect(screen.getByLabelText("サブPCの同時実行数")).toBeTruthy();
+  });
+
+  it("アカウント名の行を押すとアカウント設定が開き、削除ボタンは無い（#3744）", () => {
+    renderDialog();
+
+    fireEvent.click(screen.getByRole("button", { name: "アカウント設定" }));
+
+    expect(screen.getByRole("button", { name: /ログアウト/ })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /アカウントを削除/ })).toBeNull();
+    expect(screen.queryByLabelText("自動リトライ回数")).toBeNull();
   });
 
   it("バージョンはアカウントを開かなくても見え、押すと更新履歴が開く（#1764）", () => {

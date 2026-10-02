@@ -72,7 +72,9 @@ import { useIssueBodies } from "@/hooks/use-issue-bodies";
 import { useIssueFilters } from "@/hooks/use-issue-filters";
 import { useIssuePolling } from "@/hooks/use-issue-polling";
 import { useManualStepGuide } from "@/hooks/use-manual-step-guide";
+import { useMediaQuery } from "@/hooks/use-media-query";
 import { useMobileScreen } from "@/hooks/use-mobile-screen";
+import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { useNow } from "@/hooks/use-now";
 import { usePullRequests } from "@/hooks/use-pull-requests";
 import { usePushDeliveryState } from "@/hooks/use-push-delivery";
@@ -373,6 +375,8 @@ export function IssueDeckShell({
     setDispatchConcurrency(next.dispatchConcurrency);
   }
 
+  // スマホの設定シートはポータルで`md:hidden`の外へ出るため、幅でも出し分ける（#3744）
+  const isMobileViewport = !useMediaQuery("(min-width: 768px)");
   const {
     mobileScreen,
     selectTab,
@@ -2087,7 +2091,8 @@ export function IssueDeckShell({
           {/* スマホ: 画面遷移型（4タブ + ドリルダウン） */}
           <div className="flex flex-1 flex-col overflow-hidden md:hidden">
             <div className="relative flex-1 overflow-hidden">
-              {mobileScreen.kind === "home" && (
+              {/* 設定はモーダルなので、背後にホームを残す（#3744） */}
+              {(mobileScreen.kind === "home" || mobileScreen.kind === "settings") && (
                 <MobileHomeScreen
                   navCounts={{ ...navCounts, "check-user": mobileCheckUserCount }}
                   manualStepAttention={manualStepAttention}
@@ -2324,31 +2329,44 @@ export function IssueDeckShell({
                 />
               )}
 
-              {mobileScreen.kind === "settings" && (
-                <MobileSettingsScreen
-                  onBack={goBack}
-                  currentUser={currentUser}
-                  autoRetryLimit={autoRetryLimit}
-                  claudeModel={claudeModel}
-                  claudeModelAssist={claudeModelAssist}
-                  claudeLocalModel={claudeLocalModel}
-                  codexModel={codexModel}
-                  defaultDispatchAgent={defaultDispatchAgent}
-                  dispatchFailoverEnabled={dispatchFailoverEnabled}
-                  dispatchFailoverThresholdPercent={dispatchFailoverThresholdPercent}
-                  appAiModel={appAiModel}
-                  appAiModelReasoning={appAiModelReasoning}
-                  modelPickEngine={modelPickEngine}
-                  dispatchConcurrency={dispatchConcurrency}
-                  repositories={repositories}
-                  onSetRepositoryHidden={handleSetRepositoryHidden}
-                  onSetRepositoriesHidden={handleSetRepositoriesHidden}
-                  onSetRepositoryIssueCreationExcluded={handleSetRepositoryIssueCreationExcluded}
-                  onUpdated={handleAppSettingsUpdated}
-                  onDraftReviewGateIssue={openReviewGateIssueDialog}
-                  creatableRepositoryNames={creatableRepositoryNames}
-                />
-              )}
+              {/* URLの`mscreen=settings`がPC幅で開かれてもシートを出さない（ポータルは`md:hidden`の外へ出る） */}
+              <Sheet
+                open={mobileScreen.kind === "settings" && isMobileViewport}
+                onOpenChange={(open) => {
+                  if (!open) goBack();
+                }}
+              >
+                <SheetContent
+                  side="bottom"
+                  showCloseButton={false}
+                  className="h-[calc(100svh-4.5rem)] gap-0 rounded-t-2xl p-0"
+                >
+                  <SheetTitle className="sr-only">設定</SheetTitle>
+                  <MobileSettingsScreen
+                    onBack={goBack}
+                    currentUser={currentUser}
+                    autoRetryLimit={autoRetryLimit}
+                    claudeModel={claudeModel}
+                    claudeModelAssist={claudeModelAssist}
+                    claudeLocalModel={claudeLocalModel}
+                    codexModel={codexModel}
+                    defaultDispatchAgent={defaultDispatchAgent}
+                    dispatchFailoverEnabled={dispatchFailoverEnabled}
+                    dispatchFailoverThresholdPercent={dispatchFailoverThresholdPercent}
+                    appAiModel={appAiModel}
+                    appAiModelReasoning={appAiModelReasoning}
+                    modelPickEngine={modelPickEngine}
+                    dispatchConcurrency={dispatchConcurrency}
+                    repositories={repositories}
+                    onSetRepositoryHidden={handleSetRepositoryHidden}
+                    onSetRepositoriesHidden={handleSetRepositoriesHidden}
+                    onSetRepositoryIssueCreationExcluded={handleSetRepositoryIssueCreationExcluded}
+                    onUpdated={handleAppSettingsUpdated}
+                    onDraftReviewGateIssue={openReviewGateIssueDialog}
+                    creatableRepositoryNames={creatableRepositoryNames}
+                  />
+                </SheetContent>
+              </Sheet>
 
               {mobileScreen.kind === "repo-detail" && (
                 <MobileRepoIssuesScreen
