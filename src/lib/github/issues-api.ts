@@ -34,7 +34,8 @@ export type GithubApiIssue = {
 
 export type GithubApiComment = {
   id: number;
-  user: { login: string } | null;
+  /** `type`は`Bot`か`User`。ack記録の投稿者判定（#3739）に使う */
+  user: { login: string; type?: string } | null;
   // 投稿者がこのリポジトリに対してどんな関係か。計画レビューのマーカーを信じてよいかの判定に使う（#3716）
   author_association?: string;
   body: string | null;

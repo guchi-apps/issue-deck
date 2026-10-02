@@ -186,6 +186,7 @@ describe("PullRequestMergeProduction", () => {
                 riskKind: "none",
                 riskLabel: "該当なし",
                 reviewBody: null,
+                acknowledgement: null,
               },
               {
                 issueNumber: 2063,
@@ -196,6 +197,7 @@ describe("PullRequestMergeProduction", () => {
                 riskKind: "none",
                 riskLabel: "該当なし",
                 reviewBody: null,
+                acknowledgement: null,
               },
             ],
             tally: { total: 2, ok: 1, needsCheck: 0, changesRequested: 1, skipped: 0, unknown: 0 },

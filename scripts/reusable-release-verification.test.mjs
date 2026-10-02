@@ -55,6 +55,21 @@ if [ "$1" = "issue" ] && [ "$2" = "view" ]; then
   printf '%s' "\${!var:-}"
   exit 0
 fi
+# 確認済みの記録（#3739）。gh api --paginate repos/<repo>/issues/<PR>/comments --jq ... の結果は、
+# ワークフローの--jq（投稿者をissue-deck[bot]に絞る）が適用済みの「本文の配列」なので、スタブは
+# その配列をそのまま出す。**投稿者の絞り込みそのものはghが行うため、ここでは確かめられない**
+if [ "$1" = "api" ]; then
+  for arg in "$@"; do
+    case "$arg" in
+      repos/*/issues/*/comments)
+        n="\${arg#repos/*/issues/}"; n="\${n%/comments}"
+        var="STUB_ACK_$n"
+        printf '%s' "\${!var:-[]}"
+        exit 0
+        ;;
+    esac
+  done
+fi
 head=""
 while [ $# -gt 0 ]; do
   if [ "$1" = "--head" ]; then head="$2"; fi
@@ -84,14 +99,17 @@ afterEach(() => {
  * @param prs Issue番号 → `gh pr list`が返すPRのJSON
  * @param issueBodies Issue番号 → `gh issue view`が返す本文（#3634）
  */
-function runAggregation(issueLines, prs, issueBodies = {}) {
+function runAggregation(issueLines, prs, issueBodies = {}, ackComments = {}) {
   writeFileSync(path.join(workDir, "release-issue-lines.txt"), `${issueLines.join("\n")}\n`);
 
   const script = extractRunScript("対象issueの検証結果を集計する").replaceAll(
     "/tmp/",
     `${workDir}/`,
   );
-  const env = { ...process.env, PATH: `${workDir}:${process.env.PATH}` };
+  const env = { ...process.env, PATH: `${workDir}:${process.env.PATH}`, GH_REPO: "guchi-apps/issue-deck" };
+  for (const [prNumber, bodies] of Object.entries(ackComments)) {
+    env[`STUB_ACK_${prNumber}`] = JSON.stringify(bodies);
+  }
   for (const [number, json] of Object.entries(prs)) {
     env[`STUB_PR_${number}`] = JSON.stringify(json);
   }
@@ -299,5 +317,44 @@ describe("対象issueの検証結果を集計する", () => {
     const out = runAggregation(["（issue-deckへ問い合わせできませんでした）"], {});
 
     expect(out).toBe("");
+  });
+});
+
+describe("確認済みの記録を読む（#3739）", () => {
+  const pr = (verdict) => ({
+    number: 2446,
+    body: `<!-- issue-deck-verification:start review=${verdict} risk=none -->\n## 検証結果\n<!-- issue-deck-verification:end -->`,
+    comments: [reviewComment("## 総評\n\n気になる点あり。", verdict)],
+  });
+  const ack = (sha, by = "guchi") => `<!-- issue-deck-review-ack sha=${sha} by=${by} -->\n対応しない`;
+  const revoke = (sha) => `<!-- issue-deck-review-ack-revoke sha=${sha} -->`;
+  const lines = ["- #2441 レビューのゲートを直す"];
+
+  it("レビューのshaと一致する記録があれば、確認済みにする", () => {
+    const out = runAggregation(lines, { 2441: pr("needs-check") }, {}, { 2446: [ack("abc123")] });
+    expect(out).toContain("| #2441 | #2446 | ✅ 確認済み（元の判定: 要確認、記録: guchi） | 該当なし |");
+    // 画面が読み戻せる
+    const row = parseReleaseVerification(out)?.rows[0];
+    expect(row?.reviewKind).toBe("ok");
+    expect(row?.acknowledgement).toEqual({ verdict: "needs-check", recordedBy: "guchi" });
+  });
+
+  it("要修正も確認済みにできる", () => {
+    const out = runAggregation(lines, { 2441: pr("changes-requested") }, {}, { 2446: [ack("abc123")] });
+    expect(out).toContain("✅ 確認済み（元の判定: 要修正、記録: guchi）");
+  });
+
+  it("別のコミットへの記録・取り消された記録・記録なしは、元の判定のまま", () => {
+    const stale = runAggregation(lines, { 2441: pr("needs-check") }, {}, { 2446: [ack("def456")] });
+    expect(stale).toContain("| #2441 | #2446 | ⚠️ 要確認 | 該当なし |");
+    const revoked = runAggregation(lines, { 2441: pr("needs-check") }, {}, { 2446: [ack("abc123"), revoke("abc123")] });
+    expect(revoked).toContain("| #2441 | #2446 | ⚠️ 要確認 | 該当なし |");
+    const none = runAggregation(lines, { 2441: pr("needs-check") });
+    expect(none).toContain("| #2441 | #2446 | ⚠️ 要確認 | 該当なし |");
+  });
+
+  it("問題なしの行は書き換えない", () => {
+    const out = runAggregation(lines, { 2441: pr("lgtm") }, {}, { 2446: [ack("abc123")] });
+    expect(out).toContain("| #2441 | #2446 | ✅ 問題なし | 該当なし |");
   });
 });

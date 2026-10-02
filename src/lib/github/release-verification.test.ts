@@ -189,6 +189,24 @@ describe("parseReleaseVerification", () => {
   });
 });
 
+describe("確認済みの記録（#3739）", () => {
+  it("✅確認済みのセルをokとして読み、元の判定と記録者を取り出す", () => {
+    const body = [
+      "## コードレビューの検証結果",
+      "",
+      "| Issue | PR | 自動レビュー | 機械的リスク判定 |",
+      "| --- | --- | --- | --- |",
+      "| #10 | #11 | ✅ 確認済み（元の判定: 要確認、記録: guchi） | 該当なし |",
+      "| #20 | #21 | ✅ 問題なし（LGTM） | 該当なし |",
+    ].join("\n");
+    const rows = parseReleaseVerification(body)?.rows ?? [];
+
+    expect(rows[0].reviewKind).toBe("ok");
+    expect(rows[0].acknowledgement).toEqual({ verdict: "needs-check", recordedBy: "guchi" });
+    expect(rows[1].acknowledgement).toBeNull();
+  });
+});
+
 describe("buildReleaseVerificationFixIssueDraft", () => {
   it("起票先はリリース対象と同じリポジトリで、本文に元Issue・対応PR・指摘本文・関連リンクが残る", () => {
     const rows = parseReleaseVerification(RELEASE_BODY)?.rows ?? [];

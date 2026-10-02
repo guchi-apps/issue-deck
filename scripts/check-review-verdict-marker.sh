@@ -267,6 +267,27 @@ if ! grep -qF '(対応PR|対象PR): #([0-9]+)' "$RELEASE_WORKFLOW"; then
   fail=1
 fi
 
+# --- 「確認済み・対応しない」の記録（#3739）---
+#
+# 画面（`review-acknowledgement.ts`）が投稿する記録のコメントの印を、リリースのワークフローが読む。
+# **ずれても赤くならず、記録したはずの指摘が次のリリースでも要確認のまま残る**。
+ACK_LIB="src/lib/github/review-acknowledgement.ts"
+[ -f "$ACK_LIB" ] || { echo "エラー: $ACK_LIB が見つかりません" >&2; exit 1; }
+if ! grep -qF 'REVIEW_ACK_MARKER_PREFIX = "issue-deck-review-ack"' "$ACK_LIB"; then
+  echo "エラー: $ACK_LIB の記録の印が issue-deck-review-ack ではありません。" >&2
+  fail=1
+fi
+for needle in 'issue-deck-review-ack sha=' 'issue-deck-review-ack-revoke sha=' '"issue-deck[bot]" and .user.type == "Bot"'; do
+  if ! grep -qF "$needle" "$RELEASE_WORKFLOW"; then
+    echo "エラー: $RELEASE_WORKFLOW に記録の読み取り（$needle）が見つかりません。" >&2
+    fail=1
+  fi
+done
+if ! grep -qF '確認済み（元の判定: ' "$RELEASE_WORKFLOW" || ! grep -qF '元の判定: ${VERDICT_LABEL' "$ACK_LIB"; then
+  echo "エラー: 確認済みのセルの文言が $RELEASE_WORKFLOW と $ACK_LIB で揃っていません。" >&2
+  fail=1
+fi
+
 if [ "$fail" -ne 0 ]; then
   exit 1
 fi
@@ -278,3 +299,4 @@ echo "OK: マージ待ちのレビュー指摘パネルの読み取りも揃っ�
 echo "OK: 判定時点のコミット（sha=）の書き込みと読み取りも揃っています（#3172）"
 echo "OK: レビュー指摘の自動修正への渡しの印も揃っています（#3363）"
 echo "OK: 修正Issueが指す対象PRの書き込みと読み取りも揃っています（#3634）"
+echo "OK: 「確認済み・対応しない」の記録の書き込みと読み取りも揃っています（#3739）"
