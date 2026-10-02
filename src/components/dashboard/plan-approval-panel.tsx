@@ -311,6 +311,8 @@ export function PlanApprovalPanel({
                   disabled={!canSend || dispatch.isSubmitting}
                   isSubmitting={dispatch.isSubmitting}
                   deemphasizeSubmit={approveRecommended}
+                  approveHint="下の「承認して実装へ進む」を押す"
+                  unavailable={sessionGone ? "session-gone" : remainingMs <= 0 ? "expired" : undefined}
                   onSubmit={(text) => send("revise", text)}
                 />
               </div>
@@ -401,7 +403,7 @@ export function PlanApprovalPanel({
           </div>
         )}
 
-        {sessionGone && (
+        {sessionGone && planReview === null && (
           <p className="flex items-start gap-1.5 text-xs text-destructive">
             <TriangleAlert className="mt-0.5 size-3.5 shrink-0" aria-hidden />
             このセッションは終了しています。承認・修正は届きません。続きを頼むには
