@@ -57,7 +57,7 @@ export const SETTINGS_SECTIONS = [
     key: "fleet",
     label: "フリート運用",
     icon: Boxes,
-    description: "押すとその場で走る操作",
+    description: "GitHubへの再取得・配布・同期と、認証情報の管理",
   },
   {
     key: "images",
@@ -66,12 +66,17 @@ export const SETTINGS_SECTIONS = [
     description: "添付した画像の容量・使用状況・自動削除",
   },
   {
+    key: "status",
+    label: "使用量と障害状況",
+    icon: Activity,
+    description: "GitHubの使用量とレート制限、障害情報",
+  },
+  {
     key: "knowledge",
     label: "共通知識",
     icon: BookOpen,
     description: "フリートの知見メモと、共有知識にたまった知見（反映PRは自動でマージされます）",
   },
-  { key: "status", label: "状態", icon: Activity, description: "使用量と障害状況" },
   {
     key: "changelog",
     label: "更新履歴",

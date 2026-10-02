@@ -148,7 +148,7 @@ describe("SettingsDialog", () => {
   it("区分をタブとして出し、既定では実行設定を開く（#1539・#1552）", () => {
     renderDialog();
 
-    for (const label of ["表示", "実行設定", "フリート運用", "状態", "更新履歴"]) {
+    for (const label of ["表示", "実行設定", "フリート運用", "使用量と障害状況", "更新履歴"]) {
       expect(screen.getByRole("button", { name: new RegExp(label) })).toBeTruthy();
     }
     // 「アカウント」は区分に並べず、アカウント名の行から開く（#3744）
@@ -223,7 +223,7 @@ describe("SettingsDialog", () => {
     // 開いた直後はどの区分も「状態」ではない
     expect(useSettingsDataArgs.every(([, statusActive]) => statusActive === false)).toBe(true);
 
-    fireEvent.click(screen.getByRole("button", { name: /状態/ }));
+    fireEvent.click(screen.getByRole("button", { name: /使用量と障害状況/ }));
 
     expect(useSettingsDataArgs.at(-1)).toEqual([true, true]);
   });
@@ -328,7 +328,7 @@ describe("SettingsDialog", () => {
   it("状態の区分ではGitHubの使用量と障害状況をまとめて出す（元は別ダイアログだった）", () => {
     renderDialog();
 
-    fireEvent.click(screen.getByRole("button", { name: /状態/ }));
+    fireEvent.click(screen.getByRole("button", { name: /使用量と障害状況/ }));
 
     expect(screen.getByText("GitHub使用量")).toBeTruthy();
     expect(screen.getByText("GitHub障害状況")).toBeTruthy();
@@ -340,7 +340,7 @@ describe("SettingsDialog", () => {
   it("状態の区分にAI使用量のカードは出さない（AI使用量画面へ移した）", () => {
     renderDialog();
 
-    fireEvent.click(screen.getByRole("button", { name: /状態/ }));
+    fireEvent.click(screen.getByRole("button", { name: /使用量と障害状況/ }));
 
     // ダイアログはportalでbody直下へ描かれるので、renderのcontainerからは辿れない
     const cardTitles = Array.from(

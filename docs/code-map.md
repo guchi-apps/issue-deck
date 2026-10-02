@@ -229,7 +229,7 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   収まるため、`overflow-hidden`で切られることはない。
   **重なりの受け皿になる行には塗り（`bg-background`）を入れておく**——切り抜きを入れても、
   塗りの無いフッターは次に何かが重なったときに同じ見え方で再発する。
-- **同じ実測値を2つの画面に出さない**（#2631）。設定の「状態」とAI使用量画面が、どちらも
+- **同じ実測値を2つの画面に出さない**（#2631）。設定の「使用量と障害状況」とAI使用量画面が、どちらも
   `ClaudeUsageCard`・`CodexUsageCard`で同じプラン枠のメーターを出していた。**値は同じでも
   取得のタイミングが違う**ので、片方で枠の残りを見た後にもう片方を開くと数字が食い違って
   見え、どちらが本当か分からなくなる。出す場所は1つに寄せ、消えた側には移った先を1行書く
@@ -437,6 +437,10 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   PCの設定ダイアログ（[`settings-dialog.tsx`](../src/components/dashboard/settings/settings-dialog.tsx)）と
   スマホの設定画面（[`mobile/mobile-settings-screen.tsx`](../src/components/dashboard/mobile/mobile-settings-screen.tsx)）が
   同じ配列と同じセクションコンポーネントを読む。**片方の画面にだけ項目を足さない。**
+  **並びは、設定値系（表示・通知・実行設定）→操作系（フリート運用・画像）→読むだけの区分
+  （使用量と障害状況・共通知識・更新履歴）**（#3767）。実行設定は保存ボタンの上を
+  「実行の動かし方」「使うAIモデル」、下を「その場で保存される設定」で分け、フリート運用は
+  「配布・同期」「認証情報」の見出しで分ける。
   区分は機能の性質で割っており、**保存を押すまで効かない設定値は「実行設定」、押した瞬間に
   GitHub Actionsが走る操作は「フリート運用」**へ入れる。混ぜると「保存ボタンがどこまで効くのか
   分からない」という元の状態に戻る。読み取り系のデータ取得は
@@ -457,7 +461,7 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   「フリート運用」を開くと共有ワークフローのタグ照会と同期履歴が走っていた。今は
   **区分を開くまで取りに行かない**という原則で2か所に分けている。
   - [`hooks/use-settings-data.ts`](../src/hooks/use-settings-data.ts)は`statusActive`
-    （「状態」区分を開いているか）を受け取り、使用量・レート制限をそのあいだだけ取る。
+    （「使用量と障害状況」区分を開いているか）を受け取り、使用量・レート制限をそのあいだだけ取る。
     **障害状況とPAT一覧だけは先読みのまま**——どちらも区分を開かずに出す警告バッジの材料で、
     遅らせるとバッジが出ない。
   - フリート運用の3区画は
@@ -517,7 +521,7 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   PC・スマホ共通。**バージョン表示（`app-version-button.tsx`）は区分の外**（PCは左タブ最下部・
   スマホは一覧最下部）に置く——アカウント区分の中にあった頃は開かないと見えなかった。
 - **枠の消費を出すバーは[`usage-meter.tsx`](../src/components/dashboard/usage-meter.tsx)を使う**（#1651）。
-  設定の「状態」区分にあるClaudeプラン使用量（`claude-usage-card.tsx`）とGitHub API使用量の
+  設定の「使用量と障害状況」区分にあるClaudeプラン使用量（`claude-usage-card.tsx`）とGitHub API使用量の
   レート制限（`github-rate-limit-list.tsx`）が共通で読む。**使用量を左から右へ伸ばし、経過時間は
   同じバーの上に立つ縦の目盛りで示す。** 以前は残量を描いていたので消費が進むほどバーが縮み、
   経過時間も別の細いバーとして下に並んでいた。**片方だけ旧表示に戻さない**——同じ画面に
@@ -525,7 +529,7 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   shadcnの`Progress`は`overflow-x-hidden`で端が欠けるため目盛りを重ねられず、この用途では使わない
   （構成比を出す`github-api-usage-list.tsx`の内訳バーは枠の消費ではないので`Progress`のまま）。
   リセットの絶対時刻は下段の幅に収まらないため画面には出さず、`title`（ツールチップ）にだけ置く。
-- **設定の「状態」1枚目のカードは「GitHub使用量」で、中を`API`と`ACTIONS`に分ける**（#2212）。
+- **設定の「使用量と障害状況」1枚目のカードは「GitHub使用量」で、中を`API`と`ACTIONS`に分ける**（#2212）。
   `API`はレート制限（`github-rate-limit-list.tsx`）と用途別の呼び出し回数
   （`github-api-usage-list.tsx`）、`ACTIONS`は課金レポートから読んだ実行時間
   （[`github-actions-usage.tsx`](../src/components/dashboard/github-actions-usage.tsx)・
@@ -538,7 +542,7 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   **課金レポートは半日ほど遅れて載る**ので、数字には必ず「どこまで反映されているか」を
   添える。カードはPC・スマホ共通の`settings/status-section.tsx`が組み立てる。
 - **issue-deck自身が投げたAI API呼び出しは、機能別に計上している（画面には出さない）**（#2347）。
-  かつては設定の「状態」→「AI使用量」画面に機能別の内訳カード（「アプリ内AI機能別」）を出していたが、
+  かつては設定の「使用量と障害状況」→「AI使用量」画面に機能別の内訳カード（「アプリ内AI機能別」）を出していたが、
   **#3062で表示（カード・取得フック・`/api/claude/api-usage`）を削除した**。計上
   （[`lib/claude/api-usage.ts`](../src/lib/claude/api-usage.ts)・`ClaudeApiUsageBucket`）は残っており、
   読む画面は無い。プラン枠（5時間枠・週間枠）のメーターは`claude-usage-card.tsx`・
