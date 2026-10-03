@@ -11,6 +11,8 @@ import {
   CLAUDE_LOCAL_MODEL_DEFAULT,
   CODEX_MODEL_DEFAULT,
   DEFAULT_DISPATCH_AGENT_SETTING,
+  GITHUB_ACTIONS_AGENT_DEFAULT,
+  GITHUB_ACTIONS_CODEX_MODEL_DEFAULT,
   DISPATCH_FAILOVER_THRESHOLD_PERCENT_DEFAULT,
   DISPATCH_CONCURRENCY_DEFAULT,
   parseClaudeLocalModelSetting,
@@ -20,6 +22,7 @@ import {
   parseCodexLocalModel,
   parseAppAiModel,
   parseDefaultDispatchAgent,
+  parseGithubActionsAgent,
   parseDispatchFailoverThresholdPercent,
   parseModelPickEngine,
   parsePlanReviewAgent,
@@ -84,6 +87,10 @@ export default async function DashboardPage() {
     | null;
   const autoRetryLimit = appSetting?.autoRetryLimit ?? AUTO_RETRY_LIMIT_MIN;
   const claudeModel = parseClaudeModel(appSetting?.claudeModel) ?? "auto";
+  const githubActionsAgent =
+    parseGithubActionsAgent(appSetting?.githubActionsAgent) ?? GITHUB_ACTIONS_AGENT_DEFAULT;
+  const githubActionsCodexModel =
+    parseCodexLocalModel(appSetting?.githubActionsCodexModel) ?? GITHUB_ACTIONS_CODEX_MODEL_DEFAULT;
   const claudeModelAssist = parseClaudeModel(appSetting?.claudeModelAssist) ?? "auto";
   // `claudeLocalModel`は#2776で`auto`を選べなくした。既存値が`auto`のまま残っていても
   // `parseClaudeLocalModelSetting`が弾いて既定（sonnet）へ倒す（`parseClaudeModel`だと`auto`を
@@ -148,6 +155,8 @@ export default async function DashboardPage() {
       issuesFetchedAt={new Date().toISOString()}
       autoRetryLimit={autoRetryLimit}
       claudeModel={claudeModel}
+      githubActionsAgent={githubActionsAgent}
+      githubActionsCodexModel={githubActionsCodexModel}
       claudeModelAssist={claudeModelAssist}
       claudeLocalModel={claudeLocalModel}
       codexModel={codexModel}
