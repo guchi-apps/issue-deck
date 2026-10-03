@@ -4,6 +4,7 @@ const findMany = vi.fn();
 const readNextWindowRunSettings = vi.fn();
 const readClaudeWindowSnapshot = vi.fn();
 const readLastNextWindowLaunchedAt = vi.fn();
+const getLatestCodexUsage = vi.fn();
 const launchScheduledRunEntry = vi.fn();
 const markScheduledRunSkipped = vi.fn();
 
@@ -26,6 +27,12 @@ vi.mock("@/lib/next-window-run-db", () => ({
   },
   get readLastNextWindowLaunchedAt() {
     return readLastNextWindowLaunchedAt;
+  },
+}));
+
+vi.mock("@/lib/dispatch/codex-usage", () => ({
+  get getLatestCodexUsage() {
+    return getLatestCodexUsage;
   },
 }));
 
@@ -67,9 +74,11 @@ describe("launchNextWindowRunEntries", () => {
       intervalMinutes: 10,
       fiveHourFloorPercent: 0,
       weeklyFloorPercent: 0,
+      codexWeeklyFloorPercent: 0,
     });
     readClaudeWindowSnapshot.mockResolvedValue({ resetsAt: RESETS_AT, usedPercent: 62 });
     readLastNextWindowLaunchedAt.mockResolvedValue(null);
+    getLatestCodexUsage.mockResolvedValue(null);
     findMany.mockResolvedValue([entry()]);
     launchScheduledRunEntry.mockImplementation(async ({ entry: row }) => ({
       reserved: true,
@@ -169,6 +178,37 @@ describe("launchNextWindowRunEntries", () => {
     await launchNextWindowRunEntries({ hostName: "subpc", now: new Date(RESETS_AT - 30 * MINUTE) });
 
     expect(launchScheduledRunEntry).toHaveBeenCalledTimes(1);
+  });
+
+  /** #3859 */
+  it("ChatGPTの週間枠の残りが下限を下回っていれば起動を見送る", async () => {
+    readNextWindowRunSettings.mockResolvedValue({
+      enabled: true, leadMinutes: 60, intervalMinutes: 10, fiveHourFloorPercent: 0, weeklyFloorPercent: 0, codexWeeklyFloorPercent: 20,
+    });
+    findMany.mockResolvedValue([entry({ agent: "codex" })]);
+    getLatestCodexUsage.mockResolvedValue({
+      stale: false,
+      windows: [{ key: "secondary", usedPercent: 83, remainingPercent: 17, resetsAt: RESETS_AT / 1000, durationMs: 0, expired: false }],
+    });
+
+    const result = await launchNextWindowRunEntries({ hostName: "subpc", now: new Date(RESETS_AT - 30 * MINUTE) });
+
+    expect(launchScheduledRunEntry).not.toHaveBeenCalled();
+    expect(result.actions[0]).toMatchObject({ result: "deferred" });
+    expect(result.actions[0]?.detail).toContain("ChatGPTの週間枠の残りが17%");
+  });
+
+  it("ChatGPTの週間枠が未取得または古いときも、下限を設定していれば起動しない", async () => {
+    readNextWindowRunSettings.mockResolvedValue({
+      enabled: true, leadMinutes: 60, intervalMinutes: 10, fiveHourFloorPercent: 0, weeklyFloorPercent: 0, codexWeeklyFloorPercent: 20,
+    });
+    findMany.mockResolvedValue([entry({ agent: "codex" })]);
+    getLatestCodexUsage.mockResolvedValue(null);
+
+    const result = await launchNextWindowRunEntries({ hostName: "subpc", now: new Date(RESETS_AT - 30 * MINUTE) });
+
+    expect(launchScheduledRunEntry).not.toHaveBeenCalled();
+    expect(result.actions[0]?.detail).toContain("ChatGPTの週間枠を取得できないか、情報が古いため");
   });
 
   it("枠の途中では起動しない（待つ理由だけ返す）", async () => {

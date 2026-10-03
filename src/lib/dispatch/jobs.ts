@@ -4,6 +4,7 @@ import {
   DISPATCH_CONCURRENCY_DEFAULT,
   parseClaudeModel,
   parseCodexLocalModel,
+  type ClaudeLocalModel,
   type ClaudeModel,
   type CodexLocalModel,
 } from "@/lib/app-settings";
@@ -905,6 +906,8 @@ export async function enqueueManualStepSessionJob(params: {
   repositoryFullName: string;
   issueNumber: number;
   hostName: string;
+  /** この手作業セッションだけに指定するClaude Codeのモデル。省略時は設定の既定に従う。 */
+  claudeModel?: ClaudeLocalModel | null;
   requestedByUserId: string | null;
   now?: Date;
 }): Promise<EnqueueManualStepSessionJobResult> {
@@ -959,6 +962,7 @@ export async function enqueueManualStepSessionJob(params: {
         issueNumber: params.issueNumber,
         targetHost: params.hostName,
         kind: "MANUAL_STEP_SESSION",
+        claudeModel: params.claudeModel ?? null,
         status: "QUEUED",
         activeKey: buildDispatchActiveKey(
           params.repositoryFullName,

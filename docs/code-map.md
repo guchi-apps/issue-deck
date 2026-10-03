@@ -540,7 +540,7 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
 - **設定の「障害状況」区分はGitHubの障害状況だけを出す**（#3827）。かつてあった「GitHub使用量」カード
   （`API`のレート制限・呼び出し回数と`ACTIONS`の実行時間。#2212）はStatusHubで扱うため、表示・取得フック・
   専用GET API・Actions課金の取得（`actions-billing.ts`）ごと削除した。呼び出し回数の記録（`lib/github/api-usage.ts`）と
-  `GET /api/github/rate-limit/apps`は残る。`GITHUB_BILLING_TOKEN`は読む場所が無くなったが、撤去は別Issueで扱う。
+  `GET /api/github/rate-limit/apps`は残る。
   障害状況カードの右上には、`GET /api/github/status`が返す`fetchedAt`を「取得 10/3 13:15」の形で出す。
   カードはPC・スマホ共通の`settings/status-section.tsx`が組み立てる。
 - **issue-deck自身が投げたAI API呼び出しは、機能別に計上している（画面には出さない）**（#2347）。
@@ -1613,8 +1613,10 @@ export function POST(request: NextRequest) {
     [`scripts/prompts/manual-step-agent.md`](../scripts/prompts/manual-step-agent.md)）。
     アシスタントの最初の画面とIssue詳細の手作業パネルの「Claude Codeセッションで進める」から、
     `DispatchJob`の`MANUAL_STEP_SESSION`を積み、pollerがworktree無しのtmuxセッションを立てる。
-    手順ごとにコマンド全文を`AskUserQuestion`で示して「実行する」→実行→終了コードを示して
-    「次へ進む」を聞く。押せない理由は`resolveManualStepSessionRejection`（`lib/dispatch/dispatch-job.ts`）。
+    本文・コメント・環境から目的達成に必要な作業を自律して実行し、本人操作・秘密値・未確定の
+    不可逆な変更または解消できない失敗だけを`AskUserQuestion`へ戻す（#3870）。本文から抽出する
+    一覧は既知の手順であって実行範囲の上限ではない。押せない理由は
+    `resolveManualStepSessionRejection`（`lib/dispatch/dispatch-job.ts`）。
     設計は[docs/multi-agent/subpc-dispatch.md](multi-agent/subpc-dispatch.md#手作業issueをセッションと対話しながら実施する2771)。
   - **下端の操作はスマホで1行に畳む**（#2403）。ボタンの高さはスマホ幅で44pxあり、縦積みの
     ままだと手順の画面で最大5段＝276px（画面の約1/3）を占めて、読むべき手順とコマンドが

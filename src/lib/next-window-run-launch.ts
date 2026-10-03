@@ -1,12 +1,15 @@
 import { db } from "@/lib/db";
+import { getLatestCodexUsage } from "@/lib/dispatch/codex-usage";
 import {
   launchScheduledRunEntry,
   markScheduledRunSkipped,
   type NightlyRunLaunchAction,
 } from "@/lib/nightly-run-launch";
 import {
+  describeCodexWeeklyQuotaBlock,
   decideNextWindowRunLaunch,
   formatNextWindowRunKey,
+  resolveCodexWeeklyQuotaBlock,
   resolveNextWindowRunWindow,
   type NextWindowRunPhase,
 } from "@/lib/next-window-run";
@@ -69,6 +72,11 @@ export async function launchNextWindowRunEntries(params: {
   result.runKey = window.runKey;
 
   const lastLaunchedAt = await readLastNextWindowLaunchedAt(params.hostName);
+  const codexUsage =
+    settings.codexWeeklyFloorPercent > 0 && entries.some((entry) => entry.agent === "codex")
+      ? await getLatestCodexUsage()
+      : null;
+  const codexWeekly = codexUsage?.windows.find((candidate) => candidate.key === "secondary") ?? null;
 
   for (const entry of entries) {
     const decision = decideNextWindowRunLaunch({
@@ -108,6 +116,26 @@ export async function launchNextWindowRunEntries(params: {
         });
       }
       continue;
+    }
+
+    if (entry.agent === "codex") {
+      const codexBlock = resolveCodexWeeklyQuotaBlock({
+        usedPercent: codexWeekly?.usedPercent ?? null,
+        unavailable: codexUsage?.stale === true || codexWeekly?.expired === true,
+        floorPercent: settings.codexWeeklyFloorPercent,
+      });
+      if (codexBlock) {
+        if (result.actions.length === 0) {
+          result.actions.push({
+            entryId: entry.id,
+            repositoryFullName: entry.repositoryFullName,
+            issueNumber: entry.issueNumber,
+            result: "deferred",
+            detail: `${describeCodexWeeklyQuotaBlock(codexBlock)}。残りが下限を上回るまで起動を見送ります。`,
+          });
+        }
+        continue;
+      }
     }
 
     if (window.runKey === null) continue; // launchなら必ず鍵はあるが、型の上では起こりうる

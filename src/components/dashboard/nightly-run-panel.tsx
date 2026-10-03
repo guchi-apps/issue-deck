@@ -48,6 +48,7 @@ import {
 import {
   describeNextWindowRunSchedule,
   formatNextWindowRunKeyLabel,
+  type CodexWeeklyWindowView,
   type NextWindowRunSettings,
   type NextWindowRunWindowView,
 } from "@/lib/next-window-run";
@@ -125,6 +126,13 @@ export function NightlyRunPanel({
           <ClaudeWindowMeter
             window={state.nextWindow.window}
             settings={state.nextWindow.settings}
+            isSubmitting={isSubmitting}
+            onUpdateSettings={onUpdateSettings}
+          />
+
+          <CodexWeeklyMeter
+            window={state.nextWindow.codexWeeklyWindow}
+            floorPercent={state.nextWindow.settings.codexWeeklyFloorPercent}
             isSubmitting={isSubmitting}
             onUpdateSettings={onUpdateSettings}
           />
@@ -314,6 +322,59 @@ function ClaudeWindowMeter({
         onCommit={(minutes) => onUpdateSettings({ nextWindow: { leadMinutes: minutes } })}
       />
     </div>
+  );
+}
+
+/** ChatGPT（Codex）は5時間枠を持たないため、予約実行では週間枠だけを表示・設定する（#3859）。 */
+function CodexWeeklyMeter({
+  window,
+  floorPercent,
+  isSubmitting,
+  onUpdateSettings,
+}: {
+  window: CodexWeeklyWindowView | null;
+  floorPercent: number;
+  isSubmitting: boolean;
+  onUpdateSettings: (patch: ScheduledRunSettingsPatch) => void;
+}) {
+  const resetText = window?.resetsAt ? `${formatMonthDay(window.resetsAt)} ${formatTimeOfDay(window.resetsAt)}にリセット` : "";
+  return (
+    <section className="flex flex-col gap-2">
+      <div>
+        <h3 className="text-[13px] font-semibold">ChatGPT の実行枠</h3>
+        <p className="text-[11px] text-muted-foreground">ChatGPTには5時間枠がないため、週間枠だけを予約実行で確認します</p>
+      </div>
+      <div className="flex flex-col gap-1.5 rounded-lg border p-3">
+        <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+          <span className="min-w-20 text-[11px] text-muted-foreground">週間枠</span>
+          <span className="font-mono text-sm font-semibold tabular-nums">
+            {window?.unavailable || window?.usedPercent === null || !window ? "—" : `${Math.round(window.usedPercent)}%`}
+          </span>
+          <span className="text-[11px] text-muted-foreground">下限: {formatFloor(floorPercent)}</span>
+          {resetText && <span className="basis-full text-[11px] text-muted-foreground">{resetText}</span>}
+        </div>
+        <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+          <span>残り枠の下限</span>
+          <Select
+            value={String(floorPercent)}
+            disabled={isSubmitting}
+            onValueChange={(value) => onUpdateSettings({ nextWindow: { codexWeeklyFloorPercent: Number(value) } })}
+          >
+            <SelectTrigger size="sm" className="w-28" aria-label="ChatGPTの週間枠の下限">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {NEXT_WINDOW_RUN_FLOOR_PERCENT_OPTIONS.map((percent) => (
+                <SelectItem key={percent} value={String(percent)}>{formatFloor(percent)}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        {window?.unavailable && (
+          <p className="text-[11px] text-muted-foreground">使用量が未取得または古いため、下限を設定している間はChatGPTの予約を起動しません</p>
+        )}
+      </div>
+    </section>
   );
 }
 
@@ -905,4 +966,3 @@ function ResultsSection({
     </div>
   );
 }
-

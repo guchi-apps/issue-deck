@@ -3,6 +3,13 @@
 import { useState } from "react";
 import { Check, Copy, Loader2, MessageSquareText, Monitor } from "lucide-react";
 
+import {
+  CLAUDE_LOCAL_MODEL_DEFAULT,
+  CLAUDE_MODEL_FIT_LABELS,
+  describeClaudeModel,
+  type ClaudeLocalModel,
+} from "@/lib/app-settings";
+import { ModelChip } from "@/components/dashboard/agent-model-chips";
 import { Button } from "@/components/ui/button";
 import { IssueSessionStatus } from "@/components/dashboard/issue-session-status";
 import { copyText } from "@/lib/copy-text";
@@ -28,6 +35,12 @@ import { splitShellCommandLines } from "@/lib/shell-command-lines";
 import type { Issue } from "@/types/issue";
 import { cn } from "@/lib/utils";
 
+const MANUAL_STEP_SESSION_MODEL_ENTRIES: readonly ClaudeLocalModel[] = [
+  "fable",
+  "opus",
+  "sonnet",
+];
+
 /**
  * 手作業Issueを、サブPCのClaude Codeセッションと対話しながら進める入口（#2771）。
  *
@@ -36,15 +49,11 @@ import { cn } from "@/lib/utils";
  * サブPCに1本立て**、止まるところまで手順を流す。答える先は
  * Issue詳細の質問パネル（`QuestionAnswerPanel`）でも、Claude Codeアプリ（Remote Control）でもよい。
  *
- * **本文に書かれた手順は、押した1回で最後まで流す**（#2830）。#2771では手順ごとに
- * 「実行しますか？」「次へ進みますか？」と2回ずつ聞いていたが、5手順のIssueで10回答えることになり、
- * 「チェックする必要がないなら自動で実行してほしい」という要望を受けて線を引き直した。
- * 歯止めは**本文に書かれたコマンドかどうか**で、本文に無いコマンド（失敗の調査・修正案）は
- * これまでどおり毎回承認を取る（`docs/multi-agent/gates.md`の例外5）。
+ * セッションは本文の手順を出発点に、**本文に書かれていない調査・修正・確認も含めて**目的の達成まで
+ * 自律実行する（#3870）。ユーザー本人の操作・秘密値・未確定の不可逆な変更だけを質問に戻す。
  *
- * そのため、**押す1回で何が流れるのかを押す前に並べる**。振り分けの判定は
- * `buildManualStepSessionPlan`＝代行実行と同じ関数で、理由の文言も
- * `describeManualStepExecutionRejection`から取る。
+ * 本文から抽出できる既知の手順は押す前に一覧にする。ただし一覧は実行範囲の上限ではなく、
+ * セッションが追加で行う調査・修正・確認はここには載らない。
  *
  * **ただし、並べたものと実際に流れるものが一致する保証は無い。** 代行実行の照合2回・
  * `body_changed`・5分の失効に当たるものはセッションに無く、起動後に自分で本文を読み直す。
@@ -78,6 +87,9 @@ export function ManualStepSessionPanel({
   className?: string;
 }) {
   const [error, setError] = useState<string | null>(null);
+  // 手作業の内容を見て人が選ぶ入口なので、「設定に従う」は置かない。どのモデルで始まるかを
+  // 起動前に明示するため、通常の実装開始と同じ3候補から既定のSonnetを選んだ状態で始める。
+  const [model, setModel] = useState<ClaudeLocalModel>(CLAUDE_LOCAL_MODEL_DEFAULT);
 
   // 起動先は**手作業セッションに対応したオンラインのホスト**。無ければ代行実行と同じ既定の
   // ホストを「理由を出す相手」として使う（申告が無い理由を、ホスト名つきで出せる）
@@ -111,6 +123,7 @@ export function ManualStepSessionPanel({
       repositoryFullName: issue.repositoryFullName,
       issueNumber: issue.number,
       hostName: host.name,
+      model,
     });
     if (!result.ok) setError(result.message);
   }
@@ -156,15 +169,31 @@ export function ManualStepSessionPanel({
         <>
           <p className="text-[11px] leading-relaxed text-muted-foreground">
             {formatDispatchHostName(hostName)}
-            にこのIssue専用のClaude Codeセッションを立て、本文の手順を上から順に
+            にこのIssue専用のClaude Codeセッションを立て、本文の目的に必要な作業を
             <strong className="font-semibold text-foreground">自動で実行します</strong>。
-            終了コード0のときだけ本文の <code>- [ ]</code> にチェックを付けて次へ進み、
+            本文の記載が不足していても、調査・修正・確認を自律して進めます。実施済みの本文の
+            <code>- [ ]</code> にはチェックを付け、
             <strong className="font-semibold text-foreground">
-              あなたが実行する手順・失敗したとき・本文に無いコマンドが要るとき
+              秘密値・本人操作・未確定の不可逆な変更が必要なとき
             </strong>
             に手を止めて聞きます。答える先はこの画面の質問パネルかClaude Codeアプリです。
             出力はセッションの中だけに留め、Issueには書きません。
           </p>
+
+          <div className="flex flex-col gap-2">
+            <p className="text-xs font-semibold">モデル</p>
+            <div role="radiogroup" aria-label="モデル" className="grid grid-cols-3 gap-2">
+              {MANUAL_STEP_SESSION_MODEL_ENTRIES.map((entry) => (
+                <ModelChip
+                  key={entry}
+                  label={describeClaudeModel(entry)}
+                  fit={CLAUDE_MODEL_FIT_LABELS[entry]}
+                  selected={model === entry}
+                  onSelect={() => setModel(entry)}
+                />
+              ))}
+            </div>
+          </div>
 
           {/* 手作業Issueでなければ並べない。**同じ理由が手順の数だけ並ぶ**だけで、
               押せない理由は下に1回出ている */}
@@ -183,7 +212,7 @@ export function ManualStepSessionPanel({
               ) : (
                 <MessageSquareText />
               )}
-              {plan.auto > 0 ? `セッションを起動して${plan.auto}件を自動実行` : "セッションを起動"}
+              セッションを起動して実行を開始
             </Button>
             {/* 押した操作がどこまで進んだか（pull型なので届くまで最大30秒ほど何も起きない） */}
             {job && hasActiveJob && (
@@ -220,11 +249,10 @@ export function ManualStepSessionPanel({
 }
 
 /**
- * 起動を押した1回で何が流れるのかの一覧（#2830）。
+ * 本文から読み取れた既知の手順の一覧。
  *
- * **畳まずに全部出す。** 見せる対象は「本文の手順」ではなく「これから実行される文字列」で、
- * 人に頼む手順もその理由とともに同じ並びへ出す——飛ばされないことが分かっていないと、
- * 自分が実行する手順を待たずにセッションが先へ進むと誤解する。
+ * **畳まずに全部出す。** 一覧は本文の記載から得られる候補であり、セッションが実際に実行する
+ * 作業の上限ではない。目的の達成に必要な調査・修正・確認は、本文に無くても自動で追加する。
  */
 function ManualStepSessionRunPlan({
   plan,
@@ -240,9 +268,9 @@ function ManualStepSessionRunPlan({
   return (
     <div className="overflow-hidden rounded-md border bg-background">
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1 border-b bg-muted/40 px-2.5 py-1.5 text-[11.5px] font-semibold">
-        <span className="text-violet-700 dark:text-violet-300">自動で実行 {plan.auto}件</span>
+        <span className="text-violet-700 dark:text-violet-300">本文から実行可能 {plan.auto}件</span>
         <span className="font-normal text-muted-foreground">／</span>
-        <span className="text-amber-700 dark:text-amber-400">あなたが実行 {plan.user}件</span>
+        <span className="text-amber-700 dark:text-amber-400">本人操作が必要そう {plan.user}件</span>
         <span className="ml-auto font-mono text-[11px] font-normal text-muted-foreground">
           {hostName}
         </span>
@@ -288,8 +316,8 @@ function ManualStepSessionRunPlan({
       </ol>
 
       <p className="border-t bg-muted/20 px-2.5 py-1.5 text-[11px] leading-relaxed text-muted-foreground">
-        本文に無いコマンド（失敗の原因調べ・手順の直し）を実行するときは、自動実行の途中でも
-        全文を示して毎回聞きます。クローズも最後に聞きます。
+        本文に無い調査・修正・確認も自動で行います。秘密値・本人操作・未確定の不可逆な変更だけを
+        質問に戻し、クローズは最後に聞きます。
       </p>
     </div>
   );
@@ -327,7 +355,7 @@ function ManualStepUserCommands({
       <div className="flex flex-wrap items-center gap-2 px-2.5 py-2">
         <div className="min-w-0 flex-1">
           <p id="manual-step-user-commands" className="text-xs font-semibold text-amber-800 dark:text-amber-300">
-            あなたが実行 {entries.length}件
+            本人操作が必要そう {entries.length}件
           </p>
           <p className="text-[11px] leading-relaxed text-muted-foreground">
             PCではまとめて、スマホでは1行ずつコピーして実行できます。

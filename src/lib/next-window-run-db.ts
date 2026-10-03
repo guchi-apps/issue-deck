@@ -39,6 +39,7 @@ export async function readNextWindowRunSettings(): Promise<NextWindowRunSettings
       nextWindowRunIntervalMinutes: true,
       nextWindowRunFiveHourFloorPercent: true,
       nextWindowRunWeeklyFloorPercent: true,
+      nextWindowRunCodexWeeklyFloorPercent: true,
       nextWindowRunBulkModel: true,
     },
   });
@@ -55,6 +56,9 @@ export async function readNextWindowRunSettings(): Promise<NextWindowRunSettings
       NEXT_WINDOW_RUN_FLOOR_PERCENT_DEFAULT,
     weeklyFloorPercent:
       parseNextWindowRunFloorPercent(row?.nextWindowRunWeeklyFloorPercent) ??
+      NEXT_WINDOW_RUN_FLOOR_PERCENT_DEFAULT,
+    codexWeeklyFloorPercent:
+      parseNextWindowRunFloorPercent(row?.nextWindowRunCodexWeeklyFloorPercent) ??
       NEXT_WINDOW_RUN_FLOOR_PERCENT_DEFAULT,
     bulkModel: normalizeBulkModel(row?.nextWindowRunBulkModel),
   };
