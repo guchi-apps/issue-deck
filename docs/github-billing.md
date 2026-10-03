@@ -71,12 +71,10 @@ privateのまま残すリポジトリでActionsの分数が問題になった場
 Actionsの外へ出せないかを先に考える**（下記#2294）。出せないならpublic化を検討し、
 それもできないなら実行そのものを減らす。
 
-### 画面から見る（#2212）
+### 画面から見る
 
-issue-deckの設定 ▸「使用量と障害状況」▸ GitHub使用量の`ACTIONS`に、今日・今月の実行時間とリポジトリ別の
-内訳が出る。**上のコマンドを叩かなくても、課金が出ているリポジトリは金額付きで並ぶ。**
-取得元は上の確認コマンドと同じ`/organizations/{org}/settings/billing/usage`で、実装は
-[`src/lib/github/actions-billing.ts`](../src/lib/github/actions-billing.ts)。
+設定の「GitHub使用量」（#2212）は、StatusHubで扱うことにしたため削除した（#3827）。
+上の確認コマンドで見る。`src/lib/github/actions-billing.ts`も削除済み。
 
 ### 課金レポートのAPIで気を付けること
 
