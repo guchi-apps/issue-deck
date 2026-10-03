@@ -291,4 +291,16 @@ describe("ReleaseHistoryPanel のiOS配布バッジ（#3800）", () => {
     expect(screen.getAllByText(/TestFlight配布済み/)).toHaveLength(1);
     expect(screen.getByText(/TestFlight配布済み #318/)).toBeTruthy();
   });
+
+  it("iOS配布が失敗したリリースにだけ失敗段階つきのバッジを出す", () => {
+    renderPanel({
+      entries: [
+        entry({ tagName: "v4.78.0", iosFailureStage: "アップロード" }),
+        entry({ tagName: "v4.77.0", htmlUrl: "https://github.com/guchi-apps/issue-deck/releases/tag/v4.77.0" }),
+      ],
+    });
+    showAllReleases();
+    expect(screen.getAllByText(/iOS配布に失敗/)).toHaveLength(1);
+    expect(screen.getByText("iOS配布に失敗（アップロード）")).toBeTruthy();
+  });
 });
