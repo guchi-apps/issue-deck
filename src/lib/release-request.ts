@@ -26,6 +26,9 @@ export function releaseErrorMessage(
   if (errorCode === "release_workflow_missing") {
     return "このリポジトリにはリリース用workflow（release-develop-to-main.yml）がありません。";
   }
+  if (errorCode === "deploy_failed") {
+    return "本番デプロイが失敗しているため、新しいリリースは開始できません。再デプロイを成功させてからやり直してください。";
+  }
   // 上げ幅の指定（`bump_kind`）を受け取れない世代のworkflowを持つリポジトリ（#1548）。
   // GitHubは`Unexpected inputs provided`の422で落とすが、そのままでは何をすればよいか読めない。
   if (errorCode === "bump_kind_unsupported") {

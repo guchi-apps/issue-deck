@@ -1262,6 +1262,7 @@ describe("リリース起動の可否（canTriggerRelease）", () => {
     branchStatusMissing?: boolean;
     sameContent?: boolean;
     units?: UnreleasedUnits | null;
+    deployRun?: Partial<BranchFlowDeployRun> | null;
   }) {
     return buildBranchFlow({
       repositories,
@@ -1280,6 +1281,28 @@ describe("リリース起動の可否（canTriggerRelease）", () => {
               hasReleaseWorkflow: input.hasReleaseWorkflow ?? true,
             }),
           ],
+      deployStatuses:
+        input.deployRun === undefined
+          ? []
+          : [
+              {
+                repositoryFullName: REPO,
+                deployRun:
+                  input.deployRun === null
+                    ? null
+                    : {
+                        id: 1,
+                        status: "completed",
+                        conclusion: "success",
+                        htmlUrl: `https://github.com/${REPO}/actions/runs/1`,
+                        createdAt: "2026-08-15T10:00:30Z",
+                        event: "push",
+                        runAttempt: 1,
+                        ...input.deployRun,
+                      },
+                failureIssue: null,
+              },
+            ],
     }).repositories[0];
   }
 
@@ -1370,6 +1393,22 @@ describe("リリース起動の可否（canTriggerRelease）", () => {
       ],
     });
     expect(repository.canTriggerRelease).toBe(false);
+  });
+
+  it("本番デプロイが失敗している間は押せない（#3897）", () => {
+    const repository = buildRelease({
+      deployRun: { conclusion: "failure" },
+    });
+    expect(repository.canTriggerRelease).toBe(false);
+    expect(repository.releaseBlockedReason).toBe("deploy-failed");
+  });
+
+  it("手動の再デプロイが失敗した場合も新規リリースを止める", () => {
+    const repository = buildRelease({
+      deployRun: { conclusion: "failure", event: "workflow_dispatch" },
+    });
+    expect(repository.canTriggerRelease).toBe(false);
+    expect(repository.releaseBlockedReason).toBe("deploy-failed");
   });
 
   // #2711。押せないときにボタンごと消すと、「次のリリース（本番未反映）」の束から本番へ出す
