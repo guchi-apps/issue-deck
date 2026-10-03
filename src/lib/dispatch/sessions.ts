@@ -291,6 +291,20 @@ export async function markDispatchSessionEnded(params: {
   // **実際に`ALIVE`から倒した1回だけ締める（#1119）。** 二重に報告されても2回目は0件なので、
   // ここを通らない。投稿するかどうか（記録が残っているか）の判定は`session-wrapup.ts`側。
   if (result.count > 0 && target) {
+    try {
+      await db.dispatchSessionTimelineEvent.create({
+        data: {
+          sessionId: target.id,
+          source: "session",
+          occurredAt: now,
+          kind: "event",
+          title: "セッション消失",
+        },
+      });
+    } catch {
+      // タイムラインは表示用の補助情報なので、記録失敗で終了処理を止めない。
+    }
+
     await postSessionWrapupComment({
       repositoryFullName: target.repositoryFullName,
       issueNumber: target.issueNumber,
