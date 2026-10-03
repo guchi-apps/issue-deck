@@ -349,7 +349,9 @@ else
         ;;
     esac
   fi
-  SESSION_CMD="$(printf 'set -o pipefail; cd %q && cat %q | %scodex exec --sandbox workspace-write --ask-for-approval never -c sandbox_workspace_write.network_access=true%s -' \
+  # `codex exec`は対話コマンドの`--ask-for-approval`を受け付けない。
+  # 同じ承認方針を設定値で渡す（#3928）。
+  SESSION_CMD="$(printf 'set -o pipefail; cd %q && cat %q | %scodex exec --sandbox workspace-write -c approval_policy=never -c sandbox_workspace_write.network_access=true%s -' \
     "$WORKDIR" "$PROMPT_FILE" "$RUNNER" "$CODEX_MODEL_ARG")"
 fi
 SESSION_CMD+=" 2>&1 | tee $(printf '%q' "$LOG_FILE")"
