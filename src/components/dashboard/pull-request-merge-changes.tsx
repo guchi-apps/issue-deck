@@ -10,11 +10,35 @@ import { pullRequestChangeIssueLabel, pullRequestChangeLabel } from "@/lib/pull-
 import { cn } from "@/lib/utils";
 import type { PullRequestChange, PullRequestSummary } from "@/types/pull-request";
 
-/** 行に印を出す判定。問題なし・実施なし・記録なしは何も出さない（指摘があるものだけを目立たせる） */
+/** 指摘の判定だけは、丸に加えて短い文言も出して優先して読めるようにする */
 const FINDING_LABEL: Partial<Record<ReviewVerdictKind, string>> = {
   "changes-requested": "要修正",
   "needs-check": "要確認",
 };
+
+/**
+ * 色だけに頼らず、支援技術でも読めるレビュー状態の丸。
+ *
+ * `reviewKind`がある行には常に出す。以前は指摘がある行だけに印を出していたため、
+ * 問題なしとレビューされていない行を見分けられなかった（#3904）。
+ */
+function ReviewStatusDot({ kind, label }: { kind: ReviewVerdictKind; label: string }) {
+  const tone: Record<ReviewVerdictKind, string> = {
+    ok: "bg-green-600 dark:bg-green-400",
+    "needs-check": "bg-amber-500 dark:bg-amber-400",
+    "changes-requested": "bg-destructive",
+    skipped: "bg-muted-foreground",
+    unknown: "bg-muted-foreground",
+  };
+
+  return (
+    <span
+      role="img"
+      aria-label={`Claudeレビュー: ${label}`}
+      className={cn("size-2.5 shrink-0 rounded-full", tone[kind])}
+    />
+  );
+}
 
 /**
  * 一覧に出すのは実際に入る変更だけ。**バージョンバンプのPRは外す**（#3260）。
@@ -31,7 +55,7 @@ type PullRequestMergeChangesProps = {
   pullRequest: PullRequestSummary;
   /** 変更点の取得結果。取得は親（`PullRequestMergeProduction`）が1回だけ行い、「マージ前の確認」と共有する */
   state: UsePullRequestChangesResult;
-  /** 変更（`change.id`）ごとのClaudeレビューの判定（#3592）。無い行には印を出さない */
+  /** 変更（`change.id`）ごとのClaudeレビューの判定（#3904）。無い行には状態の丸を出さない */
   reviewKinds?: ReadonlyMap<string, ReviewVerdictKind>;
   /** 行を押したときにPR詳細を開く（#3592）。PR番号が取れない行は押せない */
   onOpenPullRequest?: (pullRequestNumber: number) => void;
@@ -49,6 +73,17 @@ function ChangeRow({
   const label = pullRequestChangeLabel(change);
   const issueLabel = pullRequestChangeIssueLabel(change);
   const findingLabel = reviewKind ? FINDING_LABEL[reviewKind] : undefined;
+  const reviewLabel = reviewKind
+    ? reviewKind === "ok"
+      ? "問題なし"
+      : reviewKind === "needs-check"
+        ? "要確認"
+        : reviewKind === "changes-requested"
+          ? "要修正"
+          : reviewKind === "skipped"
+            ? "実施なし"
+            : "記録なし"
+    : null;
 
   const body = (
     <>
@@ -64,6 +99,7 @@ function ChangeRow({
           {issueLabel}
         </span>
       )}
+      {reviewKind && reviewLabel && <ReviewStatusDot kind={reviewKind} label={reviewLabel} />}
       {reviewKind && findingLabel && (
         <span
           className={cn(
@@ -111,9 +147,9 @@ function ChangeRow({
  * 取得中は骨組みだけを出し、失敗したときは理由とGitHubへの導線を出す。
  *
  * **行の主語はPull Request。判定は総合の見方を「マージ前の確認」のレビュー行へ集約し**（#3093。
- * `PullRequestMergePrecheck`）、この一覧の行には**指摘があるもの（要修正・要確認）だけ**印を付ける
- * （#3592）。全行に判定を並べていた（#2843）と違い、問題なし・記録なしの行は何も出さないので、
- * どのPRを見に行くべきかだけが目に入る。行を押すとPR詳細を開く（`onOpenPullRequest`）。
+ * `PullRequestMergePrecheck`）、この一覧の各行には状態を示す丸を付ける（#3904）。問題なしも緑で
+ * 表示し、実施なし・記録なしは灰色にする。要修正・要確認だけは丸に加えて文言も残し、見落としを
+ * 防ぐ。行を押すとPR詳細を開く（`onOpenPullRequest`）。
  */
 export function PullRequestMergeChanges({
   pullRequest,

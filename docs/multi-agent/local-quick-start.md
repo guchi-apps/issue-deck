@@ -986,6 +986,13 @@ pnpm exec prisma migrate status                                       # "Databas
 `migrate resolve --rolled-back`を実行し、修正済みのSQLを`migrate deploy`で再試行する。
 対象列が既にあるなど状態が想定と違う場合は、自動修復せずデプロイを止めてDBの状態を調べる。
 
+`20261003130000_add_dispatch_session_codex_thread_id`も同じ引用符で失敗した（#3908）。
+この移行も専用スクリプトで`DispatchSession.codexThreadId`がまだ存在しないことを確かめ、
+失敗記録だけをロールバック扱いにしてから再試行する。MySQLの移行 SQL で識別子を引用する際は
+バッククォートを使う。`prisma validate`はスキーマを検査するが、手書きの`migration.sql`が
+MySQLで実行できるかは検査しない。CIは`check-migration-sql-quoting.mjs`で二重引用符を
+検出するが、SQL全体の実行可否までは保証しない。
+
 **新規テーブルの追加など、既存のマイグレーションと競合しない変更なら`prisma migrate deploy`
 1回で済むことがある**（#2760で実測）。`migrate dev`がリセットを要求するのは差分検出に
 shadow DBを使う（履歴のずれをそこで検出する）ためで、`migrate deploy`はローカルの

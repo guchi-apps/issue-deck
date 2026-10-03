@@ -46,7 +46,7 @@ const DEFAULT_GRACE_SECONDS = 90;
  * 見張りを諦めるまでの既定時間（分）。
  *
  * 起動し直しに失敗し続けるケース（権限・GitHubの障害）で、行が`pending`のまま残り続けるのを防ぐ。
- * 諦めても本番が古いままなのは`deploy-failure`の巡回（#2236）とブランチ画面が別に拾う。
+ * 諦めた場合もブランチ画面が本番未反映の状態を表示する。
  */
 const DEFAULT_GIVE_UP_MINUTES = 30;
 

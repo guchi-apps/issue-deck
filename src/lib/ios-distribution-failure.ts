@@ -1,18 +1,9 @@
-import {
-  decideDeployFailure,
-  type DeployFailureDecision,
-  type DeployFailureSweepRun,
-  type DeployFailureTrackedIssue,
-} from "@/lib/deploy-failure";
-
 /**
  * iOS配布（`ios-testflight.yml`）が失敗したまま止まっているリポジトリを巡回で見つけ、
  * 追跡用のIssueを自動で起票する（#3745）。
  *
- * Webの本番デプロイ失敗（#2236。`deploy-failure.ts`）と**同じ判定・同じ巡回の形**で、
- * 起票してよいかの判定は`decideDeployFailure`をそのまま使う（猶予・成功時のクローズ・
- * 「別のrunが落ちたら書き足す」の取り決めが同じため）。違うのは対象のworkflowと、
- * 本文に失敗した**段階**（署名・ビルドなど）を書く点だけ。
+ * 失敗から猶予を置き、成功時は追跡Issueを閉じ、別のrunの失敗は既存Issueへ書き足す。
+ * 本文には失敗した**段階**（署名・ビルドなど）を書く。
  *
  * **起票のみで、実装の自動起動はしない。** 署名の期限切れ・Apple側の一時障害のように
  * コードでは直らない失敗が多く、失敗の型を溜めてから自動化の線を引く方が安全なため。
@@ -47,16 +38,52 @@ export function iosDistributionFailureGraceMinutes(
   return nonNegativeMinutes(raw, DEFAULT_GRACE_MINUTES);
 }
 
+type IosDistributionFailureSweepRun = {
+  id: number;
+  status: string;
+  conclusion: string | null;
+  htmlUrl: string;
+  updatedAt: string;
+  runAttempt: number;
+};
+
+type IosDistributionFailureTrackedIssue = { issueNumber: number; runId: number };
+
+export type IosDistributionFailureSkipReason =
+  | "no_run"
+  | "not_completed"
+  | "not_failed"
+  | "within_grace"
+  | "already_tracked";
+
+export type IosDistributionFailureDecision =
+  | { kind: "create" }
+  | { kind: "update"; issueNumber: number }
+  | { kind: "close"; issueNumber: number }
+  | { kind: "skip"; reason: IosDistributionFailureSkipReason };
+
 export function decideIosDistributionFailure(input: {
-  run: DeployFailureSweepRun | null;
-  tracked: DeployFailureTrackedIssue | null;
+  run: IosDistributionFailureSweepRun | null;
+  tracked: IosDistributionFailureTrackedIssue | null;
   now: Date;
   graceMinutes?: number;
-}): DeployFailureDecision {
-  return decideDeployFailure({
-    ...input,
-    graceMinutes: input.graceMinutes ?? iosDistributionFailureGraceMinutes(),
-  });
+}): IosDistributionFailureDecision {
+  const { run, tracked, now, graceMinutes = iosDistributionFailureGraceMinutes() } = input;
+  if (run === null) return { kind: "skip", reason: "no_run" };
+  if (run.status !== "completed") return { kind: "skip", reason: "not_completed" };
+  const failed = run.conclusion === "failure" || run.conclusion === "timed_out";
+  if (!failed) {
+    if (tracked !== null && run.conclusion === "success") {
+      return { kind: "close", issueNumber: tracked.issueNumber };
+    }
+    return { kind: "skip", reason: "not_failed" };
+  }
+  if (tracked !== null && tracked.runId === run.id) return { kind: "skip", reason: "already_tracked" };
+  const elapsedMs = now.getTime() - new Date(run.updatedAt).getTime();
+  if (!Number.isFinite(elapsedMs) || elapsedMs < graceMinutes * 60_000) {
+    return { kind: "skip", reason: "within_grace" };
+  }
+  return tracked === null ? { kind: "create" } : { kind: "update", issueNumber: tracked.issueNumber };
 }
 
 export type IosDistributionFailureMeta = {
