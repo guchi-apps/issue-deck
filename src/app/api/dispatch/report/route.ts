@@ -8,7 +8,6 @@ import { isAgentResumeBody } from "@/lib/dispatch/agent-resume";
 import { authorizeDispatch } from "@/lib/dispatch/dispatch-auth";
 import { parseDispatchHostName, parseDispatchReportStatus } from "@/lib/dispatch/dispatch-job";
 import { reportDispatchJob } from "@/lib/dispatch/jobs";
-import { PR_FIX_SESSION_INSTRUCTION } from "@/lib/dispatch/pr-fix-request";
 import { resolveFixedInstructionCheckUser } from "@/lib/dispatch/session-escalation";
 import { MANUAL_STEP_OUTPUT_MAX_LENGTH } from "@/lib/manual-step-command";
 import { advanceManualStepRun } from "@/lib/manual-step-run";
@@ -153,11 +152,7 @@ export async function POST(request: NextRequest) {
     await resolveFixedInstructionCheckUser({
       repositoryFullName: result.job.repositoryFullName,
       issueNumber: result.job.issueNumber,
-      // **`01.check-merge`まで外すのはマージ待ちの修正依頼だけ**（#2919）。どちらの経路も
-      // `recovery`で積まれるため、送った本文で見分ける——受け口が本文をその1行に限っている
-      // ので、これが立つのは`POST /api/dispatch/pr-fix-notify`を通ったジョブだけになる。
-      // 停滞からの復旧（#2886）で広げると、同じIssueに乗っているマージ待ちの札まで落ちる
-      allowMergeReason: result.job.instruction === PR_FIX_SESSION_INSTRUCTION,
+      allowMergeReason: false,
     });
   }
 
