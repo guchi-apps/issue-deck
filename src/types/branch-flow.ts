@@ -473,12 +473,14 @@ export type BranchFlowRelease = {
  * - `no-workflow`: `release-develop-to-main.yml`を持たないリポジトリ（#1538）
  * - `release-in-progress`: openなリリースPR・バンプPRがある（起こし直すと二重に走る）
  * - `nothing-to-release`: developの中身がmainに入りきっている（#2316・#2678・#2704）
+ * - `deploy-failed`: 直近の本番デプロイが失敗している（#3897）
  */
 export type ReleaseBlockedReason =
   | "branches-unloaded"
   | "no-workflow"
   | "release-in-progress"
-  | "nothing-to-release";
+  | "nothing-to-release"
+  | "deploy-failed";
 
 /**
  * Xcodeで実機へ反映するリポジトリ（#3468。`lib/device-build-repos.ts`）の表示材料。
@@ -530,7 +532,8 @@ export type BranchFlowRepository = {
    *
    * 押せないときにボタンごと消すと、「次のリリース（本番未反映）」と出ている束から本番へ出す
    * 手段が画面のどこにも無くなり、**押せないのか、そもそも操作が無いのかを区別できない**。
-   * 無効のボタンへ添える文言の材料として持つ。
+   * 無効のボタンへ添える文言の材料として持つ。`deploy-failed`では修正リリースの
+   * 手動上書きを選ぶボタンへ切り替える（#3912）。
    */
   releaseBlockedReason: ReleaseBlockedReason | null;
   /**
