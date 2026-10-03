@@ -68,3 +68,55 @@ describe("IosReleaseGroupPanel 修正Issueを起案", () => {
     expect(screen.queryByRole("button", { name: /修正Issueを起案/ })).toBeNull();
   });
 });
+
+describe("IosReleaseGroupPanel 手動配布（#3840）", () => {
+  function stubSkipped() {
+    const body = {
+      available: true,
+      latestDeliveredBuild: null,
+      trackedIssue: null,
+      release: { sha: SHA, merged: true, isMainTip: true, webDeploy: "success", deliveredBuild: null },
+      runs: [
+        {
+          id: 11,
+          htmlUrl: "https://github.com/o/r/actions/runs/11",
+          headSha: SHA,
+          headBranch: "main",
+          event: "workflow_dispatch",
+          createdAt: "2026-10-03T00:00:00Z",
+          updatedAt: "2026-10-03T00:01:00Z",
+          status: "completed",
+          conclusion: "success",
+          verdict: { kind: "skipped" },
+          stages: [{ key: "detect", label: "変更判定", state: "success", startedAt: null, completedAt: null }],
+          notes: [],
+        },
+      ],
+    };
+    const fetchMock = vi.fn(async (_url: string, init?: RequestInit) =>
+      init?.method === "POST"
+        ? new Response(JSON.stringify({ ok: true, sha: SHA }), { status: 200 })
+        : new Response(JSON.stringify(body), { status: 200 }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    return fetchMock;
+  }
+
+  it("更新不要のときだけ「手動で配布」が出て、確認後にforce付きでPOSTする", async () => {
+    const fetchMock = stubSkipped();
+    render(panel);
+    fireEvent.click(await screen.findByRole("button", { name: "手動で配布" }));
+    fireEvent.click(await screen.findByRole("button", { name: "手動で配布する" }));
+    await vi.waitFor(() => {
+      const post = fetchMock.mock.calls.find(([, init]) => init?.method === "POST");
+      expect(JSON.parse(String(post?.[1]?.body))).toEqual({ owner: "guchi-apps", repo: "kurashio", prNumber: 5, force: true });
+    });
+  });
+
+  it("失敗時は手動配布ではなく「再実行」を出す", async () => {
+    stubTestflight(null);
+    render(panel);
+    expect(await screen.findByRole("button", { name: "再実行" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "手動で配布" })).toBeNull();
+  });
+});
