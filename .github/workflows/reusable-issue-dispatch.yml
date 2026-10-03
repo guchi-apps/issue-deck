@@ -1282,7 +1282,7 @@ jobs:
         with:
           openai-api-key: ${{ secrets.OPENAI_API_KEY }}
           model: ${{ steps.claude_model.outputs.codex_model }}
-          permission-profile: :workspace
+          permission-profile: :danger-full-access
           allow-bot-users: issue-deck
           prompt: ${{ env.PROMPT_PLAN }}
       - name: Claude使用量をJob Summaryに出力する（Claude Code（計画提示））
@@ -1715,7 +1715,7 @@ jobs:
         with:
           openai-api-key: ${{ secrets.OPENAI_API_KEY }}
           model: ${{ steps.claude_model.outputs.codex_model }}
-          permission-profile: :workspace
+          permission-profile: :danger-full-access
           allow-bot-users: issue-deck
           prompt: ${{ env.PROMPT_SPLIT }}
       - name: Claude使用量をJob Summaryに出力する（Claude Code（分割））
@@ -1851,7 +1851,7 @@ jobs:
         with:
           openai-api-key: ${{ secrets.OPENAI_API_KEY }}
           model: ${{ steps.claude_model.outputs.codex_model }}
-          permission-profile: :workspace
+          permission-profile: :danger-full-access
           allow-bot-users: issue-deck
           prompt: ${{ env.PROMPT_QUESTION }}
       - name: Claude使用量をJob Summaryに出力する（Claude Code（質問応答））
@@ -2174,6 +2174,7 @@ jobs:
             ${{ steps.claude_model.outputs.model_flag }}
           prompt: ${{ env.PROMPT_IMPLEMENT }}
       - name: Codex（実装・PR作成）
+        id: codex_implement
         if: (steps.state.outputs.mode == 'implement' || steps.state.outputs.mode == 'additional') && steps.claude_model.outputs.agent == 'codex'
         uses: openai/codex-action@v1
         env:
@@ -2181,7 +2182,7 @@ jobs:
         with:
           openai-api-key: ${{ secrets.OPENAI_API_KEY }}
           model: ${{ steps.claude_model.outputs.codex_model }}
-          permission-profile: :workspace
+          permission-profile: :danger-full-access
           allow-bot-users: issue-deck
           prompt: ${{ env.PROMPT_IMPLEMENT }}
       - name: Claude使用量をJob Summaryに出力する（Claude Code（実装・PR作成））
@@ -2458,8 +2459,11 @@ jobs:
         # 後処理の失敗が「実装は完了したのに未完了として通知される」事態を招かないようにするため。
         if: |
           inputs.post-implement-script != '' &&
-          steps.claude_implement.outcome == 'success' &&
-          (steps.state.outputs.mode == 'implement' || steps.state.outputs.mode == 'additional')
+          (steps.state.outputs.mode == 'implement' || steps.state.outputs.mode == 'additional') &&
+          (
+            (steps.claude_model.outputs.agent != 'codex' && steps.claude_implement.outcome == 'success') ||
+            (steps.claude_model.outputs.agent == 'codex' && steps.codex_implement.outcome == 'success')
+          )
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
