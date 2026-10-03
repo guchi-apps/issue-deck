@@ -24,7 +24,6 @@ import {
   Loader2,
   Lock,
   RefreshCw,
-  Smartphone,
   TriangleAlert,
   Wrench,
   type LucideIcon,
@@ -53,6 +52,7 @@ import {
   IosReleaseGroupPanel,
   type IosFixIssueOrigin,
 } from "@/components/dashboard/ios-release-group-panel";
+import { IosDistributionIcon } from "@/components/dashboard/ios-distribution-icon";
 import { ReleaseRebuildButton } from "@/components/dashboard/release-rebuild-button";
 import { getWebviewIosRepository } from "@/lib/webview-ios-repos";
 import { ResizeHandle } from "@/components/dashboard/resize-handle";
@@ -1741,13 +1741,14 @@ function RepositorySummaryRow({
           判定（`hasAnything`）にも数えない。色は配布カード・内訳（`ios-release-group-panel.tsx`）の
           青で、他の意味の色（紫＝リリース・琥珀＝手が要る・緑＝成功・赤＝失敗）とは重ねない */}
       {getWebviewIosRepository(repository.repositoryFullName) && (
-        <span
-          title="iOS自動配布"
-          aria-label="iOS自動配布"
-          className="inline-flex shrink-0 text-blue-600 dark:text-blue-400"
-        >
-          <Smartphone className="size-3.5" aria-hidden="true" />
-        </span>
+        <IosDistributionIcon
+          owner={repository.repositoryFullName.split("/")[0]}
+          repo={repository.repositoryFullName.split("/")[1]}
+          prNumber={
+            repository.releaseGroups.find((group) => group.mergedAt !== null && group.pullRequest?.merged)
+              ?.pullRequest?.number ?? null
+          }
+        />
       )}
 
       <span className="flex-1" />
