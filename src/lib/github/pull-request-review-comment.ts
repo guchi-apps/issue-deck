@@ -32,7 +32,7 @@ import type { ReviewVerdictKind } from "@/lib/github/release-verification";
  * 文字列を変えるときはその一覧にも入れること。
  */
 const VERDICT_MARKER_PATTERN =
-  /<!--\s*issue-deck-review-verdict:(lgtm|needs-check|changes-requested)\s+sha=([0-9a-fA-F]+)\s*-->/;
+  /<!--\s*issue-deck-(?:codex-)?review-verdict:(lgtm|needs-check|changes-requested)\s+sha=([0-9a-fA-F]+)\s*-->/;
 
 /**
  * レビュー本体が投稿できなかったときに、ワークフローが実行ログから転記したコメントの印（#2488）。

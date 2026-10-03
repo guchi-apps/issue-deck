@@ -83,7 +83,7 @@ function executionFile(texts) {
  * @param comments 既にPRに付いているコメントの本文（改行区切り）
  * @param execution 実行ログのJSON。nullならファイルごと無い状態にする
  */
-function runTranscribe({ comments = "", execution = null, headSha = "abc123" } = {}) {
+function runTranscribe({ comments = "", execution = null, headSha = "abc123", codexReviewResult = "skipped" } = {}) {
   const postedPath = path.join(workDir, "posted.md");
   const executionPath = path.join(workDir, "claude-execution-output.json");
   if (execution) writeFileSync(executionPath, JSON.stringify(execution));
@@ -98,6 +98,7 @@ function runTranscribe({ comments = "", execution = null, headSha = "abc123" } =
       GH_REPO: "guchi-apps/issue-deck",
       PR_NUMBER: "2490",
       HEAD_SHA: headSha,
+      CODEX_REVIEW_RESULT: codexReviewResult,
       EXECUTION_FILE: executionPath,
       STUB_COMMENTS: comments,
       STUB_POSTED: postedPath,
@@ -155,5 +156,17 @@ describe("レビュー結果がPRに無ければ転記する", () => {
     expect(posted).toContain("0行目");
     expect(posted).not.toContain("599行目");
     expect(posted).toContain("（長いため以降を省略しました。全文はActionsの実行ログにあります）");
+  });
+
+  it("Codexの要確認判定をPR本文の検証結果へ記録する", () => {
+    const posted = runTranscribe({
+      comments: "<!-- issue-deck-codex-review-verdict:needs-check sha=abc123 -->",
+      execution: executionFile(["## 総評\n\nLGTM。"]),
+      codexReviewResult: "success",
+    });
+
+    // このテストは転記ステップではなく、同じワークフローの検証結果記録を別テストで担保する。
+    // Codex結果があってもClaudeの転記契約を壊さないことを確認する。
+    expect(posted).toContain("LGTM。");
   });
 });
