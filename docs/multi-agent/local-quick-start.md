@@ -980,6 +980,12 @@ pnpm exec prisma migrate status                                       # "Databas
 型は通るのに実行時だけ`Table doesn't exist`で落ちる（本番では`deploy.yml`の`migrate`が
 ファイルを実行するので、そちらは正しく当たる）。**必ず両方**行う。
 
+本番でも失敗記録が残ると、SQLファイルを直しただけでは`P3009`が続き、後続の移行を適用できない。
+`20261003090000_add_codex_weekly_floor`では、MySQL用のSQLに二重引用符を使ったため失敗した。
+この移行に限り、デプロイ時に失敗記録が1件だけあり、対象列がまだ無いことを確かめてから
+`migrate resolve --rolled-back`を実行し、修正済みのSQLを`migrate deploy`で再試行する。
+対象列が既にあるなど状態が想定と違う場合は、自動修復せずデプロイを止めてDBの状態を調べる。
+
 **新規テーブルの追加など、既存のマイグレーションと競合しない変更なら`prisma migrate deploy`
 1回で済むことがある**（#2760で実測）。`migrate dev`がリセットを要求するのは差分検出に
 shadow DBを使う（履歴のずれをそこで検出する）ためで、`migrate deploy`はローカルの
