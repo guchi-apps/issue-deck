@@ -71,7 +71,10 @@ export function PullRequestRepairButtons({
   const [hasStarted, setHasStarted] = useState(false);
   const [owner, repo] = repositoryFullName.split("/");
   // 押せない種類があるときだけ、理由と次の一手を添える（理由が違えば行を分ける）。
-  const unavailableNotices = repairUnavailableNotices(kinds, availability);
+  // APIは優先順位の先頭1件だけを起動するため、今回起動するworkflowの可否だけで
+  // ボタンを無効化する。後続が未配布でも、先頭の修復まで止めない。
+  const nextKind = kinds[0];
+  const unavailableNotices = repairUnavailableNotices([nextKind], availability);
 
   // 起動直後はAPI応答とrepairRunの反映に時間差があるためhasStartedで表示を保つ。
   // 一度runningKindが観測された後、それがnullへ戻ったら修復完了なので次の対象を起動できるよう戻す。
@@ -88,7 +91,7 @@ export function PullRequestRepairButtons({
 
   if (kinds.length === 0) return null;
 
-  const hasUnavailableWorkflow = kinds.some((kind) => isRepairWorkflowMissing(availability, kind));
+  const hasUnavailableWorkflow = isRepairWorkflowMissing(availability, nextKind);
 
   async function runRepair() {
     const ok = await repairPullRequest({ owner, repo, number: pullRequestNumber });
