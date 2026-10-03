@@ -136,6 +136,7 @@ jobs:
             deploy \
             scripts/construct-database-url.sh \
             scripts/repair-failed-codex-weekly-floor.mjs \
+            scripts/repair-failed-dispatch-session-codex-thread-id.mjs \
             scripts/update-env-file.sh \
             next.config.mjs
 
@@ -311,6 +312,7 @@ jobs:
 
             echo "Applying database migrations..."
             DATABASE_URL="$MIGRATE_DATABASE_URL" node scripts/repair-failed-codex-weekly-floor.mjs
+            DATABASE_URL="$MIGRATE_DATABASE_URL" node scripts/repair-failed-dispatch-session-codex-thread-id.mjs
             DATABASE_URL="$MIGRATE_DATABASE_URL" pnpm exec prisma migrate deploy
 
             echo "Restarting PM2..."
