@@ -19,28 +19,61 @@ function Timeline({ sessionId }: { sessionId: string | undefined }) {
   const [events, setEvents] = useState<SessionTimelineEventView[]>([]);
   const [loading, setLoading] = useState(Boolean(sessionId));
   useEffect(() => {
-    if (!sessionId) return;
+    if (!sessionId) {
+      setEvents([]);
+      setLoading(false);
+      return;
+    }
+
     let cancelled = false;
     const load = async () => {
-      const response = await fetch(`/api/dispatch/sessions/${sessionId}/timeline`).catch(() => null);
-      if (!response?.ok || cancelled) return;
-      const json = (await response.json()) as { events: SessionTimelineEventView[] };
-      setEvents(json.events);
-      setLoading(false);
+      try {
+        const response = await fetch(`/api/dispatch/sessions/${sessionId}/timeline`);
+        if (!response.ok || cancelled) return;
+        const json = (await response.json()) as { events: SessionTimelineEventView[] };
+        setEvents(json.events);
+      } catch {
+        // 取得できないときは既存のイベントを保持し、次の定期取得で回復を試みる。
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
     };
+
+    setEvents([]);
+    setLoading(true);
     void load();
     const timer = window.setInterval(load, 20_000);
-    return () => { cancelled = true; window.clearInterval(timer); };
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
   }, [sessionId]);
-  if (!sessionId) return <p className="text-sm text-muted-foreground">このセッションは詳細ログを取得できません。</p>;
+  if (!sessionId) {
+    return <p className="text-sm text-muted-foreground">このセッションは詳細ログを取得できません。</p>;
+  }
   if (loading) return <Loader2 className="size-4 animate-spin text-muted-foreground" />;
-  if (events.length === 0) return <p className="text-sm text-muted-foreground">表示できる会話・作業ログはまだありません。</p>;
-  return <ol className="space-y-0">
-    {events.map((event) => <li key={event.id} className="grid grid-cols-[3.5rem_1fr] gap-2 border-t py-3 first:border-t-0 first:pt-0">
-      <time className="text-xs text-muted-foreground" title={formatDateTimeFull(event.occurredAt)}>{formatTimeOfDay(event.occurredAt)}</time>
-      <div><p className="font-medium">{event.title}</p>{event.body && <p className="mt-1 whitespace-pre-wrap text-sm text-muted-foreground">{event.body}</p>}</div>
-    </li>)}
-  </ol>;
+  if (events.length === 0) {
+    return <p className="text-sm text-muted-foreground">表示できる会話・作業ログはまだありません。</p>;
+  }
+
+  return (
+    <ol className="space-y-0">
+      {events.map((event) => (
+        <li
+          key={event.id}
+          className="grid grid-cols-[3.5rem_1fr] gap-2 border-t py-3 first:border-t-0 first:pt-0"
+        >
+          <time className="text-xs text-muted-foreground" title={formatDateTimeFull(event.occurredAt)}>
+            {formatTimeOfDay(event.occurredAt)}
+          </time>
+          <div>
+            <p className="font-medium">{event.title}</p>
+            {event.body && <p className="mt-1 whitespace-pre-wrap text-sm text-muted-foreground">{event.body}</p>}
+          </div>
+        </li>
+      ))}
+    </ol>
+  );
 }
 
 export function SessionDetail({ session, dispatch }: { session: DispatchSessionView; dispatch: DispatchStateHandle }) {
@@ -52,22 +85,51 @@ export function SessionDetail({ session, dispatch }: { session: DispatchSessionV
   const openTarget = buildSessionOpenTarget(session);
   const submit = async (kind: "instruction" | "interrupt" | "kill") => {
     const parsed = kind === "instruction" ? parseSessionInstruction(instruction) : null;
-    if (kind === "instruction" && !parsed) { setMessage("追加指示は1行で入力してください。"); return; }
-    const result = await dispatch.sendSessionControl({ repositoryFullName: session.repositoryFullName, issueNumber: session.issueNumber, hostName: session.host, kind, ...(parsed ? { instruction: parsed } : {}) });
+    if (kind === "instruction" && !parsed) {
+      setMessage("追加指示は1行で入力してください。");
+      return;
+    }
+    const result = await dispatch.sendSessionControl({
+      repositoryFullName: session.repositoryFullName,
+      issueNumber: session.issueNumber,
+      hostName: session.host,
+      kind,
+      ...(parsed ? { instruction: parsed } : {}),
+    });
     setMessage(result.ok ? "操作を送信しました。反映まで最大1分ほどかかります。" : result.message);
     if (result.ok && kind === "instruction") setInstruction("");
   };
-  return <>
-    <Button size="sm" onClick={() => setOpen(true)}>セッション詳細</Button>
-    <Sheet open={open} onOpenChange={setOpen}><SheetContent className="w-full overflow-y-auto sm:max-w-2xl"><SheetHeader><SheetTitle>セッション詳細</SheetTitle></SheetHeader>
+
+  return (
+    <>
+      <Button size="sm" onClick={() => setOpen(true)}>
+        セッション詳細
+      </Button>
+      <Sheet open={open} onOpenChange={setOpen}>
+        <SheetContent className="w-full overflow-y-auto sm:max-w-2xl">
+          <SheetHeader>
+            <SheetTitle>セッション詳細</SheetTitle>
+          </SheetHeader>
       <div className="space-y-6 px-4 pb-8 pt-5">
-        <div><p className="font-semibold">#{session.issueNumber} {session.issueTitle ?? ""}</p><p className="mt-1 text-sm text-muted-foreground">{summary.label} ・ {formatRelativeDate(summary.at)}</p></div>
-        <section className="rounded-lg border p-4"><h3 className="font-semibold">現在の状態</h3><p className="mt-2 text-sm">{summary.detail ?? summary.label}</p><dl className="mt-3 grid grid-cols-2 gap-3 text-sm"><div><dt className="text-muted-foreground">ホスト</dt><dd>{session.host}</dd></div><div><dt className="text-muted-foreground">ステップ</dt><dd>{step?.label ?? "取得待ち"}</dd></div></dl></section>
+        <div>
+          <p className="font-semibold">#{session.issueNumber} {session.issueTitle ?? ""}</p>
+          <p className="mt-1 text-sm text-muted-foreground">{summary.label} ・ {formatRelativeDate(summary.at)}</p>
+        </div>
+        <section className="rounded-lg border p-4">
+          <h3 className="font-semibold">現在の状態</h3>
+          <p className="mt-2 text-sm">{summary.detail ?? summary.label}</p>
+          <dl className="mt-3 grid grid-cols-2 gap-3 text-sm">
+            <div><dt className="text-muted-foreground">ホスト</dt><dd>{session.host}</dd></div>
+            <div><dt className="text-muted-foreground">ステップ</dt><dd>{step?.label ?? "取得待ち"}</dd></div>
+          </dl>
+        </section>
         <section><h3 className="mb-3 font-semibold">会話・作業ログ</h3><Timeline sessionId={session.id} /></section>
         <section className="border-t pt-5"><h3 className="font-semibold">追加指示</h3><div className="mt-3 flex gap-2"><Input value={instruction} onChange={(event) => setInstruction(event.target.value.replaceAll(/[\r\n]+/g, " "))} maxLength={SESSION_INSTRUCTION_MAX_LENGTH} placeholder="セッションへ送る指示（1行）" /><Button onClick={() => void submit("instruction")} disabled={dispatch.isSubmitting}><SendHorizonal />送信</Button></div></section>
         <div className="flex flex-wrap gap-2"><Button variant="outline" onClick={() => void submit("interrupt")} disabled={dispatch.isSubmitting}><Square />停止</Button><Button variant="destructive" onClick={() => void submit("kill")} disabled={dispatch.isSubmitting}><X />セッション終了</Button>{openTarget && <Button variant="outline" asChild><a href={openTarget.url} target="_blank" rel="noreferrer">{openTarget.label}<ExternalLink /></a></Button>}</div>
         {message && <p className="text-sm text-muted-foreground" role="status">{message}</p>}
       </div>
-    </SheetContent></Sheet>
-  </>;
+        </SheetContent>
+      </Sheet>
+    </>
+  );
 }

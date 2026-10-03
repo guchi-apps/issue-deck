@@ -115,6 +115,26 @@ beforeEach(() => {
 });
 
 describe("reportDispatchSessions", () => {
+  it("stepを送らない古いpollerの報告では、保存済みstepの履歴を重複して追加しない", async () => {
+    findMany
+      .mockResolvedValueOnce([existingRow({ step: "テスト中" })])
+      .mockResolvedValueOnce([]);
+
+    await reportDispatchSessions({ hostName: "subpc", sessions: [report()], now: NOW });
+
+    expect(timelineCreate).not.toHaveBeenCalled();
+  });
+
+  it("状態・stepの履歴にはサーバー側の記録元を付ける", async () => {
+    findMany.mockResolvedValueOnce([]).mockResolvedValueOnce([]);
+
+    await reportDispatchSessions({ hostName: "subpc", sessions: [report()], now: NOW });
+
+    expect(timelineCreate).toHaveBeenCalledWith({
+      data: expect.objectContaining({ source: "session", title: "セッション開始" }),
+    });
+  });
+
   it("報告に含まれない既存行をGONEへ倒す（削除はしない）", async () => {
     findMany
       .mockResolvedValueOnce([
