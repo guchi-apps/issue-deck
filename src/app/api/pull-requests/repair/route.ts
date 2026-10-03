@@ -11,6 +11,7 @@ import {
   resolveRepairDispatch,
 } from "@/lib/github/pull-request-repair";
 import {
+  fetchActivePullRequestRepairRun,
   recordPullRequestRepairRun,
 } from "@/lib/github/pull-request-repair-run";
 import { fetchPullRequest } from "@/lib/github/pull-requests-api";
@@ -77,6 +78,20 @@ async function handlePOST(request: NextRequest) {
         {
           error: "not_repairable",
           message: "クローズ済み・ドラフトのPull Requestは自動修復の対象外です。",
+        },
+        { status: 409 },
+      );
+    }
+
+    const activeRepair = await fetchActivePullRequestRepairRun(
+      `${owner}/${repo}`,
+      pullRequest.number,
+    );
+    if (activeRepair) {
+      return NextResponse.json(
+        {
+          error: "repair_in_progress",
+          message: "このPRは現在自動修正中です。完了してからもう一度実行してください。",
         },
         { status: 409 },
       );
