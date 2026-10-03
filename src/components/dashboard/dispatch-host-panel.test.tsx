@@ -36,6 +36,7 @@ function makeHost(overrides: Partial<DispatchHostView> = {}): DispatchHostView {
     reboot: null,
     previewRepositories: null,
     preview: null,
+    planReviewSessions: [],
     maxSessions: 12,
     liveSessions: 2,
     metrics: {
@@ -181,6 +182,28 @@ describe("DispatchHostPanel", () => {
     render(<DispatchHostPanel hosts={[makeHost()]} sessions={[makeSession()]} />);
     expect(screen.getByText("#1567 サブPC上のセッション表示とリソース使用率の表示機能")).toBeTruthy();
     expect(screen.getByText("issue-deck・実行中・たった今")).toBeTruthy();
+  });
+
+  it("稼働中の計画レビューを実装セッションと分けて出す", () => {
+    render(
+      <DispatchHostPanel
+        hosts={[
+          makeHost({
+            planReviewSessions: [
+              {
+                repositoryFullName: "guchi-apps/issue-deck",
+                issueNumber: 3924,
+                issueTitle: "実行状況の画面に計画レビューの実行状況を表示してほしい",
+                issueId: "issue-3924",
+              },
+            ],
+          }),
+        ]}
+        sessions={[]}
+      />,
+    );
+    expect(screen.getByText("#3924 実行状況の画面に計画レビューの実行状況を表示してほしい")).toBeTruthy();
+    expect(screen.getByText("issue-deck・計画レビュー中")).toBeTruthy();
   });
 
   // #1817。Issue詳細と同じ`describeSessionReap`を通す（同じ状態が画面によって違う言い方に

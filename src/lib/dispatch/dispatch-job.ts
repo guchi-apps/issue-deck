@@ -13,6 +13,7 @@ import type { DispatchHostReboot } from "@/lib/dispatch/host-reboot";
 // 型だけのimport（コンパイル時に消える）。`preview-server.ts`側も`DispatchHostView`を
 // 型としてしか使わないため、実行時の循環importにはならない（`host-checkout.ts`と同じ）
 import type { DispatchHostPreview } from "@/lib/dispatch/preview-server";
+import type { DispatchPlanReviewSession } from "@/lib/dispatch/plan-review-session";
 import type { DispatchSessionView } from "@/lib/dispatch/session-state";
 import { parseRepositoryFullName } from "@/lib/local-session";
 // 対話が要るコマンドの表記は`manual-step-command.ts`が持つ（判定もそちら）。ここでは
@@ -781,6 +782,8 @@ export type DispatchHostView = {
    * 実体はサブPCのプロセスで、30秒ごとの申告で置き換わる。
    */
   preview: DispatchHostPreview | null;
+  /** poller が検出した、現在稼働中の計画レビュー（G1）。実装セッションの本数には含めない。 */
+  planReviewSessions?: DispatchPlanReviewSession[];
   /**
    * 生かしておく実装セッションの本数の上限（#1361）と、申告した時点で生きていた本数（#1394）。
    *
