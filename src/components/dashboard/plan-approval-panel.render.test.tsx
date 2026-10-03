@@ -342,6 +342,37 @@ describe("PlanApprovalPanel", () => {
     );
   });
 
+  it("追加で修正したいことが未送信の間は承認を止め、空にすれば承認できる（#3852）", () => {
+    render(
+      <PlanApprovalPanel
+        request={request()}
+        session={session()}
+        dispatch={dispatchHandle(vi.fn().mockResolvedValue({ ok: true }))}
+        planReview={pendingReview(
+          [
+            "**1. テストが型で落ちる**",
+            "- **指摘**: 5本のテストが落ちる",
+            "- **根拠**: `a.ts:1`",
+            "- **提案**: 変更対象に加える",
+            "",
+            "推奨: 修正のうえ承認",
+            "<!-- supervisor:plan-review -->",
+          ].join("\n"),
+        )}
+      />,
+    );
+    const approve = () => screen.getByRole("button", { name: /承認して実装へ進む/ }) as HTMLButtonElement;
+    expect(approve().disabled).toBe(false);
+
+    const box = screen.getByLabelText("追加で修正したいこと（任意）");
+    fireEvent.change(box, { target: { value: "ここも直して" } });
+    expect(approve().disabled).toBe(true);
+    expect(screen.getByText(/未送信です/)).toBeTruthy();
+
+    fireEvent.change(box, { target: { value: "" } });
+    expect(approve().disabled).toBe(false);
+  });
+
   it("計画レビューの指摘ごとに反映・見送りを選び、見送る理由を添えて送る（#3554）", async () => {
     const decidePlan = vi.fn().mockResolvedValue({ ok: true });
     render(

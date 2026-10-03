@@ -108,6 +108,9 @@ export function PlanApprovalPanel({
   const [isExpanded, setIsExpanded] = useState(false);
   const [isRevising, setIsRevising] = useState(false);
   const [revision, setRevision] = useState("");
+  // 計画レビューカードの「追加で修正したいこと」の下書き。承認では文章を運べないので、
+  // 入っている間は承認を止めて黙って捨てない（#3852）
+  const [reviewAdditional, setReviewAdditional] = useState("");
   // 画像のアップロード中に送ると、まだURLの入っていない本文がClaudeへ渡る（#2425）
   const [isUploadingImage, setIsUploadingImage] = useState(false);
   // nullは元の会話をそのまま続ける（既定）。モデルを入れたときだけ新しい会話へ引き継ぐ。
@@ -211,6 +214,8 @@ export function PlanApprovalPanel({
     !noteOnly &&
     planReview !== null &&
     (planReview.review.findings.length > 0 || planReview.review.decisions.length > 0);
+  // 承認は文章を運べない。未送信の追記があるまま押すと承認だけが通って文章が消える
+  const hasUnsentAdditional = splitAttachments(reviewAdditional).body.trim() !== "";
   const canHandoff = session !== null && session.codexThreadKnown !== null;
   // **数えるのは人が書いた文章だけ**（#2425）。末尾の画像記法は添付なので枚数で見る
   // （サーバー側の`parseSessionPlanRevision`と同じ勘定にしておかないと、押せたのに400で弾かれる）
@@ -282,6 +287,8 @@ export function PlanApprovalPanel({
               isSubmitting={dispatch.isSubmitting}
               deemphasizeSubmit={approveRecommended}
               approveHint={`下の「${noteOnly ? "計画を承認する" : "承認して実装へ進む"}」を押す`}
+              additional={reviewAdditional}
+              onAdditionalChange={setReviewAdditional}
               unavailable={sessionGone ? "session-gone" : remainingMs <= 0 ? "expired" : undefined}
               onSubmit={(text) => send("revise", text)}
             />
@@ -401,12 +408,17 @@ export function PlanApprovalPanel({
                  「このまま承認」なら承認を主ボタンにしてリングで強調する（#3670） */
               variant={planReviewHasFindings && !approveRecommended ? "outline" : "default"}
               className={approveRecommended ? "ring-2 ring-emerald-500 ring-offset-2 ring-offset-background" : undefined}
-              disabled={!canSend || dispatch.isSubmitting}
+              disabled={!canSend || dispatch.isSubmitting || hasUnsentAdditional}
               onClick={() => void send("approve")}
             >
               {dispatch.isSubmitting ? <Loader2 className="animate-spin" /> : <Check />}
               {noteOnly ? "計画を承認する" : "承認して実装へ進む"}
             </Button>
+            {hasUnsentAdditional && (
+              <p role="status" className="w-full text-xs text-amber-700 dark:text-amber-400">
+                「追加で修正したいこと」が未送信です。承認では送られないため、「選んだ内容で計画を出し直す」で送るか、欄を空にしてから承認してください。
+              </p>
+            )}
             {!cardHandlesRevision && (
               <Button
                 variant="outline"
