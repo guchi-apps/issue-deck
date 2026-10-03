@@ -1,3 +1,4 @@
+import type { AiReviewState } from "@/lib/github/check-rollup";
 import type { PullRequestRepairRunSummary } from "@/lib/github/pull-request-repair-run";
 import type { PullRequestReviewVerdict } from "@/lib/github/pull-request-review-verdict";
 import { resolveReviewVerdictFreshness } from "@/lib/github/review-verdict-freshness";
@@ -27,6 +28,7 @@ export function resolvePullRequestReviewRound(params: {
   headSha: string | null;
   repairRun: PullRequestRepairRunSummary | null;
   reviewPending: boolean;
+  aiReviewState: AiReviewState;
   autoMergeEnabled: boolean;
   readyToMerge: boolean;
 }): PullRequestReviewRound {
@@ -62,5 +64,14 @@ export function resolvePullRequestReviewRound(params: {
     }
     return { state: "approved", label: "レビューOK", description: "レビューで問題は見つかりませんでした。" };
   }
-  return { state: "reviewing", label: "レビュー中", description: "レビュー結果を待っています。" };
+  if (params.aiReviewState === "failed") {
+    return { state: "needs-check", label: "レビュー失敗", description: "自動レビューに失敗しました。実行ログを確認してください。" };
+  }
+  if (params.aiReviewState === "skipped") {
+    return { state: "needs-check", label: "レビュー省略", description: "このPRでは自動レビューが省略されました。" };
+  }
+  if (params.aiReviewState === "none") {
+    return { state: "needs-check", label: "レビュー未実行", description: "このPRでは自動レビューがまだ実行されていません。" };
+  }
+  return { state: "needs-check", label: "確認待ち", description: "レビューは完了しましたが判定結果を取得できませんでした。" };
 }
