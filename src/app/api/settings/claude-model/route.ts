@@ -91,8 +91,9 @@ export async function PATCH(request: NextRequest) {
   }
 
   const payload = await request.json().catch(() => null);
-  const claudeModel = parseClaudeModel(payload?.claudeModel);
-  if (claudeModel === null) {
+  const hasClaudeModel = payload !== null && typeof payload === "object" && "claudeModel" in payload;
+  const claudeModel = hasClaudeModel ? parseClaudeModel(payload?.claudeModel) : undefined;
+  if (hasClaudeModel && claudeModel === null) {
     return NextResponse.json({ error: "invalid_request" }, { status: 400 });
   }
   const hasGithubActionsAgent = payload !== null && typeof payload === "object" && "githubActionsAgent" in payload;
@@ -229,7 +230,7 @@ export async function PATCH(request: NextRequest) {
     where: { id: 1 },
     create: {
       id: 1,
-      claudeModel,
+      claudeModel: claudeModel ?? "auto",
       ...(githubActionsAgent ? { githubActionsAgent } : {}),
       ...(githubActionsCodexModel ? { githubActionsCodexModel } : {}),
       ...(workflowClaudeModel ? { workflowClaudeModel } : {}),
@@ -252,7 +253,7 @@ export async function PATCH(request: NextRequest) {
         : {}),
     },
     update: {
-      claudeModel,
+      ...(claudeModel ? { claudeModel } : {}),
       ...(githubActionsAgent ? { githubActionsAgent } : {}),
       ...(githubActionsCodexModel ? { githubActionsCodexModel } : {}),
       ...(workflowClaudeModel ? { workflowClaudeModel } : {}),
