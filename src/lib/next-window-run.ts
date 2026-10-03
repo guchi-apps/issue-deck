@@ -315,9 +315,45 @@ export type NextWindowRunSettings = {
   /** 起動しない残り枠の下限（%・0＝制限しない。#3100） */
   fiveHourFloorPercent: number;
   weeklyFloorPercent: number;
+  /** ChatGPT（Codex）の週間枠で起動しない残り枠の下限（%・0＝制限しない。#3859） */
+  codexWeeklyFloorPercent: number;
   /** 一括予約の使用モデルの初期値（`<agent>:<model>`・空は設定に従う。#3438） */
   bulkModel?: string;
 };
+
+/** ChatGPT（Codex）の週間枠。5時間枠は持たないため週間枠だけを予約実行で判定する（#3859）。 */
+export type CodexWeeklyWindowView = {
+  usedPercent: number | null;
+  resetsAt: string | null;
+  /** 使用量が古い・リセット済み・未取得ならtrue。下限を設定している場合は起動しない。 */
+  unavailable: boolean;
+};
+
+export type CodexWeeklyQuotaBlock =
+  | { kind: "below_floor"; remainingPercent: number; floorPercent: number }
+  | { kind: "unavailable" };
+
+/** ChatGPTの週間枠が下限を下回る、または安全に読めないときの起動保留理由。 */
+export function resolveCodexWeeklyQuotaBlock(input: {
+  usedPercent: number | null;
+  unavailable: boolean;
+  floorPercent: number;
+}): CodexWeeklyQuotaBlock | null {
+  if (input.floorPercent === 0) return null;
+  if (input.unavailable || input.usedPercent === null || !Number.isFinite(input.usedPercent)) {
+    return { kind: "unavailable" };
+  }
+  const remainingPercent = 100 - input.usedPercent;
+  return remainingPercent < input.floorPercent
+    ? { kind: "below_floor", remainingPercent, floorPercent: input.floorPercent }
+    : null;
+}
+
+export function describeCodexWeeklyQuotaBlock(block: CodexWeeklyQuotaBlock): string {
+  return block.kind === "unavailable"
+    ? "ChatGPTの週間枠を取得できないか、情報が古いため"
+    : `ChatGPTの週間枠の残りが${Math.round(block.remainingPercent)}%で、下限の${block.floorPercent}%を下回っています`;
+}
 
 /** 画面へ渡す枠の状況（`Date`はISO文字列にする） */
 export type NextWindowRunWindowView = {

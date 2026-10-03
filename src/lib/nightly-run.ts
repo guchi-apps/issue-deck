@@ -20,6 +20,7 @@ import {
   describeNextWindowRunMarkChip,
   describeNextWindowRunMarkDetail,
   describeNextWindowRunMarkTitle,
+  type CodexWeeklyWindowView,
   type NextWindowRunQueuedMark,
   type NextWindowRunSettings,
   type NextWindowRunWindowView,
@@ -322,6 +323,8 @@ export type NightlyRunState = {
     settings: NextWindowRunSettings;
     /** いまの5時間枠の状況。取りに行かなかった・取れなかったときは`null` */
     window: NextWindowRunWindowView | null;
+    /** ChatGPT（Codex）の週間枠。未取得ならnull（#3859）。 */
+    codexWeeklyWindow: CodexWeeklyWindowView | null;
   };
   /** 5時間枠を開けておく（#3032） */
   keepAlive: ClaudeWindowKeepAliveView;
