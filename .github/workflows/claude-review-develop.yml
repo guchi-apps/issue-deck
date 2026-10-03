@@ -1,6 +1,6 @@
-name: Claude Code Review (develop向けPR)
+name: Claude Code / Codex Review (develop向けPR)
 
-# develop向けPRの作成・更新時に、機械的リスク判定・Claude Codeによる自動レビュー・
+# develop向けPRの作成・更新時に、機械的リスク判定・Claude CodeとCodexによる自動レビュー・
 # 低リスクPRの自動マージを行う(docs/multi-agent-workflow.md「段階的導入計画」のPhase3/Phase4)。
 #
 # **トリガー定義とconcurrencyのみ**を持ち、ジョブ本体はreusable-claude-review-develop.ymlへ

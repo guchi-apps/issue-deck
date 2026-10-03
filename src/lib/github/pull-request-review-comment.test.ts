@@ -64,6 +64,26 @@ describe("selectPullRequestReviewComment", () => {
     expect(result?.verdictLabel).toBe("問題なし（LGTM）");
   });
 
+  it("Codexの判定マーカーも同じレビューコメントとして読む", () => {
+    const result = selectPullRequestReviewComment(
+      [
+        comment(
+          [
+            "## 総評",
+            "",
+            "- `src/example.ts:12` で例外処理が不足しています。",
+            "",
+            `<!-- issue-deck-codex-review-verdict:changes-requested sha=${HEAD_SHA} -->`,
+          ].join("\n"),
+        ),
+      ],
+      HEAD_SHA,
+    );
+
+    expect(result?.verdictKind).toBe("changes-requested");
+    expect(result?.body).toContain("例外処理が不足しています。");
+  });
+
   it("headと同じコミットへのレビューが複数あれば最後のものを選ぶ", () => {
     const result = selectPullRequestReviewComment(
       [
