@@ -26,6 +26,15 @@ describe("getWebviewIosRepository", () => {
     expect(repo?.command).toContain("open ios/YoteiFlow.xcodeproj");
   });
 
+  it("aide・morrowもWebView型のiOSアプリを持つリポジトリとして返す", () => {
+    const aide = getWebviewIosRepository("guchi-apps/aide");
+    expect(aide?.xcodeProjectPath).toBe("ios/AIDEios.xcodeproj");
+    expect(aide?.command).toContain("open ios/AIDEios.xcodeproj");
+    const morrow = getWebviewIosRepository("guchi-apps/morrow");
+    expect(morrow?.xcodeProjectPath).toBe("ios/Morrow.xcodeproj");
+    expect(morrow?.command).toContain("cd ~/apps/morrow");
+  });
+
   it("表に無いリポジトリはnull", () => {
     expect(getWebviewIosRepository("guchi-apps/issue-deck")).toBeNull();
     expect(getWebviewIosRepository("guchi-apps/aide-ios")).toBeNull();
