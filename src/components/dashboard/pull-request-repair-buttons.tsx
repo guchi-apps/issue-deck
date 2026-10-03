@@ -87,7 +87,9 @@ export function PullRequestRepairButtons({
       // runningKindの反映前だけ短く起動済み表示を出す。次の再描画でrunningKindが
       // 無ければ高速完了とみなし、ボタンを復帰させる。
       setJustStarted(true);
-      queueMicrotask(() => setJustStarted(false));
+      // repairRunの反映にはAPI成功後に時間差がある。短い猶予中は二重起動を防ぎ、
+      // その間にrunningKindが観測されなかった（高速完了した）場合だけ操作を復帰させる。
+      setTimeout(() => setJustStarted(false), 5_000);
     }
   }
 
