@@ -2558,7 +2558,10 @@ jobs:
         with:
           openai-api-key: ${{ secrets.OPENAI_API_KEY }}
           model: ${{ needs.dispatch.outputs.codex_model }}
-          permission-profile: :read-only
+          # 計画レビューはGitHubから計画を読み、Issueへ結果を投稿する必要がある。
+          # :read-only はネットワークも遮断するため、GitHub API通信を許可するプロファイルを使う。
+          # レビュー用プロンプトではコード変更・pushを行わず、ジョブ権限もcontents: readのまま。
+          permission-profile: :danger-full-access
           allow-bot-users: issue-deck
           prompt: ${{ env.PROMPT_PLAN_REVIEW }}
 
