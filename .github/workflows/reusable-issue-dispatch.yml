@@ -1555,7 +1555,7 @@ jobs:
         # プロンプト本文を.github/prompts/へ置く理由は上記「計画提示プロンプトを組み立てる」の
         # コメントを参照(#907)。動的な値はenvsubstで埋め、プレースホルダは以下の4つ。
         #   ${ISSUE_NUMBER} ${REPOSITORY} ${RUN_URL} ${FLEET_STATUS}
-        if: steps.state.outputs.mode == 'plan' && steps.verify_plan.outputs.plan_posted == 'true' && steps.claude_model.outputs.agent != 'codex'
+        if: steps.state.outputs.mode == 'plan' && steps.verify_plan.outputs.plan_posted == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           ISSUE_NUMBER: ${{ steps.state.outputs.issue_number }}
@@ -1610,7 +1610,6 @@ jobs:
         #
         # continue-on-errorを付けているのは、計画レビューが補助だから。ここが落ちても計画提示自体は
         # 成功しており、runを赤くして人に「計画が出ていない」と誤解させる方が害が大きい。
-        if: steps.state.outputs.mode == 'plan' && steps.verify_plan.outputs.plan_posted == 'true'
         continue-on-error: true
         uses: anthropics/claude-code-action@v1
         env:
@@ -1655,7 +1654,7 @@ jobs:
 
       - name: 分割前のコメント数を記録する
         id: before_split
-        if: steps.state.outputs.mode == 'split' && steps.claude_model.outputs.agent != 'codex'
+        if: steps.state.outputs.mode == 'split'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -1697,7 +1696,7 @@ jobs:
 
       - name: Claude Code（分割）
         id: claude_split
-        if: steps.state.outputs.mode == 'split'
+        if: steps.state.outputs.mode == 'split' && steps.claude_model.outputs.agent != 'codex'
         uses: anthropics/claude-code-action@v1
         env:
           GH_TOKEN: ${{ github.token }}
@@ -1786,7 +1785,7 @@ jobs:
 
       - name: 質問前のコメント数を記録する
         id: before_ask
-        if: steps.state.outputs.mode == 'ask' && steps.claude_model.outputs.agent != 'codex'
+        if: steps.state.outputs.mode == 'ask'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -1835,7 +1834,7 @@ jobs:
         # 書くだけで終わらせるとどのカンバンにも残らず追跡できなくなるため、計画提示ステップ
         # (#735)と同じルール（`70.needs-decision`付き・起点を明記・目安3件まで）で起票を許可する。
         # ルール本文は.github/prompts/question.md側に置く。
-        if: steps.state.outputs.mode == 'ask'
+        if: steps.state.outputs.mode == 'ask' && steps.claude_model.outputs.agent != 'codex'
         uses: anthropics/claude-code-action@v1
         env:
           GH_TOKEN: ${{ github.token }}
@@ -1943,7 +1942,7 @@ jobs:
         id: before_implement
         # additionalモード(PR未作成の詰まった状態からの再開を含む)も、implementと同様に
         # 途中で行き詰まって無言のまま終了しうるため、フォールバック検証の対象に含める。
-        if: (steps.state.outputs.mode == 'implement' || steps.state.outputs.mode == 'additional') && steps.claude_model.outputs.agent != 'codex'
+        if: steps.state.outputs.mode == 'implement' || steps.state.outputs.mode == 'additional'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -2121,7 +2120,7 @@ jobs:
 
       - name: Claude Code（実装・PR作成）
         id: claude_implement
-        if: steps.state.outputs.mode == 'implement' || steps.state.outputs.mode == 'additional'
+        if: (steps.state.outputs.mode == 'implement' || steps.state.outputs.mode == 'additional') && steps.claude_model.outputs.agent != 'codex'
         uses: anthropics/claude-code-action@v1
         env:
           # .github/workflows/配下を変更するIssueでもgit pushが拒否されないようにする認証は、
