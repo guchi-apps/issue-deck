@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { fetchWithTimeout } from "@/lib/fetch-with-timeout";
-import type { ClaudeModel, CodexLocalModel } from "@/lib/app-settings";
+import type { ClaudeLocalModel, ClaudeModel, CodexLocalModel } from "@/lib/app-settings";
 import {
   isActiveDispatchJobStatus,
   type DispatchAgent,
@@ -519,6 +519,7 @@ export function useDispatchState(enabled: boolean) {
       repositoryFullName: string;
       issueNumber: number;
       hostName: string;
+      model: ClaudeLocalModel;
     }): Promise<{ ok: true } | { ok: false; message: string }> => {
       setIsSubmitting(true);
       try {
@@ -530,6 +531,7 @@ export function useDispatchState(enabled: boolean) {
             issue: params.issueNumber,
             host: params.hostName,
             kind: "manual_step_session",
+            model: params.model,
           }),
         });
         if (!res.ok) return { ok: false, message: await readErrorMessage(res) };

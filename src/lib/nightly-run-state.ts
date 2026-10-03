@@ -5,6 +5,7 @@ import {
 import { readClaudeWindowKeepAliveSettings } from "@/lib/claude-window-keepalive-run";
 import type { DispatchJobStatus } from "@/lib/dispatch/dispatch-job";
 import type { DispatchSessionState } from "@/lib/dispatch/session-state";
+import { getLatestCodexUsage } from "@/lib/dispatch/codex-usage";
 import { db } from "@/lib/db";
 import {
   classifyNightlyRunOutcome,
@@ -250,11 +251,21 @@ export async function listNightlyRunState(now: Date = new Date()): Promise<Night
         snapshot,
       )
     : null;
+  const codexUsage = await getLatestCodexUsage();
+  const codexWeekly = codexUsage?.windows.find((window) => window.key === "secondary") ?? null;
+  const codexWeeklyWindow = codexWeekly
+    ? {
+        usedPercent: codexWeekly.usedPercent,
+        resetsAt: new Date(codexWeekly.resetsAt * 1000).toISOString(),
+        unavailable: codexUsage?.stale === true || codexWeekly.expired,
+      }
+    : null;
 
   return {
     nextWindow: {
       settings: nextWindowSettings,
       window: claudeWindow,
+      codexWeeklyWindow,
       queued: nextWindow.queued.map(view),
       results: nextWindow.latestKey
         ? { runKey: nextWindow.latestKey, entries: nextWindow.results.map(view) }

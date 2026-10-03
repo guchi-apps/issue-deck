@@ -35,7 +35,7 @@ function entry(overrides: Partial<NightlyRunEntryView> = {}): NightlyRunEntryVie
 function state(overrides: Partial<NightlyRunState["nextWindow"]> = {}): NightlyRunState {
   return {
     nextWindow: {
-      settings: { enabled: true, leadMinutes: 60, intervalMinutes: 10, fiveHourFloorPercent: 0, weeklyFloorPercent: 0 },
+      settings: { enabled: true, leadMinutes: 60, intervalMinutes: 10, fiveHourFloorPercent: 0, weeklyFloorPercent: 0, codexWeeklyFloorPercent: 0 },
       window: {
         phase: "waiting",
         // 2026-09-18 08:40 JST
@@ -47,6 +47,7 @@ function state(overrides: Partial<NightlyRunState["nextWindow"]> = {}): NightlyR
         quotaBlock: null,
         runKey: "2026-09-18 08:40",
       },
+      codexWeeklyWindow: null,
       queued: [entry()],
       results: null,
       ...overrides,
@@ -104,7 +105,7 @@ describe("NightlyRunPanel", () => {
   it("枠を取っていなければメーターを出さない", () => {
     renderPanel(
       state({
-        settings: { enabled: false, leadMinutes: 60, intervalMinutes: 10, fiveHourFloorPercent: 0, weeklyFloorPercent: 0 },
+        settings: { enabled: false, leadMinutes: 60, intervalMinutes: 10, fiveHourFloorPercent: 0, weeklyFloorPercent: 0, codexWeeklyFloorPercent: 0 },
         window: null,
         queued: [],
       }),
@@ -160,6 +161,7 @@ describe("NightlyRunPanel", () => {
           intervalMinutes: 10,
           fiveHourFloorPercent: 0,
           weeklyFloorPercent: 20,
+          codexWeeklyFloorPercent: 0,
         },
         window: {
           ...base.nextWindow.window!,
@@ -204,7 +206,7 @@ describe("NightlyRunPanel", () => {
   it("枠を取っていなくてもつまみで下限と残り時間を選べる", () => {
     renderPanel(
       state({
-        settings: { enabled: false, leadMinutes: 60, intervalMinutes: 10, fiveHourFloorPercent: 0, weeklyFloorPercent: 0 },
+        settings: { enabled: false, leadMinutes: 60, intervalMinutes: 10, fiveHourFloorPercent: 0, weeklyFloorPercent: 0, codexWeeklyFloorPercent: 0 },
         window: null,
         queued: [],
       }),
@@ -217,5 +219,20 @@ describe("NightlyRunPanel", () => {
   it("取得前は骨組みだけ出す", () => {
     renderPanel(null);
     expect(screen.queryByText("次の5時間枠")).toBeNull();
+  });
+
+  /** #3859 */
+  it("ChatGPTの週間枠と下限を出す", () => {
+    renderPanel({
+      ...state(),
+      nextWindow: {
+        ...state().nextWindow,
+        settings: { ...state().nextWindow.settings, codexWeeklyFloorPercent: 20 },
+        codexWeeklyWindow: { usedPercent: 28, resetsAt: "2026-09-23T00:00:00.000Z", unavailable: false },
+      },
+    });
+
+    expect(screen.getByText("ChatGPT の実行枠")).toBeTruthy();
+    expect(screen.getByLabelText("ChatGPTの週間枠の下限").textContent).toContain("残り20%");
   });
 });

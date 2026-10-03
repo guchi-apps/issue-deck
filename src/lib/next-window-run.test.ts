@@ -289,7 +289,7 @@ describe("decideNextWindowRunLaunch", () => {
 });
 
 describe("画面に出す文言", () => {
-  const settings = { enabled: true, leadMinutes: 60, intervalMinutes: 10, fiveHourFloorPercent: 0, weeklyFloorPercent: 0 };
+  const settings = { enabled: true, leadMinutes: 60, intervalMinutes: 10, fiveHourFloorPercent: 0, weeklyFloorPercent: 0, codexWeeklyFloorPercent: 0 };
 
   it("OFFのときは枠の残り時間の話をしない", () => {
     const line = describeNextWindowRunSchedule({ ...settings, enabled: false }, null);

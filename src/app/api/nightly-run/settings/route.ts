@@ -92,6 +92,10 @@ export async function PATCH(request: NextRequest) {
       nextWindow.weeklyFloorPercent,
       parseNextWindowRunFloorPercent,
     ),
+    codexWeeklyFloorPercent: readOptionalNumber(
+      nextWindow.codexWeeklyFloorPercent,
+      parseNextWindowRunFloorPercent,
+    ),
     bulkModel: readOptionalBulkModel(nextWindow.bulkModel),
     keepAliveEnabled: readOptionalBoolean(keepAlive.enabled),
     keepAliveStartHour: readOptionalNumber(keepAlive.startHour, parseClaudeWindowKeepAliveHour),
@@ -110,6 +114,7 @@ export async function PATCH(request: NextRequest) {
     intervalMinutes,
     fiveHourFloorPercent,
     weeklyFloorPercent,
+    codexWeeklyFloorPercent,
     bulkModel,
     keepAliveEnabled,
     keepAliveStartHour,
@@ -120,6 +125,7 @@ export async function PATCH(request: NextRequest) {
     intervalMinutes?: number;
     fiveHourFloorPercent?: number;
     weeklyFloorPercent?: number;
+    codexWeeklyFloorPercent?: number;
     bulkModel?: string;
     keepAliveEnabled?: boolean;
     keepAliveStartHour?: number;
@@ -136,6 +142,8 @@ export async function PATCH(request: NextRequest) {
       nextWindowRunFiveHourFloorPercent:
         fiveHourFloorPercent ?? NEXT_WINDOW_RUN_FLOOR_PERCENT_DEFAULT,
       nextWindowRunWeeklyFloorPercent: weeklyFloorPercent ?? NEXT_WINDOW_RUN_FLOOR_PERCENT_DEFAULT,
+      nextWindowRunCodexWeeklyFloorPercent:
+        codexWeeklyFloorPercent ?? NEXT_WINDOW_RUN_FLOOR_PERCENT_DEFAULT,
       nextWindowRunBulkModel: bulkModel ?? BULK_RESERVE_MODEL_DEFAULT,
       claudeWindowKeepAliveEnabled: keepAliveEnabled ?? false,
       claudeWindowKeepAliveStartHour:
@@ -152,6 +160,9 @@ export async function PATCH(request: NextRequest) {
       ...(weeklyFloorPercent === undefined
         ? {}
         : { nextWindowRunWeeklyFloorPercent: weeklyFloorPercent }),
+      ...(codexWeeklyFloorPercent === undefined
+        ? {}
+        : { nextWindowRunCodexWeeklyFloorPercent: codexWeeklyFloorPercent }),
       ...(bulkModel === undefined ? {} : { nextWindowRunBulkModel: bulkModel }),
       ...(keepAliveEnabled === undefined ? {} : { claudeWindowKeepAliveEnabled: keepAliveEnabled }),
       ...(keepAliveStartHour === undefined
@@ -175,6 +186,9 @@ export async function PATCH(request: NextRequest) {
         NEXT_WINDOW_RUN_FLOOR_PERCENT_DEFAULT,
       weeklyFloorPercent:
         parseNextWindowRunFloorPercent(updated.nextWindowRunWeeklyFloorPercent) ??
+        NEXT_WINDOW_RUN_FLOOR_PERCENT_DEFAULT,
+      codexWeeklyFloorPercent:
+        parseNextWindowRunFloorPercent(updated.nextWindowRunCodexWeeklyFloorPercent) ??
         NEXT_WINDOW_RUN_FLOOR_PERCENT_DEFAULT,
       bulkModel: normalizeBulkModel(updated.nextWindowRunBulkModel),
     },

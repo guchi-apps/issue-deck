@@ -42,6 +42,7 @@ describe("PATCH /api/nightly-run/settings", () => {
       nextWindowRunIntervalMinutes: update.nextWindowRunIntervalMinutes ?? 10,
       nextWindowRunFiveHourFloorPercent: update.nextWindowRunFiveHourFloorPercent ?? 0,
       nextWindowRunWeeklyFloorPercent: update.nextWindowRunWeeklyFloorPercent ?? 0,
+      nextWindowRunCodexWeeklyFloorPercent: update.nextWindowRunCodexWeeklyFloorPercent ?? 0,
       claudeWindowKeepAliveEnabled: update.claudeWindowKeepAliveEnabled ?? false,
       claudeWindowKeepAliveStartHour: update.claudeWindowKeepAliveStartHour ?? 7,
       claudeWindowKeepAliveEndHour: update.claudeWindowKeepAliveEndHour ?? 23,
@@ -64,6 +65,7 @@ describe("PATCH /api/nightly-run/settings", () => {
         intervalMinutes: 10,
         fiveHourFloorPercent: 0,
         weeklyFloorPercent: 0,
+        codexWeeklyFloorPercent: 0,
         bulkModel: "",
       },
       keepAlive: { enabled: false, startHour: 7, endHour: 23 },
@@ -122,6 +124,15 @@ describe("PATCH /api/nightly-run/settings", () => {
     });
   });
 
+  /** #3859 */
+  it("ChatGPTの週間枠の下限を切り替えられる", async () => {
+    const response = await PATCH(request({ nextWindow: { codexWeeklyFloorPercent: 20 } }));
+
+    expect(response.status).toBe(200);
+    expect(upsert.mock.calls[0][0].update).toEqual({ nextWindowRunCodexWeeklyFloorPercent: 20 });
+    expect((await response.json()).nextWindow).toMatchObject({ codexWeeklyFloorPercent: 20 });
+  });
+
   /** #3438 */
   it("一括予約の初期モデルを保存できる（Claude・Codex・設定に従う）", async () => {
     const response = await PATCH(request({ nextWindow: { bulkModel: "codex:gpt-6-sol" } }));
@@ -143,6 +154,7 @@ describe("PATCH /api/nightly-run/settings", () => {
     expect((await PATCH(request({ nextWindow: { weeklyFloorPercent: 55 } }))).status).toBe(400);
     expect((await PATCH(request({ nextWindow: { weeklyFloorPercent: 100 } }))).status).toBe(400);
     expect((await PATCH(request({ nextWindow: { fiveHourFloorPercent: -10 } }))).status).toBe(400);
+    expect((await PATCH(request({ nextWindow: { codexWeeklyFloorPercent: 7 } }))).status).toBe(400);
     expect(upsert).not.toHaveBeenCalled();
   });
 

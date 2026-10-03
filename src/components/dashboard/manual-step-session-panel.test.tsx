@@ -159,7 +159,20 @@ describe("ManualStepSessionPanel（#2771）", () => {
       repositoryFullName: "guchi-apps/issue-deck",
       issueNumber: 2790,
       hostName: "subpc",
+      model: "sonnet",
     });
+  });
+
+  it("選んだモデルを手作業セッションの起動要求へ渡す", async () => {
+    render(<ManualStepSessionPanel issue={issue} dispatch={makeDispatch()} />);
+    fireEvent.click(screen.getByRole("radio", { name: /Opus 5.5/, checked: false }));
+    fireEvent.click(screen.getByRole("button", { name: START_BUTTON }));
+
+    await waitFor(() =>
+      expect(startManualStepSession).toHaveBeenCalledWith(
+        expect.objectContaining({ model: "opus" }),
+      ),
+    );
   });
 
   // 古いpollerへ配ると未知の種別として`failed`になり、押した起動が失われる
