@@ -692,6 +692,8 @@ kurashioとyoteiflow（yoteiflow#961・#3737。kurashioと同じ契約）は`ios
   必要があり**（未宣言だとGitHubが422）、その場合は`force_unsupported`（409）を返して画面が「未対応」と案内する。
   サーバーはその版のrunが完了・成功（更新不要で終わった）ときだけ受け付ける（`force_not_needed`）。
   ワークフロー側は`force`が真ならdetectで`needed=true`として扱う
+  **手動配布のrunが失敗すると「再実行」はforceを付けないので、再び更新不要で終わる。** その場合は失敗の原因を直したうえで、
+  更新不要に戻った欄の「手動で配布」からやり直す（runの入力は一覧APIから見えず、失敗runがforceだったかは判別できない）
 - 「iOS変更の判定結果」は起動前には出せない（判定はworkflow内のdetectジョブで、`::notice::`も出していない）。
   ダイアログでは「起動後に判定」と明示し、更新不要は`judgeIosRun`の`skipped`で「iOS更新不要」と出す（失敗にしない）
 
