@@ -6,14 +6,18 @@ import {
   MODEL_PICK_ENGINE_DEFAULT,
   PLAN_REVIEW_AGENT_FOR_CLAUDE_DEFAULT,
   PLAN_REVIEW_AGENT_FOR_CODEX_DEFAULT,
+  PLAN_REVIEW_CLAUDE_MODEL_DEFAULT,
+  PLAN_REVIEW_CODEX_MODEL_DEFAULT,
   CLAUDE_LOCAL_MODEL_DEFAULT,
   CODEX_MODEL_DEFAULT,
   DEFAULT_DISPATCH_AGENT_SETTING,
   DISPATCH_FAILOVER_THRESHOLD_PERCENT_DEFAULT,
   DISPATCH_CONCURRENCY_DEFAULT,
   parseClaudeLocalModelSetting,
+  parseClaudeLocalModel,
   parseClaudeModel,
   parseCodexModelSetting,
+  parseCodexLocalModel,
   parseAppAiModel,
   parseDefaultDispatchAgent,
   parseDispatchFailoverThresholdPercent,
@@ -93,6 +97,10 @@ export default async function DashboardPage() {
     parsePlanReviewAgent(appSetting?.planReviewAgentForClaude) ?? PLAN_REVIEW_AGENT_FOR_CLAUDE_DEFAULT;
   const planReviewAgentForCodex =
     parsePlanReviewAgent(appSetting?.planReviewAgentForCodex) ?? PLAN_REVIEW_AGENT_FOR_CODEX_DEFAULT;
+  const planReviewClaudeModel =
+    parseClaudeLocalModel(appSetting?.planReviewClaudeModel) ?? PLAN_REVIEW_CLAUDE_MODEL_DEFAULT;
+  const planReviewCodexModel =
+    parseCodexLocalModel(appSetting?.planReviewCodexModel) ?? PLAN_REVIEW_CODEX_MODEL_DEFAULT;
   const dispatchFailoverEnabled = appSetting?.dispatchFailoverEnabled ?? true;
   const dispatchFailoverThresholdPercent =
     parseDispatchFailoverThresholdPercent(appSetting?.dispatchFailoverThresholdPercent) ??
@@ -146,6 +154,8 @@ export default async function DashboardPage() {
       defaultDispatchAgent={defaultDispatchAgent}
       planReviewAgentForClaude={planReviewAgentForClaude}
       planReviewAgentForCodex={planReviewAgentForCodex}
+      planReviewClaudeModel={planReviewClaudeModel}
+      planReviewCodexModel={planReviewCodexModel}
       dispatchFailoverEnabled={dispatchFailoverEnabled}
       dispatchFailoverThresholdPercent={dispatchFailoverThresholdPercent}
       appAiModel={appAiModel}

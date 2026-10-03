@@ -4,9 +4,11 @@ import { useState } from "react";
 
 import type {
   AppAiModel,
+  ClaudeLocalModel,
   ClaudeLocalModelSetting,
   ClaudeModel,
   CodexModelSetting,
+  CodexLocalModel,
   DefaultDispatchAgent,
   ModelPickEngine,
   PlanReviewAgent,
@@ -48,6 +50,8 @@ export function useAppSettingsMutations() {
     defaultDispatchAgent: DefaultDispatchAgent,
     planReviewAgentForClaude: PlanReviewAgent,
     planReviewAgentForCodex: PlanReviewAgent,
+    planReviewClaudeModel: ClaudeLocalModel,
+    planReviewCodexModel: CodexLocalModel,
     dispatchFailoverEnabled: boolean,
     dispatchFailoverThresholdPercent: number,
   ): Promise<boolean> {
@@ -68,6 +72,8 @@ export function useAppSettingsMutations() {
           defaultDispatchAgent,
           planReviewAgentForClaude,
           planReviewAgentForCodex,
+          planReviewClaudeModel,
+          planReviewCodexModel,
           dispatchFailoverEnabled,
           dispatchFailoverThresholdPercent,
         }),

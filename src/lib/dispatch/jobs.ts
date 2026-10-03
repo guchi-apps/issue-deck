@@ -999,6 +999,10 @@ export async function enqueuePlanReviewJob(params: {
   hostName: string;
   /** 省略時は既存どおりClaude Codeでレビューする */
   agent?: DispatchAgent;
+  /** 自動計画レビュー用のClaude Codeモデル。手動レビューは省略して通常設定に従う。 */
+  claudeModel?: ClaudeLocalModel;
+  /** 自動計画レビュー用のCodex CLIモデル。手動レビューは省略して通常設定に従う。 */
+  codexModel?: CodexLocalModel;
   requestedByUserId: string | null;
   now?: Date;
 }): Promise<EnqueuePlanReviewJobResult> {
@@ -1042,6 +1046,8 @@ export async function enqueuePlanReviewJob(params: {
         targetHost: params.hostName,
         kind: "PLAN_REVIEW",
         agent: params.agent ?? DEFAULT_DISPATCH_AGENT,
+        claudeModel: params.claudeModel ?? null,
+        codexModel: params.codexModel ?? null,
         status: "QUEUED",
         activeKey: buildDispatchActiveKey(
           params.repositoryFullName,

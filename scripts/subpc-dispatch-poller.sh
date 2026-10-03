@@ -3518,7 +3518,8 @@ run_job() {
     fi
     launch_and_report "$job_id" "$(plan_review_session_name "$repo" "$issue_number")" \
       "計画レビュー（G1）を起動しています" \
-      bash "$PLAN_REVIEW_LAUNCHER" --agent "$agent" "$owner" "$repo" "$issue_number"
+      ISSUE_DECK_CLAUDE_MODEL="$claude_local_model" ISSUE_DECK_CODEX_MODEL="$codex_model" \
+        bash "$PLAN_REVIEW_LAUNCHER" --agent "$agent" "$owner" "$repo" "$issue_number"
     return 0
   fi
 

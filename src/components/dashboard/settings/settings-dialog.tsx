@@ -30,8 +30,10 @@ import { cn } from "@/lib/utils";
 import type {
   AppAiModel,
   ClaudeLocalModelSetting,
+  ClaudeLocalModel,
   ClaudeModel,
   CodexModelSetting,
+  CodexLocalModel,
   DefaultDispatchAgent,
   ModelPickEngine,
   PlanReviewAgent,
@@ -52,6 +54,8 @@ type SettingsDialogProps = {
   defaultDispatchAgent?: DefaultDispatchAgent;
   planReviewAgentForClaude?: PlanReviewAgent;
   planReviewAgentForCodex?: PlanReviewAgent;
+  planReviewClaudeModel?: ClaudeLocalModel;
+  planReviewCodexModel?: CodexLocalModel;
   dispatchFailoverEnabled?: boolean;
   dispatchFailoverThresholdPercent?: number;
   appAiModel: AppAiModel;
@@ -86,6 +90,8 @@ export function SettingsDialog({
   defaultDispatchAgent = "claude",
   planReviewAgentForClaude = "claude",
   planReviewAgentForCodex = "codex",
+  planReviewClaudeModel = "sonnet",
+  planReviewCodexModel = "gpt-5.6-terra",
   dispatchFailoverEnabled = true,
   dispatchFailoverThresholdPercent = 90,
   appAiModel,
@@ -209,6 +215,8 @@ export function SettingsDialog({
                   defaultDispatchAgent={defaultDispatchAgent}
                   planReviewAgentForClaude={planReviewAgentForClaude}
                   planReviewAgentForCodex={planReviewAgentForCodex}
+                  planReviewClaudeModel={planReviewClaudeModel}
+                  planReviewCodexModel={planReviewCodexModel}
                   dispatchFailoverEnabled={dispatchFailoverEnabled}
                   dispatchFailoverThresholdPercent={dispatchFailoverThresholdPercent}
                   appAiModel={appAiModel}

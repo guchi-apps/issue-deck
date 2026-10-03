@@ -286,6 +286,18 @@ PLAN_REVIEW_DISALLOWED_TOOLS='Task,Agent'
 
 CLAUDE_ARGS=(-p --allowedTools "$PLAN_REVIEW_ALLOWED_TOOLS" --disallowedTools "$PLAN_REVIEW_DISALLOWED_TOOLS")
 
+# 自動計画レビューのジョブで指定されたモデルだけをCLIへ渡す。手動起動など、環境変数が無い
+# 従来の入口はCLIの既定のままにする。
+if [[ "$AGENT_CLI_KIND" == "claude" && -n "${ISSUE_DECK_CLAUDE_MODEL:-}" ]]; then
+  case "$ISSUE_DECK_CLAUDE_MODEL" in
+    fable | opus | sonnet) CLAUDE_ARGS+=(--model "$ISSUE_DECK_CLAUDE_MODEL") ;;
+    *)
+      echo "Error: 計画レビュー用のClaudeモデルが不正です: $ISSUE_DECK_CLAUDE_MODEL" >&2
+      exit 1
+      ;;
+  esac
+fi
+
 # 共有知識リポジトリ（guchi-apps/docs）をcloneしてある場合だけ参照させる。
 SHARED_CONTEXT_DIR="${ISSUE_DECK_SHARED_CONTEXT_DIR:-$HOME/apps/_docs}"
 if [[ -d "$SHARED_CONTEXT_DIR" ]]; then
@@ -327,8 +339,18 @@ if [[ "$AGENT_CLI_KIND" == "claude" ]]; then
 else
   # `codex exec`は標準入力の`-`でプロンプトを受け取る。G1の成果物である`gh issue comment`には
   # ネットワークが必要なので、agent-cliと同じworkspace-writeのネットワーク許可を明示する。
-  SESSION_CMD="$(printf 'set -o pipefail; cd %q && cat %q | %scodex exec --sandbox workspace-write --ask-for-approval never -c sandbox_workspace_write.network_access=true -' \
-    "$WORKDIR" "$PROMPT_FILE" "$RUNNER")"
+  CODEX_MODEL_ARG=""
+  if [[ -n "${ISSUE_DECK_CODEX_MODEL:-}" ]]; then
+    case "$ISSUE_DECK_CODEX_MODEL" in
+      gpt-6-astra | gpt-6-sol | gpt-5.6-terra | gpt-6-luna) CODEX_MODEL_ARG=" -m $(printf '%q' "$ISSUE_DECK_CODEX_MODEL")" ;;
+      *)
+        echo "Error: 計画レビュー用のCodexモデルが不正です: $ISSUE_DECK_CODEX_MODEL" >&2
+        exit 1
+        ;;
+    esac
+  fi
+  SESSION_CMD="$(printf 'set -o pipefail; cd %q && cat %q | %scodex exec --sandbox workspace-write --ask-for-approval never -c sandbox_workspace_write.network_access=true%s -' \
+    "$WORKDIR" "$PROMPT_FILE" "$RUNNER" "$CODEX_MODEL_ARG")"
 fi
 SESSION_CMD+=" 2>&1 | tee $(printf '%q' "$LOG_FILE")"
 
