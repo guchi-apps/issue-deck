@@ -203,10 +203,11 @@ describe("agent_cli_codex_writable_dirs", () => {
     expect(writableDirs(makeRepoWithWorktree().main)).toEqual([]);
   });
 
-  // linked worktreeの管理領域（`…/.git/worktrees/<名前>`）は本体の`.git`の下にあるので重ねない。
-  it("worktreeでは本体の`.git`だけを出す", () => {
+  // Codex 0.160.0は管理領域をroで重ね直すため、本体の`.git`の下にあっても個別に出す（#3862）。
+  it("worktreeでは本体の`.git`とworktreeの管理領域を出す", () => {
     const { main, worktree } = makeRepoWithWorktree();
-    expect(writableDirs(worktree)).toEqual([fs.realpathSync(path.join(main, ".git"))]);
+    const gitDir = fs.realpathSync(path.join(main, ".git"));
+    expect(writableDirs(worktree)).toEqual([gitDir, path.join(gitDir, "worktrees", "wt")]);
   });
 
   it("gitリポジトリでないディレクトリでは何も出さない", () => {
@@ -249,7 +250,7 @@ describe("agent_cli_build_codex_args の --add-dir", () => {
     return { gitDir: fs.realpathSync(path.join(main, ".git")), worktree };
   }
 
-  it("workspace-writeのworktreeでは本体の`.git`を開ける", () => {
+  it("workspace-writeのworktreeでは本体の`.git`とworktreeの管理領域を開ける", () => {
     const { gitDir, worktree } = makeWorktree();
     expect(codexArgs({}, "", worktree)).toEqual([
       "--sandbox",
@@ -260,6 +261,8 @@ describe("agent_cli_build_codex_args の --add-dir", () => {
       "sandbox_workspace_write.network_access=true",
       "--add-dir",
       gitDir,
+      "--add-dir",
+      path.join(gitDir, "worktrees", "wt"),
     ]);
   });
 
