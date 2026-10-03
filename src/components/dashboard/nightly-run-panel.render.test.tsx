@@ -188,8 +188,8 @@ describe("NightlyRunPanel", () => {
     const slider = screen.getByRole("slider", { name: "5時間枠の下限" });
     expect(slider.getAttribute("aria-valuenow")).toBe("0");
     fireEvent.keyDown(slider, { key: "ArrowRight" });
-    expect(slider.getAttribute("aria-valuenow")).toBe("10");
-    expect(onUpdateSettings).toHaveBeenCalledWith({ nextWindow: { fiveHourFloorPercent: 10 } });
+    expect(slider.getAttribute("aria-valuenow")).toBe("5");
+    expect(onUpdateSettings).toHaveBeenCalledWith({ nextWindow: { fiveHourFloorPercent: 5 } });
   });
 
   it("起動する残り時間も目盛り帯で選べて、起動位置が出る", () => {
