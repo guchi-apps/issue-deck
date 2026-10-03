@@ -9,6 +9,14 @@ export const DISPATCH_AGENT_OPTIONS = [
 export const DEFAULT_DISPATCH_AGENT_SETTING = "claude" as const;
 export type DefaultDispatchAgent = (typeof DISPATCH_AGENT_OPTIONS)[number]["value"];
 
+/** GitHub Actionsの無人実行に使うCLI。サブPCの既定CLIとは別設定。 */
+export const GITHUB_ACTIONS_AGENT_DEFAULT = "claude" as const;
+export type GithubActionsAgent = DefaultDispatchAgent;
+
+export function parseGithubActionsAgent(value: unknown): GithubActionsAgent | null {
+  return parseDefaultDispatchAgent(value);
+}
+
 // 計画を投稿したCLIごとに、続く自動計画レビューで使うCLIを選ぶ。既定は従来どおり開始元と同じ。
 export const PLAN_REVIEW_AGENT_FOR_CLAUDE_DEFAULT = "claude" as const;
 export const PLAN_REVIEW_AGENT_FOR_CODEX_DEFAULT = "codex" as const;
@@ -337,6 +345,7 @@ export const CODEX_MODEL_OPTIONS = [
 ] as const;
 
 export const CODEX_MODEL_DEFAULT = "gpt-5.6-terra" as const;
+export const GITHUB_ACTIONS_CODEX_MODEL_DEFAULT = CODEX_MODEL_DEFAULT;
 
 export const CODEX_MODEL_VALUES = CODEX_MODEL_OPTIONS.map((option) => option.value);
 export type CodexModel = (typeof CODEX_MODEL_VALUES)[number];

@@ -674,6 +674,10 @@ jobs:
     # 使う必要がある。
     outputs:
       final_mode: ${{ steps.state.outputs.mode }}
+      issue_number: ${{ steps.state.outputs.issue_number }}
+      agent: ${{ steps.claude_model.outputs.agent }}
+      codex_model: ${{ steps.claude_model.outputs.codex_model }}
+      plan_posted: ${{ steps.verify_plan.outputs.plan_posted }}
     permissions:
       contents: write
       pull-requests: write
@@ -1027,6 +1031,8 @@ jobs:
               # claudeModelAssistは後から追加した項目のため、古いレスポンス(項目自体が無い)でも
               # autoへ倒れるだけで壊れないようにしておく。
               CLAUDE_MODEL_ASSIST="$(printf '%s' "$RESPONSE" | jq -r '.claudeModelAssist // "auto"' 2>/dev/null)" || true
+              GITHUB_ACTIONS_AGENT="$(printf '%s' "$RESPONSE" | jq -r '.githubActionsAgent // "claude"' 2>/dev/null)" || true
+              GITHUB_ACTIONS_CODEX_MODEL="$(printf '%s' "$RESPONSE" | jq -r '.githubActionsCodexModel // "gpt-5.6-terra"' 2>/dev/null)" || true
               if [ -z "$CLAUDE_MODEL" ]; then
                 echo "::warning::APP_BASE_URL(${APP_BASE_URL})からのレスポンスのJSONパースに失敗したため、claudeModel設定の取得に失敗しautoにフォールバックしました（レスポンス: ${RESPONSE}）"
                 CLAUDE_MODEL=auto
@@ -1046,6 +1052,10 @@ jobs:
           esac
           echo "model=$CLAUDE_MODEL" >> "$GITHUB_OUTPUT"
           echo "assist_model=$CLAUDE_MODEL_ASSIST" >> "$GITHUB_OUTPUT"
+          case "$GITHUB_ACTIONS_AGENT" in claude|codex) : ;; *) GITHUB_ACTIONS_AGENT=claude ;; esac
+          case "$GITHUB_ACTIONS_CODEX_MODEL" in gpt-6-astra|gpt-6-sol|gpt-5.6-terra|gpt-6-luna) : ;; *) GITHUB_ACTIONS_CODEX_MODEL=gpt-5.6-terra ;; esac
+          echo "agent=$GITHUB_ACTIONS_AGENT" >> "$GITHUB_OUTPUT"
+          echo "codex_model=$GITHUB_ACTIONS_CODEX_MODEL" >> "$GITHUB_OUTPUT"
           if [ "$CLAUDE_MODEL" = "auto" ]; then
             echo "model_flag=" >> "$GITHUB_OUTPUT"
           else
@@ -1249,7 +1259,7 @@ jobs:
 
       - name: Claude Code（計画提示）
         id: claude_plan
-        if: steps.state.outputs.mode == 'plan'
+        if: steps.state.outputs.mode == 'plan' && steps.claude_model.outputs.agent != 'codex'
         uses: anthropics/claude-code-action@v1
         env:
           GH_TOKEN: ${{ github.token }}
@@ -1263,6 +1273,18 @@ jobs:
             --allowedTools "Bash(gh issue view:*),Bash(gh issue comment:*),Bash(gh issue edit:*),Bash(gh issue create:*),Bash(gh pr list:*),Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh api:*),Bash(git ls-remote:*),Bash(git log:*),Bash(curl:*),Bash(grep:*),Bash(find:*),Bash(ls:*),Bash(cat:*),Bash(head:*),Bash(tail:*),Bash(wc:*),Read,Grep,Glob"
             --disallowedTools "Task,Agent"
             ${{ steps.claude_model.outputs.model_flag }}
+          prompt: ${{ env.PROMPT_PLAN }}
+      - name: Codex（計画提示）
+        id: codex_plan
+        if: steps.state.outputs.mode == 'plan' && steps.claude_model.outputs.agent == 'codex'
+        uses: openai/codex-action@v1
+        env:
+          GH_TOKEN: ${{ github.token }}
+        with:
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          model: ${{ steps.claude_model.outputs.codex_model }}
+          permission-profile: :danger-full-access
+          allow-bot-users: issue-deck
           prompt: ${{ env.PROMPT_PLAN }}
       - name: Claude使用量をJob Summaryに出力する（Claude Code（計画提示））
         # トークン使用量・ターン数・権限拒否を可視化する(#903)。計測は補助情報のため、
@@ -1305,7 +1327,7 @@ jobs:
           RETRY_ATTEMPT: ${{ steps.state.outputs.retry_attempt }}
           APP_BASE_URL: ${{ vars.APP_BASE_URL }}
           REPO: ${{ github.repository }}
-          CLAUDE_STEP_OUTCOME: ${{ steps.claude_plan.outcome }}
+          CLAUDE_STEP_OUTCOME: ${{ steps.claude_model.outputs.agent == 'codex' && steps.codex_plan.outcome || steps.claude_plan.outcome }}
           # claude-code-actionの正式な出力(action.ymlで公開)。SDKが書き出したメッセージ列
           # (Turn[]相当。system/assistant/user/resultの各typeを持つ)へのパスで、Claude Code
           # ステップがfailure終了した場合でもSDK内部のcatch節で書き出し済みなら出力される
@@ -1583,6 +1605,7 @@ jobs:
 
       - name: Claude Code（計画レビュー）
         id: claude_plan_review
+        if: steps.state.outputs.mode == 'plan' && steps.verify_plan.outputs.plan_posted == 'true' && steps.claude_model.outputs.agent != 'codex'
         # モデルは補助系(assist_model_flag)ではなく実装系(model_flag)に寄せる。指摘の見落としは
         # そのまま「実装30分＋実装run 1本の作り直し」になり、損失がレビュー1本のコストより大きい
         # (#1218・docs/multi-agent/prompts-and-models.md)。
@@ -1593,7 +1616,6 @@ jobs:
         #
         # continue-on-errorを付けているのは、計画レビューが補助だから。ここが落ちても計画提示自体は
         # 成功しており、runを赤くして人に「計画が出ていない」と誤解させる方が害が大きい。
-        if: steps.state.outputs.mode == 'plan' && steps.verify_plan.outputs.plan_posted == 'true'
         continue-on-error: true
         uses: anthropics/claude-code-action@v1
         env:
@@ -1609,7 +1631,6 @@ jobs:
             --disallowedTools "Task,Agent"
             ${{ steps.claude_model.outputs.model_flag }}
           prompt: ${{ env.PROMPT_PLAN_REVIEW }}
-
       - name: Claude使用量をJob Summaryに出力する（Claude Code（計画レビュー））
         # トークン使用量・ターン数・権限拒否を可視化する(#903)。計測は補助情報のため、
         # 失敗しても本来の処理に影響させない(スクリプト側で常にexit 0する)。
@@ -1670,7 +1691,7 @@ jobs:
 
       - name: Claude Code（分割）
         id: claude_split
-        if: steps.state.outputs.mode == 'split'
+        if: steps.state.outputs.mode == 'split' && steps.claude_model.outputs.agent != 'codex'
         uses: anthropics/claude-code-action@v1
         env:
           GH_TOKEN: ${{ github.token }}
@@ -1686,6 +1707,17 @@ jobs:
           claude_args: |
             --allowedTools "Bash(gh issue view:*),Bash(gh issue comment:*),Bash(gh issue create:*),Bash(gh issue close:*),Bash(gh api repos/:*)"
             ${{ steps.claude_model.outputs.assist_model_flag }}
+          prompt: ${{ env.PROMPT_SPLIT }}
+      - name: Codex（Issue分割）
+        if: steps.state.outputs.mode == 'split' && steps.claude_model.outputs.agent == 'codex'
+        uses: openai/codex-action@v1
+        env:
+          GH_TOKEN: ${{ github.token }}
+        with:
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          model: ${{ steps.claude_model.outputs.codex_model }}
+          permission-profile: :danger-full-access
+          allow-bot-users: issue-deck
           prompt: ${{ env.PROMPT_SPLIT }}
       - name: Claude使用量をJob Summaryに出力する（Claude Code（分割））
         # トークン使用量・ターン数・権限拒否を可視化する(#903)。計測は補助情報のため、
@@ -1798,7 +1830,7 @@ jobs:
         # 書くだけで終わらせるとどのカンバンにも残らず追跡できなくなるため、計画提示ステップ
         # (#735)と同じルール（`70.needs-decision`付き・起点を明記・目安3件まで）で起票を許可する。
         # ルール本文は.github/prompts/question.md側に置く。
-        if: steps.state.outputs.mode == 'ask'
+        if: steps.state.outputs.mode == 'ask' && steps.claude_model.outputs.agent != 'codex'
         uses: anthropics/claude-code-action@v1
         env:
           GH_TOKEN: ${{ github.token }}
@@ -1811,6 +1843,17 @@ jobs:
           claude_args: |
             --allowedTools "Bash(gh issue view:*),Bash(gh issue comment:*),Bash(gh issue create:*),Bash(gh pr list:*),Bash(gh pr view:*),Bash(gh pr diff:*),Bash(gh api:*),Bash(git ls-remote:*),Bash(git log:*),Bash(curl:*),Bash(grep:*),Bash(find:*),Bash(ls:*),Bash(cat:*),Bash(head:*),Bash(tail:*),Bash(wc:*),Read,Grep,Glob"
             ${{ steps.claude_model.outputs.assist_model_flag }}
+          prompt: ${{ env.PROMPT_QUESTION }}
+      - name: Codex（質問回答）
+        if: steps.state.outputs.mode == 'ask' && steps.claude_model.outputs.agent == 'codex'
+        uses: openai/codex-action@v1
+        env:
+          GH_TOKEN: ${{ github.token }}
+        with:
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          model: ${{ steps.claude_model.outputs.codex_model }}
+          permission-profile: :danger-full-access
+          allow-bot-users: issue-deck
           prompt: ${{ env.PROMPT_QUESTION }}
       - name: Claude使用量をJob Summaryに出力する（Claude Code（質問応答））
         # トークン使用量・ターン数・権限拒否を可視化する(#903)。計測は補助情報のため、
@@ -2074,7 +2117,7 @@ jobs:
 
       - name: Claude Code（実装・PR作成）
         id: claude_implement
-        if: steps.state.outputs.mode == 'implement' || steps.state.outputs.mode == 'additional'
+        if: (steps.state.outputs.mode == 'implement' || steps.state.outputs.mode == 'additional') && steps.claude_model.outputs.agent != 'codex'
         uses: anthropics/claude-code-action@v1
         env:
           # .github/workflows/配下を変更するIssueでもgit pushが拒否されないようにする認証は、
@@ -2130,6 +2173,18 @@ jobs:
           claude_args: |
             --allowedTools "Edit,Write,Read,Grep,Glob,Bash(git:*),Bash(gh:*),${{ inputs.package-manager == 'pnpm' && 'Bash(pnpm:*)' || 'Bash(npm:*)' }},Bash(npx:*),Bash(node:*),Bash(python:*),Bash(python3:*),Bash(pip:*),Bash(pip3:*),Bash(pytest:*),Bash(curl:*),Bash(grep:*),Bash(find:*),Bash(ls:*),Bash(cat:*),Bash(head:*),Bash(tail:*),Bash(wc:*)"
             ${{ steps.claude_model.outputs.model_flag }}
+          prompt: ${{ env.PROMPT_IMPLEMENT }}
+      - name: Codex（実装・PR作成）
+        id: codex_implement
+        if: (steps.state.outputs.mode == 'implement' || steps.state.outputs.mode == 'additional') && steps.claude_model.outputs.agent == 'codex'
+        uses: openai/codex-action@v1
+        env:
+          GH_TOKEN: ${{ github.token }}
+        with:
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          model: ${{ steps.claude_model.outputs.codex_model }}
+          permission-profile: :danger-full-access
+          allow-bot-users: issue-deck
           prompt: ${{ env.PROMPT_IMPLEMENT }}
       - name: Claude使用量をJob Summaryに出力する（Claude Code（実装・PR作成））
         # トークン使用量・ターン数・権限拒否を可視化する(#903)。計測は補助情報のため、
@@ -2211,7 +2266,7 @@ jobs:
           RETRY_ATTEMPT: ${{ steps.state.outputs.retry_attempt }}
           APP_BASE_URL: ${{ vars.APP_BASE_URL }}
           REPO: ${{ github.repository }}
-          CLAUDE_STEP_OUTCOME: ${{ steps.claude_implement.outcome }}
+          CLAUDE_STEP_OUTCOME: ${{ steps.claude_model.outputs.agent == 'codex' && steps.codex_implement.outcome || steps.claude_implement.outcome }}
           # 計画提示ステップのフォールバック検証ステップと同じ考え方(#716)。フォールバック
           # 理由の推定表示に使う(詳細は計画提示ステップ側のコメントを参照)。
           EXECUTION_FILE: ${{ steps.claude_implement.outputs.execution_file }}
@@ -2405,8 +2460,11 @@ jobs:
         # 後処理の失敗が「実装は完了したのに未完了として通知される」事態を招かないようにするため。
         if: |
           inputs.post-implement-script != '' &&
-          steps.claude_implement.outcome == 'success' &&
-          (steps.state.outputs.mode == 'implement' || steps.state.outputs.mode == 'additional')
+          (steps.state.outputs.mode == 'implement' || steps.state.outputs.mode == 'additional') &&
+          (
+            (steps.claude_model.outputs.agent != 'codex' && steps.claude_implement.outcome == 'success') ||
+            (steps.claude_model.outputs.agent == 'codex' && steps.codex_implement.outcome == 'success')
+          )
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
@@ -2423,6 +2481,89 @@ jobs:
           fi
           echo "実装後フックを実行します: $POST_IMPLEMENT_SCRIPT"
           bash "$POST_IMPLEMENT_SCRIPT"
+  # Codex Actionの既定のdrop-sudoは同一ジョブ内で不可逆である。計画提示と計画レビューを
+  # 別ジョブへ分け、レビュー用ランナーでも一度だけ安全に権限を落として実行する(#3959)。
+  codex-plan-review:
+    needs: dispatch
+    if: >-
+      always() &&
+      needs.dispatch.result == 'success' &&
+      needs.dispatch.outputs.final_mode == 'plan' &&
+      needs.dispatch.outputs.plan_posted == 'true' &&
+      needs.dispatch.outputs.agent == 'codex'
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: read
+    steps:
+      - name: Checkout develop
+        uses: actions/checkout@v4
+        with:
+          ref: develop
+          fetch-depth: 1
+
+      - name: プロンプトの取得元をissue-deck側にする（prompts-ref指定時）
+        if: inputs.prompts-ref != ''
+        uses: actions/checkout@v4
+        with:
+          repository: guchi-apps/issue-deck
+          ref: ${{ inputs.prompts-ref }}
+          path: .shared-prompts
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: 計画レビュープロンプトを組み立てる
+        env:
+          ISSUE_NUMBER: ${{ needs.dispatch.outputs.issue_number }}
+          REPOSITORY: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          PROMPTS_REF: ${{ inputs.prompts-ref }}
+        run: |
+          set -euo pipefail
+          ROOT=.
+          if [ -n "$PROMPTS_REF" ]; then
+            ROOT=.shared-prompts
+          fi
+          PROMPT_FILE="$ROOT/.github/prompts/plan-review.md"
+          if [ ! -s "$PROMPT_FILE" ]; then
+            echo "::error::$PROMPT_FILE が存在しないか空です"
+            exit 1
+          fi
+
+          # ランナーにはtmuxが無いため、並行状況はdevelop先端と未マージPRを中心に取得する。
+          FLEET_STATUS="（並行状況のスナップショットは取得できませんでした）"
+          FLEET_STATUS_SCRIPT="$ROOT/scripts/fleet-status.sh"
+          if [ -x "$FLEET_STATUS_SCRIPT" ]; then
+            SNAPSHOT="$("$FLEET_STATUS_SCRIPT" --root "$GITHUB_WORKSPACE" --repo "$GITHUB_REPOSITORY" --no-fetch 2>/dev/null)" || SNAPSHOT=""
+            if [ -n "$SNAPSHOT" ]; then
+              FLEET_STATUS="$SNAPSHOT"
+            else
+              echo "::warning::並行状況スナップショットの取得に失敗したため、その節を空のまま進めます"
+            fi
+          fi
+          export FLEET_STATUS
+
+          {
+            echo 'PROMPT_PLAN_REVIEW<<__ISSUE_DECK_PROMPT_EOF__'
+            envsubst '${ISSUE_NUMBER} ${REPOSITORY} ${RUN_URL} ${FLEET_STATUS}' < "$PROMPT_FILE"
+            echo '__ISSUE_DECK_PROMPT_EOF__'
+          } >> "$GITHUB_ENV"
+
+      - name: Codex（計画レビュー）
+        uses: openai/codex-action@v1
+        env:
+          GH_TOKEN: ${{ github.token }}
+        with:
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          model: ${{ needs.dispatch.outputs.codex_model }}
+          # 計画レビューはGitHubから計画を読み、Issueへ結果を投稿する必要がある。
+          # :read-only はネットワークも遮断するため、GitHub API通信を許可するプロファイルを使う。
+          # レビュー用プロンプトではコード変更・pushを行わず、ジョブ権限もcontents: readのまま。
+          permission-profile: :danger-full-access
+          allow-bot-users: issue-deck
+          prompt: ${{ env.PROMPT_PLAN_REVIEW }}
 
 
 

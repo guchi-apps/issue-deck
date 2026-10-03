@@ -223,6 +223,8 @@ describe("SettingsDialog", () => {
     await waitFor(() => expect(updateAutoRetryLimit).toHaveBeenCalledWith(5));
     expect(updateClaudeModel).toHaveBeenCalledWith(
       "auto",
+      "claude",
+      "gpt-5.6-terra",
       "haiku",
       "sonnet",
       "auto",
@@ -240,6 +242,8 @@ describe("SettingsDialog", () => {
     expect(onUpdated).toHaveBeenCalledWith({
       autoRetryLimit: 5,
       claudeModel: "auto",
+      githubActionsAgent: "claude",
+      githubActionsCodexModel: "gpt-5.6-terra",
       claudeModelAssist: "haiku",
       claudeLocalModel: "sonnet",
       codexModel: "auto",
