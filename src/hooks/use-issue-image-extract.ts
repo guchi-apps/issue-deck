@@ -9,7 +9,7 @@ export function useIssueImageExtract() {
   const [error, setError] = useState<string | null>(null);
   const [notConfigured, setNotConfigured] = useState(false);
 
-  const extract = useCallback(async (images: string[]): Promise<ImageExtractResult | null> => {
+  const extract = useCallback(async (images: string[], originals?: Record<string, string>): Promise<ImageExtractResult | null> => {
     setIsExtracting(true);
     setError(null);
     setNotConfigured(false);
@@ -18,7 +18,7 @@ export function useIssueImageExtract() {
       const res = await fetch("/api/issues/image-extract", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ images }),
+        body: JSON.stringify({ images, originals }),
       });
       if (res.status === 501) {
         setNotConfigured(true);

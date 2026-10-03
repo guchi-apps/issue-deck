@@ -61,7 +61,14 @@ describe("POST /api/issues/image-extract", () => {
 
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ items: ["A"], unreadable: false });
-    expect(generateImageExtract).toHaveBeenCalledWith("token", ["u"]);
+    expect(generateImageExtract).toHaveBeenCalledWith("token", ["u"], {});
+  });
+
+  it("元画像の対応表をそのまま渡し、形が違えば400（#3851）", async () => {
+    vi.mocked(generateImageExtract).mockResolvedValue({ items: ["A"], unreadable: false });
+    await POST(requestWith({ images: ["u"], originals: { u: "o" } }));
+    expect(generateImageExtract).toHaveBeenCalledWith("token", ["u"], { u: "o" });
+    expect((await POST(requestWith({ images: ["u"], originals: { u: 1 } }))).status).toBe(400);
   });
 
   it("利用者向けのエラーはコードに応じたステータスと文言で返す", async () => {

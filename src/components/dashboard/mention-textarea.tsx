@@ -25,6 +25,7 @@ import {
   splitAttachments,
   type ImageAttachment,
 } from "@/lib/markdown-attachments";
+import { registerOriginalImage } from "@/lib/annotation/original-images";
 import { isSvgImageUrl } from "@/lib/uploaded-images";
 import { cn } from "@/lib/utils";
 import type { Issue } from "@/types/issue";
@@ -234,6 +235,7 @@ export function MentionTextarea({
    */
   async function replaceAttachment(originalUrl: string, file: File): Promise<string> {
     const url = await postImage(file);
+    registerOriginalImage(url, originalUrl);
     const current = attachmentsRef.current;
     const index = current.findIndex((attachment) => attachment.url === originalUrl);
     const next =

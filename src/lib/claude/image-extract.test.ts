@@ -76,6 +76,30 @@ describe("generateImageExtract", () => {
     expect(content[1].type).toBe("text");
   });
 
+  // #3851。取り消し線で隠れた元の文字を読めるよう、元画像を「元画像→書き込み後」の順で添える
+  it("元画像が分かる画像は、元画像→書き込み後の順に送り、プロンプトに見比べる指示を足す", async () => {
+    await writeFile(path.join(UPLOADED_IMAGE_DIR, NAME_B), Buffer.from([255, 216]));
+    callClaudeMessages.mockResolvedValue(aiResponse('{"items":["A"],"unreadable":false}'));
+
+    await generateImageExtract("token", [url(NAME_A)], { [url(NAME_A)]: url(NAME_B) });
+
+    const content = callClaudeMessages.mock.calls[0][0].body.messages[0].content;
+    expect(content.map((block: { type: string }) => block.type)).toEqual(["text", "image", "text", "image", "text"]);
+    expect(content[1].source.media_type).toBe("image/jpeg");
+    expect(content[3].source.media_type).toBe("image/png");
+    expect(content[4].text).toContain("元画像と見比べる");
+  });
+
+  it("元画像が読めないときは失敗にせず、書き込み後だけで読む", async () => {
+    callClaudeMessages.mockResolvedValue(aiResponse('{"items":["A"],"unreadable":false}'));
+
+    await generateImageExtract("token", [url(NAME_A)], { [url(NAME_A)]: url(NAME_B) });
+
+    const content = callClaudeMessages.mock.calls[0][0].body.messages[0].content;
+    expect(content.map((block: { type: string }) => block.type)).toEqual(["image", "text"]);
+    expect(content[1].text).not.toContain("元画像と見比べる");
+  });
+
   it("画像が無ければno_images", async () => {
     await expect(generateImageExtract("token", ["https://example.test/x.png"])).rejects.toMatchObject({
       code: "no_images",

@@ -340,6 +340,11 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   最新のものをrefから読む。書き込みが読めなかったときは推測せず「判読できない書き込みがあります」の
   1行を足す。**OpenAI系のモデルを選んでいるときは、`request.ts`の`openAiBody`が`image`ブロックを
   `input_image`へ変換する**（Anthropic形式のcontent配列をそのまま渡せる）。
+  **書き込みエディタで保存した添付は、書き込み前の元画像も一緒に読ませる**（#3851。取り消し線の下の
+  文字は書き込み後の画像だけでは分からない）。元画像のURLは`mention-textarea.tsx`の`replaceAttachment`が
+  [`lib/annotation/original-images.ts`](../src/lib/annotation/original-images.ts)へ登録し（ブラウザのメモリ上だけ。
+  リロードで消え、その場合は書き込み後の1枚だけで読む）、ボタンが`originals`（書き込み後URL→元画像URL）として
+  送る。サーバーは「元画像→書き込み後」の順に並べ、元画像が読めない・5MB超のときは失敗にせず書き込み後だけで読む。
 - **作成した直後にどこへ進むかは、作成フォームではなく作成後の1画面で選ぶ**（#2862）。
   以前は「作成」「作成+実装開始」「質問する」のどれを押しても必ず作ったIssueの詳細へ
   移動していた（`issue-deck-shell.tsx`の`handleIssueCreated`が`selectIssue`を呼ぶ）。
