@@ -16,6 +16,7 @@ import { BulkCreateCodeReviewIssuesDialog } from "@/components/dashboard/bulk-cr
 import type { AppSettingsValues } from "@/components/dashboard/settings/execution-settings-section";
 import { SettingsDialog } from "@/components/dashboard/settings/settings-dialog";
 import { EditIssueDialog } from "@/components/dashboard/edit-issue-dialog";
+import { DeployFailureFixIssueContext } from "@/components/dashboard/deploy-failure-alert";
 import { GithubReferenceNavigationProvider } from "@/components/dashboard/github-reference-navigation";
 import { IssueDetail } from "@/components/dashboard/issue-detail";
 import { IssueList } from "@/components/dashboard/issue-list";
@@ -2140,6 +2141,7 @@ export function IssueDeckShell({
     (mobileScreen.kind === "pull-requests" && !filters.pr);
 
   return (
+    <DeployFailureFixIssueContext.Provider value={openPullRequestFixIssueDialog}>
     <GithubReferenceNavigationProvider openReference={openReference}>
       {/* 通知ベルの材料（#1772）。PCのトップバーとスマホの各画面のヘッダーが同じものを読む。
           リリース状況の取得を1本に保つため、ここで1回だけ用意して配る。
@@ -3081,5 +3083,6 @@ export function IssueDeckShell({
       </div>
       </NotificationProvider>
     </GithubReferenceNavigationProvider>
+    </DeployFailureFixIssueContext.Provider>
   );
 }

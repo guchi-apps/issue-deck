@@ -16,6 +16,7 @@ export const CLAUDE_API_FEATURES = [
   { key: "issue_body_cleanup", label: "本文の整形" },
   { key: "issue_image_extract", label: "画像からの変更内容の抽出" },
   { key: "manual_step_fix", label: "手作業の修正提案" },
+  { key: "deploy_failure_analysis", label: "デプロイ失敗の原因分析" },
   { key: "model_pick", label: "モデルの自動選択" },
   { key: "plan_review_pick", label: "計画レビューの採否判定" },
   { key: "new_app_consult", label: "新規アプリの相談" },
