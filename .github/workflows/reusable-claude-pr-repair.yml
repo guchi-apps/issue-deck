@@ -469,6 +469,16 @@ jobs:
             echo '__ISSUE_DECK_PROMPT_EOF__'
           } >> "$GITHUB_ENV"
 
+      - name: PRレビュー・修復用のClaudeモデルを取得する
+        id: workflow_model
+        env:
+          APP_BASE_URL: ${{ vars.APP_BASE_URL }}
+        run: |
+          model=auto
+          if [ -n "$APP_BASE_URL" ]; then model="$(curl -fsS --max-time 5 "${APP_BASE_URL%/}/api/settings/claude-model" 2>/dev/null | jq -r '.workflowClaudeModel // "auto"' || true)"; fi
+          case "$model" in auto|fable|opus|sonnet|haiku) ;; *) model=auto ;; esac
+          [ "$model" = auto ] && echo 'claude_args=' >> "$GITHUB_OUTPUT" || echo "claude_args=--model $model" >> "$GITHUB_OUTPUT"
+
       - name: Claude Code（PRの自動修復）
         id: claude_pr_repair
         if: steps.state.outputs.should_repair == 'true'
@@ -494,6 +504,7 @@ jobs:
           # ここだけ食い違うと「CIは自動修正できるのに実装はできない」といった
           # 不揃いな挙動になる(#1147)。出し分けるのはパッケージマネージャ本体だけ(#931)。
           claude_args: >-
+            ${{ steps.workflow_model.outputs.claude_args }}
             --allowedTools "Edit,Write,Read,Grep,Glob,Bash(git:*),Bash(gh:*),${{ inputs.package-manager == 'pnpm' && 'Bash(pnpm:*)' || 'Bash(npm:*)' }},Bash(npx:*),Bash(node:*),Bash(python:*),Bash(python3:*),Bash(pip:*),Bash(pip3:*),Bash(pytest:*),Bash(curl:*),Bash(grep:*),Bash(find:*),Bash(ls:*),Bash(cat:*),Bash(head:*),Bash(tail:*),Bash(wc:*)"
           prompt: ${{ env.PROMPT_PR_REPAIR }}
 

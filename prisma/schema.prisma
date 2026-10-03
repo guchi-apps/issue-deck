@@ -462,6 +462,10 @@ model AppSetting {
   githubActionsAgent  String   @default("claude")
   // GitHub ActionsでCodexを使うときのモデル。サブPC用codexModelとは独立させる。
   githubActionsCodexModel String @default("gpt-5.6-terra")
+  // PRレビュー・修復workflow専用。autoはAction/CLIの既定へ委ねる。
+  workflowClaudeModel String @default("auto")
+  workflowCodexModel String @default("auto")
+  workflowCodexReasoningEffort String @default("default")
   // 質問応答・サブIssue分割のような補助的な処理に使うモデル(#905)。実装・計画とは品質要求が
   // 異なり、同じモデルで動かすとコストに見合わないため分けている。
   claudeModelAssist   String   @default("auto")
