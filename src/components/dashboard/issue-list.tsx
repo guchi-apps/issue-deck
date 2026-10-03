@@ -1186,6 +1186,8 @@ export function IssueList({
                 // 「developへマージ」の中で何を待っているか（#2816）。PR一覧を渡していない
                 // 画面ではundefinedのままで、従来どおり段の名前だけが出る
                 pullRequestProgress={pullRequestProgressByIssueId.get(issue.id) ?? null}
+                // 一覧で解決した計画レビュー状態を、Planning中の詳細状態文言へ渡す（#3941）
+                planReviewState={planReviewState}
               />
               {/* 進捗バーが描かれない行（積んだ直後のStatusが`Ready`のまま）だけ、
                   実行が始まる前の状態を同じ位置・同じ寸法のバーで出す（#2449） */}

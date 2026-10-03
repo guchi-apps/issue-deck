@@ -79,26 +79,22 @@ describe("canCreateFollowupFromComment", () => {
   });
 });
 
-describe("resolveProgressSegments（#2867・#2927）", () => {
+describe("resolveProgressSegments（#3941・#2927）", () => {
   const states = (result: ReturnType<typeof resolveProgressSegments>) =>
     result?.segments.map((segment) => `${segment.key}:${segment.state}`);
 
-  it("いまの段より前のマスは済み、後のマスはまだ。段に1マスならそれがいま", () => {
+  it("いまのフェーズより前は済み、後はまだ", () => {
     const planning = resolveProgressSegments({ projectStatus: "Planning" });
     expect(states(planning)).toEqual([
       "planning:current",
-      "exploring:pending",
-      "editing:pending",
-      "verifying:pending",
-      "pr-checks:pending",
-      "pr-merge:pending",
-      "develop:pending",
+      "implementation:pending",
+      "merge:pending",
     ]);
     expect(planning?.ratio).toBe(0);
     expect(planning?.productionTracker).toBe("hidden");
   });
 
-  it("developへのマージが完了した時点で7マス全部済み・目安100%になる（#2927）", () => {
+  it("developへのマージが完了した時点で3フェーズ全部済み・目安100%になる（#2927）", () => {
     const develop = resolveProgressSegments({ projectStatus: "Develop" });
     expect(develop?.segments.every((segment) => segment.state === "done")).toBe(true);
     expect(develop?.ratio).toBe(100);
@@ -106,43 +102,24 @@ describe("resolveProgressSegments（#2867・#2927）", () => {
     expect(develop?.productionTracker).toBe("pending");
   });
 
-  it("実装の中は位置で決める。位置が無ければ最初のマス（調査）", () => {
-    expect(states(resolveProgressSegments({ projectStatus: "Implementation" }))?.slice(0, 4)).toEqual([
+  it("実装の詳細位置に関わらず実装フェーズを現在地にする", () => {
+    expect(states(resolveProgressSegments({ projectStatus: "Implementation" }))).toEqual([
       "planning:done",
-      "exploring:current",
-      "editing:pending",
-      "verifying:pending",
+      "implementation:current",
+      "merge:pending",
     ]);
     const verifying = resolveProgressSegments(
       { projectStatus: "Implementation" },
       { implementation: "verifying" },
     );
-    expect(states(verifying)?.slice(0, 5)).toEqual([
-      "planning:done",
-      "exploring:done",
-      "editing:done",
-      "verifying:current",
-      "pr-checks:pending",
-    ]);
-    // 済み3マス（計画・調査・実装）／7マス
-    expect(verifying?.ratio).toBe(43);
+    expect(states(verifying)).toEqual(states(resolveProgressSegments({ projectStatus: "Implementation" })));
+    expect(verifying?.ratio).toBe(33);
     expect(verifying?.productionTracker).toBe("hidden");
   });
 
-  it("developへマージの中はPRの位置で決める", () => {
+  it("developへマージの詳細位置に関わらずマージフェーズを現在地にする", () => {
     const merge = resolveProgressSegments({ projectStatus: "Develop PR" }, { developPr: "merge" });
-    expect(states(merge)?.slice(4, 7)).toEqual(["pr-checks:done", "pr-merge:current", "develop:pending"]);
-    // 実装の位置を渡していても、段が進んでいれば実装のマスは全部済み
-    const checks = resolveProgressSegments(
-      { projectStatus: "Develop PR" },
-      { implementation: "exploring", developPr: "checks" },
-    );
-    expect(states(checks)?.slice(1, 5)).toEqual([
-      "exploring:done",
-      "editing:done",
-      "verifying:done",
-      "pr-checks:current",
-    ]);
+    expect(states(merge)).toEqual(["planning:done", "implementation:done", "merge:current"]);
   });
 
   it("本番へマージ中（Release）は主バー全部済み・2点トラッカーの1つ目だけ点灯", () => {
@@ -159,17 +136,9 @@ describe("resolveProgressSegments（#2867・#2927）", () => {
     expect(done?.productionTracker).toBe("done");
   });
 
-  it("段の境目に印を付ける（4段のまとまりをすき間で示す）", () => {
+  it("各フェーズの末尾に境目の印を付ける", () => {
     const result = resolveProgressSegments({ projectStatus: "Planning" });
-    expect(result?.segments.map((segment) => segment.stageEnd)).toEqual([
-      true, // 計画｜調査
-      false,
-      false,
-      true, // 検証・仕上げ｜CI・レビュー
-      false,
-      true, // マージ待ち｜develop反映済
-      false, // 末尾
-    ]);
+    expect(result?.segments.map((segment) => segment.stageEnd)).toEqual([true, true, false]);
   });
 
   it("未着手・Statusなし・未知の名前ではnull（バー自体を出さない）", () => {

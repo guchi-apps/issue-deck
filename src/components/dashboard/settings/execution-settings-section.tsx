@@ -15,6 +15,7 @@ import {
 import { PlanReviewAutoReflectField } from "@/components/dashboard/settings/plan-review-auto-reflect-field";
 import { CodeReviewRecommendField } from "@/components/dashboard/settings/code-review-recommend-field";
 import { ReleasePrepIntervalField } from "@/components/dashboard/settings/release-prep-interval-field";
+import { ExecutionFlowOverview } from "@/components/dashboard/settings/execution-flow-overview";
 import { useAppSettingsMutations } from "@/hooks/use-app-settings-mutations";
 import {
   AUTO_RETRY_LIMIT_MAX,
@@ -38,6 +39,7 @@ import {
   type CodexModelSetting,
   type CodexLocalModel,
   type DefaultDispatchAgent,
+  type GithubActionsAgent,
   type ModelPickEngine,
   type PlanReviewAgent,
 } from "@/lib/app-settings";
@@ -45,6 +47,8 @@ import {
 export type AppSettingsValues = {
   autoRetryLimit: number;
   claudeModel: ClaudeModel;
+  githubActionsAgent: GithubActionsAgent;
+  githubActionsCodexModel: CodexLocalModel;
   claudeModelAssist: ClaudeModel;
   claudeLocalModel: ClaudeLocalModelSetting;
   codexModel: CodexModelSetting;
@@ -64,6 +68,8 @@ export type AppSettingsValues = {
 type ExecutionSettingsSectionProps = {
   autoRetryLimit: number;
   claudeModel: ClaudeModel;
+  githubActionsAgent: GithubActionsAgent;
+  githubActionsCodexModel: CodexLocalModel;
   claudeModelAssist: ClaudeModel;
   claudeLocalModel: ClaudeLocalModelSetting;
   codexModel: CodexModelSetting;
@@ -92,6 +98,8 @@ type ExecutionSettingsSectionProps = {
 export function ExecutionSettingsSection({
   autoRetryLimit: initialAutoRetryLimit,
   claudeModel: initialClaudeModel,
+  githubActionsAgent: initialGithubActionsAgent,
+  githubActionsCodexModel: initialGithubActionsCodexModel,
   claudeModelAssist: initialClaudeModelAssist,
   claudeLocalModel: initialClaudeLocalModel,
   codexModel: initialCodexModel,
@@ -112,6 +120,8 @@ export function ExecutionSettingsSection({
     useAppSettingsMutations();
   const [autoRetryLimit, setAutoRetryLimit] = useState(initialAutoRetryLimit);
   const [claudeModel, setClaudeModel] = useState<ClaudeModel>(initialClaudeModel);
+  const [githubActionsAgent, setGithubActionsAgent] = useState<GithubActionsAgent>(initialGithubActionsAgent);
+  const [githubActionsCodexModel, setGithubActionsCodexModel] = useState<CodexLocalModel>(initialGithubActionsCodexModel);
   const [claudeModelAssist, setClaudeModelAssist] =
     useState<ClaudeModel>(initialClaudeModelAssist);
   const [claudeLocalModel, setClaudeLocalModel] =
@@ -163,6 +173,8 @@ export function ExecutionSettingsSection({
   const isDirty =
     autoRetryLimit !== initialAutoRetryLimit ||
     claudeModel !== initialClaudeModel ||
+    githubActionsAgent !== initialGithubActionsAgent ||
+    githubActionsCodexModel !== initialGithubActionsCodexModel ||
     claudeModelAssist !== initialClaudeModelAssist ||
     claudeLocalModel !== initialClaudeLocalModel ||
     codexModel !== initialCodexModel ||
@@ -184,6 +196,8 @@ export function ExecutionSettingsSection({
     if (!autoRetryOk) return;
     const claudeModelOk = await updateClaudeModel(
       claudeModel,
+      githubActionsAgent,
+      githubActionsCodexModel,
       claudeModelAssist,
       claudeLocalModel,
       codexModel,
@@ -204,6 +218,8 @@ export function ExecutionSettingsSection({
     onUpdated({
       autoRetryLimit,
       claudeModel,
+      githubActionsAgent,
+      githubActionsCodexModel,
       claudeModelAssist,
       claudeLocalModel,
       codexModel,
@@ -224,9 +240,25 @@ export function ExecutionSettingsSection({
 
   return (
     <div className="flex flex-col gap-4">
-      <h3 className="border-b pb-1 text-xs font-semibold tracking-wide text-muted-foreground">実行の動かし方</h3>
+      <ExecutionFlowOverview
+        claudeModel={claudeModel}
+        githubActionsAgent={githubActionsAgent}
+        githubActionsCodexModel={githubActionsCodexModel}
+        claudeModelAssist={claudeModelAssist}
+        claudeLocalModel={claudeLocalModel}
+        codexModel={codexModel}
+        planReviewAgentForClaude={planReviewAgentForClaude}
+        planReviewAgentForCodex={planReviewAgentForCodex}
+        planReviewClaudeModel={planReviewClaudeModel}
+        planReviewCodexModel={planReviewCodexModel}
+        appAiModel={appAiModel}
+        appAiModelReasoning={appAiModelReasoning}
+        modelPickEngine={modelPickEngine}
+      />
 
-      <div className="flex flex-col gap-1.5">
+      <h3 className="border-b pb-1 text-xs font-semibold tracking-wide text-muted-foreground">共通設定</h3>
+
+      <div id="execution-controls" className="flex flex-col gap-1.5">
         <Label htmlFor="auto-retry-limit">自動リトライ回数</Label>
         <Input
           id="auto-retry-limit"
@@ -248,7 +280,7 @@ export function ExecutionSettingsSection({
         </p>
       </div>
 
-      <div className="flex flex-col gap-1.5 border-t pt-4">
+      <div id="subpc-agent-settings" className="flex flex-col gap-1.5 border-t pt-4">
         <Label htmlFor="default-dispatch-agent">サブPC：既定のエージェント</Label>
         <Select
           value={defaultDispatchAgent}
@@ -270,7 +302,7 @@ export function ExecutionSettingsSection({
         </p>
       </div>
 
-      <div className="flex flex-col gap-3 border-t pt-4">
+      <div id="plan-review-settings" className="flex flex-col gap-3 border-t pt-4">
         <div>
           <Label>サブPC：自動計画レビューのエージェントとモデル</Label>
           <p className="mt-1 text-xs text-muted-foreground">
@@ -351,7 +383,7 @@ export function ExecutionSettingsSection({
         </div>
       </div>
 
-      <div className="flex flex-col gap-3 border-t pt-4">
+      <div id="failover-settings" className="flex flex-col gap-3 border-t pt-4">
         <div>
           <Label htmlFor="dispatch-failover-enabled">使用量に応じた自動フェイルオーバー</Label>
           <p className="mt-1 text-xs text-muted-foreground">
@@ -388,7 +420,7 @@ export function ExecutionSettingsSection({
         </div>
       </div>
 
-      <div className="flex flex-col gap-1.5 border-t pt-4">
+      <div id="concurrency-settings" className="flex flex-col gap-1.5 border-t pt-4">
         <Label htmlFor="dispatch-concurrency">サブPCの同時実行数</Label>
         <Input
           id="dispatch-concurrency"
@@ -405,7 +437,26 @@ export function ExecutionSettingsSection({
         </p>
       </div>
 
-      <h3 className="border-b pb-1 text-xs font-semibold tracking-wide text-muted-foreground">使うAIモデル</h3>
+      <h3 id="github-actions-settings" className="border-b pb-1 text-xs font-semibold tracking-wide text-muted-foreground">GitHub Actions 共通設定</h3>
+
+      <div className="flex flex-col gap-1.5">
+        <Label htmlFor="github-actions-agent">エージェント</Label>
+        <Select value={githubActionsAgent} onValueChange={(value) => setGithubActionsAgent(value as GithubActionsAgent)}>
+          <SelectTrigger id="github-actions-agent" className="w-full"><SelectValue /></SelectTrigger>
+          <SelectContent>{DISPATCH_AGENT_OPTIONS.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}</SelectContent>
+        </Select>
+        <p className="text-xs text-muted-foreground">GitHub Actionsの計画・実装・レビューに使うCLIです。サブPCとは別に保存されます。</p>
+      </div>
+
+      {githubActionsAgent === "codex" && (
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor="github-actions-codex-model">GitHub Actions（Codex）：使用モデル</Label>
+          <Select value={githubActionsCodexModel} onValueChange={(value) => setGithubActionsCodexModel(value as CodexLocalModel)}>
+            <SelectTrigger id="github-actions-codex-model" className="w-full"><SelectValue /></SelectTrigger>
+            <SelectContent>{CODEX_LOCAL_MODEL_OPTIONS.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}</SelectContent>
+          </Select>
+        </div>
+      )}
 
       <div className="flex flex-col gap-1.5">
         <Label htmlFor="claude-model">GitHub Actions（Claude）：計画・実装・レビュー</Label>
@@ -422,7 +473,7 @@ export function ExecutionSettingsSection({
           </SelectContent>
         </Select>
         <p className="text-xs text-muted-foreground">
-          GitHub Actionsで計画を作り、計画をレビューし、実装してPRを作る処理に使います。
+          Claude Codeを選んだときに、GitHub Actionsで計画を作り、計画をレビューし、実装してPRを作る処理に使います。
           通常はSonnet、難しい設計を優先する場合はOpusが適しています。全リポジトリ共通です。
         </p>
       </div>
@@ -448,6 +499,8 @@ export function ExecutionSettingsSection({
           GitHub Actionsで質問へ回答し、大きなIssueを分割する処理に使います。通常はHaikuで十分です。
         </p>
       </div>
+
+      <h3 id="subpc-model-settings" className="border-b pb-1 text-xs font-semibold tracking-wide text-muted-foreground">サブPC 共通設定</h3>
 
       <div className="flex flex-col gap-1.5">
         <Label htmlFor="claude-local-model">サブPC（Claude）：計画・実装</Label>
@@ -512,7 +565,7 @@ export function ExecutionSettingsSection({
       {/* 判定に使うAI（#3189・#3245）。**選ばれる側のモデルではなく、選ぶ側。**
           「おまかせ」のモデル選択と、Issue作成の「タイトル自動」で付くラベルの判定の両方に効く。
           サブPCのモデル設定（すぐ上）の直後に置く */}
-      <div className="flex flex-col gap-1.5">
+      <div id="model-pick-settings" className="flex flex-col gap-1.5">
         <Label htmlFor="model-pick-engine">判定に使うAI（おまかせ・ラベル付与）</Label>
         <Select
           value={modelPickEngine}
@@ -542,7 +595,7 @@ export function ExecutionSettingsSection({
         </p>
       </div>
 
-      <div className="flex flex-col gap-1.5">
+      <div id="app-ai-settings" className="flex flex-col gap-1.5">
         <Label htmlFor="app-ai-model">アプリ内AI：要約・検索・文章整理</Label>
         <Select value={appAiModel} onValueChange={(value) => setAppAiModel(value as AppAiModel)}>
           <SelectTrigger id="app-ai-model" className="w-full">

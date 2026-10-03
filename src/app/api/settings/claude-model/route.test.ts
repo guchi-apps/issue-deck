@@ -51,6 +51,8 @@ describe("GET", () => {
     findUnique.mockResolvedValue(null);
     await expect((await GET()).json()).resolves.toEqual({
       claudeModel: "auto",
+      githubActionsAgent: "claude",
+      githubActionsCodexModel: "gpt-5.6-terra",
       claudeModelAssist: "auto",
       claudeLocalModel: "sonnet",
       codexModel: "gpt-5.6-terra",
@@ -78,6 +80,8 @@ describe("GET", () => {
     });
     await expect((await GET()).json()).resolves.toEqual({
       claudeModel: "opus",
+      githubActionsAgent: "claude",
+      githubActionsCodexModel: "gpt-5.6-terra",
       claudeModelAssist: "sonnet",
       claudeLocalModel: "opus",
       codexModel: "gpt-5.6-terra",

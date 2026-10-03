@@ -72,7 +72,7 @@ function pulse(container: HTMLElement): Element | null {
 }
 
 /**
- * 濃く塗られた（済んだ）主バーのマスの数（#2516・#2867）。
+ * 濃く塗られた（済んだ）主バーのフェーズ数（#2516・#3941）。
  * `[data-segment]`に絞るのは、本番マージの2点トラッカー（`[data-production-tracker]`。
  * #2927）も塗りに`.bg-current`を使うため、絞らないとdone状態で数がずれるため。
  */
@@ -98,31 +98,29 @@ function queueState(overrides: Partial<IssueQueueState> = {}): IssueQueueState {
 afterEach(cleanup);
 
 describe("WorkflowStepBadge", () => {
-  it("済んだマスを濃く塗り、いまのマスは半分の濃さにする（7マス。#2867・#2927）", () => {
+  it("済んだフェーズを濃く塗り、いまのフェーズは半分の濃さにする（3フェーズ。#3941・#2927）", () => {
     const planning = render(<WorkflowStepBadge labels={[]} projectStatus="Planning" />);
     expect(filledSegments(planning.container)).toBe(0);
     expect(currentSegment(planning.container)).toBe("planning");
     cleanup();
 
-    // 実装の位置が分からなければ「調査」のマスがいま
     const implementation = render(<WorkflowStepBadge labels={[]} projectStatus="Implementation" />);
     expect(filledSegments(implementation.container)).toBe(1);
-    expect(currentSegment(implementation.container)).toBe("exploring");
+    expect(currentSegment(implementation.container)).toBe("implementation");
     cleanup();
 
-    // developへマージ: 計画・調査・実装・検証の4マスが済み、CI・レビューがいま
     const developPr = render(<WorkflowStepBadge labels={[]} projectStatus="Develop PR" />);
-    expect(filledSegments(developPr.container)).toBe(4);
-    expect(currentSegment(developPr.container)).toBe("pr-checks");
+    expect(filledSegments(developPr.container)).toBe(2);
+    expect(currentSegment(developPr.container)).toBe("merge");
     cleanup();
 
     // develop到達以降は主バーを全部塗る（半分の濃さのマスを残さない。#2927）
     const done = render(<WorkflowStepBadge labels={[]} projectStatus="Done" />);
-    expect(filledSegments(done.container)).toBe(7);
+    expect(filledSegments(done.container)).toBe(3);
     expect(currentSegment(done.container)).toBeNull();
   });
 
-  it("実装の中の位置は、サブPCのセッションが報告する作業で決める（#2867）", () => {
+  it("実装の詳細は左側の状態文言で示し、バーは実装フェーズを保つ（#3941）", () => {
     const editing = render(
       <WorkflowStepBadge
         labels={[]}
@@ -131,8 +129,9 @@ describe("WorkflowStepBadge", () => {
         now={NOW}
       />,
     );
-    expect(filledSegments(editing.container)).toBe(2);
-    expect(currentSegment(editing.container)).toBe("editing");
+    expect(filledSegments(editing.container)).toBe(1);
+    expect(currentSegment(editing.container)).toBe("implementation");
+    expect(editing.container.textContent).toContain("実装中");
     cleanup();
 
     // 入力待ち・終了したセッションでも、最後に報告した作業が到達点
@@ -144,11 +143,11 @@ describe("WorkflowStepBadge", () => {
         now={NOW}
       />,
     );
-    expect(filledSegments(testing.container)).toBe(3);
-    expect(currentSegment(testing.container)).toBe("verifying");
+    expect(filledSegments(testing.container)).toBe(1);
+    expect(currentSegment(testing.container)).toBe("implementation");
   });
 
-  it("GitHub Actionsの実装ステップが走っていれば「実装」のマスまで進める（#2867）", () => {
+  it("GitHub Actionsの実装ステップが走っても実装フェーズを保つ（#3941）", () => {
     const { container } = render(
       <WorkflowStepBadge
         labels={[]}
@@ -156,10 +155,10 @@ describe("WorkflowStepBadge", () => {
         running={{ isRunning: true, currentStep: "Claude Code（実装・PR作成）", runId: 1 }}
       />,
     );
-    expect(currentSegment(container)).toBe("editing");
+    expect(currentSegment(container)).toBe("implementation");
   });
 
-  it("ツールチップに済んだマスの重みの合計を「目安」として添える（#2867・#2927）", () => {
+  it("ツールチップに済んだフェーズの重みの合計を「目安」として添える（#3941・#2927）", () => {
     const { container } = render(
       <WorkflowStepBadge
         labels={[]}
@@ -168,8 +167,7 @@ describe("WorkflowStepBadge", () => {
         now={NOW}
       />,
     );
-    // 済み3マス（計画・調査・実装）／7マス
-    expect(container.querySelector("[title]")?.getAttribute("title")).toContain("目安 43%");
+    expect(container.querySelector("[title]")?.getAttribute("title")).toContain("目安 33%");
   });
 
   it("developへのマージが完了した時点で目安は常に100%になる（#2927）", () => {
@@ -177,9 +175,23 @@ describe("WorkflowStepBadge", () => {
     expect(container.querySelector("[title]")?.getAttribute("title")).toContain("目安 100%");
   });
 
+  it("Planning中は計画レビュー状態をセッション文言より優先して表示する（#3941）", () => {
+    const { container } = render(
+      <WorkflowStepBadge
+        labels={[]}
+        projectStatus="Planning"
+        session={session({ step: "EDITING" })}
+        planReviewState="creating"
+        now={NOW}
+      />,
+    );
+    expect(container.textContent).toContain("計画レビュー中");
+    expect(container.textContent).not.toContain("実装中");
+  });
+
   // #2516。一覧の行にはGitHubのラベル（`00.check-user`・`01.check-*`を含む）が出ないため
   // （#3159）、色で伝えるのはこのバッジだけになる。塗ったマスだけでは
-  // `Planning`（1/6）の行で5pxしか色が乗らないので、未達のマスも濃く塗る
+  // `Planning`（1/3）の行で色が乗る面積が小さいので、未達のマスも濃く塗る
   it("確認待ち・回答待ちでは未達のマスも濃く塗る", () => {
     const plain = render(<WorkflowStepBadge labels={[]} projectStatus="Planning" />);
     expect(hasEmphasizedTrack(plain.container)).toBe(false);
@@ -521,7 +533,7 @@ describe("PRを待っている段の内訳（#2816）", () => {
     expect(liveSweep(container)).not.toBeNull();
   });
 
-  it("止まっているPR（CI失敗）は赤に倒し、未達のマスも濃く塗る", () => {
+  it("止まっているPR（CI失敗）は赤に倒す", () => {
     const { container } = render(
       <WorkflowStepBadge
         labels={[]}
@@ -532,7 +544,8 @@ describe("PRを待っている段の内訳（#2816）", () => {
     );
     expect(container.textContent).toContain("CI失敗");
     expect(container.querySelectorAll(".text-destructive").length).toBeGreaterThan(0);
-    expect(hasEmphasizedTrack(container)).toBe(true);
+    // 3フェーズではCI失敗もマージ枠が現在地であり、未達枠は残らない
+    expect(hasEmphasizedTrack(container)).toBe(false);
   });
 
   it("PRを待っていない段では内訳を読まない", () => {
@@ -556,12 +569,13 @@ describe("PRを待っている段の内訳（#2816）", () => {
   });
 });
 
-describe("developへマージの中の位置（#2867）", () => {
-  it("CI・レビューが動いている間は「CI・レビュー」のマス、マージだけが残れば「マージ待ち」", () => {
+describe("マージフェーズの詳細（#3941）", () => {
+  it("CI・レビュー中もマージ待ちも同じマージ枠にし、詳細は左側の文言で示す", () => {
     const reviewing = render(
       <WorkflowStepBadge labels={[]} projectStatus="Develop PR" pullRequestProgress={progress()} />,
     );
-    expect(currentSegment(reviewing.container)).toBe("pr-checks");
+    expect(currentSegment(reviewing.container)).toBe("merge");
+    expect(reviewing.container.textContent).toContain("レビュー実施中");
     cleanup();
 
     const waiting = render(
@@ -581,14 +595,15 @@ describe("developへマージの中の位置（#2867）", () => {
         })}
       />,
     );
-    expect(filledSegments(waiting.container)).toBe(5);
-    expect(currentSegment(waiting.container)).toBe("pr-merge");
+    expect(filledSegments(waiting.container)).toBe(2);
+    expect(currentSegment(waiting.container)).toBe("merge");
+    expect(waiting.container.textContent).toContain("マージ待ち");
   });
 
-  it("順番待ちのバーは1マスも塗らない（7マスすべてがまだ）", () => {
+  it("順番待ちのバーは1フェーズも塗らない", () => {
     const { container } = render(<QueueStepBadge queue={queueState()} />);
     expect(filledSegments(container)).toBe(0);
-    expect(container.querySelectorAll("[data-segment]")).toHaveLength(7);
+    expect(container.querySelectorAll("[data-segment]")).toHaveLength(3);
   });
 });
 

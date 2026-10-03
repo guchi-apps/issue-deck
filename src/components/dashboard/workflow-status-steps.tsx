@@ -8,21 +8,16 @@ import {
   describeIssueQueueState,
   type IssueQueueState,
 } from "@/lib/dispatch/issue-queue-state";
-import {
-  resolveImplementationPosition,
-  shortIssueSessionLabel,
-} from "@/lib/dispatch/issue-session";
+import { shortIssueSessionLabel } from "@/lib/dispatch/issue-session";
 import type { DispatchSessionView } from "@/lib/dispatch/session-state";
+import type { PlanReviewListState } from "@/lib/dispatch/plan-review-list-state";
 import {
   checkUserReason,
   CHECK_USER_REASON_TEXT,
   isApprovalPending,
 } from "@/lib/github/approval-labels";
 import { isDispatchedStatusKey } from "@/lib/github/project-status-dispatch";
-import {
-  getSimpleStepLabel,
-  isImplementationRunStep,
-} from "@/lib/github/workflow-step-label";
+import { getSimpleStepLabel } from "@/lib/github/workflow-step-label";
 import {
   allocateSegmentWidths,
   getWorkflowStepIndex,
@@ -32,11 +27,7 @@ import {
   type ProgressSegmentView,
 } from "@/lib/github/workflow-status";
 import { PROGRESS_SEGMENTS, resolveProgressStatus } from "@/lib/issue-progress";
-import {
-  isPullRequestWaitingStatus,
-  resolvePullRequestPosition,
-  type IssuePullRequestProgress,
-} from "@/lib/issue-pull-request-progress";
+import { isPullRequestWaitingStatus, type IssuePullRequestProgress } from "@/lib/issue-pull-request-progress";
 import { cn } from "@/lib/utils";
 import { isWorkflowBadgeSpinning } from "@/lib/workflow-badge-activity";
 import type { IssueLabel } from "@/types/issue";
@@ -151,6 +142,8 @@ type WorkflowStepBadgeProps = ProgressProps & {
    * 内訳はIssue詳細の`WorkflowStatusSteps`が出す。
    */
   pullRequestProgress?: IssuePullRequestProgress | null;
+  /** 一覧で解決済みの計画レビュー状態。Planning中の詳細文言として優先する（#3941）。 */
+  planReviewState?: PlanReviewListState | null;
 };
 
 /**
@@ -168,34 +161,27 @@ type QueueStepBadgeProps = {
  * 表していた。18pxの円では3/6と4/6の角度差を読み取れず、一覧を流し見しても何段目かが
  * 分からなかった。
  *
- * マスは`PROGRESS_SEGMENTS`の7つ（#2867・#2927）。#2516の時点では1マス＝1段（6マス）
- * だったが、長く待つ計画・実装のあいだに動くのが1〜2マスに偏っていたため、実装の中を
- * 3マス・developへマージの中を2マスに分けた（#2867）。**developへのマージが完了する
+ * マスは`PROGRESS_SEGMENTS`の3つ（#3941）。計画・実装・マージを等間隔に示し、フェーズ内の
+ * 詳細は左側の状態文言へ寄せる。**developへのマージが完了する
  * （develop到達）までがこのバーの対象**で、release・doneは`ProductionTracker`が別デザイン
- * として担う（#2927）。**Issue詳細の6段（`WorkflowStatusSteps`）との対応は段の境目の
- * すき間（`STAGE_GAP`）で示す。**
+ * として担う（#2927）。Issue詳細の6段（`WorkflowStatusSteps`）は従来どおり別に表示する。
  */
 /**
- * 37px（#2927。#2516〜#2867の頃は40px）。**7マス・重み均等のときにすき間9pxを引いた
- * 28pxがちょうど4pxずつへ割り切れる値へ合わせてある**（計画レビューの指摘）。重みが
- * 全部同じでも`allocateSegmentWidths`の端数処理（最大剰余法）に委ねると割り切れない
- * 場合に1px差の不揃いが残るため、割り切れる`BAR_WIDTH`を選ぶことで実際に等幅にする。
+ * 39px。3枠の区切りを一覧で読み取れる幅にし、すき間を引いた35pxを均等に配る。
  */
-const BAR_WIDTH = 37;
+const BAR_WIDTH = 39;
 const BAR_HEIGHT = 5;
-/** 同じ段の中のマスのすき間 */
-const SEGMENT_GAP = 1;
-/** 段の境目のすき間。同じ段の中より広く取り、6段のまとまりを読めるようにする */
+/** フェーズの境目のすき間 */
 const STAGE_GAP = 2;
 /** マスの最小幅。これより細いと塗りの濃さの違いが読めない */
 const SEGMENT_MIN_WIDTH = 2;
 
-/** 各マスの幅（px）。重み均等・`BAR_WIDTH`が割り切れる値のため、実際には全マス同じ幅になる */
+/** 各フェーズの幅（px） */
 const SEGMENT_WIDTHS: readonly number[] = (() => {
   const gaps = PROGRESS_SEGMENTS.reduce((sum, segment, index) => {
     const next = PROGRESS_SEGMENTS[index + 1];
     if (next === undefined) return sum;
-    return sum + (next.status === segment.status ? SEGMENT_GAP : STAGE_GAP);
+    return sum + STAGE_GAP;
   }, 0);
   return allocateSegmentWidths(
     PROGRESS_SEGMENTS.map((segment) => segment.weight),
@@ -225,7 +211,7 @@ const SKIPPED_STEP_LABEL = "計画スキップ";
 const SKIPPED_STEP_TITLE = "計画フェーズを通らずに実装へ入りました";
 
 type ProgressBarProps = {
-  /** 7マスそれぞれの状態（`resolveProgressSegments`の結果。#2867・#2927） */
+  /** 3フェーズそれぞれの状態（`resolveProgressSegments`の結果。#3941） */
   segments: readonly ProgressSegmentView[];
   /** 色を決めるTailwindの`text-*`クラス。塗り・未達・掃く光がすべて`currentColor`を参照する */
   colorClass: string;
@@ -301,8 +287,7 @@ function ProgressBar({
           className={cn("shrink-0 rounded-[1px]", segmentFillClass(segment.state, emphasizeTrack))}
           style={{
             width: SEGMENT_WIDTHS[index],
-            marginRight:
-              index === segments.length - 1 ? 0 : segment.stageEnd ? STAGE_GAP : SEGMENT_GAP,
+            marginRight: index === segments.length - 1 ? 0 : STAGE_GAP,
           }}
         />
       ))}
@@ -365,11 +350,9 @@ function ProductionTracker({
 }
 
 /**
- * 一覧などの省スペースな箇所向けに、現在の実装状況を**7マスの横棒**で示す（#2516・#2867・
- * #2927）。マスは`PROGRESS_SEGMENTS`で、Issue詳細の6段ステップ（`WorkflowStatusSteps`）の
- * 実装とdevelopへマージの中を分けたもの。済んだマスを濃く・いまのマスを半分の濃さで塗る。
- * 以前は同じ位置に18pxの円グラフ（`conic-gradient`）を出していたが、小さな円の角度では
- * 3/6と4/6を見分けられず、一覧を流し見しても何段目かが分からなかった。
+ * 一覧などの省スペースな箇所向けに、現在の実装状況を**計画・実装・マージの3枠**で示す（#3941）。
+ * `PROGRESS_SEGMENTS`の済んだフェーズを濃く・いまのフェーズを半分の濃さで塗る。フェーズ内の
+ * 計画レビュー、実装、CI・レビュー、マージ待ちは左側の詳細な状態文言で示す。
  *
  * **developへのマージが完了した時点でバーは常に満タンになり、release・doneは`ProductionTracker`
  * （2点トラッカー）が別デザインとして引き継ぐ**（#2927）。
@@ -397,6 +380,7 @@ export function WorkflowStepBadge({
   queue = null,
   queueWaitReason = null,
   pullRequestProgress = null,
+  planReviewState = null,
 }: WorkflowStepBadgeProps) {
   const currentIndex = getWorkflowStepIndex({ projectStatus });
   if (currentIndex === null) return null;
@@ -411,20 +395,8 @@ export function WorkflowStepBadge({
   // 呼び出し側の絞り込みには頼らずここでも確かめる
   const prProgress = isPullRequestWaitingStatus(step.key) ? pullRequestProgress : null;
   const actionsRunning = running?.isRunning ?? false;
-  // 7マスの塗り（#2867・#2927）。実装の中の位置はサブPCのセッションが報告する作業から、
-  // developへマージの中の位置はPRの内訳から決める。GitHub Actionsの実装ステップが
-  // 走っていれば「実装」のマスまで進める（Actionsは作業の内訳を報告しないため、それ以上は
-  // 分けられない）
-  const progress = resolveProgressSegments(
-    { projectStatus },
-    {
-      implementation:
-        actionsRunning && isImplementationRunStep(running?.currentStep ?? null)
-          ? "editing"
-          : resolveImplementationPosition(session),
-      developPr: resolvePullRequestPosition(prProgress),
-    },
-  );
+  // 3フェーズの塗り（#3941）。フェーズ内の位置は左側の詳細文言へ寄せる。
+  const progress = resolveProgressSegments({ projectStatus });
   if (progress === null) return null;
   // 外周を回すかどうか（#1439）。Actionsの実行中に加えて、サブPCのセッションが生きて動いている
   // 間も回す。人待ち（承認待ち・入力待ち）と、終わった・報告が途絶えたセッションでは回さない
@@ -486,11 +458,21 @@ export function WorkflowStepBadge({
   // 後半が省略記号で切れていた。省いた情報は`title`（下記）にそのまま残す。
   // **PRの内訳（「レビュー実施中」）はそれらより優先する**（#2816）。この段で待っている
   // のはPR側の処理で、そこでのローカルセッションは既に役目を終えている
-  const stepText = prProgress
-    ? prProgress.label
-    : displaySessionLabel && !simpleStep && !awaitingDispatch && !queueLabel
-      ? displaySessionLabel
-      : `${step.label}${suffix ? `（${suffix}）` : ""}`;
+  const planReviewLabel =
+    step.key === "planning" && planReviewState !== null
+      ? ({
+          queued: "計画レビュー起動待ち",
+          creating: "計画レビュー中",
+          presented: "計画レビュー済み・計画承認待ち",
+        } satisfies Record<PlanReviewListState, string>)[planReviewState]
+      : null;
+  const stepText = planReviewLabel
+    ? planReviewLabel
+    : prProgress
+      ? prProgress.label
+      : displaySessionLabel && !simpleStep && !awaitingDispatch && !queueLabel
+        ? displaySessionLabel
+        : `${step.label}${suffix ? `（${suffix}）` : ""}`;
   // 止まっているPR（CI失敗・レビュー失敗・コンフリクト）は赤に倒す（#2816）。承認待ち・
   // 回答待ちが立っているときはそちらを優先する——押す先があるのはあちらで、こちらは状態の報告
   const prAttention = prProgress?.tone === "attention";
