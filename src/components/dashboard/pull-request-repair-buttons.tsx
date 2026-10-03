@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Info, Wrench } from "lucide-react";
 
 import { ApiErrorMessage } from "@/components/dashboard/api-error-message";
@@ -72,6 +72,21 @@ export function PullRequestRepairButtons({
   const [owner, repo] = repositoryFullName.split("/");
   // 押せない種類があるときだけ、理由と次の一手を添える（理由が違えば行を分ける）。
   const unavailableNotices = repairUnavailableNotices(kinds, availability);
+
+  // 起動直後はAPI応答とrepairRunの反映に時間差があるためhasStartedで表示を保つ。
+  // 一度runningKindが観測された後、それがnullへ戻ったら修復完了なので次の対象を起動できるよう戻す。
+  const [sawRunning, setSawRunning] = useState(false);
+  useEffect(() => {
+    if (!hasStarted) return;
+    if (runningKind !== null) {
+      setSawRunning(true);
+      return;
+    }
+    if (sawRunning) {
+      setHasStarted(false);
+      setSawRunning(false);
+    }
+  }, [hasStarted, runningKind, sawRunning]);
 
   if (kinds.length === 0) return null;
 
