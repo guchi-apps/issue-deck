@@ -8,7 +8,7 @@
  *
  * 対策は2つで、どちらもここに置く。
  *
- * - **本文の先頭へ不可視のマーカーを埋める**（`deploy-failure.ts`と同じやり方）。
+ * - **本文の先頭へ不可視のマーカーを埋める**。
  *   GitHubのIssue検索は**HTMLコメントの中身も索引している**ので、
  *   `gh issue list --repo guchi-apps/vps --state open --search "new-app-launch aide-bot"`
  *   で引ける。人が読む本文は変わらない。

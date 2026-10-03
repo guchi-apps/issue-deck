@@ -1691,13 +1691,6 @@ GitHub APIをどれだけ使うかであり、それはissue-deckの側の関心
 どのPRへ起動するかの判定はissue-deck側にある。設計は
 [auto-repair.md](auto-repair.md)「issue-deckからの巡回検知」。
 
-**本番デプロイ失敗の巡回検知（#2236）も同じ1巡に相乗りしている。**
-`POST /api/repositories/deploy-failure-sweep`を毎巡そのまま呼び、間隔
-（`DEPLOY_FAILURE_SWEEP_INTERVAL_MINUTES`・既定5分・0で無効）も起票の判定もissue-deck側が持つ。
-ログに出すのは起票・更新・クローズしたときだけで、`--dry-run`では呼ばない（Issueの起票という
-外向きの副作用があるため）。設計は
-[auto-repair.md](auto-repair.md)「直らなかったデプロイ失敗を、Issueにして残す」。
-
 **進捗の取り残しの巡回回収（#2294）も同じ1巡に相乗りしている。** `POST /api/issues/progress-sweep`を
 毎巡そのまま呼び、間隔（`PROGRESS_SWEEP_INTERVAL_MINUTES`・既定5分・0で無効）も、どのIssueを
 `Develop`へ進めるか・取り残しとして人へ渡すかの判定もissue-deck側が持つ。ラベルの無い手作業Issueへ
@@ -2852,7 +2845,6 @@ poller の POST /api/dispatch/claim（非fast） → 次枠実行 → keepClaude
 | `POST /api/dispatch/sessions` | `DISPATCH_SECRET` | 起動後のtmuxセッションの状態報告（#1217） |
 | `POST /api/dispatch/sessions/ended` | `DISPATCH_SECRET` | セッションが畳まれた瞬間の報告。1件だけ`ALIVE`を降ろす（#1321） |
 | `POST /api/pull-requests/conflict-sweep` | `DISPATCH_SECRET` | コンフリクトしたPRの巡回検知を促す（#2116）。巡回するかどうかも、どのPRへ何を起動するかもissue-deck側が決める |
-| `POST /api/repositories/deploy-failure-sweep` | `DISPATCH_SECRET` | 本番デプロイ失敗の巡回検知を促す（#2236）。巡回するかどうかも、起票するかどうかもissue-deck側が決める |
 | `POST /api/issues/progress-sweep` | `DISPATCH_SECRET` | 進捗の取り残しの巡回回収を促す（#2294）。巡回するかどうかも、どのIssueをどう扱うかもissue-deck側が決める |
 | `POST /api/repositories/release-merge-push-sweep` | `DISPATCH_SECRET` | 本番へのマージ待ちの巡回通知を促す（#2376）。巡回するかどうかも、鳴らすかどうかもissue-deck側が決める |
 | `POST /api/repositories/deploy-launch-sweep` | `DISPATCH_SECRET` | mainへマージしたのにデプロイが起動していないものの巡回検知と起動し直しを促す（#2703）。**間隔で間引かない**（遅れがそのまま本番が古いままの時間になる） |

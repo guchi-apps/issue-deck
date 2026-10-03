@@ -144,10 +144,6 @@ rm -rf "<TARGET_DIR>"
   なので、起動元が走らなくなれば自動で止まる
 - **止めた後は`main`へマージしてもタグとGitHub Releaseは作られない**（`deploy.yml`の`tag`・
   `release`ジョブが作っているため）
-- **デプロイ失敗Issueは自動でcloseされない。** issue-deckが閉じる契機は「次のデプロイの成功」で、
-  デプロイをしなくなる以上その契機が来ない。**手でcloseするのはアーカイブした後**。
-  [`deploy-failure-sweep-run.ts`](../src/lib/github/deploy-failure-sweep-run.ts)は追跡中のIssueが
-  無くなると立て直すため、先にcloseすると同じIssueがもう1件立つ
 
 ## シークレットの後片付け
 
@@ -251,7 +247,7 @@ GitHubの`archived`は再同期のタイミングでDBへ取り込まれるた�
 **外れない。**
 
 - `repositoryFullName`を文字列で持つ表（`DispatchJob`・`DispatchSession`・`NightlyRunEntry`・
-  `ManualStepRun`・`DeployFailureIssue`など）のレコードは残る。実害は無いので消さない
+  `ManualStepRun`など）のレコードは残る。実害は無いので消さない
 - ドキュメントに書いた`gh repo list`のコマンド例（`--no-archived`を付ける）
 - GitHub Secrets・1Passwordのアイテム・VPS実機の資源・DNS・外形監視
 

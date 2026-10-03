@@ -480,7 +480,7 @@ IOは[`lib/github/new-app-existing-issue.ts`](../src/lib/github/new-app-existing
 ```
 
 **GitHubのIssue検索はHTMLコメントの中身も索引している**ので、これで引ける。人が読む本文は
-変わらない（`deploy-failure.ts`と同じやり方）。
+変わらない（本文の先頭へ不可視のマーカーを埋める方法）。
 
 ```bash
 gh issue list --repo guchi-apps/vps --state open --search "new-app-launch aide-bot" --json number,title

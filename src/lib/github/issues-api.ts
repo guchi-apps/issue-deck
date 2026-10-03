@@ -305,12 +305,10 @@ export async function fetchRepositoryLabelNames(
 }
 
 /**
- * Issue1件の状態（open / closed）を読む（#2236）。**存在しなければnull。** 401のときだけ
+ * Issue1件の状態（open / closed）を読む。**存在しなければnull。** 401のときだけ
  * `GithubApiError`を投げる（トークンの延長を呼び出し側に任せるため。#3148）。
  *
- * デプロイ失敗の追跡Issue（`deploy-failure-sweep-run.ts`）が、DBに「起票済み・open」と
- * 記録している行の実物を確かめるのに使う。**人が画面から先に閉じることがある**ため、
- * DBの記録だけを信じると「閉じたのに次の失敗でIssueが立たない」状態が続く。
+ * iOS配布失敗の追跡Issueが、DBに記録した行の実物を確かめるのに使う。
  */
 export async function fetchIssueState(
   owner: string,

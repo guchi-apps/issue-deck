@@ -3,7 +3,6 @@
 import { createContext, useContext, useState } from "react";
 import { ExternalLink, Loader2, Sparkles, TriangleAlert, Wrench } from "lucide-react";
 
-import { GithubReferenceLink } from "@/components/dashboard/github-reference-link";
 import { RepositoryDeployButton } from "@/components/dashboard/repository-deploy-button";
 import type { DeployFailureAnalysis } from "@/lib/claude/deploy-failure-analysis";
 import {
@@ -12,7 +11,6 @@ import {
   type DeployFailureFixIssueDraft,
 } from "@/lib/deploy-failure";
 import { cn } from "@/lib/utils";
-import type { DeployFailureIssueRef } from "@/types/branch-flow";
 
 /**
  * 本番デプロイが失敗しているときに、失敗が見えている場所へそのまま出す帯（#2236）。
@@ -22,14 +20,13 @@ import type { DeployFailureIssueRef } from "@/types/branch-flow";
  * PR詳細とIssue詳細には入口が無かった。落ちたことに気づいた人が、画面を移らずに
  * 出し直せるようにする。
  *
- * 出す先は3つで、**中身は同じもの**（見出しと説明だけ画面ごとに変える）。
+ * 出す先は2つで、**中身は同じもの**（見出しと説明だけ画面ごとに変える）。
  *
  * - ブランチ画面: 落ちた版の束の中
  * - PR詳細: 「デプロイ失敗」ピルの下
- * - Issue詳細: 自動起票したデプロイ失敗Issueのパネル（`deploy-failure-panel.tsx`）
  *
  * **ボタンは`RepositoryDeployButton`をそのまま使う。** 確認ダイアログ（押すと本番へ出るため
- * 必ず挟む）と`POST /api/repositories/deploy`の呼び出しを、3画面ぶん書き分けないため。
+ * 必ず挟む）と`POST /api/repositories/deploy`の呼び出しを、2画面ぶん書き分けないため。
  */
 /**
  * 「修正Issueを作成」の送り先（#3887）。**ここでは起票せず**、下書き入りの新規作成ダイアログを開くのは
@@ -60,9 +57,7 @@ export type DeployFailureAlertProps = {
   failedJobs?: string[];
   /** 失敗した実行のログURL */
   runUrl?: string | null;
-  /** 追跡している自動起票Issue。無ければリンクを出さない */
-  failureIssue?: DeployFailureIssueRef | null;
-  /** 説明の下に足す補足（Issue詳細だけが使う） */
+  /** 説明の下に足す補足 */
   footer?: React.ReactNode;
   /** すでに起動済みで実行が現れるのを待っている最中か */
   isPending?: boolean;
@@ -81,7 +76,6 @@ export function DeployFailureAlert({
   autoRetried = false,
   failedJobs = [],
   runUrl = null,
-  failureIssue = null,
   footer,
   isPending = false,
   onTriggered,
@@ -127,7 +121,6 @@ export function DeployFailureAlert({
         version,
         runUrl,
         failedJobs,
-        failureIssueNumber: failureIssue?.number ?? null,
         analysis,
       }),
     );
@@ -207,15 +200,6 @@ export function DeployFailureAlert({
               <ExternalLink className="size-3" aria-hidden="true" />
               実行ログを開く
             </a>
-          )}
-          {failureIssue && (
-            <GithubReferenceLink
-              href={failureIssue.htmlUrl}
-              reference={{ repositoryFullName, number: failureIssue.number, kind: "issue" }}
-              className="text-primary hover:underline"
-            >
-              デプロイ失敗 #{failureIssue.number}
-            </GithubReferenceLink>
           )}
         </div>
       </div>
