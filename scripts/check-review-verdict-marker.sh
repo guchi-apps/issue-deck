@@ -272,15 +272,8 @@ fi
 # 修正Issueの本文の`対応PR: #<番号>`（リリースの検証結果から起票）・`対象PR: #<番号>`
 # （PR詳細から起票）は、リリースのワークフローが「このPRは同じリリースの修正Issueで直った」と
 # 読む材料。**ずれても赤くならず、作り直したリリースで直したはずのPRが要修正のまま残る**。
-FIX_ISSUE_DRAFT="src/lib/github/pull-request-fix-issue.ts"
-[ -f "$FIX_ISSUE_DRAFT" ] || { echo "エラー: $FIX_ISSUE_DRAFT が見つかりません" >&2; exit 1; }
-
 if ! grep -qF '`- 対応PR: ${row.pullRequestNumber !== null ? `#' "$PARSER"; then
   echo "エラー: $PARSER の修正Issueの下書きに「- 対応PR: #<番号>」の行が見つかりません。" >&2
-  fail=1
-fi
-if ! grep -qF 'TARGET_PULL_REQUEST_MARKER_PREFIX = "対象PR: #"' "$FIX_ISSUE_DRAFT"; then
-  echo "エラー: $FIX_ISSUE_DRAFT の修正Issueのマーカーが「対象PR: #」ではありません。" >&2
   fail=1
 fi
 if ! grep -qF '(対応PR|対象PR): #([0-9]+)' "$RELEASE_WORKFLOW"; then

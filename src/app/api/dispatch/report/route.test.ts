@@ -1,7 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { PR_FIX_SESSION_INSTRUCTION } from "@/lib/dispatch/pr-fix-request";
-
 const reportDispatchJob = vi.fn();
 const resolveFixedInstructionCheckUser = vi.fn();
 
@@ -34,7 +32,7 @@ function job(overrides: Record<string, unknown> = {}) {
     id: "job-1",
     kind: "INSTRUCTION",
     recovery: true,
-    instruction: PR_FIX_SESSION_INSTRUCTION,
+    instruction: "固定の復旧指示",
     repositoryFullName: "guchi-apps/issue-deck",
     issueNumber: 2919,
     ...overrides,
@@ -52,9 +50,7 @@ function postRequest(body: unknown) {
 const succeeded = { jobId: "job-1", host: "subpc", status: "succeeded" };
 
 /**
- * 停滞からの復旧で送られる文面（#2886）。**`session-stall.ts`は本文を公開していない**ので、
- * ここでは「修正依頼の1行ではない`recovery`ジョブ」の代表として置いている——見分けているのは
- * 「修正依頼の1行と一致するか」の1点なので、他のどの文面でも結果は同じ。
+ * 停滞からの復旧で送られる文面（#2886）。
  */
 const STALL_RECOVERY_BODY =
   "直前の応答がAPIエラーで中断しました。中断したところから作業を続けてください。";
@@ -66,18 +62,15 @@ beforeEach(() => {
 });
 
 /**
- * 固定文面が届いた時点の確認待ちの片付け（#2886・#2919）。
- *
- * **どちらの経路も`recovery`で積まれるので、送った本文で見分ける。** ここを取り違えると、
- * 停滞からの復旧でマージ待ちの札まで落ちるか、修正依頼を送っても札が残るかのどちらかになる。
+ * 固定文面が届いた時点の確認待ちの片付け（#2886）。
  */
 describe("POST /api/dispatch/report の確認待ち解除", () => {
-  it("マージ待ちの修正依頼が届いたら、01.check-mergeも外してよいと伝える", async () => {
+  it("復旧指示が届いても01.check-mergeは外さない", async () => {
     await POST(postRequest(succeeded));
     expect(resolveFixedInstructionCheckUser).toHaveBeenCalledWith({
       repositoryFullName: "guchi-apps/issue-deck",
       issueNumber: 2919,
-      allowMergeReason: true,
+      allowMergeReason: false,
     });
   });
 

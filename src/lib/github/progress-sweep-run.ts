@@ -9,8 +9,6 @@ import { getInstallationToken } from "@/lib/github/app-auth";
 import { compareBranches, fetchBranchHeadSha } from "@/lib/github/branches-api";
 import { sweepCompletedCodeReviews } from "@/lib/github/code-review-close-sweep-run";
 import type { CodeReviewCloseSkipReason } from "@/lib/github/code-review-close-sweep";
-import type { FixIssueCloseSkipReason } from "@/lib/github/fix-issue-close-sweep";
-import { sweepClosableFixIssues } from "@/lib/github/fix-issue-close-sweep-run";
 import {
   addIssueLabels,
   createComment,
@@ -126,11 +124,7 @@ export type ProgressSweepAction = {
     /** 本番反映済みなのにopenのまま残っていたIssueをcloseした（#2715） */
     | "open_closed"
     /** 全指摘が対応済みのコードレビューIssueをcloseした（#3216） */
-    | "code_review_closed"
-    /** 対象PRがマージされた修正Issueをcloseした（#3353） */
-    | "fix_issue_closed"
-    /** 修正PRが元PRを取り込んだため、元PRをcloseした（#3918） */
-    | "original_pr_closed";
+    | "code_review_closed";
 };
 
 export type ProgressSweepResult = {
@@ -155,7 +149,6 @@ export type ProgressSweepResult = {
       | ClosedStrandedSkipReason
       | MergedOpenSkipReason
       | CodeReviewCloseSkipReason
-      | FixIssueCloseSkipReason
       | "fetch_failed"
       | "action_failed",
       number
@@ -333,17 +326,6 @@ export async function runProgressSweep(
     );
   } catch (error) {
     console.error("[progress-sweep] コードレビューIssueの自動close:", error);
-    countSkip("fetch_failed");
-  }
-
-  // 対象PRがマージされた修正Issueを閉じる（#3353）。上と同じ理由で、DB取得自体の失敗も外側で握る。
-  try {
-    const fixIssueActions = await sweepClosableFixIssues({ tokenFor, countSkip });
-    actions.push(
-      ...fixIssueActions,
-    );
-  } catch (error) {
-    console.error("[progress-sweep] 修正Issueの自動close:", error);
     countSkip("fetch_failed");
   }
 
