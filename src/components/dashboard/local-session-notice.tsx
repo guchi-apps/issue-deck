@@ -8,8 +8,8 @@ import { formatDispatchHostName } from "@/lib/dispatch/host-label";
 import {
   describeSessionPermission,
   resolveIssueImplementationAgent,
-  summarizeIssueSession,
 } from "@/lib/dispatch/issue-session";
+import { buildSessionOpenTarget } from "@/lib/dispatch/session-open-target";
 import { describeSessionStall } from "@/lib/dispatch/session-stall";
 import type { DispatchSessionView } from "@/lib/dispatch/session-state";
 
@@ -42,15 +42,12 @@ function LocalSessionNotice({
    * そのままでよい」場面なので、従来どおり枠線のまま。
    */
   emphasizeRemoteControl = false,
-  /** Remote Controlボタンの文言。承認欄では「答える」ことが用件なので言い換える */
-  remoteControlLabel = "Claude Codeアプリで開く",
 }: {
   session: DispatchSessionView | null;
   children: ReactNode;
   emphasizeRemoteControl?: boolean;
-  remoteControlLabel?: string;
 }) {
-  const remoteControlUrl = session ? summarizeIssueSession(session).remoteControlUrl : null;
+  const openTarget = session ? buildSessionOpenTarget(session) : null;
 
   return (
     <div className="mb-2 rounded-md bg-muted/60 p-2 text-xs text-muted-foreground">
@@ -58,15 +55,15 @@ function LocalSessionNotice({
         <Info className="mt-0.5 size-3.5 shrink-0" />
         <span>{children}</span>
       </p>
-      {remoteControlUrl && (
+      {openTarget && (
         <Button
           variant={emphasizeRemoteControl ? "default" : "outline"}
           size="sm"
           className="mt-2"
           asChild
         >
-          <a href={remoteControlUrl} target="_blank" rel="noreferrer">
-            {remoteControlLabel}
+          <a href={openTarget.url} target="_blank" rel="noreferrer">
+            セッションを開く
             <ExternalLink />
           </a>
         </Button>
@@ -130,7 +127,7 @@ export function LocalSessionApprovalNotice({
   // **アプリを開かずに復旧できること自体が画面から読み取れない**（計画パネルと同じ扱い）
   if (describeSessionStall(session)) {
     return (
-      <LocalSessionNotice session={session} remoteControlLabel="Claude Codeアプリで開く">
+      <LocalSessionNotice session={session}>
         {hostName}のセッションが停滞しています。
         <strong className="font-medium">
           上の「セッションが停滞しています」から復旧の文面を送れます
@@ -145,7 +142,6 @@ export function LocalSessionApprovalNotice({
     <LocalSessionNotice
       session={session}
       emphasizeRemoteControl={!isCodex}
-      remoteControlLabel={isCodex ? "端末で答える" : "Remote Controlで答える"}
     >
       {hostName}のセッションが担当中です。
       <strong className="font-medium">ここに書いた回答はセッションに届きません</strong>
@@ -191,7 +187,7 @@ export function LocalSessionWaitingInputNotice({
 
   if (questionAnswerPending) {
     return (
-      <LocalSessionNotice session={session} remoteControlLabel="Claude Codeアプリで開く">
+      <LocalSessionNotice session={session}>
         質問の回答を待っています。
         <strong className="font-medium">
           上の「質問の回答を待っています」から選択肢を選んで送れます
@@ -204,7 +200,7 @@ export function LocalSessionWaitingInputNotice({
 
   if (planDecisionPending) {
     return (
-      <LocalSessionNotice session={session} remoteControlLabel="Claude Codeアプリで開く">
+      <LocalSessionNotice session={session}>
         計画の承認を待っています。
         <strong className="font-medium">
           上の「計画の承認を待っています」から承認・修正を送れます
@@ -218,7 +214,7 @@ export function LocalSessionWaitingInputNotice({
   // 承認ダイアログで許可を求めているとき（#2971）。答える場所は同じだが、押すものが違う
   if (session && describeSessionPermission(session)) {
     return (
-      <LocalSessionNotice session={session} remoteControlLabel="Claude Codeアプリで開く">
+      <LocalSessionNotice session={session}>
         走っているセッションが<strong className="font-medium">アクセスの許可</strong>を待っています。
         Claude Codeアプリから許可・拒否を選んでください（`11.local`が付いている間、このコメント欄へ
         書いても走っているセッションには届きません）。選ぶと`00.check-user`は自動的に外れます。

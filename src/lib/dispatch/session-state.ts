@@ -128,6 +128,20 @@ export function parseRemoteControlUrl(value: unknown): string | null {
 }
 
 /**
+ * CodexのスレッドUUIDとして受け入れる形。
+ *
+ * URLそのものをホストから受け取らず、ここで検証したUUIDからissue-deck側がDeep Linkを
+ * 組み立てる。これにより、共有シークレットを持つ相手が任意のリンクを画面へ差し込めない。
+ */
+export function parseCodexThreadId(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  if (!/^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(value)) {
+    return null;
+  }
+  return value.toLowerCase();
+}
+
+/**
  * 承認ダイアログで許可を求めているツール名として受け入れる形（#2971）。
  *
  * 組み込みのツール（`Read`・`Bash`…）とMCPのツール（`mcp__server__tool`）が通る文字だけを許す。
@@ -353,6 +367,11 @@ export type DispatchSessionReport = {
    */
   codexThreadKnown?: boolean | null;
   /**
+   * CodexのスレッドUUID。URLではなくUUIDだけを受け取り、表示用のDeep Linkは
+   * `session-open-target.ts`が組み立てる。古いpollerでは項目そのものが無い。
+   */
+  codexThreadId?: string | null;
+  /**
    * いま何をしているか（#2705）。**フックが書いた印をpollerが運ぶだけ**で、issue-deck側は
    * 判定に加わらない。
    *
@@ -424,6 +443,8 @@ export type DispatchSessionView = {
    * **`false`のあいだは追加指示を送れない**（`resolveSessionControlRejection`が断る）。
    */
   codexThreadKnown: boolean | null;
+  /** CodexのスレッドUUID。未取得・Claude Codeのセッションではnull。 */
+  codexThreadId?: string | null;
   /**
    * いま何をしているか（#2705）と、そのステップに入った時刻。申告が無ければ`null`。
    * 画面に出す形にするのは`describeSessionStep`（`issue-session.ts`）。
@@ -686,6 +707,19 @@ export function parseDispatchSessionReport(value: unknown): DispatchSessionRepor
     codexThreadKnown = rawCodexThread;
   }
 
+  // UUIDの形式でない値は、任意のDeep Linkを作らせないため報告全体を拒否する。`null`は
+  // 新しいpollerが「まだUUIDが無い」と確認した値、項目が無いのは古いpollerである。
+  const hasCodexThreadId = "codexThreadId" in input;
+  let codexThreadId: string | null | undefined;
+  if (hasCodexThreadId) {
+    if (input.codexThreadId === null) {
+      codexThreadId = null;
+    } else {
+      codexThreadId = parseCodexThreadId(input.codexThreadId);
+      if (codexThreadId === null) return null;
+    }
+  }
+
   // いま何をしているか（#2705）。**`reap`と同じ扱い**——壊れていても報告全体は通し、コードと
   // 時刻は揃って初めて意味を持つので、片方でも読めなければ両方nullにする（経過時間を出せない
   // ステップを画面へ出さない）
@@ -713,6 +747,7 @@ export function parseDispatchSessionReport(value: unknown): DispatchSessionRepor
     // 古いpollerは送ってこない。`undefined`のまま残すと既存の値を触らない
     ...(hasReapField ? reap : {}),
     ...(codexThreadKnown === undefined ? {} : { codexThreadKnown }),
+    ...(codexThreadId === undefined ? {} : { codexThreadId }),
     ...(hasStepField ? step : {}),
   };
 }

@@ -363,6 +363,20 @@ describe("reportDispatchSessions", () => {
       expect(upsert.mock.calls[0]?.[0]?.update).toMatchObject({ codexThreadKnown: false });
     });
 
+    it("検証済みのCodexスレッドUUIDを保存し、nullの報告で消す", async () => {
+      findMany.mockResolvedValueOnce([existingRow()]).mockResolvedValueOnce([]);
+      await reportDispatchSessions({
+        hostName: "subpc",
+        sessions: [
+          report({ codexThreadId: "a0b1c2d3-1234-4abc-9def-0123456789ab" }),
+        ],
+        now: NOW,
+      });
+      expect(upsert.mock.calls[0]?.[0]?.update).toMatchObject({
+        codexThreadId: "a0b1c2d3-1234-4abc-9def-0123456789ab",
+      });
+    });
+
     // 古いpollerはこの項目を送ってこない。**キーごと渡さない**ので既存の値が消えない
     it("宛先を申告しない古いpollerでは、その列を書き換えない（#2519）", async () => {
       findMany.mockResolvedValueOnce([existingRow()]).mockResolvedValueOnce([]);

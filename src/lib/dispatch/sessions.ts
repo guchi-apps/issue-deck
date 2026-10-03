@@ -69,6 +69,7 @@ function toSessionView(session: DispatchSession): DispatchSessionView {
     // Codexのセッションの宛先が分かっているか（#2519）。**Claude Codeの行では`null`**で、
     // 追加指示の判定に効かない
     codexThreadKnown: session.codexThreadKnown,
+    codexThreadId: session.codexThreadId,
     // コードが読めなければ時刻も出さない（経過時間だけが宙に浮くのを防ぐ）
     step,
     stepAt: step === null ? null : (session.stepAt?.toISOString() ?? null),
@@ -369,6 +370,10 @@ export async function reportDispatchSessions(params: {
     // 前の巡の値を残す意味が無い。古いpollerは項目そのものを送ってこない（`undefined`）
     const codexThread =
       report.codexThreadKnown === undefined ? {} : { codexThreadKnown: report.codexThreadKnown };
+    // UUIDはpollerが読めた巡の値で置き換える。古いpollerが項目を送らない場合は既存値を
+    // 触らず、`null`は新しいpollerが未取得と確認した値として消す。
+    const codexThreadId =
+      report.codexThreadId === undefined ? {} : { codexThreadId: report.codexThreadId };
     // いま何をしているか（#2705）。**送ってきた巡の値でそのまま置き換える**（畳む予定と同じ扱い）。
     // 時刻は「そのステップに入った時刻」で、ホスト側が同じコードの間は書き換えないため、
     // 毎巡上書きしても経過時間は伸び続ける。古いpollerは項目そのものを送ってこない（`undefined`）
@@ -403,6 +408,7 @@ export async function reportDispatchSessions(params: {
         ...(startingTransition === "enter" ? { activity: "NOT_STARTED", activityAt: now } : {}),
         ...reap,
         ...codexThread,
+        ...codexThreadId,
         ...step,
         // Remote ControlのURL（#2771）。pollerが引けた巡だけ載る。フックの報告より先に行を
         // 作る1巡目でも、ここで入れば起動直後から「Claude Codeアプリで開く」が出る
@@ -427,6 +433,7 @@ export async function reportDispatchSessions(params: {
               activity: null,
               activityAt: null,
               remoteControlUrl: null,
+              codexThreadId: null,
               firstSeenAt: now,
               reapAt: null,
               reapReason: null,
@@ -456,6 +463,7 @@ export async function reportDispatchSessions(params: {
         // **`revived`の後に置く**（立ち上がり直した行では、捨てた後にこの巡の値を入れる）
         ...reap,
         ...codexThread,
+        ...codexThreadId,
         ...step,
         // **`revived`の後に置く**（立ち上がり直した行では、捨てた後にこの巡のURLを入れる。
         // 引くのは同じtmux名を持つ最新の記録なので、前のセッションのURLは載らない）
