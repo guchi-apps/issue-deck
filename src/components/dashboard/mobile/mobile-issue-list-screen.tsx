@@ -77,6 +77,10 @@ type MobileIssueListScreenProps = {
    */
   groupByRepo?: boolean;
   onChangeGroupByRepo?: (value: boolean) => void;
+  /** 未着手ビューの予約実行中Issueの表示切替（#3822）。フィルターシートへそのまま渡す */
+  showReservedIssues?: boolean;
+  onChangeShowReservedIssues?: (value: boolean) => void;
+  reservedIssueCount?: number;
   onChangeView: (view: NavViewId) => void;
   onChangeFilters: (filters: MobileIssueLocalFilters) => void;
   onSelectIssue: (issue: Issue) => void;
@@ -167,6 +171,9 @@ export function MobileIssueListScreen({
   assigneeOptions,
   groupByRepo = false,
   onChangeGroupByRepo,
+  showReservedIssues,
+  onChangeShowReservedIssues,
+  reservedIssueCount,
   onChangeView,
   onChangeFilters,
   onSelectIssue,
@@ -487,6 +494,9 @@ export function MobileIssueListScreen({
         sortLocked={view === "check-user"}
         groupByRepo={groupByRepo}
         onChangeGroupByRepo={onChangeGroupByRepo}
+        showReservedIssues={showReservedIssues}
+        onChangeShowReservedIssues={view === "not-started" ? onChangeShowReservedIssues : undefined}
+        reservedIssueCount={reservedIssueCount}
         activeFilterCount={activeFilterCount}
         onClearFilters={() => onChangeFilters(clearIssueFilterConditions(filters, view))}
       />

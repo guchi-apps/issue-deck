@@ -770,6 +770,22 @@ describe("time-dependent stats", () => {
       });
     });
 
+    it("予約実行中のIssueは、渡した集合ぶんだけ未着手の件数から引く（#3822）", () => {
+      const issues = [makeIssue({ id: "1" }), makeIssue({ id: "2" })];
+      const counts = computeNavCountsForFilters(
+        issues,
+        listFilters,
+        "me",
+        issues,
+        undefined,
+        undefined,
+        new Set(["2"]),
+      );
+      expect(counts["not-started"]).toBe(1);
+      // 他のビューの件数は変わらない
+      expect(counts.all).toBe(2);
+    });
+
     // 前提待ちを含む総数は「いま手を動かせば片付く数」として読めない（#1763）
     it("ユーザーの作業待ちは、いま実行できる手作業だけを数える", () => {
       const manualStepLabel = { name: "71.manual-step", color: "d876e3", description: null };

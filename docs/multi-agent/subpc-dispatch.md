@@ -2792,6 +2792,16 @@ poller の POST /api/dispatch/claim（非fast） → launchNextWindowRunEntries�
 | `src/app/api/nightly-run/` | 一覧・積む・取り消す・設定 |
 | `src/components/dashboard/nightly-run-panel.tsx` | 画面（PC・スマホ共用） |
 
+### 未着手ビューでは予約中のIssueを標準で伏せる（#3822）
+
+予約実行に積まれたIssue（`selectScheduledRunQueuedMarks`の表に載るもの）は起動待ちで人が着手する
+必要が無いため、**未着手ビューの一覧と件数から標準で外す**。一覧のフィルター（スマホはフィルター
+シート）の「予約実行中も表示」で出せ、設定は端末のlocalStorage（`useShowReservedIssues`）へ保存する。
+除外の集合は`selectReservedIssueIdsToHide`が作り、一覧（`issue-deck-shell.tsx`・
+`mobile-issues-screen.tsx`）と件数（`computeNavCountsForFilters`の最終引数）が同じ集合を読む。
+予約実行の一覧は5分間隔（予約実行画面を開いている間は30秒）で取り直すため、他端末で積んだ
+直後は最大5分、未着手に残る。
+
 ### 5時間枠を開けておく（#3032）
 
 guchi-apps/question#69の案B。「予約実行」画面の設定をONにすると、**指定した時間帯（既定7:00〜23:00・
