@@ -25,6 +25,8 @@ export type IosTestflightResponse =
       available: true;
       latestDeliveredBuild: { tag: string; buildNumber: number } | null;
       runs: IosTestflightRun[];
+      /** 開いている追跡Issue（自動起票または画面から起票したもの。#3784）。無ければnull */
+      trackedIssue?: { number: number; htmlUrl: string } | null;
       /** `prNumber`を渡したときだけ入る、その版（リリースPR）の配布状態（#3644） */
       release?: {
         sha: string | null;

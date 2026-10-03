@@ -42,12 +42,17 @@ import {
 } from "@/components/dashboard/pull-request-badges";
 import { PullRequestMergeButton } from "@/components/dashboard/pull-request-merge-button";
 import { PullToRefreshIndicator } from "@/components/dashboard/pull-to-refresh-indicator";
+import type { IosDistributionFixIssueDraft } from "@/lib/ios-distribution-failure";
 import { DeployFailureAlert } from "@/components/dashboard/deploy-failure-alert";
 import { ReleaseBulkButton } from "@/components/dashboard/release-bulk-button";
 import { RepositoryDeployButton } from "@/components/dashboard/repository-deploy-button";
 import { WorkflowRunProgressPanel } from "@/components/dashboard/workflow-run-progress-panel";
 import { RepositoryReleaseButton } from "@/components/dashboard/repository-release-button";
-import { IosReleaseGroupPanel } from "@/components/dashboard/ios-release-group-panel";
+import {
+  IosFixIssueDraftContext,
+  IosReleaseGroupPanel,
+  type IosFixIssueOrigin,
+} from "@/components/dashboard/ios-release-group-panel";
 import { ReleaseRebuildButton } from "@/components/dashboard/release-rebuild-button";
 import { getWebviewIosRepository } from "@/lib/webview-ios-repos";
 import { ResizeHandle } from "@/components/dashboard/resize-handle";
@@ -167,6 +172,11 @@ type BranchFlowViewProps = {
    * 渡されない場合は`onRefresh`だけを呼ぶ（＝再取得が返るまでマージ待ちのまま残る）。
    */
   onMerged?: (pullRequest: PullRequestSummary) => void;
+  /**
+   * iOS配布が失敗した束の「修正Issueを起案」（#3784）。**ここでは起票せず**、下書き入りの
+   * 新規作成ダイアログを開く。渡さない場合はボタンを出さない。
+   */
+  onDraftIosFixIssue?: (draft: IosDistributionFixIssueDraft, origin: IosFixIssueOrigin) => void;
   /**
    * 一覧を下へ引っ張ったときに実行する更新（#1958）。**渡した画面でだけ有効になる。**
    * 引っ張るという操作はタッチにしか無く、PCの画面は渡さないので今までどおり
@@ -2081,6 +2091,7 @@ export function BranchFlowView({
   onChangeAutoRefreshInterval,
   onRefresh,
   onMerged,
+  onDraftIosFixIssue,
   onPullToRefresh,
   refreshIconOnly = false,
   splitLayout = false,
@@ -2233,6 +2244,7 @@ export function BranchFlowView({
     ) ?? null;
 
   return (
+    <IosFixIssueDraftContext.Provider value={onDraftIosFixIssue}>
     <div ref={layoutRef} className={cn("flex flex-col overflow-hidden", className)} style={style}>
       {/*
         スマホ（`md`未満）ではヘッダーを2段にする（#1638）。1段のままだと、見出しと
@@ -2468,5 +2480,6 @@ export function BranchFlowView({
         )}
       </div>
     </div>
+    </IosFixIssueDraftContext.Provider>
   );
 }

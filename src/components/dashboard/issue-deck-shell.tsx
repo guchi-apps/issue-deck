@@ -50,6 +50,8 @@ import { PreviewPanel } from "@/components/dashboard/preview-panel";
 import { NightlyRunPanel } from "@/components/dashboard/nightly-run-panel";
 import { IdeasPanel } from "@/components/dashboard/ideas-panel";
 import { IosExtensionsPanel } from "@/components/dashboard/ios-extensions-panel";
+import type { IosFixIssueOrigin } from "@/components/dashboard/ios-release-group-panel";
+import type { IosDistributionFixIssueDraft } from "@/lib/ios-distribution-failure";
 import { useIdeasCount } from "@/hooks/use-ideas";
 import { ReleaseHistoryPanel } from "@/components/dashboard/release-history-panel";
 import {
@@ -416,6 +418,11 @@ export function IssueDeckShell({
    * 「作った方が先」と書き足すために覚えておく
    */
   const [configIssueOrigin, setConfigIssueOrigin] = useState<Issue | null>(null);
+  /**
+   * iOS配布失敗の「修正Issueを起案」の起案元（#3784）。作成できた時点で、そのIssueを追跡Issueとして
+   * 登録し、巡回が重ねて自動起票しないようにするために覚えておく。**他の入口はすべて`null`へ戻す**
+   */
+  const [iosFixOrigin, setIosFixOrigin] = useState<IosFixIssueOrigin | null>(null);
   const [crossQuestionDialogOpen, setCrossQuestionDialogOpen] = useState(false);
   /** 新規アプリの立ち上げ（#2188）。入口はPCの左メニューとスマホのホームの最下部の1行だけ */
   const [newAppDialogOpen, setNewAppDialogOpen] = useState(false);
@@ -483,6 +490,7 @@ export function IssueDeckShell({
     setCreateDialogTitle(null);
     setCreateDialogBody(null);
     setConfigIssueOrigin(null);
+    setIosFixOrigin(null);
   }
 
   /**
@@ -503,6 +511,7 @@ export function IssueDeckShell({
     setCreateDialogBody(draft.body);
     setCreateDialogBodyPrefix(null);
     setConfigIssueOrigin(issue);
+    setIosFixOrigin(null);
     setCreateDialogOpen(true);
   }
 
@@ -536,6 +545,7 @@ export function IssueDeckShell({
     setCreateDialogBody(draft.body);
     setCreateDialogBodyPrefix(null);
     setConfigIssueOrigin(null);
+    setIosFixOrigin(null);
     setCreateDialogOpen(true);
   }
 
@@ -573,6 +583,7 @@ export function IssueDeckShell({
     setCreateDialogBody(draft.body);
     setCreateDialogBodyPrefix(null);
     setConfigIssueOrigin(null);
+    setIosFixOrigin(null);
     setCreateDialogOpen(true);
   }
 
@@ -587,7 +598,17 @@ export function IssueDeckShell({
     setCreateDialogBody(draft.body);
     setCreateDialogBodyPrefix(null);
     setConfigIssueOrigin(null);
+    setIosFixOrigin(null);
     setCreateDialogOpen(true);
+  }
+
+  /**
+   * ブランチ画面のiOS配布欄の「修正Issueを起案」（#3784）。**ここでは起票しない**
+   * （`openPullRequestFixIssueDialog`と同じ立場）。起案元は覚えておき、作成後に追跡Issueへ登録する。
+   */
+  function openIosFixIssueDialog(draft: IosDistributionFixIssueDraft, origin: IosFixIssueOrigin) {
+    openPullRequestFixIssueDialog(draft);
+    setIosFixOrigin(origin);
   }
 
   /**
@@ -623,6 +644,38 @@ export function IssueDeckShell({
     if (configIssueOrigin) {
       void linkConfigIssueToManualStep(configIssueOrigin, issue);
       clearConfigIssuePrefill();
+    }
+    // iOS配布失敗の修正Issue（#3784）。起票先を変えていたら登録しない（別リポジトリの同じ番号を
+    // 巡回が閉じてしまうため）
+    if (iosFixOrigin) {
+      if (issue.repositoryFullName === iosFixOrigin.repositoryFullName) {
+        void registerIosFixIssueAsTracked(iosFixOrigin, issue);
+      }
+      setIosFixOrigin(null);
+    }
+  }
+
+  /**
+   * 起票した修正Issueを、iOS配布失敗の追跡Issueとして登録する（#3784）。失敗しても起票は済んでいるので
+   * 握りつぶしてログだけ残す（巡回が重ねて起票しうるだけで、画面の操作は止めない）。
+   */
+  async function registerIosFixIssueAsTracked(origin: IosFixIssueOrigin, created: Issue) {
+    const [owner, repo] = origin.repositoryFullName.split("/");
+    try {
+      await fetch("/api/repositories/ios-testflight/tracked-issue", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          owner,
+          repo,
+          runId: origin.runId,
+          runUrl: origin.runUrl,
+          failedStage: origin.failedStage,
+          issueNumber: created.number,
+        }),
+      });
+    } catch (error) {
+      console.error("[ios-fix-issue] 追跡Issueの登録に失敗しました:", error);
     }
   }
 
@@ -2226,6 +2279,7 @@ export function IssueDeckShell({
                     deployStatus.refresh();
                   }}
                   onMerged={handleBranchFlowMerged}
+                  onDraftIosFixIssue={openIosFixIssueDialog}
                 />
               )}
 
@@ -2629,6 +2683,7 @@ export function IssueDeckShell({
                 deployStatus.refresh();
               }}
               onMerged={handleBranchFlowMerged}
+              onDraftIosFixIssue={openIosFixIssueDialog}
               /* 左右2ペイン（#2157）。幅が足りるかどうかは`BranchFlowView`が実測して決める */
               splitLayout
               className="hidden flex-1 md:flex"
