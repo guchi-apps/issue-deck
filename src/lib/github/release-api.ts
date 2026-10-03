@@ -153,6 +153,8 @@ export type ReleaseHistoryItem = {
   body: string | null;
   /** TestFlightへ配布済みのビルド番号（#3800）。配布対象リポジトリで、配布済みのときだけ入る */
   iosDeliveredBuild?: number;
+  /** iOS配布が失敗した段階（#3867）。`null`は段階を特定できなかった失敗、未定義は失敗なし */
+  iosFailureStage?: string | null;
 };
 
 /**

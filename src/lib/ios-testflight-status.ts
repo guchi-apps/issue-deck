@@ -211,6 +211,37 @@ export function iosDeliveryForReleases(
   return result;
 }
 
+/**
+ * リリース履歴の各リリースについて、対応する最新のiOS配布実行が失敗している版を返す（#3867）。
+ *
+ * `runs`はGitHub APIの新しい順のまま渡す。成功・更新不要で終わった後に古い失敗runが残っていても、
+ * 最新の完了済みrunだけを見るため失敗として表示しない。配布済みタグがある版を優先して除くのは呼び出し側。
+ */
+export function iosFailuresForReleases(
+  tagNames: readonly string[],
+  versionRefs: readonly { ref: string; sha: string }[],
+  runs: readonly {
+    headSha: string;
+    status: string;
+    conclusion: string | null;
+    failedStage: string | null;
+  }[],
+): Map<string, string | null> {
+  const shaByTag = new Map(versionRefs.map((item) => [item.ref.replace(/^refs\/tags\//, ""), item.sha]));
+  const result = new Map<string, string | null>();
+  for (const tagName of tagNames) {
+    const sha = shaByTag.get(tagName);
+    if (!sha) continue;
+    const latest = runs.find((run) => run.headSha === sha && run.status === "completed");
+    if (!latest || latest.conclusion === "success" || latest.conclusion === "neutral" || latest.conclusion === "skipped") {
+      continue;
+    }
+    // `null`は実行が完了しているがGitHubが結論を返せなかった状態。失敗と断定しない。
+    if (latest.conclusion !== null) result.set(tagName, latest.failedStage);
+  }
+  return result;
+}
+
 /** その版のWebの本番デプロイの状態（iOS配布欄の前提。Webの成否とは混ぜない） */
 export type IosWebDeployState = "success" | "pending" | "failed";
 

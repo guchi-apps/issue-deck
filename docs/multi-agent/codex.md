@@ -618,6 +618,18 @@ Codexのサンドボックスが書込みを許すのはworktree・`/tmp`・`$TM
 畳んでも残す（#2520）。新しい会話で起こす場合はランチャーが起動前に消し、前回の宛先へ追加指示を
 送らないようにする。
 
+### Issue詳細からスレッドを開く
+
+pollerは`codexThreadKnown`に加えて、`<セッション名>.codex-thread`から読めたUUIDを
+`codexThreadId`として`/api/dispatch/sessions`へ報告する（#3885）。issue-deckはUUID形式を
+厳格に検証して`DispatchSession`へ保存し、**URLは受け取らない**。画面は
+`buildCodexThreadUrl`で`codex://threads/<UUID>`を組み立て、「セッションを開く」から遷移する。
+
+UUIDが未取得のときはリンクを出さない。subpcのようなRemote hostのスレッドは、手元のCodexで
+Deep Linkを開けないことがあるため、セッション表示にはホスト名と`codex resume <UUID>`をコピーする
+フォールバックも出す。Deep Linkの仕様が変わった場合は、画面ごとのリンクを直さず
+`src/lib/dispatch/session-open-target.ts`だけを差し替える。
+
 ### 信頼確認に答えるまでは送れないことを画面に出す
 
 **ディレクトリの信頼確認に答えるまでフックは1つも飛ばない**（下の「信頼（trust）は2種類あり」）。

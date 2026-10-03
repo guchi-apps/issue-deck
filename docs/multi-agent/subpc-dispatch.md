@@ -1031,25 +1031,26 @@ GET /api/dispatch（画面が20秒ごとに読む）
 
 代行実行（#1828）は本文のコマンドをpollerが1件ずつ流す経路で、**結果を見ながら相談する
 相手がいない**。失敗したときの診断も「出力を貼って`POST /api/manual-steps/fix`へ送る」往復に
-なる。そこで、手作業Issue専用のClaude Codeセッションをサブ PCに1本立て、手順の実行・結果の
+なる。そこで、手作業Issue専用のClaude CodeまたはCodexのセッションをサブ PCに1本立て、手順の実行・結果の
 確認・失敗時の相談を**そのセッションと直接**やり取りできるようにした。
 
 ```text
-手作業アシスタントの最初の画面／Issue詳細の手作業パネル「Claude Codeセッションで進める」
+手作業アシスタントの最初の画面／Issue詳細の手作業パネル「AIセッションで進める」
   ↓ POST /api/dispatch（kind=manual_step_session）→ enqueueManualStepSessionJob
 （キュー: DispatchJob。activeKeyは manual_step_session:owner/repo#番号）
   ↑ claim（manualStepSessionCapable を申告したホストにだけ。枠は実装セッションと同じ）
 scripts/subpc-dispatch-poller.sh → scripts/start-manual-step-session.sh
-  ↓ tmuxセッション <repo>-issue-<番号>（worktree無し・開発サーバー無し・--remote-control付き）
+  ↓ tmuxセッション <repo>-issue-<番号>（worktree無し・開発サーバー無し）
   ↓ プロンプト scripts/prompts/manual-step-agent.md
   本文・コメント・環境から目的達成に必要な作業を自律して実行 → 実施済みの - [ ] にチェック（gh issue edit）
   ↓ 止まるのは本人操作・秘密値・未確定の不可逆な変更・解消できない失敗・クローズの可否だけ
-  ↓ AskUserQuestion → 画面の「質問の回答を待っています」パネル／Claude Codeアプリから答える
+  ↓ Claude CodeはAskUserQuestion、Codexはsubmit-question.sh → 画面の「質問の回答を待っています」パネル
   → 答えると続きが自動で流れる … 完了の確認方法まで流し、クローズは人が選ぶ
 ```
 
 - **セッション名は実装セッションと同じ規約。** pollerの重複起動ガード・停止／追加指示の
-  突き合わせ・フックの通知（承認待ち・質問）・Remote Controlの取得がそのまま効く。
+  突き合わせがそのまま効く。Claude Codeではフックの通知とRemote Controlの取得も効き、Codexでは
+  追加指示を`codex queue`で送る。
   cwdはリポジトリの本体チェックアウト（対応表で解決できないときは
   `~/apps/issue-deck-worktrees/.manual-steps/_session-<repo>`）で、**前回の会話は引き継がない**
   （cwdがIssueごとではないため。横断質問と同じ）。回収は`kind=manual-step`として

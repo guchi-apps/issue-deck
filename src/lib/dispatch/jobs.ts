@@ -113,6 +113,7 @@ import {
   type SessionControlRejection,
 } from "@/lib/dispatch/dispatch-job";
 import { MANUAL_STEP_LABEL } from "@/lib/github/approval-labels";
+import { HIGH_PRIORITY_LABEL } from "@/lib/branch-flow";
 import {
   extractRunnableManualStepCommands,
   fillManualStepPlaceholders,
@@ -774,6 +775,16 @@ export async function enqueueDispatchJob(params: {
     }
   }
 
+  // 高優先度ラベルが付いたIssueは、通常の順番待ち（既定値0）より先に流す。手動の
+  // 「先頭へ上げる」は現在の最大値+1を入れるため、既に人が先頭へ上げたジョブを追い越さない。
+  // ラベルは画面から受け取らず、Webhookで同期したIssueキャッシュから読む。
+  const queuePriority = (await isHighPriorityDispatchIssue(
+    params.repositoryFullName,
+    params.issueNumber,
+  ))
+    ? 1
+    : undefined;
+
   try {
     const job = await db.dispatchJob.create({
       data: {
@@ -787,6 +798,7 @@ export async function enqueueDispatchJob(params: {
         codexModel: params.codexModel ?? null,
         handoffFrom: params.handoffFrom ?? null,
         handoffTranscript: params.handoffFrom ? params.handoffTranscript === true : false,
+        queuePriority,
         status: "QUEUED",
         activeKey: buildDispatchActiveKey(params.repositoryFullName, params.issueNumber),
         requestedByUserId: params.requestedByUserId,
@@ -798,6 +810,26 @@ export async function enqueueDispatchJob(params: {
     // 含めてここで確実に止まる（アプリ側の存在チェックだけでは競合をすり抜ける）
     return reject("already_queued");
   }
+}
+
+/** 高優先度ラベルは同期済みのIssueキャッシュを正として判定する。 */
+async function isHighPriorityDispatchIssue(
+  repositoryFullName: string,
+  issueNumber: number,
+): Promise<boolean> {
+  // `Repository.fullName`はインストール違いで複数行あり得る。どの行でも同じGitHub Issueを
+  // 同期しているため、従来の手作業Issue判定と同じく1行を読めば足りる。
+  const repository = await db.repository.findFirst({
+    where: { fullName: repositoryFullName },
+    select: { id: true },
+  });
+  if (!repository) return false;
+
+  const issue = await db.issue.findFirst({
+    where: { repositoryId: repository.id, number: issueNumber },
+    select: { labels: { where: { name: HIGH_PRIORITY_LABEL }, select: { id: true }, take: 1 } },
+  });
+  return issue?.labels.length === 1;
 }
 
 export type EnqueueCrossRepoQuestionJobResult =
@@ -894,7 +926,7 @@ export type EnqueueManualStepSessionJobResult =
   | { ok: false; rejection: ManualStepSessionRejection; message: string };
 
 /**
- * 手作業Issueを実施するClaude Codeセッション（#2771）を積む。
+ * 手作業Issueを実施するエージェントセッション（#2771）を積む。
  *
  * 横断質問（`enqueueCrossRepoQuestionJob`）と同じ作法で、**動いているセッションがあれば弾く**
  * （同じIssueにセッションは1本）。対象が`71.manual-step`のIssueかどうかは**DBのIssueキャッシュの
@@ -906,12 +938,17 @@ export async function enqueueManualStepSessionJob(params: {
   repositoryFullName: string;
   issueNumber: number;
   hostName: string;
+  /** 起こすエージェント。省略時は従来どおりClaude Code。 */
+  agent?: DispatchAgent;
   /** この手作業セッションだけに指定するClaude Codeのモデル。省略時は設定の既定に従う。 */
   claudeModel?: ClaudeLocalModel | null;
+  /** この手作業セッションだけに指定するCodexのモデル。省略時は設定の既定に従う。 */
+  codexModel?: CodexLocalModel | null;
   requestedByUserId: string | null;
   now?: Date;
 }): Promise<EnqueueManualStepSessionJobResult> {
   const now = params.now ?? new Date();
+  const agent = params.agent ?? DEFAULT_DISPATCH_AGENT;
   await expireStaleDispatchJobs(now);
 
   const reject = (rejection: ManualStepSessionRejection): EnqueueManualStepSessionJobResult => ({
@@ -946,12 +983,14 @@ export async function enqueueManualStepSessionJob(params: {
       ? {
           online: isDispatchHostOnline(host.lastSeenAt, now),
           manualStepSessionCapable: host.manualStepSessionCapable,
+          codexCapable: host.codexCapable,
         }
       : null,
     isManualStepIssue: issue !== null && issue.labels.some((l) => l.name === "71.manual-step"),
     // 二重投入はactiveKeyのunique制約が確実に止める（下のcatch）
     hasActiveJob: false,
     blockingSession,
+    agent,
   });
   if (rejection) return reject(rejection);
 
@@ -962,7 +1001,9 @@ export async function enqueueManualStepSessionJob(params: {
         issueNumber: params.issueNumber,
         targetHost: params.hostName,
         kind: "MANUAL_STEP_SESSION",
+        agent,
         claudeModel: params.claudeModel ?? null,
+        codexModel: params.codexModel ?? null,
         status: "QUEUED",
         activeKey: buildDispatchActiveKey(
           params.repositoryFullName,
@@ -999,6 +1040,10 @@ export async function enqueuePlanReviewJob(params: {
   hostName: string;
   /** 省略時は既存どおりClaude Codeでレビューする */
   agent?: DispatchAgent;
+  /** 自動計画レビュー用のClaude Codeモデル。手動レビューは省略して通常設定に従う。 */
+  claudeModel?: ClaudeLocalModel;
+  /** 自動計画レビュー用のCodex CLIモデル。手動レビューは省略して通常設定に従う。 */
+  codexModel?: CodexLocalModel;
   requestedByUserId: string | null;
   now?: Date;
 }): Promise<EnqueuePlanReviewJobResult> {
@@ -1042,6 +1087,8 @@ export async function enqueuePlanReviewJob(params: {
         targetHost: params.hostName,
         kind: "PLAN_REVIEW",
         agent: params.agent ?? DEFAULT_DISPATCH_AGENT,
+        claudeModel: params.claudeModel ?? null,
+        codexModel: params.codexModel ?? null,
         status: "QUEUED",
         activeKey: buildDispatchActiveKey(
           params.repositoryFullName,

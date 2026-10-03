@@ -5,6 +5,7 @@ import {
   checkIosDispatchable,
   deliveredBuildForSha,
   iosDeliveryForReleases,
+  iosFailuresForReleases,
   isIosDistributionPending,
   isIosDistributionRunning,
   judgeIosReleasePanel,
@@ -210,6 +211,37 @@ describe("iosDeliveryForReleases（#3800）", () => {
     expect(result.get("v1.0.0")).toBe(9);
     expect(result.has("v1.1.0")).toBe(false);
     expect(result.has("v0.9.0")).toBe(false);
+  });
+});
+
+describe("iosFailuresForReleases（#3867）", () => {
+  const versionRefs = [
+    { ref: "refs/tags/v1.0.0", sha: "aaa" },
+    { ref: "refs/tags/v1.1.0", sha: "bbb" },
+  ];
+
+  it("対応する最新の完了runが失敗したリリースだけ、失敗段階を返す", () => {
+    const result = iosFailuresForReleases(["v1.0.0", "v1.1.0"], versionRefs, [
+      { headSha: "aaa", status: "completed", conclusion: "failure", failedStage: "アップロード" },
+      { headSha: "bbb", status: "completed", conclusion: "success", failedStage: null },
+    ]);
+    expect(result.get("v1.0.0")).toBe("アップロード");
+    expect(result.has("v1.1.0")).toBe(false);
+  });
+
+  it("新しい成功runがあるときは、古い失敗runを表示しない", () => {
+    const result = iosFailuresForReleases(["v1.0.0"], versionRefs, [
+      { headSha: "aaa", status: "completed", conclusion: "success", failedStage: null },
+      { headSha: "aaa", status: "completed", conclusion: "failure", failedStage: "署名" },
+    ]);
+    expect(result.has("v1.0.0")).toBe(false);
+  });
+
+  it("段階を特定できない失敗も返す", () => {
+    const result = iosFailuresForReleases(["v1.0.0"], versionRefs, [
+      { headSha: "aaa", status: "completed", conclusion: "cancelled", failedStage: null },
+    ]);
+    expect(result.get("v1.0.0")).toBeNull();
   });
 });
 

@@ -1336,10 +1336,10 @@ Git管理外の領域は従来どおり手作業のまま残すのが正しい�
 - **`00.check-user`とは併用しない。** 併用するとissue-deckのIssue詳細に「承認」「修正」
   ボタンが出るが、手作業Issueには承認して再開させる実装フローが無く、押しても宛先が無い。
   「ユーザーの確認待ち」ビューにも混ざり、承認待ちの優先順位付けが崩れる。
-  **例外は手作業セッション（#2771）が質問を出している間。** 「Claude Codeセッションで進める」で
-  起こしたセッションが`AskUserQuestion`で「次へ進みますか」と聞くと、フックが`00.check-user`＋
-  `01.check-input`を付ける（Push通知で気付くため）。このときは答える相手（セッション）が居るので
-  併用の前提が成り立ち、答えると外れる（[subpc-dispatch.md](subpc-dispatch.md)
+  **例外は手作業セッション（#2771）が質問を出している間。** 「AIセッションで進める」で
+  起こしたClaude Codeセッションが`AskUserQuestion`で、またはCodexセッションが`submit-question.sh`で
+  「次へ進みますか」と聞くと、`00.check-user`＋`01.check-input`が付く。このときは答える相手
+  （セッション）が居るので併用の前提が成り立ち、答えると外れる（[subpc-dispatch.md](subpc-dispatch.md)
   「手作業Issueをセッションと対話しながら実施する」）。
 - **00番台にしない。** `^00\.`のラベルは`isAttentionLabel`により一覧カードのラベル表示から
   除外される（`src/lib/issue-status.ts`・`src/components/dashboard/issue-list.tsx`）ため、

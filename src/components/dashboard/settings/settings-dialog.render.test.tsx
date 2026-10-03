@@ -232,6 +232,8 @@ describe("SettingsDialog", () => {
       "claude",
       "claude",
       "codex",
+      "sonnet",
+      "gpt-5.6-terra",
       true,
       90,
     );
@@ -244,6 +246,8 @@ describe("SettingsDialog", () => {
       defaultDispatchAgent: "claude",
       planReviewAgentForClaude: "claude",
       planReviewAgentForCodex: "codex",
+      planReviewClaudeModel: "sonnet",
+      planReviewCodexModel: "gpt-5.6-terra",
       dispatchFailoverEnabled: true,
       dispatchFailoverThresholdPercent: 90,
       appAiModel: "claude-haiku-4-5",

@@ -472,6 +472,10 @@ model AppSetting {
   // 既定値は開始したCLIと同じにして、設定追加前の動作を保つ。
   planReviewAgentForClaude String @default("claude")
   planReviewAgentForCodex  String @default("codex")
+  // サブPCの自動計画レビューをClaude Codeで行うときのモデル。既定は設定追加前と同じSonnet。
+  planReviewClaudeModel String @default("sonnet")
+  // サブPCの自動計画レビューをCodex CLIで行うときのモデル。既定は設定追加前と同じTerra。
+  planReviewCodexModel  String @default("gpt-5.6-terra")
   // 既定CLIの使用率がしきい値以上なら、起動ダイアログで他方を最初に選ぶ（#3531）。
   // 既定ON・90%は、従来のClaude残量10%未満でCodexへ切り替える挙動を引き継ぐため。
   dispatchFailoverEnabled Boolean @default(true)
@@ -1336,9 +1340,10 @@ model DispatchSession {
   // 送る）／申告しない古いpoller。false＝Codexだが宛先がまだ無い（ディレクトリの信頼確認に
   // 答えるまでフックが飛ばず、UUIDが手に入らない）。true＝送れる。
   //
-  // **UUIDそのものは持たない。** 画面が要るのは「送れるかどうか」だけで、宛先を使うのは
-  // サブPCのpollerだけ（`~/.local/state/issue-deck/sessions/<セッション名>.codex-thread`）。
+  // UUIDは検証済みのものだけをpollerから受ける。URLを受け取らず、画面用のDeep Linkは
+  // issue-deck側で組み立てるため、任意URLを保存・表示しない。
   codexThreadKnown Boolean?
+  codexThreadId    String?                  @db.VarChar(36)
 
   // いま何をしているか（#2705）。**Claude Codeのフックが渡してきたツール名とコマンドを、
   // サブPC側（`scripts/lib/session-step.sh`）が固定語彙のコードへ畳んだもの。**

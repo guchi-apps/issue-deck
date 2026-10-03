@@ -1,28 +1,36 @@
 "use client";
 
 import { useState } from "react";
-import { Check, Copy, Loader2, MessageSquareText, Monitor } from "lucide-react";
+import { Asterisk, Check, Copy, Loader2, MessageSquareText, Monitor, SquareTerminal } from "lucide-react";
 
 import {
   CLAUDE_LOCAL_MODEL_DEFAULT,
   CLAUDE_MODEL_FIT_LABELS,
+  CODEX_LOCAL_MODEL_VALUES,
+  CODEX_MODEL_FIT_LABELS,
   describeClaudeModel,
+  describeCodexModel,
   type ClaudeLocalModel,
+  type CodexLocalModel,
 } from "@/lib/app-settings";
-import { ModelChip } from "@/components/dashboard/agent-model-chips";
+import { AgentChip, CodexLimitationsNotice, ModelChip } from "@/components/dashboard/agent-model-chips";
 import { Button } from "@/components/ui/button";
 import { IssueSessionStatus } from "@/components/dashboard/issue-session-status";
 import { copyText } from "@/lib/copy-text";
 import type { DispatchStateHandle } from "@/hooks/use-dispatch-state";
 import {
   describeDispatchJobStatus,
+  describeDispatchAgent,
   describeManualStepExecutionRejection,
   describeManualStepSessionRejection,
+  DEFAULT_DISPATCH_AGENT,
   findManualStepSessionJobForIssue,
   isActiveDispatchJobStatus,
+  isDispatchAgentSelectable,
   resolveDefaultManualStepSessionHost,
   resolveManualStepHost,
   resolveManualStepSessionRejection,
+  type DispatchAgent,
 } from "@/lib/dispatch/dispatch-job";
 import { formatDispatchHostName } from "@/lib/dispatch/host-label";
 import { findSessionForIssue } from "@/lib/dispatch/issue-session";
@@ -41,13 +49,18 @@ const MANUAL_STEP_SESSION_MODEL_ENTRIES: readonly ClaudeLocalModel[] = [
   "sonnet",
 ];
 
+const MANUAL_STEP_SESSION_AGENT_ENTRIES = [
+  { agent: "claude", icon: Asterisk },
+  { agent: "codex", icon: SquareTerminal },
+] as const;
+
 /**
- * 手作業Issueを、サブPCのClaude Codeセッションと対話しながら進める入口（#2771）。
+ * 手作業Issueを、サブPCのAIエージェントセッションと対話しながら進める入口（#2771）。
  *
  * 手作業アシスタントの代行実行（「承認してN件を自動実行」）は本文のコマンドをpollerが1件ずつ
  * 実行し、失敗したら出力を貼って診断する往復になる。こちらは**このIssue専用のセッションを
  * サブPCに1本立て**、止まるところまで手順を流す。答える先は
- * Issue詳細の質問パネル（`QuestionAnswerPanel`）でも、Claude Codeアプリ（Remote Control）でもよい。
+ * Issue詳細の質問パネルか、選択したエージェントのセッションから進める。
  *
  * セッションは本文の手順を出発点に、**本文に書かれていない調査・修正・確認も含めて**目的の達成まで
  * 自律実行する（#3870）。ユーザー本人の操作・秘密値・未確定の不可逆な変更だけを質問に戻す。
@@ -87,9 +100,11 @@ export function ManualStepSessionPanel({
   className?: string;
 }) {
   const [error, setError] = useState<string | null>(null);
+  const [agent, setAgent] = useState<DispatchAgent>(DEFAULT_DISPATCH_AGENT);
   // 手作業の内容を見て人が選ぶ入口なので、「設定に従う」は置かない。どのモデルで始まるかを
   // 起動前に明示するため、通常の実装開始と同じ3候補から既定のSonnetを選んだ状態で始める。
-  const [model, setModel] = useState<ClaudeLocalModel>(CLAUDE_LOCAL_MODEL_DEFAULT);
+  const [claudeModel, setClaudeModel] = useState<ClaudeLocalModel>(CLAUDE_LOCAL_MODEL_DEFAULT);
+  const [codexModel, setCodexModel] = useState<CodexLocalModel>("gpt-5.6-terra");
 
   // 起動先は**手作業セッションに対応したオンラインのホスト**。無ければ代行実行と同じ既定の
   // ホストを「理由を出す相手」として使う（申告が無い理由を、ホスト名つきで出せる）
@@ -110,6 +125,7 @@ export function ManualStepSessionPanel({
     isManualStepIssue: isManualStep,
     hasActiveJob,
     blockingSession: aliveSession,
+    agent,
   });
 
   // 本文の解析は毎レンダー行う（`parseManualStepGuide`は文字列を1回走査するだけで、
@@ -123,7 +139,8 @@ export function ManualStepSessionPanel({
       repositoryFullName: issue.repositoryFullName,
       issueNumber: issue.number,
       hostName: host.name,
-      model,
+      agent,
+      model: agent === "codex" ? codexModel : claudeModel,
     });
     if (!result.ok) setError(result.message);
   }
@@ -134,11 +151,11 @@ export function ManualStepSessionPanel({
         "flex flex-col gap-2 rounded-md border border-primary/30 bg-primary/5 p-2.5",
         className,
       )}
-      aria-label="Claude Codeセッションで進める"
+      aria-label="AIセッションで進める"
     >
       <h4 className="flex items-center gap-1.5 text-xs font-semibold">
         <Monitor className="size-3.5 shrink-0" aria-hidden />
-        Claude Codeセッションで進める
+        AIセッションで進める
       </h4>
 
       {aliveSession ? (
@@ -148,7 +165,7 @@ export function ManualStepSessionPanel({
               <>
                 この手作業のセッションが動いています。
                 <strong className="font-medium text-foreground">
-                  手順の結果と質問はClaude Codeアプリで受け取ります
+                  手順の結果と質問は起動したセッションで受け取ります
                 </strong>
                 。この画面で答えたいときは「アプリで答える」をOFFに戻してください。
               </>
@@ -156,7 +173,7 @@ export function ManualStepSessionPanel({
               <>
                 この手作業のセッションが動いています。あなたが実行する手順・失敗で止まったときは
                 「質問の回答を待っています」に出るので、そこから答えると続きが自動で流れます。
-                相談は「Claude Codeアプリで開く」からそのまま送れます。
+                相談は起動したセッションからそのまま送れます。
               </>
             )}
             {!showSessionStatus && "操作は上のセッションの行にあります。"}
@@ -169,29 +186,45 @@ export function ManualStepSessionPanel({
         <>
           <p className="text-[11px] leading-relaxed text-muted-foreground">
             {formatDispatchHostName(hostName)}
-            にこのIssue専用のClaude Codeセッションを立て、本文の目的に必要な作業を
+            にこのIssue専用の{describeDispatchAgent(agent)}セッションを立て、本文の目的に必要な作業を
             <strong className="font-semibold text-foreground">自動で実行します</strong>。
             本文の記載が不足していても、調査・修正・確認を自律して進めます。実施済みの本文の
             <code>- [ ]</code> にはチェックを付け、
             <strong className="font-semibold text-foreground">
               秘密値・本人操作・未確定の不可逆な変更が必要なとき
             </strong>
-            に手を止めて聞きます。答える先はこの画面の質問パネルかClaude Codeアプリです。
+            に手を止めて聞きます。Codexを選んだ場合の画面連携の制約は下に表示します。
             出力はセッションの中だけに留め、Issueには書きません。
           </p>
 
           <div className="flex flex-col gap-2">
-            <p className="text-xs font-semibold">モデル</p>
-            <div role="radiogroup" aria-label="モデル" className="grid grid-cols-3 gap-2">
-              {MANUAL_STEP_SESSION_MODEL_ENTRIES.map((entry) => (
-                <ModelChip
-                  key={entry}
-                  label={describeClaudeModel(entry)}
-                  fit={CLAUDE_MODEL_FIT_LABELS[entry]}
-                  selected={model === entry}
-                  onSelect={() => setModel(entry)}
+            <p className="text-xs font-semibold">エージェント</p>
+            <div role="radiogroup" aria-label="エージェント" className="grid grid-cols-2 gap-2">
+              {MANUAL_STEP_SESSION_AGENT_ENTRIES.map((entry) => (
+                <AgentChip
+                  key={entry.agent}
+                  icon={entry.icon}
+                  label={describeDispatchAgent(entry.agent)}
+                  isDefault={entry.agent === DEFAULT_DISPATCH_AGENT}
+                  selected={agent === entry.agent}
+                  disabled={entry.agent === "codex" && !isDispatchAgentSelectable(host)}
+                  onSelect={() => setAgent(entry.agent)}
                 />
               ))}
+            </div>
+            {agent === "codex" && <CodexLimitationsNotice />}
+          </div>
+
+          <div className="flex flex-col gap-2">
+            <p className="text-xs font-semibold">モデル</p>
+            <div role="radiogroup" aria-label="モデル" className={cn("grid gap-2", agent === "codex" ? "grid-cols-2" : "grid-cols-3")}>
+              {agent === "codex"
+                ? CODEX_LOCAL_MODEL_VALUES.map((entry) => (
+                    <ModelChip key={entry} label={describeCodexModel(entry)} fit={CODEX_MODEL_FIT_LABELS[entry]} selected={codexModel === entry} onSelect={() => setCodexModel(entry)} />
+                  ))
+                : MANUAL_STEP_SESSION_MODEL_ENTRIES.map((entry) => (
+                    <ModelChip key={entry} label={describeClaudeModel(entry)} fit={CLAUDE_MODEL_FIT_LABELS[entry]} selected={claudeModel === entry} onSelect={() => setClaudeModel(entry)} />
+                  ))}
             </div>
           </div>
 

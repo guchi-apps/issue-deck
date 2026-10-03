@@ -29,8 +29,10 @@ import { useSettingsData } from "@/hooks/use-settings-data";
 import type {
   AppAiModel,
   ClaudeLocalModelSetting,
+  ClaudeLocalModel,
   ClaudeModel,
   CodexModelSetting,
+  CodexLocalModel,
   DefaultDispatchAgent,
   ModelPickEngine,
   PlanReviewAgent,
@@ -54,6 +56,8 @@ type MobileSettingsScreenProps = {
   defaultDispatchAgent?: DefaultDispatchAgent;
   planReviewAgentForClaude?: PlanReviewAgent;
   planReviewAgentForCodex?: PlanReviewAgent;
+  planReviewClaudeModel?: ClaudeLocalModel;
+  planReviewCodexModel?: CodexLocalModel;
   dispatchFailoverEnabled?: boolean;
   dispatchFailoverThresholdPercent?: number;
   appAiModel: AppAiModel;
@@ -85,6 +89,8 @@ export function MobileSettingsScreen({
   defaultDispatchAgent = "claude",
   planReviewAgentForClaude = "claude",
   planReviewAgentForCodex = "codex",
+  planReviewClaudeModel = "sonnet",
+  planReviewCodexModel = "gpt-5.6-terra",
   dispatchFailoverEnabled = true,
   dispatchFailoverThresholdPercent = 90,
   appAiModel,
@@ -211,6 +217,8 @@ export function MobileSettingsScreen({
             defaultDispatchAgent={defaultDispatchAgent}
             planReviewAgentForClaude={planReviewAgentForClaude}
             planReviewAgentForCodex={planReviewAgentForCodex}
+            planReviewClaudeModel={planReviewClaudeModel}
+            planReviewCodexModel={planReviewCodexModel}
             dispatchFailoverEnabled={dispatchFailoverEnabled}
             dispatchFailoverThresholdPercent={dispatchFailoverThresholdPercent}
             appAiModel={appAiModel}

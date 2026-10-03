@@ -413,6 +413,15 @@ function ReleaseHistoryCard({
             TestFlight配布済み #{entry.iosDeliveredBuild}
           </span>
         )}
+        {entry.iosFailureStage !== undefined && (
+          <span
+            className="inline-flex items-center gap-1 rounded-full border border-red-500/50 bg-red-50 px-1.5 py-px text-[10.5px] font-bold text-red-700 dark:bg-red-950/40 dark:text-red-300"
+            title="このリリースのiOS配布は失敗しており、TestFlightへ配布されていません"
+          >
+            <CircleAlert className="size-2.5" aria-hidden />
+            {entry.iosFailureStage ? `iOS配布に失敗（${entry.iosFailureStage}）` : "iOS配布に失敗"}
+          </span>
+        )}
         {status.kind === "out_of_scope" && outOfScopeReason === "not_targeted" && (
           <span
             className="inline-flex items-center rounded-full border border-dashed px-1.5 py-px text-[10.5px] text-muted-foreground"

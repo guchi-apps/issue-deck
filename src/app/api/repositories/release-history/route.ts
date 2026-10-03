@@ -4,8 +4,17 @@ import { requireUserId } from "@/lib/auth-user";
 import { db } from "@/lib/db";
 import { withGithubApiFeature } from "@/lib/github/api-usage";
 import { getInstallationToken } from "@/lib/github/app-auth";
+import { fetchWorkflowRunJobs } from "@/lib/github/actions-api";
 import { fetchReleasesBackTo, fetchTagRefs, type ReleaseHistoryItem } from "@/lib/github/release-api";
-import { IOS_TESTFLIGHT_TAG_PREFIX, iosDeliveryForReleases } from "@/lib/ios-testflight-status";
+import { GITHUB_API, githubFetch } from "@/lib/github/request";
+import {
+  IOS_TESTFLIGHT_TAG_PREFIX,
+  IOS_TESTFLIGHT_WORKFLOW_FILE,
+  iosDeliveryForReleases,
+  iosFailuresForReleases,
+  judgeIosRun,
+  summarizeIosStages,
+} from "@/lib/ios-testflight-status";
 import { getWebviewIosRepository } from "@/lib/webview-ios-repos";
 import {
   hasReachedReleaseCheckSince,
@@ -105,18 +114,47 @@ async function handleGET() {
         );
         // TestFlight配布対象のリポジトリだけ、配布済みのビルド番号を付ける（#3800）
         if (getWebviewIosRepository(repository.fullName) === null || releases.length === 0) return releases;
-        const [versionRefs, deliveredRefs] = await Promise.all([
+        const [versionRefs, deliveredRefs, iosRuns] = await Promise.all([
           fetchTagRefs(repository.ownerLogin, repository.name, token, "v"),
           fetchTagRefs(repository.ownerLogin, repository.name, token, IOS_TESTFLIGHT_TAG_PREFIX),
+          fetchIosTestflightRuns(repository.ownerLogin, repository.name, token),
         ]);
         const delivered = iosDeliveryForReleases(
           releases.map((release) => release.tagName),
           versionRefs,
           deliveredRefs,
         );
+        const releaseShas = new Set(
+          versionRefs
+            .filter((ref) => releases.some((release) => release.tagName === ref.ref.replace(/^refs\/tags\//, "")))
+            .map((ref) => ref.sha),
+        );
+        // run一覧は新しい順。リリースごとの最新runが失敗しているときだけ、段階名を取る。
+        const latestRunsBySha = new Map<string, (typeof iosRuns)[number]>();
+        for (const run of iosRuns) {
+          if (run.status === "completed" && !latestRunsBySha.has(run.headSha) && releaseShas.has(run.headSha)) {
+            latestRunsBySha.set(run.headSha, run);
+          }
+        }
+        const failureStages = await Promise.all(
+          [...latestRunsBySha.values()].map(async (run) => {
+            if (["success", "neutral", "skipped", null].includes(run.conclusion)) return { ...run, failedStage: null };
+            try {
+              const jobs = await fetchWorkflowRunJobs(repository.ownerLogin, repository.name, run.id, token);
+              const verdict = judgeIosRun(run, summarizeIosStages(jobs));
+              return { ...run, failedStage: verdict.kind === "failed" ? verdict.failedStage : null };
+            } catch {
+              return { ...run, failedStage: null };
+            }
+          }),
+        );
+        const failures = iosFailuresForReleases(releases.map((release) => release.tagName), versionRefs, failureStages);
         return releases.map((release) => {
           const build = delivered.get(release.tagName);
-          return build === undefined ? release : { ...release, iosDeliveredBuild: build };
+          // 成功を示す配布済みタグがある版は、過去の失敗runより成功を優先する。
+          if (build !== undefined) return { ...release, iosDeliveredBuild: build };
+          const failedStage = failures.get(release.tagName);
+          return failedStage === undefined ? release : { ...release, iosFailureStage: failedStage };
         });
       } catch (error) {
         // 1リポジトリの取得失敗で他リポジトリの表示まで巻き込まない（`release-pending-merges`と同じ）。
@@ -131,4 +169,28 @@ async function handleGET() {
     checkRecords,
     checkLineRecords,
   });
+}
+
+type IosTestflightRun = {
+  id: number;
+  headSha: string;
+  status: string;
+  conclusion: string | null;
+};
+
+/** リリースのコミットと照合するiOS配布runを新しい順に取る。ワークフロー未導入は空配列へ縮退する。 */
+async function fetchIosTestflightRuns(owner: string, repo: string, token: string): Promise<IosTestflightRun[]> {
+  const res = await githubFetch(
+    `${GITHUB_API}/repos/${owner}/${repo}/actions/workflows/${IOS_TESTFLIGHT_WORKFLOW_FILE}/runs?per_page=100`,
+    token,
+  );
+  if (!res.ok) return [];
+  const body: {
+    workflow_runs?: Array<{ id?: number; head_sha?: string; status?: string; conclusion?: string | null }>;
+  } = await res.json().catch(() => ({}));
+  return (body.workflow_runs ?? []).flatMap((run) =>
+    typeof run.id === "number" && typeof run.head_sha === "string" && typeof run.status === "string"
+      ? [{ id: run.id, headSha: run.head_sha, status: run.status, conclusion: run.conclusion ?? null }]
+      : [],
+  );
 }

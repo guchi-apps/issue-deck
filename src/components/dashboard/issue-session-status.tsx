@@ -53,6 +53,10 @@ import {
   summarizeIssueSession,
   type IssueSessionTone,
 } from "@/lib/dispatch/issue-session";
+import {
+  buildCodexResumeCommand,
+  buildSessionOpenTarget,
+} from "@/lib/dispatch/session-open-target";
 import { selectHostCodexPairingJob } from "@/lib/dispatch/queue-summary";
 import type { DispatchSessionView } from "@/lib/dispatch/session-state";
 import { formatDateTime, formatDateTimeFull } from "@/lib/format-date-time";
@@ -175,6 +179,7 @@ export function IssueSessionStatus({
   const [controlsOpen, setControlsOpen] = useState<boolean | null>(null);
   const controlsId = useId();
   const [copiedAttach, setCopiedAttach] = useState(false);
+  const [copiedCodexResume, setCopiedCodexResume] = useState(false);
 
   const host = dispatch.hosts.find((candidate) => candidate.name === session.host) ?? null;
   const controlJob = findSessionControlJobForIssue(
@@ -205,6 +210,11 @@ export function IssueSessionStatus({
   // Claude Codeか、申告しない古いpoller）。追加指示の届き方の説明がここで変わる——Codexは
   // `codex queue`で積むので、承認プロンプト・選択フォームの表示中かどうかに左右されない
   const isCodexSession = session.codexThreadKnown !== null;
+  const sessionOpenTarget = buildSessionOpenTarget(session);
+  const codexResumeCommand =
+    sessionOpenTarget?.kind === "codex"
+      ? buildCodexResumeCommand(sessionOpenTarget.threadId)
+      : null;
   // 送れる本文かどうかは受け口（`POST /api/dispatch`）と同じ関数で判定する。
   // 画面だけ緩いと、押せたのに400で弾かれる
   const instructionBody = parseSessionInstruction(instruction);
@@ -254,7 +264,7 @@ export function IssueSessionStatus({
    */
   const showAnswerModeToggle = session.state === "ALIVE" && !isCodexSession;
   // 出口の行（アプリで開く・開発環境を開く・アプリで答える）が出ているか。操作との間の線に使う
-  const hasExitRow = Boolean(summary.remoteControlUrl || summary.previewUrl || showAnswerModeToggle);
+  const hasExitRow = Boolean(sessionOpenTarget || summary.previewUrl || showAnswerModeToggle);
   // 起動できたセッションの中身を見る唯一の手掛かり（#1468）。畳んだ行のピルはセッションの
   // 状態を表すものに変わったため、コピーは展開側の明示的なボタンにする
   const attachCommand =
@@ -273,6 +283,17 @@ export function IssueSessionStatus({
     }
     setCopiedAttach(true);
     window.setTimeout(() => setCopiedAttach(false), 1500);
+  }
+
+  async function handleCopyCodexResumeCommand() {
+    if (!codexResumeCommand) return;
+    try {
+      await navigator.clipboard.writeText(codexResumeCommand);
+    } catch {
+      return;
+    }
+    setCopiedCodexResume(true);
+    window.setTimeout(() => setCopiedCodexResume(false), 1500);
   }
 
   async function toggleAnswerMode() {
@@ -442,13 +463,22 @@ export function IssueSessionStatus({
             align === "end" ? "justify-end" : "justify-start",
           )}
         >
-          {summary.remoteControlUrl && (
+          {sessionOpenTarget && (
             <Button variant="outline" size="sm" asChild>
-              <a href={summary.remoteControlUrl} target="_blank" rel="noreferrer">
-                アプリで開く
+              <a href={sessionOpenTarget.url} target="_blank" rel="noreferrer">
+                セッションを開く
                 <ExternalLink />
               </a>
             </Button>
+          )}
+          {sessionOpenTarget?.kind === "codex" && codexResumeCommand && (
+            <div className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
+              <span>{formatDispatchHostName(sessionOpenTarget.host)}上のCodexセッションです。</span>
+              <Button variant="ghost" size="sm" onClick={() => void handleCopyCodexResumeCommand()}>
+                <Copy />
+                {copiedCodexResume ? "コピーしました" : "再開コマンドをコピー"}
+              </Button>
+            </div>
           )}
           {/* tailnet内からしか開けない（#1265）。スマホがtailnetにいれば押せる */}
           {summary.previewUrl && (

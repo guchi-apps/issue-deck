@@ -350,6 +350,12 @@ describe("parseKnowledgeFile", () => {
       path: "knowledge/github-actions.md",
       title: "既定の`GITHUB_TOKEN`では`.github/workflows/`配下へpushできない",
       summary: "`workflow`スコープを持つPATを`actions/checkout`の`token`へ渡す。",
+      content: [
+        "- **状況**: ワークフローファイル自体を変更するIssueを無人実行したとき。",
+        "- **結論**: `workflow`スコープを持つPATを`actions/checkout`の`token`へ渡す。",
+        "- **確認日**: 2026-08-09",
+        "- **出典リポジトリ**: guchi-apps/issue-deck#106",
+      ].join("\n"),
       confirmedOn: "2026-08-09",
       source: "guchi-apps/issue-deck#106",
     });
@@ -366,6 +372,11 @@ describe("parseKnowledgeFile", () => {
     expect(parseKnowledgeFile({ path: "knowledge/x.md", text: wrapped })[0].summary).toBe(
       "`workflow`スコープを持つPATを`actions/checkout`の`token`へ渡す。",
     );
+  });
+
+  it("詳細表示用にコードブロックを含む本文を保持する", () => {
+    const content = ["## 見出し", "", "本文", "", "```ts", "const value = 1;", "```"].join("\n");
+    expect(parseKnowledgeFile({ path: "knowledge/x.md", text: content })[0].content).toContain("const value = 1;");
   });
 
   it("確認日・出典が無ければnullで、要約は本文の冒頭で埋める", () => {

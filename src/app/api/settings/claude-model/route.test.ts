@@ -60,6 +60,8 @@ describe("GET", () => {
       defaultDispatchAgent: "claude",
       planReviewAgentForClaude: "claude",
       planReviewAgentForCodex: "codex",
+      planReviewClaudeModel: "sonnet",
+      planReviewCodexModel: "gpt-5.6-terra",
       dispatchFailoverEnabled: true,
       dispatchFailoverThresholdPercent: 90,
     });
@@ -85,6 +87,8 @@ describe("GET", () => {
       defaultDispatchAgent: "claude",
       planReviewAgentForClaude: "claude",
       planReviewAgentForCodex: "codex",
+      planReviewClaudeModel: "sonnet",
+      planReviewCodexModel: "gpt-5.6-terra",
       dispatchFailoverEnabled: true,
       dispatchFailoverThresholdPercent: 90,
     });
@@ -101,6 +105,8 @@ describe("PATCH", () => {
         codexModel: "gpt-6-sol",
         planReviewAgentForClaude: "codex",
         planReviewAgentForCodex: "claude",
+        planReviewClaudeModel: "opus",
+        planReviewCodexModel: "gpt-6-sol",
         appAiModel: "claude-opus-5-5",
         appAiModelReasoning: "claude-sonnet-5-5",
       }),
@@ -116,6 +122,8 @@ describe("PATCH", () => {
           codexModel: "gpt-6-sol",
           planReviewAgentForClaude: "codex",
           planReviewAgentForCodex: "claude",
+          planReviewClaudeModel: "opus",
+          planReviewCodexModel: "gpt-6-sol",
           appAiModel: "claude-opus-5-5",
           appAiModelReasoning: "claude-sonnet-5-5",
         },
@@ -182,6 +190,33 @@ describe("PATCH", () => {
     );
 
     expect(res.status).toBe(400);
+    expect(upsert).not.toHaveBeenCalled();
+  });
+
+  it("計画レビュー用モデルを保存し、不正な値は400で拒否する", async () => {
+    const valid = await PATCH(
+      patchRequest({
+        claudeModel: "sonnet",
+        planReviewClaudeModel: "fable",
+        planReviewCodexModel: "gpt-6-astra",
+      }),
+    );
+
+    expect(valid.status).toBe(200);
+    expect(upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        update: expect.objectContaining({
+          planReviewClaudeModel: "fable",
+          planReviewCodexModel: "gpt-6-astra",
+        }),
+      }),
+    );
+
+    upsert.mockClear();
+    const invalid = await PATCH(
+      patchRequest({ claudeModel: "sonnet", planReviewClaudeModel: "haiku" }),
+    );
+    expect(invalid.status).toBe(400);
     expect(upsert).not.toHaveBeenCalled();
   });
 
