@@ -623,6 +623,30 @@ count_plan_review_sessions() {
     sort -u | wc -l | tr -d ' '
 }
 
+# 稼働中の計画レビューを実行状況へ載せる形にする（#3924）。実装セッションの`report_sessions`
+# には混ぜない——あちらへ入れると`-issue-`規約を前提にした本数・終了照合と取り違える。
+# 死んだペインを除く規則は`count_plan_review_sessions`と同じで、画面だけが終了済みの失敗を
+# 「実行中」と表示しないようにする。
+plan_review_sessions_json() {
+  local session_name repo_name issue_number full_name
+  local entries=()
+
+  while IFS= read -r session_name; do
+    [[ "$session_name" =~ ^(.+)-plan-review-([1-9][0-9]*)$ ]] || continue
+    repo_name="${BASH_REMATCH[1]}"
+    issue_number="${BASH_REMATCH[2]}"
+    full_name="$(resolve_session_repository "$session_name" "$repo_name")" || continue
+    entries+=("$(jq -n --arg repositoryFullName "$full_name" --argjson issueNumber "$issue_number" \
+      '{repositoryFullName: $repositoryFullName, issueNumber: $issueNumber}')")
+  done < <(
+    tmux list-panes -a -F $'#{session_name}\t#{pane_dead}' 2>/dev/null |
+      awk -F '\t' '$2 != "1" && $1 ~ /^.+-plan-review-[1-9][0-9]*$/ { print $1 }' |
+      sort -u
+  )
+
+  printf '%s\n' "${entries[@]+"${entries[@]}"}" | jq -s .
+}
+
 # 計画レビューの空き本数（#3772）。claimへ`planReviewMaxJobs`として渡し、計画レビューを
 # 実装セッションの本数上限（`DISPATCH_MAX_SESSIONS`）の外で受け取る。
 plan_review_slots() {
@@ -1149,7 +1173,7 @@ describe_checkout_state() {
 CODEX_CAPABLE_LOGGED=""
 
 announce() {
-  local repositories payload live_sessions metrics checkout
+  local repositories payload live_sessions metrics checkout plan_review_sessions
   local codex_probe codex_flag codex_reason
   repositories="$(local_repo_list_runnable | jq -R . | jq -s .)"
   # **申告するのは1巡の入口で数えた本数**（#1394）。この後の回収（reap_sessions）で減ったぶんは
@@ -1173,6 +1197,9 @@ announce() {
   # 動かしているチェックアウトの版（#1612）。取れなければ空にし、下で`null`として送る
   # （issue-deck側はそれを「申告なし」として5列をnullへ戻すため、古い版が残り続けない）
   checkout="$(collect_checkout_state)" || checkout=""
+  # 計画レビューのセッションは実装用の本数には含めないが、実行状況から見える必要がある。
+  # 検出に失敗しても古い一覧を残さず空配列を報告する。
+  plan_review_sessions="$(plan_review_sessions_json 2>/dev/null)" || plan_review_sessions='[]'
 
   # Codexの可否（#2526）。**理由はここで拾う。** `--argjson codex "$(codex_capable)"`のように
   # jqの引数として直に呼ぶと、`false`になった理由が`$( )`のサブシェルに閉じて外へ出せない。
@@ -1258,7 +1285,8 @@ announce() {
     --argjson metrics "${metrics:-null}" \
     --argjson launchHold "${LAUNCH_HOLD_JSON:-null}" \
     --argjson checkout "${checkout:-null}" \
-    '{host: $host, repositories: $repositories, contractVersion: $contractVersion, agentVersion: $agentVersion, sessionControl: true, instruction: true, crossRepoQuestion: $crossRepoQuestion, manualStep: $manualStep, manualStepAbort: $manualStepAbort, manualStepValues: $manualStepValues, manualStepVps: $manualStepVps, manualStepSession: $manualStepSession, planReview: $planReview, planReviewAgent: $planReviewAgent, codeReview: $codeReview, codex: $codex, codexRemoteControl: $codexRemoteControl, selfUpdate: $selfUpdate, reboot: $reboot, rebootState: $rebootState, preview: $preview, previewState: $previewState, previewRepositories: $previewRepositories, maxSessions: $maxSessions, liveSessions: $liveSessions, metrics: $metrics, launchHold: $launchHold, checkout: $checkout}')"
+    --argjson planReviewSessions "$plan_review_sessions" \
+    '{host: $host, repositories: $repositories, contractVersion: $contractVersion, agentVersion: $agentVersion, sessionControl: true, instruction: true, crossRepoQuestion: $crossRepoQuestion, manualStep: $manualStep, manualStepAbort: $manualStepAbort, manualStepValues: $manualStepValues, manualStepVps: $manualStepVps, manualStepSession: $manualStepSession, planReview: $planReview, planReviewAgent: $planReviewAgent, codeReview: $codeReview, codex: $codex, codexRemoteControl: $codexRemoteControl, selfUpdate: $selfUpdate, reboot: $reboot, rebootState: $rebootState, preview: $preview, previewState: $previewState, previewRepositories: $previewRepositories, maxSessions: $maxSessions, liveSessions: $liveSessions, metrics: $metrics, launchHold: $launchHold, checkout: $checkout, planReviewSessions: $planReviewSessions}')"
 
   if ! api_call POST /api/dispatch/hosts "$payload"; then
     report_api_failure "ホストの申告に失敗しました"

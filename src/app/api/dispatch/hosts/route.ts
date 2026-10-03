@@ -8,6 +8,7 @@ import {
 import { parseDispatchHostCheckout } from "@/lib/dispatch/host-checkout";
 import { parseDispatchHostReboot } from "@/lib/dispatch/host-reboot";
 import { parseDispatchHostPreview } from "@/lib/dispatch/preview-server";
+import { parseDispatchPlanReviewSessions } from "@/lib/dispatch/plan-review-session";
 import {
   parseDispatchHostLaunchHold,
   parseDispatchHostMetrics,
@@ -163,6 +164,9 @@ export async function POST(request: NextRequest) {
     // 「動いていない」として扱う（`parseDispatchHostPreview`）。止まっているものが画面で
     // 動いているように見えるのが、この写しでいちばん困る壊れ方
     preview: parseDispatchHostPreview(payload?.previewState),
+    // 計画レビューは実装セッションの報告対象ではないため、ホスト申告へ専用の一覧として載せる。
+    // 配列でない古いpollerは`null`（未申告）にする。
+    planReviewSessions: parseDispatchPlanReviewSessions(payload?.planReviewSessions),
     // ホストごと再起動できるpollerだけが送ってくる（#2496）。**未申告はnull＝非対応扱い**
     // （`selfUpdate`と同じ向き）。pollerは`sudo -n -l /usr/sbin/reboot`が通るときだけ真を送る
     rebootCapable: typeof payload?.reboot === "boolean" ? payload.reboot : null,

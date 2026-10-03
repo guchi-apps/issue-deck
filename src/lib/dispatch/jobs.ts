@@ -43,6 +43,10 @@ import { listSessionQuestionRequests } from "@/lib/dispatch/question-requests";
 import type { SessionPlanRequestView } from "@/lib/dispatch/session-plan-request";
 import type { SessionQuestionRequestView } from "@/lib/dispatch/session-question-request";
 import { listDispatchSessions } from "@/lib/dispatch/sessions";
+import {
+  parseDispatchPlanReviewSessions,
+  type DispatchPlanReviewSession,
+} from "@/lib/dispatch/plan-review-session";
 import type { DispatchSessionView } from "@/lib/dispatch/session-state";
 import {
   ACTIVE_DISPATCH_JOB_STATUSES,
@@ -343,6 +347,7 @@ function toHostView(host: DispatchHost, now: Date): DispatchHostView {
             startedAt: host.previewStartedAt?.toISOString() ?? null,
             idleMinutes: host.previewIdleMinutes,
           },
+    planReviewSessions: parseDispatchPlanReviewSessions(host.planReviewSessions) ?? [],
   };
 }
 
@@ -2362,10 +2367,19 @@ export async function listDispatchState(now: Date = new Date()): Promise<{
   //
   // **ジョブとセッションを1回にまとめる**（#1567）。セッションの行にもタイトルを出すが、
   // 別々に引くと同じリポジトリ・同じIssueを2度読むことになる（同じIssueを指すことが多い）
-  const resolvedIssues = await resolveDispatchIssues([...jobs, ...sessions]);
+  const hostViews = hosts.map((host) => toHostView(host, now));
+  const planReviewSessions = hostViews.flatMap((host) => host.planReviewSessions ?? []);
+  const resolvedIssues = await resolveDispatchIssues([...jobs, ...sessions, ...planReviewSessions]);
 
   return {
-    hosts: hosts.map((host) => toHostView(host, now)),
+    hosts: hostViews.map((host) => ({
+      ...host,
+      planReviewSessions: (host.planReviewSessions ?? []).map((session) => {
+        const issue =
+          resolvedIssues.get(issueTitleKey(session.repositoryFullName, session.issueNumber)) ?? null;
+        return { ...session, issueTitle: issue?.title ?? null, issueId: issue?.id ?? null };
+      }),
+    })),
     // **`jobs.map(toJobView)`と書かない。** `Array#map`は第2引数にindexを渡すため、
     // それがそのまま引き当て済みのIssueとして渡ってしまう
     // **埋めた値は画面へ返さない**（#2403）。送ったのは画面自身だが、値はシークレットで
@@ -2486,6 +2500,8 @@ export async function announceDispatchHost(params: {
    * `null`へ戻す（前回の値を残すと、止まっているものが動いているように出続ける）。
    */
   preview: DispatchHostPreview | null;
+  /** 現在稼働中の計画レビュー。古いpollerでは`null`＝未申告。 */
+  planReviewSessions: DispatchPlanReviewSession[] | null;
   now?: Date;
 }): Promise<DispatchHostView> {
   const now = params.now ?? new Date();
@@ -2554,6 +2570,10 @@ export async function announceDispatchHost(params: {
     previewSubject: params.preview?.subject ?? null,
     previewStartedAt: toDate(params.preview?.startedAt),
     previewIdleMinutes: params.preview?.idleMinutes ?? null,
+    // 計画レビューの実体は tmux にあり、ここは毎巡の表示用の写し。前回値を残すと終了後も
+    // 「計画レビュー中」が出続けるため、未申告・空配列とも毎回置き換える。
+    planReviewSessions:
+      params.planReviewSessions === null ? null : JSON.stringify(params.planReviewSessions),
     lastSeenAt: now,
   };
 
