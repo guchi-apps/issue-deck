@@ -1,6 +1,7 @@
 import type { DispatchSession } from "@prisma/client";
 
 import { db } from "@/lib/db";
+import { SESSION_TIMELINE_MAX_EVENTS } from "@/lib/dispatch/session-timeline";
 import {
   isRevivedSession,
   nextEscalatedState,
@@ -516,6 +517,19 @@ export async function reportDispatchSessions(params: {
             title,
           },
         });
+        // 長時間セッションでもサーバー生成履歴が無制限に増えないよう、表示上限と同じ件数へ
+        // 切り詰める。transcript側も含めた全イベントの最新N件を残す。
+        const overflow = await db.dispatchSessionTimelineEvent.findMany({
+          where: { sessionId: stored.id },
+          orderBy: [{ occurredAt: "desc" }, { id: "desc" }],
+          skip: SESSION_TIMELINE_MAX_EVENTS,
+          select: { id: true },
+        });
+        if (overflow.length > 0) {
+          await db.dispatchSessionTimelineEvent.deleteMany({
+            where: { id: { in: overflow.map((event) => event.id) } },
+          });
+        }
       } catch {
         // タイムラインは表示用の補助情報であり、重複記録の失敗でセッション報告本体を止めない。
       }
