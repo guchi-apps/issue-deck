@@ -1,6 +1,7 @@
 import type { MergeJudgement } from "@/lib/github/check-rollup";
 import type { PullRequestCiStatus } from "@/lib/github/pull-request-ci";
 import type { PullRequestReviewVerdict } from "@/lib/github/pull-request-review-verdict";
+import { resolveReviewVerdictFreshness } from "@/lib/github/review-verdict-freshness";
 import type { CiState } from "@/lib/github/release-api";
 import { type ProgressStatusKey } from "@/lib/issue-progress";
 import {
@@ -121,6 +122,11 @@ export type IssuePullRequestProgressSource = {
    * `ai-review`ジョブが`passed`のとき、この`reviewKind`で✔/△/×をさらに出し分ける。
    */
   reviewVerdict: PullRequestReviewVerdict | null;
+  /**
+   * PRの最新headコミット。レビュー判定の`reviewedSha`と突き合わせ、前のheadに対する
+   * 結果を現在の進捗として表示しないために使う（#3967）。
+   */
+  headSha?: string | null;
   /** PRのURL。停止パネルが実行結果へのリンクを作るために使う。持たない材料（PR一覧）では省く */
   htmlUrl?: string | null;
 };
@@ -182,6 +188,7 @@ export function toIssuePullRequestProgressSource(pullRequest: {
   mergeable: boolean | null;
   mergeJudgement: MergeJudgement;
   reviewVerdict: PullRequestReviewVerdict | null;
+  headSha?: string | null;
   htmlUrl?: string | null;
 }): IssuePullRequestProgressSource {
   return {
@@ -193,6 +200,7 @@ export function toIssuePullRequestProgressSource(pullRequest: {
     mergeable: pullRequest.mergeable,
     mergeJudgement: pullRequest.mergeJudgement,
     reviewVerdict: pullRequest.reviewVerdict,
+    headSha: pullRequest.headSha ?? null,
     htmlUrl: pullRequest.htmlUrl ?? null,
   };
 }
@@ -230,9 +238,16 @@ export function buildIssuePullRequestProgress(
   pullRequest: IssuePullRequestProgressSource,
 ): IssuePullRequestProgress {
   const { mergeJudgement, ciState, mergeable, draft, merged, reviewVerdict } = pullRequest;
-  const aiReviewState = mergeJudgement.aiReview.state;
+  // PR本文の判定マーカーは履歴として残る。headが進んだ後は、その成功・失敗を現在の
+  // 判定へ引き継がず、新しいレビュー結果が届くまで「再レビュー中」に戻す。
+  const hasStaleReviewVerdict =
+    resolveReviewVerdictFreshness({
+      reviewedSha: reviewVerdict?.reviewedSha,
+      headSha: pullRequest.headSha,
+    }) === "stale";
+  const aiReviewState = hasStaleReviewVerdict ? "pending" : mergeJudgement.aiReview.state;
   const aiReviewVerdictState = resolveAiReviewVerdictState(mergeJudgement.aiReview, reviewVerdict);
-  const judgementPending = mergeJudgement.state === "pending";
+  const judgementPending = mergeJudgement.state === "pending" || hasStaleReviewVerdict;
   const stopKind = resolveStopKind();
 
   const steps: IssuePullRequestStep[] = [
@@ -268,17 +283,19 @@ export function buildIssuePullRequestProgress(
       shortLabel: AI_REVIEW_STEP_NAME,
       detail:
         aiReviewState === "pending"
-          ? AI_REVIEW_PENDING_LABEL
+          ? hasStaleReviewVerdict
+            ? "再レビュー中"
+            : AI_REVIEW_PENDING_LABEL
           : AI_REVIEW_VERDICT_LABEL[aiReviewVerdictState as AiReviewVerdictState],
       ...(aiReviewVerdictState === "skipped" ? { statusText: AI_REVIEW_SKIPPED_STATUS_TEXT } : {}),
       state:
-        aiReviewVerdictState === "failed" || aiReviewVerdictState === "changes-requested"
+        hasStaleReviewVerdict || aiReviewState === "pending"
+          ? "current"
+          : aiReviewVerdictState === "failed" || aiReviewVerdictState === "changes-requested"
           ? "failed"
           : aiReviewVerdictState === "needs-check"
             ? "needs-check"
-            : aiReviewState === "pending"
-              ? "current"
-              : "done",
+            : "done",
     });
   }
   // マージの段が`current`になるのは、前の段が全部片付いて本当にマージだけが残ったとき。
@@ -318,6 +335,7 @@ export function buildIssuePullRequestProgress(
     if (mergeable === null) return { label: "コンフリクト確認中", tone: "running" };
     if (merged) return { label: MERGED_STEP_LABEL, tone: "running" };
     if (draft) return { label: "下書き", tone: "waiting" };
+    if (hasStaleReviewVerdict) return { label: "再レビュー中", tone: "running" };
     if (judgementPending) return { label: "判定実施中", tone: "running" };
     if (ciState === "pending") return { label: CI_STATE_LABEL.pending, tone: "running" };
     return { label: "マージ待ち", tone: "waiting" };

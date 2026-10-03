@@ -52,6 +52,7 @@ function withAiReview(state: AiReviewState, runUrl: string | null = null) {
 
 function reviewVerdict(
   reviewKind: PullRequestReviewVerdict["reviewKind"],
+  reviewedSha: string | null = null,
 ): PullRequestReviewVerdict {
   return {
     reviewKind,
@@ -60,7 +61,7 @@ function reviewVerdict(
     riskLabel: "",
     riskReasons: [],
     confirmLabel: null,
-    reviewedSha: null,
+    reviewedSha,
   };
 }
 
@@ -122,6 +123,25 @@ describe("PullRequestStatusRail（#2942）", () => {
       expect(slotLabels(container)[2]).toBe(label);
       cleanup();
     }
+  });
+
+  it("旧headの要修正は現在の×ではなく再レビュー中として出す（#3967）", () => {
+    const { container } = render(
+      <PullRequestStatusRail
+        pullRequest={makePullRequest({
+          mergeJudgement: {
+            state: "settled",
+            step: null,
+            runUrl: null,
+            aiReview: { state: "passed", runUrl: null },
+          },
+          reviewVerdict: reviewVerdict("changes-requested", "old-head"),
+        })}
+      />,
+    );
+
+    expect(slotLabels(container)[2]).toBe("レビュー実施中");
+    expect(screen.getByTitle("レビュー: 再レビュー中")).toBeTruthy();
   });
 
   it("状態記号でも、補助テキストからレビューの結果を読める", () => {
