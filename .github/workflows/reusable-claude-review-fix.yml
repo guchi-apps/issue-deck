@@ -311,7 +311,15 @@ jobs:
           # 開始したこの経路だけで扱う。これにより、どちらの指摘も後継Issue／PRを作らない。
           # --paginateの--jqはページごとに評価されるため、ページをまとめてから対象を抜き出す。
           gh api "repos/$GH_REPO/issues/$PR_NUMBER/comments?per_page=100" --paginate \
-            | jq -rs --arg head_sha "$HEAD_SHA" '[.[][] | select(.body | test("issue-deck(-codex)?-review-verdict:changes-requested sha=" + $head_sha)) | .body] | join("\n\n---\n\n")' \
+            | jq -rs --arg head_sha "$HEAD_SHA" --arg manual "$MANUAL" '
+                [.[][] | select(.body | test("issue-deck(-codex)?-review-verdict:(lgtm|needs-check|changes-requested) sha=" + $head_sha))]
+                | group_by(if (.body | test("issue-deck-codex-review-verdict:")) then "codex" else "claude" end)
+                | map(sort_by(.created_at) | last)
+                | map(select(.body | test("changes-requested sha=" + $head_sha)))
+                | if $manual == "true" then . else map(select(.body | test("issue-deck-review-verdict:"))) end
+                | map(.body)
+                | join("\n\n---\n\n")
+              ' \
             > /tmp/review-comment.md
           if ! grep -q '[^[:space:]]' /tmp/review-comment.md; then
             echo "自動レビューのコメントが見つからないため何もしません"
