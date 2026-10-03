@@ -42,13 +42,27 @@ cleanup_review_worktree() {
 run_review() {
   local owner="$1" repo="$2" pr_number="$3" base_sha="$4" head_sha="$5"
   local full_name="$owner/$repo" local_path workdir prompt_file output_file log_file
-  local verdict_pattern codex_command cleanup_command
+  local verdict_pattern codex_command cleanup_command codex_model reasoning_effort
 
   require_command gh
   require_command git
   require_command timeout
   codex_command="$(agent_cli_codex_command)"
   require_command "$codex_command"
+  # pollerが渡すAPP_BASE_URLから、PRレビュー専用の設定を読む。取得できない環境では従来どおり
+  # Codex CLIの既定を使うため、ローカル単体実行や一時的なIssueDeck停止でレビューを止めない。
+  codex_model=auto
+  reasoning_effort=default
+  if [[ -n "${APP_BASE_URL:-}" ]]; then
+    local settings_json
+    settings_json="$(curl -fsS --max-time 5 "${APP_BASE_URL%/}/api/settings/claude-model" 2>/dev/null || true)"
+    if [[ -n "$settings_json" ]]; then
+      codex_model="$(jq -r '.workflowCodexModel // "auto"' <<<"$settings_json" 2>/dev/null || printf 'auto')"
+      reasoning_effort="$(jq -r '.workflowCodexReasoningEffort // "default"' <<<"$settings_json" 2>/dev/null || printf 'default')"
+    fi
+  fi
+  case "$codex_model" in auto|gpt-6-astra|gpt-6-sol|gpt-5.6-terra|gpt-6-luna|gpt-5.5|gpt-5.4) ;; *) codex_model=auto ;; esac
+  case "$reasoning_effort" in default|low|medium|high|xhigh) ;; *) reasoning_effort=default ;; esac
   [[ -f "$SCRIPT_DIR/prompts/codex-pr-review-agent.md" ]] || {
     echo "Error: Codex PRレビュー用プロンプトがありません。" >&2
     exit 1
@@ -77,7 +91,10 @@ run_review() {
     -e "s|{{HEAD_SHA}}|$head_sha|g" \
     "$SCRIPT_DIR/prompts/codex-pr-review-agent.md" >"$prompt_file"
 
-  if ! timeout "$TIMEOUT_SECONDS" "$codex_command" exec --sandbox read-only --ephemeral \
+  local -a codex_model_args=()
+  [[ "$codex_model" = auto ]] || codex_model_args=(-m "$codex_model")
+  [[ "$reasoning_effort" = default ]] || codex_model_args+=(--config "model_reasoning_effort=$reasoning_effort")
+  if ! timeout "$TIMEOUT_SECONDS" "$codex_command" exec --sandbox read-only --ephemeral "${codex_model_args[@]}" \
     --output-last-message "$output_file" -C "$workdir" <"$prompt_file" >"$log_file" 2>&1; then
     : >"$output_file"
   fi
@@ -125,7 +142,7 @@ sweep() {
     session_name="$(session_name_for "$repo" "$pr_number" "$head_sha")"
     tmux has-session -t "=$session_name" 2>/dev/null && continue
     tmux new-session -d -s "$session_name" -c "$local_path" \
-      "bash $(printf '%q' "$SCRIPT_DIR/start-codex-pr-review.sh") --run $(printf '%q' "$owner") $(printf '%q' "$repo") $(printf '%q' "$pr_number") $(printf '%q' "$base_sha") $(printf '%q' "$head_sha")"
+      "APP_BASE_URL=$(printf '%q' "${APP_BASE_URL:-}") bash $(printf '%q' "$SCRIPT_DIR/start-codex-pr-review.sh") --run $(printf '%q' "$owner") $(printf '%q' "$repo") $(printf '%q' "$pr_number") $(printf '%q' "$base_sha") $(printf '%q' "$head_sha")"
     tmux set-option -t "$session_name:" -w remain-on-exit failed >/dev/null 2>&1 || true
     echo "Codex PRレビューを起動しました: ${full_name}#${pr_number} (${head_sha:0:12})"
   done <<<"$rows"

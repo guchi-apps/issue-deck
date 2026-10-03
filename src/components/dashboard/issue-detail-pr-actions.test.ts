@@ -36,16 +36,12 @@ describe("Issue詳細はPRを変更する操作を持たない（#3333）", () =
 });
 
 /**
- * PRへの修正依頼の送信はPR詳細（`issue-deck-shell.tsx`の`handlePullRequestFixSessionRequest`）
- * の1系統だけにする（#3333）。
+ * PRレビューの修正は既存PRのreview-fixワークフローに統一する（#3965）。
  */
-describe("PRへの修正依頼の送信（#2919・#3009）", () => {
-  /**
-   * **呼び戻すときのCLIを渡し忘れない。** `POST /api/dispatch`は`agent`が無いと既定
-   * （Claude Code）へ落とすため、書き忘れるとCodexで進んでいたIssueが黙って別のCLIで立ち上がる。
-   */
-  it("呼び戻すときに`agent`を引き継ぐ", () => {
+describe("PRレビューの修正（#3965）", () => {
+  it("PR詳細は旧セッション経路を持たない", () => {
     const source = readFileSync(SHELL, "utf8");
-    expect(source).toContain("agent: route.agent");
+    expect(source).not.toContain("handlePullRequestFixSessionRequest");
+    expect(source).not.toContain("sendPrFixNotify");
   });
 });

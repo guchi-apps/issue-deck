@@ -84,8 +84,6 @@ import { usePullRequests } from "@/hooks/use-pull-requests";
 import { usePushDeliveryState } from "@/hooks/use-push-delivery";
 import { usePushNotificationCleanup } from "@/hooks/use-push-notification-cleanup";
 import { usePullRequestDetail } from "@/hooks/use-pull-request-detail";
-import { useIssueCommentMutations } from "@/hooks/use-issue-comment-mutations";
-import { useIssueMutations } from "@/hooks/use-issue-mutations";
 import { usePersistedState } from "@/hooks/use-persisted-state";
 import { useReferenceNavigation } from "@/hooks/use-reference-navigation";
 import { useResizableWidth } from "@/hooks/use-resizable-width";
@@ -124,20 +122,7 @@ import {
 } from "@/lib/check-user-notification";
 import { buildPullRequestId, type GithubReference } from "@/lib/github-reference";
 import { subscribeIssueCreated } from "@/lib/issue-broadcast";
-import { findSessionForIssue } from "@/lib/dispatch/issue-session";
-import { prFixRequestLabels, type PrFixRequestRoute } from "@/lib/dispatch/pr-fix-request";
-import type { DispatchSessionView } from "@/lib/dispatch/session-state";
 import { buildFollowupIssueBodyPrefix } from "@/lib/github/followup-issue";
-import {
-  requestPrFixCommentBody,
-  withRollbackFailureNotice,
-  withRollbackNotice,
-} from "@/lib/github/approval-labels";
-import {
-  findExistingPullRequestFixIssue,
-  resolvePullRequestFixRoute,
-  type PullRequestFixRoute,
-} from "@/lib/github/pull-request-fix-issue";
 import {
   buildCodeReviewFindingIssueDraft,
   isCodeReviewIssue,
@@ -211,36 +196,6 @@ import type { CurrentUser } from "@/types/user";
 
 // 確認待ちトーストが積み上がりすぎないよう、直近分だけ表示する（#852）
 const MAX_CHECK_USER_TOASTS = 4;
-
-/**
- * PR詳細の「修正Issueを起案」の送り先（#3009）。`allIssues`から元Issueのラベルを、
- * `sessions`からセッション状態を引き、あとは`resolvePullRequestFixRoute`（マージ済み・元Issueの
- * 数を先に見る）へ委ねる。**コンポーネント外の純粋関数にする**のは、`useMemo`の依存配列を
- * `allIssues`・`sessions`・対象PRの3つだけに保てるようにするため（関数自体をクロージャに
- * すると、レンダーのたびに参照が変わり依存配列に入れられない）。
- */
-function resolvePullRequestFixRouteFor(
-  pullRequest: PullRequestSummary | null,
-  allIssues: readonly Issue[],
-  sessions: readonly DispatchSessionView[],
-): PullRequestFixRoute {
-  if (!pullRequest || pullRequest.linkedIssueNumbers.length !== 1) {
-    return { kind: "create-issue" };
-  }
-  const targetIssue = allIssues.find(
-    (candidate) =>
-      candidate.repositoryFullName === pullRequest.repositoryFullName &&
-      candidate.number === pullRequest.linkedIssueNumbers[0],
-  );
-  const session = targetIssue
-    ? findSessionForIssue(sessions, targetIssue.repositoryFullName, targetIssue.number)
-    : null;
-  return resolvePullRequestFixRoute({
-    pullRequest,
-    targetIssueLabels: targetIssue?.labels ?? null,
-    session,
-  });
-}
 
 type IssueDeckShellProps = {
   currentUser: CurrentUser | null;
@@ -625,12 +580,8 @@ export function IssueDeckShell({
     setCreateDialogOpen(true);
   }
 
-  /**
-   * PR詳細の「修正Issueを起案」（#2961）。下書きは`PullRequestFixIssueBar`が自動レビューの
-   * 本文まで取ってから組み立てて渡す。**ここでも起票しない**
-   * （`openReleaseVerificationFixIssueDialog`と同じ立場）。
-   */
-  function openPullRequestFixIssueDialog(draft: { repositoryFullName: string; title: string; body: string }) {
+  /** 下書き入りの新規Issue作成ダイアログを開く。ここでは起票しない。 */
+  function openIssueDraftDialog(draft: { repositoryFullName: string; title: string; body: string }) {
     setCreateDialogRepo(draft.repositoryFullName);
     setCreateDialogTitle(draft.title);
     setCreateDialogBody(draft.body);
@@ -642,10 +593,10 @@ export function IssueDeckShell({
 
   /**
    * ブランチ画面のiOS配布欄の「修正Issueを起案」（#3784）。**ここでは起票しない**
-   * （`openPullRequestFixIssueDialog`と同じ立場）。起案元は覚えておき、作成後に追跡Issueへ登録する。
+   * （`openIssueDraftDialog`と同じ立場）。起案元は覚えておき、作成後に追跡Issueへ登録する。
    */
   function openIosFixIssueDialog(draft: IosDistributionFixIssueDraft, origin: IosFixIssueOrigin) {
-    openPullRequestFixIssueDialog(draft);
+    openIssueDraftDialog(draft);
     setIosFixOrigin(origin);
   }
 
@@ -655,7 +606,7 @@ export function IssueDeckShell({
    */
   function openReviewGateIssueDialog(draft: { repositoryFullName: string; title: string; body: string }) {
     setSettingsDialogOpen(false);
-    openPullRequestFixIssueDialog(draft);
+    openIssueDraftDialog(draft);
   }
 
   // 既にマージ・クローズ済みのIssueは本文を直接編集できないため、続きの対応が必要な場合は
@@ -968,12 +919,6 @@ export function IssueDeckShell({
   // ここで持つのは「確認待ちのIssueでエージェントがまだ動いているか」を判定するため（#2174）で、
   // 同じものをIssue一覧へも渡す——一覧が自前で持つと、同じ画面のために取得が2本走る。
   const dispatch = useDispatchState(true);
-  // PR詳細の「修正Issueを起案」の送り先がセッションのとき（#3009）に使う。`issue-detail.tsx`の
-  // `useIssueMutations`・`useIssueCommentMutations`とは別インスタンス——対象Issueが選択中の
-  // Issueとは限らないため、こちらは`handlePullRequestFixSessionRequest`専用に持つ
-  const pullRequestFixIssueMutations = useIssueMutations();
-  const pullRequestFixCommentMutations = useIssueCommentMutations();
-  const [pullRequestFixSessionError, setPullRequestFixSessionError] = useState<string | null>(null);
   /**
    * 確認環境（#2444）が動いているか。**左メニューの行に丸を出すためだけ**に持つ。
    * 押し忘れて置きっぱなしになっているのは自動で片付かない（60分は動き続け、その間
@@ -1753,157 +1698,21 @@ export function IssueDeckShell({
       modalPullRequestDetail.detail,
     ],
   );
-
-  // PR詳細の「修正Issueを起案」の送り先とメンション候補（#3009）。PC PR一覧画面（`selectedPullRequest`）
-  // と「ユーザーの確認待ち」から開くモーダル（`modalPullRequest`）は別のPRを指しうるので、それぞれで計算する
-  const pullRequestFixRoute = useMemo(
-    () => resolvePullRequestFixRouteFor(selectedPullRequest, allIssues, dispatch.sessions),
-    [selectedPullRequest, allIssues, dispatch.sessions],
-  );
-  const modalPullRequestFixRoute = useMemo(
-    () => resolvePullRequestFixRouteFor(modalPullRequest, allIssues, dispatch.sessions),
-    [modalPullRequest, allIssues, dispatch.sessions],
-  );
-  // 「修正Issueを起案」（route.kindがcreate-issueのとき）で、このPRを参照する既存の修正Issueが
-  // 既にあれば気づけるようにする（#3331。二重起票の防止）
-  const existingPullRequestFixIssue = useMemo(
-    () =>
-      selectedPullRequest && pullRequestFixRoute.kind === "create-issue"
-        ? findExistingPullRequestFixIssue(selectedPullRequest, allIssues)
-        : null,
-    [selectedPullRequest, pullRequestFixRoute, allIssues],
-  );
-  const modalExistingPullRequestFixIssue = useMemo(
-    () =>
-      modalPullRequest && modalPullRequestFixRoute.kind === "create-issue"
-        ? findExistingPullRequestFixIssue(modalPullRequest, allIssues)
-        : null,
-    [modalPullRequest, modalPullRequestFixRoute, allIssues],
-  );
-  const pullRequestFixIssueSuggestions = useMemo(
+  const pullRequestIssueSuggestions = useMemo(
     () =>
       selectedPullRequest
         ? getRepoIssueSuggestions(allIssues, selectedPullRequest.repositoryFullName)
         : [],
     [allIssues, selectedPullRequest],
   );
-  const modalPullRequestFixIssueSuggestions = useMemo(
+  const modalPullRequestIssueSuggestions = useMemo(
     () =>
-      modalPullRequest ? getRepoIssueSuggestions(allIssues, modalPullRequest.repositoryFullName) : [],
+      modalPullRequest
+        ? getRepoIssueSuggestions(allIssues, modalPullRequest.repositoryFullName)
+        : [],
     [allIssues, modalPullRequest],
   );
 
-  async function postPullRequestFixIssueComment(issue: Issue, body: string): Promise<boolean> {
-    const [owner, repo] = issue.repositoryFullName.split("/");
-    const created = await pullRequestFixCommentMutations.createComment({ owner, repo, number: issue.number, body });
-    if (!created) {
-      setPullRequestFixSessionError(pullRequestFixCommentMutations.error);
-      return false;
-    }
-    handleIssueUpdated({ ...issue, commentCount: issue.commentCount + 1 });
-    return true;
-  }
-
-  /**
-   * ラベル更新→コメント投稿の順で行う（#2919・`issue-detail.tsx`の`updateLabelsAndComment`と
-   * 同じ手順）。コメント投稿が失敗したらラベルをロールバックし、「ラベルは外れたが実装は
-   * 再開されない」不整合状態を防ぐ（#421）。
-   */
-  async function updatePullRequestFixIssueLabelsAndComment(
-    issue: Issue,
-    newLabels: string[],
-    commentBody: string,
-  ): Promise<boolean> {
-    const originalLabels = issue.labels.map((label) => label.name);
-    const updated = await pullRequestFixIssueMutations.updateIssue({
-      repositoryFullName: issue.repositoryFullName,
-      number: issue.number,
-      labels: newLabels,
-    });
-    if (!updated) {
-      setPullRequestFixSessionError(pullRequestFixIssueMutations.error);
-      return false;
-    }
-    handleIssueUpdated(updated);
-
-    const [owner, repo] = issue.repositoryFullName.split("/");
-    const created = await pullRequestFixCommentMutations.createComment({
-      owner,
-      repo,
-      number: issue.number,
-      body: commentBody,
-    });
-    if (created) {
-      handleIssueUpdated({ ...updated, commentCount: updated.commentCount + 1 });
-      return true;
-    }
-
-    const rolledBack = await pullRequestFixIssueMutations.updateIssue({
-      repositoryFullName: issue.repositoryFullName,
-      number: issue.number,
-      labels: originalLabels,
-    });
-    if (rolledBack) handleIssueUpdated(rolledBack);
-    setPullRequestFixSessionError(
-      rolledBack
-        ? withRollbackNotice(pullRequestFixCommentMutations.error ?? "")
-        : withRollbackFailureNotice(pullRequestFixCommentMutations.error ?? ""),
-    );
-    return false;
-  }
-
-  /**
-   * PR詳細の「修正Issueを起案」の送り先が新規Issue作成以外のとき（#3009）の送信一式。
-   * `issue-detail.tsx`の`handleRequestPrFix`（#2919）と手順は同じで、対象Issueがクロージャの
-   * 選択中Issueではなく引数（PRの元Issue）で決まる点だけが違う。
-   */
-  async function handlePullRequestFixSessionRequest(
-    pullRequest: PullRequestSummary,
-    route: PrFixRequestRoute,
-    reason: string,
-  ): Promise<boolean> {
-    setPullRequestFixSessionError(null);
-    const targetIssue = allIssues.find(
-      (candidate) =>
-        candidate.repositoryFullName === pullRequest.repositoryFullName &&
-        candidate.number === pullRequest.linkedIssueNumbers[0],
-    );
-    if (!targetIssue) {
-      setPullRequestFixSessionError("対象のIssueが見つかりませんでした。");
-      return false;
-    }
-
-    const body = requestPrFixCommentBody(reason);
-    const newLabels = prFixRequestLabels(route, targetIssue.labels);
-    const posted = newLabels
-      ? await updatePullRequestFixIssueLabelsAndComment(targetIssue, newLabels, body)
-      : await postPullRequestFixIssueComment(targetIssue, body);
-    if (!posted) return false;
-
-    if (route.kind === "session") {
-      const result = await dispatch.sendPrFixNotify({
-        repositoryFullName: targetIssue.repositoryFullName,
-        issueNumber: targetIssue.number,
-        hostName: route.host,
-      });
-      if (!result.ok) setPullRequestFixSessionError(result.message);
-      return result.ok;
-    }
-    if (route.kind === "resume") {
-      const enqueued = await dispatch.enqueue({
-        repositoryFullName: targetIssue.repositoryFullName,
-        issueNumber: targetIssue.number,
-        hostName: route.host,
-        agent: route.agent,
-      });
-      if (!enqueued) {
-        setPullRequestFixSessionError("セッションを再開できませんでした。サブPCの状態を確認してください。");
-      }
-      return enqueued;
-    }
-    // actions・handoff: コメント投稿（とhandoffなら11.localを外すラベル更新）だけで完了
-    return true;
-  }
 
   function handlePullRequestMerged(pullRequest: PullRequestSummary) {
     const merge: OptimisticMerge = { id: pullRequest.id, mergedAt: new Date().toISOString() };
@@ -2150,7 +1959,7 @@ export function IssueDeckShell({
     (mobileScreen.kind === "pull-requests" && !filters.pr);
 
   return (
-    <DeployFailureFixIssueContext.Provider value={openPullRequestFixIssueDialog}>
+    <DeployFailureFixIssueContext.Provider value={openIssueDraftDialog}>
     <GithubReferenceNavigationProvider openReference={openReference}>
       {/* 通知ベルの材料（#1772）。PCのトップバーとスマホの各画面のヘッダーが同じものを読む。
           リリース状況の取得を1本に保つため、ここで1回だけ用意して配る。
@@ -2365,20 +2174,6 @@ export function IssueDeckShell({
                     }
                     onUpdated={openPullRequests.refresh}
                     onCreateFixIssue={openReleaseVerificationFixIssueDialog}
-                    onCreatePullRequestFixIssue={openPullRequestFixIssueDialog}
-                    pullRequestFixRoute={pullRequestFixRoute}
-                    existingPullRequestFixIssue={existingPullRequestFixIssue}
-                    issueSuggestions={pullRequestFixIssueSuggestions}
-                    onRequestPullRequestSessionFix={(route, reason) =>
-                      selectedPullRequest
-                        ? handlePullRequestFixSessionRequest(selectedPullRequest, route, reason)
-                        : Promise.resolve(false)
-                    }
-                    isSubmittingPullRequestSessionFix={
-                      pullRequestFixIssueMutations.isSubmitting || pullRequestFixCommentMutations.isSubmitting
-                    }
-                    pullRequestSessionFixRejection={null}
-                    pullRequestSessionFixError={pullRequestFixSessionError}
                     // 積んだ履歴があれば巻き戻す。無ければPRの選択を解除して一覧へ戻す（#1396）。
                     onBack={() => goBackOrFallback(() => selectPullRequest(null))}
                   />
@@ -2791,19 +2586,7 @@ export function IssueDeckShell({
                 }
                 onUpdated={openPullRequests.refresh}
                 onCreateFixIssue={openReleaseVerificationFixIssueDialog}
-                onCreatePullRequestFixIssue={openPullRequestFixIssueDialog}
-                pullRequestFixRoute={pullRequestFixRoute}
-                existingPullRequestFixIssue={existingPullRequestFixIssue}
-                issueSuggestions={pullRequestFixIssueSuggestions}
-                onRequestPullRequestSessionFix={(route, reason) =>
-                  selectedPullRequest
-                    ? handlePullRequestFixSessionRequest(selectedPullRequest, route, reason)
-                    : Promise.resolve(false)
-                }
-                isSubmittingPullRequestSessionFix={
-                  pullRequestFixIssueMutations.isSubmitting || pullRequestFixCommentMutations.isSubmitting
-                }
-                pullRequestSessionFixError={pullRequestFixSessionError}
+                issueSuggestions={pullRequestIssueSuggestions}
                 className="hidden flex-1 md:flex"
               />
             </>
@@ -2972,22 +2755,10 @@ export function IssueDeckShell({
           onPullRequestClosed={() => modalPullRequest && handlePullRequestClosed(modalPullRequest)}
           onUpdated={openPullRequests.refresh}
           onCreateFixIssue={openReleaseVerificationFixIssueDialog}
-          onCreatePullRequestFixIssue={openPullRequestFixIssueDialog}
-          pullRequestFixRoute={modalPullRequestFixRoute}
-          existingPullRequestFixIssue={modalExistingPullRequestFixIssue}
-          issueSuggestions={modalPullRequestFixIssueSuggestions}
-          onRequestPullRequestSessionFix={(route, reason) =>
-            modalPullRequest
-              ? handlePullRequestFixSessionRequest(modalPullRequest, route, reason)
-              : Promise.resolve(false)
-          }
-          isSubmittingPullRequestSessionFix={
-            pullRequestFixIssueMutations.isSubmitting || pullRequestFixCommentMutations.isSubmitting
-          }
-          pullRequestSessionFixError={pullRequestFixSessionError}
           /* 開くときに履歴を積んでいるので、閉じるのは巻き戻し。共有URLで直接開いた場合だけ
              クエリを落とす（`goBackOrFallback`。他の閉じる導線と同じ扱い） */
           onClose={() => goBackOrFallback(() => selectPullRequestModal(null))}
+          issueSuggestions={modalPullRequestIssueSuggestions}
         />
 
         {/* 手作業アシスタント（#1826）。PC・スマホの入口が同じ1つを開く */}

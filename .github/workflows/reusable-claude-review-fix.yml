@@ -305,11 +305,21 @@ jobs:
             fi
           fi
 
-          # 直す材料は、このPRへ投稿された最新の自動レビュー（総評の判定マーカー付きのコメント）。
-          # 手動実行では判定時点のコミットを問わない（押した人が「この指摘を直して」と頼んでいる）
-          # --paginateの--jqはページごとに評価されるため、ページをまとめてから最後の1件を取る
+          # 直す材料は、このPRへ投稿された最新コミットへの「要修正」自動レビューコメント。
+          # ClaudeとCodexは同じPRを再レビューするため、**手動実行では両方の指摘を渡す**。
+          # Codexは「自動修正してよい」印を持たないので自動のhandoffには入れず、画面で人が
+          # 開始したこの経路だけで扱う。これにより、どちらの指摘も後継Issue／PRを作らない。
+          # --paginateの--jqはページごとに評価されるため、ページをまとめてから対象を抜き出す。
           gh api "repos/$GH_REPO/issues/$PR_NUMBER/comments?per_page=100" --paginate \
-            | jq -rs '[.[][] | select(.body | test("issue-deck-review-verdict:(lgtm|needs-check|changes-requested) sha="))] | last | .body // ""' \
+            | jq -rs --arg head_sha "$HEAD_SHA" --arg manual "$MANUAL" '
+                [.[][] | select(.body | test("issue-deck(-codex)?-review-verdict:(lgtm|needs-check|changes-requested) sha=" + $head_sha))]
+                | group_by(if (.body | test("issue-deck-codex-review-verdict:")) then "codex" else "claude" end)
+                | map(sort_by(.created_at) | last)
+                | map(select(.body | test("changes-requested sha=" + $head_sha)))
+                | if $manual == "true" then . else map(select(.body | test("issue-deck-review-verdict:"))) end
+                | map(.body)
+                | join("\n\n---\n\n")
+              ' \
             > /tmp/review-comment.md
           if ! grep -q '[^[:space:]]' /tmp/review-comment.md; then
             echo "自動レビューのコメントが見つからないため何もしません"
@@ -483,6 +493,16 @@ jobs:
             echo '__ISSUE_DECK_PROMPT_EOF__'
           } >> "$GITHUB_ENV"
 
+      - name: PRレビュー・修復用のClaudeモデルを取得する
+        id: workflow_model
+        env:
+          APP_BASE_URL: ${{ vars.APP_BASE_URL }}
+        run: |
+          model=auto
+          if [ -n "$APP_BASE_URL" ]; then model="$(curl -fsS --max-time 5 "${APP_BASE_URL%/}/api/settings/claude-model" 2>/dev/null | jq -r '.workflowClaudeModel // "auto"' || true)"; fi
+          case "$model" in auto|fable|opus|sonnet|haiku) ;; *) model=auto ;; esac
+          [ "$model" = auto ] && echo 'claude_args=' >> "$GITHUB_OUTPUT" || echo "claude_args=--model $model" >> "$GITHUB_OUTPUT"
+
       - name: Claude Code（レビュー指摘修正）
         id: claude_review_fix
         if: steps.state.outputs.should_fix == 'true'
@@ -537,6 +557,7 @@ jobs:
           # 直接書けばディレクトリ作成が要らず、ランナーは実行ごとに破棄されるため掃除も要らない。
           # その旨をプロンプト側に明記して、そもそも使わせない方向で解決している。
           claude_args: >-
+            ${{ steps.workflow_model.outputs.claude_args }}
             --allowedTools "Edit,Write,Read,Grep,Glob,Bash(git:*),Bash(gh:*),${{ inputs.package-manager == 'pnpm' && 'Bash(pnpm:*)' || 'Bash(npm:*)' }},Bash(npx:*),Bash(node:*),Bash(python:*),Bash(python3:*),Bash(pip:*),Bash(pip3:*),Bash(pytest:*),Bash(curl:*),Bash(grep:*),Bash(find:*),Bash(ls:*),Bash(cat:*),Bash(head:*),Bash(tail:*),Bash(wc:*)"
           prompt: ${{ env.PROMPT_REVIEW_FIX }}
 

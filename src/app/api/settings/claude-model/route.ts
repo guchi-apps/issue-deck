@@ -5,6 +5,7 @@ import {
   APP_AI_MODEL_REASONING_DEFAULT,
   CLAUDE_LOCAL_MODEL_DEFAULT,
   CODEX_MODEL_DEFAULT,
+  CODEX_REASONING_EFFORT_DEFAULT,
   DEFAULT_DISPATCH_AGENT_SETTING,
   GITHUB_ACTIONS_AGENT_DEFAULT,
   GITHUB_ACTIONS_CODEX_MODEL_DEFAULT,
@@ -20,6 +21,8 @@ import {
   parseClaudeModel,
   parseCodexLocalModel,
   parseCodexModelSetting,
+  parseCodexModel,
+  parseCodexReasoningEffort,
   parseDefaultDispatchAgent,
   parseGithubActionsAgent,
   parseDispatchFailoverThresholdPercent,
@@ -39,6 +42,10 @@ async function getClaudeModels() {
       parseGithubActionsAgent(setting?.githubActionsAgent) ?? GITHUB_ACTIONS_AGENT_DEFAULT,
     githubActionsCodexModel:
       parseCodexLocalModel(setting?.githubActionsCodexModel) ?? GITHUB_ACTIONS_CODEX_MODEL_DEFAULT,
+    workflowClaudeModel: parseClaudeModel(setting?.workflowClaudeModel) ?? "auto",
+    workflowCodexModel: parseCodexModel(setting?.workflowCodexModel) ?? "auto",
+    workflowCodexReasoningEffort:
+      parseCodexReasoningEffort(setting?.workflowCodexReasoningEffort) ?? CODEX_REASONING_EFFORT_DEFAULT,
     claudeModelAssist: setting?.claudeModelAssist ?? "auto",
     claudeLocalModel:
       parseClaudeLocalModelSetting(setting?.claudeLocalModel) ?? CLAUDE_LOCAL_MODEL_DEFAULT,
@@ -84,8 +91,9 @@ export async function PATCH(request: NextRequest) {
   }
 
   const payload = await request.json().catch(() => null);
-  const claudeModel = parseClaudeModel(payload?.claudeModel);
-  if (claudeModel === null) {
+  const hasClaudeModel = payload !== null && typeof payload === "object" && "claudeModel" in payload;
+  const claudeModel = hasClaudeModel ? parseClaudeModel(payload?.claudeModel) : undefined;
+  if (hasClaudeModel && claudeModel === null) {
     return NextResponse.json({ error: "invalid_request" }, { status: 400 });
   }
   const hasGithubActionsAgent = payload !== null && typeof payload === "object" && "githubActionsAgent" in payload;
@@ -101,6 +109,23 @@ export async function PATCH(request: NextRequest) {
     ? parseCodexLocalModel(payload?.githubActionsCodexModel)
     : undefined;
   if (hasGithubActionsCodexModel && githubActionsCodexModel === null) {
+    return NextResponse.json({ error: "invalid_request" }, { status: 400 });
+  }
+  const hasWorkflowClaudeModel = payload !== null && typeof payload === "object" && "workflowClaudeModel" in payload;
+  const workflowClaudeModel = hasWorkflowClaudeModel ? parseClaudeModel(payload?.workflowClaudeModel) : undefined;
+  if (hasWorkflowClaudeModel && workflowClaudeModel === null) {
+    return NextResponse.json({ error: "invalid_request" }, { status: 400 });
+  }
+  const hasWorkflowCodexModel = payload !== null && typeof payload === "object" && "workflowCodexModel" in payload;
+  const workflowCodexModel = hasWorkflowCodexModel ? parseCodexModel(payload?.workflowCodexModel) : undefined;
+  if (hasWorkflowCodexModel && workflowCodexModel === null) {
+    return NextResponse.json({ error: "invalid_request" }, { status: 400 });
+  }
+  const hasWorkflowCodexReasoningEffort = payload !== null && typeof payload === "object" && "workflowCodexReasoningEffort" in payload;
+  const workflowCodexReasoningEffort = hasWorkflowCodexReasoningEffort
+    ? parseCodexReasoningEffort(payload?.workflowCodexReasoningEffort)
+    : undefined;
+  if (hasWorkflowCodexReasoningEffort && workflowCodexReasoningEffort === null) {
     return NextResponse.json({ error: "invalid_request" }, { status: 400 });
   }
   // claudeModelAssistは省略を許容し、その場合は既存値を変更しない。設定画面は常に両方を送るが、
@@ -205,9 +230,12 @@ export async function PATCH(request: NextRequest) {
     where: { id: 1 },
     create: {
       id: 1,
-      claudeModel,
+      claudeModel: claudeModel ?? "auto",
       ...(githubActionsAgent ? { githubActionsAgent } : {}),
       ...(githubActionsCodexModel ? { githubActionsCodexModel } : {}),
+      ...(workflowClaudeModel ? { workflowClaudeModel } : {}),
+      ...(workflowCodexModel ? { workflowCodexModel } : {}),
+      ...(workflowCodexReasoningEffort ? { workflowCodexReasoningEffort } : {}),
       ...(claudeModelAssist ? { claudeModelAssist } : {}),
       ...(codexModel ? { codexModel } : {}),
       ...(claudeLocalModel ? { claudeLocalModel } : {}),
@@ -225,9 +253,12 @@ export async function PATCH(request: NextRequest) {
         : {}),
     },
     update: {
-      claudeModel,
+      ...(claudeModel ? { claudeModel } : {}),
       ...(githubActionsAgent ? { githubActionsAgent } : {}),
       ...(githubActionsCodexModel ? { githubActionsCodexModel } : {}),
+      ...(workflowClaudeModel ? { workflowClaudeModel } : {}),
+      ...(workflowCodexModel ? { workflowCodexModel } : {}),
+      ...(workflowCodexReasoningEffort ? { workflowCodexReasoningEffort } : {}),
       ...(claudeModelAssist ? { claudeModelAssist } : {}),
       ...(codexModel ? { codexModel } : {}),
       ...(claudeLocalModel ? { claudeLocalModel } : {}),
@@ -261,6 +292,10 @@ export async function PATCH(request: NextRequest) {
       parseGithubActionsAgent(updated.githubActionsAgent) ?? GITHUB_ACTIONS_AGENT_DEFAULT,
     githubActionsCodexModel:
       parseCodexLocalModel(updated.githubActionsCodexModel) ?? GITHUB_ACTIONS_CODEX_MODEL_DEFAULT,
+    workflowClaudeModel: parseClaudeModel(updated.workflowClaudeModel) ?? "auto",
+    workflowCodexModel: parseCodexModel(updated.workflowCodexModel) ?? "auto",
+    workflowCodexReasoningEffort:
+      parseCodexReasoningEffort(updated.workflowCodexReasoningEffort) ?? CODEX_REASONING_EFFORT_DEFAULT,
     claudeModelAssist: updated.claudeModelAssist,
     codexModel: parseCodexModelSetting(updated.codexModel) ?? CODEX_MODEL_DEFAULT,
     claudeLocalModel:
