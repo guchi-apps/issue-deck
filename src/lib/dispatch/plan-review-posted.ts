@@ -10,7 +10,7 @@ import { isPlanReviewCommentBody } from "@/lib/dispatch/plan-review-auto-reflect
  * ままになっていた。ここで`reviewPostedAt`を埋めると、一覧・通知の保留もIssue詳細と同じ時点で
  * 「作成中」を終える。
  *
- * 記録する先は、**`reviewPostedAt`が未記入のclaudeの`SUCCEEDED`ジョブのうち、コメントより前に積まれ、
+ * 記録する先は、**`reviewPostedAt`が未記入の`SUCCEEDED`ジョブのうち、コメントより前に積まれ、
  * 15分以内で最も古いもの**（#3648。#3659では「最新」だった）。「最新」だと、計画を出し直した後に
  * 前回のレビューが遅れて届いたとき、その指摘が**次の計画のジョブ**へ記録され、古い指摘で次の計画の
  * 保留が外れ、自動反映まで走る。古い順に割り当てれば、遅れて届いたレビューは古いジョブが受ける。
@@ -48,7 +48,6 @@ export async function markPlanReviewPosted(params: {
       repositoryFullName: params.repositoryFullName,
       issueNumber: params.issueNumber,
       kind: "PLAN_REVIEW",
-      agent: "claude",
       status: "SUCCEEDED",
       reviewPostedAt: null,
       createdAt: {

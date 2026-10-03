@@ -9,6 +9,8 @@ const resolveCheckUser = vi.fn();
 const createComment = vi.fn();
 const pickByJev = vi.fn();
 const findJobs = vi.fn();
+const recordCodexDelivery = vi.fn();
+const notifyCodex = vi.fn();
 
 vi.mock("@/lib/db", () => ({
   db: {
@@ -28,6 +30,10 @@ vi.mock("@/lib/claude/plan-review-pick", () => ({
 }));
 vi.mock("@/lib/dispatch/plan-requests", () => ({
   decideSessionPlanRequest: (...a: unknown[]) => decide(...a),
+  recordSessionPlanCodexDelivery: (...a: unknown[]) => recordCodexDelivery(...a),
+}));
+vi.mock("@/lib/dispatch/codex-decision-notify", () => ({
+  notifyCodexSessionDecision: (...a: unknown[]) => notifyCodex(...a),
 }));
 vi.mock("@/lib/dispatch/session-plan", () => ({
   resolveSessionPlanCheckUser: (...a: unknown[]) => resolveCheckUser(...a),
@@ -80,6 +86,8 @@ describe("autoReflectPlanReview", () => {
       createComment,
       pickByJev,
       findJobs,
+      recordCodexDelivery,
+      notifyCodex,
     ]) {
       m.mockReset();
     }
@@ -93,6 +101,7 @@ describe("autoReflectPlanReview", () => {
     countRequests.mockResolvedValue(0);
     pickByJev.mockResolvedValue(true);
     decide.mockResolvedValue({ ok: true });
+    notifyCodex.mockResolvedValue({ ok: false, reason: "not_codex", message: "" });
   });
 
   it("Jevが採用と判断した指摘は、画面の一括ボタンと同じ固定文面で修正を送り、後処理まで行う", async () => {
@@ -111,6 +120,50 @@ describe("autoReflectPlanReview", () => {
     expect(body).toContain(PLAN_REVIEW_AUTO_REFLECT_MARKER);
     expect(body).not.toContain("plan-reviser");
     expect(resolveCheckUser).toHaveBeenCalled();
+  });
+
+  it("Codex実装セッションへは既存の固定継続指示を積み、配送結果を記録する", async () => {
+    notifyCodex.mockResolvedValue({ ok: true, jobId: "instruction-1" });
+
+    await expect(autoReflectPlanReview(params(WITH_FINDINGS))).resolves.toEqual({ reflected: true });
+
+    expect(notifyCodex).toHaveBeenCalledWith({
+      repositoryFullName: "guchi-apps/issue-deck",
+      issueNumber: 3616,
+      kind: "plan-revision",
+      requestedByUserId: null,
+    });
+    expect(recordCodexDelivery).toHaveBeenCalledWith({
+      id: "req-1",
+      queued: true,
+      summary: null,
+    });
+  });
+
+  it("Codexへの配送を積めない場合も、既存の復旧導線向けに理由を記録する", async () => {
+    notifyCodex.mockResolvedValue({
+      ok: false,
+      reason: "not_alive",
+      message: "Codexのセッションが動いていません。",
+    });
+
+    await expect(autoReflectPlanReview(params(WITH_FINDINGS))).resolves.toEqual({ reflected: true });
+
+    expect(recordCodexDelivery).toHaveBeenCalledWith({
+      id: "req-1",
+      queued: false,
+      summary: "Codexのセッションが動いていません。",
+    });
+  });
+
+  it("Codexへの配送処理が例外になっても、自動反映済みの判断は失わせない", async () => {
+    notifyCodex.mockRejectedValue(new Error("queue unavailable"));
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await expect(autoReflectPlanReview(params(WITH_FINDINGS))).resolves.toEqual({ reflected: true });
+
+    expect(recordCodexDelivery).not.toHaveBeenCalled();
+    error.mockRestore();
   });
 
   it("書式が崩れて指摘に分けられないレビューも、Jevが採用すれば一括の依頼文で反映する", async () => {
