@@ -487,12 +487,14 @@ export type BranchFlowRelease = {
  * - `no-workflow`: `release-develop-to-main.yml`を持たないリポジトリ（#1538）
  * - `release-in-progress`: openなリリースPR・バンプPRがある（起こし直すと二重に走る）
  * - `nothing-to-release`: developの中身がmainに入りきっている（#2316・#2678・#2704）
+ * - `deploy-failed`: 直近の本番デプロイが失敗している（#3897）
  */
 export type ReleaseBlockedReason =
   | "branches-unloaded"
   | "no-workflow"
   | "release-in-progress"
-  | "nothing-to-release";
+  | "nothing-to-release"
+  | "deploy-failed";
 
 /**
  * Xcodeで実機へ反映するリポジトリ（#3468。`lib/device-build-repos.ts`）の表示材料。

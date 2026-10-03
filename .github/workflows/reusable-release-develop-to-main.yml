@@ -108,6 +108,30 @@ jobs:
           git fetch origin develop:refs/remotes/origin/develop --quiet --force
           git fetch origin main:refs/remotes/origin/main --quiet --force
 
+      - name: 直近の本番デプロイ失敗を確認する
+        # 失敗した版を直さないまま次のリリースを始めると、未反映の版と修正内容が追えなくなる。
+        # 画面のAPIだけではscheduleやGitHubからの直接起動を防げないため、作成処理の手前でも
+        # 同じく止める（#3897）。取得できないときは誤って止めず、従来どおり続ける。
+        id: deploy-gate
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.WORKFLOW_PAT }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -e
+
+          READY=true
+          if ! RUNS="$(gh run list --workflow deploy.yml --branch main --limit 1 --json status,conclusion,url)"; then
+            echo "直近の本番デプロイを取得できないため、リリースの可否は従来どおり判定します"
+          else
+            STATUS="$(printf '%s' "$RUNS" | jq -r '.[0].status // empty')"
+            CONCLUSION="$(printf '%s' "$RUNS" | jq -r '.[0].conclusion // empty')"
+            if [ "$STATUS" = "completed" ] && { [ "$CONCLUSION" = "failure" ] || [ "$CONCLUSION" = "timed_out" ]; }; then
+              READY=false
+              echo "直近の本番デプロイが失敗しているため、新しいリリースは開始しません"
+            fi
+          fi
+          echo "ready=$READY" >> "$GITHUB_OUTPUT"
+
       - name: リリース状態を判定する
         id: state
         env:
@@ -211,7 +235,7 @@ jobs:
         #
         # マージコミットが1件も無いリポジトリ（squashマージ運用）では件名の`(#番号)`から拾い、
         # それでも拾えなければ従来どおりissue-deckへ問い合わせる。
-        if: steps.state.outputs.need_bump == 'true' || steps.state.outputs.need_main_pr == 'true'
+        if: steps.deploy-gate.outputs.ready == 'true' && (steps.state.outputs.need_bump == 'true' || steps.state.outputs.need_main_pr == 'true')
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.WORKFLOW_PAT }}
           GH_REPO: ${{ github.repository }}
@@ -414,7 +438,7 @@ jobs:
         # `workflow_dispatch`（画面の「リリースする」ボタン）はこの確認を経由せず、
         # これまでどおり常に実行する。フリート横断（他リポジトリの実装中issue）は見ない。
         id: gate
-        if: steps.state.outputs.need_bump == 'true' && github.event_name == 'schedule'
+        if: steps.deploy-gate.outputs.ready == 'true' && steps.state.outputs.need_bump == 'true' && github.event_name == 'schedule'
         env:
           GH_REPO: ${{ github.repository }}
           APP_BASE_URL: ${{ vars.APP_BASE_URL }}
@@ -463,7 +487,7 @@ jobs:
 
       - name: コード変更内容からバージョンの上げ幅を判定する
         id: version-decision
-        if: steps.state.outputs.need_bump == 'true' && (github.event_name == 'workflow_dispatch' || steps.gate.outputs.ready == 'true')
+        if: steps.deploy-gate.outputs.ready == 'true' && steps.state.outputs.need_bump == 'true' && (github.event_name == 'workflow_dispatch' || steps.gate.outputs.ready == 'true')
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
@@ -563,7 +587,7 @@ jobs:
         id: bump
         # version-decisionステップ自体が失敗した場合でもpatchへフォールバックできるよう、
         # 前ステップの成否によらず実行する
-        if: always() && steps.state.outputs.need_bump == 'true' && (github.event_name == 'workflow_dispatch' || steps.gate.outputs.ready == 'true')
+        if: always() && steps.deploy-gate.outputs.ready == 'true' && steps.state.outputs.need_bump == 'true' && (github.event_name == 'workflow_dispatch' || steps.gate.outputs.ready == 'true')
         env:
           # structured_outputはClaude Codeの判定結果（信頼できないテキストを含みうる）のため、
           # run:本文に直接展開せずenv経由でのみ参照する
@@ -634,7 +658,7 @@ jobs:
           echo "usage: $USAGE"
 
       - name: バージョンをbumpしてdevelop向けPRを作成する
-        if: always() && steps.state.outputs.need_bump == 'true' && (github.event_name == 'workflow_dispatch' || steps.gate.outputs.ready == 'true')
+        if: always() && steps.deploy-gate.outputs.ready == 'true' && steps.state.outputs.need_bump == 'true' && (github.event_name == 'workflow_dispatch' || steps.gate.outputs.ready == 'true')
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.WORKFLOW_PAT }}
           GH_REPO: ${{ github.repository }}
@@ -884,7 +908,7 @@ jobs:
         # されて閉じるため、mainへマージするかを人が判断する時点では読めなくなる（#2978）。
         # マージ済みのバンプPR本文から同じ節を抽出し、develop→mainのPR本文にも引き継ぐ。
         id: reason
-        if: steps.state.outputs.need_main_pr == 'true'
+        if: steps.deploy-gate.outputs.ready == 'true' && steps.state.outputs.need_main_pr == 'true'
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.WORKFLOW_PAT }}
           GH_REPO: ${{ github.repository }}
@@ -924,7 +948,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: 対象issueの検証結果を集計する
-        if: steps.state.outputs.need_main_pr == 'true'
+        if: steps.deploy-gate.outputs.ready == 'true' && steps.state.outputs.need_main_pr == 'true'
         # 記録は補助情報なので、集計に失敗してもリリースPRの作成は止めない
         continue-on-error: true
         env:
@@ -1128,7 +1152,7 @@ jobs:
           cat "$OUT"
 
       - name: develop→mainのPRを作成する
-        if: steps.state.outputs.need_main_pr == 'true'
+        if: steps.deploy-gate.outputs.ready == 'true' && steps.state.outputs.need_main_pr == 'true'
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.WORKFLOW_PAT }}
           GH_REPO: ${{ github.repository }}

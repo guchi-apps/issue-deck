@@ -447,14 +447,17 @@ export function resolveReleaseBlockedReason({
   branchStatus,
   releasePullRequest,
   bumpPullRequest,
+  deployState,
 }: {
   branchStatus: RepositoryBranchStatus | null;
   releasePullRequest: PullRequestSummary | null;
   bumpPullRequest: PullRequestSummary | null;
+  deployState: BranchFlowDeployState | null;
 }): ReleaseBlockedReason | null {
   if (branchStatus === null) return "branches-unloaded";
   if (!branchStatus.hasReleaseWorkflow) return "no-workflow";
   if (releasePullRequest !== null || bumpPullRequest !== null) return "release-in-progress";
+  if (deployState?.kind === "failure") return "deploy-failed";
   if (unreleasedCommitCount(branchStatus.developVsMain) === 0) return "nothing-to-release";
   return null;
 }
@@ -628,6 +631,7 @@ function buildRepository({
       canRelease &&
       releasePullRequest === null &&
       bumpPullRequest === null &&
+      deployState?.kind !== "failure" &&
       unreleasedCommitCount(branchStatus?.developVsMain) > 0,
     // 押せないときも「なぜ押せないか」を画面へ渡す（#2711）。ボタンごと消すと、
     // 「次のリリース（本番未反映）」の束から本番へ出す手段が画面のどこにも無くなる。
@@ -635,6 +639,7 @@ function buildRepository({
       branchStatus,
       releasePullRequest,
       bumpPullRequest,
+      deployState,
     }),
     // 「本番へ再デプロイ」（#2020）。**リリースの可否とは条件が別物**——`main`をそのまま
     // 出し直すだけなので、未リリースの変更があってもなくても押してよい。

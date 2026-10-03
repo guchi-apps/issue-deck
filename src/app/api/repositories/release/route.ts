@@ -269,6 +269,16 @@ async function handlePOST(request: NextRequest) {
       return NextResponse.json({ error: "release_workflow_missing" }, { status: 400 });
     }
 
+    // 失敗した本番デプロイを直さないまま別の版を出すと、どの変更で直ったのかと
+    // 本番に届いていない版が追えなくなる。取得不能時は誤って止めない（#3897）。
+    const latestDeploy = await fetchLatestDeployWorkflowRun(owner, repo, token);
+    if (
+      latestDeploy?.status === "completed" &&
+      (latestDeploy.conclusion === "failure" || latestDeploy.conclusion === "timed_out")
+    ) {
+      return NextResponse.json({ error: "deploy_failed" }, { status: 409 });
+    }
+
     await dispatchReleaseWorkflow(owner, repo, token, isBumpKind(bumpKind) ? bumpKind : undefined);
     return NextResponse.json({ ok: true });
   } catch (error) {

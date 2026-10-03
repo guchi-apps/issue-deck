@@ -29,6 +29,7 @@ const BLOCKED_REASON_LABEL: Record<ReleaseBlockedReason, string> = {
   "no-workflow": "リリース用ワークフローがありません",
   "release-in-progress": "リリース中",
   "nothing-to-release": "出す変更がありません",
+  "deploy-failed": "本番デプロイの失敗を解消してください",
 };
 
 type RepositoryReleaseButtonProps = {
