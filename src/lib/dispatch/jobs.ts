@@ -347,8 +347,20 @@ function toHostView(host: DispatchHost, now: Date): DispatchHostView {
             startedAt: host.previewStartedAt?.toISOString() ?? null,
             idleMinutes: host.previewIdleMinutes,
           },
-    planReviewSessions: parseDispatchPlanReviewSessions(host.planReviewSessions) ?? [],
+    // Prismaの`String?`列にはJSON文字列として保存される。ホストから届いた配列を検証する
+    // `parseDispatchPlanReviewSessions`へそのまま渡すと常に`null`になり、実行中の計画レビューが
+    // 実行状況から消える。壊れた過去の値も画面全体を止めないよう、復元に失敗したら空配列にする。
+    planReviewSessions: parseStoredPlanReviewSessions(host.planReviewSessions),
   };
+}
+
+function parseStoredPlanReviewSessions(value: string | null): DispatchPlanReviewSession[] {
+  if (value === null) return [];
+  try {
+    return parseDispatchPlanReviewSessions(JSON.parse(value)) ?? [];
+  } catch {
+    return [];
+  }
 }
 
 async function getDispatchConcurrency(): Promise<number> {
