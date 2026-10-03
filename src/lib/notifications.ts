@@ -100,6 +100,7 @@ export type BuildNotificationsInput = {
   releaseStatuses: RepositoryReleaseStatus[] | null;
   /**
    * 確認待ちのうち、まだエージェントが動いていて押せる操作が無いIssueのid（#2174）。
+   * **ベルの確認待ちからは外す**（#3787）。
    * **画面が左メニューの件数に使っているのと同じ集合を渡す**——ここで数え直すと、
    * メニューからは消えているのにベルには「PRのマージ」と出ている状態になる。
    */
@@ -194,40 +195,39 @@ function selectCheckUserIssues(issues: Issue[]): Issue[] {
  * 確認待ちの通知。理由ラベル（`01.check-*`）が読めればその文言を出す。
  * 並びは呼び出し側で「待たせている時間が長い順」（＝左メニューの「確認待ち」ビューと同じ考え方）。
  *
- * **マージを求めているのに対応PRのチェックがまだ確定していないものは「CI実行中」として弱める**
- * （#1709）。ラベルを付ける側がCIの完了を待たないことがあり、そのまま「PRのマージ」と出すと
- * 押しても弾かれる操作を要求することになる。判定は`isMergeAwaitingCi`（`ciState`を読むだけ）。
+ * **いま人が動けないものは出さない**（#3787）。エージェントがまだ動いているもの（#2174）と、
+ * マージを求めているのに対応PRのチェックがまだ確定していないもの（#1709）は、押せる操作が
+ * 無く、出すと件数が実態より多く見える。左メニューの「確認待ち」件数が外しているのと同じ基準
+ * （`checkUserRunningIssueIds`）に、ベル側の判定`isMergeAwaitingCi`（`ciState`を読むだけ）を足す。
+ * 外したIssueも、終了時に人の確認が要れば改めて`00.check-user`が付いて出る。
+ *
+ * **PR側の重複除去は、ここで外す前の確認待ち（`selectCheckUserIssues`）で行う**
+ * （`buildNotifications`）。外したIssueの対応PRが「Pull Request」区分へ出直さないようにするため。
  */
 function buildCheckUserNotifications(
   issues: Issue[],
   pullRequests: PullRequestSummary[],
   runningIssueIds: ReadonlySet<string> | undefined,
 ): NotificationItem[] {
-  return selectCheckUserIssues(issues).map((issue) => {
-    const reason = checkUserReason(issue.labels);
-    const awaitingCi = isMergeAwaitingCi(issue, pullRequests);
-    // エージェントがまだ動いているもの（#2174）。左メニューの件数から外したのと同じ集合で、
-    // CIの完了待ち（#1709）と同じく「いま人が動けるものではない」側へ寄せる
-    const running = runningIssueIds?.has(issue.id) === true;
-    return {
-      id: `check-user:${issue.id}`,
-      group: "check-user",
-      // 「回答の確認」は読むだけで手は止まっていないので弱める（#1490の表の`answered`）。
-      // CIの完了待ち・エージェントの実行中も、いま人が動けるものではないので同じ扱いにする。
-      tone: reason === "answered" || awaitingCi || running ? "info" : "action",
-      title: `#${issue.number} ${issue.title}`,
-      badgeLabel: awaitingCi
-        ? "CI実行中"
-        : running
-          ? "実行中"
-          : reason
-            ? CHECK_USER_REASON_TEXT[reason]
-            : "確認待ち",
-      repositoryFullName: issue.repositoryFullName,
-      since: issue.checkUserLabeledAt ?? issue.updatedAt,
-      target: { kind: "issue", issueId: issue.id },
-    } satisfies NotificationItem;
-  });
+  return selectCheckUserIssues(issues)
+    .filter(
+      (issue) =>
+        runningIssueIds?.has(issue.id) !== true && !isMergeAwaitingCi(issue, pullRequests),
+    )
+    .map((issue) => {
+      const reason = checkUserReason(issue.labels);
+      return {
+        id: `check-user:${issue.id}`,
+        group: "check-user",
+        // 「回答の確認」は読むだけで手は止まっていないので弱める（#1490の表の`answered`）
+        tone: reason === "answered" ? "info" : "action",
+        title: `#${issue.number} ${issue.title}`,
+        badgeLabel: reason ? CHECK_USER_REASON_TEXT[reason] : "確認待ち",
+        repositoryFullName: issue.repositoryFullName,
+        since: issue.checkUserLabeledAt ?? issue.updatedAt,
+        target: { kind: "issue", issueId: issue.id },
+      } satisfies NotificationItem;
+    });
 }
 
 /**
@@ -332,7 +332,7 @@ function buildPullRequestNotifications(
     .filter((pullRequest) => !isAutoMergingPullRequest(pullRequest))
     .map((pullRequest) => {
       // 自動修復が走っているあいだは赤（`error`）を出さない（#2072）。CIは失敗したままだが、
-      // いま人が動けるものではないため、確認待ちの「CI実行中」と同じく`info`まで弱める。
+      // いま人が動けるものではないため、`info`まで弱める。
       // 直せなかった場合は対応Issueに`00.check-user`が付き、確認待ちとして改めて通知される。
       const repairRun = pullRequest.repairRun;
       const failed = pullRequest.ciState === "failure" && repairRun === null;
