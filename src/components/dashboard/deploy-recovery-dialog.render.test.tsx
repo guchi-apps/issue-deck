@@ -19,7 +19,7 @@ describe("DeployRecoveryDialog（#3913）", () => {
 
   it("候補を選び、復旧用PRを作成する", async () => {
     const fetchMock = vi.mocked(fetch);
-    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ candidates: [candidate] }), { status: 200 }));
+    fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ candidates: [candidate], truncated: false }), { status: 200 }));
     fetchMock.mockResolvedValueOnce(new Response(JSON.stringify({ url: "https://example.test/pull/99" }), { status: 200 }));
     render(<DeployRecoveryDialog repositoryFullName="guchi-apps/issue-deck" />);
 
@@ -36,11 +36,19 @@ describe("DeployRecoveryDialog（#3913）", () => {
   });
 
   it("候補が無ければ選択できない", async () => {
-    vi.mocked(fetch).mockResolvedValueOnce(new Response(JSON.stringify({ candidates: [] }), { status: 200 }));
+    vi.mocked(fetch).mockResolvedValueOnce(new Response(JSON.stringify({ candidates: [], truncated: false }), { status: 200 }));
     render(<DeployRecoveryDialog repositoryFullName="guchi-apps/issue-deck" />);
 
     fireEvent.click(screen.getByRole("button", { name: "修正PRを選んで復旧" }));
     expect(await screen.findByText(/取り込めるマージ済みPRがありません/)).toBeTruthy();
     expect((screen.getByRole("button", { name: "0件で復旧用PRを作成" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("取得上限に達したときは候補が欠ける可能性を表示する", async () => {
+    vi.mocked(fetch).mockResolvedValueOnce(new Response(JSON.stringify({ candidates: [candidate], truncated: true }), { status: 200 }));
+    render(<DeployRecoveryDialog repositoryFullName="guchi-apps/issue-deck" />);
+
+    fireEvent.click(screen.getByRole("button", { name: "修正PRを選んで復旧" }));
+    expect(await screen.findByText(/表示されない復旧候補がある可能性/)).toBeTruthy();
   });
 });

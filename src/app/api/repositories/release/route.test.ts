@@ -4,6 +4,7 @@ const requireUserId = vi.fn();
 const findFirst = vi.fn();
 const getInstallationToken = vi.fn();
 const dispatchReleaseWorkflow = vi.fn();
+const fetchLatestDeployWorkflowRun = vi.fn();
 const releaseWorkflowExists = vi.fn();
 
 vi.mock("@/lib/auth-user", () => ({
@@ -35,6 +36,9 @@ vi.mock("@/lib/github/release-api", async (importOriginal) => {
     get dispatchReleaseWorkflow() {
       return dispatchReleaseWorkflow;
     },
+    get fetchLatestDeployWorkflowRun() {
+      return fetchLatestDeployWorkflowRun;
+    },
   };
 });
 
@@ -60,6 +64,7 @@ describe("POST /api/repositories/release", () => {
     findFirst.mockReset().mockResolvedValue({ installation: { installationId: 1 } });
     getInstallationToken.mockReset().mockResolvedValue("token");
     dispatchReleaseWorkflow.mockReset().mockResolvedValue(undefined);
+    fetchLatestDeployWorkflowRun.mockReset().mockResolvedValue(null);
     releaseWorkflowExists.mockReset().mockResolvedValue(true);
   });
 
@@ -73,6 +78,7 @@ describe("POST /api/repositories/release", () => {
       "issue-deck",
       "token",
       undefined,
+      false,
     );
   });
 
@@ -85,7 +91,43 @@ describe("POST /api/repositories/release", () => {
       "issue-deck",
       "token",
       "minor",
+      false,
     );
+  });
+
+  it("本番デプロイが失敗している間は起動せず409を返す（#3897）", async () => {
+    fetchLatestDeployWorkflowRun.mockResolvedValue({ status: "completed", conclusion: "failure" });
+
+    const res = await POST(request({ owner: "guchi-apps", repo: "issue-deck" }));
+
+    expect(res.status).toBe(409);
+    await expect(res.json()).resolves.toEqual({ error: "deploy_failed" });
+    expect(dispatchReleaseWorkflow).not.toHaveBeenCalled();
+  });
+
+  it("本番デプロイ失敗中でも明示的な手動上書きなら起動する（#3912）", async () => {
+    fetchLatestDeployWorkflowRun.mockResolvedValue({ status: "completed", conclusion: "timed_out" });
+
+    const res = await POST(request({ owner: "guchi-apps", repo: "issue-deck", allowFailedDeploy: true }));
+
+    expect(res.status).toBe(200);
+    expect(dispatchReleaseWorkflow).toHaveBeenCalledWith("guchi-apps", "issue-deck", "token", undefined, true);
+  });
+
+  it("上書きはbooleanだけを受け付ける", async () => {
+    const res = await POST(request({ owner: "guchi-apps", repo: "issue-deck", allowFailedDeploy: "true" }));
+
+    expect(res.status).toBe(400);
+    expect(dispatchReleaseWorkflow).not.toHaveBeenCalled();
+  });
+
+  it("上書きinputに未対応のworkflowでは専用エラーを返す", async () => {
+    dispatchReleaseWorkflow.mockRejectedValue(new GithubApiError(422, "Unexpected inputs provided"));
+
+    const res = await POST(request({ owner: "guchi-apps", repo: "dayspan", allowFailedDeploy: true }));
+
+    expect(res.status).toBe(400);
+    await expect(res.json()).resolves.toEqual({ error: "failed_deploy_override_unsupported" });
   });
 
   it("上げ幅が不正な値なら起動せず400を返す（#1548）", async () => {

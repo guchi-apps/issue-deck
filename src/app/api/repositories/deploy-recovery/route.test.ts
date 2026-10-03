@@ -49,14 +49,14 @@ describe("/api/repositories/deploy-recovery（#3913）", () => {
     findFirst.mockReset().mockResolvedValue({ installation: { installationId: 1 } });
     getInstallationToken.mockReset().mockResolvedValue("token");
     fetchLatestDeployWorkflowRun.mockReset().mockResolvedValue({ status: "completed", conclusion: "failure" });
-    fetchCandidates.mockReset().mockResolvedValue([]);
+    fetchCandidates.mockReset().mockResolvedValue({ candidates: [], truncated: false });
     createPullRequest.mockReset().mockResolvedValue({ url: "https://example.test/pull/10" });
   });
 
   it("候補を返す", async () => {
-    fetchCandidates.mockResolvedValue([{ number: 9 }]);
+    fetchCandidates.mockResolvedValue({ candidates: [{ number: 9 }], truncated: false });
     const response = await GET(getRequest());
-    await expect(response.json()).resolves.toEqual({ candidates: [{ number: 9 }] });
+    await expect(response.json()).resolves.toEqual({ candidates: [{ number: 9 }], truncated: false });
   });
 
   it("失敗中なら選択したPRの復旧用PRを作る", async () => {

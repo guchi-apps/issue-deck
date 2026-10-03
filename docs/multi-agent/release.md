@@ -501,6 +501,22 @@ PRを閉じるところから始める必要がある）。そこで、**起動�
   起動してください）」と出す。自動判定での起動はinputを送らないので、未配布のリポジトリでも
   今までどおり動く。
 
+### 本番デプロイ失敗中の修正リリース（#3897・#3912）
+
+直近の`main`の`deploy.yml`が`failure`または`timed_out`なら、通常の画面起動・API起動・
+定時起動を止める。修正を`develop`へ取り込んだときは、画面の確認ダイアログで失敗中の起動を
+明示的に許可するか、GitHub Actionsの`workflow_dispatch`で`allow_failed_deploy`を選ぶ。
+画面の指定はAPIの`allowFailedDeploy`からcallerの`allow_failed_deploy`を経て、再利用可能
+workflowの`allow-failed-deploy`へ渡る。入力を持たない古いcallerはGitHubの422になり、
+画面にworkflowの更新が必要と表示される。新規アプリのcaller雛形は旧版の共有workflowタグを
+参照するため、この入力を先行追加しない。共有workflowタグを更新するときにcallerも揃える。
+
+**上書きが必要なのはリリースの開始時だけ。** バンプPRが`develop`へマージされると、
+`package.json`の変更による`push`が別runを起動してリリースPRを作る。このrunには手動入力が
+引き継がれないため、`need_main_pr=true`の`push`はデプロイ失敗中でも継続させる。
+ここも止めると、上書きでバンプPRを作れてもリリースPRが作られず、修正を本番へ出せない。
+デプロイ状況の取得に失敗した場合は、従来どおり誤ブロックを避けて続行する。
+
 ## トリガー
 
 `workflow_dispatch`（手動実行）、**`package.json`の変更を伴う`develop`へのpush**、
@@ -517,6 +533,10 @@ on:
         type: choice
         default: auto
         options: [auto, patch, minor, major]
+      allow_failed_deploy:
+        required: false
+        type: boolean
+        default: false
   schedule:
     - cron: "*/15 * * * *"
   push:

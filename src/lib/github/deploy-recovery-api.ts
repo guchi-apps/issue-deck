@@ -2,6 +2,7 @@ import {
   resolveDeployRecoverySelection,
   selectDeployRecoveryCandidates,
   type DeployRecoveryCandidate,
+  type DeployRecoveryCandidatesResult,
 } from "@/lib/deploy-recovery";
 import { GithubApiError } from "@/lib/github/github-api-error";
 import { GITHUB_API, githubFetch } from "@/lib/github/request";
@@ -39,15 +40,16 @@ export async function fetchDeployRecoveryCandidates(
   owner: string,
   repo: string,
   token: string,
-): Promise<DeployRecoveryCandidate[]> {
+): Promise<DeployRecoveryCandidatesResult> {
   const prefix = `${GITHUB_API}/repos/${owner}/${repo}`;
-  const [comparison, pullRequests] = await Promise.all([
-    requestJson<{ commits?: Array<{ sha?: string }> }>(`${prefix}/compare/main...develop?per_page=100`, token),
-    requestJson<GithubClosedPullRequest[]>(
-      `${prefix}/pulls?state=closed&base=develop&sort=updated&direction=desc&per_page=100`,
-      token,
-    ),
+  const [comparison, pullRequestsResponse] = await Promise.all([
+    requestJson<{ commits?: Array<{ sha?: string }>; total_commits?: number }>(`${prefix}/compare/main...develop?per_page=100`, token),
+    githubFetch(`${prefix}/pulls?state=closed&base=develop&sort=updated&direction=desc&per_page=100`, token),
   ]);
+  if (!pullRequestsResponse.ok) {
+    throwGithubError(pullRequestsResponse.status, `${prefix}/pulls`, await pullRequestsResponse.text().catch(() => ""));
+  }
+  const pullRequests = await pullRequestsResponse.json() as GithubClosedPullRequest[];
   const commits = new Set((comparison.commits ?? []).flatMap((commit) => (commit.sha ? [commit.sha] : [])));
   const merged = pullRequests.flatMap((pullRequest) => {
     if (!pullRequest.merged_at || !pullRequest.merge_commit_sha || pullRequest.base.ref !== "develop") return [];
@@ -59,7 +61,12 @@ export async function fetchDeployRecoveryCandidates(
       mergeCommitSha: pullRequest.merge_commit_sha,
     }];
   });
-  return selectDeployRecoveryCandidates(merged, commits);
+  return {
+    candidates: selectDeployRecoveryCandidates(merged, commits),
+    truncated:
+      (comparison.total_commits ?? comparison.commits?.length ?? 0) > (comparison.commits?.length ?? 0) ||
+      pullRequestsResponse.headers?.get("link")?.includes('rel="next"') === true,
+  };
 }
 
 function recoveryBranch(selected: DeployRecoveryCandidate[]): string {
@@ -81,7 +88,7 @@ export async function createDeployRecoveryPullRequest(
   token: string,
   selectedNumbers: number[],
 ): Promise<{ url: string }> {
-  const candidates = await fetchDeployRecoveryCandidates(owner, repo, token);
+  const { candidates } = await fetchDeployRecoveryCandidates(owner, repo, token);
   const selected = resolveDeployRecoverySelection(candidates, selectedNumbers);
   if (!selected) throw new RangeError("candidate_changed");
 

@@ -25,7 +25,7 @@ function response(body: unknown, status = 200) {
 }
 
 function candidatesResponses(url: string) {
-  if (url.includes("/compare/")) return response({ commits: [{ sha: "merge-2" }, { sha: "merge-1" }] });
+  if (url.includes("/compare/")) return response({ commits: [{ sha: "merge-2" }, { sha: "merge-1" }], total_commits: 2 });
   if (url.includes("state=closed")) {
     return response([
       { number: 2, title: "後の修正", html_url: "https://example.test/2", merged_at: "2026-10-02T00:00:00Z", merge_commit_sha: "merge-2", base: { ref: "develop" } },
@@ -41,7 +41,21 @@ describe("deploy recovery GitHub API（#3913）", () => {
 
     const candidates = await fetchDeployRecoveryCandidates("guchi-apps", "issue-deck", "token");
 
-    expect(candidates.map((candidate) => candidate.number)).toEqual([1, 2]);
+    expect(candidates.candidates.map((candidate) => candidate.number)).toEqual([1, 2]);
+    expect(candidates.truncated).toBe(false);
+  });
+
+  it("比較コミットが取得上限を超えると候補が欠ける可能性を返す", async () => {
+    githubFetch.mockReset().mockImplementation(async (url: string) => {
+      if (url.includes("/compare/")) return response({ commits: [{ sha: "merge-1" }], total_commits: 251 });
+      if (url.includes("state=closed")) return response([]);
+      throw new Error(`unexpected request: ${url}`);
+    });
+
+    await expect(fetchDeployRecoveryCandidates("guchi-apps", "issue-deck", "token")).resolves.toMatchObject({
+      candidates: [],
+      truncated: true,
+    });
   });
 
   it("選択PRをmain起点のブランチへ順に取り込み、復旧用PRを作る", async () => {

@@ -246,11 +246,15 @@ async function handlePOST(request: NextRequest) {
   const repo = payload?.repo;
   // バージョンの上げ幅の指定（#1548）。省略時は従来どおりworkflow内のClaudeが判定する。
   const bumpKind = payload?.bumpKind;
+  const allowFailedDeploy = payload?.allowFailedDeploy ?? false;
 
   if (typeof owner !== "string" || typeof repo !== "string") {
     return NextResponse.json({ error: "invalid_request" }, { status: 400 });
   }
   if (bumpKind !== undefined && bumpKind !== null && !isBumpKind(bumpKind)) {
+    return NextResponse.json({ error: "invalid_request" }, { status: 400 });
+  }
+  if (typeof allowFailedDeploy !== "boolean") {
     return NextResponse.json({ error: "invalid_request" }, { status: 400 });
   }
 
@@ -269,12 +273,32 @@ async function handlePOST(request: NextRequest) {
       return NextResponse.json({ error: "release_workflow_missing" }, { status: 400 });
     }
 
-    await dispatchReleaseWorkflow(owner, repo, token, isBumpKind(bumpKind) ? bumpKind : undefined);
+    // 失敗した本番デプロイを直さないまま別の版を出すと、どの変更で直ったのかと
+    // 本番に届いていない版が追えなくなる。取得不能時は誤って止めない（#3897）。
+    const latestDeploy = await fetchLatestDeployWorkflowRun(owner, repo, token);
+    if (
+      !allowFailedDeploy &&
+      latestDeploy?.status === "completed" &&
+      (latestDeploy.conclusion === "failure" || latestDeploy.conclusion === "timed_out")
+    ) {
+      return NextResponse.json({ error: "deploy_failed" }, { status: 409 });
+    }
+
+    await dispatchReleaseWorkflow(
+      owner,
+      repo,
+      token,
+      isBumpKind(bumpKind) ? bumpKind : undefined,
+      allowFailedDeploy,
+    );
     return NextResponse.json({ ok: true });
   } catch (error) {
     // 上げ幅を指定したのに、workflowがそのinputを持たないリポジトリ（#1548）。GitHubは
     // `Unexpected inputs provided`の422で落とす。**起動そのものの失敗と混ぜない**——
     // 自動判定で押し直せば通る、という次の手が画面から読み取れる必要があるため。
+    if (allowFailedDeploy && error instanceof GithubApiError && error.status === 422) {
+      return NextResponse.json({ error: "failed_deploy_override_unsupported" }, { status: 400 });
+    }
     if (isBumpKind(bumpKind) && error instanceof GithubApiError && error.status === 422) {
       return NextResponse.json({ error: "bump_kind_unsupported" }, { status: 400 });
     }
