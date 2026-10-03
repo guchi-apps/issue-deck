@@ -37,6 +37,8 @@ import {
   createNextWorkflowTag,
   dispatchPropagation,
   dispatchSharedFilePropagation,
+  fetchChangeReasons,
+  extractCommitIssueNumber,
 } from "@/lib/github/workflow-tags";
 
 function repo(fullName: string, installationId = 42) {
@@ -233,6 +235,7 @@ describe("collectWorkflowTags", () => {
       compareUrl: "https://github.com/guchi-apps/issue-deck/compare/workflows/v12...main",
       hasContentDiff: true,
       changedFiles: [".github/workflows/reusable-issue-dispatch.yml"],
+      changeReasons: [],
     });
     // 件数だけを取る。RESTの`/compare`は差分のコミットとファイルまで返す
     const compare = graphqlCalls().find((call) => call.query.includes("compare(headRef"));
@@ -943,5 +946,43 @@ describe("dispatchSharedFilePropagation", () => {
     const result = await dispatchSharedFilePropagation("user-1");
 
     expect(result).toMatchObject({ dispatched: false, reason: "running" });
+  });
+});
+
+describe("fetchChangeReasons（#3783）", () => {
+  beforeEach(() => {
+    githubFetch.mockReset();
+  });
+
+  const commit = (sha: string, message: string) => ({ sha, commit: { message } });
+
+  it("mainにあってタグに無いコミットだけを、sha明示で取る（日付では絞らない）", async () => {
+    githubFetch.mockImplementation(async (url: string) => {
+      const sha = new URL(url).searchParams.get("sha");
+      const body =
+        sha === "main"
+          ? [commit("b", "新しい変更 #3772\n\n本文"), commit("a", "既にタグにある変更 #1")]
+          : [commit("a", "既にタグにある変更 #1")];
+      return { ok: true, json: async () => body };
+    });
+
+    const reasons = await fetchChangeReasons("token", "workflows/v12", ["x.yml"]);
+
+    expect(reasons).toEqual([
+      { file: "x.yml", commits: [{ title: "新しい変更 #3772", number: 3772 }] },
+    ]);
+    const shas = githubFetch.mock.calls.map((call) => new URL(String(call[0])).searchParams.get("sha"));
+    expect(shas.sort()).toEqual(["main", "workflows/v12"]);
+  });
+
+  it("取得に失敗したファイルは含めない", async () => {
+    githubFetch.mockResolvedValue({ ok: false, json: async () => ({}) });
+
+    expect(await fetchChangeReasons("token", "workflows/v12", ["x.yml"])).toEqual([]);
+  });
+
+  it("題名末尾の番号だけを拾う", () => {
+    expect(extractCommitIssueNumber("修正 #12")).toBe(12);
+    expect(extractCommitIssueNumber("#12 を修正")).toBeNull();
   });
 });
