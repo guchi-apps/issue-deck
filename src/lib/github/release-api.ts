@@ -151,7 +151,25 @@ export type ReleaseHistoryItem = {
    * （issue-deckの`更新履歴`画面が持つような日本語の要約ではない）。
    */
   body: string | null;
+  /** TestFlightへ配布済みのビルド番号（#3800）。配布対象リポジトリで、配布済みのときだけ入る */
+  iosDeliveredBuild?: number;
 };
+
+/**
+ * タグ名の前方一致で参照（タグ名とそのコミット）を取る（#3800）。ページングされず1回で全件返る。
+ * 失敗したときは空配列（履歴の表示を巻き込まない）。
+ */
+export async function fetchTagRefs(
+  owner: string,
+  repo: string,
+  token: string,
+  prefix: string,
+): Promise<{ ref: string; sha: string }[]> {
+  const url = `${GITHUB_API}/repos/${owner}/${repo}/git/matching-refs/tags/${prefix}`;
+  const result = await githubFetchJsonWithEtag<Array<{ ref: string; object?: { sha?: string } }>>(url, token);
+  if (!result.ok) return [];
+  return result.data.map((item) => ({ ref: item.ref, sha: item.object?.sha ?? "" }));
+}
 
 /**
  * そのリポジトリの直近のGitHub Releaseを新しい順に最大`perPage`件取得する（#2726）。

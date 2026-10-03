@@ -4,6 +4,9 @@ import type { ReleaseHistoryItem } from "@/lib/github/release-api";
 import {
   applyReleaseCheckLineToggle,
   applyReleaseCheckToggle,
+  isReleaseToggleUnsettled,
+  overlayReleaseCheckLineToggles,
+  overlayReleaseCheckToggles,
   buildReleaseCheckIndex,
   buildReleaseCheckLineIndex,
   countUncheckedReleases,
@@ -251,5 +254,48 @@ describe("applyReleaseCheckLineToggle（#2982）", () => {
       other,
       { ...target, checkedAt: "2026-09-06T12:00:00.000Z" },
     ]);
+  });
+});
+
+describe("取り直しの応答への上乗せ（#3797）", () => {
+  const now = new Date("2026-10-03T00:00:00.000Z");
+  const target = { repoFullName: "o/a", tagName: "v1.0.0" };
+
+  it("取得を始める前に保存が済んでいた操作だけを手放す", () => {
+    expect(isReleaseToggleUnsettled({ target, checked: true, settledSeq: null }, 5)).toBe(true);
+    expect(isReleaseToggleUnsettled({ target, checked: true, settledSeq: 6 }, 5)).toBe(true);
+    expect(isReleaseToggleUnsettled({ target, checked: true, settledSeq: 4 }, 5)).toBe(false);
+  });
+
+  it("取得の途中で押した「確認済み」が、押す前の記録を持った応答で消えない", () => {
+    expect(
+      overlayReleaseCheckToggles([], [{ target, checked: true, settledSeq: null }], now),
+    ).toEqual([{ ...target, checkedAt: now.toISOString() }]);
+  });
+
+  it("取得の途中で戻した「未確認」が、応答の記録で確認済みへ戻らない", () => {
+    const records = [{ ...target, checkedAt: "2026-10-01T00:00:00.000Z" }];
+    expect(
+      overlayReleaseCheckToggles(records, [{ target, checked: false, settledSeq: null }], now),
+    ).toEqual([]);
+  });
+
+  it("応答と一致する操作は記録を差し替えない（確認時刻はサーバーの値のまま）", () => {
+    const records = [{ ...target, checkedAt: "2026-10-01T00:00:00.000Z" }];
+    expect(
+      overlayReleaseCheckToggles(records, [{ target, checked: true, settledSeq: 9 }], now),
+    ).toEqual(records);
+  });
+
+  it("行のチェックも同じく上乗せする", () => {
+    const lineTarget = { ...target, lineKey: "#12" };
+    const other = { ...target, lineKey: "#13", checkedAt: "2026-10-01T00:00:00.000Z" };
+    expect(
+      overlayReleaseCheckLineToggles(
+        [other],
+        [{ target: lineTarget, checked: true, settledSeq: null }],
+        now,
+      ),
+    ).toEqual([other, { ...lineTarget, checkedAt: now.toISOString() }]);
   });
 });

@@ -189,6 +189,28 @@ export function deliveredBuildForSha(
   return best;
 }
 
+/**
+ * リリース履歴の各リリースが、TestFlightへ配布済みかを引く（#3800）。リリースのタグが指すコミットへ
+ * 配布済みタグ（`ios-testflight/<ビルド番号>`）が付いていれば、そのビルド番号を返す。
+ * **付いていないことは「未配布」を意味しない**（iOS更新が不要と判定された版はタグを付けずに成功で終わる）
+ * ので、呼び出し側は null のリリースには何も出さない。
+ */
+export function iosDeliveryForReleases(
+  tagNames: readonly string[],
+  versionRefs: readonly { ref: string; sha: string }[],
+  deliveredRefs: readonly { ref: string; sha: string }[],
+): Map<string, number> {
+  const shaByTag = new Map(versionRefs.map((item) => [item.ref.replace(/^refs\/tags\//, ""), item.sha]));
+  const result = new Map<string, number>();
+  for (const tagName of tagNames) {
+    const sha = shaByTag.get(tagName);
+    if (!sha) continue;
+    const build = deliveredBuildForSha(deliveredRefs, sha);
+    if (build !== null) result.set(tagName, build);
+  }
+  return result;
+}
+
 /** その版のWebの本番デプロイの状態（iOS配布欄の前提。Webの成否とは混ぜない） */
 export type IosWebDeployState = "success" | "pending" | "failed";
 
@@ -262,4 +284,14 @@ export function checkIosDispatchable(input: {
   if (input.deliveredBuild !== null) return "already_delivered";
   if (input.hasActiveRun) return "run_in_progress";
   return null;
+}
+
+/**
+ * 畳んだ行のスマホアイコンに斜線を引くか（#3799）。最新リリースがまだTestFlightへ配布できていない
+ * 状態（配布中・Webデプロイ待ち・失敗・未起動）だけtrue。配布済み・更新不要・過去の版（判定できない）・
+ * 読み込み前（null）は、誤って警告しないようfalse。
+ */
+export function isIosDistributionPending(state: IosReleasePanelState | null): boolean {
+  if (state === null) return false;
+  return state.kind === "running" || state.kind === "awaiting-web" || state.kind === "failed" || state.kind === "ready";
 }

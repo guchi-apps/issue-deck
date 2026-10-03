@@ -4,6 +4,8 @@ import {
   buildNumberFromTag,
   checkIosDispatchable,
   deliveredBuildForSha,
+  iosDeliveryForReleases,
+  isIosDistributionPending,
   judgeIosReleasePanel,
   toWebDeployState,
   judgeIosRun,
@@ -190,5 +192,38 @@ describe("summarizeIosStages の時刻", () => {
     expect(build?.startedAt).toBe("2026-09-30T14:00:00Z");
     expect(build?.completedAt).toBe("2026-09-30T14:04:00Z");
     expect(stages.find((s) => s.key === "sign")?.startedAt).toBeNull();
+  });
+});
+
+describe("iosDeliveryForReleases（#3800）", () => {
+  it("リリースタグのコミットへ配布済みタグがあるリリースだけ、ビルド番号を返す", () => {
+    const versionRefs = [
+      { ref: "refs/tags/v1.0.0", sha: "aaa" },
+      { ref: "refs/tags/v1.1.0", sha: "bbb" },
+    ];
+    const delivered = [
+      { ref: "refs/tags/ios-testflight/7", sha: "aaa" },
+      { ref: "refs/tags/ios-testflight/9", sha: "aaa" },
+    ];
+    const result = iosDeliveryForReleases(["v1.1.0", "v1.0.0", "v0.9.0"], versionRefs, delivered);
+    expect(result.get("v1.0.0")).toBe(9);
+    expect(result.has("v1.1.0")).toBe(false);
+    expect(result.has("v0.9.0")).toBe(false);
+  });
+});
+
+describe("isIosDistributionPending", () => {
+  it("配布が済んでいない状態だけ斜線の対象にする", () => {
+    expect(isIosDistributionPending({ kind: "ready" })).toBe(true);
+    expect(isIosDistributionPending({ kind: "failed", failedStage: null })).toBe(true);
+    expect(isIosDistributionPending({ kind: "awaiting-web", failed: false })).toBe(true);
+    expect(isIosDistributionPending({ kind: "running", stages: [] })).toBe(true);
+  });
+
+  it("配布済み・更新不要・判定できない版・読み込み前は対象にしない", () => {
+    expect(isIosDistributionPending({ kind: "delivered", buildNumber: 3 })).toBe(false);
+    expect(isIosDistributionPending({ kind: "not-needed" })).toBe(false);
+    expect(isIosDistributionPending({ kind: "stale" })).toBe(false);
+    expect(isIosDistributionPending(null)).toBe(false);
   });
 });
