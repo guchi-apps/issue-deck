@@ -403,6 +403,11 @@ export function MobileIssueDetail({
     issue.repositoryFullName,
     issue.number,
   );
+  // PC版と同じく、計画を出し直した時とレビューの投稿時にコメントを取り直す（#3936）。
+  // 古いレビューが手元にあると、下の定期再取得だけでは新しいレビューを拾えない。
+  useEffect(() => {
+    if (planRequest?.id || planReviewJob?.reviewPostedAt) refreshComments();
+  }, [planRequest?.id, planReviewJob?.reviewPostedAt, refreshComments]);
   // 未反映の計画レビュー（#3554。PCの詳細と同じ）
   const pendingPlanReview = resolvePendingPlanReview(comments);
   // 計画レビューは計画の投稿から3〜6分で届く。開いたままでも「反映」ボタンが出るよう、
