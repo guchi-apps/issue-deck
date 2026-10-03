@@ -4,6 +4,7 @@ import { createContext, useContext, useState } from "react";
 import { ExternalLink, Loader2, Sparkles, TriangleAlert, Wrench } from "lucide-react";
 
 import { RepositoryDeployButton } from "@/components/dashboard/repository-deploy-button";
+import { DeployRecoveryDialog } from "@/components/dashboard/deploy-recovery-dialog";
 import type { DeployFailureAnalysis } from "@/lib/claude/deploy-failure-analysis";
 import {
   buildDeployFailureFixIssueDraft,
@@ -163,6 +164,7 @@ export function DeployFailureAlert({
           isPending={isPending}
           onTriggered={onTriggered}
         />
+        <DeployRecoveryDialog repositoryFullName={repositoryFullName} block={compact} />
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
           {openFixIssue && (
             <button
