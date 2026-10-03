@@ -549,6 +549,24 @@ export async function reportDispatchSessions(params: {
         escalatedState: null,
       },
     });
+
+    // 報告から消えたセッションは上のupsertループを通らないため、GONEへの状態変化も
+    // ここでタイムラインへ残す。表示用の補助履歴なので、記録失敗で報告APIは止めない。
+    for (const row of goneRows) {
+      try {
+        await db.dispatchSessionTimelineEvent.create({
+          data: {
+            sessionId: row.id,
+            source: "session",
+            occurredAt: now,
+            kind: "event",
+            title: "セッション消失",
+          },
+        });
+      } catch {
+        // タイムラインの記録失敗はセッション状態の更新を妨げない。
+      }
+    }
   }
 
   // 何も記録を残さずに終わったセッションを締める（#1119）。**`markDispatchSessionEnded`と
