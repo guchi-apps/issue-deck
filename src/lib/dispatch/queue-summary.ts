@@ -34,6 +34,15 @@ export type DispatchQueueSummary = {
   /** 直近24時間に失敗・タイムアウトしたもの（新しい順） */
   failed: DispatchJobView[];
   /**
+   * 計画レビュー（`PLAN_REVIEW`）の実行中・順番待ち（#3785。払い出される順）。
+   *
+   * **`running`・`queued`とは別に持つ。** 計画レビューのセッション（`<repo>-plan-review-<番号>`）は
+   * ホストのセッション本数の上限（既定12）に数えられないため、実装の順番待ちに混ぜると、上限を
+   * 気にして待ちを整理するときに「まとめて取り消す」で一緒に消してしまう。取り消しの対象
+   * （`cancelableDispatchJobs`）にも入らない（行ごとの×だけで消せる）。
+   */
+  planReviews: DispatchJobView[];
+  /**
    * まだ届いていない制御ジョブ＝停止・セッション終了・追加指示（#1519）。積んだ順。
    *
    * **`running`・`queued`とは別に持ち、件数にも数えない。** 制御ジョブは同時実行数の枠を
@@ -73,14 +82,19 @@ export function summarizeDispatchQueue(
   // 逆に**横断質問（#1454）は`LAUNCH`と同じ枠で走る**ので数える（`claimDispatchJobs`の空きの
   // 計算と同じ集合＝`SESSION_LAUNCH_JOB_KINDS`。ずれると、枠が埋まっていても「実行中 0/2」と出る）
   const launchJobs = [...jobs].filter((job) => isSessionLaunchJobKind(job.kind));
+  // 計画レビューは実装のキューから分けて出す（#3785）。失敗だけは分けず、見落とさせない
+  const isPlanReview = (job: DispatchJobView) => job.kind === "PLAN_REVIEW";
 
   // 走る順。`queuePriority`が同じなら積んだ順（既定は全件0なので従来と同じ並びになる）
   const byRunOrder = [...launchJobs].sort(
     (a, b) => b.queuePriority - a.queuePriority || a.createdAt.localeCompare(b.createdAt),
   );
 
-  const running = byRunOrder.filter(isRunningStatus);
-  const queued = byRunOrder.filter((job) => job.status === "QUEUED");
+  const running = byRunOrder.filter((job) => isRunningStatus(job) && !isPlanReview(job));
+  const queued = byRunOrder.filter((job) => job.status === "QUEUED" && !isPlanReview(job));
+  const planReviews = byRunOrder.filter(
+    (job) => isPlanReview(job) && (isRunningStatus(job) || job.status === "QUEUED"),
+  );
   // **終わったものは走る順ではなく新しい順に出す。** 「直近の失敗」で見たいのは順番ではなく
   // 直近かどうかで、先頭へ上げたジョブが後から失敗したときに古い失敗より上へ来てしまう
   const failed = launchJobs
@@ -113,6 +127,7 @@ export function summarizeDispatchQueue(
     running,
     queued,
     failed,
+    planReviews,
     controls,
     concurrency,
     activeCount: running.length + queued.length,

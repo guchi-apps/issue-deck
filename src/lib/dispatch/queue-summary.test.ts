@@ -217,6 +217,33 @@ describe("summarizeDispatchQueue", () => {
     expect(summary.activeCount).toBe(2);
   });
 
+  // 計画レビューのセッションはセッション上限に数えない。実装の待ちに混ぜると一括取り消しで消せてしまう（#3785）
+  it("計画レビューは別枠に出し、実行中・順番待ち・一括取り消しに含めない", () => {
+    const summary = summarizeDispatchQueue(
+      [
+        job({ id: "impl", issueNumber: 1 }),
+        job({ id: "pr-queued", kind: "PLAN_REVIEW", issueNumber: 2 }),
+        job({ id: "pr-running", kind: "PLAN_REVIEW", issueNumber: 3, status: "RUNNING" }),
+        job({ id: "pr-done", kind: "PLAN_REVIEW", issueNumber: 4, status: "SUCCEEDED" }),
+      ],
+      2,
+    );
+    expect(summary.queued.map((j) => j.id)).toEqual(["impl"]);
+    expect(summary.running).toHaveLength(0);
+    expect(summary.planReviews.map((j) => j.id).sort()).toEqual(["pr-queued", "pr-running"]);
+    expect(summary.activeCount).toBe(1);
+    expect(cancelableDispatchJobs(summary).map((j) => j.id)).toEqual(["impl"]);
+  });
+
+  it("計画レビューの失敗は直近の失敗に出す", () => {
+    const summary = summarizeDispatchQueue(
+      [job({ id: "pr-failed", kind: "PLAN_REVIEW", status: "FAILED" })],
+      2,
+    );
+    expect(summary.failed.map((j) => j.id)).toEqual(["pr-failed"]);
+    expect(summary.planReviews).toHaveLength(0);
+  });
+
   it("横断質問ジョブと起動ジョブは走る順で1つに並べる", () => {
     const summary = summarizeDispatchQueue(
       [
