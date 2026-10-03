@@ -142,7 +142,7 @@ sweep() {
     session_name="$(session_name_for "$repo" "$pr_number" "$head_sha")"
     tmux has-session -t "=$session_name" 2>/dev/null && continue
     tmux new-session -d -s "$session_name" -c "$local_path" \
-      "bash $(printf '%q' "$SCRIPT_DIR/start-codex-pr-review.sh") --run $(printf '%q' "$owner") $(printf '%q' "$repo") $(printf '%q' "$pr_number") $(printf '%q' "$base_sha") $(printf '%q' "$head_sha")"
+      "APP_BASE_URL=$(printf '%q' "${APP_BASE_URL:-}") bash $(printf '%q' "$SCRIPT_DIR/start-codex-pr-review.sh") --run $(printf '%q' "$owner") $(printf '%q' "$repo") $(printf '%q' "$pr_number") $(printf '%q' "$base_sha") $(printf '%q' "$head_sha")"
     tmux set-option -t "$session_name:" -w remain-on-exit failed >/dev/null 2>&1 || true
     echo "Codex PRレビューを起動しました: ${full_name}#${pr_number} (${head_sha:0:12})"
   done <<<"$rows"
