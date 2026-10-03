@@ -421,6 +421,20 @@ export function hasBlockingFindings(review: ParsedPlanReview): boolean {
   return review.findings.some((finding) => finding.severity !== "note");
 }
 
+/**
+ * 指摘が実装時対応の補足（`note`）だけで、人が選ぶ判断が無く、推奨も「このまま承認」か（#3850）。
+ * 該当するレビューは、各指摘の反映・見送りを選ばせず承認だけに進ませる。
+ */
+export function isNoteOnlyApprove(review: ParsedPlanReview | null): boolean {
+  if (review === null) return false;
+  return (
+    review.findings.length > 0 &&
+    review.decisions.length === 0 &&
+    review.findings.every((finding) => finding.severity === "note") &&
+    review.recommendation?.kind === "approve"
+  );
+}
+
 /** 計画レビューの種別（`## 計画レビュー（G1・解消確認）`の見出しで見分ける。見出しが無ければ初回） */
 export function readPlanReviewKind(body: string): "initial" | "resolve" {
   return /^\s{0,3}#{1,6}\s*計画レビュー[（(]\s*G1\s*[・･]\s*解消確認/m.test(body) ? "resolve" : "initial";

@@ -233,7 +233,7 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   収まるため、`overflow-hidden`で切られることはない。
   **重なりの受け皿になる行には塗り（`bg-background`）を入れておく**——切り抜きを入れても、
   塗りの無いフッターは次に何かが重なったときに同じ見え方で再発する。
-- **同じ実測値を2つの画面に出さない**（#2631）。設定の「使用量と障害状況」とAI使用量画面が、どちらも
+- **同じ実測値を2つの画面に出さない**（#2631）。設定の旧「使用量と障害状況」区分（現「障害状況」）とAI使用量画面が、どちらも
   `ClaudeUsageCard`・`CodexUsageCard`で同じプラン枠のメーターを出していた。**値は同じでも
   取得のタイミングが違う**ので、片方で枠の残りを見た後にもう片方を開くと数字が食い違って
   見え、どちらが本当か分からなくなる。出す場所は1つに寄せ、消えた側には移った先を1行書く
@@ -340,6 +340,11 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   最新のものをrefから読む。書き込みが読めなかったときは推測せず「判読できない書き込みがあります」の
   1行を足す。**OpenAI系のモデルを選んでいるときは、`request.ts`の`openAiBody`が`image`ブロックを
   `input_image`へ変換する**（Anthropic形式のcontent配列をそのまま渡せる）。
+  **書き込みエディタで保存した添付は、書き込み前の元画像も一緒に読ませる**（#3851。取り消し線の下の
+  文字は書き込み後の画像だけでは分からない）。元画像のURLは`mention-textarea.tsx`の`replaceAttachment`が
+  [`lib/annotation/original-images.ts`](../src/lib/annotation/original-images.ts)へ登録し（ブラウザのメモリ上だけ。
+  リロードで消え、その場合は書き込み後の1枚だけで読む）、ボタンが`originals`（書き込み後URL→元画像URL）として
+  送る。サーバーは「元画像→書き込み後」の順に並べ、元画像が読めない・5MB超のときは失敗にせず書き込み後だけで読む。
 - **作成した直後にどこへ進むかは、作成フォームではなく作成後の1画面で選ぶ**（#2862）。
   以前は「作成」「作成+実装開始」「質問する」のどれを押しても必ず作ったIssueの詳細へ
   移動していた（`issue-deck-shell.tsx`の`handleIssueCreated`が`selectIssue`を呼ぶ）。
@@ -442,7 +447,7 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   スマホの設定画面（[`mobile/mobile-settings-screen.tsx`](../src/components/dashboard/mobile/mobile-settings-screen.tsx)）が
   同じ配列と同じセクションコンポーネントを読む。**片方の画面にだけ項目を足さない。**
   **並びは、設定値系（表示・通知・実行設定）→操作系（フリート運用・画像）→読むだけの区分
-  （使用量と障害状況・共通知識・更新履歴）**（#3767）。実行設定は保存ボタンの上を
+  （障害状況・共通知識・更新履歴）**（#3767）。実行設定は保存ボタンの上を
   「実行の動かし方」「使うAIモデル」、下を「その場で保存される設定」で分け、フリート運用は
   「配布・同期」「認証情報」の見出しで分ける。
   区分は機能の性質で割っており、**保存を押すまで効かない設定値は「実行設定」、押した瞬間に
@@ -461,13 +466,12 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   **非表示はIssue一覧・各ビューの件数・通知にも効く**（#2279。#367以来「効かない」ままだった
   範囲を揃えた。効く範囲の一覧と、どこで除いているかは下の「非表示にしたリポジトリ〜」を参照）。
 - **設定画面は「開いた区分のぶんだけ」読み込む**（#2022）。以前は設定を開いた時点で5本
-  （レート制限・API使用量・Claude使用量・GitHubの障害状況・PAT一覧）が走り、さらに
+  （レート制限・API使用量・Claude使用量・GitHubの障害状況・PAT一覧。#3827で使用量系は設定から外した）が走り、さらに
   「フリート運用」を開くと共有ワークフローのタグ照会と同期履歴が走っていた。今は
   **区分を開くまで取りに行かない**という原則で2か所に分けている。
-  - [`hooks/use-settings-data.ts`](../src/hooks/use-settings-data.ts)は`statusActive`
-    （「使用量と障害状況」区分を開いているか）を受け取り、使用量・レート制限をそのあいだだけ取る。
-    **障害状況とPAT一覧だけは先読みのまま**——どちらも区分を開かずに出す警告バッジの材料で、
-    遅らせるとバッジが出ない。
+  - [`hooks/use-settings-data.ts`](../src/hooks/use-settings-data.ts)が先読みするのは
+    **障害状況とPAT一覧だけ**——どちらも区分を開かずに出す警告バッジの材料で、遅らせるとバッジが出ない。
+    GitHubの使用量は#3827でStatusHubへ移し、設定では取らない。
   - フリート運用の3区画は
     [`settings/lazy-fleet-panel.tsx`](../src/components/dashboard/settings/lazy-fleet-panel.tsx)の
     カードで畳み、**押した時点で初めて中身をマウントする**（中のセクションはマウント時点で
@@ -524,28 +528,21 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   [`settings/changelog-section.tsx`](../src/components/dashboard/settings/changelog-section.tsx)で
   PC・スマホ共通。**バージョン表示（`app-version-button.tsx`）は区分の外**（PCは左タブ最下部・
   スマホは一覧最下部）に置く——アカウント区分の中にあった頃は開かないと見えなかった。
-- **GitHub Appのレート制限をサーバー間で読む`GET /api/github/rate-limit/apps`**（#3830）。応答は`GET /api/github/rate-limit`と同じ形で、セッションに依存せず全インストールを返す。認証は`/api/typesafe/usage`と同じ`OPS_API_TOKEN`のBearer（新しいシークレットは増やさない）。StatusHubの利用枠画面が読む。
+- **GitHub Appのレート制限をサーバー間で読む`GET /api/github/rate-limit/apps`**（#3830）。（かつて設定画面向けにあった`GET /api/github/rate-limit`は#3827で削除。応答の形はその名残）セッションに依存せず全インストールを返す。認証は`/api/typesafe/usage`と同じ`OPS_API_TOKEN`のBearer（新しいシークレットは増やさない）。StatusHubの利用枠画面が読む。
 - **枠の消費を出すバーは[`usage-meter.tsx`](../src/components/dashboard/usage-meter.tsx)を使う**（#1651）。
-  設定の「使用量と障害状況」区分にあるClaudeプラン使用量（`claude-usage-card.tsx`）とGitHub API使用量の
-  レート制限（`github-rate-limit-list.tsx`）が共通で読む。**使用量を左から右へ伸ばし、経過時間は
+  Claudeプラン使用量（`claude-usage-card.tsx`）などが読む。**使用量を左から右へ伸ばし、経過時間は
   同じバーの上に立つ縦の目盛りで示す。** 以前は残量を描いていたので消費が進むほどバーが縮み、
   経過時間も別の細いバーとして下に並んでいた。**片方だけ旧表示に戻さない**——同じ画面に
   「伸びるバー」と「縮むバー」が混在すると、どちらの向きで読むのかが行ごとに変わる。
   shadcnの`Progress`は`overflow-x-hidden`で端が欠けるため目盛りを重ねられず、この用途では使わない
-  （構成比を出す`github-api-usage-list.tsx`の内訳バーは枠の消費ではないので`Progress`のまま）。
+  。
   リセットの絶対時刻は下段の幅に収まらないため画面には出さず、`title`（ツールチップ）にだけ置く。
-- **設定の「使用量と障害状況」1枚目のカードは「GitHub使用量」で、中を`API`と`ACTIONS`に分ける**（#2212）。
-  `API`はレート制限（`github-rate-limit-list.tsx`）と用途別の呼び出し回数
-  （`github-api-usage-list.tsx`）、`ACTIONS`は課金レポートから読んだ実行時間
-  （[`github-actions-usage.tsx`](../src/components/dashboard/github-actions-usage.tsx)・
-  [`lib/github/actions-billing.ts`](../src/lib/github/actions-billing.ts)）。
-  **`ACTIONS`だけは専用のclassic PAT（`GITHUB_BILLING_TOKEN`）で読む**——課金レポートは
-  GitHub Appのトークン（インストール・ユーザーとも）では403になる。未設定ならその表示だけが
-  無効になり、アプリは動く（Claudeプラン使用量と同じ扱い）。
-  **Actionsに無料枠のメーターは置かない**——今回のスコープ外という判断で、
-  `Repository.private`と突き合わせれば出せる（[github-billing.md](github-billing.md)）。
-  **課金レポートは半日ほど遅れて載る**ので、数字には必ず「どこまで反映されているか」を
-  添える。カードはPC・スマホ共通の`settings/status-section.tsx`が組み立てる。
+- **設定の「障害状況」区分はGitHubの障害状況だけを出す**（#3827）。かつてあった「GitHub使用量」カード
+  （`API`のレート制限・呼び出し回数と`ACTIONS`の実行時間。#2212）はStatusHubで扱うため、表示・取得フック・
+  専用GET API・Actions課金の取得（`actions-billing.ts`）ごと削除した。呼び出し回数の記録（`lib/github/api-usage.ts`）と
+  `GET /api/github/rate-limit/apps`は残る。`GITHUB_BILLING_TOKEN`は読む場所が無くなったが、撤去は別Issueで扱う。
+  障害状況カードの右上には、`GET /api/github/status`が返す`fetchedAt`を「取得 10/3 13:15」の形で出す。
+  カードはPC・スマホ共通の`settings/status-section.tsx`が組み立てる。
 - **issue-deck自身が投げたAI API呼び出しは、機能別に計上している（画面には出さない）**（#2347）。
   かつては設定の「使用量と障害状況」→「AI使用量」画面に機能別の内訳カード（「アプリ内AI機能別」）を出していたが、
   **#3062で表示（カード・取得フック・`/api/claude/api-usage`）を削除した**。計上

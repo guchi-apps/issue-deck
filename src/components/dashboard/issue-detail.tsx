@@ -318,6 +318,8 @@ export function IssueDetail({
     setError: setCommentMutationError,
   } = useIssueCommentMutations();
   const [newCommentBody, setNewCommentBody] = useState("");
+  // 計画レビューカードの「追加で修正したいこと」の下書き。承認欄の承認へ同梱する（#3852）
+  const [planReviewAdditional, setPlanReviewAdditional] = useState("");
   // ディスパッチ状態はこの画面で1回だけ取得し、起動ボタン・実行先の表示へ配る（#1262）。
   // 子（StartImplementationDialog・StartLocalSessionButton）が各自で取得すると、
   // 同じ画面のためにポーリングが何本も走る
@@ -553,6 +555,10 @@ export function IssueDetail({
   }
 
   async function handleApprove(text?: string) {
+    // カードの追記を黙って捨てない。承認コメントへ載せ、`@claude`がその文を読む（#3852）
+    const note = [text?.trim(), planReviewAdditional.trim()].filter(Boolean).join("\n\n");
+    text = note || undefined;
+    setPlanReviewAdditional("");
     if (!issue) return;
     await updateLabelsAndComment(
       labelsAfterApproval(issue.labels),
@@ -561,6 +567,7 @@ export function IssueDetail({
   }
 
   async function handleReject(reason: string) {
+    setPlanReviewAdditional("");
     if (!issue) return;
     await updateLabelsAndComment(labelsAfterRejection(issue.labels), rejectCommentBody(issue.labels, reason));
   }
@@ -1145,6 +1152,8 @@ export function IssueDetail({
                 approveHint="下の承認欄の「承認」を押す"
                 disabled={isSubmitting}
                 isSubmitting={isSubmitting}
+                additional={planReviewAdditional}
+                onAdditionalChange={setPlanReviewAdditional}
                 onSubmit={handleReject}
               />
             )}

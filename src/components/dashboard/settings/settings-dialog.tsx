@@ -97,7 +97,7 @@ export function SettingsDialog({
 }: SettingsDialogProps) {
   const [section, setSection] = useState<SettingsSectionKey>(DEFAULT_SETTINGS_SECTION);
   // 使用量・レート制限は「状態」を開いているあいだだけ取りに行く（#2022）
-  const data = useSettingsData(open, section === "status");
+  const data = useSettingsData(open);
 
   const alerts: Partial<Record<SettingsSectionKey, boolean>> = {
     fleet: data.hasExpiringFineGrainedToken,
@@ -224,9 +224,6 @@ export function SettingsDialog({
               {section === "knowledge" && <KnowledgeSection />}
         {section === "status" && (
                 <StatusSection
-                  rateLimits={data.rateLimits}
-                  apiUsage={data.apiUsage}
-                  actionsUsage={data.actionsUsage}
                   githubStatus={data.githubStatus}
                 />
               )}

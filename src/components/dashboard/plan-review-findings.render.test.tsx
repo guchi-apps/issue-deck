@@ -110,3 +110,34 @@ describe("PlanReviewFindings の追記欄（#3829）", () => {
     expect(submit.disabled).toBe(false);
   });
 });
+
+describe("補足だけで承認が推奨のカード（#3850）", () => {
+  const NOTE_BODY = [
+    "## 計画レビュー",
+    "",
+    "**1. 文言テストの更新**",
+    "- **区分**: 実装時対応の補足",
+    "- **指摘**: 文言も合わせる",
+    "",
+    "推奨: このまま承認してよい",
+  ].join("\n");
+
+  it("反映する・見送る・追記欄・出し直しを出さず、承認だけを案内する", () => {
+    render(
+      <PlanReviewFindings
+        review={parsePlanReview(NOTE_BODY)}
+        submitLabel="選んだ指摘で計画を出し直す"
+        fallbackSubmitLabel="レビューを反映して計画を出し直す"
+        deemphasizeSubmit
+        approveHint="下の「計画を承認する」を押す"
+        onSubmit={() => {}}
+      />,
+    );
+    expect(screen.getByText("文言テストの更新")).toBeTruthy();
+    expect(screen.queryByText("反映する")).toBeNull();
+    expect(screen.queryByText("見送る")).toBeNull();
+    expect(screen.queryByText("追加で修正したいこと（任意）")).toBeNull();
+    expect(screen.queryByRole("button", { name: /出し直す/ })).toBeNull();
+    expect(screen.getByText(/操作は承認だけです。下の「計画を承認する」を押す/)).toBeTruthy();
+  });
+});

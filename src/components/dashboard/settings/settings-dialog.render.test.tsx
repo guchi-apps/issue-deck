@@ -20,9 +20,6 @@ const appSettingsMutations = {
 };
 
 const settingsData = {
-  rateLimits: { data: null, isLoading: false, error: null },
-  apiUsage: { data: null, isLoading: false, error: null },
-  actionsUsage: { data: null, isLoading: false, error: null, notConfigured: false },
   claudeUsage: { data: null, isLoading: false, error: null, notConfigured: true },
   codexUsage: { data: null, isLoading: false, error: null, notConfigured: true },
   githubStatus: { data: null, isLoading: false, error: null },
@@ -32,11 +29,8 @@ const settingsData = {
   hasGithubIncident: false,
 };
 
-// 「状態」区分を開いているあいだだけ使用量を取りに行く（#2022）。引数を控えて検証する
-const useSettingsDataArgs: [boolean, boolean][] = [];
 vi.mock("@/hooks/use-settings-data", () => ({
-  useSettingsData: (enabled: boolean, statusActive: boolean) => {
-    useSettingsDataArgs.push([enabled, statusActive]);
+  useSettingsData: () => {
     return settingsData;
   },
 }));
@@ -140,7 +134,6 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  useSettingsDataArgs.length = 0;
   cleanup();
 });
 
@@ -148,7 +141,7 @@ describe("SettingsDialog", () => {
   it("区分をタブとして出し、既定では実行設定を開く（#1539・#1552）", () => {
     renderDialog();
 
-    for (const label of ["表示", "実行設定", "フリート運用", "使用量と障害状況", "更新履歴"]) {
+    for (const label of ["表示", "実行設定", "フリート運用", "障害状況", "更新履歴"]) {
       expect(screen.getByRole("button", { name: new RegExp(label) })).toBeTruthy();
     }
     // 「アカウント」は区分に並べず、アカウント名の行から開く（#3744）
@@ -215,17 +208,6 @@ describe("SettingsDialog", () => {
     fireEvent.click(within(panel).getByRole("button", { name: /開く/ }));
 
     expect(screen.getByLabelText(/対象キー/)).toBeTruthy();
-  });
-
-  it("使用量・レート制限は「状態」を開くまで取りに行かない（#2022）", () => {
-    renderDialog();
-
-    // 開いた直後はどの区分も「状態」ではない
-    expect(useSettingsDataArgs.every(([, statusActive]) => statusActive === false)).toBe(true);
-
-    fireEvent.click(screen.getByRole("button", { name: /使用量と障害状況/ }));
-
-    expect(useSettingsDataArgs.at(-1)).toEqual([true, true]);
   });
 
   it("変更が無いあいだ保存は押せず、変更すると押せるようになる", async () => {
@@ -325,13 +307,13 @@ describe("SettingsDialog", () => {
     expect(onSetRepositoryIssueCreationExcluded).toHaveBeenCalledWith(repositories[0], true);
   });
 
-  it("状態の区分ではGitHubの使用量と障害状況をまとめて出す（元は別ダイアログだった）", () => {
+  it("障害状況の区分ではGitHubの障害状況だけを出す（使用量はStatusHubへ移した）", () => {
     renderDialog();
 
-    fireEvent.click(screen.getByRole("button", { name: /使用量と障害状況/ }));
+    fireEvent.click(screen.getByRole("button", { name: /障害状況/ }));
 
-    expect(screen.getByText("GitHub使用量")).toBeTruthy();
     expect(screen.getByText("GitHub障害状況")).toBeTruthy();
+    expect(screen.queryByText("GitHub使用量")).toBeNull();
   });
 
   // #2631。プラン枠のメーターがAI使用量画面と丸ごと重複していたため、カードごと移した。
@@ -340,12 +322,12 @@ describe("SettingsDialog", () => {
   it("状態の区分にAI使用量のカードは出さない（AI使用量画面へ移した）", () => {
     renderDialog();
 
-    fireEvent.click(screen.getByRole("button", { name: /使用量と障害状況/ }));
+    fireEvent.click(screen.getByRole("button", { name: /障害状況/ }));
 
     // ダイアログはportalでbody直下へ描かれるので、renderのcontainerからは辿れない
     const cardTitles = Array.from(
       document.body.querySelectorAll("p.text-xs.font-medium"),
     ).map((node) => node.textContent);
-    expect(cardTitles).toEqual(["GitHub使用量", "GitHub障害状況"]);
+    expect(cardTitles).toEqual(["GitHub障害状況"]);
   });
 });

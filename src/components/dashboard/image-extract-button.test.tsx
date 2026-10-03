@@ -2,6 +2,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { registerOriginalImage } from "@/lib/annotation/original-images";
 import { ImageExtractButton } from "@/components/dashboard/image-extract-button";
 
 const WITH_IMAGE = "保存ボタンを直したい\n\n![a.png](https://example.test/api/issues/images/x.png)";
@@ -50,11 +51,26 @@ describe("ImageExtractButton", () => {
     expect(fetchMock.mock.calls[0][0]).toBe("/api/issues/image-extract");
     expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({
       images: ["https://example.test/api/issues/images/x.png"],
+      originals: {},
     });
     expect(onChange).toHaveBeenCalledWith(
       "保存ボタンを直したい\n\n## 画像から読み取った変更内容\n- 保存ボタンを右上へ移動する\n\n![a.png](https://example.test/api/issues/images/x.png)",
     );
     await waitFor(() => expect(screen.getByText(/1件の変更内容を本文へ追加しました/)).not.toBeNull());
+  });
+
+  it("書き込みエディタで保存した画像は、元画像のURLも一緒に送る（#3851）", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(200, { items: ["A"], unreadable: false }));
+    vi.stubGlobal("fetch", fetchMock);
+    registerOriginalImage("https://example.test/api/issues/images/x.png", "https://example.test/api/issues/images/o.png");
+
+    render(<ImageExtractButton value={WITH_IMAGE} onChange={() => {}} />);
+    fireEvent.click(screen.getByRole("button", { name: /画像から変更内容を抽出/ }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body).originals).toEqual({
+      "https://example.test/api/issues/images/x.png": "https://example.test/api/issues/images/o.png",
+    });
   });
 
   it("失敗したときは理由を出し、本文を変えない", async () => {

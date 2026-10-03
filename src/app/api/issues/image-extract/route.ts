@@ -30,8 +30,22 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "invalid_request" }, { status: 400 });
   }
 
+  const rawOriginals = payload?.originals;
+  const originals: Record<string, string> = {};
+  if (rawOriginals !== undefined && rawOriginals !== null) {
+    if (typeof rawOriginals !== "object" || Array.isArray(rawOriginals)) {
+      return NextResponse.json({ error: "invalid_request" }, { status: 400 });
+    }
+    for (const [annotated, original] of Object.entries(rawOriginals)) {
+      if (typeof original !== "string") {
+        return NextResponse.json({ error: "invalid_request" }, { status: 400 });
+      }
+      originals[annotated] = original;
+    }
+  }
+
   try {
-    const result = await generateImageExtract(token, images);
+    const result = await generateImageExtract(token, images, originals);
     return NextResponse.json(result);
   } catch (error) {
     if (error instanceof ImageExtractError) {

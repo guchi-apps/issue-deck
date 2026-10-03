@@ -67,9 +67,9 @@ export const SETTINGS_SECTIONS = [
   },
   {
     key: "status",
-    label: "使用量と障害状況",
+    label: "障害状況",
     icon: Activity,
-    description: "GitHubの使用量とレート制限、障害情報",
+    description: "GitHubの障害情報",
   },
   {
     key: "knowledge",

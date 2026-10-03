@@ -5,6 +5,7 @@ import { CheckCircle2, Loader2, ScanText } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { useIssueImageExtract } from "@/hooks/use-issue-image-extract";
+import { pickOriginalImages } from "@/lib/annotation/original-images";
 import { formatExtractedChanges } from "@/lib/image-extract-format";
 import { appendToBody, splitAttachments } from "@/lib/markdown-attachments";
 
@@ -39,10 +40,13 @@ export function ImageExtractButton({ value, onChange, disabled }: ImageExtractBu
 
   const imageUrls = splitAttachments(value).attachments.map((attachment) => attachment.url);
   const imageCount = imageUrls.length;
+  // 書き込み前の元画像が分かる添付は、元画像も一緒に読ませる（#3851）
+  const originals = pickOriginalImages(imageUrls);
+  const hasOriginals = Object.keys(originals).length > 0;
 
   async function handleExtract() {
     setAddedCount(null);
-    const result = await extract(imageUrls);
+    const result = await extract(imageUrls, originals);
     if (!result) return;
     const text = formatExtractedChanges(result);
     if (!text) return;
@@ -74,7 +78,7 @@ export function ImageExtractButton({ value, onChange, disabled }: ImageExtractBu
       </Button>
       {isExtracting && (
         <p role="status" className="basis-full text-xs text-muted-foreground">
-          画像{imageCount}枚を読み取っています…
+          画像{imageCount}枚{hasOriginals ? "（元画像つき）" : ""}を読み取っています…
         </p>
       )}
       {!isExtracting && addedCount !== null && !error && (

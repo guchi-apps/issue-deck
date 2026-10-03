@@ -12,6 +12,9 @@ export const MAX_EXTRACT_IMAGES = 4;
 /** 1枚あたりの上限。Anthropic APIが受け付ける画像の上限（5MB）に合わせる */
 export const MAX_EXTRACT_IMAGE_BYTES = 5 * 1024 * 1024;
 
+/** 元画像を足したあとのbase64の合計の上限。Messages APIのリクエスト上限（32MB）に余裕を持たせる（#3851） */
+const MAX_TOTAL_IMAGE_BASE64_LENGTH = 20 * 1024 * 1024;
+
 /** 変更内容は多くても20件ほど。出力を抑えて本文が膨らむのを防ぐ */
 const MAX_ITEMS = 20;
 const MAX_TOKENS = 1024;
@@ -48,7 +51,9 @@ export function resolveImageFilenames(urls: string[]): string[] {
   return [...new Set(filenames)];
 }
 
-async function loadImage(filename: string): Promise<{ mediaType: string; data: string }> {
+type LoadedImage = { mediaType: string; data: string };
+
+async function loadImage(filename: string): Promise<LoadedImage> {
   const buffer = await readFile(path.join(UPLOADED_IMAGE_DIR, filename))
     .catch(() => readFile(path.join(UPLOADED_IMAGE_TRASH_DIR, filename)))
     .catch(() => null);
@@ -65,15 +70,28 @@ async function loadImage(filename: string): Promise<{ mediaType: string; data: s
   return { mediaType: MEDIA_TYPE_BY_EXTENSION[extension], data: buffer.toString("base64") };
 }
 
+/**
+ * 書き込み前の元画像を読む。**読めなくても抽出は止めない**（欠損・5MB超・SVGは書き込み後だけで読む）。
+ * 元画像は補助の情報で、無くても従来どおり抽出できるため。
+ */
+async function loadOriginalImage(filename: string | undefined): Promise<LoadedImage | null> {
+  if (!filename || isSvgImageUrl(filename)) return null;
+  return loadImage(filename).catch(() => null);
+}
+
 /** 書き込み済みの画像から変更内容を読み取らせるプロンプト。画像はこの文の前に並べる */
-export function buildImageExtractPrompt(imageCount: number): string {
+export function buildImageExtractPrompt(imageCount: number, withOriginals = false): string {
+  const originalsRule = withOriginals
+    ? `
+- 「元画像」と「書き込み後」の組がある画像は、元画像と見比べる。取り消し線・塗りつぶし・×印などで文字が読めなくなった箇所は、元画像で何と書かれていたかを確認し、対象の文言として書く（例: 「保存して閉じる」ボタンを削除する（取り消し線））。元画像は何が書き込まれたかを知るための参照で、元画像にもともと写っているものを変更内容にはしない。`
+    : "";
   return `添付した${imageCount}枚の画像は、GitHub Issueを作る人がアプリの画面などに書き込みを加えたものです。書き込み（赤丸・矢印・線・×印・取り消し線・番号・記号・手書きや入力した文字など）が指している箇所を読み取り、「何をどう変えてほしいか」を1件1行の日本語にしてください。
 
 ルール:
 - 1件は「対象（画面の部品・文言・位置）」と「変更内容（削除・変更・追加・移動など）」がわかる文にし、根拠にした書き込みを括弧で添える（例: 「保存」ボタンを右下から右上へ移動する（赤い矢印））。
 - 元の画像にもともと写っている文字や画面そのものは変更内容にしない。書き込みから読み取れることだけを書く。
 - 書き込みが無い、または意図が読み取れないときは推測で埋めない。読み取れない書き込みが残っているときは"unreadable"をtrueにする。
-- 画像が複数あるときは、文頭に「（画像1）」のように何枚目かを付ける。
+- 画像が複数あるときは、文頭に「（画像1）」のように何枚目かを付ける（元画像と書き込み後の組は1枚として数える）。${originalsRule}
 - 件数は多くても${MAX_ITEMS}件まで。
 
 出力は前置きや説明・コードフェンスを一切付けず、以下の形式のJSONのみを出力してください。
@@ -117,8 +135,17 @@ type AnthropicMessageResponse = {
 export async function generateImageExtract(
   token: string,
   imageUrls: string[],
+  /** 書き込み後の画像URL→書き込み前の元画像URL。元画像が分かる画像だけ入れる（#3851） */
+  originalUrls: Record<string, string> = {},
 ): Promise<ImageExtractResult> {
   const attached = resolveImageFilenames(imageUrls);
+  // 書き込み後のファイル名→元画像のファイル名（形式に合わないURLは無視する）
+  const originalFilenameByFilename = new Map<string, string>();
+  for (const [annotatedUrl, originalUrl] of Object.entries(originalUrls)) {
+    const [annotated] = resolveImageFilenames([annotatedUrl]);
+    const [original] = resolveImageFilenames([originalUrl]);
+    if (annotated && original) originalFilenameByFilename.set(annotated, original);
+  }
   // SVGはAnthropic APIの画像として送れない（400になる）ので、送る前に外す（#3286）。
   // 書き込みはPNGへ描き出す機能で、SVGには書き込めない（書き込み済みの画像はPNGになっている）
   const filenames = attached.filter((filename) => !isSvgImageUrl(filename));
@@ -138,6 +165,32 @@ export async function generateImageExtract(
   }
 
   const images = await Promise.all(filenames.map(loadImage));
+  // 元画像が読めた画像は「元画像→書き込み後」の順に並べる
+  const loadedOriginals = await Promise.all(
+    filenames.map((filename) => loadOriginalImage(originalFilenameByFilename.get(filename))),
+  );
+  // 書き込み後の画像を優先し、合計が上限に収まる範囲でだけ元画像を足す。超える分は書き込み後だけで読む
+  let totalLength = images.reduce((sum, image) => sum + image.data.length, 0);
+  const originals = loadedOriginals.map((original) => {
+    if (!original || totalLength + original.data.length > MAX_TOTAL_IMAGE_BASE64_LENGTH) return null;
+    totalLength += original.data.length;
+    return original;
+  });
+  const withOriginals = originals.some((original) => original !== null);
+  const toBlock = (image: LoadedImage) => ({
+    type: "image",
+    source: { type: "base64", media_type: image.mediaType, data: image.data },
+  });
+  const imageBlocks = images.flatMap((image, index) => {
+    const original = originals[index];
+    if (!original) return [toBlock(image)];
+    return [
+      { type: "text", text: `（画像${index + 1}の元画像: 書き込む前）` },
+      toBlock(original),
+      { type: "text", text: `（画像${index + 1}の書き込み後）` },
+      toBlock(image),
+    ];
+  });
 
   const { response: res, json } = await callClaudeMessages<AnthropicMessageResponse>({
     feature: "issue_image_extract",
@@ -148,11 +201,8 @@ export async function generateImageExtract(
         {
           role: "user",
           content: [
-            ...images.map((image) => ({
-              type: "image",
-              source: { type: "base64", media_type: image.mediaType, data: image.data },
-            })),
-            { type: "text", text: buildImageExtractPrompt(images.length) },
+            ...imageBlocks,
+            { type: "text", text: buildImageExtractPrompt(images.length, withOriginals) },
           ],
         },
       ],
