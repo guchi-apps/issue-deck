@@ -12,6 +12,7 @@ import {
 } from "@/lib/github/pull-request-repair";
 import {
   fetchActivePullRequestRepairRun,
+  isRepairSymptomGone,
   recordPullRequestRepairRun,
 } from "@/lib/github/pull-request-repair-run";
 import { fetchPullRequest } from "@/lib/github/pull-requests-api";
@@ -87,7 +88,15 @@ async function handlePOST(request: NextRequest) {
       `${owner}/${repo}`,
       pullRequest.number,
     );
-    if (activeRepair) {
+    // 終了報告が届かない旧workflowではDBにrunningが残ることがある。画面表示と同じく、
+    // 現在のPR状態で元の症状が既に解消していれば、その古い記録で次の修復を止めない。
+    const activeRepairStillRelevant =
+      activeRepair !== null &&
+      !isRepairSymptomGone(activeRepair.kind, {
+        mergeable: currentState.mergeable,
+        ciState: currentState.ciState,
+      });
+    if (activeRepairStillRelevant) {
       return NextResponse.json(
         {
           error: "repair_in_progress",
