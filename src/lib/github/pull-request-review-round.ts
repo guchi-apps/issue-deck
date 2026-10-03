@@ -39,8 +39,10 @@ export function resolvePullRequestReviewRound(params: {
   const verdict = params.reviewVerdict;
   const freshness = resolveReviewVerdictFreshness({ reviewedSha: verdict?.reviewedSha, headSha: params.headSha });
   if (verdict?.reviewKind === "changes-requested") {
+    // 古い要修正判定だけでは「再レビューが実行中」とは判断しない。reviewPendingは上で
+    // 実際のworkflow状態から処理済みなので、ここでは最新HEADに対する判定がまだ無いことを示す。
     if (freshness === "stale") {
-      return { state: "re-reviewing", label: "再レビュー中", description: "修正コミットを追加しました。最新コミットの再レビュー結果を待っています。" };
+      return { state: "changes-requested", label: "再レビュー待ち", description: "修正コミット後のレビュー結果がまだありません。必要なら再レビューを実行してください。" };
     }
     return { state: "changes-requested", label: "要修正", description: "指摘はこのPRで修正します。新しいIssueやPRは作成しません。" };
   }
