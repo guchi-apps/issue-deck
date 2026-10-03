@@ -10,7 +10,7 @@ CREATE TABLE `DispatchSessionTimelineEvent` (
     `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
 
     INDEX `DispatchSessionTimelineEvent_sessionId_occurredAt_idx`(`sessionId`, `occurredAt`),
-    UNIQUE INDEX `DispatchSessionTimelineEvent_sessionId_source_occurredAt_kind_title_key`(`sessionId`, `source`, `occurredAt`, `kind`, `title`),
+    UNIQUE INDEX `dispatch_timeline_session_source_occurred_kind_title_key`(`sessionId`, `source`, `occurredAt`, `kind`, `title`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 

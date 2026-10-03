@@ -1421,7 +1421,7 @@ model DispatchSessionTimelineEvent {
 
   session DispatchSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
 
-  @@unique([sessionId, source, occurredAt, kind, title])
+  @@unique([sessionId, source, occurredAt, kind, title], map: "dispatch_timeline_session_source_occurred_kind_title_key")
   @@index([sessionId, occurredAt])
 }
 

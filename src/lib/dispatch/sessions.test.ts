@@ -135,6 +135,38 @@ describe("reportDispatchSessions", () => {
     });
   });
 
+  it("正常終了でstepを明示的に消したときは、終了イベントを記録する", async () => {
+    findMany
+      .mockResolvedValueOnce([existingRow({ step: "テスト中" })])
+      .mockResolvedValueOnce([]);
+
+    await reportDispatchSessions({
+      hostName: "subpc",
+      sessions: [report({ paneDead: true, paneDeadStatus: 0, step: null })],
+      now: NOW,
+    });
+
+    expect(timelineCreate).toHaveBeenCalledWith({
+      data: expect.objectContaining({ kind: "event", title: "セッション終了" }),
+    });
+  });
+
+  it("異常終了でstepを明示的に消したときは、異常終了イベントを記録する", async () => {
+    findMany
+      .mockResolvedValueOnce([existingRow({ step: "テスト中" })])
+      .mockResolvedValueOnce([]);
+
+    await reportDispatchSessions({
+      hostName: "subpc",
+      sessions: [report({ paneDead: true, paneDeadStatus: 1, step: null })],
+      now: NOW,
+    });
+
+    expect(timelineCreate).toHaveBeenCalledWith({
+      data: expect.objectContaining({ kind: "event", title: "セッション異常終了" }),
+    });
+  });
+
   it("報告に含まれない既存行をGONEへ倒す（削除はしない）", async () => {
     findMany
       .mockResolvedValueOnce([

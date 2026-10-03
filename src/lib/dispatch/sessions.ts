@@ -475,26 +475,30 @@ export async function reportDispatchSessions(params: {
     // pollerが既に運んでいる状態・固定語彙のstepだけを時系列へ残す。画面や転記の本文、
     // コマンド・tool結果はここへ入れない。会話本文はtimeline APIの許可済みイベントだけが担う。
     const previousStep = revived ? null : previous?.step;
-    // 古いpollerはstepを送らない。省略値をundefinedのまま比べると、既存のstepとの差で
-    // 毎巡イベントを作ってしまうため、保存済みの値を引き継いで比較する。
-    const currentStep = report.step ?? previousStep;
-    if (!previous || revived || previous?.state !== state || previousStep !== currentStep) {
-      const title = currentStep
-        ? `作業: ${currentStep}`
-        : state === "ALIVE"
+    // 古いpollerはstepを送らない。省略値は保存済みの値を引き継いで毎巡の重複記録を防ぐが、
+    // 明示的なnullは終了時などにstepを消したことを表すため、区別してそのまま反映する。
+    const currentStep = report.step === undefined ? previousStep : report.step;
+    const stateChanged = !previous || revived || previous.state !== state;
+    if (stateChanged || previousStep !== currentStep) {
+      // 終了・異常終了を作業イベントで覆わないよう、状態変化をstepより優先する。
+      const title = stateChanged
+        ? state === "ALIVE"
           ? "セッション開始"
           : state === "EXITED"
             ? "セッション終了"
             : state === "FAILED"
               ? "セッション異常終了"
-              : "セッション消失";
+              : "セッション消失"
+        : currentStep
+          ? `作業: ${currentStep}`
+          : "作業状態を解除";
       try {
         await db.dispatchSessionTimelineEvent.create({
           data: {
             sessionId: stored.id,
             source: "session",
             occurredAt: now,
-            kind: currentStep ? "step" : "event",
+            kind: stateChanged || !currentStep ? "event" : "step",
             title,
           },
         });
