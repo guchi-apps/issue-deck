@@ -98,6 +98,32 @@ describe("selectPullRequestReviewComment", () => {
     expect(result?.body).toContain("2回目");
   });
 
+  it("CodexのLGTMが後から届いてもClaudeの要修正を表示する", () => {
+    const result = selectPullRequestReviewComment(
+      [
+        comment(reviewBody("changes-requested", HEAD_SHA, "Claudeの指摘")),
+        comment(`CodexはLGTM\n\n<!-- issue-deck-codex-review-verdict:lgtm sha=${HEAD_SHA} -->`),
+      ],
+      HEAD_SHA,
+    );
+
+    expect(result?.verdictKind).toBe("changes-requested");
+    expect(result?.body).toContain("Claudeの指摘");
+  });
+
+  it("ClaudeのLGTMが後から届いてもCodexの要修正を表示する", () => {
+    const result = selectPullRequestReviewComment(
+      [
+        comment(`Codexの指摘\n\n<!-- issue-deck-codex-review-verdict:changes-requested sha=${HEAD_SHA} -->`),
+        comment(reviewBody("lgtm", HEAD_SHA, "ClaudeはLGTM")),
+      ],
+      HEAD_SHA,
+    );
+
+    expect(result?.verdictKind).toBe("changes-requested");
+    expect(result?.body).toContain("Codexの指摘");
+  });
+
   it("headより古いコミットへのレビューしか無ければ、それを`isStale`付きで返す", () => {
     const result = selectPullRequestReviewComment(
       [comment(reviewBody("changes-requested", OLD_SHA, "古い指摘"))],

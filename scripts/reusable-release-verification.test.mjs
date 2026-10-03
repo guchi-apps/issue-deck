@@ -164,6 +164,28 @@ describe("対象issueの検証結果を集計する", () => {
     expect(detail.split("\n").filter((line) => line.startsWith("## "))).toEqual([]);
   });
 
+  it("Codexの要修正を集計し、後から届いたClaudeのLGTMで指摘を隠さない", () => {
+    const out = runAggregation(["- #3917 Codexレビュー"], {
+      3917: {
+        number: 3927,
+        headRefOid: "abc123",
+        body: "<!-- issue-deck-verification:start review=changes-requested risk=none -->\n<!-- issue-deck-verification:end -->",
+        comments: [
+          {
+            url: "https://example.com/codex",
+            body: "Codexの要修正指摘\n\n<!-- issue-deck-codex-review-verdict:changes-requested sha=abc123 -->",
+          },
+          reviewComment("ClaudeはLGTM。"),
+        ],
+      },
+    });
+
+    expect(out).toContain("| #3917 | #3927 | ❌ 要修正 | 該当なし |");
+    expect(out).toContain("Codexの要修正指摘");
+    expect(out).not.toContain("ClaudeはLGTM。");
+    expect(out).toContain("[元のレビューコメントを開く](https://example.com/codex)");
+  });
+
   it("ワークフローが転記したレビュー結果も拾う（#2488）", () => {
     // 判定マーカーが無くても、転記の印が付いたコメントは結果として載せる
     const out = runAggregation(["- #2441 転記された結果"], {
