@@ -5,7 +5,7 @@ import { canMergeFromDeck } from "@/lib/pull-request-list";
 import { cn } from "@/lib/utils";
 import type { PullRequestSummary } from "@/types/pull-request";
 
-export function PullRequestReviewRound({ pullRequest }: { pullRequest: Pick<PullRequestSummary, "reviewVerdict" | "headSha" | "repairRun" | "mergeJudgement" | "autoMergeEnabled"> }) {
+export function PullRequestReviewRound({ pullRequest }: { pullRequest: PullRequestSummary }) {
   const round = resolvePullRequestReviewRound({
     reviewVerdict: pullRequest.reviewVerdict,
     headSha: pullRequest.headSha,
@@ -14,8 +14,8 @@ export function PullRequestReviewRound({ pullRequest }: { pullRequest: Pick<Pull
     autoMergeEnabled: pullRequest.autoMergeEnabled,
     readyToMerge:
       canMergeFromDeck(pullRequest) &&
-      pullRequest.mergeJudgement.ci.state === "success" &&
-      pullRequest.mergeJudgement.aiReview.state === "success",
+      pullRequest.ciState === "success" &&
+      pullRequest.mergeJudgement.aiReview.state === "passed",
   });
   const icon = round.state === "fixing" ? <Wrench className="size-4" /> : round.state === "re-reviewing" || round.state === "reviewing" ? <RefreshCw className="size-4" /> : round.state === "changes-requested" ? <CircleDot className="size-4" /> : <CircleCheck className="size-4" />;
   const tone = round.state === "changes-requested" ? "border-destructive/40 bg-destructive/10 text-destructive" : round.state === "fixing" || round.state === "re-reviewing" || round.state === "reviewing" ? "border-primary/35 bg-primary/10 text-primary" : "border-green-600/35 bg-green-600/10 text-green-700 dark:text-green-400";
