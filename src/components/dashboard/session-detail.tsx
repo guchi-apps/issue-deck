@@ -12,7 +12,7 @@ import { describeSessionStep, summarizeIssueSession } from "@/lib/dispatch/issue
 import { buildSessionOpenTarget } from "@/lib/dispatch/session-open-target";
 import type { DispatchSessionView } from "@/lib/dispatch/session-state";
 import type { SessionTimelineEventView } from "@/lib/dispatch/session-timeline";
-import { formatDateTimeFull } from "@/lib/format-date-time";
+import { formatDateTimeFull, formatTimeOfDay } from "@/lib/format-date-time";
 import { formatRelativeDate } from "@/lib/format-relative-date";
 
 function Timeline({ sessionId }: { sessionId: string | undefined }) {
@@ -37,7 +37,7 @@ function Timeline({ sessionId }: { sessionId: string | undefined }) {
   if (events.length === 0) return <p className="text-sm text-muted-foreground">表示できる会話・作業ログはまだありません。</p>;
   return <ol className="space-y-0">
     {events.map((event) => <li key={event.id} className="grid grid-cols-[3.5rem_1fr] gap-2 border-t py-3 first:border-t-0 first:pt-0">
-      <time className="text-xs text-muted-foreground" title={formatDateTimeFull(event.occurredAt)}>{new Date(event.occurredAt).toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit" })}</time>
+      <time className="text-xs text-muted-foreground" title={formatDateTimeFull(event.occurredAt)}>{formatTimeOfDay(event.occurredAt)}</time>
       <div><p className="font-medium">{event.title}</p>{event.body && <p className="mt-1 whitespace-pre-wrap text-sm text-muted-foreground">{event.body}</p>}</div>
     </li>)}
   </ol>;
