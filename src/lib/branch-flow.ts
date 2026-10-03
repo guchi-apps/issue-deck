@@ -26,7 +26,6 @@ import type {
   BranchFlowRepository,
   BranchFlowRepositorySummary,
   BranchFlowStartedIssue,
-  DeployFailureIssueRef,
   ReleaseBlockedReason,
   RepositoryBranchStatus,
   RepositoryDeployStatus,
@@ -392,10 +391,6 @@ export function buildBranchFlow(input: BuildBranchFlowInput): BranchFlow {
   const deployRunByRepo = new Map(
     (input.deployStatuses ?? []).map((status) => [status.repositoryFullName, status.deployRun]),
   );
-  // 失敗の帯から追跡Issueへ移るためのリンク（#2236）。判定には使わない。
-  const deployFailureIssueByRepo = new Map(
-    (input.deployStatuses ?? []).map((status) => [status.repositoryFullName, status.failureIssue]),
-  );
   const now = input.now ?? Date.now();
 
   const repositories = input.repositories.map((repository) =>
@@ -407,7 +402,6 @@ export function buildBranchFlow(input: BuildBranchFlowInput): BranchFlow {
       issues: input.issues.filter((issue) => issue.repositoryFullName === repository.fullName),
       branchStatus: branchStatusByRepo.get(repository.fullName) ?? null,
       deployRun: deployRunByRepo.get(repository.fullName) ?? null,
-      deployFailureIssue: deployFailureIssueByRepo.get(repository.fullName) ?? null,
       now,
     }),
   );
@@ -457,8 +451,8 @@ export function resolveReleaseBlockedReason({
   if (branchStatus === null) return "branches-unloaded";
   if (!branchStatus.hasReleaseWorkflow) return "no-workflow";
   if (releasePullRequest !== null || bumpPullRequest !== null) return "release-in-progress";
-  if (deployState?.kind === "failure") return "deploy-failed";
   if (unreleasedCommitCount(branchStatus.developVsMain) === 0) return "nothing-to-release";
+  if (deployState?.kind === "failure") return "deploy-failed";
   return null;
 }
 
@@ -468,7 +462,6 @@ function buildRepository({
   issues,
   branchStatus,
   deployRun,
-  deployFailureIssue,
   now,
 }: {
   repository: { fullName: string; private: boolean };
@@ -476,7 +469,6 @@ function buildRepository({
   issues: BranchFlowIssueSource[];
   branchStatus: RepositoryBranchStatus | null;
   deployRun: BranchFlowDeployRun | null;
-  deployFailureIssue: DeployFailureIssueRef | null;
   now: number;
 }): BranchFlowRepository {
   // リリースPR（develop→main）はレーンではなく幹の一部なので、作業レーンからは外す。
@@ -648,7 +640,6 @@ function buildRepository({
     canTriggerDeploy:
       (branchStatus?.hasDeployWorkflow ?? false) &&
       (deployState === null || deployState.kind === "success" || deployState.kind === "failure"),
-    deployFailureIssue,
     orphanIssues: issues
       .filter(
         (issue) =>

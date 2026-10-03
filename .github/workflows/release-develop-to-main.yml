@@ -34,6 +34,11 @@ on:
         type: choice
         default: auto
         options: [auto, patch, minor, major]
+      allow_failed_deploy:
+        description: "本番デプロイ失敗中に修正リリースを手動で開始する"
+        required: false
+        type: boolean
+        default: false
   schedule:
     # 実装中issueが無いタイミングでの自動起動（#3404）。実際の実行間隔は画面の設定
     # （#3416）で、cronは変えられないため15分おきに起動し、reusable側のgateが設定した
@@ -62,6 +67,7 @@ jobs:
       # push起動はdevelop→mainのPR作成だけを行い、上げ幅を使わない（#1548）。schedule起動は
       # 自動判定のみを使う。
       bump-kind: ${{ github.event_name == 'workflow_dispatch' && inputs.bump_kind || '' }}
+      allow-failed-deploy: ${{ github.event_name == 'workflow_dispatch' && inputs.allow_failed_deploy == true }}
     secrets: inherit
     # **呼ばれる側の権限はcallerの付与範囲を超えられない。** 通常のワークフローではjobが
     # workflowレベルの既定を上回る指定をしてよいが、再利用可能ワークフローでは

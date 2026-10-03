@@ -3,7 +3,6 @@ import { NextResponse, type NextRequest } from "next/server";
 import { requireUserId } from "@/lib/auth-user";
 import { isDevelopContentInMain, MAIN_BRANCH } from "@/lib/branch-flow";
 import { db } from "@/lib/db";
-import { findOpenDeployFailureIssue } from "@/lib/deploy-failure-store";
 import { withGithubApiFeature } from "@/lib/github/api-usage";
 import { getInstallationToken } from "@/lib/github/app-auth";
 import { lookupBranchRefs } from "@/lib/github/branches-api";
@@ -113,8 +112,6 @@ async function handleGET(request: NextRequest) {
     }
 
     const response: PullRequestDeployStatusResponse = {
-      // 失敗しているときにだけ画面が使う（#2236）。DBを1回引くだけでGitHub APIは増えない。
-      failureIssue: await findOpenDeployFailureIssue(repository.fullName),
       status,
       fetchedAt: new Date().toISOString(),
     };
@@ -149,5 +146,5 @@ async function isDevelopContentAlreadyInMain(
 }
 
 function emptyResponse(): PullRequestDeployStatusResponse {
-  return { status: null, failureIssue: null, fetchedAt: new Date().toISOString() };
+  return { status: null, fetchedAt: new Date().toISOString() };
 }

@@ -2,7 +2,6 @@ import { NextResponse } from "next/server";
 
 import { requireUserId } from "@/lib/auth-user";
 import { db } from "@/lib/db";
-import { findOpenDeployFailureIssues } from "@/lib/deploy-failure-store";
 import { withGithubApiFeature } from "@/lib/github/api-usage";
 import { getInstallationToken } from "@/lib/github/app-auth";
 import { deployWorkflowExists } from "@/lib/github/deploy-workflow-cache";
@@ -64,12 +63,6 @@ async function handleGET() {
     return token;
   }
 
-  // 失敗の表示から追跡Issueへ移るためのリンク（#2236）。**DBを1回引くだけ**で、
-  // GitHub APIは叩かない。
-  const failureIssues = await findOpenDeployFailureIssues(
-    repositories.map((repository) => repository.fullName),
-  );
-
   const results = await Promise.all(
     repositories.map(async (repository): Promise<RepositoryDeployStatus | null> => {
       try {
@@ -92,7 +85,6 @@ async function handleGET() {
         return {
           repositoryFullName: repository.fullName,
           deployRun,
-          failureIssue: failureIssues.get(repository.fullName) ?? null,
         };
       } catch (error) {
         // 1リポジトリの取得失敗で画面全体を落とさない。返さなければ従来どおりの表示になる。

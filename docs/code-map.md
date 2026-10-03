@@ -158,7 +158,7 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   - **通知も同じ扱いにする。** 確認待ちのトーストは`selectVisibleIssues`を通した集合で検知し、
     プッシュ通知（[`lib/notifications/check-user-push.ts`](../src/lib/notifications/check-user-push.ts)）は
     宛先の購読を`hiddenRepositories: { none: ... }`で絞る。開いた先に何も無い知らせを送らない
-  - 巡回（`conflict-sweep-run.ts`・`deploy-failure-sweep-run.ts`）と無人実行はユーザー単位の
+  - 巡回（`conflict-sweep-run.ts`）と無人実行はユーザー単位の
     概念を持たないため、従来どおり全リポジトリを対象にする。**本番マージ待ちのPush通知
     （`notifications/release-merge-push.ts`。#2376）も同じで、母集団は全リポジトリ・
     絞るのは宛先の購読の側**
@@ -2944,27 +2944,12 @@ export function POST(request: NextRequest) {
   空けるまで起動し直さず、対応Issueに`00.check-user`が付いていれば起動しない（自動解消を断念した
   ワークフローが付けるラベルなので、そのまま「人が見ると決めたもの」の目印にする）。
   設計は[multi-agent/auto-repair.md](multi-agent/auto-repair.md)「issue-deckからの巡回検知」。
-- **直らなかった本番デプロイの失敗は、issue-deckが巡回して追跡用のIssueにする**
-  （#2236。判定は[`lib/deploy-failure.ts`](../src/lib/deploy-failure.ts)、IOは
-  [`lib/github/deploy-failure-sweep-run.ts`](../src/lib/github/deploy-failure-sweep-run.ts)）。
-  コンフリクト巡回と同じ形で、pollerが1巡ごとに`POST /api/repositories/deploy-failure-sweep`を
-  叩き、間隔（`DEPLOY_FAILURE_SWEEP_INTERVAL_MINUTES`・既定5分・0で無効）はサーバー側が決める。
-  起票するのは**mainの`deploy.yml`の最新runが失敗のまま猶予（`DEPLOY_FAILURE_ISSUE_GRACE_MINUTES`・
-  既定10分）を過ぎたとき**だけで、`deploy-retry.yml`の自動再実行（#2134）と二重に動かない。
-  1リポジトリにつき同時に開くのは1件（鍵はrun id。`DeployFailureIssue`）で、後から走った
-  デプロイが成功したら自動でクローズする。**画面がこのIssueを見分けるのはラベルではなく
-  本文へ埋めた不可視マーカー**（`<!-- deploy-failure: {...} -->`）で、`parseDeployFailureMeta`が
-  読み、`DeployFailurePanel`が出す。**押す口（「本番へ再デプロイ」）は
-  [`components/dashboard/deploy-failure-alert.tsx`](../src/components/dashboard/deploy-failure-alert.tsx)
-  ひとつにまとめ**、ブランチ画面・PR詳細・Issue詳細の3か所で同じものを出す（確認ダイアログと
-  `POST /api/repositories/deploy`の呼び出しを書き分けない）。**ブランチ画面での置き場所は
-  リポジトリの節で、落ちた版の束ではない**——束は「次のリリースに乗る分」があると畳まれるため、
-  直らないまま次のリリースが動き出すと帯ごと消える（#2020が同じ理由でボタンを束へ置いていない）。
-  帯を出しているあいだ凡例の行のボタンは出さず、押す口を1つに保つ。
-  **issue-deck自身の`deploy`ジョブの失敗だけは拾えない**——`deploy.yml`は旧版を落とした後に
-  ヘルスチェックするので、失敗した時点でissue-deck自身が応答していない。
-  設計は[multi-agent/auto-repair.md](multi-agent/auto-repair.md)「直らなかったデプロイ失敗を、Issueにして残す」。
-- iOS配布（`ios-testflight.yml`）の失敗も同じ形で巡回し起票する（#3745。判定は`lib/deploy-failure.ts`の`decideDeployFailure`を再利用、本文は[`lib/ios-distribution-failure.ts`](../src/lib/ios-distribution-failure.ts)、IOは[`lib/github/ios-distribution-failure-sweep-run.ts`](../src/lib/github/ios-distribution-failure-sweep-run.ts)、受け口は`POST /api/repositories/ios-distribution-failure-sweep`）。対象は`Repository`の行を`webview-ios-repos.ts`で絞る
+- **本番デプロイの失敗は、ブランチ画面とPR詳細で表示し、その場で「本番へ再デプロイ」を押せる**
+  （#2020）。失敗を理由にIssueを自動作成しないため、修正が必要な場合は利用者が明示的に起案する。
+- iOS配布（`ios-testflight.yml`）の失敗も同じ形で巡回し起票する（#3745。判定・本文は
+  [`lib/ios-distribution-failure.ts`](../src/lib/ios-distribution-failure.ts)、IOは
+  [`lib/github/ios-distribution-failure-sweep-run.ts`](../src/lib/github/ios-distribution-failure-sweep-run.ts)、
+  受け口は`POST /api/repositories/ios-distribution-failure-sweep`）。対象は`Repository`の行を`webview-ios-repos.ts`で絞る
   - 画面からの手動起案（#3784）: ブランチ画面のiOS配布欄が失敗のとき、自動起票済みなら「起票済み（#N）」のリンク（`GET /api/repositories/ios-testflight`の`trackedIssue`）、無ければ「修正Issueを起案」（下書き入りの新規作成ダイアログ。`buildIosDistributionFixIssueDraft`）を出す。人が起票したIssueは`POST /api/repositories/ios-testflight/tracked-issue`（[`lib/github/ios-distribution-failure-register.ts`](../src/lib/github/ios-distribution-failure-register.ts)）で追跡Issueの行として登録し、以後の二重起票の抑止・書き足し・自動クローズは巡回に任せる。リポジトリごとに`open`の行は1件に保つ
 - **mainへマージしたのにデプロイが起動しなかったときは、issue-deckが起動し直す**
   （#2703。判定は[`lib/deploy-launch.ts`](../src/lib/deploy-launch.ts)、IOは

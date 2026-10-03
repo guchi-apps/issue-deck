@@ -1139,7 +1139,6 @@ describe("本番デプロイ起動の可否（canTriggerDeploy・#2020）", () =
         : [
             {
               repositoryFullName: REPO,
-              failureIssue: null,
               deployRun: {
                 id: 1,
                 status: "completed",
@@ -1301,7 +1300,6 @@ describe("リリース起動の可否（canTriggerRelease）", () => {
                         runAttempt: 1,
                         ...input.deployRun,
                       },
-                failureIssue: null,
               },
             ],
     }).repositories[0];
@@ -1402,6 +1400,11 @@ describe("リリース起動の可否（canTriggerRelease）", () => {
     });
     expect(repository.canTriggerRelease).toBe(false);
     expect(repository.releaseBlockedReason).toBe("deploy-failed");
+  });
+
+  it("失敗中でも未リリースの変更が無ければ修正リリースを出さない", () => {
+    const repository = buildRelease({ aheadBy: 0, deployRun: { conclusion: "failure" } });
+    expect(repository.releaseBlockedReason).toBe("nothing-to-release");
   });
 
   it("手動の再デプロイが失敗した場合も新規リリースを止める", () => {
@@ -1558,7 +1561,6 @@ describe("本番デプロイの状態（#1579）", () => {
     return [
       {
         repositoryFullName: REPO,
-        failureIssue: null,
         deployRun: {
           id: 1,
           status: "completed",

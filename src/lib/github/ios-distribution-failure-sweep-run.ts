@@ -1,7 +1,6 @@
 import { db } from "@/lib/db";
 import { getInstallationToken } from "@/lib/github/app-auth";
 import { fetchWorkflowRunJobs } from "@/lib/github/actions-api";
-import type { DeployFailureSkipReason } from "@/lib/deploy-failure";
 import {
   buildIosDistributionFailureIssueBody,
   buildIosDistributionFailureIssueTitle,
@@ -10,6 +9,7 @@ import {
   decideIosDistributionFailure,
   iosDistributionFailureSweepIntervalMinutes,
   type IosDistributionFailureMeta,
+  type IosDistributionFailureSkipReason,
 } from "@/lib/ios-distribution-failure";
 import {
   IOS_TESTFLIGHT_WORKFLOW_FILE,
@@ -28,7 +28,7 @@ import { getWebviewIosRepository } from "@/lib/webview-ios-repos";
 
 /**
  * iOS配布（`ios-testflight.yml`）が失敗したまま止まっているリポジトリを巡回し、追跡用のIssueを
- * 起票・更新・クローズする（#3745）。判定の考え方は`deploy-failure-sweep-run.ts`（#2236）と同じ。
+ * 起票・更新・クローズする（#3745）。
  *
  * **入口は`Repository`の行で、固定リストは絞り込みにだけ使う。** 固定リストのキーを回すと、
  * リネーム前の旧名（`guchi-apps/myroom`）と新名が両方あり、同じ失敗でIssueが2件立つため。
@@ -48,7 +48,7 @@ export type IosDistributionFailureSweepResult = {
   disabled: boolean;
   repositories: number;
   actions: IosDistributionFailureSweepAction[];
-  skipped: Partial<Record<DeployFailureSkipReason | "action_failed", number>>;
+  skipped: Partial<Record<IosDistributionFailureSkipReason | "action_failed", number>>;
   failedRepositories: string[];
 };
 

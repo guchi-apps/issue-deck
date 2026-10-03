@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { MobileReleaseSheet } from "@/components/dashboard/mobile/mobile-release-sheet";
@@ -96,5 +96,32 @@ describe("MobileReleaseSheet iOSへの反映欄（#3579）", () => {
     expect(screen.queryByText("AIDE-iosを実機へ反映する手順")).toBeNull();
     expect(screen.queryByText(/Webだけ更新/)).toBeNull();
     expect(screen.getByText("リリースworkflowを起動")).not.toBeNull();
+  });
+
+  it("本番デプロイ失敗中は確認チェックを付けたときだけ手動上書きを渡す", () => {
+    const triggerRelease = vi.fn(async () => true);
+    render(
+      <MobileReleaseSheet
+        {...baseProps}
+        triggerRelease={triggerRelease}
+        repository={makeRepository("guchi-apps/issue-deck")}
+        releaseStatus={makeStatus({
+          deployWorkflowRun: {
+            status: "completed",
+            conclusion: "failure",
+            htmlUrl: "https://github.com/guchi-apps/issue-deck/actions/runs/1",
+            createdAt: "2026-10-03T00:00:00Z",
+          },
+        })}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "リリースworkflowを起動" }));
+    const action = screen.getByRole("button", { name: "起動する" });
+    expect(action.hasAttribute("disabled")).toBe(true);
+    fireEvent.click(screen.getByRole("checkbox"));
+    expect(action.hasAttribute("disabled")).toBe(false);
+    fireEvent.click(action);
+    expect(triggerRelease).toHaveBeenCalledWith(undefined, true);
   });
 });

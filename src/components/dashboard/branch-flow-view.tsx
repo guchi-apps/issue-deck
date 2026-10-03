@@ -1389,7 +1389,6 @@ function ReleaseFlowGraph({
           version={repository.release.latestVersion}
           autoRetried={deployFailure.autoRetried}
           runUrl={deployFailure.htmlUrl}
-          failureIssue={repository.deployFailureIssue}
           isPending={deployTriggerPending}
           onTriggered={onDeployTriggered}
           className="mb-2"

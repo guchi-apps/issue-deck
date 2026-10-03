@@ -8,7 +8,6 @@ import {
   parseIosDistributionFailureMeta,
   type IosDistributionFailureMeta,
 } from "@/lib/ios-distribution-failure";
-import { parseDeployFailureMeta } from "@/lib/deploy-failure";
 
 const now = new Date("2026-10-02T12:00:00Z");
 const run = (over: Partial<Parameters<typeof decideIosDistributionFailure>[0]["run"] & object> = {}) => ({
@@ -60,10 +59,6 @@ describe("decideIosDistributionFailure", () => {
 describe("iOS配布失敗Issueの本文", () => {
   it("マーカーが往復する", () => {
     expect(parseIosDistributionFailureMeta(buildIosDistributionFailureIssueBody(meta))).toEqual(meta);
-  });
-  it("Webのデプロイ失敗のマーカーとは取り違えない", () => {
-    const body = buildIosDistributionFailureIssueBody(meta);
-    expect(parseDeployFailureMeta(body)).toBeNull();
   });
   it("壊れたマーカーはnull", () => {
     expect(parseIosDistributionFailureMeta("<!-- ios-distribution-failure: {oops -->")).toBeNull();

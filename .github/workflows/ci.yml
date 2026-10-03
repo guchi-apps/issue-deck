@@ -41,6 +41,9 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: MySQL移行SQLの引用符を検査
+        run: node scripts/check-migration-sql-quoting.mjs
+
       - name: Lint
         run: pnpm lint
 

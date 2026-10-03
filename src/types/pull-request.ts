@@ -7,7 +7,6 @@ import type { PullRequestReviewVerdict } from "@/lib/github/pull-request-review-
 import type { PullRequestRole } from "@/lib/github/pull-request-role";
 import type { CiState } from "@/lib/github/release-api";
 import type { ReleaseVerification } from "@/lib/github/release-verification";
-import type { DeployFailureIssueRef } from "@/types/branch-flow";
 
 /** CIの内訳に並べるチェック1件（#2777）。中身は`RollupCiCheck`そのもの */
 export type PullRequestCiCheck = RollupCiCheck;
@@ -204,12 +203,6 @@ export type PullRequestDeployStatus = {
 export type PullRequestDeployStatusResponse = {
   /** 判定できなければnull */
   status: PullRequestDeployStatus | null;
-  /**
-   * そのリポジトリで開いているデプロイ失敗Issue（#2236）。無ければnull。
-   * **`status.kind`が`failed`のときにしか使わない**が、判定はリポジトリ単位なので
-   * `status`とは別に持つ。
-   */
-  failureIssue: DeployFailureIssueRef | null;
   /** 取得時刻（ISO8601） */
   fetchedAt: string;
 };

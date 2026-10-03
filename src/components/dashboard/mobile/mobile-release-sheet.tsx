@@ -21,6 +21,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { getDeviceBuildRepository } from "@/lib/device-build-repos";
 import type { ReleaseStatus } from "@/hooks/use-release-status";
@@ -42,7 +43,7 @@ type MobileReleaseSheetProps = {
   releaseStatus: ReleaseStatus | null;
   releaseStatusLoading: boolean;
   releaseStatusError: string | null;
-  triggerRelease: () => Promise<boolean>;
+  triggerRelease: (bumpKind?: undefined, allowFailedDeploy?: boolean) => Promise<boolean>;
   isTriggeringRelease: boolean;
 };
 
@@ -58,6 +59,10 @@ export function MobileReleaseSheet({
   isTriggeringRelease,
 }: MobileReleaseSheetProps) {
   const [releaseConfirmOpen, setReleaseConfirmOpen] = useState(false);
+  const [allowFailedDeploy, setAllowFailedDeploy] = useState(false);
+  const deployRun = releaseStatus?.available ? releaseStatus.deployWorkflowRun : null;
+  const deployFailed = deployRun?.status === "completed" &&
+    (deployRun.conclusion === "failure" || deployRun.conclusion === "timed_out");
 
   // iOSアプリを持つリポジトリだけの「iOSへの反映」欄（#3579）。対象リポジトリの固定リストは
   // `lib/device-build-repos.ts`（Xcodeで実機ビルド。mainへのマージもMacのスクリプトが行う）と
@@ -168,7 +173,10 @@ export function MobileReleaseSheet({
         </div>
       </SheetContent>
 
-      <AlertDialog open={releaseConfirmOpen} onOpenChange={setReleaseConfirmOpen}>
+      <AlertDialog open={releaseConfirmOpen} onOpenChange={(open) => {
+        setReleaseConfirmOpen(open);
+        if (!open) setAllowFailedDeploy(false);
+      }}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>リリースworkflowを起動しますか？</AlertDialogTitle>
@@ -193,6 +201,16 @@ export function MobileReleaseSheet({
             <p className="text-xs text-muted-foreground">
               develop済みでmain未反映のIssueはありません。
             </p>
+          )}
+          {deployFailed && (
+            <label className="flex items-start gap-2 rounded-md border border-destructive/40 p-3 text-sm">
+              <Checkbox
+                checked={allowFailedDeploy}
+                onCheckedChange={(checked) => setAllowFailedDeploy(checked === true)}
+                disabled={isTriggeringRelease}
+              />
+              <span>本番デプロイの失敗を確認しました。developに取り込んだ修正をリリースするため、失敗中の起動を許可します。</span>
+            </label>
           )}
           {otherPullRequestsWithIssue.length > 0 && (
             <div className="flex max-h-48 flex-col gap-1.5 overflow-y-auto rounded-md border p-2">
@@ -226,7 +244,10 @@ export function MobileReleaseSheet({
             <AlertDialogCancel>キャンセル</AlertDialogCancel>
             {/* 起動できたことは、閉じた先のこのシートの進捗（`ReleaseProgress`）で分かるため、
                 「リリースを起動しました」のダイアログは出さない（#1590） */}
-            <AlertDialogAction onClick={() => void triggerRelease()}>起動する</AlertDialogAction>
+            <AlertDialogAction
+              disabled={isTriggeringRelease || (deployFailed && !allowFailedDeploy)}
+              onClick={() => void triggerRelease(undefined, deployFailed && allowFailedDeploy)}
+            >起動する</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
