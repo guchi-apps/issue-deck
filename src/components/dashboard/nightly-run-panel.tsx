@@ -483,18 +483,11 @@ function LaunchTimingRow({
               style={{ left: `${timeline.launchPercent}%` }}
               aria-hidden
             />
-            {timeline.nowPercent !== null && (
-              <div
-                className="absolute -inset-y-1.5 w-0.5 -translate-x-1/2 bg-foreground"
-                style={{ left: `${timeline.nowPercent}%` }}
-                aria-hidden
-              />
-            )}
           </div>
           <p className="text-[11px] text-muted-foreground">
             {formatTimeOfDay(timeline.launchAtIso)}に起動
             {resetsAt && `（${formatTimeOfDay(resetsAt)}にリセット）`}
-            {timeline.nowPercent !== null && " ・ 青い線が起動位置、黒い線がいま"}
+            {timeline.nowPercent !== null && " ・ 青い線が起動位置"}
           </p>
         </>
       ) : (
