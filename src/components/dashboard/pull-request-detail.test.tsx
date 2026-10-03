@@ -244,7 +244,7 @@ describe("PullRequestDetail", () => {
     expect(screen.getByRole("button", { name: /レビュー要修正/ })).toBeTruthy();
   });
 
-  it("CI失敗とレビュー要修正が同時でも、修復入口は1つだけでマージ操作を出さない", () => {
+  it("CI失敗とレビュー要修正が同時でも、修復入口は1つだけで、マージ操作は主要CTAにしない", () => {
     renderDetail({
       pullRequest: makePullRequest({
         ciState: "failure",
@@ -262,7 +262,9 @@ describe("PullRequestDetail", () => {
     });
 
     expect(screen.getAllByRole("button", { name: "PRを自動修正" })).toHaveLength(1);
-    expect(screen.queryByRole("button", { name: "マージする" })).toBeNull();
+    // 手動マージの経路は残すが、修正対象がある間は補助（outline）として出す
+    const mergeButton = screen.getByRole("button", { name: "マージする" });
+    expect(mergeButton.getAttribute("data-variant")).toBe("outline");
   });
 
   // 差分が小さくレビューが走らなかったことを言い切る。何も出さないと未完了と区別が付かない。
