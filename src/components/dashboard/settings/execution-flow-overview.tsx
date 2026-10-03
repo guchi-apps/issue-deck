@@ -57,7 +57,7 @@ export function ExecutionFlowOverview(props: ExecutionFlowOverviewProps) {
       return <div key={group} className="flex flex-col gap-2"><h4 className="border-b pb-1 text-xs font-semibold tracking-wide text-muted-foreground">{group}</h4>
         {groupFlows.map((flow) => {
           const editable = flow.sourceId === "workflow-model-settings";
-          const kind = flow.agent === "Codex Action" ? "codex" : "claude";
+          const kind = flow.agent === "Codex Action" || flow.agent === "Codex CLI" ? "codex" : "claude";
           return <article key={`${flow.name}-${flow.agent}`} className="rounded-lg border bg-card p-3 text-sm">
             <h5 className="font-medium">{flow.name}</h5>
             <dl className="mt-2 grid grid-cols-[5.5rem_minmax(0,1fr)] gap-x-2 gap-y-1 text-xs"><dt className="text-muted-foreground">実行場所</dt><dd>{flow.location}</dd><dt className="text-muted-foreground">エージェント</dt><dd>{flow.agent}</dd>{flow.setting && <><dt className="text-muted-foreground">設定値</dt><dd>{flow.setting}</dd></>}<dt className="text-muted-foreground">実効モデル</dt><dd className="font-medium">{flow.model}</dd>{flow.reasoningEffort && <><dt className="text-muted-foreground">推論強度</dt><dd>{flow.reasoningEffort}</dd></>}</dl>
