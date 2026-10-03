@@ -32,6 +32,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { CodexPairingControl } from "@/components/dashboard/codex-pairing-control";
+import { SessionDetail } from "@/components/dashboard/session-detail";
 import type { DispatchStateHandle } from "@/hooks/use-dispatch-state";
 import {
   describeDispatchJobStatus,
@@ -456,6 +457,7 @@ export function IssueSessionStatus({
       )}
       {/* 出口は畳まない（#1676）。入力待ちのときRemote Controlが唯一の答える手段で、
           畳むと画面から`00.check-user`を外せなくなる */}
+      <SessionDetail session={session} dispatch={dispatch} />
       {hasExitRow && (
         <div
           className={cn(

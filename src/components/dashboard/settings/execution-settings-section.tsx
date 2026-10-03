@@ -15,6 +15,7 @@ import {
 import { PlanReviewAutoReflectField } from "@/components/dashboard/settings/plan-review-auto-reflect-field";
 import { CodeReviewRecommendField } from "@/components/dashboard/settings/code-review-recommend-field";
 import { ReleasePrepIntervalField } from "@/components/dashboard/settings/release-prep-interval-field";
+import { ExecutionFlowOverview } from "@/components/dashboard/settings/execution-flow-overview";
 import { useAppSettingsMutations } from "@/hooks/use-app-settings-mutations";
 import {
   AUTO_RETRY_LIMIT_MAX,
@@ -239,9 +240,25 @@ export function ExecutionSettingsSection({
 
   return (
     <div className="flex flex-col gap-4">
-      <h3 className="border-b pb-1 text-xs font-semibold tracking-wide text-muted-foreground">実行の動かし方</h3>
+      <ExecutionFlowOverview
+        claudeModel={claudeModel}
+        githubActionsAgent={githubActionsAgent}
+        githubActionsCodexModel={githubActionsCodexModel}
+        claudeModelAssist={claudeModelAssist}
+        claudeLocalModel={claudeLocalModel}
+        codexModel={codexModel}
+        planReviewAgentForClaude={planReviewAgentForClaude}
+        planReviewAgentForCodex={planReviewAgentForCodex}
+        planReviewClaudeModel={planReviewClaudeModel}
+        planReviewCodexModel={planReviewCodexModel}
+        appAiModel={appAiModel}
+        appAiModelReasoning={appAiModelReasoning}
+        modelPickEngine={modelPickEngine}
+      />
 
-      <div className="flex flex-col gap-1.5">
+      <h3 className="border-b pb-1 text-xs font-semibold tracking-wide text-muted-foreground">共通設定</h3>
+
+      <div id="execution-controls" className="flex flex-col gap-1.5">
         <Label htmlFor="auto-retry-limit">自動リトライ回数</Label>
         <Input
           id="auto-retry-limit"
@@ -263,7 +280,7 @@ export function ExecutionSettingsSection({
         </p>
       </div>
 
-      <div className="flex flex-col gap-1.5 border-t pt-4">
+      <div id="subpc-agent-settings" className="flex flex-col gap-1.5 border-t pt-4">
         <Label htmlFor="default-dispatch-agent">サブPC：既定のエージェント</Label>
         <Select
           value={defaultDispatchAgent}
@@ -285,7 +302,7 @@ export function ExecutionSettingsSection({
         </p>
       </div>
 
-      <div className="flex flex-col gap-3 border-t pt-4">
+      <div id="plan-review-settings" className="flex flex-col gap-3 border-t pt-4">
         <div>
           <Label>サブPC：自動計画レビューのエージェントとモデル</Label>
           <p className="mt-1 text-xs text-muted-foreground">
@@ -366,7 +383,7 @@ export function ExecutionSettingsSection({
         </div>
       </div>
 
-      <div className="flex flex-col gap-3 border-t pt-4">
+      <div id="failover-settings" className="flex flex-col gap-3 border-t pt-4">
         <div>
           <Label htmlFor="dispatch-failover-enabled">使用量に応じた自動フェイルオーバー</Label>
           <p className="mt-1 text-xs text-muted-foreground">
@@ -403,7 +420,7 @@ export function ExecutionSettingsSection({
         </div>
       </div>
 
-      <div className="flex flex-col gap-1.5 border-t pt-4">
+      <div id="concurrency-settings" className="flex flex-col gap-1.5 border-t pt-4">
         <Label htmlFor="dispatch-concurrency">サブPCの同時実行数</Label>
         <Input
           id="dispatch-concurrency"
@@ -420,7 +437,7 @@ export function ExecutionSettingsSection({
         </p>
       </div>
 
-      <h3 className="border-b pb-1 text-xs font-semibold tracking-wide text-muted-foreground">GitHub Actions：無人実行のAI</h3>
+      <h3 id="github-actions-settings" className="border-b pb-1 text-xs font-semibold tracking-wide text-muted-foreground">GitHub Actions 共通設定</h3>
 
       <div className="flex flex-col gap-1.5">
         <Label htmlFor="github-actions-agent">エージェント</Label>
@@ -483,7 +500,7 @@ export function ExecutionSettingsSection({
         </p>
       </div>
 
-      <h3 className="border-b pb-1 text-xs font-semibold tracking-wide text-muted-foreground">サブPC：実装して本番へ反映するAI</h3>
+      <h3 id="subpc-model-settings" className="border-b pb-1 text-xs font-semibold tracking-wide text-muted-foreground">サブPC 共通設定</h3>
 
       <div className="flex flex-col gap-1.5">
         <Label htmlFor="claude-local-model">サブPC（Claude）：計画・実装</Label>
@@ -548,7 +565,7 @@ export function ExecutionSettingsSection({
       {/* 判定に使うAI（#3189・#3245）。**選ばれる側のモデルではなく、選ぶ側。**
           「おまかせ」のモデル選択と、Issue作成の「タイトル自動」で付くラベルの判定の両方に効く。
           サブPCのモデル設定（すぐ上）の直後に置く */}
-      <div className="flex flex-col gap-1.5">
+      <div id="model-pick-settings" className="flex flex-col gap-1.5">
         <Label htmlFor="model-pick-engine">判定に使うAI（おまかせ・ラベル付与）</Label>
         <Select
           value={modelPickEngine}
@@ -578,7 +595,7 @@ export function ExecutionSettingsSection({
         </p>
       </div>
 
-      <div className="flex flex-col gap-1.5">
+      <div id="app-ai-settings" className="flex flex-col gap-1.5">
         <Label htmlFor="app-ai-model">アプリ内AI：要約・検索・文章整理</Label>
         <Select value={appAiModel} onValueChange={(value) => setAppAiModel(value as AppAiModel)}>
           <SelectTrigger id="app-ai-model" className="w-full">

@@ -11,6 +11,7 @@ const resolveNotStartedSession = vi.fn();
 const postSessionWrapupComment = vi.fn();
 // 実際に動いているモデルの引き当て（#2723）
 const sessionUsageFindMany = vi.fn();
+const timelineCreate = vi.fn();
 
 vi.mock("@/lib/db", () => ({
   db: {
@@ -34,6 +35,11 @@ vi.mock("@/lib/db", () => ({
     sessionUsage: {
       get findMany() {
         return sessionUsageFindMany;
+      },
+    },
+    dispatchSessionTimelineEvent: {
+      get create() {
+        return timelineCreate;
       },
     },
   },
@@ -104,9 +110,63 @@ beforeEach(() => {
   resolveNotStartedSession.mockResolvedValue(true);
   postSessionWrapupComment.mockResolvedValue(false);
   sessionUsageFindMany.mockResolvedValue([]);
+  upsert.mockResolvedValue({ id: "row-1" });
+  timelineCreate.mockResolvedValue({});
 });
 
 describe("reportDispatchSessions", () => {
+  it("stepを送らない古いpollerの報告では、保存済みstepの履歴を重複して追加しない", async () => {
+    findMany
+      .mockResolvedValueOnce([existingRow({ step: "テスト中" })])
+      .mockResolvedValueOnce([]);
+
+    await reportDispatchSessions({ hostName: "subpc", sessions: [report()], now: NOW });
+
+    expect(timelineCreate).not.toHaveBeenCalled();
+  });
+
+  it("状態・stepの履歴にはサーバー側の記録元を付ける", async () => {
+    findMany.mockResolvedValueOnce([]).mockResolvedValueOnce([]);
+
+    await reportDispatchSessions({ hostName: "subpc", sessions: [report()], now: NOW });
+
+    expect(timelineCreate).toHaveBeenCalledWith({
+      data: expect.objectContaining({ source: "session", title: "セッション開始" }),
+    });
+  });
+
+  it("正常終了でstepを明示的に消したときは、終了イベントを記録する", async () => {
+    findMany
+      .mockResolvedValueOnce([existingRow({ step: "テスト中" })])
+      .mockResolvedValueOnce([]);
+
+    await reportDispatchSessions({
+      hostName: "subpc",
+      sessions: [report({ paneDead: true, paneDeadStatus: 0, step: null })],
+      now: NOW,
+    });
+
+    expect(timelineCreate).toHaveBeenCalledWith({
+      data: expect.objectContaining({ kind: "event", title: "セッション終了" }),
+    });
+  });
+
+  it("異常終了でstepを明示的に消したときは、異常終了イベントを記録する", async () => {
+    findMany
+      .mockResolvedValueOnce([existingRow({ step: "テスト中" })])
+      .mockResolvedValueOnce([]);
+
+    await reportDispatchSessions({
+      hostName: "subpc",
+      sessions: [report({ paneDead: true, paneDeadStatus: 1, step: null })],
+      now: NOW,
+    });
+
+    expect(timelineCreate).toHaveBeenCalledWith({
+      data: expect.objectContaining({ kind: "event", title: "セッション異常終了" }),
+    });
+  });
+
   it("報告に含まれない既存行をGONEへ倒す（削除はしない）", async () => {
     findMany
       .mockResolvedValueOnce([

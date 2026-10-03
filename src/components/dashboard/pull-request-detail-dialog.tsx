@@ -5,10 +5,7 @@ import { X } from "lucide-react";
 import type { IssueSuggestion } from "@/components/dashboard/mention-textarea";
 import { PullRequestDetail } from "@/components/dashboard/pull-request-detail";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
-import type { PrFixRequestRoute } from "@/lib/dispatch/pr-fix-request";
-import type { PullRequestFixIssueDraft, PullRequestFixRoute } from "@/lib/github/pull-request-fix-issue";
 import type { ReleaseVerificationRow } from "@/lib/github/release-verification";
-import type { Issue } from "@/types/issue";
 import type {
   PullRequestSummary,
   PullRequestDetail as PullRequestDetailData,
@@ -33,17 +30,7 @@ type PullRequestDetailDialogProps = {
   onClose: () => void;
   /** 検証結果の「修正をIssueにする」ボタン（#2838）。`PullRequestDetail`へそのまま中継する */
   onCreateFixIssue?: (row: ReleaseVerificationRow, pullRequest: PullRequestSummary) => void;
-  /** 「修正Issueを起案」（#2961）。`PullRequestDetail`へそのまま中継する */
-  onCreatePullRequestFixIssue?: (draft: PullRequestFixIssueDraft) => void;
-  /** 「修正Issueを起案」の送り先一式（#3009）。`PullRequestDetail`へそのまま中継する */
-  pullRequestFixRoute?: PullRequestFixRoute;
-  /** 対象PRを参照する既存の修正Issue（#3331）。`PullRequestDetail`へそのまま中継する */
-  existingPullRequestFixIssue?: Pick<Issue, "number" | "htmlUrl"> | null;
   issueSuggestions?: IssueSuggestion[];
-  onRequestPullRequestSessionFix?: (route: PrFixRequestRoute, reason: string) => Promise<boolean>;
-  isSubmittingPullRequestSessionFix?: boolean;
-  pullRequestSessionFixRejection?: string | null;
-  pullRequestSessionFixError?: string | null;
 };
 
 /**
@@ -79,14 +66,7 @@ export function PullRequestDetailDialog({
   onUpdated,
   onClose,
   onCreateFixIssue,
-  onCreatePullRequestFixIssue,
-  pullRequestFixRoute,
-  existingPullRequestFixIssue,
-  issueSuggestions,
-  onRequestPullRequestSessionFix,
-  isSubmittingPullRequestSessionFix,
-  pullRequestSessionFixRejection,
-  pullRequestSessionFixError,
+  issueSuggestions = [],
 }: PullRequestDetailDialogProps) {
   const open = pullRequestId !== null;
 
@@ -121,14 +101,7 @@ export function PullRequestDetailDialog({
           onClosed={onPullRequestClosed}
           onUpdated={onUpdated}
           onCreateFixIssue={onCreateFixIssue}
-          onCreatePullRequestFixIssue={onCreatePullRequestFixIssue}
-          pullRequestFixRoute={pullRequestFixRoute}
-          existingPullRequestFixIssue={existingPullRequestFixIssue}
           issueSuggestions={issueSuggestions}
-          onRequestPullRequestSessionFix={onRequestPullRequestSessionFix}
-          isSubmittingPullRequestSessionFix={isSubmittingPullRequestSessionFix}
-          pullRequestSessionFixRejection={pullRequestSessionFixRejection}
-          pullRequestSessionFixError={pullRequestSessionFixError}
           className="min-h-0"
           headerLeading={
             <button

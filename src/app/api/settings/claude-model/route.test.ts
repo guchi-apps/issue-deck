@@ -64,6 +64,9 @@ describe("GET", () => {
       planReviewAgentForCodex: "codex",
       planReviewClaudeModel: "sonnet",
       planReviewCodexModel: "gpt-5.6-terra",
+      workflowClaudeModel: "auto",
+      workflowCodexModel: "auto",
+      workflowCodexReasoningEffort: "default",
       dispatchFailoverEnabled: true,
       dispatchFailoverThresholdPercent: 90,
     });
@@ -93,6 +96,9 @@ describe("GET", () => {
       planReviewAgentForCodex: "codex",
       planReviewClaudeModel: "sonnet",
       planReviewCodexModel: "gpt-5.6-terra",
+      workflowClaudeModel: "auto",
+      workflowCodexModel: "auto",
+      workflowCodexReasoningEffort: "default",
       dispatchFailoverEnabled: true,
       dispatchFailoverThresholdPercent: 90,
     });

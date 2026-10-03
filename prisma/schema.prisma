@@ -462,6 +462,10 @@ model AppSetting {
   githubActionsAgent  String   @default("claude")
   // GitHub ActionsでCodexを使うときのモデル。サブPC用codexModelとは独立させる。
   githubActionsCodexModel String @default("gpt-5.6-terra")
+  // PRレビュー・修復workflow専用。autoはAction/CLIの既定へ委ねる。
+  workflowClaudeModel String @default("auto")
+  workflowCodexModel String @default("auto")
+  workflowCodexReasoningEffort String @default("default")
   // 質問応答・サブIssue分割のような補助的な処理に使うモデル(#905)。実装・計画とは品質要求が
   // 異なり、同じモデルで動かすとコストに見合わないため分けている。
   claudeModelAssist   String   @default("auto")
@@ -1401,11 +1405,32 @@ model DispatchSession {
   waitingTool   String? @db.VarChar(100)
   waitingTarget String? @db.Text
 
+  // 画面に表示してよい範囲へ限定した会話・作業イベント。生の転記や画面内容は保存しない。
+  timelineEvents DispatchSessionTimelineEvent[]
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@unique([host, tmuxSessionName])
   @@index([state])
+}
+
+model DispatchSessionTimelineEvent {
+  id         String   @id @default(cuid())
+  sessionId  String
+  // pollerが送る会話ログと、サーバーが記録する状態・stepの履歴を分ける。
+  // 会話ログの置換で後者を消さないために使用する。
+  source     String   @default("transcript") @db.VarChar(16)
+  occurredAt DateTime
+  kind       String   @db.VarChar(32)
+  title      String   @db.VarChar(160)
+  body       String?  @db.Text
+  createdAt  DateTime @default(now())
+
+  session DispatchSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@unique([sessionId, source, occurredAt, kind, title], map: "dispatch_timeline_session_source_occurred_kind_title_key")
+  @@index([sessionId, occurredAt])
 }
 
 // ALIVE=ペインが生きている / EXITED=正常終了して残っている / FAILED=異常終了して残っている /
