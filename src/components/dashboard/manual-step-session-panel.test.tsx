@@ -146,8 +146,7 @@ afterEach(() => {
   cleanup();
 });
 
-/** 自動で流せるのはサブPCの手順1件と完了の確認1件（#2830） */
-const START_BUTTON = "セッションを起動して2件を自動実行";
+const START_BUTTON = "セッションを起動して実行を開始";
 
 describe("ManualStepSessionPanel（#2771）", () => {
   it("対応したホストがあれば「セッションを起動」を押せ、押すとそのホストへ積む", async () => {
@@ -182,7 +181,7 @@ describe("ManualStepSessionPanel（#2771）", () => {
         dispatch={makeDispatch()}
       />,
     );
-    expect(screen.getByRole("button", { name: "セッションを起動" })).toHaveProperty(
+    expect(screen.getByRole("button", { name: START_BUTTON })).toHaveProperty(
       "disabled",
       true,
     );
@@ -201,11 +200,11 @@ describe("ManualStepSessionPanel（#2771）", () => {
     expect(screen.getByText(/この手作業のセッションが動いています/)).toBeTruthy();
   });
 
-  // 押した1回で何が流れるのかを押す前に並べる（#2830。承認パネル＝#1869と同じ立場）
-  it("自動で流す手順と、人に頼む手順を起動前に並べる", () => {
+  it("本文から読み取れた既知の手順と、自律実行の方針を起動前に示す", () => {
     render(<ManualStepSessionPanel issue={issue} dispatch={makeDispatch()} />);
-    expect(screen.getByText("自動で実行 2件")).toBeTruthy();
-    expect(screen.getAllByText("あなたが実行 1件")).toHaveLength(2);
+    expect(screen.getByText("本文から実行可能 2件")).toBeTruthy();
+    expect(screen.getAllByText("本人操作が必要そう 1件")).toHaveLength(2);
+    expect(screen.getByText(/本文に無い調査・修正・確認も自動で行います/)).toBeTruthy();
     expect(
       screen.getByText("systemctl --user restart issue-deck-dispatch-poller.service"),
     ).toBeTruthy();
