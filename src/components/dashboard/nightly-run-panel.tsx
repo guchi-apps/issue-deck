@@ -275,7 +275,7 @@ function ClaudeWindowMeter({
   const showFloorLegend =
     settings.fiveHourFloorPercent > 0 ||
     (live?.weeklyUsedPercent != null && settings.weeklyFloorPercent > 0);
-  // 動いている枠があるときだけ、枠の上の「いま」と起動位置を引ける
+  // 動いている枠があるときだけ、枠の上の塗りつぶしと起動位置を出せる
   const timeline =
     live && live.phase !== "idle" && live.resetsAt
       ? buildWindowTimeline(live.resetsAt, now, settings.leadMinutes)
@@ -444,7 +444,7 @@ function FloorRuler({
   );
 }
 
-/** 「起動するタイミング」行。5時間枠の帯に「いま」と起動位置を引き、「設定」で起動位置を動かす */
+/** 「起動するタイミング」行。5時間枠の帯に塗りつぶしで現在位置を示し、起動位置の線を引き、「設定」で起動位置を動かす */
 function LaunchTimingRow({
   leadMinutes,
   timeline,
