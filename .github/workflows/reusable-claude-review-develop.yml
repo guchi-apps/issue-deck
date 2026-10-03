@@ -810,6 +810,51 @@ jobs:
           fi
           "$CLAUDE_USAGE_SCRIPT" "Run Claude Code Review" "${{ steps.claude_review.outputs.execution_file }}"
 
+  codex-review:
+    # APIキー課金のCodex Actionは使わず、サブPCでChatGPTサブスクリプションにログイン済みの
+    # Codex CLIへPRコメントの要求印を渡す（#3917）。結果が返るまで待つため、失敗・期限切れは
+    # auto-mergeを止める安全側のfailureにする。
+    needs: [identify-issue, risk-check]
+    if: github.event.pull_request.draft == false && needs.risk-check.outputs.needs-review == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    steps:
+      - name: Codexレビューを依頼して結果を待つ
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          REQUEST="<!-- issue-deck-codex-review-request sha=${HEAD_SHA} -->"
+          RESULT_PATTERN="issue-deck-codex-review-verdict:(lgtm|needs-check|changes-requested|failed) sha=${HEAD_SHA}"
+          COMMENTS="$(gh pr view "$PR_NUMBER" --json comments --jq '.comments[].body')"
+          if ! grep -qE "$RESULT_PATTERN" <<<"$COMMENTS" && ! grep -qF "$REQUEST" <<<"$COMMENTS"; then
+            BODY="🤖 Codexによる差分レビューをサブPCへ依頼しました。結果が投稿されるまで待機します。"
+            BODY="$BODY"$'\n\n'"$REQUEST"$'\n<!-- issue-deck-source:codex-review-develop -->'
+            gh pr comment "$PR_NUMBER" --body "$BODY"
+          fi
+          for attempt in $(seq 1 60); do
+            COMMENTS="$(gh pr view "$PR_NUMBER" --json comments --jq '.comments[].body')"
+            VERDICT="$(grep -oE "$RESULT_PATTERN" <<<"$COMMENTS" | tail -n 1 | sed -E 's/^.*verdict:([a-z-]+) sha=.*$/\1/' || true)"
+            case "$VERDICT" in
+              lgtm|needs-check|changes-requested)
+                echo "Codexレビュー結果を取得しました: ${VERDICT}"
+                exit 0
+                ;;
+              failed)
+                echo "::error::Codexレビューが失敗しました"
+                exit 1
+                ;;
+            esac
+            echo "Codexレビュー結果を待っています（${attempt}/60）"
+            sleep 30
+          done
+          echo "::error::Codexレビュー結果の待機がタイムアウトしました"
+          exit 1
+
   claude-review-fallback:
     # wait-for-ciをneedsに入れているのは、このジョブも00.check-userを付けるため(#2136)。
     # CIが実行中のうちに付けると、auto-merge経由と同じく時期尚早の通知になる。
@@ -872,8 +917,41 @@ jobs:
             gh issue comment "$ISSUE_NUMBER" --body "$COMMENT_BODY"
           fi
 
+  codex-review-fallback:
+    needs: [identify-issue, wait-for-ci, risk-check, codex-review]
+    if: always() && needs.codex-review.result == 'failure'
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+      issues: write
+    steps:
+      - name: Codexレビュー失敗を通知してマージを保留する
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          ISSUE_NUMBER: ${{ needs.identify-issue.outputs.number }}
+        run: |
+          set -euo pipefail
+          gh pr comment "$PR_NUMBER" --body "⚠️ Codexによる自動レビューを完了できませんでした。サブPCの状態とActionsの実行ログを確認してください。安全のため自動マージはスキップされます。"
+          [ -n "$ISSUE_NUMBER" ] || exit 0
+          DEFINED_LABELS="$(gh label list --json name --jq '.[].name' --limit 200)"
+          LABEL_ARGS=()
+          for name in 00.check-user 01.check-blocked; do
+            grep -qx "$name" <<<"$DEFINED_LABELS" && LABEL_ARGS+=(--add-label "$name")
+          done
+          for name in 01.check-plan 01.check-input 01.check-merge 01.check-answered 00.qa-answered; do
+            grep -qx "$name" <<<"$DEFINED_LABELS" && LABEL_ARGS+=(--remove-label "$name")
+          done
+          [ "${#LABEL_ARGS[@]}" -eq 0 ] || gh issue edit "$ISSUE_NUMBER" "${LABEL_ARGS[@]}"
+          RUN_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          BODY="⚠️ 以下の理由により、developへのマージ前にユーザーの確認が必要です。"
+          BODY="$BODY"$'\n\n- Codexによる自動レビューを完了できなかったため（安全のため自動マージはスキップされます）'
+          BODY="$BODY"$'\n\n'"実行ログ: ${RUN_URL}"$'\n\n<!-- issue-deck-source:codex-review-develop -->'
+          gh issue comment "$ISSUE_NUMBER" --body "$BODY"
+
   auto-merge:
-    needs: [identify-issue, wait-for-ci, risk-check, claude-review]
+    needs: [identify-issue, wait-for-ci, risk-check, claude-review, codex-review]
     # claude-reviewはrisk-checkの判定次第でskipされる(#992)。needsの既定動作では
     # 依存ジョブがskipされると後続もskipされてしまうため、条件を明示的に組み立てて
     # 「claude-reviewがsuccessまたはskipped」を許容する。
@@ -895,6 +973,7 @@ jobs:
       && needs.identify-issue.result == 'success'
       && needs.risk-check.result == 'success'
       && (needs.claude-review.result == 'success' || needs.claude-review.result == 'skipped')
+      && (needs.codex-review.result == 'success' || needs.codex-review.result == 'skipped')
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -940,6 +1019,7 @@ jobs:
           REASONS: ${{ needs.risk-check.outputs.reasons }}
           ALREADY_CHECK_USER: ${{ needs.risk-check.outputs.already-check-user }}
           REVIEW_RESULT: ${{ needs.claude-review.result }}
+          CODEX_REVIEW_RESULT: ${{ needs.codex-review.result }}
           REVIEW_AUTO_FIX: ${{ inputs.review-auto-fix }}
         run: |
           set -e
@@ -969,7 +1049,26 @@ jobs:
             fi
           fi
 
-          if [ "$RISKY" != "true" ] && [ "$REVIEW_BLOCKED" != "true" ]; then
+          CODEX_REVIEW_BLOCKED=false
+          if [ "$CODEX_REVIEW_RESULT" = "success" ]; then
+            CODEX_VERDICT="$(gh pr view "$PR_NUMBER" --json comments --jq '.comments[].body' \
+              | grep -oE "issue-deck-codex-review-verdict:(lgtm|needs-check|changes-requested) sha=${HEAD_SHA}" \
+              | tail -n 1 \
+              | sed -E 's/^.*verdict:([a-z-]+) sha=.*$/\1/' || true)"
+            case "$CODEX_VERDICT" in
+              needs-check|changes-requested)
+                CODEX_REVIEW_BLOCKED=true
+                echo "Codexレビューが自動マージを保留すべきと判定しています: ${CODEX_VERDICT}"
+                ;;
+              lgtm) echo "CodexレビューはLGTMです。" ;;
+              *)
+                echo "::error::Codexレビューの判定を取得できませんでした"
+                exit 1
+                ;;
+            esac
+          fi
+
+          if [ "$RISKY" != "true" ] && [ "$REVIEW_BLOCKED" != "true" ] && [ "$CODEX_REVIEW_BLOCKED" != "true" ]; then
             echo "どちらの判定にも該当しないため、00.check-userは付与しません。"
             exit 0
           fi
@@ -980,7 +1079,7 @@ jobs:
           # 渡したことはIssueへの印付きコメントで伝える。claude-review-fix.ymlはこのワークフローの
           # 完了(workflow_run)で起動し、この印がいまのheadに対して残っているときだけ着手する。
           # 条件を満たさないときは下の従来の処理(00.check-user＋01.check-merge)へ落ちる。
-          if [ "$REVIEW_BLOCKED" = "true" ] && [ "$RISKY" != "true" ] && [ "$REVIEW_AUTO_FIX" = "true" ]; then
+          if [ "$REVIEW_BLOCKED" = "true" ] && [ "$CODEX_REVIEW_BLOCKED" != "true" ] && [ "$RISKY" != "true" ] && [ "$REVIEW_AUTO_FIX" = "true" ]; then
             HANDOFF_BLOCKER=""
             AUTOFIX_MARKER="<!-- issue-deck-review-autofix:ok sha=${HEAD_SHA} -->"
             HANDOFF_MAX=2
@@ -1038,8 +1137,13 @@ jobs:
           # ここで投稿するのは機械的リスク判定(risk-check)の理由だけ。意味的判定の理由は
           # claude-review自身が投稿済みで(その末尾のマーカーを上で読んでいる)、同じ理由を
           # 二重に並べないため(#2136)。
-          if [ "$RISKY" != "true" ]; then
+          if [ "$RISKY" != "true" ] && [ "$CODEX_REVIEW_BLOCKED" != "true" ]; then
             echo "機械的リスク判定には該当していないため、理由コメントの投稿はclaude-review側に任せます。"
+          elif [ "$CODEX_REVIEW_BLOCKED" = "true" ] && [ "$ALREADY_CHECK_USER" != "true" ]; then
+            BODY="⚠️ 以下の理由により、developへのマージ前にユーザーの確認が必要と判定しました。"
+            BODY="$BODY"$'\n\n'"- Codexによる自動レビューが \`${CODEX_VERDICT}\` と判定したため。詳細はPR #${PR_NUMBER} のレビューコメントを確認してください。"
+            BODY="$BODY"$'\n\n<!-- issue-deck-source:codex-review-develop -->'
+            gh issue comment "$ISSUE_NUMBER" --body "$BODY"
           # このpush開始時点で既に00.check-user付与済み(=既に確認待ち)ならコメントのみ省略する(#594)。
           # 判定材料はrisk-checkが掴んだpush開始時点の状態で、ここで読み直さない。読み直すと
           # 他経路が付けたラベルを見て、理由コメントを取りこぼす(#1406)
@@ -1089,6 +1193,7 @@ jobs:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           REVIEW_RESULT: ${{ needs.claude-review.result }}
           REVIEW_EXECUTED: ${{ needs.claude-review.outputs.executed }}
+          CODEX_REVIEW_RESULT: ${{ needs.codex-review.result }}
           RISKY: ${{ needs.risk-check.outputs.risky }}
           REASONS: ${{ needs.risk-check.outputs.reasons }}
           REVIEW_FIX_HANDOFF: ${{ steps.hold.outputs.handoff }}
@@ -1129,6 +1234,22 @@ jobs:
               ;;
           esac
 
+          CODEX_REVIEW="unavailable"
+          CODEX_SKIP_REASON=""
+          case "$CODEX_REVIEW_RESULT" in
+            skipped)
+              CODEX_REVIEW="skipped"
+              CODEX_SKIP_REASON="低リスクかつ小規模のため省略"
+              ;;
+            success)
+              FOUND="$(gh pr view "$PR_NUMBER" --json comments --jq '.comments[].body' \
+                | grep -oE "issue-deck-codex-review-verdict:(lgtm|needs-check|changes-requested) sha=${HEAD_SHA}" \
+                | tail -n 1 \
+                | sed -E 's/^.*verdict:([a-z-]+) sha=.*$/\1/' || true)"
+              [ -z "$FOUND" ] || CODEX_REVIEW="$FOUND"
+              ;;
+          esac
+
           # review=・risk=の値と文言の対応は、ローカルのレビュー・統合エージェント
           # (scripts/prompts/review-agent.md)・リリースPRの集計・画面(src/lib/github/
           # release-verification.ts)で共通の契約。**片方だけ増やさない**
@@ -1138,6 +1259,13 @@ jobs:
             changes-requested) REVIEW_TEXT="❌ 要修正" ;;
             skipped) REVIEW_TEXT="— 実施なし（${SKIP_REASON}）" ;;
             *) REVIEW="unavailable"; REVIEW_TEXT="? 判定を取得できませんでした" ;;
+          esac
+          case "$CODEX_REVIEW" in
+            lgtm) CODEX_REVIEW_TEXT="✅ 問題なし（LGTM）" ;;
+            needs-check) CODEX_REVIEW_TEXT="⚠️ 要確認" ;;
+            changes-requested) CODEX_REVIEW_TEXT="❌ 要修正" ;;
+            skipped) CODEX_REVIEW_TEXT="— 実施なし（${CODEX_SKIP_REASON}）" ;;
+            *) CODEX_REVIEW="unavailable"; CODEX_REVIEW_TEXT="? 判定を取得できませんでした" ;;
           esac
 
           if [ "$RISKY" = "true" ]; then
@@ -1150,7 +1278,7 @@ jobs:
 
           if [ "$REVIEW_FIX_HANDOFF" = "true" ]; then
             CONFIRM_TEXT="不要（指摘を自動修正へ回しました。直した後に再レビューされます）"
-          elif [ "$RISK" = "hit" ] || [ "$REVIEW" = "needs-check" ] || [ "$REVIEW" = "changes-requested" ]; then
+          elif [ "$RISK" = "hit" ] || [ "$REVIEW" = "needs-check" ] || [ "$REVIEW" = "changes-requested" ] || [ "$CODEX_REVIEW" = "needs-check" ] || [ "$CODEX_REVIEW" = "changes-requested" ]; then
             CONFIRM_TEXT="必要（自動マージはスキップされます）"
           else
             CONFIRM_TEXT="不要（自動マージの対象）"
@@ -1162,6 +1290,7 @@ jobs:
             echo "## 検証結果"
             echo
             echo "- 自動レビュー: ${REVIEW_TEXT}"
+            echo "- Codexによる自動レビュー: ${CODEX_REVIEW_TEXT}"
             echo "- 機械的リスク判定: ${RISK_TEXT}"
             if [ "$RISK" = "hit" ] && [ -n "$REASONS" ]; then
               # risk-checkが組み立てた `- <理由>` の行を、そのままぶら下げる

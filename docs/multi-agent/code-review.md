@@ -14,6 +14,12 @@ Claude Codeの`/code-review`に当たるものを、フリートの盤面（issu
 
 材料も出す場所も別なので、片方を直すときにもう片方は動かない。
 
+## develop向けPRのCodexレビュー（#3917）
+
+develop向けPRの自動レビューは、既存のClaude Codeに加えてCodexも同じ実行条件で確認する。CodexはGitHub Actions内で実行しない。公式の`openai/codex-action`はAPIキー課金になるため、ActionsはPRコメントへ対象SHA付きの要求印を残して結果を待ち、サブPCのpollerがその印を拾う。
+
+サブPCでは`codex login`済みのCodex CLIを読み取り専用・一時worktreeで実行するため、ChatGPTサブスクリプション枠を使い、実装中のworktreeやPRブランチを変更しない。結果は同じSHA付きの判定印としてPRへ投稿され、ClaudeまたはCodexのどちらかが`needs-check`・`changes-requested`なら自動マージを保留する。サブPCが応答しない、Codexが失敗する、30分以内に結果が返らない場合も安全側で保留する。
+
 ## 経路
 
 ```text

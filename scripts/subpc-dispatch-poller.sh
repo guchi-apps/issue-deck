@@ -257,6 +257,10 @@ MANUAL_STEP_RUNNER="$SCRIPT_DIR/run-manual-step.sh"
 # worktreeを作らず、対象リポジトリの`origin/develop`のスナップショットを読んで指摘を投稿する。
 PLAN_REVIEW_LAUNCHER="$SCRIPT_DIR/start-plan-review.sh"
 CODE_REVIEW_LAUNCHER="$SCRIPT_DIR/start-code-review.sh"
+# develop向けPRのCodexレビューは、GitHub Actionsが残す要求コメントを巡回して拾う。
+# APIキーではなくサブPCで`codex login`済みのChatGPTサブスクリプションを使うため、Actionsから
+# 直接起動せずこのランチャーへ渡す（#3917）。
+CODEX_PR_REVIEW_LAUNCHER="$SCRIPT_DIR/start-codex-pr-review.sh"
 # 確認環境（#2444）。**セッションを立てないジョブ**（`SELF_UPDATE`・`MANUAL_STEP`と同じ枠外）で、
 # developの最新をそのまま開ける開発サーバーを1本だけ起こす。
 PREVIEW_LAUNCHER="$SCRIPT_DIR/start-preview-dev.sh"
@@ -1455,6 +1459,24 @@ sweep_pull_request_conflicts() {
     jq -r '.dispatched[] | "コンフリクト解消を起動しました: \(.repositoryFullName)#\(.pullRequestNumber)（Issue #\(.issueNumber)）"' 2>/dev/null ||
     true
   return 0
+}
+
+# --- Codexによるdevelop向けPRレビュー ------------------------------------------------
+#
+# GitHub ActionsはPRコメントへ要求印を投稿して結果を待つだけにし、実際のCodex CLIは
+# サブPCのログイン済みセッションで動かす。これによりAPIキー課金を避け、ChatGPTの
+# サブスクリプション枠を使う。各リポジトリの走査・重複排除・対象SHAの固定はランチャー側に置く。
+sweep_codex_pull_request_reviews() {
+  [[ -f "$CODEX_PR_REVIEW_LAUNCHER" ]] || return 0
+  local full_name owner repo
+  while IFS= read -r full_name; do
+    [[ -n "$full_name" && "$full_name" == */* ]] || continue
+    owner="${full_name%%/*}"
+    repo="${full_name#*/}"
+    # GitHub APIの応答待ちでpoller本体のジョブ取得を止めない。ランチャー内のflockが同一repoの
+    # 重複走査を防ぐため、次の巡回が来ても同じレビューを二重に起動しない。
+    setsid bash "$CODEX_PR_REVIEW_LAUNCHER" --sweep "$owner" "$repo" &
+  done < <(local_repo_list_runnable)
 }
 
 # --- iOS配布失敗の巡回検知 ---------------------------------------------------------
@@ -3858,6 +3880,7 @@ run_once() {
     # 呼ばない**（スレッドのアーカイブとデーモンの起動という副作用があるため）
     tidy_codex_remote_control
     sweep_pull_request_conflicts
+    sweep_codex_pull_request_reviews
     # iOS配布失敗の巡回検知（#3745）。**dry-runでは呼ばない**（Issueの起票という外向きの副作用があるため）。
     sweep_ios_distribution_failures
     # デプロイ起動漏れの巡回検知と起動し直し（#2703）。**dry-runでは呼ばない**

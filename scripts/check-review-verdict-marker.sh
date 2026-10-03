@@ -16,6 +16,8 @@ cd "$(dirname "$0")/.."
 
 PROMPT=".github/prompts/review-develop.md"
 WORKFLOW=".github/workflows/reusable-claude-review-develop.yml"
+CODEX_PROMPT="scripts/prompts/codex-pr-review-agent.md"
+CODEX_RUNNER="scripts/start-codex-pr-review.sh"
 
 # プロンプト側はhead SHAを埋め込む前（envsubstの前）なので `sha=${HEAD_SHA}`、
 # ワークフロー側は展開後の値を組み立てるので `sha=${HEAD_SHA}`（bashの変数）になる。
@@ -28,6 +30,26 @@ fail=0
 for file in "$PROMPT" "$WORKFLOW"; do
   [ -f "$file" ] || { echo "エラー: $file が見つかりません" >&2; exit 1; }
 done
+
+# CodexのレビューはサブPC上のChatGPTサブスクリプションで実行する。GitHub Actionsが残す
+# 要求印と、Codexの出力を検証して投稿する側の判定印がずれると、待機がタイムアウトして
+# 自動マージが常に止まるか、別SHAの結果を誤って読む。3ファイルで固定する。
+CODEX_REQUEST='issue-deck-codex-review-request sha='
+CODEX_VERDICT='issue-deck-codex-review-verdict:'
+for file in "$WORKFLOW" "$CODEX_RUNNER"; do
+  if ! grep -qF "$CODEX_REQUEST" "$file"; then
+    echo "エラー: $file にCodexレビュー要求の印がありません。" >&2
+    fail=1
+  fi
+  if ! grep -qF "$CODEX_VERDICT" "$file"; then
+    echo "エラー: $file にCodexレビュー判定の印がありません。" >&2
+    fail=1
+  fi
+done
+if ! grep -qF '<!-- issue-deck-codex-review-verdict:<判定> sha={{HEAD_SHA}} -->' "$CODEX_PROMPT"; then
+  echo "エラー: $CODEX_PROMPT にCodexレビュー判定の指示がありません。" >&2
+  fail=1
+fi
 
 if ! grep -qF "$PROMPT_MARKER" "$PROMPT"; then
   echo "エラー: $PROMPT に判定マーカーの指示が見つかりません。" >&2
@@ -110,9 +132,9 @@ done
 COMMENT_PARSER="src/lib/github/pull-request-review-comment.ts"
 [ -f "$COMMENT_PARSER" ] || { echo "エラー: $COMMENT_PARSER が見つかりません" >&2; exit 1; }
 
-if ! grep -qF "issue-deck-review-verdict:(lgtm|needs-check|changes-requested)" "$COMMENT_PARSER"; then
+if ! grep -qF "issue-deck-(?:codex-)?review-verdict:(lgtm|needs-check|changes-requested)" "$COMMENT_PARSER"; then
   echo "エラー: $COMMENT_PARSER に総評の判定マーカーの読み取りが見つかりません。" >&2
-  echo "  期待する文字列: issue-deck-review-verdict:(lgtm|needs-check|changes-requested)" >&2
+  echo "  期待する文字列: issue-deck-(?:codex-)?review-verdict:(lgtm|needs-check|changes-requested)" >&2
   fail=1
 fi
 

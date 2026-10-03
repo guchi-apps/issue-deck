@@ -179,6 +179,7 @@ function host(overrides: Record<string, unknown> = {}) {
     bootedAt: null,
     previewRepositories: null,
     preview: null,
+    planReviewSessions: null,
     maxConcurrency: null,
     ...overrides,
   };
@@ -1927,6 +1928,44 @@ describe("listDispatchState のIssueタイトル解決", () => {
     expect(state.sessions[0].issueTitle).toBe("実行キューの状態を可視化する");
     // ジョブの行と同じく`String(githubIssueId)`（#1671）
     expect(state.sessions[0].issueId).toBe("3021519");
+  });
+
+  it("保存済みの計画レビューを復元し、タイトルとidを載せる", async () => {
+    dispatchHostFindMany.mockResolvedValue([
+      host({
+        planReviewSessions: JSON.stringify([
+          { repositoryFullName: REPOSITORY, issueNumber: 1519 },
+        ]),
+      }),
+    ]);
+    repositoryFindMany.mockResolvedValue([{ id: "repo-1", fullName: REPOSITORY }]);
+    issueFindMany.mockResolvedValue([
+      {
+        githubIssueId: BigInt(3021519),
+        number: 1519,
+        title: "実行キューの状態を可視化する",
+        repositoryId: "repo-1",
+      },
+    ]);
+
+    const state = await listDispatchState(NOW);
+
+    expect(state.hosts[0].planReviewSessions).toEqual([
+      {
+        repositoryFullName: REPOSITORY,
+        issueNumber: 1519,
+        issueTitle: "実行キューの状態を可視化する",
+        issueId: "3021519",
+      },
+    ]);
+  });
+
+  it("壊れた保存済みの計画レビューは空配列として扱う", async () => {
+    dispatchHostFindMany.mockResolvedValue([host({ planReviewSessions: "{壊れたJSON" })]);
+
+    const state = await listDispatchState(NOW);
+
+    expect(state.hosts[0].planReviewSessions).toEqual([]);
   });
 
   // 同期前のIssue・GitHub Appを外したリポジトリでは普通に起きる。ここで落とすとキュー全体が消える
