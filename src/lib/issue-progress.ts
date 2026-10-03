@@ -237,24 +237,17 @@ export function hasActiveProgress(issue: ProgressSource): boolean {
   return getProgressStatusDef(resolveProgressStatus(issue)).active;
 }
 
-/** 一覧の進捗バーのマス（#2867・#2927）。`status`はそのマスが属する段 */
-export type ProgressSegmentKey =
-  | "planning"
-  | "exploring"
-  | "editing"
-  | "verifying"
-  | "pr-checks"
-  | "pr-merge"
-  | "develop";
+/** 一覧の進捗バーの3フェーズ（#3941）。`status`はフェーズの開始段 */
+export type ProgressSegmentKey = "planning" | "implementation" | "merge";
 
 export type ProgressSegmentDef = {
   key: ProgressSegmentKey;
   /** 属する段（`ADVANCED_PROGRESS_STATUSES`のキー） */
   status: ProgressStatusKey;
-  /** ツールチップ・テスト用の短い名前 */
+  /** ツールチップ・テスト用のフェーズ名 */
   label: string;
   /**
-   * バーのマス幅の重み。#2927で実測ベースの重み付けをやめ、7マス均等にした。
+   * バーのフェーズ幅の重み。3フェーズは均等にする。
    * **合計が100である必要はない**——ツールチップの「目安 xx%」は
    * `resolveProgressSegments`が済んだマスの重み合計を全マスの重み合計で正規化して
    * 出すため（#2867時点はこの重みがそのまま%だったので合計100が前提だった）。
@@ -263,13 +256,10 @@ export type ProgressSegmentDef = {
 };
 
 /**
- * Issue一覧の進捗バーの7マス（#2867・#2927）。**developへのマージが完了する
- * （Status: Develop）までを1本のバーとして等間隔に描き、develop到達＝常に満タンにする。**
- *
- * 6段（`ADVANCED_PROGRESS_STATUSES`）のうち実装の中を調査／実装／検証・仕上げ、
- * developへマージの中をCI・レビュー／マージ待ちに分けているのは#2867のまま
- * （長く待つ計画・実装のあいだに動くのが1〜2マスに偏るのを避けるため）。属する段は
- * `status`で持ち、`WorkflowStatusSteps`（Issue詳細の6段）との対応はそこから引く。
+ * Issue一覧の進捗バーの3フェーズ（#3941）。**計画・実装・マージを等間隔に描き、
+ * developへのマージが完了する（Status: Develop）までを1本のバーとして表す。**
+ * マージは`Develop PR`から`Develop`までを含み、フェーズ内のCI・レビュー・マージ待ちは
+ * バー左側の詳細な状態文言で示す。Issue詳細の6段ステップは変更しない。
  *
  * **release・done（本番マージ）はこの配列に含めない**（#2927）。実測（16分〜4.6時間の
  * develop反映済＝人がリリースを押すまでの待ち、3〜17分の本番へマージ）を重みに混ぜると、
@@ -279,10 +269,6 @@ export type ProgressSegmentDef = {
  */
 export const PROGRESS_SEGMENTS: readonly ProgressSegmentDef[] = [
   { key: "planning", status: "planning", label: "計画", weight: 1 },
-  { key: "exploring", status: "implementation", label: "調査", weight: 1 },
-  { key: "editing", status: "implementation", label: "実装", weight: 1 },
-  { key: "verifying", status: "implementation", label: "検証・仕上げ", weight: 1 },
-  { key: "pr-checks", status: "develop-pr", label: "CI・レビュー", weight: 1 },
-  { key: "pr-merge", status: "develop-pr", label: "マージ待ち", weight: 1 },
-  { key: "develop", status: "develop", label: "develop反映済", weight: 1 },
+  { key: "implementation", status: "implementation", label: "実装", weight: 1 },
+  { key: "merge", status: "develop-pr", label: "マージ", weight: 1 },
 ];

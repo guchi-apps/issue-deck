@@ -600,6 +600,27 @@ describe("計画の承認への入口（#2061）", () => {
   });
 });
 
+describe("計画レビュー中の詳細状態（#3941）", () => {
+  it("一覧で解決した計画レビュー状態をPlanning行の進捗文言へ渡す", () => {
+    renderList({
+      issues: [makeIssue({ number: 1, projectStatus: "Planning" })],
+      dispatch: makeDispatch([], [], [
+        {
+          kind: "PLAN_REVIEW",
+          repositoryFullName: "guchi-apps/issue-deck",
+          issueNumber: 1,
+          status: "RUNNING",
+          createdAt: "2026-08-22T10:00:00.000Z",
+          finishedAt: null,
+        },
+      ]),
+    });
+
+    expect(rowOf(1).textContent).toContain("計画レビュー中");
+    expect(rowOf(1).textContent).toContain("計画レビュー作成中");
+  });
+});
+
 // #3083: 自動マージされなかった行に「Remote」しか出ず、なぜ確認が要るのかが読めなかった
 describe("PRのマージへの入口（#3083）", () => {
   const mergeLabels = [{ name: "00.check-user" }, { name: "01.check-merge" }] as IssueLabel[];

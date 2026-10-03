@@ -111,9 +111,8 @@ export type ProgressSegmentsResult = {
 };
 
 /**
- * 段の中の位置。段に複数のマスがある場合に、どのマスが「いま」かを決める（#2867）。
- * `implementation`は調査／実装／検証・仕上げ、`develop-pr`はCI・レビュー／マージ待ち。
- * 他の段は1マスなので位置を持たない。
+ * #3941以前の7分割バーで使っていたフェーズ内位置。呼び出し側との互換性のため残すが、
+ * 一覧の3フェーズバーの現在地には使わない。詳細はバー左側の状態文言で表示する。
  */
 export type ProgressSegmentPositions = {
   implementation?: "exploring" | "editing" | "verifying";
@@ -125,12 +124,10 @@ const DEVELOP_STATUS_INDEX = getProgressStatusIndex("develop");
 const RELEASE_STATUS_INDEX = getProgressStatusIndex("release");
 
 /**
- * 進捗Statusと段の中の位置から、7マスそれぞれの状態と目安%、本番マージの2点トラッカーの
- * 状態を出す（#2867・#2927）。
+ * 進捗Statusから、3フェーズそれぞれの状態と目安%、本番マージの2点トラッカーの状態を出す。
  *
  * - いまの段より前のマスは`done`、後のマスは`pending`
- * - いまの段に複数のマスがあれば、位置より前のマスが`done`・位置のマスが`current`。
- *   位置が渡されなければ最初のマスが`current`
+ * - 進行中のフェーズは`current`、それより前は`done`、後は`pending`
  * - **developへのマージが完了した（`develop`到達）以降は主バーを常に満タン（`ratio`=100）
  *   にする。** developより先（release・done）は主バーの対象外で、2点トラッカー
  *   （`productionTracker`）が別デザインとして担う
@@ -138,12 +135,12 @@ const RELEASE_STATUS_INDEX = getProgressStatusIndex("release");
  */
 export function resolveProgressSegments(
   issue: ProgressSource,
-  positions: ProgressSegmentPositions = {},
+  _positions: ProgressSegmentPositions = {},
 ): ProgressSegmentsResult | null {
   const status = resolveProgressStatus(issue);
   if (getWorkflowStepIndex(issue) === null) return null;
   const statusIndex = getProgressStatusIndex(status);
-  const currentKey = currentSegmentKey(status, positions);
+  const currentKey = currentSegmentKey(status);
   const reachedDevelop = statusIndex >= DEVELOP_STATUS_INDEX;
 
   const totalWeight = PROGRESS_SEGMENTS.reduce((sum, segment) => sum + segment.weight, 0);
@@ -179,12 +176,8 @@ export function resolveProgressSegments(
 }
 
 /** いまの段のうち`current`にするマス。段に1マスしか無ければそれ */
-function currentSegmentKey(
-  status: ProgressStatusKey,
-  positions: ProgressSegmentPositions,
-): ProgressSegmentKey | null {
-  if (status === "implementation") return positions.implementation ?? "exploring";
-  if (status === "develop-pr") return positions.developPr === "merge" ? "pr-merge" : "pr-checks";
+function currentSegmentKey(status: ProgressStatusKey): ProgressSegmentKey | null {
+  if (status === "develop") return null;
   return PROGRESS_SEGMENTS.find((segment) => segment.status === status)?.key ?? null;
 }
 

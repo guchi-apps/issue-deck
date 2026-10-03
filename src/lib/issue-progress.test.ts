@@ -166,35 +166,21 @@ describe("isReleasePendingIssue", () => {
   });
 });
 
-describe("PROGRESS_SEGMENTS（#2867・#2927）", () => {
-  it("重みは全マス均等（#2927。developまでを等間隔にする）", () => {
+describe("PROGRESS_SEGMENTS（#3941）", () => {
+  it("計画・実装・マージの3フェーズを等しい重みで持つ", () => {
     const weights = PROGRESS_SEGMENTS.map((segment) => segment.weight);
+    expect(PROGRESS_SEGMENTS.map((segment) => segment.key)).toEqual([
+      "planning",
+      "implementation",
+      "merge",
+    ]);
     expect(weights.every((weight) => weight === weights[0])).toBe(true);
     expect(PROGRESS_SEGMENTS.every((segment) => segment.weight > 0)).toBe(true);
   });
 
-  it("developまでを遷移順にたどり、release・doneは含まない（#2927）", () => {
-    const statuses = PROGRESS_SEGMENTS.map((segment) => segment.status);
-    const indexes = statuses.map((status) => getProgressStatusIndex(status));
-    expect([...indexes]).toEqual([...indexes].sort((a, b) => a - b));
-    expect(new Set(statuses)).toEqual(
-      new Set(
-        ADVANCED_PROGRESS_STATUSES.map((status) => status.key).filter(
-          (key) => key !== "release" && key !== "done",
-        ),
-      ),
-    );
-  });
-
-  it("実装は3マス、developへマージは2マスに分かれている", () => {
-    expect(PROGRESS_SEGMENTS.filter((s) => s.status === "implementation").map((s) => s.key)).toEqual([
-      "exploring",
-      "editing",
-      "verifying",
-    ]);
-    expect(PROGRESS_SEGMENTS.filter((s) => s.status === "develop-pr").map((s) => s.key)).toEqual([
-      "pr-checks",
-      "pr-merge",
-    ]);
+  it("マージはDevelop PRで始まり、release・doneは本番用トラッカーへ残す", () => {
+    expect(PROGRESS_SEGMENTS.at(-1)?.status).toBe("develop-pr");
+    expect(PROGRESS_SEGMENTS.map((segment) => segment.status)).not.toContain("release");
+    expect(PROGRESS_SEGMENTS.map((segment) => segment.status)).not.toContain("done");
   });
 });
