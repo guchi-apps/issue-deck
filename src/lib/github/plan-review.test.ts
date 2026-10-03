@@ -7,6 +7,7 @@ import {
   findPendingPlanReviewComment,
   isPlanReviewPending,
   hasBlockingFindings,
+  isNoteOnlyApprove,
   parsePlanReview,
   readPlanReviewKind,
   resolvePendingPlanReview,
@@ -257,6 +258,16 @@ describe("区分・種別・省略の記録（#3765）", () => {
     const legacy = parsePlanReview("**1. 見出し**\n- **指摘**: 問題");
     expect(legacy.findings[0].severity).toBeNull();
     expect(hasBlockingFindings(legacy)).toBe(true);
+  });
+
+  it("補足だけで推奨が承認のときだけ、承認へ進ませる（#3850）", () => {
+    const rec = "\n\n推奨: このまま承認してよい";
+    expect(isNoteOnlyApprove(parsePlanReview(finding("実装時対応の補足") + rec))).toBe(true);
+    expect(isNoteOnlyApprove(parsePlanReview(finding("実装時対応の補足")))).toBe(false);
+    expect(isNoteOnlyApprove(parsePlanReview(finding("計画修正が必要") + rec))).toBe(false);
+    expect(isNoteOnlyApprove(parsePlanReview("**1. 見出し**\n- **指摘**: 問題" + rec))).toBe(false);
+    expect(isNoteOnlyApprove(parsePlanReview("指摘なし。" + rec))).toBe(false);
+    expect(isNoteOnlyApprove(null)).toBe(false);
   });
 
   it("指摘なしは重大な指摘なし。分けられない自由記述は重大として扱う", () => {

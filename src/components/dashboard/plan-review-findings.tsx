@@ -15,6 +15,7 @@ import {
   SESSION_PLAN_REVISION_MAX_LENGTH,
 } from "@/lib/dispatch/session-plan-request";
 import { splitAttachments } from "@/lib/markdown-attachments";
+import { isNoteOnlyApprove } from "@/lib/github/plan-review";
 import type {
   ParsedPlanReview,
   PlanReviewDecision,
@@ -96,6 +97,8 @@ export function PlanReviewFindings({
 
   const { findings, decisions } = review;
   const hasFindings = findings.length > 0 || decisions.length > 0;
+  // 補足だけで承認が推奨のときは、反映・見送りを選ばせず読み物にする（#3850）
+  const noteOnly = isNoteOnlyApprove(review);
   const undecidedCount = decisions.filter((decision) => choices[decision.number] === undefined).length;
   const skipCount = findings.filter((finding) => skipped[finding.number]).length;
   const applyCount = findings.length - skipCount;
@@ -258,6 +261,7 @@ export function PlanReviewFindings({
               <FindingItem
                 key={finding.number}
                 finding={finding}
+                readOnly={noteOnly}
                 skipped={Boolean(skipped[finding.number])}
                 reason={reasons[finding.number] ?? ""}
                 repositoryFullName={repositoryFullName}
@@ -270,6 +274,7 @@ export function PlanReviewFindings({
               />
             ))}
           </ol>
+          {!noteOnly && (
           <div className="flex flex-col gap-1.5 border-t border-emerald-600/40 bg-emerald-500/10 px-3 py-2">
             <label className="text-xs font-semibold text-emerald-700 dark:text-emerald-400" htmlFor="plan-review-additional">
               追加で修正したいこと（任意）
@@ -290,6 +295,8 @@ export function PlanReviewFindings({
               </p>
             )}
           </div>
+          )}
+          {!noteOnly && (
           <footer className="flex flex-col gap-2 border-t bg-muted/50 px-3 py-2 sm:flex-row sm:items-center">
             <p className="min-w-0 flex-1 text-xs text-muted-foreground">
               {footerMessage}
@@ -305,6 +312,7 @@ export function PlanReviewFindings({
               {effectiveSubmitLabel}
             </Button>
           </footer>
+          )}
         </>
       ) : (
         /* 指摘なし・分けられなかったときは本文を畳んで出す。**指摘なしなら送るボタンは出さない**
@@ -470,6 +478,7 @@ function recommendationLabel(kind: PlanReviewRecommendationKind, text: string): 
 
 function FindingItem({
   finding,
+  readOnly = false,
   skipped,
   reason,
   repositoryFullName,
@@ -477,6 +486,8 @@ function FindingItem({
   onChangeReason,
 }: {
   finding: PlanReviewFinding;
+  /** 反映・見送りの切り替えを出さない（補足だけのレビュー。#3850） */
+  readOnly?: boolean;
   skipped: boolean;
   reason: string;
   repositoryFullName?: string;
@@ -507,6 +518,7 @@ function FindingItem({
             </span>
           )}
         </p>
+        {!readOnly && (
         <div
           role="group"
           aria-label={`指摘${finding.number}の扱い`}
@@ -535,6 +547,7 @@ function FindingItem({
             見送る
           </button>
         </div>
+        )}
       </div>
 
       <div className="flex flex-col gap-1 pl-5 text-xs">
