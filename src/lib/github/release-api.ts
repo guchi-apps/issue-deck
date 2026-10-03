@@ -775,17 +775,29 @@ export async function fetchPullRequestCiStates(
  * リポジトリでも、従来どおり（自動判定での起動）動き続ける必要があるため。指定した場合に
  * そうしたリポジトリを叩くとGitHubが422（`Unexpected inputs provided`）を返し、
  * 呼び出し側がそれを`bump_kind_unsupported`として画面へ伝える。
+ * `allowFailedDeploy`は失敗した本番デプロイを確認した手動起動だけに送る（#3912）。
  */
 export async function dispatchReleaseWorkflow(
   owner: string,
   repo: string,
   token: string,
   bumpKind?: BumpKind,
+  allowFailedDeploy = false,
 ): Promise<void> {
   const url = `${GITHUB_API}/repos/${owner}/${repo}/actions/workflows/${RELEASE_WORKFLOW_FILE}/dispatches`;
   const res = await githubFetch(url, token, {
     method: "POST",
-    body: { ref: "develop", ...(bumpKind ? { inputs: { bump_kind: bumpKind } } : {}) },
+    body: {
+      ref: "develop",
+      ...(bumpKind || allowFailedDeploy
+        ? {
+            inputs: {
+              ...(bumpKind ? { bump_kind: bumpKind } : {}),
+              ...(allowFailedDeploy ? { allow_failed_deploy: "true" } : {}),
+            },
+          }
+        : {}),
+    },
   });
   if (!res.ok) {
     const detail = await res.text().catch(() => "");

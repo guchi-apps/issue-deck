@@ -299,6 +299,8 @@ export async function fetchBranchHeadSha(
 export type BranchCompareResult = {
   /** headにあってbaseに無いコミット数 */
   aheadBy: number;
+  /** baseにあってheadに無いコミット数。0ならbaseの先頭をheadが取り込んでいる */
+  behindBy: number;
   /**
    * baseへ持ち込む変更のファイル数。**応答に`files`が無ければ`null`。**
    * 三点比較なので、これが0ならマージしても何も入らない（#2289）。
@@ -326,14 +328,16 @@ export async function compareBranches(
   if (!res.ok) return null;
   const body: {
     ahead_by?: unknown;
+    behind_by?: unknown;
     files?: unknown;
     commits?: { commit?: { committer?: { date?: unknown } } }[];
   } = await res.json().catch(() => ({}));
-  if (typeof body.ahead_by !== "number") return null;
+  if (typeof body.ahead_by !== "number" || typeof body.behind_by !== "number") return null;
   const lastCommit = Array.isArray(body.commits) ? body.commits[body.commits.length - 1] : undefined;
   const lastCommitAt = lastCommit?.commit?.committer?.date;
   return {
     aheadBy: body.ahead_by,
+    behindBy: body.behind_by,
     changedFiles: Array.isArray(body.files) ? body.files.length : null,
     lastCommitAt: typeof lastCommitAt === "string" ? lastCommitAt : null,
   };

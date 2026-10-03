@@ -663,6 +663,9 @@ CMD_IN_SOURCE=re.compile(r'"cmd"\s*:\s*"((?:[^"\\]|\\.)*)"')
 APPLY_PATCH=re.compile(r"tools\.apply_patch\s*\(")
 # 計画の提出（計画 → 調査の境目）。CodexはIssueDeckの受け口を叩く（#2545）。
 PLAN_SUBMIT=re.compile(r"submit-plan\.sh(?:\s|\"|$)")
+# 計画レビューの作業場はリポジトリごとに使い回すため、対象Issue番号は起動プロンプトだけにある。
+# Codexの転記では入力メッセージが`response_item`として残るので、最初に見つかった番号を使う。
+ISSUE_IN_PROMPT=re.compile(r"Issue #([1-9][0-9]*)")
 # 以下3つはClaude側（`session_usage_aggregate`）と同じ正規表現。**片方だけ直さない。**
 BASH_WRITE=re.compile(
     r"(?:^|[\s;&|(])(?:sed\s+-i|tee\s|patch\s|git\s+apply|dd\s+if=)"
@@ -757,10 +760,12 @@ for raw_path in sys.stdin:
     plan_submit_ts = None
     first_write_ts = None
     first_commit_ts = None
+    prompt_issue = None
     with handle:
         for line in handle:
             if ('"token_count"' not in line and '"session_meta"' not in line
-                    and '"turn_context"' not in line and '"custom_tool_call"' not in line):
+                    and '"turn_context"' not in line and '"custom_tool_call"' not in line
+                    and '"role":"user"' not in line):
                 continue
             try:
                 record = json.loads(line)
@@ -775,6 +780,15 @@ for raw_path in sys.stdin:
             if record.get("type") == "turn_context":
                 model = payload.get("model") or model
                 cwd = payload.get("cwd") or cwd
+            if record.get("type") == "response_item" and payload.get("type") == "message" and payload.get("role") == "user" and prompt_issue is None:
+                content = payload.get("content")
+                if isinstance(content, list):
+                    for block in content:
+                        text = block.get("text") if isinstance(block, dict) else None
+                        matched = ISSUE_IN_PROMPT.search(text) if isinstance(text, str) else None
+                        if matched:
+                            prompt_issue = int(matched.group(1))
+                            break
 
             # フェーズの境界（#3169）。**印を次の応答へ持ち越す。**
             #
@@ -896,6 +910,10 @@ for raw_path in sys.stdin:
         wrapup_cost_usd = round(phases["wrapup"], 4)
 
     kind, repo, issue = classify(cwd)
+    # 実装worktreeの番号を優先する。計画レビューなど、作業場に番号を持たない種別だけへ
+    # 起動プロンプトから復元した対象Issue番号を入れる。
+    if issue is None:
+        issue = prompt_issue
     row = {"responses": responses, "input": uncached, "cacheCreate5m": created, "cacheCreate1h": 0,
            "cacheRead": cached, "output": output, "costUsd": round(cost, 4),
            "inputCostUsd": round(in_cost, 4), "outputCostUsd": round(out_cost, 4),

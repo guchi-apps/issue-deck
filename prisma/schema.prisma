@@ -1261,6 +1261,9 @@ model DispatchHost {
   previewSubject             String?  @db.Text
   previewStartedAt           DateTime?
   previewIdleMinutes         Int?
+  // 稼働中の計画レビュー（G1）の対象一覧。実装セッションとは別名・別の上限で管理するため、
+  // `DispatchSession`には混ぜず、pollerが毎巡送る画面表示用の写しとしてJSONで持つ。
+  planReviewSessions         String?  @db.Text
   // 最後に申告が届いた時刻。一定時間途絶えたホストはoffline扱いでenqueueを拒否する
   lastSeenAt                 DateTime
 

@@ -146,6 +146,14 @@ function codexTokens(
   };
 }
 
+function codexUserMessage(timestamp: string, text: string) {
+  return {
+    type: "response_item",
+    timestamp,
+    payload: { type: "message", role: "user", content: [{ type: "input_text", text }] },
+  };
+}
+
 describe("session_usage_aggregate", () => {
   it("同じmessage.idの行を1応答として数える（usageは全content行に重複して書かれる）", () => {
     // 同じ応答が3行に分かれて書かれている転記。除去しないと3応答・3倍のトークンになる。
@@ -551,6 +559,19 @@ describe("session_usage_live_transcripts", () => {
 });
 
 describe("codex_session_usage_aggregate", () => {
+  it("計画レビューは起動プロンプトのIssue番号へ使用量を紐付ける", () => {
+    const cwd = "/home/u/apps/issue-deck-worktrees/.plan-reviews/_refs/guchi-apps-issue-deck";
+    const file = writeTranscript("codex-plan-review.jsonl", [
+      codexMeta("2026-10-03T01:00:00.000Z", cwd),
+      codexUserMessage("2026-10-03T01:00:01.000Z", "あなたは計画レビュー担当です。Issue #3919 の計画を確認してください。"),
+      codexTurn("2026-10-03T01:00:02.000Z"),
+      codexTokens("2026-10-03T01:01:00.000Z", { input: 1_000, cached: 800, output: 100 }),
+    ]);
+
+    const [session] = aggregateCodex([file]).sessions;
+    expect(session).toMatchObject({ kind: "plan-review", repository: "issue-deck", issue: 3919 });
+  });
+
   it("最後の累積値を使い、キャッシュ入力と通常入力を分ける", () => {
     const file = writeTranscript("codex.jsonl", [
       { type: "session_meta", timestamp: "2026-08-30T01:00:00.000Z", payload: { cwd: "/home/u/apps/issue-deck-worktrees/issue-2544" } },

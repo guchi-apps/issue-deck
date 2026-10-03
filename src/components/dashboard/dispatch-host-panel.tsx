@@ -10,6 +10,7 @@ import { DispatchIssueTitle } from "@/components/dashboard/dispatch-issue-title"
 import { ModelDot } from "@/components/dashboard/model-dot";
 import { pickPrimaryModel } from "@/lib/agent-model-color";
 import type { DispatchHostView, DispatchJobView } from "@/lib/dispatch/dispatch-job";
+import type { DispatchPlanReviewSession } from "@/lib/dispatch/plan-review-session";
 import { isDispatchHostAtSessionCapacity } from "@/lib/dispatch/dispatch-job";
 import {
   describeDispatchHostCheckout,
@@ -314,6 +315,17 @@ function HostCard({
           {sessions.map((session) => (
             <SessionRow
               key={session.tmuxSessionName}
+              session={session}
+              onOpenIssue={onOpenIssue}
+            />
+          ))}
+        </ul>
+      )}
+      {(host.planReviewSessions?.length ?? 0) > 0 && (
+        <ul className="mt-2 flex flex-col gap-1 border-t pt-2">
+          {(host.planReviewSessions ?? []).map((session) => (
+            <PlanReviewSessionRow
+              key={`${session.repositoryFullName}#${session.issueNumber}`}
               session={session}
               onOpenIssue={onOpenIssue}
             />
@@ -879,6 +891,31 @@ function SessionRow({
           <Monitor className="size-3.5" />
         </a>
       )}
+    </li>
+  );
+}
+
+/** 実装セッションと別枠で動く計画レビュー（G1）の、実行状況用の1行。 */
+function PlanReviewSessionRow({
+  session,
+  onOpenIssue,
+}: {
+  session: DispatchPlanReviewSession;
+  onOpenIssue?: (issueId: string) => void;
+}) {
+  const repoName = session.repositoryFullName.split("/")[1] ?? session.repositoryFullName;
+  return (
+    <li className="flex items-start gap-1.5 text-xs">
+      <span aria-hidden className="mt-1 size-1.5 shrink-0 rounded-full bg-violet-500" />
+      <span className="min-w-0 flex-1">
+        <DispatchIssueTitle
+          issueNumber={session.issueNumber}
+          issueTitle={session.issueTitle}
+          issueId={session.issueId}
+          onOpenIssue={onOpenIssue}
+        />
+        <span className="block truncate text-muted-foreground">{repoName}・計画レビュー中</span>
+      </span>
     </li>
   );
 }
