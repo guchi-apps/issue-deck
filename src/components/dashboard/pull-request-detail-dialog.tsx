@@ -2,6 +2,7 @@
 
 import { X } from "lucide-react";
 
+import type { IssueSuggestion } from "@/components/dashboard/mention-textarea";
 import { PullRequestDetail } from "@/components/dashboard/pull-request-detail";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import type { ReleaseVerificationRow } from "@/lib/github/release-verification";
@@ -29,6 +30,7 @@ type PullRequestDetailDialogProps = {
   onClose: () => void;
   /** 検証結果の「修正をIssueにする」ボタン（#2838）。`PullRequestDetail`へそのまま中継する */
   onCreateFixIssue?: (row: ReleaseVerificationRow, pullRequest: PullRequestSummary) => void;
+  issueSuggestions?: IssueSuggestion[];
 };
 
 /**
@@ -64,6 +66,7 @@ export function PullRequestDetailDialog({
   onUpdated,
   onClose,
   onCreateFixIssue,
+  issueSuggestions = [],
 }: PullRequestDetailDialogProps) {
   const open = pullRequestId !== null;
 
@@ -98,6 +101,7 @@ export function PullRequestDetailDialog({
           onClosed={onPullRequestClosed}
           onUpdated={onUpdated}
           onCreateFixIssue={onCreateFixIssue}
+          issueSuggestions={issueSuggestions}
           className="min-h-0"
           headerLeading={
             <button
