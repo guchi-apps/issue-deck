@@ -34,7 +34,7 @@ import { usePullRequestDeployStatus } from "@/hooks/use-pull-request-deploy-stat
 import type { IssueSuggestion } from "@/components/dashboard/mention-textarea";
 import { formatRelativeDate } from "@/lib/format-relative-date";
 import { selectPullRequestReviewComment } from "@/lib/github/pull-request-review-comment";
-import { isRepairWorkflowMissing, repairKindsFor } from "@/lib/github/pull-request-repair";
+import { repairKindsFor } from "@/lib/github/pull-request-repair";
 import { parseReleaseVerification, type ReleaseVerificationRow } from "@/lib/github/release-verification";
 import { canMergeFromDeck, requiresUserMerge } from "@/lib/pull-request-list";
 import { cn } from "@/lib/utils";
@@ -211,9 +211,6 @@ export function PullRequestDetail({
   // `mergeable`は一覧・詳細のどちらの`summary`にも入っている（#1742）ので、CI失敗と
   // コンフリクトの両方の修復ボタンを出せる（#1293）。
   const repairKinds = repairKindsFor(pullRequest, pullRequest.mergeable);
-  const nextRepairUnavailable =
-    repairKinds.length > 0 &&
-    isRepairWorkflowMissing(pullRequest.repairWorkflowAvailability, repairKinds[0]);
   // リリースPRの本文に載っている検証結果（#2448）。見出しを持たないPRではnullになる
   const verification = parseReleaseVerification(currentDetail?.body);
   // 検証結果の行の「確認済み・対応しない」の記録・取り消し（#3739）。develop向けPRへ記録を残し、
