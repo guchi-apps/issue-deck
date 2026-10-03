@@ -3,6 +3,13 @@
 import { useState } from "react";
 import { Check, Copy, Loader2, MessageSquareText, Monitor } from "lucide-react";
 
+import {
+  CLAUDE_LOCAL_MODEL_DEFAULT,
+  CLAUDE_MODEL_FIT_LABELS,
+  describeClaudeModel,
+  type ClaudeLocalModel,
+} from "@/lib/app-settings";
+import { ModelChip } from "@/components/dashboard/agent-model-chips";
 import { Button } from "@/components/ui/button";
 import { IssueSessionStatus } from "@/components/dashboard/issue-session-status";
 import { copyText } from "@/lib/copy-text";
@@ -27,6 +34,12 @@ import {
 import { splitShellCommandLines } from "@/lib/shell-command-lines";
 import type { Issue } from "@/types/issue";
 import { cn } from "@/lib/utils";
+
+const MANUAL_STEP_SESSION_MODEL_ENTRIES: readonly ClaudeLocalModel[] = [
+  "fable",
+  "opus",
+  "sonnet",
+];
 
 /**
  * 手作業Issueを、サブPCのClaude Codeセッションと対話しながら進める入口（#2771）。
@@ -78,6 +91,9 @@ export function ManualStepSessionPanel({
   className?: string;
 }) {
   const [error, setError] = useState<string | null>(null);
+  // 手作業の内容を見て人が選ぶ入口なので、「設定に従う」は置かない。どのモデルで始まるかを
+  // 起動前に明示するため、通常の実装開始と同じ3候補から既定のSonnetを選んだ状態で始める。
+  const [model, setModel] = useState<ClaudeLocalModel>(CLAUDE_LOCAL_MODEL_DEFAULT);
 
   // 起動先は**手作業セッションに対応したオンラインのホスト**。無ければ代行実行と同じ既定の
   // ホストを「理由を出す相手」として使う（申告が無い理由を、ホスト名つきで出せる）
@@ -111,6 +127,7 @@ export function ManualStepSessionPanel({
       repositoryFullName: issue.repositoryFullName,
       issueNumber: issue.number,
       hostName: host.name,
+      model,
     });
     if (!result.ok) setError(result.message);
   }
@@ -165,6 +182,21 @@ export function ManualStepSessionPanel({
             に手を止めて聞きます。答える先はこの画面の質問パネルかClaude Codeアプリです。
             出力はセッションの中だけに留め、Issueには書きません。
           </p>
+
+          <div className="flex flex-col gap-2">
+            <p className="text-xs font-semibold">モデル</p>
+            <div role="radiogroup" aria-label="モデル" className="grid grid-cols-3 gap-2">
+              {MANUAL_STEP_SESSION_MODEL_ENTRIES.map((entry) => (
+                <ModelChip
+                  key={entry}
+                  label={describeClaudeModel(entry)}
+                  fit={CLAUDE_MODEL_FIT_LABELS[entry]}
+                  selected={model === entry}
+                  onSelect={() => setModel(entry)}
+                />
+              ))}
+            </div>
+          </div>
 
           {/* 手作業Issueでなければ並べない。**同じ理由が手順の数だけ並ぶ**だけで、
               押せない理由は下に1回出ている */}

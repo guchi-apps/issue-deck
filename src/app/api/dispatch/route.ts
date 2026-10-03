@@ -220,10 +220,18 @@ export async function POST(request: NextRequest) {
   // 手作業セッション（#2771）。横断質問と同じく`enqueueDispatchJob`とは別の判定（対象が手作業Issueで
   // あること・pollerの対応・同じIssueのセッションが動いていないこと）を通す
   if (kind === "MANUAL_STEP_SESSION") {
+    // 手作業セッションはClaude Codeで起動するため、通常の起動と同じローカル向け候補だけを受ける。
+    // 省略は既存の起動要求との互換のため設定の既定へ任せるが、画面は常に具体的な値を送る。
+    const claudeModel =
+      payload?.model === undefined ? null : parseClaudeLocalModel(payload.model);
+    if (payload?.model !== undefined && !claudeModel) {
+      return NextResponse.json({ error: "invalid_request" }, { status: 400 });
+    }
     const sessionResult = await enqueueManualStepSessionJob({
       repositoryFullName: target.repositoryFullName,
       issueNumber: target.issueNumber,
       hostName,
+      claudeModel,
       requestedByUserId: userId,
     });
     if (!sessionResult.ok) {

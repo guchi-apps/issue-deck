@@ -135,6 +135,7 @@ const {
   enqueueDispatchJob,
   enqueueManualStepAbortJob,
   enqueueManualStepJob,
+  enqueueManualStepSessionJob,
   enqueueCodeReviewJob,
   enqueueCodexPairingJob,
   enqueuePlanReviewJob,
@@ -1944,6 +1945,46 @@ describe("listDispatchState のIssueタイトル解決", () => {
     await listDispatchState(NOW);
     expect(repositoryFindMany).not.toHaveBeenCalled();
     expect(issueFindMany).not.toHaveBeenCalled();
+  });
+});
+
+describe("enqueueManualStepSessionJob", () => {
+  beforeEach(() => {
+    dispatchHostFindUnique.mockResolvedValue(host({ manualStepSessionCapable: true }));
+    repositoryFindFirst.mockResolvedValue({ id: "repo-1" });
+    issueFindFirst.mockResolvedValue({ body: "", labels: [{ name: "71.manual-step" }] });
+  });
+
+  it("選択したClaudeモデルを手作業セッションのジョブに保存する", async () => {
+    const result = await enqueueManualStepSessionJob({
+      repositoryFullName: REPOSITORY,
+      issueNumber: 2771,
+      hostName: "subpc",
+      claudeModel: "opus",
+      requestedByUserId: "user-1",
+      now: NOW,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(dispatchJobCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ kind: "MANUAL_STEP_SESSION", claudeModel: "opus" }),
+      }),
+    );
+  });
+
+  it("モデルが省略された既存の要求では設定の既定に委ねる", async () => {
+    await enqueueManualStepSessionJob({
+      repositoryFullName: REPOSITORY,
+      issueNumber: 2771,
+      hostName: "subpc",
+      requestedByUserId: "user-1",
+      now: NOW,
+    });
+
+    expect(dispatchJobCreate).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ claudeModel: null }) }),
+    );
   });
 });
 
