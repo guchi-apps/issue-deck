@@ -138,8 +138,9 @@ describe("PATCH /api/nightly-run/settings", () => {
     }
   });
 
-  it("下限は決まった選択肢（0・10〜50%）だけ受け付ける", async () => {
-    expect((await PATCH(request({ nextWindow: { weeklyFloorPercent: 15 } }))).status).toBe(400);
+  it("下限は決まった選択肢（0・5〜50%の5刻み）だけ受け付ける", async () => {
+    expect((await PATCH(request({ nextWindow: { weeklyFloorPercent: 7 } }))).status).toBe(400);
+    expect((await PATCH(request({ nextWindow: { weeklyFloorPercent: 55 } }))).status).toBe(400);
     expect((await PATCH(request({ nextWindow: { weeklyFloorPercent: 100 } }))).status).toBe(400);
     expect((await PATCH(request({ nextWindow: { fiveHourFloorPercent: -10 } }))).status).toBe(400);
     expect(upsert).not.toHaveBeenCalled();
