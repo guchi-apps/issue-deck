@@ -140,7 +140,7 @@ function run({
 
 describe("レビュー指摘の自動修正への渡し（#3363）", () => {
   it("手動修正はClaude・Codex双方の最新要修正コメントを同じPRから読む", () => {
-    expect(reviewFixWorkflowYaml).toContain("issue-deck(-codex)?-review-verdict:changes-requested");
+    expect(reviewFixWorkflowYaml).toContain("issue-deck(-codex)?-review-verdict:(lgtm|needs-check|changes-requested) sha=");
     expect(reviewFixWorkflowYaml).toContain('join("\\n\\n---\\n\\n")');
   });
 
