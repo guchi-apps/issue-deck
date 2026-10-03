@@ -178,7 +178,7 @@ describe("PullRequestList", () => {
     expect(screen.getByRole("button", { name: "PRを自動修正" }).hasAttribute("disabled")).toBe(true);
     expect(
       screen.getByText(
-        "コンフリクト解消のワークフローが未配布です。設定 › フリート運用 から、このリポジトリへ配布できます。",
+        "自動修復ワークフローが未配布です。設定 › フリート運用 から、このリポジトリへ配布できます。",
       ),
     ).toBeTruthy();
   });
