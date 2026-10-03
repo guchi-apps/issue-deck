@@ -39,6 +39,14 @@ curl -fsS "$ISSUE_DECK_URL/api/shared-tokens?name=EXAMPLE_TOKEN" \
 }
 ```
 
+## 上書き（#3786）
+
+`PUT /api/shared-tokens`は`POST`と同じ本文で、**名前が既にあれば値を置き換え**（`200`）、無ければ作成します（`201`）。
+アクセストークンを再発行すると旧値が即座に失効するアプリ（StatusHubの`<アプリID大文字>_ACCESS_APP_TOKEN`など）が、
+再発行の直後に新しい値へ差し替えるための経路です。`description`・`sourceReference`は指定したときだけ更新し、
+省略すると既存の値を保ちます。利用記録には操作`update`（新規作成時は`create`）と利用元を残し、応答にもログにも値は出しません。
+`GET`は60秒キャッシュを持たないので、上書き直後の読み取りから新しい値が返ります。
+
 各アプリを切り替えたら、issue-deckの設定画面で利用日時と利用元を確認してから、1Password側の旧値を削除します。
 
 ## issue-deck自身が使う値は自DBから読む（#3561）

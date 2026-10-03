@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildIosDistributionFailureIssueBody,
+  buildIosDistributionFixIssueDraft,
   buildIosDistributionFailureIssueTitle,
   decideIosDistributionFailure,
   parseIosDistributionFailureMeta,
@@ -70,5 +71,37 @@ describe("iOS配布失敗Issueの本文", () => {
   it("タイトルに段階が入り、不明なら省く", () => {
     expect(buildIosDistributionFailureIssueTitle(meta)).toContain("（署名）");
     expect(buildIosDistributionFailureIssueTitle({ ...meta, failedStage: null })).not.toContain("（");
+  });
+});
+
+describe("buildIosDistributionFixIssueDraft", () => {
+  const base = {
+    repositoryFullName: "o/r",
+    version: "1.8.0",
+    sha: "abcdef1234567",
+    runUrl: "https://github.com/o/r/actions/runs/10",
+    failedStage: "署名",
+    notes: ["更新が必要と判定"],
+  };
+
+  it("版・コミット・実行URL・段階・注記を入れる", () => {
+    const draft = buildIosDistributionFixIssueDraft(base);
+    expect(draft.repositoryFullName).toBe("o/r");
+    expect(draft.title).toBe("[iOS配布失敗] o/r: v1.8.0のTestFlight配布の失敗を修正する（署名）");
+    expect(draft.body).toContain("abcdef1");
+    expect(draft.body).toContain(base.runUrl);
+    expect(draft.body).toContain("失敗した段階: 署名");
+    expect(draft.body).toContain("実行の注記: 更新が必要と判定");
+  });
+
+  it("自動起票のマーカーを入れない（取り違え防止）", () => {
+    const draft = buildIosDistributionFixIssueDraft(base);
+    expect(parseIosDistributionFailureMeta(draft.body)).toBeNull();
+  });
+
+  it("版・段階・注記が無くても組み立てられる", () => {
+    const draft = buildIosDistributionFixIssueDraft({ ...base, version: null, failedStage: null, notes: [] });
+    expect(draft.title).toBe("[iOS配布失敗] o/r: TestFlight配布の失敗を修正する");
+    expect(draft.body).not.toContain("失敗した段階");
   });
 });

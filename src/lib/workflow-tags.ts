@@ -281,6 +281,18 @@ export type SourceAhead = {
    * `hasContentDiff`が`true`のときだけ意味を持つ（`false`・`null`のときは空配列）。
    */
   changedFiles: string[];
+  /**
+   * `changedFiles`の各ファイルが「なぜ変わったか」（#3783）。`main`に入っていて最新タグには
+   * 入っていないコミットの題名と、題名末尾の`#番号`。**ファイル名だけでは、その変更が何なのか
+   * 読めなかった。** 取得できなかったファイルは含めない（画面は従来どおりファイル名だけ出す）。
+   */
+  changeReasons: ChangeReason[];
+};
+
+/** 1ファイルに入った変更の理由（コミットの題名と、あれば題名末尾の`#番号`） */
+export type ChangeReason = {
+  file: string;
+  commits: { title: string; number: number | null }[];
 };
 
 /** 配布ワークフローの実行（run）のうち画面に出すぶん */

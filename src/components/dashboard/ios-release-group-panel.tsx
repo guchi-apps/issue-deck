@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { ChevronDown, ChevronRight, Loader2, RefreshCw, Smartphone } from "lucide-react";
+import { createContext, useContext, useEffect, useState } from "react";
+import { ChevronDown, ChevronRight, ExternalLink, Loader2, Plus, RefreshCw, Smartphone } from "lucide-react";
 
 import { GithubReferenceLink } from "@/components/dashboard/github-reference-link";
 import { IosRunProgressPanel } from "@/components/dashboard/ios-run-progress-panel";
@@ -17,6 +17,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { useIosTestflight } from "@/hooks/use-ios-testflight";
+import { buildIosDistributionFixIssueDraft, type IosDistributionFixIssueDraft } from "@/lib/ios-distribution-failure";
 import { judgeIosReleasePanel, type IosDispatchBlock } from "@/lib/ios-testflight-status";
 
 const DISPATCH_ERROR: Record<IosDispatchBlock | string, string> = {
@@ -35,6 +36,26 @@ const AUTO_REFRESH_MS = 10_000;
 const LAUNCH_WAIT_MS = 60_000;
 
 /**
+ * 「修正Issueを起案」で下書きを開くときに渡す、起案元の失敗した実行（#3784）。
+ * 起票されたIssueを追跡Issueとして登録するときに使う。
+ */
+export type IosFixIssueOrigin = {
+  repositoryFullName: string;
+  runId: number;
+  runUrl: string;
+  failedStage: string | null;
+};
+
+/**
+ * 失敗時の「修正Issueを起案」の送り先（#3784）。**ここでは起票せず**、下書き入りの新規作成ダイアログを
+ * 開くのは親（`BranchFlowView`の呼び出し元）の仕事。束の描画の途中に何段もあるため、propsの中継ではなく
+ * contextで渡す。提供されなければボタンを出さない。
+ */
+export const IosFixIssueDraftContext = createContext<
+  ((draft: IosDistributionFixIssueDraft, origin: IosFixIssueOrigin) => void) | undefined
+>(undefined);
+
+/**
  * ブランチ画面のリリース束に置くiOS配布欄（#3644）。Webの本番デプロイとは別の行にし、
  * iOSの成否をWebの成否と混ぜない。対象は`webview-ios-repos.ts`のリポジトリの、mainへマージ済みの束。
  */
@@ -49,6 +70,7 @@ export function IosReleaseGroupPanel({
   prNumber: number;
   version: string | null;
 }) {
+  const onDraftFixIssue = useContext(IosFixIssueDraftContext);
   // null=自動（実行中・失敗のときだけ開く）。人が開閉したらその値を優先する
   const [detailToggle, setDetailToggle] = useState<boolean | null>(null);
   const [tipKnown, setTipKnown] = useState<boolean | null>(null);
@@ -167,6 +189,23 @@ export function IosReleaseGroupPanel({
       : state.kind === "failed"
         ? data.runs.find((run) => run.headSha === sha)
         : undefined) ?? latestRun;
+  const trackedIssue = data.trackedIssue ?? null;
+  const failedRun = state.kind === "failed" ? data.runs.find((run) => run.headSha === sha) : undefined;
+  function draftFixIssue() {
+    if (!onDraftFixIssue || !failedRun) return;
+    const failedStage = failedRun.stages.find((stage) => stage.state === "failure")?.label ?? null;
+    onDraftFixIssue(
+      buildIosDistributionFixIssueDraft({
+        repositoryFullName: `${owner}/${repo}`,
+        version,
+        sha,
+        runUrl: failedRun.htmlUrl,
+        failedStage,
+        notes: failedRun.notes,
+      }),
+      { repositoryFullName: `${owner}/${repo}`, runId: failedRun.id, runUrl: failedRun.htmlUrl, failedStage },
+    );
+  }
   const autoOpen = state.kind === "running" || state.kind === "failed";
   const detailOpen = detailToggle ?? autoOpen;
   // 内訳を開いている、または実行中のrunがあるあいだだけ自動更新する（フック側の条件と同じ）
@@ -182,6 +221,23 @@ export function IosReleaseGroupPanel({
         {canDispatch && (
           <Button size="sm" variant="outline" className="h-6 px-2 text-xs" onClick={() => setOpen(true)}>
             {state.kind === "failed" ? "再実行" : "iOSへ配布"}
+          </Button>
+        )}
+        {state.kind === "failed" && trackedIssue && (
+          <Button asChild size="sm" variant="outline" className="h-6 px-2 text-xs">
+            <GithubReferenceLink
+              href={trackedIssue.htmlUrl}
+              reference={{ repositoryFullName: `${owner}/${repo}`, number: trackedIssue.number, kind: "issue" }}
+            >
+              <ExternalLink aria-hidden="true" />
+              起票済み（#{trackedIssue.number}）
+            </GithubReferenceLink>
+          </Button>
+        )}
+        {state.kind === "failed" && !trackedIssue && failedRun && onDraftFixIssue && (
+          <Button size="sm" variant="outline" className="h-6 px-2 text-xs" onClick={draftFixIssue}>
+            <Plus aria-hidden="true" />
+            修正Issueを起案
           </Button>
         )}
         {detailRun && (

@@ -83,6 +83,9 @@
 #   DISPATCH_MAX_SESSIONS           生かしておく実装セッションの上限（省略時は12）
 #   DISPATCH_MAX_PLAN_REVIEWS       同時に走らせる計画レビューの上限（省略時は2）
 #   DISPATCH_MAX_CODE_REVIEWS       同時に走らせるコードレビューの上限（省略時は2）
+#   DISPATCH_SESSION_MEMORY_MB      空きメモリから本数の上限を絞る1本あたりの見積りMB（省略時は0＝絞らない）
+#   DISPATCH_SESSION_MEMORY_RESERVE_MB
+#                                   上の見積りで常に残しておく余白MB（省略時は2048）
 #   DISPATCH_MEMORY_HOLD_PERCENT    起動を見送るメモリ使用率（省略時は85・0で無効）
 #   DISPATCH_SWAP_HOLD_PERCENT      起動を見送るSWAP使用率（省略時は50・0で無効）
 #   DISPATCH_POLL_INTERVAL_SECONDS  ポーリング間隔の秒数（省略時は30）
@@ -223,6 +226,10 @@ source "$SCRIPT_DIR/lib/codex-thread-archive.sh"
 # 実機を用意せずに確かめられるようにしておきたいため（scripts/launch-hold.test.mjs）。
 # shellcheck source=scripts/lib/launch-hold.sh
 source "$SCRIPT_DIR/lib/launch-hold.sh"
+# 空きメモリに応じて本数の上限を静的な上限より絞る判定（#3780）。launch-hold.shと同じ理由で
+# 判定だけを別に持つ（scripts/session-cap.test.mjs）。
+# shellcheck source=scripts/lib/session-cap.sh
+source "$SCRIPT_DIR/lib/session-cap.sh"
 # ローカルセッションのトークン使用量の集計（#2350）。issue-deckの画面へ報告するために読む
 # （#2504）。**転記を開くのはこのlibだけ**で、読むのは`message.usage`と時刻・作業ディレクトリ。
 # shellcheck source=scripts/lib/session-usage.sh
@@ -431,6 +438,12 @@ require_percent() {
 # SWAPの50%は、平常時（実装セッション6本前後）の実測が20%程度であることから取った値。
 MEMORY_HOLD_PERCENT="$(require_percent DISPATCH_MEMORY_HOLD_PERCENT "${DISPATCH_MEMORY_HOLD_PERCENT:-}" 85)"
 SWAP_HOLD_PERCENT="$(require_percent DISPATCH_SWAP_HOLD_PERCENT "${DISPATCH_SWAP_HOLD_PERCENT:-}" 50)"
+
+# 空きメモリに応じて本数の上限を絞る（#3780）。**0（既定）で無効**＝`DISPATCH_MAX_SESSIONS`のまま。
+# 実効上限は`min(DISPATCH_MAX_SESSIONS, 生きている本数 + (空き - 余白) ÷ 1本あたりの見積り)`。
+# 見るのは`announce`が集めた`metrics`で、画面の使用率と同じ値（取れなかった巡は絞らない）。
+SESSION_MEMORY_MB="$(require_non_negative_int DISPATCH_SESSION_MEMORY_MB "${DISPATCH_SESSION_MEMORY_MB:-}" 0)"
+SESSION_MEMORY_RESERVE_MB="$(require_non_negative_int DISPATCH_SESSION_MEMORY_RESERVE_MB "${DISPATCH_SESSION_MEMORY_RESERVE_MB:-}" 2048)"
 
 # チェックアウトの遅れ（#1612）を数え直す間隔（分）。**0で無効**（fetchを一切行わない）。
 #
@@ -1153,6 +1166,10 @@ announce() {
   # 場所で行う**ので、画面に出る理由と実際の動きが必ず一致する。取れなかった巡は見送らない
   resolve_launch_hold "$metrics" "$MEMORY_HOLD_PERCENT" "$SWAP_HOLD_PERCENT"
 
+  # 空きメモリから本数の上限を絞る（#3780）。**申告する`maxSessions`も実効上限にする**ので、
+  # 絞って見送った巡は画面の既存の「上限に達している」表示で理由が出る（issue-deck側は変えない）
+  resolve_session_cap "$live_sessions" "$MAX_SESSIONS" "$metrics" "$SESSION_MEMORY_MB" "$SESSION_MEMORY_RESERVE_MB"
+
   # 動かしているチェックアウトの版（#1612）。取れなければ空にし、下で`null`として送る
   # （issue-deck側はそれを「申告なし」として5列をnullへ戻すため、古い版が残り続けない）
   checkout="$(collect_checkout_state)" || checkout=""
@@ -1219,7 +1236,7 @@ announce() {
     --argjson repositories "$repositories" \
     --argjson contractVersion "$LOCAL_SESSION_SUPPORTED_CONTRACT_VERSION" \
     --arg agentVersion "$DISPATCH_POLLER_VERSION" \
-    --argjson maxSessions "$MAX_SESSIONS" \
+    --argjson maxSessions "$SESSION_CAP_REPORTED" \
     --argjson liveSessions "$live_sessions" \
     --argjson crossRepoQuestion "$(cross_repo_question_capable)" \
     --argjson manualStep "$(manual_step_capable)" \
@@ -1247,7 +1264,7 @@ announce() {
     report_api_failure "ホストの申告に失敗しました"
     return 1
   fi
-  echo "申告しました: $HOST_NAME（セッション $live_sessions/$MAX_SESSIONS$(describe_checkout_state "$checkout")） → $(printf '%s' "$repositories" | jq -r 'join(", ")')"
+  echo "申告しました: $HOST_NAME（セッション $live_sessions/$SESSION_CAP_REPORTED$(describe_checkout_state "$checkout")） → $(printf '%s' "$repositories" | jq -r 'join(", ")')"
   return 0
 }
 
@@ -3883,6 +3900,12 @@ run_once() {
   elif [[ "$live_sessions" -ge "$MAX_SESSIONS" ]]; then
     echo "セッションが上限に達しているため、起動ジョブは取りに行きません（$live_sessions/$MAX_SESSIONS 本。計画レビューは別枠で空き $claim_plan_reviews 本）。"
     claim_max_jobs=0
+  elif [[ -n "$SESSION_CAP_EFFECTIVE" && "$SESSION_CAP_EFFECTIVE" -lt "$MAX_SESSIONS" && "$live_sessions" -ge "$SESSION_CAP_EFFECTIVE" ]]; then
+    # 空きメモリで絞った上限（#3780）。**メモリを理由に止める以上、計画レビューも#2095の見送りと同じく
+    # 止める**。静的な上限の分岐は計画レビューを別枠で残す（#3772）ので、ここは独立させている
+    echo "空きメモリが少ないため、起動ジョブは取りに行きません（$live_sessions/$SESSION_CAP_EFFECTIVE 本。上限は最大 $MAX_SESSIONS 本）。"
+    claim_max_jobs=0
+    claim_plan_reviews=0
   fi
 
   local claim_payload jobs_json job_count job

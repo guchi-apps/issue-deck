@@ -135,6 +135,7 @@ export function DispatchQueueContent({
       )}
 
       {summary.activeCount === 0 &&
+        summary.planReviews.length === 0 &&
         summary.failed.length === 0 &&
         summary.controls.length === 0 && (
           <p className="mt-2 text-xs text-muted-foreground">
@@ -159,6 +160,17 @@ export function DispatchQueueContent({
         onOpenIssue={onOpenIssue}
         showOrder
         showModel
+      />
+      {/*
+        計画レビュー（#3785）。**セッション上限（既定12本）に数えないジョブ**なので、実装の
+        順番待ちと分ける。「まとめて取り消す」の対象にも入らず、消せるのは行ごとの×だけ
+      */}
+      <QueueSection
+        title="計画レビュー"
+        note="セッション上限には数えません。まとめて取り消しの対象外です。"
+        jobs={summary.planReviews}
+        onCancel={dispatch.cancel}
+        onOpenIssue={onOpenIssue}
       />
       {/*
         まだ届いていない停止・セッション終了・追加指示（#1519）。**上の実行中・順番待ちとは
@@ -287,7 +299,7 @@ export function DispatchQueueBadge({ summary }: { summary: DispatchQueueSummary 
     );
   }
 
-  if (summary.activeCount > 0) {
+  if (summary.activeCount > 0 || summary.planReviews.length > 0) {
     return (
       <span aria-hidden className="absolute -top-0.5 -right-0.5 size-2 rounded-full bg-primary" />
     );
