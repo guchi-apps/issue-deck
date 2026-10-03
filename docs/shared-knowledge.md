@@ -464,7 +464,7 @@ Claude Code実行前に、以下のステップを挟む。
 ### 9.2 格上げ判定（`guchi-apps/docs`のワークフロー）
 
 判定エージェントは`guchi-apps/docs`のGitHub Actionsとして動き、issue-deckを含む
-`guchi-apps`配下の全リポジトリを対象に、定期実行で次を行う。
+`guchi-apps`配下の全リポジトリを対象に、次を行う。起動契機は2つで、**都度**（issue-deckが進捗を`develop`・`done`・`closed`へ進めた時点で`workflow_dispatch`する。#3814。失敗の知見が反映される前に別リポジトリで同じ失敗をするのを減らすため）と、**取りこぼしの回収**（毎日05:00 JSTのcron）。都度起動は10分間隔で間引き、docs側のconcurrencyが同時実行を1本に絞る。
 
 1. 各リポジトリのIssueから、`<!-- knowledge-candidate -->`があり
    `<!-- knowledge-promotion:judged -->`が**まだ無い**ものを集める。**対象を日付で絞らない**ため、

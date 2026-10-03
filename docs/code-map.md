@@ -4312,6 +4312,7 @@ PR一覧画面（`pane=pull-requests`）へは遷移しない——リリース�
 自動で行うようになった。`mergeable_state`が`clean`のPRだけをマージし、失敗・コンフリクト・
 判定待ちは見送る。共有知識を書き換えるのは変わらず`promote-knowledge.yml`が作ったPRだけで、
 巡回はそのPRをマージするだけ。間隔は`KNOWLEDGE_PROMOTION_MERGE_INTERVAL_MINUTES`（既定10分、0で停止）。
+格上げ判定そのものの都度起動（#3814）は`src/lib/github/knowledge-promotion-dispatch.ts`で、`reportProgressStatus`が`develop`・`done`・`closed`へ進めたときにdocsの`promote-knowledge.yml`を`workflow_dispatch`する。間引きは`KNOWLEDGE_PROMOTION_DISPATCH_INTERVAL_MINUTES`（既定10分、0で停止）。
 下の#2950の記述にある「マージする」「マージしない」ボタンは、この変更で無くなっている。
 
 - **マーカーは「行全体が一致するか」で見る**（`guchi-apps/aide#161`の共有知識）。この仕組みを
