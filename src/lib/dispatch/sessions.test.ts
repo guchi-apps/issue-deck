@@ -11,6 +11,7 @@ const resolveNotStartedSession = vi.fn();
 const postSessionWrapupComment = vi.fn();
 // 実際に動いているモデルの引き当て（#2723）
 const sessionUsageFindMany = vi.fn();
+const timelineCreate = vi.fn();
 
 vi.mock("@/lib/db", () => ({
   db: {
@@ -34,6 +35,11 @@ vi.mock("@/lib/db", () => ({
     sessionUsage: {
       get findMany() {
         return sessionUsageFindMany;
+      },
+    },
+    dispatchSessionTimelineEvent: {
+      get create() {
+        return timelineCreate;
       },
     },
   },
@@ -104,6 +110,8 @@ beforeEach(() => {
   resolveNotStartedSession.mockResolvedValue(true);
   postSessionWrapupComment.mockResolvedValue(false);
   sessionUsageFindMany.mockResolvedValue([]);
+  upsert.mockResolvedValue({ id: "row-1" });
+  timelineCreate.mockResolvedValue({});
 });
 
 describe("reportDispatchSessions", () => {
