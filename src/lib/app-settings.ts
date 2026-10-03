@@ -347,6 +347,26 @@ export const CODEX_MODEL_OPTIONS = [
 export const CODEX_MODEL_DEFAULT = "gpt-5.6-terra" as const;
 export const GITHUB_ACTIONS_CODEX_MODEL_DEFAULT = CODEX_MODEL_DEFAULT;
 
+/** PRレビューと修復workflowが個別指定を持たないときに使う値。 */
+export const WORKFLOW_CLAUDE_MODEL_DEFAULT = "auto" as const;
+export const WORKFLOW_CODEX_MODEL_DEFAULT = "auto" as const;
+export const CODEX_REASONING_EFFORT_OPTIONS = [
+  { value: "default", label: "Codex Actionの既定" },
+  { value: "low", label: "low" },
+  { value: "medium", label: "medium" },
+  { value: "high", label: "high" },
+  { value: "xhigh", label: "xhigh" },
+] as const;
+export type CodexReasoningEffort = (typeof CODEX_REASONING_EFFORT_OPTIONS)[number]["value"];
+export const CODEX_REASONING_EFFORT_DEFAULT = "default" as const;
+
+export function parseCodexReasoningEffort(value: unknown): CodexReasoningEffort | null {
+  if (typeof value !== "string") return null;
+  return (CODEX_REASONING_EFFORT_OPTIONS as readonly { value: string }[]).some((option) => option.value === value)
+    ? (value as CodexReasoningEffort)
+    : null;
+}
+
 export const CODEX_MODEL_VALUES = CODEX_MODEL_OPTIONS.map((option) => option.value);
 export type CodexModel = (typeof CODEX_MODEL_VALUES)[number];
 

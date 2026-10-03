@@ -9,7 +9,9 @@ import {
   type ClaudeLocalModelSetting,
   type ClaudeModel,
   type CodexLocalModel,
+  type CodexModel,
   type CodexModelSetting,
+  type CodexReasoningEffort,
   type GithubActionsAgent,
   type ModelPickEngine,
   type PlanReviewAgent,
@@ -24,6 +26,8 @@ export type ExecutionFlow = {
   model: string;
   source: string;
   sourceId?: string;
+  setting?: string;
+  reasoningEffort?: string;
   note?: string;
 };
 
@@ -31,6 +35,9 @@ export type ExecutionFlowSettings = {
   claudeModel: ClaudeModel;
   githubActionsAgent: GithubActionsAgent;
   githubActionsCodexModel: CodexLocalModel;
+  workflowClaudeModel?: ClaudeModel;
+  workflowCodexModel?: CodexModel;
+  workflowCodexReasoningEffort?: CodexReasoningEffort;
   claudeModelAssist: ClaudeModel;
   claudeLocalModel: ClaudeLocalModelSetting;
   codexModel: CodexModelSetting;
@@ -79,6 +86,9 @@ function planReviewModel(settings: ExecutionFlowSettings, agent: PlanReviewAgent
  * Actions の修復系はモデル入力を受け取らないため、CLI の既定と明示して推測表示を避ける。
  */
 export function resolveExecutionFlows(settings: ExecutionFlowSettings): ExecutionFlow[] {
+  const workflowClaudeModel = settings.workflowClaudeModel ?? "auto";
+  const workflowCodexModel = settings.workflowCodexModel ?? "auto";
+  const workflowCodexReasoningEffort = settings.workflowCodexReasoningEffort ?? "default";
   const localClaudeNote = settings.claudeLocalModel === MODEL_PICK_SETTING
     ? `候補: Sonnet 5.5 / Opus 5.5 / Fable 5.1。ダイアログを経由しない起動は ${describeClaudeModel("sonnet")} にフォールバックします。`
     : undefined;
@@ -132,15 +142,15 @@ export function resolveExecutionFlows(settings: ExecutionFlowSettings): Executio
     },
     {
       group: "レビュー", name: "PRコードレビュー（Claude）", location: "GitHub Actions", agent: "Claude Code",
-      model: "CLIの既定（個別設定なし）", source: "レビューworkflow", note: "このworkflowはモデル入力を受け取らず、GitHub Actions の Claude Code 既定を使います。",
+      model: describeClaudeModel(workflowClaudeModel), source: "PRレビュー・修復設定", setting: workflowClaudeModel === "auto" ? "デフォルト継承" : describeClaudeModel(workflowClaudeModel), sourceId: "workflow-model-settings",
     },
     {
       group: "レビュー", name: "PRコードレビュー（Codex）", location: "GitHub Actions", agent: "Codex Action",
-      model: "Codex Actionの既定（個別設定なし）", source: "レビューworkflow", note: "GitHub Actions の Codex Action で実行します。サブPCの Codex CLI 設定とは別です。",
+      model: describeCodexModel(workflowCodexModel), source: "PRレビュー・修復設定", setting: workflowCodexModel === "auto" ? "デフォルト継承" : describeCodexModel(workflowCodexModel), reasoningEffort: workflowCodexReasoningEffort === "default" ? "デフォルト継承" : workflowCodexReasoningEffort, sourceId: "workflow-model-settings",
     },
     {
       group: "修復", name: "レビュー指摘修正・CI自動修正・コンフリクト解消・PR repair", location: "GitHub Actions", agent: "Claude Code",
-      model: "CLIの既定（個別設定なし）", source: "修復workflow", note: "各修復workflowはモデル入力を受け取りません。GitHub Actions の Claude Code 既定を使います。",
+      model: describeClaudeModel(workflowClaudeModel), source: "PRレビュー・修復設定", setting: workflowClaudeModel === "auto" ? "デフォルト継承" : describeClaudeModel(workflowClaudeModel), sourceId: "workflow-model-settings", note: "この設定はレビュー指摘修正、CI自動修正、コンフリクト解消、PR repair で共有します。",
     },
     {
       group: "アプリ内AI", name: "要約・検索・文章整理・手作業アシスタント", location: "IssueDeckサーバー",

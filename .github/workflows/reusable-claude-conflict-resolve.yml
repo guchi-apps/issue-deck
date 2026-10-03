@@ -453,6 +453,16 @@ jobs:
             echo '__ISSUE_DECK_PROMPT_EOF__'
           } >> "$GITHUB_ENV"
 
+      - name: PRレビュー・修復用のClaudeモデルを取得する
+        id: workflow_model
+        env:
+          APP_BASE_URL: ${{ vars.APP_BASE_URL }}
+        run: |
+          model=auto
+          if [ -n "$APP_BASE_URL" ]; then model="$(curl -fsS --max-time 5 "${APP_BASE_URL%/}/api/settings/claude-model" 2>/dev/null | jq -r '.workflowClaudeModel // "auto"' || true)"; fi
+          case "$model" in auto|fable|opus|sonnet|haiku) ;; *) model=auto ;; esac
+          [ "$model" = auto ] && echo 'claude_args=' >> "$GITHUB_OUTPUT" || echo "claude_args=--model $model" >> "$GITHUB_OUTPUT"
+
       - name: Claude Code（コンフリクト解消）
         id: claude_conflict
         if: steps.state.outputs.should_resolve == 'true'
@@ -508,6 +518,7 @@ jobs:
           # 直接書けばディレクトリ作成が要らず、ランナーは実行ごとに破棄されるため掃除も要らない。
           # その旨をプロンプト側に明記して、そもそも使わせない方向で解決している。
           claude_args: >-
+            ${{ steps.workflow_model.outputs.claude_args }}
             --allowedTools "Edit,Write,Read,Grep,Glob,Bash(git:*),Bash(gh:*),${{ inputs.package-manager == 'pnpm' && 'Bash(pnpm:*)' || 'Bash(npm:*)' }},Bash(npx:*),Bash(node:*),Bash(python:*),Bash(python3:*),Bash(pip:*),Bash(pip3:*),Bash(pytest:*),Bash(curl:*),Bash(grep:*),Bash(find:*),Bash(ls:*),Bash(cat:*),Bash(head:*),Bash(tail:*),Bash(wc:*)"
           prompt: ${{ env.PROMPT_CONFLICT }}
 
