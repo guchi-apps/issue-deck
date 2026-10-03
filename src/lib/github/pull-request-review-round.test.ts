@@ -12,7 +12,7 @@ const verdict = (reviewKind: "changes-requested" | "ok", reviewedSha = "abc1234"
   reviewedSha,
 });
 
-const base = { repairRun: null, reviewPending: false, autoMergeEnabled: false, readyToMerge: false };
+const base = { repairRun: null, reviewPending: false, aiReviewState: "passed" as const, autoMergeEnabled: false, readyToMerge: false };
 
 describe("resolvePullRequestReviewRound", () => {
   it("レビュー修正の実行中は同じPRの修正中として示す", () => {
