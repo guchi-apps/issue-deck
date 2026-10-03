@@ -22,6 +22,7 @@ import {
 import { PullRequestActionsMenu } from "@/components/dashboard/pull-request-actions-menu";
 import { PullRequestFileList } from "@/components/dashboard/pull-request-file-list";
 import { PullRequestFixIssueBar } from "@/components/dashboard/pull-request-fix-issue-bar";
+import { PullRequestReviewRound } from "@/components/dashboard/pull-request-review-round";
 import { PullRequestMergeButton } from "@/components/dashboard/pull-request-merge-button";
 import { PullRequestRepairButtons } from "@/components/dashboard/pull-request-repair-buttons";
 import { PullRequestReviewFindings } from "@/components/dashboard/pull-request-review-findings";
@@ -482,6 +483,7 @@ export function PullRequestDetail({
 
         {currentDetail && (
           <>
+            {showsPullRequestFixIssueBar(pullRequest) && <PullRequestReviewRound pullRequest={pullRequest} />}
             {/* レビューの指摘から修正Issueを起案する（#2961）。リリースPRは検証結果パネルの
                 行ごとのボタンが受け持つので出さない */}
             {onCreatePullRequestFixIssue && showsPullRequestFixIssueBar(pullRequest) && (

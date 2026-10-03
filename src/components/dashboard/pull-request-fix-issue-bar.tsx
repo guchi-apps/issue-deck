@@ -130,8 +130,10 @@ export function PullRequestFixIssueBar({
   const buttonLabel = alreadyFiledIssue
     ? `起票済み（#${alreadyFiledIssue.number}）`
     : route.kind === "create-issue"
-      ? "修正Issueを起案"
-      : prFixRequestActionLabel(route);
+      ? "範囲外の課題をIssueにする"
+      : route.kind === "actions"
+        ? "このPRを修正する"
+        : prFixRequestActionLabel(route);
 
   async function handleClick() {
     setIsPreparing(true);
