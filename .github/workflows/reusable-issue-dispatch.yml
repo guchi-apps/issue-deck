@@ -1275,6 +1275,7 @@ jobs:
             ${{ steps.claude_model.outputs.model_flag }}
           prompt: ${{ env.PROMPT_PLAN }}
       - name: Codex（計画提示）
+        id: codex_plan
         if: steps.state.outputs.mode == 'plan' && steps.claude_model.outputs.agent == 'codex'
         uses: openai/codex-action@v1
         env:
@@ -1326,7 +1327,7 @@ jobs:
           RETRY_ATTEMPT: ${{ steps.state.outputs.retry_attempt }}
           APP_BASE_URL: ${{ vars.APP_BASE_URL }}
           REPO: ${{ github.repository }}
-          CLAUDE_STEP_OUTCOME: ${{ steps.claude_plan.outcome }}
+          CLAUDE_STEP_OUTCOME: ${{ steps.claude_model.outputs.agent == 'codex' && steps.codex_plan.outcome || steps.claude_plan.outcome }}
           # claude-code-actionの正式な出力(action.ymlで公開)。SDKが書き出したメッセージ列
           # (Turn[]相当。system/assistant/user/resultの各typeを持つ)へのパスで、Claude Code
           # ステップがfailure終了した場合でもSDK内部のcatch節で書き出し済みなら出力される
@@ -2265,7 +2266,7 @@ jobs:
           RETRY_ATTEMPT: ${{ steps.state.outputs.retry_attempt }}
           APP_BASE_URL: ${{ vars.APP_BASE_URL }}
           REPO: ${{ github.repository }}
-          CLAUDE_STEP_OUTCOME: ${{ steps.claude_implement.outcome }}
+          CLAUDE_STEP_OUTCOME: ${{ steps.claude_model.outputs.agent == 'codex' && steps.codex_implement.outcome || steps.claude_implement.outcome }}
           # 計画提示ステップのフォールバック検証ステップと同じ考え方(#716)。フォールバック
           # 理由の推定表示に使う(詳細は計画提示ステップ側のコメントを参照)。
           EXECUTION_FILE: ${{ steps.claude_implement.outputs.execution_file }}
