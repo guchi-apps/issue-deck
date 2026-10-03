@@ -178,6 +178,13 @@ issue-deckから貼られた画像は`.../api/issues/images/<UUID>`形式のURL�
 
 APIキー・トークン・パスワード等の実シークレットを、コミット・PR本文・Issueコメント・ログなど、リポジトリやGitHub上に残る場所へ出力しないでください。envファイルは起動時にサブPCの本体チェックアウトからコピーされたものです。
 
+**マニフェスト（`.github/secrets-manifest.tsv`）へ新しいキーの行を足したときは、ブランチをpushしたあと、PRを作る前に1Passwordへの登録とGitHubへの同期まで済ませます。** 未登録のままマージすると、本番デプロイの値検査で落ちます。ランダム生成でよい値（トークン・署名鍵など）は人に頼まず次で完結させます。`--ref`で自分のブランチのマニフェストを読ませ、`--no-deploy`でコードが値を読む前の本番デプロイを止めます（既定は`develop`のマニフェストを読み`main`のデプロイを起こすため、PR作成前は必ず失敗します）。まず`--dry-run`で確かめてください。外部サービスで発行する値は従来どおり`71.manual-step`のIssueを起票します。
+
+```bash
+{{ISSUE_DECK_SCRIPTS_DIR}}/provision-secret.sh --repo {{REPOSITORY}} --key <KEY> --generate hex32 --ref issue-{{ISSUE_NUMBER}} --no-deploy
+```
+
+
 ## 必要になったら読むもの
 
 次の状況になったら、**作業を進める前に** `{{ISSUE_DECK_SCRIPTS_DIR}}/prompts/generic-implementation-agent-reference.md` の該当する節を`Read`で読んでください。issue-deck側のファイルでこのworktreeには無いため、絶対パスで示しています。毎回は使わないため、この文面から外してあります（#3023）。**このファイルが無いPC・本体チェックアウトが古くて無いときは**、`gh api -H "Accept: application/vnd.github.raw" "repos/guchi-apps/issue-deck/contents/scripts/prompts/generic-implementation-agent-reference.md?ref=develop"`で同じ内容を読めます。
