@@ -752,6 +752,24 @@ sandbox: workspace-write [workdir, /tmp, $TMPDIR, /home/guchi/apps/issue-deck/.g
 （`danger-full-access`）とは別物。gitはオブジェクトもrefも本体側へ書くため、これより狭くして
 コミットとpushを通す方法は無い。
 
+### gitの管理領域が読み取り専用になったとき（#3862）
+
+**本体の`.git`だけを`--add-dir`で渡しても、Codex 0.160.0では足りない。** worktreeの`gitdir:`が指す
+`<本体>/.git/worktrees/<名前>`を、Codexが保護メタデータとして読み取り専用で重ね直すため、
+`git add`が`index.lock: Read-only file system`で落ちる（morrow#491で実際に止まった。
+`findmnt -T <管理領域>`のOPTIONSが`ro`になる）。**その管理領域も個別に渡すと書ける**ので、
+`agent_cli_codex_writable_dirs`は本体の`.git`に加えて管理領域も出力する。
+
+起動前には`agent_cli_codex_git_write_probe`が、サンドボックス内で管理領域へ実際に書けるかを確かめ、
+書けなければ起動ログに警告と回復方法を出す（無言で止まらない）。
+
+**既に止まったセッションの回復**:
+
+1. issue-deckの`scripts/`を最新にする（画面の「更新して再起動」）
+2. 該当セッションを再起動する。会話は`codex resume`で引き継がれ、起動引数は起動のたびに組み直されるため、
+   新しい`--add-dir`が付く
+3. `findmnt -T <本体>/.git/worktrees/<名前>`の出力に`rw`が含まれれば復旧（Codex内のシェルから確認）
+
 ### サンドボックスを組み立てられないホスト（#2526）
 
 **`codex`コマンドが入っていても、セッションが1本もコマンドを実行できないホストがある。**

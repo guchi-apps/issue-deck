@@ -1151,6 +1151,12 @@ else
   # 第2引数はワークスペースの根。ここは`cd`済みでworktreeそのものだが、**明示して渡す**
   # （gitの管理領域を`--add-dir`で開ける判定に使うので、暗黙の`$PWD`に頼らない。#2529）。
   agent_cli_build_codex_args "$CODEX_RESUME_THREAD" "$PWD"
+  # git管理領域へ書けないままだと、実装を終えたあとコミット直前で無言のまま止まる（#3862）。
+  GIT_WRITE_PROBE="$(agent_cli_codex_git_write_probe "$PWD" 2>/dev/null || true)"
+  if [[ "${GIT_WRITE_PROBE%%$'\n'*}" == "broken" ]]; then
+    echo "#$ISSUE_NUMBER: 警告: Codexのサンドボックスがgit管理領域に書き込めません（コミット・pushが失敗します）: ${GIT_WRITE_PROBE#*$'\n'}"
+    echo "#$ISSUE_NUMBER: 回復方法: docs/multi-agent/codex.md「gitの管理領域が読み取り専用になったとき」。scriptsを更新したうえでセッションを再起動（resume）してください。"
+  fi
   # フックの`-c`（#2509）はサンドボックスの設定より後ろに置く。**同じ`-c`でもキーが違うので
   # 順序は挙動に影響しない**が、起動ログに出す引数は素の分だけにして読めるようにしておく。
   AGENT_LAUNCH_ARGS=(${AGENT_CLI_ARGS[@]+"${AGENT_CLI_ARGS[@]}"} ${CODEX_HOOK_ARGS[@]+"${CODEX_HOOK_ARGS[@]}"})

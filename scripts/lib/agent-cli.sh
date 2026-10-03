@@ -126,7 +126,7 @@ agent_cli_path_contains() {
 # gitはオブジェクトもrefも本体側へ書くため、これより狭くしてコミットとpushを通す方法は無い。
 agent_cli_codex_writable_dirs() {
   local workspace="${1:-$PWD}"
-  local common_dir git_dir dir chosen
+  local common_dir git_dir dir
   local -a picked=()
 
   command -v git >/dev/null 2>&1 || return 0
@@ -136,26 +136,60 @@ agent_cli_codex_writable_dirs() {
   common_dir="$(git -C "$workspace" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)"
   git_dir="$(git -C "$workspace" rev-parse --absolute-git-dir 2>/dev/null || true)"
 
-  # 共通の`.git`を先に見る。linked worktreeの管理領域はその下にあるので、先に採れば2つ目は落ちる。
   for dir in "$common_dir" "$git_dir"; do
     [[ -n "$dir" && -d "$dir" ]] || continue
     if agent_cli_path_contains "$workspace" "$dir"; then
       continue
     fi
-    local covered=0
-    for chosen in ${picked[@]+"${picked[@]}"}; do
-      if agent_cli_path_contains "$chosen" "$dir"; then
-        covered=1
-        break
-      fi
-    done
-    [[ "$covered" == "0" ]] || continue
+    # **本体の`.git`の下にあっても、worktree自身の管理領域を別に出す**（#3862）。Codex 0.160.0は
+    # worktreeの`gitdir:`が指す先を保護メタデータとして読み取り専用で重ね直すため、本体の`.git`だけを
+    # 渡すと`index.lock: Read-only file system`で落ちる（実機で確認。管理領域を個別に渡せば書ける）。
+    [[ " ${picked[*]-} " != *" $dir "* ]] || continue
     picked+=("$dir")
   done
 
   for dir in ${picked[@]+"${picked[@]}"}; do
     printf '%s\n' "$dir"
   done
+}
+
+# サンドボックス内で、git管理領域へ実際に書けるかを下見する（#3862）。判定は`ok`・`broken`・
+# `unknown`の1語（`broken`のときは2行目に材料）。終了コードは常に0。
+#
+# 引数の組み立てが正しくても、Codexの版が変わると管理領域がroで重ね直されることがある
+# （#3862。morrowの#491が、コミットの直前で無言のまま止まった）。起動前に気付けるようにする。
+# `--add-dir`は`writable_roots`と同じ扱いなので、同じ一覧を`-c`で渡して確かめる。
+# 管理領域が無い（ふつうのクローン・gitでない）ときは確かめる対象が無いので`unknown`。
+agent_cli_codex_git_write_probe() {
+  local workspace="${1:-$PWD}" codex_command git_dir dir roots="" output
+  local -a timeout_args=()
+
+  codex_command="$(agent_cli_codex_command)"
+  command -v "$codex_command" >/dev/null 2>&1 || { printf 'unknown'; return 0; }
+  "$codex_command" sandbox --help >/dev/null 2>&1 || { printf 'unknown'; return 0; }
+  [[ "$(agent_cli_codex_sandbox_mode)" == "workspace-write" ]] || { printf 'unknown'; return 0; }
+
+  git_dir="$(git -C "$workspace" rev-parse --absolute-git-dir 2>/dev/null || true)"
+  if [[ -z "$git_dir" ]] || agent_cli_path_contains "$workspace" "$git_dir"; then
+    printf 'unknown'
+    return 0
+  fi
+
+  while IFS= read -r dir; do
+    [[ -n "$dir" ]] || continue
+    roots+="${roots:+,}\"$dir\""
+  done < <(agent_cli_codex_writable_dirs "$workspace")
+
+  command -v timeout >/dev/null 2>&1 && timeout_args=(timeout 10)
+  if output="$(cd "$workspace" && "${timeout_args[@]}" "$codex_command" sandbox \
+    -c sandbox_mode=workspace-write \
+    -c "sandbox_workspace_write.writable_roots=[$roots]" \
+    -- sh -c 'f="$1/.issue-deck-write-probe.$$"; : > "$f" && rm -f "$f"' sh "$git_dir" 2>&1)"; then
+    printf 'ok'
+    return 0
+  fi
+  printf 'broken\n%s' "$(printf '%s\n' "$output" | grep -m1 -v '^[[:space:]]*$' || true)"
+  return 0
 }
 
 # Codexの起動引数を`AGENT_CLI_ARGS`配列へ組み立てる（プロンプト本文は含めない。呼び出し側が
