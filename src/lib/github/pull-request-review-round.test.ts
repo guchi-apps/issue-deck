@@ -19,8 +19,10 @@ describe("resolvePullRequestReviewRound", () => {
     expect(resolvePullRequestReviewRound({ ...base, reviewVerdict: verdict("changes-requested"), headSha: "abc1234", repairRun: { kind: "review", startedAt: "2026-10-03T00:00:00Z", runUrl: null } }).state).toBe("fixing");
   });
 
-  it("修正後に古い要修正判定だけが残る間は再レビュー中と示す", () => {
-    expect(resolvePullRequestReviewRound({ ...base, reviewVerdict: verdict("changes-requested"), headSha: "def5678" }).state).toBe("re-reviewing");
+  it("修正後に古い要修正判定だけが残る間は再レビュー待ちと示す", () => {
+    const round = resolvePullRequestReviewRound({ ...base, reviewVerdict: verdict("changes-requested"), headSha: "def5678" });
+    expect(round.state).toBe("changes-requested");
+    expect(round.label).toBe("再レビュー待ち");
   });
 
   it("最新コミットへの要修正は元PRで修正する状態にする", () => {
