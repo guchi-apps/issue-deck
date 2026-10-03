@@ -1,6 +1,7 @@
 import type { DispatchSession } from "@prisma/client";
 
 import { db } from "@/lib/db";
+import { SESSION_TIMELINE_MAX_EVENTS } from "@/lib/dispatch/session-timeline";
 import {
   isRevivedSession,
   nextEscalatedState,
@@ -44,6 +45,7 @@ function toSessionView(session: DispatchSession): DispatchSessionView {
   // 中断・停滞の引き上げ（#2886）。ステップと同じ理由で保存されているコードも読み直す
   const interruptedReason = parseSessionInterruptedReason(session.interruptedReason);
   return {
+    id: session.id,
     host: session.host,
     tmuxSessionName: session.tmuxSessionName,
     repositoryFullName: session.repositoryFullName,
@@ -290,6 +292,20 @@ export async function markDispatchSessionEnded(params: {
   // **実際に`ALIVE`から倒した1回だけ締める（#1119）。** 二重に報告されても2回目は0件なので、
   // ここを通らない。投稿するかどうか（記録が残っているか）の判定は`session-wrapup.ts`側。
   if (result.count > 0 && target) {
+    try {
+      await db.dispatchSessionTimelineEvent.create({
+        data: {
+          sessionId: target.id,
+          source: "session",
+          occurredAt: now,
+          kind: "event",
+          title: "セッション消失",
+        },
+      });
+    } catch {
+      // タイムラインは表示用の補助情報なので、記録失敗で終了処理を止めない。
+    }
+
     await postSessionWrapupComment({
       repositoryFullName: target.repositoryFullName,
       issueNumber: target.issueNumber,
@@ -386,7 +402,7 @@ export async function reportDispatchSessions(params: {
             stepSeenAt: report.stepSeenAt == null ? null : new Date(report.stepSeenAt),
           };
 
-    await db.dispatchSession.upsert({
+    const stored = await db.dispatchSession.upsert({
       where: {
         host_tmuxSessionName: {
           host: params.hostName,
@@ -471,6 +487,65 @@ export async function reportDispatchSessions(params: {
       },
     });
 
+    // 同じtmux名で起動し直した場合はDB上のDispatchSession行を再利用するため、前回実行の
+    // タイムラインをここで明示的に捨てる。実行単位を跨いだ会話・stepが新しいセッション詳細へ
+    // 混ざらないようにし、この巡の「セッション開始」から新しい履歴を作り直す。
+    if (revived) {
+      try {
+        await db.dispatchSessionTimelineEvent.deleteMany({ where: { sessionId: stored.id } });
+      } catch {
+        // タイムラインは補助情報なので、履歴の初期化失敗でセッション報告本体を止めない。
+      }
+    }
+
+    // pollerが既に運んでいる状態・固定語彙のstepだけを時系列へ残す。画面や転記の本文、
+    // コマンド・tool結果はここへ入れない。会話本文はtimeline APIの許可済みイベントだけが担う。
+    const previousStep = revived ? null : previous?.step;
+    // 古いpollerはstepを送らない。省略値は保存済みの値を引き継いで毎巡の重複記録を防ぐが、
+    // 明示的なnullは終了時などにstepを消したことを表すため、区別してそのまま反映する。
+    const currentStep = report.step === undefined ? previousStep : report.step;
+    const stateChanged = !previous || revived || previous.state !== state;
+    if (stateChanged || previousStep !== currentStep) {
+      // 終了・異常終了を作業イベントで覆わないよう、状態変化をstepより優先する。
+      const title = stateChanged
+        ? state === "ALIVE"
+          ? "セッション開始"
+          : state === "EXITED"
+            ? "セッション終了"
+            : state === "FAILED"
+              ? "セッション異常終了"
+              : "セッション消失"
+        : currentStep
+          ? `作業: ${currentStep}`
+          : "作業状態を解除";
+      try {
+        await db.dispatchSessionTimelineEvent.create({
+          data: {
+            sessionId: stored.id,
+            source: "session",
+            occurredAt: now,
+            kind: stateChanged || !currentStep ? "event" : "step",
+            title,
+          },
+        });
+        // 長時間セッションでもサーバー生成履歴が無制限に増えないよう、表示上限と同じ件数へ
+        // 切り詰める。transcript側も含めた全イベントの最新N件を残す。
+        const overflow = await db.dispatchSessionTimelineEvent.findMany({
+          where: { sessionId: stored.id },
+          orderBy: [{ occurredAt: "desc" }, { id: "desc" }],
+          skip: SESSION_TIMELINE_MAX_EVENTS,
+          select: { id: true },
+        });
+        if (overflow.length > 0) {
+          await db.dispatchSessionTimelineEvent.deleteMany({
+            where: { id: { in: overflow.map((event) => event.id) } },
+          });
+        }
+      } catch {
+        // タイムラインは表示用の補助情報であり、重複記録の失敗でセッション報告本体を止めない。
+      }
+    }
+
     if (startingTransition === "enter") {
       notStarted.push({
         repositoryFullName: report.repositoryFullName,
@@ -513,6 +588,24 @@ export async function reportDispatchSessions(params: {
         escalatedState: null,
       },
     });
+
+    // 報告から消えたセッションは上のupsertループを通らないため、GONEへの状態変化も
+    // ここでタイムラインへ残す。表示用の補助履歴なので、記録失敗で報告APIは止めない。
+    for (const row of goneRows) {
+      try {
+        await db.dispatchSessionTimelineEvent.create({
+          data: {
+            sessionId: row.id,
+            source: "session",
+            occurredAt: now,
+            kind: "event",
+            title: "セッション消失",
+          },
+        });
+      } catch {
+        // タイムラインの記録失敗はセッション状態の更新を妨げない。
+      }
+    }
   }
 
   // 何も記録を残さずに終わったセッションを締める（#1119）。**`markDispatchSessionEnded`と

@@ -393,6 +393,8 @@ export type DispatchSessionReport = {
 
 /** 画面へ返すセッション。DBの行をそのまま出さず、必要な項目だけを整える */
 export type DispatchSessionView = {
+  /** 詳細ログの取得・表示にだけ使うセッション固有ID */
+  id?: string;
   host: string;
   tmuxSessionName: string;
   repositoryFullName: string;
