@@ -108,7 +108,13 @@ sweep() {
   flock -n 9 || return 0
   local_path="$(local_repo_resolve_path "$full_name" 2>/dev/null || true)"
   [[ -n "$local_path" && -d "$local_path" ]] || return 0
-  rows="$(gh pr list --repo "$full_name" --base develop --state open --json number,baseRefOid,headRefOid --jq '.[] | [.number, .baseRefOid, .headRefOid] | @tsv' 2>/dev/null || true)"
+  # gh pr list --json は baseRefOid を公開しない。失敗を空一覧として扱うと
+  # Actions の要求だけが残り、Codex の結果待ちが30分続く。
+  if ! rows="$(gh api "repos/${full_name}/pulls?state=open&base=develop&per_page=100" --paginate \
+    --jq '.[] | [.number, .base.sha, .head.sha] | @tsv')"; then
+    echo "Error: ${full_name} のレビュー対象PRを取得できませんでした。" >&2
+    return 1
+  fi
   while IFS=$'\t' read -r pr_number base_sha head_sha; do
     [[ -n "$pr_number" && -n "$base_sha" && -n "$head_sha" ]] || continue
     comments="$(gh pr view "$pr_number" --repo "$full_name" --json comments --jq '.comments[].body' 2>/dev/null || true)"
