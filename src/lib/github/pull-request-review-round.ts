@@ -6,6 +6,7 @@ import { resolveReviewVerdictFreshness } from "@/lib/github/review-verdict-fresh
 export type PullRequestReviewRoundState =
   | "reviewing"
   | "changes-requested"
+  | "needs-check"
   | "fixing"
   | "re-reviewing"
   | "approved"
@@ -42,6 +43,13 @@ export function resolvePullRequestReviewRound(params: {
       return { state: "re-reviewing", label: "再レビュー中", description: "修正コミットを追加しました。最新コミットの再レビュー結果を待っています。" };
     }
     return { state: "changes-requested", label: "要修正", description: "指摘はこのPRで修正します。新しいIssueやPRは作成しません。" };
+  }
+  if (verdict?.reviewKind === "needs-check") {
+    return {
+      state: "needs-check",
+      label: "確認待ち",
+      description: "レビューは完了しています。内容を確認して次の対応を判断してください。",
+    };
   }
   if (verdict?.reviewKind === "ok") {
     if (params.autoMergeEnabled || params.readyToMerge) {
