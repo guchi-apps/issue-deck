@@ -27,7 +27,10 @@ export function releaseErrorMessage(
     return "このリポジトリにはリリース用workflow（release-develop-to-main.yml）がありません。";
   }
   if (errorCode === "deploy_failed") {
-    return "本番デプロイが失敗しているため、新しいリリースは開始できません。再デプロイを成功させてからやり直してください。";
+    return "本番デプロイが失敗しています。修正をdevelopへ取り込んだ場合は、確認画面で上書きを指定して起動してください。";
+  }
+  if (errorCode === "failed_deploy_override_unsupported") {
+    return "このリポジトリのリリースworkflowは失敗中の手動上書きに未対応です。workflowを更新してください。";
   }
   // 上げ幅の指定（`bump_kind`）を受け取れない世代のworkflowを持つリポジトリ（#1548）。
   // GitHubは`Unexpected inputs provided`の422で落とすが、そのままでは何をすればよいか読めない。
@@ -60,13 +63,22 @@ export function releaseErrorMessage(
  * `bumpKind`を渡すとバージョンの上げ幅をworkflowへ指定する（#1548）。**渡さない場合は
  * 従来どおりinput無しでdispatchし、workflow内のClaudeがコード差分から判定する。**
  */
-export async function requestRelease(repoFullName: string, bumpKind?: BumpKind): Promise<void> {
+export async function requestRelease(
+  repoFullName: string,
+  bumpKind?: BumpKind,
+  allowFailedDeploy = false,
+): Promise<void> {
   const [owner, repo] = repoFullName.split("/");
 
   const res = await fetch("/api/repositories/release", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ owner, repo, ...(bumpKind ? { bumpKind } : {}) }),
+    body: JSON.stringify({
+      owner,
+      repo,
+      ...(bumpKind ? { bumpKind } : {}),
+      ...(allowFailedDeploy ? { allowFailedDeploy: true } : {}),
+    }),
   });
   const json: { error?: string; message?: string } = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(releaseErrorMessage(res.status, json.error, json.message));

@@ -16,6 +16,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { requestRelease } from "@/lib/release-request";
 import type { BumpKind } from "@/lib/semver-bump";
 import type { BranchFlowIssueRef, ReleaseBlockedReason } from "@/types/branch-flow";
@@ -29,7 +30,7 @@ const BLOCKED_REASON_LABEL: Record<ReleaseBlockedReason, string> = {
   "no-workflow": "リリース用ワークフローがありません",
   "release-in-progress": "リリース中",
   "nothing-to-release": "出す変更がありません",
-  "deploy-failed": "本番デプロイの失敗を解消してください",
+  "deploy-failed": "本番デプロイ失敗中。修正を取り込んだ場合は手動で起動できます",
 };
 
 type RepositoryReleaseButtonProps = {
@@ -41,8 +42,8 @@ type RepositoryReleaseButtonProps = {
   /** すでに起動済みで、バンプPRが現れるのを待っている最中か（#1955） */
   isPending: boolean;
   /**
-   * 押せない理由（#2711）。渡すと、無効のボタンと理由だけを出す（確認ダイアログは持たない）。
-   * nullなら今までどおり押せるボタン。
+   * 押せない理由（#2711）。通常は無効のボタンと理由だけを出す。
+   * `deploy-failed`だけは、明示的な上書きを選ぶ確認ダイアログを開ける（#3912）。
    */
   blockedReason?: ReleaseBlockedReason | null;
   /** 起動に成功したあと。起動中の記録とバンプPRの出現を反映させるための再取得を親が行う */
@@ -82,18 +83,21 @@ export function RepositoryReleaseButton({
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [isTriggering, setIsTriggering] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [allowFailedDeploy, setAllowFailedDeploy] = useState(false);
   // 既定は自動判定（null）。選ばなければ起動の挙動は今までと変わらない（#1548）
   const [bumpKind, setBumpKind] = useState<BumpKind | null>(null);
+  const deployFailed = blockedReason === "deploy-failed";
 
   async function handleTrigger() {
     setIsTriggering(true);
     setError(null);
     try {
-      await requestRelease(repositoryFullName, bumpKind ?? undefined);
+      await requestRelease(repositoryFullName, bumpKind ?? undefined, deployFailed && allowFailedDeploy);
       // 起動できたら確認ダイアログを閉じるだけにする（#1590）。以前は「リリースを起動しました」の
       // ダイアログを続けて出していたが、閉じた先のボタンが「リリース起動中…」へ変わることで
       // 起動できたことは分かるため、OKを押させるだけの一手間だった。
       setConfirmOpen(false);
+      setAllowFailedDeploy(false);
       onTriggered();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -105,7 +109,7 @@ export function RepositoryReleaseButton({
   // 押せないときは、無効のボタンと理由だけを出す（#2711）。**ボタンごと消さない**——
   // 「次のリリース（本番未反映）」と出ている束から本番へ出す手段が画面から無くなり、
   // 押せないのか操作が存在しないのかを区別できなくなるため。
-  if (blockedReason) {
+  if (blockedReason && !deployFailed) {
     return (
       <span className="flex items-center gap-1.5" title={BLOCKED_REASON_LABEL[blockedReason]}>
         <Button size="sm" variant="outline" className="h-6 gap-1 px-2 text-xs" disabled>
@@ -127,12 +131,16 @@ export function RepositoryReleaseButton({
         onClick={() => setConfirmOpen(true)}
       >
         <Rocket className={isTriggering || isPending ? "size-3 animate-pulse" : "size-3"} />
-        {isTriggering ? "起動中..." : isPending ? "リリース起動中…" : "リリースする"}
+        {isTriggering ? "起動中..." : isPending ? "リリース起動中…" : deployFailed ? "修正リリース" : "リリースする"}
       </Button>
+      {deployFailed && <span className="text-xs text-muted-foreground">{BLOCKED_REASON_LABEL["deploy-failed"]}</span>}
       {error && <span className="text-xs text-destructive">{error}</span>}
 
       {/* 誤タップでの起動を防ぐため確認を挟む。文面はヘッダーのロケットボタンと揃えている */}
-      <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+      <AlertDialog open={confirmOpen} onOpenChange={(open) => {
+        setConfirmOpen(open);
+        if (!open) setAllowFailedDeploy(false);
+      }}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>リリースworkflowを起動しますか？</AlertDialogTitle>
@@ -146,6 +154,16 @@ export function RepositoryReleaseButton({
             currentVersion={currentVersion}
             disabled={isTriggering}
           />
+          {deployFailed && (
+            <label className="flex items-start gap-2 rounded-md border border-destructive/40 p-3 text-sm">
+              <Checkbox
+                checked={allowFailedDeploy}
+                onCheckedChange={(checked) => setAllowFailedDeploy(checked === true)}
+                disabled={isTriggering}
+              />
+              <span>本番デプロイの失敗を確認しました。developに取り込んだ修正をリリースするため、失敗中の起動を許可します。</span>
+            </label>
+          )}
           {pendingIssues.length > 0 ? (
             <div className="flex max-h-48 flex-col gap-1.5 overflow-y-auto rounded-md border p-2">
               <p className="text-xs font-medium text-muted-foreground">今回反映する内容</p>
@@ -172,7 +190,7 @@ export function RepositoryReleaseButton({
           <AlertDialogFooter>
             <AlertDialogCancel disabled={isTriggering}>キャンセル</AlertDialogCancel>
             <AlertDialogAction
-              disabled={isTriggering}
+              disabled={isTriggering || (deployFailed && !allowFailedDeploy)}
               onClick={(event) => {
                 // 起動の結果を待たずに閉じないよう既定の閉じる動作を止める。閉じてしまうと
                 // 連打で複数回dispatchできてしまい、失敗しても文言が出ない（#1548）。

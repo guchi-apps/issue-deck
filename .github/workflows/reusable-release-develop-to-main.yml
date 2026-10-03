@@ -51,6 +51,11 @@ on:
         required: false
         type: string
         default: ""
+      allow-failed-deploy:
+        description: "本番デプロイ失敗中に手動で修正リリースを開始する（workflow_dispatchのみ）"
+        required: false
+        type: boolean
+        default: false
       bump-command:
         description: >-
           バージョンを書き換えるコマンド。空なら
@@ -107,30 +112,6 @@ jobs:
         run: |
           git fetch origin develop:refs/remotes/origin/develop --quiet --force
           git fetch origin main:refs/remotes/origin/main --quiet --force
-
-      - name: 直近の本番デプロイ失敗を確認する
-        # 失敗した版を直さないまま次のリリースを始めると、未反映の版と修正内容が追えなくなる。
-        # 画面のAPIだけではscheduleやGitHubからの直接起動を防げないため、作成処理の手前でも
-        # 同じく止める（#3897）。取得できないときは誤って止めず、従来どおり続ける。
-        id: deploy-gate
-        env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.WORKFLOW_PAT }}
-          GH_REPO: ${{ github.repository }}
-        run: |
-          set -e
-
-          READY=true
-          if ! RUNS="$(gh run list --workflow deploy.yml --branch main --limit 1 --json status,conclusion,url)"; then
-            echo "直近の本番デプロイを取得できないため、リリースの可否は従来どおり判定します"
-          else
-            STATUS="$(printf '%s' "$RUNS" | jq -r '.[0].status // empty')"
-            CONCLUSION="$(printf '%s' "$RUNS" | jq -r '.[0].conclusion // empty')"
-            if [ "$STATUS" = "completed" ] && { [ "$CONCLUSION" = "failure" ] || [ "$CONCLUSION" = "timed_out" ]; }; then
-              READY=false
-              echo "直近の本番デプロイが失敗しているため、新しいリリースは開始しません"
-            fi
-          fi
-          echo "ready=$READY" >> "$GITHUB_OUTPUT"
 
       - name: リリース状態を判定する
         id: state
@@ -219,6 +200,41 @@ jobs:
           echo "need_main_pr=$NEED_MAIN_PR" >> "$GITHUB_OUTPUT"
           echo "rebuild_from=${REBUILD_FROM:-}" >> "$GITHUB_OUTPUT"
           echo "判定結果: need_bump=$NEED_BUMP need_main_pr=$NEED_MAIN_PR main_version=$MAIN_VERSION dev_version=$DEV_VERSION rebuild_from=${REBUILD_FROM:-}"
+
+      - name: 直近の本番デプロイ失敗を確認する
+        # 失敗した版を直さないまま次のリリースを始めると、未反映の版と修正内容が追えなくなる。
+        # 画面のAPIだけではscheduleやGitHubからの直接起動を防げないため、作成処理の手前でも
+        # 同じく止める（#3897）。取得できないときは誤って止めず、従来どおり続ける。
+        # 手動上書きは明示されたrunだけに効く。バンプPRのマージによるpushは
+        # リリースPR作成まで継続させる（#3912）。
+        id: deploy-gate
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.WORKFLOW_PAT }}
+          GH_REPO: ${{ github.repository }}
+          EVENT_NAME: ${{ github.event_name }}
+          ALLOW_FAILED_DEPLOY: ${{ inputs.allow-failed-deploy }}
+          NEED_MAIN_PR: ${{ steps.state.outputs.need_main_pr }}
+        run: |
+          set -e
+
+          READY=true
+          if ! RUNS="$(gh run list --workflow deploy.yml --branch main --limit 1 --json status,conclusion,url)"; then
+            echo "直近の本番デプロイを取得できないため、リリースの可否は従来どおり判定します"
+          else
+            STATUS="$(printf '%s' "$RUNS" | jq -r '.[0].status // empty')"
+            CONCLUSION="$(printf '%s' "$RUNS" | jq -r '.[0].conclusion // empty')"
+            if [ "$STATUS" = "completed" ] && { [ "$CONCLUSION" = "failure" ] || [ "$CONCLUSION" = "timed_out" ]; }; then
+              if [ "$EVENT_NAME" = "workflow_dispatch" ] && [ "$ALLOW_FAILED_DEPLOY" = "true" ]; then
+                echo "手動上書きが指定されたため、失敗中の修正リリースを開始します"
+              elif [ "$EVENT_NAME" = "push" ] && [ "$NEED_MAIN_PR" = "true" ]; then
+                echo "バンプ後のpushのため、リリースPR作成まで続行します"
+              else
+                READY=false
+                echo "直近の本番デプロイが失敗しているため、新しいリリースは開始しません"
+              fi
+            fi
+          fi
+          echo "ready=$READY" >> "$GITHUB_OUTPUT"
 
       - name: リリース対象のプルリクエストとissueを特定する
         id: issues

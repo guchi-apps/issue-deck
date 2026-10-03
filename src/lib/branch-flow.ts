@@ -451,8 +451,8 @@ export function resolveReleaseBlockedReason({
   if (branchStatus === null) return "branches-unloaded";
   if (!branchStatus.hasReleaseWorkflow) return "no-workflow";
   if (releasePullRequest !== null || bumpPullRequest !== null) return "release-in-progress";
-  if (deployState?.kind === "failure") return "deploy-failed";
   if (unreleasedCommitCount(branchStatus.developVsMain) === 0) return "nothing-to-release";
+  if (deployState?.kind === "failure") return "deploy-failed";
   return null;
 }
 
