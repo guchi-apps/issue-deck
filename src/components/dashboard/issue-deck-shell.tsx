@@ -39,6 +39,7 @@ import { MobileScreenFab } from "@/components/dashboard/mobile/mobile-screen-fab
 import { MobilePullRequestDetailScreen } from "@/components/dashboard/mobile/mobile-pull-request-detail-screen";
 import { MobilePullRequestsScreen } from "@/components/dashboard/mobile/mobile-pull-requests-screen";
 import { MobileSettingsScreen } from "@/components/dashboard/mobile/mobile-settings-screen";
+import { getRepoIssueSuggestions } from "@/components/dashboard/mention-textarea";
 import { PullRequestDetail } from "@/components/dashboard/pull-request-detail";
 import { PullRequestDetailDialog } from "@/components/dashboard/pull-request-detail-dialog";
 import { PullRequestList } from "@/components/dashboard/pull-request-list";
@@ -1688,6 +1689,21 @@ export function IssueDeckShell({
       modalPullRequestDetail.detail,
     ],
   );
+  const pullRequestIssueSuggestions = useMemo(
+    () =>
+      selectedPullRequest
+        ? getRepoIssueSuggestions(allIssues, selectedPullRequest.repositoryFullName)
+        : [],
+    [allIssues, selectedPullRequest],
+  );
+  const modalPullRequestIssueSuggestions = useMemo(
+    () =>
+      modalPullRequest
+        ? getRepoIssueSuggestions(allIssues, modalPullRequest.repositoryFullName)
+        : [],
+    [allIssues, modalPullRequest],
+  );
+
 
   function handlePullRequestMerged(pullRequest: PullRequestSummary) {
     const merge: OptimisticMerge = { id: pullRequest.id, mergedAt: new Date().toISOString() };
@@ -2559,6 +2575,7 @@ export function IssueDeckShell({
                 }
                 onUpdated={openPullRequests.refresh}
                 onCreateFixIssue={openReleaseVerificationFixIssueDialog}
+                issueSuggestions={pullRequestIssueSuggestions}
                 className="hidden flex-1 md:flex"
               />
             </>
@@ -2730,6 +2747,7 @@ export function IssueDeckShell({
           /* 開くときに履歴を積んでいるので、閉じるのは巻き戻し。共有URLで直接開いた場合だけ
              クエリを落とす（`goBackOrFallback`。他の閉じる導線と同じ扱い） */
           onClose={() => goBackOrFallback(() => selectPullRequestModal(null))}
+          issueSuggestions={modalPullRequestIssueSuggestions}
         />
 
         {/* 手作業アシスタント（#1826）。PC・スマホの入口が同じ1つを開く */}
