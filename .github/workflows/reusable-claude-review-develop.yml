@@ -698,6 +698,16 @@ jobs:
             echo '__ISSUE_DECK_PROMPT_EOF__'
           } >> "$GITHUB_ENV"
 
+      - name: PRレビュー・修復用のClaudeモデルを取得する
+        id: workflow_model
+        env:
+          APP_BASE_URL: ${{ vars.APP_BASE_URL }}
+        run: |
+          model=auto
+          if [ -n "$APP_BASE_URL" ]; then model="$(curl -fsS --max-time 5 "${APP_BASE_URL%/}/api/settings/claude-model" 2>/dev/null | jq -r '.workflowClaudeModel // "auto"' || true)"; fi
+          case "$model" in auto|fable|opus|sonnet|haiku) ;; *) model=auto ;; esac
+          [ "$model" = auto ] && echo 'claude_args=' >> "$GITHUB_OUTPUT" || echo "claude_args=--model $model" >> "$GITHUB_OUTPUT"
+
       - name: Run Claude Code Review
         id: claude_review
         uses: anthropics/claude-code-action@v1
@@ -729,7 +739,7 @@ jobs:
           # develop向けPRにレビューのコメントは1件も無く、PR本文の`## 検証結果`は
           # `review=unavailable`（判定を取得できませんでした）、リリースPRの表も全行が
           # 「記録なし」になっていた。prompt modeのclaude-code-actionは結果を自分では投稿しない。
-          claude_args: '--allowedTools "Bash(gh issue view:*),Bash(gh issue comment:*),Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr checks:*),Read,Grep,Glob"'
+          claude_args: '${{ steps.workflow_model.outputs.claude_args }} --allowedTools "Bash(gh issue view:*),Bash(gh issue comment:*),Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr checks:*),Read,Grep,Glob"'
           prompt: ${{ env.PROMPT_REVIEW }}
 
       # レビュー結果がPRへ残らないまま終わるのを塞ぐ(#2488)。上でallowedToolsへ
