@@ -42,6 +42,13 @@ export type ChangelogEntry = {
  */
 export const APP_CHANGELOG: ChangelogEntry[] = [
   {
+    version: "8.31.1",
+    date: "2026-10-04",
+    changes: [
+      "Codexによる計画レビューの結果が、Claudeのレビューと同じように自動で反映されるようになりました。計画レビュー中の通知や画面の更新が正しく動かない問題も直しています。また、撤回したレビューがリリースの集計に含まれてしまう問題を修正しました。",
+    ],
+  },
+  {
     version: "8.30.0",
     date: "2026-10-03",
     changes: [
