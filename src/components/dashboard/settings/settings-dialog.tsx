@@ -35,6 +35,7 @@ import type {
   CodexModelSetting,
   CodexLocalModel,
   DefaultDispatchAgent,
+  GithubActionsAgent,
   ModelPickEngine,
   PlanReviewAgent,
 } from "@/lib/app-settings";
@@ -48,6 +49,8 @@ type SettingsDialogProps = {
   currentUser: CurrentUser | null;
   autoRetryLimit: number;
   claudeModel: ClaudeModel;
+  githubActionsAgent?: GithubActionsAgent;
+  githubActionsCodexModel?: CodexLocalModel;
   claudeModelAssist: ClaudeModel;
   claudeLocalModel: ClaudeLocalModelSetting;
   codexModel: CodexModelSetting;
@@ -84,6 +87,8 @@ export function SettingsDialog({
   currentUser,
   autoRetryLimit,
   claudeModel,
+  githubActionsAgent = "claude",
+  githubActionsCodexModel = "gpt-5.6-terra",
   claudeModelAssist,
   claudeLocalModel,
   codexModel,
@@ -209,6 +214,8 @@ export function SettingsDialog({
                 <ExecutionSettingsSection
                   autoRetryLimit={autoRetryLimit}
                   claudeModel={claudeModel}
+                  githubActionsAgent={githubActionsAgent}
+                  githubActionsCodexModel={githubActionsCodexModel}
                   claudeModelAssist={claudeModelAssist}
                   claudeLocalModel={claudeLocalModel}
                   codexModel={codexModel}
