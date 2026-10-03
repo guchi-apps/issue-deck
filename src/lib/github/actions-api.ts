@@ -41,6 +41,8 @@ export type GithubApiWorkflowJobStep = {
 };
 
 export type GithubApiWorkflowJob = {
+  /** ジョブのID。ログの取得（`fetchWorkflowJobLogs`）に使う */
+  id?: number;
   /** ジョブ名（`build`・`lint-and-build`など）。#2777で内訳を出すために使う */
   name?: string;
   status: "queued" | "in_progress" | "completed" | string;
@@ -71,6 +73,25 @@ export async function fetchWorkflowRunJobs(
   }
   const data: { jobs: GithubApiWorkflowJob[] } = await res.json();
   return data.jobs;
+}
+
+/**
+ * ジョブのログ全文をテキストで取る（#3887）。GitHubは署名付きURLへ302で返すので、`fetch`の
+ * リダイレクト追従に任せる（別オリジンへは認証ヘッダが付かない）。
+ */
+export async function fetchWorkflowJobLogs(
+  owner: string,
+  repo: string,
+  jobId: number,
+  token: string,
+): Promise<string> {
+  const url = `${GITHUB_API}/repos/${owner}/${repo}/actions/jobs/${jobId}/logs`;
+  const res = await githubFetch(url, token);
+  if (!res.ok) {
+    const detail = await res.text().catch(() => "");
+    throw new GithubApiError(res.status, `GitHub API request failed: ${res.status} ${url} ${detail}`);
+  }
+  return res.text();
 }
 
 export async function cancelWorkflowRun(

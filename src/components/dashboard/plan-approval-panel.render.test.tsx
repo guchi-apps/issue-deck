@@ -229,7 +229,7 @@ describe("PlanApprovalPanel", () => {
     await waitFor(() => expect(screen.getByText("承認を送りました。")).toBeTruthy());
   });
 
-  it("Codexでは既定は同じモデルで継続し、選んだときだけ軽いモデルへの引き継ぎを送る", async () => {
+  it("実装に使うモデル欄を表示せずに承認を送る", async () => {
     const decidePlan = vi.fn().mockResolvedValue({ ok: true });
     render(
       <PlanApprovalPanel
@@ -239,9 +239,7 @@ describe("PlanApprovalPanel", () => {
       />,
     );
 
-    expect(screen.getByRole("button", { name: /同じモデルで継続/ })).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: /軽いモデルへ引き継ぐ/ }));
-    fireEvent.click(screen.getByRole("radio", { name: /GPT-6 Luna/ }));
+    expect(screen.queryByText("実装に使うモデル")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: /承認して実装へ進む/ }));
 
     await waitFor(() => {
@@ -249,7 +247,6 @@ describe("PlanApprovalPanel", () => {
         id: "req-1",
         decision: "approve",
         text: undefined,
-        handoffModel: "gpt-6-luna",
       });
     });
   });

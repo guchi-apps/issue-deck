@@ -901,3 +901,16 @@ kurashio・yoteiflowの`ios-testflight.yml`が失敗したまま止まったと�
   画面側は`PullRequestRepairButtons`が1か所で表示を受け持つ。一覧APIでは**PR1件ずつの変換
   （`toOpenPullRequest`）ではなく、summaryが揃ってから別の一巡で埋める**——CI状態の取得を
   まとめ取りへ組み替える予定（#1962）と同じ関数を奪い合わないため。
+
+## デプロイ失敗の帯から、原因を聞いて修正Issueを立てる（#3887）
+
+`DeployFailureAlert`（ブランチ画面・PR詳細の2か所）に「修正Issueを作成」と「原因をAIに聞く」を足した。
+再デプロイで直らない失敗の次の一手を、ログを別タブで読まずに取れるようにするためのもの。
+
+- **「原因をAIに聞く」**は`POST /api/repositories/deploy-failure/analysis`。画面が送るのはリポジトリとrun idだけで、
+  失敗ジョブとログ（末尾6,000文字）はサーバーがGitHubから読み直す。ログは`sanitizeDeployLog`で
+  トークン形式・`KEY=value`・`op://`・認証付きURLを伏せてからAIへ渡す。**返すのは提案まで。**
+- **「修正Issueを作成」**は起票しない。`DeployFailureFixIssueContext`経由でシェルの新規作成ダイアログを下書き入りで開き、
+  立てるかどうかは人が決める。分析済みなら推定原因とログ抜粋が本文へ入る。
+- 修正Issueのタイトルは`[デプロイ失敗の修正]`で始める。自動起票のデプロイ失敗Issue（`[デプロイ失敗]`）は
+  #3895で廃止したため、巡回の追跡・自動クローズの対象は無い。
