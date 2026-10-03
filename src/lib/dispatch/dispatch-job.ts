@@ -61,7 +61,7 @@ export type DispatchJobStatus =
  * - `CODE_REVIEW` … リポジトリ全体のコードレビューのセッションを立てる（#698）。`PLAN_REVIEW`と
  *   同じく`origin/develop`のスナップショットを読むだけで、指摘は**レビュー用に1件作ったIssueへの
  *   コメント**として返す。人が画面から押して起こす
- * - `MANUAL_STEP_SESSION` … 手作業Issueを実施するClaude Codeセッションを立てる（#2771）。
+ * - `MANUAL_STEP_SESSION` … 手作業Issueを実施するエージェントセッションを立てる（#2771）。
  *   手作業アシスタントの代行実行（`MANUAL_STEP`）が本文のコマンドをpollerが1件ずつ実行するのに
  *   対し、こちらは`LAUNCH`と同じくtmuxセッションを1本立て、本文の手順を止まるところまで
  *   流す（#2830。人が呼ばれるのは代行できない手順・失敗・クローズの可否のときだけで、
@@ -733,7 +733,7 @@ export type DispatchHostView = {
    */
   codexRemoteControlCapable: boolean | null;
   /**
-   * 手作業Issueを実施するClaude Codeセッション（#2771）を起こせるか。**`null`（未申告）は
+   * 手作業Issueを実施するエージェントセッション（#2771）を起こせるか。**`null`（未申告）は
    * 「できない」として扱う**（`crossRepoQuestionCapable`と同じ向き）。古いpollerは未知の種別を
    * `failed`で返すため、配ると押した起動が失われる。
    */
@@ -1515,6 +1515,7 @@ export type ManualStepSessionRejection =
   | "host_unknown"
   | "host_offline"
   | "manual_step_session_unsupported"
+  | "agent_not_capable"
   | "not_manual_step"
   | "already_queued"
   | "session_alive";
@@ -1530,12 +1531,14 @@ export function describeManualStepSessionRejection(
       return `${formatDispatchHostName(context.hostName)} が応答していません（最後の申告から時間が経ちすぎています）。`;
     case "manual_step_session_unsupported":
       return `${formatDispatchHostName(context.hostName)} のpollerが手作業セッションに対応していません（issue-deckを更新して再起動してください）。`;
+    case "agent_not_capable":
+      return `${formatDispatchHostName(context.hostName)} はCodex CLIでの手作業セッションに対応していません（codexが未導入か、pollerが古い可能性があります）。`;
     case "not_manual_step":
       return "手作業Issue（`71.manual-step`）ではないため、手作業セッションは起こせません。";
     case "already_queued":
       return "この手作業Issueには実行中または待機中の起動ジョブが既にあります。";
     case "session_alive":
-      return "この手作業Issueのセッションは既に動いています。続きはそのセッションへ追加指示を送るか、Claude Codeアプリから伝えてください。";
+      return "この手作業Issueのセッションは既に動いています。続きはそのセッションへ追加指示を送るか、起動したエージェントの対話画面から伝えてください。";
   }
 }
 
@@ -1545,15 +1548,22 @@ export function describeManualStepSessionRejection(
  * 断る」状態が生まれるため、投入側（`jobs.ts`）もこの関数を通す。
  */
 export function resolveManualStepSessionRejection(params: {
-  host: Pick<DispatchHostView, "online" | "manualStepSessionCapable"> | null | undefined;
+  host: Pick<DispatchHostView, "online" | "manualStepSessionCapable" | "codexCapable"> | null | undefined;
   isManualStepIssue: boolean;
   hasActiveJob: boolean;
   blockingSession: Pick<DispatchSessionView, "host" | "tmuxSessionName"> | null;
+  /** 省略時は従来どおりClaude Codeで起動する */
+  agent?: DispatchAgent;
 }): ManualStepSessionRejection | null {
   if (!params.isManualStepIssue) return "not_manual_step";
   if (!params.host) return "host_unknown";
   if (!params.host.online) return "host_offline";
   if (params.host.manualStepSessionCapable !== true) return "manual_step_session_unsupported";
+  // 手作業セッションのホスト情報は、この判定に必要な項目だけを持つ。通常の起動と同じく、
+  // Codexの選択には`codexCapable`の明示的な申告を求める。
+  if (params.agent === "codex" && params.host.codexCapable !== true) {
+    return "agent_not_capable";
+  }
   if (params.hasActiveJob) return "already_queued";
   if (params.blockingSession) return "session_alive";
   return null;

@@ -511,7 +511,7 @@ export function useDispatchState(enabled: boolean) {
    * 押した場所と表示が離れると話が通じない）。
    */
   /**
-   * 手作業Issueを実施するClaude Codeセッション（#2771）を積む。**失敗の理由は戻り値で返す**
+   * 手作業Issueを実施するエージェントセッション（#2771）を積む。**失敗の理由は戻り値で返す**
    * （`sendSessionControl`と同じ。押した場所の下に出す）。
    */
   const startManualStepSession = useCallback(
@@ -519,7 +519,8 @@ export function useDispatchState(enabled: boolean) {
       repositoryFullName: string;
       issueNumber: number;
       hostName: string;
-      model: ClaudeLocalModel;
+      agent: DispatchAgent;
+      model: ClaudeLocalModel | CodexLocalModel;
     }): Promise<{ ok: true } | { ok: false; message: string }> => {
       setIsSubmitting(true);
       try {
@@ -531,6 +532,7 @@ export function useDispatchState(enabled: boolean) {
             issue: params.issueNumber,
             host: params.hostName,
             kind: "manual_step_session",
+            agent: params.agent,
             model: params.model,
           }),
         });

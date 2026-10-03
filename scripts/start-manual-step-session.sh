@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 手作業Issue（`71.manual-step`）を、ユーザーと対話しながら実施するClaude Codeセッションの
+# 手作業Issue（`71.manual-step`）を、ユーザーと対話しながら実施するエージェントセッションの
 # ランチャー（#2771）。
 #
 # 使い方:
@@ -7,7 +7,7 @@
 #   scripts/start-manual-step-session.sh --prepare-only <owner> <repo> <issue番号>
 #
 # 呼び出し経路:
-#   issue-deckの画面「Claude Codeセッションで進める」（手作業アシスタント・Issue詳細の手作業パネル）
+#   issue-deckの画面「AIセッションで進める」（手作業アシスタント・Issue詳細の手作業パネル）
 #     → ジョブキュー（kind=MANUAL_STEP_SESSION）→ scripts/subpc-dispatch-poller.sh → このスクリプト
 #
 # ## 実装セッション（start-issue.sh）との違い
@@ -45,7 +45,10 @@
 # 環境変数:
 #   ISSUE_DECK_MANUAL_STEP_BASE         固定ディレクトリの置き場（cloneが無いリポジトリ用）
 #   ISSUE_DECK_SHARED_CONTEXT_DIR       共有知識リポジトリ（既定は ~/apps/_docs）
+#   ISSUE_DECK_AGENT                    起こすCLI（claude / codex。既定はclaude）
 #   ISSUE_DECK_CLAUDE_PERMISSION_MODE   claude の権限モード（既定は auto。#1205）
+#   ISSUE_DECK_CLAUDE_MODEL             このセッション用のClaudeモデル
+#   ISSUE_DECK_CODEX_MODEL              このセッション用のCodexモデル
 #   ISSUE_DECK_LAUNCHER_REEXEC          1なら同期コピーからの再実行を行わない（内部用・#1583）
 set -euo pipefail
 
@@ -100,8 +103,18 @@ for required_command in gh python3; do
     exit 1
   fi
 done
-if [[ "$PREPARE_ONLY" -eq 0 ]] && ! command -v claude >/dev/null 2>&1; then
-  echo "Error: claude コマンドが見つかりません。" >&2
+AGENT_KIND="${ISSUE_DECK_AGENT:-claude}"
+case "$AGENT_KIND" in
+  claude) AGENT_COMMAND="claude" ;;
+  codex) AGENT_COMMAND="codex" ;;
+  *)
+    echo "Error: 対応していないエージェントです: $AGENT_KIND（指定できるのは claude codex）" >&2
+    exit 1
+    ;;
+esac
+export ISSUE_DECK_AGENT="$AGENT_KIND"
+if [[ "$PREPARE_ONLY" -eq 0 ]] && ! command -v "$AGENT_COMMAND" >/dev/null 2>&1; then
+  echo "Error: $AGENT_COMMAND コマンドが見つかりません。" >&2
   exit 1
 fi
 
@@ -161,12 +174,12 @@ fi
 echo "#$ISSUE_NUMBER: 起動用プロンプトを生成しています..."
 ISSUE_JSON_FILE="$(mktemp)"
 printf '%s' "$ISSUE_JSON" >"$ISSUE_JSON_FILE"
-python3 - "$ISSUE_JSON_FILE" "$PROMPT_TEMPLATE" "$FULL_NAME" "$SESSION_DIR" "$REPO_DIR" "$(hostname)" \
+python3 - "$ISSUE_JSON_FILE" "$PROMPT_TEMPLATE" "$FULL_NAME" "$SESSION_DIR" "$REPO_DIR" "$(hostname)" "$LAUNCHER_SCRIPTS_DIR/submit-question.sh" \
   >"$PROMPT_FILE" <<'PY'
 import json
 import sys
 
-issue_json_path, template_path, repository, session_dir, repo_dir, host_name = sys.argv[1:7]
+issue_json_path, template_path, repository, session_dir, repo_dir, host_name, question_submit_command = sys.argv[1:8]
 with open(issue_json_path, encoding="utf-8") as f:
     issue = json.load(f)
 with open(template_path, encoding="utf-8") as f:
@@ -194,6 +207,7 @@ replacements = {
     "{{SESSION_DIR}}": session_dir,
     "{{REPO_DIR}}": f"`{repo_dir}`" if repo_dir else "(このホストにcloneがありません)",
     "{{HOST_NAME}}": host_name,
+    "{{QUESTION_SUBMIT_COMMAND}}": question_submit_command,
 }
 result = template
 for placeholder, value in replacements.items():
@@ -226,8 +240,8 @@ build_env_prefix() {
   prefix+="export ISSUE_DECK_SESSION_KIND=manual-step; "
   # **前回の会話を引き継がない。** cwdはIssueごとではないので、残っている会話は別の手作業のもの
   prefix+="export ISSUE_DECK_CLAUDE_RESUME=0; "
-  for var in ISSUE_DECK_SHARED_CONTEXT_DIR ISSUE_DECK_CLAUDE_PERMISSION_MODE \
-    ISSUE_DECK_SESSION_REAPABLE ISSUE_DECK_SESSION_STATE_DIR ISSUE_DECK_CLAUDE_MODEL; do
+  for var in ISSUE_DECK_SHARED_CONTEXT_DIR ISSUE_DECK_AGENT ISSUE_DECK_CLAUDE_PERMISSION_MODE \
+    ISSUE_DECK_SESSION_REAPABLE ISSUE_DECK_SESSION_STATE_DIR ISSUE_DECK_CLAUDE_MODEL ISSUE_DECK_CODEX_MODEL; do
     value="${!var:-}"
     [[ -n "$value" ]] || continue
     prefix+="export $var=$(printf '%q' "$value"); "

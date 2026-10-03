@@ -3484,9 +3484,19 @@ run_job() {
       report_job "$job_id" failed "手作業セッションのランチャーがありません（$MANUAL_STEP_SESSION_LAUNCHER）。"
       return 0
     fi
+    # 通常の実装セッションと同じく、`auto`は環境変数として渡さない。Codexへ`-m auto`、
+    # Claude Codeへ`--model auto`を渡すとCLIの既定に委ねるのではなく不正なモデル指定になる。
+    local -a manual_session_env=(env "ISSUE_DECK_AGENT=$agent")
+    if [[ "$agent" == "claude" && "$claude_local_model" != "auto" ]]; then
+      manual_session_env+=("ISSUE_DECK_CLAUDE_MODEL=$claude_local_model")
+    fi
+    if [[ "$agent" == "codex" && "$codex_model" != "auto" ]]; then
+      manual_session_env+=("ISSUE_DECK_CODEX_MODEL=$codex_model")
+    fi
     launch_and_report "$job_id" "$(expected_session_name "$repo" "$issue_number")" \
       "手作業セッションを起動しています" \
-      bash "$MANUAL_STEP_SESSION_LAUNCHER" "$owner" "$repo" "$issue_number"
+      "${manual_session_env[@]}" \
+        bash "$MANUAL_STEP_SESSION_LAUNCHER" "$owner" "$repo" "$issue_number"
     return 0
   fi
 

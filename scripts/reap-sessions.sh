@@ -327,7 +327,7 @@ reap_one() {
     local issue_label restart_hint restart_hint_idle
     if [[ "$kind" == "manual-step" ]]; then
       issue_label="手作業Issue"
-      restart_hint="続ける場合は、issue-deckの「Claude Codeセッションで進める」から起動し直してください（本文のチェックから続きます）。"
+      restart_hint="続ける場合は、issue-deckの「AIセッションで進める」から起動し直してください（本文のチェックから続きます）。"
       restart_hint_idle="$restart_hint"
     else
       issue_label="質問Issue"

@@ -1611,10 +1611,10 @@ export function POST(request: NextRequest) {
     [`manual-step-session-panel.tsx`](../src/components/dashboard/manual-step-session-panel.tsx)・
     [`scripts/start-manual-step-session.sh`](../scripts/start-manual-step-session.sh)・
     [`scripts/prompts/manual-step-agent.md`](../scripts/prompts/manual-step-agent.md)）。
-    アシスタントの最初の画面とIssue詳細の手作業パネルの「Claude Codeセッションで進める」から、
+    アシスタントの最初の画面とIssue詳細の手作業パネルの「AIセッションで進める」から、Claude CodeまたはCodexを選び、
     `DispatchJob`の`MANUAL_STEP_SESSION`を積み、pollerがworktree無しのtmuxセッションを立てる。
     本文・コメント・環境から目的達成に必要な作業を自律して実行し、本人操作・秘密値・未確定の
-    不可逆な変更または解消できない失敗だけを`AskUserQuestion`へ戻す（#3870）。本文から抽出する
+    不可逆な変更または解消できない失敗だけを質問へ戻す（Claude Codeは`AskUserQuestion`、Codexは`submit-question.sh`。#3870）。本文から抽出する
     一覧は既知の手順であって実行範囲の上限ではない。押せない理由は
     `resolveManualStepSessionRejection`（`lib/dispatch/dispatch-job.ts`）。
     設計は[docs/multi-agent/subpc-dispatch.md](multi-agent/subpc-dispatch.md#手作業issueをセッションと対話しながら実施する2771)。

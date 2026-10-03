@@ -1976,6 +1976,30 @@ describe("enqueueManualStepSessionJob", () => {
     );
   });
 
+  it("選択したCodexとモデルを手作業セッションのジョブに保存する", async () => {
+    dispatchHostFindUnique.mockResolvedValue(host({ manualStepSessionCapable: true, codexCapable: true }));
+    const result = await enqueueManualStepSessionJob({
+      repositoryFullName: REPOSITORY,
+      issueNumber: 2771,
+      hostName: "subpc",
+      agent: "codex",
+      codexModel: "gpt-5.6-terra",
+      requestedByUserId: "user-1",
+      now: NOW,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(dispatchJobCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          kind: "MANUAL_STEP_SESSION",
+          agent: "codex",
+          codexModel: "gpt-5.6-terra",
+        }),
+      }),
+    );
+  });
+
   it("モデルが省略された既存の要求では設定の既定に委ねる", async () => {
     await enqueueManualStepSessionJob({
       repositoryFullName: REPOSITORY,

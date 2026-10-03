@@ -159,6 +159,7 @@ describe("ManualStepSessionPanel（#2771）", () => {
       repositoryFullName: "guchi-apps/issue-deck",
       issueNumber: 2790,
       hostName: "subpc",
+      agent: "claude",
       model: "sonnet",
     });
   });
@@ -173,6 +174,25 @@ describe("ManualStepSessionPanel（#2771）", () => {
         expect.objectContaining({ model: "opus" }),
       ),
     );
+  });
+
+  it("Codexとそのモデルを選んで手作業セッションの起動要求へ渡す", async () => {
+    render(
+      <ManualStepSessionPanel
+        issue={issue}
+        dispatch={makeDispatch({ hosts: [makeHost({ codexCapable: true })] })}
+      />,
+    );
+    fireEvent.click(screen.getByRole("radio", { name: "Codex CLI" }));
+    fireEvent.click(screen.getByRole("radio", { name: /GPT-6 Sol/, checked: false }));
+    fireEvent.click(screen.getByRole("button", { name: START_BUTTON }));
+
+    await waitFor(() =>
+      expect(startManualStepSession).toHaveBeenCalledWith(
+        expect.objectContaining({ agent: "codex", model: "gpt-6-sol" }),
+      ),
+    );
+    expect(screen.getByText(/Remote Controlのリンクは出ません/)).toBeTruthy();
   });
 
   // 古いpollerへ配ると未知の種別として`failed`になり、押した起動が失われる

@@ -2219,7 +2219,11 @@ describe("エージェントの選択（#2505）", () => {
 });
 
 describe("resolveManualStepSessionRejection（#2771）", () => {
-  const host = { online: true, manualStepSessionCapable: true as boolean | null };
+  const host = {
+    online: true,
+    manualStepSessionCapable: true as boolean | null,
+    codexCapable: true as boolean | null,
+  };
   const base = { host, isManualStepIssue: true, hasActiveJob: false, blockingSession: null };
 
   it("手作業Issueで、対応したオンラインのホストがあり、動いているセッションが無ければ押せる", () => {
@@ -2253,6 +2257,17 @@ describe("resolveManualStepSessionRejection（#2771）", () => {
         blockingSession: { host: "subpc", tmuxSessionName: "issue-deck-issue-1" },
       }),
     ).toBe("session_alive");
+  });
+
+  it("Codexを選ぶときは対応を申告したホストだけを受け入れる", () => {
+    expect(resolveManualStepSessionRejection({ ...base, agent: "codex" })).toBeNull();
+    expect(
+      resolveManualStepSessionRejection({
+        ...base,
+        host: { ...host, codexCapable: null },
+        agent: "codex",
+      }),
+    ).toBe("agent_not_capable");
   });
 
   it("SESSION_LAUNCH_JOB_KINDS・SESSION_REPORTED_JOB_KINDSに含まれる（枠を使い、セッションが報告される）", () => {
