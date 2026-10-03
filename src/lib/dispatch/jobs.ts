@@ -894,7 +894,7 @@ export type EnqueueManualStepSessionJobResult =
   | { ok: false; rejection: ManualStepSessionRejection; message: string };
 
 /**
- * 手作業Issueを実施するClaude Codeセッション（#2771）を積む。
+ * 手作業Issueを実施するエージェントセッション（#2771）を積む。
  *
  * 横断質問（`enqueueCrossRepoQuestionJob`）と同じ作法で、**動いているセッションがあれば弾く**
  * （同じIssueにセッションは1本）。対象が`71.manual-step`のIssueかどうかは**DBのIssueキャッシュの
@@ -906,12 +906,17 @@ export async function enqueueManualStepSessionJob(params: {
   repositoryFullName: string;
   issueNumber: number;
   hostName: string;
+  /** 起こすエージェント。省略時は従来どおりClaude Code。 */
+  agent?: DispatchAgent;
   /** この手作業セッションだけに指定するClaude Codeのモデル。省略時は設定の既定に従う。 */
   claudeModel?: ClaudeLocalModel | null;
+  /** この手作業セッションだけに指定するCodexのモデル。省略時は設定の既定に従う。 */
+  codexModel?: CodexLocalModel | null;
   requestedByUserId: string | null;
   now?: Date;
 }): Promise<EnqueueManualStepSessionJobResult> {
   const now = params.now ?? new Date();
+  const agent = params.agent ?? DEFAULT_DISPATCH_AGENT;
   await expireStaleDispatchJobs(now);
 
   const reject = (rejection: ManualStepSessionRejection): EnqueueManualStepSessionJobResult => ({
@@ -946,12 +951,14 @@ export async function enqueueManualStepSessionJob(params: {
       ? {
           online: isDispatchHostOnline(host.lastSeenAt, now),
           manualStepSessionCapable: host.manualStepSessionCapable,
+          codexCapable: host.codexCapable,
         }
       : null,
     isManualStepIssue: issue !== null && issue.labels.some((l) => l.name === "71.manual-step"),
     // 二重投入はactiveKeyのunique制約が確実に止める（下のcatch）
     hasActiveJob: false,
     blockingSession,
+    agent,
   });
   if (rejection) return reject(rejection);
 
@@ -962,7 +969,9 @@ export async function enqueueManualStepSessionJob(params: {
         issueNumber: params.issueNumber,
         targetHost: params.hostName,
         kind: "MANUAL_STEP_SESSION",
+        agent,
         claudeModel: params.claudeModel ?? null,
+        codexModel: params.codexModel ?? null,
         status: "QUEUED",
         activeKey: buildDispatchActiveKey(
           params.repositoryFullName,
