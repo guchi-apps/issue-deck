@@ -540,7 +540,7 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
 - **設定の「障害状況」区分はGitHubの障害状況だけを出す**（#3827）。かつてあった「GitHub使用量」カード
   （`API`のレート制限・呼び出し回数と`ACTIONS`の実行時間。#2212）はStatusHubで扱うため、表示・取得フック・
   専用GET API・Actions課金の取得（`actions-billing.ts`）ごと削除した。呼び出し回数の記録（`lib/github/api-usage.ts`）と
-  `GET /api/github/rate-limit/apps`は残る。`GITHUB_BILLING_TOKEN`は読む場所が無くなったが、撤去は別Issueで扱う。
+  `GET /api/github/rate-limit/apps`は残る。
   障害状況カードの右上には、`GET /api/github/status`が返す`fetchedAt`を「取得 10/3 13:15」の形で出す。
   カードはPC・スマホ共通の`settings/status-section.tsx`が組み立てる。
 - **issue-deck自身が投げたAI API呼び出しは、機能別に計上している（画面には出さない）**（#2347）。
