@@ -197,8 +197,8 @@ function buildIssue(overrides: Partial<Issue> = {}): Issue {
   };
 }
 
-function renderDetail(issue: Issue, overrides: Partial<ComponentProps<typeof IssueDetail>> = {}) {
-  return render(
+function detailElement(issue: Issue, overrides: Partial<ComponentProps<typeof IssueDetail>> = {}) {
+  return (
     <IssueDetail
       issue={issue}
       issues={[issue]}
@@ -218,15 +218,19 @@ function renderDetail(issue: Issue, overrides: Partial<ComponentProps<typeof Iss
       claudeLocalModel="sonnet"
       codexModel="gpt-5.6-terra"
       {...overrides}
-    />,
+    />
   );
 }
 
-function renderMobileDetail(
+function renderDetail(issue: Issue, overrides: Partial<ComponentProps<typeof IssueDetail>> = {}) {
+  return render(detailElement(issue, overrides));
+}
+
+function mobileDetailElement(
   issue: Issue,
   overrides: Partial<ComponentProps<typeof MobileIssueDetail>> = {},
 ) {
-  return render(
+  return (
     <MobileIssueDetail
       issue={issue}
       issues={[issue]}
@@ -247,8 +251,15 @@ function renderMobileDetail(
       onSelectRepository={vi.fn()}
       onStartManualStepGuide={vi.fn()}
       {...overrides}
-    />,
+    />
   );
+}
+
+function renderMobileDetail(
+  issue: Issue,
+  overrides: Partial<ComponentProps<typeof MobileIssueDetail>> = {},
+) {
+  return render(mobileDetailElement(issue, overrides));
 }
 
 /** コメント入力欄そのもの。質問Issueではプレースホルダが変わる（#2345） */
@@ -275,6 +286,81 @@ function typeDraft(text: string): void {
 }
 
 afterEach(cleanup);
+
+describe("計画レビューのコメント再取得（#3936）", () => {
+  const plan = {
+    id: "plan-1",
+    repositoryFullName: repository.fullName,
+    issueNumber: 1,
+    hostName: "subpc",
+    plan: "## 要約\n\n計画",
+    status: "WAITING",
+    createdAt: new Date(Date.now() - 60_000).toISOString(),
+    expiresAt: new Date(Date.now() + 60 * 60_000).toISOString(),
+    decidedAt: null,
+    delivered: false,
+  };
+  const reviewJob = {
+    kind: "PLAN_REVIEW",
+    repositoryFullName: repository.fullName,
+    issueNumber: 1,
+    status: "SUCCEEDED",
+    createdAt: new Date(Date.now() - 30_000).toISOString(),
+    finishedAt: new Date(Date.now() - 20_000).toISOString(),
+    planReviewDecidedAt: new Date(Date.now() - 10_000).toISOString(),
+    reviewPostedAt: new Date(Date.now() - 15_000).toISOString(),
+  } as DispatchJobView;
+
+  afterEach(() => {
+    dispatchState.planRequests = [];
+    dispatchState.jobs = [];
+    commentsState.comments = comments;
+    commentsState.refresh.mockClear();
+  });
+
+  for (const [name, element] of [
+    ["PC", detailElement],
+    ["モバイル", mobileDetailElement],
+  ] as const) {
+    it(`${name}は計画の出し直しとレビュー投稿のたびにコメントを取り直す`, () => {
+      const issue = buildIssue({ title: "計画のレビューを確認する" });
+      dispatchState.planRequests = [plan];
+      // 手元に前の版のレビューがあると、従来の定期再取得は止まっていた。
+      commentsState.comments = [
+        { ...comments[0], id: "old-plan", body: "<!-- issue-deck:session-plan -->", authorTrusted: true },
+        { ...comments[0], id: "old-review", body: "<!-- supervisor:plan-review -->", authorTrusted: true },
+      ];
+
+      const view = render(element(issue));
+      expect(commentsState.refresh).toHaveBeenCalledTimes(1);
+
+      dispatchState.planRequests = [{ ...plan, id: "plan-2" }];
+      view.rerender(element(issue));
+      expect(commentsState.refresh).toHaveBeenCalledTimes(2);
+
+      dispatchState.jobs = [reviewJob];
+      view.rerender(element(issue));
+      expect(commentsState.refresh).toHaveBeenCalledTimes(3);
+    });
+
+    it(`${name}はレビュー到着後に推奨と承認操作を同じ欄に表示する`, () => {
+      dispatchState.planRequests = [plan];
+      commentsState.comments = [
+        { ...comments[0], id: "plan", body: "<!-- issue-deck:session-plan -->", authorTrusted: true },
+        {
+          ...comments[0],
+          id: "review",
+          body: "## 計画レビュー（G1）\n\n指摘なし。\n\n推奨: このまま承認してよい\n\n<!-- supervisor:plan-review -->",
+          authorTrusted: true,
+        },
+      ];
+
+      render(element(buildIssue({ title: "計画のレビューを確認する" })));
+      expect(screen.getByText(/このまま承認してよい/)).toBeTruthy();
+      expect(screen.getByRole("button", { name: /承認して実装へ進む/ })).toBeTruthy();
+    });
+  }
+});
 
 describe("IssueDetailのコメント欄の下の操作列（#1770・#2345）", () => {
   it("回答済みの質問Issueでは「回答を確認してクローズ」が出る", () => {
