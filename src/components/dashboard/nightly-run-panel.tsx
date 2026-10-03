@@ -1,9 +1,10 @@
 "use client";
 
 import { CalendarClock, Hourglass, Loader2, RefreshCw, Timer, X } from "lucide-react";
-import { useMemo, type ReactNode } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 
 import { ApiErrorMessage } from "@/components/dashboard/api-error-message";
+import { QuotaRuler } from "@/components/dashboard/quota-ruler";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -50,6 +51,7 @@ import {
   type NextWindowRunSettings,
   type NextWindowRunWindowView,
 } from "@/lib/next-window-run";
+import { buildWindowTimeline, type WindowTimeline } from "@/lib/quota-ruler";
 import { getRepoColor } from "@/lib/repo-color";
 import { cn } from "@/lib/utils";
 
@@ -120,7 +122,12 @@ export function NightlyRunPanel({
         </>
       ) : (
         <>
-          <ClaudeWindowMeter window={state.nextWindow.window} settings={state.nextWindow.settings} />
+          <ClaudeWindowMeter
+            window={state.nextWindow.window}
+            settings={state.nextWindow.settings}
+            isSubmitting={isSubmitting}
+            onUpdateSettings={onUpdateSettings}
+          />
 
           <KeepAliveSection
             keepAlive={state.keepAlive}
@@ -157,27 +164,6 @@ export function NightlyRunPanel({
                     <span>次の5時間枠での実行を有効にする</span>
                   </label>
                   <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                    <span>起動する残り時間</span>
-                    <Select
-                      value={String(state.nextWindow.settings.leadMinutes)}
-                      disabled={isSubmitting}
-                      onValueChange={(value) =>
-                        onUpdateSettings({ nextWindow: { leadMinutes: Number(value) } })
-                      }
-                    >
-                      <SelectTrigger size="sm" className="w-24">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {NEXT_WINDOW_RUN_LEAD_MINUTES_OPTIONS.map((minutes) => (
-                          <SelectItem key={minutes} value={String(minutes)}>
-                            {minutes}分
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
                     <span>起動の間隔</span>
                     <Select
                       value={String(state.nextWindow.settings.intervalMinutes)}
@@ -199,12 +185,6 @@ export function NightlyRunPanel({
                     </Select>
                   </div>
                 </div>
-                <FloorSettings
-                  settings={state.nextWindow.settings}
-                  compact={compact}
-                  isSubmitting={isSubmitting}
-                  onUpdateSettings={onUpdateSettings}
-                />
                 <BulkModelSettings
                   settings={state.nextWindow.settings}
                   compact={compact}
@@ -244,70 +224,99 @@ export function NightlyRunPanel({
   );
 }
 
+type MeterEditor = "fiveHour" | "weekly" | "lead";
+
 /**
- * いまのClaude 5時間枠と週間枠。**「AI使用量」画面と同じ値**（`/api/claude/usage`）で、ここでは
- * 予約の起動時刻と、残り枠の下限（#3100）に触れているかを読むために出す。取りに行っていない
- * （次枠実行がOFFで予定も無い）ときは出さない。
+ * いまのClaude 5時間枠と週間枠、起動するタイミング。**「AI使用量」画面と同じ値**（`/api/claude/usage`）で、
+ * 予約の起動時刻と、残り枠の下限（#3100）に触れているかを読むために出す。
+ *
+ * **各行の「設定」を押すと、直下に横スクロールの目盛り帯が開く**（#3821）。残り枠の下限と
+ * 「起動する残り時間」はここで決める（かつては下のセレクトだった）。枠を取りに行っていない
+ * （次枠実行がOFFで予定も無い）ときも、使用率を「—」にして行と「設定」は出す（出さないと
+ * ONにする前に値を決められなくなるため）。
  */
 function ClaudeWindowMeter({
   window,
   settings,
+  isSubmitting,
+  onUpdateSettings,
 }: {
   window: NextWindowRunWindowView | null;
   settings: NextWindowRunSettings;
+  isSubmitting: boolean;
+  onUpdateSettings: (patch: ScheduledRunSettingsPatch) => void;
 }) {
   // 残り時間の表示だけは時計に依る（`useNow`。取り直しの間隔は`useNightlyRun`と同じ30秒）。
   // **描画中に`Date.now()`を読まない**（`react-hooks/purity`）
   const now = useNow();
-  if (!window) return null;
-  if (window.phase === "unknown") {
-    return (
-      <p className="rounded-lg border border-dashed p-3 text-xs text-muted-foreground">
-        Claudeの5時間枠の状況を取得できていません。取得できるまで次枠実行は起動しません。
-      </p>
-    );
-  }
+  // 開く目盛り帯は同時に1つだけ
+  const [editing, setEditing] = useState<MeterEditor | null>(null);
+  const toggle = (key: MeterEditor) => setEditing((current) => (current === key ? null : key));
+  const unknown = window?.phase === "unknown";
+  const live = window && !unknown ? window : null;
 
   // `useNow`は最初の描画で`null`を返す（サーバーとクライアントで時刻がずれないようにするため）。
   // その間はカウントダウンを出さず、絶対時刻だけを出す
   const countdown =
-    window.resetsAt && now !== null
-      ? formatResetCountdown(new Date(window.resetsAt).getTime() / 1000, now)
+    live?.resetsAt && now !== null
+      ? formatResetCountdown(new Date(live.resetsAt).getTime() / 1000, now)
       : null;
-  const fiveHourText =
-    (window.phase === "idle"
-      ? "枠は動いていません"
-      : window.resetsAt
-        ? `${formatTimeOfDay(window.resetsAt)}にリセット${countdown ? `（${countdown}）` : ""}`
-        : "") +
-    (window.opensAt && window.phase === "waiting"
-      ? ` ・ ${formatTimeOfDay(window.opensAt)}から起動`
-      : "");
-  const weeklyText = window.weeklyResetsAt
-    ? `${formatMonthDay(window.weeklyResetsAt)} ${formatTimeOfDay(window.weeklyResetsAt)}にリセット`
+  const fiveHourText = live
+    ? (live.phase === "idle"
+        ? "枠は動いていません"
+        : live.resetsAt
+          ? `${formatTimeOfDay(live.resetsAt)}にリセット${countdown ? `（${countdown}）` : ""}`
+          : "") +
+      (live.opensAt && live.phase === "waiting" ? ` ・ ${formatTimeOfDay(live.opensAt)}から起動` : "")
+    : "";
+  const weeklyText = live?.weeklyResetsAt
+    ? `${formatMonthDay(live.weeklyResetsAt)} ${formatTimeOfDay(live.weeklyResetsAt)}にリセット`
     : "";
   const showFloorLegend =
     settings.fiveHourFloorPercent > 0 ||
-    (window.weeklyUsedPercent !== null && settings.weeklyFloorPercent > 0);
+    (live?.weeklyUsedPercent != null && settings.weeklyFloorPercent > 0);
+  // 動いている枠があるときだけ、枠の上の「いま」と起動位置を引ける
+  const timeline =
+    live && live.phase !== "idle" && live.resetsAt
+      ? buildWindowTimeline(live.resetsAt, now, settings.leadMinutes)
+      : null;
+
+  const floorEditor = (key: "fiveHourFloorPercent" | "weeklyFloorPercent", label: string) => (
+    <FloorRuler
+      label={label}
+      value={settings[key]}
+      disabled={isSubmitting}
+      onCommit={(percent) => onUpdateSettings({ nextWindow: { [key]: percent } })}
+    />
+  );
 
   return (
-    <div className="flex flex-col gap-2.5 rounded-lg border p-3">
+    <div className="flex flex-col gap-3 rounded-lg border p-3">
+      {unknown && (
+        <p className="rounded-md border border-dashed p-2 text-xs text-muted-foreground">
+          Claudeの5時間枠の状況を取得できていません。取得できるまで次枠実行は起動しません。
+        </p>
+      )}
       <QuotaMeterRow
         label="いまの5時間枠"
-        usedPercent={window.usedPercent}
+        usedPercent={live?.usedPercent ?? null}
         floorPercent={settings.fiveHourFloorPercent}
-        blocked={window.quotaBlock?.window === "fiveHour"}
+        blocked={live?.quotaBlock?.window === "fiveHour"}
         text={fiveHourText}
+        settingOpen={editing === "fiveHour"}
+        onToggleSetting={() => toggle("fiveHour")}
+        editor={editing === "fiveHour" ? floorEditor("fiveHourFloorPercent", "5時間枠") : null}
       />
-      {window.weeklyUsedPercent !== null && (
-        <QuotaMeterRow
-          label="週間枠"
-          usedPercent={window.weeklyUsedPercent}
-          floorPercent={settings.weeklyFloorPercent}
-          blocked={window.quotaBlock?.window === "weekly"}
-          text={weeklyText}
-        />
-      )}
+      <QuotaMeterRow
+        label="週間枠"
+        usedPercent={live?.weeklyUsedPercent ?? null}
+        floorPercent={settings.weeklyFloorPercent}
+        blocked={live?.quotaBlock?.window === "weekly"}
+        text={weeklyText}
+        settingOpen={editing === "weekly"}
+        onToggleSetting={() => toggle("weekly")}
+        editor={editing === "weekly" ? floorEditor("weeklyFloorPercent", "週間枠") : null}
+      />
       {showFloorLegend && (
         <p className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
           <span
@@ -318,6 +327,15 @@ function ClaudeWindowMeter({
           斜線は下限を下回る範囲です。ここに入っている間は起動しません
         </p>
       )}
+      <LaunchTimingRow
+        leadMinutes={settings.leadMinutes}
+        timeline={timeline}
+        resetsAt={live?.resetsAt ?? null}
+        open={editing === "lead"}
+        disabled={isSubmitting}
+        onToggle={() => toggle("lead")}
+        onCommit={(minutes) => onUpdateSettings({ nextWindow: { leadMinutes: minutes } })}
+      />
     </div>
   );
 }
@@ -328,39 +346,178 @@ const FLOOR_ZONE_STYLE = {
     "repeating-linear-gradient(135deg, rgb(245 158 11 / 0.3) 0 3px, transparent 3px 6px)",
 } as const;
 
+function SettingButton({ open, onClick, label }: { open: boolean; onClick: () => void; label: string }) {
+  return (
+    <Button
+      type="button"
+      variant={open ? "default" : "outline"}
+      size="sm"
+      className="h-6 rounded-full px-2.5 text-[11px]"
+      aria-pressed={open}
+      aria-label={`${label}を設定`}
+      onClick={onClick}
+    >
+      設定
+    </Button>
+  );
+}
+
 function QuotaMeterRow({
   label,
   usedPercent,
   floorPercent,
   blocked,
   text,
+  settingOpen,
+  onToggleSetting,
+  editor,
 }: {
   label: string;
   usedPercent: number | null;
   floorPercent: number;
   blocked: boolean;
   text: string;
+  settingOpen: boolean;
+  onToggleSetting: () => void;
+  editor: ReactNode;
 }) {
   return (
-    <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
-      <span className="min-w-20 text-[11px] text-muted-foreground">{label}</span>
-      <span className="font-mono text-sm font-semibold tabular-nums">
-        {usedPercent === null ? "—" : `${Math.round(usedPercent)}%`}
-      </span>
-      <div className="relative h-2 min-w-24 flex-1 overflow-hidden rounded-full bg-muted">
-        <div
-          className={cn("h-full rounded-full transition-[width]", blocked ? "bg-amber-500" : "bg-primary")}
-          style={{ width: `${Math.min(100, Math.max(0, usedPercent ?? 0))}%` }}
-        />
-        {floorPercent > 0 && (
+    <div className="flex flex-col gap-1.5">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+        <span className="min-w-20 text-[11px] text-muted-foreground">{label}</span>
+        <span className="font-mono text-sm font-semibold tabular-nums">
+          {usedPercent === null ? "—" : `${Math.round(usedPercent)}%`}
+        </span>
+        <div className="relative h-2 min-w-24 flex-1 overflow-hidden rounded-full bg-muted">
           <div
-            className="absolute inset-y-0 right-0 border-l-2 border-amber-500"
-            style={{ ...FLOOR_ZONE_STYLE, width: `${floorPercent}%` }}
-            aria-hidden
+            className={cn("h-full rounded-full transition-[width]", blocked ? "bg-amber-500" : "bg-primary")}
+            style={{ width: `${Math.min(100, Math.max(0, usedPercent ?? 0))}%` }}
           />
-        )}
+          {floorPercent > 0 && (
+            <div
+              className="absolute inset-y-0 right-0 border-l-2 border-amber-500"
+              style={{ ...FLOOR_ZONE_STYLE, width: `${floorPercent}%` }}
+              aria-hidden
+            />
+          )}
+        </div>
+        <SettingButton open={settingOpen} onClick={onToggleSetting} label={`${label}の下限`} />
+        {text && <span className="basis-full text-[11px] text-muted-foreground">{text}</span>}
       </div>
-      <span className="basis-full text-[11px] text-muted-foreground">{text}</span>
+      {editor}
+    </div>
+  );
+}
+
+/** 残り枠の下限（0は制限しない）を選ぶ目盛り帯。`QuotaMeterRow`の直下に開く */
+function FloorRuler({
+  label,
+  value,
+  disabled,
+  onCommit,
+}: {
+  label: string;
+  value: number;
+  disabled: boolean;
+  onCommit: (percent: number) => void;
+}) {
+  return (
+    <div className="flex flex-col gap-1">
+      <div className="flex flex-wrap items-baseline justify-between gap-2 text-[11px] text-muted-foreground">
+        <span>残りがこの値を下回っている間は起動を見送ります</span>
+        <strong className="font-mono text-sm text-primary">
+          {value === 0 ? "制限しない" : `残り${value}%`}
+        </strong>
+      </div>
+      <QuotaRuler
+        options={NEXT_WINDOW_RUN_FLOOR_PERCENT_OPTIONS}
+        value={value}
+        pxPerUnit={7}
+        formatTick={(percent) => (percent === 0 ? "なし" : `${percent}%`)}
+        formatValue={(percent) => (percent === 0 ? "制限しない" : `${percent}%`)}
+        ariaLabel={`${label}の下限`}
+        disabled={disabled}
+        onCommit={onCommit}
+      />
+      <p className="text-[11px] text-muted-foreground">目盛りを左右にスクロール（左右キーでも動かせます）</p>
+    </div>
+  );
+}
+
+/** 「起動するタイミング」行。5時間枠の帯に「いま」と起動位置を引き、「設定」で起動位置を動かす */
+function LaunchTimingRow({
+  leadMinutes,
+  timeline,
+  resetsAt,
+  open,
+  disabled,
+  onToggle,
+  onCommit,
+}: {
+  leadMinutes: number;
+  timeline: WindowTimeline | null;
+  resetsAt: string | null;
+  open: boolean;
+  disabled: boolean;
+  onToggle: () => void;
+  onCommit: (minutes: number) => void;
+}) {
+  return (
+    <div className="flex flex-col gap-1.5 border-t pt-3">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+        <span className="min-w-20 text-[11px] text-muted-foreground">起動するタイミング</span>
+        <span className="font-mono text-sm font-semibold tabular-nums">残り{leadMinutes}分</span>
+        <SettingButton open={open} onClick={onToggle} label="起動する残り時間" />
+      </div>
+      {timeline ? (
+        <>
+          <div className="relative h-2 rounded-full bg-muted" role="img" aria-label="5時間枠のどこで起動するか">
+            {timeline.nowPercent !== null && (
+              <div
+                className="absolute inset-y-0 left-0 rounded-full bg-muted-foreground/40"
+                style={{ width: `${timeline.nowPercent}%` }}
+              />
+            )}
+            <div
+              className="absolute -inset-y-1 w-0.5 -translate-x-1/2 rounded bg-primary"
+              style={{ left: `${timeline.launchPercent}%` }}
+              aria-hidden
+            />
+            {timeline.nowPercent !== null && (
+              <div
+                className="absolute -inset-y-1.5 w-0.5 -translate-x-1/2 bg-foreground"
+                style={{ left: `${timeline.nowPercent}%` }}
+                aria-hidden
+              />
+            )}
+          </div>
+          <p className="text-[11px] text-muted-foreground">
+            {formatTimeOfDay(timeline.launchAtIso)}に起動
+            {resetsAt && `（${formatTimeOfDay(resetsAt)}にリセット）`}
+            {timeline.nowPercent !== null && " ・ 青い線が起動位置、黒い線がいま"}
+          </p>
+        </>
+      ) : (
+        <p className="text-[11px] text-muted-foreground">
+          動いている枠が無いときは待たずに起動します。動いている枠があるときは、リセットの{leadMinutes}
+          分前から1件ずつ起動します
+        </p>
+      )}
+      {open && (
+        <div className="flex flex-col gap-1">
+          <p className="text-[11px] text-muted-foreground">5時間枠が切れる何分前に起動するか。右へ動かすほど早く起動します</p>
+          <QuotaRuler
+            options={NEXT_WINDOW_RUN_LEAD_MINUTES_OPTIONS}
+            value={leadMinutes}
+            pxPerUnit={2.2}
+            formatTick={(minutes) => `${minutes}分`}
+            formatValue={(minutes) => `残り${minutes}分`}
+            ariaLabel="起動する残り時間"
+            disabled={disabled}
+            onCommit={onCommit}
+          />
+        </div>
+      )}
     </div>
   );
 }
@@ -420,67 +577,6 @@ function BulkModelSettings({
 
 /** Radixの`SelectItem`は空文字を値にできないため、「設定に従う」だけこの語で表す */
 const FOLLOW_SETTINGS = "follow-settings";
-
-/**
- * 起動しない残り枠の下限（#3100）。**次枠実行の設定の一部**で、切り替えた時点で保存する。
- * 選ぶのは「残りがこの値を下回っている間は起動を見送る」ライン（0は制限しない）。
- */
-function FloorSettings({
-  settings,
-  compact,
-  isSubmitting,
-  onUpdateSettings,
-}: {
-  settings: NextWindowRunSettings;
-  compact: boolean;
-  isSubmitting: boolean;
-  onUpdateSettings: (patch: ScheduledRunSettingsPatch) => void;
-}) {
-  const floorSelect = (
-    value: number,
-    key: "fiveHourFloorPercent" | "weeklyFloorPercent",
-    label: string,
-  ) => (
-    <div className="flex items-center gap-2 text-xs text-muted-foreground">
-      <span>{label}</span>
-      <Select
-        value={String(value)}
-        disabled={isSubmitting}
-        onValueChange={(next) => onUpdateSettings({ nextWindow: { [key]: Number(next) } })}
-      >
-        <SelectTrigger size="sm" className="w-28" aria-label={`${label}の下限`}>
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          {NEXT_WINDOW_RUN_FLOOR_PERCENT_OPTIONS.map((percent) => (
-            <SelectItem key={percent} value={String(percent)}>
-              {percent === 0 ? "制限しない" : `${percent}%`}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-    </div>
-  );
-
-  return (
-    <div className="flex flex-col gap-2 rounded-lg border p-3">
-      <span className="text-[13px] font-semibold">起動しない残り枠の下限</span>
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-        {floorSelect(settings.fiveHourFloorPercent, "fiveHourFloorPercent", "5時間枠")}
-        {floorSelect(settings.weeklyFloorPercent, "weeklyFloorPercent", "週間枠")}
-      </div>
-      {!compact && (
-        <p className="text-[11px] leading-relaxed text-muted-foreground">
-          残りが下限を
-          <strong className="font-semibold text-foreground">下回っている間</strong>
-          は起動を見送り、上回れば次の巡回で再開します。5時間枠は「いまの枠を多く使っている＝作業中」
-          とみなして起こさない目安、週間枠は週の残りを取っておく目安です。見送りが24時間を超えた予定は
-          「見送り」になります（週間枠のリセットまで数日あるときなど）。
-        </p>
-      )}
-    </div>
-  );
-}
 
 const KEEP_ALIVE_HOUR_OPTIONS = Array.from({ length: 24 }, (_, hour) => hour);
 
