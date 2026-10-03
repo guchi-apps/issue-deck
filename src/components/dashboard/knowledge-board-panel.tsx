@@ -12,14 +12,13 @@ import {
 import { useMemo, useState } from "react";
 
 import { Button } from "@/components/ui/button";
+import { MarkdownBody } from "@/components/dashboard/markdown-body";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toJstParts } from "@/lib/format-date-time";
 import { formatRelativeDate } from "@/lib/format-relative-date";
 import {
-  countByFile,
   daysSinceJstDate,
   detectKnowledgeStall,
-  groupKnowledgeByDate,
   groupKnowledgeByEntered,
   type KnowledgeBoardData,
   type KnowledgeCandidate,
@@ -61,7 +60,7 @@ export function KnowledgeBoardPanel({
   compact?: boolean;
   className?: string;
 }) {
-  const [tab, setTab] = useState<"candidates" | "knowledge" | "entered">("candidates");
+  const [tab, setTab] = useState<"verdicts" | "files" | "entered">("verdicts");
   const [filePath, setFilePath] = useState<string | null>(null);
 
   const stall = useMemo(
@@ -71,12 +70,10 @@ export function KnowledgeBoardPanel({
         : null,
     [data],
   );
-  const files = useMemo(() => (data ? countByFile(data.sections) : []), [data]);
   const visibleSections = useMemo(
     () => (data ? data.sections.filter((s) => !filePath || s.path === filePath) : []),
     [data, filePath],
   );
-  const groups = useMemo(() => groupKnowledgeByDate(visibleSections), [visibleSections]);
   const enteredGroups = useMemo(() => groupKnowledgeByEntered(visibleSections), [visibleSections]);
 
   const lastPromotedDays = stall?.lastPromotedOn ? daysSinceJstDate(stall.lastPromotedOn) : null;
@@ -176,15 +173,15 @@ export function KnowledgeBoardPanel({
 
           <nav className="flex gap-0.5 border-b" aria-label="表示する内容">
             <TabButton
-              active={tab === "candidates"}
-              onClick={() => setTab("candidates")}
-              label="知見の候補"
+              active={tab === "verdicts"}
+              onClick={() => setTab("verdicts")}
+              label="判定結果"
               count={data.candidates.length}
             />
             <TabButton
-              active={tab === "knowledge"}
-              onClick={() => setTab("knowledge")}
-              label="たまった共通知識"
+              active={tab === "files"}
+              onClick={() => setTab("files")}
+              label="ファイル別"
               count={data.sections.length}
             />
             <TabButton
@@ -195,13 +192,12 @@ export function KnowledgeBoardPanel({
             />
           </nav>
 
-          {tab === "candidates" ? (
+          {tab === "verdicts" ? (
             <CandidateList data={data} />
           ) : tab === "entered" ? (
             <div className="flex flex-col gap-3">
-              <FileChips
-                total={data.sections.length}
-                files={files}
+              <KnowledgeFileTree
+                sections={data.sections}
                 filePath={filePath}
                 onSelect={setFilePath}
               />
@@ -237,39 +233,26 @@ export function KnowledgeBoardPanel({
             </div>
           ) : (
             <div className="flex flex-col gap-3">
-              <FileChips
-                total={data.sections.length}
-                files={files}
+              <KnowledgeFileTree
+                sections={data.sections}
                 filePath={filePath}
                 onSelect={setFilePath}
               />
 
-              {groups.length === 0 ? (
+              {visibleSections.length === 0 ? (
                 <p className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">
                   共有知識をまだ読み込めていません。
                 </p>
               ) : (
-                <div className="flex flex-col gap-4">
-                  {groups.map((group) => (
-                    <section key={group.date ?? "unknown"}>
-                      <h3 className="mb-1.5 flex items-baseline gap-2 text-xs font-bold">
-                        <span className="font-mono">{group.date ?? "確認日なし"}</span>
-                        <span className="text-[11px] font-normal text-muted-foreground">
-                          {group.sections.length}件
-                        </span>
-                      </h3>
-                      <ul className="flex flex-col gap-1.5">
-                        {group.sections.map((section) => (
-                          <KnowledgeRow
-                            key={`${section.path}-${section.title}`}
-                            section={section}
-                            docsRepoUrl={data.docsRepoUrl}
-                          />
-                        ))}
-                      </ul>
-                    </section>
+                <ul className="flex flex-col gap-1.5">
+                  {visibleSections.map((section) => (
+                    <KnowledgeRow
+                      key={`${section.path}-${section.title}`}
+                      section={section}
+                      docsRepoUrl={data.docsRepoUrl}
+                    />
                   ))}
-                </div>
+                </ul>
               )}
             </div>
           )}
@@ -574,33 +557,39 @@ function TabButton({
   );
 }
 
-function FileChips({
-  total,
-  files,
+function KnowledgeFileTree({
+  sections,
   filePath,
   onSelect,
 }: {
-  total: number;
-  files: { path: string; count: number }[];
+  sections: KnowledgeSection[];
   filePath: string | null;
   onSelect: (path: string | null) => void;
 }) {
+  const files = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const section of sections) counts.set(section.path, (counts.get(section.path) ?? 0) + 1);
+    return [...counts.entries()].sort(([a], [b]) => a.localeCompare(b));
+  }, [sections]);
+
   return (
-    <div className="flex flex-wrap gap-1">
-      <FileChip label={`すべて ${total}`} active={filePath === null} onClick={() => onSelect(null)} />
-      {files.map((file) => (
-        <FileChip
-          key={file.path}
-          label={`${fileLabel(file.path)} ${file.count}`}
-          active={filePath === file.path}
-          onClick={() => onSelect(file.path)}
-        />
-      ))}
-    </div>
+    <nav className="rounded-md border bg-muted/20 p-1.5" aria-label="共通知識のファイル">
+      <FileTreeButton label={`▾ knowledge　${sections.length}件`} active={filePath === null} onClick={() => onSelect(null)} />
+      <div className="ml-3 border-l pl-1">
+        {files.map(([path, count]) => (
+          <FileTreeButton
+            key={path}
+            label={`▤ ${fileLabel(path)}　${count}`}
+            active={filePath === path}
+            onClick={() => onSelect(path)}
+          />
+        ))}
+      </div>
+    </nav>
   );
 }
 
-function FileChip({
+function FileTreeButton({
   label,
   active,
   onClick,
@@ -615,10 +604,8 @@ function FileChip({
       onClick={onClick}
       aria-pressed={active}
       className={cn(
-        "rounded-full border px-2 py-0.5 font-mono text-[10px]",
-        active
-          ? "border-primary bg-primary text-primary-foreground"
-          : "text-muted-foreground hover:bg-accent",
+        "block w-full rounded-sm px-2 py-1 text-left font-mono text-[11px]",
+        active ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-accent hover:text-foreground",
       )}
     >
       {label}
@@ -632,9 +619,6 @@ function fileLabel(path: string): string {
 }
 
 function CandidateList({ data }: { data: KnowledgeBoardData }) {
-  const pending = data.candidates.filter((c) => c.verdict === "pending");
-  const judged = data.candidates.filter((c) => c.verdict !== "pending");
-
   return (
     <div className="flex flex-col gap-4">
       {data.candidates.length === 0 && (
@@ -643,32 +627,13 @@ function CandidateList({ data }: { data: KnowledgeBoardData }) {
         </p>
       )}
 
-      {pending.length > 0 && (
+      {data.candidates.length > 0 && (
         <section>
-          <h3 className="mb-1.5 flex items-baseline gap-2 text-xs font-bold">
-            未判定
-            <span className="text-[11px] font-normal text-muted-foreground">
-                {pending.length}件 · 古い順。実装が未マージのものは仕様として判定対象外です
-            </span>
-          </h3>
-          <ul className="flex flex-col gap-1.5">
-            {pending.map((candidate) => (
-              <CandidateRow key={`${candidate.repoFullName}#${candidate.number}`} candidate={candidate} />
-            ))}
-          </ul>
-        </section>
-      )}
-
-      {judged.length > 0 && (
-        <section>
-          <h3 className="mb-1.5 flex items-baseline gap-2 text-xs font-bold">
-            判定済み
-            <span className="text-[11px] font-normal text-muted-foreground">
-              {judged.length}件 · 新しい順
-            </span>
-          </h3>
-          <ul className="flex flex-col gap-1.5">
-            {judged.map((candidate) => (
+          <p className="text-[11px] text-muted-foreground">
+            未判定・採用・不採用をまとめて表示しています。未判定は古い順、判定済みは新しい順です。
+          </p>
+          <ul className="mt-1.5 flex flex-col gap-1.5">
+            {data.candidates.map((candidate) => (
               <CandidateRow key={`${candidate.repoFullName}#${candidate.number}`} candidate={candidate} />
             ))}
           </ul>
@@ -823,44 +788,52 @@ function KnowledgeRow({
   showEntered?: boolean;
 }) {
   return (
-    <li className="rounded-md border bg-card p-2.5">
-      <div className="flex items-baseline gap-2">
-        <a
-          href={`${docsRepoUrl}/blob/HEAD/${section.path}`}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="min-w-0 break-all font-mono text-[10px] text-muted-foreground hover:text-foreground hover:underline"
-        >
-          {section.path}
-        </a>
-        {showEntered && section.enteredAt && (
-          <span className="ml-auto shrink-0 font-mono text-[10px] text-muted-foreground tabular-nums">
-            {formatJstTime(section.enteredAt)}
-          </span>
-        )}
-      </div>
-      <p className="mt-0.5 text-xs leading-relaxed font-semibold">{section.title}</p>
-      {section.summary && (
-        <p className="mt-0.5 line-clamp-3 text-[11px] leading-relaxed text-muted-foreground">
-          {section.summary}
-        </p>
-      )}
-      {(section.source || (showEntered && section.enteredPrNumber)) && (
-        <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 font-mono text-[10px] text-muted-foreground">
-          {section.source && <span>出典 {section.source}</span>}
-          {showEntered && section.enteredPrNumber && (
+    <li>
+      <details className="group rounded-md border bg-card">
+        <summary className="cursor-pointer list-none p-2.5 [&::-webkit-details-marker]:hidden">
+          <div className="flex items-baseline gap-2">
             <a
-              href={`${docsRepoUrl}/pull/${section.enteredPrNumber}`}
+              href={`${docsRepoUrl}/blob/HEAD/${section.path}`}
               target="_blank"
               rel="noopener noreferrer"
-              className="inline-flex items-center gap-1 hover:text-foreground hover:underline"
+              onClick={(event) => event.stopPropagation()}
+              className="min-w-0 break-all font-mono text-[10px] text-muted-foreground hover:text-foreground hover:underline"
             >
-              <GitPullRequest className="size-3" aria-hidden />
-              反映PR docs#{section.enteredPrNumber}
+              {section.path}
             </a>
+            {showEntered && section.enteredAt && (
+              <span className="ml-auto shrink-0 font-mono text-[10px] text-muted-foreground tabular-nums">
+                {formatJstTime(section.enteredAt)}
+              </span>
+            )}
+          </div>
+          <p className="mt-0.5 text-xs leading-relaxed font-semibold">{section.title}</p>
+          {section.summary && <p className="mt-0.5 text-[11px] leading-relaxed text-muted-foreground">{section.summary}</p>}
+          <span className="mt-1 inline-flex text-[11px] font-medium text-primary group-open:hidden">詳細を表示</span>
+          <span className="mt-1 hidden text-[11px] font-medium text-primary group-open:inline">詳細を閉じる</span>
+        </summary>
+        <div className="border-t px-2.5 py-2.5">
+          {section.content && (
+            <MarkdownBody content={section.content} className="text-xs leading-relaxed" repositoryFullName="guchi-apps/docs" />
+          )}
+          {(section.source || (showEntered && section.enteredPrNumber)) && (
+            <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 font-mono text-[10px] text-muted-foreground">
+              {section.source && <span>出典 {section.source}</span>}
+              {showEntered && section.enteredPrNumber && (
+                <a
+                  href={`${docsRepoUrl}/pull/${section.enteredPrNumber}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 hover:text-foreground hover:underline"
+                >
+                  <GitPullRequest className="size-3" aria-hidden />
+                  反映PR docs#{section.enteredPrNumber}
+                </a>
+              )}
+            </div>
           )}
         </div>
-      )}
+      </details>
     </li>
   );
 }

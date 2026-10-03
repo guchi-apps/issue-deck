@@ -2,8 +2,8 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { PromotionKnowledgeList } from "@/components/dashboard/knowledge-board-panel";
-import type { PromotionKnowledgeFile } from "@/lib/knowledge-board";
+import { KnowledgeBoardPanel, PromotionKnowledgeList } from "@/components/dashboard/knowledge-board-panel";
+import type { KnowledgeBoardData, PromotionKnowledgeFile } from "@/lib/knowledge-board";
 
 function makeFiles(count: number): PromotionKnowledgeFile[] {
   return Array.from({ length: count }, (_, i) => ({
@@ -64,5 +64,56 @@ describe("PromotionKnowledgeList", () => {
     expect(screen.getByText("knowledge/foo.md")).toBeTruthy();
     expect(screen.getByText(/見出しの単位では取り出せませんでした/)).toBeTruthy();
     expect(screen.getByText("+12 −1行")).toBeTruthy();
+  });
+});
+
+function boardData(): KnowledgeBoardData {
+  return {
+    sections: [
+      {
+        path: "knowledge/github-actions.md",
+        title: "全文を読める知識",
+        summary: "カードには要約を表示します。",
+        content: "- **結論**: カードを開くと詳細本文も読めます。\n\n詳細本文の続きです。",
+        confirmedOn: "2026-10-01",
+        source: "guchi-apps/issue-deck#3886",
+        enteredAt: "2026-10-02T05:21:00Z",
+        enteredPrNumber: 12,
+      },
+    ],
+    fileCount: 1,
+    candidates: [],
+    openPromotionPullRequests: [],
+    truncated: false,
+    counts: { total: 0, unjudged: 0, judged: 0 },
+    collectLimit: 100,
+    docsRepoUrl: "https://github.com/guchi-apps/docs",
+  };
+}
+
+describe("KnowledgeBoardPanel", () => {
+  afterEach(() => cleanup());
+
+  it("判定結果・ファイル別・入った順へ整理して表示する", () => {
+    render(<KnowledgeBoardPanel data={boardData()} isLoading={false} error={null} onRefresh={() => {}} />);
+
+    expect(screen.getByRole("button", { name: /判定結果/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /ファイル別/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /入った順/ })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /知見の候補/ })).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: /ファイル別/ }));
+    expect(screen.getByRole("navigation", { name: "共通知識のファイル" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /github-actions.*1/ })).toBeTruthy();
+  });
+
+  it("知識カードを開くとMarkdown全文を表示する", () => {
+    render(<KnowledgeBoardPanel data={boardData()} isLoading={false} error={null} onRefresh={() => {}} />);
+    fireEvent.click(screen.getByRole("button", { name: /ファイル別/ }));
+    fireEvent.click(screen.getByText("全文を読める知識"));
+
+    const details = screen.getByText("全文を読める知識").closest("details");
+    expect(details?.open).toBe(true);
+    expect(screen.getByText("詳細本文の続きです。")).toBeTruthy();
   });
 });

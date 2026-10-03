@@ -33,6 +33,8 @@ export type KnowledgeSection = {
   title: string;
   /** `- **結論**: ...`の値。無ければ本文の冒頭 */
   summary: string;
+  /** 見出しを除くMarkdown本文。詳細表示で省略せずに読ませる（旧レスポンスとの互換のため省略可） */
+  content?: string;
   /** `- **確認日**: 2026-08-31`の値（`YYYY-MM-DD`）。取れなければnull */
   confirmedOn: string | null;
   /** `- **出典リポジトリ**: guchi-apps/issue-deck#123`の値。取れなければnull */
@@ -724,18 +726,16 @@ function fieldValue(text: string, label: string): string | null {
  * **`README.md`は索引なので呼び出し側が除く。** ここでは判定しない。
  */
 export function parseKnowledgeFile(file: RawKnowledgeFile): KnowledgeSection[] {
-  const body = stripCodeFences(file.text);
-  const chunks = body.split(/^##\s+/m).slice(1);
+  return splitRawSections(file.text).map((section) => {
+    const title = cleanHeading(section.heading);
+    // メタデータの抽出ではコードブロックの擬似的な箇条書きを無視し、詳細表示用には原文を保つ。
+    const content = section.lines.join("\n").trim();
+    const readableContent = stripCodeFences(content);
+    const conclusion = fieldValue(readableContent, "結論");
+    const confirmedOn = fieldValue(readableContent, "確認日");
+    const source = fieldValue(readableContent, "出典リポジトリ") ?? fieldValue(readableContent, "出典");
 
-  return chunks.map((chunk) => {
-    const lines = chunk.split("\n");
-    const title = cleanHeading(lines[0]);
-    const rest = lines.slice(1).join("\n");
-    const conclusion = fieldValue(rest, "結論");
-    const confirmedOn = fieldValue(rest, "確認日");
-    const source = fieldValue(rest, "出典リポジトリ") ?? fieldValue(rest, "出典");
-
-    const fallback = rest
+    const fallback = readableContent
       .split("\n")
       .map((line) => line.trim())
       .find((line) => line && !line.startsWith("[") && !line.startsWith("<!--"));
@@ -744,6 +744,7 @@ export function parseKnowledgeFile(file: RawKnowledgeFile): KnowledgeSection[] {
       path: file.path,
       title,
       summary: conclusion ?? fallback ?? "",
+      content,
       confirmedOn: confirmedOn && /^\d{4}-\d{2}-\d{2}$/.test(confirmedOn) ? confirmedOn : null,
       source: source ? source.replace(/[`（(].*$/, "").trim() : null,
     };
