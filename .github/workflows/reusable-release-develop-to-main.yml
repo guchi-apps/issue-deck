@@ -1029,7 +1029,7 @@ jobs:
 
           for NUM in $NUMBERS; do
             PR_JSON="$(gh pr list --state merged --base develop --head "issue-${NUM}" --limit 1 \
-              --json number,body,comments --jq '.[0] // empty' 2>/dev/null || true)"
+              --json number,body,comments,headRefOid --jq '.[0] // empty' 2>/dev/null || true)"
             PR_CELL="—"
             REVIEW=""
             RISK=""
@@ -1043,17 +1043,19 @@ jobs:
                 REVIEW="$(printf '%s' "$MARKER" | sed -nE 's/.*review=([a-z-]+).*/\1/p')"
                 RISK="$(printf '%s' "$MARKER" | sed -nE 's/.*risk=([a-z-]+).*/\1/p')"
               fi
-              # レビュー本体が投稿したPRコメント(#2488)。総評の判定マーカー(#2448)か、
-              # ワークフローが転記したときの印(`issue-deck-review-report`)が付いているものだけを
-              # 拾う——同じPRには実装者・自動修復・fallbackのコメントも並ぶため、
-              # 「claude[bot]の最後のコメント」では別のものを引く。追いコミットで複数回
-              # レビューされている場合は最後のものが今の中身に対する判定になる
-              REVIEW_BODY="$(printf '%s' "$PR_JSON" | jq -r '
-                [ .comments[]? | select((.body // "") | test("issue-deck-review-verdict:(lgtm|needs-check|changes-requested) |issue-deck-review-report ")) ]
-                | last // empty | .body // ""')"
-              REVIEW_URL="$(printf '%s' "$PR_JSON" | jq -r '
-                [ .comments[]? | select((.body // "") | test("issue-deck-review-verdict:(lgtm|needs-check|changes-requested) |issue-deck-review-report ")) ]
-                | last // empty | .url // ""')"
+              # 総合判定と同じSHA・判定のレビュー本文を選ぶ。後から届いたLGTMで
+              # Claude/Codexいずれかの要修正コメントを隠さない。
+              REVIEW_COMMENT="$(printf '%s' "$PR_JSON" | jq -c --arg review "$REVIEW" '
+                (.headRefOid // "") as $sha
+                | [ .comments[]? | select((.body // "") | test("issue-deck-(codex-)?review-verdict:(lgtm|needs-check|changes-requested) |issue-deck-review-report ")) ] as $all
+                | ([ $all[] | select((.body // "") | contains("sha=" + $sha)) ] | if length > 0 then . else $all end) as $current
+                | ([ $current[] | select((.body // "") | test("issue-deck-review-(verdict|report)")) ] | last) as $claude
+                | ([ $current[] | select((.body // "") | contains("issue-deck-codex-review-verdict:")) ] | last) as $codex
+                | [$claude, $codex] | map(select(. != null)) as $latest
+                | ([ $latest[] | select((.body // "") | contains("verdict:" + $review + " sha=")) ] | last)
+                  // ($latest | last) // {}')"
+              REVIEW_BODY="$(printf '%s' "$REVIEW_COMMENT" | jq -r '.body // ""')"
+              REVIEW_URL="$(printf '%s' "$REVIEW_COMMENT" | jq -r '.url // ""')"
             fi
             # 文言はreusable-claude-review-develop.yml側と対。画面
             # (src/lib/github/release-verification.ts)はこの列の先頭の記号で判定を読む
@@ -1094,7 +1096,7 @@ jobs:
               "⚠️"*|"❌"*)
                 if [ "$PR_CELL" != "—" ] && [ -n "$REVIEW_BODY" ]; then
                   REVIEWED_SHA="$(printf '%s' "$REVIEW_BODY" \
-                    | sed -nE 's/.*issue-deck-review-(verdict:[a-z-]+|report)[[:space:]]+sha=([0-9a-fA-F]+).*/\2/p' | tail -n 1)"
+                    | sed -nE 's/.*issue-deck-(codex-)?review-(verdict:[a-z-]+|report)[[:space:]]+sha=([0-9a-fA-F]+).*/\3/p' | tail -n 1)"
                   if [ -n "$REVIEWED_SHA" ]; then
                     # 記録があれば`ack:<記録者>`、無い・取り消されていれば空
                     ACK_STATE="$(gh api --paginate "repos/${GH_REPO}/issues/${PR_CELL#\#}/comments" \

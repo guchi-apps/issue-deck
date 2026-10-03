@@ -1268,6 +1268,25 @@ jobs:
             *) CODEX_REVIEW="unavailable"; CODEX_REVIEW_TEXT="? 判定を取得できませんでした" ;;
           esac
 
+          # 画面とリリースPRが読むreview=は両レビューの総合判定にする。
+          # 片方でも要修正・要確認なら、もう片方のLGTMで上書きしない。
+          if [ "$REVIEW" = "changes-requested" ] || [ "$CODEX_REVIEW" = "changes-requested" ]; then
+            OVERALL_REVIEW="changes-requested"
+            OVERALL_REVIEW_TEXT="❌ 要修正"
+          elif [ "$REVIEW" = "needs-check" ] || [ "$CODEX_REVIEW" = "needs-check" ]; then
+            OVERALL_REVIEW="needs-check"
+            OVERALL_REVIEW_TEXT="⚠️ 要確認"
+          elif [ "$REVIEW" = "unavailable" ] || [ "$CODEX_REVIEW" = "unavailable" ]; then
+            OVERALL_REVIEW="unavailable"
+            OVERALL_REVIEW_TEXT="? 判定を取得できませんでした"
+          elif [ "$REVIEW" = "lgtm" ] || [ "$CODEX_REVIEW" = "lgtm" ]; then
+            OVERALL_REVIEW="lgtm"
+            OVERALL_REVIEW_TEXT="✅ 問題なし（LGTM）"
+          else
+            OVERALL_REVIEW="skipped"
+            OVERALL_REVIEW_TEXT="— 実施なし（低リスクかつ小規模のため省略）"
+          fi
+
           if [ "$RISKY" = "true" ]; then
             RISK="hit"
             RISK_TEXT="⚠️ 該当あり"
@@ -1286,10 +1305,11 @@ jobs:
 
           TMP="${RUNNER_TEMP:-/tmp}"
           {
-            echo "<!-- issue-deck-verification:start review=${REVIEW} risk=${RISK} -->"
+            echo "<!-- issue-deck-verification:start review=${OVERALL_REVIEW} risk=${RISK} -->"
             echo "## 検証結果"
             echo
-            echo "- 自動レビュー: ${REVIEW_TEXT}"
+            echo "- 自動レビュー: ${OVERALL_REVIEW_TEXT}"
+            echo "- Claudeによる自動レビュー: ${REVIEW_TEXT}"
             echo "- Codexによる自動レビュー: ${CODEX_REVIEW_TEXT}"
             echo "- 機械的リスク判定: ${RISK_TEXT}"
             if [ "$RISK" = "hit" ] && [ -n "$REASONS" ]; then
@@ -1322,7 +1342,7 @@ jobs:
           cat "$TMP/verification-section.md" >> "$TMP/pr-body-new.md"
 
           gh pr edit "$PR_NUMBER" --body-file "$TMP/pr-body-new.md"
-          echo "検証結果をPR本文へ記録しました（review=${REVIEW} risk=${RISK}）。"
+          echo "検証結果をPR本文へ記録しました（review=${OVERALL_REVIEW} risk=${RISK}）。"
 
       # GITHUB_TOKEN起点でAuto-mergeを有効化すると、必須ステータスチェック通過後に
       # GitHub側が非同期に実行する実際のマージが「GITHUB_TOKEN起点のイベントは他の

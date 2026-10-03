@@ -32,7 +32,7 @@ import type { ReviewVerdictKind } from "@/lib/github/release-verification";
  * 文字列を変えるときはその一覧にも入れること。
  */
 const VERDICT_MARKER_PATTERN =
-  /<!--\s*issue-deck-(?:codex-)?review-verdict:(lgtm|needs-check|changes-requested)\s+sha=([0-9a-fA-F]+)\s*-->/;
+  /<!--\s*issue-deck-(codex-)?review-verdict:(lgtm|needs-check|changes-requested)\s+sha=([0-9a-fA-F]+)\s*-->/;
 
 /**
  * レビュー本体が投稿できなかったときに、ワークフローが実行ログから転記したコメントの印（#2488）。
@@ -93,14 +93,14 @@ export type PullRequestReviewCommentContent = {
 };
 
 /** そのコメントがレビュー本体のものか。判定マーカーか転記の印のどちらかを持つ */
-function matchMarkers(body: string): { kind: ReviewVerdictKind; sha: string } | null {
+function matchMarkers(body: string): { kind: ReviewVerdictKind; sha: string; source: string } | null {
   const verdict = VERDICT_MARKER_PATTERN.exec(body);
   if (verdict) {
-    return { kind: VERDICT_KINDS[verdict[1]] ?? "unknown", sha: verdict[2] };
+    return { kind: VERDICT_KINDS[verdict[2]] ?? "unknown", sha: verdict[3], source: verdict[1] ? "codex" : "claude" };
   }
   const report = REPORT_MARKER_PATTERN.exec(body);
   if (report) {
-    return { kind: "unknown", sha: report[1] };
+    return { kind: "unknown", sha: report[1], source: "claude" };
   }
   return null;
 }
@@ -118,10 +118,10 @@ function stripMarkers(body: string): string {
 /**
  * PRの会話コメントから、いま読むべきレビューコメントを1件選ぶ。1件も無ければnull。
  *
- * **選ぶのは「headと同じコミットへのレビューのうち最後のもの」。** 同じPRには実装者・
+ * **同じheadではレビュー元ごとの最新を比べ、要修正・要確認を優先する。** 同じPRには実装者・
  * 自動修復・fallbackのコメントも並ぶため、投稿者では絞れない（ローカルのレビュー・統合
  * エージェントはユーザー本人のトークンで投稿する）。追いコミットで複数回レビューされている
- * 場合、いまの中身に対する判定は最後のものになる。
+ * 場合、同じレビュー元の古い判定は最新の投稿で置き換える。
  *
  * **headと一致するものが無ければ、最後のレビューを`isStale`付きで返す。** 隠すと
  * 「レビューが無い」と区別が付かず、直前のレビューで何を言われたのかを読めないままマージを
@@ -131,7 +131,7 @@ export function selectPullRequestReviewComment(
   comments: readonly PullRequestReviewCommentSource[],
   headSha: string | null,
 ): PullRequestReviewCommentContent | null {
-  const found: (PullRequestReviewCommentContent & { matchesHead: boolean })[] = [];
+  const found: (PullRequestReviewCommentContent & { matchesHead: boolean; source: string })[] = [];
 
   for (const comment of comments) {
     if (!comment.body) continue;
@@ -150,13 +150,27 @@ export function selectPullRequestReviewComment(
       reviewedSha: marker.sha,
       isStale: headSha !== null && !matchesHead,
       matchesHead,
+      source: marker.source,
     });
   }
 
   if (found.length === 0) return null;
 
-  const latestForHead = [...found].reverse().find((item) => item.matchesHead);
-  const selected = latestForHead ?? found[found.length - 1];
+  const latestBySource = new Map<string, (typeof found)[number]>();
+  for (const item of found.filter((candidate) => candidate.matchesHead)) {
+    latestBySource.set(item.source, item);
+  }
+  const priority: Record<ReviewVerdictKind, number> = {
+    "changes-requested": 3,
+    "needs-check": 2,
+    unknown: 1,
+    ok: 0,
+    skipped: 0,
+  };
+  const selected = [...latestBySource.values()].reduce<(typeof found)[number] | null>(
+    (best, item) => best && priority[best.verdictKind] > priority[item.verdictKind] ? best : item,
+    null,
+  ) ?? found[found.length - 1];
   return {
     verdictKind: selected.verdictKind,
     verdictLabel: selected.verdictLabel,

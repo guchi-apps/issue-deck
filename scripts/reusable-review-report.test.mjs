@@ -42,7 +42,18 @@ function extractRunScript(stepName) {
 const STUB_GH = `#!/usr/bin/env bash
 set -u
 if [ "\${1:-}" = "pr" ] && [ "\${2:-}" = "view" ]; then
-  printf '%s' "\${STUB_COMMENTS:-}"
+  if [ "\${5:-}" = "body" ]; then
+    printf '%s' "\${STUB_BODY:-}"
+  else
+    printf '%s' "\${STUB_COMMENTS:-}"
+  fi
+  exit 0
+fi
+if [ "\${1:-}" = "pr" ] && [ "\${2:-}" = "edit" ]; then
+  while [ $# -gt 0 ]; do
+    if [ "$1" = "--body-file" ]; then cp "$2" "$STUB_EDITED"; fi
+    shift
+  done
   exit 0
 fi
 if [ "\${1:-}" = "pr" ] && [ "\${2:-}" = "comment" ]; then
@@ -109,6 +120,33 @@ function runTranscribe({ comments = "", execution = null, headSha = "abc123", co
   return existsSync(postedPath) ? readFileSync(postedPath, "utf8") : null;
 }
 
+function runVerification(comments) {
+  const editedPath = path.join(workDir, "edited.md");
+  const script = extractRunScript("検証結果をPR本文へ記録する");
+  execFileSync("bash", ["-e", "-c", script], {
+    env: {
+      ...process.env,
+      PATH: `${workDir}:${process.env.PATH}`,
+      RUNNER_TEMP: workDir,
+      GH_TOKEN: "dummy",
+      GH_REPO: "guchi-apps/issue-deck",
+      PR_NUMBER: "3927",
+      HEAD_SHA: "abc123",
+      REVIEW_RESULT: "success",
+      REVIEW_EXECUTED: "true",
+      CODEX_REVIEW_RESULT: "success",
+      RISKY: "false",
+      REASONS: "",
+      REVIEW_FIX_HANDOFF: "false",
+      STUB_BODY: "## 対応Issue\n\n#3917",
+      STUB_COMMENTS: comments,
+      STUB_EDITED: editedPath,
+    },
+    encoding: "utf8",
+  });
+  return readFileSync(editedPath, "utf8");
+}
+
 describe("レビュー結果がPRに無ければ転記する", () => {
   it("PRに結果が無ければ、実行ログの最後の応答を転記する", () => {
     const posted = runTranscribe({
@@ -168,5 +206,19 @@ describe("レビュー結果がPRに無ければ転記する", () => {
     // このテストは転記ステップではなく、同じワークフローの検証結果記録を別テストで担保する。
     // Codex結果があってもClaudeの転記契約を壊さないことを確認する。
     expect(posted).toContain("LGTM。");
+  });
+});
+
+describe("検証結果をPR本文へ記録する", () => {
+  it("Codexだけが要修正なら総合判定も要修正にする", () => {
+    const body = runVerification([
+      "<!-- issue-deck-review-verdict:lgtm sha=abc123 -->",
+      "<!-- issue-deck-codex-review-verdict:changes-requested sha=abc123 -->",
+    ].join("\n"));
+
+    expect(body).toContain("<!-- issue-deck-verification:start review=changes-requested risk=none -->");
+    expect(body).toContain("- 自動レビュー: ❌ 要修正");
+    expect(body).toContain("- Claudeによる自動レビュー: ✅ 問題なし（LGTM）");
+    expect(body).toContain("- Codexによる自動レビュー: ❌ 要修正");
   });
 });

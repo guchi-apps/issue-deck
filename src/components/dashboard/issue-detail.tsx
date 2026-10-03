@@ -339,6 +339,15 @@ export function IssueDetail({
     ? findPlanRequestForIssue(dispatch.planRequests ?? [], issue.repositoryFullName, issue.number)
     : undefined
   )?.id;
+  const planReviewPostedAt = issue
+    ? findPlanReviewJobForIssue(dispatch.jobs, issue.repositoryFullName, issue.number)?.reviewPostedAt
+    : null;
+  // コメントはGitHubから取得するため、DBの計画待ち・レビュー投稿より遅れて届く。
+  // 出し直した計画では手元の古いレビューにより定期再取得が止まるので、計画の版が変わった時点と
+  // レビューの投稿がDBへ届いた時点に、両方とも取り直す（#3936）。
+  useEffect(() => {
+    if (planRequestId || planReviewPostedAt) refreshComments();
+  }, [planRequestId, planReviewPostedAt, refreshComments]);
   useEffect(() => {
     if (planRequestId) reloadArtifacts();
   }, [planRequestId, reloadArtifacts]);

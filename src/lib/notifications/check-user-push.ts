@@ -105,7 +105,7 @@ export function decideCheckUserPush(input: {
    */
   holdUntil?: Date | null;
   /**
-   * 計画レビュー（G1）が届いて自動で反映されるまで送らない（#3616。`selectPlanReviewHoldKeys`）。
+   * 計画レビュー（G1）の採否が決まるまで送らない（#3616・#3936。`selectPlanReviewHoldKeys`）。
    * **待ちが生きていても止める**——待たずに送る理由（理由が確定していて自動では消えない）より、
    * 「反映が済んでいない計画を人に見せない」ことを優先する。省略時は従来どおり
    */
@@ -190,7 +190,7 @@ export const PLAN_REVIEW_PUSH_HOLD_MAX_MS = 15 * 60 * 1000;
 /**
  * 計画待ちの作成から、計画レビューのジョブが積まれるのを待つ時間（#3709）。
  * `postSessionPlan`は`00.check-user`を付けてからジョブを積むため、その間に走った巡回は
- * ジョブを引けない。積まれなかった計画（Codex等）でも、通知はこの時間だけ遅れるだけ
+ * ジョブを引けない。レビューを省略した計画でも、通知はこの時間だけ遅れるだけ
  */
 export const PLAN_REVIEW_JOB_ENQUEUE_WAIT_MS = 60 * 1000;
 
@@ -202,14 +202,14 @@ export const PLAN_REVIEW_JOB_ENQUEUE_WAIT_MS = 60 * 1000;
 export const PLAN_REVIEW_REFLECT_PUSH_HOLD_MS = 2 * 60 * 1000;
 
 /**
- * **計画レビューの自動反映を待って、通知を保留するIssue**の鍵を返す（#3616）。
+ * **計画レビューの採否が決まるまで通知を保留するIssue**の鍵を返す（#3616・#3936）。
  *
  * 保留するのは次のどれか。**受け手の居ない保留は、通知が遅れるだけで何も起こらない**ので、
- * 自動反映が実際に起こりうる場合に限る。
+ * 画面から答えられる計画待ちがある場合に限る。
  *
  * - **レビューが作成中**: 期限内の`WAITING`の計画待ちがあり
  *   （「アプリで答える」ON・待ち時間0のセッションは待ちが作られないので対象外）、計画の提示から
- *   `PLAN_REVIEW_PUSH_HOLD_MAX_MS`以内で、計画レビューのジョブがClaude Codeのもので作成中
+ *   `PLAN_REVIEW_PUSH_HOLD_MAX_MS`以内で、計画レビューのジョブが作成中
  *   （`isPlanReviewJobCreating`。実行中、または成功から猶予内で、採否`planReviewDecidedAt`が未決定）。
  *   **反映済みでも保留する**（#3648。自動反映は指摘がなくなるまで繰り返す）が、**今の計画より後に
  *   積まれた**ジョブだけを見る。積まれていない・失敗・見送りなら保留しない
@@ -255,7 +255,6 @@ async function selectPlanReviewHoldKeys(
       select: {
         repositoryFullName: true,
         issueNumber: true,
-        agent: true,
         status: true,
         createdAt: true,
         finishedAt: true,
@@ -305,7 +304,6 @@ async function selectPlanReviewHoldKeys(
       if (now.getTime() - planCreatedAt.getTime() < PLAN_REVIEW_JOB_ENQUEUE_WAIT_MS) keys.add(key);
       continue;
     }
-    if (current.agent !== "claude") continue;
     const creating = isPlanReviewJobCreating(
       {
         status: current.status as DispatchJobStatus,

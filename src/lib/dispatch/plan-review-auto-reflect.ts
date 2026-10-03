@@ -1,5 +1,9 @@
 import { db } from "@/lib/db";
-import { decideSessionPlanRequest } from "@/lib/dispatch/plan-requests";
+import {
+  decideSessionPlanRequest,
+  recordSessionPlanCodexDelivery,
+} from "@/lib/dispatch/plan-requests";
+import { notifyCodexSessionDecision } from "@/lib/dispatch/codex-decision-notify";
 import { resolveInstallationToken } from "@/lib/dispatch/installation-token";
 import { resolveSessionPlanCheckUser } from "@/lib/dispatch/session-plan";
 import { PLAN_REVIEW_REFLECT_REQUEST_TEXT } from "@/lib/dispatch/session-plan-request";
@@ -25,13 +29,13 @@ import { parseRepositoryFullName } from "@/lib/local-session";
  *
  * ここでは`supervisor:plan-review`コメントの到着（GitHubのWebhook）を契機に、画面の一括ボタンと
  * **同じ固定文面**（`PLAN_REVIEW_REFLECT_REQUEST_TEXT`）を「修正」として書き込む。承認ではない
- * （G1が承認しない原則は保つ。承認は人が押す）。フックが待っている`SessionPlanRequest`へ書くだけで、
- * 端末へキーを送る経路は無い。
+ * （G1が承認しない原則は保つ。承認は人が押す）。`SessionPlanRequest`へ書き、Codexには既存の
+ * 継続指示を積む。端末へキーを送る経路は無い。
  *
  * 守っていることは次のとおり。
  *
- * - **Claude Codeのセッションだけ。** Codexへの継続指示は`codex queue`で送るため、人の操作を挟まない
- *   自動送信を新しく作らない。届いたレビューのジョブ（`markPlanReviewPosted`が返す）がclaudeのもの
+ * - **Claude CodeとCodexの実装セッション。** Codexへは既存の`codex queue`による固定の継続指示を
+ *   ディスパッチジョブとして積む。Claude Codeは計画待ちのフックが決定を受け取るため、通知関数は何もしない
  * - **採用かどうかはJevが決める**（#3648）。設定（`AppSetting.planReviewAutoReflectEnabled`）がOFF、
  *   Jevが「採用しない」と答えた、Jevの答えが取れなかったときは反映せず、人へ通知する
  * - **自動反映は初回レビューの後の1回だけ**（#3765。#3648の「指摘がなくなるまで繰り返す」を置き換えた）。
@@ -221,7 +225,44 @@ async function decideAutoReflect(params: {
   // 決定はもうDBに入っている。以降の失敗は握りつぶす（画面の「修正」と同じ）
   await postAutoReflectComment(params.repositoryFullName, params.issueNumber);
   await resolveSessionPlanCheckUser(target);
+  await notifyCodexPlanRevision({
+    repositoryFullName: params.repositoryFullName,
+    issueNumber: params.issueNumber,
+    requestId: request.id,
+  });
   return { reflected: true };
+}
+
+/**
+ * Codexは計画待ちをポーリングせずターンを終えるため、画面からの修正と同じ継続指示を積む。
+ * Claude Codeでは計画待ちのフックが決定を受け取るので、`notifyCodexSessionDecision`は何もしない。
+ */
+async function notifyCodexPlanRevision(params: {
+  repositoryFullName: string;
+  issueNumber: number;
+  requestId: string;
+}) {
+  try {
+    const notified = await notifyCodexSessionDecision({
+      repositoryFullName: params.repositoryFullName,
+      issueNumber: params.issueNumber,
+      kind: "plan-revision",
+      requestedByUserId: null,
+    });
+    if (notified.ok || (notified.reason !== "not_codex" && notified.reason !== "no_session")) {
+      await recordSessionPlanCodexDelivery({
+        id: params.requestId,
+        queued: notified.ok,
+        summary: notified.ok ? null : notified.message,
+      });
+    }
+  } catch (error) {
+    // 自動反映の判断はすでに保存済み。配送失敗でWebhook処理まで失敗させない
+    console.error(
+      `[dispatch] Codexへ計画レビューの修正指示を配送できませんでした（${params.repositoryFullName}#${params.issueNumber}）`,
+      error,
+    );
+  }
 }
 
 export function buildPlanReviewUnresolvedCommentBody(review: ParsedPlanReview): string {

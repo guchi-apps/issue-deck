@@ -376,16 +376,27 @@ describe("sweepCheckUserPushNotifications", () => {
       expect(sendPushNotification).toHaveBeenCalled();
     });
 
-    it("Codexのレビュー・計画待ちが無い場合は保留しない", async () => {
+    it("Codexのレビュー中も計画の判断を人へ渡さず、Push通知を保留する", async () => {
       mockDb({
         waitingPlans: [plan],
         planReviewJobs: [{ ...runningJob, agent: "codex" }],
         subscriptions: sub,
       });
       await sweepCheckUserPushNotifications(NOW);
-      expect(sendPushNotification).toHaveBeenCalledTimes(1);
+      expect(sendPushNotification).not.toHaveBeenCalled();
 
-      vi.mocked(sendPushNotification).mockClear();
+      mockDb({
+        waitingPlans: [plan],
+        planReviewJobs: [
+          { ...runningJob, agent: "codex", status: "SUCCEEDED", finishedAt: at(10_000), planReviewDecidedAt: at(5_000) },
+        ],
+        subscriptions: sub,
+      });
+      await sweepCheckUserPushNotifications(NOW);
+      expect(sendPushNotification).toHaveBeenCalledTimes(1);
+    });
+
+    it("計画待ちが無ければ、レビュー中でも保留しない", async () => {
       mockDb({ planReviewJobs: [runningJob], subscriptions: sub });
       await sweepCheckUserPushNotifications(NOW);
       expect(sendPushNotification).toHaveBeenCalledTimes(1);
