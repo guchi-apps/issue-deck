@@ -155,3 +155,56 @@ export function parseIosDistributionFailureMeta(
     detectedAt: typeof meta.detectedAt === "string" ? meta.detectedAt : "",
   };
 }
+
+export type IosDistributionFixIssueDraft = {
+  repositoryFullName: string;
+  title: string;
+  body: string;
+};
+
+/**
+ * ブランチ画面の「修正Issueを起案」（#3784）が開く新規作成ダイアログの下書き。
+ *
+ * **ここでは起票しない。** 巡回の自動起票（`buildIosDistributionFailureIssueBody`）とは別の、人が修正を
+ * 依頼するための下書きで、**自動起票のマーカー（`<!-- ios-distribution-failure: -->`）は入れない**
+ * （マーカーがあると自動起票のIssueと取り違えられる）。実際に起票したIssueは、画面が追跡Issueとして
+ * 登録し、以後の二重起票・成功時のクローズを巡回に任せる。ジョブ名はAPIが返さないため入れない。
+ */
+export function buildIosDistributionFixIssueDraft(params: {
+  repositoryFullName: string;
+  version: string | null;
+  sha: string;
+  runUrl: string;
+  failedStage: string | null;
+  notes: readonly string[];
+}): IosDistributionFixIssueDraft {
+  const { repositoryFullName, version, sha, runUrl, failedStage, notes } = params;
+  const versionLabel = version ? `v${version}の` : "";
+  const stageLabel = failedStage ? `（${failedStage}）` : "";
+  const lines = [
+    `- 対象: ${repositoryFullName}${version ? ` v${version}` : ""}（mainコミット ${sha.slice(0, 7)}）`,
+    `- 失敗した実行: ${runUrl}`,
+    ...(failedStage ? [`- 失敗した段階: ${failedStage}（ジョブ・ステップ名からの推定）`] : []),
+    ...notes.map((note) => `- 実行の注記: ${note}`),
+  ];
+  return {
+    repositoryFullName,
+    title: `${IOS_DISTRIBUTION_FAILURE_TITLE_PREFIX} ${repositoryFullName}: ${versionLabel}TestFlight配布の失敗を修正する${stageLabel}`,
+    body: `## 何が起きているか
+
+${repositoryFullName}のiOS配布（\`ios-testflight.yml\`）が失敗しました。Webの本番デプロイとは別の経路で、TestFlightへ新しいビルドが届いていません。
+
+${lines.join("\n")}
+
+## 直したいこと
+
+実行ログを確認し、失敗の原因になっているコード・設定の修正を行ってください。
+署名の期限切れやApple Developerの規約同意待ちのようにアカウント側の対応が要る場合は、その手順を手作業Issueとして切り出してください。
+
+## 補足
+
+- 一時的な障害なら、ブランチ画面のiOS配布欄の「再実行」で直ることがあります
+- このIssueを起票すると、iOS配布の巡回はこのIssueを追跡します。後続の配布が成功すると自動でクローズされ、別の実行が失敗した場合は書き足されます
+`,
+  };
+}

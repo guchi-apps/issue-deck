@@ -195,10 +195,20 @@ async function handleGET(request: NextRequest) {
       }),
     );
 
+    // 追跡Issue（自動起票または画面から起票したもの。#3784）。画面が「起票済み」の表示に使う
+    const tracked = await db.iosDistributionFailureIssue.findFirst({
+      where: { repositoryFullName: `${owner}/${repo}`, state: "open" },
+      orderBy: { detectedAt: "desc" },
+      select: { issueNumber: true },
+    });
+
     return NextResponse.json({
       available: true,
       latestDeliveredBuild: latestBuild,
       runs,
+      trackedIssue: tracked
+        ? { number: tracked.issueNumber, htmlUrl: `https://github.com/${owner}/${repo}/issues/${tracked.issueNumber}` }
+        : null,
       ...(release ? { release } : {}),
     });
   } catch (error) {

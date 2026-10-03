@@ -2961,6 +2961,7 @@ export function POST(request: NextRequest) {
   ヘルスチェックするので、失敗した時点でissue-deck自身が応答していない。
   設計は[multi-agent/auto-repair.md](multi-agent/auto-repair.md)「直らなかったデプロイ失敗を、Issueにして残す」。
 - iOS配布（`ios-testflight.yml`）の失敗も同じ形で巡回し起票する（#3745。判定は`lib/deploy-failure.ts`の`decideDeployFailure`を再利用、本文は[`lib/ios-distribution-failure.ts`](../src/lib/ios-distribution-failure.ts)、IOは[`lib/github/ios-distribution-failure-sweep-run.ts`](../src/lib/github/ios-distribution-failure-sweep-run.ts)、受け口は`POST /api/repositories/ios-distribution-failure-sweep`）。対象は`Repository`の行を`webview-ios-repos.ts`で絞る
+  - 画面からの手動起案（#3784）: ブランチ画面のiOS配布欄が失敗のとき、自動起票済みなら「起票済み（#N）」のリンク（`GET /api/repositories/ios-testflight`の`trackedIssue`）、無ければ「修正Issueを起案」（下書き入りの新規作成ダイアログ。`buildIosDistributionFixIssueDraft`）を出す。人が起票したIssueは`POST /api/repositories/ios-testflight/tracked-issue`（[`lib/github/ios-distribution-failure-register.ts`](../src/lib/github/ios-distribution-failure-register.ts)）で追跡Issueの行として登録し、以後の二重起票の抑止・書き足し・自動クローズは巡回に任せる。リポジトリごとに`open`の行は1件に保つ
 - **mainへマージしたのにデプロイが起動しなかったときは、issue-deckが起動し直す**
   （#2703。判定は[`lib/deploy-launch.ts`](../src/lib/deploy-launch.ts)、IOは
   [`lib/github/deploy-launch-sweep-run.ts`](../src/lib/github/deploy-launch-sweep-run.ts)）。
