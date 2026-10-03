@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Info, Wrench } from "lucide-react";
 
 import { ApiErrorMessage } from "@/components/dashboard/api-error-message";
@@ -70,6 +70,11 @@ export function PullRequestRepairButtons({
   const [isConfirmOpen, setIsConfirmOpen] = useState(false);
   const [justStarted, setJustStarted] = useState(false);
   const [owner, repo] = repositoryFullName.split("/");
+  useEffect(() => {
+    if (!justStarted) return;
+    const timer = window.setTimeout(() => setJustStarted(false), 5_000);
+    return () => window.clearTimeout(timer);
+  }, [justStarted]);
   // 押せない種類があるときだけ、理由と次の一手を添える（理由が違えば行を分ける）。
   // APIは優先順位の先頭1件だけを起動するため、今回起動するworkflowの可否だけで
   // ボタンを無効化する。後続が未配布でも、先頭の修復まで止めない。
@@ -87,9 +92,6 @@ export function PullRequestRepairButtons({
       // runningKindの反映前だけ短く起動済み表示を出す。次の再描画でrunningKindが
       // 無ければ高速完了とみなし、ボタンを復帰させる。
       setJustStarted(true);
-      // repairRunの反映にはAPI成功後に時間差がある。短い猶予中は二重起動を防ぎ、
-      // その間にrunningKindが観測されなかった（高速完了した）場合だけ操作を復帰させる。
-      setTimeout(() => setJustStarted(false), 5_000);
     }
   }
 
@@ -122,8 +124,8 @@ export function PullRequestRepairButtons({
         </Button>
       )}
       {!justStarted && runningKind !== null && (
-        <span className="text-xs text-muted-foreground">
-          PRを自動修正中です。結果はPRのコメントに届きます。
+        <span className="text-xs text-muted-foreground" title={`${REPAIR_TARGET_LABEL[runningKind]}を処理中`}>
+          PRを自動修正中です（{REPAIR_TARGET_LABEL[runningKind]}）。結果はPRのコメントに届きます。
         </span>
       )}
       {!justStarted &&
@@ -149,7 +151,7 @@ export function PullRequestRepairButtons({
             <AlertDialogTitle>PRを自動修正しますか？</AlertDialogTitle>
             <AlertDialogDescription>
               {repositoryFullName} #{pullRequestNumber} の現在の状態を取得し直し、修正が必要な項目を
-              同じPRのhead branchで自動修正します。安全に直せないと判断された場合は変更を加えず、理由が報告されます。
+              同じPRのhead branchで自動修正します。複数ある場合は優先順位に沿って1回につき1件を実行するため、完了後に残りがあればもう一度この操作を実行してください。安全に直せないと判断された場合は変更を加えず、理由が報告されます。
             </AlertDialogDescription>
           </AlertDialogHeader>
           <div className="text-sm">
