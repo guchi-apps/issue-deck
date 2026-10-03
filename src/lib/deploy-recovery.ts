@@ -7,6 +7,12 @@ export type DeployRecoveryCandidate = {
   mergeCommitSha: string;
 };
 
+/** 候補一覧と、GitHub APIの取得上限により候補が欠ける可能性。 */
+export type DeployRecoveryCandidatesResult = {
+  candidates: DeployRecoveryCandidate[];
+  truncated: boolean;
+};
+
 /** 選択入力を重複なく正のPR番号だけに正規化する。 */
 export function normalizeDeployRecoverySelection(value: unknown): number[] | null {
   if (!Array.isArray(value) || value.length === 0) return null;
@@ -54,15 +60,15 @@ export function deployRecoveryErrorMessage(
 
 export async function fetchDeployRecoveryCandidates(
   repositoryFullName: string,
-): Promise<DeployRecoveryCandidate[]> {
+): Promise<DeployRecoveryCandidatesResult> {
   const [owner, repo] = repositoryFullName.split("/");
   const params = new URLSearchParams({ owner, repo });
   const response = await fetch(`/api/repositories/deploy-recovery?${params}`);
-  const json: { candidates?: DeployRecoveryCandidate[]; error?: string; message?: string } = await response
+  const json: { candidates?: DeployRecoveryCandidate[]; truncated?: boolean; error?: string; message?: string } = await response
     .json()
     .catch(() => ({}));
   if (!response.ok) throw new Error(deployRecoveryErrorMessage(response.status, json.error, json.message));
-  return json.candidates ?? [];
+  return { candidates: json.candidates ?? [], truncated: json.truncated === true };
 }
 
 export async function requestDeployRecovery(

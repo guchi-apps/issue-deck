@@ -38,9 +38,7 @@ export async function GET(request: NextRequest) {
 
   try {
     const token = await getInstallationToken(repository.installation.installationId);
-    return NextResponse.json({
-      candidates: await fetchDeployRecoveryCandidates(repositoryRef.owner, repositoryRef.repo, token),
-    });
+    return NextResponse.json(await fetchDeployRecoveryCandidates(repositoryRef.owner, repositoryRef.repo, token));
   } catch (error) {
     console.error(`[GET /api/repositories/deploy-recovery] ${repositoryRef.owner}/${repositoryRef.repo}:`, error);
     return NextResponse.json(
