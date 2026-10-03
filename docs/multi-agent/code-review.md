@@ -20,6 +20,10 @@ develop向けPRの自動レビューは、既存のClaude Codeに加えてCodex�
 
 サブPCでは`codex login`済みのCodex CLIを読み取り専用・一時worktreeで実行するため、ChatGPTサブスクリプション枠を使い、実装中のworktreeやPRブランチを変更しない。結果は同じSHA付きの判定印としてPRへ投稿され、ClaudeまたはCodexのどちらかが`needs-check`・`changes-requested`なら自動マージを保留する。サブPCが応答しない、Codexが失敗する、30分以内に結果が返らない場合も安全側で保留する。
 
+PR本文の`issue-deck-verification:start review=...`にはClaudeとCodexの総合判定を書く。要修正、要確認、取得失敗、LGTMの順で優先し、各レビューの個別判定は節の箇条書きに残す。PR詳細とリリースPRの指摘本文も、同じコミットに対する各レビュー元の最新コメントから要修正・要確認を優先して選ぶ。後から届いた別のレビュー元のLGTMで指摘を隠さないため。
+
+この機能を初めて追加するPRでは、マージ前のサブPCのpollerにCodex要求の巡回処理がまだ無い。Actionsは要求コメントを投稿しても結果を受け取れずタイムアウトするため、そのPRの検証では`start-codex-pr-review.sh --run`を対象SHAで手動起動する。以後のPRは、develop反映後にpollerが巡回する。
+
 ## 経路
 
 ```text

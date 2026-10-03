@@ -132,9 +132,9 @@ done
 COMMENT_PARSER="src/lib/github/pull-request-review-comment.ts"
 [ -f "$COMMENT_PARSER" ] || { echo "エラー: $COMMENT_PARSER が見つかりません" >&2; exit 1; }
 
-if ! grep -qF "issue-deck-(?:codex-)?review-verdict:(lgtm|needs-check|changes-requested)" "$COMMENT_PARSER"; then
+if ! grep -qF "issue-deck-(codex-)?review-verdict:(lgtm|needs-check|changes-requested)" "$COMMENT_PARSER"; then
   echo "エラー: $COMMENT_PARSER に総評の判定マーカーの読み取りが見つかりません。" >&2
-  echo "  期待する文字列: issue-deck-(?:codex-)?review-verdict:(lgtm|needs-check|changes-requested)" >&2
+  echo "  期待する文字列: issue-deck-(codex-)?review-verdict:(lgtm|needs-check|changes-requested)" >&2
   fail=1
 fi
 
