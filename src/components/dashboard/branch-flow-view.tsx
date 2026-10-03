@@ -968,11 +968,14 @@ function ReleaseGroupHeader({
   releaseButton,
   rebuildButton,
   deviceBuild,
+  showIosDistribution = false,
   onMerged,
 }: {
   repositoryFullName: string;
   group: BranchFlowReleaseGroup;
   releaseButton?: React.ReactNode;
+  /** iOS配布のパネルを出すか。最新のマージ済みの束だけに出す（#3808） */
+  showIosDistribution?: boolean;
   /** リリースPRを閉じてバンプから作り直す導線（#3014）。リリースPRが開いている束だけに渡す */
   rebuildButton?: React.ReactNode;
   /**
@@ -1160,7 +1163,7 @@ function ReleaseGroupHeader({
         )}
 
         {/* kurashioのiOS TestFlight配布（#3644）。Webのデプロイとは別の行で、iOSの成否を混ぜない */}
-        {webviewIos && released && group.pullRequest?.merged && (
+        {showIosDistribution && webviewIos && released && group.pullRequest?.merged && (
           <IosReleaseGroupPanel
             owner={repositoryFullName.split("/")[0]}
             repo={repositoryFullName.split("/")[1]}
@@ -1292,6 +1295,10 @@ function ReleaseFlowGraph({
       ? pendingGroups
       : repository.releaseGroups.slice(0, 1);
   const hiddenGroups = repository.releaseGroups.slice(visibleGroups.length);
+  // iOS配布のパネルは最新のマージ済みの束にだけ出す（#3808。見出しのアイコンと同じ基準）
+  const latestMergedGroupKey = repository.releaseGroups.find(
+    (group) => group.mergedAt !== null && group.pullRequest?.merged,
+  )?.key;
   const unassignedLanes = showAllVersions ? repository.unassignedLanes : [];
   // 版を特定できないレーンもボタンの向こうにいる（#1711）。**畳んだ束が無いときでもボタンを出す
   // 理由**で、ここを見ずに`hiddenGroups`だけで判断すると、開く手段が画面のどこにも無くなる。
@@ -1424,6 +1431,7 @@ function ReleaseFlowGraph({
             group={group}
             onMerged={onMerged}
             deviceBuild={repository.deviceBuild}
+            showIosDistribution={group.key === latestMergedGroupKey}
             releaseButton={
               /* **Xcodeで実機へ反映するリポジトリには出さない**（#3468）。リリースPRの作成から
                  mainへのマージまでをMacのスクリプトが持ち、画面の導線はコマンドの表示だけにする。
@@ -1564,6 +1572,7 @@ function ReleaseGroupHeaderWithLanes({
   releaseButton,
   rebuildButton,
   deviceBuild,
+  showIosDistribution,
   onMerged,
 }: {
   repositoryFullName: string;
@@ -1571,6 +1580,7 @@ function ReleaseGroupHeaderWithLanes({
   releaseButton?: React.ReactNode;
   rebuildButton?: React.ReactNode;
   deviceBuild?: BranchFlowDeviceBuild | null;
+  showIosDistribution?: boolean;
   onMerged: (pullRequest: PullRequestSummary) => void;
 }) {
   // リリースPRの凍結後にdevelopへ入った作業は、その版に含まれないので見出しの上へ出す（#3664）
@@ -1599,6 +1609,7 @@ function ReleaseGroupHeaderWithLanes({
         releaseButton={releaseButton}
         rebuildButton={rebuildButton}
         deviceBuild={deviceBuild}
+        showIosDistribution={showIosDistribution}
         onMerged={onMerged}
       />
       {included.length > 0 && (
