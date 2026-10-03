@@ -1,15 +1,19 @@
 import { db } from "@/lib/db";
 import {
   buildFixIssueAutoClosedComment,
+  buildOriginalPullRequestAutoClosedComment,
   decideFixIssueClose,
+  decideOriginalPullRequestClose,
   type FixIssueCloseSkipReason,
 } from "@/lib/github/fix-issue-close-sweep";
+import { closePullRequest } from "@/lib/github/actions-api";
+import { compareBranches } from "@/lib/github/branches-api";
 import { createComment, hasReopenedEvent, updateIssue } from "@/lib/github/issues-api";
 import {
   extractTargetPullRequestNumber,
   TARGET_PULL_REQUEST_MARKER_PREFIX,
 } from "@/lib/github/pull-request-fix-issue";
-import { fetchPullRequest } from "@/lib/github/pull-requests-api";
+import { fetchPullRequest, fetchPullRequestsForHead } from "@/lib/github/pull-requests-api";
 
 /**
  * 「修正Issueを起案」が作った修正Issueのうち、対象PRがマージされたものを自動closeする（#3353）。
@@ -32,12 +36,20 @@ export function resetFixIssueCloseSweepMemoForTest(): void {
   knownReopened.clear();
 }
 
-export type FixIssueClosedIssue = { repositoryFullName: string; issueNumber: number };
+export type FixIssueCloseAction =
+  | { repositoryFullName: string; issueNumber: number; kind: "fix_issue_closed" }
+  | {
+      repositoryFullName: string;
+      issueNumber: number;
+      kind: "original_pr_closed";
+      originalPullRequestNumber: number;
+      replacementPullRequestNumber: number;
+    };
 
 export async function sweepClosableFixIssues(params: {
   tokenFor: (installationId: number, cacheKey: string) => Promise<string>;
   countSkip: (reason: FixIssueCloseSkipReason | "fetch_failed" | "action_failed") => void;
-}): Promise<FixIssueClosedIssue[]> {
+}): Promise<FixIssueCloseAction[]> {
   const targets = await db.issue.findMany({
     where: {
       state: "OPEN",
@@ -61,7 +73,7 @@ export async function sweepClosableFixIssues(params: {
   });
   if (targets.length === 0) return [];
 
-  const closed: FixIssueClosedIssue[] = [];
+  const actions: FixIssueCloseAction[] = [];
   for (const target of targets) {
     const { ownerLogin, name, fullName, installation } = target.repository;
     const issueKey = `${fullName}#${target.number}`;
@@ -82,8 +94,18 @@ export async function sweepClosableFixIssues(params: {
           state: pullRequest.state === "open" ? "open" : "closed",
         },
       });
-      // 大多数はここで抜ける（対象PRがまだopen）。閉じると決めたものだけ先へ進む。
-      if (decision.action === "skip") continue;
+      if (decision.action === "skip") {
+        await closeOriginalPullRequestWhenReplaced({
+          owner: ownerLogin,
+          repo: name,
+          repositoryFullName: fullName,
+          fixIssueNumber: target.number,
+          originalPullRequest: pullRequest,
+          token,
+          onClosed: (action) => actions.push(action),
+        });
+        continue;
+      }
 
       const reopened = await hasReopenedEvent(ownerLogin, name, target.number, token);
       // 確かめられなかったものは閉じない（次の巡回で引き直す）
@@ -116,7 +138,7 @@ export async function sweepClosableFixIssues(params: {
       } catch (error) {
         console.error(`[progress-sweep] ${issueKey}の修正Issueへのコメント:`, error);
       }
-      closed.push({ repositoryFullName: fullName, issueNumber: target.number });
+      actions.push({ repositoryFullName: fullName, issueNumber: target.number, kind: "fix_issue_closed" });
     } catch (error) {
       // 1件の失敗で残りを止めない（次の巡回で拾い直せる）
       console.error(`[progress-sweep] ${issueKey}の修正Issueの判定:`, error);
@@ -124,5 +146,63 @@ export async function sweepClosableFixIssues(params: {
     }
   }
 
-  return closed;
+  return actions;
+}
+
+async function closeOriginalPullRequestWhenReplaced(params: {
+  owner: string;
+  repo: string;
+  repositoryFullName: string;
+  fixIssueNumber: number;
+  originalPullRequest: { number: number; state: string; head: { sha: string } };
+  token: string;
+  onClosed: (action: FixIssueCloseAction) => void;
+}): Promise<void> {
+  const { owner, repo, repositoryFullName, fixIssueNumber, originalPullRequest, token } = params;
+  const replacementPullRequests = await fetchPullRequestsForHead(
+    owner,
+    repo,
+    null,
+    `issue-${fixIssueNumber}`,
+    "open",
+    token,
+  );
+  const replacement = replacementPullRequests[0];
+  const comparison = replacement
+    ? await compareBranches(owner, repo, originalPullRequest.head.sha, replacement.head.sha, token)
+    : null;
+  const decision = decideOriginalPullRequestClose({
+    originalPullRequestOpen: originalPullRequest.state === "open",
+    replacementPullRequestFound: replacement !== undefined,
+    replacementBehindBy: comparison?.behindBy ?? null,
+  });
+  if (decision.action === "skip" || !replacement) return;
+
+  try {
+    await closePullRequest(owner, repo, originalPullRequest.number, token);
+  } catch (error) {
+    console.error(
+      `[progress-sweep] ${repositoryFullName}#${originalPullRequest.number} の元PRのclose:`,
+      error,
+    );
+    return;
+  }
+
+  try {
+    await createComment(owner, repo, originalPullRequest.number, token, {
+      body: buildOriginalPullRequestAutoClosedComment(replacement.number),
+    });
+  } catch (error) {
+    console.error(
+      `[progress-sweep] ${repositoryFullName}#${originalPullRequest.number} の元PRへのコメント:`,
+      error,
+    );
+  }
+  params.onClosed({
+    repositoryFullName,
+    issueNumber: fixIssueNumber,
+    kind: "original_pr_closed",
+    originalPullRequestNumber: originalPullRequest.number,
+    replacementPullRequestNumber: replacement.number,
+  });
 }

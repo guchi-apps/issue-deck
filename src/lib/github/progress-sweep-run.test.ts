@@ -9,6 +9,7 @@ const fetchPullRequestsForHead = vi.fn();
 const fetchPullRequest = vi.fn();
 const fetchBranchHeadSha = vi.fn();
 const compareBranches = vi.fn();
+const closePullRequest = vi.fn();
 const fetchCommentsForIssue = vi.fn();
 const createComment = vi.fn();
 const hasReopenedEvent = vi.fn();
@@ -66,6 +67,12 @@ vi.mock("@/lib/github/branches-api", () => ({
   },
   get compareBranches() {
     return compareBranches;
+  },
+}));
+
+vi.mock("@/lib/github/actions-api", () => ({
+  get closePullRequest() {
+    return closePullRequest;
   },
 }));
 
@@ -223,6 +230,7 @@ describe("runProgressSweep", () => {
     fetchPullRequestsForHead.mockImplementation(pullRequestsForHead([mergedPullRequest()]));
     fetchBranchHeadSha.mockResolvedValue("aaa111");
     compareBranches.mockResolvedValue(null);
+    closePullRequest.mockResolvedValue(undefined);
     fetchCommentsForIssue.mockResolvedValue([]);
     createComment.mockResolvedValue({});
     hasReopenedEvent.mockResolvedValue(false);
@@ -571,6 +579,48 @@ describe("runProgressSweep", () => {
     });
     expect(result.actions).toEqual([
       { repositoryFullName: "guchi-apps/issue-deck", issueNumber: 3001, kind: "fix_issue_closed" },
+    ]);
+  });
+
+  it("修正PRが元PRを取り込んでいれば、元PRのcloseを巡回の成果に数える（#3918）", async () => {
+    fetchProjectItems.mockResolvedValue([]);
+    issueFindMany.mockImplementation(
+      issueRowsFor({
+        fixIssue: [
+          {
+            number: 3001,
+            body: "指摘です。\n\n- 対象PR: #2957",
+            repositoryId: "repo-issue-deck",
+            repository: {
+              ownerLogin: "guchi-apps",
+              name: "issue-deck",
+              fullName: "guchi-apps/issue-deck",
+              installation: { id: "inst-row", installationId: 111 },
+            },
+          },
+        ],
+      }),
+    );
+    fetchPullRequest.mockResolvedValue({
+      number: 2957,
+      merged: false,
+      state: "open",
+      head: { sha: "original-sha" },
+    });
+    fetchPullRequestsForHead.mockResolvedValue([{ number: 3002, head: { sha: "replacement-sha" } }]);
+    compareBranches.mockResolvedValue({ aheadBy: 1, behindBy: 0, changedFiles: 1, lastCommitAt: null });
+
+    const result = await runProgressSweep({ now: NOW });
+
+    expect(closePullRequest).toHaveBeenCalledWith("guchi-apps", "issue-deck", 2957, "token");
+    expect(result.actions).toEqual([
+      {
+        repositoryFullName: "guchi-apps/issue-deck",
+        issueNumber: 3001,
+        kind: "original_pr_closed",
+        originalPullRequestNumber: 2957,
+        replacementPullRequestNumber: 3002,
+      },
     ]);
   });
 

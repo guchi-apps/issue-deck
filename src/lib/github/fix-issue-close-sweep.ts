@@ -28,6 +28,12 @@ export type FixIssueCloseSkipReason =
   /** 開け直しの有無を確かめられなかった。次の巡回で引き直す */
   | "fix_issue_reopen_unknown";
 
+/** 後続の修正PRによる元PRの自動クローズを見送る理由。いずれも平常時に起こりうるため数えない */
+export type OriginalPullRequestCloseQuietSkipReason =
+  | "original_pr_not_open"
+  | "replacement_pr_not_found"
+  | "original_pr_not_in_replacement";
+
 export type FixIssueCloseDecision =
   | { action: "close" }
   | { action: "skip"; reason: FixIssueCloseQuietSkipReason };
@@ -48,12 +54,46 @@ export function decideFixIssueClose(params: {
   };
 }
 
+/**
+ * 修正IssueのPRが元PRを置き換えたと判断できるか。
+ *
+ * 修正PRが元PRのheadを祖先として持つ（`behindBy === 0`）場合だけ閉じる。squash・rebaseで
+ * コミットの祖先関係が消えた場合は、内容が同じ可能性があっても自動では閉じない。
+ */
+export function decideOriginalPullRequestClose(params: {
+  originalPullRequestOpen: boolean;
+  replacementPullRequestFound: boolean;
+  replacementBehindBy: number | null;
+}):
+  | { action: "close" }
+  | { action: "skip"; reason: OriginalPullRequestCloseQuietSkipReason } {
+  if (!params.originalPullRequestOpen) return { action: "skip", reason: "original_pr_not_open" };
+  if (!params.replacementPullRequestFound) {
+    return { action: "skip", reason: "replacement_pr_not_found" };
+  }
+  if (params.replacementBehindBy !== 0) {
+    return { action: "skip", reason: "original_pr_not_in_replacement" };
+  }
+  return { action: "close" };
+}
+
 /** 自動closeしたときに残すコメント。なぜ閉じたのかと、開け直せば閉じ直さないことを伝える */
 export function buildFixIssueAutoClosedComment(pullRequestNumber: number): string {
   return [
     `✅ 対象PR #${pullRequestNumber} がマージされ、この修正が取り込まれたと判断してこのIssueをcloseしました。`,
     "",
     "まだ対応が残っている場合は、このIssueを開き直してください（開き直したものは自動では閉じません）。",
+    "",
+    COMMENT_SOURCE_MARKER,
+  ].join("\n");
+}
+
+/** 元PRを自動closeしたときに、置き換え先を明示して残すコメント */
+export function buildOriginalPullRequestAutoClosedComment(replacementPullRequestNumber: number): string {
+  return [
+    `✅ このPRを取り込んだ修正PR #${replacementPullRequestNumber} が作成されたため、このPRをcloseしました。`,
+    "",
+    "修正PRをマージしてください。まだこのPRで対応する場合は、開き直してください。",
     "",
     COMMENT_SOURCE_MARKER,
   ].join("\n");
