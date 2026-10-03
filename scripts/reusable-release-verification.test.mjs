@@ -17,7 +17,6 @@ import { fileURLToPath } from "node:url";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { buildPullRequestFixIssueDraft } from "@/lib/github/pull-request-fix-issue";
 import {
   buildReleaseVerificationFixIssueDraft,
   parseReleaseVerification,
@@ -299,25 +298,12 @@ describe("対象issueの検証結果を集計する", () => {
       repositoryFullName: "guchi-apps/issue-deck",
       releasePullRequestNumber: 2450,
     }).body;
-    const pullRequestFixBody = buildPullRequestFixIssueDraft({
-      pullRequest: {
-        repositoryFullName: "guchi-apps/issue-deck",
-        number: 2446,
-        title: "レビューのゲートを直す",
-        baseRef: "develop",
-        headRef: "issue-2441",
-        merged: true,
-        state: "closed",
-        linkedIssueNumbers: [2441],
-        reviewVerdict: null,
-      },
-      review: null,
-      openChangeRequests: [],
-    }).body;
+    // 旧フローで作成済みのIssueも、リリース集計では読み続ける。
+    const legacyPullRequestFixBody = "対象PR: #2446";
 
     it.each([
       ["リリースの検証結果から起票した修正Issue", releaseFixBody],
-      ["PR詳細から起票した修正Issue", pullRequestFixBody],
+      ["旧フローで起票済みの修正Issue", legacyPullRequestFixBody],
     ])("%sが同じリリースに入っていれば、元PRの行を修正済みにする", (_, fixBody) => {
       const out = runAggregation(
         ["- #2455 レビューのゲートを直す の修正（レビュー指摘）", "- #2441 レビューのゲートを直す"],

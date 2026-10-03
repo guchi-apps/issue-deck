@@ -5,7 +5,7 @@ import { callClaudeMessages } from "@/lib/claude/request";
  * 原因の推定と、再デプロイで直る見込みかを返す。
  *
  * **返すのは提案まで。** 修正Issueを立てるかどうかは、画面で読んだ人が決める
- * （`pull-request-fix-issue.ts`と同じ立場）。
+ * （他のIssue下書き生成と同じ立場）。
  */
 
 /** プロンプトへ載せるログの長さ。**末尾を残して切る**（失敗は最後に出るため） */

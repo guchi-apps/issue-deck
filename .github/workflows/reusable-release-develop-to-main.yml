@@ -1002,9 +1002,7 @@ jobs:
           # マージ確認で毎回止められていた。
           #
           # 修正Issueの本文には対象のPRが書いてある（`対応PR: #<番号>`は
-          # `buildReleaseVerificationFixIssueDraft`、`対象PR: #<番号>`は
-          # `buildPullRequestFixIssueDraft`が書く。文言は`scripts/check-review-verdict-marker.sh`が
-          # 突き合わせる）。**その修正Issueが同じリリースの対象issueに入っている**＝修正が本番へ
+          # `buildReleaseVerificationFixIssueDraft`が書く。**その修正Issueが同じリリースの対象issueに入っている**＝修正が本番へ
           # 一緒に出る場合だけ、元PRの行を修正済みにする。修正Issueがまだdevelopへ入っていなければ
           # 対象issueに載らないので、元PRの行は要修正のまま残る。修正Issue自身の行は
           # 自分のPRの判定で出るので、修正そのものの出来はそちらで読める。

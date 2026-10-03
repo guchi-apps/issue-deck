@@ -22,6 +22,8 @@ develop向けPRの自動レビューは、既存のClaude Codeに加えてCodex�
 
 PR本文の`issue-deck-verification:start review=...`にはClaudeとCodexの総合判定を書く。要修正、要確認、取得失敗、LGTMの順で優先し、各レビューの個別判定は節の箇条書きに残す。PR詳細とリリースPRの指摘本文も、同じコミットに対する各レビュー元の最新コメントから要修正・要確認を優先して選ぶ。後から届いた別のレビュー元のLGTMで指摘を隠さないため。
 
+Codexが`changes-requested`の場合も、後継Issueや新しいPRは作らない。Codexには「人の判断なしに自動修正してよい」印が無いため、無人の自動修正へは渡さず確認待ちにする。人がPR詳細から「レビュー指摘を自動修正」を開始すると、Claude・Codex双方の同一head SHAに対する要修正コメントを既存の`issue-<番号>`ブランチへ渡し、修正後は同じPRを再レビューする。PR詳細はこの過程をレビュー中・要修正・修正中・再レビュー中・レビューOK・マージ待ちとして表示する。
+
 この機能を初めて追加するPRでは、マージ前のサブPCのpollerにCodex要求の巡回処理がまだ無い。Actionsは要求コメントを投稿しても結果を受け取れずタイムアウトするため、そのPRの検証では`start-codex-pr-review.sh --run`を対象SHAで手動起動する。以後のPRは、develop反映後にpollerが巡回する。
 
 巡回側でPRのbase/head SHAを読むときは、`gh pr list --json baseRefOid`を使わない。`gh pr list`のJSONフィールドに`baseRefOid`は無く、エラーを空一覧へ変換すると要求コメントだけが残り、Actionsは結果待ちを続ける（#3943）。`gh api repos/<owner>/<repo>/pulls`の`.base.sha`と`.head.sha`を使い、一覧取得の失敗はエラーとして出す。develop向けのバージョンbump PRで残った未完了チェックは、同じhead SHAを使うmain向けリリースPRにも表示される。

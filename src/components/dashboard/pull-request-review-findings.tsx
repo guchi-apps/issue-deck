@@ -108,9 +108,7 @@ export function PullRequestReviewFindings({
 
       <div className="flex flex-wrap items-center gap-2 border-t bg-muted/50 px-3 py-1.5">
         <span className="min-w-0 flex-1 text-[11px] text-muted-foreground">
-          {/* 修正依頼の入口はPR詳細上部の帯（`PullRequestFixIssueBar`）。押すと指摘を引用した
-              依頼文・下書きが開く（#3009・#3333） */}
-          指摘を直させるときは、画面上部の「修正を依頼」「修正Issueを起案」から送ります。
+          指摘を直すときは、PR詳細上部の「レビュー指摘を自動修正」から同じPRへ修正を依頼できます。
         </span>
         {readUrl && (
           <a
