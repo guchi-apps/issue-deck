@@ -58,6 +58,8 @@ describe("GET", () => {
       appAiModelReasoning: "claude-sonnet-5-5",
       modelPickEngine: "app-ai",
       defaultDispatchAgent: "claude",
+      planReviewAgentForClaude: "claude",
+      planReviewAgentForCodex: "codex",
       dispatchFailoverEnabled: true,
       dispatchFailoverThresholdPercent: 90,
     });
@@ -81,6 +83,8 @@ describe("GET", () => {
       appAiModelReasoning: "claude-opus-5-5",
       modelPickEngine: "app-ai",
       defaultDispatchAgent: "claude",
+      planReviewAgentForClaude: "claude",
+      planReviewAgentForCodex: "codex",
       dispatchFailoverEnabled: true,
       dispatchFailoverThresholdPercent: 90,
     });
@@ -95,6 +99,8 @@ describe("PATCH", () => {
         claudeModelAssist: "haiku",
         claudeLocalModel: "sonnet",
         codexModel: "gpt-6-sol",
+        planReviewAgentForClaude: "codex",
+        planReviewAgentForCodex: "claude",
         appAiModel: "claude-opus-5-5",
         appAiModelReasoning: "claude-sonnet-5-5",
       }),
@@ -108,6 +114,8 @@ describe("PATCH", () => {
           claudeModelAssist: "haiku",
           claudeLocalModel: "sonnet",
           codexModel: "gpt-6-sol",
+          planReviewAgentForClaude: "codex",
+          planReviewAgentForCodex: "claude",
           appAiModel: "claude-opus-5-5",
           appAiModelReasoning: "claude-sonnet-5-5",
         },
@@ -146,6 +154,35 @@ describe("PATCH", () => {
         }),
       }),
     );
+  });
+
+  it("開始元ごとの計画レビュー用エージェントを保存できる", async () => {
+    const res = await PATCH(
+      patchRequest({
+        claudeModel: "sonnet",
+        planReviewAgentForClaude: "codex",
+        planReviewAgentForCodex: "claude",
+      }),
+    );
+
+    expect(res.status).toBe(200);
+    expect(upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        update: expect.objectContaining({
+          planReviewAgentForClaude: "codex",
+          planReviewAgentForCodex: "claude",
+        }),
+      }),
+    );
+  });
+
+  it("計画レビュー用エージェントが不正な値の場合は400を返す", async () => {
+    const res = await PATCH(
+      patchRequest({ claudeModel: "sonnet", planReviewAgentForClaude: "other" }),
+    );
+
+    expect(res.status).toBe(400);
+    expect(upsert).not.toHaveBeenCalled();
   });
 
   // 設定画面は常に両方を送るが、片方だけ更新したい呼び出しや旧形式のリクエストを壊さないため、

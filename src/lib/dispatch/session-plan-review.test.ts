@@ -12,6 +12,7 @@ const removeCheckUserWithReason = vi.fn();
 const resolveInstallationToken = vi.fn();
 const enqueuePlanReviewJob = vi.fn();
 const listCountedPlanReviewJobs = vi.fn();
+const findAppSetting = vi.fn();
 
 vi.mock("@/lib/github/issues-api", () => ({
   createComment: (...args: unknown[]) => createComment(...args),
@@ -26,13 +27,16 @@ vi.mock("@/lib/dispatch/installation-token", () => ({
 vi.mock("@/lib/dispatch/jobs", () => ({
   enqueuePlanReviewJob: (...args: unknown[]) => enqueuePlanReviewJob(...args),
 }));
+vi.mock("@/lib/db", () => ({
+  db: { appSetting: { findUnique: (...args: unknown[]) => findAppSetting(...args) } },
+}));
 
 vi.mock("@/lib/dispatch/plan-review-kind", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/dispatch/plan-review-kind")>()),
   listCountedPlanReviewJobs: (...args: unknown[]) => listCountedPlanReviewJobs(...args),
 }));
 
-const { postSessionPlan } = await import("@/lib/dispatch/session-plan");
+const { postSessionPlan, resolvePlanReviewAgentForSession } = await import("@/lib/dispatch/session-plan");
 
 const PLAN = {
   repositoryFullName: "guchi-apps/issue-deck",
@@ -49,6 +53,7 @@ beforeEach(() => {
   resolveInstallationToken.mockReset().mockResolvedValue("token");
   enqueuePlanReviewJob.mockReset().mockResolvedValue({ ok: true, job: { id: "job1" } });
   listCountedPlanReviewJobs.mockReset().mockResolvedValue([]);
+  findAppSetting.mockReset().mockResolvedValue(null);
 });
 
 describe("postSessionPlan の計画レビュー起動", () => {
@@ -59,7 +64,7 @@ describe("postSessionPlan の計画レビュー起動", () => {
       repositoryFullName: "guchi-apps/issue-deck",
       issueNumber: 1855,
       hostName: "subpc",
-      agent: undefined,
+      agent: "claude",
       // 人が押したわけではないので、積んだユーザーは残らない
       requestedByUserId: null,
     });
@@ -71,6 +76,34 @@ describe("postSessionPlan の計画レビュー起動", () => {
     expect(enqueuePlanReviewJob).toHaveBeenCalledWith(
       expect.objectContaining({ agent: "codex" }),
     );
+  });
+
+  it("開始元ごとの保存済み設定を計画レビューのエージェントに使う", async () => {
+    findAppSetting.mockResolvedValue({
+      planReviewAgentForClaude: "codex",
+      planReviewAgentForCodex: "claude",
+    });
+
+    await postSessionPlan(PLAN);
+    await postSessionPlan({ ...PLAN, agent: "codex" });
+
+    expect(enqueuePlanReviewJob).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ agent: "codex" }),
+    );
+    expect(enqueuePlanReviewJob).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ agent: "claude" }),
+    );
+  });
+
+  it("不正な設定値は開始元と同じCLIへ戻す", () => {
+    expect(
+      resolvePlanReviewAgentForSession({
+        sourceAgent: "codex",
+        planReviewAgentForCodex: "other",
+      }),
+    ).toBe("codex");
   });
 
   /**

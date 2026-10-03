@@ -9,6 +9,7 @@ import type {
   CodexModelSetting,
   DefaultDispatchAgent,
   ModelPickEngine,
+  PlanReviewAgent,
 } from "@/lib/app-settings";
 
 export function useAppSettingsMutations() {
@@ -45,6 +46,8 @@ export function useAppSettingsMutations() {
     appAiModelReasoning: AppAiModel,
     modelPickEngine: ModelPickEngine,
     defaultDispatchAgent: DefaultDispatchAgent,
+    planReviewAgentForClaude: PlanReviewAgent,
+    planReviewAgentForCodex: PlanReviewAgent,
     dispatchFailoverEnabled: boolean,
     dispatchFailoverThresholdPercent: number,
   ): Promise<boolean> {
@@ -63,6 +66,8 @@ export function useAppSettingsMutations() {
           appAiModelReasoning,
           modelPickEngine,
           defaultDispatchAgent,
+          planReviewAgentForClaude,
+          planReviewAgentForCodex,
           dispatchFailoverEnabled,
           dispatchFailoverThresholdPercent,
         }),

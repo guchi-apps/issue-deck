@@ -16,6 +16,13 @@ import { judgePlanReviewScope } from "@/lib/dispatch/plan-review-scope";
 import { SESSION_ARTIFACT_HTML_LIMIT } from "@/lib/dispatch/session-artifact";
 import { PLAN_REQUIRED_LABEL } from "@/lib/github/approval-labels";
 import { createComment } from "@/lib/github/issues-api";
+import {
+  PLAN_REVIEW_AGENT_FOR_CLAUDE_DEFAULT,
+  PLAN_REVIEW_AGENT_FOR_CODEX_DEFAULT,
+  parsePlanReviewAgent,
+  type PlanReviewAgent,
+} from "@/lib/app-settings";
+import { db } from "@/lib/db";
 import { parseRepositoryFullName } from "@/lib/local-session";
 
 /**
@@ -41,6 +48,43 @@ import { parseRepositoryFullName } from "@/lib/local-session";
 
 /** 自動投稿された計画コメントであることを示すマーカー */
 export const SESSION_PLAN_MARKER = "<!-- issue-deck:session-plan -->";
+
+type SessionPlanAgent = "claude" | "codex";
+
+/** 開始元と保存済み設定から、自動計画レビューに使うCLIを決める。 */
+export function resolvePlanReviewAgentForSession(params: {
+  sourceAgent?: SessionPlanAgent;
+  planReviewAgentForClaude?: unknown;
+  planReviewAgentForCodex?: unknown;
+}): PlanReviewAgent {
+  const sourceAgent = params.sourceAgent ?? "claude";
+  const configured =
+    sourceAgent === "codex"
+      ? parsePlanReviewAgent(params.planReviewAgentForCodex)
+      : parsePlanReviewAgent(params.planReviewAgentForClaude);
+  if (configured) return configured;
+  return sourceAgent === "codex"
+    ? PLAN_REVIEW_AGENT_FOR_CODEX_DEFAULT
+    : PLAN_REVIEW_AGENT_FOR_CLAUDE_DEFAULT;
+}
+
+async function readPlanReviewAgentForSession(sourceAgent?: SessionPlanAgent): Promise<PlanReviewAgent> {
+  try {
+    const setting = await db.appSetting.findUnique({
+      where: { id: 1 },
+      select: { planReviewAgentForClaude: true, planReviewAgentForCodex: true },
+    });
+    return resolvePlanReviewAgentForSession({
+      sourceAgent,
+      planReviewAgentForClaude: setting?.planReviewAgentForClaude,
+      planReviewAgentForCodex: setting?.planReviewAgentForCodex,
+    });
+  } catch (error) {
+    // 設定を読めなくても、計画の投稿や従来どおりの自動レビューを止めない。
+    console.error("[dispatch] 計画レビュー用エージェント設定を読めませんでした", error);
+    return resolvePlanReviewAgentForSession({ sourceAgent });
+  }
+}
 
 /**
  * GitHubのIssueコメント本文の上限は65536字。計画がそれを超えることは実際にはまず無いが、
@@ -189,11 +233,12 @@ export async function postSessionPlan(params: {
     // 計画の関門（G1・#1855）。**計画が実際に投稿された回だけ起こす**（無人側で守っている
     // のと同じ条件。`.github/workflows/reusable-issue-dispatch.yml`の`plan_posted`）。
     // 投稿より後に置くのは、ここで何が起きても計画そのものは残るようにするため。
+    const planReviewAgent = await readPlanReviewAgentForSession(params.agent);
     await requestPlanReview({
       repositoryFullName: params.repositoryFullName,
       issueNumber: params.issueNumber,
       hostName: params.hostName,
-      agent: params.agent,
+      agent: planReviewAgent,
       labels,
       plan: params.plan,
       post: (body) => createComment(parsed.owner, parsed.repo, params.issueNumber, token, { body }),

@@ -34,6 +34,7 @@ import type {
   CodexModelSetting,
   DefaultDispatchAgent,
   ModelPickEngine,
+  PlanReviewAgent,
 } from "@/lib/app-settings";
 import type { ConnectedRepository } from "@/types/repository";
 import type { ReviewGateIssueDraft } from "@/lib/review-gate-issue-draft";
@@ -49,6 +50,8 @@ type SettingsDialogProps = {
   claudeLocalModel: ClaudeLocalModelSetting;
   codexModel: CodexModelSetting;
   defaultDispatchAgent?: DefaultDispatchAgent;
+  planReviewAgentForClaude?: PlanReviewAgent;
+  planReviewAgentForCodex?: PlanReviewAgent;
   dispatchFailoverEnabled?: boolean;
   dispatchFailoverThresholdPercent?: number;
   appAiModel: AppAiModel;
@@ -81,6 +84,8 @@ export function SettingsDialog({
   claudeLocalModel,
   codexModel,
   defaultDispatchAgent = "claude",
+  planReviewAgentForClaude = "claude",
+  planReviewAgentForCodex = "codex",
   dispatchFailoverEnabled = true,
   dispatchFailoverThresholdPercent = 90,
   appAiModel,
@@ -202,6 +207,8 @@ export function SettingsDialog({
                   claudeLocalModel={claudeLocalModel}
                   codexModel={codexModel}
                   defaultDispatchAgent={defaultDispatchAgent}
+                  planReviewAgentForClaude={planReviewAgentForClaude}
+                  planReviewAgentForCodex={planReviewAgentForCodex}
                   dispatchFailoverEnabled={dispatchFailoverEnabled}
                   dispatchFailoverThresholdPercent={dispatchFailoverThresholdPercent}
                   appAiModel={appAiModel}
