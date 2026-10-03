@@ -107,7 +107,7 @@ describe("PullRequestMergeProduction", () => {
     );
   });
 
-  it("指摘のある行にだけ印を付け、押すとダイアログを閉じてPR詳細を開く（#3592）", async () => {
+  it("各行にレビュー状態の丸を付け、押すとダイアログを閉じてPR詳細を開く（#3904）", async () => {
     mockChanges([
       makeChange({ id: "a1", pullRequestNumber: 2077, title: "要修正のPR" }),
       makeChange({ id: "a2", pullRequestNumber: 2078, issueNumber: 2063, title: "問題なしのPR" }),
@@ -136,6 +136,12 @@ describe("PullRequestMergeProduction", () => {
     const button = (await screen.findByText("要修正のPR")).closest("button");
     expect(button?.textContent).toContain("要修正");
     expect(screen.getByText("問題なしのPR").closest("button")?.textContent).not.toContain("要");
+    expect(screen.getByRole("img", { name: "Claudeレビュー: 要修正" })).toBeTruthy();
+    expect(screen.getByRole("img", { name: "Claudeレビュー: 問題なし" }).className).toContain(
+      "bg-green-600",
+    );
+    // 判定表にない変更も、未確認であることを灰色の丸から読める
+    expect(screen.getByRole("img", { name: "Claudeレビュー: 記録なし" })).toBeTruthy();
     // PR番号が取れない行は押せない
     expect(screen.getByText("番号なしの変更").closest("button")).toBeNull();
 
@@ -211,8 +217,10 @@ describe("PullRequestMergeProduction", () => {
     expect(await screen.findByText("要修正 1 ／ 問題なし 1")).toBeTruthy();
     expect(screen.getByText("#2077が要修正")).toBeTruthy();
     expect(screen.getByText("止めるべき項目があります（1件）")).toBeTruthy();
-    // 一覧の行には指摘のあるものだけ印を付ける（#3592）。問題なしの判定文は並べない
+    // 一覧の各行には状態の丸を付け、問題なしの判定文は並べない（#3904）
     expect(screen.queryByText("問題なし（LGTM）")).toBeNull();
+    expect(screen.getByRole("img", { name: "Claudeレビュー: 要修正" })).toBeTruthy();
+    expect(screen.getByRole("img", { name: "Claudeレビュー: 問題なし" })).toBeTruthy();
     expect(
       screen.getByText("自動マージ失敗時の理由表示機能の追加").closest("button")?.textContent,
     ).toContain("要修正");
