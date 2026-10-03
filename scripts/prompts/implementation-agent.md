@@ -141,6 +141,13 @@ scripts/fetch-issue-images.sh "<画像URL>"
 - 全アプリ共通の共有知識（`~/apps/_docs`）を参照したい → 「全アプリ共通の共有知識」（読み取り専用）
 
 ## 実装完了直前にやること
+
+**マニフェスト（`.github/secrets-manifest.tsv`）へ新しいキーの行を足したときは、ブランチをpushしたあと、`gh pr create`の前に1Passwordへの登録とGitHubへの同期まで済ませます。** 未登録のままマージすると、本番デプロイの値検査で落ちます。ランダム生成でよい値（トークン・署名鍵など）は人に頼まず次で完結させます。`--ref`で自分のブランチのマニフェストを読ませ、`--no-deploy`でコードが値を読む前の本番デプロイを止めます（既定は`develop`のマニフェストを読み`main`のデプロイを起こすため、PR作成前は必ず失敗します）。まず`--dry-run`で確かめてください。外部サービスで発行する値は従来どおり`71.manual-step`のIssueを起票します。
+
+```bash
+scripts/provision-secret.sh --repo guchi-apps/issue-deck --key <KEY> --generate hex32 --ref issue-{{ISSUE_NUMBER}} --no-deploy
+```
+
 <!-- if:plan-required -->
 
 **`gh pr create`の直前に、計画レビューが届いているかを必ず確かめてください**（#2864）。develop向けPRは作成から約90秒で自動マージされるため、出してから気付くと指摘の反映だけの2本目のPRになります。

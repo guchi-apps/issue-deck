@@ -216,6 +216,9 @@ push専用URL（`remote.origin.pushurl`、workflow書き込み権限を持つPAT
     それでも失敗する場合はそれ以上リトライせず、
     `gh issue comment ${ISSUE_NUMBER}`
     で他の変更と競合したため追加対応を中断した旨を人間に報告して停止する
+- マニフェスト（`.github/secrets-manifest.tsv`）へ新しいキーの行を足した場合は、無人実行では1Passwordへ書けない
+  （書き込み権限つきサービスアカウントはサブPCにしか無い）。PRを作る前に作業を止め、登録が要るキーをIssueコメントに
+  書いて`00.check-user`と`01.check-blocked`を付ける（ローカル実行なら`provision-secret.sh --ref issue-<番号> --no-deploy`で完結できる）
 - Pull Requestを作成・更新する
   - `implement`の場合、または`additional`でPRがまだ無い場合:
     `gh pr create --base develop --head ${BRANCH}`で
