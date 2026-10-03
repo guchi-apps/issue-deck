@@ -1,5 +1,9 @@
 import { db } from "@/lib/db";
 import { getInstallationToken } from "@/lib/github/app-auth";
+import {
+  dispatchKnowledgePromotion,
+  isPromotionTriggerStatus,
+} from "@/lib/github/knowledge-promotion-dispatch";
 import { getProjectLocation } from "@/lib/github/project-location";
 import {
   addProjectItem,
@@ -172,6 +176,9 @@ export async function reportProgressStatus(params: {
     where: { repositoryId: repository.id, number: params.issueNumber },
     data: { projectStatus: targetStatus, projectItemId: item.itemId },
   });
+
+  // 共通知識の格上げ判定を都度起動する（#3814）。待たず、失敗しても報告の結果に影響させない
+  if (isPromotionTriggerStatus(params.status)) void dispatchKnowledgePromotion();
 
   return { applied: true, from: item.status, to: targetStatus };
 }
