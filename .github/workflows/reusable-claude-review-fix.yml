@@ -305,11 +305,21 @@ jobs:
             fi
           fi
 
-          # 直す材料は、このPRへ投稿された最新の自動レビュー（総評の判定マーカー付きのコメント）。
-          # 手動実行では判定時点のコミットを問わない（押した人が「この指摘を直して」と頼んでいる）
-          # --paginateの--jqはページごとに評価されるため、ページをまとめてから最後の1件を取る
+          # 直す材料は、このPRへ投稿された最新コミットへの「要修正」自動レビューコメント。
+          # ClaudeとCodexは同じPRを再レビューするため、**手動実行では両方の指摘を渡す**。
+          # Codexは「自動修正してよい」印を持たないので自動のhandoffには入れず、画面で人が
+          # 開始したこの経路だけで扱う。これにより、どちらの指摘も後継Issue／PRを作らない。
+          # --paginateの--jqはページごとに評価されるため、ページをまとめてから対象を抜き出す。
           gh api "repos/$GH_REPO/issues/$PR_NUMBER/comments?per_page=100" --paginate \
-            | jq -rs '[.[][] | select(.body | test("issue-deck-review-verdict:(lgtm|needs-check|changes-requested) sha="))] | last | .body // ""' \
+            | jq -rs --arg head_sha "$HEAD_SHA" --arg manual "$MANUAL" '
+                [.[][] | select(.body | test("issue-deck(-codex)?-review-verdict:(lgtm|needs-check|changes-requested) sha=" + $head_sha))]
+                | group_by(if (.body | test("issue-deck-codex-review-verdict:")) then "codex" else "claude" end)
+                | map(sort_by(.created_at) | last)
+                | map(select(.body | test("changes-requested sha=" + $head_sha)))
+                | if $manual == "true" then . else map(select(.body | test("issue-deck-review-verdict:"))) end
+                | map(.body)
+                | join("\n\n---\n\n")
+              ' \
             > /tmp/review-comment.md
           if ! grep -q '[^[:space:]]' /tmp/review-comment.md; then
             echo "自動レビューのコメントが見つからないため何もしません"

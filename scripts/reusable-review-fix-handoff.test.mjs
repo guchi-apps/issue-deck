@@ -19,6 +19,10 @@ const workflowYaml = readFileSync(
   path.join(repoRoot, ".github/workflows/reusable-claude-review-develop.yml"),
   "utf8",
 );
+const reviewFixWorkflowYaml = readFileSync(
+  path.join(repoRoot, ".github/workflows/reusable-claude-review-fix.yml"),
+  "utf8",
+);
 
 /** ステップ名から`run: |`の本文を取り出す（`reusable-review-report.test.mjs`と同じ最小実装） */
 function extractRunScript(stepName) {
@@ -96,6 +100,7 @@ function run({
   callerExit = "0",
   risky = "false",
   autoFix = "true",
+  codexReviewResult = "",
 } = {}) {
   const logPath = path.join(workDir, "gh.log");
   const outputPath = path.join(workDir, "output");
@@ -114,6 +119,7 @@ function run({
       REASONS: risky === "true" ? "- **GitHub Actionsやデプロイ設定**: x" : "",
       ALREADY_CHECK_USER: "false",
       REVIEW_RESULT: "success",
+      CODEX_REVIEW_RESULT: codexReviewResult,
       REVIEW_AUTO_FIX: autoFix,
       STUB_ISSUE_COMMENTS: issueComments,
       STUB_PR_COMMENTS: prComments,
@@ -133,6 +139,11 @@ function run({
 }
 
 describe("レビュー指摘の自動修正への渡し（#3363）", () => {
+  it("手動修正はClaude・Codex双方の最新要修正コメントを同じPRから読む", () => {
+    expect(reviewFixWorkflowYaml).toContain("issue-deck(-codex)?-review-verdict:(lgtm|needs-check|changes-requested) sha=");
+    expect(reviewFixWorkflowYaml).toContain('join("\\n\\n---\\n\\n")');
+  });
+
   it("要修正で、レビューが自動修正OKの印を付けていれば、人へ渡さず自動修正へ渡す", () => {
     const result = run();
     expect(result.handedOff).toBe(true);
@@ -177,6 +188,12 @@ describe("レビュー指摘の自動修正への渡し（#3363）", () => {
 
   it("入力で無効にしていれば渡さない", () => {
     expect(run({ autoFix: "false" }).handedOff).toBe(false);
+  });
+
+  it("Codexだけが要修正なら自動修正へ渡さず、人の確認を待つ", () => {
+    const result = run({ issueComments: "", prComments: "<!-- issue-deck-codex-review-verdict:changes-requested sha=abc123 -->", codexReviewResult: "success" });
+    expect(result.handedOff).toBe(false);
+    expect(result.labeled).toBe(true);
   });
 
   it("2回渡した後は人へ渡し、上限に達したことをIssueへ書く", () => {

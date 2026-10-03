@@ -21,7 +21,7 @@ import {
 } from "@/components/dashboard/pull-request-badges";
 import { PullRequestActionsMenu } from "@/components/dashboard/pull-request-actions-menu";
 import { PullRequestFileList } from "@/components/dashboard/pull-request-file-list";
-import { PullRequestFixIssueBar } from "@/components/dashboard/pull-request-fix-issue-bar";
+import { PullRequestReviewRound } from "@/components/dashboard/pull-request-review-round";
 import { PullRequestMergeButton } from "@/components/dashboard/pull-request-merge-button";
 import { PullRequestRepairButtons } from "@/components/dashboard/pull-request-repair-buttons";
 import { PullRequestReviewFindings } from "@/components/dashboard/pull-request-review-findings";
@@ -33,18 +33,11 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { usePullRequestDeployStatus } from "@/hooks/use-pull-request-deploy-status";
 import type { IssueSuggestion } from "@/components/dashboard/mention-textarea";
 import { formatRelativeDate } from "@/lib/format-relative-date";
-import type { PrFixRequestRoute } from "@/lib/dispatch/pr-fix-request";
-import {
-  showsPullRequestFixIssueBar,
-  type PullRequestFixIssueDraft,
-  type PullRequestFixRoute,
-} from "@/lib/github/pull-request-fix-issue";
 import { selectPullRequestReviewComment } from "@/lib/github/pull-request-review-comment";
 import { repairKindsFor } from "@/lib/github/pull-request-repair";
 import { parseReleaseVerification, type ReleaseVerificationRow } from "@/lib/github/release-verification";
 import { canMergeFromDeck, requiresUserMerge } from "@/lib/pull-request-list";
 import { cn } from "@/lib/utils";
-import type { Issue } from "@/types/issue";
 import type {
   PullRequestSummary,
   PullRequestDetail as PullRequestDetailData,
@@ -74,29 +67,8 @@ type PullRequestDetailProps = {
    * 渡さない画面ではボタンを出さない。起点のリリースPRは表示中の`pullRequest`から渡す。
    */
   onCreateFixIssue?: (row: ReleaseVerificationRow, pullRequest: PullRequestSummary) => void;
-  /**
-   * ヘッダーと本文の間の「修正Issueを起案」（#2961）。下書きを埋めた新規作成ダイアログを開く。
-   * 渡さない画面では帯を出さない。
-   */
-  onCreatePullRequestFixIssue?: (draft: PullRequestFixIssueDraft) => void;
-  /**
-   * 「修正Issueを起案」の送り先（#3009）。未指定（`showsPullRequestFixIssueBar`が偽になる
-   * リリースPR等）では帯自体を出さないので既定値は不要。
-   */
-  pullRequestFixRoute?: PullRequestFixRoute;
-  /**
-   * `pullRequestFixRoute`が`create-issue`のとき、このPRを参照する既存の修正Issueが
-   * 既にあればそれ（#3331）。二重起票に気づけるよう、帯のボタンをそのIssueへのリンクへ
-   * 切り替えるために使う。無ければ`null`。
-   */
-  existingPullRequestFixIssue?: Pick<Issue, "number" | "htmlUrl"> | null;
-  /** 「修正Issueを起案」の確認ダイアログの`@Issue番号`補完に使う候補一覧 */
+  /** PR本文を編集するときの`@Issue番号`補完に使う候補一覧 */
   issueSuggestions?: IssueSuggestion[];
-  /** `pullRequestFixRoute`が`create-issue`以外のときの送信（#3009） */
-  onRequestPullRequestSessionFix?: (route: PrFixRequestRoute, reason: string) => Promise<boolean>;
-  isSubmittingPullRequestSessionFix?: boolean;
-  pullRequestSessionFixRejection?: string | null;
-  pullRequestSessionFixError?: string | null;
   /** ヘッダーの左に置く戻るボタン等（スマホ画面向け） */
   headerLeading?: React.ReactNode;
   className?: string;
@@ -183,14 +155,7 @@ export function PullRequestDetail({
   onClosed,
   onUpdated,
   onCreateFixIssue,
-  onCreatePullRequestFixIssue,
-  pullRequestFixRoute,
-  existingPullRequestFixIssue = null,
   issueSuggestions = [],
-  onRequestPullRequestSessionFix,
-  isSubmittingPullRequestSessionFix = false,
-  pullRequestSessionFixRejection = null,
-  pullRequestSessionFixError = null,
   headerLeading,
   className,
   style,
@@ -482,23 +447,7 @@ export function PullRequestDetail({
 
         {currentDetail && (
           <>
-            {/* レビューの指摘から修正Issueを起案する（#2961）。リリースPRは検証結果パネルの
-                行ごとのボタンが受け持つので出さない */}
-            {onCreatePullRequestFixIssue && showsPullRequestFixIssueBar(pullRequest) && (
-              <PullRequestFixIssueBar
-                pullRequest={pullRequest}
-                events={currentDetail.events}
-                onCreate={onCreatePullRequestFixIssue}
-                route={pullRequestFixRoute}
-                existingFixIssue={existingPullRequestFixIssue}
-                repositoryFullName={pullRequest.repositoryFullName}
-                issueSuggestions={issueSuggestions}
-                onRequestSessionFix={onRequestPullRequestSessionFix}
-                isSubmittingSessionFix={isSubmittingPullRequestSessionFix}
-                sessionFixRejection={pullRequestSessionFixRejection}
-                sessionFixError={pullRequestSessionFixError}
-              />
-            )}
+            {pullRequest.kind !== "release" && <PullRequestReviewRound pullRequest={pullRequest} />}
 
             {/* リリースPRの検証結果は、本文より先に出す（#2448）。mainへ出すかを決める人が
                 最初に知りたいのは「何件のうち何件が問題なしか」で、本文の表まで
