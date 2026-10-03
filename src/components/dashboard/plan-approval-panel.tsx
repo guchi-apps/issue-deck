@@ -32,7 +32,7 @@ import { summarizeIssueSession } from "@/lib/dispatch/issue-session";
 import type { DispatchSessionView } from "@/lib/dispatch/session-state";
 import { formatRemaining, useRemainingMs } from "@/components/dashboard/use-remaining-ms";
 import { formatRelativeDate } from "@/lib/format-relative-date";
-import type { PendingPlanReview, PlanReviewNotice } from "@/lib/github/plan-review";
+import { isNoteOnlyApprove, type PendingPlanReview, type PlanReviewNotice } from "@/lib/github/plan-review";
 import { splitAttachments } from "@/lib/markdown-attachments";
 import {
   CODEX_LOCAL_MODEL_VALUES,
@@ -205,7 +205,10 @@ export function PlanApprovalPanel({
     planReview.review.recommendation?.kind === "approve" &&
     planReview.review.decisions.length === 0;
   // 指摘・判断に分けられたレビューでは、カード内の追記欄が「修正を送る」を兼ねる（#3829）
+  // 補足だけで承認が推奨なら、カードに修正の入口が無いので承認欄の「修正する」を出す（#3850）
+  const noteOnly = isNoteOnlyApprove(planReview?.review ?? null);
   const cardHandlesRevision =
+    !noteOnly &&
     planReview !== null &&
     (planReview.review.findings.length > 0 || planReview.review.decisions.length > 0);
   const canHandoff = session !== null && session.codexThreadKnown !== null;
@@ -278,7 +281,7 @@ export function PlanApprovalPanel({
               disabled={!canSend || dispatch.isSubmitting}
               isSubmitting={dispatch.isSubmitting}
               deemphasizeSubmit={approveRecommended}
-              approveHint="下の「承認して実装へ進む」を押す"
+              approveHint={`下の「${noteOnly ? "計画を承認する" : "承認して実装へ進む"}」を押す`}
               unavailable={sessionGone ? "session-gone" : remainingMs <= 0 ? "expired" : undefined}
               onSubmit={(text) => send("revise", text)}
             />
@@ -402,7 +405,7 @@ export function PlanApprovalPanel({
               onClick={() => void send("approve")}
             >
               {dispatch.isSubmitting ? <Loader2 className="animate-spin" /> : <Check />}
-              承認して実装へ進む
+              {noteOnly ? "計画を承認する" : "承認して実装へ進む"}
             </Button>
             {!cardHandlesRevision && (
               <Button
@@ -412,7 +415,7 @@ export function PlanApprovalPanel({
                 onClick={() => setIsRevising(true)}
               >
                 <Pencil />
-                修正を送る
+                {noteOnly ? "修正する" : "修正を送る"}
               </Button>
             )}
             {artifactsMissing && (
