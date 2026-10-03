@@ -27,6 +27,8 @@ const DISPATCH_ERROR: Record<IosDispatchBlock | string, string> = {
   already_delivered: "この版はすでにTestFlightへ配布済みです。",
   run_in_progress: "iOS配布がすでに実行中です。",
   ios_workflow_missing: "このリポジトリにはiOS配布のワークフローがありません。",
+  force_unsupported: "このアプリのワークフローはまだ手動配布（判定を飛ばす配布）に対応していません。",
+  force_not_needed: "この版は更新不要と判定されたものではないため、手動配布はできません。",
 };
 
 /** 内訳の自動更新の間隔（#3665） */
@@ -81,6 +83,8 @@ export function IosReleaseGroupPanel({
     pollPaused: tipKnown === false,
   });
   const [open, setOpen] = useState(false);
+  // 更新不要の判定を飛ばす手動配布（#3840）
+  const [forceOpen, setForceOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [launchedAt, setLaunchedAt] = useState<number | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -122,21 +126,23 @@ export function IosReleaseGroupPanel({
   const latestRun = data.runs[0];
   const launching = launchedAt !== null;
   const canDispatch = (state.kind === "ready" || state.kind === "failed") && !launching;
+  const canForceDispatch = state.kind === "not-needed" && !launching;
 
-  async function dispatch() {
+  async function dispatch(force = false) {
     setSubmitting(true);
     setActionError(null);
     try {
       const res = await fetch("/api/repositories/ios-testflight", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ owner, repo, prNumber }),
+        body: JSON.stringify({ owner, repo, prNumber, ...(force ? { force: true } : {}) }),
       });
       if (!res.ok) {
         const body = (await res.json().catch(() => null)) as { error?: string; message?: string } | null;
         throw new Error(DISPATCH_ERROR[body?.error ?? ""] ?? body?.message ?? `起動に失敗しました (${res.status})`);
       }
       setOpen(false);
+      setForceOpen(false);
       setLaunchedAt(Date.now());
       refresh();
     } catch (err) {
@@ -221,6 +227,11 @@ export function IosReleaseGroupPanel({
         {canDispatch && (
           <Button size="sm" variant="outline" className="h-6 px-2 text-xs" onClick={() => setOpen(true)}>
             {state.kind === "failed" ? "再実行" : "iOSへ配布"}
+          </Button>
+        )}
+        {canForceDispatch && (
+          <Button size="sm" variant="outline" className="h-6 px-2 text-xs" onClick={() => setForceOpen(true)}>
+            手動で配布
           </Button>
         )}
         {state.kind === "failed" && trackedIssue && (
@@ -310,6 +321,39 @@ export function IosReleaseGroupPanel({
             >
               {submitting && <Loader2 className="size-4 animate-spin" aria-hidden="true" />}
               配布する
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={forceOpen} onOpenChange={setForceOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {version ? `v${version} を手動でiOSへ配布しますか？` : "手動でiOSへ配布しますか？"}
+            </AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="flex flex-col gap-1">
+                <span>対象のmainコミット：{sha.slice(0, 7)}</span>
+                <span className="text-amber-700 dark:text-amber-400">
+                  この版は「iOS更新不要」と判定されています。判定を飛ばして、署名・ビルド・アップロードを行います。
+                </span>
+                <span>完了後、TestFlightの内部グループへ配布されます。</span>
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          {actionError && <p className="text-destructive text-sm">{actionError}</p>}
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={submitting}>キャンセル</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={submitting}
+              onClick={(event) => {
+                event.preventDefault();
+                void dispatch(true);
+              }}
+            >
+              {submitting && <Loader2 className="size-4 animate-spin" aria-hidden="true" />}
+              手動で配布する
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

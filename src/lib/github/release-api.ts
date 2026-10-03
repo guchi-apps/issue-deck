@@ -820,15 +820,19 @@ const IOS_TESTFLIGHT_WORKFLOW = "ios-testflight.yml";
 /**
  * `ios-testflight.yml`を対象コミット付きでmainに対して手動起動する（#3644）。
  * 対象は`inputs.sha`で渡す。runの`head_sha`は`--ref main`の先端になり、対象コミットとは限らない。
+ * `force`が真なら`inputs.force`も渡し、更新不要の判定を飛ばして配布させる（#3840）。
  */
 export async function dispatchIosTestflightWorkflow(
   owner: string,
   repo: string,
   token: string,
   sha: string,
+  force = false,
 ): Promise<void> {
   const url = `${GITHUB_API}/repos/${owner}/${repo}/actions/workflows/${IOS_TESTFLIGHT_WORKFLOW}/dispatches`;
-  const res = await githubFetch(url, token, { method: "POST", body: { ref: "main", inputs: { sha } } });
+  // `force`は更新不要の判定を飛ばして配布する手動配布（#3840）。ワークフロー側に`force`入力が無いと422になる
+  const inputs = force ? { sha, force: "true" } : { sha };
+  const res = await githubFetch(url, token, { method: "POST", body: { ref: "main", inputs } });
   if (!res.ok) {
     const detail = await res.text().catch(() => "");
     throw new GithubApiError(res.status, `GitHub API request failed: ${res.status} ${url} ${detail}`);

@@ -137,8 +137,8 @@ export function parseNextWindowRunIntervalMinutes(value: unknown): number | null
 
 // 次枠実行で起動しない「残り枠の下限」（%・#3100）。**残りがこの値を下回っている間は起動を見送る**。
 // 0は制限しない（既定。従来と同じ動き）。自由入力にしないのは、100のような値で無人実行が
-// 永久に止まるのを避けるため（上限は半分に留める）。5時間枠・週間枠で同じ選択肢を使う。
-export const NEXT_WINDOW_RUN_FLOOR_PERCENT_OPTIONS = [0, 10, 20, 30, 40, 50] as const;
+// 永久に止まるのを避けるため（上限は半分に留める）。5時間枠・週間枠で同じ選択肢を使う。刻みは5%（#3837）。
+export const NEXT_WINDOW_RUN_FLOOR_PERCENT_OPTIONS = [0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50] as const;
 export const NEXT_WINDOW_RUN_FLOOR_PERCENT_DEFAULT = 0;
 
 export function parseNextWindowRunFloorPercent(value: unknown): number | null {

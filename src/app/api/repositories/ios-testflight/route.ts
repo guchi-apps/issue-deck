@@ -4,6 +4,7 @@ import { requireUserId } from "@/lib/auth-user";
 import { db } from "@/lib/db";
 import { withGithubApiFeature } from "@/lib/github/api-usage";
 import { getInstallationToken } from "@/lib/github/app-auth";
+import { GithubApiError } from "@/lib/github/github-api-error";
 import {
   dispatchIosTestflightWorkflow,
   fetchDeployRunForSha,
@@ -244,6 +245,7 @@ async function handlePOST(request: NextRequest) {
   const owner = payload?.owner;
   const repo = payload?.repo;
   const prNumber = payload?.prNumber;
+  const force = payload?.force === true;
   if (typeof owner !== "string" || typeof repo !== "string" || !Number.isInteger(prNumber)) {
     return NextResponse.json({ error: "invalid_request" }, { status: 400 });
   }
@@ -300,6 +302,16 @@ async function handlePOST(request: NextRequest) {
     if (block !== null || sha === null) {
       return NextResponse.json({ error: block ?? "not_merged" }, { status: 409 });
     }
+    // 手動配布（#3840）は、この版のrunが判定を終えて成功している（＝更新不要で終わった）ときだけ。
+    // 未判定の版や失敗した版は、通常の配布・再実行で足りる
+    if (
+      force &&
+      !runsBody.workflow_runs.some(
+        (run) => run.head_sha === sha && run.status === "completed" && run.conclusion === "success",
+      )
+    ) {
+      return NextResponse.json({ error: "force_not_needed" }, { status: 409 });
+    }
 
     const key = `${owner}/${repo}`;
     const last = recentDispatches.get(key);
@@ -309,9 +321,13 @@ async function handlePOST(request: NextRequest) {
     recentDispatches.set(key, Date.now());
 
     try {
-      await dispatchIosTestflightWorkflow(owner, repo, token, sha);
+      await dispatchIosTestflightWorkflow(owner, repo, token, sha, force);
     } catch (error) {
       recentDispatches.delete(key);
+      // 入力`force`をワークフローが宣言していないと422になる。通常の配布へ落とさず、未対応として返す
+      if (force && error instanceof GithubApiError && error.status === 422) {
+        return NextResponse.json({ error: "force_unsupported" }, { status: 409 });
+      }
       throw error;
     }
     return NextResponse.json({ ok: true, sha });
