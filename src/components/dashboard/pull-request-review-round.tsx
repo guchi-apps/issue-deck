@@ -11,6 +11,7 @@ export function PullRequestReviewRound({ pullRequest }: { pullRequest: PullReque
     headSha: pullRequest.headSha,
     repairRun: pullRequest.repairRun,
     reviewPending: pullRequest.mergeJudgement.aiReview.state === "pending",
+    aiReviewState: pullRequest.mergeJudgement.aiReview.state,
     autoMergeEnabled: pullRequest.autoMergeEnabled,
     readyToMerge:
       canMergeFromDeck(pullRequest) &&
