@@ -38,7 +38,7 @@ export function ExecutionFlowOverview(props: ExecutionFlowOverviewProps) {
     try {
       const response = await fetch("/api/settings/claude-model", {
         method: "PATCH", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ claudeModel: props.claudeModel, workflowClaudeModel: claudeModel, workflowCodexModel: codexModel, workflowCodexReasoningEffort: reasoningEffort }),
+        body: JSON.stringify({ workflowClaudeModel: claudeModel, workflowCodexModel: codexModel, workflowCodexReasoningEffort: reasoningEffort }),
       });
       if (!response.ok) throw new Error("保存に失敗しました");
       setEditing(null);
