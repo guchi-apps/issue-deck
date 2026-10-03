@@ -77,9 +77,16 @@ import { cn } from "@/lib/utils";
 export function DispatchQueueContent({
   dispatch,
   onOpenIssue,
+  pinTop = false,
 }: {
   dispatch: DispatchStateHandle;
   onOpenIssue?: (issueId: string) => void;
+  /**
+   * 更新インジケーターとエージェントの一括操作を上に固定し、それより下だけをスクロールさせる
+   * （#3818）。親が高さの決まった縦flex（`flex min-h-0 flex-1 flex-col`）のときだけ渡す。
+   * 暴走に気付いてすぐ止めたい操作が、ジョブの一覧を下へ送ると画面外へ流れていたため
+   */
+  pinTop?: boolean;
 }) {
   const summary = summarizeDispatchQueue(dispatch.jobs, dispatch.concurrency, dispatch.hosts);
   const stall = describeDispatchQueueStall(summary, dispatch.hosts);
@@ -99,7 +106,7 @@ export function DispatchQueueContent({
     }
   }
 
-  return (
+  const pinned = (
     <>
       {/* いつ時点の内容かと、取得中かどうか（#1773） */}
       <QueueRefreshRow dispatch={dispatch} />
@@ -117,6 +124,10 @@ export function DispatchQueueContent({
         同じ理由で、名前が似ていて役割が違う2つの上限を別の場所に置くと、どちらが起動を
         止めているのか読み取れないため
       */}
+    </>
+  );
+  const body = (
+    <>
       <DispatchHostPanel
         hosts={dispatch.hosts}
         sessions={dispatch.sessions}
@@ -230,6 +241,22 @@ export function DispatchQueueContent({
       </p>
 
       {dispatch.error && <p className="mt-2 text-xs text-destructive">{dispatch.error}</p>}
+    </>
+  );
+
+  if (pinTop) {
+    return (
+      <>
+        <div className="shrink-0 border-b pb-2">{pinned}</div>
+        <div className="min-h-0 flex-1 overflow-y-auto">{body}</div>
+      </>
+    );
+  }
+
+  return (
+    <>
+      {pinned}
+      {body}
     </>
   );
 }
