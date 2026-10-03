@@ -419,12 +419,11 @@ export function PullRequestDetail({
               availability={pullRequest.repairWorkflowAvailability}
               runningKind={pullRequest.repairRun?.kind ?? null}
             />
-            {/* 問題を直す通常操作より「マージする」を目立たせない。明確な修正対象が無いときだけ主要CTAにする。 */}
-            {canMergeFromDeck(pullRequest) && repairKinds.length === 0 && (
+            {canMergeFromDeck(pullRequest) && (
               <PullRequestMergeButton
                 pullRequest={pullRequest}
                 onMerged={onMerged}
-                variant="default"
+                variant={repairKinds.length === 0 ? "default" : "outline"}
                 className="ml-auto"
               />
             )}
@@ -487,9 +486,10 @@ export function PullRequestDetail({
                 行ごとのボタンが受け持つので出さない */}
             {onCreatePullRequestFixIssue &&
               showsPullRequestFixIssueBar(pullRequest) &&
-              // 元Issueへ修正を送る従来の通常導線は「PRを自動修正」に統合する。
-              // ここに残すのは新しい別課題を起票する例外操作だけ。
-              (pullRequestFixRoute?.kind ?? "create-issue") === "create-issue" && (
+              // 自動修正できる問題がある間は主要CTAへ統合する。needs-check等で自動修正対象が
+              // 無い場合は、元Issue/セッションへ修正依頼する従来経路を残す。
+              ((pullRequestFixRoute?.kind ?? "create-issue") === "create-issue" ||
+                repairKinds.length === 0) && (
               <PullRequestFixIssueBar
                 pullRequest={pullRequest}
                 events={currentDetail.events}
