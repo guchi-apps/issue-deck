@@ -32,6 +32,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { CodexPairingControl } from "@/components/dashboard/codex-pairing-control";
+import { SessionDetail } from "@/components/dashboard/session-detail";
 import type { DispatchStateHandle } from "@/hooks/use-dispatch-state";
 import {
   describeDispatchJobStatus,
@@ -463,6 +464,7 @@ export function IssueSessionStatus({
             align === "end" ? "justify-end" : "justify-start",
           )}
         >
+          <SessionDetail session={session} dispatch={dispatch} />
           {sessionOpenTarget && (
             <Button variant="outline" size="sm" asChild>
               <a href={sessionOpenTarget.url} target="_blank" rel="noreferrer">

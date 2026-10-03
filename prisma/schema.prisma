@@ -1397,11 +1397,29 @@ model DispatchSession {
   waitingTool   String? @db.VarChar(100)
   waitingTarget String? @db.Text
 
+  // 画面に表示してよい範囲へ限定した会話・作業イベント。生の転記や画面内容は保存しない。
+  timelineEvents DispatchSessionTimelineEvent[]
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@unique([host, tmuxSessionName])
   @@index([state])
+}
+
+model DispatchSessionTimelineEvent {
+  id        String   @id @default(cuid())
+  sessionId String
+  occurredAt DateTime
+  kind      String   @db.VarChar(32)
+  title     String   @db.VarChar(160)
+  body      String?  @db.Text
+  createdAt DateTime @default(now())
+
+  session DispatchSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@unique([sessionId, occurredAt, kind, title])
+  @@index([sessionId, occurredAt])
 }
 
 // ALIVE=ペインが生きている / EXITED=正常終了して残っている / FAILED=異常終了して残っている /
