@@ -597,119 +597,38 @@ IssueもPRも無く、数える場所が無い。**issue-deckのDBへ記録す�
 **`vps`・`subpc`へ配るかは配布のときに判断する**——あの2つは実機のインフラ設定を流す
 リポジトリで、#2134でも自動再実行に含めるかを別扱いにしている。
 
-## 直らなかったデプロイ失敗を、Issueにして残す（#2236）
-
-`deploy-retry.yml`の自動再実行で直らなかった失敗は、そこから先へ進まない。**そのとき残るのは
-流れて消える通知1件と、その画面を開いた人にしか見えない赤いバッジだけ**で、人が気づいて
-「本番へ再デプロイ」を押しに行くまで本番は古い版のまま残る。
-
-issue-deckが**失敗したまま止まっているリポジトリを巡回して見つけ、追跡用のIssueを1件立てる**。
-
-| | |
-| --- | --- |
-| 巡回の起動 | サブPCのpollerが1巡ごとに`POST /api/repositories/deploy-failure-sweep`（コンフリクト巡回#2116と同じ形） |
-| 実際に巡回する間隔 | issue-deck側が決める（`DEPLOY_FAILURE_SWEEP_INTERVAL_MINUTES`・既定5分・0で無効） |
-| 起票の条件 | mainの`deploy.yml`の最新runが`completed`かつ`failure`／`timed_out`で、**最後に動いてから猶予（`DEPLOY_FAILURE_ISSUE_GRACE_MINUTES`・既定10分）が過ぎている**こと |
-| 判定 | [`src/lib/deploy-failure.ts`](../../src/lib/deploy-failure.ts)の`decideDeployFailure`（純関数） |
-| IO | [`src/lib/github/deploy-failure-sweep-run.ts`](../../src/lib/github/deploy-failure-sweep-run.ts) |
-
-### なぜGitHub Actions側で立てないのか
-
-**立てるべきかどうかを、落ちた実行それ自身は判断できない。** `deploy-retry.yml`の再実行は
-同じrunのattemptを増やすだけなので、1回目の失敗の時点でIssueを立てると、そのあと再実行が
-成功した場合に「もう直っているIssue」が開いたまま残る。「失敗のまま一定時間が過ぎた」ことを
-言うには失敗の**後**を見る必要があり、それを見られるのは外から巡回する側だけになる。
-
-加えて`deploy.yml`は14リポジトリに配られている。起票の作法（ラベル・本文・重複の防止）を
-各リポジトリのワークフローへ配り直すより、issue-deckに1か所置く方が揃えやすい。
-
-### 1リポジトリにつき同時に1件
-
-二重起票を防ぐ鍵は**失敗した`deploy.yml`のrun id**（DBの`DeployFailureIssue`）。
-
-- 同じrunを追いかけているIssueが開いていれば、何もしない
-- **直らないまま次のリリースが来た**（別のrunが落ちた）ときは、Issueを立て直さず開いている
-  1件へコメントを書き足し、追跡先を新しいrunへ移す。立て直すと同じ症状のIssueが並ぶ
-- 後から走ったデプロイが**成功**したら、コメントを添えて自動でクローズする。キャンセルでは
-  閉じない（人が止めたものを「直った」と扱わない）
-- **人が画面から先に閉じることがある。** DBの記録だけを信じると次の失敗で二度と立たなく
-  なるので、開いている行を見つけたときだけGitHubの実物を1回見て、閉じられていればDB側も畳む
-
-### ラベルは既存のものだけを使う
-
-付けるのは`30.bug`と`80.Priority: High`で、**新しいラベルは作らない**。新設すると14リポジトリへ
-配り終えるまで機能が半端に効く状態が続くため。**そのリポジトリに定義があるラベルだけ**を
-付ける（存在しないラベルを渡すとGitHubがIssueの作成ごと弾く。`gh label list | grep -qx`
-ガード#975と同じ考え方）。
-
-画面がデプロイ失敗Issueを見分けるのも、ラベルではなく**本文の先頭に埋めた不可視マーカー**
-（`<!-- deploy-failure: {...} -->`）による。Issueの本文はissue-deckのDBへ同期済みなので、
-パネルを出すのに追加のAPI呼び出しが要らない。
-
 ### iOS配布の失敗も同じ形で起票する（#3745）
 
-kurashio・yoteiflowの`ios-testflight.yml`が失敗したまま止まったときも、Webのデプロイ失敗と同じ巡回の形で
-`[iOS配布失敗]`Issueを1件立てる。**判定は`decideDeployFailure`をそのまま再利用**し（猶予・成功時のクローズ・
-別のrunが落ちたら書き足す、が同じ）、違うのは対象のworkflowと、本文へ失敗した**段階**（`summarizeIosStages`の推定）を書く点だけ。
+kurashio・yoteiflowの`ios-testflight.yml`が失敗したまま止まったとき、
+`[iOS配布失敗]`Issueを1件立てる。猶予・成功時のクローズ・別のrunが落ちたときの書き足しを判定し、
+本文へ失敗した**段階**（`summarizeIosStages`の推定）を書く。
 
 | | |
 | --- | --- |
 | 巡回の起動 | pollerが1巡ごとに`POST /api/repositories/ios-distribution-failure-sweep` |
 | 間隔・猶予 | `IOS_DISTRIBUTION_FAILURE_SWEEP_INTERVAL_MINUTES`（既定5分・0で無効）／`IOS_DISTRIBUTION_FAILURE_ISSUE_GRACE_MINUTES`（既定10分） |
 | 対象 | `Repository`の行を`webview-ios-repos.ts`で絞る（**固定リストのキーでは回さない**。旧名`myroom`と新名で二重に起票するため） |
-| 追跡 | DBの`IosDistributionFailureIssue`（`DeployFailureIssue`とは別表。既存クエリに種別条件を足さない） |
-| マーカー | `<!-- ios-distribution-failure: {...} -->`（Webのデプロイ失敗のマーカーとは別名） |
+| 追跡 | DBの`IosDistributionFailureIssue` |
+| マーカー | `<!-- ios-distribution-failure: {...} -->` |
 | IO | [`src/lib/github/ios-distribution-failure-sweep-run.ts`](../../src/lib/github/ios-distribution-failure-sweep-run.ts) |
 
 **起票のみで、実装の自動起動はしない。** 署名の期限切れ・Apple側の一時障害のようにコードでは直らない失敗が多く、
 失敗段階の判定は名前からの推定で「不明」もあり得るため。実際の失敗の型が溜まってから自動化の線を引く（#3745の判断）。
 ジョブ一覧は起票・更新のときだけ取るので、平常時の消費は最新run 1回（ETag）に収まる。
 
-### 拾えない失敗が1つある——issue-deck自身の`deploy`ジョブの失敗
-
-`deploy.yml`の`deploy`ジョブは、配布物の展開・`.env`更新・`pnpm install --prod`・
-`prisma migrate deploy`を済ませ、**`pm2 delete issue-deck`で旧版を落として新版を起動した後**に
-60秒のヘルスチェックを回す（`.github/workflows/deploy.yml`）。つまり`deploy`ジョブが失敗した
-時点で、issue-deck自身は**旧版も新版も応答していない**可能性が高い。pollerが叩く受け口も
-落ちているため、**この巡回はissue-deck自身の`deploy`失敗を起票できない。**
-
-- 拾えるのは、**他リポジトリの失敗すべて**と、issue-deck自身については**本番サーバーに
-  触れていない失敗**（`build`・`tag`）
-- issue-deck自身の`deploy`失敗は、従来どおりSignalyの通知が入口になる。issue-deckが復帰した
-  後も最新runが失敗のままなら、そこで初めて起票される
-- ここまで拾うにはGitHub Actions側（`deploy-retry.yml`と同じ場所）に置く必要があり、#2134が
-  「issue-deckのDBへ記録する案は採らなかった」のと同じ理由。設計が変わるので#2236の範囲から
-  外してある
-
-### なぜissue-deckのDBへ記録するのか（#2134と結論が違う理由）
-
-#2134は再実行の上限をissue-deckのDBに持たせず、GitHubの`run_attempt`を使った。**ここで
-DBを使うのは、判定の置き場所ではなく「起票したことを取りこぼさない」ため。**
-
-起票済みかどうかを、同期済みの`Issue`（タイトルが`[デプロイ失敗] `で始まるopenなもの）で
-判定する案もあるが、**その同期はGitHubのwebhook配送に依存する。** このリポジトリでは
-`pull_request(opened)`のイベントが1本も配送されなかった実例がある（guchi-apps/myroom#191。
-上記「issue-deckからの巡回検知」）。同じことが`issues(opened)`で起きると、巡回のたびに
-同じ失敗のIssueが積み上がる。作成と同時にDBへ1行残せば、webhookが落ちても二重起票にならない。
-
-**代わりにGitHub側の実物も1回だけ見る。** DBが`open`でも人が画面から先に閉じていることが
-あるため、開いている行を見つけたときだけ`GET /repos/.../issues/<番号>`で状態を確かめ、
-閉じられていればDB側も畳む。
-
 ### 押せる場所を、失敗が見えている場所に置く
 
 「本番へ再デプロイ」は#2020から「ブランチとPRの流れ」画面のリポジトリの節にあるが、そこは
-失敗の表示と離れた行で、PR詳細とIssue詳細には入口が無かった。失敗しているときだけ、同じ帯
-（[`deploy-failure-alert.tsx`](../../src/components/dashboard/deploy-failure-alert.tsx)）を3か所に出す。
+失敗の表示と離れた行で、PR詳細には入口が無かった。失敗しているときだけ、同じ帯
+（[`deploy-failure-alert.tsx`](../../src/components/dashboard/deploy-failure-alert.tsx)）を2か所に出す。
 
 | 画面 | 置き場所 | 見出し |
 | --- | --- | --- |
 | ブランチとPRの流れ | **リポジトリの節（レールの凡例の行のすぐ下）** | 本番デプロイが失敗しています |
 | Pull Request詳細 | 「デプロイ失敗」ピルの下 | このPRの変更は本番へ出ていません |
-| Issue詳細（自動起票分） | 本文より上 | 本番デプロイが失敗しています |
 
 ボタンの実体は`RepositoryDeployButton`のままで、**確認ダイアログ（押すと本番へ出るため必ず
-挟む）と`POST /api/repositories/deploy`の呼び出しを3画面ぶん書き分けない。**
+挟む）と`POST /api/repositories/deploy`の呼び出しを2画面ぶん書き分けない。**
 
 **ブランチ画面で帯を「落ちた版の束」に置かない。** 束は「次のリリースに乗る分」があると
 畳まれる（`visibleGroups`）ので、直らないまま次のリリースが動き出した瞬間に、いちばん見せたい

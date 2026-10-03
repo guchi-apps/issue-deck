@@ -141,24 +141,10 @@ export type BranchFlowDeployRun = {
   runAttempt: number;
 };
 
-/**
- * 本番デプロイの失敗を追跡するために自動起票したIssueへの参照（#2236）。
- *
- * **失敗の表示から、それを追いかけているIssueへ1回で移れるようにするためだけの型。**
- * 起票そのものは`lib/github/deploy-failure-sweep-run.ts`が行い、ここに出るのは
- * その結果（DBの`DeployFailureIssue`）を読んだもの。
- */
-export type DeployFailureIssueRef = {
-  number: number;
-  htmlUrl: string;
-};
-
 /** リポジトリ1件ぶんの本番デプロイ状況。`GET /api/branch-flow/deploy`が返す */
 export type RepositoryDeployStatus = {
   repositoryFullName: string;
   deployRun: BranchFlowDeployRun | null;
-  /** そのリポジトリで開いているデプロイ失敗Issue。無ければnull（#2236） */
-  failureIssue: DeployFailureIssueRef | null;
 };
 
 export type BranchFlowDeployResponse = {
@@ -555,11 +541,6 @@ export type BranchFlowRepository = {
    * developとの差分は出ないため、リリースの可否とは関係が無い。
    */
   canTriggerDeploy: boolean;
-  /**
-   * そのリポジトリで開いているデプロイ失敗Issue（#2236）。無ければnull。
-   * 失敗の帯からこのIssueへ移れるようにするためだけに持つ。
-   */
-  deployFailureIssue: DeployFailureIssueRef | null;
   /**
    * developへマージの段階まで進んでいるはずなのに、ブランチもPRも見つからないIssue。
    * 「関連が付いていない」ことを隠さないために出す。

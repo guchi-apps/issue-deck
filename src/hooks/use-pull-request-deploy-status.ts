@@ -4,7 +4,6 @@ import { useEffect, useState } from "react";
 
 import { parsePullRequestId } from "@/lib/github-reference";
 import { isPendingPullRequestDeployStatus } from "@/lib/pull-request-deploy";
-import type { DeployFailureIssueRef } from "@/types/branch-flow";
 import type {
   PullRequestDeployStatus,
   PullRequestDeployStatusResponse,
@@ -15,11 +14,9 @@ const ACTIVE_POLL_INTERVAL_MS = 30_000;
 
 export type PullRequestDeployStatusResult = {
   status: PullRequestDeployStatus | null;
-  /** そのリポジトリで開いているデプロイ失敗Issue（#2236）。無ければnull */
-  failureIssue: DeployFailureIssueRef | null;
 };
 
-const EMPTY_RESULT: PullRequestDeployStatusResult = { status: null, failureIssue: null };
+const EMPTY_RESULT: PullRequestDeployStatusResult = { status: null };
 
 /**
  * 選択中PRが本番へ届いたかを取得する（#1814）。
@@ -33,9 +30,6 @@ const EMPTY_RESULT: PullRequestDeployStatusResult = { status: null, failureIssue
  * 取得に失敗しても画面にエラーを出さない（バッジが出ないだけ）。**間違った状態を出すより
  * 「何も言わない」方がよい**という方針をブランチ画面から引き継いでいる。
  *
- * 併せて、そのリポジトリで開いているデプロイ失敗Issue（#2236）も返す。失敗しているときに
- * 「デプロイ失敗 #312」へ移れるようにするためで、**同じ1リクエストで受け取る**
- * （issue-deck自身のDBを引くだけなのでGitHub APIは増えない）。
  */
 export function usePullRequestDeployStatus(
   /** PRのid（`<owner>/<repo>#<番号>`）。未選択ならnull */
@@ -79,7 +73,6 @@ export function usePullRequestDeployStatus(
         setResult({
           pullRequestId,
           status: data.status,
-          failureIssue: data.failureIssue ?? null,
         });
       } catch {
         // 前回の取得結果を保ったままにする（失敗を理由に表示を消さない）

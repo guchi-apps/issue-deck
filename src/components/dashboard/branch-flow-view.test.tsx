@@ -1500,7 +1500,6 @@ describe("BranchFlowView", () => {
       return [
         {
           repositoryFullName: REPO,
-          failureIssue: null,
           deployRun: {
             id: 1,
             status: "completed",
@@ -1914,7 +1913,6 @@ describe("BranchFlowView", () => {
         deployStatuses: [
           {
             repositoryFullName: REPO,
-            failureIssue: null,
             deployRun: {
               id: 1,
               status: "in_progress",

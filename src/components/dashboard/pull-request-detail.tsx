@@ -199,7 +199,7 @@ export function PullRequestDetail({
   // 本番へ届いたか（#1814）。マージ済みのPRでだけ取りに行く。ヘッダーの「更新」でも
   // 取り直したいので、詳細の取得時刻をキーに渡す。スマホのPR詳細画面もこの部品を使うため、
   // ここで持つことでPC・スマホの両方に同じ表示が出る。
-  const { status: deployStatus, failureIssue: deployFailureIssue } = usePullRequestDeployStatus(
+  const { status: deployStatus } = usePullRequestDeployStatus(
     pullRequest?.id ?? null,
     pullRequest?.merged ?? false,
     detail?.fetchedAt ?? null,
@@ -458,7 +458,6 @@ export function PullRequestDetail({
               title="このPRの変更は本番へ出ていません"
               version={deployStatus.version}
               runUrl={deployStatus.deployRunUrl}
-              failureIssue={deployFailureIssue}
             />
           )}
 

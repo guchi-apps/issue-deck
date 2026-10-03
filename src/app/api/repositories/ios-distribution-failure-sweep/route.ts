@@ -7,8 +7,7 @@ import { previewModeGuard } from "@/lib/preview-mode";
 
 /**
  * iOS配布（`ios-testflight.yml`）が失敗したまま止まっているリポジトリを巡回し、追跡用のIssueを
- * 起票する（#3745）。Webの本番デプロイ失敗の巡回（`deploy-failure-sweep`）と同じ形で、
- * 詳細は`src/lib/ios-distribution-failure.ts`のヘッダーコメントを参照。
+ * 起票する（#3745）。詳細は`src/lib/ios-distribution-failure.ts`のヘッダーコメントを参照。
  *
  * 呼ぶのはサブPCのpollerで、認証は`DISPATCH_SECRET`。実際に巡回するかどうかはサーバー側が
  * 間隔（`IOS_DISTRIBUTION_FAILURE_SWEEP_INTERVAL_MINUTES`・既定5分）で決める。
