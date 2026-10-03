@@ -1123,6 +1123,12 @@ def resolve_question_context():
 
     応答の境界は`message.id`で取る。転記は1応答をブロックごとの行に分けて書くため、
     同じ`message.id`の行の`text`ブロックだけを集める。それより前の応答の本文は拾わない。
+
+    **本文の入った`thinking`ブロックも拾う**（#3809）。前置きを`text`でなく思考に書いて
+    質問することがあり、Claudeアプリでは引用の見た目で出ているのに画面には何も出なかった。
+    転記の`thinking`はふつう空（署名だけ）で、本文が入っているのはセッションの画面にも
+    出ているものなので、拾ってもセッションに見えていない内容は出さない。アプリの見た目に
+    合わせて引用（`> `）にし、`text`の本文と見分けられるようにする。
     """
     if not question_retried_recently():
         return ""
@@ -1175,6 +1181,12 @@ def resolve_question_context():
             break  # 質問より後に書かれた本文は前提ではない
         if block.get("type") == "text" and isinstance(block.get("text"), str) and block["text"].strip():
             texts.append(block["text"].strip())
+        elif (
+            block.get("type") == "thinking"
+            and isinstance(block.get("thinking"), str)
+            and block["thinking"].strip()
+        ):
+            texts.append("\n".join("> " + line if line.strip() else ">" for line in block["thinking"].strip().splitlines()))
     return "\n\n".join(texts)[:QUESTION_CONTEXT_MAX_CHARS]
 
 
