@@ -5,6 +5,7 @@ import {
   checkIosDispatchable,
   deliveredBuildForSha,
   iosDeliveryForReleases,
+  isIosDistributionPending,
   judgeIosReleasePanel,
   toWebDeployState,
   judgeIosRun,
@@ -208,5 +209,21 @@ describe("iosDeliveryForReleases（#3800）", () => {
     expect(result.get("v1.0.0")).toBe(9);
     expect(result.has("v1.1.0")).toBe(false);
     expect(result.has("v0.9.0")).toBe(false);
+  });
+});
+
+describe("isIosDistributionPending", () => {
+  it("配布が済んでいない状態だけ斜線の対象にする", () => {
+    expect(isIosDistributionPending({ kind: "ready" })).toBe(true);
+    expect(isIosDistributionPending({ kind: "failed", failedStage: null })).toBe(true);
+    expect(isIosDistributionPending({ kind: "awaiting-web", failed: false })).toBe(true);
+    expect(isIosDistributionPending({ kind: "running", stages: [] })).toBe(true);
+  });
+
+  it("配布済み・更新不要・判定できない版・読み込み前は対象にしない", () => {
+    expect(isIosDistributionPending({ kind: "delivered", buildNumber: 3 })).toBe(false);
+    expect(isIosDistributionPending({ kind: "not-needed" })).toBe(false);
+    expect(isIosDistributionPending({ kind: "stale" })).toBe(false);
+    expect(isIosDistributionPending(null)).toBe(false);
   });
 });
