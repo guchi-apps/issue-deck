@@ -35,10 +35,14 @@ require_command() {
   }
 }
 
+cleanup_review_worktree() {
+  git -C "$1" worktree remove --force "$2" >/dev/null 2>&1 || rm -rf "$2"
+}
+
 run_review() {
   local owner="$1" repo="$2" pr_number="$3" base_sha="$4" head_sha="$5"
   local full_name="$owner/$repo" local_path workdir prompt_file output_file log_file
-  local verdict_pattern codex_command
+  local verdict_pattern codex_command cleanup_command
 
   require_command gh
   require_command git
@@ -57,10 +61,9 @@ run_review() {
   log_file="$WORK_ROOT/${repo}-${pr_number}-${head_sha:0:12}.log"
   verdict_pattern="${VERDICT_PREFIX}(lgtm|needs-check|changes-requested) sha=${head_sha}"
 
-  cleanup() {
-    git -C "$local_path" worktree remove --force "$workdir" >/dev/null 2>&1 || rm -rf "$workdir"
-  }
-  trap cleanup EXIT
+  # EXITトラップはrun_review終了後に動くため、local変数の値をここで固定する。
+  printf -v cleanup_command 'cleanup_review_worktree %q %q' "$local_path" "$workdir"
+  trap "$cleanup_command" EXIT
 
   rm -rf "$workdir"
   # SHAそのもののfetchを許さないホストもあるため、GitHubが公開しているPR refとdevelopを取る。
