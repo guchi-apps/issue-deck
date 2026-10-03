@@ -2,7 +2,6 @@ import { Prisma, type DispatchHost, type DispatchJob } from "@prisma/client";
 
 import {
   DISPATCH_CONCURRENCY_DEFAULT,
-  type ClaudeLocalModel,
   parseClaudeModel,
   parseCodexLocalModel,
   type ClaudeLocalModel,
