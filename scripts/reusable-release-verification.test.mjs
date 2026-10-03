@@ -186,6 +186,27 @@ describe("対象issueの検証結果を集計する", () => {
     expect(out).toContain("[元のレビューコメントを開く](https://example.com/codex)");
   });
 
+  it("Claudeが同じSHAで撤回した古い指摘を選ばない", () => {
+    const out = runAggregation(["- #3917 再レビュー"], {
+      3917: {
+        number: 3927,
+        headRefOid: "abc123",
+        body: "<!-- issue-deck-verification:start review=changes-requested risk=none -->\n<!-- issue-deck-verification:end -->",
+        comments: [
+          {
+            url: "https://example.com/codex",
+            body: "Codexの現在の指摘B\n\n<!-- issue-deck-codex-review-verdict:changes-requested sha=abc123 -->",
+          },
+          reviewComment("Claudeの撤回済み指摘A", "changes-requested"),
+          reviewComment("Claudeは再レビューでLGTM", "lgtm"),
+        ],
+      },
+    });
+
+    expect(out).toContain("Codexの現在の指摘B");
+    expect(out).not.toContain("Claudeの撤回済み指摘A");
+  });
+
   it("ワークフローが転記したレビュー結果も拾う（#2488）", () => {
     // 判定マーカーが無くても、転記の印が付いたコメントは結果として載せる
     const out = runAggregation(["- #2441 転記された結果"], {

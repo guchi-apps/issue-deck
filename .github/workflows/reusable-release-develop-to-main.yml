@@ -1049,8 +1049,11 @@ jobs:
                 (.headRefOid // "") as $sha
                 | [ .comments[]? | select((.body // "") | test("issue-deck-(codex-)?review-verdict:(lgtm|needs-check|changes-requested) |issue-deck-review-report ")) ] as $all
                 | ([ $all[] | select((.body // "") | contains("sha=" + $sha)) ] | if length > 0 then . else $all end) as $current
-                | ([ $current[] | select((.body // "") | contains("verdict:" + $review + " sha=")) ] | last)
-                  // ($current | last) // {}')"
+                | ([ $current[] | select((.body // "") | test("issue-deck-review-(verdict|report)")) ] | last) as $claude
+                | ([ $current[] | select((.body // "") | contains("issue-deck-codex-review-verdict:")) ] | last) as $codex
+                | [$claude, $codex] | map(select(. != null)) as $latest
+                | ([ $latest[] | select((.body // "") | contains("verdict:" + $review + " sha=")) ] | last)
+                  // ($latest | last) // {}')"
               REVIEW_BODY="$(printf '%s' "$REVIEW_COMMENT" | jq -r '.body // ""')"
               REVIEW_URL="$(printf '%s' "$REVIEW_COMMENT" | jq -r '.url // ""')"
             fi
