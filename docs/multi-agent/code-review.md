@@ -24,6 +24,8 @@ PR本文の`issue-deck-verification:start review=...`にはClaudeとCodexの総�
 
 この機能を初めて追加するPRでは、マージ前のサブPCのpollerにCodex要求の巡回処理がまだ無い。Actionsは要求コメントを投稿しても結果を受け取れずタイムアウトするため、そのPRの検証では`start-codex-pr-review.sh --run`を対象SHAで手動起動する。以後のPRは、develop反映後にpollerが巡回する。
 
+巡回側でPRのbase/head SHAを読むときは、`gh pr list --json baseRefOid`を使わない。`gh pr list`のJSONフィールドに`baseRefOid`は無く、エラーを空一覧へ変換すると要求コメントだけが残り、Actionsは結果待ちを続ける（#3943）。`gh api repos/<owner>/<repo>/pulls`の`.base.sha`と`.head.sha`を使い、一覧取得の失敗はエラーとして出す。develop向けのバージョンbump PRで残った未完了チェックは、同じhead SHAを使うmain向けリリースPRにも表示される。
+
 ## 経路
 
 ```text
