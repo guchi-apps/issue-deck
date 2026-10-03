@@ -19,11 +19,7 @@ function Timeline({ sessionId }: { sessionId: string | undefined }) {
   const [events, setEvents] = useState<SessionTimelineEventView[]>([]);
   const [loading, setLoading] = useState(Boolean(sessionId));
   useEffect(() => {
-    if (!sessionId) {
-      setEvents([]);
-      setLoading(false);
-      return;
-    }
+    if (!sessionId) return;
 
     let cancelled = false;
     const load = async () => {
@@ -39,8 +35,6 @@ function Timeline({ sessionId }: { sessionId: string | undefined }) {
       }
     };
 
-    setEvents([]);
-    setLoading(true);
     void load();
     const timer = window.setInterval(load, 20_000);
     return () => {
@@ -123,7 +117,7 @@ export function SessionDetail({ session, dispatch }: { session: DispatchSessionV
             <div><dt className="text-muted-foreground">ステップ</dt><dd>{step?.label ?? "取得待ち"}</dd></div>
           </dl>
         </section>
-        <section><h3 className="mb-3 font-semibold">会話・作業ログ</h3><Timeline sessionId={session.id} /></section>
+        <section><h3 className="mb-3 font-semibold">会話・作業ログ</h3><Timeline key={session.id} sessionId={session.id} /></section>
         <section className="border-t pt-5"><h3 className="font-semibold">追加指示</h3><div className="mt-3 flex gap-2"><Input value={instruction} onChange={(event) => setInstruction(event.target.value.replaceAll(/[\r\n]+/g, " "))} maxLength={SESSION_INSTRUCTION_MAX_LENGTH} placeholder="セッションへ送る指示（1行）" /><Button onClick={() => void submit("instruction")} disabled={dispatch.isSubmitting}><SendHorizonal />送信</Button></div></section>
         <div className="flex flex-wrap gap-2"><Button variant="outline" onClick={() => void submit("interrupt")} disabled={dispatch.isSubmitting}><Square />停止</Button><Button variant="destructive" onClick={() => void submit("kill")} disabled={dispatch.isSubmitting}><X />セッション終了</Button>{openTarget && <Button variant="outline" asChild><a href={openTarget.url} target="_blank" rel="noreferrer">{openTarget.label}<ExternalLink /></a></Button>}</div>
         {message && <p className="text-sm text-muted-foreground" role="status">{message}</p>}
