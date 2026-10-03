@@ -22,7 +22,9 @@ describe("fetchGithubStatusSummary", () => {
 
     const result = await fetchGithubStatusSummary();
 
+    expect(Number.isNaN(Date.parse(result.fetchedAt))).toBe(false);
     expect(result).toEqual({
+      fetchedAt: result.fetchedAt,
       indicator: "major",
       description: "Partial System Outage",
       components: [

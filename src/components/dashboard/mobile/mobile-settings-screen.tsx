@@ -96,7 +96,7 @@ export function MobileSettingsScreen({
 }: MobileSettingsScreenProps) {
   const [section, setSection] = useState<SettingsSectionKey | null>(null);
   // 使用量・レート制限は「状態」を開いているあいだだけ取りに行く（#2022）
-  const data = useSettingsData(true, section === "status");
+  const data = useSettingsData(true);
 
   const alerts: Partial<Record<SettingsSectionKey, boolean>> = {
     fleet: data.hasExpiringFineGrainedToken,
@@ -226,9 +226,6 @@ export function MobileSettingsScreen({
         {section === "knowledge" && <KnowledgeSection compact />}
         {section === "status" && (
           <StatusSection
-            rateLimits={data.rateLimits}
-            apiUsage={data.apiUsage}
-            actionsUsage={data.actionsUsage}
             githubStatus={data.githubStatus}
           />
         )}

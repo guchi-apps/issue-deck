@@ -14,6 +14,8 @@ export type GithubStatusSummary = {
   indicator: GithubStatusIndicator;
   description: string;
   components: GithubStatusComponent[];
+  /** このAPIがStatuspageから取得した時刻（ISO 8601） */
+  fetchedAt: string;
 };
 
 type GithubStatusSummaryResponse = {
@@ -31,6 +33,7 @@ export async function fetchGithubStatusSummary(): Promise<GithubStatusSummary> {
   return {
     indicator: isGithubStatusIndicator(data.status.indicator) ? data.status.indicator : "none",
     description: data.status.description,
+    fetchedAt: new Date().toISOString(),
     components: data.components.map((component) => ({
       id: component.id,
       name: component.name,
