@@ -44,6 +44,7 @@ function toSessionView(session: DispatchSession): DispatchSessionView {
   // 中断・停滞の引き上げ（#2886）。ステップと同じ理由で保存されているコードも読み直す
   const interruptedReason = parseSessionInterruptedReason(session.interruptedReason);
   return {
+    id: session.id,
     host: session.host,
     tmuxSessionName: session.tmuxSessionName,
     repositoryFullName: session.repositoryFullName,
@@ -386,7 +387,7 @@ export async function reportDispatchSessions(params: {
             stepSeenAt: report.stepSeenAt == null ? null : new Date(report.stepSeenAt),
           };
 
-    await db.dispatchSession.upsert({
+    const stored = await db.dispatchSession.upsert({
       where: {
         host_tmuxSessionName: {
           host: params.hostName,
@@ -470,6 +471,24 @@ export async function reportDispatchSessions(params: {
         ...(report.remoteControlUrl ? { remoteControlUrl: report.remoteControlUrl } : {}),
       },
     });
+
+    // pollerが既に運んでいる状態・固定語彙のstepだけを時系列へ残す。画面や転記の本文、
+    // コマンド・tool結果はここへ入れない。会話本文はtimeline APIの許可済みイベントだけが担う。
+    const previousStep = revived ? null : previous?.step;
+    if (!previous || revived || previous?.state !== state || previousStep !== report.step) {
+      const title = report.step
+        ? `作業: ${report.step}`
+        : state === "ALIVE"
+          ? "セッション開始"
+          : state === "EXITED"
+            ? "セッション終了"
+            : state === "FAILED"
+              ? "セッション異常終了"
+              : "セッション消失";
+      await db.dispatchSessionTimelineEvent.create({
+        data: { sessionId: stored.id, occurredAt: now, kind: report.step ? "step" : "event", title },
+      });
+    }
 
     if (startingTransition === "enter") {
       notStarted.push({
