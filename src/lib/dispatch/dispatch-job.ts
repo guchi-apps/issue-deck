@@ -2357,7 +2357,48 @@ export function findPlanReviewJobForIssue(
 const PLAN_REVIEW_CREATING_GRACE_MS = 600_000;
 
 /**
- * 計画レビュー（G1）ジョブを承認パネルへ「作成中」として出すかどうか（#3565）。
+ * 計画レビュー（G1）ジョブの起動待ち（`QUEUED`）を「作成中」と同じく扱う猶予（#3772）。
+ * 計画レビューは実装セッションの本数上限の外で払い出すため、起動待ちは通常pollerの1巡（約40秒）で
+ * 抜ける。積んだ直後から確認待ちへ出すと、毎回Push通知と一覧の出入りが起きる。一方、メモリ逼迫
+ * （#2095）・再起動待ち（#2496）・計画レビューの本数埋まりの間は待ちに上限が無いので、
+ * 「作成中は数分」という#3625の前提を超えたぶんは人の目へ戻す
+ */
+const PLAN_REVIEW_QUEUED_GRACE_MS = 600_000;
+
+/**
+ * 計画レビュー（G1）ジョブの段階（#3772）。
+ *
+ * - `queued`: 起動待ち（`QUEUED`）で、積んでから猶予内
+ * - `queued_overdue`: 起動待ちのまま猶予を超えた（サブPCの空きを待っている）
+ * - `creating`: 起動済みでレビューを書いている（`CLAIMED`/`RUNNING`、または成功から猶予内で採否が未決定）
+ * - `null`: どれでもない（終わった・見送られた・ジョブが無い）
+ *
+ * `QUEUED`を`creating`に含めていた頃は、サブPCがセッション上限で取りに来ない間も
+ * 「計画レビューを作成中」と出し続け、5時間超その表示のままになっていた
+ */
+export type PlanReviewJobPhase = "queued" | "queued_overdue" | "creating";
+
+export function resolvePlanReviewJobPhase(
+  job: Pick<DispatchJobView, "status" | "createdAt" | "finishedAt" | "planReviewDecidedAt"> | null,
+  now: Date,
+): PlanReviewJobPhase | null {
+  if (job === null) return null;
+  if (job.status === "QUEUED") {
+    return now.getTime() - new Date(job.createdAt).getTime() < PLAN_REVIEW_QUEUED_GRACE_MS
+      ? "queued"
+      : "queued_overdue";
+  }
+  if (isActiveDispatchJobStatus(job.status)) return "creating";
+  if (job.status !== "SUCCEEDED" || job.finishedAt === null) return null;
+  if (job.planReviewDecidedAt) return null;
+  return now.getTime() - new Date(job.finishedAt).getTime() < PLAN_REVIEW_CREATING_GRACE_MS
+    ? "creating"
+    : null;
+}
+
+/**
+ * 計画レビュー（G1）ジョブを「作成中」とみなし、承認を人へ回さずに待つかどうか（#3565）。
+ * 起動待ち（`QUEUED`）は猶予内だけ含める（#3772。`resolvePlanReviewJobPhase`）。
  *
  * **`SUCCEEDED`も対象に含める。** 除外すると、実際に指摘コメントを書いている時間
  * （`SUCCEEDED`後の数分間）をほとんど拾えず表示区間が数秒〜十数秒しかなくなる。
@@ -2370,14 +2411,11 @@ const PLAN_REVIEW_CREATING_GRACE_MS = 600_000;
  * 保留・承認パネルは**すべてこの関数を読む**（判定を分けると、画面と通知で食い違う）。
  */
 export function isPlanReviewJobCreating(
-  job: Pick<DispatchJobView, "status" | "finishedAt" | "planReviewDecidedAt"> | null,
+  job: Pick<DispatchJobView, "status" | "createdAt" | "finishedAt" | "planReviewDecidedAt"> | null,
   now: Date,
 ): boolean {
-  if (job === null) return false;
-  if (isActiveDispatchJobStatus(job.status)) return true;
-  if (job.status !== "SUCCEEDED" || job.finishedAt === null) return false;
-  if (job.planReviewDecidedAt) return false;
-  return now.getTime() - new Date(job.finishedAt).getTime() < PLAN_REVIEW_CREATING_GRACE_MS;
+  const phase = resolvePlanReviewJobPhase(job, now);
+  return phase === "queued" || phase === "creating";
 }
 
 function findJobForIssue(

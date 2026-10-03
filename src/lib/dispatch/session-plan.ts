@@ -5,6 +5,14 @@ import {
 import { formatDispatchHostName } from "@/lib/dispatch/host-label";
 import { resolveInstallationToken } from "@/lib/dispatch/installation-token";
 import { enqueuePlanReviewJob } from "@/lib/dispatch/jobs";
+import {
+  buildPlanReviewKindCommentBody,
+  buildPlanReviewLimitCommentBody,
+  buildPlanReviewSkippedCommentBody,
+  decideNextPlanReviewKind,
+  listCountedPlanReviewJobs,
+} from "@/lib/dispatch/plan-review-kind";
+import { judgePlanReviewScope } from "@/lib/dispatch/plan-review-scope";
 import { SESSION_ARTIFACT_HTML_LIMIT } from "@/lib/dispatch/session-artifact";
 import { PLAN_REQUIRED_LABEL } from "@/lib/github/approval-labels";
 import { createComment } from "@/lib/github/issues-api";
@@ -187,6 +195,8 @@ export async function postSessionPlan(params: {
       hostName: params.hostName,
       agent: params.agent,
       labels,
+      plan: params.plan,
+      post: (body) => createComment(parsed.owner, parsed.repo, params.issueNumber, token, { body }),
     });
     return true;
   } catch (error) {
@@ -225,11 +235,47 @@ async function requestPlanReview(params: {
   agent?: "claude" | "codex";
   /** `addCheckUserWithReason`が返した付与後のラベル名。取れなければ`null` */
   labels: string[] | null;
+  /** 投稿した計画本文。影響判定（`judgePlanReviewScope`）の入力 */
+  plan: string;
+  /** 判定の記録（省略・種別・打ち止め）をIssueコメントとして残す。失敗しても握りつぶす */
+  post: (body: string) => Promise<unknown>;
 }): Promise<void> {
   if (!params.hostName) return;
   if (!params.labels?.includes(PLAN_REQUIRED_LABEL)) return;
 
+  const record = async (body: string) => {
+    try {
+      await params.post(body);
+    } catch (error) {
+      console.error(
+        `[dispatch] 計画レビューの判定をIssueへ残せませんでした（${params.repositoryFullName}#${params.issueNumber}）`,
+        error,
+      );
+    }
+  };
+
   try {
+    // 履歴から次の種別を決める（#3765）。初回が済んでいれば人の修正でも自動反映でも解消確認、
+    // 解消確認まで済んでいれば積まずに人へ引き継ぐ。ジョブを積まないので通知の保留も掛からない
+    const history = await listCountedPlanReviewJobs({
+      repositoryFullName: params.repositoryFullName,
+      issueNumber: params.issueNumber,
+    });
+    const round = decideNextPlanReviewKind(history);
+    if (round.kind === "stop") {
+      await record(buildPlanReviewLimitCommentBody());
+      return;
+    }
+    let reason = "前回の重大な指摘が解消したかだけを確認します。";
+    if (round.kind === "initial") {
+      const scope = judgePlanReviewScope(params.plan);
+      if (!scope.review) {
+        await record(buildPlanReviewSkippedCommentBody(scope.reason));
+        return;
+      }
+      reason = scope.reason;
+    }
+
     const result = await enqueuePlanReviewJob({
       repositoryFullName: params.repositoryFullName,
       issueNumber: params.issueNumber,
@@ -238,7 +284,10 @@ async function requestPlanReview(params: {
       // 人が押したわけではないので積んだユーザーは残らない（無人実行の起動と同じ扱い）
       requestedByUserId: null,
     });
-    if (!result.ok) {
+    if (result.ok) {
+      // 種別は積めた後に残す（積めなかったのに解消確認の印だけが残ると、動いている初回を取り違える）
+      await record(buildPlanReviewKindCommentBody(round.kind, reason));
+    } else {
       // **断られること自体は異常ではない**（pollerが未対応・同じ計画のレビューが既にある）。
       // 画面のジョブ一覧にも出ないため、ここだけが手掛かりになる
       console.info(

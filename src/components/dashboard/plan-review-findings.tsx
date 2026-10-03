@@ -39,6 +39,7 @@ export function PlanReviewFindings({
   review,
   reviewedAtLabel,
   round,
+  kind,
   repositoryFullName,
   submitLabel,
   fallbackSubmitLabel,
@@ -58,6 +59,8 @@ export function PlanReviewFindings({
    * 関門の番号（gates.md）で回数ではなく、何度レビューしても変わらないため利用者を迷わせていた
    */
   round?: number;
+  /** 初回レビューか解消確認か（#3765）。無ければ種別を出さない */
+  kind?: "initial" | "resolve";
   repositoryFullName?: string;
   /** 指摘ごとの判断を送るボタンの文言（例: 「選んだ指摘で計画を出し直す」） */
   submitLabel: string;
@@ -139,6 +142,11 @@ export function PlanReviewFindings({
         <h4 className="text-sm font-semibold text-blue-700 dark:text-blue-300">
           計画レビュー{round !== undefined && `（${round}回目）`}
         </h4>
+        {kind !== undefined && (
+          <span className="rounded-full bg-blue-500/15 px-2 py-0.5 text-[11px] font-medium text-blue-700 dark:text-blue-300">
+            {kind === "resolve" ? "解消確認" : "初回レビュー"}
+          </span>
+        )}
         <span className="rounded-full bg-blue-500/15 px-2 py-0.5 text-[11px] font-medium text-blue-700 dark:text-blue-300">
           {hasFindings ? `指摘 ${findings.length}件` : review.noFindings ? "指摘なし" : "本文のみ"}
         </span>
@@ -454,6 +462,11 @@ function FindingItem({
             {finding.number}
           </span>
           <span className="min-w-0">{finding.title}</span>
+          {finding.severity === "note" && (
+            <span className="shrink-0 self-start rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium text-muted-foreground no-underline">
+              実装時対応の補足
+            </span>
+          )}
         </p>
         <div
           role="group"

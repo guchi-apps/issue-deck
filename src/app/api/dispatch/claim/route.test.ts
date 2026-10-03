@@ -83,6 +83,24 @@ describe("POST /api/dispatch/claim", () => {
   });
 
   // 相乗りの巡回が落ちても払い出しは続ける（#838のときからの約束）
+  // 計画レビューの空き本数（#3772）。送ってきたpollerにだけ別枠で配る
+  it("planReviewMaxJobsを受け取ったら払い出しへ渡す", async () => {
+    await POST(postRequest({ host: "subpc", maxJobs: 0, planReviewMaxJobs: 2 }));
+    expect(claimDispatchJobs).toHaveBeenCalledWith({
+      hostName: "subpc",
+      maxJobs: 0,
+      planReviewMaxJobs: 2,
+    });
+  });
+
+  it.each([["負数", -1], ["小数", 1.5], ["文字列", "2"]])(
+    "planReviewMaxJobsが%sなら未指定として扱う（従来どおり起動枠で配る）",
+    async (_label, value) => {
+      await POST(postRequest({ host: "subpc", maxJobs: 1, planReviewMaxJobs: value }));
+      expect(vi.mocked(claimDispatchJobs).mock.calls.at(-1)?.[0].planReviewMaxJobs).toBeUndefined();
+    },
+  );
+
   it("相乗りの巡回が失敗してもジョブは払い出す", async () => {
     sweepCheckUserPushNotifications.mockRejectedValue(new Error("boom"));
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});

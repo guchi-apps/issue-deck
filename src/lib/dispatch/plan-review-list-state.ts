@@ -1,18 +1,20 @@
 import {
   findPlanReviewJobForIssue,
   isPlanReviewJobCreating,
+  resolvePlanReviewJobPhase,
   type DispatchJobView,
 } from "@/lib/dispatch/dispatch-job";
 import type { SessionPlanRequestView } from "@/lib/dispatch/session-plan-request";
 import { checkUserReason } from "@/lib/github/approval-labels";
 
 /** Issue一覧の行に出す計画レビューの状態（#3607） */
-export type PlanReviewListState = "creating" | "presented";
+export type PlanReviewListState = "queued" | "creating" | "presented";
 
 /**
  * 計画レビュー（G1）の状態を一覧の行向けに判定する。
  *
- * - `creating`: ジョブが実行中、または成功から猶予内（`isPlanReviewJobCreating`。詳細画面と同じ）
+ * - `queued`: ジョブが起動待ち（`QUEUED`。#3772）。猶予を超えても起動するまでは出し続ける
+ * - `creating`: ジョブが実行中、または成功から猶予内（`resolvePlanReviewJobPhase`。詳細画面と同じ）
  * - `presented`: 成功したジョブがあり、計画の承認待ち（`00.check-user`＋`01.check-plan`）のとき。
  *   承認待ちは`WAITING`ではなくラベルで見る（`WAITING`は期限切れで一覧から消えるため）。
  *   計画リクエストが残っている間は、ジョブが今の計画に対するもの（作成が計画より後）に限る。
@@ -31,7 +33,9 @@ export function resolvePlanReviewListState(params: {
 }): PlanReviewListState | null {
   const job = findPlanReviewJobForIssue(params.jobs, params.repositoryFullName, params.issueNumber);
   if (job === null) return null;
-  if (isPlanReviewJobCreating(job, params.now)) return "creating";
+  const phase = resolvePlanReviewJobPhase(job, params.now);
+  if (phase === "queued" || phase === "queued_overdue") return "queued";
+  if (phase === "creating") return "creating";
   if (job.status !== "SUCCEEDED") return null;
   if (checkUserReason(params.labels) !== "plan") return null;
   // 今の計画待ちより前に積まれたジョブは前の計画へのレビュー。**計画待ちはレビューのジョブより

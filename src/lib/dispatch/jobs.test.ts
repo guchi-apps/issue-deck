@@ -1236,6 +1236,81 @@ describe("claimDispatchJobs の制御ジョブ", () => {
     );
   });
 
+  // 計画レビューの空き本数を送ってきたpoller（#3772）。実装セッションが満杯（`maxJobs: 0`）でも
+  // 計画レビューだけは別枠で配る。12/12の間に計画レビューが5時間超`QUEUED`のまま残っていた
+  describe("計画レビューの別枠（#3772）", () => {
+    function setupPlanReviewQueue() {
+      dispatchHostFindUnique.mockResolvedValue(host());
+      dispatchJobCount.mockResolvedValue(0);
+      dispatchJobFindMany.mockImplementation(async (args: { where?: Record<string, unknown> }) =>
+        args.where?.kind === "PLAN_REVIEW" ? [queuedJob({ id: "review-1", kind: "PLAN_REVIEW" })] : [],
+      );
+    }
+
+    it("maxJobs: 0 でも空き本数の範囲で計画レビューを配る", async () => {
+      setupPlanReviewQueue();
+      const claimed = await claimDispatchJobs({
+        hostName: "subpc",
+        maxJobs: 0,
+        planReviewMaxJobs: 2,
+        now: NOW,
+      });
+      expect(claimed.map((job) => job.id)).toEqual(["review-1"]);
+      expect(dispatchJobFindMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { targetHost: "subpc", status: "QUEUED", kind: "PLAN_REVIEW" },
+          take: 2,
+        }),
+      );
+    });
+
+    it("空き本数を送ってきたpollerには、起動枠へ計画レビューを混ぜない", async () => {
+      setupPlanReviewQueue();
+      await claimDispatchJobs({ hostName: "subpc", maxJobs: 1, planReviewMaxJobs: 0, now: NOW });
+      expect(claimedKinds()).toContainEqual({ in: ["LAUNCH", "CROSS_REPO_QUESTION", "CODE_REVIEW"] });
+      expect(claimedKinds()).not.toContain("PLAN_REVIEW");
+    });
+
+    it("空き本数が0なら計画レビューは配らない（QUEUEDのまま次の巡を待つ）", async () => {
+      setupPlanReviewQueue();
+      const claimed = await claimDispatchJobs({
+        hostName: "subpc",
+        maxJobs: 0,
+        planReviewMaxJobs: 0,
+        now: NOW,
+      });
+      expect(claimed).toEqual([]);
+      expect(claimedKinds()).not.toContain("PLAN_REVIEW");
+    });
+
+    it("再起動が積まれている間は計画レビューも配らない（#2496）", async () => {
+      setupPlanReviewQueue();
+      dispatchHostFindUnique.mockResolvedValue(host({ rebootCapable: true }));
+      dispatchJobCount.mockImplementation(async (args: { where?: Record<string, unknown> }) =>
+        args.where?.kind === "REBOOT" ? 1 : 0,
+      );
+      const claimed = await claimDispatchJobs({
+        hostName: "subpc",
+        maxJobs: 0,
+        planReviewMaxJobs: 2,
+        now: NOW,
+      });
+      expect(claimed).toEqual([]);
+    });
+
+    it("計画レビューに対応していないpollerには、空き本数があっても配らない", async () => {
+      setupPlanReviewQueue();
+      dispatchHostFindUnique.mockResolvedValue(host({ planReviewCapable: null }));
+      const claimed = await claimDispatchJobs({
+        hostName: "subpc",
+        maxJobs: 0,
+        planReviewMaxJobs: 2,
+        now: NOW,
+      });
+      expect(claimed).toEqual([]);
+    });
+  });
+
   // 手作業セッション（#2771）も横断質問と同じく、申告したホストにだけ配る（古いpollerは
   // 未知の種別として`failed`で返し、押した起動が失われる）
   it("手作業セッションは申告したホストにだけ払い出す", async () => {

@@ -22,7 +22,6 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
-import { Separator } from "@/components/ui/separator";
 import { useIssueSync } from "@/hooks/use-issue-sync";
 import { useRepositorySync } from "@/hooks/use-repository-sync";
 import type { SettingsData } from "@/hooks/use-settings-data";
@@ -37,15 +36,24 @@ type FleetOpsSectionProps = {
   creatableRepositoryNames?: readonly string[];
 };
 
+function GroupHeading({ children }: { children: React.ReactNode }) {
+  return (
+    <h3 className="border-b pb-1 text-xs font-semibold tracking-wide text-muted-foreground">
+      {children}
+    </h3>
+  );
+}
+
 /**
- * 設定の「フリート運用」区分（#1539）。**押した瞬間に走る操作だけ**を置く。
+ * 設定の「フリート運用」区分（#1539）。押した瞬間に走る操作（再取得・配布・同期）と、
+ * 保存ボタンを持たない認証情報の管理・閲覧（#3767で見出しを分けた）を置く。
  *
  * 保存ボタンは無い。ここに保存が要る設定値を混ぜると、元の「保存がどこまで効くのか
  * 分からない」状態に戻る。設定値は`ExecutionSettingsSection`へ置くこと。
  *
  * **中の3区画は`LazyFleetPanel`で畳む**（#2022）。この区分を開いただけで、共有ワークフローの
  * タグ照会（GitHubへの一括問い合わせ）とシークレット同期の履歴が走っていたのをやめるため。
- * 上の「GitHubからの再取得」は押すまで何も起こさないので、畳まずそのまま置く。
+ * 先頭の「GitHubからの再取得」は押すまで何も起こさないので、畳まないカードで置く。
  *
  * **PATのカードだけは畳んでも取得が減らない。** 一覧は設定画面が先に取っており
  * （`useSettingsData`。左タブの警告バッジの材料になる）、ここでは表示を畳むだけ。
@@ -66,8 +74,14 @@ export function FleetOpsSection({
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex flex-col gap-2">
-        <span className="text-sm font-medium">GitHubからの再取得</span>
+      <GroupHeading>配布・同期</GroupHeading>
+
+      {/* 畳まないカード。押すまで何も起こさないので、`LazyFleetPanel`にすると手数が増えるだけ */}
+      <div className="flex flex-col gap-2 rounded-lg border p-3">
+        <div className="flex items-center gap-2">
+          <RefreshCw className="size-4 shrink-0 text-muted-foreground" />
+          <span className="text-sm font-medium">GitHubからの再取得</span>
+        </div>
         <div className="grid gap-2 sm:grid-cols-2">
           <Button
             variant="outline"
@@ -90,8 +104,6 @@ export function FleetOpsSection({
           </Button>
         </div>
       </div>
-
-      <Separator />
 
       {/* 参照タグの更新と自動修復の配布は**同じ`/api/workflow-tags`の1回の取得**から出している。
           Issueでは別項目だが、カードを分けると同じ取得が2回走るため1枚にまとめる（#2022） */}
@@ -118,6 +130,8 @@ export function FleetOpsSection({
           creatableRepositoryNames={creatableRepositoryNames}
         />
       </LazyFleetPanel>
+
+      <GroupHeading>認証情報</GroupHeading>
 
       <LazyFleetPanel
         icon={KeyRound}

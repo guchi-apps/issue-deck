@@ -31,7 +31,7 @@ export async function pickPlanReviewAdoptionByJev(reviewBody: string): Promise<b
       [QUESTION_KEY]: {
         type: "noul",
         instructions:
-          "これは実装計画へのレビューです。指摘は根拠が具体的で、計画を直せば解決するものですか。" +
+          "これは実装計画への初回レビューです。計画を直さなければ実装の成立・安全性・受け入れ条件を損なう重大な指摘が、根拠が具体的で、計画を直せば解決するものですか。" +
           "人の判断が要る方針の分かれ目や、根拠が曖昧な指摘を含むなら「いいえ」にしてください。",
       },
     },
