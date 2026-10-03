@@ -12,6 +12,9 @@ export const MAX_EXTRACT_IMAGES = 4;
 /** 1枚あたりの上限。Anthropic APIが受け付ける画像の上限（5MB）に合わせる */
 export const MAX_EXTRACT_IMAGE_BYTES = 5 * 1024 * 1024;
 
+/** 元画像を足したあとのbase64の合計の上限。Messages APIのリクエスト上限（32MB）に余裕を持たせる（#3851） */
+const MAX_TOTAL_IMAGE_BASE64_LENGTH = 20 * 1024 * 1024;
+
 /** 変更内容は多くても20件ほど。出力を抑えて本文が膨らむのを防ぐ */
 const MAX_ITEMS = 20;
 const MAX_TOKENS = 1024;
@@ -163,7 +166,16 @@ export async function generateImageExtract(
 
   const images = await Promise.all(filenames.map(loadImage));
   // 元画像が読めた画像は「元画像→書き込み後」の順に並べる
-  const originals = await Promise.all(filenames.map((filename) => loadOriginalImage(originalFilenameByFilename.get(filename))));
+  const loadedOriginals = await Promise.all(
+    filenames.map((filename) => loadOriginalImage(originalFilenameByFilename.get(filename))),
+  );
+  // 書き込み後の画像を優先し、合計が上限に収まる範囲でだけ元画像を足す。超える分は書き込み後だけで読む
+  let totalLength = images.reduce((sum, image) => sum + image.data.length, 0);
+  const originals = loadedOriginals.map((original) => {
+    if (!original || totalLength + original.data.length > MAX_TOTAL_IMAGE_BASE64_LENGTH) return null;
+    totalLength += original.data.length;
+    return original;
+  });
   const withOriginals = originals.some((original) => original !== null);
   const toBlock = (image: LoadedImage) => ({
     type: "image",

@@ -100,6 +100,27 @@ describe("generateImageExtract", () => {
     expect(content[1].text).not.toContain("元画像と見比べる");
   });
 
+  it("元画像を足すと合計が上限を超えるときは、元画像を外して書き込み後だけで読む", async () => {
+    await writeFile(path.join(UPLOADED_IMAGE_DIR, NAME_A), Buffer.alloc(MAX_EXTRACT_IMAGE_BYTES));
+    await writeFile(path.join(UPLOADED_IMAGE_DIR, NAME_B), Buffer.alloc(MAX_EXTRACT_IMAGE_BYTES));
+    const names = [1, 2, 3].map((i) => `eeeeeeee-1111-2222-3333-44444444441${i}.png`);
+    try {
+      for (const name of names) await writeFile(path.join(UPLOADED_IMAGE_DIR, name), Buffer.alloc(MAX_EXTRACT_IMAGE_BYTES));
+      callClaudeMessages.mockResolvedValue(aiResponse('{"items":["A"],"unreadable":false}'));
+
+      await generateImageExtract("token", [url(NAME_A), url(names[0])], {
+        [url(NAME_A)]: url(NAME_B),
+        [url(names[0])]: url(names[1]),
+      });
+
+      const content = callClaudeMessages.mock.calls[0][0].body.messages[0].content;
+      // 書き込み後2枚＋元画像1枚（約3枚ぶんのbase64）までは収まり、2枚目の元画像は外れる
+      expect(content.filter((block: { type: string }) => block.type === "image").length).toBeLessThan(4);
+    } finally {
+      for (const name of names) await rm(path.join(UPLOADED_IMAGE_DIR, name), { force: true });
+    }
+  });
+
   it("画像が無ければno_images", async () => {
     await expect(generateImageExtract("token", ["https://example.test/x.png"])).rejects.toMatchObject({
       code: "no_images",
