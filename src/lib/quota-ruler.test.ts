@@ -1,16 +1,20 @@
 import { describe, expect, it } from "vitest";
 
-import { buildWindowTimeline, nearestOption, stepOption } from "@/lib/quota-ruler";
+import { buildWindowTimeline, optionFromRatio, stepOption } from "@/lib/quota-ruler";
 
 const OPTIONS = [30, 45, 60, 90, 120];
-const scale = (value: number) => value * 2;
 
-describe("nearestOption", () => {
-  it("針の位置に最も近い選択肢へ吸着する", () => {
-    expect(nearestOption(OPTIONS, scale, 0)).toBe(30);
-    expect(nearestOption(OPTIONS, scale, 100)).toBe(45);
-    expect(nearestOption(OPTIONS, scale, 160)).toBe(90);
-    expect(nearestOption(OPTIONS, scale, 9999)).toBe(120);
+describe("optionFromRatio", () => {
+  it("バーの位置（右端からの割合）に最も近い選択肢へ吸着する", () => {
+    // 右端0・左端300分: 割合0.2→60分、0.1→30分、0.4→120分
+    expect(optionFromRatio(OPTIONS, 0.2, 300)).toBe(60);
+    expect(optionFromRatio(OPTIONS, 0.1, 300)).toBe(30);
+    expect(optionFromRatio(OPTIONS, 0.28, 300)).toBe(90);
+  });
+
+  it("バーの外は端の選択肢になる", () => {
+    expect(optionFromRatio(OPTIONS, -1, 300)).toBe(30);
+    expect(optionFromRatio(OPTIONS, 5, 300)).toBe(120);
   });
 });
 

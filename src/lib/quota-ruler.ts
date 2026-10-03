@@ -1,21 +1,25 @@
 /**
- * 予約実行の設定で使う、横スクロールの目盛り帯（#3821）の計算。
+ * 予約実行の設定で使う、バー上のつまみ（#3841。もとは横スクロールの目盛り帯 #3821）の計算。
  * 値は選択肢（`NEXT_WINDOW_RUN_*_OPTIONS`）のどれかに必ず吸着させる。
  */
 
 /** Claudeの5時間枠の長さ（分） */
 export const FIVE_HOUR_WINDOW_MINUTES = 300;
 
-/** `scrollLeft`（中央の針の位置）に最も近い選択肢を返す。`scale`は値→横位置（px）の写像 */
-export function nearestOption(options: readonly number[], scale: (value: number) => number, scrollLeft: number): number {
+/**
+ * バーの右端を0・左端を`maxValue`としたときの位置（`ratio`＝右端からの割合）に最も近い選択肢を返す。
+ * バーの外へはみ出した位置は端の選択肢になる。
+ */
+export function optionFromRatio(options: readonly number[], ratio: number, maxValue: number): number {
+  const target = Math.min(1, Math.max(0, ratio)) * maxValue;
   let best = options[0];
   for (const option of options) {
-    if (Math.abs(scale(option) - scrollLeft) < Math.abs(scale(best) - scrollLeft)) best = option;
+    if (Math.abs(option - target) < Math.abs(best - target)) best = option;
   }
   return best;
 }
 
-/** 隣の選択肢（`direction`が-1なら左、1なら右）。端では動かない */
+/** 隣の選択肢（`direction`が-1なら小さい方、1なら大きい方）。端では動かない */
 export function stepOption(options: readonly number[], value: number, direction: -1 | 1): number {
   const index = options.indexOf(value);
   if (index < 0) return value;

@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { NightlyRunPanel } from "@/components/dashboard/nightly-run-panel";
 import type { NightlyRunEntryView, NightlyRunState } from "@/lib/nightly-run";
+import { NEXT_WINDOW_RUN_FLOOR_PERCENT_OPTIONS } from "@/lib/app-settings";
 
 /**
  * 「予約実行」画面（#2995）。「次の5時間枠」の節が正しく出ることと、設定の切り替えが送られる
@@ -177,34 +178,30 @@ describe("NightlyRunPanel", () => {
     expect(screen.getByText(/週間枠の残りが17%で、下限の20%を下回っています/)).toBeTruthy();
   });
 
-  it("下限は「設定」で目盛り帯を開き、キーで選ぶと送られる", () => {
+  it("下限はバー上のつまみをキーで動かすと送られる", () => {
     const { onUpdateSettings } = renderPanel();
 
     // 下限を設けていない（0）ときは見送り表示を出さない
     expect(screen.queryByText("起動を見送り中")).toBeNull();
-    expect(screen.queryByRole("slider", { name: "5時間枠の下限" })).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "いまの5時間枠の下限を設定" }));
-
-    const slider = screen.getByRole("slider", { name: "5時間枠の下限" });
+    const slider = screen.getByRole("slider", { name: "いまの5時間枠の下限" });
     expect(slider.getAttribute("aria-valuenow")).toBe("0");
-    fireEvent.keyDown(slider, { key: "ArrowRight" });
-    expect(slider.getAttribute("aria-valuenow")).toBe("5");
-    expect(onUpdateSettings).toHaveBeenCalledWith({ nextWindow: { fiveHourFloorPercent: 5 } });
+    // つまみは左へ動かすほど大きくなるので、左キーで増える
+    fireEvent.keyDown(slider, { key: "ArrowLeft" });
+    expect(onUpdateSettings).toHaveBeenCalledWith({ nextWindow: { fiveHourFloorPercent: NEXT_WINDOW_RUN_FLOOR_PERCENT_OPTIONS[1] } });
   });
 
-  it("起動する残り時間も目盛り帯で選べて、起動位置が出る", () => {
+  it("起動する残り時間もつまみで選べて、起動時刻が出る", () => {
     const { onUpdateSettings } = renderPanel();
 
-    fireEvent.click(screen.getByRole("button", { name: "起動する残り時間を設定" }));
     const slider = screen.getByRole("slider", { name: "起動する残り時間" });
     expect(slider.getAttribute("aria-valuenow")).toBe("60");
-    fireEvent.keyDown(slider, { key: "ArrowRight" });
+    fireEvent.keyDown(slider, { key: "ArrowLeft" });
     expect(onUpdateSettings).toHaveBeenCalledWith({ nextWindow: { leadMinutes: 90 } });
     expect(screen.getByText(/07:40に起動/)).toBeTruthy();
   });
 
   /** メーターが出ない状態でも、ONにする前に値を決められる */
-  it("枠を取っていなくても「設定」から下限と残り時間を選べる", () => {
+  it("枠を取っていなくてもつまみで下限と残り時間を選べる", () => {
     renderPanel(
       state({
         settings: { enabled: false, leadMinutes: 60, intervalMinutes: 10, fiveHourFloorPercent: 0, weeklyFloorPercent: 0 },
@@ -213,8 +210,8 @@ describe("NightlyRunPanel", () => {
       }),
     );
 
-    expect(screen.getByRole("button", { name: "週間枠の下限を設定" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "起動する残り時間を設定" })).toBeTruthy();
+    expect(screen.getByRole("slider", { name: "週間枠の下限" })).toBeTruthy();
+    expect(screen.getByRole("slider", { name: "起動する残り時間" })).toBeTruthy();
   });
 
   it("取得前は骨組みだけ出す", () => {
