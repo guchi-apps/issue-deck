@@ -54,6 +54,15 @@ function stateFor(jobs: DispatchJobView[], issueNumber: number) {
 }
 
 describe("buildIssueQueueStates", () => {
+  it("計画レビューは行の待ち状態に出ない（#3785）", () => {
+    const jobs = [
+      job({ id: "pr", issueNumber: 20, kind: "PLAN_REVIEW" }),
+      job({ id: "impl", issueNumber: 21 }),
+    ];
+    expect(stateFor(jobs, 20)).toBeNull();
+    expect(stateFor(jobs, 21)).toMatchObject({ phase: "queued", position: 1, queuedTotal: 1 });
+  });
+
   it("順番待ちの番号は払い出しと同じ並び（優先度の降順→積んだ順）で振る", () => {
     const jobs = [
       job({ id: "a", issueNumber: 10, createdAt: "2026-08-14T00:00:00.000Z" }),
@@ -106,10 +115,10 @@ describe("buildIssueQueueStates", () => {
     expect(stateFor(jobs, 13)?.queuedTotal).toBe(1);
   });
 
-  it("横断質問・計画レビューも枠を使うので順番待ちに数える（#1544と同じ集合）", () => {
+  it("横断質問も枠を使うので順番待ちに数える（#1544。計画レビューは#3785で別枠）", () => {
     const jobs = [
       job({ id: "a", issueNumber: 10, kind: "CROSS_REPO_QUESTION" }),
-      job({ id: "b", issueNumber: 11, kind: "PLAN_REVIEW", createdAt: "2026-08-14T00:01:00.000Z" }),
+      job({ id: "b", issueNumber: 11, kind: "LAUNCH", createdAt: "2026-08-14T00:01:00.000Z" }),
     ];
 
     expect(stateFor(jobs, 10)?.position).toBe(1);
