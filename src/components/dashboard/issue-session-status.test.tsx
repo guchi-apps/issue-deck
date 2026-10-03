@@ -271,7 +271,7 @@ describe("IssueSessionStatus", () => {
     expect(screen.queryByText("実装中")).toBeNull();
   });
 
-  it("入力待ちのときだけRemote Controlの導線を出す", () => {
+  it("Claude Codeのセッションを開く導線を出す", () => {
     render(
       <IssueSessionStatus
         session={session({
@@ -283,9 +283,27 @@ describe("IssueSessionStatus", () => {
       />,
     );
 
-    expect(screen.getByRole("link", { name: /アプリで開く/ }).getAttribute("href")).toBe(
+    expect(screen.getByRole("link", { name: /セッションを開く/ }).getAttribute("href")).toBe(
       "https://claude.ai/code/session_01ABC",
     );
+  });
+
+  it("CodexのUUIDがあればDeep LinkとRemote host向けの再開コマンドを出す", () => {
+    render(
+      <IssueSessionStatus
+        session={session({
+          codexThreadKnown: true,
+          codexThreadId: "a0b1c2d3-1234-4abc-9def-0123456789ab",
+        })}
+        dispatch={makeDispatch()}
+      />,
+    );
+
+    expect(screen.getByRole("link", { name: /セッションを開く/ }).getAttribute("href")).toBe(
+      "codex://threads/a0b1c2d3-1234-4abc-9def-0123456789ab",
+    );
+    expect(screen.getByText(/サブPC上のCodexセッション/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: /再開コマンドをコピー/ })).toBeTruthy();
   });
 });
 
@@ -660,7 +678,7 @@ describe("IssueSessionStatus の畳んだ状態（#1676）", () => {
       />,
     );
 
-    expect(screen.getByRole("link", { name: /アプリで開く/ })).not.toBeNull();
+    expect(screen.getByRole("link", { name: /セッションを開く/ })).not.toBeNull();
     expect(screen.getByRole("link", { name: /開発環境を開く/ })).not.toBeNull();
     expect(screen.getByText(/Remote Controlから答えてください/)).not.toBeNull();
   });
@@ -933,7 +951,7 @@ describe("許可待ち（#2971）", () => {
     expect(screen.getByText(/許可を待っています/)).toBeTruthy();
     expect(screen.getByText("Read（ファイルの読み取り）")).toBeTruthy();
     expect(screen.getByText("/tmp/issue-deck-images/a.png")).toBeTruthy();
-    expect(screen.getByRole("link", { name: /アプリで開く/ })).toBeTruthy();
+    expect(screen.getByRole("link", { name: /セッションを開く/ })).toBeTruthy();
   });
 
   it("Bashでは対象の欄を出さない", () => {

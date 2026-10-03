@@ -51,22 +51,22 @@ describe("LocalSessionCommentNotice", () => {
     expect(screen.getByText(/走っているセッションには届きません/)).toBeTruthy();
   });
 
-  it("Remote Controlを開く導線を出す", () => {
+  it("セッションを開く共通導線を出す", () => {
     render(<LocalSessionCommentNotice session={session()} />);
     expect(
-      screen.getByRole("link", { name: /Claude Codeアプリで開く/ }).getAttribute("href"),
+      screen.getByRole("link", { name: /セッションを開く/ }).getAttribute("href"),
     ).toBe(REMOTE_URL);
   });
 
   it("セッションが分からなくても案内自体は出す（届かないことはセッションの有無によらない）", () => {
     render(<LocalSessionCommentNotice session={null} />);
     expect(screen.getByText(/走っているセッションには届きません/)).toBeTruthy();
-    expect(screen.queryByRole("link", { name: /Claude Codeアプリで開く/ })).toBeNull();
+    expect(screen.queryByRole("link", { name: /セッションを開く/ })).toBeNull();
   });
 
   it("終わったセッションではRemote Controlの導線を出さない（開いても操作できない）", () => {
     render(<LocalSessionCommentNotice session={session({ state: "GONE" })} />);
-    expect(screen.queryByRole("link", { name: /Claude Codeアプリで開く/ })).toBeNull();
+    expect(screen.queryByRole("link", { name: /セッションを開く/ })).toBeNull();
   });
 });
 
@@ -81,7 +81,7 @@ describe("LocalSessionApprovalNotice", () => {
     render(<LocalSessionApprovalNotice session={session()} />);
     expect(screen.getByText(/ここに書いた回答はセッションに届きません/)).toBeTruthy();
     expect(
-      screen.getByRole("link", { name: /Remote Controlで答える/ }).getAttribute("href"),
+      screen.getByRole("link", { name: /セッションを開く/ }).getAttribute("href"),
     ).toBe(REMOTE_URL);
   });
 

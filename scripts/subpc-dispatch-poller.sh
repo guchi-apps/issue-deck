@@ -2248,6 +2248,22 @@ session_codex_thread_json() {
   fi
 }
 
+# CodexのスレッドUUID。`codexThreadKnown`は追加指示を送れるかの3値を保つためのものだが、
+# Issue詳細から該当スレッドを開くにはUUIDそのものも必要になる。URLはここで作らない。
+session_codex_thread_id_json() {
+  local session="$1" thread
+  if [[ "$(session_state_agent_kind "$session")" != "codex" ]]; then
+    printf 'null'
+    return 0
+  fi
+  thread="$(session_state_read_codex_thread "$session" 2>/dev/null || true)"
+  if [[ "$thread" =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$ ]]; then
+    jq -Rn --arg thread "$thread" '$thread'
+  else
+    printf 'null'
+  fi
+}
+
 # Codexのセッション名を`<リポジトリ名> #<Issue番号>`へ揃え直す（#3220）。
 #
 # 名前は`SessionStart`のフックが1回付けるが、**その2〜6秒後にモデルの自動命名で上書きされる**
@@ -2359,12 +2375,14 @@ report_sessions() {
       --argjson paneDeadStatus "$status_json" \
       --argjson claudeStarting "$(claude_start_pending "$session_name")" \
       --argjson codexThreadKnown "$(session_codex_thread_json "$session_name")" \
+      --argjson codexThreadId "$(session_codex_thread_id_json "$session_name")" \
       --argjson reap "$(session_reap_json "$session_name")" \
       --argjson step "$(session_step_json "$session_name")" \
       --arg remoteControlUrl "$(session_transcript_remote_control_url "$session_name" 2>/dev/null || true)" \
       '{tmuxSessionName: $tmuxSessionName, repositoryFullName: $repositoryFullName,
         issueNumber: $issueNumber, paneDead: $paneDead, paneDeadStatus: $paneDeadStatus,
-        claudeStarting: $claudeStarting, codexThreadKnown: $codexThreadKnown}
+        claudeStarting: $claudeStarting, codexThreadKnown: $codexThreadKnown,
+        codexThreadId: $codexThreadId}
          + $reap + $step
          + (if $remoteControlUrl == "" then {} else {remoteControlUrl: $remoteControlUrl} end)')")
   done < <(tmux list-panes -a -F $'#{session_name}\t#{pane_dead}\t#{pane_dead_status}' 2>/dev/null || true)

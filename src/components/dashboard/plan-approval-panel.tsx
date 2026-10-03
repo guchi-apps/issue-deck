@@ -28,7 +28,6 @@ import {
   SESSION_PLAN_REVISION_MAX_LENGTH,
 } from "@/lib/dispatch/session-plan-request";
 import type { SessionPlanRequestView } from "@/lib/dispatch/session-plan-request";
-import { summarizeIssueSession } from "@/lib/dispatch/issue-session";
 import type { DispatchSessionView } from "@/lib/dispatch/session-state";
 import { formatRemaining, useRemainingMs } from "@/components/dashboard/use-remaining-ms";
 import { formatRelativeDate } from "@/lib/format-relative-date";
@@ -39,6 +38,7 @@ import {
   CODEX_MODEL_FIT_LABELS,
   describeCodexModel,
 } from "@/lib/app-settings";
+import { buildSessionOpenTarget, type SessionOpenTarget } from "@/lib/dispatch/session-open-target";
 
 /**
  * ローカルセッションが提示した計画を読んで、その場で承認・修正を送るパネル（#2061）。
@@ -131,7 +131,7 @@ export function PlanApprovalPanel({
   const hostLabel = request.hostName ? formatDispatchHostName(request.hostName) : "ローカル";
   const sessionGone = session !== null && session.state !== "ALIVE";
   // 「ここからは送れない」と言うだけでは、どこで答えればよいのかが画面から辿れない（#2108）
-  const remoteControlUrl = session ? summarizeIssueSession(session).remoteControlUrl : null;
+  const sessionOpenTarget = session ? buildSessionOpenTarget(session) : null;
 
   async function send(decision: "approve" | "revise" | "defer", text?: string) {
     setError(null);
@@ -160,7 +160,7 @@ export function PlanApprovalPanel({
       <PlanDecisionResult
         decision={decided}
         hostLabel={hostLabel}
-        remoteControlUrl={remoteControlUrl}
+        sessionOpenTarget={sessionOpenTarget}
         autoReflected={request.autoReflected === true && sentForThisRequest === null}
         deliveryStatus={request.deliveryStatus}
         deliveryExitCode={request.deliveryExitCode}
@@ -506,7 +506,7 @@ function describeDelivery(
 function PlanDecisionResult({
   decision,
   hostLabel,
-  remoteControlUrl,
+  sessionOpenTarget,
   autoReflected,
   deliveryStatus,
   deliveryExitCode,
@@ -515,7 +515,7 @@ function PlanDecisionResult({
   decision: "approve" | "revise" | "defer" | "expired";
   hostLabel: string;
   /** 端末で答えることになったときの行き先。無ければリンクを出さない */
-  remoteControlUrl: string | null;
+  sessionOpenTarget: SessionOpenTarget | null;
   /** 計画レビューを受けて自動で修正を送った回（人が押した回ではない） */
   autoReflected?: boolean;
   deliveryStatus?: string | null;
@@ -573,10 +573,10 @@ function PlanDecisionResult({
           {describeDelivery(deliveryStatus, deliveryExitCode, deliverySummary)}
         </p>
       )}
-      {answerElsewhere && remoteControlUrl && (
+      {answerElsewhere && sessionOpenTarget && (
         <Button variant="outline" size="sm" className="self-start" asChild>
-          <a href={remoteControlUrl} target="_blank" rel="noreferrer">
-            Remote Controlで答える
+          <a href={sessionOpenTarget.url} target="_blank" rel="noreferrer">
+            セッションを開く
             <ExternalLink />
           </a>
         </Button>

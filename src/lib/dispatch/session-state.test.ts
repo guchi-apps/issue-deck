@@ -5,6 +5,7 @@ import {
   nextEscalatedState,
   parseDispatchSessionActivity,
   parseDispatchSessionName,
+  parseCodexThreadId,
   parseDispatchSessionReport,
   parsePreviewUrl,
   parseRemoteControlUrl,
@@ -357,6 +358,34 @@ describe("parseDispatchSessionReport", () => {
         stepSeenAt: null,
       });
     }
+  });
+
+  it("CodexのスレッドUUIDは正規化して受け、壊れた値は報告全体を弾く", () => {
+    const threadId = "A0B1C2D3-1234-4ABC-9DEF-0123456789AB";
+    expect(parseDispatchSessionReport({ ...valid, codexThreadId: threadId })).toEqual({
+      ...valid,
+      codexThreadId: threadId.toLowerCase(),
+    });
+    expect(parseDispatchSessionReport({ ...valid, codexThreadId: "https://example.com" })).toBeNull();
+    expect(parseDispatchSessionReport({ ...valid, codexThreadId: "not-a-uuid" })).toBeNull();
+  });
+
+  it("CodexのスレッドUUIDは省略とnullを区別する", () => {
+    expect(parseDispatchSessionReport({ ...valid, codexThreadId: null })).toEqual({
+      ...valid,
+      codexThreadId: null,
+    });
+    const parsed = parseDispatchSessionReport(valid);
+    expect(parsed && "codexThreadId" in parsed).toBe(false);
+  });
+});
+
+describe("parseCodexThreadId", () => {
+  it("UUID以外を受け入れない", () => {
+    expect(parseCodexThreadId("a0b1c2d3-1234-4abc-9def-0123456789ab")).toBe(
+      "a0b1c2d3-1234-4abc-9def-0123456789ab",
+    );
+    expect(parseCodexThreadId("codex://threads/a0b1c2d3-1234-4abc-9def-0123456789ab")).toBeNull();
   });
 });
 
