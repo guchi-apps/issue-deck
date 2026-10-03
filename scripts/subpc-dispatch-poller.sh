@@ -3544,9 +3544,21 @@ run_job() {
         "計画レビューのセッションが上限（$MAX_PLAN_REVIEWS本）に達しているため起動しませんでした（現在 $live_reviews 本）。"
       return 0
     fi
+    # `launch_and_report`は起動時間を制限するため、受け取ったコマンドを`timeout`へ渡す。
+    # 変数代入をそのまま渡すと`timeout`は実行ファイル名として解釈し、
+    # `timeout: failed to run command ‘ISSUE_DECK_CLAUDE_MODEL=sonnet’`で失敗する。
+    # `env`を先頭に置けば、timeout配下でもモデル指定を環境変数として渡せる。
+    # `auto`はCLIの既定に委ねる値なので、通常の実装・手作業セッションと同じく渡さない。
+    local -a plan_review_env=(env)
+    if [[ "$agent" == "claude" && "$claude_local_model" != "auto" ]]; then
+      plan_review_env+=("ISSUE_DECK_CLAUDE_MODEL=$claude_local_model")
+    fi
+    if [[ "$agent" == "codex" && "$codex_model" != "auto" ]]; then
+      plan_review_env+=("ISSUE_DECK_CODEX_MODEL=$codex_model")
+    fi
     launch_and_report "$job_id" "$(plan_review_session_name "$repo" "$issue_number")" \
       "計画レビュー（G1）を起動しています" \
-      ISSUE_DECK_CLAUDE_MODEL="$claude_local_model" ISSUE_DECK_CODEX_MODEL="$codex_model" \
+      "${plan_review_env[@]}" \
         bash "$PLAN_REVIEW_LAUNCHER" --agent "$agent" "$owner" "$repo" "$issue_number"
     return 0
   fi
