@@ -2,6 +2,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const issueFindMany = vi.fn();
 const fetchPullRequest = vi.fn();
+const fetchPullRequestsForHead = vi.fn();
+const compareBranches = vi.fn();
+const closePullRequest = vi.fn();
 const createComment = vi.fn();
 const hasReopenedEvent = vi.fn();
 const updateIssue = vi.fn();
@@ -31,6 +34,21 @@ vi.mock("@/lib/github/issues-api", () => ({
 vi.mock("@/lib/github/pull-requests-api", () => ({
   get fetchPullRequest() {
     return fetchPullRequest;
+  },
+  get fetchPullRequestsForHead() {
+    return fetchPullRequestsForHead;
+  },
+}));
+
+vi.mock("@/lib/github/branches-api", () => ({
+  get compareBranches() {
+    return compareBranches;
+  },
+}));
+
+vi.mock("@/lib/github/actions-api", () => ({
+  get closePullRequest() {
+    return closePullRequest;
   },
 }));
 
@@ -69,6 +87,8 @@ describe("sweepClosableFixIssues", () => {
     hasReopenedEvent.mockResolvedValue(false);
     updateIssue.mockResolvedValue({});
     createComment.mockResolvedValue({});
+    fetchPullRequestsForHead.mockResolvedValue([]);
+    closePullRequest.mockResolvedValue(undefined);
   });
 
   it("対象PRがマージされていれば、修正Issueをcompletedで閉じてコメントを残す", async () => {
@@ -77,7 +97,9 @@ describe("sweepClosableFixIssues", () => {
 
     const { result, countSkip } = run();
 
-    expect(await result).toEqual([{ repositoryFullName: "guchi-apps/issue-deck", issueNumber: 3001 }]);
+    expect(await result).toEqual([
+      { repositoryFullName: "guchi-apps/issue-deck", issueNumber: 3001, kind: "fix_issue_closed" },
+    ]);
     expect(updateIssue).toHaveBeenCalledWith("guchi-apps", "issue-deck", 3001, "token", {
       state: "closed",
       state_reason: "completed",
@@ -159,7 +181,7 @@ describe("sweepClosableFixIssues", () => {
     const { result } = run();
 
     expect(await result).toEqual([
-      { repositoryFullName: "guchi-apps/issue-deck", issueNumber: 3001 },
+      { repositoryFullName: "guchi-apps/issue-deck", issueNumber: 3001, kind: "fix_issue_closed" },
     ]);
   });
 
@@ -173,7 +195,7 @@ describe("sweepClosableFixIssues", () => {
     const { result, countSkip } = run();
 
     expect(await result).toEqual([
-      { repositoryFullName: "guchi-apps/issue-deck", issueNumber: 3002 },
+      { repositoryFullName: "guchi-apps/issue-deck", issueNumber: 3002, kind: "fix_issue_closed" },
     ]);
     expect(countSkip).toHaveBeenCalledWith("fetch_failed");
   });
@@ -185,5 +207,74 @@ describe("sweepClosableFixIssues", () => {
 
     expect(await result).toEqual([]);
     expect(fetchPullRequest).not.toHaveBeenCalled();
+  });
+
+  it("修正PRが元PRのheadを取り込んでいれば、元PRをcloseして置き換え先をコメントする", async () => {
+    issueFindMany.mockResolvedValue([fixIssueRow(3001, 2957)]);
+    fetchPullRequest.mockResolvedValue({
+      number: 2957,
+      merged: false,
+      state: "open",
+      head: { sha: "original-sha" },
+    });
+    fetchPullRequestsForHead.mockResolvedValue([{ number: 3002, head: { sha: "replacement-sha" } }]);
+    compareBranches.mockResolvedValue({ aheadBy: 1, behindBy: 0, changedFiles: 1, lastCommitAt: null });
+
+    const { result } = run();
+
+    expect(await result).toEqual([
+      {
+        repositoryFullName: "guchi-apps/issue-deck",
+        issueNumber: 3001,
+        kind: "original_pr_closed",
+        originalPullRequestNumber: 2957,
+        replacementPullRequestNumber: 3002,
+      },
+    ]);
+    expect(fetchPullRequestsForHead).toHaveBeenCalledWith(
+      "guchi-apps",
+      "issue-deck",
+      null,
+      "issue-3001",
+      "open",
+      "token",
+    );
+    expect(compareBranches).toHaveBeenCalledWith(
+      "guchi-apps",
+      "issue-deck",
+      "original-sha",
+      "replacement-sha",
+      "token",
+    );
+    expect(closePullRequest).toHaveBeenCalledWith("guchi-apps", "issue-deck", 2957, "token");
+    expect(createComment).toHaveBeenCalledWith(
+      "guchi-apps",
+      "issue-deck",
+      2957,
+      "token",
+      expect.objectContaining({ body: expect.stringContaining("修正PR #3002") }),
+    );
+  });
+
+  it("修正PRが元PRを取り込んでいない、または比較できない場合は元PRをcloseしない", async () => {
+    issueFindMany.mockResolvedValue([fixIssueRow(3001, 2957)]);
+    fetchPullRequest.mockResolvedValue({
+      number: 2957,
+      merged: false,
+      state: "open",
+      head: { sha: "original-sha" },
+    });
+    fetchPullRequestsForHead.mockResolvedValue([{ number: 3002, head: { sha: "replacement-sha" } }]);
+    compareBranches.mockResolvedValue({ aheadBy: 1, behindBy: 1, changedFiles: 1, lastCommitAt: null });
+
+    const { result } = run();
+
+    expect(await result).toEqual([]);
+    expect(closePullRequest).not.toHaveBeenCalled();
+
+    compareBranches.mockResolvedValue(null);
+    const retry = run();
+    expect(await retry.result).toEqual([]);
+    expect(closePullRequest).not.toHaveBeenCalled();
   });
 });
