@@ -131,20 +131,20 @@ describe("PullRequestList", () => {
     renderList([makePullRequest({ ciState: "success", mergeable: false })]);
     expect(screen.getByTitle("CI: CI通過")).toBeTruthy();
     expect(screen.getByTitle(/コンフリクト: baseブランチとコンフリクトしています/)).toBeTruthy();
-    expect(screen.getByRole("button", { name: "コンフリクトを自動解消" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "PRを自動修正" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "マージする" })).toBeNull();
   });
 
   it("コンフリクトの判定が出ていないPRは確認中で表示する（#1742）", () => {
     renderList([makePullRequest({ mergeable: null })]);
     expect(screen.getByTitle("コンフリクト: コンフリクトの有無を確認しています。")).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "コンフリクトを自動解消" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "PRを自動修正" })).toBeNull();
     expect(screen.getByRole("button", { name: "マージする" })).toBeTruthy();
   });
 
   it("CI失敗のPRには自動修正ボタンを出す（#1293）", () => {
     renderList([makePullRequest({ ciState: "failure" })]);
-    expect(screen.getByRole("button", { name: "CI失敗を自動修正" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "PRを自動修正" })).toBeTruthy();
   });
 
   // 自動修復ワークフローが配られていないリポジトリでは、押しても404で起動しない（#1960）。
@@ -158,10 +158,7 @@ describe("PullRequestList", () => {
       }),
     ]);
 
-    const ciButton = screen.getByRole("button", { name: "CI失敗を自動修正" });
-    const conflictButton = screen.getByRole("button", { name: "コンフリクトを自動解消" });
-    expect(ciButton.hasAttribute("disabled")).toBe(true);
-    expect(conflictButton.hasAttribute("disabled")).toBe(true);
+    expect(screen.getByRole("button", { name: "PRを自動修正" }).hasAttribute("disabled")).toBe(true);
     expect(
       screen.getByText(
         "自動修復ワークフローが未配布です。設定 › フリート運用 から、このリポジトリへ配布できます。",
@@ -169,7 +166,7 @@ describe("PullRequestList", () => {
     ).toBeTruthy();
   });
 
-  it("片方だけ未配布ならその種類だけ押せなくする（#1960）", () => {
+  it("修正対象の一部が未配布なら統合した修正操作を押せなくする（#1960）", () => {
     renderList([
       makePullRequest({
         ciState: "failure",
@@ -178,12 +175,7 @@ describe("PullRequestList", () => {
       }),
     ]);
 
-    expect(screen.getByRole("button", { name: "CI失敗を自動修正" }).hasAttribute("disabled")).toBe(
-      false,
-    );
-    expect(
-      screen.getByRole("button", { name: "コンフリクトを自動解消" }).hasAttribute("disabled"),
-    ).toBe(true);
+    expect(screen.getByRole("button", { name: "PRを自動修正" }).hasAttribute("disabled")).toBe(true);
     expect(
       screen.getByText(
         "コンフリクト解消のワークフローが未配布です。設定 › フリート運用 から、このリポジトリへ配布できます。",
@@ -194,7 +186,7 @@ describe("PullRequestList", () => {
   it("配布状況を判定していないPRは従来どおり押せる（#1960）", () => {
     renderList([makePullRequest({ ciState: "failure", repairWorkflowAvailability: {} })]);
 
-    expect(screen.getByRole("button", { name: "CI失敗を自動修正" }).hasAttribute("disabled")).toBe(
+    expect(screen.getByRole("button", { name: "PRを自動修正" }).hasAttribute("disabled")).toBe(
       false,
     );
     expect(screen.queryByText(/未配布/)).toBeNull();
@@ -214,19 +206,19 @@ describe("PullRequestList", () => {
       }),
     ]);
 
-    const badge = screen.getByText("CI失敗を自動修正中（3分経過）");
+    const badge = screen.getByText("PRを自動修正中（3分経過）");
     // ピルごと実行ログへのリンクにする（`DeployStatusBadge`と同じ形）。
     expect(badge.closest("a")?.getAttribute("href")).toBe(
       "https://github.com/guchi-apps/issue-deck/actions/runs/1",
     );
     // 失敗している事実は打ち消さず、その隣に重ねて出す。
     expect(screen.getByTitle("CI: CI失敗")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "CI失敗を自動修正" }).hasAttribute("disabled")).toBe(
+    expect(screen.getByRole("button", { name: "PRを自動修正" }).hasAttribute("disabled")).toBe(
       true,
     );
   });
 
-  it("コンフリクトの自動解消が走っていてもCI失敗のボタンは押せる（#2072）", () => {
+  it("自動修正中は対象が複数でも統合した修正操作を押せなくする（#2072）", () => {
     renderList([
       makePullRequest({
         ciState: "failure",
@@ -235,12 +227,7 @@ describe("PullRequestList", () => {
       }),
     ]);
 
-    expect(screen.getByRole("button", { name: "CI失敗を自動修正" }).hasAttribute("disabled")).toBe(
-      false,
-    );
-    expect(
-      screen.getByRole("button", { name: "コンフリクトを自動解消" }).hasAttribute("disabled"),
-    ).toBe(true);
+    expect(screen.getByRole("button", { name: "PRを自動修正" }).hasAttribute("disabled")).toBe(true);
   });
 
   it("draftのPRはGitHubがマージを受け付けないためボタンを出さない", () => {

@@ -40,7 +40,7 @@ import {
   type PullRequestFixRoute,
 } from "@/lib/github/pull-request-fix-issue";
 import { selectPullRequestReviewComment } from "@/lib/github/pull-request-review-comment";
-import { repairKindsFor } from "@/lib/github/pull-request-repair";
+import { isRepairWorkflowMissing, repairKindsFor } from "@/lib/github/pull-request-repair";
 import { parseReleaseVerification, type ReleaseVerificationRow } from "@/lib/github/release-verification";
 import { canMergeFromDeck, requiresUserMerge } from "@/lib/pull-request-list";
 import { cn } from "@/lib/utils";
@@ -246,6 +246,9 @@ export function PullRequestDetail({
   // `mergeable`は一覧・詳細のどちらの`summary`にも入っている（#1742）ので、CI失敗と
   // コンフリクトの両方の修復ボタンを出せる（#1293）。
   const repairKinds = repairKindsFor(pullRequest, pullRequest.mergeable);
+  const nextRepairUnavailable =
+    repairKinds.length > 0 &&
+    isRepairWorkflowMissing(pullRequest.repairWorkflowAvailability, repairKinds[0]);
   // リリースPRの本文に載っている検証結果（#2448）。見出しを持たないPRではnullになる
   const verification = parseReleaseVerification(currentDetail?.body);
   // 検証結果の行の「確認済み・対応しない」の記録・取り消し（#3739）。develop向けPRへ記録を残し、
@@ -423,7 +426,7 @@ export function PullRequestDetail({
               <PullRequestMergeButton
                 pullRequest={pullRequest}
                 onMerged={onMerged}
-                variant="default"
+                variant={repairKinds.length === 0 ? "default" : "outline"}
                 className="ml-auto"
               />
             )}
@@ -484,7 +487,13 @@ export function PullRequestDetail({
           <>
             {/* レビューの指摘から修正Issueを起案する（#2961）。リリースPRは検証結果パネルの
                 行ごとのボタンが受け持つので出さない */}
-            {onCreatePullRequestFixIssue && showsPullRequestFixIssueBar(pullRequest) && (
+            {onCreatePullRequestFixIssue &&
+              showsPullRequestFixIssueBar(pullRequest) &&
+              // 自動修正できる問題がある間は主要CTAへ統合する。needs-check等で自動修正対象が
+              // 無い場合は、元Issue/セッションへ修正依頼する従来経路を残す。
+              ((pullRequestFixRoute?.kind ?? "create-issue") === "create-issue" ||
+                repairKinds.length === 0 ||
+                nextRepairUnavailable) && (
               <PullRequestFixIssueBar
                 pullRequest={pullRequest}
                 events={currentDetail.events}

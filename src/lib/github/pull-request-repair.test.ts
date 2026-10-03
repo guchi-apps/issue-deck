@@ -137,6 +137,15 @@ describe("repairKindsFor", () => {
       ]);
     });
 
+    it("CI失敗とレビュー要修正が同時でも、修正対象としてまとめて返す", () => {
+      expect(
+        repairKindsFor(
+          { ...issuePr, ciState: "failure", reviewVerdict: verdict("changes-requested") },
+          true,
+        ),
+      ).toEqual(["ci", "review"]);
+    });
+
     it("要確認・LGTM・判定なしでは出さない", () => {
       expect(repairKindsFor({ ...issuePr, reviewVerdict: verdict("needs-check") }, true)).toEqual([]);
       expect(repairKindsFor({ ...issuePr, reviewVerdict: verdict("lgtm") }, true)).toEqual([]);

@@ -143,6 +143,13 @@ export const REPAIR_KIND_LABEL: Record<RepairKind, string> = {
   review: "レビュー指摘を自動修正",
 };
 
+/** 自動修正の確認画面で、今回直す対象として並べる短い名前 */
+export const REPAIR_TARGET_LABEL: Record<RepairKind, string> = {
+  ci: "CI失敗",
+  conflict: "コンフリクト",
+  review: "レビュー指摘",
+};
+
 /**
  * 自動修復が走っているあいだの言い回し（#2072）。バッジ・通知ベルで同じ文言にする。
  *
@@ -150,9 +157,9 @@ export const REPAIR_KIND_LABEL: Record<RepairKind, string> = {
  * 同じ言葉で出すと、走っている最中のバッジが押せるボタンに見えるため。
  */
 export const REPAIR_KIND_RUNNING_LABEL: Record<RepairKind, string> = {
-  ci: "CI失敗を自動修正中",
-  conflict: "コンフリクトを自動解消中",
-  review: "レビュー指摘を自動修正中",
+  ci: "PRを自動修正中",
+  conflict: "PRを自動修正中",
+  review: "PRを自動修正中",
 };
 
 /** 幅の狭い場所（通知ベル・スマホの一覧）で使う短い言い回し（#2072） */

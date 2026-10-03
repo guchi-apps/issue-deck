@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { GitMerge, Info, MessageSquareWarning, Wrench } from "lucide-react";
+import { Info, Wrench } from "lucide-react";
 
 import { ApiErrorMessage } from "@/components/dashboard/api-error-message";
 import {
@@ -18,8 +18,7 @@ import { Button } from "@/components/ui/button";
 import { usePullRequestRepairMutation } from "@/hooks/use-pull-request-repair-mutation";
 import {
   isRepairWorkflowMissing,
-  REPAIR_KIND_DESCRIPTION,
-  REPAIR_KIND_LABEL,
+  REPAIR_TARGET_LABEL,
   repairUnavailableNotices,
   type RepairKind,
   type RepairWorkflowAvailability,
@@ -44,14 +43,8 @@ type PullRequestRepairButtonsProps = {
   className?: string;
 };
 
-const KIND_ICON: Record<RepairKind, typeof Wrench> = {
-  ci: Wrench,
-  conflict: GitMerge,
-  review: MessageSquareWarning,
-};
-
 /**
- * 詰まっているPRをボタン1つで直しにいく導線（#1293）。
+ * 詰まっているPRをボタン1つで直しにいく導線（#1293、#3970）。
  *
  * CIが失敗している・baseブランチとコンフリクトしている状態は、これまで人間がIssueへ
  * `@claude`コメントを書くか、GitHubのActions画面から手動実行するしか起点が無かった
@@ -74,66 +67,64 @@ export function PullRequestRepairButtons({
   className,
 }: PullRequestRepairButtonsProps) {
   const { repairPullRequest, isSubmitting, error, setError } = usePullRequestRepairMutation();
-  const [confirmKind, setConfirmKind] = useState<RepairKind | null>(null);
-  const [startedKind, setStartedKind] = useState<RepairKind | null>(null);
+  const [isConfirmOpen, setIsConfirmOpen] = useState(false);
+  const [justStarted, setJustStarted] = useState(false);
   const [owner, repo] = repositoryFullName.split("/");
   // 押せない種類があるときだけ、理由と次の一手を添える（理由が違えば行を分ける）。
-  const unavailableNotices = repairUnavailableNotices(kinds, availability);
+  // APIは優先順位の先頭1件だけを起動するため、今回起動するworkflowの可否だけで
+  // ボタンを無効化する。後続が未配布でも、先頭の修復まで止めない。
+  const nextKind = kinds[0];
+  const unavailableNotices = repairUnavailableNotices([nextKind], availability);
 
   if (kinds.length === 0) return null;
 
-  async function runRepair(kind: RepairKind) {
-    const ok = await repairPullRequest({ owner, repo, number: pullRequestNumber, kind });
+  const hasUnavailableWorkflow = isRepairWorkflowMissing(availability, nextKind);
+
+  async function runRepair() {
+    const ok = await repairPullRequest({ owner, repo, number: pullRequestNumber });
     if (ok) {
-      setConfirmKind(null);
-      setStartedKind(kind);
+      setIsConfirmOpen(false);
+      // runningKindの反映前だけ短く起動済み表示を出す。次の再描画でrunningKindが
+      // 無ければ高速完了とみなし、ボタンを復帰させる。
+      setJustStarted(true);
+      queueMicrotask(() => setJustStarted(false));
     }
   }
 
   return (
     <div className={cn("flex min-w-0 flex-wrap items-center gap-2", className)}>
-      {startedKind ? (
+      {justStarted ? (
         <span className="text-xs text-muted-foreground">
-          {REPAIR_KIND_LABEL[startedKind]}のworkflowを起動しました（結果はPRのコメントに届きます）
+          PRを自動修正中です。結果はPRのコメントに届きます。
         </span>
       ) : (
-        kinds.map((kind) => {
-          const Icon = KIND_ICON[kind];
-          const missing = isRepairWorkflowMissing(availability, kind);
-          const running = runningKind === kind;
-          return (
-            <Button
-              key={kind}
-              size="sm"
-              variant="outline"
-              className="h-7 shrink-0"
-              disabled={isSubmitting || missing || running}
-              // 無効化の理由はホバーできない端末にも要るため下の一文でも出すが、
-              // マウスで触ったときにその場で読めるようtitleにも同じ趣旨を持たせる。
-              title={
-                running
-                  ? "いま実行中です。結果はIssueのコメントに届きます。"
-                  : missing
-                    ? unavailableNotices.join(" ")
-                    : undefined
-              }
-              onClick={() => {
-                setError(null);
-                setConfirmKind(kind);
-              }}
-            >
-              <Icon className="size-3.5" />
-              {REPAIR_KIND_LABEL[kind]}
-            </Button>
-          );
-        })
+        <Button
+          size="sm"
+          variant="outline"
+          className="h-7 shrink-0"
+          disabled={isSubmitting || hasUnavailableWorkflow || runningKind !== null}
+          title={
+            runningKind !== null
+              ? "いま自動修正中です。結果はPRのコメントに届きます。"
+              : hasUnavailableWorkflow
+                ? unavailableNotices.join(" ")
+                : undefined
+          }
+          onClick={() => {
+            setError(null);
+            setIsConfirmOpen(true);
+          }}
+        >
+          <Wrench className="size-3.5" />
+          PRを自動修正
+        </Button>
       )}
-      {!startedKind && runningKind !== null && (
+      {!justStarted && runningKind !== null && (
         <span className="text-xs text-muted-foreground">
-          いま実行中です。結果はIssueのコメントに届きます。
+          PRを自動修正中です。結果はPRのコメントに届きます。
         </span>
       )}
-      {!startedKind &&
+      {!justStarted &&
         unavailableNotices.map((notice) => (
           <p
             key={notice}
@@ -143,26 +134,30 @@ export function PullRequestRepairButtons({
             <span>{notice}</span>
           </p>
         ))}
-      {error && !confirmKind && <span className="text-xs text-destructive">{error}</span>}
+      {error && !isConfirmOpen && <span className="text-xs text-destructive">{error}</span>}
 
       <AlertDialog
-        open={confirmKind !== null}
+        open={isConfirmOpen}
         onOpenChange={(open) => {
-          if (!open) setConfirmKind(null);
+          if (!open) setIsConfirmOpen(false);
         }}
       >
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>
-              {confirmKind ? REPAIR_KIND_LABEL[confirmKind] : ""}を実行しますか？
-            </AlertDialogTitle>
+            <AlertDialogTitle>PRを自動修正しますか？</AlertDialogTitle>
             <AlertDialogDescription>
-              {repositoryFullName} #{pullRequestNumber} を対象に、Claude Codeによる自動修復の
-              workflowを起動します。
-              {confirmKind ? REPAIR_KIND_DESCRIPTION[confirmKind] : ""}
-              安全に直せないと判断された場合は変更を加えず、理由が報告されます。
+              {repositoryFullName} #{pullRequestNumber} の現在の状態を取得し直し、修正が必要な項目を
+              同じPRのhead branchで自動修正します。安全に直せないと判断された場合は変更を加えず、理由が報告されます。
             </AlertDialogDescription>
           </AlertDialogHeader>
+          <div className="text-sm">
+            <p className="font-medium">現在検出されている修正対象</p>
+            <ul className="mt-1 list-disc pl-5 text-muted-foreground">
+              {kinds.map((kind) => (
+                <li key={kind}>{REPAIR_TARGET_LABEL[kind]}</li>
+              ))}
+            </ul>
+          </div>
           <ApiErrorMessage message={error} />
           <AlertDialogFooter>
             <AlertDialogCancel disabled={isSubmitting}>キャンセル</AlertDialogCancel>
@@ -171,7 +166,7 @@ export function PullRequestRepairButtons({
                 // 起動結果を待たずに閉じないよう、既定の閉じる動作を止めてから実行する
                 // （マージボタンと同じ扱い）。
                 event.preventDefault();
-                if (confirmKind) runRepair(confirmKind);
+                runRepair();
               }}
               disabled={isSubmitting}
             >
