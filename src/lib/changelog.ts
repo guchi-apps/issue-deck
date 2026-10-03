@@ -42,6 +42,19 @@ export type ChangelogEntry = {
  */
 export const APP_CHANGELOG: ChangelogEntry[] = [
   {
+    version: "8.26.0",
+    date: "2026-10-03",
+    changes: [
+      "設定画面で、自動計画レビューに使うエージェントを、計画を出したCLIごと（Claude Codeで開始したとき／ChatGPT（Codex CLI）で開始したとき）に選べるようになりました。",
+    ],
+    usage: [
+      "1. 設定ダイアログを開き、実行に関する設定を表示します。",
+      "2. 「サブPC：自動計画レビューのエージェント」で、「Claude Codeで開始したとき」と「ChatGPT（Codex CLI）で開始したとき」のそれぞれについて、使いたいエージェントを選びます。",
+      "3. 保存を押します。",
+      "4. 成功すると、選んだ内容が保存されたまま表示され、次に計画が出たときの自動レビューが開始元のCLIに応じたエージェントで行われます。",
+    ],
+  },
+  {
     version: "8.25.0",
     date: "2026-10-03",
     changes: [
