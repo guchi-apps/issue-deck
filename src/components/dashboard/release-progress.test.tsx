@@ -193,25 +193,23 @@ describe("ReleaseProgress 自動修復ボタン（#1293）", () => {
 
   it("本番へのリリースPRのCIが失敗しているとCI修正ボタンを出す", () => {
     render(<ReleaseProgress status={statusWithReleaseCi("failure")} repoFullName="owner/repo" />);
-    expect(screen.getByRole("button", { name: "CI失敗を自動修正" })).not.toBeNull();
+    expect(screen.getByRole("button", { name: "PRを自動修正" })).not.toBeNull();
   });
 
   it("本番へのリリースPRがコンフリクトしていると解消ボタンとバッジを出す", () => {
     render(<ReleaseProgress status={statusWithReleaseCi("success", false)} repoFullName="owner/repo" />);
     expect(screen.getByText("コンフリクトあり")).not.toBeNull();
-    expect(screen.getByRole("button", { name: "コンフリクトを自動解消" })).not.toBeNull();
+    expect(screen.getByRole("button", { name: "PRを自動修正" })).not.toBeNull();
   });
 
   it("CIが通っていてコンフリクトも無ければボタンを出さない", () => {
     render(<ReleaseProgress status={statusWithReleaseCi("success", true)} repoFullName="owner/repo" />);
-    expect(screen.queryByRole("button", { name: "CI失敗を自動修正" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "コンフリクトを自動解消" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "PRを自動修正" })).toBeNull();
   });
 
   it("repoFullNameが渡されない場合は起動先が決まらないためボタンを出さない", () => {
     render(<ReleaseProgress status={statusWithReleaseCi("failure", false)} />);
-    expect(screen.queryByRole("button", { name: "CI失敗を自動修正" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "コンフリクトを自動解消" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "PRを自動修正" })).toBeNull();
   });
 
   // バンプPR・リリースPRを直すのは`claude-pr-repair.yml`で、リリースフローを持っていても
@@ -233,12 +231,7 @@ describe("ReleaseProgress 自動修復ボタン（#1293）", () => {
       />,
     );
 
-    expect(screen.getByRole("button", { name: "CI失敗を自動修正" }).hasAttribute("disabled")).toBe(
-      true,
-    );
-    expect(
-      screen.getByRole("button", { name: "コンフリクトを自動解消" }).hasAttribute("disabled"),
-    ).toBe(true);
+    expect(screen.getByRole("button", { name: "PRを自動修正" }).hasAttribute("disabled")).toBe(true);
     expect(
       screen.getByText(
         "自動修復ワークフローが未配布です。設定 › フリート運用 から、このリポジトリへ配布できます。",
@@ -269,7 +262,7 @@ describe("ReleaseProgress 自動修復ボタン（#1293）", () => {
         repoFullName="owner/repo"
       />,
     );
-    expect(screen.getByRole("button", { name: "CI失敗を自動修正" })).not.toBeNull();
+    expect(screen.getByRole("button", { name: "PRを自動修正" })).not.toBeNull();
   });
 });
 

@@ -165,10 +165,10 @@ describe("PullRequestDetail", () => {
   });
 
   // `mergeable`は詳細ではなくsummaryが持つ（一覧・詳細で同じ判定にするため。#1742）
-  it("コンフリクトしているPRは警告と自動解消ボタンを出し、マージボタンを出さない", () => {
+  it("コンフリクトしているPRは警告と統合した自動修正ボタンを出し、マージボタンを出さない", () => {
     renderDetail({ pullRequest: makePullRequest({ mergeable: false }) });
     expect(screen.getByText("コンフリクトあり")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "コンフリクトを自動解消" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "PRを自動修正" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "マージする" })).toBeNull();
   });
 
@@ -242,6 +242,29 @@ describe("PullRequestDetail", () => {
       }),
     });
     expect(screen.getByRole("button", { name: /レビュー要修正/ })).toBeTruthy();
+  });
+
+  it("CI失敗とレビュー要修正が同時でも、修復入口は1つだけで、マージ操作は主要CTAにしない", () => {
+    renderDetail({
+      pullRequest: makePullRequest({
+        ciState: "failure",
+        mergeable: true,
+        reviewVerdict: {
+          reviewKind: "changes-requested",
+          reviewLabel: "要修正",
+          riskKind: "none",
+          riskLabel: "該当なし",
+          riskReasons: [],
+          confirmLabel: null,
+          reviewedSha: null,
+        },
+      }),
+    });
+
+    expect(screen.getAllByRole("button", { name: "PRを自動修正" })).toHaveLength(1);
+    // 手動マージの経路は残すが、修正対象がある間は補助（outline）として出す
+    const mergeButton = screen.getByRole("button", { name: "マージする" });
+    expect(mergeButton.getAttribute("data-variant")).toBe("outline");
   });
 
   // 差分が小さくレビューが走らなかったことを言い切る。何も出さないと未完了と区別が付かない。
