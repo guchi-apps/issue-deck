@@ -145,7 +145,7 @@ export function resolveExecutionFlows(settings: ExecutionFlowSettings): Executio
       model: describeClaudeModel(workflowClaudeModel), source: "PRレビュー・修復設定", setting: workflowClaudeModel === "auto" ? "デフォルト継承" : describeClaudeModel(workflowClaudeModel), sourceId: "workflow-model-settings",
     },
     {
-      group: "レビュー", name: "PRコードレビュー（Codex）", location: "GitHub Actions", agent: "Codex Action",
+      group: "レビュー", name: "PRコードレビュー（Codex）", location: "サブPC", agent: "Codex CLI",
       model: describeCodexModel(workflowCodexModel), source: "PRレビュー・修復設定", setting: workflowCodexModel === "auto" ? "デフォルト継承" : describeCodexModel(workflowCodexModel), reasoningEffort: workflowCodexReasoningEffort === "default" ? "デフォルト継承" : workflowCodexReasoningEffort, sourceId: "workflow-model-settings",
     },
     {
