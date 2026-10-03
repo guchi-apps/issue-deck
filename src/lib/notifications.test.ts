@@ -269,7 +269,7 @@ describe("buildNotifications 確認待ち・手作業待ち", () => {
     expect(hasErrorNotification(items)).toBe(false);
   });
 
-  it("マージ待ちでも対応PRのCIが実行中なら「CI実行中」として弱める", () => {
+  it("マージ待ちでも対応PRのCIが実行中ならベルに出さない（#3787）", () => {
     const items = build({
       issues: [
         makeIssue({
@@ -281,13 +281,10 @@ describe("buildNotifications 確認待ち・手作業待ち", () => {
       pullRequests: [makePullRequest({ linkedIssueNumber: 100, ciState: "pending" })],
     });
 
-    expect(items).toHaveLength(1);
-    expect(items[0].group).toBe("check-user");
-    expect(items[0].badgeLabel).toBe("CI実行中");
-    expect(items[0].tone).toBe("info");
+    expect(items.filter((item) => item.group === "check-user")).toHaveLength(0);
   });
 
-  it("エージェントが実行中の確認待ちは「実行中」として弱める（#2174）", () => {
+  it("エージェントが実行中の確認待ちはベルに出さない（#2174・#3787）", () => {
     const items = build({
       issues: [
         makeIssue({
@@ -299,9 +296,23 @@ describe("buildNotifications 確認待ち・手作業待ち", () => {
       checkUserRunningIssueIds: new Set(["issue-100"]),
     });
 
-    expect(items).toHaveLength(1);
-    expect(items[0].badgeLabel).toBe("実行中");
-    expect(items[0].tone).toBe("info");
+    expect(items).toHaveLength(0);
+  });
+
+  it("実行中の確認待ちの対応PRは、Pull Request区分へ出直さない（#3787）", () => {
+    const items = build({
+      issues: [
+        makeIssue({
+          id: "issue-100",
+          number: 100,
+          labels: [label("00.check-user"), label("01.check-merge")],
+        }),
+      ],
+      pullRequests: [makePullRequest({ linkedIssueNumber: 100, ciState: "success" })],
+      checkUserRunningIssueIds: new Set(["issue-100"]),
+    });
+
+    expect(items).toHaveLength(0);
   });
 
   it("対応PRのCIが確定していれば「PRのマージ」として出す", () => {

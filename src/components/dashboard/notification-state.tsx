@@ -163,7 +163,7 @@ export function NotificationProvider({
   pullRequests: PullRequestSummary[];
   /**
    * 確認待ちのうち、まだエージェントが動いていて押せる操作が無いIssueのid（#2174）。
-   * 左メニューの件数と同じ集合を受け取り、その行を「実行中」として弱く出す。
+   * 左メニューの件数と同じ集合を受け取り、その行をベルの確認待ちから外す（#3787）。
    */
   checkUserRunningIssueIds?: ReadonlySet<string>;
   /** 応答終了したCodexセッションをアクション通知へ載せるための状態 */
