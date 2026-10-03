@@ -230,6 +230,8 @@ describe("SettingsDialog", () => {
       "claude-sonnet-5-5",
       "app-ai",
       "claude",
+      "claude",
+      "codex",
       true,
       90,
     );
@@ -240,6 +242,8 @@ describe("SettingsDialog", () => {
       claudeLocalModel: "sonnet",
       codexModel: "auto",
       defaultDispatchAgent: "claude",
+      planReviewAgentForClaude: "claude",
+      planReviewAgentForCodex: "codex",
       dispatchFailoverEnabled: true,
       dispatchFailoverThresholdPercent: 90,
       appAiModel: "claude-haiku-4-5",

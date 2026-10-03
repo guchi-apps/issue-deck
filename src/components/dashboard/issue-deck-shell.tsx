@@ -95,6 +95,7 @@ import type {
   CodexModelSetting,
   DefaultDispatchAgent,
   ModelPickEngine,
+  PlanReviewAgent,
 } from "@/lib/app-settings";
 import {
   ISSUE_LIST_PULL_REQUEST_POLL_INTERVAL_MS,
@@ -247,6 +248,8 @@ type IssueDeckShellProps = {
   claudeLocalModel: ClaudeLocalModelSetting;
   codexModel: CodexModelSetting;
   defaultDispatchAgent: DefaultDispatchAgent;
+  planReviewAgentForClaude: PlanReviewAgent;
+  planReviewAgentForCodex: PlanReviewAgent;
   dispatchFailoverEnabled: boolean;
   dispatchFailoverThresholdPercent: number;
   appAiModel: AppAiModel;
@@ -268,6 +271,8 @@ export function IssueDeckShell({
   claudeLocalModel: initialClaudeLocalModel,
   codexModel: initialCodexModel,
   defaultDispatchAgent: initialDefaultDispatchAgent,
+  planReviewAgentForClaude: initialPlanReviewAgentForClaude,
+  planReviewAgentForCodex: initialPlanReviewAgentForCodex,
   dispatchFailoverEnabled: initialDispatchFailoverEnabled,
   dispatchFailoverThresholdPercent: initialDispatchFailoverThresholdPercent,
   appAiModel: initialAppAiModel,
@@ -349,6 +354,12 @@ export function IssueDeckShell({
   const [defaultDispatchAgent, setDefaultDispatchAgent] = useState<DefaultDispatchAgent>(
     initialDefaultDispatchAgent,
   );
+  const [planReviewAgentForClaude, setPlanReviewAgentForClaude] = useState<PlanReviewAgent>(
+    initialPlanReviewAgentForClaude,
+  );
+  const [planReviewAgentForCodex, setPlanReviewAgentForCodex] = useState<PlanReviewAgent>(
+    initialPlanReviewAgentForCodex,
+  );
   const [dispatchFailoverEnabled, setDispatchFailoverEnabled] = useState(initialDispatchFailoverEnabled);
   const [dispatchFailoverThresholdPercent, setDispatchFailoverThresholdPercent] = useState(
     initialDispatchFailoverThresholdPercent,
@@ -370,6 +381,8 @@ export function IssueDeckShell({
     setClaudeLocalModel(next.claudeLocalModel);
     setCodexModel(next.codexModel);
     setDefaultDispatchAgent(next.defaultDispatchAgent);
+    setPlanReviewAgentForClaude(next.planReviewAgentForClaude);
+    setPlanReviewAgentForCodex(next.planReviewAgentForCodex);
     setDispatchFailoverEnabled(next.dispatchFailoverEnabled);
     setDispatchFailoverThresholdPercent(next.dispatchFailoverThresholdPercent);
     setAppAiModel(next.appAiModel);
@@ -2450,6 +2463,8 @@ export function IssueDeckShell({
                     claudeLocalModel={claudeLocalModel}
                     codexModel={codexModel}
                     defaultDispatchAgent={defaultDispatchAgent}
+                    planReviewAgentForClaude={planReviewAgentForClaude}
+                    planReviewAgentForCodex={planReviewAgentForCodex}
                     dispatchFailoverEnabled={dispatchFailoverEnabled}
                     dispatchFailoverThresholdPercent={dispatchFailoverThresholdPercent}
                     appAiModel={appAiModel}
@@ -3015,6 +3030,8 @@ export function IssueDeckShell({
           claudeLocalModel={claudeLocalModel}
           codexModel={codexModel}
           defaultDispatchAgent={defaultDispatchAgent}
+          planReviewAgentForClaude={planReviewAgentForClaude}
+          planReviewAgentForCodex={planReviewAgentForCodex}
           dispatchFailoverEnabled={dispatchFailoverEnabled}
           dispatchFailoverThresholdPercent={dispatchFailoverThresholdPercent}
           appAiModel={appAiModel}

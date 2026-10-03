@@ -468,6 +468,10 @@ model AppSetting {
   codexModel          String   @default("gpt-5.6-terra")
   // サブPCの「実装を開始」で最初に選ぶCLI。明示して選び直した値や、既存セッションの再開には影響しない。
   defaultDispatchAgent String  @default("claude")
+  // ローカルセッションが計画を投稿した後の自動計画レビューに使うCLI。開始元ごとに別々に選べる。
+  // 既定値は開始したCLIと同じにして、設定追加前の動作を保つ。
+  planReviewAgentForClaude String @default("claude")
+  planReviewAgentForCodex  String @default("codex")
   // 既定CLIの使用率がしきい値以上なら、起動ダイアログで他方を最初に選ぶ（#3531）。
   // 既定ON・90%は、従来のClaude残量10%未満でCodexへ切り替える挙動を引き継ぐため。
   dispatchFailoverEnabled Boolean @default(true)
