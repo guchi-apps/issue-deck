@@ -53,6 +53,8 @@ export function PlanReviewFindings({
   deemphasizeSubmit = false,
   approveHint = DEFAULT_APPROVE_HINT,
   unavailable,
+  additional: controlledAdditional,
+  onAdditionalChange,
   onSubmit,
 }: {
   review: ParsedPlanReview;
@@ -80,6 +82,12 @@ export function PlanReviewFindings({
   approveHint?: string;
   /** 承認・修正が届かない理由（セッション終了／計画待ちの期限切れ）。無ければ送れる状態 */
   unavailable?: PlanReviewUnavailable;
+  /**
+   * 「追加で修正したいこと」の下書き。親が持つと、カードの外の承認ボタンが未送信の文章に気付ける
+   * （#3852。内部状態だけだと承認で黙って捨てられる）。両方渡さなければ従来どおりカード内で持つ
+   */
+  additional?: string;
+  onAdditionalChange?: (value: string) => void;
   onSubmit: (text: string) => void | Promise<void>;
 }) {
   // 番号ごとの判断。**無い番号は「反映する」**として扱う（既定を全件反映にするため）
@@ -91,7 +99,9 @@ export function PlanReviewFindings({
   // 推奨の理由とレビュー要約は細かい文字で読まれないので、既定は閉じておく（#3754）
   const [isDetailOpen, setIsDetailOpen] = useState(false);
   // 選択に加えて送る自由記述（#3829）。画像の貼り付けも使えるので、アップロード中は送らせない
-  const [additional, setAdditional] = useState("");
+  const [innerAdditional, setInnerAdditional] = useState("");
+  const additional = controlledAdditional ?? innerAdditional;
+  const setAdditional = onAdditionalChange ?? setInnerAdditional;
   const [isUploadingImage, setIsUploadingImage] = useState(false);
 
   const { findings, decisions } = review;

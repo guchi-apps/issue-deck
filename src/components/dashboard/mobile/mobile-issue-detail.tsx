@@ -467,6 +467,8 @@ export function MobileIssueDetail({
     setError: setCommentMutationError,
   } = useIssueCommentMutations();
   const [newCommentBody, setNewCommentBody] = useState("");
+  // 計画レビューカードの「追加で修正したいこと」の下書き。承認欄の承認へ同梱する（#3852）
+  const [planReviewAdditional, setPlanReviewAdditional] = useState("");
   const [isImageUploading, setIsImageUploading] = useState(false);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const targetCommentRef = useRef<HTMLLIElement>(null);
@@ -734,6 +736,10 @@ export function MobileIssueDetail({
   }
 
   async function handleApprove(text?: string) {
+    // カードの追記を黙って捨てない。承認コメントへ載せ、`@claude`がその文を読む（#3852）
+    const note = [text?.trim(), planReviewAdditional.trim()].filter(Boolean).join("\n\n");
+    text = note || undefined;
+    setPlanReviewAdditional("");
     await updateLabelsAndComment(
       labelsAfterApproval(issue.labels),
       approveCommentBody(issue.labels, text),
@@ -741,6 +747,7 @@ export function MobileIssueDetail({
   }
 
   async function handleReject(reason: string) {
+    setPlanReviewAdditional("");
     await updateLabelsAndComment(labelsAfterRejection(issue.labels), rejectCommentBody(issue.labels, reason));
   }
 
@@ -1043,6 +1050,8 @@ export function MobileIssueDetail({
               approveHint="下の承認欄の「承認」を押す"
               disabled={isSubmitting}
               isSubmitting={isSubmitting}
+              additional={planReviewAdditional}
+              onAdditionalChange={setPlanReviewAdditional}
               onSubmit={handleReject}
             />
           )}
