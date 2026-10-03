@@ -1,147 +1,110 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
+import { useState, type KeyboardEvent, type PointerEvent } from "react";
 
-import { nearestOption, stepOption } from "@/lib/quota-ruler";
+import { optionFromRatio, stepOption } from "@/lib/quota-ruler";
 import { cn } from "@/lib/utils";
 
-/** 静止してから値を確定するまでの時間（ms）。スクロールの途中では保存しない */
-const SETTLE_MS = 150;
-
 /**
- * 横スクロールで値を選ぶ目盛り帯（#3821）。中央の針に合わせた目盛りが選ばれた値で、
- * 指（マウス）を離して静止した時点で最寄りの目盛りへ吸着し、`onCommit`で確定する。
- * 左右キーでも1目盛りずつ動かせる（`role="slider"`）。
+ * バーの上に重ねる、ドラッグで値を選ぶつまみ（#3841）。親の`relative`なバーの右端が値0、左端が`maxValue`で、
+ * 値は選択肢のどれかへ吸着する。離した時点（キー操作は1回ごと）で`onCommit`し、ドラッグ中は値の吹き出しを出す。
+ * マウス・タッチ・ペンはpointer eventsで同じに扱い、キーは左右で1目盛り・Home/Endで両端。
+ * 左へ動かすほど値が大きくなるので、キーも見た目に合わせて左が増える。
  */
-export function QuotaRuler({
+export function BarHandle({
   options,
   value,
-  pxPerUnit,
-  formatTick,
+  maxValue,
   formatValue,
   ariaLabel,
+  tone,
   disabled = false,
   onCommit,
 }: {
   options: readonly number[];
   value: number;
-  /** 値1あたりの横幅（px） */
-  pxPerUnit: number;
-  formatTick: (value: number) => string;
+  /** バーの左端にあたる値（右端は0） */
+  maxValue: number;
   formatValue: (value: number) => string;
   ariaLabel: string;
+  tone: "floor" | "launch";
   disabled?: boolean;
   onCommit: (value: number) => void;
 }) {
-  const scale = (v: number) => v * pxPerUnit;
-  const scrollerRef = useRef<HTMLDivElement>(null);
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const [draft, setDraft] = useState(value);
-  const [seenValue, setSeenValue] = useState(value);
-  const committed = useRef(value);
-  // 保存後に外から値が変わったとき（他端末の更新など）は、描画の中で選択中の値を合わせる
-  if (seenValue !== value) {
-    setSeenValue(value);
-    setDraft(value);
-  }
+  const [draft, setDraft] = useState<number | null>(null);
+  const shown = draft ?? value;
+  const min = options[0];
+  const max = options[options.length - 1];
 
-  const scrollTo = (target: number, smooth: boolean) => {
-    const el = scrollerRef.current;
-    if (!el) return;
-    if (smooth && typeof el.scrollTo === "function") el.scrollTo({ left: scale(target), behavior: "smooth" });
-    else el.scrollLeft = scale(target);
+  const valueAt = (event: PointerEvent<HTMLDivElement>): number | null => {
+    const bar = event.currentTarget.parentElement?.getBoundingClientRect();
+    if (!bar || bar.width <= 0) return null;
+    return optionFromRatio(options, (bar.right - event.clientX) / bar.width, maxValue);
   };
 
-  // 開いた時点で、いまの値が針の位置に来るようにする
-  useLayoutEffect(() => {
-    scrollTo(value, false);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // 外から値が変わったときは、確定済みの値と針の位置も合わせる
-  useEffect(() => {
-    committed.current = value;
-    scrollTo(value, true);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [value]);
-
-  useEffect(
-    () => () => {
-      if (timerRef.current) clearTimeout(timerRef.current);
-    },
-    [],
-  );
-
-  const commit = (next: number) => {
-    if (next === committed.current) return;
-    committed.current = next;
-    onCommit(next);
+  const onPointerDown = (event: PointerEvent<HTMLDivElement>) => {
+    if (disabled) return;
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+    setDraft(valueAt(event) ?? value);
   };
-
-  const onScroll = () => {
-    const el = scrollerRef.current;
-    if (!el || disabled) return;
-    const next = nearestOption(options, scale, el.scrollLeft);
-    setDraft(next);
-    if (timerRef.current) clearTimeout(timerRef.current);
-    timerRef.current = setTimeout(() => {
-      scrollTo(next, true);
-      commit(next);
-    }, SETTLE_MS);
+  const onPointerMove = (event: PointerEvent<HTMLDivElement>) => {
+    if (draft === null) return;
+    const next = valueAt(event);
+    if (next !== null) setDraft(next);
+  };
+  const finish = (event: PointerEvent<HTMLDivElement>, commit: boolean) => {
+    if (draft === null) return;
+    const next = commit ? (valueAt(event) ?? draft) : value;
+    setDraft(null);
+    if (next !== value) onCommit(next);
   };
 
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     if (disabled) return;
-    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+    let next: number;
+    if (event.key === "ArrowLeft" || event.key === "ArrowUp") next = stepOption(options, value, 1);
+    else if (event.key === "ArrowRight" || event.key === "ArrowDown") next = stepOption(options, value, -1);
+    else if (event.key === "Home") next = min;
+    else if (event.key === "End") next = max;
+    else return;
     event.preventDefault();
-    const next = stepOption(options, draft, event.key === "ArrowLeft" ? -1 : 1);
-    setDraft(next);
-    scrollTo(next, true);
-    commit(next);
+    if (next !== value) onCommit(next);
   };
 
-  const min = options[0];
-  const max = options[options.length - 1];
-
   return (
-    <div className="relative rounded-md border border-primary/30 bg-primary/5 py-1.5">
-      <div
-        ref={scrollerRef}
-        role="slider"
-        tabIndex={disabled ? -1 : 0}
-        aria-label={ariaLabel}
-        aria-valuemin={min}
-        aria-valuemax={max}
-        aria-valuenow={draft}
-        aria-valuetext={formatValue(draft)}
-        aria-disabled={disabled}
-        onScroll={onScroll}
-        onKeyDown={onKeyDown}
+    <div
+      role="slider"
+      tabIndex={disabled ? -1 : 0}
+      aria-label={ariaLabel}
+      aria-valuemin={min}
+      aria-valuemax={max}
+      aria-valuenow={shown}
+      aria-valuetext={formatValue(shown)}
+      aria-disabled={disabled}
+      onPointerDown={onPointerDown}
+      onPointerMove={onPointerMove}
+      onPointerUp={(event) => finish(event, true)}
+      onPointerCancel={(event) => finish(event, false)}
+      onKeyDown={onKeyDown}
+      className={cn(
+        "group absolute top-1/2 grid h-11 w-8 -translate-x-1/2 -translate-y-1/2 place-items-center outline-none",
+        disabled ? "opacity-60" : "cursor-ew-resize",
+      )}
+      style={{ left: `${(1 - shown / maxValue) * 100}%`, touchAction: "none" }}
+    >
+      <i
+        aria-hidden
         className={cn(
-          "overflow-x-auto overscroll-x-contain outline-none [scrollbar-width:none] [&::-webkit-scrollbar]:hidden",
-          "focus-visible:ring-2 focus-visible:ring-ring",
-          disabled ? "opacity-60" : "cursor-grab",
+          "block h-6 w-1.5 rounded bg-amber-500 shadow-[0_0_0_3px_var(--background),0_1px_4px_rgb(0_0_0/0.3)]",
+          tone === "launch" && "bg-primary",
+          "group-focus-visible:ring-2 group-focus-visible:ring-ring group-focus-visible:ring-offset-2",
         )}
-        style={{ touchAction: "pan-x" }}
-      >
-        {/* 左右の余白を半幅にして、どの目盛りも中央の針に合わせられるようにする */}
-        <div className="relative h-9" style={{ marginInline: "50%", width: scale(max) }}>
-          {options.map((option) => (
-            <span
-              key={option}
-              className={cn(
-                "absolute top-0 flex -translate-x-1/2 flex-col items-center font-mono text-[11px] tabular-nums",
-                option === draft ? "font-semibold text-primary" : "text-muted-foreground",
-              )}
-              style={{ left: scale(option) }}
-            >
-              <i className="mb-0.5 block h-3 w-px bg-current" aria-hidden />
-              {formatTick(option)}
-            </span>
-          ))}
-        </div>
-      </div>
-      <div className="pointer-events-none absolute inset-y-0 left-1/2 w-0.5 -translate-x-1/2 rounded bg-primary" aria-hidden />
+      />
+      {draft !== null && (
+        <span className="pointer-events-none absolute bottom-9 left-1/2 -translate-x-1/2 whitespace-nowrap rounded bg-foreground px-1.5 py-0.5 font-mono text-[11px] font-semibold text-background">
+          {formatValue(draft)}
+        </span>
+      )}
     </div>
   );
 }
