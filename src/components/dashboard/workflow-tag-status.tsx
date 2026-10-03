@@ -71,7 +71,7 @@ function CountChip({
 
   return (
     <span
-      className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] ${toneClass}`}
+      className={`inline-flex items-center gap-1 whitespace-nowrap rounded-full border px-2 py-0.5 text-[11px] ${toneClass}`}
     >
       {label} {count}
     </span>
@@ -431,11 +431,11 @@ export function WorkflowTagStatusSection({ open }: { open: boolean }) {
 
   return (
     <div className="flex flex-col gap-1.5">
-      <div className="flex items-center justify-between gap-2">
+      <div className="flex items-start justify-between gap-2">
         <span className="text-sm font-medium">共有ワークフローのバージョン</span>
-        <div className="flex items-center gap-1.5">
+        <div className="flex shrink-0 items-center gap-1.5">
           {latestLabel && (
-            <span className="rounded-full border px-2 py-0.5 text-[11px] tabular-nums">
+            <span className="whitespace-nowrap rounded-full border px-2 py-0.5 text-[11px] tabular-nums">
               最新 {latestLabel}
             </span>
           )}
@@ -621,13 +621,31 @@ export function WorkflowTagStatusSection({ open }: { open: boolean }) {
                   されたのかを確認できなかった。実際に内容が変わったファイル名を出すことで、
                   「特定のPRが入った場合にのみ必要」という前提をその場で検証できるようにする */}
               {sourceAhead.hasContentDiff === true && sourceAhead.changedFiles.length > 0 && (
-                <ul className="flex flex-col gap-0.5 pl-0.5 text-[11px] text-muted-foreground">
-                  {sourceAhead.changedFiles.map((file) => (
-                    <li key={file} className="truncate">
-                      <code>{file}</code>
-                    </li>
-                  ))}
-                </ul>
+                <>
+                  <p className="text-[11px] text-muted-foreground">
+                    次のファイルが {shortWorkflowTag(sourceAhead.tag)}{" "}
+                    から変わっています。各リポジトリはタグで固定した版を使うため、新しいタグを切って配るまで反映されません。
+                  </p>
+                  <ul className="flex flex-col gap-1.5 text-[11px] text-muted-foreground">
+                    {sourceAhead.changedFiles.map((file) => {
+                      const reason = sourceAhead.changeReasons?.find((item) => item.file === file);
+                      return (
+                        <li key={file} className="border-l-2 pl-2">
+                          <code className="break-all">{file}</code>
+                          {reason && (
+                            <ul className="mt-0.5 flex flex-col gap-0.5">
+                              {reason.commits.map((commit, index) => (
+                                <li key={`${commit.number ?? "none"}-${index}`}>
+                                  なぜ: {commit.title}
+                                </li>
+                              ))}
+                            </ul>
+                          )}
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </>
               )}
             </>
           )}

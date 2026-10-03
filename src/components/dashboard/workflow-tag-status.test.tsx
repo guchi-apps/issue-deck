@@ -255,6 +255,7 @@ describe("WorkflowTagStatusSection", () => {
         compareUrl: "https://github.com/guchi-apps/issue-deck/compare/workflows/v19...main",
         hasContentDiff: null,
         changedFiles: [],
+        changeReasons: [],
       },
     });
     render(<WorkflowTagStatusSection open />);
@@ -280,6 +281,7 @@ describe("WorkflowTagStatusSection", () => {
         compareUrl: "https://github.com/guchi-apps/issue-deck/compare/workflows/v19...main",
         hasContentDiff: null,
         changedFiles: [],
+        changeReasons: [],
       },
     });
     render(<WorkflowTagStatusSection open />);
@@ -305,6 +307,12 @@ describe("WorkflowTagStatusSection", () => {
         compareUrl: "https://github.com/guchi-apps/issue-deck/compare/workflows/v19...main",
         hasContentDiff: true,
         changedFiles: [".github/workflows/reusable-issue-dispatch.yml"],
+        changeReasons: [
+          {
+            file: ".github/workflows/reusable-issue-dispatch.yml",
+            commits: [{ title: "同時セッション数の判定を追加 #3767", number: 3767 }],
+          },
+        ],
       },
     });
     render(<WorkflowTagStatusSection open />);
@@ -332,6 +340,7 @@ describe("WorkflowTagStatusSection", () => {
         compareUrl: "https://github.com/guchi-apps/issue-deck/compare/workflows/v19...main",
         hasContentDiff: false,
         changedFiles: [],
+        changeReasons: [],
       },
     });
     render(<WorkflowTagStatusSection open />);

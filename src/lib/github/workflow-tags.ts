@@ -21,6 +21,7 @@ import {
   sharedFilePropagationTargets,
   SHARED_FILE_SPECS,
   type PropagationRun,
+  type ChangeReason,
   type SourceAhead,
   type WorkflowTagPullRequest,
   type WorkflowTagRef,
@@ -325,6 +326,76 @@ function computeContentDiff(
   return { hasContentDiff: false, changedFiles: [] };
 }
 
+/** 理由を取るファイル数の上限。1ファイルにつきREST 2回なので、画面を開くたびの負荷を抑える */
+const CHANGE_REASON_FILE_LIMIT = 5;
+/** 1ファイルあたり見るコミット数。タグ以降の変更がこれを超えることは通常無い */
+const CHANGE_REASON_COMMIT_LIMIT = 30;
+
+/** コミット題名の末尾（`#3772`）から番号を取る。無ければnull */
+export function extractCommitIssueNumber(title: string): number | null {
+  const match = title.match(/#(\d+)\s*$/);
+  return match ? Number(match[1]) : null;
+}
+
+/** `sha`から辿れる、`path`に触れたコミットを返す。取れなければnull */
+async function fetchPathCommits(
+  token: string,
+  sha: string,
+  path: string,
+): Promise<{ sha: string; title: string }[] | null> {
+  const [owner, name] = SOURCE_REPOSITORY.split("/");
+  const query = new URLSearchParams({
+    sha,
+    path,
+    per_page: String(CHANGE_REASON_COMMIT_LIMIT),
+  });
+  const res = await githubFetch(`${GITHUB_API}/repos/${owner}/${name}/commits?${query}`, token);
+  if (!res.ok) return null;
+  const body = (await res.json().catch(() => null)) as
+    | { sha: string; commit: { message: string } }[]
+    | null;
+  if (!Array.isArray(body)) return null;
+  return body.map((item) => ({ sha: item.sha, title: item.commit.message.split("\n")[0] }));
+}
+
+/**
+ * 変更ファイルごとに「なぜ変わったか」を取る（#3783）。
+ *
+ * **日付（`since`）ではなく到達可能性の差で絞る。** `main`の履歴から最新タグの履歴にあるSHAを
+ * 引く。developで先に作られたコミットがタグ後のリリースで`main`へ入ると、作成日時はタグより
+ * 古く、日付で絞ると取りこぼす（`workflows/v17..v18`で実際に起きた）。**`sha`は必ず明示する**
+ * （既定ブランチは`develop`で、省くとまだ`main`に無い変更が理由として出る）。
+ * 取得に失敗したファイルは返さず、画面は従来どおりファイル名だけを出す。
+ */
+export async function fetchChangeReasons(
+  token: string,
+  latest: string,
+  files: string[],
+): Promise<ChangeReason[]> {
+  const results = await Promise.all(
+    files.slice(0, CHANGE_REASON_FILE_LIMIT).map(async (file): Promise<ChangeReason | null> => {
+      try {
+        const [mainCommits, tagCommits] = await Promise.all([
+          fetchPathCommits(token, "main", file),
+          fetchPathCommits(token, latest, file),
+        ]);
+        if (!mainCommits || !tagCommits) return null;
+        const inTag = new Set(tagCommits.map((commit) => commit.sha));
+        const commits = mainCommits
+          .filter((commit) => !inTag.has(commit.sha))
+          .map((commit) => ({
+            title: commit.title,
+            number: extractCommitIssueNumber(commit.title),
+          }));
+        return commits.length > 0 ? { file, commits } : null;
+      } catch {
+        return null;
+      }
+    }),
+  );
+  return results.filter((reason): reason is ChangeReason => reason !== null);
+}
+
 /**
  * `main`の先端が最新タグからどれだけ進んでいるか・配布物の中身が変わっているかを取る（#2476・#2941）。
  *
@@ -407,12 +478,16 @@ ${treeSelections}
     if (typeof aheadBy !== "number") return null;
 
     const { hasContentDiff, changedFiles } = computeContentDiff(data.repository);
+    const changeReasons = hasContentDiff
+      ? await fetchChangeReasons(token, latest, changedFiles)
+      : [];
     return {
       tag: latest,
       aheadBy,
       compareUrl: `https://github.com/${SOURCE_REPOSITORY}/compare/${latest}...main`,
       hasContentDiff,
       changedFiles,
+      changeReasons,
     };
   } catch (error) {
     // 進み具合が分からなくてもタグは切れる。画面はこの行を出さないだけにする
