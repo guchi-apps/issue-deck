@@ -104,36 +104,28 @@ async function handlePOST(request: NextRequest) {
         { status: 409 },
       );
     }
-    for (const kind of kinds) {
-      const dispatch = resolveRepairDispatch(
-        { number: pullRequest.number, baseRef: pullRequest.base.ref, headRef: pullRequest.head.ref },
-        kind,
-      );
-      await dispatchWorkflow(
-        owner,
-        repo,
-        dispatch.workflowFile,
-        dispatch.ref,
-        dispatch.inputs,
-        token,
-      );
-    }
+    // 同じIssueブランチの修復workflowは同一concurrency groupを共有する。GitHub Actionsは
+    // running 1件 + pending 1件しか保持しないため複数を一度にdispatchせず、優先順位
+    // conflict → ci → review（repairKindsForの順）の先頭だけを起動する。完了後にPRを再取得し、
+    // まだ問題が残っていれば同じ「PRを自動修正」から次を実行する。
+    const kind = kinds[0];
+    const dispatch = resolveRepairDispatch(
+      { number: pullRequest.number, baseRef: pullRequest.base.ref, headRef: pullRequest.head.ref },
+      kind,
+    );
+    await dispatchWorkflow(owner, repo, dispatch.workflowFile, dispatch.ref, dispatch.inputs, token);
 
-    // ワークフローが自分で「開始」を報告するのは、runが立ち上がって対象PRを再確認した後に
-    // なる（数十秒かかる）。押した直後から画面に「自動修正中」を出すため、起動できた時点で
-    // ここでも同じ行を記録する（実行ログのURLはまだ決まらないためnull）。
-    // 対象PRの状態を再確認して何もせず終わる場合でも、終了の報告か時間切れで消える。
-    await Promise.all(kinds.map((kind) => recordPullRequestRepairRun({
+    // 実際に起動した種類だけrunningとして記録する。未起動の修復が画面へ残らないようにする。
+    await recordPullRequestRepairRun({
       repositoryFullName: `${owner}/${repo}`,
       pullRequestNumber: pullRequest.number,
       kind,
       status: "running",
-    }))).catch((error: unknown) => {
-      // 記録できなくても起動自体は成功している。画面にバッジが出ないだけ。
+    }).catch((error: unknown) => {
       console.warn(`[POST /api/pull-requests/repair] ${owner}/${repo}#${number} の記録:`, error);
     });
 
-    return NextResponse.json({ ok: true, kinds });
+    return NextResponse.json({ ok: true, kinds: [kind], remainingKinds: kinds.slice(1) });
   } catch (error) {
     // ワークフロー自体が無いリポジトリ・デフォルトブランチへ未反映の場合は404が返る。
     // 「押しても起動しない」理由が分かるよう、汎用のAPIエラーと区別して文言を返す。
