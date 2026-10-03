@@ -54,6 +54,9 @@ export function resolvePullRequestReviewRound(params: {
     };
   }
   if (verdict?.reviewKind === "ok") {
+    if (freshness === "stale") {
+      return { state: "changes-requested", label: "再レビュー待ち", description: "最新コミットのレビュー結果がまだありません。再レビュー完了までレビューOKとして扱いません。" };
+    }
     if (params.autoMergeEnabled || params.readyToMerge) {
       return { state: "merge-pending", label: "マージ待ち", description: "レビューOKです。既存のマージ手順へ進めます。" };
     }
