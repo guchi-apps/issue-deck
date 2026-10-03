@@ -1,6 +1,6 @@
 "use client";
 
-import { Check, CircleAlert, ExternalLink, Loader2, RefreshCw, Settings2 } from "lucide-react";
+import { Check, CircleAlert, ExternalLink, Loader2, RefreshCw, Settings2, Smartphone } from "lucide-react";
 import { useMemo, useState } from "react";
 
 import { Button } from "@/components/ui/button";
@@ -402,6 +402,15 @@ function ReleaseHistoryCard({
           <span className="inline-flex items-center gap-1 rounded-full border border-emerald-500/50 bg-emerald-50 px-1.5 py-px text-[10.5px] font-bold text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300">
             <Check className="size-2.5" aria-hidden />
             確認済み
+          </span>
+        )}
+        {entry.iosDeliveredBuild !== undefined && (
+          <span
+            className="inline-flex items-center gap-1 rounded-full border border-emerald-500/50 bg-emerald-50 px-1.5 py-px text-[10.5px] font-bold text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300"
+            title="このリリースのコミットはTestFlightへ配布済みです"
+          >
+            <Smartphone className="size-2.5" aria-hidden />
+            TestFlight配布済み #{entry.iosDeliveredBuild}
           </span>
         )}
         {status.kind === "out_of_scope" && outOfScopeReason === "not_targeted" && (

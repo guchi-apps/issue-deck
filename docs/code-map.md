@@ -207,6 +207,10 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   6文字だと約72pxで枠の縁と接する）。収まらないときは画面名をそのまま使わず、タブだけ
   短い呼び名にする——「リリース履歴」画面のタブは「リリース」で、画面のタイトルとPCの
   左メニューは「リリース履歴」のまま。
+- **リリース履歴の各リリースに、TestFlight配布済みのバッジを出す**（#3800）。対象は`webview-ios-repos.ts`の
+  リポジトリだけで、`release-history`APIが`v*`タグと`ios-testflight/*`タグのコミットを突き合わせて
+  `iosDeliveredBuild`を付ける（`iosDeliveryForReleases`）。**タグが無いリリースには何も出さない**——iOS更新が
+  不要と判定された版は、成功でもタグを付けないため、タグ無し＝未配布とは言えない。
 - **フッターの「ホーム」タブには、ユーザーの確認待ち件数を橙のバッジで重ねる**（#3080）。数字は
   ホームのメニュー・PCの左メニューの「ユーザーの確認待ち」と同じ（`navCounts["check-user"]`
   ＋ユーザーがマージするPR）で、`issue-deck-shell.tsx`から`checkUserCount`propで渡す

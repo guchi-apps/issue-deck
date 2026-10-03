@@ -278,3 +278,17 @@ describe("ReleaseHistoryPanel のPR詳細への導線（#3128）", () => {
     expect(onOpenPullRequest).not.toHaveBeenCalled();
   });
 });
+
+describe("ReleaseHistoryPanel のiOS配布バッジ（#3800）", () => {
+  it("配布済みのリリースにだけビルド番号つきのバッジを出す", () => {
+    renderPanel({
+      entries: [
+        entry({ tagName: "v4.78.0", iosDeliveredBuild: 318 }),
+        entry({ tagName: "v4.77.0", htmlUrl: "https://github.com/guchi-apps/issue-deck/releases/tag/v4.77.0" }),
+      ],
+    });
+    showAllReleases();
+    expect(screen.getAllByText(/TestFlight配布済み/)).toHaveLength(1);
+    expect(screen.getByText(/TestFlight配布済み #318/)).toBeTruthy();
+  });
+});
