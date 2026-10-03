@@ -52,7 +52,11 @@ import {
   IosReleaseGroupPanel,
   type IosFixIssueOrigin,
 } from "@/components/dashboard/ios-release-group-panel";
-import { IosDistributionIcon } from "@/components/dashboard/ios-distribution-icon";
+import {
+  IosDistributingBadge,
+  IosDistributionIcon,
+  useIosDistributionState,
+} from "@/components/dashboard/ios-distribution-icon";
 import { ReleaseRebuildButton } from "@/components/dashboard/release-rebuild-button";
 import { getWebviewIosRepository } from "@/lib/webview-ios-repos";
 import { ResizeHandle } from "@/components/dashboard/resize-handle";
@@ -1685,11 +1689,21 @@ function RepositorySummaryRow({
   // 成功したデプロイは畳んだ行に出さない（静止している状態でバッジを埋めない。#1579）
   const deploy =
     summary.deploy && summary.deploy.kind !== "success" ? summary.deploy : null;
+  const [ownerName, repoName] = repository.repositoryFullName.split("/");
+  const webviewIos = getWebviewIosRepository(repository.repositoryFullName);
+  const iosDistribution = useIosDistributionState(
+    ownerName,
+    repoName,
+    repository.releaseGroups.find((group) => group.mergedAt !== null && group.pullRequest?.merged)
+      ?.pullRequest?.number ?? null,
+    webviewIos !== null,
+  );
   const hasAnything =
     summary.activeLaneCount > 0 ||
     summary.releaseInProgress ||
     releaseLaunching ||
     deploy !== null ||
+    iosDistribution.running ||
     unreleased.count > 0 ||
     summary.openManualStepCount > 0 ||
     summary.startedIssueCount > 0 ||
@@ -1740,16 +1754,7 @@ function RepositorySummaryRow({
           版番号・鍵と同じ「静的な属性」なので右側の「手が要るか」の列へは並べず、「動きなし」の
           判定（`hasAnything`）にも数えない。色は配布カード・内訳（`ios-release-group-panel.tsx`）の
           青で、他の意味の色（紫＝リリース・琥珀＝手が要る・緑＝成功・赤＝失敗）とは重ねない */}
-      {getWebviewIosRepository(repository.repositoryFullName) && (
-        <IosDistributionIcon
-          owner={repository.repositoryFullName.split("/")[0]}
-          repo={repository.repositoryFullName.split("/")[1]}
-          prNumber={
-            repository.releaseGroups.find((group) => group.mergedAt !== null && group.pullRequest?.merged)
-              ?.pullRequest?.number ?? null
-          }
-        />
-      )}
+      {webviewIos && <IosDistributionIcon pending={iosDistribution.pending} />}
 
       <span className="flex-1" />
 
@@ -1783,6 +1788,8 @@ function RepositorySummaryRow({
         )
       )}
       {/* マージ後もデプロイが終わるまでは本番へ出ていない。開かなくても分かるようにする（#1579） */}
+      {/* TestFlightへの配布が走っている間だけ（#3806）。Webのデプロイとは別の行為なので別のピルにする */}
+      {iosDistribution.running && <IosDistributingBadge />}
       <DeployStateBadge deploy={deploy} compact linkToRun={false} />
 
       {/* **PRのマージ待ちは畳んだ行に出さない**（#2172）。8リポジトリを1行ずつ並べる画面で

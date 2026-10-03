@@ -6,6 +6,7 @@ import {
   deliveredBuildForSha,
   iosDeliveryForReleases,
   isIosDistributionPending,
+  isIosDistributionRunning,
   judgeIosReleasePanel,
   toWebDeployState,
   judgeIosRun,
@@ -225,5 +226,18 @@ describe("isIosDistributionPending", () => {
     expect(isIosDistributionPending({ kind: "not-needed" })).toBe(false);
     expect(isIosDistributionPending({ kind: "stale" })).toBe(false);
     expect(isIosDistributionPending(null)).toBe(false);
+  });
+});
+
+describe("isIosDistributionRunning", () => {
+  it("実行中だけtrue", () => {
+    expect(isIosDistributionRunning({ kind: "running", stages: [] })).toBe(true);
+  });
+  it("実行中以外と読み込み前はfalse", () => {
+    expect(isIosDistributionRunning({ kind: "ready" })).toBe(false);
+    expect(isIosDistributionRunning({ kind: "failed", failedStage: null })).toBe(false);
+    expect(isIosDistributionRunning({ kind: "awaiting-web", failed: false })).toBe(false);
+    expect(isIosDistributionRunning({ kind: "delivered", buildNumber: 3 })).toBe(false);
+    expect(isIosDistributionRunning(null)).toBe(false);
   });
 });
