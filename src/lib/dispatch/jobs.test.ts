@@ -805,12 +805,15 @@ describe("enqueuePlanReviewJob", () => {
       issueNumber: 1855,
       hostName: "subpc",
       agent: "codex",
+      codexModel: "gpt-6-sol",
       requestedByUserId: null,
       now: NOW,
     });
 
     expect(dispatchJobCreate).toHaveBeenCalledWith(
-      expect.objectContaining({ data: expect.objectContaining({ agent: "codex" }) }),
+      expect.objectContaining({
+        data: expect.objectContaining({ agent: "codex", codexModel: "gpt-6-sol" }),
+      }),
     );
   });
 

@@ -19,7 +19,13 @@ import { createComment } from "@/lib/github/issues-api";
 import {
   PLAN_REVIEW_AGENT_FOR_CLAUDE_DEFAULT,
   PLAN_REVIEW_AGENT_FOR_CODEX_DEFAULT,
+  PLAN_REVIEW_CLAUDE_MODEL_DEFAULT,
+  PLAN_REVIEW_CODEX_MODEL_DEFAULT,
+  parseClaudeLocalModel,
+  parseCodexLocalModel,
   parsePlanReviewAgent,
+  type ClaudeLocalModel,
+  type CodexLocalModel,
   type PlanReviewAgent,
 } from "@/lib/app-settings";
 import { db } from "@/lib/db";
@@ -68,21 +74,40 @@ export function resolvePlanReviewAgentForSession(params: {
     : PLAN_REVIEW_AGENT_FOR_CLAUDE_DEFAULT;
 }
 
-async function readPlanReviewAgentForSession(sourceAgent?: SessionPlanAgent): Promise<PlanReviewAgent> {
+async function readPlanReviewSettingsForSession(sourceAgent?: SessionPlanAgent): Promise<{
+  agent: PlanReviewAgent;
+  claudeModel: ClaudeLocalModel;
+  codexModel: CodexLocalModel;
+}> {
   try {
     const setting = await db.appSetting.findUnique({
       where: { id: 1 },
-      select: { planReviewAgentForClaude: true, planReviewAgentForCodex: true },
+      select: {
+        planReviewAgentForClaude: true,
+        planReviewAgentForCodex: true,
+        planReviewClaudeModel: true,
+        planReviewCodexModel: true,
+      },
     });
-    return resolvePlanReviewAgentForSession({
-      sourceAgent,
-      planReviewAgentForClaude: setting?.planReviewAgentForClaude,
-      planReviewAgentForCodex: setting?.planReviewAgentForCodex,
-    });
+    return {
+      agent: resolvePlanReviewAgentForSession({
+        sourceAgent,
+        planReviewAgentForClaude: setting?.planReviewAgentForClaude,
+        planReviewAgentForCodex: setting?.planReviewAgentForCodex,
+      }),
+      claudeModel:
+        parseClaudeLocalModel(setting?.planReviewClaudeModel) ?? PLAN_REVIEW_CLAUDE_MODEL_DEFAULT,
+      codexModel:
+        parseCodexLocalModel(setting?.planReviewCodexModel) ?? PLAN_REVIEW_CODEX_MODEL_DEFAULT,
+    };
   } catch (error) {
     // 設定を読めなくても、計画の投稿や従来どおりの自動レビューを止めない。
     console.error("[dispatch] 計画レビュー用エージェント設定を読めませんでした", error);
-    return resolvePlanReviewAgentForSession({ sourceAgent });
+    return {
+      agent: resolvePlanReviewAgentForSession({ sourceAgent }),
+      claudeModel: PLAN_REVIEW_CLAUDE_MODEL_DEFAULT,
+      codexModel: PLAN_REVIEW_CODEX_MODEL_DEFAULT,
+    };
   }
 }
 
@@ -233,12 +258,15 @@ export async function postSessionPlan(params: {
     // 計画の関門（G1・#1855）。**計画が実際に投稿された回だけ起こす**（無人側で守っている
     // のと同じ条件。`.github/workflows/reusable-issue-dispatch.yml`の`plan_posted`）。
     // 投稿より後に置くのは、ここで何が起きても計画そのものは残るようにするため。
-    const planReviewAgent = await readPlanReviewAgentForSession(params.agent);
+    const planReviewSettings = await readPlanReviewSettingsForSession(params.agent);
     await requestPlanReview({
       repositoryFullName: params.repositoryFullName,
       issueNumber: params.issueNumber,
       hostName: params.hostName,
-      agent: planReviewAgent,
+      agent: planReviewSettings.agent,
+      claudeModel:
+        planReviewSettings.agent === "claude" ? planReviewSettings.claudeModel : undefined,
+      codexModel: planReviewSettings.agent === "codex" ? planReviewSettings.codexModel : undefined,
       labels,
       plan: params.plan,
       post: (body) => createComment(parsed.owner, parsed.repo, params.issueNumber, token, { body }),
@@ -278,6 +306,8 @@ async function requestPlanReview(params: {
   issueNumber: number;
   hostName: string | null;
   agent?: "claude" | "codex";
+  claudeModel?: ClaudeLocalModel;
+  codexModel?: CodexLocalModel;
   /** `addCheckUserWithReason`が返した付与後のラベル名。取れなければ`null` */
   labels: string[] | null;
   /** 投稿した計画本文。影響判定（`judgePlanReviewScope`）の入力 */
@@ -326,6 +356,8 @@ async function requestPlanReview(params: {
       issueNumber: params.issueNumber,
       hostName: params.hostName,
       agent: params.agent,
+      claudeModel: params.claudeModel,
+      codexModel: params.codexModel,
       // 人が押したわけではないので積んだユーザーは残らない（無人実行の起動と同じ扱い）
       requestedByUserId: null,
     });

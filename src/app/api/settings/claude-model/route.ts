@@ -10,9 +10,13 @@ import {
   MODEL_PICK_ENGINE_DEFAULT,
   PLAN_REVIEW_AGENT_FOR_CLAUDE_DEFAULT,
   PLAN_REVIEW_AGENT_FOR_CODEX_DEFAULT,
+  PLAN_REVIEW_CLAUDE_MODEL_DEFAULT,
+  PLAN_REVIEW_CODEX_MODEL_DEFAULT,
   parseAppAiModel,
+  parseClaudeLocalModel,
   parseClaudeLocalModelSetting,
   parseClaudeModel,
+  parseCodexLocalModel,
   parseCodexModelSetting,
   parseDefaultDispatchAgent,
   parseDispatchFailoverThresholdPercent,
@@ -38,6 +42,10 @@ async function getClaudeModels() {
       parsePlanReviewAgent(setting?.planReviewAgentForClaude) ?? PLAN_REVIEW_AGENT_FOR_CLAUDE_DEFAULT,
     planReviewAgentForCodex:
       parsePlanReviewAgent(setting?.planReviewAgentForCodex) ?? PLAN_REVIEW_AGENT_FOR_CODEX_DEFAULT,
+    planReviewClaudeModel:
+      parseClaudeLocalModel(setting?.planReviewClaudeModel) ?? PLAN_REVIEW_CLAUDE_MODEL_DEFAULT,
+    planReviewCodexModel:
+      parseCodexLocalModel(setting?.planReviewCodexModel) ?? PLAN_REVIEW_CODEX_MODEL_DEFAULT,
     dispatchFailoverEnabled: setting?.dispatchFailoverEnabled ?? true,
     dispatchFailoverThresholdPercent:
       parseDispatchFailoverThresholdPercent(setting?.dispatchFailoverThresholdPercent) ??
@@ -138,6 +146,22 @@ export async function PATCH(request: NextRequest) {
   if (hasPlanReviewAgentForCodex && planReviewAgentForCodex === null) {
     return NextResponse.json({ error: "invalid_request" }, { status: 400 });
   }
+  const hasPlanReviewClaudeModel =
+    payload !== null && typeof payload === "object" && "planReviewClaudeModel" in payload;
+  const planReviewClaudeModel = hasPlanReviewClaudeModel
+    ? parseClaudeLocalModel(payload?.planReviewClaudeModel)
+    : undefined;
+  if (hasPlanReviewClaudeModel && planReviewClaudeModel === null) {
+    return NextResponse.json({ error: "invalid_request" }, { status: 400 });
+  }
+  const hasPlanReviewCodexModel =
+    payload !== null && typeof payload === "object" && "planReviewCodexModel" in payload;
+  const planReviewCodexModel = hasPlanReviewCodexModel
+    ? parseCodexLocalModel(payload?.planReviewCodexModel)
+    : undefined;
+  if (hasPlanReviewCodexModel && planReviewCodexModel === null) {
+    return NextResponse.json({ error: "invalid_request" }, { status: 400 });
+  }
   const hasDispatchFailoverEnabled =
     payload !== null && typeof payload === "object" && "dispatchFailoverEnabled" in payload;
   const dispatchFailoverEnabled = hasDispatchFailoverEnabled ? payload?.dispatchFailoverEnabled : undefined;
@@ -169,6 +193,8 @@ export async function PATCH(request: NextRequest) {
       ...(defaultDispatchAgent ? { defaultDispatchAgent } : {}),
       ...(planReviewAgentForClaude ? { planReviewAgentForClaude } : {}),
       ...(planReviewAgentForCodex ? { planReviewAgentForCodex } : {}),
+      ...(planReviewClaudeModel ? { planReviewClaudeModel } : {}),
+      ...(planReviewCodexModel ? { planReviewCodexModel } : {}),
       ...(dispatchFailoverEnabled !== undefined ? { dispatchFailoverEnabled } : {}),
       ...(validDispatchFailoverThresholdPercent !== undefined
         ? { dispatchFailoverThresholdPercent: validDispatchFailoverThresholdPercent }
@@ -185,6 +211,8 @@ export async function PATCH(request: NextRequest) {
       ...(defaultDispatchAgent ? { defaultDispatchAgent } : {}),
       ...(planReviewAgentForClaude ? { planReviewAgentForClaude } : {}),
       ...(planReviewAgentForCodex ? { planReviewAgentForCodex } : {}),
+      ...(planReviewClaudeModel ? { planReviewClaudeModel } : {}),
+      ...(planReviewCodexModel ? { planReviewCodexModel } : {}),
       ...(dispatchFailoverEnabled !== undefined ? { dispatchFailoverEnabled } : {}),
       ...(validDispatchFailoverThresholdPercent !== undefined
         ? { dispatchFailoverThresholdPercent: validDispatchFailoverThresholdPercent }
@@ -195,6 +223,8 @@ export async function PATCH(request: NextRequest) {
     defaultDispatchAgent?: string;
     planReviewAgentForClaude?: string;
     planReviewAgentForCodex?: string;
+    planReviewClaudeModel?: string;
+    planReviewCodexModel?: string;
     dispatchFailoverEnabled?: boolean;
     dispatchFailoverThresholdPercent?: number;
   };
@@ -215,6 +245,10 @@ export async function PATCH(request: NextRequest) {
       parsePlanReviewAgent(updated.planReviewAgentForClaude) ?? PLAN_REVIEW_AGENT_FOR_CLAUDE_DEFAULT,
     planReviewAgentForCodex:
       parsePlanReviewAgent(updated.planReviewAgentForCodex) ?? PLAN_REVIEW_AGENT_FOR_CODEX_DEFAULT,
+    planReviewClaudeModel:
+      parseClaudeLocalModel(updated.planReviewClaudeModel) ?? PLAN_REVIEW_CLAUDE_MODEL_DEFAULT,
+    planReviewCodexModel:
+      parseCodexLocalModel(updated.planReviewCodexModel) ?? PLAN_REVIEW_CODEX_MODEL_DEFAULT,
     dispatchFailoverEnabled: updated.dispatchFailoverEnabled ?? true,
     dispatchFailoverThresholdPercent:
       parseDispatchFailoverThresholdPercent(updated.dispatchFailoverThresholdPercent) ??

@@ -65,6 +65,8 @@ describe("postSessionPlan の計画レビュー起動", () => {
       issueNumber: 1855,
       hostName: "subpc",
       agent: "claude",
+      claudeModel: "sonnet",
+      codexModel: undefined,
       // 人が押したわけではないので、積んだユーザーは残らない
       requestedByUserId: null,
     });
@@ -82,6 +84,8 @@ describe("postSessionPlan の計画レビュー起動", () => {
     findAppSetting.mockResolvedValue({
       planReviewAgentForClaude: "codex",
       planReviewAgentForCodex: "claude",
+      planReviewClaudeModel: "opus",
+      planReviewCodexModel: "gpt-6-sol",
     });
 
     await postSessionPlan(PLAN);
@@ -89,11 +93,11 @@ describe("postSessionPlan の計画レビュー起動", () => {
 
     expect(enqueuePlanReviewJob).toHaveBeenNthCalledWith(
       1,
-      expect.objectContaining({ agent: "codex" }),
+      expect.objectContaining({ agent: "codex", codexModel: "gpt-6-sol" }),
     );
     expect(enqueuePlanReviewJob).toHaveBeenNthCalledWith(
       2,
-      expect.objectContaining({ agent: "claude" }),
+      expect.objectContaining({ agent: "claude", claudeModel: "opus" }),
     );
   });
 

@@ -283,6 +283,10 @@ export const CLAUDE_LOCAL_MODEL_VALUES = CLAUDE_LOCAL_MODEL_OPTIONS.map((option)
 
 export type ClaudeLocalModel = (typeof CLAUDE_LOCAL_MODEL_VALUES)[number];
 
+// 自動計画レビューに使うClaude Codeの既定。設定追加前はローカル実行モデルの既定（Sonnet）で
+// 起動していたため、既存利用者の動作を変えない。
+export const PLAN_REVIEW_CLAUDE_MODEL_DEFAULT = CLAUDE_LOCAL_MODEL_DEFAULT;
+
 // APIリクエストのボディ（JSON.parse直後のunknown値）を検証し、DB保存用の値へ変換する。
 // `claudeLocalModel`設定・Issueごとのローカル起動モデル指定（`POST /api/dispatch`）の
 // バリデーションに使う。`haiku`はここで弾かれ、既存にHaikuが保存されていてもnullへ落ちて
@@ -358,7 +362,14 @@ export const CODEX_LOCAL_MODEL_VALUES = [
   "gpt-6-luna",
 ] as const;
 
+export const CODEX_LOCAL_MODEL_OPTIONS = CODEX_MODEL_OPTIONS.filter((option) =>
+  (CODEX_LOCAL_MODEL_VALUES as readonly string[]).includes(option.value),
+);
+
 export type CodexLocalModel = (typeof CODEX_LOCAL_MODEL_VALUES)[number];
+
+// 自動計画レビューに使うCodex CLIの既定。設定追加前と同じTerraにする。
+export const PLAN_REVIEW_CODEX_MODEL_DEFAULT = CODEX_MODEL_DEFAULT;
 
 // ジョブ・APIの`model`の検証（`parseClaudeLocalModel`のCodex版）。`pick`（おまかせ）は通さない。
 export function parseCodexLocalModel(value: unknown): CodexLocalModel | null {

@@ -20,9 +20,11 @@ import {
   AUTO_RETRY_LIMIT_MAX,
   AUTO_RETRY_LIMIT_MIN,
   APP_AI_MODEL_OPTIONS,
+  CLAUDE_LOCAL_MODEL_OPTIONS,
   CLAUDE_LOCAL_MODEL_SETTING_OPTIONS,
   CLAUDE_MODEL_OPTIONS,
   CODEX_MODEL_SETTING_OPTIONS,
+  CODEX_LOCAL_MODEL_OPTIONS,
   DISPATCH_AGENT_OPTIONS,
   DISPATCH_CONCURRENCY_MAX,
   DISPATCH_CONCURRENCY_MIN,
@@ -30,9 +32,11 @@ import {
   DISPATCH_FAILOVER_THRESHOLD_PERCENT_MIN,
   MODEL_PICK_ENGINE_OPTIONS,
   type AppAiModel,
+  type ClaudeLocalModel,
   type ClaudeLocalModelSetting,
   type ClaudeModel,
   type CodexModelSetting,
+  type CodexLocalModel,
   type DefaultDispatchAgent,
   type ModelPickEngine,
   type PlanReviewAgent,
@@ -47,6 +51,8 @@ export type AppSettingsValues = {
   defaultDispatchAgent: DefaultDispatchAgent;
   planReviewAgentForClaude: PlanReviewAgent;
   planReviewAgentForCodex: PlanReviewAgent;
+  planReviewClaudeModel: ClaudeLocalModel;
+  planReviewCodexModel: CodexLocalModel;
   dispatchFailoverEnabled: boolean;
   dispatchFailoverThresholdPercent: number;
   appAiModel: AppAiModel;
@@ -64,6 +70,8 @@ type ExecutionSettingsSectionProps = {
   defaultDispatchAgent: DefaultDispatchAgent;
   planReviewAgentForClaude: PlanReviewAgent;
   planReviewAgentForCodex: PlanReviewAgent;
+  planReviewClaudeModel: ClaudeLocalModel;
+  planReviewCodexModel: CodexLocalModel;
   dispatchFailoverEnabled: boolean;
   dispatchFailoverThresholdPercent: number;
   appAiModel: AppAiModel;
@@ -90,6 +98,8 @@ export function ExecutionSettingsSection({
   defaultDispatchAgent: initialDefaultDispatchAgent,
   planReviewAgentForClaude: initialPlanReviewAgentForClaude,
   planReviewAgentForCodex: initialPlanReviewAgentForCodex,
+  planReviewClaudeModel: initialPlanReviewClaudeModel,
+  planReviewCodexModel: initialPlanReviewCodexModel,
   dispatchFailoverEnabled: initialDispatchFailoverEnabled,
   dispatchFailoverThresholdPercent: initialDispatchFailoverThresholdPercent,
   appAiModel: initialAppAiModel,
@@ -115,6 +125,12 @@ export function ExecutionSettingsSection({
   );
   const [planReviewAgentForCodex, setPlanReviewAgentForCodex] = useState<PlanReviewAgent>(
     initialPlanReviewAgentForCodex,
+  );
+  const [planReviewClaudeModel, setPlanReviewClaudeModel] = useState<ClaudeLocalModel>(
+    initialPlanReviewClaudeModel,
+  );
+  const [planReviewCodexModel, setPlanReviewCodexModel] = useState<CodexLocalModel>(
+    initialPlanReviewCodexModel,
   );
   const [dispatchFailoverEnabled, setDispatchFailoverEnabled] = useState(initialDispatchFailoverEnabled);
   const [dispatchFailoverThresholdPercent, setDispatchFailoverThresholdPercent] = useState(
@@ -153,6 +169,8 @@ export function ExecutionSettingsSection({
     defaultDispatchAgent !== initialDefaultDispatchAgent ||
     planReviewAgentForClaude !== initialPlanReviewAgentForClaude ||
     planReviewAgentForCodex !== initialPlanReviewAgentForCodex ||
+    planReviewClaudeModel !== initialPlanReviewClaudeModel ||
+    planReviewCodexModel !== initialPlanReviewCodexModel ||
     dispatchFailoverEnabled !== initialDispatchFailoverEnabled ||
     dispatchFailoverThresholdPercent !== initialDispatchFailoverThresholdPercent ||
     appAiModel !== initialAppAiModel ||
@@ -175,6 +193,8 @@ export function ExecutionSettingsSection({
       defaultDispatchAgent,
       planReviewAgentForClaude,
       planReviewAgentForCodex,
+      planReviewClaudeModel,
+      planReviewCodexModel,
       dispatchFailoverEnabled,
       dispatchFailoverThresholdPercent,
     );
@@ -190,6 +210,8 @@ export function ExecutionSettingsSection({
       defaultDispatchAgent,
       planReviewAgentForClaude,
       planReviewAgentForCodex,
+      planReviewClaudeModel,
+      planReviewCodexModel,
       dispatchFailoverEnabled,
       dispatchFailoverThresholdPercent,
       appAiModel,
@@ -250,7 +272,7 @@ export function ExecutionSettingsSection({
 
       <div className="flex flex-col gap-3 border-t pt-4">
         <div>
-          <Label>サブPC：自動計画レビューのエージェント</Label>
+          <Label>サブPC：自動計画レビューのエージェントとモデル</Label>
           <p className="mt-1 text-xs text-muted-foreground">
             計画を出したCLIごとに、続く自動計画レビューで使うエージェントを選びます。Issue詳細から手動で始める単独レビューの選択には影響しません。
           </p>
@@ -284,6 +306,42 @@ export function ExecutionSettingsSection({
             </SelectTrigger>
             <SelectContent>
               {DISPATCH_AGENT_OPTIONS.map((option) => (
+                <SelectItem key={option.value} value={option.value}>
+                  {option.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor="plan-review-claude-model">Claude Codeでレビューするときのモデル</Label>
+          <Select
+            value={planReviewClaudeModel}
+            onValueChange={(value) => setPlanReviewClaudeModel(value as ClaudeLocalModel)}
+          >
+            <SelectTrigger id="plan-review-claude-model" className="w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {CLAUDE_LOCAL_MODEL_OPTIONS.map((option) => (
+                <SelectItem key={option.value} value={option.value}>
+                  {option.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="flex flex-col gap-1.5">
+          <Label htmlFor="plan-review-codex-model">ChatGPT（Codex CLI）でレビューするときのモデル</Label>
+          <Select
+            value={planReviewCodexModel}
+            onValueChange={(value) => setPlanReviewCodexModel(value as CodexLocalModel)}
+          >
+            <SelectTrigger id="plan-review-codex-model" className="w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {CODEX_LOCAL_MODEL_OPTIONS.map((option) => (
                 <SelectItem key={option.value} value={option.value}>
                   {option.label}
                 </SelectItem>

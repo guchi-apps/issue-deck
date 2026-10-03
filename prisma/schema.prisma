@@ -472,6 +472,10 @@ model AppSetting {
   // 既定値は開始したCLIと同じにして、設定追加前の動作を保つ。
   planReviewAgentForClaude String @default("claude")
   planReviewAgentForCodex  String @default("codex")
+  // サブPCの自動計画レビューをClaude Codeで行うときのモデル。既定は設定追加前と同じSonnet。
+  planReviewClaudeModel String @default("sonnet")
+  // サブPCの自動計画レビューをCodex CLIで行うときのモデル。既定は設定追加前と同じTerra。
+  planReviewCodexModel  String @default("gpt-5.6-terra")
   // 既定CLIの使用率がしきい値以上なら、起動ダイアログで他方を最初に選ぶ（#3531）。
   // 既定ON・90%は、従来のClaude残量10%未満でCodexへ切り替える挙動を引き継ぐため。
   dispatchFailoverEnabled Boolean @default(true)
