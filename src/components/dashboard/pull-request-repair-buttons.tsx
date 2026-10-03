@@ -25,6 +25,20 @@ import {
 } from "@/lib/github/pull-request-repair";
 import { cn } from "@/lib/utils";
 
+type AutoRepairLoop = {
+  status: "running" | "completed" | "stopped";
+  round: number;
+  currentKind: RepairKind | null;
+  stopReason: string | null;
+};
+
+const STOP_REASON_LABEL: Record<string, string> = {
+  user_action_required: "判断が必要なレビュー指摘があります。",
+  max_rounds_reached: "自動修正が上限の3回に達しました。",
+  repeated_problem: "同じ問題が修正後も再発しました。",
+  pull_request_closed: "Pull Requestがクローズされました。",
+};
+
 type PullRequestRepairButtonsProps = {
   repositoryFullName: string;
   pullRequestNumber: number;
@@ -69,7 +83,20 @@ export function PullRequestRepairButtons({
   const { repairPullRequest, isSubmitting, error, setError } = usePullRequestRepairMutation();
   const [isConfirmOpen, setIsConfirmOpen] = useState(false);
   const [justStarted, setJustStarted] = useState(false);
+  const [loop, setLoop] = useState<AutoRepairLoop | null>(null);
   const [owner, repo] = repositoryFullName.split("/");
+  useEffect(() => {
+    let cancelled = false;
+    const refresh = async () => {
+      const response = await fetch(`/api/pull-requests/auto-repair-sweep?owner=${encodeURIComponent(owner)}&repo=${encodeURIComponent(repo)}&number=${pullRequestNumber}`);
+      if (!response.ok || cancelled) return;
+      const data = (await response.json()) as { loop: AutoRepairLoop | null };
+      if (!cancelled) setLoop(data.loop);
+    };
+    void refresh();
+    const timer = window.setInterval(() => void refresh(), 10_000);
+    return () => { cancelled = true; window.clearInterval(timer); };
+  }, [owner, repo, pullRequestNumber]);
   useEffect(() => {
     if (!justStarted) return;
     const timer = window.setTimeout(() => setJustStarted(false), 5_000);
@@ -99,7 +126,7 @@ export function PullRequestRepairButtons({
     <div className={cn("flex min-w-0 flex-wrap items-center gap-2", className)}>
       {justStarted ? (
         <span className="text-xs text-muted-foreground">
-          PRを自動修正中です。結果はPRのコメントに届きます。
+          PRを自動修正中です。修正後のCI・再レビューも確認して、必要なら最大3回まで続けます。
         </span>
       ) : (
         <Button
@@ -125,8 +152,17 @@ export function PullRequestRepairButtons({
       )}
       {!justStarted && runningKind !== null && (
         <span className="text-xs text-muted-foreground" title={`${REPAIR_TARGET_LABEL[runningKind]}を処理中`}>
-          PRを自動修正中です（{REPAIR_TARGET_LABEL[runningKind]}）。結果はPRのコメントに届きます。
+          PRを自動修正中です（{REPAIR_TARGET_LABEL[runningKind]}）。修正後のCI・再レビューも自動で確認します。
         </span>
+      )}
+      {loop?.status === "running" && (
+        <span className="text-xs text-muted-foreground">
+          自動修復 {loop.round} / 3（{loop.currentKind ? REPAIR_TARGET_LABEL[loop.currentKind] : "CI・再レビューを待機"}）
+        </span>
+      )}
+      {loop?.status === "completed" && <span className="text-xs text-emerald-700">自動修復が完了しました。</span>}
+      {loop?.status === "stopped" && (
+        <span className="text-xs text-amber-700">自動修復を停止しました。{loop.stopReason ? STOP_REASON_LABEL[loop.stopReason] : ""}</span>
       )}
       {!justStarted &&
         unavailableNotices.map((notice) => (
@@ -151,7 +187,7 @@ export function PullRequestRepairButtons({
             <AlertDialogTitle>PRを自動修正しますか？</AlertDialogTitle>
             <AlertDialogDescription>
               {repositoryFullName} #{pullRequestNumber} の現在の状態を取得し直し、修正が必要な項目を
-              同じPRのhead branchで自動修正します。複数ある場合は優先順位に沿って1回につき1件を実行するため、完了後に残りがあればもう一度この操作を実行してください。安全に直せないと判断された場合は変更を加えず、理由が報告されます。
+              同じPRのhead branchで自動修正します。複数ある場合は優先順位に沿って1回につき1件を実行し、新しいHEADのCI・再レビューを確認してから次を続けます。安全に直せない場合、同じ指摘が再発した場合、または3回に達した場合は停止して理由を報告します。
             </AlertDialogDescription>
           </AlertDialogHeader>
           <div className="text-sm">

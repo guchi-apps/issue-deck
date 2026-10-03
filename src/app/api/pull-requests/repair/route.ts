@@ -15,6 +15,7 @@ import {
   isRepairSymptomGone,
   recordPullRequestRepairRun,
 } from "@/lib/github/pull-request-repair-run";
+import { AUTO_REPAIR_MAX_ROUNDS } from "@/lib/github/pull-request-repair-loop";
 import { fetchPullRequest } from "@/lib/github/pull-requests-api";
 import { parsePullRequestReviewVerdict } from "@/lib/github/pull-request-review-verdict";
 import { fetchPullRequestCiState } from "@/lib/github/release-api";
@@ -149,7 +150,35 @@ async function handlePOST(request: NextRequest) {
       console.warn(`[POST /api/pull-requests/repair] ${owner}/${repo}#${number} の記録:`, error);
     });
 
-    return NextResponse.json({ ok: true, kinds: [kind], remainingKinds: kinds.slice(1) });
+    // 以後はpollerの巡回が新HEADのCI・再レビューを待ち、必要なら次の1種類だけを起動する。
+    // 初回のdispatchもラウンドに数えるため、同じ指摘を延々と起動しない。
+    await db.pullRequestAutoRepairLoop.upsert({
+      where: {
+        repositoryFullName_pullRequestNumber: {
+          repositoryFullName: `${owner}/${repo}`,
+          pullRequestNumber: pullRequest.number,
+        },
+      },
+      create: {
+        repositoryFullName: `${owner}/${repo}`,
+        pullRequestNumber: pullRequest.number,
+        status: "running",
+        headSha: pullRequest.head.sha,
+        round: 1,
+        currentKind: kind,
+        lastFingerprint: `${pullRequest.head.sha}:${kind}`,
+      },
+      update: {
+        status: "running",
+        headSha: pullRequest.head.sha,
+        round: 1,
+        currentKind: kind,
+        lastFingerprint: `${pullRequest.head.sha}:${kind}`,
+        stopReason: null,
+      },
+    });
+
+    return NextResponse.json({ ok: true, kinds: [kind], remainingKinds: kinds.slice(1), maxRounds: AUTO_REPAIR_MAX_ROUNDS });
   } catch (error) {
     // ワークフロー自体が無いリポジトリ・デフォルトブランチへ未反映の場合は404が返る。
     // 「押しても起動しない」理由が分かるよう、汎用のAPIエラーと区別して文言を返す。
