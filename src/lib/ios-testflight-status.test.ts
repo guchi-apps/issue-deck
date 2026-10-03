@@ -4,6 +4,7 @@ import {
   buildNumberFromTag,
   checkIosDispatchable,
   deliveredBuildForSha,
+  iosDeliveryForReleases,
   judgeIosReleasePanel,
   toWebDeployState,
   judgeIosRun,
@@ -190,5 +191,22 @@ describe("summarizeIosStages の時刻", () => {
     expect(build?.startedAt).toBe("2026-09-30T14:00:00Z");
     expect(build?.completedAt).toBe("2026-09-30T14:04:00Z");
     expect(stages.find((s) => s.key === "sign")?.startedAt).toBeNull();
+  });
+});
+
+describe("iosDeliveryForReleases（#3800）", () => {
+  it("リリースタグのコミットへ配布済みタグがあるリリースだけ、ビルド番号を返す", () => {
+    const versionRefs = [
+      { ref: "refs/tags/v1.0.0", sha: "aaa" },
+      { ref: "refs/tags/v1.1.0", sha: "bbb" },
+    ];
+    const delivered = [
+      { ref: "refs/tags/ios-testflight/7", sha: "aaa" },
+      { ref: "refs/tags/ios-testflight/9", sha: "aaa" },
+    ];
+    const result = iosDeliveryForReleases(["v1.1.0", "v1.0.0", "v0.9.0"], versionRefs, delivered);
+    expect(result.get("v1.0.0")).toBe(9);
+    expect(result.has("v1.1.0")).toBe(false);
+    expect(result.has("v0.9.0")).toBe(false);
   });
 });

@@ -4,7 +4,9 @@ import { requireUserId } from "@/lib/auth-user";
 import { db } from "@/lib/db";
 import { withGithubApiFeature } from "@/lib/github/api-usage";
 import { getInstallationToken } from "@/lib/github/app-auth";
-import { fetchReleasesBackTo, type ReleaseHistoryItem } from "@/lib/github/release-api";
+import { fetchReleasesBackTo, fetchTagRefs, type ReleaseHistoryItem } from "@/lib/github/release-api";
+import { IOS_TESTFLIGHT_TAG_PREFIX, iosDeliveryForReleases } from "@/lib/ios-testflight-status";
+import { getWebviewIosRepository } from "@/lib/webview-ios-repos";
 import {
   hasReachedReleaseCheckSince,
   type ReleaseCheckLineRecord,
@@ -94,13 +96,28 @@ async function handleGET() {
       try {
         const token = await tokenFor(repository.installation.installationId);
         const sinceMs = checkSinceMsByFullName.get(repository.fullName);
-        return await fetchReleasesBackTo(
+        const releases = await fetchReleasesBackTo(
           repository.ownerLogin,
           repository.name,
           token,
           sinceMs,
           hasReachedReleaseCheckSince,
         );
+        // TestFlight配布対象のリポジトリだけ、配布済みのビルド番号を付ける（#3800）
+        if (getWebviewIosRepository(repository.fullName) === null || releases.length === 0) return releases;
+        const [versionRefs, deliveredRefs] = await Promise.all([
+          fetchTagRefs(repository.ownerLogin, repository.name, token, "v"),
+          fetchTagRefs(repository.ownerLogin, repository.name, token, IOS_TESTFLIGHT_TAG_PREFIX),
+        ]);
+        const delivered = iosDeliveryForReleases(
+          releases.map((release) => release.tagName),
+          versionRefs,
+          deliveredRefs,
+        );
+        return releases.map((release) => {
+          const build = delivered.get(release.tagName);
+          return build === undefined ? release : { ...release, iosDeliveredBuild: build };
+        });
       } catch (error) {
         // 1リポジトリの取得失敗で他リポジトリの表示まで巻き込まない（`release-pending-merges`と同じ）。
         console.error(`[GET /api/repositories/release-history] ${repository.fullName}:`, error);
