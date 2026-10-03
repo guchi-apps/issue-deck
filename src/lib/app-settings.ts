@@ -9,11 +9,20 @@ export const DISPATCH_AGENT_OPTIONS = [
 export const DEFAULT_DISPATCH_AGENT_SETTING = "claude" as const;
 export type DefaultDispatchAgent = (typeof DISPATCH_AGENT_OPTIONS)[number]["value"];
 
+// 計画を投稿したCLIごとに、続く自動計画レビューで使うCLIを選ぶ。既定は従来どおり開始元と同じ。
+export const PLAN_REVIEW_AGENT_FOR_CLAUDE_DEFAULT = "claude" as const;
+export const PLAN_REVIEW_AGENT_FOR_CODEX_DEFAULT = "codex" as const;
+export type PlanReviewAgent = DefaultDispatchAgent;
+
 export function parseDefaultDispatchAgent(value: unknown): DefaultDispatchAgent | null {
   if (typeof value !== "string") return null;
   return (DISPATCH_AGENT_OPTIONS as readonly { value: string }[]).some((option) => option.value === value)
     ? (value as DefaultDispatchAgent)
     : null;
+}
+
+export function parsePlanReviewAgent(value: unknown): PlanReviewAgent | null {
+  return parseDefaultDispatchAgent(value);
 }
 
 // 100%では制限到達まで切り替わらない。0%は常に切り替わり既定の意味を失うため選ばせない。
