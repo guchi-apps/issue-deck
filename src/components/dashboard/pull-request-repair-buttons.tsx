@@ -68,26 +68,13 @@ export function PullRequestRepairButtons({
 }: PullRequestRepairButtonsProps) {
   const { repairPullRequest, isSubmitting, error, setError } = usePullRequestRepairMutation();
   const [isConfirmOpen, setIsConfirmOpen] = useState(false);
-  const [hasStarted, setHasStarted] = useState(false);
+  const [justStarted, setJustStarted] = useState(false);
   const [owner, repo] = repositoryFullName.split("/");
   // 押せない種類があるときだけ、理由と次の一手を添える（理由が違えば行を分ける）。
   // APIは優先順位の先頭1件だけを起動するため、今回起動するworkflowの可否だけで
   // ボタンを無効化する。後続が未配布でも、先頭の修復まで止めない。
   const nextKind = kinds[0];
   const unavailableNotices = repairUnavailableNotices([nextKind], availability);
-
-  // 起動直後はAPI応答とrepairRunの反映に時間差があるためhasStartedで表示を保つ。
-  // 一度runningKindが観測された後、それがnullへ戻ったら修復完了なので次の対象を起動できるよう戻す。
-  const [sawRunning, setSawRunning] = useState(false);
-  // effect内のsetStateは連鎖レンダーを招くため、レンダー中に条件付きで状態を調整する。
-  if (hasStarted) {
-    if (runningKind !== null && !sawRunning) {
-      setSawRunning(true);
-    } else if (runningKind === null && sawRunning) {
-      setHasStarted(false);
-      setSawRunning(false);
-    }
-  }
 
   if (kinds.length === 0) return null;
 
@@ -97,13 +84,16 @@ export function PullRequestRepairButtons({
     const ok = await repairPullRequest({ owner, repo, number: pullRequestNumber });
     if (ok) {
       setIsConfirmOpen(false);
-      setHasStarted(true);
+      // runningKindの反映前だけ短く起動済み表示を出す。次の再描画でrunningKindが
+      // 無ければ高速完了とみなし、ボタンを復帰させる。
+      setJustStarted(true);
+      queueMicrotask(() => setJustStarted(false));
     }
   }
 
   return (
     <div className={cn("flex min-w-0 flex-wrap items-center gap-2", className)}>
-      {hasStarted ? (
+      {justStarted ? (
         <span className="text-xs text-muted-foreground">
           PRを自動修正中です。結果はPRのコメントに届きます。
         </span>
@@ -129,12 +119,12 @@ export function PullRequestRepairButtons({
           PRを自動修正
         </Button>
       )}
-      {!hasStarted && runningKind !== null && (
+      {!justStarted && runningKind !== null && (
         <span className="text-xs text-muted-foreground">
           PRを自動修正中です。結果はPRのコメントに届きます。
         </span>
       )}
-      {!hasStarted &&
+      {!justStarted &&
         unavailableNotices.map((notice) => (
           <p
             key={notice}
