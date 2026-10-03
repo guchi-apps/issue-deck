@@ -475,9 +475,12 @@ export async function reportDispatchSessions(params: {
     // pollerが既に運んでいる状態・固定語彙のstepだけを時系列へ残す。画面や転記の本文、
     // コマンド・tool結果はここへ入れない。会話本文はtimeline APIの許可済みイベントだけが担う。
     const previousStep = revived ? null : previous?.step;
-    if (!previous || revived || previous?.state !== state || previousStep !== report.step) {
-      const title = report.step
-        ? `作業: ${report.step}`
+    // 古いpollerはstepを送らない。省略値をundefinedのまま比べると、既存のstepとの差で
+    // 毎巡イベントを作ってしまうため、保存済みの値を引き継いで比較する。
+    const currentStep = report.step ?? previousStep;
+    if (!previous || revived || previous?.state !== state || previousStep !== currentStep) {
+      const title = currentStep
+        ? `作業: ${currentStep}`
         : state === "ALIVE"
           ? "セッション開始"
           : state === "EXITED"
@@ -485,9 +488,19 @@ export async function reportDispatchSessions(params: {
             : state === "FAILED"
               ? "セッション異常終了"
               : "セッション消失";
-      await db.dispatchSessionTimelineEvent.create({
-        data: { sessionId: stored.id, occurredAt: now, kind: report.step ? "step" : "event", title },
-      });
+      try {
+        await db.dispatchSessionTimelineEvent.create({
+          data: {
+            sessionId: stored.id,
+            source: "session",
+            occurredAt: now,
+            kind: currentStep ? "step" : "event",
+            title,
+          },
+        });
+      } catch {
+        // タイムラインは表示用の補助情報であり、重複記録の失敗でセッション報告本体を止めない。
+      }
     }
 
     if (startingTransition === "enter") {

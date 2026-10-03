@@ -457,6 +457,7 @@ export function IssueSessionStatus({
       )}
       {/* 出口は畳まない（#1676）。入力待ちのときRemote Controlが唯一の答える手段で、
           畳むと画面から`00.check-user`を外せなくなる */}
+      <SessionDetail session={session} dispatch={dispatch} />
       {hasExitRow && (
         <div
           className={cn(
@@ -464,7 +465,6 @@ export function IssueSessionStatus({
             align === "end" ? "justify-end" : "justify-start",
           )}
         >
-          <SessionDetail session={session} dispatch={dispatch} />
           {sessionOpenTarget && (
             <Button variant="outline" size="sm" asChild>
               <a href={sessionOpenTarget.url} target="_blank" rel="noreferrer">

@@ -1408,17 +1408,20 @@ model DispatchSession {
 }
 
 model DispatchSessionTimelineEvent {
-  id        String   @id @default(cuid())
-  sessionId String
+  id         String   @id @default(cuid())
+  sessionId  String
+  // pollerが送る会話ログと、サーバーが記録する状態・stepの履歴を分ける。
+  // 会話ログの置換で後者を消さないために使用する。
+  source     String   @default("transcript") @db.VarChar(16)
   occurredAt DateTime
-  kind      String   @db.VarChar(32)
-  title     String   @db.VarChar(160)
-  body      String?  @db.Text
-  createdAt DateTime @default(now())
+  kind       String   @db.VarChar(32)
+  title      String   @db.VarChar(160)
+  body       String?  @db.Text
+  createdAt  DateTime @default(now())
 
   session DispatchSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
 
-  @@unique([sessionId, occurredAt, kind, title])
+  @@unique([sessionId, source, occurredAt, kind, title])
   @@index([sessionId, occurredAt])
 }
 

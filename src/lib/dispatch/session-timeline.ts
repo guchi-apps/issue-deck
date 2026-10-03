@@ -59,15 +59,19 @@ export async function replaceSessionTimeline(params: {
   });
   if (!session) return false;
   await db.$transaction([
-    db.dispatchSessionTimelineEvent.deleteMany({ where: { sessionId: session.id } }),
+    db.dispatchSessionTimelineEvent.deleteMany({
+      where: { sessionId: session.id, source: "transcript" },
+    }),
     db.dispatchSessionTimelineEvent.createMany({
       data: params.events.map((event) => ({
         sessionId: session.id,
+        source: "transcript",
         occurredAt: new Date(event.occurredAt),
         kind: event.kind,
         title: event.title,
         body: event.body ?? null,
       })),
+      skipDuplicates: true,
     }),
   ]);
   return true;
