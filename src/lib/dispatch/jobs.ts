@@ -113,6 +113,7 @@ import {
   type SessionControlRejection,
 } from "@/lib/dispatch/dispatch-job";
 import { MANUAL_STEP_LABEL } from "@/lib/github/approval-labels";
+import { HIGH_PRIORITY_LABEL } from "@/lib/branch-flow";
 import {
   extractRunnableManualStepCommands,
   fillManualStepPlaceholders,
@@ -774,6 +775,16 @@ export async function enqueueDispatchJob(params: {
     }
   }
 
+  // 高優先度ラベルが付いたIssueは、通常の順番待ち（既定値0）より先に流す。手動の
+  // 「先頭へ上げる」は現在の最大値+1を入れるため、既に人が先頭へ上げたジョブを追い越さない。
+  // ラベルは画面から受け取らず、Webhookで同期したIssueキャッシュから読む。
+  const queuePriority = (await isHighPriorityDispatchIssue(
+    params.repositoryFullName,
+    params.issueNumber,
+  ))
+    ? 1
+    : undefined;
+
   try {
     const job = await db.dispatchJob.create({
       data: {
@@ -787,6 +798,7 @@ export async function enqueueDispatchJob(params: {
         codexModel: params.codexModel ?? null,
         handoffFrom: params.handoffFrom ?? null,
         handoffTranscript: params.handoffFrom ? params.handoffTranscript === true : false,
+        queuePriority,
         status: "QUEUED",
         activeKey: buildDispatchActiveKey(params.repositoryFullName, params.issueNumber),
         requestedByUserId: params.requestedByUserId,
@@ -798,6 +810,26 @@ export async function enqueueDispatchJob(params: {
     // 含めてここで確実に止まる（アプリ側の存在チェックだけでは競合をすり抜ける）
     return reject("already_queued");
   }
+}
+
+/** 高優先度ラベルは同期済みのIssueキャッシュを正として判定する。 */
+async function isHighPriorityDispatchIssue(
+  repositoryFullName: string,
+  issueNumber: number,
+): Promise<boolean> {
+  // `Repository.fullName`はインストール違いで複数行あり得る。どの行でも同じGitHub Issueを
+  // 同期しているため、従来の手作業Issue判定と同じく1行を読めば足りる。
+  const repository = await db.repository.findFirst({
+    where: { fullName: repositoryFullName },
+    select: { id: true },
+  });
+  if (!repository) return false;
+
+  const issue = await db.issue.findFirst({
+    where: { repositoryId: repository.id, number: issueNumber },
+    select: { labels: { where: { name: HIGH_PRIORITY_LABEL }, select: { id: true }, take: 1 } },
+  });
+  return issue?.labels.length === 1;
 }
 
 export type EnqueueCrossRepoQuestionJobResult =

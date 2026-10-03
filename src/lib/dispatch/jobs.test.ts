@@ -214,6 +214,8 @@ beforeEach(() => {
   appSettingFindUnique.mockResolvedValue({ id: 1, dispatchConcurrency: 2 });
   dispatchHostFindUnique.mockResolvedValue(host());
   dispatchSessionFindFirst.mockResolvedValue(null);
+  repositoryFindFirst.mockResolvedValue({ id: "repo-1" });
+  issueFindFirst.mockResolvedValue({ labels: [] });
   // 実際に動いているモデル（#2723）は、転記の集計が届くまで空
   sessionUsageFindMany.mockResolvedValue([]);
   sessionPlanRequestFindMany.mockResolvedValue([]);
@@ -266,6 +268,48 @@ describe("enqueueDispatchJob のエージェント", () => {
   it("既定のエージェントは申告が無くても積める", async () => {
     const result = await enqueue("claude");
     expect(result.ok).toBe(true);
+  });
+});
+
+describe("enqueueDispatchJob の優先度", () => {
+  it("高優先度ラベルのIssueは通常の順番待ちより先に積む", async () => {
+    issueFindFirst.mockResolvedValue({ labels: [{ id: "label-1" }] });
+
+    const result = await enqueue();
+
+    expect(result.ok).toBe(true);
+    expect(dispatchJobCreate).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ queuePriority: 1 }) }),
+    );
+    expect(issueFindFirst).toHaveBeenCalledWith({
+      where: { repositoryId: "repo-1", number: 1311 },
+      select: {
+        labels: {
+          where: { name: "80.Priority: High" },
+          select: { id: true },
+          take: 1,
+        },
+      },
+    });
+  });
+
+  it("高優先度ラベルが無いIssueは従来どおり既定の順番で積む", async () => {
+    await enqueue();
+
+    expect(dispatchJobCreate).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ queuePriority: undefined }) }),
+    );
+  });
+
+  it("同期前でIssueを引けない場合も従来どおり積める", async () => {
+    repositoryFindFirst.mockResolvedValue(null);
+
+    const result = await enqueue();
+
+    expect(result.ok).toBe(true);
+    expect(dispatchJobCreate).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ queuePriority: undefined }) }),
+    );
   });
 });
 
