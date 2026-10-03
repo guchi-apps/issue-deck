@@ -5,6 +5,7 @@ import { useMemo } from "react";
 import type { MobileIssueLocalFilters } from "@/components/dashboard/mobile/mobile-issue-filter-sheet";
 import { MobileIssueListScreen } from "@/components/dashboard/mobile/mobile-issue-list-screen";
 import { useGroupByRepo } from "@/hooks/use-group-by-repo";
+import { useShowReservedIssues } from "@/hooks/use-show-reserved-issues";
 import { useNow } from "@/hooks/use-now";
 import type { IssueSort, IssueStateFilter } from "@/hooks/use-issue-filters";
 import type { AutoRefreshIntervalMs } from "@/lib/auto-refresh";
@@ -23,7 +24,7 @@ import {
   type SnoozeMap,
   type SnoozeTarget,
 } from "@/lib/snooze";
-import type { ScheduledRunQueuedMap } from "@/lib/nightly-run";
+import { selectReservedIssueIdsToHide, type ScheduledRunQueuedMap } from "@/lib/nightly-run";
 import type { Issue, LabelSummary, NavViewId } from "@/types/issue";
 import type { PullRequestSummary } from "@/types/pull-request";
 
@@ -124,6 +125,12 @@ export function MobileIssuesScreen({
   codeReviewRepositoryFullNames,
 }: MobileIssuesScreenProps) {
   const [groupByRepo, setGroupByRepo] = useGroupByRepo(view);
+  const [showReservedIssues, setShowReservedIssues] = useShowReservedIssues();
+  // 未着手では予約実行に積まれたIssueを標準で伏せる（#3822。PCと同じ集合）
+  const reservedIssueIdsToHide = useMemo(
+    () => selectReservedIssueIdsToHide(nightlyRunQueued, showReservedIssues),
+    [nightlyRunQueued, showReservedIssues],
+  );
 
   // 一覧と件数の両方で使う絞り込み条件。片方だけ条件が欠けると、ビュー名の隣に出る件数と
   // 実際に並ぶ件数が食い違う（#1689）。
@@ -153,13 +160,25 @@ export function MobileIssuesScreen({
   }, [issues, mergePendingIssueKeys, planReviewCreatingIssueIds]);
 
   const displayedIssues = useMemo(() => {
-    const scoped = filterIssuesByView(issues, view, currentUserLogin);
+    const byView = filterIssuesByView(issues, view, currentUserLogin);
+    const scoped =
+      view === "not-started" && reservedIssueIdsToHide
+        ? byView.filter((issue) => !reservedIssueIdsToHide.has(issue.id))
+        : byView;
     const listed =
       view === "check-user" && awaitingMergeIssueIds
         ? scoped.filter((issue) => !awaitingMergeIssueIds.has(issue.id))
         : scoped;
     return sortIssues(applyIssueFilters(listed, listFilters), sort, view);
-  }, [issues, view, currentUserLogin, listFilters, sort, awaitingMergeIssueIds]);
+  }, [
+    issues,
+    view,
+    currentUserLogin,
+    listFilters,
+    sort,
+    awaitingMergeIssueIds,
+    reservedIssueIdsToHide,
+  ]);
 
   // タブごとの該当Issue件数（#880）。「ユーザーの確認待ち」のみだった件数バッジを
   // 全タブに広げるにあたり、サイドバー・ホーム画面（#742）と同じ数え方を使う。
@@ -174,6 +193,7 @@ export function MobileIssuesScreen({
         checkUserRunningIssueIds,
         // どのビューからも保留中を外す（#2398・#2456。同上、PCと同じ数え方）
         snoozedIssueIds,
+        reservedIssueIdsToHide,
       );
     const counts = count(issues);
     if (!awaitingMergeIssueIds) return counts;
@@ -187,6 +207,7 @@ export function MobileIssuesScreen({
     checkUserRunningIssueIds,
     snoozedIssueIds,
     awaitingMergeIssueIds,
+    reservedIssueIdsToHide,
   ]);
 
   // 手作業Issueの前提条件がそろっているか（#1763）。母集団は絞り込み前の全Issue——
@@ -225,6 +246,9 @@ export function MobileIssuesScreen({
       assigneeOptions={assigneeOptions}
       groupByRepo={groupByRepo}
       onChangeGroupByRepo={setGroupByRepo}
+      showReservedIssues={showReservedIssues}
+      onChangeShowReservedIssues={setShowReservedIssues}
+      reservedIssueCount={nightlyRunQueued?.size ?? 0}
       onChangeView={onChangeView}
       onChangeFilters={onChangeFilters}
       onSelectIssue={onSelectIssue}

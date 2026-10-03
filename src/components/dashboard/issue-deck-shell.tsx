@@ -63,6 +63,7 @@ import { TopBar, type TopBarAiSearch } from "@/components/dashboard/topbar";
 import { useBranchFlow } from "@/hooks/use-branch-flow";
 import { useSessionUsage } from "@/hooks/use-session-usage";
 import { useNightlyRun } from "@/hooks/use-nightly-run";
+import { useShowReservedIssues } from "@/hooks/use-show-reserved-issues";
 import { useReleaseHistory } from "@/hooks/use-release-history";
 import { useDeployStatus } from "@/hooks/use-deploy-status";
 import { useDispatchState } from "@/hooks/use-dispatch-state";
@@ -109,7 +110,7 @@ import {
 } from "@/lib/branch-flow";
 import { selectCheckUserRunningIssueIds } from "@/lib/check-user-attention";
 import { selectPlanReviewCreatingIssueIds } from "@/lib/dispatch/plan-review-list-state";
-import { selectScheduledRunQueuedMarks } from "@/lib/nightly-run";
+import { selectReservedIssueIdsToHide, selectScheduledRunQueuedMarks } from "@/lib/nightly-run";
 import { findActiveSnooze, selectSnoozedIssueIds } from "@/lib/snooze";
 import {
   isMergeCheckUser,
@@ -829,6 +830,24 @@ export function IssueDeckShell({
   // 「予約実行」画面（#2995）。開いている間は巡回の間隔で、閉じている間は左メニューの件数の
   // ためにゆっくり取り直す（フック側が間隔を切り替える）
   const isNightlyRunPaneActive = filters.pane === "nightly" || mobileScreen.kind === "nightly-run";
+  const nightlyRun = useNightlyRun(isNightlyRunPaneActive);
+  /**
+   * 予約実行に積まれているIssueの引き当て表（#2866・#2995）。**取得口は増やさず、
+   * 左メニューの件数と同じ`useNightlyRun`の結果から作る。**
+   *
+   * 予約実行の画面を開いていない間の取り直しは5分間隔なので、他の端末で積んだぶんの反映は
+   * 最大5分遅れる。積んだ端末では「実装を開始」の成功時に`refresh`を呼んで即時に出す。
+   */
+  const nightlyRunQueued = useMemo(
+    () => selectScheduledRunQueuedMarks(nightlyRun.state),
+    [nightlyRun.state],
+  );
+  // 未着手ビューに予約実行中のIssueも出すか（#3822）。標準は伏せる
+  const [showReservedIssues, setShowReservedIssues] = useShowReservedIssues();
+  const reservedIssueIdsToHide = useMemo(
+    () => selectReservedIssueIdsToHide(nightlyRunQueued, showReservedIssues),
+    [nightlyRunQueued, showReservedIssues],
+  );
   // **PR画面（PCのペイン・スマホの画面）を開いている間は、ビューによらず10秒ごとに取り直す**
   // （#1531・#1947）。元は「マージ待ち」ビューだけだったが、ヘッダーの「更新」ボタンを外した
   // ため、開いている間ずっと新しくなり続けることが一覧の唯一の前提になった（Issue一覧と同じ）。
@@ -1069,7 +1088,11 @@ export function IssueDeckShell({
   );
 
   const filteredIssues = useMemo(() => {
-    const scoped = filterIssuesByView(viewFilteredIssues, filters.view, currentUserLogin, issues);
+    const byView = filterIssuesByView(viewFilteredIssues, filters.view, currentUserLogin, issues);
+    const scoped =
+      filters.view === "not-started" && reservedIssueIdsToHide
+        ? byView.filter((issue) => !reservedIssueIdsToHide.has(issue.id))
+        : byView;
     return sortIssues(
       // 「最新リリース」の基準時刻は絞り込み前の全Issueから求める（キーワード検索などで
       // 基準がずれて古いリリース分が現れないようにする）。
@@ -1086,6 +1109,7 @@ export function IssueDeckShell({
     filters.sort,
     currentUserLogin,
     planReviewCreatingIssueIds,
+    reservedIssueIdsToHide,
   ]);
 
   // AI検索へ渡す自由語（`label:`等のトークンを除いた残り）。これが空ならボタンを出さない。
@@ -1373,8 +1397,16 @@ export function IssueDeckShell({
         issues,
         checkUserRunningIssueIds,
         snoozedIssueIds,
+        reservedIssueIdsToHide,
       ),
-    [issues, filtersWithAiSearch, currentUserLogin, checkUserRunningIssueIds, snoozedIssueIds],
+    [
+      issues,
+      filtersWithAiSearch,
+      currentUserLogin,
+      checkUserRunningIssueIds,
+      snoozedIssueIds,
+      reservedIssueIdsToHide,
+    ],
   );
 
   const filteredPullRequests = useMemo(
@@ -1506,7 +1538,6 @@ export function IssueDeckShell({
   // リリース履歴（#2726）。取得はこの画面を開いている間だけ。非表示リポジトリぶんは
   // クライアント側で除く（#2279「Issueとリリース状況はクライアント側で除く」と同じ方針）。
   const releaseHistory = useReleaseHistory(isReleaseHistoryPaneActive);
-  const nightlyRun = useNightlyRun(isNightlyRunPaneActive);
 
   // iOS拡張ダイアログの起票後「実装を開始」へ渡す値（作成フォームと同じ）。更新の反映先は
   // 画面を移さない`registerCreatedIssue`（詳細を開く`handleIosExtensionIssueCreated`ではない）
@@ -1521,17 +1552,6 @@ export function IssueDeckShell({
     dispatchFailoverEnabled,
     dispatchFailoverThresholdPercent,
   };
-  /**
-   * 予約実行に積まれているIssueの引き当て表（#2866・#2995）。**取得口は増やさず、
-   * 左メニューの件数と同じ`useNightlyRun`の結果から作る。**
-   *
-   * 予約実行の画面を開いていない間の取り直しは5分間隔なので、他の端末で積んだぶんの反映は
-   * 最大5分遅れる。積んだ端末では「実装を開始」の成功時に`refresh`を呼んで即時に出す。
-   */
-  const nightlyRunQueued = useMemo(
-    () => selectScheduledRunQueuedMarks(nightlyRun.state),
-    [nightlyRun.state],
-  );
   // 左メニュー「構想」の件数（#3639）
   const { count: ideasCount, refresh: refreshIdeasCount } = useIdeasCount();
   /** 左メニューの件数。次の5時間枠に積んである予定の総数 */
@@ -2120,6 +2140,9 @@ export function IssueDeckShell({
           setFilter={setFilter}
           groupByRepo={groupByRepo}
           onChangeGroupByRepo={setGroupByRepo}
+          showReservedIssues={showReservedIssues}
+          onChangeShowReservedIssues={setShowReservedIssues}
+          reservedIssueCount={nightlyRunQueued.size}
           assigneeOptions={assigneeOptions}
           /* 開いている画面に関連するリポジトリを初期値にする（#1884）。1つに絞り込んでいれば
              そのリポジトリ、絞り込んでいなければ**いま画面に出ている**Issueのリポジトリ。

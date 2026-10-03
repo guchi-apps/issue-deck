@@ -352,6 +352,9 @@ export function getAssigneeOptions(issues: Issue[]): string[] {
  *   `selectSnoozedIssueIds`）。**引くのは全ビュー**（#2456）。伏せたIssueがどこにも出て
  *   こなくなるのを避けるのは、一覧の上の1行（「保留中がN件あります」＋「表示」）の役目に
  *   する。同上、省略時は従来どおり全件を数える。
+ * @param notStartedHiddenIssueIds 「未着手」の件数からだけ引くIssueのid（#3822。予約実行に積まれた
+ *   Issue。`selectReservedIssueIdsToHide`）。一覧も同じ集合で伏せるので、数と行数は食い違わない。
+ *   省略時は従来どおり全件を数える。
  */
 export function computeNavCountsForFilters(
   issues: Issue[],
@@ -360,6 +363,7 @@ export function computeNavCountsForFilters(
   referenceIssues: Issue[] = issues,
   checkUserRunningIssueIds?: ReadonlySet<string>,
   snoozedIssueIds?: ReadonlySet<string>,
+  notStartedHiddenIssueIds?: ReadonlySet<string>,
 ): Record<NavViewId, number> {
   const counts = {} as Record<NavViewId, number>;
   for (const view of navViews) {
@@ -372,9 +376,13 @@ export function computeNavCountsForFilters(
     // 保留中はどのビューの件数からも引く（#2456。#2398では要対応の2ビューだけだった）。
     // 一覧の側も同じ集合で伏せる（`issue-list.tsx`の`snoozeEnabled`）ので、メニューの数と
     // 並んでいる行数は食い違わない
-    const matched = snoozedIssueIds
+    const unsnoozed = snoozedIssueIds
       ? all.filter((issue) => !snoozedIssueIds.has(issue.id))
       : all;
+    const matched =
+      view.id === "not-started" && notStartedHiddenIssueIds
+        ? unsnoozed.filter((issue) => !notStartedHiddenIssueIds.has(issue.id))
+        : unsnoozed;
     counts[view.id] =
       view.id === "manual-step"
         ? computeManualStepAttention(matched, referenceIssues).actionable

@@ -10,6 +10,7 @@ import {
   resolveBulkReserveRejection,
   resolveNightlyRunLabelRejection,
   selectLatestNightKey,
+  selectReservedIssueIdsToHide,
   selectScheduledRunQueuedMarks,
   summarizeNightlyRunOutcomes,
   type NightlyRunEntryView,
@@ -301,6 +302,14 @@ describe("予約実行の目印（#2866・#2995）", () => {
     // 別のIssue・取得前（表そのものが無い）は目印を出さない
     expect(findScheduledRunQueuedMark(marks, "9002")).toBeNull();
     expect(findScheduledRunQueuedMark(undefined, "9001")).toBeNull();
+  });
+
+  it("未着手で伏せるidは、スイッチオフのときだけ予約中のIssueになる（#3822）", () => {
+    const marks = selectScheduledRunQueuedMarks(state({}));
+    expect([...(selectReservedIssueIdsToHide(marks, false) ?? [])]).toEqual(["9001"]);
+    expect(selectReservedIssueIdsToHide(marks, true)).toBeUndefined();
+    expect(selectReservedIssueIdsToHide(undefined, false)).toBeUndefined();
+    expect(selectReservedIssueIdsToHide(new Map(), false)).toBeUndefined();
   });
 
   it("同期できていないIssue（issueIdがnull）は表へ入れない", () => {

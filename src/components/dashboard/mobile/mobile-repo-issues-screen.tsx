@@ -7,6 +7,7 @@ import type { MobileIssueLocalFilters } from "@/components/dashboard/mobile/mobi
 import { MobileIssueListScreen } from "@/components/dashboard/mobile/mobile-issue-list-screen";
 import { MobileReleaseSheet } from "@/components/dashboard/mobile/mobile-release-sheet";
 import { useNow } from "@/hooks/use-now";
+import { useShowReservedIssues } from "@/hooks/use-show-reserved-issues";
 import { useReleaseStatus } from "@/hooks/use-release-status";
 import type { IssueSort, IssueStateFilter } from "@/hooks/use-issue-filters";
 import type { AutoRefreshIntervalMs } from "@/lib/auto-refresh";
@@ -24,7 +25,7 @@ import {
 import { computeIssuePrerequisiteReadiness } from "@/lib/manual-step-attention";
 import { getRepoColor } from "@/lib/repo-color";
 import { selectSnoozedIssueIds, type SnoozeMap, type SnoozeTarget } from "@/lib/snooze";
-import type { ScheduledRunQueuedMap } from "@/lib/nightly-run";
+import { selectReservedIssueIdsToHide, type ScheduledRunQueuedMap } from "@/lib/nightly-run";
 import { cn } from "@/lib/utils";
 import type { Issue, NavViewId } from "@/types/issue";
 import type { ConnectedRepository } from "@/types/repository";
@@ -125,10 +126,21 @@ export function MobileRepoIssuesScreen({
     [state, labels, assignee],
   );
 
+  // 未着手では予約実行に積まれたIssueを標準で伏せる（#3822。リポジトリ横断の一覧と同じ集合・同じ設定）
+  const [showReservedIssues, setShowReservedIssues] = useShowReservedIssues();
+  const reservedIssueIdsToHide = useMemo(
+    () => selectReservedIssueIdsToHide(nightlyRunQueued, showReservedIssues),
+    [nightlyRunQueued, showReservedIssues],
+  );
+
   const displayedIssues = useMemo(() => {
-    const scoped = filterIssuesByView(repoIssues, view, currentUserLogin);
+    const byView = filterIssuesByView(repoIssues, view, currentUserLogin);
+    const scoped =
+      view === "not-started" && reservedIssueIdsToHide
+        ? byView.filter((issue) => !reservedIssueIdsToHide.has(issue.id))
+        : byView;
     return sortIssues(applyIssueFilters(scoped, listFilters), sort, view);
-  }, [repoIssues, view, currentUserLogin, listFilters, sort]);
+  }, [repoIssues, view, currentUserLogin, listFilters, sort, reservedIssueIdsToHide]);
 
   // 保留中のIssue（#2398・#2456）。件数と一覧が同じ集合を読むよう、ここで1回だけ求める
   const now = useNow();
@@ -154,8 +166,9 @@ export function MobileRepoIssuesScreen({
         issues,
         undefined,
         snoozedIssueIds,
+        reservedIssueIdsToHide,
       ),
-    [repoIssues, listFilters, currentUserLogin, issues, snoozedIssueIds],
+    [repoIssues, listFilters, currentUserLogin, issues, snoozedIssueIds, reservedIssueIdsToHide],
   );
 
   // 手作業Issueの前提条件がそろっているか（#1763）。判定の母集団も全Issue
@@ -180,6 +193,9 @@ export function MobileRepoIssuesScreen({
 
   return (
     <MobileIssueListScreen
+      showReservedIssues={showReservedIssues}
+      onChangeShowReservedIssues={setShowReservedIssues}
+      reservedIssueCount={nightlyRunQueued?.size ?? 0}
       title={repository.name}
       meta={repository.private ? "Private" : "Public"}
       icon={

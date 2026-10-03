@@ -42,6 +42,10 @@ type MobileIssueFilterSheetProps = {
    */
   groupByRepo?: boolean;
   onChangeGroupByRepo?: (value: boolean) => void;
+  /** 未着手ビューで予約実行中のIssueも表示するか（#3822）。onChangeShowReservedIssuesを渡したときだけ出す */
+  showReservedIssues?: boolean;
+  onChangeShowReservedIssues?: (value: boolean) => void;
+  reservedIssueCount?: number;
   /**
    * いま効いている絞り込み条件の数（`countActiveIssueFilters`）。1件以上のときだけ
    * 見出しの右に「すべて解除」を出す（#1645）。
@@ -86,6 +90,9 @@ export function MobileIssueFilterSheet({
   sortLocked = false,
   groupByRepo = false,
   onChangeGroupByRepo,
+  showReservedIssues = false,
+  onChangeShowReservedIssues,
+  reservedIssueCount = 0,
   activeFilterCount = 0,
   onClearFilters,
 }: MobileIssueFilterSheetProps) {
@@ -258,6 +265,20 @@ export function MobileIssueFilterSheet({
                 </Pill>
                 <Pill active={groupByRepo} onClick={() => onChangeGroupByRepo(true)}>
                   リポジトリごとに分ける
+                </Pill>
+              </div>
+            </section>
+          )}
+
+          {onChangeShowReservedIssues && (
+            <section>
+              <h3 className="mb-2 text-xs font-semibold text-muted-foreground">予約実行</h3>
+              <div className="flex flex-wrap gap-2">
+                <Pill active={!showReservedIssues} onClick={() => onChangeShowReservedIssues(false)}>
+                  予約中は隠す
+                </Pill>
+                <Pill active={showReservedIssues} onClick={() => onChangeShowReservedIssues(true)}>
+                  予約実行中も表示（{reservedIssueCount}件）
                 </Pill>
               </div>
             </section>
