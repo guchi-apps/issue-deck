@@ -7,7 +7,7 @@ import {
   type CodexLocalModel,
 } from "@/lib/app-settings";
 import type { DispatchAgent } from "@/lib/dispatch/dispatch-job";
-import { hasImageMarkdown, splitAttachments } from "@/lib/markdown-attachments";
+import { composeAttachments, hasImageMarkdown, splitAttachments } from "@/lib/markdown-attachments";
 
 /**
  * ローカルセッションが提示した計画に対する、画面からの返事（#2061）の**純粋な部分**。
@@ -107,7 +107,17 @@ export type PlanReviewChoice = {
 export function buildPlanReviewDecisionRequestText(
   decisions: readonly PlanReviewFindingDecision[],
   choices: readonly PlanReviewChoice[] = [],
+  additional = "",
 ): string {
+  // 追記は選択結果の末尾に連結する（#3829）。**サーバーは添付を除いた本文で上限を判定する**ので、
+  // 追記は本文と添付に分け、本文の長さだけを枠から引く。切り詰めは選択結果の側だけに掛け、
+  // 追記の本文と末尾の画像記法は必ず残す
+  const { body: additionalBody, attachments } = splitAttachments(additional);
+  const extra = additionalBody.trim();
+  const extraSection = extra === "" ? "" : `${ADDITIONAL_HEADING}${extra}`;
+  const budget = SESSION_PLAN_REVISION_MAX_LENGTH - extraSection.length;
+  const withExtra = (base: string) => composeAttachments(`${base}${extraSection}`, attachments);
+
   for (const [titleMax, reasonMax] of [
     [120, 300],
     [60, 120],
@@ -115,11 +125,14 @@ export function buildPlanReviewDecisionRequestText(
     [16, 0],
   ] as const) {
     const text = composePlanReviewDecisionText(decisions, choices, titleMax, reasonMax);
-    if (text.length <= SESSION_PLAN_REVISION_MAX_LENGTH) return text;
+    if (text.length <= budget) return withExtra(text);
   }
   // 指摘が100件を超えるような異常な場合だけここに来る。途中で切っても判断の先頭は残る
-  return `${composePlanReviewDecisionText(decisions, choices, 16, 0).slice(0, SESSION_PLAN_REVISION_MAX_LENGTH - 1)}…`;
+  const base = composePlanReviewDecisionText(decisions, choices, 16, 0);
+  return withExtra(`${base.slice(0, Math.max(budget - 1, 0))}…`);
 }
+
+const ADDITIONAL_HEADING = "\n\n追加の修正（上の判断に加えて、次も計画へ反映してください）:\n";
 
 function clip(text: string, max: number): string {
   const oneLine = text.replace(/\s+/g, " ").trim();

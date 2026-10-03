@@ -204,6 +204,10 @@ export function PlanApprovalPanel({
     planReview !== null &&
     planReview.review.recommendation?.kind === "approve" &&
     planReview.review.decisions.length === 0;
+  // 指摘・判断に分けられたレビューでは、カード内の追記欄が「修正を送る」を兼ねる（#3829）
+  const cardHandlesRevision =
+    planReview !== null &&
+    (planReview.review.findings.length > 0 || planReview.review.decisions.length > 0);
   const canHandoff = session !== null && session.codexThreadKnown !== null;
   // **数えるのは人が書いた文章だけ**（#2425）。末尾の画像記法は添付なので枚数で見る
   // （サーバー側の`parseSessionPlanRevision`と同じ勘定にしておかないと、押せたのに400で弾かれる）
@@ -254,6 +258,32 @@ export function PlanApprovalPanel({
             </div>
           )}
         </div>
+
+        {/* 修正を書いている間も指摘カードを畳まない（#3829）。畳むと判断の選択肢を選べないまま
+            自由記述だけを送ることになる */}
+        {planReview && (
+          /* 指摘を読んで、どれを取り込ませるかをここで決める（#3554）。承認・修正のボタンより
+             上に置く——読んでから押す順にする */
+          <div className="w-full">
+            <PlanReviewFindings
+              key={planReview.commentId}
+              review={planReview.review}
+              reviewedAtLabel={planReview.createdAtLabel}
+              round={planReview.round}
+              kind={planReview.kind}
+              repositoryFullName={request.repositoryFullName}
+              submitLabel="選んだ指摘で計画を出し直す"
+              remainingMs={remainingMs}
+              fallbackSubmitLabel="レビューを反映して計画を出し直す"
+              disabled={!canSend || dispatch.isSubmitting}
+              isSubmitting={dispatch.isSubmitting}
+              deemphasizeSubmit={approveRecommended}
+              approveHint="下の「承認して実装へ進む」を押す"
+              unavailable={sessionGone ? "session-gone" : remainingMs <= 0 ? "expired" : undefined}
+              onSubmit={(text) => send("revise", text)}
+            />
+          </div>
+        )}
 
         {isRevising ? (
           <div className="flex flex-col gap-2">
@@ -320,29 +350,6 @@ export function PlanApprovalPanel({
                 {planReviewNotice.text}
               </p>
             )}
-            {planReview && (
-              /* 指摘を読んで、どれを取り込ませるかをここで決める（#3554）。承認・修正のボタンより
-                 上に置く——読んでから押す順にする */
-              <div className="w-full">
-                <PlanReviewFindings
-                  key={planReview.commentId}
-                  review={planReview.review}
-                  reviewedAtLabel={planReview.createdAtLabel}
-                  round={planReview.round}
-                  kind={planReview.kind}
-                  repositoryFullName={request.repositoryFullName}
-                  submitLabel="選んだ指摘で計画を出し直す"
-                  remainingMs={remainingMs}
-                  fallbackSubmitLabel="レビューを反映して計画を出し直す"
-                  disabled={!canSend || dispatch.isSubmitting}
-                  isSubmitting={dispatch.isSubmitting}
-                  deemphasizeSubmit={approveRecommended}
-                  approveHint="下の「承認して実装へ進む」を押す"
-                  unavailable={sessionGone ? "session-gone" : remainingMs <= 0 ? "expired" : undefined}
-                  onSubmit={(text) => send("revise", text)}
-                />
-              </div>
-            )}
             {session && !sessionGone && canHandoff && (
               <div className="w-full rounded-md border bg-muted/40 p-3">
                 <p className="text-xs font-medium">実装に使うモデル</p>
@@ -397,15 +404,17 @@ export function PlanApprovalPanel({
               {dispatch.isSubmitting ? <Loader2 className="animate-spin" /> : <Check />}
               承認して実装へ進む
             </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={!canSend || dispatch.isSubmitting}
-              onClick={() => setIsRevising(true)}
-            >
-              <Pencil />
-              修正を送る
-            </Button>
+            {!cardHandlesRevision && (
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={!canSend || dispatch.isSubmitting}
+                onClick={() => setIsRevising(true)}
+              >
+                <Pencil />
+                修正を送る
+              </Button>
+            )}
             {artifactsMissing && (
               <Button
                 variant="outline"
