@@ -928,6 +928,7 @@ jobs:
       - name: Codexレビュー失敗を通知してマージを保留する
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           ISSUE_NUMBER: ${{ needs.identify-issue.outputs.number }}
         run: |
