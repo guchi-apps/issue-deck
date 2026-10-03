@@ -97,6 +97,7 @@ import type {
   CodexModelSetting,
   CodexLocalModel,
   DefaultDispatchAgent,
+  GithubActionsAgent,
   ModelPickEngine,
   PlanReviewAgent,
 } from "@/lib/app-settings";
@@ -247,6 +248,8 @@ type IssueDeckShellProps = {
   issues: Issue[];
   autoRetryLimit: number;
   claudeModel: ClaudeModel;
+  githubActionsAgent: GithubActionsAgent;
+  githubActionsCodexModel: CodexLocalModel;
   claudeModelAssist: ClaudeModel;
   claudeLocalModel: ClaudeLocalModelSetting;
   codexModel: CodexModelSetting;
@@ -272,6 +275,8 @@ export function IssueDeckShell({
   issuesFetchedAt,
   autoRetryLimit: initialAutoRetryLimit,
   claudeModel: initialClaudeModel,
+  githubActionsAgent: initialGithubActionsAgent,
+  githubActionsCodexModel: initialGithubActionsCodexModel,
   claudeModelAssist: initialClaudeModelAssist,
   claudeLocalModel: initialClaudeLocalModel,
   codexModel: initialCodexModel,
@@ -353,6 +358,8 @@ export function IssueDeckShell({
   const visibleIssue = filters.pane === "issues" ? selectedIssue : null;
   const [autoRetryLimit, setAutoRetryLimit] = useState(initialAutoRetryLimit);
   const [claudeModel, setClaudeModel] = useState<ClaudeModel>(initialClaudeModel);
+  const [githubActionsAgent, setGithubActionsAgent] = useState<GithubActionsAgent>(initialGithubActionsAgent);
+  const [githubActionsCodexModel, setGithubActionsCodexModel] = useState<CodexLocalModel>(initialGithubActionsCodexModel);
   const [claudeModelAssist, setClaudeModelAssist] =
     useState<ClaudeModel>(initialClaudeModelAssist);
   const [claudeLocalModel, setClaudeLocalModel] =
@@ -390,6 +397,8 @@ export function IssueDeckShell({
   function handleAppSettingsUpdated(next: AppSettingsValues) {
     setAutoRetryLimit(next.autoRetryLimit);
     setClaudeModel(next.claudeModel);
+    setGithubActionsAgent(next.githubActionsAgent);
+    setGithubActionsCodexModel(next.githubActionsCodexModel);
     setClaudeModelAssist(next.claudeModelAssist);
     setClaudeLocalModel(next.claudeLocalModel);
     setCodexModel(next.codexModel);
@@ -2475,6 +2484,8 @@ export function IssueDeckShell({
                     currentUser={currentUser}
                     autoRetryLimit={autoRetryLimit}
                     claudeModel={claudeModel}
+                    githubActionsAgent={githubActionsAgent}
+                    githubActionsCodexModel={githubActionsCodexModel}
                     claudeModelAssist={claudeModelAssist}
                     claudeLocalModel={claudeLocalModel}
                     codexModel={codexModel}
@@ -3044,6 +3055,8 @@ export function IssueDeckShell({
           currentUser={currentUser}
           autoRetryLimit={autoRetryLimit}
           claudeModel={claudeModel}
+          githubActionsAgent={githubActionsAgent}
+          githubActionsCodexModel={githubActionsCodexModel}
           claudeModelAssist={claudeModelAssist}
           claudeLocalModel={claudeLocalModel}
           codexModel={codexModel}

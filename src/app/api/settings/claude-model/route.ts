@@ -6,6 +6,8 @@ import {
   CLAUDE_LOCAL_MODEL_DEFAULT,
   CODEX_MODEL_DEFAULT,
   DEFAULT_DISPATCH_AGENT_SETTING,
+  GITHUB_ACTIONS_AGENT_DEFAULT,
+  GITHUB_ACTIONS_CODEX_MODEL_DEFAULT,
   DISPATCH_FAILOVER_THRESHOLD_PERCENT_DEFAULT,
   MODEL_PICK_ENGINE_DEFAULT,
   PLAN_REVIEW_AGENT_FOR_CLAUDE_DEFAULT,
@@ -19,6 +21,7 @@ import {
   parseCodexLocalModel,
   parseCodexModelSetting,
   parseDefaultDispatchAgent,
+  parseGithubActionsAgent,
   parseDispatchFailoverThresholdPercent,
   parseModelPickEngine,
   parsePlanReviewAgent,
@@ -32,6 +35,10 @@ async function getClaudeModels() {
     | null;
   return {
     claudeModel: setting?.claudeModel ?? "auto",
+    githubActionsAgent:
+      parseGithubActionsAgent(setting?.githubActionsAgent) ?? GITHUB_ACTIONS_AGENT_DEFAULT,
+    githubActionsCodexModel:
+      parseCodexLocalModel(setting?.githubActionsCodexModel) ?? GITHUB_ACTIONS_CODEX_MODEL_DEFAULT,
     claudeModelAssist: setting?.claudeModelAssist ?? "auto",
     claudeLocalModel:
       parseClaudeLocalModelSetting(setting?.claudeLocalModel) ?? CLAUDE_LOCAL_MODEL_DEFAULT,
@@ -79,6 +86,21 @@ export async function PATCH(request: NextRequest) {
   const payload = await request.json().catch(() => null);
   const claudeModel = parseClaudeModel(payload?.claudeModel);
   if (claudeModel === null) {
+    return NextResponse.json({ error: "invalid_request" }, { status: 400 });
+  }
+  const hasGithubActionsAgent = payload !== null && typeof payload === "object" && "githubActionsAgent" in payload;
+  const githubActionsAgent = hasGithubActionsAgent
+    ? parseGithubActionsAgent(payload?.githubActionsAgent)
+    : undefined;
+  if (hasGithubActionsAgent && githubActionsAgent === null) {
+    return NextResponse.json({ error: "invalid_request" }, { status: 400 });
+  }
+  const hasGithubActionsCodexModel =
+    payload !== null && typeof payload === "object" && "githubActionsCodexModel" in payload;
+  const githubActionsCodexModel = hasGithubActionsCodexModel
+    ? parseCodexLocalModel(payload?.githubActionsCodexModel)
+    : undefined;
+  if (hasGithubActionsCodexModel && githubActionsCodexModel === null) {
     return NextResponse.json({ error: "invalid_request" }, { status: 400 });
   }
   // claudeModelAssistは省略を許容し、その場合は既存値を変更しない。設定画面は常に両方を送るが、
@@ -184,6 +206,8 @@ export async function PATCH(request: NextRequest) {
     create: {
       id: 1,
       claudeModel,
+      ...(githubActionsAgent ? { githubActionsAgent } : {}),
+      ...(githubActionsCodexModel ? { githubActionsCodexModel } : {}),
       ...(claudeModelAssist ? { claudeModelAssist } : {}),
       ...(codexModel ? { codexModel } : {}),
       ...(claudeLocalModel ? { claudeLocalModel } : {}),
@@ -202,6 +226,8 @@ export async function PATCH(request: NextRequest) {
     },
     update: {
       claudeModel,
+      ...(githubActionsAgent ? { githubActionsAgent } : {}),
+      ...(githubActionsCodexModel ? { githubActionsCodexModel } : {}),
       ...(claudeModelAssist ? { claudeModelAssist } : {}),
       ...(codexModel ? { codexModel } : {}),
       ...(claudeLocalModel ? { claudeLocalModel } : {}),
@@ -231,6 +257,10 @@ export async function PATCH(request: NextRequest) {
 
   return NextResponse.json({
     claudeModel: updated.claudeModel,
+    githubActionsAgent:
+      parseGithubActionsAgent(updated.githubActionsAgent) ?? GITHUB_ACTIONS_AGENT_DEFAULT,
+    githubActionsCodexModel:
+      parseCodexLocalModel(updated.githubActionsCodexModel) ?? GITHUB_ACTIONS_CODEX_MODEL_DEFAULT,
     claudeModelAssist: updated.claudeModelAssist,
     codexModel: parseCodexModelSetting(updated.codexModel) ?? CODEX_MODEL_DEFAULT,
     claudeLocalModel:

@@ -10,6 +10,7 @@ import type {
   CodexModelSetting,
   CodexLocalModel,
   DefaultDispatchAgent,
+  GithubActionsAgent,
   ModelPickEngine,
   PlanReviewAgent,
 } from "@/lib/app-settings";
@@ -41,6 +42,8 @@ export function useAppSettingsMutations() {
 
   async function updateClaudeModel(
     claudeModel: ClaudeModel,
+    githubActionsAgent: GithubActionsAgent,
+    githubActionsCodexModel: CodexLocalModel,
     claudeModelAssist: ClaudeModel,
     claudeLocalModel: ClaudeLocalModelSetting,
     codexModel: CodexModelSetting,
@@ -63,6 +66,8 @@ export function useAppSettingsMutations() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           claudeModel,
+          githubActionsAgent,
+          githubActionsCodexModel,
           claudeModelAssist,
           claudeLocalModel,
           codexModel,
