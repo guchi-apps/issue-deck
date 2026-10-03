@@ -295,3 +295,8 @@ export function isIosDistributionPending(state: IosReleasePanelState | null): bo
   if (state === null) return false;
   return state.kind === "running" || state.kind === "awaiting-web" || state.kind === "failed" || state.kind === "ready";
 }
+
+/** 畳んだ行に「iOS配布中」を出すか（#3806）。配布のworkflowが実行中（`running`）のときだけtrue */
+export function isIosDistributionRunning(state: IosReleasePanelState | null): boolean {
+  return state?.kind === "running";
+}
