@@ -487,6 +487,17 @@ export async function reportDispatchSessions(params: {
       },
     });
 
+    // 同じtmux名で起動し直した場合はDB上のDispatchSession行を再利用するため、前回実行の
+    // タイムラインをここで明示的に捨てる。実行単位を跨いだ会話・stepが新しいセッション詳細へ
+    // 混ざらないようにし、この巡の「セッション開始」から新しい履歴を作り直す。
+    if (revived) {
+      try {
+        await db.dispatchSessionTimelineEvent.deleteMany({ where: { sessionId: stored.id } });
+      } catch {
+        // タイムラインは補助情報なので、履歴の初期化失敗でセッション報告本体を止めない。
+      }
+    }
+
     // pollerが既に運んでいる状態・固定語彙のstepだけを時系列へ残す。画面や転記の本文、
     // コマンド・tool結果はここへ入れない。会話本文はtimeline APIの許可済みイベントだけが担う。
     const previousStep = revived ? null : previous?.step;
