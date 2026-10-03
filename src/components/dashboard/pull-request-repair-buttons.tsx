@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Info, Wrench } from "lucide-react";
 
 import { ApiErrorMessage } from "@/components/dashboard/api-error-message";
@@ -76,17 +76,15 @@ export function PullRequestRepairButtons({
   // 起動直後はAPI応答とrepairRunの反映に時間差があるためhasStartedで表示を保つ。
   // 一度runningKindが観測された後、それがnullへ戻ったら修復完了なので次の対象を起動できるよう戻す。
   const [sawRunning, setSawRunning] = useState(false);
-  useEffect(() => {
-    if (!hasStarted) return;
-    if (runningKind !== null) {
+  // effect内のsetStateは連鎖レンダーを招くため、レンダー中に条件付きで状態を調整する。
+  if (hasStarted) {
+    if (runningKind !== null && !sawRunning) {
       setSawRunning(true);
-      return;
-    }
-    if (sawRunning) {
+    } else if (runningKind === null && sawRunning) {
       setHasStarted(false);
       setSawRunning(false);
     }
-  }, [hasStarted, runningKind, sawRunning]);
+  }
 
   if (kinds.length === 0) return null;
 
