@@ -44,6 +44,11 @@ vi.mock("@/lib/github/projects-api", () => ({
   },
 }));
 
+vi.mock("@/lib/github/knowledge-promotion-dispatch", () => ({
+  dispatchKnowledgePromotion: vi.fn(),
+  isPromotionTriggerStatus: () => false,
+}));
+
 import { clearProjectStatusFieldCache, reportProgressStatus } from "@/lib/github/report-progress";
 import {
   CLOSE_TERMINAL_SOURCE_STATUSES,

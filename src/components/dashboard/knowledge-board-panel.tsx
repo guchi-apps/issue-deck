@@ -36,7 +36,7 @@ import { cn } from "@/lib/utils";
  * （`guchi-apps/docs`の`knowledge/`）へどう採用されたかを1画面で追う。
  *
  * それまでは、知見メモは各Issueのコメントに散り、採用結果は`guchi-apps/docs`を開かないと
- * 分からなかった。**格上げ判定（`promote-knowledge.yml`・毎日05:00 JST）が止まっても誰も
+ * 分からなかった。**格上げ判定（`promote-knowledge.yml`・都度起動＋毎日05:00 JSTの回収）が止まっても誰も
  * 気付かない**という積み残しがあり（`docs/shared-knowledge.md`の未解決課題）、実際に188件が
  * 溜まったことがある（`guchi-apps/docs#92`）。滞留の警告はそのための合図。
  *
@@ -170,7 +170,7 @@ export function KnowledgeBoardPanel({
               </span>{" "}
               表示している中でいちばん古いものは{formatRelativeDate(stall.oldestPendingAt ?? "")}の
               投稿です。格上げ判定（<code className="font-mono">promote-knowledge.yml</code>・
-              毎日05:00 JST）が失敗し続けていないか確かめてください。
+              毎日05:00 JSTの回収も含む）が失敗し続けていないか確かめてください。
             </Alert>
           )}
 

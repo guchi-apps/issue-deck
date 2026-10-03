@@ -71,6 +71,10 @@ type TopBarProps = {
   /** リポジトリごとのグルーピング表示（#849）のON/OFF */
   groupByRepo: boolean;
   onChangeGroupByRepo: (value: boolean) => void;
+  /** 未着手ビューで予約実行中のIssueも表示するか（#3822）。未着手ビューのときだけスイッチを出す */
+  showReservedIssues?: boolean;
+  onChangeShowReservedIssues?: (value: boolean) => void;
+  reservedIssueCount?: number;
   assigneeOptions: string[];
   onCreateIssue: () => void;
   /** 複数リポジトリ横断の質問（#1454）。単一リポジトリへの質問は新規作成ダイアログ側（#1641） */
@@ -98,6 +102,9 @@ export function TopBar({
   setFilter,
   groupByRepo,
   onChangeGroupByRepo,
+  showReservedIssues = false,
+  onChangeShowReservedIssues,
+  reservedIssueCount = 0,
   assigneeOptions,
   onCreateIssue,
   onAskCrossRepoQuestion,
@@ -339,10 +346,20 @@ export function TopBar({
 
             <section>
               <h3 className="mb-1.5 text-xs font-semibold text-muted-foreground">表示</h3>
-              <FilterChip active={groupByRepo} onClick={() => onChangeGroupByRepo(!groupByRepo)}>
-                <FolderTree className="size-3" />
-                リポジトリ別
-              </FilterChip>
+              <div className="flex flex-wrap gap-1.5">
+                <FilterChip active={groupByRepo} onClick={() => onChangeGroupByRepo(!groupByRepo)}>
+                  <FolderTree className="size-3" />
+                  リポジトリ別
+                </FilterChip>
+                {filters.view === "not-started" && onChangeShowReservedIssues && (
+                  <FilterChip
+                    active={showReservedIssues}
+                    onClick={() => onChangeShowReservedIssues(!showReservedIssues)}
+                  >
+                    予約実行中も表示（{reservedIssueCount}件）
+                  </FilterChip>
+                )}
+              </div>
             </section>
           </PopoverContent>
         </Popover>

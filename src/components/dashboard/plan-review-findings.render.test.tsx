@@ -87,3 +87,26 @@ describe("buildNextSteps", () => {
     expect(buildNextSteps({ ...base, hasFindings: false })[0].text).toContain("一括で出し直す");
   });
 });
+
+describe("PlanReviewFindings の追記欄（#3829）", () => {
+  it("追記を書くと、選択結果の依頼文の末尾に連結して送る", () => {
+    const sent: string[] = [];
+    renderCard({ onSubmit: (text) => void sent.push(text) });
+    fireEvent.change(screen.getByLabelText("追加で修正したいこと（任意）"), {
+      target: { value: "見出しも直してほしい" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /選んだ指摘で計画を出し直す/ }));
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toContain("反映する:");
+    expect(sent[0].endsWith("見出しも直してほしい")).toBe(true);
+  });
+
+  it("全件見送りでも、追記があれば送れる", () => {
+    renderCard();
+    fireEvent.click(screen.getByRole("button", { name: /見送る/ }));
+    const submit = screen.getByRole("button", { name: /選んだ指摘で計画を出し直す/ }) as HTMLButtonElement;
+    expect(submit.disabled).toBe(true);
+    fireEvent.change(screen.getByLabelText("追加で修正したいこと（任意）"), { target: { value: "別の直し" } });
+    expect(submit.disabled).toBe(false);
+  });
+});

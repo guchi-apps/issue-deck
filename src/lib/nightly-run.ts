@@ -428,6 +428,19 @@ export function selectScheduledRunQueuedMarks(state: Pick<NightlyRunState, "next
   return marks;
 }
 
+/**
+ * 未着手ビューで伏せる、予約実行に積まれているIssueのid（#3822）。
+ * 予約済みのIssueは起動待ちで人が着手する必要がないため、標準では未着手の一覧と件数から外す。
+ * `show`がtrue（利用者がスイッチで表示を選んだ）ときは何も伏せない（`undefined`）。
+ */
+export function selectReservedIssueIdsToHide(
+  queued: ScheduledRunQueuedMap | undefined,
+  show: boolean,
+): ReadonlySet<string> | undefined {
+  if (show || !queued || queued.size === 0) return undefined;
+  return new Set(queued.keys());
+}
+
 export function findScheduledRunQueuedMark(
   marks: ScheduledRunQueuedMap | undefined,
   issueId: string,

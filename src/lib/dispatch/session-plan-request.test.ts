@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { splitAttachments } from "@/lib/markdown-attachments";
 
 import {
   buildPlanReviewDecisionRequestText,
@@ -324,5 +325,42 @@ describe("buildPlanReviewDecisionRequestText（#3554）", () => {
     const text = buildPlanReviewDecisionRequestText([], choices);
     expect(text).not.toContain("反映する:");
     expect(text.length).toBeLessThanOrEqual(SESSION_PLAN_REVISION_MAX_LENGTH);
+  });
+});
+
+describe("buildPlanReviewDecisionRequestText の追記（#3829）", () => {
+  const image = "![a.png](https://example.com/api/issues/images/00000000-0000-0000-0000-000000000000.png)";
+
+  it("追記が無ければ従来と同じ文になる", () => {
+    const decisions = [{ number: 1, title: "a", decision: "apply" as const }];
+    expect(buildPlanReviewDecisionRequestText(decisions, [], "  ")).toBe(
+      buildPlanReviewDecisionRequestText(decisions),
+    );
+  });
+
+  it("選択結果の後ろに追記を連結する。全件見送りでも追記だけで文になる", () => {
+    const text = buildPlanReviewDecisionRequestText(
+      [{ number: 1, title: "a", decision: "skip" }],
+      [{ number: 1, title: "方式", letter: "B", label: "拡張する" }],
+      "見出しも直してほしい",
+    );
+    expect(text).toContain("判断1. 方式 → B. 拡張する");
+    expect(text.endsWith("見出しも直してほしい")).toBe(true);
+    expect(parseSessionPlanRevision(text)).toBe(text);
+  });
+
+  it("上限を超える場合は選択結果側を切り、追記本文と末尾の画像は残す", () => {
+    const decisions = Array.from({ length: 30 }, (_, i) => ({
+      number: i + 1,
+      title: "長い見出し".repeat(40),
+      decision: "apply" as const,
+    }));
+    const extra = `${"追".repeat(1500)}\n\n${image}`;
+    const text = buildPlanReviewDecisionRequestText(decisions, [], extra);
+    const { body, attachments } = splitAttachments(text);
+    expect(body.length).toBeLessThanOrEqual(SESSION_PLAN_REVISION_MAX_LENGTH);
+    expect(body.endsWith("追".repeat(1500))).toBe(true);
+    expect(attachments).toHaveLength(1);
+    expect(parseSessionPlanRevision(text)).toBe(text);
   });
 });

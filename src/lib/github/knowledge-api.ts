@@ -7,7 +7,7 @@
  * 2. フリート各リポジトリのIssueに残った知見メモ（`<!-- knowledge-candidate -->`）と、
  *    それに対する格上げ判定（`<!-- knowledge-promotion:judged -->`）のコメント
  *
- * 2は`guchi-apps/docs`の`promote-knowledge.yml`が毎日巡回しているのと同じ材料を、同じ検索語で
+ * 2は`guchi-apps/docs`の`promote-knowledge.yml`が巡回しているのと同じ材料を、同じ検索語で
  * 引いている。**判定はここでは行わない**（判定エージェントの仕事）。整形は`lib/knowledge-board.ts`
  * が持ち、ここは取ってきた形をそのまま返す。
  *

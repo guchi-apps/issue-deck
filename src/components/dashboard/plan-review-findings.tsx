@@ -4,13 +4,17 @@ import { useState } from "react";
 import { ChevronDown, ChevronRight, Loader2, ScanSearch } from "lucide-react";
 
 import { MarkdownBody } from "@/components/dashboard/markdown-body";
+import { MentionTextarea } from "@/components/dashboard/mention-textarea";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
   buildPlanReviewDecisionRequestText,
   type PlanReviewChoice,
   PLAN_REVIEW_REFLECT_REQUEST_TEXT,
+  SESSION_PLAN_REVISION_MAX_ATTACHMENTS,
+  SESSION_PLAN_REVISION_MAX_LENGTH,
 } from "@/lib/dispatch/session-plan-request";
+import { splitAttachments } from "@/lib/markdown-attachments";
 import type {
   ParsedPlanReview,
   PlanReviewDecision,
@@ -86,12 +90,18 @@ export function PlanReviewFindings({
   const [choices, setChoices] = useState<Record<number, string>>({});
   // 推奨の理由とレビュー要約は細かい文字で読まれないので、既定は閉じておく（#3754）
   const [isDetailOpen, setIsDetailOpen] = useState(false);
+  // 選択に加えて送る自由記述（#3829）。画像の貼り付けも使えるので、アップロード中は送らせない
+  const [additional, setAdditional] = useState("");
+  const [isUploadingImage, setIsUploadingImage] = useState(false);
 
   const { findings, decisions } = review;
   const hasFindings = findings.length > 0 || decisions.length > 0;
   const undecidedCount = decisions.filter((decision) => choices[decision.number] === undefined).length;
   const skipCount = findings.filter((finding) => skipped[finding.number]).length;
   const applyCount = findings.length - skipCount;
+  const { body: additionalBody, attachments: additionalAttachments } = splitAttachments(additional);
+  const hasAdditional = additionalBody.trim() !== "";
+  const tooManyAttachments = additionalAttachments.length > SESSION_PLAN_REVISION_MAX_ATTACHMENTS;
 
   function submitDecisions() {
     void onSubmit(
@@ -109,18 +119,24 @@ export function PlanReviewFindings({
             ? { number: decision.number, title: decision.title, letter: option.letter, label: option.label }
             : { number: decision.number, title: decision.title, letter: null };
         }),
+        additional,
       ),
     );
   }
 
   // 指摘を全件見送って判断も無いなら、出し直させる材料が無い（従来どおり）
-  const canSubmit = undecidedCount === 0 && (applyCount > 0 || decisions.length > 0);
+  // 追記があれば「全件見送り＋追加の修正」でも送れる（#3829）
+  const canSubmit =
+    undecidedCount === 0 &&
+    !isUploadingImage &&
+    !tooManyAttachments &&
+    (applyCount > 0 || decisions.length > 0 || hasAdditional);
   const footerMessage =
     undecidedCount > 0
       ? `判断があと${undecidedCount}件残っています${remainingMs !== undefined ? `（計画待ちはあと${formatRemaining(remainingMs)}）` : ""}。`
-      : applyCount === 0 && decisions.length === 0
+      : applyCount === 0 && decisions.length === 0 && !hasAdditional
         ? "すべて見送る場合は、この計画のまま承認してください。"
-        : `${decisions.length > 0 ? `判断 ${decisions.length}件・` : ""}反映 ${applyCount}件・見送り ${skipCount}件${skipCount > 0 ? "。見送る理由も一緒に送ります" : ""}`;
+        : `${decisions.length > 0 ? `判断 ${decisions.length}件・` : ""}反映 ${applyCount}件・見送り ${skipCount}件${skipCount > 0 ? "。見送る理由も一緒に送ります" : ""}${hasAdditional ? "・追加の修正あり" : ""}`;
 
   const hasDetail = Boolean(review.recommendation?.reason) || (hasFindings && Boolean(review.summary));
   const effectiveSubmitLabel = decisions.length > 0 ? submitLabel.replace("選んだ指摘", "選んだ内容") : submitLabel;
@@ -130,6 +146,7 @@ export function PlanReviewFindings({
     undecidedCount,
     decisionCount: decisions.length,
     applyCount,
+    hasAdditional,
     approveRecommended: deemphasizeSubmit,
     submitLabel: effectiveSubmitLabel,
     fallbackSubmitLabel,
@@ -253,6 +270,26 @@ export function PlanReviewFindings({
               />
             ))}
           </ol>
+          <div className="flex flex-col gap-1.5 border-t border-emerald-600/40 bg-emerald-500/10 px-3 py-2">
+            <label className="text-xs font-semibold text-emerald-700 dark:text-emerald-400" htmlFor="plan-review-additional">
+              追加で修正したいこと（任意）
+            </label>
+            <MentionTextarea
+              id="plan-review-additional"
+              value={additional}
+              onChange={setAdditional}
+              onUploadingChange={setIsUploadingImage}
+              repositoryFullName={repositoryFullName}
+              maxLength={SESSION_PLAN_REVISION_MAX_LENGTH}
+              rows={3}
+              placeholder="上の選択に加えて直してほしいことがあれば書いてください。選んだ内容と一緒にClaudeへ渡ります。画像も貼り付けできます。"
+            />
+            {tooManyAttachments && (
+              <p className="text-xs text-destructive">
+                添付できる画像は{SESSION_PLAN_REVISION_MAX_ATTACHMENTS}枚までです。
+              </p>
+            )}
+          </div>
           <footer className="flex flex-col gap-2 border-t bg-muted/50 px-3 py-2 sm:flex-row sm:items-center">
             <p className="min-w-0 flex-1 text-xs text-muted-foreground">
               {footerMessage}
@@ -334,6 +371,8 @@ export function buildNextSteps(input: {
   undecidedCount: number;
   decisionCount: number;
   applyCount: number;
+  /** 追加で修正したいことが書かれている（#3829）。無ければ`false`として扱う */
+  hasAdditional?: boolean;
   approveRecommended: boolean;
   submitLabel: string;
   fallbackSubmitLabel: string;
@@ -355,7 +394,7 @@ export function buildNextSteps(input: {
   if (input.decisionCount > 0) {
     return [{ text: `判断${input.decisionCount}件を選んだ`, done: true }, push];
   }
-  if (input.applyCount === 0) {
+  if (input.applyCount === 0 && !input.hasAdditional) {
     return [{ text: `すべて見送る場合は、${input.approveHint}` }];
   }
   return [

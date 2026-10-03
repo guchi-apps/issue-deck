@@ -463,7 +463,7 @@ describe("detectKnowledgeStall", () => {
     });
   });
 
-  it("直近の未判定だけなら警告しない（判定は毎日1回なので当日ぶんは残る）", () => {
+  it("直近の未判定だけなら警告しない（滞留の警告は日次の回収を基準にするので当日ぶんは残る）", () => {
     const stall = detectKnowledgeStall(
       [pending("2026-09-08T00:00:00Z")],
       sections,
