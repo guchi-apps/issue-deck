@@ -50,6 +50,7 @@ function labelOf(step: string, progress: ReturnType<typeof buildIssuePullRequest
 
 function reviewVerdict(
   reviewKind: PullRequestReviewVerdict["reviewKind"],
+  reviewedSha: string | null = null,
 ): PullRequestReviewVerdict {
   return {
     reviewKind,
@@ -58,7 +59,7 @@ function reviewVerdict(
     riskLabel: "",
     riskReasons: [],
     confirmLabel: null,
-    reviewedSha: null,
+    reviewedSha,
   };
 }
 
@@ -280,6 +281,20 @@ describe("buildIssuePullRequestProgress の内訳", () => {
       expect(step?.state).toBe(state);
       expect(step?.detail).toBe(detail);
     }
+  });
+
+  it("前のheadに対するレビュー判定は再レビュー中へ戻し、失敗として残さない（#3967）", () => {
+    const progress = buildIssuePullRequestProgress(
+      pullRequest({
+        headSha: "new-head",
+        mergeJudgement: judgement({ state: "settled", aiReview: "passed" }),
+        reviewVerdict: reviewVerdict("changes-requested", "old-head"),
+      }),
+    );
+
+    expect(labelOf("ai-review", progress)).toMatchObject({ state: "current", detail: "再レビュー中" });
+    expect(progress).toMatchObject({ label: "再レビュー中", tone: "running", stopKind: null });
+    expect(labelOf("merge", progress)?.state).toBe("pending");
   });
 
   it("コンフリクトは解消済み・要対応・確認中を工程の状態として返す", () => {
