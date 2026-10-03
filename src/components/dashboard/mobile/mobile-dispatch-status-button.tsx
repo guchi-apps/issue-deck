@@ -84,10 +84,10 @@ export function MobileDispatchStatusButton({
       </SheetTrigger>
       {/*
         ホストの様子とキューを合わせると縦に伸びるため、画面の高さの85%までにして中を
-        スクロールさせる。`svh`なのはiOS Safariのアドレスバーぶんでシートが画面外へ
+        スクロールさせる。見出し・更新・一括操作は固定し、その下だけスクロールする（#3818）。`svh`なのはiOS Safariのアドレスバーぶんでシートが画面外へ
         はみ出さないようにするため
       */}
-      <SheetContent side="bottom" className="max-h-[85svh] gap-2 overflow-y-auto p-4 pb-8">
+      <SheetContent side="bottom" className="max-h-[85svh] gap-2 overflow-hidden p-4 pb-8">
         <SheetHeader className="p-0">
           <SheetTitle className="text-sm">実行状況</SheetTitle>
           <SheetDescription className="text-xs">
@@ -117,6 +117,7 @@ function SheetBody({
   return (
     <DispatchQueueContent
       dispatch={dispatch}
+      pinTop
       // 開いたまま後ろの画面だけが変わると何が起きたのか分からないので、閉じてから遷移する
       onOpenIssue={(issueId) => {
         onClose();
