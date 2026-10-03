@@ -35,7 +35,7 @@ describe("markPlanReviewPosted（#3659・#3648）", () => {
     expect(findJob).not.toHaveBeenCalled();
   });
 
-  it("未記入のclaudeのSUCCEEDEDジョブのうち、15分以内で最も古いものへ届いた時刻を記録し、そのジョブを返す", async () => {
+  it("未記入のSUCCEEDEDジョブのうち、15分以内で最も古いものへ届いた時刻を記録し、そのジョブを返す", async () => {
     const createdAt = new Date("2026-09-30T11:55:00Z");
     findJob.mockResolvedValueOnce(null).mockResolvedValueOnce({ id: "job-1", createdAt });
 
@@ -47,7 +47,6 @@ describe("markPlanReviewPosted（#3659・#3648）", () => {
           repositoryFullName: "guchi-apps/issue-deck",
           issueNumber: 3659,
           kind: "PLAN_REVIEW",
-          agent: "claude",
           status: "SUCCEEDED",
           reviewPostedAt: null,
           createdAt: { gte: new Date("2026-09-30T11:45:00Z"), lte: POSTED_AT },
@@ -57,6 +56,20 @@ describe("markPlanReviewPosted（#3659・#3648）", () => {
     );
     expect(updateJob).toHaveBeenCalledWith({
       where: { id: "job-1" },
+      data: { reviewPostedAt: POSTED_AT },
+    });
+  });
+
+  it("レビューを実行したCLIで絞らず、CodexのG1レビューも記録できる", async () => {
+    const createdAt = new Date("2026-09-30T11:55:00Z");
+    findJob.mockResolvedValueOnce(null).mockResolvedValueOnce({ id: "codex-job-1", createdAt });
+
+    await expect(markPlanReviewPosted(params(REVIEW))).resolves.toEqual({ jobId: "codex-job-1", createdAt });
+
+    const where = findJob.mock.calls[1][0].where as Record<string, unknown>;
+    expect(where).not.toHaveProperty("agent");
+    expect(updateJob).toHaveBeenCalledWith({
+      where: { id: "codex-job-1" },
       data: { reviewPostedAt: POSTED_AT },
     });
   });
