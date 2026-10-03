@@ -60,10 +60,40 @@ const YOTEIFLOW: WebviewIosRepository = {
   ],
 };
 
+/** aide。ios/配下のAIDEiosをTestFlightへ自動配信する（#3834）。Mac miniのチェックアウトは`~/apps/aide` */
+const AIDE: WebviewIosRepository = {
+  appLabel: "aide",
+  xcodeProjectPath: "ios/AIDEios.xcodeproj",
+  command:
+    "cd ~/apps/aide &&\ngit status --short &&\ngit switch develop &&\ngit pull --ff-only origin develop &&\nopen ios/AIDEios.xcodeproj",
+  setupReferences: [
+    {
+      label: "ios/README.md",
+      url: "https://github.com/guchi-apps/aide/blob/develop/ios/README.md",
+    },
+  ],
+};
+
+/** morrow。ios/配下のMorrowをTestFlightへ自動配信する（#3834）。Mac miniのチェックアウトは`~/apps/morrow` */
+const MORROW: WebviewIosRepository = {
+  appLabel: "morrow",
+  xcodeProjectPath: "ios/Morrow.xcodeproj",
+  command:
+    "cd ~/apps/morrow &&\ngit status --short &&\ngit switch develop &&\ngit pull --ff-only origin develop &&\nopen ios/Morrow.xcodeproj",
+  setupReferences: [
+    {
+      label: "ios/README.md",
+      url: "https://github.com/guchi-apps/morrow/blob/develop/ios/README.md",
+    },
+  ],
+};
+
 const WEBVIEW_IOS_REPOSITORIES: Readonly<Record<string, WebviewIosRepository>> = {
   "guchi-apps/kurashio": KURASHIO,
   "guchi-apps/myroom": KURASHIO,
   "guchi-apps/yoteiflow": YOTEIFLOW,
+  "guchi-apps/aide": AIDE,
+  "guchi-apps/morrow": MORROW,
 };
 
 export function getWebviewIosRepository(repositoryFullName: string): WebviewIosRepository | null {

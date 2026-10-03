@@ -39,6 +39,8 @@ export const IOS_EXTENSION_REPOSITORY_NAMES = [
   "guchi-apps/kurashio",
   "guchi-apps/myroom",
   "guchi-apps/yoteiflow",
+  "guchi-apps/aide",
+  "guchi-apps/morrow",
 ] as const;
 
 /** 走査するSwiftファイルのパス。拡張が置かれる名前だけに絞り、取得するBlobの数を抑える */

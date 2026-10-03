@@ -524,6 +524,7 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   [`settings/changelog-section.tsx`](../src/components/dashboard/settings/changelog-section.tsx)で
   PC・スマホ共通。**バージョン表示（`app-version-button.tsx`）は区分の外**（PCは左タブ最下部・
   スマホは一覧最下部）に置く——アカウント区分の中にあった頃は開かないと見えなかった。
+- **GitHub Appのレート制限をサーバー間で読む`GET /api/github/rate-limit/apps`**（#3830）。応答は`GET /api/github/rate-limit`と同じ形で、セッションに依存せず全インストールを返す。認証は`/api/typesafe/usage`と同じ`OPS_API_TOKEN`のBearer（新しいシークレットは増やさない）。StatusHubの利用枠画面が読む。
 - **枠の消費を出すバーは[`usage-meter.tsx`](../src/components/dashboard/usage-meter.tsx)を使う**（#1651）。
   設定の「使用量と障害状況」区分にあるClaudeプラン使用量（`claude-usage-card.tsx`）とGitHub API使用量の
   レート制限（`github-rate-limit-list.tsx`）が共通で読む。**使用量を左から右へ伸ばし、経過時間は
