@@ -263,3 +263,13 @@ export function checkIosDispatchable(input: {
   if (input.hasActiveRun) return "run_in_progress";
   return null;
 }
+
+/**
+ * 畳んだ行のスマホアイコンに斜線を引くか（#3799）。最新リリースがまだTestFlightへ配布できていない
+ * 状態（配布中・Webデプロイ待ち・失敗・未起動）だけtrue。配布済み・更新不要・過去の版（判定できない）・
+ * 読み込み前（null）は、誤って警告しないようfalse。
+ */
+export function isIosDistributionPending(state: IosReleasePanelState | null): boolean {
+  if (state === null) return false;
+  return state.kind === "running" || state.kind === "awaiting-web" || state.kind === "failed" || state.kind === "ready";
+}
