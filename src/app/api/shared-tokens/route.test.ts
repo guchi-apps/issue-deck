@@ -4,6 +4,7 @@ import { NextRequest } from "next/server";
 const findUnique = vi.fn();
 const createUsage = vi.fn();
 const create = vi.fn();
+const update = vi.fn();
 
 vi.mock("@/lib/db", () => ({
   db: {
@@ -13,6 +14,9 @@ vi.mock("@/lib/db", () => ({
       },
       get create() {
         return create;
+      },
+      get update() {
+        return update;
       },
     },
     sharedTokenUsage: {
@@ -28,7 +32,7 @@ vi.mock("@/lib/crypto/secret-cipher", () => ({
   decryptSecret: (value: string) => value.replace(/^encrypted:/, ""),
 }));
 
-const { GET, POST } = await import("./route");
+const { GET, POST, PUT } = await import("./route");
 
 function request(path: string, init: ConstructorParameters<typeof NextRequest>[1] = {}) {
   return new NextRequest(`http://localhost${path}`, init);
@@ -99,6 +103,48 @@ describe("共有トークンAPI", () => {
         sourceReference: null,
         usages: { create: { consumer: "ai-agent", action: "create" } },
       },
+    });
+  });
+
+  const putRequest = (body: unknown) =>
+    request("/api/shared-tokens", {
+      method: "PUT",
+      headers: {
+        authorization: "Bearer shared-secret",
+        "content-type": "application/json",
+        "x-shared-token-consumer": "status-hub",
+      },
+      body: JSON.stringify(body),
+    });
+
+  it("PUTは既存の値を上書きし、操作updateを記録する（説明は省略時に保つ）", async () => {
+    findUnique.mockResolvedValue({ id: "token-1", name: "TOKEN" });
+    update.mockResolvedValue({ id: "token-1", name: "TOKEN" });
+    const res = await PUT(putRequest({ name: "TOKEN", value: "new-value" }));
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ id: "token-1", name: "TOKEN" });
+    expect(update).toHaveBeenCalledWith({
+      where: { id: "token-1" },
+      data: {
+        encryptedValue: "encrypted:new-value",
+        usages: { create: { consumer: "status-hub", action: "update" } },
+      },
+    });
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it("PUTは無ければ作成する", async () => {
+    findUnique.mockResolvedValue(null);
+    create.mockResolvedValue({ id: "token-2", name: "NEW" });
+    const res = await PUT(putRequest({ name: "NEW", value: "v" }));
+
+    expect(res.status).toBe(201);
+    expect(create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        name: "NEW",
+        usages: { create: { consumer: "status-hub", action: "create" } },
+      }),
     });
   });
 });
