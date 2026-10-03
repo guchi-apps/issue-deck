@@ -153,13 +153,13 @@ describe("PullRequestFixIssueBar の既存修正Issueへの気づかせ（#3331�
 
     const link = screen.getByRole("link", { name: /起票済み（#3001）/ });
     expect(link.getAttribute("href")).toBe("https://github.com/guchi-apps/issue-deck/issues/3001");
-    expect(screen.queryByRole("button", { name: /修正Issueを起案/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /範囲外の課題をIssueにする/ })).toBeNull();
   });
 
   it("既存の修正Issueが無ければ、従来どおり起票ボタンを出す", () => {
     renderBar(makePullRequest(), [], { existingFixIssue: null });
 
-    expect(screen.getByRole("button", { name: /修正Issueを起案/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /範囲外の課題をIssueにする/ })).toBeTruthy();
     expect(screen.queryByRole("link", { name: /起票済み/ })).toBeNull();
   });
 });
