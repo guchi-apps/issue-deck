@@ -478,7 +478,7 @@ function FindingItem({
             aria-pressed={!skipped}
             onClick={() => onChangeSkipped(false)}
             className={cn(
-              "h-11 flex-1 px-3 text-xs md:h-7",
+              "h-11 flex-1 whitespace-nowrap px-3 text-xs md:h-7",
               !skipped ? "bg-primary text-primary-foreground" : "bg-background text-muted-foreground hover:bg-muted",
             )}
           >
@@ -489,7 +489,7 @@ function FindingItem({
             aria-pressed={skipped}
             onClick={() => onChangeSkipped(true)}
             className={cn(
-              "h-11 flex-1 border-l px-3 text-xs md:h-7",
+              "h-11 flex-1 whitespace-nowrap border-l px-3 text-xs md:h-7",
               skipped ? "bg-muted font-semibold text-foreground" : "bg-background text-muted-foreground hover:bg-muted",
             )}
           >

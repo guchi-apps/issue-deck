@@ -52,7 +52,11 @@ import {
   IosReleaseGroupPanel,
   type IosFixIssueOrigin,
 } from "@/components/dashboard/ios-release-group-panel";
-import { IosDistributionIcon } from "@/components/dashboard/ios-distribution-icon";
+import {
+  IosDistributingBadge,
+  IosDistributionIcon,
+  useIosDistributionState,
+} from "@/components/dashboard/ios-distribution-icon";
 import { ReleaseRebuildButton } from "@/components/dashboard/release-rebuild-button";
 import { getWebviewIosRepository } from "@/lib/webview-ios-repos";
 import { ResizeHandle } from "@/components/dashboard/resize-handle";
@@ -964,11 +968,14 @@ function ReleaseGroupHeader({
   releaseButton,
   rebuildButton,
   deviceBuild,
+  showIosDistribution = false,
   onMerged,
 }: {
   repositoryFullName: string;
   group: BranchFlowReleaseGroup;
   releaseButton?: React.ReactNode;
+  /** iOS配布のパネルを出すか。最新のマージ済みの束だけに出す（#3808） */
+  showIosDistribution?: boolean;
   /** リリースPRを閉じてバンプから作り直す導線（#3014）。リリースPRが開いている束だけに渡す */
   rebuildButton?: React.ReactNode;
   /**
@@ -1156,7 +1163,7 @@ function ReleaseGroupHeader({
         )}
 
         {/* kurashioのiOS TestFlight配布（#3644）。Webのデプロイとは別の行で、iOSの成否を混ぜない */}
-        {webviewIos && released && group.pullRequest?.merged && (
+        {showIosDistribution && webviewIos && released && group.pullRequest?.merged && (
           <IosReleaseGroupPanel
             owner={repositoryFullName.split("/")[0]}
             repo={repositoryFullName.split("/")[1]}
@@ -1288,6 +1295,10 @@ function ReleaseFlowGraph({
       ? pendingGroups
       : repository.releaseGroups.slice(0, 1);
   const hiddenGroups = repository.releaseGroups.slice(visibleGroups.length);
+  // iOS配布のパネルは最新のマージ済みの束にだけ出す（#3808。見出しのアイコンと同じ基準）
+  const latestMergedGroupKey = repository.releaseGroups.find(
+    (group) => group.mergedAt !== null && group.pullRequest?.merged,
+  )?.key;
   const unassignedLanes = showAllVersions ? repository.unassignedLanes : [];
   // 版を特定できないレーンもボタンの向こうにいる（#1711）。**畳んだ束が無いときでもボタンを出す
   // 理由**で、ここを見ずに`hiddenGroups`だけで判断すると、開く手段が画面のどこにも無くなる。
@@ -1420,6 +1431,7 @@ function ReleaseFlowGraph({
             group={group}
             onMerged={onMerged}
             deviceBuild={repository.deviceBuild}
+            showIosDistribution={group.key === latestMergedGroupKey}
             releaseButton={
               /* **Xcodeで実機へ反映するリポジトリには出さない**（#3468）。リリースPRの作成から
                  mainへのマージまでをMacのスクリプトが持ち、画面の導線はコマンドの表示だけにする。
@@ -1560,6 +1572,7 @@ function ReleaseGroupHeaderWithLanes({
   releaseButton,
   rebuildButton,
   deviceBuild,
+  showIosDistribution,
   onMerged,
 }: {
   repositoryFullName: string;
@@ -1567,6 +1580,7 @@ function ReleaseGroupHeaderWithLanes({
   releaseButton?: React.ReactNode;
   rebuildButton?: React.ReactNode;
   deviceBuild?: BranchFlowDeviceBuild | null;
+  showIosDistribution?: boolean;
   onMerged: (pullRequest: PullRequestSummary) => void;
 }) {
   // リリースPRの凍結後にdevelopへ入った作業は、その版に含まれないので見出しの上へ出す（#3664）
@@ -1595,6 +1609,7 @@ function ReleaseGroupHeaderWithLanes({
         releaseButton={releaseButton}
         rebuildButton={rebuildButton}
         deviceBuild={deviceBuild}
+        showIosDistribution={showIosDistribution}
         onMerged={onMerged}
       />
       {included.length > 0 && (
@@ -1685,11 +1700,21 @@ function RepositorySummaryRow({
   // 成功したデプロイは畳んだ行に出さない（静止している状態でバッジを埋めない。#1579）
   const deploy =
     summary.deploy && summary.deploy.kind !== "success" ? summary.deploy : null;
+  const [ownerName, repoName] = repository.repositoryFullName.split("/");
+  const webviewIos = getWebviewIosRepository(repository.repositoryFullName);
+  const iosDistribution = useIosDistributionState(
+    ownerName,
+    repoName,
+    repository.releaseGroups.find((group) => group.mergedAt !== null && group.pullRequest?.merged)
+      ?.pullRequest?.number ?? null,
+    webviewIos !== null,
+  );
   const hasAnything =
     summary.activeLaneCount > 0 ||
     summary.releaseInProgress ||
     releaseLaunching ||
     deploy !== null ||
+    iosDistribution.running ||
     unreleased.count > 0 ||
     summary.openManualStepCount > 0 ||
     summary.startedIssueCount > 0 ||
@@ -1740,16 +1765,7 @@ function RepositorySummaryRow({
           版番号・鍵と同じ「静的な属性」なので右側の「手が要るか」の列へは並べず、「動きなし」の
           判定（`hasAnything`）にも数えない。色は配布カード・内訳（`ios-release-group-panel.tsx`）の
           青で、他の意味の色（紫＝リリース・琥珀＝手が要る・緑＝成功・赤＝失敗）とは重ねない */}
-      {getWebviewIosRepository(repository.repositoryFullName) && (
-        <IosDistributionIcon
-          owner={repository.repositoryFullName.split("/")[0]}
-          repo={repository.repositoryFullName.split("/")[1]}
-          prNumber={
-            repository.releaseGroups.find((group) => group.mergedAt !== null && group.pullRequest?.merged)
-              ?.pullRequest?.number ?? null
-          }
-        />
-      )}
+      {webviewIos && <IosDistributionIcon pending={iosDistribution.pending} />}
 
       <span className="flex-1" />
 
@@ -1783,6 +1799,8 @@ function RepositorySummaryRow({
         )
       )}
       {/* マージ後もデプロイが終わるまでは本番へ出ていない。開かなくても分かるようにする（#1579） */}
+      {/* TestFlightへの配布が走っている間だけ（#3806）。Webのデプロイとは別の行為なので別のピルにする */}
+      {iosDistribution.running && <IosDistributingBadge />}
       <DeployStateBadge deploy={deploy} compact linkToRun={false} />
 
       {/* **PRのマージ待ちは畳んだ行に出さない**（#2172）。8リポジトリを1行ずつ並べる画面で

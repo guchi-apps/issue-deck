@@ -11,7 +11,8 @@
 
 import { execFile } from "node:child_process";
 import { createServer } from "node:http";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -30,6 +31,8 @@ let decisionQueue;
 let releaseResponse;
 /** 受け取ったリクエストの記録（メソッドとパスだけ） */
 let received;
+/** 質問の登録（`POST /question`）で受け取った本文 */
+let questionPayloads;
 
 function ok(body) {
   return { code: 200, body };
@@ -43,6 +46,7 @@ beforeEach(async () => {
   decisionQueue = [];
   releaseResponse = ok({ status: "DEFERRED", answers: null });
   received = [];
+  questionPayloads = [];
 
   server = createServer((request, response) => {
     const url = new URL(request.url, "http://127.0.0.1");
@@ -54,8 +58,14 @@ beforeEach(async () => {
     };
 
     if (url.pathname === "/api/dispatch/sessions/question" && request.method === "POST") {
-      request.resume();
-      send(ok({ ok: true, labeled: true, questionRequestId: "req-1" }));
+      let body = "";
+      request.on("data", (chunk) => {
+        body += chunk;
+      });
+      request.on("end", () => {
+        questionPayloads.push(JSON.parse(body));
+        send(ok({ ok: true, labeled: true, questionRequestId: "req-1" }));
+      });
       return;
     }
     if (url.pathname === "/api/dispatch/sessions/question/decision" && request.method === "GET") {
@@ -112,7 +122,7 @@ const HOOK_JSON = JSON.stringify({
  * **同期実行にしない。** 返事を返すHTTPサーバーがこのプロセスに居るため、イベントループを
  * 止めると自分で自分の返事を止めることになり、必ず「届かない」側に倒れる。
  */
-function runHook() {
+function runHook(hookJson = HOOK_JSON) {
   const child = execFile("bash", [script, "2189", "issue-deck", "guchi-apps/issue-deck"], {
     encoding: "utf8",
     cwd: repoRoot,
@@ -140,7 +150,7 @@ function runHook() {
     child.on("error", reject);
     child.on("close", () => resolve(stdout));
   });
-  child.stdin.end(HOOK_JSON);
+  child.stdin.end(hookJson);
   return done;
 }
 
@@ -211,5 +221,73 @@ describe("質問への回答待ち", () => {
     const decision = decisionOf(await runHook());
 
     expect(decision).toMatchObject({ permissionDecision: "allow" });
+  });
+}, 60_000);
+
+// 質問の前提（#3569・#3809）。差し戻したあとの呼び直しで、差し戻した応答の本文を転記から
+// 読んで`context`として送る。ここでは「直前に差し戻した」印と転記を先に置いて、呼び直しの
+// 時点を再現する
+describe("質問の前提", () => {
+  const SESSION_ID = "session-3809";
+
+  /** 差し戻した応答（同じ`message.id`のブロックを1行ずつ）を転記に置き、呼び直しのフックJSONを返す */
+  function retriedHookJson(blocks) {
+    const markerDir = path.join(workDir, ".local/state/issue-deck/sessions/question-retry");
+    mkdirSync(markerDir, { recursive: true });
+    writeFileSync(
+      path.join(markerDir, createHash("sha256").update(SESSION_ID).digest("hex").slice(0, 32)),
+      "0\n",
+    );
+    const transcript = path.join(workDir, "transcript.jsonl");
+    const lines = [
+      { type: "user", message: { role: "user", content: "前の指示" } },
+      { type: "assistant", message: { id: "msg-old", content: [{ type: "text", text: "前の応答の本文" }] } },
+      ...[...blocks, { type: "tool_use", name: "AskUserQuestion", input: TOOL_INPUT }].map((block) => ({
+        type: "assistant",
+        message: { id: "msg-asked", content: [block] },
+      })),
+    ];
+    writeFileSync(transcript, lines.map((line) => JSON.stringify(line)).join("\n") + "\n");
+    return JSON.stringify({
+      hook_event_name: "PreToolUse",
+      tool_name: "AskUserQuestion",
+      tool_input: TOOL_INPUT,
+      transcript_path: transcript,
+      session_id: SESSION_ID,
+    });
+  }
+
+  async function sentContext(blocks) {
+    decisionQueue = [ok({ status: "DEFERRED", answers: null })];
+    await runHook(retriedHookJson(blocks));
+    expect(questionPayloads).toHaveLength(1);
+    return questionPayloads[0].context;
+  }
+
+  it("同じ応答の本文（text）を前提として送る", async () => {
+    expect(await sentContext([{ type: "text", text: "上記のコードを実行します" }])).toBe(
+      "上記のコードを実行します",
+    );
+  });
+
+  // 前置きを思考に書いて質問すると、Claudeアプリには引用の見た目で出るのに画面には
+  // 何も出なかった（#3809）
+  it("本文の入った思考（thinking）も引用にして送る", async () => {
+    expect(
+      await sentContext([
+        { type: "thinking", thinking: "App Store Connectで新規App作成が必要です。\n\nその後TestFlightへ進みます。", signature: "x" },
+        { type: "text", text: "確認します" },
+      ]),
+    ).toBe("> App Store Connectで新規App作成が必要です。\n>\n> その後TestFlightへ進みます。\n\n確認します");
+  });
+
+  // 転記の思考はふつう署名だけで空。空の引用を前提に出さない
+  it("空の思考は拾わない", async () => {
+    expect(
+      await sentContext([
+        { type: "thinking", thinking: "", signature: "x" },
+        { type: "text", text: "上記のコードを実行します" },
+      ]),
+    ).toBe("上記のコードを実行します");
   });
 }, 60_000);
