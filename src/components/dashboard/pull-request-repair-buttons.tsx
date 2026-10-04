@@ -26,7 +26,7 @@ import {
 import { cn } from "@/lib/utils";
 
 type AutoRepairLoop = {
-  status: "running" | "completed" | "stopped";
+  status: "dispatching" | "running" | "completed" | "stopped";
   round: number;
   currentKind: RepairKind | null;
   stopReason: string | null;
@@ -163,6 +163,9 @@ export function PullRequestRepairButtons({
         <span className="text-xs text-muted-foreground" title={`${REPAIR_TARGET_LABEL[runningKind]}を処理中`}>
           PRを自動修正中です（{REPAIR_TARGET_LABEL[runningKind]}）。修正後のCI・再レビューも自動で確認します。
         </span>
+      )}
+      {loop?.status === "dispatching" && (
+        <span className="text-xs text-muted-foreground">自動修正ワークフローを起動中です。</span>
       )}
       {loop?.status === "running" && (
         <span className="text-xs text-muted-foreground">
