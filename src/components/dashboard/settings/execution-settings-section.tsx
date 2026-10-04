@@ -279,25 +279,27 @@ export function ExecutionSettingsSection({
       const dispatchOk = await updateDispatchConcurrency(dispatchConcurrency);
       if (!dispatchOk) return;
     }
+    // 親へも「この区分で実際に保存した値」だけを反映する。他区分の未保存stateを
+    // 保存済みpropsへ混ぜると、未保存表示が消えたり後の保存で巻き戻るため、initial値を維持する。
     onUpdated({
-      autoRetryLimit,
-      claudeModel,
-      githubActionsAgent,
-      githubActionsCodexModel,
-      claudeModelAssist,
-      claudeLocalModel,
-      codexModel,
-      defaultDispatchAgent,
-      planReviewAgentForClaude,
-      planReviewAgentForCodex,
-      planReviewClaudeModel,
-      planReviewCodexModel,
-      dispatchFailoverEnabled,
-      dispatchFailoverThresholdPercent,
-      appAiModel,
-      appAiModelReasoning,
-      modelPickEngine,
-      dispatchConcurrency,
+      autoRetryLimit: mode === "execution" || mode === "all" ? autoRetryLimit : initialAutoRetryLimit,
+      claudeModel: mode === "ai" || mode === "all" ? claudeModel : initialClaudeModel,
+      githubActionsAgent: mode === "ai" || mode === "all" ? githubActionsAgent : initialGithubActionsAgent,
+      githubActionsCodexModel: mode === "ai" || mode === "all" ? githubActionsCodexModel : initialGithubActionsCodexModel,
+      claudeModelAssist: mode === "ai" || mode === "all" ? claudeModelAssist : initialClaudeModelAssist,
+      claudeLocalModel: mode === "ai" || mode === "all" ? claudeLocalModel : initialClaudeLocalModel,
+      codexModel: mode === "ai" || mode === "all" ? codexModel : initialCodexModel,
+      defaultDispatchAgent: mode === "execution" || mode === "all" ? defaultDispatchAgent : initialDefaultDispatchAgent,
+      planReviewAgentForClaude: mode === "automation" || mode === "all" ? planReviewAgentForClaude : initialPlanReviewAgentForClaude,
+      planReviewAgentForCodex: mode === "automation" || mode === "all" ? planReviewAgentForCodex : initialPlanReviewAgentForCodex,
+      planReviewClaudeModel: mode === "automation" || mode === "all" ? planReviewClaudeModel : initialPlanReviewClaudeModel,
+      planReviewCodexModel: mode === "automation" || mode === "all" ? planReviewCodexModel : initialPlanReviewCodexModel,
+      dispatchFailoverEnabled: mode === "execution" || mode === "all" ? dispatchFailoverEnabled : initialDispatchFailoverEnabled,
+      dispatchFailoverThresholdPercent: mode === "execution" || mode === "all" ? dispatchFailoverThresholdPercent : initialDispatchFailoverThresholdPercent,
+      appAiModel: mode === "ai" || mode === "all" ? appAiModel : initialAppAiModel,
+      appAiModelReasoning: mode === "ai" || mode === "all" ? appAiModelReasoning : initialAppAiModelReasoning,
+      modelPickEngine: mode === "ai" || mode === "all" ? modelPickEngine : initialModelPickEngine,
+      dispatchConcurrency: mode === "execution" || mode === "all" ? dispatchConcurrency : initialDispatchConcurrency,
     });
     setIsSaved(true);
   }
@@ -364,7 +366,7 @@ export function ExecutionSettingsSection({
         <p className="text-xs text-muted-foreground">
           「実装を開始」を開いたときの最初の選択です。Issueごとに選び直した値、既存セッションの再開、GitHub Actionsには影響しません。
         </p>
-      </div>}
+      </div>
 
       {(mode === "automation" || mode === "all") && <div id="plan-review-settings" className="flex flex-col gap-3 border-t pt-4">
         <div>
@@ -706,7 +708,7 @@ export function ExecutionSettingsSection({
 
       {error && <p className="text-sm text-destructive">{error}</p>}
 
-      {<div className="flex items-center gap-3 border-t pt-4">
+      <div className="flex items-center gap-3 border-t pt-4">
         <Button onClick={handleSubmit} disabled={isSubmitting || !isValid || !sectionDirty}>
           {isSubmitting ? "保存中..." : "保存"}
         </Button>
