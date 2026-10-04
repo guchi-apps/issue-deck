@@ -50,6 +50,8 @@ export async function runPullRequestAutoRepairSweep(): Promise<{ scanned: number
       };
       const decision = decideAutoRepairLoop(loop, {
         state: pullRequest.state === "closed" ? "closed" : "open",
+        draft: pullRequest.draft,
+        reviewRequired: pullRequest.base.ref === "develop" && pullRequest.head.ref.startsWith("issue-"),
         headSha: pullRequest.head.sha,
         mergeable: current.mergeable,
         ciState: current.ciState,
