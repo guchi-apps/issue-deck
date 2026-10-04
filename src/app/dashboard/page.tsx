@@ -1,17 +1,11 @@
 import { IssueDeckShell } from "@/components/dashboard/issue-deck-shell";
 import {
   AUTO_RETRY_LIMIT_MIN,
-  APP_AI_MODEL_DEFAULT,
-  APP_AI_MODEL_REASONING_DEFAULT,
   MODEL_PICK_ENGINE_DEFAULT,
-  PLAN_REVIEW_AGENT_FOR_CLAUDE_DEFAULT,
-  PLAN_REVIEW_AGENT_FOR_CODEX_DEFAULT,
   PLAN_REVIEW_CLAUDE_MODEL_DEFAULT,
   PLAN_REVIEW_CODEX_MODEL_DEFAULT,
   CLAUDE_LOCAL_MODEL_DEFAULT,
   CODEX_MODEL_DEFAULT,
-  DEFAULT_DISPATCH_AGENT_SETTING,
-  GITHUB_ACTIONS_AGENT_DEFAULT,
   GITHUB_ACTIONS_CODEX_MODEL_DEFAULT,
   DISPATCH_FAILOVER_THRESHOLD_PERCENT_DEFAULT,
   DISPATCH_CONCURRENCY_DEFAULT,
@@ -20,12 +14,11 @@ import {
   parseClaudeModel,
   parseCodexModelSetting,
   parseCodexLocalModel,
-  parseAppAiModel,
   parseDefaultDispatchAgent,
-  parseGithubActionsAgent,
   parseDispatchFailoverThresholdPercent,
   parseModelPickEngine,
-  parsePlanReviewAgent,
+  resolveAiExecutionAgent,
+  resolveAppAiModel,
 } from "@/lib/app-settings";
 import { getCurrentUser } from "@/lib/auth-user";
 import { db } from "@/lib/db";
@@ -87,8 +80,9 @@ export default async function DashboardPage() {
     | null;
   const autoRetryLimit = appSetting?.autoRetryLimit ?? AUTO_RETRY_LIMIT_MIN;
   const claudeModel = parseClaudeModel(appSetting?.claudeModel) ?? "auto";
+  const aiExecutionProvider = parseDefaultDispatchAgent(appSetting?.aiExecutionProvider) ?? "claude";
   const githubActionsAgent =
-    parseGithubActionsAgent(appSetting?.githubActionsAgent) ?? GITHUB_ACTIONS_AGENT_DEFAULT;
+    resolveAiExecutionAgent(appSetting?.githubActionsAgent, aiExecutionProvider);
   const githubActionsCodexModel =
     parseCodexLocalModel(appSetting?.githubActionsCodexModel) ?? GITHUB_ACTIONS_CODEX_MODEL_DEFAULT;
   const claudeModelAssist = parseClaudeModel(appSetting?.claudeModelAssist) ?? "auto";
@@ -99,11 +93,11 @@ export default async function DashboardPage() {
     parseClaudeLocalModelSetting(appSetting?.claudeLocalModel) ?? CLAUDE_LOCAL_MODEL_DEFAULT;
   const codexModel = parseCodexModelSetting(appSetting?.codexModel) ?? CODEX_MODEL_DEFAULT;
   const defaultDispatchAgent =
-    parseDefaultDispatchAgent(appSetting?.defaultDispatchAgent) ?? DEFAULT_DISPATCH_AGENT_SETTING;
+    resolveAiExecutionAgent(appSetting?.defaultDispatchAgent, aiExecutionProvider);
   const planReviewAgentForClaude =
-    parsePlanReviewAgent(appSetting?.planReviewAgentForClaude) ?? PLAN_REVIEW_AGENT_FOR_CLAUDE_DEFAULT;
+    resolveAiExecutionAgent(appSetting?.planReviewAgentForClaude, aiExecutionProvider);
   const planReviewAgentForCodex =
-    parsePlanReviewAgent(appSetting?.planReviewAgentForCodex) ?? PLAN_REVIEW_AGENT_FOR_CODEX_DEFAULT;
+    resolveAiExecutionAgent(appSetting?.planReviewAgentForCodex, aiExecutionProvider);
   const planReviewClaudeModel =
     parseClaudeLocalModel(appSetting?.planReviewClaudeModel) ?? PLAN_REVIEW_CLAUDE_MODEL_DEFAULT;
   const planReviewCodexModel =
@@ -112,9 +106,9 @@ export default async function DashboardPage() {
   const dispatchFailoverThresholdPercent =
     parseDispatchFailoverThresholdPercent(appSetting?.dispatchFailoverThresholdPercent) ??
     DISPATCH_FAILOVER_THRESHOLD_PERCENT_DEFAULT;
-  const appAiModel = parseAppAiModel(appSetting?.appAiModel) ?? APP_AI_MODEL_DEFAULT;
+  const appAiModel = resolveAppAiModel(appSetting?.appAiModel, aiExecutionProvider);
   const appAiModelReasoning =
-    parseAppAiModel(appSetting?.appAiModelReasoning) ?? APP_AI_MODEL_REASONING_DEFAULT;
+    resolveAppAiModel(appSetting?.appAiModelReasoning, aiExecutionProvider, true);
   const modelPickEngine =
     parseModelPickEngine(appSetting?.modelPickEngine) ?? MODEL_PICK_ENGINE_DEFAULT;
   const dispatchConcurrency = appSetting?.dispatchConcurrency ?? DISPATCH_CONCURRENCY_DEFAULT;
@@ -155,6 +149,7 @@ export default async function DashboardPage() {
       issuesFetchedAt={new Date().toISOString()}
       autoRetryLimit={autoRetryLimit}
       claudeModel={claudeModel}
+      aiExecutionProvider={aiExecutionProvider}
       githubActionsAgent={githubActionsAgent}
       githubActionsCodexModel={githubActionsCodexModel}
       claudeModelAssist={claudeModelAssist}

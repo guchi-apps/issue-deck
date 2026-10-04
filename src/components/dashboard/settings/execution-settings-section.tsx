@@ -33,6 +33,7 @@ import {
   DISPATCH_FAILOVER_THRESHOLD_PERCENT_MIN,
   MODEL_PICK_ENGINE_OPTIONS,
   type AppAiModel,
+  type AiExecutionProvider,
   type ClaudeLocalModel,
   type ClaudeLocalModelSetting,
   type ClaudeModel,
@@ -45,6 +46,7 @@ import {
 } from "@/lib/app-settings";
 
 export type AppSettingsValues = {
+  aiExecutionProvider: AiExecutionProvider;
   autoRetryLimit: number;
   claudeModel: ClaudeModel;
   githubActionsAgent: GithubActionsAgent;
@@ -71,6 +73,7 @@ export type ExecutionSettingsSectionProps = {
   /** 既存の保存APIを保ったまま、設定の目的ごとにフォームを表示する。 */
   mode?: ExecutionSettingsMode;
   autoRetryLimit: number;
+  aiExecutionProvider: AiExecutionProvider;
   claudeModel: ClaudeModel;
   githubActionsAgent: GithubActionsAgent;
   githubActionsCodexModel: CodexLocalModel;
@@ -102,6 +105,7 @@ export type ExecutionSettingsSectionProps = {
 export function ExecutionSettingsSection({
   mode = "all",
   autoRetryLimit: initialAutoRetryLimit,
+  aiExecutionProvider: initialAiExecutionProvider,
   claudeModel: initialClaudeModel,
   githubActionsAgent: initialGithubActionsAgent,
   githubActionsCodexModel: initialGithubActionsCodexModel,
@@ -124,6 +128,7 @@ export function ExecutionSettingsSection({
   const { updateAutoRetryLimit, updateClaudeModel, updateDispatchConcurrency, isSubmitting, error } =
     useAppSettingsMutations();
   const [autoRetryLimit, setAutoRetryLimit] = useState(initialAutoRetryLimit);
+  const [aiExecutionProvider, setAiExecutionProvider] = useState<AiExecutionProvider>(initialAiExecutionProvider);
   const [claudeModel, setClaudeModel] = useState<ClaudeModel>(initialClaudeModel);
   const [githubActionsAgent, setGithubActionsAgent] = useState<GithubActionsAgent>(initialGithubActionsAgent);
   const [githubActionsCodexModel, setGithubActionsCodexModel] = useState<CodexLocalModel>(initialGithubActionsCodexModel);
@@ -160,6 +165,7 @@ export function ExecutionSettingsSection({
   const [isSaved, setIsSaved] = useState(false);
   const previousInitials = useRef({
     autoRetryLimit: initialAutoRetryLimit,
+    aiExecutionProvider: initialAiExecutionProvider,
     claudeModel: initialClaudeModel,
     githubActionsAgent: initialGithubActionsAgent,
     githubActionsCodexModel: initialGithubActionsCodexModel,
@@ -185,6 +191,7 @@ export function ExecutionSettingsSection({
   useEffect(() => {
     const prev = previousInitials.current;
     setAutoRetryLimit((value) => value === prev.autoRetryLimit ? initialAutoRetryLimit : value);
+    setAiExecutionProvider((value) => value === prev.aiExecutionProvider ? initialAiExecutionProvider : value);
     setClaudeModel((value) => value === prev.claudeModel ? initialClaudeModel : value);
     setGithubActionsAgent((value) => value === prev.githubActionsAgent ? initialGithubActionsAgent : value);
     setGithubActionsCodexModel((value) => value === prev.githubActionsCodexModel ? initialGithubActionsCodexModel : value);
@@ -203,7 +210,7 @@ export function ExecutionSettingsSection({
     setModelPickEngine((value) => value === prev.modelPickEngine ? initialModelPickEngine : value);
     setDispatchConcurrency((value) => value === prev.dispatchConcurrency ? initialDispatchConcurrency : value);
     previousInitials.current = {
-      autoRetryLimit: initialAutoRetryLimit, claudeModel: initialClaudeModel,
+      autoRetryLimit: initialAutoRetryLimit, aiExecutionProvider: initialAiExecutionProvider, claudeModel: initialClaudeModel,
       githubActionsAgent: initialGithubActionsAgent, githubActionsCodexModel: initialGithubActionsCodexModel,
       claudeModelAssist: initialClaudeModelAssist, claudeLocalModel: initialClaudeLocalModel,
       codexModel: initialCodexModel, defaultDispatchAgent: initialDefaultDispatchAgent,
@@ -215,6 +222,7 @@ export function ExecutionSettingsSection({
       modelPickEngine: initialModelPickEngine, dispatchConcurrency: initialDispatchConcurrency,
     };
   }, [
+    initialAiExecutionProvider,
     initialAutoRetryLimit, initialClaudeModel, initialGithubActionsAgent, initialGithubActionsCodexModel,
     initialClaudeModelAssist, initialClaudeLocalModel, initialCodexModel, initialDefaultDispatchAgent,
     initialPlanReviewAgentForClaude, initialPlanReviewAgentForCodex, initialPlanReviewClaudeModel,
@@ -237,6 +245,8 @@ export function ExecutionSettingsSection({
 
   const isDirty =
     autoRetryLimit !== initialAutoRetryLimit ||
+    aiExecutionProvider !== initialAiExecutionProvider ||
+    aiExecutionProvider !== initialAiExecutionProvider ||
     claudeModel !== initialClaudeModel ||
     githubActionsAgent !== initialGithubActionsAgent ||
     githubActionsCodexModel !== initialGithubActionsCodexModel ||
@@ -256,6 +266,7 @@ export function ExecutionSettingsSection({
     dispatchConcurrency !== initialDispatchConcurrency;
 
   const aiDirty =
+    aiExecutionProvider !== initialAiExecutionProvider ||
     claudeModel !== initialClaudeModel ||
     githubActionsAgent !== initialGithubActionsAgent ||
     githubActionsCodexModel !== initialGithubActionsCodexModel ||
@@ -289,10 +300,26 @@ export function ExecutionSettingsSection({
       const autoRetryOk = await updateAutoRetryLimit(autoRetryLimit);
       if (!autoRetryOk) return;
     }
+    const onlyAiExecutionProviderChanged =
+      mode === "ai" &&
+      aiExecutionProvider !== initialAiExecutionProvider &&
+      claudeModel === initialClaudeModel &&
+      githubActionsAgent === initialGithubActionsAgent &&
+      githubActionsCodexModel === initialGithubActionsCodexModel &&
+      claudeModelAssist === initialClaudeModelAssist &&
+      claudeLocalModel === initialClaudeLocalModel &&
+      codexModel === initialCodexModel &&
+      appAiModel === initialAppAiModel &&
+      appAiModelReasoning === initialAppAiModelReasoning &&
+      modelPickEngine === initialModelPickEngine;
     const modelValues =
+      onlyAiExecutionProviderChanged
+        ? { aiExecutionProvider }
+        :
       mode === "ai"
         ? {
             claudeModel,
+            aiExecutionProvider,
             githubActionsAgent,
             githubActionsCodexModel,
             claudeModelAssist,
@@ -317,6 +344,7 @@ export function ExecutionSettingsSection({
               }
             : {
                 claudeModel,
+                aiExecutionProvider,
                 githubActionsAgent,
                 githubActionsCodexModel,
                 claudeModelAssist,
@@ -343,6 +371,7 @@ export function ExecutionSettingsSection({
     // 保存済みpropsへ混ぜると、未保存表示が消えたり後の保存で巻き戻るため、initial値を維持する。
     onUpdated({
       autoRetryLimit: mode === "execution" || mode === "all" ? autoRetryLimit : initialAutoRetryLimit,
+      aiExecutionProvider: mode === "ai" || mode === "all" ? aiExecutionProvider : initialAiExecutionProvider,
       claudeModel: mode === "ai" || mode === "all" ? claudeModel : initialClaudeModel,
       githubActionsAgent: mode === "ai" || mode === "all" ? githubActionsAgent : initialGithubActionsAgent,
       githubActionsCodexModel: mode === "ai" || mode === "all" ? githubActionsCodexModel : initialGithubActionsCodexModel,
@@ -366,6 +395,14 @@ export function ExecutionSettingsSection({
 
   return (
     <div className="flex flex-col gap-4">
+      {(mode === "ai" || mode === "all") && <section className="rounded-lg border bg-card p-4" aria-labelledby="ai-execution-provider">
+        <h3 id="ai-execution-provider" className="font-medium">AI実行プロバイダー</h3>
+        <p className="mt-1 text-sm text-muted-foreground">新しく開始するIssue実装・レビュー・アプリ内AIの既定実行先です。個別に固定した設定は変更しません。</p>
+        <div className="mt-3 grid grid-cols-2 gap-2">
+          {DISPATCH_AGENT_OPTIONS.map((option) => <Button key={option.value} type="button" variant={aiExecutionProvider === option.value ? "default" : "outline"} onClick={() => setAiExecutionProvider(option.value)}>{option.value === "claude" ? "Claude" : "Codex"}</Button>)}
+        </div>
+        <p className="mt-2 text-xs text-muted-foreground">現在: {aiExecutionProvider === "claude" ? "Claude" : "Codex"}。切替は次に開始する処理から適用されます。</p>
+      </section>}
       {(mode === "ai" || mode === "all") && <ExecutionFlowOverview
         claudeModel={claudeModel}
         githubActionsAgent={githubActionsAgent}

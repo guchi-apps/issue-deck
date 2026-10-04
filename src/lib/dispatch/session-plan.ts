@@ -17,13 +17,13 @@ import { SESSION_ARTIFACT_HTML_LIMIT } from "@/lib/dispatch/session-artifact";
 import { PLAN_REQUIRED_LABEL } from "@/lib/github/approval-labels";
 import { createComment } from "@/lib/github/issues-api";
 import {
-  PLAN_REVIEW_AGENT_FOR_CLAUDE_DEFAULT,
-  PLAN_REVIEW_AGENT_FOR_CODEX_DEFAULT,
   PLAN_REVIEW_CLAUDE_MODEL_DEFAULT,
   PLAN_REVIEW_CODEX_MODEL_DEFAULT,
   parseClaudeLocalModel,
   parseCodexLocalModel,
+  parseAiExecutionProvider,
   parsePlanReviewAgent,
+  resolveAiExecutionAgent,
   type ClaudeLocalModel,
   type CodexLocalModel,
   type PlanReviewAgent,
@@ -62,16 +62,17 @@ export function resolvePlanReviewAgentForSession(params: {
   sourceAgent?: SessionPlanAgent;
   planReviewAgentForClaude?: unknown;
   planReviewAgentForCodex?: unknown;
+  aiExecutionProvider?: unknown;
 }): PlanReviewAgent {
   const sourceAgent = params.sourceAgent ?? "claude";
   const configured =
     sourceAgent === "codex"
       ? parsePlanReviewAgent(params.planReviewAgentForCodex)
       : parsePlanReviewAgent(params.planReviewAgentForClaude);
-  if (configured) return configured;
-  return sourceAgent === "codex"
-    ? PLAN_REVIEW_AGENT_FOR_CODEX_DEFAULT
-    : PLAN_REVIEW_AGENT_FOR_CLAUDE_DEFAULT;
+  return resolveAiExecutionAgent(
+    configured,
+    parseAiExecutionProvider(params.aiExecutionProvider) ?? sourceAgent,
+  );
 }
 
 async function readPlanReviewSettingsForSession(sourceAgent?: SessionPlanAgent): Promise<{
@@ -85,6 +86,7 @@ async function readPlanReviewSettingsForSession(sourceAgent?: SessionPlanAgent):
       select: {
         planReviewAgentForClaude: true,
         planReviewAgentForCodex: true,
+        aiExecutionProvider: true,
         planReviewClaudeModel: true,
         planReviewCodexModel: true,
       },
@@ -94,6 +96,7 @@ async function readPlanReviewSettingsForSession(sourceAgent?: SessionPlanAgent):
         sourceAgent,
         planReviewAgentForClaude: setting?.planReviewAgentForClaude,
         planReviewAgentForCodex: setting?.planReviewAgentForCodex,
+        aiExecutionProvider: setting?.aiExecutionProvider,
       }),
       claudeModel:
         parseClaudeLocalModel(setting?.planReviewClaudeModel) ?? PLAN_REVIEW_CLAUDE_MODEL_DEFAULT,

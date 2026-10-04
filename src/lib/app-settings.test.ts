@@ -19,6 +19,8 @@ import {
   parseDispatchFailoverThresholdPercent,
   isDispatchUsageAtOrAboveThreshold,
   resolveCodexInitialModel,
+  resolveAiExecutionAgent,
+  resolveAppAiModel,
 } from "@/lib/app-settings";
 
 describe("parseAutoRetryLimit", () => {
@@ -60,6 +62,20 @@ describe("既定エージェントとフェイルオーバー設定（#3531）",
     expect(isDispatchUsageAtOrAboveThreshold([{ usedPercent: 90 }], 90)).toBe(true);
     expect(isDispatchUsageAtOrAboveThreshold([{ usedPercent: 89 }], 90)).toBe(false);
     expect(isDispatchUsageAtOrAboveThreshold([{ usedPercent: 100, expired: true }], 90)).toBe(false);
+  });
+});
+
+describe("主系AIプロバイダー（#3988）", () => {
+  it("個別指定が無ければグローバルのCLIを使い、指定があれば優先する", () => {
+    expect(resolveAiExecutionAgent("inherit", "codex")).toBe("codex");
+    expect(resolveAiExecutionAgent(undefined, "claude")).toBe("claude");
+    expect(resolveAiExecutionAgent("claude", "codex")).toBe("claude");
+  });
+
+  it("アプリ内AIは主系プロバイダーに追従し、モデル固定は優先する", () => {
+    expect(resolveAppAiModel("inherit", "claude")).toBe("claude-haiku-4-5");
+    expect(resolveAppAiModel("inherit", "codex", true)).toBe("gpt-5.6-terra");
+    expect(resolveAppAiModel("claude-opus-5-5", "codex")).toBe("claude-opus-5-5");
   });
 });
 

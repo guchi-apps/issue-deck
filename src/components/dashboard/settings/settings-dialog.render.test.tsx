@@ -243,6 +243,7 @@ describe("SettingsDialog", () => {
       dispatchFailoverThresholdPercent: 90,
     });
     expect(onUpdated).toHaveBeenCalledWith({
+      aiExecutionProvider: "claude",
       autoRetryLimit: 5,
       claudeModel: "auto",
       githubActionsAgent: "claude",
