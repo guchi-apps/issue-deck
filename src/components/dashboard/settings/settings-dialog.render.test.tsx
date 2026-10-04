@@ -236,24 +236,12 @@ describe("SettingsDialog", () => {
 
     fireEvent.click(save);
     await waitFor(() => expect(updateAutoRetryLimit).toHaveBeenCalledWith(5));
-    expect(updateClaudeModel).toHaveBeenCalledWith(
-      "auto",
-      "claude",
-      "gpt-5.6-terra",
-      "haiku",
-      "sonnet",
-      "auto",
-      "claude-haiku-4-5",
-      "claude-sonnet-5-5",
-      "app-ai",
-      "claude",
-      "claude",
-      "codex",
-      "sonnet",
-      "gpt-5.6-terra",
-      true,
-      90,
-    );
+    // 実行の区分は、自分が持つ設定（既定エージェント・フェイルオーバー）だけを保存する
+    expect(updateClaudeModel).toHaveBeenCalledWith({
+      defaultDispatchAgent: "claude",
+      dispatchFailoverEnabled: true,
+      dispatchFailoverThresholdPercent: 90,
+    });
     expect(onUpdated).toHaveBeenCalledWith({
       autoRetryLimit: 5,
       claudeModel: "auto",
