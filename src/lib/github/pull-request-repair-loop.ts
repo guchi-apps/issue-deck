@@ -4,7 +4,7 @@ import type { CiState } from "@/lib/github/release-api";
 /** 画面から開始した自動修復系列の最大修復回数。 */
 export const AUTO_REPAIR_MAX_ROUNDS = 3;
 
-export type AutoRepairLoopStatus = "running" | "completed" | "stopped";
+export type AutoRepairLoopStatus = "dispatching" | "running" | "completed" | "stopped";
 export type AutoRepairStopReason =
   | "user_action_required"
   | "max_rounds_reached"
