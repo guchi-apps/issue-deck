@@ -1464,7 +1464,14 @@ sweep_pull_request_conflicts() {
 # 画面から開始したPR自動修復系列を進める。修復workflowがpushした新HEADのCI・再レビューを
 # issue-deck側で判定するため、ここでは一定間隔を持たず毎巡呼ぶだけにする。
 sweep_pull_request_auto_repairs() {
-  api_call POST /api/pull-requests/auto-repair-sweep '{}' || true
+  if ! api_call POST /api/pull-requests/auto-repair-sweep '{}'; then
+    case "$API_RESPONSE_STATUS" in
+      # デプロイ順のずれによる404と接続不可は、既存のconflict巡回と同じく黙って見送る。
+      404|000) return 0 ;;
+      *) report_api_failure "PR自動修復系列の巡回に失敗しました" ;;
+    esac
+    return 0
+  fi
 }
 
 # --- Codexによるdevelop向けPRレビュー ------------------------------------------------
