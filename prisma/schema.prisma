@@ -1784,7 +1784,7 @@ model PullRequestAutoRepairLoop {
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
 
-  @@unique([repositoryFullName, pullRequestNumber])
+  @@unique([repositoryFullName, pullRequestNumber], map: "PullRequestAutoRepairLoop_repo_pr_key")
   @@index([status])
 }
 
