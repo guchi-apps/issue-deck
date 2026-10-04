@@ -16,7 +16,9 @@ import { dispatchWorkflow } from "@/lib/github/workflow-dispatch";
  * 次の種類を1つだけdispatchする。個々のworkflowの開始・終了表示は既存のRepairRunをそのまま使う。
  */
 export async function runPullRequestAutoRepairSweep(): Promise<{ scanned: number; dispatched: number }> {
-  const timeoutAt = new Date(Date.now() - 30 * 60 * 1000);
+  const now = new Date();
+  const timeoutAt = new Date(now.getTime() - 30 * 60 * 1000);
+  const sweepAt = new Date(now.getTime() - 60 * 1000);
   // dispatching中にプロセス停止・DB障害が起きた系列は放置せず停止させる。
   await db.pullRequestAutoRepairLoop.updateMany({
     where: { status: "dispatching", updatedAt: { lt: timeoutAt } },
@@ -27,6 +29,18 @@ export async function runPullRequestAutoRepairSweep(): Promise<{ scanned: number
 
   for (const stored of loops) {
     try {
+      // subpc poller自体は30秒周期でも、同じ系列のGitHub API巡回は最大1分に1回に抑える。
+      // updateManyでclaimするため、複数pollerが同時に来ても1本だけがAPIを消費する。
+      const sweepClaim = await db.pullRequestAutoRepairLoop.updateMany({
+        where: {
+          repositoryFullName: stored.repositoryFullName,
+          pullRequestNumber: stored.pullRequestNumber,
+          status: "running",
+          OR: [{ lastSweepAt: null }, { lastSweepAt: { lt: sweepAt } }],
+        },
+        data: { lastSweepAt: now },
+      });
+      if (sweepClaim.count !== 1) continue;
       const repository = await db.repository.findFirst({
         where: { fullName: stored.repositoryFullName },
         include: { installation: true },
@@ -52,13 +66,13 @@ export async function runPullRequestAutoRepairSweep(): Promise<{ scanned: number
       if (active === null && stored.currentKind !== null) {
         await db.pullRequestAutoRepairLoop.update({
           where: { repositoryFullName_pullRequestNumber: { repositoryFullName: stored.repositoryFullName, pullRequestNumber: stored.pullRequestNumber } },
-          data: { currentKind: null },
+          data: { currentKind: null, waitStartedAt: now },
         });
         continue;
       }
       // workflowが実際に走っている間は既存のRepairRun（最大6時間）を正とし、待機タイムアウトしない。
       // workflow終了を観測してcurrentKindを消した後、CI/レビュー待ちだけが30分以上続いた場合に停止する。
-      if (active === null && stored.currentKind === null && stored.updatedAt < timeoutAt) {
+      if (active === null && stored.currentKind === null && stored.waitStartedAt !== null && stored.waitStartedAt < timeoutAt) {
         await db.pullRequestAutoRepairLoop.update({
           where: { repositoryFullName_pullRequestNumber: { repositoryFullName: stored.repositoryFullName, pullRequestNumber: stored.pullRequestNumber } },
           data: { status: "stopped", currentKind: null, headSha: pullRequest.head.sha, stopReason: "timed_out" },
@@ -107,7 +121,7 @@ export async function runPullRequestAutoRepairSweep(): Promise<{ scanned: number
           headSha: stored.headSha,
           round: stored.round,
         },
-        data: { status: "dispatching", currentKind: decision.kind },
+        data: { status: "dispatching", currentKind: decision.kind, waitStartedAt: null },
       });
       if (claimed.count !== 1) continue;
 
@@ -146,6 +160,7 @@ export async function runPullRequestAutoRepairSweep(): Promise<{ scanned: number
           currentKind: decision.kind,
           lastFingerprint: decision.fingerprint,
           stopReason: null,
+          waitStartedAt: null,
         },
       });
       dispatched += 1;
