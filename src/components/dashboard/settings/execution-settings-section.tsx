@@ -222,7 +222,7 @@ export function ExecutionSettingsSection({
     initialAppAiModel, initialAppAiModelReasoning, initialModelPickEngine, initialDispatchConcurrency,
   ]);
 
-  const isValid =
+  const executionValid =
     Number.isInteger(autoRetryLimit) &&
     autoRetryLimit >= AUTO_RETRY_LIMIT_MIN &&
     autoRetryLimit <= AUTO_RETRY_LIMIT_MAX &&
@@ -232,6 +232,8 @@ export function ExecutionSettingsSection({
     Number.isInteger(dispatchFailoverThresholdPercent) &&
     dispatchFailoverThresholdPercent >= DISPATCH_FAILOVER_THRESHOLD_PERCENT_MIN &&
     dispatchFailoverThresholdPercent <= DISPATCH_FAILOVER_THRESHOLD_PERCENT_MAX;
+  // 区分は独立保存なので、非表示の兄弟フォームに不正な編集中値があっても現在区分を阻害しない。
+  const isValid = mode === "execution" || mode === "all" ? executionValid : true;
 
   const isDirty =
     autoRetryLimit !== initialAutoRetryLimit ||
