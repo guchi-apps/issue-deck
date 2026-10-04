@@ -34,7 +34,7 @@ export async function runPullRequestAutoRepairSweep(): Promise<{ scanned: number
       const verdict = parsePullRequestReviewVerdict(pullRequest.body);
       const review =
         verdict?.reviewedSha === pullRequest.head.sha
-          ? verdict.reviewKind === "ok"
+          ? verdict.reviewKind === "ok" || verdict.reviewKind === "skipped"
             ? "lgtm"
             : verdict.reviewKind === "changes-requested"
               ? "changes-requested"
