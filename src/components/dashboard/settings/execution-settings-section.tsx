@@ -366,7 +366,7 @@ export function ExecutionSettingsSection({
         <p className="text-xs text-muted-foreground">
           「実装を開始」を開いたときの最初の選択です。Issueごとに選び直した値、既存セッションの再開、GitHub Actionsには影響しません。
         </p>
-      </div>
+      </div>}
 
       {(mode === "automation" || mode === "all") && <div id="plan-review-settings" className="flex flex-col gap-3 border-t pt-4">
         <div>
@@ -718,7 +718,7 @@ export function ExecutionSettingsSection({
         {sectionDirty && !isSubmitting && (
           <span className="text-xs text-muted-foreground">未保存の変更があります</span>
         )}
-      </div>}
+      </div>
 
       {(mode === "automation" || mode === "all") && <>
       {mode === "all" && <><h3 className="border-b pb-1 text-xs font-semibold tracking-wide text-muted-foreground">自動化</h3><p className="-mt-2 text-xs text-muted-foreground">各項目の変更はその場で保存されます。</p></>}
