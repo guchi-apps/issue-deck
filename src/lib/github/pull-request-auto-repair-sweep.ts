@@ -4,7 +4,7 @@ import {
   fetchActivePullRequestRepairRun,
   recordPullRequestRepairRun,
 } from "@/lib/github/pull-request-repair-run";
-import { isRepairSymptomGone, resolveRepairDispatch } from "@/lib/github/pull-request-repair";
+import { resolveRepairDispatch } from "@/lib/github/pull-request-repair";
 import { decideAutoRepairLoop, type AutoRepairLoopState } from "@/lib/github/pull-request-repair-loop";
 import { fetchPullRequest } from "@/lib/github/pull-requests-api";
 import { parsePullRequestReviewVerdict } from "@/lib/github/pull-request-review-verdict";
@@ -60,17 +60,9 @@ export async function runPullRequestAutoRepairSweep(): Promise<{ scanned: number
               ? "changes-requested"
               : "needs-check"
           : null;
-      const recordedActive = await fetchActivePullRequestRepairRun(stored.repositoryFullName, stored.pullRequestNumber);
-      // workflowの終了報告だけ欠落してRepairRunがrunningのまま残る場合がある。
-      // 現在のPR状態で元の症状が既に消えていれば、手動開始側と同じく残留記録を無効扱いにする。
-      const active =
-        recordedActive !== null &&
-        !isRepairSymptomGone(recordedActive.kind, {
-          mergeable: current.mergeable,
-          ciState: current.ciState,
-        })
-          ? recordedActive
-          : null;
+      // 自動系列では、前段workflowがrunningの間は症状が先に消えても必ず終了を待つ。
+      // RepairRun自体が6時間でstaleになるため、終了報告欠落時にも永久待機にはならない。
+      const active = await fetchActivePullRequestRepairRun(stored.repositoryFullName, stored.pullRequestNumber);
       // workflow実行中に30分を超えても、終了後のCI・レビュー待ちはそこから30分確保する。
       // currentKindが残っていてactiveが消えた最初の巡回を「workflow終了観測」とし、待機時計をリセットする。
       if (active === null && stored.currentKind !== null) {
