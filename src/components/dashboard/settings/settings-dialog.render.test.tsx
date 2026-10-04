@@ -281,8 +281,9 @@ describe("SettingsDialog", () => {
     expect(onUpdated.mock.calls.at(-1)?.[0].appAiModel).toBe("claude-haiku-4-5");
 
     fireEvent.click(screen.getByRole("button", { name: /^AI・モデル$/ }));
-    expect((screen.getByRole("button", { name: "保存" }) as HTMLButtonElement).disabled).toBe(false);
-    expect(screen.getByText("未保存の変更があります")).toBeTruthy();
+    const aiSave = screen.getAllByRole("button", { name: "保存" }).find((button) => isShown(button)) as HTMLButtonElement;
+    expect(aiSave.disabled).toBe(false);
+    expect(screen.getAllByText("未保存の変更があります").some((node) => isShown(node))).toBe(true);
   });
 
   it("リポジトリの区分でチェックを外すと、そのリポジトリを非表示にする（#3983）", () => {
