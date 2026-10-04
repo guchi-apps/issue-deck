@@ -264,6 +264,27 @@ describe("SettingsDialog", () => {
     });
   });
 
+  it("別区分を保存してもAI・モデルの未保存変更を保存済み扱いにしない（#3983）", async () => {
+    renderDialog();
+
+    // AI・モデル側に未保存変更を作る。
+    const appAi = screen.getByLabelText("アプリ内AI：要約・検索・文章整理");
+    fireEvent.change(appAi, { target: { value: "claude-sonnet-5-5" } });
+
+    // 実行区分だけを保存する。
+    fireEvent.click(screen.getByRole("button", { name: /^実行$/ }));
+    fireEvent.change(screen.getByLabelText("自動リトライ回数"), { target: { value: "5" } });
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+    await waitFor(() => expect(onUpdated).toHaveBeenCalled());
+
+    // 親へ通知するAI値は保存済み初期値のまま。未保存の値を保存済み扱いにしない。
+    expect(onUpdated.mock.calls.at(-1)?.[0].appAiModel).toBe("claude-haiku-4-5");
+
+    fireEvent.click(screen.getByRole("button", { name: /^AI・モデル$/ }));
+    expect((screen.getByRole("button", { name: "保存" }) as HTMLButtonElement).disabled).toBe(false);
+    expect(screen.getByText("未保存の変更があります")).toBeTruthy();
+  });
+
   it("リポジトリの区分でチェックを外すと、そのリポジトリを非表示にする（#3983）", () => {
     renderDialog();
 
