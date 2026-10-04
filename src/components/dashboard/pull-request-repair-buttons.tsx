@@ -85,10 +85,7 @@ export function PullRequestRepairButtons({
   const [justStarted, setJustStarted] = useState(false);
   const [loop, setLoop] = useState<AutoRepairLoop | null>(null);
   const [owner, repo] = repositoryFullName.split("/");
-  const hasRepairKinds = kinds.length > 0;
   useEffect(() => {
-    // 修復の対象が無いPR（ボタンを出さない）では進行状況を取りに行かない。
-    if (!hasRepairKinds) return;
     let cancelled = false;
     const refresh = async () => {
       try {
@@ -103,7 +100,7 @@ export function PullRequestRepairButtons({
     void refresh();
     const timer = window.setInterval(() => void refresh(), 10_000);
     return () => { cancelled = true; window.clearInterval(timer); };
-  }, [owner, repo, pullRequestNumber, hasRepairKinds]);
+  }, [owner, repo, pullRequestNumber]);
   useEffect(() => {
     if (!justStarted) return;
     const timer = window.setTimeout(() => setJustStarted(false), 5_000);
@@ -115,9 +112,10 @@ export function PullRequestRepairButtons({
   const nextKind = kinds[0];
   const unavailableNotices = repairUnavailableNotices([nextKind], availability);
 
-  if (kinds.length === 0) return null;
+  // 修復対象が消えた後も、直前の系列の完了・停止理由は表示する。
+  if (kinds.length === 0 && loop === null) return null;
 
-  const hasUnavailableWorkflow = isRepairWorkflowMissing(availability, nextKind);
+  const hasUnavailableWorkflow = nextKind ? isRepairWorkflowMissing(availability, nextKind) : false;
 
   async function runRepair() {
     const ok = await repairPullRequest({ owner, repo, number: pullRequestNumber });
@@ -131,7 +129,7 @@ export function PullRequestRepairButtons({
 
   return (
     <div className={cn("flex min-w-0 flex-wrap items-center gap-2", className)}>
-      {justStarted ? (
+      {kinds.length > 0 && (justStarted ? (
         <span className="text-xs text-muted-foreground">
           PRを自動修正中です。修正後のCI・再レビューも確認して、必要なら最大3回まで続けます。
         </span>
@@ -156,7 +154,7 @@ export function PullRequestRepairButtons({
           <Wrench className="size-3.5" />
           PRを自動修正
         </Button>
-      )}
+      ))}
       {!justStarted && runningKind !== null && (
         <span className="text-xs text-muted-foreground" title={`${REPAIR_TARGET_LABEL[runningKind]}を処理中`}>
           PRを自動修正中です（{REPAIR_TARGET_LABEL[runningKind]}）。修正後のCI・再レビューも自動で確認します。
