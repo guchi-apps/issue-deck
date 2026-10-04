@@ -48,6 +48,8 @@ export function decideAutoRepairLoop(
 ): AutoRepairDecision {
   if (observation.state !== "open" || observation.draft) return { action: "stop", reason: "pull_request_closed" };
   if (observation.repairRunning) return { action: "wait" };
+  // GitHubがmergeabilityをまだ計算していない間は、競合なしと決めつけて完了しない。
+  if (observation.mergeable === null) return { action: "wait" };
 
   // 修復後の新HEADでは、CIとレビューが両方そろうまで古い結果で次を起動しない。
   if (observation.ciState === "pending" || observation.ciState === "unknown" || observation.ciState === null) {
