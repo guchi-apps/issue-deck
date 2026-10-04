@@ -60,17 +60,29 @@ export function ExecutionFlowOverview(props: ExecutionFlowOverviewProps) {
     <div className="rounded-lg border bg-muted/30 p-3"><h3 id="execution-flows-heading" className="text-sm font-semibold">現在のAI構成</h3><p className="mt-1 text-xs text-muted-foreground">主な処理の実効設定です。詳細は下で確認・変更できます。</p><dl className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2"><>{summaryGroups.map((group) => { const groupFlows = flows.filter((flow) => flow.group === group); const models = [...new Set(groupFlows.map((flow) => `${flow.agent} / ${flow.model}`))]; return <div key={group} className="rounded-md bg-background px-2.5 py-2"><dt className="text-xs text-muted-foreground">{group}</dt><dd className="text-xs font-medium">{models.join("・")}</dd></div>; })}</></dl></div>
     <p className="text-xs text-muted-foreground">実行場所とエージェントは参照専用です。PRレビュー・修復のモデルはカード内で変更できます。</p>
     {GROUPS.map((group) => {
-      const groupFlows = flows.filter((flow) => flow.group === group);
+      const editableFlows = flows.filter(
+        (flow) => flow.group === group && flow.sourceId === "workflow-model-settings",
+      );
+      const groupFlows =
+        group === "修復"
+          ? editableFlows.filter((flow, index) => {
+              const kind = flow.agent === "Codex Action" || flow.agent === "Codex CLI" ? "codex" : "claude";
+              return editableFlows.findIndex((candidate) =>
+                (candidate.agent === "Codex Action" || candidate.agent === "Codex CLI" ? "codex" : "claude") === kind
+              ) === index;
+            })
+          : editableFlows;
       if (!groupFlows.length) return null;
       return <div key={group} className="flex flex-col gap-2"><h4 className="border-b pb-1 text-xs font-semibold tracking-wide text-muted-foreground">{group}</h4>
         {groupFlows.map((flow) => {
           const editable = flow.sourceId === "workflow-model-settings";
           const kind = flow.agent === "Codex Action" || flow.agent === "Codex CLI" ? "codex" : "claude";
           return <article key={`${flow.name}-${flow.agent}`} className="rounded-lg border bg-card p-3 text-sm">
-            <h5 className="font-medium">{flow.name}</h5>
+            <h5 className="font-medium">{group === "修復" ? "PR修復（共有設定）" : flow.name}</h5>
             <dl className="mt-2 grid grid-cols-[5.5rem_minmax(0,1fr)] gap-x-2 gap-y-1 text-xs"><dt className="text-muted-foreground">実行場所</dt><dd>{flow.location}</dd><dt className="text-muted-foreground">エージェント</dt><dd>{flow.agent}</dd>{flow.setting && <><dt className="text-muted-foreground">設定値</dt><dd>{flow.setting}</dd></>}<dt className="text-muted-foreground">実効モデル</dt><dd className="font-medium">{flow.model}</dd>{flow.reasoningEffort && <><dt className="text-muted-foreground">推論強度</dt><dd>{flow.reasoningEffort}</dd></>}</dl>
             {editable && <Button type="button" variant="link" className="mt-1 h-auto px-0 text-xs" onClick={() => settingsLoaded && setEditing(editing === kind ? null : kind)} disabled={!settingsLoaded}><Pencil className="mr-1 size-3" />変更</Button>}
             {editable && editing === kind && <div className="mt-3 flex flex-col gap-2 border-t pt-3">{kind === "claude" ? <><Label htmlFor="workflow-claude-model">モデル</Label><Select value={claudeModel} onValueChange={(value) => setClaudeModel(value as ClaudeModel)}><SelectTrigger id="workflow-claude-model"><SelectValue /></SelectTrigger><SelectContent>{CLAUDE_MODEL_OPTIONS.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}</SelectContent></Select></> : <><Label htmlFor="workflow-codex-model">モデル</Label><Select value={codexModel} onValueChange={(value) => setCodexModel(value as CodexModel)}><SelectTrigger id="workflow-codex-model"><SelectValue /></SelectTrigger><SelectContent>{CODEX_MODEL_OPTIONS.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}</SelectContent></Select><Label htmlFor="workflow-codex-reasoning">推論強度</Label><Select value={reasoningEffort} onValueChange={(value) => setReasoningEffort(value as CodexReasoningEffort)}><SelectTrigger id="workflow-codex-reasoning"><SelectValue /></SelectTrigger><SelectContent>{CODEX_REASONING_EFFORT_OPTIONS.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}</SelectContent></Select></>}<p className="text-xs text-muted-foreground">保存すると、次回のworkflow実行から反映されます。デフォルトを選ぶと個別指定を解除します。</p><Button type="button" size="sm" onClick={() => saveWorkflowSettings(kind)} disabled={isSaving || !settingsLoaded}>{isSaving ? "保存中…" : "保存"}</Button>{saveError && <p className="text-xs text-destructive">{saveError}</p>}</div>}
+            {group === "修復" && <p className="mt-2 border-t pt-2 text-xs leading-relaxed text-muted-foreground">適用: レビュー指摘修正 / CI自動修正 / コンフリクト解消 / PR repair</p>}
             {flow.note && <p className="mt-2 border-t pt-2 text-xs leading-relaxed text-muted-foreground">{flow.note}</p>}
           </article>;
         })}
