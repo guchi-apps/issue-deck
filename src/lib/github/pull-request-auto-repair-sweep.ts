@@ -47,9 +47,18 @@ export async function runPullRequestAutoRepairSweep(): Promise<{ scanned: number
               : "needs-check"
           : null;
       const active = await fetchActivePullRequestRepairRun(stored.repositoryFullName, stored.pullRequestNumber);
+      // workflow実行中に30分を超えても、終了後のCI・レビュー待ちはそこから30分確保する。
+      // currentKindが残っていてactiveが消えた最初の巡回を「workflow終了観測」とし、待機時計をリセットする。
+      if (active === null && stored.currentKind !== null) {
+        await db.pullRequestAutoRepairLoop.update({
+          where: { repositoryFullName_pullRequestNumber: { repositoryFullName: stored.repositoryFullName, pullRequestNumber: stored.pullRequestNumber } },
+          data: { currentKind: null },
+        });
+        continue;
+      }
       // workflowが実際に走っている間は既存のRepairRun（最大6時間）を正とし、待機タイムアウトしない。
-      // workflow終了後にCI/レビュー待ちだけが30分以上続いた場合に停止する。
-      if (active === null && stored.updatedAt < timeoutAt) {
+      // workflow終了を観測してcurrentKindを消した後、CI/レビュー待ちだけが30分以上続いた場合に停止する。
+      if (active === null && stored.currentKind === null && stored.updatedAt < timeoutAt) {
         await db.pullRequestAutoRepairLoop.update({
           where: { repositoryFullName_pullRequestNumber: { repositoryFullName: stored.repositoryFullName, pullRequestNumber: stored.pullRequestNumber } },
           data: { status: "stopped", currentKind: null, headSha: pullRequest.head.sha, stopReason: "timed_out" },
