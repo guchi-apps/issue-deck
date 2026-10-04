@@ -1,6 +1,9 @@
 import { db } from "@/lib/db";
 import { getInstallationToken } from "@/lib/github/app-auth";
-import { fetchActivePullRequestRepairRun } from "@/lib/github/pull-request-repair-run";
+import {
+  fetchActivePullRequestRepairRun,
+  recordPullRequestRepairRun,
+} from "@/lib/github/pull-request-repair-run";
 import { resolveRepairDispatch } from "@/lib/github/pull-request-repair";
 import { decideAutoRepairLoop, type AutoRepairLoopState } from "@/lib/github/pull-request-repair-loop";
 import { fetchPullRequest } from "@/lib/github/pull-requests-api";
@@ -73,6 +76,14 @@ export async function runPullRequestAutoRepairSweep(): Promise<{ scanned: number
         decision.kind,
       );
       await dispatchWorkflow(owner, repo, dispatch.workflowFile, dispatch.ref, dispatch.inputs, token);
+      // workflow自身の開始報告より先にpollerが次巡へ入っても、同じHEAD・同じ問題を
+      // repeated_problemと誤認しないよう、初回のrepair APIと同じくdispatch成功時点でrunningを記録する。
+      await recordPullRequestRepairRun({
+        repositoryFullName: stored.repositoryFullName,
+        pullRequestNumber: stored.pullRequestNumber,
+        kind: decision.kind,
+        status: "running",
+      });
       await db.pullRequestAutoRepairLoop.update({
         where: { repositoryFullName_pullRequestNumber: { repositoryFullName: stored.repositoryFullName, pullRequestNumber: stored.pullRequestNumber } },
         data: {
