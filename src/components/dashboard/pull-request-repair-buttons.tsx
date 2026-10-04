@@ -88,8 +88,6 @@ export function PullRequestRepairButtons({
   const [loop, setLoop] = useState<AutoRepairLoop | null>(null);
   const [owner, repo] = repositoryFullName.split("/");
   useEffect(() => {
-    // 修復対象が無く、系列表示もまだ無い通常PRではポーリング自体を開始しない。
-    if (kinds.length === 0 && loop === null) return;
     let cancelled = false;
     const refresh = async () => {
       try {
@@ -101,7 +99,11 @@ export function PullRequestRepairButtons({
         // 進行状況は補助表示なので、取得に失敗してもボタンの操作は妨げない。
       }
     };
+    // 再訪時にもcompleted/stoppedを表示できるよう初回は1回取得する。
     void refresh();
+    // 定期ポーリングは修復対象または実行中系列だけ。通常PRは初回GETだけで終える。
+    const shouldPoll = kinds.length > 0 || loop?.status === "running" || loop?.status === "dispatching";
+    if (!shouldPoll) return () => { cancelled = true; };
     const timer = window.setInterval(() => void refresh(), 10_000);
     return () => { cancelled = true; window.clearInterval(timer); };
   }, [owner, repo, pullRequestNumber, kinds.length, loop?.status]);
