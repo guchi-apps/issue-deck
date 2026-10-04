@@ -17,6 +17,14 @@ describe("decideAutoRepairLoop", () => {
     expect(decideAutoRepairLoop(loop(), observed({ headSha: "b", review: null }))).toEqual({ action: "wait" });
   });
 
+  it("mergeability未計算なら待機する", () => {
+    expect(decideAutoRepairLoop(loop(), observed({ mergeable: null }))).toEqual({ action: "wait" });
+  });
+
+  it("レビュー不要PRはレビュー結果なしでも完了する", () => {
+    expect(decideAutoRepairLoop(loop(), observed({ reviewRequired: false, review: null }))).toEqual({ action: "complete" });
+  });
+
   it("現在HEADのLGTMで完了し、needs-checkは安全に停止する", () => {
     expect(decideAutoRepairLoop(loop(), observed())).toEqual({ action: "complete" });
     expect(decideAutoRepairLoop(loop(), observed({ review: "needs-check" }))).toEqual({ action: "stop", reason: "user_action_required" });
