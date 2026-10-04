@@ -140,22 +140,25 @@ async function handlePOST(request: NextRequest) {
     );
     // workflow起動前に系列を記録する。DB保存に失敗したのにworkflowだけ走る
     // 「孤児dispatch」を作らない。既存系列のroundはリセットせず、手動再押下でも上限を維持する。
-    const existingLoop = await db.pullRequestAutoRepairLoop.findUnique({
+    // completed/stoppedは過去の系列なので、新しい手動開始ではラウンドをリセットする。
+    // running/dispatchingの同一系列だけ上限を引き継ぐ。
+    const existingState = await db.pullRequestAutoRepairLoop.findUnique({
       where: {
         repositoryFullName_pullRequestNumber: {
           repositoryFullName: `${owner}/${repo}`,
           pullRequestNumber: pullRequest.number,
         },
       },
-      select: { round: true },
+      select: { round: true, status: true },
     });
-    const startingRound = Math.min((existingLoop?.round ?? 0) + 1, AUTO_REPAIR_MAX_ROUNDS);
-    if (existingLoop && existingLoop.round >= AUTO_REPAIR_MAX_ROUNDS) {
+    const continuing = existingState?.status === "running" || existingState?.status === "dispatching";
+    if (continuing && existingState.round >= AUTO_REPAIR_MAX_ROUNDS) {
       return NextResponse.json(
-        { error: "max_rounds_reached", message: "自動修正が上限の3回に達しています。" },
+        { error: "max_rounds_reached", message: "この自動修正系列は上限の3回に達しています。" },
         { status: 409 },
       );
     }
+    const startingRound = continuing ? existingState.round + 1 : 1;
     await db.pullRequestAutoRepairLoop.upsert({
       where: {
         repositoryFullName_pullRequestNumber: {
