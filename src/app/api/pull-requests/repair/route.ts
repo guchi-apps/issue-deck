@@ -174,6 +174,8 @@ async function handlePOST(request: NextRequest) {
         round: startingRound,
         currentKind: kind,
         lastFingerprint: `${pullRequest.head.sha}:${kind}`,
+        lastSweepAt: null,
+        waitStartedAt: null,
       },
       update: {
         status: "dispatching",
@@ -182,6 +184,8 @@ async function handlePOST(request: NextRequest) {
         currentKind: kind,
         lastFingerprint: `${pullRequest.head.sha}:${kind}`,
         stopReason: null,
+        lastSweepAt: null,
+        waitStartedAt: null,
       },
     });
 
