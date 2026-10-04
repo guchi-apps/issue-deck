@@ -1777,6 +1777,8 @@ model PullRequestAutoRepairLoop {
   currentKind        String?
   lastFingerprint    String?
   stopReason         String?
+  lastSweepAt        DateTime?
+  waitStartedAt      DateTime?
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
 
