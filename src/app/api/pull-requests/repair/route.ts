@@ -152,13 +152,14 @@ async function handlePOST(request: NextRequest) {
       select: { round: true, status: true },
     });
     const continuing = existingState?.status === "running" || existingState?.status === "dispatching";
-    if (continuing && existingState.round >= AUTO_REPAIR_MAX_ROUNDS) {
+    // 自動sweepまたは別の手動操作が既に系列を進めている間は二重dispatchしない。
+    if (continuing) {
       return NextResponse.json(
-        { error: "max_rounds_reached", message: "この自動修正系列は上限の3回に達しています。" },
+        { error: "repair_in_progress", message: "このPRは現在自動修正中です。完了または停止してからもう一度実行してください。" },
         { status: 409 },
       );
     }
-    const startingRound = continuing ? existingState.round + 1 : 1;
+    const startingRound = 1;
     await db.pullRequestAutoRepairLoop.upsert({
       where: {
         repositoryFullName_pullRequestNumber: {
