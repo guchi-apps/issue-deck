@@ -41,22 +41,24 @@ export function useAppSettingsMutations() {
   }
 
   async function updateClaudeModel(
-    claudeModel: ClaudeModel,
-    githubActionsAgent: GithubActionsAgent,
-    githubActionsCodexModel: CodexLocalModel,
-    claudeModelAssist: ClaudeModel,
-    claudeLocalModel: ClaudeLocalModelSetting,
-    codexModel: CodexModelSetting,
-    appAiModel: AppAiModel,
-    appAiModelReasoning: AppAiModel,
-    modelPickEngine: ModelPickEngine,
-    defaultDispatchAgent: DefaultDispatchAgent,
-    planReviewAgentForClaude: PlanReviewAgent,
-    planReviewAgentForCodex: PlanReviewAgent,
-    planReviewClaudeModel: ClaudeLocalModel,
-    planReviewCodexModel: CodexLocalModel,
-    dispatchFailoverEnabled: boolean,
-    dispatchFailoverThresholdPercent: number,
+    values: Partial<{
+      claudeModel: ClaudeModel;
+      githubActionsAgent: GithubActionsAgent;
+      githubActionsCodexModel: CodexLocalModel;
+      claudeModelAssist: ClaudeModel;
+      claudeLocalModel: ClaudeLocalModelSetting;
+      codexModel: CodexModelSetting;
+      appAiModel: AppAiModel;
+      appAiModelReasoning: AppAiModel;
+      modelPickEngine: ModelPickEngine;
+      defaultDispatchAgent: DefaultDispatchAgent;
+      planReviewAgentForClaude: PlanReviewAgent;
+      planReviewAgentForCodex: PlanReviewAgent;
+      planReviewClaudeModel: ClaudeLocalModel;
+      planReviewCodexModel: CodexLocalModel;
+      dispatchFailoverEnabled: boolean;
+      dispatchFailoverThresholdPercent: number;
+    }>,
   ): Promise<boolean> {
     setIsSubmitting(true);
     setError(null);
@@ -64,28 +66,9 @@ export function useAppSettingsMutations() {
       const res = await fetch("/api/settings/claude-model", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          claudeModel,
-          githubActionsAgent,
-          githubActionsCodexModel,
-          claudeModelAssist,
-          claudeLocalModel,
-          codexModel,
-          appAiModel,
-          appAiModelReasoning,
-          modelPickEngine,
-          defaultDispatchAgent,
-          planReviewAgentForClaude,
-          planReviewAgentForCodex,
-          planReviewClaudeModel,
-          planReviewCodexModel,
-          dispatchFailoverEnabled,
-          dispatchFailoverThresholdPercent,
-        }),
+        body: JSON.stringify(values),
       });
-      if (!res.ok) {
-        throw new Error(`リクエストに失敗しました (${res.status})`);
-      }
+      if (!res.ok) throw new Error(`リクエストに失敗しました (${res.status})`);
       return true;
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
