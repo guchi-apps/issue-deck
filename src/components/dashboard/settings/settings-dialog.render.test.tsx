@@ -264,6 +264,30 @@ describe("SettingsDialog", () => {
     });
   });
 
+  it("兄弟区分の保存済み値を同期し、後の保存で古い値へ巻き戻さない（#3983）", async () => {
+    const view = renderDialog();
+
+    // 親からAIモデルの保存済み値が更新された状態を再現する。
+    view.rerender(
+      <SettingsDialog
+        open onOpenChange={() => {}} currentUser={{ login: "octocat", name: "Octo Cat", image: null }}
+        autoRetryLimit={2} claudeModel="sonnet" claudeModelAssist="haiku" claudeLocalModel="sonnet"
+        codexModel="auto" appAiModel="claude-haiku-4-5" appAiModelReasoning="claude-sonnet-5-5"
+        modelPickEngine="app-ai" dispatchConcurrency={2} repositories={repositories}
+        onSetRepositoryHidden={onSetRepositoryHidden} onSetRepositoriesHidden={onSetRepositoriesHidden}
+        onSetRepositoryIssueCreationExcluded={onSetRepositoryIssueCreationExcluded} onUpdated={onUpdated}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /^実行$/ }));
+    fireEvent.change(screen.getByLabelText("自動リトライ回数"), { target: { value: "5" } });
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+    await waitFor(() => expect(onUpdated).toHaveBeenCalled());
+
+    // 実行フォームも親の最新保存値へ同期済みなので、古いautoを親へ戻さない。
+    expect(onUpdated.mock.calls.at(-1)?.[0].claudeModel).toBe("sonnet");
+  });
+
   it("別区分を保存してもAI・モデルの未保存変更を保存済み扱いにしない（#3983）", async () => {
     renderDialog();
 
