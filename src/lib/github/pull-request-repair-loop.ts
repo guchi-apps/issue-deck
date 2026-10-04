@@ -9,7 +9,9 @@ export type AutoRepairStopReason =
   | "user_action_required"
   | "max_rounds_reached"
   | "repeated_problem"
-  | "pull_request_closed";
+  | "pull_request_closed"
+  | "dispatch_failed"
+  | "timed_out";
 
 export type AutoRepairLoopState = {
   status: AutoRepairLoopStatus;
