@@ -88,6 +88,8 @@ export function PullRequestRepairButtons({
   const [loop, setLoop] = useState<AutoRepairLoop | null>(null);
   const [owner, repo] = repositoryFullName.split("/");
   useEffect(() => {
+    // 修復対象が無く、系列表示もまだ無い通常PRではポーリング自体を開始しない。
+    if (kinds.length === 0 && loop === null) return;
     let cancelled = false;
     const refresh = async () => {
       try {
@@ -102,7 +104,7 @@ export function PullRequestRepairButtons({
     void refresh();
     const timer = window.setInterval(() => void refresh(), 10_000);
     return () => { cancelled = true; window.clearInterval(timer); };
-  }, [owner, repo, pullRequestNumber]);
+  }, [owner, repo, pullRequestNumber, kinds.length, loop?.status]);
   useEffect(() => {
     if (!justStarted) return;
     const timer = window.setTimeout(() => setJustStarted(false), 5_000);
