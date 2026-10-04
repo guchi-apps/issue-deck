@@ -85,18 +85,25 @@ export function PullRequestRepairButtons({
   const [justStarted, setJustStarted] = useState(false);
   const [loop, setLoop] = useState<AutoRepairLoop | null>(null);
   const [owner, repo] = repositoryFullName.split("/");
+  const hasRepairKinds = kinds.length > 0;
   useEffect(() => {
+    // 修復の対象が無いPR（ボタンを出さない）では進行状況を取りに行かない。
+    if (!hasRepairKinds) return;
     let cancelled = false;
     const refresh = async () => {
-      const response = await fetch(`/api/pull-requests/auto-repair-sweep?owner=${encodeURIComponent(owner)}&repo=${encodeURIComponent(repo)}&number=${pullRequestNumber}`);
-      if (!response.ok || cancelled) return;
-      const data = (await response.json()) as { loop: AutoRepairLoop | null };
-      if (!cancelled) setLoop(data.loop);
+      try {
+        const response = await fetch(`/api/pull-requests/auto-repair-sweep?owner=${encodeURIComponent(owner)}&repo=${encodeURIComponent(repo)}&number=${pullRequestNumber}`);
+        if (!response.ok || cancelled) return;
+        const data = (await response.json()) as { loop: AutoRepairLoop | null };
+        if (!cancelled) setLoop(data.loop);
+      } catch {
+        // 進行状況は補助表示なので、取得に失敗してもボタンの操作は妨げない。
+      }
     };
     void refresh();
     const timer = window.setInterval(() => void refresh(), 10_000);
     return () => { cancelled = true; window.clearInterval(timer); };
-  }, [owner, repo, pullRequestNumber]);
+  }, [owner, repo, pullRequestNumber, hasRepairKinds]);
   useEffect(() => {
     if (!justStarted) return;
     const timer = window.setTimeout(() => setJustStarted(false), 5_000);
