@@ -13,7 +13,7 @@ CREATE TABLE `PullRequestAutoRepairLoop` (
     `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
     `updatedAt` DATETIME(3) NOT NULL,
 
-    UNIQUE INDEX `PullRequestAutoRepairLoop_repositoryFullName_pullRequestNumber_key`(`repositoryFullName`, `pullRequestNumber`),
+    UNIQUE INDEX `PullRequestAutoRepairLoop_repo_pr_key`(`repositoryFullName`, `pullRequestNumber`),
     INDEX `PullRequestAutoRepairLoop_status_idx`(`status`),
     PRIMARY KEY (`id`)
 ) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
