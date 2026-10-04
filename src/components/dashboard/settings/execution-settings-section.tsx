@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -158,11 +158,69 @@ export function ExecutionSettingsSection({
     useState<ModelPickEngine>(initialModelPickEngine);
   const [dispatchConcurrency, setDispatchConcurrency] = useState(initialDispatchConcurrency);
   const [isSaved, setIsSaved] = useState(false);
+  const previousInitials = useRef({
+    autoRetryLimit: initialAutoRetryLimit,
+    claudeModel: initialClaudeModel,
+    githubActionsAgent: initialGithubActionsAgent,
+    githubActionsCodexModel: initialGithubActionsCodexModel,
+    claudeModelAssist: initialClaudeModelAssist,
+    claudeLocalModel: initialClaudeLocalModel,
+    codexModel: initialCodexModel,
+    defaultDispatchAgent: initialDefaultDispatchAgent,
+    planReviewAgentForClaude: initialPlanReviewAgentForClaude,
+    planReviewAgentForCodex: initialPlanReviewAgentForCodex,
+    planReviewClaudeModel: initialPlanReviewClaudeModel,
+    planReviewCodexModel: initialPlanReviewCodexModel,
+    dispatchFailoverEnabled: initialDispatchFailoverEnabled,
+    dispatchFailoverThresholdPercent: initialDispatchFailoverThresholdPercent,
+    appAiModel: initialAppAiModel,
+    appAiModelReasoning: initialAppAiModelReasoning,
+    modelPickEngine: initialModelPickEngine,
+    dispatchConcurrency: initialDispatchConcurrency,
+  });
 
-  // フォームの初期化はマウント時のuseStateだけで済ませ、effectでの再同期は持たない。
-  // このセクションは区分を切り替えるたび・設定を閉じるたびにアンマウントされるため、
-  // 開き直せば必ず現在値から始まる。保存後に親から新しい値が降りてくる経路と
-  // 競合しないぶん、「保存しました」の表示もそのまま残せる。
+  // PCでは3区分をhiddenで常駐させて未保存入力を保持する。そのため兄弟区分が保存されて
+  // 親propsが更新されたときは「そのフォームで未編集の項目」だけ最新保存値へ追従させる。
+  // ローカル値が以前のinitialと違う項目は編集中なので上書きしない。
+  useEffect(() => {
+    const prev = previousInitials.current;
+    setAutoRetryLimit((value) => value === prev.autoRetryLimit ? initialAutoRetryLimit : value);
+    setClaudeModel((value) => value === prev.claudeModel ? initialClaudeModel : value);
+    setGithubActionsAgent((value) => value === prev.githubActionsAgent ? initialGithubActionsAgent : value);
+    setGithubActionsCodexModel((value) => value === prev.githubActionsCodexModel ? initialGithubActionsCodexModel : value);
+    setClaudeModelAssist((value) => value === prev.claudeModelAssist ? initialClaudeModelAssist : value);
+    setClaudeLocalModel((value) => value === prev.claudeLocalModel ? initialClaudeLocalModel : value);
+    setCodexModel((value) => value === prev.codexModel ? initialCodexModel : value);
+    setDefaultDispatchAgent((value) => value === prev.defaultDispatchAgent ? initialDefaultDispatchAgent : value);
+    setPlanReviewAgentForClaude((value) => value === prev.planReviewAgentForClaude ? initialPlanReviewAgentForClaude : value);
+    setPlanReviewAgentForCodex((value) => value === prev.planReviewAgentForCodex ? initialPlanReviewAgentForCodex : value);
+    setPlanReviewClaudeModel((value) => value === prev.planReviewClaudeModel ? initialPlanReviewClaudeModel : value);
+    setPlanReviewCodexModel((value) => value === prev.planReviewCodexModel ? initialPlanReviewCodexModel : value);
+    setDispatchFailoverEnabled((value) => value === prev.dispatchFailoverEnabled ? initialDispatchFailoverEnabled : value);
+    setDispatchFailoverThresholdPercent((value) => value === prev.dispatchFailoverThresholdPercent ? initialDispatchFailoverThresholdPercent : value);
+    setAppAiModel((value) => value === prev.appAiModel ? initialAppAiModel : value);
+    setAppAiModelReasoning((value) => value === prev.appAiModelReasoning ? initialAppAiModelReasoning : value);
+    setModelPickEngine((value) => value === prev.modelPickEngine ? initialModelPickEngine : value);
+    setDispatchConcurrency((value) => value === prev.dispatchConcurrency ? initialDispatchConcurrency : value);
+    previousInitials.current = {
+      autoRetryLimit: initialAutoRetryLimit, claudeModel: initialClaudeModel,
+      githubActionsAgent: initialGithubActionsAgent, githubActionsCodexModel: initialGithubActionsCodexModel,
+      claudeModelAssist: initialClaudeModelAssist, claudeLocalModel: initialClaudeLocalModel,
+      codexModel: initialCodexModel, defaultDispatchAgent: initialDefaultDispatchAgent,
+      planReviewAgentForClaude: initialPlanReviewAgentForClaude, planReviewAgentForCodex: initialPlanReviewAgentForCodex,
+      planReviewClaudeModel: initialPlanReviewClaudeModel, planReviewCodexModel: initialPlanReviewCodexModel,
+      dispatchFailoverEnabled: initialDispatchFailoverEnabled,
+      dispatchFailoverThresholdPercent: initialDispatchFailoverThresholdPercent,
+      appAiModel: initialAppAiModel, appAiModelReasoning: initialAppAiModelReasoning,
+      modelPickEngine: initialModelPickEngine, dispatchConcurrency: initialDispatchConcurrency,
+    };
+  }, [
+    initialAutoRetryLimit, initialClaudeModel, initialGithubActionsAgent, initialGithubActionsCodexModel,
+    initialClaudeModelAssist, initialClaudeLocalModel, initialCodexModel, initialDefaultDispatchAgent,
+    initialPlanReviewAgentForClaude, initialPlanReviewAgentForCodex, initialPlanReviewClaudeModel,
+    initialPlanReviewCodexModel, initialDispatchFailoverEnabled, initialDispatchFailoverThresholdPercent,
+    initialAppAiModel, initialAppAiModelReasoning, initialModelPickEngine, initialDispatchConcurrency,
+  ]);
 
   const isValid =
     Number.isInteger(autoRetryLimit) &&
