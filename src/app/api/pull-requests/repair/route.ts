@@ -138,7 +138,73 @@ async function handlePOST(request: NextRequest) {
       { number: pullRequest.number, baseRef: pullRequest.base.ref, headRef: pullRequest.head.ref },
       kind,
     );
-    await dispatchWorkflow(owner, repo, dispatch.workflowFile, dispatch.ref, dispatch.inputs, token);
+    // workflow起動前に系列を記録する。DB保存に失敗したのにworkflowだけ走る
+    // 「孤児dispatch」を作らない。既存系列のroundはリセットせず、手動再押下でも上限を維持する。
+    const existingLoop = await db.pullRequestAutoRepairLoop.findUnique({
+      where: {
+        repositoryFullName_pullRequestNumber: {
+          repositoryFullName: `${owner}/${repo}`,
+          pullRequestNumber: pullRequest.number,
+        },
+      },
+      select: { round: true },
+    });
+    const startingRound = Math.min((existingLoop?.round ?? 0) + 1, AUTO_REPAIR_MAX_ROUNDS);
+    if (existingLoop && existingLoop.round >= AUTO_REPAIR_MAX_ROUNDS) {
+      return NextResponse.json(
+        { error: "max_rounds_reached", message: "自動修正が上限の3回に達しています。" },
+        { status: 409 },
+      );
+    }
+    await db.pullRequestAutoRepairLoop.upsert({
+      where: {
+        repositoryFullName_pullRequestNumber: {
+          repositoryFullName: `${owner}/${repo}`,
+          pullRequestNumber: pullRequest.number,
+        },
+      },
+      create: {
+        repositoryFullName: `${owner}/${repo}`,
+        pullRequestNumber: pullRequest.number,
+        status: "dispatching",
+        headSha: pullRequest.head.sha,
+        round: startingRound,
+        currentKind: kind,
+        lastFingerprint: `${pullRequest.head.sha}:${kind}`,
+      },
+      update: {
+        status: "dispatching",
+        headSha: pullRequest.head.sha,
+        round: startingRound,
+        currentKind: kind,
+        lastFingerprint: `${pullRequest.head.sha}:${kind}`,
+        stopReason: null,
+      },
+    });
+
+    try {
+      await dispatchWorkflow(owner, repo, dispatch.workflowFile, dispatch.ref, dispatch.inputs, token);
+    } catch (error) {
+      await db.pullRequestAutoRepairLoop.update({
+        where: {
+          repositoryFullName_pullRequestNumber: {
+            repositoryFullName: `${owner}/${repo}`,
+            pullRequestNumber: pullRequest.number,
+          },
+        },
+        data: { status: "stopped", currentKind: null, stopReason: "dispatch_failed" },
+      });
+      throw error;
+    }
+    await db.pullRequestAutoRepairLoop.update({
+      where: {
+        repositoryFullName_pullRequestNumber: {
+          repositoryFullName: `${owner}/${repo}`,
+          pullRequestNumber: pullRequest.number,
+        },
+      },
+      data: { status: "running" },
+    });
 
     // 実際に起動した種類だけrunningとして記録する。未起動の修復が画面へ残らないようにする。
     await recordPullRequestRepairRun({
@@ -150,33 +216,7 @@ async function handlePOST(request: NextRequest) {
       console.warn(`[POST /api/pull-requests/repair] ${owner}/${repo}#${number} の記録:`, error);
     });
 
-    // 以後はpollerの巡回が新HEADのCI・再レビューを待ち、必要なら次の1種類だけを起動する。
-    // 初回のdispatchもラウンドに数えるため、同じ指摘を延々と起動しない。
-    await db.pullRequestAutoRepairLoop.upsert({
-      where: {
-        repositoryFullName_pullRequestNumber: {
-          repositoryFullName: `${owner}/${repo}`,
-          pullRequestNumber: pullRequest.number,
-        },
-      },
-      create: {
-        repositoryFullName: `${owner}/${repo}`,
-        pullRequestNumber: pullRequest.number,
-        status: "running",
-        headSha: pullRequest.head.sha,
-        round: 1,
-        currentKind: kind,
-        lastFingerprint: `${pullRequest.head.sha}:${kind}`,
-      },
-      update: {
-        status: "running",
-        headSha: pullRequest.head.sha,
-        round: 1,
-        currentKind: kind,
-        lastFingerprint: `${pullRequest.head.sha}:${kind}`,
-        stopReason: null,
-      },
-    });
+    // 以後はpollerが新HEADのCI・再レビューを待ち、必要なら次の1種類を起動する。
 
     return NextResponse.json({ ok: true, kinds: [kind], remainingKinds: kinds.slice(1), maxRounds: AUTO_REPAIR_MAX_ROUNDS });
   } catch (error) {
