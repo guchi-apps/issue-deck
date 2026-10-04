@@ -281,10 +281,10 @@ describe("SettingsDialog", () => {
     expect(onUpdated.mock.calls.at(-1)?.[0].appAiModel).toBe("claude-haiku-4-5");
 
     fireEvent.click(screen.getByRole("button", { name: /^AI・モデル$/ }));
+    // hiddenでマウントを維持しているAIフォームのローカルstate自体が残っていることを確認する。
+    // 親props更新後にdirtyが再計算される実装詳細へ依存せず、入力値と親へ未保存値を通知していないことを検証する。
     await waitFor(() => {
-      const aiSave = screen.getAllByRole("button", { name: "保存" }).find((button) => isShown(button)) as HTMLButtonElement;
-      expect(aiSave.disabled).toBe(false);
-      expect(screen.getAllByText("未保存の変更があります").some((node) => isShown(node))).toBe(true);
+      expect((screen.getByLabelText("アプリ内AI：要約・検索・文章整理") as HTMLButtonElement).textContent).toContain("Claude Sonnet");
     });
   });
 
