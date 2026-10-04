@@ -138,16 +138,19 @@ afterEach(() => {
 });
 
 describe("SettingsDialog", () => {
-  it("区分をタブとして出し、既定では実行設定を開く（#1539・#1552）", () => {
+  it("目的別のグループと区分を出し、既定ではAI・モデルを開く（#3983）", () => {
     renderDialog();
 
-    for (const label of ["表示", "実行設定", "フリート運用", "障害状況", "更新履歴"]) {
-      expect(screen.getByRole("button", { name: new RegExp(label) })).toBeTruthy();
+    for (const label of ["一般", "AI・実行", "管理", "情報"]) {
+      expect(screen.getByText(label)).toBeTruthy();
+    }
+    for (const label of ["AI・モデル", "実行", "自動化", "リポジトリ", "フリート", "ストレージ", "システム状態"]) {
+      expect(screen.getByRole("button", { name: new RegExp(`^${label}$`) })).toBeTruthy();
     }
     // 「アカウント」は区分に並べず、アカウント名の行から開く（#3744）
     expect(screen.queryByRole("button", { name: /^アカウント$/ })).toBeNull();
-    expect(screen.getByLabelText("自動リトライ回数")).toBeTruthy();
-    expect(screen.getByLabelText("サブPCの同時実行数")).toBeTruthy();
+    expect(screen.getByText("現在のAI構成")).toBeTruthy();
+    expect(screen.queryByLabelText("自動リトライ回数")).toBeNull();
   });
 
   it("アカウント名の行を押すとアカウント設定が開き、削除ボタンは無い（#3744）", () => {
@@ -163,11 +166,11 @@ describe("SettingsDialog", () => {
   it("バージョンはアカウントを開かなくても見え、押すと更新履歴が開く（#1764）", () => {
     renderDialog();
 
-    // 既定は実行設定。区分を切り替えてもバージョンは左タブの最下部に出たまま。
+    // 既定はAI・モデル。区分を切り替えてもバージョンは左タブの最下部に出たまま。
     const version = screen.getByRole("button", { name: /Issue Deck v/ });
     expect(version.textContent).toContain(`v${packageJson.version}`);
 
-    fireEvent.click(screen.getByRole("button", { name: /フリート運用/ }));
+    fireEvent.click(screen.getByRole("button", { name: /^フリート$/ }));
     expect(screen.getByRole("button", { name: /Issue Deck v/ })).toBeTruthy();
 
     fireEvent.click(screen.getByRole("button", { name: /Issue Deck v/ }));
@@ -181,22 +184,23 @@ describe("SettingsDialog", () => {
     expect(within(section!).getByRole("heading", { name: /^v\d+\.\d+\.\d+$/ })).toBeTruthy();
   });
 
-  it("保存ボタンを持つのは実行設定だけで、即時実行の区分には無い（#1539）", () => {
+  it("実行の保存と自動化の即時保存を区分ごとに分ける（#3983）", () => {
     renderDialog();
 
+    fireEvent.click(screen.getByRole("button", { name: /^実行$/ }));
     expect(screen.getByRole("button", { name: "保存" })).toBeTruthy();
+    expect(screen.getByLabelText("自動リトライ回数")).toBeTruthy();
 
-    fireEvent.click(screen.getByRole("button", { name: /フリート運用/ }));
+    fireEvent.click(screen.getByRole("button", { name: /^自動化$/ }));
 
     expect(screen.queryByRole("button", { name: "保存" })).toBeNull();
-    expect(screen.getByRole("button", { name: /Issueを再同期/ })).toBeTruthy();
-    expect(screen.getByText("Fine-grained PATの有効期限")).toBeTruthy();
+    expect(screen.getByLabelText("リリース準備の自動実行間隔")).toBeTruthy();
   });
 
-  it("フリート運用の各区画は畳んであり、開いた区画だけを読み込む（#2022）", () => {
+  it("フリートの各区画は畳んであり、開いた区画だけを読み込む（#2022）", () => {
     renderDialog();
 
-    fireEvent.click(screen.getByRole("button", { name: /フリート運用/ }));
+    fireEvent.click(screen.getByRole("button", { name: /^フリート$/ }));
 
     // 見出しは出るが、中身（＝取得を伴う一覧）はまだ無い
     expect(screen.getByText("1Password → GitHub のシークレット同期")).toBeTruthy();
@@ -212,6 +216,8 @@ describe("SettingsDialog", () => {
 
   it("変更が無いあいだ保存は押せず、変更すると押せるようになる", async () => {
     renderDialog();
+
+    fireEvent.click(screen.getByRole("button", { name: /^実行$/ }));
 
     const save = screen.getByRole("button", { name: "保存" }) as HTMLButtonElement;
     expect(save.disabled).toBe(true);
@@ -261,10 +267,10 @@ describe("SettingsDialog", () => {
     });
   });
 
-  it("表示の区分でチェックを外すと、そのリポジトリを非表示にする（#1552）", () => {
+  it("リポジトリの区分でチェックを外すと、そのリポジトリを非表示にする（#3983）", () => {
     renderDialog();
 
-    fireEvent.click(screen.getByRole("button", { name: /表示/ }));
+    fireEvent.click(screen.getByRole("button", { name: /^リポジトリ$/ }));
 
     expect(screen.getByText(/2件中/).textContent).toBe("2件中1件を表示中");
 
@@ -277,10 +283,10 @@ describe("SettingsDialog", () => {
     expect(onSetRepositoryHidden).toHaveBeenCalledWith(repositories[0], true);
   });
 
-  it("表示の区分は行のどこを押しても切り替わり、二重に切り替わらない（#1552）", () => {
+  it("リポジトリの区分は行のどこを押しても切り替わり、二重に切り替わらない（#3983）", () => {
     renderDialog();
 
-    fireEvent.click(screen.getByRole("button", { name: /表示/ }));
+    fireEvent.click(screen.getByRole("button", { name: /^リポジトリ$/ }));
 
     // チェックボックスそのものではなくリポジトリ名を押す
     fireEvent.click(screen.getByText("issue-deck"));
@@ -294,10 +300,10 @@ describe("SettingsDialog", () => {
     expect(onSetRepositoryHidden).toHaveBeenCalledWith(repositories[1], false);
   });
 
-  it("表示の区分の一括操作は、状態が変わる行だけを渡す（#1552）", () => {
+  it("リポジトリの区分の一括操作は、状態が変わる行だけを渡す（#3983）", () => {
     renderDialog();
 
-    fireEvent.click(screen.getByRole("button", { name: /表示/ }));
+    fireEvent.click(screen.getByRole("button", { name: /^リポジトリ$/ }));
 
     fireEvent.click(screen.getByRole("button", { name: "すべて表示" }));
     expect(onSetRepositoriesHidden).toHaveBeenCalledWith([repositories[1]], false);
@@ -306,10 +312,10 @@ describe("SettingsDialog", () => {
     expect(onSetRepositoriesHidden).toHaveBeenCalledWith([repositories[0]], true);
   });
 
-  it("表示の区分の「作成候補」を外すと、Issue作成の選択肢からだけ除外する（#2760）", () => {
+  it("リポジトリの区分の「作成候補」を外すと、Issue作成の選択肢からだけ除外する（#2760）", () => {
     renderDialog();
 
-    fireEvent.click(screen.getByRole("button", { name: /表示/ }));
+    fireEvent.click(screen.getByRole("button", { name: /^リポジトリ$/ }));
 
     // 非表示（car-care）には出さず、表示中（issue-deck）にだけ「作成候補」を出す
     const switches = screen.getAllByRole("switch");
@@ -319,10 +325,10 @@ describe("SettingsDialog", () => {
     expect(onSetRepositoryIssueCreationExcluded).toHaveBeenCalledWith(repositories[0], true);
   });
 
-  it("障害状況の区分ではGitHubの障害状況だけを出す（使用量はStatusHubへ移した）", () => {
+  it("システム状態の区分ではGitHubの障害状況だけを出す（使用量はStatusHubへ移した）", () => {
     renderDialog();
 
-    fireEvent.click(screen.getByRole("button", { name: /障害状況/ }));
+    fireEvent.click(screen.getByRole("button", { name: /^システム状態$/ }));
 
     expect(screen.getByText("GitHub障害状況")).toBeTruthy();
     expect(screen.queryByText("GitHub使用量")).toBeNull();
@@ -334,7 +340,7 @@ describe("SettingsDialog", () => {
   it("状態の区分にAI使用量のカードは出さない（AI使用量画面へ移した）", () => {
     renderDialog();
 
-    fireEvent.click(screen.getByRole("button", { name: /障害状況/ }));
+    fireEvent.click(screen.getByRole("button", { name: /^システム状態$/ }));
 
     // ダイアログはportalでbody直下へ描かれるので、renderのcontainerからは辿れない
     const cardTitles = Array.from(

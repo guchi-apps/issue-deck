@@ -65,7 +65,11 @@ export type AppSettingsValues = {
   dispatchConcurrency: number;
 };
 
-type ExecutionSettingsSectionProps = {
+export type ExecutionSettingsMode = "ai" | "execution" | "automation" | "all";
+
+export type ExecutionSettingsSectionProps = {
+  /** 既存の保存APIを保ったまま、設定の目的ごとにフォームを表示する。 */
+  mode?: ExecutionSettingsMode;
   autoRetryLimit: number;
   claudeModel: ClaudeModel;
   githubActionsAgent: GithubActionsAgent;
@@ -96,6 +100,7 @@ type ExecutionSettingsSectionProps = {
  * 保存ボタンを持つのはこの区分だけ、という切り分けを保つこと。
  */
 export function ExecutionSettingsSection({
+  mode = "all",
   autoRetryLimit: initialAutoRetryLimit,
   claudeModel: initialClaudeModel,
   githubActionsAgent: initialGithubActionsAgent,
@@ -190,10 +195,35 @@ export function ExecutionSettingsSection({
     modelPickEngine !== initialModelPickEngine ||
     dispatchConcurrency !== initialDispatchConcurrency;
 
+  const aiDirty =
+    claudeModel !== initialClaudeModel ||
+    githubActionsAgent !== initialGithubActionsAgent ||
+    githubActionsCodexModel !== initialGithubActionsCodexModel ||
+    claudeModelAssist !== initialClaudeModelAssist ||
+    claudeLocalModel !== initialClaudeLocalModel ||
+    codexModel !== initialCodexModel ||
+    planReviewAgentForClaude !== initialPlanReviewAgentForClaude ||
+    planReviewAgentForCodex !== initialPlanReviewAgentForCodex ||
+    planReviewClaudeModel !== initialPlanReviewClaudeModel ||
+    planReviewCodexModel !== initialPlanReviewCodexModel ||
+    appAiModel !== initialAppAiModel ||
+    appAiModelReasoning !== initialAppAiModelReasoning ||
+    modelPickEngine !== initialModelPickEngine;
+  const executionDirty =
+    autoRetryLimit !== initialAutoRetryLimit ||
+    defaultDispatchAgent !== initialDefaultDispatchAgent ||
+    dispatchFailoverEnabled !== initialDispatchFailoverEnabled ||
+    dispatchFailoverThresholdPercent !== initialDispatchFailoverThresholdPercent ||
+    dispatchConcurrency !== initialDispatchConcurrency;
+  const sectionDirty = mode === "ai" ? aiDirty : mode === "execution" ? executionDirty : isDirty;
+  const hasFormSave = mode !== "automation";
+
   async function handleSubmit() {
     setIsSaved(false);
-    const autoRetryOk = await updateAutoRetryLimit(autoRetryLimit);
-    if (!autoRetryOk) return;
+    if (mode === "execution" || mode === "all") {
+      const autoRetryOk = await updateAutoRetryLimit(autoRetryLimit);
+      if (!autoRetryOk) return;
+    }
     const claudeModelOk = await updateClaudeModel(
       claudeModel,
       githubActionsAgent,
@@ -213,8 +243,10 @@ export function ExecutionSettingsSection({
       dispatchFailoverThresholdPercent,
     );
     if (!claudeModelOk) return;
-    const dispatchOk = await updateDispatchConcurrency(dispatchConcurrency);
-    if (!dispatchOk) return;
+    if (mode === "execution" || mode === "all") {
+      const dispatchOk = await updateDispatchConcurrency(dispatchConcurrency);
+      if (!dispatchOk) return;
+    }
     onUpdated({
       autoRetryLimit,
       claudeModel,
@@ -240,7 +272,7 @@ export function ExecutionSettingsSection({
 
   return (
     <div className="flex flex-col gap-4">
-      <ExecutionFlowOverview
+      {(mode === "ai" || mode === "all") && <ExecutionFlowOverview
         claudeModel={claudeModel}
         githubActionsAgent={githubActionsAgent}
         githubActionsCodexModel={githubActionsCodexModel}
@@ -254,11 +286,11 @@ export function ExecutionSettingsSection({
         appAiModel={appAiModel}
         appAiModelReasoning={appAiModelReasoning}
         modelPickEngine={modelPickEngine}
-      />
+      />}
 
-      <h3 className="border-b pb-1 text-xs font-semibold tracking-wide text-muted-foreground">共通設定</h3>
+      {(mode === "execution" || mode === "all") && <h3 className="border-b pb-1 text-xs font-semibold tracking-wide text-muted-foreground">サブPCとエラー処理</h3>}
 
-      <div id="execution-controls" className="flex flex-col gap-1.5">
+      {(mode === "execution" || mode === "all") && <div id="execution-controls" className="flex flex-col gap-1.5">
         <Label htmlFor="auto-retry-limit">自動リトライ回数</Label>
         <Input
           id="auto-retry-limit"
@@ -278,9 +310,9 @@ export function ExecutionSettingsSection({
           Actionsの無人実行（Issueからの計画・実装）が、計画コメントもPull
           Requestも残せずに終わった場合に、自動で再実行する回数の上限です。0で無効ですが、一過性の障害と判定した場合だけは0でも2回まで再実行します。ローカルセッションには適用されません。全リポジトリ共通の設定です。
         </p>
-      </div>
+      </div>}
 
-      <div id="subpc-agent-settings" className="flex flex-col gap-1.5 border-t pt-4">
+      {(mode === "execution" || mode === "all") && <div id="subpc-agent-settings" className="flex flex-col gap-1.5 border-t pt-4">
         <Label htmlFor="default-dispatch-agent">サブPC：既定のエージェント</Label>
         <Select
           value={defaultDispatchAgent}
@@ -300,9 +332,9 @@ export function ExecutionSettingsSection({
         <p className="text-xs text-muted-foreground">
           「実装を開始」を開いたときの最初の選択です。Issueごとに選び直した値、既存セッションの再開、GitHub Actionsには影響しません。
         </p>
-      </div>
+      </div>}
 
-      <div id="plan-review-settings" className="flex flex-col gap-3 border-t pt-4">
+      {(mode === "ai" || mode === "all") && <div id="plan-review-settings" className="flex flex-col gap-3 border-t pt-4">
         <div>
           <Label>サブPC：自動計画レビューのエージェントとモデル</Label>
           <p className="mt-1 text-xs text-muted-foreground">
@@ -381,9 +413,9 @@ export function ExecutionSettingsSection({
             </SelectContent>
           </Select>
         </div>
-      </div>
+      </div>}
 
-      <div id="failover-settings" className="flex flex-col gap-3 border-t pt-4">
+      {(mode === "execution" || mode === "all") && <div id="failover-settings" className="flex flex-col gap-3 border-t pt-4">
         <div>
           <Label htmlFor="dispatch-failover-enabled">使用量に応じた自動フェイルオーバー</Label>
           <p className="mt-1 text-xs text-muted-foreground">
@@ -418,9 +450,9 @@ export function ExecutionSettingsSection({
             使用量を取得できない・古い・期限切れの場合は切り替えません。手動で選び直したエージェントも維持します。
           </p>
         </div>
-      </div>
+      </div>}
 
-      <div id="concurrency-settings" className="flex flex-col gap-1.5 border-t pt-4">
+      {(mode === "execution" || mode === "all") && <div id="concurrency-settings" className="flex flex-col gap-1.5 border-t pt-4">
         <Label htmlFor="dispatch-concurrency">サブPCの同時実行数</Label>
         <Input
           id="dispatch-concurrency"
@@ -435,8 +467,9 @@ export function ExecutionSettingsSection({
           合わせて変えられるよう設定値にしています（既定の3は載せ替え後のCPU実測にもとづく上限で、
           4本にするとメモリが足りずビルドが2倍以上遅くなります）。
         </p>
-      </div>
+      </div>}
 
+      {(mode === "ai" || mode === "all") && <>
       <h3 id="github-actions-settings" className="border-b pb-1 text-xs font-semibold tracking-wide text-muted-foreground">GitHub Actions 共通設定</h3>
 
       <div className="flex flex-col gap-1.5">
@@ -637,33 +670,31 @@ export function ExecutionSettingsSection({
           通常はSonnetが適しています。GPTを選ぶとOpenAI API、Claudeを選ぶとAnthropic APIを使います。
         </p>
       </div>
+      </>}
 
-      {error && <p className="text-sm text-destructive">{error}</p>}
+      {hasFormSave && error && <p className="text-sm text-destructive">{error}</p>}
 
-      <div className="flex items-center gap-3 border-t pt-4">
-        <Button onClick={handleSubmit} disabled={isSubmitting || !isValid || !isDirty}>
+      {hasFormSave && <div className="flex items-center gap-3 border-t pt-4">
+        <Button onClick={handleSubmit} disabled={isSubmitting || !isValid || !sectionDirty}>
           {isSubmitting ? "保存中..." : "保存"}
         </Button>
-        {isSaved && !isDirty && (
+        {isSaved && !sectionDirty && (
           <span className="text-xs text-muted-foreground">保存しました</span>
         )}
-        {isDirty && !isSubmitting && (
+        {sectionDirty && !isSubmitting && (
           <span className="text-xs text-muted-foreground">未保存の変更があります</span>
         )}
-      </div>
+      </div>}
 
-      <h3 className="border-b pb-1 text-xs font-semibold tracking-wide text-muted-foreground">
-        その場で保存される設定
-      </h3>
-      <p className="-mt-2 text-xs text-muted-foreground">
-        上の「保存」の対象ではありません。選んだ時点か、各項目の専用ボタンで保存されます。
-      </p>
+      {(mode === "automation" || mode === "all") && <>
+      {mode === "all" && <><h3 className="border-b pb-1 text-xs font-semibold tracking-wide text-muted-foreground">自動化</h3><p className="-mt-2 text-xs text-muted-foreground">各項目の変更はその場で保存されます。</p></>}
 
       <ReleasePrepIntervalField />
 
       <CodeReviewRecommendField />
 
       <PlanReviewAutoReflectField />
+      </>}
     </div>
   );
 }

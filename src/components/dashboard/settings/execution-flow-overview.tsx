@@ -33,6 +33,7 @@ export function ExecutionFlowOverview(props: ExecutionFlowOverviewProps) {
     }).catch(() => setSettingsLoaded(false));
   }, [props.workflowClaudeModel]);
   const flows = resolveExecutionFlows({ ...props, workflowClaudeModel: claudeModel, workflowCodexModel: codexModel, workflowCodexReasoningEffort: reasoningEffort });
+  const summaryGroups = ["計画", "実装", "レビュー", "修復", "アプリ内AI"] as const;
 
   async function saveWorkflowSettings(kind: "claude" | "codex") {
     setIsSaving(true);
@@ -56,7 +57,8 @@ export function ExecutionFlowOverview(props: ExecutionFlowOverviewProps) {
   }
 
   return <section aria-labelledby="execution-flows-heading" className="flex flex-col gap-4">
-    <div><h3 id="execution-flows-heading" className="text-sm font-semibold">実行フロー</h3><p className="mt-1 text-xs text-muted-foreground">実行場所とエージェントは参照専用です。PRレビュー・修復のモデルはカード内で変更できます。</p></div>
+    <div className="rounded-lg border bg-muted/30 p-3"><h3 id="execution-flows-heading" className="text-sm font-semibold">現在のAI構成</h3><p className="mt-1 text-xs text-muted-foreground">主な処理の実効設定です。詳細は下で確認・変更できます。</p><dl className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2"><>{summaryGroups.map((group) => { const groupFlows = flows.filter((flow) => flow.group === group); const models = [...new Set(groupFlows.map((flow) => `${flow.agent} / ${flow.model}`))]; return <div key={group} className="rounded-md bg-background px-2.5 py-2"><dt className="text-xs text-muted-foreground">{group}</dt><dd className="text-xs font-medium">{models.join("・")}</dd></div>; })}</></dl></div>
+    <p className="text-xs text-muted-foreground">実行場所とエージェントは参照専用です。PRレビュー・修復のモデルはカード内で変更できます。</p>
     {GROUPS.map((group) => {
       const groupFlows = flows.filter((flow) => flow.group === group);
       if (!groupFlows.length) return null;
