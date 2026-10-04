@@ -16,6 +16,17 @@ import { dispatchWorkflow } from "@/lib/github/workflow-dispatch";
  * 次の種類を1つだけdispatchする。個々のworkflowの開始・終了表示は既存のRepairRunをそのまま使う。
  */
 export async function runPullRequestAutoRepairSweep(): Promise<{ scanned: number; dispatched: number }> {
+  const timeoutAt = new Date(Date.now() - 30 * 60 * 1000);
+  // dispatching中にプロセス停止・DB障害が起きた系列は放置せず停止させる。
+  await db.pullRequestAutoRepairLoop.updateMany({
+    where: { status: "dispatching", updatedAt: { lt: timeoutAt } },
+    data: { status: "stopped", currentKind: null, stopReason: "timed_out" },
+  });
+  // CI/レビュー待ちが永続する系列も30分で停止し、永久pollを防ぐ。
+  await db.pullRequestAutoRepairLoop.updateMany({
+    where: { status: "running", updatedAt: { lt: timeoutAt } },
+    data: { status: "stopped", currentKind: null, stopReason: "timed_out" },
+  });
   const loops = await db.pullRequestAutoRepairLoop.findMany({ where: { status: "running" } });
   let dispatched = 0;
 
