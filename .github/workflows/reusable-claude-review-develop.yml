@@ -549,11 +549,29 @@ jobs:
             fi
           } >> "$GITHUB_STEP_SUMMARY"
 
+  review-provider:
+    # 通常時は主系プロバイダーだけをレビューに使う。設定を読めない場合は従来どおりClaudeへ倒す。
+    runs-on: ubuntu-latest
+    outputs:
+      provider: ${{ steps.provider.outputs.provider }}
+    steps:
+      - name: 主系AIプロバイダーを取得する
+        id: provider
+        env:
+          APP_BASE_URL: ${{ vars.APP_BASE_URL }}
+        run: |
+          provider=claude
+          if [ -n "$APP_BASE_URL" ]; then
+            provider="$(curl -fsS --max-time 5 "${APP_BASE_URL%/}/api/settings/claude-model" 2>/dev/null | jq -r '.aiExecutionProvider // "claude"' || true)"
+          fi
+          case "$provider" in claude|codex) ;; *) provider=claude ;; esac
+          echo "provider=$provider" >> "$GITHUB_OUTPUT"
+
   claude-review:
     # risk-checkがレビュー要と判定した場合のみ実行する(#992)。
     # スキップされた場合、auto-mergeはclaude-reviewの結果を'skipped'として許容する
-    needs: [identify-issue, risk-check]
-    if: github.event.pull_request.draft == false && needs.risk-check.outputs.needs-review == 'true'
+    needs: [identify-issue, risk-check, review-provider]
+    if: github.event.pull_request.draft == false && needs.risk-check.outputs.needs-review == 'true' && needs.review-provider.outputs.provider == 'claude'
     runs-on: ubuntu-latest
     outputs:
       # Claudeが実際に走ったか(#2448)。claude-code-actionには「ワークフローファイルの内容が
@@ -824,8 +842,8 @@ jobs:
     # APIキー課金のCodex Actionは使わず、サブPCでChatGPTサブスクリプションにログイン済みの
     # Codex CLIへPRコメントの要求印を渡す（#3917）。結果が返るまで待つため、失敗・期限切れは
     # auto-mergeを止める安全側のfailureにする。
-    needs: [identify-issue, risk-check]
-    if: github.event.pull_request.draft == false && needs.risk-check.outputs.needs-review == 'true'
+    needs: [identify-issue, risk-check, review-provider]
+    if: github.event.pull_request.draft == false && needs.risk-check.outputs.needs-review == 'true' && needs.review-provider.outputs.provider == 'codex'
     runs-on: ubuntu-latest
     permissions:
       pull-requests: write

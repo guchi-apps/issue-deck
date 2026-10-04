@@ -51,6 +51,7 @@ describe("GET", () => {
     findUnique.mockResolvedValue(null);
     await expect((await GET()).json()).resolves.toEqual({
       claudeModel: "auto",
+      aiExecutionProvider: "claude",
       githubActionsAgent: "claude",
       githubActionsCodexModel: "gpt-5.6-terra",
       claudeModelAssist: "auto",
@@ -61,7 +62,7 @@ describe("GET", () => {
       modelPickEngine: "app-ai",
       defaultDispatchAgent: "claude",
       planReviewAgentForClaude: "claude",
-      planReviewAgentForCodex: "codex",
+      planReviewAgentForCodex: "claude",
       planReviewClaudeModel: "sonnet",
       planReviewCodexModel: "gpt-5.6-terra",
       workflowClaudeModel: "auto",
@@ -83,6 +84,7 @@ describe("GET", () => {
     });
     await expect((await GET()).json()).resolves.toEqual({
       claudeModel: "opus",
+      aiExecutionProvider: "claude",
       githubActionsAgent: "claude",
       githubActionsCodexModel: "gpt-5.6-terra",
       claudeModelAssist: "sonnet",
@@ -93,7 +95,7 @@ describe("GET", () => {
       modelPickEngine: "app-ai",
       defaultDispatchAgent: "claude",
       planReviewAgentForClaude: "claude",
-      planReviewAgentForCodex: "codex",
+      planReviewAgentForCodex: "claude",
       planReviewClaudeModel: "sonnet",
       planReviewCodexModel: "gpt-5.6-terra",
       workflowClaudeModel: "auto",

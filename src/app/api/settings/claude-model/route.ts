@@ -1,21 +1,17 @@
 import { NextResponse, type NextRequest } from "next/server";
 
 import {
-  APP_AI_MODEL_DEFAULT,
-  APP_AI_MODEL_REASONING_DEFAULT,
+  AI_EXECUTION_PROVIDER_DEFAULT,
   CLAUDE_LOCAL_MODEL_DEFAULT,
   CODEX_MODEL_DEFAULT,
   CODEX_REASONING_EFFORT_DEFAULT,
-  DEFAULT_DISPATCH_AGENT_SETTING,
-  GITHUB_ACTIONS_AGENT_DEFAULT,
   GITHUB_ACTIONS_CODEX_MODEL_DEFAULT,
   DISPATCH_FAILOVER_THRESHOLD_PERCENT_DEFAULT,
   MODEL_PICK_ENGINE_DEFAULT,
-  PLAN_REVIEW_AGENT_FOR_CLAUDE_DEFAULT,
-  PLAN_REVIEW_AGENT_FOR_CODEX_DEFAULT,
   PLAN_REVIEW_CLAUDE_MODEL_DEFAULT,
   PLAN_REVIEW_CODEX_MODEL_DEFAULT,
   parseAppAiModel,
+  parseAiExecutionProvider,
   parseClaudeLocalModel,
   parseClaudeLocalModelSetting,
   parseClaudeModel,
@@ -28,6 +24,8 @@ import {
   parseDispatchFailoverThresholdPercent,
   parseModelPickEngine,
   parsePlanReviewAgent,
+  resolveAiExecutionAgent,
+  resolveAppAiModel,
 } from "@/lib/app-settings";
 import { requireUserId } from "@/lib/auth-user";
 import { db } from "@/lib/db";
@@ -38,8 +36,10 @@ async function getClaudeModels() {
     | null;
   return {
     claudeModel: setting?.claudeModel ?? "auto",
+    aiExecutionProvider:
+      parseAiExecutionProvider(setting?.aiExecutionProvider) ?? AI_EXECUTION_PROVIDER_DEFAULT,
     githubActionsAgent:
-      parseGithubActionsAgent(setting?.githubActionsAgent) ?? GITHUB_ACTIONS_AGENT_DEFAULT,
+      resolveAiExecutionAgent(setting?.githubActionsAgent, setting?.aiExecutionProvider),
     githubActionsCodexModel:
       parseCodexLocalModel(setting?.githubActionsCodexModel) ?? GITHUB_ACTIONS_CODEX_MODEL_DEFAULT,
     workflowClaudeModel: parseClaudeModel(setting?.workflowClaudeModel) ?? "auto",
@@ -51,11 +51,11 @@ async function getClaudeModels() {
       parseClaudeLocalModelSetting(setting?.claudeLocalModel) ?? CLAUDE_LOCAL_MODEL_DEFAULT,
     codexModel: parseCodexModelSetting(setting?.codexModel) ?? CODEX_MODEL_DEFAULT,
     defaultDispatchAgent:
-      parseDefaultDispatchAgent(setting?.defaultDispatchAgent) ?? DEFAULT_DISPATCH_AGENT_SETTING,
+      resolveAiExecutionAgent(setting?.defaultDispatchAgent, setting?.aiExecutionProvider),
     planReviewAgentForClaude:
-      parsePlanReviewAgent(setting?.planReviewAgentForClaude) ?? PLAN_REVIEW_AGENT_FOR_CLAUDE_DEFAULT,
+      resolveAiExecutionAgent(setting?.planReviewAgentForClaude, setting?.aiExecutionProvider),
     planReviewAgentForCodex:
-      parsePlanReviewAgent(setting?.planReviewAgentForCodex) ?? PLAN_REVIEW_AGENT_FOR_CODEX_DEFAULT,
+      resolveAiExecutionAgent(setting?.planReviewAgentForCodex, setting?.aiExecutionProvider),
     planReviewClaudeModel:
       parseClaudeLocalModel(setting?.planReviewClaudeModel) ?? PLAN_REVIEW_CLAUDE_MODEL_DEFAULT,
     planReviewCodexModel:
@@ -64,9 +64,9 @@ async function getClaudeModels() {
     dispatchFailoverThresholdPercent:
       parseDispatchFailoverThresholdPercent(setting?.dispatchFailoverThresholdPercent) ??
       DISPATCH_FAILOVER_THRESHOLD_PERCENT_DEFAULT,
-    appAiModel: parseAppAiModel(setting?.appAiModel) ?? APP_AI_MODEL_DEFAULT,
+    appAiModel: resolveAppAiModel(setting?.appAiModel, setting?.aiExecutionProvider),
     appAiModelReasoning:
-      parseAppAiModel(setting?.appAiModelReasoning) ?? APP_AI_MODEL_REASONING_DEFAULT,
+      resolveAppAiModel(setting?.appAiModelReasoning, setting?.aiExecutionProvider, true),
     modelPickEngine: parseModelPickEngine(setting?.modelPickEngine) ?? MODEL_PICK_ENGINE_DEFAULT,
   };
 }
@@ -91,6 +91,13 @@ export async function PATCH(request: NextRequest) {
   }
 
   const payload = await request.json().catch(() => null);
+  const hasAiExecutionProvider = payload !== null && typeof payload === "object" && "aiExecutionProvider" in payload;
+  const aiExecutionProvider = hasAiExecutionProvider
+    ? parseAiExecutionProvider(payload?.aiExecutionProvider)
+    : undefined;
+  if (hasAiExecutionProvider && aiExecutionProvider === null) {
+    return NextResponse.json({ error: "invalid_request" }, { status: 400 });
+  }
   const hasClaudeModel = payload !== null && typeof payload === "object" && "claudeModel" in payload;
   const claudeModel = hasClaudeModel ? parseClaudeModel(payload?.claudeModel) : undefined;
   if (hasClaudeModel && claudeModel === null) {
@@ -231,6 +238,7 @@ export async function PATCH(request: NextRequest) {
     create: {
       id: 1,
       claudeModel: claudeModel ?? "auto",
+      ...(aiExecutionProvider ? { aiExecutionProvider } : {}),
       ...(githubActionsAgent ? { githubActionsAgent } : {}),
       ...(githubActionsCodexModel ? { githubActionsCodexModel } : {}),
       ...(workflowClaudeModel ? { workflowClaudeModel } : {}),
@@ -254,6 +262,7 @@ export async function PATCH(request: NextRequest) {
     },
     update: {
       ...(claudeModel ? { claudeModel } : {}),
+      ...(aiExecutionProvider ? { aiExecutionProvider } : {}),
       ...(githubActionsAgent ? { githubActionsAgent } : {}),
       ...(githubActionsCodexModel ? { githubActionsCodexModel } : {}),
       ...(workflowClaudeModel ? { workflowClaudeModel } : {}),
@@ -288,8 +297,10 @@ export async function PATCH(request: NextRequest) {
 
   return NextResponse.json({
     claudeModel: updated.claudeModel,
+    aiExecutionProvider:
+      parseAiExecutionProvider(updated.aiExecutionProvider) ?? AI_EXECUTION_PROVIDER_DEFAULT,
     githubActionsAgent:
-      parseGithubActionsAgent(updated.githubActionsAgent) ?? GITHUB_ACTIONS_AGENT_DEFAULT,
+      resolveAiExecutionAgent(updated.githubActionsAgent, updated.aiExecutionProvider),
     githubActionsCodexModel:
       parseCodexLocalModel(updated.githubActionsCodexModel) ?? GITHUB_ACTIONS_CODEX_MODEL_DEFAULT,
     workflowClaudeModel: parseClaudeModel(updated.workflowClaudeModel) ?? "auto",
@@ -300,16 +311,16 @@ export async function PATCH(request: NextRequest) {
     codexModel: parseCodexModelSetting(updated.codexModel) ?? CODEX_MODEL_DEFAULT,
     claudeLocalModel:
       parseClaudeLocalModelSetting(updated.claudeLocalModel) ?? CLAUDE_LOCAL_MODEL_DEFAULT,
-    appAiModel: parseAppAiModel(updated.appAiModel) ?? APP_AI_MODEL_DEFAULT,
+    appAiModel: resolveAppAiModel(updated.appAiModel, updated.aiExecutionProvider),
     appAiModelReasoning:
-      parseAppAiModel(updated.appAiModelReasoning) ?? APP_AI_MODEL_REASONING_DEFAULT,
+      resolveAppAiModel(updated.appAiModelReasoning, updated.aiExecutionProvider, true),
     modelPickEngine: parseModelPickEngine(updated.modelPickEngine) ?? MODEL_PICK_ENGINE_DEFAULT,
     defaultDispatchAgent:
-      parseDefaultDispatchAgent(updated.defaultDispatchAgent) ?? DEFAULT_DISPATCH_AGENT_SETTING,
+      resolveAiExecutionAgent(updated.defaultDispatchAgent, updated.aiExecutionProvider),
     planReviewAgentForClaude:
-      parsePlanReviewAgent(updated.planReviewAgentForClaude) ?? PLAN_REVIEW_AGENT_FOR_CLAUDE_DEFAULT,
+      resolveAiExecutionAgent(updated.planReviewAgentForClaude, updated.aiExecutionProvider),
     planReviewAgentForCodex:
-      parsePlanReviewAgent(updated.planReviewAgentForCodex) ?? PLAN_REVIEW_AGENT_FOR_CODEX_DEFAULT,
+      resolveAiExecutionAgent(updated.planReviewAgentForCodex, updated.aiExecutionProvider),
     planReviewClaudeModel:
       parseClaudeLocalModel(updated.planReviewClaudeModel) ?? PLAN_REVIEW_CLAUDE_MODEL_DEFAULT,
     planReviewCodexModel:
