@@ -145,12 +145,18 @@ export async function runPullRequestAutoRepairSweep(): Promise<{ scanned: number
       }
       // workflow自身の開始報告より先にpollerが次巡へ入っても、同じHEAD・同じ問題を
       // repeated_problemと誤認しないよう、初回のrepair APIと同じくdispatch成功時点でrunningを記録する。
-      await recordPullRequestRepairRun({
-        repositoryFullName: stored.repositoryFullName,
-        pullRequestNumber: stored.pullRequestNumber,
-        kind: decision.kind,
-        status: "running",
-      });
+      // RepairRunは画面表示用の補助記録。workflowのdispatch自体が成功しているため、
+      // 一時的なDB障害でこの記録だけ失敗しても系列の状態遷移を止めない。
+      try {
+        await recordPullRequestRepairRun({
+          repositoryFullName: stored.repositoryFullName,
+          pullRequestNumber: stored.pullRequestNumber,
+          kind: decision.kind,
+          status: "running",
+        });
+      } catch (error) {
+        console.error("[runPullRequestAutoRepairSweep] failed to record repair run", stored.repositoryFullName, stored.pullRequestNumber, error);
+      }
       await db.pullRequestAutoRepairLoop.update({
         where: { repositoryFullName_pullRequestNumber: { repositoryFullName: stored.repositoryFullName, pullRequestNumber: stored.pullRequestNumber } },
         data: {
