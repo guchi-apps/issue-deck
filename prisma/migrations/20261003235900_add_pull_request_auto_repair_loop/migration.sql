@@ -8,6 +8,8 @@ CREATE TABLE `PullRequestAutoRepairLoop` (
     `currentKind` VARCHAR(191) NULL,
     `lastFingerprint` VARCHAR(191) NULL,
     `stopReason` VARCHAR(191) NULL,
+    `lastSweepAt` DATETIME(3) NULL,
+    `waitStartedAt` DATETIME(3) NULL,
     `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
     `updatedAt` DATETIME(3) NOT NULL,
 
