@@ -21,6 +21,7 @@ import {
   PLAN_REVIEW_CODEX_MODEL_DEFAULT,
   parseClaudeLocalModel,
   parseCodexLocalModel,
+  parseAiExecutionProvider,
   parsePlanReviewAgent,
   resolveAiExecutionAgent,
   type ClaudeLocalModel,
@@ -68,7 +69,10 @@ export function resolvePlanReviewAgentForSession(params: {
     sourceAgent === "codex"
       ? parsePlanReviewAgent(params.planReviewAgentForCodex)
       : parsePlanReviewAgent(params.planReviewAgentForClaude);
-  return resolveAiExecutionAgent(configured, params.aiExecutionProvider);
+  return resolveAiExecutionAgent(
+    configured,
+    parseAiExecutionProvider(params.aiExecutionProvider) ?? sourceAgent,
+  );
 }
 
 async function readPlanReviewSettingsForSession(sourceAgent?: SessionPlanAgent): Promise<{
