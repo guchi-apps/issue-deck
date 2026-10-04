@@ -215,8 +215,17 @@ export function ExecutionSettingsSection({
     dispatchFailoverEnabled !== initialDispatchFailoverEnabled ||
     dispatchFailoverThresholdPercent !== initialDispatchFailoverThresholdPercent ||
     dispatchConcurrency !== initialDispatchConcurrency;
-  const sectionDirty = mode === "ai" ? aiDirty : mode === "execution" ? executionDirty : isDirty;
-  const hasFormSave = mode !== "automation";
+  const automationDirty =
+    planReviewAgentForClaude !== initialPlanReviewAgentForClaude ||
+    planReviewAgentForCodex !== initialPlanReviewAgentForCodex ||
+    planReviewClaudeModel !== initialPlanReviewClaudeModel ||
+    planReviewCodexModel !== initialPlanReviewCodexModel;
+  const sectionDirty =
+    mode === "ai" ? aiDirty :
+    mode === "execution" ? executionDirty :
+    mode === "automation" ? automationDirty :
+    isDirty;
+  const hasFormSave = true;
 
   async function handleSubmit() {
     setIsSaved(false);
@@ -334,7 +343,7 @@ export function ExecutionSettingsSection({
         </p>
       </div>}
 
-      {(mode === "ai" || mode === "all") && <div id="plan-review-settings" className="flex flex-col gap-3 border-t pt-4">
+      {(mode === "automation" || mode === "all") && <div id="plan-review-settings" className="flex flex-col gap-3 border-t pt-4">
         <div>
           <Label>サブPC：自動計画レビューのエージェントとモデル</Label>
           <p className="mt-1 text-xs text-muted-foreground">
