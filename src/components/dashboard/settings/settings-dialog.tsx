@@ -7,9 +7,11 @@ import { AccountSection } from "@/components/dashboard/settings/account-section"
 import { AppVersionButton } from "@/components/dashboard/settings/app-version-button";
 import { ChangelogSection } from "@/components/dashboard/settings/changelog-section";
 import {
-  ExecutionSettingsSection,
   type AppSettingsValues,
 } from "@/components/dashboard/settings/execution-settings-section";
+import { AiModelSettingsSection } from "@/components/dashboard/settings/ai-model-settings-section";
+import { AutomationSettingsSection } from "@/components/dashboard/settings/automation-settings-section";
+import { ExecutionControlSettingsSection } from "@/components/dashboard/settings/execution-control-settings-section";
 import { FleetOpsSection } from "@/components/dashboard/settings/fleet-ops-section";
 import { ImagesSection } from "@/components/dashboard/settings/images-section";
 import { KnowledgeSection } from "@/components/dashboard/settings/knowledge-section";
@@ -18,6 +20,7 @@ import { PostCreateDestinationSection } from "@/components/dashboard/settings/po
 import { RepositoryVisibilitySection } from "@/components/dashboard/settings/repository-visibility-section";
 import {
   DEFAULT_SETTINGS_SECTION,
+  SETTINGS_SECTION_GROUPS,
   SETTINGS_LIST_SECTIONS,
   SETTINGS_SECTIONS,
   type SettingsSectionKey,
@@ -120,6 +123,13 @@ export function SettingsDialog({
     status: data.hasGithubIncident,
   };
   const activeSection = SETTINGS_SECTIONS.find((item) => item.key === section);
+  const settingsProps = {
+    autoRetryLimit, claudeModel, githubActionsAgent, githubActionsCodexModel, claudeModelAssist,
+    claudeLocalModel, codexModel, defaultDispatchAgent, planReviewAgentForClaude,
+    planReviewAgentForCodex, planReviewClaudeModel, planReviewCodexModel,
+    dispatchFailoverEnabled, dispatchFailoverThresholdPercent, appAiModel, appAiModelReasoning,
+    modelPickEngine, dispatchConcurrency, onUpdated,
+  };
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -160,9 +170,12 @@ export function SettingsDialog({
                 </span>
               </span>
             </button>
-            {SETTINGS_LIST_SECTIONS.map((item) => {
-              const Icon = item.icon;
-              const isActive = item.key === section;
+            {SETTINGS_SECTION_GROUPS.map((group) => <div key={group.label} className="mb-1.5">
+              <p className="px-2.5 pt-2 pb-1 text-[11px] font-semibold text-muted-foreground">{group.label}</p>
+              {group.keys.map((key) => {
+              const item = SETTINGS_LIST_SECTIONS.find((candidate) => candidate.key === key);
+              if (!item) return null;
+              const Icon = item.icon; const isActive = item.key === section;
               return (
                 <button
                   key={item.key}
@@ -183,7 +196,7 @@ export function SettingsDialog({
                   )}
                 </button>
               );
-            })}
+            })}</div>)}
 
             {/* バージョンは区分の外（左タブの最下部）に常設する。どの区分を開いていても
                 目に入り、押すと更新履歴へ入る（#1764） */}
@@ -201,38 +214,14 @@ export function SettingsDialog({
               {section === "display" && (
                 <div className="flex flex-col gap-5">
                   <PostCreateDestinationSection />
-                  <RepositoryVisibilitySection
-                    repositories={repositories}
-                    onSetRepositoryHidden={onSetRepositoryHidden}
-                    onSetRepositoriesHidden={onSetRepositoriesHidden}
-                    onSetRepositoryIssueCreationExcluded={onSetRepositoryIssueCreationExcluded}
-                  />
                 </div>
               )}
               {section === "notification" && <NotificationSettingsSection />}
-              {section === "execution" && (
-                <ExecutionSettingsSection
-                  autoRetryLimit={autoRetryLimit}
-                  claudeModel={claudeModel}
-                  githubActionsAgent={githubActionsAgent}
-                  githubActionsCodexModel={githubActionsCodexModel}
-                  claudeModelAssist={claudeModelAssist}
-                  claudeLocalModel={claudeLocalModel}
-                  codexModel={codexModel}
-                  defaultDispatchAgent={defaultDispatchAgent}
-                  planReviewAgentForClaude={planReviewAgentForClaude}
-                  planReviewAgentForCodex={planReviewAgentForCodex}
-                  planReviewClaudeModel={planReviewClaudeModel}
-                  planReviewCodexModel={planReviewCodexModel}
-                  dispatchFailoverEnabled={dispatchFailoverEnabled}
-                  dispatchFailoverThresholdPercent={dispatchFailoverThresholdPercent}
-                  appAiModel={appAiModel}
-                  appAiModelReasoning={appAiModelReasoning}
-                  modelPickEngine={modelPickEngine}
-                  dispatchConcurrency={dispatchConcurrency}
-                  onUpdated={onUpdated}
-                />
-              )}
+              {section === "repositories" && <RepositoryVisibilitySection repositories={repositories} onSetRepositoryHidden={onSetRepositoryHidden} onSetRepositoriesHidden={onSetRepositoriesHidden} onSetRepositoryIssueCreationExcluded={onSetRepositoryIssueCreationExcluded} />}
+              {/* 3区分は切替時もマウントを維持し、保存前のフォーム入力を失わない。 */}
+              <div hidden={section !== "ai-models"}><AiModelSettingsSection {...settingsProps} /></div>
+              <div hidden={section !== "execution"}><ExecutionControlSettingsSection {...settingsProps} /></div>
+              <div hidden={section !== "automation"}><AutomationSettingsSection {...settingsProps} /></div>
               {section === "fleet" && (
                 <FleetOpsSection
                   fineGrainedTokens={data.fineGrainedTokens}

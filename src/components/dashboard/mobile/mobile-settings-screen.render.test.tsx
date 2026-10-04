@@ -113,11 +113,14 @@ afterEach(() => {
 });
 
 describe("MobileSettingsScreen", () => {
-  it("PCの設定ダイアログと同じ区分を一覧に出す（#1539・#1552）", () => {
+  it("PCの設定ダイアログと同じ目的別グループを一覧に出す（#3983）", () => {
     renderScreen();
 
-    for (const label of ["表示", "実行設定", "フリート運用", "障害状況", "更新履歴"]) {
-      expect(screen.getByRole("button", { name: new RegExp(label) })).toBeTruthy();
+    for (const label of ["一般", "AI・実行", "管理", "情報"]) {
+      expect(screen.getByRole("region", { name: label })).toBeTruthy();
+    }
+    for (const label of ["AI・モデル", "実行", "自動化", "リポジトリ", "フリート", "ストレージ", "システム状態"]) {
+      expect(screen.getByRole("button", { name: new RegExp(`^${label}`) })).toBeTruthy();
     }
     // 「アカウント」は区分に並べず、アカウント名のカードから開く（#3744）
     expect(screen.queryByRole("button", { name: /^アカウント$/ })).toBeNull();
@@ -140,12 +143,12 @@ describe("MobileSettingsScreen", () => {
   it("区分を選ぶと中身へ入り、戻るで一覧へ帰る", () => {
     renderScreen();
 
-    fireEvent.click(screen.getByRole("button", { name: /実行設定/ }));
+    fireEvent.click(screen.getByRole("button", { name: /^実行/ }));
     expect(screen.getByLabelText("自動リトライ回数")).toBeTruthy();
 
     fireEvent.click(screen.getByRole("button", { name: "戻る" }));
     expect(screen.queryByLabelText("自動リトライ回数")).toBeNull();
-    expect(screen.getByRole("button", { name: /フリート運用/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /^フリート/ })).toBeTruthy();
   });
 
   it("アカウント名を押すとアカウント設定へ入り、戻るで一覧へ帰る（#3744）", () => {
@@ -156,10 +159,10 @@ describe("MobileSettingsScreen", () => {
     expect(screen.getByRole("button", { name: /ログアウト/ })).toBeTruthy();
     expect(screen.queryByRole("button", { name: /アカウントを削除/ })).toBeNull();
     // 一覧は重ならない
-    expect(screen.queryByRole("button", { name: /フリート運用/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^フリート/ })).toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: "戻る" }));
-    expect(screen.getByRole("button", { name: /フリート運用/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /^フリート/ })).toBeTruthy();
   });
 
   it("一覧ではモーダルを閉じるボタンが出て、押すとonBackを呼ぶ（#3744）", () => {
@@ -189,10 +192,10 @@ describe("MobileSettingsScreen", () => {
     expect(onBack).toHaveBeenCalled();
   });
 
-  it("表示の区分でもPCと同じリポジトリ一覧を出す（#1552）", () => {
+  it("リポジトリの区分でもPCと同じリポジトリ一覧を出す（#3983）", () => {
     renderScreen();
 
-    fireEvent.click(screen.getByRole("button", { name: /表示/ }));
+    fireEvent.click(screen.getByRole("button", { name: /^リポジトリ/ }));
 
     expect(screen.getByText(/1件中/).textContent).toBe("1件中1件を表示中");
 

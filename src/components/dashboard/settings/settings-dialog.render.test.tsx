@@ -105,6 +105,12 @@ const repositories = [
   },
 ];
 
+// 区分を切り替えても入力中の値を失わないよう、設定の区分は`hidden`で隠すだけでマウントしたままにしている。
+// 非表示の区分に属する要素は「画面に出ていない」ものとして扱う。
+function isShown(element: Element | null): boolean {
+  return element !== null && element.closest("[hidden]") === null;
+}
+
 function renderDialog() {
   return render(
     <SettingsDialog
@@ -138,16 +144,19 @@ afterEach(() => {
 });
 
 describe("SettingsDialog", () => {
-  it("区分をタブとして出し、既定では実行設定を開く（#1539・#1552）", () => {
+  it("目的別のグループと区分を出し、既定ではAI・モデルを開く（#3983）", () => {
     renderDialog();
 
-    for (const label of ["表示", "実行設定", "フリート運用", "障害状況", "更新履歴"]) {
-      expect(screen.getByRole("button", { name: new RegExp(label) })).toBeTruthy();
+    for (const label of ["一般", "AI・実行", "管理", "情報"]) {
+      expect(screen.getByText(label)).toBeTruthy();
+    }
+    for (const label of ["AI・モデル", "実行", "自動化", "リポジトリ", "フリート", "ストレージ", "システム状態"]) {
+      expect(screen.getByRole("button", { name: new RegExp(`^${label}$`) })).toBeTruthy();
     }
     // 「アカウント」は区分に並べず、アカウント名の行から開く（#3744）
     expect(screen.queryByRole("button", { name: /^アカウント$/ })).toBeNull();
-    expect(screen.getByLabelText("自動リトライ回数")).toBeTruthy();
-    expect(screen.getByLabelText("サブPCの同時実行数")).toBeTruthy();
+    expect(screen.getByText("現在のAI構成")).toBeTruthy();
+    expect(isShown(screen.queryByLabelText("自動リトライ回数"))).toBe(false);
   });
 
   it("アカウント名の行を押すとアカウント設定が開き、削除ボタンは無い（#3744）", () => {
@@ -157,17 +166,17 @@ describe("SettingsDialog", () => {
 
     expect(screen.getByRole("button", { name: /ログアウト/ })).toBeTruthy();
     expect(screen.queryByRole("button", { name: /アカウントを削除/ })).toBeNull();
-    expect(screen.queryByLabelText("自動リトライ回数")).toBeNull();
+    expect(isShown(screen.queryByLabelText("自動リトライ回数"))).toBe(false);
   });
 
   it("バージョンはアカウントを開かなくても見え、押すと更新履歴が開く（#1764）", () => {
     renderDialog();
 
-    // 既定は実行設定。区分を切り替えてもバージョンは左タブの最下部に出たまま。
+    // 既定はAI・モデル。区分を切り替えてもバージョンは左タブの最下部に出たまま。
     const version = screen.getByRole("button", { name: /Issue Deck v/ });
     expect(version.textContent).toContain(`v${packageJson.version}`);
 
-    fireEvent.click(screen.getByRole("button", { name: /フリート運用/ }));
+    fireEvent.click(screen.getByRole("button", { name: /^フリート$/ }));
     expect(screen.getByRole("button", { name: /Issue Deck v/ })).toBeTruthy();
 
     fireEvent.click(screen.getByRole("button", { name: /Issue Deck v/ }));
@@ -181,22 +190,26 @@ describe("SettingsDialog", () => {
     expect(within(section!).getByRole("heading", { name: /^v\d+\.\d+\.\d+$/ })).toBeTruthy();
   });
 
-  it("保存ボタンを持つのは実行設定だけで、即時実行の区分には無い（#1539）", () => {
+  it("実行と自動化は区分ごとに自分の保存ボタンを持ち、即時保存の項目も自動化に並ぶ（#3983）", () => {
     renderDialog();
 
+    fireEvent.click(screen.getByRole("button", { name: /^実行$/ }));
     expect(screen.getByRole("button", { name: "保存" })).toBeTruthy();
+    expect(isShown(screen.getByLabelText("自動リトライ回数"))).toBe(true);
 
-    fireEvent.click(screen.getByRole("button", { name: /フリート運用/ }));
+    fireEvent.click(screen.getByRole("button", { name: /^自動化$/ }));
 
-    expect(screen.queryByRole("button", { name: "保存" })).toBeNull();
-    expect(screen.getByRole("button", { name: /Issueを再同期/ })).toBeTruthy();
-    expect(screen.getByText("Fine-grained PATの有効期限")).toBeTruthy();
+    // 計画レビューのエージェント設定は保存を押すまで効かないため、自動化にも専用の保存ボタンがある。
+    // 実行区分のフォームは隠れ、表示中の保存ボタンは自動化のものだけになる。
+    expect(isShown(screen.getByLabelText("自動リトライ回数"))).toBe(false);
+    expect(isShown(screen.getByRole("button", { name: "保存" }))).toBe(true);
+    expect(screen.getByLabelText("リリース準備の自動実行間隔")).toBeTruthy();
   });
 
-  it("フリート運用の各区画は畳んであり、開いた区画だけを読み込む（#2022）", () => {
+  it("フリートの各区画は畳んであり、開いた区画だけを読み込む（#2022）", () => {
     renderDialog();
 
-    fireEvent.click(screen.getByRole("button", { name: /フリート運用/ }));
+    fireEvent.click(screen.getByRole("button", { name: /^フリート$/ }));
 
     // 見出しは出るが、中身（＝取得を伴う一覧）はまだ無い
     expect(screen.getByText("1Password → GitHub のシークレット同期")).toBeTruthy();
@@ -213,6 +226,8 @@ describe("SettingsDialog", () => {
   it("変更が無いあいだ保存は押せず、変更すると押せるようになる", async () => {
     renderDialog();
 
+    fireEvent.click(screen.getByRole("button", { name: /^実行$/ }));
+
     const save = screen.getByRole("button", { name: "保存" }) as HTMLButtonElement;
     expect(save.disabled).toBe(true);
 
@@ -221,24 +236,12 @@ describe("SettingsDialog", () => {
 
     fireEvent.click(save);
     await waitFor(() => expect(updateAutoRetryLimit).toHaveBeenCalledWith(5));
-    expect(updateClaudeModel).toHaveBeenCalledWith(
-      "auto",
-      "claude",
-      "gpt-5.6-terra",
-      "haiku",
-      "sonnet",
-      "auto",
-      "claude-haiku-4-5",
-      "claude-sonnet-5-5",
-      "app-ai",
-      "claude",
-      "claude",
-      "codex",
-      "sonnet",
-      "gpt-5.6-terra",
-      true,
-      90,
-    );
+    // 実行の区分は、自分が持つ設定（既定エージェント・フェイルオーバー）だけを保存する
+    expect(updateClaudeModel).toHaveBeenCalledWith({
+      defaultDispatchAgent: "claude",
+      dispatchFailoverEnabled: true,
+      dispatchFailoverThresholdPercent: 90,
+    });
     expect(onUpdated).toHaveBeenCalledWith({
       autoRetryLimit: 5,
       claudeModel: "auto",
@@ -261,10 +264,55 @@ describe("SettingsDialog", () => {
     });
   });
 
-  it("表示の区分でチェックを外すと、そのリポジトリを非表示にする（#1552）", () => {
+  it("兄弟区分の保存済み値を同期し、後の保存で古い値へ巻き戻さない（#3983）", async () => {
+    const view = renderDialog();
+
+    // 親からAIモデルの保存済み値が更新された状態を再現する。
+    view.rerender(
+      <SettingsDialog
+        open onOpenChange={() => {}} currentUser={{ login: "octocat", name: "Octo Cat", image: null }}
+        autoRetryLimit={2} claudeModel="sonnet" claudeModelAssist="haiku" claudeLocalModel="sonnet"
+        codexModel="auto" appAiModel="claude-haiku-4-5" appAiModelReasoning="claude-sonnet-5-5"
+        modelPickEngine="app-ai" dispatchConcurrency={2} repositories={repositories}
+        onSetRepositoryHidden={onSetRepositoryHidden} onSetRepositoriesHidden={onSetRepositoriesHidden}
+        onSetRepositoryIssueCreationExcluded={onSetRepositoryIssueCreationExcluded} onUpdated={onUpdated}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /^実行$/ }));
+    fireEvent.change(screen.getByLabelText("自動リトライ回数"), { target: { value: "5" } });
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+    await waitFor(() => expect(onUpdated).toHaveBeenCalled());
+
+    // 実行フォームも親の最新保存値へ同期済みなので、古いautoを親へ戻さない。
+    expect(onUpdated.mock.calls.at(-1)?.[0].claudeModel).toBe("sonnet");
+  });
+
+  it("別区分を保存してもAI・モデルの未保存変更を保存済み扱いにしない（#3983）", async () => {
     renderDialog();
 
-    fireEvent.click(screen.getByRole("button", { name: /表示/ }));
+    // AI・モデル側に未保存変更を作る。
+    const appAi = screen.getByLabelText("アプリ内AI：要約・検索・文章整理");
+    fireEvent.change(appAi, { target: { value: "claude-sonnet-5-5" } });
+
+    // 実行区分だけを保存する。
+    fireEvent.click(screen.getByRole("button", { name: /^実行$/ }));
+    fireEvent.change(screen.getByLabelText("自動リトライ回数"), { target: { value: "5" } });
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+    await waitFor(() => expect(onUpdated).toHaveBeenCalled());
+
+    // 親へ通知するAI値は保存済み初期値のまま。未保存の値を保存済み扱いにしない。
+    expect(onUpdated.mock.calls.at(-1)?.[0].appAiModel).toBe("claude-haiku-4-5");
+
+    // このテストの親はonUpdated後にpropsを更新しない単純なspyなので、フォーム表示値の
+    // 再同期まではここで仮定しない。重要な契約は「実行の保存がAIの未保存値を保存済みとして親へ渡さない」こと。
+    expect(onUpdated.mock.calls.at(-1)?.[0].appAiModel).toBe("claude-haiku-4-5");
+  });
+
+  it("リポジトリの区分でチェックを外すと、そのリポジトリを非表示にする（#3983）", () => {
+    renderDialog();
+
+    fireEvent.click(screen.getByRole("button", { name: /^リポジトリ$/ }));
 
     expect(screen.getByText(/2件中/).textContent).toBe("2件中1件を表示中");
 
@@ -277,10 +325,10 @@ describe("SettingsDialog", () => {
     expect(onSetRepositoryHidden).toHaveBeenCalledWith(repositories[0], true);
   });
 
-  it("表示の区分は行のどこを押しても切り替わり、二重に切り替わらない（#1552）", () => {
+  it("リポジトリの区分は行のどこを押しても切り替わり、二重に切り替わらない（#3983）", () => {
     renderDialog();
 
-    fireEvent.click(screen.getByRole("button", { name: /表示/ }));
+    fireEvent.click(screen.getByRole("button", { name: /^リポジトリ$/ }));
 
     // チェックボックスそのものではなくリポジトリ名を押す
     fireEvent.click(screen.getByText("issue-deck"));
@@ -294,10 +342,10 @@ describe("SettingsDialog", () => {
     expect(onSetRepositoryHidden).toHaveBeenCalledWith(repositories[1], false);
   });
 
-  it("表示の区分の一括操作は、状態が変わる行だけを渡す（#1552）", () => {
+  it("リポジトリの区分の一括操作は、状態が変わる行だけを渡す（#3983）", () => {
     renderDialog();
 
-    fireEvent.click(screen.getByRole("button", { name: /表示/ }));
+    fireEvent.click(screen.getByRole("button", { name: /^リポジトリ$/ }));
 
     fireEvent.click(screen.getByRole("button", { name: "すべて表示" }));
     expect(onSetRepositoriesHidden).toHaveBeenCalledWith([repositories[1]], false);
@@ -306,10 +354,10 @@ describe("SettingsDialog", () => {
     expect(onSetRepositoriesHidden).toHaveBeenCalledWith([repositories[0]], true);
   });
 
-  it("表示の区分の「作成候補」を外すと、Issue作成の選択肢からだけ除外する（#2760）", () => {
+  it("リポジトリの区分の「作成候補」を外すと、Issue作成の選択肢からだけ除外する（#2760）", () => {
     renderDialog();
 
-    fireEvent.click(screen.getByRole("button", { name: /表示/ }));
+    fireEvent.click(screen.getByRole("button", { name: /^リポジトリ$/ }));
 
     // 非表示（car-care）には出さず、表示中（issue-deck）にだけ「作成候補」を出す
     const switches = screen.getAllByRole("switch");
@@ -319,10 +367,10 @@ describe("SettingsDialog", () => {
     expect(onSetRepositoryIssueCreationExcluded).toHaveBeenCalledWith(repositories[0], true);
   });
 
-  it("障害状況の区分ではGitHubの障害状況だけを出す（使用量はStatusHubへ移した）", () => {
+  it("システム状態の区分ではGitHubの障害状況だけを出す（使用量はStatusHubへ移した）", () => {
     renderDialog();
 
-    fireEvent.click(screen.getByRole("button", { name: /障害状況/ }));
+    fireEvent.click(screen.getByRole("button", { name: /^システム状態$/ }));
 
     expect(screen.getByText("GitHub障害状況")).toBeTruthy();
     expect(screen.queryByText("GitHub使用量")).toBeNull();
@@ -334,7 +382,7 @@ describe("SettingsDialog", () => {
   it("状態の区分にAI使用量のカードは出さない（AI使用量画面へ移した）", () => {
     renderDialog();
 
-    fireEvent.click(screen.getByRole("button", { name: /障害状況/ }));
+    fireEvent.click(screen.getByRole("button", { name: /^システム状態$/ }));
 
     // ダイアログはportalでbody直下へ描かれるので、renderのcontainerからは辿れない
     const cardTitles = Array.from(
