@@ -105,6 +105,12 @@ const repositories = [
   },
 ];
 
+// 区分を切り替えても入力中の値を失わないよう、設定の区分は`hidden`で隠すだけでマウントしたままにしている。
+// 非表示の区分に属する要素は「画面に出ていない」ものとして扱う。
+function isShown(element: Element | null): boolean {
+  return element !== null && element.closest("[hidden]") === null;
+}
+
 function renderDialog() {
   return render(
     <SettingsDialog
@@ -150,7 +156,7 @@ describe("SettingsDialog", () => {
     // 「アカウント」は区分に並べず、アカウント名の行から開く（#3744）
     expect(screen.queryByRole("button", { name: /^アカウント$/ })).toBeNull();
     expect(screen.getByText("現在のAI構成")).toBeTruthy();
-    expect(screen.queryByLabelText("自動リトライ回数")).toBeNull();
+    expect(isShown(screen.queryByLabelText("自動リトライ回数"))).toBe(false);
   });
 
   it("アカウント名の行を押すとアカウント設定が開き、削除ボタンは無い（#3744）", () => {
@@ -160,7 +166,7 @@ describe("SettingsDialog", () => {
 
     expect(screen.getByRole("button", { name: /ログアウト/ })).toBeTruthy();
     expect(screen.queryByRole("button", { name: /アカウントを削除/ })).toBeNull();
-    expect(screen.queryByLabelText("自動リトライ回数")).toBeNull();
+    expect(isShown(screen.queryByLabelText("自動リトライ回数"))).toBe(false);
   });
 
   it("バージョンはアカウントを開かなくても見え、押すと更新履歴が開く（#1764）", () => {
@@ -184,16 +190,19 @@ describe("SettingsDialog", () => {
     expect(within(section!).getByRole("heading", { name: /^v\d+\.\d+\.\d+$/ })).toBeTruthy();
   });
 
-  it("実行の保存と自動化の即時保存を区分ごとに分ける（#3983）", () => {
+  it("実行と自動化は区分ごとに自分の保存ボタンを持ち、即時保存の項目も自動化に並ぶ（#3983）", () => {
     renderDialog();
 
     fireEvent.click(screen.getByRole("button", { name: /^実行$/ }));
     expect(screen.getByRole("button", { name: "保存" })).toBeTruthy();
-    expect(screen.getByLabelText("自動リトライ回数")).toBeTruthy();
+    expect(isShown(screen.getByLabelText("自動リトライ回数"))).toBe(true);
 
     fireEvent.click(screen.getByRole("button", { name: /^自動化$/ }));
 
-    expect(screen.queryByRole("button", { name: "保存" })).toBeNull();
+    // 計画レビューのエージェント設定は保存を押すまで効かないため、自動化にも専用の保存ボタンがある。
+    // 実行区分のフォームは隠れ、表示中の保存ボタンは自動化のものだけになる。
+    expect(isShown(screen.getByLabelText("自動リトライ回数"))).toBe(false);
+    expect(isShown(screen.getByRole("button", { name: "保存" }))).toBe(true);
     expect(screen.getByLabelText("リリース準備の自動実行間隔")).toBeTruthy();
   });
 
