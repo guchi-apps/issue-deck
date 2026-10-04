@@ -21,6 +21,9 @@ export type AutoRepairLoopState = {
 
 export type AutoRepairObservation = {
   state: "open" | "closed";
+  draft?: boolean;
+  /** このPRでレビュー完了を待つ必要があるか。CI/conflictのみの経路ではfalse。 */
+  reviewRequired?: boolean;
   headSha: string;
   mergeable: boolean | null;
   ciState: CiState | null;
@@ -43,26 +46,26 @@ export function decideAutoRepairLoop(
   loop: AutoRepairLoopState,
   observation: AutoRepairObservation,
 ): AutoRepairDecision {
-  if (observation.state !== "open") return { action: "stop", reason: "pull_request_closed" };
+  if (observation.state !== "open" || observation.draft) return { action: "stop", reason: "pull_request_closed" };
   if (observation.repairRunning) return { action: "wait" };
 
   // 修復後の新HEADでは、CIとレビューが両方そろうまで古い結果で次を起動しない。
   if (observation.ciState === "pending" || observation.ciState === "unknown" || observation.ciState === null) {
     return { action: "wait" };
   }
-  if (observation.review === null) return { action: "wait" };
+  if (observation.reviewRequired !== false && observation.review === null) return { action: "wait" };
 
   const kind: RepairKind | null =
     observation.mergeable === false
       ? "conflict"
       : observation.ciState === "failure"
         ? "ci"
-        : observation.review === "changes-requested"
+        : observation.reviewRequired !== false && observation.review === "changes-requested"
           ? "review"
           : null;
 
   if (kind === null) {
-    if (observation.review === "needs-check") return { action: "stop", reason: "user_action_required" };
+    if (observation.reviewRequired !== false && observation.review === "needs-check") return { action: "stop", reason: "user_action_required" };
     return { action: "complete" };
   }
   if (loop.round >= AUTO_REPAIR_MAX_ROUNDS) return { action: "stop", reason: "max_rounds_reached" };
