@@ -73,11 +73,38 @@ export async function runPullRequestAutoRepairSweep(): Promise<{ scanned: number
         });
         continue;
       }
+      // 複数pollerが同時に同じ系列を評価しても1本だけがdispatchするよう、観測した
+      // snapshot（running + head + round）をDBで原子的にclaimする。
+      const claimed = await db.pullRequestAutoRepairLoop.updateMany({
+        where: {
+          repositoryFullName: stored.repositoryFullName,
+          pullRequestNumber: stored.pullRequestNumber,
+          status: "running",
+          headSha: stored.headSha,
+          round: stored.round,
+        },
+        data: { status: "dispatching", currentKind: decision.kind },
+      });
+      if (claimed.count !== 1) continue;
+
       const dispatch = resolveRepairDispatch(
         { number: pullRequest.number, baseRef: pullRequest.base.ref, headRef: pullRequest.head.ref },
         decision.kind,
       );
-      await dispatchWorkflow(owner, repo, dispatch.workflowFile, dispatch.ref, dispatch.inputs, token);
+      try {
+        await dispatchWorkflow(owner, repo, dispatch.workflowFile, dispatch.ref, dispatch.inputs, token);
+      } catch (error) {
+        // dispatch自体が失敗した場合だけclaimを戻し、次回巡回で再試行できるようにする。
+        await db.pullRequestAutoRepairLoop.updateMany({
+          where: {
+            repositoryFullName: stored.repositoryFullName,
+            pullRequestNumber: stored.pullRequestNumber,
+            status: "dispatching",
+          },
+          data: { status: "running", currentKind: null },
+        });
+        throw error;
+      }
       // workflow自身の開始報告より先にpollerが次巡へ入っても、同じHEAD・同じ問題を
       // repeated_problemと誤認しないよう、初回のrepair APIと同じくdispatch成功時点でrunningを記録する。
       await recordPullRequestRepairRun({
@@ -89,6 +116,7 @@ export async function runPullRequestAutoRepairSweep(): Promise<{ scanned: number
       await db.pullRequestAutoRepairLoop.update({
         where: { repositoryFullName_pullRequestNumber: { repositoryFullName: stored.repositoryFullName, pullRequestNumber: stored.pullRequestNumber } },
         data: {
+          status: "running",
           headSha: pullRequest.head.sha,
           round: { increment: 1 },
           currentKind: decision.kind,
