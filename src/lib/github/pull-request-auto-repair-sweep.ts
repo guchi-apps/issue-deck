@@ -132,14 +132,14 @@ export async function runPullRequestAutoRepairSweep(): Promise<{ scanned: number
       try {
         await dispatchWorkflow(owner, repo, dispatch.workflowFile, dispatch.ref, dispatch.inputs, token);
       } catch (error) {
-        // dispatch自体が失敗した場合だけclaimを戻し、次回巡回で再試行できるようにする。
+        // 恒久的なworkflow未配置等で1分ごとに無限再試行しない。手動開始と同じく停止して理由を表示する。
         await db.pullRequestAutoRepairLoop.updateMany({
           where: {
             repositoryFullName: stored.repositoryFullName,
             pullRequestNumber: stored.pullRequestNumber,
             status: "dispatching",
           },
-          data: { status: "running", currentKind: null },
+          data: { status: "stopped", currentKind: null, stopReason: "dispatch_failed" },
         });
         throw error;
       }
