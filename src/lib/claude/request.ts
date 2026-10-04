@@ -3,11 +3,9 @@ import {
   recordClaudeApiCall,
 } from "@/lib/claude/api-usage";
 import {
-  APP_AI_MODEL_DEFAULT,
-  APP_AI_MODEL_REASONING_DEFAULT,
   appAiProvider,
   type AppAiModel,
-  parseAppAiModel,
+  resolveAppAiModel,
 } from "@/lib/app-settings";
 import { db } from "@/lib/db";
 
@@ -105,13 +103,13 @@ async function getAppAiModel(feature: ClaudeApiFeature): Promise<AppAiModel> {
   try {
     const setting = await db.appSetting.findUnique({
       where: { id: 1 },
-      select: { appAiModel: true, appAiModelReasoning: true },
+      select: { appAiModel: true, appAiModelReasoning: true, aiExecutionProvider: true },
     });
     return REASONING_FEATURES.has(feature)
-      ? parseAppAiModel(setting?.appAiModelReasoning) ?? APP_AI_MODEL_REASONING_DEFAULT
-      : parseAppAiModel(setting?.appAiModel) ?? APP_AI_MODEL_DEFAULT;
+      ? resolveAppAiModel(setting?.appAiModelReasoning, setting?.aiExecutionProvider, true)
+      : resolveAppAiModel(setting?.appAiModel, setting?.aiExecutionProvider);
   } catch {
-    return REASONING_FEATURES.has(feature) ? APP_AI_MODEL_REASONING_DEFAULT : APP_AI_MODEL_DEFAULT;
+    return resolveAppAiModel(undefined, undefined, REASONING_FEATURES.has(feature));
   }
 }
 

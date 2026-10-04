@@ -41,6 +41,7 @@ import type {
   GithubActionsAgent,
   ModelPickEngine,
   PlanReviewAgent,
+  AiExecutionProvider,
 } from "@/lib/app-settings";
 import type { ConnectedRepository } from "@/types/repository";
 import type { ReviewGateIssueDraft } from "@/lib/review-gate-issue-draft";
@@ -51,6 +52,7 @@ type SettingsDialogProps = {
   onOpenChange: (open: boolean) => void;
   currentUser: CurrentUser | null;
   autoRetryLimit: number;
+  aiExecutionProvider?: AiExecutionProvider;
   claudeModel: ClaudeModel;
   githubActionsAgent?: GithubActionsAgent;
   githubActionsCodexModel?: CodexLocalModel;
@@ -89,6 +91,7 @@ export function SettingsDialog({
   onOpenChange,
   currentUser,
   autoRetryLimit,
+  aiExecutionProvider = "claude",
   claudeModel,
   githubActionsAgent = "claude",
   githubActionsCodexModel = "gpt-5.6-terra",
@@ -124,7 +127,7 @@ export function SettingsDialog({
   };
   const activeSection = SETTINGS_SECTIONS.find((item) => item.key === section);
   const settingsProps = {
-    autoRetryLimit, claudeModel, githubActionsAgent, githubActionsCodexModel, claudeModelAssist,
+    autoRetryLimit, aiExecutionProvider, claudeModel, githubActionsAgent, githubActionsCodexModel, claudeModelAssist,
     claudeLocalModel, codexModel, defaultDispatchAgent, planReviewAgentForClaude,
     planReviewAgentForCodex, planReviewClaudeModel, planReviewCodexModel,
     dispatchFailoverEnabled, dispatchFailoverThresholdPercent, appAiModel, appAiModelReasoning,

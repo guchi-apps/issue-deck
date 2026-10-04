@@ -9,6 +9,27 @@ export const DISPATCH_AGENT_OPTIONS = [
 export const DEFAULT_DISPATCH_AGENT_SETTING = "claude" as const;
 export type DefaultDispatchAgent = (typeof DISPATCH_AGENT_OPTIONS)[number]["value"];
 
+/** IssueDeck 全体で新規に開始する AI 処理の既定プロバイダー。 */
+export type AiExecutionProvider = DefaultDispatchAgent;
+export const AI_EXECUTION_PROVIDER_DEFAULT: AiExecutionProvider = "claude";
+
+export function parseAiExecutionProvider(value: unknown): AiExecutionProvider | null {
+  return parseDefaultDispatchAgent(value);
+}
+
+/**
+ * 機能別設定をグローバル既定値へ戻すためにDBへ保存する値。
+ * 既存の文字列カラムを維持して移行を小さくしつつ、未指定を明確に表現する。
+ */
+export const AI_PROVIDER_INHERIT = "inherit" as const;
+
+export function resolveAiExecutionAgent(
+  override: unknown,
+  provider: unknown,
+): DefaultDispatchAgent {
+  return parseDefaultDispatchAgent(override) ?? parseAiExecutionProvider(provider) ?? AI_EXECUTION_PROVIDER_DEFAULT;
+}
+
 /** GitHub Actionsの無人実行に使うCLI。サブPCの既定CLIとは別設定。 */
 export const GITHUB_ACTIONS_AGENT_DEFAULT = "claude" as const;
 export type GithubActionsAgent = DefaultDispatchAgent;
@@ -478,6 +499,7 @@ export const APP_AI_MODEL_OPTIONS = [
 
 export const APP_AI_MODEL_DEFAULT = APP_AI_MODEL_OPTIONS[0].value;
 export const APP_AI_MODEL_REASONING_DEFAULT = "claude-sonnet-5-5" as const;
+export const APP_AI_MODEL_CODEX_DEFAULT = "gpt-5.6-terra" as const;
 export const APP_AI_MODEL_VALUES = APP_AI_MODEL_OPTIONS.map((option) => option.value);
 export type AppAiModel = (typeof APP_AI_MODEL_VALUES)[number];
 export type AppAiProvider = "anthropic" | "openai";
@@ -493,6 +515,21 @@ export function parseAppAiModel(value: unknown): AppAiModel | null {
   return (APP_AI_MODEL_VALUES as readonly string[]).includes(value)
     ? (value as AppAiModel)
     : null;
+}
+
+/** 個別モデルを固定しないアプリ内AIは、主系プロバイダーに対応するモデルを使う。 */
+export function resolveAppAiModel(
+  override: unknown,
+  provider: unknown,
+  reasoning = false,
+): AppAiModel {
+  const configured = parseAppAiModel(override);
+  if (configured) return configured;
+  return parseAiExecutionProvider(provider) === "codex"
+    ? APP_AI_MODEL_CODEX_DEFAULT
+    : reasoning
+      ? APP_AI_MODEL_REASONING_DEFAULT
+      : APP_AI_MODEL_DEFAULT;
 }
 
 /**

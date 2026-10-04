@@ -4,6 +4,7 @@ import { useState } from "react";
 
 import type {
   AppAiModel,
+  AiExecutionProvider,
   ClaudeLocalModel,
   ClaudeLocalModelSetting,
   ClaudeModel,
@@ -42,6 +43,7 @@ export function useAppSettingsMutations() {
 
   async function updateClaudeModel(
     values: Partial<{
+      aiExecutionProvider: AiExecutionProvider;
       claudeModel: ClaudeModel;
       githubActionsAgent: GithubActionsAgent;
       githubActionsCodexModel: CodexLocalModel;

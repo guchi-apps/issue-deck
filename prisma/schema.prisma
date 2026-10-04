@@ -458,8 +458,10 @@ model AppSetting {
   id                  Int      @id @default(1)
   autoRetryLimit      Int      @default(0)
   claudeModel         String   @default("auto")
-  // GitHub Actionsの無人実行で使うCLI。既定は従来どおりClaude Code。
-  githubActionsAgent  String   @default("claude")
+  // IssueDeck全体の新規AI処理で使う主系プロバイダー。機能別の値は"inherit"ならこれに追従する。
+  aiExecutionProvider String   @default("claude")
+  // GitHub Actionsの無人実行で使うCLI。"inherit"なら主系プロバイダーに追従する。
+  githubActionsAgent  String   @default("inherit")
   // GitHub ActionsでCodexを使うときのモデル。サブPC用codexModelとは独立させる。
   githubActionsCodexModel String @default("gpt-5.6-terra")
   // PRレビュー・修復workflow専用。autoはAction/CLIの既定へ委ねる。
@@ -475,11 +477,11 @@ model AppSetting {
   // "auto"の場合は`-m`を付けず、Codex CLI側のデフォルトモデルに委ねる。
   codexModel          String   @default("gpt-5.6-terra")
   // サブPCの「実装を開始」で最初に選ぶCLI。明示して選び直した値や、既存セッションの再開には影響しない。
-  defaultDispatchAgent String  @default("claude")
+  defaultDispatchAgent String  @default("inherit")
   // ローカルセッションが計画を投稿した後の自動計画レビューに使うCLI。開始元ごとに別々に選べる。
-  // 既定値は開始したCLIと同じにして、設定追加前の動作を保つ。
-  planReviewAgentForClaude String @default("claude")
-  planReviewAgentForCodex  String @default("codex")
+  // "inherit"なら主系プロバイダーを使い、開始元を問わず一括切替に追従する。
+  planReviewAgentForClaude String @default("inherit")
+  planReviewAgentForCodex  String @default("inherit")
   // サブPCの自動計画レビューをClaude Codeで行うときのモデル。既定は設定追加前と同じSonnet。
   planReviewClaudeModel String @default("sonnet")
   // サブPCの自動計画レビューをCodex CLIで行うときのモデル。既定は設定追加前と同じTerra。
@@ -493,9 +495,9 @@ model AppSetting {
   planReviewAutoReflectEnabled Boolean @default(true)
   planReviewAutoReflectMaxRounds Int @default(5)
   // アプリ内の要約・検索・文章整理など、定型的な処理に使うモデル（#2562）。
-  appAiModel          String   @default("claude-haiku-4-5")
+  appAiModel          String   @default("inherit")
   // アプリ内の原因診断・新規アプリ相談など、判断を伴う処理に使うモデル。
-  appAiModelReasoning String   @default("claude-sonnet-5")
+  appAiModelReasoning String   @default("inherit")
   // 「おまかせ」（モデルの自動選択）の判定に何を使うか（#3189）。"app-ai"はアプリ内AIの
   // モデル（appAiModel）に従う従来どおりの経路、"jev"はTypeSafeのJev。**既定は"app-ai"**——
   // JevはTYPESAFE_API_KEYが要る外部サービスで、未設定の環境では黙って従来経路へ倒れる。
