@@ -22,11 +22,6 @@ export async function runPullRequestAutoRepairSweep(): Promise<{ scanned: number
     where: { status: "dispatching", updatedAt: { lt: timeoutAt } },
     data: { status: "stopped", currentKind: null, stopReason: "timed_out" },
   });
-  // CI/レビュー待ちが永続する系列も30分で停止し、永久pollを防ぐ。
-  await db.pullRequestAutoRepairLoop.updateMany({
-    where: { status: "running", updatedAt: { lt: timeoutAt } },
-    data: { status: "stopped", currentKind: null, stopReason: "timed_out" },
-  });
   const loops = await db.pullRequestAutoRepairLoop.findMany({ where: { status: "running" } });
   let dispatched = 0;
 
@@ -52,6 +47,15 @@ export async function runPullRequestAutoRepairSweep(): Promise<{ scanned: number
               : "needs-check"
           : null;
       const active = await fetchActivePullRequestRepairRun(stored.repositoryFullName, stored.pullRequestNumber);
+      // workflowが実際に走っている間は既存のRepairRun（最大6時間）を正とし、待機タイムアウトしない。
+      // workflow終了後にCI/レビュー待ちだけが30分以上続いた場合に停止する。
+      if (active === null && stored.updatedAt < timeoutAt) {
+        await db.pullRequestAutoRepairLoop.update({
+          where: { repositoryFullName_pullRequestNumber: { repositoryFullName: stored.repositoryFullName, pullRequestNumber: stored.pullRequestNumber } },
+          data: { status: "stopped", currentKind: null, headSha: pullRequest.head.sha, stopReason: "timed_out" },
+        });
+        continue;
+      }
       const loop: AutoRepairLoopState = {
         status: "running",
         headSha: stored.headSha,
