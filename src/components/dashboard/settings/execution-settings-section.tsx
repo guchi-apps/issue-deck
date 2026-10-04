@@ -202,10 +202,6 @@ export function ExecutionSettingsSection({
     claudeModelAssist !== initialClaudeModelAssist ||
     claudeLocalModel !== initialClaudeLocalModel ||
     codexModel !== initialCodexModel ||
-    planReviewAgentForClaude !== initialPlanReviewAgentForClaude ||
-    planReviewAgentForCodex !== initialPlanReviewAgentForCodex ||
-    planReviewClaudeModel !== initialPlanReviewClaudeModel ||
-    planReviewCodexModel !== initialPlanReviewCodexModel ||
     appAiModel !== initialAppAiModel ||
     appAiModelReasoning !== initialAppAiModelReasoning ||
     modelPickEngine !== initialModelPickEngine;
@@ -225,7 +221,7 @@ export function ExecutionSettingsSection({
     mode === "execution" ? executionDirty :
     mode === "automation" ? automationDirty :
     isDirty;
-  const hasFormSave = true;
+
 
   async function handleSubmit() {
     setIsSaved(false);
@@ -233,24 +229,51 @@ export function ExecutionSettingsSection({
       const autoRetryOk = await updateAutoRetryLimit(autoRetryLimit);
       if (!autoRetryOk) return;
     }
-    const claudeModelOk = await updateClaudeModel(
-      claudeModel,
-      githubActionsAgent,
-      githubActionsCodexModel,
-      claudeModelAssist,
-      claudeLocalModel,
-      codexModel,
-      appAiModel,
-      appAiModelReasoning,
-      modelPickEngine,
-      defaultDispatchAgent,
-      planReviewAgentForClaude,
-      planReviewAgentForCodex,
-      planReviewClaudeModel,
-      planReviewCodexModel,
-      dispatchFailoverEnabled,
-      dispatchFailoverThresholdPercent,
-    );
+    const modelValues =
+      mode === "ai"
+        ? {
+            claudeModel,
+            githubActionsAgent,
+            githubActionsCodexModel,
+            claudeModelAssist,
+            claudeLocalModel,
+            codexModel,
+            appAiModel,
+            appAiModelReasoning,
+            modelPickEngine,
+          }
+        : mode === "execution"
+          ? {
+              defaultDispatchAgent,
+              dispatchFailoverEnabled,
+              dispatchFailoverThresholdPercent,
+            }
+          : mode === "automation"
+            ? {
+                planReviewAgentForClaude,
+                planReviewAgentForCodex,
+                planReviewClaudeModel,
+                planReviewCodexModel,
+              }
+            : {
+                claudeModel,
+                githubActionsAgent,
+                githubActionsCodexModel,
+                claudeModelAssist,
+                claudeLocalModel,
+                codexModel,
+                appAiModel,
+                appAiModelReasoning,
+                modelPickEngine,
+                defaultDispatchAgent,
+                planReviewAgentForClaude,
+                planReviewAgentForCodex,
+                planReviewClaudeModel,
+                planReviewCodexModel,
+                dispatchFailoverEnabled,
+                dispatchFailoverThresholdPercent,
+              };
+    const claudeModelOk = await updateClaudeModel(modelValues);
     if (!claudeModelOk) return;
     if (mode === "execution" || mode === "all") {
       const dispatchOk = await updateDispatchConcurrency(dispatchConcurrency);
@@ -681,9 +704,9 @@ export function ExecutionSettingsSection({
       </div>
       </>}
 
-      {hasFormSave && error && <p className="text-sm text-destructive">{error}</p>}
+      {error && <p className="text-sm text-destructive">{error}</p>}
 
-      {hasFormSave && <div className="flex items-center gap-3 border-t pt-4">
+      {<div className="flex items-center gap-3 border-t pt-4">
         <Button onClick={handleSubmit} disabled={isSubmitting || !isValid || !sectionDirty}>
           {isSubmitting ? "保存中..." : "保存"}
         </Button>
