@@ -3,31 +3,30 @@ import {
   Bell,
   BookOpen,
   Boxes,
+  Bot,
   Eye,
   History,
   Image as ImageIcon,
-  SlidersHorizontal,
+  Play,
+  Repeat2,
+  Database,
   UserRound,
 } from "lucide-react";
 
 /**
  * 設定の区分（#1539）。**唯一の定義がここ**で、PCの左タブとスマホの一覧が同じ配列を読む。
  *
- * 区分は機能の「性質」で割っている。設定値（保存を押すまで効かない）と即時実行
- * （押した瞬間にGitHub Actionsが走る）が同じ画面に混ざっていたことが、
- * 「保存ボタンがどこまで効くのか分からない」という元の問題だった。
+ * 区分は保存方式ではなく、利用者が設定したい目的で分ける。PCの左タブとスマホの
+ * 一覧は、この定義とグループ定義を共通で読む。
  *
- * 「表示」（#1552）はそのどちらでもない**ユーザーごとの画面の見え方**で、切り替えた時点で
- * 即座に効き、GitHub側には何も起こらない。実行設定・フリート運用のどちらへ混ぜても
- * 区分の説明と食い違うため、別区分にしている。
+ * 「表示」（#1552）は**ユーザーごとの画面の見え方**に限定し、切り替えた時点で
+ * 即座に効く設定を扱う。AI・実行や管理系の設定とは責務を分ける。
  *
  * 「更新履歴」（#1764）は設定値を持たない読むだけの区分。バージョン表示（`AppVersionButton`）が
  * 区分の外に常設されており、そこから入る先でもある。
  *
- * 「画像」（#2462）は保存を押すまで効かない値を持たず、押した瞬間に**このアプリが持つデータ**を
- * 消す。GitHubへ操作が飛ぶ「フリート運用」とは効く先が違うため別区分にし、その隣へ置いている。
- * **自動削除の設定（#2475）もこの性質を崩さない**——ON/OFFと保持日数は切り替えた時点で保存し、
- * 「実行設定」の保存ボタンには載せない（保存ボタンを持つのはあちらだけ、という切り分けを保つ）。
+ * 「ストレージ」（#2462）はIssueDeckが保持する画像の容量・保持・削除を扱う。
+ * 自動削除（#2475）のON/OFFと保持日数は従来どおりその場で保存する。
  *
  * 「通知」（#838）は**端末ごとに効く設定**で、他のどの区分とも性質が違う。保存を押すまで
  * 効かない値でも、押した瞬間に走る操作でもなく、この端末のブラウザに許可と購読を作る。
@@ -39,7 +38,7 @@ export const SETTINGS_SECTIONS = [
     key: "display",
     label: "表示",
     icon: Eye,
-    description: "画面に出すリポジトリと、Issueを作った後に開く画面",
+    description: "Issueを作った後に開く画面",
   },
   {
     key: "notification",
@@ -48,26 +47,44 @@ export const SETTINGS_SECTIONS = [
     description: "閉じているときのPush通知",
   },
   {
+    key: "ai-models",
+    label: "AI・モデル",
+    icon: Bot,
+    description: "処理ごとの担当エージェントとモデル",
+  },
+  {
     key: "execution",
-    label: "実行設定",
-    icon: SlidersHorizontal,
-    description: "保存すると次回の実行から効く値",
+    label: "実行",
+    icon: Play,
+    description: "同時実行、フェイルオーバー、エラー処理",
+  },
+  {
+    key: "automation",
+    label: "自動化",
+    icon: Repeat2,
+    description: "計画、レビュー、リリースの自動処理",
+  },
+  {
+    key: "repositories",
+    label: "リポジトリ",
+    icon: Database,
+    description: "表示するリポジトリとIssue作成対象の管理",
   },
   {
     key: "fleet",
-    label: "フリート運用",
+    label: "フリート",
     icon: Boxes,
     description: "GitHubへの再取得・配布・同期と、認証情報の管理",
   },
   {
     key: "images",
-    label: "画像",
+    label: "ストレージ",
     icon: ImageIcon,
     description: "添付した画像の容量・使用状況・自動削除",
   },
   {
     key: "status",
-    label: "障害状況",
+    label: "システム状態",
     icon: Activity,
     description: "GitHubの障害情報",
   },
@@ -87,6 +104,13 @@ export const SETTINGS_SECTIONS = [
 
 export type SettingsSectionKey = (typeof SETTINGS_SECTIONS)[number]["key"];
 
+export const SETTINGS_SECTION_GROUPS = [
+  { label: "一般", keys: ["display", "notification"] },
+  { label: "AI・実行", keys: ["ai-models", "execution", "automation"] },
+  { label: "管理", keys: ["repositories", "fleet", "images", "knowledge"] },
+  { label: "情報", keys: ["status", "changelog"] },
+] as const satisfies ReadonlyArray<{ label: string; keys: readonly SettingsSectionKey[] }>;
+
 /**
  * 区分の一覧（PCの左タブ・スマホの一覧）に並べるもの（#3744）。「アカウント」は一覧に並べず、
  * アカウント名の行を押して開く。定義（`SETTINGS_SECTIONS`）には残してあるので、見出し・説明文・
@@ -94,4 +118,4 @@ export type SettingsSectionKey = (typeof SETTINGS_SECTIONS)[number]["key"];
  */
 export const SETTINGS_LIST_SECTIONS = SETTINGS_SECTIONS.filter((item) => item.key !== "account");
 
-export const DEFAULT_SETTINGS_SECTION: SettingsSectionKey = "execution";
+export const DEFAULT_SETTINGS_SECTION: SettingsSectionKey = "ai-models";

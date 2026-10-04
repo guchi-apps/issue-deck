@@ -2,13 +2,10 @@
 
 import { useState } from "react";
 
-import type { RepairKind } from "@/lib/github/pull-request-repair";
-
 export type RepairPullRequestInput = {
   owner: string;
   repo: string;
   number: number;
-  kind: RepairKind;
 };
 
 function errorMessageForResponse(

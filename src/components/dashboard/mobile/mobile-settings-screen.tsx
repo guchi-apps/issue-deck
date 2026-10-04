@@ -10,9 +10,11 @@ import { AccountSection } from "@/components/dashboard/settings/account-section"
 import { AppVersionButton } from "@/components/dashboard/settings/app-version-button";
 import { ChangelogSection } from "@/components/dashboard/settings/changelog-section";
 import {
-  ExecutionSettingsSection,
   type AppSettingsValues,
 } from "@/components/dashboard/settings/execution-settings-section";
+import { AiModelSettingsSection } from "@/components/dashboard/settings/ai-model-settings-section";
+import { AutomationSettingsSection } from "@/components/dashboard/settings/automation-settings-section";
+import { ExecutionControlSettingsSection } from "@/components/dashboard/settings/execution-control-settings-section";
 import { FleetOpsSection } from "@/components/dashboard/settings/fleet-ops-section";
 import { ImagesSection } from "@/components/dashboard/settings/images-section";
 import { KnowledgeSection } from "@/components/dashboard/settings/knowledge-section";
@@ -21,6 +23,7 @@ import { PostCreateDestinationSection } from "@/components/dashboard/settings/po
 import { RepositoryVisibilitySection } from "@/components/dashboard/settings/repository-visibility-section";
 import {
   SETTINGS_LIST_SECTIONS,
+  SETTINGS_SECTION_GROUPS,
   SETTINGS_SECTIONS,
   type SettingsSectionKey,
 } from "@/components/dashboard/settings/settings-sections";
@@ -119,6 +122,13 @@ export function MobileSettingsScreen({
     status: data.hasGithubIncident,
   };
   const activeSection = SETTINGS_SECTIONS.find((item) => item.key === section);
+  const settingsProps = {
+    autoRetryLimit, claudeModel, githubActionsAgent, githubActionsCodexModel, claudeModelAssist,
+    claudeLocalModel, codexModel, defaultDispatchAgent, planReviewAgentForClaude,
+    planReviewAgentForCodex, planReviewClaudeModel, planReviewCodexModel,
+    dispatchFailoverEnabled, dispatchFailoverThresholdPercent, appAiModel, appAiModelReasoning,
+    modelPickEngine, dispatchConcurrency, onUpdated,
+  };
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
@@ -163,8 +173,12 @@ export function MobileSettingsScreen({
               <ChevronRight className="ml-auto size-4 shrink-0 text-muted-foreground" />
             </button>
 
-            <ul className="flex flex-col gap-2">
-              {SETTINGS_LIST_SECTIONS.map((item) => {
+            <div className="flex flex-col gap-4">
+              {SETTINGS_SECTION_GROUPS.map((group) => <section key={group.label} aria-label={group.label}>
+                <h2 className="mb-2 px-1 text-xs font-semibold text-muted-foreground">{group.label}</h2>
+                <ul className="flex flex-col gap-2">{group.keys.map((key) => {
+                const item = SETTINGS_LIST_SECTIONS.find((candidate) => candidate.key === key);
+                if (!item) return null;
                 const Icon = item.icon;
                 return (
                   <li key={item.key}>
@@ -188,8 +202,8 @@ export function MobileSettingsScreen({
                     </button>
                   </li>
                 );
-              })}
-            </ul>
+              })}</ul></section>)}
+            </div>
 
             {/* バージョンは区分の中ではなく一覧の最下部へ。設定を開けば必ず目に入り、
                 押すと更新履歴へ入る（#1764） */}
@@ -203,38 +217,13 @@ export function MobileSettingsScreen({
         {section === "display" && (
           <div className="flex flex-col gap-5">
             <PostCreateDestinationSection />
-            <RepositoryVisibilitySection
-              repositories={repositories}
-              onSetRepositoryHidden={onSetRepositoryHidden}
-              onSetRepositoriesHidden={onSetRepositoriesHidden}
-              onSetRepositoryIssueCreationExcluded={onSetRepositoryIssueCreationExcluded}
-            />
           </div>
         )}
         {section === "notification" && <NotificationSettingsSection />}
-        {section === "execution" && (
-          <ExecutionSettingsSection
-            autoRetryLimit={autoRetryLimit}
-            claudeModel={claudeModel}
-            githubActionsAgent={githubActionsAgent}
-            githubActionsCodexModel={githubActionsCodexModel}
-            claudeModelAssist={claudeModelAssist}
-            claudeLocalModel={claudeLocalModel}
-            codexModel={codexModel}
-            defaultDispatchAgent={defaultDispatchAgent}
-            planReviewAgentForClaude={planReviewAgentForClaude}
-            planReviewAgentForCodex={planReviewAgentForCodex}
-            planReviewClaudeModel={planReviewClaudeModel}
-            planReviewCodexModel={planReviewCodexModel}
-            dispatchFailoverEnabled={dispatchFailoverEnabled}
-            dispatchFailoverThresholdPercent={dispatchFailoverThresholdPercent}
-            appAiModel={appAiModel}
-            appAiModelReasoning={appAiModelReasoning}
-            modelPickEngine={modelPickEngine}
-            dispatchConcurrency={dispatchConcurrency}
-            onUpdated={onUpdated}
-          />
-        )}
+        {section === "repositories" && <RepositoryVisibilitySection repositories={repositories} onSetRepositoryHidden={onSetRepositoryHidden} onSetRepositoriesHidden={onSetRepositoriesHidden} onSetRepositoryIssueCreationExcluded={onSetRepositoryIssueCreationExcluded} />}
+        {section === "ai-models" && <AiModelSettingsSection {...settingsProps} />}
+        {section === "execution" && <ExecutionControlSettingsSection {...settingsProps} />}
+        {section === "automation" && <AutomationSettingsSection {...settingsProps} />}
         {section === "fleet" && (
           <FleetOpsSection
             fineGrainedTokens={data.fineGrainedTokens}

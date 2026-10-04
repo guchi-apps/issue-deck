@@ -7,14 +7,17 @@ import { getInstallationToken } from "@/lib/github/app-auth";
 import { GithubApiError } from "@/lib/github/github-api-error";
 import {
   canRepairFromDeck,
+  repairKindsFor,
   resolveRepairDispatch,
-  supportsRepairKind,
 } from "@/lib/github/pull-request-repair";
 import {
-  isRepairKind,
+  fetchActivePullRequestRepairRun,
+  isRepairSymptomGone,
   recordPullRequestRepairRun,
 } from "@/lib/github/pull-request-repair-run";
 import { fetchPullRequest } from "@/lib/github/pull-requests-api";
+import { parsePullRequestReviewVerdict } from "@/lib/github/pull-request-review-verdict";
+import { fetchPullRequestCiState } from "@/lib/github/release-api";
 import { dispatchWorkflow } from "@/lib/github/workflow-dispatch";
 import { previewModeGuard } from "@/lib/preview-mode";
 
@@ -47,12 +50,12 @@ async function handlePOST(request: NextRequest) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
-  const body: { owner?: string; repo?: string; number?: number; kind?: string } = await request
+  const body: { owner?: string; repo?: string; number?: number } = await request
     .json()
     .catch(() => ({}));
-  const { owner, repo, number, kind } = body;
+  const { owner, repo, number } = body;
 
-  if (!owner || !repo || !number || Number.isNaN(Number(number)) || !isRepairKind(kind)) {
+  if (!owner || !repo || !number || Number.isNaN(Number(number))) {
     return NextResponse.json({ error: "invalid_request" }, { status: 400 });
   }
 
@@ -64,6 +67,7 @@ async function handlePOST(request: NextRequest) {
   try {
     const token = await getInstallationToken(repository.installation.installationId);
     const pullRequest = await fetchPullRequest(owner, repo, Number(number), token);
+    const currentState = await fetchPullRequestCiState(owner, repo, Number(number), token);
 
     if (
       !canRepairFromDeck({
@@ -80,47 +84,72 @@ async function handlePOST(request: NextRequest) {
       );
     }
 
-    const target = {
-      number: pullRequest.number,
-      baseRef: pullRequest.base.ref,
-      headRef: pullRequest.head.ref,
-    };
-    // レビュー指摘の修正はdevelop向け`issue-<番号>`PRにしか起動先が無い（#3363）
-    if (!supportsRepairKind(target, kind)) {
+    const activeRepair = await fetchActivePullRequestRepairRun(
+      `${owner}/${repo}`,
+      pullRequest.number,
+    );
+    // 終了報告が届かない旧workflowではDBにrunningが残ることがある。画面表示と同じく、
+    // 現在のPR状態で元の症状が既に解消していれば、その古い記録で次の修復を止めない。
+    const activeRepairStillRelevant =
+      activeRepair !== null &&
+      !isRepairSymptomGone(activeRepair.kind, {
+        mergeable: currentState.mergeable,
+        ciState: currentState.ciState,
+      });
+    if (activeRepairStillRelevant) {
       return NextResponse.json(
         {
-          error: "not_repairable",
-          message: "レビュー指摘の自動修正は、Issueから作られたdevelop向けPull Requestだけが対象です。",
+          error: "repair_in_progress",
+          message: "このPRは現在自動修正中です。完了してからもう一度実行してください。",
         },
         { status: 409 },
       );
     }
-    const dispatch = resolveRepairDispatch(target, kind);
 
-    await dispatchWorkflow(
-      owner,
-      repo,
-      dispatch.workflowFile,
-      dispatch.ref,
-      dispatch.inputs,
-      token,
+    // 画面に表示した時点の状態を信用せず、実行時のHEADから対象を組み立て直す。
+    // これによりCIとレビューが同時にNGでも、利用者が実行順を選ぶ必要がない。
+    const kinds = repairKindsFor(
+      {
+        state: pullRequest.state === "closed" ? "closed" : "open",
+        draft: pullRequest.draft,
+        ciState: currentState.ciState,
+        baseRef: pullRequest.base.ref,
+        headRef: pullRequest.head.ref,
+        reviewVerdict: parsePullRequestReviewVerdict(pullRequest.body),
+      },
+      currentState.mergeable,
     );
+    if (kinds.length === 0) {
+      return NextResponse.json(
+        {
+          error: "not_repairable",
+          message: "このPRには現在、自動修正できる問題が見つかりませんでした。",
+        },
+        { status: 409 },
+      );
+    }
+    // 同じIssueブランチの修復workflowは同一concurrency groupを共有する。GitHub Actionsは
+    // running 1件 + pending 1件しか保持しないため複数を一度にdispatchせず、優先順位
+    // conflict → ci → review（repairKindsForの順）の先頭だけを起動する。完了後にPRを再取得し、
+    // まだ問題が残っていれば同じ「PRを自動修正」から次を実行する。
+    const kind = kinds[0];
+    const dispatch = resolveRepairDispatch(
+      { number: pullRequest.number, baseRef: pullRequest.base.ref, headRef: pullRequest.head.ref },
+      kind,
+    );
+    await dispatchWorkflow(owner, repo, dispatch.workflowFile, dispatch.ref, dispatch.inputs, token);
 
-    // ワークフローが自分で「開始」を報告するのは、runが立ち上がって対象PRを再確認した後に
-    // なる（数十秒かかる）。押した直後から画面に「自動修正中」を出すため、起動できた時点で
-    // ここでも同じ行を記録する（実行ログのURLはまだ決まらないためnull）。
-    // 対象PRの状態を再確認して何もせず終わる場合でも、終了の報告か時間切れで消える。
+    // 実際に起動した種類だけrunningとして記録する。未起動の修復が画面へ残らないようにする。
     await recordPullRequestRepairRun({
       repositoryFullName: `${owner}/${repo}`,
       pullRequestNumber: pullRequest.number,
       kind,
       status: "running",
     }).catch((error: unknown) => {
-      // 記録できなくても起動自体は成功している。画面にバッジが出ないだけ。
       console.warn(`[POST /api/pull-requests/repair] ${owner}/${repo}#${number} の記録:`, error);
     });
 
-    return NextResponse.json({ ok: true, workflowFile: dispatch.workflowFile });
+    return NextResponse.json({ ok: true, kinds: [kind], remainingKinds: kinds.slice(1) });
   } catch (error) {
     // ワークフロー自体が無いリポジトリ・デフォルトブランチへ未反映の場合は404が返る。
     // 「押しても起動しない」理由が分かるよう、汎用のAPIエラーと区別して文言を返す。

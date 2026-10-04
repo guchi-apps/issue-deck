@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -65,7 +65,11 @@ export type AppSettingsValues = {
   dispatchConcurrency: number;
 };
 
-type ExecutionSettingsSectionProps = {
+export type ExecutionSettingsMode = "ai" | "execution" | "automation" | "all";
+
+export type ExecutionSettingsSectionProps = {
+  /** 既存の保存APIを保ったまま、設定の目的ごとにフォームを表示する。 */
+  mode?: ExecutionSettingsMode;
   autoRetryLimit: number;
   claudeModel: ClaudeModel;
   githubActionsAgent: GithubActionsAgent;
@@ -96,6 +100,7 @@ type ExecutionSettingsSectionProps = {
  * 保存ボタンを持つのはこの区分だけ、という切り分けを保つこと。
  */
 export function ExecutionSettingsSection({
+  mode = "all",
   autoRetryLimit: initialAutoRetryLimit,
   claudeModel: initialClaudeModel,
   githubActionsAgent: initialGithubActionsAgent,
@@ -153,13 +158,71 @@ export function ExecutionSettingsSection({
     useState<ModelPickEngine>(initialModelPickEngine);
   const [dispatchConcurrency, setDispatchConcurrency] = useState(initialDispatchConcurrency);
   const [isSaved, setIsSaved] = useState(false);
+  const previousInitials = useRef({
+    autoRetryLimit: initialAutoRetryLimit,
+    claudeModel: initialClaudeModel,
+    githubActionsAgent: initialGithubActionsAgent,
+    githubActionsCodexModel: initialGithubActionsCodexModel,
+    claudeModelAssist: initialClaudeModelAssist,
+    claudeLocalModel: initialClaudeLocalModel,
+    codexModel: initialCodexModel,
+    defaultDispatchAgent: initialDefaultDispatchAgent,
+    planReviewAgentForClaude: initialPlanReviewAgentForClaude,
+    planReviewAgentForCodex: initialPlanReviewAgentForCodex,
+    planReviewClaudeModel: initialPlanReviewClaudeModel,
+    planReviewCodexModel: initialPlanReviewCodexModel,
+    dispatchFailoverEnabled: initialDispatchFailoverEnabled,
+    dispatchFailoverThresholdPercent: initialDispatchFailoverThresholdPercent,
+    appAiModel: initialAppAiModel,
+    appAiModelReasoning: initialAppAiModelReasoning,
+    modelPickEngine: initialModelPickEngine,
+    dispatchConcurrency: initialDispatchConcurrency,
+  });
 
-  // フォームの初期化はマウント時のuseStateだけで済ませ、effectでの再同期は持たない。
-  // このセクションは区分を切り替えるたび・設定を閉じるたびにアンマウントされるため、
-  // 開き直せば必ず現在値から始まる。保存後に親から新しい値が降りてくる経路と
-  // 競合しないぶん、「保存しました」の表示もそのまま残せる。
+  // PCでは3区分をhiddenで常駐させて未保存入力を保持する。そのため兄弟区分が保存されて
+  // 親propsが更新されたときは「そのフォームで未編集の項目」だけ最新保存値へ追従させる。
+  // ローカル値が以前のinitialと違う項目は編集中なので上書きしない。
+  useEffect(() => {
+    const prev = previousInitials.current;
+    setAutoRetryLimit((value) => value === prev.autoRetryLimit ? initialAutoRetryLimit : value);
+    setClaudeModel((value) => value === prev.claudeModel ? initialClaudeModel : value);
+    setGithubActionsAgent((value) => value === prev.githubActionsAgent ? initialGithubActionsAgent : value);
+    setGithubActionsCodexModel((value) => value === prev.githubActionsCodexModel ? initialGithubActionsCodexModel : value);
+    setClaudeModelAssist((value) => value === prev.claudeModelAssist ? initialClaudeModelAssist : value);
+    setClaudeLocalModel((value) => value === prev.claudeLocalModel ? initialClaudeLocalModel : value);
+    setCodexModel((value) => value === prev.codexModel ? initialCodexModel : value);
+    setDefaultDispatchAgent((value) => value === prev.defaultDispatchAgent ? initialDefaultDispatchAgent : value);
+    setPlanReviewAgentForClaude((value) => value === prev.planReviewAgentForClaude ? initialPlanReviewAgentForClaude : value);
+    setPlanReviewAgentForCodex((value) => value === prev.planReviewAgentForCodex ? initialPlanReviewAgentForCodex : value);
+    setPlanReviewClaudeModel((value) => value === prev.planReviewClaudeModel ? initialPlanReviewClaudeModel : value);
+    setPlanReviewCodexModel((value) => value === prev.planReviewCodexModel ? initialPlanReviewCodexModel : value);
+    setDispatchFailoverEnabled((value) => value === prev.dispatchFailoverEnabled ? initialDispatchFailoverEnabled : value);
+    setDispatchFailoverThresholdPercent((value) => value === prev.dispatchFailoverThresholdPercent ? initialDispatchFailoverThresholdPercent : value);
+    setAppAiModel((value) => value === prev.appAiModel ? initialAppAiModel : value);
+    setAppAiModelReasoning((value) => value === prev.appAiModelReasoning ? initialAppAiModelReasoning : value);
+    setModelPickEngine((value) => value === prev.modelPickEngine ? initialModelPickEngine : value);
+    setDispatchConcurrency((value) => value === prev.dispatchConcurrency ? initialDispatchConcurrency : value);
+    previousInitials.current = {
+      autoRetryLimit: initialAutoRetryLimit, claudeModel: initialClaudeModel,
+      githubActionsAgent: initialGithubActionsAgent, githubActionsCodexModel: initialGithubActionsCodexModel,
+      claudeModelAssist: initialClaudeModelAssist, claudeLocalModel: initialClaudeLocalModel,
+      codexModel: initialCodexModel, defaultDispatchAgent: initialDefaultDispatchAgent,
+      planReviewAgentForClaude: initialPlanReviewAgentForClaude, planReviewAgentForCodex: initialPlanReviewAgentForCodex,
+      planReviewClaudeModel: initialPlanReviewClaudeModel, planReviewCodexModel: initialPlanReviewCodexModel,
+      dispatchFailoverEnabled: initialDispatchFailoverEnabled,
+      dispatchFailoverThresholdPercent: initialDispatchFailoverThresholdPercent,
+      appAiModel: initialAppAiModel, appAiModelReasoning: initialAppAiModelReasoning,
+      modelPickEngine: initialModelPickEngine, dispatchConcurrency: initialDispatchConcurrency,
+    };
+  }, [
+    initialAutoRetryLimit, initialClaudeModel, initialGithubActionsAgent, initialGithubActionsCodexModel,
+    initialClaudeModelAssist, initialClaudeLocalModel, initialCodexModel, initialDefaultDispatchAgent,
+    initialPlanReviewAgentForClaude, initialPlanReviewAgentForCodex, initialPlanReviewClaudeModel,
+    initialPlanReviewCodexModel, initialDispatchFailoverEnabled, initialDispatchFailoverThresholdPercent,
+    initialAppAiModel, initialAppAiModelReasoning, initialModelPickEngine, initialDispatchConcurrency,
+  ]);
 
-  const isValid =
+  const executionValid =
     Number.isInteger(autoRetryLimit) &&
     autoRetryLimit >= AUTO_RETRY_LIMIT_MIN &&
     autoRetryLimit <= AUTO_RETRY_LIMIT_MAX &&
@@ -169,6 +232,8 @@ export function ExecutionSettingsSection({
     Number.isInteger(dispatchFailoverThresholdPercent) &&
     dispatchFailoverThresholdPercent >= DISPATCH_FAILOVER_THRESHOLD_PERCENT_MIN &&
     dispatchFailoverThresholdPercent <= DISPATCH_FAILOVER_THRESHOLD_PERCENT_MAX;
+  // 区分は独立保存なので、非表示の兄弟フォームに不正な編集中値があっても現在区分を阻害しない。
+  const isValid = mode === "execution" || mode === "all" ? executionValid : true;
 
   const isDirty =
     autoRetryLimit !== initialAutoRetryLimit ||
@@ -190,57 +255,118 @@ export function ExecutionSettingsSection({
     modelPickEngine !== initialModelPickEngine ||
     dispatchConcurrency !== initialDispatchConcurrency;
 
+  const aiDirty =
+    claudeModel !== initialClaudeModel ||
+    githubActionsAgent !== initialGithubActionsAgent ||
+    githubActionsCodexModel !== initialGithubActionsCodexModel ||
+    claudeModelAssist !== initialClaudeModelAssist ||
+    claudeLocalModel !== initialClaudeLocalModel ||
+    codexModel !== initialCodexModel ||
+    appAiModel !== initialAppAiModel ||
+    appAiModelReasoning !== initialAppAiModelReasoning ||
+    modelPickEngine !== initialModelPickEngine;
+  const executionDirty =
+    autoRetryLimit !== initialAutoRetryLimit ||
+    defaultDispatchAgent !== initialDefaultDispatchAgent ||
+    dispatchFailoverEnabled !== initialDispatchFailoverEnabled ||
+    dispatchFailoverThresholdPercent !== initialDispatchFailoverThresholdPercent ||
+    dispatchConcurrency !== initialDispatchConcurrency;
+  const automationDirty =
+    planReviewAgentForClaude !== initialPlanReviewAgentForClaude ||
+    planReviewAgentForCodex !== initialPlanReviewAgentForCodex ||
+    planReviewClaudeModel !== initialPlanReviewClaudeModel ||
+    planReviewCodexModel !== initialPlanReviewCodexModel;
+  const sectionDirty =
+    mode === "ai" ? aiDirty :
+    mode === "execution" ? executionDirty :
+    mode === "automation" ? automationDirty :
+    isDirty;
+
+
   async function handleSubmit() {
     setIsSaved(false);
-    const autoRetryOk = await updateAutoRetryLimit(autoRetryLimit);
-    if (!autoRetryOk) return;
-    const claudeModelOk = await updateClaudeModel(
-      claudeModel,
-      githubActionsAgent,
-      githubActionsCodexModel,
-      claudeModelAssist,
-      claudeLocalModel,
-      codexModel,
-      appAiModel,
-      appAiModelReasoning,
-      modelPickEngine,
-      defaultDispatchAgent,
-      planReviewAgentForClaude,
-      planReviewAgentForCodex,
-      planReviewClaudeModel,
-      planReviewCodexModel,
-      dispatchFailoverEnabled,
-      dispatchFailoverThresholdPercent,
-    );
+    if (mode === "execution" || mode === "all") {
+      const autoRetryOk = await updateAutoRetryLimit(autoRetryLimit);
+      if (!autoRetryOk) return;
+    }
+    const modelValues =
+      mode === "ai"
+        ? {
+            claudeModel,
+            githubActionsAgent,
+            githubActionsCodexModel,
+            claudeModelAssist,
+            claudeLocalModel,
+            codexModel,
+            appAiModel,
+            appAiModelReasoning,
+            modelPickEngine,
+          }
+        : mode === "execution"
+          ? {
+              defaultDispatchAgent,
+              dispatchFailoverEnabled,
+              dispatchFailoverThresholdPercent,
+            }
+          : mode === "automation"
+            ? {
+                planReviewAgentForClaude,
+                planReviewAgentForCodex,
+                planReviewClaudeModel,
+                planReviewCodexModel,
+              }
+            : {
+                claudeModel,
+                githubActionsAgent,
+                githubActionsCodexModel,
+                claudeModelAssist,
+                claudeLocalModel,
+                codexModel,
+                appAiModel,
+                appAiModelReasoning,
+                modelPickEngine,
+                defaultDispatchAgent,
+                planReviewAgentForClaude,
+                planReviewAgentForCodex,
+                planReviewClaudeModel,
+                planReviewCodexModel,
+                dispatchFailoverEnabled,
+                dispatchFailoverThresholdPercent,
+              };
+    const claudeModelOk = await updateClaudeModel(modelValues);
     if (!claudeModelOk) return;
-    const dispatchOk = await updateDispatchConcurrency(dispatchConcurrency);
-    if (!dispatchOk) return;
+    if (mode === "execution" || mode === "all") {
+      const dispatchOk = await updateDispatchConcurrency(dispatchConcurrency);
+      if (!dispatchOk) return;
+    }
+    // 親へも「この区分で実際に保存した値」だけを反映する。他区分の未保存stateを
+    // 保存済みpropsへ混ぜると、未保存表示が消えたり後の保存で巻き戻るため、initial値を維持する。
     onUpdated({
-      autoRetryLimit,
-      claudeModel,
-      githubActionsAgent,
-      githubActionsCodexModel,
-      claudeModelAssist,
-      claudeLocalModel,
-      codexModel,
-      defaultDispatchAgent,
-      planReviewAgentForClaude,
-      planReviewAgentForCodex,
-      planReviewClaudeModel,
-      planReviewCodexModel,
-      dispatchFailoverEnabled,
-      dispatchFailoverThresholdPercent,
-      appAiModel,
-      appAiModelReasoning,
-      modelPickEngine,
-      dispatchConcurrency,
+      autoRetryLimit: mode === "execution" || mode === "all" ? autoRetryLimit : initialAutoRetryLimit,
+      claudeModel: mode === "ai" || mode === "all" ? claudeModel : initialClaudeModel,
+      githubActionsAgent: mode === "ai" || mode === "all" ? githubActionsAgent : initialGithubActionsAgent,
+      githubActionsCodexModel: mode === "ai" || mode === "all" ? githubActionsCodexModel : initialGithubActionsCodexModel,
+      claudeModelAssist: mode === "ai" || mode === "all" ? claudeModelAssist : initialClaudeModelAssist,
+      claudeLocalModel: mode === "ai" || mode === "all" ? claudeLocalModel : initialClaudeLocalModel,
+      codexModel: mode === "ai" || mode === "all" ? codexModel : initialCodexModel,
+      defaultDispatchAgent: mode === "execution" || mode === "all" ? defaultDispatchAgent : initialDefaultDispatchAgent,
+      planReviewAgentForClaude: mode === "automation" || mode === "all" ? planReviewAgentForClaude : initialPlanReviewAgentForClaude,
+      planReviewAgentForCodex: mode === "automation" || mode === "all" ? planReviewAgentForCodex : initialPlanReviewAgentForCodex,
+      planReviewClaudeModel: mode === "automation" || mode === "all" ? planReviewClaudeModel : initialPlanReviewClaudeModel,
+      planReviewCodexModel: mode === "automation" || mode === "all" ? planReviewCodexModel : initialPlanReviewCodexModel,
+      dispatchFailoverEnabled: mode === "execution" || mode === "all" ? dispatchFailoverEnabled : initialDispatchFailoverEnabled,
+      dispatchFailoverThresholdPercent: mode === "execution" || mode === "all" ? dispatchFailoverThresholdPercent : initialDispatchFailoverThresholdPercent,
+      appAiModel: mode === "ai" || mode === "all" ? appAiModel : initialAppAiModel,
+      appAiModelReasoning: mode === "ai" || mode === "all" ? appAiModelReasoning : initialAppAiModelReasoning,
+      modelPickEngine: mode === "ai" || mode === "all" ? modelPickEngine : initialModelPickEngine,
+      dispatchConcurrency: mode === "execution" || mode === "all" ? dispatchConcurrency : initialDispatchConcurrency,
     });
     setIsSaved(true);
   }
 
   return (
     <div className="flex flex-col gap-4">
-      <ExecutionFlowOverview
+      {(mode === "ai" || mode === "all") && <ExecutionFlowOverview
         claudeModel={claudeModel}
         githubActionsAgent={githubActionsAgent}
         githubActionsCodexModel={githubActionsCodexModel}
@@ -254,11 +380,11 @@ export function ExecutionSettingsSection({
         appAiModel={appAiModel}
         appAiModelReasoning={appAiModelReasoning}
         modelPickEngine={modelPickEngine}
-      />
+      />}
 
-      <h3 className="border-b pb-1 text-xs font-semibold tracking-wide text-muted-foreground">共通設定</h3>
+      {(mode === "execution" || mode === "all") && <h3 className="border-b pb-1 text-xs font-semibold tracking-wide text-muted-foreground">サブPCとエラー処理</h3>}
 
-      <div id="execution-controls" className="flex flex-col gap-1.5">
+      {(mode === "execution" || mode === "all") && <div id="execution-controls" className="flex flex-col gap-1.5">
         <Label htmlFor="auto-retry-limit">自動リトライ回数</Label>
         <Input
           id="auto-retry-limit"
@@ -278,9 +404,9 @@ export function ExecutionSettingsSection({
           Actionsの無人実行（Issueからの計画・実装）が、計画コメントもPull
           Requestも残せずに終わった場合に、自動で再実行する回数の上限です。0で無効ですが、一過性の障害と判定した場合だけは0でも2回まで再実行します。ローカルセッションには適用されません。全リポジトリ共通の設定です。
         </p>
-      </div>
+      </div>}
 
-      <div id="subpc-agent-settings" className="flex flex-col gap-1.5 border-t pt-4">
+      {(mode === "execution" || mode === "all") && <div id="subpc-agent-settings" className="flex flex-col gap-1.5 border-t pt-4">
         <Label htmlFor="default-dispatch-agent">サブPC：既定のエージェント</Label>
         <Select
           value={defaultDispatchAgent}
@@ -300,9 +426,9 @@ export function ExecutionSettingsSection({
         <p className="text-xs text-muted-foreground">
           「実装を開始」を開いたときの最初の選択です。Issueごとに選び直した値、既存セッションの再開、GitHub Actionsには影響しません。
         </p>
-      </div>
+      </div>}
 
-      <div id="plan-review-settings" className="flex flex-col gap-3 border-t pt-4">
+      {(mode === "automation" || mode === "all") && <div id="plan-review-settings" className="flex flex-col gap-3 border-t pt-4">
         <div>
           <Label>サブPC：自動計画レビューのエージェントとモデル</Label>
           <p className="mt-1 text-xs text-muted-foreground">
@@ -381,9 +507,9 @@ export function ExecutionSettingsSection({
             </SelectContent>
           </Select>
         </div>
-      </div>
+      </div>}
 
-      <div id="failover-settings" className="flex flex-col gap-3 border-t pt-4">
+      {(mode === "execution" || mode === "all") && <div id="failover-settings" className="flex flex-col gap-3 border-t pt-4">
         <div>
           <Label htmlFor="dispatch-failover-enabled">使用量に応じた自動フェイルオーバー</Label>
           <p className="mt-1 text-xs text-muted-foreground">
@@ -418,9 +544,9 @@ export function ExecutionSettingsSection({
             使用量を取得できない・古い・期限切れの場合は切り替えません。手動で選び直したエージェントも維持します。
           </p>
         </div>
-      </div>
+      </div>}
 
-      <div id="concurrency-settings" className="flex flex-col gap-1.5 border-t pt-4">
+      {(mode === "execution" || mode === "all") && <div id="concurrency-settings" className="flex flex-col gap-1.5 border-t pt-4">
         <Label htmlFor="dispatch-concurrency">サブPCの同時実行数</Label>
         <Input
           id="dispatch-concurrency"
@@ -435,8 +561,9 @@ export function ExecutionSettingsSection({
           合わせて変えられるよう設定値にしています（既定の3は載せ替え後のCPU実測にもとづく上限で、
           4本にするとメモリが足りずビルドが2倍以上遅くなります）。
         </p>
-      </div>
+      </div>}
 
+      {(mode === "ai" || mode === "all") && <>
       <h3 id="github-actions-settings" className="border-b pb-1 text-xs font-semibold tracking-wide text-muted-foreground">GitHub Actions 共通設定</h3>
 
       <div className="flex flex-col gap-1.5">
@@ -637,33 +764,31 @@ export function ExecutionSettingsSection({
           通常はSonnetが適しています。GPTを選ぶとOpenAI API、Claudeを選ぶとAnthropic APIを使います。
         </p>
       </div>
+      </>}
 
       {error && <p className="text-sm text-destructive">{error}</p>}
 
       <div className="flex items-center gap-3 border-t pt-4">
-        <Button onClick={handleSubmit} disabled={isSubmitting || !isValid || !isDirty}>
+        <Button onClick={handleSubmit} disabled={isSubmitting || !isValid || !sectionDirty}>
           {isSubmitting ? "保存中..." : "保存"}
         </Button>
-        {isSaved && !isDirty && (
+        {isSaved && !sectionDirty && (
           <span className="text-xs text-muted-foreground">保存しました</span>
         )}
-        {isDirty && !isSubmitting && (
+        {sectionDirty && !isSubmitting && (
           <span className="text-xs text-muted-foreground">未保存の変更があります</span>
         )}
       </div>
 
-      <h3 className="border-b pb-1 text-xs font-semibold tracking-wide text-muted-foreground">
-        その場で保存される設定
-      </h3>
-      <p className="-mt-2 text-xs text-muted-foreground">
-        上の「保存」の対象ではありません。選んだ時点か、各項目の専用ボタンで保存されます。
-      </p>
+      {(mode === "automation" || mode === "all") && <>
+      {mode === "all" && <><h3 className="border-b pb-1 text-xs font-semibold tracking-wide text-muted-foreground">自動化</h3><p className="-mt-2 text-xs text-muted-foreground">各項目の変更はその場で保存されます。</p></>}
 
       <ReleasePrepIntervalField />
 
       <CodeReviewRecommendField />
 
       <PlanReviewAutoReflectField />
+      </>}
     </div>
   );
 }

@@ -388,7 +388,7 @@ export function PullRequestDetail({
               <PullRequestMergeButton
                 pullRequest={pullRequest}
                 onMerged={onMerged}
-                variant="default"
+                variant={repairKinds.length === 0 ? "default" : "outline"}
                 className="ml-auto"
               />
             )}
