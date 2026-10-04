@@ -42,6 +42,14 @@ export type ChangelogEntry = {
  */
 export const APP_CHANGELOG: ChangelogEntry[] = [
   {
+    version: "8.33.1",
+    date: "2026-10-04",
+    changes: [
+      "設定画面を目的別の区分に整理し、各区分で自分の設定だけを保存できるようにしました。別の区分で入力途中の内容が消えたり、意図せず保存されたりしなくなりました。",
+      "PR自動修正のボタンを整理し、同じPRで修正が重複して起動しないようにしました。実行が完了するとボタンが元に戻ります。",
+    ],
+  },
+  {
     version: "8.33.0",
     date: "2026-10-04",
     changes: [
