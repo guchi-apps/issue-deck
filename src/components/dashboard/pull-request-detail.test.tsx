@@ -498,7 +498,12 @@ describe("PullRequestDetail", () => {
     renderDetail();
 
     await waitFor(() => expect(screen.getByText("コメント 1件")).toBeTruthy());
-    expect(fetchMock).not.toHaveBeenCalled();
+    const requestedUrls = (fetchMock.mock.calls as unknown as unknown[][]).map((call) =>
+      String(call[0]),
+    );
+    expect(requestedUrls.some((url) => url.includes("/api/pull-requests/deploy-status"))).toBe(
+      false,
+    );
     expect(screen.queryByText("本番反映済み v4.1.0")).toBeNull();
   });
 

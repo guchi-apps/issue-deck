@@ -1461,6 +1461,19 @@ sweep_pull_request_conflicts() {
   return 0
 }
 
+# 画面から開始したPR自動修復系列を進める。修復workflowがpushした新HEADのCI・再レビューを
+# issue-deck側で判定するため、ここでは一定間隔を持たず毎巡呼ぶだけにする。
+sweep_pull_request_auto_repairs() {
+  if ! api_call POST /api/pull-requests/auto-repair-sweep '{}'; then
+    case "$API_RESPONSE_STATUS" in
+      # デプロイ順のずれによる404と接続不可は、既存のconflict巡回と同じく黙って見送る。
+      404|000) return 0 ;;
+      *) report_api_failure "PR自動修復系列の巡回に失敗しました" ;;
+    esac
+    return 0
+  fi
+}
+
 # --- Codexによるdevelop向けPRレビュー ------------------------------------------------
 #
 # GitHub ActionsはPRコメントへ要求印を投稿して結果を待つだけにし、実際のCodex CLIは
@@ -3880,6 +3893,7 @@ run_once() {
     # 呼ばない**（スレッドのアーカイブとデーモンの起動という副作用があるため）
     tidy_codex_remote_control
     sweep_pull_request_conflicts
+    sweep_pull_request_auto_repairs
     sweep_codex_pull_request_reviews
     # iOS配布失敗の巡回検知（#3745）。**dry-runでは呼ばない**（Issueの起票という外向きの副作用があるため）。
     sweep_ios_distribution_failures

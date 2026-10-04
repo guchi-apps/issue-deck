@@ -1764,6 +1764,28 @@ model PullRequestRepairRun {
   @@index([status])
 }
 
+/// 画面の「PRを自動修正」から開始した、同一PR上の自動修復系列（#3978）。
+///
+/// 個々のworkflow実行は`PullRequestRepairRun`が担い、ここでは修復の順番・HEAD・停止理由だけを持つ。
+model PullRequestAutoRepairLoop {
+  id                 String   @id @default(cuid())
+  repositoryFullName String
+  pullRequestNumber  Int
+  status             String
+  headSha            String
+  round              Int      @default(0)
+  currentKind        String?
+  lastFingerprint    String?
+  stopReason         String?
+  lastSweepAt        DateTime?
+  waitStartedAt      DateTime?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  @@unique([repositoryFullName, pullRequestNumber])
+  @@index([status])
+}
+
 /// ローカル・サブPC実行のセッションが公開したアーティファクト（#2154）。
 ///
 /// **claude.aiのアーティファクトページは`content-security-policy: frame-ancestors 'self'`を
