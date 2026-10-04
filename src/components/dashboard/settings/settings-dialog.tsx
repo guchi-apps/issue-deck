@@ -218,9 +218,10 @@ export function SettingsDialog({
               )}
               {section === "notification" && <NotificationSettingsSection />}
               {section === "repositories" && <RepositoryVisibilitySection repositories={repositories} onSetRepositoryHidden={onSetRepositoryHidden} onSetRepositoriesHidden={onSetRepositoriesHidden} onSetRepositoryIssueCreationExcluded={onSetRepositoryIssueCreationExcluded} />}
-              {section === "ai-models" && <AiModelSettingsSection {...settingsProps} />}
-              {section === "execution" && <ExecutionControlSettingsSection {...settingsProps} />}
-              {section === "automation" && <AutomationSettingsSection {...settingsProps} />}
+              {/* 3区分は切替時もマウントを維持し、保存前のフォーム入力を失わない。 */}
+              <div hidden={section !== "ai-models"}><AiModelSettingsSection {...settingsProps} /></div>
+              <div hidden={section !== "execution"}><ExecutionControlSettingsSection {...settingsProps} /></div>
+              <div hidden={section !== "automation"}><AutomationSettingsSection {...settingsProps} /></div>
               {section === "fleet" && (
                 <FleetOpsSection
                   fineGrainedTokens={data.fineGrainedTokens}
