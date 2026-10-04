@@ -204,6 +204,16 @@ async function handlePOST(request: NextRequest) {
       });
       throw error;
     }
+    // sweepがrunning系列を拾う前にRepairRunを記録する。これによりdispatch直後の巡回が
+    // activeなしをworkflow終了と誤認してcurrentKindを消す競合を防ぐ。
+    await recordPullRequestRepairRun({
+      repositoryFullName: `${owner}/${repo}`,
+      pullRequestNumber: pullRequest.number,
+      kind,
+      status: "running",
+    }).catch((error: unknown) => {
+      console.warn(`[POST /api/pull-requests/repair] ${owner}/${repo}#${number} の記録:`, error);
+    });
     await db.pullRequestAutoRepairLoop.update({
       where: {
         repositoryFullName_pullRequestNumber: {
@@ -212,16 +222,6 @@ async function handlePOST(request: NextRequest) {
         },
       },
       data: { status: "running" },
-    });
-
-    // 実際に起動した種類だけrunningとして記録する。未起動の修復が画面へ残らないようにする。
-    await recordPullRequestRepairRun({
-      repositoryFullName: `${owner}/${repo}`,
-      pullRequestNumber: pullRequest.number,
-      kind,
-      status: "running",
-    }).catch((error: unknown) => {
-      console.warn(`[POST /api/pull-requests/repair] ${owner}/${repo}#${number} の記録:`, error);
     });
 
     // 以後はpollerが新HEADのCI・再レビューを待ち、必要なら次の1種類を起動する。
