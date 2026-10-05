@@ -571,6 +571,148 @@ describe("fetchCheckRollup", () => {
     );
   });
 
+  /**
+   * GitHubから矛盾した状態が返ったcheck-run（#4049）。kurashio#712の`review / review-provider`は
+   * `status: IN_PROGRESS`・`conclusion: SUCCESS`・`completedAt`ありのまま残り、ワークフローも
+   * 全ジョブも終わっているのに「マージ可否を判定中」が消えなかった。
+   */
+  describe("矛盾した状態のcheck-run（#4049）", () => {
+    function withEvidence(
+      node: ReturnType<typeof checkRun>,
+      evidence: { completedAt?: string | null; suiteStatus?: string | null },
+    ) {
+      return {
+        ...node,
+        completedAt: evidence.completedAt ?? null,
+        checkSuite: { ...node.checkSuite, status: evidence.suiteStatus ?? null },
+      };
+    }
+
+    async function judgementOf(nodes: unknown[]) {
+      stubGraphql(rollupResponse({ state: "SUCCESS", contexts: { totalCount: nodes.length, nodes } }));
+      const rollup = await fetchCheckRollup("owner", "repo", "develop", "token");
+      return rollup?.mergeJudgement;
+    }
+
+    const KURASHIO_712 = [
+      checkRun("COMPLETED", "SUCCESS", "ci.yml", "lint-and-build"),
+      checkRun("COMPLETED", "SUCCESS", "claude-review-develop.yml", "identify-issue"),
+      checkRun("COMPLETED", "SUCCESS", "claude-review-develop.yml", "risk-check"),
+      withEvidence(checkRun("IN_PROGRESS", "SUCCESS", "claude-review-develop.yml", "review-provider"), {
+        completedAt: "2026-10-05T12:05:50Z",
+        suiteStatus: "COMPLETED",
+      }),
+      checkRun("COMPLETED", "SUCCESS", "claude-review-develop.yml", "claude-review"),
+      checkRun("COMPLETED", "SUCCESS", "claude-review-develop.yml", "auto-merge"),
+    ];
+
+    it("実データ相当（in_progress＋success＋completedAt、suite完了）は判定済みにする", async () => {
+      const judgement = await judgementOf(KURASHIO_712);
+      expect(judgement?.state).toBe("settled");
+      // レビューの結果（LGTMかどうか）には触れない。終わったことだけを返す。
+      expect(judgement?.aiReview.state).toBe("passed");
+    });
+
+    it("conclusionとcompletedAtが揃っていれば、suiteの状態が取れなくても判定済みにする", async () => {
+      const judgement = await judgementOf([
+        withEvidence(checkRun("IN_PROGRESS", "SUCCESS", "claude-review-develop.yml", "review-provider"), {
+          completedAt: "2026-10-05T12:05:50Z",
+        }),
+        checkRun("COMPLETED", "SUCCESS", "claude-review-develop.yml", "auto-merge"),
+      ]);
+      expect(judgement?.state).toBe("settled");
+    });
+
+    it("失敗・キャンセルで終わった矛盾値も判定済みにする（結論は書き換えない）", async () => {
+      const judgement = await judgementOf([
+        withEvidence(checkRun("IN_PROGRESS", "CANCELLED", "claude-review-develop.yml", "claude-review"), {
+          completedAt: "2026-10-05T12:05:50Z",
+        }),
+        checkRun("COMPLETED", "SUCCESS", "claude-review-develop.yml", "auto-merge-fallback"),
+      ]);
+      expect(judgement?.state).toBe("settled");
+      expect(judgement?.aiReview.state).toBe("failed");
+    });
+
+    it("本当に実行中の必須チェックがあれば、矛盾値が終わっていても判定中を維持する", async () => {
+      const judgement = await judgementOf([
+        withEvidence(checkRun("IN_PROGRESS", "SUCCESS", "claude-review-develop.yml", "review-provider"), {
+          completedAt: "2026-10-05T12:05:50Z",
+        }),
+        checkRun("IN_PROGRESS", null, "claude-review-develop.yml", "claude-review"),
+        checkRun("QUEUED", null, "claude-review-develop.yml", "auto-merge"),
+      ]);
+      expect(judgement?.state).toBe("pending");
+      expect(judgement?.step).toBe("claude-review");
+    });
+
+    it("再実行で同名のcheck-runが並んでも、旧attemptの終了で今の実行中は解除しない", async () => {
+      const judgement = await judgementOf([
+        checkRun("COMPLETED", "FAILURE", "claude-review-develop.yml", "claude-review"),
+        checkRun("IN_PROGRESS", null, "claude-review-develop.yml", "claude-review"),
+      ]);
+      expect(judgement?.state).toBe("pending");
+      expect(judgement?.aiReview.state).toBe("pending");
+    });
+
+    it("suiteが実行中（再実行で戻った）なら、completedAtの無い矛盾値は終わった扱いにしない", async () => {
+      const judgement = await judgementOf([
+        withEvidence(checkRun("IN_PROGRESS", "SUCCESS", "claude-review-develop.yml", "auto-merge"), {
+          suiteStatus: "IN_PROGRESS",
+        }),
+      ]);
+      expect(judgement?.state).toBe("pending");
+      expect(judgement?.step).toBe("state-mismatch");
+    });
+
+    it.each([
+      ["conclusionだけ", { status: "IN_PROGRESS", conclusion: "SUCCESS", evidence: {} }],
+      [
+        "completedAtだけ（結論なし）",
+        { status: "IN_PROGRESS", conclusion: null, evidence: { completedAt: "2026-10-05T12:05:50Z" } },
+      ],
+      [
+        "suiteの完了だけ（結論なし）",
+        { status: "IN_PROGRESS", conclusion: null, evidence: { suiteStatus: "COMPLETED" } },
+      ],
+    ])("終了の根拠が足りない矛盾値（%s）は判定中のまま、段階を「再確認中」にする", async (_, input) => {
+      const judgement = await judgementOf([
+        withEvidence(checkRun(input.status, input.conclusion, "claude-review-develop.yml", "auto-merge"), input.evidence),
+      ]);
+      expect(judgement).toMatchObject({
+        state: "pending",
+        step: "state-mismatch",
+        runUrl: "https://github.com/owner/repo/actions/runs/1/job/auto-merge",
+      });
+    });
+
+    it("根拠の無いふつうの実行中は、時間がどれだけ経っても判定中のまま", async () => {
+      const node = { ...checkRun("IN_PROGRESS", null, "claude-review-develop.yml", "review-provider"), startedAt: "2020-01-01T00:00:00Z" };
+      const judgement = await judgementOf([node]);
+      expect(judgement?.state).toBe("pending");
+      // 補助ジョブも段階を名乗る（「マージ可否を判定中」への縮退ではなく既知の段階として扱う）。
+      expect(judgement?.step).toBe("risk-check");
+    });
+
+    it("CIの集約・内訳も同じ根拠で完了扱いにする", async () => {
+      const node = withEvidence(checkRun("IN_PROGRESS", "SUCCESS", "ci.yml", "lint-and-build"), {
+        completedAt: "2026-10-05T12:05:50Z",
+      });
+      stubGraphql(rollupResponse({ state: "PENDING", contexts: { totalCount: 1, nodes: [node] } }));
+      const rollup = await fetchCheckRollup("owner", "repo", "develop", "token");
+      expect(rollup?.checks).toEqual([{ status: "completed", conclusion: "success" }]);
+      expect(rollup?.ciChecks[0]?.status).toBe("completed");
+    });
+
+    it("問い合わせにcheck-suiteの状態とcompletedAtを含める", async () => {
+      const calls = stubGraphql(rollupResponse(null));
+      await fetchCheckRollup("owner", "repo", "develop", "token");
+      const query = JSON.parse(calls[0].body).query as string;
+      expect(query).toContain("completedAt");
+      expect(query).toMatch(/checkSuite \{\s*status/);
+    });
+  });
+
   it("チェックが100件を超える場合は1件ずつ返さず、`state`だけを返す", async () => {
     stubGraphql(
       rollupResponse({

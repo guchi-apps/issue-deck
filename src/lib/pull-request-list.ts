@@ -574,6 +574,8 @@ export const MERGE_JUDGEMENT_STEP_LABEL: Record<MergeJudgementStep, string> = {
   "risk-check": "マージ可否を判定中",
   "claude-review": "レビュー実施中",
   "auto-merge": "自動マージの判定中",
+  // GitHubから矛盾した状態が返り、終了を確定できないとき（#4049）。再取得で解消を待つ。
+  "state-mismatch": "GitHubの状態を再確認中",
 };
 
 /** 段階を特定できないときの表示。ジョブ名が想定外・チェックが多すぎて1件ずつ見られない場合（#2059） */
@@ -592,6 +594,9 @@ export function mergeJudgementLabel(step: MergeJudgementStep | null): string {
  * PCでマウスを載せたときに「押せない理由」まで読めるようにするため。
  */
 export function mergeJudgementReason(step: MergeJudgementStep | null): string {
+  if (step === "state-mismatch") {
+    return "GitHubが判定のチェックを「実行中」のまま返していますが、結論や終了時刻と食い違っており終了を確定できません。自動で取り直し、終了を確かめられた時点で押せるようになります。";
+  }
   return `${mergeJudgementLabel(step)}です。判定が終わると、自動マージされるか、確認が必要な場合は00.check-userが付いて押せるようになります。`;
 }
 

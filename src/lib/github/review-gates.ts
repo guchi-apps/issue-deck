@@ -308,7 +308,7 @@ function fetchRollupChunk(chunk: RollupRequest[], token: string): Promise<Record
       (_, i) => `  p${i}: repository(owner: $owner${i}, name: $name${i}) {
     pullRequest(number: $number${i}) {
       commits(last: 1) { nodes { commit { statusCheckRollup { contexts(first: ${CHECKS_PER_COMMIT}) {
-        nodes { __typename ... on CheckRun { name detailsUrl status conclusion checkSuite { workflowRun { workflow { resourcePath } } } } }
+        nodes { __typename ... on CheckRun { name detailsUrl status conclusion completedAt checkSuite { status workflowRun { workflow { resourcePath } } } } }
       } } } } }
     }
   }`,
