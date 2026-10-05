@@ -38,6 +38,7 @@ export function DeployRecoverySeriesPanel({ repositoryFullName, runId, block = f
   const [owner, repo] = repositoryFullName.split("/");
   const [series, setSeries] = useState<DeployRecoverySeriesView | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [throughMain, setThroughMain] = useState(true);
   const [busy, setBusy] = useState<"start" | "stop" | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -70,7 +71,7 @@ export function DeployRecoverySeriesPanel({ repositoryFullName, runId, block = f
       const res = await fetch("/api/repositories/deploy-recovery-series", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ owner, repo, runId }),
+        body: JSON.stringify({ owner, repo, runId, scope: throughMain ? "fix_until_main" : "fix_until_develop" }),
       });
       const data = await res.json().catch(() => null);
       if (data?.series) setSeries(data.series);
@@ -174,6 +175,7 @@ export function DeployRecoverySeriesPanel({ repositoryFullName, runId, block = f
               <ExternalAnchor href={`${github}/pull/${shown.pullRequestNumber}`}>修正PR #{shown.pullRequestNumber}</ExternalAnchor>
             )}
             <ExternalAnchor href={shown.failedRunUrl}>失敗した実行</ExternalAnchor>
+            {shown.releaseRunUrl && <ExternalAnchor href={shown.releaseRunUrl}>再デプロイの実行</ExternalAnchor>}
           </p>
         </div>
       )}
@@ -195,11 +197,26 @@ export function DeployRecoverySeriesPanel({ repositoryFullName, runId, block = f
                   <li>原因を調べ、区分（コード・設定・DB・外部障害）を判定する</li>
                   <li>コードの問題なら修正Issueと修正PRを作る</li>
                   <li>CI・レビューで指摘があれば最大{DEPLOY_RECOVERY_MAX_REPAIR_ROUNDS}回まで直す</li>
-                  <li>developへマージされたら、本番反映待ちとして知らせる</li>
+                  <li>developへマージされる（修正PRの自動マージ）</li>
+                  {throughMain && (
+                    <li>
+                      この修正だけをmainへ取り込む復旧PRを作り、<strong>現在のHEADでCIが通れば、自動でmainへマージする</strong>
+                      （mainが進んだ・差分が修正の範囲を超えた・PRが変更されたときはマージせず止めます）
+                    </li>
+                  )}
                 </ol>
+                <label className="flex items-start gap-2">
+                  <input
+                    type="checkbox"
+                    className="mt-1"
+                    checked={throughMain}
+                    onChange={(event) => setThroughMain(event.target.checked)}
+                  />
+                  <span>mainへのマージまで自動で進める（外すと、developへ入った時点で止めて知らせます）</span>
+                </label>
                 <p>
-                  本番（main）への反映と再デプロイは、いまは自動で行いません。コード以外の原因・上限・24時間の期限に
-                  達したときは止めて知らせます。途中でいつでも停止できます。
+                  許可はこの失敗の復旧系列だけに有効で、通常のリリースには及びません。コード以外の原因・上限・24時間の期限に
+                  達したときは止めて知らせます。途中でいつでも停止できます。再デプロイの稼働版の確認は、いまは自動で行いません。
                 </p>
               </div>
             </AlertDialogDescription>
