@@ -209,6 +209,7 @@ export function IssueStatusCard({
               dispatch={dispatch}
               align="end"
               launchJob={foldedLaunchJob}
+              hideControls
             />
           )}
           {/* 終了したセッションを呼び戻す（#1830）。**終了した行のすぐ下に置く。**

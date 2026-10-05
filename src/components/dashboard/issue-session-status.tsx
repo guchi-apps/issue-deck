@@ -132,6 +132,7 @@ export function IssueSessionStatus({
   dispatch,
   align = "end",
   launchJob = null,
+  hideControls = false,
 }: {
   session: DispatchSessionView;
   /** 画面で1回だけ取ったディスパッチの状態（#1262）。停止・終了もこの経路で積む */
@@ -146,6 +147,11 @@ export function IssueSessionStatus({
    * 展開側に添えるためだけに使う。
    */
   launchJob?: DispatchJobView | null;
+  /**
+   * 停止・追加指示・セッション終了の操作欄を出さない（#3991）。Issue詳細ではこれらを
+   * 「セッション詳細」のモーダルへ一本化したため、カード側では重複させない。
+   */
+  hideControls?: boolean;
 }) {
   const summary = summarizeIssueSession(session);
   // 自動終了までの残り時間（#1817）。**猶予待ちのセッションでだけ返る。**
@@ -262,7 +268,7 @@ export function IssueSessionStatus({
   const attachCommand =
     session.state === "ALIVE" ? `tmux attach -t ${session.tmuxSessionName}` : null;
   // 畳む相手が1つも無ければトグルも出さない（消えたセッションには操作する相手がいない）
-  const hasControls = canControl || attachCommand !== null;
+  const hasControls = !hideControls && (canControl || attachCommand !== null);
   const controlsExpanded = controlsOpen ?? hasActiveControlJob;
 
   async function handleCopyAttachCommand() {
