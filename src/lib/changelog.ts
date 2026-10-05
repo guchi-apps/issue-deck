@@ -42,6 +42,13 @@ export type ChangelogEntry = {
  */
 export const APP_CHANGELOG: ChangelogEntry[] = [
   {
+    version: "8.36.1",
+    date: "2026-10-06",
+    changes: [
+      "スマホでチャット画面を開いたとき、右下の操作ボタンが入力欄や送信ボタンに重なって押せなくなる問題を修正しました。",
+    ],
+  },
+  {
     version: "8.36.0",
     date: "2026-10-05",
     changes: [
