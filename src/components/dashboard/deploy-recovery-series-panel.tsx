@@ -174,6 +174,7 @@ export function DeployRecoverySeriesPanel({ repositoryFullName, runId, block = f
               <ExternalAnchor href={`${github}/pull/${shown.pullRequestNumber}`}>修正PR #{shown.pullRequestNumber}</ExternalAnchor>
             )}
             <ExternalAnchor href={shown.failedRunUrl}>失敗した実行</ExternalAnchor>
+            {shown.releaseRunUrl && <ExternalAnchor href={shown.releaseRunUrl}>再デプロイの実行</ExternalAnchor>}
           </p>
         </div>
       )}

@@ -245,12 +245,15 @@ jobs:
           VAPID_PRIVATE_KEY: ${{ secrets.VAPID_PRIVATE_KEY }}
           VAPID_SUBJECT: ${{ secrets.VAPID_SUBJECT }}
           TARGET_DIR: ${{ secrets.TARGET_DIR }}
+          # 稼働している版の照合に使う（#4007）。ヘルスチェックが`/api/app-version`の`sha`と突き合わせる。
+          # コミットのSHAは公開情報なのでそのまま渡してよい
+          APP_COMMIT_SHA: ${{ github.sha }}
         with:
           host: ${{ secrets.HOST }}
           username: ${{ secrets.USERNAME }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           port: ${{ secrets.SSH_PORT }}
-          envs: DATABASE_URL,MIGRATE_DATABASE_URL,DB_USER,DB_PASSWORD,DB_HOST,DB_PORT,DB_NAME,NEXT_PUBLIC_SUPABASE_URL,NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY,SUPABASE_SERVICE_ROLE_KEY,SUPABASE_MANAGEMENT_API_TOKEN,GITHUB_APP_ID,GITHUB_APP_PRIVATE_KEY_BASE64,NEXT_PUBLIC_GITHUB_APP_SLUG,GITHUB_WEBHOOK_SECRET,GITHUB_USER_TOKEN_ENCRYPTION_KEY,SHARED_TOKEN_API_SECRET,GITHUB_OAUTH_CLIENT_ID,GITHUB_OAUTH_CLIENT_SECRET,ALLOWED_EMAILS,CLAUDE_CODE_OAUTH_TOKEN,OPENAI_API_KEY,TYPESAFE_API_KEY,OPS_API_TOKEN,PROJECT_V2_OWNER,PROJECT_V2_NUMBER,PROGRESS_REPORT_SECRET,DISPATCH_SECRET,IMAGE_UPLOAD_SECRET,VAPID_PUBLIC_KEY,VAPID_PRIVATE_KEY,VAPID_SUBJECT,TARGET_DIR
+          envs: APP_COMMIT_SHA,DATABASE_URL,MIGRATE_DATABASE_URL,DB_USER,DB_PASSWORD,DB_HOST,DB_PORT,DB_NAME,NEXT_PUBLIC_SUPABASE_URL,NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY,SUPABASE_SERVICE_ROLE_KEY,SUPABASE_MANAGEMENT_API_TOKEN,GITHUB_APP_ID,GITHUB_APP_PRIVATE_KEY_BASE64,NEXT_PUBLIC_GITHUB_APP_SLUG,GITHUB_WEBHOOK_SECRET,GITHUB_USER_TOKEN_ENCRYPTION_KEY,SHARED_TOKEN_API_SECRET,GITHUB_OAUTH_CLIENT_ID,GITHUB_OAUTH_CLIENT_SECRET,ALLOWED_EMAILS,CLAUDE_CODE_OAUTH_TOKEN,OPENAI_API_KEY,TYPESAFE_API_KEY,OPS_API_TOKEN,PROJECT_V2_OWNER,PROJECT_V2_NUMBER,PROGRESS_REPORT_SECRET,DISPATCH_SECRET,IMAGE_UPLOAD_SECRET,VAPID_PUBLIC_KEY,VAPID_PRIVATE_KEY,VAPID_SUBJECT,TARGET_DIR
           script: |
             set -euo pipefail
             cd "${TARGET_DIR}"
@@ -273,6 +276,7 @@ jobs:
             echo "Updating .env..."
             update_env NODE_ENV production
             update_env PORT "$PORT"
+            update_env APP_COMMIT_SHA "$APP_COMMIT_SHA"
             update_env DATABASE_URL "$DATABASE_URL"
             update_env DB_USER "$DB_USER"
             update_env DB_PASSWORD "$DB_PASSWORD"
@@ -332,15 +336,20 @@ jobs:
             # アプリが正常に立ち上がっていても deploy ジョブが失敗する。失敗すると後続の
             # release / notify-release がスキップされ、タグはあるのに GitHub Release が
             # 作られない状態になる（複数アプリを同時にデプロイした際に実際に発生した）。
+            #
+            # HTTP 200だけでは成功にしない（#4007）。再起動に失敗して旧版のプロセスが残っていても
+            # 200は返るため、`/api/app-version`が返す`sha`が今回デプロイしたコミットと一致するまで待つ。
             for i in $(seq 1 30); do
-              if curl -fsS -o /dev/null "http://127.0.0.1:${PORT}/"; then
-                echo "Deployment successful."
+              body="$(curl -fsS "http://127.0.0.1:${PORT}/api/app-version" 2>/dev/null || true)"
+              if [ -n "$body" ] && printf '%s' "$body" | grep -qF "\"sha\":\"${APP_COMMIT_SHA}\""; then
+                echo "Deployment successful. (sha=${APP_COMMIT_SHA})"
                 exit 0
               fi
               sleep 2
             done
 
-            echo "Health check failed after 60s."
+            echo "Health check failed after 60s: /api/app-version did not report sha=${APP_COMMIT_SHA}."
+            echo "last response: ${body:-<none>}"
             pm2 describe issue-deck || true
             pm2 logs issue-deck --lines 50 --nostream || true
             exit 1
