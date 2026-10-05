@@ -9,6 +9,7 @@
 - GitHub上の操作が誰の名義になるか: [attribution.md](attribution.md)
 - Actions側のトークンと自己ループ防止: [actions-token-model.md](actions-token-model.md)
 - 無人実行フローの全体像: [multi-agent-workflow.md](multi-agent-workflow.md)・[multi-agent/](multi-agent/)
+- IssueDeckのiOSアプリ（方式・認証・配布）: [ios-app.md](ios-app.md)
 
 ## ディレクトリ
 
