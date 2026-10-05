@@ -602,6 +602,10 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   画面側が`endedAt`で行う。**プラン枠への換算（「枠%」）は逆算した目安**で、実測の枠は
   同じ画面に置いた`ClaudeUsageCard`が受け持つ。流れと決まりは
   [multi-agent/session-inspect.md](multi-agent/session-inspect.md)を参照。
+  - **転記の残らないサブPCのPRレビュー（Codex PRレビュー）は別の受け口**（#3995。
+    `POST /api/dispatch/review-usage` → [`lib/dispatch/review-usage.ts`](../src/lib/dispatch/review-usage.ts)）。
+    `kind: "actions"`（「CI/CD・レビュー」）・`source: "local"`で保存し、試行ごとに1行。送り手は
+    [`scripts/lib/review-usage.sh`](../scripts/lib/review-usage.sh)で、送れなかった報告を手元に残して送り直す
   - **リポジトリ名の変更は`RepositoryNameAlias`で引き継ぐ**（#3613）。`SessionUsage.repository`は
     作業ディレクトリ名の短い名前で、改名すると旧名の行が別リポジトリに分かれる。
     [`lib/repository-alias.ts`](../src/lib/repository-alias.ts)がリポジトリ同期（と

@@ -7,6 +7,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib/local-repo-resolve.sh"
 # shellcheck source=scripts/lib/agent-cli.sh
 source "$SCRIPT_DIR/lib/agent-cli.sh"
+# shellcheck source=scripts/lib/session-usage.sh
+source "$SCRIPT_DIR/lib/session-usage.sh"
+# shellcheck source=scripts/lib/review-usage.sh
+source "$SCRIPT_DIR/lib/review-usage.sh"
 
 REQUEST_PREFIX='issue-deck-codex-review-request sha='
 VERDICT_PREFIX='issue-deck-codex-review-verdict:'
@@ -43,6 +47,8 @@ run_review() {
   local owner="$1" repo="$2" pr_number="$3" base_sha="$4" head_sha="$5"
   local full_name="$owner/$repo" local_path workdir prompt_file output_file log_file
   local verdict_pattern codex_command cleanup_command codex_model reasoning_effort
+  local events_file started_at ended_at exit_code run_status usage_summary resolved_model
+  local issue_number head_ref comment_url comment_status
 
   require_command gh
   require_command git
@@ -73,6 +79,7 @@ run_review() {
   prompt_file="$WORK_ROOT/${repo}-${pr_number}-${head_sha:0:12}.md"
   output_file="$WORK_ROOT/${repo}-${pr_number}-${head_sha:0:12}.out"
   log_file="$WORK_ROOT/${repo}-${pr_number}-${head_sha:0:12}.log"
+  events_file="$WORK_ROOT/${repo}-${pr_number}-${head_sha:0:12}.events.jsonl"
   verdict_pattern="${VERDICT_PREFIX}(lgtm|needs-check|changes-requested) sha=${head_sha}"
 
   # EXITトラップはrun_review終了後に動くため、local変数の値をここで固定する。
@@ -94,10 +101,23 @@ run_review() {
   local -a codex_model_args=()
   [[ "$codex_model" = auto ]] || codex_model_args=(-m "$codex_model")
   [[ "$reasoning_effort" = default ]] || codex_model_args+=(--config "model_reasoning_effort=$reasoning_effort")
-  if ! timeout "$TIMEOUT_SECONDS" "$codex_command" exec --sandbox read-only --ephemeral "${codex_model_args[@]}" \
-    --output-last-message "$output_file" -C "$workdir" <"$prompt_file" >"$log_file" 2>&1; then
-    : >"$output_file"
-  fi
+  # `--json`でイベントを標準出力へ出させ、`turn.completed`のusageを使用量の報告に使う（#3995）。
+  # `--ephemeral`では転記が残らないため、これが唯一の計測の手がかり。イベントには会話の本文も
+  # 含まれるので、数値だけを取り出したら消す（下の`rm -f "$events_file"`）。
+  started_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  exit_code=0
+  timeout "$TIMEOUT_SECONDS" "$codex_command" exec --json --sandbox read-only --ephemeral "${codex_model_args[@]}" \
+    --output-last-message "$output_file" -C "$workdir" <"$prompt_file" >"$events_file" 2>"$log_file" || exit_code=$?
+  ended_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  case "$exit_code" in
+    0) run_status=completed ;;
+    124) run_status=timeout ;;
+    *) run_status=failed ;;
+  esac
+  ((exit_code == 0)) || : >"$output_file"
+  resolved_model="$(review_usage_codex_model "$codex_model")"
+  usage_summary="$(codex_exec_usage_summary "$resolved_model" <"$events_file" 2>/dev/null || true)"
+  rm -f "$events_file"
   if ! grep -qE "$verdict_pattern" "$output_file" 2>/dev/null; then
     cat >"$output_file" <<EOF
 ⚠️ Codexによるレビューを完了できなかったか、有効な判定を取得できませんでした。サブPCの実行ログを確認してください。
@@ -108,7 +128,20 @@ EOF
   else
     printf '\n%s\n' "$SOURCE_MARKER" >>"$output_file"
   fi
-  gh pr comment "$pr_number" --repo "$full_name" --body-file "$output_file"
+  comment_status=0
+  comment_url="$(gh pr comment "$pr_number" --repo "$full_name" --body-file "$output_file")" || comment_status=$?
+  [[ -n "$comment_url" ]] && printf '%s\n' "$comment_url"
+
+  # 使用量の報告（#3995）。**判定の投稿より後に回し、失敗してもレビューの結果を変えない。**
+  # 対象Issueはブランチ名`issue-<番号>`から解決する（取れなければPR番号だけで残る）。
+  head_ref="$(gh api "repos/${full_name}/pulls/${pr_number}" --jq '.head.ref' 2>/dev/null || true)"
+  issue_number=""
+  [[ "$head_ref" =~ ^issue-([1-9][0-9]*)$ ]] && issue_number="${BASH_REMATCH[1]}"
+  [[ "$comment_url" =~ ^https:// ]] || comment_url=""
+  review_usage_record codex codex-pr-review "$full_name" "$pr_number" "$head_sha" "$issue_number" \
+    "$run_status" "$started_at" "$ended_at" "$resolved_model" "$comment_url" "$usage_summary"
+  review_usage_flush
+  return "$comment_status"
 }
 
 sweep() {
@@ -123,6 +156,10 @@ sweep() {
   # pollerは短い間隔で巡回するため、同じリポジトリを二重に走査しない。
   exec 9>"$WORK_ROOT/${repo}-sweep.lock"
   flock -n 9 || return 0
+  # 使用量の報告（#3995）。報告を入れる前の実行を「使用量の記録なし」として補完し、前回までに
+  # 送れなかった報告（本番の不通・未デプロイの間に溜まったもの）とあわせて送り直す。
+  review_usage_backfill_logs "$WORK_ROOT" "$owner" "$repo"
+  review_usage_flush
   local_path="$(local_repo_resolve_path "$full_name" 2>/dev/null || true)"
   [[ -n "$local_path" && -d "$local_path" ]] || return 0
   # gh pr list --json は baseRefOid を公開しない。失敗を空一覧として扱うと

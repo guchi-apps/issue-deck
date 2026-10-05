@@ -1,9 +1,16 @@
 import { db } from "@/lib/db";
+import { SESSION_USAGE_AGENTS, type SessionUsageAgent } from "@/lib/dispatch/session-usage";
 
 const MAX_REPORTS_PER_REQUEST = 20;
 export const ACTIONS_USAGE_RETENTION_DAYS = 180;
 
 export type ActionsUsageReport = {
+  /**
+   * 実行したエージェント（#3995）。**送ってこない報告はClaude**——Actionsの報告元は
+   * `.github/scripts/summarize-claude-usage.sh`（claude-code-actionの実行結果）だけで、
+   * 既存の報告はすべてClaudeの実行だった。Claude以外を報告する経路は`agent`を明示する
+   */
+  agent: SessionUsageAgent;
   repository: string;
   runId: string;
   runUrl: string | null;
@@ -39,6 +46,8 @@ function timestamp(value: unknown): Date | null {
 export function parseActionsUsageReport(value: unknown): ActionsUsageReport | null {
   if (!value || typeof value !== "object") return null;
   const input = value as Record<string, unknown>;
+  const agent = input.agent ?? "claude";
+  if (typeof agent !== "string" || !SESSION_USAGE_AGENTS.includes(agent as SessionUsageAgent)) return null;
   const repository = stringValue(input.repository, 191);
   const runId = stringValue(input.runId, 191);
   const stepName = stringValue(input.stepName, 191);
@@ -59,6 +68,7 @@ export function parseActionsUsageReport(value: unknown): ActionsUsageReport | nu
   const prNumber = rawPr === null || rawPr === undefined ? null : nonNegativeInteger(rawPr);
   if (rawPr !== null && rawPr !== undefined && (!prNumber || prNumber <= 0)) return null;
   return {
+    agent: agent as SessionUsageAgent,
     repository,
     runId,
     runUrl: stringValue(input.runUrl, 500),
@@ -89,9 +99,9 @@ export async function storeActionsUsage(reports: ActionsUsageReport[], reportedA
   for (const report of reports) {
     const sessionId = `actions:${report.repository}:${report.runId}:${report.stepName}`.slice(0, 191);
     await db.sessionUsage.upsert({
-      where: { host_agent_sessionId: { host: "github-actions", agent: "claude", sessionId } },
+      where: { host_agent_sessionId: { host: "github-actions", agent: report.agent, sessionId } },
       create: {
-        host: "github-actions", agent: "claude", source: "github-actions", sessionId,
+        host: "github-actions", agent: report.agent, source: "github-actions", sessionId,
         transcript: report.runUrl ?? "github-actions", kind: "actions",
         repository: report.repository.split("/").at(-1) ?? report.repository,
         issueNumber: report.issueNumber, prNumber: report.prNumber, workflowName: report.workflowName, runUrl: report.runUrl,

@@ -30,7 +30,10 @@ import {
   niceAxisScale,
   sessionUsageCostSplit,
   sessionUsageIssueKey,
+  sessionUsageGap,
+  type SessionUsageSummary,
   sessionUsageKindLabel,
+  sessionUsageLocationLabel,
   sessionUsageModelLabel,
   sessionUsagePhaseSplit,
   usagePhaseKindKey,
@@ -853,8 +856,11 @@ function SessionName({
         )}
         <div className="mt-0.5 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[10px] text-muted-foreground">
           <span className="truncate">
-            {entry.source === "github-actions" ? "GitHub Actions" : sessionUsageKindLabel(entry.kind)} ・{" "}
-            {entry.agent === "claude" ? "Claude" : "Codex"}
+            {/* 「CI/CD・レビュー」は場所がActionsとサブPCに分かれるので、種別ではなく実行場所を出す（#3995） */}
+            {entry.source === "github-actions" || entry.kind === "actions"
+              ? sessionUsageLocationLabel(entry)
+              : sessionUsageKindLabel(entry.kind)}{" "}
+            ・ {entry.agent === "claude" ? "Claude" : "Codex"}
             {entry.workflowName ? ` ・ ${entry.workflowName}` : ""}
           </span>
           {/* 使ったモデル（#2646）。集計側は`models`を持っているが、これまで画面に出していなかった */}
@@ -880,9 +886,77 @@ function SessionName({
           <span className="sr-only">{issue.issueNumber !== null ? "Issueを開く" : "PRを開く"}</span>
         </Button>
       )}
-      {entry.source === "github-actions" && entry.runUrl && <a href={entry.runUrl} target="_blank" rel="noreferrer" className="flex size-5 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground" title="Actions実行を開く" aria-label="Actions実行を開く"><ExternalLink className="size-3" /></a>}
+      {entry.runUrl && (
+        <a
+          href={entry.runUrl}
+          target="_blank"
+          rel="noreferrer"
+          className="flex size-5 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
+          title={entry.source === "github-actions" ? "Actions実行を開く" : "レビュー結果を開く"}
+          aria-label={entry.source === "github-actions" ? "Actions実行を開く" : "レビュー結果を開く"}
+        >
+          <ExternalLink className="size-3" />
+        </a>
+      )}
     </div>
   );
+}
+
+/**
+ * 「CI/CD・レビュー」の計測範囲と、数値の揃っていない記録の断り（#3995）。
+ * **表示が無いことを「実行していない」と読ませない**ために、何を数えていて何が欠けうるかを書く。
+ */
+function UsageCoverageNote({ gaps }: { gaps: SessionUsageSummary["usageGaps"] }) {
+  return (
+    <div className="flex flex-col gap-1 text-[10px] text-muted-foreground">
+      <p>
+        「CI/CD・レビュー」は、GitHub ActionsでのClaude Codeの実行と、サブPCで走るCodex PRレビューの使用量です。
+        build・test・lintなどAIを使わないCIは含みません。実行場所・エージェントは明細の各行に出ます。
+      </p>
+      <p>
+        Codex PRレビューは使用量の報告を始めた後の実行だけが記録されます（それより前の実行は使用量が残っておらず、復元できません）。
+        記録が無いことは、実行していないことを意味しません。反映に時間がかかる場合があり、料金はAPI換算の目安でサブスクの実請求額ではありません。
+      </p>
+      {(gaps.missing > 0 || gaps.unpriced > 0) && (
+        <p className="text-amber-700 dark:text-amber-400">
+          この期間には
+          {gaps.missing > 0 && ` 使用量の記録なし ${gaps.missing.toLocaleString()}件`}
+          {gaps.missing > 0 && gaps.unpriced > 0 && "・"}
+          {gaps.unpriced > 0 && ` 単価不明 ${gaps.unpriced.toLocaleString()}件`}
+          があり、その消費は合計の金額に含まれていません。
+        </p>
+      )}
+    </div>
+  );
+}
+
+/**
+ * 記録1件の金額（#3995）。**使用量を取れなかった試行・単価の分からない記録を$0と出さない。**
+ * どちらも合計には0として入っているので、ここでは金額の代わりに理由を出す。
+ */
+function EntryCost({ entry }: { entry: SessionUsageEntry }) {
+  const gap = sessionUsageGap(entry);
+  if (gap === "missing") {
+    return (
+      <span
+        className="text-[10px] font-semibold text-amber-700 dark:text-amber-400"
+        title="実行はありましたが、タイムアウト・失敗などで使用量を取得できませんでした。消費が0だったという意味ではありません"
+      >
+        使用量の記録なし
+      </span>
+    );
+  }
+  if (gap === "unpriced") {
+    return (
+      <span
+        className="text-[10px] font-semibold text-amber-700 dark:text-amber-400"
+        title="トークン数は記録されていますが、モデルの単価が分からないため金額を出せません（合計には含まれていません）"
+      >
+        単価不明
+      </span>
+    );
+  }
+  return <span className="font-semibold tabular-nums">{formatUsageUsd(entry.costUsd)}</span>;
 }
 
 /**
@@ -919,9 +993,7 @@ function SessionCards({
                 <SessionName issue={issue} entry={entry} onOpenIssue={onOpenIssue} hideIssueLabel={hideIssueLabel} />
               </div>
               <div className="shrink-0 text-right">
-                <span className="font-semibold tabular-nums">
-                  {formatUsageUsd(entry.costUsd)}
-                </span>
+                <EntryCost entry={entry} />
                 <PhaseSplitNote entry={entry} />
               </div>
             </div>
@@ -935,7 +1007,7 @@ function SessionCards({
               </div>
               <TokenBreakdown segments={segments} columns />
             </div>
-            <div
+            {sessionUsageGap(entry) === null && <div
               className="text-[10px] tabular-nums text-muted-foreground"
               title={
                 costSplit.approximate
@@ -946,7 +1018,7 @@ function SessionCards({
               入力 {costSplit.approximate ? "約" : ""}
               {formatUsageUsd(costSplit.inputCostUsd)}・出力 {costSplit.approximate ? "約" : ""}
               {formatUsageUsd(costSplit.outputCostUsd)}
-            </div>
+            </div>}
             <div className="text-[10px] tabular-nums text-muted-foreground">
               {formatDateTime(entry.startedAt)} 〜 {formatDateTime(entry.endedAt)}
             </div>
@@ -1767,6 +1839,8 @@ export function SessionUsagePanel({
   const avgContext =
     totals && totals.responses > 0 ? Math.round(totals.contextTokens / totals.responses) : 0;
   const planReview = period?.byKind.find((kind) => kind.key === "plan-review");
+  // 実行場所（Actions）ではなく処理種別で数える。サブPCのCodex PRレビューも入る（#3995）
+  const ciReview = period?.byKind.find((kind) => kind.key === "actions");
   // 日別は期間の全日を並べる（記録の無い日は0で埋める。#3038）。最後の日が「集計中の今日」
   const dailyDays = period ? fillUsageDays(period.byDay, period.since, period.until) : [];
   const todayKey = dailyDays.at(-1)?.date ?? "";
@@ -1875,7 +1949,7 @@ export function SessionUsagePanel({
               value={period.totals.sessions.toLocaleString()}
               /* 実装の本数は`byKind`から数えられない（フェーズごとの行へ割ってあり、
                  1本が最大5行に現れる）ため、集計側が数えた本数を使う（#2779） */
-              sub={`実装 ${period.implementationSessions}・計画レビュー ${planReview?.sessions ?? 0}・Actions ${period.totalsBySource["github-actions"].sessions}`}
+              sub={`実装 ${period.implementationSessions}・計画レビュー ${planReview?.sessions ?? 0}・CI/CD・レビュー ${ciReview?.sessions ?? 0}`}
             />
           </div>
 
@@ -1980,9 +2054,7 @@ export function SessionUsagePanel({
               </>
             )}
           </section>
-          <p className="text-[10px] text-muted-foreground">
-            GitHub Actionsの使用量はClaude Code実行後に報告されます。反映に時間がかかる場合があり、料金はAPI換算の目安です。
-          </p>
+          <UsageCoverageNote gaps={period.usageGaps} />
         </>
       )}
     </div>

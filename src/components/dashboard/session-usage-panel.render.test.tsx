@@ -362,6 +362,43 @@ describe("SessionUsagePanel", () => {
     expect(screen.getByText("Claude Code Review", { exact: false })).toBeTruthy();
     expect(screen.getByRole("link", { name: "Actions実行を開く" }).getAttribute("href")).toBe("https://github.com/example/run/1");
   });
+  it("サブPCのCodex PRレビューを実行場所・エージェント付きで出し、使用量の欠損を$0と出さない（#3995）", () => {
+    const codex = {
+      agent: "codex" as const,
+      source: "local" as const,
+      host: "subpc",
+      kind: "actions",
+      prNumber: 4010,
+      models: ["gpt-5.6-terra"],
+      runUrl: "https://github.com/guchi-apps/issue-deck/pull/4010#issuecomment-1",
+    };
+    renderPanel(
+      response([
+        entry({ ...codex, sessionId: "codex-a", workflowName: "Codex PRレビュー", costUsd: 1.5 }),
+        entry({
+          ...codex,
+          sessionId: "codex-b",
+          workflowName: "Codex PRレビュー（タイムアウト）",
+          responses: 0,
+          inputTokens: 0,
+          cacheCreateTokens: 0,
+          cacheReadTokens: 0,
+          outputTokens: 0,
+          contextTokens: 0,
+          costUsd: 0,
+          runUrl: null,
+        }),
+      ]),
+    );
+    openIssueGroup(screen.getByText("Issue・PR別").closest("section") as HTMLElement);
+    expect(screen.getAllByText("ローカル（subpc）", { exact: false }).length).toBe(2);
+    expect(screen.queryByText("GitHub Actions ・", { exact: false })).toBeNull();
+    expect(screen.getByText("Codex PRレビュー（タイムアウト）", { exact: false })).toBeTruthy();
+    expect(screen.getByText("使用量の記録なし")).toBeTruthy();
+    expect(screen.getByText(/使用量の記録なし 1件/)).toBeTruthy();
+    expect(screen.getByRole("link", { name: "レビュー結果を開く" }).getAttribute("href")).toContain("issuecomment-1");
+  });
+
   it("同じIssueのセッションは1つの行にまとめ、初期状態ではすべて閉じて押した行だけを開く（#2653・#3536）", () => {
     renderPanel(
       response([
