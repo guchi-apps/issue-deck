@@ -4192,6 +4192,31 @@ GitHubが自動生成した「マージ済みPRタイトルの箇条書き＋Ful
 **`softprops/action-gh-release`のバージョンアップ等でGitHubの自動生成フォーマットが変われば、
 この抽出は静かに効かなくなる**（例外にはならず、単に箇条書きが0件になる）。
 
+### GitHub Releaseが無い版は、タグから補って修正版へ紐付ける（#4003）
+
+`deploy.yml`の`release`ジョブは`needs: [tag, deploy]`なので、**タグを打った後に本番デプロイが
+落ちるとReleaseが作られず、Releaseだけを見ていた履歴からその版が説明ごと消える。** 修正版の
+Release本文は`前の版...修正版`の差分だけなので、元の版の機能はどこにも出なくなっていた
+（v8.34.0→v8.34.1で実際に起きた）。
+
+- **DBへ写さず、表示のたびにGitから補う**（[`lib/github/unreleased-versions.ts`](../src/lib/github/unreleased-versions.ts)、
+  判定は[`lib/release-recovery.ts`](../src/lib/release-recovery.ts)の純粋関数）。タグと
+  `.github/release-notes.md`はデプロイの成否と無関係に残るので、既存の版もそのまま補完される。
+  対象は「取得したReleaseのうち最も古い版より新しく、Releaseの無い`vX.Y.Z`タグ」（1リポジトリ5件まで）
+- 説明はタグ時点の`.github/release-notes.md`で、**見出しが版と一致したときだけ使う**（文面が生成され
+  なかった版ではファイルが前の版のまま残る。v8.34.1の見出しはv8.34.0だった）。PRの一覧は
+  `POST /releases/generate-notes`（Releaseを作らない）で、通常の版と同じ書式の本文を作らせる。
+  取れなかったものは**空欄にせず理由を出す**
+- 状態は、そのコミットに対する`deploy.yml`の最新の実行（`fetchDeployRunForSha`）から
+  失敗／実行中／結果不明／成功したがRelease未作成に分ける
+- **失敗版の変更は、それより後で最初にデプロイが成功した版が届けたとみなし、compare APIで
+  祖先関係を確かめた組だけを紐付ける**（版番号の隣接では決めない）。届けた版には失敗版それ自身の
+  説明とPRだけを持たせるので、失敗が続いても同じ項目は1回ずつしか載らない
+- **Releaseが無い版は動作確認の対象外**（`resolveReleaseCheckStatus`）。その変更の確認は届けた版の
+  カード（引き継いだ変更の行チェック）で行う。未確認件数（`unchecked-count`）はReleaseだけを
+  数えるので、件数は画面と食い違わない。Push通知（`release-push.ts`）は`releases/latest`しか
+  見ないため、補完で鳴ることはない
+
 ### 箇条書きの行から、PR詳細をその場に重ねて開く（#3128）
 
 行のタイトルを押すと、確認待ちのマージ待ちPR（#2149）と同じ`PullRequestDetailDialog`

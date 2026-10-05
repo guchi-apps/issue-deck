@@ -27,7 +27,14 @@ import {
   extractReleaseHighlights,
   groupReleaseHistoryByJstDate,
   resolveReleasePullRequestId,
+  type ReleaseHighlightLine,
 } from "@/lib/release-history";
+import {
+  carriedNoteLineKey,
+  type CarriedRelease,
+  type ReleaseNotesSnapshot,
+  type UnreleasedDeployState,
+} from "@/lib/release-recovery";
 import { getRepoColor } from "@/lib/repo-color";
 import { cn } from "@/lib/utils";
 
@@ -138,6 +145,17 @@ export function ReleaseHistoryPanel({
     [checkTargets],
   );
 
+  // 失敗版のカードは動作確認の対象外で、未確認だけの表示には出ない。相手のカードへ移るときは
+  // 全件表示へ切り替えてから、描き直しを待ってスクロールする（#4003）。
+  function jumpToRelease(target: { repoFullName: string; tagName: string }) {
+    setShowAll(true);
+    window.setTimeout(() => {
+      document
+        .getElementById(releaseCardId(target.repoFullName, target.tagName))
+        ?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 50);
+  }
+
   return (
     <div className={cn("flex flex-col gap-3", className)}>
       <header className="flex flex-wrap items-center gap-2">
@@ -146,7 +164,7 @@ export function ReleaseHistoryPanel({
           {!compact && (
             <p className="text-[11px] text-muted-foreground">
               {showAll
-                ? "全リポジトリのGitHub Releaseを新しい順に並べたタイムラインです"
+                ? "全リポジトリのリリース（デプロイに失敗した版を含む）を新しい順に並べたタイムラインです"
                 : "未確認のリリースを新しい順に並べています"}
             </p>
           )}
@@ -255,6 +273,7 @@ export function ReleaseHistoryPanel({
                     checkLineIndex={checkLineIndex}
                     onToggleCheckedLine={onToggleCheckedLine}
                     onOpenPullRequest={onOpenPullRequest}
+                    onJumpToRelease={jumpToRelease}
                   />
                 ))}
               </ol>
@@ -351,6 +370,7 @@ function ReleaseHistoryCard({
   checkLineIndex,
   onToggleCheckedLine,
   onOpenPullRequest,
+  onJumpToRelease,
 }: {
   entry: ReleaseHistoryItem;
   status: ReleaseCheckStatus;
@@ -367,6 +387,8 @@ function ReleaseHistoryCard({
     checked: boolean,
   ) => void;
   onOpenPullRequest?: (pullRequestId: string) => void;
+  /** 失敗版・修正版の相手のカードへ移る（#4003） */
+  onJumpToRelease: (target: { repoFullName: string; tagName: string }) => void;
 }) {
   const repoName = entry.repoFullName.split("/")[1] ?? entry.repoFullName;
   const { lines } = extractReleaseHighlights(entry.body, Number.POSITIVE_INFINITY);
@@ -374,9 +396,11 @@ function ReleaseHistoryCard({
 
   return (
     <li
+      id={releaseCardId(entry.repoFullName, entry.tagName)}
       className={cn(
-        "relative -ml-[18.5px] list-none rounded-md border bg-card p-2.5 pl-3",
+        "relative -ml-[18.5px] scroll-mt-4 list-none rounded-md border bg-card p-2.5 pl-3",
         status.kind === "unchecked" && "border-amber-500/50",
+        entry.deployState === "failed" && "border-red-500/40",
       )}
     >
       <span
@@ -404,6 +428,7 @@ function ReleaseHistoryCard({
             確認済み
           </span>
         )}
+        {entry.deployState !== undefined && <DeployStateBadge state={entry.deployState} />}
         {entry.iosDeliveredBuild !== undefined && (
           <span
             className="inline-flex items-center gap-1 rounded-full border border-emerald-500/50 bg-emerald-50 px-1.5 py-px text-[10.5px] font-bold text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300"
@@ -440,39 +465,48 @@ function ReleaseHistoryCard({
         )}
       </div>
 
-      {lines.length > 0 && (
-        <ul className="mt-1.5 flex flex-col gap-0.5">
-          {lines.map((line) => {
-            const lineTarget = { ...target, lineKey: line.key };
-            const lineChecked = resolveReleaseCheckLineStatus(lineTarget, checkLineIndex) !== null;
-            const pullRequestId = resolveReleasePullRequestId(line.key, entry.repoFullName);
-            return (
-              <li key={line.key} className="flex items-start gap-1.5 text-xs leading-relaxed text-foreground/90">
-                <Checkbox
-                  checked={lineChecked}
-                  aria-label={`「${line.text}」を確認済みにする（参考）`}
-                  onCheckedChange={(next) => onToggleCheckedLine(lineTarget, next === true)}
-                  className="mt-0.5 size-3.5 shrink-0"
-                />
-                {pullRequestId && onOpenPullRequest ? (
-                  <button
-                    type="button"
-                    onClick={() => onOpenPullRequest(pullRequestId)}
-                    title="Pull Requestの詳細を開く"
-                    className={cn(
-                      "cursor-pointer text-left underline-offset-2 hover:text-foreground hover:underline",
-                      lineChecked && "text-muted-foreground line-through",
-                    )}
-                  >
-                    {line.text}
-                  </button>
-                ) : (
-                  <span className={cn(lineChecked && "text-muted-foreground line-through")}>{line.text}</span>
-                )}
-              </li>
-            );
-          })}
-        </ul>
+      {entry.deployState !== undefined ? (
+        <>
+          <UnreleasedRelation entry={entry} onJumpToRelease={onJumpToRelease} />
+          <ReleaseNotesView notes={entry.releaseNotes} />
+          {entry.bodyUnavailableReason ? (
+            <p className="mt-1.5 text-[11px] text-muted-foreground">{entry.bodyUnavailableReason}</p>
+          ) : (
+            lines.length > 0 && (
+              <ReleaseLineList
+                heading="この版に含まれるPR"
+                lines={lines}
+                repoFullName={entry.repoFullName}
+                onOpenPullRequest={onOpenPullRequest}
+              />
+            )
+          )}
+        </>
+      ) : (
+        <>
+          {/* 失敗版を引き継いだ版では、この版で足した修正と引き継いだ変更を見分けられるようにする（#4003） */}
+          {(lines.length > 0 || entry.carriedOver) && (
+            <ReleaseLineList
+              heading={entry.carriedOver ? "復旧のために追加した修正" : undefined}
+              lines={lines}
+              repoFullName={entry.repoFullName}
+              onOpenPullRequest={onOpenPullRequest}
+              check={{ target, index: checkLineIndex, onToggle: onToggleCheckedLine }}
+            />
+          )}
+          {entry.carriedOver?.map((carried) => (
+            <CarriedReleaseSection
+              key={carried.tagName}
+              carried={carried}
+              repoFullName={entry.repoFullName}
+              target={target}
+              checkLineIndex={checkLineIndex}
+              onToggleCheckedLine={onToggleCheckedLine}
+              onOpenPullRequest={onOpenPullRequest}
+              onJumpToRelease={onJumpToRelease}
+            />
+          ))}
+        </>
       )}
 
       <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1">
@@ -483,7 +517,7 @@ function ReleaseHistoryCard({
           className="inline-flex items-center gap-1 text-[11px] font-medium text-muted-foreground hover:text-foreground"
         >
           <ExternalLink className="size-3" aria-hidden />
-          GitHubで見る
+          {entry.deployState !== undefined ? "タグをGitHubで見る" : "GitHubで見る"}
         </a>
 
         {status.kind === "unchecked" && (
@@ -517,5 +551,270 @@ function ReleaseHistoryCard({
         )}
       </div>
     </li>
+  );
+}
+
+/** カードのDOM id。失敗版と修正版の間を行き来するために使う（#4003） */
+function releaseCardId(repoFullName: string, tagName: string): string {
+  return `release-${repoFullName.replace(/[^A-Za-z0-9_-]/g, "-")}-${tagName.replace(/[^A-Za-z0-9_-]/g, "-")}`;
+}
+
+const DEPLOY_STATE_LABEL: Record<UnreleasedDeployState, { label: string; title: string; tone: "red" | "muted" }> = {
+  failed: {
+    label: "デプロイ失敗",
+    title: "この版の本番デプロイは失敗し、GitHub Releaseは作られていません",
+    tone: "red",
+  },
+  in_progress: { label: "デプロイ中", title: "この版の本番デプロイを実行中です", tone: "muted" },
+  unknown: {
+    label: "デプロイ結果不明",
+    title: "GitHub Releaseが無く、本番デプロイの結果も確認できません",
+    tone: "muted",
+  },
+  succeeded_without_release: {
+    label: "Release未作成",
+    title: "本番デプロイは成功しましたが、GitHub Releaseが作られていません",
+    tone: "muted",
+  },
+};
+
+function DeployStateBadge({ state }: { state: UnreleasedDeployState }) {
+  const { label, title, tone } = DEPLOY_STATE_LABEL[state];
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center gap-1 rounded-full border px-1.5 py-px text-[10.5px] font-bold",
+        tone === "red"
+          ? "border-red-500/50 bg-red-50 text-red-700 dark:bg-red-950/40 dark:text-red-300"
+          : "border-dashed text-muted-foreground",
+      )}
+      title={title}
+    >
+      {tone === "red" && <CircleAlert className="size-2.5" aria-hidden />}
+      {label}
+    </span>
+  );
+}
+
+function JumpButton({ tagName, onClick }: { tagName: string; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="font-mono font-semibold text-foreground underline underline-offset-2"
+    >
+      {tagName}
+    </button>
+  );
+}
+
+/** Releaseが無い版が、本番へ出たのかどうか・どの版で出たのか（#4003） */
+function UnreleasedRelation({
+  entry,
+  onJumpToRelease,
+}: {
+  entry: ReleaseHistoryItem;
+  onJumpToRelease: (target: { repoFullName: string; tagName: string }) => void;
+}) {
+  const recoveredBy = entry.recoveredBy;
+  let message: React.ReactNode;
+  if (entry.deployState === "failed") {
+    message = recoveredBy ? (
+      <>
+        この版の変更は{" "}
+        <JumpButton
+          tagName={recoveredBy}
+          onClick={() => onJumpToRelease({ repoFullName: entry.repoFullName, tagName: recoveredBy })}
+        />{" "}
+        で本番へ反映されました。
+      </>
+    ) : (
+      "この版の変更は、まだ本番へ反映されていません。"
+    );
+  } else if (entry.deployState === "in_progress") {
+    message = "本番デプロイを実行中です。終わるとGitHub Releaseが作られます。";
+  } else if (entry.deployState === "unknown") {
+    message = "GitHub Releaseが無く、本番デプロイの結果を確認できません。";
+  } else {
+    message = "本番デプロイは成功しましたが、GitHub Releaseの作成に失敗しています。";
+  }
+  return <p className="mt-1.5 text-[11px] leading-relaxed text-muted-foreground">{message}</p>;
+}
+
+/** 版の説明（`.github/release-notes.md`）。取れなかったときは理由を出す（#4003） */
+function ReleaseNotesView({
+  notes,
+  check,
+}: {
+  notes: ReleaseNotesSnapshot | undefined;
+  check?: {
+    target: { repoFullName: string; tagName: string };
+    noteTagName: string;
+    index: ReleaseCheckLineIndex;
+    onToggle: (target: { repoFullName: string; tagName: string; lineKey: string }, checked: boolean) => void;
+  };
+}) {
+  if (!notes || notes.status === "unavailable") {
+    return (
+      <p className="mt-1.5 rounded border border-dashed px-2 py-1 text-[11px] text-muted-foreground">
+        説明を取得できませんでした{notes ? `（${notes.reason}）` : ""}
+      </p>
+    );
+  }
+  return (
+    <div className="mt-1.5 flex flex-col gap-1">
+      <ul className="flex flex-col gap-0.5">
+        {notes.changes.map((change) => {
+          if (!check) {
+            return (
+              <li key={change} className="text-xs leading-relaxed text-foreground/90">
+                ・{change}
+              </li>
+            );
+          }
+          const lineTarget = { ...check.target, lineKey: carriedNoteLineKey(check.noteTagName, change) };
+          const lineChecked = resolveReleaseCheckLineStatus(lineTarget, check.index) !== null;
+          return (
+            <li key={change} className="flex items-start gap-1.5 text-xs leading-relaxed text-foreground/90">
+              <Checkbox
+                checked={lineChecked}
+                aria-label={`「${change}」を確認済みにする（参考）`}
+                onCheckedChange={(next) => check.onToggle(lineTarget, next === true)}
+                className="mt-0.5 size-3.5 shrink-0"
+              />
+              <span className={cn(lineChecked && "text-muted-foreground line-through")}>{change}</span>
+            </li>
+          );
+        })}
+      </ul>
+      {notes.usage.length > 0 && (
+        <div className="rounded bg-muted/50 px-2 py-1">
+          <p className="text-[10.5px] font-semibold text-muted-foreground">使い方</p>
+          <ul className="flex flex-col">
+            {notes.usage.map((step) => (
+              <li key={step} className="text-[11px] leading-relaxed text-foreground/80">
+                {step}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** PRタイトルの箇条書き。`check`を渡したときだけ行チェック（#2982）を付ける */
+function ReleaseLineList({
+  heading,
+  lines,
+  repoFullName,
+  onOpenPullRequest,
+  check,
+}: {
+  heading?: string;
+  lines: ReleaseHighlightLine[];
+  repoFullName: string;
+  onOpenPullRequest?: (pullRequestId: string) => void;
+  check?: {
+    target: { repoFullName: string; tagName: string };
+    index: ReleaseCheckLineIndex;
+    onToggle: (target: { repoFullName: string; tagName: string; lineKey: string }, checked: boolean) => void;
+  };
+}) {
+  return (
+    <div className="mt-1.5">
+      {heading && <p className="mb-0.5 text-[10.5px] font-semibold text-muted-foreground">{heading}</p>}
+      {lines.length === 0 ? (
+        <p className="text-[11px] text-muted-foreground">PRはありません</p>
+      ) : (
+        <ul className="flex flex-col gap-0.5">
+          {lines.map((line) => {
+            const lineTarget = check ? { ...check.target, lineKey: line.key } : null;
+            const lineChecked =
+              check && lineTarget ? resolveReleaseCheckLineStatus(lineTarget, check.index) !== null : false;
+            const pullRequestId = resolveReleasePullRequestId(line.key, repoFullName);
+            return (
+              <li key={line.key} className="flex items-start gap-1.5 text-xs leading-relaxed text-foreground/90">
+                {check && lineTarget ? (
+                  <Checkbox
+                    checked={lineChecked}
+                    aria-label={`「${line.text}」を確認済みにする（参考）`}
+                    onCheckedChange={(next) => check.onToggle(lineTarget, next === true)}
+                    className="mt-0.5 size-3.5 shrink-0"
+                  />
+                ) : (
+                  <span aria-hidden className="shrink-0">・</span>
+                )}
+                {pullRequestId && onOpenPullRequest ? (
+                  <button
+                    type="button"
+                    onClick={() => onOpenPullRequest(pullRequestId)}
+                    title="Pull Requestの詳細を開く"
+                    className={cn(
+                      "cursor-pointer text-left underline-offset-2 hover:text-foreground hover:underline",
+                      lineChecked && "text-muted-foreground line-through",
+                    )}
+                  >
+                    {line.text}
+                  </button>
+                ) : (
+                  <span className={cn(lineChecked && "text-muted-foreground line-through")}>{line.text}</span>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+/** 修正版が前の失敗版から引き継いだ変更（#4003）。この版で本番へ出たので、行チェックはこの版に付ける */
+function CarriedReleaseSection({
+  carried,
+  repoFullName,
+  target,
+  checkLineIndex,
+  onToggleCheckedLine,
+  onOpenPullRequest,
+  onJumpToRelease,
+}: {
+  carried: CarriedRelease;
+  repoFullName: string;
+  target: { repoFullName: string; tagName: string };
+  checkLineIndex: ReleaseCheckLineIndex;
+  onToggleCheckedLine: (
+    target: { repoFullName: string; tagName: string; lineKey: string },
+    checked: boolean,
+  ) => void;
+  onOpenPullRequest?: (pullRequestId: string) => void;
+  onJumpToRelease: (target: { repoFullName: string; tagName: string }) => void;
+}) {
+  const { lines } = extractReleaseHighlights(carried.body, Number.POSITIVE_INFINITY);
+  return (
+    <section className="mt-2 rounded border-l-2 border-red-500/40 pl-2">
+      <p className="flex flex-wrap items-center gap-1.5 text-[10.5px] font-semibold text-muted-foreground">
+        <JumpButton tagName={carried.tagName} onClick={() => onJumpToRelease({ repoFullName, tagName: carried.tagName })} />
+        から引き継いだ変更
+        <DeployStateBadge state={carried.deployState} />
+      </p>
+      <ReleaseNotesView
+        notes={carried.releaseNotes}
+        check={{ target, noteTagName: carried.tagName, index: checkLineIndex, onToggle: onToggleCheckedLine }}
+      />
+      {carried.body === null ? (
+        <p className="mt-1.5 text-[11px] text-muted-foreground">
+          {carried.tagName}に含まれるPRの一覧を取得できませんでした
+        </p>
+      ) : (
+        <ReleaseLineList
+          heading={`${carried.tagName}に含まれるPR`}
+          lines={lines}
+          repoFullName={repoFullName}
+          onOpenPullRequest={onOpenPullRequest}
+          check={{ target, index: checkLineIndex, onToggle: onToggleCheckedLine }}
+        />
+      )}
+    </section>
   );
 }

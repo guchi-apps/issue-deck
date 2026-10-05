@@ -7,6 +7,7 @@ import { getInstallationToken } from "@/lib/github/app-auth";
 import { fetchWorkflowRunJobs } from "@/lib/github/actions-api";
 import { fetchReleasesBackTo, fetchTagRefs, type ReleaseHistoryItem } from "@/lib/github/release-api";
 import { GITHUB_API, githubFetch } from "@/lib/github/request";
+import { appendUnreleasedVersions } from "@/lib/github/unreleased-versions";
 import {
   IOS_TESTFLIGHT_TAG_PREFIX,
   IOS_TESTFLIGHT_WORKFLOW_FILE,
@@ -112,8 +113,17 @@ async function handleGET() {
           sinceMs,
           hasReachedReleaseCheckSince,
         );
+        // GitHub Releaseが無い版（本番デプロイの失敗など）をタグから補い、修正版と紐付ける（#4003）
+        const withUnreleased = await appendUnreleasedVersions(
+          repository.ownerLogin,
+          repository.name,
+          token,
+          releases,
+        );
         // TestFlight配布対象のリポジトリだけ、配布済みのビルド番号を付ける（#3800）
-        if (getWebviewIosRepository(repository.fullName) === null || releases.length === 0) return releases;
+        if (getWebviewIosRepository(repository.fullName) === null || releases.length === 0) {
+          return withUnreleased;
+        }
         const [versionRefs, deliveredRefs, iosRuns] = await Promise.all([
           fetchTagRefs(repository.ownerLogin, repository.name, token, "v"),
           fetchTagRefs(repository.ownerLogin, repository.name, token, IOS_TESTFLIGHT_TAG_PREFIX),
@@ -149,7 +159,7 @@ async function handleGET() {
           }),
         );
         const failures = iosFailuresForReleases(releases.map((release) => release.tagName), versionRefs, failureStages);
-        return releases.map((release) => {
+        return withUnreleased.map((release) => {
           const build = delivered.get(release.tagName);
           // 成功を示す配布済みタグがある版は、過去の失敗runより成功を優先する。
           if (build !== undefined) return { ...release, iosDeliveredBuild: build };
