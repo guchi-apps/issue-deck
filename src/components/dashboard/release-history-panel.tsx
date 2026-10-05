@@ -447,6 +447,15 @@ function ReleaseHistoryCard({
             {entry.iosFailureStage ? `iOS配布に失敗（${entry.iosFailureStage}）` : "iOS配布に失敗"}
           </span>
         )}
+        {entry.iosNotDistributed === true && (
+          <span
+            className="inline-flex items-center gap-1 rounded-full border border-dashed px-1.5 py-px text-[10.5px] text-muted-foreground"
+            title="TestFlightへの配布済みタグが無い版です（iOS更新が不要と判定された版を含みます）"
+          >
+            <Smartphone className="size-2.5" aria-hidden />
+            iOS自動配布なし
+          </span>
+        )}
         {status.kind === "out_of_scope" && outOfScopeReason === "not_targeted" && (
           <span
             className="inline-flex items-center rounded-full border border-dashed px-1.5 py-px text-[10.5px] text-muted-foreground"
