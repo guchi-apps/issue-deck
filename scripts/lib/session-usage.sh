@@ -647,12 +647,9 @@ PY
 # 読めない行・知らない形は黙って捨てる側へ倒す（Claude側と同じ）。
 codex_session_usage_aggregate() {
   local script
-  script="$(cat <<'PY'
+  script="$_CODEX_USAGE_PRICING_PY"$'\n'"$(cat <<'PY'
 import json, os, re, sys
 
-PRICES={"gpt-6-astra":(10,1,50),"gpt-6-sol":(2,.2,10),"gpt-6-luna":(.1,.01,.5),"gpt-5.6-sol":(4,.4,20),"gpt-5.6":(4,.4,20),"gpt-5.6-terra":(2,.2,12),"gpt-5.6-luna":(.2,.02,1.2),"gpt-5.5":(5,.5,30),"gpt-5.4":(2.5,.25,15)}
-# キャッシュ書き込みの倍率。CodexはTTLの内訳を持たないので、Claude側の5分TTLと同じ1.25倍で数える。
-CACHE_WRITE_5M=1.25
 WORKTREE=re.compile(r"/(?P<repo>[^/]+)-worktrees/issue-(?P<issue>[1-9][0-9]*)$")
 LABELS={"implementation":"実装","plan-review":"計画レビュー","code-review":"コードレビュー","question":"横断質問","other":"その他"}
 
@@ -701,11 +698,6 @@ def classify(cwd):
     return "other", os.path.basename(cwd or "") or None, None
 
 
-def price_for(model):
-    matches = [(key, value) for key, value in PRICES.items() if model == key or model.startswith(key + "-")]
-    return max(matches, key=lambda pair: len(pair[0]))[1] if matches else None
-
-
 def commands(source):
     """`exec`のソースに含まれるシェルコマンドを全部出す。解けない断片は黙って捨てる。"""
     for matched in CMD_IN_SOURCE.finditer(source):
@@ -715,15 +707,10 @@ def commands(source):
             continue
 
 
-def cost_of(price, uncached, cached, created, output):
-    """(入力側, 出力側)。単価が分からないモデルは両方0。"""
-    if not price:
-        return 0.0, 0.0
-    return (
-        (uncached * price[0] + cached * price[1] + created * price[0] * CACHE_WRITE_5M) / 1_000_000,
-        output * price[2] / 1_000_000,
-    )
-
+# Codex PRレビュー（`scripts/start-codex-pr-review.sh`）の作業場（#3995）。**ここの転記は数えない。**
+# 通常は`--ephemeral`で転記が残らないが、残った場合もレビュー側が`codex exec --json`のusageを
+# 試行ごとに直接報告している（`/api/dispatch/review-usage`）ので、こちらでも数えると二重になる。
+CODEX_PR_REVIEW_DIR = "/issue-deck-codex-pr-reviews/"
 
 sessions = []
 totals = {"responses": 0, "input": 0, "cacheCreate5m": 0, "cacheCreate1h": 0, "cacheRead": 0,
@@ -851,6 +838,8 @@ for raw_path in sys.stdin:
                 last_at = stamp if last_at is None or stamp > last_at else last_at
     if not latest or not first_at or not last_at:
         continue
+    if CODEX_PR_REVIEW_DIR in (cwd or ""):
+        continue
 
     if price_for(model) is None and model:
         unknown.add(model)
@@ -940,6 +929,100 @@ print()
 PY
 )"
   _session_usage_run_python "$script"
+}
+
+# Codexの単価表と金額の計算（#3995で`codex_session_usage_aggregate`から切り出した）。
+# 転記の集計と`codex exec --json`の集計（`codex_exec_usage_summary`）で**同じ表を使う**ため、
+# Pythonの断片として持ち、各スクリプトの先頭へ連結する。単価は1M tokensあたりのUSDで
+# (入力, キャッシュ読み出し, 出力)。
+_CODEX_USAGE_PRICING_PY="$(cat <<'PY'
+PRICES={"gpt-6-astra":(10,1,50),"gpt-6-sol":(2,.2,10),"gpt-6-luna":(.1,.01,.5),"gpt-5.6-sol":(4,.4,20),"gpt-5.6":(4,.4,20),"gpt-5.6-terra":(2,.2,12),"gpt-5.6-luna":(.2,.02,1.2),"gpt-5.5":(5,.5,30),"gpt-5.4":(2.5,.25,15)}
+# キャッシュ書き込みの倍率。CodexはTTLの内訳を持たないので、Claude側の5分TTLと同じ1.25倍で数える。
+CACHE_WRITE_5M=1.25
+
+
+def price_for(model):
+    matches = [(key, value) for key, value in PRICES.items() if model == key or model.startswith(key + "-")]
+    return max(matches, key=lambda pair: len(pair[0]))[1] if matches else None
+
+
+def cost_of(price, uncached, cached, created, output):
+    """(入力側, 出力側)。単価が分からないモデルは両方0。"""
+    if not price:
+        return 0.0, 0.0
+    return (
+        (uncached * price[0] + cached * price[1] + created * price[0] * CACHE_WRITE_5M) / 1_000_000,
+        output * price[2] / 1_000_000,
+    )
+PY
+)"
+
+# `codex exec --json`のイベント（stdin）から、使用量の数値だけを1行のJSONへ畳む（#3995）。
+#
+#   codex_exec_usage_summary [モデルID]
+#
+# `--ephemeral`で走らせると転記が残らないため、`turn.completed`の`usage`だけが計測の手がかり。
+# **読むのは`thread.started`のIDと`turn.completed`の`usage`だけで、会話の本文は出力しない。**
+# モデルはイベントに含まれないので呼び出し側が渡す（分からなければ空。金額はnull＝単価不明）。
+#
+# 出力: `{"threadId": "...", "usage": {...}}`。`turn.completed`が1つも無ければ（タイムアウト・
+# 起動失敗）`usage`はnullで、**0にはしない**（画面は「使用量の記録なし」と出す）。
+codex_exec_usage_summary() {
+  local script
+  script="$_CODEX_USAGE_PRICING_PY"$'\n'"$(cat <<'PY'
+import json, sys
+
+model = sys.argv[1] if len(sys.argv) > 1 else ""
+thread_id = None
+turns = 0
+uncached = cached = created = output = 0
+
+
+def number(value):
+    try:
+        return max(0, int(value))
+    except (TypeError, ValueError):
+        return 0
+
+
+for line in sys.stdin:
+    if '"thread.started"' not in line and '"turn.completed"' not in line:
+        continue
+    try:
+        event = json.loads(line)
+    except ValueError:
+        continue
+    if not isinstance(event, dict):
+        continue
+    if event.get("type") == "thread.started" and isinstance(event.get("thread_id"), str):
+        thread_id = event["thread_id"][:64]
+    if event.get("type") == "turn.completed" and isinstance(event.get("usage"), dict):
+        usage = event["usage"]
+        turns += 1
+        total_input = number(usage.get("input_tokens"))
+        turn_cached = number(usage.get("cached_input_tokens"))
+        turn_created = number(usage.get("cache_write_input_tokens"))
+        # `input_tokens`はキャッシュ分を含む合計（転記の`total_token_usage`と同じ）。
+        uncached += max(0, total_input - turn_cached - turn_created)
+        cached += turn_cached
+        created += turn_created
+        output += number(usage.get("output_tokens"))
+
+summary = {"threadId": thread_id, "usage": None}
+if turns:
+    price = price_for(model) if model else None
+    in_cost, out_cost = cost_of(price, uncached, cached, created, output)
+    summary["usage"] = {
+        "responses": turns, "inputTokens": uncached, "cacheCreateTokens": created,
+        "cacheReadTokens": cached, "outputTokens": output,
+        "costUsd": round(in_cost + out_cost, 6) if price else None,
+        "inputCostUsd": round(in_cost, 6) if price else None,
+        "outputCostUsd": round(out_cost, 6) if price else None,
+    }
+print(json.dumps(summary, separators=(",", ":")))
+PY
+)"
+  _session_usage_run_python "$script" "${1:-}"
 }
 
 # 正規化JSON（stdin）を人が読む表にする。

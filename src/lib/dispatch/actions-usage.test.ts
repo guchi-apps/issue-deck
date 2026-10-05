@@ -53,6 +53,15 @@ describe("GitHub ActionsのAI使用量報告", () => {
     expect(parseActionsUsageReport(report({ prNumber: "2648" }))).toBeNull();
   });
 
+  it("agentを送ってこない既存の報告はClaudeとして扱う（#3995）", () => {
+    expect(parseActionsUsageReport(report())).toMatchObject({ agent: "claude" });
+  });
+
+  it("Codexを明示した報告はCodexのまま受け取り、知らないagentは破棄する（#3995）", () => {
+    expect(parseActionsUsageReport(report({ agent: "codex" }))).toMatchObject({ agent: "codex" });
+    expect(parseActionsUsageReport(report({ agent: "gemini" }))).toBeNull();
+  });
+
   it("1回の報告上限を超えた本文は受け付けない", () => {
     const reports = Array.from({ length: 21 }, (_unused, index) => report({ runId: String(index) }));
     expect(parseActionsUsagePayload({ reports })).toBeNull();

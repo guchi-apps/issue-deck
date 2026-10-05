@@ -558,7 +558,50 @@ describe("session_usage_live_transcripts", () => {
   });
 });
 
+describe("codex_exec_usage_summary（#3995）", () => {
+  const events = [
+    { type: "thread.started", thread_id: "01a10ba3-e01b-7090-885f-6318ef55f9b8" },
+    { type: "turn.started" },
+    { type: "item.completed", item: { id: "item_0", type: "agent_message", text: "秘密の本文" } },
+    {
+      type: "turn.completed",
+      usage: { input_tokens: 14203, cached_input_tokens: 12288, cache_write_input_tokens: 0, output_tokens: 5 },
+    },
+  ].map((line) => JSON.stringify(line)).join("\n") + "\n";
+
+  it("turn.completedのusageだけを畳み、本文は出さない", () => {
+    const out = callShell("codex_exec_usage_summary", events, "gpt-6-sol");
+    expect(out).not.toContain("秘密の本文");
+    const summary = JSON.parse(out);
+    expect(summary.threadId).toBe("01a10ba3-e01b-7090-885f-6318ef55f9b8");
+    // input_tokensはキャッシュ分を含む合計なので、非キャッシュは差し引いた値
+    expect(summary.usage).toMatchObject({ responses: 1, inputTokens: 1915, cacheReadTokens: 12288, outputTokens: 5 });
+    expect(summary.usage.costUsd).toBeCloseTo((1915 * 2 + 12288 * 0.2 + 5 * 10) / 1_000_000, 6);
+  });
+
+  it("モデルが分からなければ金額はnull（0にしない）", () => {
+    const summary = JSON.parse(callShell("codex_exec_usage_summary", events));
+    expect(summary.usage).toMatchObject({ outputTokens: 5, costUsd: null, inputCostUsd: null });
+  });
+
+  it("turn.completedが無い（タイムアウト・起動失敗）ならusageはnull", () => {
+    const summary = JSON.parse(
+      callShell("codex_exec_usage_summary", JSON.stringify({ type: "thread.started", thread_id: "t1" }) + "\n", "gpt-6-sol"),
+    );
+    expect(summary).toEqual({ threadId: "t1", usage: null });
+  });
+});
+
 describe("codex_session_usage_aggregate", () => {
+  it("Codex PRレビューの作業場の転記は数えない（レビュー側が直接報告するため。#3995）", () => {
+    const file = writeTranscript("codex-pr-review.jsonl", [
+      codexMeta("2026-10-05T01:00:00.000Z", "/tmp/issue-deck-codex-pr-reviews/issue-deck-4010-0123456789ab"),
+      codexTurn("2026-10-05T01:00:01.000Z"),
+      codexTokens("2026-10-05T01:01:00.000Z", { input: 1_000, cached: 800, output: 100 }),
+    ]);
+    expect(aggregateCodex([file]).sessions).toEqual([]);
+  });
+
   it("計画レビューは起動プロンプトのIssue番号へ使用量を紐付ける", () => {
     const cwd = "/home/u/apps/issue-deck-worktrees/.plan-reviews/_refs/guchi-apps-issue-deck";
     const file = writeTranscript("codex-plan-review.jsonl", [

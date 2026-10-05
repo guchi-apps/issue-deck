@@ -391,6 +391,10 @@ Claude Codeのセッションはトークンの大半がキャッシュ読み出
 - **種別別のカードは金額の棒だけで、細い帯（トークン）を出さない**（#3064）。GitHub Actionsの行は
   中身がCI（自動レビュー等）なので「CI/CD・レビュー」と呼ぶ（Issue・PR別の明細の実行経路表記は
   「GitHub Actions」のまま）
+- **「CI/CD・レビュー」（種別`actions`）は実行場所ではなく処理の種別**（#3995）。GitHub Actionsの
+  Claude実行に加えて、サブPCで走るCodex PRレビューも入る。エージェント（`agent`）・実行場所
+  （`source`＋`host`）・処理種別（`kind`）は別の列で、明細には「GitHub Actions」「ローカル（subpc）」の
+  ように実行場所を出す。下の「Codex PRレビューの使用量（#3995）」を参照
 
 - **境界は転記のツール呼び出しから推定した近似**で、実測ではない。カードの補足にもそう書く
 - **auto modeではファイル編集がBash経由になる**（`sed -i`・リダイレクト・ヒアドキュメント）。
@@ -474,3 +478,48 @@ jq -r 'select(.type=="assistant") | (.message.content // []) | if type=="array" 
        | select(.type=="tool_use" and (.name == "Edit" or .name == "Write")) | .input.file_path' \
    "$(scripts/inspect-session.sh 1473 --raw)" | tail -5
 ```
+
+## Codex PRレビューの使用量（#3995）
+
+サブPCの`scripts/start-codex-pr-review.sh`が走らせるCodex PRレビューは、`codex exec --ephemeral`で
+動くため`~/.codex/sessions`に転記が残らず、pollerの転記収集（`/api/dispatch/session-usage`）には
+載らない。代わりにレビュー自身が、実行1回（試行）ごとに使用量を報告する。
+
+| 段 | どこで | 何をするか |
+| --- | --- | --- |
+| 計測 | `start-codex-pr-review.sh` | `codex exec --json`のイベントを一時ファイルへ出し、`codex_exec_usage_summary`（`scripts/lib/session-usage.sh`）で`thread.started`のIDと`turn.completed`の`usage`だけを取り出して、イベントのファイルは消す（会話の本文は送らない・残さない） |
+| 送信待ち | `scripts/lib/review-usage.sh`の`review_usage_record` | 報告1件を`~/.local/state/issue-deck/review-usage-outbox/`へJSONで書く |
+| 送信 | 同`review_usage_flush` | `/api/dispatch/review-usage`（`DISPATCH_SECRET`）へ送り、`200`を受けたものだけ消す。レビュー直後と、`--sweep`の巡回のたびに呼ぶ |
+| 保存 | `src/lib/dispatch/review-usage.ts` | `SessionUsage`へ`kind: "actions"`・`source: "local"`・`host`・`agent: "codex"`・`prNumber`・`issueNumber`（ブランチ名`issue-<番号>`から解決）・`workflowName`（`Codex PRレビュー`、失敗時は`（失敗）`・`（タイムアウト）`付き）・`runUrl`（投稿したPRコメントのURL）で保存する |
+
+- **一意キーは試行ごと**（`codex-pr-review:<owner/repo>#<PR>@<SHA12>:<thread_id>`）。同じ報告の再送は
+  同じ行へ上書きされ、再レビューで実際に追加消費した別の試行は別の行として残る
+- **使用量を取れなかった試行も残す。** タイムアウト・起動失敗で`turn.completed`が出なかった試行は
+  `usage: null`で送り、応答0・トークン0の行になる。画面は金額の代わりに「使用量の記録なし」と出し、
+  補足に件数を出す（合計には0として入るため）。**スレッドが立つ前に落ちた試行（`thread.started`も
+  `turn.completed`も無い）は、モデルを呼んでおらず消費が無いので記録しない**
+- **単価が分からないものは金額を出さない。** モデルはPRレビュー設定（`workflowCodexModel`）で決め、
+  `auto`のときは`~/.codex/config.toml`の`model`を読む。どちらでも分からなければ`models`は空・金額はnullで
+  送り、画面は「単価不明」と出す。単価表は転記の集計と共通（`_CODEX_USAGE_PRICING_PY`）
+- **専用の受け口に分けたのは、サブPC（`develop`）と本番（`main`）の更新時差のため。** 既存の
+  `/session-usage`へ足すと、古い本番は新しい項目を黙って捨てて`200`を返す。新しいパスなら古い本番は
+  `404`を返し、報告は送信待ちに残ってリリース後に送り直される（30日を過ぎたものは捨てる）
+- **計測・報告の失敗でレビューを止めない。** 報告はPRコメントの投稿より後に回し、どの関数も失敗を返さない
+- **転記集計との二重計上を防ぐ。** 作業場（`/issue-deck-codex-pr-reviews/`）の転記は、`--ephemeral`を
+  外して残った場合でも`codex_session_usage_aggregate`が数えない
+- **GitHub Actionsからの報告（`/api/dispatch/actions-usage`）も`agent`を持てる。** 送ってこない報告は
+  Claude（報告元の`summarize-claude-usage.sh`はclaude-code-actionの実行結果だけを読むため）
+
+### 既存データと復元できない範囲
+
+- これまでの`kind: "actions"`の行はすべてGitHub Actionsの`claude-code-action`の実行で、Claudeとして
+  正しい。書き換えはしない
+- **この報告を入れる前のCodex PRレビューは、使用量の内訳が残っていない。** `--ephemeral`で転記が無く、
+  実行ログ（`<作業場>/<repo>-<PR>-<SHA12>.log`）は`--json`無しの表示用で、`tokens used`の合計しか持たない。
+  入力・キャッシュ・出力の比で単価が桁で変わるため、**合計から金額を推測しない。**
+  ログが残っている実行だけは、`review_usage_backfill_logs`が見出しの`model:`・`session id:`と`.out`の判定から
+  「使用量の記録なし」の試行として補完する（`--sweep`の巡回で1回ずつ。`.usage-backfilled`の印で読み直さない）。
+  ログは`/tmp`にあり再起動で消えるため、それより前の実行は記録として残らない。
+  画面の補足でも「記録が無いことは実行していないことを意味しない」と断る
+- AIを使わないCI（build・test・lint）は報告元が無く、使用量に入らない
+
