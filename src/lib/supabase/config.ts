@@ -45,16 +45,3 @@ export function isSupabaseManagementApiConfigured(): boolean {
     isUsableValue(process.env.SUPABASE_MANAGEMENT_API_TOKEN)
   );
 }
-
-/**
- * ログインを許可するメールアドレスが1件以上設定されているか（サーバー専用）。
- *
- * ここが空だと、Supabaseの設定が正しくても`/auth/callback`の`isEmailAllowed()`が必ず偽になり、
- * `?error=not_allowed`でログイン画面へ戻ってくる。**Supabaseの値だけ直しても通らない**ため、
- * 詰まる場所を先に見せる目的で分けている。
- */
-export function isAllowedEmailsConfigured(): boolean {
-  return (process.env.ALLOWED_EMAILS ?? "")
-    .split(",")
-    .some((email) => email.trim().length > 0);
-}
