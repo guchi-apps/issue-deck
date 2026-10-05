@@ -13,6 +13,8 @@ import {
   createDeployRecoveryPullRequest,
   DeployRecoveryConflictError,
   fetchDeployRecoveryCandidates,
+  isDependencyFile,
+  nextPatchVersion,
 } from "@/lib/github/deploy-recovery-api";
 
 function response(body: unknown, status = 200) {
@@ -58,39 +60,67 @@ describe("deploy recovery GitHub API（#3913）", () => {
     });
   });
 
-  it("選択PRをmain起点のブランチへ順に取り込み、復旧用PRを作る", async () => {
-    githubFetch.mockReset().mockImplementation(async (url: string, _token: string, options?: { method?: string; body?: unknown }) => {
+  function gitFixture(overrides: { headBlob?: string } = {}) {
+    const trees: Record<string, Array<{ path: string; mode: string; type: string; sha: string }>> = {
+      "tree-main": [{ path: "a.ts", mode: "100644", type: "blob", sha: overrides.headBlob ?? "a0" }, { path: "package.json", mode: "100644", type: "blob", sha: "pkg0" }],
+      "tree-base": [{ path: "a.ts", mode: "100644", type: "blob", sha: "a0" }, { path: "package.json", mode: "100644", type: "blob", sha: "pkg0" }],
+      "tree-merged": [{ path: "a.ts", mode: "100644", type: "blob", sha: "a1" }, { path: "package.json", mode: "100644", type: "blob", sha: "pkg0" }],
+    };
+    const created: string[] = [];
+    return async (url: string, _token: string, options?: { method?: string; body?: unknown }) => {
       const candidates = candidatesResponses(url);
       if (candidates) return candidates;
       if (url.includes("state=open")) return response([]);
       if (url.endsWith("/git/ref/heads/main")) return response({ object: { sha: "main-sha" } });
       if (url.endsWith("/git/refs")) return response({}, 201);
-      if (url.endsWith("/merges")) return response({}, 201);
+      if (url.endsWith("/git/commits/main-sha")) return response({ sha: "main-sha", tree: { sha: "tree-main" } });
+      if (url.endsWith("/git/commits/base-sha")) return response({ sha: "base-sha", tree: { sha: "tree-base" } });
+      if (url.includes("/git/commits/merge-")) return response({ sha: "m", tree: { sha: "tree-merged" } });
+      if (/\/git\/commits\/new-/.test(url)) return response({ sha: "n", tree: { sha: "tree-main" } });
+      if (url.includes("/git/trees/tree-")) {
+        const key = url.split("/git/trees/")[1].split("?")[0];
+        return response({ truncated: false, tree: trees[key] });
+      }
+      if (/\/commits\/merge-\d/.test(url)) return response({ parents: [{ sha: "base-sha" }], files: [{ filename: "a.ts", status: "modified", sha: "a1" }] });
+      if (url.endsWith("/tags?per_page=100")) return response([{ name: "v8.34.1" }, { name: "v8.34.2" }]);
+      if (url.includes("/git/blobs/pkg0")) return response({ encoding: "utf-8", content: '{"version": "8.34.1"}' });
+      if (url.endsWith("/git/blobs")) return response({ sha: "pkg1" }, 201);
+      if (url.endsWith("/git/trees") && options?.method === "POST") { created.push(JSON.stringify(options.body)); return response({ sha: "new-tree" }, 201); }
+      if (url.endsWith("/git/commits") && options?.method === "POST") return response({ sha: `new-${created.length}` }, 201);
+      if (url.includes("/git/refs/heads/deploy-recovery/") && options?.method === "PATCH") return response({}, 200);
+      if (url.includes("/git/refs/heads/deploy-recovery/") && options?.method === "DELETE") return response({}, 204);
       if (url.endsWith("/pulls") && options?.method === "POST") return response({ html_url: "https://example.test/pull/9" }, 201);
       throw new Error(`unexpected request: ${url}`);
-    });
+    };
+  }
 
-    await expect(createDeployRecoveryPullRequest("guchi-apps", "issue-deck", "token", [2, 1])).resolves.toEqual({ url: "https://example.test/pull/9" });
+  it("選択PRのマージ差分だけをmain起点のブランチへ適用し、版を上げて復旧用PRを作る", async () => {
+    githubFetch.mockReset().mockImplementation(gitFixture());
 
-    const mergeBodies = githubFetch.mock.calls
-      .filter(([url]) => String(url).endsWith("/merges"))
-      .map(([, , options]) => (options as { body: { head: string } }).body.head);
-    expect(mergeBodies).toEqual(["merge-1", "merge-2"]);
+    await expect(createDeployRecoveryPullRequest("guchi-apps", "issue-deck", "token", [1])).resolves.toEqual({ url: "https://example.test/pull/9" });
+
+    expect(githubFetch.mock.calls.some(([url]) => String(url).endsWith("/merges"))).toBe(false);
+    const blob = githubFetch.mock.calls.find(([url, , options]) => String(url).endsWith("/git/blobs") && (options as { method?: string })?.method === "POST");
+    expect((blob?.[2] as { body: { content: string } }).body.content).toContain("8.34.3");
+    const pull = githubFetch.mock.calls.find(([url, , options]) => String(url).endsWith("/pulls") && (options as { method?: string })?.method === "POST");
+    expect((pull?.[2] as { body: { body: string } }).body.body).toContain("8.34.3");
   });
 
-  it("競合時は途中ブランチを削除してPRを作らない", async () => {
-    githubFetch.mockReset().mockImplementation(async (url: string) => {
-      const candidates = candidatesResponses(url);
-      if (candidates) return candidates;
-      if (url.includes("state=open")) return response([]);
-      if (url.endsWith("/git/ref/heads/main")) return response({ object: { sha: "main-sha" } });
-      if (url.endsWith("/git/refs")) return response({}, 201);
-      if (url.endsWith("/merges")) return response({ message: "conflict" }, 409);
-      if (url.includes("/git/refs/heads/deploy-recovery/")) return response({}, 204);
-      throw new Error(`unexpected request: ${url}`);
-    });
+  it("未選択のdevelop変更と同じファイルを変えているPRは理由付きで止め、途中ブランチを削除する", async () => {
+    githubFetch.mockReset().mockImplementation(gitFixture({ headBlob: "other" }));
 
     await expect(createDeployRecoveryPullRequest("guchi-apps", "issue-deck", "token", [1])).rejects.toBeInstanceOf(DeployRecoveryConflictError);
     expect(githubFetch.mock.calls.some(([url, , options]) => String(url).includes("/git/refs/heads/deploy-recovery/") && (options as { method?: string }).method === "DELETE")).toBe(true);
+    expect(githubFetch.mock.calls.some(([url, , options]) => String(url).endsWith("/pulls") && (options as { method?: string })?.method === "POST")).toBe(false);
+  });
+});
+
+describe("版の採番", () => {
+  it("既存タグを飛ばして次のパッチ版を返す", () => {
+    expect(nextPatchVersion("8.34.1", new Set(["8.34.2"]))).toBe("8.34.3");
+  });
+  it("依存関係ファイルを判定する", () => {
+    expect(isDependencyFile("pnpm-lock.yaml")).toBe(true);
+    expect(isDependencyFile("src/a.ts")).toBe(false);
   });
 });

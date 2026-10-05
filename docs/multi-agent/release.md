@@ -807,3 +807,21 @@ issue-deckがマージしたのに`deploy.yml`（Deploy to Production）が**1�
 
 実装は[`src/lib/deploy-launch.ts`](../../src/lib/deploy-launch.ts)（判定）と
 [`src/lib/github/deploy-launch-sweep-run.ts`](../../src/lib/github/deploy-launch-sweep-run.ts)（IO）。
+
+## 本番デプロイ復旧PRは「マージ差分だけ」を適用する（#4005）
+
+画面の本番デプロイ復旧（`src/lib/github/deploy-recovery-api.ts`）は、選択したdevelop向けPRを
+main起点の`deploy-recovery/*`ブランチへ取り込む。**`merges`APIは使わない**——マージコミットを渡すと
+祖先の未選択変更ごと入るため。代わりにGit Data APIで次を行う。
+
+1. 各PRのマージコミットの**第1親→マージコミットの差分**（ファイル単位のblob）だけを、ブランチへ
+   コミットとして積む。ブランチ上のblobが差分の起点と食い違うファイルは、未選択のdevelop変更に
+   依存しているため**競合として止め**、理由（ファイル名）を返す。`package.json`・ロックファイルが
+   該当するときは、依存を安全に分離できない旨と、候補を加えるか出し直すかを案内する
+2. `package.json`のversionを、**既存タグと重ならない次のパッチ版**へ上げる（タグは作らず動かさない）
+3. mainとの最終差分が「選択PRが触れたファイル＋`package.json`」だけであることを検証し、外れれば
+   PRを作らずブランチを消す
+
+**マージ後の整合**: mainのversionがdevelopより上がるため、通常リリースの状態判定（main版 != develop版
+＝バンプ済み）が誤作動する。復旧PRのマージ後、リリース前に**developのversionをmainと同じか上へ揃える**
+こと（復旧PR本文にも書く。自動化は未対応）。

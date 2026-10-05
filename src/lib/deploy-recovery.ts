@@ -50,7 +50,9 @@ export function deployRecoveryErrorMessage(
   if (errorCode === "no_candidates") return "mainへ取り込めるマージ済みPRがありません。";
   if (errorCode === "candidate_changed") return "選択したPRの状態が変わりました。候補を読み直してください。";
   if (errorCode === "deploy_not_failed") return "本番デプロイが失敗中ではないため、復旧用PRは作成できません。";
+  if (errorCode === "recovery_unverified" && message) return message;
   if (errorCode === "recovery_conflict") {
+    if (message) return `選択したPRをmainへ取り込めませんでした。${message}`;
     return "選択したPRをmainへ取り込めませんでした。競合するPRを外すか、修正してからもう一度試してください。";
   }
   if (errorCode === "recovery_already_open" && message) return message;
