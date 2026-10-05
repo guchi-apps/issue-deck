@@ -26,6 +26,7 @@ import {
 import { MANUAL_STEP_TIMEOUT_SECONDS } from "@/lib/manual-step-command";
 import type { ManualStepRunView } from "@/lib/manual-step-run-view";
 import { abandonManualStepVerificationCheck } from "@/lib/manual-step-verification-patrol";
+import { normalizeManualStepIssueBody } from "@/lib/manual-step-normalize";
 import { toggleTaskListLine } from "@/lib/markdown-task-list";
 
 /**
@@ -75,6 +76,13 @@ export async function startManualStepRun(params: {
   now?: Date;
 }): Promise<ManualStepRunActionResult> {
   const now = params.now ?? new Date();
+
+  // 本文が雛形から崩れていれば、実行計画を作る前に自動で整える（#4039）。失敗しても続行する
+  await normalizeManualStepIssueBody({
+    repositoryFullName: params.repositoryFullName,
+    issueNumber: params.issueNumber,
+  });
+
   const values = {
     targetHost: params.hostName,
     status: "RUNNING" as const,
