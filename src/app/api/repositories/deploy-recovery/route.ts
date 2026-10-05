@@ -6,6 +6,7 @@ import { db } from "@/lib/db";
 import {
   createDeployRecoveryPullRequest,
   DeployRecoveryConflictError,
+  DeployRecoveryVerificationError,
   fetchDeployRecoveryCandidates,
 } from "@/lib/github/deploy-recovery-api";
 import { getInstallationToken } from "@/lib/github/app-auth";
@@ -83,7 +84,10 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "candidate_changed" }, { status: 409 });
     }
     if (error instanceof DeployRecoveryConflictError) {
-      return NextResponse.json({ error: "recovery_conflict" }, { status: 409 });
+      return NextResponse.json({ error: "recovery_conflict", message: error.detail || undefined }, { status: 409 });
+    }
+    if (error instanceof DeployRecoveryVerificationError) {
+      return NextResponse.json({ error: "recovery_unverified", message: error.message }, { status: 409 });
     }
     console.error(`[POST /api/repositories/deploy-recovery] ${repositoryRef.owner}/${repositoryRef.repo}:`, error);
     return NextResponse.json(
