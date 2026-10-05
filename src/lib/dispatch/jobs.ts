@@ -2363,7 +2363,12 @@ async function resolveDispatchIssues(
  * 画面が必要とするディスパッチの状態一式（#1180の起動先選択・状態表示が使う）。
  * ホストの申告と未完了ジョブ、直近に終わったジョブをまとめて返す。
  */
-export async function listDispatchState(now: Date = new Date()): Promise<{
+export async function listDispatchState(
+  now: Date = new Date(),
+  // `false`なら停滞ジョブのTIMEOUT確定・期限切れ要求の掃除（DB更新）を行わない。
+  // 読み取り専用の呼び出し元（AIDE向け集計API #3999）が使う
+  options: { sweepExpired?: boolean } = {},
+): Promise<{
   hosts: DispatchHostView[];
   jobs: DispatchJobView[];
   sessions: DispatchSessionView[];
@@ -2373,7 +2378,8 @@ export async function listDispatchState(now: Date = new Date()): Promise<{
   /** エージェット別の新規実行の一時停止状態（#2994） */
   agentPause: DispatchAgentPauseState;
 }> {
-  await expireStaleDispatchJobs(now);
+  const sweepExpired = options.sweepExpired !== false;
+  if (sweepExpired) await expireStaleDispatchJobs(now);
 
   // セッション（#1217）を専用のエンドポイントではなくここへ足しているのは、画面側が
   // `GET /api/dispatch`と`use-dispatch-state.ts`の1本で状態を読んでいるため。取得口を
@@ -2398,9 +2404,9 @@ export async function listDispatchState(now: Date = new Date()): Promise<{
       listDispatchSessions(now),
       // 計画への返事待ち（#2061）も同じ応答に載せる。**取得口を増やさない**（セッションと
       // 同じ理由で、分けると同じ画面のためにポーリングが2本走る）
-      listSessionPlanRequests(now),
+      listSessionPlanRequests(now, { sweepExpired }),
       // 質問への回答待ち（#2189）も同じ応答に載せる。計画の返事待ちと同じ理由
-      listSessionQuestionRequests(now),
+      listSessionQuestionRequests(now, { sweepExpired }),
       getDispatchConcurrency(),
       readAgentDispatchPauseState(),
     ]);

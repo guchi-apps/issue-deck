@@ -4471,6 +4471,15 @@ Claude Code・Codex CLIそれぞれの新規実行の一時停止（`AppSetting.
   （止めたセッションは動かない）。再開のジョブは`recovery`付きだが、`report`が本文を見て
   `00.check-user`を外さない。**畳まれた（GONE）セッションには送れない**（対象外）
 
+## AIDE向け開発状況サマリAPI（#3999）
+
+`GET /api/integrations/aide/development-summary`は、進捗・要対応・予約・PR・本番反映・最近の完了を全体合計とリポジトリ別内訳で返す**読み取り専用**API。契約・集計定義・制約は[aide-development-summary-api.md](aide-development-summary-api.md)。
+
+- 集計は純関数`lib/aide-development-summary.ts`、材料の読み取りは`lib/aide-development-summary-load.ts`、クエリ解釈・ページングは`lib/aide-development-summary-response.ts`、認証は`lib/aide-summary-auth.ts`。
+- **Issueの件数は画面の左メニューと同じ`selectNavViewIssues`（`computeNavCountsForFilters`が1ビューぶんとして呼ぶ）を通す。** AIDE側に進捗判定を複製しない。
+- **読み取りでDBを更新する既存関数には`sweepExpired: false`を渡す**（`listDispatchState`・`listSessionPlanRequests`・`listSessionQuestionRequests`）。5時間枠は`readClaudeWindowSnapshot`ではなく`peekClaudeWindowSnapshot`（メモリ上の最後の値）だけを読む。
+- PR一覧の取得は`lib/pull-request-list-fetch.ts`の`fetchPullRequestListForUser`（`GET /api/pull-requests`と共用。installation単位のCI一括取得・ETag・部分失敗）。
+
 ## 環境変数
 
 `.env.local.example` が一次情報源。DB・Supabase・GitHub App・Push通知の4系統に分かれる。

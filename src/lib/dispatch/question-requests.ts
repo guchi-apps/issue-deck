@@ -208,11 +208,15 @@ export async function findSessionQuestionRequestQuestions(
  */
 export async function listSessionQuestionRequests(
   now: Date = new Date(),
+  options: { sweepExpired?: boolean } = {},
 ): Promise<SessionQuestionRequestView[]> {
-  await db.sessionQuestionRequest.updateMany({
-    where: { status: "WAITING", expiresAt: { lte: now } },
-    data: { status: "EXPIRED" },
-  });
+  // 読み取り専用の呼び出し元（AIDE向け集計API #3999）は`sweepExpired: false`で掃除を飛ばす
+  if (options.sweepExpired !== false) {
+    await db.sessionQuestionRequest.updateMany({
+      where: { status: "WAITING", expiresAt: { lte: now } },
+      data: { status: "EXPIRED" },
+    });
+  }
 
   const rows = await db.sessionQuestionRequest.findMany({
     where: {

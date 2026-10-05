@@ -256,11 +256,15 @@ export async function decideSessionPlanRequest(params: {
  */
 export async function listSessionPlanRequests(
   now: Date = new Date(),
+  options: { sweepExpired?: boolean } = {},
 ): Promise<SessionPlanRequestView[]> {
-  await db.sessionPlanRequest.updateMany({
-    where: { status: "WAITING", expiresAt: { lte: now } },
-    data: { status: "EXPIRED" },
-  });
+  // 読み取り専用の呼び出し元（AIDE向け集計API #3999）は`sweepExpired: false`で掃除を飛ばす
+  if (options.sweepExpired !== false) {
+    await db.sessionPlanRequest.updateMany({
+      where: { status: "WAITING", expiresAt: { lte: now } },
+      data: { status: "EXPIRED" },
+    });
+  }
 
   const rows = await db.sessionPlanRequest.findMany({
     where: {
