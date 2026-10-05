@@ -156,6 +156,8 @@ export type ReleaseHistoryItem = {
   iosDeliveredBuild?: number;
   /** iOS配布が失敗した段階（#3867）。`null`は段階を特定できなかった失敗、未定義は失敗なし */
   iosFailureStage?: string | null;
+  /** iOS対応のリポジトリで、この版にTestFlightの配布済みタグが無く、失敗もしていない（配布が実行中のときは付けない） */
+  iosNotDistributed?: boolean;
   /**
    * GitHub Releaseが無い版（タグから補った版。#4003）の本番デプロイの状態。
    * **未定義はReleaseのある通常の版。** 定義されている版は本番反映済みとして扱わない

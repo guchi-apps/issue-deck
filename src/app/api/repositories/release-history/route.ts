@@ -159,12 +159,17 @@ async function handleGET() {
           }),
         );
         const failures = iosFailuresForReleases(releases.map((release) => release.tagName), versionRefs, failureStages);
+        const hasActiveRun = iosRuns.some((run) => run.status !== "completed");
         return withUnreleased.map((release) => {
           const build = delivered.get(release.tagName);
           // 成功を示す配布済みタグがある版は、過去の失敗runより成功を優先する。
           if (build !== undefined) return { ...release, iosDeliveredBuild: build };
           const failedStage = failures.get(release.tagName);
-          return failedStage === undefined ? release : { ...release, iosFailureStage: failedStage };
+          if (failedStage !== undefined) return { ...release, iosFailureStage: failedStage };
+          // 配布済みでも失敗でもない版は「自動配布なし」として示す（更新不要と判定された版を含む）。
+          // runのhead_shaは版のコミットと一致しないため、版とは突き合わせず、
+          // 配布が実行中のリポジトリでは途中の版を誤ってなしと示さないよう出さない。
+          return hasActiveRun ? release : { ...release, iosNotDistributed: true };
         });
       } catch (error) {
         // 1リポジトリの取得失敗で他リポジトリの表示まで巻き込まない（`release-pending-merges`と同じ）。
