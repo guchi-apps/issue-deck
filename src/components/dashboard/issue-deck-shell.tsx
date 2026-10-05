@@ -2403,7 +2403,8 @@ export function IssueDeckShell({
                 />
               )}
 
-              {mobileScreen.kind !== "settings" && (
+              {/* チャット画面は下端に入力欄と送信ボタンがあり、右下のボタンが覆って押せなくなるため出さない（#4030） */}
+              {mobileScreen.kind !== "settings" && mobileScreen.kind !== "chat" && (
                 <MobileScreenFab
                   raised={mobileFabRaised}
                   onCreateIssue={() => openCreateDialog(mobileFabRepositoryFullName)}
