@@ -1,6 +1,10 @@
 import { db } from "@/lib/db";
 import { getInstallationToken } from "@/lib/github/app-auth";
 import { pullRequestRollupKey, type PullRequestRollupTarget } from "@/lib/github/check-rollup";
+import {
+  autoRepairLoopKey,
+  fetchPullRequestAutoRepairSummaries,
+} from "@/lib/github/pull-request-auto-repair-status";
 import { repairKindsFor } from "@/lib/github/pull-request-repair";
 import {
   fetchActivePullRequestRepairRuns,
@@ -180,6 +184,20 @@ export async function fetchPullRequestListForUser(
       repairRuns.get(repairRunKey(pullRequest.repositoryFullName, pullRequest.number)) ?? null,
       pullRequest,
     );
+  }
+
+  // 自動修復系列の状態（#4015）。`repairRun`と同じく全リポジトリぶんを1クエリで引く
+  const autoRepairs = await fetchPullRequestAutoRepairSummaries(
+    allPullRequests
+      .filter((pullRequest) => pullRequest.state === "open" && !pullRequest.draft)
+      .map((pullRequest) => ({
+        repositoryFullName: pullRequest.repositoryFullName,
+        pullRequestNumber: pullRequest.number,
+      })),
+  );
+  for (const pullRequest of allPullRequests) {
+    pullRequest.autoRepair =
+      autoRepairs.get(autoRepairLoopKey(pullRequest.repositoryFullName, pullRequest.number)) ?? null;
   }
 
   const response: PullRequestListResponse = {

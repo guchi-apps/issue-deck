@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { EMPTY_HEALTH_COUNTS } from "@/lib/pull-request-health";
 import {
   buildBranchFlow,
   extractManualStepOrigin,
@@ -391,6 +392,7 @@ describe("buildBranchFlow", () => {
     expect(quiet.activeLanes).toEqual([]);
     expect(quiet.releaseGroups).toEqual([]);
     expect(quiet.summary).toEqual({
+      pullRequestHealth: { counts: EMPTY_HEALTH_COUNTS, humanCount: 0, autoCount: 0 },
       activeLaneCount: 0,
       hasCiFailure: false,
       needsUserMerge: false,
@@ -1744,6 +1746,11 @@ describe("サマリー行の集計", () => {
     });
 
     expect(flow.repositories[0].summary).toEqual({
+      pullRequestHealth: {
+        counts: { ...EMPTY_HEALTH_COUNTS, "ci-failed": 1 },
+        humanCount: 1,
+        autoCount: 0,
+      },
       activeLaneCount: 2,
       hasCiFailure: true,
       needsUserMerge: true,
@@ -1755,6 +1762,47 @@ describe("サマリー行の集計", () => {
       releaseMergeTarget: null,
       deploy: null,
     });
+  });
+
+  it("通常PR・バンプPR・リリースPRを数え、マージ済みPRで水増ししない（#4015）", () => {
+    const flow = build({
+      pullRequests: [
+        pullRequest({ id: `${REPO}#1`, number: 1, headRef: "issue-1", linkedIssueNumber: 1, mergeable: false }),
+        pullRequest({
+          id: `${REPO}#2`,
+          number: 2,
+          headRef: "release/v1.0.1",
+          kind: "version-bump",
+          linkedIssueNumber: null,
+          ciState: "failure",
+        }),
+        pullRequest({
+          id: `${REPO}#3`,
+          number: 3,
+          baseRef: "main",
+          headRef: "develop",
+          kind: "release",
+          linkedIssueNumber: null,
+          ciState: "failure",
+        }),
+        pullRequest({
+          id: `${REPO}#4`,
+          number: 4,
+          headRef: "issue-4",
+          linkedIssueNumber: 4,
+          state: "closed",
+          merged: true,
+          mergedAt: "2026-08-01T00:00:00Z",
+          ciState: "failure",
+        }),
+      ],
+      branchStatuses: [branchStatus()],
+    });
+
+    const { pullRequestHealth } = flow.repositories[0].summary;
+    expect(pullRequestHealth.counts["ci-failed"]).toBe(2);
+    expect(pullRequestHealth.counts.conflict).toBe(1);
+    expect(pullRequestHealth.humanCount).toBe(3);
   });
 
   it("未完了の手作業を数える。同じIssueが複数レーンにあっても1件（#1586）", () => {

@@ -42,6 +42,13 @@ export type ChangelogEntry = {
  */
 export const APP_CHANGELOG: ChangelogEntry[] = [
   {
+    version: "8.35.1",
+    date: "2026-10-05",
+    changes: [
+      "本番復旧の再デプロイが実際に反映されたかを追跡するようになりました。対象の版が本番で稼働していることを確認できたときだけ「復旧済み」と表示されるため、復旧していないのに復旧済みと表示されることがなくなります。",
+    ],
+  },
+  {
     version: "8.35.0",
     date: "2026-10-05",
     changes: [

@@ -825,3 +825,20 @@ main起点の`deploy-recovery/*`ブランチへ取り込む。**`merges`APIは�
 **マージ後の整合**: mainのversionがdevelopより上がるため、通常リリースの状態判定（main版 != develop版
 ＝バンプ済み）が誤作動する。復旧PRのマージ後、リリース前に**developのversionをmainと同じか上へ揃える**
 こと（復旧PR本文にも書く。自動化は未対応）。
+
+## 復旧系列に限り、main向け復旧PRを自動マージする（#4006）
+
+「AIに修正を依頼」（#3998）の開始時に、開始者が「mainへのマージまで自動で進める」（`scope=fix_until_main`）
+を選んだ系列だけが、修正PRのdevelopマージ後に`awaiting_main_merge`へ進み、次を行う。これが
+「main反映は人が行う」の唯一の限定例外で、通常リリースのルールは変えない（ルールの全文は`CLAUDE.md`
+「自動マージ不可カテゴリ」）。
+
+1. 修正PRだけをmain起点の復旧PRへ取り込む（`createDeployRecoveryPullRequest`。#4005の差分限定）。
+   このとき復旧PRの番号・ブランチ・HEAD・main先端（base）・変更ファイルを系列へ記録する
+2. 巡回のたびに、復旧PRの**現在のHEAD**のCI・mainの**現在の先端**・PRの現在の差分を観測し直し、
+   `decideRecoveryMainMerge`で判定する（権限は系列の記録だけ。ラベル・PR本文は使わない）
+3. 合格したら、停止・期限切れと競合しない条件付き更新で`releasing`へ進めてから、HEADのSHAを添えてマージする
+
+止まる条件（`needs_attention`＋修正Issueへ引き継ぎコメントと`00.check-user`）: 停止・期限切れ・範囲外・
+復旧PRの不一致・HEAD変更・main前進・コンフリクト・差分が記録外・CI失敗・人の確認ラベル・別リリースによる置換済み。
+マージ後の稼働版の確認（`recovered`）は#4007で足す。

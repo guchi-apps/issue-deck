@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 
 import { requireUserId } from "@/lib/auth-user";
 import { db } from "@/lib/db";
+import { DEPLOY_RECOVERY_SCOPE_DEVELOP, parseDeployRecoveryScope } from "@/lib/deploy-recovery-main-merge";
 import {
   findLatestDeployRecoverySeries,
   startDeployRecoverySeries,
@@ -57,12 +58,15 @@ export async function POST(request: NextRequest) {
   if (!owner || !repo || typeof runId !== "number" || !Number.isInteger(runId) || runId <= 0) {
     return NextResponse.json({ error: "invalid_request" }, { status: 400 });
   }
+  // 許可する範囲はサーバーが検証する。未指定はdevelopまで（mainへの自動マージは明示した開始だけ）。
+  const scope = payload?.scope === undefined ? DEPLOY_RECOVERY_SCOPE_DEVELOP : parseDeployRecoveryScope(payload.scope);
+  if (scope === null) return NextResponse.json({ error: "invalid_request" }, { status: 400 });
   const repository = await findRepository(userId, owner, repo);
   if (!repository) return NextResponse.json({ error: "not_found" }, { status: 404 });
 
   try {
     const token = await getInstallationToken(repository.installation.installationId);
-    const result = await startDeployRecoverySeries({ repositoryFullName: `${owner}/${repo}`, runId, userId, token });
+    const result = await startDeployRecoverySeries({ repositoryFullName: `${owner}/${repo}`, runId, userId, token, scope });
     if (!result.ok) return NextResponse.json(result, { status: 409 });
     return NextResponse.json(result);
   } catch (error) {
