@@ -32,7 +32,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { CodexPairingControl } from "@/components/dashboard/codex-pairing-control";
-import { SessionDetail } from "@/components/dashboard/session-detail";
+import { SESSION_INSTRUCTION_PRESETS, SessionDetail } from "@/components/dashboard/session-detail";
 import type { DispatchStateHandle } from "@/hooks/use-dispatch-state";
 import {
   describeDispatchJobStatus,
@@ -106,15 +106,6 @@ const TONE_CLASS: Record<IssueSessionTone, string> = {
   error: "bg-destructive/15 text-destructive ring-destructive",
 };
 
-/**
- * 追加指示の定型文（#1012）。**押すのは人**で、状況を見て自動で選ぶ実行体は作らない
- * （`docs/multi-agent/gates.md`）。よく使う2つだけを置き、入力欄へ差し込むだけにしている
- * （そのまま送らないのは、送る前に手直しできる形にしておくため）。
- */
-const INSTRUCTION_PRESETS = [
-  "計画を承認します。実装に進んでください。",
-  "CIが失敗しています。ログを確認して直してください。",
-] as const;
 
 /**
  * 操作の3ボタン（停止・追加指示・セッション終了）を1行に収めるための幅の割り振り（#3108）。
@@ -630,7 +621,7 @@ export function IssueSessionStatus({
                 </Button>
               </div>
               <div className="flex flex-wrap gap-1.5">
-                {INSTRUCTION_PRESETS.map((preset) => (
+                {SESSION_INSTRUCTION_PRESETS.map((preset) => (
                   <Button
                     key={preset}
                     variant="ghost"
