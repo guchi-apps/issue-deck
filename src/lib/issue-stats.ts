@@ -367,22 +367,15 @@ export function computeNavCountsForFilters(
 ): Record<NavViewId, number> {
   const counts = {} as Record<NavViewId, number>;
   for (const view of navViews) {
-    const viewFilters = resolveFiltersForView(filters, view.id);
-    const base = applyIssueFilters(
+    const matched = selectNavViewIssues(
+      view.id,
       issues,
-      view.defaultState === "all" ? { ...viewFilters, state: "all" } : viewFilters,
+      filters,
+      currentUserLogin,
+      referenceIssues,
+      snoozedIssueIds,
+      notStartedHiddenIssueIds,
     );
-    const all = filterIssuesByView(base, view.id, currentUserLogin, referenceIssues);
-    // 保留中はどのビューの件数からも引く（#2456。#2398では要対応の2ビューだけだった）。
-    // 一覧の側も同じ集合で伏せる（`issue-list.tsx`の`snoozeEnabled`）ので、メニューの数と
-    // 並んでいる行数は食い違わない
-    const unsnoozed = snoozedIssueIds
-      ? all.filter((issue) => !snoozedIssueIds.has(issue.id))
-      : all;
-    const matched =
-      view.id === "not-started" && notStartedHiddenIssueIds
-        ? unsnoozed.filter((issue) => !notStartedHiddenIssueIds.has(issue.id))
-        : unsnoozed;
     counts[view.id] =
       view.id === "manual-step"
         ? computeManualStepAttention(matched, referenceIssues).actionable
@@ -391,6 +384,38 @@ export function computeNavCountsForFilters(
           : matched.length;
   }
   return counts;
+}
+
+/**
+ * 1つのビューに並ぶIssue（件数から「確認待ちの実行中」「手作業の前提待ち」を引く前の集合）を求める。
+ * `computeNavCountsForFilters`の1ビューぶんで、画面の件数とAIDE向けの集計API（#3999）が
+ * 同じ集合を数える。
+ */
+export function selectNavViewIssues(
+  viewId: NavViewId,
+  issues: Issue[],
+  filters: IssueFilterInput,
+  currentUserLogin: string | null,
+  referenceIssues: Issue[] = issues,
+  snoozedIssueIds?: ReadonlySet<string>,
+  notStartedHiddenIssueIds?: ReadonlySet<string>,
+): Issue[] {
+  const view = getNavView(viewId);
+  const viewFilters = resolveFiltersForView(filters, view.id);
+  const base = applyIssueFilters(
+    issues,
+    view.defaultState === "all" ? { ...viewFilters, state: "all" } : viewFilters,
+  );
+  const all = filterIssuesByView(base, view.id, currentUserLogin, referenceIssues);
+  // 保留中はどのビューの件数からも引く（#2456。#2398では要対応の2ビューだけだった）。
+  // 一覧の側も同じ集合で伏せる（`issue-list.tsx`の`snoozeEnabled`）ので、メニューの数と
+  // 並んでいる行数は食い違わない
+  const unsnoozed = snoozedIssueIds
+    ? all.filter((issue) => !snoozedIssueIds.has(issue.id))
+    : all;
+  return view.id === "not-started" && notStartedHiddenIssueIds
+    ? unsnoozed.filter((issue) => !notStartedHiddenIssueIds.has(issue.id))
+    : unsnoozed;
 }
 
 // ポーリング等で取得した最新のIssue一覧を、内容が変わっていないIssueについては
