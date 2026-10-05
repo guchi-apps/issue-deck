@@ -840,48 +840,59 @@ jobs:
 
   codex-review:
     # APIキー課金のCodex Actionは使わず、サブPCでChatGPTサブスクリプションにログイン済みの
-    # Codex CLIへPRコメントの要求印を渡す（#3917）。結果が返るまで待つため、失敗・期限切れは
-    # auto-mergeを止める安全側のfailureにする。
+    # Codex CLIでレビューする（#3917）。**このジョブは依頼を積んで終わる**——結果は待たない（#3990）。
+    # かつてはPRコメントへ要求印を投稿し、結果コメントが付くまで最大30分ポーリングしていたが、
+    # 状態の正本をIssueDeckのDispatchJob（`PR_REVIEW`）へ移した。サブPCが実行して結果を報告すると、
+    # IssueDeckがこのrunの`auto-merge`ジョブだけを再実行して最終マージ判定を再開する。
+    # 依頼そのものができなかった（実行できるサブPCが無い・IssueDeckへ届かない）場合は、30分待たずに
+    # ここで失敗させ、auto-mergeを止める安全側のfailureにする（codex-review-fallbackが理由を伝える）。
     needs: [identify-issue, risk-check, review-provider]
     if: github.event.pull_request.draft == false && needs.risk-check.outputs.needs-review == 'true' && needs.review-provider.outputs.provider == 'codex'
     runs-on: ubuntu-latest
+    outputs:
+      reason: ${{ steps.request.outputs.reason }}
     permissions:
-      pull-requests: write
+      pull-requests: read
     steps:
-      - name: Codexレビューを依頼して結果を待つ
+      - name: CodexレビューをサブPCへ依頼する（結果は待たない）
+        id: request
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          RUN_ID: ${{ github.run_id }}
+          APP_BASE_URL: ${{ vars.APP_BASE_URL }}
+          PROGRESS_REPORT_SECRET: ${{ secrets.PROGRESS_REPORT_SECRET }}
         run: |
-          set -euo pipefail
-          REQUEST="<!-- issue-deck-codex-review-request sha=${HEAD_SHA} -->"
-          RESULT_PATTERN="issue-deck-codex-review-verdict:(lgtm|needs-check|changes-requested|failed) sha=${HEAD_SHA}"
-          COMMENTS="$(gh pr view "$PR_NUMBER" --json comments --jq '.comments[].body')"
-          if ! grep -qE "$RESULT_PATTERN" <<<"$COMMENTS" && ! grep -qF "$REQUEST" <<<"$COMMENTS"; then
-            BODY="🤖 Codexによる差分レビューをサブPCへ依頼しました。結果が投稿されるまで待機します。"
-            BODY="$BODY"$'\n\n'"$REQUEST"$'\n<!-- issue-deck-source:codex-review-develop -->'
-            gh pr comment "$PR_NUMBER" --body "$BODY"
+          set -uo pipefail
+          fail() {
+            echo "reason=$1" >> "$GITHUB_OUTPUT"
+            echo "::error::$1"
+            exit 1
+          }
+          # 移行前の実装がこのHEADへ投稿済みの結果があれば、積み直さずそれを使う（二重に実行しない）。
+          if gh pr view "$PR_NUMBER" --json comments --jq '.comments[].body' \
+            | grep -qE "issue-deck-codex-review-verdict:(lgtm|needs-check|changes-requested) sha=${HEAD_SHA}"; then
+            echo "このHEADのCodexレビュー結果が既にPRにあるため、依頼しません。"
+            exit 0
           fi
-          for attempt in $(seq 1 60); do
-            COMMENTS="$(gh pr view "$PR_NUMBER" --json comments --jq '.comments[].body')"
-            VERDICT="$(grep -oE "$RESULT_PATTERN" <<<"$COMMENTS" | tail -n 1 | sed -E 's/^.*verdict:([a-z-]+) sha=.*$/\1/' || true)"
-            case "$VERDICT" in
-              lgtm|needs-check|changes-requested)
-                echo "Codexレビュー結果を取得しました: ${VERDICT}"
-                exit 0
-                ;;
-              failed)
-                echo "::error::Codexレビューが失敗しました"
-                exit 1
-                ;;
-            esac
-            echo "Codexレビュー結果を待っています（${attempt}/60）"
-            sleep 30
-          done
-          echo "::error::Codexレビュー結果の待機がタイムアウトしました"
-          exit 1
+          [ -n "$APP_BASE_URL" ] && [ -n "$PROGRESS_REPORT_SECRET" ] \
+            || fail "APP_BASE_URL / PROGRESS_REPORT_SECRET が未設定のため、Codexレビューを依頼できません"
+          BODY="$(jq -n --arg repository "$GH_REPO" --argjson pr "$PR_NUMBER" --arg head "$HEAD_SHA" \
+            --arg base "$BASE_SHA" --arg run "$RUN_ID" \
+            '{action:"request", repository:$repository, pullRequest:$pr, headSha:$head, baseSha:$base, agent:"codex", runId:$run}')"
+          RESPONSE="$(mktemp)"
+          CODE="$(curl -sS -m 30 -o "$RESPONSE" -w '%{http_code}' \
+            -X POST "${APP_BASE_URL%/}/api/dispatch/pr-review" \
+            -H "Authorization: Bearer $PROGRESS_REPORT_SECRET" \
+            -H "Content-Type: application/json" -d "$BODY")" || CODE=000
+          MESSAGE="$(jq -r '.message // empty' "$RESPONSE" 2>/dev/null || true)"
+          if [ "$CODE" != "200" ]; then
+            fail "Codexレビューを依頼できませんでした（HTTP ${CODE}）${MESSAGE:+: ${MESSAGE}}"
+          fi
+          echo "Codexレビューを依頼しました: $(jq -r '.state' "$RESPONSE")（${MESSAGE}）"
 
   claude-review-fallback:
     # wait-for-ciをneedsに入れているのは、このジョブも00.check-userを付けるため(#2136)。
@@ -959,9 +970,10 @@ jobs:
           GH_REPO: ${{ github.repository }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           ISSUE_NUMBER: ${{ needs.identify-issue.outputs.number }}
+          CODEX_FAILURE_REASON: ${{ needs.codex-review.outputs.reason }}
         run: |
           set -euo pipefail
-          gh pr comment "$PR_NUMBER" --body "⚠️ Codexによる自動レビューを完了できませんでした。サブPCの状態とActionsの実行ログを確認してください。安全のため自動マージはスキップされます。"
+          gh pr comment "$PR_NUMBER" --body "⚠️ Codexによる自動レビューを依頼できませんでした${CODEX_FAILURE_REASON:+（${CODEX_FAILURE_REASON}）}。サブPCの状態とActionsの実行ログを確認してください。安全のため自動マージはスキップされます。"
           [ -n "$ISSUE_NUMBER" ] || exit 0
           DEFINED_LABELS="$(gh label list --json name --jq '.[].name' --limit 200)"
           LABEL_ARGS=()
@@ -974,12 +986,16 @@ jobs:
           [ "${#LABEL_ARGS[@]}" -eq 0 ] || gh issue edit "$ISSUE_NUMBER" "${LABEL_ARGS[@]}"
           RUN_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
           BODY="⚠️ 以下の理由により、developへのマージ前にユーザーの確認が必要です。"
-          BODY="$BODY"$'\n\n- Codexによる自動レビューを完了できなかったため（安全のため自動マージはスキップされます）'
+          BODY="$BODY"$'\n\n- Codexによる自動レビューを依頼できなかったため（安全のため自動マージはスキップされます）'
+          [ -z "$CODEX_FAILURE_REASON" ] || BODY="$BODY"$'\n'"  - ${CODEX_FAILURE_REASON}"
           BODY="$BODY"$'\n\n'"実行ログ: ${RUN_URL}"$'\n\n<!-- issue-deck-source:codex-review-develop -->'
           gh issue comment "$ISSUE_NUMBER" --body "$BODY"
 
   auto-merge:
     needs: [identify-issue, wait-for-ci, risk-check, claude-review, codex-review]
+    # **Codexレビューの結果はここで待たない**（#3990）。codex-reviewは依頼を積むだけで、auto-mergeは
+    # IssueDeckのDispatchJobの状態をその場で読む。結果が出ていなければ判定を保留して終わり、
+    # レビュー完了の報告を受けたIssueDeckがこのジョブだけを再実行して判定を再開する。
     # claude-reviewはrisk-checkの判定次第でskipされる(#992)。needsの既定動作では
     # 依存ジョブがskipされると後続もskipされてしまうため、条件を明示的に組み立てて
     # 「claude-reviewがsuccessまたはskipped」を許容する。
@@ -1034,6 +1050,73 @@ jobs:
       # トークンは github.token を使う(マージ実行のステップだけワークフロー用トークン)。
       # ラベル付与・コメント投稿の名義を従来のgithub-actions[bot]から変えないため
       # (docs/attribution.md)。
+      # Codexレビューの状態を、IssueDeckのDispatchJobから読む（#3990）。**状態の正本はDispatchJob**で、
+      # PRコメントのverdict markerは結果の記録（移行前のPRのためのフォールバックとして読む）。
+      # 結果（`result`）は次のどれか。
+      #   skipped … Codexレビューを要求していない（低リスクで省略・Claudeモード）
+      #   success … 判定が出ている（`verdict`にlgtm / needs-check / changes-requested）
+      #   pending … キュー待ち・実行中。判定を保留し、完了後にこのジョブが再実行される
+      #   stale   … PRのHEADが進んだ。この結果では判定しない（新しいHEADのrunが判定する）
+      #   failed  … 失敗・時間切れ・不正出力・取得不能。**自動マージせず人へ渡す**（`reason`）
+      - name: Codexレビューの状態を取得する
+        id: codex
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          CODEX_JOB_RESULT: ${{ needs.codex-review.result }}
+          APP_BASE_URL: ${{ vars.APP_BASE_URL }}
+          PROGRESS_REPORT_SECRET: ${{ secrets.PROGRESS_REPORT_SECRET }}
+        run: |
+          set -uo pipefail
+          emit() {
+            {
+              echo "result=$1"
+              echo "verdict=${2:-}"
+              printf 'reason=%s\n' "$(printf '%s' "${3:-}" | tr '\n' ' ')"
+            } >> "$GITHUB_OUTPUT"
+            echo "Codexレビューの状態: $1 ${2:-} ${3:-}"
+            exit 0
+          }
+          if [ "$CODEX_JOB_RESULT" != "success" ]; then
+            emit skipped
+          fi
+          CURRENT_HEAD="$(gh api "repos/${GH_REPO}/pulls/${PR_NUMBER}" --jq .head.sha 2>/dev/null || true)"
+          if [ -n "$CURRENT_HEAD" ] && [ "$CURRENT_HEAD" != "$HEAD_SHA" ]; then
+            emit stale
+          fi
+          MARKER_VERDICT="$(gh pr view "$PR_NUMBER" --json comments --jq '.comments[].body' 2>/dev/null \
+            | grep -oE "issue-deck-codex-review-verdict:(lgtm|needs-check|changes-requested) sha=${HEAD_SHA}" \
+            | tail -n 1 | sed -E 's/^.*verdict:([a-z-]+) sha=.*$/\1/' || true)"
+          if [ -z "$APP_BASE_URL" ] || [ -z "$PROGRESS_REPORT_SECRET" ]; then
+            [ -z "$MARKER_VERDICT" ] || emit success "$MARKER_VERDICT"
+            emit failed "" "APP_BASE_URL / PROGRESS_REPORT_SECRET が未設定のため、Codexレビューの状態を取得できません"
+          fi
+          BODY="$(jq -n --arg repository "$GH_REPO" --argjson pr "$PR_NUMBER" --arg head "$HEAD_SHA" \
+            '{action:"status", repository:$repository, pullRequest:$pr, headSha:$head, agent:"codex"}')"
+          RESPONSE="$(mktemp)"
+          CODE="$(curl -sS -m 30 -o "$RESPONSE" -w '%{http_code}' \
+            -X POST "${APP_BASE_URL%/}/api/dispatch/pr-review" \
+            -H "Authorization: Bearer $PROGRESS_REPORT_SECRET" \
+            -H "Content-Type: application/json" -d "$BODY")" || CODE=000
+          if [ "$CODE" != "200" ]; then
+            [ -z "$MARKER_VERDICT" ] || emit success "$MARKER_VERDICT"
+            emit failed "" "IssueDeckからCodexレビューの状態を取得できませんでした（HTTP ${CODE}）"
+          fi
+          STATE="$(jq -r '.state // empty' "$RESPONSE")"
+          case "$STATE" in
+            done) emit success "$(jq -r '.verdict // empty' "$RESPONSE")" ;;
+            pending) emit pending "" "$(jq -r '.message // empty' "$RESPONSE")" ;;
+            stale) emit stale ;;
+            failed) emit failed "" "$(jq -r '.reason // "レビューが失敗しました"' "$RESPONSE")" ;;
+            missing)
+              [ -z "$MARKER_VERDICT" ] || emit success "$MARKER_VERDICT"
+              emit failed "" "Codexレビューのジョブが見つかりません（依頼が届いていません）"
+              ;;
+            *) emit failed "" "Codexレビューの状態を読み取れませんでした" ;;
+          esac
+
       - name: マージ保留の判定を反映する
         id: hold
         if: needs.identify-issue.outputs.number != ''
@@ -1047,7 +1130,9 @@ jobs:
           REASONS: ${{ needs.risk-check.outputs.reasons }}
           ALREADY_CHECK_USER: ${{ needs.risk-check.outputs.already-check-user }}
           REVIEW_RESULT: ${{ needs.claude-review.result }}
-          CODEX_REVIEW_RESULT: ${{ needs.codex-review.result }}
+          CODEX_REVIEW_RESULT: ${{ steps.codex.outputs.result }}
+          CODEX_VERDICT_INPUT: ${{ steps.codex.outputs.verdict }}
+          CODEX_FAILURE_REASON: ${{ steps.codex.outputs.reason }}
           REVIEW_AUTO_FIX: ${{ inputs.review-auto-fix }}
         run: |
           set -e
@@ -1077,12 +1162,31 @@ jobs:
             fi
           fi
 
+          # Codexレビューの結果が出ていない（pending）・古いHEAD（stale）なら、**何も反映せず保留する**
+          # （#3990）。ラベルもコメントも自動マージも、結果が出たあとに再実行されるこのジョブが
+          # 最新のHEADに対して行う。結果待ちでrunnerを保持しないための分岐。
+          if [ "$CODEX_REVIEW_RESULT" = "pending" ] || [ "$CODEX_REVIEW_RESULT" = "stale" ]; then
+            echo "Codexレビューが${CODEX_REVIEW_RESULT}のため、最終マージ判定を保留します（結果が出ると再実行されます）。"
+            echo "waiting=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
           CODEX_REVIEW_BLOCKED=false
-          if [ "$CODEX_REVIEW_RESULT" = "success" ]; then
-            CODEX_VERDICT="$(gh pr view "$PR_NUMBER" --json comments --jq '.comments[].body' \
-              | grep -oE "issue-deck-codex-review-verdict:(lgtm|needs-check|changes-requested) sha=${HEAD_SHA}" \
-              | tail -n 1 \
-              | sed -E 's/^.*verdict:([a-z-]+) sha=.*$/\1/' || true)"
+          CODEX_REVIEW_FAILED=false
+          CODEX_VERDICT=""
+          if [ "$CODEX_REVIEW_RESULT" = "failed" ]; then
+            # 失敗・時間切れ・不正出力は、判定が無いのと同じ。**自動マージせず人へ渡す**
+            CODEX_REVIEW_BLOCKED=true
+            CODEX_REVIEW_FAILED=true
+            echo "Codexレビューの結果を得られませんでした: ${CODEX_FAILURE_REASON}"
+          elif [ "$CODEX_REVIEW_RESULT" = "success" ]; then
+            CODEX_VERDICT="${CODEX_VERDICT_INPUT:-}"
+            if [ -z "$CODEX_VERDICT" ]; then
+              CODEX_VERDICT="$(gh pr view "$PR_NUMBER" --json comments --jq '.comments[].body' \
+                | grep -oE "issue-deck-codex-review-verdict:(lgtm|needs-check|changes-requested) sha=${HEAD_SHA}" \
+                | tail -n 1 \
+                | sed -E 's/^.*verdict:([a-z-]+) sha=.*$/\1/' || true)"
+            fi
             case "$CODEX_VERDICT" in
               needs-check|changes-requested)
                 CODEX_REVIEW_BLOCKED=true
@@ -1142,6 +1246,9 @@ jobs:
           fi
 
           REASON_LABEL="01.check-merge"
+          # Codexレビューが完了できなかった場合は「ユーザーの判断」ではなく「止まっている」ので、
+          # 理由ラベルは01.check-blockedにする
+          [ "$CODEX_REVIEW_FAILED" != "true" ] || REASON_LABEL="01.check-blocked"
           # 展開先リポジトリにラベル自体が定義されていない場合でもこのステップを落とさないよう、
           # 付与・除去の前にリポジトリのラベル一覧と突き合わせる(#975)。理由ラベル(#1490)は常に1枚
           # なので、定義済みの他の理由ラベルは同じ呼び出しで外す。
@@ -1169,7 +1276,12 @@ jobs:
             echo "機械的リスク判定には該当していないため、理由コメントの投稿はclaude-review側に任せます。"
           elif [ "$CODEX_REVIEW_BLOCKED" = "true" ] && [ "$ALREADY_CHECK_USER" != "true" ]; then
             BODY="⚠️ 以下の理由により、developへのマージ前にユーザーの確認が必要と判定しました。"
-            BODY="$BODY"$'\n\n'"- Codexによる自動レビューが \`${CODEX_VERDICT}\` と判定したため。詳細はPR #${PR_NUMBER} のレビューコメントを確認してください。"
+            if [ "$CODEX_REVIEW_FAILED" = "true" ]; then
+              BODY="$BODY"$'\n\n'"- Codexによる自動レビューを完了できなかったため（安全のため自動マージはスキップされます）"
+              BODY="$BODY"$'\n'"  - ${CODEX_FAILURE_REASON}"
+            else
+              BODY="$BODY"$'\n\n'"- Codexによる自動レビューが \`${CODEX_VERDICT}\` と判定したため。詳細はPR #${PR_NUMBER} のレビューコメントを確認してください。"
+            fi
             BODY="$BODY"$'\n\n<!-- issue-deck-source:codex-review-develop -->'
             gh issue comment "$ISSUE_NUMBER" --body "$BODY"
           # このpush開始時点で既に00.check-user付与済み(=既に確認待ち)ならコメントのみ省略する(#594)。
@@ -1221,12 +1333,19 @@ jobs:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           REVIEW_RESULT: ${{ needs.claude-review.result }}
           REVIEW_EXECUTED: ${{ needs.claude-review.outputs.executed }}
-          CODEX_REVIEW_RESULT: ${{ needs.codex-review.result }}
+          CODEX_REVIEW_RESULT: ${{ steps.codex.outputs.result }}
+          CODEX_VERDICT_INPUT: ${{ steps.codex.outputs.verdict }}
           RISKY: ${{ needs.risk-check.outputs.risky }}
           REASONS: ${{ needs.risk-check.outputs.reasons }}
           REVIEW_FIX_HANDOFF: ${{ steps.hold.outputs.handoff }}
         run: |
           set -euo pipefail
+
+          # 古いHEADに対する実行は何も書かない（新しいHEADのrunがその時点の結果を書く。#3990）
+          if [ "$CODEX_REVIEW_RESULT" = "stale" ]; then
+            echo "PRのHEADが進んでいるため、検証結果の記録をスキップします。"
+            exit 0
+          fi
 
           # 自動レビューの判定は、レビューがPRへ投稿したコメントの末尾のマーカーから読む
           # (.github/prompts/review-develop.md と対。ずれるとここは黙って「取得できず」へ
@@ -1270,11 +1389,18 @@ jobs:
               CODEX_SKIP_REASON="低リスクかつ小規模のため省略"
               ;;
             success)
-              FOUND="$(gh pr view "$PR_NUMBER" --json comments --jq '.comments[].body' \
-                | grep -oE "issue-deck-codex-review-verdict:(lgtm|needs-check|changes-requested) sha=${HEAD_SHA}" \
-                | tail -n 1 \
-                | sed -E 's/^.*verdict:([a-z-]+) sha=.*$/\1/' || true)"
+              FOUND="${CODEX_VERDICT_INPUT:-}"
+              if [ -z "$FOUND" ]; then
+                FOUND="$(gh pr view "$PR_NUMBER" --json comments --jq '.comments[].body' \
+                  | grep -oE "issue-deck-codex-review-verdict:(lgtm|needs-check|changes-requested) sha=${HEAD_SHA}" \
+                  | tail -n 1 \
+                  | sed -E 's/^.*verdict:([a-z-]+) sha=.*$/\1/' || true)"
+              fi
               [ -z "$FOUND" ] || CODEX_REVIEW="$FOUND"
+              ;;
+            # キュー待ち・実行中。完了するとこのジョブが再実行され、この節が最終の判定に書き換わる（#3990）
+            pending)
+              CODEX_REVIEW="pending"
               ;;
           esac
 
@@ -1293,6 +1419,7 @@ jobs:
             needs-check) CODEX_REVIEW_TEXT="⚠️ 要確認" ;;
             changes-requested) CODEX_REVIEW_TEXT="❌ 要修正" ;;
             skipped) CODEX_REVIEW_TEXT="— 実施なし（${CODEX_SKIP_REASON}）" ;;
+            pending) CODEX_REVIEW_TEXT="⏳ サブPCで実行待ち・実行中（完了後に自動で更新されます）" ;;
             *) CODEX_REVIEW="unavailable"; CODEX_REVIEW_TEXT="? 判定を取得できませんでした" ;;
           esac
 
@@ -1304,6 +1431,10 @@ jobs:
           elif [ "$REVIEW" = "needs-check" ] || [ "$CODEX_REVIEW" = "needs-check" ]; then
             OVERALL_REVIEW="needs-check"
             OVERALL_REVIEW_TEXT="⚠️ 要確認"
+          elif [ "$CODEX_REVIEW" = "pending" ]; then
+            # Codexの結果待ち。完了までは判定を確定させない（待ち中に「問題なし」と読ませない）
+            OVERALL_REVIEW="unavailable"
+            OVERALL_REVIEW_TEXT="⏳ Codexレビューの完了待ち"
           elif [ "$REVIEW" = "unavailable" ] || [ "$CODEX_REVIEW" = "unavailable" ]; then
             OVERALL_REVIEW="unavailable"
             OVERALL_REVIEW_TEXT="? 判定を取得できませんでした"
@@ -1327,6 +1458,8 @@ jobs:
             CONFIRM_TEXT="不要（指摘を自動修正へ回しました。直した後に再レビューされます）"
           elif [ "$RISK" = "hit" ] || [ "$REVIEW" = "needs-check" ] || [ "$REVIEW" = "changes-requested" ] || [ "$CODEX_REVIEW" = "needs-check" ] || [ "$CODEX_REVIEW" = "changes-requested" ]; then
             CONFIRM_TEXT="必要（自動マージはスキップされます）"
+          elif [ "$CODEX_REVIEW" = "pending" ]; then
+            CONFIRM_TEXT="判定待ち（Codexレビューの完了後に自動で判定します）"
           else
             CONFIRM_TEXT="不要（自動マージの対象）"
           fi
@@ -1385,9 +1518,17 @@ jobs:
           ISSUE_NUMBER: ${{ needs.identify-issue.outputs.number }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           REVIEW_FIX_HANDOFF: ${{ steps.hold.outputs.handoff }}
+          WAITING_FOR_CODEX: ${{ steps.hold.outputs.waiting }}
         run: |
           if [ -z "$ISSUE_NUMBER" ]; then
             echo "対応Issue番号を特定できないため、自動マージをスキップします。"
+            exit 0
+          fi
+
+          # Codexレビューの結果待ち・古いHEADでは、マージを有効化しない（#3990）。結果が出ると
+          # このジョブが再実行され、最新のHEADについて改めて判定する
+          if [ "$WAITING_FOR_CODEX" = "true" ]; then
+            echo "Codexレビューの結果を待っているため、自動マージを有効化しません。"
             exit 0
           fi
 

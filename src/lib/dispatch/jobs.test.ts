@@ -2972,3 +2972,80 @@ describe("sweepAgentUsageLimitPause", () => {
     expect(appSettingUpsert).not.toHaveBeenCalled();
   });
 });
+
+describe("PRレビュー（PR_REVIEW・#3990）", () => {
+  const RUNNING_REVIEW = {
+    id: "job-1",
+    repositoryFullName: REPOSITORY,
+    issueNumber: 7,
+    targetHost: "subpc",
+    agent: "codex",
+    kind: "PR_REVIEW",
+    status: "RUNNING",
+    claimedByHost: "subpc",
+    message: null,
+    prNumber: 7,
+    headSha: "a".repeat(40),
+    baseSha: "b".repeat(40),
+    reviewVerdict: null,
+    createdAt: NOW,
+    claimedAt: NOW,
+    startedAt: NOW,
+    finishedAt: null,
+  };
+
+  beforeEach(() => {
+    dispatchJobFindUnique.mockResolvedValue(RUNNING_REVIEW);
+    dispatchJobUpdateMany.mockResolvedValue({ count: 1 });
+  });
+
+  it("判定つきの成功は、判定を保存して終了させる", async () => {
+    await reportDispatchJob({
+      jobId: "job-1",
+      hostName: "subpc",
+      status: "succeeded",
+      reviewVerdict: "changes-requested",
+      now: NOW,
+    });
+    expect(dispatchJobUpdateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ status: "SUCCEEDED", reviewVerdict: "changes-requested", activeKey: null }),
+      }),
+    );
+  });
+
+  it("判定の無い成功は、不正な出力として失敗に倒す（判定の無いレビューで自動マージを通さない）", async () => {
+    await reportDispatchJob({ jobId: "job-1", hostName: "subpc", status: "succeeded", now: NOW });
+    expect(dispatchJobUpdateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ status: "FAILED", message: expect.stringContaining("不正な出力") }),
+      }),
+    );
+  });
+
+  it("実行中の生存報告でheartbeatを更新する", async () => {
+    await reportDispatchJob({ jobId: "job-1", hostName: "subpc", status: "running", now: NOW });
+    expect(dispatchJobUpdateMany).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ status: "RUNNING", heartbeatAt: NOW }) }),
+    );
+  });
+
+  it("対応を申告したpollerにだけPRレビューを枠外で配る", async () => {
+    dispatchJobCount.mockResolvedValue(0);
+    const requestedKinds: string[][] = [];
+    dispatchJobFindMany.mockImplementation(async (args: { where?: Record<string, unknown> }) => {
+      const kind = args.where?.kind as { in?: string[] } | undefined;
+      if (kind?.in) requestedKinds.push(kind.in);
+      return [];
+    });
+
+    dispatchHostFindUnique.mockResolvedValue(host({ prReviewCapable: null }));
+    await claimDispatchJobs({ hostName: "subpc", maxJobs: 0, now: NOW });
+    expect(requestedKinds.flat()).not.toContain("PR_REVIEW");
+
+    requestedKinds.length = 0;
+    dispatchHostFindUnique.mockResolvedValue(host({ prReviewCapable: true }));
+    await claimDispatchJobs({ hostName: "subpc", maxJobs: 0, now: NOW });
+    expect(requestedKinds.flat()).toContain("PR_REVIEW");
+  });
+});

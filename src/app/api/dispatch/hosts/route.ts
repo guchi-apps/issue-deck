@@ -134,6 +134,9 @@ export async function POST(request: NextRequest) {
     // （`crossRepoQuestion`と同じ向き。配ると未知の種別として`failed`になり、押した起動が失われる）
     manualStepSessionCapable:
       typeof payload?.manualStepSession === "boolean" ? payload.manualStepSession : null,
+    // develop向けPRのAIレビュー（#3990）を実行できるpollerだけが送ってくる。**未申告はnull＝
+    // 非対応扱い**（配ると未知の種別として`failed`になり、PRのレビューが必ず失敗として残る）
+    prReviewCapable: typeof payload?.prReview === "boolean" ? payload.prReview : null,
     selfUpdateCapable:
       typeof payload?.selfUpdate === "boolean" ? payload.selfUpdate : null,
     // セッション本数の上限と、申告した時点の本数（#1394）。**上限に達している間、pollerは

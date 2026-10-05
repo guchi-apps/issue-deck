@@ -84,6 +84,11 @@ export type DispatchJobStatus =
  *   `codex remote-control start` / `pair`を打ち、**10分で切れるペアリングコードを画面へ返す**。
  *   Claude Code側（#1219）がセッションごとのURLなのに対し、こちらは**ホストに紐づく**
  *   （`serverName`はホスト名で、Issueごとには分かれない）ので`issueNumber`は0
+ * - `PR_REVIEW` … develop向けPRのAIレビュー（#3990）。PR番号・base/head SHA・agentを専用列で持ち、
+ *   `activeKey`は`repository + PR + head SHA + agent`。**GitHub Actionsは結果を待たずに積んで終わり**、
+ *   サブPCのpollerが取ってCodex CLIを走らせ、完了の報告で最終マージ判定（`auto-merge`ジョブ）が
+ *   再開される。`CODE_REVIEW`（リポジトリ全体を人が起こす）とは別物。**`issueNumber`にはPR番号を
+ *   埋め草として入れる**（必須列。GitHubはIssueとPRで番号を共有するので衝突しない）
  */
 export type DispatchJobKind =
   | "LAUNCH"
@@ -100,7 +105,8 @@ export type DispatchJobKind =
   | "PREVIEW"
   | "REBOOT"
   | "CODEX_PAIRING"
-  | "MANUAL_STEP_SESSION";
+  | "MANUAL_STEP_SESSION"
+  | "PR_REVIEW";
 
 /**
  * 既に立っているセッションを操作するジョブ（起動しないジョブ）。
@@ -186,6 +192,7 @@ export function parseDispatchJobKind(value: unknown): DispatchJobKind | null {
   if (value === "reboot") return "REBOOT";
   if (value === "codex_pairing") return "CODEX_PAIRING";
   if (value === "manual_step_session") return "MANUAL_STEP_SESSION";
+  if (value === "pr_review") return "PR_REVIEW";
   return null;
 }
 
@@ -614,6 +621,15 @@ export type DispatchJobView = {
   codexPairingExpiresAt: string | null;
   tmuxSessionName: string | null;
   /**
+   * develop向けPRのAIレビュー（`kind`が`PR_REVIEW`・#3990）の対象と結果。**古い応答・テストの
+   * 差し込みでは欠けうる**ので任意にしてある。`issueNumber`はPR番号の埋め草で、読むのはこちら。
+   */
+  prNumber?: number | null;
+  baseSha?: string | null;
+  headSha?: string | null;
+  /** `lgtm` / `needs-check` / `changes-requested`。失敗・時間切れは入らず`status`と`message`が持つ */
+  reviewVerdict?: string | null;
+  /**
    * 順番待ちの中で先に払い出す度合い（#1541。大きいほど先）。
    *
    * **画面はこれで並べ替えたうえで、値そのものは出さない。** 押した結果は「1番になった」
@@ -739,6 +755,11 @@ export type DispatchHostView = {
    * `failed`で返すため、配ると押した起動が失われる。
    */
   manualStepSessionCapable: boolean | null;
+  /**
+   * develop向けPRのAIレビュー（#3990）を実行できるか。**`null`・未定義は「できない」**
+   * （古いpollerは未知の種別を`failed`で返すため、配るとレビューが必ず失敗として残る）。
+   */
+  prReviewCapable?: boolean | null;
 
   /**
    * チェックアウトの更新と自己再起動ができるか（#1875）。**`null`（未申告）は「できない」として
@@ -1152,6 +1173,8 @@ export function describeDispatchJobKind(kind: DispatchJobKind): string {
       return "Codexのペアリング";
     case "MANUAL_STEP_SESSION":
       return "手作業セッション";
+    case "PR_REVIEW":
+      return "PRレビュー";
     case "INTERRUPT":
     case "KILL":
     case "INSTRUCTION":
@@ -1945,6 +1968,7 @@ export function describeDispatchJobStatus(
   if (kind === "MANUAL_STEP") return describeManualStepJobStatus(status);
   if (kind === "PLAN_REVIEW") return describePlanReviewJobStatus(status);
   if (kind === "CODE_REVIEW") return describeCodeReviewJobStatus(status);
+  if (kind === "PR_REVIEW") return describePrReviewJobStatus(status);
   if (kind !== "LAUNCH") return describeSessionControlJobStatus(status, kind);
   switch (status) {
     case "QUEUED":
@@ -2125,6 +2149,38 @@ function describeCodeReviewJobStatus(status: DispatchJobStatus): {
       return { label: "応答なし", tone: "error" };
     case "CANCELED":
       return { label: "取り消し済み", tone: "muted" };
+  }
+}
+
+/**
+ * develop向けPRのAIレビュー（#3990）の状態の見せ方。
+ *
+ * **他の種別と違い、`succeeded`は「レビューが終わった」まで**（セッションが立っただけではない）。
+ * 実行中はpollerではなくレビューのスクリプトが生存報告を送る。判定そのもの（lgtm等）は
+ * `reviewVerdict`に入り、画面は状態ラベルへ添える。
+ */
+function describePrReviewJobStatus(status: DispatchJobStatus): {
+  label: string;
+  tone: DispatchJobTone;
+} {
+  switch (status) {
+    case "QUEUED":
+      return { label: "キュー待ち", tone: "pending" };
+    case "CLAIMED":
+      return { label: "サブPC受付済み", tone: "pending" };
+    case "RUNNING":
+      return { label: "レビュー実行中", tone: "running" };
+    case "SUCCEEDED":
+      return { label: "完了", tone: "success" };
+    case "FAILED":
+      return { label: "失敗", tone: "error" };
+    case "SKIPPED":
+      return { label: "見送り", tone: "muted" };
+    case "TIMEOUT":
+      return { label: "タイムアウト", tone: "error" };
+    // 新しいHEADが積まれて取り消された（古いHEADの結果はマージ判定に使わない）
+    case "CANCELED":
+      return { label: "古いHEAD（取り消し）", tone: "muted" };
   }
 }
 

@@ -9,6 +9,8 @@ import type {
   PullRequestDetail as PullRequestDetailData,
 } from "@/types/pull-request";
 
+vi.mock("@/components/dashboard/pull-request-ai-review-jobs", () => ({ PullRequestAiReviewJobs: () => null }));
+
 function makePullRequest(overrides: Partial<PullRequestSummary> = {}): PullRequestSummary {
   return {
     ciRunId: null,
