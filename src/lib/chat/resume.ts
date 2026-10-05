@@ -1,8 +1,10 @@
 import { loadStatus, type ChatUser } from "@/lib/chat/handlers";
 import { diffRows } from "@/lib/chat/session";
 import type { ChatConfirmCard, ChatContext, ChatFreshness, ChatMemory } from "@/lib/chat/types";
+import { getInstallationToken } from "@/lib/github/app-auth";
 import { findRepositoryByFullName } from "@/lib/github/issue-create-service";
 import { planPullRequestRepair } from "@/lib/github/pull-request-repair-service";
+import { fetchPullRequest } from "@/lib/github/pull-requests-api";
 
 const MAX_REFRESH_TARGETS = 5;
 
@@ -62,6 +64,25 @@ export async function refreshConversation(params: {
   const staleConfirms = (
     await Promise.all(
       params.pendingConfirms.map(async ({ messageId, card }): Promise<ChatStaleConfirm | null> => {
+        if (card.type === "confirm_fix_request") {
+          // 依頼を組み立てた時点のHEADから進んでいたら、古い前提のまま実行させない（#4045）
+          const [fixOwner, fixRepo] = card.repo.split("/");
+          const fixRepository = await findRepositoryByFullName(user.id, card.repo);
+          if (!fixRepository || !fixOwner || !fixRepo) {
+            return { messageId, reason: `${card.repo} へのアクセス権が無いため依頼できません。` };
+          }
+          try {
+            const token = await getInstallationToken(fixRepository.installation.installationId);
+            const pr = await fetchPullRequest(fixOwner, fixRepo, card.number, token);
+            if (pr.state !== "open" || pr.merged) return { messageId, reason: "このPRはすでにクローズ・マージされています。" };
+            if (pr.head.sha !== card.headSha) {
+              return { messageId, reason: `調査したHEAD（${card.headSha.slice(0, 7)}）から進んでいます（現在 ${pr.head.sha.slice(0, 7)}）。もう一度調べ直してください。` };
+            }
+            return null;
+          } catch {
+            return { messageId, reason: "PRの最新状態を取得できないため、依頼してよいか確認できません（未確認）。" };
+          }
+        }
         if (card.type !== "confirm_repair") return null;
         const [owner, repo] = card.repo.split("/");
         const repository = await findRepositoryByFullName(user.id, card.repo);

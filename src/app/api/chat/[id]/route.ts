@@ -26,6 +26,8 @@ const RECENT_USER_TEXTS = 8;
 const PAGE_SIZE = 100;
 /** 他端末の更新と衝突したときに、読み直してやり直す回数 */
 const MAX_RETRIES = 3;
+/** 調査へ渡す直近の発言・返信の件数 */
+const HISTORY_TURNS = 6;
 
 class VersionConflict extends Error {}
 
@@ -151,11 +153,23 @@ export async function POST(request: NextRequest, { params }: Params) {
       take: RECENT_USER_TEXTS,
       select: { text: true },
     });
+    // 調査が「それ」「この方針で」を解釈する材料（直近の会話。発言・返信とも本文だけ）
+    const turns = await db.chatMessage.findMany({
+      where: { conversationId: id },
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      take: HISTORY_TURNS,
+      select: { role: true, text: true },
+    });
+    const history = turns.reverse().map((row) => ({
+      role: row.role === "user" ? ("user" as const) : ("assistant" as const),
+      content: row.text.slice(0, 1200),
+    }));
     const reply = await handleChatMessage({
       user,
       context,
       text,
       recentUserTexts: [...recent.map((row) => row.text).reverse(), text],
+      history,
     });
     const memory = recordFindings(
       parseChatMemory(conversation.memory),

@@ -69,7 +69,8 @@ export async function POST(request: NextRequest, { params }: Params) {
       !!item &&
       typeof item === "object" &&
       ((item as { type?: unknown }).type === "confirm_repair" ||
-        (item as { type?: unknown }).type === "confirm_issue"),
+        (item as { type?: unknown }).type === "confirm_issue" ||
+        (item as { type?: unknown }).type === "confirm_fix_request"),
   );
   if (!card) {
     await db.chatMessage.update({ where: { id: message.id }, data: { confirmState: "pending" } });

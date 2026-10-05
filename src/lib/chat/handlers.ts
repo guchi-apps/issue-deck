@@ -5,6 +5,9 @@ import {
   type ResolvedRef,
 } from "@/lib/chat/intent";
 import { buildIssueDraft } from "@/lib/chat/issue-draft";
+import { latestFixRequest, loadFixProgress } from "@/lib/chat/fix-progress-loader";
+import type { ModelMessage } from "@/lib/chat/investigation/agent";
+import { replyWithInvestigation, type InvestigationDeps } from "@/lib/chat/investigation/reply";
 import {
   buildIssueStatusCard,
   buildPullRequestStatusCard,
@@ -31,6 +34,7 @@ import {
   planPullRequestRepair,
   startPullRequestRepair,
 } from "@/lib/github/pull-request-repair-service";
+import { requestPullRequestFix } from "@/lib/github/pull-request-fix-request-service";
 import { fetchActivePullRequestRepairRun } from "@/lib/github/pull-request-repair-run";
 import { parsePullRequestReviewVerdict } from "@/lib/github/pull-request-review-verdict";
 import { fetchPullRequest } from "@/lib/github/pull-requests-api";
@@ -160,13 +164,43 @@ export async function handleChatMessage(params: {
   context: ChatContext;
   text: string;
   recentUserTexts: string[];
+  /** 直近の会話（古い→新しい）。調査が「それ」「続けて」を解釈する材料（#4045） */
+  history?: ModelMessage[];
+  /** テスト用の差し替え */
+  investigationDeps?: InvestigationDeps;
 }): Promise<ChatReply> {
   const { user, context } = params;
   const resolved = resolveIntent(parseIntent(params.text), context);
+  const investigate = (
+    target: { repo: string; number: number } | null,
+    candidates: ChatTarget[],
+    note?: string,
+  ) =>
+    replyWithInvestigation({
+      user,
+      context,
+      text: params.text,
+      target,
+      candidates,
+      history: params.history ?? [],
+      note,
+      deps: params.investigationDeps,
+    });
 
   switch (resolved.type) {
-    case "unknown":
+    case "investigate": {
+      const reply = await investigate(resolved.target, resolved.candidates);
+      return reply;
+    }
+
+    case "unknown": {
+      // 定型に当たらない質問・依頼はAIの調査へ。AIが使えないときだけ従来の使い方案内に戻す
+      if (params.text.trim().length >= 3) {
+        const reply = await investigate(null, context.targets.length > 1 ? context.targets.slice(0, 4) : []);
+        if (!reply.unavailable) return reply;
+      }
       return { text: CHAT_HELP_TEXT, cards: [], needsConfirm: false, nextContext: context };
+    }
 
     case "ask":
       return {
@@ -182,16 +216,24 @@ export async function handleChatMessage(params: {
     case "merge_check": {
       const refs = resolved.type === "status" ? resolved.targets : [resolved.target];
       const loaded = await Promise.all(refs.map((ref) => loadStatus(user, ref)));
-      const cards = loaded.flatMap((item) => (item.ok ? [item.card] : []));
+      const cards: ChatCard[] = loaded.flatMap((item) => (item.ok ? [item.card] : []));
+      // この会話で渡した修正依頼があれば、状態カードの後ろに進み具合（依頼→push→CI→レビュー）を足す
+      for (const item of loaded) {
+        if (!item.ok || item.card.kind !== "pr") continue;
+        const action = latestFixRequest(context.actions, item.card.repo, item.card.number);
+        const progress = action ? await loadFixProgress(user.id, action) : null;
+        if (progress) cards.push(progress);
+      }
+      const statusCards = cards.filter((c): c is ChatStatusCard => c.type === "status");
       const errors = loaded.flatMap((item) => (item.ok ? [] : [item.message]));
-      const targets = cards.map(toTarget);
+      const targets = statusCards.map(toTarget);
       const repo = refs[0]?.repo ?? context.repo;
       const lead =
         resolved.type === "merge_check"
-          ? mergeSummary(cards[0])
-          : cards.length > 1
-            ? `${cards.length}件の現在の状態です。`
-            : cards.length === 1
+          ? mergeSummary(statusCards[0])
+          : statusCards.length > 1
+            ? `${statusCards.length}件の現在の状態です。`
+            : statusCards.length === 1
               ? "現在の状態です。"
               : "";
       return {
@@ -215,6 +257,16 @@ export async function handleChatMessage(params: {
       }
       const plan = await planPullRequestRepair(repository, owner, repo, resolved.target.number);
       if (!plan.ok) {
+        // 自動修正の対象外でも「終了」にしない。理由を内容から調べて説明し、明示の修正依頼なら
+        // 実行系へ渡す経路（修正依頼カード）へ進める（#4045）。進行中・取得失敗は調査へ回さず理由だけ返す
+        if (plan.error === "not_repairable") {
+          const reply = await investigate(
+            resolved.target,
+            [],
+            `既存の自動修正（CI失敗・コンフリクト・自動レビューの要修正）の対象外と判定された（${plan.message ?? plan.error}）。レビューやCIの中身を調べ、修正可能・方針判断待ち・情報不足・修正不要のどれかを説明すること。`,
+          );
+          if (!reply.unavailable) return reply;
+        }
         return {
           text: plan.message ?? `#${resolved.target.number} は自動修正を起動できません（${plan.error}）。`,
           cards: [],
@@ -239,6 +291,18 @@ export async function handleChatMessage(params: {
     }
 
     case "create_issue": {
+      // 調査・合意を目的／要件／完了条件へ整理したIssue案（重複確認つき）。AIが使えないときだけ従来の貼り付け型
+      const ai = await investigate(
+        context.investigation?.target
+          ? { repo: context.investigation.target.repo, number: context.investigation.target.number }
+          : resolved.source
+            ? { repo: resolved.source.repo, number: resolved.source.number }
+            : null,
+        [],
+        "Issue案の作成を依頼された。会話の調査・合意を目的／要件／完了条件へ整理し、proposal_kind=\"issue\" で返す。既存Issueとの重複は search_issues で確認する。",
+      );
+      const stopped = ai.cards.some((c) => c.type === "investigation" && c.stopReason !== null);
+      if (!ai.unavailable && !stopped) return ai;
       const draft = buildIssueDraft({
         title: resolved.title,
         source: resolved.source,
@@ -314,10 +378,61 @@ export async function executeConfirmedCard(
     };
   }
 
+  if (card.type === "confirm_fix_request") {
+    const [owner, repo] = card.repo.split("/");
+    const repository = await findRepositoryByFullName(user.id, card.repo);
+    if (!repository || !owner || !repo) {
+      return failure("fix_request", card.repo, card.number, "リポジトリにアクセスできません。", at);
+    }
+    const result = await requestPullRequestFix(user, repository, {
+      owner,
+      repo,
+      number: card.number,
+      expectedHeadSha: card.headSha,
+      instruction: card.instruction,
+    });
+    if (!result.ok) return failure("fix_request", card.repo, card.number, result.message, at);
+    const message = result.duplicate
+      ? `PR #${card.number} への同じ修正依頼は既に渡してあります（再送しませんでした）。「進み具合は？」で状況を確認できます。`
+      : `PR #${card.number} の修正依頼をIssue #${result.issueNumber} へ渡しました。実行先が起動すると同じPRのブランチへpushされます。CI・レビューを待ち、検証できたら結果をお知らせします（「進み具合は？」で確認できます）。`;
+    return {
+      ok: true,
+      text: message,
+      card: { type: "result", ok: true, title: "修正依頼を渡しました（まだ完了ではありません）", detail: message, htmlUrl: result.commentUrl },
+      action: {
+        type: "fix_request",
+        status: "started",
+        repo: card.repo,
+        number: card.number,
+        at,
+        message,
+        fixRequest: { headSha: result.headSha, commentUrl: result.commentUrl, issueNumber: result.issueNumber },
+      },
+    };
+  }
+
   const repository = await findRepositoryByFullName(user.id, card.repo);
   const title = (overrides.title ?? card.title).trim();
   if (!repository) return failure("create_issue", card.repo, null, "リポジトリにアクセスできません。", at);
   if (!title) return failure("create_issue", card.repo, null, "タイトルが空です。", at);
+  // 再送・再接続で同じIssueを2件作らない: 直近に同じタイトルのIssueがあれば、それを返す
+  const recent = await db.issue.findFirst({
+    where: {
+      repositoryId: repository.id,
+      title,
+      githubCreatedAt: { gte: new Date(Date.now() - 10 * 60_000) },
+    },
+    select: { number: true, title: true, htmlUrl: true },
+  });
+  if (recent) {
+    const message = `同じタイトルのIssue #${recent.number} が直前に作成済みのため、新しくは作りませんでした。`;
+    return {
+      ok: true,
+      text: message,
+      card: { type: "result", ok: true, title: message, detail: recent.title, htmlUrl: recent.htmlUrl },
+      action: { type: "create_issue", status: "created", repo: card.repo, number: recent.number, at, message },
+    };
+  }
   const result = await createIssueForUser(user, repository, {
     repositoryFullName: card.repo,
     title,
