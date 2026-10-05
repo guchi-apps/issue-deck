@@ -33,6 +33,7 @@ import { DeviceBuildInstructions, shortOid } from "@/components/dashboard/device
 import { GithubReferenceLink } from "@/components/dashboard/github-reference-link";
 import {
   PullRequestHealthRow,
+  hasPullRequestHealthChips,
   PullRequestHealthSummaryChips,
 } from "@/components/dashboard/pull-request-health-chips";
 import {
@@ -1713,6 +1714,13 @@ function RepositorySummaryRow({
       ?.pullRequest?.number ?? null,
     webviewIos !== null,
   );
+  // 状態バッジが1つでもあるか。無いときは2行目を作らない（#4032）
+  const hasBadges =
+    hasPullRequestHealthChips(summary.pullRequestHealth) ||
+    summary.releaseInProgress ||
+    releaseLaunching ||
+    iosDistribution.running ||
+    deploy !== null;
   const hasAnything =
     summary.activeLaneCount > 0 ||
     summary.releaseInProgress ||
@@ -1732,13 +1740,15 @@ function RepositorySummaryRow({
       // 2ペインでは中身が行の下に無いので、どこが開いたのかを読み上げへ伝える（#2157）
       aria-controls={showSelectionMarker ? DETAIL_PANE_ID : undefined}
       className={cn(
-        "flex w-full flex-wrap items-center gap-x-2 gap-y-1 border-b px-4 py-2 text-left hover:bg-accent/50",
+        "flex w-full flex-col gap-1 border-b px-4 py-2 text-left hover:bg-accent/50",
         isOpen && "bg-muted/60",
         // 枠線のぶん左padding を詰めて、選択中でない行と文字の位置を揃える
         showSelectionMarker && "border-l-2 border-l-transparent pl-3.5",
         showSelectionMarker && isOpen && "border-l-primary",
       )}
     >
+      {/* 1行目: 左に名前と属性、右に件数。件数はバッジの有無・個数に関わらずここへ固定する（#4032） */}
+      <span className="flex w-full min-w-0 items-center gap-x-2">
       <ChevronRight
         className={cn(
           "size-3 shrink-0 text-muted-foreground transition-transform",
@@ -1771,45 +1781,9 @@ function RepositorySummaryRow({
           青で、他の意味の色（紫＝リリース・琥珀＝手が要る・緑＝成功・赤＝失敗）とは重ねない */}
       {webviewIos && <IosDistributionIcon pending={iosDistribution.pending} />}
 
-      <span className="flex-1" />
+      <span className="min-w-0 flex-1" />
 
-      {/* 問題と進行状況を件数で並べる（#4015）。CI失敗だけでなく、レビュー要修正・コンフリクト・
-          自動修正中なども開かずに分かる。成功状態は出さず、記号と文字を常時表示してホバー不要にする */}
-      <PullRequestHealthSummaryChips summary={summary.pullRequestHealth} />
-      {summary.releaseInProgress ? (
-        // 人が押す番になったら紫（自動で進む）から琥珀（手が要る）へ変える（#2038）。
-        // 回るアイコンの有無だけが手掛かりだったころは、一覧を流し見して自分の番の
-        // リポジトリを見つけられなかった。文言は展開したときの見出しと同じものを使う。
-        // Xcodeで実機へ反映するリポジトリ（#3468）は画面でマージしないので、見出しと同じ
-        // 「実機未反映」を出す
-        repository.deviceBuild ? (
-          <AttentionPill>{repository.deviceBuild.pendingLabel}</AttentionPill>
-        ) : summary.releaseMergeTarget ? (
-          <AttentionPill>{releaseMergeTargetLabel(summary.releaseMergeTarget)}</AttentionPill>
-        ) : (
-          <ReleaseProgressPill
-            label="リリース中"
-            spinning={summary.releaseAutoProgressing}
-            note="チェック・判定の実行中"
-          />
-        )
-      ) : (
-        // 起動からバンプPRが現れるまでは、開いたときのボタン（「リリース起動中…」）にしか
-        // 出ていなかった（#1955）。バンプPRが現れれば上の「リリース中」へ引き継がれる
-        releaseLaunching && (
-          <ReleaseProgressPill label="リリース起動中" spinning note="workflowの起動待ち" />
-        )
-      )}
-      {/* マージ後もデプロイが終わるまでは本番へ出ていない。開かなくても分かるようにする（#1579） */}
-      {/* TestFlightへの配布が走っている間だけ（#3806）。Webのデプロイとは別の行為なので別のピルにする */}
-      {iosDistribution.running && <IosDistributingBadge />}
-      <DeployStateBadge deploy={deploy} compact linkToRun={false} />
-
-      {/* **PRのマージ待ちは畳んだ行に出さない**（#2172）。8リポジトリを1行ずつ並べる画面で
-          ピルが長く、スマホ幅ではその行だけが2段に折り返していた。マージの導線は開いたPR行
-          （`PullRequestLine`）とPR一覧画面が持っているので、畳んだままでも操作は失われない。
-          ヘッダーの「手が要るもの◯件」には引き続き数える（`needsAttention`）。
-          リリースPRのマージ待ち（「mainへマージ待ち」）は上の琥珀のピルが表す（#2038） */}
+      <span className="flex shrink-0 items-center gap-2">
       {/* 手作業は畳んだ束にも残る（#1586）。開かなくても残っていることが分かるようにする。
           **他の件数と同じアイコン＋数字で出す**（#2243）。琥珀のピルだけ形が違ったため、
           右端に件数が並んでも手作業だけ縦位置と字送りがそろわず、スマホ幅ではそのぶん
@@ -1871,6 +1845,47 @@ function RepositorySummaryRow({
           {mergedPullRequestsLoaded ? "動きなし" : "読み込み中"}
         </span>
       )}
+      </span>
+      </span>
+
+      {/* 2行目以降: 状態バッジ。1個でも必ずここへ出し、収まらなければ折り返す。無ければ行ごと作らない */}
+      {hasBadges && (
+      <span className="flex w-full flex-wrap items-center gap-x-2 gap-y-1">
+      {/* 問題と進行状況を並べる（#4015）。CI失敗だけでなく、レビュー要修正・コンフリクト・
+          自動修正中なども開かずに分かる。成功状態は出さず、記号と文字を常時表示してホバー不要にする */}
+      <PullRequestHealthSummaryChips summary={summary.pullRequestHealth} />
+      {summary.releaseInProgress ? (
+        // 人が押す番になったら紫（自動で進む）から琥珀（手が要る）へ変える（#2038）。
+        // 回るアイコンの有無だけが手掛かりだったころは、一覧を流し見して自分の番の
+        // リポジトリを見つけられなかった。文言は展開したときの見出しと同じものを使う。
+        // Xcodeで実機へ反映するリポジトリ（#3468）は画面でマージしないので、見出しと同じ
+        // 「実機未反映」を出す
+        repository.deviceBuild ? (
+          <AttentionPill>{repository.deviceBuild.pendingLabel}</AttentionPill>
+        ) : summary.releaseMergeTarget ? (
+          <AttentionPill>{releaseMergeTargetLabel(summary.releaseMergeTarget)}</AttentionPill>
+        ) : (
+          <ReleaseProgressPill
+            label="リリース中"
+            spinning={summary.releaseAutoProgressing}
+            note="チェック・判定の実行中"
+          />
+        )
+      ) : (
+        // 起動からバンプPRが現れるまでは、開いたときのボタン（「リリース起動中…」）にしか
+        // 出ていなかった（#1955）。バンプPRが現れれば上の「リリース中」へ引き継がれる
+        releaseLaunching && (
+          <ReleaseProgressPill label="リリース起動中" spinning note="workflowの起動待ち" />
+        )
+      )}
+      {/* マージ後もデプロイが終わるまでは本番へ出ていない。開かなくても分かるようにする（#1579） */}
+      {/* TestFlightへの配布が走っている間だけ（#3806）。Webのデプロイとは別の行為なので別のピルにする */}
+      {iosDistribution.running && <IosDistributingBadge />}
+      <DeployStateBadge deploy={deploy} compact linkToRun={false} />
+      </span>
+      )}
+      {/* **PRのマージ待ちは畳んだ行に出さない**（#2172）。マージの導線は開いたPR行と
+          PR一覧画面が持っている。ヘッダーの「手が要るもの◯件」には引き続き数える（`needsAttention`） */}
     </button>
   );
 }

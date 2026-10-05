@@ -153,6 +153,11 @@ const CHIP_DEFS: {
   { category: "review-running", label: "レビュー中", icon: "●", tone: "run", description: "レビュー実行中のPR" },
 ];
 
+/** `PullRequestHealthSummaryChips`が1つ以上描画するか（畳んだ行で空のバッジ行を作らないため） */
+export function hasPullRequestHealthChips(summary: PullRequestHealthSummary): boolean {
+  return CHIP_DEFS.some((def) => summary.counts[def.category] > 0);
+}
+
 export function PullRequestHealthSummaryChips({ summary }: { summary: PullRequestHealthSummary }) {
   const chips = CHIP_DEFS.filter((def) => summary.counts[def.category] > 0);
   if (chips.length === 0) return null;
