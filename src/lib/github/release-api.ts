@@ -16,6 +16,7 @@ import {
   type CompareCommit,
   type ReleaseRebuildCandidate,
 } from "@/lib/release-rebuild";
+import type { CarriedRelease, ReleaseNotesSnapshot, UnreleasedDeployState } from "@/lib/release-recovery";
 import type { BumpKind } from "@/lib/semver-bump";
 
 /** 「develop→mainのリリースフロー」を自動化するworkflowのファイル名（release-develop-to-main.yml） */
@@ -155,6 +156,20 @@ export type ReleaseHistoryItem = {
   iosDeliveredBuild?: number;
   /** iOS配布が失敗した段階（#3867）。`null`は段階を特定できなかった失敗、未定義は失敗なし */
   iosFailureStage?: string | null;
+  /**
+   * GitHub Releaseが無い版（タグから補った版。#4003）の本番デプロイの状態。
+   * **未定義はReleaseのある通常の版。** 定義されている版は本番反映済みとして扱わない
+   * （動作確認の対象外。`resolveReleaseCheckStatus`）。
+   */
+  deployState?: UnreleasedDeployState;
+  /** Releaseが無い版の利用者向けの説明（その版の`.github/release-notes.md`。#4003） */
+  releaseNotes?: ReleaseNotesSnapshot;
+  /** Releaseが無い版で、関連PRの一覧（`body`）を取れなかった理由（#4003） */
+  bodyUnavailableReason?: string;
+  /** この失敗版の変更を本番へ届けた後の版（#4003） */
+  recoveredBy?: string;
+  /** 前の失敗版から引き継いで本番へ届けた変更（#4003）。この版自身の変更は`body` */
+  carriedOver?: CarriedRelease[];
 };
 
 /**

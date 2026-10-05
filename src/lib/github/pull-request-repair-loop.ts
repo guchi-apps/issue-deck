@@ -11,7 +11,9 @@ export type AutoRepairStopReason =
   | "repeated_problem"
   | "pull_request_closed"
   | "dispatch_failed"
-  | "timed_out";
+  | "timed_out"
+  /** 本番復旧系列（#3998）の停止に巻き込んで止めた */
+  | "stopped_by_user";
 
 export type AutoRepairLoopState = {
   status: AutoRepairLoopStatus;
@@ -19,6 +21,8 @@ export type AutoRepairLoopState = {
   round: number;
   currentKind: RepairKind | null;
   lastFingerprint: string | null;
+  /** この系列の修復回数の上限。省略時は`AUTO_REPAIR_MAX_ROUNDS`（本番復旧系列は残り回数を渡す。#3998） */
+  maxRounds?: number;
 };
 
 export type AutoRepairObservation = {
@@ -72,7 +76,7 @@ export function decideAutoRepairLoop(
     if (observation.reviewRequired !== false && observation.review === "needs-check") return { action: "stop", reason: "user_action_required" };
     return { action: "complete" };
   }
-  if (loop.round >= AUTO_REPAIR_MAX_ROUNDS) return { action: "stop", reason: "max_rounds_reached" };
+  if (loop.round >= (loop.maxRounds ?? AUTO_REPAIR_MAX_ROUNDS)) return { action: "stop", reason: "max_rounds_reached" };
 
   const fingerprint = `${observation.headSha}:${kind}`;
   if (loop.lastFingerprint === fingerprint) return { action: "stop", reason: "repeated_problem" };

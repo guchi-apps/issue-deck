@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const reportDispatchJob = vi.fn();
 const resolveFixedInstructionCheckUser = vi.fn();
+const resumePrReviewMerge = vi.fn();
 
 vi.mock("@/lib/dispatch/dispatch-auth", () => ({
   authorizeDispatch: () => "ok",
@@ -16,6 +17,12 @@ vi.mock("@/lib/dispatch/jobs", () => ({
 vi.mock("@/lib/dispatch/session-escalation", () => ({
   get resolveFixedInstructionCheckUser() {
     return resolveFixedInstructionCheckUser;
+  },
+}));
+
+vi.mock("@/lib/dispatch/pr-review-jobs", () => ({
+  get resumePrReviewMerge() {
+    return resumePrReviewMerge;
   },
 }));
 
@@ -59,6 +66,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   reportDispatchJob.mockResolvedValue({ ok: true, applied: true, job: job() });
   resolveFixedInstructionCheckUser.mockResolvedValue(true);
+  resumePrReviewMerge.mockResolvedValue("resumed");
 });
 
 /**
@@ -99,5 +107,44 @@ describe("POST /api/dispatch/report の確認待ち解除", () => {
   it("succeeded以外では何も外さない（見送られた報告で札を消さない）", async () => {
     await POST(postRequest({ ...succeeded, status: "skipped" }));
     expect(resolveFixedInstructionCheckUser).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * PRレビュー（#3990）が確定したら、最終マージ判定を再開する。
+ */
+describe("POST /api/dispatch/report のPRレビューの完了", () => {
+  const review = job({ id: "job-1", kind: "PR_REVIEW", recovery: false, instruction: null });
+
+  it("確定の報告で最終マージ判定の再開を試みる", async () => {
+    reportDispatchJob.mockResolvedValue({ ok: true, applied: true, job: review });
+    await POST(postRequest({ ...succeeded, reviewVerdict: "lgtm" }));
+    expect(reportDispatchJob).toHaveBeenCalledWith(expect.objectContaining({ reviewVerdict: "lgtm" }));
+    expect(resumePrReviewMerge).toHaveBeenCalledWith("job-1");
+  });
+
+  it("失敗の報告でも再開する（失敗として読み直して人へ渡すため）", async () => {
+    reportDispatchJob.mockResolvedValue({ ok: true, applied: true, job: review });
+    await POST(postRequest({ jobId: "job-1", host: "subpc", status: "failed", message: "x" }));
+    expect(resumePrReviewMerge).toHaveBeenCalledWith("job-1");
+  });
+
+  it("実行中の生存報告では再開しない", async () => {
+    reportDispatchJob.mockResolvedValue({ ok: true, applied: true, job: review });
+    await POST(postRequest({ jobId: "job-1", host: "subpc", status: "running" }));
+    expect(resumePrReviewMerge).not.toHaveBeenCalled();
+  });
+
+  it("未知の判定の語は受け取らない", async () => {
+    reportDispatchJob.mockResolvedValue({ ok: true, applied: true, job: review });
+    await POST(postRequest({ ...succeeded, reviewVerdict: "failed" }));
+    expect(reportDispatchJob).toHaveBeenCalledWith(expect.objectContaining({ reviewVerdict: null }));
+  });
+
+  it("再開に失敗しても報告そのものは受け付ける（巡回が拾う）", async () => {
+    reportDispatchJob.mockResolvedValue({ ok: true, applied: true, job: review });
+    resumePrReviewMerge.mockRejectedValue(new Error("boom"));
+    const response = await POST(postRequest({ ...succeeded, reviewVerdict: "lgtm" }));
+    expect(response.status).toBe(200);
   });
 });

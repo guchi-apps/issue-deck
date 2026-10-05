@@ -14,19 +14,55 @@ Claude Codeの`/code-review`に当たるものを、フリートの盤面（issu
 
 材料も出す場所も別なので、片方を直すときにもう片方は動かない。
 
-## develop向けPRのCodexレビュー（#3917）
+## develop向けPRのCodexレビュー（#3917・#3990）
 
-develop向けPRの自動レビューは、既存のClaude Codeに加えてCodexも同じ実行条件で確認する。CodexはGitHub Actions内で実行しない。公式の`openai/codex-action`はAPIキー課金になるため、ActionsはPRコメントへ対象SHA付きの要求印を残して結果を待ち、サブPCのpollerがその印を拾う。
+develop向けPRの自動レビューは、既存のClaude Codeに加えてCodexも同じ実行条件で確認する。CodexはGitHub Actions内で実行しない。公式の`openai/codex-action`はAPIキー課金になるため、サブPCで`codex login`済み（ChatGPTサブスクリプション）のCodex CLIを使う。
 
-サブPCでは`codex login`済みのCodex CLIを読み取り専用・一時worktreeで実行するため、ChatGPTサブスクリプション枠を使い、実装中のworktreeやPRブランチを変更しない。結果は同じSHA付きの判定印としてPRへ投稿され、ClaudeまたはCodexのどちらかが`needs-check`・`changes-requested`なら自動マージを保留する。サブPCが応答しない、Codexが失敗する、30分以内に結果が返らない場合も安全側で保留する。
+### 経路（#3990）
 
-PR本文の`issue-deck-verification:start review=...`にはClaudeとCodexの総合判定を書く。要修正、要確認、取得失敗、LGTMの順で優先し、各レビューの個別判定は節の箇条書きに残す。PR詳細とリリースPRの指摘本文も、同じコミットに対する各レビュー元の最新コメントから要修正・要確認を優先して選ぶ。後から届いた別のレビュー元のLGTMで指摘を隠さないため。
+**状態の正本はIssueDeckの`DispatchJob`（`kind=PR_REVIEW`）**。かつてはActionsがPRコメントへ要求印を残して結果コメントが付くまで30秒×60回（最大30分）ポーリングし、サブPCが全リポジトリのopen PRを巡回して印を拾っていたが、これは廃止した（結果待ちだけのためにGitHub-hostedのrunnerを最大30分保持し、サブPC停止・巡回失敗・Codex実行中を区別できなかったため）。
+
+```text
+PR作成 / push → claude-review-develop.yml
+  risk-check → review-provider（Claudeモードならここで終わり。Codexは起動しない）
+  codex-review ジョブ: POST /api/dispatch/pr-review {action: request}（積んで即終了。結果は待たない）
+        実行できるサブPCが無い → 409。その場で失敗（理由つき）して auto-merge を止める
+  auto-merge ジョブ: POST /api/dispatch/pr-review {action: status} を読む
+        pending → ラベル・コメント・自動マージを何も反映せず保留して終了
+        done    → 判定（lgtm / needs-check / changes-requested）で通常の最終判定
+        failed  → 自動マージせず 00.check-user ＋ 01.check-blocked（理由つき）
+        stale   → PRのHEADが進んでいる。何も反映しない（新しいHEADのrunが判定する）
+
+サブPC poller が PR_REVIEW を claim（QUEUED → CLAIMED）→ tmuxで start-codex-pr-review.sh --run
+  → レビューのスクリプトが running（生存報告）→ succeeded/failed を /api/dispatch/report へ報告
+  → PRへレビュー本文と判定印（issue-deck-codex-review-verdict）を投稿（人が読む記録・parser互換）
+
+確定の報告（または巡回 POST /api/dispatch/pr-review/resume-sweep）
+  → 同じrunの auto-merge ジョブだけを再実行（POST /actions/jobs/{id}/rerun）
+  → auto-merge が最新のDispatchJobの状態を読み直して、最新HEADについて最終判定をやり直す
+```
+
+- **状態は`QUEUED` / `CLAIMED` / `RUNNING` / `SUCCEEDED` / `FAILED` / `TIMEOUT`（＋`CANCELED`=古いHEAD）で区別する。** PR詳細の「サブPCのAIレビュー」に、状態・host・モデル・開始時刻・失敗理由が出る。
+- **起動前の失敗も30分待たず原因が分かる。** 実行できるホストが無ければ積む時点で拒否、積んだが取りに来ないものは`QUEUED`のまま5分で`TIMEOUT`（`DISPATCH_CONTROL_QUEUE_TIMEOUT_MS`）、起動後にスクリプトが落ちれば`on_exit`が`failed`を報告する。どれも`auto-merge`の再実行で`failed`として読まれ、自動マージせず人へ渡る。
+- **二重レビューの防止。** `activeKey`は`pr_review:<repo>#<PR>@<head SHA>:<agent>`。同じPR・HEAD・agentの未完了・判定済みがあれば積み直さない（Actionsの再実行は最新のジョブを返し、再開先のrunIDだけを付け替える）。失敗・取り消し後の再依頼だけが新しいジョブを作る。
+- **古いHEADの結果をマージ判定に使わない。** 新しいHEADを積むと、同じPR・agentの待機中（`QUEUED`）の古いジョブを`CANCELED`にする。走り出したものは止めないが、結果は`headSha`が違うので使われない。`auto-merge`も現在のPRのHEADと突き合わせ、再実行はHEADが一致するときだけ行う（再実行は同じ`concurrency`グループに入り、新しいHEADの実行中のrunをキャンセルしかねないため）。
+- **`auto-merge`の再実行が、GitHub-hostedのrunnerを結果待ちで保持しない再開手段。** 比較した選択肢は、(1) 報告時の`workflow_dispatch`（callerへトリガーの追加配布が要る）、(2) check/statusを契機にするworkflow（同上）、(3) IssueDeckでの最終判定（auto-mergeの複雑な判定をサーバーへ複製することになる）。**既存のGitHub App（`actions: write`）で、callerの変更なしに、取得済みの`needs`出力を引き継げる**ジョブ単位の再実行を採った。runが実行中だと再実行できないため、巡回（pollerが毎巡`resume-sweep`を呼ぶ）で取りこぼしを拾う。10回失敗・24時間経過で諦める際は、PRへ理由を投稿する。
+- **Claudeモード・Codexモードとの整合（#3988）。** Claudeモードは通常CI＋Claudeレビューのみでcodex-reviewジョブは`skipped`（状態は`skipped`）。Codexモードは通常CI＋`PR_REVIEW(agent=codex)`で、Claudeレビューは起動しない。通常のCI（build/test/lint）はAIプロバイダーと無関係に実行される。
+- **移行。** 移行前の実装が残した判定印が同じHEADにあれば、新しいジョブを積まず、その判定をそのまま使う（二重に実行しない）。要求印（`issue-deck-codex-review-request`）はジョブキューとしては使わず、巡回（`--sweep`）も削除した。移行前のワークフローのrunがpoll中のPRは、そのrunがタイムアウトした後に再実行（またはpush）すれば新しい経路に載る。
+
+### GitHub上の記録と判定の扱い
+
+サブPCでは`codex login`済みのCodex CLIを読み取り専用・一時worktreeで実行するため、ChatGPTサブスクリプション枠を使い、実装中のworktreeやPRブランチを変更しない。結果は同じSHA付きの判定印としてPRへ投稿され（状態の正本はDispatchJobで、判定印は人が読む記録・既存parser・リリース集約との互換のために残す）、ClaudeまたはCodexのどちらかが`needs-check`・`changes-requested`なら自動マージを保留する。サブPCが応答しない、Codexが失敗する、判定を読み取れない場合も安全側で保留する。
+
+PR本文の`issue-deck-verification:start review=...`にはClaudeとCodexの総合判定を書く。要修正、要確認、取得失敗、LGTMの順で優先し、各レビューの個別判定は節の箇条書きに残す。Codexの結果待ちの間は総合判定を確定させず（`review=unavailable`・「⏳ Codexレビューの完了待ち」）、完了後に`auto-merge`が再実行されて最終の判定に書き換わる。PR詳細とリリースPRの指摘本文も、同じコミットに対する各レビュー元の最新コメントから要修正・要確認を優先して選ぶ。後から届いた別のレビュー元のLGTMで指摘を隠さないため。
 
 Codexが`changes-requested`の場合も、後継Issueや新しいPRは作らない。Codexには「人の判断なしに自動修正してよい」印が無いため、無人の自動修正へは渡さず確認待ちにする。人がPR詳細から「レビュー指摘を自動修正」を開始すると、Claude・Codex双方の同一head SHAに対する要修正コメントを既存の`issue-<番号>`ブランチへ渡し、修正後は同じPRを再レビューする。PR詳細はこの過程をレビュー中・要修正・修正中・再レビュー中・レビューOK・マージ待ちとして表示する。
 
-この機能を初めて追加するPRでは、マージ前のサブPCのpollerにCodex要求の巡回処理がまだ無い。Actionsは要求コメントを投稿しても結果を受け取れずタイムアウトするため、そのPRの検証では`start-codex-pr-review.sh --run`を対象SHAで手動起動する。以後のPRは、develop反映後にpollerが巡回する。
+### デプロイの順序
 
-巡回側でPRのbase/head SHAを読むときは、`gh pr list --json baseRefOid`を使わない。`gh pr list`のJSONフィールドに`baseRefOid`は無く、エラーを空一覧へ変換すると要求コメントだけが残り、Actionsは結果待ちを続ける（#3943）。`gh api repos/<owner>/<repo>/pulls`の`.base.sha`と`.head.sha`を使い、一覧取得の失敗はエラーとして出す。develop向けのバージョンbump PRで残った未完了チェックは、同じhead SHAを使うmain向けリリースPRにも表示される。
+この仕組みはサブPCの`poller`（`DISPATCH_POLLER_VERSION` 31）と本番のissue-deck（`/api/dispatch/pr-review`・DBマイグレーション）の両方が揃って動く。**サブPCは`develop`、本番は`main`で動く**ため、`develop`にだけ入っている間は、pollerが`prReview`を申告しても本番がまだ受け取れない。順序は「①`main`へのリリースで本番のAPI・マイグレーションを出す → ②サブPCのチェックアウトを更新して再起動（画面の「更新して再起動」）」。①より前に②をすると、巡回（`--sweep`）が無くなったpollerだけが先に新しくなり、旧ワークフロー（要求印）のPRが結果を得られない。その間のPRは`codex-review`が失敗して確認待ちになる（安全側）。
+
+巡回側でPRのbase/head SHAを読むときは、`gh pr list --json baseRefOid`を使わない（#3943。`gh pr list`のJSONフィールドに`baseRefOid`は無い）。ジョブには積む時点（Actionsのイベント）の`base.sha`・`head.sha`が載るので、いまはpollerがGitHubへ問い合わせて取る必要が無い。develop向けのバージョンbump PRで残った未完了チェックは、同じhead SHAを使うmain向けリリースPRにも表示される。
 
 ## 経路
 

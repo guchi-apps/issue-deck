@@ -191,6 +191,13 @@ export type SessionUsageSummary = {
    */
   omittedIssues: number;
   omittedIssueCostUsd: number;
+  /**
+   * 使用量が数値として揃っていない記録の件数（#3995）。**合計には0として入っている**ので、
+   * 画面は「合計に含まれていない消費がある」ことを断る。
+   * - `missing`: 実行はあったが使用量を取れなかった試行（タイムアウト等。`sessionUsageGap`）
+   * - `unpriced`: トークンはあるが単価が分からず、金額を出せなかった記録
+   */
+  usageGaps: { missing: number; unpriced: number };
   /** 報告してきたホスト名（重複なし） */
   hosts: string[];
   /** いちばん新しい報告の時刻（ISO）。まだ1件も無ければnull */
@@ -618,8 +625,11 @@ export function buildSessionUsageSummary({
   const byIssue = new Map<string, UsageIssue>();
   const hosts = new Set<string>();
   let implementationSessions = 0;
+  const usageGaps = { missing: 0, unpriced: 0 };
 
   for (const entry of inPeriod) {
+    const gap = sessionUsageGap(entry);
+    if (gap) usageGaps[gap] += 1;
     addEntry(totals, entry);
     addEntry(totalsByAgent[entry.agent], entry);
     addEntry(totalsBySource[entry.source === "github-actions" ? "github-actions" : "local"], entry);
@@ -763,9 +773,35 @@ export function buildSessionUsageSummary({
     byIssue: issues.slice(0, MAX_DETAIL_ISSUES),
     omittedIssues: omitted.length,
     omittedIssueCostUsd: omitted.reduce((sum, issue) => sum + issue.costUsd, 0),
+    usageGaps,
     hosts: [...hosts].sort(),
     reportedAt,
   };
+}
+
+/**
+ * 記録1件の使用量が数値として揃っていないか（#3995）。**$0を「使っていない」と読ませないため。**
+ *
+ * - `missing`: 応答0の記録。サブPCのPRレビュー（`/api/dispatch/review-usage`）は、タイムアウト等で
+ *   使用量を取れなかった試行も応答0の行として残す（転記・Actionsの報告は応答0を受け付けないので、
+ *   この形はそこからしか来ない）
+ * - `unpriced`: トークンはあるのに金額が0。集計側の単価表に無いモデル（または`auto`でモデルが
+ *   分からない実行）は金額を0で報告するため、実測の$0とは区別する
+ */
+export function sessionUsageGap(
+  entry: Pick<SessionUsageEntry, "responses" | "contextTokens" | "outputTokens" | "costUsd">,
+): "missing" | "unpriced" | null {
+  if (entry.responses === 0) return "missing";
+  if (entry.costUsd === 0 && entry.contextTokens + entry.outputTokens > 0) return "unpriced";
+  return null;
+}
+
+/**
+ * 記録の実行場所（#3995）。種別（処理の中身）とは別に出す。「CI/CD・レビュー」にはGitHub Actionsの
+ * 実行とサブPCで走ったPRレビュー（Codex）の両方が入るため、種別だけでは場所が分からない。
+ */
+export function sessionUsageLocationLabel(entry: Pick<SessionUsageEntry, "source" | "host">): string {
+  return entry.source === "github-actions" ? "GitHub Actions" : `ローカル（${entry.host}）`;
 }
 
 export type SessionUsageCostSplit = {

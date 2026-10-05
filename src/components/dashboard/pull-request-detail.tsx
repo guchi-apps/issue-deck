@@ -20,6 +20,7 @@ import {
   pullRequestKindLabel,
 } from "@/components/dashboard/pull-request-badges";
 import { PullRequestActionsMenu } from "@/components/dashboard/pull-request-actions-menu";
+import { PullRequestAiReviewJobs } from "@/components/dashboard/pull-request-ai-review-jobs";
 import { PullRequestFileList } from "@/components/dashboard/pull-request-file-list";
 import { PullRequestReviewRound } from "@/components/dashboard/pull-request-review-round";
 import { PullRequestMergeButton } from "@/components/dashboard/pull-request-merge-button";
@@ -434,6 +435,15 @@ export function PullRequestDetail({
             </p>
           )}
         </div>
+
+        {/* サブPCで走るAIレビュー（PR_REVIEW・#3990）の状態。develop向けの未マージPRだけ */}
+        {pullRequest.baseRef === "develop" && pullRequest.state === "open" && !pullRequest.merged && (
+          <PullRequestAiReviewJobs
+            repositoryFullName={pullRequest.repositoryFullName}
+            prNumber={pullRequest.number}
+            headSha={pullRequest.headSha}
+          />
+        )}
 
         {error && <p className="px-4 py-3 text-sm text-destructive">{error}</p>}
 

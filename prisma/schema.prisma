@@ -795,6 +795,7 @@ enum DispatchJobKind {
   REBOOT
   CODEX_PAIRING
   MANUAL_STEP_SESSION
+  PR_REVIEW
 }
 
 // issue-deckの画面から積み、サブPCのpollerがポーリングで取りに来るジョブ（#1179）。
@@ -996,6 +997,24 @@ model DispatchJob {
   //
   // **未完了のジョブには入れない**（`dismissDispatchJob`が弾く）。走っているものを表示だけ
   // 消せると、動いている実体が画面のどこにも出ないまま残る。止めたいなら取り消しを使う。
+  // develop向けPRのAIレビュー（`kind`が`PR_REVIEW`のときだけ入る。#3990）。
+  //
+  // **PR番号・SHAを`issueNumber`や`message`へ詰めず専用列で持つ。** `issueNumber`にはPR番号を
+  // 埋め草として入れる（必須列のため。GitHubはIssueとPRで番号を共有するので衝突しない）。
+  // 同一PR・同一HEAD・同一agentの二重レビューは`activeKey`（`pr_review:owner/repo#PR@HEAD:agent`）
+  // が止め、新しいpushでHEADが変われば別ジョブになる（古いHEADの結果はマージ判定から外れる）。
+  prNumber           Int?
+  baseSha            String?           @db.VarChar(64)
+  headSha            String?           @db.VarChar(64)
+  // レビューの判定（`lgtm` / `needs-check` / `changes-requested`）。**失敗・時間切れは入れず
+  // `status`と`message`が持つ。** GitHubのverdict markerは結果の記録で、状態の正本はこの行
+  reviewVerdict      String?           @db.VarChar(32)
+  // 最終マージ判定を再開する対象のActionsのrun（PRを契機に走った`claude-review-develop`の実行ID）。
+  // レビューの完了後に、そのrunの`auto-merge`ジョブだけを再実行して判定をやり直す
+  workflowRunId      String?           @db.VarChar(32)
+  // 最終マージ判定の再開を済ませた時刻。入るまでは再開の対象で、sweepが何度でも試す
+  mergeResumedAt     DateTime?
+  mergeResumeAttempts Int              @default(0)
   dismissedAt        DateTime?
   // 順番待ちの中で先に払い出す度合い（#1541）。大きいほど先。既定は0で、同じ値なら
   // `createdAt`の昇順＝積んだ順に流れるため、**既存行の並びは変わらない**。
@@ -1016,6 +1035,8 @@ model DispatchJob {
   @@index([targetHost, status, kind])
   @@index([targetHost, status, kind, queuePriority])
   @@index([repositoryFullName, issueNumber])
+  @@index([kind, status, mergeResumedAt])
+  @@index([repositoryFullName, prNumber, headSha])
 }
 
 // ジョブを実行できるホストの申告（#1179）。サブPCが定期的にpushする。
@@ -1123,6 +1144,9 @@ model DispatchHost {
   // standalone installで入れたCodexだけで、npmで入れたものはサブコマンドが存在しても
   // 共有のapp-serverデーモンを起こせない（#2521）。
   codexRemoteControlCapable Boolean?
+  // develop向けPRのAIレビュー（`PR_REVIEW`・#3990）を実行できるか。Codex CLIの実体と
+  // 起動用スクリプトが揃っているpollerだけが申告する。`null`（未申告）は「できない」
+  prReviewCapable          Boolean?
   manualStepSessionCapable  Boolean?
 
   // チェックアウトの更新と自己再起動ができるか（#1875）。`git pull --ff-only`のうえ
@@ -1781,11 +1805,65 @@ model PullRequestAutoRepairLoop {
   stopReason         String?
   lastSweepAt        DateTime?
   waitStartedAt      DateTime?
+  /// この系列で使える修復回数の上限。本番復旧系列（`DeployRecoverySeries`）から渡すときは、
+  /// 系列全体の残り回数になる（#3998）。画面からの開始は既定の3
+  maxRounds          Int      @default(3)
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
 
   @@unique([repositoryFullName, pullRequestNumber], map: "PullRequestAutoRepairLoop_repo_pr_key")
   @@index([status])
+}
+
+/// 本番デプロイ失敗を起点にした復旧系列（#3998）。デプロイ失敗の帯の「AIに修正を依頼」で1件できる。
+///
+/// **1回の失敗（repo・環境・run・attempt）につき1行。** 同じ失敗の連打は同じ行を返す。
+/// 状態遷移の判断は`src/lib/deploy-recovery-series.ts`の純関数が持ち、ここは観測の結果だけを持つ。
+/// 個々のPR修復は`PullRequestAutoRepairLoop`へ渡し、ここは修正Issue・PR・試行回数・停止理由を束ねる。
+///
+/// **第1段（#3998）では本番反映の手前（`awaiting_release`）で止まる。** main起点への限定適用・
+/// 本番自動マージ・稼働版の確認はサブIssue（#4005〜#4007）で足す。
+model DeployRecoverySeries {
+  id                 String    @id @default(cuid())
+  repositoryFullName String
+  /// 対象環境。いまは`production`だけ
+  environment        String    @default("production")
+  /// 失敗した`deploy.yml`のrun id・attempt・対象SHA。**この組で1回の失敗を表す**
+  failedRunId        BigInt
+  failedRunAttempt   Int
+  failedSha          String
+  failedRunUrl       String    @db.Text
+  /// 失敗した版（`package.json`のversion）。分からなければnull
+  failedVersion      String?
+  /// `DeployRecoveryStatus`。解釈はアプリ側に寄せる
+  status             String
+  /// 進行中の間だけ`repositoryFullName`を入れる。**同じリポジトリで系列を2本同時に走らせない**
+  activeKey          String?   @unique
+  /// 開始した人と許可した範囲・期限。**権限はラベルやPR本文ではなくこの記録で判定する**
+  startedByUserId    String
+  scope              String
+  expiresAt          DateTime
+  /// 修正Issue・実装の起動・修正PR
+  issueNumber        Int?
+  dispatchJobId      String?
+  dispatchedAt       DateTime?
+  /// 実装セッションが報告した原因の区分（`code` / `config` / `database` / `external` / `unknown`）
+  cause              String?
+  pullRequestNumber  Int?
+  /// 前のPRまでに使った修復回数。現在のPRの分は`PullRequestAutoRepairLoop.round`を足して数える
+  repairRoundsBase   Int       @default(0)
+  repairRoundsUsed   Int       @default(0)
+  stopReason         String?
+  stopDetail         String?   @db.Text
+  stoppedByUserId    String?
+  stoppedAt          DateTime?
+  lastSweepAt        DateTime?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  @@unique([repositoryFullName, environment, failedRunId, failedRunAttempt], map: "DeployRecoverySeries_failure_key")
+  @@index([status])
+  @@index([repositoryFullName, createdAt])
 }
 
 /// ローカル・サブPC実行のセッションが公開したアーティファクト（#2154）。

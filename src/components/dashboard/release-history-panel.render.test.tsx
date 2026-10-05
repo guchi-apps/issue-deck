@@ -304,3 +304,65 @@ describe("ReleaseHistoryPanel のiOS配布バッジ（#3800）", () => {
     expect(screen.getByText("iOS配布に失敗（アップロード）")).toBeTruthy();
   });
 });
+
+describe("ReleaseHistoryPanel のデプロイ失敗版と修正版（#4003）", () => {
+  const failed = entry({
+    tagName: "v8.34.0",
+    htmlUrl: "https://github.com/guchi-apps/issue-deck/tree/v8.34.0",
+    publishedAt: "2026-09-06T04:00:00.000Z",
+    body: "## What's Changed\n* PR自動修復を繰り返す by @m-guchi in https://github.com/guchi-apps/issue-deck/pull/3980\n",
+    deployState: "failed",
+    releaseNotes: { status: "ok", changes: ["PRの自動修復を繰り返し実行できるようになりました。"], usage: ["1. 修復ボタンを押します。"] },
+    recoveredBy: "v8.34.1",
+  });
+  const recovery = entry({
+    tagName: "v8.34.1",
+    body: "## What's Changed\n* マイグレーション失敗を復旧する by @m-guchi in https://github.com/guchi-apps/issue-deck/pull/3997\n",
+    carriedOver: [
+      {
+        tagName: "v8.34.0",
+        htmlUrl: failed.htmlUrl,
+        deployState: "failed",
+        releaseNotes: failed.releaseNotes!,
+        body: failed.body,
+      },
+    ],
+  });
+
+  it("修正版は追加した修正と、元版から引き継いだ説明・PRを分けて出し、未確認は1件だけ", () => {
+    renderPanel({ entries: [recovery, failed] });
+    expect(screen.getByText("復旧のために追加した修正")).toBeTruthy();
+    expect(screen.getByText("マイグレーション失敗を復旧する")).toBeTruthy();
+    expect(screen.getByText("から引き継いだ変更")).toBeTruthy();
+    expect(screen.getByText("PRの自動修復を繰り返し実行できるようになりました。")).toBeTruthy();
+    expect(screen.getByText("PR自動修復を繰り返す")).toBeTruthy();
+    expect(screen.getByText("未確認 1件")).toBeTruthy();
+  });
+
+  it("失敗版は全件表示で読め、デプロイ失敗と後継の版が分かる", () => {
+    renderPanel({ entries: [recovery, failed] });
+    showAllReleases();
+    expect(screen.getAllByText("デプロイ失敗").length).toBeGreaterThan(0);
+    expect(screen.getByText(/で本番へ反映されました/)).toBeTruthy();
+    expect(screen.getByText("この版に含まれるPR")).toBeTruthy();
+    expect(screen.getAllByText("1. 修復ボタンを押します。")).toHaveLength(2);
+  });
+
+  it("説明を取得できない失敗版は、空欄にせず理由を出す", () => {
+    renderPanel({
+      entries: [
+        entry({
+          tagName: "v9.0.0",
+          deployState: "failed",
+          releaseNotes: { status: "unavailable", reason: "説明ファイルの取得に失敗しました" },
+          body: null,
+          bodyUnavailableReason: "この版に含まれるPRの一覧を取得できませんでした",
+        }),
+      ],
+    });
+    showAllReleases();
+    expect(screen.getByText("説明を取得できませんでした（説明ファイルの取得に失敗しました）")).toBeTruthy();
+    expect(screen.getByText("この版に含まれるPRの一覧を取得できませんでした")).toBeTruthy();
+    expect(screen.getByText("この版の変更は、まだ本番へ反映されていません。")).toBeTruthy();
+  });
+});

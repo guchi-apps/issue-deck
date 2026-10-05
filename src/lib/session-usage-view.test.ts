@@ -14,6 +14,8 @@ import {
   isUsageKindInWorkFlow,
   niceAxisScale,
   sessionUsageCostSplit,
+  sessionUsageGap,
+  sessionUsageLocationLabel,
   sessionUsageIssueKey,
   sessionUsageModelLabel,
   sessionUsagePeriodStartMs,
@@ -422,6 +424,82 @@ describe("buildSessionUsageSummary", () => {
     expect(summary.byDay[0].byAgent.codex.sessions).toBe(1);
     expect(summary.byRepository[0].byAgent.claude.sessions).toBe(1);
     expect(summary.byKind[0].byAgent.codex.sessions).toBe(1);
+  });
+
+  it("「CI/CD・レビュー」にActionsのClaudeとサブPCのCodexを並べ、種別・日別・エージェント・Issue別・総計が一致する（#3995）", () => {
+    const entries = [
+      entry({ sessionId: "impl", costUsd: 5 }),
+      entry({
+        sessionId: "actions:guchi-apps/issue-deck:1:claude-review",
+        host: "github-actions",
+        source: "github-actions",
+        kind: "actions",
+        issueNumber: 2504,
+        prNumber: 2600,
+        costUsd: 2,
+      }),
+      entry({
+        sessionId: "codex-pr-review:a",
+        agent: "codex",
+        source: "local",
+        kind: "actions",
+        issueNumber: 2504,
+        prNumber: 2600,
+        models: ["gpt-5.6-terra"],
+        costUsd: 1.5,
+      }),
+      // 使用量を取れなかった再試行（応答0）。合計を変えず、欠損として数える
+      entry({
+        sessionId: "codex-pr-review:b",
+        agent: "codex",
+        source: "local",
+        kind: "actions",
+        issueNumber: 2504,
+        prNumber: 2600,
+        responses: 0,
+        inputTokens: 0,
+        cacheCreateTokens: 0,
+        cacheReadTokens: 0,
+        outputTokens: 0,
+        costUsd: 0,
+      }),
+    ];
+    const summary = buildSessionUsageSummary({ entries, nowMs: NOW_MS, days: 7, reportedAt: null });
+    const ci = summary.byKind.find((row) => row.key === "actions");
+
+    expect(ci?.costUsd).toBe(3.5);
+    expect(ci?.byAgent.claude.costUsd).toBe(2);
+    expect(ci?.byAgent.codex.costUsd).toBe(1.5);
+    expect(ci?.byAgent.codex.sessions).toBe(2);
+    // サブPCの実行をActionsへ数えない
+    expect(ci?.bySource["github-actions"].costUsd).toBe(2);
+    expect(ci?.bySource.local.costUsd).toBe(1.5);
+
+    const kindSum = summary.byKind.reduce((sum, row) => sum + row.costUsd, 0);
+    const daySum = summary.byDay.reduce((sum, row) => sum + row.costUsd, 0);
+    const agentSum = summary.totalsByAgent.claude.costUsd + summary.totalsByAgent.codex.costUsd;
+    const issueSum = summary.byIssue.reduce((sum, row) => sum + row.costUsd, 0);
+    for (const value of [kindSum, daySum, agentSum, issueSum]) expect(value).toBeCloseTo(summary.totals.costUsd, 9);
+    expect(summary.totals.costUsd).toBe(8.5);
+    expect(summary.usageGaps).toEqual({ missing: 1, unpriced: 0 });
+  });
+
+  it("使用量の記録なし・単価不明を実測の$0と区別する（#3995）", () => {
+    expect(sessionUsageGap(entry())).toBeNull();
+    expect(sessionUsageGap(entry({ responses: 0, inputTokens: 0, cacheCreateTokens: 0, cacheReadTokens: 0, outputTokens: 0, costUsd: 0 }))).toBe("missing");
+    expect(sessionUsageGap(entry({ costUsd: 0 }))).toBe("unpriced");
+    const summary = buildSessionUsageSummary({
+      entries: [entry({ sessionId: "a", agent: "codex", models: [], costUsd: 0 })],
+      nowMs: NOW_MS,
+      days: 7,
+      reportedAt: null,
+    });
+    expect(summary.usageGaps).toEqual({ missing: 0, unpriced: 1 });
+  });
+
+  it("実行場所はsourceとhostから出し、種別とは独立している（#3995）", () => {
+    expect(sessionUsageLocationLabel(entry({ source: "github-actions", host: "github-actions" }))).toBe("GitHub Actions");
+    expect(sessionUsageLocationLabel(entry({ source: "local", host: "subpc" }))).toBe("ローカル（subpc）");
   });
 
   it("日別の金額をエージェント×モデルの重さ（tier）別に積む（#3396）", () => {

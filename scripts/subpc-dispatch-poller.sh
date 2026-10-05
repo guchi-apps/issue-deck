@@ -164,7 +164,11 @@ set -euo pipefail
 #     まま止まったセッションへは、画面のボタンを押しても毎回「作業中のため送りませんでした」で
 #     見送られていた。
 # 30: 計画レビューのagentを読み、Codex CLIも起動する（#3186）。
-DISPATCH_POLLER_VERSION="30"
+# 31: develop向けPRのAIレビュー（`PR_REVIEW`）をDispatchJobとして受け取り、Codexレビューを
+#     tmuxで起動する（#3990）。かつての`--sweep`（全リポジトリのopen PRを巡回して要求印を拾う）は
+#     廃止し、使用量の補完・送り直し（`--usage-flush`）と、確定したレビューの最終マージ判定の
+#     再開の巡回（`POST /api/dispatch/pr-review/resume-sweep`）だけを残した。
+DISPATCH_POLLER_VERSION="31"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -257,9 +261,9 @@ MANUAL_STEP_RUNNER="$SCRIPT_DIR/run-manual-step.sh"
 # worktreeを作らず、対象リポジトリの`origin/develop`のスナップショットを読んで指摘を投稿する。
 PLAN_REVIEW_LAUNCHER="$SCRIPT_DIR/start-plan-review.sh"
 CODE_REVIEW_LAUNCHER="$SCRIPT_DIR/start-code-review.sh"
-# develop向けPRのCodexレビューは、GitHub Actionsが残す要求コメントを巡回して拾う。
-# APIキーではなくサブPCで`codex login`済みのChatGPTサブスクリプションを使うため、Actionsから
-# 直接起動せずこのランチャーへ渡す（#3917）。
+# develop向けPRのCodexレビュー。APIキーではなくサブPCで`codex login`済みのChatGPTサブスクリプションを
+# 使うため、Actionsから直接起動せずこのランチャーへ渡す（#3917）。**ジョブ（`PR_REVIEW`）はissue-deckが
+# 積み、pollerがclaimして起動する**（#3990。かつてはPRコメントの要求印を巡回して拾っていた）。
 CODEX_PR_REVIEW_LAUNCHER="$SCRIPT_DIR/start-codex-pr-review.sh"
 # 確認環境（#2444）。**セッションを立てないジョブ**（`SELF_UPDATE`・`MANUAL_STEP`と同じ枠外）で、
 # developの最新をそのまま開ける開発サーバーを1本だけ起こす。
@@ -790,6 +794,20 @@ plan_review_capable() {
   fi
 }
 
+# develop向けPRのAIレビュー（`PR_REVIEW`・#3990）を実行できるか。**ランチャーとCodex CLIの両方が
+# 手元にあるかで判定する**（`plan_review_capable`と同じ向き。申告しないpollerへは配られない）。
+# このジョブはPRのたびに自動で積まれるので、実行できないまま申告すると、PRのたびに
+# 「失敗」のレビューが並び自動マージが止まる。
+pr_review_capable() {
+  local codex_command
+  codex_command="$(agent_cli_codex_command 2>/dev/null || true)"
+  if [[ -f "$CODEX_PR_REVIEW_LAUNCHER" && -n "$codex_command" ]] && command -v "$codex_command" >/dev/null 2>&1; then
+    printf 'true'
+  else
+    printf 'false'
+  fi
+}
+
 # リポジトリ全体のコードレビュー（#698）のセッションを起こせるか。**ランチャーが手元にあるかで
 # 判定する**（`plan_review_capable`と同じ）。こちらは人が画面から押す種別なので、申告しないと
 # ダイアログの選択肢に理由付きで出る（配ってから`failed`で返すより早い）。
@@ -1278,6 +1296,7 @@ announce() {
     --argjson planReview "$(plan_review_capable)" \
     --argjson planReviewAgent true \
     --argjson codeReview "$(code_review_capable)" \
+    --argjson prReview "$(pr_review_capable)" \
     --argjson codex "$codex_flag" \
     --argjson codexRemoteControl "$(codex_remote_control_capable)" \
     --argjson selfUpdate "$(self_update_capable)" \
@@ -1290,7 +1309,7 @@ announce() {
     --argjson launchHold "${LAUNCH_HOLD_JSON:-null}" \
     --argjson checkout "${checkout:-null}" \
     --argjson planReviewSessions "$plan_review_sessions" \
-    '{host: $host, repositories: $repositories, contractVersion: $contractVersion, agentVersion: $agentVersion, sessionControl: true, instruction: true, crossRepoQuestion: $crossRepoQuestion, manualStep: $manualStep, manualStepAbort: $manualStepAbort, manualStepValues: $manualStepValues, manualStepVps: $manualStepVps, manualStepSession: $manualStepSession, planReview: $planReview, planReviewAgent: $planReviewAgent, codeReview: $codeReview, codex: $codex, codexRemoteControl: $codexRemoteControl, selfUpdate: $selfUpdate, reboot: $reboot, rebootState: $rebootState, preview: $preview, previewState: $previewState, previewRepositories: $previewRepositories, maxSessions: $maxSessions, liveSessions: $liveSessions, metrics: $metrics, launchHold: $launchHold, checkout: $checkout, planReviewSessions: $planReviewSessions}')"
+    '{host: $host, repositories: $repositories, contractVersion: $contractVersion, agentVersion: $agentVersion, sessionControl: true, instruction: true, crossRepoQuestion: $crossRepoQuestion, manualStep: $manualStep, manualStepAbort: $manualStepAbort, manualStepValues: $manualStepValues, manualStepVps: $manualStepVps, manualStepSession: $manualStepSession, planReview: $planReview, planReviewAgent: $planReviewAgent, codeReview: $codeReview, prReview: $prReview, codex: $codex, codexRemoteControl: $codexRemoteControl, selfUpdate: $selfUpdate, reboot: $reboot, rebootState: $rebootState, preview: $preview, previewState: $previewState, previewRepositories: $previewRepositories, maxSessions: $maxSessions, liveSessions: $liveSessions, metrics: $metrics, launchHold: $launchHold, checkout: $checkout, planReviewSessions: $planReviewSessions}')"
 
   if ! api_call POST /api/dispatch/hosts "$payload"; then
     report_api_failure "ホストの申告に失敗しました"
@@ -1474,22 +1493,59 @@ sweep_pull_request_auto_repairs() {
   fi
 }
 
+# 「AIに修正を依頼」で始めた本番復旧系列を進める（#3998）。修正Issueの作成・実装の起動・
+# 原因区分の読み取り・修正PRの修復への受け渡しはissue-deck側が判定し、ここは呼ぶだけにする。
+# 実装はこのホストで起動するため、ホスト名を渡す。
+sweep_deploy_recoveries() {
+  local payload
+  payload="$(jq -n --arg host "$HOST_NAME" '{host: $host}')"
+  if ! api_call POST /api/repositories/deploy-recovery-series/sweep "$payload"; then
+    case "$API_RESPONSE_STATUS" in
+      # デプロイ順のずれによる404と接続不可は、他の巡回と同じく黙って見送る。
+      404|000) return 0 ;;
+      *) report_api_failure "本番復旧系列の巡回に失敗しました" ;;
+    esac
+    return 0
+  fi
+  printf '%s' "$API_RESPONSE_BODY" |
+    jq -r '.actions[]? | "本番復旧系列を進めました: \(.repositoryFullName) \(.action) \(.detail // "")"' 2>/dev/null ||
+    true
+  return 0
+}
+
 # --- Codexによるdevelop向けPRレビュー ------------------------------------------------
 #
-# GitHub ActionsはPRコメントへ要求印を投稿して結果を待つだけにし、実際のCodex CLIは
-# サブPCのログイン済みセッションで動かす。これによりAPIキー課金を避け、ChatGPTの
-# サブスクリプション枠を使う。各リポジトリの走査・重複排除・対象SHAの固定はランチャー側に置く。
+# レビューそのものは`PR_REVIEW`ジョブとして届く（`run_pr_review_job`。#3990）。ここに残るのは、
+# ジョブの外側で要る2つの巡回だけ。**GitHubを走査してレビューを拾う処理は廃止した**
+# （PRコメントの要求印をジョブキューにせず、状態の正本をDispatchJobへ移した）。
+#
+# 1. 使用量の補完と送り直し（#3995）。GitHubには触れず、手元のログと送信待ちの置き場だけを見る
+# 2. 確定したレビューの最終マージ判定の再開。完了の報告でも再開を試みるが、Actionsのrunが実行中だと
+#    再実行できないため、その取りこぼしと、サブPC停止で`TIMEOUT`になったものをここで拾う。
+#    **判断はissue-deck側**で、ここは呼ぶだけ
 sweep_codex_pull_request_reviews() {
-  [[ -f "$CODEX_PR_REVIEW_LAUNCHER" ]] || return 0
-  local full_name owner repo
-  while IFS= read -r full_name; do
-    [[ -n "$full_name" && "$full_name" == */* ]] || continue
-    owner="${full_name%%/*}"
-    repo="${full_name#*/}"
-    # GitHub APIの応答待ちでpoller本体のジョブ取得を止めない。ランチャー内のflockが同一repoの
-    # 重複走査を防ぐため、次の巡回が来ても同じレビューを二重に起動しない。
-    setsid bash "$CODEX_PR_REVIEW_LAUNCHER" --sweep "$owner" "$repo" &
-  done < <(local_repo_list_runnable)
+  if [[ -f "$CODEX_PR_REVIEW_LAUNCHER" ]]; then
+    local full_name owner repo
+    while IFS= read -r full_name; do
+      [[ -n "$full_name" && "$full_name" == */* ]] || continue
+      owner="${full_name%%/*}"
+      repo="${full_name#*/}"
+      setsid bash "$CODEX_PR_REVIEW_LAUNCHER" --usage-flush "$owner" "$repo" >/dev/null 2>&1 &
+    done < <(local_repo_list_runnable)
+  fi
+
+  if ! api_call POST /api/dispatch/pr-review/resume-sweep '{}'; then
+    case "$API_RESPONSE_STATUS" in
+      # デプロイ順のずれによる404と接続不可は、他の巡回と同じく黙って見送る
+      404|000) return 0 ;;
+      *) report_api_failure "PRレビュー後の最終マージ判定の再開に失敗しました" ;;
+    esac
+    return 0
+  fi
+  local resumed
+  resumed="$(printf '%s' "$API_RESPONSE_BODY" | jq -r '.resumed // 0' 2>/dev/null || echo 0)"
+  [[ "${resumed:-0}" -gt 0 ]] && echo "PRレビューの完了を受けて、最終マージ判定を${resumed}件再開しました。"
+  return 0
 }
 
 # --- iOS配布失敗の巡回検知 ---------------------------------------------------------
@@ -3419,6 +3475,49 @@ abort_manual_step_job() {
   return 0
 }
 
+# develop向けPRのAIレビュー（#3990）のジョブを起動する。**起動前の失敗はここで即座に`failed`で
+# 報告する**（Actionsが30分待つ前に、原因が分かる）。起動後はレビューのスクリプトが報告を引き継ぐ。
+run_pr_review_job() {
+  local job_id="$1" owner="$2" repo="$3" agent="$4" pr_number="$5" base_sha="$6" head_sha="$7"
+  local session
+  if [[ ! -f "$CODEX_PR_REVIEW_LAUNCHER" ]]; then
+    report_job "$job_id" failed "PRレビューのランチャーがありません（$CODEX_PR_REVIEW_LAUNCHER）。"
+    return 0
+  fi
+  if [[ "$agent" != "codex" ]]; then
+    report_job "$job_id" failed "PRレビューに未対応のエージェントです: $agent"
+    return 0
+  fi
+  if [[ ! "$pr_number" =~ ^[1-9][0-9]*$ || ! "$base_sha" =~ ^[0-9a-f]{40,64}$ || ! "$head_sha" =~ ^[0-9a-f]{40,64}$ ]]; then
+    report_job "$job_id" failed "PR番号またはSHAが不正です: #$pr_number base=$base_sha head=$head_sha"
+    return 0
+  fi
+  session="${repo//[^A-Za-z0-9_-]/-}-codex-pr-review-${pr_number}-${head_sha:0:12}"
+  # 前回の失敗で`remain-on-exit`の死んだペインだけが残っているセッションは畳む（再依頼を妨げない）
+  if tmux has-session -t "=$session" 2>/dev/null &&
+    [[ "$(tmux list-panes -t "=$session" -F '#{pane_dead}' 2>/dev/null | head -1)" == "1" ]]; then
+    tmux kill-session -t "=$session" 2>/dev/null || true
+  fi
+  if tmux has-session -t "=$session" 2>/dev/null; then
+    # 失敗ではなく見送り（同じHEADのレビューが前のジョブから動き続けている）。結果は前の実行が
+    # GitHubへ判定印として残すが、このジョブの状態は確定しないので、最終マージ判定は人へ渡る
+    report_job "$job_id" skipped "同じHEADのレビューのtmuxセッションが既に動いています: $session" "$session"
+    return 0
+  fi
+  if [[ "$DRY_RUN" -eq 1 ]]; then
+    echo "  --dry-run のため起動しません（PRレビュー $owner/$repo#$pr_number）"
+    return 0
+  fi
+  ensure_tmux_server_scope
+  if ! tmux new-session -d -s "$session" -c "$HOME" \
+    "APP_BASE_URL=$(printf '%q' "${APP_BASE_URL:-}") bash $(printf '%q' "$CODEX_PR_REVIEW_LAUNCHER") --run $(printf '%q' "$owner") $(printf '%q' "$repo") $(printf '%q' "$pr_number") $(printf '%q' "$base_sha") $(printf '%q' "$head_sha") $(printf '%q' "$job_id")"; then
+    report_job "$job_id" failed "PRレビューのtmuxセッションを起動できませんでした: $session"
+    return 0
+  fi
+  tmux set-option -t "$session:" -w remain-on-exit failed >/dev/null 2>&1 || true
+  report_job "$job_id" running "Codexレビューを起動しました（$owner/$repo#$pr_number）" "$session"
+}
+
 # ジョブを1件実行する。
 #
 # 起動できたかどうかは、**起動の前後でtmuxのセッション一覧を比べて増分を見る**。
@@ -3507,6 +3606,18 @@ run_job() {
   # ここが最後にパス・シェル引数として使う場所なので改めて確かめる。
   if ! local_session_validate_target "$owner" "$repo" "$issue_number" 2>/dev/null; then
     report_job "$job_id" failed "受け取った owner/repo/Issue番号が不正です: $full_name #$issue_number"
+    return 0
+  fi
+
+  # develop向けPRのAIレビュー（`PR_REVIEW`・#3990）。**`local_repo_check`は通さない**（版数の契約は
+  # 実装セッション用で、こちらはPRのコードを読むだけ。cloneが無ければランチャーが理由を出して落ちる）。
+  # **`launch_and_report`は使わない。** あちらは「tmuxが立った」時点で`succeeded`を報告するが、
+  # このジョブはレビューが終わるまで`running`のままで、完了・失敗はレビューのスクリプト自身が報告する。
+  if [[ "$kind" == "PR_REVIEW" ]]; then
+    run_pr_review_job "$job_id" "$owner" "$repo" "$agent" \
+      "$(printf '%s' "$job_json" | jq -r '.prNumber // ""')" \
+      "$(printf '%s' "$job_json" | jq -r '.baseSha // ""')" \
+      "$(printf '%s' "$job_json" | jq -r '.headSha // ""')"
     return 0
   fi
 
@@ -3894,6 +4005,8 @@ run_once() {
     tidy_codex_remote_control
     sweep_pull_request_conflicts
     sweep_pull_request_auto_repairs
+    # 本番復旧系列（#3998）。**dry-runでは呼ばない**（Issueの起票と実装の起動という副作用があるため）。
+    sweep_deploy_recoveries
     sweep_codex_pull_request_reviews
     # iOS配布失敗の巡回検知（#3745）。**dry-runでは呼ばない**（Issueの起票という外向きの副作用があるため）。
     sweep_ios_distribution_failures

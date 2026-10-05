@@ -8,6 +8,8 @@ import { isAgentResumeBody } from "@/lib/dispatch/agent-resume";
 import { authorizeDispatch } from "@/lib/dispatch/dispatch-auth";
 import { parseDispatchHostName, parseDispatchReportStatus } from "@/lib/dispatch/dispatch-job";
 import { reportDispatchJob } from "@/lib/dispatch/jobs";
+import { parsePrReviewVerdict } from "@/lib/dispatch/pr-review";
+import { resumePrReviewMerge } from "@/lib/dispatch/pr-review-jobs";
 import { resolveFixedInstructionCheckUser } from "@/lib/dispatch/session-escalation";
 import { MANUAL_STEP_OUTPUT_MAX_LENGTH } from "@/lib/manual-step-command";
 import { advanceManualStepRun } from "@/lib/manual-step-run";
@@ -87,6 +89,7 @@ export async function POST(request: NextRequest) {
     output,
     codexPairingCode: codexPairingExpiresAt ? codexPairingCode : null,
     codexPairingExpiresAt,
+    reviewVerdict: parsePrReviewVerdict(payload?.reviewVerdict),
   });
 
   if (!result.ok) {
@@ -100,6 +103,17 @@ export async function POST(request: NextRequest) {
     }
     const status = result.reason === "not_found" ? 404 : 403;
     return NextResponse.json({ error: result.reason }, { status });
+  }
+
+  // PRレビューが確定したら、そのPRの最終マージ判定（`auto-merge`ジョブ）をイベント駆動で
+  // 再開する（#3990）。Actionsのrunがまだ走っている間は再開できないので、失敗は握り潰して
+  // 巡回（`POST /api/dispatch/pr-review/resume-sweep`）に任せる。報告そのものは受け付ける
+  if (result.job.kind === "PR_REVIEW" && status !== "running") {
+    try {
+      await resumePrReviewMerge(result.job.id);
+    } catch (error) {
+      console.error(`[POST /api/dispatch/report] 最終マージ判定を再開できませんでした ${jobId}:`, error);
+    }
   }
 
   // 自動実行（#1882）を1歩進める。**成功なら次の1件を積み、失敗ならそこで止まる。**
