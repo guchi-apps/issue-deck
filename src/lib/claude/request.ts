@@ -97,7 +97,11 @@ async function readAiApiError(response: Response): Promise<AiApiError> {
   return { code, requestId: response.headers.get("x-request-id") };
 }
 
-const REASONING_FEATURES = new Set<ClaudeApiFeature>(["manual_step_fix", "new_app_consult"]);
+const REASONING_FEATURES = new Set<ClaudeApiFeature>([
+  "manual_step_fix",
+  "new_app_consult",
+  "chat_investigation",
+]);
 
 async function getAppAiModel(feature: ClaudeApiFeature): Promise<AppAiModel> {
   try {

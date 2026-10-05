@@ -89,3 +89,40 @@ describe("resolveIntent", () => {
     });
   });
 });
+
+describe("調査の意図（#4045）", () => {
+  it("理由・内容・方針の質問は定型の状態確認ではなく調査へ回す", () => {
+    expect(parseIntent("#3966はなぜ止まっている？")).toEqual({ type: "investigate", ref: { repo: null, number: 3966 } });
+    expect(parseIntent("レビューの内容を教えて")).toEqual({ type: "investigate", ref: null });
+    expect(parseIntent("この方針で続けて")).toEqual({ type: "investigate", ref: null });
+  });
+  it("「確認して直して」は定型の自動修正ではなく調査を通す。素の「直して」は従来どおり", () => {
+    expect(parseIntent("確認して直して")).toEqual({ type: "investigate", ref: null });
+    expect(parseIntent("#12を確認して直して")).toEqual({ type: "investigate", ref: { repo: null, number: 12 } });
+    expect(parseIntent("直して")).toEqual({ type: "repair", ref: null });
+  });
+  it("対象は明示 → 直前の1件 → 調査の引き継ぎの順で決め、複数で決まらないときは候補を調査へ渡す", () => {
+    expect(resolveIntent({ type: "investigate", ref: { repo: null, number: 9 } }, ctx([1, 2]))).toEqual({
+      type: "investigate",
+      target: { repo: REPO, number: 9 },
+      candidates: [],
+    });
+    expect(resolveIntent({ type: "investigate", ref: null }, ctx([5]))).toMatchObject({ target: { number: 5 } });
+    const withInvestigation: ChatContext = {
+      ...ctx([]),
+      investigation: {
+        target: target(7),
+        summary: "s",
+        evidence: [],
+        agreements: [],
+        openQuestions: [],
+        unconfirmed: [],
+        updatedAt: "",
+      },
+    };
+    expect(resolveIntent({ type: "investigate", ref: null }, withInvestigation)).toMatchObject({ target: { number: 7 } });
+    const multi = resolveIntent({ type: "investigate", ref: null }, ctx([1, 2]));
+    expect(multi).toMatchObject({ type: "investigate", target: null });
+    expect(multi.type === "investigate" && multi.candidates).toHaveLength(2);
+  });
+});
