@@ -1,7 +1,9 @@
 import { NextResponse, type NextRequest } from "next/server";
 
 import { getCurrentUser } from "@/lib/auth-user";
+import { hasConversationRepoAccess } from "@/lib/chat/access";
 import { executeConfirmedCard, withAction } from "@/lib/chat/handlers";
+import { buildRefsText } from "@/lib/chat/session";
 import { parseChatContext, toChatMessageView } from "@/lib/chat/store";
 import type { ChatConfirmCard } from "@/lib/chat/types";
 import { db } from "@/lib/db";
@@ -35,6 +37,16 @@ export async function POST(request: NextRequest, { params }: Params) {
   });
   if (!message || message.confirmState === null) {
     return NextResponse.json({ error: "not_found" }, { status: 404 });
+  }
+
+  // 権限を失った後は、古い確認カードから新しい操作を起動しない（やめる操作は通す）
+  if (body.action === "execute") {
+    const cardRepo = (Array.isArray(message.cards) ? message.cards : [])
+      .map((item) => (item && typeof item === "object" ? (item as { repo?: unknown }).repo : null))
+      .find((value): value is string => typeof value === "string");
+    if (!(await hasConversationRepoAccess(user.id, cardRepo ?? message.conversation.repo))) {
+      return NextResponse.json({ error: "repository_access_lost" }, { status: 403 });
+    }
   }
 
   const claimed = await db.chatMessage.updateMany({
@@ -72,21 +84,28 @@ export async function POST(request: NextRequest, { params }: Params) {
   if (!outcome.ok) {
     await db.chatMessage.update({ where: { id: message.id }, data: { confirmState: "pending" } });
   }
-  const context = withAction(parseChatContext(message.conversation.context), outcome.action);
-  const [reply] = await db.$transaction([
-    db.chatMessage.create({
+  // 実行記録は、他端末が更新した最新の会話へ足す（古いコンテキストで上書きして履歴を消さない）
+  const { reply, context } = await db.$transaction(async (tx) => {
+    const latest = await tx.chatConversation.findUniqueOrThrow({ where: { id } });
+    const merged = withAction(parseChatContext(latest.context), outcome.action);
+    await tx.chatConversation.update({
+      where: { id },
+      data: {
+        context: JSON.parse(JSON.stringify(merged)),
+        refsText: buildRefsText(merged, [], latest.refsText),
+        version: { increment: 1 },
+      },
+    });
+    const row = await tx.chatMessage.create({
       data: {
         conversationId: id,
         role: "assistant",
         text: outcome.text,
         cards: JSON.parse(JSON.stringify([outcome.card])),
       },
-    }),
-    db.chatConversation.update({
-      where: { id },
-      data: { context: JSON.parse(JSON.stringify(context)) },
-    }),
-  ]);
+    });
+    return { reply: row, context: merged };
+  });
   return NextResponse.json({
     confirmState: outcome.ok ? "done" : "pending",
     ok: outcome.ok,

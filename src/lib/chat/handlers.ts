@@ -66,7 +66,7 @@ type StatusLoad =
   | { ok: true; card: ChatStatusCard }
   | { ok: false; message: string };
 
-async function loadStatus(user: ChatUser, ref: ResolvedRef): Promise<StatusLoad> {
+export async function loadStatus(user: ChatUser, ref: ResolvedRef): Promise<StatusLoad> {
   const [owner, repo] = ref.repo.split("/");
   const repository = await findRepositoryByFullName(user.id, ref.repo);
   if (!repository || !owner || !repo) {
