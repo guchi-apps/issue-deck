@@ -5,9 +5,10 @@
  * `deploy-recovery-series-run.ts`が持つ。巡回が何度来ても・再起動を挟んでも、同じ観測から同じ判断が
  * 出るようにするため。
  *
- * **第1段では本番反映の手前で止まる。** develop向けの修正PRがマージされた時点で`awaiting_release`
- * （本番反映待ち。人の対応が要る終端）へ進め、`recovered`（復旧済み）へは遷移させない。
- * 復旧済みと言えるのは対象版の稼働を確かめたときだけで、その確認は#4007で足す。
+ * develop向けの修正PRがマージされた時点で`awaiting_release`（本番反映待ち。人の対応が要る終端）へ進む。
+ * mainへ出したマージSHAが分かると（`beginDeployRecoveryRelease`）`releasing`→`verifying`と進み、
+ * **対象版の稼働を確かめたときだけ**`recovered`（復旧済み）になる（#4007。`decideDeployRecoveryRelease`）。
+ * PRのマージ・別SHAのdeploy成功・旧版のHTTP 200では復旧済みにしない。
  */
 
 /** 系列全体で使える修復回数（内側のPR修復も含む）。 */
@@ -37,6 +38,11 @@ export const DEPLOY_RECOVERY_STATUSES = [
 ] as const;
 export type DeployRecoveryStatus = (typeof DEPLOY_RECOVERY_STATUSES)[number];
 
+/** 本番へ出してから対象版の稼働を確かめるまでの上限。超えたら人へ渡す（無制限に待たない）。 */
+export const DEPLOY_RECOVERY_RELEASE_TIMEOUT_MS = 60 * 60 * 1000;
+/** 失敗したrunを`deploy-retry`が再実行するのを待つ時間。再実行は1回だけなので、過ぎたら失敗として扱う。 */
+export const DEPLOY_RECOVERY_RETRY_WAIT_MS = 15 * 60 * 1000;
+
 /** 終わった（巡回が進めない）状態。`awaiting_release`も第1段では人へ渡す終端。 */
 export const DEPLOY_RECOVERY_TERMINAL_STATUSES: readonly DeployRecoveryStatus[] = [
   "awaiting_release",
@@ -59,6 +65,11 @@ export type DeployRecoveryStopReason =
   | "dispatch_failed"
   | "pull_request_closed"
   | "repair_stopped"
+  | "deploy_not_started"
+  | "deploy_failed"
+  | "deploy_cancelled"
+  | "version_unverified"
+  | "release_timed_out"
   | "max_rounds_reached"
   | "stopped_by_user";
 
@@ -176,6 +187,84 @@ export function decideDeployRecovery(
   return { action: "wait" };
 }
 
+/** 対象SHAに対するdeploy workflowの実行（GitHubから読んだもの）。 */
+export type DeployRunObservation = {
+  id: number;
+  htmlUrl: string;
+  createdAt: string;
+  headSha: string;
+  status: string;
+  conclusion: string | null;
+  attempt: number;
+};
+
+export type DeployRecoveryReleaseState = {
+  releaseSha: string;
+  releaseStartedAt: Date;
+};
+
+export type DeployRecoveryReleaseObservation = {
+  now: Date;
+  runs: readonly DeployRunObservation[];
+  /**
+   * 最新のrunが「稼働SHAの一致まで確かめた」証拠を持つか。deployジョブが成功しており、かつそのrunの
+   * `deploy.yml`がSHA照合つきのヘルスチェックを持つ（旧版がHTTP 200を返すだけでは通らない）ときだけtrue。
+   */
+  versionVerified: boolean;
+};
+
+export type DeployRecoveryReleaseDecision =
+  | { action: "wait" }
+  | { action: "track"; status: "releasing" | "verifying"; run: DeployRunObservation }
+  | { action: "recovered"; run: DeployRunObservation }
+  | { action: "stop"; reason: DeployRecoveryStopReason; detail?: string };
+
+/**
+ * 本番へ出したあとの1巡ぶんの判断（#4007）。**起動漏れの回収は`deploy-launch`、失敗の1回再実行は
+ * `deploy-retry`が持つ**ので、ここは観測だけで、deployを起動し直さない（二重に実行しない）。
+ *
+ * - 対象SHAのrunが無い: 待つ（猶予内に`deploy-launch`が起動する）。上限を過ぎたら人へ渡す
+ * - 複数ある: 最新の1本だけを見る（古いrunは新しいrunに置き換えられている）
+ * - 進行中: `releasing`
+ * - 成功: 稼働SHAの一致を確かめた証拠があれば`recovered`。無ければ`verifying`で待ち、上限で人へ渡す。
+ *   **確かめられないことを復旧済みと見なさない**
+ * - cancel: 再実行を待ち、上限を過ぎたら人へ渡す
+ * - 失敗・timeout: 1回目の失敗は`deploy-retry`の再実行を待つ。再実行も失敗した（attempt 2以降）ら人へ渡す
+ */
+export function decideDeployRecoveryRelease(
+  series: DeployRecoveryReleaseState,
+  observation: DeployRecoveryReleaseObservation,
+): DeployRecoveryReleaseDecision {
+  const { now, runs } = observation;
+  const timedOut = now.getTime() - series.releaseStartedAt.getTime() >= DEPLOY_RECOVERY_RELEASE_TIMEOUT_MS;
+  const matching = runs
+    .filter((run) => run.headSha === series.releaseSha)
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.id - a.id);
+  const latest = matching[0];
+
+  if (!latest) {
+    return timedOut ? { action: "stop", reason: "deploy_not_started" } : { action: "wait" };
+  }
+  if (latest.status !== "completed") return { action: "track", status: "releasing", run: latest };
+
+  switch (latest.conclusion) {
+    case "success":
+      if (observation.versionVerified) return { action: "recovered", run: latest };
+      return timedOut
+        ? { action: "stop", reason: "version_unverified", detail: latest.htmlUrl }
+        : { action: "track", status: "verifying", run: latest };
+    case "cancelled":
+      return timedOut ? { action: "stop", reason: "deploy_cancelled", detail: latest.htmlUrl } : { action: "wait" };
+    default: {
+      const finishedWaitingRetry = now.getTime() - new Date(latest.createdAt).getTime() >= DEPLOY_RECOVERY_RETRY_WAIT_MS;
+      if (latest.attempt >= 2 || finishedWaitingRetry || timedOut) {
+        return { action: "stop", reason: "deploy_failed", detail: latest.htmlUrl };
+      }
+      return { action: "wait" };
+    }
+  }
+}
+
 /** 画面に出す状態名。Issueの「合意したユーザー体験」の7つに寄せる。 */
 export function deployRecoveryStatusLabel(status: string): string {
   switch (status) {
@@ -218,6 +307,16 @@ export function deployRecoveryStopReasonLabel(reason: string | null, detail: str
       return "修正PRがマージされずに閉じられました。";
     case "repair_stopped":
       return `修正PRの自動修復が止まりました${detail ? `（${detail}）` : ""}。PRを確かめてください。`;
+    case "deploy_not_started":
+      return "マージしたコミットのデプロイが始まらないまま時間が過ぎました。Actionsを確かめてください。";
+    case "deploy_failed":
+      return `対象のコミットのデプロイが失敗しました（再実行も失敗）${detail ? `: ${detail}` : ""}。`;
+    case "deploy_cancelled":
+      return `対象のコミットのデプロイが取り消されたまま、再実行されませんでした${detail ? `: ${detail}` : ""}。`;
+    case "version_unverified":
+      return `デプロイは成功しましたが、対象版が稼働していることを確かめられませんでした${detail ? `: ${detail}` : ""}。復旧済みとは扱いません。`;
+    case "release_timed_out":
+      return "本番反映から復旧確認までの上限時間を過ぎました。";
     case "max_rounds_reached":
       return `修復の上限（${DEPLOY_RECOVERY_MAX_REPAIR_ROUNDS}回）に達しました。`;
     case "stopped_by_user":

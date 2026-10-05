@@ -2,6 +2,10 @@ import { describe, expect, it } from "vitest";
 
 import {
   decideDeployRecovery,
+  decideDeployRecoveryRelease,
+  DEPLOY_RECOVERY_RELEASE_TIMEOUT_MS,
+  DEPLOY_RECOVERY_RETRY_WAIT_MS,
+  type DeployRunObservation,
   DEPLOY_RECOVERY_CAUSE_TIMEOUT_MS,
   DEPLOY_RECOVERY_MAX_REPAIR_ROUNDS,
   deployRecoveryStatusLabel,
@@ -136,5 +140,72 @@ describe("deployRecoveryStatusLabel", () => {
     expect(deployRecoveryStatusLabel("preparing")).toBe("調査中");
     expect(deployRecoveryStatusLabel("awaiting_checks")).toBe("CI・レビュー待ち");
     expect(deployRecoveryStatusLabel("needs_attention")).toBe("要対応");
+  });
+});
+
+describe("decideDeployRecoveryRelease（#4007）", () => {
+  const releaseSha = "a".repeat(40);
+  const release = { releaseSha, releaseStartedAt: new Date(now.getTime() - 60 * 1000) };
+  const run = (overrides: Partial<DeployRunObservation> = {}): DeployRunObservation => ({
+    id: 100,
+    htmlUrl: "https://github.com/o/r/actions/runs/100",
+    createdAt: new Date(now.getTime() - 30 * 1000).toISOString(),
+    headSha: releaseSha,
+    status: "completed",
+    conclusion: "success",
+    attempt: 1,
+    ...overrides,
+  });
+  const decide = (runs: DeployRunObservation[], versionVerified: boolean, at = now, state = release) =>
+    decideDeployRecoveryRelease(state, { now: at, runs, versionVerified });
+  const later = (ms: number) => new Date(now.getTime() + ms);
+
+  it("対象SHAのrunが無い間は待ち、上限を過ぎたら止める（deployを起動し直さない）", () => {
+    expect(decide([], false)).toEqual({ action: "wait" });
+    expect(decide([run({ headSha: "b".repeat(40) })], true)).toEqual({ action: "wait" });
+    expect(decide([], false, later(DEPLOY_RECOVERY_RELEASE_TIMEOUT_MS))).toEqual({ action: "stop", reason: "deploy_not_started" });
+  });
+
+  it("別SHAのdeploy成功では復旧済みにしない", () => {
+    expect(decide([run({ headSha: "b".repeat(40) })], true).action).toBe("wait");
+  });
+
+  it("進行中は本番反映中として追跡する", () => {
+    const r = run({ status: "in_progress", conclusion: null });
+    expect(decide([r], false)).toEqual({ action: "track", status: "releasing", run: r });
+  });
+
+  it("成功かつ稼働SHAの一致を確かめたときだけ復旧済みにする", () => {
+    const r = run();
+    expect(decide([r], true)).toEqual({ action: "recovered", run: r });
+    // 一致を確かめられない（旧版がHTTP 200を返すだけ・照合の無いworkflow）なら復旧済みにしない
+    expect(decide([r], false)).toEqual({ action: "track", status: "verifying", run: r });
+  });
+
+  it("確かめられないまま上限を過ぎたら、復旧済みでなく要対応へ渡す", () => {
+    expect(decide([run()], false, later(DEPLOY_RECOVERY_RELEASE_TIMEOUT_MS)).action).toBe("stop");
+  });
+
+  it("同じSHAのrunが複数あれば最新だけで判断する（重複）", () => {
+    const old = run({ id: 1, createdAt: new Date(now.getTime() - 50 * 1000).toISOString(), conclusion: "failure" });
+    const fresh = run({ id: 2 });
+    expect(decide([old, fresh], true)).toEqual({ action: "recovered", run: fresh });
+  });
+
+  it("cancelは再実行を待ち、上限で止める", () => {
+    const r = run({ conclusion: "cancelled" });
+    expect(decide([r], true)).toEqual({ action: "wait" });
+    expect(decide([r], true, later(DEPLOY_RECOVERY_RELEASE_TIMEOUT_MS))).toMatchObject({ action: "stop", reason: "deploy_cancelled" });
+  });
+
+  it("1回目の失敗はdeploy-retryの再実行を待ち、再実行も失敗したら止める", () => {
+    const failed = run({ conclusion: "failure" });
+    expect(decide([failed], false)).toEqual({ action: "wait" });
+    expect(decide([run({ conclusion: "failure", attempt: 2 })], false)).toMatchObject({ action: "stop", reason: "deploy_failed" });
+    expect(decide([failed], false, later(DEPLOY_RECOVERY_RETRY_WAIT_MS))).toMatchObject({ action: "stop", reason: "deploy_failed" });
+  });
+
+  it("timed_outも失敗として扱う", () => {
+    expect(decide([run({ conclusion: "timed_out", attempt: 2 })], false)).toMatchObject({ action: "stop", reason: "deploy_failed" });
   });
 });

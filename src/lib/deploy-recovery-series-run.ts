@@ -7,6 +7,7 @@ import { enqueueDispatchJob } from "@/lib/dispatch/jobs";
 import { buildDeployRecoveryIssueSection, DEPLOY_FAILURE_FIX_TITLE_PREFIX } from "@/lib/deploy-failure";
 import {
   decideDeployRecovery,
+  decideDeployRecoveryRelease,
   DEPLOY_RECOVERY_CAUSE_MARKER_PREFIX,
   DEPLOY_RECOVERY_PREPARING_TIMEOUT_MS,
   DEPLOY_RECOVERY_SCOPE,
@@ -19,7 +20,9 @@ import {
   parseDeployRecoveryCause,
   type DeployRecoveryCause,
   type DeployRecoveryDecision,
+  type DeployRecoveryReleaseDecision,
   type DeployRecoveryStatus,
+  type DeployRunObservation,
 } from "@/lib/deploy-recovery-series";
 import { fetchWorkflowJobLogs, fetchWorkflowRunJobs } from "@/lib/github/actions-api";
 import { getInstallationToken } from "@/lib/github/app-auth";
@@ -72,6 +75,9 @@ export type DeployRecoverySeriesView = {
   repairRoundsUsed: number;
   stopReason: string | null;
   stopMessage: string | null;
+  releaseSha: string | null;
+  releaseRunUrl: string | null;
+  recoveredAt: string | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -95,6 +101,9 @@ export function toDeployRecoverySeriesView(row: SeriesRow): DeployRecoverySeries
     repairRoundsUsed: row.repairRoundsUsed,
     stopReason: row.stopReason,
     stopMessage: deployRecoveryStopReasonLabel(row.stopReason, row.stopDetail),
+    releaseSha: row.releaseSha,
+    releaseRunUrl: row.releaseRunUrl,
+    recoveredAt: row.recoveredAt?.toISOString() ?? null,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
   };
@@ -204,6 +213,46 @@ export async function findLatestDeployRecoverySeries(repositoryFullName: string)
     orderBy: { createdAt: "desc" },
   });
   return row ? toDeployRecoverySeriesView(row) : null;
+}
+
+/**
+ * 本番（main）へ出したマージSHAを記録し、再デプロイの追跡を始める（#4007）。
+ * 呼ぶのは限定したmain反映（#4005）で、`awaiting_release`の系列だけが対象。
+ *
+ * 同じSHAでの呼び直しは何もしない（冪等）。**別の系列が同じリポジトリで進行中なら始めない**
+ * （`activeKey`の一意制約で原子的に弾く）。deployの起動そのものは行わない
+ * （起動漏れは`deploy-launch`、失敗の再実行は`deploy-retry`が持つ）。
+ */
+export async function beginDeployRecoveryRelease(params: {
+  seriesId: string;
+  mergeSha: string;
+  now?: Date;
+}): Promise<{ ok: boolean; reason?: "not_found" | "not_awaiting_release" | "series_active" }> {
+  const now = params.now ?? new Date();
+  const row = await db.deployRecoverySeries.findUnique({ where: { id: params.seriesId } });
+  if (!row) return { ok: false, reason: "not_found" };
+  if (row.releaseSha === params.mergeSha && (row.status === "releasing" || row.status === "verifying" || row.status === "recovered")) {
+    return { ok: true };
+  }
+  if (row.status !== "awaiting_release") return { ok: false, reason: "not_awaiting_release" };
+  try {
+    const updated = await db.deployRecoverySeries.updateMany({
+      where: { id: row.id, status: "awaiting_release" },
+      data: {
+        status: "releasing",
+        activeKey: row.repositoryFullName,
+        releaseSha: params.mergeSha,
+        releaseStartedAt: now,
+        releaseRunId: null,
+        releaseRunUrl: null,
+        lastSweepAt: null,
+      },
+    });
+    return updated.count === 1 ? { ok: true } : { ok: false, reason: "not_awaiting_release" };
+  } catch (error) {
+    if (isUniqueConstraintError(error)) return { ok: false, reason: "series_active" };
+    throw error;
+  }
 }
 
 /**
@@ -325,6 +374,10 @@ async function advanceSeries(
     return prepareSeries(series, token, hostName, now);
   }
 
+  if (series.status === "releasing" || series.status === "verifying") {
+    return advanceRelease(series, token, now);
+  }
+
   const observation = await observeSeries(series, token);
   const decision = decideDeployRecovery(
     {
@@ -342,6 +395,137 @@ async function advanceSeries(
     await db.deployRecoverySeries.update({ where: { id: series.id }, data: { repairRoundsUsed: roundsUsed } });
   }
   return applyDecision(series, decision, token, observation.pullRequest?.headSha ?? null);
+}
+
+/** 本番へ出したあとの追跡（#4007）。判断は`decideDeployRecoveryRelease`、ここは観測と記録だけ。 */
+async function advanceRelease(
+  series: SeriesRow,
+  token: string,
+  now: Date,
+): Promise<{ action: string; detail?: string } | null> {
+  if (!series.releaseSha || !series.releaseStartedAt) {
+    // 記録が欠けた系列は復旧済みにできない。人へ渡す。
+    return applyReleaseDecision(series, { action: "stop", reason: "release_timed_out" }, token, now);
+  }
+  const [owner, repo] = splitFullName(series.repositoryFullName);
+  const runs = await fetchDeployRunsForSha(owner, repo, series.releaseSha, token);
+  const latest = [...runs].sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.id - a.id)[0];
+  // 成功したrunだけ、稼働SHAの一致を確かめた証拠を取りに行く（それ以外ではAPIを消費しない）。
+  const versionVerified =
+    latest?.status === "completed" && latest.conclusion === "success"
+      ? await hasVersionVerification(owner, repo, latest, token)
+      : false;
+  const decision = decideDeployRecoveryRelease(
+    { releaseSha: series.releaseSha, releaseStartedAt: series.releaseStartedAt },
+    { now, runs, versionVerified },
+  );
+  return applyReleaseDecision(series, decision, token, now);
+}
+
+async function fetchDeployRunsForSha(
+  owner: string,
+  repo: string,
+  sha: string,
+  token: string,
+): Promise<DeployRunObservation[]> {
+  const data = await requestJson<{ workflow_runs?: Array<GithubWorkflowRun & { created_at?: string }> }>(
+    `${GITHUB_API}/repos/${owner}/${repo}/actions/workflows/deploy.yml/runs?head_sha=${encodeURIComponent(sha)}&per_page=20`,
+    token,
+  );
+  return (data.workflow_runs ?? []).map((run) => ({
+    id: run.id,
+    htmlUrl: run.html_url,
+    createdAt: run.created_at ?? "",
+    headSha: run.head_sha,
+    status: run.status,
+    conclusion: run.conclusion,
+    attempt: run.run_attempt ?? 1,
+  }));
+}
+
+/**
+ * 稼働SHAの一致を確かめた証拠があるか。次の2つが揃うときだけtrue。
+ * - そのrunの`deploy`ジョブが成功している
+ * - そのコミットの`deploy.yml`が、`/api/app-version`のSHAと突き合わせるヘルスチェックを持つ
+ *   （`APP_COMMIT_SHA`で判定。無い版のdeployは旧版がHTTP 200を返すだけでも成功になるため証拠にしない）
+ */
+async function hasVersionVerification(owner: string, repo: string, run: DeployRunObservation, token: string): Promise<boolean> {
+  try {
+    const jobs = await fetchWorkflowRunJobs(owner, repo, run.id, token);
+    const deployJob = jobs.find((job) => job.name === "deploy");
+    if (deployJob?.conclusion !== "success") return false;
+    const response = await githubFetch(
+      `${GITHUB_API}/repos/${owner}/${repo}/contents/${DEPLOY_WORKFLOW_PATH}?ref=${encodeURIComponent(run.headSha)}`,
+      token,
+    );
+    if (!response.ok) return false;
+    const file: { content?: string; encoding?: string } = await response.json();
+    const text = Buffer.from(file.content ?? "", file.encoding === "base64" ? "base64" : "utf-8").toString("utf-8");
+    return text.includes("APP_COMMIT_SHA") && text.includes("/api/app-version");
+  } catch (error) {
+    // 読めなかったことは「確かめられた」ではない。次の巡回でやり直す（上限で人へ渡る）。
+    console.error("[deploy-recovery] 稼働版の確認材料を読めませんでした", run.id, error);
+    return false;
+  }
+}
+
+async function applyReleaseDecision(
+  series: SeriesRow,
+  decision: DeployRecoveryReleaseDecision,
+  token: string,
+  now: Date,
+): Promise<{ action: string; detail?: string } | null> {
+  if (decision.action === "wait") return null;
+
+  if (decision.action === "track") {
+    const runId = BigInt(decision.run.id);
+    if (series.status === decision.status && series.releaseRunId === runId) return null;
+    await db.deployRecoverySeries.updateMany({
+      where: { id: series.id, status: series.status },
+      data: { status: decision.status, releaseRunId: runId, releaseRunUrl: decision.run.htmlUrl },
+    });
+    return { action: `transition:${decision.status}`, detail: decision.run.htmlUrl };
+  }
+
+  if (decision.action === "recovered") {
+    const updated = await db.deployRecoverySeries.updateMany({
+      where: { id: series.id, status: series.status },
+      data: {
+        status: "recovered",
+        activeKey: null,
+        recoveredAt: now,
+        releaseRunId: BigInt(decision.run.id),
+        releaseRunUrl: decision.run.htmlUrl,
+      },
+    });
+    if (updated.count === 1 && series.issueNumber !== null) {
+      const [owner, repo] = splitFullName(series.repositoryFullName);
+      await createComment(owner, repo, series.issueNumber, token, {
+        body: [
+          `本番の復旧を確認しました。稼働中の版が \`${series.releaseSha?.slice(0, 7)}\` と一致しています。`,
+          "",
+          `- デプロイ: ${decision.run.htmlUrl}`,
+          `- 失敗した実行: ${series.failedRunUrl}`,
+          "",
+          "<!-- issue-deck-agent:guide -->",
+        ].join("\n"),
+      }).catch((error: unknown) => console.error("[deploy-recovery] 復旧完了のコメントに失敗しました", series.id, error));
+    }
+    return updated.count === 1 ? { action: "recovered", detail: decision.run.htmlUrl } : null;
+  }
+
+  const updated = await db.deployRecoverySeries.updateMany({
+    where: { id: series.id, status: series.status },
+    data: { status: "needs_attention", activeKey: null, stopReason: decision.reason, stopDetail: decision.detail ?? null },
+  });
+  if (updated.count === 1) {
+    await notifyHandOff(
+      series,
+      token,
+      `本番復旧の確認を止めました。${deployRecoveryStopReasonLabel(decision.reason, decision.detail ?? null) ?? ""}`,
+    );
+  }
+  return { action: `stop:${decision.reason}`, detail: decision.detail };
 }
 
 async function observeSeries(series: SeriesRow, token: string) {
