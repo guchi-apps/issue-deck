@@ -1,7 +1,7 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
-import { isEmailAllowed } from "@/lib/allowed-emails";
+import { isUserAllowed } from "@/lib/access/client";
 import { CI_BYPASS_COOKIE_NAME, isCiBypassRequest } from "@/lib/ci-auth-bypass";
 import { getRequestOrigin } from "@/lib/request-origin";
 import { toSafeRedirectPath } from "@/lib/safe-redirect-path";
@@ -47,7 +47,7 @@ export async function updateSession(request: NextRequest) {
   // 一度許可されてログイン済みのユーザーが、後で許可リストから外れたケースへの多層防御。
   // /auth/callback側で新規ログイン時点では弾いているが、既存セッションはここで塞ぐ。
   // 許可されないユーザーは以降 user なし（＝未ログイン）と同様に扱う。
-  const allowedUser = user && isEmailAllowed(user.email) ? user : null;
+  const allowedUser = user && (await isUserAllowed(user)) ? user : null;
 
   // /api/* はルートハンドラ自身が requireUserId() で認証チェックし、
   // 401 JSON を返す設計のため、ここではリダイレクトせず素通りさせる。

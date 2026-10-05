@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 
-import { isEmailAllowed } from "@/lib/allowed-emails";
+import { isUserAllowed } from "@/lib/access/client";
 import { encryptSecret } from "@/lib/crypto/secret-cipher";
 import { db } from "@/lib/db";
 import { getRequestOrigin } from "@/lib/request-origin";
@@ -27,7 +27,7 @@ export async function GET(request: NextRequest) {
 
   const { user } = data;
 
-  if (!isEmailAllowed(user.email)) {
+  if (!(await isUserAllowed(user))) {
     await supabase.auth.signOut();
     const admin = createAdminClient();
     const { error: deleteError } = await admin.auth.admin.deleteUser(user.id);
