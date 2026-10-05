@@ -5,21 +5,13 @@ import { db } from "@/lib/db";
 import { withGithubApiFeature } from "@/lib/github/api-usage";
 import { getInstallationToken } from "@/lib/github/app-auth";
 import { GithubApiError } from "@/lib/github/github-api-error";
-import {
-  canRepairFromDeck,
-  repairKindsFor,
-  resolveRepairDispatch,
-} from "@/lib/github/pull-request-repair";
-import {
-  fetchActivePullRequestRepairRun,
-  isRepairSymptomGone,
-  recordPullRequestRepairRun,
-} from "@/lib/github/pull-request-repair-run";
+import { startPullRequestAutoRepairLoop } from "@/lib/github/pull-request-auto-repair-start";
+import { canRepairFromDeck, repairKindsFor } from "@/lib/github/pull-request-repair";
+import { fetchActivePullRequestRepairRun, isRepairSymptomGone } from "@/lib/github/pull-request-repair-run";
 import { AUTO_REPAIR_MAX_ROUNDS } from "@/lib/github/pull-request-repair-loop";
 import { fetchPullRequest } from "@/lib/github/pull-requests-api";
 import { parsePullRequestReviewVerdict } from "@/lib/github/pull-request-review-verdict";
 import { fetchPullRequestCiState } from "@/lib/github/release-api";
-import { dispatchWorkflow } from "@/lib/github/workflow-dispatch";
 import { previewModeGuard } from "@/lib/preview-mode";
 
 async function findRepository(userId: string, owner: string, repo: string) {
@@ -134,97 +126,24 @@ async function handlePOST(request: NextRequest) {
     // conflict → ci → review（repairKindsForの順）の先頭だけを起動する。完了後にPRを再取得し、
     // まだ問題が残っていれば同じ「PRを自動修正」から次を実行する。
     const kind = kinds[0];
-    const dispatch = resolveRepairDispatch(
-      { number: pullRequest.number, baseRef: pullRequest.base.ref, headRef: pullRequest.head.ref },
-      kind,
-    );
-    // workflow起動前に系列を記録する。DB保存に失敗したのにworkflowだけ走る
-    // 「孤児dispatch」を作らない。既存系列のroundはリセットせず、手動再押下でも上限を維持する。
-    // completed/stoppedは過去の系列なので、新しい手動開始ではラウンドをリセットする。
-    // running/dispatchingの同一系列だけ上限を引き継ぐ。
-    const existingState = await db.pullRequestAutoRepairLoop.findUnique({
-      where: {
-        repositoryFullName_pullRequestNumber: {
-          repositoryFullName: `${owner}/${repo}`,
-          pullRequestNumber: pullRequest.number,
-        },
+    const started = await startPullRequestAutoRepairLoop({
+      owner,
+      repo,
+      token,
+      pullRequest: {
+        number: pullRequest.number,
+        headSha: pullRequest.head.sha,
+        baseRef: pullRequest.base.ref,
+        headRef: pullRequest.head.ref,
       },
-      select: { round: true, status: true },
+      kind,
     });
-    const continuing = existingState?.status === "running" || existingState?.status === "dispatching";
-    // 自動sweepまたは別の手動操作が既に系列を進めている間は二重dispatchしない。
-    if (continuing) {
+    if (!started.ok) {
       return NextResponse.json(
         { error: "repair_in_progress", message: "このPRは現在自動修正中です。完了または停止してからもう一度実行してください。" },
         { status: 409 },
       );
     }
-    const startingRound = 1;
-    await db.pullRequestAutoRepairLoop.upsert({
-      where: {
-        repositoryFullName_pullRequestNumber: {
-          repositoryFullName: `${owner}/${repo}`,
-          pullRequestNumber: pullRequest.number,
-        },
-      },
-      create: {
-        repositoryFullName: `${owner}/${repo}`,
-        pullRequestNumber: pullRequest.number,
-        status: "dispatching",
-        headSha: pullRequest.head.sha,
-        round: startingRound,
-        currentKind: kind,
-        lastFingerprint: `${pullRequest.head.sha}:${kind}`,
-        lastSweepAt: null,
-        waitStartedAt: null,
-      },
-      update: {
-        status: "dispatching",
-        headSha: pullRequest.head.sha,
-        round: startingRound,
-        currentKind: kind,
-        lastFingerprint: `${pullRequest.head.sha}:${kind}`,
-        stopReason: null,
-        lastSweepAt: null,
-        waitStartedAt: null,
-      },
-    });
-
-    try {
-      await dispatchWorkflow(owner, repo, dispatch.workflowFile, dispatch.ref, dispatch.inputs, token);
-    } catch (error) {
-      await db.pullRequestAutoRepairLoop.update({
-        where: {
-          repositoryFullName_pullRequestNumber: {
-            repositoryFullName: `${owner}/${repo}`,
-            pullRequestNumber: pullRequest.number,
-          },
-        },
-        data: { status: "stopped", currentKind: null, stopReason: "dispatch_failed" },
-      });
-      throw error;
-    }
-    // sweepがrunning系列を拾う前にRepairRunを記録する。これによりdispatch直後の巡回が
-    // activeなしをworkflow終了と誤認してcurrentKindを消す競合を防ぐ。
-    await recordPullRequestRepairRun({
-      repositoryFullName: `${owner}/${repo}`,
-      pullRequestNumber: pullRequest.number,
-      kind,
-      status: "running",
-    }).catch((error: unknown) => {
-      console.warn(`[POST /api/pull-requests/repair] ${owner}/${repo}#${number} の記録:`, error);
-    });
-    await db.pullRequestAutoRepairLoop.update({
-      where: {
-        repositoryFullName_pullRequestNumber: {
-          repositoryFullName: `${owner}/${repo}`,
-          pullRequestNumber: pullRequest.number,
-        },
-      },
-      data: { status: "running" },
-    });
-
-    // 以後はpollerが新HEADのCI・再レビューを待ち、必要なら次の1種類を起動する。
 
     return NextResponse.json({ ok: true, kinds: [kind], remainingKinds: kinds.slice(1), maxRounds: AUTO_REPAIR_MAX_ROUNDS });
   } catch (error) {

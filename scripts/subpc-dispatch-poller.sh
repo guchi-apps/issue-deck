@@ -1474,6 +1474,26 @@ sweep_pull_request_auto_repairs() {
   fi
 }
 
+# 「AIに修正を依頼」で始めた本番復旧系列を進める（#3998）。修正Issueの作成・実装の起動・
+# 原因区分の読み取り・修正PRの修復への受け渡しはissue-deck側が判定し、ここは呼ぶだけにする。
+# 実装はこのホストで起動するため、ホスト名を渡す。
+sweep_deploy_recoveries() {
+  local payload
+  payload="$(jq -n --arg host "$HOST_NAME" '{host: $host}')"
+  if ! api_call POST /api/repositories/deploy-recovery-series/sweep "$payload"; then
+    case "$API_RESPONSE_STATUS" in
+      # デプロイ順のずれによる404と接続不可は、他の巡回と同じく黙って見送る。
+      404|000) return 0 ;;
+      *) report_api_failure "本番復旧系列の巡回に失敗しました" ;;
+    esac
+    return 0
+  fi
+  printf '%s' "$API_RESPONSE_BODY" |
+    jq -r '.actions[]? | "本番復旧系列を進めました: \(.repositoryFullName) \(.action) \(.detail // "")"' 2>/dev/null ||
+    true
+  return 0
+}
+
 # --- Codexによるdevelop向けPRレビュー ------------------------------------------------
 #
 # GitHub ActionsはPRコメントへ要求印を投稿して結果を待つだけにし、実際のCodex CLIは
@@ -3894,6 +3914,8 @@ run_once() {
     tidy_codex_remote_control
     sweep_pull_request_conflicts
     sweep_pull_request_auto_repairs
+    # 本番復旧系列（#3998）。**dry-runでは呼ばない**（Issueの起票と実装の起動という副作用があるため）。
+    sweep_deploy_recoveries
     sweep_codex_pull_request_reviews
     # iOS配布失敗の巡回検知（#3745）。**dry-runでは呼ばない**（Issueの起票という外向きの副作用があるため）。
     sweep_ios_distribution_failures

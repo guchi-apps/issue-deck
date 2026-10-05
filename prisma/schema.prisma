@@ -1781,11 +1781,65 @@ model PullRequestAutoRepairLoop {
   stopReason         String?
   lastSweepAt        DateTime?
   waitStartedAt      DateTime?
+  /// この系列で使える修復回数の上限。本番復旧系列（`DeployRecoverySeries`）から渡すときは、
+  /// 系列全体の残り回数になる（#3998）。画面からの開始は既定の3
+  maxRounds          Int      @default(3)
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
 
   @@unique([repositoryFullName, pullRequestNumber], map: "PullRequestAutoRepairLoop_repo_pr_key")
   @@index([status])
+}
+
+/// 本番デプロイ失敗を起点にした復旧系列（#3998）。デプロイ失敗の帯の「AIに修正を依頼」で1件できる。
+///
+/// **1回の失敗（repo・環境・run・attempt）につき1行。** 同じ失敗の連打は同じ行を返す。
+/// 状態遷移の判断は`src/lib/deploy-recovery-series.ts`の純関数が持ち、ここは観測の結果だけを持つ。
+/// 個々のPR修復は`PullRequestAutoRepairLoop`へ渡し、ここは修正Issue・PR・試行回数・停止理由を束ねる。
+///
+/// **第1段（#3998）では本番反映の手前（`awaiting_release`）で止まる。** main起点への限定適用・
+/// 本番自動マージ・稼働版の確認はサブIssue（#4005〜#4007）で足す。
+model DeployRecoverySeries {
+  id                 String    @id @default(cuid())
+  repositoryFullName String
+  /// 対象環境。いまは`production`だけ
+  environment        String    @default("production")
+  /// 失敗した`deploy.yml`のrun id・attempt・対象SHA。**この組で1回の失敗を表す**
+  failedRunId        BigInt
+  failedRunAttempt   Int
+  failedSha          String
+  failedRunUrl       String    @db.Text
+  /// 失敗した版（`package.json`のversion）。分からなければnull
+  failedVersion      String?
+  /// `DeployRecoveryStatus`。解釈はアプリ側に寄せる
+  status             String
+  /// 進行中の間だけ`repositoryFullName`を入れる。**同じリポジトリで系列を2本同時に走らせない**
+  activeKey          String?   @unique
+  /// 開始した人と許可した範囲・期限。**権限はラベルやPR本文ではなくこの記録で判定する**
+  startedByUserId    String
+  scope              String
+  expiresAt          DateTime
+  /// 修正Issue・実装の起動・修正PR
+  issueNumber        Int?
+  dispatchJobId      String?
+  dispatchedAt       DateTime?
+  /// 実装セッションが報告した原因の区分（`code` / `config` / `database` / `external` / `unknown`）
+  cause              String?
+  pullRequestNumber  Int?
+  /// 前のPRまでに使った修復回数。現在のPRの分は`PullRequestAutoRepairLoop.round`を足して数える
+  repairRoundsBase   Int       @default(0)
+  repairRoundsUsed   Int       @default(0)
+  stopReason         String?
+  stopDetail         String?   @db.Text
+  stoppedByUserId    String?
+  stoppedAt          DateTime?
+  lastSweepAt        DateTime?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  @@unique([repositoryFullName, environment, failedRunId, failedRunAttempt], map: "DeployRecoverySeries_failure_key")
+  @@index([status])
+  @@index([repositoryFullName, createdAt])
 }
 
 /// ローカル・サブPC実行のセッションが公開したアーティファクト（#2154）。

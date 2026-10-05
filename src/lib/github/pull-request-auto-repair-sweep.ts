@@ -97,6 +97,7 @@ export async function runPullRequestAutoRepairSweep(): Promise<{ scanned: number
         round: stored.round,
         currentKind: stored.currentKind === "ci" || stored.currentKind === "conflict" || stored.currentKind === "review" ? stored.currentKind : null,
         lastFingerprint: stored.lastFingerprint,
+        maxRounds: stored.maxRounds,
       };
       if (active === null && stored.currentKind === null && stored.waitStartedAt === null) {
         await db.pullRequestAutoRepairLoop.update({

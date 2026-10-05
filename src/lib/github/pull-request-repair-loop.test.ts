@@ -38,4 +38,9 @@ describe("decideAutoRepairLoop", () => {
   it("PRが閉じられたら停止する", () => {
     expect(decideAutoRepairLoop(loop(), observed({ state: "closed" }))).toEqual({ action: "stop", reason: "pull_request_closed" });
   });
+
+  it("系列ごとの上限maxRoundsを守る（本番復旧系列が残り回数を渡す。#3998）", () => {
+    expect(decideAutoRepairLoop(loop({ round: 1, maxRounds: 1 }), observed({ ciState: "failure" }))).toEqual({ action: "stop", reason: "max_rounds_reached" });
+    expect(decideAutoRepairLoop(loop({ round: 0, maxRounds: 1 }), observed({ ciState: "failure" }))).toMatchObject({ action: "dispatch", kind: "ci" });
+  });
 });

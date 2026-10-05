@@ -5,6 +5,7 @@ import { ExternalLink, Loader2, Sparkles, TriangleAlert, Wrench } from "lucide-r
 
 import { RepositoryDeployButton } from "@/components/dashboard/repository-deploy-button";
 import { DeployRecoveryDialog } from "@/components/dashboard/deploy-recovery-dialog";
+import { DeployRecoverySeriesPanel } from "@/components/dashboard/deploy-recovery-series-panel";
 import type { DeployFailureAnalysis } from "@/lib/claude/deploy-failure-analysis";
 import {
   buildDeployFailureFixIssueDraft,
@@ -155,6 +156,9 @@ export function DeployFailureAlert({
         )}
       </p>
 
+      {/* 主要操作は「AIに修正を依頼」（#3998）。再デプロイと既存PRからの復旧は補助操作として残す */}
+      <DeployRecoverySeriesPanel repositoryFullName={repositoryFullName} runId={runId} block={compact} />
+
       <div className={cn("flex flex-wrap items-center gap-x-3 gap-y-2", compact && "flex-col items-stretch")}>
         <RepositoryDeployButton
           repositoryFullName={repositoryFullName}
@@ -166,16 +170,6 @@ export function DeployFailureAlert({
         />
         <DeployRecoveryDialog repositoryFullName={repositoryFullName} block={compact} />
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
-          {openFixIssue && (
-            <button
-              type="button"
-              onClick={createFixIssue}
-              className="inline-flex items-center gap-1 rounded-md border border-primary px-2 py-1 text-primary hover:bg-primary/10"
-            >
-              <Wrench className="size-3" aria-hidden="true" />
-              修正Issueを作成
-            </button>
-          )}
           {runId !== null && (
             <button
               type="button"
@@ -190,6 +184,20 @@ export function DeployFailureAlert({
               )}
               {analysisState.status === "loading" ? "ログを読んでいます…" : "原因をAIに聞く"}
             </button>
+          )}
+          {openFixIssue && (
+            // 自分で直すときの詳細操作。主要操作の「AIに修正を依頼」は修正Issueを自動で作るため畳んでおく（#3998）
+            <details className="text-xs">
+              <summary className="cursor-pointer text-muted-foreground">詳細操作</summary>
+              <button
+                type="button"
+                onClick={createFixIssue}
+                className="mt-1 inline-flex items-center gap-1 rounded-md border border-primary px-2 py-1 text-primary hover:bg-primary/10"
+              >
+                <Wrench className="size-3" aria-hidden="true" />
+                修正Issueを作成
+              </button>
+            </details>
           )}
           {runUrl && (
             // 実行ログはアプリ内に対応する画面が無いので別タブで開く（`DeployStateBadge`と同じ）
