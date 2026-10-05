@@ -5,6 +5,7 @@ import {
   FolderGit2,
   Loader2,
   Lightbulb,
+  MessageSquareText,
   Smartphone,
   MonitorPlay,
   Rocket,
@@ -91,6 +92,7 @@ type MobileHomeScreenProps = {
   ideasCount?: number | null;
   /** 新規アプリの構想一覧を開く */
   onSelectIdeas?: () => void;
+  onSelectChat?: () => void;
   /** iOS拡張（#3708）の画面を開く */
   onSelectIosExtensions?: () => void;
   /**
@@ -179,6 +181,7 @@ export function MobileHomeScreenView({
   nightlyRunQueuedCount,
   ideasCount = null,
   onSelectIdeas = () => {},
+  onSelectChat = () => {},
   onSelectIosExtensions = () => {},
   onSelectRepos,
   repositoryCount,
@@ -219,6 +222,7 @@ export function MobileHomeScreenView({
     onSelectPreview,
     onSelectNightlyRun,
     onSelectIdeas,
+    onSelectChat,
     onSelectIosExtensions,
     onSelectRepos,
   });
@@ -430,7 +434,7 @@ const HOME_TILE_GROUPS: { id: HomeTileGroupId; label: string }[] = [
 const HOME_TILE_LAYOUT: Record<HomeTileGroupId, string[]> = {
   attention: ["check-user", "manual-step", "pr:completed", "question"],
   progress: ["not-started", "nightly-run", "in-progress", "pr:in-progress", "release-pending"],
-  list: ["all", "pr:all", "repos", "code-review", "ideas", "ios-extensions", "preview"],
+  list: ["all", "pr:all", "repos", "code-review", "chat", "ideas", "ios-extensions", "preview"],
 };
 
 type HomeTile = {
@@ -470,6 +474,7 @@ type BuildHomeTilesInput = {
   onSelectPreview: () => void;
   onSelectNightlyRun: () => void;
   onSelectIdeas: () => void;
+  onSelectChat: () => void;
   onSelectIosExtensions: () => void;
   onSelectRepos: () => void;
 };
@@ -602,6 +607,16 @@ function buildHomeTiles(input: BuildHomeTilesInput): HomeTile[] {
       busy: false,
       title: "新規アプリの構想を確認・整理する",
       onClick: input.onSelectIdeas,
+    },
+    {
+      key: "chat",
+      label: "チャット",
+      icon: MessageSquareText,
+      count: null,
+      emphasis: "none",
+      busy: false,
+      title: "Issue・PRの状態確認や修復を会話で進める",
+      onClick: input.onSelectChat,
     },
     {
       key: "ios-extensions",

@@ -49,6 +49,7 @@ import { MobileNightlyRunScreen } from "@/components/dashboard/mobile/mobile-nig
 import { MobileReleaseHistoryScreen } from "@/components/dashboard/mobile/mobile-release-history-screen";
 import { PreviewPanel } from "@/components/dashboard/preview-panel";
 import { NightlyRunPanel } from "@/components/dashboard/nightly-run-panel";
+import { ChatView } from "@/components/dashboard/chat-view";
 import { IdeasPanel } from "@/components/dashboard/ideas-panel";
 import { IosExtensionsPanel } from "@/components/dashboard/ios-extensions-panel";
 import type { IosFixIssueOrigin } from "@/components/dashboard/ios-release-group-panel";
@@ -261,6 +262,7 @@ export function IssueDeckShell({
     selectReleaseHistoryPane,
     selectNightlyRunPane,
     selectIdeasPane,
+    selectChatPane,
     selectIosExtensionsPane,
     selectPullRequest,
     selectPullRequestModal,
@@ -388,6 +390,7 @@ export function IssueDeckShell({
     selectPreview,
     selectNightlyRun,
     selectIdeas,
+    selectChat,
     selectIosExtensions,
     selectRepository,
     selectRepositoryByFullName,
@@ -1540,6 +1543,16 @@ export function IssueDeckShell({
   };
   // 左メニュー「構想」の件数（#3639）
   const { count: ideasCount, refresh: refreshIdeasCount } = useIdeasCount();
+  // チャット（#3975）。会話に紐づける候補は見えているリポジトリ。番号だけの発言はこの既定を補う
+  const chatRepositoryNames = useMemo(
+    () => repositories.filter((repo) => !repo.hidden && !repo.archived).map((repo) => repo.fullName),
+    [repositories],
+  );
+  const chatDefaultRepo = filters.repos[0] ?? chatRepositoryNames[0] ?? null;
+  const openChatPullRequest = useCallback(
+    (repo: string, number: number) => openPullRequestUrl(buildPullRequestId(repo, number)),
+    [openPullRequestUrl],
+  );
   /** 左メニューの件数。次の5時間枠に積んである予定の総数 */
   const nightlyRunQueuedCount = nightlyRun.state ? nightlyRun.state.nextWindow.queued.length : null;
   const visibleReleaseHistoryEntries = useMemo(
@@ -2056,6 +2069,7 @@ export function IssueDeckShell({
                   previewRunning={previewRunning}
                   onSelectNightlyRun={selectNightlyRun}
                   onSelectIdeas={selectIdeas}
+                  onSelectChat={selectChat}
                   onSelectIosExtensions={selectIosExtensions}
                   nightlyRunQueuedCount={nightlyRunQueuedCount}
                   ideasCount={ideasCount}
@@ -2096,6 +2110,17 @@ export function IssueDeckShell({
                   onToggleCheckTarget={handleSetReleaseCheckTarget}
                   onOpenPullRequest={selectPullRequestModal}
                 />
+              )}
+
+              {mobileScreen.kind === "chat" && (
+                <div className="h-full p-3">
+                  <ChatView
+                    onBack={goBack}
+                    repositories={chatRepositoryNames}
+                    defaultRepo={chatDefaultRepo}
+                    onOpenPullRequest={openChatPullRequest}
+                  />
+                </div>
               )}
 
               {mobileScreen.kind === "ideas" && (
@@ -2419,6 +2444,7 @@ export function IssueDeckShell({
                 onSelectReleaseHistory={selectReleaseHistoryPane}
                 onSelectNightlyRun={selectNightlyRunPane}
                 onSelectIdeas={selectIdeasPane}
+                onSelectChat={selectChatPane}
                 onSelectIosExtensions={selectIosExtensionsPane}
                 nightlyRunQueuedCount={nightlyRunQueuedCount}
                   ideasCount={ideasCount}
@@ -2448,7 +2474,17 @@ export function IssueDeckShell({
             </>
           )}
 
-          {filters.pane === "ios-extensions" ? (
+          {filters.pane === "chat" ? (
+            <div className="hidden flex-1 overflow-hidden p-4 md:block">
+              <div className="mx-auto h-full max-w-6xl">
+                <ChatView
+                  repositories={chatRepositoryNames}
+                  defaultRepo={chatDefaultRepo}
+                  onOpenPullRequest={openChatPullRequest}
+                />
+              </div>
+            </div>
+          ) : filters.pane === "ios-extensions" ? (
             <div className="hidden flex-1 overflow-y-auto p-4 md:block">
               <div className="mx-auto max-w-5xl"><IosExtensionsPanel onIssueCreated={handleIosExtensionIssueCreated} start={iosExtensionStartProps} /></div>
             </div>

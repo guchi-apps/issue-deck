@@ -13,6 +13,7 @@ import {
   GitBranch,
   History,
   Lightbulb,
+  MessageSquareText,
   Smartphone,
   Loader2,
   Lock,
@@ -85,6 +86,8 @@ type SidebarNavProps = {
   onSelectNightlyRun: () => void;
   /** 新規アプリの構想一覧を開く */
   onSelectIdeas?: () => void;
+  /** チャット（#3975）の画面を開く */
+  onSelectChat?: () => void;
   /** iOS拡張（#3708）の画面を開く */
   onSelectIosExtensions?: () => void;
   /** 次の5時間枠に積んであるIssueの数（#2995）。行に出す。nullなら出さない */
@@ -189,6 +192,7 @@ export function SidebarNavView({
   onSelectReleaseHistory,
   onSelectNightlyRun,
   onSelectIdeas = () => {},
+  onSelectChat = () => {},
   onSelectIosExtensions = () => {},
   nightlyRunQueuedCount = null,
   ideasCount = null,
@@ -406,6 +410,15 @@ export function SidebarNavView({
             // 両方に出すとどちらを押せば片付くのか分からなくなる
             count: nightlyRunQueuedCount,
             title: "次の5時間枠の予定、直近の結果を見る",
+          })}
+          {navRow({
+            key: "chat",
+            label: "チャット",
+            icon: MessageSquareText,
+            active: activePane === "chat",
+            onClick: onSelectChat,
+            count: null,
+            title: "Issue・PRの状態確認や修復を会話で進める",
           })}
           {navRow({
             key: "ideas",

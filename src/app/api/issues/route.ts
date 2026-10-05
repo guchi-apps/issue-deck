@@ -4,9 +4,9 @@ import { getCurrentUser, requireUserId } from "@/lib/auth-user";
 import { db } from "@/lib/db";
 import { withGithubApiFeature } from "@/lib/github/api-usage";
 import { isCloseReasonLabelName } from "@/lib/github/issue-close";
+import { createIssueForUser } from "@/lib/github/issue-create-service";
 import {
   addIssueLabels,
-  createIssue,
   deleteIssue,
   fetchRepositoryLabelNames,
   updateIssue,
@@ -88,15 +88,14 @@ async function handlePOST(request: NextRequest) {
     return NextResponse.json({ error: "not_found" }, { status: 404 });
   }
 
-  const result = await withUserGithubToken(user, `POST /api/issues ${repositoryFullName}`, async (token) => {
-    const created = await createIssue(owner, repo, token, {
-      title: title.trim(),
-      body: typeof payload.body === "string" && payload.body.trim() ? payload.body : undefined,
-      labels: Array.isArray(payload.labels) ? payload.labels.filter((l: unknown) => typeof l === "string") : undefined,
-      assignees:
-        typeof payload.assignee === "string" && payload.assignee ? [payload.assignee] : undefined,
-    });
-    return upsertIssueAndGetDisplay(repository, created);
+  const result = await createIssueForUser(user, repository, {
+    repositoryFullName,
+    title,
+    body: typeof payload.body === "string" ? payload.body : undefined,
+    labels: Array.isArray(payload.labels)
+      ? payload.labels.filter((l: unknown) => typeof l === "string")
+      : undefined,
+    assignee: typeof payload.assignee === "string" && payload.assignee ? payload.assignee : undefined,
   });
   if ("errorResponse" in result) {
     return result.errorResponse;
