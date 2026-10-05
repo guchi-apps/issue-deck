@@ -824,8 +824,10 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
     到達時は両方輪郭、release中は1つ目が点灯、doneでは両方が点灯する。
   - **幅は整数pxで固定し、`flex`の伸縮に任せない**。39pxからフェーズ間の2pxのすき間を引いた幅を
     `allocateSegmentWidths`で配り、狭い一覧カラムでも末尾を切らない。
-  - **実行中はバーを端から端まで光が掃く**（`.progress-live-sweep`）。光は塗りの上を通るだけで、
-    進捗そのものは動かさない。掃くかどうかの判定は`isWorkflowBadgeSpinning`へ集約する。
+  - **実行中は現在フェーズの1区間だけがゆっくり明滅する**（`.progress-segment-live`。#4056）。バー全体
+    を横切る光は廃止した。済んだ区間・未着手の区間は動かさず、最暗でも現在区間の固定の塗りで止める。
+    動きを減らす設定では固定表示。順番待ち・起動中（現在フェーズ未確定）は動かさず未着手の固定表示。
+    明滅するかどうかの判定は`isWorkflowBadgeSpinning`へ集約する。
   - **確認待ち（amber）・回答待ち（blue）ではアイコンをバーの左隣に出し、未達のマスも濃く塗る**
     （`emphasizeTrack`）。5px高のバーの中にアイコンは収まらない。そして**一覧の行にはGitHubの
     ラベル（`00.check-user`・`01.check-*`を含む）が出ない**（#3159。未着手ビューの種類ラベル〈30〜69番台〉だけは
@@ -3681,9 +3683,8 @@ export function POST(request: NextRequest) {
     `QueueStepBadge`。材料は`lib/dispatch/issue-queue-state.ts`が`GET /api/dispatch`の
     ジョブから組み、DBもAPIも増やさない）。**番号の並びは払い出し・実行キューと同じ**
     （`queuePriority`降順→`createdAt`昇順）で、ここだけ別にすると「先頭へ上げる」（#1541）を
-    押した結果が一覧に映らない。**光で掃くのは起動中だけ**にして、順番待ちはゆっくり
-    明滅させる——掃くと`isWorkflowBadgeSpinning`が動かしている行（実際に作業が進んでいる行）と
-    見分けが付かなくなる。**バーは2つ並べない。** Statusが進んでいる行では`WorkflowStepBadge`へ
+    押した結果が一覧に映らない。**順番待ちも起動中も動かさず**、未着手の固定表示＋文言で
+    伝える（#4056。現在フェーズが未確定なので、どの区間も実行中として動かすと誤読を招く）。**バーは2つ並べない。** Statusが進んでいる行では`WorkflowStepBadge`へ
     `queue`を渡して添える字（「サブPC・順番待ち 2番目」）にし、どちらを出すかは並べる側
     （`issue-list.tsx`の`renderIssueRow`）が決める。
   同じく**質問Issueは「未着手」「実行中」ではなく専用の「質問」ビューに出す**（#1514）。質問Issueは
