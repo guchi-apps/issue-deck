@@ -179,9 +179,14 @@ export async function mergePullRequest(
   repo: string,
   number: number,
   token: string,
+  /** 渡すと、PRのHEADがこのSHAのときだけマージする（食い違えばGitHubが409を返す） */
+  expectedHeadSha?: string,
 ): Promise<MergePullRequestResult> {
   const url = `${GITHUB_API}/repos/${owner}/${repo}/pulls/${number}/merge`;
-  const res = await githubFetch(url, token, { method: "PUT", body: { merge_method: "merge" } });
+  const res = await githubFetch(url, token, {
+    method: "PUT",
+    body: { merge_method: "merge", ...(expectedHeadSha ? { sha: expectedHeadSha } : {}) },
+  });
   if (!res.ok) {
     const detail = await res.text().catch(() => "");
     throw new GithubApiError(res.status, `GitHub API request failed: ${res.status} ${url} ${detail}`);

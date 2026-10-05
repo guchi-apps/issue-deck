@@ -295,6 +295,15 @@ Issueコメントとして投稿し、「なぜエージェントが実行でき
 
 **「GitHub Actionsやデプロイ設定」の唯一の例外は、issue-deckの画面から他リポジトリへ配る共有ワークフローの参照タグ更新PR**（`.github/scripts/propagate-workflow-tag.sh`が作るもの。#1602）。差分が`@workflows/vN`と`prompts-ref`の置換だけの機械的なPRで、配るタグ自体はissue-deck側で確認を通してから切っているため、配布先で見ても判断材料が増えない（14リポジトリぶんのPRを開いてマージするだけの作業になっていた）。**例外はこの配布PRに限られ、issue-deck自身のPRには一切適用しない。** 自動マージは画面のチェックボックスで外せる。
 
+**`develop`→`main`は人がマージする原則の、唯一の限定例外は「ユーザーが開始した本番復旧系列」のmain向け復旧PR**（#4006・#3998）。画面の「AIに修正を依頼」で開始者が「mainへのマージまで自動で進める」を選んだ系列に限り、issue-deckの巡回が、その系列が作った復旧PR（`deploy-recovery/*`）を自動マージする。通常のリリースPR・人が作った復旧PR・他の系列のPRには及ばない。
+
+- **権限の根拠はサーバー側の系列記録だけ**（`DeployRecoverySeries`の開始者・許可範囲`scope`・期限・停止・復旧PRの番号／ブランチ／HEAD／base／差分）。ラベル・PR本文のマーカー・PRの作者は権限にしない
+- 判定は純関数`src/lib/deploy-recovery-main-merge.ts`の`decideRecoveryMainMerge`が1か所で持ち、画面（開始ダイアログの範囲選択）・API（`POST /api/repositories/deploy-recovery-series`が範囲を検証）・巡回（`runDeployRecoverySweep`）はこれに揃える。ワークフローはmainへのマージを持たない
+- **マージ直前に、復旧PRの現在のHEADとmainの現在の先端に対して観測し直す。** CIは復旧PRの現在のHEADのものを見て、develop上の合格は流用しない。PRの現在の差分が復旧PR作成時に記録した範囲（選んだ修正＋`package.json`）に収まることも確かめ、マージAPIにも記録したHEADのSHAを渡す
+- mainが進んだ・HEADが変わった・差分が範囲を超えた・コンフリクトした・CIが失敗した・`22.merge-confirm-required`が付いた場合はマージせず`needs_attention`で止め、修正が別のリリースで既にmainへ入っていれば置換済みとして止める
+- main向けPRにはClaudeの自動レビュー（`claude-review-develop.yml`はdevelop向けのみ）が走らないため、レビューに相当する関門は上の機械検証（差分の範囲・HEADの一致）。レビューを人の目で通したい失敗では、開始ダイアログで「mainへのマージまで自動で進める」を外す
+- 範囲外の自動化（稼働版の確認・復旧完了の判定）は#4007で足す。それまでマージ後の状態`releasing`は人へ渡す終端として扱う
+
 ### Issue・PRの責任モデル
 
 IssueとPRがそれぞれ何を正として持つか、1 Issue・1 PRの原則と親子Issue・複数PRの使い分け、
