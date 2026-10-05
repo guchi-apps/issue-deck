@@ -330,6 +330,28 @@ export async function fetchIssueState(
 }
 
 /**
+ * Issue本文の**現在の実物**を読む。取得できなければ`null`（401は`fetchIssueState`と同じく投げる）。
+ *
+ * 手作業Issueの自動整形（#4039）が、書き戻す直前に「整形に使った本文から変わっていないか」を
+ * 確かめるのに使う。DBのキャッシュは同期の遅れがあり、無条件のPATCHは人の編集を上書きする。
+ */
+export async function fetchIssueBody(
+  owner: string,
+  repo: string,
+  number: number,
+  token: string,
+): Promise<string | null> {
+  const url = `${GITHUB_API}/repos/${owner}/${repo}/issues/${number}`;
+  const res = await githubFetch(url, token);
+  if (res.status === 401) {
+    throw new GithubApiError(401, `GitHub API request failed: 401 ${url}`);
+  }
+  if (!res.ok) return null;
+  const issue: { body?: unknown } = await res.json().catch(() => ({}));
+  return typeof issue.body === "string" ? issue.body : issue.body === null ? "" : null;
+}
+
+/**
  * Issueが一度でもreopenされているか（#2715）。**取得できなければ`null`。**
  *
  * 本番反映済みのIssueを巡回がcloseする（`sweepMergedOpenIssue`）前の歯止め。進捗が`Done`の

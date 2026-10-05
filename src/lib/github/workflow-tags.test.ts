@@ -611,6 +611,7 @@ describe("collectWorkflowTags", () => {
       repairPropagation: null,
       sharedFilePropagation: null,
       sourceAhead: null,
+      unverifiedRepositories: [],
     });
     expect(githubFetch).not.toHaveBeenCalled();
   });
