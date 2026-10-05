@@ -11,6 +11,7 @@ import {
   RELEASE_BRANCH_PREFIX,
   requiresUserMerge,
 } from "@/lib/pull-request-list";
+import { summarizePullRequestHealth } from "@/lib/pull-request-health";
 import type {
   BranchComparison,
   BranchFlowDeployRun,
@@ -564,7 +565,14 @@ function buildRepository({
   const openLanePullRequests = lanePullRequests.filter(
     (pullRequest) => pullRequest.state === "open",
   );
+  // 通常PR・バージョンバンプPR・リリースPRを漏れなく数える（`hasCiFailure`と同じ母集団）
+  const summarizedPullRequests = [
+    ...openLanePullRequests,
+    ...(releasePullRequest ? [releasePullRequest] : []),
+    ...(bumpPullRequest ? [bumpPullRequest] : []),
+  ];
   const summary: BranchFlowRepositorySummary = {
+    pullRequestHealth: summarizePullRequestHealth(summarizedPullRequests),
     activeLaneCount: activeLanes.filter((lane) => !isClosedLane(lane)).length,
     // バンプPRもレーンから外したぶんここで数える（#1548）。CIが落ちたバンプPRは
     // auto-mergeが効かず止まっている状態そのもので、畳んだ行から気づけないと困る。
