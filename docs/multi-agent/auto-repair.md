@@ -669,10 +669,33 @@ kurashio・yoteiflowの`ios-testflight.yml`が失敗したまま止まったと�
 - 人へ渡すときは修正Issueへコメントし、`00.check-user`＋`01.check-blocked`で通知する（状態が
   変わった1回だけ）
 
-**第1段（#3998）は本番反映の手前で止まる。** `recovered`（復旧済み）は型だけ置き、遷移させない
-（PRのマージだけで復旧済みにしないため）。mainへの限定反映は#4005、復旧系列に限った本番自動
-マージの例外は#4006、再デプロイの追跡と稼働版の確認は#4007で足す。それまでは「main反映は人」の
-ルール（`CLAUDE.md`の自動マージ不可カテゴリ）を変えない。
+**修正PRのマージ（`awaiting_release`）は復旧済みではない。** 復旧済み（`recovered`）になるのは、
+次の再デプロイの追跡（#4007）で対象版の稼働を確かめたときだけ。mainへの限定反映は#4005、復旧系列に
+限った本番自動マージの例外は#4006で足す。それまでは「main反映は人」のルール（`CLAUDE.md`の
+自動マージ不可カテゴリ）を変えない。
+
+### 再デプロイの追跡と稼働版の確認（#4007）
+
+main反映側（#4005）が`beginDeployRecoveryRelease`でマージSHAを記録すると、`awaiting_release`から
+`releasing`（deploy実行中）→`verifying`（成功したが稼働版の確認待ち）→`recovered`と進む。
+判断は純関数`decideDeployRecoveryRelease`、観測と記録は`deploy-recovery-series-run.ts`。
+
+- **稼働版の照合。** `/api/app-version`が`sha`（`APP_COMMIT_SHA`＝`deploy.yml`が`github.sha`を`.env`へ書く）を
+  返し、`deploy.yml`のヘルスチェックはそのshaが今回のコミットと一致するまで成功にしない。
+  再起動に失敗して旧版が200を返し続けても、deployジョブは失敗する
+- **復旧済みの条件。** 対象SHAの最新のdeploy runが成功し、かつ`deploy`ジョブの成功と、そのコミットの
+  `deploy.yml`がSHA照合つきであること（`APP_COMMIT_SHA`と`/api/app-version`を含む）の両方を確かめられたとき。
+  照合の無い`deploy.yml`のリポジトリは、deployが成功しても`verifying`のまま上限（60分）で`needs_attention`
+  （`version_unverified`）になる。**確かめられないことを復旧済みと見なさない**
+- **起動漏れ・重複・cancel・timeout。** 対象SHAのrunが無い間は待つ（`deploy-launch`が起動を回収する）。
+  上限を過ぎても無ければ`deploy_not_started`。同じSHAのrunが複数あれば最新だけを見る。cancelは再実行を待ち、
+  上限で`deploy_cancelled`。失敗は`deploy-retry`の1回目の再実行を待ち（15分）、再実行も失敗（attempt 2以降）
+  なら`deploy_failed`
+- **実行権の分担。** 系列は**deployを起動し直さない**。起動漏れは`deploy-launch`、失敗の1回再実行は
+  `deploy-retry`が持ち、系列は観測だけなので二重に実行しない。試行回数もそれぞれのものを数え直さない
+- **IssueDeck自身が止まっているとき。** 追跡の状態はDBにあり、再起動後にpollerの巡回で続きから進む。
+  IssueDeckが落ちている間は巡回が届かず進まないだけで、復旧済みにはならない（観測できないことが
+  復旧済みへ倒れる経路は無い）。デプロイ自体の検証は`deploy.yml`のジョブ内（外部のActions）で行われる
 
 ## 配布状況と、不足しているcallerの配布（#1948・#1475）
 

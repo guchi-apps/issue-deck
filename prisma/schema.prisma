@@ -1873,6 +1873,14 @@ model DeployRecoverySeries {
   stopDetail                String?   @db.Text
   stoppedByUserId           String?
   stoppedAt                 DateTime?
+  /// 本番へ出したmainのマージSHA（#4007）。`releasing`以降で入り、このSHAのdeploy runだけを追跡する
+  releaseSha                String?
+  releaseStartedAt          DateTime?
+  /// 追跡しているdeploy run（最新のもの）
+  releaseRunId              BigInt?
+  releaseRunUrl             String?   @db.Text
+  /// 対象版の稼働を確かめた時刻。**これが入るのは`recovered`のときだけ**
+  recoveredAt               DateTime?
   lastSweepAt               DateTime?
   createdAt                 DateTime  @default(now())
   updatedAt                 DateTime  @updatedAt
