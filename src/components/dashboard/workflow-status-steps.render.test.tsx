@@ -52,14 +52,14 @@ function session(overrides: Partial<DispatchSessionView> = {}): DispatchSessionV
   };
 }
 
-/** 実行中の合図（塗ったマスの上をバー全体にわたって掃く光。#2516） */
+/** 実行中の合図（現在フェーズの1区間だけが明滅する。#4056） */
 function liveSweep(container: HTMLElement): Element | null {
-  return container.querySelector(".progress-live-sweep");
+  return container.querySelector(".progress-segment-live");
 }
 
-/** 起動中の合図（トラックの上を掃く濃い帯。#2516） */
+/** 掃く光が残っていないこと（#4056で廃止） */
 function barSweep(container: HTMLElement): Element | null {
-  return container.querySelector(".progress-bar-sweep");
+  return container.querySelector(".progress-live-sweep, .progress-bar-sweep");
 }
 
 /** 未達のマスを濃く塗っているか（確認待ち・回答待ち。#2516） */
@@ -221,6 +221,10 @@ describe("WorkflowStepBadge", () => {
       />,
     );
     expect(liveSweep(container)).not.toBeNull();
+    // 明滅するのは現在区間の1つだけで、バー全体を横切る光は出さない
+    expect(container.querySelectorAll(".progress-segment-live")).toHaveLength(1);
+    expect(liveSweep(container)?.getAttribute("data-state")).toBe("current");
+    expect(barSweep(container)).toBeNull();
   });
 
   it("入力待ちで止まっているセッションでは掃かない", () => {
@@ -419,22 +423,24 @@ describe("WorkflowStatusSteps のスマホ用キャプション", () => {
  * ——掃くと、実際に作業が進んでいる行と一覧の上で区別が付かなくなる。
  */
 describe("QueueStepBadge", () => {
-  it("順番待ちは番号を出し、掃かずに明滅させる", () => {
+  it("順番待ちは番号を出し、動かさず未着手の固定表示にする", () => {
     const { container } = render(<QueueStepBadge queue={queueState()} />);
     expect(container.textContent).toContain("順番待ち 2番目");
     expect(barSweep(container)).toBeNull();
-    expect(pulse(container)).not.toBeNull();
+    expect(pulse(container)).toBeNull();
+    expect(liveSweep(container)).toBeNull();
     // まだ1段も進んでいないので1マスも塗らない（#2516）
     expect(filledSegments(container)).toBe(0);
   });
 
-  it("起動中は「起動中」を出してトラック全体を掃く", () => {
+  it("起動中は「起動中」を出し、どの区間も動かさない", () => {
     const { container } = render(
       <QueueStepBadge queue={queueState({ phase: "starting", position: null })} />,
     );
     expect(container.textContent).toContain("起動中");
-    expect(barSweep(container)).not.toBeNull();
+    expect(barSweep(container)).toBeNull();
     expect(pulse(container)).toBeNull();
+    expect(liveSweep(container)).toBeNull();
     expect(filledSegments(container)).toBe(0);
   });
 
