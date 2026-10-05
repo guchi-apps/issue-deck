@@ -269,6 +269,7 @@ function toHostView(host: DispatchHost, now: Date): DispatchHostView {
     codexCapable: host.codexCapable,
     codexRemoteControlCapable: host.codexRemoteControlCapable,
     manualStepSessionCapable: host.manualStepSessionCapable,
+    reviewFixCapable: host.reviewFixCapable,
     prReviewCapable: host.prReviewCapable,
     selfUpdateCapable: host.selfUpdateCapable,
     maxSessions: host.maxSessions,
@@ -551,6 +552,7 @@ export async function expireStaleDispatchJobs(now: Date = new Date()): Promise<n
         // 確定させる**——これがActionsの最大30分ポーリングを廃止できる前提。サブPCが
         // オフライン・pollerが対応していない場合、ここで`TIMEOUT`になり最終マージ判定が再開される
         { status: "QUEUED", kind: "PR_REVIEW", createdAt: { lt: controlDeadline } },
+        { status: "QUEUED", kind: "REVIEW_FIX", createdAt: { lt: new Date(now.getTime() - 30 * 60_000) } },
       ],
     },
     select: {
@@ -597,6 +599,10 @@ export async function expireStaleDispatchJobs(now: Date = new Date()): Promise<n
           },
     });
     expired += result.count;
+    if (result.count > 0 && job.kind === "REVIEW_FIX") {
+      const { notifyReviewFixFailure } = await import("@/lib/dispatch/review-fix-notify");
+      await notifyReviewFixFailure(job.repositoryFullName, job.issueNumber, "サブPCのレビュー修正が時間切れになりました。実行状態を確認してください。");
+    }
   }
 
   // **期限の切れたペアリングコードを列ごと空にする**（#2524）。ジョブの状態とは無関係に、
@@ -1906,6 +1912,7 @@ export async function claimDispatchJobs(params: {
   // 制御ジョブのように枠外へ出すとセッション本数の見積もりが崩れる。対応を申告していない
   // pollerには配らない（古いpollerは未知の種別として`failed`で返すため、質問が必ず失われる）
   const launchKinds: DispatchJobKind[] = ["LAUNCH"];
+  if (host?.reviewFixCapable === true && host.codexCapable === true) launchKinds.push("REVIEW_FIX");
   if (host?.crossRepoQuestionCapable === true) launchKinds.push("CROSS_REPO_QUESTION");
   // **計画レビュー（G1・#1855）も同じ枠。** tmuxセッションを立てる点は横断質問と同じで、
   // 対応を申告していないpollerに配ると、計画を出すたびに`failed`のジョブが並ぶ。
@@ -2503,6 +2510,7 @@ export async function announceDispatchHost(params: {
   /** 手作業セッション（#2771）を起こせるか。申告していないpollerでは`null`＝非対応 */
   manualStepSessionCapable: boolean | null;
   /** develop向けPRのAIレビュー（#3990）を実行できるか。申告していないpollerでは未定義＝非対応 */
+  reviewFixCapable?: boolean | null;
   prReviewCapable?: boolean | null;
   selfUpdateCapable: boolean | null;
   /**
@@ -2575,6 +2583,7 @@ export async function announceDispatchHost(params: {
     codexCapable: params.codexCapable,
     codexRemoteControlCapable: params.codexRemoteControlCapable,
     manualStepSessionCapable: params.manualStepSessionCapable,
+    reviewFixCapable: params.reviewFixCapable ?? null,
     prReviewCapable: params.prReviewCapable ?? null,
     selfUpdateCapable: params.selfUpdateCapable,
     maxSessions: params.maxSessions,

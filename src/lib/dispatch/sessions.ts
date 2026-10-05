@@ -1,3 +1,4 @@
+import { recordImplementationRun } from "@/lib/dispatch/implementation-provider";
 import type { DispatchSession } from "@prisma/client";
 
 import { db } from "@/lib/db";
@@ -486,6 +487,17 @@ export async function reportDispatchSessions(params: {
         ...(report.remoteControlUrl ? { remoteControlUrl: report.remoteControlUrl } : {}),
       },
     });
+
+    // セッション行は回収されるため、開始時の担当だけは別に残す（#4037）。
+    // NOT_STARTEDは実行前の確認待ちなので担当の切替とは扱わない。
+    if (stored.activity !== "NOT_STARTED") {
+      await recordImplementationRun({
+        repositoryFullName: stored.repositoryFullName, issueNumber: stored.issueNumber,
+        runKey: `local:${stored.id}:${stored.firstSeenAt.toISOString()}`,
+        agent: stored.codexThreadKnown === null ? "claude" : "codex", source: "local",
+        startedAt: stored.firstSeenAt,
+      });
+    }
 
     // 同じtmux名で起動し直した場合はDB上のDispatchSession行を再利用するため、前回実行の
     // タイムラインをここで明示的に捨てる。実行単位を跨いだ会話・stepが新しいセッション詳細へ

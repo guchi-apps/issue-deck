@@ -244,6 +244,11 @@ FIX_WORKFLOW=".github/workflows/reusable-claude-review-fix.yml"
 [ -f "$FIX_WORKFLOW" ] || { echo "エラー: $FIX_WORKFLOW が見つかりません" >&2; exit 1; }
 
 AUTOFIX_PROMPT='<!-- issue-deck-review-autofix:ok sha=${HEAD_SHA} -->'
+CODEX_AUTOFIX_PROMPT='<!-- issue-deck-review-autofix:ok sha={{HEAD_SHA}} -->'
+if ! grep -qF "$CODEX_AUTOFIX_PROMPT" scripts/prompts/codex-pr-review-agent.md; then
+  echo "エラー: Codexレビューの自動修正OKの印がありません" >&2
+  fail=1
+fi
 AUTOFIX_READ='AUTOFIX_MARKER="<!-- issue-deck-review-autofix:ok sha=${HEAD_SHA} -->"'
 HANDOFF_WRITE='<!-- issue-deck-review-fix:handoff sha=${HEAD_SHA} -->'
 HANDOFF_READ='HANDOFF="<!-- issue-deck-review-fix:handoff sha=${HEAD_SHA} -->"'

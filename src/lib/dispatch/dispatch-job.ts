@@ -106,7 +106,8 @@ export type DispatchJobKind =
   | "REBOOT"
   | "CODEX_PAIRING"
   | "MANUAL_STEP_SESSION"
-  | "PR_REVIEW";
+  | "PR_REVIEW"
+  | "REVIEW_FIX";
 
 /**
  * 既に立っているセッションを操作するジョブ（起動しないジョブ）。
@@ -141,6 +142,7 @@ export const SESSION_LAUNCH_JOB_KINDS = [
   "PLAN_REVIEW",
   "CODE_REVIEW",
   "MANUAL_STEP_SESSION",
+  "REVIEW_FIX",
 ] as const;
 
 export type SessionLaunchJobKind = (typeof SESSION_LAUNCH_JOB_KINDS)[number];
@@ -192,6 +194,7 @@ export function parseDispatchJobKind(value: unknown): DispatchJobKind | null {
   if (value === "reboot") return "REBOOT";
   if (value === "codex_pairing") return "CODEX_PAIRING";
   if (value === "manual_step_session") return "MANUAL_STEP_SESSION";
+  if (value === "review_fix") return "REVIEW_FIX";
   if (value === "pr_review") return "PR_REVIEW";
   return null;
 }
@@ -759,6 +762,7 @@ export type DispatchHostView = {
    * develop向けPRのAIレビュー（#3990）を実行できるか。**`null`・未定義は「できない」**
    * （古いpollerは未知の種別を`failed`で返すため、配るとレビューが必ず失敗として残る）。
    */
+  reviewFixCapable?: boolean | null;
   prReviewCapable?: boolean | null;
 
   /**
@@ -1173,6 +1177,8 @@ export function describeDispatchJobKind(kind: DispatchJobKind): string {
       return "Codexのペアリング";
     case "MANUAL_STEP_SESSION":
       return "手作業セッション";
+    case "REVIEW_FIX":
+      return "レビュー指摘の修正";
     case "PR_REVIEW":
       return "PRレビュー";
     case "INTERRUPT":

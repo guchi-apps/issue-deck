@@ -214,6 +214,18 @@ export async function fetchActivePullRequestRepairRuns(
       runUrl: row.runUrl,
     });
   }
+  // サブPCの修正はActionsの終了とは独立。ジョブの状態を正として表示する。
+  const fixes = await db.dispatchJob.findMany({
+    where: { kind: "REVIEW_FIX", status: { in: ["QUEUED", "CLAIMED", "RUNNING"] },
+      updatedAt: { gt: new Date(now.getTime() - 30 * 60_000) },
+      OR: targets.map((target) => ({ repositoryFullName: target.repositoryFullName, prNumber: target.pullRequestNumber })) },
+    orderBy: { createdAt: "asc" },
+  }).catch(() => []);
+  for (const job of fixes) {
+    if (job.prNumber !== null) active.set(repairRunKey(job.repositoryFullName, job.prNumber), {
+      kind: "review", startedAt: job.createdAt.toISOString(), runUrl: null,
+    });
+  }
   return active;
 }
 

@@ -168,7 +168,8 @@ set -euo pipefail
 #     tmuxで起動する（#3990）。かつての`--sweep`（全リポジトリのopen PRを巡回して要求印を拾う）は
 #     廃止し、使用量の補完・送り直し（`--usage-flush`）と、確定したレビューの最終マージ判定の
 #     再開の巡回（`POST /api/dispatch/pr-review/resume-sweep`）だけを残した。
-DISPATCH_POLLER_VERSION="31"
+# 32: REVIEW_FIXを独立ジョブとして購読認証のCodexで実行する（#4043）。
+DISPATCH_POLLER_VERSION="32"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -265,6 +266,7 @@ CODE_REVIEW_LAUNCHER="$SCRIPT_DIR/start-code-review.sh"
 # 使うため、Actionsから直接起動せずこのランチャーへ渡す（#3917）。**ジョブ（`PR_REVIEW`）はissue-deckが
 # 積み、pollerがclaimして起動する**（#3990。かつてはPRコメントの要求印を巡回して拾っていた）。
 CODEX_PR_REVIEW_LAUNCHER="$SCRIPT_DIR/start-codex-pr-review.sh"
+CODEX_REVIEW_FIX_LAUNCHER="$SCRIPT_DIR/start-codex-review-fix.sh"
 # 確認環境（#2444）。**セッションを立てないジョブ**（`SELF_UPDATE`・`MANUAL_STEP`と同じ枠外）で、
 # developの最新をそのまま開ける開発サーバーを1本だけ起こす。
 PREVIEW_LAUNCHER="$SCRIPT_DIR/start-preview-dev.sh"
@@ -1296,6 +1298,7 @@ announce() {
     --argjson planReview "$(plan_review_capable)" \
     --argjson planReviewAgent true \
     --argjson codeReview "$(code_review_capable)" \
+    --argjson reviewFix "$(if [[ -f "$CODEX_REVIEW_FIX_LAUNCHER" ]] && [[ "$(pr_review_capable)" == true ]]; then echo true; else echo false; fi)" \
     --argjson prReview "$(pr_review_capable)" \
     --argjson codex "$codex_flag" \
     --argjson codexRemoteControl "$(codex_remote_control_capable)" \
@@ -1309,7 +1312,7 @@ announce() {
     --argjson launchHold "${LAUNCH_HOLD_JSON:-null}" \
     --argjson checkout "${checkout:-null}" \
     --argjson planReviewSessions "$plan_review_sessions" \
-    '{host: $host, repositories: $repositories, contractVersion: $contractVersion, agentVersion: $agentVersion, sessionControl: true, instruction: true, crossRepoQuestion: $crossRepoQuestion, manualStep: $manualStep, manualStepAbort: $manualStepAbort, manualStepValues: $manualStepValues, manualStepVps: $manualStepVps, manualStepSession: $manualStepSession, planReview: $planReview, planReviewAgent: $planReviewAgent, codeReview: $codeReview, prReview: $prReview, codex: $codex, codexRemoteControl: $codexRemoteControl, selfUpdate: $selfUpdate, reboot: $reboot, rebootState: $rebootState, preview: $preview, previewState: $previewState, previewRepositories: $previewRepositories, maxSessions: $maxSessions, liveSessions: $liveSessions, metrics: $metrics, launchHold: $launchHold, checkout: $checkout, planReviewSessions: $planReviewSessions}')"
+    '{host: $host, repositories: $repositories, contractVersion: $contractVersion, agentVersion: $agentVersion, sessionControl: true, instruction: true, crossRepoQuestion: $crossRepoQuestion, manualStep: $manualStep, manualStepAbort: $manualStepAbort, manualStepValues: $manualStepValues, manualStepVps: $manualStepVps, manualStepSession: $manualStepSession, planReview: $planReview, planReviewAgent: $planReviewAgent, codeReview: $codeReview, prReview: $prReview, reviewFix: $reviewFix, codex: $codex, codexRemoteControl: $codexRemoteControl, selfUpdate: $selfUpdate, reboot: $reboot, rebootState: $rebootState, preview: $preview, previewState: $previewState, previewRepositories: $previewRepositories, maxSessions: $maxSessions, liveSessions: $liveSessions, metrics: $metrics, launchHold: $launchHold, checkout: $checkout, planReviewSessions: $planReviewSessions}')"
 
   if ! api_call POST /api/dispatch/hosts "$payload"; then
     report_api_failure "ホストの申告に失敗しました"
@@ -3518,6 +3521,33 @@ run_pr_review_job() {
   report_job "$job_id" running "Codexレビューを起動しました（$owner/$repo#$pr_number）" "$session"
 }
 
+# 修正は専用セッションで実行し、完了はスクリプト自身が報告する。
+run_review_fix_job() {
+  local job_id="$1" owner="$2" repo="$3" issue="$4" agent="$5" pr="$6" sha="$7"
+  local session="${repo}-review-fix-${issue}"
+  if [[ "$agent" != codex || ! -f "$CODEX_REVIEW_FIX_LAUNCHER" || ! "$pr" =~ ^[1-9][0-9]*$ || ! "$sha" =~ ^[a-f0-9]{40,64}$ ]]; then
+    report_job "$job_id" failed "レビュー修正のランチャー・agent・対象が不正です"
+    return 0
+  fi
+  if tmux has-session -t "=$session" 2>/dev/null; then
+    if [[ "$(tmux list-panes -t "=$session" -F '#{pane_dead}' | head -1)" == 1 ]]; then
+      tmux kill-session -t "=$session"
+    else
+      report_job "$job_id" failed "同じIssueのレビュー修正が実行中です"
+      return 0
+    fi
+  fi
+  [[ "$DRY_RUN" != 1 ]] || return 0
+  ensure_tmux_server_scope
+  if ! tmux new-session -d -s "$session" -c "$HOME" \
+    "APP_BASE_URL=$(printf '%q' "${APP_BASE_URL:-}") bash $(printf '%q' "$CODEX_REVIEW_FIX_LAUNCHER") $(printf '%q' "$owner") $(printf '%q' "$repo") $(printf '%q' "$issue") $(printf '%q' "$pr") $(printf '%q' "$sha") $(printf '%q' "$job_id")"; then
+    report_job "$job_id" failed "レビュー修正のセッションを起動できませんでした"
+    return 0
+  fi
+  tmux set-option -t "$session:" -w remain-on-exit failed >/dev/null 2>&1 || true
+  report_job "$job_id" running "Codexのレビュー修正を起動しました" "$session"
+}
+
 # ジョブを1件実行する。
 #
 # 起動できたかどうかは、**起動の前後でtmuxのセッション一覧を比べて増分を見る**。
@@ -3613,6 +3643,12 @@ run_job() {
   # 実装セッション用で、こちらはPRのコードを読むだけ。cloneが無ければランチャーが理由を出して落ちる）。
   # **`launch_and_report`は使わない。** あちらは「tmuxが立った」時点で`succeeded`を報告するが、
   # このジョブはレビューが終わるまで`running`のままで、完了・失敗はレビューのスクリプト自身が報告する。
+  if [[ "$kind" == "REVIEW_FIX" ]]; then
+    run_review_fix_job "$job_id" "$owner" "$repo" "$issue_number" "$agent" \
+      "$(printf '%s' "$job_json" | jq -r '.prNumber // ""')" \
+      "$(printf '%s' "$job_json" | jq -r '.headSha // ""')"
+    return 0
+  fi
   if [[ "$kind" == "PR_REVIEW" ]]; then
     run_pr_review_job "$job_id" "$owner" "$repo" "$agent" \
       "$(printf '%s' "$job_json" | jq -r '.prNumber // ""')" \

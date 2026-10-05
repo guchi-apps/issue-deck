@@ -1,8 +1,8 @@
-name: Reusable Claude Review Fix
+name: Reusable Claude / Codex Review Fix
 
 # develop向け、またはdevelopを持たないリポジトリのmain向けPR（issue-<番号>ブランチ）で、
 # 自動レビュー（reusable-claude-review-develop.yml）が「要修正」と判定した指摘を、
-# Claude Codeが直してpushするワークフローのジョブ本体（#3363）。
+# 実装担当に合わせてClaude CodeまたはサブPCのCodexが直してpushする（#3363・#4043）。
 # トリガー定義は呼び出し元の claude-review-fix.yml が持ち、ここは on: workflow_call のみ。
 #
 # **直してよいかを決めるのはレビュー側。** レビューが「人の判断が要らない指摘だけ」と印を
@@ -307,16 +307,20 @@ jobs:
 
           # 直す材料は、このPRへ投稿された最新コミットへの「要修正」自動レビューコメント。
           # ClaudeとCodexは同じPRを再レビューするため、**手動実行では両方の指摘を渡す**。
-          # Codexは「自動修正してよい」印を持たないので自動のhandoffには入れず、画面で人が
-          # 開始したこの経路だけで扱う。これにより、どちらの指摘も後継Issue／PRを作らない。
+          # 自動実行では同じ最新コメント内の安全マーカーも必要。どちらの指摘も同じPRで直す。
           # --paginateの--jqはページごとに評価されるため、ページをまとめてから対象を抜き出す。
           gh api "repos/$GH_REPO/issues/$PR_NUMBER/comments?per_page=100" --paginate \
             | jq -rs --arg head_sha "$HEAD_SHA" --arg manual "$MANUAL" '
                 [.[][] | select(.body | test("issue-deck(-codex)?-review-verdict:(lgtm|needs-check|changes-requested) sha=" + $head_sha))]
                 | group_by(if (.body | test("issue-deck-codex-review-verdict:")) then "codex" else "claude" end)
                 | map(sort_by(.created_at) | last)
+                | if $manual == "true" then .
+                  elif any(.[]; .body | contains("needs-check sha=" + $head_sha + " -->")) then []
+                  else . end
                 | map(select(.body | test("changes-requested sha=" + $head_sha)))
-                | if $manual == "true" then . else map(select(.body | test("issue-deck-review-verdict:"))) end
+                | if $manual == "true" then .
+                  elif all(.[]; .body | contains("<!-- issue-deck-review-autofix:ok sha=" + $head_sha + " -->")) then .
+                  else [] end
                 | map(.body)
                 | join("\n\n---\n\n")
               ' \
@@ -329,8 +333,25 @@ jobs:
           echo "レビューコメント: $(wc -l < /tmp/review-comment.md) 行"
 
           echo "should_fix=true" >> "$GITHUB_OUTPUT"
+          echo "head_sha=$HEAD_SHA" >> "$GITHUB_OUTPUT"
           echo "pr_number=$PR_NUMBER" >> "$GITHUB_OUTPUT"
           echo "pr_url=$PR_URL" >> "$GITHUB_OUTPUT"
+
+      - name: 実装担当から修正担当を解決する
+        id: provider
+        if: steps.state.outputs.should_fix == 'true'
+        env:
+          APP_BASE_URL: ${{ vars.APP_BASE_URL }}
+          PROGRESS_REPORT_SECRET: ${{ secrets.PROGRESS_REPORT_SECRET }}
+          REPOSITORY: ${{ github.repository }}
+          ISSUE_NUMBER: ${{ needs.detect.outputs.issue_number }}
+        run: |
+          set -euo pipefail
+          test -n "$APP_BASE_URL" && test -n "$PROGRESS_REPORT_SECRET"
+          body="$(jq -nc --arg repository "$REPOSITORY" --argjson issueNumber "$ISSUE_NUMBER" '{action:"resolve",repository:$repository,issueNumber:$issueNumber}')"
+          result="$(curl -fsS --max-time 20 -X POST -H "Authorization: Bearer $PROGRESS_REPORT_SECRET" -H 'Content-Type: application/json' --data-binary "$body" "${APP_BASE_URL%/}/api/dispatch/implementation-provider")"
+          provider="$(jq -er '.provider | select(. == "claude" or . == "codex")' <<<"$result")"
+          echo "agent=$provider" >> "$GITHUB_OUTPUT"
 
       - name: 手動実行のときは確認待ちを外す
         # 画面の「レビュー指摘を自動修正」を押すのは、人が確認したうえで直しを任せたということ。
@@ -353,8 +374,37 @@ jobs:
             gh issue edit "$ISSUE_NUMBER" "${LABEL_ARGS[@]}" || echo "::warning::確認待ちのラベルを外せませんでした"
           fi
 
+      - name: Codexのレビュー修正をサブPCへ依頼する
+        id: codex_fix
+        if: steps.state.outputs.should_fix == 'true' && steps.provider.outputs.agent == 'codex'
+        env:
+          APP_BASE_URL: ${{ vars.APP_BASE_URL }}
+          PROGRESS_REPORT_SECRET: ${{ secrets.PROGRESS_REPORT_SECRET }}
+          REPOSITORY: ${{ github.repository }}
+          ISSUE_NUMBER: ${{ needs.detect.outputs.issue_number }}
+          PR_NUMBER: ${{ steps.state.outputs.pr_number }}
+          HEAD_SHA: ${{ steps.state.outputs.head_sha }}
+          MANUAL: ${{ needs.detect.outputs.manual }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          body="$(jq -nc --arg repository "$REPOSITORY" --argjson issueNumber "$ISSUE_NUMBER" --argjson pullRequest "$PR_NUMBER" --arg headSha "$HEAD_SHA" --argjson manual "$MANUAL" --arg runId "$RUN_ID" '{runId:$runId,action:"request",repository:$repository,issueNumber:$issueNumber,pullRequest:$pullRequest,headSha:$headSha,manual:$manual}')"
+          result="$(curl -fsS --max-time 30 -X POST -H "Authorization: Bearer $PROGRESS_REPORT_SECRET" -H 'Content-Type: application/json' --data-binary "$body" "${APP_BASE_URL%/}/api/dispatch/review-fix")"
+          jq -e '.status == "QUEUED" or .status == "CLAIMED" or .status == "RUNNING" or .status == "SUCCEEDED"' <<<"$result" >/dev/null
+          echo 'サブPCへ依頼しました。完了はDispatchJobの状態で確認できます。'
+
+      - name: 修正担当の解決またはサブPCへの依頼失敗を通知する
+        if: failure() && steps.state.outputs.should_fix == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          ISSUE_NUMBER: ${{ needs.detect.outputs.issue_number }}
+        run: |
+          gh issue comment "$ISSUE_NUMBER" --body 'レビュー修正の担当解決またはサブPCへの依頼に失敗しました。実装担当の記録、サブPCの更新・オンライン状態、同じIssueの実装セッションを確認してください。Claudeへは切り替えていません。<!-- issue-deck-source:claude-review-fix -->'
+          gh issue edit "$ISSUE_NUMBER" --add-label 00.check-user --add-label 01.check-blocked
+
       - name: 作業ブランチをcheckoutする
-        if: steps.state.outputs.should_fix == 'true'
+        if: steps.state.outputs.should_fix == 'true' && steps.provider.outputs.agent == 'claude'
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.WORKFLOW_PAT }}
           BRANCH: ${{ steps.state.outputs.branch }}
@@ -364,7 +414,7 @@ jobs:
           git checkout "$BRANCH"
 
       - name: 対応開始をコメントで通知する
-        if: steps.state.outputs.should_fix == 'true'
+        if: steps.state.outputs.should_fix == 'true' && steps.provider.outputs.agent == 'claude'
         env:
           GH_TOKEN: ${{ github.token }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
@@ -383,7 +433,7 @@ jobs:
         # runの`head_branch`・`head_sha`が対象PRではなくデフォルトブランチを指し、
         # 実行から対象PRへ辿る手段が無い。走っている側から報告する。
         # 進捗報告（`POST /api/progress`）と同じ値・同じ「失敗してもワークフローを止めない」扱い。
-        if: steps.state.outputs.should_fix == 'true'
+        if: steps.state.outputs.should_fix == 'true' && steps.provider.outputs.agent == 'claude'
         env:
           APP_BASE_URL: ${{ vars.APP_BASE_URL }}
           PROGRESS_REPORT_SECRET: ${{ secrets.PROGRESS_REPORT_SECRET }}
@@ -404,7 +454,7 @@ jobs:
 
       - name: 解消前のコメント数を記録する
         id: before
-        if: steps.state.outputs.should_fix == 'true'
+        if: steps.state.outputs.should_fix == 'true' && steps.provider.outputs.agent == 'claude'
         env:
           GH_TOKEN: ${{ github.token }}
           ISSUE_NUMBER: ${{ needs.detect.outputs.issue_number }}
@@ -413,18 +463,18 @@ jobs:
           echo "comment_count=$COUNT" >> "$GITHUB_OUTPUT"
 
       - name: Setup pnpm
-        if: steps.state.outputs.should_fix == 'true' && inputs.package-manager == 'pnpm' && inputs.runtime-setup != 'minimal'
+        if: steps.state.outputs.should_fix == 'true' && steps.provider.outputs.agent == 'claude' && inputs.package-manager == 'pnpm' && inputs.runtime-setup != 'minimal'
         uses: pnpm/action-setup@v4
 
       - name: Setup Node.js
-        if: steps.state.outputs.should_fix == 'true' && inputs.runtime-setup != 'minimal'
+        if: steps.state.outputs.should_fix == 'true' && steps.provider.outputs.agent == 'claude' && inputs.runtime-setup != 'minimal'
         uses: actions/setup-node@v4
         with:
           node-version: ${{ inputs.node-version || '24' }}
           cache: ${{ inputs.package-manager }}
 
       - name: 依存関係をインストールする
-        if: steps.state.outputs.should_fix == 'true' && inputs.runtime-setup != 'minimal' && inputs.install-dependencies
+        if: steps.state.outputs.should_fix == 'true' && steps.provider.outputs.agent == 'claude' && inputs.runtime-setup != 'minimal' && inputs.install-dependencies
         run: |
           if [ "${{ inputs.package-manager }}" = "pnpm" ]; then
             pnpm install --frozen-lockfile
@@ -435,7 +485,7 @@ jobs:
       - name: ビルド検証用の環境変数を設定する
         # Claude Codeエージェントがビルドを実行して修正を検証できるようにするための
         # CI専用プレースホルダー。実シークレットは渡さない前提（inputs.build-envのdescription参照）。
-        if: steps.state.outputs.should_fix == 'true' && inputs.build-env != ''
+        if: steps.state.outputs.should_fix == 'true' && steps.provider.outputs.agent == 'claude' && inputs.build-env != ''
         env:
           BUILD_ENV: ${{ inputs.build-env }}
         run: |
@@ -460,7 +510,7 @@ jobs:
         # テンプレートとして扱われ、その長さに21,000バイト(UTF-8)の上限がかかる。超えると
         # ワークフローファイル自体が「Invalid workflow file」となりトリガーが一切発火しなくなる
         # （#901で無人実行が丸半日停止した）。env経由にすることでこの上限を構造的に回避する。
-        if: steps.state.outputs.should_fix == 'true'
+        if: steps.state.outputs.should_fix == 'true' && steps.provider.outputs.agent == 'claude'
         env:
           ISSUE_NUMBER: ${{ needs.detect.outputs.issue_number }}
           BRANCH: ${{ steps.state.outputs.branch }}
@@ -495,6 +545,7 @@ jobs:
 
       - name: PRレビュー・修復用のClaudeモデルを取得する
         id: workflow_model
+        if: steps.state.outputs.should_fix == 'true' && steps.provider.outputs.agent == 'claude'
         env:
           APP_BASE_URL: ${{ vars.APP_BASE_URL }}
         run: |
@@ -505,7 +556,7 @@ jobs:
 
       - name: Claude Code（レビュー指摘修正）
         id: claude_review_fix
-        if: steps.state.outputs.should_fix == 'true'
+        if: steps.state.outputs.should_fix == 'true' && steps.provider.outputs.agent == 'claude'
         uses: anthropics/claude-code-action@v1
         env:
           # .github/workflows/配下を含むgit pushの認証は、前段の「pushの認証をワークフロー用トークンに
@@ -587,7 +638,7 @@ jobs:
         #
         # Phase 4までは同じ目的で実装中を示す進捗ラベルを除去していた。進捗ラベルの廃止
         # （#991 Phase 5・#1010）にあわせてStatusの再報告へ置き換えている。
-        if: always() && steps.state.outputs.should_fix == 'true'
+        if: always() && steps.state.outputs.should_fix == 'true' && steps.provider.outputs.agent == 'claude'
         env:
           APP_BASE_URL: ${{ vars.APP_BASE_URL }}
           PROGRESS_REPORT_SECRET: ${{ secrets.PROGRESS_REPORT_SECRET }}
@@ -618,7 +669,7 @@ jobs:
         # 場合や許可されていない操作で行き詰まった場合に結果が使用者に一切伝わらない恐れがある。
         # そのため後続のステップとして独立に結果を確認する（claude-conflict-resolve.ymlの
         # 同種の検証ステップと同じ考え方）。
-        if: always() && steps.state.outputs.should_fix == 'true'
+        if: always() && steps.state.outputs.should_fix == 'true' && steps.provider.outputs.agent == 'claude'
         env:
           GH_TOKEN: ${{ github.token }}
           ISSUE_NUMBER: ${{ needs.detect.outputs.issue_number }}
@@ -662,7 +713,7 @@ jobs:
         # 画面から「自動修正中」を消す（#2072）。`if: always()`で、直せた場合も断念した場合も
         # 必ず通す。実行そのものがキャンセルされてここへ来なかった場合は、issue-deck側が
         # 開始から`REPAIR_RUN_STALE_MINUTES`で時間切れとして倒す。
-        if: always() && steps.state.outputs.should_fix == 'true'
+        if: always() && steps.state.outputs.should_fix == 'true' && (steps.provider.outputs.agent != 'codex' || steps.codex_fix.outcome != 'success')
         env:
           APP_BASE_URL: ${{ vars.APP_BASE_URL }}
           PROGRESS_REPORT_SECRET: ${{ secrets.PROGRESS_REPORT_SECRET }}

@@ -2115,6 +2115,28 @@ jobs:
           } >> "$GITHUB_ENV"
 
 
+      - name: 実装担当を記録する
+        # PR作成より前に記録する。記録失敗時は別担当でレビューされる実装を開始しない（#4037）。
+        if: steps.state.outputs.mode == 'implement' || steps.state.outputs.mode == 'additional'
+        env:
+          APP_BASE_URL: ${{ vars.APP_BASE_URL }}
+          PROGRESS_REPORT_SECRET: ${{ secrets.PROGRESS_REPORT_SECRET }}
+          REPOSITORY: ${{ github.repository }}
+          ISSUE_NUMBER: ${{ steps.state.outputs.issue_number }}
+          AGENT: ${{ steps.claude_model.outputs.agent }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+        run: |
+          set -euo pipefail
+          [ -n "$APP_BASE_URL" ] && [ -n "$PROGRESS_REPORT_SECRET" ] || {
+            echo "::error::実装担当を記録する接続設定がありません"; exit 1;
+          }
+          BODY="$(jq -nc --arg repository "$REPOSITORY" --argjson issueNumber "$ISSUE_NUMBER" \
+            --arg agent "$AGENT" --arg runId "$RUN_ID" --argjson attempt "$RUN_ATTEMPT" \
+            '{action:"record",repository:$repository,issueNumber:$issueNumber,agent:$agent,runId:$runId,attempt:$attempt}')"
+          curl -fsS --max-time 15 -X POST "${APP_BASE_URL%/}/api/dispatch/implementation-provider" \
+            -H "Authorization: Bearer $PROGRESS_REPORT_SECRET" -H 'Content-Type: application/json' --data "$BODY" >/dev/null
+
       - name: Claude Code（実装・PR作成）
         id: claude_implement
         if: (steps.state.outputs.mode == 'implement' || steps.state.outputs.mode == 'additional') && steps.claude_model.outputs.agent != 'codex'

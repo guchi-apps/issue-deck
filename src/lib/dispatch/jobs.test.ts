@@ -1248,7 +1248,7 @@ describe("claimDispatchJobs の制御ジョブ", () => {
     expect(dispatchJobCount).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({
-          kind: { in: ["LAUNCH", "CROSS_REPO_QUESTION", "PLAN_REVIEW", "CODE_REVIEW", "MANUAL_STEP_SESSION"] },
+          kind: { in: ["LAUNCH", "CROSS_REPO_QUESTION", "PLAN_REVIEW", "CODE_REVIEW", "MANUAL_STEP_SESSION", "REVIEW_FIX"] },
         }),
       }),
     );
@@ -2694,7 +2694,7 @@ describe("claimDispatchJobs の代行実行", () => {
     expect(dispatchJobCount).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({
-          kind: { in: ["LAUNCH", "CROSS_REPO_QUESTION", "PLAN_REVIEW", "CODE_REVIEW", "MANUAL_STEP_SESSION"] },
+          kind: { in: ["LAUNCH", "CROSS_REPO_QUESTION", "PLAN_REVIEW", "CODE_REVIEW", "MANUAL_STEP_SESSION", "REVIEW_FIX"] },
         }),
       }),
     );
@@ -3047,5 +3047,28 @@ describe("PRレビュー（PR_REVIEW・#3990）", () => {
     dispatchHostFindUnique.mockResolvedValue(host({ prReviewCapable: true }));
     await claimDispatchJobs({ hostName: "subpc", maxJobs: 0, now: NOW });
     expect(requestedKinds.flat()).toContain("PR_REVIEW");
+  });
+});
+
+
+describe("レビュー指摘修正の払い出し（#4043）", () => {
+  it("対応を申告したCodexホストだけにセッション枠内で配る", async () => {
+    dispatchJobCount.mockResolvedValue(0);
+    const requested: string[][] = [];
+    dispatchJobFindMany.mockImplementation(async (args: { where?: Record<string, unknown> }) => {
+      const kind = args.where?.kind as { in?: string[] } | undefined;
+      if (kind?.in) requested.push(kind.in);
+      return [];
+    });
+    dispatchHostFindUnique.mockResolvedValue(host({ reviewFixCapable: null, codexCapable: true }));
+    await claimDispatchJobs({ hostName: "subpc", maxJobs: 1, now: NOW });
+    expect(requested.flat()).not.toContain("REVIEW_FIX");
+    requested.length = 0;
+    dispatchHostFindUnique.mockResolvedValue(host({ reviewFixCapable: true, codexCapable: true }));
+    await claimDispatchJobs({ hostName: "subpc", maxJobs: 0, now: NOW });
+    expect(requested.flat()).not.toContain("REVIEW_FIX");
+    requested.length = 0;
+    await claimDispatchJobs({ hostName: "subpc", maxJobs: 1, now: NOW });
+    expect(requested.flat()).toContain("REVIEW_FIX");
   });
 });
