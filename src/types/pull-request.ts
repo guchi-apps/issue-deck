@@ -2,6 +2,7 @@ import type { CheckUserReason } from "@/lib/github/approval-labels";
 import type { MergeJudgement, RollupCiCheck } from "@/lib/github/check-rollup";
 import type { PullRequestCiStatus } from "@/lib/github/pull-request-ci";
 import type { RepairWorkflowAvailability } from "@/lib/github/pull-request-repair";
+import type { PullRequestAgentReview } from "@/lib/dispatch/pr-review-agent-summary";
 import type { PullRequestAutoRepairSummary } from "@/lib/github/pull-request-auto-repair-status";
 import type { PullRequestRepairRunSummary } from "@/lib/github/pull-request-repair-run";
 import type { PullRequestReviewVerdict } from "@/lib/github/pull-request-review-verdict";
@@ -156,6 +157,12 @@ export type PullRequestSummary = {
    * 同じ扱い。ブランチ画面の「再検証待ち」「停止（理由）」の材料。
    */
   autoRepair?: PullRequestAutoRepairSummary | null;
+  /**
+   * 現在のHEADに対する、エージェント別（Codex等）のAIレビュー（`PR_REVIEW`ジョブ。#4024）。
+   * ジョブが無ければ無い。**一覧だけが載せる**ので省略可能。Claudeのレビューは`reviewVerdict`・
+   * `mergeJudgement`から読むためここには入らない。
+   */
+  agentReviews?: PullRequestAgentReview[];
   /**
    * このPR1本ぶんの自動レビュー判定（#2843）。PR本文の`## 検証結果`から読む。記録が無ければnull。
    *

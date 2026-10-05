@@ -1,3 +1,7 @@
+import {
+  agentReviewKey,
+  fetchPullRequestAgentReviews,
+} from "@/lib/dispatch/pr-review-agent-summary";
 import { db } from "@/lib/db";
 import { getInstallationToken } from "@/lib/github/app-auth";
 import { pullRequestRollupKey, type PullRequestRollupTarget } from "@/lib/github/check-rollup";
@@ -198,6 +202,21 @@ export async function fetchPullRequestListForUser(
   for (const pullRequest of allPullRequests) {
     pullRequest.autoRepair =
       autoRepairs.get(autoRepairLoopKey(pullRequest.repositoryFullName, pullRequest.number)) ?? null;
+  }
+
+  // エージェント別のAIレビュー（#4024）。現在のHEADに対する`PR_REVIEW`ジョブを1クエリで引く
+  const agentReviews = await fetchPullRequestAgentReviews(
+    allPullRequests
+      .filter((pullRequest) => pullRequest.state === "open" && !pullRequest.draft)
+      .map((pullRequest) => ({
+        repositoryFullName: pullRequest.repositoryFullName,
+        pullRequestNumber: pullRequest.number,
+        headSha: pullRequest.headSha,
+      })),
+  );
+  for (const pullRequest of allPullRequests) {
+    pullRequest.agentReviews =
+      agentReviews.get(agentReviewKey(pullRequest.repositoryFullName, pullRequest.number)) ?? [];
   }
 
   const response: PullRequestListResponse = {

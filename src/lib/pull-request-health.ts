@@ -2,6 +2,7 @@ import { autoRepairStopReasonLabel } from "@/lib/github/pull-request-auto-repair
 import { REPAIR_KIND_RUNNING_SHORT_LABEL } from "@/lib/github/pull-request-repair";
 import { resolveReviewVerdictFreshness } from "@/lib/github/review-verdict-freshness";
 import { resolveAiReviewVerdictState } from "@/lib/pull-request-list";
+import type { PullRequestAgentReviewState } from "@/lib/dispatch/pr-review-agent-summary";
 import type { PullRequestSummary } from "@/types/pull-request";
 
 /**
@@ -55,7 +56,19 @@ export type PullRequestHealthSlot = {
    * 展開先。`ci`はCIの内訳（#3662）、それ以外はPR詳細へ進む。画面側が出し分けるための印で、
    * 判定には使わない。
    */
-  detail: "ci-breakdown" | "pull-request" | null;
+  detail: "ci-breakdown" | "agent-breakdown" | "pull-request" | null;
+  /**
+   * レビュー枠のエージェント別の内訳（#4024）。Codex等の`PR_REVIEW`ジョブがあるときだけ入り、
+   * 全員のLGTMが揃ったときだけ枠が完了になる。
+   */
+  breakdown?: PullRequestHealthBreakdownRow[];
+};
+
+export type PullRequestHealthBreakdownRow = {
+  agentLabel: string;
+  icon: string;
+  label: string;
+  tone: PullRequestHealthTone;
 };
 
 /**
@@ -90,6 +103,7 @@ type HealthSource = Pick<
   | "reviewVerdict"
   | "repairRun"
   | "autoRepair"
+  | "agentReviews"
 >;
 
 const COLUMN_LABEL: Record<PullRequestHealthSlotKey, string> = {
@@ -101,6 +115,20 @@ const COLUMN_LABEL: Record<PullRequestHealthSlotKey, string> = {
 
 /** check-runのstatusのうち、まだ始まっていないもの */
 const QUEUED_CHECK_STATUSES = new Set(["queued", "waiting", "pending", "requested"]);
+
+const TONE_SEVERITY: Record<PullRequestHealthTone, number> = { ok: 0, idle: 1, run: 2, warn: 3, bad: 4 };
+
+/** エージェント別レビューの状態 → [記号, 文言, 色, 数えるカテゴリ] */
+const AGENT_REVIEW_STATE: Record<
+  PullRequestAgentReviewState,
+  [string, string, PullRequestHealthTone, PullRequestHealthCategory | null]
+> = {
+  pending: ["●", "レビュー実施中", "run", "review-running"],
+  lgtm: ["✓", "LGTM", "ok", null],
+  "needs-check": ["△", "要確認", "warn", "review-needs-check"],
+  "changes-requested": ["✕", "要修正", "bad", "review-changes-requested"],
+  failed: ["✕", "レビュー失敗", "bad", "review-needs-check"],
+};
 
 type SlotInput = Omit<PullRequestHealthSlot, "key" | "columnLabel">;
 
@@ -120,7 +148,7 @@ export function resolvePullRequestHealth(pullRequest: HealthSource): PullRequest
 
   const categories = new Set<PullRequestHealthCategory>();
   const ci = ciSlot();
-  const review = reviewSlot();
+  const review = withAgentBreakdown(claudeReviewSlot());
   const conflict = conflictSlot();
   const repair = repairSlot();
 
@@ -207,7 +235,56 @@ export function resolvePullRequestHealth(pullRequest: HealthSource): PullRequest
     }
   }
 
-  function reviewSlot(): PullRequestHealthSlot {
+  /**
+   * Claudeの判定（`claudeSlot`）と、Codex等の`PR_REVIEW`の状態を合わせて、枠を1つにする（#4024）。
+   * **必要な全員のLGTMが揃ったときだけ完了**で、1人でも要修正・失敗・未完了なら、
+   * いちばん重い状態を枠に出す。ジョブを持たないエージェントは必須とみなさない。
+   */
+  function withAgentBreakdown(claudeSlot: PullRequestHealthSlot): PullRequestHealthSlot {
+    const agents = pullRequest.agentReviews ?? [];
+    if (agents.length === 0) return claudeSlot;
+    const rows: { row: PullRequestHealthBreakdownRow; slot: PullRequestHealthSlot | null }[] = [];
+    // 「レビューなし」はClaudeの工程自体が無い状態で、必須の欠落ではない
+    if (claudeSlot.detail !== null || claudeSlot.href !== null) {
+      rows.push({
+        row: { agentLabel: "Claude", icon: claudeSlot.icon, label: claudeSlot.label, tone: claudeSlot.tone },
+        slot: claudeSlot,
+      });
+    }
+    for (const review of agents) {
+      const agentLabel = review.agent === "codex" ? "Codex" : "Claude（ジョブ）";
+      const [icon, label, tone, category] = AGENT_REVIEW_STATE[review.state];
+      if (category) categories.add(category);
+      rows.push({
+        row: { agentLabel, icon, label, tone },
+        slot: makeSlot("review", {
+          icon,
+          label: `${agentLabel}${label}`,
+          tone,
+          title: `${agentLabel}のレビュー: ${label}。内訳で各エージェントの状態を確認できます。`,
+          href: null,
+          detail: "agent-breakdown",
+        }),
+      });
+    }
+    const breakdown = rows.map((entry) => entry.row);
+    const worst = rows.reduce((a, b) => (TONE_SEVERITY[b.row.tone] > TONE_SEVERITY[a.row.tone] ? b : a));
+    const allOk = rows.every((entry) => entry.row.tone === "ok");
+    const names = rows.map((entry) => entry.row.agentLabel).join("・");
+    const base = allOk
+      ? makeSlot("review", {
+          icon: "✓",
+          label: "レビューLGTM（全員）",
+          tone: "ok",
+          title: `${names}のレビューがすべて問題なしと判定しています。`,
+          href: claudeSlot.href,
+          detail: "agent-breakdown",
+        })
+      : (worst.slot ?? claudeSlot);
+    return { ...base, detail: "agent-breakdown", breakdown };
+  }
+
+  function claudeReviewSlot(): PullRequestHealthSlot {
     const { aiReview } = pullRequest.mergeJudgement;
     const href = aiReview.runUrl;
     const detail = "pull-request" as const;
