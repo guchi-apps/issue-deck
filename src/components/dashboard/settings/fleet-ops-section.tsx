@@ -10,7 +10,8 @@ import type { ReviewGateIssueDraft } from "@/lib/review-gate-issue-draft";
 import { ReviewGateSection } from "@/components/dashboard/settings/review-gate-section";
 import { SharedTokensSection } from "@/components/dashboard/settings/shared-tokens-section";
 import { SupabaseRedirectUrlsSection } from "@/components/dashboard/settings/supabase-redirect-urls-section";
-import { WorkflowTagStatusSection } from "@/components/dashboard/workflow-tag-status";
+import { WorkflowTagSummaryBadge } from "@/components/dashboard/settings/workflow-tag-summary-badge";
+import { WorkflowTagStatusView } from "@/components/dashboard/workflow-tag-status";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -22,6 +23,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
+import { useWorkflowTags } from "@/hooks/use-workflow-tags";
 import { useIssueSync } from "@/hooks/use-issue-sync";
 import { useRepositorySync } from "@/hooks/use-repository-sync";
 import type { SettingsData } from "@/hooks/use-settings-data";
@@ -58,6 +60,10 @@ function GroupHeading({ children }: { children: React.ReactNode }) {
  * **PATのカードだけは畳んでも取得が減らない。** 一覧は設定画面が先に取っており
  * （`useSettingsData`。左タブの警告バッジの材料になる）、ここでは表示を畳むだけ。
  * 代わりに件数を見出しへ出し、開かなくても期限切れに気づけるようにしている。
+ *
+ * **共有ワークフローの配布だけは、この区分を開いた時点で取得する**（#4016）。配布忘れに開く前から
+ * 気づけるよう、見出しへ状態バッジ（`summarizeWorkflowTags`）を出すため。取得は期限付きの共有
+ * キャッシュ（`workflow-tags-store.ts`）に載り、開閉や複数表示で重ならない。
  */
 export function FleetOpsSection({
   fineGrainedTokens,
@@ -69,6 +75,9 @@ export function FleetOpsSection({
   const { isSyncing: isIssueSyncing, handleSync: handleIssueSync } = useIssueSync();
   const { isSyncing: isRepositorySyncing, handleSync: handleRepositorySync } =
     useRepositorySync();
+  // 設定画面を開いた時点で状態を取り、見出しのバッジと詳細で同じ取得を共有する（#4016）。
+  // 取得は期限付きの共有キャッシュに載るため、開閉や複数表示で重ならない
+  const workflowTags = useWorkflowTags(true);
   const [issueSyncConfirmOpen, setIssueSyncConfirmOpen] = useState(false);
   const [repositorySyncConfirmOpen, setRepositorySyncConfirmOpen] = useState(false);
 
@@ -111,9 +120,9 @@ export function FleetOpsSection({
         icon={Boxes}
         title="共有ワークフローの配布"
         description="参照タグの更新と、自動修復ワークフローの配布"
-        loadHint="開くと各リポジトリの参照状況をGitHubへ問い合わせます"
+        status={(open) => <WorkflowTagSummaryBadge tags={workflowTags} onOpen={open} />}
       >
-        <WorkflowTagStatusSection open />
+        <WorkflowTagStatusView tags={workflowTags} />
       </LazyFleetPanel>
 
       {/* 読み取りだけの区画だが、中身がcallerの設定値そのものなので配布の隣に置く（#2948）。

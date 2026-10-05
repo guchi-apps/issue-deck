@@ -3,6 +3,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { WorkflowTagStatusSection } from "@/components/dashboard/workflow-tag-status";
+import { invalidateWorkflowTags } from "@/lib/workflow-tags-store";
 import type { PropagationRun, SourceAhead, WorkflowTagStatus } from "@/lib/workflow-tags";
 
 /**
@@ -115,7 +116,11 @@ function repositoryNameMatcher(fullName: string) {
     element?.tagName === "SPAN" && element.textContent === fullName;
 }
 
-beforeEach(() => vi.unstubAllGlobals());
+beforeEach(() => {
+  vi.unstubAllGlobals();
+  // 取得は期限付きの共有キャッシュに載るため、テストごとに捨てる（#4016）
+  invalidateWorkflowTags();
+});
 afterEach(() => cleanup());
 
 describe("WorkflowTagStatusSection", () => {

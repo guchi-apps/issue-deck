@@ -90,6 +90,12 @@ export type WorkflowTagOverview = {
    * 最新タグが分からない場合・取得に失敗した場合は null。
    */
   sourceAhead: SourceAhead | null;
+  /**
+   * GitHubから読めず、判定できなかったリポジトリ（#4016）。`allowPartialData`で個別の失敗は
+   * 残りを返すため、**黙って一覧から落ちる**——「ワークフローを持たない正当な対象外」とは別物。
+   * 設定の状態バッジが、読めなかった分を「最新」と誤表示しないために使う。
+   */
+  unverifiedRepositories: string[];
 };
 
 /** GraphQLで読む対象リポジトリ（DBから引いた行のうち、問い合わせに要る項目だけ） */
@@ -150,6 +156,8 @@ type RepositoryRefs = {
    */
   sharedFiles: Record<string, string | null>;
   pullRequests: OpenPullRequest[];
+  /** GraphQLの応答にリポジトリ自体が無かった（読めなかった）。ワークフローが無いだけなら偽 */
+  unverified: boolean;
 };
 
 /** GraphQLのエイリアス名。配布物はリポジトリの選択セット内で `sf0`・`sf1`… とする */
@@ -593,6 +601,7 @@ ${SHARED_FILE_SPECS.map(
       callerContents,
       sharedFiles,
       pullRequests,
+      unverified: repository == null,
     });
   });
   return refsByRepository;
@@ -688,6 +697,7 @@ export async function collectWorkflowTags(userId: string): Promise<WorkflowTagOv
       repairPropagation: null,
       sharedFilePropagation: null,
       sourceAhead: null,
+      unverifiedRepositories: [],
     };
   }
 
@@ -727,8 +737,13 @@ export async function collectWorkflowTags(userId: string): Promise<WorkflowTagOv
   }
 
   const statuses: WorkflowTagStatus[] = [];
+  const unverifiedRepositories: string[] = [];
   for (const repository of repositories) {
     const result = refsByRepository.get(repository.fullName);
+    if (!result || result.unverified) {
+      unverifiedRepositories.push(repository.fullName);
+      continue;
+    }
     // 共有ワークフローを参照していないリポジトリは表示しても意味がないため落とす
     if (!result || result.refs.length === 0) continue;
 
@@ -770,6 +785,7 @@ export async function collectWorkflowTags(userId: string): Promise<WorkflowTagOv
     repairPropagation,
     sharedFilePropagation,
     sourceAhead,
+    unverifiedRepositories,
   };
 }
 
