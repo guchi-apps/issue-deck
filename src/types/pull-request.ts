@@ -2,6 +2,7 @@ import type { CheckUserReason } from "@/lib/github/approval-labels";
 import type { MergeJudgement, RollupCiCheck } from "@/lib/github/check-rollup";
 import type { PullRequestCiStatus } from "@/lib/github/pull-request-ci";
 import type { RepairWorkflowAvailability } from "@/lib/github/pull-request-repair";
+import type { PullRequestAutoRepairSummary } from "@/lib/github/pull-request-auto-repair-status";
 import type { PullRequestRepairRunSummary } from "@/lib/github/pull-request-repair-run";
 import type { PullRequestReviewVerdict } from "@/lib/github/pull-request-review-verdict";
 import type { PullRequestRole } from "@/lib/github/pull-request-role";
@@ -149,6 +150,12 @@ export type PullRequestSummary = {
    * [`lib/github/pull-request-repair-run.ts`](../lib/github/pull-request-repair-run.ts)を参照。
    */
   repairRun: PullRequestRepairRunSummary | null;
+  /**
+   * 自動修復系列（`PullRequestAutoRepairLoop`。#3978）の状態（#4015）。系列が無い・完了済みなら
+   * 無い。**一覧（`/api/pull-requests`）だけが載せる**ので省略可能で、無いことは「系列なし」と
+   * 同じ扱い。ブランチ画面の「再検証待ち」「停止（理由）」の材料。
+   */
+  autoRepair?: PullRequestAutoRepairSummary | null;
   /**
    * このPR1本ぶんの自動レビュー判定（#2843）。PR本文の`## 検証結果`から読む。記録が無ければnull。
    *

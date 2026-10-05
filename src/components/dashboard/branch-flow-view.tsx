@@ -32,7 +32,10 @@ import {
 import { DeviceBuildInstructions, shortOid } from "@/components/dashboard/device-build-instructions";
 import { GithubReferenceLink } from "@/components/dashboard/github-reference-link";
 import {
-  CiStatusButton,
+  PullRequestHealthRow,
+  PullRequestHealthSummaryChips,
+} from "@/components/dashboard/pull-request-health-chips";
+import {
   MergeJudgementBadge,
   PullRequestMetaBadge,
   PullRequestStateIcon,
@@ -80,6 +83,7 @@ import {
   type AutoRefreshIntervalMs,
 } from "@/lib/auto-refresh";
 import { readTriggeredAt, useTriggerPending } from "@/hooks/use-trigger-pending";
+import { resolvePullRequestHealth, type PullRequestHealthDisposition } from "@/lib/pull-request-health";
 import {
   DEVELOP_BRANCH,
   MAIN_BRANCH,
@@ -275,21 +279,44 @@ const LANE_STATUS_LABEL: Partial<Record<BranchFlowLaneStatus, string>> = {
 };
 
 /** レーンの状態を表すピル。マージ待ちだけ色を付ける */
-function LaneStatusBadge({ status }: { status: BranchFlowLaneStatus }) {
-  const label = LANE_STATUS_LABEL[status];
+function LaneStatusBadge({
+  status,
+  pullRequests = [],
+}: {
+  status: BranchFlowLaneStatus;
+  /** レーンのPR。openのとき、問題や検証中のPRを単なる「マージ待ち」と言わないために使う（#4015） */
+  pullRequests?: PullRequestSummary[];
+}) {
+  const disposition = status === "open" ? laneDisposition(pullRequests) : "clear";
+  const label =
+    disposition === "human"
+      ? "要対応"
+      : disposition === "auto"
+        ? "検証・修正中"
+        : LANE_STATUS_LABEL[status];
   if (!label) return null;
   return (
     <span
       className={cn(
         "shrink-0 rounded-full px-2 py-0.5 text-xs ring-1 ring-inset",
-        status === "open"
-          ? "bg-primary/15 text-primary ring-primary"
-          : "bg-muted text-muted-foreground ring-border",
+        disposition === "human"
+          ? "bg-amber-500/15 text-amber-700 ring-amber-500 dark:text-amber-400"
+          : status === "open"
+            ? "bg-primary/15 text-primary ring-primary"
+            : "bg-muted text-muted-foreground ring-border",
       )}
     >
       {label}
     </span>
   );
+}
+
+/** レーンの全PRのうち最も重い扱い。人の対応 > 待てば進む > なし */
+function laneDisposition(pullRequests: PullRequestSummary[]): PullRequestHealthDisposition {
+  const dispositions = pullRequests.map((pullRequest) => resolvePullRequestHealth(pullRequest).disposition);
+  if (dispositions.includes("human")) return "human";
+  if (dispositions.includes("auto")) return "auto";
+  return "clear";
 }
 
 /**
@@ -596,36 +623,6 @@ function RemainingManualSteps({
 }
 
 /**
- * 開いているPRのCI状態。**押すとCIのジョブ内訳がその場に開く**（PR詳細と同じ部品。#3662）。
- * 「CI実行中」だけ見えても、どのworkflowが動いているのか分からなかった。
- * 下書き・クローズ・マージ済みでは何も出さない。内訳は`panel`に返すので、行の外側に置く。
- */
-function useCiDetail(pullRequest: PullRequestSummary): {
-  button: React.ReactNode;
-  panel: React.ReactNode;
-} {
-  const [open, setOpen] = useState(false);
-  if (pullRequest.state !== "open" || pullRequest.merged || pullRequest.draft) {
-    return { button: null, panel: null };
-  }
-  return {
-    button: (
-      <CiStatusButton ciState={pullRequest.ciState} expanded={open} onClick={() => setOpen(!open)} />
-    ),
-    panel: open ? (
-      <WorkflowRunProgressPanel
-        repositoryFullName={pullRequest.repositoryFullName}
-        runId={pullRequest.ciRunId}
-        open={open}
-        title="CIの内訳"
-        checks={pullRequest.ciChecks}
-        className="mt-1 max-w-2xl basis-full"
-      />
-    ) : null,
-  };
-}
-
-/**
  * レーンにぶら下がるPR1行。
  *
  * **マージボタンを出すのは「ユーザーがマージするしかないPR」だけ**（#1756）。この画面は
@@ -653,7 +650,6 @@ function PullRequestLine({
   const kindLabel = pullRequestKindLabel(pullRequest.kind);
   const userMerge = onMerged !== undefined && requiresUserMerge(pullRequest);
   const canMerge = userMerge && canMergeFromDeck(pullRequest);
-  const { button: ciButton, panel: ciPanel } = useCiDetail(pullRequest);
 
   return (
     <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
@@ -672,9 +668,17 @@ function PullRequestLine({
       {pullRequest.draft ? (
         <PullRequestMetaBadge>ドラフト</PullRequestMetaBadge>
       ) : (
-        ciButton
+        // CI・レビュー・コンフリクト・自動修正を並べて出す（#4015）。互いを隠さない
+        <PullRequestHealthRow pullRequest={pullRequest} />
       )}
-      <MergeJudgementBadge mergeJudgement={pullRequest.mergeJudgement} ciState={pullRequest.ciState} />
+      {/* レビュー・CIの待ちは上の枠が言うので、それ以外の判定段階（リスク判定・自動マージ判定）だけ出す */}
+      {pullRequest.mergeJudgement.step !== "claude-review" &&
+        pullRequest.mergeJudgement.step !== "wait-for-ci" && (
+          <MergeJudgementBadge
+            mergeJudgement={pullRequest.mergeJudgement}
+            ciState={pullRequest.ciState}
+          />
+        )}
       {pullRequest.autoMergeEnabled && <PullRequestMetaBadge>Auto-merge有効</PullRequestMetaBadge>}
       {/* 種類は「今どうなっているか」ではないので、状態のピルと同じ強さで出さない（#1510） */}
       {kindLabel && pullRequest.kind !== "issue" && (
@@ -691,7 +695,6 @@ function PullRequestLine({
           variant="outline"
         />
       )}
-      {ciPanel}
     </div>
   );
 }
@@ -737,7 +740,7 @@ function LaneRow({
           <code className="min-w-0 max-w-full truncate rounded bg-muted px-1.5 py-0.5 text-xs">
             {lane.branchName}
           </code>
-          <LaneStatusBadge status={lane.status} />
+          <LaneStatusBadge status={lane.status} pullRequests={lane.pullRequests} />
         </div>
 
         {lane.pullRequests.map((pullRequest) => (
@@ -811,7 +814,7 @@ function BumpPullRequestLine({
   version: string | null;
   onMerged: (pullRequest: PullRequestSummary) => void;
 }) {
-  const { button: ciButton, panel: ciPanel } = useCiDetail(pullRequest);
+  const health = resolvePullRequestHealth(pullRequest);
   return (
     <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 rounded-md border border-dashed border-purple-500/60 bg-purple-500/5 px-2 py-1.5">
       <span className="shrink-0 text-xs font-medium text-purple-700 dark:text-purple-300">
@@ -829,16 +832,18 @@ function BumpPullRequestLine({
       >
         #{pullRequest.number} {pullRequest.title}
       </GithubReferenceLink>
-      {ciButton}
+      <PullRequestHealthRow pullRequest={pullRequest} />
       {pullRequest.autoMergeEnabled ? (
         <PullRequestMetaBadge>Auto-merge有効</PullRequestMetaBadge>
       ) : (
-        <span className="shrink-0 text-xs text-muted-foreground">developへマージ待ち</span>
+        // 要修正・CI失敗・コンフリクト・検証中のPRを、問題のない単なるマージ待ちと見せない（#4015）
+        !health.blocksPlainMergeWait && (
+          <span className="shrink-0 text-xs text-muted-foreground">developへマージ待ち</span>
+        )
       )}
       {!pullRequest.autoMergeEnabled && (
         <ReleaseMergeButton pullRequest={pullRequest} onMerged={onMerged} />
       )}
-      {ciPanel}
     </div>
   );
 }
@@ -1768,11 +1773,9 @@ function RepositorySummaryRow({
 
       <span className="flex-1" />
 
-      {summary.hasCiFailure && (
-        <span className="shrink-0 rounded-full bg-destructive/15 px-2 py-0.5 text-xs font-medium text-destructive ring-1 ring-inset ring-destructive">
-          CI失敗
-        </span>
-      )}
+      {/* 問題と進行状況を件数で並べる（#4015）。CI失敗だけでなく、レビュー要修正・コンフリクト・
+          自動修正中なども開かずに分かる。成功状態は出さず、記号と文字を常時表示してホバー不要にする */}
+      <PullRequestHealthSummaryChips summary={summary.pullRequestHealth} />
       {summary.releaseInProgress ? (
         // 人が押す番になったら紫（自動で進む）から琥珀（手が要る）へ変える（#2038）。
         // 回るアイコンの有無だけが手掛かりだったころは、一覧を流し見して自分の番の
@@ -2001,7 +2004,9 @@ function RepositorySection({
 function needsAttention(repository: BranchFlowRepository): boolean {
   const { summary } = repository;
   return (
-    summary.hasCiFailure ||
+    // 自動修正が走っている問題は「待てば進むもの」側へ回る（`pullRequestHealth.autoCount`）。
+    // 直している最中でない問題だけを手が要るものに数え、同じリポジトリを両方へ重ねない（#4015）
+    summary.pullRequestHealth.humanCount > 0 ||
     summary.needsUserMerge ||
     summary.releaseMergeTarget !== null ||
     summary.deploy?.kind === "failure"
@@ -2023,7 +2028,11 @@ function isProgressing(repository: BranchFlowRepository): boolean {
     summary.deploy !== null &&
     summary.deploy.kind !== "success" &&
     summary.deploy.kind !== "failure";
-  return (summary.releaseInProgress && summary.releaseMergeTarget === null) || deploying;
+  return (
+    (summary.releaseInProgress && summary.releaseMergeTarget === null) ||
+    deploying ||
+    summary.pullRequestHealth.autoCount > 0
+  );
 }
 
 /**

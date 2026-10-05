@@ -10,6 +10,7 @@
 - Actions側のトークンと自己ループ防止: [actions-token-model.md](actions-token-model.md)
 - 無人実行フローの全体像: [multi-agent-workflow.md](multi-agent-workflow.md)・[multi-agent/](multi-agent/)
 - 会話型の操作入口（IssueDeck Chat。意図解釈・確認カード・共通サービスの切り出し）: [chat.md](chat.md)
+- IssueDeckのiOSアプリ（方式・認証・配布）: [ios-app.md](ios-app.md)
 
 ## ディレクトリ
 
@@ -2463,6 +2464,18 @@ export function POST(request: NextRequest) {
   **「マージ済みなのにブランチが残っている」は状態として持たない**——設計時は`delete_branch_on_merge`が
   無効で数百本が該当し、出しても情報にならなかった。掃除の仕組みは#1478が持つ（この画面は
   ブランチの後始末を扱わない）。
+  **PRの状態表示（#4015）**は[`lib/pull-request-health.ts`](../src/lib/pull-request-health.ts)が1か所で
+  持つ。展開したPR行は**CI・レビュー・コンフリクト・自動修正の4枠を並列**に出し
+  （`components/dashboard/pull-request-health-chips.tsx`。CI枠は#3662の内訳を開く）、畳んだ行は
+  同じ判定から数えたopen PR数（`summary.pullRequestHealth`）を件数チップで出す。**件数は
+  カテゴリごとのPR数で、同じPRが複数に数えられるため合計はPR数ではない。**
+  根拠が無い状態は成功・完了に見せない（CIの待機/実行は`ciChecks[].status`が分かるときだけ区別、
+  ジョブ終了でも判定が読めなければ「判定未記録」、旧HEADの判定は「再検証待ち」、
+  `mergeable`未取得は「判定中」）。**「手が要るもの」（`humanCount`）と「待てば進むもの」
+  （`autoCount`）は`disposition`で排他に分類**し、自動修正中・再検証待ちは後者へ回す。
+  自動修復系列（`PullRequestAutoRepairLoop`）の状態は`/api/pull-requests`が`autoRepair`として載せる
+  （`lib/github/pull-request-auto-repair-status.ts`。DB1クエリでGitHub APIは増えない）。
+  **Codexなどエージェント別のレビュー判定は`PullRequestSummary`に載っていないため、この表示の対象外**。
   **IssueとPRの対応は1対1に限らない。** 同じIssueでもブランチが違えばレーンは分かれ（レーンの
   キーはブランチ名）、1本のPRが複数のIssueを扱う場合は`PullRequestSummary.linkedIssueNumbers`
   （`extractLinkedIssueNumbers`が確度の高い順に全参照を返す）の2件目以降を「関連Issue」として
