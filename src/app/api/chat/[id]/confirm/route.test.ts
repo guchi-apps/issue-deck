@@ -8,10 +8,16 @@ const updateMany = vi.fn();
 const update = vi.fn();
 const create = vi.fn();
 const transaction = vi.fn();
+const hasAccess = vi.fn();
 
 vi.mock("@/lib/auth-user", () => ({
   get getCurrentUser() {
     return getCurrentUser;
+  },
+}));
+vi.mock("@/lib/chat/access", () => ({
+  get hasConversationRepoAccess() {
+    return hasAccess;
   },
 }));
 vi.mock("@/lib/chat/handlers", () => ({
@@ -62,8 +68,18 @@ describe("POST /api/chat/[id]/confirm", () => {
     delete process.env.PREVIEW_MODE;
     getCurrentUser.mockResolvedValue({ id: "u1" });
     findFirst.mockResolvedValue(message);
-    transaction.mockResolvedValue([reply]);
+    hasAccess.mockResolvedValue(true);
     create.mockResolvedValue(reply);
+    // 実行記録は最新の会話へ足すため、コールバック形式のトランザクションで読み書きする
+    transaction.mockImplementation(async (fn: (tx: unknown) => unknown) =>
+      fn({
+        chatConversation: {
+          findUniqueOrThrow: async () => ({ context: {}, refsText: "" }),
+          update: async () => ({}),
+        },
+        chatMessage: { create: async () => reply },
+      }),
+    );
   });
 
   it("未ログインは401で何も実行しない", async () => {
@@ -85,6 +101,14 @@ describe("POST /api/chat/[id]/confirm", () => {
     expect(res.status).toBe(200);
     expect(executeConfirmedCard).toHaveBeenCalledTimes(1);
     expect(executeConfirmedCard.mock.calls[0][1]).toEqual(repairCard);
+  });
+
+  it("対象リポジトリの権限を失っていたら403で実行しない", async () => {
+    hasAccess.mockResolvedValue(false);
+    const res = await POST(request({ messageId: "m1", action: "execute" }), params);
+    expect(res.status).toBe(403);
+    expect(updateMany).not.toHaveBeenCalled();
+    expect(executeConfirmedCard).not.toHaveBeenCalled();
   });
 
   it("すでに押された確認カードは409で再実行しない（二重実行の防止）", async () => {

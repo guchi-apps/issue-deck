@@ -1,13 +1,14 @@
 "use client";
 
-import { Loader2, MessageSquarePlus, Send } from "lucide-react";
+import { AlertTriangle, History, Loader2, MessageSquarePlus, NotebookPen, RotateCw, Send } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 
 import { ChatCardView } from "@/components/dashboard/chat-cards";
+import { ChatMemoryPanel } from "@/components/dashboard/chat-memory-panel";
+import { ChatSessionList } from "@/components/dashboard/chat-session-list";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { useChat } from "@/hooks/use-chat";
-import { cn } from "@/lib/utils";
 
 const PLACEHOLDER = "メッセージを入力（例：3966どうなってる？ / 直して / 別Issueにして）";
 
@@ -32,11 +33,13 @@ export function ChatView({
   const chat = useChat(active);
   const [text, setText] = useState("");
   const [repo, setRepo] = useState<string | null>(defaultRepo ?? repositories[0] ?? null);
+  const [showList, setShowList] = useState(false);
+  const [showMemory, setShowMemory] = useState(false);
   const endRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ block: "end" });
-  }, [chat.messages.length, chat.isSending]);
+  }, [chat.messages.length, chat.outbox.length, chat.isSending]);
 
   const submit = (value: string) => {
     const body = value.trim();
@@ -44,6 +47,25 @@ export function ChatView({
     setText("");
     void chat.send(body, repo);
   };
+
+  const openConversation = (id: string) => {
+    setShowList(false);
+    void chat.open(id);
+  };
+
+  const sessionList = (
+    <ChatSessionList
+      conversations={chat.conversations}
+      selectedId={chat.conversationId}
+      query={chat.query}
+      onQueryChange={chat.setQuery}
+      filter={chat.archiveFilter}
+      onFilterChange={chat.setArchiveFilter}
+      onOpen={openConversation}
+      onRename={(id, title) => void chat.rename(id, title)}
+      onArchive={(id, archived) => void chat.setArchivedFor(id, archived)}
+    />
+  );
 
   const targets = chat.context?.targets ?? [];
 
@@ -66,31 +88,49 @@ export function ChatView({
           >
             {repositories.map((name) => <option key={name} value={name}>{name}</option>)}
           </select>
-          <Button variant="outline" size="sm" onClick={chat.startNew}>
+          <Button variant="outline" size="sm" className="lg:hidden" aria-expanded={showList} onClick={() => setShowList((v) => !v)}>
+            <History />履歴
+          </Button>
+          <Button variant="outline" size="sm" aria-expanded={showMemory} disabled={!chat.conversationId} onClick={() => setShowMemory((v) => !v)}>
+            <NotebookPen />メモ・調査
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => { chat.startNew(); setShowList(false); }}>
             <MessageSquarePlus />新しい会話
           </Button>
         </div>
       </header>
 
+      {showList && <div className="flex max-h-64 flex-col rounded-lg border p-2 lg:hidden">{sessionList}</div>}
       <div className="flex min-h-0 flex-1 gap-3">
-        <aside className="hidden w-52 shrink-0 flex-col gap-1 overflow-y-auto lg:flex" aria-label="会話の履歴">
-          {chat.conversations.length === 0 && <p className="text-xs text-muted-foreground">まだ会話はありません。</p>}
-          {chat.conversations.map((item) => (
-            <button
-              key={item.id}
-              type="button"
-              onClick={() => void chat.open(item.id)}
-              className={cn(
-                "truncate rounded-lg px-2.5 py-1.5 text-left text-xs hover:bg-muted",
-                chat.conversationId === item.id && "bg-muted font-semibold",
-              )}
-            >
-              {item.title}
-            </button>
-          ))}
-        </aside>
+        <aside className="hidden w-56 shrink-0 flex-col lg:flex">{sessionList}</aside>
 
         <div className="flex min-h-0 min-w-0 flex-1 flex-col rounded-lg border">
+          {chat.conversationId && (
+            <div className="flex flex-wrap items-center gap-2 border-b px-3 py-1.5 text-xs">
+              <span className="min-w-0 flex-1 truncate font-semibold">{chat.title}</span>
+              {chat.archived && (
+                <>
+                  <span className="rounded-full border px-2 text-muted-foreground">アーカイブ済み</span>
+                  <Button variant="outline" size="sm" onClick={() => void chat.setArchivedFor(chat.conversationId!, false)}>解除</Button>
+                </>
+              )}
+            </div>
+          )}
+          {!chat.accessible && (
+            <p role="alert" className="flex items-center gap-1.5 border-b bg-destructive/10 px-3 py-1.5 text-xs text-destructive">
+              <AlertTriangle className="size-3.5" />このリポジトリへのアクセス権が無いため、履歴の閲覧だけできます（新しい取得・操作はできません）。
+            </p>
+          )}
+          {chat.freshness?.some((item) => item.changes.length > 0) && (
+            <p className="border-b bg-amber-500/10 px-3 py-1.5 text-xs">
+              前回の調査から状態が変わった対象があります。「メモ・調査」で調査時点との差を確認できます。
+            </p>
+          )}
+          {showMemory && chat.conversationId && (
+            <div className="max-h-72 overflow-y-auto border-b p-3">
+              <ChatMemoryPanel memory={chat.memory} freshness={chat.freshness} actions={chat.context?.actions ?? []} onOp={(op) => void chat.memoryOp(op)} />
+            </div>
+          )}
           {targets.length > 0 && (
             <div className="flex flex-wrap items-center gap-1.5 border-b bg-muted/50 px-3 py-1.5 text-xs text-muted-foreground">
               いまの対象：
@@ -103,7 +143,10 @@ export function ChatView({
             </div>
           )}
           <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-3" aria-live="polite">
-            {chat.messages.length === 0 && (
+            {chat.hasMore && (
+              <Button variant="ghost" size="sm" className="self-center" onClick={() => void chat.loadOlder()}>過去の発言を読み込む</Button>
+            )}
+            {chat.messages.length === 0 && chat.outbox.length === 0 && (
               <p className="m-auto max-w-sm text-center text-sm text-muted-foreground">
                 「3966どうなってる？」のように番号を送ると、CI・レビュー・コンフリクト・修復の状態を返します。
               </p>
@@ -116,6 +159,11 @@ export function ChatView({
               ) : (
                 <div key={message.id} className="flex max-w-full min-w-0 flex-col gap-2 self-start text-sm md:max-w-[85%]">
                   {message.text && <p className="whitespace-pre-wrap leading-relaxed">{message.text}</p>}
+                  {chat.staleConfirms[message.id] && message.confirmState === "pending" && (
+                    <p className="rounded border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-xs">
+                      現在の状態と照合しました：{chat.staleConfirms[message.id]}
+                    </p>
+                  )}
                   {message.cards.map((card, index) => (
                     <ChatCardView
                       key={index}
@@ -130,7 +178,21 @@ export function ChatView({
                 </div>
               ),
             )}
-            {chat.isSending && (
+            {chat.outbox.map((item) => (
+              <div key={item.clientId} className="flex max-w-[85%] flex-col items-end gap-1 self-end">
+                <div className="whitespace-pre-wrap rounded-xl rounded-br-sm bg-primary/10 px-3 py-2 text-sm opacity-70">{item.text}</div>
+                {item.state === "sending" ? (
+                  <span className="flex items-center gap-1 text-[11px] text-muted-foreground"><Loader2 className="size-3 animate-spin" />保存中…</span>
+                ) : (
+                  <span role="alert" className="flex flex-wrap items-center justify-end gap-1 text-[11px] text-destructive">
+                    保存できませんでした{item.error ? `（${item.error}）` : ""}
+                    <Button variant="outline" size="sm" disabled={chat.isSending} onClick={() => void chat.retry(item.clientId)}><RotateCw />再送</Button>
+                    <Button variant="ghost" size="sm" onClick={() => { setText((current) => current || item.text); chat.discardFailed(item.clientId); }}>入力欄へ戻す</Button>
+                  </span>
+                )}
+              </div>
+            ))}
+            {chat.isSending && chat.outbox.length === 0 && (
               <div className="flex items-center gap-2 text-xs text-muted-foreground"><Loader2 className="size-3.5 animate-spin" />処理しています…</div>
             )}
             <div ref={endRef} />

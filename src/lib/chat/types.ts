@@ -107,3 +107,48 @@ export type ChatMessageView = {
   confirmState: ChatConfirmState | null;
   createdAt: string;
 };
+
+// --- チャットセッションの保存・再開（#4047） ---
+
+/** 会話メモの1項目（合意した方針・未解決の質問）。**許可する操作の根拠には使わない**（実行は確認カードだけ） */
+export type ChatMemoryItem = {
+  id: string;
+  text: string;
+  createdAt: string;
+  /** 未解決の質問を解決済みにしたときだけ付く */
+  resolvedAt?: string;
+};
+
+/** 状態カードを返した時点の調査結果。再開時に「その時点」と「いま」を区別して見せる材料 */
+export type ChatFinding = {
+  repo: string;
+  number: number;
+  kind: "pr" | "issue";
+  title: string;
+  htmlUrl: string | null;
+  capturedAt: string;
+  rows: ChatStatusRow[];
+};
+
+export type ChatMemory = {
+  agreements: ChatMemoryItem[];
+  openQuestions: ChatMemoryItem[];
+  findings: ChatFinding[];
+};
+
+export const EMPTY_CHAT_MEMORY: ChatMemory = { agreements: [], openQuestions: [], findings: [] };
+
+/** 再開時に再取得した、いまの状態と調査時点との差 */
+export type ChatFreshness = {
+  repo: string;
+  number: number;
+  kind: "pr" | "issue";
+  title: string;
+  capturedAt: string | null;
+  /** 調査時点から値が変わった行（調査時点の記録が無ければ空） */
+  changes: { label: string; before: string; after: string }[];
+  current: ChatStatusRow[];
+  error: string | null;
+};
+
+export type ChatConversationStatus = "waiting" | "idle";
