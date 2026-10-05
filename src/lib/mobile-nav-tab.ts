@@ -40,6 +40,7 @@ export function resolveBottomNavTab(screen: MobileScreen): MobileBottomNavTab | 
     case "preview":
     case "nightly-run":
     case "ideas":
+    case "chat":
     case "ios-extensions":
       return null;
     case "issue-detail":

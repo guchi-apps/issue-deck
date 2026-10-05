@@ -37,6 +37,7 @@ model User {
   releaseCheckTargets  ReleaseCheckTarget[]
   releaseChecks        ReleaseCheck[]
   releaseCheckLines    ReleaseCheckLine[]
+  chatConversations    ChatConversation[]
 }
 
 // --- GitHub App 連携 ---
@@ -2208,4 +2209,39 @@ model DeployLaunchWatch {
 
   @@unique([repositoryFullName, pullRequestNumber])
   @@index([state, mergedAt])
+}
+
+// --- IssueDeck Chat（#3975） ---
+
+/// 会話型の操作入口の1会話。`context`は「それ」「直して」を解釈する直前の対象と、実行した操作の記録
+/// （`src/lib/chat/types.ts`の`ChatContext`）。クライアントの申告ではなくサーバー側のこの値を信用する。
+model ChatConversation {
+  id        String   @id @default(cuid())
+  userId    String
+  title     String   @db.VarChar(120)
+  repo      String?  @db.VarChar(200)
+  context   Json     @default("{}")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user     User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  messages ChatMessage[]
+
+  @@index([userId, updatedAt])
+}
+
+/// 会話の1発言。`cards`は状態・確認・結果カードのJSON、`confirmState`は確認カードを含む発言だけが持つ
+/// （`pending`→`done`/`cancelled`）。**実行は`pending`→`done`へ更新できた1回だけ**で、二重実行を防ぐ。
+model ChatMessage {
+  id             String   @id @default(cuid())
+  conversationId String
+  role           String   @db.VarChar(16)
+  text           String   @db.Text
+  cards          Json     @default("[]")
+  confirmState   String?  @db.VarChar(16)
+  createdAt      DateTime @default(now())
+
+  conversation ChatConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId, createdAt])
 }

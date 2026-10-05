@@ -42,6 +42,7 @@ export type DashboardPane =
   | "releases"
   | "nightly"
   | "ideas"
+  | "chat"
   | "ios-extensions";
 
 function parsePane(value: string | null): DashboardPane {
@@ -53,6 +54,7 @@ function parsePane(value: string | null): DashboardPane {
     value === "releases" ||
     value === "nightly" ||
     value === "ideas" ||
+    value === "chat" ||
     value === "ios-extensions"
   ) {
     return value;
@@ -286,6 +288,11 @@ export function useIssueFilters() {
     setFilters({ pane: "ideas", pr: null, prmodal: null });
   }, [setFilters]);
 
+  // 左メニューの「チャット」画面への遷移（#3975）。上と同じくPRの選択状態を持たない。
+  const selectChatPane = useCallback(() => {
+    setFilters({ pane: "chat", pr: null, prmodal: null });
+  }, [setFilters]);
+
   // 左メニューの「iOS拡張」画面への遷移（#3708）。上と同じくPRの選択状態を持たない。
   const selectIosExtensionsPane = useCallback(() => {
     setFilters({ pane: "ios-extensions", pr: null, prmodal: null });
@@ -342,6 +349,7 @@ export function useIssueFilters() {
     selectReleaseHistoryPane,
     selectNightlyRunPane,
     selectIdeasPane,
+    selectChatPane,
     selectIosExtensionsPane,
     selectPullRequest,
     selectPullRequestModal,
