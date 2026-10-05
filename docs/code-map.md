@@ -606,6 +606,12 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
     `POST /api/dispatch/review-usage` → [`lib/dispatch/review-usage.ts`](../src/lib/dispatch/review-usage.ts)）。
     `kind: "actions"`（「CI/CD・レビュー」）・`source: "local"`で保存し、試行ごとに1行。送り手は
     [`scripts/lib/review-usage.sh`](../scripts/lib/review-usage.sh)で、送れなかった報告を手元に残して送り直す
+  - **サブPCのPRレビュー（Codex）そのものの状態は`DispatchJob`（`kind=PR_REVIEW`）が正本**（#3990）。
+    純関数は[`lib/dispatch/pr-review.ts`](../src/lib/dispatch/pr-review.ts)、DB操作（依頼・状態・最終マージ判定の再開）は
+    [`lib/dispatch/pr-review-jobs.ts`](../src/lib/dispatch/pr-review-jobs.ts)、受け口は`POST /api/dispatch/pr-review`
+    （Actionsの依頼・状態取得）と`POST /api/dispatch/pr-review/resume-sweep`（pollerの巡回）。サブPC側は
+    `scripts/start-codex-pr-review.sh --run`が`scripts/lib/pr-review-report.sh`で状態を報告する。経路・設計の判断は
+    [multi-agent/code-review.md](multi-agent/code-review.md)「develop向けPRのCodexレビュー」
   - **リポジトリ名の変更は`RepositoryNameAlias`で引き継ぐ**（#3613）。`SessionUsage.repository`は
     作業ディレクトリ名の短い名前で、改名すると旧名の行が別リポジトリに分かれる。
     [`lib/repository-alias.ts`](../src/lib/repository-alias.ts)がリポジトリ同期（と

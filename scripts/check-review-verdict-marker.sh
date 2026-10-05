@@ -31,21 +31,23 @@ for file in "$PROMPT" "$WORKFLOW"; do
   [ -f "$file" ] || { echo "エラー: $file が見つかりません" >&2; exit 1; }
 done
 
-# CodexのレビューはサブPC上のChatGPTサブスクリプションで実行する。GitHub Actionsが残す
-# 要求印と、Codexの出力を検証して投稿する側の判定印がずれると、待機がタイムアウトして
-# 自動マージが常に止まるか、別SHAの結果を誤って読む。3ファイルで固定する。
-CODEX_REQUEST='issue-deck-codex-review-request sha='
+# CodexのレビューはサブPC上のChatGPTサブスクリプションで実行する。Codexの出力を検証して
+# 投稿する側（ランチャー）の判定印と、それを読むワークフロー側の判定印がずれると、別SHAの結果を
+# 誤って読むか、結果を読めずに自動マージが常に止まる。2ファイルで固定する。
+# **状態の正本はIssueDeckのDispatchJob**で、判定印は人が読む結果の記録と移行前のPRのための
+# フォールバック（#3990）。要求印（`issue-deck-codex-review-request`）はジョブキューとしては使わない。
 CODEX_VERDICT='issue-deck-codex-review-verdict:'
 for file in "$WORKFLOW" "$CODEX_RUNNER"; do
-  if ! grep -qF "$CODEX_REQUEST" "$file"; then
-    echo "エラー: $file にCodexレビュー要求の印がありません。" >&2
-    fail=1
-  fi
   if ! grep -qF "$CODEX_VERDICT" "$file"; then
     echo "エラー: $file にCodexレビュー判定の印がありません。" >&2
     fail=1
   fi
 done
+# Actionsに結果待ちのポーリングを戻していないか（#3990）。runnerを最大30分保持する構成は廃止した。
+if grep -qE 'issue-deck-codex-review-request|Codexレビュー結果を待っています' "$WORKFLOW" "$CODEX_RUNNER"; then
+  echo "エラー: Codexレビューの要求印・結果待ちのポーリングが残っています（#3990で廃止）。" >&2
+  fail=1
+fi
 if ! grep -qF '<!-- issue-deck-codex-review-verdict:<判定> sha={{HEAD_SHA}} -->' "$CODEX_PROMPT"; then
   echo "エラー: $CODEX_PROMPT にCodexレビュー判定の指示がありません。" >&2
   fail=1

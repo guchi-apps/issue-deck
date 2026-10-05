@@ -218,6 +218,11 @@ function toJobView(
       ? null
       : (job.codexPairingExpiresAt?.toISOString() ?? null),
     tmuxSessionName: job.tmuxSessionName,
+    // develop向けPRのAIレビュー（#3990）。他の種別では全部null
+    prNumber: job.prNumber,
+    baseSha: job.baseSha,
+    headSha: job.headSha,
+    reviewVerdict: job.reviewVerdict,
     queuePriority: job.queuePriority,
     createdAt: job.createdAt.toISOString(),
     claimedAt: job.claimedAt?.toISOString() ?? null,
@@ -264,6 +269,7 @@ function toHostView(host: DispatchHost, now: Date): DispatchHostView {
     codexCapable: host.codexCapable,
     codexRemoteControlCapable: host.codexRemoteControlCapable,
     manualStepSessionCapable: host.manualStepSessionCapable,
+    prReviewCapable: host.prReviewCapable,
     selfUpdateCapable: host.selfUpdateCapable,
     maxSessions: host.maxSessions,
     liveSessions: host.liveSessions,
@@ -541,6 +547,10 @@ export async function expireStaleDispatchJobs(now: Date = new Date()): Promise<n
           kind: { in: [...SESSION_CONTROL_JOB_KINDS, ...OUT_OF_BAND_JOB_KINDS] },
           createdAt: { lt: controlDeadline },
         },
+        // 取りに来られないまま古びたPRレビュー（#3990）。**30分待たず、起動前の失敗として早く
+        // 確定させる**——これがActionsの最大30分ポーリングを廃止できる前提。サブPCが
+        // オフライン・pollerが対応していない場合、ここで`TIMEOUT`になり最終マージ判定が再開される
+        { status: "QUEUED", kind: "PR_REVIEW", createdAt: { lt: controlDeadline } },
       ],
     },
     select: {
@@ -1876,6 +1886,9 @@ export async function claimDispatchJobs(params: {
   for (const kind of OUT_OF_BAND_JOB_KINDS) {
     if (host?.[OUT_OF_BAND_JOB_KIND_CAPABILITY[kind]] === true) controlKinds.push(kind);
   }
+  // develop向けPRのAIレビュー（#3990）は申告したpollerにだけ、枠外で配る。**セッション枠を消費しない**
+  // （Codex CLIを1回走らせて終わる。5分で失効するため、起動待ちの後ろに並ばせない）
+  if (host?.prReviewCapable === true) controlKinds.push("PR_REVIEW");
   if (controlKinds.length > 0) {
     const controls = await db.dispatchJob.findMany({
       where: {
@@ -2031,6 +2044,12 @@ export async function reportDispatchJob(params: {
    */
   codexPairingCode?: string | null;
   codexPairingExpiresAt?: Date | null;
+  /**
+   * develop向けPRのAIレビューの判定（#3990。`lgtm` / `needs-check` / `changes-requested`）。
+   * **受け口で既知の語だけを通してから渡す。** `succeeded`なのに判定が無いPRレビューは
+   * 「不正出力」として`FAILED`に倒す（判定の無い成功で自動マージを通さない）
+   */
+  reviewVerdict?: string | null;
   now?: Date;
 }): Promise<ReportDispatchJobResult> {
   const now = params.now ?? new Date();
@@ -2056,14 +2075,26 @@ export async function reportDispatchJob(params: {
     data.codexPairingExpiresAt = params.codexPairingExpiresAt;
   }
 
-  if (params.status === "running") {
+  // PRレビューは判定が無いまま成功にしない（#3990）。レビューのスクリプトが判定を読めなかった
+  // 場合は`failed`で報告してくるが、受け口の側でも守る（古いスクリプト・手で叩かれた報告対策）
+  let reportStatus = params.status;
+  if (job.kind === "PR_REVIEW" && reportStatus === "succeeded") {
+    if (params.reviewVerdict) {
+      data.reviewVerdict = params.reviewVerdict;
+    } else {
+      reportStatus = "failed";
+      data.message = "レビューは終了しましたが、有効な判定が報告されませんでした（不正な出力）。";
+    }
+  }
+
+  if (reportStatus === "running") {
     data.status = "RUNNING";
     data.startedAt = job.startedAt ?? now;
     data.heartbeatAt = now;
   } else {
     // `skipped`（#1229）も終了として扱う。**起動しなかっただけで、そのジョブは終わっている。**
     // ここを未完了のままにすると、activeKeyが残って次のジョブを積めなくなる
-    data.status = REPORT_STATUS_TO_JOB_STATUS[params.status];
+    data.status = REPORT_STATUS_TO_JOB_STATUS[reportStatus as Exclude<DispatchReportStatus, "running">];
     data.finishedAt = now;
     // 終了したら次のジョブを積めるようにする
     data.activeKey = null;
@@ -2465,6 +2496,8 @@ export async function announceDispatchHost(params: {
   codexRemoteControlCapable: boolean | null;
   /** 手作業セッション（#2771）を起こせるか。申告していないpollerでは`null`＝非対応 */
   manualStepSessionCapable: boolean | null;
+  /** develop向けPRのAIレビュー（#3990）を実行できるか。申告していないpollerでは未定義＝非対応 */
+  prReviewCapable?: boolean | null;
   selfUpdateCapable: boolean | null;
   /**
    * セッション本数の上限と、申告した時点で生きていた本数（#1394）。**画面へ出すための写しで、
@@ -2536,6 +2569,7 @@ export async function announceDispatchHost(params: {
     codexCapable: params.codexCapable,
     codexRemoteControlCapable: params.codexRemoteControlCapable,
     manualStepSessionCapable: params.manualStepSessionCapable,
+    prReviewCapable: params.prReviewCapable ?? null,
     selfUpdateCapable: params.selfUpdateCapable,
     maxSessions: params.maxSessions,
     liveSessions: params.liveSessions,

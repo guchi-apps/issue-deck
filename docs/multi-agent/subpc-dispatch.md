@@ -1964,6 +1964,14 @@ pollerの起動の上限は15分（`DISPATCH_LAUNCH_TIMEOUT_SECONDS`）なのに
 （`DISPATCH_HEARTBEAT_TIMEOUT_MS`）で見限るため、10分以上かかる起動はセッションが立つ前に
 タイムアウトし、この救済も効かない。実測は数十秒〜数分（#1177）なので現状は表に出ていない。
 
+## PRレビュー（`PR_REVIEW`・#3990）
+
+develop向けPRのAIレビュー（Codex）を運ぶジョブ。**セッション枠を消費せず、制御ジョブと同じ「枠外」で払い出す**（`prReview`を申告したpollerだけ。`DispatchHost.prReviewCapable`）。PR番号・base/head SHA・判定は専用列（`prNumber`・`baseSha`・`headSha`・`reviewVerdict`）で、`issueNumber`には必須列の埋め草としてPR番号が入る。`activeKey`は`pr_review:<repo>#<PR>@<head SHA>:<agent>`。
+
+- 積むのはActions（`POST /api/dispatch/pr-review`・`PROGRESS_REPORT_SECRET`認証）。pollerが`start-codex-pr-review.sh --run ... <ジョブID>`をtmuxで起動し`running`を報告する。**完了・失敗の報告はレビューのスクリプト自身が送る**（`scripts/lib/pr-review-report.sh`。生存報告は60秒間隔で、10分途絶えると`TIMEOUT`）。`succeeded`には判定（`reviewVerdict`）が必須で、無ければ受け口が`FAILED`（不正な出力）に倒す。
+- `QUEUED`のまま5分で`TIMEOUT`（制御ジョブと同じ。サブPCが落ちていても30分待たずに確定する）。
+- 確定したら`auto-merge`ジョブだけを再実行して最終マージ判定を再開する（`resumePrReviewMerge`。報告時と、pollerが毎巡呼ぶ`POST /api/dispatch/pr-review/resume-sweep`）。設計の全体は[code-review.md](code-review.md)「develop向けPRのCodexレビュー」。
+
 ## 重複起動の防止（4層）
 
 | 層 | 仕組み | 何を防ぐか |
@@ -2842,6 +2850,8 @@ poller の POST /api/dispatch/claim（非fast） → 次枠実行 → keepClaude
 | `POST /api/dispatch/claim` | `DISPATCH_SECRET` | ジョブの払い出し |
 | `POST /api/dispatch/report` | `DISPATCH_SECRET` | `running` / `succeeded` / `failed` / `skipped` の報告 |
 | `POST /api/dispatch/hosts` | `DISPATCH_SECRET` | 実行可能リポジトリの申告＋生存報告（プレビューの可否・セッション操作の可否・追加指示の可否・横断質問の可否・セッションの本数と上限・リソース使用率も申告する） |
+| `POST /api/dispatch/pr-review` | `PROGRESS_REPORT_SECRET` | develop向けPRのAIレビュー（`PR_REVIEW`）の依頼（`action: request`。冪等・結果は待たない）と状態の取得（`action: status`）。呼ぶのはActionsの`codex-review`・`auto-merge`ジョブ（#3990） |
+| `POST /api/dispatch/pr-review/resume-sweep` | `DISPATCH_SECRET` | 確定したPRレビューの最終マージ判定（`auto-merge`ジョブの再実行）を再開する巡回。pollerが毎巡呼ぶ（#3990） |
 | `POST /api/dispatch/sessions` | `DISPATCH_SECRET` | 起動後のtmuxセッションの状態報告（#1217） |
 | `POST /api/dispatch/sessions/ended` | `DISPATCH_SECRET` | セッションが畳まれた瞬間の報告。1件だけ`ALIVE`を降ろす（#1321） |
 | `POST /api/pull-requests/conflict-sweep` | `DISPATCH_SECRET` | コンフリクトしたPRの巡回検知を促す（#2116）。巡回するかどうかも、どのPRへ何を起動するかもissue-deck側が決める |

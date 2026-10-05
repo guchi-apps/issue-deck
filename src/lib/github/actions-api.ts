@@ -94,6 +94,27 @@ export async function fetchWorkflowJobLogs(
   return res.text();
 }
 
+/**
+ * ワークフローの1ジョブだけを再実行する（そのジョブに依存するジョブも再実行される。#3990）。
+ *
+ * **runが完了していないと403で断られる**（実行中のジョブがある間は再実行できない）。呼ぶ側は
+ * 失敗を「まだ早い」として扱い、あとで試し直す。取得済みの`needs`の出力は引き継がれるので、
+ * 他のジョブ（Claudeレビューなど）は走り直さない。
+ */
+export async function rerunWorkflowJob(
+  owner: string,
+  repo: string,
+  jobId: number,
+  token: string,
+): Promise<void> {
+  const url = `${GITHUB_API}/repos/${owner}/${repo}/actions/jobs/${jobId}/rerun`;
+  const res = await githubFetch(url, token, { method: "POST" });
+  if (!res.ok) {
+    const detail = await res.text().catch(() => "");
+    throw new GithubApiError(res.status, `GitHub API request failed: ${res.status} ${url} ${detail}`);
+  }
+}
+
 export async function cancelWorkflowRun(
   owner: string,
   repo: string,
