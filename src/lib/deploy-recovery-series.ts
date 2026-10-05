@@ -11,6 +11,13 @@
  * PRのマージ・別SHAのdeploy成功・旧版のHTTP 200では復旧済みにしない。
  */
 
+import {
+  allowsMainMerge,
+  DEPLOY_RECOVERY_SCOPE_DEVELOP,
+  recoveryMergeStopMessage,
+  type RecoveryMergeStopReason,
+} from "@/lib/deploy-recovery-main-merge";
+
 /** 系列全体で使える修復回数（内側のPR修復も含む）。 */
 export const DEPLOY_RECOVERY_MAX_REPAIR_ROUNDS = 3;
 /** 開始から期限までの時間。超えたら止める（無制限に走らせない）。 */
@@ -20,8 +27,8 @@ export const DEPLOY_RECOVERY_CAUSE_TIMEOUT_MS = 90 * 60 * 1000;
 /** 起動の準備（修正Issue・dispatch）が途中で止まったとみなす時間。 */
 export const DEPLOY_RECOVERY_PREPARING_TIMEOUT_MS = 10 * 60 * 1000;
 
-/** 開始時に許可する範囲。第1段は「修正PRをdevelopへ入れるまで」。 */
-export const DEPLOY_RECOVERY_SCOPE = "fix_until_develop";
+/** 開始時に許可する範囲の既定。「修正PRをdevelopへ入れるまで」。mainまで許すのは開始者が選んだときだけ（#4006）。 */
+export const DEPLOY_RECOVERY_SCOPE = DEPLOY_RECOVERY_SCOPE_DEVELOP;
 
 export const DEPLOY_RECOVERY_STATUSES = [
   "starting",
@@ -30,6 +37,7 @@ export const DEPLOY_RECOVERY_STATUSES = [
   "fixing",
   "awaiting_checks",
   "awaiting_release",
+  "awaiting_main_merge",
   "releasing",
   "verifying",
   "recovered",
@@ -46,6 +54,8 @@ export const DEPLOY_RECOVERY_RETRY_WAIT_MS = 15 * 60 * 1000;
 /** 終わった（巡回が進めない）状態。`awaiting_release`も第1段では人へ渡す終端。 */
 export const DEPLOY_RECOVERY_TERMINAL_STATUSES: readonly DeployRecoveryStatus[] = [
   "awaiting_release",
+  // mainへマージした後。稼働版の確認（#4007）が入るまでは、人へ渡す終端として扱う。
+  "releasing",
   "recovered",
   "needs_attention",
   "stopped",
@@ -71,7 +81,9 @@ export type DeployRecoveryStopReason =
   | "version_unverified"
   | "release_timed_out"
   | "max_rounds_reached"
-  | "stopped_by_user";
+  | "stopped_by_user"
+  | RecoveryMergeStopReason
+  | "merge_failed";
 
 /** 実装セッションが原因の区分を報告するコメントのマーカー。修正Issueの本文で書き方を指示する。 */
 export const DEPLOY_RECOVERY_CAUSE_MARKER_PREFIX = "issue-deck-deploy-recovery-cause:";
@@ -99,6 +111,7 @@ export function parseDeployRecoveryCause(bodies: readonly (string | null | undef
 
 export type DeployRecoverySeriesState = {
   status: DeployRecoveryStatus;
+  scope: string;
   expiresAt: Date;
   dispatchedAt: Date | null;
   cause: DeployRecoveryCause | null;
@@ -162,9 +175,11 @@ export function decideDeployRecovery(
 
   if (series.status === "awaiting_checks") {
     if (pullRequest === null) return { action: "wait" };
-    // **マージされたら本番反映待ちで止める。** 第1段ではmainへ出す操作をしないため、
-    // ここを`recovered`へ写すと「PRがマージされただけで復旧済み」になってしまう。
-    if (pullRequest.merged) return { action: "transition", status: "awaiting_release" };
+    // **マージされたら本番反映待ちで止める。** ここを`recovered`へ写すと「PRがマージされただけで
+    // 復旧済み」になってしまう。開始者がmainまで許可した系列だけが、復旧PRの工程（#4006）へ進む。
+    if (pullRequest.merged) {
+      return { action: "transition", status: allowsMainMerge(series.scope) ? "awaiting_main_merge" : "awaiting_release" };
+    }
     if (pullRequest.state === "closed") return { action: "stop", reason: "pull_request_closed" };
 
     const loop = observation.repairLoop;
@@ -278,6 +293,8 @@ export function deployRecoveryStatusLabel(status: string): string {
       return "CI・レビュー待ち";
     case "awaiting_release":
       return "本番反映待ち";
+    case "awaiting_main_merge":
+      return "本番反映のCI・レビュー待ち";
     case "releasing":
       return "本番反映中";
     case "verifying":
@@ -322,7 +339,7 @@ export function deployRecoveryStopReasonLabel(reason: string | null, detail: str
     case "stopped_by_user":
       return "停止しました。新しい修復・マージは始めません（すでに動いている実装セッションは止まりません）。";
     default:
-      return reason;
+      return recoveryMergeStopMessage(reason, detail);
   }
 }
 

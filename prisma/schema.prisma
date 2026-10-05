@@ -27,16 +27,17 @@ model User {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  userInstallations    UserInstallation[]
-  hiddenRepositories   HiddenRepository[]
-  favoriteRepositories FavoriteRepository[]
-  commentReads         IssueCommentRead[]
-  pushSubscriptions    PushSubscription[]
-  snoozedItems         SnoozedItem[]
+  userInstallations                 UserInstallation[]
+  hiddenRepositories                HiddenRepository[]
+  favoriteRepositories              FavoriteRepository[]
+  commentReads                      IssueCommentRead[]
+  pushSubscriptions                 PushSubscription[]
+  snoozedItems                      SnoozedItem[]
   issueCreationExcludedRepositories IssueCreationExcludedRepository[]
-  releaseCheckTargets  ReleaseCheckTarget[]
-  releaseChecks        ReleaseCheck[]
-  releaseCheckLines    ReleaseCheckLine[]
+  releaseCheckTargets               ReleaseCheckTarget[]
+  releaseChecks                     ReleaseCheck[]
+  releaseCheckLines                 ReleaseCheckLine[]
+  chatConversations                 ChatConversation[]
 }
 
 // --- GitHub App 連携 ---
@@ -113,11 +114,11 @@ model Repository {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  installation GithubInstallation   @relation(fields: [installationId], references: [id], onDelete: Cascade)
-  issues       Issue[]
-  hiddenBy     HiddenRepository[]
-  favoritedBy  FavoriteRepository[]
-  snoozedItems SnoozedItem[]
+  installation            GithubInstallation                @relation(fields: [installationId], references: [id], onDelete: Cascade)
+  issues                  Issue[]
+  hiddenBy                HiddenRepository[]
+  favoritedBy             FavoriteRepository[]
+  snoozedItems            SnoozedItem[]
   issueCreationExcludedBy IssueCreationExcludedRepository[]
   releaseCheckTargetedBy  ReleaseCheckTarget[]
   releaseChecks           ReleaseCheck[]
@@ -208,7 +209,9 @@ model ReleaseCheck {
   id           String @id @default(cuid())
   userId       String
   repositoryId String
-  /** `v4.75.0`。`ReleaseHistoryItem.tagName`と同じ値 */
+  /**
+   * `v4.75.0`。`ReleaseHistoryItem.tagName`と同じ値
+   */
   tagName      String
 
   checkedAt DateTime @default(now())
@@ -235,9 +238,13 @@ model ReleaseCheckLine {
   id           String @id @default(cuid())
   userId       String
   repositoryId String
-  /** `v4.75.0`。`ReleaseHistoryItem.tagName`と同じ値 */
+  /**
+   * `v4.75.0`。`ReleaseHistoryItem.tagName`と同じ値
+   */
   tagName      String
-  /** `owner/repo#123`やPRのURL。`ReleaseHighlightLine.key`と同じ値 */
+  /**
+   * `owner/repo#123`やPRのURL。`ReleaseHighlightLine.key`と同じ値
+   */
   lineKey      String
 
   checkedAt DateTime @default(now())
@@ -264,35 +271,35 @@ enum IssueStateReason {
 }
 
 model Issue {
-  id                String            @id @default(cuid())
-  githubIssueId     BigInt            @unique
-  repositoryId      String
-  number            Int
-  title             String            @db.Text
-  body              String?           @db.Text
-  state             IssueState
-  stateReason       IssueStateReason?
-  htmlUrl           String
-  authorLogin       String
+  id                 String            @id @default(cuid())
+  githubIssueId      BigInt            @unique
+  repositoryId       String
+  number             Int
+  title              String            @db.Text
+  body               String?           @db.Text
+  state              IssueState
+  stateReason        IssueStateReason?
+  htmlUrl            String
+  authorLogin        String
   // GitHubの`author_association`（OWNER/MEMBER/COLLABORATOR/CONTRIBUTOR/NONE等）。
   // 手作業Issueの確認コマンド定期巡回（#3365）が、起票者がリポジトリの信頼できる
   // メンバーかどうかを判定するために使う。同期のたびに上書きするので、起票後に
   // 権限が変わった（コラボレーターから外れた等）場合も次の同期で反映される
-  authorAssociation String?
-  assigneeLogin     String?
-  commentCount      Int               @default(0)
+  authorAssociation  String?
+  assigneeLogin      String?
+  commentCount       Int               @default(0)
   // GitHubの`sub_issues_summary`（子Issueの総数・完了数）と`parent_issue_url`。一覧の行へ
   // 「親Issue／子Issue」を出すための値（#3469）。REST・Webhookのpayloadにそのまま載る
   subIssuesTotal     Int?
   subIssuesCompleted Int?
   parentIssueUrl     String?
-  milestoneTitle    String?
-  milestoneOpen     Int?
-  milestoneClosed   Int?
-  githubCreatedAt   DateTime
-  githubUpdatedAt   DateTime
-  githubClosedAt    DateTime?
-  syncedAt          DateTime          @default(now())
+  milestoneTitle     String?
+  milestoneOpen      Int?
+  milestoneClosed    Int?
+  githubCreatedAt    DateTime
+  githubUpdatedAt    DateTime
+  githubClosedAt     DateTime?
+  syncedAt           DateTime          @default(now())
 
   // 00.check-userラベルが最後に付与された日時（確認待ちフィルターを確認が古い順に
   // 並べるための基準）。ラベルが外れるとnullに戻す
@@ -455,57 +462,57 @@ model ClaudeApiUsageCumulative {
 // claudeModel: claude-issue-dispatch.ymlがclaude-code-action起動時に付与する--modelの値。
 // "auto"の場合は--modelを付与せずclaude-code-action側のデフォルトモデルに委ねる（#622）。
 model AppSetting {
-  id                  Int      @id @default(1)
-  autoRetryLimit      Int      @default(0)
-  claudeModel         String   @default("auto")
+  id                               Int     @id @default(1)
+  autoRetryLimit                   Int     @default(0)
+  claudeModel                      String  @default("auto")
   // IssueDeck全体の新規AI処理で使う主系プロバイダー。機能別の値は"inherit"ならこれに追従する。
-  aiExecutionProvider String   @default("claude")
+  aiExecutionProvider              String  @default("claude")
   // GitHub Actionsの無人実行で使うCLI。"inherit"なら主系プロバイダーに追従する。
-  githubActionsAgent  String   @default("inherit")
+  githubActionsAgent               String  @default("inherit")
   // GitHub ActionsでCodexを使うときのモデル。サブPC用codexModelとは独立させる。
-  githubActionsCodexModel String @default("gpt-5.6-terra")
+  githubActionsCodexModel          String  @default("gpt-5.6-terra")
   // PRレビュー・修復workflow専用。autoはAction/CLIの既定へ委ねる。
-  workflowClaudeModel String @default("auto")
-  workflowCodexModel String @default("auto")
-  workflowCodexReasoningEffort String @default("default")
+  workflowClaudeModel              String  @default("auto")
+  workflowCodexModel               String  @default("auto")
+  workflowCodexReasoningEffort     String  @default("default")
   // 質問応答・サブIssue分割のような補助的な処理に使うモデル(#905)。実装・計画とは品質要求が
   // 異なり、同じモデルで動かすとコストに見合わないため分けている。
-  claudeModelAssist   String   @default("auto")
+  claudeModelAssist                String  @default("auto")
   // サブPCでClaude Codeのローカルセッションを起動するときに`--model`へ渡すモデル。
-  claudeLocalModel    String   @default("sonnet")
+  claudeLocalModel                 String  @default("sonnet")
   // ローカルセッションをCodex CLIで起動するときに`-m`へ渡すモデル（#2550）。
   // "auto"の場合は`-m`を付けず、Codex CLI側のデフォルトモデルに委ねる。
-  codexModel          String   @default("gpt-5.6-terra")
+  codexModel                       String  @default("gpt-5.6-terra")
   // サブPCの「実装を開始」で最初に選ぶCLI。明示して選び直した値や、既存セッションの再開には影響しない。
-  defaultDispatchAgent String  @default("inherit")
+  defaultDispatchAgent             String  @default("inherit")
   // ローカルセッションが計画を投稿した後の自動計画レビューに使うCLI。開始元ごとに別々に選べる。
   // "inherit"なら主系プロバイダーを使い、開始元を問わず一括切替に追従する。
-  planReviewAgentForClaude String @default("inherit")
-  planReviewAgentForCodex  String @default("inherit")
+  planReviewAgentForClaude         String  @default("inherit")
+  planReviewAgentForCodex          String  @default("inherit")
   // サブPCの自動計画レビューをClaude Codeで行うときのモデル。既定は設定追加前と同じSonnet。
-  planReviewClaudeModel String @default("sonnet")
+  planReviewClaudeModel            String  @default("sonnet")
   // サブPCの自動計画レビューをCodex CLIで行うときのモデル。既定は設定追加前と同じTerra。
-  planReviewCodexModel  String @default("gpt-5.6-terra")
+  planReviewCodexModel             String  @default("gpt-5.6-terra")
   // 既定CLIの使用率がしきい値以上なら、起動ダイアログで他方を最初に選ぶ（#3531）。
   // 既定ON・90%は、従来のClaude残量10%未満でCodexへ切り替える挙動を引き継ぐため。
-  dispatchFailoverEnabled Boolean @default(true)
-  dispatchFailoverThresholdPercent Int @default(90)
+  dispatchFailoverEnabled          Boolean @default(true)
+  dispatchFailoverThresholdPercent Int     @default(90)
   // 計画レビューの指摘をJevが判断し、採用なら通知なしで計画へ自動反映する（#3648）。
   // 上限は人の修正を挟まずに連続して自動反映する回数。
-  planReviewAutoReflectEnabled Boolean @default(true)
-  planReviewAutoReflectMaxRounds Int @default(5)
+  planReviewAutoReflectEnabled     Boolean @default(true)
+  planReviewAutoReflectMaxRounds   Int     @default(5)
   // アプリ内の要約・検索・文章整理など、定型的な処理に使うモデル（#2562）。
-  appAiModel          String   @default("inherit")
+  appAiModel                       String  @default("inherit")
   // アプリ内の原因診断・新規アプリ相談など、判断を伴う処理に使うモデル。
-  appAiModelReasoning String   @default("inherit")
+  appAiModelReasoning              String  @default("inherit")
   // 「おまかせ」（モデルの自動選択）の判定に何を使うか（#3189）。"app-ai"はアプリ内AIの
   // モデル（appAiModel）に従う従来どおりの経路、"jev"はTypeSafeのJev。**既定は"app-ai"**——
   // JevはTYPESAFE_API_KEYが要る外部サービスで、未設定の環境では黙って従来経路へ倒れる。
-  modelPickEngine     String   @default("app-ai")
+  modelPickEngine                  String  @default("app-ai")
   // サブPCへディスパッチしたジョブを同時に何本まで走らせるか（#1179）。**定数で埋め込まない。**
   // CPUの載せ替えで変わる値で、埋め込むと作り直しになる（#1176）。既定の3はRyzen 5 PRO 4650G
   // （6C/12T）での実測（guchi-apps/subpc#19・#1812）にもとづく。根拠はsrc/lib/app-settings.ts。
-  dispatchConcurrency Int      @default(3)
+  dispatchConcurrency              Int     @default(3)
 
   // リリース準備（バンプPR・develop→mainのPR作成）の自動実行間隔（分・#3416）。`null`は既定の60分、
   // 0は自動実行しない。GitHub Actionsのcronは実行時に変えられないため、ワークフローは15分おきに
@@ -519,10 +526,10 @@ model AppSetting {
   // 参照されていない添付画像の自動削除（#2475）。**既定はOFF**——「未使用」の判定は
   // Issue本文とIssue／PRのコメントしか見ておらず、PR本文・リポジトリ内のファイル・
   // GitHub外への貼り付けは原理的に検出できない。人が中身を見て納得してから有効にする。
-  imageCleanupEnabled Boolean  @default(false)
+  imageCleanupEnabled  Boolean   @default(false)
   // アップロードから何日経ったものを自動削除の対象にするか。下書きに貼ったまま投稿していない
   // 画像（localStorageにしか無く、サーバーからは見えない）を巻き込まないための猶予でもある
-  imageRetentionDays  Int      @default(30)
+  imageRetentionDays   Int       @default(30)
   // 全リポジトリのIssueコメントを一度読み切った時刻。**列に既定値を持たせない**——
   // `@default(now())`にすると、マイグレーション直後に「全件確認済み・参照0件」という
   // 最悪の状態が成立する。nullの間は自動削除を一切行わない
@@ -531,19 +538,19 @@ model AppSetting {
   // 次枠実行（#2995）。「次の5時間枠」に積んだIssueを、**いまの5時間枠の残りが
   // `nextWindowRunLeadMinutes`分を切ってから**サブPCへ1件ずつ起動する。
   // **既定はOFF**——無人で実装が進む処理なので、画像の自動削除と同じく人が納得してから有効にする
-  nextWindowRunEnabled         Boolean  @default(false)
+  nextWindowRunEnabled                 Boolean @default(false)
   // 起動を始める「枠の残り時間」（分）。判定は`src/lib/next-window-run.ts`
-  nextWindowRunLeadMinutes     Int      @default(60)
+  nextWindowRunLeadMinutes             Int     @default(60)
   // 1件起動してから次を起動するまで空ける時間（分）。リセットの瞬間に全部走らせないための間隔
-  nextWindowRunIntervalMinutes Int      @default(10)
+  nextWindowRunIntervalMinutes         Int     @default(10)
   // 起動しない「残り枠の下限」（%・0＝制限しない）。5時間枠・週間枠のそれぞれについて、**残りが
   // この値を下回っている間は起動を見送る**（日々の作業用に取っておく量。判定は`next-window-run.ts`）
-  nextWindowRunFiveHourFloorPercent Int @default(0)
-  nextWindowRunWeeklyFloorPercent   Int @default(0)
+  nextWindowRunFiveHourFloorPercent    Int     @default(0)
+  nextWindowRunWeeklyFloorPercent      Int     @default(0)
   // ChatGPT（Codex）には5時間枠がないため、予約実行で確認する下限は週間枠だけにする（#3859）。
-  nextWindowRunCodexWeeklyFloorPercent Int @default(0)
+  nextWindowRunCodexWeeklyFloorPercent Int     @default(0)
   // 一括予約（#3438）の使用モデルの初期値。`<agent>:<model>`（例`codex:gpt-6-sol`）で、空は「設定に従う」
-  nextWindowRunBulkModel String @default("")
+  nextWindowRunBulkModel               String  @default("")
 
   // 5時間枠を開けておく（#3032）。**指定した時間帯（日本時間の時）のあいだ、枠が止まっていれば**
   // pollerの巡回ついでに最小の推論リクエストを1本送って枠を開ける。枠は最初のリクエストで始まるため、
@@ -564,7 +571,7 @@ model AppSetting {
   claudeDispatchPauseReason String?
   codexDispatchPauseReason  String?
 
-  updatedAt           DateTime @updatedAt
+  updatedAt DateTime @updatedAt
 }
 
 /// 夜間実行の予定と結果（#2772）。
@@ -665,7 +672,7 @@ model UploadedImageReference {
   id String @id @default(cuid())
 
   /// `uploads/images/`のファイル名（UUID + 拡張子）
-  filename String
+  filename  String
   /// 参照元。`issue:<githubIssueId>`（本文）または`comment:<githubCommentId>`（コメント）。
   /// 参照元ごとに「今そこに写っている画像の集合」へ置き換えるための鍵
   sourceKey String
@@ -713,11 +720,11 @@ model SharedToken {
 // 外部アプリ・AIエージェントが共有トークンを取得または登録した記録。
 // 利用元と時刻だけを残し、トークン値・認証用Bearer値は絶対に保持しない。
 model SharedTokenUsage {
-  id            String      @id @default(cuid())
+  id            String   @id @default(cuid())
   sharedTokenId String
   consumer      String
   action        String
-  usedAt        DateTime    @default(now())
+  usedAt        DateTime @default(now())
 
   sharedToken SharedToken @relation(fields: [sharedTokenId], references: [id], onDelete: Cascade)
 
@@ -806,13 +813,13 @@ enum DispatchJobKind {
 // **RepositoryやIssueへの外部キーは張らない。** リポジトリ同期が済んでいないIssueでも
 // 積めるようにするためで、リポジトリはowner/nameの文字列で持つ（/api/progressと同じ形）。
 model DispatchJob {
-  id                 String            @id @default(cuid())
-  repositoryFullName String
-  issueNumber        Int
+  id                    String            @id @default(cuid())
+  repositoryFullName    String
+  issueNumber           Int
   // 起動先として指定されたホスト名（DispatchHost.nameと対応）
-  targetHost         String
+  targetHost            String
   // 何をするジョブか（#1332）。既存行はすべて起動ジョブなのでLAUNCHが既定
-  kind               DispatchJobKind   @default(LAUNCH)
+  kind                  DispatchJobKind   @default(LAUNCH)
   // 起こすエージェントCLI（#2505。`LAUNCH`と`PLAN_REVIEW`で意味がある）。
   //
   // **入るのは`ISSUE_DECK_AGENT`へそのまま渡せる小文字の語**（`claude` / `codex`）で、
@@ -822,7 +829,7 @@ model DispatchJob {
   //
   // **既定は`claude`で、既存行はすべてこの値になる。** 種別を増やしたときに既存の起動が
   // 黙って別のCLIへ移らないよう、`enum`ではなく既定値付きの文字列で持つ。
-  agent              String            @default("claude")
+  agent                 String            @default("claude")
   // このIssueだけに使うClaudeのモデル（#2717。`kind`が`LAUNCH`・`agent`が`claude`のときだけ意味がある）。
   //
   // **nullは「設定の既定に従う」**（`AppSetting.claudeLocalModel`）で、既存行はすべてnullになる。
@@ -834,24 +841,24 @@ model DispatchJob {
   // 費用の6割がキャッシュ読み出しで、そこが半額のFable 5.1はOpus 5比1.03倍にしかならない。
   // 数往復で終わるIssueではその相殺が効かず素の単価差（2倍）に近づく。だから全体の既定ではなく
   // 起動のたびに選ぶ（docs/multi-agent/prompts-and-models.md）。
-  claudeModel        String?
+  claudeModel           String?
   // このIssueだけに使うCodexのモデル（#3192。`kind`が`LAUNCH`・`agent`が`codex`のときだけ意味がある）。
   //
   // **nullは「設定の既定に従う」**（`AppSetting.codexModel`）で、既存行はすべてnullになる。
   // 入るのは`CODEX_LOCAL_MODEL_VALUES`のモデル名（`gpt-6-sol`など）だけで、`claudeModel`と
   // 同じく画面・API・払い出しの3か所で既知の語だけを通す。払い出し（`POST /api/dispatch/claim`）が
   // この値をジョブごとの`codexModel`として載せ直すので、pollerは従来どおり`codexModel`だけを読む。
-  codexModel         String?
+  codexModel            String?
   // 別のAIへ引き継いで起動するときの、引き継ぎ元のエージェント（#3496。`kind`が`LAUNCH`のときだけ意味がある）。
   //
   // **nullは通常の起動**で、既存行はすべてnullになる。入るのは`agent`と同じ既知の語（`claude` / `codex`）
   // だけで、画面・API・払い出し・pollerの各所で絞る。値があるとpollerは、元セッションを止める**前に**
   // 転記・Issue・gitの状態から引き継ぎ要約を書き出し、新しいセッションの最初の指示へ添える。
-  handoffFrom        String?
+  handoffFrom           String?
   // 引き継ぎ要約に元セッションの生の転記も添えるか（#3496。`handoffFrom`があるときだけ意味がある）。
   // 既定はfalse（要約のみ）。長い転記は引き継ぎ先の枠を食うため、押した人が選んだときだけ添える。
-  handoffTranscript  Boolean           @default(false)
-  status             DispatchJobStatus @default(QUEUED)
+  handoffTranscript     Boolean           @default(false)
+  status                DispatchJobStatus @default(QUEUED)
   // 「同じIssueに対する未完了ジョブは1件まで」をDBに保証させるための列（#1179）。
   // 未完了の間だけ `owner/repo#番号` が入り、終了時にnullへ戻す。MySQLのunique indexは
   // 複数のNULLを許すため、終了したジョブは同じIssueで何件でも並べられる。
@@ -865,34 +872,34 @@ model DispatchJob {
   // 二重起動を防ぐための制約で、質問には当てはまらない。ここで枠を取ると、
   // **実装ジョブが走っているIssueに質問を積めなくなる**（質問はまさに実装中に割り込んで
   // 聞くための機能なので、それでは意味が無い）。
-  activeKey          String?           @unique
+  activeKey             String?           @unique
   // 画面から積んだユーザー（User.id）。Userを消してもジョブの履歴は残すためFKは張らない
-  requestedByUserId  String?
-  claimedByHost      String?
-  claimedAt          DateTime?
-  startedAt          DateTime?
-  finishedAt         DateTime?
+  requestedByUserId     String?
+  claimedByHost         String?
+  claimedAt             DateTime?
+  startedAt             DateTime?
+  finishedAt            DateTime?
   // 計画レビュー（G1）の指摘コメントが届いた時刻（#3659。`kind`が`PLAN_REVIEW`のときだけ入る）。
   //
   // **`SUCCEEDED`はレビューのセッションが立った時点で、指摘の投稿はその数分後。** Issue一覧は
   // コメント本文を持たないため、これが無いと`finishedAt`からの猶予（6分）が切れるまで、
   // 指摘が届いた後も「計画レビュー作成中」のままになる。GitHubのWebhookで
   // `supervisor:plan-review`コメントを受けた時点で埋める（`plan-review-posted.ts`）。
-  reviewPostedAt     DateTime?
+  reviewPostedAt        DateTime?
   // 計画レビュー（G1）の指摘コメントの採否が決まった時刻（#3648。`kind`が`PLAN_REVIEW`のときだけ入る）。
   //
   // `reviewPostedAt`は「届いた」時点で、Jevの判定と自動反映が終わるまでの数秒は通知を保留し続ける
   // 必要がある。自動反映の処理が「指摘なし」・見送り・Jevの採否・上限のどの終わり方でも最後に埋め、
   // これが入るまで一覧・通知・承認パネルは「作成中」として扱う。
-  planReviewDecidedAt DateTime?
+  planReviewDecidedAt   DateTime?
   // RUNNING中の生存報告。途絶えたらTIMEOUTへ落とす
-  heartbeatAt        DateTime?
+  heartbeatAt           DateTime?
   // 起動したtmuxセッション名。実行ログを見る唯一の手掛かり（`tmux attach -t <名前>`）で、
   // Actions UIに相当するものが無いローカル実行ではこれがログの在り処になる
-  tmuxSessionName    String?
+  tmuxSessionName       String?
   // 失敗理由・結果の要約。**画面にそのまま出す前提**。「投げたのに何も起きない」を避けるため、
   // clone未登録・版数不一致・tmux起動失敗といった理由をここへ入れて返す
-  message            String?           @db.Text
+  message               String?           @db.Text
   // 走っているセッションへ流す追加指示の本文（#1012。`kind`が`INSTRUCTION`のときだけ入る）。
   //
   // **改行を含まない1行だけを受ける。** 複数行は確定キーの解釈が画面の実装に依存する。
@@ -900,7 +907,7 @@ model DispatchJob {
   //
   // **組み立てるのは人だけで、実行体が状況から本文を決めて自動送信する経路は作らない**
   // （docs/multi-agent/gates.md）。画面のプリセットも、押すのは人という点は変わらない。
-  instruction        String?           @db.Text
+  instruction           String?           @db.Text
   // その追加指示が「停滞からの復旧」か（#2886。`kind`が`INSTRUCTION`のときだけ意味がある）。
   //
   // **本文は`src/lib/dispatch/session-stall.ts`が持つ固定文面のどれか**で、受け口
@@ -916,14 +923,14 @@ model DispatchJob {
   //
   // **古いpollerはこの項目を読まない。** その場合は従来どおり`Stop`だけが許可され、
   // APIエラーの復旧は「セッションが作業中のため送りませんでした」として見送られる（札は残る）。
-  recovery           Boolean           @default(false)
+  recovery              Boolean           @default(false)
   // 手作業アシスタントから代行実行するコマンド（#1828。`kind`が`MANUAL_STEP`のときだけ入る）。
   //
   // **入るのはサーバーが手作業Issueの本文から抽出し直したものだけ。** 画面から届いた文字列は
   // 「人が承認したのはこれか」の照合にしか使わず、そのまま保存も実行もしない。これがこの経路を
   // 「画面から任意のコマンドを流せる口」にしないための一次の歯止めになっている
   // （二次の歯止めはサブPC側で、pollerがGitHubの本文を読み直して同じ照合をもう一度行う）。
-  command            String?           @db.Text
+  command               String?           @db.Text
   // 人が埋めたプレースホルダの値（#2403。`<控えたkey>`の表記 → 値のマップ）。
   //
   // **`command`は`<…>`が入ったままのテンプレートで保存する。** 本文との照合（サーバーとpollerが
@@ -933,12 +940,12 @@ model DispatchJob {
   // **シークレット（トークン・キー）が入りうる。** 出力（`commandOutput`）と同じ扱いで、
   // GitHubのIssueにも通知にもpollerのログにも出さない。さらに**ジョブが終わった時点で空にする**
   // ——出力と違い、後から確かめるための手掛かりとしての価値が無いため残す理由が無い。
-  placeholderValues  Json?
+  placeholderValues     Json?
   // 代行実行した手順の、本文中の行番号（#1828。`- [ ]`の行）。画面がジョブと手順を対応付ける。
   //
   // **チェックを付けるのはこの行ではなく画面側**（`hooks/use-issue-task-list.ts`）。ここに持つのは
   // 「どの手順を実行したのか」を後から辿るためで、行が持つ意味はあくまで記録。
-  manualStepLine     Int?
+  manualStepLine        Int?
   // 代行実行をどこで走らせるか（#2901。`subpc`または`vps`。`kind`が`MANUAL_STEP`のときだけ入る）。
   //
   // **入るのはサーバーが本文から解決したものだけ**で、画面からは受け取らない（`command`と同じ
@@ -946,14 +953,14 @@ model DispatchJob {
   //
   // 語を2つに絞って渡すのは`previewAction`と同じ作法で、**接続先そのものは渡さない**
   // ——SSHの宛先はサブPCの`dispatch.env`が持ち、issue-deckは知らない。
-  manualStepRunTarget String?
+  manualStepRunTarget   String?
   // 止める対象のジョブid（#1882。`kind`が`MANUAL_STEP_ABORT`のときだけ入る）。
   //
   // **pollerへ渡すのはこのidだけで、実行するコマンドは渡さない。** pollerが
   // `issue-deck-manual-step-<id>`というユニット名を組み立て直して止めるので、
   // この経路が任意の`systemctl stop`を流す口にはならない（`INTERRUPT`・`KILL`が
   // セッション名を組み立て直すのと同じ作法）。
-  targetJobId        String?
+  targetJobId           String?
   // 確認環境（#2444）に対する操作。`kind`が`PREVIEW`のときだけ入る。
   //
   //   start    そのリポジトリのdevelopで起こす（他のリポジトリが動いていれば止めてから）
@@ -964,17 +971,17 @@ model DispatchJob {
   // ポートも渡さない。** ポートは`scripts/local-repo-ports.conf`から、起動の仕方は
   // `scripts/start-preview-dev.sh`からpollerが決める（`INTERRUPT`・`KILL`が
   // セッション名を組み立て直すのと同じ作法で、任意のコマンドを流す口にしない）。
-  previewAction      String?
+  previewAction         String?
   // 代行実行の終了コード（#1828）。`0`が成功で、画面はこれを見てチェックを付けるかを決める。
   // タイムアウトで打ち切った場合は`timeout`の終了コード（124）が入る。
-  exitCode           Int?
+  exitCode              Int?
   // 代行実行の出力（#1828。標準出力と標準エラーをまとめたもの）。**末尾を残して切る**
   // （エラーは最後に出るため）。
   //
   // **出力にはシークレットが混ざりうる。** ログイン必須のこの画面にだけ出し、GitHubのIssueにも
   // 通知にもpollerのログにも出さない。ここに残ること自体は、実行した結果を後から確かめる
   // 唯一の手掛かりであるため受け入れている。
-  commandOutput      String?           @db.Text
+  commandOutput         String?           @db.Text
   // Codexのペアリングコード（#2524。`kind`が`CODEX_PAIRING`のときだけ入る）。
   //
   // **これは資格情報。** 押した人のブラウザ（ログイン必須の画面）にだけ出し、Issueコメント・
@@ -983,7 +990,7 @@ model DispatchJob {
   // **`commandOutput`を流用せずに専用の列を持つ。** あちらは「後から原因を追うための出力」で
   // 残ることに意味があるのに対し、こちらは**期限が切れたら消す値**（`placeholderValues`と
   // 同じ立場）。同じ列に載せると、消す条件が種別ごとに枝分かれする。
-  codexPairingCode      String?        @db.VarChar(64)
+  codexPairingCode      String?           @db.VarChar(64)
   // 上のコードが切れる時刻（#2524）。Codexが返す`expiresAt`（発行から10分）。
   //
   // **画面はこれを過ぎたコードを出さず、`expireStaleDispatchJobs`が列ごと空にする。**
@@ -1003,19 +1010,19 @@ model DispatchJob {
   // 埋め草として入れる（必須列のため。GitHubはIssueとPRで番号を共有するので衝突しない）。
   // 同一PR・同一HEAD・同一agentの二重レビューは`activeKey`（`pr_review:owner/repo#PR@HEAD:agent`）
   // が止め、新しいpushでHEADが変われば別ジョブになる（古いHEADの結果はマージ判定から外れる）。
-  prNumber           Int?
-  baseSha            String?           @db.VarChar(64)
-  headSha            String?           @db.VarChar(64)
+  prNumber              Int?
+  baseSha               String?           @db.VarChar(64)
+  headSha               String?           @db.VarChar(64)
   // レビューの判定（`lgtm` / `needs-check` / `changes-requested`）。**失敗・時間切れは入れず
   // `status`と`message`が持つ。** GitHubのverdict markerは結果の記録で、状態の正本はこの行
-  reviewVerdict      String?           @db.VarChar(32)
+  reviewVerdict         String?           @db.VarChar(32)
   // 最終マージ判定を再開する対象のActionsのrun（PRを契機に走った`claude-review-develop`の実行ID）。
   // レビューの完了後に、そのrunの`auto-merge`ジョブだけを再実行して判定をやり直す
-  workflowRunId      String?           @db.VarChar(32)
+  workflowRunId         String?           @db.VarChar(32)
   // 最終マージ判定の再開を済ませた時刻。入るまでは再開の対象で、sweepが何度でも試す
-  mergeResumedAt     DateTime?
-  mergeResumeAttempts Int              @default(0)
-  dismissedAt        DateTime?
+  mergeResumedAt        DateTime?
+  mergeResumeAttempts   Int               @default(0)
+  dismissedAt           DateTime?
   // 順番待ちの中で先に払い出す度合い（#1541）。大きいほど先。既定は0で、同じ値なら
   // `createdAt`の昇順＝積んだ順に流れるため、**既存行の並びは変わらない**。
   //
@@ -1025,7 +1032,7 @@ model DispatchJob {
   //
   // 払い出し（`claimDispatchJob`）と画面（`summarizeDispatchQueue`）は**同じ並び**で読む。
   // ここがずれると、画面に見えている順番と実際に走る順番が食い違う。
-  queuePriority      Int               @default(0)
+  queuePriority         Int               @default(0)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1049,34 +1056,34 @@ model DispatchJob {
 // `scripts/start-local-session.sh`と同じ4つの検証を通ったものだけを載せる。判定を二重に
 // 持たないよう、検証ロジックは`scripts/lib/local-repo-resolve.sh`で共有している。
 model DispatchHost {
-  id                       String   @id @default(cuid())
-  name                     String   @unique
+  id                        String   @id @default(cuid())
+  name                      String   @unique
   // 実行可能と申告されたリポジトリのJSON配列（例: `["guchi-apps/issue-deck"]`）。
   // 数件しか無く、別テーブルにしてまで検索する必要が無いためテキストで持つ
-  repositories             String   @db.Text
+  repositories              String   @db.Text
   // ホストの受け口が扱えるローカル起動プロトコルの上限版数
   // （src/lib/local-session.ts の LOCAL_SESSION_CONTRACT_VERSION と対応）
-  contractVersion          Int?
+  contractVersion           Int?
   // ホスト側が申告する同時実行数の上限。AppSetting.dispatchConcurrencyとminを取る
-  maxConcurrency           Int?
+  maxConcurrency            Int?
   // pollerのバージョン。受け口が古いまま動いているかの手掛かり
-  agentVersion             String?
+  agentVersion              String?
   // 走っているセッションを画面から操作できるか（#1332）。pollerが対応版で申告する。
   // **`null`（未申告＝古いpoller）は「できない」として扱う**。
   // 判定材料が無いまま制御ジョブを配ると、古いpollerは`kind`を読まないため
   // **起動ジョブとして解釈してセッションを立てる**（「閉じる」を押して起動する）
-  sessionControlCapable    Boolean?
+  sessionControlCapable     Boolean?
   // 走っているセッションへ追加指示を流せるか（#1012）。3段階プロトコル
   // （状態確認 → 本文のみ送出 → 反映の再確認 → 確定キーを別送）を実装したpollerだけが申告する。
   // **`sessionControlCapable`とは別に持つ**。あちらは固定の`C-c`と`kill-session`しか送らないのに対し、
   // こちらは**内容のある文字列**を送るため、対応版でないpollerへ配ると事故の質が違う
   // （`null`＝未申告は「できない」として扱うのは同じ）
-  instructionCapable       Boolean?
+  instructionCapable        Boolean?
   // 複数リポジトリ横断の質問セッション（#1454）を起こせるか。`scripts/start-cross-repo-question.sh`を
   // 持つpollerだけが申告する。**`null`（未申告＝古いpoller）は「できない」として扱う**
   // （`sessionControlCapable`・`instructionCapable`と同じ向き。古いpollerへ配ると未知の種別として
   // `failed`になり、質問が必ず失われる）
-  crossRepoQuestionCapable Boolean?
+  crossRepoQuestionCapable  Boolean?
   // 手作業アシスタントからの代行実行（#1828）を実行できるか。`scripts/run-manual-step.sh`を
   // 持つpollerだけが申告する。**`null`（未申告＝古いpoller）は「できない」として扱う**
   // （`sessionControlCapable`・`instructionCapable`と同じ向き）。
@@ -1084,7 +1091,7 @@ model DispatchHost {
   // **`instructionCapable`とも分けて持つ。** あちらは走っているセッションの入力欄へ1行流すだけだが、
   // こちらは**シェルでコマンドを実行する**。対応していないpollerへ配ると未知の種別として`failed`に
   // なるだけだが、そもそも配ってよいホストかどうかの意味が違う
-  manualStepCapable        Boolean?
+  manualStepCapable         Boolean?
   // 走っている代行実行を止められるか（#1882）。`MANUAL_STEP_ABORT`を扱えるpollerだけが申告する。
   // **`null`（未申告＝古いpoller）は「できない」として扱う**（`manualStepCapable`と同じ向き）。
   //
@@ -1092,7 +1099,7 @@ model DispatchHost {
   // 入っているとは限らない。判定材料が無いまま中断ジョブを配ると未知の種別として`failed`になり、
   // 画面には「中断できなかった」だけが残る。申告を見て、止められないホストでは
   // 「打ち切りまで待つ」ことを先に案内する。
-  manualStepAbortCapable   Boolean?
+  manualStepAbortCapable    Boolean?
   // 埋めた値を差し込んで代行実行できるか（#2403）。`placeholderValues`を読んで`'…'`で包み、
   // 本文照合を通したテンプレートの穴へ差し込むpollerだけが申告する。
   // **`null`（未申告＝古いpoller）は「できない」として扱う**（`manualStepCapable`と同じ向き）。
@@ -1101,7 +1108,7 @@ model DispatchHost {
   // `command`（＝`<…>`が入ったままのテンプレート）をそのまま実行してしまう。#2051が防いだ
   // 「`KEY=<値>`がリダイレクトとして解釈される」状態そのものなので、**申告が真でないホストへは
   // 値付きのジョブを払い出さない**（画面も理由を出して押させない）。
-  manualStepValuesCapable  Boolean?
+  manualStepValuesCapable   Boolean?
   // VPSの手順を代行実行できるか（#2901）。**サブPCからVPSへSSHで到達できるpollerだけが申告する**
   // （接続先は`~/.config/issue-deck/dispatch.env`の`MANUAL_STEP_VPS_SSH_TARGET`。リポジトリが
   // PUBLICなのでGitには置かない）。**`null`（未申告＝古いpoller）は「できない」として扱う**
@@ -1111,17 +1118,17 @@ model DispatchHost {
   // 無視し、**VPSで実行するはずのコマンドをサブPCで実行してしまう**（`manualStepValuesCapable`と
   // 同じ「配ってから`failed`で返る」では済まない種類の非対応）。申告が真でないホストへは
   // VPSのジョブを払い出さず、画面も理由を出して押させない。
-  manualStepVpsCapable     Boolean?
+  manualStepVpsCapable      Boolean?
   // 計画の関門（G1・#1218）のセッションを起こせるか（#1855）。`scripts/start-plan-review.sh`を
   // 持つpollerだけが申告する。**`null`（未申告＝古いpoller）は「できない」として扱う**
   // （`crossRepoQuestionCapable`・`manualStepCapable`と同じ向き）。
   //
   // 計画レビューは**計画コメントの投稿を契機に自動で積まれる**ため、対応していないホストへ配ると
   // 計画のたびに`failed`のジョブが並ぶ。申告を見てから配る意味は他の種別より大きい。
-  planReviewCapable        Boolean?
+  planReviewCapable         Boolean?
   // 計画レビューでジョブの`agent`を読み、Codex CLIを起こせるか（#3186）。`codexCapable`だけでは
   // 古いpollerが`PLAN_REVIEW`のagentを無視してClaude Codeを起動するため、別に申告する。
-  planReviewAgentCapable   Boolean?
+  planReviewAgentCapable    Boolean?
   // リポジトリ全体のコードレビュー（#698）のセッションを起こせるか。
   // `scripts/start-code-review.sh`を持つpollerだけが申告する。**`null`（未申告＝古いpoller）は
   // 「できない」として扱う**（`planReviewCapable`と同じ向き）。
@@ -1129,7 +1136,7 @@ model DispatchHost {
   // **`planReviewCapable`とは分けて持つ。** 走らせ方は似ているが、レビューは人が画面から押して
   // 起こすもので、対応していないホストへ配ると「押したのに`failed`だけが返る」ことになる。
   // 申告を見て、選べないホストは選択肢の側で理由を出す。
-  codeReviewCapable        Boolean?
+  codeReviewCapable         Boolean?
   // Codex CLIでローカルセッションを起こせるか（#2505）。**2つを同時に満たすpollerだけが申告する**
   // ——`codex`コマンドが入っていることと、払い出されたジョブの`agent`を読んで
   // `ISSUE_DECK_AGENT`として受け口へ渡すこと。
@@ -1138,7 +1145,7 @@ model DispatchHost {
   // ここは「配ってから`failed`で返る」では済まない種類の非対応で、古いpollerは`agent`を
   // 読まないため、**Codexを選んだのにClaude Codeが黙って立つ**（画面には「Codex CLI」と出たまま）。
   // 画面はこの申告が真のホストにだけエージェントの選択欄を出す。
-  codexCapable             Boolean?
+  codexCapable              Boolean?
   // Codexのペアリングコードを発行できるか（#2524）。**`codexCapable`とは別に持つ。**
   // あちらは`codex`コマンドがあるかだけを見るが、`remote-control`が動くのは公式インストーラの
   // standalone installで入れたCodexだけで、npmで入れたものはサブコマンドが存在しても
@@ -1146,7 +1153,7 @@ model DispatchHost {
   codexRemoteControlCapable Boolean?
   // develop向けPRのAIレビュー（`PR_REVIEW`・#3990）を実行できるか。Codex CLIの実体と
   // 起動用スクリプトが揃っているpollerだけが申告する。`null`（未申告）は「できない」
-  prReviewCapable          Boolean?
+  prReviewCapable           Boolean?
   manualStepSessionCapable  Boolean?
 
   // チェックアウトの更新と自己再起動ができるか（#1875）。`git pull --ff-only`のうえ
@@ -1191,7 +1198,7 @@ model DispatchHost {
   // claude-config・ideas はローカルセッションのためにポート帯だけ確保してあるが`package.json`が
   // 無く、確認環境としては起こせない。分けて持たないと、画面に押しても必ず失敗する行が並ぶ。
   // **`null`（未申告＝古いpoller）は「絞り込めない」**で、そのときは`repositories`をそのまま使う。
-  previewRepositories        String?  @db.Text
+  previewRepositories        String?   @db.Text
   // セッション本数の上限（#1361）と、申告した時点で生きていた本数（#1394）。
   // **`AppSetting.dispatchConcurrency`とは別物**で、あちらはジョブの払い出しにしか効かない。
   // ジョブはtmuxセッションが立った時点で`succeeded`になるため、本数を止めているのはこちらだけ。
@@ -1292,12 +1299,12 @@ model DispatchHost {
   previewPort                Int?
   previewUrl                 String?
   previewCommit              String?
-  previewSubject             String?  @db.Text
+  previewSubject             String?   @db.Text
   previewStartedAt           DateTime?
   previewIdleMinutes         Int?
   // 稼働中の計画レビュー（G1）の対象一覧。実装セッションとは別名・別の上限で管理するため、
   // `DispatchSession`には混ぜず、pollerが毎巡送る画面表示用の写しとしてJSONで持つ。
-  planReviewSessions         String?  @db.Text
+  planReviewSessions         String?   @db.Text
   // 最後に申告が届いた時刻。一定時間途絶えたホストはoffline扱いでenqueueを拒否する
   lastSeenAt                 DateTime
 
@@ -1357,7 +1364,7 @@ model DispatchSession {
   //
   // **セッション1本ぶんの設定。** 同じ名前で立ち上がり直した行では捨てる（`isRevivedSession`）。
   // 全体設定にしないのは、別のIssueをスマホから答える経路まで一緒に切ってしまうため。
-  answerInApp      Boolean                  @default(false)
+  answerInApp Boolean @default(false)
 
   // このセッションを自動で畳む予定（#1817）。**サブPCの`scripts/reap-sessions.sh`が
   // 「畳む条件はすべて揃っていて、あとは猶予が経つのを待っているだけ」と判定したときだけ埋まる。**
@@ -1380,7 +1387,7 @@ model DispatchSession {
   // UUIDは検証済みのものだけをpollerから受ける。URLを受け取らず、画面用のDeep Linkは
   // issue-deck側で組み立てるため、任意URLを保存・表示しない。
   codexThreadKnown Boolean?
-  codexThreadId    String?                  @db.VarChar(36)
+  codexThreadId    String?  @db.VarChar(36)
 
   // いま何をしているか（#2705）。**Claude Codeのフックが渡してきたツール名とコマンドを、
   // サブPC側（`scripts/lib/session-step.sh`）が固定語彙のコードへ畳んだもの。**
@@ -1690,14 +1697,14 @@ model SessionPlanRequest {
   // フックが結論を受け取った時刻。**受け取ったあとに押しても届かない**ことを画面へ出す
   deliveredAt        DateTime?
   // サブPCが判断を取得した時刻。画面でのdecidedAtとは別の経路の証跡
-  decisionObservedAt  DateTime?
-  pollCount           Int                      @default(0)
-  lastPolledAt        DateTime?
+  decisionObservedAt DateTime?
+  pollCount          Int                      @default(0)
+  lastPolledAt       DateTime?
   // セッション側からの完了報告。未報告なら、取得後にプロセスが継続できたか不明
-  deliveryStatus      String?
-  deliveryReportedAt  DateTime?
-  deliveryExitCode    Int?
-  deliverySummary     String?                  @db.VarChar(500)
+  deliveryStatus     String?
+  deliveryReportedAt DateTime?
+  deliveryExitCode   Int?
+  deliverySummary    String?                  @db.VarChar(500)
   createdAt          DateTime                 @default(now())
   updatedAt          DateTime                 @updatedAt
 
@@ -1794,12 +1801,12 @@ model PullRequestRepairRun {
 ///
 /// 個々のworkflow実行は`PullRequestRepairRun`が担い、ここでは修復の順番・HEAD・停止理由だけを持つ。
 model PullRequestAutoRepairLoop {
-  id                 String   @id @default(cuid())
+  id                 String    @id @default(cuid())
   repositoryFullName String
   pullRequestNumber  Int
   status             String
   headSha            String
-  round              Int      @default(0)
+  round              Int       @default(0)
   currentKind        String?
   lastFingerprint    String?
   stopReason         String?
@@ -1807,9 +1814,9 @@ model PullRequestAutoRepairLoop {
   waitStartedAt      DateTime?
   /// この系列で使える修復回数の上限。本番復旧系列（`DeployRecoverySeries`）から渡すときは、
   /// 系列全体の残り回数になる（#3998）。画面からの開始は既定の3
-  maxRounds          Int      @default(3)
-  createdAt          DateTime @default(now())
-  updatedAt          DateTime @updatedAt
+  maxRounds          Int       @default(3)
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
 
   @@unique([repositoryFullName, pullRequestNumber], map: "PullRequestAutoRepairLoop_repo_pr_key")
   @@index([status])
@@ -1824,50 +1831,60 @@ model PullRequestAutoRepairLoop {
 /// **第1段（#3998）では本番反映の手前（`awaiting_release`）で止まる。** main起点への限定適用・
 /// 本番自動マージ・稼働版の確認はサブIssue（#4005〜#4007）で足す。
 model DeployRecoverySeries {
-  id                 String    @id @default(cuid())
-  repositoryFullName String
+  id                        String    @id @default(cuid())
+  repositoryFullName        String
   /// 対象環境。いまは`production`だけ
-  environment        String    @default("production")
+  environment               String    @default("production")
   /// 失敗した`deploy.yml`のrun id・attempt・対象SHA。**この組で1回の失敗を表す**
-  failedRunId        BigInt
-  failedRunAttempt   Int
-  failedSha          String
-  failedRunUrl       String    @db.Text
+  failedRunId               BigInt
+  failedRunAttempt          Int
+  failedSha                 String
+  failedRunUrl              String    @db.Text
   /// 失敗した版（`package.json`のversion）。分からなければnull
-  failedVersion      String?
+  failedVersion             String?
   /// `DeployRecoveryStatus`。解釈はアプリ側に寄せる
-  status             String
+  status                    String
   /// 進行中の間だけ`repositoryFullName`を入れる。**同じリポジトリで系列を2本同時に走らせない**
-  activeKey          String?   @unique
+  activeKey                 String?   @unique
   /// 開始した人と許可した範囲・期限。**権限はラベルやPR本文ではなくこの記録で判定する**
-  startedByUserId    String
-  scope              String
-  expiresAt          DateTime
+  startedByUserId           String
+  scope                     String
+  expiresAt                 DateTime
   /// 修正Issue・実装の起動・修正PR
-  issueNumber        Int?
-  dispatchJobId      String?
-  dispatchedAt       DateTime?
+  issueNumber               Int?
+  dispatchJobId             String?
+  dispatchedAt              DateTime?
   /// 実装セッションが報告した原因の区分（`code` / `config` / `database` / `external` / `unknown`）
-  cause              String?
-  pullRequestNumber  Int?
+  cause                     String?
+  pullRequestNumber         Int?
   /// 前のPRまでに使った修復回数。現在のPRの分は`PullRequestAutoRepairLoop.round`を足して数える
-  repairRoundsBase   Int       @default(0)
-  repairRoundsUsed   Int       @default(0)
-  stopReason         String?
-  stopDetail         String?   @db.Text
-  stoppedByUserId    String?
-  stoppedAt          DateTime?
+  repairRoundsBase          Int       @default(0)
+  repairRoundsUsed          Int       @default(0)
+  /// main向け復旧PR（#4006）。開始者が`fix_until_main`を許可した系列だけが持つ。
+  /// **自動マージの権限はラベルやPR本文ではなく、この記録（PR番号・ブランチ・HEAD・base・差分）で判定する**
+  fixMergeCommitSha         String?
+  recoveryPullRequestNumber Int?
+  recoveryHeadRef           String?
+  recoveryHeadSha           String?
+  recoveryBaseSha           String?
+  /// 復旧PRを作った時点の変更ファイル（JSON配列）。これ以外が増えたら自動マージしない
+  recoveryFiles             String?   @db.Text
+  recoveryMergedSha         String?
+  stopReason                String?
+  stopDetail                String?   @db.Text
+  stoppedByUserId           String?
+  stoppedAt                 DateTime?
   /// 本番へ出したmainのマージSHA（#4007）。`releasing`以降で入り、このSHAのdeploy runだけを追跡する
-  releaseSha         String?
-  releaseStartedAt   DateTime?
+  releaseSha                String?
+  releaseStartedAt          DateTime?
   /// 追跡しているdeploy run（最新のもの）
-  releaseRunId       BigInt?
-  releaseRunUrl      String?   @db.Text
+  releaseRunId              BigInt?
+  releaseRunUrl             String?   @db.Text
   /// 対象版の稼働を確かめた時刻。**これが入るのは`recovered`のときだけ**
-  recoveredAt        DateTime?
-  lastSweepAt        DateTime?
-  createdAt          DateTime  @default(now())
-  updatedAt          DateTime  @updatedAt
+  recoveredAt               DateTime?
+  lastSweepAt               DateTime?
+  createdAt                 DateTime  @default(now())
+  updatedAt                 DateTime  @updatedAt
 
   @@unique([repositoryFullName, environment, failedRunId, failedRunAttempt], map: "DeployRecoverySeries_failure_key")
   @@index([status])
@@ -1948,18 +1965,18 @@ model PushSubscription {
 ///
 /// Webの本番デプロイとは別の表にしている。持つのは起票したかどうかだけで、失敗の正はGitHubのrun。
 model IosDistributionFailureIssue {
-  id                 String @id @default(cuid())
+  id                 String  @id @default(cuid())
   repositoryFullName String
   /// 失敗した`ios-testflight.yml`のrun id。**同じrunで二重に起票しないための鍵**
   runId              BigInt
   /// 起票したIssueの番号
   issueNumber        Int
   /// `open` / `closed`。後続の配布が成功した時点で`closed`にする
-  state              String @default("open")
+  state              String  @default("open")
   /// 失敗した段階の表示名（「署名」など）。特定できなければnull
   failedStage        String?
   /// 失敗したrunのURL
-  runUrl             String @db.Text
+  runUrl             String  @db.Text
 
   detectedAt DateTime  @default(now())
   /// 自動でクローズした時刻。人が先に閉じた場合はnullのまま`closed`になる
@@ -1985,7 +2002,7 @@ model IosDistributionFailureIssue {
 /// 鍵は`repositoryFullName` + `pullRequestNumber`。マージ・クローズされたPRの行は次の巡回が消すので、
 /// 平常時は数行しか残らない。
 model ReleaseMergePushNotice {
-  id                 String @id @default(cuid())
+  id                 String   @id @default(cuid())
   repositoryFullName String
   /// マージ待ちのリリースPRの番号。**同じPRで鳴らし続けないための鍵**
   pullRequestNumber  Int
@@ -2011,9 +2028,9 @@ model ReleaseMergePushNotice {
 /// マージ待ちの`ReleaseMergePushNotice`と違い、鳴らし直しはしない。リリースは
 /// 「人が動かないと止まるもの」ではなく、済んだことを報せるだけの通知のため。
 model ReleasePushNotice {
-  id                 String @id @default(cuid())
+  id                 String    @id @default(cuid())
   /// `guchi-apps/issue-deck`。リポジトリごとに1行
-  repositoryFullName String @unique
+  repositoryFullName String    @unique
   /// 最後に鳴らした（または種まきで記録した）リリースのタグ。例: `v4.74.0`
   tagName            String
   /// そのリリースの公開時刻。取れなかった場合はnull
@@ -2045,13 +2062,13 @@ model SessionUsage {
   id String @id @default(cuid())
 
   /// 報告してきたホスト名（DispatchHost.nameと対応）
-  host String @db.VarChar(191)
+  host       String @db.VarChar(191)
   /// 使用したローカルエージェント。既存行はClaudeとして移行する
-  agent String @default("claude") @db.VarChar(16)
+  agent      String @default("claude") @db.VarChar(16)
   /// 使用元。既存行とサブPCからの報告は`local`、GitHub Actionsは`github-actions`
-  source String @default("local") @db.VarChar(32)
+  source     String @default("local") @db.VarChar(32)
   /// 転記のファイル名から取ったセッションID。ホスト・エージェントと合わせて一意
-  sessionId String @db.VarChar(191)
+  sessionId  String @db.VarChar(191)
   /// 転記の絶対パス。手元で元ファイルを辿るためだけに持つ（画面には出さない）
   transcript String @db.Text
 
@@ -2059,40 +2076,40 @@ model SessionUsage {
   /// **enumにしない**——判定しているのはシェル側（作業ディレクトリのパス）で、種別が増えるたびに
   /// マイグレーションを挟むと、報告する側と受ける側のデプロイ順に依存してしまう。
   /// 同じ理由で、受け取り側も一覧との一致では見ない（`SESSION_USAGE_KIND_PATTERN`。#2832）
-  kind String @db.VarChar(32)
+  kind         String  @db.VarChar(32)
   /// 対象リポジトリ名（ownerを除く。例: `issue-deck`）。判定できなければnull
-  repository String? @db.VarChar(191)
+  repository   String? @db.VarChar(191)
   /// 対象Issue番号。計画レビュー・横断質問など紐づかないセッションではnull
-  issueNumber Int?
+  issueNumber  Int?
   /// 対象PR番号。issueに紐づかないPR起点の実行（developへのPRレビュー等）で、
   /// issueNumberが取れない・特定できない場合に使う。両方nullのこともある
-  prNumber Int?
+  prNumber     Int?
   /// ActionsのJob Summaryに表示するワークフロー名。ローカル行はnull
   workflowName String? @db.VarChar(191)
   /// Actionsの実行URL。ローカル行はnull、画面の明細から開くために持つ
-  runUrl String? @db.VarChar(500)
+  runUrl       String? @db.VarChar(500)
 
   /// 応答（assistantメッセージ）の数。`message.id`で重複除去済み
-  responses Int
+  responses             Int
   /// キャッシュに載らなかった入力トークン
-  inputTokens BigInt
+  inputTokens           BigInt
   /// キャッシュ書き込み（5分TTL / 1時間TTL）。単価が違うので分けて持つ
-  cacheCreate5mTokens BigInt
-  cacheCreate1hTokens BigInt
+  cacheCreate5mTokens   BigInt
+  cacheCreate1hTokens   BigInt
   /// キャッシュ読み出し
-  cacheReadTokens BigInt
-  outputTokens BigInt
+  cacheReadTokens       BigInt
+  outputTokens          BigInt
   /// API換算の目安（USD）。**サブスクの実費ではない。** 単価はシェル側の表を正とし、
   /// 過去に報告された行の金額は再計算しない（当時の単価で残す）
-  costUsd Float
+  costUsd               Float
   /// `costUsd`の入力側・出力側の内訳（#2626）。**画面はここを読み、トークン比で按分しない。**
   /// キャッシュ読み出しは入力単価の0.1倍・書き込みは1.25〜2.0倍で、トークン比の按分だと
   /// 出力側が桁で過小に出る。**単価を持っているのは集計する`scripts/lib/session-usage.sh`だけ**
   /// なので、そこで割った金額をそのまま受け取る。
   /// 内訳を持たない行（この列より前に報告されたローカルセッション・内訳の出ないGitHub Actions）は
   /// null。その行だけ画面がトークン比の近似を出し、「約」と断る
-  inputCostUsd  Float?
-  outputCostUsd Float?
+  inputCostUsd          Float?
+  outputCostUsd         Float?
   /// `costUsd`の計画（Plan mode）・実装の内訳（#2646）。転記に残る`ExitPlanMode`の最後の
   /// 呼び出し時刻を境に、集計側（`scripts/lib/session-usage.sh`）が振り分けたもの。
   /// Plan modeを使っていないセッション・Codexの行はnull（画面は「区分なし」として合算のみ出す）
@@ -2103,19 +2120,19 @@ model SessionUsage {
   /// **`researchCostUsd + codingCostUsd + verifyCostUsd + wrapupCostUsd = implementationCostUsd`**（計画を除く全部）。
   /// 書き込みもコミットも1度も無いセッション・Codexの行は全てnull
   /// （画面は「実装（フェーズ未集計）」の1行へまとめる）
-  researchCostUsd Float?
-  codingCostUsd   Float?
+  researchCostUsd       Float?
+  codingCostUsd         Float?
   /// 実装・仕上げの中で、テスト・Lint・型チェック・ビルド・curlを呼んだ応答の金額（#3064）。
   /// **この列より前に報告された行はnull**で、そのぶんは`codingCostUsd`・`wrapupCostUsd`に含まれたまま
   /// （画面は0として扱い、合計は変わらない）
-  verifyCostUsd   Float?
-  wrapupCostUsd   Float?
+  verifyCostUsd         Float?
+  wrapupCostUsd         Float?
   /// 使われたモデルIDのJSON配列（例: `["claude-opus-5"]`）
-  models String @db.Text
+  models                String @db.Text
 
   /// このセッションの最初／最後の応答の時刻。期間の絞り込みは`endedAt`で行う
-  startedAt DateTime
-  endedAt   DateTime
+  startedAt  DateTime
+  endedAt    DateTime
   /// pollerがこの行を報告してきた時刻。画面の「◯分前」に使う
   reportedAt DateTime
 
@@ -2188,12 +2205,12 @@ model CodexUsageSnapshot {
 /// 鍵は`repositoryFullName` + `pullRequestNumber`（1本のPRがマージされるのは1回だけ）。
 /// 決着した行は保持期間を過ぎた時点で巡回が消すので、平常時は数行しか残らない。
 model DeployLaunchWatch {
-  id                 String @id @default(cuid())
+  id                 String   @id @default(cuid())
   repositoryFullName String
   /// mainへマージしたPRの番号。起動し直したことを書き戻す先でもある
   pullRequestNumber  Int
   /// PRのタイトル。通知の本文に出す（後から引き直さずに済ませる）
-  pullRequestTitle   String @db.Text
+  pullRequestTitle   String   @db.Text
   /// マージコミットのSHA。**`deploy.yml`の実行と照合するための鍵**
   mergeCommitSha     String
   /// マージした時刻。ここから猶予を測る
@@ -2201,19 +2218,54 @@ model DeployLaunchWatch {
 
   /// `pending`（見張り中） / `covered`（実行を確認できた） / `dispatched`（起動し直した） /
   /// `unsupported`（`deploy.yml`が無い・`workflow_dispatch`に未対応） / `failed`（起動に失敗した）
-  state              String    @default("pending")
+  state      String    @default("pending")
   /// 決着した時刻（`pending`以外になった時刻）
-  resolvedAt         DateTime?
+  resolvedAt DateTime?
   /// 確認できた、または起動し直した`deploy.yml`実行のURL。特定できなければnull
-  runUrl             String?   @db.Text
+  runUrl     String?   @db.Text
   /// 起動し直しを試みて失敗した回数。上限に達したら`failed`にして諦める
-  attempts           Int       @default(0)
+  attempts   Int       @default(0)
   /// 最後に見た時刻。巡回が動いているかを画面・ログから読むためだけに持つ
-  checkedAt          DateTime?
+  checkedAt  DateTime?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@unique([repositoryFullName, pullRequestNumber])
   @@index([state, mergedAt])
+}
+
+// --- IssueDeck Chat（#3975） ---
+
+/// 会話型の操作入口の1会話。`context`は「それ」「直して」を解釈する直前の対象と、実行した操作の記録
+/// （`src/lib/chat/types.ts`の`ChatContext`）。クライアントの申告ではなくサーバー側のこの値を信用する。
+model ChatConversation {
+  id        String   @id @default(cuid())
+  userId    String
+  title     String   @db.VarChar(120)
+  repo      String?  @db.VarChar(200)
+  context   Json     @default("{}")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user     User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  messages ChatMessage[]
+
+  @@index([userId, updatedAt])
+}
+
+/// 会話の1発言。`cards`は状態・確認・結果カードのJSON、`confirmState`は確認カードを含む発言だけが持つ
+/// （`pending`→`done`/`cancelled`）。**実行は`pending`→`done`へ更新できた1回だけ**で、二重実行を防ぐ。
+model ChatMessage {
+  id             String   @id @default(cuid())
+  conversationId String
+  role           String   @db.VarChar(16)
+  text           String   @db.Text
+  cards          Json     @default("[]")
+  confirmState   String?  @db.VarChar(16)
+  createdAt      DateTime @default(now())
+
+  conversation ChatConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId, createdAt])
 }

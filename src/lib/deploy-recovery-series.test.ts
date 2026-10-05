@@ -18,6 +18,7 @@ import {
 const now = new Date("2026-10-05T12:00:00Z");
 const series = (overrides: Partial<DeployRecoverySeriesState> = {}): DeployRecoverySeriesState => ({
   status: "investigating",
+  scope: "fix_until_develop",
   expiresAt: new Date(now.getTime() + 60 * 60 * 1000),
   dispatchedAt: new Date(now.getTime() - 60 * 1000),
   cause: null,
@@ -98,6 +99,11 @@ describe("decideDeployRecovery", () => {
     const merged = observed({ pullRequest: { number: 12, state: "closed", merged: true } });
     expect(decideDeployRecovery(waiting, merged)).toEqual({ action: "transition", status: "awaiting_release" });
     expect(isDeployRecoveryActive("awaiting_release")).toBe(false);
+    // mainまでの許可を開始者が出した系列だけが、復旧PRの工程へ進む（#4006）
+    expect(decideDeployRecovery(series({ status: "awaiting_checks", scope: "fix_until_main", pullRequestNumber: 12 }), merged)).toEqual({
+      action: "transition",
+      status: "awaiting_main_merge",
+    });
     // 本番反映待ちからは巡回が何を観測しても進めない
     expect(decideDeployRecovery(series({ status: "awaiting_release" }), merged)).toEqual({ action: "wait" });
   });

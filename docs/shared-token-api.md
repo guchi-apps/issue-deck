@@ -58,3 +58,5 @@ issue-deckは共有トークンの保存先なので、自分が使う連携ト�
 | `OPS_API_TOKEN` | `OPS_API_TOKEN` | `ai-usage-export.ts`・`typesafe/usage-auth.ts`・`dispatch/ops-dashboard-codex-usage.ts` |
 | `ISSUE_DECK_IMAGE_UPLOAD_SECRET` | `IMAGE_UPLOAD_SECRET` | `images/image-upload-auth.ts` |
 | `TYPESAFE_API_KEY` | `TYPESAFE_API_KEY` | `typesafe/system-one.ts` |
+| `ISSUE_DECK_AIDE_SUMMARY_SECRET` | `AIDE_SUMMARY_SECRET` | `aide-summary-auth.ts`（AIDE向け開発状況サマリAPI。#3999） |
+| `ISSUE_DECK_AIDE_SUMMARY_USER` | `AIDE_SUMMARY_USER_LOGIN` | 同上（集計の対象利用者のGitHubログイン名。秘密ではないが同じ置き場に置く） |

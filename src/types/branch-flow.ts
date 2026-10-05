@@ -1,4 +1,5 @@
 import type { ReleaseMergeTarget } from "@/lib/github/release-button-status";
+import type { PullRequestHealthSummary } from "@/lib/pull-request-health";
 import type { ProgressStatusKey } from "@/lib/issue-progress";
 import type { PullRequestKind, PullRequestSummary } from "@/types/pull-request";
 
@@ -367,6 +368,12 @@ export type BranchFlowRepositorySummary = {
   activeLaneCount: number;
   /** CIが失敗しているopenなPRがある */
   hasCiFailure: boolean;
+  /**
+   * openなPR（通常・バージョンバンプ・リリース）のCI・レビュー・コンフリクト・自動修正の
+   * 件数（#4015）。**畳んだ行の件数チップと、「手が要るもの」「待てば進むもの」の分類の
+   * 共通の元**。マージ済み・クローズ済み・下書きは数えない。
+   */
+  pullRequestHealth: PullRequestHealthSummary;
   /**
    * ユーザーがマージするしかないopenなPRがある（リリースPRを除く）。
    *
