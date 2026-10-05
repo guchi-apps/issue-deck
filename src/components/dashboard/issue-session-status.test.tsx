@@ -314,6 +314,13 @@ describe("IssueSessionStatus", () => {
  * サブPCのpoller。ここではAPIへ何を積んだかまでを確かめる。
  */
 describe("IssueSessionStatus のセッション操作", () => {
+  it("hideControlsでは「操作」欄を出さず、詳細モーダルの入口は残す（#3991）", () => {
+    render(<IssueSessionStatus session={session()} dispatch={makeDispatch()} hideControls />);
+    expect(screen.queryByRole("button", { name: /操作/ })).toBeNull();
+    expect(screen.getByRole("button", { name: "セッション詳細" })).toBeTruthy();
+  });
+
+
   it("生きているセッションでは停止と終了を押せる", () => {
     render(<IssueSessionStatus session={session()} dispatch={makeDispatch()} />);
     openControls();
