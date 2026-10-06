@@ -60,6 +60,9 @@
  * [`progress-sweep-run.ts`](./progress-sweep-run.ts)。
  */
 
+import type { CompareFile } from "@/lib/github/branches-api";
+import { parsePullRequestRole } from "@/lib/github/pull-request-role";
+
 /** 巡回の間隔（分）の既定値。`PROGRESS_SWEEP_INTERVAL_MINUTES`で変えられる */
 export const PROGRESS_SWEEP_DEFAULT_INTERVAL_MINUTES = 5;
 
@@ -126,6 +129,12 @@ export type ProgressSweepFacts = {
   compare: ProgressSweepCompare | null;
   /** 開いているdevelop向けPRがあるか */
   hasOpenDevelopPullRequest: boolean;
+  /**
+   * developへ入っていないコミットの**中身が、developの先端に既にある**か（#4070）。
+   * 確かめていない・確かめられなかったときは`false`（従来どおり取り残しとして扱う）。
+   * 判定は`isResidualAlreadyInBase`。
+   */
+  residualAlreadyInDevelop?: boolean;
 };
 
 export type ProgressSweepDecision =
@@ -176,6 +185,12 @@ export function decideProgressSweep(
   if (compare.aheadBy === 0 || compare.changedFiles === 0) {
     return { action: "advance", pullRequestUrl: merged.url };
   }
+  // 残ったコミットの中身が、別のコミットで既にdevelopへ入っている（#4070）。CI自動修正が
+  // PRのマージとほぼ同時に生成物を再生成してpushした形で、マージしても何も変わらない。
+  // 猶予時間を待たずに進める（待つ理由が無く、待つあいだ盤面が`Implementation`のまま残る）。
+  if (facts.residualAlreadyInDevelop === true) {
+    return { action: "advance", pullRequestUrl: merged.url };
+  }
 
   if (facts.hasOpenDevelopPullRequest) return { action: "skip", reason: "develop_pr_open" };
   if (!compare.lastCommitAt) return { action: "skip", reason: "compare_unavailable" };
@@ -198,6 +213,151 @@ export function decideProgressSweep(
     aheadBy: compare.aheadBy,
     ageMinutes,
   };
+}
+
+/**
+ * ブランチに残ったコミットの中身が、baseの先端に既にあるか（#4070）。
+ *
+ * ## なぜ要るか
+ *
+ * CI自動修正（`claude-ci-fix`）はPRが開いている間に起動し、修正をpushするまでに数分かかる。
+ * その間にPRが自動マージされると、修正コミットはどのPRにも載らないままブランチに残る。
+ * #4039・#4056・#4022では、どれもプロンプト共有テンプレートの再生成で、**同じ内容は別の
+ * コミットで既にdevelopへ入っていた**。それでも三点比較（merge-base基準）は差分を返すため、
+ * 取り残しとして`00.check-user`＋`01.check-blocked`が付き、実装もマージも済んだIssueが
+ * 「ユーザーの確認待ち」に残った。
+ *
+ * ## 判定
+ *
+ * 三点比較が返した各ファイルについて、ブランチ側のblobとbaseの先端のblobが一致するかを見る。
+ * 削除は「baseにも無い」、リネームは「元のパスがbaseに無い」ことも求める。**1件でも
+ * 確かめられない（取得できない・一覧が無い）ものがあれば`false`**——本物の取り残しを
+ * 黙って見送るより、確認待ちが1件多く出る方を選ぶ。
+ *
+ * @param files 三点比較の`files`。`null`（応答に無かった）なら確かめられない
+ * @param baseBlobShas baseの先端での各パスのblob SHA（ファイルが無ければ`null`）。
+ *   取得できなければ`null`
+ */
+export function isResidualAlreadyInBase(
+  files: readonly CompareFile[] | null,
+  baseBlobShas: ReadonlyMap<string, string | null> | null,
+): boolean {
+  if (!files || files.length === 0 || !baseBlobShas) return false;
+  return files.every((file) => {
+    if (!baseBlobShas.has(file.filename)) return false;
+    const baseSha = baseBlobShas.get(file.filename) ?? null;
+    if (file.status === "removed") return baseSha === null;
+    if (file.sha === null || baseSha !== file.sha) return false;
+    if (file.status === "renamed" && file.previousFilename) {
+      if (!baseBlobShas.has(file.previousFilename)) return false;
+      return baseBlobShas.get(file.previousFilename) === null;
+    }
+    return true;
+  });
+}
+
+/** `isResidualAlreadyInBase`のためにbaseで引くパス（リネーム元を含む） */
+export function residualLookupPaths(files: readonly CompareFile[]): string[] {
+  const paths = new Set<string>();
+  for (const file of files) {
+    paths.add(file.filename);
+    if (file.previousFilename) paths.add(file.previousFilename);
+  }
+  return [...paths];
+}
+
+/**
+ * developへのマージ後も`00.check-user`を残す理由（#4070）。
+ *
+ * - `open_sub_issues` … 子Issue（`71.manual-step`の手作業Issueなど）が残っている
+ * - `open_prerequisites` … 本文の`## 前提条件`に書かれたIssueがまだopen
+ * - `interim_pull_request` … マージしたPRが途中PR（`issue-deck-pr-role:interim`）で、後続がある
+ * - `unresolved_followups` … マージしたPRの本文の`## 未対応事項`に残りが書かれている
+ */
+export type CheckUserWaitReason =
+  | "open_sub_issues"
+  | "open_prerequisites"
+  | "interim_pull_request"
+  | "unresolved_followups";
+
+/** `## 未対応事項`に「無い」とだけ書かれている行（`無し`・`なし`・`特になし`など） */
+const NO_FOLLOWUP_PATTERN = /^(?:[-*]\s*)?(?:特に)?(?:無し|なし|ない|ありません|有りません|none|n\/a)[。.]?$/i;
+const FOLLOWUP_HEADING_PATTERN = /^#{2,3}\s*未対応事項\s*$/;
+const ANY_HEADING_PATTERN = /^#{1,6}\s/;
+
+/**
+ * PR本文の`## 未対応事項`に、まだ残っている作業が書かれているか（#4070）。
+ *
+ * PR本文テンプレート（`CLAUDE.md`）は、Issueの完了条件のうちそのPRで満たしていないものを
+ * ここへ書き、無ければ「無し」と書く決まり。節が無いPR（人が作ったPR・テンプレート導入前）は
+ * 残りを読み取れないので`false`。HTMLコメントは読まない。
+ */
+export function hasUnresolvedFollowups(body: string | null | undefined): boolean {
+  if (!body) return false;
+  const lines = body.replace(/<!--[\s\S]*?-->/g, "").split("\n");
+  const headingIndex = lines.findIndex((line) => FOLLOWUP_HEADING_PATTERN.test(line.trim()));
+  if (headingIndex === -1) return false;
+  const rest = lines.slice(headingIndex + 1);
+  const nextHeading = rest.findIndex((line) => ANY_HEADING_PATTERN.test(line.trim()));
+  const section = (nextHeading === -1 ? rest : rest.slice(0, nextHeading))
+    .map((line) => line.trim())
+    .filter((line) => line !== "");
+  return section.some((line) => !NO_FOLLOWUP_PATTERN.test(line));
+}
+
+/** マージ後も確認待ちを残す理由を並べる。空なら残す理由は無い */
+export function findCheckUserWaitReasons(facts: {
+  subIssuesTotal: number | null;
+  subIssuesCompleted: number | null;
+  /** `## 前提条件`に書かれ、まだopenなIssueの数 */
+  openPrerequisiteCount: number;
+  mergedPullRequestBody: string | null;
+}): CheckUserWaitReason[] {
+  const reasons: CheckUserWaitReason[] = [];
+  if ((facts.subIssuesTotal ?? 0) > (facts.subIssuesCompleted ?? 0)) {
+    reasons.push("open_sub_issues");
+  }
+  if (facts.openPrerequisiteCount > 0) reasons.push("open_prerequisites");
+  if (parsePullRequestRole(facts.mergedPullRequestBody) === "interim") {
+    reasons.push("interim_pull_request");
+  }
+  if (hasUnresolvedFollowups(facts.mergedPullRequestBody)) reasons.push("unresolved_followups");
+  return reasons;
+}
+
+export type PostMergeCheckUserDecision =
+  /** `00.check-user`と理由ラベルを外す */
+  | { action: "clear" }
+  /** 有効な待ち理由があるので残す */
+  | { action: "keep"; reasons: CheckUserWaitReason[] };
+
+/**
+ * developへ進めるとき、付いている`00.check-user`を外してよいか（#4070）。
+ *
+ * **マージより前に付いたもの**（計画の承認・マージの確認など）は、マージそのものが確認の
+ * 完了なので従来どおり外す（`develop-pr-merged`ジョブと同じ扱い。#266）。
+ *
+ * **マージより後に付いたもの**（取り残しの通知・事後確認・人が付けたもの）は、マージでは
+ * 片付いていない。待つ理由（`findCheckUserWaitReasons`）が残っていれば外さない——手作業や
+ * 本番設定が残る#4022の形を、確認待ちから黙って消さないため。理由が無ければ外す。
+ *
+ * 付与時刻が分からないもの（DBに行が無い・同期が遅れている）は、従来どおり外す。
+ */
+export function decidePostMergeCheckUser(facts: {
+  checkUserLabeledAt: Date | null;
+  /** 直近のマージ済みPRのマージ時刻（ISO8601） */
+  mergedAt: string | null;
+  reasons: readonly CheckUserWaitReason[];
+}): PostMergeCheckUserDecision {
+  const mergedAtMs = facts.mergedAt ? Date.parse(facts.mergedAt) : Number.NaN;
+  const labeledAfterMerge =
+    facts.checkUserLabeledAt !== null &&
+    !Number.isNaN(mergedAtMs) &&
+    facts.checkUserLabeledAt.getTime() >= mergedAtMs;
+  if (labeledAfterMerge && facts.reasons.length > 0) {
+    return { action: "keep", reasons: [...facts.reasons] };
+  }
+  return { action: "clear" };
 }
 
 /**

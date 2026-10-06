@@ -2,6 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const repositoryFindMany = vi.fn();
 const issueFindMany = vi.fn();
+const issueFindFirst = vi.fn();
+const issueCount = vi.fn();
 const dispatchSessionFindMany = vi.fn();
 const getInstallationToken = vi.fn();
 const fetchProjectItems = vi.fn();
@@ -9,6 +11,7 @@ const fetchPullRequestsForHead = vi.fn();
 const fetchPullRequest = vi.fn();
 const fetchBranchHeadSha = vi.fn();
 const compareBranches = vi.fn();
+const fetchBlobShasAtRef = vi.fn();
 const closePullRequest = vi.fn();
 const fetchCommentsForIssue = vi.fn();
 const createComment = vi.fn();
@@ -30,6 +33,12 @@ vi.mock("@/lib/db", () => ({
     issue: {
       get findMany() {
         return issueFindMany;
+      },
+      get findFirst() {
+        return issueFindFirst;
+      },
+      get count() {
+        return issueCount;
       },
     },
     dispatchSession: {
@@ -67,6 +76,9 @@ vi.mock("@/lib/github/branches-api", () => ({
   },
   get compareBranches() {
     return compareBranches;
+  },
+  get fetchBlobShasAtRef() {
+    return fetchBlobShasAtRef;
   },
 }));
 
@@ -230,6 +242,9 @@ describe("runProgressSweep", () => {
     fetchPullRequestsForHead.mockImplementation(pullRequestsForHead([mergedPullRequest()]));
     fetchBranchHeadSha.mockResolvedValue("aaa111");
     compareBranches.mockResolvedValue(null);
+    fetchBlobShasAtRef.mockResolvedValue(null);
+    issueFindFirst.mockResolvedValue(null);
+    issueCount.mockResolvedValue(0);
     closePullRequest.mockResolvedValue(undefined);
     fetchCommentsForIssue.mockResolvedValue([]);
     createComment.mockResolvedValue({});
@@ -320,6 +335,145 @@ describe("runProgressSweep", () => {
     );
     expect(createComment.mock.calls[0][4].body).toContain("developへ入っていないコミット");
     expect(reportProgressStatus).not.toHaveBeenCalled();
+  });
+
+  describe("取り残しの中身がdevelopに既にある場合（#4070）", () => {
+    /** CI自動修正がマージ後にpushした、生成物の再生成コミット（#4039の実測の形） */
+    const RESIDUAL_FILES = [
+      { filename: "docs/a.md", status: "modified", sha: "blob-a", previousFilename: null },
+      { filename: "docs/b.md", status: "modified", sha: "blob-b", previousFilename: null },
+    ];
+    /** 取り残しの通知が付けた確認待ち（マージより後） */
+    const LABELED_AFTER_MERGE = new Date("2026-08-25T11:00:00Z");
+
+    beforeEach(() => {
+      fetchBranchHeadSha.mockResolvedValue("bbb222");
+      compareBranches.mockResolvedValue({
+        aheadBy: 1,
+        changedFiles: 2,
+        lastCommitAt: new Date(NOW.getTime() - 300 * 60_000).toISOString(),
+        files: RESIDUAL_FILES,
+      });
+      fetchBlobShasAtRef.mockResolvedValue(
+        new Map([
+          ["docs/a.md", "blob-a"],
+          ["docs/b.md", "blob-b"],
+        ]),
+      );
+    });
+
+    it("取り残しとして通知せずDevelopへ進め、待つ理由が無ければ確認待ちを外す（#4039の形）", async () => {
+      issueFindFirst.mockResolvedValue({
+        body: "## 背景\n- x",
+        checkUserLabeledAt: LABELED_AFTER_MERGE,
+        subIssuesTotal: null,
+        subIssuesCompleted: null,
+      });
+      fetchPullRequestsForHead.mockImplementation(
+        pullRequestsForHead([
+          mergedPullRequest({ body: "## 未対応事項\n無し\n<!-- issue-deck-pr-role:closing -->" }),
+        ]),
+      );
+
+      const result = await runProgressSweep({ now: NOW });
+
+      expect(fetchBlobShasAtRef).toHaveBeenCalledWith(
+        "guchi-apps",
+        "issue-deck",
+        "develop",
+        ["docs/a.md", "docs/b.md"],
+        "token",
+      );
+      expect(result.actions).toEqual([
+        { repositoryFullName: "guchi-apps/issue-deck", issueNumber: 2294, kind: "advanced" },
+      ]);
+      expect(addCheckUserWithReason).not.toHaveBeenCalled();
+      expect(removeIssueLabel).toHaveBeenCalledWith(
+        "guchi-apps",
+        "issue-deck",
+        2294,
+        "token",
+        "00.check-user",
+      );
+      expect(reportProgressStatus).toHaveBeenCalled();
+      // 中身がdevelopにあると分かった時点で、開いているPRの確認は要らない
+      expect(fetchPullRequestsForHead).not.toHaveBeenCalledWith(
+        "guchi-apps",
+        "issue-deck",
+        "develop",
+        "issue-2294",
+        "open",
+        "token",
+      );
+    });
+
+    it("手作業の子Issueが残っていれば、進めても確認待ちは外さない（#4022の形）", async () => {
+      issueFindFirst.mockResolvedValue({
+        body: "## 背景\n- x",
+        checkUserLabeledAt: LABELED_AFTER_MERGE,
+        subIssuesTotal: 1,
+        subIssuesCompleted: 0,
+      });
+      const info = vi.spyOn(console, "info").mockImplementation(() => {});
+
+      const result = await runProgressSweep({ now: NOW });
+
+      expect(result.actions).toEqual([
+        { repositoryFullName: "guchi-apps/issue-deck", issueNumber: 2294, kind: "advanced" },
+      ]);
+      expect(reportProgressStatus).toHaveBeenCalled();
+      expect(removeIssueLabel).not.toHaveBeenCalled();
+      expect(info.mock.calls[0]?.[0]).toContain("open_sub_issues");
+      info.mockRestore();
+    });
+
+    it("前提条件のIssueがまだopenなら確認待ちは外さない", async () => {
+      issueFindFirst.mockResolvedValue({
+        body: "## 前提条件\n- 先に完了している必要があるIssue・PR: #39, guchi-apps/vps#12",
+        checkUserLabeledAt: LABELED_AFTER_MERGE,
+        subIssuesTotal: null,
+        subIssuesCompleted: null,
+      });
+      issueCount.mockResolvedValue(1);
+      vi.spyOn(console, "info").mockImplementation(() => {});
+
+      await runProgressSweep({ now: NOW });
+
+      expect(issueCount).toHaveBeenCalledWith({
+        where: {
+          state: "OPEN",
+          OR: [
+            { number: 39, repository: { fullName: "guchi-apps/issue-deck" } },
+            { number: 12, repository: { fullName: "guchi-apps/vps" } },
+          ],
+        },
+      });
+      expect(removeIssueLabel).not.toHaveBeenCalled();
+    });
+
+    it("中身が1件でも食い違えば、従来どおり取り残しとして通知する", async () => {
+      fetchBlobShasAtRef.mockResolvedValue(
+        new Map([
+          ["docs/a.md", "blob-a"],
+          ["docs/b.md", "other"],
+        ]),
+      );
+
+      const result = await runProgressSweep({ now: NOW });
+
+      expect(result.actions).toEqual([
+        { repositoryFullName: "guchi-apps/issue-deck", issueNumber: 2294, kind: "stranded" },
+      ]);
+      expect(reportProgressStatus).not.toHaveBeenCalled();
+    });
+
+    it("developのblobを取得できなければ、従来どおり取り残しとして通知する", async () => {
+      fetchBlobShasAtRef.mockResolvedValue(null);
+
+      const result = await runProgressSweep({ now: NOW });
+
+      expect(result.actions[0]?.kind).toBe("stranded");
+    });
   });
 
   it("同じ先端について通知済みなら重ねて通知しない（配布前のジョブと同じマーカーで見分ける）", async () => {
