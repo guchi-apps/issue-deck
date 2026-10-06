@@ -5,6 +5,7 @@ import { ExternalLink, RefreshCw } from "lucide-react";
 
 import { DeployFailureAlert } from "@/components/dashboard/deploy-failure-alert";
 import { GithubReferenceLink } from "@/components/dashboard/github-reference-link";
+import { MergeCheckReasonNotice } from "@/components/dashboard/merge-check-reason-notice";
 import { MarkdownBody } from "@/components/dashboard/markdown-body";
 import {
   AiReviewStatusButton,
@@ -394,6 +395,11 @@ export function PullRequestDetail({
               />
             )}
           </div>
+
+          {/* ユーザーのマージが必要な理由（#4088）。バッジの直下に出して押す前に読めるようにする */}
+          {requiresUserMerge(pullRequest) && currentDetail?.userMergeReasons && (
+            <MergeCheckReasonNotice reasons={currentDetail.userMergeReasons} className="mt-2" />
+          )}
 
           {/* CIのジョブ単位の内訳（#2777）。押したときだけ取得する */}
           {ciDetailOpen && (
