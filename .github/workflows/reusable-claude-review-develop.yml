@@ -550,22 +550,56 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
   review-provider:
-    # 通常時は主系プロバイダーだけをレビューに使う。設定を読めない場合は従来どおりClaudeへ倒す。
+    # 実装担当を優先する（#4037）。共通設定の変更で既存Issueの担当を入れ替えない。
+    needs: [identify-issue, risk-check]
+    if: github.event.pull_request.draft == false && needs.risk-check.outputs.needs-review == 'true'
     runs-on: ubuntu-latest
     outputs:
       provider: ${{ steps.provider.outputs.provider }}
     steps:
-      - name: 主系AIプロバイダーを取得する
+      - name: 実装担当からレビュー担当を取得する
         id: provider
         env:
           APP_BASE_URL: ${{ vars.APP_BASE_URL }}
+          PROGRESS_REPORT_SECRET: ${{ secrets.PROGRESS_REPORT_SECRET }}
+          REPOSITORY: ${{ github.repository }}
+          ISSUE_NUMBER: ${{ needs.identify-issue.outputs.number }}
         run: |
-          provider=claude
-          if [ -n "$APP_BASE_URL" ]; then
-            provider="$(curl -fsS --max-time 5 "${APP_BASE_URL%/}/api/settings/claude-model" 2>/dev/null | jq -r '.aiExecutionProvider // "claude"' || true)"
+          set -euo pipefail
+          if [ -z "$ISSUE_NUMBER" ]; then
+            # 実装Issueを持たないPRだけは共通設定を使用する。取得失敗は推測しない。
+            echo "対応IssueがないPRのため共通のレビュー設定を使います"
+            RESPONSE="$(curl -fsS --max-time 10 "${APP_BASE_URL%/}/api/settings/claude-model")"
+            provider="$(jq -r '.aiExecutionProvider' <<< "$RESPONSE")"
+          else
+            [ -n "$APP_BASE_URL" ] && [ -n "$PROGRESS_REPORT_SECRET" ] || {
+              echo "::error::実装担当の取得に必要な接続設定がありません"; exit 1;
+            }
+            BODY="$(jq -nc --arg repository "$REPOSITORY" --argjson issueNumber "$ISSUE_NUMBER" '{action:"resolve",repository:$repository,issueNumber:$issueNumber}')"
+            RESPONSE="$(curl -fsS --max-time 15 -X POST "${APP_BASE_URL%/}/api/dispatch/implementation-provider" \
+              -H "Authorization: Bearer $PROGRESS_REPORT_SECRET" -H 'Content-Type: application/json' --data "$BODY")" || {
+              echo "::error::実装担当が不明、または取得できません。共通設定へ切り替えず停止します"; exit 1;
+            }
+            provider="$(jq -r '.provider' <<< "$RESPONSE")"
           fi
-          case "$provider" in claude|codex) ;; *) provider=claude ;; esac
+          case "$provider" in claude|codex) ;; *) echo "::error::レビュー担当が不正です"; exit 1 ;; esac
           echo "provider=$provider" >> "$GITHUB_OUTPUT"
+          echo "レビュー担当: $provider（実装Issue: ${ISSUE_NUMBER:-なし}）" >> "$GITHUB_STEP_SUMMARY"
+
+  review-provider-fallback:
+    needs: [identify-issue, review-provider]
+    if: always() && needs.review-provider.result == 'failure'
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    steps:
+      - name: 担当を解決できない理由をPRへ通知する
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          gh pr comment "$PR_NUMBER" --body '⚠️ 実装担当を特定できなかったため、PRレビューと自動マージを停止しました。実装セッションの記録・Issue番号・IssueDeck APIの接続状態を確認し、review-providerジョブを再実行してください。共通設定のエージェントへは切り替えていません。'
 
   claude-review:
     # risk-checkがレビュー要と判定した場合のみ実行する(#992)。
@@ -992,7 +1026,7 @@ jobs:
           gh issue comment "$ISSUE_NUMBER" --body "$BODY"
 
   auto-merge:
-    needs: [identify-issue, wait-for-ci, risk-check, claude-review, codex-review]
+    needs: [identify-issue, wait-for-ci, risk-check, review-provider, claude-review, codex-review]
     # **Codexレビューの結果はここで待たない**（#3990）。codex-reviewは依頼を積むだけで、auto-mergeは
     # IssueDeckのDispatchJobの状態をその場で読む。結果が出ていなければ判定を保留して終わり、
     # レビュー完了の報告を受けたIssueDeckがこのジョブだけを再実行して判定を再開する。
@@ -1016,6 +1050,7 @@ jobs:
       && github.event.pull_request.draft == false
       && needs.identify-issue.result == 'success'
       && needs.risk-check.result == 'success'
+      && (needs.risk-check.outputs.needs-review != 'true' || needs.review-provider.result == 'success')
       && (needs.claude-review.result == 'success' || needs.claude-review.result == 'skipped')
       && (needs.codex-review.result == 'success' || needs.codex-review.result == 'skipped')
     runs-on: ubuntu-latest
@@ -1333,6 +1368,7 @@ jobs:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           REVIEW_RESULT: ${{ needs.claude-review.result }}
           REVIEW_EXECUTED: ${{ needs.claude-review.outputs.executed }}
+          REVIEW_PROVIDER: ${{ needs.review-provider.outputs.provider }}
           CODEX_REVIEW_RESULT: ${{ steps.codex.outputs.result }}
           CODEX_VERDICT_INPUT: ${{ steps.codex.outputs.verdict }}
           RISKY: ${{ needs.risk-check.outputs.risky }}
@@ -1361,6 +1397,7 @@ jobs:
               # 低リスクかつ小規模なPRに限られる設計どおりの動きで、危険信号ではない
               REVIEW="skipped"
               SKIP_REASON="低リスクかつ小規模のため省略"
+              [ "${REVIEW_PROVIDER:-}" != "codex" ] || SKIP_REASON="実装担当に合わせてCodexでレビュー"
               ;;
             success)
               if [ "$REVIEW_EXECUTED" != "true" ]; then
@@ -1387,6 +1424,7 @@ jobs:
             skipped)
               CODEX_REVIEW="skipped"
               CODEX_SKIP_REASON="低リスクかつ小規模のため省略"
+              [ "${REVIEW_PROVIDER:-}" != "claude" ] || CODEX_SKIP_REASON="実装担当に合わせてClaudeでレビュー"
               ;;
             success)
               FOUND="${CODEX_VERDICT_INPUT:-}"

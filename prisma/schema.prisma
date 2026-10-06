@@ -2280,3 +2280,16 @@ model ChatMessage {
   @@unique([conversationId, clientMessageId])
   @@index([conversationId, createdAt])
 }
+
+// 実装担当の記録。セッション回収後もPRレビューが共通設定へ戻らないよう保持する（#4037）。
+model ImplementationRun {
+  id                 String   @id @default(cuid())
+  repositoryFullName String
+  issueNumber        Int
+  runKey             String   @unique @db.VarChar(191)
+  agent              String   @db.VarChar(16)
+  source             String   @db.VarChar(16)
+  startedAt          DateTime
+
+  @@index([repositoryFullName, issueNumber, startedAt])
+}

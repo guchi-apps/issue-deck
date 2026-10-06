@@ -1,5 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+const recordImplementationRun = vi.fn();
+vi.mock("@/lib/dispatch/implementation-provider", () => ({ recordImplementationRun: (...args: unknown[]) => recordImplementationRun(...args) }));
+
 const findMany = vi.fn();
 const findUnique = vi.fn();
 const upsert = vi.fn();
@@ -110,11 +113,24 @@ beforeEach(() => {
   resolveNotStartedSession.mockResolvedValue(true);
   postSessionWrapupComment.mockResolvedValue(false);
   sessionUsageFindMany.mockResolvedValue([]);
-  upsert.mockResolvedValue({ id: "row-1" });
+  upsert.mockImplementation(async ({ create, update }) => ({ ...existingRow(), ...create, ...update }));
   timelineCreate.mockResolvedValue({});
 });
 
 describe("reportDispatchSessions", () => {
+  it("回収後も使える実装担当を開始時刻とともに保存する", async () => {
+    findMany.mockResolvedValueOnce([]).mockResolvedValueOnce([]);
+    await reportDispatchSessions({ hostName: "subpc", sessions: [report({ codexThreadKnown: false })], now: NOW });
+    expect(recordImplementationRun).toHaveBeenCalledWith(expect.objectContaining({
+      repositoryFullName: "guchi-apps/issue-deck", agent: "codex", source: "local", startedAt: NOW,
+    }));
+  });
+  it("未開始のセッションを実装担当として記録しない", async () => {
+    findMany.mockResolvedValueOnce([]).mockResolvedValueOnce([]);
+    upsert.mockResolvedValueOnce(existingRow({ activity: "NOT_STARTED" }));
+    await reportDispatchSessions({ hostName: "subpc", sessions: [report()], now: NOW });
+    expect(recordImplementationRun).not.toHaveBeenCalled();
+  });
   it("stepを送らない古いpollerの報告では、保存済みstepの履歴を重複して追加しない", async () => {
     findMany
       .mockResolvedValueOnce([existingRow({ step: "テスト中" })])
