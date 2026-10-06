@@ -654,6 +654,65 @@ function toRollupCiChecks(nodes: RollupContextNode[]): RollupCiCheck[] {
   }));
 }
 
+/** 後から同じジョブが走り直したなら、結果を数えなくてよい（打ち切られた）conclusion */
+const SUPERSEDABLE_CONCLUSIONS = new Set(["CANCELLED", "STALE"]);
+
+/**
+ * 同じheadコミットで**同じジョブが後から走り直した**とき、古い実行を外す（#4070）。
+ *
+ * `statusCheckRollup`は、同じSHAに付いたcheck-runを実行（check-suite）ごとに全部返す。
+ * 同じジョブが失敗→再実行で成功した、あるいは同時実行の制御でキャンセル→後続が成功した場合、
+ * 古い失敗・キャンセルが残ったままだと、**今の実行は通っているのに「CI失敗」**になる。
+ *
+ * 外すのは次のどちらかに当たる古い実行だけ（キーはワークフローのファイルとジョブ名）。
+ *
+ * - 同じキーの別の実行が、**その実行が終わった後に**始まっている（終わった後の再実行）
+ * - その実行がキャンセル・staleで、同じキーの別の実行が**同時かそれより後に**始まっている
+ *
+ * `push`と`pull_request`で同じCIが並行して走るような、**時刻が重なる実行どうしは両方残す**
+ * （どちらも今の結果なので、片方の失敗を隠さない）。時刻が読めないものも外さない。
+ */
+export function dropSupersededCheckRuns(nodes: RollupContextNode[]): RollupContextNode[] {
+  const keyOf = (node: RollupContextNode) =>
+    node.__typename === "CheckRun" && node.name
+      ? `${workflowFileOf(node) ?? ""}\u0000${node.name}`
+      : null;
+  const byKey = new Map<string, RollupContextNode[]>();
+  for (const node of nodes) {
+    const key = keyOf(node);
+    if (key === null) continue;
+    const bucket = byKey.get(key);
+    if (bucket) bucket.push(node);
+    else byKey.set(key, [node]);
+  }
+
+  const superseded = new Set<RollupContextNode>();
+  for (const bucket of byKey.values()) {
+    if (bucket.length < 2) continue;
+    for (const node of bucket) {
+      const startedMs = node.startedAt ? Date.parse(node.startedAt) : Number.NaN;
+      const completedMs = node.completedAt ? Date.parse(node.completedAt) : Number.NaN;
+      const cancelled = SUPERSEDABLE_CONCLUSIONS.has((node.conclusion ?? "").toUpperCase());
+      const replaced = bucket.some((other) => {
+        if (other === node || !other.startedAt) return false;
+        const otherStartedMs = Date.parse(other.startedAt);
+        if (Number.isNaN(otherStartedMs)) return false;
+        if (!Number.isNaN(completedMs) && otherStartedMs >= completedMs) return true;
+        if (!cancelled || Number.isNaN(startedMs)) return false;
+        // 同時刻に始まったキャンセルどうしが互いを外し合って両方消えないよう、同時刻は
+        // 相手が打ち切られていないときだけ数える
+        if (otherStartedMs > startedMs) return true;
+        return (
+          otherStartedMs === startedMs &&
+          !SUPERSEDABLE_CONCLUSIONS.has((other.conclusion ?? "").toUpperCase())
+        );
+      });
+      if (replaced) superseded.add(node);
+    }
+  }
+  return superseded.size === 0 ? nodes : nodes.filter((node) => !superseded.has(node));
+}
+
 function toRollupChecks(nodes: RollupContextNode[]): RollupCheck[] {
   return nodes.map(toRollupCheck).filter((check): check is RollupCheck => check !== null);
 }
@@ -690,7 +749,7 @@ function toCheckRollup(rollup: RollupNode | null | undefined): CheckRollup {
       ciChecks: [],
     };
   }
-  const ciNodes = rollup.contexts.nodes.filter(isCiCheck);
+  const ciNodes = dropSupersededCheckRuns(rollup.contexts.nodes.filter(isCiCheck));
   const ciChecks = toRollupChecks(ciNodes);
   const countedNodes = ciChecks.length > 0 ? ciNodes : rollup.contexts.nodes;
   return {

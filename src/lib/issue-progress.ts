@@ -90,7 +90,9 @@ export const PROGRESS_STATUSES: readonly ProgressStatusDef[] = [
   {
     key: "develop",
     projectStatus: "Develop",
-    label: "develop反映済",
+    // developへ反映済み・main未反映。待っているのはリリース（本番への反映）だけなので、
+    // 左メニューのビュー「本番反映待ち」と同じ呼び名にする（#4070）
+    label: "本番反映待ち",
     icon: GitMerge,
     active: false,
   },
