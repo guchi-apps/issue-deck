@@ -103,7 +103,17 @@ export type MergeJudgementState = "pending" | "settled" | "unknown";
  * 06:42:11・`claude-review`完了が06:45:03だったように、**画面に「CI通過」が出てからも判定だけが
  * 動いている窓は残る**。この窓で何を待っているかを画面に出すためにジョブ名を取り出す。
  */
-export type MergeJudgementStep = "wait-for-ci" | "risk-check" | "claude-review" | "auto-merge";
+export type MergeJudgementStep =
+  | "wait-for-ci"
+  | "risk-check"
+  | "claude-review"
+  | "auto-merge"
+  /**
+   * 残っている未完了のcheck-runが、GitHubから**矛盾した状態**で返ってきたものだけのとき（#4049）。
+   * `status`は未完了なのに`conclusion`や`completedAt`が入っている、など。終了を確定できないため
+   * 判定中は維持するが、「何かが動いている」とは名乗らせない（`checkRunPhaseOf`）。
+   */
+  | "state-mismatch";
 
 /**
  * Claude（AI）によるレビューが終わったか（#2150）。`claude-review`ジョブのcheck-runだけを見る。
@@ -184,6 +194,10 @@ const JUDGEMENT_STEP_BY_JOB: Record<string, MergeJudgementStep> = {
   "claude-review-fallback": "claude-review",
   "auto-merge": "auto-merge",
   "auto-merge-fallback": "auto-merge",
+  // レビューに使うプロバイダーを決める補助ジョブ（#4049）。レビューの前段なので判定の段階として扱う。
+  "review-provider": "risk-check",
+  "codex-review": "claude-review",
+  "codex-review-fallback": "claude-review",
 };
 
 /**
@@ -266,6 +280,7 @@ const ROLLUP_FIELDS = `
         startedAt
         completedAt
         checkSuite {
+          status
           workflowRun {
             workflow {
               resourcePath
@@ -363,6 +378,8 @@ export type RollupContextNode = {
   state?: string | null;
   /** CheckRun。GitHub Actions発なら`/owner/repo/actions/workflows/ci.yml`が入る（#1799） */
   checkSuite?: {
+    /** check-runが属するcheck-suiteの`QUEUED` / `IN_PROGRESS` / `COMPLETED`など（#4049） */
+    status?: string | null;
     workflowRun?: { workflow?: { resourcePath?: string | null } | null } | null;
   } | null;
 };
@@ -405,10 +422,47 @@ function fromStatusContext(state: string): RollupCheck {
   };
 }
 
+/**
+ * check-run 1件が終わっているかを、`status`だけでなく**終了の根拠と照らし合わせて**決める（#4049）。
+ *
+ * - `completed` … `status`が`COMPLETED`。または`status`は未完了でも、`conclusion`が入っていて、
+ *   かつ`completedAt`かcheck-suiteの完了のどちらかで終了を裏付けられるもの
+ * - `running` … 終了の根拠が何も無い、ふつうの実行中・待機中
+ * - `mismatch` … 終了の根拠が一部だけある（`conclusion`だけ・`completedAt`だけ・check-suiteの
+ *   完了だけ）。結論を確定できないため終わった扱いにはしないが、実行中とも区別する
+ *
+ * kurashio#712では、`review-provider`のcheck-runだけが`status: IN_PROGRESS`・`conclusion:
+ * SUCCESS`・`completedAt`ありという矛盾した値のまま残り、ワークフローも全ジョブも終わって
+ * いるのに画面が「マージ可否を判定中」から抜けなかった。`status`だけを見ていたため。
+ *
+ * **時間の経過では終わった扱いにしない。** 根拠にするのはGitHubが返した終了の値だけで、
+ * 結論（`conclusion`）が無いものは何があっても`completed`にしない。判定中の解除は「確認待ち」を
+ * 表示できるようにするだけで、マージの可否は従来どおり対応Issueの`00.check-user`と
+ * レビュー結果が決める。check-runはHEADのコミットに付くもので、旧HEADのcheck-runは
+ * 集約に入らない。判定は1件ずつ行うため、旧attemptが終わっても今動いている別のcheck-runの
+ * 状態は変わらない。
+ */
+export type CheckRunPhase = "completed" | "running" | "mismatch";
+
+export function checkRunPhaseOf(node: RollupContextNode): CheckRunPhase {
+  if ((node.status ?? "").toLowerCase() === "completed") return "completed";
+  const hasConclusion = Boolean(node.conclusion);
+  const hasCompletedAt = Boolean(node.completedAt);
+  const suiteCompleted = (node.checkSuite?.status ?? "").toLowerCase() === "completed";
+  if (hasConclusion && (hasCompletedAt || suiteCompleted)) return "completed";
+  if (hasConclusion || hasCompletedAt || suiteCompleted) return "mismatch";
+  return "running";
+}
+
+/** `checkRunPhaseOf`で終わったと確かめられたものは`completed`、それ以外は元の`status`（小文字） */
+function normalizedCheckRunStatus(node: RollupContextNode): string {
+  return checkRunPhaseOf(node) === "completed" ? "completed" : (node.status ?? "").toLowerCase();
+}
+
 function toRollupCheck(node: RollupContextNode): RollupCheck | null {
   if (node.__typename === "CheckRun") {
     return {
-      status: (node.status ?? "").toLowerCase(),
+      status: normalizedCheckRunStatus(node),
       conclusion: node.conclusion ? node.conclusion.toLowerCase() : null,
     };
   }
@@ -451,7 +505,7 @@ function judgementStepOf(node: RollupContextNode): MergeJudgementStep | null {
  */
 function currentJudgementCheck(pendingChecks: RollupContextNode[]): RollupContextNode | null {
   const running = pendingChecks.filter(
-    (node) => (node.status ?? "").toLowerCase() === "in_progress",
+    (node) => checkRunPhaseOf(node) === "running" && (node.status ?? "").toLowerCase() === "in_progress",
   );
   const candidates = running.length > 0 ? running : pendingChecks;
   const orderOf = (node: RollupContextNode) => {
@@ -484,12 +538,22 @@ function toMergeJudgement(nodes: RollupContextNode[]): MergeJudgement {
   if (judgementChecks.length === 0) return MERGE_JUDGEMENT_UNKNOWN;
 
   const aiReview = toAiReview(judgementChecks);
-  const pendingChecks = judgementChecks.filter(
-    (node) => (node.status ?? "").toLowerCase() !== "completed",
-  );
+  const pendingChecks = judgementChecks.filter((node) => checkRunPhaseOf(node) !== "completed");
   if (pendingChecks.length === 0) return { state: "settled", step: null, runUrl: null, aiReview };
 
-  const current = currentJudgementCheck(pendingChecks);
+  // 本当に動いているものが1件でもあれば、そちらを待っているものとして名乗らせる（#4049）。
+  // 残りが矛盾した状態のものだけなら、終わったとは言えないが何かが動いているとも言えない。
+  const runningChecks = pendingChecks.filter((node) => checkRunPhaseOf(node) === "running");
+  if (runningChecks.length === 0) {
+    return {
+      state: "pending",
+      step: "state-mismatch",
+      runUrl: pendingChecks[0]?.detailsUrl ?? null,
+      aiReview,
+    };
+  }
+
+  const current = currentJudgementCheck(runningChecks);
   return {
     state: "pending",
     step: current ? judgementStepOf(current) : null,
@@ -516,7 +580,7 @@ function toAiReview(judgementChecks: RollupContextNode[]): AiReview {
   if (!check) return AI_REVIEW_NONE;
 
   const runUrl = check.detailsUrl ?? null;
-  if ((check.status ?? "").toLowerCase() !== "completed") return { state: "pending", runUrl };
+  if (checkRunPhaseOf(check) !== "completed") return { state: "pending", runUrl };
 
   const conclusion = (check.conclusion ?? "").toLowerCase();
   if (conclusion === "success") return { state: "passed", runUrl };
@@ -546,7 +610,8 @@ export function claudeReviewOfContexts(nodes: RollupContextNode[]): {
   const riskChecks = judgementChecks.filter((node) => jobNameOf(node) === "risk-check");
   const riskCheck = riskChecks[riskChecks.length - 1];
   const riskCheckFailed =
-    (riskCheck?.status ?? "").toLowerCase() === "completed" &&
+    riskCheck !== undefined &&
+    checkRunPhaseOf(riskCheck) === "completed" &&
     (riskCheck?.conclusion ?? "").toLowerCase() === "failure";
   return { aiReview: toAiReview(judgementChecks), riskCheckFailed };
 }
@@ -564,7 +629,7 @@ function toCiRunId(nodes: RollupContextNode[]): number | null {
     const conclusion = (node.conclusion ?? "").toLowerCase();
     return conclusion !== "" && conclusion !== "success" && conclusion !== "skipped" && conclusion !== "neutral";
   });
-  const running = checkRuns.find((node) => (node.status ?? "").toLowerCase() !== "completed");
+  const running = checkRuns.find((node) => checkRunPhaseOf(node) !== "completed");
   return extractRunIdFromDetailsUrl((failed ?? running ?? checkRuns[0])?.detailsUrl);
 }
 
@@ -580,7 +645,7 @@ function toRollupCiChecks(nodes: RollupContextNode[]): RollupCiCheck[] {
   if (nodes.some((node) => node.__typename !== "CheckRun")) return [];
   return nodes.map((node) => ({
     name: jobNameOf(node) || (node.name ?? "(名前なし)"),
-    status: (node.status ?? "").toLowerCase(),
+    status: normalizedCheckRunStatus(node),
     conclusion: node.conclusion ? node.conclusion.toLowerCase() : null,
     startedAt: node.startedAt ?? null,
     completedAt: node.completedAt ?? null,

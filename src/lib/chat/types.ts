@@ -10,12 +10,42 @@ export type ChatTarget = {
 
 /** 実行（または確認待ち）にした操作の記録。会話コンテキストの`actions`に積む */
 export type ChatActionRecord = {
-  type: "repair" | "create_issue";
+  type: "repair" | "create_issue" | "fix_request";
   status: "started" | "created" | "failed";
   repo: string;
   number: number | null;
   at: string;
   message: string;
+  /** 修正依頼（`fix_request`）だけ。依頼した時点のHEADと、依頼コメントのURL・紐づくIssue（#4045） */
+  fixRequest?: { headSha: string; commentUrl: string | null; issueNumber: number };
+};
+
+/** 調査で確かめた根拠1件。回答の「根拠」欄へリンクと取得時点つきで出す（#4045） */
+export type ChatEvidence = {
+  label: string;
+  url: string | null;
+  /** 取得した時点（ISO8601） */
+  fetchedAt: string;
+  /** PRのHEAD・実行IDなど、「何を見たか」を特定する値 */
+  ref: string | null;
+};
+
+/**
+ * 調査の引き継ぎ（#4045）。「それ」「この方針で」「続けて」が指す材料で、会話コンテキストと一緒に保存する。
+ * 方針の質問に答えると、ここから元の対象・調査を保ったまま再開する。
+ */
+export type ChatInvestigation = {
+  target: ChatTarget | null;
+  /** 直近の調査で言えたこと（事実・推測・未確認を区別した要約） */
+  summary: string;
+  evidence: ChatEvidence[];
+  /** 会話で合意した方針・条件 */
+  agreements: string[];
+  /** 利用者の判断待ち・未解決の事項 */
+  openQuestions: string[];
+  /** 取得できなかった・上限で見られなかった範囲 */
+  unconfirmed: string[];
+  updatedAt: string;
 };
 
 /**
@@ -28,9 +58,11 @@ export type ChatContext = {
   /** 直前の発言で見せた対象。発言のたびに置き換える（1件なら「それ」が指す、複数なら聞き返す） */
   targets: ChatTarget[];
   actions: ChatActionRecord[];
+  /** 直近の調査の引き継ぎ（#4045）。無ければnull */
+  investigation?: ChatInvestigation | null;
 };
 
-export const EMPTY_CHAT_CONTEXT: ChatContext = { repo: null, targets: [], actions: [] };
+export const EMPTY_CHAT_CONTEXT: ChatContext = { repo: null, targets: [], actions: [], investigation: null };
 
 /** 文章から読み取った意図。**実行はせず**、解決（`resolveIntent`）と確認を経る */
 export type ChatIntent =
@@ -39,6 +71,8 @@ export type ChatIntent =
   | { type: "merge_check" }
   | { type: "repair"; ref: ChatRef | null }
   | { type: "create_issue"; title: string | null }
+  /** 状態の言い換えでは答えられない質問・依頼。AIが読み取り専用ツールで調べて答える（#4045） */
+  | { type: "investigate"; ref: ChatRef | null }
   | { type: "unknown" };
 
 export type ChatRef = { repo: string | null; number: number };
@@ -76,6 +110,20 @@ export type ChatConfirmCard =
       repo: string;
       title: string;
       body: string;
+      /** 起案前に見つかった、同じ話題の既存Issue（重複確認。#4045） */
+      duplicates?: { number: number; title: string; htmlUrl: string; state: string }[];
+    }
+  | {
+      /** 合意した方針で同じPRを直すよう、紐づくIssueへ依頼を渡す（#4045）。実行系は既存の`@claude`経路 */
+      type: "confirm_fix_request";
+      repo: string;
+      number: number;
+      title: string;
+      /** 依頼を組み立てた時点のHEAD。実行時に変わっていたら中断する */
+      headSha: string;
+      issueNumber: number;
+      /** 実行系へ渡す依頼本文（合意した方針・未解消の指摘・検証条件） */
+      instruction: string;
     };
 
 export type ChatChoiceCard = {
@@ -93,7 +141,38 @@ export type ChatResultCard = {
   htmlUrl: string | null;
 };
 
-export type ChatCard = ChatStatusCard | ChatConfirmCard | ChatChoiceCard | ChatResultCard;
+/** 調査結果の根拠欄（#4045）。事実／推測／未確認を分けて出す */
+export type ChatInvestigationCard = {
+  type: "investigation";
+  evidence: ChatEvidence[];
+  facts: string[];
+  inferences: string[];
+  unconfirmed: string[];
+  /** 打ち切った理由（上限到達・進展なし等）。完走したらnull */
+  stopReason: string | null;
+};
+
+/** 修正依頼の進み具合（#4045）。CI／レビュー待ちは完了にしない */
+export type ChatFixProgressCard = {
+  type: "fix_progress";
+  repo: string;
+  number: number;
+  phase: "requested" | "working" | "waiting_ci" | "waiting_review" | "verified" | "failed";
+  phaseLabel: string;
+  headSha: string | null;
+  requestedHeadSha: string;
+  steps: { label: string; done: boolean; note: string | null }[];
+  htmlUrl: string | null;
+  fetchedAt: string;
+};
+
+export type ChatCard =
+  | ChatStatusCard
+  | ChatConfirmCard
+  | ChatChoiceCard
+  | ChatResultCard
+  | ChatInvestigationCard
+  | ChatFixProgressCard;
 
 /** 確認カードの状態。押された後は再実行できない（二重実行の防止） */
 export type ChatConfirmState = "pending" | "done" | "cancelled";
@@ -107,3 +186,48 @@ export type ChatMessageView = {
   confirmState: ChatConfirmState | null;
   createdAt: string;
 };
+
+// --- チャットセッションの保存・再開（#4047） ---
+
+/** 会話メモの1項目（合意した方針・未解決の質問）。**許可する操作の根拠には使わない**（実行は確認カードだけ） */
+export type ChatMemoryItem = {
+  id: string;
+  text: string;
+  createdAt: string;
+  /** 未解決の質問を解決済みにしたときだけ付く */
+  resolvedAt?: string;
+};
+
+/** 状態カードを返した時点の調査結果。再開時に「その時点」と「いま」を区別して見せる材料 */
+export type ChatFinding = {
+  repo: string;
+  number: number;
+  kind: "pr" | "issue";
+  title: string;
+  htmlUrl: string | null;
+  capturedAt: string;
+  rows: ChatStatusRow[];
+};
+
+export type ChatMemory = {
+  agreements: ChatMemoryItem[];
+  openQuestions: ChatMemoryItem[];
+  findings: ChatFinding[];
+};
+
+export const EMPTY_CHAT_MEMORY: ChatMemory = { agreements: [], openQuestions: [], findings: [] };
+
+/** 再開時に再取得した、いまの状態と調査時点との差 */
+export type ChatFreshness = {
+  repo: string;
+  number: number;
+  kind: "pr" | "issue";
+  title: string;
+  capturedAt: string | null;
+  /** 調査時点から値が変わった行（調査時点の記録が無ければ空） */
+  changes: { label: string; before: string; after: string }[];
+  current: ChatStatusRow[];
+  error: string | null;
+};
+
+export type ChatConversationStatus = "waiting" | "idle";

@@ -401,7 +401,7 @@ function ManualStepReadinessIcon({ readiness }: { readiness: ManualStepReadiness
  * （`isQaAnswerWaiting`）で受け取るのは、「質問する」ボタンが通常のIssueのコメント欄にも
  * あるため（`resolveQuestionState`の`waiting`はタイトルが質問Issueの形のものしか通さない）。
  * 回すのは待っているのが処理だから——**承認待ち（琥珀）は人を待っているので回さない**
- * （`WorkflowStepBadge`の掃く光と同じ使い分け）。未確認も回さない。
+ * （`WorkflowStepBadge`の明滅と同じ使い分け）。未確認も回さない。
  */
 function QuestionStateBadge({
   state,

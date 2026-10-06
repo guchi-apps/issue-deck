@@ -27,15 +27,17 @@ function ReviewStatusDot({ kind, label }: { kind: ReviewVerdictKind; label: stri
     ok: "bg-green-600 dark:bg-green-400",
     "needs-check": "bg-amber-500 dark:bg-amber-400",
     "changes-requested": "bg-destructive",
-    skipped: "bg-muted-foreground",
-    unknown: "bg-muted-foreground",
+    // 省略（低リスクでレビューを省いた）と記録なし（判定を取得できていない）は、色を変えず形で分ける。
+    // どちらも危険信号ではないので灰色のまま（#2448）
+    skipped: "border-2 border-muted-foreground bg-transparent",
+    unknown: "border-2 border-dashed border-muted-foreground bg-transparent",
   };
 
   return (
     <span
       role="img"
       aria-label={`Claudeレビュー: ${label}`}
-      className={cn("size-2.5 shrink-0 rounded-full", tone[kind])}
+      className={cn("box-border size-3 shrink-0 rounded-full", tone[kind])}
     />
   );
 }
@@ -100,6 +102,11 @@ function ChangeRow({
         </span>
       )}
       {reviewKind && reviewLabel && <ReviewStatusDot kind={reviewKind} label={reviewLabel} />}
+      {reviewKind === "unknown" && (
+        <span className="shrink-0 rounded-full bg-muted px-2 text-[10.5px] leading-5 font-bold whitespace-nowrap text-muted-foreground">
+          <span aria-hidden="true">{REVIEW_MARK.unknown}</span> 未確認
+        </span>
+      )}
       {reviewKind && findingLabel && (
         <span
           className={cn(

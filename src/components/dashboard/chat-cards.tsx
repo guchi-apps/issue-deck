@@ -6,6 +6,7 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { repairKindLabel } from "@/lib/chat/status-card";
+import { formatTimeOfDay } from "@/lib/format-date-time";
 import type {
   ChatCard,
   ChatConfirmState,
@@ -122,6 +123,78 @@ export function ChatCardView({
           <ConfirmActions state={confirmState} busy={busy} executeLabel="実行する" onConfirm={onConfirm} />
         </ConfirmFrame>
       );
+    case "confirm_fix_request":
+      return (
+        <ConfirmFrame title={`確認：PR #${card.number} の修正を依頼します`} state={confirmState}>
+          <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 px-3 py-2.5 text-sm">
+            <dt className="text-muted-foreground">対象</dt>
+            <dd>{card.repo}#{card.number} {card.title}</dd>
+            <dt className="text-muted-foreground">前提のHEAD</dt>
+            <dd className="font-mono text-xs">{card.headSha.slice(0, 7)}（進んでいたら中断します）</dd>
+            <dt className="text-muted-foreground">渡し先</dt>
+            <dd>Issue #{card.issueNumber} への依頼コメント（実行先・エージェントは既存の設定に従います）</dd>
+            <dt className="text-muted-foreground">依頼内容</dt>
+            <dd className="whitespace-pre-wrap">{card.instruction}</dd>
+            <dt className="text-muted-foreground">許可範囲</dt>
+            <dd>このPRのブランチ内の修正のみ。マージ・本番反映・認証方式や環境変数の変更はしません</dd>
+          </dl>
+          <ConfirmActions state={confirmState} busy={busy} executeLabel="依頼する" onConfirm={onConfirm} />
+        </ConfirmFrame>
+      );
+    case "investigation":
+      return (
+        <div className="overflow-hidden rounded-lg border bg-card text-sm">
+          <div className="border-b px-3 py-2 font-semibold">調査の根拠</div>
+          <div className="flex flex-col gap-2 px-3 py-2.5">
+            {card.facts.length > 0 && <EvidenceList title="確認できたこと" items={card.facts} />}
+            {card.inferences.length > 0 && <EvidenceList title="推測" items={card.inferences} />}
+            {card.unconfirmed.length > 0 && <EvidenceList title="未確認" items={card.unconfirmed} tone="warn" />}
+            {card.evidence.length > 0 && (
+              <div>
+                <p className="mb-1 text-xs font-semibold text-muted-foreground">参照</p>
+                <ul className="flex flex-col gap-1">
+                  {card.evidence.map((item) => (
+                    <li key={`${item.label}|${item.url ?? ""}|${item.ref ?? ""}`} className="text-xs">
+                      {item.url ? (
+                        <a className="underline" href={item.url} target="_blank" rel="noreferrer">{item.label}</a>
+                      ) : (
+                        item.label
+                      )}
+                      <span className="text-muted-foreground">
+                        {item.ref ? `　${item.ref}` : ""}　取得 {formatTimeOfDay(item.fetchedAt)}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {card.stopReason && <p className="text-xs text-amber-700 dark:text-amber-300">調査を止めた理由: {card.stopReason}</p>}
+          </div>
+        </div>
+      );
+    case "fix_progress":
+      return (
+        <div className="overflow-hidden rounded-lg border bg-card text-sm">
+          <div className="flex flex-wrap items-center gap-2 border-b px-3 py-2 font-semibold">
+            <span>修正依頼 {card.repo}#{card.number}</span>
+            <Pill tone={card.phase === "verified" ? "ok" : card.phase === "failed" ? "bad" : "warn"}>{card.phaseLabel}</Pill>
+          </div>
+          <ol className="flex flex-col gap-1 px-3 py-2.5">
+            {card.steps.map((step) => (
+              <li key={step.label} className="flex gap-2">
+                <span>{step.done ? "✅" : "⏳"}</span>
+                <span>{step.label}{step.note ? <span className="text-muted-foreground">（{step.note}）</span> : null}</span>
+              </li>
+            ))}
+          </ol>
+          <div className="flex flex-wrap items-center gap-2 border-t px-3 py-2.5">
+            <Button variant="outline" size="sm" disabled={busy} onClick={() => onSend(`${card.repo}#${card.number}の修正依頼の進み具合を確認して`)}>
+              状況を更新
+            </Button>
+            <span className="text-xs text-muted-foreground">取得 {formatTimeOfDay(card.fetchedAt)}</span>
+          </div>
+        </div>
+      );
     case "confirm_issue":
       return <IssueDraft card={card} state={confirmState} busy={busy} onConfirm={onConfirm} />;
     case "result":
@@ -137,6 +210,21 @@ export function ChatCardView({
         </div>
       );
   }
+}
+
+function EvidenceList({ title, items, tone }: { title: string; items: string[]; tone?: "warn" }) {
+  return (
+    <div>
+      <p className={cn("mb-1 text-xs font-semibold", tone === "warn" ? "text-amber-700 dark:text-amber-300" : "text-muted-foreground")}>
+        {title}
+      </p>
+      <ul className="list-disc pl-5">
+        {items.map((item) => (
+          <li key={item}>{item}</li>
+        ))}
+      </ul>
+    </div>
+  );
 }
 
 function ConfirmFrame({
@@ -198,6 +286,18 @@ function IssueDraft({
     <ConfirmFrame title="Issue案（確認してから作成します）" state={state}>
       <div className="flex flex-col gap-2 px-3 py-2.5">
         <p className="text-xs text-muted-foreground">{card.repo}</p>
+        {card.duplicates && card.duplicates.length > 0 && (
+          <div className="rounded-lg border border-amber-500/60 px-2.5 py-2 text-xs">
+            <p className="font-semibold">似た既存のIssue（重複でないか確認してください）</p>
+            <ul className="mt-1 list-disc pl-5">
+              {card.duplicates.map((item) => (
+                <li key={item.number}>
+                  <a className="underline" href={item.htmlUrl} target="_blank" rel="noreferrer">#{item.number} {item.title}</a>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
         <label className="flex flex-col gap-1 text-xs text-muted-foreground" htmlFor="chat-issue-title">
           タイトル
           <input

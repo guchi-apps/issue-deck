@@ -2242,33 +2242,44 @@ model DeployLaunchWatch {
 /// 会話型の操作入口の1会話。`context`は「それ」「直して」を解釈する直前の対象と、実行した操作の記録
 /// （`src/lib/chat/types.ts`の`ChatContext`）。クライアントの申告ではなくサーバー側のこの値を信用する。
 model ChatConversation {
-  id        String   @id @default(cuid())
-  userId    String
-  title     String   @db.VarChar(120)
-  repo      String?  @db.VarChar(200)
-  context   Json     @default("{}")
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id         String    @id @default(cuid())
+  userId     String
+  title      String    @db.VarChar(120)
+  repo       String?   @db.VarChar(200)
+  context    Json      @default("{}")
+  /// 合意・未解決の質問・調査時点の状態（`ChatMemory`）。許可範囲の根拠には使わない（#4047）
+  memory     Json      @default("{}")
+  /// 検索用の「owner/repo#番号 」の連結（対象・実行記録・発言に出た番号）
+  refsText   String    @default("") @db.Text
+  /// 複数端末・再送での上書き消失を防ぐ楽観ロック。更新のたびに増やす
+  version    Int       @default(0)
+  /// アーカイブ済みの時刻。削除でも実行停止でもなく、一覧から外すだけ
+  archivedAt DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
 
   user     User          @relation(fields: [userId], references: [id], onDelete: Cascade)
   messages ChatMessage[]
 
-  @@index([userId, updatedAt])
+  @@index([userId, archivedAt, updatedAt])
 }
 
 /// 会話の1発言。`cards`は状態・確認・結果カードのJSON、`confirmState`は確認カードを含む発言だけが持つ
 /// （`pending`→`done`/`cancelled`）。**実行は`pending`→`done`へ更新できた1回だけ**で、二重実行を防ぐ。
 model ChatMessage {
-  id             String   @id @default(cuid())
-  conversationId String
-  role           String   @db.VarChar(16)
-  text           String   @db.Text
-  cards          Json     @default("[]")
-  confirmState   String?  @db.VarChar(16)
-  createdAt      DateTime @default(now())
+  id              String   @id @default(cuid())
+  conversationId  String
+  role            String   @db.VarChar(16)
+  text            String   @db.Text
+  cards           Json     @default("[]")
+  confirmState    String?  @db.VarChar(16)
+  /// クライアントが発言ごとに振るID。再送・複数端末の重複送信で二重登録しないための冪等キー（ユーザー発言だけ）
+  clientMessageId String?  @db.VarChar(64)
+  createdAt       DateTime @default(now())
 
   conversation ChatConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
 
+  @@unique([conversationId, clientMessageId])
   @@index([conversationId, createdAt])
 }
 

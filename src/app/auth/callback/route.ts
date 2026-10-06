@@ -1,11 +1,11 @@
 import { NextResponse, type NextRequest } from "next/server";
 
-import { isEmailAllowed } from "@/lib/allowed-emails";
+import { isUserAllowed } from "@/lib/access/client";
 import { encryptSecret } from "@/lib/crypto/secret-cipher";
 import { db } from "@/lib/db";
+import { fetchVerifiedGithubProfile } from "@/lib/auth/github-profile";
 import { getRequestOrigin } from "@/lib/request-origin";
 import { toSafeRedirectPath } from "@/lib/safe-redirect-path";
-import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 
 export async function GET(request: NextRequest) {
@@ -19,61 +19,68 @@ export async function GET(request: NextRequest) {
   }
 
   const supabase = await createClient();
-  const { data, error } = await supabase.auth.exchangeCodeForSession(code);
+  let stage = "code_exchange";
+  try {
+    const { data, error } = await supabase.auth.exchangeCodeForSession(code);
+    if (error || !data.user) throw new Error("code_exchange_failed");
+    const { user } = data;
 
-  if (error || !data.user) {
-    return NextResponse.redirect(`${origin}/login`);
-  }
-
-  const { user } = data;
-
-  if (!isEmailAllowed(user.email)) {
-    await supabase.auth.signOut();
-    const admin = createAdminClient();
-    const { error: deleteError } = await admin.auth.admin.deleteUser(user.id);
-    if (deleteError) {
-      console.error("[auth/callback] failed to delete disallowed Supabase Auth user", deleteError);
+    stage = "access_decision";
+    if (!(await isUserAllowed(user))) {
+      // 共用のSupabaseユーザーは削除しない。他アプリのセッションも失効させない。
+      await supabase.auth.signOut({ scope: "local" });
+      return NextResponse.redirect(`${origin}/login?error=not_allowed`);
     }
-    return NextResponse.redirect(`${origin}/login?error=not_allowed`);
-  }
 
-  const metadata = user.user_metadata as Record<string, unknown>;
-
-  const githubUserId = Number(metadata.provider_id ?? metadata.sub);
-  const githubLogin = String(metadata.user_name ?? metadata.preferred_username ?? "");
-
-  if (!githubUserId || !githubLogin) {
-    return NextResponse.redirect(`${origin}/login`);
-  }
-
-  const providerToken = data.session?.provider_token;
-  const githubAccessToken = providerToken ? encryptSecret(providerToken) : undefined;
-  // Supabase Auth側の設定（GitHub Appの「Expire user authorization tokens」有効時のみ）によっては
-  // 払い出されない。無い場合はundefinedのままにし、自動延長機能のみ無効化する
-  const providerRefreshToken = data.session?.provider_refresh_token;
-  const githubRefreshToken = providerRefreshToken ? encryptSecret(providerRefreshToken) : undefined;
-
-  await db.user.upsert({
-    where: { supabaseUserId: user.id },
-    create: {
+    // user_metadataは利用者が編集可能。既存データの再紐付けの根拠には使わず、
+    // 今回のOAuthで取得したトークンをGitHub自身へ照会して本人の不変IDを確認する。
+    const providerToken = data.session?.provider_token;
+    stage = "github_identity";
+    const profile = await fetchVerifiedGithubProfile(providerToken);
+    const values = {
       supabaseUserId: user.id,
-      githubUserId,
-      githubLogin,
-      name: (metadata.full_name as string) ?? (metadata.name as string) ?? null,
+      githubLogin: profile.login,
+      name: profile.name,
       email: user.email ?? null,
-      image: (metadata.avatar_url as string) ?? null,
-      githubAccessToken,
-      githubRefreshToken,
-    },
-    update: {
-      githubLogin,
-      name: (metadata.full_name as string) ?? (metadata.name as string) ?? null,
-      email: user.email ?? null,
-      image: (metadata.avatar_url as string) ?? null,
-      ...(githubAccessToken ? { githubAccessToken } : {}),
-      ...(githubRefreshToken ? { githubRefreshToken } : {}),
-    },
-  });
+      image: profile.avatar_url,
+      githubAccessToken: encryptSecret(providerToken!),
+      githubRefreshToken: data.session?.provider_refresh_token
+        ? encryptSecret(data.session.provider_refresh_token)
+        : null,
+    };
 
-  return NextResponse.redirect(`${origin}${next}`);
+    // 同時ログインによるcreate競合・直列化競合だけを有限回再試行する。
+    stage = "user_save";
+    for (let attempt = 0; ; attempt++) {
+      try {
+        await db.$transaction(async (tx) => {
+          const linked = await tx.user.findUnique({ where: { supabaseUserId: user.id } });
+          if (linked && linked.githubUserId !== profile.id) {
+            throw new Error("identity_conflict");
+          }
+          // User.idを維持して更新するため、設定・履歴・連携の外部キーは変わらない。
+          await tx.user.upsert({
+            where: { githubUserId: profile.id },
+            create: { ...values, githubUserId: profile.id },
+            update: values,
+          });
+        }, { isolationLevel: "Serializable" });
+        break;
+      } catch (error) {
+        const retryable = typeof error === "object" && error !== null && "code" in error
+          && (error.code === "P2002" || error.code === "P2034");
+        if (!retryable || attempt >= 2) throw error;
+      }
+    }
+    return NextResponse.redirect(`${origin}${next}`);
+  } catch {
+    // Prisma例外やOAuth応答には個人情報・秘密が含まれ得るので丸ごと記録しない。
+    console.error("[auth/callback] ログイン完了処理に失敗しました", { stage });
+    try {
+      await supabase.auth.signOut({ scope: "local" });
+    } catch {
+      // セッション失効自体が失敗しても、白画面にせず再試行の入口を返す。
+    }
+    return NextResponse.redirect(`${origin}/login?error=callback_failed`);
+  }
 }
