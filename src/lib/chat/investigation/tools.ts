@@ -88,6 +88,12 @@ export const TOOL_SPECS: ToolSpec[] = [
     args: '{"repo":"省略可","path":"docs/chat.md","ref":"省略可"}',
   },
   {
+    name: "search_repo_files",
+    description:
+      "リポジトリのファイルをパスのキーワードで探す（番号なしの設計相談で、関連する画面・コードのファイルを見つけるのに使う。read_repo_fileの前に使う）",
+    args: '{"repo":"省略可","query":"パスに含まれる語（例: work, calendar）","ref":"省略可"}',
+  },
+  {
     name: "get_repair_state",
     description: "PRの自動修正（実行中のrun・系列の状態）をDBの記録から取得する",
     args: '{"repo":"省略可","number":123}',
@@ -364,6 +370,41 @@ async function readRepoFile(ctx: ToolContext, args: Args): Promise<ToolResult> {
   };
 }
 
+const IGNORED_DIRS = /(^|\/)(node_modules|\.next|dist|build|coverage|\.git|vendor)\//;
+const MAX_LISTED_FILES = 40;
+
+/** パスの部分一致でファイルを探す（読み取りだけ）。内容は`read_repo_file`で読む */
+async function searchRepoFiles(ctx: ToolContext, args: Args): Promise<ToolResult> {
+  const query = str(args.query)?.toLowerCase();
+  if (!query) return fail("queryが必要です。");
+  const access = await resolveAccess(ctx, args);
+  if (isFailure(access)) return access;
+  const ref = str(args.ref) ?? "HEAD";
+  const res = await githubFetch(
+    `${GITHUB_API}/repos/${access.fullName}/git/trees/${encodeURIComponent(ref)}?recursive=1`,
+    access.token,
+  );
+  if (!res.ok) return fail(`${access.fullName} のファイル一覧を取得できませんでした（${res.status}）。`);
+  const tree = (await res.json()) as { tree?: { path: string; type: string }[]; truncated?: boolean };
+  const terms = query.split(/\s+/).filter(Boolean);
+  const hits = (tree.tree ?? [])
+    .filter((n) => n.type === "blob" && !IGNORED_DIRS.test(n.path) && isReadablePath(n.path))
+    .filter((n) => terms.every((t) => n.path.toLowerCase().includes(t)))
+    .map((n) => n.path);
+  const shown = hits.slice(0, MAX_LISTED_FILES);
+  const notes = [
+    hits.length > shown.length ? `（他${hits.length - shown.length}件は省略。語を絞ってください）` : "",
+    tree.truncated ? "（リポジトリが大きく一覧が途中で切れています。見つからなくても存在しないとは言えません）" : "",
+  ].filter(Boolean);
+  return {
+    ok: true,
+    text: shown.length
+      ? `# ${access.fullName} のパス「${query}」の一致 ${hits.length}件\n${shown.join("\n")}${notes.length ? `\n${notes.join("\n")}` : ""}`
+      : `パス「${query}」に一致するファイルはありません。${notes.join("")}`,
+    evidence: [evidence(ctx, `${access.fullName} のファイル検索「${query}」`, null, ref)],
+  };
+}
+
 async function getRepairState(ctx: ToolContext, args: Args): Promise<ToolResult> {
   const number = int(args.number);
   if (!number) return fail("numberが必要です。");
@@ -395,6 +436,7 @@ const HANDLERS: Record<string, (ctx: ToolContext, args: Args) => Promise<ToolRes
   get_issue: getIssue,
   search_issues: searchIssues,
   read_repo_file: readRepoFile,
+  search_repo_files: searchRepoFiles,
   get_repair_state: getRepairState,
 };
 

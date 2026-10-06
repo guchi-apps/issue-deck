@@ -49,6 +49,26 @@ export type InvestigationReply = {
   unavailable: boolean;
 };
 
+/** AIを呼べなかった理由の種別と、利用者が次にすること（機密値は含まない固定文面だけ） */
+export function describeUnavailable(stopReason: string): { kind: string; label: string; next: string } {
+  if (/認証情報が設定/.test(stopReason)) {
+    return { kind: "auth_missing", label: "AIの認証情報が未設定です", next: "設定のAI項目で認証情報を登録してから、再試行してください。" };
+  }
+  if (/HTTP (401|403)/.test(stopReason)) {
+    return { kind: "auth_rejected", label: "AIの認証が拒否されました", next: "設定のAI項目で認証情報の有効期限・権限を確認してから、再試行してください。" };
+  }
+  if (/HTTP 429/.test(stopReason)) {
+    return { kind: "rate_limited", label: "AIの利用上限に達しています", next: "しばらく待ってから再試行してください。" };
+  }
+  if (/HTTP 5\d\d|通信に失敗|時間切れ|時間の上限/.test(stopReason)) {
+    return { kind: "network", label: "AIとの通信に失敗しました（通信エラーまたは時間切れ）", next: "少し待って再試行してください。続く場合はAIサービスの状況を確認します。" };
+  }
+  if (/読み取れませんでした|空でした|長すぎて/.test(stopReason)) {
+    return { kind: "bad_response", label: "AIの応答を読み取れませんでした", next: "もう一度試してください。続けて失敗する場合は、質問を短く分けて送ってください。" };
+  }
+  return { kind: "other", label: "AIの調査を始められませんでした", next: "再試行してください。続く場合は設定のAI項目を確認してください。" };
+}
+
 const ISSUE_ASK = /(issue|起案|起票)/i;
 const FIX_ASK = /(直して|修正して|対応して|fix)/i;
 
@@ -160,8 +180,15 @@ export async function replyWithInvestigation(params: {
 
   const unavailable = result.steps === 0 && result.stopReason !== null && !result.reply;
   if (unavailable) {
+    const failure = describeUnavailable(result.stopReason ?? "");
+    // 相談内容は保存済み。同じ発言をそのまま送り直せる再試行を出す（操作案内で上書きしない）
+    cards.push({
+      type: "choice",
+      question: "同じ内容でもう一度送れます。",
+      options: [{ label: "同じ内容で再試行", send: params.text }],
+    });
     return {
-      text: `調査を始められませんでした（${result.stopReason}）。定型の確認（「#番号どうなってる？」）は引き続き使えます。`,
+      text: `回答できませんでした：${failure.label}（${result.stopReason}）。${failure.next}\n相談内容は会話に残っています。定型の確認（「#番号どうなってる？」）は引き続き使えます。`,
       cards,
       needsConfirm: false,
       nextContext: context,
@@ -293,7 +320,8 @@ export async function replyWithInvestigation(params: {
     nextContext: {
       ...context,
       repo: target?.repo ?? context.repo,
-      targets: target ? [target] : context.targets,
+      // 番号なしの純粋な相談（候補も無い）は、以前の対象を持ち越さない
+      targets: target ? [target] : params.candidates.length === 0 ? [] : context.targets,
       investigation: nextInvestigation,
     },
     unavailable: false,
