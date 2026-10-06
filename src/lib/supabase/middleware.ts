@@ -58,7 +58,7 @@ export async function updateSession(request: NextRequest) {
   // ログイン済みユーザーが /login を開いた場合（ブラウザの「戻る」操作等）は
   // ログイン画面を再表示せずダッシュボードへ送り、URL上もログイン前の状態に
   // 戻れてしまわないようにする。
-  if (pathname === "/login" && allowedUser) {
+  if (pathname === "/login" && allowedUser && request.nextUrl.searchParams.get("error") !== "callback_failed") {
     const callbackUrl = request.nextUrl.searchParams.get("callbackUrl");
     return NextResponse.redirect(new URL(toSafeRedirectPath(callbackUrl), getRequestOrigin(request)));
   }

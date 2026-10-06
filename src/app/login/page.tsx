@@ -43,6 +43,12 @@ export default async function LoginPage({
           {error === "not_allowed" && (
             <p className="text-sm text-destructive">このアカウントではログインできません。</p>
           )}
+          {error === "callback_failed" && (
+            <p className="text-sm text-destructive" role="alert">
+              ログインの完了処理に失敗しました。もう一度GitHubでログインしてください。
+              繰り返す場合は管理者にお問い合わせください。
+            </p>
+          )}
           {!supabaseConfigured && (
             <div className="flex flex-col gap-2 rounded-md bg-muted/60 p-3 text-sm ring-1 ring-foreground/10">
               <p className="flex items-center gap-2 font-medium">
