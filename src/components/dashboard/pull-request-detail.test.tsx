@@ -183,6 +183,27 @@ describe("PullRequestDetail", () => {
     expect(screen.queryByText("ユーザーのマージが必要です")).toBeNull();
   });
 
+  it("ユーザーのマージが必要なPRには、その理由をバッジの下に出す（#4088）", () => {
+    renderDetail({
+      pullRequest: makePullRequest({ linkedIssueCheckUser: true }),
+      detail: makeDetail({
+        userMergeReasons: {
+          source: "review",
+          items: ["認証・認可に関わる変更が含まれているため"],
+          postedAtLabel: "1時間前",
+        },
+      }),
+    });
+    expect(screen.getByText("認証・認可に関わる変更が含まれているため")).toBeTruthy();
+    cleanup();
+
+    renderDetail({
+      pullRequest: makePullRequest(),
+      detail: makeDetail({ userMergeReasons: null }),
+    });
+    expect(screen.queryByText("自動マージされなかった理由")).toBeNull();
+  });
+
   it("CI・レビューの状態を四角い操作表示で出す（#3319）", () => {
     renderDetail({
       pullRequest: makePullRequest({

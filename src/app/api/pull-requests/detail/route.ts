@@ -5,6 +5,7 @@ import { db } from "@/lib/db";
 import { withGithubApiFeature } from "@/lib/github/api-usage";
 import { getInstallationToken } from "@/lib/github/app-auth";
 import { MERGE_JUDGEMENT_UNKNOWN } from "@/lib/github/check-rollup";
+import { mapComment } from "@/lib/github/issue-mapper";
 import { fetchCommentsForIssue } from "@/lib/github/issues-api";
 import { githubApiErrorMessage } from "@/lib/github/network-error";
 import { buildPullRequestEvents } from "@/lib/github/pull-request-events";
@@ -23,7 +24,8 @@ import {
 import { fetchRefCheckState } from "@/lib/github/release-api";
 import { fetchRepairWorkflowAvailability } from "@/lib/github/repair-workflow-cache";
 import { checkUserIssueKey, fetchCheckUserIssueReasons } from "@/lib/pull-request-check-user";
-import { extractLinkedIssueNumber } from "@/lib/pull-request-list";
+import { resolveMergeCheckReasons, type MergeCheckReasons } from "@/lib/merge-check-reasons";
+import { extractLinkedIssueNumber, requiresUserMerge } from "@/lib/pull-request-list";
 import type { PullRequestDetail } from "@/types/pull-request";
 
 export function GET(request: NextRequest) {
@@ -126,9 +128,7 @@ async function handleGET(request: NextRequest) {
       { mergeable: pullRequest.mergeable, ciState },
     );
 
-    const detail: PullRequestDetail = {
-      id: `${repository.fullName}#${number}`,
-      summary: toPullRequestSummary(
+    const summary = toPullRequestSummary(
         pullRequest,
         { fullName: repository.fullName, private: repository.private },
         {
@@ -144,7 +144,24 @@ async function handleGET(request: NextRequest) {
           repairWorkflowAvailability,
           repairRun,
         },
-      ),
+      );
+
+    // ユーザーのマージが必要な理由（#4088）。必要なPRでだけ、対応Issueのコメントを1回読む。
+    let userMergeReasons: MergeCheckReasons | null = null;
+    if (requiresUserMerge(summary)) {
+      userMergeReasons = await resolveUserMergeReasons({
+        kind: summary.kind,
+        repositoryId: repository.id,
+        owner,
+        repo,
+        linkedIssueNumber,
+        token,
+      });
+    }
+
+    const detail: PullRequestDetail = {
+      id: `${repository.fullName}#${number}`,
+      summary,
       body: pullRequest.body ?? "",
       additions: pullRequest.additions,
       deletions: pullRequest.deletions,
@@ -152,6 +169,7 @@ async function handleGET(request: NextRequest) {
       commits: pullRequest.commits,
       events: buildPullRequestEvents({ comments, reviews, reviewComments }),
       fetchedAt: new Date().toISOString(),
+      userMergeReasons,
     };
     return NextResponse.json(detail);
   } catch (error) {
@@ -161,4 +179,32 @@ async function handleGET(request: NextRequest) {
       { status: 502 },
     );
   }
+}
+
+/** リリースPR（develop→main）はIssueの判定と無関係に、常にユーザーがマージする */
+const RELEASE_MERGE_REASON: MergeCheckReasons = {
+  source: "label",
+  items: ["develop→mainのリリースPRは、自動マージ不可カテゴリとして常にユーザーがマージします"],
+  postedAtLabel: null,
+};
+
+async function resolveUserMergeReasons(params: {
+  kind: string;
+  repositoryId: string;
+  owner: string;
+  repo: string;
+  linkedIssueNumber: number | null;
+  token: string;
+}): Promise<MergeCheckReasons> {
+  if (params.kind === "release") return RELEASE_MERGE_REASON;
+  if (params.linkedIssueNumber === null) return resolveMergeCheckReasons([], []);
+  const [issue, rawComments] = await Promise.all([
+    db.issue.findFirst({
+      where: { repositoryId: params.repositoryId, number: params.linkedIssueNumber },
+      select: { labels: { select: { name: true } } },
+    }),
+    fetchCommentsForIssue(params.owner, params.repo, params.linkedIssueNumber, params.token),
+  ]);
+  const labels = (issue?.labels ?? []).map((label) => ({ name: label.name, color: "", description: null }));
+  return resolveMergeCheckReasons(labels, rawComments.map(mapComment));
 }
