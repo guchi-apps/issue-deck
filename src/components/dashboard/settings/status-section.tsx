@@ -1,8 +1,13 @@
 "use client";
 
+import { ExternalLink } from "lucide-react";
+
 import { GithubStatusList } from "@/components/dashboard/github-status-list";
 import { formatMonthDayTime } from "@/lib/format-date-time";
 import type { SettingsData } from "@/hooks/use-settings-data";
+
+/** GitHub公式のステータスページ。インシデントの詳細・履歴はここでしか見られない（#4064） */
+const GITHUB_STATUS_PAGE_URL = "https://www.githubstatus.com/";
 
 type StatusSectionProps = Pick<SettingsData, "githubStatus">;
 
@@ -20,14 +25,25 @@ export function StatusSection({ githubStatus }: StatusSectionProps) {
       <div className="flex flex-col gap-2 rounded-lg border p-3">
         <div className="flex items-baseline justify-between gap-2">
           <p className="text-xs font-medium text-muted-foreground">GitHub障害状況</p>
-          {githubStatus.data && (
-            <time
-              dateTime={githubStatus.data.fetchedAt}
-              className="text-xs tabular-nums text-muted-foreground"
+          <div className="flex items-baseline gap-3">
+            {githubStatus.data && (
+              <time
+                dateTime={githubStatus.data.fetchedAt}
+                className="text-xs tabular-nums text-muted-foreground"
+              >
+                取得 {formatMonthDayTime(githubStatus.data.fetchedAt)}
+              </time>
+            )}
+            <a
+              href={GITHUB_STATUS_PAGE_URL}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-1 text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground"
             >
-              取得 {formatMonthDayTime(githubStatus.data.fetchedAt)}
-            </time>
-          )}
+              公式ページ
+              <ExternalLink className="size-3" aria-hidden />
+            </a>
+          </div>
         </div>
         <GithubStatusList
           data={githubStatus.data}

@@ -27,4 +27,12 @@ describe("StatusSection", () => {
 
     expect(screen.queryByText(/取得 /)).toBeNull();
   });
+
+  it("GitHub公式のステータスページへ別タブで開くリンクを出す（#4064）", () => {
+    render(<StatusSection githubStatus={{ data: null, isLoading: true, error: null }} />);
+
+    const link = screen.getByRole("link", { name: "公式ページ" });
+    expect(link.getAttribute("href")).toBe("https://www.githubstatus.com/");
+    expect(link.getAttribute("target")).toBe("_blank");
+  });
 });
