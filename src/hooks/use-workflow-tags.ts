@@ -2,25 +2,13 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { fetchWithTimeout, SLOW_FETCH_TIMEOUT_MS } from "@/lib/fetch-with-timeout";
 import {
-  isPropagationRunning,
-  type PropagationRun,
-  type SourceAhead,
-  type WorkflowTagStatus,
-} from "@/lib/workflow-tags";
-
-type Overview = {
-  latest: string | null;
-  repositories: WorkflowTagStatus[];
-  propagation: PropagationRun | null;
-  /** 不足しているcallerの配布（#1948・#1475）。タグ配布とは別のrun */
-  repairPropagation: PropagationRun | null;
-  /** ワークフロー以外の配布物の更新（#2240）。これも別のrun */
-  sharedFilePropagation: PropagationRun | null;
-  /** 配布元（`main`）が最新タグからどれだけ進んでいるか（#2476）。取れなければ null */
-  sourceAhead: SourceAhead | null;
-};
+  invalidateWorkflowTags,
+  loadWorkflowTags,
+  peekWorkflowTags,
+  type WorkflowTagsOverview,
+} from "@/lib/workflow-tags-store";
+import { isPropagationRunning } from "@/lib/workflow-tags";
 
 /** 配布ワークフローが動いている間の再取得間隔。PRの作成は1リポジトリあたり数秒〜数十秒 */
 const RUNNING_POLL_INTERVAL_MS = 10_000;
@@ -39,13 +27,18 @@ const AWAITING_RUN_TIMEOUT_MS = 90_000;
  * 共有ワークフローの参照タグの状況を取得する（#985）。
  *
  * **リポジトリ数ぶんのGitHub API呼び出しになるため、`enabled`が真になったときと、明示的な
- * 再取得のときだけ動かす。** 例外は配布ワークフローが動いている間で、そのときだけ
+ * 再取得のときだけ動かす。** 設定画面を開いた時点で呼ばれ（項目を開く前の状態表示。#4016）、
+ * 結果は期限付きの共有キャッシュ（`workflow-tags-store.ts`）に載るので、短時間の開閉や複数の
+ * 表示が同じ全件取得を重ねない。 例外は配布ワークフローが動いている間で、そのときだけ
  * ポーリングする（#1602）。押してからPRが出来上がるまで数分あり、その間の状態が見えないと
  * 「押しても何も起きていない」ようにしか見えず、続けて押してしまう
  * （`use-secrets-sync.ts`と同じ理由・同じ形）。
  */
 export function useWorkflowTags(enabled: boolean) {
-  const [overview, setOverview] = useState<Overview | null>(null);
+  // 期限内の共有キャッシュがあれば初期値にする（設定画面の開閉で同じ全件取得を重ねない）
+  const [snapshot, setSnapshot] = useState(() => peekWorkflowTags());
+  const overview: WorkflowTagsOverview | null = snapshot?.overview ?? null;
+  const fetchedAt = snapshot?.fetchedAt ?? null;
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // 明示的な再取得のたびに増やして、下のeffectを再実行させる
@@ -54,12 +47,21 @@ export function useWorkflowTags(enabled: boolean) {
   const [awaiting, setAwaiting] = useState(false);
   const awaitingSince = useRef<number | null>(null);
 
-  const reload = useCallback(() => setReloadCount((count) => count + 1), []);
+  // 明示的な再取得・配布操作の直後だけキャッシュを捨てて取り直す。初回・再表示はキャッシュを使う
+  const forceNext = useRef(false);
+
+  const reload = useCallback(() => {
+    invalidateWorkflowTags();
+    forceNext.current = true;
+    setReloadCount((count) => count + 1);
+  }, []);
 
   /** 起動に成功した直後に呼ぶ。runが見えるまでのあいだも実行中として扱わせる */
   const markDispatched = useCallback(() => {
     awaitingSince.current = Date.now();
     setAwaiting(true);
+    invalidateWorkflowTags();
+    forceNext.current = true;
     setReloadCount((count) => count + 1);
   }, []);
 
@@ -76,15 +78,13 @@ export function useWorkflowTags(enabled: boolean) {
 
     let cancelled = false;
 
-    async function load() {
+    async function load(force: boolean) {
       try {
-        // リポジトリごとにGitHub APIを叩くため、既定より長く待つ
-        const res = await fetchWithTimeout("/api/workflow-tags", { timeoutMs: SLOW_FETCH_TIMEOUT_MS });
-        if (!res.ok) throw new Error(`取得に失敗しました (${res.status})`);
-        const json = (await res.json()) as Overview;
+        const next = await loadWorkflowTags(force);
         if (cancelled) return;
 
-        setOverview(json);
+        const json = next.overview;
+        setSnapshot(next);
         setError(null);
 
         // runが見えた（または待ちすぎた）ら、以降は取得結果だけで実行中かを判断する
@@ -107,9 +107,11 @@ export function useWorkflowTags(enabled: boolean) {
     }
 
     // ダイアログを開いたタイミングでの一度きりの取得と、実行中のポーリング。
+    const force = forceNext.current;
+    forceNext.current = false;
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setIsLoading(true);
-    void load();
+    void load(force);
 
     if (!isRunning) {
       return () => {
@@ -123,7 +125,7 @@ export function useWorkflowTags(enabled: boolean) {
     const timer = setInterval(() => {
       if (document.hidden || inFlight) return;
       inFlight = true;
-      void load().finally(() => {
+      void load(true).finally(() => {
         inFlight = false;
       });
     }, RUNNING_POLL_INTERVAL_MS);
@@ -135,9 +137,12 @@ export function useWorkflowTags(enabled: boolean) {
 
   return {
     overview,
+    /** 最後に取得できた時刻（ms）。取得前は null */
+    fetchedAt,
     isLoading,
     error,
     isRunning,
+    awaiting,
     isRepairRunning,
     isSharedFileRunning,
     reload,

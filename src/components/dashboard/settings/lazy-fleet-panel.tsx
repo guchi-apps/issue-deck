@@ -12,6 +12,11 @@ type LazyFleetPanelProps = {
   loadHint?: string;
   /** 見出しの右に出す状態のチップ。開かなくても分かるものだけを渡す */
   badge?: ReactNode;
+  /**
+   * 説明の下に出す状態の表示（#4016）。**開く前の気づき**のためのもので、幅が狭くても折り返して
+   * 全文が読める。`open`を呼ぶと、押した項目をそのまま開いて詳細へ進める。
+   */
+  status?: (open: () => void) => ReactNode;
   children: ReactNode;
 };
 
@@ -36,6 +41,7 @@ export function LazyFleetPanel({
   description,
   loadHint,
   badge,
+  status,
   children,
 }: LazyFleetPanelProps) {
   const [open, setOpen] = useState(false);
@@ -43,6 +49,10 @@ export function LazyFleetPanel({
   const [mounted, setMounted] = useState(false);
   // 見出しの文字列をidにしない（空白や記号を含み、`aria-controls`の参照が壊れる）
   const contentId = useId();
+  const openPanel = () => {
+    setMounted(true);
+    setOpen(true);
+  };
 
   return (
     <section className="rounded-lg border">
@@ -52,6 +62,7 @@ export function LazyFleetPanel({
         <div className="flex min-w-0 flex-1 flex-col gap-0.5">
           <span className="text-sm font-medium">{title}</span>
           <span className="text-xs text-muted-foreground">{description}</span>
+          {status?.(openPanel)}
           {/* 押すと何が起きるかは、押す前にだけ要る */}
           {!mounted && loadHint && (
             <span className="text-xs text-muted-foreground">{loadHint}</span>

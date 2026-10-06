@@ -39,4 +39,11 @@ export async function register() {
   onCallRecorded(({ model, inputTokens }) => {
     void addCumulativeInputTokens(model, inputTokens);
   });
+
+  // StatusHubの共通アクセス設定へ反映状況（appliedVersion）を伝える。判定APIは利用者の操作が無いと
+  // 呼ばれないため、5分以内に1回は呼ぶ（管理画面の「反映済み」の判定に使われる）。
+  const { sendAccessHeartbeat } = await import("@/lib/access/client");
+  const heartbeat = () => void sendAccessHeartbeat();
+  setTimeout(heartbeat, 10_000).unref();
+  setInterval(heartbeat, 4 * 60_000).unref();
 }

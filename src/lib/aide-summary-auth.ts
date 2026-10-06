@@ -18,7 +18,7 @@ export async function authorizeAideSummary(
 ): Promise<SharedSecretAuthResult> {
   return authorizeBearerSecret(
     authorizationHeader,
-    await resolveSharedToken("ISSUE_DECK_AIDE_SUMMARY_SECRET", "AIDE_SUMMARY_SECRET"),
+    await resolveSharedToken("ISSUE_DECK_DEVELOPMENT_SUMMARY_TOKEN", "AIDE_SUMMARY_SECRET"),
   );
 }
 

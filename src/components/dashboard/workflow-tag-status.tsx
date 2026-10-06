@@ -245,7 +245,14 @@ function SharedFileRow({ status, running }: { status: Status; running: boolean }
   );
 }
 
+export type WorkflowTagsState = ReturnType<typeof useWorkflowTags>;
+
+/** 取得も自分で行う版。設定の見出しバッジと詳細で取得を共有したい場合は`View`へ状態を渡す（#4016） */
 export function WorkflowTagStatusSection({ open }: { open: boolean }) {
+  return <WorkflowTagStatusView tags={useWorkflowTags(open)} />;
+}
+
+export function WorkflowTagStatusView({ tags }: { tags: WorkflowTagsState }) {
   const {
     overview,
     isLoading,
@@ -255,7 +262,7 @@ export function WorkflowTagStatusSection({ open }: { open: boolean }) {
     isSharedFileRunning,
     reload,
     markDispatched,
-  } = useWorkflowTags(open);
+  } = tags;
   const [autoMerge, setAutoMerge] = useState(true);
   const [isDispatching, setIsDispatching] = useState(false);
   const [propagateMessage, setPropagateMessage] = useState<string | null>(null);

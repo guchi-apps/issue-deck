@@ -714,6 +714,14 @@ describe("isMergeJudgementPending", () => {
     expect(mergeJudgementReason(null)).toContain("マージ可否を判定中です");
   });
 
+  it("GitHubの状態が食い違っているときは「再確認中」と理由を出し、判定中は維持する（#4049）", () => {
+    expect(mergeJudgementLabel("state-mismatch")).toBe("GitHubの状態を再確認中");
+    expect(mergeJudgementReason("state-mismatch")).toContain("終了を確定できません");
+    expect(
+      isMergeJudgementPending({ state: "pending", step: "state-mismatch", runUrl: null, aiReview: AI_REVIEW_NONE }),
+    ).toBe(true);
+  });
+
   it("判定中でも`mergeWarnings`は増やさない（止め方はボタンの無効化。#1968）", () => {
     const judging = pullRequest({
       ciState: "success",

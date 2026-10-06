@@ -26,6 +26,11 @@ const REPAIR_WORDS = /(直して|直す|修正して|修復|自動修正|リペ�
 const ISSUE_WORDS = /(別\s*issue|issue\s*(に|化|として|を)|起案|起票|issueにして)/i;
 const MERGE_WORDS = /(マージ.*(できる|大丈夫|いい|可能)|merge)/i;
 const RECHECK_WORDS = /(もう\s*(一度|1回|いっかい|一回)|再確認|再度|確認して|チェックして|どうなって|状況|状態|進捗|ステータス)/;
+/** 状態の言い換えでは答えられない、理由・内容・方針の質問（#4045）。AIが調べて答える */
+const INVESTIGATE_WORDS =
+  /(なぜ|なんで|どうして|理由|原因|止まって|詰まって|進まない|調べ|調査|レビュー(の)?(内容|指摘|コメント)|指摘|中身|読んで|教えて|説明|どういう|どうすれば|方針|続けて|続きを|それで|この方針|その方針|相談|ログ|失敗)/;
+/** 調べてから直す依頼（「確認して直して」）。定型の自動修正ではなく調査を通す */
+const CHECK_THEN_FIX = /(確認|調べ|調査|見て|読んで|レビュー|指摘|方針).*(直して|修正して|対応して|fix)|(直して|修正して|対応して).*(確認|調べ|調査|方針)/i;
 const PR_WORDS = /^(pr|プルリク|pull\s*request)(は|って|を)?[？?\s]*$/i;
 
 export function parseIntent(text: string): ChatIntent {
@@ -41,10 +46,14 @@ export function parseIntent(text: string): ChatIntent {
       .trim();
     return { type: "create_issue", title: title.length >= 4 ? title : null };
   }
+  if (CHECK_THEN_FIX.test(trimmed)) {
+    return { type: "investigate", ref: refs[0] ?? null };
+  }
   if (REPAIR_WORDS.test(trimmed)) {
     return { type: "repair", ref: refs[0] ?? null };
   }
   if (MERGE_WORDS.test(trimmed)) return { type: "merge_check" };
+  if (INVESTIGATE_WORDS.test(trimmed)) return { type: "investigate", ref: refs[0] ?? null };
   if (refs.length > 0) return { type: "status", refs };
   if (RECHECK_WORDS.test(trimmed) || PR_WORDS.test(trimmed)) return { type: "recheck" };
   return { type: "unknown" };
@@ -56,6 +65,8 @@ export type ResolvedIntent =
   | { type: "repair"; target: ResolvedRef }
   | { type: "create_issue"; title: string | null; repo: string; source: ChatTarget | null }
   | { type: "ask"; question: string; options: { label: string; send: string }[] }
+  /** AIが読み取りツールで調べる。対象が決まらなくても聞き返さず、調査側が必要なら聞く */
+  | { type: "investigate"; target: ResolvedRef | null; candidates: ChatTarget[] }
   | { type: "unknown" };
 
 export type ResolvedRef = { repo: string; number: number };
@@ -129,10 +140,23 @@ export function resolveIntent(intent: ChatIntent, context: ChatContext): Resolve
       }
       return { type: "create_issue", title: intent.title, repo, source: context.targets[0] ?? null };
     }
+    case "investigate": {
+      const explicit = intent.ref ? withRepo(intent.ref, context) : null;
+      if (explicit) return { type: "investigate", target: explicit, candidates: [] };
+      const known = context.investigation?.target ?? null;
+      if (context.targets.length === 1) {
+        const [t] = context.targets;
+        return { type: "investigate", target: { repo: t.repo, number: t.number }, candidates: [] };
+      }
+      if (known && (context.targets.length === 0 || context.targets.some((t) => t.number === known.number))) {
+        return { type: "investigate", target: { repo: known.repo, number: known.number }, candidates: [] };
+      }
+      return { type: "investigate", target: null, candidates: context.targets.slice(0, 4) };
+    }
     case "unknown":
       return { type: "unknown" };
   }
 }
 
 export const CHAT_HELP_TEXT =
-  "次のように話しかけてください。\n- 「#3966どうなってる？」（複数なら「3960と3961どうなってる？」）\n- 「直して」「もう一度確認して」「マージできる？」（直前に見た対象を指します）\n- 「別Issueにして」（この会話を材料にIssue案を作ります）";
+  "次のように話しかけてください。\n- 「#3966はなぜ止まっている？」（レビュー・CIログまで調べて理由を答えます）\n- 「確認して直して」（調べたうえで、同じPRの修正依頼を確認カードで出します）\n- 「#3966どうなってる？」（複数なら「3960と3961どうなってる？」）\n- 「直して」「もう一度確認して」「マージできる？」（直前に見た対象を指します）\n- 「別Issueにして」（この会話を材料にIssue案を作ります）";

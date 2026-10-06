@@ -215,12 +215,8 @@ type ProgressBarProps = {
   segments: readonly ProgressSegmentView[];
   /** 色を決めるTailwindの`text-*`クラス。塗り・未達・掃く光がすべて`currentColor`を参照する */
   colorClass: string;
-  /** 実行中（#1439）。塗ったマスの上を背景色寄りの光がバー全体にわたって掃く */
+  /** 実行中（#4056）。現在フェーズの1区間だけをゆっくり明滅させる。ほかの区間は動かさない */
   live?: boolean;
-  /** 起動中（#2449）。まだ0段なので、トラックの上を色の濃い帯が掃く */
-  sweeping?: boolean;
-  /** 順番待ち（#2449）。掃かず、ゆっくり明滅させるだけ */
-  pulsing?: boolean;
   /**
    * 未達のマス（トラック）を濃く塗るか（#2516）。
    *
@@ -250,21 +246,13 @@ function segmentFillClass(state: ProgressSegmentView["state"], emphasizeTrack: b
  * 一覧の行に出す進捗の横棒（#2516）。`WorkflowStepBadge`（進捗Statusを持つ行）と
  * `QueueStepBadge`（実行が始まる前の行）が**同じ寸法・同じ塗り分け**で共有する。
  *
- * 動きの使い分けは円グラフだった頃の外周リングをそのまま引き継ぐ。実行中・起動中だけを
- * 掃き、順番待ちは明滅させるだけにする——掃くと、実際に作業が進んでいる行と一覧の上で
- * 区別が付かなくなる（`docs/code-map.md`「同じ状態を2か所で言わせない」）。
- *
- * **掃く範囲はバー全体で、1マスの中に閉じ込めない**（#2358）。細い弧が1/4周だけ動いて
- * いた頃は「回っているかどうかが分からない」「スマホでは一瞬しか出ていない」と報告された。
- * 40pxを端から端まで通れば動く距離は当時のリングと同等になり、バー自体（塗り＋トラック）が
- * 常時見える輪郭の役を引き継ぐ。
+ * 動くのは実行中の現在区間（`live`）だけ（#4056）。バー全体を横切る光は、現在区間の塗り分けが
+ * 読み取りにくくなるため廃止した。順番待ち・起動中は現在フェーズが未確定なので動かさない。
  */
 function ProgressBar({
   segments,
   colorClass,
   live = false,
-  sweeping = false,
-  pulsing = false,
   emphasizeTrack = false,
 }: ProgressBarProps) {
   return (
@@ -273,7 +261,6 @@ function ProgressBar({
       className={cn(
         "relative flex shrink-0 overflow-hidden rounded-full",
         colorClass,
-        pulsing && "animate-pulse",
       )}
       style={{ width: BAR_WIDTH, height: BAR_HEIGHT }}
     >
@@ -284,15 +271,17 @@ function ProgressBar({
           key={segment.key}
           data-segment={segment.key}
           data-state={segment.state}
-          className={cn("shrink-0 rounded-[1px]", segmentFillClass(segment.state, emphasizeTrack))}
+          className={cn(
+            "shrink-0 rounded-[1px]",
+            segmentFillClass(segment.state, emphasizeTrack),
+            live && segment.state === "current" && "progress-segment-live",
+          )}
           style={{
             width: SEGMENT_WIDTHS[index],
             marginRight: index === segments.length - 1 ? 0 : STAGE_GAP,
           }}
         />
       ))}
-      {live && <span className="progress-live-sweep" />}
-      {sweeping && <span className="progress-bar-sweep" />}
     </span>
   );
 }
@@ -361,12 +350,11 @@ function ProductionTracker({
  * アイコンを添え、一覧をざっと流し見しただけでも要対応Issueだと判別できるようにする。
  * Claudeへの質問が回答待ちの場合はblue色に切り替えたうえで質問アイコンを添える
  * （承認待ちとは別系統の状態のため、両方成立する場合はより緊急度の高い承認待ち表示を優先する）。
- * 実行中はバー全体を光が掃き、進捗（塗り分け）と実行中（動き）を同じバーで同時に
- * 表現する。**動かすかどうかの条件はGitHub ActionsとサブPCで材料が違うため、
+ * 実行中は現在フェーズの1区間だけが明滅し、進捗（塗り分け）と実行中（動き）を同じバーで
+ * 同時に表現する。**動かすかどうかの条件はGitHub ActionsとサブPCで材料が違うため、
  * `isWorkflowBadgeSpinning`（#1439）に集約している。**
  *
- * **掃く光は塗りの上を通るだけで、塗りそのものは動かさない**（#2516）。どこまで進んだかは
- * 光が抜けた後も同じ位置に残る。
+ * **明滅するのは現在区間だけで、済んだ区間・未着手の区間は動かさない**（#4056）。
  */
 export function WorkflowStepBadge({
   labels,
@@ -518,8 +506,8 @@ export function WorkflowStepBadge({
           aria-hidden="true"
         />
       )}
-      {/* 実行中はバー全体を光が掃く（#1439・#2358・#2516）。**承認待ち（amber）でも
-          掃く**——確認待ちのまま処理が動いている状態を動きで表すため（`isWorkflowBadgeSpinning`）。
+      {/* 実行中は現在フェーズの1区間だけが明滅する（#4056）。**承認待ち（amber）でも
+          処理が動いていれば明滅する**（`isWorkflowBadgeSpinning`）。
           確認待ち・回答待ちの行では未達のマスも濃く塗り、行の中で色を伝える唯一の場所として
           十分な面積を確保する */}
       <ProgressBar
@@ -570,16 +558,13 @@ export function QueueStepBadge({ queue, waitReason = null }: QueueStepBadgeProps
       className="flex min-w-0 items-center gap-1.5"
     >
       <span className="max-w-[7rem] truncate text-[10px] text-muted-foreground">{label}</span>
-      {/* 待っていることを形でも言う。起動中は動き（掃く光）が出るのでアイコンは添えない */}
+      {/* 待っていることを形でも言う。起動中は文言だけで伝える */}
       {!isStarting && <Hourglass className="size-3 shrink-0 text-muted-foreground" aria-hidden="true" />}
-      {/* 進捗は0段。`WorkflowStepBadge`の未達部分と同じ濃さになり、同じバーの仲間だと分かる。
-          `animate-pulse`は既定で2秒周期のゆっくりした明滅で、掃く光と違って
-          「進んでいる」とは読めない */}
+      {/* 進捗は0段で、未着手の固定表示にする（#4056）。現在フェーズが未確定なので、どの区間も
+          実行中として動かさず、状態は左の文言（順番待ち・起動中）で伝える */}
       <ProgressBar
         segments={EMPTY_SEGMENTS}
         colorClass={accentColorClass}
-        sweeping={isStarting}
-        pulsing={!isStarting}
       />
     </span>
   );

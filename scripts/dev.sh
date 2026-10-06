@@ -36,7 +36,7 @@ PORT="${PORT:-3000}"
 # （ログインが要らない画面の確認はこのままでもできる）。
 CI_PLACEHOLDER_MARKER="ci-placeholder"
 missing_auth_env=()
-for key in NEXT_PUBLIC_SUPABASE_URL NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ALLOWED_EMAILS; do
+for key in NEXT_PUBLIC_SUPABASE_URL NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY; do
   value="${!key:-}"
   if [ -z "$value" ] || [[ "$value" == *"$CI_PLACEHOLDER_MARKER"* ]]; then
     missing_auth_env+=("$key")

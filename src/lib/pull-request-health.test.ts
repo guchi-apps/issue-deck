@@ -118,6 +118,27 @@ describe("resolvePullRequestHealth（#4015）", () => {
     expect(failed.categories).toContain("review-needs-check");
   });
 
+  it("Claudeだけ・Codexだけのレビュー完了を、全体の完了にしない（#4024）", () => {
+    const claudeOk = withReview("passed", "ok");
+    const codexPending = resolvePullRequestHealth(
+      pr({ ...claudeOk, agentReviews: [{ agent: "codex", state: "pending" }] }),
+    );
+    expect(labelOf(codexPending, "review")).toBe("Codexレビュー実施中");
+    expect(codexPending.categories).toContain("review-running");
+    const codexNg = resolvePullRequestHealth(
+      pr({ ...claudeOk, agentReviews: [{ agent: "codex", state: "changes-requested" }] }),
+    );
+    expect(labelOf(codexNg, "review")).toBe("Codex要修正");
+    expect(codexNg.categories).toContain("review-changes-requested");
+    const claudeNg = resolvePullRequestHealth(
+      pr({ ...withReview("passed", "changes-requested"), agentReviews: [{ agent: "codex", state: "lgtm" }] }),
+    );
+    expect(labelOf(claudeNg, "review")).toBe("レビュー要修正");
+    const all = resolvePullRequestHealth(pr({ ...claudeOk, agentReviews: [{ agent: "codex", state: "lgtm" }] }));
+    expect(labelOf(all, "review")).toBe("レビューLGTM（全員）");
+    expect(all.slots.find((slot) => slot.key === "review")?.breakdown).toHaveLength(2);
+  });
+
   it("旧HEADの判定（要修正もLGTMも）は現在の結果にせず、再検証待ちにする", () => {
     const staleNg = resolvePullRequestHealth(pr(withReview("passed", "changes-requested", OLD_HEAD)));
     expect(labelOf(staleNg, "review")).toBe("再検証待ち");

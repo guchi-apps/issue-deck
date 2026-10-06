@@ -48,6 +48,7 @@ function SlotBody({ slot }: { slot: PullRequestHealthSlot }) {
  */
 export function PullRequestHealthRow({ pullRequest }: { pullRequest: PullRequestSummary }) {
   const [ciOpen, setCiOpen] = useState(false);
+  const [agentOpen, setAgentOpen] = useState(false);
   const health = resolvePullRequestHealth(pullRequest);
   if (health.slots.length === 0) return null;
 
@@ -71,6 +72,28 @@ export function PullRequestHealthRow({ pullRequest }: { pullRequest: PullRequest
             >
               <SlotBody slot={slot} />
               {ciOpen ? (
+                <ChevronDown className="size-3" aria-hidden="true" />
+              ) : (
+                <ChevronRight className="size-3" aria-hidden="true" />
+              )}
+            </button>
+          );
+        }
+        if (slot.detail === "agent-breakdown") {
+          return (
+            <button
+              key={slot.key}
+              type="button"
+              onClick={() => setAgentOpen(!agentOpen)}
+              aria-expanded={agentOpen}
+              title={title}
+              className={cn(
+                className,
+                "transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+              )}
+            >
+              <SlotBody slot={slot} />
+              {agentOpen ? (
                 <ChevronDown className="size-3" aria-hidden="true" />
               ) : (
                 <ChevronRight className="size-3" aria-hidden="true" />
@@ -115,6 +138,21 @@ export function PullRequestHealthRow({ pullRequest }: { pullRequest: PullRequest
           </span>
         );
       })}
+      {agentOpen && (
+        <ul className="mt-1 flex basis-full flex-col gap-1 text-xs" aria-label="エージェント別のレビュー内訳">
+          {health.slots
+            .find((slot) => slot.key === "review")
+            ?.breakdown?.map((row) => (
+              <li key={row.agentLabel} className="flex items-center gap-2">
+                <span className="w-24 shrink-0 text-muted-foreground">{row.agentLabel}</span>
+                <span className={cn(SLOT_CLASS, TONE_CLASS[row.tone])}>
+                  <span aria-hidden="true">{row.icon}</span>
+                  {row.label}
+                </span>
+              </li>
+            ))}
+        </ul>
+      )}
       {ciOpen && (
         <WorkflowRunProgressPanel
           repositoryFullName={pullRequest.repositoryFullName}
@@ -152,6 +190,11 @@ const CHIP_DEFS: {
   { category: "ci-running", label: "CI実行中", icon: "●", tone: "run", description: "CIが完了していないPR" },
   { category: "review-running", label: "レビュー中", icon: "●", tone: "run", description: "レビュー実行中のPR" },
 ];
+
+/** `PullRequestHealthSummaryChips`が1つ以上描画するか（畳んだ行で空のバッジ行を作らないため） */
+export function hasPullRequestHealthChips(summary: PullRequestHealthSummary): boolean {
+  return CHIP_DEFS.some((def) => summary.counts[def.category] > 0);
+}
 
 export function PullRequestHealthSummaryChips({ summary }: { summary: PullRequestHealthSummary }) {
   const chips = CHIP_DEFS.filter((def) => summary.counts[def.category] > 0);
