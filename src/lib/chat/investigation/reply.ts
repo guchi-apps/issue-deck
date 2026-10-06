@@ -238,9 +238,11 @@ export async function replyWithInvestigation(params: {
         } else if (investigatedHead && !pr.head.sha.startsWith(investigatedHead)) {
           text += `\n\n調査後にHEADが進みました（調査 ${investigatedHead} → 現在 ${pr.head.sha.slice(0, 7)}）。古い前提で直さないよう、もう一度調べ直してから依頼してください。`;
         } else {
+          // 過去のターンで合意した方針も依頼へ載せる（引き継いだ合意を落とさない）
+          const agreed = mergeUnique(context.investigation?.agreements ?? [], result.agreements);
           const instruction = [
             proposal.body,
-            result.agreements.length ? `## 合意済みの方針\n${result.agreements.map((a) => `- ${a}`).join("\n")}` : "",
+            agreed.length ? `## 合意済みの方針\n${agreed.map((a) => `- ${a}`).join("\n")}` : "",
             result.unconfirmed.length ? `## 確認できていない点\n${result.unconfirmed.map((a) => `- ${a}`).join("\n")}` : "",
           ]
             .filter(Boolean)
