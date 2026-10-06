@@ -3,6 +3,16 @@
 import { useState } from "react";
 import { Eye, EyeOff, Trash2 } from "lucide-react";
 
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -14,6 +24,7 @@ import {
   SHARED_TOKEN_NAME_MAX_LENGTH,
   SHARED_TOKEN_SOURCE_REFERENCE_MAX_LENGTH,
 } from "@/lib/shared-tokens";
+import { generateSharedTokenValue } from "@/lib/shared-token-generate";
 import type { SharedToken } from "@/types/shared-token";
 
 type SharedTokensSectionProps = {
@@ -36,6 +47,8 @@ export function SharedTokensSection({
   const [description, setDescription] = useState("");
   const [sourceReference, setSourceReference] = useState("");
   const [revealed, setRevealed] = useState<Record<string, string>>({});
+  const [valueVisible, setValueVisible] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<SharedToken | null>(null);
 
   async function handleAdd() {
     const ok = await createSharedToken({
@@ -49,6 +62,7 @@ export function SharedTokensSection({
     setValue("");
     setDescription("");
     setSourceReference("");
+    setValueVisible(false);
     onChanged();
   }
 
@@ -73,7 +87,13 @@ export function SharedTokensSection({
       delete next[id];
       return next;
     });
+    setDeleteTarget(null);
     onChanged();
+  }
+
+  function handleGenerate() {
+    setValue(generateSharedTokenValue());
+    setValueVisible(true);
   }
 
   return (
@@ -108,7 +128,7 @@ export function SharedTokensSection({
                     className="size-7"
                     disabled={isSubmitting}
                     aria-label={`${token.name}を削除`}
-                    onClick={() => void handleDelete(token.id)}
+                    onClick={() => setDeleteTarget(token)}
                   >
                     <Trash2 className="size-4" />
                   </Button>
@@ -140,7 +160,13 @@ export function SharedTokensSection({
         </div>
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="shared-token-value" className="text-xs">トークン値</Label>
-          <Input id="shared-token-value" type="password" autoComplete="off" value={value} onChange={(event) => setValue(event.target.value)} />
+          <div className="flex gap-2">
+            <Input id="shared-token-value" type={valueVisible ? "text" : "password"} autoComplete="off" value={value} onChange={(event) => setValue(event.target.value)} />
+            <Button type="button" variant="outline" className="shrink-0" onClick={handleGenerate}>自動生成</Button>
+          </div>
+          {valueVisible && value && (
+            <p className="text-xs text-muted-foreground">ランダムな値を入力しました。登録後は一覧から再表示できます。</p>
+          )}
         </div>
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="shared-token-description" className="text-xs">説明（任意）</Label>
@@ -154,10 +180,35 @@ export function SharedTokensSection({
       <Button className="self-start" onClick={() => void handleAdd()} disabled={isSubmitting || !name.trim() || !value}>
         {isSubmitting ? "登録中..." : "移行して登録"}
       </Button>
-      {mutationError && <p className="text-sm text-destructive">{mutationError}</p>}
+      {mutationError && !deleteTarget && <p className="text-sm text-destructive">{mutationError}</p>}
       <p className="text-xs text-muted-foreground">
         1Passwordの値をここへ一度だけ入力して移行します。値は暗号化して保存され、一覧・利用履歴・エラーには表示されません。
       </p>
+
+      <AlertDialog open={deleteTarget !== null} onOpenChange={(open) => !open && !isSubmitting && setDeleteTarget(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>トークンを削除しますか？</AlertDialogTitle>
+            <AlertDialogDescription>
+              「{deleteTarget?.name}」を削除します。このトークンを使っているアプリは、次の取得から認証に失敗します。元に戻せません。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          {mutationError && <p className="text-sm text-destructive">{mutationError}</p>}
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isSubmitting}>キャンセル</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-white hover:bg-destructive/90"
+              disabled={isSubmitting}
+              onClick={(event) => {
+                event.preventDefault();
+                if (deleteTarget) void handleDelete(deleteTarget.id);
+              }}
+            >
+              {isSubmitting ? "削除中…" : "削除する"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
