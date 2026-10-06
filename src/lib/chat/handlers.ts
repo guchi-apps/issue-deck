@@ -194,10 +194,10 @@ export async function handleChatMessage(params: {
     }
 
     case "unknown": {
-      // 定型に当たらない質問・依頼はAIの調査へ。AIが使えないときだけ従来の使い方案内に戻す
+      // 定型に当たらない質問・依頼（番号のない設計相談を含む）はAIの調査へ。AIが使えないときも、
+      // 理由と再試行を返し、操作案内で上書きしない（#4093）。使い方案内は短すぎる発言だけ
       if (params.text.trim().length >= 3) {
-        const reply = await investigate(null, context.targets.length > 1 ? context.targets.slice(0, 4) : []);
-        if (!reply.unavailable) return reply;
+        return investigate(null, context.targets.length > 1 ? context.targets.slice(0, 4) : []);
       }
       return { text: CHAT_HELP_TEXT, cards: [], needsConfirm: false, nextContext: context };
     }

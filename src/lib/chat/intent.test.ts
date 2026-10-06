@@ -126,3 +126,36 @@ describe("調査の意図（#4045）", () => {
     expect(multi.type === "investigate" && multi.candidates).toHaveLength(2);
   });
 });
+
+describe("番号のない設計相談（#4093）", () => {
+  const CONSULT = "勤務画面では、月表示だと表示数が多くて月末のときに見にくい。週ごとに表示されるぐらいの方が見やすいかも";
+  const consulting: ChatContext = {
+    repo: REPO,
+    targets: [],
+    actions: [],
+    investigation: { target: null, summary: "s", evidence: [], agreements: [], openQuestions: [], unconfirmed: [], updatedAt: "" },
+  };
+
+  it("初回の相談文は操作ではなくunknown（調査へ渡る）", () => {
+    expect(parseIntent(CONSULT)).toEqual({ type: "unknown" });
+  });
+
+  it("「31日」「30件」などの単位付きの数値を番号とみなさない", () => {
+    expect(extractRefs("月末の31日が見にくい")).toEqual([]);
+    expect(extractRefs("30件を超えると重い")).toEqual([]);
+    expect(parseIntent("月末の31日が見にくい")).toEqual({ type: "unknown" });
+    expect(extractRefs("3966どうなってる？")).toEqual([{ repo: null, number: 3966 }]);
+  });
+
+  it("相談中の質問・前置きを修正依頼・Issue起案と区別する", () => {
+    expect(parseIntent("直すならどの案がよい？")).toEqual({ type: "investigate", ref: null });
+    expect(parseIntent("Issueにする前に相談したい")).toEqual({ type: "investigate", ref: null });
+    expect(parseIntent("この内容でIssue起案して").type).toBe("create_issue");
+  });
+
+  it("相談の途中の「現状を確認して」は前のPRではなく相談へつなぐ", () => {
+    const withPr: ChatContext = { ...consulting, targets: [] };
+    expect(resolveIntent(parseIntent("現状を確認して"), withPr)).toEqual({ type: "investigate", target: null, candidates: [] });
+    expect(resolveIntent(parseIntent("確認して"), ctx([]))).toMatchObject({ type: "ask" });
+  });
+});

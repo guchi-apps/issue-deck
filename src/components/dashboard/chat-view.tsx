@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { useChat } from "@/hooks/use-chat";
 
-const PLACEHOLDER = "メッセージを入力（例：3966どうなってる？ / 直して / 別Issueにして）";
+const PLACEHOLDER = "メッセージを入力（例：勤務画面を週表示にしたい / 3966どうなってる？ / 別Issueにして）";
 
 /**
  * IssueDeck Chat（#3975）。自然言語から既存のIssue・PR・PR自動修正・Issue起案を呼ぶ入口。
@@ -148,7 +148,7 @@ export function ChatView({
             )}
             {chat.messages.length === 0 && chat.outbox.length === 0 && (
               <p className="m-auto max-w-sm text-center text-sm text-muted-foreground">
-                「3966どうなってる？」のように番号を送ると、CI・レビュー・コンフリクト・修復の状態を返します。
+                「3966どうなってる？」のように番号を送ると、CI・レビュー・コンフリクト・修復の状態を返します。番号がなくても、困りごとや改善案（例：「勤務画面を週ごとに表示したい」）を送れば、案の比較から「これでIssue起案して」まで相談できます。
               </p>
             )}
             {chat.messages.map((message) =>

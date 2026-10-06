@@ -215,4 +215,43 @@ describe("会話シナリオ", () => {
     expect(reply.unavailable).toBe(true);
     expect(reply.needsConfirm).toBe(false);
   });
+
+  it("番号のない相談は、PR番号を求めずツールなしで案を返し、提案カードを出さない（#4093）", async () => {
+    const reply = await run("勤務画面を週ごとに表示したいかも", {
+      target: null,
+      model: undefined,
+      deps: { callModel: model(final({ reply: "案A: 週表示 / 案B: 週月切替（推奨）", proposal_kind: "issue", proposal_repo: "a/b", proposal_title: "t", proposal_body: "b" })) },
+    } as never);
+    expect(reply.unavailable).toBe(false);
+    expect(reply.text).toContain("週月切替");
+    expect(reply.needsConfirm).toBe(false);
+    expect(reply.cards.some((c) => c.type.startsWith("confirm_"))).toBe(false);
+    expect(reply.nextContext.targets).toEqual([]);
+  });
+
+  it("起案依頼では、相談の合意を反映したIssue案を確認カードで返す（#4093）", async () => {
+    const reply = await run("この内容でIssue起案して", {
+      target: null,
+      deps: { callModel: model(final({ agreements: ["週/月の切替"], proposal_kind: "issue", proposal_repo: "a/b", proposal_title: "勤務画面の週表示", proposal_body: "## 合意\n- 週/月の切替" })) },
+    } as never);
+    expect(reply.needsConfirm).toBe(true);
+    expect(reply.cards.find((c) => c.type === "confirm_issue")).toMatchObject({ title: "勤務画面の週表示" });
+    expect(reply.nextContext.investigation?.agreements).toEqual(["週/月の切替"]);
+  });
+
+  it.each([
+    ["AIの認証情報が設定されていません", "認証情報が未設定"],
+    ["HTTP 401", "認証が拒否"],
+    ["時間切れ", "通信に失敗"],
+    ["応答が空でした", "読み取れませんでした"],
+  ])("AIが使えないとき、原因（%s）と再試行を出し、操作案内で上書きしない", async (reason, label) => {
+    const reply = await run("勤務画面を週ごとに表示したいかも", {
+      target: null,
+      deps: { callModel: async () => ({ ok: false, reason }) },
+    } as never);
+    expect(reply.unavailable).toBe(true);
+    expect(reply.text).toContain(label);
+    expect(reply.text).not.toContain("次のように話しかけてください");
+    expect(reply.cards).toContainEqual(expect.objectContaining({ type: "choice", options: [{ label: "同じ内容で再試行", send: "勤務画面を週ごとに表示したいかも" }] }));
+  });
 });

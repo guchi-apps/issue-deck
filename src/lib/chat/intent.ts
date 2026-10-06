@@ -7,7 +7,7 @@ import type { ChatContext, ChatIntent, ChatRef, ChatTarget } from "@/lib/chat/ty
  */
 
 // `owner/repo#123`・`repo#123`・`#123`・`123`（2桁以上の裸の数字）を拾う。
-const REF_PATTERN = /(?:([\w.-]+\/[\w.-]+)|([\w.-]+))?#(\d{1,7})|(?<![\w/.-])(\d{2,7})(?![\w/.-])/g;
+const REF_PATTERN = /(?:([\w.-]+\/[\w.-]+)|([\w.-]+))?#(\d{1,7})|(?<![\w/.-])(\d{2,7})(?![\w/.-])(?!\s*(?:日|件|個|人|回|分|時|月|年|週|円|％|%|行|枚|本|台|名|桁|秒|倍|割|番目|px|ms))/g;
 
 export function extractRefs(text: string): ChatRef[] {
   const refs: ChatRef[] = [];
@@ -31,6 +31,12 @@ const INVESTIGATE_WORDS =
   /(なぜ|なんで|どうして|理由|原因|止まって|詰まって|進まない|調べ|調査|レビュー(の)?(内容|指摘|コメント)|指摘|中身|読んで|教えて|説明|どういう|どうすれば|方針|続けて|続きを|それで|この方針|その方針|相談|ログ|失敗)/;
 /** 調べてから直す依頼（「確認して直して」）。定型の自動修正ではなく調査を通す */
 const CHECK_THEN_FIX = /(確認|調べ|調査|見て|読んで|レビュー|指摘|方針).*(直して|修正して|対応して|fix)|(直して|修正して|対応して).*(確認|調べ|調査|方針)/i;
+/**
+ * 設計の相談・比較の質問（#4093）。「直すならどの案がよい？」「Issueにする前に相談したい」を、
+ * 修正依頼・Issue起案の操作と取り違えないよう、操作語より先に調べ（相談）へ回す
+ */
+const CONSULT_WORDS =
+  /(相談したい|相談です|相談に乗|どの案|どちらがいい|どっちがいい|どれがいい|どれがよい|直すなら|直すとしたら|直すべき|にする前に|起案する前に|起票する前に|してもいい？|でいい？|がよい？|がいい？)/;
 const PR_WORDS = /^(pr|プルリク|pull\s*request)(は|って|を)?[？?\s]*$/i;
 
 export function parseIntent(text: string): ChatIntent {
@@ -38,6 +44,7 @@ export function parseIntent(text: string): ChatIntent {
   if (!trimmed) return { type: "unknown" };
   const refs = extractRefs(trimmed);
 
+  if (CONSULT_WORDS.test(trimmed)) return { type: "investigate", ref: refs[0] ?? null };
   if (ISSUE_WORDS.test(trimmed)) {
     const title = trimmed
       .replace(/(この問題は|これは|それは|これを|それを)/g, "")
@@ -90,6 +97,11 @@ function suggestOptions(context: ChatContext, verb: string) {
  * 複数を並べて見せた直後の「直して」は、どれを指すか決められないので聞き返す。
  */
 export function resolveIntent(intent: ChatIntent, context: ChatContext): ResolvedIntent {
+  // 番号なしの設計相談の途中（調査の対象が無い）。「現状を確認して」「それで」は前のPRではなく相談へつなぐ
+  const consulting = !!context.investigation && !context.investigation.target && context.targets.length === 0;
+  if (consulting && (intent.type === "recheck" || (intent.type === "investigate" && !intent.ref))) {
+    return { type: "investigate", target: null, candidates: [] };
+  }
   switch (intent.type) {
     case "status": {
       const targets = intent.refs.map((ref) => withRepo(ref, context));
@@ -159,4 +171,4 @@ export function resolveIntent(intent: ChatIntent, context: ChatContext): Resolve
 }
 
 export const CHAT_HELP_TEXT =
-  "次のように話しかけてください。\n- 「#3966はなぜ止まっている？」（レビュー・CIログまで調べて理由を答えます）\n- 「確認して直して」（調べたうえで、同じPRの修正依頼を確認カードで出します）\n- 「#3966どうなってる？」（複数なら「3960と3961どうなってる？」）\n- 「直して」「もう一度確認して」「マージできる？」（直前に見た対象を指します）\n- 「別Issueにして」（この会話を材料にIssue案を作ります）";
+  "次のように話しかけてください。\n- 「勤務画面を週表示にしたいかも」（番号なしの困りごと・改善案の相談。案の比較から「これでIssue起案して」まで進めます）\n- 「#3966はなぜ止まっている？」（レビュー・CIログまで調べて理由を答えます）\n- 「確認して直して」（調べたうえで、同じPRの修正依頼を確認カードで出します）\n- 「#3966どうなってる？」（複数なら「3960と3961どうなってる？」）\n- 「直して」「もう一度確認して」「マージできる？」（直前に見た対象を指します）\n- 「別Issueにして」（この会話を材料にIssue案を作ります）";
