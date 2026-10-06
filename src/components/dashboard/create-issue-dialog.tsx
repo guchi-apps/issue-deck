@@ -1252,7 +1252,10 @@ export function CreateIssueDialog({
       </Button>
       {/* 「タイトル・ラベルを付与」の専用ボタンは廃止（#2773）。タイトルが空のまま押すと、
           `handleSubmit`/`handleCreateAndStart`が送信前に自動で判定してから作成する */}
+      {/* 主導線は「作成+実装開始」なので、そちらを強調色にする（#4086）。質問モードは
+          このボタンだけが出るため強調色のままにする */}
       <Button
+        variant={isQuestion ? "default" : "secondary"}
         className="flex-1 sm:flex-none"
         onClick={handleSubmit}
         disabled={
@@ -1277,7 +1280,6 @@ export function CreateIssueDialog({
           タイトルが空でも押せる（#2773）——押すと送信前に自動でタイトル・ラベルを判定する */}
       {!isQuestion && (
         <Button
-          variant="secondary"
           className="flex-1 sm:flex-none"
           onClick={handleCreateAndStart}
           disabled={
