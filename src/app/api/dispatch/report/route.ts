@@ -105,6 +105,11 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: result.reason }, { status });
   }
 
+  if (result.job.kind === "REVIEW_FIX" && status !== "running" && status !== "succeeded") {
+    const { notifyReviewFixFailure } = await import("@/lib/dispatch/review-fix-notify");
+    await notifyReviewFixFailure(result.job.repositoryFullName, result.job.issueNumber, message ?? "サブPCのレビュー修正が停止しました。");
+  }
+
   // PRレビューが確定したら、そのPRの最終マージ判定（`auto-merge`ジョブ）をイベント駆動で
   // 再開する（#3990）。Actionsのrunがまだ走っている間は再開できないので、失敗は握り潰して
   // 巡回（`POST /api/dispatch/pr-review/resume-sweep`）に任せる。報告そのものは受け付ける

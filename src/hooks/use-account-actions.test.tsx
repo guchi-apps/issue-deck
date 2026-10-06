@@ -35,7 +35,7 @@ describe("useAccountActions", () => {
     expect(refresh).toHaveBeenCalledOnce();
   });
 
-  it("アカウント削除はAPIで利用者を削除してから全セッションを破棄する", async () => {
+  it("アカウント削除はAPIでアプリ利用者を削除し、IssueDeckのセッションだけ破棄する", async () => {
     const fetchMock = vi.fn(async () => ({ ok: true }) as Response);
     vi.stubGlobal("fetch", fetchMock);
     const { result } = renderHook(() => useAccountActions());
@@ -43,8 +43,19 @@ describe("useAccountActions", () => {
     await act(() => result.current.handleDeleteAccount());
 
     expect(fetchMock).toHaveBeenCalledWith("/api/account", { method: "DELETE" });
-    expect(signOut).toHaveBeenCalledWith({ scope: "global" });
+    expect(signOut).toHaveBeenCalledWith({ scope: "local" });
+    expect(signOut).not.toHaveBeenCalledWith({ scope: "global" });
     expect(push).toHaveBeenCalledWith("/login");
     expect(refresh).toHaveBeenCalledOnce();
+  });
+
+  it("アカウント削除APIが失敗したらセッションを維持する", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => ({ ok: false }) as Response));
+    const { result } = renderHook(() => useAccountActions());
+
+    await act(() => result.current.handleDeleteAccount());
+
+    expect(signOut).not.toHaveBeenCalled();
+    expect(push).not.toHaveBeenCalled();
   });
 });

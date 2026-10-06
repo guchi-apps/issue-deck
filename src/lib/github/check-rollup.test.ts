@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   AI_REVIEW_NONE,
+  dropSupersededCheckRuns,
   fetchCheckRollup,
   fetchPullRequestRollup,
   fetchPullRequestRollups,
@@ -962,5 +963,88 @@ describe("fetchPullRequestRollups", () => {
 
     await expect(fetchPullRequestRollups([], "token")).resolves.toEqual(new Map());
     expect(calls).toHaveLength(0);
+  });
+});
+
+/** 時刻付きのcheck-run（#4070）。分は`2026-10-05T16:MM:00Z`の分 */
+function timedRun(
+  conclusion: string | null,
+  startedMinute: number,
+  completedMinute: number | null,
+  job = "test",
+  workflowFile = "ci.yml",
+) {
+  const at = (minute: number) => `2026-10-05T16:${String(minute).padStart(2, "0")}:00Z`;
+  return {
+    ...checkRun(completedMinute === null ? "IN_PROGRESS" : "COMPLETED", conclusion, workflowFile, job),
+    startedAt: at(startedMinute),
+    completedAt: completedMinute === null ? null : at(completedMinute),
+  };
+}
+
+describe("dropSupersededCheckRuns（#4070）", () => {
+  it("失敗した後に同じジョブが再実行されていれば、古い失敗を外す", () => {
+    const failed = timedRun("FAILURE", 0, 5);
+    const rerun = timedRun("SUCCESS", 10, 15);
+    expect(dropSupersededCheckRuns([failed, rerun])).toEqual([rerun]);
+  });
+
+  it("キャンセルされた実行は、同時かそれより後に始まった同じジョブがあれば外す", () => {
+    const cancelled = timedRun("CANCELLED", 0, 1);
+    const running = timedRun(null, 0, null);
+    expect(dropSupersededCheckRuns([cancelled, running])).toEqual([running]);
+  });
+
+  it("時刻が重なる実行（push・pull_requestの並行実行）はどちらも残す", () => {
+    const pushRun = timedRun("FAILURE", 0, 5);
+    const prRun = timedRun("SUCCESS", 1, 6);
+    expect(dropSupersededCheckRuns([pushRun, prRun])).toEqual([pushRun, prRun]);
+  });
+
+  it("同時刻に始まったキャンセルどうしは互いを外し合わない", () => {
+    const first = timedRun("CANCELLED", 0, 1);
+    const second = timedRun("CANCELLED", 0, 1);
+    expect(dropSupersededCheckRuns([first, second])).toEqual([first, second]);
+  });
+
+  it("ジョブ名・ワークフローが違えば別物として扱う", () => {
+    const lint = timedRun("FAILURE", 0, 5, "lint");
+    const test = timedRun("SUCCESS", 10, 15, "test");
+    const other = timedRun("SUCCESS", 10, 15, "lint", "other.yml");
+    expect(dropSupersededCheckRuns([lint, test, other])).toEqual([lint, test, other]);
+  });
+
+  it("時刻が読めないものは外さない", () => {
+    const failed = checkRun("COMPLETED", "FAILURE", "ci.yml", "test");
+    const rerun = timedRun("SUCCESS", 10, 15);
+    expect(dropSupersededCheckRuns([failed, rerun])).toEqual([failed, rerun]);
+  });
+
+  it("再実行で通ったCIは、過去の失敗が残っていても「失敗」に数えない", async () => {
+    stubGraphql(
+      rollupResponse({
+        state: "FAILURE",
+        contexts: {
+          totalCount: 2,
+          nodes: [timedRun("FAILURE", 0, 5), timedRun("SUCCESS", 10, 15)],
+        },
+      }),
+    );
+    const rollup = await fetchCheckRollup("owner", "repo", "issue-1", "token");
+    expect(rollup?.checks).toEqual([{ status: "completed", conclusion: "success" }]);
+  });
+
+  it("今の実行が失敗していれば、従来どおり失敗に数える", async () => {
+    stubGraphql(
+      rollupResponse({
+        state: "FAILURE",
+        contexts: {
+          totalCount: 2,
+          nodes: [timedRun("SUCCESS", 0, 5), timedRun("FAILURE", 10, 15)],
+        },
+      }),
+    );
+    const rollup = await fetchCheckRollup("owner", "repo", "issue-1", "token");
+    expect(rollup?.checks).toEqual([{ status: "completed", conclusion: "failure" }]);
   });
 });

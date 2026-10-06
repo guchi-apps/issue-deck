@@ -6,7 +6,11 @@ import {
   isCheckUserReasonLabel,
 } from "@/lib/github/approval-labels";
 import { getInstallationToken } from "@/lib/github/app-auth";
-import { compareBranches, fetchBranchHeadSha } from "@/lib/github/branches-api";
+import {
+  compareBranches,
+  fetchBlobShasAtRef,
+  fetchBranchHeadSha,
+} from "@/lib/github/branches-api";
 import { sweepCompletedCodeReviews } from "@/lib/github/code-review-close-sweep-run";
 import type { CodeReviewCloseSkipReason } from "@/lib/github/code-review-close-sweep";
 import {
@@ -27,12 +31,16 @@ import {
   buildStrandedComment,
   decideClosedStrandedIssue,
   decideMergedOpenIssue,
+  decidePostMergeCheckUser,
   decideProgressSweep,
   decideStaleCheckUser,
+  findCheckUserWaitReasons,
   hasDevelopMergedNotice,
   hasStrandedNotice,
+  isResidualAlreadyInBase,
   needsStrandedCheck,
   progressSweepIntervalMinutes,
+  residualLookupPaths,
   type ClosedStrandedSkipReason,
   type MergedOpenFacts,
   type MergedOpenSkipReason,
@@ -42,6 +50,7 @@ import {
 import { fetchPullRequestsForHead } from "@/lib/github/pull-requests-api";
 import { reportProgressStatus } from "@/lib/github/report-progress";
 import { matchProjectStatus, type ProgressStatusKey } from "@/lib/issue-progress";
+import { extractManualStepReferences } from "@/lib/manual-step-prerequisites";
 
 /**
  * developへのマージ後に取り残された進捗を巡回して回収する（#2294）。
@@ -485,11 +494,30 @@ async function sweepIssue(params: {
 
   let compare: ProgressSweepCompare | null = null;
   let hasOpenDevelopPullRequest = false;
+  let residualAlreadyInDevelop = false;
   if (needsStrandedCheck(branchHead, mergedPullRequest.headSha)) {
-    compare = await compareBranches(ownerLogin, name, BASE_BRANCH, branch, token);
+    const compared = await compareBranches(ownerLogin, name, BASE_BRANCH, branch, token);
+    compare = compared;
+    // 残ったコミットの中身がdevelopの先端に既にあるかを確かめる（#4070）。GraphQL 1回で、
+    // 先端が食い違うIssueでしか投げない（平常時の消費は増えない）。
+    if (compared && compared.aheadBy !== 0 && compared.changedFiles !== 0 && compared.files) {
+      const baseBlobShas = await fetchBlobShasAtRef(
+        ownerLogin,
+        name,
+        BASE_BRANCH,
+        residualLookupPaths(compared.files),
+        token,
+      );
+      residualAlreadyInDevelop = isResidualAlreadyInBase(compared.files, baseBlobShas);
+    }
     // developへ持ち込む変更が残っているときだけ、開いているPRの有無まで確かめる
     // （compareが読めなかった場合も含めて、判定は`decideProgressSweep`に任せる）。
-    if (compare && compare.aheadBy !== 0 && compare.changedFiles !== 0) {
+    if (
+      compare &&
+      compare.aheadBy !== 0 &&
+      compare.changedFiles !== 0 &&
+      !residualAlreadyInDevelop
+    ) {
       const open = await fetchPullRequestsForHead(
         ownerLogin,
         name,
@@ -503,7 +531,7 @@ async function sweepIssue(params: {
   }
 
   const decision = decideProgressSweep(
-    { mergedPullRequest, branchHead, compare, hasOpenDevelopPullRequest },
+    { mergedPullRequest, branchHead, compare, hasOpenDevelopPullRequest, residualAlreadyInDevelop },
     { now },
   );
 
@@ -541,8 +569,21 @@ async function sweepIssue(params: {
     return { repositoryFullName: params.repositoryFullName, issueNumber, kind: "stranded" };
   }
 
-  // 進める。**確認待ちを先に解く**（人がやることは無くなったため）。
-  await clearCheckUser(ownerLogin, name, issueNumber, token);
+  // 進める。**確認待ちを先に解く**（人がやることは無くなったため）。ただしマージ後に
+  // 付いた確認待ちは、手作業・前提・後続PRが残っていれば外さない（#4070）。
+  const checkUser = await decideCheckUserOnAdvance({
+    repositoryFullName: params.repositoryFullName,
+    issueNumber,
+    mergedAt: merged.merged_at,
+    mergedPullRequestBody: merged.body,
+  });
+  if (checkUser.action === "clear") {
+    await clearCheckUser(ownerLogin, name, issueNumber, token);
+  } else {
+    console.info(
+      `[progress-sweep] ${params.repositoryFullName}#${issueNumber} の${CHECK_USER_LABEL}は待つ理由が残っているため外しません（${checkUser.reasons.join(", ")}）`,
+    );
+  }
   // 通知の重複判定も`develop-merge-sweep`ジョブと同じ（PRのURLと定型文で見分ける）ため、
   // 配布前のリポジトリで両方が動いてもコメントは1件しか付かない。
   if (!hasDevelopMergedNotice(commentBodies, decision.pullRequestUrl)) {
@@ -562,6 +603,68 @@ async function sweepIssue(params: {
     );
   }
   return { repositoryFullName: params.repositoryFullName, issueNumber, kind: "advanced" };
+}
+
+/**
+ * `Develop`へ進めるとき、付いている`00.check-user`を外すかを決める（#4070）。
+ *
+ * 材料はissue-deckのDB（付与時刻・子Issueの件数・本文の`## 前提条件`）と、マージした
+ * PRの本文だけで、**GitHub APIは消費しない。** 判定は`decidePostMergeCheckUser`。
+ *
+ * `00.check-user`が付いていない・DBに行が無いIssueは、従来どおり`clear`（付いていなければ
+ * `clearCheckUser`は何もしない）。
+ */
+async function decideCheckUserOnAdvance(params: {
+  repositoryFullName: string;
+  issueNumber: number;
+  mergedAt: string | null;
+  mergedPullRequestBody: string | null;
+}) {
+  const row = await db.issue.findFirst({
+    where: {
+      number: params.issueNumber,
+      repository: { fullName: params.repositoryFullName },
+    },
+    select: {
+      body: true,
+      checkUserLabeledAt: true,
+      subIssuesTotal: true,
+      subIssuesCompleted: true,
+    },
+  });
+  if (!row || row.checkUserLabeledAt === null) {
+    return decidePostMergeCheckUser({ checkUserLabeledAt: null, mergedAt: params.mergedAt, reasons: [] });
+  }
+
+  const prerequisites = extractManualStepReferences(
+    row.body,
+    params.repositoryFullName,
+    params.issueNumber,
+    { includeOrigin: false },
+  );
+  const openPrerequisiteCount =
+    prerequisites.length === 0
+      ? 0
+      : await db.issue.count({
+          where: {
+            state: "OPEN",
+            OR: prerequisites.map((reference) => ({
+              number: reference.number,
+              repository: { fullName: reference.repositoryFullName },
+            })),
+          },
+        });
+
+  return decidePostMergeCheckUser({
+    checkUserLabeledAt: row.checkUserLabeledAt,
+    mergedAt: params.mergedAt,
+    reasons: findCheckUserWaitReasons({
+      subIssuesTotal: row.subIssuesTotal,
+      subIssuesCompleted: row.subIssuesCompleted,
+      openPrerequisiteCount,
+      mergedPullRequestBody: params.mergedPullRequestBody,
+    }),
+  });
 }
 
 /**

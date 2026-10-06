@@ -17,12 +17,15 @@ export function useAccountActions() {
   }
 
   async function handleDeleteAccount() {
-    await fetch("/api/account", { method: "DELETE" });
+    const res = await fetch("/api/account", { method: "DELETE" });
+    // 削除に失敗したときはログイン状態を保ち、そのまま再試行できるようにする。
+    if (!res.ok) return false;
     const supabase = createClient();
-    // アカウント削除では残っているセッションを利用可能なままにしない。
-    await supabase.auth.signOut({ scope: "global" });
+    // 共有Supabaseの他アプリのセッションを巻き込まないよう、IssueDeckのセッションだけ破棄する。
+    await supabase.auth.signOut({ scope: "local" });
     router.push("/login");
     router.refresh();
+    return true;
   }
 
   return { handleLogout, handleDeleteAccount };

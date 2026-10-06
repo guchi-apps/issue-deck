@@ -70,6 +70,7 @@ case "$1 $2" in
     exit 0 ;;
 esac
 if [ "$1" = "api" ]; then
+  if [[ "$2" == *comments* ]]; then printf '%s' "\${STUB_PR_JSON:-[]}"; exit 0; fi
   exit "\${STUB_CALLER_EXIT:-0}"
 fi
 exit 0
@@ -94,7 +95,8 @@ afterEach(() => {
 
 function run({
   issueComments = `理由\n${VERDICT}`,
-  prComments = `## 総評\n要修正\n${AUTOFIX}`,
+  prComments = `## 総評\n要修正\n<!-- issue-deck-review-verdict:changes-requested sha=${HEAD_SHA} -->\n${AUTOFIX}`,
+  prJson,
   labels = "",
   merged = "false",
   callerExit = "0",
@@ -123,6 +125,7 @@ function run({
       REVIEW_AUTO_FIX: autoFix,
       STUB_ISSUE_COMMENTS: issueComments,
       STUB_PR_COMMENTS: prComments,
+      STUB_PR_JSON: JSON.stringify(prJson ?? [{body:prComments, created_at:"2026-10-05", author_association:"OWNER"}]),
       STUB_LABELS: labels,
       STUB_MERGED: merged,
       STUB_CALLER_EXIT: callerExit,
@@ -215,3 +218,14 @@ describe("レビュー指摘の自動修正への渡し（#3363）", () => {
     expect(result.log).toContain("2/2回目");
   });
 });
+
+ it("Codexの安全な最新指摘も自動修正へ渡す", () => {
+   expect(run({ issueComments:"", prComments:`<!-- issue-deck-codex-review-verdict:changes-requested sha=${HEAD_SHA} -->\n${AUTOFIX}`, codexReviewResult:"success" }).handedOff).toBe(true);
+ });
+ it("古い安全印の後に最新needs-checkがあれば人へ渡す", () => {
+   expect(run({ prJson:[{body:`<!-- issue-deck-review-verdict:changes-requested sha=${HEAD_SHA} -->\n${AUTOFIX}`,created_at:"1"},{body:`<!-- issue-deck-review-verdict:needs-check sha=${HEAD_SHA} -->`,created_at:"2"}] }).handedOff).toBe(false);
+ });
+ it("同じHEADのworkflow再実行はhandoffを増やさない", () => {
+   const result=run({issueComments:`${VERDICT}\n<!-- issue-deck-review-fix:handoff sha=${HEAD_SHA} -->`});
+   expect(result.handedOff).toBe(true); expect(result.log).not.toContain("COMMENT");
+ });

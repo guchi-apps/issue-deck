@@ -149,8 +149,12 @@ export function resolveExecutionFlows(settings: ExecutionFlowSettings): Executio
       model: describeCodexModel(workflowCodexModel), source: "PRレビュー・修復設定", setting: workflowCodexModel === "auto" ? "デフォルト継承" : describeCodexModel(workflowCodexModel), reasoningEffort: workflowCodexReasoningEffort === "default" ? "デフォルト継承" : workflowCodexReasoningEffort, sourceId: "workflow-model-settings",
     },
     {
-      group: "修復", name: "レビュー指摘修正・CI自動修正・コンフリクト解消・PR repair", location: "GitHub Actions", agent: "Claude Code",
-      model: describeClaudeModel(workflowClaudeModel), source: "PRレビュー・修復設定", setting: workflowClaudeModel === "auto" ? "デフォルト継承" : describeClaudeModel(workflowClaudeModel), sourceId: "workflow-model-settings", note: "この設定はレビュー指摘修正、CI自動修正、コンフリクト解消、PR repair で共有します。",
+      group: "修復", name: "レビュー指摘修正（Claude）・CI自動修正・コンフリクト解消・PR repair", location: "GitHub Actions", agent: "Claude Code",
+      model: describeClaudeModel(workflowClaudeModel), source: "PRレビュー・修復設定", setting: workflowClaudeModel === "auto" ? "デフォルト継承" : describeClaudeModel(workflowClaudeModel), sourceId: "workflow-model-settings", note: "Claude実装のレビュー指摘修正と、CI自動修正・コンフリクト解消・PR repairで共有します。",
+    },
+    {
+      group: "修復", name: "レビュー指摘修正（Codex）", location: "サブPC", agent: "Codex CLI",
+      model: describeCodexModel(workflowCodexModel), source: "PRレビュー・修復設定", setting: workflowCodexModel === "auto" ? "デフォルト継承" : describeCodexModel(workflowCodexModel), reasoningEffort: workflowCodexReasoningEffort === "default" ? "デフォルト継承" : workflowCodexReasoningEffort, sourceId: "workflow-model-settings", note: "Codexで実装したIssueのレビュー指摘を、サブPCのChatGPT購読認証で修正します。APIキーは不要です。",
     },
     {
       group: "アプリ内AI", name: "要約・検索・文章整理・手作業アシスタント", location: "IssueDeckサーバー",

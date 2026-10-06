@@ -1874,6 +1874,12 @@ export function POST(request: NextRequest) {
   ものそのもので、この選別を自前で再現しなくてよい（起動イベントで絞る自作フィルタは、GitHub Actions
   以外のチェック——外部CIのcommit status——を落とす）。集約の規則（未完了が1つでもあれば失敗より
   優先して`pending`）は`resolveCiStateFromCheckRuns`のまま変えていない。
+- **同じheadコミットで同じジョブが後から走り直していれば、古い実行は数えない**（#4070。
+  `check-rollup.ts`の`dropSupersededCheckRuns`）。`statusCheckRollup`は実行ごとのcheck-runを
+  全部返すため、失敗→再実行で成功した・キャンセル→後続が成功した場合に、古い失敗が残って
+  「CI失敗」になる。外すのは「前の実行が終わった後に始まった再実行がある」か「キャンセル・staleで、
+  同時か後に始まった同じジョブがある」ものだけで、時刻が重なる並行実行（`push`と`pull_request`）は
+  どちらも残す
 - **そのうえで、issue-deckが配る運用自動化のcheck-runは集約に数えない**（#1799。
   `check-rollup.ts`の`NON_CI_WORKFLOW_FILES`）。`pull_request`・`push`起動に絞っても、残るのは
   CIだけではない——ラベル付け（`issue-labels.yml`）・自動レビューと自動マージ
@@ -2974,7 +2980,10 @@ export function POST(request: NextRequest) {
   マージ済みなら`Develop`へ進め、`00.check-user`と理由ラベルを外し、マージ完了を通知する。
   マージ済みPRの先端とブランチの先端が食い違う場合は`compare/develop...issue-<番号>`を引き、
   **developへ入らないコミットが猶予（120分）を過ぎて残っていれば`00.check-user`＋`01.check-blocked`で
-  人へ渡す**（#1999）。ラベルの無い手作業Issueへ`71.manual-step`を付け直すのも同じ巡回で、
+  人へ渡す**（#1999）。残ったコミットの中身がdevelopの先端に既にあれば取り残しではないので進める
+  （#4070。`isResidualAlreadyInBase`）。進めるときマージより後に付いた`00.check-user`は、待つ理由
+  （子Issue・前提条件・途中PR・`## 未対応事項`）が残っていれば外さない（`decidePostMergeCheckUser`）。
+  ラベルの無い手作業Issueへ`71.manual-step`を付け直すのも同じ巡回で、
   そちらの探し先はDB（`Issue.title`が`[手作業]`で始まりラベルが無いもの）。
   **マージ時に外しそこねた`00.check-user`を外すのも同じ巡回**（#2335。判定は
   `decideStaleCheckUser`）。マージ時の除去は7枚まとめての1回で再試行が無く、GitHubの

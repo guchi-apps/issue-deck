@@ -308,6 +308,21 @@ export type BranchCompareResult = {
   changedFiles: number | null;
   /** baseに無い最後のコミットの時刻（ISO8601）。取れなければ`null` */
   lastCommitAt: string | null;
+  /**
+   * baseへ持ち込む変更の各ファイル（#4070）。**応答に`files`が無ければ`null`。**
+   * 「持ち込む中身がbaseの先端に既にあるか」を確かめるのに使う（`isResidualAlreadyInBase`）。
+   */
+  files: CompareFile[] | null;
+};
+
+/** 三点比較の`files[]`1件ぶん。`sha`はhead側のblob（削除なら`null`） */
+export type CompareFile = {
+  filename: string;
+  /** `added` / `modified` / `removed` / `renamed`など */
+  status: string;
+  sha: string | null;
+  /** `renamed`のときの元のパス */
+  previousFilename: string | null;
 };
 
 /**
@@ -329,7 +344,7 @@ export async function compareBranches(
   const body: {
     ahead_by?: unknown;
     behind_by?: unknown;
-    files?: unknown;
+    files?: { filename?: unknown; status?: unknown; sha?: unknown; previous_filename?: unknown }[];
     commits?: { commit?: { committer?: { date?: unknown } } }[];
   } = await res.json().catch(() => ({}));
   if (typeof body.ahead_by !== "number" || typeof body.behind_by !== "number") return null;
@@ -340,5 +355,72 @@ export async function compareBranches(
     behindBy: body.behind_by,
     changedFiles: Array.isArray(body.files) ? body.files.length : null,
     lastCommitAt: typeof lastCommitAt === "string" ? lastCommitAt : null,
+    files: Array.isArray(body.files)
+      ? body.files.flatMap((file) =>
+          typeof file.filename === "string"
+            ? [
+                {
+                  filename: file.filename,
+                  status: typeof file.status === "string" ? file.status : "",
+                  // GitHubは削除したファイルにも`sha`を載せることがあるため、状態で落とす
+                  sha: file.status !== "removed" && typeof file.sha === "string" ? file.sha : null,
+                  previousFilename:
+                    typeof file.previous_filename === "string" ? file.previous_filename : null,
+                },
+              ]
+            : [],
+        )
+      : null,
   };
+}
+
+/** `fetchBlobShasAtRef`が1回で引くパスの上限。超えたら確かめずに`null`を返す */
+export const MAX_BLOB_LOOKUP_PATHS = 30;
+
+/**
+ * 指定refでの各パスのblob SHAを**1回のGraphQLで**引く（#4070）。ファイルが無ければ`null`。
+ *
+ * 取り残し巡回が「ブランチに残ったコミットの中身が、developの先端に既に入っているか」を
+ * 確かめるのに使う。CI自動修正がPRのマージとほぼ同時に生成物を再生成してpushすると、
+ * 同じ内容が別のコミットでdevelopへ入っていても三点比較は差分を返す（#4039・#4056・#4022）。
+ *
+ * 取得できなかった・パスが多すぎる場合は`null`（＝確かめられなかった）を返し、
+ * 呼び出し側は従来どおり取り残しとして扱う。
+ */
+export async function fetchBlobShasAtRef(
+  owner: string,
+  repo: string,
+  ref: string,
+  paths: readonly string[],
+  token: string,
+): Promise<Map<string, string | null> | null> {
+  if (paths.length === 0) return new Map();
+  if (paths.length > MAX_BLOB_LOOKUP_PATHS) return null;
+  const variables: Record<string, unknown> = { owner, name: repo };
+  const selections = paths.map((path, index) => {
+    variables[`e${index}`] = `${ref}:${path}`;
+    return `    f${index}: object(expression: $e${index}) { ... on Blob { oid } }`;
+  });
+  const declarations = paths.map((_, index) => `$e${index}: String!`).join(", ");
+  const query = `query($owner: String!, $name: String!, ${declarations}) {
+  repository(owner: $owner, name: $name) {
+${selections.join("\n")}
+  }
+}`;
+  try {
+    const data = await githubGraphql<{
+      repository: Record<string, { oid?: string } | null> | null;
+    }>(token, query, variables, "fetchBlobShasAtRef");
+    const repository = data.repository;
+    if (!repository) return null;
+    const result = new Map<string, string | null>();
+    paths.forEach((path, index) => {
+      const oid = repository[`f${index}`]?.oid;
+      result.set(path, typeof oid === "string" ? oid : null);
+    });
+    return result;
+  } catch (error) {
+    console.warn(`[fetchBlobShasAtRef] ${owner}/${repo}@${ref}:`, error);
+    return null;
+  }
 }

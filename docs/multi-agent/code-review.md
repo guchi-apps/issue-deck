@@ -56,7 +56,7 @@ PR作成 / push → claude-review-develop.yml
 
 PR本文の`issue-deck-verification:start review=...`にはClaudeとCodexの総合判定を書く。要修正、要確認、取得失敗、LGTMの順で優先し、各レビューの個別判定は節の箇条書きに残す。Codexの結果待ちの間は総合判定を確定させず（`review=unavailable`・「⏳ Codexレビューの完了待ち」）、完了後に`auto-merge`が再実行されて最終の判定に書き換わる。PR詳細とリリースPRの指摘本文も、同じコミットに対する各レビュー元の最新コメントから要修正・要確認を優先して選ぶ。後から届いた別のレビュー元のLGTMで指摘を隠さないため。
 
-Codexが`changes-requested`の場合も、後継Issueや新しいPRは作らない。Codexには「人の判断なしに自動修正してよい」印が無いため、無人の自動修正へは渡さず確認待ちにする。人がPR詳細から「レビュー指摘を自動修正」を開始すると、Claude・Codex双方の同一head SHAに対する要修正コメントを既存の`issue-<番号>`ブランチへ渡し、修正後は同じPRを再レビューする。PR詳細はこの過程をレビュー中・要修正・修正中・再レビュー中・レビューOK・マージ待ちとして表示する。
+Codexが`changes-requested`の場合も、後継Issueや新しいPRは作らない。#4043以降は、安全な最新指摘に限り自動修正へ渡す。人がPR詳細から「レビュー指摘を自動修正」を開始する経路も、同一head SHAに対する要修正コメントを既存の`issue-<番号>`ブランチへ渡し、修正後は同じPRを再レビューする。修正担当と条件は末尾の「実装担当に合わせたレビュー指摘修正（#4043）」を参照。PR詳細はこの過程をレビュー中・要修正・修正中・再レビュー中・レビューOK・マージ待ちとして表示する。
 
 ### デプロイの順序
 
@@ -369,3 +369,67 @@ Issue——ここは表示のための当て推量。
   `src/app/api/issues/code-review-reports/route.ts`・`src/lib/github/code-review-report-cache.ts`・
   `src/components/dashboard/code-review-result-badges.tsx`。**バッジの見た目はIssue詳細の
   パネルと共用**なので、色や文言を変えると両方に効く
+
+
+## 実装担当に合わせたPRレビュー（#4037）
+
+`issue-<番号>`のPRは、そのIssueで直近に開始した実装担当をレビューへ引き継ぐ。
+ClaudeならActionsのClaudeレビュー、CodexならサブPCの既存PR_REVIEWジョブを使う。
+主系設定を変えても既存の実装担当は変えない。明示的に別担当の実装を開始した場合は
+新しい開始記録を優先する。同一開始時刻で担当が競合する場合や記録がない場合は、
+推測でClaudeへ倒さずreview-providerを失敗させ、自動マージを止めてPRへ理由を残す。
+Issueを持たないPRのみ従来の共通設定を参照する。低リスクのレビュー省略は維持する。
+
+- サブPCのセッション報告時に`ImplementationRun`へ担当と`firstSeenAt`を保存する。
+  `NOT_STARTED`は対象外。セッション回収後も記録を残す。生存報告の時刻は優先順位に使わない。
+  Codexのthread情報が後着した場合は同じ開始記録の担当を補正する。
+- Actionsでは実装・追加対応ステップの直前に認証付きAPIへ担当を記録する。
+  run ID・attemptで再送を識別し、開始時刻を更新しない。記録できなければ実装を開始しない。
+- 記録は開始した実行の担当であり、各コミットの著者やモデル名ではない。
+  計画レビューや使用量の記録から担当を推測しない。
+- 移行前の実装は残っているDispatchSessionでも解決できる。既に回収済みで記録がない
+  過去PRは手動確認へ渡す。PRの本文だけを書き換えて担当記録を偽装する経路は設けない。
+
+### 配布・戻し方
+
+先にmainへAPI・DB migrationをリリースし、サブPCのセッション報告が新しい記録を
+保存する状態にする。その後、共有workflowタグを作成し、実装とレビューのcallerを
+同じタグへ配布する。developに先に入った新workflowは本番API未配布の間、取得に失敗して
+停止するため、初回リリースは手動で確認する。接続失敗を成功扱いにする暫定回避はしない。
+戻す場合はworkflow参照を旧タグへ戻す。新しいテーブルは残してよく、既存データを削除しない。
+
+CIのbuild/test/lint、CI失敗・レビュー指摘の自動修正担当はこの変更の対象外。
+レビュー指摘の自動修正も#4043で実装担当を継承する。実行場所・導入順は次節を参照。
+
+### 実装担当に合わせたレビュー指摘修正（#4043）
+
+#4037の実装担当記録から修正担当も決める。Claude実装は従来のActions上のClaude、Codex実装は
+サブPCのCodex CLI（ChatGPT購読認証）で実行する。Codex用APIキーは不要。担当不明・API障害・
+対応サブPC不在ではClaudeへ切り替えず、理由を残して確認待ちへ戻す。
+CI自動修正・コンフリクト解消・PR repairの実行担当は従来どおりClaudeのまま。
+
+自動修正は、現在のHEADに対する各agentの**最新**レビューが `changes-requested` で、同じコメントに
+`issue-deck-review-autofix:ok` がある場合だけ。古いコメントの安全印は使わず、`needs-check`・
+安全印なし・`11.local`・`00.check-user`・2回のhandoff上限で停止する。同HEADへのworkflow再実行は
+handoff回数を増やさない。`workflow_run`の購読名は現在の `Claude Code / Codex Review (develop向けPR)`
+と旧名の両方を残す（購読はファイル名ではなく `name` で一致する）。
+
+サブPC修正は読取専用の `PR_REVIEW` と分けた `REVIEW_FIX` ジョブ。対応能力 `reviewFixCapable` を
+申告したオンラインホストだけへ依頼し、同時実行枠を使う。Actionsは依頼して終了し、修正中の表示は
+DispatchJobを正として続く。画面が起動時に作る仮のrepair-runは依頼成功時に終了化し、遅れた
+旧ジョブの終了で新しい修正中表示を消さない。失敗・時間切れはIssueへ通知し、確認待ちへ戻す。
+
+- 実装LAUNCHと同じ活性キーを持ち、同じIssueへ二重に書込ジョブを積まない。
+- 生存している実装セッションや実装・追加指示ジョブがあれば停止する。隔離したdetached worktreeを使い、既存のworktreeを変更しない。
+- 起動時・commit前・push前にGitHubのHEAD、Issueラベル、最新レビュー本文を再検証する。
+- Codexはファイル修正のみ。ラッパーが検証し、同じIssueブランチへ通常pushする。force push・rebase・新PR作成はしない。
+- 現時点の自動検証対象は `package.json` に `lint` / `typecheck` / `test` のいずれかを持つリポジトリ。
+  存在する検証を実行し、失敗・差分なし・検証手順なしならpushしない。依存・検証宣言の変更は確認待ち。
+  Node以外など検証を特定できないリポジトリは自動修正を完了扱いにしない。
+- Codexのモデル・推論強度はPRレビューと同じ `workflowCodexModel` / `workflowCodexReasoningEffort`。
+- 同HEADの自動再送は重複ジョブを作らない。失敗後に人が新たに手動起動した別workflow runだけは再試行可能。
+
+導入順は **#4037のAPI/DB → #4043のDB/API → サブPCのpoller更新 → caller/shared workflow**。
+`REVIEW_FIX` enumとホスト能力列のマイグレーションを先に適用する。古いpollerには新ジョブを配らない。
+workflow_runの購読変更はデフォルトブランチに入り、共有callerはリリース後のタグ配布で初めて有効になる。
+APIを戻す場合は先にcallerを戻して新規依頼を止め、実行中の修正が終わってから戻す。
