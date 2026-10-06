@@ -21,6 +21,7 @@ name: Claude Review Fix
 on:
   workflow_run:
     workflows:
+      - "Claude Code / Codex Review (develop向けPR)"
       - "Claude Code Review (develop向けPR)"
     types:
       - completed

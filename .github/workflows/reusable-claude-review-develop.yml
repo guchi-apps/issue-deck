@@ -1246,12 +1246,20 @@ jobs:
           # 渡したことはIssueへの印付きコメントで伝える。claude-review-fix.ymlはこのワークフローの
           # 完了(workflow_run)で起動し、この印がいまのheadに対して残っているときだけ着手する。
           # 条件を満たさないときは下の従来の処理(00.check-user＋01.check-merge)へ落ちる。
-          if [ "$REVIEW_BLOCKED" = "true" ] && [ "$CODEX_REVIEW_BLOCKED" != "true" ] && [ "$RISKY" != "true" ] && [ "$REVIEW_AUTO_FIX" = "true" ]; then
+          if { [ "$REVIEW_BLOCKED" = "true" ] || [ "$CODEX_VERDICT" = "changes-requested" ]; } && [ "$CODEX_REVIEW_FAILED" != "true" ] && [ "$CODEX_VERDICT" != "needs-check" ] && [ "$RISKY" != "true" ] && [ "$REVIEW_AUTO_FIX" = "true" ]; then
             HANDOFF_BLOCKER=""
             AUTOFIX_MARKER="<!-- issue-deck-review-autofix:ok sha=${HEAD_SHA} -->"
             HANDOFF_MAX=2
+            ISSUE_COMMENTS="$(gh issue view "$ISSUE_NUMBER" --json comments --jq ' .comments[].body')"
             HANDOFF_COUNT="$(printf '%s' "$ISSUE_COMMENTS" | grep -c "issue-deck-review-fix:handoff sha=" || true)"
-            if ! gh pr view "$PR_NUMBER" --json comments --jq '.comments[].body' | grep -qF "$AUTOFIX_MARKER"; then
+            # 同じHEADでも古い安全マーカーは使わず、agentごとの最新判定に限定する。
+            SAFE="$(gh api "repos/$GH_REPO/issues/$PR_NUMBER/comments?per_page=100" --paginate | jq -rs --arg sha "$HEAD_SHA" --arg marker "$AUTOFIX_MARKER" '
+              [.[][] | select(.body | test("issue-deck(-codex)?-review-verdict:(lgtm|needs-check|changes-requested) sha=" + $sha + " -->"))]
+              | group_by(if (.body | contains("issue-deck-codex-review-verdict:")) then "codex" else "claude" end)
+              | map(sort_by(.created_at) | last)
+              | map(select(.body | contains("lgtm sha=" + $sha + " -->") | not))
+              | length > 0 and all(.[]; (.body | contains("changes-requested sha=" + $sha + " -->")) and (.body | contains($marker)))')"
+            if [ "$SAFE" != true ]; then
               HANDOFF_BLOCKER="レビューが「人の判断が要らない指摘だけ」と判定していない"
             elif gh issue view "$ISSUE_NUMBER" --json labels --jq '.labels[].name' | grep -qxE '11\.local|00\.check-user'; then
               HANDOFF_BLOCKER="対応Issueに 11.local または 00.check-user が付いている"
@@ -1259,6 +1267,9 @@ jobs:
               HANDOFF_BLOCKER="claude-review-fix.yml がこのリポジトリに無い"
             elif [ "$(gh pr view "$PR_NUMBER" --json merged --jq .merged 2>/dev/null || echo false)" = "true" ]; then
               HANDOFF_BLOCKER="PRが既にマージされている"
+            elif printf '%s' "$ISSUE_COMMENTS" | grep -qF "<!-- issue-deck-review-fix:handoff sha=${HEAD_SHA} -->"; then
+              echo "handoff=true" >> "$GITHUB_OUTPUT"
+              exit 0
             elif [ "$HANDOFF_COUNT" -ge "$HANDOFF_MAX" ]; then
               HANDOFF_BLOCKER="自動修正を${HANDOFF_COUNT}回試みた"
               LIMIT_BODY="⚠️ レビュー指摘の自動修正を${HANDOFF_COUNT}回試みましたが、まだ「要修正」と判定されています。繰り返しを避けるため自動修正を止め、確認を待ちます。内容を確認してから、issue-deckのPR画面の「レビュー指摘を自動修正」で再実行するか、修正を依頼してください。"

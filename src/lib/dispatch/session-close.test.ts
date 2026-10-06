@@ -124,7 +124,7 @@ describe("handleIssueClosedForDispatch", () => {
       where: {
         repositoryFullName: "guchi-apps/issue-deck",
         issueNumber: 1518,
-        kind: { in: ["LAUNCH", "CROSS_REPO_QUESTION", "PLAN_REVIEW", "CODE_REVIEW", "MANUAL_STEP_SESSION"] },
+        kind: { in: ["LAUNCH", "CROSS_REPO_QUESTION", "PLAN_REVIEW", "CODE_REVIEW", "MANUAL_STEP_SESSION", "REVIEW_FIX"] },
         status: "QUEUED",
       },
       data: {

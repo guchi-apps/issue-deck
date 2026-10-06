@@ -56,7 +56,7 @@ PR作成 / push → claude-review-develop.yml
 
 PR本文の`issue-deck-verification:start review=...`にはClaudeとCodexの総合判定を書く。要修正、要確認、取得失敗、LGTMの順で優先し、各レビューの個別判定は節の箇条書きに残す。Codexの結果待ちの間は総合判定を確定させず（`review=unavailable`・「⏳ Codexレビューの完了待ち」）、完了後に`auto-merge`が再実行されて最終の判定に書き換わる。PR詳細とリリースPRの指摘本文も、同じコミットに対する各レビュー元の最新コメントから要修正・要確認を優先して選ぶ。後から届いた別のレビュー元のLGTMで指摘を隠さないため。
 
-Codexが`changes-requested`の場合も、後継Issueや新しいPRは作らない。Codexには「人の判断なしに自動修正してよい」印が無いため、無人の自動修正へは渡さず確認待ちにする。人がPR詳細から「レビュー指摘を自動修正」を開始すると、Claude・Codex双方の同一head SHAに対する要修正コメントを既存の`issue-<番号>`ブランチへ渡し、修正後は同じPRを再レビューする。PR詳細はこの過程をレビュー中・要修正・修正中・再レビュー中・レビューOK・マージ待ちとして表示する。
+Codexが`changes-requested`の場合も、後継Issueや新しいPRは作らない。#4043以降は、安全な最新指摘に限り自動修正へ渡す。人がPR詳細から「レビュー指摘を自動修正」を開始する経路も、同一head SHAに対する要修正コメントを既存の`issue-<番号>`ブランチへ渡し、修正後は同じPRを再レビューする。修正担当と条件は末尾の「実装担当に合わせたレビュー指摘修正（#4043）」を参照。PR詳細はこの過程をレビュー中・要修正・修正中・再レビュー中・レビューOK・マージ待ちとして表示する。
 
 ### デプロイの順序
 
@@ -399,4 +399,37 @@ Issueを持たないPRのみ従来の共通設定を参照する。低リスク�
 戻す場合はworkflow参照を旧タグへ戻す。新しいテーブルは残してよく、既存データを削除しない。
 
 CIのbuild/test/lint、CI失敗・レビュー指摘の自動修正担当はこの変更の対象外。
-自動修正は引き続き既存のClaude経路であり、レビュー担当の継承と混同しない。
+レビュー指摘の自動修正も#4043で実装担当を継承する。実行場所・導入順は次節を参照。
+
+### 実装担当に合わせたレビュー指摘修正（#4043）
+
+#4037の実装担当記録から修正担当も決める。Claude実装は従来のActions上のClaude、Codex実装は
+サブPCのCodex CLI（ChatGPT購読認証）で実行する。Codex用APIキーは不要。担当不明・API障害・
+対応サブPC不在ではClaudeへ切り替えず、理由を残して確認待ちへ戻す。
+CI自動修正・コンフリクト解消・PR repairの実行担当は従来どおりClaudeのまま。
+
+自動修正は、現在のHEADに対する各agentの**最新**レビューが `changes-requested` で、同じコメントに
+`issue-deck-review-autofix:ok` がある場合だけ。古いコメントの安全印は使わず、`needs-check`・
+安全印なし・`11.local`・`00.check-user`・2回のhandoff上限で停止する。同HEADへのworkflow再実行は
+handoff回数を増やさない。`workflow_run`の購読名は現在の `Claude Code / Codex Review (develop向けPR)`
+と旧名の両方を残す（購読はファイル名ではなく `name` で一致する）。
+
+サブPC修正は読取専用の `PR_REVIEW` と分けた `REVIEW_FIX` ジョブ。対応能力 `reviewFixCapable` を
+申告したオンラインホストだけへ依頼し、同時実行枠を使う。Actionsは依頼して終了し、修正中の表示は
+DispatchJobを正として続く。画面が起動時に作る仮のrepair-runは依頼成功時に終了化し、遅れた
+旧ジョブの終了で新しい修正中表示を消さない。失敗・時間切れはIssueへ通知し、確認待ちへ戻す。
+
+- 実装LAUNCHと同じ活性キーを持ち、同じIssueへ二重に書込ジョブを積まない。
+- 生存している実装セッションや実装・追加指示ジョブがあれば停止する。隔離したdetached worktreeを使い、既存のworktreeを変更しない。
+- 起動時・commit前・push前にGitHubのHEAD、Issueラベル、最新レビュー本文を再検証する。
+- Codexはファイル修正のみ。ラッパーが検証し、同じIssueブランチへ通常pushする。force push・rebase・新PR作成はしない。
+- 現時点の自動検証対象は `package.json` に `lint` / `typecheck` / `test` のいずれかを持つリポジトリ。
+  存在する検証を実行し、失敗・差分なし・検証手順なしならpushしない。依存・検証宣言の変更は確認待ち。
+  Node以外など検証を特定できないリポジトリは自動修正を完了扱いにしない。
+- Codexのモデル・推論強度はPRレビューと同じ `workflowCodexModel` / `workflowCodexReasoningEffort`。
+- 同HEADの自動再送は重複ジョブを作らない。失敗後に人が新たに手動起動した別workflow runだけは再試行可能。
+
+導入順は **#4037のAPI/DB → #4043のDB/API → サブPCのpoller更新 → caller/shared workflow**。
+`REVIEW_FIX` enumとホスト能力列のマイグレーションを先に適用する。古いpollerには新ジョブを配らない。
+workflow_runの購読変更はデフォルトブランチに入り、共有callerはリリース後のタグ配布で初めて有効になる。
+APIを戻す場合は先にcallerを戻して新規依頼を止め、実行中の修正が終わってから戻す。

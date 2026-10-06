@@ -136,6 +136,7 @@ export async function POST(request: NextRequest) {
       typeof payload?.manualStepSession === "boolean" ? payload.manualStepSession : null,
     // develop向けPRのAIレビュー（#3990）を実行できるpollerだけが送ってくる。**未申告はnull＝
     // 非対応扱い**（配ると未知の種別として`failed`になり、PRのレビューが必ず失敗として残る）
+    reviewFixCapable: typeof payload?.reviewFix === "boolean" ? payload.reviewFix : null,
     prReviewCapable: typeof payload?.prReview === "boolean" ? payload.prReview : null,
     selfUpdateCapable:
       typeof payload?.selfUpdate === "boolean" ? payload.selfUpdate : null,

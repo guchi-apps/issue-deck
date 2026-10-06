@@ -30,3 +30,9 @@
 ```
 <!-- issue-deck-codex-review-verdict:<判定> sha={{HEAD_SHA}} -->
 ```
+
+## レビュー指摘の自動修正
+
+判定が changes-requested で、指摘のすべてが人の判断を必要としない明確な不具合・機械的な修正に限られる場合だけ、同じレビューコメントに次の印を追加する。仕様判断、認証・権限、秘密情報、課金、データ破壊、依存追加、本番設定の判断を含む場合や判断に迷う場合は印を付けない。needs-check / lgtm には付けない。
+
+`<!-- issue-deck-review-autofix:ok sha={{HEAD_SHA}} -->`

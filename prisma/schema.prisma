@@ -803,6 +803,7 @@ enum DispatchJobKind {
   CODEX_PAIRING
   MANUAL_STEP_SESSION
   PR_REVIEW
+  REVIEW_FIX
 }
 
 // issue-deckの画面から積み、サブPCのpollerがポーリングで取りに来るジョブ（#1179）。
@@ -1153,6 +1154,7 @@ model DispatchHost {
   codexRemoteControlCapable Boolean?
   // develop向けPRのAIレビュー（`PR_REVIEW`・#3990）を実行できるか。Codex CLIの実体と
   // 起動用スクリプトが揃っているpollerだけが申告する。`null`（未申告）は「できない」
+  reviewFixCapable          Boolean?
   prReviewCapable           Boolean?
   manualStepSessionCapable  Boolean?
 
