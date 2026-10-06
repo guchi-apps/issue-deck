@@ -2,8 +2,15 @@ import { NextResponse } from "next/server";
 
 import { getCurrentUser } from "@/lib/auth-user";
 import { db } from "@/lib/db";
-import { createAdminClient } from "@/lib/supabase/admin";
 
+/**
+ * IssueDeckからの退会。削除するのはIssueDeckのアプリUser（とカスケードされる関連データ）だけ。
+ *
+ * Supabaseプロジェクトは他アプリと共有しているため、共有Authユーザー
+ * （`auth.admin.deleteUser`）は削除しない。削除すると他アプリのログインまで失われる。
+ * 再登録時は、残っているAuthユーザーでログインすればアプリUserが新規作成される。
+ * 処理はDB削除1回だけなので、途中失敗で一部だけ完了する状態は生じない。
+ */
 export async function DELETE() {
   const currentUser = await getCurrentUser();
   if (!currentUser) {
@@ -11,13 +18,6 @@ export async function DELETE() {
   }
 
   await db.user.delete({ where: { id: currentUser.id } });
-
-  const admin = createAdminClient();
-  const { error } = await admin.auth.admin.deleteUser(currentUser.supabaseUserId);
-  if (error) {
-    console.error("[api/account] failed to delete Supabase Auth user", error);
-    return NextResponse.json({ error: "supabase_delete_failed" }, { status: 500 });
-  }
 
   return NextResponse.json({ ok: true });
 }
