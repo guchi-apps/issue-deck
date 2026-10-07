@@ -105,6 +105,54 @@ const SESSION_STEP_TEXT: Record<DispatchSessionStep, string> = {
 };
 
 /**
+ * ステップごとの「その時点で何をしているか」の1行（#4124）。
+ *
+ * **コマンドの原文はサーバーへ運ばない**（`SESSION_STEPS`の注記）ため、個々の対象までは
+ * 書けない。分類の中身（何をしていると「調査中」になるのか）を言葉にして、`EXPLORING`・
+ * `RUNNING`のコードだけが並んでいた作業ログを読めるようにする。AIへの問い合わせは要らない。
+ */
+const SESSION_STEP_DESCRIPTION: Record<DispatchSessionStep, string> = {
+  PLANNING: "実装の計画をまとめています",
+  EXPLORING: "ファイル・コード・履歴を読んで調べています",
+  EDITING: "ファイルを書き換えています",
+  LINTING: "Lintでコードの書き方を確認しています",
+  TYPECHECKING: "型の整合を確認しています",
+  TESTING: "テストを実行しています",
+  BUILDING: "ビルドが通るか確認しています",
+  COMMITTING: "変更をコミットしています",
+  PUSHING: "ブランチをpushしています",
+  PR: "Pull Requestを作成・更新しています",
+  ISSUE: "Issueへコメントを記録しています",
+  ARTIFACT: "見た目の確認用ページを公開しています",
+  RUNNING: "調査・確認のためのコマンドを実行しています",
+};
+
+/** 作業ログの「作業」行の接頭辞。サーバーはステップのコードだけを`作業: <コード>`で残す */
+const TIMELINE_STEP_TITLE_PREFIX = "作業: ";
+
+/** 作業ログへ残す「作業」行の題。**文言でなくコードを残す**（表示側で言い換える。#4124） */
+export function buildTimelineStepTitle(step: string): string {
+  return `${TIMELINE_STEP_TITLE_PREFIX}${step}`;
+}
+
+/**
+ * 作業ログの「作業」行を画面の言い方へ（#4124）。
+ *
+ * 保存済みの行は`作業: EXPLORING`のようにコードのまま残っているため、表示のたびに言い換える
+ * （過去の行も新しい語彙も同じ経路で日本語になる）。**知らないコードを英語のまま出さない**——
+ * pollerはissue-deck本体より新しいことがあり、語彙が先に増えうる（`parseSessionStep`と同じ立場）。
+ */
+export function describeTimelineStep(title: string): { label: string; description: string | null } | null {
+  if (!title.startsWith(TIMELINE_STEP_TITLE_PREFIX)) return null;
+  const code = title.slice(TIMELINE_STEP_TITLE_PREFIX.length).trim();
+  if (Object.hasOwn(SESSION_STEP_TEXT, code)) {
+    const step = code as DispatchSessionStep;
+    return { label: SESSION_STEP_TEXT[step], description: SESSION_STEP_DESCRIPTION[step] };
+  }
+  return { label: "作業中", description: null };
+}
+
+/**
  * ステップの申告が「いまも走っている」ことを表しているか（#2705）。
  *
  * **判定は`stepSeenAt`と`activityAt`の前後だけ。** `activity`は`Stop`のたびに`RESPONDED`へ戻る

@@ -31,6 +31,7 @@ import {
   describeSessionPermission,
   describeSessionReap,
   describeSessionStep,
+  describeTimelineStep,
   summarizeIssueSession,
   type IssueSessionTone,
 } from "@/lib/dispatch/issue-session";
@@ -106,32 +107,39 @@ function Timeline({ sessionId }: { sessionId: string | undefined }) {
 
   return (
     <ol>
-      {events.map((event) => (
-        <li
-          key={event.id}
-          className="grid grid-cols-[3rem_minmax(0,1fr)] gap-2 border-t py-2.5 first:border-t-0 first:pt-0"
-        >
-          <time
-            className="text-xs tabular-nums text-muted-foreground"
-            title={formatDateTimeFull(event.occurredAt)}
+      {events.map((event) => {
+        // 「作業」行はステップのコード（`作業: EXPLORING`）で届くため、日本語の状態名と1行説明へ言い換える（#4124）
+        const step = event.kind === "step" ? describeTimelineStep(event.title) : null;
+        return (
+          <li
+            key={event.id}
+            className="grid grid-cols-[3rem_minmax(0,1fr)] gap-2 border-t py-2.5 first:border-t-0 first:pt-0"
           >
-            {formatTimeOfDay(event.occurredAt)}
-          </time>
-          <div className="min-w-0">
-            <p className="break-words font-medium">
-              {EVENT_KIND_LABEL[event.kind] && (
-                <span className="mr-1.5 rounded bg-muted px-1.5 py-0.5 text-xs font-normal text-muted-foreground">
-                  {EVENT_KIND_LABEL[event.kind]}
-                </span>
+            <time
+              className="text-xs tabular-nums text-muted-foreground"
+              title={formatDateTimeFull(event.occurredAt)}
+            >
+              {formatTimeOfDay(event.occurredAt)}
+            </time>
+            <div className="min-w-0">
+              <p className="break-words font-medium">
+                {EVENT_KIND_LABEL[event.kind] && (
+                  <span className="mr-1.5 rounded bg-muted px-1.5 py-0.5 text-xs font-normal text-muted-foreground">
+                    {EVENT_KIND_LABEL[event.kind]}
+                  </span>
+                )}
+                {step ? step.label : event.title}
+                {step?.description && (
+                  <span className="ml-1.5 font-normal text-muted-foreground">— {step.description}</span>
+                )}
+              </p>
+              {event.body && (
+                <p className="mt-1 whitespace-pre-wrap break-words text-sm text-muted-foreground">{event.body}</p>
               )}
-              {event.title}
-            </p>
-            {event.body && (
-              <p className="mt-1 whitespace-pre-wrap break-words text-sm text-muted-foreground">{event.body}</p>
-            )}
-          </div>
-        </li>
-      ))}
+            </div>
+          </li>
+        );
+      })}
     </ol>
   );
 }
