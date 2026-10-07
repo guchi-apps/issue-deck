@@ -7,7 +7,7 @@ import type { SharedToken } from "@/types/shared-token";
 
 const deleteSharedToken = vi.fn().mockResolvedValue(true);
 const mutations = {
-  createSharedToken: vi.fn().mockResolvedValue(true),
+  createSharedToken: vi.fn().mockResolvedValue({ generatedValue: "generated-once" }),
   revealSharedToken: vi.fn().mockResolvedValue(null),
   deleteSharedToken,
   isSubmitting: false,
@@ -61,12 +61,20 @@ describe("SharedTokensSection", () => {
     await waitFor(() => expect(deleteSharedToken).toHaveBeenCalledWith("t1"));
   });
 
-  it("自動生成で値が入り、表示状態になる", () => {
+  it("値を空欄のまま登録すると値なしで送り、生成された値を1回表示する", async () => {
     renderSection();
-    const input = screen.getByLabelText("トークン値") as HTMLInputElement;
-    expect(input.type).toBe("password");
-    fireEvent.click(screen.getByRole("button", { name: "自動生成" }));
-    expect(input.value).toMatch(/^[A-Za-z0-9_-]{43}$/);
-    expect(input.type).toBe("text");
+    fireEvent.change(screen.getByLabelText("トークン名"), { target: { value: "NEW_TOKEN" } });
+    fireEvent.click(screen.getByRole("button", { name: "登録（値を自動生成）" }));
+    await waitFor(() =>
+      expect(mutations.createSharedToken).toHaveBeenCalledWith({
+        name: "NEW_TOKEN",
+        value: null,
+        description: null,
+        sourceReference: null,
+      }),
+    );
+    expect((await screen.findByLabelText("自動生成した値") as HTMLInputElement).value).toBe("generated-once");
+    fireEvent.click(screen.getByRole("button", { name: "閉じる" }));
+    expect(screen.queryByLabelText("自動生成した値")).toBeNull();
   });
 });

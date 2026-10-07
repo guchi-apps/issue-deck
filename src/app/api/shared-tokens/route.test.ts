@@ -106,6 +106,26 @@ describe("共有トークンAPI", () => {
     });
   });
 
+  it("POSTで値を省略するとランダム値を生成して保存し、生成した値をその応答でだけ返す", async () => {
+    create.mockResolvedValue({ id: "token-2", name: "AUTO" });
+    const res = await POST(
+      request("/api/shared-tokens", {
+        method: "POST",
+        headers: {
+          authorization: "Bearer shared-secret",
+          "content-type": "application/json",
+          "x-shared-token-consumer": "ai-agent",
+        },
+        body: JSON.stringify({ name: "AUTO" }),
+      }),
+    );
+
+    expect(res.status).toBe(201);
+    const json = (await res.json()) as { generatedValue: string };
+    expect(json.generatedValue).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    expect(create.mock.calls[0][0].data.encryptedValue).toBe(`encrypted:${json.generatedValue}`);
+  });
+
   const putRequest = (body: unknown) =>
     request("/api/shared-tokens", {
       method: "PUT",
@@ -116,6 +136,13 @@ describe("共有トークンAPI", () => {
       },
       body: JSON.stringify(body),
     });
+
+  it("PUTは値の省略（自動生成）を400で拒否する", async () => {
+    const res = await PUT(putRequest({ name: "TOKEN" }));
+    expect(res.status).toBe(400);
+    expect(create).not.toHaveBeenCalled();
+    expect(update).not.toHaveBeenCalled();
+  });
 
   it("PUTは既存の値を上書きし、操作updateを記録する（説明は省略時に保つ）", async () => {
     findUnique.mockResolvedValue({ id: "token-1", name: "TOKEN" });

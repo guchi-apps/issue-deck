@@ -35,9 +35,11 @@ curl -fsS "$ISSUE_DECK_URL/api/shared-tokens?name=EXAMPLE_TOKEN" \
 
 ## 登録
 
-`POST /api/shared-tokens`は`name`と`value`を必須とし、任意で`description`と移行元の
-`sourceReference`（`op://`参照など）を受け取ります。値は暗号化して保存し、成功時は`201`でIDと名称だけを返します。
-同じ名称があるときは`409`です。
+`POST /api/shared-tokens`は`name`を必須とし、任意で`value`・`description`と移行元の
+`sourceReference`（`op://`参照など）を受け取ります。**`value`を省略するとissue-deckがランダムな値（URLセーフなbase64・43文字）を生成して**
+暗号化保存します（#4121。アプリ間認証用のように値に意味が無いものは省略する）。1Passwordなど外部で値が決まっているものを移すときだけ`value`を渡します。
+成功時は`201`でIDと名称を返し、**自動生成したときだけ`generatedValue`を同じ応答に含めます（返すのはこの1回だけ）**。以降は利用側が`GET`で取得します。
+同じ名称があるときは`409`です。設定画面でも値を空欄のまま登録すると自動生成し、作成直後に1回だけ表示します。
 
 ```json
 {
@@ -50,7 +52,7 @@ curl -fsS "$ISSUE_DECK_URL/api/shared-tokens?name=EXAMPLE_TOKEN" \
 
 ## 上書き（#3786）
 
-`PUT /api/shared-tokens`は`POST`と同じ本文で、**名前が既にあれば値を置き換え**（`200`）、無ければ作成します（`201`）。
+`PUT /api/shared-tokens`は`POST`と同じ本文で（ただし`value`は必須。省略は`400`）、**名前が既にあれば値を置き換え**（`200`）、無ければ作成します（`201`）。
 アクセストークンを再発行すると旧値が即座に失効するアプリ（StatusHubの`<アプリID大文字>_ACCESS_APP_TOKEN`など）が、
 再発行の直後に新しい値へ差し替えるための経路です。`description`・`sourceReference`は指定したときだけ更新し、
 省略すると既存の値を保ちます。利用記録には操作`update`（新規作成時は`create`）と利用元を残し、応答にもログにも値は出しません。
