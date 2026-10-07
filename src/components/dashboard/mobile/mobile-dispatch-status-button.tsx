@@ -78,6 +78,8 @@ export function MobileDispatchStatusButton({
         <button
           type="button"
           aria-label="実行状況"
+          // 取得前は押しても中身が空なので、アイコンだけ先に出して押せないようにする（#4107）
+          disabled={!dispatch.isLoaded}
           className="relative flex size-11 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
         >
           <ListOrdered className="size-5" />

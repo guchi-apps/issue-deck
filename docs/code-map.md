@@ -716,7 +716,7 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   **端末標準の「引っ張って更新」は使えない**——`app/layout.tsx`が`overscroll-none`＋`body`の
   `fixed inset-0`でドキュメントを固定しているため（#607。この固定と高さの決め方については、
   上の「アプリシェルの高さを`position`に依存させない」も参照）。ホーム画面から起動したPWAには
-  ツールバーも無く、一覧の画面には更新の手段が無かった（`MobileReloadButton`はホームだけ）。
+  ツールバーも無く、一覧の画面には更新の手段が無かった（`MobileReloadButton`は設定画面の右上だけ。#4107でホームから移した）。
   実装で外せない点が3つある。**Reactの`onTouchMove`ではなく`{ passive: false }`のネイティブ
   リスナーを張る**（Reactはルートでpassive登録するため`preventDefault()`が効かない）。
   **`preventDefault()`するのは「縦方向かつ下向き」に動いている間だけ**——方向判定
@@ -735,7 +735,7 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   「更新」ボタンと同じ経路で、`isFetching`をそのまま`isRefreshing`として渡す。リリース状況の
   取得はGitHub APIを使う（通常は5分間隔）ぶん消費は増えるが、押した回数ぶんしか走らない。
   **サブPCのカードの取り直し（`dispatch.refresh`）はホーム側で足す**——実行状況はこの画面が
-  自分で取っているもので、ベルの`refresh`には入っていない。**ヘッダーの`MobileReloadButton`は
+  自分で取っているもので、ベルの`refresh`には入っていない。**設定画面右上の`MobileReloadButton`は
   残す**（引っ張る方は数字だけ、ボタンはページ全体の再読み込み＝新しいビルドへの追従）。
   **一覧の先頭に固定するセクション（`IssueList`の`pinnedSection`）も、その枠の中に置く**（#2175）——
   「ユーザーの確認待ち」に並ぶマージ待ちPR（#1613）は画面の上半分を占めることがあり、枠の外に

@@ -59,6 +59,7 @@ export function DispatchQueueButton({
           type="button"
           className="relative flex items-center gap-1 rounded-md p-1.5 hover:bg-accent"
           aria-label="実行キュー"
+          disabled={!dispatch.isLoaded}
           title={`実行キュー（${describeDispatchQueueTitle(summary)}）`}
         >
           <ListOrdered className="size-4" />

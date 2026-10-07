@@ -104,6 +104,7 @@ function makeDispatch(
     concurrency: 2,
     fetchedAt: refreshOverrides.fetchedAt ?? Date.now() - 12_000,
     isFetching: refreshOverrides.isFetching ?? false,
+    isLoaded: true,
     pollIntervalMs: refreshOverrides.pollIntervalMs ?? 20_000,
     refresh,
     error: null,
