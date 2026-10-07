@@ -9,11 +9,13 @@
 ## 1. 全体像
 
 ```
-通常時:  PR ──push──▶ GitHub Actions（ci.yml）──▶ lint-and-build 等 ──▶ 必須チェック
+通常時:  PR ──push──▶ GitHub Actions（ci.yml）──▶ lint-and-build 等（必須ジョブ）
+                                              │  pollerの巡回／workflow_runのWebhookで照合（#4113）
+                                              ▼
 障害時:  PR詳細「バックアップCIで実行」──▶ issue-deck ──CircleCI API──▶ CircleCI（.circleci/config.yml）
                                               ▲   完了Webhook／pollerの巡回で照合        │
                                               └──────────── 結果（ci-result.json）◀──────┘
-                                              └──▶ commit status `issue-deck/ci-gate`
+                                              └──▶ 最後に始まった試行の結果を commit status `issue-deck/ci-gate` へ
 ```
 
 - **検査の中身は1か所**（[`ci/required-checks.json`](../ci/required-checks.json)）。Actionsはジョブごとに
@@ -25,8 +27,11 @@
   **ci.ymlへ直接検査ステップを足すと、このチェックが失敗する**
 - 状態の正本はissue-deckの`BackupCiRun`（`prisma/schema.prisma`）。起動時にPRのhead/base SHA・baseの
   検査定義のダイジェスト・開始者を記録し、完了時にCircleCIの結果をこの記録と突き合わせる
-- コードは`src/lib/backup-ci/`（`state.ts`が判定の純関数、`service.ts`が起動・回収・発行、
-  `circleci-client.ts`がAPI）、画面は`src/components/dashboard/pull-request-backup-ci.tsx`
+- 共通チェックへどちらの経路（Actions／バックアップCI）を出したかの正本は`CiGateState`（#4113）。
+  PRごとに、採用した経路・試行・その開始時刻・状態・発行状況を持つ
+- コードは`src/lib/backup-ci/`（`state.ts`・`gate.ts`が判定の純関数、`service.ts`が起動・回収、
+  `gate-service.ts`が共通チェックの決定・発行とActionsの取り込み、`github.ts`がGitHubへの読み書き、
+  `circleci-client.ts`がCircleCIのAPI）、画面は`src/components/dashboard/pull-request-backup-ci.tsx`
 
 ## 2. 安全のための約束（変えるときは#4065を読み直す）
 
@@ -40,6 +45,10 @@
 | 不明・timeout・キャンセル・検査欠落を成功にしない | `evaluateBackupCiResult`・`decideCiGateFromBackupRun`。90分で`unverifiable` |
 | 応答不明の起動要求を再送しない | `trigger_unknown`で止める。利用者がCircleCIの画面で確かめてから再実行する |
 | 二重に採用しない | 未完了の実行はPRごとに1件（`activeKey`の一意制約）。共通チェックはPRで最新の試行からしか発行しない |
+| 2つの経路から都合のよい成功を選ばない | Actions（ci.ymlのPRで最後に作られた実行の、最新の試行）とバックアップCI（PRで最新の試行）のうち、**最後に始まった方**だけを採用する（`chooseCiGateCandidate`）。成功している方を選ぶ規則は無い |
+| 遅れて届いた結果で巻き戻さない | バックアップCIより前に始まって止まっていたActionsの実行が後から終わっても、採用は変わらない。同じ経路で前回より古い試行・完了から検査中への後退が見えたら、前回の採用を保つ（`CiGateState`の`sourceStartedAt`・`sourceRef`） |
+| Actionsの検査失敗をバックアップCIで上書きしない | 今のheadに対してActionsの必須ジョブが`failure`で終わっていれば、バックアップCIを起動させない（キャンセル・未開始・検査中は障害の可能性があるので止めない） |
+| 同名ジョブで合格を作れない | Actionsは`.github/workflows/ci.yml`の`pull_request`起動の実行だけを数え、必須ジョブ名はPRの**base**の`ci/required-checks.json`から取る。必須ジョブの欠落・スキップ・キャンセルは`error` |
 | 偽のWebhookで合格を作れない | `circleci-signature`をHMAC-SHA256で検証。本文の状態は使わず、APIで照合し直す。イベントIDで重複排除（`CircleciWebhookDelivery`） |
 | テスト環境へ権限を渡さない | CircleCIプロジェクトにContext・環境変数を設定しない。検査はプレースホルダ値で動く。マージ・共通チェックの発行はissue-deckのGitHub Appだけが行う |
 
@@ -49,11 +58,13 @@ PR詳細（develop向けの未マージPR）の「バックアップCI（GitHub 
 
 - 1行目は**元のGitHub Actionsの状態**（ジョブ未開始／待機中・実行中／成功／失敗）。共通チェックとは
   別に出し、Actionsの履歴は消さない
-- 2行目がCircleCIの最新の実行（`CircleCIで代替実行中`／`バックアップCI成功`／`失敗`／`結果確認不能`／
+- 続く行がCircleCIの最新の実行（`CircleCIで代替実行中`／`バックアップCI成功`／`失敗`／`結果確認不能`／
   `PRが更新されたため無効`）。ログはCircleCIのワークフロー画面へのリンク
 - 開くと、head/base・検査したコミット・検査定義の版・共通チェックの発行状況・検査ごとの結果と、
   「バックアップCIで実行」ボタン（押すと対象のリポジトリ・PR・コミット・実行先を確認してから起動）
 - 未設定・権限不足・無料枠不足など起動できない理由は、その場に必要な操作と一緒に出る
+- 2行目（あれば）は**共通チェックにどちらの経路の結果を出しているか**（`共通チェック issue-deck/ci-gate:
+  success（GitHub Actionsの結果を採用）`など。発行に失敗していればその理由）
 - 共通チェックが出ているPRでは、PR一覧・詳細のCIバッジは`issue-deck/ci-gate`の状態で決まる
   （止まったActionsのジョブが残っていても「実行中」のままにならない。`src/lib/github/check-rollup.ts`）
 
@@ -80,6 +91,10 @@ PR詳細（develop向けの未マージPR）の「バックアップCI（GitHub 
    プロジェクトスラッグ（`circleci/<org-id>/<project-id>`）・パイプライン定義IDを保存する
 6. **試験**: 7章の定期確認を1回行う
 
+値の配り方: `CIRCLECI_API_TOKEN`・`CIRCLECI_WEBHOOK_SECRET`は`.github/secrets-manifest.tsv`と`deploy.yml`に
+入っている（#4113）。1Passwordへ入れたあと`scripts/sync-github-secrets.sh`で同期し、本番をデプロイし直すと
+サーバーの`.env`へ入る。どちらも未設定のままでもデプロイは通る（バックアップCIの起動・Webhookの受信だけができない）。
+
 ### 無料枠の制約
 
 - CircleCI Freeプランは月ごとのクレジット制。`resource_class: large`で1回あたり十数分（ビルド・単体テスト込み）を
@@ -98,21 +113,57 @@ issue-deckのGitHub App（app id 4448617）は`statuses`権限を持っていな
 次の順で移す。途中で検査の空白期間を作らないため、**1→2→3を飛ばさない**。
 
 1. 4章を済ませ、試験PRでバックアップCIの合格と`issue-deck/ci-gate`の発行を確かめる
-2. **通常時にも共通チェックが出る状態にする**（Actionsの結果を`issue-deck/ci-gate`へ写す。#4113）。
-   これが無いまま3へ進むと、通常のPRが共通チェック待ちで永久に止まる
+2. **通常時にも共通チェックが出る状態にする**（#4113）。これが無いまま3へ進むと、通常のPRが共通チェック待ちで
+   永久に止まる
+   - #4113が本番へ出ていることを確かめ、PR詳細のバックアップCI欄「このリポジトリのバックアップCI設定」で
+     「通常時もGitHub Actionsの結果を共通チェック（issue-deck/ci-gate）へ写す」をオンにして保存する
+   - 以後、pollerの巡回（約30秒ごと。合否が決まったPRは3分おき）がdevelop向けのopenなPRすべてについて、
+     ci.ymlの必須ジョブ（`ci/required-checks.json`の各グループ）の結果を共通チェックへ写す
+   - 任意: GitHub Appの設定で**Workflow run**イベントを購読すると、Actionsの完了がすぐ写る（無くても巡回で写る）
+   - 確認: 下のコマンドで、**全open PRが`none`以外**（success/pending/failure/error）を返すこと
+     ```bash
+     for n in $(gh pr list --repo guchi-apps/issue-deck --base develop --state open --json number --jq '.[].number'); do
+       sha=$(gh api repos/guchi-apps/issue-deck/pulls/$n --jq .head.sha)
+       st=$(gh api repos/guchi-apps/issue-deck/commits/$sha/status \
+         --jq '[.statuses[] | select(.context=="issue-deck/ci-gate")][0].state // "none"')
+       echo "#$n $st"
+     done
+     ```
+     あわせて、Actionsが成功したPRで`success`、失敗したPRで`failure`になっていることを数件見比べる
 3. 必須チェックを`lint-and-build`(15368)から`issue-deck/ci-gate`（issue-deck App、4448617）へ置き換える。
-   ブランチ保護とrulesetの両方を変える（Administration権限が要るため、org ownerの`gh`で実行）
+   ブランチ保護とrulesetの両方を変える（Administration権限が要るため、org ownerの`gh`で実行）。
+   rulesetは**`rules`の配列を丸ごと置き換える**APIなので、取得したものの`required_status_checks`だけを書き換えて戻す
+   ```bash
+   gh api repos/guchi-apps/issue-deck/rulesets/20194705 \
+     | jq '{rules: [.rules[] | if .type == "required_status_checks"
+         then .parameters.required_status_checks = [{"context":"issue-deck/ci-gate","integration_id":4448617}]
+         else . end]}' \
+     | gh api -X PUT repos/guchi-apps/issue-deck/rulesets/20194705 --input -
+   gh api -X PATCH repos/guchi-apps/issue-deck/branches/develop/protection/required_status_checks \
+     --input - <<'JSON'
+   {"strict":false,"checks":[{"context":"issue-deck/ci-gate","app_id":4448617}]}
+   JSON
+   ```
+   確認: `gh api repos/guchi-apps/issue-deck/rules/branches/develop --jq '.[].parameters.required_status_checks'`
+   が`issue-deck/ci-gate`/4448617だけを返すこと。続けて、次にdevelopへ向くPRが共通チェックの成功で
+   自動マージされることを見届ける
+   - 移したあとは、設定の「通常時もGitHub Actionsの結果を共通チェックへ写す」を**外さない**
+     （外すと通常のPRに共通チェックが出ず、マージできなくなる）
+
+`strict`（baseの更新を要求する）は今と同じく`false`のまま。Actions経由の合格は、baseが進んでも
+headが同じ間は有効（現在の`lint-and-build`と同じ扱い）。バックアップCIの合格だけは、その時のbaseに
+対してしか有効にしない（baseが進めばActionsの結果へ戻る）。
 
 ### ロールバック（導入前の保護設定へ戻す）
 
 共通チェックを外し、Actionsの`lint-and-build`だけを必須に戻す。
 
 ```bash
-gh api -X PUT repos/guchi-apps/issue-deck/rulesets/20194705 --input - <<'JSON'
-{"rules":[{"type":"required_status_checks","parameters":{"do_not_enforce_on_create":false,
-"strict_required_status_checks_policy":false,
-"required_status_checks":[{"context":"lint-and-build","integration_id":15368}]}}]}
-JSON
+gh api repos/guchi-apps/issue-deck/rulesets/20194705 \
+  | jq '{rules: [.rules[] | if .type == "required_status_checks"
+      then .parameters.required_status_checks = [{"context":"lint-and-build","integration_id":15368}]
+      else . end]}' \
+  | gh api -X PUT repos/guchi-apps/issue-deck/rulesets/20194705 --input -
 gh api -X PATCH repos/guchi-apps/issue-deck/branches/develop/protection/required_status_checks \
   --input - <<'JSON'
 {"strict":false,"checks":[{"context":"lint-and-build","app_id":15368}]}
@@ -127,6 +178,8 @@ JSON
 3の後は、**issue-deckが止まっているとdevelopへのマージが止まる**（共通チェックを発行するのがissue-deckだけになるため）。
 issue-deckが応答しない・GitHub Appの権限が外れた場合、共通チェックは`pending`のまま残り、画面上は
 「確認不能」と同じ扱いになる（成功にはならない）。長引く場合は上のロールバックで`lint-and-build`へ戻す。
+Actionsの結果を写す主経路は**サブPCのpollerが叩く`POST /api/dispatch/claim`の巡回**なので、サブPCの
+pollerが止まっている間も写りが止まる（GitHub Appが`workflow_run`を購読していれば、そのWebhookで写る）。
 
 ## 6. 障害時の切替と通常運用への復帰
 
@@ -141,7 +194,9 @@ issue-deckが応答しない・GitHub Appの権限が外れた場合、共通チ
 
 復帰（Actionsが動き始めたら）: 何もしなくてよい。次のpushからはActionsが従来どおり検査する。
 バックアップCIの合格は**そのhead/baseに対してだけ**有効で、新しいpush・baseの更新で自動的に無効になる。
-Actionsの遅れて届いた結果は、バックアップCIの記録を書き換えない。
+Actionsの遅れて届いた結果（バックアップCIより前に始まって止まっていた実行の完了）は、共通チェックの採用を
+変えない。バックアップCIの後にActionsで**再実行**（またはpush）した場合は、そちらが後に始まった試行なので
+Actionsの結果が採用される。
 
 ## 7. 定期的な動作確認（月1回目安）
 
@@ -151,6 +206,6 @@ Actionsの遅れて届いた結果は、バックアップCIの記録を書き�
 
 ## 8. 未対応（#4065の残り）
 
-- Actionsの結果を通常時も`issue-deck/ci-gate`へ写す処理と、必須チェックの置き換え（5章の2・3。#4113）
+- 必須チェックの置き換え（5章の3。Administration権限が要るため人が行う。手作業Issueで追跡）
 - Actions停止中に、サブPCのAIレビュー（`PR_REVIEW`）をissue-deckから起動・回収し、既存のマージ判定へ
   接続する処理（現在の起点は`claude-review-develop.yml`で、Actionsが止まるとレビューも始まらない。#4114）

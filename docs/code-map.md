@@ -4538,8 +4538,11 @@ GitHub Actions障害時に、PR詳細からCircleCIを直接起動してdevelop�
 `scripts/ci/run-required-checks.mjs`経由でこれを実行する（ci.ymlへ直接ステップを足すと
 `scripts/ci/check-ci-definition-sync.mjs`が落とす）。サーバー側は`src/lib/backup-ci/`、結果は
 `BackupCiRun`に記録し、合否は共通チェック`issue-deck/ci-gate`（commit status）として出す。
-`check-rollup.ts`は共通チェックがあればそれだけでCI状態を決める。運用・移行・ロールバックは
-[backup-ci.md](backup-ci.md)。
+`check-rollup.ts`は共通チェックがあればそれだけでCI状態を決める。
+**共通チェックの発行は`gate-service.ts`の`syncPullRequestCiGate`だけが行う**（#4113）。通常時のActions
+（ci.ymlの必須ジョブ）とバックアップCIの両方の最新の試行から、最後に始まった方を採用し（判定は`gate.ts`）、
+採用した経路は`CiGateState`に残す。Actionsの結果はpollerの巡回（`sweepCiGateMirror`）と`workflow_run`の
+Webhookで取り込む。運用・移行・ロールバックは[backup-ci.md](backup-ci.md)。
 
 ## 一覧の行に出す親子関係（#3469）
 

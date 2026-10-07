@@ -1,4 +1,6 @@
-import type { BackupCiRun } from "@prisma/client";
+import type { BackupCiRun, CiGateState } from "@prisma/client";
+
+import { CI_GATE_SOURCE_LABELS, parseCiGateSource } from "@/lib/backup-ci/gate";
 
 import {
   BACKUP_CI_STATUS_LABELS,
@@ -60,5 +62,32 @@ export function toBackupCiRunView(run: BackupCiRun): BackupCiRunView {
     startedByUserId: run.startedByUserId,
     requestedAt: run.requestedAt.toISOString(),
     completedAt: run.completedAt?.toISOString() ?? null,
+  };
+}
+
+/** 画面へ返す共通チェックの採用状況（#4113）。どちらの経路の結果を出しているか */
+export type CiGateStateView = {
+  source: string;
+  sourceLabel: string;
+  state: string;
+  description: string;
+  headSha: string;
+  baseSha: string;
+  /** 発行に失敗していれば`publish_failed:<code>` */
+  publishFailure: string | null;
+  lastEvaluatedAt: string;
+};
+
+export function toCiGateStateView(gate: CiGateState): CiGateStateView {
+  const source = parseCiGateSource(gate.source);
+  return {
+    source: gate.source,
+    sourceLabel: source ? CI_GATE_SOURCE_LABELS[source] : gate.source,
+    state: gate.state,
+    description: gate.description,
+    headSha: gate.headSha,
+    baseSha: gate.baseSha,
+    publishFailure: gate.publishedState?.startsWith("publish_failed") ? gate.publishedState : null,
+    lastEvaluatedAt: gate.lastEvaluatedAt.toISOString(),
   };
 }

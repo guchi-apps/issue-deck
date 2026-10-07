@@ -2340,15 +2340,18 @@ model ImplementationRun {
 /// **行が無い・`enabled`が偽のリポジトリでは、バックアップCIを起動できない**（明示的に有効化したものだけ）。
 /// CircleCIのAPIトークンとWebhookの署名鍵はここに置かず、環境変数（`CIRCLECI_API_TOKEN`・`CIRCLECI_WEBHOOK_SECRET`）から読む
 model BackupCiSetting {
-  repositoryFullName   String   @id
-  enabled              Boolean  @default(false)
+  repositoryFullName    String   @id
+  enabled               Boolean  @default(false)
   /// `circleci/<org-id>/<project-id>`（GitHub App連携）のようなプロジェクトスラッグ
-  circleciProjectSlug  String?
+  circleciProjectSlug   String?
   /// APIからの起動に使うパイプライン定義のID（CircleCIのProject Settings > Pipelines）
-  circleciDefinitionId String?
-  updatedByUserId      String?
-  createdAt            DateTime @default(now())
-  updatedAt            DateTime @updatedAt
+  circleciDefinitionId  String?
+  /// 通常時（バックアップCIを起動していないPR）も、GitHub Actionsの必須ジョブの結果を共通チェック
+  /// `issue-deck/ci-gate`へ写す（#4113）。**必須チェックを共通チェックへ移したあとは外さない**
+  mirrorActionsToCiGate Boolean  @default(false)
+  updatedByUserId       String?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
 }
 
 /// バックアップCIの実行要求1回（#4065）。**PRのhead/baseと実際に検査したコミット、検査定義の版を
@@ -2394,6 +2397,35 @@ model BackupCiRun {
 
   @@unique([repositoryFullName, prNumber, attempt])
   @@index([status])
+}
+
+/// PRごとに、共通チェック（issue-deck/ci-gate）へどちらの経路（GitHub Actions／バックアップCI）の
+/// 結果を採用したかの記録（#4113）。**最後に始まった試行の結果だけを採用し、遅れて届いた古い試行で
+/// 巻き戻さない**ための基準になる。判定は src/lib/backup-ci/gate.ts
+model CiGateState {
+  id                 String    @id @default(cuid())
+  repositoryFullName String
+  prNumber           Int
+  headSha            String
+  baseSha            String
+  /// `actions` | `backup`
+  source             String
+  /// 採用した試行（Actionsは`<run id>:<attempt>`、バックアップCIは`BackupCiRun.id`）。未開始ならnull
+  sourceRef          String?
+  /// 採用した試行の開始時刻。これより前に始まった同じ経路の試行では置き換えない
+  sourceStartedAt    DateTime?
+  /// 共通チェックの状態（success / failure / pending / error）
+  state              String
+  description        String    @db.Text
+  targetUrl          String?   @db.Text
+  /// 最後にGitHubへ発行できた`<source>:<state>:<baseSha>`。失敗時は`publish_failed:<code>`
+  publishedState     String?
+  lastEvaluatedAt    DateTime
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  @@unique([repositoryFullName, prNumber])
+  @@index([lastEvaluatedAt])
 }
 
 /// CircleCIの完了Webhookの受信記録（#4065）。**同じイベントIDを2回処理しない**ための台帳
