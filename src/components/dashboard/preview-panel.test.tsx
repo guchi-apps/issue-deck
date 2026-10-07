@@ -26,6 +26,7 @@ function host(overrides: Partial<DispatchHostView> = {}): DispatchHostView {
     codexCapable: null,
     codexRemoteControlCapable: null,
     manualStepSessionCapable: null,
+    chatCodexCapable: null,
     selfUpdateCapable: true,
     previewCapable: true,
     rebootCapable: null,

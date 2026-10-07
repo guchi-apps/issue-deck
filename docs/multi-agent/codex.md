@@ -919,6 +919,14 @@ Signalyのwebhook URLだけで、`deploy/subpc/notify.env.example`にもそう�
 リポジトリは、走るのがissue-deck自身の`scripts/generic-start-issue.sh`なので、対象リポジトリ側には
 何も要らない（[generic-launcher.md](generic-launcher.md)「エージェントは受け口から渡ってくる」）。
 
+## チャット相談もCodex CLIで答える（#4109）
+
+AI実行プロバイダーがCodexのとき、IssueDeck Chatの調査は**OpenAI APIではなく、サブPCのこのCodex CLI**（`codex login`済みのChatGPTアカウント）で答える。pollerが枠外ジョブ`CHAT_TURN`を受け取り、`scripts/run-chat-codex.sh`をバックグラウンドで起こして`codex exec --sandbox read-only --ephemeral --skip-git-repo-check --output-schema`を1回走らせる。流れ・失敗の種別・制約は[chat.md](../chat.md)「実行先がCodexのとき」。
+
+- **`--output-schema`は、調査の`STEP_SCHEMA`（全項目required・`additionalProperties: false`）をそのまま受け付ける**（codex-cli 0.160.1で確認）。最終メッセージはスキーマに合うJSON1つになり、`--json`の`turn.completed`に使用量が載る
+- **`codex login status`の出力で、ChatGPTアカウントのログインとAPIキーのログインを見分ける**（`Logged in using ChatGPT`）。APIキーでログインしたCodexは従量課金になるため、チャットでは使わず`api_key_auth`として断る
+- 申告は`chatCodex`（`DispatchHost.chatCodexCapable`。スクリプトとCodex CLIが揃っていれば`true`）。ログイン状態は申告に含めず、実行時に確かめて理由をチャットへ返す
+
 ## 実装の在り処
 
 | 何を | どこに |
@@ -932,6 +940,7 @@ Signalyのwebhook URLだけで、`deploy/subpc/notify.env.example`にもそう�
 | 画面から渡された種別の受け取り・出口ごとの可否 | [`scripts/start-local-session.sh`](../../scripts/start-local-session.sh) |
 | 他リポジトリでの種別の受け取り・読み替えの追記・計画の出し方の差し替え（#2590） | [`scripts/generic-start-issue.sh`](../../scripts/generic-start-issue.sh) |
 | ジョブの`agent`の読み取り・`codex`の申告・追加指示の送り分け | [`scripts/subpc-dispatch-poller.sh`](../../scripts/subpc-dispatch-poller.sh) |
+| チャット相談の1手を`codex exec`で答える（#4109） | [`scripts/run-chat-codex.sh`](../../scripts/run-chat-codex.sh)・[`src/lib/chat/investigation/codex-model.ts`](../../src/lib/chat/investigation/codex-model.ts) |
 | `codex queue`での送出（#2519） | [`scripts/lib/codex-queue.sh`](../../scripts/lib/codex-queue.sh) |
 | セッション名を付ける・自動命名から付け直す（#2540・#3220） | [`scripts/lib/codex-thread-name.sh`](../../scripts/lib/codex-thread-name.sh) |
 | 宛先（セッションUUID）の置き場・エージェント種別の記録 | [`scripts/lib/session-state.sh`](../../scripts/lib/session-state.sh) |

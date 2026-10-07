@@ -55,3 +55,22 @@ describe("修正依頼コメント", () => {
     expect(body).not.toContain("supersecretvalue");
   });
 });
+
+describe("describeUnavailable（原因ごとの案内。#4109）", () => {
+  it("API残高切れ（credit_balance_exhausted）は通常の429と分け、「待って再試行」を案内しない", async () => {
+    const { describeUnavailable } = await import("@/lib/chat/investigation/reply");
+    const exhausted = describeUnavailable("AIの呼び出しに失敗しました（HTTP 429 credit_balance_exhausted）");
+    expect(exhausted.kind).toBe("api_credit_exhausted");
+    expect(exhausted.next).toContain("待っても回復しません");
+    expect(describeUnavailable("HTTP 429 insufficient_quota").kind).toBe("api_credit_exhausted");
+    expect(describeUnavailable("HTTP 429 rate_limit_exceeded").kind).toBe("rate_limited");
+  });
+
+  it("Codex経由の失敗は種別ごとに分ける（利用枠・未ログイン・接続）", async () => {
+    const { describeUnavailable } = await import("@/lib/chat/investigation/reply");
+    expect(describeUnavailable("AIの呼び出しに失敗しました（Codex(usage_limit) 上限）").kind).toBe("codex_usage_limit");
+    expect(describeUnavailable("Codex(not_logged_in) x").next).toContain("codex login");
+    expect(describeUnavailable("Codex(not_claimed) x").kind).toBe("codex_not_claimed");
+    expect(describeUnavailable("Codex(api_key_auth) x").label).toContain("APIキー");
+  });
+});

@@ -571,6 +571,7 @@ describe("GitHub Actionsが走っているIssueの起動ボタン（#2032）", (
     codexCapable: null,
     codexRemoteControlCapable: null,
     manualStepSessionCapable: null,
+    chatCodexCapable: null,
     selfUpdateCapable: null,
     previewCapable: null,
     rebootCapable: null,
