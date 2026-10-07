@@ -42,6 +42,18 @@ export type ChangelogEntry = {
  */
 export const APP_CHANGELOG: ChangelogEntry[] = [
   {
+    version: "8.40.0",
+    date: "2026-10-07",
+    changes: [
+      "スマートフォンの画面右下に「チャットを開く」ボタンを追加しました。どの画面からでもワンタップでチャットへ移動できます。",
+    ],
+    usage: [
+      "1. スマートフォンでissue-deckを開き、Issue一覧などの画面を表示します。",
+      "2. 画面右下に並ぶ丸いボタンのうち、吹き出しのアイコン（「チャットを開く」）を押します。",
+      "3. チャット画面に切り替われば成功です。",
+    ],
+  },
+  {
     version: "8.39.0",
     date: "2026-10-07",
     changes: [
