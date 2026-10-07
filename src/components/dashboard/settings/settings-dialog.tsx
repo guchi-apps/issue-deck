@@ -134,6 +134,11 @@ export function SettingsDialog({
     planReviewAgentForCodex, planReviewClaudeModel, planReviewCodexModel,
     dispatchFailoverEnabled, dispatchFailoverThresholdPercent, appAiModel, appAiModelReasoning,
     modelPickEngine, dispatchConcurrency, aiProviderOverrides, onUpdated,
+    // 自動化区分から、AI・モデル区分の計画レビュー欄へ移る（#4139）
+    onOpenPlanReviewSettings: () => {
+      setSection("ai-models");
+      setTimeout(() => document.getElementById("plan-review-settings")?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
+    },
   };
 
   return (

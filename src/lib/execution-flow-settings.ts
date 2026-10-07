@@ -308,7 +308,6 @@ export function resolveProviderFlowRows(
   });
   const subBinding: ProviderFlowBinding = overrides.defaultDispatchAgent ? "override" : "provider";
   const actionsBinding: ProviderFlowBinding = overrides.githubActionsAgent ? "override" : "provider";
-  const planReviewFixed = subAgent === "claude" ? overrides.planReviewAgentForClaude : overrides.planReviewAgentForCodex;
   // PRレビュー・修復は実装したCLIの側で走る。サブPCとActionsで実装エージェントが違えば両方を出す
   const implementationAgents = [...new Set([subAgent, actionsAgentValue])];
   const reviewFlows = (prefix: "PRコードレビュー" | "レビュー指摘修正") =>
@@ -321,6 +320,22 @@ export function resolveProviderFlowRows(
       return entry(flow, "implementation", `${flow.location}（${agent === "claude" ? "Claude" : "Codex"}実装）`);
     });
   const pickFlow = find("おまかせのモデル選択・Issueラベル判定");
+  // 計画レビューは、計画を出したCLIごとに担当AIを持つ。継承なら全体設定（provider）で同じ結果になるので1行にまとめ、
+  // 個別に固定して結果が分かれるときだけ開始元ごとに分けて見せる（#4139）
+  const planReviewEntries = (): ProviderFlowEntry[] => {
+    const sources = [
+      { start: "Claude Codeで開始後", fixed: overrides.planReviewAgentForClaude, label: "Claude Codeの計画" },
+      { start: "Codex CLIで開始後", fixed: overrides.planReviewAgentForCodex, label: "Codex CLIの計画" },
+    ] as const;
+    const built = sources.map((source) => {
+      const flow = find(`自動計画レビュー（${source.start}）`);
+      return { source, flow, binding: (source.fixed ? "override" : "provider") as ProviderFlowBinding };
+    });
+    const same = built[0].flow.agent === built[1].flow.agent && built[0].flow.model === built[1].flow.model &&
+      built[0].binding === built[1].binding;
+    if (same) return [entry(built[0].flow, built[0].binding)];
+    return built.map(({ source, flow, binding }) => entry(flow, binding, `${flow.location}（${source.label}）`));
+  };
 
   return [
     {
@@ -343,12 +358,7 @@ export function resolveProviderFlowRows(
     },
     {
       step: "計画レビュー",
-      entries: [
-        entry(
-          find(`自動計画レビュー（${subAgent === "claude" ? "Claude Codeで開始後" : "Codex CLIで開始後"}）`),
-          planReviewFixed ? "override" : "provider",
-        ),
-      ],
+      entries: planReviewEntries(),
       sourceId: "plan-review-settings",
       editsWorkflowModels: false,
     },

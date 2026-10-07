@@ -200,10 +200,11 @@ describe("SettingsDialog", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /^自動化$/ }));
 
-    // 計画レビューのエージェント設定は保存を押すまで効かないため、自動化にも専用の保存ボタンがある。
-    // 実行区分のフォームは隠れ、表示中の保存ボタンは自動化のものだけになる。
+    // 計画レビューの担当AI・モデルはAI・モデル区分へ移した（#4139）。自動化に保存ボタンは無く、
+    // 担当AIの変更先へのリンクだけがある。
     expect(isShown(screen.getByLabelText("自動リトライ回数"))).toBe(false);
-    expect(isShown(screen.getByRole("button", { name: "保存" }))).toBe(true);
+    expect(screen.queryAllByRole("button", { name: "保存" }).some((button) => isShown(button))).toBe(false);
+    expect(screen.getByRole("button", { name: "担当AIはAIモデル設定で変更" })).toBeTruthy();
     expect(screen.getByLabelText("リリース準備の自動実行間隔")).toBeTruthy();
   });
 
@@ -254,7 +255,7 @@ describe("SettingsDialog", () => {
       codexModel: "auto",
       defaultDispatchAgent: "claude",
       planReviewAgentForClaude: "claude",
-      planReviewAgentForCodex: "codex",
+      planReviewAgentForCodex: "claude",
       planReviewClaudeModel: "sonnet",
       planReviewCodexModel: "gpt-5.6-terra",
       dispatchFailoverEnabled: true,
@@ -273,6 +274,22 @@ describe("SettingsDialog", () => {
         appAiModelReasoning: false,
       },
     });
+  });
+
+  it("計画レビューはAI・モデル区分にあり、継承のまま保存しても担当AIを固定しない（#4139）", async () => {
+    renderDialog();
+
+    const block = document.getElementById("plan-review-settings")!;
+    expect(block).not.toBeNull();
+    expect(document.querySelectorAll("#plan-review-claude-model").length).toBe(1);
+
+    const group = screen.getByRole("group", { name: "AI実行プロバイダー" });
+    fireEvent.click(within(group).getByRole("button", { name: "Codex" }));
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+
+    await waitFor(() => expect(updateClaudeModel).toHaveBeenCalled());
+    // プロバイダーだけを切り替えた保存は、計画レビューの値を一切送らない
+    expect(updateClaudeModel).toHaveBeenCalledWith({ aiExecutionProvider: "codex" });
   });
 
   it("プロバイダーを切り替えると、保存前でも工程ごとの実効エージェントを切り替えて見せる（#4108）", async () => {

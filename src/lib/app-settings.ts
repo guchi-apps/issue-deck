@@ -54,6 +54,16 @@ export function parsePlanReviewAgent(value: unknown): PlanReviewAgent | null {
   return parseDefaultDispatchAgent(value);
 }
 
+/**
+ * 計画レビューの担当AIとして保存してよい値。`inherit`は個別固定を解いて全体設定へ戻す（#4139）。
+ * 画面へ返す値は解決済みなので、`inherit`を送れないと一度固定した値を戻せなかった。
+ */
+export type PlanReviewAgentSetting = PlanReviewAgent | typeof AI_PROVIDER_INHERIT;
+
+export function parsePlanReviewAgentSetting(value: unknown): PlanReviewAgentSetting | null {
+  return value === AI_PROVIDER_INHERIT ? AI_PROVIDER_INHERIT : parsePlanReviewAgent(value);
+}
+
 // 100%では制限到達まで切り替わらない。0%は常に切り替わり既定の意味を失うため選ばせない。
 export const DISPATCH_FAILOVER_THRESHOLD_PERCENT_MIN = 1;
 export const DISPATCH_FAILOVER_THRESHOLD_PERCENT_MAX = 100;

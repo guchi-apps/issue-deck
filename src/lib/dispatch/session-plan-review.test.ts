@@ -101,6 +101,31 @@ describe("postSessionPlan の計画レビュー起動", () => {
     );
   });
 
+  it("継承（inherit）なら計画の作成元に関わらず全体のプロバイダーに従う（#4139）", () => {
+    for (const aiExecutionProvider of ["claude", "codex", "claude"] as const) {
+      for (const sourceAgent of ["claude", "codex"] as const) {
+        expect(
+          resolvePlanReviewAgentForSession({
+            sourceAgent,
+            planReviewAgentForClaude: "inherit",
+            planReviewAgentForCodex: "inherit",
+            aiExecutionProvider,
+          }),
+        ).toBe(aiExecutionProvider);
+      }
+    }
+  });
+
+  it("個別固定は全体のプロバイダーより優先する（#4139）", () => {
+    expect(
+      resolvePlanReviewAgentForSession({
+        sourceAgent: "claude",
+        planReviewAgentForClaude: "codex",
+        aiExecutionProvider: "claude",
+      }),
+    ).toBe("codex");
+  });
+
   it("不正な設定値は開始元と同じCLIへ戻す", () => {
     expect(
       resolvePlanReviewAgentForSession({

@@ -100,12 +100,30 @@ describe("resolveProviderFlowRows", () => {
     const overrides = { ...NO_AI_PROVIDER_OVERRIDES, planReviewAgentForCodex: true, appAiModel: true };
     const rows = resolveProviderFlowRows(resolved, "codex", overrides);
 
-    expect(rows.find((row) => row.step === "計画レビュー")!.entries[0]).toEqual(
+    // 開始元ごとに結果が分かれるので、固定している側と追従している側を別々に出す（#4139）
+    const planReview = rows.find((row) => row.step === "計画レビュー")!.entries;
+    expect(planReview).toHaveLength(2);
+    expect(planReview.find((entry) => entry.label.includes("Codex CLIの計画"))).toEqual(
       expect.objectContaining({ agent: "Claude Code", model: "Opus 5.5", binding: "override" }),
+    );
+    expect(planReview.find((entry) => entry.label.includes("Claude Codeの計画"))).toEqual(
+      expect.objectContaining({ agent: "Codex CLI", binding: "provider" }),
     );
     expect(rows.find((row) => row.step === "アプリ内AI")!.entries[0]).toEqual(
       expect.objectContaining({ agent: "Anthropic API", binding: "override" }),
     );
+  });
+
+  it("継承なら計画の作成元に関わらず全体の切替に従い、実効エージェントが1行に揃う（#4139）", () => {
+    for (const provider of ["claude", "codex", "claude"] as const) {
+      const entries = resolveProviderFlowRows(resolved, provider, NO_AI_PROVIDER_OVERRIDES)
+        .find((row) => row.step === "計画レビュー")!.entries;
+      expect(entries).toHaveLength(1);
+      expect(entries[0]).toEqual(expect.objectContaining({
+        agent: provider === "claude" ? "Claude Code" : "Codex CLI",
+        binding: "provider",
+      }));
+    }
   });
 
   it("PRレビュー・修復は実装したエージェントの側で走り、実装先が分かれれば両方を出す", () => {
