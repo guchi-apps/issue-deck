@@ -93,6 +93,8 @@ function makeDispatch(overrides: {
   /** 更新インジケーター（#1773）。既定は「12秒前に取得できていて、いまは取得していない」 */
   fetchedAt?: number | null;
   isFetching?: boolean;
+  /** 最初の取得が終わったか（#4107）。既定は終わっている */
+  isLoaded?: boolean;
 }): DispatchStateHandle {
   return {
     hosts: overrides.hosts ?? [],
@@ -103,6 +105,7 @@ function makeDispatch(overrides: {
     concurrency: 2,
     fetchedAt: overrides.fetchedAt ?? Date.now() - 12_000,
     isFetching: overrides.isFetching ?? false,
+    isLoaded: overrides.isLoaded ?? true,
     pollIntervalMs: 20_000,
     refresh,
     error: null,
@@ -127,6 +130,15 @@ describe("MobileDispatchStatusButton（#1638）", () => {
     );
 
     expect(container.innerHTML).toBe("");
+  });
+
+  it("最初の取得が終わるまではアイコンだけ先に出し、バッジは出さない（#4107）", () => {
+    render(
+      <MobileDispatchStatusButton dispatch={makeDispatch({ hosts: [], isLoaded: false })} />,
+    );
+
+    expect(screen.getByRole("button", { name: "実行状況" })).toBeTruthy();
+    expect(screen.queryByText("1")).toBeNull();
   });
 
   it("実行中の件数をバッジに出す", () => {

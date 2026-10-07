@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { AlertTriangle, ChevronLeft, ChevronRight, X } from "lucide-react";
 
+import { MobileReloadButton } from "@/components/dashboard/mobile/mobile-reload-button";
 import { MobileDispatchStatusButton } from "@/components/dashboard/mobile/mobile-dispatch-status-button";
 import { MobileNotificationButton } from "@/components/dashboard/mobile/mobile-notification-button";
 import { UserAvatar } from "@/components/dashboard/user-avatar";
@@ -150,6 +151,9 @@ export function MobileSettingsScreen({
         <MobileDispatchStatusButton />
         {/* 通知ベル（#1772）。実行状況の右隣で全画面そろえる */}
         <MobileNotificationButton />
+        {/* 画面の更新（#1681）。ホームのヘッダーから移した（#4107）。PWAにはブラウザの再読み込みが
+            無いので、設定を開いた右上に置く */}
+        <MobileReloadButton />
       </header>
 
       <div className="flex flex-1 flex-col gap-4 overflow-y-auto overscroll-contain p-4">

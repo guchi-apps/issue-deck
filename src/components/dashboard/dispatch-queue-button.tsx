@@ -40,7 +40,9 @@ export function DispatchQueueButton({
   const summary = summarizeDispatchQueue(dispatch.jobs, dispatch.concurrency, dispatch.hosts);
 
   // 申告しているホストが1台も無ければ、キューという概念自体が無い
-  if (dispatch.hosts.length === 0) return null;
+  // 最初の取得が終わるまではアイコンだけ先に出し、バッジは取得後に付く（#4107）。
+  // 取得後にホストが無いと分かったときだけ消す
+  if (dispatch.isLoaded && dispatch.hosts.length === 0) return null;
 
   // Issueへ飛ぶ操作は、開いたまま後ろの画面だけが変わると何が起きたのか分からないので閉じる
   const openIssue = onOpenIssue
