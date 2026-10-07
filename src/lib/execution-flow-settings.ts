@@ -87,7 +87,12 @@ function planReviewModel(settings: ExecutionFlowSettings, agent: PlanReviewAgent
 }
 
 function appAiAgent(model: AppAiModel) {
-  return appAiProvider(model) === "openai" ? "OpenAI API" : "Anthropic API";
+  return appAiProvider(model) === "openai" ? "OpenAI API（従量課金）" : "Anthropic API";
+}
+
+/** チャット調査はGPT系ならサブPCのCodex CLI（サブスク枠）で動く（#4143）。主系プロバイダーは見ない。 */
+function chatInvestigationAgent(model: AppAiModel) {
+  return appAiProvider(model) === "openai" ? "Codex CLI（ChatGPTサブスク）" : "Anthropic API";
 }
 
 /**
@@ -170,8 +175,15 @@ export function resolveExecutionFlows(settings: ExecutionFlowSettings): Executio
       agent: appAiAgent(settings.appAiModel), model: appAiModelLabel(settings.appAiModel), source: "アプリ内AI設定", sourceId: "app-ai-settings",
     },
     {
-      group: "アプリ内AI", name: "原因診断・新規アプリ相談", location: "IssueDeckサーバー",
+      group: "アプリ内AI", name: "原因診断（チャット調査）",
+      location: appAiProvider(settings.appAiModelReasoning) === "openai" ? "サブPC" : "IssueDeckサーバー",
+      agent: chatInvestigationAgent(settings.appAiModelReasoning), model: appAiModelLabel(settings.appAiModelReasoning), source: "アプリ内AI（推論）設定", sourceId: "app-ai-settings",
+      note: appAiProvider(settings.appAiModelReasoning) === "openai" ? "GPT系はOpenAI APIを使わず、サブPCのCodex CLI（ChatGPTサブスク枠）で実行します。" : undefined,
+    },
+    {
+      group: "アプリ内AI", name: "新規アプリ相談・手作業の修正提案", location: "IssueDeckサーバー",
       agent: appAiAgent(settings.appAiModelReasoning), model: appAiModelLabel(settings.appAiModelReasoning), source: "アプリ内AI（推論）設定", sourceId: "app-ai-settings",
+      note: appAiProvider(settings.appAiModelReasoning) === "openai" ? "GPT系を選ぶとOpenAI APIの従量課金で実行されます（この機能はまだCodex CLIへ移っていません）。" : undefined,
     },
     {
       group: "判定", name: "おまかせのモデル選択・Issueラベル判定", location: settings.modelPickEngine === "jev" ? "TypeSafe" : "IssueDeckサーバー",
@@ -358,7 +370,8 @@ export function resolveProviderFlowRows(
       step: "アプリ内AI",
       entries: [
         entry(find("要約・検索・文章整理・手作業アシスタント"), overrides.appAiModel ? "override" : "provider", "要約・検索・文章整理"),
-        entry(find("原因診断・新規アプリ相談"), overrides.appAiModelReasoning ? "override" : "provider", "原因診断・新規アプリ相談"),
+        entry(find("原因診断（チャット調査）"), overrides.appAiModelReasoning ? "override" : "provider", "原因診断（チャット）"),
+        entry(find("新規アプリ相談・手作業の修正提案"), overrides.appAiModelReasoning ? "override" : "provider", "新規アプリ相談・修正提案"),
       ],
       sourceId: "app-ai-settings",
       editsWorkflowModels: false,

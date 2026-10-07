@@ -59,6 +59,26 @@ describe("resolveExecutionFlows", () => {
   });
 });
 
+describe("原因診断の実行基盤表示（#4143）", () => {
+  const find = (flows: ReturnType<typeof resolveExecutionFlows>, name: string) => flows.find((flow) => flow.name === name)!;
+
+  it("GPT系はチャット調査だけCodex CLI、新規アプリ相談はOpenAI API従量課金と明示する", () => {
+    const flows = resolveExecutionFlows({ ...settings, appAiModelReasoning: "gpt-5.6-terra" });
+    expect(find(flows, "原因診断（チャット調査）")).toEqual(
+      expect.objectContaining({ location: "サブPC", agent: "Codex CLI（ChatGPTサブスク）" }),
+    );
+    expect(find(flows, "新規アプリ相談・手作業の修正提案")).toEqual(
+      expect.objectContaining({ location: "IssueDeckサーバー", agent: "OpenAI API（従量課金）" }),
+    );
+  });
+
+  it("Claude系はどちらもAnthropic API", () => {
+    const flows = resolveExecutionFlows({ ...settings, appAiModelReasoning: "claude-sonnet-5-5" });
+    expect(find(flows, "原因診断（チャット調査）").agent).toBe("Anthropic API");
+    expect(find(flows, "新規アプリ相談・手作業の修正提案").agent).toBe("Anthropic API");
+  });
+});
+
 describe("resolveProviderFlowRows", () => {
   // 画面へ渡る値は保存時点のプロバイダーで解決済み。個別設定でない項目はプロバイダーで解き直される
   const resolved = {
@@ -91,9 +111,9 @@ describe("resolveProviderFlowRows", () => {
     expect(rows.find((row) => row.step === "計画レビュー")!.entries[0]).toEqual(
       expect.objectContaining({ agent: "Codex CLI", model: "GPT-6 Sol", binding: "provider" }),
     );
-    expect(rows.find((row) => row.step === "アプリ内AI")!.entries[1]).toEqual(
-      expect.objectContaining({ agent: "OpenAI API", binding: "provider" }),
-    );
+    const appAi = rows.find((row) => row.step === "アプリ内AI")!.entries;
+    expect(appAi[1]).toEqual(expect.objectContaining({ agent: "Codex CLI（ChatGPTサブスク）", binding: "provider" }));
+    expect(appAi[2]).toEqual(expect.objectContaining({ agent: "OpenAI API（従量課金）", binding: "provider" }));
   });
 
   it("個別設定した項目はプロバイダーを切り替えても変わらない", () => {
