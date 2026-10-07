@@ -6,7 +6,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import type { BackupCiDisplayKind } from "@/lib/backup-ci/state";
-import type { BackupCiRunView } from "@/lib/backup-ci/view";
+import type { BackupCiRunView, CiGateStateView } from "@/lib/backup-ci/view";
 import { formatDateTime } from "@/lib/format-date-time";
 import { cn } from "@/lib/utils";
 
@@ -21,6 +21,7 @@ type Readiness = {
   enabled: boolean;
   circleciProjectSlug: string | null;
   circleciDefinitionId: string | null;
+  mirrorActionsToCiGate: boolean;
   tokenConfigured: boolean;
   webhookConfigured: boolean;
   problems: string[];
@@ -62,6 +63,12 @@ export function describeActionsState(checks: readonly ActionsCheck[]): string {
   return failed ? "GitHub Actions: 失敗" : "GitHub Actions: 成功";
 }
 
+/** 共通チェックに今どちらの経路の結果を出しているか（#4113） */
+export function describeCiGate(gate: Pick<CiGateStateView, "state" | "sourceLabel" | "publishFailure">): string {
+  if (gate.publishFailure) return `共通チェック: 発行できませんでした（${gate.publishFailure}）`;
+  return `共通チェック issue-deck/ci-gate: ${gate.state}（${gate.sourceLabel}の結果を採用）`;
+}
+
 function shortSha(sha: string | null): string {
   return sha ? sha.slice(0, 7) : "—";
 }
@@ -82,6 +89,7 @@ export function PullRequestBackupCi({
   const [owner, repo] = repositoryFullName.split("/");
   const [readiness, setReadiness] = useState<Readiness | null>(null);
   const [runs, setRuns] = useState<BackupCiRunView[]>([]);
+  const [gate, setGate] = useState<CiGateStateView | null>(null);
   const [open, setOpen] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -98,10 +106,15 @@ export function PullRequestBackupCi({
     async function fetchOnce() {
       const res = await fetch(`/api/pull-requests/backup-ci?${params}`, { cache: "no-store" }).catch(() => null);
       if (cancelled || !res?.ok) return;
-      const json = (await res.json().catch(() => null)) as { readiness?: Readiness; runs?: BackupCiRunView[] } | null;
+      const json = (await res.json().catch(() => null)) as {
+        readiness?: Readiness;
+        runs?: BackupCiRunView[];
+        gate?: CiGateStateView | null;
+      } | null;
       if (cancelled || !json || !json.readiness || !Array.isArray(json.runs)) return;
       setReadiness(json.readiness);
       setRuns(json.runs);
+      setGate(json.gate ?? null);
       // 実行中の間だけ15秒おきに取り直す
       if (json.runs[0]?.displayKind === "running") timer = setTimeout(() => void fetchOnce(), 15_000);
     }
@@ -149,6 +162,11 @@ export function PullRequestBackupCi({
         バックアップCI（GitHub Actions障害時）
       </button>
       <p className="text-xs text-muted-foreground">{describeActionsState(actionsChecks)}</p>
+      {gate && gate.headSha === headSha && (
+        <p className="text-xs text-muted-foreground">
+          {describeCiGate(gate)}
+        </p>
+      )}
       {latest && (
         <div className={cn("flex flex-wrap items-center gap-1.5 text-xs", KIND_CLASS[latest.displayKind])}>
           <KindIcon kind={latest.displayKind} />
@@ -289,6 +307,7 @@ function BackupCiSettingForm({
   const [enabled, setEnabled] = useState(readiness.enabled);
   const [slug, setSlug] = useState(readiness.circleciProjectSlug ?? "");
   const [definitionId, setDefinitionId] = useState(readiness.circleciDefinitionId ?? "");
+  const [mirror, setMirror] = useState(readiness.mirrorActionsToCiGate);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -307,7 +326,14 @@ function BackupCiSettingForm({
       const res = await fetch("/api/repositories/backup-ci-settings", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ owner, repo, enabled, circleciProjectSlug: slug, circleciDefinitionId: definitionId }),
+        body: JSON.stringify({
+          owner,
+          repo,
+          enabled,
+          circleciProjectSlug: slug,
+          circleciDefinitionId: definitionId,
+          mirrorActionsToCiGate: mirror,
+        }),
       });
       const json = (await res.json().catch(() => ({}))) as { message?: string; error?: string };
       if (!res.ok) {
@@ -335,6 +361,13 @@ function BackupCiSettingForm({
         パイプライン定義ID
         <Input value={definitionId} onChange={(e) => setDefinitionId(e.target.value)} placeholder="xxxxxxxx-xxxx-..." />
       </label>
+      <label className="flex items-center gap-1.5">
+        <input type="checkbox" checked={mirror} onChange={(e) => setMirror(e.target.checked)} />
+        通常時もGitHub Actionsの結果を共通チェック（issue-deck/ci-gate）へ写す
+      </label>
+      <p className="text-muted-foreground">
+        必須チェックを共通チェックへ移したあとは外さないでください（外すと通常のPRがマージできなくなります）。
+      </p>
       <p className="text-muted-foreground">APIトークンとWebhookの署名鍵はサーバーの環境変数で設定します（docs/backup-ci.md）。</p>
       {error && <p className="text-destructive">{error}</p>}
       <div className="flex gap-2">

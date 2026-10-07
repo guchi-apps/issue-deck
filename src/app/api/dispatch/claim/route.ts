@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 
+import { sweepCiGateMirror } from "@/lib/backup-ci/gate-service";
 import { sweepBackupCiRuns } from "@/lib/backup-ci/service";
 import { keepClaudeWindowOpen } from "@/lib/claude-window-keepalive-run";
 import { authorizeDispatch } from "@/lib/dispatch/dispatch-auth";
@@ -149,6 +150,13 @@ export async function POST(request: NextRequest) {
       await sweepBackupCiRuns();
     } catch (error) {
       console.error("[POST /api/dispatch/claim] バックアップCIの照合に失敗しました:", error);
+    }
+    // 通常時のActionsの結果を共通チェック`issue-deck/ci-gate`へ写す（#4113）。developの必須チェックが
+    // 共通チェックへ移ったあとは、**ここが止まるとdevelopへのマージが止まる**（docs/backup-ci.md 5章）
+    try {
+      await sweepCiGateMirror();
+    } catch (error) {
+      console.error("[POST /api/dispatch/claim] 共通チェックの写しに失敗しました:", error);
     }
   }
 
