@@ -204,6 +204,7 @@ type IssueDeckShellProps = {
   issues: Issue[];
   autoRetryLimit: number;
   aiExecutionProvider: import("@/lib/app-settings").AiExecutionProvider;
+  aiProviderOverrides: import("@/lib/execution-flow-settings").AiProviderOverrides;
   claudeModel: ClaudeModel;
   githubActionsAgent: GithubActionsAgent;
   githubActionsCodexModel: CodexLocalModel;
@@ -232,6 +233,7 @@ export function IssueDeckShell({
   issuesFetchedAt,
   autoRetryLimit: initialAutoRetryLimit,
   aiExecutionProvider: initialAiExecutionProvider,
+  aiProviderOverrides: initialAiProviderOverrides,
   claudeModel: initialClaudeModel,
   githubActionsAgent: initialGithubActionsAgent,
   githubActionsCodexModel: initialGithubActionsCodexModel,
@@ -317,6 +319,7 @@ export function IssueDeckShell({
   const visibleIssue = filters.pane === "issues" ? selectedIssue : null;
   const [autoRetryLimit, setAutoRetryLimit] = useState(initialAutoRetryLimit);
   const [aiExecutionProvider, setAiExecutionProvider] = useState(initialAiExecutionProvider);
+  const [aiProviderOverrides, setAiProviderOverrides] = useState(initialAiProviderOverrides);
   const [claudeModel, setClaudeModel] = useState<ClaudeModel>(initialClaudeModel);
   const [githubActionsAgent, setGithubActionsAgent] = useState<GithubActionsAgent>(initialGithubActionsAgent);
   const [githubActionsCodexModel, setGithubActionsCodexModel] = useState<CodexLocalModel>(initialGithubActionsCodexModel);
@@ -357,6 +360,7 @@ export function IssueDeckShell({
   function handleAppSettingsUpdated(next: AppSettingsValues) {
     setAutoRetryLimit(next.autoRetryLimit);
     setAiExecutionProvider(next.aiExecutionProvider);
+    setAiProviderOverrides(next.aiProviderOverrides);
     setClaudeModel(next.claudeModel);
     setGithubActionsAgent(next.githubActionsAgent);
     setGithubActionsCodexModel(next.githubActionsCodexModel);
@@ -2308,6 +2312,7 @@ export function IssueDeckShell({
                     currentUser={currentUser}
                     autoRetryLimit={autoRetryLimit}
                     aiExecutionProvider={aiExecutionProvider}
+                    aiProviderOverrides={aiProviderOverrides}
                     claudeModel={claudeModel}
                     githubActionsAgent={githubActionsAgent}
                     githubActionsCodexModel={githubActionsCodexModel}
@@ -2869,6 +2874,7 @@ export function IssueDeckShell({
           currentUser={currentUser}
           autoRetryLimit={autoRetryLimit}
           aiExecutionProvider={aiExecutionProvider}
+          aiProviderOverrides={aiProviderOverrides}
           claudeModel={claudeModel}
           githubActionsAgent={githubActionsAgent}
           githubActionsCodexModel={githubActionsCodexModel}

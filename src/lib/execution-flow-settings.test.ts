@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { resolveExecutionFlows } from "@/lib/execution-flow-settings";
+import {
+  NO_AI_PROVIDER_OVERRIDES,
+  readAiProviderOverrides,
+  resolveExecutionFlows,
+  resolveProviderFlowRows,
+} from "@/lib/execution-flow-settings";
 
 const settings = {
   claudeModel: "sonnet",
@@ -51,5 +56,92 @@ describe("resolveExecutionFlows", () => {
     expect(claude?.model).toBe("おまかせ（実装開始時に判定）");
     expect(claude?.note).toContain("Sonnet 5.5 にフォールバック");
     expect(codex?.note).toContain("GPT-5.6 Terra にフォールバック");
+  });
+});
+
+describe("resolveProviderFlowRows", () => {
+  // 画面へ渡る値は保存時点のプロバイダーで解決済み。個別設定でない項目はプロバイダーで解き直される
+  const resolved = {
+    ...settings,
+    claudeLocalModel: "sonnet",
+    codexModel: "gpt-5.6-terra",
+    defaultDispatchAgent: "claude",
+    planReviewAgentForClaude: "claude",
+    planReviewAgentForCodex: "claude",
+    appAiModel: "claude-haiku-4-5",
+    appAiModelReasoning: "claude-sonnet-5-5",
+    modelPickEngine: "app-ai",
+  } as const;
+  const steps = ["計画", "実装", "計画レビュー", "PRレビュー", "レビュー修復", "アプリ内AI", "判定"];
+
+  it("Claude・Codexのどちらでも工程の並びを変えない", () => {
+    for (const provider of ["claude", "codex"] as const) {
+      expect(resolveProviderFlowRows(resolved, provider, NO_AI_PROVIDER_OVERRIDES).map((row) => row.step)).toEqual(steps);
+    }
+  });
+
+  it("個別設定の無い項目はプロバイダーへ追従する", () => {
+    const rows = resolveProviderFlowRows(resolved, "codex", NO_AI_PROVIDER_OVERRIDES);
+    const plan = rows.find((row) => row.step === "計画")!;
+
+    expect(plan.entries).toEqual([
+      expect.objectContaining({ label: "サブPC", agent: "Codex CLI", model: "GPT-5.6 Terra", binding: "provider" }),
+      expect.objectContaining({ label: "GitHub Actions", agent: "Codex Action", model: "GPT-5.6 Terra", binding: "provider" }),
+    ]);
+    expect(rows.find((row) => row.step === "計画レビュー")!.entries[0]).toEqual(
+      expect.objectContaining({ agent: "Codex CLI", model: "GPT-6 Sol", binding: "provider" }),
+    );
+    expect(rows.find((row) => row.step === "アプリ内AI")!.entries[1]).toEqual(
+      expect.objectContaining({ agent: "OpenAI API", binding: "provider" }),
+    );
+  });
+
+  it("個別設定した項目はプロバイダーを切り替えても変わらない", () => {
+    const overrides = { ...NO_AI_PROVIDER_OVERRIDES, planReviewAgentForCodex: true, appAiModel: true };
+    const rows = resolveProviderFlowRows(resolved, "codex", overrides);
+
+    expect(rows.find((row) => row.step === "計画レビュー")!.entries[0]).toEqual(
+      expect.objectContaining({ agent: "Claude Code", model: "Opus 5.5", binding: "override" }),
+    );
+    expect(rows.find((row) => row.step === "アプリ内AI")!.entries[0]).toEqual(
+      expect.objectContaining({ agent: "Anthropic API", binding: "override" }),
+    );
+  });
+
+  it("PRレビュー・修復は実装したエージェントの側で走り、実装先が分かれれば両方を出す", () => {
+    const claude = resolveProviderFlowRows(resolved, "claude", NO_AI_PROVIDER_OVERRIDES);
+    expect(claude.find((row) => row.step === "PRレビュー")!.entries).toEqual([
+      expect.objectContaining({ label: "GitHub Actions（Claude実装）", agent: "Claude Code", binding: "implementation" }),
+    ]);
+
+    const split = resolveProviderFlowRows(resolved, "claude", { ...NO_AI_PROVIDER_OVERRIDES, githubActionsAgent: true });
+    expect(resolveProviderFlowRows({ ...resolved, githubActionsAgent: "codex" }, "claude", { ...NO_AI_PROVIDER_OVERRIDES, githubActionsAgent: true })
+      .find((row) => row.step === "レビュー修復")!.entries.map((entry) => entry.agent)).toEqual(["Claude Code", "Codex CLI"]);
+    expect(split.find((row) => row.step === "PRレビュー")!.entries).toHaveLength(1);
+  });
+
+  it("判定はJevならプロバイダーと無関係", () => {
+    const rows = resolveProviderFlowRows({ ...resolved, modelPickEngine: "jev" }, "codex", NO_AI_PROVIDER_OVERRIDES);
+    expect(rows.find((row) => row.step === "判定")!.entries[0].binding).toBe("independent");
+  });
+});
+
+describe("readAiProviderOverrides", () => {
+  it("inheritと未設定は追従、値が読めるものは個別設定と読む", () => {
+    expect(readAiProviderOverrides({
+      githubActionsAgent: "inherit",
+      defaultDispatchAgent: "codex",
+      planReviewAgentForClaude: undefined,
+      planReviewAgentForCodex: "claude",
+      appAiModel: "inherit",
+      appAiModelReasoning: "claude-sonnet-5",
+    })).toEqual({
+      githubActionsAgent: false,
+      defaultDispatchAgent: true,
+      planReviewAgentForClaude: false,
+      planReviewAgentForCodex: true,
+      appAiModel: false,
+      appAiModelReasoning: true,
+    });
   });
 });
