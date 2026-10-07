@@ -13,6 +13,7 @@ import {
   parseCodeReviewRecommendDays,
   parseCodeReviewRecommendPrCount,
 } from "@/lib/app-settings";
+import { InfoHint } from "@/components/dashboard/settings/info-hint";
 
 type Saved = { days: number; prCount: number };
 
@@ -71,7 +72,13 @@ export function CodeReviewRecommendField() {
 
   return (
     <div className="flex flex-col gap-3 rounded-md border p-3">
-      <span className="text-sm font-semibold">コードレビューの提案条件</span>
+      <div className="flex items-center gap-1.5">
+        <span className="text-sm font-semibold">コードレビューの提案条件</span>
+        <InfoHint label="コードレビューの提案条件">
+          未実施のリポジトリは常に提案します。既定は30日・100件です。経過日数は、一覧で経過が長い
+          リポジトリを注意の色で出す基準にも使います。
+        </InfoHint>
+      </div>
       <div className="flex flex-col gap-1.5">
         <Label htmlFor="code-review-recommend-days">経過日数</Label>
         <div className="flex flex-wrap items-center gap-2">
@@ -106,10 +113,6 @@ export function CodeReviewRecommendField() {
           </span>
         </div>
       </div>
-      <p className="text-xs text-muted-foreground">
-        未実施のリポジトリは常に提案します。既定は30日・100件です。経過日数は、一覧で経過が長い
-        リポジトリを注意の色で出す基準にも使います。
-      </p>
       {error && <p className="text-sm text-destructive">{error}</p>}
       <div className="flex items-center gap-3">
         <Button size="sm" onClick={handleSave} disabled={saving || !valid || !dirty}>

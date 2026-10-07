@@ -443,6 +443,16 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   半径の半分ずつ刻んで当てる（`eraseShapesAlong`）。**1回のなぞりは離した時点で履歴1件**
   （途中は`moving`と同じく表示用の一時状態）なので、「元に戻す」1回で戻せる。消しゴムの
   輪郭はキャンバスへ描くが、保存時の描き出しには含めない。
+- **設定項目の長い補足は、ラベル横の情報アイコン（[`settings/info-hint.tsx`](../src/components/dashboard/settings/info-hint.tsx)）へ入れる**（#4108）。
+  常時表示の段落にしない。現在値・警告（例: 判定AIでJevを選んだときの送信先）・「選んだ時点で保存」のような
+  操作結果に直結する短い補足だけは畳まずに出す。
+- **AIモデル区分の上部（[`settings/execution-flow-overview.tsx`](../src/components/dashboard/settings/execution-flow-overview.tsx)）は、
+  プロバイダー切替と工程ごとの実効エージェント・モデルを1枚で見せる**（#4108）。行の組み立ては
+  [`lib/execution-flow-settings.ts`](../src/lib/execution-flow-settings.ts)の`resolveProviderFlowRows`で、モデル名の解決は
+  `resolveExecutionFlows`に任せる。**画面へ渡る機能別のAI設定（`githubActionsAgent`・`defaultDispatchAgent`・
+  計画レビューのエージェント・アプリ内AIのモデル）は`inherit`を解決済みの値で、追従か個別設定かは値から読めない。**
+  そのため生の行から`readAiProviderOverrides`で別に読み、`AppSettingsValues.aiProviderOverrides`として保存後も更新する
+  （機能別の値を送る保存は、その項目を`inherit`から固定値へ変えるため）。
 - **設定画面に項目を足すときは`components/dashboard/settings/`の該当区分へ入れる**（#1539）。
   区分は[`settings-sections.ts`](../src/components/dashboard/settings/settings-sections.ts)が唯一の定義で、
   PCの設定ダイアログ（[`settings-dialog.tsx`](../src/components/dashboard/settings/settings-dialog.tsx)）と

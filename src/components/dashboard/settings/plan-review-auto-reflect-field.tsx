@@ -9,6 +9,7 @@ import {
   PLAN_REVIEW_AUTO_REFLECT_MAX_ROUNDS_MIN,
   parsePlanReviewAutoReflectMaxRounds,
 } from "@/lib/app-settings";
+import { InfoHint } from "@/components/dashboard/settings/info-hint";
 
 type Values = { enabled: boolean; maxRounds: number };
 
@@ -59,17 +60,17 @@ export function PlanReviewAutoReflectField() {
 
   return (
     <div className="flex flex-col gap-3 border-t pt-4">
-      <div>
+      <div className="flex items-center gap-1.5">
         <Label htmlFor="plan-review-auto-reflect-enabled">
           Jevが判断して、計画レビューの指摘を自動で反映する
         </Label>
-        <p className="mt-1 text-xs text-muted-foreground">
+        <InfoHint label="計画レビューの指摘の自動反映">
           ONにすると、Jevが初回レビューの重大な指摘を採用するか判断します。採用なら通知なしで計画を修正し、
           解消確認を1回だけ行って自動の見直しを終えます（#3765）。解消確認の後も重大な問題が残れば、
           未解消点をまとめて人へ通知します。不採用・判断できないときも人へ通知します。OFFのときは、
           レビューが届いてから通知し、反映するかは承認パネルで選びます。ローカルのClaude Code
           セッションだけが対象です。
-        </p>
+        </InfoHint>
       </div>
       <label className="flex items-center gap-2 text-sm" htmlFor="plan-review-auto-reflect-enabled">
         <input
@@ -88,7 +89,14 @@ export function PlanReviewAutoReflectField() {
         自動で反映する
       </label>
       <div className="flex flex-col gap-1.5">
-        <Label htmlFor="plan-review-auto-reflect-max-rounds">自動反映の上限回数</Label>
+        <div className="flex items-center gap-1.5">
+          <Label htmlFor="plan-review-auto-reflect-max-rounds">自動反映の上限回数</Label>
+          <InfoHint label="自動反映の上限回数">
+            人の修正を挟まずに連続して自動反映する回数です。実際に効くのは1回までです（以前の既定の5を
+            設定していても、初回レビュー1回→解消確認1回で終わります）。人が画面から修正を送っても、
+            全体レビューは自動では再開しません。
+          </InfoHint>
+        </div>
         <div className="flex items-center gap-2">
           <Input
             id="plan-review-auto-reflect-max-rounds"
@@ -110,11 +118,6 @@ export function PlanReviewAutoReflectField() {
           />
           <span className="text-sm text-muted-foreground">回</span>
         </div>
-        <p className="text-xs text-muted-foreground">
-          人の修正を挟まずに連続して自動反映する回数です。実際に効くのは1回までです（以前の既定の5を
-          設定していても、初回レビュー1回→解消確認1回で終わります）。人が画面から修正を送っても、
-          全体レビューは自動では再開しません。
-        </p>
       </div>
       {error && <p className="text-sm text-destructive">{error}</p>}
     </div>
