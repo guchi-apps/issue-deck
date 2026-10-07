@@ -5,6 +5,7 @@ import type { ReactNode } from "react";
 import { ArrowRight, GitPullRequest } from "lucide-react";
 
 import { GithubReferenceLink } from "@/components/dashboard/github-reference-link";
+import { IosPrecheckStatusLine } from "@/components/dashboard/ios-precheck-status";
 import {
   AiReviewBadge,
   ConflictBadge,
@@ -234,6 +235,14 @@ export function IssuePullRequestList({
                   reviewRunUrl={
                     detail?.mergeJudgement.aiReview.runUrl ?? detail?.mergeJudgement.runUrl ?? null
                   }
+                />
+              )}
+              {/* iOS事前検証（#4140）。CIとは別の軸なので内訳の工程に入れず、専用の行で出す */}
+              {detail?.iosPrecheck && (
+                <IosPrecheckStatusLine
+                  className="w-full"
+                  summary={detail.iosPrecheck}
+                  pullRequestUrl={detail.htmlUrl}
                 />
               )}
             </li>

@@ -835,6 +835,7 @@ describe("fetchPullRequestRollup", () => {
         ciChecks: expect.any(Array),
       },
       mergeable: false,
+      iosPrecheck: null,
     });
     // ref経由（`fetchCheckRollup`）と足して2回にならないこと自体がこの関数の目的。
     expect(calls).toHaveLength(1);
@@ -856,6 +857,7 @@ describe("fetchPullRequestRollup", () => {
         ciChecks: expect.any(Array),
       },
       mergeable: true,
+      iosPrecheck: null,
     });
 
     stubGraphql(pullRequestWithRollup("UNKNOWN", null));
@@ -868,6 +870,7 @@ describe("fetchPullRequestRollup", () => {
         ciChecks: expect.any(Array),
       },
       mergeable: null,
+      iosPrecheck: null,
     });
   });
 
@@ -883,6 +886,7 @@ describe("fetchPullRequestRollup", () => {
         ciChecks: expect.any(Array),
       },
       mergeable: true,
+      iosPrecheck: null,
     });
   });
 
@@ -892,6 +896,7 @@ describe("fetchPullRequestRollup", () => {
     await expect(fetchPullRequestRollup("owner", "repo", 1, "token")).resolves.toEqual({
       rollup: null,
       mergeable: null,
+      iosPrecheck: null,
     });
   });
 
@@ -901,6 +906,7 @@ describe("fetchPullRequestRollup", () => {
     await expect(fetchPullRequestRollup("owner", "repo", 1, "token")).resolves.toEqual({
       rollup: null,
       mergeable: null,
+      iosPrecheck: null,
     });
   });
 });
@@ -1084,5 +1090,68 @@ describe("dropSupersededCheckRuns（#4070）", () => {
     );
     const rollup = await fetchCheckRollup("owner", "repo", "issue-1", "token");
     expect(rollup?.checks).toEqual([{ status: "completed", conclusion: "failure" }]);
+  });
+});
+
+describe("iOS事前検証（issue-deck/ios-precheck。#4140）", () => {
+  const iosPending = {
+    __typename: "StatusContext",
+    context: "issue-deck/ios-precheck",
+    state: "PENDING",
+  };
+
+  it("commit statusはCI状態の集約にも内訳にも数えない", async () => {
+    stubGraphql(
+      pullRequestWithRollup("MERGEABLE", {
+        state: "PENDING",
+        contexts: {
+          totalCount: 2,
+          nodes: [checkRun("COMPLETED", "SUCCESS", "ci.yml", "lint"), iosPending],
+        },
+      }),
+    );
+
+    const { rollup } = await fetchPullRequestRollup("owner", "repo", 1, "token");
+    expect(rollup?.checks).toEqual([{ status: "completed", conclusion: "success" }]);
+    // StatusContextが混ざると内訳ごと消えていた
+    expect(rollup?.ciChecks).toHaveLength(1);
+  });
+
+  it("既定（PR一覧）ではコミットの履歴を引かず、iosPrecheckはnull", async () => {
+    const calls = stubGraphql(pullRequestWithRollup("MERGEABLE", null));
+    await expect(fetchPullRequestRollup("owner", "repo", 1, "token")).resolves.toMatchObject({
+      iosPrecheck: null,
+    });
+    expect(JSON.parse(calls[0]?.body ?? "{}").query).not.toContain("iosPrecheckCommits");
+  });
+
+  it("includeIosPrecheckのときは同じ1回のクエリでコミットごとのstatusを引き、要約にする", async () => {
+    const calls = stubGraphql(
+      pullRequestResponse({
+        ...pullRequestNode("MERGEABLE", null),
+        iosPrecheckCommits: {
+          nodes: [
+            {
+              commit: {
+                oid: "a".repeat(40),
+                status: { context: { state: "SUCCESS", description: "ビルド成功", createdAt: null } },
+              },
+            },
+            { commit: { oid: "b".repeat(40), status: null } },
+          ],
+        },
+      }),
+    );
+
+    const rollups = await fetchPullRequestRollups([{ owner: "owner", repo: "repo", number: 7 }], "token", {
+      includeIosPrecheck: true,
+    });
+    expect(calls).toHaveLength(1);
+    expect(JSON.parse(calls[0]?.body ?? "{}").query).toContain('context(name: "issue-deck/ios-precheck")');
+    expect(rollups.get(pullRequestRollupKey("owner", "repo", 7))?.iosPrecheck).toEqual({
+      headSha: "b".repeat(40),
+      head: null,
+      previous: { phase: "success", description: "ビルド成功", sha: "a".repeat(40), updatedAt: null },
+    });
   });
 });
