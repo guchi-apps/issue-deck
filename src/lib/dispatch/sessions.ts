@@ -3,6 +3,7 @@ import type { DispatchSession } from "@prisma/client";
 
 import { db } from "@/lib/db";
 import { SESSION_TIMELINE_MAX_EVENTS } from "@/lib/dispatch/session-timeline";
+import { buildTimelineStepTitle } from "@/lib/dispatch/issue-session";
 import {
   isRevivedSession,
   nextEscalatedState,
@@ -528,7 +529,7 @@ export async function reportDispatchSessions(params: {
               ? "セッション異常終了"
               : "セッション消失"
         : currentStep
-          ? `作業: ${currentStep}`
+          ? buildTimelineStepTitle(currentStep)
           : "作業状態を解除";
       try {
         await db.dispatchSessionTimelineEvent.create({
