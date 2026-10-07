@@ -23,7 +23,7 @@ import {
   parseGithubActionsAgent,
   parseDispatchFailoverThresholdPercent,
   parseModelPickEngine,
-  parsePlanReviewAgent,
+  parsePlanReviewAgentSetting,
   resolveAiExecutionAgent,
   resolveAppAiModel,
 } from "@/lib/app-settings";
@@ -187,7 +187,7 @@ export async function PATCH(request: NextRequest) {
   const hasPlanReviewAgentForClaude =
     payload !== null && typeof payload === "object" && "planReviewAgentForClaude" in payload;
   const planReviewAgentForClaude = hasPlanReviewAgentForClaude
-    ? parsePlanReviewAgent(payload?.planReviewAgentForClaude)
+    ? parsePlanReviewAgentSetting(payload?.planReviewAgentForClaude)
     : undefined;
   if (hasPlanReviewAgentForClaude && planReviewAgentForClaude === null) {
     return NextResponse.json({ error: "invalid_request" }, { status: 400 });
@@ -195,7 +195,7 @@ export async function PATCH(request: NextRequest) {
   const hasPlanReviewAgentForCodex =
     payload !== null && typeof payload === "object" && "planReviewAgentForCodex" in payload;
   const planReviewAgentForCodex = hasPlanReviewAgentForCodex
-    ? parsePlanReviewAgent(payload?.planReviewAgentForCodex)
+    ? parsePlanReviewAgentSetting(payload?.planReviewAgentForCodex)
     : undefined;
   if (hasPlanReviewAgentForCodex && planReviewAgentForCodex === null) {
     return NextResponse.json({ error: "invalid_request" }, { status: 400 });

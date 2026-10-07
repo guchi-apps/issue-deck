@@ -108,6 +108,24 @@ describe("GET", () => {
 });
 
 describe("PATCH", () => {
+  it("計画レビューの担当AIはinheritを保存でき、個別固定を全体設定へ戻せる（#4139）", async () => {
+    const res = await PATCH(
+      patchRequest({ planReviewAgentForClaude: "inherit", planReviewAgentForCodex: "inherit" }),
+    );
+
+    expect(res.status).toBe(200);
+    expect(upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        update: { planReviewAgentForClaude: "inherit", planReviewAgentForCodex: "inherit" },
+      }),
+    );
+  });
+
+  it("計画レビューの担当AIに未知の値は400", async () => {
+    const res = await PATCH(patchRequest({ planReviewAgentForClaude: "other" }));
+    expect(res.status).toBe(400);
+  });
+
   it("両方指定された場合は両方を更新する", async () => {
     const res = await PATCH(
       patchRequest({
