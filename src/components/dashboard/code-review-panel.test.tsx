@@ -38,18 +38,18 @@ afterEach(cleanup);
 
 describe("CodeReviewPanel（#698）", () => {
   it("結果もレビュー中でもなければ何も出さない", () => {
-    const { container } = render(<CodeReviewPanel report={null} isPending={false} />);
+    const { container } = render(<CodeReviewPanel report={null} runStatus="reported" />);
     expect(container.firstChild).toBeNull();
   });
 
   // 押した直後は結果がまだ無い。ここで何も出ないと、依頼できたのかどうかが画面から分からない
   it("結果が返る前は「レビュー中」と出す", () => {
-    render(<CodeReviewPanel report={null} isPending />);
+    render(<CodeReviewPanel report={null} runStatus="running" />);
     expect(screen.getByText("レビュー中")).toBeTruthy();
   });
 
   it("重要度ごとの件数・根拠・指摘を出す", () => {
-    render(<CodeReviewPanel report={report()} isPending={false} />);
+    render(<CodeReviewPanel report={report()} runStatus="reported" />);
 
     expect(screen.getByText("重大 1")).toBeTruthy();
     expect(screen.getByText("軽微 1")).toBeTruthy();
@@ -71,7 +71,7 @@ describe("CodeReviewPanel（#698）", () => {
     render(
       <CodeReviewPanel
         report={report()}
-        isPending={false}
+        runStatus="reported"
         onCreateFindingIssue={onCreateFindingIssue}
       />,
     );
@@ -89,7 +89,7 @@ describe("CodeReviewPanel（#698）", () => {
     render(
       <CodeReviewPanel
         report={report()}
-        isPending={false}
+        runStatus="reported"
         createdFindingIssues={new Map([["未完了ジョブの判定が種別を見ていない", 2170]])}
         onBulkCreateFindingIssues={onBulkCreateFindingIssues}
       />,
@@ -108,7 +108,7 @@ describe("CodeReviewPanel（#698）", () => {
     render(
       <CodeReviewPanel
         report={report()}
-        isPending={false}
+        runStatus="reported"
         createdFindingIssues={
           new Map([
             ["未完了ジョブの判定が種別を見ていない", 2170],
@@ -127,7 +127,7 @@ describe("CodeReviewPanel（#698）", () => {
     render(
       <CodeReviewPanel
         report={report()}
-        isPending={false}
+        runStatus="reported"
         createdFindingIssues={new Map([["未完了ジョブの判定が種別を見ていない", 2170]])}
         onCreateFindingIssue={vi.fn()}
       />,
@@ -141,12 +141,12 @@ describe("CodeReviewPanel（#698）", () => {
   it("結果が出てからは「もう一度レビュー」を出す（レビュー中は出さない）", () => {
     const onRestartReview = vi.fn();
     const { rerender } = render(
-      <CodeReviewPanel report={null} isPending onRestartReview={onRestartReview} />,
+      <CodeReviewPanel report={null} runStatus="running" onRestartReview={onRestartReview} />,
     );
     expect(screen.queryByRole("button", { name: "もう一度レビュー" })).toBeNull();
 
     rerender(
-      <CodeReviewPanel report={report()} isPending={false} onRestartReview={onRestartReview} />,
+      <CodeReviewPanel report={report()} runStatus="reported" onRestartReview={onRestartReview} />,
     );
     fireEvent.click(screen.getByRole("button", { name: "もう一度レビュー" }));
     expect(onRestartReview).toHaveBeenCalledTimes(1);
@@ -157,9 +157,53 @@ describe("CodeReviewPanel（#698）", () => {
     const parsed = parseCodeReviewReport(
       `${CODE_REVIEW_REPORT_MARKER}\n\n指摘はありませんでした。`,
     );
-    render(<CodeReviewPanel report={parsed} isPending={false} />);
+    render(<CodeReviewPanel report={parsed} runStatus="reported" />);
 
     expect(screen.getByText("指摘なし")).toBeTruthy();
     expect(screen.getByText("指摘はありませんでした。")).toBeTruthy();
+  });
+
+  // #4116。結果が届かなかった実行は「レビュー中」に残さず、理由・時刻と再実行を出す
+  it("失敗した実行は理由と再実行を出し、「レビュー中」を出さない", () => {
+    const onRerun = vi.fn();
+    render(
+      <CodeReviewPanel
+        report={null}
+        runStatus="failed"
+        job={{
+          id: "job-1",
+          status: "FAILED",
+          message: "Claude CLIが異常終了しました（終了コード 1）",
+          targetHost: "subpc",
+          createdAt: "2026-10-06T22:09:00.000Z",
+          startedAt: "2026-10-06T22:10:00.000Z",
+          heartbeatAt: null,
+          finishedAt: "2026-10-06T22:12:00.000Z",
+        }}
+        onRerun={onRerun}
+      />,
+    );
+
+    expect(screen.queryByText("レビュー中")).toBeNull();
+    expect(screen.getByText("失敗")).toBeTruthy();
+    expect(screen.getByText(/終了コード 1/)).toBeTruthy();
+    expect(screen.getByText(/開始/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "再実行" }));
+    expect(onRerun).toHaveBeenCalledTimes(1);
+  });
+
+  // 実行中・順番待ちは再実行を出さない（二重起動を避ける）
+  it("実行中は再実行を出さない", () => {
+    render(<CodeReviewPanel report={null} runStatus="running" onRerun={vi.fn()} />);
+    expect(screen.getByText("レビュー中")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "再実行" })).toBeNull();
+  });
+
+  // 再実行が失敗しても前回の結果（指摘カード・起票済みの関連）は残す
+  it("再実行が失敗しても前回の結果を残す", () => {
+    render(<CodeReviewPanel report={report()} runStatus="timeout" onRerun={vi.fn()} />);
+    expect(screen.getByText("時間切れ")).toBeTruthy();
+    expect(screen.getByText("以下は前回の結果です。")).toBeTruthy();
+    expect(screen.getByText("未完了ジョブの判定が種別を見ていない")).toBeTruthy();
   });
 });

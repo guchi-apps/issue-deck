@@ -72,11 +72,14 @@ Codexが`changes-requested`の場合も、後継Issueや新しいPRは作らな�
   ├ 依頼コメントを投稿（<!-- issue-deck-code-review -->）
   └ ジョブを積む（kind=CODE_REVIEW）
         → scripts/subpc-dispatch-poller.sh
-        → scripts/start-code-review.sh
+        → scripts/start-code-review.sh（ジョブは running のまま）
               origin/develop のスナップショットを読み取り専用で読む
-              claude -p を1回（scripts/prompts/code-review-agent.md）
+        → tmuxの中で scripts/run-code-review.sh（#4116）
+              running の生存報告（60秒ごと）
+              claude -p を1回（scripts/prompts/code-review-agent.md・上限つき）
         → gh issue comment でレビューIssueへ結果を投稿
-              （<!-- issue-deck-code-review-report -->）
+              （<!-- issue-deck-code-review-report --> ＋ 実行の印）
+        → ランナーが結果コメントの到達を確かめ、succeeded / failed / 時間切れ を報告
   → 画面が結果コメントを読んで指摘カードにする（CodeReviewPanel）
   → カードの「Issueを作成」→ 埋まった新規作成ダイアログ
   → 「もう一度レビュー」→ 同じリポジトリで実行ダイアログを開き直す
@@ -94,9 +97,9 @@ Codexが`changes-requested`の場合も、後継Issueや新しいPRは作らな�
 
 | 付いてこないもの | 理由 | 代わりの受け方 |
 | --- | --- | --- |
-| セッションの状態報告 | フック（`session-notify.sh`）を付けない。実装セッション用の経路へ載せると、同じIssueに受付・締めのコメントが二重に出る（計画レビューと同じ） | 結果はIssueコメントとして残る（未読の印は付く）。固まった場合は下の実行時間の上限で必ず終わる |
+| セッションの状態報告 | フック（`session-notify.sh`）を付けない。実装セッション用の経路へ載せると、同じIssueに受付・締めのコメントが二重に出る（計画レビューと同じ） | **ランナーがジョブへ直接報告する**（#4116。下記「実行の追跡」）。結果はIssueコメントとして残る（未読の印は付く） |
 | 走っているセッションの中止（`KILL`・`INTERRUPT`） | pollerが組み立て直すセッション名は`<repo>-issue-<番号>`で、`-code-review-`は照合に通らない | 順番待ち（`QUEUED`）のジョブは画面から取り消せる。走り始めたレビューは上限（既定45分）で終わる |
-| `dispatchPendingAt`由来の「実行中」表示 | ジョブはセッションが立った時点で閉じるため、レビュー本体が走っている間は残らない | 依頼コメントに対する結果コメントの有無で「レビュー中」を出す（`isCodeReviewPending`） |
+| `dispatchPendingAt`由来の「実行中」表示 | 実装セッション用の表示で、レビューIssueには使わない | ジョブ（`DispatchJob`）の状態と結果コメントから決める（`resolveCodeReviewRunStatus`。#4116） |
 | 左メニュー・スマホのホームの「コードレビュー」の行に回るアイコン | 上と同じ理由。行が見ているのは一覧のデータで、そこにコメントは載っていない | 一覧の行のバッジ（後述「一覧に結果を出す」）と、開いたIssueの「レビュー中」表示で読む。**「質問」の合図（丸・回るアイコン・吹き出し）を流用しない**——同じ枠に並んでいるだけで、質問の回答待ちのあいだレビューの行まで回っていた（#2325。判定は`resolveQuestionNavSignals`へ寄せてある） |
 
 **記録先はレビュー対象のリポジトリで、選ばせない。** 横断質問が専用の`question`リポジトリを
@@ -326,7 +329,7 @@ Issue——ここは表示のための当て推量。
 | 対象リポジトリ | サブPCにチェックアウトがあるものだけ（`repository_not_runnable`）。読むコードがそこにしか無い。無人実行を入れない枠の5つは除く（`repository_excluded`。上記） |
 | 参照先 | `origin/develop`（無ければ`origin/main`）のスナップショット。置き場は`~/apps/issue-deck-worktrees/.code-reviews`で、横断質問・計画レビューとは分ける |
 | 同時実行 | `DISPATCH_MAX_CODE_REVIEWS`（既定2）。セッション名が`-issue-`の規約から外れるため`DISPATCH_MAX_SESSIONS`には数えられない |
-| 実行時間 | `ISSUE_DECK_CODE_REVIEW_TIMEOUT_SECONDS`（既定2700秒＝45分）。フックを付けていないので、固まっても誰も気づけない。上限で必ず終わる形にする |
+| 実行時間 | `ISSUE_DECK_CODE_REVIEW_TIMEOUT_SECONDS`（既定2700秒＝45分・正の整数のみ）。`timeout`コマンドが無い・値が不正なら**起動しない**（#4116。以前は黙って上限なしで走らせ、「0で無効」も受け付けていた） |
 | 指摘の件数 | プロンプトで目安10件。全部挙げるより重い順に並べる方が役に立つ |
 | poller | `codeReviewCapable`を申告したホストにだけ配る。未申告（＝ランチャーが同期されていない）は「できない」側へ倒し、ダイアログの選択肢の側で理由を出す |
 
@@ -334,6 +337,79 @@ Issue——ここは表示のための当て推量。
 起動のたびに別のコミットへ貼り替えられる。リポジトリ全体を読んでいる最中に足元が変わると、
 指摘のファイル:行がその場でずれる。分けておけば、貼り替える可能性があるのは同じリポジトリの
 別のレビューだけになり、その1点はランチャー側のガード（`code_review_sessions_alive_for`）で塞げる。
+
+## 実行の追跡（#4116）
+
+**状態の正は`DispatchJob`（`kind=CODE_REVIEW`の最新1件）と結果コメント。** 以前はpollerが
+「tmuxが立った」時点でジョブを`SUCCEEDED`にし、その後の終了コード・時間切れ・投稿の成否は
+どこにも残らなかった。画面は結果コメントの有無だけで「レビュー中」を出していたため、起動すら
+していないレビューが何日も「レビュー中」に残った（下記「#4090・yoteiflow#1131の直接原因」）。
+
+| 状況 | ジョブ | 画面（一覧のバッジ・詳細のパネル） |
+| --- | --- | --- |
+| 積んだ・受け取った | `QUEUED`・`CLAIMED` | 順番待ち |
+| 走っている | `RUNNING`（ランナーの生存報告） | レビュー中（依頼・開始・最終更新・ホスト） |
+| 結果コメントが届いた | `SUCCEEDED`（到達を確かめてから） | 重大n・中n…／指摘なし |
+| `claude`が非0で終了・結果未投稿・投稿エラー | `FAILED`（理由とログの場所） | 失敗＋再実行 |
+| 実行上限・生存報告が10分途絶（プロセス消失・ホスト停止） | `TIMEOUT` | 時間切れ＋再実行 |
+| 同時実行の上限・同じレビューが動いている | `SKIPPED` | 見送り＋再実行 |
+| 結果が無いのに`SUCCEEDED`（旧版pollerの起動時点の記録）・記録が無い | — | 状態不明＋再実行 |
+
+- **判定は1つの純関数**（`resolveCodeReviewRunStatus`・`src/lib/github/code-review.ts`）。一覧は
+  要約API（`GET /api/issues/code-review-reports`）がDBの最新ジョブを付けて決め、詳細は手元の
+  コメントと同じAPIのジョブで決める。画面の`dispatch.jobs`は直近24時間ぶんしか持たないので、
+  詳細の判定には使わない（要約が届くまでの埋め合わせだけ）。**依頼時刻の経過だけで時間切れ・完了を決めない**
+- **結果の到達は実行の印で確かめる。** 結果コメントの2行目に`<!-- issue-deck-code-review-run:<ジョブID> -->`
+  （プロンプトの`{{RUN_MARKER}}`）。印の無い結果（対象リポジトリ独自のプロンプト）は、その実行の
+  開始以降に作られたものだけを数える。**印が最新のジョブと違う結果（再実行前の実行が遅れて
+  返したもの）は、最新の実行の結果として数えない**
+- **生成済みの結果は捨てない。** エージェントが投稿に失敗しても、最終応答に結果の全文があれば
+  ランナーが印を付けて投稿し直す。投稿の前に毎回「もう届いているか」を確かめ、二重に付けない
+- **報告の通信断から収束できる。** 終了の報告は間隔を空けて送り直す。届かずに`TIMEOUT`にされた後でも、
+  ランナーの終了報告（`exitCode`付き）は`TIMEOUT`・起動時点の`SUCCEEDED`を上書きできる
+  （`reportDispatchJob`。生存報告は終わったジョブを生き返らせない）。結果コメント自体が届いて
+  いれば、ジョブの状態に関わらず`reported`になる
+- **再実行は同じレビューIssueのまま**（`POST /api/code-review/rerun`）。先にジョブを積み（未完了の
+  実行があれば`activeKey`で断る）、積めたら依頼コメントを足す。pollerは同名のtmuxセッションが
+  生きていれば見送る。旧い結果・ログ・起票済みのIssueはそのまま残る
+- 走り出したコードレビュー（`RUNNING`）は**実装セッションの起動枠に数えない**（`claimDispatchJobs`・
+  `summarizeDispatchQueue`）。本数はpollerの`DISPATCH_MAX_CODE_REVIEWS`が絞る
+- **本数の上限は生きているペインだけを数える。** ランチャーは異常終了時にペインを残す（`remain-on-exit failed`）
+
+### #4090・yoteiflow#1131の直接原因（2026-10-07調査）
+
+サブPCのpollerのjournal（UTC表記）に次が残っていた。
+
+```text
+Oct 06 22:10:56 ジョブ cmux8dpzv0800k161c8ol6rq6: guchi-apps/issue-deck #4090（CODE_REVIEW）
+  コードレビューのセッションが上限（2本）に達しているため起動しませんでした（現在 2 本）。
+Oct 06 22:11:37 ジョブ cmux8e1da080kk161acll45qe: guchi-apps/yoteiflow #1131（CODE_REVIEW）
+  コードレビューのセッションが上限（2本）に達しているため起動しませんでした（現在 2 本）。
+```
+
+- 「2本」は10月2日に利用上限（`You've hit your session limit`）で終了コード1で落ち、死んだペインだけが
+  残っていた`aide-code-review-536`・`morrow-code-review-442`。`count_code_review_sessions`が
+  `tmux list-sessions`の名前だけで数えていたため、以降のレビューが全部見送られた
+- ジョブは`SKIPPED`で終わったが、画面の`dispatch.jobs`は終了後24時間で消え、パネルは結果コメントの
+  有無だけを見ていたため「レビュー中」に戻った
+- 2件ともサブPCに`.code-reviews/<repo>-<番号>.log`・プロンプトは無い（＝ランチャーは走っていない）。
+  CLIの終了コード・GitHubへの投稿エラーは発生していない。本番DBのジョブ行は直接は読んでいない
+  （journalのジョブIDとメッセージで確認）
+- 復旧: 新版の画面で2件は「見送り」と理由＋「再実行」になる。死んだペインのセッションは、新版の
+  pollerでは数えられず、同名のレビューを起こすときに畳まれる
+
+### 配布順序と旧版の混在
+
+サブPCは`develop`、本番は`main`で動く。**順序は「①`main`へのリリース（本番の画面・API）→
+②サブPCの「更新して再起動」（poller 33・ランチャー・ランナー）」**。マイグレーションは無い。
+
+| 組み合わせ | 挙動 |
+| --- | --- |
+| 新サーバー＋旧poller | 起動時点で`SUCCEEDED`。結果が届けば`reported`、届かなければ「状態不明＋再実行」（永久の「レビュー中」にはならない） |
+| 旧サーバー＋新poller | 起動後は`RUNNING`＋生存報告。`timedOut`は読まれず時間切れは`FAILED`になる。走り出したレビューが起動枠を1つ使う |
+| 新サーバー＋新poller | 上の表どおり |
+
+戻す場合はpollerを先に戻す（旧サーバーは`exitCode`付きの遅い報告を上書きに使わないだけで壊れない）。
 
 ## セッション名
 

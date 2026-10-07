@@ -90,7 +90,13 @@ export function summarizeDispatchQueue(
     (a, b) => b.queuePriority - a.queuePriority || a.createdAt.localeCompare(b.createdAt),
   );
 
-  const running = byRunOrder.filter((job) => isRunningStatus(job) && !isPlanReview(job));
+  // 走り出したコードレビュー（#4116）は完了まで`RUNNING`のまま残るが、起動枠は使わない
+  // （`claimDispatchJobs`の空きの計算と同じ除外）。結果待ちはレビューIssueの側に出る
+  const isRunningCodeReview = (job: DispatchJobView) =>
+    job.kind === "CODE_REVIEW" && job.status === "RUNNING";
+  const running = byRunOrder.filter(
+    (job) => isRunningStatus(job) && !isPlanReview(job) && !isRunningCodeReview(job),
+  );
   const queued = byRunOrder.filter((job) => job.status === "QUEUED" && !isPlanReview(job));
   const planReviews = byRunOrder.filter(
     (job) => isPlanReview(job) && (isRunningStatus(job) || job.status === "QUEUED"),

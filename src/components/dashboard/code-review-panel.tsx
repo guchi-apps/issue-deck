@@ -2,15 +2,22 @@
 
 import { FilePlus2, ListChecks, Loader2, RotateCw, ScanSearch } from "lucide-react";
 
-import { CodeReviewSeverityBadge } from "@/components/dashboard/code-review-result-badges";
+import {
+  CodeReviewRunStatusBadge,
+  CodeReviewSeverityBadge,
+} from "@/components/dashboard/code-review-result-badges";
 import { MarkdownBody } from "@/components/dashboard/markdown-body";
 import { Button } from "@/components/ui/button";
+import { formatMonthDayTime } from "@/lib/format-date-time";
 import {
   CODE_REVIEW_SEVERITIES,
+  canRerunCodeReview,
   countCodeReviewFindings,
   filterUncreatedCodeReviewFindings,
   type CodeReviewFinding,
   type CodeReviewReport,
+  type CodeReviewRunJob,
+  type CodeReviewRunStatus,
 } from "@/lib/github/code-review";
 import { cn } from "@/lib/utils";
 
@@ -36,9 +43,27 @@ import { cn } from "@/lib/utils";
  * チェックボックスの選択に残す**——数十件が無条件で自動生成される事態は変わらず避けている。
  * 個別のタイトル・本文を直したい場合は従来どおり1件ずつの「Issueを作成」を使う。
  */
+/** 結果が無い状態ごとの説明（#4116）。「何が起きて、次に何をすればよいか」を1文で出す */
+const RUN_STATUS_DESCRIPTIONS: Record<Exclude<CodeReviewRunStatus, "reported" | "missing">, string> = {
+  queued: "サブPCが受け取るのを待っています。",
+  running:
+    "サブPCのセッションがリポジトリ全体を読んでいます。結果はこのIssueのコメントとして返ります。",
+  failed: "レビューは結果を返さずに終わりました。理由を確かめて再実行してください。",
+  timeout:
+    "実行上限に達したか、サブPCからの生存報告が途絶えました（プロセスの消失・ホストの停止）。再実行してください。",
+  skipped: "レビューを起動しませんでした。理由を確かめて再実行してください。",
+  canceled: "レビューは取り消されました。",
+  unknown:
+    "結果が届いていませんが、実行の記録は終わっているか残っていません（旧い起動記録など）。結果が届くかは分からないため、再実行してください。",
+};
+
 export function CodeReviewPanel({
   report,
-  isPending,
+  runStatus,
+  job,
+  onRerun,
+  isRerunning = false,
+  rerunError = null,
   createdFindingIssues,
   onCreateFindingIssue,
   onBulkCreateFindingIssues,
@@ -47,8 +72,20 @@ export function CodeReviewPanel({
 }: {
   /** いちばん新しいレビュー結果。まだ返っていなければ`null` */
   report: CodeReviewReport | null;
-  /** 依頼したがまだ結果が返っていない（`isCodeReviewPending`） */
-  isPending: boolean;
+  /**
+   * レビューの状態（#4116。`resolveCodeReviewRunStatus`）。一覧のバッジと同じ関数で決めた値を渡す
+   */
+  runStatus: CodeReviewRunStatus;
+  /** 最新の実行の記録（開始時刻・最終更新・理由を出す）。取れていなければ`null` */
+  job?: CodeReviewRunJob | null;
+  /**
+   * 同じレビューIssueのまま再実行する（#4116）。失敗・時間切れ・見送り・状態不明のときだけ出す。
+   * 渡さない画面ではボタンを出さない
+   */
+  onRerun?: () => void;
+  isRerunning?: boolean;
+  /** 再実行を積めなかった理由（実行中の記録が残っている・ホストが無い など） */
+  rerunError?: string | null;
   /**
    * 既にIssueにした指摘（見出し → Issue番号）。**同じ指摘を2回起票するのを防ぐためのもの。**
    *
@@ -71,12 +108,13 @@ export function CodeReviewPanel({
    *
    * **結果を読んだ場所から起こし直せるようにする。** 直したあとに効いたかを見たくなるのは
    * 結果を読んだ直後で、そのたびに「コードレビュー」ビューへ戻るのは遠い。
-   * 走っている最中（`isPending`）は出さない。
+   * 結果が届いているときだけ出す（結果が無いときは`onRerun`の「再実行」）。
    */
   onRestartReview?: () => void;
   className?: string;
 }) {
-  if (!report && !isPending) return null;
+  if (!report && (runStatus === "missing" || runStatus === "reported")) return null;
+  const reported = runStatus === "reported";
 
   const findings = report?.findings ?? [];
   const counts = countCodeReviewFindings(findings);
@@ -89,7 +127,7 @@ export function CodeReviewPanel({
           <ScanSearch className="size-3.5 text-muted-foreground" />
           レビュー結果
         </h3>
-        {report ? (
+        {reported && report ? (
           findings.length > 0 ? (
             <div className="flex flex-wrap items-center gap-1.5">
               {CODE_REVIEW_SEVERITIES.filter((severity) => counts[severity] > 0).map((severity) => (
@@ -103,13 +141,18 @@ export function CodeReviewPanel({
           ) : (
             <span className="text-xs text-muted-foreground">指摘なし</span>
           )
-        ) : (
-          <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
-            <Loader2 className="size-3.5 animate-spin" />
-            レビュー中
-          </span>
+        ) : runStatus !== "reported" && runStatus !== "missing" ? (
+          <CodeReviewRunStatusBadge status={runStatus} title={job?.message} />
+        ) : null}
+        {!reported && onRerun && canRerunCodeReview(runStatus) && (
+          <div className="ml-auto">
+            <Button size="xs" variant="outline" onClick={onRerun} disabled={isRerunning}>
+              {isRerunning ? <Loader2 className="animate-spin" /> : <RotateCw />}
+              再実行
+            </Button>
+          </div>
         )}
-        {report && (onBulkCreateFindingIssues || onRestartReview) && (
+        {reported && report && (onBulkCreateFindingIssues || onRestartReview) && (
           <div className="ml-auto flex flex-wrap items-center gap-2">
             {onBulkCreateFindingIssues && uncreatedFindings.length > 0 && (
               <Button
@@ -142,10 +185,25 @@ export function CodeReviewPanel({
         <MarkdownBody content={report.summary} className="px-3 py-2 text-xs leading-relaxed" />
       )}
 
-      {!report && (
-        <p className="px-3 py-2 text-xs text-muted-foreground">
-          サブPCのセッションがリポジトリ全体を読んでいます。結果はこのIssueのコメントとして返ります。
-        </p>
+      {/* 結果が無い・届かなかった実行の状態（#4116）。理由・開始時刻・最終更新を、一覧のバッジより
+          詳しく出す。前の実行の結果があれば、その下に「前回の結果」として残す */}
+      {runStatus !== "reported" && runStatus !== "missing" && (
+        <div className="flex flex-col gap-1 border-b px-3 py-2 text-xs">
+          <p className="text-muted-foreground">{RUN_STATUS_DESCRIPTIONS[runStatus]}</p>
+          {job?.message && (
+            <p className="font-mono text-[11px] break-all whitespace-pre-wrap">{job.message}</p>
+          )}
+          {job && (
+            <p className="text-[11px] text-muted-foreground">
+              依頼 {formatMonthDayTime(job.createdAt)}
+              {job.startedAt && ` ・ 開始 ${formatMonthDayTime(job.startedAt)}`}
+              {` ・ 最終更新 ${formatMonthDayTime(job.finishedAt ?? job.heartbeatAt ?? job.startedAt ?? job.createdAt)}`}
+              {` ・ ${job.targetHost}`}
+            </p>
+          )}
+          {rerunError && <p className="text-[11px] text-destructive">{rerunError}</p>}
+          {report && <p className="text-[11px] text-muted-foreground">以下は前回の結果です。</p>}
+        </div>
       )}
 
       {findings.length > 0 && (

@@ -51,6 +51,7 @@ import { NightlyRunNotice } from "@/components/dashboard/nightly-run-marks";
 import { StartImplementationDialog } from "@/components/dashboard/start-implementation-dialog";
 import { SubIssueProgress } from "@/components/dashboard/sub-issue-progress";
 import { StartLocalSessionButton } from "@/components/dashboard/start-local-session-button";
+import { useCodeReviewRun } from "@/hooks/use-code-review-run";
 import { useDispatchState } from "@/hooks/use-dispatch-state";
 import {
   findBlockingSession,
@@ -126,7 +127,6 @@ import {
   buildCodeReviewFindingIssueIndex,
   findLatestCodeReviewReport,
   isCodeReviewIssue,
-  isCodeReviewPending,
   type CodeReviewFinding,
 } from "@/lib/github/code-review";
 import {
@@ -324,6 +324,8 @@ export function MobileIssueDetail({
   );
   // ディスパッチ状態はこの画面で1回だけ取得し、起動ボタン・実行先の表示へ配る（#1262）
   const dispatch = useDispatchState(true);
+  // コードレビューIssue（#698）の実行の状態（#4116）。一覧のバッジと同じ関数で決める
+  const codeReviewRun = useCodeReviewRun(issue, comments, dispatch);
   // 計画が出し直されたら取り直す（#3493）。作成を依頼した後の計画では公開済みになっているため
   const planRequestId = (issue
     ? findPlanRequestForIssue(dispatch.planRequests ?? [], issue.repositoryFullName, issue.number)
@@ -504,7 +506,6 @@ export function MobileIssueDetail({
   const codeReview = isCodeReviewIssue(issue)
     ? {
         report: findLatestCodeReviewReport(comments),
-        isPending: isCodeReviewPending(comments),
         // 同じ指摘を2回起票しないための照合（#698）。**同じリポジトリの同じタイトル**だけを見る
         // （レビューを回し直すと同じ指摘が返るため、無いと同じIssueが何件も立つ）
         createdFindingIssues: buildCodeReviewFindingIssueIndex(issues, issue.repositoryFullName),
@@ -1115,7 +1116,11 @@ export function MobileIssueDetail({
         {codeReview && (
           <CodeReviewPanel
             report={codeReview.report}
-            isPending={codeReview.isPending}
+            runStatus={codeReviewRun?.runStatus ?? "missing"}
+            job={codeReviewRun?.job}
+            onRerun={() => void codeReviewRun?.rerun()}
+            isRerunning={codeReviewRun?.isRerunning}
+            rerunError={codeReviewRun?.rerunError}
             createdFindingIssues={codeReview.createdFindingIssues}
             onRestartReview={() => onStartCodeReview(issue.repositoryFullName)}
             onCreateFindingIssue={(finding) => onCreateCodeReviewFindingIssue(issue, finding)}

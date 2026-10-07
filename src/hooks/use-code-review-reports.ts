@@ -3,6 +3,13 @@
 import { useEffect, useState } from "react";
 
 import { isCodeReviewIssue, type CodeReviewSummary } from "@/lib/github/code-review";
+
+/**
+ * 順番待ち・実行中のレビューがある間だけ取り直す間隔（#4116）。結果はコメント件数の変化で
+ * 取り直されるが、失敗・時間切れはコメントを増やさないため、これが無いと「レビュー中」から動かない。
+ * 取り直しはDBのジョブを引くだけで、コメントはキャッシュから返る（GitHubは叩かない）
+ */
+const ACTIVE_RUN_REFRESH_MS = 30_000;
 import type { Issue } from "@/types/issue";
 
 /**
@@ -16,10 +23,15 @@ import type { Issue } from "@/types/issue";
  * 取れなかったIssueは戻り値に入らない。行のバッジが出ないだけで、一覧そのものは今までどおり出す。
  */
 export function useCodeReviewReports(
-  issues: Issue[],
+  issues: readonly Pick<Issue, "repositoryFullName" | "number" | "title" | "commentCount">[],
   enabled: boolean,
-): ReadonlyMap<string, CodeReviewSummary> {
+): { summaries: ReadonlyMap<string, CodeReviewSummary>; reload: () => void } {
   const [summaries, setSummaries] = useState<ReadonlyMap<string, CodeReviewSummary>>(new Map());
+  // 再実行を積んだ直後など、コメント件数が変わる前に取り直したいときに進める
+  const [reloadToken, setReloadToken] = useState(0);
+  const hasActiveRun = [...summaries.values()].some(
+    (summary) => summary.runStatus === "queued" || summary.runStatus === "running",
+  );
 
   const targets = enabled ? issues.filter(isCodeReviewIssue) : [];
   // コメント件数まで含めてキーにする。レビュー結果が返るとコメントが1件増えるので、
@@ -58,14 +70,16 @@ export function useCodeReviewReports(
     }
 
     load();
+    const timer = hasActiveRun ? window.setInterval(load, ACTIVE_RUN_REFRESH_MS) : null;
 
     return () => {
       cancelled = true;
       controller.abort();
+      if (timer !== null) window.clearInterval(timer);
     };
-  }, [targetKey]);
+  }, [targetKey, reloadToken, hasActiveRun]);
 
-  return summaries;
+  return { summaries, reload: () => setReloadToken((value) => value + 1) };
 }
 
 /** 一覧の行から要約を引くためのキー。APIへ渡す形（`owner/repo#123`）と同じ */

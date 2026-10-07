@@ -710,7 +710,10 @@ export function IssueList({
    */
   // **リポジトリで絞る前の集合で引く**（#3092）。絞った集合で引くと、選択を切り替えるたびに
   // 引き直しになり、枠の「結果待ち」の印も選んだリポジトリ以外から消える
-  const codeReviewSummaries = useCodeReviewReports(allIssues, view === "code-review");
+  const { summaries: codeReviewSummaries } = useCodeReviewReports(
+    allIssues,
+    view === "code-review",
+  );
   /**
    * 指摘の対応状況（#2868）。**要約に入っているのは指摘の見出しだけ**で、それが
    * Issueになったか・closeされたかは手元のIssueから数える（`summarizeCodeReviewFindingProgress`）。
@@ -745,8 +748,14 @@ export function IssueList({
         codeReviewRepositoryFullNames ??
         [...new Set(reviewIssues.map((issue) => issue.repositoryFullName))],
       canRun: (repositoryFullName) => canCodeReviewRepository(dispatch.hosts, repositoryFullName),
-      isPending: (issue) =>
-        codeReviewSummaries.get(codeReviewSummaryKey(issue))?.state === "pending",
+      // 白抜き（結果待ち）は順番待ち・実行中だけ（#4116）。失敗・状態不明を「待っている」に見せない
+      isPending: (issue) => {
+        const summary = codeReviewSummaries.get(codeReviewSummaryKey(issue));
+        if (summary?.runStatus) {
+          return summary.runStatus === "queued" || summary.runStatus === "running";
+        }
+        return summary?.state === "pending";
+      },
       now,
       staleDays: codeReviewRecommend?.days,
     });
