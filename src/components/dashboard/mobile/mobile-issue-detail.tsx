@@ -130,7 +130,6 @@ import {
   type CodeReviewFinding,
 } from "@/lib/github/code-review";
 import {
-  ARTIFACT_REQUIRED_LABEL,
   canStartImplementation,
   startImplementationDisabledReason,
 } from "@/lib/github/start-implementation";
@@ -274,8 +273,12 @@ export function MobileIssueDetail({
     useIssueComments(issue);
   const { relations: subIssueRelations } = useIssueSubIssues(issue);
   // セッションが公開したアーティファクト（#2154）。PC版（`issue-detail.tsx`）と同じ扱い
-  const { artifacts, isLoaded: isArtifactsLoaded, reload: reloadArtifacts } =
-    useIssueArtifacts(issue);
+  const {
+    artifacts,
+    isLoaded: isArtifactsLoaded,
+    isFailed: isArtifactsFailed,
+    reload: reloadArtifacts,
+  } = useIssueArtifacts(issue);
   const taskList = useIssueTaskList(issue, onIssueUpdated);
   // 手作業Issueが待っている相手の状況（#1705）。PCの詳細と同じフック・同じ部品を使う
   const manualStepPrerequisites = useManualStepPrerequisites(issue, issues);
@@ -1027,8 +1030,7 @@ export function MobileIssueDetail({
               planReview={pendingPlanReview}
               planReviewJob={planReviewJob}
               artifactsMissing={
-                  issue.labels.some((label) => label.name === ARTIFACT_REQUIRED_LABEL) &&
-                  isArtifactsLoaded &&
+                  isArtifactsLoaded && !isArtifactsFailed &&
                   artifacts.length === 0
                 }
             />

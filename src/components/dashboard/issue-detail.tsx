@@ -147,7 +147,6 @@ import {
   type CodeReviewFinding,
 } from "@/lib/github/code-review";
 import {
-  ARTIFACT_REQUIRED_LABEL,
   canStartImplementation,
   startImplementationDisabledReason,
 } from "@/lib/github/start-implementation";
@@ -276,8 +275,12 @@ export function IssueDetail({
   const { relations: subIssueRelations } = useIssueSubIssues(issue);
   // セッションが公開したアーティファクト（#2154）。本文・コメント中のclaude.aiリンクを
   // アプリ内プレビューへ差し替えるためにも使うので、セクションより外側で取る
-  const { artifacts, isLoaded: isArtifactsLoaded, reload: reloadArtifacts } =
-    useIssueArtifacts(issue);
+  const {
+    artifacts,
+    isLoaded: isArtifactsLoaded,
+    isFailed: isArtifactsFailed,
+    reload: reloadArtifacts,
+  } = useIssueArtifacts(issue);
   // 手作業Issueが待っている相手の状況（#1705）。スマホの詳細でも同じフックを使う
   const manualStepPrerequisites = useManualStepPrerequisites(issue, issues);
   // 実機のファイル変更を管理リポジトリへ切り出せるか（#2021）。**手作業Issueでしか見ない**
@@ -1129,8 +1132,7 @@ export function IssueDetail({
                 planReviewNotice={planReviewNotice}
                 planReviewJob={planReviewJob}
                 artifactsMissing={
-                  issue.labels.some((label) => label.name === ARTIFACT_REQUIRED_LABEL) &&
-                  isArtifactsLoaded &&
+                  isArtifactsLoaded && !isArtifactsFailed &&
                   artifacts.length === 0
                 }
               />
