@@ -46,6 +46,8 @@ type ProgressProps = {
 };
 
 type WorkflowStatusStepsProps = ProgressProps & {
+  /** 計画レビューを作成中か。作成中は人が押す操作が無いので確認待ちの橙にしない（#4160） */
+  planReviewCreating?: boolean;
   /** このIssueがどこで走っているか（#1262）。着手後もPC・スマホの詳細から実行先が分かるようにする */
   executionTarget?: IssueExecutionTarget;
   /**
@@ -376,7 +378,8 @@ export function WorkflowStepBadge({
   const currentIndex = getWorkflowStepIndex({ projectStatus });
   if (currentIndex === null) return null;
 
-  const approvalPending = isApprovalPending(labels);
+  // 計画レビューの作成中は人が押して進める操作が無いので、確認待ち（橙）にしない（#4160）
+  const approvalPending = isApprovalPending(labels) && planReviewState !== "creating";
   // 何を求められているかを添える（#1490）。理由ラベルが配られていないリポジトリではnullになり、
   // 従来どおり「ユーザーの確認待ち」だけを出す
   const reason = checkUserReason(labels);
@@ -601,11 +604,13 @@ export function WorkflowStatusSteps({
   showExecutionTarget = true,
   planningSkipped = false,
   pullRequestProgress = null,
+  planReviewCreating = false,
 }: WorkflowStatusStepsProps) {
   const currentIndex = getDisplayPhaseIndex({ projectStatus });
   if (currentIndex === null) return null;
 
-  const approvalPending = isApprovalPending(labels);
+  // 計画レビューの作成中は橙にしない（#4160）
+  const approvalPending = isApprovalPending(labels) && !planReviewCreating;
   // 何を求められているかをバッジへ添える（#1490）。理由ラベルが配られていないリポジトリでは
   // nullになり、従来どおり「ユーザー確認待ち」だけを出す
   const reason = checkUserReason(labels);

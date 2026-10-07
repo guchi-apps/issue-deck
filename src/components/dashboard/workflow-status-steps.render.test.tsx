@@ -210,6 +210,27 @@ describe("WorkflowStepBadge", () => {
     expect(hasEmphasizedTrack(qa.container)).toBe(true);
   });
 
+  it("計画レビューの作成中は確認待ちの橙にしない（#4160）", () => {
+    const labels = [{ name: "00.check-user", color: "", description: null }];
+    const creating = render(
+      <WorkflowStepBadge labels={labels} projectStatus="Planning" planReviewState="creating" />,
+    );
+    expect(hasEmphasizedTrack(creating.container)).toBe(false);
+    expect(creating.container.innerHTML).not.toContain("amber");
+    cleanup();
+
+    const presented = render(
+      <WorkflowStepBadge labels={labels} projectStatus="Planning" planReviewState="presented" />,
+    );
+    expect(hasEmphasizedTrack(presented.container)).toBe(true);
+    cleanup();
+
+    const steps = render(
+      <WorkflowStatusSteps labels={labels} projectStatus="Planning" planReviewCreating />,
+    );
+    expect(steps.container.innerHTML).not.toContain("amber");
+  });
+
   it("サブPCのセッションが動いている間はバーを掃く", () => {
     const { container } = render(
       <WorkflowStepBadge
