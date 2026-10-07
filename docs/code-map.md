@@ -3341,8 +3341,8 @@ export function POST(request: NextRequest) {
   [multi-agent/prompts-and-models.md](multi-agent/prompts-and-models.md)「重いIssueだけ
   モデルを上げる」を参照。
   **「おまかせ」はissue-deckがIssueを読んで選ぶ**（#2723。`lib/claude/model-pick.ts`と
-  `POST /api/issues/model-pick`。押したときだけ呼び、AIが使えなければラベルと分量からの
-  ルールへ倒す。**設定`claudeLocalModel`が`pick`（おまかせ）のときは、モデル欄が出た時点で
+  `POST /api/issues/model-pick`。押したときだけ呼び、AIが使えなければ本文の未解決の判断を見るルール
+  （ラベル・分量では昇格しない。#4106）へ倒す。**設定`claudeLocalModel`が`pick`（おまかせ）のときは、モデル欄が出た時点で
   自動で1回呼ぶ**〈#3106。最初の選択は設定の値で、「設定に従う」は削除した。検証は
   `parseClaudeLocalModelSetting`〈`pick`を通す〉と`parseClaudeLocalModel`〈弾く〉に分かれる〉。
   **判定をJevで行うときは、聞くのも出すのもモデルの選択だけ**〈#3255。難しさ・調査の要否・

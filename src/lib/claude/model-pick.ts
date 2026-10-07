@@ -89,6 +89,45 @@ function truncate(text: string, maxLength: number): string {
   return `${normalized.slice(0, maxLength)}...(省略)`;
 }
 
+/** 見出しにこの語が含まれる節は、後半にあっても判断材料として残す（#4106） */
+const DECISION_HEADING = /決定|確定|方針|仕様|前提|完了条件|要件|制約|承認/;
+
+/**
+ * 判定へ渡す本文・計画の抜粋（#4106）。**先頭だけを切ると、後半に書かれた決定事項が落ちて**
+ * 「まだ決まっていない」ように見え、難しさを過大評価する。上限を超えるときは
+ * 先頭＋決定事項などの節（見出しに`DECISION_HEADING`を含むもの）＋末尾を残す。
+ * 上限（`maxLength`）自体は変えない。
+ */
+export function excerptForPick(text: string, maxLength: number): string {
+  const normalized = text.replace(/\s+/g, " ").trim();
+  if (normalized.length <= maxLength) return normalized;
+
+  const headLength = Math.floor(maxLength * 0.5);
+  const tailLength = Math.floor(maxLength * 0.2);
+  const sectionBudget = maxLength - headLength - tailLength;
+
+  const sections: string[] = [];
+  let used = 0;
+  const parts = text.split(/^(?=#{1,6}\s)/m);
+  let offset = 0;
+  for (const part of parts) {
+    const start = offset;
+    offset += part.length;
+    const heading = part.match(/^#{1,6}\s+(.*)/)?.[1] ?? "";
+    // 先頭の抜粋に入る節は重ねて載せない
+    if (!DECISION_HEADING.test(heading) || start < headLength) continue;
+    const body = part.replace(/\s+/g, " ").trim().slice(0, sectionBudget - used);
+    if (!body) break;
+    sections.push(body);
+    used += body.length;
+    if (used >= sectionBudget) break;
+  }
+
+  const head = normalized.slice(0, headLength);
+  const tail = normalized.slice(normalized.length - tailLength);
+  return [head, ...sections, tail].join(" ...(中略)... ");
+}
+
 /**
  * ラベル名から番号の接頭辞（`30.`）を落として小文字にする。
  * ラベルはリポジトリごとに番号がずれることがあるため、**番号ではなく名前で判定する**。
@@ -98,11 +137,30 @@ function normalizeLabel(label: string): string {
 }
 
 /**
- * ラベルと分量から選ぶ（#2723）。**AIを呼べなかったときの逃げ道。**
+ * 本文に書かれた「未解決の判断」の手がかり（#4106）。**ラベル・本文の長さ・コメント数は見ない**
+ * ——名称や分量だけでは難しさが分からず、明確な仕様の新規画面や修正方法の決まった不具合まで
+ * 中級へ上がってしまうため。
+ */
+const UNRESOLVED_HINTS = [
+  /原因(が|は)?(不明|わから|分から|未特定|特定できて)/,
+  /切り分け/,
+  /再現(し|でき)ない/,
+  /複数(の)?(案|候補)|どちらにする|案[AＡ]|要検討|比較して(決|検討)/,
+  /整合(性)?を(保|取|判断)/,
+];
+
+function hasUnresolvedHint(input: ModelPickInput): boolean {
+  const text = `${input.title}\n${input.body}`;
+  return UNRESOLVED_HINTS.some((hint) => hint.test(text));
+}
+
+/**
+ * 本文から選ぶ（#2723・#4106）。**AIを呼べなかったときの逃げ道。**
  *
- * 読めるのは「どの種類の作業か」と「どれだけ書かれているか」までなので、**最上位（Fable）は
- * 選ばない**——ここで一番高いものへ倒すと、AIが落ちている間ずっと重いモデルで走ることになる。
- * 判定の根拠が説明できることを優先し、迷ったら`sonnet`にする。
+ * **ラベル・本文の長さ・コメント数だけでは昇格しない。** 中級へ上げるのは、本文に未解決の判断
+ * （原因の切り分け・複数案の比較など）が書かれているときだけ。最上位（Fable）は選ばない
+ * ——ここで一番高いものへ倒すと、AIが落ちている間ずっと重いモデルで走ることになる。
+ * 迷ったら`sonnet`にする。
  */
 export function pickModelByRule(
   input: ModelPickInput,
@@ -117,21 +175,18 @@ export function pickModelByRule(
 
   if (agent === "codex") return pickCodexModelByRule(input, has, bodyLength);
 
-  if (has("bug") || has("investigation")) {
-    return { model: "opus", reason: "不具合のIssueで、原因の調査から始まるためです。" };
-  }
-  if (has("plan-required") || bodyLength >= 800 || input.commentCount >= 10) {
+  if (hasUnresolvedHint(input)) {
     return {
       model: "opus",
-      reason: "計画や長いやり取りがあり、決めることが多いIssueだと読めるためです。",
+      reason: "本文に原因の切り分けや案の比較など、未解決の判断が書かれているためです。",
     };
   }
   return { model: "sonnet", reason: "やることの範囲が読める通常の実装だと判断したためです。" };
 }
 
 /**
- * Codex版のルール（#3192）。考え方はClaude版と同じで、**Lunaを選ぶのは文書だけの更新のような
- * 説明のつく場合に限り**、迷ったらTerraにする。重い判定（Sol）へ倒すのも同じ条件で、
+ * Codex版のルール（#3192・#4106）。考え方はClaude版と同じで、**ラベル・分量・コメント数では
+ * 昇格しない**。**Lunaを選ぶのは文書だけの更新のような説明のつく場合に限り**、迷ったらTerraにする。
  * 最上位のAstraはClaude側のFableと同様にフォールバックで選ばない。
  */
 function pickCodexModelByRule(
@@ -139,13 +194,10 @@ function pickCodexModelByRule(
   has: (name: string) => boolean,
   bodyLength: number,
 ): { model: CodexLocalModel; reason: string } {
-  if (has("bug") || has("investigation")) {
-    return { model: "gpt-6-sol", reason: "不具合のIssueで、原因の調査から始まるためです。" };
-  }
-  if (has("plan-required") || bodyLength >= 800 || input.commentCount >= 10) {
+  if (hasUnresolvedHint(input)) {
     return {
       model: "gpt-6-sol",
-      reason: "計画や長いやり取りがあり、決めることが多いIssueだと読めるためです。",
+      reason: "本文に原因の切り分けや案の比較など、未解決の判断が書かれているためです。",
     };
   }
   if (has("documentation") && bodyLength < 400) {
@@ -154,13 +206,19 @@ function pickCodexModelByRule(
   return { model: "gpt-5.6-terra", reason: "やることの範囲が読める通常の実装だと判断したためです。" };
 }
 
-const CODEX_PICK_OPTIONS = `- \`gpt-6-astra\`: 原因がまるで読めない不具合や、**設計から考える**必要がある実装向け
-- \`gpt-6-sol\`: 既存の作りを**調べたうえでの判断**が要る実装、原因の切り分けが要る不具合向け
-- \`gpt-5.6-terra\`: やることがはっきりしている**通常の実装**向け（既定。迷ったらこれ）
+/**
+ * 判定基準の共通方針（#4106）。**Jev・アプリ内AI・ルール、Claude・Codexで方向を揃える**ため、
+ * 文面はここ1か所に置いて各所が参照する。
+ */
+const PICK_POLICY = `このIssueの実装と検証に十分な最小のモデルを選んでください。新規画面・デザイン・設計・調査という名称ではなく、**未解決の判断とリスク**を評価してください。仕様や承認済み計画で方針が決まっており、既存パターンで実装できる場合は軽量を選びます。既存コードを読むこと、作業量、本文の長さ、コメント数、ラベルだけでは上位を選ぶ根拠になりません。中級以上は、未確定のUI/UXの比較判断、相互依存する状態の整合、原因不明の不具合、重大な影響などの具体的根拠がある場合に選んでください。承認済みの計画がある場合は、解決済みの設計課題を難しさへ加算せず、残る実装・検証の難しさを評価してください（ただし計画済みでも難しい実装や重大な影響は過小評価しないでください）。本文や計画は途中を省略していることがあります。材料が足りないこと自体は難しさの根拠にならず、根拠が乏しければ軽量にしてください`;
+
+const CODEX_PICK_OPTIONS = `- \`gpt-6-astra\`: 中級でも不足する、広範で複雑なアーキテクチャ判断や高い不確実性・リスクがある実装向け
+- \`gpt-6-sol\`: 未確定のUI/UXの比較判断、相互依存する状態の整合、原因の切り分けが要る不具合、影響の大きい変更向け
+- \`gpt-5.6-terra\`: 仕様・方針が明確な**通常の実装**向け（既定。迷ったらこれ）。仕様が決まった新規画面、既存パターンに沿う機能追加、修正方法が分かっている不具合を含む
 - \`gpt-6-luna\`: 文言・設定値の修正や、決まった手順をなぞるだけの**軽い作業**向け`;
 
-const CODEX_PICK_GUIDE = `- **内容の難しさで選んでください。** 分量が多いだけのIssue（列挙されているだけ・手順が長いだけ）は難しいとは限りません
-- \`gpt-6-astra\`は「調べても分からなそうか」「作りそのものを決める必要があるか」に当てはまるときだけにしてください
+const CODEX_PICK_GUIDE = `- ${PICK_POLICY}
+- \`gpt-6-astra\`は中級でも不足する具体的な根拠があるときだけにしてください
 - \`gpt-6-luna\`は変更の範囲が数行〜1ファイルに収まると読めるときだけにしてください
 - 迷ったら\`gpt-5.6-terra\`にしてください`;
 
@@ -171,23 +229,23 @@ export function buildModelPickPrompt(
 ): string {
   const labels = input.labels.length > 0 ? input.labels.join(", ") : "（なし）";
   const body = input.body.trim()
-    ? truncate(input.body, MODEL_PICK_BODY_HEAD_LENGTH)
+    ? excerptForPick(input.body, MODEL_PICK_BODY_HEAD_LENGTH)
     : "（本文なし）";
   const plan = input.planComment?.trim()
-    ? `\n# 承認済みの計画\n${truncate(input.planComment, MODEL_PICK_PLAN_HEAD_LENGTH)}\n`
+    ? `\n# 承認済みの計画\n${excerptForPick(input.planComment, MODEL_PICK_PLAN_HEAD_LENGTH)}\n`
     : "";
 
   const isCodex = agent === "codex";
   const agentName = isCodex ? "Codex CLI" : "Claude Code";
   const options = isCodex
     ? CODEX_PICK_OPTIONS
-    : `- \`sonnet\`: やることがはっきりしている**通常の実装**向け（既定。迷ったらこれ）。色・余白・文言など**小さな見た目の調整**もこれ
-- \`opus\`: 既存の作りを**調べたうえでの判断**が要る実装、原因の切り分けが要る不具合、**既存の画面構成を踏まえて新しい画面・UIを設計する**実装向け
-- \`fable\`: 原因がまるで読めない不具合や、**設計から考える**必要がある実装向け`;
+    : `- \`sonnet\`: 仕様・方針が明確な**通常の実装**向け（既定。迷ったらこれ）。色・余白・文言など小さな見た目の調整、仕様が決まった新規画面、既存パターンに沿う機能追加、修正方法が分かっている不具合を含む
+- \`opus\`: 未確定のUI/UXの**比較判断**、相互依存する状態の整合、原因の**切り分け**が要る不具合、影響の大きい変更向け
+- \`fable\`: 中級でも不足する、広範で複雑な**アーキテクチャ判断**や高い不確実性・リスクがある実装向け`;
   const guide = isCodex
     ? CODEX_PICK_GUIDE
-    : `- **内容の難しさで選んでください。** 分量が多いだけのIssue（列挙されているだけ・手順が長いだけ）は難しいとは限りません
-- \`fable\`は「調べても分からなそうか」「作りそのものを決める必要があるか」に当てはまるときだけにしてください
+    : `- ${PICK_POLICY}
+- \`fable\`は中級でも不足する具体的な根拠があるときだけにしてください
 - 迷ったら\`sonnet\`にしてください`;
   const example = isCodex ? "gpt-5.6-terra" : "sonnet";
   const modelList = isCodex
@@ -309,9 +367,9 @@ export function buildModelPickState(input: ModelPickInput): Record<string, unkno
     タイトル: input.title,
     ラベル: input.labels,
     コメント数: input.commentCount,
-    本文: input.body.trim() ? truncate(input.body, MODEL_PICK_BODY_HEAD_LENGTH) : "（本文なし）",
+    本文: input.body.trim() ? excerptForPick(input.body, MODEL_PICK_BODY_HEAD_LENGTH) : "（本文なし）",
     ...(input.planComment?.trim()
-      ? { 承認済みの計画: truncate(input.planComment, MODEL_PICK_PLAN_HEAD_LENGTH) }
+      ? { 承認済みの計画: excerptForPick(input.planComment, MODEL_PICK_PLAN_HEAD_LENGTH) }
       : {}),
   };
 }
@@ -325,15 +383,18 @@ const CHOICE_CRITERIA_BY_AGENT: Readonly<
 > = {
   claude: {
     sonnet:
-      "やることがはっきりしている通常の実装（色・余白・文言など小さな見た目の調整を含む）。既定で、迷ったときもこれ",
-    opus: "既存の作りを調べたうえでの判断が要る実装、原因の切り分けが要る不具合、既存の画面構成を踏まえて新しい画面・UIを設計する実装",
-    fable: "原因がまるで読めない不具合や、設計そのものから考える必要がある実装",
+      "仕様・方針が明確な通常の実装（小さな見た目の調整、仕様が決まった新規画面、既存パターンに沿う機能追加、修正方法が分かっている不具合を含む）。既定で、迷ったときもこれ",
+    opus: "未確定のUI/UXの比較判断、相互依存する状態の整合、原因の切り分けが要る不具合、影響の大きい変更",
+    fable:
+      "中級でも不足する、広範で複雑なアーキテクチャ判断や高い不確実性・リスクがある実装",
   },
   codex: {
-    "gpt-6-astra": "原因がまるで読めない不具合や、設計そのものから考える必要がある実装",
-    "gpt-5.6-terra": "やることがはっきりしている通常の実装。既定で、迷ったときもこれ",
+    "gpt-6-astra":
+      "中級でも不足する、広範で複雑なアーキテクチャ判断や高い不確実性・リスクがある実装",
+    "gpt-5.6-terra":
+      "仕様・方針が明確な通常の実装（仕様が決まった新規画面、既存パターンに沿う機能追加、修正方法が分かっている不具合を含む）。既定で、迷ったときもこれ",
     "gpt-6-sol":
-      "既存の作りを調べたうえでの判断が要る実装、原因の切り分けが要る不具合",
+      "未確定のUI/UXの比較判断、相互依存する状態の整合、原因の切り分けが要る不具合、影響の大きい変更",
     "gpt-6-luna": "文言・設定値の修正や、決まった手順をなぞるだけの軽い作業",
   },
 };
@@ -355,7 +416,7 @@ export function buildModelPickQuestions(
       type: "choice",
       instructions: `これから実装エージェント（${
         isCodex ? "Codex CLI" : "Claude Code"
-      }）にこのIssueを実装させます。使うモデルを選んでください。分量が多いだけのIssue（列挙されているだけ・手順が長いだけ）は難しいとは限りません。迷ったら${
+      }）にこのIssueを実装させます。${PICK_POLICY.replace(/\*\*/g, "")}。迷ったら${
         isCodex ? "gpt-5.6-terra" : "sonnet"
       }にしてください。`,
       criteria: CHOICE_CRITERIA_BY_AGENT[agent],
