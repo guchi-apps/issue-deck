@@ -56,6 +56,7 @@ main   （直接push禁止、develop→mainのPRのみ、CI必須）
 | [個人設定（グローバルルール・個人skill）の同期](multi-agent/personal-config-sync.md) | メインPCとサブPCで`~/.claude/CLAUDE.md`・個人skillの実体を1つにするsymlink方式、取り残しの検知 |
 | [実装セッションの状態通知とRemote Control](multi-agent/session-notify.md) | フック（`Notification`・`Stop`）によるissue-deckへの即時報告と確認待ちのPush通知、扱うイベントの選別、`--remote-control`で外出先から答える経路 |
 | [他セッションのやり取りを見る](multi-agent/session-inspect.md) | 走っている別セッションの会話を読む3経路と`scripts/inspect-session.sh`、読んだ内容の扱い（端末に留める・そのセッションへ送らない）、トークン使用量の集計（`scripts/session-usage.sh`） |
+| [iOS事前検証](multi-agent/ios-precheck.md) | サブPCからSSHでMac miniへiOSのビルド／自動テストを依頼する`scripts/ios-precheck.sh`、結果のJSONの契約、commit status`issue-deck/ios-precheck`と必須検証、導入手順（#4138） |
 
 ## 段階的導入計画
 
