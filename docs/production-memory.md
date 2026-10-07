@@ -318,5 +318,12 @@ Rust製のクエリエンジンを読み込まない構成にし、#3017と同�
     回避するには`next.config.mjs`でブラウザ向けのスタブへ差し替えるか、`db`を読む経路を切り離す必要がある
   - 接続数の上限・タイムアウト・トランザクションの挙動が変わり得る（アダプタ既定のプールは`connectionLimit`5、
     取得待ちの既定は10秒。現行のエンジンの既定とは違う）。**今回は切替を採らないため、本番相当の負荷での挙動比較はしていない**
+- **接続数は両構成でそろっていない。** 現行は`DATABASE_URL`の`connection_limit`（`scripts/construct-database-url.sh`の
+  `DB_CONNECTION_LIMIT`、既定3）をエンジンが解釈する。アダプタ構成ではエンジンが読まないため、アダプタの
+  プール設定（`connectionLimit`）へ同じ値を明示的に渡す必要がある。今回の測定は逐次リクエストで実効接続が
+  1本だったためRSSの比較には影響しないが、並行負荷での比較にはなっていない
+- **切替を再検討する場合の対象**: `src/lib/db.ts`・`prisma/schema.prisma`・`next.config.mjs`に加え、引数なしで
+  `new PrismaClient()`を作る`scripts/seed-ci-db.mjs`・`scripts/ci-seed-user.mjs`（アダプタ無しだとCIのシードが
+  落ちる）と`scripts/construct-database-url.sh`
 - 本番（認証後の画面・GitHubの応答を扱う）で同じ幅になる保証は無い。**メモリをさらに削る必要が出て、他の手段を
   使い切ったときに再検討する**。そのときは上のビルドエラーの回避から始める
