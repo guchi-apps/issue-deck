@@ -4,6 +4,7 @@ import {
   buildModelPickPrompt,
   buildModelPickQuestions,
   buildModelPickState,
+  excerptForPick,
   parseModelPick,
   pickModelByJev,
   pickModelByRule,
@@ -57,19 +58,36 @@ describe("parseModelPick", () => {
 });
 
 describe("pickModelByRule", () => {
-  it("不具合のIssueは調査が要るものとして扱う", () => {
-    expect(pickModelByRule(input({ labels: ["30.bug"] })).model).toBe("opus");
-    expect(pickModelByRule(input({ labels: ["40.investigation"] })).model).toBe("opus");
+  // #4106。ラベル・本文の長さ・コメント数だけでは昇格しない
+  it("bug・investigation・plan-requiredのラベルだけでは昇格しない", () => {
+    expect(pickModelByRule(input({ labels: ["30.bug"] })).model).toBe("sonnet");
+    expect(pickModelByRule(input({ labels: ["40.investigation"] })).model).toBe("sonnet");
+    expect(pickModelByRule(input({ labels: ["21.plan-required"] })).model).toBe("sonnet");
   });
 
-  // ラベルの番号はリポジトリごとにずれるので、番号ではなく名前で判定する
-  it("ラベルの番号が違っても同じ判定になる", () => {
-    expect(pickModelByRule(input({ labels: ["31.bug"] })).model).toBe("opus");
+  it("長い本文・多数のコメントだけでは昇格しない", () => {
+    expect(pickModelByRule(input({ body: "あ".repeat(2000) })).model).toBe("sonnet");
+    expect(pickModelByRule(input({ commentCount: 30 })).model).toBe("sonnet");
   });
 
-  it("計画が要る・やり取りが長いものは決めることが多いとみなす", () => {
-    expect(pickModelByRule(input({ labels: ["21.plan-required"] })).model).toBe("opus");
-    expect(pickModelByRule(input({ commentCount: 12 })).model).toBe("opus");
+  it("修正方法が明確な不具合・仕様が決まった新規画面は軽量", () => {
+    expect(
+      pickModelByRule(
+        input({ labels: ["30.bug"], body: "保存ボタンのonClickでidを渡し忘れている。引数を足して直す。" }),
+      ).model,
+    ).toBe("sonnet");
+    expect(
+      pickModelByRule(
+        input({ title: "設定画面を新規追加", labels: ["50.design"], body: "左メニュー配下に一覧と編集フォームを置く。レイアウトは添付のとおり。" }),
+      ).model,
+    ).toBe("sonnet");
+  });
+
+  it("本文に未解決の判断（原因の切り分け・案の比較）があれば中級", () => {
+    expect(pickModelByRule(input({ body: "原因が不明で、再現しない日がある。" })).model).toBe("opus");
+    expect(pickModelByRule(input({ body: "導線は複数案があり、どちらにするか決まっていない。" })).model).toBe(
+      "opus",
+    );
   });
 
   // 以前はHaikuへ倒していたが、auto mode（--permission-mode auto）で動作しないため
@@ -85,7 +103,7 @@ describe("pickModelByRule", () => {
   // AIが落ちている間ずっと一番高いモデルで走らないよう、ここでFableは選ばない
   it("ルールではFableを選ばない", () => {
     const models = [
-      pickModelByRule(input({ labels: ["30.bug"], body: "a".repeat(2000) })).model,
+      pickModelByRule(input({ labels: ["30.bug"], body: "原因が不明。" + "a".repeat(2000) })).model,
       pickModelByRule(input({ labels: ["21.plan-required"] })).model,
       pickModelByRule(input({ labels: [] })).model,
     ];
@@ -94,6 +112,26 @@ describe("pickModelByRule", () => {
 
   it("理由を必ず添える（画面がそのまま出す）", () => {
     expect(pickModelByRule(input()).reason.length).toBeGreaterThan(0);
+  });
+});
+
+describe("excerptForPick（#4106）", () => {
+  it("上限以内ならそのまま", () => {
+    expect(excerptForPick("短い  本文", 100)).toBe("短い 本文");
+  });
+
+  // 先頭だけを切ると、後半の決定事項が落ちて未決定に見える
+  it("切り詰めても後半の決定事項の節を残す", () => {
+    const text = `## 背景\n${"あ".repeat(1500)}\n## 決定事項\nレイアウトは左右2カラムに確定。既存の一覧部品を使う。`;
+    const excerpt = excerptForPick(text, 1200);
+    expect(excerpt).toContain("レイアウトは左右2カラムに確定");
+    expect(excerpt.length).toBeLessThan(1300);
+  });
+
+  it("決定事項が無い長文は先頭と末尾を残す", () => {
+    const excerpt = excerptForPick(`始まり${"い".repeat(3000)}終わり`, 1200);
+    expect(excerpt).toContain("始まり");
+    expect(excerpt).toContain("終わり");
   });
 });
 
@@ -107,19 +145,21 @@ describe("buildModelPickPrompt", () => {
 
   it("承認済みの計画があれば材料に含める", () => {
     const prompt = buildModelPickPrompt(input({ planComment: "## 要約\n直します" }));
-    expect(prompt).toContain("承認済みの計画");
+    expect(prompt).toContain("# 承認済みの計画");
     expect(prompt).toContain("直します");
   });
 
   it("計画が無ければその見出しごと出さない", () => {
-    expect(buildModelPickPrompt(input())).not.toContain("承認済みの計画");
+    expect(buildModelPickPrompt(input())).not.toContain("# 承認済みの計画");
   });
 
-  // 画面設計全般ではなく、新しい画面を一から設計する場合だけ中級（opus）へ寄せる
-  it("新しい画面の設計はopus、小さな見た目の調整はsonnetの基準として書く", () => {
+  // #4106。新規画面・設計という名称では昇格させず、未解決の判断で選ぶ
+  it("名称ではなく未解決の判断で選ぶ基準として書く", () => {
     const prompt = buildModelPickPrompt(input());
-    expect(prompt).toMatch(/`opus`:.*既存の画面構成を踏まえて新しい画面・UIを設計/);
-    expect(prompt).toMatch(/`sonnet`:.*小さな見た目の調整/);
+    expect(prompt).toContain("未解決の判断とリスク");
+    expect(prompt).toMatch(/`sonnet`:.*仕様が決まった新規画面/);
+    expect(prompt).not.toMatch(/`opus`:.*新しい画面・UIを設計/);
+    expect(prompt).toContain("解決済みの設計課題を難しさへ加算せず");
   });
 
   // 本文が無いIssueでも判定は走る（タイトルとラベルだけで選ぶ）
@@ -172,16 +212,21 @@ describe("Codexの候補（#3192）", () => {
   });
 
   describe("ルール", () => {
-    it("不具合はSol", () => {
-      expect(pickModelByRule(input({ labels: ["52.bug"] }), "codex").model).toBe("gpt-6-sol");
+    it("ラベル・長さ・コメント数だけではSolへ昇格しない（#4106）", () => {
+      for (const overrides of [
+        { labels: ["52.bug"] },
+        { labels: ["21.plan-required"] },
+        { body: "あ".repeat(800) },
+        { commentCount: 10 },
+      ]) {
+        expect(pickModelByRule(input(overrides), "codex").model).toBe("gpt-5.6-terra");
+      }
     });
 
-    it("計画が要る・長い・やり取りが多いものはSol", () => {
-      expect(pickModelByRule(input({ labels: ["21.plan-required"] }), "codex").model).toBe(
-        "gpt-6-sol",
-      );
-      expect(pickModelByRule(input({ body: "あ".repeat(800) }), "codex").model).toBe("gpt-6-sol");
-      expect(pickModelByRule(input({ commentCount: 10 }), "codex").model).toBe("gpt-6-sol");
+    it("未解決の判断が書かれていればSol", () => {
+      expect(
+        pickModelByRule(input({ body: "原因が不明で切り分けが必要。" }), "codex").model,
+      ).toBe("gpt-6-sol");
     });
 
     it("文書だけの短い更新はLuna", () => {
@@ -197,7 +242,7 @@ describe("Codexの候補（#3192）", () => {
     });
 
     it("agentを省略した判定は従来どおりClaudeの候補", () => {
-      expect(pickModelByRule(input({ labels: ["52.bug"] })).model).toBe("opus");
+      expect(pickModelByRule(input({ body: "原因が不明。" })).model).toBe("opus");
     });
   });
 });
@@ -228,10 +273,25 @@ describe("buildModelPickState / buildModelPickQuestions", () => {
     ]);
   });
 
-  it("Jevの基準にも新しい画面の設計をopusとして書く", () => {
-    const { criteria } = buildModelPickQuestions().model as { criteria: Record<string, string> };
-    expect(criteria.opus).toContain("既存の画面構成を踏まえて新しい画面・UIを設計");
-    expect(criteria.sonnet).toContain("小さな見た目の調整");
+  it("Jevの基準でも仕様が決まった新規画面は軽量、未確定の比較判断は中級として書く（#4106）", () => {
+    const { criteria, instructions } = buildModelPickQuestions().model as {
+      criteria: Record<string, string>;
+      instructions: string;
+    };
+    expect(criteria.sonnet).toContain("仕様が決まった新規画面");
+    expect(criteria.opus).toContain("未確定のUI/UXの比較判断");
+    expect(criteria.opus).not.toContain("新しい画面・UIを設計");
+    expect(instructions).toContain("未解決の判断とリスク");
+    expect(instructions).toContain("解決済みの設計課題を難しさへ加算せず");
+  });
+
+  it("Codexの基準も同じ方針で書く（#4106）", () => {
+    const { criteria } = buildModelPickQuestions("codex").model as {
+      criteria: Record<string, string>;
+    };
+    expect(criteria["gpt-5.6-terra"]).toContain("仕様が決まった新規画面");
+    expect(criteria["gpt-6-sol"]).toContain("未確定のUI/UXの比較判断");
+    expect(buildModelPickPrompt(input(), "codex")).toContain("未解決の判断とリスク");
   });
 
   // 難しさ・調査の要否はモデルの選択に使っておらず、画面にも出さなくなった（#3255）
