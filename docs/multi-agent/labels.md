@@ -1129,8 +1129,24 @@ PRにレビューコメントが投稿されているか、あるいは「Claude
   **`merge-policy`とは独立で、`relaxed`でも止まる**（#2790で「許容」としていた方針の変更）。
   Codexが担当のPR（`claude-review`を使わない）には適用しない。止めたくないリポジトリだけが
   callerの`with:`へ`workflow-change-policy: allow`と書く（オプトアウト）。
-  **AIによる代替レビュー（Codex経由など）はこの対応に含めていない**（別Issue）。人が確認するのは
-  今も人であり、ワークフロー変更PRの意味的判定が自動化されたわけではない。
+- **#4149で、そのPRにClaude以外の経路でAIの判定を付けた。** `confirm`のとき、実装担当がClaudeでも
+  「ワークフローを変更していて、Claudeが走っていない」PRには`codex-review`ジョブがサブPCの
+  Codexレビュー（`PR_REVIEW`）を依頼する。Codex CLIはclaude-code-actionの検証機構の対象外で、
+  ワークフロー変更PRでも意味的にレビューできる。
+  - **判定が出るまで自動マージは保留する。** 仕組みはCodex担当のPRと同じ（#3990）で、結果待ちの間は
+    `auto-merge`が何も反映せずに終わり、サブPCの結果報告を受けたissue-deckが`auto-merge`ジョブだけを
+    再実行する。`lgtm`なら自動マージへ進み、`needs-check`・`changes-requested`はCodex担当のPRと
+    同じく人へ回る（要修正の自動修正への引き渡しも同じ条件で効く）
+  - **Claudeが走ったかを見てから依頼する。** `codex-review`はこの場合だけ`claude-review`の完了を待つ。
+    ワークフローを変更していても、検証対象のファイル（実行中のワークフロー）が変わっていなければ
+    Claudeは走るため、変更の有無だけで依頼すると二重にレビューする
+  - **依頼できない・判定が得られないときは#4144の扱いに戻す。** 配布先リポジトリに`APP_BASE_URL`・
+    `PROGRESS_REPORT_SECRET`が無い、実行できるサブPCが無い、サブPCで失敗・時間切れになった、の
+    いずれも、`codex-review`を失敗させず（`requested=false`）`00.check-user`＋**`01.check-merge`**で
+    人へ回し、理由コメントにCodexの判定が得られなかった理由を添える。Codex担当のPRで依頼に失敗した
+    ときの`01.check-blocked`にしないのは、代替レビューが無いことは「止まっている」ではなく
+    「人が見れば進められる」状態で、#4144以前より悪くしないため
+  - `workflow-change-policy: allow`のリポジトリでは依頼しない（従来どおりレビュー無しで通す）
 
 実例: PR #1048（本ゲート機構の導入PR）の
 [run 31477646748](https://github.com/guchi-apps/issue-deck/actions/runs/31477646748)。
@@ -2099,7 +2115,7 @@ Issue本文からClaude（`claude-haiku-4-5`）がタイトルとラベルを推
 
 **`merge-policy`の変更は、それを入れるPR自身に効く**（#2775の実測）。issue-deckのcallerは共有ワークフローを`uses: ./.github/workflows/reusable-claude-review-develop.yml`とローカルパスで参照しており、`pull_request`イベントではcallerも呼び出し先も**PRのmerge ref**（`refs/pull/<番号>/merge`）から解決される。そのため`merge-policy: relaxed`を足したPR #2789は、`develop`へ入る前の時点で既に`relaxed`として判定され、`risk-check`のログに「マージ方針: relaxed」「機械的リスク判定: 該当なし」を残して自動マージされた（`.github/workflows/**`の変更を含むにもかかわらず）。**判定を厳しくする変更でも緩める変更でも、developへ入る前に自分自身へ適用されるものとして扱う。** 段階的に確かめたい場合は、先に入力だけを足したPRと、callerで値を切り替えるPRに分ける。
 
-**`.github/workflows/**`を変更するPRは、`relaxed`でもClaudeが実行されなかったときに限り人へ回る**（#4144）。claude-code-actionの検証機構により、そのPRでは`claude-review`がClaudeを実行しないまま`success`で終わるため、以前は**機械判定も意味的判定も無いままdevelopへ入っていた**（#2790では穴を許容していた）。`workflow-change-policy`入力（`confirm`＝既定／`allow`）で、Claudeが走っていないワークフロー変更PRに`00.check-user`＋`01.check-merge`を付けて自動マージを止める（詳細は「ワークフローファイルを変更するPRではclaude-reviewが必ずスキップされる」）。AIによる代替レビューはまだ無い。
+**`.github/workflows/**`を変更するPRは、`relaxed`でもClaudeが実行されなかったときに限り人へ回る**（#4144）。claude-code-actionの検証機構により、そのPRでは`claude-review`がClaudeを実行しないまま`success`で終わるため、以前は**機械判定も意味的判定も無いままdevelopへ入っていた**（#2790では穴を許容していた）。`workflow-change-policy`入力（`confirm`＝既定／`allow`）で、Claudeが走っていないワークフロー変更PRに`00.check-user`＋`01.check-merge`を付けて自動マージを止める（詳細は「ワークフローファイルを変更するPRではclaude-reviewが必ずスキップされる」）。#4149からは代わりにサブPCのCodexレビューを依頼し、その判定が`lgtm`なら止めない（依頼できない・判定が得られないときは従来どおり人へ回す）。
 
 判定方法（`.github/workflows/claude-review-develop.yml`に実装済み、Phase4）:
 - **CI完了待ち（`wait-for-ci`ジョブ）**: `ci.yml`（ワークフロー名`CI`）がそのPRのhead SHAに対して`completed`になるまで待つ待機ジョブ。20秒間隔・最大60回（約20分）ポーリングし、タイムアウトした場合もジョブ自体は失敗させずそのまま後続へ進める（fail-open）。CIが`in_progress`のうちに`00.check-user`が付き、issue-deck画面上で時期尚早に「要確認」と見えてしまう問題を防ぐためのもの（#810）。**依存するのは最後の`auto-merge`ジョブだけで、`risk-check`・`claude-review`はCIと並行して走る**（#2066。後述「判定とレビューはCIと並行して走らせる」）。なお実際のマージ可否は`auto-merge`ジョブがGitHub Auto-merge機能（`develop`の`required_status_checks`でCI完了を待つ）に委ねているため、`wait-for-ci`の有無に関わらずマージの安全性自体は保たれる。

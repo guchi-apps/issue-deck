@@ -287,12 +287,12 @@ Issueコメントとして投稿し、「なぜエージェントが実行でき
 - Issueに`22.merge-confirm-required`・`23.preview-required`のいずれかが付いている
 - `.shared-context/`（共有知識リポジトリのcheckout先）が差分に混入している
 - Claudeの自動レビューが「実際に直すべき問題がある」と判定した
-- Claudeが走っていない`.github/workflows/**`変更PR（`workflow-change-policy: confirm`。#4144）
+- Claudeが走っていない`.github/workflows/**`変更PRで、代わりのCodexレビューが`lgtm`を出せなかった（`workflow-change-policy: confirm`。#4144・#4149）
 - `claude-review`・`auto-merge`ジョブ自体が失敗した（フォールバックが`00.check-user`を付ける）
 
 **`relaxed`は「レビューを省く」ことではない。** カテゴリに該当したPRでは従来どおりClaudeの自動レビューが走り、止めるかどうかだけがレビューの判定に委ねられる。したがって、マージ前に必ず自分の目で通したい変更には`22.merge-confirm-required`を明示的に付ける（詳細は[docs/multi-agent/labels.md](docs/multi-agent/labels.md)「developへのマージ前確認要否をIssueラベルでトグルする」参照）。
 
-**`.github/workflows/**`を変更するPRは、レビュー自体が行われない。** claude-code-actionの検証機構により、そのPRでは自動レビューがClaudeを実行しないまま`success`で終わる。以前はそのまま`relaxed`でdevelopへ入っていたが、#4144で`workflow-change-policy`（`confirm`＝既定／`allow`）を足し、**Claudeが走っていないワークフロー変更PRは`00.check-user`＋`01.check-merge`で人へ回す**ようにした（`merge-policy`とは独立。止めたくないリポジトリは`allow`）。AIによる代替レビューは別Issueで検討中で、今は人が確認する（[docs/multi-agent/labels.md](docs/multi-agent/labels.md)「ワークフローファイルを変更するPRではclaude-reviewが必ずスキップされる」）。
+**`.github/workflows/**`を変更するPRは、レビュー自体が行われない。** claude-code-actionの検証機構により、そのPRでは自動レビューがClaudeを実行しないまま`success`で終わる。以前はそのまま`relaxed`でdevelopへ入っていたが、#4144で`workflow-change-policy`（`confirm`＝既定／`allow`）を足し、**Claudeが走っていないワークフロー変更PRは`00.check-user`＋`01.check-merge`で人へ回す**ようにした（`merge-policy`とは独立。止めたくないリポジトリは`allow`）。#4149からは**代わりにサブPCのCodexレビューを依頼し、判定が出るまで自動マージを保留する**。`lgtm`なら止めず、依頼できない（配布先からIssueDeckへ届かない・サブPCが無い）・判定が得られないときは従来どおり`01.check-merge`で人へ回す（[docs/multi-agent/labels.md](docs/multi-agent/labels.md)「ワークフローファイルを変更するPRではclaude-reviewが必ずスキップされる」）。
 
 **「GitHub Actionsやデプロイ設定」の唯一の例外は、issue-deckの画面から他リポジトリへ配る共有ワークフローの参照タグ更新PR**（`.github/scripts/propagate-workflow-tag.sh`が作るもの。#1602）。差分が`@workflows/vN`と`prompts-ref`の置換だけの機械的なPRで、配るタグ自体はissue-deck側で確認を通してから切っているため、配布先で見ても判断材料が増えない（14リポジトリぶんのPRを開いてマージするだけの作業になっていた）。**例外はこの配布PRに限られ、issue-deck自身のPRには一切適用しない。** 自動マージは画面のチェックボックスで外せる。
 
