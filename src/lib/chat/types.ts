@@ -1,5 +1,8 @@
 import type { RepairKind } from "@/lib/github/pull-request-repair";
 
+/** 修正依頼の種類。`code`はPRのブランチへのpush、`metadata`はPR本文・Issue本文の追跡情報だけ（pushしない） */
+export type FixRequestScopeKind = "code" | "metadata";
+
 /** 会話が指している1件（Issue・PRは同じ番号空間なので、取得してから種別が決まる） */
 export type ChatTarget = {
   repo: string;
@@ -17,7 +20,15 @@ export type ChatActionRecord = {
   at: string;
   message: string;
   /** 修正依頼（`fix_request`）だけ。依頼した時点のHEADと、依頼コメントのURL・紐づくIssue（#4045） */
-  fixRequest?: { headSha: string; commentUrl: string | null; issueNumber: number };
+  fixRequest?: {
+    headSha: string;
+    commentUrl: string | null;
+    issueNumber: number;
+    /** 修正の種類。省略は`code`（#4153） */
+    scope?: FixRequestScopeKind;
+    /** 依頼時点のレビュー判定（`metadata`の検証で「元の指摘が解消したか」を見る材料） */
+    reviewKindBefore?: string | null;
+  };
 };
 
 /** 調査で確かめた根拠1件。回答の「根拠」欄へリンクと取得時点つきで出す（#4045） */
@@ -72,7 +83,7 @@ export type ChatIntent =
   | { type: "repair"; ref: ChatRef | null }
   | { type: "create_issue"; title: string | null }
   /** 状態の言い換えでは答えられない質問・依頼。AIが読み取り専用ツールで調べて答える（#4045） */
-  | { type: "investigate"; ref: ChatRef | null }
+  | { type: "investigate"; ref: ChatRef | null; fix?: boolean }
   | { type: "unknown" };
 
 export type ChatRef = { repo: string | null; number: number };
@@ -124,6 +135,12 @@ export type ChatConfirmCard =
       issueNumber: number;
       /** 実行系へ渡す依頼本文（合意した方針・未解消の指摘・検証条件） */
       instruction: string;
+      /** 修正の種類。省略は`code`（#4153） */
+      scope?: FixRequestScopeKind;
+      /** 調査時点のPR本文のハッシュ。`metadata`で、実行時に本文が変わっていたら中断する */
+      prBodyHash?: string;
+      /** 調査時点のレビュー判定（`ok` / `changes-requested`など） */
+      reviewKindBefore?: string | null;
     };
 
 export type ChatChoiceCard = {

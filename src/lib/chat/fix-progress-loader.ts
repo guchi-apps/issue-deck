@@ -64,6 +64,8 @@ export async function loadFixProgress(
       activeRepair: activeRepair !== null,
       agentReported,
       verdict: verdict ? { reviewKind: verdict.reviewKind, reviewedSha: verdict.reviewedSha } : null,
+      scope: action.fixRequest.scope ?? "code",
+      reviewKindBefore: action.fixRequest.reviewKindBefore ?? null,
       fetchedAt: new Date().toISOString(),
     });
   } catch {

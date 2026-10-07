@@ -56,6 +56,15 @@ describe("修正依頼コメント", () => {
   });
 });
 
+describe("管理情報だけの修正依頼（#4153）", () => {
+  it("許可範囲がmetadataになり、承認済みの方針・pushしない指示を含む", () => {
+    const body = buildFixRequestBody({ number: 1, headSha: "abcdef1234", instruction: "PRを途中PRへ", key: "k2", scope: "metadata" });
+    expect(body).toContain("コミット・push・新しいPRは作らない");
+    expect(body).toContain("同じ方針の質問で停止しない");
+    expect(body).not.toContain("同じPRのブランチへpushし");
+  });
+});
+
 describe("describeUnavailable（原因ごとの案内。#4109）", () => {
   it("API残高切れ（credit_balance_exhausted）は通常の429と分け、「待って再試行」を案内しない", async () => {
     const { describeUnavailable } = await import("@/lib/chat/investigation/reply");

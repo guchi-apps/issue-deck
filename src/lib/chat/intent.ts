@@ -22,7 +22,10 @@ export function extractRefs(text: string): ChatRef[] {
   return refs;
 }
 
-const REPAIR_WORDS = /(直して|直す|修正して|修復|自動修正|リペア|fix)/i;
+/** 既存の自動修正を明示した依頼。ここだけが定型の修復（確認カード）へ進む */
+const AUTO_REPAIR_WORDS = /(修復|自動修正|リペア|再実行|もう一度.*(直して|修正して))/i;
+/** 「直して」「修正して」。自動修正の起動ではなく、停止理由などの調査を起点に対応を選ぶ（#4153） */
+const FIX_WORDS = /(直して|直す|修正して|修正を|対応して|fix)/i;
 const ISSUE_WORDS = /(別\s*issue|issue\s*(に|化|として|を)|起案|起票|issueにして)/i;
 const MERGE_WORDS = /(マージ.*(できる|大丈夫|いい|可能)|merge)/i;
 const RECHECK_WORDS = /(もう\s*(一度|1回|いっかい|一回)|再確認|再度|確認して|チェックして|どうなって|状況|状態|進捗|ステータス)/;
@@ -54,10 +57,13 @@ export function parseIntent(text: string): ChatIntent {
     return { type: "create_issue", title: title.length >= 4 ? title : null };
   }
   if (CHECK_THEN_FIX.test(trimmed)) {
-    return { type: "investigate", ref: refs[0] ?? null };
+    return { type: "investigate", ref: refs[0] ?? null, fix: true };
   }
-  if (REPAIR_WORDS.test(trimmed)) {
+  if (AUTO_REPAIR_WORDS.test(trimmed)) {
     return { type: "repair", ref: refs[0] ?? null };
+  }
+  if (FIX_WORDS.test(trimmed)) {
+    return { type: "investigate", ref: refs[0] ?? null, fix: true };
   }
   if (MERGE_WORDS.test(trimmed)) return { type: "merge_check" };
   if (INVESTIGATE_WORDS.test(trimmed)) return { type: "investigate", ref: refs[0] ?? null };
@@ -73,7 +79,7 @@ export type ResolvedIntent =
   | { type: "create_issue"; title: string | null; repo: string; source: ChatTarget | null }
   | { type: "ask"; question: string; options: { label: string; send: string }[] }
   /** AIが読み取りツールで調べる。対象が決まらなくても聞き返さず、調査側が必要なら聞く */
-  | { type: "investigate"; target: ResolvedRef | null; candidates: ChatTarget[] }
+  | { type: "investigate"; target: ResolvedRef | null; candidates: ChatTarget[]; fix?: boolean }
   | { type: "unknown" };
 
 export type ResolvedRef = { repo: string; number: number };
@@ -153,17 +159,18 @@ export function resolveIntent(intent: ChatIntent, context: ChatContext): Resolve
       return { type: "create_issue", title: intent.title, repo, source: context.targets[0] ?? null };
     }
     case "investigate": {
+      const fix = intent.fix ? { fix: true } : {};
       const explicit = intent.ref ? withRepo(intent.ref, context) : null;
-      if (explicit) return { type: "investigate", target: explicit, candidates: [] };
+      if (explicit) return { type: "investigate", target: explicit, candidates: [], ...fix };
       const known = context.investigation?.target ?? null;
       if (context.targets.length === 1) {
         const [t] = context.targets;
-        return { type: "investigate", target: { repo: t.repo, number: t.number }, candidates: [] };
+        return { type: "investigate", target: { repo: t.repo, number: t.number }, candidates: [], ...fix };
       }
       if (known && (context.targets.length === 0 || context.targets.some((t) => t.number === known.number))) {
-        return { type: "investigate", target: { repo: known.repo, number: known.number }, candidates: [] };
+        return { type: "investigate", target: { repo: known.repo, number: known.number }, candidates: [], ...fix };
       }
-      return { type: "investigate", target: null, candidates: context.targets.slice(0, 4) };
+      return { type: "investigate", target: null, candidates: context.targets.slice(0, 4), ...fix };
     }
     case "unknown":
       return { type: "unknown" };
@@ -171,4 +178,4 @@ export function resolveIntent(intent: ChatIntent, context: ChatContext): Resolve
 }
 
 export const CHAT_HELP_TEXT =
-  "次のように話しかけてください。\n- 「勤務画面を週表示にしたいかも」（番号なしの困りごと・改善案の相談。案の比較から「これでIssue起案して」まで進めます）\n- 「#3966はなぜ止まっている？」（レビュー・CIログまで調べて理由を答えます）\n- 「確認して直して」（調べたうえで、同じPRの修正依頼を確認カードで出します）\n- 「#3966どうなってる？」（複数なら「3960と3961どうなってる？」）\n- 「直して」「もう一度確認して」「マージできる？」（直前に見た対象を指します）\n- 「別Issueにして」（この会話を材料にIssue案を作ります）";
+  "次のように話しかけてください。\n- 「勤務画面を週表示にしたいかも」（番号なしの困りごと・改善案の相談。案の比較から「これでIssue起案して」まで進めます）\n- 「#3966はなぜ止まっている？」（レビュー・CIログまで調べて理由を答えます）\n- 「直して」「#3966を修正して」（停止理由・過去の自動修正・会話の合意を調べたうえで、必要な修正を確認カードで出します。自動修正だけの起動は「自動修正して」）\n- 「#3966どうなってる？」（複数なら「3960と3961どうなってる？」）\n- 「直して」「もう一度確認して」「マージできる？」（直前に見た対象を指します）\n- 「別Issueにして」（この会話を材料にIssue案を作ります）";
