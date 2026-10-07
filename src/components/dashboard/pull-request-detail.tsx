@@ -26,6 +26,7 @@ import { PullRequestFileList } from "@/components/dashboard/pull-request-file-li
 import { PullRequestReviewRound } from "@/components/dashboard/pull-request-review-round";
 import { PullRequestMergeButton } from "@/components/dashboard/pull-request-merge-button";
 import { PullRequestRepairButtons } from "@/components/dashboard/pull-request-repair-buttons";
+import { PullRequestBackupCi } from "@/components/dashboard/pull-request-backup-ci";
 import { PullRequestReviewFindings } from "@/components/dashboard/pull-request-review-findings";
 import { UserAvatar } from "@/components/dashboard/user-avatar";
 import { VerificationSummaryPanel } from "@/components/dashboard/verification-summary-panel";
@@ -448,6 +449,17 @@ export function PullRequestDetail({
             repositoryFullName={pullRequest.repositoryFullName}
             prNumber={pullRequest.number}
             headSha={pullRequest.headSha}
+          />
+        )}
+
+        {/* GitHub Actions障害時のバックアップCI（#4065）。develop向けの未マージPRだけ */}
+        {pullRequest.baseRef === "develop" && pullRequest.state === "open" && !pullRequest.merged && (
+          <PullRequestBackupCi
+            repositoryFullName={pullRequest.repositoryFullName}
+            prNumber={pullRequest.number}
+            headSha={pullRequest.headSha}
+            headRef={pullRequest.headRef}
+            actionsChecks={ciChecks}
           />
         )}
 

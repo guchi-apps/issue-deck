@@ -4521,6 +4521,16 @@ Claude Code・Codex CLIそれぞれの新規実行の一時停止（`AppSetting.
 片方で解決できない項目はもう片方から補う（#1306）。供給元が揃っているかは
 `.github/workflows/load-secrets-check.yml`を`workflow_dispatch`で実行すると確認できる。
 
+## バックアップCI（#4065）
+
+GitHub Actions障害時に、PR詳細からCircleCIを直接起動してdevelop向けPRの必須検査を続ける。
+**必須検査の正本は[`ci/required-checks.json`](../ci/required-checks.json)**で、`ci.yml`もCircleCIも
+`scripts/ci/run-required-checks.mjs`経由でこれを実行する（ci.ymlへ直接ステップを足すと
+`scripts/ci/check-ci-definition-sync.mjs`が落とす）。サーバー側は`src/lib/backup-ci/`、結果は
+`BackupCiRun`に記録し、合否は共通チェック`issue-deck/ci-gate`（commit status）として出す。
+`check-rollup.ts`は共通チェックがあればそれだけでCI状態を決める。運用・移行・ロールバックは
+[backup-ci.md](backup-ci.md)。
+
 ## 一覧の行に出す親子関係（#3469）
 
 - 一覧の行は`Issue.hierarchy`（`src/types/issue.ts`）で親Issue／子Issueのバッジを出す。材料はGitHubのIssue payload（REST・Webhook）に載る`sub_issues_summary`と`parent_issue_url`で、`sync-issues.ts`が`Issue`テーブルの`subIssuesTotal`・`subIssuesCompleted`・`parentIssueUrl`へ保存し、`issue-mapper.ts`が`lib/issue-hierarchy.ts`の`buildIssueHierarchy`で写す。判定と文言は`resolveIssueHierarchyBadges`

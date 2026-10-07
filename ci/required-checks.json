@@ -1,0 +1,98 @@
+{
+  "$comment": "develop向けPRの必須検査の正本（#4065）。GitHub Actions（.github/workflows/ci.yml）とバックアップCI（.circleci/config.yml）の両方が scripts/ci/run-required-checks.mjs 経由でこの定義を実行する。検査を足すときはここへ足し、ワークフロー側へ直接ステップを書かない（両者がずれると、片方でだけ通る変更が生まれる）。groups のキーは ci.yml のジョブ名と一致させる（lint-and-build はブランチ保護の必須チェック名）。通知・情報提供だけのジョブ（workflow-drift-notice・notify）はここへ入れない。",
+  "schemaVersion": 1,
+  "runtime": {
+    "node": "24",
+    "packageManager": "pnpm"
+  },
+  "groups": {
+    "lint-and-build": {
+      "needsDependencies": true,
+      "checks": [
+        {
+          "id": "migration-sql-quoting",
+          "name": "MySQL移行SQLの引用符を検査",
+          "run": "node scripts/check-migration-sql-quoting.mjs"
+        },
+        { "id": "lint", "name": "Lint", "run": "pnpm lint" },
+        { "id": "typecheck", "name": "Typecheck", "run": "pnpm typecheck" },
+        { "id": "unit-tests", "name": "Unit tests", "run": "pnpm test:unit" },
+        {
+          "id": "build",
+          "name": "Build",
+          "run": "pnpm build:ci",
+          "env": {
+            "NODE_ENV": "production",
+            "DATABASE_URL": "mysql://placeholder:placeholder@127.0.0.1:3306/app_issue_deck",
+            "NEXT_PUBLIC_SUPABASE_URL": "https://ci-placeholder.supabase.co",
+            "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY": "ci-placeholder",
+            "GITHUB_APP_ID": "123456",
+            "GITHUB_APP_PRIVATE_KEY_BASE64": "Y2ktcGxhY2Vob2xkZXI=",
+            "NEXT_PUBLIC_GITHUB_APP_SLUG": "ci-placeholder",
+            "GITHUB_WEBHOOK_SECRET": "ci-placeholder"
+          }
+        }
+      ]
+    },
+    "docs-sync-check": {
+      "needsDependencies": false,
+      "checks": [
+        {
+          "id": "cross-repo-guide-sync",
+          "name": "Cross-repo setup guide sync check",
+          "run": "scripts/check-cross-repo-guide-sync.sh"
+        },
+        {
+          "id": "workflow-gh-repo",
+          "name": "Workflow gh repository check",
+          "run": "scripts/check-workflow-gh-repo.sh"
+        },
+        {
+          "id": "workflow-job-permissions",
+          "name": "Workflow job permissions check",
+          "run": "scripts/check-workflow-job-permissions.sh"
+        },
+        {
+          "id": "local-session-contract",
+          "name": "Local session contract check",
+          "run": "scripts/check-local-session-contract.sh"
+        },
+        {
+          "id": "load-secrets-env-block",
+          "name": "Load secrets env block check",
+          "run": "scripts/check-load-secrets-env-block.sh"
+        },
+        {
+          "id": "review-verdict-marker",
+          "name": "Review verdict marker check",
+          "run": "scripts/check-review-verdict-marker.sh"
+        },
+        {
+          "id": "prompt-template-sync",
+          "name": "Prompt shared template sync check",
+          "run": "node scripts/generate-prompt-templates.mjs --check"
+        },
+        {
+          "id": "ci-definition-sync",
+          "name": "CI definition sync check",
+          "run": "node scripts/ci/check-ci-definition-sync.mjs"
+        }
+      ]
+    },
+    "workflow-expression-length-check": {
+      "needsDependencies": false,
+      "checks": [
+        {
+          "id": "workflow-expression-length",
+          "name": "Workflow expression length check",
+          "run": "node scripts/check-workflow-expression-length.mjs"
+        },
+        {
+          "id": "workflow-expression-syntax",
+          "name": "Workflow expression syntax check",
+          "run": "node scripts/check-workflow-expression-syntax.mjs"
+        }
+      ]
+    }
+  }
+}

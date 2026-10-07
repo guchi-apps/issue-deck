@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 
+import { sweepBackupCiRuns } from "@/lib/backup-ci/service";
 import { keepClaudeWindowOpen } from "@/lib/claude-window-keepalive-run";
 import { authorizeDispatch } from "@/lib/dispatch/dispatch-auth";
 import { parseDispatchHostName } from "@/lib/dispatch/dispatch-job";
@@ -141,6 +142,13 @@ export async function POST(request: NextRequest) {
       await sweepCheckUserPushNotifications();
     } catch (error) {
       console.error("[POST /api/dispatch/claim] 確認待ちのPush通知を送れませんでした:", error);
+    }
+    // バックアップCI（#4065）の結果回収。Webhookの取りこぼし・issue-deckの再起動で止まった実行を
+    // CircleCI APIで照合して進める。**GitHub Actionsが止まっていても回る経路**としてここに置く
+    try {
+      await sweepBackupCiRuns();
+    } catch (error) {
+      console.error("[POST /api/dispatch/claim] バックアップCIの照合に失敗しました:", error);
     }
   }
 
