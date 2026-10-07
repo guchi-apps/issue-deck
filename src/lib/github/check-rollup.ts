@@ -1,5 +1,13 @@
 import { CI_GATE_CONTEXT } from "@/lib/backup-ci/state";
 import { githubGraphql } from "@/lib/github/graphql";
+import {
+  IOS_PRECHECK_COMMIT_FIELDS,
+  IOS_PRECHECK_COMMIT_WINDOW,
+  IOS_PRECHECK_CONTEXT,
+  toIosPrecheckSummary,
+  type IosPrecheckCommitNode,
+  type IosPrecheckSummary,
+} from "@/lib/github/ios-precheck";
 import { extractRunIdFromDetailsUrl } from "@/lib/workflow-run-progress";
 
 /**
@@ -334,6 +342,24 @@ const PULL_REQUEST_FIELDS = `
 `;
 
 /**
+ * iOS事前検証（#4140）を見るときだけ足すフィールド。PRの直近のコミットそれぞれの
+ * `issue-deck/ios-precheck`を1件ずつ引く。headに結果が無いとき「前回どのSHAで何だったか」を
+ * 出すため、headだけでなく遡って見る。
+ *
+ * **PR一覧（10秒間隔の自動更新）では引かない。** 接続のノード数がPR件数×`IOS_PRECHECK_COMMIT_WINDOW`に
+ * なり、まとめ取りの消費（#1962）を押し上げるため、Issue詳細の対応PR（多くて数件）だけが使う。
+ */
+const IOS_PRECHECK_FIELDS = `
+  iosPrecheckCommits: commits(last: ${IOS_PRECHECK_COMMIT_WINDOW}) {
+    nodes {
+      commit {
+        ${IOS_PRECHECK_COMMIT_FIELDS}
+      }
+    }
+  }
+`;
+
+/**
  * 複数PRを**エイリアス（`p0`・`p1`…）で1本のクエリへ並べる**（#1962）。
  *
  * PR一覧はPR1件につき1回GraphQLを投げており、10秒間隔の自動更新と合わせると消費が
@@ -346,7 +372,7 @@ const PULL_REQUEST_FIELDS = `
  * 実測（`rateLimit { cost }`）で50PRまで1ポイント・100PRで2ポイントだった。1件ずつ投げると
  * PR件数ぶんのポイントになるのと対照的で、これがまとめる理由そのものになっている。
  */
-function buildPullRequestQuery(count: number): string {
+function buildPullRequestQuery(count: number, includeIosPrecheck = false): string {
   const declarations = Array.from(
     { length: count },
     (_, index) => `$owner${index}: String!, $name${index}: String!, $number${index}: Int!`,
@@ -355,7 +381,7 @@ function buildPullRequestQuery(count: number): string {
     { length: count },
     (_, index) => `  p${index}: repository(owner: $owner${index}, name: $name${index}) {
     pullRequest(number: $number${index}) {
-      ${PULL_REQUEST_FIELDS}
+      ${PULL_REQUEST_FIELDS}${includeIosPrecheck ? IOS_PRECHECK_FIELDS : ""}
     }
   }`,
   ).join("\n");
@@ -406,6 +432,8 @@ type PullRequestNode = {
   /** `MERGEABLE` / `CONFLICTING` / `UNKNOWN`（GitHubが判定中） */
   mergeable: string | null;
   commits: { nodes: { commit: { statusCheckRollup: RollupNode | null } | null }[] };
+  /** `includeIosPrecheck`のときだけ入る（#4140） */
+  iosPrecheckCommits?: { nodes: { commit: IosPrecheckCommitNode | null }[] } | null;
 };
 
 /** エイリアス（`p0`・`p1`…）をキーにしたPRごとの応答。読めなかったエイリアスはnullで返る */
@@ -487,6 +515,19 @@ function workflowFileOf(node: RollupContextNode): string | null {
 /** 共通チェック（#4065）のcommit status。issue-deck自身のGitHub Appが発行する */
 function findCiGateNode(nodes: RollupContextNode[]): RollupContextNode | null {
   return nodes.find((node) => node.__typename === "StatusContext" && node.context === CI_GATE_CONTEXT && node.state) ?? null;
+}
+
+/**
+ * iOS事前検証（#4138）のcommit statusか。**CI状態の集約には数えない**（#4140）。
+ *
+ * サブPCから人・エージェントが依頼したときだけ付き、Macへ届かないあいだは理由付きの`pending`の
+ * まま残る（成功にも失敗にもしない設計）。CIに数えると、検証待ちのPRが「CI実行中」から抜けず、
+ * StatusContextが混ざることでCIの内訳（`toRollupCiChecks`）まで消える。結果は
+ * Issue詳細の対応PRに別の行として出す（`lib/github/ios-precheck.ts`）。必須検証にした
+ * リポジトリでマージを止めるのはGitHubの必須チェックで、issue-deckのCI状態ではない。
+ */
+function isIosPrecheckNode(node: RollupContextNode): boolean {
+  return node.__typename === "StatusContext" && node.context === IOS_PRECHECK_CONTEXT;
 }
 
 function isCiCheck(node: RollupContextNode): boolean {
@@ -761,15 +802,16 @@ function toCheckRollup(rollup: RollupNode | null | undefined): CheckRollup {
   // 共通チェック（`issue-deck/ci-gate`・#4065）があれば、CIの合否はそれだけで決める。バックアップCIで
   // 合格したPRは、止まったままのActionsのジョブが残っていても「実行中」に見せない。Actionsの内訳は
   // そのまま並べる（どちらで検査したかを区別できるように、元の履歴を消さない）
-  const gateNode = findCiGateNode(rollup.contexts.nodes);
-  const otherNodes = gateNode ? rollup.contexts.nodes.filter((node) => node !== gateNode) : rollup.contexts.nodes;
+  const contextNodes = rollup.contexts.nodes.filter((node) => !isIosPrecheckNode(node));
+  const gateNode = findCiGateNode(contextNodes);
+  const otherNodes = gateNode ? contextNodes.filter((node) => node !== gateNode) : contextNodes;
   const ciNodes = dropSupersededCheckRuns(otherNodes.filter(isCiCheck));
   const ciChecks = toRollupChecks(ciNodes);
   const countedNodes = ciChecks.length > 0 ? ciNodes : otherNodes;
   const gateCheck = gateNode ? toRollupCheck(gateNode) : null;
   return {
     state,
-    checks: gateCheck ? [gateCheck] : ciChecks.length > 0 ? ciChecks : toRollupChecks(rollup.contexts.nodes),
+    checks: gateCheck ? [gateCheck] : ciChecks.length > 0 ? ciChecks : toRollupChecks(contextNodes),
     mergeJudgement: toMergeJudgement(rollup.contexts.nodes),
     ciRunId: toCiRunId(countedNodes),
     ciChecks: toRollupCiChecks(countedNodes),
@@ -811,6 +853,16 @@ export type PullRequestRollup = {
    * `null`＝GitHubが判定中（`UNKNOWN`）または取得できなかった。
    */
   mergeable: boolean | null;
+  /**
+   * iOS事前検証の要約（#4140）。`includeIosPrecheck`を指定しなかった・PRのコミットのどれにも
+   * statusが無ければnull。
+   */
+  iosPrecheck: IosPrecheckSummary | null;
+};
+
+export type PullRequestRollupOptions = {
+  /** iOS事前検証（`issue-deck/ios-precheck`）の結果も引くか（#4140）。Issue詳細の対応PRだけが立てる */
+  includeIosPrecheck?: boolean;
 };
 
 /** GraphQLの`MergeableState`をbooleanへ写す。`UNKNOWN`（判定中）はnullのまま扱う */
@@ -855,6 +907,7 @@ const PULL_REQUESTS_PER_QUERY = 25;
 export async function fetchPullRequestRollups(
   targets: PullRequestRollupTarget[],
   token: string,
+  options: PullRequestRollupOptions = {},
 ): Promise<Map<string, PullRequestRollup>> {
   const rollups = new Map<string, PullRequestRollup>();
   const chunks: PullRequestRollupTarget[][] = [];
@@ -873,7 +926,7 @@ export async function fetchPullRequestRollups(
 
       const data = await githubGraphql<PullRequestRollupResponse>(
         token,
-        buildPullRequestQuery(chunk.length),
+        buildPullRequestQuery(chunk.length, options.includeIosPrecheck),
         variables,
         "pullRequestStatusCheckRollup",
         {
@@ -893,6 +946,13 @@ export async function fetchPullRequestRollups(
         rollups.set(pullRequestRollupKey(target.owner, target.repo, target.number), {
           rollup: toCheckRollup(pullRequest.commits.nodes[0]?.commit?.statusCheckRollup),
           mergeable: toMergeable(pullRequest.mergeable),
+          iosPrecheck: pullRequest.iosPrecheckCommits
+            ? toIosPrecheckSummary(
+                pullRequest.iosPrecheckCommits.nodes
+                  .map((node) => node.commit)
+                  .filter((commit): commit is IosPrecheckCommitNode => commit !== null),
+              )
+            : null,
         });
       });
     }),
@@ -914,5 +974,7 @@ export async function fetchPullRequestRollup(
   token: string,
 ): Promise<PullRequestRollup> {
   const rollups = await fetchPullRequestRollups([{ owner, repo, number }], token);
-  return rollups.get(pullRequestRollupKey(owner, repo, number)) ?? { rollup: null, mergeable: null };
+  return (
+    rollups.get(pullRequestRollupKey(owner, repo, number)) ?? { rollup: null, mergeable: null, iosPrecheck: null }
+  );
 }

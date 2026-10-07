@@ -1,6 +1,7 @@
 import type { MergeCheckReasons } from "@/lib/merge-check-reasons";
 import type { CheckUserReason } from "@/lib/github/approval-labels";
 import type { MergeJudgement, RollupCiCheck } from "@/lib/github/check-rollup";
+import type { IosPrecheckSummary } from "@/lib/github/ios-precheck";
 import type { PullRequestCiStatus } from "@/lib/github/pull-request-ci";
 import type { RepairWorkflowAvailability } from "@/lib/github/pull-request-repair";
 import type { PullRequestAgentReview } from "@/lib/dispatch/pr-review-agent-summary";
@@ -285,6 +286,12 @@ export type IssuePullRequest = {
    * **同じ判定が画面によって鮮度つき・鮮度なしで出ないように、こちらにも持たせる。**
    */
   headSha: string;
+  /**
+   * iOS事前検証（`issue-deck/ios-precheck`。#4138）の結果と検証したSHA（#4140）。openかつdraftで
+   * ないPRでのみ引き、PRの直近のコミットのどれにもstatusが無ければnull（対象外・未依頼）。
+   * **CI状態（`ciStatus`）とは別の軸**で、CIの集約には数えない（`lib/github/check-rollup.ts`）。
+   */
+  iosPrecheck: IosPrecheckSummary | null;
 };
 
 export type IssuePullRequestListResponse = {

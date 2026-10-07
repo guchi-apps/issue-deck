@@ -28,6 +28,7 @@ function pullRequest(overrides: Partial<IssuePullRequest> = {}): IssuePullReques
     role: null,
     reviewVerdict: null,
     headSha: "1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b",
+    iosPrecheck: null,
     ...overrides,
   };
 }
@@ -379,5 +380,53 @@ describe("IssuePullRequestList", () => {
       />,
     );
     expect(container.textContent).toBe("");
+  });
+  it("iOS事前検証の結果と検証SHAを専用の行で出す（#4140）", () => {
+    render(
+      <IssuePullRequestList
+        links={[link(616)]}
+        pullRequests={[
+          pullRequest({
+            iosPrecheck: {
+              headSha: "1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b",
+              head: {
+                phase: "waiting",
+                description: "iOS検証待ち（unreachable）: Macへ接続できません",
+                sha: "1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b",
+                updatedAt: null,
+              },
+              previous: null,
+            },
+          }),
+        ]}
+        mergeApprovalPending={false}
+      />,
+    );
+    const row = screen.getByTestId("ios-precheck-status");
+    expect(row.textContent).toContain("iOS事前検証: 検証待ち");
+    expect(row.textContent).toContain("検証SHA 1a2b3c4（PRの最新）");
+    expect(row.textContent).toContain("iOS検証待ち（unreachable）: Macへ接続できません");
+  });
+
+  it("headに結果が無ければ未実施と出し、前回の結果は検証SHA付きで添える（#4140）", () => {
+    render(
+      <IssuePullRequestList
+        links={[link(616)]}
+        pullRequests={[
+          pullRequest({
+            iosPrecheck: {
+              headSha: "1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b",
+              head: null,
+              previous: { phase: "success", description: "ビルド成功", sha: "ffffeee", updatedAt: null },
+            },
+          }),
+        ]}
+        mergeApprovalPending={false}
+      />,
+    );
+    const row = screen.getByTestId("ios-precheck-status");
+    expect(row.textContent).toContain("iOS事前検証: 未実施");
+    expect(row.textContent).toContain("PRの最新 1a2b3c4 は未検証 ・前回 ffffeee は成功");
+    expect(row.textContent).toContain("前回: ビルド成功");
   });
 });

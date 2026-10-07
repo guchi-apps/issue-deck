@@ -89,6 +89,7 @@ function toIssuePullRequest(
     reviewVerdict: parsePullRequestReviewVerdict(pullRequest.body),
     // 判定の鮮度（#3172）の突き合わせ先。PR本体のレスポンスに入っているので消費は増えない
     headSha: pullRequest.head.sha,
+    iosPrecheck: checkState?.iosPrecheck ?? null,
   };
 }
 
@@ -159,6 +160,8 @@ async function handleGET(request: NextRequest) {
         : await fetchPullRequestCiStates(
             targets.map((pullRequest) => ({ owner, repo, number: pullRequest.number })),
             token,
+            // iOS事前検証（#4140）は同じ1回のGraphQLへ相乗りさせる。PR一覧では引かない
+            { includeIosPrecheck: true },
           );
     // いま走っている自動修復（#2072）はGitHubからは引けない。DBを1回引くだけで足りる。
     const repairRuns = await fetchActivePullRequestRepairRuns(

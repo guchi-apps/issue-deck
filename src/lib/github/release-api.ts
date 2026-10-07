@@ -5,9 +5,11 @@ import {
   type CheckRollup,
   MERGE_JUDGEMENT_UNKNOWN,
   type MergeJudgement,
+  type PullRequestRollupOptions,
   type PullRequestRollupTarget,
   type RollupCiCheck,
 } from "@/lib/github/check-rollup";
+import type { IosPrecheckSummary } from "@/lib/github/ios-precheck";
 import { githubFetchJsonWithEtag } from "@/lib/github/conditional-request";
 import { GithubApiError } from "@/lib/github/github-api-error";
 import { GITHUB_API, githubFetch } from "@/lib/github/request";
@@ -717,6 +719,11 @@ export type PullRequestCiState = {
   ciRunId: number | null;
   /** CIの内訳に並べるチェック一覧（#2777）。CI状態と同じ母集団 */
   ciChecks: RollupCiCheck[];
+  /**
+   * iOS事前検証の要約（#4140）。`includeIosPrecheck`で引いたときだけ入りうる。
+   * 引いていない・対象外ならnullか未定義
+   */
+  iosPrecheck?: IosPrecheckSummary | null;
 };
 
 /**
@@ -768,10 +775,11 @@ export const UNKNOWN_PULL_REQUEST_CI_STATE: PullRequestCiState = {
 export async function fetchPullRequestCiStates(
   targets: PullRequestRollupTarget[],
   token: string,
+  options: PullRequestRollupOptions = {},
 ): Promise<Map<string, PullRequestCiState>> {
-  const rollups = await fetchPullRequestRollups(targets, token);
+  const rollups = await fetchPullRequestRollups(targets, token, options);
   return new Map(
-    [...rollups].map(([key, { rollup, mergeable }]) => [
+    [...rollups].map(([key, { rollup, mergeable, iosPrecheck }]) => [
       key,
       {
         ciState: toCiState(rollup),
@@ -779,6 +787,7 @@ export async function fetchPullRequestCiStates(
         mergeJudgement: rollup?.mergeJudgement ?? MERGE_JUDGEMENT_UNKNOWN,
         ciRunId: rollup?.ciRunId ?? null,
         ciChecks: rollup?.ciChecks ?? [],
+        iosPrecheck,
       },
     ]),
   );
