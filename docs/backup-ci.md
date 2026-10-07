@@ -206,6 +206,6 @@ Actionsの結果が採用される。
 
 ## 8. 未対応（#4065の残り）
 
-- 必須チェックの置き換え（5章の3。Administration権限が要るため人が行う。手作業Issueで追跡）
+- 必須チェックの置き換え（5章の2のオン操作と3。Administration権限が要るため人が行う。手作業Issue #4151）
 - Actions停止中に、サブPCのAIレビュー（`PR_REVIEW`）をissue-deckから起動・回収し、既存のマージ判定へ
   接続する処理（現在の起点は`claude-review-develop.yml`で、Actionsが止まるとレビューも始まらない。#4114）
