@@ -115,6 +115,13 @@ describe("buildModelPickPrompt", () => {
     expect(buildModelPickPrompt(input())).not.toContain("承認済みの計画");
   });
 
+  // 画面設計全般ではなく、新しい画面を一から設計する場合だけ中級（opus）へ寄せる
+  it("新しい画面の設計はopus、小さな見た目の調整はsonnetの基準として書く", () => {
+    const prompt = buildModelPickPrompt(input());
+    expect(prompt).toMatch(/`opus`:.*既存の画面構成を踏まえて新しい画面・UIを設計/);
+    expect(prompt).toMatch(/`sonnet`:.*小さな見た目の調整/);
+  });
+
   // 本文が無いIssueでも判定は走る（タイトルとラベルだけで選ぶ）
   it("本文が空でも組み立てられる", () => {
     expect(buildModelPickPrompt(input({ body: "" }))).toContain("（本文なし）");
@@ -219,6 +226,12 @@ describe("buildModelPickState / buildModelPickQuestions", () => {
       "opus",
       "fable",
     ]);
+  });
+
+  it("Jevの基準にも新しい画面の設計をopusとして書く", () => {
+    const { criteria } = buildModelPickQuestions().model as { criteria: Record<string, string> };
+    expect(criteria.opus).toContain("既存の画面構成を踏まえて新しい画面・UIを設計");
+    expect(criteria.sonnet).toContain("小さな見た目の調整");
   });
 
   // 難しさ・調査の要否はモデルの選択に使っておらず、画面にも出さなくなった（#3255）
