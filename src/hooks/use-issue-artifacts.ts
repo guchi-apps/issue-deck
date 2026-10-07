@@ -12,6 +12,8 @@ type UseIssueArtifactsResult = {
   isLoading: boolean;
   /** 現在のIssueについて、取得が1回完了している（成功・失敗を問わない） */
   isLoaded: boolean;
+  /** 直近の取得が失敗した。空配列でも「未作成」とは限らないので、未作成の判定には使わない */
+  isFailed: boolean;
   /** 公開されたばかりのものを拾い直す。セクションの「更新」から呼ぶ */
   reload: () => void;
 };
@@ -28,6 +30,7 @@ type UseIssueArtifactsResult = {
 export function useIssueArtifacts(issue: Issue | null): UseIssueArtifactsResult {
   const [artifacts, setArtifacts] = useState<SessionArtifactView[]>(EMPTY);
   const [isLoading, setIsLoading] = useState(false);
+  const [isFailed, setIsFailed] = useState(false);
   const [loadedKey, setLoadedKey] = useState<string | null>(null);
   const [reloadCount, setReloadCount] = useState(0);
   const repositoryFullName = issue?.repositoryFullName ?? null;
@@ -43,6 +46,7 @@ export function useIssueArtifacts(issue: Issue | null): UseIssueArtifactsResult 
     const [owner, repo] = repositoryFullName.split("/");
     const controller = new AbortController();
     setIsLoading(true);
+    setIsFailed(false);
 
     fetch(`/api/issues/artifacts?owner=${owner}&repo=${repo}&number=${issueNumber}`, {
       signal: controller.signal,
@@ -51,11 +55,16 @@ export function useIssueArtifacts(issue: Issue | null): UseIssueArtifactsResult 
         if (!res.ok) throw new Error(`artifacts fetch failed (${res.status})`);
         return (await res.json()) as { artifacts?: SessionArtifactView[] };
       })
-      .then((data) => setArtifacts(data.artifacts ?? EMPTY))
+      .then((data) => {
+        setArtifacts(data.artifacts ?? EMPTY);
+        setIsFailed(false);
+      })
       // **失敗しても空にするだけ。** セクションが出ないだけで、claude.aiのURLは
       // Issueコメントに残っているので見る手段は無くならない
       .catch(() => {
-        if (!controller.signal.aborted) setArtifacts(EMPTY);
+        if (controller.signal.aborted) return;
+        setArtifacts(EMPTY);
+        setIsFailed(true);
       })
       .finally(() => {
         if (!controller.signal.aborted) {
@@ -71,5 +80,5 @@ export function useIssueArtifacts(issue: Issue | null): UseIssueArtifactsResult 
 
   const isLoaded = loadedKey !== null && loadedKey === `${repositoryFullName}#${issueNumber}`;
 
-  return { artifacts, isLoading, isLoaded, reload };
+  return { artifacts, isLoading, isLoaded, isFailed, reload };
 }
