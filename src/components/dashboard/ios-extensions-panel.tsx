@@ -12,10 +12,9 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useIosExtensions } from "@/hooks/use-ios-extensions";
 import { IOS_EXTENSION_KIND_LABELS } from "@/lib/ios-extensions";
-import type { Issue } from "@/types/issue";
 
 /** iOS拡張一覧（#3708）。リポジトリのSwiftソースから検出したウィジェット・ロック画面・ライブアクティビティ・コントロール */
-export function IosExtensionsPanel({ active = true, onBack, onIssueCreated, start }: { active?: boolean; onBack?: () => void; onIssueCreated: (issue: Issue) => void; start: IosExtensionStartProps }) {
+export function IosExtensionsPanel({ active = true, onBack, start }: { active?: boolean; onBack?: () => void; start: IosExtensionStartProps }) {
   const { repositories, isLoading, error, refresh } = useIosExtensions(active);
   const [target, setTarget] = useState<IosExtensionIssueTarget | null>(null);
   const names = repositories.map((repository) => repository.fullName);
@@ -82,7 +81,7 @@ export function IosExtensionsPanel({ active = true, onBack, onIssueCreated, star
         </div>
       )}
 
-      <IosExtensionIssueDialog target={target} repositories={names} start={start} onClose={() => setTarget(null)} onCreated={onIssueCreated} />
+      <IosExtensionIssueDialog target={target} repositories={names} start={start} onClose={() => setTarget(null)} />
     </section>
   );
 }
