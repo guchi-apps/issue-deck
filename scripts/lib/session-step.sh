@@ -31,6 +31,7 @@ SESSION_STEP_CODES=(
   TYPECHECKING # 型チェック中
   TESTING      # テスト中
   BUILDING     # ビルド中
+  IOS_VERIFYING # iOS事前検証中（Macでのビルド／テスト待ち。#4138）
   COMMITTING   # コミット中
   PUSHING      # push中
   PR           # PRを作成中
@@ -70,6 +71,13 @@ session_step_from_bash_command() {
   fi
   if [[ "$lower" =~ (^|[[:space:]])git[[:space:]]+(.*[[:space:]])?(commit|add)([[:space:]]|$) ]]; then
     printf 'COMMITTING'
+    return 0
+  fi
+
+  # iOS事前検証（#4138）。Macの結果を待つ間は数分〜数十分かかり、手元のビルドと見分けたいので
+  # 他の検証より先に見る（`pnpm build`より前でないと、連結した行で別のステップに倒れる）
+  if [[ "$lower" =~ (^|[[:space:]/])ios-precheck\.sh[[:space:]]+(run|status)([[:space:]]|$) ]]; then
+    printf 'IOS_VERIFYING'
     return 0
   fi
 

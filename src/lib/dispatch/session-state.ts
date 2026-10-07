@@ -221,6 +221,8 @@ export const SESSION_STEPS = [
   "TESTING",
   /** ビルド（`pnpm build`など） */
   "BUILDING",
+  /** iOS事前検証（`scripts/ios-precheck.sh run`。Macでのビルド／テストを待っている。#4138） */
+  "IOS_VERIFYING",
   /** コミット（`git add`・`git commit`） */
   "COMMITTING",
   /** push（`git push`） */
