@@ -68,6 +68,8 @@ type IssueStatusCardProps = {
    * 対応PRを持っておらず、ここで取り直すと同じ取得が2本走る（`planningSkipped`と同じ形）。
    */
   pullRequestProgress?: IssuePullRequestProgress | null;
+  /** 計画レビューを作成中か（#4160）。作成中は進捗ステッパーを確認待ちの橙にしない */
+  planReviewCreating?: boolean;
   /**
    * 「別のAIで続ける」（#3496）に必要な材料。**渡されたときだけ、セッションの行にボタンを出す。**
    *
@@ -104,6 +106,7 @@ export function IssueStatusCard({
   checkUserGuidance = null,
   planningSkipped = false,
   pullRequestProgress = null,
+  planReviewCreating = false,
   handoff,
 }: IssueStatusCardProps) {
   // 「別のAIで続ける」を復旧メニューの項目から開くための状態（#3516）。終了したセッションだけが使う
@@ -183,6 +186,7 @@ export function IssueStatusCard({
           showExecutionTarget={issueSession === null}
           planningSkipped={planningSkipped}
           pullRequestProgress={pullRequestProgress}
+          planReviewCreating={planReviewCreating}
         />
       )}
 

@@ -1068,6 +1068,7 @@ export function IssueDetail({
             checkUserGuidance={checkUserGuidance}
             planningSkipped={planningSkipped}
             pullRequestProgress={pullRequestProgress}
+            planReviewCreating={planReviewJobCreating}
             handoff={{
               comments,
               claudeLocalModel,
