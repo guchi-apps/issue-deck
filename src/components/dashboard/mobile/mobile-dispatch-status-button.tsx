@@ -68,7 +68,9 @@ export function MobileDispatchStatusButton({
   const setOpen = onOpenChange ?? setUncontrolledOpen;
   const summary = summarizeDispatchQueue(dispatch.jobs, dispatch.concurrency, dispatch.hosts);
 
-  if (dispatch.hosts.length === 0) return null;
+  // 最初の取得が終わるまではアイコンだけ先に出し、バッジは取得後に付く（#4107）。
+  // 取得後にホストが無いと分かったときだけ消す
+  if (dispatch.isLoaded && dispatch.hosts.length === 0) return null;
 
   return (
     <Sheet open={open} onOpenChange={setOpen}>
@@ -76,6 +78,8 @@ export function MobileDispatchStatusButton({
         <button
           type="button"
           aria-label="実行状況"
+          // 取得前は押しても中身が空なので、アイコンだけ先に出して押せないようにする（#4107）
+          disabled={!dispatch.isLoaded}
           className="relative flex size-11 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
         >
           <ListOrdered className="size-5" />

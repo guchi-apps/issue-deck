@@ -120,7 +120,7 @@ describe("MobileSettingsScreen", () => {
       expect(screen.getByRole("region", { name: label })).toBeTruthy();
     }
     for (const label of ["AI・モデル", "実行", "自動化", "リポジトリ", "フリート", "ストレージ", "システム状態"]) {
-      expect(screen.getByRole("button", { name: new RegExp(`^${label}`) })).toBeTruthy();
+      expect(screen.getByRole("button", { name: new RegExp(`^${label}(?!状況)`) })).toBeTruthy();
     }
     // 「アカウント」は区分に並べず、アカウント名のカードから開く（#3744）
     expect(screen.queryByRole("button", { name: /^アカウント$/ })).toBeNull();
@@ -143,7 +143,7 @@ describe("MobileSettingsScreen", () => {
   it("区分を選ぶと中身へ入り、戻るで一覧へ帰る", () => {
     renderScreen();
 
-    fireEvent.click(screen.getByRole("button", { name: /^実行/ }));
+    fireEvent.click(screen.getByRole("button", { name: /^実行(?!状況)/ }));
     expect(screen.getByLabelText("自動リトライ回数")).toBeTruthy();
 
     fireEvent.click(screen.getByRole("button", { name: "戻る" }));
