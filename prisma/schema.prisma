@@ -2295,3 +2295,72 @@ model ImplementationRun {
 
   @@index([repositoryFullName, issueNumber, startedAt])
 }
+
+/// GitHub Actions障害時のバックアップCI（#4065）のリポジトリ別設定。
+/// **行が無い・`enabled`が偽のリポジトリでは、バックアップCIを起動できない**（明示的に有効化したものだけ）。
+/// CircleCIのAPIトークンとWebhookの署名鍵はここに置かず、環境変数（`CIRCLECI_API_TOKEN`・`CIRCLECI_WEBHOOK_SECRET`）から読む
+model BackupCiSetting {
+  repositoryFullName   String   @id
+  enabled              Boolean  @default(false)
+  /// `circleci/<org-id>/<project-id>`（GitHub App連携）のようなプロジェクトスラッグ
+  circleciProjectSlug  String?
+  /// APIからの起動に使うパイプライン定義のID（CircleCIのProject Settings > Pipelines）
+  circleciDefinitionId String?
+  updatedByUserId      String?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+}
+
+/// バックアップCIの実行要求1回（#4065）。**PRのhead/baseと実際に検査したコミット、検査定義の版を
+/// 起動側（issue-deck）が記録し、完了時にこの記録と突き合わせた結果だけを合格として採用する。**
+model BackupCiRun {
+  id                     String    @id @default(cuid())
+  repositoryFullName     String
+  prNumber               Int
+  headRef                String
+  baseRef                String
+  headSha                String
+  baseSha                String
+  /// 同じPRでの試行番号（1始まり）
+  attempt                Int
+  provider               String    @default("circleci")
+  /// `BackupCiRunStatus`。解釈はアプリ側（src/lib/backup-ci/state.ts）に寄せる
+  status                 String
+  /// 未完了の間だけ`repositoryFullName#prNumber`を入れる。**同じPRで実行要求を2本同時に採用しない**
+  activeKey              String?   @unique
+  startedByUserId        String
+  /// 起動時に読んだbaseの検査定義のダイジェスト。結果のダイジェストがこれと違えば採用しない
+  definitionDigest       String?
+  resultDigest           String?
+  /// 実際に検査したコミット（baseへheadをマージした結果）とその親
+  testedSha              String?
+  testedParents          String?
+  externalPipelineId     String?   @unique
+  externalPipelineNumber Int?
+  externalWorkflowId     String?
+  externalJobNumber      Int?
+  logUrl                 String?   @db.Text
+  /// 検査ごとの結果（JSON配列）
+  checksJson             String?   @db.Text
+  statusReason           String?   @db.Text
+  /// 最後に共通チェック（issue-deck/ci-gate）へ出した状態
+  gateState              String?
+  requestedAt            DateTime  @default(now())
+  triggeredAt            DateTime?
+  completedAt            DateTime?
+  lastReconciledAt       DateTime?
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
+
+  @@unique([repositoryFullName, prNumber, attempt])
+  @@index([status])
+}
+
+/// CircleCIの完了Webhookの受信記録（#4065）。**同じイベントIDを2回処理しない**ための台帳
+model CircleciWebhookDelivery {
+  eventId    String   @id
+  type       String
+  receivedAt DateTime @default(now())
+
+  @@index([receivedAt])
+}

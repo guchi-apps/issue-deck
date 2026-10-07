@@ -84,6 +84,8 @@ export const GITHUB_API_FEATURES = [
   { key: "pull_request_update", label: "PRのタイトル・本文の更新" },
   { key: "pull_request_review_ack", label: "レビュー指摘の確認済み記録" },
   { key: "pull_request_repair", label: "PRの自動修復の起動" },
+  // バックアップCI（#4065）の手動起動。PR・baseの検査定義の取得と共通チェックの発行
+  { key: "backup_ci", label: "バックアップCIの起動" },
   // コンフリクトしたPRの巡回検知（#2116）。PR一覧のRESTはETagが効くので、実際に消費するのは
   // コンフリクトしているPRがあるときのGraphQLと起動だけ。
   { key: "conflict_sweep", label: "コンフリクトの巡回検知" },
