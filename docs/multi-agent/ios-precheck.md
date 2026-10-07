@@ -197,6 +197,6 @@ Mac側スクリプトがbash 3.2の空配列展開で落ち、依頼側は`inter
 ## 残っていること
 
 - Issue詳細・PR欄での状態と検証SHAの表示（#4140。いまはセッションのステップ「iOS検証中」と、GitHub上のcommit statusで見る）
-- yoteiflowを必須検証にするか（必須チェックの追加と`required=true`。無人実行のPRが止まる点の判断を含む。#4141）
+- yoteiflowは`required=true`にした（#4141。無人実行が作ったPRはサブPCから`run`するまで止まる点は受け入れた）。**yoteiflowの`develop`の必須チェックへ`issue-deck/ios-precheck`を足す設定変更は人が行う**。足すまでは自動マージを止めない
 - yoteiflowへのテストTargetの追加（guchi-apps/yoteiflow#1159）。追加されるまでは「ビルド成功・自動テスト未設定」になる
 - kurashio・aide・morrowは未設定（`scripts/ios-precheck.conf`へ足し、1回`run`を通してから使う）
