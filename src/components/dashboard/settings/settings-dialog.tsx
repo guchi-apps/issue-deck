@@ -53,6 +53,7 @@ type SettingsDialogProps = {
   currentUser: CurrentUser | null;
   autoRetryLimit: number;
   aiExecutionProvider?: AiExecutionProvider;
+  aiProviderOverrides?: import("@/lib/execution-flow-settings").AiProviderOverrides;
   claudeModel: ClaudeModel;
   githubActionsAgent?: GithubActionsAgent;
   githubActionsCodexModel?: CodexLocalModel;
@@ -92,6 +93,7 @@ export function SettingsDialog({
   currentUser,
   autoRetryLimit,
   aiExecutionProvider = "claude",
+  aiProviderOverrides,
   claudeModel,
   githubActionsAgent = "claude",
   githubActionsCodexModel = "gpt-5.6-terra",
@@ -131,7 +133,7 @@ export function SettingsDialog({
     claudeLocalModel, codexModel, defaultDispatchAgent, planReviewAgentForClaude,
     planReviewAgentForCodex, planReviewClaudeModel, planReviewCodexModel,
     dispatchFailoverEnabled, dispatchFailoverThresholdPercent, appAiModel, appAiModelReasoning,
-    modelPickEngine, dispatchConcurrency, onUpdated,
+    modelPickEngine, dispatchConcurrency, aiProviderOverrides, onUpdated,
   };
 
   return (

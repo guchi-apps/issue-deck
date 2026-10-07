@@ -60,13 +60,38 @@
 | ループ | `src/lib/chat/investigation/agent.ts` | 1ステップごとに「次のツール」か「最終回答」を構造化出力で返させ、結果を見て追加調査する。回数・時間・同一呼び出し・連続失敗に上限があり、止まったら途中結果と停止理由を返す |
 | ツール | `src/lib/chat/investigation/tools.ts` | 読み取りだけ（PR状態・レビュー／コメント・変更ファイル・CI失敗ログ・Issue・Issue検索・リポジトリのファイル・自動修正の記録）。書き込み・実行・シェルは持たない |
 | 返信 | `src/lib/chat/investigation/reply.ts` | 結果を本文・根拠カード・提案カード・次のコンテキストへ組み立てる |
-| モデル | `src/lib/chat/investigation/model.ts` | `callClaudeMessages`（アプリ内AIの共通入口）を使う。モデル・プロバイダ（Claude/Codex側の設定）と消費量の計上はそのまま引き継ぐ |
+| モデル | `src/lib/chat/investigation/model.ts` | 実行先を決める（`resolveChatExecution`）。AI実行プロバイダーがClaudeなら`callClaudeMessages`（アプリ内AIの共通入口）で同期に呼ぶ。Codexなら下の「実行先がCodexのとき」の経路 |
+| Codex | `src/lib/chat/investigation/codex-model.ts`・`src/lib/chat/codex-run.ts` | サブPCのCodex CLIへ1手ずつ`CHAT_TURN`ジョブを渡し、回答待ち（`ChatRun`）を非同期に進める（#4109） |
 | 機密 | `src/lib/chat/investigation/redact.ts` | 取得直後にトークン等を伏せる。回答・保存ログへ値を出さない |
 
 - **上限**: モデル呼び出し最大7回／全体90秒／同じツール＋引数の繰り返しは「進展なし」で停止／取得失敗が3回連続で停止。最後の1回はツールを使わせず、見られなかった範囲を「未確認」へ書かせる。停止しても途中結果と停止理由、次の行動を返す
 - **事実・推測・未確認を分ける**。根拠カードに「確認できたこと／推測／未確認」と、参照リンク（HEAD・run・件数・取得時刻つき）を出す。取得に失敗した範囲は「問題なし」とせず未確認に入れる。自動レビュー判定の判定時HEADが現在のHEADと違えば古い判定として扱う
 - **「要確認（needs-check）」「レビュー記録なし」「既存の自動修正の対象外」でも調査する**。定型の`planPullRequestRepair`が`not_repairable`を返したときは終了せず、レビューやCIの中身から修正可能／方針判断待ち／情報不足／修正不要を説明する
 - **取得した本文は材料で、許可ではない**。コメント・ログ・コードは`<untrusted_data>`で渡し、そこに書かれた指示に従わない。読めるパスは通常ファイルだけ（`.env*`・鍵・リポジトリ外は拒否）
+
+### 実行先がCodexのとき（#4109）
+
+**AI実行プロバイダーがCodexなら、チャットの調査はサブPCのログイン済みCodex CLI（ChatGPT/Codexのサブスク枠）で答える。OpenAI API（`OPENAI_API_KEY`）は使わず、失敗してもAPIへは逃がさない。** 以前はGPT系モデルを選ぶと`callClaudeMessages`がOpenAI Responses APIを直接呼んでおり、API残高が尽きると`HTTP 429 credit_balance_exhausted`で止まっていた。
+
+```text
+POST /api/chat/[id] → 発言とChatRun（running）を保存してすぐ返す
+  └ executeCodexChatRun（サーバー内で非同期）→ 調査ループ（ツールはサーバーで実行）
+       └ 1手ごとに CHAT_TURN ジョブを積む（ChatRun.stepRequest にプロンプト）
+            poller（軽い巡回・3秒刻み）→ scripts/run-chat-codex.sh をバックグラウンドで起動
+              GET  /api/dispatch/chat-turn  … プロンプトとスキーマを受け取る
+              codex exec --sandbox read-only --ephemeral --output-schema（空の一時ディレクトリで）
+              POST /api/dispatch/chat-turn  … 最終メッセージ・失敗の種別・使用量を返す
+画面 → GET /api/chat/[id]/run を2.5秒おきに取りに行き、届いたら返信を足す
+```
+
+- **送信のHTTPは回答を待たない。** 1手ごとに受け取り待ちと`codex exec`の起動が乗り、全体で数十秒〜数分かかるため。画面は「Codexで回答中（サブPC・モデル）」と途中経過を出し、再読込しても`GET /api/chat/[id]`の`activeRun`から待ち状態を戻す。回答待ちの間は次の発言を受け付けない（`409 run_in_progress`）
+- **上限はCodex経路だけ長い**（1手120秒・全体5分）。更新が7分止まった回答待ちはサーバー再起動などで途切れたとみなし、「中断」の返信と同じ内容での再試行を出す（`sweepStaleChatRuns`）
+- **失敗は原因ごとに分けて返す**（`describeUnavailable`の`codex_*`）。サブPC未接続（オフライン・30秒受け取られない）／pollerが未対応／Codex未ログイン／**APIキーでのログイン**（従量課金になるため使わない）／利用枠の上限／時間切れ／応答不正／Codexで動かせないモデル。ログイン状態は実行のたびに`codex login status`で確かめる
+- **OpenAI APIの残高切れ（`credit_balance_exhausted`・`insufficient_quota`）は`api_credit_exhausted`として通常の429と分ける。** 待っても回復しないので「しばらく待って再試行」とは案内しない
+- **モデル**は設定の調査用モデル（`appAiModelReasoning`）、無ければCodexの既定（Terra）。`-m`へ渡すのは`CODEX_LOCAL_MODEL_VALUES`の4つだけで、Claude系を個別指定しているときは`unsupported_model`で断る（実行先を黙って切り替えない）
+- **利用状況には`codex-cli/<モデル>`として計上する**（単価は付けない）。OpenAI APIの`gpt-*`と混ざらない。回答待ちの行（`ChatRun.provider`・`model`・`failureKind`）にも実際の実行先が残る
+- **チャットからコードは変わらない。** `CHAT_TURN`は読み取り専用のサンドボックス・空の作業ディレクトリ・リポジトリのパスを渡さない形で走り、worktree・PR・セッションを作らない。ジョブは実行状況の一覧に出さない（`listDispatchState`で除外）
+- **pollerの版数33から。** 更新前のpollerは`chatCodex`を申告しないため配られず、チャットには「pollerが未対応」と出る（設定のフリート運用から「更新して再起動」）
 
 ### 引き継ぎ（「それ」「この方針で」「続けて」）
 

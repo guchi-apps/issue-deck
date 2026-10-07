@@ -1,0 +1,103 @@
+# GitHub Actions障害時のバックアップCI（#4065）。運用手順は docs/backup-ci.md。
+#
+# **通常のpush/PRでは何も実行しない。** ワークフローは`backup_ci`パラメータが真のときだけ走り、
+# それを渡すのはissue-deckがCircleCI API（POST /api/v2/project/{slug}/pipeline/run）から起動する
+# ときだけ。プロジェクト側にpush/PRのトリガーを作らない運用と合わせて、Actionsとの二重実行を防ぐ。
+#
+# **この設定は信頼済みのブランチ（develop）から読む。** issue-deckは起動時に`config.branch`へ
+# PRのbase（develop）を、`checkout.branch`へPRのheadブランチを渡す。PRの中で
+# このファイルを書き換えても、バックアップCIの手順は変わらない。
+#
+# **検査定義もPRのbaseから読む。** ci/required-checks.json とランナーは`base_sha`の版を
+# 取り出して使い、PRの中で定義を減らしても検査は省けない。issue-deckは結果の定義ダイジェストを
+# baseの定義と突き合わせ、一致しなければ合格として採用しない。
+#
+# **シークレットを渡さない。** このプロジェクトにはContextも環境変数も設定しない（検査はすべて
+# プレースホルダ値で動く）。マージ権限も本番の値もテスト環境へは渡らない。
+version: 2.1
+
+parameters:
+  backup_ci:
+    type: boolean
+    default: false
+  run_request_id:
+    type: string
+    default: ""
+  head_sha:
+    type: string
+    default: ""
+  base_sha:
+    type: string
+    default: ""
+
+jobs:
+  required-checks:
+    docker:
+      - image: cimg/base:current
+    # next buildとvitestを通すのに、Actionsのubuntu-latest（4コア）に近い大きさを使う。
+    # 無料プランで使える上限の大きさ（docs/backup-ci.md「無料枠の制約」）
+    resource_class: large
+    environment:
+      REQUIRED_CHECKS_HEAD_SHA: << pipeline.parameters.head_sha >>
+      REQUIRED_CHECKS_BASE_SHA: << pipeline.parameters.base_sha >>
+      REQUIRED_CHECKS_RUN_REQUEST_ID: << pipeline.parameters.run_request_id >>
+      COREPACK_ENABLE_DOWNLOAD_PROMPT: "0"
+    steps:
+      - checkout
+      - run:
+          name: 要求されたhead/baseを取り出し、baseへheadをマージした結果を用意する
+          command: |
+            set -euo pipefail
+            for v in REQUIRED_CHECKS_HEAD_SHA REQUIRED_CHECKS_BASE_SHA REQUIRED_CHECKS_RUN_REQUEST_ID; do
+              if ! printf '%s' "${!v}" | grep -Eq '^[0-9A-Za-z_-]+$'; then
+                echo "パラメータ ${v} が空か不正です" >&2
+                exit 1
+              fi
+            done
+            git fetch --no-tags origin "$REQUIRED_CHECKS_HEAD_SHA" "$REQUIRED_CHECKS_BASE_SHA"
+            # ブランチ指定で起動したあとに先端が動いていても、要求されたSHAそのものを検査する。
+            # issue-deckは完了時にPRの現在のhead/baseと照合し、変わっていれば採用しない
+            git checkout --quiet --detach "$REQUIRED_CHECKS_BASE_SHA"
+            git -c user.name=backup-ci -c user.email=backup-ci@localhost \
+              merge --no-ff --no-edit "$REQUIRED_CHECKS_HEAD_SHA" \
+              || { echo "baseとheadがコンフリクトしています。PRのコンフリクトを解消してから再実行してください" >&2; exit 1; }
+            mkdir -p /tmp/trusted /tmp/result
+            git show "$REQUIRED_CHECKS_BASE_SHA:ci/required-checks.json" > /tmp/trusted/required-checks.json
+            git show "$REQUIRED_CHECKS_BASE_SHA:scripts/ci/run-required-checks.mjs" > /tmp/trusted/run-required-checks.mjs
+      - run:
+          name: Node.jsとpnpmを用意する（ci/required-checks.json の runtime と同じ）
+          command: |
+            set -euo pipefail
+            NODE_MAJOR="$(python3 -c 'import json;print(json.load(open("/tmp/trusted/required-checks.json"))["runtime"]["node"])')"
+            curl -fsSL "https://deb.nodesource.com/setup_${NODE_MAJOR}.x" | sudo -E bash -
+            sudo apt-get install -y nodejs
+            sudo corepack enable
+            node --version
+            pnpm --version
+      - run:
+          name: Install dependencies
+          command: pnpm install --frozen-lockfile
+      - run:
+          name: 必須検査（全グループ）
+          # 失敗しても結果を保存してから落とすため、終了コードを記録していったん成功で抜ける
+          command: |
+            set +e
+            node /tmp/trusted/run-required-checks.mjs --all \
+              --manifest /tmp/trusted/required-checks.json \
+              --result /tmp/result/ci-result.json
+            echo "$?" > /tmp/required-checks-exit-code
+      - store_artifacts:
+          path: /tmp/result
+          destination: backup-ci
+      - run:
+          name: 必須検査の合否
+          command: |
+            code="$(cat /tmp/required-checks-exit-code 2>/dev/null || echo 1)"
+            echo "必須検査の終了コード: ${code}"
+            test "$code" = "0"
+
+workflows:
+  backup-ci:
+    when: << pipeline.parameters.backup_ci >>
+    jobs:
+      - required-checks

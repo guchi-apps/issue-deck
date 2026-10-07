@@ -155,7 +155,8 @@ describe("SettingsDialog", () => {
     }
     // 「アカウント」は区分に並べず、アカウント名の行から開く（#3744）
     expect(screen.queryByRole("button", { name: /^アカウント$/ })).toBeNull();
-    expect(screen.getByText("現在のAI構成")).toBeTruthy();
+    expect(screen.getByRole("group", { name: "AI実行プロバイダー" })).toBeTruthy();
+    expect(screen.getByRole("list", { name: "Claudeを選んだときの各工程" })).toBeTruthy();
     expect(isShown(screen.queryByLabelText("自動リトライ回数"))).toBe(false);
   });
 
@@ -262,7 +263,37 @@ describe("SettingsDialog", () => {
       appAiModelReasoning: "claude-sonnet-5-5",
       modelPickEngine: "app-ai",
       dispatchConcurrency: 2,
+      // 実行の区分は既定エージェントを送るので、保存後はプロバイダーに追従しない個別設定になる（#4108）
+      aiProviderOverrides: {
+        githubActionsAgent: false,
+        defaultDispatchAgent: true,
+        planReviewAgentForClaude: false,
+        planReviewAgentForCodex: false,
+        appAiModel: false,
+        appAiModelReasoning: false,
+      },
     });
+  });
+
+  it("プロバイダーを切り替えると、保存前でも工程ごとの実効エージェントを切り替えて見せる（#4108）", async () => {
+    renderDialog();
+
+    const group = screen.getByRole("group", { name: "AI実行プロバイダー" });
+    fireEvent.click(within(group).getByRole("button", { name: "Codex" }));
+
+    const flow = screen.getByRole("list", { name: "Codexを選んだときの各工程" });
+    expect(within(flow).getAllByText(/Codex CLI/).length).toBeGreaterThan(0);
+    expect(screen.getByText("未保存")).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+    await waitFor(() => expect(updateClaudeModel).toHaveBeenCalledWith({ aiExecutionProvider: "codex" }));
+    // 追従している項目は、保存したプロバイダーで解き直した値を親へ返す
+    expect(onUpdated).toHaveBeenCalledWith(expect.objectContaining({
+      aiExecutionProvider: "codex",
+      githubActionsAgent: "codex",
+      defaultDispatchAgent: "codex",
+      appAiModel: "gpt-5.6-terra",
+    }));
   });
 
   it("兄弟区分の保存済み値を同期し、後の保存で古い値へ巻き戻さない（#3983）", async () => {

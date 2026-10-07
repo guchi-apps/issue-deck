@@ -11,6 +11,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { RELEASE_PREP_INTERVAL_MINUTES_OPTIONS } from "@/lib/app-settings";
+import { InfoHint } from "@/components/dashboard/settings/info-hint";
 
 function describeInterval(minutes: number): string {
   if (minutes === 0) return "自動実行しない";
@@ -61,7 +62,13 @@ export function ReleasePrepIntervalField() {
 
   return (
     <div className="flex flex-col gap-1.5">
-      <Label htmlFor="release-prep-interval">リリース準備の自動実行間隔</Label>
+      <div className="flex items-center gap-1.5">
+        <Label htmlFor="release-prep-interval">リリース準備の自動実行間隔</Label>
+        <InfoHint label="リリース準備の自動実行間隔">
+          developからリリース準備（バージョンのバンプPRとdevelop→mainのPR作成）を自動で始める間隔です。
+          実装中のIssueがあるときは見送ります。本番へのマージは自動では行いません。
+        </InfoHint>
+      </div>
       <Select
         value={value === null ? undefined : String(value)}
         onValueChange={handleChange}
@@ -79,9 +86,7 @@ export function ReleasePrepIntervalField() {
         </SelectContent>
       </Select>
       <p className="text-xs text-muted-foreground">
-        developからリリース準備（バージョンのバンプPRとdevelop→mainのPR作成）を自動で始める間隔です。
-        実装中のIssueがあるときは見送ります。本番へのマージは自動では行いません。選んだ時点で
-        保存され、次の15分刻みの起動から反映されます。
+        選んだ時点で保存され、次の15分刻みの起動から反映されます。
       </p>
       {error && <p className="text-sm text-destructive">{error}</p>}
     </div>

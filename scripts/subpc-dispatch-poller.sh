@@ -169,10 +169,12 @@ set -euo pipefail
 #     廃止し、使用量の補完・送り直し（`--usage-flush`）と、確定したレビューの最終マージ判定の
 #     再開の巡回（`POST /api/dispatch/pr-review/resume-sweep`）だけを残した。
 # 32: REVIEW_FIXを独立ジョブとして購読認証のCodexで実行する（#4043）。
-# 33: コードレビュー（`CODE_REVIEW`）を起動時点で`succeeded`にせず`running`のまま渡し、完了・失敗・
+# 33: チャット相談のモデル呼び出し（`CHAT_TURN`）を受け取り、ログイン済みのCodex CLIで答えを
+#     作って返す（#4109。`scripts/run-chat-codex.sh`）。
+# 34: コードレビュー（`CODE_REVIEW`）を起動時点で`succeeded`にせず`running`のまま渡し、完了・失敗・
 #     時間切れはレビューのランナー（`run-code-review.sh`）が結果コメントの到達を確かめてから報告する。
 #     本数の上限は死んだペインだけが残るセッションを数えない（#4116）。
-DISPATCH_POLLER_VERSION="33"
+DISPATCH_POLLER_VERSION="34"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -269,6 +271,7 @@ CODE_REVIEW_LAUNCHER="$SCRIPT_DIR/start-code-review.sh"
 # 使うため、Actionsから直接起動せずこのランチャーへ渡す（#3917）。**ジョブ（`PR_REVIEW`）はissue-deckが
 # 積み、pollerがclaimして起動する**（#3990。かつてはPRコメントの要求印を巡回して拾っていた）。
 CODEX_PR_REVIEW_LAUNCHER="$SCRIPT_DIR/start-codex-pr-review.sh"
+CHAT_CODEX_RUNNER="$SCRIPT_DIR/run-chat-codex.sh"
 CODEX_REVIEW_FIX_LAUNCHER="$SCRIPT_DIR/start-codex-review-fix.sh"
 # 確認環境（#2444）。**セッションを立てないジョブ**（`SELF_UPDATE`・`MANUAL_STEP`と同じ枠外）で、
 # developの最新をそのまま開ける開発サーバーを1本だけ起こす。
@@ -463,8 +466,23 @@ SESSION_MEMORY_RESERVE_MB="$(require_non_negative_int DISPATCH_SESSION_MEMORY_RE
 # 既定の6時間は「毎巡fetchしたくない」と「遅れに気付くのが1日遅れては意味が無い」の間を取った値。
 # 遅れの数字は最後にoriginを見た時点のものなので、間隔を延ばすほど申告が古くなる（どの時点の
 # 数字かは`fetchedAt`として一緒に申告し、画面が古ければ注記を出す）。
+# チェックアウトの自動更新（#4118）。**0で無効**（従来どおり画面の「更新して再起動」だけで更新する）。
+#
+# 画面に「◯コミット遅れ」「再起動待ち」が出る条件と同じ状態を巡回の終わりに見つけたら、
+# 画面のボタンと同じ手順（`git pull --ff-only`→`exec`で入れ替え）を自分で行う。
+AUTO_SELF_UPDATE="$(require_non_negative_int DISPATCH_AUTO_SELF_UPDATE "${DISPATCH_AUTO_SELF_UPDATE:-}" 1)"
+# 失敗した自動更新をやり直すまでの間隔（分）。作業ツリーが汚れたままなどで毎巡失敗し続けない歯止め
+AUTO_SELF_UPDATE_RETRY_MINUTES="$(require_non_negative_int \
+  DISPATCH_AUTO_SELF_UPDATE_RETRY_MINUTES "${DISPATCH_AUTO_SELF_UPDATE_RETRY_MINUTES:-}" 60)"
+# 失敗の記録（1行目＝epoch秒、2行目＝理由）。`exec`で入れ替わっても残すためファイルに置く
+AUTO_SELF_UPDATE_STATE_FILE="${XDG_STATE_HOME:-$HOME/.local/state}/issue-deck/auto-self-update"
+
+# 自動更新が有効なら、遅れに気付くのが半日後では意味が無いので既定を6時間から30分へ縮める
+# （明示した値は尊重する）。
+CHECKOUT_FETCH_DEFAULT_MINUTES=360
+((AUTO_SELF_UPDATE > 0)) && CHECKOUT_FETCH_DEFAULT_MINUTES=30
 CHECKOUT_FETCH_INTERVAL_MINUTES="$(require_non_negative_int \
-  DISPATCH_CHECKOUT_FETCH_INTERVAL_MINUTES "${DISPATCH_CHECKOUT_FETCH_INTERVAL_MINUTES:-}" 360)"
+  DISPATCH_CHECKOUT_FETCH_INTERVAL_MINUTES "${DISPATCH_CHECKOUT_FETCH_INTERVAL_MINUTES:-}" "$CHECKOUT_FETCH_DEFAULT_MINUTES")"
 
 # worktreeを掃除する間隔（分）。**0で無効**（#1716）。
 #
@@ -818,6 +836,19 @@ pr_review_capable() {
   fi
 }
 
+# チャット相談のモデル呼び出し（`CHAT_TURN`・#4109）を実行できるか。**実行するスクリプトと
+# Codex CLIの両方が手元にあるかで判定する**（`pr_review_capable`と同じ向き）。ログイン状態は
+# ここでは見ない（見送りの理由をチャットへ返せるよう、実行時に確かめて`not_logged_in`で返す）。
+chat_codex_capable() {
+  local codex_command
+  codex_command="$(agent_cli_codex_command 2>/dev/null || true)"
+  if [[ -f "$CHAT_CODEX_RUNNER" && -n "$codex_command" ]] && command -v "$codex_command" >/dev/null 2>&1; then
+    printf 'true'
+  else
+    printf 'false'
+  fi
+}
+
 # リポジトリ全体のコードレビュー（#698）のセッションを起こせるか。**ランチャーが手元にあるかで
 # 判定する**（`plan_review_capable`と同じ）。こちらは人が画面から押す種別なので、申告しないと
 # ダイアログの選択肢に理由付きで出る（配ってから`failed`で返すより早い）。
@@ -1161,14 +1192,23 @@ collect_checkout_state() {
     fetched_at="$(date -u -d "@$fetched_epoch" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || true)"
   fi
 
+  # 自動更新が最後に失敗した理由。再試行の間隔を過ぎれば（次に試すので）出さない
+  local auto_error=""
+  if ((AUTO_SELF_UPDATE > 0)) && self_update_in_backoff "$AUTO_SELF_UPDATE_STATE_FILE" "$AUTO_SELF_UPDATE_RETRY_MINUTES"; then
+    auto_error="$(sed -n 2p "$AUTO_SELF_UPDATE_STATE_FILE" 2>/dev/null | cut -c1-300)"
+  fi
+
   jq -n \
     --arg commit "$commit" \
     --arg branch "$branch" \
     --arg committedAt "$committed_at" \
     --arg fetchedAt "$fetched_at" \
     --arg startedCommit "$POLLER_STARTED_COMMIT" \
+    --argjson autoEnabled "$(((AUTO_SELF_UPDATE > 0)) && echo true || echo false)" \
+    --arg autoError "$auto_error" \
     --argjson behindCount "${behind:-null}" \
-    '{commit: $commit, behindCount: $behindCount}
+    '{commit: $commit, behindCount: $behindCount,
+        autoUpdate: ({enabled: $autoEnabled} + (if $autoError == "" then {} else {error: $autoError} end))}
       + (if $branch == "" then {} else {branch: $branch} end)
       + (if $committedAt == "" then {} else {committedAt: $committedAt} end)
       + (if $fetchedAt == "" then {} else {fetchedAt: $fetchedAt} end)
@@ -1308,6 +1348,7 @@ announce() {
     --argjson codeReview "$(code_review_capable)" \
     --argjson reviewFix "$(if [[ -f "$CODEX_REVIEW_FIX_LAUNCHER" ]] && [[ "$(pr_review_capable)" == true ]]; then echo true; else echo false; fi)" \
     --argjson prReview "$(pr_review_capable)" \
+    --argjson chatCodex "$(chat_codex_capable)" \
     --argjson codex "$codex_flag" \
     --argjson codexRemoteControl "$(codex_remote_control_capable)" \
     --argjson selfUpdate "$(self_update_capable)" \
@@ -1320,7 +1361,7 @@ announce() {
     --argjson launchHold "${LAUNCH_HOLD_JSON:-null}" \
     --argjson checkout "${checkout:-null}" \
     --argjson planReviewSessions "$plan_review_sessions" \
-    '{host: $host, repositories: $repositories, contractVersion: $contractVersion, agentVersion: $agentVersion, sessionControl: true, instruction: true, crossRepoQuestion: $crossRepoQuestion, manualStep: $manualStep, manualStepAbort: $manualStepAbort, manualStepValues: $manualStepValues, manualStepVps: $manualStepVps, manualStepSession: $manualStepSession, planReview: $planReview, planReviewAgent: $planReviewAgent, codeReview: $codeReview, prReview: $prReview, reviewFix: $reviewFix, codex: $codex, codexRemoteControl: $codexRemoteControl, selfUpdate: $selfUpdate, reboot: $reboot, rebootState: $rebootState, preview: $preview, previewState: $previewState, previewRepositories: $previewRepositories, maxSessions: $maxSessions, liveSessions: $liveSessions, metrics: $metrics, launchHold: $launchHold, checkout: $checkout, planReviewSessions: $planReviewSessions}')"
+    '{host: $host, repositories: $repositories, contractVersion: $contractVersion, agentVersion: $agentVersion, sessionControl: true, instruction: true, crossRepoQuestion: $crossRepoQuestion, manualStep: $manualStep, manualStepAbort: $manualStepAbort, manualStepValues: $manualStepValues, manualStepVps: $manualStepVps, manualStepSession: $manualStepSession, planReview: $planReview, planReviewAgent: $planReviewAgent, codeReview: $codeReview, prReview: $prReview, chatCodex: $chatCodex, reviewFix: $reviewFix, codex: $codex, codexRemoteControl: $codexRemoteControl, selfUpdate: $selfUpdate, reboot: $reboot, rebootState: $rebootState, preview: $preview, previewState: $previewState, previewRepositories: $previewRepositories, maxSessions: $maxSessions, liveSessions: $liveSessions, metrics: $metrics, launchHold: $launchHold, checkout: $checkout, planReviewSessions: $planReviewSessions}')"
 
   if ! api_call POST /api/dispatch/hosts "$payload"; then
     report_api_failure "ホストの申告に失敗しました"
@@ -3105,11 +3146,41 @@ run_control_job() {
 # **実行そのものは別プロセスへ逃がす**（`run-manual-step.sh`）。サブPCの手作業で最も多いのが
 # 「`git pull`してpollerを再起動する」で、pollerのcgroupの中で実行すると自分ごと殺されて
 # 結果を返せない。`systemd-run --user --collect --unit=...`で別のcgroupへ出す。
+# 画面のボタンを押す代わりに、pollerが自分でチェックアウトを更新して入れ替わる（#4118）。
+#
+# **`run_once`が完全に終わった後にだけ呼ぶ。** `exec`はプロセスごと入れ替わるため、claim・報告・
+# セッション起動の途中で行うと、掴んだジョブの報告が届かないまま消える。
+# 失敗は`AUTO_SELF_UPDATE_STATE_FILE`に残して`AUTO_SELF_UPDATE_RETRY_MINUTES`の間は繰り返さず、
+# 理由は申告（`checkout.autoUpdate.error`）で画面へ出す。成功すれば記録を消して`exec`する
+# （`run_self_update_job`と同じく、走っている実装セッションは落ちない。#1927）。
+maybe_auto_self_update() {
+  ((AUTO_SELF_UPDATE > 0)) || return 0
+  [[ "$SHUTDOWN" -eq 0 ]] || return 0
+  git -C "$CHECKOUT_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1 || return 0
+  self_update_needed "$CHECKOUT_DIR" "$POLLER_STARTED_COMMIT" || return 0
+  if self_update_in_backoff "$AUTO_SELF_UPDATE_STATE_FILE" "$AUTO_SELF_UPDATE_RETRY_MINUTES"; then
+    return 0
+  fi
+
+  echo "チェックアウトの遅れ・再起動待ちを検知したため、自動で更新します（$CHECKOUT_DIR）..."
+  local result before after
+  if ! result="$(self_update_pull "$CHECKOUT_DIR")"; then
+    echo "警告: 自動更新に失敗しました: $result" >&2
+    mkdir -p "$(dirname "$AUTO_SELF_UPDATE_STATE_FILE")" 2>/dev/null || true
+    printf '%s\n%s\n' "$(date +%s)" "$result" >"$AUTO_SELF_UPDATE_STATE_FILE" 2>/dev/null || true
+    return 0
+  fi
+  read -r before after <<<"$result"
+  rm -f "$AUTO_SELF_UPDATE_STATE_FILE" 2>/dev/null || true
+  echo "$before → $after へ更新しました。新しいスクリプトへ入れ替えます（同じプロセスのまま）。"
+  exec /usr/bin/env bash "${BASH_SOURCE[0]}" ${POLLER_ARGV[@]+"${POLLER_ARGV[@]}"}
+}
+
 # チェックアウトを最新へ追随させ、pollerを畳む（#1875）。
 #
 # **`ssh`して`git pull && systemctl restart`していた手作業**（#1858・#1867）の置き換え。
-# pollerが自分から`git pull`しない設計（人が取り込むかを決める）は崩さず、**画面で押された
-# ときだけ**動く経路としてここに置く。
+# 画面で押されたときの経路。**自動更新（#4118。`maybe_auto_self_update`）も同じ手順を踏む**
+# （かつては「pollerが自分から`git pull`しない」設計で、人が押したときだけ動いた）。
 #
 # **報告してから終了する。** 自分で`systemctl --user restart`を打つと、報告が届く前にプロセスが
 # 死んで、画面には「実行中」のまま残る。終了だけしてsystemdの`Restart=always`に拾わせれば、
@@ -3122,23 +3193,12 @@ run_self_update_job() {
   # **作業ツリーが汚れていたら触らない。** 手で試した変更を巻き込んで消しうるため、
   # 強制せずに人へ返す。止めるときは変更のあるファイル名を返し、取り込み先と同じ内容の
   # 変更だけなら捨てて続ける（#3588。判定は lib/self-update.sh）
-  local dirty_reason
-  if ! dirty_reason="$(self_update_prepare_worktree "$CHECKOUT_DIR")"; then
-    report_job "$job_id" failed "$dirty_reason"
+  local result before after
+  if ! result="$(self_update_pull "$CHECKOUT_DIR")"; then
+    report_job "$job_id" failed "$result"
     return 0
   fi
-
-  local before after out
-  before="$(git -C "$CHECKOUT_DIR" rev-parse --short HEAD 2>/dev/null || true)"
-
-  # **`--ff-only`。** マージコミットを作らず、分岐していれば失敗として返す
-  if ! out="$(timeout 120 git -C "$CHECKOUT_DIR" pull --ff-only 2>&1)"; then
-    report_job "$job_id" failed \
-      "git pull --ff-only に失敗しました: $(printf '%s' "$out" | tail -3 | tr '\n' ' ')"
-    return 0
-  fi
-
-  after="$(git -C "$CHECKOUT_DIR" rev-parse --short HEAD 2>/dev/null || true)"
+  read -r before after <<<"$result"
 
   if [[ "$before" == "$after" ]]; then
     report_job "$job_id" succeeded "既に最新でした（$after）。再起動します。"
@@ -3230,6 +3290,28 @@ run_reboot_job() {
 #
 # **デーモンは止めない。** `stop`を打つと、そのとき繋いでいる端末との接続も切れる。
 # `start`は既に上がっていれば`connected`を返すだけ（冪等）なので、押すたびに呼んでよい。
+# チャット相談のモデル呼び出し（`CHAT_TURN`・#4109）。**待たずにバックグラウンドで起こす。**
+# `codex exec`は1回で十数秒〜2分かかり、ここで待つと軽い巡回（3秒刻み）が止まって他の枠外ジョブ
+# まで遅れる。開始（`running`）と結果はスクリプト自身が`/api/dispatch/chat-turn`へ報告する。
+# スクリプトが無い場合だけここで`failed`を返す（チャット側は`codex_error`として理由を出す）。
+# 起こした後に落ちて報告が届かない場合は、チャット側の待ち時間の上限で`timeout`として扱われる。
+run_chat_turn_job() {
+  local job_id="$1" log_dir="${XDG_STATE_HOME:-$HOME/.local/state}/issue-deck/chat-codex"
+  if [[ ! -f "$CHAT_CODEX_RUNNER" ]]; then
+    report_job "$job_id" failed "チャットのCodex実行スクリプトがありません（$CHAT_CODEX_RUNNER）。"
+    return 0
+  fi
+  if [[ "$DRY_RUN" -eq 1 ]]; then
+    echo "  --dry-run のため起動しません（チャットの回答 $job_id）"
+    return 0
+  fi
+  mkdir -p "$log_dir"
+  # 古いログは7日で消す（1発言で数件できる）
+  find "$log_dir" -type f -name '*.log' -mtime +7 -delete 2>/dev/null || true
+  setsid nohup bash "$CHAT_CODEX_RUNNER" "$job_id" >"$log_dir/$job_id.log" 2>&1 </dev/null &
+  echo "  チャットの回答をCodexで作成しています（ジョブ $job_id）"
+}
+
 run_codex_pairing_job() {
   local job_id="$1" codex_command
   local start_rc=0 pair_rc=0 pair_out code expires attempt
@@ -3672,6 +3754,13 @@ run_job() {
   # `local_session_validate_target`（Issue番号に`^[1-9][0-9]*$`を求める）より手前に置く。
   if [[ "$kind" == "REBOOT" ]]; then
     run_reboot_job "$job_id"
+    return 0
+  fi
+
+  # チャット相談のモデル呼び出し（#4109）。**Issueに紐づかない**（埋め草の`guchi-apps/issue-deck#0`）
+  # ため、`local_session_validate_target`より手前に置く。
+  if [[ "$kind" == "CHAT_TURN" ]]; then
+    run_chat_turn_job "$job_id"
     return 0
   fi
 
@@ -4300,6 +4389,9 @@ while [[ "$SHUTDOWN" -eq 0 ]]; do
   # 理由で落ちるたびにプロセスごと終わると、復帰までポーリングが空く
   run_once || true
   [[ "$SHUTDOWN" -eq 0 ]] || break
+  # **`run_once`の直後に置く**（#4118）。`wait_between_polls`の中でもclaimが走るため、そこに
+  # 入れるとジョブを掴んだまま入れ替わる
+  maybe_auto_self_update
   wait_between_polls
 done
 

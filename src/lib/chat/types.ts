@@ -187,6 +187,22 @@ export type ChatMessageView = {
   createdAt: string;
 };
 
+/**
+ * サブPCのCodex CLIで回答を作っている途中の発言（#4109）。`provider`は実際に使った実行先
+ * （`codex-cli`）で、OpenAI APIの利用と区別して画面・診断に出す。
+ */
+export type ChatRunView = {
+  id: string;
+  status: "running" | "succeeded" | "failed" | "interrupted";
+  phase: string;
+  provider: string;
+  model: string | null;
+  failureKind: string | null;
+  userMessageId: string;
+  assistantMessageId: string | null;
+  createdAt: string;
+};
+
 // --- チャットセッションの保存・再開（#4047） ---
 
 /** 会話メモの1項目（合意した方針・未解決の質問）。**許可する操作の根拠には使わない**（実行は確認カードだけ） */

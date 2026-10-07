@@ -41,29 +41,10 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: MySQL移行SQLの引用符を検査
-        run: node scripts/check-migration-sql-quoting.mjs
-
-      - name: Lint
-        run: pnpm lint
-
-      - name: Typecheck
-        run: pnpm typecheck
-
-      - name: Unit tests
-        run: pnpm test:unit
-
-      - name: Build
-        run: pnpm build:ci
-        env:
-          NODE_ENV: production
-          DATABASE_URL: mysql://placeholder:placeholder@127.0.0.1:3306/app_issue_deck
-          NEXT_PUBLIC_SUPABASE_URL: https://ci-placeholder.supabase.co
-          NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ci-placeholder
-          GITHUB_APP_ID: "123456"
-          GITHUB_APP_PRIVATE_KEY_BASE64: Y2ktcGxhY2Vob2xkZXI=
-          NEXT_PUBLIC_GITHUB_APP_SLUG: ci-placeholder
-          GITHUB_WEBHOOK_SECRET: ci-placeholder
+      # 検査の中身は ci/required-checks.json が正本（#4065）。バックアップCI（.circleci/config.yml）も
+      # 同じ定義を実行するため、ここへ直接ステップを足さない。
+      - name: 必須検査（lint-and-build）
+        run: node scripts/ci/run-required-checks.mjs --group lint-and-build
 
   docs-sync-check:
     runs-on: ubuntu-latest
@@ -72,44 +53,19 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Cross-repo setup guide sync check
-        run: scripts/check-cross-repo-guide-sync.sh
+      # バックアップCIと同じNodeで検査する（#4065。ci/required-checks.json の runtime.node）
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
 
-      - name: Workflow gh repository check
-        run: scripts/check-workflow-gh-repo.sh
-
-      # checkoutを行うジョブがpermissions:へcontentsを書き忘れると、publicのissue-deckでは
-      # 匿名cloneが通って気付けず、privateの配布先だけでcheckoutが落ちる（#2126）。
-      - name: Workflow job permissions check
-        run: scripts/check-workflow-job-permissions.sh
-
-      # ローカル起動プロトコル（#1073）への適合。issue-deck自身が契約を満たさなくなると、
-      # 他リポジトリへ配る内容の正が崩れるため、developへ入る前に落とす。
-      - name: Local session contract check
-        run: scripts/check-local-session-contract.sh
-
-      # マニフェストへ項目を足したのに load-secrets-check.yml の env: へ足し忘れると、
-      # 検証ワークフローがその項目を見ないまま「OK」を出す。検証していないのに
-      # 検証したように見えるのを防ぐ（#1306）。
-      - name: Load secrets env block check
-        run: scripts/check-load-secrets-env-block.sh
-
-      # claude-reviewの判定マーカー（#2136）が、レビュープロンプトと再利用ワークフローで
-      # 一致しているか。ずれるとワークフロー側が「該当なし」に倒れ、自動マージ不可と
-      # 判定したPRが黙って自動マージされる。
-      - name: Review verdict marker check
-        run: scripts/check-review-verdict-marker.sh
-
-      # 手作業Issueの本文の雛形（docs/multi-agent/manual-step-body-template.md）が、
-      # 差し込み先の4ファイルへ反映されているか（#2048）。雛形を直したのに差し込みを
-      # 忘れると、起票するエージェントは古い雛形を読み続けるが、どこにも警告が出ない。
-      - name: Prompt shared template sync check
-        run: node scripts/generate-prompt-templates.mjs --check
+      - name: 必須検査（docs-sync-check）
+        run: node scripts/ci/run-required-checks.mjs --group docs-sync-check
 
   # ワークフローファイルが「Invalid workflow file」になる書き方を、developへ入る前に落とす。
   # 無効になるとトリガーが一切発火しなくなり、ジョブも作られないためログに何も残らない。
   # **ジョブ名は変えないこと**（ブランチ保護の必須チェックとして参照されている）。検査を
-  # 増やすときはここへステップを足す。
+  # 増やすときは ci/required-checks.json の workflow-expression-length-check へ足す。
   #   - 式テンプレート長（21,000バイト）の超過（#901）
   #   - 式として解釈できない `${{ ... }}`（#2181）
   workflow-expression-length-check:
@@ -119,11 +75,14 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Workflow expression length check
-        run: node scripts/check-workflow-expression-length.mjs
+      # バックアップCIと同じNodeで検査する（#4065。ci/required-checks.json の runtime.node）
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
 
-      - name: Workflow expression syntax check
-        run: node scripts/check-workflow-expression-syntax.mjs
+      - name: 必須検査（workflow-expression-length-check）
+        run: node scripts/ci/run-required-checks.mjs --group workflow-expression-length-check
 
   # ワークフロー同期のずれを知らせるだけの通知ジョブ。CIの合否には影響させない。
   # continue-on-errorをジョブ単位ではなくステップ単位に付けているのは、ジョブ単位だと

@@ -12,11 +12,11 @@ import { formatRelativeDate } from "@/lib/format-relative-date";
  * **どちらもマージ済みなのに一度も効いていなかった**（worktreeで`--dry-run`すると直って
  * 見えるため、実機との差にも気付けない）。
  *
- * **足すのは計器だけで、pollerに自分から`git pull`はさせない**（`docs/multi-agent/gates.md`
- * 「監督のための役は新設しない」）。レビューを経ていないコードが無人で走り出す形にはせず、
- * 「遅れている」という事実だけを画面へ出して、取り込むかどうかは人が決める。**人が押した
- * ときだけ更新する経路（#1875の「更新して再起動」）はこの取り決めを崩さない**ので、
- * 押した結果の見せ方（`describeDispatchHostSelfUpdate`・#1927）もここに置く。
+ * **#1612の時点では計器だけを足し、pollerに自分から`git pull`はさせなかった。** その後
+ * #4118で、橙表示を見て「更新して再起動」（#1875）を押す運用を置き換えるため、pollerが同じ
+ * 条件を見て自動で更新するようにした（`DISPATCH_AUTO_SELF_UPDATE=0`で無効。申告は`autoUpdate`）。
+ * 自動更新が無効・失敗しているホストでは、人が押す経路が残る。押した結果の見せ方
+ * （`describeDispatchHostSelfUpdate`・#1927）もここに置く。
  *
  * **`agentVersion`とは別物。** あちらは約束を変えたときに手で上げるプロトコル版数で、
  * チェックアウトの鮮度とは無関係（実際、版数が同じまま97コミット遅れていた）。
@@ -74,6 +74,17 @@ export type DispatchHostCheckout = {
    * これが無いと「0コミット遅れ」がいつ時点の話なのか分からない。
    */
   fetchedAt: string | null;
+  /**
+   * pollerの自動更新（#4118）の状態。**欠けているのは「申告していない」**（#4118より前のpoller）で、
+   * 無効と同じに扱う（ボタンを出す側へ倒す）。
+   */
+  autoUpdate?: DispatchHostAutoUpdate | null;
+};
+
+/** pollerの自動更新の申告。`error`は直近の自動更新が失敗した理由（再試行を待っている間だけ入る） */
+export type DispatchHostAutoUpdate = {
+  enabled: boolean;
+  error: string | null;
 };
 
 /** 短縮SHAから完全なSHAまで受ける。gitの出力なので小文字の16進のみ */
@@ -109,8 +120,19 @@ export function parseDispatchHostCheckout(value: unknown): DispatchHostCheckout 
   const startedCommit =
     typeof input.startedCommit === "string" ? input.startedCommit.trim().toLowerCase() : "";
 
+  const auto = input.autoUpdate;
+  let autoUpdate: DispatchHostAutoUpdate | null = null;
+  if (typeof auto === "object" && auto !== null) {
+    const rawAuto = auto as Record<string, unknown>;
+    if (typeof rawAuto.enabled === "boolean") {
+      const error = typeof rawAuto.error === "string" ? rawAuto.error.trim().slice(0, 300) : "";
+      autoUpdate = { enabled: rawAuto.enabled, error: error || null };
+    }
+  }
+
   return {
     commit,
+    autoUpdate,
     // 読めなければ`null`＝「申告していない」。`commit`と違って全体は落とさない
     // （起動時のコミットが分からなくても、HEADの遅れは今までどおり出せる）
     startedCommit: COMMIT_PATTERN.test(startedCommit) ? startedCommit : null,
@@ -143,6 +165,25 @@ export function isDispatchHostPollerRestartPending(
     !checkout.commit.startsWith(checkout.startedCommit) &&
     !checkout.startedCommit.startsWith(checkout.commit)
   );
+}
+
+/**
+ * 「更新して再起動」ボタンを出すか（#4118）。
+ *
+ * 更新が要る状態（遅れ・再起動待ち）または押した結果が読める間で、かつ**人が押す必要があるとき**だけ。
+ * pollerが自動で更新する設定のホストでは、通常は待てば解けるのでボタンを出さない。
+ * 出すのは、自動更新を無効にしているホスト・申告していない古いpoller・自動更新が失敗して
+ * 人の手が要る（再試行を待っている）ホスト。
+ */
+export function shouldShowDispatchHostSelfUpdateButton(
+  checkout: DispatchHostCheckout | null | undefined,
+  hasResult: boolean,
+): boolean {
+  const needed = (checkout?.behindCount ?? 0) > 0 || isDispatchHostPollerRestartPending(checkout);
+  if (!needed && !hasResult) return false;
+  const auto = checkout?.autoUpdate;
+  if (!auto?.enabled) return true;
+  return auto.error !== null || hasResult;
 }
 
 /**
@@ -203,6 +244,12 @@ export function describeDispatchHostCheckout(
   const restartPending = isDispatchHostPollerRestartPending(checkout);
   const details: string[] = [];
   if (restartPending) details.push(`起動時 ${checkout.startedCommit} で動作中`);
+  // 自動更新が効く状態なら、待てば解けることを添える（#4118）。失敗中は理由を出す
+  const auto = checkout.autoUpdate;
+  const needsUpdate = restartPending || (checkout.behindCount ?? 0) > 0;
+  if (auto?.enabled && needsUpdate) {
+    details.push(auto.error ? `自動更新に失敗: ${auto.error}` : "自動で更新します");
+  }
   if (checkout.committedAt) details.push(formatRelativeDate(checkout.committedAt, now.getTime()));
 
   // 遅れの状態に添える。**遅れ0でも消えない**——チェックアウトが追い付いた瞬間に

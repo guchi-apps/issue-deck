@@ -443,6 +443,16 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   半径の半分ずつ刻んで当てる（`eraseShapesAlong`）。**1回のなぞりは離した時点で履歴1件**
   （途中は`moving`と同じく表示用の一時状態）なので、「元に戻す」1回で戻せる。消しゴムの
   輪郭はキャンバスへ描くが、保存時の描き出しには含めない。
+- **設定項目の長い補足は、ラベル横の情報アイコン（[`settings/info-hint.tsx`](../src/components/dashboard/settings/info-hint.tsx)）へ入れる**（#4108）。
+  常時表示の段落にしない。現在値・警告（例: 判定AIでJevを選んだときの送信先）・「選んだ時点で保存」のような
+  操作結果に直結する短い補足だけは畳まずに出す。
+- **AIモデル区分の上部（[`settings/execution-flow-overview.tsx`](../src/components/dashboard/settings/execution-flow-overview.tsx)）は、
+  プロバイダー切替と工程ごとの実効エージェント・モデルを1枚で見せる**（#4108）。行の組み立ては
+  [`lib/execution-flow-settings.ts`](../src/lib/execution-flow-settings.ts)の`resolveProviderFlowRows`で、モデル名の解決は
+  `resolveExecutionFlows`に任せる。**画面へ渡る機能別のAI設定（`githubActionsAgent`・`defaultDispatchAgent`・
+  計画レビューのエージェント・アプリ内AIのモデル）は`inherit`を解決済みの値で、追従か個別設定かは値から読めない。**
+  そのため生の行から`readAiProviderOverrides`で別に読み、`AppSettingsValues.aiProviderOverrides`として保存後も更新する
+  （機能別の値を送る保存は、その項目を`inherit`から固定値へ変えるため）。
 - **設定画面に項目を足すときは`components/dashboard/settings/`の該当区分へ入れる**（#1539）。
   区分は[`settings-sections.ts`](../src/components/dashboard/settings/settings-sections.ts)が唯一の定義で、
   PCの設定ダイアログ（[`settings-dialog.tsx`](../src/components/dashboard/settings/settings-dialog.tsx)）と
@@ -4520,6 +4530,16 @@ Claude Code・Codex CLIそれぞれの新規実行の一時停止（`AppSetting.
 マニフェストを読んで、GitHubのsecret/variableと1Passwordのどちらからでも同じ環境変数を作り、
 片方で解決できない項目はもう片方から補う（#1306）。供給元が揃っているかは
 `.github/workflows/load-secrets-check.yml`を`workflow_dispatch`で実行すると確認できる。
+
+## バックアップCI（#4065）
+
+GitHub Actions障害時に、PR詳細からCircleCIを直接起動してdevelop向けPRの必須検査を続ける。
+**必須検査の正本は[`ci/required-checks.json`](../ci/required-checks.json)**で、`ci.yml`もCircleCIも
+`scripts/ci/run-required-checks.mjs`経由でこれを実行する（ci.ymlへ直接ステップを足すと
+`scripts/ci/check-ci-definition-sync.mjs`が落とす）。サーバー側は`src/lib/backup-ci/`、結果は
+`BackupCiRun`に記録し、合否は共通チェック`issue-deck/ci-gate`（commit status）として出す。
+`check-rollup.ts`は共通チェックがあればそれだけでCI状態を決める。運用・移行・ロールバックは
+[backup-ci.md](backup-ci.md)。
 
 ## 一覧の行に出す親子関係（#3469）
 

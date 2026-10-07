@@ -2945,15 +2945,16 @@ systemctl --user restart issue-deck-dispatch-poller.service
 - 遅れていれば橙、10コミット以上遅れていれば赤（`src/lib/dispatch/host-checkout.ts`）
 - 比べる先は**追跡ブランチ**（通常は`origin/develop`）。`origin/develop`と決め打ちしないのは、
   別のブランチで動かしたときに常に大量に遅れていると出るのを避けるため
-- **毎巡fetchはしない。** 既定は6時間ごと（`DISPATCH_CHECKOUT_FETCH_INTERVAL_MINUTES`）で、
+- **毎巡fetchはしない。** 既定は6時間ごと（自動更新が有効なときは30分ごと。`DISPATCH_CHECKOUT_FETCH_INTERVAL_MINUTES`）で、
   数字がいつ時点のものかも一緒に申告する。12時間より古ければ「◯時間前時点」と注記が出る。
   fetchできなければ「遅れ不明」（＝「遅れていない」とは言わない）
 - 遅れの数え直しは人が手で`git pull`しても反映される（判断材料は`.git/FETCH_HEAD`のmtime）
 - journaldにも毎巡出る（`申告しました: subpc（セッション 3/12・スクリプト develop fbb809d（97コミット遅れ））`）
 
-**pollerが自分から`git pull`することはない**（[gates.md](gates.md)）。レビューを経ていないコードが
-無人で走り出す形にはしない。取り込むのは人が決めることで、上のコマンドを手で打つか、次の
-「更新して再起動」を押すかのどちらか。
+**pollerは遅れを見つけると自分で`git pull`する**（#4118。かつては「pollerが自分から`git pull`することはない」
+で、人が決めて取り込む設計だった）。developへ自動マージされた変更が人の確認なしで実機に効く形に
+意図して変えたもので、画面の橙表示を見てボタンを押す運用の置き換え。`DISPATCH_AUTO_SELF_UPDATE=0`で
+従来どおり人が押すだけにできる。詳細は後述「自動で更新して再起動する」。
 
 `agentVersion`（`DISPATCH_POLLER_VERSION`）とは別物であることに注意する。あちらは約束を変えた
 ときに手で上げるプロトコル版数で、チェックアウトの鮮度とは無関係（実際、版数が同じまま
@@ -3035,12 +3036,30 @@ pollerを再起動するまで効かない。** 画面の「更新して再起�
 `journalctl --user -u issue-deck-dispatch-poller --since "10 min ago" | grep "Argument list too long"`
 で再発していないことを確認する。
 
+### 自動で更新して再起動する（#4118）
+
+画面に「◯コミット遅れ」「再起動待ち」が出る条件と同じ状態を、pollerが巡回の終わりに見つけたら、
+「更新して再起動」と同じ手順（`git pull --ff-only`→`exec`で入れ替え）を自分で行う。
+
+- **`run_once`が完全に終わった直後にだけ行う**（`maybe_auto_self_update`）。`exec`はプロセスごと
+  入れ替わるため、claim・報告・セッション起動の途中や`wait_between_polls`の中（claimが走る）に
+  置くと、掴んだジョブの報告が届かないまま消える
+- 判定は手元のrefだけで行い（`self_update_needed`）、originを見に行くのは`maybe_fetch_checkout`の
+  間隔（自動更新が有効なときの既定は30分）に任せる
+- **失敗は繰り返さない。** 作業ツリーが汚れている・`--ff-only`できないときは、失敗を状態ファイル
+  （`$XDG_STATE_HOME/issue-deck/auto-self-update`）に残し、`DISPATCH_AUTO_SELF_UPDATE_RETRY_MINUTES`
+  （既定60分）は再試行しない。理由は申告の`checkout.autoUpdate.error`で画面へ出て、その間は
+  「更新して再起動」ボタンも出る。成功すれば記録を消す
+- 無効にするのは`DISPATCH_AUTO_SELF_UPDATE=0`。申告の`checkout.autoUpdate.enabled`が`false`
+  （または申告なし）のホストでは、従来どおり遅れの間ボタンを出す
+- 更新が壊れたコードを取り込んでも、起動後の自動巻き戻しはしない（スコープ外）。人が気付いて直す
+
 ### 画面から更新して再起動する（#1875）
 
 遅れている行の下に「更新して再起動」を出し、押すと`SELF_UPDATE`のジョブが積まれる。受け取った
 pollerは`git pull --ff-only`してから自分を新しいスクリプトへ入れ替える。`ssh`して
 `git pull && systemctl --user restart`するだけの手作業Issue（#1858・#1867）をなくすためのもので、
-**押すのは人**という一点は#1612から変えていない。
+通常は次節の自動更新が同じ手順を踏むため、このボタンは自動更新を無効にしているホスト・自動更新が失敗したホストにだけ出る（#4118）。
 
 - **遅れているとき（と、pollerが古いコードのまま走っているとき。#2815）だけ出す。**
   どちらでもない状態で押しても再起動が走るだけで、そのぶん払い出しが止まる

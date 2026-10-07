@@ -272,6 +272,7 @@ function toHostView(host: DispatchHost, now: Date): DispatchHostView {
     manualStepSessionCapable: host.manualStepSessionCapable,
     reviewFixCapable: host.reviewFixCapable,
     prReviewCapable: host.prReviewCapable,
+    chatCodexCapable: host.chatCodexCapable,
     selfUpdateCapable: host.selfUpdateCapable,
     maxSessions: host.maxSessions,
     liveSessions: host.liveSessions,
@@ -2476,6 +2477,9 @@ export async function listDispatchState(
           // 画面から消した失敗（#1479）は返さない。**未完了のジョブには入らない**ので、
           // ここで落ちるのは終了済みのものだけ（`dismissDispatchJob`）
           dismissedAt: null,
+          // チャット相談のモデル呼び出し（#4109）は実行状況・Issueのジョブ表示に出さない。
+          // 発言1回で数件積まれ、状態はチャット側（`ChatRun`）が持つ
+          kind: { not: "CHAT_TURN" },
           OR: [
             { status: { in: [...ACTIVE_DISPATCH_JOB_STATUSES] } },
             { finishedAt: { gte: new Date(now.getTime() - FINISHED_JOB_RETENTION_MS) } },
@@ -2588,6 +2592,7 @@ export async function announceDispatchHost(params: {
   /** develop向けPRのAIレビュー（#3990）を実行できるか。申告していないpollerでは未定義＝非対応 */
   reviewFixCapable?: boolean | null;
   prReviewCapable?: boolean | null;
+  chatCodexCapable?: boolean | null;
   selfUpdateCapable: boolean | null;
   /**
    * セッション本数の上限と、申告した時点で生きていた本数（#1394）。**画面へ出すための写しで、
@@ -2661,6 +2666,7 @@ export async function announceDispatchHost(params: {
     manualStepSessionCapable: params.manualStepSessionCapable,
     reviewFixCapable: params.reviewFixCapable ?? null,
     prReviewCapable: params.prReviewCapable ?? null,
+    chatCodexCapable: params.chatCodexCapable ?? null,
     selfUpdateCapable: params.selfUpdateCapable,
     maxSessions: params.maxSessions,
     liveSessions: params.liveSessions,

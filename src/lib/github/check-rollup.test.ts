@@ -100,6 +100,44 @@ describe("fetchCheckRollup", () => {
     });
   });
 
+  it("共通チェック（issue-deck/ci-gate）があれば、止まったActionsが残っていてもそれだけで合否を決め、Actionsの内訳は残す（#4065）", async () => {
+    stubGraphql(
+      rollupResponse({
+        state: "PENDING",
+        contexts: {
+          totalCount: 2,
+          nodes: [
+            checkRun("QUEUED", null, "ci.yml", "lint-and-build"),
+            { __typename: "StatusContext", context: "issue-deck/ci-gate", state: "SUCCESS" },
+          ],
+        },
+      }),
+    );
+
+    const rollup = await fetchCheckRollup("owner", "repo", "develop", "token");
+    expect(rollup?.checks).toEqual([{ status: "completed", conclusion: "success" }]);
+    expect(rollup?.ciChecks).toHaveLength(1);
+    expect(rollup?.ciChecks[0]).toMatchObject({ name: "lint-and-build", status: "queued" });
+  });
+
+  it("共通チェックが失敗なら、Actionsが成功していても失敗（都合のよい成功だけを採用しない）", async () => {
+    stubGraphql(
+      rollupResponse({
+        state: "FAILURE",
+        contexts: {
+          totalCount: 2,
+          nodes: [
+            checkRun("COMPLETED", "SUCCESS", "ci.yml", "lint-and-build"),
+            { __typename: "StatusContext", context: "issue-deck/ci-gate", state: "FAILURE" },
+          ],
+        },
+      }),
+    );
+
+    const rollup = await fetchCheckRollup("owner", "repo", "develop", "token");
+    expect(rollup?.checks).toEqual([{ status: "completed", conclusion: "failure" }]);
+  });
+
   it("commit status（StatusContext）はcheck-runの形へ寄せる", async () => {
     stubGraphql(
       rollupResponse({

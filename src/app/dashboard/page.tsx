@@ -24,6 +24,7 @@ import { getCurrentUser } from "@/lib/auth-user";
 import { db } from "@/lib/db";
 import { listDispatchRunnableRepositories } from "@/lib/dispatch/runnable-repositories";
 import { getIssuesForUser } from "@/lib/issues-for-user";
+import { readAiProviderOverrides } from "@/lib/execution-flow-settings";
 
 export default async function DashboardPage() {
   const currentUser = await getCurrentUser();
@@ -150,6 +151,7 @@ export default async function DashboardPage() {
       autoRetryLimit={autoRetryLimit}
       claudeModel={claudeModel}
       aiExecutionProvider={aiExecutionProvider}
+      aiProviderOverrides={readAiProviderOverrides(appSetting)}
       githubActionsAgent={githubActionsAgent}
       githubActionsCodexModel={githubActionsCodexModel}
       claudeModelAssist={claudeModelAssist}

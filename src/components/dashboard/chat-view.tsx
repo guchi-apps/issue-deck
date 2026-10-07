@@ -39,11 +39,15 @@ export function ChatView({
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ block: "end" });
-  }, [chat.messages.length, chat.outbox.length, chat.isSending]);
+  }, [chat.messages.length, chat.outbox.length, chat.isSending, chat.run?.id]);
+
+  // サブPCのCodexで回答を作っている間（#4109）。次の発言は回答が届いてから送る
+  const waitingRun = chat.run?.status === "running" ? chat.run : null;
+  const busy = chat.isSending || waitingRun !== null;
 
   const submit = (value: string) => {
     const body = value.trim();
-    if (!body) return;
+    if (!body || busy) return;
     setText("");
     void chat.send(body, repo);
   };
@@ -169,7 +173,7 @@ export function ChatView({
                       key={index}
                       card={card}
                       confirmState={message.confirmState}
-                      busy={chat.isSending}
+                      busy={busy}
                       onSend={submit}
                       onConfirm={(action, overrides) => void chat.resolveConfirm(message.id, action, overrides)}
                       onOpenPullRequest={onOpenPullRequest}
@@ -194,6 +198,17 @@ export function ChatView({
             ))}
             {chat.isSending && chat.outbox.length === 0 && (
               <div className="flex items-center gap-2 text-xs text-muted-foreground"><Loader2 className="size-3.5 animate-spin" />処理しています…</div>
+            )}
+            {waitingRun && !chat.isSending && (
+              <div role="status" className="flex flex-col gap-0.5 self-start text-xs text-muted-foreground">
+                <span className="flex items-center gap-2">
+                  <Loader2 className="size-3.5 animate-spin" />
+                  Codexで回答中（サブPC{waitingRun.model ? `・${waitingRun.model}` : ""}）
+                </span>
+                <span className="pl-5">
+                  {waitingRun.phase || "サブPCの受け取り待ち"}。数十秒〜数分かかることがあります。画面を閉じても回答は会話に残ります。
+                </span>
+              </div>
             )}
             <div ref={endRef} />
           </div>
@@ -220,7 +235,7 @@ export function ChatView({
                 }
               }}
             />
-            <Button type="submit" size="sm" disabled={chat.isSending || !text.trim()}><Send />送信</Button>
+            <Button type="submit" size="sm" disabled={busy || !text.trim()}><Send />送信</Button>
           </form>
         </div>
       </div>
