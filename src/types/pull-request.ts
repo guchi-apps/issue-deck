@@ -1,3 +1,4 @@
+import type { MergeCheckReasons } from "@/lib/merge-check-reasons";
 import type { CheckUserReason } from "@/lib/github/approval-labels";
 import type { MergeJudgement, RollupCiCheck } from "@/lib/github/check-rollup";
 import type { PullRequestCiStatus } from "@/lib/github/pull-request-ci";
@@ -383,6 +384,12 @@ export type PullRequestDetail = {
   commits: number;
   /** 時系列（古い順）に並べたコメント・レビュー */
   events: PullRequestEvent[];
+  /**
+   * ユーザーのマージが必要な理由（#4088）。`requiresUserMerge`なPRでだけ入り、それ以外は`null`。
+   * 理由の出所は対応Issueの理由コメント・ラベル（`resolveMergeCheckReasons`）で、リリースPRは固定文。
+   * 省略されうるのは、この項目を持たない古いレスポンスを読んだ場合のため。
+   */
+  userMergeReasons?: MergeCheckReasons | null;
 };
 
 /**
