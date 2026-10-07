@@ -282,16 +282,17 @@ Issueコメントとして投稿し、「なぜエージェントが実行でき
 
 **配布先へ届くのはタグを配ってから。** 各リポジトリのcallerは`@workflows/vN`でタグ固定しており、既定の反転は参照タグを上げた時点で効き始める。タグは`main`の先端から切られるため、`develop`→`main`のリリースを1回通し、画面（設定＞フリート運用）の「新しいタグを切って配る」を押すまでは従来どおり`strict`の挙動になる。issue-deck自身はローカルパス参照なのでdevelopへ入った時点で効く。
 
-`relaxed`でもdevelop向けPRのマージが止まるのは次の3つ。
+`relaxed`でもdevelop向けPRのマージが止まるのは次のとおり。
 
 - Issueに`22.merge-confirm-required`・`23.preview-required`のいずれかが付いている
 - `.shared-context/`（共有知識リポジトリのcheckout先）が差分に混入している
 - Claudeの自動レビューが「実際に直すべき問題がある」と判定した
+- Claudeが走っていない`.github/workflows/**`変更PR（`workflow-change-policy: confirm`。#4144）
 - `claude-review`・`auto-merge`ジョブ自体が失敗した（フォールバックが`00.check-user`を付ける）
 
 **`relaxed`は「レビューを省く」ことではない。** カテゴリに該当したPRでは従来どおりClaudeの自動レビューが走り、止めるかどうかだけがレビューの判定に委ねられる。したがって、マージ前に必ず自分の目で通したい変更には`22.merge-confirm-required`を明示的に付ける（詳細は[docs/multi-agent/labels.md](docs/multi-agent/labels.md)「developへのマージ前確認要否をIssueラベルでトグルする」参照）。
 
-**ただし`.github/workflows/**`を変更するPRだけは、レビュー自体が行われない。** claude-code-actionの検証機構により、そのPRでは自動レビューがClaudeを実行しないまま`success`で終わるため、`relaxed`では機械判定も意味的判定も無いままdevelopへ入る（CIは通る）。#2790で配布先も含めて許容すると決めており、**ワークフローの変更を人の目で通したいときは`22.merge-confirm-required`を付ける**（[docs/multi-agent/labels.md](docs/multi-agent/labels.md)「ワークフローファイルを変更するPRではclaude-reviewが必ずスキップされる」）。
+**`.github/workflows/**`を変更するPRは、レビュー自体が行われない。** claude-code-actionの検証機構により、そのPRでは自動レビューがClaudeを実行しないまま`success`で終わる。以前はそのまま`relaxed`でdevelopへ入っていたが、#4144で`workflow-change-policy`（`confirm`＝既定／`allow`）を足し、**Claudeが走っていないワークフロー変更PRは`00.check-user`＋`01.check-merge`で人へ回す**ようにした（`merge-policy`とは独立。止めたくないリポジトリは`allow`）。AIによる代替レビューは別Issueで検討中で、今は人が確認する（[docs/multi-agent/labels.md](docs/multi-agent/labels.md)「ワークフローファイルを変更するPRではclaude-reviewが必ずスキップされる」）。
 
 **「GitHub Actionsやデプロイ設定」の唯一の例外は、issue-deckの画面から他リポジトリへ配る共有ワークフローの参照タグ更新PR**（`.github/scripts/propagate-workflow-tag.sh`が作るもの。#1602）。差分が`@workflows/vN`と`prompts-ref`の置換だけの機械的なPRで、配るタグ自体はissue-deck側で確認を通してから切っているため、配布先で見ても判断材料が増えない（14リポジトリぶんのPRを開いてマージするだけの作業になっていた）。**例外はこの配布PRに限られ、issue-deck自身のPRには一切適用しない。** 自動マージは画面のチェックボックスで外せる。
 

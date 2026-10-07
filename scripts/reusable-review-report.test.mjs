@@ -137,6 +137,8 @@ function runVerification(comments) {
       CODEX_REVIEW_RESULT: "success",
       RISKY: "false",
       REASONS: "",
+      WORKFLOW_CHANGED: "false",
+      WORKFLOW_CHANGE_POLICY: "confirm",
       REVIEW_FIX_HANDOFF: "false",
       STUB_BODY: "## 対応Issue\n\n#3917",
       STUB_COMMENTS: comments,
