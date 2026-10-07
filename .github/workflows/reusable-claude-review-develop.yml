@@ -38,8 +38,9 @@ name: Reusable Claude Code Review (develop向けPR)
 #   同ファイルと完全一致していなければClaudeの実行だけをスキップする」検証機構がある。
 #   このファイルを含む .github/workflows/ 配下を変更するPRでは、このジョブはClaudeを
 #   実行しないまま success で終わる(ステップもジョブも成功扱いになる点に注意)。
-#   その場合もrisk-checkが .github/workflows/** の変更を検知した結果をauto-mergeが反映して
-#   00.check-userを付与するため自動マージはされない。詳細は docs/multi-agent/labels.md
+#   strictではrisk-checkの検知をauto-mergeが反映して00.check-userを付与する。relaxed(既定)では
+#   それが無いため、workflow-change-policy: confirm(既定)がClaude未実行のワークフロー変更PRを
+#   00.check-userで人へ回す(#4144)。詳細は docs/multi-agent/labels.md
 #   「ワークフローファイルを変更するPRではclaude-reviewが必ずスキップされる」参照
 # - claude-review-fallback: claude-reviewが失敗した場合にのみ走る。Claude Code自体を
 #   使わない単純なシェルスクリプトとし、Claude Code側の失敗原因に関わらず確実に
@@ -161,6 +162,17 @@ on:
         required: false
         type: string
         default: relaxed
+      workflow-change-policy:
+        description: >-
+          `.github/workflows/**`を変更するPRでClaudeが実行されなかった場合の扱い(#4144)。
+          claude-code-actionには「ワークフローファイルの内容がデフォルトブランチと完全一致して
+          いなければClaudeの実行だけをスキップする」検証機構があり、そのPRでは意味的レビューが
+          無いまま`success`で終わる。confirm(既定・自動マージせず00.check-userで人へ回す) /
+          allow(従来どおりレビュー無しで通す)。merge-policyとは独立で、relaxedでも効く。
+          Codexが担当のPR(claude-reviewを使わない)には適用しない。
+        required: false
+        type: string
+        default: confirm
       review-auto-fix:
         description: >-
           自動レビューが「要修正」と判定し、しかも「人の判断が要らない指摘だけ」と印を付けたとき、
@@ -249,6 +261,9 @@ jobs:
       risky: ${{ steps.risk.outputs.risky }}
       # 後続のclaude-reviewを実行するか(#992)。riskyより広い条件で立つ
       needs-review: ${{ steps.risk.outputs.needs-review }}
+      # `.github/workflows/`配下を変更しているか(#4144)。claude-reviewがClaudeを実行できない
+      # PRかどうかをauto-mergeが判定する材料
+      workflow-changed: ${{ steps.risk.outputs.workflow-changed }}
       # 該当した理由(複数行)。auto-mergeジョブが投稿するコメントの本文になる(#1406)
       reasons: ${{ steps.risk.outputs.reasons }}
       # このpush開始時点で既に00.check-userが付いていたか。重複コメント抑止(#594)の判定に使う。
@@ -525,6 +540,11 @@ jobs:
           {
             echo "needs-review=${NEEDS_REVIEW}"
             echo "risky=${RISKY}"
+            if echo "$CHANGED_FILES" | grep -q '^\.github/workflows/'; then
+              echo "workflow-changed=true"
+            else
+              echo "workflow-changed=false"
+            fi
           } >> "$GITHUB_OUTPUT"
 
           {
@@ -1165,6 +1185,9 @@ jobs:
           REASONS: ${{ needs.risk-check.outputs.reasons }}
           ALREADY_CHECK_USER: ${{ needs.risk-check.outputs.already-check-user }}
           REVIEW_RESULT: ${{ needs.claude-review.result }}
+          REVIEW_EXECUTED: ${{ needs.claude-review.outputs.executed }}
+          WORKFLOW_CHANGED: ${{ needs.risk-check.outputs.workflow-changed }}
+          WORKFLOW_CHANGE_POLICY: ${{ inputs.workflow-change-policy }}
           CODEX_REVIEW_RESULT: ${{ steps.codex.outputs.result }}
           CODEX_VERDICT_INPUT: ${{ steps.codex.outputs.verdict }}
           CODEX_FAILURE_REASON: ${{ steps.codex.outputs.reason }}
@@ -1235,7 +1258,24 @@ jobs:
             esac
           fi
 
-          if [ "$RISKY" != "true" ] && [ "$REVIEW_BLOCKED" != "true" ] && [ "$CODEX_REVIEW_BLOCKED" != "true" ]; then
+          # ワークフローを変更したPRでClaudeが実行されていない場合は、判定が無いまま通さず人へ回す
+          # (#4144)。claude-code-actionの検証機構でジョブはsuccessのまま意味的レビューだけが
+          # 省かれるため、REVIEW_BLOCKED(判定マーカー)は常にfalseになり、merge-policy: relaxedでは
+          # 機械判定も意味的判定も無いままdevelopへ入っていた。
+          # **merge-policyとは独立**(relaxedでも止める)。止めたくないリポジトリは
+          # workflow-change-policy: allow にする。
+          WORKFLOW_UNREVIEWED=false
+          if [ "${WORKFLOW_CHANGE_POLICY:-confirm}" = "confirm" ] && [ "$WORKFLOW_CHANGED" = "true" ] \
+            && [ "$REVIEW_RESULT" = "success" ] && [ "$REVIEW_EXECUTED" != "true" ]; then
+            WORKFLOW_UNREVIEWED=true
+            echo "ワークフローファイルの変更を含み、Claudeによるレビューが実行されていないため、自動マージを保留します。"
+            # strictではrisk-checkの理由に同じ変更が入っているので、ここで足すのはそれが無いときだけ
+            if [ "$RISKY" != "true" ]; then
+              REASONS="- GitHub Actionsワークフローの変更 (.github/workflows/**) を含み、Claudeによる自動レビューを実行できなかったため（claude-code-actionの検証機構でスキップされます）。内容を人が確認してからマージしてください"
+            fi
+          fi
+
+          if [ "$RISKY" != "true" ] && [ "$REVIEW_BLOCKED" != "true" ] && [ "$CODEX_REVIEW_BLOCKED" != "true" ] && [ "$WORKFLOW_UNREVIEWED" != "true" ]; then
             echo "どちらの判定にも該当しないため、00.check-userは付与しません。"
             exit 0
           fi
@@ -1246,7 +1286,7 @@ jobs:
           # 渡したことはIssueへの印付きコメントで伝える。claude-review-fix.ymlはこのワークフローの
           # 完了(workflow_run)で起動し、この印がいまのheadに対して残っているときだけ着手する。
           # 条件を満たさないときは下の従来の処理(00.check-user＋01.check-merge)へ落ちる。
-          if { [ "$REVIEW_BLOCKED" = "true" ] || [ "$CODEX_VERDICT" = "changes-requested" ]; } && [ "$CODEX_REVIEW_FAILED" != "true" ] && [ "$CODEX_VERDICT" != "needs-check" ] && [ "$RISKY" != "true" ] && [ "$REVIEW_AUTO_FIX" = "true" ]; then
+          if { [ "$REVIEW_BLOCKED" = "true" ] || [ "$CODEX_VERDICT" = "changes-requested" ]; } && [ "$CODEX_REVIEW_FAILED" != "true" ] && [ "$CODEX_VERDICT" != "needs-check" ] && [ "$RISKY" != "true" ] && [ "$WORKFLOW_UNREVIEWED" != "true" ] && [ "$REVIEW_AUTO_FIX" = "true" ]; then
             HANDOFF_BLOCKER=""
             AUTOFIX_MARKER="<!-- issue-deck-review-autofix:ok sha=${HEAD_SHA} -->"
             HANDOFF_MAX=2
@@ -1318,7 +1358,7 @@ jobs:
           # ここで投稿するのは機械的リスク判定(risk-check)の理由だけ。意味的判定の理由は
           # claude-review自身が投稿済みで(その末尾のマーカーを上で読んでいる)、同じ理由を
           # 二重に並べないため(#2136)。
-          if [ "$RISKY" != "true" ] && [ "$CODEX_REVIEW_BLOCKED" != "true" ]; then
+          if [ "$RISKY" != "true" ] && [ "$CODEX_REVIEW_BLOCKED" != "true" ] && [ "$WORKFLOW_UNREVIEWED" != "true" ]; then
             echo "機械的リスク判定には該当していないため、理由コメントの投稿はclaude-review側に任せます。"
           elif [ "$CODEX_REVIEW_BLOCKED" = "true" ] && [ "$ALREADY_CHECK_USER" != "true" ]; then
             BODY="⚠️ 以下の理由により、developへのマージ前にユーザーの確認が必要と判定しました。"
@@ -1380,6 +1420,8 @@ jobs:
           REVIEW_RESULT: ${{ needs.claude-review.result }}
           REVIEW_EXECUTED: ${{ needs.claude-review.outputs.executed }}
           REVIEW_PROVIDER: ${{ needs.review-provider.outputs.provider }}
+          WORKFLOW_CHANGED: ${{ needs.risk-check.outputs.workflow-changed }}
+          WORKFLOW_CHANGE_POLICY: ${{ inputs.workflow-change-policy }}
           CODEX_REVIEW_RESULT: ${{ steps.codex.outputs.result }}
           CODEX_VERDICT_INPUT: ${{ steps.codex.outputs.verdict }}
           RISKY: ${{ needs.risk-check.outputs.risky }}
@@ -1417,6 +1459,9 @@ jobs:
                 # のではなく、そもそも実施していない
                 REVIEW="skipped"
                 SKIP_REASON="ワークフローファイルの変更を含むため、Claudeを実行していない"
+                # 人の確認へ回す設定のときは、通ったのではなく止めたことが分かる文面にする(#4144)
+                [ "${WORKFLOW_CHANGE_POLICY:-confirm}" != "confirm" ] || [ "$WORKFLOW_CHANGED" != "true" ] \
+                  || SKIP_REASON="${SKIP_REASON}。人の確認が必要なため自動マージは保留"
               else
                 FOUND="$(gh pr view "$PR_NUMBER" --json comments --jq '.comments[].body' \
                   | grep -oE "issue-deck-review-verdict:(lgtm|needs-check|changes-requested) sha=${HEAD_SHA}" \
@@ -1503,9 +1548,16 @@ jobs:
             RISK_TEXT="該当なし"
           fi
 
+          # hold側と同じ条件(#4144)。Claudeが走っていないワークフロー変更PRは人の確認へ回る
+          WORKFLOW_UNREVIEWED=false
+          if [ "${WORKFLOW_CHANGE_POLICY:-confirm}" = "confirm" ] && [ "$WORKFLOW_CHANGED" = "true" ] \
+            && [ "$REVIEW_RESULT" = "success" ] && [ "$REVIEW_EXECUTED" != "true" ]; then
+            WORKFLOW_UNREVIEWED=true
+          fi
+
           if [ "$REVIEW_FIX_HANDOFF" = "true" ]; then
             CONFIRM_TEXT="不要（指摘を自動修正へ回しました。直した後に再レビューされます）"
-          elif [ "$RISK" = "hit" ] || [ "$REVIEW" = "needs-check" ] || [ "$REVIEW" = "changes-requested" ] || [ "$CODEX_REVIEW" = "needs-check" ] || [ "$CODEX_REVIEW" = "changes-requested" ]; then
+          elif [ "$RISK" = "hit" ] || [ "$WORKFLOW_UNREVIEWED" = "true" ] || [ "$REVIEW" = "needs-check" ] || [ "$REVIEW" = "changes-requested" ] || [ "$CODEX_REVIEW" = "needs-check" ] || [ "$CODEX_REVIEW" = "changes-requested" ]; then
             CONFIRM_TEXT="必要（自動マージはスキップされます）"
           elif [ "$CODEX_REVIEW" = "pending" ]; then
             CONFIRM_TEXT="判定待ち（Codexレビューの完了後に自動で判定します）"
