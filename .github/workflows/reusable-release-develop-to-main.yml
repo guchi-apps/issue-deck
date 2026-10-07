@@ -970,6 +970,9 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.WORKFLOW_PAT }}
           GH_REPO: ${{ github.repository }}
+          APP_BASE_URL: ${{ vars.APP_BASE_URL }}
+          PROGRESS_REPORT_SECRET: ${{ secrets.PROGRESS_REPORT_SECRET }}
+          RUN_ID: ${{ github.run_id }}
         run: |
           set -euo pipefail
 
@@ -1025,9 +1028,44 @@ jobs:
             echo "| --- | --- | --- | --- |"
           } > "$OUT"
 
+          # 記録なしPRのレビュー要否を判定し、要ならPR_REVIEWへ積む（#4092）。標準出力へ表のセルを返す。
+          # 不要にしてよいのは**小規模かつ低リスク**のときだけ。リスクの見方は
+          # reusable-claude-review-develop.ymlの機械的リスク判定と同じ変更カテゴリで、ここは
+          # 要否の目安なので簡略にしてある（迷えば依頼する側へ倒す）。
+          # 依頼できない（設定不足・ホスト無し・通信失敗）ときは`? 依頼できず`にして集計を止めない
+          request_review() {
+            local pr_json="$1" fallback="$2" number files_changed lines paths head base code resp body
+            number="$(printf '%s' "$pr_json" | jq -r '.number')"
+            files_changed="$(printf '%s' "$pr_json" | jq -r '.changedFiles // 0')"
+            lines="$(printf '%s' "$pr_json" | jq -r '((.additions // 0) + (.deletions // 0))')"
+            head="$(printf '%s' "$pr_json" | jq -r '.headRefOid // ""')"
+            base="$(printf '%s' "$pr_json" | jq -r '.baseRefOid // ""')"
+            paths="$(gh pr view "$number" --json files --jq '.files[].path' 2>/dev/null || true)"
+            if [ "$files_changed" -le 10 ] && [ "$lines" -le 500 ] && [ -n "$paths" ] \
+              && ! printf '%s\n' "$paths" | grep -qE '^prisma/migrations/|(^|/)\.env|^\.github/workflows/|(^|/)auth(/|\.[^/]*$)|^package\.json$|^\.shared-context/'; then
+              echo "— 不要（小規模・低リスクのため）"
+              return 0
+            fi
+            if [ -z "${APP_BASE_URL:-}" ] || [ -z "${PROGRESS_REPORT_SECRET:-}" ] || [ -z "$head" ] || [ -z "$base" ]; then
+              echo "? 依頼できず（設定または差分情報の不足。${fallback#* }）"
+              return 0
+            fi
+            body="$(jq -n --arg repository "$GH_REPO" --argjson pr "$number" --arg head "$head" --arg base "$base" \
+              '{action:"request", repository:$repository, pullRequest:$pr, headSha:$head, baseSha:$base, agent:"codex"}')"
+            resp="$(mktemp)"
+            code="$(curl -sS -m 30 -o "$resp" -w '%{http_code}' -X POST "${APP_BASE_URL%/}/api/dispatch/pr-review" \
+              -H "Authorization: Bearer $PROGRESS_REPORT_SECRET" -H "Content-Type: application/json" -d "$body" 2>/dev/null)" || code=000
+            rm -f "$resp"
+            if [ "$code" = "200" ]; then
+              echo "? レビュー依頼済み（結果待ち）"
+            else
+              echo "? 依頼できず（HTTP ${code}）"
+            fi
+          }
+
           for NUM in $NUMBERS; do
             PR_JSON="$(gh pr list --state merged --base develop --head "issue-${NUM}" --limit 1 \
-              --json number,body,comments,headRefOid --jq '.[0] // empty' 2>/dev/null || true)"
+              --json number,body,comments,headRefOid,baseRefOid,additions,deletions,changedFiles --jq '.[0] // empty' 2>/dev/null || true)"
             PR_CELL="—"
             REVIEW=""
             RISK=""
@@ -1054,6 +1092,21 @@ jobs:
                   // ($latest | last) // {}')"
               REVIEW_BODY="$(printf '%s' "$REVIEW_COMMENT" | jq -r '.body // ""')"
               REVIEW_URL="$(printf '%s' "$REVIEW_COMMENT" | jq -r '.url // ""')"
+              # **本文の`## 検証結果`が無いPRは、判定印のコメントから判定を読む**（#4092）。リリースの
+              # 記録なしPRへ依頼したレビュー（PR_REVIEW）は、マージ済みPRの本文を書き換えない。
+              # 判定印があっても本文のマーカーが無いと「記録なし」のままになるため、現在のHEADと
+              # 同じshaの判定印だけを採る（追いコミット前の判定は採らない）。複数あれば厳しい方
+              if [ -z "$REVIEW" ]; then
+                REVIEW="$(printf '%s' "$PR_JSON" | jq -r '
+                  (.headRefOid // "") as $sha
+                  | [ .comments[]?.body // empty
+                      | capture("issue-deck-(codex-)?review-verdict:(?<v>lgtm|needs-check|changes-requested) sha=(?<s>[0-9a-fA-F]+)")?
+                      | select($sha != "" and .s == $sha) | .v ] as $v
+                  | if ($v | index("changes-requested")) then "changes-requested"
+                    elif ($v | index("needs-check")) then "needs-check"
+                    elif ($v | index("lgtm")) then "lgtm"
+                    else "" end' 2>/dev/null || true)"
+              fi
             fi
             # 文言はreusable-claude-review-develop.yml側と対。画面
             # (src/lib/github/release-verification.ts)はこの列の先頭の記号で判定を読む
@@ -1064,6 +1117,19 @@ jobs:
               skipped) REVIEW_CELL="— 実施なし" ;;
               unavailable) REVIEW_CELL="? 判定を取得できず" ;;
               *) REVIEW_CELL="? 記録なし" ;;
+            esac
+            # **記録のないPRは、要否を機械判定してレビューを依頼する**（#4092）。対象は記録なしと
+            # 判定を取得できなかったもの（unavailable）だけ。`skipped`は理由が記録済みなので
+            # 触らない。依頼するだけで結果は待たず、リリースPRのマージも止めない（表示のみ）。
+            # 結果は次の集計（リリースPRの作り直し）で上の判定印フォールバックが読む
+            case "$REVIEW" in
+              ""|unavailable)
+                if [ -z "$PR_JSON" ]; then
+                  REVIEW_CELL="? 記録なし（PRを特定できず）"
+                else
+                  REVIEW_CELL="$(request_review "$PR_JSON" "$REVIEW_CELL")"
+                fi
+                ;;
             esac
             # 同じリリースに入っている修正Issueで直したPR（#3634）。上の`$FIXES`の説明を参照。
             # 直す対象になるのは要修正・要確認だけで、問題なしのPRを書き換えることはしない
