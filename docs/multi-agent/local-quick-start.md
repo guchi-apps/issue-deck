@@ -1438,12 +1438,8 @@ MagicDNSの短い名前（`subpc`）や生のtailnet IP（`100.x.x.x`）で開�
 | 設定 | 場所 | 欠けたときに起きること |
 |---|---|---|
 | `NEXT_PUBLIC_SUPABASE_URL`・`NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | `.env.local` | `signInWithOAuth()`が存在しないホストへ飛ばし、画面が真っ白になる |
-| `ALLOWED_EMAILS` | `.env.local` | 認証は通るが`/auth/callback`の`isEmailAllowed()`が偽になり`?error=not_allowed`で戻る |
+| ログイン許可（StatusHub管理画面） | StatusHub（`ACCESS_API_URL`、共有トークン`ISSUE_DECK_ACCESS_APP_TOKEN`） | 認証は通るが判定APIが許可せず、全員拒否になる。旧`ALLOWED_EMAILS`は参照されない（#4022） |
 | リダイレクト先の許可 | issue-deckの設定画面（フリート運用 > Supabase Redirect URLs。#3568）またはSupabaseダッシュボード（Redirect URLs） | Supabase側で弾かれ、コールバックまで戻ってこない。**worktreeごとにポートが違う**ため`http://<ホスト名>.<tailnet>.ts.net:*/auth/callback`のようにポートをワイルドカードで登録する |
-
-**`ALLOWED_EMAILS`は実際のSupabaseの値より先に入れる。** 空のまま実プロジェクトへ繋ぐと、
-`/auth/callback`が許可外ユーザーとしてSupabase Authユーザーの削除（`admin.auth.admin.deleteUser`）へ
-進む経路に入る。Supabaseプロジェクトは他アプリ（asset-manager等）と共用のため、順序を守る。
 
 気づけるようにしてあるのは2箇所（#1419）。判定の実体は`src/lib/supabase/config.ts`。
 
