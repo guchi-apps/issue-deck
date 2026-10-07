@@ -7,8 +7,8 @@
 ## 認証と対象利用者
 
 - `Authorization: Bearer <鍵>`。鍵は共有トークン`ISSUE_DECK_DEVELOPMENT_SUMMARY_TOKEN`（無ければ環境変数`AIDE_SUMMARY_SECRET`）。**他のAPIの鍵（`IMAGE_UPLOAD_SECRET`など）は流用しない。** 未設定は`503 not_configured`、不一致・欠落は`401 unauthorized`。鍵は応答にもログにも出さない。
-- **対象利用者は呼び出し側で指定できない。** 共有トークン`ISSUE_DECK_AIDE_SUMMARY_USER`（無ければ`AIDE_SUMMARY_USER_LOGIN`）にGitHubログイン名を設定し、その利用者が連携しているリポジトリを母集団にする。未設定・該当なしは`503 user_not_configured`。`userId`などのクエリは無視する。
-- 設定は設定画面の共有トークンへ登録する（[shared-token-api.md](shared-token-api.md)）。登録するまでAPIは503を返す。
+- **対象利用者は呼び出し側で指定できない。** 環境変数`AIDE_SUMMARY_USER_LOGIN`にGitHubログイン名を設定し（設定値であり認証値ではないため共有トークンには置かない。#4048）、その利用者が連携しているリポジトリを母集団にする。未設定・該当なしは`503 user_not_configured`。`userId`などのクエリは無視する。
+- 鍵は設定画面の共有トークンへ登録する（[shared-token-api.md](shared-token-api.md)）。対象利用者は`.github/secrets-manifest.tsv`の`AIDE_SUMMARY_USER_LOGIN`（1Password→GitHub secret→本番`.env`）で配る。どちらかが無い間、APIは503を返す。
 
 ## リクエスト
 
