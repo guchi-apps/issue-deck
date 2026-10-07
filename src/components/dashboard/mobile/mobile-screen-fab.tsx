@@ -1,6 +1,6 @@
 "use client";
 
-import { MessageCircleQuestion, Plus } from "lucide-react";
+import { MessageCircle, MessageCircleQuestion, Plus } from "lucide-react";
 
 type MobileScreenFabProps = {
   /**
@@ -10,6 +10,7 @@ type MobileScreenFabProps = {
   raised?: boolean;
   onCreateIssue: () => void;
   onAskCrossRepoQuestion: () => void;
+  onOpenChat: () => void;
 };
 
 /**
@@ -17,7 +18,7 @@ type MobileScreenFabProps = {
  * 共通のこの1つに一本化している。**位置・見た目を画面ごとに変えない**——
  * 同じ動作のボタンが画面ごとに違う位置にあると探すことになるため（#1690・#1945）。
  */
-export function MobileScreenFab({ raised, onCreateIssue, onAskCrossRepoQuestion }: MobileScreenFabProps) {
+export function MobileScreenFab({ raised, onCreateIssue, onAskCrossRepoQuestion, onOpenChat }: MobileScreenFabProps) {
   return (
     <div className={`absolute right-4 z-20 flex items-center gap-3 ${raised ? "bottom-22" : "bottom-4"}`}>
       <button
@@ -27,6 +28,14 @@ export function MobileScreenFab({ raised, onCreateIssue, onAskCrossRepoQuestion 
         className="flex size-14 items-center justify-center rounded-full border bg-background shadow-lg"
       >
         <MessageCircleQuestion className="size-6" />
+      </button>
+      <button
+        type="button"
+        onClick={onOpenChat}
+        aria-label="チャットを開く"
+        className="flex size-14 items-center justify-center rounded-full border bg-background shadow-lg"
+      >
+        <MessageCircle className="size-6" />
       </button>
       <button
         type="button"

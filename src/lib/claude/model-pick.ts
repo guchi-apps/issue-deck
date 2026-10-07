@@ -181,8 +181,8 @@ export function buildModelPickPrompt(
   const agentName = isCodex ? "Codex CLI" : "Claude Code";
   const options = isCodex
     ? CODEX_PICK_OPTIONS
-    : `- \`sonnet\`: やることがはっきりしている**通常の実装**向け（既定。迷ったらこれ）
-- \`opus\`: 既存の作りを**調べたうえでの判断**が要る実装、原因の切り分けが要る不具合向け
+    : `- \`sonnet\`: やることがはっきりしている**通常の実装**向け（既定。迷ったらこれ）。色・余白・文言など**小さな見た目の調整**もこれ
+- \`opus\`: 既存の作りを**調べたうえでの判断**が要る実装、原因の切り分けが要る不具合、**既存の画面構成を踏まえて新しい画面・UIを設計する**実装向け
 - \`fable\`: 原因がまるで読めない不具合や、**設計から考える**必要がある実装向け`;
   const guide = isCodex
     ? CODEX_PICK_GUIDE
@@ -324,8 +324,9 @@ const CHOICE_CRITERIA_BY_AGENT: Readonly<
   Record<ModelPickAgent, Readonly<Record<string, string>>>
 > = {
   claude: {
-    sonnet: "やることがはっきりしている通常の実装。既定で、迷ったときもこれ",
-    opus: "既存の作りを調べたうえでの判断が要る実装、原因の切り分けが要る不具合",
+    sonnet:
+      "やることがはっきりしている通常の実装（色・余白・文言など小さな見た目の調整を含む）。既定で、迷ったときもこれ",
+    opus: "既存の作りを調べたうえでの判断が要る実装、原因の切り分けが要る不具合、既存の画面構成を踏まえて新しい画面・UIを設計する実装",
     fable: "原因がまるで読めない不具合や、設計そのものから考える必要がある実装",
   },
   codex: {
