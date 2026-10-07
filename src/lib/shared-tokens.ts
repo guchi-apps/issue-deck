@@ -23,14 +23,16 @@ export function parseSharedTokenInput(payload: unknown): SharedTokenInput | null
   if (!payload || typeof payload !== "object") return null;
   const body = payload as Record<string, unknown>;
   const name = typeof body.name === "string" ? body.name.trim() : "";
-  const value = typeof body.value === "string" ? body.value : "";
+  // value 省略（キー無し・null）はサーバーでの自動生成を意味する（#4121）。空文字は不正として弾く。
+  const rawValue = body.value;
+  const value = rawValue === undefined || rawValue === null ? null : typeof rawValue === "string" ? rawValue : undefined;
   const description = optionalText(body.description, SHARED_TOKEN_DESCRIPTION_MAX_LENGTH);
   const sourceReference = optionalText(body.sourceReference, SHARED_TOKEN_SOURCE_REFERENCE_MAX_LENGTH);
   if (
     !name ||
     name.length > SHARED_TOKEN_NAME_MAX_LENGTH ||
-    !value ||
-    value.length > SHARED_TOKEN_VALUE_MAX_LENGTH ||
+    value === undefined ||
+    (value !== null && (!value || value.length > SHARED_TOKEN_VALUE_MAX_LENGTH)) ||
     description === undefined ||
     sourceReference === undefined
   ) {

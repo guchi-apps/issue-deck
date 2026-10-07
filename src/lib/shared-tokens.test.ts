@@ -29,8 +29,14 @@ describe("parseSharedTokenInput", () => {
     ).toEqual({ name: "TOKEN", value: "value", description: null, sourceReference: null });
   });
 
+  it("値の省略（キー無し・null）は自動生成を意味するnullとして受け付ける", () => {
+    expect(parseSharedTokenInput({ name: "TOKEN" })?.value).toBeNull();
+    expect(parseSharedTokenInput({ name: "TOKEN", value: null })?.value).toBeNull();
+  });
+
   it("空の値や不正な任意項目を拒否する", () => {
     expect(parseSharedTokenInput({ name: "TOKEN", value: "" })).toBeNull();
+    expect(parseSharedTokenInput({ name: "TOKEN", value: 1 })).toBeNull();
     expect(parseSharedTokenInput({ name: "TOKEN", value: "value", description: 1 })).toBeNull();
     expect(
       parseSharedTokenInput({ name: "TOKEN", value: "value", description: "x".repeat(1_001) }),

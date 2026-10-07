@@ -4,6 +4,7 @@ import { authorizeSharedTokenApi } from "@/lib/shared-token-auth";
 import { decryptSecret, encryptSecret } from "@/lib/crypto/secret-cipher";
 import { db } from "@/lib/db";
 import { isUniqueConstraintError } from "@/lib/prisma-error";
+import { generateSharedTokenValue } from "@/lib/shared-token-generate";
 import { parseSharedTokenConsumer, parseSharedTokenInput } from "@/lib/shared-tokens";
 
 function authorize(request: NextRequest): NextResponse | null {
@@ -38,17 +39,24 @@ export async function POST(request: NextRequest) {
   const input = parseSharedTokenInput(await request.json().catch(() => null));
   if (!input) return NextResponse.json({ error: "invalid_request" }, { status: 400 });
 
+  // value省略時はissue-deckが生成する。生成した値は作成直後のこの応答でだけ返す（#4121）。
+  const generatedValue = input.value === null ? generateSharedTokenValue() : null;
+  const value = input.value ?? generatedValue!;
+
   try {
     const row = await db.sharedToken.create({
       data: {
         name: input.name,
-        encryptedValue: encryptSecret(input.value),
+        encryptedValue: encryptSecret(value),
         description: input.description,
         sourceReference: input.sourceReference,
         usages: { create: { consumer, action: "create" } },
       },
     });
-    return NextResponse.json({ id: row.id, name: row.name }, { status: 201 });
+    return NextResponse.json(
+      { id: row.id, name: row.name, ...(generatedValue !== null ? { generatedValue } : {}) },
+      { status: 201 },
+    );
   } catch (error) {
     if (isUniqueConstraintError(error)) {
       return NextResponse.json({ error: "duplicate_name" }, { status: 409 });
@@ -65,7 +73,8 @@ export async function PUT(request: NextRequest) {
   const consumer = getConsumer(request);
   if (!consumer) return NextResponse.json({ error: "invalid_request" }, { status: 400 });
   const input = parseSharedTokenInput(await request.json().catch(() => null));
-  if (!input) return NextResponse.json({ error: "invalid_request" }, { status: 400 });
+  // 上書きは外部で決まった新しい値を差し替える経路なので、値の省略（自動生成）は受け付けない
+  if (!input || input.value === null) return NextResponse.json({ error: "invalid_request" }, { status: 400 });
 
   const encryptedValue = encryptSecret(input.value);
   const existing = await db.sharedToken.findUnique({ where: { name: input.name } });
