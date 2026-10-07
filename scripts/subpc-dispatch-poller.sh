@@ -169,7 +169,9 @@ set -euo pipefail
 #     廃止し、使用量の補完・送り直し（`--usage-flush`）と、確定したレビューの最終マージ判定の
 #     再開の巡回（`POST /api/dispatch/pr-review/resume-sweep`）だけを残した。
 # 32: REVIEW_FIXを独立ジョブとして購読認証のCodexで実行する（#4043）。
-DISPATCH_POLLER_VERSION="32"
+# 33: チャット相談のモデル呼び出し（`CHAT_TURN`）を受け取り、ログイン済みのCodex CLIで答えを
+#     作って返す（#4109。`scripts/run-chat-codex.sh`）。
+DISPATCH_POLLER_VERSION="33"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -266,6 +268,7 @@ CODE_REVIEW_LAUNCHER="$SCRIPT_DIR/start-code-review.sh"
 # 使うため、Actionsから直接起動せずこのランチャーへ渡す（#3917）。**ジョブ（`PR_REVIEW`）はissue-deckが
 # 積み、pollerがclaimして起動する**（#3990。かつてはPRコメントの要求印を巡回して拾っていた）。
 CODEX_PR_REVIEW_LAUNCHER="$SCRIPT_DIR/start-codex-pr-review.sh"
+CHAT_CODEX_RUNNER="$SCRIPT_DIR/run-chat-codex.sh"
 CODEX_REVIEW_FIX_LAUNCHER="$SCRIPT_DIR/start-codex-review-fix.sh"
 # 確認環境（#2444）。**セッションを立てないジョブ**（`SELF_UPDATE`・`MANUAL_STEP`と同じ枠外）で、
 # developの最新をそのまま開ける開発サーバーを1本だけ起こす。
@@ -810,6 +813,19 @@ pr_review_capable() {
   fi
 }
 
+# チャット相談のモデル呼び出し（`CHAT_TURN`・#4109）を実行できるか。**実行するスクリプトと
+# Codex CLIの両方が手元にあるかで判定する**（`pr_review_capable`と同じ向き）。ログイン状態は
+# ここでは見ない（見送りの理由をチャットへ返せるよう、実行時に確かめて`not_logged_in`で返す）。
+chat_codex_capable() {
+  local codex_command
+  codex_command="$(agent_cli_codex_command 2>/dev/null || true)"
+  if [[ -f "$CHAT_CODEX_RUNNER" && -n "$codex_command" ]] && command -v "$codex_command" >/dev/null 2>&1; then
+    printf 'true'
+  else
+    printf 'false'
+  fi
+}
+
 # リポジトリ全体のコードレビュー（#698）のセッションを起こせるか。**ランチャーが手元にあるかで
 # 判定する**（`plan_review_capable`と同じ）。こちらは人が画面から押す種別なので、申告しないと
 # ダイアログの選択肢に理由付きで出る（配ってから`failed`で返すより早い）。
@@ -1300,6 +1316,7 @@ announce() {
     --argjson codeReview "$(code_review_capable)" \
     --argjson reviewFix "$(if [[ -f "$CODEX_REVIEW_FIX_LAUNCHER" ]] && [[ "$(pr_review_capable)" == true ]]; then echo true; else echo false; fi)" \
     --argjson prReview "$(pr_review_capable)" \
+    --argjson chatCodex "$(chat_codex_capable)" \
     --argjson codex "$codex_flag" \
     --argjson codexRemoteControl "$(codex_remote_control_capable)" \
     --argjson selfUpdate "$(self_update_capable)" \
@@ -1312,7 +1329,7 @@ announce() {
     --argjson launchHold "${LAUNCH_HOLD_JSON:-null}" \
     --argjson checkout "${checkout:-null}" \
     --argjson planReviewSessions "$plan_review_sessions" \
-    '{host: $host, repositories: $repositories, contractVersion: $contractVersion, agentVersion: $agentVersion, sessionControl: true, instruction: true, crossRepoQuestion: $crossRepoQuestion, manualStep: $manualStep, manualStepAbort: $manualStepAbort, manualStepValues: $manualStepValues, manualStepVps: $manualStepVps, manualStepSession: $manualStepSession, planReview: $planReview, planReviewAgent: $planReviewAgent, codeReview: $codeReview, prReview: $prReview, reviewFix: $reviewFix, codex: $codex, codexRemoteControl: $codexRemoteControl, selfUpdate: $selfUpdate, reboot: $reboot, rebootState: $rebootState, preview: $preview, previewState: $previewState, previewRepositories: $previewRepositories, maxSessions: $maxSessions, liveSessions: $liveSessions, metrics: $metrics, launchHold: $launchHold, checkout: $checkout, planReviewSessions: $planReviewSessions}')"
+    '{host: $host, repositories: $repositories, contractVersion: $contractVersion, agentVersion: $agentVersion, sessionControl: true, instruction: true, crossRepoQuestion: $crossRepoQuestion, manualStep: $manualStep, manualStepAbort: $manualStepAbort, manualStepValues: $manualStepValues, manualStepVps: $manualStepVps, manualStepSession: $manualStepSession, planReview: $planReview, planReviewAgent: $planReviewAgent, codeReview: $codeReview, prReview: $prReview, chatCodex: $chatCodex, reviewFix: $reviewFix, codex: $codex, codexRemoteControl: $codexRemoteControl, selfUpdate: $selfUpdate, reboot: $reboot, rebootState: $rebootState, preview: $preview, previewState: $previewState, previewRepositories: $previewRepositories, maxSessions: $maxSessions, liveSessions: $liveSessions, metrics: $metrics, launchHold: $launchHold, checkout: $checkout, planReviewSessions: $planReviewSessions}')"
 
   if ! api_call POST /api/dispatch/hosts "$payload"; then
     report_api_failure "ホストの申告に失敗しました"
@@ -3222,6 +3239,28 @@ run_reboot_job() {
 #
 # **デーモンは止めない。** `stop`を打つと、そのとき繋いでいる端末との接続も切れる。
 # `start`は既に上がっていれば`connected`を返すだけ（冪等）なので、押すたびに呼んでよい。
+# チャット相談のモデル呼び出し（`CHAT_TURN`・#4109）。**待たずにバックグラウンドで起こす。**
+# `codex exec`は1回で十数秒〜2分かかり、ここで待つと軽い巡回（3秒刻み）が止まって他の枠外ジョブ
+# まで遅れる。開始（`running`）と結果はスクリプト自身が`/api/dispatch/chat-turn`へ報告する。
+# スクリプトが無い場合だけここで`failed`を返す（チャット側は`codex_error`として理由を出す）。
+# 起こした後に落ちて報告が届かない場合は、チャット側の待ち時間の上限で`timeout`として扱われる。
+run_chat_turn_job() {
+  local job_id="$1" log_dir="${XDG_STATE_HOME:-$HOME/.local/state}/issue-deck/chat-codex"
+  if [[ ! -f "$CHAT_CODEX_RUNNER" ]]; then
+    report_job "$job_id" failed "チャットのCodex実行スクリプトがありません（$CHAT_CODEX_RUNNER）。"
+    return 0
+  fi
+  if [[ "$DRY_RUN" -eq 1 ]]; then
+    echo "  --dry-run のため起動しません（チャットの回答 $job_id）"
+    return 0
+  fi
+  mkdir -p "$log_dir"
+  # 古いログは7日で消す（1発言で数件できる）
+  find "$log_dir" -type f -name '*.log' -mtime +7 -delete 2>/dev/null || true
+  setsid nohup bash "$CHAT_CODEX_RUNNER" "$job_id" >"$log_dir/$job_id.log" 2>&1 </dev/null &
+  echo "  チャットの回答をCodexで作成しています（ジョブ $job_id）"
+}
+
 run_codex_pairing_job() {
   local job_id="$1" codex_command
   local start_rc=0 pair_rc=0 pair_out code expires attempt
@@ -3613,6 +3652,13 @@ run_job() {
   # `local_session_validate_target`（Issue番号に`^[1-9][0-9]*$`を求める）より手前に置く。
   if [[ "$kind" == "REBOOT" ]]; then
     run_reboot_job "$job_id"
+    return 0
+  fi
+
+  # チャット相談のモデル呼び出し（#4109）。**Issueに紐づかない**（埋め草の`guchi-apps/issue-deck#0`）
+  # ため、`local_session_validate_target`より手前に置く。
+  if [[ "$kind" == "CHAT_TURN" ]]; then
+    run_chat_turn_job "$job_id"
     return 0
   fi
 

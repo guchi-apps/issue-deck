@@ -3,7 +3,9 @@ import { NextResponse, type NextRequest } from "next/server";
 
 import { getCurrentUser, requireUserId } from "@/lib/auth-user";
 import { hasConversationRepoAccess } from "@/lib/chat/access";
+import { executeCodexChatRun, findActiveChatRun, startCodexChatRun, toChatRunView } from "@/lib/chat/codex-run";
 import { handleChatMessage } from "@/lib/chat/handlers";
+import { resolveChatExecution } from "@/lib/chat/investigation/model";
 import { refreshConversation } from "@/lib/chat/resume";
 import {
   applyMemoryOp,
@@ -86,6 +88,8 @@ export async function GET(request: NextRequest, { params }: Params) {
     );
     freshness = await refreshConversation({ user, context, memory, pendingConfirms });
   }
+  // 回答待ち（Codex CLI経由。#4109）。再読込しても「回答中」を戻し、結果を取りに行けるようにする
+  const activeRun = before ? null : await findActiveChatRun(conversation.id);
 
   return json({
     id: conversation.id,
@@ -100,6 +104,7 @@ export async function GET(request: NextRequest, { params }: Params) {
     hasMore,
     freshness: freshness?.freshness ?? null,
     staleConfirms: freshness?.staleConfirms ?? [],
+    activeRun,
   });
 }
 
@@ -109,6 +114,9 @@ export async function GET(request: NextRequest, { params }: Params) {
  *
  * `clientMessageId`は再送・複数端末の重複送信で二重登録しないための冪等キー。同じIDの発言が保存済みなら、
  * 何も実行せず保存済みの返信を返す。保存は会話の`version`を条件にし、他端末の更新と衝突したら読み直してやり直す。
+ *
+ * **AI実行プロバイダーがCodexのときは、発言だけを保存してすぐ返す**（#4109）。回答はサブPCのCodex CLIで
+ * 非同期に作り、画面は返した`run`を`GET /api/chat/[id]/run`で取りに来る。OpenAI APIは使わない。
  */
 export async function POST(request: NextRequest, { params }: Params) {
   const user = await getCurrentUser();
@@ -135,15 +143,35 @@ export async function POST(request: NextRequest, { params }: Params) {
           where: { conversationId: id, role: "assistant", createdAt: { gte: existing.createdAt } },
           orderBy: [{ createdAt: "asc" }, { id: "asc" }],
         });
+        const run = await db.chatRun.findUnique({ where: { userMessageId: existing.id } });
         return json({
           duplicate: true,
           messages: [toChatMessageView(existing), ...(reply ? [toChatMessageView(reply)] : [])],
           context: parseChatContext(conversation.context),
+          run: run ? toChatRunView(run) : null,
         });
       }
     }
     if (!(await hasConversationRepoAccess(user.id, conversation.repo))) {
       return json({ error: "repository_access_lost" }, { status: 403 });
+    }
+
+    const execution = await resolveChatExecution();
+    if (execution.mode === "codex") {
+      const started = await startCodexChatRun({
+        conversationId: id,
+        userId: user.id,
+        text,
+        clientMessageId,
+        model: execution.model,
+      });
+      if (!started.ok) {
+        if (started.error === "conflict") continue;
+        return json({ error: started.error }, { status: started.error === "not_found" ? 404 : 409 });
+      }
+      // 待たない。回答は回答待ち（ChatRun）へ保存され、画面が取りに来る
+      void executeCodexChatRun({ runId: started.run.id, user });
+      return json({ messages: [started.userMessage], run: started.run });
     }
 
     const context = parseChatContext(conversation.context);

@@ -228,8 +228,12 @@ export async function runInvestigation(params: {
   /** テスト用の差し替え */
   tool?: (ctx: ToolContext, name: string, args: Record<string, unknown>) => Promise<ToolResult>;
   clock?: () => number;
+  /** 時間の上限の差し替え（Codex CLI経由は受け取り待ちと起動が乗るため長く取る。#4109） */
+  limits?: { maxDurationMs?: number; stepTimeoutMs?: number };
 }): Promise<InvestigationResult> {
   const clock = params.clock ?? Date.now;
+  const maxDurationMs = params.limits?.maxDurationMs ?? INVESTIGATION_LIMITS.maxDurationMs;
+  const stepTimeoutMs = params.limits?.stepTimeoutMs ?? INVESTIGATION_LIMITS.stepTimeoutMs;
   const exec = params.tool ?? runTool;
   const startedAt = clock();
   const system = buildSystemPrompt();
@@ -268,15 +272,15 @@ export async function runInvestigation(params: {
   });
 
   for (let step = 1; step <= INVESTIGATION_LIMITS.maxSteps; step++) {
-    const remaining = INVESTIGATION_LIMITS.maxDurationMs - (clock() - startedAt);
-    if (remaining <= 0) return stop(`時間の上限（${INVESTIGATION_LIMITS.maxDurationMs / 1000}秒）に達しました`);
+    const remaining = maxDurationMs - (clock() - startedAt);
+    if (remaining <= 0) return stop(`時間の上限（${maxDurationMs / 1000}秒）に達しました`);
     const lastStep = step === INVESTIGATION_LIMITS.maxSteps;
     const response = await params.callModel({
       system,
       messages: lastStep
         ? [...messages, { role: "user", content: "調査の回数が上限です。これ以上ツールは呼ばず、ここまでの材料で action=\"final\" を出してください。見られなかった範囲は unconfirmed に書くこと。" }]
         : messages,
-      timeoutMs: Math.min(INVESTIGATION_LIMITS.stepTimeoutMs, remaining),
+      timeoutMs: Math.min(stepTimeoutMs, remaining),
     });
     if (!response.ok) return stop(`AIの呼び出しに失敗しました（${response.reason}）`);
     const parsed = parseStep(response.text);

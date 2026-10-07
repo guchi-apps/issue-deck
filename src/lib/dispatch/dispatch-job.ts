@@ -107,7 +107,8 @@ export type DispatchJobKind =
   | "CODEX_PAIRING"
   | "MANUAL_STEP_SESSION"
   | "PR_REVIEW"
-  | "REVIEW_FIX";
+  | "REVIEW_FIX"
+  | "CHAT_TURN";
 
 /**
  * 既に立っているセッションを操作するジョブ（起動しないジョブ）。
@@ -382,6 +383,7 @@ export const OUT_OF_BAND_JOB_KINDS = [
   "PREVIEW",
   "REBOOT",
   "CODEX_PAIRING",
+  "CHAT_TURN",
 ] as const;
 
 export function isOutOfBandJobKind(kind: DispatchJobKind): boolean {
@@ -416,6 +418,7 @@ export const OUT_OF_BAND_JOB_KIND_CAPABILITY = {
   PREVIEW: "previewCapable",
   REBOOT: "rebootCapable",
   CODEX_PAIRING: "codexRemoteControlCapable",
+  CHAT_TURN: "chatCodexCapable",
 } as const satisfies Record<OutOfBandJobKind, DispatchHostCapabilityField>;
 
 /**
@@ -764,6 +767,11 @@ export type DispatchHostView = {
    */
   reviewFixCapable?: boolean | null;
   prReviewCapable?: boolean | null;
+  /**
+   * チャット相談のモデル呼び出し（`CHAT_TURN`・#4109）をCodex CLIで実行できるか。
+   * **`null`は「できない」**（古いpollerへ配ると未知の種別として`failed`になり、回答が必ず失敗する）
+   */
+  chatCodexCapable: boolean | null;
 
   /**
    * チェックアウトの更新と自己再起動ができるか（#1875）。**`null`（未申告）は「できない」として
@@ -966,6 +974,18 @@ export function buildDispatchActiveKey(
  */
 export const SELF_UPDATE_REPOSITORY = "guchi-apps/issue-deck";
 export const SELF_UPDATE_ISSUE_NUMBER = 0;
+
+/**
+ * チャット相談のモデル呼び出し（`CHAT_TURN`・#4109）が使う埋め草。**Issueに紐づかない**
+ * （番号の無い相談もある）ので、`SELF_UPDATE`と同じくissue-deck自身と0を置く。
+ * 活性キーは`chat-turn:<ChatRun.id>`で、1つの回答待ちにつき未完了のジョブは1件まで。
+ */
+export const CHAT_TURN_REPOSITORY = SELF_UPDATE_REPOSITORY;
+export const CHAT_TURN_ISSUE_NUMBER = 0;
+
+export function buildChatTurnActiveKey(runId: string): string {
+  return `chat-turn:${runId}`;
+}
 
 /**
  * 更新ジョブの活性キー。**Issueではなくホストで一意にする。**
@@ -1181,6 +1201,8 @@ export function describeDispatchJobKind(kind: DispatchJobKind): string {
       return "レビュー指摘の修正";
     case "PR_REVIEW":
       return "PRレビュー";
+    case "CHAT_TURN":
+      return "チャットの回答";
     case "INTERRUPT":
     case "KILL":
     case "INSTRUCTION":
