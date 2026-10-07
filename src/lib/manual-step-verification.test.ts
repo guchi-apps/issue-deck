@@ -45,6 +45,15 @@ describe("isReadOnlyVerificationCommand", () => {
     expect(isReadOnlyVerificationCommand("echo $(rm -rf ~/apps)")).toBe(false);
     expect(isReadOnlyVerificationCommand("echo `rm -rf ~/apps`")).toBe(false);
     expect(isReadOnlyVerificationCommand("cat foo &")).toBe(false);
+    // #4162。ダブルクォートの中でも展開される
+    expect(isReadOnlyVerificationCommand('echo "$(rm -rf ~/apps)"')).toBe(false);
+    expect(isReadOnlyVerificationCommand('echo "`rm -rf ~/apps`"')).toBe(false);
+    expect(isReadOnlyVerificationCommand('cat "${x:-$(touch y)}"')).toBe(false);
+    expect(isReadOnlyVerificationCommand("cat <(touch ~/pwned)")).toBe(false);
+    expect(isReadOnlyVerificationCommand('echo "\\" $(rm x)')).toBe(false);
+    // シングルクォートの中は不活性
+    expect(isReadOnlyVerificationCommand("echo '$(rm x)'")).toBe(true);
+    expect(isReadOnlyVerificationCommand('echo "a\\$(b)"')).toBe(true);
     expect(isReadOnlyVerificationCommand("grep 'foo")).toBe(false);
     expect(isReadOnlyVerificationCommand("")).toBe(false);
   });
