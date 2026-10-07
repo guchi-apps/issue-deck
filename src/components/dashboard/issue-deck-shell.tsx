@@ -2408,6 +2408,7 @@ export function IssueDeckShell({
                 <MobileScreenFab
                   raised={mobileFabRaised}
                   onCreateIssue={() => openCreateDialog(mobileFabRepositoryFullName)}
+                  onOpenChat={selectChat}
                   onAskCrossRepoQuestion={() =>
                     openCrossRepoQuestionDialog(mobileFabRepositoryFullName)
                   }
