@@ -455,6 +455,21 @@ describe("sweepCheckUserPushNotifications", () => {
     expect(updateMany).not.toHaveBeenCalled();
   });
 
+  it("確認待ちをOFFにしたユーザーは宛先から外し、全員OFFなら席を取らない（#4159）", async () => {
+    const { findSubscriptions, updateMany } = mockDb({
+      subscriptions: [],
+      snoozedSubscriberCount: 1,
+    });
+
+    await sweepCheckUserPushNotifications(NOW);
+
+    expect(findSubscriptions.mock.calls[0][0].where.user.pushMutedKinds).toEqual({
+      none: { kind: "check-user" },
+    });
+    expect(sendPushNotification).not.toHaveBeenCalled();
+    expect(updateMany).not.toHaveBeenCalled();
+  });
+
   it("送る前に「送信済み」を立てて席を取る（#2300）", async () => {
     const { updateMany } = mockDb();
 
