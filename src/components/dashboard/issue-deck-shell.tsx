@@ -681,11 +681,6 @@ export function IssueDeckShell({
   }
 
   /**
-   * 作れたIssueを一覧へ反映し、そのまま詳細画面へ進む。**行き先を選ばせない入口**
-   * （一括作成・コードレビュー・横断質問）が使う。新規作成ダイアログは
-   * `registerCreatedIssue`と`selectIssue`を別々に受け取る。
-   */
-  /**
    * iOS拡張画面から起票したIssueの詳細を開く（#3743）。`handleIssueCreated`の`selectIssue`は
    * `pane`を消さず、PCではiOS拡張パネルが残るため、`pane`を消す`openIssueUrl`で開く。
    */
@@ -694,6 +689,11 @@ export function IssueDeckShell({
     openIssueUrl(issue.id);
   }
 
+  /**
+   * 作れたIssueを一覧へ反映し、そのまま詳細画面へ進む。**行き先を選ばせない入口**
+   * （一括作成・コードレビュー・横断質問）が使う。新規作成ダイアログは
+   * `registerCreatedIssue`と`selectIssue`を別々に受け取る。
+   */
   function handleIssueCreated(issue: Issue) {
     registerCreatedIssue(issue);
     // PC・スマホのどちらの現在地も1回のURL更新で詳細画面へ進める（#192・#1396）。

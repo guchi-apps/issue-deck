@@ -56,6 +56,10 @@ export type IosExtensionStartProps = {
 /**
  * iOS拡張の追加・編集依頼（#3708）。種類別テンプレートでIssueを起票するだけで、Swiftは生成しない。
  * 起票は通常のIssue作成API（`POST /api/issues`）で、実装は通常の実装エージェント経路に任せる。
+ *
+ * 通常のIssue起案と同じく「作成」と「作成+実装開始」を選べる（#4171）。どちらも起票後は
+ * ダイアログを閉じて拡張の一覧へ戻り、「作成+実装開始」だけ実行先を選ぶ「実装を開始」を開く。
+ * 実装開始ダイアログはフォームを閉じても残るよう、フォームの外（この関数）が持つ。
  */
 export function IosExtensionIssueDialog({
   target,
@@ -68,14 +72,67 @@ export function IosExtensionIssueDialog({
   repositories: string[];
   start: IosExtensionStartProps;
   onClose: () => void;
+  /** 実装開始ダイアログを閉じたときにIssue詳細を開く（計画の承認パネルは詳細にしか出ない。#4172） */
   onCreated: (issue: Issue) => void;
 }) {
+  // 「作成+実装開始」で起票したIssue。一覧は反映済みで、表示用に最新の更新を持つ
+  const [startTarget, setStartTarget] = useState<Issue | null>(null);
+  const startRepository = startTarget
+    ? start.repositories.find((repo) => repo.fullName === startTarget.repositoryFullName)
+    : undefined;
+
   return (
-    <Dialog open={target !== null} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent>
-        {target && <DialogForm key={`${target.repositoryFullName}:${target.extension?.path}:${target.extension?.name}`} target={target} repositories={repositories} start={start} onClose={onClose} onCreated={onCreated} />}
-      </DialogContent>
-    </Dialog>
+    <>
+      <Dialog open={target !== null} onOpenChange={(open) => !open && onClose()}>
+        <DialogContent>
+          {target && (
+            <DialogForm
+              key={`${target.repositoryFullName}:${target.extension?.path}:${target.extension?.name}`}
+              target={target}
+              repositories={repositories}
+              start={start}
+              onClose={onClose}
+              onCreatedAndStart={setStartTarget}
+            />
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {startTarget && (
+        <StartImplementationDialog
+          issue={startTarget}
+          open
+          onOpenChange={(nextOpen) => {
+            if (nextOpen) return;
+            // 計画の承認パネル・計画コメントはIssue詳細にしか出ないため、実行先を選び終えたら
+            // （キャンセルでも）詳細へ移る。通常の作成フォームと同じ挙動にする
+            const target = startTarget;
+            setStartTarget(null);
+            if (target) onCreated(target);
+          }}
+          onIssueUpdated={(updated) => {
+            // 閉じた後に届いた更新で開き直さない（#1434）
+            setStartTarget((prev) => (prev ? updated : prev));
+            start.onIssueUpdated(updated);
+          }}
+          onCommentCreated={() => {}}
+          onNightlyRunQueued={start.onNightlyRunQueued}
+          includeDispatchTargets
+          actionsDisabledReason={startImplementationDisabledReason(startRepository?.hasClaudeWorkflow)}
+          localSessionCommand={
+            canStartLocalSession(startRepository?.hasLocalStartScript)
+              ? buildLocalSessionCommand(startTarget.repositoryFullName, startTarget.number)
+              : null
+          }
+          subIssueRelations={{ parent: null, children: [], childCount: 0 }}
+          claudeLocalModel={start.claudeLocalModel}
+          codexModel={start.codexModel}
+          defaultDispatchAgent={start.defaultDispatchAgent}
+          dispatchFailoverEnabled={start.dispatchFailoverEnabled}
+          dispatchFailoverThresholdPercent={start.dispatchFailoverThresholdPercent}
+        />
+      )}
+    </>
   );
 }
 
@@ -84,13 +141,13 @@ function DialogForm({
   repositories,
   start,
   onClose,
-  onCreated,
+  onCreatedAndStart,
 }: {
   target: IosExtensionIssueTarget;
   repositories: string[];
   start: IosExtensionStartProps;
   onClose: () => void;
-  onCreated: (issue: Issue) => void;
+  onCreatedAndStart: (issue: Issue) => void;
 }) {
   const isEdit = target.extension !== null;
   const [repositoryFullName, setRepositoryFullName] = useState(target.repositoryFullName);
@@ -98,13 +155,7 @@ function DialogForm({
   const [description, setDescription] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [created, setCreated] = useState<Issue | null>(null);
   const [isImageUploading, setIsImageUploading] = useState(false);
-  // 起票後に「実装を開始」で開く。起票したIssueは一覧へ反映済みで、表示用に最新の更新を持つ
-  const [startTarget, setStartTarget] = useState<Issue | null>(null);
-  const startRepository = startTarget
-    ? start.repositories.find((repo) => repo.fullName === startTarget.repositoryFullName)
-    : undefined;
   const issueSuggestions = useMemo(
     () => getRepoIssueSuggestions(start.issues, repositoryFullName),
     [start.issues, repositoryFullName],
@@ -118,7 +169,7 @@ function DialogForm({
     description,
   });
 
-  async function submit() {
+  async function submit(startAfter: boolean) {
     setIsSubmitting(true);
     setError(null);
     try {
@@ -129,14 +180,16 @@ function DialogForm({
       });
       const json = (await response.json().catch(() => null)) as { issue?: Issue } | null;
       if (!response.ok || !json?.issue) throw new Error(`Issueを起票できませんでした (${response.status})`);
-      setCreated(json.issue);
       start.onIssueUpdated(json.issue);
+      onClose();
+      if (startAfter) onCreatedAndStart(json.issue);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Issueを起票できませんでした");
-    } finally {
       setIsSubmitting(false);
     }
   }
+
+  const submitDisabled = isSubmitting || isImageUploading;
 
   return (
     <>
@@ -145,16 +198,6 @@ function DialogForm({
         <DialogDescription>種類別のテンプレートでIssueを作成します。実装は通常のIssueと同じ経路で進みます。</DialogDescription>
       </DialogHeader>
 
-      {created ? (
-        <div className="space-y-3 text-sm">
-          <p>Issue #{created.number} を起票しました。</p>
-          <div className="flex flex-wrap gap-2">
-            <Button size="sm" onClick={() => setStartTarget(startTarget ?? created)}>実装を開始…</Button>
-            <Button variant="outline" size="sm" onClick={() => { onCreated(created); onClose(); }}>Issueを開く</Button>
-          </div>
-          <p className="text-xs text-muted-foreground">「実装を開始」で、実行先・オプションを選んで実装エージェントを起動できます。</p>
-        </div>
-      ) : (
         <div className="space-y-3 text-sm">
           {!isEdit && (
             <label className="block space-y-1">
@@ -203,49 +246,11 @@ function DialogForm({
           </details>
           {error && <p role="alert" className="text-destructive">{error}</p>}
         </div>
-      )}
-
-      {startTarget && (
-        <StartImplementationDialog
-          issue={startTarget}
-          open
-          onOpenChange={(nextOpen) => {
-            if (nextOpen) return;
-            // 計画の承認パネル・計画コメントはIssue詳細にしか出ないため、実行先を選び終えたら
-            // （キャンセルでも）詳細へ移る。通常の作成フォームと同じ挙動にする
-            const target = startTarget;
-            setStartTarget(null);
-            if (target) {
-              onCreated(target);
-              onClose();
-            }
-          }}
-          onIssueUpdated={(updated) => {
-            // 閉じた後に届いた更新で開き直さない（#1434）
-            setStartTarget((prev) => (prev ? updated : prev));
-            start.onIssueUpdated(updated);
-          }}
-          onCommentCreated={() => {}}
-          onNightlyRunQueued={start.onNightlyRunQueued}
-          includeDispatchTargets
-          actionsDisabledReason={startImplementationDisabledReason(startRepository?.hasClaudeWorkflow)}
-          localSessionCommand={
-            canStartLocalSession(startRepository?.hasLocalStartScript)
-              ? buildLocalSessionCommand(startTarget.repositoryFullName, startTarget.number)
-              : null
-          }
-          subIssueRelations={{ parent: null, children: [], childCount: 0 }}
-          claudeLocalModel={start.claudeLocalModel}
-          codexModel={start.codexModel}
-          defaultDispatchAgent={start.defaultDispatchAgent}
-          dispatchFailoverEnabled={start.dispatchFailoverEnabled}
-          dispatchFailoverThresholdPercent={start.dispatchFailoverThresholdPercent}
-        />
-      )}
 
       <DialogFooter>
-        <Button variant="outline" onClick={onClose}>{created ? "閉じる" : "キャンセル"}</Button>
-        {!created && <Button onClick={() => void submit()} disabled={isSubmitting || isImageUploading}>{isSubmitting ? "起票中…" : "Issueを起票"}</Button>}
+        <Button variant="outline" onClick={onClose}>キャンセル</Button>
+        <Button variant="secondary" onClick={() => void submit(false)} disabled={submitDisabled}>{isSubmitting ? "作成中…" : "作成"}</Button>
+        <Button onClick={() => void submit(true)} disabled={submitDisabled}>{isSubmitting ? "作成中…" : "作成+実装開始"}</Button>
       </DialogFooter>
     </>
   );
