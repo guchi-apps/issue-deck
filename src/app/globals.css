@@ -245,24 +245,38 @@
   }
 }
 
-/* 実行中の現在区間だけをゆっくり明滅させる（#4056）。最も暗い瞬間でも、現在区間の通常の塗り
-   （55%）で止め、最明も完了済み（100%）より一段落とす。未着手（15%・確認待ち強調時35%）と区別できる濃さを保つ。 */
-@keyframes progress-segment-blink {
+/* 実行中の現在区間の中を、明るい帯が左から右へ流れ続ける（#4056・#4122）。区間は十数pxと狭く、
+   濃さを往復させるだけでは動いて見えなかったため、流れる向きのある動きにした。基調は現在区間の
+   通常の塗り（55%）より少し暗い40%にして、帯との差を作る。完了済み（100%）・未着手（15%）とは
+   区間の境目で区別が付く。 */
+@keyframes progress-segment-sweep {
   from {
-    background-color: color-mix(in oklch, currentColor 90%, transparent);
+    background-position: 130% 0;
   }
   to {
-    background-color: color-mix(in oklch, currentColor 55%, transparent);
+    background-position: -30% 0;
   }
 }
 
-.progress-segment-live {
-  animation: progress-segment-blink 1.6s ease-in-out infinite alternate;
+span.progress-segment-live {
+  background-color: color-mix(in oklch, currentColor 40%, transparent);
+  background-image: linear-gradient(
+    100deg,
+    transparent 0,
+    transparent 30%,
+    currentColor 50%,
+    transparent 70%,
+    transparent 100%
+  );
+  background-size: 250% 100%;
+  animation: progress-segment-sweep 0.9s linear infinite;
 }
 
-/* 動きを減らす設定では明滅させず、現在区間の固定の塗り（55%）のまま置く */
+/* 動きを減らす設定では流さず、現在区間の固定の塗り（55%）のまま置く */
 @media (prefers-reduced-motion: reduce) {
-  .progress-segment-live {
+  span.progress-segment-live {
     animation: none;
+    background-image: none;
+    background-color: color-mix(in oklch, currentColor 55%, transparent);
   }
 }
