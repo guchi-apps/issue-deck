@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { getClaudeApiUsageSummary, resetClaudeApiUsage } from "@/lib/claude/api-usage";
-import { callClaudeMessages } from "@/lib/claude/request";
+import { callClaudeMessages, getAppAiToken } from "@/lib/claude/request";
 
 const { findUnique } = vi.hoisted(() => ({ findUnique: vi.fn() }));
 
@@ -31,6 +31,7 @@ describe("callClaudeMessages", () => {
 
   afterEach(() => {
     delete process.env.OPENAI_API_KEY;
+    delete process.env.CLAUDE_CODE_OAUTH_TOKEN;
     vi.useRealTimers();
     vi.unstubAllGlobals();
   });
@@ -115,31 +116,6 @@ describe("callClaudeMessages", () => {
     expect(getClaudeApiUsageSummary(NOW).features).toEqual([]);
   });
 
-  it("OpenAIの一時的なレート制限は待機後に1回だけ再試行する", async () => {
-    findUnique.mockResolvedValue({ appAiModel: "gpt-6-luna" });
-    process.env.OPENAI_API_KEY = "openai-test-token";
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValueOnce(
-        new Response(JSON.stringify({ error: { code: "rate_limit_exceeded" } }), {
-          status: 429,
-          headers: { "content-type": "application/json", "retry-after": "1" },
-        }),
-      )
-      .mockResolvedValueOnce(jsonResponse({ output_text: "ok" }));
-    vi.stubGlobal("fetch", fetchMock);
-
-    const result = callClaudeMessages({
-      feature: "issue_suggest",
-      token: "anthropic-token",
-      body: { max_tokens: 16, messages: [] },
-    });
-    await vi.advanceTimersByTimeAsync(1_000);
-
-    await expect(result).resolves.toMatchObject({ response: { status: 200 }, json: { content: [{ text: "ok" }] } });
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-  });
-
   it("送信先・認証ヘッダ・bodyをそのまま渡す", async () => {
     const fetchMock = vi
       .fn()
@@ -222,114 +198,37 @@ describe("callClaudeMessages", () => {
     expect(JSON.parse(String(fetchMock.mock.calls[1][1].body)).model).toBe("claude-haiku-4-5");
   });
 
-  it("GPTモデルへは画像ブロックをinput_imageへ変換して送る（#3243）", async () => {
-    findUnique.mockResolvedValue({ appAiModel: "gpt-5.6-terra" });
+  it("GPT系が選ばれていてもOpenAI APIへは送らず、Claude系の既定モデルで実行する（#4147）", async () => {
+    findUnique.mockResolvedValue({ appAiModel: "gpt-6-luna", appAiModelReasoning: "gpt-5.6-terra" });
     process.env.OPENAI_API_KEY = "openai-test-token";
-    const fetchMock = vi.fn().mockResolvedValue(
-      jsonResponse({
-        model: "gpt-5.6-terra",
-        output: [{ type: "message", content: [{ type: "output_text", text: "回答" }] }],
-        usage: { input_tokens: 1, output_tokens: 1 },
-      }),
-    );
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(jsonResponse({ content: [{ type: "text", text: "ok" }] }));
     vi.stubGlobal("fetch", fetchMock);
 
     await callClaudeMessages({
-      feature: "issue_image_extract",
-      token: "anthropic-token",
-      body: {
-        max_tokens: 8,
-        messages: [
-          {
-            role: "user",
-            content: [
-              { type: "image", source: { type: "base64", media_type: "image/png", data: "QUJD" } },
-              { type: "text", text: "読み取って" },
-            ],
-          },
-        ],
-      },
-    });
-
-    const sent = JSON.parse(String(fetchMock.mock.calls[0][1].body));
-    expect(sent.input).toEqual([
-      {
-        role: "user",
-        content: [
-          { type: "input_image", image_url: "data:image/png;base64,QUJD" },
-          { type: "input_text", text: "読み取って" },
-        ],
-      },
-    ]);
-  });
-
-  it("GPTモデルはResponses APIへ変換し、応答を既存形式へ正規化する", async () => {
-    findUnique.mockResolvedValue({ appAiModelReasoning: "gpt-5.6-terra" });
-    process.env.OPENAI_API_KEY = "openai-test-token";
-    const fetchMock = vi.fn().mockResolvedValue(
-      jsonResponse({
-        model: "gpt-5.6-terra-2026-08-01",
-        output: [{ type: "message", content: [{ type: "output_text", text: "回答" }] }],
-        usage: {
-          input_tokens: 90,
-          output_tokens: 20,
-          input_tokens_details: { cached_tokens: 30 },
-        },
-      }),
-    );
-    vi.stubGlobal("fetch", fetchMock);
-
-    const { json } = await callClaudeMessages({
-      feature: "new_app_consult",
-      token: "anthropic-token",
-      body: {
-        max_tokens: 128,
-        system: "指示",
-        messages: [{ role: "user", content: "質問" }],
-        output_config: { format: { type: "json_schema", schema: { type: "object" } } },
-      },
-    });
-
-    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-    expect(url).toBe("https://api.openai.com/v1/responses");
-    expect((init.headers as Record<string, string>).Authorization).toBe("Bearer openai-test-token");
-    expect(JSON.parse(String(init.body))).toEqual({
-      model: "gpt-5.6-terra",
-      input: [{ role: "user", content: "質問" }],
-      instructions: "指示",
-      max_output_tokens: 128,
-      text: {
-        format: {
-          type: "json_schema",
-          name: "response",
-          strict: true,
-          schema: { type: "object" },
-        },
-      },
-    });
-    expect(json?.content?.[0]?.text).toBe("回答");
-    expect(getClaudeApiUsageSummary(NOW).totalLast24h).toEqual({
-      calls: 1,
-      inputTokens: 90,
-      outputTokens: 20,
-      cacheReadTokens: 30,
-      cacheCreationTokens: 0,
-    });
-  });
-
-  it("GPTモデル選択時にOpenAI APIキーが無ければ未設定を返す", async () => {
-    findUnique.mockResolvedValue({ appAiModel: "gpt-6-luna" });
-    const fetchMock = vi.fn();
-    vi.stubGlobal("fetch", fetchMock);
-
-    const { response, json } = await callClaudeMessages({
       feature: "comment_summary",
       token: "anthropic-token",
       body: { max_tokens: 16, messages: [] },
     });
+    await callClaudeMessages({
+      feature: "new_app_consult",
+      token: "anthropic-token",
+      body: { max_tokens: 16, messages: [] },
+    });
 
-    expect(response.status).toBe(501);
-    expect(json).toBeNull();
-    expect(fetchMock).not.toHaveBeenCalled();
+    for (const call of fetchMock.mock.calls as [string, RequestInit][]) {
+      expect(call[0]).toBe("https://api.anthropic.com/v1/messages");
+      expect((call[1].headers as Record<string, string>).Authorization).toBe("Bearer anthropic-token");
+    }
+    expect(JSON.parse(String(fetchMock.mock.calls[0][1].body)).model).toBe("claude-haiku-4-5");
+    expect(JSON.parse(String(fetchMock.mock.calls[1][1].body)).model).toBe("claude-sonnet-5-5");
+  });
+
+  it("GPT系が選ばれていてもアプリ内AIの認証情報はClaudeのOAuthトークンを返す", async () => {
+    findUnique.mockResolvedValue({ appAiModel: "gpt-6-luna" });
+    process.env.OPENAI_API_KEY = "openai-test-token";
+    process.env.CLAUDE_CODE_OAUTH_TOKEN = "oauth-token";
+    await expect(getAppAiToken("comment_summary")).resolves.toBe("oauth-token");
   });
 });
