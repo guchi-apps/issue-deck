@@ -5,6 +5,12 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { IosExtensionIssueDialog } from "@/components/dashboard/ios-extension-issue-dialog";
 import type { Issue } from "@/types/issue";
 
+vi.mock("@/components/dashboard/start-implementation-dialog", () => ({
+  StartImplementationDialog: ({ onOpenChange }: { onOpenChange: (open: boolean) => void }) => (
+    <button onClick={() => onOpenChange(false)}>モック: 実行先ダイアログを閉じる</button>
+  ),
+}));
+
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
@@ -37,5 +43,26 @@ describe("IosExtensionIssueDialog", () => {
     fireEvent.click(screen.getByRole("button", { name: "Issueを起票" }));
     await waitFor(() => expect(screen.getByRole("button", { name: /実装を開始/ })).toBeTruthy());
     expect(start.onIssueUpdated).toHaveBeenCalledWith(issue);
+  });
+
+  it("実装開始ダイアログを閉じると、Issue詳細へ移ってダイアログを閉じる（計画の承認パネルを見せるため）", async () => {
+    const issue = { number: 9, repositoryFullName: "guchi-apps/aide-ios" } as Issue;
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ issue }), { status: 200 })));
+    const onCreated = vi.fn();
+    const onClose = vi.fn();
+    render(
+      <IosExtensionIssueDialog
+        target={{ repositoryFullName: "guchi-apps/aide-ios", extension: null }}
+        repositories={["guchi-apps/aide-ios"]}
+        start={start}
+        onClose={onClose}
+        onCreated={onCreated}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Issueを起票" }));
+    fireEvent.click(await screen.findByRole("button", { name: /実装を開始/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /実行先ダイアログを閉じる/ }));
+    expect(onCreated).toHaveBeenCalledWith(issue);
+    expect(onClose).toHaveBeenCalled();
   });
 });
