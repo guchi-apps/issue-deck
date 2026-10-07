@@ -3,6 +3,7 @@ import { diffRows } from "@/lib/chat/session";
 import type { ChatConfirmCard, ChatContext, ChatFreshness, ChatMemory } from "@/lib/chat/types";
 import { getInstallationToken } from "@/lib/github/app-auth";
 import { findRepositoryByFullName } from "@/lib/github/issue-create-service";
+import { bodyHash } from "@/lib/github/pull-request-fix-request-service";
 import { planPullRequestRepair } from "@/lib/github/pull-request-repair-service";
 import { fetchPullRequest } from "@/lib/github/pull-requests-api";
 
@@ -77,6 +78,9 @@ export async function refreshConversation(params: {
             if (pr.state !== "open" || pr.merged) return { messageId, reason: "このPRはすでにクローズ・マージされています。" };
             if (pr.head.sha !== card.headSha) {
               return { messageId, reason: `調査したHEAD（${card.headSha.slice(0, 7)}）から進んでいます（現在 ${pr.head.sha.slice(0, 7)}）。もう一度調べ直してください。` };
+            }
+            if (card.scope === "metadata" && card.prBodyHash && bodyHash(pr.body) !== card.prBodyHash) {
+              return { messageId, reason: "調査後にPR本文が更新されています。もう一度調べ直してください。" };
             }
             return null;
           } catch {

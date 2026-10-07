@@ -35,8 +35,8 @@ describe("parseIntent", () => {
   });
 
   it("修復・マージ可否・Issue起案", () => {
-    expect(parseIntent("直して")).toEqual({ type: "repair", ref: null });
-    expect(parseIntent("#3966を直して")).toEqual({ type: "repair", ref: { repo: null, number: 3966 } });
+    expect(parseIntent("自動修正して")).toEqual({ type: "repair", ref: null });
+    expect(parseIntent("#3966を自動修正して")).toEqual({ type: "repair", ref: { repo: null, number: 3966 } });
     expect(parseIntent("マージできる？")).toEqual({ type: "merge_check" });
     expect(parseIntent("この問題は別Issueにして")).toEqual({ type: "create_issue", title: null });
   });
@@ -97,9 +97,19 @@ describe("調査の意図（#4045）", () => {
     expect(parseIntent("この方針で続けて")).toEqual({ type: "investigate", ref: null });
   });
   it("「確認して直して」は定型の自動修正ではなく調査を通す。素の「直して」は従来どおり", () => {
-    expect(parseIntent("確認して直して")).toEqual({ type: "investigate", ref: null });
-    expect(parseIntent("#12を確認して直して")).toEqual({ type: "investigate", ref: { repo: null, number: 12 } });
-    expect(parseIntent("直して")).toEqual({ type: "repair", ref: null });
+    expect(parseIntent("確認して直して")).toEqual({ type: "investigate", ref: null, fix: true });
+    expect(parseIntent("#12を確認して直して")).toEqual({ type: "investigate", ref: { repo: null, number: 12 }, fix: true });
+  });
+  it("「直して」「修正して」だけでも調査を起点にする（#4153）。自動修正の起動は明示の言い回しだけ", () => {
+    expect(parseIntent("直して")).toEqual({ type: "investigate", ref: null, fix: true });
+    expect(parseIntent("#4142を修正して")).toEqual({ type: "investigate", ref: { repo: null, number: 4142 }, fix: true });
+    expect(parseIntent("修正してください")).toEqual({ type: "investigate", ref: null, fix: true });
+    expect(parseIntent("自動修正を再実行して")).toEqual({ type: "repair", ref: null });
+    expect(resolveIntent({ type: "investigate", ref: null, fix: true }, ctx([3966]))).toMatchObject({
+      type: "investigate",
+      target: { number: 3966 },
+      fix: true,
+    });
   });
   it("対象は明示 → 直前の1件 → 調査の引き継ぎの順で決め、複数で決まらないときは候補を調査へ渡す", () => {
     expect(resolveIntent({ type: "investigate", ref: { repo: null, number: 9 } }, ctx([1, 2]))).toEqual({

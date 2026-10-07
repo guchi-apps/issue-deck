@@ -26,6 +26,16 @@ export const FIX_REQUEST_MARKER = "issue-deck-chat-fix-request";
 export const FIX_REQUEST_SCOPE =
   "許可範囲: このPRのブランチ内のコード・テスト・ドキュメントの修正のみ。マージ・本番反映・認証方式や環境変数・Secretsの変更はしない。判断が要る点は実装せずIssueコメントで相談する。";
 
+/** 管理情報（PR本文・関連Issue本文）だけを直す依頼の許可範囲。コード変更・push・別PRは作らせない（#4153） */
+export const FIX_REQUEST_SCOPE_METADATA =
+  "許可範囲: このPR本文と、紐づく親Issue本文の追跡情報（PRの役割・残作業の記載・関連付け）の更新のみ。コミット・push・新しいPRは作らない。既存の要件の削除や完了条件の縮小、マージ・本番反映・認証方式や環境変数・Secretsの変更はしない。判断が要る点は実装せずIssueコメントで相談する。";
+
+export type FixScopeKind = "code" | "metadata";
+
+export function bodyHash(body: string | null | undefined): string {
+  return createHash("sha256").update(body ?? "").digest("hex").slice(0, 16);
+}
+
 export type FixRequestFailure = {
   ok: false;
   error:
@@ -33,6 +43,7 @@ export type FixRequestFailure = {
     | "not_open"
     | "no_linked_issue"
     | "head_moved"
+    | "body_moved"
     | "repair_in_progress"
     | "github_error";
   message: string;
@@ -56,14 +67,20 @@ export function buildFixRequestBody(params: {
   headSha: string;
   instruction: string;
   key: string;
+  scope?: FixScopeKind;
 }): string {
+  const metadata = params.scope === "metadata";
   return [
     `@claude PR #${params.number}（HEAD ${params.headSha.slice(0, 7)}）の修正をお願いします。チャットでの調査と合意に基づく依頼です。`,
     "",
     redactSecrets(params.instruction.trim()),
     "",
-    FIX_REQUEST_SCOPE,
-    "修正後はテスト・lint・型チェックを実行し、結果と残課題をこのIssueへコメントしてください。同じPRのブランチへpushし、新しいPRは作らないでください。",
+    "この依頼は、利用者がチャットで原因と方針を確認して承認したものです。上の方針は回答済みとして扱い、同じ方針の質問で停止しないでください。",
+    "",
+    metadata ? FIX_REQUEST_SCOPE_METADATA : FIX_REQUEST_SCOPE,
+    metadata
+      ? "更新したPR本文・Issue本文の変更箇所と、元の指摘がどう解消したかをこのIssueへコメントしてください。コミット・pushはしないでください（HEADが変わらなくても未修正ではありません）。"
+      : "修正後はテスト・lint・型チェックを実行し、結果と残課題をこのIssueへコメントしてください。同じPRのブランチへpushし、新しいPRは作らないでください。",
     "",
     `<!-- ${FIX_REQUEST_MARKER}:${params.key} sha=${params.headSha} -->`,
   ].join("\n");
@@ -81,6 +98,9 @@ export async function requestPullRequestFix(
     number: number;
     expectedHeadSha: string;
     instruction: string;
+    scope?: FixScopeKind;
+    /** 調査時点のPR本文のハッシュ。`metadata`で本文が変わっていたら中断する */
+    expectedBodyHash?: string;
   },
 ): Promise<FixRequestSent | FixRequestFailure> {
   const { owner, repo, number } = params;
@@ -107,7 +127,14 @@ export async function requestPullRequestFix(
         message: `調査したHEAD（${params.expectedHeadSha.slice(0, 7)}）から進んでいます（現在 ${pr.head.sha.slice(0, 7)}）。古い前提で直さないよう中断しました。もう一度調べ直してください。`,
       };
     }
-    const key = fixRequestKey(fullName, number, pr.head.sha, params.instruction);
+    if (params.scope === "metadata" && params.expectedBodyHash && bodyHash(pr.body) !== params.expectedBodyHash) {
+      return {
+        ok: false,
+        error: "body_moved",
+        message: "調査後にPR本文が更新されています。古い前提で上書きしないよう中断しました。もう一度調べ直してください。",
+      };
+    }
+    const key = fixRequestKey(fullName, number, pr.head.sha, `${params.scope ?? "code"}:${params.instruction}`);
     const existing = (await fetchCommentsForIssue(owner, repo, issueNumber, token)).find((c) =>
       c.body?.includes(`${FIX_REQUEST_MARKER}:${key}`),
     );
@@ -122,7 +149,7 @@ export async function requestPullRequestFix(
         message: "このPRは現在自動修正中です。完了してから依頼してください。",
       };
     }
-    const body = buildFixRequestBody({ number, headSha: pr.head.sha, instruction: params.instruction, key });
+    const body = buildFixRequestBody({ number, headSha: pr.head.sha, instruction: params.instruction, key, scope: params.scope });
     const posted = await withUserGithubToken(user, `chat fix-request ${fullName}#${number}`, (userToken) =>
       createComment(owner, repo, issueNumber, userToken, { body }),
     );
