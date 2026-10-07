@@ -30,6 +30,7 @@ type PullRequestDetailDialogProps = {
   onClose: () => void;
   /** 検証結果の「修正をIssueにする」ボタン（#2838）。`PullRequestDetail`へそのまま中継する */
   onCreateFixIssue?: (row: ReleaseVerificationRow, pullRequest: PullRequestSummary) => void;
+  onDraftFixIssue?: (pullRequest: PullRequestSummary) => void;
   issueSuggestions?: IssueSuggestion[];
 };
 
@@ -66,6 +67,7 @@ export function PullRequestDetailDialog({
   onUpdated,
   onClose,
   onCreateFixIssue,
+  onDraftFixIssue,
   issueSuggestions = [],
 }: PullRequestDetailDialogProps) {
   const open = pullRequestId !== null;
@@ -101,6 +103,7 @@ export function PullRequestDetailDialog({
           onClosed={onPullRequestClosed}
           onUpdated={onUpdated}
           onCreateFixIssue={onCreateFixIssue}
+          onDraftFixIssue={onDraftFixIssue}
           issueSuggestions={issueSuggestions}
           className="min-h-0"
           headerLeading={

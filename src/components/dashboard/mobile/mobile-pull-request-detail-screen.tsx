@@ -21,6 +21,7 @@ type MobilePullRequestDetailScreenProps = {
   onBack: () => void;
   /** 検証結果の「修正をIssueにする」ボタン（#2838）。`PullRequestDetail`へそのまま中継する */
   onCreateFixIssue?: (row: ReleaseVerificationRow, pullRequest: PullRequestSummary) => void;
+  onDraftFixIssue?: (pullRequest: PullRequestSummary) => void;
   issueSuggestions?: IssueSuggestion[];
 };
 
@@ -39,6 +40,7 @@ export function MobilePullRequestDetailScreen({
   onUpdated,
   onBack,
   onCreateFixIssue,
+  onDraftFixIssue,
   issueSuggestions = [],
 }: MobilePullRequestDetailScreenProps) {
   return (
@@ -52,6 +54,7 @@ export function MobilePullRequestDetailScreen({
       onClosed={onClosed}
       onUpdated={onUpdated}
       onCreateFixIssue={onCreateFixIssue}
+      onDraftFixIssue={onDraftFixIssue}
       issueSuggestions={issueSuggestions}
       className="h-full"
       footerSpacing

@@ -4276,6 +4276,15 @@ PR一覧画面（`pane=pull-requests`）へは遷移しない——リリース�
   （`resolvePullRequestHeader`）。連携していないリポジトリのPRは詳細APIが404になり、
   ダイアログにその旨が出る
 
+### 行から開いたPR詳細に「修正Issueを起案」を出す（#4154）
+
+実機確認で「反映されていない」と分かったときに、そのまま修正依頼へ進めるための導線。マージ済みの
+リリースPR以外のPR詳細ヘッダー下に「修正Issueを起案」を出し、押すと対象PR・元Issue・マージ日時を
+引用した下書き入りの新規Issue作成ダイアログを開く（`buildPullRequestFixIssueDraft`・
+[`lib/github/pull-request-release-fix-issue.ts`](../src/lib/github/pull-request-release-fix-issue.ts)）。
+**ここでは起票しない**（`openIssueDraftDialog`経由）。レビュー指摘を起点にした旧導線（#3965で廃止）とは別で、
+`対象PR:`を読んで自動closeする巡回は持たない。
+
 ### 動作確認のフラグは「対象を選ぶ」ことでしか絞れない（#2930）
 
 リリースした機能が本番で動いているかを確かめたかどうかを、カードの「未確認」「確認済み」で

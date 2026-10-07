@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, type CSSProperties } from "react";
-import { ExternalLink, RefreshCw } from "lucide-react";
+import { ExternalLink, RefreshCw, Wrench } from "lucide-react";
+import { showsPullRequestFixIssueButton } from "@/lib/github/pull-request-release-fix-issue";
 
 import { DeployFailureAlert } from "@/components/dashboard/deploy-failure-alert";
 import { GithubReferenceLink } from "@/components/dashboard/github-reference-link";
@@ -70,6 +71,11 @@ type PullRequestDetailProps = {
    * 渡さない画面ではボタンを出さない。起点のリリースPRは表示中の`pullRequest`から渡す。
    */
   onCreateFixIssue?: (row: ReleaseVerificationRow, pullRequest: PullRequestSummary) => void;
+  /**
+   * マージ済みPRの「修正Issueを起案」。リリース履歴で実機確認して反映されていなかったときに、
+   * 対象PRを引用した新規Issueの下書きを開く（#4154）。渡さない画面ではボタンを出さない。
+   */
+  onDraftFixIssue?: (pullRequest: PullRequestSummary) => void;
   /** PR本文を編集するときの`@Issue番号`補完に使う候補一覧 */
   issueSuggestions?: IssueSuggestion[];
   /** ヘッダーの左に置く戻るボタン等（スマホ画面向け） */
@@ -158,6 +164,7 @@ export function PullRequestDetail({
   onClosed,
   onUpdated,
   onCreateFixIssue,
+  onDraftFixIssue,
   issueSuggestions = [],
   headerLeading,
   className,
@@ -329,6 +336,17 @@ export function PullRequestDetail({
               >
                 Issue #{pullRequest.linkedIssueNumber}
               </GithubReferenceLink>
+            )}
+            {onDraftFixIssue && showsPullRequestFixIssueButton(pullRequest) && (
+              <Button
+                size="sm"
+                variant="outline"
+                className="ml-auto h-7 text-xs"
+                onClick={() => onDraftFixIssue(pullRequest)}
+              >
+                <Wrench className="size-3.5" />
+                修正Issueを起案
+              </Button>
             )}
           </div>
 
