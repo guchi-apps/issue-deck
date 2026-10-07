@@ -9,6 +9,7 @@ import type {
   ChatFreshness,
   ChatMemory,
   ChatMessageView,
+  ChatRunView,
 } from "@/lib/chat/types";
 import { EMPTY_CHAT_MEMORY } from "@/lib/chat/types";
 
@@ -45,7 +46,12 @@ type OpenedConversation = {
   hasMore: boolean;
   freshness: ChatFreshness[] | null;
   staleConfirms: { messageId: string; reason: string }[];
+  /** サブPCのCodexで回答を作っている途中の発言（#4109）。再読込後も「回答中」を戻す */
+  activeRun?: ChatRunView | null;
 };
+
+/** 回答待ちを取りに行く間隔 */
+const RUN_POLL_INTERVAL_MS = 2_500;
 
 async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, init);
@@ -55,6 +61,7 @@ async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
     if (reason === "preview_mode_forbidden") throw new Error("この環境では実行できません（プレビュー環境）。");
     if (reason === "repository_access_lost") throw new Error("このリポジトリへのアクセス権が無いため、この会話では実行できません。");
     if (reason === "conflict") throw new Error("他の端末の更新と重なりました。もう一度お試しください。");
+    if (reason === "run_in_progress") throw new Error("前の発言の回答を作っています。回答が届いてから送ってください。");
     throw new Error(reason);
   }
   return json;
@@ -90,6 +97,7 @@ export function useChat(active: boolean) {
   const [outbox, setOutbox] = useState<ChatOutboxItem[]>([]);
   const [isSending, setIsSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [run, setRun] = useState<ChatRunView | null>(null);
   const idRef = useRef<string | null>(null);
 
   const listUrl = useCallback(() => {
@@ -127,6 +135,7 @@ export function useChat(active: boolean) {
     setMemory(json.memory);
     setFreshness(json.freshness);
     setStaleConfirms(Object.fromEntries(json.staleConfirms.map((item) => [item.messageId, item.reason])));
+    setRun(json.activeRun ?? null);
   }, []);
 
   /** 開き直し・別端末で開く場合の復元。`refresh`でGitHub上の現在の状態も取り直す */
@@ -173,6 +182,7 @@ export function useChat(active: boolean) {
           setMemory(json.memory);
           setTitle(json.title);
           setArchived(json.archived);
+          setRun(json.activeRun ?? null);
         })
         .catch(() => undefined);
     };
@@ -194,7 +204,44 @@ export function useChat(active: boolean) {
     setStaleConfirms({});
     setOutbox([]);
     setError(null);
+    setRun(null);
   }, []);
+
+  // 回答待ち（Codex CLI経由。#4109）の間は、結果を取りに行く。届いたら返信を足して終える
+  useEffect(() => {
+    const id = conversationId;
+    if (!active || !id || run?.status !== "running") return;
+    const runId = run.id;
+    let stopped = false;
+    const timer = setInterval(() => {
+      void requestJson<{
+        run: ChatRunView;
+        message: ChatMessageView | null;
+        context: ChatContext | null;
+        memory: ChatMemory | null;
+      }>(`/api/chat/${id}/run?runId=${encodeURIComponent(runId)}`)
+        .then((json) => {
+          if (stopped || idRef.current !== id) return;
+          if (json.run.status === "running") {
+            setRun((current) => (current?.id === runId ? json.run : current));
+            return;
+          }
+          if (json.message) {
+            const message = json.message;
+            setMessages((current) => (current.some((m) => m.id === message.id) ? current : [...current, message]));
+          }
+          if (json.context) setContext(json.context);
+          if (json.memory) setMemory(json.memory);
+          setRun(null);
+          void refreshList();
+        })
+        .catch(() => undefined);
+    }, RUN_POLL_INTERVAL_MS);
+    return () => {
+      stopped = true;
+      clearInterval(timer);
+    };
+  }, [active, conversationId, run?.id, run?.status, refreshList]);
 
   const deliver = useCallback(
     async (item: ChatOutboxItem) => {
@@ -211,16 +258,20 @@ export function useChat(active: boolean) {
           idRef.current = id;
           setConversationId(id);
         }
-        const json = await requestJson<{ messages: ChatMessageView[]; context: ChatContext; memory?: ChatMemory }>(
-          `/api/chat/${id}`,
-          jsonInit("POST", { text: item.text, clientMessageId: item.clientId }),
-        );
+        const json = await requestJson<{
+          messages: ChatMessageView[];
+          context?: ChatContext;
+          memory?: ChatMemory;
+          run?: ChatRunView | null;
+        }>(`/api/chat/${id}`, jsonInit("POST", { text: item.text, clientMessageId: item.clientId }));
         setMessages((current) => {
           const known = new Set(current.map((m) => m.id));
           return [...current, ...json.messages.filter((m) => !known.has(m.id))];
         });
-        setContext(json.context);
+        if (json.context) setContext(json.context);
         if (json.memory) setMemory(json.memory);
+        // Codexで回答を作る場合は、発言だけが保存されて返る（回答は後から取りに行く）
+        if (json.run?.status === "running") setRun(json.run);
         setOutbox((current) => current.filter((o) => o.clientId !== item.clientId));
         setTitle((current) => current || item.text.slice(0, 40));
         void refreshList();
@@ -239,12 +290,12 @@ export function useChat(active: boolean) {
   const send = useCallback(
     async (text: string, repo: string | null) => {
       const body = text.trim();
-      if (!body || isSending) return;
+      if (!body || isSending || run?.status === "running") return;
       const item: ChatOutboxItem = { clientId: newClientId(), text: body, repo, state: "sending", error: null };
       setOutbox((current) => [...current, item]);
       await deliver(item);
     },
-    [deliver, isSending],
+    [deliver, isSending, run?.status],
   );
 
   /** 保存に失敗した発言を、同じIDで再送する（サーバー側で保存済みなら二重登録されない） */
@@ -333,6 +384,7 @@ export function useChat(active: boolean) {
     staleConfirms,
     outbox,
     isSending,
+    run,
     error,
     open,
     loadOlder,

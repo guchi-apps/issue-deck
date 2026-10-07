@@ -51,6 +51,7 @@ import { NightlyRunNotice } from "@/components/dashboard/nightly-run-marks";
 import { StartImplementationDialog } from "@/components/dashboard/start-implementation-dialog";
 import { SubIssueProgress } from "@/components/dashboard/sub-issue-progress";
 import { StartLocalSessionButton } from "@/components/dashboard/start-local-session-button";
+import { useCodeReviewRun } from "@/hooks/use-code-review-run";
 import { useDispatchState } from "@/hooks/use-dispatch-state";
 import {
   findBlockingSession,
@@ -126,11 +127,9 @@ import {
   buildCodeReviewFindingIssueIndex,
   findLatestCodeReviewReport,
   isCodeReviewIssue,
-  isCodeReviewPending,
   type CodeReviewFinding,
 } from "@/lib/github/code-review";
 import {
-  ARTIFACT_REQUIRED_LABEL,
   canStartImplementation,
   startImplementationDisabledReason,
 } from "@/lib/github/start-implementation";
@@ -274,8 +273,12 @@ export function MobileIssueDetail({
     useIssueComments(issue);
   const { relations: subIssueRelations } = useIssueSubIssues(issue);
   // セッションが公開したアーティファクト（#2154）。PC版（`issue-detail.tsx`）と同じ扱い
-  const { artifacts, isLoaded: isArtifactsLoaded, reload: reloadArtifacts } =
-    useIssueArtifacts(issue);
+  const {
+    artifacts,
+    isLoaded: isArtifactsLoaded,
+    isFailed: isArtifactsFailed,
+    reload: reloadArtifacts,
+  } = useIssueArtifacts(issue);
   const taskList = useIssueTaskList(issue, onIssueUpdated);
   // 手作業Issueが待っている相手の状況（#1705）。PCの詳細と同じフック・同じ部品を使う
   const manualStepPrerequisites = useManualStepPrerequisites(issue, issues);
@@ -321,6 +324,8 @@ export function MobileIssueDetail({
   );
   // ディスパッチ状態はこの画面で1回だけ取得し、起動ボタン・実行先の表示へ配る（#1262）
   const dispatch = useDispatchState(true);
+  // コードレビューIssue（#698）の実行の状態（#4116）。一覧のバッジと同じ関数で決める
+  const codeReviewRun = useCodeReviewRun(issue, comments, dispatch);
   // 計画が出し直されたら取り直す（#3493）。作成を依頼した後の計画では公開済みになっているため
   const planRequestId = (issue
     ? findPlanRequestForIssue(dispatch.planRequests ?? [], issue.repositoryFullName, issue.number)
@@ -501,7 +506,6 @@ export function MobileIssueDetail({
   const codeReview = isCodeReviewIssue(issue)
     ? {
         report: findLatestCodeReviewReport(comments),
-        isPending: isCodeReviewPending(comments),
         // 同じ指摘を2回起票しないための照合（#698）。**同じリポジトリの同じタイトル**だけを見る
         // （レビューを回し直すと同じ指摘が返るため、無いと同じIssueが何件も立つ）
         createdFindingIssues: buildCodeReviewFindingIssueIndex(issues, issue.repositoryFullName),
@@ -1027,8 +1031,7 @@ export function MobileIssueDetail({
               planReview={pendingPlanReview}
               planReviewJob={planReviewJob}
               artifactsMissing={
-                  issue.labels.some((label) => label.name === ARTIFACT_REQUIRED_LABEL) &&
-                  isArtifactsLoaded &&
+                  isArtifactsLoaded && !isArtifactsFailed &&
                   artifacts.length === 0
                 }
             />
@@ -1113,7 +1116,11 @@ export function MobileIssueDetail({
         {codeReview && (
           <CodeReviewPanel
             report={codeReview.report}
-            isPending={codeReview.isPending}
+            runStatus={codeReviewRun?.runStatus ?? "missing"}
+            job={codeReviewRun?.job}
+            onRerun={() => void codeReviewRun?.rerun()}
+            isRerunning={codeReviewRun?.isRerunning}
+            rerunError={codeReviewRun?.rerunError}
             createdFindingIssues={codeReview.createdFindingIssues}
             onRestartReview={() => onStartCodeReview(issue.repositoryFullName)}
             onCreateFindingIssue={(finding) => onCreateCodeReviewFindingIssue(issue, finding)}

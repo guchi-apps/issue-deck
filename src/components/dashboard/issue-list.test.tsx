@@ -36,7 +36,7 @@ let workflowRunningByIssueId: Record<string, { isRunning: boolean }> = {};
 let codeReviewSummaries = new Map<string, CodeReviewSummary>();
 
 vi.mock("@/hooks/use-code-review-reports", () => ({
-  useCodeReviewReports: () => codeReviewSummaries,
+  useCodeReviewReports: () => ({ summaries: codeReviewSummaries, reload: () => {} }),
   codeReviewSummaryKey: (issue: { repositoryFullName: string; number: number }) =>
     `${issue.repositoryFullName}#${issue.number}`,
 }));

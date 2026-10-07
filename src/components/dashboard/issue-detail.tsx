@@ -101,6 +101,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sh
 import { useFirstUnreadCommentIndex } from "@/hooks/use-first-unread-comment-index";
 import { useIssueCommentMutations } from "@/hooks/use-issue-comment-mutations";
 import { useIssueCommentSummaries } from "@/hooks/use-issue-comment-summaries";
+import { useCodeReviewRun } from "@/hooks/use-code-review-run";
 import { useDispatchState } from "@/hooks/use-dispatch-state";
 import { useIssueArtifacts } from "@/hooks/use-issue-artifacts";
 import { useIssueComments } from "@/hooks/use-issue-comments";
@@ -143,11 +144,9 @@ import {
   buildCodeReviewFindingIssueIndex,
   findLatestCodeReviewReport,
   isCodeReviewIssue,
-  isCodeReviewPending,
   type CodeReviewFinding,
 } from "@/lib/github/code-review";
 import {
-  ARTIFACT_REQUIRED_LABEL,
   canStartImplementation,
   startImplementationDisabledReason,
 } from "@/lib/github/start-implementation";
@@ -276,8 +275,12 @@ export function IssueDetail({
   const { relations: subIssueRelations } = useIssueSubIssues(issue);
   // セッションが公開したアーティファクト（#2154）。本文・コメント中のclaude.aiリンクを
   // アプリ内プレビューへ差し替えるためにも使うので、セクションより外側で取る
-  const { artifacts, isLoaded: isArtifactsLoaded, reload: reloadArtifacts } =
-    useIssueArtifacts(issue);
+  const {
+    artifacts,
+    isLoaded: isArtifactsLoaded,
+    isFailed: isArtifactsFailed,
+    reload: reloadArtifacts,
+  } = useIssueArtifacts(issue);
   // 手作業Issueが待っている相手の状況（#1705）。スマホの詳細でも同じフックを使う
   const manualStepPrerequisites = useManualStepPrerequisites(issue, issues);
   // 実機のファイル変更を管理リポジトリへ切り出せるか（#2021）。**手作業Issueでしか見ない**
@@ -319,6 +322,8 @@ export function IssueDetail({
   // 子（StartImplementationDialog・StartLocalSessionButton）が各自で取得すると、
   // 同じ画面のためにポーリングが何本も走る
   const dispatch = useDispatchState(true);
+  // コードレビューIssue（#698）の実行の状態（#4116）。一覧のバッジと同じ関数で決める
+  const codeReviewRun = useCodeReviewRun(issue, comments, dispatch);
   // 未反映の計画レビュー（#3554）。計画承認パネルと、無人実行の計画のカードへ指摘ごとに出す
   const pendingPlanReview = useMemo(() => resolvePendingPlanReview(comments), [comments]);
   const planReviewNotice = useMemo(() => resolvePlanReviewNotice(comments), [comments]);
@@ -636,7 +641,6 @@ export function IssueDetail({
   const codeReview = isCodeReviewIssue(issue)
     ? {
         report: findLatestCodeReviewReport(comments),
-        isPending: isCodeReviewPending(comments),
         // 同じ指摘を2回起票しないための照合（#698）。**同じリポジトリの同じタイトル**だけを見る
         // （レビューを回し直すと同じ指摘が返るため、無いと同じIssueが何件も立つ）
         createdFindingIssues: buildCodeReviewFindingIssueIndex(issues, issue.repositoryFullName),
@@ -1129,8 +1133,7 @@ export function IssueDetail({
                 planReviewNotice={planReviewNotice}
                 planReviewJob={planReviewJob}
                 artifactsMissing={
-                  issue.labels.some((label) => label.name === ARTIFACT_REQUIRED_LABEL) &&
-                  isArtifactsLoaded &&
+                  isArtifactsLoaded && !isArtifactsFailed &&
                   artifacts.length === 0
                 }
               />
@@ -1204,7 +1207,11 @@ export function IssueDetail({
           {codeReview && (
             <CodeReviewPanel
               report={codeReview.report}
-              isPending={codeReview.isPending}
+              runStatus={codeReviewRun?.runStatus ?? "missing"}
+              job={codeReviewRun?.job}
+              onRerun={() => void codeReviewRun?.rerun()}
+              isRerunning={codeReviewRun?.isRerunning}
+              rerunError={codeReviewRun?.rerunError}
               createdFindingIssues={codeReview.createdFindingIssues}
               onRestartReview={() => onStartCodeReview(issue.repositoryFullName)}
               onCreateFindingIssue={(finding) => onCreateCodeReviewFindingIssue(issue, finding)}

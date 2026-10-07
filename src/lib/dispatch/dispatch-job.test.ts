@@ -1140,6 +1140,7 @@ describe("横断質問（#1454）", () => {
       codexCapable: null,
       codexRemoteControlCapable: null,
       manualStepSessionCapable: null,
+      chatCodexCapable: null,
       selfUpdateCapable: null,
       previewCapable: null,
       rebootCapable: null,
@@ -1330,6 +1331,7 @@ describe("計画レビュー（PLAN_REVIEW）", () => {
       codexCapable: null,
       codexRemoteControlCapable: null,
       manualStepSessionCapable: null,
+      chatCodexCapable: null,
       selfUpdateCapable: null,
       previewCapable: null,
       rebootCapable: null,
@@ -1696,6 +1698,7 @@ describe("コードレビュー（CODE_REVIEW）", () => {
       codexCapable: null,
       codexRemoteControlCapable: null,
       manualStepSessionCapable: null,
+      chatCodexCapable: null,
       selfUpdateCapable: null,
       previewCapable: null,
       rebootCapable: null,
@@ -1735,7 +1738,7 @@ describe("コードレビュー（CODE_REVIEW）", () => {
   it("キューでは「コードレビュー」として並ぶ", () => {
     expect(describeDispatchJobKind("CODE_REVIEW")).toBe("コードレビュー");
     expect(describeDispatchJobStatus("SUCCEEDED", "CODE_REVIEW")).toEqual({
-      label: "コードレビューを開始しました",
+      label: "コードレビューが完了しました",
       tone: "success",
     });
   });
@@ -2064,6 +2067,7 @@ describe("resolveManualStepHost", () => {
       codexCapable: null,
       codexRemoteControlCapable: null,
       manualStepSessionCapable: null,
+      chatCodexCapable: null,
       selfUpdateCapable: null,
       previewCapable: null,
       rebootCapable: null,
@@ -2141,6 +2145,7 @@ describe("エージェントの選択（#2505）", () => {
       codexCapable: true,
       codexRemoteControlCapable: null,
       manualStepSessionCapable: null,
+      chatCodexCapable: null,
       selfUpdateCapable: null,
       previewCapable: null,
       rebootCapable: null,
@@ -2222,6 +2227,7 @@ describe("resolveManualStepSessionRejection（#2771）", () => {
   const host = {
     online: true,
     manualStepSessionCapable: true as boolean | null,
+    chatCodexCapable: null,
     codexCapable: true as boolean | null,
   };
   const base = { host, isManualStepIssue: true, hasActiveJob: false, blockingSession: null };

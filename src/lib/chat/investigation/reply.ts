@@ -33,6 +33,8 @@ import { fetchPullRequest } from "@/lib/github/pull-requests-api";
 
 export type InvestigationDeps = {
   callModel?: CallModel;
+  /** 時間の上限の差し替え（Codex CLI経由。#4109） */
+  limits?: { maxDurationMs?: number; stepTimeoutMs?: number };
   tool?: (
     ctx: Parameters<typeof runTool>[0],
     name: string,
@@ -51,11 +53,22 @@ export type InvestigationReply = {
 
 /** AIを呼べなかった理由の種別と、利用者が次にすること（機密値は含まない固定文面だけ） */
 export function describeUnavailable(stopReason: string): { kind: string; label: string; next: string } {
+  // サブPCのCodex CLI経由（#4109）。種別は`codex-model.ts`が理由の先頭に付ける
+  const codex = /Codex\((\w+)\)/.exec(stopReason)?.[1];
+  if (codex) return describeCodexUnavailable(codex);
   if (/認証情報が設定/.test(stopReason)) {
     return { kind: "auth_missing", label: "AIの認証情報が未設定です", next: "設定のAI項目で認証情報を登録してから、再試行してください。" };
   }
   if (/HTTP (401|403)/.test(stopReason)) {
     return { kind: "auth_rejected", label: "AIの認証が拒否されました", next: "設定のAI項目で認証情報の有効期限・権限を確認してから、再試行してください。" };
+  }
+  // APIの残高切れは、待っても回復しない（#4109）。通常のレート制限と同じ案内にしない
+  if (/credit_balance_exhausted|insufficient_quota|billing/.test(stopReason)) {
+    return {
+      kind: "api_credit_exhausted",
+      label: "AI APIの残高（従量課金のクレジット）が尽きています",
+      next: "待っても回復しません。API残高を補充するか、設定のAI実行プロバイダーをCodex（サブPCのサブスク枠）またはClaudeへ切り替えてから再試行してください。",
+    };
   }
   if (/HTTP 429/.test(stopReason)) {
     return { kind: "rate_limited", label: "AIの利用上限に達しています", next: "しばらく待ってから再試行してください。" };
@@ -67,6 +80,38 @@ export function describeUnavailable(stopReason: string): { kind: string; label: 
     return { kind: "bad_response", label: "AIの応答を読み取れませんでした", next: "もう一度試してください。続けて失敗する場合は、質問を短く分けて送ってください。" };
   }
   return { kind: "other", label: "AIの調査を始められませんでした", next: "再試行してください。続く場合は設定のAI項目を確認してください。" };
+}
+
+/** 理由の先頭に付けた機械向けの種別（`Codex(usage_limit)`）を、画面に出す文面から外す */
+function displayReason(reason: string): string {
+  return reason.replace(/Codex\(\w+\)\s*/g, "");
+}
+
+function describeCodexUnavailable(code: string): { kind: string; label: string; next: string } {
+  const kind = `codex_${code}`;
+  switch (code) {
+    case "offline":
+    case "not_claimed":
+      return { kind, label: "サブPCに接続できません（Codexの実行先が応答しません）", next: "サブPCとpollerが動いているかを実行状況パネルで確認してから、再試行してください。" };
+    case "unsupported":
+      return { kind, label: "サブPCのpollerがチャットのCodex実行に未対応です", next: "設定のフリート運用から「更新して再起動」でサブPCのpollerを更新してから、再試行してください。" };
+    case "not_logged_in":
+      return { kind, label: "サブPCのCodex CLIが未ログインです", next: "サブPCで `codex login`（ChatGPTアカウント）を済ませてから、再試行してください。" };
+    case "api_key_auth":
+      return { kind, label: "サブPCのCodex CLIがAPIキーでログインしています", next: "従量課金を避けるため使いません。サブPCで `codex logout` → `codex login`（ChatGPTアカウント）を行ってから、再試行してください。" };
+    case "usage_limit":
+      return { kind, label: "Codex（ChatGPTサブスク）の利用枠の上限に達しています", next: "枠がリセットされてから再試行するか、設定のAI実行プロバイダーをClaudeへ切り替えてください。" };
+    case "timeout":
+      return { kind, label: "Codexの応答が時間切れになりました", next: "少し待って再試行してください。続く場合は質問を短く分けて送ってください。" };
+    case "bad_output":
+      return { kind, label: "Codexの応答を読み取れませんでした", next: "もう一度試してください。続けて失敗する場合は、質問を短く分けて送ってください。" };
+    case "unsupported_model":
+      return { kind, label: "選択中のモデルはCodex実行に未対応です", next: "設定のAI項目で、調査用モデルをGPT系（Sol・Terra・Luna）にしてから再試行してください。" };
+    case "provider_changed":
+      return { kind, label: "AI実行プロバイダーが切り替わりました", next: "同じ内容をもう一度送ってください。" };
+    default:
+      return { kind: "codex_error", label: "サブPCでのCodex実行に失敗しました", next: "再試行してください。続く場合はサブPCの実行ログを確認してください。" };
+  }
 }
 
 const ISSUE_ASK = /(issue|起案|起票)/i;
@@ -172,6 +217,7 @@ export async function replyWithInvestigation(params: {
     ctx: { user, defaultRepo, now: () => new Date() },
     callModel: params.deps?.callModel ?? callInvestigationModel,
     tool: params.deps?.tool,
+    limits: params.deps?.limits,
     userText,
     history: params.history,
     investigation: context.investigation,
@@ -188,7 +234,7 @@ export async function replyWithInvestigation(params: {
       options: [{ label: "同じ内容で再試行", send: params.text }],
     });
     return {
-      text: `回答できませんでした：${failure.label}（${result.stopReason}）。${failure.next}\n相談内容は会話に残っています。定型の確認（「#番号どうなってる？」）は引き続き使えます。`,
+      text: `回答できませんでした：${failure.label}（${displayReason(result.stopReason ?? "")}）。${failure.next}\n相談内容は会話に残っています。定型の確認（「#番号どうなってる？」）は引き続き使えます。`,
       cards,
       needsConfirm: false,
       nextContext: context,
@@ -199,7 +245,18 @@ export async function replyWithInvestigation(params: {
   const allowed = allowedProposals(params.text, context.investigation);
   let text = result.reply || fallbackText(result);
   if (result.stopReason) {
-    text = `${text}\n\n⚠️ 調査を途中で止めました: ${result.stopReason}。上の内容は、ここまでに確認できた範囲です。`;
+    text = `${text}\n\n⚠️ 調査を途中で止めました: ${displayReason(result.stopReason)}。上の内容は、ここまでに確認できた範囲です。`;
+    // 実行先の都合で止まった場合（Codexの利用枠・サブPC接続・API残高など。#4109）は、原因に合った
+    // 次の行動と、同じ内容での再試行を出す
+    const failure = describeUnavailable(result.stopReason);
+    if (failure.kind.startsWith("codex_") || failure.kind === "api_credit_exhausted") {
+      text += `\n${failure.label}。${failure.next}`;
+      cards.push({
+        type: "choice",
+        question: "同じ内容でもう一度送れます。",
+        options: [{ label: "同じ内容で再試行", send: params.text }],
+      });
+    }
   }
 
   if (result.evidence.length || result.facts.length || result.inferences.length || result.unconfirmed.length || result.stopReason) {

@@ -6,6 +6,8 @@ import {
   describeSessionReap,
   describeSessionStep,
   describeSessionRecovery,
+  buildTimelineStepTitle,
+  describeTimelineStep,
   findSessionForIssue,
   isSessionWaitingInput,
   resolveImplementationPosition,
@@ -667,5 +669,33 @@ describe("describeSessionPermission", () => {
     expect(summarizeIssueSession(session({ activity: "WAITING_INPUT" })).shortLabel).toBe(
       "入力を待っています",
     );
+  });
+});
+
+describe("describeTimelineStep（#4124）", () => {
+  it("作業ログのステップコードを日本語の状態名と1行説明へ言い換える", () => {
+    expect(describeTimelineStep(buildTimelineStepTitle("EXPLORING"))).toEqual({
+      label: "調査中",
+      description: "ファイル・コード・履歴を読んで調べています",
+    });
+    expect(describeTimelineStep("作業: RUNNING")?.label).toBe("コマンド実行中");
+    expect(describeTimelineStep("作業: PLANNING")?.label).toBe("計画作成中");
+  });
+
+  it("全てのステップに日本語の状態名と1行説明がある", async () => {
+    const { SESSION_STEPS } = await import("@/lib/dispatch/session-state");
+    for (const step of SESSION_STEPS) {
+      const described = describeTimelineStep(buildTimelineStepTitle(step));
+      expect(described?.description).toBeTruthy();
+      expect(described?.label).not.toBe("作業中");
+    }
+  });
+
+  it("知らないコードは英語のまま出さない", () => {
+    expect(describeTimelineStep("作業: DEPLOYING")).toEqual({ label: "作業中", description: null });
+  });
+
+  it("作業行でない題は言い換えない", () => {
+    expect(describeTimelineStep("セッション開始")).toBeNull();
   });
 });

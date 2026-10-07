@@ -20,6 +20,15 @@ import {
   summarizeCodeReviewComments,
   summarizeCodeReviewFindingProgress,
 } from "@/lib/github/code-review";
+import {
+  CODE_REVIEW_REPORT_MARKER as REPORT_MARKER_4116,
+  CODE_REVIEW_REQUEST_MARKER as REQUEST_MARKER_4116,
+  canRerunCodeReview,
+  codeReviewRerunCommentBody,
+  parseCodeReviewRunId,
+  resolveCodeReviewRunStatus,
+  summarizeCodeReviewComments as summarize4116,
+} from "@/lib/github/code-review";
 
 const REPORT = `${CODE_REVIEW_REPORT_MARKER}
 読んだコード: guchi-apps/issue-deck origin/develop 9b25283b・2026-08-22
@@ -358,5 +367,70 @@ describe("resolveCodeReviewFindingLabels（#3417）", () => {
     expect(
       resolveCodeReviewFindingLabels({ severity: "high", suggestedKindLabels: ["30.bug"], repoLabelNames: [] }),
     ).toEqual([]);
+  });
+});
+
+// #4116。結果コメント・依頼コメント・最新のジョブから状態を決める
+describe("resolveCodeReviewRunStatus", () => {
+  const request = { body: `依頼\n\n${REQUEST_MARKER_4116}` };
+  const report = (runId?: string) => ({
+    body: `${REPORT_MARKER_4116}\n${runId ? `<!-- issue-deck-code-review-run:${runId} -->\n` : ""}読んだコード: x\n\n### [中] 指摘\n\n本文`,
+  });
+  const job = (id: string, status: Parameters<typeof resolveCodeReviewRunStatus>[1] extends infer J ? J extends { status: infer S } ? S : never : never) => ({ id, status });
+
+  it("結果が届いていれば reported", () => {
+    expect(resolveCodeReviewRunStatus(summarize4116([request, report("job-1")]), job("job-1", "SUCCEEDED"))).toBe("reported");
+    // 印の無い結果（対象リポジトリ独自のプロンプト）は順序だけで読む
+    expect(resolveCodeReviewRunStatus(summarize4116([request, report()]), job("job-1", "RUNNING"))).toBe("reported");
+  });
+
+  it("結果が無いときはジョブの状態で決める（依頼時刻では決めない）", () => {
+    const pending = summarize4116([request]);
+    expect(resolveCodeReviewRunStatus(pending, job("j", "QUEUED"))).toBe("queued");
+    expect(resolveCodeReviewRunStatus(pending, job("j", "CLAIMED"))).toBe("queued");
+    expect(resolveCodeReviewRunStatus(pending, job("j", "RUNNING"))).toBe("running");
+    expect(resolveCodeReviewRunStatus(pending, job("j", "FAILED"))).toBe("failed");
+    expect(resolveCodeReviewRunStatus(pending, job("j", "TIMEOUT"))).toBe("timeout");
+    expect(resolveCodeReviewRunStatus(pending, job("j", "SKIPPED"))).toBe("skipped");
+    expect(resolveCodeReviewRunStatus(pending, job("j", "CANCELED"))).toBe("canceled");
+  });
+
+  // 旧版のpollerが起動時点でSUCCEEDEDにした記録・ジョブの記録が無い依頼は、永久の「レビュー中」にしない
+  it("結果が無いのに終わった記録・記録なしは unknown", () => {
+    const pending = summarize4116([request]);
+    expect(resolveCodeReviewRunStatus(pending, job("j", "SUCCEEDED"))).toBe("unknown");
+    expect(resolveCodeReviewRunStatus(pending, null)).toBe("unknown");
+  });
+
+  // 再実行の後に前の実行の結果が遅れて届いても、新しい実行を完了にしない
+  it("前の実行の結果が遅れて届いても、最新の実行の状態を出す", () => {
+    const comments = [request, report("job-old"), { body: codeReviewRerunCommentBody() }, report("job-old")];
+    expect(resolveCodeReviewRunStatus(summarize4116(comments), job("job-new", "RUNNING"))).toBe("running");
+    expect(resolveCodeReviewRunStatus(summarize4116(comments), job("job-new", "SUCCEEDED"))).toBe("unknown");
+  });
+
+  it("再実行の依頼の後は前回の結果を今回の結果として数えない", () => {
+    const comments = [request, report("job-1"), { body: codeReviewRerunCommentBody() }];
+    const summary = summarize4116(comments);
+    expect(summary.state).toBe("reported");
+    expect(summary.awaitingResult).toBe(true);
+    expect(resolveCodeReviewRunStatus(summary, job("job-2", "QUEUED"))).toBe("queued");
+  });
+
+  it("依頼も結果も無ければ missing", () => {
+    expect(resolveCodeReviewRunStatus(summarize4116([]), null)).toBe("missing");
+  });
+
+  it("実行の印を読む", () => {
+    expect(parseCodeReviewRunId(report("cmux8dpzv0800k161c8ol6rq6").body)).toBe("cmux8dpzv0800k161c8ol6rq6");
+    expect(parseCodeReviewRunId(report().body)).toBeNull();
+  });
+
+  it("再実行は結果が届かなかった状態だけで出す", () => {
+    expect(canRerunCodeReview("failed")).toBe(true);
+    expect(canRerunCodeReview("unknown")).toBe(true);
+    expect(canRerunCodeReview("running")).toBe(false);
+    expect(canRerunCodeReview("queued")).toBe(false);
+    expect(canRerunCodeReview("reported")).toBe(false);
   });
 });

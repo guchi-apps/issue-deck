@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { AlertTriangle, ChevronLeft, ChevronRight, X } from "lucide-react";
 
+import { MobileReloadButton } from "@/components/dashboard/mobile/mobile-reload-button";
 import { MobileDispatchStatusButton } from "@/components/dashboard/mobile/mobile-dispatch-status-button";
 import { MobileNotificationButton } from "@/components/dashboard/mobile/mobile-notification-button";
 import { UserAvatar } from "@/components/dashboard/user-avatar";
@@ -55,6 +56,7 @@ type MobileSettingsScreenProps = {
   currentUser: CurrentUser | null;
   autoRetryLimit: number;
   aiExecutionProvider?: AiExecutionProvider;
+  aiProviderOverrides?: import("@/lib/execution-flow-settings").AiProviderOverrides;
   claudeModel: ClaudeModel;
   githubActionsAgent?: GithubActionsAgent;
   githubActionsCodexModel?: CodexLocalModel;
@@ -91,6 +93,7 @@ export function MobileSettingsScreen({
   currentUser,
   autoRetryLimit,
   aiExecutionProvider = "claude",
+  aiProviderOverrides,
   claudeModel,
   githubActionsAgent = "claude",
   githubActionsCodexModel = "gpt-5.6-terra",
@@ -130,7 +133,7 @@ export function MobileSettingsScreen({
     claudeLocalModel, codexModel, defaultDispatchAgent, planReviewAgentForClaude,
     planReviewAgentForCodex, planReviewClaudeModel, planReviewCodexModel,
     dispatchFailoverEnabled, dispatchFailoverThresholdPercent, appAiModel, appAiModelReasoning,
-    modelPickEngine, dispatchConcurrency, onUpdated,
+    modelPickEngine, dispatchConcurrency, aiProviderOverrides, onUpdated,
   };
 
   return (
@@ -150,6 +153,9 @@ export function MobileSettingsScreen({
         <MobileDispatchStatusButton />
         {/* 通知ベル（#1772）。実行状況の右隣で全画面そろえる */}
         <MobileNotificationButton />
+        {/* 画面の更新（#1681）。ホームのヘッダーから移した（#4107）。PWAにはブラウザの再読み込みが
+            無いので、設定を開いた右上に置く */}
+        <MobileReloadButton />
       </header>
 
       <div className="flex flex-1 flex-col gap-4 overflow-y-auto overscroll-contain p-4">

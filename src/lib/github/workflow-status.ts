@@ -10,6 +10,7 @@ import {
   type ProgressSource,
   type ProgressStatusKey,
 } from "@/lib/issue-progress";
+import type { IssuePullRequestProgress } from "@/lib/issue-pull-request-progress";
 import type { Issue } from "@/types/issue";
 
 export type WorkflowStep = {
@@ -219,4 +220,99 @@ export function allocateSegmentWidths(
     remaining += 1;
   }
   return widths;
+}
+
+/**
+ * Issue詳細の進捗表示に使う5フェーズ（#4128）。
+ *
+ * 内部のProject Status（`WORKFLOW_STEPS`の6状態）は既存自動化との互換性のため変えず、
+ * 表示だけをここで「計画 → 実装 → レビュー → 本番反映待ち → 本番反映済み」へ集約する。
+ * developへマージ・mainへマージ・デプロイは独立フェーズにせず、現在フェーズの詳細状態で言う。
+ */
+export type DisplayPhaseKey = "planning" | "implementation" | "review" | "release-wait" | "released";
+
+export type DisplayPhase = {
+  key: DisplayPhaseKey;
+  label: string;
+  /** ツールチップに出す、このフェーズに集約している内部Project Status */
+  projectStatus: string;
+  icon: LucideIcon;
+};
+
+const phaseIcon = (key: ProgressStatusKey): LucideIcon =>
+  ADVANCED_PROGRESS_STATUSES.find((status) => status.key === key)?.icon ?? ADVANCED_PROGRESS_STATUSES[0].icon;
+
+export const DISPLAY_PHASES: readonly DisplayPhase[] = [
+  { key: "planning", label: "計画", projectStatus: "Planning", icon: phaseIcon("planning") },
+  { key: "implementation", label: "実装", projectStatus: "Implementation", icon: phaseIcon("implementation") },
+  { key: "review", label: "レビュー", projectStatus: "Develop PR", icon: phaseIcon("develop-pr") },
+  { key: "release-wait", label: "本番反映待ち", projectStatus: "Develop / Release", icon: phaseIcon("develop") },
+  { key: "released", label: "本番反映済み", projectStatus: "Done", icon: phaseIcon("done") },
+];
+
+const STATUS_TO_DISPLAY_PHASE: Partial<Record<ProgressStatusKey, DisplayPhaseKey>> = {
+  planning: "planning",
+  implementation: "implementation",
+  "develop-pr": "review",
+  develop: "release-wait",
+  release: "release-wait",
+  done: "released",
+};
+
+/** 現在の表示フェーズのindex。未着手・対応終了（本流ステップを出さない状態）はnull */
+export function getDisplayPhaseIndex(issue: ProgressSource): number | null {
+  const key = STATUS_TO_DISPLAY_PHASE[resolveProgressStatus(issue)];
+  if (key === undefined) return null;
+  return DISPLAY_PHASES.findIndex((phase) => phase.key === key);
+}
+
+/** 詳細状態の重さ。`attention`＝止まっている、`running`＝動いている、`waiting`＝人待ち、`idle`＝定常 */
+export type PhaseDetailTone = "attention" | "running" | "waiting" | "idle";
+
+export type PhaseDetail = { text: string; tone: PhaseDetailTone };
+
+/**
+ * 現在フェーズの詳細状態（1行）を導く。PR内訳は`buildIssuePullRequestProgress`の結果を
+ * そのまま使い、優先順位（停止 > 実行中 > 人待ち）もそちらに従う。
+ */
+export function resolvePhaseDetail(
+  status: ProgressStatusKey,
+  options: { pullRequestProgress?: IssuePullRequestProgress | null; planApprovalPending?: boolean } = {},
+): PhaseDetail | null {
+  const pr = options.pullRequestProgress ?? null;
+  switch (status) {
+    case "planning":
+      return options.planApprovalPending
+        ? { text: "計画承認待ち", tone: "waiting" }
+        : { text: "計画を作成中", tone: "running" };
+    case "implementation":
+      return { text: "実装中", tone: "running" };
+    case "develop-pr": {
+      if (pr === null) return { text: "レビュー開始待ち", tone: "running" };
+      if (pr.stopKind === "conflict") return { text: "コンフリクト解消待ち", tone: "attention" };
+      if (pr.stopKind === "ci") return { text: "CI失敗", tone: "attention" };
+      if (pr.stopKind === "review") return { text: "修正対応中", tone: "attention" };
+      if (pr.label === "マージ待ち") {
+        const needsCheck = pr.steps.some((step) => step.key === "ai-review" && step.state === "needs-check");
+        return needsCheck
+          ? { text: "レビュー要確認", tone: "waiting" }
+          : { text: "developへマージ待ち", tone: "waiting" };
+      }
+      if (pr.label === "マージ済み") return { text: "developへマージ中", tone: "running" };
+      if (pr.label === "判定実施中") return { text: "レビュー中", tone: "running" };
+      return { text: pr.label, tone: pr.tone === "waiting" ? "waiting" : "running" };
+    }
+    case "develop":
+      return { text: "develop反映済み・本番リリース待ち", tone: "idle" };
+    case "release": {
+      if (pr === null) return { text: "本番リリース準備中", tone: "running" };
+      if (pr.tone === "attention") return { text: pr.label, tone: "attention" };
+      if (pr.tone === "waiting") return { text: "mainへマージ待ち", tone: "waiting" };
+      return { text: "mainへマージ中", tone: "running" };
+    }
+    case "done":
+      return { text: "本番反映完了", tone: "idle" };
+    default:
+      return null;
+  }
 }

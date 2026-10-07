@@ -20,7 +20,10 @@ import { isDispatchedStatusKey } from "@/lib/github/project-status-dispatch";
 import { getSimpleStepLabel } from "@/lib/github/workflow-step-label";
 import {
   allocateSegmentWidths,
+  DISPLAY_PHASES,
+  getDisplayPhaseIndex,
   getWorkflowStepIndex,
+  resolvePhaseDetail,
   resolveProgressSegments,
   WORKFLOW_STEPS,
   type ProductionTrackerState,
@@ -215,7 +218,7 @@ type ProgressBarProps = {
   segments: readonly ProgressSegmentView[];
   /** 色を決めるTailwindの`text-*`クラス。塗り・未達・掃く光がすべて`currentColor`を参照する */
   colorClass: string;
-  /** 実行中（#4056）。現在フェーズの1区間だけをゆっくり明滅させる。ほかの区間は動かさない */
+  /** 実行中（#4056）。現在フェーズの1区間だけを左から右へ流れる光で動かす（#4122）。ほかの区間は動かさない */
   live?: boolean;
   /**
    * 未達のマス（トラック）を濃く塗るか（#2516）。
@@ -350,7 +353,7 @@ function ProductionTracker({
  * アイコンを添え、一覧をざっと流し見しただけでも要対応Issueだと判別できるようにする。
  * Claudeへの質問が回答待ちの場合はblue色に切り替えたうえで質問アイコンを添える
  * （承認待ちとは別系統の状態のため、両方成立する場合はより緊急度の高い承認待ち表示を優先する）。
- * 実行中は現在フェーズの1区間だけが明滅し、進捗（塗り分け）と実行中（動き）を同じバーで
+ * 実行中は現在フェーズの1区間だけが光が流れ、進捗（塗り分け）と実行中（動き）を同じバーで
  * 同時に表現する。**動かすかどうかの条件はGitHub ActionsとサブPCで材料が違うため、
  * `isWorkflowBadgeSpinning`（#1439）に集約している。**
  *
@@ -506,8 +509,8 @@ export function WorkflowStepBadge({
           aria-hidden="true"
         />
       )}
-      {/* 実行中は現在フェーズの1区間だけが明滅する（#4056）。**承認待ち（amber）でも
-          処理が動いていれば明滅する**（`isWorkflowBadgeSpinning`）。
+      {/* 実行中は現在フェーズの1区間だけが光が流れる（#4056）。**承認待ち（amber）でも
+          処理が動いていれば光が流れる**（`isWorkflowBadgeSpinning`）。
           確認待ち・回答待ちの行では未達のマスも濃く塗り、行の中で色を伝える唯一の場所として
           十分な面積を確保する */}
       <ProgressBar
@@ -570,8 +573,16 @@ export function QueueStepBadge({ queue, waitReason = null }: QueueStepBadgeProps
   );
 }
 
+/** PRの内訳はPRを待っている段（Develop PR・Release）でだけ読む（#2816） */
+function prProgressSource(
+  status: ReturnType<typeof resolveProgressStatus>,
+  progress: IssuePullRequestProgress | null,
+): IssuePullRequestProgress | null {
+  return isPullRequestWaitingStatus(status) ? progress : null;
+}
+
 /**
- * Planning〜Doneの実装状況（Project Status）をstep形式で可視化する。Statusを持たないissueでは何も表示しない。
+ * Project Statusを「計画・実装・レビュー・本番反映待ち・本番反映済み」の5フェーズへ集約して可視化し、現在フェーズの下に詳細状態を1行出す（#4128）。Statusを持たないissueでは何も表示しない。
  * 円＋接続線の行はPC・スマホ共通で常時表示する。各ステップ下の個別ラベル（6個同時表示）はスマホの
  * 狭い横幅では重なって崩れるため`md`以上でのみ表示し、スマホでは代わりに現在ステップのみを示す
  * 1行キャプション（例:「実装中（2/6）」）を表示する。
@@ -591,7 +602,7 @@ export function WorkflowStatusSteps({
   planningSkipped = false,
   pullRequestProgress = null,
 }: WorkflowStatusStepsProps) {
-  const currentIndex = getWorkflowStepIndex({ projectStatus });
+  const currentIndex = getDisplayPhaseIndex({ projectStatus });
   if (currentIndex === null) return null;
 
   const approvalPending = isApprovalPending(labels);
@@ -603,9 +614,21 @@ export function WorkflowStatusSteps({
     : "ユーザー確認待ち";
   // バッジを出すかどうか（#2057）。状態そのもの（`approvalPending`）は色の判定に使い続ける
   const showBadge = approvalPending && showApprovalBadge;
-  const currentStep = WORKFLOW_STEPS[currentIndex];
+  const currentStep = DISPLAY_PHASES[currentIndex];
+  const progressStatus = resolveProgressStatus({ projectStatus });
+  // 現在フェーズの詳細状態（#4128）。developへマージ・mainへマージ・デプロイは独立フェーズにせずここで言う
+  const detail = resolvePhaseDetail(progressStatus, {
+    pullRequestProgress: prProgressSource(progressStatus, pullRequestProgress),
+    planApprovalPending: approvalPending && reason === "plan",
+  });
+  const detailClass =
+    detail?.tone === "attention"
+      ? "text-destructive"
+      : detail?.tone === "waiting"
+        ? "text-amber-700 dark:text-amber-400"
+        : "text-muted-foreground";
   // 内訳を描くのはPRを待っている段だけ（#2816）。`WorkflowStepBadge`と同じ確かめ方にする
-  const prProgress = isPullRequestWaitingStatus(currentStep.key) ? pullRequestProgress : null;
+  const prProgress = prProgressSource(progressStatus, pullRequestProgress);
   // 止まっているPR（CI失敗・レビュー失敗・コンフリクト）。現在地の円とキャプションを赤にする（#3144）。
   // **確認待ちの琥珀より優先する**——琥珀のままだと「人の返事を待っている」と読めるが、
   // 実際に止めているのはPRの側で、同じ段の内訳（`PR_STEP_CLASS.failed`）が赤で言っている
@@ -629,7 +652,7 @@ export function WorkflowStatusSteps({
     <div>
       <div className="overflow-x-auto">
         <div className="flex min-w-max" role="list" aria-label="実装状況">
-          {WORKFLOW_STEPS.map((step, index) => {
+          {DISPLAY_PHASES.map((step, index) => {
             const isSkipped = index === skippedIndex;
             // スキップした段は「済み」にしない。塗ってチェックを出すと、計画を通した
             // Issueと見分けが付かなくなる（#2069）
@@ -656,7 +679,7 @@ export function WorkflowStatusSteps({
                     )}
                   />
                 )}
-                {index !== WORKFLOW_STEPS.length - 1 && (
+                {index !== DISPLAY_PHASES.length - 1 && (
                   <div
                     aria-hidden
                     className={cn(
@@ -715,6 +738,14 @@ export function WorkflowStatusSteps({
           })}
         </div>
       </div>
+      {detail && (
+        <p
+          data-testid="phase-detail"
+          className={cn("mt-1.5 hidden text-center text-[11px] font-medium md:block", detailClass)}
+        >
+          {currentStep.label}：{detail.text}
+        </p>
+      )}
       {targetLabel && (
         <p className="mt-1.5 hidden text-center text-[11px] text-muted-foreground md:block">
           {targetLabel}で実行中
@@ -734,8 +765,9 @@ export function WorkflowStatusSteps({
                   : "text-foreground",
             )}
           >
-            {currentStep.label}（{currentIndex + 1}/{WORKFLOW_STEPS.length}）
+            {currentStep.label}（{currentIndex + 1}/{DISPLAY_PHASES.length}）
           </span>
+          {detail && <span className={cn("ml-1.5", detailClass)}>{detail.text}</span>}
           {captionSuffix && <span className="ml-1.5 text-muted-foreground">{captionSuffix}</span>}
         </p>
         {showBadge && (

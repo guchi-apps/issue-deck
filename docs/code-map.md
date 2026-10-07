@@ -443,6 +443,16 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   半径の半分ずつ刻んで当てる（`eraseShapesAlong`）。**1回のなぞりは離した時点で履歴1件**
   （途中は`moving`と同じく表示用の一時状態）なので、「元に戻す」1回で戻せる。消しゴムの
   輪郭はキャンバスへ描くが、保存時の描き出しには含めない。
+- **設定項目の長い補足は、ラベル横の情報アイコン（[`settings/info-hint.tsx`](../src/components/dashboard/settings/info-hint.tsx)）へ入れる**（#4108）。
+  常時表示の段落にしない。現在値・警告（例: 判定AIでJevを選んだときの送信先）・「選んだ時点で保存」のような
+  操作結果に直結する短い補足だけは畳まずに出す。
+- **AIモデル区分の上部（[`settings/execution-flow-overview.tsx`](../src/components/dashboard/settings/execution-flow-overview.tsx)）は、
+  プロバイダー切替と工程ごとの実効エージェント・モデルを1枚で見せる**（#4108）。行の組み立ては
+  [`lib/execution-flow-settings.ts`](../src/lib/execution-flow-settings.ts)の`resolveProviderFlowRows`で、モデル名の解決は
+  `resolveExecutionFlows`に任せる。**画面へ渡る機能別のAI設定（`githubActionsAgent`・`defaultDispatchAgent`・
+  計画レビューのエージェント・アプリ内AIのモデル）は`inherit`を解決済みの値で、追従か個別設定かは値から読めない。**
+  そのため生の行から`readAiProviderOverrides`で別に読み、`AppSettingsValues.aiProviderOverrides`として保存後も更新する
+  （機能別の値を送る保存は、その項目を`inherit`から固定値へ変えるため）。
 - **設定画面に項目を足すときは`components/dashboard/settings/`の該当区分へ入れる**（#1539）。
   区分は[`settings-sections.ts`](../src/components/dashboard/settings/settings-sections.ts)が唯一の定義で、
   PCの設定ダイアログ（[`settings-dialog.tsx`](../src/components/dashboard/settings/settings-dialog.tsx)）と
@@ -716,7 +726,7 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   **端末標準の「引っ張って更新」は使えない**——`app/layout.tsx`が`overscroll-none`＋`body`の
   `fixed inset-0`でドキュメントを固定しているため（#607。この固定と高さの決め方については、
   上の「アプリシェルの高さを`position`に依存させない」も参照）。ホーム画面から起動したPWAには
-  ツールバーも無く、一覧の画面には更新の手段が無かった（`MobileReloadButton`はホームだけ）。
+  ツールバーも無く、一覧の画面には更新の手段が無かった（`MobileReloadButton`は設定画面の右上だけ。#4107でホームから移した）。
   実装で外せない点が3つある。**Reactの`onTouchMove`ではなく`{ passive: false }`のネイティブ
   リスナーを張る**（Reactはルートでpassive登録するため`preventDefault()`が効かない）。
   **`preventDefault()`するのは「縦方向かつ下向き」に動いている間だけ**——方向判定
@@ -735,7 +745,7 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   「更新」ボタンと同じ経路で、`isFetching`をそのまま`isRefreshing`として渡す。リリース状況の
   取得はGitHub APIを使う（通常は5分間隔）ぶん消費は増えるが、押した回数ぶんしか走らない。
   **サブPCのカードの取り直し（`dispatch.refresh`）はホーム側で足す**——実行状況はこの画面が
-  自分で取っているもので、ベルの`refresh`には入っていない。**ヘッダーの`MobileReloadButton`は
+  自分で取っているもので、ベルの`refresh`には入っていない。**設定画面右上の`MobileReloadButton`は
   残す**（引っ張る方は数字だけ、ボタンはページ全体の再読み込み＝新しいビルドへの追従）。
   **一覧の先頭に固定するセクション（`IssueList`の`pinnedSection`）も、その枠の中に置く**（#2175）——
   「ユーザーの確認待ち」に並ぶマージ待ちPR（#1613）は画面の上半分を占めることがあり、枠の外に
@@ -3341,8 +3351,8 @@ export function POST(request: NextRequest) {
   [multi-agent/prompts-and-models.md](multi-agent/prompts-and-models.md)「重いIssueだけ
   モデルを上げる」を参照。
   **「おまかせ」はissue-deckがIssueを読んで選ぶ**（#2723。`lib/claude/model-pick.ts`と
-  `POST /api/issues/model-pick`。押したときだけ呼び、AIが使えなければラベルと分量からの
-  ルールへ倒す。**設定`claudeLocalModel`が`pick`（おまかせ）のときは、モデル欄が出た時点で
+  `POST /api/issues/model-pick`。押したときだけ呼び、AIが使えなければ本文の未解決の判断を見るルール
+  （ラベル・分量では昇格しない。#4106）へ倒す。**設定`claudeLocalModel`が`pick`（おまかせ）のときは、モデル欄が出た時点で
   自動で1回呼ぶ**〈#3106。最初の選択は設定の値で、「設定に従う」は削除した。検証は
   `parseClaudeLocalModelSetting`〈`pick`を通す〉と`parseClaudeLocalModel`〈弾く〉に分かれる〉。
   **判定をJevで行うときは、聞くのも出すのもモデルの選択だけ**〈#3255。難しさ・調査の要否・
@@ -4520,6 +4530,16 @@ Claude Code・Codex CLIそれぞれの新規実行の一時停止（`AppSetting.
 マニフェストを読んで、GitHubのsecret/variableと1Passwordのどちらからでも同じ環境変数を作り、
 片方で解決できない項目はもう片方から補う（#1306）。供給元が揃っているかは
 `.github/workflows/load-secrets-check.yml`を`workflow_dispatch`で実行すると確認できる。
+
+## バックアップCI（#4065）
+
+GitHub Actions障害時に、PR詳細からCircleCIを直接起動してdevelop向けPRの必須検査を続ける。
+**必須検査の正本は[`ci/required-checks.json`](../ci/required-checks.json)**で、`ci.yml`もCircleCIも
+`scripts/ci/run-required-checks.mjs`経由でこれを実行する（ci.ymlへ直接ステップを足すと
+`scripts/ci/check-ci-definition-sync.mjs`が落とす）。サーバー側は`src/lib/backup-ci/`、結果は
+`BackupCiRun`に記録し、合否は共通チェック`issue-deck/ci-gate`（commit status）として出す。
+`check-rollup.ts`は共通チェックがあればそれだけでCI状態を決める。運用・移行・ロールバックは
+[backup-ci.md](backup-ci.md)。
 
 ## 一覧の行に出す親子関係（#3469）
 

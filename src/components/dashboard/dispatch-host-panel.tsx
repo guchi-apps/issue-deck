@@ -15,7 +15,7 @@ import { isDispatchHostAtSessionCapacity } from "@/lib/dispatch/dispatch-job";
 import {
   describeDispatchHostCheckout,
   describeDispatchHostSelfUpdate,
-  isDispatchHostPollerRestartPending,
+  shouldShowDispatchHostSelfUpdateButton,
   type DispatchHostCheckoutRow,
   type DispatchHostCheckoutTone,
   type DispatchHostSelfUpdateRow,
@@ -228,9 +228,7 @@ function HostCard({
   const canSelfUpdate =
     onRequestSelfUpdate !== undefined &&
     host.selfUpdateCapable === true &&
-    ((host.checkout?.behindCount ?? 0) > 0 ||
-      isDispatchHostPollerRestartPending(host.checkout) ||
-      selfUpdate !== null);
+    shouldShowDispatchHostSelfUpdateButton(host.checkout, selfUpdate !== null);
   // ホストごと再起動できるか（#2496）。**「更新して再起動」とは別物**で、こちらはOSごと落ちる
   const reboot = describeDispatchHostReboot(host);
   const rebootResult = describeDispatchHostRebootJob(rebootJob);

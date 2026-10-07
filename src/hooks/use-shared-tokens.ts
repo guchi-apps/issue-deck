@@ -44,7 +44,8 @@ export function useSharedTokenMutations() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  async function createSharedToken(input: SharedTokenInput): Promise<boolean> {
+  /** 成功時は自動生成した値（値を指定した場合は null）を返し、失敗時は undefined を返す。 */
+  async function createSharedToken(input: SharedTokenInput): Promise<{ generatedValue: string | null } | undefined> {
     setIsSubmitting(true);
     setError(null);
     try {
@@ -55,13 +56,14 @@ export function useSharedTokenMutations() {
       });
       if (!res.ok) {
         if (res.status === 409) throw new Error("同じ名前のトークンが既に登録されています");
-        if (res.status === 400) throw new Error("入力内容が不正です。トークン名・値の入力と各項目の文字数を確認してください");
+        if (res.status === 400) throw new Error("入力内容が不正です。トークン名の入力と各項目の文字数を確認してください");
         throw new Error(`登録に失敗しました (${res.status})`);
       }
-      return true;
+      const json = (await res.json()) as { generatedValue?: string };
+      return { generatedValue: json.generatedValue ?? null };
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
-      return false;
+      return undefined;
     } finally {
       setIsSubmitting(false);
     }

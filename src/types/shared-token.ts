@@ -11,7 +11,8 @@ export type SharedToken = {
 
 export type SharedTokenInput = {
   name: string;
-  value: string;
+  /** null は「値を指定しない」。登録時はissue-deckがランダム値を生成する。 */
+  value: string | null;
   description: string | null;
   sourceReference: string | null;
 };

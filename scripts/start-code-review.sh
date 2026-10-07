@@ -22,7 +22,12 @@
 #
 # **フック（session-notify.sh）は付けない**（計画レビューと同じ理由）。実装セッション用の経路へ
 # 載せると、同じIssueに受付・締めのコメントが二重に出る。代償として通知にも自動回収にも
-# 乗らないため、**実行時間の上限を必ず被せる。**
+# 乗らないため、**実行時間の上限を必ず被せる。** 上限を被せられない環境（`timeout`が無い・
+# 上限の設定が不正）では起動しない（#4116。無制限の実行を黙って始めない）。
+#
+# **tmuxの中で走るのはランナー（`scripts/run-code-review.sh`）。** `claude -p`の終了コード・
+# 時間切れ・結果コメントの到達を確かめ、ジョブ（`DispatchJob`）へ完了・失敗を報告する（#4116）。
+# 起動しただけでは「レビュー完了」にしない。
 #
 # セッション名は `<リポジトリ名>-code-review-<番号>`。**実装セッションの `<リポジトリ名>-issue-<番号>`
 # とは別の形にしてある**（pollerのセッション報告・本数の計上・停止/終了の突き合わせはすべて
@@ -32,7 +37,10 @@
 #   ISSUE_DECK_CODE_REVIEW_BASE         プロンプト・ログ・参照スナップショットの置き場
 #                                       （既定 ~/apps/issue-deck-worktrees/.code-reviews）
 #   ISSUE_DECK_CODE_REVIEW_TIMEOUT_SECONDS
-#                                       1本のレビューに被せる上限秒数（既定2700・0で無効）
+#                                       1本のレビューに被せる上限秒数（既定2700。正の整数のみ。
+#                                       #4116で「0で無効」を廃止した）
+#   ISSUE_DECK_CODE_REVIEW_JOB_ID       ジョブID（pollerが渡す）。ランナーが状態を報告する宛先で、
+#                                       結果コメントに付ける実行の印にもなる。無ければ報告しない
 #   ISSUE_DECK_SHARED_CONTEXT_DIR       共有知識リポジトリ（既定は ~/apps/_docs）
 #   ISSUE_DECK_LAUNCHER_REEXEC          1なら同期コピーからの再実行を行わない（内部用・#1583）
 
@@ -72,9 +80,12 @@ code_review_session_names() {
 }
 
 # 同じリポジトリのコードレビューが（このIssue以外も含めて）走っているか。
+# **死んだペインしか残っていないセッションは数えない**（#4116。pollerの`count_code_review_sessions`と同じ）。
 code_review_sessions_alive_for() {
   local safe_repo="$1"
-  code_review_session_names | grep -qE "^${safe_repo}-code-review-[1-9][0-9]*$"
+  tmux list-panes -a -F $'#{session_name}\t#{pane_dead}' 2>/dev/null |
+    awk -F '\t' '$2 != "1" { print $1 }' |
+    grep -qE "^${safe_repo}-code-review-[1-9][0-9]*$"
 }
 
 PREPARE_ONLY=0
@@ -107,12 +118,31 @@ SESSION_NAME="$SAFE_REPO-code-review-$ISSUE_NUMBER"
 PROMPT_DIR="$CODE_REVIEW_BASE/.prompts"
 PROMPT_FILE="$PROMPT_DIR/$SAFE_REPO-$ISSUE_NUMBER.md"
 LOG_FILE="$CODE_REVIEW_BASE/$SAFE_REPO-$ISSUE_NUMBER.log"
+JOB_ID="${ISSUE_DECK_CODE_REVIEW_JOB_ID:-}"
+if [[ -n "$JOB_ID" && ! "$JOB_ID" =~ ^[A-Za-z0-9_-]{1,64}$ ]]; then
+  echo "Error: ジョブIDの形式が不正です: $JOB_ID" >&2
+  exit 1
+fi
+# 結果コメントに付ける実行の印（#4116）。再実行の後に前の実行の結果が遅れて届いても、
+# どの実行の結果かを見分けられるようにする（`src/lib/github/code-review.ts`の`CODE_REVIEW_RUN_MARKER_PREFIX`）
+RUN_MARKER=""
+if [[ -n "$JOB_ID" ]]; then
+  RUN_MARKER="<!-- issue-deck-code-review-run:$JOB_ID -->"
+fi
+
+# 実行時間の上限（#4116）。**被せられないなら起動しない。** 以前は`timeout`が無い・値が不正な
+# ときに黙って上限なしで走らせていた（通知にも自動回収にも乗らないので、固まると誰も気づけない）
+CODE_REVIEW_TIMEOUT="${ISSUE_DECK_CODE_REVIEW_TIMEOUT_SECONDS:-2700}"
+if [[ ! "$CODE_REVIEW_TIMEOUT" =~ ^[1-9][0-9]*$ ]]; then
+  echo "Error: ISSUE_DECK_CODE_REVIEW_TIMEOUT_SECONDS は正の整数で指定してください（現在: $CODE_REVIEW_TIMEOUT）。上限なしでは起動しません。" >&2
+  exit 1
+fi
 
 # 引数はジョブキューのレスポンス経由で渡るため、呼び出し元で検証済みでも改めて検証する
 # （多層防御。ここが最後にパス・シェル引数として使う場所）。
 local_session_validate_target "$OWNER" "$REPO" "$ISSUE_NUMBER" || exit 1
 
-for required_command in git gh python3; do
+for required_command in git gh python3 jq timeout; do
   if ! command -v "$required_command" >/dev/null 2>&1; then
     echo "Error: $required_command コマンドが見つかりません。" >&2
     exit 1
@@ -206,11 +236,11 @@ ISSUE_JSON_FILE="$(mktemp)"
 trap 'rm -f "${ISSUE_JSON_FILE:-}"' EXIT
 printf '%s' "$ISSUE_JSON" >"$ISSUE_JSON_FILE"
 python3 - "$ISSUE_JSON_FILE" "$PROMPT_TEMPLATE" "$FULL_NAME" "$WORKDIR" "$CHECKOUT_LABEL" \
-  >"$PROMPT_FILE" <<'PY'
+  "$RUN_MARKER" >"$PROMPT_FILE" <<'PY'
 import json
 import sys
 
-issue_json_path, template_path, repository, workdir, checkout = sys.argv[1:6]
+issue_json_path, template_path, repository, workdir, checkout, run_marker = sys.argv[1:7]
 
 with open(issue_json_path, encoding="utf-8") as f:
     issue = json.load(f)
@@ -224,6 +254,7 @@ replacements = {
     "{{REPOSITORY}}": repository,
     "{{WORKDIR}}": workdir,
     "{{CHECKOUT}}": checkout,
+    "{{RUN_MARKER}}": run_marker,
 }
 result = template
 for placeholder, value in replacements.items():
@@ -255,22 +286,19 @@ fi
 
 # **プロンプトは標準入力から渡す**（`--add-dir`が可変長で位置引数を飲み込むため。計画レビューと同じ）。
 # **出力はログへも落とす**（`claude -p`は終わるとペインごと消えるため）。
-# **実行時間の上限を必ず被せる。** リポジトリ全体を読ませるぶん計画レビューより長く、
-# 固まっても誰も気づけない（通知にも自動回収にも乗らない）。既定は45分。
-CODE_REVIEW_TIMEOUT="${ISSUE_DECK_CODE_REVIEW_TIMEOUT_SECONDS:-2700}"
-RUNNER=""
-if [[ "$CODE_REVIEW_TIMEOUT" =~ ^[0-9]+$ && "$CODE_REVIEW_TIMEOUT" -gt 0 ]] &&
-  command -v timeout >/dev/null 2>&1; then
-  RUNNER="timeout $CODE_REVIEW_TIMEOUT "
-fi
-
+# **実行時間の上限を必ず被せる**（上で検証済み）。リポジトリ全体を読ませるぶん計画レビューより長い。
+# 終了コード・時間切れ・結果コメントの到達の確認と、ジョブへの報告はランナーが行う（#4116）。
 claude_export_max_retries
-SESSION_CMD="$(printf 'set -o pipefail; cd %q && cat %q | CLAUDE_CODE_MAX_RETRIES=%q %sclaude' \
-  "$WORKDIR" "$PROMPT_FILE" "$CLAUDE_CODE_MAX_RETRIES" "$RUNNER")"
+RUNNER_SCRIPT="$LAUNCHER_SCRIPTS_DIR/run-code-review.sh"
+if [[ ! -f "$RUNNER_SCRIPT" ]]; then
+  RUNNER_SCRIPT="$SCRIPT_DIR/run-code-review.sh"
+fi
+SESSION_CMD="$(printf 'cd %q && CLAUDE_CODE_MAX_RETRIES=%q bash %q --repo %q --issue %q --workdir %q --prompt %q --log %q --timeout %q --job-id %q --session %q --' \
+  "$WORKDIR" "$CLAUDE_CODE_MAX_RETRIES" "$RUNNER_SCRIPT" "$FULL_NAME" "$ISSUE_NUMBER" "$WORKDIR" \
+  "$PROMPT_FILE" "$LOG_FILE" "$CODE_REVIEW_TIMEOUT" "$JOB_ID" "$SESSION_NAME")"
 for arg in "${CLAUDE_ARGS[@]}"; do
   SESSION_CMD+=" $(printf '%q' "$arg")"
 done
-SESSION_CMD+=" 2>&1 | tee $(printf '%q' "$LOG_FILE")"
 
 if ! command -v tmux >/dev/null 2>&1; then
   echo "警告: tmux が見つからないため、このターミナルで実行します。" >&2

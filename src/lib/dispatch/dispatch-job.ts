@@ -107,7 +107,8 @@ export type DispatchJobKind =
   | "CODEX_PAIRING"
   | "MANUAL_STEP_SESSION"
   | "PR_REVIEW"
-  | "REVIEW_FIX";
+  | "REVIEW_FIX"
+  | "CHAT_TURN";
 
 /**
  * 既に立っているセッションを操作するジョブ（起動しないジョブ）。
@@ -382,6 +383,7 @@ export const OUT_OF_BAND_JOB_KINDS = [
   "PREVIEW",
   "REBOOT",
   "CODEX_PAIRING",
+  "CHAT_TURN",
 ] as const;
 
 export function isOutOfBandJobKind(kind: DispatchJobKind): boolean {
@@ -416,6 +418,7 @@ export const OUT_OF_BAND_JOB_KIND_CAPABILITY = {
   PREVIEW: "previewCapable",
   REBOOT: "rebootCapable",
   CODEX_PAIRING: "codexRemoteControlCapable",
+  CHAT_TURN: "chatCodexCapable",
 } as const satisfies Record<OutOfBandJobKind, DispatchHostCapabilityField>;
 
 /**
@@ -764,6 +767,11 @@ export type DispatchHostView = {
    */
   reviewFixCapable?: boolean | null;
   prReviewCapable?: boolean | null;
+  /**
+   * チャット相談のモデル呼び出し（`CHAT_TURN`・#4109）をCodex CLIで実行できるか。
+   * **`null`は「できない」**（古いpollerへ配ると未知の種別として`failed`になり、回答が必ず失敗する）
+   */
+  chatCodexCapable: boolean | null;
 
   /**
    * チェックアウトの更新と自己再起動ができるか（#1875）。**`null`（未申告）は「できない」として
@@ -966,6 +974,18 @@ export function buildDispatchActiveKey(
  */
 export const SELF_UPDATE_REPOSITORY = "guchi-apps/issue-deck";
 export const SELF_UPDATE_ISSUE_NUMBER = 0;
+
+/**
+ * チャット相談のモデル呼び出し（`CHAT_TURN`・#4109）が使う埋め草。**Issueに紐づかない**
+ * （番号の無い相談もある）ので、`SELF_UPDATE`と同じくissue-deck自身と0を置く。
+ * 活性キーは`chat-turn:<ChatRun.id>`で、1つの回答待ちにつき未完了のジョブは1件まで。
+ */
+export const CHAT_TURN_REPOSITORY = SELF_UPDATE_REPOSITORY;
+export const CHAT_TURN_ISSUE_NUMBER = 0;
+
+export function buildChatTurnActiveKey(runId: string): string {
+  return `chat-turn:${runId}`;
+}
 
 /**
  * 更新ジョブの活性キー。**Issueではなくホストで一意にする。**
@@ -1181,6 +1201,8 @@ export function describeDispatchJobKind(kind: DispatchJobKind): string {
       return "レビュー指摘の修正";
     case "PR_REVIEW":
       return "PRレビュー";
+    case "CHAT_TURN":
+      return "チャットの回答";
     case "INTERRUPT":
     case "KILL":
     case "INSTRUCTION":
@@ -2131,8 +2153,10 @@ function describePlanReviewJobStatus(status: DispatchJobStatus): {
 /**
  * コードレビュー（#698）の状態の見せ方。
  *
- * **`succeeded`は「レビューのセッションが立った」まで**で、指摘が投稿されたことではない
- * （`PLAN_REVIEW`と同じ立場）。結果はレビューIssueのコメントとして返るため、そちらを見てもらう。
+ * **#4116から`succeeded`は「結果コメントの到達を確かめた」まで**（PRレビューと同じ立場）。
+ * 起動しただけでは`RUNNING`のままで、ランナー（`scripts/run-code-review.sh`）が生存報告を続け、
+ * 結果の到達・失敗・時間切れを報告する。旧版のpollerは起動時点で`succeeded`にするため、
+ * 結果が無いまま`SUCCEEDED`になった行は画面で「状態不明」として扱う（`resolveCodeReviewRunStatus`）。
  */
 function describeCodeReviewJobStatus(status: DispatchJobStatus): {
   label: string;
@@ -2144,15 +2168,15 @@ function describeCodeReviewJobStatus(status: DispatchJobStatus): {
     case "CLAIMED":
       return { label: "起動先が受け取りました", tone: "pending" };
     case "RUNNING":
-      return { label: "コードレビューを起動中", tone: "running" };
+      return { label: "コードレビューを実行中", tone: "running" };
     case "SUCCEEDED":
-      return { label: "コードレビューを開始しました", tone: "success" };
+      return { label: "コードレビューが完了しました", tone: "success" };
     case "FAILED":
-      return { label: "コードレビューを起動できませんでした", tone: "error" };
+      return { label: "コードレビューが失敗しました", tone: "error" };
     case "SKIPPED":
-      return { label: "起動済みのため見送り", tone: "muted" };
+      return { label: "コードレビューを見送りました", tone: "muted" };
     case "TIMEOUT":
-      return { label: "応答なし", tone: "error" };
+      return { label: "時間切れ・応答なし", tone: "error" };
     case "CANCELED":
       return { label: "取り消し済み", tone: "muted" };
   }

@@ -102,4 +102,26 @@ describe("SessionDetail（#3991）", () => {
     expect(screen.queryByRole("button", { name: "作業を止める" })).toBeNull();
     expect(screen.queryByRole("button", { name: "セッションを終了" })).toBeNull();
   });
+
+  it("作業ログのステップコードを日本語で出す（#4124）", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({
+          events: [
+            { id: "1", occurredAt: new Date().toISOString(), kind: "step", title: "作業: EXPLORING", body: null },
+            { id: "2", occurredAt: new Date().toISOString(), kind: "step", title: "作業: RUNNING", body: null },
+          ],
+        }),
+      }),
+    );
+    render(<SessionDetail session={session({ id: "session-1" })} dispatch={dispatchHandle()} />);
+    fireEvent.click(screen.getByRole("button", { name: "セッション詳細" }));
+
+    const dialog = await screen.findByRole("dialog");
+    await waitFor(() => expect(dialog.textContent).toContain("調査中— ファイル・コード・履歴を読んで調べています"));
+    expect(dialog.textContent).toContain("コマンド実行中");
+    expect(dialog.textContent).not.toMatch(/EXPLORING|RUNNING/);
+  });
 });

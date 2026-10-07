@@ -24,7 +24,6 @@ import {
   SHARED_TOKEN_NAME_MAX_LENGTH,
   SHARED_TOKEN_SOURCE_REFERENCE_MAX_LENGTH,
 } from "@/lib/shared-tokens";
-import { generateSharedTokenValue } from "@/lib/shared-token-generate";
 import type { SharedToken } from "@/types/shared-token";
 
 type SharedTokensSectionProps = {
@@ -48,16 +47,21 @@ export function SharedTokensSection({
   const [sourceReference, setSourceReference] = useState("");
   const [revealed, setRevealed] = useState<Record<string, string>>({});
   const [valueVisible, setValueVisible] = useState(false);
+  // 自動生成した値は作成直後の1回だけ表示する（#4121）。
+  const [created, setCreated] = useState<{ name: string; value: string } | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<SharedToken | null>(null);
 
   async function handleAdd() {
-    const ok = await createSharedToken({
-      name: name.trim(),
-      value,
+    const trimmedName = name.trim();
+    // 値が空欄ならissue-deckがランダム値を生成する
+    const result = await createSharedToken({
+      name: trimmedName,
+      value: value || null,
       description: description.trim() || null,
       sourceReference: sourceReference.trim() || null,
     });
-    if (!ok) return;
+    if (!result) return;
+    setCreated(result.generatedValue ? { name: trimmedName, value: result.generatedValue } : null);
     setName("");
     setValue("");
     setDescription("");
@@ -89,11 +93,6 @@ export function SharedTokensSection({
     });
     setDeleteTarget(null);
     onChanged();
-  }
-
-  function handleGenerate() {
-    setValue(generateSharedTokenValue());
-    setValueVisible(true);
   }
 
   return (
@@ -159,14 +158,13 @@ export function SharedTokensSection({
           <Input id="shared-token-name" placeholder="例: EXTERNAL_API_TOKEN" maxLength={SHARED_TOKEN_NAME_MAX_LENGTH} value={name} onChange={(event) => setName(event.target.value)} />
         </div>
         <div className="flex flex-col gap-1.5">
-          <Label htmlFor="shared-token-value" className="text-xs">トークン値</Label>
+          <Label htmlFor="shared-token-value" className="text-xs">トークン値（既存の値を移すときだけ）</Label>
           <div className="flex gap-2">
-            <Input id="shared-token-value" type={valueVisible ? "text" : "password"} autoComplete="off" value={value} onChange={(event) => setValue(event.target.value)} />
-            <Button type="button" variant="outline" className="shrink-0" onClick={handleGenerate}>自動生成</Button>
+            <Input id="shared-token-value" type={valueVisible ? "text" : "password"} autoComplete="off" placeholder="空欄ならランダムな値を自動生成" value={value} onChange={(event) => setValue(event.target.value)} />
+            <Button type="button" variant="outline" className="shrink-0" onClick={() => setValueVisible((visible) => !visible)}>
+              {valueVisible ? "隠す" : "表示"}
+            </Button>
           </div>
-          {valueVisible && value && (
-            <p className="text-xs text-muted-foreground">ランダムな値を入力しました。登録後は一覧から再表示できます。</p>
-          )}
         </div>
         <div className="flex flex-col gap-1.5">
           <Label htmlFor="shared-token-description" className="text-xs">説明（任意）</Label>
@@ -177,12 +175,21 @@ export function SharedTokensSection({
           <Input id="shared-token-source" placeholder="op://apps/..." maxLength={SHARED_TOKEN_SOURCE_REFERENCE_MAX_LENGTH} value={sourceReference} onChange={(event) => setSourceReference(event.target.value)} />
         </div>
       </div>
-      <Button className="self-start" onClick={() => void handleAdd()} disabled={isSubmitting || !name.trim() || !value}>
-        {isSubmitting ? "登録中..." : "移行して登録"}
+      <Button className="self-start" onClick={() => void handleAdd()} disabled={isSubmitting || !name.trim()}>
+        {isSubmitting ? "登録中..." : value ? "移行して登録" : "登録（値を自動生成）"}
       </Button>
       {mutationError && !deleteTarget && <p className="text-sm text-destructive">{mutationError}</p>}
+      {created && (
+        <div className="flex flex-col gap-1.5 rounded-lg border p-3">
+          <p className="text-xs text-muted-foreground">
+            「{created.name}」の値を自動生成しました。この値が画面に出るのは今回だけです。利用側はAPIから取得するので、控えは不要です。
+          </p>
+          <Input value={created.value} readOnly aria-label="自動生成した値" />
+          <Button type="button" variant="outline" size="sm" className="self-start" onClick={() => setCreated(null)}>閉じる</Button>
+        </div>
+      )}
       <p className="text-xs text-muted-foreground">
-        1Passwordの値をここへ一度だけ入力して移行します。値は暗号化して保存され、一覧・利用履歴・エラーには表示されません。
+        値は空欄のまま登録すると自動生成します。1Passwordなど外部で決まった値を移すときだけ入力してください。値は暗号化して保存され、一覧・利用履歴・エラーには表示されません。
       </p>
 
       <AlertDialog open={deleteTarget !== null} onOpenChange={(open) => !open && !isSubmitting && setDeleteTarget(null)}>
