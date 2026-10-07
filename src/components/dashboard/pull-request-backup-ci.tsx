@@ -98,8 +98,8 @@ export function PullRequestBackupCi({
     async function fetchOnce() {
       const res = await fetch(`/api/pull-requests/backup-ci?${params}`, { cache: "no-store" }).catch(() => null);
       if (cancelled || !res?.ok) return;
-      const json = (await res.json()) as { readiness: Readiness; runs: BackupCiRunView[] };
-      if (cancelled) return;
+      const json = (await res.json().catch(() => null)) as { readiness?: Readiness; runs?: BackupCiRunView[] } | null;
+      if (cancelled || !json || !json.readiness || !Array.isArray(json.runs)) return;
       setReadiness(json.readiness);
       setRuns(json.runs);
       // 実行中の間だけ15秒おきに取り直す
