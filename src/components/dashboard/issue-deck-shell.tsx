@@ -129,6 +129,7 @@ import {
   isCodeReviewIssue,
   type CodeReviewFinding,
 } from "@/lib/github/code-review";
+import { buildPullRequestFixIssueDraft } from "@/lib/github/pull-request-release-fix-issue";
 import {
   buildReleaseVerificationFixIssueDraft,
   type ReleaseVerificationRow,
@@ -2207,6 +2208,7 @@ export function IssueDeckShell({
                     }
                     onUpdated={openPullRequests.refresh}
                     onCreateFixIssue={openReleaseVerificationFixIssueDialog}
+                    onDraftFixIssue={(pr) => openIssueDraftDialog(buildPullRequestFixIssueDraft(pr))}
                     // 積んだ履歴があれば巻き戻す。無ければPRの選択を解除して一覧へ戻す（#1396）。
                     onBack={() => goBackOrFallback(() => selectPullRequest(null))}
                   />
@@ -2634,6 +2636,7 @@ export function IssueDeckShell({
                 }
                 onUpdated={openPullRequests.refresh}
                 onCreateFixIssue={openReleaseVerificationFixIssueDialog}
+                onDraftFixIssue={(pr) => openIssueDraftDialog(buildPullRequestFixIssueDraft(pr))}
                 issueSuggestions={pullRequestIssueSuggestions}
                 className="hidden flex-1 md:flex"
               />
@@ -2803,6 +2806,7 @@ export function IssueDeckShell({
           onPullRequestClosed={() => modalPullRequest && handlePullRequestClosed(modalPullRequest)}
           onUpdated={openPullRequests.refresh}
           onCreateFixIssue={openReleaseVerificationFixIssueDialog}
+          onDraftFixIssue={(pr) => openIssueDraftDialog(buildPullRequestFixIssueDraft(pr))}
           /* 開くときに履歴を積んでいるので、閉じるのは巻き戻し。共有URLで直接開いた場合だけ
              クエリを落とす（`goBackOrFallback`。他の閉じる導線と同じ扱い） */
           onClose={() => goBackOrFallback(() => selectPullRequestModal(null))}
