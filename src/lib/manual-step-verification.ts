@@ -174,7 +174,8 @@ export function isReadOnlyVerificationCommand(command: string): boolean {
  *
  * @returns 区切った各区間。**静的に読み切れないものは`null`**（＝巡回の対象にしない）
  *   - `>`（`2>&1`を除く）… 書き込みのリダイレクト。読み取りコマンドの組み合わせでも書き込める
- *   - `$(`・`` ` `` … コマンド置換。中で何でも実行できる
+ *   - `$(`・`${`・`` ` ``・`<(` … コマンド置換・展開・プロセス置換。中で何でも実行できる
+ *     （ダブルクォートの中でも展開されるので、シングルクォートの外はすべて見る）
  *   - 単独の`&` … バックグラウンド実行。終了コードが実行の成否を表さなくなる
  *   - 閉じていない引用符 … どこまでが引数なのかを決められない
  */
@@ -187,6 +188,16 @@ function splitCommandSegments(command: string): string[] | null {
     const char = command[index];
 
     if (quote !== null) {
+      // ダブルクォートの中でもbashはコマンド置換を展開する。不活性なのはシングルクォートの中だけ
+      if (quote === '"') {
+        if (char === "\\") {
+          current += char + (command[index + 1] ?? "");
+          index += 1;
+          continue;
+        }
+        if (char === "`") return null;
+        if (char === "$" && (command[index + 1] === "(" || command[index + 1] === "{")) return null;
+      }
       if (char === quote) quote = null;
       current += char;
       continue;
@@ -203,7 +214,8 @@ function splitCommandSegments(command: string): string[] | null {
       continue;
     }
     if (char === "`") return null;
-    if (char === "$" && command[index + 1] === "(") return null;
+    if (char === "$" && (command[index + 1] === "(" || command[index + 1] === "{")) return null;
+    if (char === "<" && command[index + 1] === "(") return null;
     if (char === ">") {
       // 標準エラーの合流（`2>&1`）だけは書き込みではないので通す
       if (command.slice(index - 1, index + 3) === "2>&1") {

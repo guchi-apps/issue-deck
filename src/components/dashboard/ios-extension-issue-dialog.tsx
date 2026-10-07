@@ -41,7 +41,8 @@ export type IosExtensionStartProps = {
   issues: Issue[];
   /**
    * 実装開始で届く更新（`11.local`の付与など）の反映先。**画面を移さず一覧へ入れるだけのものを渡す**
-   * （詳細を開く`onCreated`をつなぐと、実行先を選んだ直後に画面が切り替わる。#1434）
+   * （詳細を開く`onCreated`をつなぐと、実行先を選んだ直後に画面が切り替わる。#1434）。
+   * 詳細へ移るのは実装開始ダイアログを閉じたときで、このダイアログ側が`onCreated`を呼ぶ（#4172）
    */
   onIssueUpdated: (issue: Issue) => void;
   onNightlyRunQueued?: () => void;
@@ -65,11 +66,14 @@ export function IosExtensionIssueDialog({
   repositories,
   start,
   onClose,
+  onCreated,
 }: {
   target: IosExtensionIssueTarget | null;
   repositories: string[];
   start: IosExtensionStartProps;
   onClose: () => void;
+  /** 実装開始ダイアログを閉じたときにIssue詳細を開く（計画の承認パネルは詳細にしか出ない。#4172） */
+  onCreated: (issue: Issue) => void;
 }) {
   // 「作成+実装開始」で起票したIssue。一覧は反映済みで、表示用に最新の更新を持つ
   const [startTarget, setStartTarget] = useState<Issue | null>(null);
@@ -98,7 +102,14 @@ export function IosExtensionIssueDialog({
         <StartImplementationDialog
           issue={startTarget}
           open
-          onOpenChange={(nextOpen) => { if (!nextOpen) setStartTarget(null); }}
+          onOpenChange={(nextOpen) => {
+            if (nextOpen) return;
+            // 計画の承認パネル・計画コメントはIssue詳細にしか出ないため、実行先を選び終えたら
+            // （キャンセルでも）詳細へ移る。通常の作成フォームと同じ挙動にする
+            const target = startTarget;
+            setStartTarget(null);
+            if (target) onCreated(target);
+          }}
           onIssueUpdated={(updated) => {
             // 閉じた後に届いた更新で開き直さない（#1434）
             setStartTarget((prev) => (prev ? updated : prev));
