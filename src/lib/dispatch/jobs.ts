@@ -83,6 +83,7 @@ import {
   parseDispatchAgent,
   readDispatchAgent,
   resolveCodeReviewRejection,
+  resolveDefaultCodeReviewHost,
   resolveCrossRepoQuestionRejection,
   resolveManualStepSessionRejection,
   resolveDispatchConcurrency,
@@ -1208,6 +1209,47 @@ export async function enqueueCodeReviewJob(params: {
   }
 }
 
+export type EnqueueCodeReviewRerunResult =
+  | EnqueueCodeReviewJobResult
+  | { ok: false; rejection: "no_host"; message: string };
+
+/**
+ * 結果を返さずに終わったコードレビュー（失敗・時間切れ・見送り・状態不明）を、**同じレビューIssueの
+ * まま**積み直す（#4116）。
+ *
+ * 実行先は画面の既定と同じ関数（`resolveDefaultCodeReviewHost`）でサーバー側が選ぶ。二重起動は
+ * `enqueueCodeReviewJob`の`activeKey`（未完了の実行が残っていれば積めない）と、poller側の
+ * 同名セッションの確認の2段で止める。前の実行が遅れて結果を返しても、新しい実行の状態は
+ * ジョブIDで分かれているので上書きされない（`resolveCodeReviewRunStatus`）。
+ */
+export async function enqueueCodeReviewRerun(params: {
+  repositoryFullName: string;
+  issueNumber: number;
+  requestedByUserId: string | null;
+  now?: Date;
+}): Promise<EnqueueCodeReviewRerunResult> {
+  const now = params.now ?? new Date();
+  const hosts = await db.dispatchHost.findMany({ orderBy: { name: "asc" } });
+  const hostName = resolveDefaultCodeReviewHost(
+    hosts.map((host) => toHostView(host, now)),
+    params.repositoryFullName,
+  );
+  if (!hostName) {
+    return {
+      ok: false,
+      rejection: "no_host",
+      message: `${params.repositoryFullName} のコードレビューを実行できるホストがありません（サブPCが応答していない・チェックアウトが無い）。`,
+    };
+  }
+  return enqueueCodeReviewJob({
+    repositoryFullName: params.repositoryFullName,
+    issueNumber: params.issueNumber,
+    hostName,
+    requestedByUserId: params.requestedByUserId,
+    now,
+  });
+}
+
 export type EnqueueSessionControlJobResult =
   | { ok: true; job: DispatchJobView }
   | { ok: false; rejection: SessionControlRejection; message: string };
@@ -1933,6 +1975,10 @@ export async function claimDispatchJobs(params: {
       // 制御ジョブは枠を消費しない（上のコメント）。**画面（`summarizeDispatchQueue`）も
       // 同じ集合を数える**（#1544）
       kind: { in: [...SESSION_LAUNCH_JOB_KINDS] },
+      // **走り出したコードレビューは数えない**（#4116）。完了まで`RUNNING`のまま残るように
+      // したため、数えると最長45分、実装セッションの起動枠を1つ塞ぐ。本数はpoller側の
+      // `DISPATCH_MAX_CODE_REVIEWS`が絞っている（計画レビューと同じ立場）
+      NOT: { kind: "CODE_REVIEW", status: "RUNNING" },
     },
   });
   const available = Math.min(limit - running, params.maxJobs);
@@ -2057,6 +2103,11 @@ export async function reportDispatchJob(params: {
    * 「不正出力」として`FAILED`に倒す（判定の無い成功で自動マージを通さない）
    */
   reviewVerdict?: string | null;
+  /**
+   * コードレビュー（#4116）のランナーが「実行上限で打ち切った」と報告したか。`failed`と組で
+   * 届いたときだけ`TIMEOUT`として記録する（他の種別では読まない）
+   */
+  timedOut?: boolean;
   now?: Date;
 }): Promise<ReportDispatchJobResult> {
   const now = params.now ?? new Date();
@@ -2094,7 +2145,12 @@ export async function reportDispatchJob(params: {
     }
   }
 
-  if (reportStatus === "running") {
+  if (job.kind === "CODE_REVIEW" && reportStatus === "failed" && params.timedOut) {
+    data.status = "TIMEOUT";
+    data.finishedAt = now;
+    data.activeKey = null;
+    data.placeholderValues = Prisma.DbNull;
+  } else if (reportStatus === "running") {
     data.status = "RUNNING";
     data.startedAt = job.startedAt ?? now;
     data.heartbeatAt = now;
@@ -2112,8 +2168,28 @@ export async function reportDispatchJob(params: {
 
   // タイムアウトで既に終了扱いになったジョブへ遅れて報告が届くことがある。**上書きしない。**
   // 上書きすると、終了済みのジョブのactiveKeyが復活して次を積めなくなる場合がある
+  //
+  // **例外はコードレビューのランナーの終了報告**（#4116）。生存報告が通信断で途絶えて`TIMEOUT`に
+  // された後や、旧版のpollerが起動時点で`SUCCEEDED`にした後に、ランナーが実際の結末（結果の到達・
+  // 失敗の理由）を届けることがある。ランナーの終了報告は必ず`exitCode`を持ち、それまでの報告は
+  // 持たない（`exitCode`が空の行だけを上書きする）ので、1つのジョブを2回確定させることはない。
+  // 終了報告なので`activeKey`は`null`のまま——再実行の新しいジョブの状態には触れない
+  const lateCodeReviewOutcome =
+    job.kind === "CODE_REVIEW" &&
+    reportStatus !== "running" &&
+    reportStatus !== "skipped" &&
+    params.exitCode !== null &&
+    params.exitCode !== undefined;
   const result = await db.dispatchJob.updateMany({
-    where: { id: job.id, status: { in: ["CLAIMED", "RUNNING"] } },
+    where: lateCodeReviewOutcome
+      ? {
+          id: job.id,
+          OR: [
+            { status: { in: ["CLAIMED", "RUNNING"] } },
+            { status: { in: ["TIMEOUT", "SUCCEEDED"] }, exitCode: null },
+          ],
+        }
+      : { id: job.id, status: { in: ["CLAIMED", "RUNNING"] } },
     data,
   });
   if (result.count === 0) return { ok: false, reason: "already_finished" };

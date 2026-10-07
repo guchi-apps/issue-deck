@@ -101,6 +101,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sh
 import { useFirstUnreadCommentIndex } from "@/hooks/use-first-unread-comment-index";
 import { useIssueCommentMutations } from "@/hooks/use-issue-comment-mutations";
 import { useIssueCommentSummaries } from "@/hooks/use-issue-comment-summaries";
+import { useCodeReviewRun } from "@/hooks/use-code-review-run";
 import { useDispatchState } from "@/hooks/use-dispatch-state";
 import { useIssueArtifacts } from "@/hooks/use-issue-artifacts";
 import { useIssueComments } from "@/hooks/use-issue-comments";
@@ -143,7 +144,6 @@ import {
   buildCodeReviewFindingIssueIndex,
   findLatestCodeReviewReport,
   isCodeReviewIssue,
-  isCodeReviewPending,
   type CodeReviewFinding,
 } from "@/lib/github/code-review";
 import {
@@ -319,6 +319,8 @@ export function IssueDetail({
   // 子（StartImplementationDialog・StartLocalSessionButton）が各自で取得すると、
   // 同じ画面のためにポーリングが何本も走る
   const dispatch = useDispatchState(true);
+  // コードレビューIssue（#698）の実行の状態（#4116）。一覧のバッジと同じ関数で決める
+  const codeReviewRun = useCodeReviewRun(issue, comments, dispatch);
   // 未反映の計画レビュー（#3554）。計画承認パネルと、無人実行の計画のカードへ指摘ごとに出す
   const pendingPlanReview = useMemo(() => resolvePendingPlanReview(comments), [comments]);
   const planReviewNotice = useMemo(() => resolvePlanReviewNotice(comments), [comments]);
@@ -636,7 +638,6 @@ export function IssueDetail({
   const codeReview = isCodeReviewIssue(issue)
     ? {
         report: findLatestCodeReviewReport(comments),
-        isPending: isCodeReviewPending(comments),
         // 同じ指摘を2回起票しないための照合（#698）。**同じリポジトリの同じタイトル**だけを見る
         // （レビューを回し直すと同じ指摘が返るため、無いと同じIssueが何件も立つ）
         createdFindingIssues: buildCodeReviewFindingIssueIndex(issues, issue.repositoryFullName),
@@ -1204,7 +1205,11 @@ export function IssueDetail({
           {codeReview && (
             <CodeReviewPanel
               report={codeReview.report}
-              isPending={codeReview.isPending}
+              runStatus={codeReviewRun?.runStatus ?? "missing"}
+              job={codeReviewRun?.job}
+              onRerun={() => void codeReviewRun?.rerun()}
+              isRerunning={codeReviewRun?.isRerunning}
+              rerunError={codeReviewRun?.rerunError}
               createdFindingIssues={codeReview.createdFindingIssues}
               onRestartReview={() => onStartCodeReview(issue.repositoryFullName)}
               onCreateFindingIssue={(finding) => onCreateCodeReviewFindingIssue(issue, finding)}

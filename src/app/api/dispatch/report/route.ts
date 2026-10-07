@@ -90,6 +90,8 @@ export async function POST(request: NextRequest) {
     codexPairingCode: codexPairingExpiresAt ? codexPairingCode : null,
     codexPairingExpiresAt,
     reviewVerdict: parsePrReviewVerdict(payload?.reviewVerdict),
+    // コードレビューのランナー（#4116）が実行上限で打ち切ったとき。真偽値だけを通す
+    timedOut: payload?.timedOut === true,
   });
 
   if (!result.ok) {

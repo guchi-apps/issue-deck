@@ -169,7 +169,10 @@ set -euo pipefail
 #     廃止し、使用量の補完・送り直し（`--usage-flush`）と、確定したレビューの最終マージ判定の
 #     再開の巡回（`POST /api/dispatch/pr-review/resume-sweep`）だけを残した。
 # 32: REVIEW_FIXを独立ジョブとして購読認証のCodexで実行する（#4043）。
-DISPATCH_POLLER_VERSION="32"
+# 33: コードレビュー（`CODE_REVIEW`）を起動時点で`succeeded`にせず`running`のまま渡し、完了・失敗・
+#     時間切れはレビューのランナー（`run-code-review.sh`）が結果コメントの到達を確かめてから報告する。
+#     本数の上限は死んだペインだけが残るセッションを数えない（#4116）。
+DISPATCH_POLLER_VERSION="33"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -672,9 +675,14 @@ plan_review_slots() {
 # 生きているコードレビューのセッションの本数（#698）。**`count_plan_review_sessions`と同じ理由で
 # 別に数える**（セッション名を`-issue-`の規約から外してあるぶん、`DISPATCH_MAX_SESSIONS`の
 # 計上に入らない）。リポジトリ全体を読むぶん1本が重いので、上限は計画レビューと同じ2本を既定にする。
+#
+# **死んだペインしか残っていないセッションは数えない**（#4116）。ランチャーは異常終了時にペインを
+# 残す（`remain-on-exit failed`）ため、利用上限で落ちた2本が何日も残り、以降のレビューが
+# 「上限（2本）に達している」として全部見送られていた（`plan_review_sessions_json`と同じ判定）。
 count_code_review_sessions() {
-  tmux list-sessions -F '#{session_name}' 2>/dev/null |
-    grep -cE '^.+-code-review-[1-9][0-9]*$' || true
+  tmux list-panes -a -F $'#{session_name}\t#{pane_dead}' 2>/dev/null |
+    awk -F '\t' '$2 != "1" && $1 ~ /^.+-code-review-[1-9][0-9]*$/ { print $1 }' |
+    sort -u | grep -c . || true
 }
 
 # 横断質問セッション（#1454）を起こせるか。**ランチャーが手元にあるかで判定する。**
@@ -3521,6 +3529,57 @@ run_pr_review_job() {
   report_job "$job_id" running "Codexレビューを起動しました（$owner/$repo#$pr_number）" "$session"
 }
 
+# リポジトリ全体のコードレビュー（#698・#4116）を起動する。
+#
+# **`launch_and_report`は使わない。** あちらは「tmuxが立った」時点で`succeeded`を報告するが、
+# それはレビューの完了ではない（結果が投稿されないまま「レビュー中」が何日も残った。#4116）。
+# ここでは起動できたら`running`を報告して手を離し、完了・失敗・時間切れ・結果未投稿は
+# tmuxの中のランナー（`run-code-review.sh`）が生存報告を続けたうえで報告する。ランナーごと
+# 消えた・ホストが落ちた場合は、生存報告の途絶でissue-deck側が`TIMEOUT`にする。
+#
+#   $1 ジョブID / $2 owner / $3 repo / $4 Issue番号
+run_code_review_job() {
+  local job_id="$1" owner="$2" repo="$3" issue_number="$4"
+  local session output_file launch_status message
+  session="$(code_review_session_name "$repo" "$issue_number")"
+
+  # 前回の失敗で死んだペインだけが残っているセッションは畳む（再実行を妨げない）。ログは
+  # `.code-reviews/<repo>-<番号>.log`に残っている
+  if tmux has-session -t "=$session" 2>/dev/null &&
+    ! tmux list-panes -s -t "=$session" -F '#{pane_dead}' 2>/dev/null | grep -qv '^1$'; then
+    tmux kill-session -t "=$session" 2>/dev/null || true
+  fi
+  if tmux has-session -t "=$session" 2>/dev/null; then
+    # 失敗ではなく見送り（#1229と同じ）。走っている前の実行の結果はそのジョブが報告する
+    report_job "$job_id" skipped "同じIssueのコードレビューが既に動いています: $session" "$session"
+    return 0
+  fi
+  if [[ "$DRY_RUN" -eq 1 ]]; then
+    echo "  --dry-run のため起動しません（コードレビュー $owner/$repo#$issue_number）"
+    return 0
+  fi
+
+  ensure_tmux_server_scope
+  report_job "$job_id" running "コードレビューを起動しています"
+
+  output_file="$(mktemp)"
+  set +e
+  ISSUE_DECK_CODE_REVIEW_JOB_ID="$job_id" \
+    timeout "$LAUNCH_TIMEOUT" bash "$CODE_REVIEW_LAUNCHER" "$owner" "$repo" "$issue_number" \
+    </dev/null >"$output_file" 2>&1
+  launch_status=$?
+  set -e
+
+  if [[ "$launch_status" -eq 0 ]] && tmux has-session -t "=$session" 2>/dev/null; then
+    # **`succeeded`にしない。** ここから先の状態はランナーが報告する
+    report_job "$job_id" running "コードレビューを実行中です（tmuxセッション $session）" "$session"
+  else
+    message="$(tail -c 1500 "$output_file")"
+    report_job "$job_id" failed "コードレビューを起動できませんでした（終了コード $launch_status）: $message"
+  fi
+  rm -f "$output_file"
+}
+
 # 修正は専用セッションで実行し、完了はスクリプト自身が報告する。
 run_review_fix_job() {
   local job_id="$1" owner="$2" repo="$3" issue="$4" agent="$5" pr="$6" sha="$7"
@@ -3760,9 +3819,7 @@ run_job() {
         "コードレビューのセッションが上限（$MAX_CODE_REVIEWS本）に達しているため起動しませんでした（現在 $live_code_reviews 本）。"
       return 0
     fi
-    launch_and_report "$job_id" "$(code_review_session_name "$repo" "$issue_number")" \
-      "コードレビューを起動しています" \
-      bash "$CODE_REVIEW_LAUNCHER" "$owner" "$repo" "$issue_number"
+    run_code_review_job "$job_id" "$owner" "$repo" "$issue_number"
     return 0
   fi
 
@@ -3909,7 +3966,7 @@ prepare_handoff_launch() {
 
 # 重複起動を確かめてからランチャーを走らせ、tmuxセッションの増分で成否を報告する。
 #
-# **セッションを立てる4種別（`LAUNCH`・`CROSS_REPO_QUESTION`・`PLAN_REVIEW`・`CODE_REVIEW`）で
+# **セッションを立てる種別（`LAUNCH`・`CROSS_REPO_QUESTION`・`PLAN_REVIEW`・`MANUAL_STEP_SESSION`）で
 # 共有する。**
 # 違うのは走らせるコマンドと期待するセッション名だけで、重複防止・`running`の報告・差分による
 # 成否判定・失敗時の出力の返し方はまったく同じ。分けて持つと、片方だけ直したときに挙動がずれる。

@@ -1,3 +1,4 @@
+import type { DispatchJobStatus } from "@/lib/dispatch/dispatch-job";
 import { toJstParts } from "@/lib/format-date-time";
 import type { Issue, IssueComment } from "@/types/issue";
 
@@ -27,6 +28,30 @@ export const CODE_REVIEW_REQUEST_MARKER = "<!-- issue-deck-code-review -->";
 
 /** レビュー結果コメントに付けるマーカー。画面はこれが付いたコメントだけを指摘カードとして読む */
 export const CODE_REVIEW_REPORT_MARKER = "<!-- issue-deck-code-review-report -->";
+
+/**
+ * 結果コメントに付ける実行の印の接頭辞（#4116）。`<!-- issue-deck-code-review-run:<ジョブID> -->`。
+ *
+ * **どの実行（`DispatchJob`）の結果かを見分けるためのもの。** 再実行の後に前の実行の結果が遅れて
+ * 届いても、新しい実行の結果として数えない。付けるのはプロンプト（`{{RUN_MARKER}}`）と、
+ * 最終応答から投稿し直すランナー（`scripts/run-code-review.sh`）。印を知らない対象リポジトリ独自の
+ * プロンプトの結果には付かないので、**印が無い結果は従来どおり順序だけで読む。**
+ */
+export const CODE_REVIEW_RUN_MARKER_PREFIX = "<!-- issue-deck-code-review-run:";
+
+/** 結果コメントから実行の印（ジョブID）を読む。無ければ`null` */
+export function parseCodeReviewRunId(body: string): string | null {
+  const matched = /<!-- issue-deck-code-review-run:([A-Za-z0-9_-]{1,64}) -->/.exec(body);
+  return matched ? matched[1] : null;
+}
+
+/**
+ * 再実行の依頼コメント（#4116）。**依頼の印を付ける**ので、`isCodeReviewPending`はこれを
+ * 新しい依頼として読み、それより前の結果を「この依頼の結果」とは見なさない。
+ */
+export function codeReviewRerunCommentBody(): string {
+  return `前回のコードレビューが結果を返さずに終わったため、同じ観点で再実行を依頼しました。\n\n${CODE_REVIEW_REQUEST_MARKER}`;
+}
 
 /**
  * レビューIssueのタイトルに付ける接頭辞。質問Issue（`[質問] `）と同じ形にしてあり、
@@ -258,6 +283,14 @@ export function findLatestCodeReviewReport(
   return null;
 }
 
+/** いちばん新しい結果コメントに付いた実行の印（#4116）。結果が無い・印が無ければ`null` */
+function findLatestCodeReviewReportRunId(comments: readonly Pick<IssueComment, "body">[]): string | null {
+  for (let i = comments.length - 1; i >= 0; i--) {
+    if (isCodeReviewReportComment(comments[i])) return parseCodeReviewRunId(comments[i].body);
+  }
+  return null;
+}
+
 /** 重要度ごとの件数。0件のものも含めて返す（表示側で出し分ける） */
 export function countCodeReviewFindings(
   findings: readonly CodeReviewFinding[],
@@ -280,6 +313,128 @@ export function isCodeReviewPending(comments: readonly Pick<IssueComment, "body"
     if (comments[i].body.includes(CODE_REVIEW_REQUEST_MARKER)) return true;
   }
   return false;
+}
+
+/**
+ * レビュー1回の実行の記録（#4116）。**状態の正は`DispatchJob`**（`kind=CODE_REVIEW`の最新1件）。
+ * 画面へ出すのに要る項目だけを運ぶ。
+ */
+export type CodeReviewRunJob = {
+  id: string;
+  status: DispatchJobStatus;
+  /** 失敗・見送りの理由、走っている間は経過の説明 */
+  message: string | null;
+  targetHost: string;
+  /** 依頼した（積んだ）時刻 */
+  createdAt: string;
+  /** 走り始めた時刻（`running`が初めて届いた時刻） */
+  startedAt: string | null;
+  /** 最後の生存報告 */
+  heartbeatAt: string | null;
+  finishedAt: string | null;
+};
+
+/**
+ * 一覧と詳細に出すレビューの状態（#4116）。**依頼コメント・結果コメント・ジョブの3つから決める**
+ * （`resolveCodeReviewRunStatus`）。
+ *
+ * - `reported`: 結果が届いている
+ * - `queued`: 順番待ち・起動先が受け取った
+ * - `running`: 実行中（生存報告が続いている）
+ * - `failed`: 起動できなかった・CLIが異常終了した・結果が投稿されなかった・投稿に失敗した
+ * - `timeout`: 実行上限に達した・生存報告が途絶えた（プロセス消失・ホスト停止）
+ * - `skipped`: 見送り（同時実行の上限・同じレビューが動いている）
+ * - `canceled`: 取り消し
+ * - `unknown`: 結果が無いのに実行の記録が終わっている・記録が無い（旧版の起動時点`SUCCEEDED`など）
+ * - `missing`: 依頼コメントも結果コメントも無い（手で立てたレビューIssueなど）
+ */
+export type CodeReviewRunStatus =
+  | "reported"
+  | "queued"
+  | "running"
+  | "failed"
+  | "timeout"
+  | "skipped"
+  | "canceled"
+  | "unknown"
+  | "missing";
+
+/** 再実行の導線を出す状態。実行中・順番待ちのものは出さない（二重起動を避ける） */
+export function canRerunCodeReview(status: CodeReviewRunStatus): boolean {
+  return (
+    status === "failed" ||
+    status === "timeout" ||
+    status === "skipped" ||
+    status === "canceled" ||
+    status === "unknown"
+  );
+}
+
+/**
+ * レビューの状態を決める（#4116）。**一覧（サーバーの要約）と詳細（手元のコメント）が同じ関数を通す。**
+ *
+ * - **結果が届いていれば`reported`**（依頼より後の結果で、実行の印が最新のジョブと矛盾しないもの）。
+ *   印が別のジョブ＝前の実行の遅れて届いた結果は、最新の実行の結果として数えない
+ * - 結果が無ければ**ジョブの状態で決める。** 依頼時刻だけで「時間切れ」「完了」を決めない
+ * - 結果が無いのに`SUCCEEDED`のジョブ（旧版のpollerが起動時点で付けたもの）と、ジョブの記録が
+ *   無いもの（記録の保持期間より前・別経路の依頼）は`unknown`。永久の「レビュー中」にしない
+ */
+export function resolveCodeReviewRunStatus(
+  summary: Pick<CodeReviewSummary, "state" | "awaitingResult" | "reportRunId">,
+  job: Pick<CodeReviewRunJob, "id" | "status"> | null,
+): CodeReviewRunStatus {
+  // 旧い形の要約（#4116より前のキャッシュ・テスト）は`state`から読む
+  const awaitingResult = summary.awaitingResult ?? summary.state === "pending";
+  const reportRunId = summary.reportRunId ?? null;
+  const reportMatchesJob = reportRunId === null || job === null || reportRunId === job.id;
+  if (summary.state === "reported" && !awaitingResult && reportMatchesJob) {
+    return "reported";
+  }
+  if (!job) {
+    if (awaitingResult) return "unknown";
+    return summary.state === "reported" ? "reported" : "missing";
+  }
+  switch (job.status) {
+    case "QUEUED":
+    case "CLAIMED":
+      return "queued";
+    case "RUNNING":
+      return "running";
+    case "FAILED":
+      return "failed";
+    case "TIMEOUT":
+      return "timeout";
+    case "SKIPPED":
+      return "skipped";
+    case "CANCELED":
+      return "canceled";
+    case "SUCCEEDED":
+      return "unknown";
+  }
+}
+
+/** 状態の見出し。一覧のバッジと詳細のパネルで同じ文言を使う */
+export function describeCodeReviewRunStatus(status: CodeReviewRunStatus): string {
+  switch (status) {
+    case "reported":
+      return "結果あり";
+    case "queued":
+      return "順番待ち";
+    case "running":
+      return "レビュー中";
+    case "failed":
+      return "失敗";
+    case "timeout":
+      return "時間切れ";
+    case "skipped":
+      return "見送り";
+    case "canceled":
+      return "取り消し";
+    case "unknown":
+      return "状態不明";
+    case "missing":
+      return "結果なし";
+  }
 }
 
 /**
@@ -331,6 +486,20 @@ export type CodeReviewSummary = {
    * 古い数字が残る。手元のIssue（`allIssues`）で数えれば、起票・closeがそのまま行に出る。
    */
   findingTitles: string[];
+  /**
+   * 最後の依頼の後に結果が返っていないか（`isCodeReviewPending`。#4116）。`state`は最新の結果が
+   * あれば`reported`のままなので、再実行の待ちはこちらで見分ける
+   */
+  awaitingResult?: boolean;
+  /** 最新の結果コメントに付いた実行の印（ジョブID）。無ければ`null`（#4116） */
+  reportRunId?: string | null;
+  /**
+   * 最新の実行の記録（#4116）。**サーバーの要約APIが付ける**（コメントからは作らない）。
+   * 記録が無ければ`null`
+   */
+  job?: CodeReviewRunJob | null;
+  /** 一覧と詳細に出す状態（#4116。`resolveCodeReviewRunStatus`）。要約APIが付ける */
+  runStatus?: CodeReviewRunStatus;
 };
 
 /**
@@ -344,19 +513,24 @@ export function summarizeCodeReviewComments(
   comments: readonly Pick<IssueComment, "body">[],
 ): CodeReviewSummary {
   const report = findLatestCodeReviewReport(comments);
+  const awaitingResult = isCodeReviewPending(comments);
   if (report) {
     return {
       state: "reported",
       counts: countCodeReviewFindings(report.findings),
       findingCount: report.findings.length,
       findingTitles: report.findings.map((finding) => finding.title),
+      awaitingResult,
+      reportRunId: findLatestCodeReviewReportRunId(comments),
     };
   }
   return {
-    state: isCodeReviewPending(comments) ? "pending" : "missing",
+    state: awaitingResult ? "pending" : "missing",
     counts: { high: 0, medium: 0, low: 0 },
     findingCount: 0,
     findingTitles: [],
+    awaitingResult,
+    reportRunId: null,
   };
 }
 

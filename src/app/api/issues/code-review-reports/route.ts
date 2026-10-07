@@ -2,9 +2,15 @@ import { NextResponse, type NextRequest } from "next/server";
 
 import { requireUserId } from "@/lib/auth-user";
 import { db } from "@/lib/db";
+import { expireStaleDispatchJobs } from "@/lib/dispatch/jobs";
 import { withGithubApiFeature } from "@/lib/github/api-usage";
 import { getInstallationToken } from "@/lib/github/app-auth";
-import { summarizeCodeReviewComments, type CodeReviewSummary } from "@/lib/github/code-review";
+import {
+  resolveCodeReviewRunStatus,
+  summarizeCodeReviewComments,
+  type CodeReviewRunJob,
+  type CodeReviewSummary,
+} from "@/lib/github/code-review";
 import {
   codeReviewSummaryCacheKey,
   getCodeReviewSummaryCache,
@@ -22,6 +28,11 @@ import { fetchCommentsForIssue } from "@/lib/github/issues-api";
  *
  * 指摘の本文は返さない。中身を読むのは今までどおりIssue詳細の`CodeReviewPanel`で、
  * ここは行のバッジ（重大n・中n・軽微n／レビュー中／指摘なし）のための口。
+ *
+ * **実行の状態（#4116）も返す。** 各レビューIssueの最新の`DispatchJob`（`kind=CODE_REVIEW`）を
+ * DBから引き、コメントの要約と合わせて`runStatus`を決める（`resolveCodeReviewRunStatus`）。
+ * ジョブはキャッシュしない（状態は数十秒で動き、引くのはDBだけなのでGitHubは叩かない）。
+ * Issue詳細も同じ口を使ってジョブを受け取り、手元のコメントと同じ関数で状態を決める。
  */
 
 /** 1回で受け付けるレビューIssueの上限。取りこぼした分は行のバッジが出ないだけで済む */
@@ -94,6 +105,54 @@ async function handleGET(request: NextRequest) {
     issueRows.map((row) => [`${row.repositoryId}#${row.number}`, row.commentCount]),
   );
 
+  // 生存報告が途絶えた実行（プロセス消失・ホスト停止）を、画面を開いた時点で確定させる。
+  // 普段は`GET /api/dispatch`のポーリングが掃いているが、この口だけを見ている画面もある
+  await expireStaleDispatchJobs().catch((error) => {
+    console.error("[GET /api/issues/code-review-reports] 期限切れジョブの掃除に失敗しました:", error);
+  });
+  const jobRows = await db.dispatchJob.findMany({
+    where: {
+      kind: "CODE_REVIEW",
+      OR: requested.map((issue) => ({
+        repositoryFullName: `${issue.owner}/${issue.repo}`,
+        issueNumber: issue.number,
+      })),
+    },
+    orderBy: { createdAt: "desc" },
+    select: {
+      id: true,
+      repositoryFullName: true,
+      issueNumber: true,
+      status: true,
+      message: true,
+      targetHost: true,
+      createdAt: true,
+      startedAt: true,
+      heartbeatAt: true,
+      finishedAt: true,
+    },
+  });
+  // 新しい順に並べてあるので、最初に見たものが最新の実行
+  const latestJobByKey = new Map<string, CodeReviewRunJob>();
+  for (const row of jobRows) {
+    const key = `${row.repositoryFullName}#${row.issueNumber}`;
+    if (latestJobByKey.has(key)) continue;
+    latestJobByKey.set(key, {
+      id: row.id,
+      status: row.status,
+      message: row.message,
+      targetHost: row.targetHost,
+      createdAt: row.createdAt.toISOString(),
+      startedAt: row.startedAt?.toISOString() ?? null,
+      heartbeatAt: row.heartbeatAt?.toISOString() ?? null,
+      finishedAt: row.finishedAt?.toISOString() ?? null,
+    });
+  }
+  const withRun = (issue: RequestedIssue, summary: CodeReviewSummary) => {
+    const job = latestJobByKey.get(`${issue.owner}/${issue.repo}#${issue.number}`) ?? null;
+    return { key: issue.key, ...summary, job, runStatus: resolveCodeReviewRunStatus(summary, job) };
+  };
+
   const summaries = await Promise.all(
     requested.map(async (issue) => {
       const repository = repositoryByFullName.get(`${issue.owner}/${issue.repo}`);
@@ -105,7 +164,7 @@ async function handleGET(request: NextRequest) {
       const cacheKey = codeReviewSummaryCacheKey(issue.owner, issue.repo, issue.number);
       const cached =
         commentCount === null ? null : getCodeReviewSummaryCache(cacheKey, commentCount);
-      if (cached) return { key: issue.key, ...cached };
+      if (cached) return withRun(issue, cached);
 
       try {
         const token = await getInstallationToken(repository.installation.installationId);
@@ -121,7 +180,7 @@ async function handleGET(request: NextRequest) {
         if (commentCount !== null) {
           setCodeReviewSummaryCache(cacheKey, { summary, commentCount });
         }
-        return { key: issue.key, ...summary };
+        return withRun(issue, summary);
       } catch (error) {
         // 1件取れなくても他の行のバッジは出す。取れなかった行はバッジが出ないだけ
         console.error(

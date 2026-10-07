@@ -5,8 +5,10 @@ import { Loader2 } from "lucide-react";
 import {
   CODE_REVIEW_SEVERITIES,
   describeCodeReviewFindingProgress,
+  describeCodeReviewRunStatus,
   describeCodeReviewSeverity,
   type CodeReviewFindingProgress,
+  type CodeReviewRunStatus,
   type CodeReviewSeverity,
   type CodeReviewSummary,
 } from "@/lib/github/code-review";
@@ -123,6 +125,54 @@ export function CodeReviewProgressBadge({
   );
 }
 
+const RUN_STATUS_CLASS: Record<Exclude<CodeReviewRunStatus, "reported">, string> = {
+  queued: "border bg-muted text-muted-foreground",
+  running: "border border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400",
+  failed: "border border-destructive/30 bg-destructive/10 text-destructive",
+  timeout: "border border-destructive/30 bg-destructive/10 text-destructive",
+  skipped: "border border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-400",
+  canceled: "border bg-muted text-muted-foreground",
+  unknown: "border border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-400",
+  missing: "border border-dashed text-muted-foreground",
+};
+
+/**
+ * 結果がまだ無いレビューの状態のバッジ（#4116）。**一覧の行と詳細のパネルが同じものを使う**
+ * （文言は`describeCodeReviewRunStatus`）。失敗・時間切れは赤、見送り・状態不明は橙で、
+ * 「レビュー中」の緑と見分けられるようにする。
+ */
+export function CodeReviewRunStatusBadge({
+  status,
+  title,
+}: {
+  status: Exclude<CodeReviewRunStatus, "reported">;
+  /** ツールチップ（失敗の理由など） */
+  title?: string | null;
+}) {
+  return (
+    <span
+      title={title ?? undefined}
+      className={cn(
+        "flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px]",
+        RUN_STATUS_CLASS[status],
+      )}
+    >
+      {status === "running" && <Loader2 className="size-2.5 animate-spin" />}
+      {describeCodeReviewRunStatus(status)}
+    </span>
+  );
+}
+
+/**
+ * 要約から状態を読む。**要約APIが付けた`runStatus`を正とし**、無い（旧い応答・テスト）ときだけ
+ * コメントの要約から従来どおりに読む
+ */
+export function codeReviewSummaryRunStatus(summary: CodeReviewSummary): CodeReviewRunStatus {
+  if (summary.runStatus) return summary.runStatus;
+  if (summary.state === "pending") return "running";
+  return summary.state;
+}
+
 /**
  * 一覧の行に出すレビュー結果（#2855）。
  *
@@ -143,23 +193,11 @@ export function CodeReviewResultBadges({
    */
   progress?: CodeReviewFindingProgress | null;
 }) {
-  if (summary.state === "pending") {
-    return (
-      <span className="flex items-center gap-1 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[10px] text-emerald-700 dark:text-emerald-400">
-        <Loader2 className="size-2.5 animate-spin" />
-        レビュー中
-      </span>
-    );
-  }
-
-  // 依頼コメントも結果コメントも無いレビューIssue（手で立てたものなど）。
-  // 「指摘なし」と同じ見た目にすると、読んで指摘が無かったのと区別が付かない
-  if (summary.state === "missing") {
-    return (
-      <span className="rounded-full border border-dashed px-2 py-0.5 text-[10px] text-muted-foreground">
-        結果なし
-      </span>
-    );
+  // 結果がまだ無い・届かなかったレビュー（#4116）。「結果なし」（依頼コメントも結果コメントも
+  // 無い手で立てたIssue）も含め、「指摘なし」と同じ見た目にしない
+  const runStatus = codeReviewSummaryRunStatus(summary);
+  if (runStatus !== "reported") {
+    return <CodeReviewRunStatusBadge status={runStatus} title={summary.job?.message} />;
   }
 
   if (summary.findingCount === 0) {

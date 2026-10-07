@@ -2131,8 +2131,10 @@ function describePlanReviewJobStatus(status: DispatchJobStatus): {
 /**
  * コードレビュー（#698）の状態の見せ方。
  *
- * **`succeeded`は「レビューのセッションが立った」まで**で、指摘が投稿されたことではない
- * （`PLAN_REVIEW`と同じ立場）。結果はレビューIssueのコメントとして返るため、そちらを見てもらう。
+ * **#4116から`succeeded`は「結果コメントの到達を確かめた」まで**（PRレビューと同じ立場）。
+ * 起動しただけでは`RUNNING`のままで、ランナー（`scripts/run-code-review.sh`）が生存報告を続け、
+ * 結果の到達・失敗・時間切れを報告する。旧版のpollerは起動時点で`succeeded`にするため、
+ * 結果が無いまま`SUCCEEDED`になった行は画面で「状態不明」として扱う（`resolveCodeReviewRunStatus`）。
  */
 function describeCodeReviewJobStatus(status: DispatchJobStatus): {
   label: string;
@@ -2144,15 +2146,15 @@ function describeCodeReviewJobStatus(status: DispatchJobStatus): {
     case "CLAIMED":
       return { label: "起動先が受け取りました", tone: "pending" };
     case "RUNNING":
-      return { label: "コードレビューを起動中", tone: "running" };
+      return { label: "コードレビューを実行中", tone: "running" };
     case "SUCCEEDED":
-      return { label: "コードレビューを開始しました", tone: "success" };
+      return { label: "コードレビューが完了しました", tone: "success" };
     case "FAILED":
-      return { label: "コードレビューを起動できませんでした", tone: "error" };
+      return { label: "コードレビューが失敗しました", tone: "error" };
     case "SKIPPED":
-      return { label: "起動済みのため見送り", tone: "muted" };
+      return { label: "コードレビューを見送りました", tone: "muted" };
     case "TIMEOUT":
-      return { label: "応答なし", tone: "error" };
+      return { label: "時間切れ・応答なし", tone: "error" };
     case "CANCELED":
       return { label: "取り消し済み", tone: "muted" };
   }

@@ -3072,3 +3072,88 @@ describe("レビュー指摘修正の払い出し（#4043）", () => {
     expect(requested.flat()).toContain("REVIEW_FIX");
   });
 });
+
+// #4116。コードレビューはランナーが結果の到達を確かめてから終了を報告する
+describe("reportDispatchJob のコードレビュー", () => {
+  const RUNNING_JOB = {
+    id: "job-cr",
+    repositoryFullName: REPOSITORY,
+    issueNumber: 4090,
+    targetHost: "subpc",
+    agent: "claude",
+    kind: "CODE_REVIEW",
+    status: "RUNNING",
+    claimedByHost: "subpc",
+    message: null,
+    tmuxSessionName: "issue-deck-code-review-4090",
+    exitCode: null,
+    commandOutput: null,
+    createdAt: NOW,
+    claimedAt: NOW,
+    startedAt: NOW,
+    finishedAt: null,
+  };
+
+  beforeEach(() => {
+    dispatchJobFindUnique.mockResolvedValue(RUNNING_JOB);
+    dispatchJobUpdateMany.mockResolvedValue({ count: 1 });
+  });
+
+  it("実行上限で打ち切った報告はTIMEOUTとして記録する", async () => {
+    await reportDispatchJob({
+      jobId: "job-cr",
+      hostName: "subpc",
+      status: "failed",
+      message: "実行上限（2700秒）に達したため打ち切りました。",
+      exitCode: 124,
+      timedOut: true,
+      now: NOW,
+    });
+    expect(dispatchJobUpdateMany).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ status: "TIMEOUT", activeKey: null, exitCode: 124 }),
+      }),
+    );
+  });
+
+  // 通信断で生存報告が途絶えてTIMEOUTにされた後・旧版のpollerが起動時点でSUCCEEDEDにした後でも、
+  // ランナーの終了報告（exitCodeあり）は実際の結末で上書きできる
+  it("ランナーの終了報告は時間切れ・起動時点の成功の記録を上書きできる", async () => {
+    await reportDispatchJob({
+      jobId: "job-cr",
+      hostName: "subpc",
+      status: "succeeded",
+      message: "レビュー結果の投稿を確認しました",
+      exitCode: 0,
+      now: NOW,
+    });
+    expect(dispatchJobUpdateMany).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        where: {
+          id: "job-cr",
+          OR: [
+            { status: { in: ["CLAIMED", "RUNNING"] } },
+            { status: { in: ["TIMEOUT", "SUCCEEDED"] }, exitCode: null },
+          ],
+        },
+        data: expect.objectContaining({ status: "SUCCEEDED", activeKey: null }),
+      }),
+    );
+  });
+
+  // 生存報告（exitCodeなし）は終わったジョブを生き返らせない
+  it("生存報告は終了済みのジョブを上書きしない", async () => {
+    await reportDispatchJob({
+      jobId: "job-cr",
+      hostName: "subpc",
+      status: "running",
+      message: "コードレビューを実行中です",
+      now: NOW,
+    });
+    expect(dispatchJobUpdateMany).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        where: { id: "job-cr", status: { in: ["CLAIMED", "RUNNING"] } },
+      }),
+    );
+  });
+});
