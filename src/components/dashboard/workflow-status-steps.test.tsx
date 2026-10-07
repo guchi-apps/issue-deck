@@ -21,7 +21,7 @@ describe("WorkflowStatusSteps", () => {
 
   it("現在ステップの名称と番号をスマホ向けキャプションに表示する", () => {
     render(<WorkflowStatusSteps labels={labels()} projectStatus="Implementation" />);
-    expect(screen.getByText("実装中（2/6）")).not.toBeNull();
+    expect(screen.getByText("実装（2/5）")).not.toBeNull();
   });
 
   it("ユーザー確認待ちの場合はキャプション付近にも確認待ち表示を出す", () => {
@@ -55,7 +55,7 @@ describe("WorkflowStatusSteps", () => {
     );
     expect(screen.queryByText(/ユーザー確認待ち/)).toBeNull();
     // 段階のキャプションは残り、確認待ちであることは色（amber）で読める
-    expect(screen.getByText("developへマージ（3/6）").className).toContain("amber");
+    expect(screen.getByText("レビュー（3/5）").className).toContain("amber");
   });
 
   it("showExecutionTarget=falseなら「サブPCで実行中」を出さない（#2057）", () => {
@@ -68,7 +68,7 @@ describe("WorkflowStatusSteps", () => {
       />,
     );
     expect(screen.queryByText(/で実行中/)).toBeNull();
-    expect(screen.getByText("実装中（2/6）")).not.toBeNull();
+    expect(screen.getByText("実装（2/5）")).not.toBeNull();
   });
 
   it("既定では従来どおりバッジも実行先も出す", () => {
@@ -86,7 +86,7 @@ describe("WorkflowStatusSteps", () => {
   it("各ステップの円にaria-currentが付き、完了済みステップと現在ステップが判別できる", () => {
     render(<WorkflowStatusSteps labels={labels()} projectStatus="Develop PR" />);
     const items = screen.getAllByRole("listitem");
-    expect(items).toHaveLength(6);
+    expect(items).toHaveLength(5);
     expect(items[2].getAttribute("aria-current")).toBe("step");
     expect(items[0].getAttribute("aria-current")).toBeNull();
     expect(items[0].title).toBe("Planning");
@@ -108,7 +108,7 @@ describe("WorkflowStatusSteps", () => {
     expect(items[0].title).toContain("計画フェーズを通らずに実装へ入りました");
     // PCの段のラベルと、段のラベルが出ないスマホ向けのキャプションの両方で言う
     expect(screen.getAllByText("計画スキップ")).toHaveLength(2);
-    expect(screen.getByText("実装中（2/6）")).not.toBeNull();
+    expect(screen.getByText("実装（2/5）")).not.toBeNull();
   });
 
   it("planningSkippedを渡さなければ従来どおり済みのチェックを出す（#2069）", () => {
@@ -124,7 +124,7 @@ describe("WorkflowStatusSteps", () => {
     const items = screen.getAllByRole("listitem");
     expect(items[0].className).not.toContain("border-dashed");
     expect(screen.queryByText("計画スキップ")).toBeNull();
-    expect(screen.getByText("計画検討中（1/6）")).not.toBeNull();
+    expect(screen.getByText("計画（1/5）")).not.toBeNull();
   });
 
   it("スキップと実行先はキャプションで並べて出す（#2069）", () => {
@@ -137,5 +137,35 @@ describe("WorkflowStatusSteps", () => {
       />,
     );
     expect(screen.getByText("計画スキップ・サブPCで実行中")).not.toBeNull();
+  });
+
+  it("上段は5フェーズだけで、developへマージ・本番へマージは独立フェーズにならない（#4128）", () => {
+    render(<WorkflowStatusSteps labels={labels()} projectStatus="Develop PR" />);
+    expect(screen.getAllByRole("listitem")).toHaveLength(5);
+    expect(screen.queryByText("developへマージ")).toBeNull();
+    expect(screen.queryByText("本番へマージ")).toBeNull();
+    expect(screen.getAllByText("レビュー").length).toBeGreaterThan(0);
+  });
+
+  it("DevelopとReleaseは「本番反映待ち」へ集約し、詳細状態で区別する（#4128）", () => {
+    const { unmount } = render(<WorkflowStatusSteps labels={labels()} projectStatus="Develop" />);
+    expect(screen.getByText("本番反映待ち（4/5）")).not.toBeNull();
+    expect(screen.getByText("develop反映済み・本番リリース待ち")).not.toBeNull();
+    unmount();
+    render(<WorkflowStatusSteps labels={labels()} projectStatus="Release" />);
+    expect(screen.getByText("本番反映待ち（4/5）")).not.toBeNull();
+    expect(screen.getByText("本番リリース準備中")).not.toBeNull();
+  });
+
+  it("Doneは本番反映済みで「本番反映完了」を出す（#4128）", () => {
+    render(<WorkflowStatusSteps labels={labels()} projectStatus="Done" />);
+    expect(screen.getByText("本番反映済み（5/5）")).not.toBeNull();
+    expect(screen.getByText("本番反映完了")).not.toBeNull();
+  });
+
+  it("Ready・Closedは本流ステップを出さない（#4128）", () => {
+    expect(render(<WorkflowStatusSteps labels={labels()} projectStatus="Ready" />).container.firstChild).toBeNull();
+    cleanup();
+    expect(render(<WorkflowStatusSteps labels={labels()} projectStatus="Closed" />).container.firstChild).toBeNull();
   });
 });
