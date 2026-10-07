@@ -5,6 +5,15 @@
 `issue-deck`が共有トークンの唯一の正です。値を各アプリのDB・設定ファイルへ複製せず、必要な時点で
 このAPIから取得します。値の登録と表示はissue-deckの設定画面でも行えます。
 
+## 置いてよいもの・置かないもの（#4048）
+
+共有トークンに置くのは**アプリ間の認証トークンだけ**（アプリAがアプリBのAPIを呼ぶときのBearer鍵、またはその検証側が持つ同じ値）。次の基準で判断する。
+
+| 置く | 置かない |
+| --- | --- |
+| アプリ間のAPI認証に使う鍵（`OPS_API_TOKEN`・`ISSUE_DECK_IMAGE_UPLOAD_SECRET`・`ISSUE_DECK_DEVELOPMENT_SUMMARY_TOKEN`など） | 設定値（集計対象のGitHubログイン名など）。環境変数＋`.github/secrets-manifest.tsv`で持つ |
+| 複数のアプリが同じ値を読む必要があるもの | 外部サービスのAPIキー（`TYPESAFE_API_KEY`・`OPENAI_API_KEY`など）。アプリ間認証ではないため、従来の環境変数（1Password→GitHub secret→本番`.env`）で持つ |
+
 ## 認証と利用元
 
 全リクエストに`Authorization: Bearer <SHARED_TOKEN_API_SECRET>`と、利用元を表す
@@ -51,12 +60,10 @@ curl -fsS "$ISSUE_DECK_URL/api/shared-tokens?name=EXAMPLE_TOKEN" \
 
 ## issue-deck自身が使う値は自DBから読む（#3561）
 
-issue-deckは共有トークンの保存先なので、自分が使う連携トークンはAPIを経由せず`src/lib/shared-token-reader.ts`の`resolveSharedToken(共有トークン名, 環境変数名)`でDBから直接復号して読む。60秒メモリへ置き、DBを読んだ時点で利用元`issue-deck`の`SharedTokenUsage`を1件残す（記録の頻度はキャッシュ単位）。**取得できなければ同名の環境変数へ倒す**ので、フォールバックに黙って落ちていないかは設定画面の利用元に`issue-deck`が出ているかで確かめる。
+issue-deckは共有トークンの保存先なので、自分が使うアプリ間認証のトークンはAPIを経由せず`src/lib/shared-token-reader.ts`の`resolveSharedToken(共有トークン名, 環境変数名)`でDBから直接復号して読む。60秒メモリへ置き、DBを読んだ時点で利用元`issue-deck`の`SharedTokenUsage`を1件残す（記録の頻度はキャッシュ単位）。**取得できなければ同名の環境変数へ倒す**ので、フォールバックに黙って落ちていないかは設定画面の利用元に`issue-deck`が出ているかで確かめる。
 
 | 共有トークン名 | フォールバックの環境変数 | 読む箇所 |
 | --- | --- | --- |
 | `OPS_API_TOKEN` | `OPS_API_TOKEN` | `ai-usage-export.ts`・`typesafe/usage-auth.ts`・`dispatch/ops-dashboard-codex-usage.ts` |
 | `ISSUE_DECK_IMAGE_UPLOAD_SECRET` | `IMAGE_UPLOAD_SECRET` | `images/image-upload-auth.ts` |
-| `TYPESAFE_API_KEY` | `TYPESAFE_API_KEY` | `typesafe/system-one.ts` |
 | `ISSUE_DECK_DEVELOPMENT_SUMMARY_TOKEN` | `AIDE_SUMMARY_SECRET` | `aide-summary-auth.ts`（AIDE向け開発状況サマリAPI。#3999） |
-| `ISSUE_DECK_AIDE_SUMMARY_USER` | `AIDE_SUMMARY_USER_LOGIN` | 同上（集計の対象利用者のGitHubログイン名。秘密ではないが同じ置き場に置く） |
