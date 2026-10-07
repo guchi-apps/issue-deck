@@ -118,7 +118,7 @@ describe("buildModelPickPrompt", () => {
   // 画面設計全般ではなく、新しい画面を一から設計する場合だけ中級（opus）へ寄せる
   it("新しい画面の設計はopus、小さな見た目の調整はsonnetの基準として書く", () => {
     const prompt = buildModelPickPrompt(input());
-    expect(prompt).toMatch(/`opus`:.*新しい画面の構成・見た目を一から設計/);
+    expect(prompt).toMatch(/`opus`:.*既存の画面構成を踏まえて新しい画面・UIを設計/);
     expect(prompt).toMatch(/`sonnet`:.*小さな見た目の調整/);
   });
 
@@ -230,7 +230,7 @@ describe("buildModelPickState / buildModelPickQuestions", () => {
 
   it("Jevの基準にも新しい画面の設計をopusとして書く", () => {
     const { criteria } = buildModelPickQuestions().model as { criteria: Record<string, string> };
-    expect(criteria.opus).toContain("新しい画面の構成・見た目を一から設計");
+    expect(criteria.opus).toContain("既存の画面構成を踏まえて新しい画面・UIを設計");
     expect(criteria.sonnet).toContain("小さな見た目の調整");
   });
 
