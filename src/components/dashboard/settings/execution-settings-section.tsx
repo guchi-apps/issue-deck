@@ -812,7 +812,7 @@ export function ExecutionSettingsSection({
           <Label htmlFor="app-ai-model">アプリ内AI：要約・検索・文章整理</Label>
           <InfoHint label="アプリ内AI：要約・検索・文章整理">
             Issueとコメントの要約、類似Issue検索、本文整理、並び替え、Issue作成補助に使います。
-            定型処理が中心のため、通常はHaikuが適しています。
+            定型処理が中心のため、通常はHaikuが適しています。GPT系を選んでもOpenAI API（従量課金）は使わず、これらはClaude（Haiku）で実行します。
           </InfoHint>
         </div>
         <Select value={appAiModel} onValueChange={(value) => setAppAiModel(value as AppAiModel)}>
@@ -834,7 +834,7 @@ export function ExecutionSettingsSection({
           <Label htmlFor="app-ai-model-reasoning">アプリ内AI：原因診断・新規アプリ相談</Label>
           <InfoHint label="アプリ内AI：原因診断・新規アプリ相談">
             手作業が失敗した原因の診断と、新規アプリの構成相談に使います。判断力が必要なため、
-            通常はSonnetが適しています。GPTを選ぶとOpenAI API、Claudeを選ぶとAnthropic APIを使います。
+            通常はSonnetが適しています。原因診断（チャット調査）はGPTを選ぶとサブPCのCodex CLI（サブスク枠）で実行します。新規アプリ相談・手作業の修正提案はGPTを選んでもClaude（Sonnet）で実行し、OpenAI API（従量課金）は使いません。
           </InfoHint>
         </div>
         <Select

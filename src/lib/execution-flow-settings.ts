@@ -1,5 +1,7 @@
 import {
+  APP_AI_MODEL_DEFAULT,
   APP_AI_MODEL_OPTIONS,
+  APP_AI_MODEL_REASONING_DEFAULT,
   CODEX_MODEL_DEFAULT,
   appAiProvider,
   parseAppAiModel,
@@ -86,9 +88,21 @@ function planReviewModel(settings: ExecutionFlowSettings, agent: PlanReviewAgent
     : describeCodexModel(settings.planReviewCodexModel);
 }
 
+/** この入口の機能はGPT系を選んでもOpenAI APIを使わず、Claude系で実行する（#4147）。 */
 function appAiAgent(model: AppAiModel) {
-  return appAiProvider(model) === "openai" ? "OpenAI API（従量課金）" : "Anthropic API";
+  return appAiProvider(model) === "openai" ? "Anthropic API（Claude固定）" : "Anthropic API";
 }
+
+function appAiClaudeFixedModelLabel(model: AppAiModel, reasoning: boolean) {
+  return appAiModelLabel(
+    appAiProvider(model) === "openai"
+      ? reasoning ? APP_AI_MODEL_REASONING_DEFAULT : APP_AI_MODEL_DEFAULT
+      : model,
+  );
+}
+
+const CLAUDE_FIXED_NOTE =
+  "GPT系を選んでいてもOpenAI API（従量課金）は使わず、Claude系の既定モデルで実行します。";
 
 /** チャット調査はGPT系ならサブPCのCodex CLI（サブスク枠）で動く（#4143）。主系プロバイダーは見ない。 */
 function chatInvestigationAgent(model: AppAiModel) {
@@ -172,7 +186,8 @@ export function resolveExecutionFlows(settings: ExecutionFlowSettings): Executio
     },
     {
       group: "アプリ内AI", name: "要約・検索・文章整理・手作業アシスタント", location: "IssueDeckサーバー",
-      agent: appAiAgent(settings.appAiModel), model: appAiModelLabel(settings.appAiModel), source: "アプリ内AI設定", sourceId: "app-ai-settings",
+      agent: appAiAgent(settings.appAiModel), model: appAiClaudeFixedModelLabel(settings.appAiModel, false), source: "アプリ内AI設定", sourceId: "app-ai-settings",
+      note: appAiProvider(settings.appAiModel) === "openai" ? CLAUDE_FIXED_NOTE : undefined,
     },
     {
       group: "アプリ内AI", name: "原因診断（チャット調査）",
@@ -182,13 +197,13 @@ export function resolveExecutionFlows(settings: ExecutionFlowSettings): Executio
     },
     {
       group: "アプリ内AI", name: "新規アプリ相談・手作業の修正提案", location: "IssueDeckサーバー",
-      agent: appAiAgent(settings.appAiModelReasoning), model: appAiModelLabel(settings.appAiModelReasoning), source: "アプリ内AI（推論）設定", sourceId: "app-ai-settings",
-      note: appAiProvider(settings.appAiModelReasoning) === "openai" ? "GPT系を選ぶとOpenAI APIの従量課金で実行されます（この機能はまだCodex CLIへ移っていません）。" : undefined,
+      agent: appAiAgent(settings.appAiModelReasoning), model: appAiClaudeFixedModelLabel(settings.appAiModelReasoning, true), source: "アプリ内AI（推論）設定", sourceId: "app-ai-settings",
+      note: appAiProvider(settings.appAiModelReasoning) === "openai" ? CLAUDE_FIXED_NOTE : undefined,
     },
     {
       group: "判定", name: "おまかせのモデル選択・Issueラベル判定", location: settings.modelPickEngine === "jev" ? "TypeSafe" : "IssueDeckサーバー",
-      agent: settings.modelPickEngine === "jev" ? "Jev" : appAiAgent(settings.appAiModel), model: settings.modelPickEngine === "jev" ? "Jev（候補から判定）" : appAiModelLabel(settings.appAiModel),
-      source: "判定に使うAI設定", sourceId: "model-pick-settings", note: settings.modelPickEngine === "jev" ? "Jevが利用できない場合はアプリ内AIで判定します。" : undefined,
+      agent: settings.modelPickEngine === "jev" ? "Jev" : appAiAgent(settings.appAiModel), model: settings.modelPickEngine === "jev" ? "Jev（候補から判定）" : appAiClaudeFixedModelLabel(settings.appAiModel, false),
+      source: "判定に使うAI設定", sourceId: "model-pick-settings", note: settings.modelPickEngine === "jev" ? "Jevが利用できない場合はアプリ内AIで判定します。" : appAiProvider(settings.appAiModel) === "openai" ? CLAUDE_FIXED_NOTE : undefined,
     },
   ];
 }

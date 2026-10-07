@@ -62,13 +62,13 @@ describe("resolveExecutionFlows", () => {
 describe("原因診断の実行基盤表示（#4143）", () => {
   const find = (flows: ReturnType<typeof resolveExecutionFlows>, name: string) => flows.find((flow) => flow.name === name)!;
 
-  it("GPT系はチャット調査だけCodex CLI、新規アプリ相談はOpenAI API従量課金と明示する", () => {
+  it("GPT系はチャット調査だけCodex CLI、新規アプリ相談はClaude固定と明示する（#4147）", () => {
     const flows = resolveExecutionFlows({ ...settings, appAiModelReasoning: "gpt-5.6-terra" });
     expect(find(flows, "原因診断（チャット調査）")).toEqual(
       expect.objectContaining({ location: "サブPC", agent: "Codex CLI（ChatGPTサブスク）" }),
     );
     expect(find(flows, "新規アプリ相談・手作業の修正提案")).toEqual(
-      expect.objectContaining({ location: "IssueDeckサーバー", agent: "OpenAI API（従量課金）" }),
+      expect.objectContaining({ location: "IssueDeckサーバー", agent: "Anthropic API（Claude固定）" }),
     );
   });
 
@@ -113,7 +113,7 @@ describe("resolveProviderFlowRows", () => {
     );
     const appAi = rows.find((row) => row.step === "アプリ内AI")!.entries;
     expect(appAi[1]).toEqual(expect.objectContaining({ agent: "Codex CLI（ChatGPTサブスク）", binding: "provider" }));
-    expect(appAi[2]).toEqual(expect.objectContaining({ agent: "OpenAI API（従量課金）", binding: "provider" }));
+    expect(appAi[2]).toEqual(expect.objectContaining({ agent: "Anthropic API（Claude固定）", binding: "provider" }));
   });
 
   it("個別設定した項目はプロバイダーを切り替えても変わらない", () => {
