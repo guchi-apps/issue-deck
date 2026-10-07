@@ -6,6 +6,7 @@ import {
   describeDispatchHostSelfUpdate,
   isDispatchHostPollerRestartPending,
   parseDispatchHostCheckout,
+  shouldShowDispatchHostSelfUpdateButton,
   type DispatchHostCheckout,
 } from "@/lib/dispatch/host-checkout";
 
@@ -72,6 +73,7 @@ describe("parseDispatchHostCheckout（#1612）", () => {
       committedAt: "2026-08-16T09:00:00.000Z",
       behindCount: 97,
       fetchedAt: "2026-08-16T11:00:00.000Z",
+      autoUpdate: null,
     });
   });
 
@@ -97,6 +99,7 @@ describe("parseDispatchHostCheckout（#1612）", () => {
       committedAt: null,
       behindCount: null,
       fetchedAt: null,
+      autoUpdate: null,
     });
     expect(
       parseDispatchHostCheckout({
@@ -114,7 +117,20 @@ describe("parseDispatchHostCheckout（#1612）", () => {
       committedAt: null,
       behindCount: null,
       fetchedAt: null,
+      autoUpdate: null,
     });
+  });
+
+  it("自動更新の申告（#4118）を検証して取り込む", () => {
+    const base = { commit: "fbb809d" };
+    expect(
+      parseDispatchHostCheckout({ ...base, autoUpdate: { enabled: true, error: " 汚れ " } })?.autoUpdate,
+    ).toEqual({ enabled: true, error: "汚れ" });
+    expect(parseDispatchHostCheckout({ ...base, autoUpdate: { enabled: false } })?.autoUpdate).toEqual({
+      enabled: false,
+      error: null,
+    });
+    expect(parseDispatchHostCheckout({ ...base, autoUpdate: { enabled: "yes" } })?.autoUpdate).toBeNull();
   });
 });
 
@@ -325,5 +341,66 @@ describe("describeDispatchHostSelfUpdate（#1927）", () => {
 
   it("積んだ更新が無ければ何も出さない", () => {
     expect(describeDispatchHostSelfUpdate(null, NOW)).toBeNull();
+  });
+});
+
+describe("shouldShowDispatchHostSelfUpdateButton（#4118）", () => {
+  const behind = { ...CHECKOUT, behindCount: 3 };
+
+  it("更新が要らず結果も無ければ出さない", () => {
+    expect(shouldShowDispatchHostSelfUpdateButton(CHECKOUT, false)).toBe(false);
+  });
+
+  it("自動更新が有効なら、遅れていても出さない", () => {
+    const checkout = { ...behind, autoUpdate: { enabled: true, error: null } };
+    expect(shouldShowDispatchHostSelfUpdateButton(checkout, false)).toBe(false);
+  });
+
+  it("自動更新が失敗しているときは出す", () => {
+    const checkout = { ...behind, autoUpdate: { enabled: true, error: "作業ツリーが汚れています" } };
+    expect(shouldShowDispatchHostSelfUpdateButton(checkout, false)).toBe(true);
+  });
+
+  it("自動更新が無効・申告なしなら、遅れているときに出す", () => {
+    expect(shouldShowDispatchHostSelfUpdateButton(behind, false)).toBe(true);
+    expect(
+      shouldShowDispatchHostSelfUpdateButton({ ...behind, autoUpdate: { enabled: false, error: null } }, false),
+    ).toBe(true);
+  });
+
+  it("再起動待ちも遅れと同じに扱う", () => {
+    const pending = { ...CHECKOUT, startedCommit: "1234567", autoUpdate: { enabled: false, error: null } };
+    expect(shouldShowDispatchHostSelfUpdateButton(pending, false)).toBe(true);
+  });
+
+  it("押した結果が読める間は、自動更新が有効でも出す", () => {
+    const checkout = { ...CHECKOUT, autoUpdate: { enabled: true, error: null } };
+    expect(shouldShowDispatchHostSelfUpdateButton(checkout, true)).toBe(true);
+  });
+});
+
+describe("describeDispatchHostCheckout の自動更新の注記（#4118）", () => {
+  it("遅れていて自動更新が有効なら「自動で更新します」を添える", () => {
+    const row = describeDispatchHostCheckout(
+      host({ checkout: { ...CHECKOUT, behindCount: 2, autoUpdate: { enabled: true, error: null } } }),
+      NOW,
+    );
+    expect(row?.detail).toContain("自動で更新します");
+  });
+
+  it("自動更新が失敗していれば理由を添える", () => {
+    const row = describeDispatchHostCheckout(
+      host({ checkout: { ...CHECKOUT, behindCount: 2, autoUpdate: { enabled: true, error: "汚れ" } } }),
+      NOW,
+    );
+    expect(row?.detail).toContain("自動更新に失敗: 汚れ");
+  });
+
+  it("最新なら注記しない", () => {
+    const row = describeDispatchHostCheckout(
+      host({ checkout: { ...CHECKOUT, autoUpdate: { enabled: true, error: null } } }),
+      NOW,
+    );
+    expect(row?.detail ?? "").not.toContain("自動");
   });
 });
