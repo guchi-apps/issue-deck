@@ -5,6 +5,7 @@ import {
   fetchReleaseNotesFile,
   type LatestRelease,
 } from "@/lib/github/release-api";
+import { notMutedWhere } from "@/lib/notifications/push-kinds";
 import {
   isPushConfigured,
   sendPushNotification,
@@ -322,6 +323,7 @@ export async function runReleasePushSweep(
           user: {
             userInstallations: { some: { installationId: repository.installationId } },
             hiddenRepositories: { none: { repositoryId: repository.id } },
+            ...notMutedWhere("release"),
           },
         },
         select: { id: true, endpoint: true, p256dh: true, auth: true },

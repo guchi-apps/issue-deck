@@ -1498,6 +1498,11 @@ export function POST(request: NextRequest) {
     非表示リポジトリ（#2279）と同じ形。ただし**宛先が全員保留のときは送信済みの記録を付けない**
     ——`checkUserPushSentAt`は一度立つと`00.check-user`が付き直すまで戻らないため、付けると
     保留を解除しても二度と鳴らない。
+  - **Push通知は種類ごとにOFFにできる**（#4159。種類の正は
+    [`lib/notifications/push-kinds.ts`](../src/lib/notifications/push-kinds.ts)、設定は
+    `PushMutedKind`＝**行があればOFF・ユーザー単位**）。各送信は宛先に`notMutedWhere(kind)`を足す。
+    席を先に取る確認待ち・本番マージ待ちは、**OFFのせいで宛先が空になったときも席を取らない**
+    （保留と同じ理由。ONに戻したあとに鳴らせなくなる）。
 - **溜まった手作業は「手作業アシスタント」が1手順ずつ順番に案内する**（#1826。
   [`manual-step-guide-dialog.tsx`](../src/components/dashboard/manual-step-guide-dialog.tsx)）。
   本文はテンプレートで見出しの並びが決まっているのに、実行する人は「一覧を開く → Issueを開く →

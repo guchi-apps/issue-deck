@@ -3,17 +3,17 @@
 import { Bell, Laptop, Send, Smartphone } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { usePushKindPreferences } from "@/hooks/use-push-kind-preferences";
 import { usePushSubscription } from "@/hooks/use-push-subscription";
 import { formatDateTime, formatDateTimeFull } from "@/lib/format-date-time";
+import { PUSH_KIND_LABELS, PUSH_KINDS } from "@/lib/notifications/push-kinds";
 import { describePushDevice } from "@/lib/push-client";
 
 /**
  * 設定の「通知」区分（#838）。**PCの設定ダイアログとスマホの設定画面が同じものを描く。**
  *
- * 置いてあるのは「この端末で受け取るかどうか」だけで、リポジトリ単位・種別単位のON/OFFは
- * 持たない。通知するのは確認待ち（`00.check-user`）と本番へのマージ待ち（#2376）の2種類で、
- * **どちらも「人が動かないと止まるもの」**——片方だけ止めたい理由が出ていないので、
- * 種別のスイッチは3種類目が出たときにまとめて作る（受け取りたくない端末は購読を解除する）。
+ * 「この端末で受け取るか」（購読）と、「どの種類を受け取るか」（#4159。ユーザー単位で、
+ * 端末をまたいで効く）の2層。種類をOFFにしても購読は残るので、ONに戻せばすぐ届く。
  *
  * **「押せない」で終わらせない。** iOSはホーム画面に追加しないと受け取れず、一度
  * 「許可しない」を選ぶとこの画面からは尋ね直せない。どちらも画面の外でしか直せないため、
@@ -36,6 +36,7 @@ export function NotificationSettingsSection() {
     removeSubscription,
     sendTest,
   } = usePushSubscription(true);
+  const kindPreferences = usePushKindPreferences(true);
 
   const isSubscribed = deliveryState === "delivering";
   // **失効（ブラウザには購読が残っているのにサーバー側の行が無い）を「オフ」と混ぜない**
@@ -51,11 +52,9 @@ export function NotificationSettingsSection() {
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-col gap-1.5">
-        <p className="text-sm font-medium">確認待ち・本番マージ待ちのPush通知</p>
+        <p className="text-sm font-medium">Push通知</p>
         <p className="text-xs text-muted-foreground">
-          担当リポジトリのIssueに<code className="font-mono">00.check-user</code>
-          が付いたときと、本番（<code className="font-mono">main</code>
-          ）へのマージ待ちのリリースPRが残っているときに、この端末へ通知します。
+          確認待ち・本番マージ待ち・リリース完了・デプロイ起動漏れを、この端末へ通知します。
           アプリを開いているあいだも同じように通知するので、他のアプリを見ているときにも
           気づけます。受け取っているあいだは画面内のお知らせを出さないため、二重になることは
           ありません。
@@ -136,6 +135,51 @@ export function NotificationSettingsSection() {
         )}
         {message && <p className="text-xs text-emerald-700 dark:text-emerald-400">{message}</p>}
         {error && <p className="text-xs text-destructive">{error}</p>}
+      </div>
+
+      <div className="flex flex-col gap-1.5">
+        <p className="text-sm font-medium">受け取る通知の種類</p>
+        <p className="text-xs text-muted-foreground">
+          オフにした種類は届きません。設定はアカウント全体に効き、登録した全端末で共通です。
+          テスト通知はこの設定に関係なく届きます。
+        </p>
+        <ul className="mt-1.5 flex flex-col overflow-hidden rounded-lg border">
+          {PUSH_KINDS.map((kind) => {
+            const checked = kindPreferences.value?.[kind] ?? true;
+            const { title, description } = PUSH_KIND_LABELS[kind];
+            return (
+              <li key={kind} className="flex items-center gap-3 border-b p-2.5 last:border-b-0">
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm">{title}</p>
+                  <p className="text-xs text-muted-foreground">{description}</p>
+                </div>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={checked}
+                  aria-label={`${title}の通知`}
+                  disabled={kindPreferences.value === null}
+                  onClick={() => kindPreferences.setKindEnabled(kind, !checked)}
+                  className={`relative h-[22px] w-[38px] shrink-0 rounded-full transition-colors disabled:opacity-50 ${
+                    checked ? "bg-emerald-600" : "bg-muted-foreground/40"
+                  }`}
+                >
+                  <span
+                    className={`absolute top-[2px] size-[18px] rounded-full bg-white transition-all ${
+                      checked ? "left-[18px]" : "left-[2px]"
+                    }`}
+                  />
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+        {kindPreferences.value?.["check-user"] === false && (
+          <p className="text-xs text-amber-700 dark:text-amber-400">
+            確認待ちをオフにしていると、止まったIssueに気づけなくなります。
+          </p>
+        )}
+        {kindPreferences.error && <p className="text-xs text-destructive">{kindPreferences.error}</p>}
       </div>
 
       {availability === "needs-standalone" && (

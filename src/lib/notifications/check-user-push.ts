@@ -6,6 +6,7 @@ import {
   checkUserReason,
   type CheckUserReason,
 } from "@/lib/github/approval-labels";
+import { mutedWhere, notMutedWhere } from "@/lib/notifications/push-kinds";
 import {
   isPushConfigured,
   sendPushNotification,
@@ -425,19 +426,24 @@ export async function sweepCheckUserPushNotifications(now: Date = new Date()): P
           },
         },
       };
-      const [targets, snoozedSubscriberCount] = await Promise.all([
+      const [targets, snoozedSubscriberCount, mutedSubscriberCount] = await Promise.all([
         db.pushSubscription.findMany({
-          where: { user: { ...subscriberWhere, NOT: snoozedWhere } },
+          where: { user: { ...subscriberWhere, ...notMutedWhere("check-user"), NOT: snoozedWhere } },
           select: { id: true, endpoint: true, p256dh: true, auth: true },
         }),
         db.pushSubscription.count({ where: { user: { ...subscriberWhere, ...snoozedWhere } } }),
+        // 確認待ちをOFFにしているユーザー（#4159）。保留と同じく、OFFのせいで宛先が空に
+        // なったときは席を取らず、ONに戻したあとの巡回で拾えるようにする
+        db.pushSubscription.count({
+          where: { user: { ...subscriberWhere, ...mutedWhere("check-user") } },
+        }),
       ]);
 
       // **宛先が保留のせいで全員消えたときは、席を取らずに次の巡回へ回す**（#2398）。
       // `checkUserPushSentAt`は一度立つと`00.check-user`が付き直すまで戻らないので、
       // ここで送信済みにすると保留を解除しても二度と鳴らない。保留が解ければ、この巡回が
       // そのまま拾って送る（`decideCheckUserPush`は`checkUserLabeledAt`しか見ない）
-      if (targets.length === 0 && snoozedSubscriberCount > 0) continue;
+      if (targets.length === 0 && (snoozedSubscriberCount > 0 || mutedSubscriberCount > 0)) continue;
 
       // **送る前に「送信済み」を立てて席を取る**（#2300）。取れなかったら、同じIssueを
       // 別の巡回が既に掴んでいるので何もしない

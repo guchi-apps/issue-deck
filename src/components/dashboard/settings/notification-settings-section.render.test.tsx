@@ -28,6 +28,14 @@ type HookState = {
 
 let hookState: HookState;
 
+vi.mock("@/hooks/use-push-kind-preferences", () => ({
+  usePushKindPreferences: () => ({
+    value: { "check-user": false, "release-merge": true, release: true, "deploy-launch": true },
+    error: null,
+    setKindEnabled: vi.fn(),
+  }),
+}));
+
 vi.mock("@/hooks/use-push-subscription", () => ({
   usePushSubscription: () => ({
     ...hookState,
@@ -153,5 +161,16 @@ describe("NotificationSettingsSection", () => {
 
     fireEvent.click(screen.getAllByRole("button", { name: "解除" })[1]);
     expect(removeSubscription).toHaveBeenCalledWith("sub-2");
+  });
+
+  it("通知の種類ごとのスイッチを並べ、OFFの種類には注意を出す", () => {
+    setup();
+
+    const sw = screen.getByRole("switch", { name: "確認待ちの通知" });
+    expect(sw.getAttribute("aria-checked")).toBe("false");
+    expect(screen.getByRole("switch", { name: "リリース完了の通知" }).getAttribute("aria-checked")).toBe(
+      "true",
+    );
+    expect(screen.getByText(/止まったIssueに気づけなくなります/)).toBeTruthy();
   });
 });

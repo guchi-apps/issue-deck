@@ -32,6 +32,7 @@ model User {
   favoriteRepositories              FavoriteRepository[]
   commentReads                      IssueCommentRead[]
   pushSubscriptions                 PushSubscription[]
+  pushMutedKinds                    PushMutedKind[]
   snoozedItems                      SnoozedItem[]
   issueCreationExcludedRepositories IssueCreationExcludedRepository[]
   releaseCheckTargets               ReleaseCheckTarget[]
@@ -2435,4 +2436,18 @@ model CircleciWebhookDelivery {
   receivedAt DateTime @default(now())
 
   @@index([receivedAt])
+}
+
+/// Push通知の種類ごとのOFF設定（#4159）。**行があればその種類はOFF**で、行が無ければON
+/// （既定は全部ON。後から種類を足しても既存ユーザーの挙動が変わらない）。
+/// ユーザー単位で、端末（購読）ごとではない。`kind`は`src/lib/notifications/push-kinds.ts`の値。
+model PushMutedKind {
+  id        String   @id @default(cuid())
+  userId    String
+  kind      String
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, kind])
 }
