@@ -460,8 +460,23 @@ SESSION_MEMORY_RESERVE_MB="$(require_non_negative_int DISPATCH_SESSION_MEMORY_RE
 # 既定の6時間は「毎巡fetchしたくない」と「遅れに気付くのが1日遅れては意味が無い」の間を取った値。
 # 遅れの数字は最後にoriginを見た時点のものなので、間隔を延ばすほど申告が古くなる（どの時点の
 # 数字かは`fetchedAt`として一緒に申告し、画面が古ければ注記を出す）。
+# チェックアウトの自動更新（#4118）。**0で無効**（従来どおり画面の「更新して再起動」だけで更新する）。
+#
+# 画面に「◯コミット遅れ」「再起動待ち」が出る条件と同じ状態を巡回の終わりに見つけたら、
+# 画面のボタンと同じ手順（`git pull --ff-only`→`exec`で入れ替え）を自分で行う。
+AUTO_SELF_UPDATE="$(require_non_negative_int DISPATCH_AUTO_SELF_UPDATE "${DISPATCH_AUTO_SELF_UPDATE:-}" 1)"
+# 失敗した自動更新をやり直すまでの間隔（分）。作業ツリーが汚れたままなどで毎巡失敗し続けない歯止め
+AUTO_SELF_UPDATE_RETRY_MINUTES="$(require_non_negative_int \
+  DISPATCH_AUTO_SELF_UPDATE_RETRY_MINUTES "${DISPATCH_AUTO_SELF_UPDATE_RETRY_MINUTES:-}" 60)"
+# 失敗の記録（1行目＝epoch秒、2行目＝理由）。`exec`で入れ替わっても残すためファイルに置く
+AUTO_SELF_UPDATE_STATE_FILE="${XDG_STATE_HOME:-$HOME/.local/state}/issue-deck/auto-self-update"
+
+# 自動更新が有効なら、遅れに気付くのが半日後では意味が無いので既定を6時間から30分へ縮める
+# （明示した値は尊重する）。
+CHECKOUT_FETCH_DEFAULT_MINUTES=360
+((AUTO_SELF_UPDATE > 0)) && CHECKOUT_FETCH_DEFAULT_MINUTES=30
 CHECKOUT_FETCH_INTERVAL_MINUTES="$(require_non_negative_int \
-  DISPATCH_CHECKOUT_FETCH_INTERVAL_MINUTES "${DISPATCH_CHECKOUT_FETCH_INTERVAL_MINUTES:-}" 360)"
+  DISPATCH_CHECKOUT_FETCH_INTERVAL_MINUTES "${DISPATCH_CHECKOUT_FETCH_INTERVAL_MINUTES:-}" "$CHECKOUT_FETCH_DEFAULT_MINUTES")"
 
 # worktreeを掃除する間隔（分）。**0で無効**（#1716）。
 #
@@ -1153,14 +1168,23 @@ collect_checkout_state() {
     fetched_at="$(date -u -d "@$fetched_epoch" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || true)"
   fi
 
+  # 自動更新が最後に失敗した理由。再試行の間隔を過ぎれば（次に試すので）出さない
+  local auto_error=""
+  if ((AUTO_SELF_UPDATE > 0)) && self_update_in_backoff "$AUTO_SELF_UPDATE_STATE_FILE" "$AUTO_SELF_UPDATE_RETRY_MINUTES"; then
+    auto_error="$(sed -n 2p "$AUTO_SELF_UPDATE_STATE_FILE" 2>/dev/null | cut -c1-300)"
+  fi
+
   jq -n \
     --arg commit "$commit" \
     --arg branch "$branch" \
     --arg committedAt "$committed_at" \
     --arg fetchedAt "$fetched_at" \
     --arg startedCommit "$POLLER_STARTED_COMMIT" \
+    --argjson autoEnabled "$(((AUTO_SELF_UPDATE > 0)) && echo true || echo false)" \
+    --arg autoError "$auto_error" \
     --argjson behindCount "${behind:-null}" \
-    '{commit: $commit, behindCount: $behindCount}
+    '{commit: $commit, behindCount: $behindCount,
+        autoUpdate: ({enabled: $autoEnabled} + (if $autoError == "" then {} else {error: $autoError} end))}
       + (if $branch == "" then {} else {branch: $branch} end)
       + (if $committedAt == "" then {} else {committedAt: $committedAt} end)
       + (if $fetchedAt == "" then {} else {fetchedAt: $fetchedAt} end)
@@ -3097,11 +3121,41 @@ run_control_job() {
 # **実行そのものは別プロセスへ逃がす**（`run-manual-step.sh`）。サブPCの手作業で最も多いのが
 # 「`git pull`してpollerを再起動する」で、pollerのcgroupの中で実行すると自分ごと殺されて
 # 結果を返せない。`systemd-run --user --collect --unit=...`で別のcgroupへ出す。
+# 画面のボタンを押す代わりに、pollerが自分でチェックアウトを更新して入れ替わる（#4118）。
+#
+# **`run_once`が完全に終わった後にだけ呼ぶ。** `exec`はプロセスごと入れ替わるため、claim・報告・
+# セッション起動の途中で行うと、掴んだジョブの報告が届かないまま消える。
+# 失敗は`AUTO_SELF_UPDATE_STATE_FILE`に残して`AUTO_SELF_UPDATE_RETRY_MINUTES`の間は繰り返さず、
+# 理由は申告（`checkout.autoUpdate.error`）で画面へ出す。成功すれば記録を消して`exec`する
+# （`run_self_update_job`と同じく、走っている実装セッションは落ちない。#1927）。
+maybe_auto_self_update() {
+  ((AUTO_SELF_UPDATE > 0)) || return 0
+  [[ "$SHUTDOWN" -eq 0 ]] || return 0
+  git -C "$CHECKOUT_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1 || return 0
+  self_update_needed "$CHECKOUT_DIR" "$POLLER_STARTED_COMMIT" || return 0
+  if self_update_in_backoff "$AUTO_SELF_UPDATE_STATE_FILE" "$AUTO_SELF_UPDATE_RETRY_MINUTES"; then
+    return 0
+  fi
+
+  echo "チェックアウトの遅れ・再起動待ちを検知したため、自動で更新します（$CHECKOUT_DIR）..."
+  local result before after
+  if ! result="$(self_update_pull "$CHECKOUT_DIR")"; then
+    echo "警告: 自動更新に失敗しました: $result" >&2
+    mkdir -p "$(dirname "$AUTO_SELF_UPDATE_STATE_FILE")" 2>/dev/null || true
+    printf '%s\n%s\n' "$(date +%s)" "$result" >"$AUTO_SELF_UPDATE_STATE_FILE" 2>/dev/null || true
+    return 0
+  fi
+  read -r before after <<<"$result"
+  rm -f "$AUTO_SELF_UPDATE_STATE_FILE" 2>/dev/null || true
+  echo "$before → $after へ更新しました。新しいスクリプトへ入れ替えます（同じプロセスのまま）。"
+  exec /usr/bin/env bash "${BASH_SOURCE[0]}" ${POLLER_ARGV[@]+"${POLLER_ARGV[@]}"}
+}
+
 # チェックアウトを最新へ追随させ、pollerを畳む（#1875）。
 #
 # **`ssh`して`git pull && systemctl restart`していた手作業**（#1858・#1867）の置き換え。
-# pollerが自分から`git pull`しない設計（人が取り込むかを決める）は崩さず、**画面で押された
-# ときだけ**動く経路としてここに置く。
+# 画面で押されたときの経路。**自動更新（#4118。`maybe_auto_self_update`）も同じ手順を踏む**
+# （かつては「pollerが自分から`git pull`しない」設計で、人が押したときだけ動いた）。
 #
 # **報告してから終了する。** 自分で`systemctl --user restart`を打つと、報告が届く前にプロセスが
 # 死んで、画面には「実行中」のまま残る。終了だけしてsystemdの`Restart=always`に拾わせれば、
@@ -3114,23 +3168,12 @@ run_self_update_job() {
   # **作業ツリーが汚れていたら触らない。** 手で試した変更を巻き込んで消しうるため、
   # 強制せずに人へ返す。止めるときは変更のあるファイル名を返し、取り込み先と同じ内容の
   # 変更だけなら捨てて続ける（#3588。判定は lib/self-update.sh）
-  local dirty_reason
-  if ! dirty_reason="$(self_update_prepare_worktree "$CHECKOUT_DIR")"; then
-    report_job "$job_id" failed "$dirty_reason"
+  local result before after
+  if ! result="$(self_update_pull "$CHECKOUT_DIR")"; then
+    report_job "$job_id" failed "$result"
     return 0
   fi
-
-  local before after out
-  before="$(git -C "$CHECKOUT_DIR" rev-parse --short HEAD 2>/dev/null || true)"
-
-  # **`--ff-only`。** マージコミットを作らず、分岐していれば失敗として返す
-  if ! out="$(timeout 120 git -C "$CHECKOUT_DIR" pull --ff-only 2>&1)"; then
-    report_job "$job_id" failed \
-      "git pull --ff-only に失敗しました: $(printf '%s' "$out" | tail -3 | tr '\n' ' ')"
-    return 0
-  fi
-
-  after="$(git -C "$CHECKOUT_DIR" rev-parse --short HEAD 2>/dev/null || true)"
+  read -r before after <<<"$result"
 
   if [[ "$before" == "$after" ]]; then
     report_job "$job_id" succeeded "既に最新でした（$after）。再起動します。"
@@ -4243,6 +4286,9 @@ while [[ "$SHUTDOWN" -eq 0 ]]; do
   # 理由で落ちるたびにプロセスごと終わると、復帰までポーリングが空く
   run_once || true
   [[ "$SHUTDOWN" -eq 0 ]] || break
+  # **`run_once`の直後に置く**（#4118）。`wait_between_polls`の中でもclaimが走るため、そこに
+  # 入れるとジョブを掴んだまま入れ替わる
+  maybe_auto_self_update
   wait_between_polls
 done
 
