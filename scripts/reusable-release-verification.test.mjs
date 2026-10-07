@@ -49,6 +49,11 @@ function extractRunScript(stepName) {
 // `--jq`はgh側で適用されるので、スタブはPRのオブジェクト・Issueの本文をそのまま出す。
 const STUB_GH = `#!/usr/bin/env bash
 set -u
+if [ "$1" = "pr" ] && [ "$2" = "view" ]; then
+  var="STUB_FILES_$3"
+  printf '%s' "\${!var:-}"
+  exit 0
+fi
 if [ "$1" = "issue" ] && [ "$2" = "view" ]; then
   var="STUB_ISSUE_$3"
   printf '%s' "\${!var:-}"
@@ -78,6 +83,16 @@ var="STUB_PR_\${head#issue-}"
 printf '%s' "\${!var:-}"
 `;
 
+// 記録なしPRのレビュー依頼（#4092）。`curl`は終了コードの代わりに`-w '%{http_code}'`の値だけを返す。
+// 依頼の本文は`STUB_CURL_LOG`へ追記して、テスト側で読む
+const STUB_CURL = `#!/usr/bin/env bash
+while [ $# -gt 0 ]; do
+  if [ "$1" = "-d" ]; then printf '%s\\n' "$2" >> "$STUB_CURL_LOG"; fi
+  shift
+done
+printf '%s' "\${STUB_CURL_CODE:-200}"
+`;
+
 let workDir;
 
 beforeEach(() => {
@@ -85,6 +100,9 @@ beforeEach(() => {
   const ghPath = path.join(workDir, "gh");
   writeFileSync(ghPath, STUB_GH);
   chmodSync(ghPath, 0o755);
+  const curlPath = path.join(workDir, "curl");
+  writeFileSync(curlPath, STUB_CURL);
+  chmodSync(curlPath, 0o755);
 });
 
 afterEach(() => {
@@ -98,14 +116,23 @@ afterEach(() => {
  * @param prs Issue番号 → `gh pr list`が返すPRのJSON
  * @param issueBodies Issue番号 → `gh issue view`が返す本文（#3634）
  */
-function runAggregation(issueLines, prs, issueBodies = {}, ackComments = {}) {
+function runAggregation(issueLines, prs, issueBodies = {}, ackComments = {}, extraEnv = {}) {
   writeFileSync(path.join(workDir, "release-issue-lines.txt"), `${issueLines.join("\n")}\n`);
 
   const script = extractRunScript("対象issueの検証結果を集計する").replaceAll(
     "/tmp/",
     `${workDir}/`,
   );
-  const env = { ...process.env, PATH: `${workDir}:${process.env.PATH}`, GH_REPO: "guchi-apps/issue-deck" };
+  const env = {
+    ...process.env,
+    PATH: `${workDir}:${process.env.PATH}`,
+    GH_REPO: "guchi-apps/issue-deck",
+    // 実行環境の値を拾わない（依頼先は各テストが明示する）
+    APP_BASE_URL: "",
+    PROGRESS_REPORT_SECRET: "",
+    STUB_CURL_LOG: path.join(workDir, "curl.log"),
+    ...extraEnv,
+  };
   for (const [prNumber, bodies] of Object.entries(ackComments)) {
     env[`STUB_ACK_${prNumber}`] = JSON.stringify(bodies);
   }
@@ -243,8 +270,9 @@ describe("対象issueの検証結果を集計する", () => {
       2441: { number: 2446, body: "", comments: [{ url: "https://example.com", body: "ふつうのコメント" }] },
     });
 
-    expect(out).toContain("| #2441 | #2446 | ? 記録なし | ? 記録なし |");
-    expect(out).toContain("| #2432 | — | ? 記録なし | ? 記録なし |");
+    // 依頼先が未設定なら依頼できず（#4092）。PRが無いIssueは記録なしのまま
+    expect(out).toContain("| #2441 | #2446 | ? 依頼できず（設定または差分情報の不足。記録なし） | ? 記録なし |");
+    expect(out).toContain("| #2432 | — | ? 記録なし（PRを特定できず） | ? 記録なし |");
     expect(out).not.toContain("<details>");
   });
 
@@ -385,5 +413,127 @@ describe("確認済みの記録を読む（#3739）", () => {
   it("問題なしの行は書き換えない", () => {
     const out = runAggregation(lines, { 2441: pr("lgtm") }, {}, { 2446: [ack("abc123")] });
     expect(out).toContain("| #2441 | #2446 | ✅ 問題なし | 該当なし |");
+  });
+});
+
+describe("記録のないPRのレビュー依頼（#4092）", () => {
+  const release = { APP_BASE_URL: "https://deck.example", PROGRESS_REPORT_SECRET: "secret" };
+  const noRecordPr = (extra = {}) => ({
+    number: 5001,
+    body: "実装しました。",
+    comments: [],
+    headRefOid: "aaa111",
+    baseRefOid: "bbb222",
+    additions: 800,
+    deletions: 10,
+    changedFiles: 4,
+    ...extra,
+  });
+  const curlLog = () => {
+    try {
+      return readFileSync(path.join(workDir, "curl.log"), "utf8");
+    } catch {
+      return "";
+    }
+  };
+
+  it("大きい記録なしPRは依頼し、結果待ちとして表に出す", () => {
+    const out = runAggregation(["- #5000 大きな変更"], { 5000: noRecordPr() }, {}, {}, {
+      ...release,
+      STUB_FILES_5001: "src/a.ts",
+    });
+    expect(out).toContain("| #5000 | #5001 | ? レビュー依頼済み（結果待ち） |");
+    const sent = JSON.parse(curlLog().trim());
+    expect(sent).toMatchObject({
+      action: "request",
+      repository: "guchi-apps/issue-deck",
+      pullRequest: 5001,
+      headSha: "aaa111",
+      baseSha: "bbb222",
+      agent: "codex",
+    });
+    expect(sent.runId).toBeUndefined();
+  });
+
+  it("小規模で低リスクなら依頼しない", () => {
+    const out = runAggregation(
+      ["- #5000 文言"],
+      { 5000: noRecordPr({ additions: 5, deletions: 1, changedFiles: 1 }) },
+      {},
+      {},
+      { ...release, STUB_FILES_5001: "src/a.ts" },
+    );
+    expect(out).toContain("— 不要（小規模・低リスクのため）");
+    expect(curlLog()).toBe("");
+  });
+
+  it("小規模でもリスクのあるパスなら依頼する", () => {
+    const out = runAggregation(
+      ["- #5000 認証"],
+      { 5000: noRecordPr({ additions: 5, deletions: 1, changedFiles: 1 }) },
+      {},
+      {},
+      { ...release, STUB_FILES_5001: "src/lib/auth/session.ts" },
+    );
+    expect(out).toContain("? レビュー依頼済み（結果待ち）");
+  });
+
+  it("skippedは依頼しない", () => {
+    const out = runAggregation(
+      ["- #5000 変更"],
+      {
+        5000: noRecordPr({
+          body: "<!-- issue-deck-verification:start review=skipped risk=none -->\n<!-- issue-deck-verification:end -->",
+        }),
+      },
+      {},
+      {},
+      { ...release, STUB_FILES_5001: "src/a.ts" },
+    );
+    expect(out).toContain("| #5000 | #5001 | — 実施なし |");
+    expect(curlLog()).toBe("");
+  });
+
+  it("409や設定不足では依頼できずにして集計を続ける", () => {
+    const conflict = runAggregation(["- #5000 変更"], { 5000: noRecordPr() }, {}, {}, {
+      ...release,
+      STUB_FILES_5001: "src/a.ts",
+      STUB_CURL_CODE: "409",
+    });
+    expect(conflict).toContain("? 依頼できず（HTTP 409）");
+    const unset = runAggregation(["- #5000 変更"], { 5000: noRecordPr() }, {}, {}, {
+      STUB_FILES_5001: "src/a.ts",
+    });
+    expect(unset).toContain("? 依頼できず（設定または差分情報の不足");
+  });
+
+  it("本文にマーカーが無くても、HEADと同じshaの判定印コメントから判定を読む", () => {
+    const out = runAggregation(
+      ["- #5000 変更"],
+      {
+        5000: noRecordPr({
+          comments: [
+            {
+              url: "https://example.com/c1",
+              body: "総評\n\n<!-- issue-deck-codex-review-verdict:needs-check sha=aaa111 -->",
+            },
+            {
+              url: "https://example.com/c0",
+              body: "古い\n\n<!-- issue-deck-review-verdict:changes-requested sha=old000 -->",
+            },
+          ],
+        }),
+      },
+      {},
+      {},
+      { ...release, STUB_FILES_5001: "src/a.ts" },
+    );
+    expect(out).toContain("| #5000 | #5001 | ⚠️ 要確認 |");
+    expect(curlLog()).toBe("");
+  });
+
+  it("PRを特定できなければ依頼せず記録なしにする", () => {
+    const out = runAggregation(["- #5000 手動PR"], {}, {}, {}, release);
+    expect(out).toContain("| #5000 | — | ? 記録なし（PRを特定できず） |");
   });
 });
