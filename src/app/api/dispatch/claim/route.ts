@@ -11,6 +11,7 @@ import {
   cancelManuallyStartedScheduledRuns,
   pruneOldScheduledRunEntries,
 } from "@/lib/nightly-run-launch";
+import { pruneOldSharedTokenUsages } from "@/lib/shared-token-usage-prune";
 import { sweepCheckUserPushNotifications } from "@/lib/notifications/check-user-push";
 import {
   CLAUDE_LOCAL_MODEL_DEFAULT,
@@ -96,6 +97,12 @@ export async function POST(request: NextRequest) {
       await pruneOldScheduledRunEntries(new Date());
     } catch (error) {
       console.error("[POST /api/dispatch/claim] 予約実行の古い結果行を消せませんでした:", error);
+    }
+    // 共有トークンの古い利用記録を消す（#4165）。失敗しても払い出しは続ける
+    try {
+      await pruneOldSharedTokenUsages(new Date());
+    } catch (error) {
+      console.error("[POST /api/dispatch/claim] 共有トークンの古い利用記録を消せませんでした:", error);
     }
     // 積んだ後に手動で実装開始されたIssueの予定を取り消す（#3274）。**次枠実行より先に回す**
     // ——同じ巡回で起動判定に入る前に外し、手動で着手済みのIssueへ重ねて起動しないため。

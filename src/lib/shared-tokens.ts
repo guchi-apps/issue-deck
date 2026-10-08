@@ -8,7 +8,10 @@ export const SHARED_TOKEN_DESCRIPTION_MAX_LENGTH = 1_000;
 export const SHARED_TOKEN_SOURCE_REFERENCE_MAX_LENGTH = 500;
 export const SHARED_TOKEN_CONSUMER_MAX_LENGTH = 100;
 
-type SharedTokenWithUsages = SharedTokenRow & { usages: SharedTokenUsage[] };
+/** 一覧の表示に要る利用記録の要約（利用元ごとの最終利用日時）。全行は読まない（#4165） */
+export type SharedTokenUsageSummary = Pick<SharedTokenUsage, "consumer" | "usedAt">;
+
+type SharedTokenWithUsages = SharedTokenRow & { usages: SharedTokenUsageSummary[] };
 
 function optionalText(value: unknown, maxLength: number): string | null | undefined {
   // 画面は空欄を null で送るため、undefined（キー省略）と同じく未入力として扱う（#3547）。

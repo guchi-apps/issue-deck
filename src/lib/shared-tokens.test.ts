@@ -56,10 +56,7 @@ describe("共有トークンの表示用変換", () => {
       updatedAt: new Date("2026-09-01T00:00:00Z"),
       usages: [
         {
-          id: "usage-1",
-          sharedTokenId: "token-1",
           consumer: "aide",
-          action: "read",
           usedAt: new Date("2026-09-02T00:00:00Z"),
         },
       ],
