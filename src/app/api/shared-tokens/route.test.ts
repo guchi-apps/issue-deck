@@ -221,4 +221,23 @@ describe("共有トークンAPI", () => {
       }),
     });
   });
+
+  it.each(["POST", "PUT"])("正規のops-dashboardから専用認証付き%sを受け付け、不正値は拒否する", async (method) => {
+    const name = "ISSUE_DECK_ACCESS_APP_TOKEN";
+    findUnique.mockResolvedValue(null);
+    create.mockResolvedValue({ id: "token-4", name });
+    const handler = method === "POST" ? POST : PUT;
+    const headers = {
+      authorization: "Bearer shared-secret",
+      "x-shared-token-consumer": "ops-dashboard",
+      "x-shared-token-write-authorization": "Bearer wrong",
+    };
+    const body = JSON.stringify({ name, value: "new-token" });
+    expect((await handler(request("/api/shared-tokens", { method, headers, body }))).status).toBe(403);
+    expect(create).not.toHaveBeenCalled();
+    expect(findUnique).not.toHaveBeenCalled();
+    headers["x-shared-token-write-authorization"] = "Bearer write-secret";
+    expect((await handler(request("/api/shared-tokens", { method, headers, body }))).status).toBe(201);
+    expect(create).toHaveBeenCalled();
+  });
 });
