@@ -58,6 +58,13 @@ curl -fsS "$ISSUE_DECK_URL/api/shared-tokens?name=EXAMPLE_TOKEN" \
 省略すると既存の値を保ちます。利用記録には操作`update`（新規作成時は`create`）と利用元を残し、応答にもログにも値は出しません。
 `GET`は60秒キャッシュを持たないので、上書き直後の読み取りから新しい値が返ります。
 
+**書き込める利用元を限定している名前がある（#4164）。** issue-deck自身のログイン判定に使う`ISSUE_DECK_ACCESS_APP_TOKEN`は、
+誤った値で上書きされると全員拒否になり、直す設定画面もログインの後ろにあるため画面から戻せない。
+そのため`POST`/`PUT`は利用元が`status-hub`（StatusHubの再発行経路）のときだけ受け付け、それ以外は`403 forbidden_name`を返す。
+利用元は自己申告のヘッダーなので防げるのは誤操作と無関係な呼び出し元で、`SHARED_TOKEN_API_SECRET`を持つ悪意ある呼び出し元までは防げない
+（`SHARED_TOKEN_API_SECRET`は値を読む権限として配る前提で、書き換え権限まで渡す設計ではない点に注意する）。
+対応表は`src/lib/shared-tokens.ts`の`PROTECTED_TOKEN_WRITERS`。
+
 各アプリを切り替えたら、issue-deckの設定画面で利用日時と利用元を確認してから、1Password側の旧値を削除します。
 
 ## issue-deck自身が使う値は自DBから読む（#3561）

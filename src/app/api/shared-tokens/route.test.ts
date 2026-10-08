@@ -161,6 +161,28 @@ describe("共有トークンAPI", () => {
     expect(create).not.toHaveBeenCalled();
   });
 
+  it("ログイン判定用トークンはStatusHub以外の利用元からPUT/POSTで書けない（#4164）", async () => {
+    const headers = {
+      authorization: "Bearer shared-secret",
+      "content-type": "application/json",
+      "x-shared-token-consumer": "example-app",
+    };
+    const body = JSON.stringify({ name: "ISSUE_DECK_ACCESS_APP_TOKEN", value: "bad" });
+    const put = await PUT(request("/api/shared-tokens", { method: "PUT", headers, body }));
+    const post = await POST(request("/api/shared-tokens", { method: "POST", headers, body }));
+    expect(put.status).toBe(403);
+    expect(post.status).toBe(403);
+    expect(update).not.toHaveBeenCalled();
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it("ログイン判定用トークンはStatusHubの再発行経路からPUTできる", async () => {
+    findUnique.mockResolvedValue({ id: "token-3", name: "ISSUE_DECK_ACCESS_APP_TOKEN" });
+    update.mockResolvedValue({ id: "token-3", name: "ISSUE_DECK_ACCESS_APP_TOKEN" });
+    const res = await PUT(putRequest({ name: "ISSUE_DECK_ACCESS_APP_TOKEN", value: "v" }));
+    expect(res.status).toBe(200);
+  });
+
   it("PUTは無ければ作成する", async () => {
     findUnique.mockResolvedValue(null);
     create.mockResolvedValue({ id: "token-2", name: "NEW" });
