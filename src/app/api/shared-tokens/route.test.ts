@@ -42,6 +42,7 @@ describe("共有トークンAPI", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     process.env.SHARED_TOKEN_API_SECRET = "shared-secret";
+    process.env.SHARED_TOKEN_WRITE_SECRET = "write-secret";
   });
 
   it("未設定の認証値を503で区別する", async () => {
@@ -133,6 +134,7 @@ describe("共有トークンAPI", () => {
         authorization: "Bearer shared-secret",
         "content-type": "application/json",
         "x-shared-token-consumer": "status-hub",
+        "x-shared-token-write-authorization": "Bearer write-secret",
       },
       body: JSON.stringify(body),
     });
@@ -183,6 +185,29 @@ describe("共有トークンAPI", () => {
     expect(res.status).toBe(200);
   });
 
+  it.each(["status-hub", "statushub", "ops-dashboard"])("利用元%sを偽装しても専用認証なしではPOST/PUTできない", async (consumer) => {
+    for (const handler of [POST, PUT]) {
+      const res = await handler(request("/api/shared-tokens", {
+        method: handler === POST ? "POST" : "PUT",
+        headers: { authorization: "Bearer shared-secret", "x-shared-token-consumer": consumer },
+        body: JSON.stringify({ name: "ISSUE_DECK_ACCESS_APP_TOKEN", value: "bad" }),
+      }));
+      expect(res.status).toBe(403);
+    }
+    expect(findUnique).not.toHaveBeenCalled();
+    expect(create).not.toHaveBeenCalled();
+    expect(update).not.toHaveBeenCalled();
+  });
+
+  it.each([undefined, "shared-secret"])("専用認証の未設定・共用時はDBへ触れず停止する", async (secret) => {
+    if (secret === undefined) delete process.env.SHARED_TOKEN_WRITE_SECRET;
+    else process.env.SHARED_TOKEN_WRITE_SECRET = secret;
+    const res = await PUT(putRequest({ name: "ISSUE_DECK_ACCESS_APP_TOKEN", value: "bad" }));
+    expect(res.status).toBe(503);
+    expect(findUnique).not.toHaveBeenCalled();
+    expect(update).not.toHaveBeenCalled();
+  });
+
   it("PUTは無ければ作成する", async () => {
     findUnique.mockResolvedValue(null);
     create.mockResolvedValue({ id: "token-2", name: "NEW" });
@@ -195,5 +220,24 @@ describe("共有トークンAPI", () => {
         usages: { create: { consumer: "status-hub", action: "create" } },
       }),
     });
+  });
+
+  it.each(["POST", "PUT"])("正規のops-dashboardから専用認証付き%sを受け付け、不正値は拒否する", async (method) => {
+    const name = "ISSUE_DECK_ACCESS_APP_TOKEN";
+    findUnique.mockResolvedValue(null);
+    create.mockResolvedValue({ id: "token-4", name });
+    const handler = method === "POST" ? POST : PUT;
+    const headers = {
+      authorization: "Bearer shared-secret",
+      "x-shared-token-consumer": "ops-dashboard",
+      "x-shared-token-write-authorization": "Bearer wrong",
+    };
+    const body = JSON.stringify({ name, value: "new-token" });
+    expect((await handler(request("/api/shared-tokens", { method, headers, body }))).status).toBe(403);
+    expect(create).not.toHaveBeenCalled();
+    expect(findUnique).not.toHaveBeenCalled();
+    headers["x-shared-token-write-authorization"] = "Bearer write-secret";
+    expect((await handler(request("/api/shared-tokens", { method, headers, body }))).status).toBe(201);
+    expect(create).toHaveBeenCalled();
   });
 });

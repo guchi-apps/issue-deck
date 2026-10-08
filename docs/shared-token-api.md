@@ -60,10 +60,22 @@ curl -fsS "$ISSUE_DECK_URL/api/shared-tokens?name=EXAMPLE_TOKEN" \
 
 **書き込める利用元を限定している名前がある（#4164）。** issue-deck自身のログイン判定に使う`ISSUE_DECK_ACCESS_APP_TOKEN`は、
 誤った値で上書きされると全員拒否になり、直す設定画面もログインの後ろにあるため画面から戻せない。
-そのため`POST`/`PUT`は利用元が`status-hub`（StatusHubの再発行経路）のときだけ受け付け、それ以外は`403 forbidden_name`を返す。
-利用元は自己申告のヘッダーなので防げるのは誤操作と無関係な呼び出し元で、`SHARED_TOKEN_API_SECRET`を持つ悪意ある呼び出し元までは防げない
-（`SHARED_TOKEN_API_SECRET`は値を読む権限として配る前提で、書き換え権限まで渡す設計ではない点に注意する）。
-対応表は`src/lib/shared-tokens.ts`の`PROTECTED_TOKEN_WRITERS`。
+`POST`/`PUT`は利用元`status-hub`・`statushub`・`ops-dashboard`に加えて、
+`X-Shared-Token-Write-Authorization: Bearer <SHARED_TOKEN_WRITE_SECRET>`を必須にする。
+利用元ヘッダーは認証ではなく、専用シークレットを検証してからDBへアクセスする。
+専用キーはIssueDeckとStatusHubのサーバーにのみ配り、SharedTokenのDB・読み取りAPIへ登録しない。
+読み取りキーとの共用または未設定は`503 write_auth_not_configured`、不一致・欠落は`403 forbidden_write`。
+通常名のPOST/PUTとGETの認証は従来どおり。
+
+### #4164の導入順序
+
+1. 独立した`SHARED_TOKEN_WRITE_SECRET`を作成し、IssueDeckとStatusHubのサーバー環境へ同じ値を設定する。
+2. StatusHubの送信側を更新し、`ISSUE_DECK_ACCESS_APP_TOKEN`のPUT時のみ専用認証ヘッダーを付ける。
+3. IssueDeckの本修正をリリースする。設定・送信側の準備前にはリリースしない。
+4. StatusHubで再発行し共有トークン書き込み成功を確認する。既存トークンはこの変更では失効させない。
+
+未設定のまま導入すると既存のログイン判定は維持するが、再発行の書き込みは停止する。
+StatusHubでは書き込み失敗でも旧値が失効するため、準備が揃うまで再発行を行わない。
 
 各アプリを切り替えたら、issue-deckの設定画面で利用日時と利用元を確認してから、1Password側の旧値を削除します。
 
