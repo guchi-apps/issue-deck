@@ -2098,3 +2098,9 @@ privateの3件（#1011）と、#1047の起票後に作られた`aide`（#1379）
 - [docs/multi-agent-workflow.md](multi-agent-workflow.md) — issue-deck自身の設計・実装の詳細
 - [docs/github-app-permissions.md](github-app-permissions.md) — GitHub Appの権限棚卸し
 - [CLAUDE.md](../CLAUDE.md) — issue-deckの運用ルール本体
+
+### 保護トークンの書き込み認証（#4164）
+
+`SHARED_TOKEN_WRITE_SECRET` はStatusHubとIssueDeckのみへ配る専用キー。
+1Passwordの`op://apps/issue-deck/shared-token-write-secret`を正とし、GitHub Secretへ同期する。
+SharedTokenのDB・読み取りAPIには登録しない。導入順序は[shared-token-api.md](shared-token-api.md)を参照。

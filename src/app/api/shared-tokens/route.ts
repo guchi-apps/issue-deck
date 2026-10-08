@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 
-import { authorizeSharedTokenApi } from "@/lib/shared-token-auth";
+import { authorizeSharedTokenApi, authorizeProtectedSharedTokenWrite } from "@/lib/shared-token-auth";
 import { decryptSecret, encryptSecret } from "@/lib/crypto/secret-cipher";
 import { db } from "@/lib/db";
 import { isUniqueConstraintError } from "@/lib/prisma-error";
@@ -11,6 +11,16 @@ function authorize(request: NextRequest): NextResponse | null {
   const result = authorizeSharedTokenApi(request.headers.get("authorization"));
   if (result === "ok") return null;
   return NextResponse.json({ error: result }, { status: result === "not_configured" ? 503 : 401 });
+}
+
+function authorizeWrite(request: NextRequest, name: string): NextResponse | null {
+  if (name !== "ISSUE_DECK_ACCESS_APP_TOKEN") return null;
+  const result = authorizeProtectedSharedTokenWrite(request.headers.get("x-shared-token-write-authorization"));
+  if (result === "ok") return null;
+  return NextResponse.json(
+    { error: result === "not_configured" ? "write_auth_not_configured" : "forbidden_write" },
+    { status: result === "not_configured" ? 503 : 403 },
+  );
 }
 
 function getConsumer(request: NextRequest): string | null {
@@ -39,6 +49,8 @@ export async function POST(request: NextRequest) {
   const input = parseSharedTokenInput(await request.json().catch(() => null));
   if (!input) return NextResponse.json({ error: "invalid_request" }, { status: 400 });
   if (!canWriteSharedToken(input.name, consumer)) return NextResponse.json({ error: "forbidden_name" }, { status: 403 });
+  const writeError = authorizeWrite(request, input.name);
+  if (writeError) return writeError;
 
   // value省略時はissue-deckが生成する。生成した値は作成直後のこの応答でだけ返す（#4121）。
   const generatedValue = input.value === null ? generateSharedTokenValue() : null;
@@ -77,6 +89,8 @@ export async function PUT(request: NextRequest) {
   // 上書きは外部で決まった新しい値を差し替える経路なので、値の省略（自動生成）は受け付けない
   if (!input || input.value === null) return NextResponse.json({ error: "invalid_request" }, { status: 400 });
   if (!canWriteSharedToken(input.name, consumer)) return NextResponse.json({ error: "forbidden_name" }, { status: 403 });
+  const writeError = authorizeWrite(request, input.name);
+  if (writeError) return writeError;
 
   const encryptedValue = encryptSecret(input.value);
   const existing = await db.sharedToken.findUnique({ where: { name: input.name } });

@@ -42,6 +42,7 @@ describe("共有トークンAPI", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     process.env.SHARED_TOKEN_API_SECRET = "shared-secret";
+    process.env.SHARED_TOKEN_WRITE_SECRET = "write-secret";
   });
 
   it("未設定の認証値を503で区別する", async () => {
@@ -133,6 +134,7 @@ describe("共有トークンAPI", () => {
         authorization: "Bearer shared-secret",
         "content-type": "application/json",
         "x-shared-token-consumer": "status-hub",
+        "x-shared-token-write-authorization": "Bearer write-secret",
       },
       body: JSON.stringify(body),
     });
@@ -181,6 +183,29 @@ describe("共有トークンAPI", () => {
     update.mockResolvedValue({ id: "token-3", name: "ISSUE_DECK_ACCESS_APP_TOKEN" });
     const res = await PUT(putRequest({ name: "ISSUE_DECK_ACCESS_APP_TOKEN", value: "v" }));
     expect(res.status).toBe(200);
+  });
+
+  it.each(["status-hub", "statushub", "ops-dashboard"])("利用元%sを偽装しても専用認証なしではPOST/PUTできない", async (consumer) => {
+    for (const handler of [POST, PUT]) {
+      const res = await handler(request("/api/shared-tokens", {
+        method: handler === POST ? "POST" : "PUT",
+        headers: { authorization: "Bearer shared-secret", "x-shared-token-consumer": consumer },
+        body: JSON.stringify({ name: "ISSUE_DECK_ACCESS_APP_TOKEN", value: "bad" }),
+      }));
+      expect(res.status).toBe(403);
+    }
+    expect(findUnique).not.toHaveBeenCalled();
+    expect(create).not.toHaveBeenCalled();
+    expect(update).not.toHaveBeenCalled();
+  });
+
+  it.each([undefined, "shared-secret"])("専用認証の未設定・共用時はDBへ触れず停止する", async (secret) => {
+    if (secret === undefined) delete process.env.SHARED_TOKEN_WRITE_SECRET;
+    else process.env.SHARED_TOKEN_WRITE_SECRET = secret;
+    const res = await PUT(putRequest({ name: "ISSUE_DECK_ACCESS_APP_TOKEN", value: "bad" }));
+    expect(res.status).toBe(503);
+    expect(findUnique).not.toHaveBeenCalled();
+    expect(update).not.toHaveBeenCalled();
   });
 
   it("PUTは無ければ作成する", async () => {
