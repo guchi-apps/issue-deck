@@ -47,9 +47,18 @@ beforeEach(() => {
 });
 
 describe("GET", () => {
+  it("自動修復が共通のエージェント停止状態を参照できる", async () => {
+    findUnique.mockResolvedValue({ claudeDispatchPauseReason: "manual", codexDispatchPauseReason: "usage_limit" });
+    expect(await (await GET()).json()).toMatchObject({
+      claudeDispatchPauseReason: "manual", codexDispatchPauseReason: "usage_limit",
+    });
+  });
+
   it("設定が無い場合はすべてautoを返す", async () => {
     findUnique.mockResolvedValue(null);
     await expect((await GET()).json()).resolves.toEqual({
+      claudeDispatchPauseReason: null,
+      codexDispatchPauseReason: null,
       claudeModel: "auto",
       aiExecutionProvider: "claude",
       githubActionsAgent: "claude",
@@ -83,6 +92,8 @@ describe("GET", () => {
       appAiModelReasoning: "claude-opus-5-5",
     });
     await expect((await GET()).json()).resolves.toEqual({
+      claudeDispatchPauseReason: null,
+      codexDispatchPauseReason: null,
       claudeModel: "opus",
       aiExecutionProvider: "claude",
       githubActionsAgent: "claude",

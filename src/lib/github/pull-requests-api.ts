@@ -27,7 +27,8 @@ export type GithubApiOpenPullRequest = {
   merged_at: string | null;
   user: { login: string } | null;
   base: { ref: string };
-  head: { ref: string; sha: string };
+  head: { ref: string; sha: string; repo?: { full_name: string } | null };
+  labels?: { name: string }[];
   /** Auto-mergeが有効なPRのみオブジェクトが入る。無効ならnull */
   auto_merge: unknown | null;
 };
