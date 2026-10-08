@@ -5,7 +5,7 @@ import { decryptSecret, encryptSecret } from "@/lib/crypto/secret-cipher";
 import { db } from "@/lib/db";
 import { isUniqueConstraintError } from "@/lib/prisma-error";
 import { generateSharedTokenValue } from "@/lib/shared-token-generate";
-import { parseSharedTokenConsumer, parseSharedTokenInput } from "@/lib/shared-tokens";
+import { canWriteSharedToken, parseSharedTokenConsumer, parseSharedTokenInput } from "@/lib/shared-tokens";
 
 function authorize(request: NextRequest): NextResponse | null {
   const result = authorizeSharedTokenApi(request.headers.get("authorization"));
@@ -38,6 +38,7 @@ export async function POST(request: NextRequest) {
   if (!consumer) return NextResponse.json({ error: "invalid_request" }, { status: 400 });
   const input = parseSharedTokenInput(await request.json().catch(() => null));
   if (!input) return NextResponse.json({ error: "invalid_request" }, { status: 400 });
+  if (!canWriteSharedToken(input.name, consumer)) return NextResponse.json({ error: "forbidden_name" }, { status: 403 });
 
   // value省略時はissue-deckが生成する。生成した値は作成直後のこの応答でだけ返す（#4121）。
   const generatedValue = input.value === null ? generateSharedTokenValue() : null;
@@ -75,6 +76,7 @@ export async function PUT(request: NextRequest) {
   const input = parseSharedTokenInput(await request.json().catch(() => null));
   // 上書きは外部で決まった新しい値を差し替える経路なので、値の省略（自動生成）は受け付けない
   if (!input || input.value === null) return NextResponse.json({ error: "invalid_request" }, { status: 400 });
+  if (!canWriteSharedToken(input.name, consumer)) return NextResponse.json({ error: "forbidden_name" }, { status: 403 });
 
   const encryptedValue = encryptSecret(input.value);
   const existing = await db.sharedToken.findUnique({ where: { name: input.name } });
