@@ -231,7 +231,7 @@ if [[ -n "$REPORT_URL" ]]; then
   NOTE=""
   [[ "$CLAUDE_STATUS" -ne 0 ]] && NOTE="（Claude CLIの終了コード ${CLAUDE_STATUS}）"
   FINAL=(succeeded "レビュー結果の投稿を確認しました${NOTE}: $REPORT_URL" "$CLAUDE_STATUS" "")
-elif [[ "$CLAUDE_STATUS" -eq 124 ]]; then
+elif [[ "$CLAUDE_STATUS" -eq 124 || "$CLAUDE_STATUS" -eq 137 ]]; then  # 137は`timeout -k`がTERMで止まらず送ったKILL
   FINAL=(failed "実行上限（${TIMEOUT_SECONDS}秒）に達したため打ち切りました。結果は投稿されていません。ログ: $LOG_FILE" "$CLAUDE_STATUS" true)
 elif [[ "$CLAUDE_STATUS" -ne 0 ]]; then
   FINAL=(failed "Claude CLIが異常終了しました（終了コード ${CLAUDE_STATUS}）。ログ: $LOG_FILE ／ 末尾: ${LOG_TAIL}" "$CLAUDE_STATUS" "")
