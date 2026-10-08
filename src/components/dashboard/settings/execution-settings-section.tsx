@@ -12,6 +12,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { PlanReviewSettingsBlock } from "@/components/dashboard/settings/plan-review-settings-block";
 import { PlanReviewAutoReflectField } from "@/components/dashboard/settings/plan-review-auto-reflect-field";
 import { CodeReviewRecommendField } from "@/components/dashboard/settings/code-review-recommend-field";
 import { ReleasePrepIntervalField } from "@/components/dashboard/settings/release-prep-interval-field";
@@ -19,10 +20,10 @@ import { ExecutionFlowOverview } from "@/components/dashboard/settings/execution
 import { InfoHint } from "@/components/dashboard/settings/info-hint";
 import { useAppSettingsMutations } from "@/hooks/use-app-settings-mutations";
 import {
+  AI_PROVIDER_INHERIT,
   AUTO_RETRY_LIMIT_MAX,
   AUTO_RETRY_LIMIT_MIN,
   APP_AI_MODEL_OPTIONS,
-  CLAUDE_LOCAL_MODEL_OPTIONS,
   CLAUDE_LOCAL_MODEL_SETTING_OPTIONS,
   CLAUDE_MODEL_OPTIONS,
   CODEX_MODEL_SETTING_OPTIONS,
@@ -45,6 +46,7 @@ import {
   type GithubActionsAgent,
   type ModelPickEngine,
   type PlanReviewAgent,
+  type PlanReviewAgentSetting,
 } from "@/lib/app-settings";
 import { NO_AI_PROVIDER_OVERRIDES, type AiProviderOverrides } from "@/lib/execution-flow-settings";
 
@@ -97,6 +99,8 @@ export type ExecutionSettingsSectionProps = {
   modelPickEngine: ModelPickEngine;
   dispatchConcurrency: number;
   aiProviderOverrides?: AiProviderOverrides;
+  /** 自動化区分の「計画レビューの担当AI」リンクから、AI・モデル区分の計画レビュー欄へ移る（#4139） */
+  onOpenPlanReviewSettings?: () => void;
   // 設定項目が増えるたびに引数の順番を覚え直すことになるため、まとめて1つの値で渡す
   onUpdated: (values: AppSettingsValues) => void;
 };
@@ -108,9 +112,9 @@ export type ExecutionSettingsSectionProps = {
  * シークレット同期）が同居し、フッターの「保存」がどこまで効くのか分からなかった。
  * 保存ボタンを持つのはこの区分だけ、という切り分けを保つこと。
  */
-// 「設定へ」で移動できる欄。計画レビューの設定は「自動化」区分にあり、AIモデル区分には無い
-const FLOW_SOURCE_IDS_AI = ["subpc-model-settings", "github-actions-settings", "app-ai-settings", "model-pick-settings"] as const;
-const FLOW_SOURCE_IDS_ALL = [...FLOW_SOURCE_IDS_AI, "plan-review-settings"] as const;
+// 「設定へ」で移動できる欄。計画レビューの担当AI・モデルはAI・モデル区分にある（#4139）
+const FLOW_SOURCE_IDS_AI = ["subpc-model-settings", "github-actions-settings", "app-ai-settings", "model-pick-settings", "plan-review-settings"] as const;
+const FLOW_SOURCE_IDS_ALL = FLOW_SOURCE_IDS_AI;
 
 export function ExecutionSettingsSection({
   mode = "all",
@@ -123,8 +127,8 @@ export function ExecutionSettingsSection({
   claudeLocalModel: initialClaudeLocalModel,
   codexModel: initialCodexModel,
   defaultDispatchAgent: initialDefaultDispatchAgent,
-  planReviewAgentForClaude: initialPlanReviewAgentForClaude,
-  planReviewAgentForCodex: initialPlanReviewAgentForCodex,
+  planReviewAgentForClaude: resolvedPlanReviewAgentForClaude,
+  planReviewAgentForCodex: resolvedPlanReviewAgentForCodex,
   planReviewClaudeModel: initialPlanReviewClaudeModel,
   planReviewCodexModel: initialPlanReviewCodexModel,
   dispatchFailoverEnabled: initialDispatchFailoverEnabled,
@@ -134,8 +138,15 @@ export function ExecutionSettingsSection({
   modelPickEngine: initialModelPickEngine,
   dispatchConcurrency: initialDispatchConcurrency,
   aiProviderOverrides = NO_AI_PROVIDER_OVERRIDES,
+  onOpenPlanReviewSettings,
   onUpdated,
 }: ExecutionSettingsSectionProps) {
+  // 画面へ渡る担当AIは解決済みで追従か固定かが読めないため、固定の有無（overrides）と合わせて
+  // 「全体設定に従う（inherit）」か固定かの選択値へ戻す（#4139）
+  const initialPlanReviewAgentForClaude: PlanReviewAgentSetting =
+    aiProviderOverrides.planReviewAgentForClaude ? resolvedPlanReviewAgentForClaude : AI_PROVIDER_INHERIT;
+  const initialPlanReviewAgentForCodex: PlanReviewAgentSetting =
+    aiProviderOverrides.planReviewAgentForCodex ? resolvedPlanReviewAgentForCodex : AI_PROVIDER_INHERIT;
   const { updateAutoRetryLimit, updateClaudeModel, updateDispatchConcurrency, isSubmitting, error } =
     useAppSettingsMutations();
   const [autoRetryLimit, setAutoRetryLimit] = useState(initialAutoRetryLimit);
@@ -151,10 +162,10 @@ export function ExecutionSettingsSection({
   const [defaultDispatchAgent, setDefaultDispatchAgent] = useState<DefaultDispatchAgent>(
     initialDefaultDispatchAgent,
   );
-  const [planReviewAgentForClaude, setPlanReviewAgentForClaude] = useState<PlanReviewAgent>(
+  const [planReviewAgentForClaude, setPlanReviewAgentForClaude] = useState<PlanReviewAgentSetting>(
     initialPlanReviewAgentForClaude,
   );
-  const [planReviewAgentForCodex, setPlanReviewAgentForCodex] = useState<PlanReviewAgent>(
+  const [planReviewAgentForCodex, setPlanReviewAgentForCodex] = useState<PlanReviewAgentSetting>(
     initialPlanReviewAgentForCodex,
   );
   const [planReviewClaudeModel, setPlanReviewClaudeModel] = useState<ClaudeLocalModel>(
@@ -276,6 +287,12 @@ export function ExecutionSettingsSection({
     modelPickEngine !== initialModelPickEngine ||
     dispatchConcurrency !== initialDispatchConcurrency;
 
+  // 計画レビューの担当AI・モデルはAI・モデル区分へ移した（#4139）。自動化区分に未保存の値は無い
+  const planReviewDirty =
+    planReviewAgentForClaude !== initialPlanReviewAgentForClaude ||
+    planReviewAgentForCodex !== initialPlanReviewAgentForCodex ||
+    planReviewClaudeModel !== initialPlanReviewClaudeModel ||
+    planReviewCodexModel !== initialPlanReviewCodexModel;
   const aiDirty =
     aiExecutionProvider !== initialAiExecutionProvider ||
     claudeModel !== initialClaudeModel ||
@@ -286,22 +303,18 @@ export function ExecutionSettingsSection({
     codexModel !== initialCodexModel ||
     appAiModel !== initialAppAiModel ||
     appAiModelReasoning !== initialAppAiModelReasoning ||
-    modelPickEngine !== initialModelPickEngine;
+    modelPickEngine !== initialModelPickEngine ||
+    planReviewDirty;
   const executionDirty =
     autoRetryLimit !== initialAutoRetryLimit ||
     defaultDispatchAgent !== initialDefaultDispatchAgent ||
     dispatchFailoverEnabled !== initialDispatchFailoverEnabled ||
     dispatchFailoverThresholdPercent !== initialDispatchFailoverThresholdPercent ||
     dispatchConcurrency !== initialDispatchConcurrency;
-  const automationDirty =
-    planReviewAgentForClaude !== initialPlanReviewAgentForClaude ||
-    planReviewAgentForCodex !== initialPlanReviewAgentForCodex ||
-    planReviewClaudeModel !== initialPlanReviewClaudeModel ||
-    planReviewCodexModel !== initialPlanReviewCodexModel;
   const sectionDirty =
     mode === "ai" ? aiDirty :
     mode === "execution" ? executionDirty :
-    mode === "automation" ? automationDirty :
+    mode === "automation" ? false :
     isDirty;
 
 
@@ -310,8 +323,8 @@ export function ExecutionSettingsSection({
   const displayOverrides: AiProviderOverrides = {
     githubActionsAgent: aiProviderOverrides.githubActionsAgent || githubActionsAgent !== initialGithubActionsAgent,
     defaultDispatchAgent: aiProviderOverrides.defaultDispatchAgent || defaultDispatchAgent !== initialDefaultDispatchAgent,
-    planReviewAgentForClaude: aiProviderOverrides.planReviewAgentForClaude || planReviewAgentForClaude !== initialPlanReviewAgentForClaude,
-    planReviewAgentForCodex: aiProviderOverrides.planReviewAgentForCodex || planReviewAgentForCodex !== initialPlanReviewAgentForCodex,
+    planReviewAgentForClaude: planReviewAgentForClaude !== AI_PROVIDER_INHERIT,
+    planReviewAgentForCodex: planReviewAgentForCodex !== AI_PROVIDER_INHERIT,
     appAiModel: aiProviderOverrides.appAiModel || appAiModel !== initialAppAiModel,
     appAiModelReasoning: aiProviderOverrides.appAiModelReasoning || appAiModelReasoning !== initialAppAiModelReasoning,
   };
@@ -333,7 +346,15 @@ export function ExecutionSettingsSection({
       codexModel === initialCodexModel &&
       appAiModel === initialAppAiModel &&
       appAiModelReasoning === initialAppAiModelReasoning &&
-      modelPickEngine === initialModelPickEngine;
+      modelPickEngine === initialModelPickEngine &&
+      !planReviewDirty;
+    // 担当AIは変えた項目だけ送る。解決済みの値をそのまま送ると、追従していた項目が固定に変わってしまう
+    const planReviewValues = {
+      ...(planReviewAgentForClaude !== initialPlanReviewAgentForClaude ? { planReviewAgentForClaude } : {}),
+      ...(planReviewAgentForCodex !== initialPlanReviewAgentForCodex ? { planReviewAgentForCodex } : {}),
+      ...(planReviewClaudeModel !== initialPlanReviewClaudeModel ? { planReviewClaudeModel } : {}),
+      ...(planReviewCodexModel !== initialPlanReviewCodexModel ? { planReviewCodexModel } : {}),
+    };
     const modelValues =
       onlyAiExecutionProviderChanged
         ? { aiExecutionProvider }
@@ -350,6 +371,7 @@ export function ExecutionSettingsSection({
             appAiModel,
             appAiModelReasoning,
             modelPickEngine,
+            ...planReviewValues,
           }
         : mode === "execution"
           ? {
@@ -358,12 +380,7 @@ export function ExecutionSettingsSection({
               dispatchFailoverThresholdPercent,
             }
           : mode === "automation"
-            ? {
-                planReviewAgentForClaude,
-                planReviewAgentForCodex,
-                planReviewClaudeModel,
-                planReviewCodexModel,
-              }
+            ? {}
             : {
                 claudeModel,
                 aiExecutionProvider,
@@ -376,10 +393,7 @@ export function ExecutionSettingsSection({
                 appAiModelReasoning,
                 modelPickEngine,
                 defaultDispatchAgent,
-                planReviewAgentForClaude,
-                planReviewAgentForCodex,
-                planReviewClaudeModel,
-                planReviewCodexModel,
+                ...planReviewValues,
                 dispatchFailoverEnabled,
                 dispatchFailoverThresholdPercent,
               };
@@ -398,6 +412,12 @@ export function ExecutionSettingsSection({
         aiProviderOverrides[key] || key in sent,
       ]),
     ) as AiProviderOverrides;
+    // 計画レビューの担当AIだけは、送った値が`inherit`なら固定を解く（#4139）
+    if ("planReviewAgentForClaude" in sent) nextOverrides.planReviewAgentForClaude = planReviewAgentForClaude !== AI_PROVIDER_INHERIT;
+    if ("planReviewAgentForCodex" in sent) nextOverrides.planReviewAgentForCodex = planReviewAgentForCodex !== AI_PROVIDER_INHERIT;
+    const savedProvider = mode === "ai" || mode === "all" ? aiExecutionProvider : initialAiExecutionProvider;
+    const resolvePlanReviewAgent = (selection: PlanReviewAgentSetting): PlanReviewAgent =>
+      selection === AI_PROVIDER_INHERIT ? savedProvider : selection;
     // 親へも「この区分で実際に保存した値」だけを反映する。他区分の未保存stateを
     // 保存済みpropsへ混ぜると、未保存表示が消えたり後の保存で巻き戻るため、initial値を維持する。
     const saved: AppSettingsValues = {
@@ -410,10 +430,10 @@ export function ExecutionSettingsSection({
       claudeLocalModel: mode === "ai" || mode === "all" ? claudeLocalModel : initialClaudeLocalModel,
       codexModel: mode === "ai" || mode === "all" ? codexModel : initialCodexModel,
       defaultDispatchAgent: mode === "execution" || mode === "all" ? defaultDispatchAgent : initialDefaultDispatchAgent,
-      planReviewAgentForClaude: mode === "automation" || mode === "all" ? planReviewAgentForClaude : initialPlanReviewAgentForClaude,
-      planReviewAgentForCodex: mode === "automation" || mode === "all" ? planReviewAgentForCodex : initialPlanReviewAgentForCodex,
-      planReviewClaudeModel: mode === "automation" || mode === "all" ? planReviewClaudeModel : initialPlanReviewClaudeModel,
-      planReviewCodexModel: mode === "automation" || mode === "all" ? planReviewCodexModel : initialPlanReviewCodexModel,
+      planReviewAgentForClaude: resolvePlanReviewAgent(mode === "ai" || mode === "all" ? planReviewAgentForClaude : initialPlanReviewAgentForClaude),
+      planReviewAgentForCodex: resolvePlanReviewAgent(mode === "ai" || mode === "all" ? planReviewAgentForCodex : initialPlanReviewAgentForCodex),
+      planReviewClaudeModel: mode === "ai" || mode === "all" ? planReviewClaudeModel : initialPlanReviewClaudeModel,
+      planReviewCodexModel: mode === "ai" || mode === "all" ? planReviewCodexModel : initialPlanReviewCodexModel,
       dispatchFailoverEnabled: mode === "execution" || mode === "all" ? dispatchFailoverEnabled : initialDispatchFailoverEnabled,
       dispatchFailoverThresholdPercent: mode === "execution" || mode === "all" ? dispatchFailoverThresholdPercent : initialDispatchFailoverThresholdPercent,
       appAiModel: mode === "ai" || mode === "all" ? appAiModel : initialAppAiModel,
@@ -459,14 +479,45 @@ export function ExecutionSettingsSection({
         claudeLocalModel={claudeLocalModel}
         codexModel={codexModel}
         defaultDispatchAgent={defaultDispatchAgent}
-        planReviewAgentForClaude={planReviewAgentForClaude}
-        planReviewAgentForCodex={planReviewAgentForCodex}
+        planReviewAgentForClaude={planReviewAgentForClaude === AI_PROVIDER_INHERIT ? aiExecutionProvider : planReviewAgentForClaude}
+        planReviewAgentForCodex={planReviewAgentForCodex === AI_PROVIDER_INHERIT ? aiExecutionProvider : planReviewAgentForCodex}
         planReviewClaudeModel={planReviewClaudeModel}
         planReviewCodexModel={planReviewCodexModel}
         appAiModel={appAiModel}
         appAiModelReasoning={appAiModelReasoning}
         modelPickEngine={modelPickEngine}
       />}
+
+      {(mode === "ai" || mode === "all") && <PlanReviewSettingsBlock
+        aiExecutionProvider={aiExecutionProvider}
+        savedAiExecutionProvider={initialAiExecutionProvider}
+        flowSettings={{
+          claudeModel, githubActionsAgent, githubActionsCodexModel, claudeModelAssist, claudeLocalModel, codexModel,
+          planReviewAgentForClaude: planReviewAgentForClaude === AI_PROVIDER_INHERIT ? aiExecutionProvider : planReviewAgentForClaude,
+          planReviewAgentForCodex: planReviewAgentForCodex === AI_PROVIDER_INHERIT ? aiExecutionProvider : planReviewAgentForCodex,
+          planReviewClaudeModel, planReviewCodexModel, appAiModel, appAiModelReasoning, modelPickEngine, defaultDispatchAgent,
+        }}
+        overrides={displayOverrides}
+        agentForClaude={planReviewAgentForClaude}
+        agentForCodex={planReviewAgentForCodex}
+        onAgentForClaudeChange={setPlanReviewAgentForClaude}
+        onAgentForCodexChange={setPlanReviewAgentForCodex}
+        claudeModel={planReviewClaudeModel}
+        codexModel={planReviewCodexModel}
+        onClaudeModelChange={setPlanReviewClaudeModel}
+        onCodexModelChange={setPlanReviewCodexModel}
+      />}
+
+      {mode === "automation" && <div id="plan-review-agent-link" className="flex flex-col gap-1.5 rounded-lg border bg-muted/30 p-3 text-sm">
+        <p className="text-muted-foreground">
+          計画レビューの担当AI・モデルは、AI・モデル設定でまとめて変更します。ここでは有効・無効や実行条件だけを設定します。
+        </p>
+        {onOpenPlanReviewSettings && (
+          <Button type="button" variant="link" className="h-auto w-fit px-0 text-sm" onClick={onOpenPlanReviewSettings}>
+            担当AIはAIモデル設定で変更
+          </Button>
+        )}
+      </div>}
 
       {(mode === "execution" || mode === "all") && <h3 className="border-b pb-1 text-xs font-semibold tracking-wide text-muted-foreground">サブPCとエラー処理</h3>}
 
@@ -516,89 +567,6 @@ export function ExecutionSettingsSection({
             ))}
           </SelectContent>
         </Select>
-      </div>}
-
-      {(mode === "automation" || mode === "all") && <div id="plan-review-settings" className="flex flex-col gap-3 border-t pt-4">
-        <div>
-          <div className="flex items-center gap-1.5">
-            <Label>サブPC：自動計画レビューのエージェントとモデル</Label>
-            <InfoHint label="自動計画レビューのエージェントとモデル">
-              計画を出したCLIごとに、続く自動計画レビューで使うエージェントを選びます。Issue詳細から手動で始める単独レビューの選択には影響しません。
-            </InfoHint>
-          </div>
-        </div>
-        <div className="flex flex-col gap-1.5">
-          <Label htmlFor="plan-review-agent-for-claude">Claude Codeで開始したとき</Label>
-          <Select
-            value={planReviewAgentForClaude}
-            onValueChange={(value) => setPlanReviewAgentForClaude(value as PlanReviewAgent)}
-          >
-            <SelectTrigger id="plan-review-agent-for-claude" className="w-full">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {DISPATCH_AGENT_OPTIONS.map((option) => (
-                <SelectItem key={option.value} value={option.value}>
-                  {option.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-        <div className="flex flex-col gap-1.5">
-          <Label htmlFor="plan-review-agent-for-codex">ChatGPT（Codex CLI）で開始したとき</Label>
-          <Select
-            value={planReviewAgentForCodex}
-            onValueChange={(value) => setPlanReviewAgentForCodex(value as PlanReviewAgent)}
-          >
-            <SelectTrigger id="plan-review-agent-for-codex" className="w-full">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {DISPATCH_AGENT_OPTIONS.map((option) => (
-                <SelectItem key={option.value} value={option.value}>
-                  {option.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-        <div className="flex flex-col gap-1.5">
-          <Label htmlFor="plan-review-claude-model">Claude Codeでレビューするときのモデル</Label>
-          <Select
-            value={planReviewClaudeModel}
-            onValueChange={(value) => setPlanReviewClaudeModel(value as ClaudeLocalModel)}
-          >
-            <SelectTrigger id="plan-review-claude-model" className="w-full">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {CLAUDE_LOCAL_MODEL_OPTIONS.map((option) => (
-                <SelectItem key={option.value} value={option.value}>
-                  {option.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-        <div className="flex flex-col gap-1.5">
-          <Label htmlFor="plan-review-codex-model">ChatGPT（Codex CLI）でレビューするときのモデル</Label>
-          <Select
-            value={planReviewCodexModel}
-            onValueChange={(value) => setPlanReviewCodexModel(value as CodexLocalModel)}
-          >
-            <SelectTrigger id="plan-review-codex-model" className="w-full">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {CODEX_LOCAL_MODEL_OPTIONS.map((option) => (
-                <SelectItem key={option.value} value={option.value}>
-                  {option.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
       </div>}
 
       {(mode === "execution" || mode === "all") && <div id="failover-settings" className="flex flex-col gap-3 border-t pt-4">
@@ -844,7 +812,7 @@ export function ExecutionSettingsSection({
           <Label htmlFor="app-ai-model">アプリ内AI：要約・検索・文章整理</Label>
           <InfoHint label="アプリ内AI：要約・検索・文章整理">
             Issueとコメントの要約、類似Issue検索、本文整理、並び替え、Issue作成補助に使います。
-            定型処理が中心のため、通常はHaikuが適しています。
+            定型処理が中心のため、通常はHaikuが適しています。GPT系を選んでもOpenAI API（従量課金）は使わず、これらはClaude（Haiku）で実行します。
           </InfoHint>
         </div>
         <Select value={appAiModel} onValueChange={(value) => setAppAiModel(value as AppAiModel)}>
@@ -866,7 +834,7 @@ export function ExecutionSettingsSection({
           <Label htmlFor="app-ai-model-reasoning">アプリ内AI：原因診断・新規アプリ相談</Label>
           <InfoHint label="アプリ内AI：原因診断・新規アプリ相談">
             手作業が失敗した原因の診断と、新規アプリの構成相談に使います。判断力が必要なため、
-            通常はSonnetが適しています。GPTを選ぶとOpenAI API、Claudeを選ぶとAnthropic APIを使います。
+            通常はSonnetが適しています。原因診断（チャット調査）はGPTを選ぶとサブPCのCodex CLI（サブスク枠）で実行します。新規アプリ相談・手作業の修正提案はGPTを選んでもClaude（Sonnet）で実行し、OpenAI API（従量課金）は使いません。
           </InfoHint>
         </div>
         <Select
@@ -889,7 +857,7 @@ export function ExecutionSettingsSection({
 
       {error && <p className="text-sm text-destructive">{error}</p>}
 
-      <div className="flex items-center gap-3 border-t pt-4">
+      {mode !== "automation" && <div className="flex items-center gap-3 border-t pt-4">
         <Button onClick={handleSubmit} disabled={isSubmitting || !isValid || !sectionDirty}>
           {isSubmitting ? "保存中..." : "保存"}
         </Button>
@@ -899,7 +867,7 @@ export function ExecutionSettingsSection({
         {sectionDirty && !isSubmitting && (
           <span className="text-xs text-muted-foreground">未保存の変更があります</span>
         )}
-      </div>
+      </div>}
 
       {(mode === "automation" || mode === "all") && <>
       {mode === "all" && <><h3 className="border-b pb-1 text-xs font-semibold tracking-wide text-muted-foreground">自動化</h3><p className="-mt-2 text-xs text-muted-foreground">各項目の変更はその場で保存されます。</p></>}

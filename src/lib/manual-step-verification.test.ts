@@ -13,6 +13,39 @@ import {
  * `manual-step-verification-patrol.test.ts`が見ている。
  */
 
+describe("isReadOnlyVerificationCommand: サブコマンドの後ろのオプション（#4163）", () => {
+  it("プログラム実行・ファイル書き込みにつながるオプションは拒否する", () => {
+    for (const command of [
+      "git ls-remote --upload-pack='sh -c id' .",
+      "git ls-remote --upload-pack=id .",
+      "git ls-remote --upload=id .",
+      "git ls-remote -u id .",
+      "git ls-remote --exec=id .",
+      "git diff --output=~/.bashrc",
+      "git diff --out=x",
+      "git log --output x",
+      "git log --ext-diff",
+      "git show --textconv HEAD",
+      'git diff "--output=x"',
+      "git diff --ou'tput'=x",
+    ]) {
+      expect(isReadOnlyVerificationCommand(command), command).toBe(false);
+    }
+  });
+
+  it("読み取りに使う通常のオプションは通す", () => {
+    for (const command of [
+      "git log --oneline -n 5",
+      "git -C /home/guchi/apps/vps log --format=%H -1",
+      "git diff --stat --name-only",
+      "git ls-remote origin main",
+      "git show --no-patch HEAD",
+    ]) {
+      expect(isReadOnlyVerificationCommand(command), command).toBe(true);
+    }
+  });
+});
+
 describe("isReadOnlyVerificationCommand", () => {
   it("読み取りだけのコマンドを通す", () => {
     expect(isReadOnlyVerificationCommand("cat /etc/hostname")).toBe(true);
@@ -45,6 +78,15 @@ describe("isReadOnlyVerificationCommand", () => {
     expect(isReadOnlyVerificationCommand("echo $(rm -rf ~/apps)")).toBe(false);
     expect(isReadOnlyVerificationCommand("echo `rm -rf ~/apps`")).toBe(false);
     expect(isReadOnlyVerificationCommand("cat foo &")).toBe(false);
+    // #4162。ダブルクォートの中でも展開される
+    expect(isReadOnlyVerificationCommand('echo "$(rm -rf ~/apps)"')).toBe(false);
+    expect(isReadOnlyVerificationCommand('echo "`rm -rf ~/apps`"')).toBe(false);
+    expect(isReadOnlyVerificationCommand('cat "${x:-$(touch y)}"')).toBe(false);
+    expect(isReadOnlyVerificationCommand("cat <(touch ~/pwned)")).toBe(false);
+    expect(isReadOnlyVerificationCommand('echo "\\" $(rm x)')).toBe(false);
+    // シングルクォートの中は不活性
+    expect(isReadOnlyVerificationCommand("echo '$(rm x)'")).toBe(true);
+    expect(isReadOnlyVerificationCommand('echo "a\\$(b)"')).toBe(true);
     expect(isReadOnlyVerificationCommand("grep 'foo")).toBe(false);
     expect(isReadOnlyVerificationCommand("")).toBe(false);
   });

@@ -603,6 +603,7 @@ describe("resolveImplementationPosition（#2867）", () => {
       "TYPECHECKING",
       "TESTING",
       "BUILDING",
+      "IOS_VERIFYING",
       "COMMITTING",
       "PUSHING",
       "PR",

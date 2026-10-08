@@ -44,6 +44,8 @@ function stubDb(overrides: {
   noticeExists?: boolean;
   /** 鳴らし直しの`updateMany`が更新できた件数 */
   renotifyCount?: number;
+  /** 宛先として返す購読（既定は1件） */
+  targets?: unknown[];
 }) {
   const deleteMany = vi.fn(async () => ({ count: 0 }));
   const create = vi.fn(async () => {
@@ -54,7 +56,9 @@ function stubDb(overrides: {
   Object.assign(db, {
     pushSubscription: {
       count: vi.fn(async () => overrides.subscriptionCount ?? 1),
-      findMany: vi.fn(async () => [{ id: "s1", endpoint: "e", p256dh: "p", auth: "a" }]),
+      findMany: vi.fn(
+        async () => overrides.targets ?? [{ id: "s1", endpoint: "e", p256dh: "p", auth: "a" }],
+      ),
     },
     repository: { findMany: vi.fn(async () => overrides.repositories ?? []) },
     releaseMergePushNotice: { create, updateMany, deleteMany },
@@ -174,6 +178,17 @@ describe("runReleaseMergePushSweep", () => {
     ] as never);
 
     expect((await runReleaseMergePushSweep({ now: NOW })).notified).toHaveLength(1);
+  });
+
+  it("宛先がOFFのせいで全員消えたときは席を取らない（ONに戻したらすぐ鳴らせる。#4159）", async () => {
+    const { create } = stubDb({ repositories: [REPOSITORY], targets: [] });
+    vi.mocked(fetchOpenPullRequestsForBase).mockResolvedValue([RELEASE_PR] as never);
+
+    const result = await runReleaseMergePushSweep({ now: NOW });
+
+    expect(result.notified).toHaveLength(0);
+    expect(create).not.toHaveBeenCalled();
+    expect(sendPushNotification).not.toHaveBeenCalled();
   });
 
   it("一度鳴らしたPRは、鳴らし直しの間隔に達するまで鳴らさない", async () => {

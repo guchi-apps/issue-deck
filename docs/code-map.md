@@ -1498,6 +1498,11 @@ export function POST(request: NextRequest) {
     非表示リポジトリ（#2279）と同じ形。ただし**宛先が全員保留のときは送信済みの記録を付けない**
     ——`checkUserPushSentAt`は一度立つと`00.check-user`が付き直すまで戻らないため、付けると
     保留を解除しても二度と鳴らない。
+  - **Push通知は種類ごとにOFFにできる**（#4159。種類の正は
+    [`lib/notifications/push-kinds.ts`](../src/lib/notifications/push-kinds.ts)、設定は
+    `PushMutedKind`＝**行があればOFF・ユーザー単位**）。各送信は宛先に`notMutedWhere(kind)`を足す。
+    席を先に取る確認待ち・本番マージ待ちは、**OFFのせいで宛先が空になったときも席を取らない**
+    （保留と同じ理由。ONに戻したあとに鳴らせなくなる）。
 - **溜まった手作業は「手作業アシスタント」が1手順ずつ順番に案内する**（#1826。
   [`manual-step-guide-dialog.tsx`](../src/components/dashboard/manual-step-guide-dialog.tsx)）。
   本文はテンプレートで見出しの並びが決まっているのに、実行する人は「一覧を開く → Issueを開く →
@@ -4276,6 +4281,15 @@ PR一覧画面（`pane=pull-requests`）へは遷移しない——リリース�
   （`resolvePullRequestHeader`）。連携していないリポジトリのPRは詳細APIが404になり、
   ダイアログにその旨が出る
 
+### 行から開いたPR詳細に「修正Issueを起案」を出す（#4154）
+
+実機確認で「反映されていない」と分かったときに、そのまま修正依頼へ進めるための導線。マージ済みの
+リリースPR以外のPR詳細ヘッダー下に「修正Issueを起案」を出し、押すと対象PR・元Issue・マージ日時を
+引用した下書き入りの新規Issue作成ダイアログを開く（`buildPullRequestFixIssueDraft`・
+[`lib/github/pull-request-release-fix-issue.ts`](../src/lib/github/pull-request-release-fix-issue.ts)）。
+**ここでは起票しない**（`openIssueDraftDialog`経由）。レビュー指摘を起点にした旧導線（#3965で廃止）とは別で、
+`対象PR:`を読んで自動closeする巡回は持たない。
+
 ### 動作確認のフラグは「対象を選ぶ」ことでしか絞れない（#2930）
 
 リリースした機能が本番で動いているかを確かめたかどうかを、カードの「未確認」「確認済み」で
@@ -4538,8 +4552,11 @@ GitHub Actions障害時に、PR詳細からCircleCIを直接起動してdevelop�
 `scripts/ci/run-required-checks.mjs`経由でこれを実行する（ci.ymlへ直接ステップを足すと
 `scripts/ci/check-ci-definition-sync.mjs`が落とす）。サーバー側は`src/lib/backup-ci/`、結果は
 `BackupCiRun`に記録し、合否は共通チェック`issue-deck/ci-gate`（commit status）として出す。
-`check-rollup.ts`は共通チェックがあればそれだけでCI状態を決める。運用・移行・ロールバックは
-[backup-ci.md](backup-ci.md)。
+`check-rollup.ts`は共通チェックがあればそれだけでCI状態を決める。
+**共通チェックの発行は`gate-service.ts`の`syncPullRequestCiGate`だけが行う**（#4113）。通常時のActions
+（ci.ymlの必須ジョブ）とバックアップCIの両方の最新の試行から、最後に始まった方を採用し（判定は`gate.ts`）、
+採用した経路は`CiGateState`に残す。Actionsの結果はpollerの巡回（`sweepCiGateMirror`）と`workflow_run`の
+Webhookで取り込む。運用・移行・ロールバックは[backup-ci.md](backup-ci.md)。
 
 ## 一覧の行に出す親子関係（#3469）
 
@@ -4552,4 +4569,5 @@ GitHub Actions障害時に、PR詳細からCircleCIを直接起動してdevelop�
 - 左メニュー「iOS拡張」（`?pane=ios-extensions`・スマホは`screen=ios-extensions`）。ウィジェット・ロック画面・ライブアクティビティ・コントロールを、iOSアプリのリポジトリごとに一覧する。パネルは`components/dashboard/ios-extensions-panel.tsx`（PC・スマホ共用）、取得は`hooks/use-ios-extensions.ts`
 - 対象リポジトリは`lib/ios-extensions.ts`の`IOS_EXTENSION_REPOSITORY_NAMES`の固定リスト（`Repository`に種別の列は無い。`webview-ios-repos.ts`・`device-build-repos.ts`と同じ判断）。**新しいiOSアプリを足すときはここにも足す**
 - 一覧はSwiftソースの宣言（`: Widget`・`ActivityConfiguration`・`ControlWidget`・`.accessory*`）からの**推定**。`api/repositories/ios-extensions/route.ts`がデフォルトブランチのツリーから拡張らしい名前のSwiftを最大40件読み、5分キャッシュする。命名次第で漏れるため画面にも「検出結果」と出している
+- 起票ダイアログ（`ios-extension-issue-dialog.tsx`）は、起票後の「実装を開始」を閉じる（キャンセル含む）とIssue詳細へ移る（#4172）。計画の承認パネル・計画コメントは詳細にしか出ないため、通常の作成フォームと同じ挙動に揃えている
 - 追加・編集は画面からSwiftを生成せず、種類別テンプレート（`buildIosExtensionIssue`）でIssueを起票して通常の実装経路へ渡す（`POST /api/issues`）

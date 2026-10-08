@@ -8,7 +8,10 @@ export const SHARED_TOKEN_DESCRIPTION_MAX_LENGTH = 1_000;
 export const SHARED_TOKEN_SOURCE_REFERENCE_MAX_LENGTH = 500;
 export const SHARED_TOKEN_CONSUMER_MAX_LENGTH = 100;
 
-type SharedTokenWithUsages = SharedTokenRow & { usages: SharedTokenUsage[] };
+/** 一覧の表示に要る利用記録の要約（利用元ごとの最終利用日時）。全行は読まない（#4165） */
+export type SharedTokenUsageSummary = Pick<SharedTokenUsage, "consumer" | "usedAt">;
+
+type SharedTokenWithUsages = SharedTokenRow & { usages: SharedTokenUsageSummary[] };
 
 function optionalText(value: unknown, maxLength: number): string | null | undefined {
   // 画面は空欄を null で送るため、undefined（キー省略）と同じく未入力として扱う（#3547）。
@@ -45,6 +48,22 @@ export function parseSharedTokenConsumer(value: string | null): string | null {
   if (!value) return null;
   const consumer = value.trim();
   return consumer && consumer.length <= SHARED_TOKEN_CONSUMER_MAX_LENGTH ? consumer : null;
+}
+
+/**
+ * 外部APIから書き込める利用元を限定するトークン名（#4164）。
+ * issue-deck自身のログイン判定（StatusHub判定API）に使うトークンは、誤った値で上書きされると
+ * 全員拒否になり、直す設定画面もログインの後ろにあるため画面から戻せない。
+ * StatusHubの再発行経路（#3786）の利用元だけに書き込みを許す。
+ */
+const PROTECTED_TOKEN_WRITERS: Readonly<Record<string, readonly string[]>> = {
+  ISSUE_DECK_ACCESS_APP_TOKEN: ["status-hub", "statushub"],
+};
+
+/** この利用元が、そのトークン名へPOST/PUTで書き込んでよいか。 */
+export function canWriteSharedToken(name: string, consumer: string): boolean {
+  const writers = PROTECTED_TOKEN_WRITERS[name];
+  return !writers || writers.includes(consumer.toLowerCase());
 }
 
 export function toSharedToken(row: SharedTokenWithUsages): SharedToken {

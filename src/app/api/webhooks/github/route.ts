@@ -1,6 +1,7 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { NextResponse, type NextRequest } from "next/server";
 
+import { handleWorkflowRunEventForCiGate } from "@/lib/backup-ci/gate-service";
 import { db } from "@/lib/db";
 import { withGithubApiFeature } from "@/lib/github/api-usage";
 import { getInstallationToken } from "@/lib/github/app-auth";
@@ -608,6 +609,9 @@ async function handlePOST(request: NextRequest) {
       await handleInstallationEvent(payload);
     } else if (event === "projects_v2_item") {
       await handleProjectsV2ItemEvent(payload);
+    } else if (event === "workflow_run") {
+      // 共通チェック`issue-deck/ci-gate`の写し（#4113）。購読していなくても巡回で拾える（早くなるだけ）
+      await handleWorkflowRunEventForCiGate(payload);
     }
   } catch (error) {
     // 非2xxを返すとGitHubが自動再送・手動redeliveryの対象にしてくれるため、

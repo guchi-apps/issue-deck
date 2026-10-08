@@ -22,6 +22,8 @@ import type {
 import { db } from "@/lib/db";
 import { findRepositoryByFullName } from "@/lib/github/issue-create-service";
 import { getInstallationToken } from "@/lib/github/app-auth";
+import { bodyHash } from "@/lib/github/pull-request-fix-request-service";
+import { parsePullRequestReviewVerdict } from "@/lib/github/pull-request-review-verdict";
 import { fetchPullRequest } from "@/lib/github/pull-requests-api";
 
 /**
@@ -339,6 +341,9 @@ export async function replyWithInvestigation(params: {
             headSha: pr.head.sha,
             issueNumber,
             instruction,
+            scope: proposal.scope,
+            ...(proposal.scope === "metadata" ? { prBodyHash: bodyHash(pr.body) } : {}),
+            reviewKindBefore: parsePullRequestReviewVerdict(pr.body)?.reviewKind ?? null,
           });
           needsConfirm = true;
           text += `\n\nPR #${number}（HEAD ${pr.head.sha.slice(0, 7)}）の修正依頼を用意しました。依頼内容を確認して「依頼する」を押すと、Issue #${issueNumber} へ渡して同じPRのブランチで修正します。`;

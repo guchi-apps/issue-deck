@@ -59,6 +59,26 @@ describe("resolveExecutionFlows", () => {
   });
 });
 
+describe("原因診断の実行基盤表示（#4143）", () => {
+  const find = (flows: ReturnType<typeof resolveExecutionFlows>, name: string) => flows.find((flow) => flow.name === name)!;
+
+  it("GPT系はチャット調査だけCodex CLI、新規アプリ相談はClaude固定と明示する（#4147）", () => {
+    const flows = resolveExecutionFlows({ ...settings, appAiModelReasoning: "gpt-5.6-terra" });
+    expect(find(flows, "原因診断（チャット調査）")).toEqual(
+      expect.objectContaining({ location: "サブPC", agent: "Codex CLI（ChatGPTサブスク）" }),
+    );
+    expect(find(flows, "新規アプリ相談・手作業の修正提案")).toEqual(
+      expect.objectContaining({ location: "IssueDeckサーバー", agent: "Anthropic API（Claude固定）" }),
+    );
+  });
+
+  it("Claude系はどちらもAnthropic API", () => {
+    const flows = resolveExecutionFlows({ ...settings, appAiModelReasoning: "claude-sonnet-5-5" });
+    expect(find(flows, "原因診断（チャット調査）").agent).toBe("Anthropic API");
+    expect(find(flows, "新規アプリ相談・手作業の修正提案").agent).toBe("Anthropic API");
+  });
+});
+
 describe("resolveProviderFlowRows", () => {
   // 画面へ渡る値は保存時点のプロバイダーで解決済み。個別設定でない項目はプロバイダーで解き直される
   const resolved = {
@@ -91,21 +111,39 @@ describe("resolveProviderFlowRows", () => {
     expect(rows.find((row) => row.step === "計画レビュー")!.entries[0]).toEqual(
       expect.objectContaining({ agent: "Codex CLI", model: "GPT-6 Sol", binding: "provider" }),
     );
-    expect(rows.find((row) => row.step === "アプリ内AI")!.entries[1]).toEqual(
-      expect.objectContaining({ agent: "OpenAI API", binding: "provider" }),
-    );
+    const appAi = rows.find((row) => row.step === "アプリ内AI")!.entries;
+    expect(appAi[1]).toEqual(expect.objectContaining({ agent: "Codex CLI（ChatGPTサブスク）", binding: "provider" }));
+    expect(appAi[2]).toEqual(expect.objectContaining({ agent: "Anthropic API（Claude固定）", binding: "provider" }));
   });
 
   it("個別設定した項目はプロバイダーを切り替えても変わらない", () => {
     const overrides = { ...NO_AI_PROVIDER_OVERRIDES, planReviewAgentForCodex: true, appAiModel: true };
     const rows = resolveProviderFlowRows(resolved, "codex", overrides);
 
-    expect(rows.find((row) => row.step === "計画レビュー")!.entries[0]).toEqual(
+    // 開始元ごとに結果が分かれるので、固定している側と追従している側を別々に出す（#4139）
+    const planReview = rows.find((row) => row.step === "計画レビュー")!.entries;
+    expect(planReview).toHaveLength(2);
+    expect(planReview.find((entry) => entry.label.includes("Codex CLIの計画"))).toEqual(
       expect.objectContaining({ agent: "Claude Code", model: "Opus 5.5", binding: "override" }),
+    );
+    expect(planReview.find((entry) => entry.label.includes("Claude Codeの計画"))).toEqual(
+      expect.objectContaining({ agent: "Codex CLI", binding: "provider" }),
     );
     expect(rows.find((row) => row.step === "アプリ内AI")!.entries[0]).toEqual(
       expect.objectContaining({ agent: "Anthropic API", binding: "override" }),
     );
+  });
+
+  it("継承なら計画の作成元に関わらず全体の切替に従い、実効エージェントが1行に揃う（#4139）", () => {
+    for (const provider of ["claude", "codex", "claude"] as const) {
+      const entries = resolveProviderFlowRows(resolved, provider, NO_AI_PROVIDER_OVERRIDES)
+        .find((row) => row.step === "計画レビュー")!.entries;
+      expect(entries).toHaveLength(1);
+      expect(entries[0]).toEqual(expect.objectContaining({
+        agent: provider === "claude" ? "Claude Code" : "Codex CLI",
+        binding: "provider",
+      }));
+    }
   });
 
   it("PRレビュー・修復は実装したエージェントの側で走り、実装先が分かれれば両方を出す", () => {

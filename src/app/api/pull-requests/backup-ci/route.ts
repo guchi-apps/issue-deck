@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 
 import { BackupCiError, getBackupCiReadiness, startBackupCiRun } from "@/lib/backup-ci/service";
-import { toBackupCiRunView } from "@/lib/backup-ci/view";
+import { toBackupCiRunView, toCiGateStateView } from "@/lib/backup-ci/view";
 import { requireUserId } from "@/lib/auth-user";
 import { db } from "@/lib/db";
 import { withGithubApiFeature } from "@/lib/github/api-usage";
@@ -39,12 +39,15 @@ export async function GET(request: NextRequest) {
   const repository = await findRepository(userId, target.owner, target.repo);
   if (!repository) return NextResponse.json({ error: "not_found" }, { status: 404 });
 
-  const [readiness, runs] = await Promise.all([
+  const [readiness, runs, gate] = await Promise.all([
     getBackupCiReadiness(repository.fullName),
     db.backupCiRun.findMany({
       where: { repositoryFullName: repository.fullName, prNumber: target.prNumber },
       orderBy: { attempt: "desc" },
       take: 5,
+    }),
+    db.ciGateState.findUnique({
+      where: { repositoryFullName_prNumber: { repositoryFullName: repository.fullName, prNumber: target.prNumber } },
     }),
   ]);
   return NextResponse.json(
@@ -53,11 +56,13 @@ export async function GET(request: NextRequest) {
         enabled: readiness.setting?.enabled ?? false,
         circleciProjectSlug: readiness.setting?.circleciProjectSlug ?? null,
         circleciDefinitionId: readiness.setting?.circleciDefinitionId ?? null,
+        mirrorActionsToCiGate: readiness.setting?.mirrorActionsToCiGate ?? false,
         tokenConfigured: readiness.tokenConfigured,
         webhookConfigured: readiness.webhookConfigured,
         problems: readiness.problems,
       },
       runs: runs.map(toBackupCiRunView),
+      gate: gate ? toCiGateStateView(gate) : null,
     },
     { headers: { "Cache-Control": "no-store" } },
   );

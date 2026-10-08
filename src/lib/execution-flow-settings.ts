@@ -1,5 +1,7 @@
 import {
+  APP_AI_MODEL_DEFAULT,
   APP_AI_MODEL_OPTIONS,
+  APP_AI_MODEL_REASONING_DEFAULT,
   CODEX_MODEL_DEFAULT,
   appAiProvider,
   parseAppAiModel,
@@ -86,8 +88,25 @@ function planReviewModel(settings: ExecutionFlowSettings, agent: PlanReviewAgent
     : describeCodexModel(settings.planReviewCodexModel);
 }
 
+/** この入口の機能はGPT系を選んでもOpenAI APIを使わず、Claude系で実行する（#4147）。 */
 function appAiAgent(model: AppAiModel) {
-  return appAiProvider(model) === "openai" ? "OpenAI API" : "Anthropic API";
+  return appAiProvider(model) === "openai" ? "Anthropic API（Claude固定）" : "Anthropic API";
+}
+
+function appAiClaudeFixedModelLabel(model: AppAiModel, reasoning: boolean) {
+  return appAiModelLabel(
+    appAiProvider(model) === "openai"
+      ? reasoning ? APP_AI_MODEL_REASONING_DEFAULT : APP_AI_MODEL_DEFAULT
+      : model,
+  );
+}
+
+const CLAUDE_FIXED_NOTE =
+  "GPT系を選んでいてもOpenAI API（従量課金）は使わず、Claude系の既定モデルで実行します。";
+
+/** チャット調査はGPT系ならサブPCのCodex CLI（サブスク枠）で動く（#4143）。主系プロバイダーは見ない。 */
+function chatInvestigationAgent(model: AppAiModel) {
+  return appAiProvider(model) === "openai" ? "Codex CLI（ChatGPTサブスク）" : "Anthropic API";
 }
 
 /**
@@ -167,16 +186,24 @@ export function resolveExecutionFlows(settings: ExecutionFlowSettings): Executio
     },
     {
       group: "アプリ内AI", name: "要約・検索・文章整理・手作業アシスタント", location: "IssueDeckサーバー",
-      agent: appAiAgent(settings.appAiModel), model: appAiModelLabel(settings.appAiModel), source: "アプリ内AI設定", sourceId: "app-ai-settings",
+      agent: appAiAgent(settings.appAiModel), model: appAiClaudeFixedModelLabel(settings.appAiModel, false), source: "アプリ内AI設定", sourceId: "app-ai-settings",
+      note: appAiProvider(settings.appAiModel) === "openai" ? CLAUDE_FIXED_NOTE : undefined,
     },
     {
-      group: "アプリ内AI", name: "原因診断・新規アプリ相談", location: "IssueDeckサーバー",
-      agent: appAiAgent(settings.appAiModelReasoning), model: appAiModelLabel(settings.appAiModelReasoning), source: "アプリ内AI（推論）設定", sourceId: "app-ai-settings",
+      group: "アプリ内AI", name: "原因診断（チャット調査）",
+      location: appAiProvider(settings.appAiModelReasoning) === "openai" ? "サブPC" : "IssueDeckサーバー",
+      agent: chatInvestigationAgent(settings.appAiModelReasoning), model: appAiModelLabel(settings.appAiModelReasoning), source: "アプリ内AI（推論）設定", sourceId: "app-ai-settings",
+      note: appAiProvider(settings.appAiModelReasoning) === "openai" ? "GPT系はOpenAI APIを使わず、サブPCのCodex CLI（ChatGPTサブスク枠）で実行します。" : undefined,
+    },
+    {
+      group: "アプリ内AI", name: "新規アプリ相談・手作業の修正提案", location: "IssueDeckサーバー",
+      agent: appAiAgent(settings.appAiModelReasoning), model: appAiClaudeFixedModelLabel(settings.appAiModelReasoning, true), source: "アプリ内AI（推論）設定", sourceId: "app-ai-settings",
+      note: appAiProvider(settings.appAiModelReasoning) === "openai" ? CLAUDE_FIXED_NOTE : undefined,
     },
     {
       group: "判定", name: "おまかせのモデル選択・Issueラベル判定", location: settings.modelPickEngine === "jev" ? "TypeSafe" : "IssueDeckサーバー",
-      agent: settings.modelPickEngine === "jev" ? "Jev" : appAiAgent(settings.appAiModel), model: settings.modelPickEngine === "jev" ? "Jev（候補から判定）" : appAiModelLabel(settings.appAiModel),
-      source: "判定に使うAI設定", sourceId: "model-pick-settings", note: settings.modelPickEngine === "jev" ? "Jevが利用できない場合はアプリ内AIで判定します。" : undefined,
+      agent: settings.modelPickEngine === "jev" ? "Jev" : appAiAgent(settings.appAiModel), model: settings.modelPickEngine === "jev" ? "Jev（候補から判定）" : appAiClaudeFixedModelLabel(settings.appAiModel, false),
+      source: "判定に使うAI設定", sourceId: "model-pick-settings", note: settings.modelPickEngine === "jev" ? "Jevが利用できない場合はアプリ内AIで判定します。" : appAiProvider(settings.appAiModel) === "openai" ? CLAUDE_FIXED_NOTE : undefined,
     },
   ];
 }
@@ -308,7 +335,6 @@ export function resolveProviderFlowRows(
   });
   const subBinding: ProviderFlowBinding = overrides.defaultDispatchAgent ? "override" : "provider";
   const actionsBinding: ProviderFlowBinding = overrides.githubActionsAgent ? "override" : "provider";
-  const planReviewFixed = subAgent === "claude" ? overrides.planReviewAgentForClaude : overrides.planReviewAgentForCodex;
   // PRレビュー・修復は実装したCLIの側で走る。サブPCとActionsで実装エージェントが違えば両方を出す
   const implementationAgents = [...new Set([subAgent, actionsAgentValue])];
   const reviewFlows = (prefix: "PRコードレビュー" | "レビュー指摘修正") =>
@@ -321,6 +347,22 @@ export function resolveProviderFlowRows(
       return entry(flow, "implementation", `${flow.location}（${agent === "claude" ? "Claude" : "Codex"}実装）`);
     });
   const pickFlow = find("おまかせのモデル選択・Issueラベル判定");
+  // 計画レビューは、計画を出したCLIごとに担当AIを持つ。継承なら全体設定（provider）で同じ結果になるので1行にまとめ、
+  // 個別に固定して結果が分かれるときだけ開始元ごとに分けて見せる（#4139）
+  const planReviewEntries = (): ProviderFlowEntry[] => {
+    const sources = [
+      { start: "Claude Codeで開始後", fixed: overrides.planReviewAgentForClaude, label: "Claude Codeの計画" },
+      { start: "Codex CLIで開始後", fixed: overrides.planReviewAgentForCodex, label: "Codex CLIの計画" },
+    ] as const;
+    const built = sources.map((source) => {
+      const flow = find(`自動計画レビュー（${source.start}）`);
+      return { source, flow, binding: (source.fixed ? "override" : "provider") as ProviderFlowBinding };
+    });
+    const same = built[0].flow.agent === built[1].flow.agent && built[0].flow.model === built[1].flow.model &&
+      built[0].binding === built[1].binding;
+    if (same) return [entry(built[0].flow, built[0].binding)];
+    return built.map(({ source, flow, binding }) => entry(flow, binding, `${flow.location}（${source.label}）`));
+  };
 
   return [
     {
@@ -343,12 +385,7 @@ export function resolveProviderFlowRows(
     },
     {
       step: "計画レビュー",
-      entries: [
-        entry(
-          find(`自動計画レビュー（${subAgent === "claude" ? "Claude Codeで開始後" : "Codex CLIで開始後"}）`),
-          planReviewFixed ? "override" : "provider",
-        ),
-      ],
+      entries: planReviewEntries(),
       sourceId: "plan-review-settings",
       editsWorkflowModels: false,
     },
@@ -358,7 +395,8 @@ export function resolveProviderFlowRows(
       step: "アプリ内AI",
       entries: [
         entry(find("要約・検索・文章整理・手作業アシスタント"), overrides.appAiModel ? "override" : "provider", "要約・検索・文章整理"),
-        entry(find("原因診断・新規アプリ相談"), overrides.appAiModelReasoning ? "override" : "provider", "原因診断・新規アプリ相談"),
+        entry(find("原因診断（チャット調査）"), overrides.appAiModelReasoning ? "override" : "provider", "原因診断（チャット）"),
+        entry(find("新規アプリ相談・手作業の修正提案"), overrides.appAiModelReasoning ? "override" : "provider", "新規アプリ相談・修正提案"),
       ],
       sourceId: "app-ai-settings",
       editsWorkflowModels: false,

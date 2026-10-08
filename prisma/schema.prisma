@@ -32,6 +32,7 @@ model User {
   favoriteRepositories              FavoriteRepository[]
   commentReads                      IssueCommentRead[]
   pushSubscriptions                 PushSubscription[]
+  pushMutedKinds                    PushMutedKind[]
   snoozedItems                      SnoozedItem[]
   issueCreationExcludedRepositories IssueCreationExcludedRepository[]
   releaseCheckTargets               ReleaseCheckTarget[]
@@ -2340,15 +2341,18 @@ model ImplementationRun {
 /// **行が無い・`enabled`が偽のリポジトリでは、バックアップCIを起動できない**（明示的に有効化したものだけ）。
 /// CircleCIのAPIトークンとWebhookの署名鍵はここに置かず、環境変数（`CIRCLECI_API_TOKEN`・`CIRCLECI_WEBHOOK_SECRET`）から読む
 model BackupCiSetting {
-  repositoryFullName   String   @id
-  enabled              Boolean  @default(false)
+  repositoryFullName    String   @id
+  enabled               Boolean  @default(false)
   /// `circleci/<org-id>/<project-id>`（GitHub App連携）のようなプロジェクトスラッグ
-  circleciProjectSlug  String?
+  circleciProjectSlug   String?
   /// APIからの起動に使うパイプライン定義のID（CircleCIのProject Settings > Pipelines）
-  circleciDefinitionId String?
-  updatedByUserId      String?
-  createdAt            DateTime @default(now())
-  updatedAt            DateTime @updatedAt
+  circleciDefinitionId  String?
+  /// 通常時（バックアップCIを起動していないPR）も、GitHub Actionsの必須ジョブの結果を共通チェック
+  /// `issue-deck/ci-gate`へ写す（#4113）。**必須チェックを共通チェックへ移したあとは外さない**
+  mirrorActionsToCiGate Boolean  @default(false)
+  updatedByUserId       String?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
 }
 
 /// バックアップCIの実行要求1回（#4065）。**PRのhead/baseと実際に検査したコミット、検査定義の版を
@@ -2396,6 +2400,35 @@ model BackupCiRun {
   @@index([status])
 }
 
+/// PRごとに、共通チェック（issue-deck/ci-gate）へどちらの経路（GitHub Actions／バックアップCI）の
+/// 結果を採用したかの記録（#4113）。**最後に始まった試行の結果だけを採用し、遅れて届いた古い試行で
+/// 巻き戻さない**ための基準になる。判定は src/lib/backup-ci/gate.ts
+model CiGateState {
+  id                 String    @id @default(cuid())
+  repositoryFullName String
+  prNumber           Int
+  headSha            String
+  baseSha            String
+  /// `actions` | `backup`
+  source             String
+  /// 採用した試行（Actionsは`<run id>:<attempt>`、バックアップCIは`BackupCiRun.id`）。未開始ならnull
+  sourceRef          String?
+  /// 採用した試行の開始時刻。これより前に始まった同じ経路の試行では置き換えない
+  sourceStartedAt    DateTime?
+  /// 共通チェックの状態（success / failure / pending / error）
+  state              String
+  description        String    @db.Text
+  targetUrl          String?   @db.Text
+  /// 最後にGitHubへ発行できた`<source>:<state>:<baseSha>`。失敗時は`publish_failed:<code>`
+  publishedState     String?
+  lastEvaluatedAt    DateTime
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  @@unique([repositoryFullName, prNumber])
+  @@index([lastEvaluatedAt])
+}
+
 /// CircleCIの完了Webhookの受信記録（#4065）。**同じイベントIDを2回処理しない**ための台帳
 model CircleciWebhookDelivery {
   eventId    String   @id
@@ -2403,4 +2436,18 @@ model CircleciWebhookDelivery {
   receivedAt DateTime @default(now())
 
   @@index([receivedAt])
+}
+
+/// Push通知の種類ごとのOFF設定（#4159）。**行があればその種類はOFF**で、行が無ければON
+/// （既定は全部ON。後から種類を足しても既存ユーザーの挙動が変わらない）。
+/// ユーザー単位で、端末（購読）ごとではない。`kind`は`src/lib/notifications/push-kinds.ts`の値。
+model PushMutedKind {
+  id        String   @id @default(cuid())
+  userId    String
+  kind      String
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, kind])
 }

@@ -47,3 +47,33 @@ describe("computeFixProgress", () => {
     expect(computeFixProgress({ ...base, pr: { ...moved, state: "closed" } }).phase).toBe("failed");
   });
 });
+
+describe("computeFixProgress（管理情報だけの修正 #4153）", () => {
+  const meta: FixProgressInput = {
+    ...base,
+    scope: "metadata",
+    reviewKindBefore: "changes-requested",
+    verdict: { reviewKind: "changes-requested", reviewedSha: "aaaaaaa" },
+    ciState: "success",
+  };
+  it("HEADが変わらなくても未修正扱いにせず、報告が無ければ実行待ち", () => {
+    expect(computeFixProgress(meta).phase).toBe("requested");
+    expect(computeFixProgress({ ...meta, activeRepair: true }).phase).toBe("working");
+  });
+  it("報告後に指摘が残っていれば失敗側（判断待ちの可能性）", () => {
+    expect(computeFixProgress({ ...meta, agentReported: true }).phase).toBe("failed");
+  });
+  it("元の指摘が解消した再レビュー＋CI成功で検証済み", () => {
+    const card = computeFixProgress({ ...meta, agentReported: true, verdict: { reviewKind: "ok", reviewedSha: "aaaaaaa" } });
+    expect(card.phase).toBe("verified");
+  });
+  it("依頼時点で既に通っていた判定は解消の確認にならない", () => {
+    const card = computeFixProgress({
+      ...meta,
+      agentReported: true,
+      reviewKindBefore: "ok",
+      verdict: { reviewKind: "ok", reviewedSha: "aaaaaaa" },
+    });
+    expect(card.phase).toBe("waiting_review");
+  });
+});

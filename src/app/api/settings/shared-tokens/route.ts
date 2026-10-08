@@ -5,16 +5,27 @@ import { encryptSecret } from "@/lib/crypto/secret-cipher";
 import { db } from "@/lib/db";
 import { isUniqueConstraintError } from "@/lib/prisma-error";
 import { generateSharedTokenValue } from "@/lib/shared-token-generate";
-import { parseSharedTokenInput, toSharedToken } from "@/lib/shared-tokens";
-
-const usages = { orderBy: { usedAt: "desc" as const } };
+import { parseSharedTokenInput, toSharedToken, type SharedTokenUsageSummary } from "@/lib/shared-tokens";
 
 export async function GET() {
   const userId = await requireUserId();
   if (!userId) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
-  const rows = await db.sharedToken.findMany({ orderBy: { name: "asc" }, include: { usages } });
-  return NextResponse.json({ sharedTokens: rows.map(toSharedToken) });
+  // 利用記録は増え続けるので全行を読まず、トークン×利用元ごとの最終利用日時だけを集計で取る（#4165）
+  const [rows, grouped] = await Promise.all([
+    db.sharedToken.findMany({ orderBy: { name: "asc" } }),
+    db.sharedTokenUsage.groupBy({ by: ["sharedTokenId", "consumer"], _max: { usedAt: true } }),
+  ]);
+  const usagesByToken = new Map<string, SharedTokenUsageSummary[]>();
+  for (const group of grouped) {
+    if (!group._max.usedAt) continue;
+    const list = usagesByToken.get(group.sharedTokenId) ?? [];
+    list.push({ consumer: group.consumer, usedAt: group._max.usedAt });
+    usagesByToken.set(group.sharedTokenId, list);
+  }
+  return NextResponse.json({
+    sharedTokens: rows.map((row) => toSharedToken({ ...row, usages: usagesByToken.get(row.id) ?? [] })),
+  });
 }
 
 export async function POST(request: NextRequest) {
@@ -35,10 +46,9 @@ export async function POST(request: NextRequest) {
         description: input.description,
         sourceReference: input.sourceReference,
       },
-      include: { usages },
     });
     return NextResponse.json({
-      sharedToken: toSharedToken(row),
+      sharedToken: toSharedToken({ ...row, usages: [] }),
       ...(generatedValue !== null ? { generatedValue } : {}),
     });
   } catch (error) {

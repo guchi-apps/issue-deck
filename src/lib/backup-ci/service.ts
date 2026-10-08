@@ -9,22 +9,26 @@ import {
   BACKUP_CI_REQUESTING_STALE_MS,
   BACKUP_CI_RUN_TIMEOUT_MS,
   type BackupCiRunStatus,
-  CI_GATE_CONTEXT,
-  type RequiredCheckDefinition,
   buildBackupCiActiveKey,
-  decideCiGateFromBackupRun,
   evaluateBackupCiResult,
-  expandRequiredChecks,
   isCircleciWorkflowTerminal,
   parseBackupCiRunStatus,
   parseCircleciWebhook,
 } from "@/lib/backup-ci/state";
-import { digestDefinition, verifyCircleciSignature } from "@/lib/backup-ci/crypto";
+import { verifyCircleciSignature } from "@/lib/backup-ci/crypto";
+import {
+  BackupCiError,
+  type PullRequestTarget,
+  fetchDefinitionAt,
+  fetchPullRequestTarget,
+  installationTokenFor,
+  isBackupCiBaseRef,
+} from "@/lib/backup-ci/github";
+import { evaluateActionsForPullRequest, isActionsMirrored, syncPullRequestCiGate } from "@/lib/backup-ci/gate-service";
 import { db } from "@/lib/db";
-import { getInstallationToken } from "@/lib/github/app-auth";
-import { GithubApiError } from "@/lib/github/github-api-error";
-import { GITHUB_API, githubFetch } from "@/lib/github/request";
 import { isUniqueConstraintError } from "@/lib/prisma-error";
+
+export { BACKUP_CI_BASE_REFS, BackupCiError } from "@/lib/backup-ci/github";
 
 /**
  * バックアップCI（#4065）の起動・結果回収・共通チェックの発行。設計と運用手順は docs/backup-ci.md。
@@ -34,33 +38,18 @@ import { isUniqueConstraintError } from "@/lib/prisma-error";
  * - 合否はissue-deckの記録（`BackupCiRun`）と突き合わせてから共通チェックへ出す
  */
 
-/** 初期導入の対象はdevelop向けPRだけ（main向け・リリースは対象外） */
-export const BACKUP_CI_BASE_REFS = ["develop"] as const;
-const DEFINITION_PATH = "ci/required-checks.json";
 const RESULT_ARTIFACT_SUFFIX = "ci-result.json";
 const CIRCLECI_WORKFLOW_NAME = "backup-ci";
 const CIRCLECI_JOB_NAME = "required-checks";
-
-export class BackupCiError extends Error {
-  constructor(
-    readonly code:
-      | "not_enabled"
-      | "not_configured"
-      | "not_found"
-      | "not_eligible"
-      | "definition_unavailable",
-    message: string,
-  ) {
-    super(message);
-    this.name = "BackupCiError";
-  }
-}
 
 // ---------------------------------------------------------------------------
 // 設定
 
 export type BackupCiReadiness = {
-  setting: Pick<BackupCiSetting, "enabled" | "circleciProjectSlug" | "circleciDefinitionId"> | null;
+  setting: Pick<
+    BackupCiSetting,
+    "enabled" | "circleciProjectSlug" | "circleciDefinitionId" | "mirrorActionsToCiGate"
+  > | null;
   tokenConfigured: boolean;
   webhookConfigured: boolean;
   /** 起動できない理由と、必要な操作（空なら起動できる） */
@@ -76,7 +65,7 @@ export async function getBackupCiReadiness(repositoryFullName: string): Promise<
 }
 
 export function describeReadiness(
-  setting: Pick<BackupCiSetting, "enabled" | "circleciProjectSlug" | "circleciDefinitionId"> | null,
+  setting: BackupCiReadiness["setting"],
   env: { tokenConfigured: boolean; webhookConfigured: boolean },
 ): BackupCiReadiness {
   const problems: string[] = [];
@@ -93,10 +82,13 @@ export async function saveBackupCiSetting(input: {
   enabled: boolean;
   circleciProjectSlug: string | null;
   circleciDefinitionId: string | null;
+  /** 省略時は変えない */
+  mirrorActionsToCiGate?: boolean;
   userId: string;
 }): Promise<BackupCiSetting> {
   const data = {
     enabled: input.enabled,
+    ...(input.mirrorActionsToCiGate === undefined ? {} : { mirrorActionsToCiGate: input.mirrorActionsToCiGate }),
     circleciProjectSlug: input.circleciProjectSlug,
     circleciDefinitionId: input.circleciDefinitionId,
     updatedByUserId: input.userId,
@@ -114,97 +106,6 @@ export function isValidProjectSlug(value: string): boolean {
 }
 export function isValidDefinitionId(value: string): boolean {
   return /^[0-9a-f-]{8,64}$/i.test(value);
-}
-
-// ---------------------------------------------------------------------------
-// GitHub
-
-type PullRequestTarget = {
-  state: string;
-  headSha: string;
-  headRef: string;
-  headRepoFullName: string | null;
-  baseSha: string;
-  baseRef: string;
-};
-
-async function fetchPullRequestTarget(
-  repositoryFullName: string,
-  prNumber: number,
-  token: string,
-): Promise<PullRequestTarget> {
-  const url = `${GITHUB_API}/repos/${repositoryFullName}/pulls/${prNumber}`;
-  const res = await githubFetch(url, token);
-  if (!res.ok) throw new GithubApiError(res.status, `GitHub API request failed: ${res.status} ${url}`);
-  const pr = (await res.json()) as {
-    state: string;
-    head: { sha: string; ref: string; repo: { full_name: string } | null };
-    base: { sha: string; ref: string };
-  };
-  return {
-    state: pr.state,
-    headSha: pr.head.sha,
-    headRef: pr.head.ref,
-    headRepoFullName: pr.head.repo?.full_name ?? null,
-    baseSha: pr.base.sha,
-    baseRef: pr.base.ref,
-  };
-}
-
-/** PRのbaseにある検査定義。**PRのheadの定義は読まない**（PR内で検査を減らしても効かないように） */
-async function fetchDefinitionAt(
-  repositoryFullName: string,
-  sha: string,
-  token: string,
-): Promise<{ digest: string; checks: RequiredCheckDefinition[] }> {
-  const url = `${GITHUB_API}/repos/${repositoryFullName}/contents/${DEFINITION_PATH}?ref=${sha}`;
-  const res = await githubFetch(url, token);
-  if (!res.ok) {
-    throw new BackupCiError("definition_unavailable", `baseに検査定義（${DEFINITION_PATH}）がありません（HTTP ${res.status}）。`);
-  }
-  const json = (await res.json()) as { content?: string; encoding?: string };
-  if (json.encoding !== "base64" || typeof json.content !== "string") {
-    throw new BackupCiError("definition_unavailable", "検査定義を読み取れませんでした。");
-  }
-  const raw = Buffer.from(json.content, "base64");
-  const checks = expandRequiredChecks(safeJson(raw.toString("utf8")));
-  if (!checks) throw new BackupCiError("definition_unavailable", "baseの検査定義の形式が不正です。");
-  return { digest: digestDefinition(raw), checks };
-}
-
-/** 共通チェックを発行する。**失敗しても記録は進める**（権限不足は画面とgateStateで分かる） */
-async function publishCiGate(
-  repositoryFullName: string,
-  sha: string,
-  decision: { state: string; description: string },
-  targetUrl: string | null,
-  token: string,
-): Promise<string> {
-  const url = `${GITHUB_API}/repos/${repositoryFullName}/statuses/${sha}`;
-  try {
-    const res = await githubFetch(url, token, {
-      method: "POST",
-      body: {
-        state: decision.state,
-        context: CI_GATE_CONTEXT,
-        description: decision.description,
-        ...(targetUrl ? { target_url: targetUrl } : {}),
-      },
-    });
-    return res.ok ? decision.state : `publish_failed:${res.status}`;
-  } catch (error) {
-    console.error(`[backup-ci] 共通チェックの発行に失敗しました ${repositoryFullName}@${sha}:`, error);
-    return "publish_failed:network";
-  }
-}
-
-async function installationTokenFor(repositoryFullName: string): Promise<string> {
-  const repository = await db.repository.findFirst({
-    where: { fullName: repositoryFullName },
-    include: { installation: true },
-  });
-  if (!repository) throw new BackupCiError("not_found", "リポジトリが見つかりません。");
-  return getInstallationToken(repository.installation.installationId);
 }
 
 function circleciClientOrThrow(): CircleciClient {
@@ -241,7 +142,7 @@ export async function startBackupCiRun(input: {
 
   const pr = await fetchPullRequestTarget(repositoryFullName, prNumber, token);
   if (pr.state !== "open") throw new BackupCiError("not_eligible", "openなPRだけが対象です。");
-  if (!(BACKUP_CI_BASE_REFS as readonly string[]).includes(pr.baseRef)) {
+  if (!isBackupCiBaseRef(pr.baseRef)) {
     throw new BackupCiError("not_eligible", "バックアップCIの対象はdevelop向けPRだけです。");
   }
   if (pr.headRepoFullName !== repositoryFullName) {
@@ -252,6 +153,7 @@ export async function startBackupCiRun(input: {
   const activeKey = buildBackupCiActiveKey(repositoryFullName, prNumber);
   const existing = await db.backupCiRun.findUnique({ where: { activeKey } });
   if (existing) return { run: existing, reused: true };
+  await refuseWhenActionsFailed(repositoryFullName, prNumber, pr, token);
 
   const last = await db.backupCiRun.findFirst({
     where: { repositoryFullName, prNumber },
@@ -322,8 +224,29 @@ export async function startBackupCiRun(input: {
       },
     });
   }
-  await syncCiGate(run, { headSha: pr.headSha, baseSha: pr.baseSha }, token);
+  await syncPullRequestCiGate({ repositoryFullName, prNumber, pr, token });
   return { run, reused: false };
+}
+
+/**
+ * 通常時もActionsの結果を写しているリポジトリで、**今のheadに対してActionsの必須ジョブが失敗で
+ * 終わっている**なら起動しない（#4113）。バックアップCIは「Actionsが動かない」ときの代替で、
+ * 検査の失敗を別のCIで上書きする経路にしない（キャンセル・未開始・検査中は障害の可能性があるので止めない）。
+ */
+async function refuseWhenActionsFailed(
+  repositoryFullName: string,
+  prNumber: number,
+  pr: PullRequestTarget,
+  token: string,
+): Promise<void> {
+  if (!(await isActionsMirrored(repositoryFullName))) return;
+  const actions = await evaluateActionsForPullRequest(repositoryFullName, prNumber, pr, token);
+  if (actions.decision.state === "failure") {
+    throw new BackupCiError(
+      "not_eligible",
+      `GitHub Actionsがこのコミットの検査を失敗で終えています（${actions.decision.description}）。障害ではなく検査の失敗なので、直してpushするか、Actionsで再実行してください。`,
+    );
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -355,7 +278,9 @@ export async function reconcileBackupCiRun(run: BackupCiRun, now = new Date()): 
     next = await finish(next, "superseded", "PRのhead/baseが更新されたため、この結果は採用しません。再実行してください。");
   }
   next = await db.backupCiRun.update({ where: { id: next.id }, data: { lastReconciledAt: now } });
-  if (pr.state === "open") await syncCiGate(next, current, token);
+  if (pr.state === "open") {
+    await syncPullRequestCiGate({ repositoryFullName: run.repositoryFullName, prNumber: run.prNumber, pr, token, now });
+  }
   return next;
 }
 
@@ -429,30 +354,6 @@ function finish(
   return db.backupCiRun.update({
     where: { id: run.id },
     data: { ...extra, status, statusReason: reason, activeKey: null, completedAt: run.completedAt ?? new Date() },
-  });
-}
-
-/**
- * 共通チェックを、このPRで最新の実行から決めて発行する。**最新でない実行からは発行しない**
- * （古い試行の遅れた結果で合否を巻き戻さない）。PRのheadが変わっていれば何もしない。
- */
-async function syncCiGate(run: BackupCiRun, current: { headSha: string; baseSha: string }, token: string) {
-  if (run.headSha !== current.headSha) return;
-  const latest = await db.backupCiRun.findFirst({
-    where: { repositoryFullName: run.repositoryFullName, prNumber: run.prNumber },
-    orderBy: { attempt: "desc" },
-    select: { id: true },
-  });
-  if (latest?.id !== run.id) return;
-  const status = parseBackupCiRunStatus(run.status);
-  if (!status) return;
-  const decision = decideCiGateFromBackupRun({ ...run, status }, current);
-  const gateKey = `${decision.state}:${current.baseSha}`;
-  if (run.gateState === gateKey) return;
-  const published = await publishCiGate(run.repositoryFullName, run.headSha, decision, run.logUrl, token);
-  await db.backupCiRun.update({
-    where: { id: run.id },
-    data: { gateState: published === decision.state ? gateKey : published },
   });
 }
 

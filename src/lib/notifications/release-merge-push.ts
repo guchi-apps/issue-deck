@@ -12,6 +12,7 @@ import {
 } from "@/lib/github/release-button-status";
 import { releaseWorkflowExists } from "@/lib/github/release-workflow-cache";
 import { buildPullRequestId } from "@/lib/github-reference";
+import { mutedWhere, notMutedWhere } from "@/lib/notifications/push-kinds";
 import {
   isPushConfigured,
   sendPushNotification,
@@ -261,19 +262,27 @@ export async function runReleaseMergePushSweep(
       };
       result.pending.push(pending);
 
+      const subscriberWhere = {
+        userInstallations: { some: { installationId: repository.installationId } },
+        hiddenRepositories: { none: { repositoryId: repository.id } },
+      };
+      const [targets, mutedSubscriberCount] = await Promise.all([
+        db.pushSubscription.findMany({
+          where: { user: { ...subscriberWhere, ...notMutedWhere("release-merge") } },
+          select: { id: true, endpoint: true, p256dh: true, auth: true },
+        }),
+        db.pushSubscription.count({
+          where: { user: { ...subscriberWhere, ...mutedWhere("release-merge") } },
+        }),
+      ]);
+
+      // **OFFのせいで宛先が空になったときは席を取らない**（#4159）。席を取ると、ONに戻しても
+      // 鳴らし直しの間隔が過ぎるまで鳴らない
+      if (targets.length === 0 && mutedSubscriberCount > 0) continue;
+
       // **送る前に記録を立てて席を取る**（確認待ちのPushと同じ。#2300）。取れなかったら、
       // まだ鳴らし直す間隔に達していないか、別の巡回が既に掴んでいる
       if (!(await reserveReleaseMergePush(pending, now))) continue;
-
-      const targets = await db.pushSubscription.findMany({
-        where: {
-          user: {
-            userInstallations: { some: { installationId: repository.installationId } },
-            hiddenRepositories: { none: { repositoryId: repository.id } },
-          },
-        },
-        select: { id: true, endpoint: true, p256dh: true, auth: true },
-      });
       if (targets.length === 0) continue;
 
       await sendPushNotification(targets, buildReleaseMergePushPayload(pending));

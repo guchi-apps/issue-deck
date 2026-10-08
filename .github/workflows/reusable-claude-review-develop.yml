@@ -38,8 +38,10 @@ name: Reusable Claude Code Review (develop向けPR)
 #   同ファイルと完全一致していなければClaudeの実行だけをスキップする」検証機構がある。
 #   このファイルを含む .github/workflows/ 配下を変更するPRでは、このジョブはClaudeを
 #   実行しないまま success で終わる(ステップもジョブも成功扱いになる点に注意)。
-#   その場合もrisk-checkが .github/workflows/** の変更を検知した結果をauto-mergeが反映して
-#   00.check-userを付与するため自動マージはされない。詳細は docs/multi-agent/labels.md
+#   strictではrisk-checkの検知をauto-mergeが反映して00.check-userを付与する。relaxed(既定)では
+#   それが無いため、workflow-change-policy: confirm(既定)がClaude未実行のワークフロー変更PRを
+#   00.check-userで人へ回す(#4144)。confirmでは代わりにサブPCのCodexレビューを依頼し、その判定が
+#   出ればそれで決める(#4149。下のcodex-review参照)。詳細は docs/multi-agent/labels.md
 #   「ワークフローファイルを変更するPRではclaude-reviewが必ずスキップされる」参照
 # - claude-review-fallback: claude-reviewが失敗した場合にのみ走る。Claude Code自体を
 #   使わない単純なシェルスクリプトとし、Claude Code側の失敗原因に関わらず確実に
@@ -161,6 +163,19 @@ on:
         required: false
         type: string
         default: relaxed
+      workflow-change-policy:
+        description: >-
+          `.github/workflows/**`を変更するPRでClaudeが実行されなかった場合の扱い(#4144)。
+          claude-code-actionには「ワークフローファイルの内容がデフォルトブランチと完全一致して
+          いなければClaudeの実行だけをスキップする」検証機構があり、そのPRでは意味的レビューが
+          無いまま`success`で終わる。confirm(既定) / allow(従来どおりレビュー無しで通す)。
+          confirmでは代わりにサブPCのCodexレビューを依頼し(#4149)、その判定で自動マージを決める
+          (判定が出るまでは保留)。依頼できない・判定が得られないときは自動マージせず
+          00.check-user＋01.check-mergeで人へ回す(#4144)。merge-policyとは独立で、relaxedでも効く。
+          Codexが担当のPR(claude-reviewを使わない)には適用しない。
+        required: false
+        type: string
+        default: confirm
       review-auto-fix:
         description: >-
           自動レビューが「要修正」と判定し、しかも「人の判断が要らない指摘だけ」と印を付けたとき、
@@ -249,6 +264,9 @@ jobs:
       risky: ${{ steps.risk.outputs.risky }}
       # 後続のclaude-reviewを実行するか(#992)。riskyより広い条件で立つ
       needs-review: ${{ steps.risk.outputs.needs-review }}
+      # `.github/workflows/`配下を変更しているか(#4144)。claude-reviewがClaudeを実行できない
+      # PRかどうかをauto-mergeが判定する材料
+      workflow-changed: ${{ steps.risk.outputs.workflow-changed }}
       # 該当した理由(複数行)。auto-mergeジョブが投稿するコメントの本文になる(#1406)
       reasons: ${{ steps.risk.outputs.reasons }}
       # このpush開始時点で既に00.check-userが付いていたか。重複コメント抑止(#594)の判定に使う。
@@ -525,6 +543,11 @@ jobs:
           {
             echo "needs-review=${NEEDS_REVIEW}"
             echo "risky=${RISKY}"
+            if echo "$CHANGED_FILES" | grep -q '^\.github/workflows/'; then
+              echo "workflow-changed=true"
+            else
+              echo "workflow-changed=false"
+            fi
           } >> "$GITHUB_OUTPUT"
 
           {
@@ -880,17 +903,39 @@ jobs:
     # IssueDeckがこのrunの`auto-merge`ジョブだけを再実行して最終マージ判定を再開する。
     # 依頼そのものができなかった（実行できるサブPCが無い・IssueDeckへ届かない）場合は、30分待たずに
     # ここで失敗させ、auto-mergeを止める安全側のfailureにする（codex-review-fallbackが理由を伝える）。
-    needs: [identify-issue, risk-check, review-provider]
-    if: github.event.pull_request.draft == false && needs.risk-check.outputs.needs-review == 'true' && needs.review-provider.outputs.provider == 'codex'
+    #
+    # **実装担当がClaudeでも、Claudeを実行できなかったワークフロー変更PRには依頼する**（#4149）。
+    # claude-code-actionの検証機構で意味的レビューが省かれたPRに、Claude以外の経路でAIの判定を付ける
+    # （Codex CLIはこの検証機構の対象外）。Claudeが実際に走ったかを見てから決めるため、この場合だけ
+    # claude-reviewの完了を待つ（検証機構によるスキップは数十秒で終わる）。
+    # この代替レビュー（MODE=workflow-change）では、依頼できなくても失敗させない。`requested=false`を
+    # 返してauto-mergeへ渡し、#4144と同じく`00.check-user`＋`01.check-merge`で人へ回す——代替レビューが
+    # 無いことは「止まっている」ではなく「人が見れば進められる」状態で、配布先からサブPCへ届かない
+    # リポジトリでも#4144以前より悪くならないようにするため。
+    needs: [identify-issue, risk-check, review-provider, claude-review]
+    if: >-
+      !cancelled()
+      && github.event.pull_request.draft == false
+      && needs.risk-check.outputs.needs-review == 'true'
+      && needs.review-provider.result == 'success'
+      && (needs.review-provider.outputs.provider == 'codex'
+        || (needs.review-provider.outputs.provider == 'claude'
+          && inputs.workflow-change-policy == 'confirm'
+          && needs.risk-check.outputs.workflow-changed == 'true'
+          && needs.claude-review.result == 'success'
+          && needs.claude-review.outputs.executed != 'true'))
     runs-on: ubuntu-latest
     outputs:
       reason: ${{ steps.request.outputs.reason }}
+      # 依頼を積めたか（#4149）。代替レビューで依頼できなかったときだけ false になる
+      requested: ${{ steps.request.outputs.requested }}
     permissions:
       pull-requests: read
     steps:
       - name: CodexレビューをサブPCへ依頼する（結果は待たない）
         id: request
         env:
+          MODE: ${{ needs.review-provider.outputs.provider == 'codex' && 'primary' || 'workflow-change' }}
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -903,6 +948,12 @@ jobs:
           set -uo pipefail
           fail() {
             echo "reason=$1" >> "$GITHUB_OUTPUT"
+            if [ "${MODE:-primary}" = "workflow-change" ]; then
+              # 代替レビューは依頼できなくても失敗させない（auto-mergeが#4144の扱いで人へ回す）
+              echo "requested=false" >> "$GITHUB_OUTPUT"
+              echo "::warning::$1"
+              exit 0
+            fi
             echo "::error::$1"
             exit 1
           }
@@ -910,8 +961,11 @@ jobs:
           if gh pr view "$PR_NUMBER" --json comments --jq '.comments[].body' \
             | grep -qE "issue-deck-codex-review-verdict:(lgtm|needs-check|changes-requested) sha=${HEAD_SHA}"; then
             echo "このHEADのCodexレビュー結果が既にPRにあるため、依頼しません。"
+            echo "requested=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
+          [ "${MODE:-primary}" = "primary" ] \
+            || echo "Claudeを実行できなかったワークフロー変更PRのため、代わりにCodexレビューを依頼します（#4149）。"
           [ -n "$APP_BASE_URL" ] && [ -n "$PROGRESS_REPORT_SECRET" ] \
             || fail "APP_BASE_URL / PROGRESS_REPORT_SECRET が未設定のため、Codexレビューを依頼できません"
           BODY="$(jq -n --arg repository "$GH_REPO" --argjson pr "$PR_NUMBER" --arg head "$HEAD_SHA" \
@@ -926,6 +980,7 @@ jobs:
           if [ "$CODE" != "200" ]; then
             fail "Codexレビューを依頼できませんでした（HTTP ${CODE}）${MESSAGE:+: ${MESSAGE}}"
           fi
+          echo "requested=true" >> "$GITHUB_OUTPUT"
           echo "Codexレビューを依頼しました: $(jq -r '.state' "$RESPONSE")（${MESSAGE}）"
 
   claude-review-fallback:
@@ -1101,6 +1156,8 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           CODEX_JOB_RESULT: ${{ needs.codex-review.result }}
+          CODEX_REQUESTED: ${{ needs.codex-review.outputs.requested }}
+          CODEX_REQUEST_REASON: ${{ needs.codex-review.outputs.reason }}
           APP_BASE_URL: ${{ vars.APP_BASE_URL }}
           PROGRESS_REPORT_SECRET: ${{ secrets.PROGRESS_REPORT_SECRET }}
         run: |
@@ -1116,6 +1173,12 @@ jobs:
           }
           if [ "$CODEX_JOB_RESULT" != "success" ]; then
             emit skipped
+          fi
+          # ワークフロー変更PRの代替レビューを依頼できなかった（#4149）。判定は無いので skipped とし、
+          # 依頼できなかった理由だけを渡す（マージ保留の判定が#4144の扱いで人へ回す）。
+          # 出力が空（この出力を持たない版のrun）は依頼済みとして扱う
+          if [ "${CODEX_REQUESTED:-}" = "false" ]; then
+            emit skipped "" "${CODEX_REQUEST_REASON:-}"
           fi
           CURRENT_HEAD="$(gh api "repos/${GH_REPO}/pulls/${PR_NUMBER}" --jq .head.sha 2>/dev/null || true)"
           if [ -n "$CURRENT_HEAD" ] && [ "$CURRENT_HEAD" != "$HEAD_SHA" ]; then
@@ -1165,6 +1228,9 @@ jobs:
           REASONS: ${{ needs.risk-check.outputs.reasons }}
           ALREADY_CHECK_USER: ${{ needs.risk-check.outputs.already-check-user }}
           REVIEW_RESULT: ${{ needs.claude-review.result }}
+          REVIEW_EXECUTED: ${{ needs.claude-review.outputs.executed }}
+          WORKFLOW_CHANGED: ${{ needs.risk-check.outputs.workflow-changed }}
+          WORKFLOW_CHANGE_POLICY: ${{ inputs.workflow-change-policy }}
           CODEX_REVIEW_RESULT: ${{ steps.codex.outputs.result }}
           CODEX_VERDICT_INPUT: ${{ steps.codex.outputs.verdict }}
           CODEX_FAILURE_REASON: ${{ steps.codex.outputs.reason }}
@@ -1235,7 +1301,39 @@ jobs:
             esac
           fi
 
-          if [ "$RISKY" != "true" ] && [ "$REVIEW_BLOCKED" != "true" ] && [ "$CODEX_REVIEW_BLOCKED" != "true" ]; then
+          # ワークフローを変更したPRでClaudeが実行されていない場合は、判定が無いまま通さず人へ回す
+          # (#4144)。claude-code-actionの検証機構でジョブはsuccessのまま意味的レビューだけが
+          # 省かれるため、REVIEW_BLOCKED(判定マーカー)は常にfalseになり、merge-policy: relaxedでは
+          # 機械判定も意味的判定も無いままdevelopへ入っていた。
+          # **merge-policyとは独立**(relaxedでも止める)。止めたくないリポジトリは
+          # workflow-change-policy: allow にする。
+          #
+          # **代わりに依頼したCodexレビューの判定が出ていれば、それを意味的判定として使う**（#4149）。
+          # lgtmなら止めず、needs-check・changes-requestedは上のCodexの判定どおりに扱う（結果待ちは
+          # 上で保留済み）。依頼できなかった・完了できなかったときは、Codexの失敗（01.check-blocked）
+          # ではなく#4144と同じ「人が見れば進められる」扱い（01.check-merge）にし、理由を添える。
+          WORKFLOW_UNREVIEWED=false
+          if [ "${WORKFLOW_CHANGE_POLICY:-confirm}" = "confirm" ] && [ "$WORKFLOW_CHANGED" = "true" ] \
+            && [ "$REVIEW_RESULT" = "success" ] && [ "$REVIEW_EXECUTED" != "true" ]; then
+            if [ "$CODEX_REVIEW_RESULT" = "success" ]; then
+              echo "ワークフローファイルの変更でClaudeを実行できなかったため、Codexレビューの判定（${CODEX_VERDICT}）を使います。"
+            else
+              WORKFLOW_UNREVIEWED=true
+              CODEX_REVIEW_BLOCKED=false
+              CODEX_REVIEW_FAILED=false
+              echo "ワークフローファイルの変更を含み、Claudeによるレビューが実行されていないため、自動マージを保留します。"
+              # strictではrisk-checkの理由に同じ変更が入っているので、ここで足すのはそれが無いときだけ
+              if [ "$RISKY" != "true" ]; then
+                REASONS="- GitHub Actionsワークフローの変更 (.github/workflows/**) を含み、Claudeによる自動レビューを実行できなかったため（claude-code-actionの検証機構でスキップされます）。内容を人が確認してからマージしてください"
+              fi
+              if [ -n "${CODEX_FAILURE_REASON:-}" ]; then
+                REASONS="$REASONS"$'\n'"- 代わりに依頼したCodexによる自動レビューの判定も得られなかったため"
+                REASONS="$REASONS"$'\n'"  - ${CODEX_FAILURE_REASON}"
+              fi
+            fi
+          fi
+
+          if [ "$RISKY" != "true" ] && [ "$REVIEW_BLOCKED" != "true" ] && [ "$CODEX_REVIEW_BLOCKED" != "true" ] && [ "$WORKFLOW_UNREVIEWED" != "true" ]; then
             echo "どちらの判定にも該当しないため、00.check-userは付与しません。"
             exit 0
           fi
@@ -1246,7 +1344,7 @@ jobs:
           # 渡したことはIssueへの印付きコメントで伝える。claude-review-fix.ymlはこのワークフローの
           # 完了(workflow_run)で起動し、この印がいまのheadに対して残っているときだけ着手する。
           # 条件を満たさないときは下の従来の処理(00.check-user＋01.check-merge)へ落ちる。
-          if { [ "$REVIEW_BLOCKED" = "true" ] || [ "$CODEX_VERDICT" = "changes-requested" ]; } && [ "$CODEX_REVIEW_FAILED" != "true" ] && [ "$CODEX_VERDICT" != "needs-check" ] && [ "$RISKY" != "true" ] && [ "$REVIEW_AUTO_FIX" = "true" ]; then
+          if { [ "$REVIEW_BLOCKED" = "true" ] || [ "$CODEX_VERDICT" = "changes-requested" ]; } && [ "$CODEX_REVIEW_FAILED" != "true" ] && [ "$CODEX_VERDICT" != "needs-check" ] && [ "$RISKY" != "true" ] && [ "$WORKFLOW_UNREVIEWED" != "true" ] && [ "$REVIEW_AUTO_FIX" = "true" ]; then
             HANDOFF_BLOCKER=""
             AUTOFIX_MARKER="<!-- issue-deck-review-autofix:ok sha=${HEAD_SHA} -->"
             HANDOFF_MAX=2
@@ -1318,7 +1416,7 @@ jobs:
           # ここで投稿するのは機械的リスク判定(risk-check)の理由だけ。意味的判定の理由は
           # claude-review自身が投稿済みで(その末尾のマーカーを上で読んでいる)、同じ理由を
           # 二重に並べないため(#2136)。
-          if [ "$RISKY" != "true" ] && [ "$CODEX_REVIEW_BLOCKED" != "true" ]; then
+          if [ "$RISKY" != "true" ] && [ "$CODEX_REVIEW_BLOCKED" != "true" ] && [ "$WORKFLOW_UNREVIEWED" != "true" ]; then
             echo "機械的リスク判定には該当していないため、理由コメントの投稿はclaude-review側に任せます。"
           elif [ "$CODEX_REVIEW_BLOCKED" = "true" ] && [ "$ALREADY_CHECK_USER" != "true" ]; then
             BODY="⚠️ 以下の理由により、developへのマージ前にユーザーの確認が必要と判定しました。"
@@ -1380,8 +1478,11 @@ jobs:
           REVIEW_RESULT: ${{ needs.claude-review.result }}
           REVIEW_EXECUTED: ${{ needs.claude-review.outputs.executed }}
           REVIEW_PROVIDER: ${{ needs.review-provider.outputs.provider }}
+          WORKFLOW_CHANGED: ${{ needs.risk-check.outputs.workflow-changed }}
+          WORKFLOW_CHANGE_POLICY: ${{ inputs.workflow-change-policy }}
           CODEX_REVIEW_RESULT: ${{ steps.codex.outputs.result }}
           CODEX_VERDICT_INPUT: ${{ steps.codex.outputs.verdict }}
+          CODEX_FAILURE_REASON: ${{ steps.codex.outputs.reason }}
           RISKY: ${{ needs.risk-check.outputs.risky }}
           REASONS: ${{ needs.risk-check.outputs.reasons }}
           REVIEW_FIX_HANDOFF: ${{ steps.hold.outputs.handoff }}
@@ -1417,6 +1518,14 @@ jobs:
                 # のではなく、そもそも実施していない
                 REVIEW="skipped"
                 SKIP_REASON="ワークフローファイルの変更を含むため、Claudeを実行していない"
+                # 人の確認へ回す設定のときは、通ったのではなく止めたことが分かる文面にする(#4144)。
+                # 代わりのCodexレビューが判定した・判定待ちのときは、そちらへ委ねたことを書く(#4149)
+                if [ "${WORKFLOW_CHANGE_POLICY:-confirm}" = "confirm" ] && [ "$WORKFLOW_CHANGED" = "true" ]; then
+                  case "$CODEX_REVIEW_RESULT" in
+                    success|pending) SKIP_REASON="${SKIP_REASON}。代わりにCodexでレビュー" ;;
+                    *) SKIP_REASON="${SKIP_REASON}。人の確認が必要なため自動マージは保留" ;;
+                  esac
+                fi
               else
                 FOUND="$(gh pr view "$PR_NUMBER" --json comments --jq '.comments[].body' \
                   | grep -oE "issue-deck-review-verdict:(lgtm|needs-check|changes-requested) sha=${HEAD_SHA}" \
@@ -1436,6 +1545,8 @@ jobs:
               CODEX_REVIEW="skipped"
               CODEX_SKIP_REASON="低リスクかつ小規模のため省略"
               [ "${REVIEW_PROVIDER:-}" != "claude" ] || CODEX_SKIP_REASON="実装担当に合わせてClaudeでレビュー"
+              # Claudeの代わりに依頼しようとして届かなかった(#4149)
+              [ -z "${CODEX_FAILURE_REASON:-}" ] || CODEX_SKIP_REASON="Claudeの代わりに依頼できなかった"
               ;;
             success)
               FOUND="${CODEX_VERDICT_INPUT:-}"
@@ -1503,9 +1614,18 @@ jobs:
             RISK_TEXT="該当なし"
           fi
 
+          # hold側と同じ条件(#4144)。Claudeが走っていないワークフロー変更PRは人の確認へ回る。
+          # 代わりのCodexレビューが判定した・判定待ちなら、そちらの結果で決まる(#4149)
+          WORKFLOW_UNREVIEWED=false
+          if [ "${WORKFLOW_CHANGE_POLICY:-confirm}" = "confirm" ] && [ "$WORKFLOW_CHANGED" = "true" ] \
+            && [ "$REVIEW_RESULT" = "success" ] && [ "$REVIEW_EXECUTED" != "true" ] \
+            && [ "$CODEX_REVIEW_RESULT" != "success" ] && [ "$CODEX_REVIEW_RESULT" != "pending" ]; then
+            WORKFLOW_UNREVIEWED=true
+          fi
+
           if [ "$REVIEW_FIX_HANDOFF" = "true" ]; then
             CONFIRM_TEXT="不要（指摘を自動修正へ回しました。直した後に再レビューされます）"
-          elif [ "$RISK" = "hit" ] || [ "$REVIEW" = "needs-check" ] || [ "$REVIEW" = "changes-requested" ] || [ "$CODEX_REVIEW" = "needs-check" ] || [ "$CODEX_REVIEW" = "changes-requested" ]; then
+          elif [ "$RISK" = "hit" ] || [ "$WORKFLOW_UNREVIEWED" = "true" ] || [ "$REVIEW" = "needs-check" ] || [ "$REVIEW" = "changes-requested" ] || [ "$CODEX_REVIEW" = "needs-check" ] || [ "$CODEX_REVIEW" = "changes-requested" ]; then
             CONFIRM_TEXT="必要（自動マージはスキップされます）"
           elif [ "$CODEX_REVIEW" = "pending" ]; then
             CONFIRM_TEXT="判定待ち（Codexレビューの完了後に自動で判定します）"

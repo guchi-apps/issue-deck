@@ -21,8 +21,14 @@ export async function PUT(request: NextRequest) {
     enabled?: unknown;
     circleciProjectSlug?: unknown;
     circleciDefinitionId?: unknown;
+    mirrorActionsToCiGate?: unknown;
   } = await request.json().catch(() => ({}));
-  if (typeof body.owner !== "string" || typeof body.repo !== "string" || typeof body.enabled !== "boolean") {
+  if (
+    typeof body.owner !== "string" ||
+    typeof body.repo !== "string" ||
+    typeof body.enabled !== "boolean" ||
+    (body.mirrorActionsToCiGate !== undefined && typeof body.mirrorActionsToCiGate !== "boolean")
+  ) {
     return NextResponse.json({ error: "invalid_request" }, { status: 400 });
   }
   const slug = typeof body.circleciProjectSlug === "string" ? body.circleciProjectSlug.trim() : "";
@@ -60,6 +66,7 @@ export async function PUT(request: NextRequest) {
     enabled: body.enabled,
     circleciProjectSlug: slug || null,
     circleciDefinitionId: definitionId || null,
+    mirrorActionsToCiGate: body.mirrorActionsToCiGate as boolean | undefined,
     userId,
   });
   return NextResponse.json({
@@ -68,6 +75,7 @@ export async function PUT(request: NextRequest) {
       enabled: setting.enabled,
       circleciProjectSlug: setting.circleciProjectSlug,
       circleciDefinitionId: setting.circleciDefinitionId,
+      mirrorActionsToCiGate: setting.mirrorActionsToCiGate,
     },
   });
 }

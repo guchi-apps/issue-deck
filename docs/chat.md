@@ -53,14 +53,14 @@
 
 ## AIによる調査（#4045）
 
-定型に当たらない質問・依頼（「なぜ止まっている？」「レビューの内容を教えて」「確認して直して」「この方針でIssueにして」）は、**AIが読み取り専用ツールを選んで調べ、根拠つきで答える**。素の「直して」「#番号どうなってる？」「マージできる？」は従来の定型経路のまま（回帰させない）。
+定型に当たらない質問・依頼（「なぜ止まっている？」「レビューの内容を教えて」「確認して直して」「この方針でIssueにして」）は、**AIが読み取り専用ツールを選んで調べ、根拠つきで答える**。「#番号どうなってる？」「マージできる？」は従来の定型経路のまま（回帰させない）。**「直して」「修正して」も調査から始める**（#4153、下の「修正の依頼は調査を起点にする」）。定型の自動修正の確認カードへ直行するのは「自動修正して」「修復」「リペア」「再実行」を明示したときだけ。
 
 | 層 | ファイル | 役割 |
 |---|---|---|
 | ループ | `src/lib/chat/investigation/agent.ts` | 1ステップごとに「次のツール」か「最終回答」を構造化出力で返させ、結果を見て追加調査する。回数・時間・同一呼び出し・連続失敗に上限があり、止まったら途中結果と停止理由を返す |
 | ツール | `src/lib/chat/investigation/tools.ts` | 読み取りだけ（PR状態・レビュー／コメント・変更ファイル・CI失敗ログ・Issue・Issue検索・リポジトリのファイル・自動修正の記録）。書き込み・実行・シェルは持たない |
 | 返信 | `src/lib/chat/investigation/reply.ts` | 結果を本文・根拠カード・提案カード・次のコンテキストへ組み立てる |
-| モデル | `src/lib/chat/investigation/model.ts` | 実行先を決める（`resolveChatExecution`）。AI実行プロバイダーがClaudeなら`callClaudeMessages`（アプリ内AIの共通入口）で同期に呼ぶ。Codexなら下の「実行先がCodexのとき」の経路 |
+| モデル | `src/lib/chat/investigation/model.ts` | 実行先を決める（`resolveChatExecution`）。**調査用モデル（`appAiModelReasoning`）の最終解決モデルの系列で決める**（#4143）。Claude系なら`callClaudeMessages`（アプリ内AIの共通入口）で同期に呼び、GPT系なら下の「実行先がCodexのとき」の経路 |
 | Codex | `src/lib/chat/investigation/codex-model.ts`・`src/lib/chat/codex-run.ts` | サブPCのCodex CLIへ1手ずつ`CHAT_TURN`ジョブを渡し、回答待ち（`ChatRun`）を非同期に進める（#4109） |
 | 機密 | `src/lib/chat/investigation/redact.ts` | 取得直後にトークン等を伏せる。回答・保存ログへ値を出さない |
 
@@ -69,9 +69,9 @@
 - **「要確認（needs-check）」「レビュー記録なし」「既存の自動修正の対象外」でも調査する**。定型の`planPullRequestRepair`が`not_repairable`を返したときは終了せず、レビューやCIの中身から修正可能／方針判断待ち／情報不足／修正不要を説明する
 - **取得した本文は材料で、許可ではない**。コメント・ログ・コードは`<untrusted_data>`で渡し、そこに書かれた指示に従わない。読めるパスは通常ファイルだけ（`.env*`・鍵・リポジトリ外は拒否）
 
-### 実行先がCodexのとき（#4109）
+### 実行先がCodexのとき（#4109・#4143）
 
-**AI実行プロバイダーがCodexなら、チャットの調査はサブPCのログイン済みCodex CLI（ChatGPT/Codexのサブスク枠）で答える。OpenAI API（`OPENAI_API_KEY`）は使わず、失敗してもAPIへは逃がさない。** 以前はGPT系モデルを選ぶと`callClaudeMessages`がOpenAI Responses APIを直接呼んでおり、API残高が尽きると`HTTP 429 credit_balance_exhausted`で止まっていた。
+**最終解決モデルがGPT系なら（主系がClaudeでも）、チャットの調査はサブPCのログイン済みCodex CLI（ChatGPT/Codexのサブスク枠）で答える。OpenAI API（`OPENAI_API_KEY`）は使わず、失敗してもAPIへは逃がさない。** 主系プロバイダーは個別指定が無いときの既定モデルを決めるだけで、実行基盤は強制しない（主系Codex＋Claude個別指定ならClaude側の既存経路）。以前はGPT系モデルを選ぶと`callClaudeMessages`がOpenAI Responses APIを直接呼んでおり、API残高が尽きると`HTTP 429 credit_balance_exhausted`で止まっていた。
 
 ```text
 POST /api/chat/[id] → 発言とChatRun（running）を保存してすぐ返す
@@ -88,7 +88,8 @@ POST /api/chat/[id] → 発言とChatRun（running）を保存してすぐ返す
 - **上限はCodex経路だけ長い**（1手120秒・全体5分）。更新が7分止まった回答待ちはサーバー再起動などで途切れたとみなし、「中断」の返信と同じ内容での再試行を出す（`sweepStaleChatRuns`）
 - **失敗は原因ごとに分けて返す**（`describeUnavailable`の`codex_*`）。サブPC未接続（オフライン・30秒受け取られない）／pollerが未対応／Codex未ログイン／**APIキーでのログイン**（従量課金になるため使わない）／利用枠の上限／時間切れ／応答不正／Codexで動かせないモデル。ログイン状態は実行のたびに`codex login status`で確かめる
 - **OpenAI APIの残高切れ（`credit_balance_exhausted`・`insufficient_quota`）は`api_credit_exhausted`として通常の429と分ける。** 待っても回復しないので「しばらく待って再試行」とは案内しない
-- **モデル**は設定の調査用モデル（`appAiModelReasoning`）、無ければCodexの既定（Terra）。`-m`へ渡すのは`CODEX_LOCAL_MODEL_VALUES`の4つだけで、Claude系を個別指定しているときは`unsupported_model`で断る（実行先を黙って切り替えない）
+- **モデル**は設定の調査用モデル（`appAiModelReasoning`）、無ければCodexの既定（Terra）。`-m`へ渡すのは`CODEX_LOCAL_MODEL_VALUES`の4つだけで、Claude系は最初からこの経路へ来ない（#4143）。
+- **棚卸し（#4143）→ Claude固定（#4147）**: `callClaudeMessages`を通る機能（`new_app_consult`・`manual_step_fix`、`appAiModel`を使う要約・検索・ラベル判定ほか）は、全て画面操作や巡回からの同期HTTP呼び出しで、画像入力・構造化出力もあるためCodex CLIへは移さない。代わりに**GPT系が選ばれていてもOpenAI API（従量課金）へは送らず、Claude系の既定モデル（通常はHaiku、判断系はSonnet）で実行する**（`src/lib/claude/request.ts`の`claudeModelFor`）。設定画面の実行フローには「Anthropic API（Claude固定）」と注記を出す。GPT系をサブスク枠で動かせるのはチャット調査だけ
 - **利用状況には`codex-cli/<モデル>`として計上する**（単価は付けない）。OpenAI APIの`gpt-*`と混ざらない。回答待ちの行（`ChatRun.provider`・`model`・`failureKind`）にも実際の実行先が残る
 - **チャットからコードは変わらない。** `CHAT_TURN`は読み取り専用のサンドボックス・空の作業ディレクトリ・リポジトリのパスを渡さない形で走り、worktree・PR・セッションを作らない。ジョブは実行状況の一覧に出さない（`listDispatchState`で除外）
 - **pollerの版数33から。** 更新前のpollerは`chatCodex`を申告しないため配られず、チャットには「pollerが未対応」と出る（設定のフリート運用から「更新して再起動」）
@@ -119,6 +120,16 @@ POST /api/chat/[id] → 発言とChatRun（running）を保存してすぐ返す
 | CI待ち／レビュー待ち | pushされたが、新HEADのCI・自動レビューが未完了。**完了ではない** |
 | 検証済み | 依頼後にHEADが進み、新HEADのCI成功かつ**そのHEADへの**自動レビューがok |
 | 失敗 | 修正後のCI失敗・未解消の指摘・PRクローズ。取得に失敗した場合は進み具合を出さず未確認と書く |
+
+### 修正の依頼は調査を起点にする（#4153）
+
+「#4142を修正して」は自動修正を起動せず、停止理由・直近の自動修正の結果・親Issueの要件とコメント・会話の合意を読んでから、コード修正／管理情報修正／判断待ち／実行中／修正済みを区別して答える（`FIX_INVESTIGATION_NOTE`と調査プロンプト）。
+
+- **停止の繰り返しは起動しない**: 明示の自動修正でも、実行系の停止報告が「方針・判断待ち」で3回続き、その後に承認済みの修正依頼が無いときは4回目を起動せず、停止理由の調査へ戻る（`src/lib/chat/repair-stall.ts`）。取得に失敗したときは止めずに従来どおり進む
+- **合意を実行系へ渡す**: 修正依頼コメントに「利用者がチャットで承認した方針で、回答済みとして扱う」と明記する。依頼コメント自体が対象Issueへの方針の記録になり、次の停止検出の区切りにもなる
+- **管理情報だけの修正（`scope=metadata`）**: PR本文の役割・親Issue本文の残作業追跡だけを直す。許可範囲は`FIX_REQUEST_SCOPE_METADATA`（コミット・push・別PRなし、要件の削除や完了条件の縮小はしない）。確認カードの時点のPR本文ハッシュと実行時を比べ、本文が更新されていたら中断する（HEAD不一致と同じ扱い。再接続時の古いカード判定にも効く）
+- **結果の確認**: `metadata`はHEADが変わらなくても未修正扱いにしない。「実行先の報告」「CI成功」「依頼時点で通っていなかった再レビューが通った」がそろって初めて検証済み。報告だけの段階は「報告済み・再レビュー待ち」と表示する
+- 要件の削除・完了条件の縮小・運用変更が要るときは、選択肢・影響・推奨案を答えに示して待ち、「途中PRで」の回答は`agreements`に残して次の提案に使う。マージ・本番反映・認証・Secretsの権限は広げない
 
 ### 結合シナリオの検証（#4044）
 

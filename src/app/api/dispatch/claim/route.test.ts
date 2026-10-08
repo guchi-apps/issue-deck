@@ -17,6 +17,9 @@ vi.mock("@/lib/notifications/check-user-push", () => ({
 }));
 
 // バックアップCIの照合（#4065）。GitHub App・CircleCIへは行かせない
+vi.mock("@/lib/backup-ci/gate-service", () => ({
+  sweepCiGateMirror: vi.fn(async () => ({ checked: 0, errors: 0 })),
+}));
 vi.mock("@/lib/backup-ci/service", () => ({
   sweepBackupCiRuns: vi.fn(async () => ({ checked: 0, errors: 0 })),
 }));

@@ -13,7 +13,7 @@ import type {
   DefaultDispatchAgent,
   GithubActionsAgent,
   ModelPickEngine,
-  PlanReviewAgent,
+  PlanReviewAgentSetting,
 } from "@/lib/app-settings";
 
 export function useAppSettingsMutations() {
@@ -54,8 +54,8 @@ export function useAppSettingsMutations() {
       appAiModelReasoning: AppAiModel;
       modelPickEngine: ModelPickEngine;
       defaultDispatchAgent: DefaultDispatchAgent;
-      planReviewAgentForClaude: PlanReviewAgent;
-      planReviewAgentForCodex: PlanReviewAgent;
+      planReviewAgentForClaude: PlanReviewAgentSetting;
+      planReviewAgentForCodex: PlanReviewAgentSetting;
       planReviewClaudeModel: ClaudeLocalModel;
       planReviewCodexModel: CodexLocalModel;
       dispatchFailoverEnabled: boolean;

@@ -154,6 +154,20 @@ issue-deckから貼られた画像は`.../api/issues/images/<UUID>`形式のURL�
 - **完了報告（必須）**: PRを作成したら、最後に`gh issue comment {{ISSUE_NUMBER}} --repo {{REPOSITORY}}`で完了報告を投稿する。**PRを作っただけで終えないでください。** 内容は「作成したPull RequestのURL」「変更の要約（触ったファイル・対応内容が使用者に伝わる程度の箇条書き）」「実行したテスト・確認の内容」の3つ
 - 後から参照する価値のある判断（実装方針の変更・見送った案と理由・仕様に影響する追加指示）と、作業を中断する場合の到達点・残りは、Issueコメントに残す。特に`11.local`を外して無人実行へ引き継ぐときは必須。細かい進捗の実況や、コミット・PRを読めば分かることは書かない。**着手した旨のコメントは投稿しない**（起動時に受付コメントが自動で投稿済み。#1119）。コメント投稿に失敗しても実装は止めない
 
+## iOSの変更を含む場合（iOS事前検証）
+
+このホストにはXcodeがありません。`ios/`などSwift・Xcodeプロジェクトを変更したら、**pushしたあと、PRを作る前に**Mac miniでビルド（テストが設定されていればテストも）を通してください（#4138）。
+
+```bash
+{{ISSUE_DECK_SCRIPTS_DIR}}/ios-precheck.sh config --repo {{REPOSITORY}}   # 対象か・テストがあるかを確かめる
+{{ISSUE_DECK_SCRIPTS_DIR}}/ios-precheck.sh run --kind test                 # テストTargetが無ければ --kind build でよい
+```
+
+- 標準出力の最後の行が結果のJSONです。`client.nextAction`に従います: `proceed`＝進む／`fix_and_recheck`＝標準エラーに出たMacのログ抜粋を読んで直し、**新しいコミットをpushして**同じコマンドで再検証／`stop_fix_limit`＝修正の上限に達したので直すのをやめ、Issueコメントで人へ渡す／`resolve_environment`・`retry_or_report`＝**ソースを直さない**（Macの接続・環境・タイムアウトの問題）。`retry_or_report`は`--retry`を1回だけ試し、それでも駄目なら理由をIssueコメントに残して先へ進む／`resume`＝`client.resumeCommand`で再接続／`not_configured`＝対象外なので何もしない
+- **検証待ち（`waiting`）を成功として報告しない。** PR本文の「テスト内容」と完了報告に、`jobId`・`verifiedSha`・`build.status`・`test.status`（件数）を書く。テスト未設定（`not_configured`）なら「自動テスト未設定（ビルドのみ）」と書き、テスト済みと書かない
+- 結果はSHAへcommit status（`issue-deck/ios-precheck`）として付きます。必須検証にしたリポジトリでは、最新SHAで成功するまで自動マージされません
+- 詳細は`gh api -H "Accept: application/vnd.github.raw" "repos/guchi-apps/issue-deck/contents/docs/multi-agent/ios-precheck.md?ref=develop"`で読めます
+
 コミットメッセージ・PRタイトル・PR本文・Issueコメントは日本語で書きます。コミットのAuthorは`Claude Code <claude-code@example.com>`にします。リポジトリ側にこれと異なる規約がある場合はそちらに従ってください。
 
 `gh issue comment`で投稿する本文の**末尾には必ず役割マーカーを付けます**。このセッションの`gh`はユーザー本人のトークンで動くため、無いとissue-deckの画面であなたの報告がユーザー自身の発言（右寄せの吹き出し）として表示されます（#1346）。

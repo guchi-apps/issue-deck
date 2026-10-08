@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 
+import { sweepCiGateMirror } from "@/lib/backup-ci/gate-service";
 import { sweepBackupCiRuns } from "@/lib/backup-ci/service";
 import { keepClaudeWindowOpen } from "@/lib/claude-window-keepalive-run";
 import { authorizeDispatch } from "@/lib/dispatch/dispatch-auth";
@@ -10,6 +11,7 @@ import {
   cancelManuallyStartedScheduledRuns,
   pruneOldScheduledRunEntries,
 } from "@/lib/nightly-run-launch";
+import { pruneOldSharedTokenUsages } from "@/lib/shared-token-usage-prune";
 import { sweepCheckUserPushNotifications } from "@/lib/notifications/check-user-push";
 import {
   CLAUDE_LOCAL_MODEL_DEFAULT,
@@ -96,6 +98,12 @@ export async function POST(request: NextRequest) {
     } catch (error) {
       console.error("[POST /api/dispatch/claim] 予約実行の古い結果行を消せませんでした:", error);
     }
+    // 共有トークンの古い利用記録を消す（#4165）。失敗しても払い出しは続ける
+    try {
+      await pruneOldSharedTokenUsages(new Date());
+    } catch (error) {
+      console.error("[POST /api/dispatch/claim] 共有トークンの古い利用記録を消せませんでした:", error);
+    }
     // 積んだ後に手動で実装開始されたIssueの予定を取り消す（#3274）。**次枠実行より先に回す**
     // ——同じ巡回で起動判定に入る前に外し、手動で着手済みのIssueへ重ねて起動しないため。
     // 次枠実行がOFFでも回す（OFFのあいだも予定は残るので、着手済みのものだけは画面から外す）。
@@ -149,6 +157,13 @@ export async function POST(request: NextRequest) {
       await sweepBackupCiRuns();
     } catch (error) {
       console.error("[POST /api/dispatch/claim] バックアップCIの照合に失敗しました:", error);
+    }
+    // 通常時のActionsの結果を共通チェック`issue-deck/ci-gate`へ写す（#4113）。developの必須チェックが
+    // 共通チェックへ移ったあとは、**ここが止まるとdevelopへのマージが止まる**（docs/backup-ci.md 5章）
+    try {
+      await sweepCiGateMirror();
+    } catch (error) {
+      console.error("[POST /api/dispatch/claim] 共通チェックの写しに失敗しました:", error);
     }
   }
 

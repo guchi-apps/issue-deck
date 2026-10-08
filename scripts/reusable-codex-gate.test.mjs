@@ -286,3 +286,125 @@ describe("マージ保留の判定を反映する（Codexの結果）", () => {
     expect(hold("success", { CODEX_VERDICT_INPUT: "lgtm" }).log).toBe("");
   });
 });
+
+// Claudeを実行できなかったワークフロー変更PRに、代わりにCodexレビューを付ける（#4149）。
+// 依頼できない・判定が得られないときは#4144と同じく01.check-mergeで人へ回す。
+describe("ワークフロー変更PRの代替Codexレビュー（#4149）", () => {
+  it("Claude担当でも、Claudeが走らなかったワークフロー変更PRなら依頼する条件になっている", () => {
+    const job = workflowYaml.split("\n  codex-review:\n")[1].split("\n    runs-on:")[0];
+    expect(job).toContain("needs: [identify-issue, risk-check, review-provider, claude-review]");
+    expect(job).toContain("!cancelled()");
+    expect(job).toContain("needs.review-provider.outputs.provider == 'codex'");
+    expect(job).toContain("inputs.workflow-change-policy == 'confirm'");
+    expect(job).toContain("needs.risk-check.outputs.workflow-changed == 'true'");
+    expect(job).toContain("needs.claude-review.outputs.executed != 'true'");
+  });
+
+  function request(extra = {}) {
+    const { env, outputPath } = baseEnv({
+      BASE_SHA: "c".repeat(40),
+      RUN_ID: "123456",
+      APP_BASE_URL: "https://deck.example.com",
+      PROGRESS_REPORT_SECRET: "s",
+      MODE: "workflow-change",
+      ...extra,
+    });
+    let exitCode = 0;
+    try {
+      execFileSync("bash", ["-e", "-c", extractRunScript("CodexレビューをサブPCへ依頼する（結果は待たない）")], {
+        env,
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+    } catch (error) {
+      exitCode = error.status;
+    }
+    return { exitCode, outputs: parseOutputs(readFileSync(outputPath, "utf8")) };
+  }
+
+  it("依頼を積めたら requested=true", () => {
+    const { exitCode, outputs } = request(api({ state: "pending" }));
+    expect(exitCode).toBe(0);
+    expect(outputs.requested).toBe("true");
+  });
+
+  it("サブPCへ届かなくても失敗させず、requested=false と理由を返す", () => {
+    const { exitCode, outputs } = request({ STUB_API_CODE: "409", ...api({ message: "PRレビューを実行できるサブPCがありません" }) });
+    expect(exitCode).toBe(0);
+    expect(outputs.requested).toBe("false");
+    expect(outputs.reason).toContain("サブPCがありません");
+  });
+
+  it("接続設定の無い配布先でも失敗させない", () => {
+    const { exitCode, outputs } = request({ APP_BASE_URL: "" });
+    expect(exitCode).toBe(0);
+    expect(outputs.requested).toBe("false");
+  });
+
+  it("Codex担当（primary）の依頼失敗は従来どおり失敗させる", () => {
+    const { exitCode } = request({ MODE: "primary", STUB_API_CODE: "409" });
+    expect(exitCode).toBe(1);
+  });
+
+  it("依頼できなかったrunの状態は、理由つきの skipped", () => {
+    const out = status({ CODEX_REQUESTED: "false", CODEX_REQUEST_REASON: "接続できません" });
+    expect(out).toMatchObject({ result: "skipped", reason: "接続できません" });
+    expect(existsSync(path.join(workDir, "curl-bodies"))).toBe(false);
+  });
+
+  function hold(codexResult, extra = {}) {
+    const { env, outputPath } = baseEnv({
+      ISSUE_NUMBER: "4149",
+      RISKY: "false",
+      REASONS: "",
+      ALREADY_CHECK_USER: "false",
+      REVIEW_RESULT: "success",
+      REVIEW_EXECUTED: "false",
+      WORKFLOW_CHANGED: "true",
+      WORKFLOW_CHANGE_POLICY: "confirm",
+      CODEX_REVIEW_RESULT: codexResult,
+      REVIEW_AUTO_FIX: "true",
+      ...extra,
+    });
+    execFileSync("bash", ["-e", "-c", extractRunScript("マージ保留の判定を反映する")], { env, encoding: "utf8" });
+    const logPath = path.join(workDir, "gh.log");
+    return {
+      outputs: parseOutputs(readFileSync(outputPath, "utf8")),
+      log: existsSync(logPath) ? readFileSync(logPath, "utf8") : "",
+    };
+  }
+
+  it("CodexがLGTMなら止めない", () => {
+    expect(hold("success", { CODEX_VERDICT_INPUT: "lgtm" }).log).toBe("");
+  });
+
+  it("Codexの判定待ちは保留する", () => {
+    const { outputs, log } = hold("pending");
+    expect(outputs.waiting).toBe("true");
+    expect(log).toBe("");
+  });
+
+  it("Codexの要確認は人へ回す", () => {
+    const { log } = hold("success", { CODEX_VERDICT_INPUT: "needs-check" });
+    expect(log).toContain("--add-label 00.check-user");
+    expect(log).toContain("needs-check");
+  });
+
+  it("Codexが完了できなかったときは01.check-blockedではなく01.check-mergeで、理由を添える", () => {
+    const { log } = hold("failed", { CODEX_FAILURE_REASON: "タイムアウトしました" });
+    expect(log).toContain("--add-label 01.check-merge");
+    expect(log).not.toContain("--add-label 01.check-blocked");
+    expect(log).toContain("ワークフローの変更");
+    expect(log).toContain("タイムアウトしました");
+  });
+
+  it("依頼できなかったときも01.check-mergeで人へ回す", () => {
+    const { log } = hold("skipped", { CODEX_FAILURE_REASON: "接続できません" });
+    expect(log).toContain("--add-label 01.check-merge");
+    expect(log).toContain("接続できません");
+  });
+
+  it("allow では依頼の有無にかかわらず止めない", () => {
+    expect(hold("skipped", { WORKFLOW_CHANGE_POLICY: "allow" }).log).toBe("");
+  });
+});

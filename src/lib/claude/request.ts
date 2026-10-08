@@ -3,6 +3,8 @@ import {
   recordClaudeApiCall,
 } from "@/lib/claude/api-usage";
 import {
+  APP_AI_MODEL_DEFAULT,
+  APP_AI_MODEL_REASONING_DEFAULT,
   appAiProvider,
   type AppAiModel,
   resolveAppAiModel,
@@ -10,7 +12,11 @@ import {
 import { db } from "@/lib/db";
 
 /**
- * アプリ内AIからAnthropic／OpenAI APIを呼ぶ唯一の入口（#2347・#2568）。
+ * アプリ内AIからAnthropic APIを呼ぶ唯一の入口（#2347・#2568）。
+ *
+ * **OpenAI API（従量課金）は呼ばない**（#4147）。設定でGPT系を選んでいても、この入口を通る機能は
+ * Claude系（サブスク枠のOAuth）の既定モデルで実行する。GPT系をサブスク枠（Codex CLI）で動かせるのは
+ * チャット調査だけ（#4143）。どの機能がClaude固定かは設定画面の実行フロー（`execution-flow-settings.ts`）に表示する
  *
  * 以前は`lib/claude/`の各機能がそれぞれ`fetch`を書いており、エンドポイント・ヘッダ・
  * ベータ指定が9か所に写っていた。消費量を数えるには**すべての呼び出しが1か所を通る**必要が
@@ -22,7 +28,6 @@ import { db } from "@/lib/db";
  */
 
 const ANTHROPIC_API = "https://api.anthropic.com";
-const OPENAI_RESPONSES_API = "https://api.openai.com/v1/responses";
 const ANTHROPIC_VERSION = "2023-06-01";
 const OAUTH_BETA = "oauth-2025-04-20";
 
@@ -52,31 +57,8 @@ export type AiApiError = {
   requestId: string | null;
 };
 
-type OpenAiResponsesResponse = {
-  model?: string;
-  output?: { type?: string; content?: { type?: string; text?: string }[] }[];
-  output_text?: string;
-  usage?: {
-    input_tokens?: number;
-    output_tokens?: number;
-    input_tokens_details?: { cached_tokens?: number };
-  };
-};
-
 function readTokenCount(value: number | undefined): number {
   return typeof value === "number" && Number.isFinite(value) ? value : 0;
-}
-
-function retryAfterMs(response: Response): number {
-  const retryAfter = response.headers.get("retry-after");
-  if (retryAfter !== null) {
-    const seconds = Number(retryAfter);
-    if (Number.isFinite(seconds) && seconds >= 0) return Math.min(seconds * 1_000, 5_000);
-
-    const at = Date.parse(retryAfter);
-    if (!Number.isNaN(at)) return Math.min(Math.max(at - Date.now(), 0), 5_000);
-  }
-  return 1_000;
 }
 
 async function readAiApiError(response: Response): Promise<AiApiError> {
@@ -109,92 +91,30 @@ async function getAppAiModel(feature: ClaudeApiFeature): Promise<AppAiModel> {
       where: { id: 1 },
       select: { appAiModel: true, appAiModelReasoning: true, aiExecutionProvider: true },
     });
-    return REASONING_FEATURES.has(feature)
+    const reasoning = REASONING_FEATURES.has(feature);
+    const model = reasoning
       ? resolveAppAiModel(setting?.appAiModelReasoning, setting?.aiExecutionProvider, true)
       : resolveAppAiModel(setting?.appAiModel, setting?.aiExecutionProvider);
+    return claudeModelFor(model, reasoning);
   } catch {
     return resolveAppAiModel(undefined, undefined, REASONING_FEATURES.has(feature));
   }
 }
 
-/** 選択中のアプリ内AIモデルに対応する認証情報を返す。 */
+/** GPT系が選ばれていても、OpenAI APIへは送らずClaude系の既定モデルへ固定する（#4147）。 */
+function claudeModelFor(model: AppAiModel, reasoning: boolean): AppAiModel {
+  if (appAiProvider(model) === "anthropic") return model;
+  return reasoning ? APP_AI_MODEL_REASONING_DEFAULT : APP_AI_MODEL_DEFAULT;
+}
+
+/** アプリ内AIの認証情報（Claudeのサブスク枠OAuth）を返す。 */
 export async function getAppAiToken(feature: ClaudeApiFeature): Promise<string | null> {
-  const model = await getAppAiModel(feature);
-  return appAiProvider(model) === "openai"
-    ? process.env.OPENAI_API_KEY ?? null
-    : process.env.CLAUDE_CODE_OAUTH_TOKEN ?? null;
+  void feature; // 認証情報は機能によらず共通。呼び出し側のシグネチャを保つ
+  return process.env.CLAUDE_CODE_OAUTH_TOKEN ?? null;
 }
 
 /**
- * Anthropic形式のcontent（`text`・`image`ブロックの配列）をResponses APIの形へ寄せる（#3243）。
- * 文字列のcontentと、知らないブロックはそのまま通す。
- */
-function openAiContent(content: unknown): unknown {
-  if (!Array.isArray(content)) return content;
-  return content.map((block) => {
-    const b = block as {
-      type?: string;
-      text?: string;
-      source?: { type?: string; media_type?: string; data?: string };
-    };
-    if (b.type === "text") return { type: "input_text", text: b.text };
-    if (b.type === "image" && b.source?.type === "base64") {
-      return { type: "input_image", image_url: `data:${b.source.media_type};base64,${b.source.data}` };
-    }
-    return block;
-  });
-}
-
-function openAiBody(body: Record<string, unknown>, model: AppAiModel): Record<string, unknown> {
-  const messages = (Array.isArray(body.messages) ? body.messages : []).map((message) => {
-    const m = message as { role?: string; content?: unknown };
-    return Array.isArray(m.content) ? { ...m, content: openAiContent(m.content) } : message;
-  });
-  const outputConfig = body.output_config as
-    | { format?: { type?: string; schema?: unknown } }
-    | undefined;
-  const format = outputConfig?.format;
-
-  return {
-    model,
-    input: messages,
-    ...(typeof body.system === "string" ? { instructions: body.system } : {}),
-    ...(typeof body.max_tokens === "number" ? { max_output_tokens: body.max_tokens } : {}),
-    ...(format?.type === "json_schema"
-      ? {
-          text: {
-            format: {
-              type: "json_schema",
-              name: "response",
-              strict: true,
-              schema: format.schema,
-            },
-          },
-        }
-      : {}),
-  };
-}
-
-function normalizeOpenAiResponse(json: OpenAiResponsesResponse): ClaudeMessagesResponse {
-  const text =
-    json.output_text ??
-    json.output
-      ?.flatMap((item) => item.content ?? [])
-      .find((content) => content.type === "output_text")
-      ?.text;
-  return {
-    content: text ? [{ type: "text", text }] : [],
-    model: json.model,
-    usage: {
-      input_tokens: json.usage?.input_tokens,
-      output_tokens: json.usage?.output_tokens,
-      cache_read_input_tokens: json.usage?.input_tokens_details?.cached_tokens,
-    },
-  };
-}
-
-/**
- * 選択モデルに対応するAPIへPOSTし、消費したトークンを機能別に計上する。
+ * Anthropic APIへPOSTし、消費したトークンを機能別に計上する。
  *
  * `body`は`max_tokens`・`messages`のほか、`system`や`output_config`など
  * 機能ごとの指定をそのまま渡してよい。`model`は保存済みの共通設定をここで加える。
@@ -213,47 +133,19 @@ export async function callClaudeMessages<T extends ClaudeMessagesResponse = Clau
   },
 ): Promise<ClaudeMessagesResult<T>> {
   const model = await getAppAiModel(options.feature);
-  const provider = appAiProvider(model);
-  const openAiToken = process.env.OPENAI_API_KEY;
-  if (provider === "openai" && !openAiToken) {
-    return {
-      response: new Response(JSON.stringify({ error: "not_configured" }), { status: 501 }),
-      json: null,
-      error: { code: "not_configured", requestId: null },
-    };
-  }
-  const requestBody =
-    provider === "openai" ? openAiBody(options.body, model) : { ...options.body, model };
-  const request = () =>
-    fetch(provider === "openai" ? OPENAI_RESPONSES_API : `${ANTHROPIC_API}/v1/messages`, {
-      method: "POST",
-      headers:
-        provider === "openai"
-          ? {
-              Authorization: `Bearer ${openAiToken}`,
-              "content-type": "application/json",
-            }
-          : {
-              Authorization: `Bearer ${options.token}`,
-              "anthropic-beta": OAUTH_BETA,
-              "anthropic-version": ANTHROPIC_VERSION,
-              "content-type": "application/json",
-            },
-      body: JSON.stringify(requestBody),
-      cache: "no-store",
-      ...(options.timeoutMs === undefined ? {} : { signal: AbortSignal.timeout(options.timeoutMs) }),
-    });
-
-  let response = await request();
-  let error = response.ok ? null : await readAiApiError(response);
-
-  // OpenAIは出力トークンを予約してからレート制限を判定する。拒否された呼び出しは生成を始めて
-  // いないため、短い待機の後に1回だけ再試行しても二重生成にならない。
-  if (provider === "openai" && response.status === 429 && error?.code === "rate_limit_exceeded") {
-    await new Promise((resolve) => setTimeout(resolve, retryAfterMs(response)));
-    response = await request();
-    error = response.ok ? null : await readAiApiError(response);
-  }
+  const response = await fetch(`${ANTHROPIC_API}/v1/messages`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${options.token}`,
+      "anthropic-beta": OAUTH_BETA,
+      "anthropic-version": ANTHROPIC_VERSION,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({ ...options.body, model }),
+    cache: "no-store",
+    ...(options.timeoutMs === undefined ? {} : { signal: AbortSignal.timeout(options.timeoutMs) }),
+  });
+  const error = response.ok ? null : await readAiApiError(response);
 
   // 拒否された呼び出し（レート制限の429など）はプラン枠を消費しないため計上しない。
   if (!response.ok) {
@@ -266,8 +158,8 @@ export async function callClaudeMessages<T extends ClaudeMessagesResponse = Clau
 
   let json: T | null = null;
   try {
-    const raw = await response.json();
-    json = (provider === "openai" ? normalizeOpenAiResponse(raw as OpenAiResponsesResponse) : raw) as T;
+    const raw: unknown = await response.json();
+    json = raw as T;
   } catch {
     // 応答が壊れていても計測のためだけに機能を落とさない。呼び出し元が扱えるようnullで返す。
     return { response, json: null, error: null };

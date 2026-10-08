@@ -4,6 +4,8 @@ import {
   resolveIntent,
   type ResolvedRef,
 } from "@/lib/chat/intent";
+import { detectRepairStall } from "@/lib/chat/repair-stall";
+import { fetchCommentsForIssue } from "@/lib/github/issues-api";
 import { buildIssueDraft } from "@/lib/chat/issue-draft";
 import { latestFixRequest, loadFixProgress } from "@/lib/chat/fix-progress-loader";
 import type { ModelMessage } from "@/lib/chat/investigation/agent";
@@ -65,6 +67,10 @@ export type ChatReply = {
 };
 
 const MAX_ACTIONS = 20;
+
+/** 「直して」「修正して」の依頼を調査へ渡すときの補足（#4153） */
+const FIX_INVESTIGATION_NOTE =
+  "修正の依頼。自動修正を再起動する前に、停止理由・直近の自動修正の結果・親Issueの要件とコメント・この会話での合意を読み、コード修正／管理情報（PR本文の役割・親Issue本文の残作業追跡）の修正／判断待ち／実行中／修正済みのどれかを説明し、必要な修正を提案すること。";
 
 type StatusLoad =
   | { ok: true; card: ChatStatusCard }
@@ -151,6 +157,24 @@ export async function loadStatus(user: ChatUser, ref: ResolvedRef): Promise<Stat
   };
 }
 
+/** PRの紐づくIssueの停止報告を読み、同じ判断待ちの繰り返しを検出する。取得に失敗したら`null`（止めない） */
+async function loadRepairStall(
+  repository: { installation: { installationId: number } },
+  owner: string,
+  repo: string,
+  number: number,
+) {
+  try {
+    const token = await getInstallationToken(repository.installation.installationId);
+    const pr = await fetchPullRequest(owner, repo, number, token);
+    const issueNumber = /^issue-(\d+)$/.exec(pr.head.ref)?.[1];
+    if (!issueNumber) return null;
+    return detectRepairStall(await fetchCommentsForIssue(owner, repo, Number(issueNumber), token));
+  } catch {
+    return null;
+  }
+}
+
 function toTarget(card: ChatStatusCard): ChatTarget {
   return { repo: card.repo, number: card.number, kind: card.kind, title: card.title };
 }
@@ -189,7 +213,11 @@ export async function handleChatMessage(params: {
 
   switch (resolved.type) {
     case "investigate": {
-      const reply = await investigate(resolved.target, resolved.candidates);
+      const reply = await investigate(
+        resolved.target,
+        resolved.candidates,
+        resolved.fix ? FIX_INVESTIGATION_NOTE : undefined,
+      );
       return reply;
     }
 
@@ -250,6 +278,22 @@ export async function handleChatMessage(params: {
       if (!repository || !owner || !repo) {
         return {
           text: `${resolved.target.repo} は見つからないか、アクセス権がありません。`,
+          cards: [],
+          needsConfirm: false,
+          nextContext: context,
+        };
+      }
+      // 同じ理由（方針待ち）で自動修正が繰り返し止まっているなら、4回目を起動せず停止理由の調査へ戻る（#4153）
+      const stall = await loadRepairStall(repository, owner, repo, resolved.target.number);
+      if (stall?.stalled) {
+        const reply = await investigate(
+          resolved.target,
+          [],
+          `直近の自動修正が同じ「判断待ち」で${stall.consecutive}回連続して止まっており、状況の変化が無い。同じ自動修正は再起動せず、止まっている理由（方針・要件の判断）を解く提案をすること。`,
+        );
+        if (!reply.unavailable) return reply;
+        return {
+          text: `直近の自動修正が判断待ちで${stall.consecutive}回続けて止まっています。状況が変わらないまま再起動しても進まないため、起動しませんでした。AIの調査が使えないので、停止理由（方針の判断）を決めてから、もう一度お試しください。`,
           cards: [],
           needsConfirm: false,
           nextContext: context,
@@ -390,11 +434,13 @@ export async function executeConfirmedCard(
       number: card.number,
       expectedHeadSha: card.headSha,
       instruction: card.instruction,
+      scope: card.scope,
+      expectedBodyHash: card.prBodyHash,
     });
     if (!result.ok) return failure("fix_request", card.repo, card.number, result.message, at);
     const message = result.duplicate
       ? `PR #${card.number} への同じ修正依頼は既に渡してあります（再送しませんでした）。「進み具合は？」で状況を確認できます。`
-      : `PR #${card.number} の修正依頼をIssue #${result.issueNumber} へ渡しました。実行先が起動すると同じPRのブランチへpushされます。CI・レビューを待ち、検証できたら結果をお知らせします（「進み具合は？」で確認できます）。`;
+      : `PR #${card.number} の修正依頼をIssue #${result.issueNumber} へ渡しました。${card.scope === "metadata" ? "実行先が起動するとPR本文・Issue本文の追跡情報だけを更新します（pushはしません）。" : "実行先が起動すると同じPRのブランチへpushされます。"}CI・レビューを待ち、検証できたら結果をお知らせします（「進み具合は？」で確認できます）。`;
     return {
       ok: true,
       text: message,
@@ -406,7 +452,13 @@ export async function executeConfirmedCard(
         number: card.number,
         at,
         message,
-        fixRequest: { headSha: result.headSha, commentUrl: result.commentUrl, issueNumber: result.issueNumber },
+        fixRequest: {
+          headSha: result.headSha,
+          commentUrl: result.commentUrl,
+          issueNumber: result.issueNumber,
+          scope: card.scope ?? "code",
+          reviewKindBefore: card.reviewKindBefore ?? null,
+        },
       },
     };
   }

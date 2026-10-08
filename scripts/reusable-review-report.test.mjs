@@ -120,7 +120,7 @@ function runTranscribe({ comments = "", execution = null, headSha = "abc123", co
   return existsSync(postedPath) ? readFileSync(postedPath, "utf8") : null;
 }
 
-function runVerification(comments) {
+function runVerification(comments, extra = {}) {
   const editedPath = path.join(workDir, "edited.md");
   const script = extractRunScript("検証結果をPR本文へ記録する");
   execFileSync("bash", ["-e", "-c", script], {
@@ -137,10 +137,13 @@ function runVerification(comments) {
       CODEX_REVIEW_RESULT: "success",
       RISKY: "false",
       REASONS: "",
+      WORKFLOW_CHANGED: "false",
+      WORKFLOW_CHANGE_POLICY: "confirm",
       REVIEW_FIX_HANDOFF: "false",
       STUB_BODY: "## 対応Issue\n\n#3917",
       STUB_COMMENTS: comments,
       STUB_EDITED: editedPath,
+      ...extra,
     },
     encoding: "utf8",
   });
@@ -220,5 +223,26 @@ describe("検証結果をPR本文へ記録する", () => {
     expect(body).toContain("- 自動レビュー: ❌ 要修正");
     expect(body).toContain("- Claudeによる自動レビュー: ✅ 問題なし（LGTM）");
     expect(body).toContain("- Codexによる自動レビュー: ❌ 要修正");
+  });
+
+  // Claudeを実行できなかったワークフロー変更PRは、代わりのCodexレビューで判定する（#4149）
+  const workflowChange = { REVIEW_EXECUTED: "false", WORKFLOW_CHANGED: "true", REVIEW_PROVIDER: "claude" };
+
+  it("代わりのCodexがLGTMなら、自動マージの対象として記録する", () => {
+    const body = runVerification("<!-- issue-deck-codex-review-verdict:lgtm sha=abc123 -->", workflowChange);
+    expect(body).toContain("review=lgtm");
+    expect(body).toContain("代わりにCodexでレビュー");
+    expect(body).toContain("- ユーザーの確認: 不要（自動マージの対象）");
+  });
+
+  it("代わりのCodexを依頼できなかったら、人の確認が必要と記録する", () => {
+    const body = runVerification("", {
+      ...workflowChange,
+      CODEX_REVIEW_RESULT: "skipped",
+      CODEX_FAILURE_REASON: "接続できません",
+    });
+    expect(body).toContain("人の確認が必要なため自動マージは保留");
+    expect(body).toContain("Claudeの代わりに依頼できなかった");
+    expect(body).toContain("- ユーザーの確認: 必要（自動マージはスキップされます）");
   });
 });

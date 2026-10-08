@@ -18,6 +18,7 @@ import {
   fetchRecentDeployWorkflowRuns,
 } from "@/lib/github/release-api";
 import { buildPullRequestId } from "@/lib/github-reference";
+import { notMutedWhere } from "@/lib/notifications/push-kinds";
 import {
   isPushConfigured,
   sendPushNotification,
@@ -384,6 +385,7 @@ async function sendPush(
       user: {
         userInstallations: { some: { installationId: repository.installationId } },
         hiddenRepositories: { none: { repositoryId: repository.id } },
+        ...notMutedWhere("deploy-launch"),
       },
     },
     select: { id: true, endpoint: true, p256dh: true, auth: true },

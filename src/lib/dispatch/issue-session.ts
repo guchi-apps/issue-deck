@@ -96,6 +96,7 @@ const SESSION_STEP_TEXT: Record<DispatchSessionStep, string> = {
   TYPECHECKING: "型チェック中",
   TESTING: "テスト中",
   BUILDING: "ビルド中",
+  IOS_VERIFYING: "iOS検証中",
   COMMITTING: "コミット中",
   PUSHING: "push中",
   PR: "PRを作成中",
@@ -119,6 +120,7 @@ const SESSION_STEP_DESCRIPTION: Record<DispatchSessionStep, string> = {
   TYPECHECKING: "型の整合を確認しています",
   TESTING: "テストを実行しています",
   BUILDING: "ビルドが通るか確認しています",
+  IOS_VERIFYING: "Mac miniでiOSのビルド・テストを待っています",
   COMMITTING: "変更をコミットしています",
   PUSHING: "ブランチをpushしています",
   PR: "Pull Requestを作成・更新しています",
@@ -624,6 +626,7 @@ export function resolveImplementationPosition(
     case "TYPECHECKING":
     case "TESTING":
     case "BUILDING":
+    case "IOS_VERIFYING":
     case "COMMITTING":
     case "PUSHING":
     case "PR":
