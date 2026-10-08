@@ -151,6 +151,40 @@ const BANNED_OPTIONS: Record<string, readonly string[]> = {
 };
 
 /**
+ * **サブコマンドの後ろ**に置かれていたら、コマンド全体を拒否するオプション（#4163）。
+ *
+ * `git ls-remote --upload-pack=<cmd>`はプログラムを実行し、`git diff --output=<file>`は
+ * ファイルを上書きする。`--ext-diff`・`--textconv`は設定されたコマンドを呼ぶ。
+ * gitのロングオプションは**曖昧でない前方一致の省略形**を受け付ける（`--upload`・`--out`）ため、
+ * `--`の後ろが禁止オプションの前方一致になっているものも拒否する。
+ */
+const BANNED_ARGUMENT_OPTIONS: Record<string, readonly string[]> = {
+  git: ["--upload-pack", "--exec", "--output", "--ext-diff", "--textconv", "--open-files-in-pager", "--receive-pack"],
+};
+
+/** 短いオプションのうち、サブコマンドの後ろで拒否するもの（`-u <cmd>`・`-O<file>`） */
+const BANNED_ARGUMENT_SHORT_OPTIONS: Record<string, readonly string[]> = {
+  git: ["-u", "-O"],
+};
+
+function hasBannedArgumentOption(name: string, args: string[]): boolean {
+  const longBanned = BANNED_ARGUMENT_OPTIONS[name] ?? [];
+  const shortBanned = BANNED_ARGUMENT_SHORT_OPTIONS[name] ?? [];
+  for (const raw of args) {
+    // 引用符・エスケープで語を分断して隠せるので、外してから比べる
+    const token = raw.replace(/["'\\]/g, "");
+    if (token === "--") break;
+    if (token.startsWith("--")) {
+      const long = token.split("=")[0];
+      if (long.length > 2 && longBanned.some((option) => option.startsWith(long))) return true;
+    } else if (token.startsWith("-")) {
+      if (shortBanned.some((option) => token.startsWith(option))) return true;
+    }
+  }
+  return false;
+}
+
+/**
  * その確認コマンドを無人で流してよいか（読み取りだけだと読めるか）。
  *
  * **判定できないものはすべてfalse。** ここは「安全なものを見つける」判定であって
@@ -282,7 +316,8 @@ function isReadOnlySegment(segment: string): boolean {
     const skipValue = withValue.has(tokens[cursor]);
     cursor += skipValue ? 2 : 1;
   }
-  return cursor < tokens.length && subcommands.has(tokens[cursor]);
+  if (cursor >= tokens.length || !subcommands.has(tokens[cursor])) return false;
+  return !hasBannedArgumentOption(name, tokens.slice(cursor + 1));
 }
 
 /** 巡回の対象にならなかった理由。画面には出さず、判定のテストと記録のために持つ */
