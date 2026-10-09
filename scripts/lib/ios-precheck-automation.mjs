@@ -3,9 +3,15 @@ export const CONTEXT = 'issue-deck/ios-precheck';
 export function eligible(pr, repository) {
   return pr.state === 'open' && !pr.draft && pr.base?.ref === 'develop'
     && pr.head?.repo?.full_name === repository
-    && /^(issue-[1-9][0-9]*|release\/v[0-9]+\.[0-9]+\.[0-9]+)$/.test(pr.head.ref)
+    && typeof pr.head.ref === 'string' && pr.head.ref.length > 0
     && /^[a-f0-9]{40}$/.test(pr.head.sha)
     && !(pr.labels ?? []).some(l => l.name === '00.check-user');
+}
+
+// 検証する権限と、AIにコード変更・pushを許す範囲を混同しない。
+export function repairEligible(pr, repository) {
+  return eligible(pr, repository)
+    && /^(issue-[1-9][0-9]*|release\/v[0-9]+\.[0-9]+\.[0-9]+)$/.test(pr.head.ref);
 }
 
 export async function processPullRequest(io, repository, number, state, maxFixes = 3) {
@@ -47,6 +53,11 @@ export async function processPullRequest(io, repository, number, state, maxFixes
   }
   const current = await io.readPr(repository, number);
   if (!eligible(current, repository) || current.head.sha !== sha) return 'stale';
+  if (!repairEligible(current, repository)) {
+    await io.save({ ...state, blockedSha: sha, reason: 'repair_not_allowed' });
+    await io.report(repository, sha, 'failure', 'iOS検証失敗: このPRは自動修正対象外です。ログを確認してください');
+    return 'blocked';
+  }
   if (await io.busy(current)) return 'busy';
   const fixes = state.fixes ?? 0;
   if (fixes >= maxFixes || state.repairingSha === sha) {
