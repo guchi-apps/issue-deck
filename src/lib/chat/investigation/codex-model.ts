@@ -1,5 +1,6 @@
 import { Prisma } from "@prisma/client";
 
+import { notifyDispatchHostWake } from "@/lib/dispatch/wake-notify";
 import { STEP_SCHEMA, type RunSession, type SessionToolRunner } from "@/lib/chat/investigation/agent";
 import { TOOL_SPECS } from "@/lib/chat/investigation/tools";
 import { recordClaudeApiCall } from "@/lib/claude/api-usage";
@@ -226,6 +227,7 @@ export function createCodexSession(params: {
           phase: "サブPCの受け取り待ち",
         },
       });
+      notifyDispatchHostWake(job.targetHost);
       return await waitForSession({ runId: params.runId, jobId: job.id, timeoutMs, sleep, clock });
     } finally {
       sessions.delete(job.id);

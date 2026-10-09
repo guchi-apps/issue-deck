@@ -3291,3 +3291,49 @@ URLとステータスコードは切り詰めずに残るので、どの経路�
 - [local-quick-start.md](local-quick-start.md) ローカルセッションの起動とローカル起動プロトコル
 - [generic-launcher.md](generic-launcher.md) 対象リポジトリに何も置かずに起動する汎用ランチャー（#1224）
 - [progress-status-architecture.md](../progress-status-architecture.md) 進捗の唯一の正はProject Status
+
+## ジョブ即時通知（#4200）
+
+ジョブを保存した直後にVPSからサブPCへ「キューを見に行け」と知らせ、次の巡回（既定30秒）を待たずに
+`claim`を始めさせる追加改善。**pull方式は変えない**——通知が届かなくても定期巡回が回収する。
+
+```
+issue-deck(VPS) --POST /wake(署名付き・本文なし)--> 受信サービス --起床ファイル--> poller --既存のclaim--> issue-deck
+```
+
+- **通知は合図だけ。** 受信サービス（`scripts/dispatch-wake-receiver.mjs`）は`POST /wake`以外を404にし、
+  本文を読まず、署名が正しければ起床ファイルを更新するだけ。コマンド・プロンプトを受け取る口は無い。
+  取得・認証・ホスト能力・実行枠・二重実行の防止は従来の`claim`がそのまま行い、通知だけでジョブが
+  取得済み・完了になることは無い
+- **認証:** `HMAC-SHA256(派生鍵, "<宛先ホスト名>.<送信時刻ms>")`。派生鍵は`DISPATCH_SECRET`から
+  用途別に導く（新しい秘密値を増やさず、claim用の認証と鍵が混ざらない）。時刻窓は±60秒、別ホスト宛の通知は
+  通らない（`scripts/lib/dispatch-wake-protocol.mjs`・`src/lib/dispatch/wake-notify.ts`）
+- **到達性:** 受信サービスは`WAKE_LISTEN_ADDR`（tailnetのアドレス）だけで待ち受ける。`0.0.0.0`・`::`は起動を拒否する。
+  tailnetのACLで、VPSから受信ポート（既定4290）だけを許可する（実値はIssue・ログへ書かない）
+- **通知先はホスト単位:** VPSの環境変数`DISPATCH_WAKE_TARGETS`に`ホスト名=http://<tailnetのアドレス>:<ポート>`を
+  カンマ区切りで書く。Macなど他のホストは行を足し、そのホストに受信サービスを入れるだけで増やせる（今回は未導入）
+- **集中・重複:** VPS側は同じホストへの通知を200msでまとめる。poller側は起床ファイルが1つなので重複通知は
+  畳まれ、前回の巡回から`DISPATCH_WAKE_MIN_GAP_SECONDS`（既定5秒）空くまで次の前倒しをしない。
+  前倒しされるのは通常の`run_once`で、同時claimや実行枠の超過は従来と同じ判定で防がれる
+- **失敗時:** 送信失敗・通信断・サブPC停止はジョブ保存を失敗させず（待たずに送り、結果は握りつぶす）、
+  定期巡回が回収する。pollerは起動時にも`run_once`でキューを確認する。heartbeat・停止セッション回復などの
+  定期保守は`run_once`に載ったままなので、通知方式へ移しても落ちない（通知は巡回を早めるだけ）
+- **再起動の影響:** 受信サービスは別のsystemd unit。再起動・停止しても、pollerと実行中の
+  セッション・チャット・tmuxには触れない
+- **計測:** 受信サービスが「送信から何msで受信したか」、pollerが「保存から何msで巡回を前倒ししたか」を
+  journalに出す（`journalctl --user -u issue-deck-dispatch-wake -u issue-deck-dispatch-poller | grep 通知`）
+
+### サブPCへの導入
+
+1. `~/.config/issue-deck/dispatch.env`へ`WAKE_LISTEN_ADDR=$(tailscale ip -4)`と`WAKE_LISTEN_PORT=4290`を追記する
+2. `install -m 644 deploy/subpc/issue-deck-dispatch-wake.service ~/.config/systemd/user/`
+   → `systemctl --user daemon-reload && systemctl --user enable --now issue-deck-dispatch-wake`
+3. `systemctl --user restart issue-deck-dispatch-poller`（起床ファイルの待ちを入れた版を読ませる）
+4. VPSの`.env`へ`DISPATCH_WAKE_TARGETS=<ホスト名>=http://<サブPCのtailnetアドレス>:4290`を追記し、アプリを再起動する
+
+### 復旧
+
+- 通知が効いていない: `journalctl --user -u issue-deck-dispatch-wake`で`通知を拒否しました`（理由つき）・
+  VPS側のログの`ジョブ即時通知を送れませんでした`を見る。tailnetのACL・待ち受けアドレス・時刻のずれ（±60秒）が主な原因
+- 受信サービスが落ちている: 再起動してよい（実行中のセッションは無関係）。直るまでは30秒の定期巡回で動く
+- 通知を止めたい: VPSの`DISPATCH_WAKE_TARGETS`を空にする
