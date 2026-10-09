@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 
 import { sweepCiGateMirror } from "@/lib/backup-ci/gate-service";
+import { sweepBackupCiMerges } from "@/lib/backup-ci/merge-service";
 import { sweepBackupCiRuns } from "@/lib/backup-ci/service";
 import { keepClaudeWindowOpen } from "@/lib/claude-window-keepalive-run";
 import { authorizeDispatch } from "@/lib/dispatch/dispatch-auth";
@@ -164,6 +165,14 @@ export async function POST(request: NextRequest) {
       await sweepCiGateMirror();
     } catch (error) {
       console.error("[POST /api/dispatch/claim] 共通チェックの写しに失敗しました:", error);
+    }
+    // バックアップCIが合格したPRへサブPCのレビューを積み、条件を満たせばdevelopへマージする（#4114）。
+    // 共通チェックの決定の後に置き、同じ回で採用されたばかりの合格も拾う。積んだ`PR_REVIEW`は、
+    // 下の`claimDispatchJobs`で同じ回に受け取られうる
+    try {
+      await sweepBackupCiMerges();
+    } catch (error) {
+      console.error("[POST /api/dispatch/claim] バックアップCI合格後のマージ判定に失敗しました:", error);
     }
   }
 

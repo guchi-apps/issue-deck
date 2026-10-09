@@ -23,6 +23,9 @@ vi.mock("@/lib/backup-ci/gate-service", () => ({
 vi.mock("@/lib/backup-ci/service", () => ({
   sweepBackupCiRuns: vi.fn(async () => ({ checked: 0, errors: 0 })),
 }));
+vi.mock("@/lib/backup-ci/merge-service", () => ({
+  sweepBackupCiMerges: vi.fn(async () => ({ checked: 0, errors: 0 })),
+}));
 
 vi.mock("@/lib/db", () => ({
   db: {
