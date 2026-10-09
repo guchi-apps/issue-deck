@@ -13,6 +13,7 @@ name: Claude PR Repair
 # 自動で走る経路は claude-ci-fix.yml（#807）・claude-conflict-resolve.yml（#315）が持って
 # おり、そちらと二重に走らせないため。起動元はissue-deckの`POST /api/pull-requests/repair`
 # （画面の「CI失敗を自動修正」「コンフリクトを自動解消」ボタン）。
+# release/vX.Y.Z→developの競合は、サブPCからのconflict-sweepもdispatchする（#4186）。
 #
 # 注意: workflow_dispatchの受け口はデフォルトブランチのワークフロー定義から解決されるため、
 # このファイルがデフォルトブランチ（issue-deckでは develop）へ入るまでは起動できない。

@@ -34,10 +34,8 @@ import { isRepairRunActive } from "@/lib/github/pull-request-repair-run";
  *
  * ## 対象
  *
- * `issue-<番号>` → `develop`のPRだけ（`resolveRepairDispatch`が
- * `claude-conflict-resolve.yml`を返すもの）。Issueに紐づかないPR（バンプPR・
- * develop→mainのリリースPR）を受け持つ`claude-pr-repair.yml`は、
- * **意図的に自動検知の経路を持たない**設計なので巡回でも起動しない。
+ * issue-<番号>とrelease/vX.Y.ZからdevelopへのPRを対象にする。
+ * リリースバンプは既存のclaude-pr-repair.ymlへ渡す。main向けは手動のまま。
  */
 
 /** 起動を見送った理由。ログにそのまま出す（なぜ動かなかったのかを後から追うため） */
@@ -53,7 +51,8 @@ export type ConflictSweepSkipReason =
   /** 同じPRのコンフリクト解消が既に走っている */
   | "repair_running"
   /** 直前の起動から間が空いていない */
-  | "cooldown";
+  | "cooldown"
+  | "release_attempted";
 
 /** 巡回が見るPR1件ぶん。GitHubから取った値をそのまま詰める */
 export type ConflictSweepPullRequest = {
@@ -109,6 +108,10 @@ export const CONFLICT_SWEEP_RETRY_COOLDOWN_MINUTES = 30;
  * ボタンから起動する経路（`POST /api/pull-requests/repair`）と違って人の目を通らないため、
  * IOから切り離してテストできる形にしておく。
  */
+export function isAutoConflictTarget(baseRef: string, headRef: string): boolean {
+  return baseRef === "develop" && /^(issue-[1-9][0-9]*|release\/v[0-9]+\.[0-9]+\.[0-9]+)$/.test(headRef);
+}
+
 export function decideConflictSweep(
   pullRequest: ConflictSweepPullRequest,
   context: { repairRun: ConflictSweepRepairRun | null; now: Date },
@@ -130,7 +133,7 @@ export function decideConflictSweep(
     },
     "conflict",
   );
-  if (target.workflowFile !== CONFLICT_RESOLVE_WORKFLOW_FILE) {
+  if (!isAutoConflictTarget(pullRequest.baseRef, pullRequest.headRef)) {
     return { dispatch: false, reason: "no_auto_workflow" };
   }
 
@@ -145,6 +148,11 @@ export function decideConflictSweep(
   if (repairRun) {
     if (isRepairRunActive(repairRun, now)) {
       return { dispatch: false, reason: "repair_running" };
+    }
+    // バンプPRには対応Issueへの断念ラベルがないため、自動起動はPRあたり1回。
+    // 未解消なら既存の手動修復ボタンから再開できる。
+    if (target.workflowFile !== CONFLICT_RESOLVE_WORKFLOW_FILE) {
+      return { dispatch: false, reason: "release_attempted" };
     }
     if (
       now.getTime() - repairRun.startedAt.getTime() <

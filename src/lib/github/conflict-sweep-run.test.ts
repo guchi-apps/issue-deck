@@ -81,7 +81,7 @@ vi.mock("@/lib/github/workflow-dispatch", () => ({
   },
 }));
 
-import { CONFLICT_RESOLVE_WORKFLOW_FILE } from "@/lib/github/pull-request-repair";
+import { CONFLICT_RESOLVE_WORKFLOW_FILE, PR_REPAIR_WORKFLOW_FILE } from "@/lib/github/pull-request-repair";
 
 import { resetConflictSweepIntervalForTest, runConflictSweep } from "./conflict-sweep-run";
 
@@ -125,6 +125,34 @@ describe("runConflictSweep", () => {
 
   afterEach(() => {
     delete process.env.CONFLICT_SWEEP_INTERVAL_MINUTES;
+  });
+
+  it("同一repoのバンプPRはpr_numberで汎用修復を起動する", async () => {
+    fetchOpenPullRequests.mockResolvedValue([openPullRequest({
+      head: { ref: "release/v4.16.2", sha: "abc", repo: { full_name: MYROOM.fullName } },
+    })]);
+    const result = await runConflictSweep();
+    expect(dispatchWorkflow).toHaveBeenCalledWith("guchi-apps", "myroom", PR_REPAIR_WORKFLOW_FILE,
+      "develop", { pr_number: "191", mode: "conflict" }, "token");
+    expect(result.dispatched[0].issueNumber).toBeNull();
+    expect(fetchCheckUserIssueReasons).toHaveBeenCalledWith([{ repositoryId: MYROOM.id, issueNumbers: [] }]);
+  });
+
+  it("forkのバンプPRは起動しない", async () => {
+    fetchOpenPullRequests.mockResolvedValue([openPullRequest({
+      head: { ref: "release/v4.16.2", sha: "abc", repo: { full_name: "other/myroom" } },
+    })]);
+    await runConflictSweep();
+    expect(dispatchWorkflow).not.toHaveBeenCalled();
+  });
+
+  it("バンプPRのcheck-userラベルを尊重する", async () => {
+    fetchOpenPullRequests.mockResolvedValue([openPullRequest({
+      head: { ref: "release/v4.16.2", sha: "abc", repo: { full_name: MYROOM.fullName } },
+      labels: [{ name: "00.check-user" }],
+    })]);
+    expect((await runConflictSweep()).skipped.check_user).toBe(1);
+    expect(dispatchWorkflow).not.toHaveBeenCalled();
   });
 
   it("コンフリクトしているPRのコンフリクト解消ワークフローを起動し、実行中として記録する", async () => {

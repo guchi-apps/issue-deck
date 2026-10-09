@@ -627,14 +627,42 @@ report_api_failure() {
 # **start-local-session.sh と同じ4つの検証を通ったものだけ**を載せる（判定は共有ライブラリ）。
 # 併せて生存報告も兼ねており、途絶えたホストはissue-deck側でofflineとして扱われる。
 
-# 生きている実装セッションの本数（#1361）。
-#
-# 数えるのは `<リポジトリ名>-issue-<番号>` に一致するものだけ。この仕組みが作ったセッションの
-# 名前の形で、report_sessions が送る対象と同じ。人が手で立てたセッションまで数えると、
-# この仕組みと関係のない事情でジョブが取れなくなる。
+ios_automation_state_dir() {
+  printf '%s' "${ISSUE_DECK_IOS_AUTOMATION_STATE:-${XDG_STATE_HOME:-$HOME/.local/state}/issue-deck/ios-automation}"
+}
+
+# 専用flockを検証・修復の終了まで保持。pollerを再起動しても二重起動しない。
+sweep_ios_prechecks() {
+  [[ "$DRY_RUN" -eq 0 ]] || return 0
+  command -v flock >/dev/null 2>&1 || return 0
+  command -v node >/dev/null 2>&1 || return 0
+  local dir
+  dir="$(ios_automation_state_dir)"
+  mkdir -p "$dir"
+  chmod 700 "$dir"
+  (
+    flock -n 9 || exit 0
+    local now last interval
+    now="$(date +%s)"
+    last="$(cat "$dir/last-sweep" 2>/dev/null || echo 0)"
+    interval="${ISSUE_DECK_IOS_SWEEP_INTERVAL_SECONDS:-300}"
+    [[ "$interval" =~ ^[0-9]+$ && "$interval" -gt 0 ]] || exit 0
+    [[ "$last" =~ ^[0-9]+$ ]] || last=0
+    (( now - last >= interval )) || exit 0
+    printf '%s' "$now" > "$dir/last-sweep"
+    node "$SCRIPT_DIR/ios-precheck-sweep.mjs"
+  ) 9>"$dir/worker.lock" >>"$dir/sweep.log" 2>&1 < /dev/null &
+}
+
+# 実装セッションと、ロックを保持するiOS検証workerを起動枠へ数える。
 count_issue_sessions() {
-  tmux list-sessions -F '#{session_name}' 2>/dev/null |
-    grep -cE '^.+-issue-[1-9][0-9]*$' || true
+  local count lock
+  count="$(tmux list-sessions -F '#{session_name}' 2>/dev/null | grep -cE '^.+-issue-[1-9][0-9]*$' || true)"
+  lock="$(ios_automation_state_dir)/worker.lock"
+  if [[ -f "$lock" ]] && command -v flock >/dev/null 2>&1 && ! flock -n "$lock" true; then
+    count=$((count + 1))
+  fi
+  printf '%s\n' "$count"
 }
 
 # 生きている計画レビューのセッションの本数（#1855）。
@@ -1527,7 +1555,7 @@ sweep_pull_request_conflicts() {
   # 起動したときだけ出す。**毎巡ログを出さない**（30秒ごとに「異常なし」が積まれると、
   # journalctlで本当に見たい失敗が埋もれる）。
   printf '%s' "$API_RESPONSE_BODY" |
-    jq -r '.dispatched[] | "コンフリクト解消を起動しました: \(.repositoryFullName)#\(.pullRequestNumber)（Issue #\(.issueNumber)）"' 2>/dev/null ||
+    jq -r '.dispatched[] | "コンフリクト解消を起動しました: \(.repositoryFullName)#\(.pullRequestNumber)\(if .issueNumber then "（Issue #" + .issueNumber + "）" else "（リリースバンプ）" end)"' 2>/dev/null ||
     true
   return 0
 }
@@ -4286,6 +4314,8 @@ run_once() {
   job_count="$(printf '%s' "$jobs_json" | jq '.jobs | length')"
   if [[ "$job_count" -eq 0 ]]; then
     echo "取得できるジョブはありません。"
+    # 実装の払い出しを優先し、空き枠とメモリがあるときだけMac検証を起動する。
+    if [[ "$claim_max_jobs" -gt 0 ]]; then sweep_ios_prechecks; fi
     return 0
   fi
 
