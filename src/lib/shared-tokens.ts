@@ -57,7 +57,7 @@ export function parseSharedTokenConsumer(value: string | null): string | null {
  * StatusHubの再発行経路（#3786）の利用元だけに書き込みを許す。
  */
 const PROTECTED_TOKEN_WRITERS: Readonly<Record<string, readonly string[]>> = {
-  ISSUE_DECK_ACCESS_APP_TOKEN: ["status-hub", "statushub"],
+  ISSUE_DECK_ACCESS_APP_TOKEN: ["status-hub", "statushub", "ops-dashboard"],
 };
 
 /** この利用元が、そのトークン名へPOST/PUTで書き込んでよいか。 */
