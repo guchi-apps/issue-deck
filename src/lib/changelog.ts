@@ -42,6 +42,13 @@ export type ChangelogEntry = {
  */
 export const APP_CHANGELOG: ChangelogEntry[] = [
   {
+    version: "8.43.3",
+    date: "2026-10-10",
+    changes: [
+      "リリース前の確認画面で「今回反映する内容」が、反映されるプルリクエスト単位の一覧で表示されるようになり、何が本番へ出るのかが分かりやすくなりました。",
+    ],
+  },
+  {
     version: "8.43.0",
     date: "2026-10-09",
     changes: [
