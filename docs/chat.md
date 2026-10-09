@@ -61,7 +61,7 @@
 | ツール | `src/lib/chat/investigation/tools.ts` | 読み取りだけ（PR状態・レビュー／コメント・変更ファイル・CI失敗ログ・Issue・Issue検索・リポジトリのファイル・自動修正の記録）。書き込み・実行・シェルは持たない |
 | 返信 | `src/lib/chat/investigation/reply.ts` | 結果を本文・根拠カード・提案カード・次のコンテキストへ組み立てる |
 | モデル | `src/lib/chat/investigation/model.ts` | 実行先を決める（`resolveChatExecution`）。**調査用モデル（`appAiModelReasoning`）の最終解決モデルの系列で決める**（#4143）。Claude系なら`callClaudeMessages`（アプリ内AIの共通入口）で同期に呼び、GPT系なら下の「実行先がCodexのとき」の経路 |
-| Codex | `src/lib/chat/investigation/codex-model.ts`・`src/lib/chat/codex-run.ts` | サブPCのCodex CLIへ1手ずつ`CHAT_TURN`ジョブを渡し、回答待ち（`ChatRun`）を非同期に進める（#4109） |
+| Codex | `src/lib/chat/investigation/codex-model.ts`・`src/lib/chat/codex-run.ts` | サブPCのCodex CLIへ**1発言1ジョブ・1回の起動**で調査から回答まで任せ、回答待ち（`ChatRun`）を非同期に進める（#4109・#4199） |
 | 機密 | `src/lib/chat/investigation/redact.ts` | 取得直後にトークン等を伏せる。回答・保存ログへ値を出さない |
 
 - **上限**: モデル呼び出し最大7回／全体90秒／同じツール＋引数の繰り返しは「進展なし」で停止／取得失敗が3回連続で停止。最後の1回はツールを使わせず、見られなかった範囲を「未確認」へ書かせる。停止しても途中結果と停止理由、次の行動を返す
@@ -75,17 +75,19 @@
 
 ```text
 POST /api/chat/[id] → 発言とChatRun（running）を保存してすぐ返す
-  └ executeCodexChatRun（サーバー内で非同期）→ 調査ループ（ツールはサーバーで実行）
-       └ 1手ごとに CHAT_TURN ジョブを積む（ChatRun.stepRequest にプロンプト）
+  └ executeCodexChatRun（サーバー内で非同期）→ 調査ループ（セッション型。上限・重複・伏せ字はサーバー）
+       └ CHAT_TURN ジョブを1件だけ積む（ChatRun.stepRequest にプロンプトとツール一覧）
             poller（軽い巡回・3秒刻み）→ scripts/run-chat-codex.sh をバックグラウンドで起動
-              GET  /api/dispatch/chat-turn  … プロンプトとスキーマを受け取る
-              codex exec --sandbox read-only --ephemeral --output-schema（空の一時ディレクトリで）
-              POST /api/dispatch/chat-turn  … 最終メッセージ・失敗の種別・使用量を返す
-画面 → GET /api/chat/[id]/run を2.5秒おきに取りに行き、届いたら返信を足す
+              GET  /api/dispatch/chat-turn       … プロンプト・スキーマ・ツール一覧を受け取る
+              codex exec を1回だけ起動（--sandbox read-only --ephemeral --output-schema・空の一時ディレクトリ）
+                └ 読み取りが要るとき: MCPブリッジ scripts/lib/chat-tool-bridge.mjs（同じ起動の子プロセス）
+                     POST /api/dispatch/chat-turn/tool … サーバーがツールを実行して結果（伏せ字済み）を返す
+              POST /api/dispatch/chat-turn       … 最終メッセージ・失敗の種別・使用量・所要時間を返す
+画面 → GET /api/chat/[id]/run を2.5秒おきに取りに行き、途中経過（phase）と、届いたら返信を出す
 ```
 
-- **送信のHTTPは回答を待たない。** 1手ごとに受け取り待ちと`codex exec`の起動が乗り、全体で数十秒〜数分かかるため。画面は「Codexで回答中（サブPC・モデル）」と途中経過を出し、再読込しても`GET /api/chat/[id]`の`activeRun`から待ち状態を戻す。回答待ちの間は次の発言を受け付けない（`409 run_in_progress`）
-- **上限はCodex経路だけ長い**（1手120秒・全体5分）。更新が7分止まった回答待ちはサーバー再起動などで途切れたとみなし、「中断」の返信と同じ内容での再試行を出す（`sweepStaleChatRuns`）
+- **送信のHTTPは回答を待たない。** 起動と調査で十数秒〜数分かかるため。画面は「Codexで回答中（サブPC・モデル）」と途中経過（受け取り待ち → Codexを起動 → 調査中〈何を取得しているか〉→ 回答を作成中）を出し、再読込しても`GET /api/chat/[id]`の`activeRun`から待ち状態を戻す。回答待ちの間は次の発言を受け付けない（`409 run_in_progress`）
+- **上限**: 取得は合計6回（`read_many`の中身も1回ずつ数える）・同じ呼び出しの繰り返しは断る・失敗3回連続で止める・全体4分。回数・重複・失敗の判定はステップ型と同じ`runInvestigation`の上限をサーバーで掛ける。更新が7分止まった回答待ちはサーバー再起動などで途切れたとみなし、「中断」の返信と同じ内容での再試行を出す（`sweepStaleChatRuns`）
 - **失敗は原因ごとに分けて返す**（`describeUnavailable`の`codex_*`）。サブPC未接続（オフライン・30秒受け取られない）／pollerが未対応／Codex未ログイン／**APIキーでのログイン**（従量課金になるため使わない）／利用枠の上限／時間切れ／応答不正／Codexで動かせないモデル。ログイン状態は実行のたびに`codex login status`で確かめる
 - **OpenAI APIの残高切れ（`credit_balance_exhausted`・`insufficient_quota`）は`api_credit_exhausted`として通常の429と分ける。** 待っても回復しないので「しばらく待って再試行」とは案内しない
 - **モデル**は設定の調査用モデル（`appAiModelReasoning`）、無ければCodexの既定（Terra）。`-m`へ渡すのは`CODEX_LOCAL_MODEL_VALUES`の4つだけで、Claude系は最初からこの経路へ来ない（#4143）。
@@ -93,6 +95,41 @@ POST /api/chat/[id] → 発言とChatRun（running）を保存してすぐ返す
 - **利用状況には`codex-cli/<モデル>`として計上する**（単価は付けない）。OpenAI APIの`gpt-*`と混ざらない。回答待ちの行（`ChatRun.provider`・`model`・`failureKind`）にも実際の実行先が残る
 - **チャットからコードは変わらない。** `CHAT_TURN`は読み取り専用のサンドボックス・空の作業ディレクトリ・リポジトリのパスを渡さない形で走り、worktree・PR・セッションを作らない。ジョブは実行状況の一覧に出さない（`listDispatchState`で除外）
 - **pollerの版数33から。** 更新前のpollerは`chatCodex`を申告しないため配られず、チャットには「pollerが未対応」と出る（設定のフリート運用から「更新して再起動」）
+
+### 1発言1起動への切り替え（#4199）
+
+以前は調査の1手（検索→ファイル確認→回答）ごとに`CHAT_TURN`ジョブを積み、`codex exec`を起こし直していた。1手ごとに「配信待ち（pollerの3秒巡回）＋CLI起動」が累積するため、**1発言につきジョブ1件・`codex exec`1回**にした。
+
+**選んだ方式と理由**（実装前に実機で検証）: 読み取りツールの受け渡しは、Codex CLIが同じ起動の中でMCPのstdioサーバー（`scripts/lib/chat-tool-bridge.mjs`）を子として起こし、その`tools/call`を`POST /api/dispatch/chat-turn/tool`へ中継する形にした。
+
+| 検討した方式 | 判断 |
+|---|---|
+| **MCPブリッジ（採用）** | `-c mcp_servers.<名前>.command/args`で1回の起動にだけ渡せ、`~/.codex/config.toml`を書き換えない。ツールに`readOnlyHint`を付ければ承認なしで呼ばれる（付けないと`approval policy is never`で失敗する。検証で確認）。Codexは並列にもツールを呼べる。実行・上限・伏せ字はサーバーに残る |
+| `codex exec resume`で手ごとに再開 | 会話は引き継げるが、手ごとにプロセスを起こし直すので起動待ちが残る（要件の「新規起動を減らす」を満たさない） |
+| Codexにシェルで`curl`させる | read-onlyサンドボックスは外部通信を許さず、許すとシークレットがモデルに見える。読み取り専用・機密の原則に反する |
+| pollerが常駐Codexセッションを持つ | 会話間の混在・異常終了時の掃除が複雑。1発言1プロセスなら終了と同時に何も残らない |
+
+- **ツールの受け口**（`POST /api/dispatch/chat-turn/tool`）は、①ジョブを取ったホスト、②その回答待ちが今そのジョブを待っていること、③サーバーのメモリにその実行があること、を確かめてから、**その実行専用の`runTool`**（会話の既定リポジトリ・認可・上限・重複検出・伏せ字つき）を呼ぶ。実行は終わるとメモリから消えるので、遅れた呼び出し・他の会話の呼び出しは結果を得られない。サーバーの再起動で実行の記録が消えると409になり、ブリッジはCodexごと終了する（回答待ちは「中断」として再試行を出す）
+- **独立した取得はまとめる**: ブリッジは`read_many`（最大4件の読み取りを1回で）を公開する。調査不要の相談は、ツールを呼ばずにそのまま最終回答を出す
+- **途中経過の表示**: ツールを呼ぶたびに`ChatRun.phase`を「Codexで調査中（Issueを取得）」のように更新する（引数の値・本文は出さない）。最終回答は構造化出力のJSONなので、**本文の逐次表示はできない**（途中経過の表示までが可能な範囲）
+- **キャンセル**: 画面の「回答を中止する」（`DELETE /api/chat/[id]/run?runId=`）でジョブを取り消し、回答待ちを「中断」にして同じ内容での再試行を出す。サブPC側はブリッジの次の呼び出しが409で断られて終了する。遅れて届いた最終メッセージは、回答待ちが`running`でないため保存されない。タイムアウト（受け取り30秒・全体4分）と更新停止7分の掃除も同じ経路
+- **二重実行・混在の防止**: 回答待ちは会話ごとに1件（`activeKey`・`409 run_in_progress`）。再接続しても同じ`ChatRun`を返す。ツール結果はジョブIDで引く実行専用の`runTool`だけが返し、会話をまたがない
+- **サブスク枠のみ**: 認証確認（`codex login status`がChatGPTでなければ実行しない）・APIキーログインの拒否・失敗時にAPIへ逃がさない、は従来どおり
+
+**遅延の計測**: 結果の報告に`timing`（`codex exec`の所要時間）を付け、サーバーがジョブのメッセージへ`［CLI起動1回・配信待ち0.9秒・Codex実行15.4秒・ツール3回（計0.1秒）・全体16.4秒］`の形で残す。同条件の比較（サブPC・`gpt-5.6-terra`・本番サーバーを模したスタブで同じ3取得）:
+
+| | CLI起動 | 配信待ち（pollerの巡回） | `codex exec`の所要 |
+|---|---|---|---|
+| 調査なし | 1回 → 1回 | 1回 → 1回 | 同等（約3〜5秒） |
+| 複数ファイル調査（3取得） | 4回 → **1回** | 4回 → **1回** | 約20.7秒（4手の合計）→ **約15.4秒** |
+
+複数手の調査では、起動と配信待ちが手の数から1回へ減る（上の秒数にpollerの巡回待ち〈各手1〜3秒〉とサーバー側の1秒間隔のポーリングは含まれないため、実運用の差はこれより大きい）。調査なしは元から1回なので変わらない。
+
+**導入・復旧**:
+1. サブPCのチェックアウトを更新する（画面の設定 → フリート運用 →「更新して再起動」）。**スクリプトとブリッジはサブPCのチェックアウトから起動される**ので、サーバーだけ先に反映すると、古い`run-chat-codex.sh`は`mode`を無視してツール無しの1回実行になり、最終回答に至らず「応答を読み取れませんでした」になる
+2. ブリッジは`node`（`ISSUE_DECK_NODE`で差し替え可）だけを使い、追加パッケージは要らない
+3. 回答が「サブPCのpollerが未対応」「受け取られなかった」になる場合は、`~/.local/state/issue-deck/chat-codex/<ジョブID>.log`（7日で削除）を見る。`ツール呼び出しが拒否されました（HTTP 409）`はサーバーの再起動か取消で実行が消えたことを示し、再試行で直る
+4. 動作確認: サブPCで`codex exec --json -m <モデル> -c 'mcp_servers.x.command="node"' -c 'mcp_servers.x.args=["<repo>/scripts/lib/chat-tool-bridge.mjs","<設定JSON>"]' ...`を直接起こし、`mcp_tool_call`が`completed`になることを確かめられる
 
 ### 引き継ぎ（「それ」「この方針で」「続けて」）
 

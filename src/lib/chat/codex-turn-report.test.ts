@@ -28,7 +28,7 @@ vi.mock("@/lib/db", () => ({
   },
 }));
 
-import { fetchChatTurnRequest, reportChatTurnResult } from "@/lib/chat/codex-turn-report";
+import { fetchChatTurnRequest, reportChatTurnResult, runChatTurnTool } from "@/lib/chat/codex-turn-report";
 
 const request = { model: "gpt-6-sol", system: "S", messages: [{ role: "user", content: "相談" }], schema: { type: "object" } };
 
@@ -70,5 +70,18 @@ describe("CHAT_TURNの受け渡し（#4109）", () => {
     expect(state.run?.stepError).toBe("bad_output");
     expect(state.reports.at(-1)?.status).toBe("failed");
     expect(state.usage).toHaveLength(0);
+  });
+});
+
+describe("セッション型のツール受け口（#4199）", () => {
+  it("実行の記録（サーバーのメモリ）が無ければ409で断り、ブリッジに終わらせる", async () => {
+    const result = await runChatTurnTool({ jobId: "job1", host: "subpc", name: "get_issue", args: { number: 1 } });
+    expect(result).toMatchObject({ ok: false, status: 409, error: "session_missing" });
+  });
+
+  it("取ったホスト以外・待っていない回答待ちからは呼べない", async () => {
+    expect(await runChatTurnTool({ jobId: "job1", host: "other", name: "get_issue", args: {} })).toMatchObject({ ok: false, status: 403 });
+    state.run = null;
+    expect(await runChatTurnTool({ jobId: "job1", host: "subpc", name: "get_issue", args: {} })).toMatchObject({ ok: false, status: 409 });
   });
 });

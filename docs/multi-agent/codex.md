@@ -921,7 +921,7 @@ Signalyのwebhook URLだけで、`deploy/subpc/notify.env.example`にもそう�
 
 ## チャット相談もCodex CLIで答える（#4109）
 
-AI実行プロバイダーがCodexのとき、IssueDeck Chatの調査は**OpenAI APIではなく、サブPCのこのCodex CLI**（`codex login`済みのChatGPTアカウント）で答える。pollerが枠外ジョブ`CHAT_TURN`を受け取り、`scripts/run-chat-codex.sh`をバックグラウンドで起こして`codex exec --sandbox read-only --ephemeral --skip-git-repo-check --output-schema`を1回走らせる。流れ・失敗の種別・制約は[chat.md](../chat.md)「実行先がCodexのとき」。
+AI実行プロバイダーがCodexのとき、IssueDeck Chatの調査は**OpenAI APIではなく、サブPCのこのCodex CLI**（`codex login`済みのChatGPTアカウント）で答える。pollerが枠外ジョブ`CHAT_TURN`を受け取り、`scripts/run-chat-codex.sh`をバックグラウンドで起こして`codex exec --sandbox read-only --ephemeral --skip-git-repo-check --output-schema`を**1発言につき1回**だけ走らせる（調査の読み取りは同じ起動の中でMCPブリッジ`scripts/lib/chat-tool-bridge.mjs`経由。#4199）。流れ・失敗の種別・制約は[chat.md](../chat.md)「実行先がCodexのとき」。
 
 - **`--output-schema`は、調査の`STEP_SCHEMA`（全項目required・`additionalProperties: false`）をそのまま受け付ける**（codex-cli 0.160.1で確認）。最終メッセージはスキーマに合うJSON1つになり、`--json`の`turn.completed`に使用量が載る
 - **`codex login status`の出力で、ChatGPTアカウントのログインとAPIキーのログインを見分ける**（`Logged in using ChatGPT`）。APIキーでログインしたCodexは従量課金になるため、チャットでは使わず`api_key_auth`として断る

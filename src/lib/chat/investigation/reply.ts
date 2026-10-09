@@ -3,6 +3,7 @@ import {
   type CallModel,
   type InvestigationResult,
   type ModelMessage,
+  type RunSession,
 } from "@/lib/chat/investigation/agent";
 import { callInvestigationModel } from "@/lib/chat/investigation/model";
 import {
@@ -35,6 +36,8 @@ import { fetchPullRequest } from "@/lib/github/pull-requests-api";
 
 export type InvestigationDeps = {
   callModel?: CallModel;
+  /** 1回の実行で調査から回答まで進める実行（Codex。#4199）。指定すると`callModel`は使わない */
+  session?: RunSession;
   /** 時間の上限の差し替え（Codex CLI経由。#4109） */
   limits?: { maxDurationMs?: number; stepTimeoutMs?: number };
   tool?: (
@@ -220,6 +223,7 @@ export async function replyWithInvestigation(params: {
     callModel: params.deps?.callModel ?? callInvestigationModel,
     tool: params.deps?.tool,
     limits: params.deps?.limits,
+    session: params.deps?.session,
     userText,
     history: params.history,
     investigation: context.investigation,

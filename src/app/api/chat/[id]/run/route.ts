@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 
 import { requireUserId } from "@/lib/auth-user";
-import { loadChatRun } from "@/lib/chat/codex-run";
+import { cancelChatRun, loadChatRun } from "@/lib/chat/codex-run";
 
 type Params = { params: Promise<{ id: string }> };
 
@@ -18,5 +18,18 @@ export async function GET(request: NextRequest, { params }: Params) {
 
   const result = await loadChatRun({ conversationId: id, userId, runId });
   if (!result) return NextResponse.json({ error: "not_found" }, { status: 404 });
+  return NextResponse.json(result, { headers: { "Cache-Control": "no-store" } });
+}
+
+/** 回答待ちを中止する（#4199）。終わっていれば何もせず成功を返す */
+export async function DELETE(request: NextRequest, { params }: Params) {
+  const userId = await requireUserId();
+  if (!userId) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  const { id } = await params;
+  const runId = request.nextUrl.searchParams.get("runId") ?? "";
+  if (!/^[a-z0-9]{8,32}$/.test(runId)) return NextResponse.json({ error: "invalid_request" }, { status: 400 });
+
+  const result = await cancelChatRun({ conversationId: id, userId, runId });
+  if (!result.ok) return NextResponse.json({ error: result.error }, { status: 404 });
   return NextResponse.json(result, { headers: { "Cache-Control": "no-store" } });
 }

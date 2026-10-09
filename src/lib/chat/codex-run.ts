@@ -4,9 +4,9 @@ import { handleChatMessage, type ChatUser } from "@/lib/chat/handlers";
 import {
   CODEX_CLI_PROVIDER,
   CODEX_INVESTIGATION_LIMITS,
-  createCodexCallModel,
+  createCodexSession,
 } from "@/lib/chat/investigation/codex-model";
-import type { CallModel } from "@/lib/chat/investigation/agent";
+import type { CallModel, RunSession } from "@/lib/chat/investigation/agent";
 import { describeUnavailable } from "@/lib/chat/investigation/reply";
 import { buildRefsText, parseChatMemory, recordFindings } from "@/lib/chat/session";
 import { conversationTitle, parseChatContext, toChatMessageView } from "@/lib/chat/store";
@@ -16,7 +16,7 @@ import { db } from "@/lib/db";
 /**
  * Codex CLI経由のチャット回答（#4109）。**発言の保存と回答の生成を分ける。**
  *
- * サブPCでの`codex exec`は1手ごとに受け取り待ちと起動が乗り、調査全体で数十秒〜数分かかる。
+ * サブPCでの`codex exec`は起動と調査で十数秒〜数分かかる（#4199で1発言1起動になった）。
  * 送信のHTTPを最後まで保持すると、途中で接続が切れたり画面を再読込したりしたときに回答が
  * 失われる。そこで発言と回答待ち（`ChatRun`）を先に保存して返し、回答はサーバー内で非同期に
  * 作って保存する。画面は`GET /api/chat/[id]/run`で待ち状態と結果を取りに来る。
@@ -140,6 +140,7 @@ export async function executeCodexChatRun(params: {
   user: ChatUser;
   /** テスト用の差し替え */
   callModel?: CallModel;
+  session?: RunSession;
 }): Promise<void> {
   const run = await db.chatRun.findUnique({ where: { id: params.runId } });
   if (!run || run.status !== "running") return;
@@ -147,14 +148,15 @@ export async function executeCodexChatRun(params: {
   if (!userMessage) return;
 
   let lastFailure: string | null = null;
-  const codexModel =
-    params.callModel ??
-    createCodexCallModel({ runId: run.id, model: run.model ?? "", requestedByUserId: params.user.id });
-  const callModel: CallModel = async (input) => {
-    const result = await codexModel(input);
+  const codexSession =
+    params.session ??
+    createCodexSession({ runId: run.id, model: run.model ?? "", requestedByUserId: params.user.id });
+  const session: RunSession = async (input) => {
+    const result = await codexSession(input);
     lastFailure = result.ok ? null : result.reason;
     return result;
   };
+  const callModel: CallModel | undefined = params.callModel;
 
   try {
     const conversation = await db.chatConversation.findUniqueOrThrow({ where: { id: run.conversationId } });
@@ -180,7 +182,7 @@ export async function executeCodexChatRun(params: {
       text: userMessage.text,
       recentUserTexts: [...recent.map((row) => row.text).reverse(), userMessage.text],
       history,
-      investigationDeps: { callModel, limits: CODEX_INVESTIGATION_LIMITS },
+      investigationDeps: { callModel, session: callModel ? undefined : session, limits: CODEX_INVESTIGATION_LIMITS },
     });
     await saveRunReply({
       runId: run.id,
@@ -299,6 +301,31 @@ export async function sweepStaleChatRuns(conversationId: string, now: Date = new
     await finishRunWithError(run.id, conversationId, message?.text ?? "", "interrupted", "interrupted",
       "回答できませんでした：回答の生成が途中で止まりました（サーバーの再起動など）。");
   }
+}
+
+/**
+ * 利用者が回答待ちを中止する（#4199）。ジョブを取り消すと、サブPCのブリッジは次のツール呼び出しが409で
+ * 断られて`codex exec`ごと終わる。遅れて届いた結果は`status`が`running`でないため保存されない
+ * （会話と実行の対応は崩れない）。同じ内容での再試行は「中断」の返信から出せる。
+ */
+export async function cancelChatRun(params: { conversationId: string; userId: string; runId: string }) {
+  const conversation = await db.chatConversation.findFirst({
+    where: { id: params.conversationId, userId: params.userId },
+  });
+  if (!conversation) return { ok: false as const, error: "not_found" };
+  const run = await db.chatRun.findFirst({ where: { id: params.runId, conversationId: conversation.id } });
+  if (!run) return { ok: false as const, error: "not_found" };
+  if (run.status !== "running") return { ok: true as const, alreadyFinished: true };
+  if (run.currentJobId) {
+    await db.dispatchJob.updateMany({
+      where: { id: run.currentJobId, status: { in: ["QUEUED", "CLAIMED", "RUNNING"] } },
+      data: { status: "CANCELED", activeKey: null, finishedAt: new Date(), message: "チャットの回答待ちが中止されました" },
+    });
+  }
+  const message = await db.chatMessage.findUnique({ where: { id: run.userMessageId }, select: { text: true } });
+  await finishRunWithError(run.id, conversation.id, message?.text ?? "", "interrupted", "canceled",
+    "回答を中止しました。");
+  return { ok: true as const, alreadyFinished: false };
 }
 
 /** 画面の取得用。終わっていれば返信と会話の文脈も返す */
