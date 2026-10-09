@@ -476,3 +476,34 @@ export type PullRequestFileListResponse = {
 export type PullRequestFileDiffResponse = {
   patch: string | null;
 };
+
+/** 起動確認ダイアログの「今回反映する内容」の1行（PR単位。#4201） */
+export type ReleaseChangePullRequest = {
+  number: number;
+  /** PRのタイトル（マージコミットの本文・squashコミットの件名から） */
+  title: string;
+  /** ブランチ名`issue-<番号>`から取れた対応Issue。取れなければnull（補足にだけ使う） */
+  issueNumber: number | null;
+  isVersionBump: boolean;
+};
+
+/** PR番号を特定できなかったコミット */
+export type ReleaseChangeCommit = {
+  sha: string;
+  title: string;
+};
+
+export type ReleaseChangeListResponse = {
+  /** 新しい順 */
+  pullRequests: ReleaseChangePullRequest[];
+  unknownCommits: ReleaseChangeCommit[];
+  /**
+   * 差分の範囲。`develop`は`main...develop`の現在の差分、`release-pr`は作成済みリリースPRの
+   * 固定された範囲（作成後にdevelopへ入った変更は含まない）
+   */
+  source: "develop" | "release-pr";
+  /** 差分の取得時点の終端コミット（短縮SHA）。表示と操作の対象を突き合わせる目印 */
+  headSha: string | null;
+  /** 1ページの上限で打ち切ったか */
+  truncated: boolean;
+};
