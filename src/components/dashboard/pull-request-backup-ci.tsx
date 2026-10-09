@@ -184,6 +184,14 @@ export function PullRequestBackupCi({
         </div>
       )}
 
+      {latest && latestIsCurrent && latest.status === "passed" && (
+        <p className="text-xs text-muted-foreground">
+          developへのマージ: {latest.mergeStatusLabel ?? "判定待ち"}
+          {latest.mergeReason && `（${latest.mergeReason}）`}
+          {latest.mergeCommitSha && ` ${shortSha(latest.mergeCommitSha)}`}
+        </p>
+      )}
+
       {open && (
         <div className="flex flex-col gap-2 text-xs">
           {latest?.statusReason && <p className="text-muted-foreground">{latest.statusReason}</p>}

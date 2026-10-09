@@ -29,9 +29,10 @@
   検査定義のダイジェスト・開始者を記録し、完了時にCircleCIの結果をこの記録と突き合わせる
 - 共通チェックへどちらの経路（Actions／バックアップCI）を出したかの正本は`CiGateState`（#4113）。
   PRごとに、採用した経路・試行・その開始時刻・状態・発行状況を持つ
-- コードは`src/lib/backup-ci/`（`state.ts`・`gate.ts`が判定の純関数、`service.ts`が起動・回収、
-  `gate-service.ts`が共通チェックの決定・発行とActionsの取り込み、`github.ts`がGitHubへの読み書き、
-  `circleci-client.ts`がCircleCIのAPI）、画面は`src/components/dashboard/pull-request-backup-ci.tsx`
+- コードは`src/lib/backup-ci/`（`state.ts`・`gate.ts`・`merge.ts`が判定の純関数、`service.ts`が起動・回収、
+  `gate-service.ts`が共通チェックの決定・発行とActionsの取り込み、`merge-service.ts`が合格後のレビュー依頼と
+  developへのマージ（#4114）、`github.ts`がGitHubへの読み書き、`circleci-client.ts`がCircleCIのAPI）、
+  画面は`src/components/dashboard/pull-request-backup-ci.tsx`
 
 ## 2. 安全のための約束（変えるときは#4065を読み直す）
 
@@ -50,6 +51,7 @@
 | Actionsの検査失敗をバックアップCIで上書きしない | 今のheadに対してActionsの必須ジョブが`failure`で終わっていれば、バックアップCIを起動させない（キャンセル・未開始・検査中は障害の可能性があるので止めない） |
 | 同名ジョブで合格を作れない | Actionsは`.github/workflows/ci.yml`の`pull_request`起動の実行だけを数え、必須ジョブ名はPRの**base**の`ci/required-checks.json`から取る。必須ジョブの欠落・スキップ・キャンセルは`error` |
 | 偽のWebhookで合格を作れない | `circleci-signature`をHMAC-SHA256で検証。本文の状態は使わず、APIで照合し直す。イベントIDで重複排除（`CircleciWebhookDelivery`） |
+| 合格だけでマージしない・Actionsの判定ジョブを待たない | 合格後はissue-deckがサブPCのCodexレビュー（`PR_REVIEW`）を積み、LGTMで、ラベル・`.shared-context/`・コンフリクトの条件を満たし、共通チェックがその合格を採用しているときだけ`expectedHeadSha`付きでマージする（`decideBackupCiMerge`。6章） |
 | テスト環境へ権限を渡さない | CircleCIプロジェクトにContext・環境変数を設定しない。検査はプレースホルダ値で動く。マージ・共通チェックの発行はissue-deckのGitHub Appだけが行う |
 
 ## 3. 画面
@@ -191,6 +193,37 @@ pollerが止まっている間も写りが止まる（GitHub Appが`workflow_run
 3. 完了を待つ（Webhookが届けば即時、届かなくてもpollerが約30秒ごとに照合する）。失敗したら
    CircleCIのログを開いて直し、pushしてから再実行する（**コードの不具合を「障害」として上書きしない**）
 4. `バックアップCI成功`になれば、そのhead/baseに対して`issue-deck/ci-gate`がsuccessになる
+5. そのあとは**人の操作なしで**developへのマージまで進む（#4114）。PR詳細のバックアップCI欄に
+   「developへのマージ: …」として進み具合が出る
+
+### 合格後のレビューとdevelopへのマージ（#4114）
+
+Actionsが止まっていると、通常の経路（`claude-review-develop.yml`の`codex-review`→`auto-merge`）は
+レビューも始まらず、マージ判定も動かない。そこで**バックアップCIの合格を共通チェックへ採用したPR**に
+限り、issue-deckが同じ判定をサーバー側で行う。契機はpollerの巡回（`POST /api/dispatch/claim`、約30秒ごと）で、
+実装は`src/lib/backup-ci/merge.ts`（判定）・`merge-service.ts`（実行）。
+
+1. 止める条件を先に見る（Codexの枠を使う前）。対応Issue（`issue-<番号>`ブランチ）が無い・Issueに
+   `00.check-user`／`22.merge-confirm-required`／`23.preview-required`が付いている・差分に`.shared-context/`が
+   ある・developとコンフリクトしている、のどれかなら自動マージしない
+2. サブPCのCodexレビューを既存の`requestPrReviewJob`で積む（Actionsのrunは紐付けない）。**Actions上の
+   Claudeレビューの代わり**で、実装担当がClaudeでもCodexでレビューする（#4149のワークフロー変更PRと同じ扱い。
+   サブPCの`PR_REVIEW`はCodexにしか対応していない）。同じPR・HEADのジョブがあれば活性キーで相乗りする
+3. 判定が`lgtm`で、PRのhead/baseが合格した実行と同じなら、`mergePullRequest`へ**合格したheadのSHAを
+   `expectedHeadSha`として渡して**マージする（その間にpushされればGitHubが断る）。PRに記録のコメントを残す
+4. `needs-check`・`changes-requested`は`00.check-user`＋`01.check-merge`、レビューの失敗・サブPCが無い・
+   マージAPIが10回失敗した場合は`00.check-user`＋`01.check-blocked`を付け、理由をIssue（無ければPR）へ書く
+
+方針の判断（#4114で決めたこと）:
+
+- **自動でマージする**（画面のボタン待ちにしない）。develop向けの`merge-policy: relaxed`と同じで、自動マージ
+  不可カテゴリでは止めない。確実に人の目を通したいIssueには、通常時と同じく`22.merge-confirm-required`を付ける
+- 共通チェックが後からActionsの結果を採用した（Actionsが復帰して後から再実行された）ら、この経路は手を引き
+  （`skipped`）、通常の`auto-merge`に任せる
+- レビュー指摘の自動修正（`claude-review-fix.yml`への受け渡し）はActionsの経路なので行わない。`changes-requested`は
+  人へ渡す
+- **必須チェックの移行（5章の3）前は、マージがブランチ保護に断られる**（`lint-and-build`が来ないため）。
+  10回失敗すると`gave_up`で人へ渡し、理由に移行の確認を促す文を入れる
 
 復帰（Actionsが動き始めたら）: 何もしなくてよい。次のpushからはActionsが従来どおり検査する。
 バックアップCIの合格は**そのhead/baseに対してだけ**有効で、新しいpush・baseの更新で自動的に無効になる。
@@ -207,5 +240,7 @@ Actionsの結果が採用される。
 ## 8. 未対応（#4065の残り）
 
 - 必須チェックの置き換え（5章の2のオン操作と3。Administration権限が要るため人が行う。手作業Issue #4151）
-- Actions停止中に、サブPCのAIレビュー（`PR_REVIEW`）をissue-deckから起動・回収し、既存のマージ判定へ
-  接続する処理（現在の起点は`claude-review-develop.yml`で、Actionsが止まるとレビューも始まらない。#4114）
+- Actions停止中の経路でマージしたPRには、PR本文の「検証結果」節（`issue-deck-verification`）が書かれない
+  （Actionsの`auto-merge`が書くもの）。リリースPRの表ではそのPRのレビュー結果が「取得できず」になる
+- 合格後のマージ（6章）の実地確認（試験PRで、管理者バイパスや保護解除なしにdevelopへマージできること）は、
+  4章の初期設定と5章の必須チェックの移行のあとに行う
