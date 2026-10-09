@@ -10,7 +10,7 @@ develop向けPRがコンフリクトした場合、CIが失敗した場合、自
 | 対象PR | CI失敗 | コンフリクト | 起動 |
 | --- | --- | --- | --- |
 | `issue-<番号>` → develop | `claude-ci-fix.yml`（#807） | `claude-conflict-resolve.yml`（#315） | 自動検知 + 画面のボタン |
-| `release/vX.Y.Z` → develop（バンプPR） | `claude-pr-repair.yml`（#1293） | 同左 | 画面のボタンのみ |
+| `release/vX.Y.Z` → develop（バンプPR） | `claude-pr-repair.yml`（#1293） | 同左 | 競合は巡回で1回自動起動（#4186）+ 画面のボタン |
 | develop → main（リリースPR） | `claude-pr-repair.yml`（#1293） | 同左 | 画面のボタンのみ |
 
 自動レビューの「要修正」は、`issue-<番号>` → developのPRに限って`claude-review-fix.yml`（#3363）が
@@ -135,8 +135,9 @@ develop向け`issue-<番号>`PRを見て、コンフリクトしていれば
   頻繁に再試行することはない
 - **対応Issueに`00.check-user`が付いていれば起動しない。** 自動解消を断念したワークフローが
   付けるラベルなので、そのまま「人が見ると決めたもの」の目印として使う
-- **対象は`issue-<番号>`→developのPRだけ。** Issueに紐づかないPRを受け持つ
-  `claude-pr-repair.yml`は意図的に自動検知の経路を持たない（後述）ので、巡回でも起動しない
+- **対象は`issue-<番号>`と`release/vX.Y.Z`→developのPR。** バンプPRは同一repoに限り、
+  `claude-pr-repair.yml`へ渡す（#4186）。PRの`00.check-user`を尊重し、PRあたり1回だけ自動起動する。
+  main向けは画面からの操作が必要
 - **GitHub APIの消費は小さい。** PR一覧のRESTはETagの条件付きGETが効き、変化が無ければ
   レート制限を消費しない。コンフリクト有無のGraphQLは`issue-<番号>`→developのPRが
   1件でもあるときだけ、installationごとに1回投げる
@@ -297,10 +298,9 @@ develop→mainのリリースPR（head=`develop`）のCI失敗はこのワーク
 
 ### 自動検知のトリガーを持たない
 
-`workflow_dispatch`のみで、CI失敗・コンフリクトを検知して自動で走る経路は持たない。検知経路は
-既存2ワークフローが持っており、そちらと二重に走らせないため。起動元はissue-deckの画面のボタン
-（`POST /api/pull-requests/repair`）に限られる。**毎回人が押す前提のため、`claude-ci-fix.yml`が
-持つようなリトライ上限は置いていない**（無限ループが構造上起きない）。
+`workflow_dispatch`のみで、Actions側の自動検知トリガーは持たない。画面のボタン
+（`POST /api/pull-requests/repair`）に加え、release/vX.Y.Z→developの競合だけは
+issue-deckの巡回から起動する（#4186）。巡回側がPRあたり1回に制限し、未解消なら人へ渡す。
 
 CI失敗の判定では、ワークフロー名を`CI`に決め打ちせず「このPRのheadコミットに対して
 `pull_request`イベントで走ったrun」を全て見て、失敗しているものの`--log-failed`を最大3件まで

@@ -2389,6 +2389,16 @@ model BackupCiRun {
   statusReason           String?   @db.Text
   /// 最後に共通チェック（issue-deck/ci-gate）へ出した状態
   gateState              String?
+  /// 合格後のdevelopへのマージの進み具合（#4114。`BackupCiMergeStatus`、解釈は src/lib/backup-ci/merge.ts）。
+  /// Actionsが止まっていても、サブPCのレビュー（`PR_REVIEW`）を積み、条件を満たせばissue-deckがマージする
+  mergeStatus            String?
+  mergeReason            String?   @db.Text
+  /// このマージ判定のために積んだ（または相乗りした）`PR_REVIEW`のDispatchJob
+  reviewJobId            String?
+  /// マージAPIが失敗した回数。上限で諦めて人へ渡す
+  mergeAttempts          Int       @default(0)
+  mergeCommitSha         String?
+  mergeDecidedAt         DateTime?
   requestedAt            DateTime  @default(now())
   triggeredAt            DateTime?
   completedAt            DateTime?
@@ -2398,6 +2408,7 @@ model BackupCiRun {
 
   @@unique([repositoryFullName, prNumber, attempt])
   @@index([status])
+  @@index([status, mergeStatus])
 }
 
 /// PRごとに、共通チェック（issue-deck/ci-gate）へどちらの経路（GitHub Actions／バックアップCI）の

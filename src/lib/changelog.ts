@@ -42,6 +42,18 @@ export type ChangelogEntry = {
  */
 export const APP_CHANGELOG: ChangelogEntry[] = [
   {
+    version: "8.43.0",
+    date: "2026-10-09",
+    changes: [
+      "PRのバックアップCIが合格すると、サブPCでのレビューを経てdevelopへ自動でマージされるようになりました。PR詳細のバックアップCI欄に、developへのマージの進み具合・理由・マージ後のコミットが表示されます。",
+    ],
+    usage: [
+      "1. 対象のPR詳細を開き、バックアップCI欄を確認します。",
+      "2. バックアップCIが合格すると、欄の下に「developへのマージ: ○○」と進み具合が表示されます。",
+      "3. 成功すると、マージ状況の横にマージ後のコミットが表示され、PRがdevelopへ取り込まれます。止まった場合は括弧内に理由が表示されます。",
+    ],
+  },
+  {
     version: "8.42.1",
     date: "2026-10-08",
     changes: [

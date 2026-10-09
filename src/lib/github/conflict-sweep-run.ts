@@ -5,12 +5,12 @@ import {
   CONFLICT_SWEEP_RETRY_COOLDOWN_MINUTES,
   conflictSweepIntervalMinutes,
   decideConflictSweep,
+  isAutoConflictTarget,
   type ConflictSweepPullRequest,
   type ConflictSweepSkipReason,
 } from "@/lib/github/conflict-sweep";
 import { GithubApiError } from "@/lib/github/github-api-error";
 import {
-  CONFLICT_RESOLVE_WORKFLOW_FILE,
   isRepairWorkflowMissing,
   resolveRepairDispatch,
 } from "@/lib/github/pull-request-repair";
@@ -42,7 +42,7 @@ import { checkUserIssueKey, fetchCheckUserIssueReasons } from "@/lib/pull-reques
 export type ConflictSweepDispatched = {
   repositoryFullName: string;
   pullRequestNumber: number;
-  issueNumber: string;
+  issueNumber: string | null;
 };
 
 export type ConflictSweepResult = {
@@ -158,11 +158,12 @@ export async function runConflictSweep(
     baseRef: string;
     headRef: string;
     draft: boolean;
-    issueNumber: string;
+    checkUser: boolean;
+    issueNumber: string | null;
   };
 
   // まずPR一覧（REST。ETagの条件付きGETが効くので、変化が無ければレート制限を消費しない）を
-  // 取り、**この時点で`issue-<番号>`→develop以外を落とす。** コンフリクト有無のGraphQLは
+  // 取り、**この時点で自動修復対象外のブランチを落とす。** コンフリクト有無のGraphQLは
   // 残ったPRぶんしか投げない。
   const candidates = (
     await Promise.all(
@@ -176,7 +177,7 @@ export async function runConflictSweep(
           );
           return pullRequests.flatMap((pullRequest) => {
             if (pullRequest.draft) return [];
-            const { workflowFile, inputs } = resolveRepairDispatch(
+            const { inputs } = resolveRepairDispatch(
               {
                 number: pullRequest.number,
                 baseRef: pullRequest.base.ref,
@@ -184,7 +185,9 @@ export async function runConflictSweep(
               },
               "conflict",
             );
-            if (workflowFile !== CONFLICT_RESOLVE_WORKFLOW_FILE) {
+            if (!isAutoConflictTarget(pullRequest.base.ref, pullRequest.head.ref)
+              || (pullRequest.head.repo?.full_name !== repository.fullName
+                && pullRequest.head.ref.startsWith("release/"))) {
               countSkip("no_auto_workflow");
               return [];
             }
@@ -199,7 +202,8 @@ export async function runConflictSweep(
                 baseRef: pullRequest.base.ref,
                 headRef: pullRequest.head.ref,
                 draft: pullRequest.draft,
-                issueNumber: inputs.issue_number,
+                issueNumber: inputs.issue_number ?? null,
+                checkUser: (pullRequest.labels ?? []).some(label => label.name === "00.check-user"),
               },
             ];
           });
@@ -284,7 +288,7 @@ export async function runConflictSweep(
     [...new Set(conflicting.map((candidate) => candidate.repositoryId))].map((repositoryId) => ({
       repositoryId,
       issueNumbers: conflicting
-        .filter((candidate) => candidate.repositoryId === repositoryId)
+        .filter((candidate) => candidate.repositoryId === repositoryId && candidate.issueNumber !== null)
         .map((candidate) => Number(candidate.issueNumber)),
     })),
   );
@@ -305,9 +309,9 @@ export async function runConflictSweep(
       state: "open",
       draft: candidate.draft,
       mergeable: false,
-      checkUser: checkUserReasons.has(
+      checkUser: candidate.checkUser || (candidate.issueNumber !== null && checkUserReasons.has(
         checkUserIssueKey(candidate.repositoryId, Number(candidate.issueNumber)),
-      ),
+      )),
     };
     const decision = decideConflictSweep(pullRequest, {
       repairRun: repairRuns.get(repairRunKey(candidate.fullName, candidate.number)) ?? null,
@@ -350,7 +354,7 @@ export async function runConflictSweep(
       await dispatchWorkflow(
         candidate.ownerLogin,
         candidate.name,
-        CONFLICT_RESOLVE_WORKFLOW_FILE,
+        decision.target.workflowFile,
         ref,
         inputs,
         token,

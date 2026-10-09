@@ -7,7 +7,7 @@ import {
   decideConflictSweep,
   type ConflictSweepPullRequest,
 } from "@/lib/github/conflict-sweep";
-import { CONFLICT_RESOLVE_WORKFLOW_FILE } from "@/lib/github/pull-request-repair";
+import { CONFLICT_RESOLVE_WORKFLOW_FILE, PR_REPAIR_WORKFLOW_FILE } from "@/lib/github/pull-request-repair";
 import { REPAIR_RUN_STALE_MINUTES } from "@/lib/github/pull-request-repair-run";
 
 const NOW = new Date("2026-08-22T12:00:00Z");
@@ -65,7 +65,7 @@ describe("decideConflictSweep", () => {
   });
 
   it("Issueに紐づかないPR（develop→mainのリリースPR）は巡回の対象外", () => {
-    // `claude-pr-repair.yml`は意図的に自動検知の経路を持たない（毎回人が押す前提）。
+    // main向けは引き続き明示操作が必要。
     expect(
       decideConflictSweep(pullRequest({ baseRef: "main", headRef: "develop" }), {
         repairRun: null,
@@ -74,13 +74,28 @@ describe("decideConflictSweep", () => {
     ).toEqual({ dispatch: false, reason: "no_auto_workflow" });
   });
 
-  it("バンプPR（release/vX.Y.Z → develop）も巡回の対象外", () => {
+  it("バンプPRは汎用PR修復へ回す", () => {
     expect(
       decideConflictSweep(pullRequest({ headRef: "release/v4.22.0" }), {
         repairRun: null,
         now: NOW,
       }),
-    ).toEqual({ dispatch: false, reason: "no_auto_workflow" });
+    ).toEqual({ dispatch: true, target: {
+      workflowFile: PR_REPAIR_WORKFLOW_FILE, ref: "develop",
+      inputs: { pr_number: "191", mode: "conflict" },
+    } });
+  });
+
+  it("バンプPRは一度試して未解消なら自動では繰り返さない", () => {
+    expect(decideConflictSweep(pullRequest({ headRef: "release/v4.22.0" }), {
+      repairRun: { status: "finished", startedAt: minutesAgo(60) }, now: NOW,
+    })).toEqual({ dispatch: false, reason: "release_attempted" });
+  });
+
+  it("規約外のreleaseブランチは対象外", () => {
+    expect(decideConflictSweep(pullRequest({ headRef: "release/next" }), {
+      repairRun: null, now: NOW,
+    })).toEqual({ dispatch: false, reason: "no_auto_workflow" });
   });
 
   it("対応Issueが00.check-userなら起動しない", () => {

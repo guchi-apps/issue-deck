@@ -71,6 +71,56 @@ export async function fetchPullRequestTarget(
   return toTarget((await res.json()) as GithubPullRequest);
 }
 
+/** マージ判定（#4114）に要る、PRの状態とマージ可否 */
+export type PullRequestMergeInfo = PullRequestTarget & {
+  merged: boolean;
+  draft: boolean;
+  /** GitHubが計算中ならnull */
+  mergeable: boolean | null;
+  mergeableState: string | null;
+};
+
+export async function fetchPullRequestMergeInfo(
+  repositoryFullName: string,
+  prNumber: number,
+  token: string,
+): Promise<PullRequestMergeInfo> {
+  const url = `${GITHUB_API}/repos/${repositoryFullName}/pulls/${prNumber}`;
+  const res = await githubFetch(url, token);
+  if (!res.ok) throw new GithubApiError(res.status, `GitHub API request failed: ${res.status} ${url}`);
+  const pr = (await res.json()) as GithubPullRequest & {
+    merged?: boolean;
+    draft?: boolean;
+    mergeable?: boolean | null;
+    mergeable_state?: string | null;
+  };
+  return {
+    ...toTarget(pr),
+    merged: pr.merged === true,
+    draft: pr.draft === true,
+    mergeable: typeof pr.mergeable === "boolean" ? pr.mergeable : null,
+    mergeableState: typeof pr.mergeable_state === "string" ? pr.mergeable_state : null,
+  };
+}
+
+/** PRの差分に、指定した接頭辞のパスが含まれるか（最大3000件。GitHubのAPIの上限） */
+export async function pullRequestTouchesPath(
+  repositoryFullName: string,
+  prNumber: number,
+  prefix: string,
+  token: string,
+): Promise<boolean> {
+  for (let page = 1; page <= 30; page += 1) {
+    const url = `${GITHUB_API}/repos/${repositoryFullName}/pulls/${prNumber}/files?per_page=100&page=${page}`;
+    const res = await githubFetch(url, token);
+    if (!res.ok) throw new GithubApiError(res.status, `GitHub API request failed: ${res.status} ${url}`);
+    const files = (await res.json()) as { filename?: string; previous_filename?: string }[];
+    if (files.some((f) => f.filename?.startsWith(prefix) || f.previous_filename?.startsWith(prefix))) return true;
+    if (files.length < 100) return false;
+  }
+  return false;
+}
+
 /** baseが`baseRef`のopenなPR（最大100件）。共通チェックの写しの巡回に使う */
 export async function listOpenPullRequestTargets(
   repositoryFullName: string,

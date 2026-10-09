@@ -35,6 +35,8 @@ async function getClaudeModels() {
     | ({ claudeLocalModel?: string } & Awaited<ReturnType<typeof db.appSetting.findUnique>>)
     | null;
   return {
+    claudeDispatchPauseReason: setting?.claudeDispatchPauseReason ?? null,
+    codexDispatchPauseReason: setting?.codexDispatchPauseReason ?? null,
     claudeModel: setting?.claudeModel ?? "auto",
     aiExecutionProvider:
       parseAiExecutionProvider(setting?.aiExecutionProvider) ?? AI_EXECUTION_PROVIDER_DEFAULT,

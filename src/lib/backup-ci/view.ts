@@ -1,6 +1,7 @@
 import type { BackupCiRun, CiGateState } from "@prisma/client";
 
 import { CI_GATE_SOURCE_LABELS, parseCiGateSource } from "@/lib/backup-ci/gate";
+import { BACKUP_CI_MERGE_STATUS_LABELS, parseBackupCiMergeStatus } from "@/lib/backup-ci/merge";
 
 import {
   BACKUP_CI_STATUS_LABELS,
@@ -28,6 +29,11 @@ export type BackupCiRunView = {
   logUrl: string | null;
   checks: BackupCiCheckResult[];
   gateState: string | null;
+  /** 合格後のdevelopへのマージの進み具合（#4114）。未着手ならnull */
+  mergeStatus: string | null;
+  mergeStatusLabel: string | null;
+  mergeReason: string | null;
+  mergeCommitSha: string | null;
   startedByUserId: string;
   requestedAt: string;
   completedAt: string | null;
@@ -59,6 +65,13 @@ export function toBackupCiRunView(run: BackupCiRun): BackupCiRunView {
     logUrl: run.logUrl,
     checks,
     gateState: run.gateState,
+    mergeStatus: parseBackupCiMergeStatus(run.mergeStatus),
+    mergeStatusLabel: (() => {
+      const mergeStatus = parseBackupCiMergeStatus(run.mergeStatus);
+      return mergeStatus ? BACKUP_CI_MERGE_STATUS_LABELS[mergeStatus] : null;
+    })(),
+    mergeReason: run.mergeReason,
+    mergeCommitSha: run.mergeCommitSha,
     startedByUserId: run.startedByUserId,
     requestedAt: run.requestedAt.toISOString(),
     completedAt: run.completedAt?.toISOString() ?? null,

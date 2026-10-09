@@ -141,9 +141,7 @@ statusはコミットに付くので、**修正をpushした新しいSHAには�
 進まず、最新SHAで`success`が付いた時点で通常の流れへ戻る。issue-deck側のワークフローは変えていない。
 
 - 必須チェックに足すときは**Appを指定しない**（statusはユーザー本人のトークンで付くため）
-- 無人実行（GitHub Actions）からはMacへ届かない。必須にしたリポジトリでは、無人実行が作ったPRは
-  誰かがサブPCから`ios-precheck.sh run`するまで止まる。**PRを作ること（調査用に作ってよい）と、
-  検証済みとしてマージできることは別**として扱う
+- GitHub ActionsからはMacへ届かないため、サブPCのpollerが必須対象のPRを巡回し、最新SHAをMacへ依頼する（#4186）。pollerが停止中は手動の`ios-precheck.sh run`も使える
 - `required=false`の間は、statusは付くがマージは止めない（表示と記録だけ）
 - 既存のレビュー承認・本番リリースの手順は変えない
 
@@ -197,6 +195,44 @@ Mac側スクリプトがbash 3.2の空配列展開で落ち、依頼側は`inter
 ## 残っていること
 
 - Issue詳細・PR欄での状態と検証SHAの表示（#4140。いまはセッションのステップ「iOS検証中」と、GitHub上のcommit statusで見る）
-- yoteiflowは`required=true`にした（#4141。無人実行が作ったPRはサブPCから`run`するまで止まる点は受け入れた）。**yoteiflowの`develop`の必須チェックへ`issue-deck/ios-precheck`を足す設定変更は人が行う**。足すまでは自動マージを止めない
+- yoteiflowは`required=true`にした（#4141。無人実行のPRもサブPCの自動巡回が検証する）。**yoteiflowの`develop`の必須チェックへ`issue-deck/ios-precheck`を足す設定変更は人が行う**。足すまでは自動マージを止めない
 - yoteiflowへのテストTargetの追加（guchi-apps/yoteiflow#1159）。追加されるまでは「ビルド成功・自動テスト未設定」になる
 - kurashio・aide・morrowは未設定（`scripts/ios-precheck.conf`へ足し、1回`run`を通してから使う）
+
+
+## PR更新後の自動検証・修復（#4186）
+
+サブPCのpollerは、通常ジョブの払い出しがなく、起動枠・メモリに余裕があるとき、既定5分間隔で
+`scripts/ios-precheck-sweep.mjs`を別プロセスで起動する。専用flockを検証・修復終了まで保持し、
+再起動でも二重起動しない。稼働中はローカルの同時実行数に1本として数える。運用するpollerホストは1台にする。
+
+- 設定済みかつ`required=true`の同一リポジトリにある、非draftの`issue-N`または`release/vX.Y.Z` → `develop`が対象。
+  コンフリクト・判定中・PRの`00.check-user`・実装セッション稼働中は次巡へ回す。forkとmain向けは対象外。
+- 最新HEADの`issue-deck/ios-precheck`が成功済みならスキップ。未検証・失敗は既存コマンドへ渡す。
+  決定的なジョブIDを再利用するため、SSH切断や待ち時間切れの後も同じMacジョブの結果へ再接続する。
+- ビルド／テスト失敗は、共通のAI実行プロバイダーとワークフロー用モデル設定で隔離worktreeの修復を起動する。
+  修正対象は`ios/`以下のSwiftファイルのみ。依存・Xcode設定・仕様変更が必要なら人へ渡す。
+  最大3回まで試し、commit/pushはラッパーが所有する。push直前にもPRのHEADを照合し、通常pushのみを使う。
+- 修正後の新SHAは次の巡回でMac検証する。古いSHAの成功を新SHAへ転記しない。
+- 環境障害、修正不能、上限、中断した修正は停止する。共通設定のエージェント一時停止中も新規起動しない。
+  設定APIが旧版で停止状態を取得できない場合も起動しない。
+
+状態は最新SHAのcommit statusに「検証中」「自動修正中」「成功」「手動確認が必要」などを出す。
+詳細な停止理由・試行回数は`~/.local/state/issue-deck/ios-automation/<owner>--<repo>-<PR番号>.json`、
+巡回ログは同ディレクトリの`sweep.log`、修正ログは`<owner>--<repo>-<PR番号>-repair.log`に残る。
+`ISSUE_DECK_IOS_AUTOMATION_STATE`で配置先を変更できる。ログにはソースの抜粋が含まれるため公開しない。
+
+導入には、この変更を含むサーバーの公開と、サブPCのissue-deckチェックアウト更新・poller再起動が必要。
+MacのSSH・Xcode・gh認証・対象リポジトリの`local-repos.conf`・選択されたAI CLIの認証は既存のものを使う。
+新しい依存パッケージやMac用常駐サービスは不要。`ISSUE_DECK_IOS_SWEEP_INTERVAL_SECONDS=0`で新規巡回を停止できる
+（既に動いている検証・修復は終了まで続く）。
+
+停止からの復旧は、原因を解消し、まず手動`run --retry`で同じSHAの成功を確認するか、修正コミットをpushする。
+同じSHAの手動成功も次巡が認識する。修正上限を明示的にリセットする場合は、巡回を停止して実行が終わってから
+対象PRの状態JSONだけを退避し、巡回を再開する。全PRの状態を一括削除しない。
+
+リリースバンプの競合はサーバーの既存conflict-sweepが`claude-pr-repair.yml`へ渡す。
+PRラベル`00.check-user`を尊重し、自動試行はPRあたり1回に制限する。未解消なら既存の手動修復ボタンから再開する。
+通常のissueブランチの経路・main向けPRの手動操作・マージ条件は変えない。
+
+自動化の検証はモックを使うテストとローカルgitで行う。実際のサブPC→Mac→修復AIの無人往復は導入後に確認する。
