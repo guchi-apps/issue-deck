@@ -340,3 +340,41 @@ export async function fetchPullRequestsForHead(
     token,
   );
 }
+
+/** `compare`の応答のうち、リリース差分のPR対応付けに使う部分（#4201） */
+type GithubApiCompareCommits = {
+  total_commits?: number;
+  commits?: GithubApiPullRequestCommit[];
+};
+
+/**
+ * 2つのrefの差分（`base...head`）に含まれるコミットを1ページぶん取得する（#4201）。
+ *
+ * 起動確認ダイアログの「今回反映する内容」を、**実際にmainへ入る差分**から求めるのに使う。
+ * ページングはしない（`PULL_REQUEST_COMMITS_PER_PAGE`と同じ方針）。`totalCommits`が取得数より
+ * 多ければ打ち切りになるので、呼び出し側は`truncated`として画面へ伝える。
+ * 応答に`commits`が無いときは空配列ではなくエラーにする（失敗を「変更0件」と誤認させない）。
+ */
+export async function fetchCompareCommits(
+  owner: string,
+  repo: string,
+  base: string,
+  head: string,
+  token: string,
+): Promise<{ commits: GithubApiPullRequestCommit[]; totalCommits: number }> {
+  const url = `${GITHUB_API}/repos/${owner}/${repo}/compare/${encodeURIComponent(base)}...${encodeURIComponent(head)}?per_page=${PULL_REQUEST_COMMITS_PER_PAGE}`;
+  const result = await githubFetchJsonWithEtag<GithubApiCompareCommits>(url, token);
+  if (!result.ok) {
+    throw new GithubApiError(
+      result.status,
+      `GitHub API request failed: ${result.status} ${url} ${result.detail}`,
+    );
+  }
+  if (!Array.isArray(result.data.commits)) {
+    throw new GithubApiError(502, `GitHub API response has no commits: ${url}`);
+  }
+  return {
+    commits: result.data.commits,
+    totalCommits: result.data.total_commits ?? result.data.commits.length,
+  };
+}

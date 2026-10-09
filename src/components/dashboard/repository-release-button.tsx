@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { Rocket } from "lucide-react";
 
-import { GithubReferenceLink } from "@/components/dashboard/github-reference-link";
+import { ReleaseChangeList } from "@/components/dashboard/release-change-list";
 import { ReleaseBumpKindSelect } from "@/components/dashboard/release-bump-kind-select";
 import {
   AlertDialog,
@@ -19,7 +19,7 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { requestRelease } from "@/lib/release-request";
 import type { BumpKind } from "@/lib/semver-bump";
-import type { BranchFlowIssueRef, ReleaseBlockedReason } from "@/types/branch-flow";
+import type { ReleaseBlockedReason } from "@/types/branch-flow";
 
 /**
  * 押せないときにボタンへ添える文言（#2711）。**「押せない」と「操作が無い」を区別させる**ため、
@@ -35,8 +35,6 @@ const BLOCKED_REASON_LABEL: Record<ReleaseBlockedReason, string> = {
 
 type RepositoryReleaseButtonProps = {
   repositoryFullName: string;
-  /** 今回のリリースで本番へ出る変更の対応Issue（未リリースの束から作る） */
-  pendingIssues: BranchFlowIssueRef[];
   /** 直近で本番へ出た版（`3.21.0`）。上げ幅の選択肢に「3.21.0 → 3.22.0」の目安を出すのに使う */
   currentVersion?: string | null;
   /** すでに起動済みで、バンプPRが現れるのを待っている最中か（#1955） */
@@ -74,7 +72,6 @@ type RepositoryReleaseButtonProps = {
  */
 export function RepositoryReleaseButton({
   repositoryFullName,
-  pendingIssues,
   currentVersion = null,
   isPending,
   blockedReason = null,
@@ -164,28 +161,7 @@ export function RepositoryReleaseButton({
               <span>本番デプロイの失敗を確認しました。developに取り込んだ修正をリリースするため、失敗中の起動を許可します。</span>
             </label>
           )}
-          {pendingIssues.length > 0 ? (
-            <div className="flex max-h-48 flex-col gap-1.5 overflow-y-auto rounded-md border p-2">
-              <p className="text-xs font-medium text-muted-foreground">今回反映する内容</p>
-              <ul className="flex flex-col gap-1 text-xs">
-                {pendingIssues.map((issue) => (
-                  <li key={issue.number}>
-                    <GithubReferenceLink
-                      href={`https://github.com/${repositoryFullName}/issues/${issue.number}`}
-                      className="hover:underline"
-                    >
-                      #{issue.number}
-                      {issue.title ? ` ${issue.title}` : ""}
-                    </GithubReferenceLink>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ) : (
-            <p className="text-xs text-muted-foreground">
-              develop済みでmain未反映のIssueはありません。
-            </p>
-          )}
+          <ReleaseChangeList repositoryFullName={repositoryFullName} enabled={confirmOpen} />
           {error && <p className="text-xs text-destructive">{error}</p>}
           <AlertDialogFooter>
             <AlertDialogCancel disabled={isTriggering}>キャンセル</AlertDialogCancel>

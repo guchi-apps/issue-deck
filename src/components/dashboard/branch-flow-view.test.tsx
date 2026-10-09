@@ -1071,43 +1071,43 @@ describe("BranchFlowView", () => {
       expect(screen.getAllByText("mainへマージ待ち").length).toBeGreaterThan(0);
     });
 
-    it("押すと今回反映する内容を確認ダイアログに出す", () => {
-      renderFlow({
-        pullRequests: [
-          makeReleasePullRequest({
-            number: 1452,
-            title: "v3.17.0をmainへリリースする",
-            state: "closed",
-            merged: true,
-            mergedAt: "2026-08-01T00:00:00Z",
+    it("押すと今回反映する内容をPR単位で確認ダイアログに出す（#4201）", async () => {
+      vi.spyOn(globalThis, "fetch").mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            pullRequests: [
+              { number: 1460, title: "本番へ出したい変更", issueNumber: 1456, isVersionBump: false },
+            ],
+            unknownCommits: [],
+            source: "develop",
+            headSha: "abc1234",
+            truncated: false,
           }),
-          makePullRequest({
-            number: 1460,
-            headRef: "issue-1456",
-            linkedIssueNumber: 1456,
-            state: "closed",
-            merged: true,
-            mergedAt: "2026-08-10T00:00:00Z",
-          }),
-        ],
-        issues: [
-          {
-            number: 1456,
-            title: "本番へ出したい変更",
-            repositoryFullName: REPO,
-            state: "closed",
-            projectStatus: "Develop",
-          },
-        ],
-        branchStatuses: [unreleased],
-      });
+          { status: 200 },
+        ),
+      );
+      renderFlow({ branchStatuses: [unreleased] });
 
       openRepository();
       fireEvent.click(screen.getByText("リリースする"));
 
       expect(screen.getByText("リリースworkflowを起動しますか？")).toBeTruthy();
-      expect(screen.getByText("今回反映する内容")).toBeTruthy();
-      expect(screen.getByText("#1456 本番へ出したい変更")).toBeTruthy();
+      expect(await screen.findByText("#1460 本番へ出したい変更")).toBeTruthy();
+      expect(screen.getByText(/今回反映する内容/)).toBeTruthy();
+      expect(screen.getByText("関連Issue #1456")).toBeTruthy();
+    });
+
+    it("反映内容の取得に失敗したときは0件とせず失敗を出す（#4201）", async () => {
+      vi.spyOn(globalThis, "fetch").mockResolvedValue(
+        new Response(JSON.stringify({ error: "github_api_error", message: "boom" }), { status: 502 }),
+      );
+      renderFlow({ branchStatuses: [unreleased] });
+
+      openRepository();
+      fireEvent.click(screen.getByText("リリースする"));
+
+      expect(await screen.findByText(/今回反映する内容を取得できませんでした/)).toBeTruthy();
+      expect(screen.queryByText(/未反映のPRはありません/)).toBeNull();
     });
 
     it("確認ダイアログで上げ幅を選べる（#1548）", () => {
