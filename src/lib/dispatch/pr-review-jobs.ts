@@ -1,5 +1,6 @@
 import type { DispatchJob } from "@prisma/client";
 
+import { notifyDispatchHostWake } from "@/lib/dispatch/wake-notify";
 import { db } from "@/lib/db";
 import {
   DISPATCH_HOST_ONLINE_WINDOW_MS,
@@ -189,6 +190,7 @@ export async function requestPrReviewJob(params: {
         workflowRunId: params.workflowRunId,
       },
     });
+    notifyDispatchHostWake(job.targetHost);
     return { ok: true, job, created: true, gate: resolvePrReviewGateState(job) };
   } catch {
     // 同時に積まれて`activeKey`の一意制約に当たった。先に積まれた方を返す

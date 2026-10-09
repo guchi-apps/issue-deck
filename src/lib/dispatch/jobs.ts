@@ -32,6 +32,7 @@ import {
   type DispatchHostReboot,
   type RebootRejection,
 } from "@/lib/dispatch/host-reboot";
+import { notifyDispatchHostWake } from "@/lib/dispatch/wake-notify";
 import { listSessionPlanRequests } from "@/lib/dispatch/plan-requests";
 import {
   describePreviewRejection,
@@ -839,6 +840,7 @@ export async function enqueueDispatchJob(params: {
         requestedByUserId: params.requestedByUserId,
       },
     });
+    notifyDispatchHostWake(job.targetHost);
     return { ok: true, job: toJobView(job) };
   } catch {
     // activeKeyのunique制約違反＝同じIssueの未完了ジョブが既にある。二重クリックの競合を
@@ -950,6 +952,7 @@ export async function enqueueCrossRepoQuestionJob(params: {
         requestedByUserId: params.requestedByUserId,
       },
     });
+    notifyDispatchHostWake(job.targetHost);
     return { ok: true, job: toJobView(job) };
   } catch {
     return reject("already_queued");
@@ -1048,6 +1051,7 @@ export async function enqueueManualStepSessionJob(params: {
         requestedByUserId: params.requestedByUserId,
       },
     });
+    notifyDispatchHostWake(job.targetHost);
     return { ok: true, job: toJobView(job) };
   } catch {
     return reject("already_queued");
@@ -1133,6 +1137,7 @@ export async function enqueuePlanReviewJob(params: {
         requestedByUserId: params.requestedByUserId,
       },
     });
+    notifyDispatchHostWake(job.targetHost);
     return { ok: true, job: toJobView(job) };
   } catch {
     return reject("already_queued");
@@ -1204,6 +1209,7 @@ export async function enqueueCodeReviewJob(params: {
         requestedByUserId: params.requestedByUserId,
       },
     });
+    notifyDispatchHostWake(job.targetHost);
     return { ok: true, job: toJobView(job) };
   } catch {
     return reject("already_queued");
@@ -1352,6 +1358,7 @@ export async function enqueueSessionControlJob(params: {
         tmuxSessionName: session?.tmuxSessionName ?? null,
       },
     });
+    notifyDispatchHostWake(job.targetHost);
     return { ok: true, job: toJobView(job) };
   } catch {
     // activeKeyのunique制約違反＝同じ種別の未処理の操作が既にある。スマホでの連打が
@@ -1518,6 +1525,7 @@ export async function enqueueManualStepJob(params: {
         manualStepRunTarget: runTarget,
       },
     });
+    notifyDispatchHostWake(job.targetHost);
     return { ok: true, job: toJobView(job) };
   } catch {
     return reject("already_queued");
@@ -1602,6 +1610,7 @@ export async function enqueueManualStepAbortJob(params: {
         targetJobId: params.targetJobId,
       },
     });
+    notifyDispatchHostWake(job.targetHost);
     return { ok: true, job: toJobView(job) };
   } catch {
     return {
@@ -1667,6 +1676,7 @@ export async function enqueueSelfUpdateJob(params: {
         requestedByUserId: params.requestedByUserId,
       },
     });
+    notifyDispatchHostWake(job.targetHost);
     return { ok: true, job: toJobView(job) };
   } catch {
     // activeKeyのunique制約。二重クリックや、前の更新がまだ終わっていない場合
@@ -1728,6 +1738,7 @@ export async function enqueueRebootJob(params: {
         requestedByUserId: params.requestedByUserId,
       },
     });
+    notifyDispatchHostWake(job.targetHost);
     return { ok: true, job: toJobView(job) };
   } catch {
     // activeKeyのunique制約。二重クリックや、前の再起動がまだ終わっていない場合
@@ -1786,6 +1797,7 @@ export async function enqueueCodexPairingJob(params: {
         requestedByUserId: params.requestedByUserId,
       },
     });
+    notifyDispatchHostWake(job.targetHost);
     return { ok: true, job: toJobView(job) };
   } catch {
     return {
@@ -1846,6 +1858,7 @@ export async function enqueuePreviewJob(params: {
         requestedByUserId: params.requestedByUserId,
       },
     });
+    notifyDispatchHostWake(job.targetHost);
     return { ok: true, job: toJobView(job) };
   } catch {
     // activeKeyのunique制約。二重クリックや、前の操作がまだ終わっていない場合

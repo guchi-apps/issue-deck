@@ -1,5 +1,6 @@
 import { Prisma } from "@prisma/client";
 
+import { notifyDispatchHostWake } from "@/lib/dispatch/wake-notify";
 import { STEP_SCHEMA, type CallModel } from "@/lib/chat/investigation/agent";
 import { recordClaudeApiCall } from "@/lib/claude/api-usage";
 import { CODEX_LOCAL_MODEL_VALUES } from "@/lib/app-settings";
@@ -156,6 +157,7 @@ export function createCodexCallModel(params: {
         requestedByUserId: params.requestedByUserId,
       },
     });
+    notifyDispatchHostWake(job.targetHost);
     await db.chatRun.update({
       where: { id: params.runId },
       data: {
