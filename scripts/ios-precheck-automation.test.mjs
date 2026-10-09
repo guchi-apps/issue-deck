@@ -5,7 +5,7 @@ const sha = 'a'.repeat(40);
 const pr = () => ({ state: 'open', draft: false, mergeable: true, base: { ref: 'develop' }, head: { ref: 'issue-1197', sha, repo: { full_name: repo } } });
 const failed = { state: 'failed', requestedSha: sha, verifiedSha: sha, failedStage: 'build' };
 function fixture(result = failed) {
-  return { readPr: vi.fn().mockResolvedValue(pr()), status: vi.fn(), busy: vi.fn().mockResolvedValue(false),
+  return { readPr: vi.fn().mockResolvedValue(pr()), status: vi.fn(), busy: vi.fn().mockResolvedValue(null),
     verify: vi.fn().mockResolvedValue(result), repair: vi.fn().mockResolvedValue(true), save: vi.fn(), report: vi.fn() };
 }
 describe('iOS事前検証の自動巡回', () => {
@@ -59,7 +59,7 @@ describe('iOS事前検証の自動巡回', () => {
   it('ビルド失敗で修正を起動し、回数を先に保存する', async () => {
     const io = fixture();
     expect(await processPullRequest(io, repo, 1, {})).toBe('repaired');
-    expect(io.save).toHaveBeenNthCalledWith(1, { fixes: 1, repairingSha: sha });
+    expect(io.save).toHaveBeenNthCalledWith(1, { fixes: 1, repairingSha: sha, verified: { sha, result: failed } });
     expect(io.save.mock.invocationCallOrder[0]).toBeLessThan(io.repair.mock.invocationCallOrder[0]);
     expect(io.report).not.toHaveBeenCalledWith(repo, sha, 'success', expect.anything());
   });
@@ -83,13 +83,31 @@ describe('iOS事前検証の自動巡回', () => {
     expect(await processPullRequest(io, repo, 1, {})).toBe('blocked');
     expect(io.repair).not.toHaveBeenCalled();
   });
-  it('他の実装中・停止中は検証も開始しない', async () => {
-    const io = fixture(); io.busy.mockResolvedValue(true);
-    expect(await processPullRequest(io, repo, 1, {})).toBe('busy'); expect(io.verify).not.toHaveBeenCalled();
+  it('他セッション・AI一時停止でも検証は実行し、成功を報告する', async () => {
+    const io = fixture({ ...failed, state: 'succeeded' }); io.busy.mockResolvedValue('AI実行が一時停止中です');
+    expect(await processPullRequest(io, repo, 1, {})).toBe('success');
+    expect(io.verify).toHaveBeenCalledWith(repo, sha);
+    expect(io.busy).not.toHaveBeenCalled();
+  });
+  it('修復だけを待機し、結果と試行回数を保持して次巡に再検証せず再開する', async () => {
+    const io = fixture(); io.busy.mockResolvedValue('同じPRのセッション repo-issue-1197 が稼働中です');
+    expect(await processPullRequest(io, repo, 1, { fixes: 1 })).toBe('repair_waiting');
+    expect(io.repair).not.toHaveBeenCalled();
+    expect(io.save).toHaveBeenLastCalledWith({ fixes: 1, verified: { sha, result: failed }, repairWaiting: { sha, reason: expect.any(String) } });
+    expect(io.report).toHaveBeenCalledWith(repo, sha, 'pending', expect.stringContaining('修復待ち'));
+    const next = fixture(); next.busy.mockResolvedValue(null);
+    expect(await processPullRequest(next, repo, 1, { fixes: 1, verified: { sha, result: failed } })).toBe('repaired');
+    expect(next.verify).not.toHaveBeenCalled();
+    expect(next.save).toHaveBeenNthCalledWith(1, { fixes: 2, repairingSha: sha, verified: { sha, result: failed } });
+  });
+  it('HEADが変われば保持した古い結果は使わず再検証する', async () => {
+    const io = fixture({ ...failed, state: 'succeeded' });
+    expect(await processPullRequest(io, repo, 1, { verified: { sha: 'c'.repeat(40), result: failed } })).toBe('success');
+    expect(io.verify).toHaveBeenCalled();
   });
   it('修正不能なら停止する', async () => {
     const io = fixture(); io.repair.mockResolvedValue(false);
     expect(await processPullRequest(io, repo, 1, {})).toBe('blocked');
-    expect(io.save).toHaveBeenLastCalledWith({ fixes: 1, repairingSha: sha, blockedSha: sha, reason: 'repair_failed' });
+    expect(io.save).toHaveBeenLastCalledWith({ fixes: 1, repairingSha: sha, verified: { sha, result: failed }, blockedSha: sha, reason: 'repair_failed' });
   });
 });
