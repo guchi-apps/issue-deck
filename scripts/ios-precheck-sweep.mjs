@@ -31,21 +31,23 @@ function save(path, value) {
 function localRepo(repository) {
   return run('bash', ['-c', 'source "$1/lib/local-repo-resolve.sh"; local_repo_resolve_path "$2"', '_', scripts, repository]).trim();
 }
+// AI修復だけの待機条件。理由（機密を含まない文字列）を返し、待たなくてよければnull。
 function busy(pr) {
   // 古いサーバーで停止設定を読めない場合も、新しい修復を開始しない。
   const appUrl = run('bash', ['-c', 'source "$1/lib/review-usage.sh"; _review_usage_env_value APP_BASE_URL', '_', scripts]).trim();
-  if (!appUrl) return true;
+  if (!appUrl) return 'AI設定を取得できません';
   const settings = JSON.parse(run('curl', ['-fsS', '--max-time', '15', `${appUrl.replace(/\/$/, '')}/api/settings/claude-model`]));
   const pauseKey = `${settings.aiExecutionProvider}DispatchPauseReason`;
-  if (!(pauseKey in settings) || settings[pauseKey] !== null) return true;
+  if (!(pauseKey in settings)) return 'AI停止設定を取得できません';
+  if (settings[pauseKey] !== null) return 'AI実行が一時停止中です';
   const sessions = spawnSync('tmux', ['list-panes', '-a', '-F', '#{session_name}\t#{pane_dead}'], { encoding: 'utf8', timeout: 10_000 });
-  if (sessions.error || ![0, 1].includes(sessions.status)) return true;
+  if (sessions.error || ![0, 1].includes(sessions.status)) return 'tmuxの状態を確認できません';
   const name = pr.head.repo.full_name.split('/')[1];
   const issue = /^issue-([0-9]+)$/.exec(pr.head.ref)?.[1];
-  return (sessions.stdout ?? '').split('\n').some(line => {
-    const [session, dead] = line.split('\t');
-    return dead === '0' && (issue ? session === `${name}-issue-${issue}` || session === `${name}-review-fix-${issue}` : session.startsWith(`${name}-`));
-  });
+  // 同じPR・ブランチを触るセッションとだけ競合させる。別PRのセッションでは待たない。
+  const mine = new Set(issue ? [`${name}-issue-${issue}`, `${name}-review-fix-${issue}`] : []);
+  const hit = (sessions.stdout ?? '').split('\n').map(l => l.split('\t')).find(([session, dead]) => dead === '0' && mine.has(session));
+  return hit ? `同じPRのセッション ${hit[0]} が稼働中です` : null;
 }
 const repositories = [...readFileSync(config, 'utf8').matchAll(/^\[([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)\]\s*$/gm)].map(m => m[1]);
 for (const repository of repositories) {

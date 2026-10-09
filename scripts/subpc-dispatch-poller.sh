@@ -4282,7 +4282,7 @@ run_once() {
   # 起動枠に混ぜていたため、12/12の間は計画の承認を待つセッションが枠を埋めたまま、そのレビューが
   # 何時間も`QUEUED`で待たされた。空き本数を`planReviewMaxJobs`で送り、それを超えたぶんは
   # 見送り（`skipped`）にせず`QUEUED`のまま次の巡を待たせる。**メモリ逼迫の見送りは計画レビューにも効かせる**
-  local live_sessions claim_max_jobs claim_plan_reviews
+  local live_sessions claim_max_jobs claim_plan_reviews ios_sweep_ok=1
   live_sessions="$(count_issue_sessions)"
   claim_max_jobs="$MAX_JOBS"
   claim_plan_reviews="$(plan_review_slots)"
@@ -4299,7 +4299,12 @@ run_once() {
     echo "空きメモリが少ないため、起動ジョブは取りに行きません（$live_sessions/$SESSION_CAP_EFFECTIVE 本。上限は最大 $MAX_SESSIONS 本）。"
     claim_max_jobs=0
     claim_plan_reviews=0
+    ios_sweep_ok=0
   fi
+
+  # iOS事前検証の巡回は、AI起動枠・保留・払い出しの有無と切り離す（#4202）。Mac側の検証は
+  # サブPCのAIセッションを増やさないため、止めるのは実際のメモリ不足だけ。二重起動はflockが防ぐ
+  if [[ "$ios_sweep_ok" -eq 1 ]]; then sweep_ios_prechecks; fi
 
   local claim_payload jobs_json job_count job
   claim_payload="$(jq -n --arg host "$HOST_NAME" --argjson maxJobs "$claim_max_jobs" \
@@ -4314,8 +4319,6 @@ run_once() {
   job_count="$(printf '%s' "$jobs_json" | jq '.jobs | length')"
   if [[ "$job_count" -eq 0 ]]; then
     echo "取得できるジョブはありません。"
-    # 実装の払い出しを優先し、空き枠とメモリがあるときだけMac検証を起動する。
-    if [[ "$claim_max_jobs" -gt 0 ]]; then sweep_ios_prechecks; fi
     return 0
   fi
 
