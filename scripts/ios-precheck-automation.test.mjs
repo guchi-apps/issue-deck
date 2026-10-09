@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { eligible, processPullRequest } from './lib/ios-precheck-automation.mjs';
+import { eligible, repairEligible, processPullRequest } from './lib/ios-precheck-automation.mjs';
 const repo = 'guchi-apps/yoteiflow';
 const sha = 'a'.repeat(40);
 const pr = () => ({ state: 'open', draft: false, mergeable: true, base: { ref: 'develop' }, head: { ref: 'issue-1197', sha, repo: { full_name: repo } } });
@@ -9,13 +9,36 @@ function fixture(result = failed) {
     verify: vi.fn().mockResolvedValue(result), repair: vi.fn().mockResolvedValue(true), save: vi.fn(), report: vi.fn() };
 }
 describe('iOS事前検証の自動巡回', () => {
-  it('バンプPRも対象、draft/fork/main/規約外/確認待ちは対象外', () => {
+  it('バンプPRも対象、draft/fork/main/確認待ちは対象外', () => {
     const p = pr(); p.head.ref = 'release/v4.16.2'; expect(eligible(p, repo)).toBe(true);
     for (const other of [{ ...p, draft: true }, { ...p, base: { ref: 'main' } },
       { ...p, head: { ...p.head, repo: { full_name: 'other/fork' } } },
-      { ...p, head: { ...p.head, ref: 'release/next' } }, { ...p, labels: [{ name: '00.check-user' }] }]) {
+      { ...p, state: 'closed' }, { ...p, labels: [{ name: '00.check-user' }] }]) {
       expect(eligible(other, repo)).toBe(false);
     }
+  });
+  it.each(['workflow-tag/v48', 'release/next', 'dependabot/npm/package', 'fix/custom'])('Issueなしの%sも最新SHAを実際に検証する', async ref => {
+    const p = pr(); p.head.ref = ref;
+    expect(eligible(p, repo)).toBe(true);
+    expect(repairEligible(p, repo)).toBe(false);
+    const io = fixture({ ...failed, state: 'succeeded' });
+    io.readPr.mockResolvedValue(p);
+    expect(await processPullRequest(io, repo, 1202, {})).toBe('success');
+    expect(io.verify).toHaveBeenCalledWith(repo, sha);
+    expect(io.report).toHaveBeenCalledWith(repo, sha, 'success', undefined);
+    expect(io.repair).not.toHaveBeenCalled();
+  });
+  it('配布PRのビルド失敗を成功扱いせず、自動修正pushも行わない', async () => {
+    const p = pr(); p.head.ref = 'workflow-tag/v48';
+    const io = fixture(); io.readPr.mockResolvedValue(p);
+    expect(await processPullRequest(io, repo, 1202, {})).toBe('blocked');
+    expect(io.save).toHaveBeenLastCalledWith({ blockedSha: sha, reason: 'repair_not_allowed' });
+    expect(io.report).toHaveBeenCalledWith(repo, sha, 'failure', expect.any(String));
+    expect(io.repair).not.toHaveBeenCalled();
+  });
+  it.each(['issue-1197', 'release/v4.16.2'])('%sの自動修正範囲は維持する', ref => {
+    const p = pr(); p.head.ref = ref;
+    expect(repairEligible(p, repo)).toBe(true);
   });
   it('成功済みSHAを再実行しない', async () => {
     const io = fixture(); io.status.mockResolvedValue('success');
