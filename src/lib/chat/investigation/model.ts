@@ -25,7 +25,7 @@ export async function resolveChatExecution(): Promise<ChatExecution> {
  * 調査エージェントのモデル呼び出し（#4045）。アプリ内AIの共通入口（`callClaudeMessages`）を使い、
  * 選択中のモデル・プロバイダ設定と消費量の計上をそのまま引き継ぐ（呼び出しロジックは複製しない）。
  *
- * **最終解決モデルがGPT系のときはここを通さない**（`createCodexCallModel`を使う）。設定が途中で
+ * **最終解決モデルがGPT系のときはここを通さない**（`createCodexSession`を使う）。設定が途中で
  * 切り替わってここへ来た場合も、OpenAI APIへは逃がさずに断る（要件10）。
  */
 export const callInvestigationModel: CallModel = async ({ system, messages, timeoutMs }) => {

@@ -206,8 +206,11 @@ export function ChatView({
                   Codexで回答中（サブPC{waitingRun.model ? `・${waitingRun.model}` : ""}）
                 </span>
                 <span className="pl-5">
-                  {waitingRun.phase || "サブPCの受け取り待ち"}。数十秒〜数分かかることがあります。画面を閉じても回答は会話に残ります。
+                  {waitingRun.phase || "サブPCの受け取り待ち"}。通常は十数秒〜1分ほどです。画面を閉じても回答は会話に残ります。
                 </span>
+                <button type="button" className="self-start pl-5 text-xs underline" onClick={() => void chat.cancelRun()}>
+                  回答を中止する
+                </button>
               </div>
             )}
             <div ref={endRef} />

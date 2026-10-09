@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
-# チャット相談のモデル呼び出し1回ぶん（`DispatchJob.kind = CHAT_TURN`・#4109）を、サブPCの
-# ログイン済みCodex CLI（ChatGPT/Codexのサブスク枠）で実行して、結果をissue-deckへ返す。
+# チャット相談1発言ぶん（`DispatchJob.kind = CHAT_TURN`・#4109・#4199）を、サブPCの
+# ログイン済みCodex CLI（ChatGPT/Codexのサブスク枠）で**1回の起動**で実行して、結果をissue-deckへ返す。
+#
+# 調査に要る読み取りは、Codexが同じ起動の中でMCPブリッジ（`lib/chat-tool-bridge.mjs`）を通して
+# `POST /api/dispatch/chat-turn/tool`を呼ぶ。ツールの実行・上限・機密の伏せ字はサーバー側で、
+# Codexはリポジトリにも認証情報にも触れない。
 #
 #   scripts/run-chat-codex.sh <ジョブID>
 #
@@ -11,7 +15,11 @@
 #
 # **読み取り専用で、リポジトリにもホームにも触れない。** 作業ディレクトリは毎回作る空の一時
 # ディレクトリで、`--sandbox read-only --ephemeral --skip-git-repo-check`で起こす。プロンプトは
-# issue-deckの調査ループが組み立てたもので、ツールの実行（DB・GitHubの読み取り）はサーバー側が行う。
+# issue-deckの調査ループが組み立てたもの。ブリッジの設定（URL・シークレット）は0600の一時ファイルで
+# 渡し、コマンドラインや環境変数には置かない（`ps`で見えるため）。
+#
+# **ステップごとの再起動はしない。** 配信待ち・CLI起動・AI処理・ツール取得の内訳は終了時に`timing`として
+# 報告し、サーバーがジョブのメッセージへ残す（実行状況・診断で見られる）。
 #
 # 認証情報（`APP_BASE_URL`・`DISPATCH_SECRET`・`DISPATCH_HOST_NAME`）はpollerの環境か
 # `~/.config/issue-deck/dispatch.env`から取る（`lib/pr-review-report.sh`と同じ）。
@@ -24,7 +32,9 @@ source "$SCRIPT_DIR/lib/agent-cli.sh"
 source "$SCRIPT_DIR/lib/review-usage.sh"
 
 JOB_ID="${1:-}"
-TIMEOUT_SECONDS="${ISSUE_DECK_CHAT_CODEX_TIMEOUT_SECONDS:-110}"
+TIMEOUT_SECONDS="${ISSUE_DECK_CHAT_CODEX_TIMEOUT_SECONDS:-230}"
+BRIDGE="$SCRIPT_DIR/lib/chat-tool-bridge.mjs"
+NODE_BIN="${ISSUE_DECK_NODE:-node}"
 
 if [[ ! "$JOB_ID" =~ ^[a-z0-9]{8,32}$ ]]; then
   echo "Usage: scripts/run-chat-codex.sh <ジョブID>" >&2
@@ -56,12 +66,13 @@ chat_api() {
     curl "${args[@]}" "${APP_BASE_URL_VALUE%/}${path}"
 }
 
-# report <succeeded|failed> [errorKind] [出力ファイル] [usage JSON]
+# report <succeeded|failed> [errorKind] [出力ファイル] [usage JSON] [timing JSON]
 report() {
-  local status="$1" error_kind="${2:-}" output_file="${3:-}" usage="${4:-null}" body code
+  local status="$1" error_kind="${2:-}" output_file="${3:-}" usage="${4:-null}" timing="${5:-null}" body code
   body="$(jq -nc --arg jobId "$JOB_ID" --arg host "$HOST_NAME_VALUE" --arg status "$status" \
     --arg errorKind "$error_kind" --rawfile output "${output_file:-/dev/null}" --argjson usage "$usage" \
-    '{jobId: $jobId, host: $host, status: $status, usage: $usage}
+    --argjson timing "$timing" \
+    '{jobId: $jobId, host: $host, status: $status, usage: $usage, timing: $timing}
       + (if $errorKind == "" then {} else {errorKind: $errorKind} end)
       + (if $output == "" then {} else {output: $output} end)')"
   code="$(chat_api POST /api/dispatch/chat-turn "$body" || true)"
@@ -94,18 +105,44 @@ fi
 model="$(jq -r '.model // ""' "$WORK_DIR/response.json")"
 jq -r '.prompt // ""' "$WORK_DIR/response.json" >"$WORK_DIR/prompt.md"
 jq -c '.schema' "$WORK_DIR/response.json" >"$WORK_DIR/schema.json"
+mode="$(jq -r '.mode // ""' "$WORK_DIR/response.json")"
 if [[ ! "$model" =~ ^gpt-[a-z0-9.-]+$ || ! -s "$WORK_DIR/prompt.md" ]]; then
   report failed codex_error
   exit 0
 fi
 
+# セッション型: 読み取りツールをMCPブリッジで渡す（ステップごとにCLIを起こし直さない）。
+# 古いサーバーが`mode`を返さないときは、従来どおりツール無しの1回実行（最終回答だけ）になる
+codex_args=(exec --json --skip-git-repo-check --sandbox read-only --ephemeral
+  -m "$model" --output-schema "$WORK_DIR/schema.json" --output-last-message "$WORK_DIR/out.json"
+  -C "$WORK_DIR/cwd")
+if [[ "$mode" == "session" ]]; then
+  if [[ ! -f "$BRIDGE" ]] || ! command -v "$NODE_BIN" >/dev/null 2>&1; then
+    report failed codex_error
+    exit 0
+  fi
+  (
+    umask 077
+    jq -n --arg baseUrl "${APP_BASE_URL_VALUE%/}" --arg secret "$DISPATCH_SECRET_VALUE" --arg jobId "$JOB_ID" \
+      --arg host "$HOST_NAME_VALUE" --argjson tools "$(jq -c '.tools // []' "$WORK_DIR/response.json")" \
+      '{baseUrl: $baseUrl, secret: $secret, jobId: $jobId, host: $host, tools: $tools}' >"$WORK_DIR/bridge.json"
+  )
+  # ブリッジのツールは`readOnlyHint`付きなので承認なしで呼べる。コマンドラインに出るのはパスだけ
+  codex_args+=(-c "mcp_servers.idchat.command=\"$NODE_BIN\""
+    -c "mcp_servers.idchat.args=[\"$BRIDGE\",\"$WORK_DIR/bridge.json\"]"
+    -c "mcp_servers.idchat.startup_timeout_sec=20"
+    -c "mcp_servers.idchat.tool_timeout_sec=90")
+fi
+
 exit_code=0
-timeout "$TIMEOUT_SECONDS" "$CODEX" exec --json --skip-git-repo-check --sandbox read-only --ephemeral \
-  -m "$model" --output-schema "$WORK_DIR/schema.json" --output-last-message "$WORK_DIR/out.json" \
-  -C "$WORK_DIR/cwd" - <"$WORK_DIR/prompt.md" >"$WORK_DIR/events.jsonl" 2>"$WORK_DIR/stderr.log" || exit_code=$?
+started_ms="$(date +%s%3N)"
+timeout "$TIMEOUT_SECONDS" "$CODEX" "${codex_args[@]}" - <"$WORK_DIR/prompt.md" \
+  >"$WORK_DIR/events.jsonl" 2>"$WORK_DIR/stderr.log" || exit_code=$?
+codex_ms=$(( $(date +%s%3N) - started_ms ))
+timing="$(jq -nc --argjson codexMs "$codex_ms" '{codexMs: $codexMs}')"
 
 if [[ "$exit_code" -eq 124 ]]; then
-  report failed timeout
+  report failed timeout "" null "$timing"
   exit 0
 fi
 if [[ "$exit_code" -ne 0 || ! -s "$WORK_DIR/out.json" ]]; then
@@ -125,4 +162,4 @@ if [[ "$exit_code" -ne 0 || ! -s "$WORK_DIR/out.json" ]]; then
 fi
 
 usage="$(jq -c 'select(.type == "turn.completed") | .usage' "$WORK_DIR/events.jsonl" 2>/dev/null | tail -1)"
-report succeeded "" "$WORK_DIR/out.json" "${usage:-null}"
+report succeeded "" "$WORK_DIR/out.json" "${usage:-null}" "$timing"

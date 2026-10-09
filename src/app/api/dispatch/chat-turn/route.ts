@@ -51,6 +51,7 @@ export async function POST(request: NextRequest) {
     output: typeof payload?.output === "string" ? payload.output : null,
     errorKind: payload?.errorKind,
     usage: payload?.usage,
+    timing: payload?.timing,
   });
   if (!result.ok) return json({ error: result.error }, { status: result.status });
   return json({ ok: true });

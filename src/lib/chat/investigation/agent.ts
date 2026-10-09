@@ -71,6 +71,23 @@ export type CallModel = (params: {
   timeoutMs: number;
 }) => Promise<{ ok: true; text: string } | { ok: false; reason: string }>;
 
+/** セッション型の実行（#4199）でCodexがMCP経由で呼ぶツールの受け口。上限・重複・機密の伏せ字はここで掛かる */
+export type SessionToolRunner = (name: string, args: Record<string, unknown>) => Promise<{ ok: boolean; text: string }>;
+
+/**
+ * 1回の起動で調査から最終回答まで進める実行（#4199）。ステップごとにモデルを呼び直さず、
+ * 実行側が`runTool`を好きなだけ（上限内で）呼び、最後に`action="final"`の1つのJSONを返す。
+ */
+export type RunSession = (params: {
+  system: string;
+  messages: ModelMessage[];
+  timeoutMs: number;
+  runTool: SessionToolRunner;
+}) => Promise<{ ok: true; text: string } | { ok: false; reason: string }>;
+
+/** `read_many`1回にまとめられる取得の数（独立した取得の往復を減らす。個々の取得も回数の上限に数える） */
+export const SESSION_BATCH_MAX = 4;
+
 export const STEP_SCHEMA = {
   type: "object",
   properties: {
@@ -110,13 +127,22 @@ export const STEP_SCHEMA = {
   additionalProperties: false,
 } as const;
 
-export function buildSystemPrompt(): string {
+export function buildSystemPrompt(options: { session?: boolean } = {}): string {
   const tools = TOOL_SPECS.map((t) => `- ${t.name} ${t.args}\n    ${t.description}`).join("\n");
   return `あなたはissue-deckのチャットで、リポジトリの状況を調べて答える調査担当です。利用者はこのリポジトリ群のオーナー本人です。
 
 # 進め方
-- 依頼と会話の文脈から、必要な読み取りだけを選んで調べる。結果を見て足りなければ追加で調べる。最大${INVESTIGATION_LIMITS.maxSteps}回までに最終回答を出す
-- 毎回、次のどちらかを出力する。action="tool"なら tool と args_json（JSON文字列）を埋め、action="final"なら回答を埋める。使わない欄は空文字・空配列・0にする
+- 依頼と会話の文脈から、必要な読み取りだけを選んで調べる。結果を見て足りなければ追加で調べる。${
+    options.session
+      ? `取得は合計${INVESTIGATION_LIMITS.maxSteps - 1}回まで（read_many の中身も1回ずつ数える）。それまでに最終回答を出す`
+      : `最大${INVESTIGATION_LIMITS.maxSteps}回までに最終回答を出す`
+  }
+${
+    options.session
+      ? `- ツールは MCP ツールとして直接呼べる（ツール名は下の一覧と同じ）。互いに依存しない取得は read_many でまとめるか並行して呼び、往復を減らす。ツールが要らない相談は、呼ばずにすぐ final を出す
+- 調べ終えたら、action="final" の1つのJSONだけを出力する（action="tool" は使わない）。使わない欄は空文字・空配列・0にする`
+      : `- 毎回、次のどちらかを出力する。action="tool"なら tool と args_json（JSON文字列）を埋め、action="final"なら回答を埋める。使わない欄は空文字・空配列・0にする`
+  }
 - 同じツールを同じ引数で呼び直さない。取得に失敗した範囲は「未確認」に入れ、「問題なし」と言わない
 - PR本文の「要確認（needs-check）」やレビュー判定の文言だけで結論を出さない。レビューの中身（get_pr_discussion）と差分・CIログを読んで、修正可能な指摘／方針判断待ち／情報不足／修正不要のどれかを理由つきで説明する
 - 自動レビュー判定の判定時HEADが現在のHEADと違う（古い判定）なら、修正済み・マージ可能と断定しない
@@ -238,13 +264,15 @@ export async function runInvestigation(params: {
   clock?: () => number;
   /** 時間の上限の差し替え（Codex CLI経由は受け取り待ちと起動が乗るため長く取る。#4109） */
   limits?: { maxDurationMs?: number; stepTimeoutMs?: number };
+  /** 指定すると、ステップごとの`callModel`でなく1回の実行で調査から回答まで進める（#4199） */
+  session?: RunSession;
 }): Promise<InvestigationResult> {
   const clock = params.clock ?? Date.now;
   const maxDurationMs = params.limits?.maxDurationMs ?? INVESTIGATION_LIMITS.maxDurationMs;
   const stepTimeoutMs = params.limits?.stepTimeoutMs ?? INVESTIGATION_LIMITS.stepTimeoutMs;
   const exec = params.tool ?? runTool;
   const startedAt = clock();
-  const system = buildSystemPrompt();
+  const system = buildSystemPrompt({ session: Boolean(params.session) });
   const evidence: ChatEvidence[] = [];
   const toolCalls: InvestigationResult["toolCalls"] = [];
   const seen = new Set<string>();
@@ -278,6 +306,22 @@ export async function runInvestigation(params: {
     steps: toolCalls.length,
     toolCalls,
   });
+
+  if (params.session) {
+    return runSessionInvestigation({
+      session: params.session,
+      system,
+      messages,
+      exec,
+      ctx: params.ctx,
+      remainingMs: () => maxDurationMs - (clock() - startedAt),
+      stepTimeoutMs,
+      evidence,
+      toolCalls,
+      seen,
+      stop,
+    });
+  }
 
   for (let step = 1; step <= INVESTIGATION_LIMITS.maxSteps; step++) {
     const remaining = maxDurationMs - (clock() - startedAt);
@@ -345,4 +389,104 @@ export function dedupeEvidence(items: ChatEvidence[]): ChatEvidence[] {
     out.push(item);
   }
   return out.slice(0, 12);
+}
+
+/**
+ * セッション型（#4199）。ツールは実行側（Codex）が呼び、ここは**同じ上限**を掛ける:
+ * 取得は合計`maxSteps - 1`回・同じ呼び出しは2回目を断る・連続失敗3回で打ち切る・時間の上限。
+ * 上限に達したツールは結果の代わりに「final を出せ」と返し、モデル側に最後の回答を促す。
+ */
+async function runSessionInvestigation(params: {
+  session: RunSession;
+  system: string;
+  messages: ModelMessage[];
+  exec: (ctx: ToolContext, name: string, args: Record<string, unknown>) => Promise<ToolResult>;
+  ctx: ToolContext;
+  remainingMs: () => number;
+  stepTimeoutMs: number;
+  evidence: ChatEvidence[];
+  toolCalls: InvestigationResult["toolCalls"];
+  seen: Set<string>;
+  stop: (reason: string, partial?: InvestigationOutput) => InvestigationResult;
+}): Promise<InvestigationResult> {
+  const maxCalls = INVESTIGATION_LIMITS.maxSteps - 1;
+  let reserved = 0;
+  let consecutiveFailures = 0;
+  let halted: string | null = null;
+  /** 取得の失敗・時間切れで止めた理由。回数の上限は、最後に final を出せていれば正常な完走と同じに扱う（従来の最後の1手と同じ） */
+  let abnormalStop: string | null = null;
+  let finished = false;
+  const wrap = (name: string, ok: boolean, text: string) =>
+    `<untrusted_data tool="${name}" ok="${ok}">\n${redactSecrets(text)}\n</untrusted_data>`;
+
+  const single = async (name: string, args: Record<string, unknown>): Promise<{ ok: boolean; text: string }> => {
+    if (finished) return { ok: false, text: "調査は終了しています。" };
+    if (halted) return { ok: false, text: `${halted}。これ以上ツールは呼ばず、action="final" を出してください。` };
+    if (params.remainingMs() <= 0) {
+      halted = "時間の上限に達しました";
+      abnormalStop = `${halted}`;
+      return { ok: false, text: `${halted}。action="final" を出してください。` };
+    }
+    if (reserved >= maxCalls) {
+      halted = "調査の回数の上限に達しました";
+      return { ok: false, text: `${halted}。見られなかった範囲は unconfirmed に書き、action="final" を出してください。` };
+    }
+    reserved++;
+    if (!isKnownTool(name)) {
+      consecutiveFailures++;
+      return { ok: false, text: wrap(name, false, `未知のツールです（${name}）。使えるツール名で呼び直してください。`) };
+    }
+    const key = callKey(name, args);
+    if (params.seen.has(key)) {
+      consecutiveFailures++;
+      return { ok: false, text: wrap(name, false, "同じ呼び出しは済んでいます。結果を使って次へ進むか、final を出してください。") };
+    }
+    params.seen.add(key);
+    const result = await params.exec(params.ctx, name, args);
+    params.toolCalls.push({ name, ok: result.ok, args });
+    params.evidence.push(...result.evidence);
+    consecutiveFailures = result.ok ? 0 : consecutiveFailures + 1;
+    let text = wrap(name, result.ok, result.text);
+    if (consecutiveFailures >= INVESTIGATION_LIMITS.maxConsecutiveFailures) {
+      halted = "取得の失敗が続いたため止めました";
+      abnormalStop = `${halted}（権限・接続を確認してください）`;
+      text += `\n${halted}。権限・接続の問題として未確認に書き、action="final" を出してください。`;
+    }
+    return { ok: result.ok, text };
+  };
+
+  const runTool: SessionToolRunner = async (name, args) => {
+    if (name !== "read_many") return single(name, args);
+    const calls = Array.isArray(args.calls) ? args.calls.slice(0, SESSION_BATCH_MAX) : [];
+    if (calls.length === 0) return { ok: false, text: "calls に取得を1件以上指定してください。" };
+    const results = await Promise.all(
+      calls.map((call) => {
+        const c = call && typeof call === "object" ? (call as Record<string, unknown>) : {};
+        const callArgs = c.args && typeof c.args === "object" && !Array.isArray(c.args) ? (c.args as Record<string, unknown>) : {};
+        return single(typeof c.tool === "string" ? c.tool : "", callArgs);
+      }),
+    );
+    return { ok: results.some((r) => r.ok), text: results.map((r) => r.text).join("\n\n") };
+  };
+
+  const response = await params.session({
+    system: params.system,
+    messages: params.messages,
+    timeoutMs: Math.min(params.stepTimeoutMs, Math.max(params.remainingMs(), 0)),
+    runTool,
+  });
+  finished = true;
+  if (!response.ok) return params.stop(`AIの呼び出しに失敗しました（${response.reason}）`);
+  const parsed = parseStep(response.text);
+  if (!parsed) return params.stop("AIの応答を読み取れませんでした");
+  if (parsed.action !== "final" || !parsed.final) {
+    return params.stop("AIが最終回答を出さずに終わりました", undefined);
+  }
+  return {
+    ...parsed.final,
+    evidence: dedupeEvidence(params.evidence),
+    stopReason: abnormalStop,
+    steps: params.toolCalls.length,
+    toolCalls: params.toolCalls,
+  };
 }

@@ -10,6 +10,7 @@ import {
   parseStep,
   runInvestigation,
   type CallModel,
+  type RunSession,
 } from "@/lib/chat/investigation/agent";
 import type { ToolResult } from "@/lib/chat/investigation/tools";
 
@@ -182,5 +183,146 @@ describe("parseStep / callKey", () => {
   });
   it("引数の並び順が違っても同じ呼び出しとみなす", () => {
     expect(callKey("a", { x: 1, y: 2 })).toBe(callKey("a", { y: 2, x: 1 }));
+  });
+});
+
+describe("セッション型の調査（1回の実行で調査から回答まで。#4199）", () => {
+  const sessionOf = (script: (run: Parameters<RunSession>[0]["runTool"]) => Promise<string>): RunSession => {
+    return async ({ runTool }) => ({ ok: true, text: await script(runTool) });
+  };
+
+  it("ツールは実行側が呼び、結果・根拠・呼び出し記録が最終回答へ載る（モデルは1回だけ）", async () => {
+    const tool = vi.fn(async () => ok("PRの状態"));
+    const callModel = vi.fn();
+    const result = await runInvestigation({
+      ...base,
+      callModel: callModel as unknown as CallModel,
+      tool,
+      session: sessionOf(async (runTool) => {
+        await runTool("get_pull_request", { number: 1 });
+        await runTool("get_pr_discussion", { number: 1 });
+        return finalStep();
+      }),
+    });
+    expect(callModel).not.toHaveBeenCalled();
+    expect(result.stopReason).toBeNull();
+    expect(result.toolCalls.map((c) => c.name)).toEqual(["get_pull_request", "get_pr_discussion"]);
+    expect(result.evidence.length).toBeGreaterThan(0);
+    expect(result.reply).toContain("未解消");
+  });
+
+  it("read_manyで独立した取得をまとめられ、個々の取得も上限に数える", async () => {
+    const tool = vi.fn(async () => ok("x"));
+    let batch = "";
+    const result = await runInvestigation({
+      ...base,
+      callModel: vi.fn() as unknown as CallModel,
+      tool,
+      session: sessionOf(async (runTool) => {
+        batch = (
+          await runTool("read_many", {
+            calls: [
+              { tool: "get_issue", args: { number: 1 } },
+              { tool: "get_issue", args: { number: 2 } },
+            ],
+          })
+        ).text;
+        return finalStep();
+      }),
+    });
+    expect(tool).toHaveBeenCalledTimes(2);
+    expect(batch.match(/<untrusted_data/g)).toHaveLength(2);
+    expect(result.toolCalls).toHaveLength(2);
+  });
+
+  it("調査不要の相談はツールを呼ばずに回答できる", async () => {
+    const tool = vi.fn();
+    const result = await runInvestigation({ ...base, callModel: vi.fn() as unknown as CallModel, tool, session: sessionOf(async () => finalStep()) });
+    expect(tool).not.toHaveBeenCalled();
+    expect(result.steps).toBe(0);
+    expect(result.stopReason).toBeNull();
+  });
+
+  it("上限を超えた取得は実行せず、final を促す（従来と同じ回数）", async () => {
+    const tool = vi.fn(async () => ok("x"));
+    let last = { ok: true, text: "" };
+    await runInvestigation({
+      ...base,
+      callModel: vi.fn() as unknown as CallModel,
+      tool,
+      session: sessionOf(async (runTool) => {
+        for (let n = 1; n <= INVESTIGATION_LIMITS.maxSteps + 2; n++) last = await runTool("get_issue", { number: n });
+        return finalStep();
+      }),
+    });
+    expect(tool).toHaveBeenCalledTimes(INVESTIGATION_LIMITS.maxSteps - 1);
+    expect(last.ok).toBe(false);
+    expect(last.text).toContain("final");
+  });
+
+  it("同じ呼び出しの繰り返しは実行せずに断る", async () => {
+    const tool = vi.fn(async () => ok("x"));
+    let second = { ok: true, text: "" };
+    await runInvestigation({
+      ...base,
+      callModel: vi.fn() as unknown as CallModel,
+      tool,
+      session: sessionOf(async (runTool) => {
+        await runTool("get_issue", { number: 1 });
+        second = await runTool("get_issue", { number: 1 });
+        return finalStep();
+      }),
+    });
+    expect(tool).toHaveBeenCalledTimes(1);
+    expect(second.ok).toBe(false);
+  });
+
+  it("取得の失敗が続けば止め、停止理由つきで返す。機密値は伏せる", async () => {
+    const tool = vi.fn(async (): Promise<ToolResult> => ({ ok: false, text: "token ghp_abcdefghijklmnopqrstuvwxyz0123456789 で失敗", evidence: [] }));
+    let text = "";
+    const result = await runInvestigation({
+      ...base,
+      callModel: vi.fn() as unknown as CallModel,
+      tool,
+      session: sessionOf(async (runTool) => {
+        for (let n = 1; n <= 3; n++) text = (await runTool("get_issue", { number: n })).text;
+        return finalStep();
+      }),
+    });
+    expect(text).not.toContain("ghp_abcdefghijklmnopqrstuvwxyz0123456789");
+    expect(result.stopReason).toContain("失敗が続いた");
+  });
+
+  it("実行の失敗（時間切れ・異常終了）は停止理由として返し、最終回答が無ければ読み取り不能", async () => {
+    const failed = await runInvestigation({
+      ...base,
+      callModel: vi.fn() as unknown as CallModel,
+      session: async () => ({ ok: false, reason: "Codex(timeout) Codexの応答が時間切れになりました" }),
+    });
+    expect(failed.stopReason).toContain("Codex(timeout)");
+    const noFinal = await runInvestigation({
+      ...base,
+      callModel: vi.fn() as unknown as CallModel,
+      session: sessionOf(async () => toolStep("get_issue", { number: 1 })),
+    });
+    expect(noFinal.stopReason).toContain("最終回答");
+  });
+
+  it("終わった実行からの遅れたツール呼び出しは実行しない（他の会話へ漏らさない）", async () => {
+    const tool = vi.fn(async () => ok("x"));
+    let late: SessionRunner | null = null;
+    type SessionRunner = Parameters<RunSession>[0]["runTool"];
+    await runInvestigation({
+      ...base,
+      callModel: vi.fn() as unknown as CallModel,
+      tool,
+      session: sessionOf(async (runTool) => {
+        late = runTool;
+        return finalStep();
+      }),
+    });
+    const result = await (late as unknown as SessionRunner)("get_issue", { number: 9 });
+    expect(result.ok).toBe(false);
+    expect(tool).not.toHaveBeenCalled();
   });
 });
