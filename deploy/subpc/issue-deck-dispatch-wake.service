@@ -1,0 +1,28 @@
+[Unit]
+# サブPCのジョブ即時通知の受信サービス（#4200）。issue-deckがジョブを保存した直後に
+# Tailscale内から届く合図を受け、pollerの巡回を前倒しさせる。
+# **pollerとは別のunit**。このサービスを再起動・停止しても、pollerと実行中の
+# セッション・tmuxには触れない（通知が止まれば従来の定期巡回に戻るだけ）。
+Description=issue-deck dispatch wake receiver
+Documentation=https://github.com/guchi-apps/issue-deck/blob/develop/docs/multi-agent/subpc-dispatch.md
+After=network-online.target tailscaled.service
+Wants=network-online.target
+
+StartLimitIntervalSec=5min
+StartLimitBurst=5
+
+[Service]
+Type=simple
+# DISPATCH_SECRET・DISPATCH_HOST_NAME はpollerと同じファイルから読む。
+# 待ち受けアドレス・ポート（WAKE_LISTEN_ADDR・WAKE_LISTEN_PORT）も同じファイルへ書く
+EnvironmentFile=%h/.config/issue-deck/dispatch.env
+# tailnetのアドレスが付くのを待つため、失敗しても30秒おきに起こし直す
+ExecStart=/bin/bash -lc 'exec node %h/apps/issue-deck/scripts/dispatch-wake-receiver.mjs'
+Restart=always
+RestartSec=30s
+# 受け取る合図だけを扱う小さなプロセスなので、権限も絞る
+NoNewPrivileges=true
+PrivateTmp=false
+
+[Install]
+WantedBy=default.target

@@ -1,4 +1,5 @@
 import { db } from "@/lib/db";
+import { notifyDispatchHostWake } from "@/lib/dispatch/wake-notify";
 import { resolveImplementationProvider } from "@/lib/dispatch/implementation-provider";
 import { DISPATCH_HOST_ONLINE_WINDOW_MS, buildDispatchActiveKey, parseDispatchHostRepositories } from "@/lib/dispatch/dispatch-job";
 import { getInstallationToken } from "@/lib/github/app-auth";
@@ -77,7 +78,9 @@ export async function requestReviewFixJob(target: ReviewFixTarget) {
   const host = hosts.find((h) => parseDispatchHostRepositories(h.repositories).includes(target.repository));
   if (!host) throw new Error("レビュー修正に対応するサブPCがありません。pollerを更新し、オンライン状態を確認してください");
   try {
-    return await db.dispatchJob.create({ data: { ...where, targetHost: host.name, agent: "codex", status: "QUEUED", prNumber: target.pullRequest, instruction: target.manual ? "manual" : "automatic", workflowRunId: target.runId ?? null, activeKey: buildDispatchActiveKey(target.repository, target.issueNumber), } });
+    const created = await db.dispatchJob.create({ data: { ...where, targetHost: host.name, agent: "codex", status: "QUEUED", prNumber: target.pullRequest, instruction: target.manual ? "manual" : "automatic", workflowRunId: target.runId ?? null, activeKey: buildDispatchActiveKey(target.repository, target.issueNumber), } });
+    notifyDispatchHostWake(created.targetHost);
+    return created;
   } catch (error) {
     const raced = await db.dispatchJob.findFirst({ where, orderBy: { createdAt: "desc" } });
     if (raced) return raced;
