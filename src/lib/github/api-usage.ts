@@ -61,6 +61,7 @@ export const GITHUB_API_FEATURES = [
   // 別の操作から呼ばれるため、消費の内訳を分けて見られるようキーも分ける（#3383）。
   { key: "pull_request_file_diff", label: "PR詳細の変更ファイル差分の取得" },
   { key: "pull_request_changes", label: "マージ確認の変更点の取得" },
+  { key: "release_changes", label: "リリース起動確認の反映内容の取得" },
   // マージ確認のレビュー指摘（#2849）。**PR詳細の「修正Issueを起案」「修正を依頼」を押したときだけ**
   // 消費する（対象PRの本体とコメントで2リクエスト。#3333でIssue詳細からは取らなくなった）
   { key: "pull_request_review_comment", label: "マージ確認のレビュー指摘の取得" },

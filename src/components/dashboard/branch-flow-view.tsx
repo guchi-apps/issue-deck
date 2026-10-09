@@ -1335,10 +1335,6 @@ function ReleaseFlowGraph({
   // 「いま本番に出ているもの」を示すのに使う。束は新しい順なので先頭から最初の1件でよい。
   const latestReleaseMergedAt =
     repository.releaseGroups.find((group) => group.mergedAt !== null)?.mergedAt ?? null;
-  const pendingIssues = (repository.releaseGroups[0]?.mergedAt === null
-    ? repository.releaseGroups[0].lanes
-    : []
-  ).flatMap((lane) => (lane.issue ? [lane.issue] : []));
 
   // 本番デプロイが失敗しているか（#2236）。**帯の置き場所はリポジトリの節で、束ではない**
   // ——束は「次のリリースに乗る分」があると畳まれる（`visibleGroups`）ので、直らないまま
@@ -1453,7 +1449,6 @@ function ReleaseFlowGraph({
               group.bumpPullRequest === null ? (
                 <RepositoryReleaseButton
                   repositoryFullName={repository.repositoryFullName}
-                  pendingIssues={pendingIssues}
                   currentVersion={repository.release.latestVersion}
                   isPending={releaseTriggerPending}
                   blockedReason={repository.releaseBlockedReason}

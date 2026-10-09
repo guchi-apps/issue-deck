@@ -19,7 +19,6 @@ describe("本番デプロイ失敗中の修正リリース", () => {
     render(
       <RepositoryReleaseButton
         repositoryFullName="guchi-apps/issue-deck"
-        pendingIssues={[]}
         isPending={false}
         blockedReason="deploy-failed"
         onTriggered={() => {}}

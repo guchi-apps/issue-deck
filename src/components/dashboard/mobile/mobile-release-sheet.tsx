@@ -6,6 +6,7 @@ import { Rocket } from "lucide-react";
 
 import { DeviceBuildInstructions } from "@/components/dashboard/device-build-instructions";
 import { GithubReferenceLink } from "@/components/dashboard/github-reference-link";
+import { ReleaseChangeList } from "@/components/dashboard/release-change-list";
 import { ReleaseProgress } from "@/components/dashboard/release-progress";
 import { ReleaseRebuildButton } from "@/components/dashboard/release-rebuild-button";
 import { IosTestflightStatus } from "@/components/dashboard/ios-testflight-status";
@@ -29,7 +30,6 @@ import {
   formatDevelopVersionDisplay,
   formatMainVersionDisplay,
 } from "@/lib/github/release-version-display";
-import { isNextReleaseIssue } from "@/lib/issue-progress";
 import { RELEASE_BRANCH_PREFIX } from "@/lib/pull-request-list";
 import { getWebviewIosRepository } from "@/lib/webview-ios-repos";
 import type { Issue } from "@/types/issue";
@@ -70,16 +70,6 @@ export function MobileReleaseSheet({
   // 同じリポジトリが両方に載ることは無い。
   const deviceBuild = getDeviceBuildRepository(repository.fullName);
   const webviewIos = getWebviewIosRepository(repository.fullName);
-
-  // 誤タップでの起動を防ぐため確認ダイアログを挟む。今回developにマージ済みでmain未反映のIssueを
-  // 「今回反映する内容」として一覧表示する（#426）。
-  const pendingReleaseIssues = useMemo(
-    () =>
-      issues.filter(
-        (issue) => issue.repositoryFullName === repository.fullName && isNextReleaseIssue(issue),
-      ),
-    [issues, repository.fullName],
-  );
 
   // Issueを起票せず直接developへ作られたPRの見落としに気づけるよう、develop向けの
   // その他のオープンPR（バンプPR自身を除く）を、参照Issue番号から画面に読み込み済みのIssueと
@@ -184,24 +174,15 @@ export function MobileReleaseSheet({
               {repository.fullName}のdevelopをmainへ反映するリリースworkflowを起動します。
             </AlertDialogDescription>
           </AlertDialogHeader>
-          {pendingReleaseIssues.length > 0 ? (
-            <div className="flex max-h-48 flex-col gap-1.5 overflow-y-auto rounded-md border p-2">
-              <p className="text-xs font-medium text-muted-foreground">今回反映する内容</p>
-              <ul className="flex flex-col gap-1 text-xs">
-                {pendingReleaseIssues.map((issue) => (
-                  <li key={issue.id}>
-                    <GithubReferenceLink href={issue.htmlUrl} className="hover:underline">
-                      #{issue.number} {issue.title}
-                    </GithubReferenceLink>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ) : (
-            <p className="text-xs text-muted-foreground">
-              develop済みでmain未反映のIssueはありません。
-            </p>
-          )}
+          <ReleaseChangeList
+            repositoryFullName={repository.fullName}
+            enabled={releaseConfirmOpen}
+            releasePullRequestNumber={
+              releaseStatus?.available && releaseStatus.phase === "release_pr_open"
+                ? (releaseStatus.releasePullRequest?.number ?? null)
+                : null
+            }
+          />
           {deployFailed && (
             <label className="flex items-start gap-2 rounded-md border border-destructive/40 p-3 text-sm">
               <Checkbox
