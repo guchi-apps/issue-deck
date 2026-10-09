@@ -5,6 +5,7 @@ import { readFileSync, writeFileSync, mkdirSync, renameSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { CONTEXT, processPullRequest } from './lib/ios-precheck-automation.mjs';
+import { listOpenPullRequests } from './lib/ios-precheck-pr-list.mjs';
 
 const scripts = dirname(fileURLToPath(import.meta.url));
 const root = process.env.ISSUE_DECK_IOS_AUTOMATION_STATE
@@ -53,7 +54,7 @@ for (const repository of repositories) {
     if (!settings.configured || !settings.required) continue;
     const repoDir = localRepo(repository);
     // 全ページを取得。設定済みの同一repo・develop向けだけを後段で検証する。
-    const prs = gh(`repos/${repository}/pulls?state=open&base=develop&per_page=100`, '--paginate', '--slurp').flat();
+    const prs = listOpenPullRequests(gh, repository);
     for (const pr of prs) {
       const stateFile = join(root, `${repository.replace('/', '--')}-${pr.number}.json`);
       try {
