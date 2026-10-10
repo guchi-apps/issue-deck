@@ -4576,7 +4576,7 @@ GitHub Actions障害時に、PR詳細からCircleCIを直接起動してdevelop�
 **共通チェックの発行は`gate-service.ts`の`syncPullRequestCiGate`だけが行う**（#4113）。通常時のActions
 （ci.ymlの必須ジョブ）とバックアップCIの両方の最新の試行から、最後に始まった方を採用し（判定は`gate.ts`）、
 採用した経路は`CiGateState`に残す。Actionsの結果はpollerの巡回（`sweepCiGateMirror`）と`workflow_run`の
-Webhookで取り込む。運用・移行・ロールバックは[backup-ci.md](backup-ci.md)。
+Webhookで取り込む。運用・移行・ロールバックは[backup-ci.md](backup-ci.md)。 他リポジトリへの展開（#4308）は`src/lib/backup-ci/rollout.ts`・`rollout-service.ts`・`/api/backup-ci/rollout`・`.github/scripts/propagate-backup-ci.sh`（[backup-ci.md](backup-ci.md) 9章）。
 バックアップCIの合格を採用したPRは、Actionsを経由せずにissue-deckがサブPCのCodexレビュー（`PR_REVIEW`）を
 積み、LGTMならdevelopへマージする（#4114。判定は`merge.ts`、実行と巡回は`merge-service.ts`の
 `sweepBackupCiMerges`。進み具合は`BackupCiRun.mergeStatus`）。
