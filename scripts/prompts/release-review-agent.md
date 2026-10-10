@@ -48,7 +48,7 @@
   "state": "passed または needs_check または failed",
   "summary": "全体の所見（数行）",
   "findings": [
-    { "severity": "high|medium|low", "title": "短い見出し", "detail": "理由と対象", "file": "パス", "pullRequests": [123] }
+    { "severity": "high|medium|low", "title": "短い見出し", "detail": "問題の概要", "impact": "利用者・本番への影響", "evidence": "根拠（再現手順・該当コード）", "recommendation": "推奨する対応", "file": "パス", "line": 12, "pullRequests": [123] }
   ],
   "affectedPullRequests": [123],
   "affectedFiles": ["パス"]

@@ -1,4 +1,4 @@
-import type { DispatchJob } from "@prisma/client";
+import { Prisma, type DispatchJob } from "@prisma/client";
 
 import { db } from "@/lib/db";
 import {
@@ -13,6 +13,7 @@ import {
   resolveReleaseReviewAssignee,
   type ReleaseReviewAssignee,
 } from "@/lib/release-review-assignee";
+import { normalizeReleaseReviewDiagnostic } from "@/lib/release-review-diagnostic";
 import { normalizeReleaseReview } from "@/lib/release-review-result";
 import {
   recordReleaseVerificationResult,
@@ -53,6 +54,26 @@ async function pickReleaseReviewHost(
 }
 
 /**
+ * 失敗した全体レビューを同じ対象でやり直す（#4300）。**積めたとき（`already_queued`を除く）だけ**、
+ * 同対象の`ai_review`を`waiting`へ戻して旧実行の診断・指摘を消す。残すと、再実行中も旧実行の
+ * 失敗原因が現在の結果として出続ける。重複防止は`requestReleaseReviewJob`の`activeKey`に従う
+ * （実行中・待機中のジョブがあれば何もしない）。
+ */
+export async function rerunReleaseReviewJob(
+  target: ReleaseVerificationTarget,
+  now: Date = new Date(),
+): Promise<RequestReleaseReviewResult> {
+  const result = await requestReleaseReviewJob(target, now);
+  if (result.ok && result.outcome === "queued") {
+    await db.releaseVerification.updateMany({
+      where: { ...target, kind: "ai_review" },
+      data: { state: "waiting", findings: Prisma.DbNull, message: null, summary: null, unverifiedScope: null },
+    });
+  }
+  return result;
+}
+
+/**
  * 全体レビューを積む（冪等）。同じ対象（PR・base・head）に未完了のジョブがあればそれを返し、
  * 新しい対象が積まれたら同じPRの古い待機中ジョブは取り消す。**積めない理由は`ai_review`の
  * 失敗として記録する**（未実施のまま黙らせず、画面に理由を出す）。
@@ -75,7 +96,14 @@ export async function requestReleaseReviewJob(
   const hostName = await pickReleaseReviewHost(target.repoFullName, assignee, now);
   if (hostName === null) {
     const message = `${target.repoFullName}の全体レビュー（${describeReleaseReviewAssignee(assignee)}）を実行できるサブPCがありません（オフライン・pollerが未対応・リポジトリ未登録・Codex未対応のいずれか）。`;
-    await recordReleaseVerificationResult(target, { kind: "ai_review", state: "failed", message });
+    await recordReleaseVerificationResult(target, {
+      kind: "ai_review",
+      state: "failed",
+      message,
+      findings: {
+        diagnostic: normalizeReleaseReviewDiagnostic({ stage: "prepare", cause: "no_host" }, target),
+      },
+    });
     return { ok: false, rejection: "no_host", message };
   }
 
@@ -162,10 +190,18 @@ export async function applyReleaseReviewReport(
       message: typeof raw.message === "string" ? raw.message.slice(0, 5000) : message,
     });
   }
+  // 実行失敗の診断（#4300）。コードへの指摘ではないので`findings`の指摘配列には入れず、
+  // 対象SHA付きの`diagnostic`として持つ。報告が無い（古い実行側）ときは持たず、画面は原因未特定として出す
+  const diagnostic = normalizeReleaseReviewDiagnostic(
+    (body as { diagnostic?: unknown } | null)?.diagnostic,
+    target,
+  );
   return recordReleaseVerificationResult(target, {
     kind: "ai_review",
     state: "failed",
     agent,
+    findings: diagnostic ? { diagnostic } : Prisma.DbNull,
+    summary: null,
     message:
       status === "failed"
         ? (message ?? "全体レビューが失敗しました")

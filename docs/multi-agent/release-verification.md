@@ -85,6 +85,16 @@ PC（リリースPR詳細）・スマホ（リリースシート）・**本番�
 - **取得**: `GET /api/repositories/release/verification`と`GET /api/repositories/release/changes`を部品自身が取り、待機・実行中は5秒間隔、
   取得に失敗しても間隔を空けて取り直す。「更新」で両方を取り直す。スマホのシートも同じ取得を使う
 
+### 全体レビューの指摘と実行失敗の区別（#4300）
+
+`ai_review`の**指摘（コードへの問題）**と**実行失敗（レビューを最後まで行えなかった）**は別物として扱う。
+
+- 指摘: `findings`に重要度・概要・影響・根拠・推奨対応・ファイル／行・関連PRを持ち、画面は件数と最重要の題を閉じたまま、詳細を開いて出す。要修正は従来どおり「developへ入れて作り直す」
+- 実行失敗: `state=failed`のとき、`findings.diagnostic`（`stage`・`cause`・`exitCode`・機密除去済み`excerpt`・対象base/head SHA）を持つ。画面は「レビュー未完了」と出し、失敗した工程・確認できた原因・次の操作・エラー抜粋（tmuxが無くても読める）を示す。**作り直しは勧めず、「全体レビューを再実行」が主導線**
+- 原因（`cause`）は`launch_failed`（終了コード126/127・CLI無し）／`auth_failed`（ログに認証エラー表示）／`timeout`（124/137）／`parse_failed`／`target_missing`／`no_host`／`unknown`。**観測できた事実だけで決め、決められなければ`unknown`（原因未特定）**。126だけから権限問題などと断定しない
+- 診断は対象SHA付きで保存し、現在のSHAと一致するものだけを表示する（旧実行の原因を現在の結果に見せない）。機密は実行側（`scripts/run-release-review.sh`の`diag_redact`）とサーバー（`redactDiagnosticText`）の両方で伏せ、末尾30行・2000文字までしか持たない。生ログ全文は出さない
+- 再実行: `POST /api/repositories/release/review-rerun`。ガードは作り直しと同じ（`previewModeGuard`→`requireUserId`→リポジトリ所有確認）。対象はサーバーが今のリリースPRから解決し、クライアントのSHAは一致確認だけに使う。`activeKey`で実行中・待機中の二重起動を防ぎ、積めたときだけ`ai_review`を`waiting`へ戻して旧診断・指摘を消す
+
 ### 進捗（#4277）
 
 結果（`ReleaseVerification`）とは別に、**現在の対象（base・head）の**最新ジョブ（`DispatchJob`）から進捗を作る

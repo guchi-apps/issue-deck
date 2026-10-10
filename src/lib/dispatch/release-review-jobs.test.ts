@@ -22,7 +22,7 @@ vi.mock("@/lib/db", () => ({
 vi.mock("@/lib/dispatch/jobs", () => ({ expireStaleDispatchJobs: vi.fn().mockResolvedValue(0) }));
 vi.mock("@/lib/dispatch/wake-notify", () => ({ notifyDispatchHostWake: vi.fn() }));
 
-const { applyReleaseReviewReport, buildReleaseReviewActiveKey, requestReleaseReviewJob } = await import(
+const { applyReleaseReviewReport, buildReleaseReviewActiveKey, requestReleaseReviewJob, rerunReleaseReviewJob } = await import(
   "./release-review-jobs"
 );
 
@@ -100,7 +100,43 @@ describe("applyReleaseReviewReport", () => {
     expect(verificationUpdateMany.mock.calls[0][0].data.state).toBe("failed");
   });
 
+  it("失敗の診断は対象SHA付きで残し、報告の本文のSHAは使わない（#4300）", async () => {
+    await applyReleaseReviewReport(job, "failed", "全体レビューを完走できませんでした", {
+      diagnostic: { cause: "timeout", stage: "review", exitCode: 124, excerpt: "Bearer abcdef1234567890", targetHeadSha: "x" },
+    });
+    const data = verificationUpdateMany.mock.calls[0][0].data;
+    expect(data.state).toBe("failed");
+    expect(data.findings.diagnostic).toMatchObject({ cause: "timeout", targetHeadSha: HEAD, targetBaseSha: BASE });
+    expect(data.findings.diagnostic.excerpt).not.toContain("abcdef1234567890");
+  });
+
+  it("診断の無い失敗（古い実行側）は旧診断を持ち越さず、指摘も残さない", async () => {
+    await applyReleaseReviewReport(job, "failed", "失敗", undefined);
+    const data = verificationUpdateMany.mock.calls[0][0].data;
+    expect(data.state).toBe("failed");
+    expect(JSON.stringify(data.findings)).not.toContain("targetHeadSha");
+  });
+
   it("skippedは何も書かない", async () => {
     expect(await applyReleaseReviewReport(job, "skipped", null, null)).toBe(false);
+  });
+});
+
+describe("rerunReleaseReviewJob", () => {
+  it("積めたときだけai_reviewをwaitingへ戻し、旧診断・指摘を消す", async () => {
+    hostFindMany.mockResolvedValue([host()]);
+    jobCreate.mockResolvedValue({ id: "j2", targetHost: "subpc" });
+    const result = await rerunReleaseReviewJob(target, NOW);
+    expect(result).toMatchObject({ ok: true, outcome: "queued" });
+    const arg = verificationUpdateMany.mock.calls[0][0];
+    expect(arg.where).toMatchObject({ ...target, kind: "ai_review" });
+    expect(arg.data).toMatchObject({ state: "waiting", message: null, summary: null, unverifiedScope: null });
+  });
+
+  it("実行中・待機中のジョブがあれば二重に積まず、記録も戻さない", async () => {
+    jobFindFirst.mockResolvedValue({ id: "j0" });
+    expect(await rerunReleaseReviewJob(target, NOW)).toMatchObject({ outcome: "already_queued" });
+    expect(jobCreate).not.toHaveBeenCalled();
+    expect(verificationUpdateMany).not.toHaveBeenCalled();
   });
 });
