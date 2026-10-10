@@ -2,13 +2,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 
 const mocks = vi.hoisted(() => ({
-  exchange: vi.fn(), signOut: vi.fn(), allowed: vi.fn(), findUnique: vi.fn(), upsert: vi.fn(),
+  exchange: vi.fn(), signOut: vi.fn(), allowed: vi.fn(), findUnique: vi.fn(), upsert: vi.fn(), issue: vi.fn(),
 }));
 vi.mock("@/lib/access/client", () => ({ isUserAllowed: mocks.allowed }));
 vi.mock("@/lib/supabase/server", () => ({ createClient: async () => ({ auth: {
   exchangeCodeForSession: mocks.exchange, signOut: mocks.signOut,
 } }) }));
 vi.mock("@/lib/crypto/secret-cipher", () => ({ encryptSecret: (s: string) => `encrypted:${s}` }));
+vi.mock("@/lib/native-auth/cipher", () => ({ encryptSession: (s: string) => `session:${s}` }));
+vi.mock("@/lib/native-auth/handoff", () => ({ issueHandoff: mocks.issue }));
+vi.mock("@/lib/native-auth/stores", () => ({ handoffStore: {} }));
 vi.mock("@/lib/db", () => ({ db: { $transaction: async (fn: (tx: unknown) => unknown) =>
   fn({ user: { findUnique: mocks.findUnique, upsert: mocks.upsert } }) } }));
 import { GET } from "./route";
@@ -23,7 +26,7 @@ beforeEach(() => {
   vi.spyOn(console, "error").mockImplementation(() => {});
   mocks.exchange.mockResolvedValue({ data: {
     user: { id: "new-auth-id", email: "test@example.invalid", user_metadata: { provider_id: "999" } },
-    session: { provider_token: "test-provider-token" },
+    session: { provider_token: "test-provider-token", access_token: "at", refresh_token: "rt" },
   }, error: null });
   mocks.allowed.mockResolvedValue(true);
   mocks.signOut.mockResolvedValue({ error: null });
@@ -90,5 +93,46 @@ describe("ログイン完了処理", () => {
     mocks.exchange.mockResolvedValue({ data: { user: null }, error: { message: "expired" } });
     expect((await GET(request())).headers.get("location")).toContain("error=callback_failed");
     expect(mocks.upsert).not.toHaveBeenCalled();
+  });
+
+  describe("iOSアプリの認証シート（native=1）", () => {
+    const challenge = "A".repeat(43);
+    const nativeRequest = () => new NextRequest(
+      `https://example.com/auth/callback?code=test&next=%2Fissues&native=1&challenge=${challenge}`);
+
+    it("既存と同じ経路でGitHubトークンを保存してから、引き継ぎコードだけをアプリへ返す", async () => {
+      mocks.upsert.mockResolvedValue({ id: "u" });
+      mocks.issue.mockResolvedValue("handoff-code");
+      const res = await GET(nativeRequest());
+      expect(res.headers.get("location")).toBe("issuedeck://auth-callback?code=handoff-code");
+      expect(mocks.upsert.mock.calls[0][0].update.githubAccessToken).toBe("encrypted:test-provider-token");
+      const issued = mocks.issue.mock.calls[0][0];
+      expect(issued.challenge).toBe(challenge);
+      expect(issued.next).toBe("/issues");
+      expect(issued.sessionCipher).toContain("\"accessToken\":\"at\"");
+      expect(res.headers.get("location")).not.toContain("at");
+    });
+
+    it("許可のないユーザーはDB保存も引き継ぎもせず、アプリへnot_allowedで戻す", async () => {
+      mocks.allowed.mockResolvedValue(false);
+      const res = await GET(nativeRequest());
+      expect(res.headers.get("location")).toBe("issuedeck://auth-callback?error=not_allowed");
+      expect(mocks.upsert).not.toHaveBeenCalled();
+      expect(mocks.issue).not.toHaveBeenCalled();
+    });
+
+    it("GitHubの本人確認に失敗したらアプリへauth_failedで戻す", async () => {
+      fetchMock.mockResolvedValue(new Response("", { status: 401 }));
+      const res = await GET(nativeRequest());
+      expect(res.headers.get("location")).toBe("issuedeck://auth-callback?error=auth_failed");
+      expect(mocks.issue).not.toHaveBeenCalled();
+    });
+
+    it("challengeが不正ならnativeとして扱わず通常のWebの戻り先にする", async () => {
+      mocks.upsert.mockResolvedValue({ id: "u" });
+      const res = await GET(new NextRequest("https://example.com/auth/callback?code=test&next=%2Fissues&native=1&challenge=bad"));
+      expect(res.headers.get("location")).toBe("https://example.com/issues");
+      expect(mocks.issue).not.toHaveBeenCalled();
+    });
   });
 });

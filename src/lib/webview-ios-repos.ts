@@ -88,12 +88,27 @@ const MORROW: WebviewIosRepository = {
   ],
 };
 
+/** issue-deck自身。ios/配下のIssueDeckをTestFlightへ自動配信する（#3846）。Mac miniのチェックアウトは`~/apps/issue-deck` */
+const ISSUE_DECK: WebviewIosRepository = {
+  appLabel: "issue-deck",
+  xcodeProjectPath: "ios/IssueDeck.xcodeproj",
+  command:
+    "cd ~/apps/issue-deck &&\ngit status --short &&\ngit switch develop &&\ngit pull --ff-only origin develop &&\nopen ios/IssueDeck.xcodeproj",
+  setupReferences: [
+    {
+      label: "ios/README.md",
+      url: "https://github.com/guchi-apps/issue-deck/blob/develop/ios/README.md",
+    },
+  ],
+};
+
 const WEBVIEW_IOS_REPOSITORIES: Readonly<Record<string, WebviewIosRepository>> = {
   "guchi-apps/kurashio": KURASHIO,
   "guchi-apps/myroom": KURASHIO,
   "guchi-apps/yoteiflow": YOTEIFLOW,
   "guchi-apps/aide": AIDE,
   "guchi-apps/morrow": MORROW,
+  "guchi-apps/issue-deck": ISSUE_DECK,
 };
 
 export function getWebviewIosRepository(repositoryFullName: string): WebviewIosRepository | null {

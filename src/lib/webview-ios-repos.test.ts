@@ -36,7 +36,15 @@ describe("getWebviewIosRepository", () => {
   });
 
   it("表に無いリポジトリはnull", () => {
-    expect(getWebviewIosRepository("guchi-apps/issue-deck")).toBeNull();
+    expect(getWebviewIosRepository("guchi-apps/vps")).toBeNull();
     expect(getWebviewIosRepository("guchi-apps/aide-ios")).toBeNull();
+  });
+
+  it("issue-deck自身も配布状態表示の対象として返す（#3846）", () => {
+    const repo = getWebviewIosRepository("guchi-apps/issue-deck");
+    expect(repo?.appLabel).toBe("issue-deck");
+    expect(repo?.xcodeProjectPath).toBe("ios/IssueDeck.xcodeproj");
+    expect(repo?.command).toContain("cd ~/apps/issue-deck");
+    expect(repo?.command).toContain("open ios/IssueDeck.xcodeproj");
   });
 });

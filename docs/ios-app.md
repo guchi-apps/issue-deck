@@ -27,16 +27,17 @@
 | 認証コールバック | `issuedeck://auth-callback`（他アプリのスキームと衝突させない） |
 | 名称・アイコン | IssueDeckの既存のものを使う |
 
-再利用元は`morrow/ios/`（`NativeAuth.swift`・`WebViewModel.swift`・`ConnectionErrorView.swift`など）と、`ios/scripts/`・`ios-testflight*.yml`。
+再利用元は`morrow/ios/`（#3846で`ios/`へ移植済み。Swiftは`ios/IssueDeck/`、手順は[ios/README.md](../ios/README.md)）（`NativeAuth.swift`・`WebViewModel.swift`・`ConnectionErrorView.swift`など）と、`ios/scripts/`・`ios-testflight*.yml`。
 
 ## 認証
 
 現在の認証はSupabase AuthのGitHubプロバイダーで、GitHub APIの利用に`provider_token`が必須（`src/lib/supabase/github-oauth.ts`・`src/app/auth/callback/route.ts`）。Googleログインのアプリとは事情が違う。
 
 - GitHubは埋め込みWebView内のOAuthを拒否し得るため、`ASWebAuthenticationSession`（エフェメラル）でログインする
-- Morrowの方式を移植する: `/auth/native/start`（PKCEのchallenge）→ `/auth/callback?native=1`が60秒有効の一度限りのコードを`issuedeck://auth-callback?code=…`で返す → アプリが`/auth/native/consume`（code＋verifier）を呼んでCookieを得る
+- Morrowの方式を移植した（#3846）: `/auth/native/start`（GitHubプロバイダー・スコープ`repo user:email`はWeb版と同一、PKCEのchallenge）→ `/auth/callback?native=1`が既存の許可判定・GitHub本人確認・`provider_token`暗号化保存を通したあと60秒有効の一度限りのコードを`issuedeck://auth-callback?code=…`で返す（分岐は最後のリダイレクト先だけ）→ アプリが`/auth/native/consume`（code＋verifier）を呼んでCookieを得る。引き継ぎ用テーブルは`NativeAuthHandoff`で、暗号化の鍵は`GITHUB_USER_TOKEN_ENCRYPTION_KEY`から用途別に導出する（VAPID鍵は流用しない）
+- Web側のログインボタンは変えない。クライアントのSupabaseが遷移する`…/auth/v1/authorize?provider=github`をアプリが捕まえて認証シートへ渡す（`ios/IssueDeck/AppConfig.swift`の`InterceptedRoute`）
 - 許可メール判定（`isEmailAllowed`）と`provider_token`・`refresh_token`の暗号化保存を迂回する新経路を作らない
-- `src/lib/supabase/middleware.ts`の`publicPaths`へ`/auth/native/*`を足す。他の`/api/*`の認可は変えない
+- `src/lib/supabase/middleware.ts`の`publicPaths`へ`/auth/native`を足した。他の`/api/*`の認可は変えない
 - ログアウトはアプリ単位。他アプリ・他端末のセッションを巻き込まない
 - GitHub App秘密鍵・サーバー用トークン・DB接続情報はアプリへ同梱しない
 
@@ -51,7 +52,7 @@
 
 配布は他アプリと同じ流れにする。`deploy.yml`成功→`ios-testflight-trigger.yml`→`ios-testflight.yml`（macOSランナーで署名・アーカイブ・アップロード・ASCでの処理待ち・内部グループ配布）。ビルド番号は`run_number*100+run_attempt`、完了時にタグ`ios-testflight/<ビルド番号>`を打つ。認証情報は`ASC_KEY_ID`・`ASC_ISSUER_ID`・`ASC_KEY_P8`（1Passwordの`apps/AppStoreConnect`を共用）。
 
-issue-deck自身の配布状況は、既存の他アプリと同じ経路で画面に出す。**ビルド成功と実際の配布成功を混同しない**。接続は**#3846で**`src/lib/webview-ios-repos.ts`（固定リスト）へissue-deck自身を追加し、完了タグは`ios-testflight/<ビルド番号>`の規約に揃える。判定は`src/lib/ios-testflight-status.ts`の6段階判定で行う。失敗の自動起票は`src/lib/ios-distribution-failure.ts`が受け持つ。詳細は[multi-agent/release.md](multi-agent/release.md)のiOS節。
+issue-deck自身の配布状況は、既存の他アプリと同じ経路で画面に出す。**ビルド成功と実際の配布成功を混同しない**。接続は**#3846で**`src/lib/webview-ios-repos.ts`（固定リスト）へissue-deck自身を追加済みで、完了タグは`ios-testflight/<ビルド番号>`の規約に揃える。判定は`src/lib/ios-testflight-status.ts`の6段階判定で行う。失敗の自動起票は`src/lib/ios-distribution-failure.ts`が受け持つ。詳細は[multi-agent/release.md](multi-agent/release.md)のiOS節。
 
 本人の手作業（App Store Connectでのアプリ登録・初回の内部テスターグループ作成など）が残る場合は、`71.manual-step`の単独Issueとして切り出す。
 
@@ -71,3 +72,7 @@ PRのマージだけでは完了としない。次は子Issueのコメントに�
 | 日本語入力・キーボード表示中の主要操作、通信不能時の再試行 | #3846 |
 | 共有メニューから画像・URL・文章を起案できること | #3847 |
 | Web/PWAに回帰が無いこと | #3846・#3847 |
+
+## Macでのビルド確認（#3846）
+
+subpcにXcodeは無いが、Tailscale SSHでMac（`guchimac-mini`）へ入れる。`ios/scripts/remote-build-check.sh`は作業ツリーの`ios/`をMacへ送り、共有スキーム`IssueDeck`を署名なしの`xcodebuild`（iOS Simulator向け）でビルドする。コンパイルが通るかの確認用で、署名・TestFlight・実機の挙動は確かめない（実機の項目は上の表のとおり本人が確認する）。

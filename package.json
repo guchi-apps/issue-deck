@@ -14,7 +14,7 @@
     "test": "pnpm lint && pnpm typecheck && pnpm test:unit",
     "test:unit": "bash scripts/heavy-command.sh vitest run",
     "postinstall": "prisma generate",
-    "version": "node scripts/version-changelog.mjs",
+    "version": "node scripts/version-changelog.mjs && node ios/scripts/sync-version.mjs && git add ios/IssueDeck.xcodeproj/project.pbxproj",
     "env:init": "cp -n .env.local.example .env.local && echo '.env.local を編集してください（DB/Auth/GitHub）'",
     "db:setup": "bash scripts/setup-db.sh",
     "db:migrate:dev": "prisma migrate dev",
