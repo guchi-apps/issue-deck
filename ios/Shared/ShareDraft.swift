@@ -15,6 +15,8 @@ enum ShareConfig {
     static let maxImageBytes = 10 * 1024 * 1024
     /// 文章の上限（文字数）。長すぎる共有は切り詰めず、受け取れない旨を案内する
     static let maxTextLength = 20_000
+    /// アプリ本体のURLスキーム（`Config/IssueDeck-Info.plist`・`AppConfig.authCallbackScheme`と同じ値）
+    static let appURLScheme = "issuedeck"
     /// 下書きを端末に残す期間。取り込まれないまま残った素材はこの期間を過ぎると破棄する
     static let retention: TimeInterval = 7 * 24 * 60 * 60
 }
@@ -278,8 +280,17 @@ struct ShareCreatedIssue: Equatable {
     var repositoryFullName: String
     var number: Int
     var title: String
+    /// IssueDeck上のIssue識別子（`GET /api/issues`の`id`）。アプリ本体のIssue詳細を開くのに使う
+    var id: String
 
-    var githubURL: URL? { URL(string: "https://github.com/\(repositoryFullName)/issues/\(number)") }
+    /// アプリ本体のIssue詳細を開くURL（`ios/IssueDeck/IssueDeckApp.swift`の`onOpenURL`が受ける）
+    var appURL: URL? {
+        var components = URLComponents()
+        components.scheme = ShareConfig.appURLScheme
+        components.host = "issue"
+        components.queryItems = [URLQueryItem(name: "id", value: id)]
+        return components.url
+    }
 }
 
 enum ShareAPIError: Error, Equatable {
@@ -376,7 +387,10 @@ enum ShareAPI {
                   let number = issue["number"] as? Int,
                   let repository = issue["repositoryFullName"] as? String
             else { throw ShareAPIError.unknownResult }
-            return ShareCreatedIssue(repositoryFullName: repository, number: number, title: issue["title"] as? String ?? title)
+            return ShareCreatedIssue(
+                repositoryFullName: repository, number: number, title: issue["title"] as? String ?? title,
+                id: (issue["id"] as? String) ?? (issue["id"] as? Int).map(String.init) ?? ""
+            )
         case 401: throw ShareAPIError.unauthorized
         case 409, 502: throw ShareAPIError.unknownResult
         case 403 where errorMessage(data) == "repository_excluded":
