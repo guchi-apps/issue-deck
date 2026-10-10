@@ -58,6 +58,20 @@
 
 署名: 拡張のBundle IDは`com.gucchii.issuedeck.ShareExtension`、両ターゲットにApp Group entitlement（`ios/Config/`）。初回の配布でApp Group／拡張のApp IDが未登録で署名に失敗した場合は、Developerサイトでの登録（手作業）が要る。
 
+## ネイティブ通知（#4250）
+
+既存のPush通知（確認待ち・リリース関連）を、iOSアプリへAPNsで届ける。**送信の呼び出し側は変えず**、送信口`sendPushNotification`（`src/lib/notifications/push.ts`）が宛先で振り分ける。
+
+| 項目 | 方針 |
+| --- | --- |
+| 宛先の保存 | `PushSubscription`へ`endpoint = "apns:<端末トークン>"`で相乗り（`p256dh`・`auth`は空）。登録・解除は`POST/DELETE /api/notifications/apns`（ログイン必須・トークンは16進のみ）。設定画面の一覧・ミュート・解除はそのまま効く |
+| 端末側 | `ios/IssueDeck/PushNotifications.swift`が許可要求とトークン取得、タップ時の遷移を持つ。トークンはログインCookieのあるWebViewの中から`fetch`で登録し、ページを読み終えるたびに（未ログインなら無視されるので）再試行する。前面でもバナーを出す |
+| 送信 | `src/lib/notifications/apns.ts`。Node標準の`http2`・`crypto`でトークン方式（ES256のJWT。50分キャッシュ）。`apns-topic`は`com.gucchii.issuedeck` |
+| 設定（サーバーの`.env`。secrets-manifestには載せない） | `APNS_KEY_P8`（`.p8`のPEM。改行は`\n`可）・`APNS_KEY_ID`・`APNS_TEAM_ID`・`APNS_ENVIRONMENT`（`production`が既定／Xcode実機デバッグは`sandbox`）。揃っていなければAPNsへは送らない |
+| 失効 | 410と`Unregistered`だけ行を削除。`BadDeviceToken`は環境の取り違えでも出るため削除せず失敗として記録する |
+
+`isPushConfigured()`はVAPIDまたはAPNsのどちらかが設定済みで真。Apple Developerでの鍵発行・App IDのPush Notifications有効化・`.env`への登録は本人の手作業（`71.manual-step`）。
+
 ## 更新と配布
 
 **Webだけの更新とiOSバイナリの更新を区別する。**
@@ -75,7 +89,7 @@ issue-deck自身の配布状況は、既存の他アプリと同じ経路で画�
 
 ## 既知の懸念
 
-- WKWebViewではWeb Push（`public/sw.js`）が動かない可能性がある。ネイティブ通知は後続とし、初期範囲では扱わない
+- WKWebViewではWeb Push（`public/sw.js`）が動かない。ネイティブ通知は「ネイティブ通知（#4250）」のとおりAPNsで受け取る
 - キーボード・日本語入力・画面余白は実機で確認する（Webのsafe-area対応との両立を#3846で確認）
 
 ## 完了の判定と記録
