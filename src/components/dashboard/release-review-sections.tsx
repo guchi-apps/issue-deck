@@ -422,7 +422,10 @@ function AiReviewSection({
   onReload,
   onFixCreated,
   nowMs,
+  hideRebuild = false,
 }: {
+  /** ブランチ画面は作り直しを追加PR群の直下に1つだけ置く（#4357）ので、ここでは出さない */
+  hideRebuild?: boolean;
   section: ReleaseVerificationSection;
   assignee: string;
   repositoryFullName: string;
@@ -610,7 +613,7 @@ function AiReviewSection({
           <p className="text-[10.5px] text-muted-foreground">
             AIが問題なしと判断しても、自動で本番へマージはしません。マージは人が行います。
           </p>
-          {needsFix && (
+          {needsFix && !hideRebuild && (
             <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t pt-1.5 text-muted-foreground">
               <span>
                 修正はリリースブランチを直接直さず、developへ入れてから作り直します。作り直すとSHAが変わり、統合検証と全体レビューがやり直されます。
@@ -1186,6 +1189,7 @@ export function ReleaseVerificationBrief({
             onReload={reload}
             onFixCreated={reload}
             nowMs={nowMs}
+            hideRebuild
           />
           <IntegrationSection
             section={verification.integration}
