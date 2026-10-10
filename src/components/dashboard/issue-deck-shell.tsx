@@ -65,6 +65,7 @@ import { TopBar, type TopBarAiSearch } from "@/components/dashboard/topbar";
 import { useBranchFlow } from "@/hooks/use-branch-flow";
 import { useSessionUsage } from "@/hooks/use-session-usage";
 import { useNightlyRun } from "@/hooks/use-nightly-run";
+import { useCheckUserToastEnabled } from "@/hooks/use-check-user-toast-enabled";
 import { useShowReservedIssues } from "@/hooks/use-show-reserved-issues";
 import { useReleaseHistory } from "@/hooks/use-release-history";
 import { useDeployStatus } from "@/hooks/use-deploy-status";
@@ -444,6 +445,8 @@ export function IssueDeckShell({
   // この端末に確認待ちがOSの通知として届いているか（#2196）。届いているあいだはトーストを
   // 出さない——Service Workerは表示中でも必ず通知を出すため、両方出すと同じ知らせが2つになる
   const pushDeliveryState = usePushDeliveryState();
+  // 確認待ちトーストを出すか（#4262）。端末ごとの設定で、標準は出さない
+  const [checkUserToastEnabled] = useCheckUserToastEnabled();
 
   // PC向け4カラムレイアウトの表示調整（#381）。左メニューは手動で開閉でき、
   // サイドバー・Issue一覧・プロパティパネルの3カラムはドラッグで幅を調整できる。
@@ -963,8 +966,9 @@ export function IssueDeckShell({
     // **OSの通知が届いている端末では、そもそも積まない**（#2196）。確認待ちの知らせの出口を
     // 1つにするための分岐はここだけで、届いていない端末（未購読・許可なし・失効中・判定前）は
     // 従来どおりトーストが出る——通知とトーストの両方が消える状態を作らない。
+    // 設定でトーストをOFFにした端末（標準）も積まない（#4262）。
     const newlyCheckUserIssues =
-      pushDeliveryState === "delivering"
+      pushDeliveryState === "delivering" || !checkUserToastEnabled
         ? []
         : detectNewlyCheckUserIssues(
             // **非表示リポジトリぶんはトーストも出さない**（#2279）。逃げ道（選択中の
