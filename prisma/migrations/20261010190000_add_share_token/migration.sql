@@ -4,6 +4,7 @@ CREATE TABLE `ShareToken` (
     `userId` VARCHAR(191) NOT NULL,
     `deviceId` VARCHAR(64) NOT NULL,
     `tokenHash` VARCHAR(64) NOT NULL,
+    `emailVerified` BOOLEAN NOT NULL DEFAULT false,
     `expiresAt` DATETIME(3) NOT NULL,
     `revokedAt` DATETIME(3) NULL,
     `lastUsedAt` DATETIME(3) NULL,

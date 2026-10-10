@@ -2588,6 +2588,8 @@ model ShareToken {
   /// 端末ごとの識別子（アプリが生成）。同じ端末の再発行で古いトークンを失効させる
   deviceId   String    @db.VarChar(64)
   tokenHash  String    @unique @db.VarChar(64)
+  /// 発行時にSupabaseが確認済みとした値。検証のたびに許可判定（decideAccess）へ渡す
+  emailVerified Boolean @default(false)
   expiresAt  DateTime
   revokedAt  DateTime?
   lastUsedAt DateTime?

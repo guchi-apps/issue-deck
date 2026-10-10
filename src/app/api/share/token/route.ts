@@ -1,8 +1,10 @@
 import { NextResponse, type NextRequest } from "next/server";
 
+import { toAccessSubject } from "@/lib/access/client";
 import { getCurrentUser } from "@/lib/auth-user";
 import { db } from "@/lib/db";
 import { previewModeGuard } from "@/lib/preview-mode";
+import { createClient } from "@/lib/supabase/server";
 import { issueShareTokenValue, parseDeviceId, SHARE_TOKEN_TTL_MS } from "@/lib/share-token/token";
 
 /**
@@ -21,6 +23,11 @@ export async function POST(request: NextRequest) {
   const deviceId = parseDeviceId(payload?.deviceId);
   if (!deviceId) return NextResponse.json({ error: "invalid_request" }, { status: 400 });
 
+  // 検証のたびの許可判定（`authenticateShareToken`）に使う、メール確認済みの値を残す
+  const supabase = await createClient();
+  const { data } = await supabase.auth.getUser();
+  const emailVerified = data.user ? toAccessSubject(data.user).emailVerified : false;
+
   const { value, hash } = issueShareTokenValue();
   const now = new Date();
   const expiresAt = new Date(now.getTime() + SHARE_TOKEN_TTL_MS);
@@ -29,7 +36,7 @@ export async function POST(request: NextRequest) {
     where: { deviceId, revokedAt: null },
     data: { revokedAt: now },
   });
-  await db.shareToken.create({ data: { userId: user.id, deviceId, tokenHash: hash, expiresAt } });
+  await db.shareToken.create({ data: { userId: user.id, deviceId, tokenHash: hash, emailVerified, expiresAt } });
   // 期限切れ・失効済みの古い行を掃除する（失敗しても発行は成功させる）
   await db.shareToken
     .deleteMany({ where: { OR: [{ expiresAt: { lt: now } }, { revokedAt: { lt: new Date(now.getTime() - 7 * 86_400_000) } }] } })
