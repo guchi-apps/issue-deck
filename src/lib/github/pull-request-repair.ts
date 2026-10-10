@@ -140,7 +140,7 @@ export function repairKindsFor(
 export const REPAIR_KIND_LABEL: Record<RepairKind, string> = {
   ci: "CI失敗を自動修正",
   conflict: "コンフリクトを自動解消",
-  review: "レビュー指摘を自動修正",
+  review: "PRを自動修正",
 };
 
 /** 自動修正の確認画面で、今回直す対象として並べる短い名前 */

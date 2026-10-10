@@ -33,12 +33,12 @@ type AutoRepairLoop = {
 };
 
 const STOP_REASON_LABEL: Record<string, string> = {
-  user_action_required: "判断が必要なレビュー指摘があります。",
-  max_rounds_reached: "自動修正が上限の3回に達しました。",
-  repeated_problem: "修正後もHEADが変わらず、同じ問題が残っています。必要なら再レビューを実行してください。",
+  user_action_required: "判断や実機確認が必要な指摘が残っています。内容を確認し、方針をコメントしてから「PRを自動修正」で再実行してください。",
+  max_rounds_reached: "自動修正が上限の3回に達しました。残る指摘を確認し、方針をコメントするか手動で修正してください。",
+  repeated_problem: "修正後もHEADが変わらず、同じ問題が残っています。指摘内容を確認し、方針をコメントしてから再実行してください。",
   pull_request_closed: "Pull Requestがクローズされました。",
-  timed_out: "CI・レビュー待ちが一定時間を超えたため停止しました。",
-  dispatch_failed: "自動修正ワークフローの起動に失敗しました。",
+  timed_out: "CI・レビュー待ちが一定時間を超えたため停止しました。Actionsの状況を確認し、必要なら再レビューを実行するか、「PRを自動修正」で再実行してください。",
+  dispatch_failed: "自動修正ワークフローの起動に失敗しました。ワークフローの配布状況を確認し、「PRを自動修正」で再実行してください。",
 };
 
 type PullRequestRepairButtonsProps = {
@@ -56,6 +56,11 @@ type PullRequestRepairButtonsProps = {
    * 二重に起動するのを防ぐ。走っていなければ`null`（従来どおり押せる）。
    */
   runningKind?: RepairKind | null;
+  /**
+   * 手動開始が必要なときに、押した先で何が起きるかを1行添える（#4318）。レビュー指摘欄で使う。
+   * 「押せば解決する」とは書かず、自動で進める範囲と、残ったらユーザー対応になることを示す。
+   */
+  guidance?: boolean;
   className?: string;
 };
 
@@ -80,6 +85,7 @@ export function PullRequestRepairButtons({
   kinds,
   availability,
   runningKind = null,
+  guidance = false,
   className,
 }: PullRequestRepairButtonsProps) {
   const { repairPullRequest, isSubmitting, error, setError } = usePullRequestRepairMutation();
@@ -166,15 +172,24 @@ export function PullRequestRepairButtons({
           PRを自動修正中です（{REPAIR_TARGET_LABEL[runningKind]}）。修正後のCI・再レビューも自動で確認します。
         </span>
       )}
+      {guidance && kinds.length > 0 && !justStarted && runningKind === null && loop?.status !== "running" && loop?.status !== "dispatching" && (
+        <span className="min-w-0 flex-1 basis-60 text-xs text-muted-foreground">
+          「PRを自動修正」で、このPRの指摘を修正し、CI・再レビューまで進めます。直せない指摘や判断・実機確認が必要な指摘が残った場合は、停止して理由をここに表示します。
+        </span>
+      )}
       {loop?.status === "dispatching" && (
-        <span className="text-xs text-muted-foreground">自動修正ワークフローを起動中です。</span>
+        <span className="text-xs text-muted-foreground">自動修正ワークフローを起動中です。操作は不要です。</span>
       )}
       {loop?.status === "running" && (
         <span className="text-xs text-muted-foreground">
-          自動修復 {loop.round} / 3（{loop.currentKind ? REPAIR_TARGET_LABEL[loop.currentKind] : "CI・再レビューを待機"}）
+          自動修復 {loop.round} / 3（{loop.currentKind ? REPAIR_TARGET_LABEL[loop.currentKind] : "新しいHEADのCI・再レビューを待機"}）。操作は不要です。
         </span>
       )}
-      {loop?.status === "completed" && <span className="text-xs text-emerald-700">自動修復が完了しました。</span>}
+      {loop?.status === "completed" && (
+        <span className="text-xs text-emerald-700">
+          新しいHEADのCI・レビューで修正対象が無くなりました。マージ・本番反映は別の手順で進みます。
+        </span>
+      )}
       {loop?.status === "stopped" && (
         <span className="text-xs text-amber-700">自動修復を停止しました。{loop.stopReason ? STOP_REASON_LABEL[loop.stopReason] : ""}</span>
       )}

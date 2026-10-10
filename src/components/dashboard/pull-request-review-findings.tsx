@@ -5,6 +5,8 @@ import { useState } from "react";
 
 import { MarkdownBody } from "@/components/dashboard/markdown-body";
 import { ReviewVerdictFreshnessNote, VerdictText } from "@/components/dashboard/review-verdict";
+import { PullRequestRepairButtons } from "@/components/dashboard/pull-request-repair-buttons";
+import type { RepairKind, RepairWorkflowAvailability } from "@/lib/github/pull-request-repair";
 import { formatRelativeDate } from "@/lib/format-relative-date";
 import type { PullRequestReviewCommentContent } from "@/lib/github/pull-request-review-comment";
 import { cn } from "@/lib/utils";
@@ -28,6 +30,7 @@ export function PullRequestReviewFindings({
   pullRequestNumber,
   pullRequestUrl,
   reviewRunUrl,
+  repair,
   className,
 }: {
   /** 読み取れたレビュー。記録が無ければnull（下の「記録がありません」を出す） */
@@ -38,6 +41,16 @@ export function PullRequestReviewFindings({
   pullRequestUrl?: string;
   /** レビューが実行中・失敗などで、コメント本文より先に実行状況を確認したいときの行き先 */
   reviewRunUrl?: string | null;
+  /**
+   * 同じPRへ修正を依頼する操作（PR詳細上部の「PRを自動修正」と同じ処理。#4318）。
+   * スマホで上部の操作を探さなくて済むよう、指摘の読める場所にも置く。省略時は案内文だけ出す。
+   */
+  repair?: {
+    repositoryFullName: string;
+    kinds: RepairKind[];
+    availability?: RepairWorkflowAvailability;
+    runningKind?: RepairKind | null;
+  };
   className?: string;
 }) {
   const [isOpen, setIsOpen] = useState(true);
@@ -107,9 +120,21 @@ export function PullRequestReviewFindings({
       )}
 
       <div className="flex flex-wrap items-center gap-2 border-t bg-muted/50 px-3 py-1.5">
-        <span className="min-w-0 flex-1 text-[11px] text-muted-foreground">
-          指摘を直すときは、PR詳細上部の「レビュー指摘を自動修正」から同じPRへ修正を依頼できます。
-        </span>
+        {repair ? (
+          <PullRequestRepairButtons
+            repositoryFullName={repair.repositoryFullName}
+            pullRequestNumber={pullRequestNumber}
+            kinds={repair.kinds}
+            availability={repair.availability}
+            runningKind={repair.runningKind ?? null}
+            guidance
+            className="min-w-0 flex-1"
+          />
+        ) : (
+          <span className="min-w-0 flex-1 text-[11px] text-muted-foreground">
+            指摘を直すときは、PR詳細の「PRを自動修正」から同じPRへ修正を依頼できます。
+          </span>
+        )}
         {readUrl && (
           <a
             href={readUrl}
