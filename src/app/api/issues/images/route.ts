@@ -9,6 +9,8 @@ import { authorizeImageUpload } from "@/lib/images/image-upload-auth";
 import { getUploadedImageInventory } from "@/lib/images/image-cleanup-run";
 import { UPLOADED_IMAGE_DIR } from "@/lib/images/image-storage";
 import { getRequestOrigin } from "@/lib/request-origin";
+import { authenticateShareToken } from "@/lib/share-token/auth";
+import { extractShareToken } from "@/lib/share-token/token";
 import { looksLikeSvg, SVG_HEAD_SCAN_BYTES } from "@/lib/uploaded-images";
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024;
@@ -49,6 +51,12 @@ export async function GET() {
  */
 async function authorizeUpload(request: NextRequest): Promise<NextResponse | null> {
   const authorization = request.headers.get("authorization");
+  // iOS共有画面の共有トークン（#4298）。画像アップロードだけに使え、無効ならCookieへ落とさない
+  if (extractShareToken(authorization)) {
+    return (await authenticateShareToken(authorization))
+      ? null
+      : NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  }
   if (authorization) {
     const auth = await authorizeImageUpload(authorization);
     if (auth === "ok") return null;

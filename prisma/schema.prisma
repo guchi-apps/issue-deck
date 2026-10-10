@@ -35,6 +35,7 @@ model User {
   pushMutedKinds                    PushMutedKind[]
   snoozedItems                      SnoozedItem[]
   issueCreationExcludedRepositories IssueCreationExcludedRepository[]
+  shareTokens                       ShareToken[]
   releaseCheckTargets               ReleaseCheckTarget[]
   releaseChecks                     ReleaseCheck[]
   releaseCheckLines                 ReleaseCheckLine[]
@@ -2576,4 +2577,26 @@ model VpsMemorySample {
 
   @@index([sampledAt])
   @@index([segmentKey])
+}
+
+/// iOS共有画面（Share Extension）から直接Issueを作るための専用トークン（#4298）。
+/// 拡張はWKWebViewのCookieを読めないため、本体がログイン中に発行して端末のKeychain共有領域へ置く。
+/// 値そのものは保存せずSHA-256だけ持つ。使えるのは`/api/share/*`と画像アップロードだけ。
+model ShareToken {
+  id         String    @id @default(cuid())
+  userId     String
+  /// 端末ごとの識別子（アプリが生成）。同じ端末の再発行で古いトークンを失効させる
+  deviceId   String    @db.VarChar(64)
+  tokenHash  String    @unique @db.VarChar(64)
+  /// 発行時にSupabaseが確認済みとした値。検証のたびに許可判定（decideAccess）へ渡す
+  emailVerified Boolean @default(false)
+  expiresAt  DateTime
+  revokedAt  DateTime?
+  lastUsedAt DateTime?
+  createdAt  DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, deviceId])
+  @@index([expiresAt])
 }

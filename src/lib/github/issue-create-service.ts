@@ -1,5 +1,7 @@
 import { db } from "@/lib/db";
-import { createIssue } from "@/lib/github/issues-api";
+import { getAppAiToken } from "@/lib/claude/request";
+import { generateIssueSuggestion } from "@/lib/claude/issue-suggest";
+import { createIssue, updateIssue } from "@/lib/github/issues-api";
 import { upsertIssueAndGetDisplay } from "@/lib/github/sync-issues";
 import {
   withUserGithubToken,
@@ -54,4 +56,37 @@ export async function createIssueForUser(
     });
     return upsertIssueAndGetDisplay(repository, created);
   });
+}
+
+/**
+ * タイトル空欄で作ったIssueへ、本文からAIが付けたタイトルを書き込む（#4298）。
+ * **ベストエフォート**: AI未設定・失敗・GitHubへの更新失敗では何も変えず、仮タイトルのまま残す
+ * （作成そのものは成功している）。呼び出し元は応答を返したあとに走らせる。
+ */
+export async function fillIssueTitleByAi(
+  user: CreateIssueUser,
+  repository: Repository,
+  issue: { number: number; title: string },
+  body: string,
+): Promise<void> {
+  try {
+    const aiToken = await getAppAiToken("issue_suggest");
+    if (!aiToken || !body.trim()) return;
+    const suggestion = await generateIssueSuggestion(
+      aiToken,
+      { body, availableLabels: [] },
+      { includeLabels: false },
+    );
+    if (!suggestion.title) return;
+    const [owner, repo] = repository.fullName.split("/");
+    const updated = await withUserGithubToken(
+      user,
+      `PATCH /api/share/issues ${repository.fullName}#${issue.number}`,
+      (token) => updateIssue(owner, repo, issue.number, token, { title: suggestion.title }),
+    );
+    if ("errorResponse" in updated) return;
+    await upsertIssueAndGetDisplay(repository, updated.value);
+  } catch (error) {
+    console.error("[share] タイトルの自動記入に失敗しました（仮タイトルのまま）", error);
+  }
 }
