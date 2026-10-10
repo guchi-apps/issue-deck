@@ -81,7 +81,7 @@ function ReleaseChangeReview({
  * 取得中・取得失敗・変更0件・PRに対応づかないコミットを区別して出す。失敗を0件として
  * 見せないのが要点で、「出す変更がありません」と誤認したまま起動させない。
  */
-export function ReleaseChangeList({
+function ReleaseChangeListContent({
   repositoryFullName,
   enabled,
   releasePullRequestNumber = null,
@@ -91,7 +91,8 @@ export function ReleaseChangeList({
     enabled,
     releasePullRequestNumber,
   );
-  const tally = data ? tallyReleaseReviews(data.pullRequests) : null;
+  const visiblePullRequests = data?.pullRequests.filter((pr) => !pr.isVersionBump) ?? [];
+  const tally = data ? tallyReleaseReviews(visiblePullRequests) : null;
   const prUrl = (number: number) => `https://github.com/${repositoryFullName}/pull/${number}`;
 
   if (error) {
@@ -102,16 +103,36 @@ export function ReleaseChangeList({
     );
   }
   if (isLoading || !data) {
-    return <p className="text-xs text-muted-foreground">今回反映する内容を取得中...</p>;
+    return (
+      <div role="status" aria-label="今回反映する内容を取得中" className="flex flex-col gap-3">
+        <span className="sr-only">今回反映する内容を取得中...</span>
+        <div aria-hidden="true" className="flex flex-col gap-3 motion-safe:animate-pulse">
+          <div className="h-3 w-3/4 rounded bg-muted" />
+          {[0, 1].map((row) => (
+            <div key={row} className="flex flex-col gap-2 border-t pt-3">
+              <div className="h-3 w-full rounded bg-muted" />
+              <div className="h-3 w-1/2 rounded bg-muted" />
+              <div className="h-3 w-4/5 rounded bg-muted" />
+            </div>
+          ))}
+        </div>
+      </div>
+    );
   }
-  if (data.pullRequests.length === 0 && data.unknownCommits.length === 0) {
-    return <p className="text-xs text-muted-foreground">mainに未反映のPRはありません。</p>;
+  if (visiblePullRequests.length === 0 && data.unknownCommits.length === 0) {
+    return (
+      <p className="text-xs text-muted-foreground">
+        {data.pullRequests.length > 0
+          ? "今回表示する通常PRはありません（バージョンバンプPRは非表示）。"
+          : "mainに未反映のPRはありません。"}
+      </p>
+    );
   }
 
   return (
-    <div className="flex flex-col gap-1.5 rounded-md border p-2">
+    <div className="flex flex-col gap-1.5">
       <p className="text-xs font-medium text-muted-foreground">
-        今回反映する内容（PR {data.pullRequests.length}件
+        今回反映する内容（PR {visiblePullRequests.length}件
         {data.source === "release-pr" ? "・作成済みリリースPRの範囲" : ""}
         {data.headSha ? `・${data.headSha}まで` : ""}）
       </p>
@@ -129,11 +150,10 @@ export function ReleaseChangeList({
         </div>
       )}
       <ul className="flex flex-col gap-1 text-xs">
-        {data.pullRequests.map((pr) => (
+        {visiblePullRequests.map((pr) => (
           <li key={pr.number} className="flex flex-col gap-0.5 border-b pb-1.5 last:border-b-0">
             <GithubReferenceLink href={prUrl(pr.number)} className="hover:underline">
               #{pr.number} {pr.title}
-              {pr.isVersionBump ? "（バージョンバンプ）" : ""}
             </GithubReferenceLink>
             {pr.issueNumber !== null && (
               <GithubReferenceLink
@@ -165,5 +185,18 @@ export function ReleaseChangeList({
         </p>
       )}
     </div>
+  );
+}
+
+/** 読み込み前後で高さを揃え、一覧の取得で確認ボタンが移動するのを防ぐ。 */
+export function ReleaseChangeList(props: ReleaseChangeListProps) {
+  return (
+    <section
+      aria-label="今回反映する内容"
+      tabIndex={0}
+      className="h-[min(16rem,28dvh)] shrink-0 overflow-y-auto rounded-md border p-2"
+    >
+      <ReleaseChangeListContent {...props} />
+    </section>
   );
 }
