@@ -1,6 +1,6 @@
 {
   "name": "issue-deck",
-  "version": "8.44.0",
+  "version": "8.45.0",
   "private": true,
   "packageManager": "pnpm@10.34.5+sha512.a4ee05f2f73658255bd6a89859c065a45c28a57daefae2c893a168ee2b73168c37b91e83e57ea67654ad03f03031746430e8bce38e362e042605fb8abc80192e",
   "scripts": {
@@ -14,7 +14,7 @@
     "test": "pnpm lint && pnpm typecheck && pnpm test:unit",
     "test:unit": "bash scripts/heavy-command.sh vitest run",
     "postinstall": "prisma generate",
-    "version": "node scripts/version-changelog.mjs",
+    "version": "node scripts/version-changelog.mjs && node ios/scripts/sync-version.mjs && git add ios/IssueDeck.xcodeproj/project.pbxproj",
     "env:init": "cp -n .env.local.example .env.local && echo '.env.local を編集してください（DB/Auth/GitHub）'",
     "db:setup": "bash scripts/setup-db.sh",
     "db:migrate:dev": "prisma migrate dev",

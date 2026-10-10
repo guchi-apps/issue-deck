@@ -4,9 +4,10 @@
 # それを渡すのはissue-deckがCircleCI API（POST /api/v2/project/{slug}/pipeline/run）から起動する
 # ときだけ。プロジェクト側にpush/PRのトリガーを作らない運用と合わせて、Actionsとの二重実行を防ぐ。
 #
-# **この設定は信頼済みのブランチ（develop）から読む。** issue-deckは起動時に`config.branch`へ
-# PRのbase（develop）を、`checkout.branch`へPRのheadブランチを渡す。PRの中で
-# このファイルを書き換えても、バックアップCIの手順は変わらない。
+# **この設定は信頼済みのブランチ（develop）から読む。** issue-deckは起動時に`config.branch`と
+# `checkout.branch`の両方へPRのbase（develop）を渡す（同じリポジトリでは両者が一致しないと
+# CircleCIが起動を拒否する。#4215）。PRのheadは下のステップで`head_sha`をSHA指定で取り出す。
+# PRの中でこのファイルを書き換えても、バックアップCIの手順は変わらない。
 #
 # **検査定義もPRのbaseから読む。** ci/required-checks.json とランナーは`base_sha`の版を
 # 取り出して使い、PRの中で定義を減らしても検査は省けない。issue-deckは結果の定義ダイジェストを

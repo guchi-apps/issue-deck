@@ -189,8 +189,8 @@ export async function startBackupCiRun(input: {
   const triggered = await client.triggerPipeline({
     projectSlug: setting.circleciProjectSlug!,
     definitionId: setting.circleciDefinitionId!,
-    configBranch: pr.baseRef,
-    checkoutBranch: pr.headRef,
+    // 設定もチェックアウトもbase（信頼済み）から。headはランナーが`head_sha`で取り出す（#4215）
+    branch: pr.baseRef,
     parameters: {
       backup_ci: true,
       run_request_id: run.id,

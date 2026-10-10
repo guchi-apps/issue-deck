@@ -224,6 +224,40 @@ model ReleaseCheck {
   @@index([repositoryId])
 }
 
+// 固定リリース（base=main・head=`release-main/v*`のPR）に対する、統合検証・全体AIレビューの結果1件（#4212）。
+//
+// **対象キーは「リポジトリ・PR番号・baseSha・headSha・種別」。** main更新・head更新・作り直しで
+// SHAが変われば別の行になり、古い行の結果は現在の対象に流用されない
+// （判定は`src/lib/release-merge-gate.ts`の純粋関数が現在のSHAと突き合わせる）。
+// 個別PRのレビュー（#4092）はここに入れない。
+model ReleaseVerification {
+  id           String @id @default(cuid())
+  repoFullName String @db.VarChar(191)
+  prNumber     Int
+  baseSha      String @db.VarChar(64)
+  headSha      String @db.VarChar(64)
+  // `integration` / `ai_review`
+  kind         String @db.VarChar(32)
+  // `not_run` / `waiting` / `running` / `passed` / `failed` / `needs_check` / `not_applicable`
+  state        String @db.VarChar(32)
+  // 実効プロバイダー・モデル（全体レビューのみ）
+  agent        String? @db.VarChar(64)
+  summary      String? @db.Text
+  // 指摘（影響するPR・ファイル・証跡を含むJSON）
+  findings     Json?
+  // 確認できなかった範囲。空でなければ全範囲確認済みのLGTMとして扱わない
+  unverifiedScope String? @db.Text
+  evidenceUrl  String? @db.VarChar(500)
+  // 失敗・環境停止・取り消しの理由。成功扱いにせず、再実行の案内に使う
+  message      String? @db.Text
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([repoFullName, prNumber, baseSha, headSha, kind], map: "ReleaseVerification_target_key")
+  @@index([repoFullName, prNumber])
+}
+
 // ユーザーごとに「リリース本文の箇条書き1行（1機能）を確認した」と記録した1件（#2982）。
 //
 // **`ReleaseCheck`（リリース1件全体の確認フラグ）とは独立した参考情報。** 全行を
@@ -2461,4 +2495,26 @@ model PushMutedKind {
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([userId, kind])
+}
+
+/// iOSアプリのログイン引き継ぎ（#3846）。ASWebAuthenticationSession（エフェメラル）で確立した
+/// セッションを、WKWebViewの /auth/native/consume が一度だけ消費して受け取る（両者はCookieを共有しない）。
+/// コードはハッシュで持ち、トークンは暗号化して60秒だけ置く。消費時に行を消す。
+model NativeAuthHandoff {
+  id            String    @id @default(cuid())
+  /// 引き継ぎコード（アプリへ返す値）のSHA-256。値そのものは保存しない
+  codeHash      String    @unique @db.VarChar(64)
+  /// 用途。別フローのコードを拒否するため（現状は "login" のみ）
+  purpose       String    @db.VarChar(32)
+  /// アプリが持つ code_verifier のS256のハッシュ。消費時に verifier と突き合わせる
+  challengeHash String    @db.VarChar(64)
+  /// access/refresh token を src/lib/native-auth/cipher.ts で暗号化した文字列
+  sessionCipher String    @db.Text
+  /// ログイン後の遷移先（消費時にtoSafeRedirectPathを通す）
+  next          String?   @db.VarChar(512)
+  expiresAt     DateTime
+  usedAt        DateTime?
+  createdAt     DateTime  @default(now())
+
+  @@index([expiresAt])
 }

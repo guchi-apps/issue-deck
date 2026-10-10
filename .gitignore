@@ -55,3 +55,9 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# iOS (Xcode)
+ios/build/
+ios/DerivedData/
+*.xcuserstate
+xcuserdata/
