@@ -1113,3 +1113,139 @@ export function ConnectedReleaseReviewSections({
     />
   );
 }
+
+/**
+ * ブランチ画面の候補に出す「全体レビュー」「統合検証」だけの枠（#4357）。個別PRレビュー・修正PR系列は
+ * 出さず、PRのCI・レビューの表示とは別枠にする。**対象はサーバーが現在のbase・headで判定する**ので、
+ * 作り直した候補（別のPR）に古いSHAの成功は出ない。進行中は既存フックが5秒ごとに取り直し、
+ * 「更新」で即時に取り直す。詳細・指摘・ログ・再実行は各区分を開いて読む（PRの詳細と同じ部品）
+ */
+export function ReleaseVerificationBrief({
+  repositoryFullName,
+  pullRequestNumber,
+  headRef,
+  className,
+}: {
+  repositoryFullName: string;
+  pullRequestNumber: number;
+  headRef: string;
+  className?: string;
+}) {
+  const [reloadToken, setReloadToken] = useState(0);
+  const enabled = headRef.startsWith(RELEASE_BRANCH_PREFIX);
+  const { verification, error } = useReleaseVerification(repositoryFullName, pullRequestNumber, enabled, reloadToken);
+  const active =
+    verification !== null &&
+    [verification.aiReview, verification.integration].some(
+      (section) => section.state === "waiting" || section.state === "running",
+    );
+  const nowMs = useNow(active);
+  if (!enabled) return null;
+  const reload = () => setReloadToken((n) => n + 1);
+  const unavailable = (
+    <span className="min-w-0">
+      {error ? (
+        <Pill tone="bad" mark="■">
+          取得できません
+        </Pill>
+      ) : (
+        <span className="text-muted-foreground">取得中です…</span>
+      )}
+    </span>
+  );
+
+  return (
+    <div
+      className={cn("overflow-hidden rounded-lg border text-left", className)}
+      data-testid="release-verification-brief"
+    >
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 border-b bg-muted/50 px-3 py-1.5">
+        <span className="text-xs font-semibold">リリースの検証</span>
+        {verification && (
+          <span className="font-mono text-[10.5px] text-muted-foreground">
+            release {shortSha(verification.target.headSha)}
+          </span>
+        )}
+        <button
+          type="button"
+          onClick={reload}
+          className="ml-auto inline-flex items-center gap-1 rounded px-1.5 text-[11px] text-muted-foreground hover:bg-muted hover:text-foreground"
+        >
+          <RotateCcw aria-hidden className="size-3" />
+          更新
+        </button>
+      </div>
+      {verification ? (
+        <>
+          <AiReviewSection
+            section={verification.aiReview}
+            assignee={verification.aiReviewAssignee}
+            repositoryFullName={repositoryFullName}
+            pullRequestNumber={pullRequestNumber}
+            target={verification.target}
+            onReload={reload}
+            onFixCreated={reload}
+            nowMs={nowMs}
+          />
+          <IntegrationSection
+            section={verification.integration}
+            nowMs={nowMs}
+            repositoryFullName={repositoryFullName}
+            pullRequestNumber={pullRequestNumber}
+            target={verification.target}
+            onFixCreated={reload}
+          />
+          {error && (
+            <p className="border-t px-3 py-1 text-[11px] text-destructive">
+              最新の状態を取得できませんでした（{error}）。表示は最後に取得できた時点のものです
+            </p>
+          )}
+        </>
+      ) : (
+        <>
+          <SectionRow title="全体レビュー" line={unavailable} />
+          <SectionRow title="統合検証" line={unavailable} />
+        </>
+      )}
+    </div>
+  );
+}
+
+/**
+ * 畳んだリポジトリ行に出す、検証の短い要約（#4357）。進行中なら「検証中」、止まっている・
+ * 要確認・失敗なら「検証に問題」。**問題なし・未取得のときは何も出さない**（静かな状態でバッジを埋めない）
+ */
+export function ReleaseVerificationSummaryPill({
+  repositoryFullName,
+  pullRequestNumber,
+  headRef,
+}: {
+  repositoryFullName: string;
+  pullRequestNumber: number;
+  headRef: string;
+}) {
+  const { verification } = useReleaseVerification(
+    repositoryFullName,
+    pullRequestNumber,
+    headRef.startsWith(RELEASE_BRANCH_PREFIX),
+  );
+  if (!verification) return null;
+  const sections = [verification.aiReview, verification.integration];
+  const problem = sections.some((s) => s.state === "failed" || s.state === "needs_check" || s.state === "invalidated");
+  const running = sections.some((s) => s.state === "waiting" || s.state === "running");
+  if (problem) {
+    return (
+      <Pill tone="bad" mark="■">
+        検証に問題
+      </Pill>
+    );
+  }
+  if (running) {
+    return (
+      <Pill tone="run" mark="●">
+        検証中
+      </Pill>
+    );
+  }
+  return null;
+}

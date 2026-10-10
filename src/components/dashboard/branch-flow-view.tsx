@@ -63,6 +63,10 @@ import {
 } from "@/components/dashboard/ios-distribution-icon";
 import { ReleasePreparationAlert } from "@/components/dashboard/release-preparation-alert";
 import { ReleaseRebuildButton } from "@/components/dashboard/release-rebuild-button";
+import {
+  ReleaseVerificationBrief,
+  ReleaseVerificationSummaryPill,
+} from "@/components/dashboard/release-review-sections";
 import { getWebviewIosRepository } from "@/lib/webview-ios-repos";
 import { ResizeHandle } from "@/components/dashboard/resize-handle";
 import { Button } from "@/components/ui/button";
@@ -979,7 +983,6 @@ function ReleaseGroupHeader({
   repositoryFullName,
   group,
   releaseButton,
-  rebuildButton,
   deviceBuild,
   showIosDistribution = false,
   onMerged,
@@ -989,8 +992,6 @@ function ReleaseGroupHeader({
   releaseButton?: React.ReactNode;
   /** iOS配布のパネルを出すか。最新のマージ済みの束だけに出す（#3808） */
   showIosDistribution?: boolean;
-  /** リリースPRを閉じてバンプから作り直す導線（#3014）。リリースPRが開いている束だけに渡す */
-  rebuildButton?: React.ReactNode;
   /**
    * Xcodeで実機へ反映するリポジトリ（#3468）。渡されたときは「本番」の文言を置き換え、
    * mainへのマージボタンを出さない（mainへはMacのスクリプトがビルドした版だけを入れる）
@@ -1155,7 +1156,6 @@ function ReleaseGroupHeader({
           {!deviceBuild && group.pullRequest && group.pullRequest.state === "open" && (
             <ReleaseMergeButton pullRequest={group.pullRequest} onMerged={onMerged} />
           )}
-          {rebuildButton}
           {releaseButton}
         </div>
 
@@ -1187,6 +1187,20 @@ function ReleaseGroupHeader({
 
         {/* マージ導線は見出し側（`ReleaseMergeButton`）が持つので、この行には渡さない */}
         {group.pullRequest && <PullRequestLine pullRequest={group.pullRequest} />}
+        {/* 全体レビュー・統合検証の進捗（#4357）。PRのCI・レビューとは別枠で、開いている
+            リリース候補（凍結ブランチ）にだけ出す */}
+        {!deviceBuild &&
+          !released &&
+          group.pullRequest &&
+          group.pullRequest.state === "open" &&
+          group.pullRequest.headRef.startsWith(RELEASE_BRANCH_PREFIX) && (
+            <ReleaseVerificationBrief
+              repositoryFullName={repositoryFullName}
+              pullRequestNumber={group.pullRequest.number}
+              headRef={group.pullRequest.headRef}
+              className="mt-1 max-w-2xl"
+            />
+          )}
         {group.bumpPullRequest && (
           <BumpPullRequestLine
             pullRequest={group.bumpPullRequest}
@@ -1619,11 +1633,22 @@ function ReleaseGroupHeaderWithLanes({
           ))}
         </>
       )}
+      {/* 凍結後の追加PR群を取り込んで候補を作り直す操作（#4357）。追加PRの直下・バージョン見出しと
+          バンプPRより上に1つだけ置き、見出しの「マージする」の近くには出さない */}
+      {rebuildButton && (
+        <li className="pt-2 pb-0.5 pl-[3.35rem] max-sm:pl-[2.6rem]">
+          <div className="flex min-w-0 max-w-2xl flex-col gap-1.5 rounded-md border border-dashed border-amber-500/60 px-3 py-2 text-xs">
+            <span className="text-muted-foreground">
+              上の追加PRを取り込んで、リリース候補を作り直します（現在の候補は閉じられます）。
+            </span>
+            <div>{rebuildButton}</div>
+          </div>
+        </li>
+      )}
       <ReleaseGroupHeader
         repositoryFullName={repositoryFullName}
         group={group}
         releaseButton={releaseButton}
-        rebuildButton={rebuildButton}
         deviceBuild={deviceBuild}
         showIosDistribution={showIosDistribution}
         onMerged={onMerged}
@@ -1725,8 +1750,19 @@ function RepositorySummaryRow({
       ?.pullRequest?.number ?? null,
     webviewIos !== null,
   );
+  // 検証の要約を出す候補（開いているリリースPR・凍結ブランチ。#4357）
+  const verifyTarget =
+    !repository.deviceBuild
+      ? (repository.releaseGroups.find(
+          (group) =>
+            group.mergedAt === null &&
+            group.pullRequest?.state === "open" &&
+            group.pullRequest.headRef.startsWith(RELEASE_BRANCH_PREFIX),
+        )?.pullRequest ?? null)
+      : null;
   // 状態バッジが1つでもあるか。無いときは2行目を作らない（#4032）
   const hasBadges =
+    verifyTarget !== null ||
     hasPullRequestHealthChips(summary.pullRequestHealth) ||
     summary.releaseInProgress ||
     releaseLaunching ||
@@ -1865,6 +1901,13 @@ function RepositorySummaryRow({
       {/* 問題と進行状況を並べる（#4015）。CI失敗だけでなく、レビュー要修正・コンフリクト・
           自動修正中なども開かずに分かる。成功状態は出さず、記号と文字を常時表示してホバー不要にする */}
       <PullRequestHealthSummaryChips summary={summary.pullRequestHealth} />
+      {verifyTarget && (
+        <ReleaseVerificationSummaryPill
+          repositoryFullName={repository.repositoryFullName}
+          pullRequestNumber={verifyTarget.number}
+          headRef={verifyTarget.headRef}
+        />
+      )}
       {summary.releaseInProgress ? (
         // 人が押す番になったら紫（自動で進む）から琥珀（手が要る）へ変える（#2038）。
         // 回るアイコンの有無だけが手掛かりだったころは、一覧を流し見して自分の番の
