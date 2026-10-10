@@ -91,6 +91,7 @@ issue-deck自身の配布状況は、既存の他アプリと同じ経路で画�
 
 - WKWebViewではWeb Push（`public/sw.js`）が動かない。ネイティブ通知は「ネイティブ通知（#4250）」のとおりAPNsで受け取る
 - キーボード・日本語入力・画面余白は実機で確認する（Webのsafe-area対応との両立を#3846で確認）
+- WebViewは下端まで広げており、`contentInsetAdjustmentBehavior`が既定のままだと下の安全領域ぶんだけWebのレイアウト高さが縮み、フッター下に空きが出る（#4258）。`.never`にしてPWAと同じ下端までの描画に揃えている。実機（TestFlight）で確認する
 
 ## 完了の判定と記録
 

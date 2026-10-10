@@ -3184,6 +3184,8 @@ export function POST(request: NextRequest) {
     sw.jsでは読まないが、送信側には残してある**——サーバーの更新と端末のService Workerの更新は
     同時ではなく、古いsw.jsを持ったままの端末では抑止が生きているため（消すと#2195が再発する）。
     全端末が更新されたら`push.ts`の型と`api/notifications/test`から消してよい。
+  - **画面内のトーストは既定で出さない**（#4262）。設定＞表示の「確認待ちのトースト通知」（`hooks/use-check-user-toast-enabled.ts`、
+    端末ごとのlocalStorage・標準OFF）をONにした端末だけ、`IssueDeckShell`が検知したIssueを積む。
   - **二重に出さないための調整は画面側にある。確認待ちの知らせの出口は端末ごとに1つ**（#2196）。
     `usePushDeliveryState`（`hooks/use-push-delivery.ts`）がこの端末の受け取り状況を判定し、
     OSの通知として届いているあいだは`IssueDeckShell`が画面内のトーストを積まない。判定は

@@ -38,6 +38,10 @@ final class WebViewModel: NSObject, ObservableObject {
         webView.isOpaque = false
         webView.backgroundColor = UIColor(named: "HeaderBand")
         webView.scrollView.backgroundColor = UIColor(named: "HeaderBand")
+        // 下端は`ignoresSafeArea`でWebViewごと広げている。既定の`.automatic`だと下の安全領域ぶんが
+        // 内側余白になってWebのレイアウト高さが縮み、フッターの下に空きが出る（#4258）。
+        // 上端はSwiftUI側がステータスバーの下から始めているので、`.never`でも影響しない
+        webView.scrollView.contentInsetAdjustmentBehavior = .never
 
         // ネイティブ通知（#4250）。トークンが届いたら登録し、通知のタップは該当画面を開く
         PushCenter.shared.onDeviceToken = { [weak self] in self?.registerPushToken() }

@@ -39,6 +39,23 @@ async function remember<T>(key: string, load: () => Promise<T>, keep: (value: T)
   return value;
 }
 
+/** 未公開タグの補完・祖先確認が同時に出すGitHub API要求の組数の上限（#4255） */
+export const UNRELEASED_CONCURRENCY = 4;
+
+/** 同時実行数に上限を付けた`Promise.all`。結果は入力と同じ順で返し、1件が投げたら全体が投げる */
+async function mapLimited<T, R>(items: readonly T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let next = 0;
+  const worker = async () => {
+    while (next < items.length) {
+      const index = next++;
+      results[index] = await fn(items[index]);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return results;
+}
+
 /** テストから覚えた値を捨てる */
 export function clearUnreleasedVersionsMemo(): void {
   memo.clear();
@@ -176,13 +193,15 @@ export async function appendUnreleasedVersions(
     if (unreleasedTags.length === 0) return releases;
 
     const unreleased = (
-      await Promise.all(unreleasedTags.map((tag) => buildUnreleasedEntry(owner, repo, tag, tags, token)))
+      await mapLimited(unreleasedTags, UNRELEASED_CONCURRENCY, (tag) =>
+        buildUnreleasedEntry(owner, repo, tag, tags, token).catch(() => null),
+      )
     ).filter((entry): entry is ReleaseHistoryItem => entry !== null);
     const combined = [...releases, ...unreleased];
 
     const candidates = planRecoveryLinks(combined);
-    const contains = await Promise.all(
-      candidates.map((pair) => fetchContains(owner, repo, pair.failed, pair.recovery, token)),
+    const contains = await mapLimited(candidates, UNRELEASED_CONCURRENCY, (pair) =>
+      fetchContains(owner, repo, pair.failed, pair.recovery, token).catch(() => null),
     );
     // 祖先関係を確かめられた組だけを使う。版の並びだけで関係を言い切らない
     return applyRecoveryLinks(
