@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   evaluateReleaseMergeGate,
+  evaluateReleaseVerificationWait,
   isReleasePullRequest,
   type ReleaseVerificationRecord,
 } from "./release-merge-gate";
@@ -76,5 +77,27 @@ describe("isReleasePullRequest", () => {
     expect(isReleasePullRequest({ baseRef: "main", headRef: "release-main/v1.2.3" })).toBe(true);
     expect(isReleasePullRequest({ baseRef: "develop", headRef: "release-main/v1.2.3" })).toBe(false);
     expect(isReleasePullRequest({ baseRef: "main", headRef: "deploy-recovery/x" })).toBe(false);
+  });
+});
+
+describe("evaluateReleaseVerificationWait", () => {
+  const wait = (records: ReleaseVerificationRecord[]) => evaluateReleaseVerificationWait({ current, records });
+
+  it("実行中・待機中は待ちとして返す", () => {
+    const pending = wait([rec({ state: "running" }), rec({ kind: "ai_review", state: "waiting" })]);
+    expect(pending.map((p) => p.kind)).toEqual(["integration", "ai_review"]);
+  });
+
+  it("片方だけ実行中でも待つ", () => {
+    expect(wait([rec({}), rec({ kind: "ai_review", state: "running" })]).map((p) => p.kind)).toEqual(["ai_review"]);
+  });
+
+  it("判定が出ていれば結果が何でも待たない", () => {
+    expect(wait([rec({ state: "failed" }), rec({ kind: "ai_review", unverifiedScope: "ios" })])).toEqual([]);
+  });
+
+  it("記録が無い・古い結果は待たない", () => {
+    expect(wait([])).toEqual([]);
+    expect(wait([rec({ headSha: "old", state: "running" })])).toEqual([]);
   });
 });

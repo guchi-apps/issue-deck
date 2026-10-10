@@ -30,8 +30,10 @@ AIレビューはテスト実行の代わりにしない。個別レビューの
 - **`POST /api/issues/pull-request-merge`のゲートは、base=main・head=`release-main/v*`のPRにだけ掛ける。** develop向けPR・知見昇格PR等は従来どおり。
   マージ直前にGitHubからbase/headを取り直して記録のSHAと突き合わせ、`mergePullRequest`へexpectedHeadShaを渡す
 - `blocked`（失敗・未実施・実行中・古い結果）は確認済みにできない。`needs_confirmation`だけが`acknowledgeVerification: true`で通れる（サーバーログに残す）
+- **判定の完了待ち（#4354）。** 統合検証・全体レビューが`waiting`／`running`のあいだは、**`enforced`に関わらず**マージAPIが409（`release_verification_pending`）で止める。
+  結果（失敗・要確認・古い結果）では止めず、記録が無い（依頼されていない）ものも待たない。報告が来ず待ちのまま止まった場合は`acknowledgeVerification: true`で上書きできる（サーバーログに残す）。判断は`evaluateReleaseVerificationWait`
 - **AIのLGTMだけで自動マージはしない。** 最終承認は従来どおり人
-- 強制は`src/lib/release-verification-config.ts`のリポジトリ別`enforced`で切り替える。**検証の実行経路が配布されるまで`false`**（未配布を導入済みと扱わない）
+- 結果による強制は`src/lib/release-verification-config.ts`のリポジトリ別`enforced`で切り替える（上の完了待ちは対象外）。**検証の実行経路が配布されるまで`false`**（未配布を導入済みと扱わない）
 
 ### ゲートが及ばない経路
 
