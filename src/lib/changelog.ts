@@ -42,6 +42,13 @@ export type ChangelogEntry = {
  */
 export const APP_CHANGELOG: ChangelogEntry[] = [
   {
+    version: "8.48.1",
+    date: "2026-10-10",
+    changes: [
+      "PRの自動修復が止まったときに表示される「同じ問題が再発しました」というメッセージを、「修正後もHEADが変わらず、同じ問題が残っています」という実態に合った説明に改め、必要なら再レビューを実行するよう案内するようにしました。",
+    ],
+  },
+  {
     version: "8.48.0",
     date: "2026-10-10",
     changes: [
