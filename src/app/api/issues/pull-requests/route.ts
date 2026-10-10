@@ -68,6 +68,7 @@ function toIssuePullRequest(
     state: pullRequest.state === "closed" ? "closed" : "open",
     draft: pullRequest.draft,
     merged: pullRequest.merged,
+    baseRef: pullRequest.base.ref,
     ciStatus: checkState ? toPullRequestCiStatus(checkState.ciState) : null,
     mergeJudgement: checkState?.mergeJudgement ?? MERGE_JUDGEMENT_UNKNOWN,
     mergeable: checkState?.mergeable ?? null,
