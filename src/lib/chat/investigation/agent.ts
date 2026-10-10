@@ -26,6 +26,10 @@ export const INVESTIGATION_LIMITS = {
   maxConsecutiveFailures: 3,
   /** モデル1回の応答待ち */
   stepTimeoutMs: 40_000,
+  /** 同じ呼び出しの再要求をこの回数まで受け流し、既存結果を返して別の調査か回答へ切り替えさせる（#4198） */
+  maxDuplicateCalls: 2,
+  /** 停止後に、取得済みの材料から回答を作らせる回復は1回だけ。待ちもこの時間まで */
+  recoveryTimeoutMs: 30_000,
 } as const;
 
 export type ProposalKind = "none" | "issue" | "fix_request";
@@ -143,7 +147,8 @@ ${
 - 調べ終えたら、action="final" の1つのJSONだけを出力する（action="tool" は使わない）。使わない欄は空文字・空配列・0にする`
       : `- 毎回、次のどちらかを出力する。action="tool"なら tool と args_json（JSON文字列）を埋め、action="final"なら回答を埋める。使わない欄は空文字・空配列・0にする`
   }
-- 同じツールを同じ引数で呼び直さない。取得に失敗した範囲は「未確認」に入れ、「問題なし」と言わない
+- 同じツールを同じ引数で呼び直さない（呼び直しても既存の結果が返るだけ）。結果が足りなければ別のツール・別の引数（検索結果のファイルを read_repo_file で開く等）へ進むか、取得済みの材料で final を出す。利用者にツール名や検索方法の指定を求めない
+- 取得に失敗した範囲は「未確認」に入れ、「問題なし」と言わない。失敗が無いのに権限・接続の問題とは言わない
 - PR本文の「要確認（needs-check）」やレビュー判定の文言だけで結論を出さない。レビューの中身（get_pr_discussion）と差分・CIログを読んで、修正可能な指摘／方針判断待ち／情報不足／修正不要のどれかを理由つきで説明する
 - 自動レビュー判定の判定時HEADが現在のHEADと違う（古い判定）なら、修正済み・マージ可能と断定しない
 
@@ -236,6 +241,20 @@ export function callKey(name: string, args: Record<string, unknown>): string {
   return `${name}:${JSON.stringify(sorted)}`;
 }
 
+/** 停止時に取得済みの材料から回答を作り直させる依頼（回復。回数・時間とも1回だけ） */
+function recoveryPrompt(reason: string): string {
+  return `調査を打ち切ります（理由: ${reason}）。これ以上ツールは呼ばず、ここまでに取得した材料だけで action="final" を出してください。reply には、分かったこと・提案・まだ確認できていない部分を分けて書き、確認していないことを断定しないこと。`;
+}
+
+/** 回復の回答も得られないときの、確認済みの事実と未確認だけの途中結果（推測は入れない） */
+function fallbackOutput(toolCalls: InvestigationResult["toolCalls"]): Pick<InvestigationOutput, "facts" | "unconfirmed"> {
+  const describe = (c: InvestigationResult["toolCalls"][number]) => `${c.name} ${JSON.stringify(c.args)}`;
+  return {
+    facts: toolCalls.filter((c) => c.ok).map((c) => `取得済み: ${describe(c)}`).slice(0, 12),
+    unconfirmed: toolCalls.filter((c) => !c.ok).map((c) => `取得できなかった: ${describe(c)}`).slice(0, 12),
+  };
+}
+
 function carryOver(investigation: ChatInvestigation | null | undefined): string {
   if (!investigation) return "";
   const lines = [
@@ -276,6 +295,9 @@ export async function runInvestigation(params: {
   const evidence: ChatEvidence[] = [];
   const toolCalls: InvestigationResult["toolCalls"] = [];
   const seen = new Set<string>();
+  /** 取得済みの結果（同じ呼び出しの再要求には、再実行せずこれを返す） */
+  const cache = new Map<string, string>();
+  let duplicates = 0;
   let consecutiveFailures = 0;
 
   const header = [
@@ -307,6 +329,21 @@ export async function runInvestigation(params: {
     toolCalls,
   });
 
+  /**
+   * 上限・進展なしで止めるときも回答を残す（#4198）。取得済みの材料で最終回答を1回だけ作らせ、
+   * それも得られなければ確認済みの事実・未確認と停止理由だけを返す。
+   */
+  const recover = async (reason: string): Promise<InvestigationResult> => {
+    const response = await params.callModel({
+      system,
+      messages: [...messages, { role: "user", content: recoveryPrompt(reason) }],
+      timeoutMs: INVESTIGATION_LIMITS.recoveryTimeoutMs,
+    });
+    const parsed = response.ok ? parseStep(response.text) : null;
+    if (parsed?.action === "final" && parsed.final) return stop(reason, parsed.final);
+    return stop(reason, { ...emptyOutput(), ...fallbackOutput(toolCalls) });
+  };
+
   if (params.session) {
     return runSessionInvestigation({
       session: params.session,
@@ -320,12 +357,13 @@ export async function runInvestigation(params: {
       toolCalls,
       seen,
       stop,
+      fallback: () => fallbackOutput(toolCalls),
     });
   }
 
   for (let step = 1; step <= INVESTIGATION_LIMITS.maxSteps; step++) {
     const remaining = maxDurationMs - (clock() - startedAt);
-    if (remaining <= 0) return stop(`時間の上限（${maxDurationMs / 1000}秒）に達しました`);
+    if (remaining <= 0) return recover(`時間の上限（${maxDurationMs / 1000}秒）に達しました`);
     const lastStep = step === INVESTIGATION_LIMITS.maxSteps;
     const response = await params.callModel({
       system,
@@ -348,7 +386,7 @@ export async function runInvestigation(params: {
         toolCalls,
       };
     }
-    if (lastStep) return stop("調査の回数の上限に達しました");
+    if (lastStep) return recover("調査の回数の上限に達しました");
 
     const name = parsed.tool;
     const args = parseArgs(parsed.argsJson);
@@ -360,23 +398,43 @@ export async function runInvestigation(params: {
     }
     const key = callKey(name, args);
     if (seen.has(key)) {
-      return stop("同じ調査を繰り返したため、進展なしとして止めました");
+      // 即終了せず、既存の結果を示して別の調査か回答へ切り替えさせる。それでも繰り返すなら回復へ（#4198）
+      duplicates++;
+      if (duplicates > INVESTIGATION_LIMITS.maxDuplicateCalls) return recover("同じ調査の繰り返しで進展がなかったため止めました");
+      messages.push({
+        role: "user",
+        content: `<untrusted_data tool="${name}" ok="true" duplicate="true">\n同じ呼び出しは実行済みです（再実行しません）。既存の結果:\n${cache.get(key) ?? ""}\n\n別のツール・引数で調べるか、取得済みの材料で action="final" を出してください。</untrusted_data>`,
+      });
+      continue;
     }
     seen.add(key);
-
     const result = await exec(params.ctx, name, args);
     toolCalls.push({ name, ok: result.ok, args });
     evidence.push(...result.evidence);
     consecutiveFailures = result.ok ? 0 : consecutiveFailures + 1;
+    const safeText = redactSecrets(result.text);
+    cache.set(key, safeText.slice(0, 4000));
     messages.push({
       role: "user",
-      content: `<untrusted_data tool="${name}" ok="${result.ok}">\n${redactSecrets(result.text)}\n</untrusted_data>`,
+      content: `<untrusted_data tool="${name}" ok="${result.ok}">\n${safeText}\n</untrusted_data>`,
     });
     if (consecutiveFailures >= INVESTIGATION_LIMITS.maxConsecutiveFailures) {
-      return stop("取得の失敗が続いたため止めました（権限・接続を確認してください）");
+      return recover("取得の失敗が続いたため止めました（権限・接続を確認してください）");
     }
   }
-  return stop("調査の回数の上限に達しました");
+  return recover("調査の回数の上限に達しました");
+}
+
+function emptyOutput(): InvestigationOutput {
+  return {
+    reply: "",
+    facts: [],
+    inferences: [],
+    unconfirmed: [],
+    agreements: [],
+    openQuestions: [],
+    proposal: { kind: "none", repo: "", number: null, title: "", body: "", scope: "code" },
+  };
 }
 
 export function dedupeEvidence(items: ChatEvidence[]): ChatEvidence[] {
@@ -408,7 +466,10 @@ async function runSessionInvestigation(params: {
   toolCalls: InvestigationResult["toolCalls"];
   seen: Set<string>;
   stop: (reason: string, partial?: InvestigationOutput) => InvestigationResult;
+  fallback: () => Pick<InvestigationOutput, "facts" | "unconfirmed">;
 }): Promise<InvestigationResult> {
+  const cache = new Map<string, string>();
+  let duplicates = 0;
   const maxCalls = INVESTIGATION_LIMITS.maxSteps - 1;
   let reserved = 0;
   let consecutiveFailures = 0;
@@ -438,14 +499,21 @@ async function runSessionInvestigation(params: {
     }
     const key = callKey(name, args);
     if (params.seen.has(key)) {
-      consecutiveFailures++;
-      return { ok: false, text: wrap(name, false, "同じ呼び出しは済んでいます。結果を使って次へ進むか、final を出してください。") };
+      // 失敗にも数えない（取得失敗と誤案内しない）。既存結果を返し、繰り返すなら final を促す（#4198）
+      duplicates++;
+      const again = duplicates > INVESTIGATION_LIMITS.maxDuplicateCalls;
+      if (again) halted = "同じ呼び出しの繰り返しで進展がありません";
+      return {
+        ok: true,
+        text: wrap(name, true, `同じ呼び出しは実行済みです（再実行しません）。既存の結果:\n${cache.get(key) ?? ""}\n\n${again ? "これ以上ツールは呼ばず、action=\"final\" を出してください。" : "別のツール・引数で調べるか、取得済みの材料で final を出してください。"}`),
+      };
     }
     params.seen.add(key);
     const result = await params.exec(params.ctx, name, args);
     params.toolCalls.push({ name, ok: result.ok, args });
     params.evidence.push(...result.evidence);
     consecutiveFailures = result.ok ? 0 : consecutiveFailures + 1;
+    cache.set(key, redactSecrets(result.text).slice(0, 4000));
     let text = wrap(name, result.ok, result.text);
     if (consecutiveFailures >= INVESTIGATION_LIMITS.maxConsecutiveFailures) {
       halted = "取得の失敗が続いたため止めました";
@@ -478,9 +546,9 @@ async function runSessionInvestigation(params: {
   finished = true;
   if (!response.ok) return params.stop(`AIの呼び出しに失敗しました（${response.reason}）`);
   const parsed = parseStep(response.text);
-  if (!parsed) return params.stop("AIの応答を読み取れませんでした");
+  if (!parsed) return params.stop("AIの応答を読み取れませんでした", params.toolCalls.length ? { ...emptyOutput(), ...params.fallback() } : undefined);
   if (parsed.action !== "final" || !parsed.final) {
-    return params.stop("AIが最終回答を出さずに終わりました", undefined);
+    return params.stop("AIが最終回答を出さずに終わりました", params.toolCalls.length ? { ...emptyOutput(), ...params.fallback() } : undefined);
   }
   return {
     ...parsed.final,
