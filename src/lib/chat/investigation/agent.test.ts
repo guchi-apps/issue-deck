@@ -76,13 +76,42 @@ describe("runInvestigation", () => {
     expect(result.toolCalls.map((c) => c.name)).toEqual(["get_pull_request", "get_pr_discussion"]);
   });
 
-  it("同じ呼び出しの繰り返しは進展なしとして止め、途中結果を返す", async () => {
-    const model = scripted([toolStep("get_pull_request", { number: 1 })]);
-    const tool = vi.fn(async () => ok("x"));
+  it("同じ呼び出しを再要求しても即終了せず、既存結果を示して別の調査・回答へ進める", async () => {
+    const model = scripted([toolStep("get_pull_request", { number: 1 }), toolStep("get_pull_request", { number: 1 }), finalStep()]);
+    const tool = vi.fn(async () => ok("cached body"));
     const result = await runInvestigation({ ...base, callModel: model.callModel, tool });
     expect(tool).toHaveBeenCalledTimes(1);
-    expect(result.stopReason).toContain("進展なし");
+    expect(result.stopReason).toBeNull();
+    expect(result.reply).toContain("未解消");
+  });
+
+  it("繰り返しが続けば、取得済みの材料から回答を作らせて停止理由つきで返す", async () => {
+    let n = 0;
+    const callModel: CallModel = async ({ messages }) => {
+      n++;
+      const last = messages[messages.length - 1].content;
+      return { ok: true, text: last.includes("調査を打ち切ります") ? finalStep() : toolStep("get_pull_request", { number: 1 }) };
+    };
+    const tool = vi.fn(async () => ok("x"));
+    const result = await runInvestigation({ ...base, callModel, tool });
+    expect(tool).toHaveBeenCalledTimes(1);
+    expect(result.stopReason).toContain("進展がなかった");
+    expect(result.reply).toContain("未解消");
+    expect(n).toBe(INVESTIGATION_LIMITS.maxDuplicateCalls + 3);
     expect(result.evidence).toHaveLength(1);
+  });
+
+  it("回復の回答も失敗したら、確認済みの事実と停止理由だけを返す", async () => {
+    let n = 0;
+    const callModel: CallModel = async () => {
+      n++;
+      if (n <= INVESTIGATION_LIMITS.maxDuplicateCalls + 2) return { ok: true, text: toolStep("get_pull_request", { number: 1 }) };
+      return { ok: false, reason: "HTTP 529" };
+    };
+    const result = await runInvestigation({ ...base, callModel, tool: async () => ok("x") });
+    expect(result.reply).toBe("");
+    expect(result.facts[0]).toContain("get_pull_request");
+    expect(result.stopReason).toContain("進展がなかった");
   });
 
   it("取得失敗が続いたら止める（失敗を問題なしにしない）", async () => {
@@ -95,7 +124,7 @@ describe("runInvestigation", () => {
     const tool = vi.fn(async (): Promise<ToolResult> => ({ ok: false, text: "403", evidence: [] }));
     const result = await runInvestigation({ ...base, callModel: model.callModel, tool });
     expect(result.stopReason).toContain("失敗が続いた");
-    expect(result.reply).toBe("");
+    expect(result.reply).toContain("未解消"); // 回復で材料から回答を作る（#4198）
     expect(result.toolCalls.every((c) => !c.ok)).toBe(true);
   });
 
@@ -274,7 +303,9 @@ describe("セッション型の調査（1回の実行で調査から回答まで
       }),
     });
     expect(tool).toHaveBeenCalledTimes(1);
-    expect(second.ok).toBe(false);
+    // 失敗として数えず、既存の結果を返す（取得失敗と誤案内しない）
+    expect(second.ok).toBe(true);
+    expect(second.text).toContain("実行済み");
   });
 
   it("取得の失敗が続けば止め、停止理由つきで返す。機密値は伏せる", async () => {
