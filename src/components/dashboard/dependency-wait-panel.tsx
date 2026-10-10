@@ -1,8 +1,18 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { AlertTriangle, CheckCircle2, ExternalLink, Hourglass, RefreshCw, Send } from "lucide-react";
+import { AlertTriangle, CheckCircle2, ExternalLink, Hourglass, RefreshCw, Send, XCircle } from "lucide-react";
 
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import type { DispatchStateHandle } from "@/hooks/use-dispatch-state";
 import {
@@ -68,7 +78,9 @@ export function DependencyWaitPanel({
   const canResume =
     wait.status === "WAITING" || wait.status === "NEEDS_CONFIRM" || wait.status === "RESUME_FAILED";
 
-  async function run(action: "recheck" | "resume") {
+  const [confirmingCancel, setConfirmingCancel] = useState(false);
+
+  async function run(action: "recheck" | "resume" | "cancel") {
     setMessage(null);
     const result = await dispatch.controlDependencyWait({ id: wait.id, action });
     if (!result.ok) setMessage(result.message);
@@ -156,9 +168,43 @@ export function DependencyWaitPanel({
               作業を再開
             </Button>
           )}
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            disabled={dispatch.isSubmitting}
+            onClick={() => setConfirmingCancel(true)}
+          >
+            <XCircle className="size-3.5" />
+            待機を解除
+          </Button>
         </div>
       )}
       {message && <p className="text-xs text-destructive">{message}</p>}
+
+      <AlertDialog open={confirmingCancel} onOpenChange={setConfirmingCancel}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>依存待ちを解除しますか？</AlertDialogTitle>
+            <AlertDialogDescription>
+              {formatDependencyRef(wait.dependency)}の待機を取り消します。条件が成立しても、このセッションへ
+              再開の指示は送られなくなります。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={dispatch.isSubmitting}>キャンセル</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={dispatch.isSubmitting}
+              onClick={(event) => {
+                event.preventDefault();
+                void run("cancel").finally(() => setConfirmingCancel(false));
+              }}
+            >
+              解除する
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
