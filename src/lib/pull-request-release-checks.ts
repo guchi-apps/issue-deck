@@ -1,4 +1,5 @@
 import { db } from "@/lib/db";
+import { getReleaseVerificationConfig } from "@/lib/release-verification-config";
 import {
   isReleasePullRequest,
   parseReleaseVerificationKind,
@@ -59,7 +60,11 @@ export async function fetchReleaseChecks(
 ): Promise<Map<string, PullRequestReleaseChecks>> {
   const result = new Map<string, PullRequestReleaseChecks>();
   const releases = targets.filter(
-    (target) => isReleasePullRequest(target) && target.baseSha !== null,
+    // 検証を強制していないリポジトリはマージゲートも判定しないので、一覧にも出さない
+    (target) =>
+      isReleasePullRequest(target) &&
+      target.baseSha !== null &&
+      getReleaseVerificationConfig(target.repositoryFullName).enforced,
   );
   if (releases.length === 0) return result;
   try {
