@@ -2540,3 +2540,35 @@ model IssueCreateRequest {
   @@unique([userId, key])
   @@index([createdAt])
 }
+
+/// 本番VPSのissue-deckプロセスのメモリ計測サンプル（#4256）。サブPCの`scripts/vps-memory-probe.mjs`が送る。
+/// 取得できなかった回も`status`と`reason`つきで残す（0や空に置き換えない）。保存は7日・件数上限あり。
+model VpsMemorySample {
+  id             String   @id @default(cuid())
+  /// サブPCで採取した時刻
+  sampledAt      DateTime @db.DateTime(3)
+  receivedAt     DateTime @default(now()) @db.DateTime(3)
+  /// "ok" | "partial" | "unavailable"
+  status         String   @db.VarChar(16)
+  /// ssh_failed / timeout / permission_denied / process_not_found / ambiguous_process など
+  reason         String?  @db.VarChar(32)
+  /// プロセスの区間。`<pid>-<起動時刻のtick>`。変われば別プロセス（デプロイ・再起動）
+  segmentKey     String?  @db.VarChar(48)
+  pid            Int?
+  startedAt      DateTime? @db.DateTime(3)
+  rssKb          Int?
+  hwmKb          Int?
+  threads        Int?
+  uptimeSec      Int?
+  memTotalKb     BigInt?
+  memAvailableKb BigInt?
+  swapTotalKb    BigInt?
+  swapFreeKb     BigInt?
+  nodeArgs       String?  @db.VarChar(255)
+  /// 計測の実行単位（1回の`--once`／1回の連続計測）
+  runId          String?  @db.VarChar(40)
+  mode           String?  @db.VarChar(16)
+
+  @@index([sampledAt])
+  @@index([segmentKey])
+}
