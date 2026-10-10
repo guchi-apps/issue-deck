@@ -108,9 +108,25 @@ describe("PullRequestMergeButton", () => {
     expect(footer?.className).toContain("flex-row");
     const buttons = Array.from(footer?.querySelectorAll("button") ?? []);
     expect(buttons.map((button) => button.textContent)).toEqual(["キャンセル", "マージする"]);
-    // 「マージする」は危険色ではなく他の画面の主ボタンと同じ黒（primary）
-    expect(buttons[1].className).toContain("bg-primary");
+    // main向けの「マージする」は、developと見分けるオレンジ（#4328）。危険色ではない
+    expect(buttons[1].className).toContain("bg-orange-600");
+    expect(buttons[1].className).not.toContain("bg-primary");
     expect(buttons[1].className).not.toContain("bg-destructive");
+  });
+
+  it("main向けのボタンだけがオレンジで、develop向けは従来の見た目のまま（#4328）", () => {
+    const { unmount } = render(
+      <PullRequestMergeButton pullRequest={makePullRequest()} onMerged={() => {}} />,
+    );
+    expect(screen.getByRole("button", { name: "マージする" }).className).toContain("border-orange-600");
+    unmount();
+    render(
+      <PullRequestMergeButton
+        pullRequest={makePullRequest({ baseRef: "develop" })}
+        onMerged={() => {}}
+      />,
+    );
+    expect(screen.getByRole("button", { name: "マージする" }).className).not.toContain("orange");
   });
 
   it("mainへのPRでは、CIの状態を警告リストではなく「マージ前の確認」に出す（#3093）", () => {

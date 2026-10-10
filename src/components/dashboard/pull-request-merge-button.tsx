@@ -37,6 +37,15 @@ type PullRequestMergeButtonProps = {
 };
 
 /**
+ * mainへのマージ（本番デプロイが走る）だけを、developへのマージと見分けるためのオレンジ（#4328）。
+ * 詳細ペインの塗りつぶしと、一覧・流れ図の枠線のどちらでも同じ色味に揃える。
+ */
+const PRODUCTION_MERGE_FILLED =
+  "border-orange-600 bg-orange-600 text-white hover:bg-orange-700 hover:text-white dark:border-orange-500 dark:bg-orange-500 dark:text-orange-950 dark:hover:bg-orange-400";
+const PRODUCTION_MERGE_OUTLINE =
+  "border-orange-600 text-orange-700 hover:bg-orange-500/10 hover:text-orange-700 dark:border-orange-500 dark:text-orange-400 dark:hover:text-orange-300";
+
+/**
  * PRをissue-deckの画面からマージするボタン（#1058・#1087）。
  *
  * CIが落ちている・実行中・Auto-merge待ちといった「そのまま押すと意図とずれうる」状態では
@@ -95,7 +104,10 @@ export function PullRequestMergeButton({
       <Button
         size="sm"
         variant={variant}
-        className="h-7 shrink-0"
+        className={cn(
+          "h-7 shrink-0",
+          productionMerge && (variant === "default" ? PRODUCTION_MERGE_FILLED : PRODUCTION_MERGE_OUTLINE),
+        )}
         disabled={isSubmitting || isMerged || judgementPending}
         title={judgementPending ? mergeJudgementReason(pullRequest.mergeJudgement.step) : undefined}
         onClick={() => (warnings.length > 0 ? setConfirmOpen(true) : runMerge())}
@@ -153,7 +165,7 @@ export function PullRequestMergeButton({
             </AlertDialogCancel>
             <AlertDialogAction
               variant="default"
-              className="flex-1"
+              className={cn("flex-1", productionMerge && PRODUCTION_MERGE_FILLED)}
               onClick={(event) => {
                 // 確認結果を待たずに閉じないよう、既定の閉じる動作を止めてから実行する。
                 event.preventDefault();
