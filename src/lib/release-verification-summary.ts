@@ -6,6 +6,7 @@ import {
   type ReleaseVerificationKind,
   type ReleaseVerificationState,
 } from "@/lib/release-merge-gate";
+import { readReleaseReviewDiagnostic, type ReleaseReviewDiagnostic } from "@/lib/release-review-diagnostic";
 import type { ReleaseReviewFinding } from "@/lib/release-review-result";
 import type { ReleaseVerificationProgress } from "@/lib/release-verification-progress";
 
@@ -48,6 +49,11 @@ export type ReleaseVerificationSection = {
    * 対象の違うジョブは渡さない（古い実行の工程を現在の進捗に見せない）。ジョブが無ければnull
    */
   progress: ReleaseVerificationProgress | null;
+  /**
+   * 全体レビューが実行失敗したときの診断（#4300）。**現在の対象（base・head）に対応するものだけ**。
+   * コードへの指摘（`findings`）とは別で、`state`が`failed`のときだけ入る
+   */
+  diagnostic: ReleaseReviewDiagnostic | null;
 };
 
 export type ReleaseVerificationSummary = {
@@ -114,6 +120,7 @@ export function summarizeReleaseVerification(input: {
       updatedAt: row?.updatedAt.toISOString() ?? null,
       ...detail,
       progress,
+      diagnostic: state === "failed" ? readReleaseReviewDiagnostic(row?.findings, current) : null,
     };
   };
 

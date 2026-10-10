@@ -13,6 +13,14 @@ export type ReleaseReviewFinding = {
   title: string;
   detail: string;
   file: string | null;
+  /** 該当行（分かるときだけ） */
+  line: number | null;
+  /** 利用者・本番への影響（#4300） */
+  impact: string | null;
+  /** 指摘の根拠（再現手順・該当コードなど） */
+  evidence: string | null;
+  /** 推奨する対応 */
+  recommendation: string | null;
   /** 影響するPR番号 */
   pullRequests: number[];
 };
@@ -59,6 +67,10 @@ function normalizeFinding(value: unknown): ReleaseReviewFinding | null {
     title,
     detail: str(raw.detail, 2000) ?? "",
     file: str(raw.file, 300),
+    line: typeof raw.line === "number" && Number.isInteger(raw.line) && raw.line > 0 ? raw.line : null,
+    impact: str(raw.impact, 1000),
+    evidence: str(raw.evidence, 2000),
+    recommendation: str(raw.recommendation, 1000),
     pullRequests: prNumbers(raw.pullRequests),
   };
 }
