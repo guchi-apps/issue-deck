@@ -5,6 +5,7 @@ import { db } from "@/lib/db";
 import { fetchPullRequest, mergePullRequest } from "@/lib/github/actions-api";
 import { withGithubApiFeature } from "@/lib/github/api-usage";
 import { getInstallationToken } from "@/lib/github/app-auth";
+import { evaluateReviewMergeGuard } from "@/lib/github/review-merge-guard";
 import { recordDeployLaunchWatch } from "@/lib/github/deploy-launch-watch";
 import { GithubApiError } from "@/lib/github/issues-api";
 import { previewModeGuard } from "@/lib/preview-mode";
@@ -38,7 +39,7 @@ async function handlePOST(request: NextRequest) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
-  const body: { owner?: string; repo?: string; number?: number; acknowledgeVerification?: boolean } = await request
+  const body: { owner?: string; repo?: string; number?: number; acknowledgeVerification?: boolean; acknowledgeReviewSha?: string } = await request
     .json()
     .catch(() => ({}));
   const { owner, repo, number } = body;
@@ -101,6 +102,24 @@ async function handlePOST(request: NextRequest) {
       }
     }
 
+    // 要修正・要確認の判定が残るPRは、このHEADへの明示確認が無い限り通さない（#4377）。
+    // リリース検証ゲートの後に評価し、`acknowledgeVerification`とは独立。画面を介さない要求でも効く。
+    const reviewGuard = evaluateReviewMergeGuard({
+      body: pr.body,
+      headSha: pr.head.sha,
+      acknowledgeReviewSha: body.acknowledgeReviewSha,
+    });
+    if (reviewGuard.status !== "ok") {
+      return NextResponse.json({ error: reviewGuard.status, ...reviewGuard }, { status: 409 });
+    }
+    if (body.acknowledgeReviewSha) {
+      console.warn(
+        `[POST /api/issues/pull-request-merge] ${owner}/${repo}#${number} 要修正の判定を明示確認のうえマージ (head=${pr.head.sha})`,
+      );
+    }
+
+    // 明示確認したときは、HEADが確認時から動いていないことをGitHubにも保証させる（追いコミットを巻き込まない）
+    if (body.acknowledgeReviewSha) expectedHeadSha ??= pr.head.sha;
     const merged = await mergePullRequest(owner, repo, Number(number), token, expectedHeadSha);
 
     // mainへのマージなら、本番デプロイが本当に起動したかを見張る行を1つ置く（#2703）。

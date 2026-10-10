@@ -27,6 +27,7 @@ import { PullRequestAiReviewJobs } from "@/components/dashboard/pull-request-ai-
 import { PullRequestFileList } from "@/components/dashboard/pull-request-file-list";
 import { PullRequestReviewRound } from "@/components/dashboard/pull-request-review-round";
 import { PullRequestMergeButton } from "@/components/dashboard/pull-request-merge-button";
+import { PullRequestMergeHoldNotice } from "@/components/dashboard/pull-request-merge-hold";
 import { PullRequestRepairButtons } from "@/components/dashboard/pull-request-repair-buttons";
 import { PullRequestBackupCi } from "@/components/dashboard/pull-request-backup-ci";
 import { PullRequestReviewFindings } from "@/components/dashboard/pull-request-review-findings";
@@ -419,6 +420,8 @@ export function PullRequestDetail({
 
           {/* PR一覧・ブランチ画面と同じ6チェック（#4366）。バッジは操作の入口として残し、結果の比較はここで読む */}
           <PullRequestChecksStrip pullRequest={pullRequest} className="-mx-1 px-0" />
+
+          <PullRequestMergeHoldNotice pullRequest={pullRequest} className="mt-2" />
 
           {/* ユーザーのマージが必要な理由（#4088）。バッジの直下に出して押す前に読めるようにする */}
           {requiresUserMerge(pullRequest) && currentDetail?.userMergeReasons && (

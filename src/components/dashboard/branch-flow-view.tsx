@@ -45,6 +45,7 @@ import {
   pullRequestKindLabel,
 } from "@/components/dashboard/pull-request-badges";
 import { PullRequestMergeButton } from "@/components/dashboard/pull-request-merge-button";
+import { PullRequestMergeHoldNotice } from "@/components/dashboard/pull-request-merge-hold";
 import { PullToRefreshIndicator } from "@/components/dashboard/pull-to-refresh-indicator";
 import type { IosDistributionFixIssueDraft } from "@/lib/ios-distribution-failure";
 import { DeployFailureAlert } from "@/components/dashboard/deploy-failure-alert";
@@ -713,6 +714,7 @@ function PullRequestLine({
     </div>
     {/* PR詳細・PR一覧と同じ6チェック（#4366）。共通結果は対象の候補PR・SHAを添えて出す */}
     <PullRequestChecksStrip pullRequest={pullRequest} className="max-w-2xl px-0" />
+    {onMerged !== undefined && <PullRequestMergeHoldNotice pullRequest={pullRequest} className="max-w-2xl" />}
     </>
   );
 }
