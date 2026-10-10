@@ -881,8 +881,8 @@ describe("fillUsageDays", () => {
             "github-actions": { sessions: 0, responses: 0, inputTokens: 0, cacheCreateTokens: 0, cacheReadTokens: 0, contextTokens: 0, outputTokens: 0, costUsd: 0 },
           },
           modelTiers: {
-            claude: { costUsd: [0, 0, 0, 0], unresolvedCostUsd: 3 },
-            codex: { costUsd: [0, 0, 0, 0], unresolvedCostUsd: 0 },
+            claude: { costUsd: [0, 0, 0, 0], unresolvedCostUsd: 3, byBasis: { responses: { tiers: [0, 0, 0, 0], unresolved: 0 }, tokens: { tiers: [0, 0, 0, 0], unresolved: 0 }, sessions: { tiers: [0, 0, 0, 0], unresolved: 0 }, issues: { tiers: [0, 0, 0, 0], unresolved: 0 } } },
+            codex: { costUsd: [0, 0, 0, 0], unresolvedCostUsd: 0, byBasis: { responses: { tiers: [0, 0, 0, 0], unresolved: 0 }, tokens: { tiers: [0, 0, 0, 0], unresolved: 0 }, sessions: { tiers: [0, 0, 0, 0], unresolved: 0 }, issues: { tiers: [0, 0, 0, 0], unresolved: 0 } } },
           },
           issues: 0,
           modelLabels: [],
@@ -1123,6 +1123,27 @@ describe("表示基準（#4285）", () => {
     expect(summary.byKind.find((row) => row.key === "plan-review")?.issues).toBe(1);
     // 同じIssueが複数の種別に現れるので、種別の和は全体の件数と一致しない
     expect(summary.byKind.reduce((sum, row) => sum + row.issues, 0)).toBeGreaterThan(summary.byIssue.length);
+  });
+
+  it("金額以外の基準もモデルの重さ別（段別）に積み、段の和が全体と一致する（#4341）", () => {
+    const summary = buildSessionUsageSummary({
+      entries: [
+        entry({ sessionId: "a1", issueNumber: 1, responses: 3, contextTokens: 100, outputTokens: 10 }),
+        entry({ sessionId: "a2", issueNumber: 1, responses: 2, contextTokens: 50, outputTokens: 5 }),
+      ],
+      nowMs: NOW_MS,
+      days: 7,
+      reportedAt: null,
+    });
+    const day = summary.byDay[0];
+    const sum = (v: { tiers: readonly number[]; unresolved: number }) =>
+      v.tiers.reduce((a, b) => a + b, 0) + v.unresolved;
+    const claude = day.modelTiers.claude.byBasis;
+    expect(sum(claude.responses)).toBe(5);
+    expect(sum(claude.tokens)).toBe(165);
+    expect(sum(claude.sessions)).toBe(2);
+    // 同じIssueの2セッションは同じ段なら1件
+    expect(sum(claude.issues)).toBe(1);
   });
 
   it("基準ごとの値の取り出しと書式", () => {

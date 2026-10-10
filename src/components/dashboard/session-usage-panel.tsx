@@ -185,9 +185,6 @@ function BasisChip({ label }: { label: string }) {
   );
 }
 
-/** 金額以外の基準で使う単色の棒。濃淡は金額の内訳でしかないので、件数・トークンでは使わない */
-const BASIS_BAR_COLOR = "#6366f1";
-
 /** 縦軸の目盛り。金額以外は整数の目盛りに丸める（件数に`0.8`の目盛りは出さない） */
 function basisAxisScale(peak: number, basis: UsageBasis) {
   const scale = niceAxisScale(peak);
@@ -438,16 +435,18 @@ type CostRow = { costUsd: number; byAgent: UsageByAgent; modelTiers: UsageModelT
  * **濃い（重い）ものを先に積む**（日別は呼び出し側が`flex-col-reverse`で描くため、配列の
  * 先頭が最下段＝濃い色になる）。
  */
-function agentModelTierParts(row: CostRow) {
+function agentModelTierParts(row: CostRow, basis: UsageBasis = "cost") {
   const tierParts = (["claude", "codex"] as const).flatMap((agent) => {
     const bucket = row.modelTiers[agent];
+    // 金額以外の基準でも同じ濃淡で塗る（#4341）。値だけを基準のものへ差し替える
+    const values = basis === "cost" ? { tiers: bucket.costUsd, unresolved: bucket.unresolvedCostUsd } : bucket.byBasis[basis];
     return [
       ...([0, 1, 2, 3] as const).map((tier) => ({
         key: `${agent}-tier${tier}`,
-        value: bucket.costUsd[tier],
+        value: values.tiers[tier],
         color: AGENT_MODEL_TIER_COLORS[agent][tier],
       })),
-      { key: `${agent}-unresolved`, value: bucket.unresolvedCostUsd, color: UNRESOLVED_MODEL_TIER_COLOR },
+      { key: `${agent}-unresolved`, value: values.unresolved, color: UNRESOLVED_MODEL_TIER_COLOR },
     ];
   });
   // 金額0の区分は積んでも見えないので出さない（DOM要素数を実際の内訳と揃える）。
@@ -480,11 +479,9 @@ function CostBar({
   /** いちばん新しい日（集計途中）だけ枠線を足す */
   highlighted?: boolean;
 }) {
-  const toPercent = (value: number) => (row.costUsd > 0 ? (value / row.costUsd) * 100 : 0);
-  const parts =
-    basis === "cost"
-      ? agentModelTierParts(row)
-      : [{ key: "basis", value: row.costUsd, color: BASIS_BAR_COLOR }];
+  const parts = agentModelTierParts(row, basis);
+  const partsTotal = parts.reduce((sum, part) => sum + part.value, 0);
+  const toPercent = (value: number) => (partsTotal > 0 ? (value / partsTotal) * 100 : 0);
   const title = [
     { label: "Claude", value: row.byAgent.claude.costUsd },
     { label: "Codex", value: row.byAgent.codex.costUsd },
@@ -504,7 +501,7 @@ function CostBar({
           <span
             key={part.key}
             style={{
-              width: basis === "cost" ? `${toPercent(part.value)}%` : "100%",
+              width: `${toPercent(part.value)}%`,
               backgroundColor: part.color,
             }}
           />
@@ -642,10 +639,8 @@ function DailyChart({
         <div className={cn("absolute inset-0 flex items-end", barsGap)}>
           {days.map((day, index) => {
             const dayValue = valueOf(day);
-            const parts =
-              basis === "cost"
-                ? agentModelTierParts(day)
-                : [{ key: "basis", value: day.costUsd, color: BASIS_BAR_COLOR }];
+            const parts = agentModelTierParts(day, basis);
+            const partsTotal = parts.reduce((sum, part) => sum + part.value, 0);
             const isZero = dayValue <= 0;
             const showsValue = !isZero && (isFewDays || index === peakIndex);
             const modelNote = day.modelLabels.length > 0 ? `　・　モデル: ${day.modelLabels.join(", ")}` : "";
@@ -681,7 +676,7 @@ function DailyChart({
                         key={part.key}
                         className="block w-full"
                         style={{
-                          height: basis === "cost" ? `${(part.value / day.costUsd) * 100}%` : "100%",
+                          height: `${partsTotal > 0 ? (part.value / partsTotal) * 100 : 0}%`,
                           backgroundColor: part.color,
                         }}
                       />
@@ -743,28 +738,6 @@ function DailyLegend({ basis = "cost" }: { basis?: UsageBasis }) {
     { key: "claude", label: "Claude" },
     { key: "codex", label: "Codex" },
   ] as const;
-  if (basis !== "cost") {
-    return (
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
-        <span>
-          <i
-            aria-hidden
-            className="mr-1 inline-block size-2 rounded-[2px] align-middle"
-            style={{ backgroundColor: BASIS_BAR_COLOR }}
-          />
-          <span className="text-foreground">{USAGE_BASIS_LABELS[basis]}</span>
-        </span>
-        {basis === "issues" && <span>その日に動いたIssue・PRの件数（日をまたいだ重複は数え直す）</span>}
-        <span>
-          <i
-            aria-hidden
-            className="mr-1.5 inline-block w-4 border-t-[1.5px] border-dashed border-sky-600 align-middle dark:border-sky-400"
-          />
-          <span className="text-foreground">期間の平均</span>
-        </span>
-      </div>
-    );
-  }
   return (
     <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
       {agents.map((agent) => (
@@ -790,6 +763,7 @@ function DailyLegend({ basis = "cost" }: { basis?: UsageBasis }) {
         />
         モデル未確定
       </span>
+      {basis === "issues" && <span>その日に動いたIssue・PRの件数（日をまたいだ重複は数え直す）</span>}
       <span>
         <i
           aria-hidden
