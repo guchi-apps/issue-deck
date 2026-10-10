@@ -4,6 +4,18 @@ import { getCurrentUser } from "@/lib/auth-user";
 import { db } from "@/lib/db";
 
 /**
+ * ログイン中のユーザーのID（#3847）。iOSアプリが共有メニューから受け取った下書きを、
+ * 共有した本人のアカウントにだけ渡すために使う。IDのほかは返さない。
+ */
+export async function GET() {
+  const currentUser = await getCurrentUser();
+  if (!currentUser) {
+    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  }
+  return NextResponse.json({ id: currentUser.id }, { headers: { "Cache-Control": "no-store" } });
+}
+
+/**
  * IssueDeckからの退会。削除するのはIssueDeckのアプリUser（とカスケードされる関連データ）だけ。
  *
  * Supabaseプロジェクトは他アプリと共有しているため、共有Authユーザー

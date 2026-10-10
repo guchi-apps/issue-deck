@@ -10,7 +10,7 @@ vi.mock("@/lib/auth-user", () => ({ getCurrentUser }));
 vi.mock("@/lib/db", () => ({ db: { user: { delete: userDelete } } }));
 vi.mock("@/lib/supabase/admin", () => ({ createAdminClient }));
 
-import { DELETE } from "./route";
+import { DELETE, GET } from "./route";
 
 describe("DELETE /api/account", () => {
   beforeEach(() => {
@@ -37,5 +37,22 @@ describe("DELETE /api/account", () => {
     expect(userDelete).toHaveBeenCalledWith({ where: { id: "u1" } });
     expect(createAdminClient).not.toHaveBeenCalled();
     expect(deleteUser).not.toHaveBeenCalled();
+  });
+});
+
+describe("GET /api/account", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("未認証は401", async () => {
+    getCurrentUser.mockResolvedValue(null);
+    expect((await GET()).status).toBe(401);
+  });
+
+  it("ログイン中のユーザーのIDだけを返す", async () => {
+    getCurrentUser.mockResolvedValue({ id: "u1", githubAccessToken: "secret" });
+    const res = await GET();
+    expect(await res.json()).toEqual({ id: "u1" });
   });
 });

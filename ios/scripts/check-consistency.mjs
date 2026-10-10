@@ -56,6 +56,24 @@ export function checkConsistency() {
   if (!pbxproj.includes("PRODUCT_BUNDLE_IDENTIFIER = com.gucchii.issuedeck;")) problems.push("Bundle ID が com.gucchii.issuedeck ではありません");
   if (!pbxproj.includes("INFOPLIST_KEY_CFBundleDisplayName = IssueDeck;")) problems.push("表示名が IssueDeck ではありません");
 
+  // 共有メニュー（#3847）。App Group・上限・拡張の組み込みがアプリ本体と食い違わない
+  const shareDraft = read("ios/Shared/ShareDraft.swift");
+  const appGroup = shareDraft.match(/appGroupID = "([^"]+)"/)?.[1];
+  for (const file of ["ios/Config/IssueDeck.entitlements", "ios/Config/ShareExtension.entitlements"]) {
+    if (!appGroup || !read(file).includes(`<string>${appGroup}</string>`)) {
+      problems.push(`${file} に App Group ${appGroup} がありません`);
+    }
+  }
+  const imagesRoute = read("src/app/api/issues/images/route.ts");
+  const serverMax = imagesRoute.match(/MAX_FILE_SIZE = (\d+) \* 1024 \* 1024/)?.[1];
+  const swiftMax = shareDraft.match(/maxImageBytes = (\d+) \* 1024 \* 1024/)?.[1];
+  if (!serverMax || serverMax !== swiftMax) {
+    problems.push(`画像の上限が一致しません: Swift=${swiftMax}MB / サーバー=${serverMax}MB`);
+  }
+  if (!pbxproj.includes("com.apple.product-type.app-extension") || !pbxproj.includes("Embed Foundation Extensions")) {
+    problems.push("共有メニュー（Share Extension）がアプリへ組み込まれていません");
+  }
+
   // 開発用のURLをコミットしていない
   if (!/baseURL = URL\(string: "https:\/\/issuedeck\.gucchii\.com\/"\)!/.test(appConfig)) {
     problems.push("AppConfig.baseURL が本番URLではありません（開発用のまま？）");
