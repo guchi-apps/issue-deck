@@ -4585,3 +4585,7 @@ Webhookで取り込む。運用・移行・ロールバックは[backup-ci.md](b
 - 一覧はSwiftソースの宣言（`: Widget`・`ActivityConfiguration`・`ControlWidget`・`.accessory*`）からの**推定**。`api/repositories/ios-extensions/route.ts`がデフォルトブランチのツリーから拡張らしい名前のSwiftを最大40件読み、5分キャッシュする。命名次第で漏れるため画面にも「検出結果」と出している
 - 起票ダイアログ（`ios-extension-issue-dialog.tsx`）は、起票後の「実装を開始」を閉じる（キャンセル含む）とIssue詳細へ移る（#4172）。計画の承認パネル・計画コメントは詳細にしか出ないため、通常の作成フォームと同じ挙動に揃えている
 - 追加・編集は画面からSwiftを生成せず、種類別テンプレート（`buildIosExtensionIssue`）でIssueを起票して通常の実装経路へ渡す（`POST /api/issues`）
+
+### VPSメモリの自動計測（#4256）
+
+サブPCの`scripts/vps-memory-probe.mjs`（純粋な部分は`scripts/lib/vps-memory-probe-core.mjs`）がSSH経由でVPSの`/proc`を読み、`POST /api/integrations/vps-memory/samples`で`VpsMemorySample`へ保存する。AIDE向けの読み取りは`GET /api/integrations/vps-memory`。検証・区間分け・保存は`lib/vps-memory/`、認証は`lib/vps-memory/auth.ts`。設定・取得できる項目・保存期間は[vps-memory-probe.md](vps-memory-probe.md)。

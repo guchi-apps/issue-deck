@@ -215,6 +215,8 @@ grep -E "VmRSS|VmHWM|Threads" /proc/<pid>/status
 
 ## 再発したときに見るもの
 
+RSS・VmHWM・PID・稼働時間・ホストの空きは、サブPCからSSH経由で自動計測できる（[vps-memory-probe.md](vps-memory-probe.md)。#4256）。以下の手動手順は、heap・PM2再起動数・smapsが必要なときに使う。
+
 VPS上（PM2の実行ユーザーは`github-user`）で次を確認する。issue-deckのリポジトリ側からは分からない。
 
 **`pm2`は必ず`github-user`として実行する。** `guchi`のまま叩くとプロセス一覧が空
