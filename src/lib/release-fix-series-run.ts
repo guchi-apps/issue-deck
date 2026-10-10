@@ -33,6 +33,11 @@ import {
   type ReleaseFixStatus,
 } from "@/lib/release-fix-series";
 import { redactDiagnosticText } from "@/lib/release-review-diagnostic";
+import {
+  decideAutoRebuildTrigger,
+  rebuildEventKey,
+} from "@/lib/release-rebuild-history";
+import { findLatestApprovalEventId, recordRebuildEvent } from "@/lib/release-rebuild-history-run";
 import { rebuildReleaseCandidate } from "@/lib/release-rebuild-run";
 import { requestSelectiveRebuild } from "@/lib/release-rebuild-selection-run";
 import { releaseCallerSupportsSelection } from "@/lib/github/release-api";
@@ -340,7 +345,32 @@ async function stopRows(
     data: { status, stopReason: reason, ...(status === "awaiting_decision" ? {} : { activeKey: null }) },
   });
   await notifyStop(ctx, fresh, status, reason);
+  // 操作履歴（#4359）。判断待ち・停止・元候補の取消／置換を系列ごとに残す（同じ状態・理由は`dedupeKey`で1件）
+  const kind = status === "awaiting_decision" ? "decision_waiting" : status === "superseded" ? "superseded" : "stopped";
+  for (const row of fresh) {
+    await recordRebuildEvent({
+      repositoryFullName: row.repositoryFullName,
+      originPrNumber: row.releasePrNumber,
+      originHeadSha: row.originHeadSha,
+      kind,
+      actor: { kind: "system" },
+      trigger: "sweep",
+      reason,
+      seriesId: row.id,
+      payload: {
+        fixPrs: row.fixPrNumber !== null ? [row.fixPrNumber] : undefined,
+        pendingPrs: status === "awaiting_decision" ? pendingFromReason(reason) : undefined,
+      },
+      dedupeKey: rebuildEventKey.stop(row.id, kind, reason),
+    });
+  }
   return fresh.length;
+}
+
+/** 判断待ちの理由文から、原因になったPR番号（`#123`）を取り出す */
+function pendingFromReason(reason: string): number[] {
+  const body = /（((?:#\d+(?:、)?)+)）/.exec(reason)?.[1] ?? "";
+  return [...body.matchAll(/#(\d+)/g)].map((m) => Number(m[1]));
 }
 
 /** 修正PRの状態を観測して系列へ反映する（マージは既存の機構が行う。ここは見るだけ） */
@@ -444,6 +474,15 @@ async function sweepGroup(repositoryFullName: string, releasePrNumber: number, r
   }
 
   const issues = observed.map((row) => `#${row.issueNumber}`).join("、");
+  // 手動の承認が根拠にあるかで、操作履歴の契機を分ける（「自動で作り直した」だけで説明しない。#4359）
+  const hasApproval = observed.some((row) => Array.isArray(row.acceptedExtraPrs) && (row.acceptedExtraPrs as number[]).length > 0);
+  const approvalEventId = hasApproval ? await findLatestApprovalEventId(repositoryFullName, releasePrNumber, frozen.head.sha) : null;
+  const history = {
+    trigger: decideAutoRebuildTrigger({ approvalEventId }),
+    seriesIds: decision.seriesIds,
+    fixPrs: observed.map((row) => row.fixPrNumber).filter((n): n is number => n !== null),
+    approvalEventId,
+  };
   if (decision.selectedPrs.length > 0) {
     const result = await requestSelectiveRebuild({
       owner,
@@ -453,6 +492,7 @@ async function sweepGroup(repositoryFullName: string, releasePrNumber: number, r
       selected: decision.selectedPrs.map((number) => ({ number })),
       source: "fix_series",
       userId: null,
+      history,
     }).catch((error: unknown) => {
       console.error("[release-fix-series] selective rebuild failed", error);
       return { ok: false as const, error: "dispatch_failed" as const };
@@ -469,6 +509,23 @@ async function sweepGroup(repositoryFullName: string, releasePrNumber: number, r
     return { rebuilt: true, changed: decision.seriesIds.length };
   }
   let closed = false;
+  await recordRebuildEvent({
+    repositoryFullName,
+    originPrNumber: releasePrNumber,
+    originHeadSha: frozen.head.sha,
+    kind: "rebuild_started",
+    actor: { kind: "system" },
+    trigger: history.trigger,
+    seriesId: decision.seriesIds[0],
+    payload: {
+      mode: "full",
+      fixPrs: history.fixPrs,
+      approvalEventId: approvalEventId ?? undefined,
+      selectedPrs: (candidate?.pullRequests ?? []).map((pr) => ({ number: pr.number, mergeSha: pr.mergeSha ?? null, title: pr.title })),
+      excludedPrs: [],
+    },
+    dedupeKey: rebuildEventKey.startFull(repositoryFullName, releasePrNumber, frozen.head.sha, decision.seriesIds),
+  });
   try {
     await rebuildReleaseCandidate({
       owner,
@@ -508,6 +565,17 @@ async function sweepSuccessor(row: ReleaseFixSeries): Promise<number> {
           successorBaseSha: frozen.base.sha,
           successorHeadSha: frozen.head.sha,
         },
+      });
+      await recordRebuildEvent({
+        repositoryFullName: row.repositoryFullName,
+        originPrNumber: row.releasePrNumber,
+        originHeadSha: row.originHeadSha,
+        kind: "successor_created",
+        actor: { kind: "system" },
+        trigger: "sweep",
+        seriesId: row.id,
+        payload: { successor: { number: frozen.number, headSha: frozen.head.sha, baseSha: frozen.base.sha } },
+        dedupeKey: rebuildEventKey.successor(row.repositoryFullName, row.releasePrNumber, frozen.number),
       });
       return 1;
     }
@@ -601,7 +669,7 @@ export async function runReleaseFixSweep(): Promise<SweepResult> {
  * 判断待ちの系列に対して、修正と無関係な変更を含めて作り直すことを利用者が確認する。
  * **確認したPR番号だけを記録する**（後から別の変更が入ればまた判断待ちになる）。
  */
-export async function acceptReleaseFixExtraPullRequests(seriesId: string): Promise<
+export async function acceptReleaseFixExtraPullRequests(seriesId: string, userId: string): Promise<
   { ok: true } | { ok: false; error: "not_found" | "not_awaiting_decision" | "release_pr_changed" }
 > {
   const row = await db.releaseFixSeries.findUnique({ where: { id: seriesId } });
@@ -617,10 +685,48 @@ export async function acceptReleaseFixExtraPullRequests(seriesId: string): Promi
   const siblings = await db.releaseFixSeries.findMany({
     where: { repositoryFullName: row.repositoryFullName, releasePrNumber: row.releasePrNumber, status: "awaiting_decision" },
   });
-  const accepted = candidate.pullRequests.map((pr) => pr.number);
-  await db.releaseFixSeries.updateMany({
-    where: { id: { in: siblings.map((s) => s.id) } },
+  // 承認するのは、判断待ちにした時点で画面に示したPR（と修正PR）だけ。**承認の操作までの間に新しくdevelopへ
+  // 入ったPRは承認済みにしない**（次の巡回で、あらためて判断待ちになる）。判断待ちの範囲を記録していない
+  // 既存の待ちは、承認時点の候補全体を承認範囲として保持し、その旨を理由に残す（#4359）
+  const waitingEvent = await db.releaseRebuildEvent.findFirst({
+    where: {
+      repositoryFullName: row.repositoryFullName,
+      originPrNumber: row.releasePrNumber,
+      originHeadSha: frozen.head.sha,
+      kind: "decision_waiting",
+    },
+    orderBy: { createdAt: "desc" },
+  });
+  const waitingPrs = (waitingEvent?.payload as { pendingPrs?: number[] } | null)?.pendingPrs ?? null;
+  const fixPrNumbers = new Set(siblings.map((s) => s.fixPrNumber).filter((n): n is number => n !== null));
+  const approvedPullRequests =
+    waitingPrs && waitingPrs.length > 0
+      ? candidate.pullRequests.filter((pr) => waitingPrs.includes(pr.number) || fixPrNumbers.has(pr.number))
+      : candidate.pullRequests;
+  const accepted = approvedPullRequests.map((pr) => pr.number);
+  // 承認の証跡を先に残す。承認した時点の範囲・コミットを保持し、後から入ったPRを承認済みにしない（#4359）
+  await recordRebuildEvent({
+    repositoryFullName: row.repositoryFullName,
+    originPrNumber: row.releasePrNumber,
+    originHeadSha: frozen.head.sha,
+    kind: "approval",
+    actor: { kind: "user", userId },
+    trigger: "manual",
+    reason: waitingPrs && waitingPrs.length > 0
+      ? "判断待ちの追加PRを含めて作り直すことを承認"
+      : "判断待ちの範囲の記録が無いため、承認時点の候補全体を承認範囲として保持",
+    seriesId: row.id,
+    payload: {
+      approvedPrs: approvedPullRequests.map((pr) => ({ number: pr.number, mergeSha: pr.mergeSha ?? null, title: pr.title })),
+      fixPrs: siblings.map((s) => s.fixPrNumber).filter((n): n is number => n !== null),
+    },
+    dedupeKey: rebuildEventKey.approval(row.repositoryFullName, row.releasePrNumber, frozen.head.sha, accepted, siblings.map((s) => s.id)),
+  });
+  // 条件付きで更新する。同時の承認で状態が先に動いていれば、こちらは何も書き換えない
+  const updated = await db.releaseFixSeries.updateMany({
+    where: { id: { in: siblings.map((s) => s.id) }, status: "awaiting_decision" },
     data: { acceptedExtraPrs: accepted, status: "fix_merged", stopReason: null },
   });
+  if (updated.count === 0) return { ok: false, error: "not_awaiting_decision" };
   return { ok: true };
 }

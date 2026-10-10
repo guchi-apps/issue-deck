@@ -2708,6 +2708,36 @@ model ReleaseRebuildRequest {
   @@index([repositoryFullName, originPrNumber])
 }
 
+// リリース候補の作り直しの操作履歴（#4359）。追記だけで更新しない。
+// 手動の追加承認・関連修正だけの自動作り直し・承認を契機にした自動作り直し・失敗・後継候補の作成・
+// 元候補の取消／置換を区別して残し、「自動で作り直しました」だけでは分からない操作者・契機・範囲を追跡する。
+// **秘密値・認証トークンは入れない**（理由は機密除去済みの文字列だけ）。同じ依頼の重複イベントは`dedupeKey`で1件に絞る。
+model ReleaseRebuildEvent {
+  id                 String   @id @default(cuid())
+  repositoryFullName String   @db.VarChar(191)
+  // 元の候補（凍結ブランチのリリースPR）とそのhead
+  originPrNumber     Int
+  originHeadSha      String   @db.VarChar(64)
+  // `approval` / `decision_waiting` / `rebuild_started` / `rebuild_failed` / `successor_created` / `stopped` / `superseded`
+  kind               String   @db.VarChar(32)
+  // `user`（認証済みユーザー） / `system`
+  actorKind          String   @db.VarChar(16)
+  actorUserId        String?  @db.VarChar(40)
+  // 起動経路。`manual`（画面の選択） / `resume`（失敗からの再開） / `fix_series_related`（関連修正のみの自動） /
+  // `fix_series_after_approval`（手動承認を契機にした自動） / `sweep`（巡回の観測） / `workflow`（workflowの報告）
+  trigger            String   @db.VarChar(32)
+  reason             String?  @db.Text
+  seriesId           String?  @db.VarChar(40)
+  // 種別ごとの詳細（選んだ・除外したPR、適用時のコミット、後継PR・SHA、承認イベントのid、実行リンク）。JSON
+  payload            Json?
+  dedupeKey          String   @unique @db.VarChar(255)
+
+  createdAt DateTime @default(now())
+
+  @@index([repositoryFullName, originPrNumber])
+  @@index([repositoryFullName, createdAt])
+}
+
 // 実装セッションの依存待ち（#4321）。
 //
 // **DispatchSessionとは別のモデルにしている。** セッションが畳まれても（GONE・EXITED）待ちの

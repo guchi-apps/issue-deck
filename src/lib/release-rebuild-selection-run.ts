@@ -10,6 +10,8 @@ import {
   type GithubApiPullRequest,
 } from "@/lib/github/release-api";
 import { isUniqueConstraintError } from "@/lib/prisma-error";
+import { excludedFromSelection, rebuildEventKey, type RebuildEventTrigger } from "@/lib/release-rebuild-history";
+import { recordRebuildEvent } from "@/lib/release-rebuild-history-run";
 import {
   REBUILD_PR_PROBLEM_LABEL,
   checkRebuildPullRequest,
@@ -166,6 +168,8 @@ export async function requestSelectiveRebuild(input: {
   bumpKind?: BumpKind;
   source: "manual" | "fix_series" | "resume";
   userId: string | null;
+  /** 操作履歴（#4359）へ残す根拠。修正系列の自動作り直しが、関連修正のみか承認を契機にしたかを伝える */
+  history?: { trigger: RebuildEventTrigger; seriesIds?: string[]; fixPrs?: number[]; approvalEventId?: string | null };
 }): Promise<SelectiveRebuildResult> {
   const { owner, repo, token, releasePr } = input;
   const repositoryFullName = `${owner}/${repo}`;
@@ -235,9 +239,57 @@ export async function requestSelectiveRebuild(input: {
       where: { id: request.id },
       data: { status: "failed", activeKey: null, failureReason: "リリースworkflowを起動できませんでした" },
     });
+    // 修正系列の自動作り直しは、巡回側が停止の記録を残す（同じ失敗を2件に増やさない）
+    if (input.source !== "fix_series") {
+      await recordRebuildEvent({
+        repositoryFullName,
+        originPrNumber: releasePr.number,
+        originHeadSha: releasePr.head.sha,
+        kind: "rebuild_failed",
+        actor: actorOf(input.userId),
+        trigger: historyTrigger(input),
+        reason: "リリースworkflowを起動できませんでした",
+        payload: { requestId: request.id, selectedPrs: selection },
+        dedupeKey: rebuildEventKey.failed(repositoryFullName, releasePr.number, releasePr.head.sha, request.id),
+      });
+    }
     return { ok: false, error: "dispatch_failed" };
   }
+  // 操作履歴（#4359）。元の候補の後にdevelopへ入ったPRのうち、今回足さないものも残す
+  let developed: number[] = [];
+  try {
+    developed = (await fetchReleaseRebuildCandidate(owner, repo, releasePr.head.sha, token)).pullRequests.map((pr) => pr.number);
+  } catch {
+    // 含めないPRの一覧が取れなくても、起動した事実の記録は残す
+  }
+  await recordRebuildEvent({
+    repositoryFullName,
+    originPrNumber: releasePr.number,
+    originHeadSha: releasePr.head.sha,
+    kind: "rebuild_started",
+    actor: actorOf(input.userId),
+    trigger: historyTrigger(input),
+    seriesId: input.history?.seriesIds?.[0] ?? null,
+    payload: {
+      mode: "selective",
+      requestId: request.id,
+      selectedPrs: selection,
+      excludedPrs: excludedFromSelection(developed, selection.map((p) => p.number)),
+      fixPrs: input.history?.fixPrs,
+      approvalEventId: input.history?.approvalEventId ?? undefined,
+    },
+    dedupeKey: rebuildEventKey.start(repositoryFullName, releasePr.number, releasePr.head.sha, request.id),
+  });
   return { ok: true, requestId: request.id, selection };
+}
+
+function actorOf(userId: string | null) {
+  return userId ? ({ kind: "user", userId } as const) : ({ kind: "system" } as const);
+}
+
+function historyTrigger(input: { source: "manual" | "fix_series" | "resume"; history?: { trigger: RebuildEventTrigger } }): RebuildEventTrigger {
+  if (input.history) return input.history.trigger;
+  return input.source === "resume" ? "resume" : input.source === "fix_series" ? "fix_series_related" : "manual";
 }
 
 /** workflowが選んだ作り直しに失敗したと報告してきたときに、その依頼を終える（同じ元の候補へやり直せるように） */
@@ -248,6 +300,20 @@ export async function markRebuildRequestFailed(input: {
   reason: string | null;
 }): Promise<void> {
   const key = rebuildRequestActiveKey(input.repositoryFullName, input.originPrNumber, input.originHeadSha);
+  const active = await db.releaseRebuildRequest.findUnique({ where: { activeKey: key } });
+  if (active) {
+    await recordRebuildEvent({
+      repositoryFullName: input.repositoryFullName,
+      originPrNumber: input.originPrNumber,
+      originHeadSha: input.originHeadSha,
+      kind: "rebuild_failed",
+      actor: { kind: "system" },
+      trigger: "workflow",
+      reason: input.reason ?? "リリースworkflowが作り直しに失敗しました",
+      payload: { requestId: active.id, selectedPrs: Array.isArray(active.selection) ? (active.selection as { number: number; mergeSha: string; title: string }[]) : [] },
+      dedupeKey: rebuildEventKey.failed(input.repositoryFullName, input.originPrNumber, input.originHeadSha, active.id),
+    });
+  }
   await db.releaseRebuildRequest.updateMany({
     where: { activeKey: key },
     data: { status: "failed", activeKey: null, failureReason: input.reason?.slice(0, 2000) ?? null },

@@ -20,6 +20,7 @@ vi.mock("@/lib/db", () => ({
     releasePreparationFailure: { upsert: mocks.failureUpsert, updateMany: mocks.failureUpdateMany },
   },
 }));
+vi.mock("@/lib/release-rebuild-history-run", () => ({ observeRebuildSuccessor: vi.fn(async () => 0) }));
 vi.mock("@/lib/github/app-auth", () => ({ getInstallationToken: vi.fn(async () => "token") }));
 vi.mock("@/lib/github/actions-api", () => ({
   fetchWorkflowRun: mocks.fetchWorkflowRun,

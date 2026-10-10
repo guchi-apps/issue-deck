@@ -13,6 +13,7 @@ import {
   type IssueLabelEvent,
   type ReleasePreparationFailureView,
 } from "@/lib/release-preparation";
+import { observeRebuildSuccessor } from "@/lib/release-rebuild-history-run";
 import { markRebuildRequestFailed } from "@/lib/release-rebuild-selection-run";
 import { parseRebuildSelection, serializeRebuildSelection } from "@/lib/release-rebuild-selection";
 import { isBumpKind } from "@/lib/semver-bump";
@@ -128,6 +129,10 @@ export async function resolveReleasePreparation(input: {
   const { count } = await db.releasePreparationFailure.updateMany({
     where: { repositoryFullName: input.repositoryFullName, status: "open" },
     data: { status: "resolved", resolvedAt: new Date(), resolvedRunUrl: runUrl, clearedIssues },
+  });
+  // 作り直しの後継候補が作られていれば、操作履歴（#4359）へ記録する。履歴の失敗で準備の解決を止めない
+  await observeRebuildSuccessor({ owner, repo, token }).catch((error) => {
+    console.error(`[release-preparation] 後継候補の記録に失敗しました（${input.repositoryFullName}）`, error);
   });
   return { ok: true, resolved: count, clearedIssues };
 }
