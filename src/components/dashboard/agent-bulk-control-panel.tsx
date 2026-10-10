@@ -13,13 +13,11 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { CodexPairingControl } from "@/components/dashboard/codex-pairing-control";
 import type { DispatchStateHandle } from "@/hooks/use-dispatch-state";
 import { AGENT_BASE_COLORS } from "@/lib/agent-model-color";
 import { AGENT_RESUME_INSTRUCTION, selectStoppedSessions } from "@/lib/dispatch/agent-resume";
 import { describeDispatchAgent, DISPATCH_AGENTS, type DispatchAgent } from "@/lib/dispatch/dispatch-job";
 import { resolveIssueImplementationAgent } from "@/lib/dispatch/issue-session";
-import { selectHostCodexPairingJob } from "@/lib/dispatch/queue-summary";
 import type { DispatchSessionView } from "@/lib/dispatch/session-state";
 import { cn } from "@/lib/utils";
 
@@ -77,12 +75,6 @@ function AgentBulkControlRow({
     (session) => session.state === "ALIVE" && resolveIssueImplementationAgent(session) === agent,
   );
   const pauseReason = dispatch.agentPause[agent];
-  // ペアリングコードはホスト単位で発行する。実行状況の一括操作には接続可能なホストを1つだけ
-  // 出すことで、Codex CLIの状態と接続操作を同じ行で読めるようにする（#3228）。
-  const codexPairingHost =
-    agent === "codex"
-      ? dispatch.hosts.find((host) => host.codexRemoteControlCapable === true) ?? null
-      : null;
   // トグルON＝稼働中（一時停止理由が無い）。OFF＝停止中（手動・自動のどちらでも）
   const running = pauseReason === null;
   // 再開の対象の目安。**実際に送る対象はサーバーが選び直す**（同じ判定関数を使うが、こちらは
@@ -142,8 +134,7 @@ function AgentBulkControlRow({
           className="size-2 shrink-0 rounded-full ring-1 ring-black/10 dark:ring-white/30"
           style={{ backgroundColor: AGENT_BASE_COLORS[agent] }}
         />
-        {/* Codexの接続操作も状態チップの右隣に置く（#3228）。狭い幅でも同じ行に収めるため、
-            ここは折り返さず、停止操作側の文言を小さい幅ではアイコンにする。 */}
+        {/* 狭い幅でも同じ行に収めるため、ここは折り返さず、停止操作側の文言を小さい幅ではアイコンにする。 */}
         <div className="flex min-w-0 flex-nowrap items-center gap-1 sm:gap-x-2">
           <span className="text-sm font-semibold whitespace-nowrap">{describeDispatchAgent(agent)}</span>
           {aliveSessions.length > 0 && (
@@ -162,15 +153,6 @@ function AgentBulkControlRow({
             >
               停止中（{pauseReason === "usage_limit" ? "自動" : "手動"}）
             </span>
-          )}
-          {codexPairingHost && (
-            <CodexPairingControl
-              host={codexPairingHost}
-              job={selectHostCodexPairingJob(dispatch.jobs, codexPairingHost.name)}
-              onRequestCodexPairing={dispatch.requestCodexPairing}
-              context="host"
-              inline
-            />
           )}
         </div>
         <div className="ml-auto flex shrink-0 items-center gap-1.5 sm:gap-2.5">
