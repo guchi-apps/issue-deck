@@ -39,7 +39,7 @@
 | 約束 | どこで守っているか |
 |---|---|
 | 通常のpush/PRでCircleCIは走らない | `.circleci/config.yml`のワークフローは`backup_ci`パラメータが真のときだけ。CircleCIプロジェクトにpush/PRのトリガーを作らない（4章） |
-| PR内の変更で検査を省けない・手順を変えられない | 起動時に`config.branch`へPRのbase（develop）を渡す。ランナーと定義は`base_sha`の版を`git show`で取り出して使う。issue-deckは結果のダイジェストをbaseの定義と照合する |
+| PR内の変更で検査を省けない・手順を変えられない | 起動時に`config.branch`と`checkout.branch`の両方へPRのbase（develop）を渡し、headはジョブ内で`head_sha`をSHA指定で取り出す（同じリポジトリでは両者のrefが一致しないとCircleCIがHTTP 400で拒否する。#4215）。ランナーと定義は`base_sha`の版を`git show`で取り出して使う。issue-deckは結果のダイジェストをbaseの定義と照合する |
 | headだけの検査で代用しない | baseへheadを`--no-ff`でマージした結果を検査し、検査したコミットの親が`[base, head]`であることを確かめる |
 | 起動後に先端が動いても取り違えない | ブランチ名ではなく要求したSHAを`git fetch`して検査する。完了時にPRの現在のhead/baseと比べ、違えば`superseded` |
 | head/baseが更新されたら合格を流用しない | 巡回（約30秒ごと。合格は3分おき）が合格済みの実行もPRと照合し、変わっていれば無効にして共通チェックを`pending`へ戻す |
