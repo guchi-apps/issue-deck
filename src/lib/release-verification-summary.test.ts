@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { buildReleaseVerificationProgress } from "./release-verification-progress";
 import { summarizeReleaseVerification, type ReleaseVerificationDetailRow } from "./release-verification-summary";
 
 const current = { baseSha: "b".repeat(40), headSha: "a".repeat(40) };
@@ -62,4 +63,59 @@ describe("summarizeReleaseVerification", () => {
     expect(s.gateStatus).toBe("ready");
     expect(s.enforced).toBe(false);
   });
+
+  it("記録が待機中でも、ジョブが動き出していれば表示は実行中（ゲートは記録のまま）", () => {
+    const progress = buildReleaseVerificationProgress({
+      kind: "integration",
+      job: {
+        status: "RUNNING",
+        targetHost: "subpc",
+        claimedByHost: "subpc",
+        createdAt: new Date("2026-10-10T00:00:00Z"),
+        claimedAt: new Date("2026-10-10T00:00:10Z"),
+        startedAt: new Date("2026-10-10T00:00:20Z"),
+        heartbeatAt: new Date("2026-10-10T00:01:00Z"),
+        finishedAt: null,
+        message: null,
+        progress: { step: "test" },
+      },
+      hostOnline: true,
+      stalledAfterMs: 600_000,
+    });
+    const s = summarizeReleaseVerification({
+      ...base,
+      rows: [row({ kind: "integration", state: "waiting" }), row({ state: "waiting" })],
+      progress: { integration: progress },
+    });
+    expect(s.integration.state).toBe("running");
+    expect(s.integration.progress?.jobStatus).toBe("running");
+    // 全体レビューはジョブが無いので待機中のまま・進捗なし
+    expect(s.aiReview.state).toBe("waiting");
+    expect(s.aiReview.progress).toBeNull();
+    expect(s.gateStatus).toBe("blocked");
+    expect(s.target).toEqual(current);
+  });
+
+  it("結果が出ている区分は、ジョブの状態で上書きしない", () => {
+    const progress = buildReleaseVerificationProgress({
+      kind: "ai_review",
+      job: {
+        status: "RUNNING",
+        targetHost: "subpc",
+        claimedByHost: "subpc",
+        createdAt: new Date("2026-10-10T00:00:00Z"),
+        claimedAt: null,
+        startedAt: null,
+        heartbeatAt: null,
+        finishedAt: null,
+        message: null,
+        progress: null,
+      },
+      hostOnline: true,
+      stalledAfterMs: 600_000,
+    });
+    const s = summarizeReleaseVerification({ ...base, rows: [row({ state: "failed" })], progress: { ai_review: progress } });
+    expect(s.aiReview.state).toBe("failed");
+  });
 });
+

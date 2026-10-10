@@ -200,3 +200,12 @@ export function buildMergePrecheck(
         : `確認できた${counted}項目に問題はありません`,
   };
 }
+
+/**
+ * 凍結ブランチのリリースPR（`release-main/*`）で、「リリースの検証」の枠に並べるCI・コンフリクトの2行
+ * （#4277）。レビューの行は個別PRレビューの区分が持つので、ここには含めない（同じ判定を2か所に出すと、
+ * 材料の違いで食い違ったときにどちらを信じるかが分からなくなる）。
+ */
+export function buildCiConflictRows(pullRequest: MergePrecheckSource): MergePrecheckRow[] {
+  return [ciRow(pullRequest), conflictRow(pullRequest)];
+}

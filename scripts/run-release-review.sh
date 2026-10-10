@@ -16,6 +16,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib/local-repo-resolve.sh"
 # shellcheck source=scripts/lib/review-usage.sh
 source "$SCRIPT_DIR/lib/review-usage.sh"
+# shellcheck source=scripts/lib/release-progress.sh
+source "$SCRIPT_DIR/lib/release-progress.sh"
 # shellcheck source=scripts/lib/agent-cli.sh
 source "$SCRIPT_DIR/lib/agent-cli.sh"
 
@@ -35,8 +37,13 @@ LOCAL_PATH=""
 # review_report <running|succeeded|failed> <メッセージ> [releaseReview JSON]
 review_report() {
   local status="$1" message="${2:-}" result="${3:-}"
-  local app_base_url dispatch_secret host_name body
+  local app_base_url dispatch_secret host_name body progress="null"
   [[ -n "$JOB_ID" ]] || return 0
+  # 実行中の報告は、heartbeatからも最新の工程を送れるようファイルから読む（#4277）
+  if [[ "$status" == "running" && -s "$RELEASE_PROGRESS_FILE" ]]; then
+    message="$(release_progress_message)"
+    progress="$(release_progress_json)"
+  fi
   app_base_url="$(_review_usage_env_value APP_BASE_URL)"
   dispatch_secret="$(_review_usage_env_value DISPATCH_SECRET)"
   [[ -n "$app_base_url" && -n "$dispatch_secret" ]] || return 0
@@ -45,8 +52,10 @@ review_report() {
   command -v jq >/dev/null 2>&1 || return 0
   body="$(jq -nc --arg jobId "$JOB_ID" --arg host "$host_name" --arg status "$status" \
     --arg message "$message" --arg session "${TMUX_SESSION_NAME:-}" --arg result "$result" \
+    --argjson progress "$progress" \
     '{jobId: $jobId, host: $host, status: $status}
       + (if $message == "" then {} else {message: $message} end)
+      + (if $progress == null then {} else {progress: $progress} end)
       + (if $session == "" then {} else {tmuxSessionName: $session} end)
       + (if $result == "" then {} else {releaseReview: ($result | fromjson)} end)')" || return 0
   # シークレットはコマンドライン引数に置かない（`ps`で見えるため）
@@ -94,6 +103,7 @@ cleanup() {
   if [[ -n "$WORKTREE" && -n "$LOCAL_PATH" ]]; then
     git -C "$LOCAL_PATH" worktree remove --force "$WORKTREE" >/dev/null 2>&1 || rm -rf "$WORKTREE"
   fi
+  release_progress_cleanup
 }
 
 # AIの最終応答から最後のjsonコードブロック（無ければ全体）を取り出す。JSONでなければ非0
@@ -127,6 +137,9 @@ main() {
     *) finish failed "受け取った担当が不正です: $agent"; return 0 ;;
   esac
 
+  release_progress_init '["prepare","diff","review","finalize"]'
+  release_progress_set prepare 0 "$RUNNING_MESSAGE"
+  review_report running "$RUNNING_MESSAGE"
   heartbeat_start
   LOCAL_PATH="$(local_repo_resolve_path "$full_name")"
   mkdir -p "$WORK_ROOT"
@@ -143,6 +156,8 @@ main() {
   git -C "$LOCAL_PATH" worktree add --detach "$WORKTREE" "$head_sha" >/dev/null 2>&1
 
   # 差分の材料。ファイルごとの差分を、予算の範囲で先頭から詰める
+  release_progress_set diff 1 "リリースの差分を取得しています"
+  review_report running ""
   mapfile -t files < <(git -C "$WORKTREE" diff --name-only "$base_sha...$head_sha")
   total_files="${#files[@]}"
   if ((total_files == 0)); then
@@ -186,6 +201,7 @@ open(out, "w", encoding="utf-8").write(text)
 PY
 
   RUNNING_MESSAGE="全体レビューを実行中です（${agent}・${claude_model:-$codex_model}・差分${reviewed_files}/${total_files}ファイル）"
+  release_progress_set review 2 "$RUNNING_MESSAGE" "" "$total_files"
   review_report running "$RUNNING_MESSAGE"
   local exit_code=0
   if [[ "$agent" == "codex" ]]; then
@@ -203,6 +219,8 @@ PY
     finish failed "全体レビューを完走できませんでした（終了コード ${exit_code}。124は時間切れ）"
     return 0
   fi
+  release_progress_set finalize 3 "全体レビューの結果を整理しています" "" "$total_files"
+  review_report running ""
   if ! ai_json="$(extract_result_json "$output_file")"; then
     finish failed "全体レビューの結果をJSONとして読めませんでした"
     return 0

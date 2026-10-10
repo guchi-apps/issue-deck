@@ -41,7 +41,7 @@ import { formatRelativeDate } from "@/lib/format-relative-date";
 import { selectPullRequestReviewComment } from "@/lib/github/pull-request-review-comment";
 import { repairKindsFor } from "@/lib/github/pull-request-repair";
 import { parseReleaseVerification, type ReleaseVerificationRow } from "@/lib/github/release-verification";
-import { canMergeFromDeck, requiresUserMerge } from "@/lib/pull-request-list";
+import { canMergeFromDeck, RELEASE_BRANCH_PREFIX, requiresUserMerge } from "@/lib/pull-request-list";
 import { cn } from "@/lib/utils";
 import type {
   PullRequestSummary,
@@ -500,16 +500,21 @@ export function PullRequestDetail({
                 最初に知りたいのは「何件のうち何件が問題なしか」で、本文の表まで
                 スクロールしないと読めないのでは判断材料として遅い。
                 見出しを持たないPR（＝リリースPR以外）ではparseがnullを返すので何も出ない */}
-            {/* リリースPRの3区分（個別PRレビュー／統合検証／全体レビュー。#4238）。個別PRの判定は
-                下の「コードレビューの検証結果」と同じ材料で、ここでは他の2区分と並べて見せる */}
-            {pullRequest.kind === "release" && !pullRequest.merged && pullRequest.state === "open" && (
-              <ConnectedReleaseReviewSections
-                repositoryFullName={pullRequest.repositoryFullName}
-                pullRequestNumber={pullRequest.number}
-                headRef={pullRequest.headRef}
-                className="border-b px-4 py-3"
-              />
-            )}
+            {/* リリースPRの3区分（全体レビュー／統合検証／個別PRレビュー。#4238・#4277）。個別PRの判定は
+                下の「コードレビューの検証結果」と同じ材料で、ここでは他の2区分と並べて見せる。
+                並びと形式は本番マージの確認ダイアログ・スマホのリリースシートと同じ部品で揃える */}
+            {pullRequest.kind === "release" &&
+              !pullRequest.merged &&
+              pullRequest.state === "open" &&
+              pullRequest.headRef.startsWith(RELEASE_BRANCH_PREFIX) && (
+                <div className="border-b px-4 py-3">
+                  <ConnectedReleaseReviewSections
+                    repositoryFullName={pullRequest.repositoryFullName}
+                    pullRequestNumber={pullRequest.number}
+                    headRef={pullRequest.headRef}
+                  />
+                </div>
+              )}
 
             {verification && (
               <VerificationSummaryPanel

@@ -1055,6 +1055,11 @@ model DispatchJob {
   // レビューの判定（`lgtm` / `needs-check` / `changes-requested`）。**失敗・時間切れは入れず
   // `status`と`message`が持つ。** GitHubのverdict markerは結果の記録で、状態の正本はこの行
   reviewVerdict         String?           @db.VarChar(32)
+  // リリースの統合検証・全体レビュー（`RELEASE_VERIFY`・`RELEASE_REVIEW`）の現在の工程（#4277）。
+  // `running`の報告に載った`{ step, index?, total?, command? }`を受け口で検証してから入れ、
+  // 終了後も最後の工程を残す（「テストで失敗」のように止まった工程を画面に出すため）。
+  // 結果（`ReleaseVerification`）とは分けて持ち、ゲートの判定には使わない
+  progress              Json?
   // 最終マージ判定を再開する対象のActionsのrun（PRを契機に走った`claude-review-develop`の実行ID）。
   // レビューの完了後に、そのrunの`auto-merge`ジョブだけを再実行して判定をやり直す
   workflowRunId         String?           @db.VarChar(32)

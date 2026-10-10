@@ -71,9 +71,34 @@ AIレビューはテスト実行の代わりにしない。個別レビューの
 
 ## リリース画面の3区分
 
-PC（リリースPR詳細。`GET /api/repositories/release/verification`）とスマホ（リリースシート。`GET /api/repositories/release`の`releasePullRequest.verification`）で
-同じコンポーネント（`release-review-sections.tsx`）が「個別PRレビュー／統合検証／全体レビュー」を並べる。個別PRレビューは既存の「今回反映する内容」（`useReleaseChanges`）の集計で、
+PC（リリースPR詳細）・スマホ（リリースシート）・**本番マージの確認ダイアログ**（#4277）で、同じコンポーネント
+（`release-review-sections.tsx`の`ConnectedReleaseReviewSections`）が上から「全体レビュー／統合検証／個別PRレビュー」を並べる。
+**並びは表示の優先順位で、実行順序や依存関係ではない。** 全体レビュー（AIによるリリース差分全体の確認）と統合検証（mainへ統合した状態の
+ビルド・自動テスト。AIではない）は互いを代替せず、個別PRレビューは既存の「今回反映する内容」（`useReleaseChanges`）の集計で、
 他の2区分の結果で置き換えない。凍結ブランチ（`release-main/*`）のリリースPRにだけ出す。
+
+- **形式**: どの区分も「見出し＋短い説明＋状態の1行」。閉じたままで状態・現在の工程・経過時間・指摘の有無と短い理由が読め、
+  総評・指摘・実施内容・証跡・PR別の一覧は開いて読む。未実施・待機・取得失敗を緑や「問題なし」にしない
+- **確認ダイアログ**: 旧「マージ前の確認」と「このリリースに含まれる変更」の独立した枠は出さず、「リリースの検証」1枚に
+  まとめる。CI・コンフリクトは枠の末尾の1行（`buildCiConflictRows`）、変更一覧は個別PRレビューを開いた中。旧「Claudeのレビュー」行は
+  個別PRレビューへ統合した（判定の材料は区分と同じ各PR本文）。旧世代のリリースPR（head=develop）は従来の表示のまま
+- **取得**: `GET /api/repositories/release/verification`と`GET /api/repositories/release/changes`を部品自身が取り、待機・実行中は5秒間隔、
+  取得に失敗しても間隔を空けて取り直す。「更新」で両方を取り直す。スマホのシートも同じ取得を使う
+
+### 進捗（#4277）
+
+結果（`ReleaseVerification`）とは別に、**現在の対象（base・head）の**最新ジョブ（`DispatchJob`）から進捗を作る
+（`lib/release-verification-progress.ts`・`release-verification-load.ts`）。対象の違うジョブは見ないので、作り直す前のSHAの
+工程・成功を現在の進捗に見せない。**進捗はゲートの判定に使わない**（記録が`waiting`でジョブが`RUNNING`なら表示だけ「実行中」）。
+
+- **工程**: 実行側（`run-release-verify.sh`・`run-release-review.sh`）が`running`報告に`progress: { step, plan, index, command?, files? }`を載せ、
+  `/api/dispatch/report`がジョブの種別に合う工程名だけを通して`DispatchJob.progress`へ保存する。統合検証は準備→統合→検証コマンド
+  （文字列からinstall＝依存関係取得・test＝テスト・build＝ビルド、他は「検証コマンド」）→Mac検証、全体レビューは準備→差分取得→AIレビュー→結果整理。
+  生存報告は別プロセスなので、現在の工程はファイル（`scripts/lib/release-progress.sh`）経由で渡す
+- **待機理由**: `QUEUED`は実行先の`lastSeenAt`でオフライン／順番待ち、`CLAIMED`は起動準備中。ホストの記録が無ければ「未取得」と出し推測しない
+- **停止**: 最後の報告から`DISPATCH_HEARTBEAT_TIMEOUT_MS`（10分）を過ぎたら「応答なし」にしてアニメーションを止める。取り消し・
+  結果なしの終了は「中断」
+- **出さないもの**: 百分率・残り時間（総量が分からない工程に経過時間から割合を当てない）、出力・ログ。終了後の「確認した範囲」は実行中の進捗と別に出す
 
 **修正導線**: リリースブランチは直接書き換えない。指摘が出たら、developへ修正を入れてから既存の「修正を入れて作り直す」（`release-rebuild`・#3014）へ進み、
 作り直しで変わったbase/head SHAに対して統合検証・全体レビューをやり直す（古いSHAの結果は「古い結果」になり流用されない）。CI失敗・コンフリクトは従来どおり`reusable-claude-pr-repair`の修復ボタン。

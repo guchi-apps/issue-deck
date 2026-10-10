@@ -21,6 +21,8 @@ export function useReleaseChanges(
   repositoryFullName: string,
   enabled: boolean,
   pullRequestNumber: number | null = null,
+  /** 変えると取り直す（画面の「更新」。#4277） */
+  reloadToken = 0,
 ): UseReleaseChangesResult {
   const key = `${repositoryFullName}#${pullRequestNumber ?? "develop"}`;
   const [loaded, setLoaded] = useState<{ key: string; data: ReleaseChangeListResponse } | null>(null);
@@ -64,7 +66,7 @@ export function useReleaseChanges(
       setLoaded(null);
       setFailure(null);
     };
-  }, [enabled, repositoryFullName, pullRequestNumber, key]);
+  }, [enabled, repositoryFullName, pullRequestNumber, key, reloadToken]);
 
   const data = loaded !== null && loaded.key === key ? loaded.data : null;
   const error = failure !== null && failure.key === key ? failure.message : null;

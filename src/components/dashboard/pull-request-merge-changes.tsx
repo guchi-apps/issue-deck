@@ -36,7 +36,7 @@ function ReviewStatusDot({ kind, label }: { kind: ReviewVerdictKind; label: stri
   return (
     <span
       role="img"
-      aria-label={`Claudeレビュー: ${label}`}
+      aria-label={`AIレビュー: ${label}`}
       className={cn("box-border size-3 shrink-0 rounded-full", tone[kind])}
     />
   );

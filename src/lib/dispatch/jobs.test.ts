@@ -3157,3 +3157,54 @@ describe("reportDispatchJob のコードレビュー", () => {
     );
   });
 });
+
+describe("reportDispatchJob のリリース検証の工程（#4277）", () => {
+  function mockJob(kind: string) {
+    dispatchJobFindUnique.mockResolvedValue({
+      id: "job-1",
+      repositoryFullName: REPOSITORY,
+      issueNumber: 4276,
+      targetHost: "subpc",
+      agent: "claude",
+      kind,
+      status: "RUNNING",
+      claimedByHost: "subpc",
+      message: null,
+      tmuxSessionName: null,
+      createdAt: NOW,
+      claimedAt: NOW,
+      startedAt: NOW,
+      finishedAt: null,
+    });
+    dispatchJobUpdateMany.mockResolvedValue({ count: 1 });
+  }
+  const progressOf = () => dispatchJobUpdateMany.mock.calls.at(-1)?.[0].data.progress;
+
+  it("統合検証の工程を検証して保存する", async () => {
+    mockJob("RELEASE_VERIFY");
+    await reportDispatchJob({
+      jobId: "job-1",
+      hostName: "subpc",
+      status: "running",
+      progress: { step: "test", plan: ["prepare", "merge", "test"], index: 2, command: "pnpm test", extra: "x" },
+      now: NOW,
+    });
+    expect(progressOf()).toEqual({
+      step: "test",
+      plan: ["prepare", "merge", "test"],
+      index: 2,
+      command: "pnpm test",
+      files: null,
+    });
+  });
+
+  it("種別に合わない工程・リリース検証以外のジョブでは触らない", async () => {
+    mockJob("RELEASE_REVIEW");
+    await reportDispatchJob({ jobId: "job-1", hostName: "subpc", status: "running", progress: { step: "test" }, now: NOW });
+    expect(progressOf()).toBeUndefined();
+
+    mockJob("PR_REVIEW");
+    await reportDispatchJob({ jobId: "job-1", hostName: "subpc", status: "running", progress: { step: "review" }, now: NOW });
+    expect(progressOf()).toBeUndefined();
+  });
+});
