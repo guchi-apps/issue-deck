@@ -1150,8 +1150,8 @@ describe("BranchFlowView", () => {
       // 既定は自動判定
       expect(options[0].getAttribute("aria-checked")).toBe("true");
 
-      fireEvent.click(screen.getByText("マイナー"));
-      expect(screen.getByText("マイナー").closest("[role='radio']")?.getAttribute("aria-checked")).toBe(
+      fireEvent.click(screen.getByText("minor"));
+      expect(screen.getByText("minor").closest("[role='radio']")?.getAttribute("aria-checked")).toBe(
         "true",
       );
       expect(options[0].getAttribute("aria-checked")).toBe("false");
