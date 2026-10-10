@@ -624,6 +624,11 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
     （Actionsの依頼・状態取得）と`POST /api/dispatch/pr-review/resume-sweep`（pollerの巡回）。サブPC側は
     `scripts/start-codex-pr-review.sh --run`が`scripts/lib/pr-review-report.sh`で状態を報告する。経路・設計の判断は
     [multi-agent/code-review.md](multi-agent/code-review.md)「develop向けPRのCodexレビュー」
+  - **リリースPRの統合検証は`DispatchJob`（`kind=RELEASE_VERIFY`）**（#4237）。積む処理は
+    [`lib/dispatch/release-verify-jobs.ts`](../src/lib/dispatch/release-verify-jobs.ts)（`POST /api/dispatch/release-verify`の`request`が呼ぶ）、
+    実行はサブPCの`scripts/run-release-verify.sh`、結果は`/api/dispatch/report`の`releaseVerification`から`ReleaseVerification`へ記録。
+    コマンドはリポジトリ別に[`lib/release-verification-config.ts`](../src/lib/release-verification-config.ts)が持つ。
+    設計は[multi-agent/release-verification.md](multi-agent/release-verification.md)
   - **リポジトリ名の変更は`RepositoryNameAlias`で引き継ぐ**（#3613）。`SessionUsage.repository`は
     作業ディレクトリ名の短い名前で、改名すると旧名の行が別リポジトリに分かれる。
     [`lib/repository-alias.ts`](../src/lib/repository-alias.ts)がリポジトリ同期（と

@@ -27,6 +27,12 @@ export function useReferenceNavigation() {
   const openPullRequest = useCallback(
     (pullRequestId: string) => {
       pushParams((params) => {
+        // PR一覧の外（Issue詳細など）から開くときは、前に見ていた状態別ビュー（「実行中」など）を
+        // 引き継がない。マージ待ちのPRが一覧に出ず、開いたPRが見つからなくなるため既定の
+        // 「すべてのPR」へ戻す。PR一覧の中でのリンクは今のビューを保つ。
+        if (params.get("pane") !== "pull-requests" && params.get("mscreen") !== "pull-requests") {
+          params.delete("prview");
+        }
         params.set("pane", "pull-requests");
         params.set("pr", pullRequestId);
         params.set("mscreen", "pull-requests");

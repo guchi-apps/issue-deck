@@ -9,6 +9,7 @@ import { authorizeDispatch } from "@/lib/dispatch/dispatch-auth";
 import { parseDispatchHostName, parseDispatchReportStatus } from "@/lib/dispatch/dispatch-job";
 import { reportDispatchJob } from "@/lib/dispatch/jobs";
 import { parsePrReviewVerdict } from "@/lib/dispatch/pr-review";
+import { applyReleaseVerifyReport } from "@/lib/dispatch/release-verify-jobs";
 import { resumePrReviewMerge } from "@/lib/dispatch/pr-review-jobs";
 import { resolveFixedInstructionCheckUser } from "@/lib/dispatch/session-escalation";
 import { MANUAL_STEP_OUTPUT_MAX_LENGTH } from "@/lib/manual-step-command";
@@ -120,6 +121,15 @@ export async function POST(request: NextRequest) {
       await resumePrReviewMerge(result.job.id);
     } catch (error) {
       console.error(`[POST /api/dispatch/report] 最終マージ判定を再開できませんでした ${jobId}:`, error);
+    }
+  }
+
+  // リリースの統合検証（#4237）の結果を、ジョブの対象（PR・base・head）の記録へ反映する
+  if (result.job.kind === "RELEASE_VERIFY" && status !== "running") {
+    try {
+      await applyReleaseVerifyReport(result.job, status, message, payload?.releaseVerification);
+    } catch (error) {
+      console.error(`[POST /api/dispatch/report] 統合検証の結果を記録できませんでした ${jobId}:`, error);
     }
   }
 
