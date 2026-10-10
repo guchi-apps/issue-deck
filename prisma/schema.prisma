@@ -2600,3 +2600,51 @@ model ShareToken {
   @@index([userId, deviceId])
   @@index([expiresAt])
 }
+
+// リリース候補の修正系列（#4317）。全体レビューの指摘・統合検証の失敗から起案した修正Issue1件につき1行。
+// 修正PRのdevelop取り込み→候補の作り直し→新SHAでの再検証を追跡する。
+// **権限や判断の根拠はこの記録（SHA・PR番号・状態）で持ち、ラベルやPR本文は使わない。**
+// 候補の作り直しは既存のrelease-rebuild（凍結ブランチは書き換えず、後継候補を作る）を再利用する。
+model ReleaseFixSeries {
+  id                 String   @id @default(cuid())
+  repositoryFullName String   @db.VarChar(191)
+  // 起案の起点になったリリースPR（凍結ブランチ`release-main/vX.Y.Z`）と、その時点のSHA
+  releasePrNumber    Int
+  releaseVersion     String?  @db.VarChar(64)
+  originBaseSha      String   @db.VarChar(64)
+  originHeadSha      String   @db.VarChar(64)
+  // `review_finding`（全体レビューの指摘） / `integration_failure`（統合検証の失敗）
+  sourceKind         String   @db.VarChar(32)
+  // `code`（コードの不具合） / `decision`（仕様判断が要る）。実行障害は系列にしない
+  causeClass         String   @db.VarChar(32)
+  // 同一対象・指摘の二重起案を止める鍵（リポジトリ・PR・SHA・種別・指摘の組から決める）
+  sourceKey          String   @db.VarChar(64)
+  // 機密除去済みの指摘・失敗の写し（JSON）。元の根拠を後から読めるよう保持する
+  items              Json
+  issueNumber        Int
+  // 修正PR（develop向け）。issue-<番号>ブランチから解決する
+  fixPrNumber        Int?
+  fixPrMergedAt      DateTime?
+  // 利用者が「含めてよい」と確認した、修正と無関係なdevelopのPR番号（JSON配列）
+  acceptedExtraPrs   Json?
+  // `issue_created` / `fix_in_progress` / `fix_merged` / `rebuilding` / `reverifying` / `ready` / `awaiting_decision` / `stopped` / `superseded`
+  status             String   @db.VarChar(32)
+  stopReason         String?  @db.Text
+  // 進行中の間だけ`repositoryFullName#releasePrNumber:sourceKey`を入れる（同じ対象の二重起案を止める）
+  activeKey          String?  @unique @db.VarChar(255)
+  // 反復の追跡。再検証が失敗して次の修正を起案すると世代が進む
+  parentId           String?  @db.VarChar(40)
+  generation         Int      @default(1)
+  // 作り直しの記録。claim済みなら二重に作り直さない
+  rebuildClaimedAt   DateTime?
+  successorPrNumber  Int?
+  successorBaseSha   String?  @db.VarChar(64)
+  successorHeadSha   String?  @db.VarChar(64)
+  createdByUserId    String   @db.VarChar(40)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([repositoryFullName, releasePrNumber])
+  @@index([status])
+}

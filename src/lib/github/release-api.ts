@@ -388,6 +388,34 @@ export async function fetchOpenPullRequestsForBase(
   return res.json();
 }
 
+/** 修正PR（develop向け）の取得結果。マージ・クローズの判定に使う（#4317） */
+export type GithubApiPullRequestByHead = GithubApiPullRequest & {
+  state: "open" | "closed";
+  merged_at: string | null;
+  base: { ref: string; sha: string };
+};
+
+/**
+ * ブランチ名（`issue-<番号>`）をheadに持つ、baseへのPRを新しい順に返す（#4317）。
+ * 修正Issueのブランチ名からPRを引くのに使う。
+ */
+export async function fetchPullRequestsByHead(
+  owner: string,
+  repo: string,
+  branch: string,
+  base: string,
+  token: string,
+): Promise<GithubApiPullRequestByHead[]> {
+  const head = encodeURIComponent(`${owner}:${branch}`);
+  const url = `${GITHUB_API}/repos/${owner}/${repo}/pulls?head=${head}&base=${encodeURIComponent(base)}&state=all&per_page=10`;
+  const res = await githubFetch(url, token);
+  if (!res.ok) {
+    const detail = await res.text().catch(() => "");
+    throw new GithubApiError(res.status, `GitHub API request failed: ${res.status} ${url} ${detail}`);
+  }
+  return res.json();
+}
+
 export type ReleaseWorkflowRun = {
   /**
    * runのid（#2236）。**同じ失敗で二重にIssueを起票しないための鍵**として使う。

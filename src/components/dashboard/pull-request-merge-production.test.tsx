@@ -327,6 +327,9 @@ describe("PullRequestMergeProduction", () => {
             }),
           };
         }
+        if (url.startsWith("/api/repositories/release/fix-series")) {
+          return { ok: true, status: 200, json: async () => ({ series: [] }) };
+        }
         if (url.startsWith("/api/repositories/release/changes")) {
           return {
             ok: true,

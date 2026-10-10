@@ -178,7 +178,7 @@ set -euo pipefail
 #     本数の上限は死んだペインだけが残るセッションを数えない（#4116）。
 # 35: リリースPRの統合検証（`RELEASE_VERIFY`）を受け取り、`run-release-verify.sh`をtmuxで起動する（#4237）。
 # 36: リリースPRの全体AIレビュー（`RELEASE_REVIEW`）を受け取り、`run-release-review.sh`をtmuxで起動する（#4238）。
-DISPATCH_POLLER_VERSION="36"
+DISPATCH_POLLER_VERSION="37"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -1622,6 +1622,18 @@ sweep_deploy_recoveries() {
   printf '%s' "$API_RESPONSE_BODY" |
     jq -r '.actions[]? | "本番復旧系列を進めました: \(.repositoryFullName) \(.action) \(.detail // "")"' 2>/dev/null ||
     true
+  return 0
+}
+
+# リリース候補の修正系列（#4317）を進める。修正PRのdevelop取り込みの観測・候補の作り直し・
+# 新しいSHAでの再検証の判定はissue-deck側が持ち、ここは呼ぶだけにする。
+sweep_release_fix_series() {
+  if ! api_call POST /api/repositories/release/fix-series/sweep '{}'; then
+    case "$API_RESPONSE_STATUS" in
+      404|000) return 0 ;;
+      *) report_api_failure "リリース候補の修正系列の巡回に失敗しました" ;;
+    esac
+  fi
   return 0
 }
 
@@ -4345,6 +4357,8 @@ run_once() {
     sweep_pull_request_auto_repairs
     # 本番復旧系列（#3998）。**dry-runでは呼ばない**（Issueの起票と実装の起動という副作用があるため）。
     sweep_deploy_recoveries
+    # リリース候補の修正系列（#4317）。**dry-runでは呼ばない**（候補の作り直しという外向きの副作用があるため）。
+    sweep_release_fix_series
     sweep_codex_pull_request_reviews
     # iOS配布失敗の巡回検知（#3745）。**dry-runでは呼ばない**（Issueの起票という外向きの副作用があるため）。
     sweep_ios_distribution_failures

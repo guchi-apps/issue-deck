@@ -637,6 +637,10 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
     （PC・スマホ・本番マージの確認ダイアログで共通。`GET /api/repositories/release/verification`を部品自身が取る）。
     進捗（待機理由・工程・経過）は[`lib/release-verification-progress.ts`](../src/lib/release-verification-progress.ts)が
     `DispatchJob.progress`（実行側の`running`報告）から作る（#4277）
+  - **リリース候補の修正系列は`ReleaseFixSeries`**（#4317）。判断は[`lib/release-fix-series.ts`](../src/lib/release-fix-series.ts)（純関数）、
+    起案・巡回・作り直しは[`lib/release-fix-series-run.ts`](../src/lib/release-fix-series-run.ts)、作り直しの実行は画面と共通の
+    [`lib/release-rebuild-run.ts`](../src/lib/release-rebuild-run.ts)、API・巡回の入口は`app/api/repositories/release/fix-series/`、
+    画面は[`components/dashboard/release-fix-panel.tsx`](../src/components/dashboard/release-fix-panel.tsx)。設計は[multi-agent/release-verification.md](multi-agent/release-verification.md)
   - **リポジトリ名の変更は`RepositoryNameAlias`で引き継ぐ**（#3613）。`SessionUsage.repository`は
     作業ディレクトリ名の短い名前で、改名すると旧名の行が別リポジトリに分かれる。
     [`lib/repository-alias.ts`](../src/lib/repository-alias.ts)がリポジトリ同期（と
