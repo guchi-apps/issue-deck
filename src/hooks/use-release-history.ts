@@ -11,6 +11,7 @@ import {
   overlayReleaseCheckToggles,
   type PendingReleaseToggle,
   type ReleaseCheckLineRecord,
+  type ReleaseLineToggleTarget,
   type ReleaseCheckRecord,
 } from "@/lib/release-check";
 
@@ -21,7 +22,7 @@ type ReleaseHistoryResponse = {
 };
 
 type CheckTarget = { repoFullName: string; tagName: string };
-type CheckLineTarget = CheckTarget & { lineKey: string };
+type CheckLineTarget = ReleaseLineToggleTarget;
 
 function checkKey(target: CheckTarget): string {
   return `${target.repoFullName} ${target.tagName}`;
@@ -29,6 +30,21 @@ function checkKey(target: CheckTarget): string {
 
 function checkLineKey(target: CheckLineTarget): string {
   return `${target.repoFullName} ${target.tagName} ${target.lineKey}`;
+}
+
+/** 項目チェックをGitHub Release本文へ保存できなかった理由（#4374）。保存済みとは表示しない */
+function lineSaveErrorMessage(code: string | undefined, status: number): string {
+  switch (code) {
+    case "permission_denied":
+      return "GitHub Releaseを更新する権限がありません。GitHub Appに「Contents: 書き込み」の権限が必要です。";
+    case "not_found":
+      return "対応するGitHub Releaseが見つかりません。本文へ同期できないため保存していません。";
+    case "line_not_found":
+    case "conflict":
+      return "GitHub Release本文が別で編集されたため保存できませんでした。最新の状態を取り直しました。もう一度操作してください。";
+    default:
+      return `GitHub Release本文への保存に失敗しました (${code ?? status})。もう一度お試しください。`;
+  }
 }
 
 type UseReleaseHistoryResult = {
@@ -47,7 +63,7 @@ type UseReleaseHistoryResult = {
   ) => Promise<void>;
   /** 箇条書き1行を確認済み／未確認へ切り替える（#2982） */
   setReleaseLineChecked: (
-    target: { repoFullName: string; tagName: string; lineKey: string },
+    target: ReleaseLineToggleTarget,
     checked: boolean,
   ) => Promise<void>;
 };
@@ -171,15 +187,20 @@ export function useReleaseHistory(enabled: boolean): UseReleaseHistoryResult {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(target),
       });
-      if (!res.ok) throw new Error(`保存に失敗しました (${res.status})`);
+      if (!res.ok) {
+        const json: { error?: string } = await res.json().catch(() => ({}));
+        throw new Error(lineSaveErrorMessage(json.error, res.status));
+      }
       toggle.settledSeq = ++seqRef.current;
     } catch (err) {
       if (pendingLinesRef.current.get(key) !== toggle) return;
       pendingLinesRef.current.delete(key);
       setCheckLineRecords((prev) => applyReleaseCheckLineToggle(prev, target, !checked));
       setError(err instanceof Error ? err.message : String(err));
+      // GitHub本文が正なので、失敗したときは本文の最新状態を取り直して画面を揃える（同時編集の反映）
+      refresh();
     }
-  }, []);
+  }, [refresh]);
 
   return {
     entries,

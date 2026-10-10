@@ -622,6 +622,16 @@ jobs:
           prerelease: \${{ steps.meta.outputs.prerelease == 'true' }}
           skip_if_release_exists: true
 
+      - name: Convert release notes to task list
+        env:
+          GH_TOKEN: \${{ github.token }}
+          TAG: \${{ needs.tag.outputs.tag }}
+        run: |
+          # 項目ごとの確認をGitHub Release本文と連動させるため、箇条書きをタスクリストにする（#4374）。
+          # すでにタスクリストの行（- [ ] ・ - [x] ）は触らないので、再実行しても確認状態は変わらない。
+          gh release view "$TAG" --json body --jq .body | sed -E 's/^\\* /- [ ] /' > release-body.md
+          gh release edit "$TAG" --notes-file release-body.md
+
   build:
     runs-on: ubuntu-latest
     needs: tag

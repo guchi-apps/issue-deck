@@ -19,6 +19,7 @@ import {
   selectUncheckedReleases,
   type ReleaseCheckLineIndex,
   type ReleaseCheckLineRecord,
+  type ReleaseLineToggleTarget,
   type ReleaseCheckRecord,
   type ReleaseCheckStatus,
   type ReleaseCheckTargetSummary,
@@ -93,7 +94,7 @@ export function ReleaseHistoryPanel({
   ) => void;
   /** 箇条書き1行の確認チェックを切り替える（#2982） */
   onToggleCheckedLine: (
-    target: { repoFullName: string; tagName: string; lineKey: string },
+    target: ReleaseLineToggleTarget,
     checked: boolean,
   ) => void;
   onToggleCheckTarget: (
@@ -168,6 +169,9 @@ export function ReleaseHistoryPanel({
                 : "未確認のリリースを新しい順に並べています"}
             </p>
           )}
+          <p className="text-[11px] text-muted-foreground">
+            項目のチェックはGitHub Release本文のタスクリストと共有されます（GitHubで変更した場合は更新ボタンで反映）
+          </p>
         </div>
 
         {uncheckedCount > 0 && (
@@ -383,7 +387,7 @@ function ReleaseHistoryCard({
   /** 箇条書き行ごとの確認記録の索引（#2982） */
   checkLineIndex: ReleaseCheckLineIndex;
   onToggleCheckedLine: (
-    target: { repoFullName: string; tagName: string; lineKey: string },
+    target: ReleaseLineToggleTarget,
     checked: boolean,
   ) => void;
   onOpenPullRequest?: (pullRequestId: string) => void;
@@ -660,7 +664,7 @@ function ReleaseNotesView({
     target: { repoFullName: string; tagName: string };
     noteTagName: string;
     index: ReleaseCheckLineIndex;
-    onToggle: (target: { repoFullName: string; tagName: string; lineKey: string }, checked: boolean) => void;
+    onToggle: (target: ReleaseLineToggleTarget, checked: boolean) => void;
   };
 }) {
   if (!notes || notes.status === "unavailable") {
@@ -681,7 +685,12 @@ function ReleaseNotesView({
               </li>
             );
           }
-          const lineTarget = { ...check.target, lineKey: carriedNoteLineKey(check.noteTagName, change) };
+          const lineTarget = {
+            ...check.target,
+            lineKey: carriedNoteLineKey(check.noteTagName, change),
+            lineText: change,
+            carriedFrom: check.noteTagName,
+          };
           const lineChecked = resolveReleaseCheckLineStatus(lineTarget, check.index) !== null;
           return (
             <li key={change} className="flex items-start gap-1.5 text-xs leading-relaxed text-foreground/90">
@@ -726,8 +735,10 @@ function ReleaseLineList({
   onOpenPullRequest?: (pullRequestId: string) => void;
   check?: {
     target: { repoFullName: string; tagName: string };
+    /** 引き継ぎ元の版。あるときだけ、本文に無い項目を修正版の本文へ書き足せる（#4374） */
+    carriedFrom?: string;
     index: ReleaseCheckLineIndex;
-    onToggle: (target: { repoFullName: string; tagName: string; lineKey: string }, checked: boolean) => void;
+    onToggle: (target: ReleaseLineToggleTarget, checked: boolean) => void;
   };
 }) {
   return (
@@ -738,7 +749,13 @@ function ReleaseLineList({
       ) : (
         <ul className="flex flex-col gap-0.5">
           {lines.map((line) => {
-            const lineTarget = check ? { ...check.target, lineKey: line.key } : null;
+            const lineTarget = check
+              ? {
+                  ...check.target,
+                  lineKey: line.key,
+                  ...(check.carriedFrom ? { lineText: line.text, carriedFrom: check.carriedFrom } : {}),
+                }
+              : null;
             const lineChecked =
               check && lineTarget ? resolveReleaseCheckLineStatus(lineTarget, check.index) !== null : false;
             const pullRequestId = resolveReleasePullRequestId(line.key, repoFullName);
@@ -793,7 +810,7 @@ function CarriedReleaseSection({
   target: { repoFullName: string; tagName: string };
   checkLineIndex: ReleaseCheckLineIndex;
   onToggleCheckedLine: (
-    target: { repoFullName: string; tagName: string; lineKey: string },
+    target: ReleaseLineToggleTarget,
     checked: boolean,
   ) => void;
   onOpenPullRequest?: (pullRequestId: string) => void;
@@ -821,7 +838,7 @@ function CarriedReleaseSection({
           lines={lines}
           repoFullName={repoFullName}
           onOpenPullRequest={onOpenPullRequest}
-          check={{ target, index: checkLineIndex, onToggle: onToggleCheckedLine }}
+          check={{ target, carriedFrom: carried.tagName, index: checkLineIndex, onToggle: onToggleCheckedLine }}
         />
       )}
     </section>
