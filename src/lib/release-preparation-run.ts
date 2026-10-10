@@ -13,6 +13,8 @@ import {
   type IssueLabelEvent,
   type ReleasePreparationFailureView,
 } from "@/lib/release-preparation";
+import { markRebuildRequestFailed } from "@/lib/release-rebuild-selection-run";
+import { parseRebuildSelection, serializeRebuildSelection } from "@/lib/release-rebuild-selection";
 import { isBumpKind } from "@/lib/semver-bump";
 
 /**
@@ -45,6 +47,8 @@ export async function recordReleasePreparationFailure(input: {
   runId: number;
   event: string | null;
   bumpKind: string | null;
+  /** 選んで作り直していたときの指定（workflowの`rebuild-selection`）。形が崩れていれば捨てる */
+  rebuildSelection?: string | null;
 }): Promise<ReleasePreparationReportResult> {
   const context = await resolveRepository(input.repositoryFullName);
   if (!context) return { ok: false, reason: "unknown_repository" };
@@ -69,6 +73,16 @@ export async function recordReleasePreparationFailure(input: {
   }
 
   const runUrl = run.html_url ?? `https://github.com/${input.repositoryFullName}/actions/runs/${input.runId}`;
+  const selection = parseRebuildSelection(input.rebuildSelection);
+  if (selection) {
+    // 同じ元の候補へやり直せるよう、進行中の依頼を終える。選択は失敗の記録に残し、再開時に検証し直す
+    await markRebuildRequestFailed({
+      repositoryFullName: input.repositoryFullName,
+      originPrNumber: selection.origin.pr,
+      originHeadSha: selection.origin.headSha,
+      reason: errorExcerpt,
+    });
+  }
   const data = {
     runUrl,
     event: input.event?.slice(0, 32) ?? null,
@@ -76,6 +90,7 @@ export async function recordReleasePreparationFailure(input: {
     jobName: jobName?.slice(0, 255) ?? null,
     stepName: stepName?.slice(0, 255) ?? null,
     errorExcerpt,
+    rebuildSelection: selection ? serializeRebuildSelection(selection) : null,
     status: "open",
     resolvedAt: null,
     resolvedRunUrl: null,
@@ -187,6 +202,7 @@ export async function findOpenReleasePreparationFailure(
     jobName: row.jobName,
     stepName: row.stepName,
     errorExcerpt: row.errorExcerpt,
+    rebuildSelection: parseRebuildSelection(row.rebuildSelection),
     createdAt: row.createdAt.toISOString(),
   };
 }

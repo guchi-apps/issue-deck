@@ -2671,10 +2671,38 @@ model ReleasePreparationFailure {
   resolvedRunUrl     String?   @db.VarChar(512)
   // 解決時に整理した（今回の失敗由来と確認できた）確認待ちラベルのIssue番号（JSON配列）
   clearedIssues      Json?
+  // 選んで作り直していたときの指定（`rebuild-selection`のJSON）。再開時は現在の状態で検証し直してから渡す（#4335）
+  rebuildSelection   String?   @db.Text
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@unique([repositoryFullName, runId])
   @@index([repositoryFullName, status])
+}
+
+// 「修正を入れて作り直す」で、元の候補へ足すPRを選んだ依頼（#4335）。画面の手動選択と修正系列（#4317）の
+// 自動作り直しが同じ記録を使い、同じ元の候補への二重の作り直しを`activeKey`で止める。
+// **権限や判断の根拠はこの記録（元の候補のPR番号・head SHA・PRごとのマージコミット）で持つ。**
+model ReleaseRebuildRequest {
+  id                 String   @id @default(cuid())
+  repositoryFullName String   @db.VarChar(191)
+  // 元の候補（凍結ブランチ`release-main/vX.Y.Z`のリリースPR）とそのhead
+  originPrNumber     Int
+  originHeadSha      String   @db.VarChar(64)
+  // 選んだPR（JSON配列 `[{ number, mergeSha, title }]`）。developへのマージ順
+  selection          Json
+  // `manual`（画面） / `fix_series`（修正系列） / `resume`（失敗からの再開）
+  source             String   @db.VarChar(32)
+  // `dispatched`（workflowを起動した） / `failed`（準備に失敗した） / `expired`（期限切れ）
+  status             String   @db.VarChar(16)
+  failureReason      String?  @db.Text
+  // 進行中の間だけ`repositoryFullName#originPrNumber@originHeadSha`を入れる
+  activeKey          String?  @unique @db.VarChar(255)
+  requestedByUserId  String?  @db.VarChar(40)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([repositoryFullName, originPrNumber])
 }

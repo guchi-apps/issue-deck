@@ -10,6 +10,7 @@
  */
 
 import type { ReleaseRebuildCandidate } from "@/lib/release-rebuild";
+import type { RebuildSelectionOptions } from "@/lib/release-rebuild-selection-run";
 import type { BumpKind } from "@/lib/semver-bump";
 
 /** エラーコードを画面に出す文言へ直す。`useReleaseStatus`の取得側と同じ文面に揃えている */
@@ -49,6 +50,22 @@ export function releaseErrorMessage(
   }
   if (errorCode === "rebuild_dispatch_failed") {
     return "リリースPRは閉じましたが、リリースworkflowの起動に失敗しました。「リリースする」から起動し直すと作り直されます。";
+  }
+  // PRを選んだ作り直し（#4335）
+  if (errorCode === "selection_required") {
+    return "このリポジトリでは、元の候補へ足すPRを選んで作り直します。足すPRを1件以上選んでください。";
+  }
+  if (errorCode === "empty_selection") {
+    return "足すPRが選ばれていません。";
+  }
+  if (errorCode === "selection_unsupported") {
+    return "このリポジトリのリリースworkflowはPRを選んだ作り直しに未対応です。workflowを更新してください。";
+  }
+  if (errorCode === "rebuild_in_progress") {
+    return "この候補への作り直しは既に起動しています。リリース画面の進捗を確認してください。";
+  }
+  if (errorCode === "dispatch_failed") {
+    return "リリースworkflowを起動できませんでした。元の候補はそのままです。時間をおいて押し直してください。";
   }
   if (errorCode === "github_api_error" && message) {
     return message;
@@ -121,8 +138,10 @@ export async function requestReleaseBulk(repoFullNames: string[]): Promise<Relea
 
 /** 作り直しの確認ダイアログに出す材料（`GET /api/repositories/release/rebuild`。#3014） */
 export type ReleaseRebuildInfo = {
-  releasePullRequest: { number: number; title: string; url: string; version: string } | null;
+  releasePullRequest: { number: number; title: string; url: string; version: string; headSha?: string } | null;
   candidate: ReleaseRebuildCandidate | null;
+  /** PRを選んだ作り直し（#4335）の材料。リリースPRが無ければ無い */
+  selection?: RebuildSelectionOptions;
 };
 
 export async function fetchReleaseRebuild(repoFullName: string): Promise<ReleaseRebuildInfo> {
@@ -142,13 +161,29 @@ export async function requestReleaseRebuild(
   repoFullName: string,
   pullRequestNumber: number,
   bumpKind?: BumpKind,
+  /** PRを選んだ作り直し（#4335）。ダイアログで見ていた元の候補のheadと、選んだPRのマージコミット */
+  selective?: { headSha: string; pullRequests: { number: number; mergeSha: string | null }[] },
 ): Promise<void> {
   const [owner, repo] = repoFullName.split("/");
   const res = await fetch("/api/repositories/release/rebuild", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ owner, repo, pullRequestNumber, ...(bumpKind ? { bumpKind } : {}) }),
+    body: JSON.stringify({
+      owner,
+      repo,
+      pullRequestNumber,
+      ...(bumpKind ? { bumpKind } : {}),
+      ...(selective ? { headSha: selective.headSha, selectedPullRequests: selective.pullRequests } : {}),
+    }),
   });
-  const json: { error?: string; message?: string } = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(releaseErrorMessage(res.status, json.error, json.message));
+  const json: { error?: string; message?: string; problems?: { number: number; label: string }[] } = await res
+    .json()
+    .catch(() => ({}));
+  if (!res.ok) {
+    // 選べないPRがあったときは、PRごとの理由を並べる（選択は自動では広げない）
+    if (json.error === "invalid_selection" && json.problems?.length) {
+      throw new Error(`選んだPRを足せません: ${json.problems.map((p) => `#${p.number} ${p.label}`).join(" / ")}`);
+    }
+    throw new Error(releaseErrorMessage(res.status, json.error, json.message));
+  }
 }

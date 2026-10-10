@@ -41,6 +41,8 @@ async function handlePOST(request: NextRequest) {
             runId,
             event: typeof payload?.event === "string" ? payload.event : null,
             bumpKind: typeof payload?.bumpKind === "string" ? payload.bumpKind : null,
+            rebuildSelection:
+              typeof payload?.rebuildSelection === "string" ? payload.rebuildSelection.slice(0, 20_000) : null,
           })
         : await resolveReleasePreparation({ repositoryFullName, runId });
     // 記録できなかった理由（未接続・対象外）もworkflowにとってはエラーではないので200で返す

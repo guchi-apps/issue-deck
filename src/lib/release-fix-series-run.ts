@@ -34,6 +34,8 @@ import {
 } from "@/lib/release-fix-series";
 import { redactDiagnosticText } from "@/lib/release-review-diagnostic";
 import { rebuildReleaseCandidate } from "@/lib/release-rebuild-run";
+import { requestSelectiveRebuild } from "@/lib/release-rebuild-selection-run";
+import { releaseCallerSupportsSelection } from "@/lib/github/release-api";
 import { loadReleaseVerificationSummary } from "@/lib/release-verification-load";
 import type { ReleaseVerificationSection } from "@/lib/release-verification-summary";
 
@@ -401,8 +403,11 @@ async function sweepGroup(repositoryFullName: string, releasePrNumber: number, r
     originMerged = original.merged === true;
   }
   const candidate = frozen && originStillOpen ? await fetchReleaseRebuildCandidate(owner, repo, frozen.head.sha, token) : null;
+  // 選んだ作り直し（#4335）に対応していれば、修正PRだけを元の候補へ足す（無関係な変更で判断待ちにしない）
+  const selective = frozen && originStillOpen ? await releaseCallerSupportsSelection(owner, repo, token) : false;
 
   const decision = decideReleaseFix({
+    selective,
     series: observed.map((row) => ({
       id: row.id,
       status: parseReleaseFixStatus(row.status) ?? "stopped",
@@ -439,6 +444,30 @@ async function sweepGroup(repositoryFullName: string, releasePrNumber: number, r
   }
 
   const issues = observed.map((row) => `#${row.issueNumber}`).join("、");
+  if (decision.selectedPrs.length > 0) {
+    const result = await requestSelectiveRebuild({
+      owner,
+      repo,
+      token,
+      releasePr: frozen,
+      selected: decision.selectedPrs.map((number) => ({ number })),
+      source: "fix_series",
+      userId: null,
+    }).catch((error: unknown) => {
+      console.error("[release-fix-series] selective rebuild failed", error);
+      return { ok: false as const, error: "dispatch_failed" as const };
+    });
+    if (!result.ok) {
+      const reason =
+        result.error === "rebuild_in_progress"
+          ? "同じ候補への作り直しが既に起動されています。画面の進捗を確認してください"
+          : result.error === "invalid_selection"
+            ? `修正PRを元の候補へ足せません（${result.problems.map((p) => `#${p.number}: ${p.label}`).join("、")}）`
+            : "選んだ修正PRで候補を作り直せませんでした。画面の「修正を入れて作り直す」から手動で作り直せます";
+      return { rebuilt: false, changed: await stopRows(ctx, decision.seriesIds, "stopped", reason) };
+    }
+    return { rebuilt: true, changed: decision.seriesIds.length };
+  }
   let closed = false;
   try {
     await rebuildReleaseCandidate({
