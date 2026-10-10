@@ -4,6 +4,7 @@ import { useState } from "react";
 
 import { ApiErrorMessage } from "@/components/dashboard/api-error-message";
 import { PullRequestMergeProduction } from "@/components/dashboard/pull-request-merge-production";
+import { PullRequestMergeReviewGate } from "@/components/dashboard/pull-request-merge-review-gate";
 import { PullRequestMergeReview } from "@/components/dashboard/pull-request-merge-review";
 import {
   AlertDialog,
@@ -25,6 +26,7 @@ import {
   mergeJudgementReason,
   mergeWarnings,
 } from "@/lib/pull-request-list";
+import { needsReviewMergeConfirmation } from "@/lib/pull-request-merge-hold";
 import { cn } from "@/lib/utils";
 import type { PullRequestSummary } from "@/types/pull-request";
 
@@ -77,7 +79,8 @@ export function PullRequestMergeButton({
   className,
   variant = "outline",
 }: PullRequestMergeButtonProps) {
-  const { mergePullRequest, isSubmitting, error } = usePullRequestMergeMutation();
+  const { mergePullRequest, isSubmitting, error, reviewConfirmation, clearReviewConfirmation } =
+    usePullRequestMergeMutation();
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [isMerged, setIsMerged] = useState(false);
   const warnings = mergeWarnings(pullRequest);
@@ -88,9 +91,19 @@ export function PullRequestMergeButton({
   const shownWarnings = warnings.filter((warning) => warning !== ciWarningText);
   const judgementPending = isMergeJudgementPending(pullRequest.mergeJudgement);
   const [owner, repo] = pullRequest.repositoryFullName.split("/");
+  // 要修正・要確認の判定が残るPRは、確認画面（修正が主操作）を必ず通す（#4377）。
+  // サーバーが確認を求め直した（HEADが動いた等）ときも、同じ画面で確認し直させる
+  const reviewGate = needsReviewMergeConfirmation(pullRequest) || reviewConfirmation !== null;
 
-  async function runMerge() {
-    const merged = await mergePullRequest({ owner, repo, number: pullRequest.number });
+  async function runMerge(acknowledgeReviewSha?: string) {
+    const merged = await mergePullRequest({
+      owner,
+      repo,
+      number: pullRequest.number,
+      ...(acknowledgeReviewSha ? { acknowledgeReviewSha } : {}),
+    });
+    // サーバーに確認を求め直されたときは閉じない（更新後の内容を同じ画面で再提示する）
+    if (!merged && reviewGate) return;
     setConfirmOpen(false);
     if (merged) {
       setIsMerged(true);
@@ -110,7 +123,7 @@ export function PullRequestMergeButton({
         )}
         disabled={isSubmitting || isMerged || judgementPending}
         title={judgementPending ? mergeJudgementReason(pullRequest.mergeJudgement.step) : undefined}
-        onClick={() => (warnings.length > 0 ? setConfirmOpen(true) : runMerge())}
+        onClick={() => (warnings.length > 0 || reviewGate ? setConfirmOpen(true) : runMerge())}
       >
         {isMerged
           ? "マージ済み"
@@ -121,7 +134,13 @@ export function PullRequestMergeButton({
               : "マージする"}
       </Button>
 
-      <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+      <AlertDialog
+        open={confirmOpen}
+        onOpenChange={(open) => {
+          setConfirmOpen(open);
+          if (!open) clearReviewConfirmation();
+        }}
+      >
         {/* 変更点を並べるぶん、mainへのPRのときだけ広げる。**ボタンは下端に固定し、スクロールするのは
             本文だけ**（#3260）。判定や変更一覧が長くなっても、押す場所を探して下までスクロールしなくて
             よい。高さの上限はどちらの幅でも付ける（スマホで下端が切れる） */}
@@ -143,7 +162,24 @@ export function PullRequestMergeButton({
                 <li key={warning}>{warning}</li>
               ))}
             </ul>
-            {productionMerge ? (
+            {reviewGate && !productionMerge ? (
+              <>
+              <PullRequestMergeReview
+                verdict={pullRequest.reviewVerdict}
+                htmlUrl={pullRequest.htmlUrl}
+                headSha={pullRequest.headSha}
+                isReviewing={judgementPending}
+              />
+              <PullRequestMergeReviewGate
+                pullRequest={pullRequest}
+                open={confirmOpen}
+                isMerging={isSubmitting}
+                serverRequestedHeadSha={reviewConfirmation?.headSha || null}
+                onMergeWithoutFix={(sha) => void runMerge(sha)}
+                onClose={() => setConfirmOpen(false)}
+              />
+              </>
+            ) : productionMerge ? (
               <PullRequestMergeProduction
                 pullRequest={pullRequest}
                 open={confirmOpen}
@@ -159,6 +195,7 @@ export function PullRequestMergeButton({
             )}
             <ApiErrorMessage message={error} />
           </div>
+          {!(reviewGate && !productionMerge) && (
           <AlertDialogFooter className="flex-row gap-2.5 border-t px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:justify-stretch sm:px-6 sm:pt-4 sm:pb-4">
             <AlertDialogCancel className="flex-1" disabled={isSubmitting}>
               キャンセル
@@ -169,13 +206,14 @@ export function PullRequestMergeButton({
               onClick={(event) => {
                 // 確認結果を待たずに閉じないよう、既定の閉じる動作を止めてから実行する。
                 event.preventDefault();
-                runMerge();
+                void runMerge();
               }}
               disabled={isSubmitting}
             >
               {isSubmitting ? "マージ中..." : "マージする"}
             </AlertDialogAction>
           </AlertDialogFooter>
+          )}
         </AlertDialogContent>
       </AlertDialog>
     </div>
