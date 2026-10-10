@@ -264,7 +264,7 @@ export function ReleaseFixSeriesPanel({
       })
       .then((body) => {
         if (cancelled) return;
-        setSeries(body.series);
+        setSeries(Array.isArray(body.series) ? body.series : []);
         setError(null);
       })
       .catch(() => {
