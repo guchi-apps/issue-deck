@@ -20,18 +20,27 @@ export async function getIssuesForUser(
   options: { bodies: IssueListBodies } = { bodies: "open" },
 ): Promise<Issue[]> {
   // 未完了ジョブ（#1347）はIssueの件数によらず1本で引ける。Issueごとに引くとN+1になる
-  const [issueRows, pendingDispatchAt, manualStepVerifiedAt] = await Promise.all([
+  const where = { repository: { installation: { userInstallations: { some: { userId } } } } };
+  const [issueRows, openBodies, pendingDispatchAt, manualStepVerifiedAt] = await Promise.all([
     db.issue.findMany({
-      where: { repository: { installation: { userInstallations: { some: { userId } } } } },
+      where,
       // 並びを固定する。`GET /api/issues`は一覧のハッシュをETagにしており（#3387）、
       // 内容が同じでも並びが揺れると304にならず、毎回まるごと送り直すことになる
       orderBy: { id: "asc" },
+      // 本文はDBから読まない（#4255）。読んでから捨てると、閉じたIssueの本文が一覧の取得のたびに
+      // 全件ぶんヒープへ載る。openの本文だけを下の別クエリで引いて合流する
+      omit: { body: true },
       include: {
         labels: { orderBy: { id: "asc" } },
         repository: true,
         commentReadBy: { where: { userId } },
       },
     }),
+    options.bodies === "open"
+      ? db.issue
+          .findMany({ where: { ...where, state: "OPEN" }, select: { id: true, body: true } })
+          .then((rows) => new Map(rows.map((r) => [r.id, r.body])))
+      : Promise.resolve(new Map<string, string | null>()),
     getPendingDispatchAtByIssue(),
     // 完了確認の巡回の結果（#2008）も1本で引く。Issueごとに引くと順番待ちと同じくN+1になる
     listManualStepVerifiedAtByIssue(),
@@ -43,7 +52,7 @@ export async function getIssuesForUser(
     const dispatchedAt = pendingDispatchAt.get(activeKey);
     const verifiedAt = manualStepVerifiedAt.get(activeKey);
     const issue: Issue = {
-      ...dbIssueToDisplayIssue(row.repository, row),
+      ...dbIssueToDisplayIssue(row.repository, { ...row, body: openBodies.get(row.id) ?? null }),
       hasUnreadComments: row.commentCount > readCommentCount,
       readCommentCount,
       dispatchPendingAt: dispatchedAt?.toISOString() ?? null,
