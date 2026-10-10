@@ -8,7 +8,7 @@
 | 表示名 | IssueDeck |
 | Bundle ID | `com.gucchii.issuedeck` |
 | 署名 | Automatic（Apple Developer Program のチーム `6AA3WFTR94`。kurashio・YoteiFlow・morrow と同じチーム） |
-| 対応 | iPhone・縦向き・iOS 18以上 |
+| 対応 | iPhone（縦向き）・iPad（縦横とも全画面。#4283）・iOS 18以上 |
 | 認証シートの戻り先 | `issuedeck://auth-callback` |
 | 共有メニュー（Share Extension） | `ios/ShareExtension/`。Bundle ID `com.gucchii.issuedeck.ShareExtension`。App Group `group.com.gucchii.issuedeck`（下書きの受け渡し。方式は [docs/ios-app.md](../docs/ios-app.md)「共有メニューからの起案」） |
 | Associated Domains | 使わない |
