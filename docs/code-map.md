@@ -10,7 +10,7 @@
 - Actions側のトークンと自己ループ防止: [actions-token-model.md](actions-token-model.md)
 - 無人実行フローの全体像: [multi-agent-workflow.md](multi-agent-workflow.md)・[multi-agent/](multi-agent/)
 - 会話型の操作入口（IssueDeck Chat。意図解釈・確認カード・共通サービスの切り出し）: [chat.md](chat.md)
-- IssueDeckのiOSアプリ（方式・認証・配布）: [ios-app.md](ios-app.md)
+- IssueDeckのiOSアプリ（方式・認証・配布）: [ios-app.md](ios-app.md)。実装は`ios/`（SwiftUI＋WKWebView）、サーバー側の引き継ぎは`src/app/auth/native/`・`src/lib/native-auth/`（#3846）
 
 ## ディレクトリ
 

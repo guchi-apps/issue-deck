@@ -539,6 +539,9 @@ CLAUDE.mdに**無いことを明記**しておかないと、エージェント�
 | `deploy.yml` | `main`へのpushをトリガーにしたPM2デプロイ | issue-deck固有の本番環境向け。不要 |
 | `release.yml` | リリースタグ関連の処理 | issue-deck固有。不要 |
 | `load-secrets-check.yml` | シークレットの供給元（GitHub／1Password）を検証する（`workflow_dispatch`）。本番には触れず、解決できたかどうかと解決できなかった項目名だけを報告する（#1306） | **展開時に有用。** 対象リポジトリへGitHub側のsecret/variableを投入したあと、`deploy.yml`を切り替える前にこれで確認できる |
+| `ios-rebuild-notice.yml` | develop→mainのPRに、iOSアプリの入れ直しが要る変更（`ios/`の実質的な差分）が含まれるとき、PRへコメントで知らせる（#448） | issue-deck固有（iOSアプリを持つリポジトリのみ）。不要 |
+| `ios-testflight-trigger.yml` | 本番デプロイ（Deploy to Production）の成功を受けて`ios-testflight.yml`を起動する薄い起動役（#591） | issue-deck固有（iOSアプリを持つリポジトリのみ）。不要 |
+| `ios-testflight.yml` | iOSアプリ本体の更新が要るリリースだけ、TestFlightの内部テストグループへ自動配布する（#591・#3846）。App Store Connect APIキーとして`ASC_KEY_ID`・`ASC_ISSUER_ID`・`ASC_KEY_P8`のSecretsを使う（未登録でもWebのデプロイは失敗せず、iOS配布のジョブだけが止まる） | issue-deck固有（iOSアプリを持つリポジトリのみ）。不要 |
 | `propagate-workflow-tag.yml` | 共有ワークフローの参照タグ（`uses:`・`prompts-ref`）を、展開済みの他リポジトリへ配るPRを作成する（`workflow_dispatch`）。issue-deck画面（設定ダイアログ）から起動される（#1173） | issue-deck固有（配布元としての役割）。対象リポジトリ側には何もコピーしない。不要 |
 | `propagate-shared-files.yml` | ワークフロー以外の配布物（`.github/scripts/signaly-notify.sh`等、`.github/scripts/`配下にコピーして使うファイル）を、配布元（issue-deck）の内容へそろえるPRを配布先ごとに作成する（`workflow_dispatch`）。issue-deck画面（設定＞フリート運用＞共有ワークフローのバージョン「共有スクリプト」欄）から起動される（#2240） | issue-deck固有（配布元としての役割）。対象リポジトリ側には何もコピーしない。不要 |
 | `sync-secrets.yml` | 1Password（値の正）から、そのリポジトリのGitHub secret / variableへ値を同期する（`workflow_dispatch`）。本体は`reusable-sync-secrets.yml`で、ここは薄いcaller。issue-deck画面（設定ダイアログ → シークレットの同期）から起動される（#1309） | **展開する。** 下記「シークレット同期を画面のボタンから起こす」を参照 |

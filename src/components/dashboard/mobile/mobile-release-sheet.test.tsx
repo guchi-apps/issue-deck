@@ -88,7 +88,7 @@ describe("MobileReleaseSheet iOSへの反映欄（#3579）", () => {
     render(
       <MobileReleaseSheet
         {...baseProps}
-        repository={makeRepository("guchi-apps/issue-deck")}
+        repository={makeRepository("guchi-apps/vps")}
         releaseStatus={makeStatus()}
       />,
     );
