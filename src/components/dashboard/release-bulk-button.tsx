@@ -99,7 +99,7 @@ export function ReleaseBulkButton({
       {error && <span className="text-xs text-destructive">{error}</span>}
 
       <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
-        <AlertDialogContent>
+        <AlertDialogContent className="flex flex-col gap-4 overflow-hidden">
           <AlertDialogHeader>
             <AlertDialogTitle>
               {targets.length}件のリポジトリでリリースworkflowを起動しますか？
@@ -111,6 +111,7 @@ export function ReleaseBulkButton({
               （これまでどおり、各リポジトリで人が個別に行います）。
             </AlertDialogDescription>
           </AlertDialogHeader>
+          <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto">
           {/* ブランチ状況を取得できず判定できなかったリポジトリがあるとき、この一覧が
               「まとめて出した」つもりで取りこぼす1件になり得ることを明示する（計画レビュー指摘3） */}
           {unknownRepositoryCount > 0 && (
@@ -119,7 +120,7 @@ export function ReleaseBulkButton({
               件あり、この一覧には含まれていません。
             </p>
           )}
-          <div className="flex max-h-64 flex-col gap-1 overflow-y-auto rounded-md border p-2 text-xs">
+          <div className="flex flex-col gap-1 rounded-md border p-2 text-xs">
             {targets.map((target) => (
               <div
                 key={target.repositoryFullName}
@@ -133,6 +134,7 @@ export function ReleaseBulkButton({
             ))}
           </div>
           {error && <p className="text-xs text-destructive">{error}</p>}
+          </div>
           <AlertDialogFooter>
             <AlertDialogCancel disabled={isTriggering}>キャンセル</AlertDialogCancel>
             <AlertDialogAction

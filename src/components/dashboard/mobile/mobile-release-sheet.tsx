@@ -177,13 +177,14 @@ export function MobileReleaseSheet({
         setReleaseConfirmOpen(open);
         if (!open) setAllowFailedDeploy(false);
       }}>
-        <AlertDialogContent>
+        <AlertDialogContent className="flex flex-col gap-4 overflow-hidden">
           <AlertDialogHeader>
             <AlertDialogTitle>リリースworkflowを起動しますか？</AlertDialogTitle>
             <AlertDialogDescription>
               {repository.fullName}のdevelopをmainへ反映するリリースworkflowを起動します。
             </AlertDialogDescription>
           </AlertDialogHeader>
+          <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto">
           <ReleaseChangeList
             repositoryFullName={repository.fullName}
             enabled={releaseConfirmOpen}
@@ -204,7 +205,7 @@ export function MobileReleaseSheet({
             </label>
           )}
           {otherPullRequestsWithIssue.length > 0 && (
-            <div className="flex max-h-48 flex-col gap-1.5 overflow-y-auto rounded-md border p-2">
+            <div className="flex flex-col gap-1.5 rounded-md border p-2">
               <p className="text-xs font-medium text-muted-foreground">
                 developへの未マージPR（今回のリリースには含まれません）
               </p>
@@ -231,6 +232,7 @@ export function MobileReleaseSheet({
               </ul>
             </div>
           )}
+          </div>
           <AlertDialogFooter>
             <AlertDialogCancel>キャンセル</AlertDialogCancel>
             {/* 起動できたことは、閉じた先のこのシートの進捗（`ReleaseProgress`）で分かるため、

@@ -109,7 +109,7 @@ export function ReleaseChangeList({
   }
 
   return (
-    <div className="flex max-h-80 flex-col gap-1.5 overflow-y-auto rounded-md border p-2">
+    <div className="flex flex-col gap-1.5 rounded-md border p-2">
       <p className="text-xs font-medium text-muted-foreground">
         今回反映する内容（PR {data.pullRequests.length}件
         {data.source === "release-pr" ? "・作成済みリリースPRの範囲" : ""}
