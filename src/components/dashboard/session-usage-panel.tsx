@@ -1764,11 +1764,15 @@ function CurrentSessionsSkeleton() {
 }
 
 /** 合計タイル1枚の取得待ち。見出しは実物と同じ文字を出し、値と補足だけを帯にする */
-function TileSkeleton({ label }: { label: string }) {
+const SUMMARY_GRID_CLASS_NAME = "grid grid-cols-2 gap-2 sm:grid-cols-5";
+const SUMMARY_BASIS_HINT = "カードを押すと、下の日別・リポジトリ別・セッション種別別の表示基準が切り替わります。";
+
+function TileSkeleton({ label, showBar = false }: { label: string; showBar?: boolean }) {
   return (
     <div className="flex flex-col gap-0.5 rounded-lg border p-3">
       <span className="text-[10px] font-semibold tracking-wide text-muted-foreground">{label}</span>
       <Bone className="my-0.5 h-6 w-24 sm:h-7" />
+      {showBar && <Bone className="h-1.5 w-full rounded-full" />}
       <Bone className="mt-0.5 h-3 w-full max-w-40" />
     </div>
   );
@@ -1789,12 +1793,14 @@ function PeriodSkeleton({ compact }: { compact: boolean }) {
       <span className="sr-only" role="status">
         集計を読み込み中
       </span>
-      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+      <div className={SUMMARY_GRID_CLASS_NAME}>
         <TileSkeleton label="従量課金相当" />
         <TileSkeleton label="応答" />
-        <TileSkeleton label="入力トークン" />
+        <TileSkeleton label="入力トークン" showBar />
         <TileSkeleton label="セッション" />
+        <TileSkeleton label="実行したIssue" />
       </div>
+      <p className="-mt-1 text-[11px] text-muted-foreground">{SUMMARY_BASIS_HINT}</p>
 
       <section className="flex flex-col gap-2 rounded-lg border p-3">
         <div className="flex items-baseline justify-between gap-2">
@@ -2016,7 +2022,7 @@ export function SessionUsagePanel({
 
       {period && (
         <>
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
+          <div className={SUMMARY_GRID_CLASS_NAME}>
             <Tile
               selected={basis === "cost"}
               onSelect={() => setBasis("cost")}
@@ -2058,7 +2064,7 @@ export function SessionUsagePanel({
             />
           </div>
           <p className="-mt-1 text-[11px] text-muted-foreground">
-            カードを押すと、下の日別・リポジトリ別・セッション種別別の表示基準が切り替わります。
+            {SUMMARY_BASIS_HINT}
             {basis === "issues" && "　Issue数は内訳ごとの重複除去のため、内訳の和は全体の件数と一致しません"}
           </p>
 
