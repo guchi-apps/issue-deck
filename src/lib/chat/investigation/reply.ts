@@ -3,6 +3,7 @@ import {
   type CallModel,
   type InvestigationResult,
   type ModelMessage,
+  type RunSession,
 } from "@/lib/chat/investigation/agent";
 import { callInvestigationModel } from "@/lib/chat/investigation/model";
 import {
@@ -35,6 +36,8 @@ import { fetchPullRequest } from "@/lib/github/pull-requests-api";
 
 export type InvestigationDeps = {
   callModel?: CallModel;
+  /** 1回の実行で調査から回答まで進める実行（Codex。#4199）。指定すると`callModel`は使わない */
+  session?: RunSession;
   /** 時間の上限の差し替え（Codex CLI経由。#4109） */
   limits?: { maxDurationMs?: number; stepTimeoutMs?: number };
   tool?: (
@@ -145,13 +148,24 @@ function guessKind(result: InvestigationResult, number: number, fallback: "pr" |
   return fallback;
 }
 
+/** 停止理由ごとの次の行動。取得失敗が無いのに権限・接続の確認を案内しない（#4198） */
+function nextAction(result: InvestigationResult): string {
+  const failed = result.toolCalls.filter((c) => !c.ok).length;
+  const reason = result.stopReason ?? "";
+  if (/取得の失敗が続/.test(reason) && failed > 0) return "次の行動: 取得に失敗した範囲があります。権限・接続を確認してから、もう一度聞いてください。";
+  if (/繰り返/.test(reason)) return "次の行動: 取得済みの内容で足りるなら「それで進めて」と返してください。別の観点が必要なら、見てほしい範囲を普通の言葉で補足してください。";
+  if (/上限/.test(reason)) return "次の行動: 「続けて」と返すと、未確認の部分から調べ直します。範囲を絞って聞き直しても構いません。";
+  return "次の行動: もう一度送るか、聞きたい範囲を絞って送ってください。";
+}
+
 function fallbackText(result: InvestigationResult): string {
   const lines: string[] = [];
   if (result.facts.length) lines.push(`確認できたこと:\n${result.facts.map((f) => `- ${f}`).join("\n")}`);
   const failed = result.toolCalls.filter((c) => !c.ok).length;
   lines.push(`調べた回数: ${result.toolCalls.length}回（うち取得失敗${failed}回）`);
   if (result.unconfirmed.length) lines.push(`未確認:\n${result.unconfirmed.map((f) => `- ${f}`).join("\n")}`);
-  lines.push("次の行動: 範囲を絞って聞き直す（例:「#番号のレビューコメントだけ読んで」）か、権限・接続を確認してください。");
+  if (result.stopReason) lines.push(`止まった理由: ${displayReason(result.stopReason)}`);
+  lines.push(nextAction(result));
   return lines.join("\n");
 }
 
@@ -220,6 +234,7 @@ export async function replyWithInvestigation(params: {
     callModel: params.deps?.callModel ?? callInvestigationModel,
     tool: params.deps?.tool,
     limits: params.deps?.limits,
+    session: params.deps?.session,
     userText,
     history: params.history,
     investigation: context.investigation,

@@ -243,6 +243,19 @@ export function useChat(active: boolean) {
     };
   }, [active, conversationId, run?.id, run?.status, refreshList]);
 
+  // 回答待ちの中止（#4199）。サーバーがジョブを取り消し、「中断」の返信（同じ内容での再試行つき）を保存する。
+  // 返信は次の取得で届く（取得を待たず、中止の応答で返信を読み直す）
+  const cancelRun = useCallback(async () => {
+    const id = idRef.current;
+    const runId = run?.id;
+    if (!id || !runId) return;
+    try {
+      await requestJson(`/api/chat/${id}/run?runId=${encodeURIComponent(runId)}`, { method: "DELETE" });
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "中止できませんでした");
+    }
+  }, [run?.id]);
+
   const deliver = useCallback(
     async (item: ChatOutboxItem) => {
       setIsSending(true);
@@ -385,6 +398,7 @@ export function useChat(active: boolean) {
     outbox,
     isSending,
     run,
+    cancelRun,
     error,
     open,
     loadOlder,

@@ -24,9 +24,9 @@ export async function processPullRequest(io, repository, number, state, maxFixes
     return 'success';
   }
   if (state.blockedSha === sha) return 'blocked';
-  // 実装セッションと修復が競合しないよう、ビルドだけの場合も次の巡回へ回す。
-  if (await io.busy(pr)) return 'busy';
-  const result = await io.verify(repository, sha);
+  // 検証は読み取りとビルドだけなので、他セッション・AI一時停止に関わらず実行する（#4202）。
+  // 修復待ちで保持した同一SHAの結果があれば、再検証せずそれを使う。
+  const result = state.verified?.sha === sha ? state.verified.result : await io.verify(repository, sha);
   if (result.requestedSha !== sha || (result.verifiedSha && result.verifiedSha !== sha)) {
     await io.save({ ...state, blockedSha: sha, reason: 'sha_mismatch' });
     await io.report(repository, sha, 'failure', 'iOS事前検証: 検証SHAが一致しません');
@@ -58,7 +58,14 @@ export async function processPullRequest(io, repository, number, state, maxFixes
     await io.report(repository, sha, 'failure', 'iOS検証失敗: このPRは自動修正対象外です。ログを確認してください');
     return 'blocked';
   }
-  if (await io.busy(current)) return 'busy';
+  // 修復だけが他セッション・AI一時停止と競合する。待機中も結果と試行回数を保持して次巡で再開する。
+  const wait = await io.busy(current);
+  if (wait) {
+    const reason = typeof wait === 'string' ? wait : 'busy';
+    await io.save({ ...state, verified: { sha, result }, repairWaiting: { sha, reason } });
+    await io.report(repository, sha, 'pending', `iOS修復待ち: ${reason}`);
+    return 'repair_waiting';
+  }
   const fixes = state.fixes ?? 0;
   if (fixes >= maxFixes || state.repairingSha === sha) {
     await io.save({ ...state, blockedSha: sha, reason: 'fix_limit_or_interrupted' });
@@ -66,7 +73,7 @@ export async function processPullRequest(io, repository, number, state, maxFixes
     return 'blocked';
   }
   // 起動前に回数を永続化。再起動で同じ失敗を無制限に修正しない。
-  const next = { fixes: fixes + 1, repairingSha: sha };
+  const next = { fixes: fixes + 1, repairingSha: sha, verified: { sha, result } };
   await io.save(next);
   await io.report(repository, sha, 'pending', `iOS検証失敗を自動修正中（${fixes + 1}/${maxFixes}）`);
   const repaired = await io.repair(current, result);

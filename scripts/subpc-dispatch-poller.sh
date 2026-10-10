@@ -91,6 +91,8 @@
 #   DISPATCH_POLL_INTERVAL_SECONDS  ポーリング間隔の秒数（省略時は30）
 #   DISPATCH_FAST_POLL_INTERVAL_SECONDS
 #                                   枠外ジョブだけを取りに行く軽い巡回の秒数（省略時は3・0で無効）
+#   DISPATCH_WAKE_FILE              即時通知（#4200）の起床ファイル（省略時は$XDG_RUNTIME_DIR/issue-deck-dispatch-wake）
+#   DISPATCH_WAKE_MIN_GAP_SECONDS   通知で巡回を前倒しする最小間隔の秒数（省略時は5）
 #   DISPATCH_LAUNCH_TIMEOUT_SECONDS 1件の起動に掛ける上限秒数（省略時は900）
 #   DEV_SERVER_IDLE_MINUTES         開発サーバーをアイドルとみなすまでの分数（省略時は20・0で無効）
 #   SESSION_RESUME_ENABLED          APIエラーで中断したセッションの自動再開（省略時は1・0で無効）
@@ -4282,7 +4284,7 @@ run_once() {
   # 起動枠に混ぜていたため、12/12の間は計画の承認を待つセッションが枠を埋めたまま、そのレビューが
   # 何時間も`QUEUED`で待たされた。空き本数を`planReviewMaxJobs`で送り、それを超えたぶんは
   # 見送り（`skipped`）にせず`QUEUED`のまま次の巡を待たせる。**メモリ逼迫の見送りは計画レビューにも効かせる**
-  local live_sessions claim_max_jobs claim_plan_reviews
+  local live_sessions claim_max_jobs claim_plan_reviews ios_sweep_ok=1
   live_sessions="$(count_issue_sessions)"
   claim_max_jobs="$MAX_JOBS"
   claim_plan_reviews="$(plan_review_slots)"
@@ -4299,7 +4301,12 @@ run_once() {
     echo "空きメモリが少ないため、起動ジョブは取りに行きません（$live_sessions/$SESSION_CAP_EFFECTIVE 本。上限は最大 $MAX_SESSIONS 本）。"
     claim_max_jobs=0
     claim_plan_reviews=0
+    ios_sweep_ok=0
   fi
+
+  # iOS事前検証の巡回は、AI起動枠・保留・払い出しの有無と切り離す（#4202）。Mac側の検証は
+  # サブPCのAIセッションを増やさないため、止めるのは実際のメモリ不足だけ。二重起動はflockが防ぐ
+  if [[ "$ios_sweep_ok" -eq 1 ]]; then sweep_ios_prechecks; fi
 
   local claim_payload jobs_json job_count job
   claim_payload="$(jq -n --arg host "$HOST_NAME" --argjson maxJobs "$claim_max_jobs" \
@@ -4314,8 +4321,6 @@ run_once() {
   job_count="$(printf '%s' "$jobs_json" | jq '.jobs | length')"
   if [[ "$job_count" -eq 0 ]]; then
     echo "取得できるジョブはありません。"
-    # 実装の払い出しを優先し、空き枠とメモリがあるときだけMac検証を起動する。
-    if [[ "$claim_max_jobs" -gt 0 ]]; then sweep_ios_prechecks; fi
     return 0
   fi
 
@@ -4364,6 +4369,47 @@ claim_out_of_band() {
   return 0
 }
 
+# --- 即時通知（#4200） --------------------------------------------------------------
+# 受信サービス（`scripts/dispatch-wake-receiver.mjs`・別のsystemd unit）が起床ファイルを更新したら、
+# 待ち時間を打ち切って次の巡回を前倒しする。**通知はキューを見に行く合図だけ**で、取得・認証・
+# ホスト能力・実行枠・二重実行の防止は従来の`claim`経路がそのまま行う。通知が来なくても
+# 定期巡回は止まらない（heartbeat・停止セッション回復などの定期保守はこの巡回に載っている）。
+# 受信サービスはpoller本体と別プロセスなので、再起動しても実行中のセッションに触れない。
+WAKE_FILE="${DISPATCH_WAKE_FILE:-${XDG_RUNTIME_DIR:-/tmp}/issue-deck-dispatch-wake}"
+# 通知が集中しても巡回を連打しない最小間隔（秒）。間に入った通知は次の巡回に畳む
+WAKE_MIN_GAP_SECONDS="$(require_non_negative_int DISPATCH_WAKE_MIN_GAP_SECONDS "${DISPATCH_WAKE_MIN_GAP_SECONDS:-}" 5)"
+LAST_RUN_ONCE_END=0
+
+# 起床ファイルがあり、前回の巡回から最小間隔が空いていれば、ファイルを消して0を返す
+consume_wake() {
+  [[ "$ANNOUNCE_ONLY" -eq 0 && "$DRY_RUN" -eq 0 ]] || return 1
+  [[ -f "$WAKE_FILE" ]] || return 1
+  (( $(date +%s) - LAST_RUN_ONCE_END >= WAKE_MIN_GAP_SECONDS )) || return 1
+  local sent now_ms
+  sent="$(head -c 20 "$WAKE_FILE" 2>/dev/null || true)"
+  sent="${sent//[!0-9]/}"
+  rm -f "$WAKE_FILE" 2>/dev/null || true
+  now_ms="$(date +%s%3N)"
+  if [[ -n "$sent" ]]; then
+    echo "即時通知を受けて巡回を前倒しします（保存から $((now_ms - sent))ms）"
+  else
+    echo "即時通知を受けて巡回を前倒しします"
+  fi
+  return 0
+}
+
+# `step`秒待つ。通知を受けたら0.5秒以内に0を返し、満了またはシャットダウンなら1を返す
+sleep_or_wake() {
+  local ticks=$(( $1 * 2 )) i
+  for (( i = 0; i < ticks; i++ )); do
+    sleep 0.5 &
+    wait $! 2>/dev/null || true
+    [[ "$SHUTDOWN" -eq 0 ]] || return 1
+    consume_wake && return 0
+  done
+  return 1
+}
+
 # 重い巡回の合間の待ち。**まとめて`sleep`せず、軽い巡回を挟みながら刻む**（#2413）。
 # `sleep`を子プロセスとして待つのは、systemdからの停止（SIGTERM）で待ち時間の途中でも
 # 素直に終われるようにするため（刻んでも、刻みの途中で受けたシグナルで抜ける）。
@@ -4377,8 +4423,10 @@ wait_between_polls() {
     if [[ "$FAST_POLL_INTERVAL" -gt 0 && "$FAST_POLL_INTERVAL" -lt "$remaining" ]]; then
       step="$FAST_POLL_INTERVAL"
     fi
-    sleep "$step" &
-    wait $! 2>/dev/null || true
+    if sleep_or_wake "$step"; then
+      # 即時通知（#4200）を受けた。待ちを打ち切って、呼び出し元の重い巡回（`run_once`）を前倒しで回す
+      return 0
+    fi
     remaining=$((remaining - step))
     [[ "$SHUTDOWN" -eq 0 ]] || break
     if [[ "$FAST_POLL_INTERVAL" -gt 0 && "$ANNOUNCE_ONLY" -eq 0 ]]; then
@@ -4408,6 +4456,8 @@ fi
 # `sleep`を子プロセスとして待ち、シグナルで割り込めるようにしておく（`wait_between_polls`）。
 SHUTDOWN=0
 trap 'SHUTDOWN=1' TERM INT
+# 起動時に残っていた起床ファイルは捨てる（起動直後の`run_once`がキューを確認する）
+rm -f "$WAKE_FILE" 2>/dev/null || true
 
 if [[ "$FAST_POLL_INTERVAL" -gt 0 ]]; then
   echo "ポーリングを開始します（間隔 ${POLL_INTERVAL} 秒・枠外ジョブは ${FAST_POLL_INTERVAL} 秒・ホスト $HOST_NAME・宛先 $BASE_URL）"
@@ -4418,6 +4468,7 @@ while [[ "$SHUTDOWN" -eq 0 ]]; do
   # 1巡が失敗しても止めない。issue-deckが再起動中・ネットワークが一時的に切れた、といった
   # 理由で落ちるたびにプロセスごと終わると、復帰までポーリングが空く
   run_once || true
+  LAST_RUN_ONCE_END="$(date +%s)"
   [[ "$SHUTDOWN" -eq 0 ]] || break
   # **`run_once`の直後に置く**（#4118）。`wait_between_polls`の中でもclaimが走るため、そこに
   # 入れるとジョブを掴んだまま入れ替わる

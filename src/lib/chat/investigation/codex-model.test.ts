@@ -44,12 +44,17 @@ vi.mock("@/lib/db", () => ({
         Object.assign(row, data);
         return row;
       },
+      updateMany: async ({ where, data }: { where: { id: string }; data: Partial<RunRow> }) => {
+        const row = state.runs.get(where.id);
+        if (row) Object.assign(row, data);
+        return { count: row ? 1 : 0 };
+      },
       findUnique: async ({ where }: { where: { id: string } }) => state.runs.get(where.id) ?? null,
     },
   },
 }));
 
-import { buildCodexPrompt, createCodexCallModel, recordCodexChatUsage } from "@/lib/chat/investigation/codex-model";
+import { buildCodexPrompt, createCodexSession, findChatCodexSession, recordCodexChatUsage } from "@/lib/chat/investigation/codex-model";
 import { describeUnavailable } from "@/lib/chat/investigation/reply";
 
 const now = Date.now();
@@ -67,7 +72,7 @@ function setup(host: { chatCodexCapable: boolean | null; online?: boolean } | nu
 
 function model(modelName = "gpt-6-sol") {
   let t = 0;
-  return createCodexCallModel({
+  return createCodexSession({
     runId: "run1",
     model: modelName,
     requestedByUserId: "u1",
@@ -77,9 +82,14 @@ function model(modelName = "gpt-6-sol") {
   });
 }
 
-const input = { system: "S", messages: [{ role: "user" as const, content: "相談" }], timeoutMs: 120_000 };
+const input = {
+  system: "S",
+  messages: [{ role: "user" as const, content: "相談" }],
+  timeoutMs: 120_000,
+  runTool: async () => ({ ok: true, text: "結果" }),
+};
 
-describe("createCodexCallModel（サブPCのCodex CLIでモデルを呼ぶ。#4109）", () => {
+describe("createCodexSession（1発言1ジョブ・1回の起動で調査する。#4109・#4199）", () => {
   beforeEach(() => setup({ chatCodexCapable: true }));
 
   it("サブPCが返した最終メッセージをそのまま返す（OpenAI APIは呼ばない）", async () => {
@@ -94,9 +104,40 @@ describe("createCodexCallModel（サブPCのCodex CLIでモデルを呼ぶ。#41
     const job = [...state.jobs.values()][0];
     expect(job.kind).toBe("CHAT_TURN");
     expect(job.activeKey).toBe("chat-turn:run1");
-    expect(state.runs.get("run1")!.phase).toContain("Codexで回答中");
+    expect(state.runs.get("run1")!.phase).toContain("Codexを起動しています");
     expect(fetchSpy).not.toHaveBeenCalled();
     fetchSpy.mockRestore();
+  });
+
+  it("調査の途中のツール呼び出しは同じジョブの中で受け、ジョブもCLI起動も増やさない", async () => {
+    const calls: string[] = [];
+    let polls = 0;
+    state.onPoll = (jobId) => {
+      const job = state.jobs.get(jobId)!;
+      if (job.status === "QUEUED") {
+        job.status = "RUNNING";
+        return;
+      }
+      polls++;
+      if (polls === 1) {
+        // Codexが同じ起動の中でツールを続けて呼ぶ（受け口が`findChatCodexSession`で引く）
+        const session = findChatCodexSession(jobId)!;
+        void session.runTool("get_issue", { number: 1 }).then(() => session.runTool("read_repo_file", { path: "a.ts" }));
+      }
+      if (polls === 4) state.runs.get("run1")!.stepResult = '{"action":"final"}';
+    };
+    const result = await model()({
+      ...input,
+      runTool: async (name) => {
+        calls.push(name);
+        return { ok: true, text: "結果" };
+      },
+    });
+    expect(result.ok).toBe(true);
+    expect(calls).toEqual(["get_issue", "read_repo_file"]);
+    expect(state.jobs.size).toBe(1);
+    // 終わったら受け口から引けない（次の会話・遅れた呼び出しに結果が漏れない）
+    expect(findChatCodexSession([...state.jobs.keys()][0])).toBeNull();
   });
 
   it("サブPCがオフラインならジョブを積まずに offline で断る", async () => {
