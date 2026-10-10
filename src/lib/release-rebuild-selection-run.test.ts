@@ -9,7 +9,10 @@ const mocks = vi.hoisted(() => ({
   fetchPullRequestForRebuild: vi.fn(),
   isAncestorCommit: vi.fn(),
   releaseCallerSupportsSelection: vi.fn(),
+  recordRebuildEvent: vi.fn(async () => "ev1"),
+  fetchReleaseRebuildCandidate: vi.fn(),
 }));
+vi.mock("@/lib/release-rebuild-history-run", () => ({ recordRebuildEvent: mocks.recordRebuildEvent }));
 
 vi.mock("@/lib/db", () => ({
   db: {
@@ -26,7 +29,7 @@ vi.mock("@/lib/github/release-api", () => ({
   dispatchReleaseWorkflow: mocks.dispatchReleaseWorkflow,
   fetchPullRequestForRebuild: mocks.fetchPullRequestForRebuild,
   fetchRefCiState: vi.fn(async () => "success"),
-  fetchReleaseRebuildCandidate: vi.fn(),
+  fetchReleaseRebuildCandidate: mocks.fetchReleaseRebuildCandidate,
   isAncestorCommit: mocks.isAncestorCommit,
   releaseCallerSupportsSelection: mocks.releaseCallerSupportsSelection,
 }));
@@ -55,6 +58,7 @@ beforeEach(() => {
   mocks.findUnique.mockResolvedValue(null);
   mocks.create.mockResolvedValue({ id: "req1" });
   mocks.isAncestorCommit.mockResolvedValue(false);
+  mocks.fetchReleaseRebuildCandidate.mockResolvedValue({ pullRequests: [{ number: 20 }, { number: 21 }, { number: 22 }] });
 });
 
 const call = (selected: { number: number; expectedMergeSha?: string | null }[]) =>
@@ -74,6 +78,16 @@ describe("requestSelectiveRebuild", () => {
     const selection = JSON.parse(mocks.dispatchReleaseWorkflow.mock.calls[0][5]);
     expect(selection).toEqual({ origin: { pr: 99, headSha: ORIGIN }, prs: [{ number: 20, mergeSha: A }, { number: 22, mergeSha: C }] });
     expect(mocks.create.mock.calls[0][0].data.activeKey).toBe(`o/r#99@${ORIGIN}`);
+    // 操作履歴: 操作者・契機・選んだPR（適用コミット付き）・含めないPRを残す
+    expect(mocks.recordRebuildEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: "rebuild_started",
+        actor: { kind: "user", userId: "u1" },
+        trigger: "manual",
+        dedupeKey: `start:o/r#99@${ORIGIN}:req1`,
+        payload: expect.objectContaining({ excludedPrs: [21], selectedPrs: [expect.objectContaining({ number: 20, mergeSha: A }), expect.objectContaining({ number: 22, mergeSha: C })] }),
+      }),
+    );
   });
 
   it("未マージ・取り込み済みのPRがあれば理由を返して起動しない（選択を広げない・省かない）", async () => {
@@ -114,5 +128,6 @@ describe("requestSelectiveRebuild", () => {
 
     expect(await call([{ number: 20 }])).toEqual({ ok: false, error: "dispatch_failed" });
     expect(mocks.update).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ status: "failed", activeKey: null }) }));
+    expect(mocks.recordRebuildEvent).toHaveBeenCalledWith(expect.objectContaining({ kind: "rebuild_failed", trigger: "manual" }));
   });
 });

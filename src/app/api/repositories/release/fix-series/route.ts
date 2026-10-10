@@ -81,7 +81,7 @@ async function handlePOST(request: NextRequest) {
     const owned = await db.releaseFixSeries.findFirst({ where: { id: seriesId, repositoryFullName: `${owner}/${repo}` } });
     if (!owned) return NextResponse.json({ error: "not_found" }, { status: 404 });
     try {
-      const result = await acceptReleaseFixExtraPullRequests(seriesId);
+      const result = await acceptReleaseFixExtraPullRequests(seriesId, userId);
       if (!result.ok) return NextResponse.json({ error: result.error }, { status: result.error === "not_found" ? 404 : 409 });
       return NextResponse.json({ ok: true });
     } catch (error) {

@@ -62,6 +62,7 @@ import {
   useIosDistributionState,
 } from "@/components/dashboard/ios-distribution-icon";
 import { ReleasePreparationAlert } from "@/components/dashboard/release-preparation-alert";
+import { ReleaseRebuildHistoryPanel } from "@/components/dashboard/release-rebuild-history-panel";
 import { ReleaseRebuildButton } from "@/components/dashboard/release-rebuild-button";
 import { getWebviewIosRepository } from "@/lib/webview-ios-repos";
 import { ResizeHandle } from "@/components/dashboard/resize-handle";
@@ -1411,6 +1412,11 @@ function ReleaseFlowGraph({
           onResumed={onReleaseTriggered}
           className="mb-2"
         />
+      )}
+
+      {/* 作り直しの履歴（#4359）。後継候補が出るまでの元候補・承認範囲・含めないPRをここで読める */}
+      {!repository.deviceBuild && (
+        <ReleaseRebuildHistoryPanel repositoryFullName={repository.repositoryFullName} className="mb-2" />
       )}
 
       {repository.deviceBuild && <DeviceBuildInstalledBand deviceBuild={repository.deviceBuild} />}

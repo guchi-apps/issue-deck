@@ -903,3 +903,17 @@ main起点の`deploy-recovery/*`ブランチへ取り込む。**`merges`APIは�
 - 本文は`GET /api/repositories/release/changes`が取る。`base=develop`のclosed PR一覧（1回・ETag）から引き、足りない
   PRだけ`fetchPullRequest`で補う（上限20件）。取れなかったPRは**「記録なし」ではなく「取得不可」**として出す
 - バージョンバンプPRはレビューの対象ではないので判定を出さず、内訳の分母にも入れない（`tallyChangeReviews`を再利用）
+
+## リリース候補の作り直しの操作履歴を残す（#4359）
+
+「自動で作り直しました」というコメントだけでは、手動の追加承認があったのか、関連修正だけで自動に進んだのかが分からなかった（#4345）。
+作り直しの操作ごとに追記専用の記録`ReleaseRebuildEvent`を残し、ブランチ画面・スマホのリリースシートの
+「リリース候補の作り直しの履歴」（`ReleaseRebuildHistoryPanel`）が読む。**取得はDBだけ**でGitHub APIは叩かない。
+
+- **種別**: `approval`（手動の追加承認）・`decision_waiting`（判断待ち）・`rebuild_started`・`rebuild_failed`・`successor_created`・`stopped`・`superseded`（元候補の取消・置換）
+- **契機（`trigger`）**: `manual`・`resume`・`fix_series_related`（関連修正のみの自動）・`fix_series_after_approval`（手動承認を根拠にした自動。承認イベントのidを`payload.approvalEventId`へ持つ）・`sweep`・`workflow`
+- **承認範囲は承認時点のものを保持する。** 承認できるのは判断待ちにした時点で示したPR（`decision_waiting`の`pendingPrs`）と修正PRだけで、承認の操作までに入ったPRは承認済みにならない。判断待ちの範囲を記録していない既存の待ちは、承認時点の候補全体を範囲にし、その旨を理由に残す
+- **重複は`dedupeKey`のユニーク制約で1件に絞る**（二重クリック・巡回の重なり・再起動後の再実行）。承認は`status: awaiting_decision`の条件付き更新で、同時の承認・巡回に負けた側は何も書き換えない
+- **記録が無い履歴は「操作経路不明」と出す。** 後継候補だけが残る既存の修正系列は、画面側で合成して補い、承認や操作者を推測しない
+- 後継候補は、修正系列の巡回と、リリース準備の完了報告（`notify-prepared`）で観測して記録する
+- 記録の失敗は本処理を止めない。理由は機密除去してから保存する
