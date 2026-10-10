@@ -479,6 +479,39 @@ export type PullRequestFileDiffResponse = {
   patch: string | null;
 };
 
+/**
+ * 本番マージ確認ダイアログの5チェック（#4305）で、PRごとに追加取得する個別PRのCIの記録。
+ * `none`は取得できたがチェックが1件も無い、`unavailable`は取得に失敗した（成功とは扱わない）
+ */
+export type ReleaseChangeCiCheck = {
+  state: "success" | "pending" | "failure" | "none" | "unavailable";
+};
+
+/**
+ * 計画レビューの記録。**関連Issueの計画コメントから決める**（`resolvePlanCheck`）。
+ * - `not-applicable` … 対応Issueが特定できない（`issue-<番号>`ブランチではない）
+ * - `no-plan` … 計画の記録が無い（`21.plan-required`でなかった等）
+ * - `unreviewed` … 計画はあるがレビューが届いていない
+ * - `reviewed` … レビューが届き、実装側が応答済み（補足だけの指摘も含む）
+ * - `findings` … 重大な指摘が未応答
+ * - `skipped` / `limit` / `unresolved` … 省略・打ち止め・未解消の記録
+ * - `unavailable` … 取得に失敗した
+ */
+export type ReleaseChangePlanCheck = {
+  state:
+    | "not-applicable"
+    | "no-plan"
+    | "unreviewed"
+    | "reviewed"
+    | "findings"
+    | "skipped"
+    | "limit"
+    | "unresolved"
+    | "unavailable";
+  /** 理由・指摘の要点（1行）。無ければnull */
+  reason: string | null;
+};
+
 /** 起動確認ダイアログの「今回反映する内容」の1行（PR単位。#4201） */
 export type ReleaseChangePullRequest = {
   number: number;
@@ -496,6 +529,11 @@ export type ReleaseChangePullRequest = {
   prHeadSha: string | null;
   /** 本文を取得できなかった。**「記録なし」（`review: null`）とは別物**で、画面は取得不可と出す */
   reviewUnavailable: boolean;
+  /**
+   * 5チェック用の追加取得（#4305）。`include=merge-checks`を指定した呼び出し（本番マージ確認
+   * ダイアログ）だけに付く。無ければ未取得で、他の画面の応答・コストは変わらない
+   */
+  mergeChecks?: { ci: ReleaseChangeCiCheck; plan: ReleaseChangePlanCheck };
 };
 
 /** PR番号を特定できなかったコミット */

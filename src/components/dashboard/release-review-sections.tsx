@@ -41,7 +41,17 @@ import type { ReleaseChangeListResponse } from "@/types/pull-request";
  * 作り直すとSHAが変わるので、新しいSHAで統合検証・全体レビューをやり直す。
  */
 
-type Tone = "ok" | "warn" | "bad" | "run" | "muted";
+/**
+ * 個別PRレビューの一覧を差し替える描画関数が受け取る、リリース共通の検証の状態（#4305）。
+ * 各PR行の「全体〔共通〕」に、全体レビュー区分と同じ判定を渡すために使う
+ */
+export type IndividualListContext = {
+  verification: ReleaseVerificationSummary | null;
+  verificationError: string | null;
+  nowMs: number;
+};
+
+export type Tone = "ok" | "warn" | "bad" | "run" | "muted";
 
 const TONE_CLASS: Record<Tone, string> = {
   ok: "bg-green-50 text-green-700 dark:bg-green-950/40 dark:text-green-400",
@@ -189,7 +199,7 @@ function ProgressSteps({
   );
 }
 
-type SectionHead = {
+export type SectionHead = {
   tone: Tone;
   mark: string;
   label: string;
@@ -208,7 +218,7 @@ type SectionHead = {
  * 統合検証・全体レビューの区分の「閉じた1行」を、記録の状態と進捗から決める。
  * **記録が待機・実行中でないときは進捗で状態を上書きしない**（結果が正）。
  */
-function describeSection(section: ReleaseVerificationSection, nowMs: number): SectionHead {
+export function describeSection(section: ReleaseVerificationSection, nowMs: number): SectionHead {
   const progress = section.progress;
   const view = progress ? viewReleaseProgress(progress, nowMs) : null;
   const base = { meta: [] as string[], reason: section.reason, reasonTone: "muted" as Tone, steps: null, ticking: false };
@@ -742,11 +752,13 @@ function IndividualReviewSection({
   changes,
   repositoryFullName,
   renderList,
+  context,
   onOpenPullRequest,
 }: {
   changes: UseReleaseChangesResult;
   repositoryFullName: string;
-  renderList?: (data: ReleaseChangeListResponse) => ReactNode;
+  renderList?: (data: ReleaseChangeListResponse, context: IndividualListContext) => ReactNode;
+  context: IndividualListContext;
   onOpenPullRequest?: (pullRequestNumber: number) => void;
 }) {
   const { data, isLoading, error } = changes;
@@ -827,7 +839,7 @@ function IndividualReviewSection({
       reasonTone={tally.changesRequested > 0 ? "bad" : "warn"}
     >
       {renderList ? (
-        renderList(data)
+        renderList(data, context)
       ) : (
         <IndividualList data={data} repositoryFullName={repositoryFullName} onOpenPullRequest={onOpenPullRequest} />
       )}
@@ -864,7 +876,7 @@ export function ReleaseReviewSections({
   changes: UseReleaseChangesResult;
   onReload?: () => void;
   /** 個別PRレビューを開いたときの一覧を差し替える（確認ダイアログは既存の変更一覧を入れる） */
-  renderIndividualList?: (data: ReleaseChangeListResponse) => ReactNode;
+  renderIndividualList?: (data: ReleaseChangeListResponse, context: IndividualListContext) => ReactNode;
   onOpenPullRequest?: (pullRequestNumber: number) => void;
   /** 3区分の後に同じ枠で並べる行（確認ダイアログのCI・コンフリクト） */
   extraRows?: ReactNode;
@@ -957,6 +969,7 @@ export function ReleaseReviewSections({
         changes={changes}
         repositoryFullName={repositoryFullName}
         renderList={renderIndividualList}
+        context={{ verification, verificationError: verificationError ?? null, nowMs }}
         onOpenPullRequest={onOpenPullRequest}
       />
       {extraRows}
@@ -999,21 +1012,30 @@ export function ConnectedReleaseReviewSections({
   renderIndividualList,
   onOpenPullRequest,
   extraRows,
+  includeMergeChecks = false,
   className,
 }: {
   repositoryFullName: string;
   pullRequestNumber: number;
   headRef: string;
   enabled?: boolean;
-  renderIndividualList?: (data: ReleaseChangeListResponse) => ReactNode;
+  renderIndividualList?: (data: ReleaseChangeListResponse, context: IndividualListContext) => ReactNode;
   onOpenPullRequest?: (pullRequestNumber: number) => void;
   extraRows?: ReactNode;
+  /** PRごとのCI・計画レビューも取る（本番マージ確認ダイアログの5チェック。#4305） */
+  includeMergeChecks?: boolean;
   className?: string;
 }) {
   const [reloadToken, setReloadToken] = useState(0);
   const target = enabled && headRef.startsWith(RELEASE_BRANCH_PREFIX);
   const { verification, error } = useReleaseVerification(repositoryFullName, pullRequestNumber, target, reloadToken);
-  const changes = useReleaseChanges(repositoryFullName, target, pullRequestNumber, reloadToken);
+  const changes = useReleaseChanges(
+    repositoryFullName,
+    target,
+    pullRequestNumber,
+    reloadToken,
+    includeMergeChecks,
+  );
   const { openPullRequest } = useReferenceNavigation();
   return (
     <ReleaseReviewSections

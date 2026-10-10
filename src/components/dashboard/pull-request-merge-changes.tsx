@@ -1,14 +1,21 @@
 "use client";
 
+import type { ReactNode } from "react";
 import { ChevronRight, ExternalLink } from "lucide-react";
 
+import { PullRequestMergeChecks } from "@/components/dashboard/pull-request-merge-checks";
 import { REVIEW_MARK, REVIEW_TONE } from "@/components/dashboard/review-verdict";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { UsePullRequestChangesResult } from "@/hooks/use-pull-request-changes";
 import type { ReviewVerdictKind } from "@/lib/github/release-verification";
+import { buildMergeChecks, type MergeChecksInput } from "@/lib/pull-request-merge-checks";
 import { pullRequestChangeIssueLabel, pullRequestChangeLabel } from "@/lib/pull-request-changes";
 import { cn } from "@/lib/utils";
-import type { PullRequestChange, PullRequestSummary } from "@/types/pull-request";
+import type {
+  PullRequestChange,
+  PullRequestSummary,
+  ReleaseChangePullRequest,
+} from "@/types/pull-request";
 
 /** 指摘の判定だけは、丸に加えて短い文言も出して優先して読めるようにする */
 const FINDING_LABEL: Partial<Record<ReviewVerdictKind, string>> = {
@@ -61,16 +68,27 @@ type PullRequestMergeChangesProps = {
   reviewKinds?: ReadonlyMap<string, ReviewVerdictKind>;
   /** 行を押したときにPR詳細を開く（#3592）。PR番号が取れない行は押せない */
   onOpenPullRequest?: (pullRequestNumber: number) => void;
+  /**
+   * 凍結リリースPRの一覧で5チェック（CI・計画・コード・全体〔共通〕・競合。#4305）を各行に出すための材料。
+   * あれば旧来のコードレビューの丸とピルは出さない（コードのチェックが引き継ぐ）
+   */
+  mergeChecks?: {
+    byNumber: ReadonlyMap<number, ReleaseChangePullRequest>;
+    shared: Omit<MergeChecksInput, "pullRequest">;
+    onOpenOverall: () => void;
+  };
 };
 
 function ChangeRow({
   change,
   reviewKind,
   onOpen,
+  checks,
 }: {
   change: PullRequestChange;
   reviewKind: ReviewVerdictKind | undefined;
   onOpen: (() => void) | null;
+  checks: ReactNode;
 }) {
   const label = pullRequestChangeLabel(change);
   const issueLabel = pullRequestChangeIssueLabel(change);
@@ -101,13 +119,13 @@ function ChangeRow({
           {issueLabel}
         </span>
       )}
-      {reviewKind && reviewLabel && <ReviewStatusDot kind={reviewKind} label={reviewLabel} />}
-      {reviewKind === "unknown" && (
+      {!checks && reviewKind && reviewLabel && <ReviewStatusDot kind={reviewKind} label={reviewLabel} />}
+      {!checks && reviewKind === "unknown" && (
         <span className="shrink-0 rounded-full bg-muted px-2 text-[10.5px] leading-5 font-bold whitespace-nowrap text-muted-foreground">
           <span aria-hidden="true">{REVIEW_MARK.unknown}</span> 未確認
         </span>
       )}
-      {reviewKind && findingLabel && (
+      {!checks && reviewKind && findingLabel && (
         <span
           className={cn(
             "shrink-0 rounded-full bg-muted px-2 text-[10.5px] leading-5 font-bold whitespace-nowrap",
@@ -134,6 +152,7 @@ function ChangeRow({
       ) : (
         <div className="flex items-center gap-2 px-3 py-1.5">{body}</div>
       )}
+      {checks}
     </li>
   );
 }
@@ -163,6 +182,7 @@ export function PullRequestMergeChanges({
   state,
   reviewKinds,
   onOpenPullRequest,
+  mergeChecks,
 }: PullRequestMergeChangesProps) {
   const { changes: allChanges, commitCount, truncated, isLoading, error } = state;
   const changes = allChanges === null ? null : withoutVersionBumps(allChanges);
@@ -201,12 +221,36 @@ export function PullRequestMergeChanges({
       )}
 
       {changes !== null && changes.length > 0 && (
-        <ul className="max-h-[min(13.5rem,40vh)] overflow-y-auto">
+        <ul className={mergeChecks ? "max-h-[min(30rem,60vh)] overflow-y-auto" : "max-h-[min(13.5rem,40vh)] overflow-y-auto"}>
           {changes.map((change) => (
             <ChangeRow
               key={change.id}
               change={change}
               reviewKind={reviewKinds?.get(change.id)}
+              checks={
+                mergeChecks ? (
+                  <PullRequestMergeChecks
+                    checks={buildMergeChecks({
+                      ...mergeChecks.shared,
+                      pullRequest:
+                        change.pullRequestNumber !== null
+                          ? (mergeChecks.byNumber.get(change.pullRequestNumber) ?? null)
+                          : null,
+                    })}
+                    issueUrl={
+                      change.issueNumber !== null
+                        ? `https://github.com/${pullRequest.repositoryFullName}/issues/${change.issueNumber}`
+                        : null
+                    }
+                    onOpenPullRequest={
+                      onOpenPullRequest && change.pullRequestNumber !== null
+                        ? () => onOpenPullRequest(change.pullRequestNumber as number)
+                        : null
+                    }
+                    onOpenOverall={mergeChecks.onOpenOverall}
+                  />
+                ) : null
+              }
               onOpen={
                 onOpenPullRequest && change.pullRequestNumber !== null
                   ? () => onOpenPullRequest(change.pullRequestNumber as number)

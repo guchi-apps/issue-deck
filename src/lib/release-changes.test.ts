@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 
-import { tallyReleaseReviews, toReleaseChanges, withReleaseReviews } from "@/lib/release-changes";
+import {
+  tallyReleaseReviews,
+  toReleaseChangeCi,
+  toReleaseChanges,
+  withMergeChecks,
+  withReleaseReviews,
+} from "@/lib/release-changes";
 
 function merge(sha: string, n: number, branch: string, title: string) {
   return { sha, message: `Merge pull request #${n} from guchi-apps/${branch}\n\n${title}` };
@@ -70,5 +76,32 @@ describe("withReleaseReviews / tallyReleaseReviews", () => {
     expect(by.get(12)).toMatchObject({ review: null, reviewUnavailable: true });
     const tally = tallyReleaseReviews(result);
     expect(tally).toMatchObject({ total: 2, ok: 1, unknown: 1, unavailable: 1 });
+  });
+});
+
+describe("withMergeChecks（#4305）", () => {
+  const base = (number: number, issueNumber: number | null, isVersionBump = false) =>
+    ({ number, title: "t", issueNumber, isVersionBump, review: null, prHeadSha: null, reviewUnavailable: false }) as never;
+
+  it("取れなかったCI・計画は取得不可にし、Issue無しは対象外、バンプは触らない", () => {
+    const result = withMergeChecks(
+      [base(1, 10), base(2, null), base(3, 11, true)],
+      new Map([[1, { state: "success" as const }]]),
+      new Map(),
+    );
+    expect(result[0].mergeChecks).toEqual({
+      ci: { state: "success" },
+      plan: { state: "unavailable", reason: "計画の記録を取得できませんでした" },
+    });
+    expect(result[1].mergeChecks?.ci.state).toBe("unavailable");
+    expect(result[1].mergeChecks?.plan.state).toBe("not-applicable");
+    expect(result[2].mergeChecks).toBeUndefined();
+  });
+
+  it("チェック集約の状態をCIの記録へ写す", () => {
+    expect(toReleaseChangeCi("success").state).toBe("success");
+    expect(toReleaseChangeCi("expected").state).toBe("pending");
+    expect(toReleaseChangeCi("error").state).toBe("failure");
+    expect(toReleaseChangeCi(null).state).toBe("none");
   });
 });
