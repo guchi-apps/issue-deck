@@ -964,6 +964,12 @@ jobs:
             # mainへ出ていないバンプを新しい順に全部取り消す（#4335。求め方は状態判定ステップ）。
             # 旧い出力（空）のときは従来どおり直前の1回だけを戻す
             for BUMP_SHA in ${REBUILD_REVERTS:-$REBUILD_FROM}; do
+            # 暫定復旧: 公開済みの版まで戻ったら、それ以前のバンプは取り消さない。
+            # 凍結候補とdevelopのマージSHAが異なる場合も既存のmain整合検査は維持する。
+            if [ "$(jq -r "$VERSION_QUERY" "$VERSION_FILE")" = "$MAIN_VERSION" ]; then
+              echo "公開済みの版 v$MAIN_VERSION に達したため、バンプの取り消しを終了します"
+              break
+            fi
               REVERT_MAINLINE=()
               if git rev-parse --verify --quiet "${BUMP_SHA}^2" >/dev/null; then
                 REVERT_MAINLINE=(-m 1)
