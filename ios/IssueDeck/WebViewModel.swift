@@ -8,6 +8,9 @@ import WebKit
 final class WebViewModel: NSObject, ObservableObject {
     @Published private(set) var failure: LoadFailure?
     @Published private(set) var isRetrying = false
+    /// 共有メニューから受け取った素材の取り込み状況（#3847）
+    @Published private(set) var shareImport: ShareImportState = .idle
+    private var isImportingShare = false
 
     let webView: WKWebView
 
@@ -56,6 +59,32 @@ final class WebViewModel: NSObject, ObservableObject {
     func retry() {
         isRetrying = true
         load(lastRequestedURL ?? AppConfig.baseURL)
+    }
+
+    /// 共有メニューの下書きを取り込む。前面に出たとき・ページを読み終えたとき・ログイン後に呼ぶ。
+    /// 同時に2つは走らせない（同じ素材を二重にアップロードしない）
+    func importSharedDrafts() {
+        guard !isImportingShare else { return }
+        isImportingShare = true
+        Task { @MainActor in
+            defer { isImportingShare = false }
+            let importer = ShareImporter(webView: webView)
+            if !ShareDraftStore.list().isEmpty { shareImport = .importing }
+            switch await importer.run(openPath: { [weak self] in self?.loadAppPath($0) }) {
+            case .imported, .nothingToDo:
+                shareImport = .idle
+            case .waitingForLogin(let count):
+                shareImport = .waitingForLogin(count: count)
+            case .failed(let message):
+                shareImport = .failed(message: message)
+            }
+        }
+    }
+
+    /// 取り込めない素材を利用者が破棄する
+    func discardSharedDrafts() {
+        ShareDraftStore.list().forEach(ShareDraftStore.delete)
+        shareImport = .idle
     }
 
     private func load(_ url: URL) {
@@ -236,6 +265,8 @@ extension WebViewModel: WKNavigationDelegate {
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         isRetrying = false
         failure = nil
+        // ログイン後の画面を読み終えたとき、待っていた共有の素材を取り込む
+        importSharedDrafts()
     }
 
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {

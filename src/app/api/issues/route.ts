@@ -4,6 +4,12 @@ import { getCurrentUser, requireUserId } from "@/lib/auth-user";
 import { db } from "@/lib/db";
 import { withGithubApiFeature } from "@/lib/github/api-usage";
 import { isCloseReasonLabelName } from "@/lib/github/issue-close";
+import {
+  completeIssueCreate,
+  parseIdempotencyKey,
+  releaseIssueCreate,
+  reserveIssueCreate,
+} from "@/lib/issues/create-idempotency";
 import { createIssueForUser } from "@/lib/github/issue-create-service";
 import {
   addIssueLabels,
@@ -88,18 +94,41 @@ async function handlePOST(request: NextRequest) {
     return NextResponse.json({ error: "not_found" }, { status: 404 });
   }
 
-  const result = await createIssueForUser(user, repository, {
-    repositoryFullName,
-    title,
-    body: typeof payload.body === "string" ? payload.body : undefined,
-    labels: Array.isArray(payload.labels)
-      ? payload.labels.filter((l: unknown) => typeof l === "string")
-      : undefined,
-    assignee: typeof payload.assignee === "string" && payload.assignee ? payload.assignee : undefined,
-  });
+  // 冪等キー（任意。#3847）。付いていれば作成の前に予約し、再送で二重に作らない
+  const idempotencyKey = parseIdempotencyKey(payload.idempotencyKey);
+  if (payload.idempotencyKey !== undefined && !idempotencyKey) {
+    return NextResponse.json({ error: "invalid_request" }, { status: 400 });
+  }
+  if (idempotencyKey) {
+    const reservation = await reserveIssueCreate(user.id, idempotencyKey);
+    if (reservation.kind === "done") return NextResponse.json({ issue: reservation.result });
+    if (reservation.kind === "in_progress") {
+      return NextResponse.json({ error: "create_in_progress" }, { status: 409 });
+    }
+  }
+
+  let result: Awaited<ReturnType<typeof createIssueForUser>>;
+  try {
+    result = await createIssueForUser(user, repository, {
+      repositoryFullName,
+      title,
+      body: typeof payload.body === "string" ? payload.body : undefined,
+      labels: Array.isArray(payload.labels)
+        ? payload.labels.filter((l: unknown) => typeof l === "string")
+        : undefined,
+      assignee: typeof payload.assignee === "string" && payload.assignee ? payload.assignee : undefined,
+    });
+  } catch (error) {
+    // 例外は結果不明（GitHubへ届いたか分からない）ため、予約は残して「確認中」にする
+    console.error("[POST /api/issues] 作成の結果が不明です", error);
+    throw error;
+  }
   if ("errorResponse" in result) {
+    // 確実に失敗した（作成されていない）ので、同じキーで再試行できるよう予約を外す
+    if (idempotencyKey) await releaseIssueCreate(user.id, idempotencyKey).catch(() => undefined);
     return result.errorResponse;
   }
+  if (idempotencyKey) await completeIssueCreate(user.id, idempotencyKey, result.value).catch(() => undefined);
   return NextResponse.json({ issue: result.value });
 }
 

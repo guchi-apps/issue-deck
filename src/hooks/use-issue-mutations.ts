@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 import { GITHUB_REAUTH_REQUIRED_MESSAGE } from "@/lib/github/reauth-message";
 import type { Issue } from "@/types/issue";
@@ -41,6 +41,9 @@ export type TransferIssueInput = {
 };
 
 function errorMessageForResponse(status: number, data: { error?: string; message?: string }): string {
+  if (data.error === "create_in_progress") {
+    return "作成の結果を確認中です。同じ内容を二重に作らないよう、少し待ってから、一覧に作成されていないことを確かめて再度お試しください";
+  }
   if (data.error === "github_reauth_required") {
     return GITHUB_REAUTH_REQUIRED_MESSAGE;
   }
@@ -63,15 +66,33 @@ async function postJson(url: string, method: "POST" | "PATCH", input: unknown): 
   return data.issue;
 }
 
+function newIdempotencyKey(): string {
+  return crypto.randomUUID().replace(/-/g, "");
+}
+
 export function useIssueMutations() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /**
+   * 作成の冪等キー（#3847）。**成功するまで同じ内容の再送には同じキーを使う**ので、連打や
+   * 応答不明からの再試行でサーバーが同じIssueを二重に作らない。内容が変わったら別の作成として新しいキー。
+   */
+  const createAttemptRef = useRef<{ fingerprint: string; key: string } | null>(null);
 
   async function createIssue(input: CreateIssueInput): Promise<Issue | null> {
     setIsSubmitting(true);
     setError(null);
     try {
-      return await postJson("/api/issues", "POST", input);
+      const fingerprint = JSON.stringify(input);
+      if (createAttemptRef.current?.fingerprint !== fingerprint) {
+        createAttemptRef.current = { fingerprint, key: newIdempotencyKey() };
+      }
+      const issue = await postJson("/api/issues", "POST", {
+        ...input,
+        idempotencyKey: createAttemptRef.current.key,
+      });
+      createAttemptRef.current = null;
+      return issue;
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
       return null;

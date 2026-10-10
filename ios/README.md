@@ -10,7 +10,8 @@
 | 署名 | Automatic（Apple Developer Program のチーム `6AA3WFTR94`。kurashio・YoteiFlow・morrow と同じチーム） |
 | 対応 | iPhone・縦向き・iOS 18以上 |
 | 認証シートの戻り先 | `issuedeck://auth-callback` |
-| Associated Domains / Push / App Group | 使わない（初版スコープ外） |
+| 共有メニュー（Share Extension） | `ios/ShareExtension/`。Bundle ID `com.gucchii.issuedeck.ShareExtension`。App Group `group.com.gucchii.issuedeck`（下書きの受け渡し。方式は [docs/ios-app.md](../docs/ios-app.md)「共有メニューからの起案」） |
+| Associated Domains / Push | 使わない（初版スコープ外） |
 
 ## 更新が要る場所
 
