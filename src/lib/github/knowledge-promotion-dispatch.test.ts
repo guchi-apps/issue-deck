@@ -18,6 +18,12 @@ vi.mock("@/lib/github/app-auth", () => ({
     return getInstallationToken;
   },
 }));
+const checkPromotionCandidates = vi.fn();
+vi.mock("@/lib/github/knowledge-promotion-candidates", () => ({
+  get checkPromotionCandidates() {
+    return checkPromotionCandidates;
+  },
+}));
 vi.mock("@/lib/github/workflow-dispatch", () => ({
   get dispatchWorkflow() {
     return dispatchWorkflow;
@@ -59,6 +65,8 @@ describe("dispatchKnowledgePromotion", () => {
     });
     getInstallationToken.mockReset().mockResolvedValue("tok");
     dispatchWorkflow.mockReset().mockResolvedValue(undefined);
+    checkPromotionCandidates.mockReset().mockResolvedValue({ kind: "candidates", count: 1, issues: ["a/b#1"] });
+    vi.spyOn(console, "info").mockImplementation(() => {});
     vi.spyOn(console, "error").mockImplementation(() => {});
     vi.spyOn(console, "warn").mockImplementation(() => {});
   });
@@ -84,5 +92,19 @@ describe("dispatchKnowledgePromotion", () => {
     findFirst.mockResolvedValue(null);
     expect(await dispatchKnowledgePromotion()).toBe("failed");
     expect(dispatchWorkflow).not.toHaveBeenCalled();
+  });
+
+  it("候補が無ければ起動せず、間引きの時刻も進めない", async () => {
+    checkPromotionCandidates.mockResolvedValueOnce({ kind: "none", reason: "judged_only", inspected: 3 });
+    expect(await dispatchKnowledgePromotion(new Date("2026-10-03T00:00:00Z"))).toBe("skipped");
+    expect(dispatchWorkflow).not.toHaveBeenCalled();
+    // 直後に候補が付けば、間引きに掛からず起動できる
+    expect(await dispatchKnowledgePromotion(new Date("2026-10-03T00:01:00Z"))).toBe("dispatched");
+  });
+
+  it("確認に失敗したときは候補なしと区別して記録し、起動する", async () => {
+    checkPromotionCandidates.mockResolvedValueOnce({ kind: "failed", message: "boom" });
+    expect(await dispatchKnowledgePromotion()).toBe("dispatched");
+    expect(console.error).toHaveBeenCalledWith(expect.stringContaining("候補の確認に失敗"));
   });
 });
