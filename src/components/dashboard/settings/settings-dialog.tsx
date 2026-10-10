@@ -16,6 +16,7 @@ import { FleetOpsSection } from "@/components/dashboard/settings/fleet-ops-secti
 import { ImagesSection } from "@/components/dashboard/settings/images-section";
 import { KnowledgeSection } from "@/components/dashboard/settings/knowledge-section";
 import { NotificationSettingsSection } from "@/components/dashboard/settings/notification-settings-section";
+import { CheckUserToastSection } from "@/components/dashboard/settings/check-user-toast-section";
 import { PostCreateDestinationSection } from "@/components/dashboard/settings/post-create-destination-section";
 import { RepositoryVisibilitySection } from "@/components/dashboard/settings/repository-visibility-section";
 import {
@@ -224,6 +225,7 @@ export function SettingsDialog({
               {section === "display" && (
                 <div className="flex flex-col gap-5">
                   <PostCreateDestinationSection />
+                  <CheckUserToastSection />
                 </div>
               )}
               {section === "notification" && <NotificationSettingsSection />}
