@@ -45,6 +45,8 @@ final class WebViewModel: NSObject, ObservableObject {
 
         // ネイティブ通知（#4250）。トークンが届いたら登録し、通知のタップは該当画面を開く
         PushCenter.shared.onDeviceToken = { [weak self] in self?.registerPushToken() }
+        webView.configuration.userContentController.addScriptMessageHandler(
+            self, contentWorld: .page, name: "issueDeckPush")
         PushCenter.shared.onOpenPath = { [weak self] in self?.loadAppPath($0) }
     }
 
@@ -89,25 +91,44 @@ final class WebViewModel: NSObject, ObservableObject {
         }
     }
 
-    /// 端末トークンをサーバーへ登録する。ログインCookieはWebViewの中にしか無いので、
-    /// WebViewの中から`fetch`する。未ログイン（401）なら登録せず、次にページを読み終えたとき再試行する。
-    /// 同じトークンの再登録は上書きなので、毎回呼んでよい
+    /// 端末トークンの登録状態をサーバーへ合わせる。ログインCookieはWebViewの中にしか無いので、
+    /// WebViewの中から`fetch`する。未ログイン（401）なら何も起きず、次にページを読み終えたとき再試行する。
+    /// **受信オフの間は登録せず、サーバーに残っている登録の解除を再試行する**（#4275）。
+    /// 同じトークンの再登録・再解除は冪等なので、毎回呼んでよい
     func registerPushToken() {
-        guard let token = PushCenter.shared.deviceToken, failure == nil else { return }
+        guard failure == nil else { return }
         Task { @MainActor in
-            _ = try? await webView.callAsyncJavaScript(
-                """
-                await fetch('/api/notifications/apns', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  credentials: 'same-origin',
-                  body: JSON.stringify({ deviceToken: token })
-                });
-                """,
-                arguments: ["token": token],
-                contentWorld: .page
-            )
+            if PushCenter.shared.isReceivingEnabled {
+                guard let token = PushCenter.shared.deviceToken else { return }
+                _ = await sendPushRegistration(method: "POST", token: token)
+            } else if let token = PushCenter.shared.knownToken {
+                _ = await sendPushRegistration(method: "DELETE", token: token)
+            }
         }
+    }
+
+    /// `/api/notifications/apns`へ登録（POST）・解除（DELETE）を送り、HTTPステータスを返す。送れなければnil
+    @MainActor
+    fileprivate func sendPushRegistration(method: String, token: String) async -> Int? {
+        let value = try? await webView.callAsyncJavaScript(
+            """
+            const response = await fetch('/api/notifications/apns', {
+              method: method,
+              headers: { 'Content-Type': 'application/json' },
+              credentials: 'same-origin',
+              body: JSON.stringify({ deviceToken: token })
+            });
+            return response.status;
+            """,
+            arguments: ["token": token, "method": method],
+            contentWorld: .page
+        )
+        return value as? Int
+    }
+
+    /// 設定画面へ「状態を取り直して」と伝える（前面への復帰・設定アプリから戻ったとき）
+    func notifyPushStateChanged() {
+        webView.evaluateJavaScript("window.dispatchEvent(new Event('issue-deck:native-push-refresh'))")
     }
 
     /// 取り込めない素材を利用者が破棄する
@@ -377,4 +398,69 @@ struct WebViewContainer: UIViewRepresentable {
     func makeUIView(context: Context) -> WKWebView { webView }
 
     func updateUIView(_ webView: WKWebView, context: Context) {}
+}
+
+// MARK: - 設定画面の通知欄との橋渡し（#4275）
+
+extension WebViewModel: WKScriptMessageHandlerWithReply {
+    /// 設定 > 通知から呼ばれる。アプリ自身のページ（メインフレーム）以外からのメッセージは受け付けない
+    func userContentController(
+        _ userContentController: WKUserContentController,
+        didReceive message: WKScriptMessage,
+        replyHandler: @escaping (Any?, String?) -> Void
+    ) {
+        guard
+            message.frameInfo.isMainFrame,
+            let url = message.frameInfo.request.url, AppConfig.isAppURL(url),
+            let body = message.body as? [String: Any],
+            let action = body["action"] as? String
+        else {
+            replyHandler(nil, "unsupported")
+            return
+        }
+        let reply = ReplyBox(replyHandler)
+        Task { @MainActor in
+            switch action {
+            case "status":
+                reply.send(await self.pushStatus())
+            case "enable":
+                await PushCenter.shared.enable()
+                var ok = false
+                if let token = PushCenter.shared.deviceToken {
+                    ok = (await self.sendPushRegistration(method: "POST", token: token)).map { (200..<300).contains($0) } ?? false
+                }
+                reply.send(await self.pushStatus(serverOk: ok))
+            case "disable":
+                PushCenter.shared.disable()
+                var ok = true
+                if let token = PushCenter.shared.knownToken {
+                    ok = (await self.sendPushRegistration(method: "DELETE", token: token)).map { (200..<300).contains($0) } ?? false
+                }
+                reply.send(await self.pushStatus(serverOk: ok))
+            case "openSettings":
+                if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) }
+                reply.send(nil)
+            default:
+                reply.fail("unsupported")
+            }
+        }
+    }
+
+    @MainActor
+    private func pushStatus(serverOk: Bool = true) async -> [String: Any] {
+        [
+            "permission": await PushCenter.shared.authorizationState(),
+            "enabled": PushCenter.shared.isReceivingEnabled,
+            "token": PushCenter.shared.deviceToken.map { $0 as Any } ?? NSNull(),
+            "serverOk": serverOk,
+        ]
+    }
+}
+
+/// WebKitの返信クロージャを`Task`へ渡すための入れ物。返信は1回だけ・メインアクターから呼ぶ
+private final class ReplyBox: @unchecked Sendable {
+    private let handler: (Any?, String?) -> Void
+    init(_ handler: @escaping (Any?, String?) -> Void) { self.handler = handler }
+    func send(_ value: Any?) { handler(value, nil) }
+    func fail(_ reason: String) { handler(nil, reason) }
 }

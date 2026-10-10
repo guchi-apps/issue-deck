@@ -43,6 +43,8 @@ struct ContentView: View {
             if phase == .active, model.failure != nil { model.retry() }
             // 共有メニューから受け取った素材があれば取り込む（#3847）
             if phase == .active { model.importSharedDrafts() }
+            // 設定アプリでの許可変更を、通知欄へ反映させる（#4275）
+            if phase == .active { model.notifyPushStateChanged() }
         }
     }
 }
