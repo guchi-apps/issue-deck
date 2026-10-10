@@ -479,7 +479,8 @@ export function useDispatchState(enabled: boolean) {
       issueNumber: number;
       hostName: string;
       agent: DispatchAgent;
-      model: ClaudeLocalModel | CodexLocalModel;
+      /** 省略時は設定の既定に従う（セッションの復旧で前回と同じ設定のまま起こすとき） */
+      model?: ClaudeLocalModel | CodexLocalModel;
     }): Promise<{ ok: true } | { ok: false; message: string }> => {
       setIsSubmitting(true);
       try {

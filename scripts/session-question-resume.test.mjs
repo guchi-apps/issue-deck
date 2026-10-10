@@ -130,6 +130,13 @@ describe("SessionStart フックが控えるsessionId", () => {
     expect(readFileSync(idFile(), "utf8").trim()).toBe(SESSION_ID);
   });
 
+  // #4231。手作業セッションもcwdが共有されるので、質問セッションと同じ宛先を使う
+  it("手作業セッション（Claude Code）でも、tmuxセッション名をキーに控える", async () => {
+    writeDescriptor({ kind: "manual-step" });
+    await runHook({ hook_event_name: "SessionStart", session_id: SESSION_ID });
+    expect(readFileSync(idFile(), "utf8").trim()).toBe(SESSION_ID);
+  });
+
   // 実装セッションは worktree ごとに `--continue` で戻せるので、ファイルを増やす理由が無い
   it("実装セッションでは控えない", async () => {
     writeDescriptor({ kind: "implementation" });
@@ -174,6 +181,33 @@ describe("run-issue-session.sh の再開", () => {
       expect(args).toContain("追い質問");
       // 終了後（`cleanup`）も控えを消さない。消すと畳んだ後の復旧が毎回新しい会話になる
       expect(existsSync(idFile())).toBe(true);
+    },
+  );
+
+  it(
+    "手作業セッションは、控えたIDと履歴が揃えば`--resume <id>`で戻り、本文のチェック状況を読み直させる（#4231）",
+    { timeout: 20000 },
+    () => {
+      writeFileSync(idFile(), `${SESSION_ID}\n`);
+      writeFileSync(path.join(historyDir, `${SESSION_ID}.jsonl`), "");
+      writeFileSync(path.join(historyDir, `${OTHER_ID}.jsonl`), "");
+
+      const args = runLauncher({ kind: "manual-step" });
+      expect(args).toContain(`--resume ${SESSION_ID}`);
+      expect(args).not.toContain("--continue");
+      expect(args).toContain("実施済みの手順は繰り返さず");
+    },
+  );
+
+  it(
+    "手作業セッションは、控えが無ければ別の会話があっても`--continue`へ落とさず新しい会話で始める",
+    { timeout: 20000 },
+    () => {
+      writeFileSync(path.join(historyDir, `${OTHER_ID}.jsonl`), "");
+
+      const args = runLauncher({ kind: "manual-step" });
+      expect(args).not.toContain("--resume");
+      expect(args).not.toContain("--continue");
     },
   );
 

@@ -19,6 +19,7 @@ vi.mock("@/hooks/use-issue-mutations", () => ({
 }));
 
 const enqueue = vi.fn();
+const startManualStepSession = vi.fn();
 
 function makeHost(overrides: Partial<DispatchHostView> = {}): DispatchHostView {
   return {
@@ -168,6 +169,7 @@ function makeDispatch(overrides: Partial<DispatchStateHandle> = {}): DispatchSta
     setError: vi.fn(),
     isSubmitting: false,
     enqueue,
+    startManualStepSession,
     sendSessionControl: vi.fn(),
     cancel: vi.fn(),
     ...overrides,
@@ -336,11 +338,33 @@ describe("SessionRecoveryButton", () => {
     expect(container.firstChild).toBeNull();
   });
 
-  it("手作業Issue（71.manual-step）には出さない", () => {
-    const { container } = renderButton({
-      issue: makeIssue({ labels: [label("71.manual-step")] }),
+  describe("手作業Issue（71.manual-step・#4231）", () => {
+    const manualIssue = () => makeIssue({ labels: [label("71.manual-step")] });
+    const manualHost = () => makeHost({ manualStepSessionCapable: true });
+
+    it("復旧すると手作業セッションのジョブを積む（起動ジョブは積まず、11.localも付けない）", async () => {
+      renderButton({
+        issue: manualIssue(),
+        dispatch: makeDispatch({ hosts: [manualHost()] }),
+      });
+      fireEvent.click(recoveryButton()!);
+      await waitFor(() => {
+        expect(startManualStepSession).toHaveBeenCalledWith({
+          repositoryFullName: "guchi-apps/issue-deck",
+          issueNumber: 1830,
+          hostName: "subpc",
+          agent: "claude",
+        });
+      });
+      expect(enqueue).not.toHaveBeenCalled();
+      expect(updateIssue).not.toHaveBeenCalled();
     });
-    expect(container.firstChild).toBeNull();
+
+    it("手作業セッションに対応していないホストでは押せず、理由を出す", () => {
+      renderButton({ issue: manualIssue() });
+      expect(recoveryButton()!.hasAttribute("disabled")).toBe(true);
+      expect(screen.getByText(/手作業セッションに対応していません/)).not.toBeNull();
+    });
   });
 
   /**
