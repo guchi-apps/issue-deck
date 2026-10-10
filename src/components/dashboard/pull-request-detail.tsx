@@ -29,6 +29,7 @@ import { PullRequestMergeButton } from "@/components/dashboard/pull-request-merg
 import { PullRequestRepairButtons } from "@/components/dashboard/pull-request-repair-buttons";
 import { PullRequestBackupCi } from "@/components/dashboard/pull-request-backup-ci";
 import { PullRequestReviewFindings } from "@/components/dashboard/pull-request-review-findings";
+import { ConnectedReleaseReviewSections } from "@/components/dashboard/release-review-sections";
 import { UserAvatar } from "@/components/dashboard/user-avatar";
 import { VerificationSummaryPanel } from "@/components/dashboard/verification-summary-panel";
 import { WorkflowRunProgressPanel } from "@/components/dashboard/workflow-run-progress-panel";
@@ -499,6 +500,17 @@ export function PullRequestDetail({
                 最初に知りたいのは「何件のうち何件が問題なしか」で、本文の表まで
                 スクロールしないと読めないのでは判断材料として遅い。
                 見出しを持たないPR（＝リリースPR以外）ではparseがnullを返すので何も出ない */}
+            {/* リリースPRの3区分（個別PRレビュー／統合検証／全体レビュー。#4238）。個別PRの判定は
+                下の「コードレビューの検証結果」と同じ材料で、ここでは他の2区分と並べて見せる */}
+            {pullRequest.kind === "release" && !pullRequest.merged && pullRequest.state === "open" && (
+              <ConnectedReleaseReviewSections
+                repositoryFullName={pullRequest.repositoryFullName}
+                pullRequestNumber={pullRequest.number}
+                headRef={pullRequest.headRef}
+                className="border-b px-4 py-3"
+              />
+            )}
+
             {verification && (
               <VerificationSummaryPanel
                 verification={verification}

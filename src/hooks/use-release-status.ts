@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import type { MergeJudgement } from "@/lib/github/check-rollup";
 import type { RepairWorkflowAvailability } from "@/lib/github/pull-request-repair";
 import type { PullRequestRepairRunSummary } from "@/lib/github/pull-request-repair-run";
+import type { ReleaseVerificationSummary } from "@/lib/release-verification-summary";
 import { releaseErrorMessage, requestRelease } from "@/lib/release-request";
 import type { BumpKind } from "@/lib/semver-bump";
 
@@ -46,6 +47,11 @@ export type ReleasePullRequest = {
    * CI状態と同じ1回のGraphQLで取れるため、これを持ってもGitHub APIの消費は増えない。
    */
   mergeJudgement: MergeJudgement;
+  /**
+   * リリースPRの統合検証・全体AIレビューの状態（#4238。リリースPRだけ。記録を読めなかった・
+   * 古いサーバーの応答ではnull／省略）
+   */
+  verification?: ReleaseVerificationSummary | null;
 };
 
 export type BumpPullRequest = ReleasePullRequest & {

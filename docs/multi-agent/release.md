@@ -864,3 +864,13 @@ main起点の`deploy-recovery/*`ブランチへ取り込む。**`merges`APIは�
 止まる条件（`needs_attention`＋修正Issueへ引き継ぎコメントと`00.check-user`）: 停止・期限切れ・範囲外・
 復旧PRの不一致・HEAD変更・main前進・コンフリクト・差分が記録外・CI失敗・人の確認ラベル・別リリースによる置換済み。
 マージ後の稼働版の確認（`recovered`）は#4007で足す。
+
+## リリース起動確認でPRごとのレビューを出す（#4245）
+
+リリースworkflowの起動確認（PC・スマホ共通の`ReleaseChangeList`）は、「今回反映する内容」の各PR行に、PR作成時に
+本文へ記録された`## 検証結果`の判定（自動レビュー・機械的リスク・判定時点の鮮度）を出す。本番マージ確認の
+「コードレビュー」（`PullRequestMergeReview`）と同じ語彙・同じ`VerdictText`を使う。**表示専用で、起動の可否は変えない。**
+
+- 本文は`GET /api/repositories/release/changes`が取る。`base=develop`のclosed PR一覧（1回・ETag）から引き、足りない
+  PRだけ`fetchPullRequest`で補う（上限20件）。取れなかったPRは**「記録なし」ではなく「取得不可」**として出す
+- バージョンバンプPRはレビューの対象ではないので判定を出さず、内訳の分母にも入れない（`tallyChangeReviews`を再利用）

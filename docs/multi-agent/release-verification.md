@@ -3,15 +3,15 @@
 **いつ読むか**: develop→mainのリリースPR（`release-main/vX.Y.Z`）を本番へマージする前の検証・レビューの仕組みを触るとき。
 
 個別PRのレビュー（develop向けPRの自動レビュー）に加えて、**固定したリリース内容そのもの**に対する検証を足す。
-段階的に入れており、**現在入っているのはPR1（土台）だけ**。実行する経路はまだ無いため、強制は全リポジトリで無効。
+段階的に入れた（PR1＝土台 #4219、PR2＝統合検証 #4237、PR3＝全体AIレビューと画面 #4238）。**強制（`enforced`）は運用検証が済むまで全リポジトリで無効**で、画面は表示のみ。
 
 ## 3つの区分と責務
 
 | 区分 | 何を見るか | 担当 | 状態 |
 | --- | --- | --- | --- |
 | 個別PRレビュー | develop向けPR単位の差分 | 既存の自動レビュー（#4092の「記録なし」判定を含む）。**置き換えない** | 既存 |
-| 統合検証 | mainへ統合した状態のビルド・自動テスト | `kind=integration`（PR2で実行経路） | 記録と判定のみ |
-| リリース全体レビュー | 差分全体の矛盾・退行・設定不足 | `kind=ai_review`（PR3で実行経路） | 記録と判定のみ |
+| 統合検証 | mainへ統合した状態のビルド・自動テスト | `kind=integration`（PR2） | 実行経路あり |
+| リリース全体レビュー | 差分全体の矛盾・退行・設定不足 | `kind=ai_review`（PR3） | 実行経路あり |
 
 AIレビューはテスト実行の代わりにしない。個別レビューの判定を転記して「全体レビュー済み」にもしない。
 
@@ -56,6 +56,28 @@ AIレビューはテスト実行の代わりにしない。個別レビューの
 - 結果は`/api/dispatch/report`の`releaseVerification`として届き、記録先はジョブの対象で決まる（ランナーは別の対象へ書けない）。完走しても結果が無ければ`failed`
 - リリースワークフロー（`reusable-release-develop-to-main.yml`）がPR作成直後に`request`を送る。ベストエフォートで、依頼できなくてもPR作成は止めない。**配布先へはタグを配るまで届かない**
 
+## 全体AIレビューの実行（#4238・PR3）
+
+- `request`は統合検証と並べて`requestReleaseReviewJob`（`src/lib/dispatch/release-review-jobs.ts`）も呼び、`DispatchJob`（`RELEASE_REVIEW`）を積む。
+  `activeKey`は`release_review:owner/repo#PR@base:head`。積めない理由（能力ホスト無し・Codex未対応）は**`ai_review`を`failed`（理由付き）で記録**する
+- **担当は`resolveReleaseReviewAssignee`（`src/lib/release-review-assignee.ts`）。** 設定の「アプリ内AI：原因診断・新規アプリ相談」（`appAiModelReasoning`）に従い、
+  OpenAI系ならCodex、それ以外はClaude Code。AIモデル設定画面は同じ関数で実効担当を表示する。モデルは`DispatchJob.claudeModel`／`codexModel`に載り、結果の`agent`（`claude:opus`など）として記録される
+- サブPCのpoller（`DISPATCH_POLLER_VERSION=36`以降・`releaseReview`を申告→`DispatchHost.releaseReviewCapable`）が`scripts/run-release-review.sh`をtmuxで起動する。
+  `base...head`の差分を読み取り専用のAI（Claudeは`Read`・`Grep`・`Glob`のみ許可）へ渡す。**差分は予算（既定300KB）の範囲でファイル単位に詰め、載せられなかったファイルは確認できなかった範囲として報告する**
+  （`totalFiles`・`reviewedFiles`はスクリプトが確定し、AIの自己申告に任せない）
+- 結果の正規化（`src/lib/release-review-result.ts`）: **指摘が1件でもあれば`needs_check`、確認範囲が足りなければ未確認範囲つきの`passed`（判定側が理由付きの`needs_check`へ読み替える）。**
+  AIが問題なしでも指摘・未確認が無い場合だけ`passed`。`failed`はレビューを完走できなかったときだけ。結果には対象SHA・担当AI・指摘・影響PR・影響ファイルを残す
+- **AIのLGTMだけで自動マージはしない。** マージは従来どおり人で、`needs_confirmation`は理由付きで既存の明示確認フローへ渡る
+
+## リリース画面の3区分
+
+PC（リリースPR詳細。`GET /api/repositories/release/verification`）とスマホ（リリースシート。`GET /api/repositories/release`の`releasePullRequest.verification`）で
+同じコンポーネント（`release-review-sections.tsx`）が「個別PRレビュー／統合検証／全体レビュー」を並べる。個別PRレビューは既存の「今回反映する内容」（`useReleaseChanges`）の集計で、
+他の2区分の結果で置き換えない。凍結ブランチ（`release-main/*`）のリリースPRにだけ出す。
+
+**修正導線**: リリースブランチは直接書き換えない。指摘が出たら、developへ修正を入れてから既存の「修正を入れて作り直す」（`release-rebuild`・#3014）へ進み、
+作り直しで変わったbase/head SHAに対して統合検証・全体レビューをやり直す（古いSHAの結果は「古い結果」になり流用されない）。CI失敗・コンフリクトは従来どおり`reusable-claude-pr-repair`の修復ボタン。
+
 ## 既存検証の棚卸し（重複実装しない）
 
 - `ci.yml`: `lint-and-build`・`docs-sync-check`・`workflow-expression-length-check`（`scripts/ci/run-required-checks.mjs`）。リリースPRのheadに対するCIは、同じSHAなら統合検証の証跡として再利用する（PR2で実装済み）
@@ -63,6 +85,5 @@ AIレビューはテスト実行の代わりにしない。個別レビューの
 
 ## 残作業
 
-- PR2（#4237）: 完了。`enforced`はまだ`false`のまま（運用検証後に別途有効化）
-- PR3: 全体AIレビューの実行、リリース画面（PC・スマホ）の3区分表示、AIモデル画面への表示、修復導線への接続
+- PR2（#4237）・PR3（#4238）: 完了。`enforced`はまだ`false`のまま（運用検証後に別途有効化）
 - 手作業: 他リポジトリへの配布・必須チェック設定・代表例の運用検証（別Issueで追跡）

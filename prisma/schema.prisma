@@ -841,6 +841,7 @@ enum DispatchJobKind {
   REVIEW_FIX
   CHAT_TURN
   RELEASE_VERIFY
+  RELEASE_REVIEW
 }
 
 // issue-deckの画面から積み、サブPCのpollerがポーリングで取りに来るジョブ（#1179）。
@@ -1195,6 +1196,8 @@ model DispatchHost {
   prReviewCapable           Boolean?
   // リリースPRの統合検証（`RELEASE_VERIFY`・#4237）を実行できるか。`null`（未申告）は「できない」
   releaseVerifyCapable      Boolean?
+  // リリース全体のAIレビュー（`RELEASE_REVIEW`・#4238）を実行できるか。`null`（未申告）は「できない」
+  releaseReviewCapable      Boolean?
   manualStepSessionCapable  Boolean?
   // チャット相談のモデル呼び出し（`CHAT_TURN`・#4109）をCodex CLIで実行できるか。ランチャーと
   // Codex CLIが揃っているpollerだけが申告する。`null`（未申告）は「できない」
@@ -2520,4 +2523,20 @@ model NativeAuthHandoff {
   createdAt     DateTime  @default(now())
 
   @@index([expiresAt])
+}
+
+/// Issue作成の冪等キー（#3847）。同じキーの再送（連打・応答不明からの再試行）で同じIssueを
+/// 二重に作らないため、GitHubへ作成する前に予約し、成功したら結果を保存する。
+model IssueCreateRequest {
+  id         String   @id @default(cuid())
+  userId     String
+  /// クライアントが作成操作ごとに採る一意の値（ユーザー単位で一意）
+  key        String   @db.VarChar(64)
+  /// "pending"（作成中・結果不明）／"done"（作成済み。resultJsonに結果）
+  status     String   @db.VarChar(16)
+  resultJson String?  @db.LongText
+  createdAt  DateTime @default(now())
+
+  @@unique([userId, key])
+  @@index([createdAt])
 }

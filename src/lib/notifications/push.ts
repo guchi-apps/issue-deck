@@ -3,6 +3,13 @@ import { createHash } from "node:crypto";
 import webpush from "web-push";
 
 import { db } from "@/lib/db";
+import {
+  getApnsConfig,
+  isApnsConfigured,
+  isApnsEndpoint,
+  sendApnsNotifications,
+  APNS_ENDPOINT_PREFIX,
+} from "@/lib/notifications/apns";
 
 /**
  * Web Push（#838）の送信口。**購読の宛先を知っているのはここだけ**で、呼び出し側は
@@ -74,9 +81,12 @@ export function getVapidConfig(): VapidConfig | null {
   return { publicKey, privateKey, subject };
 }
 
-/** サーバー側でPush通知を送れる状態か。設定画面の「利用できません」の判定もこれを見る */
+/**
+ * サーバー側でPush通知を送れる状態か。Web Push（VAPID）かAPNs（iOSアプリ。#4250）の
+ * どちらかが設定済みなら真。送信元の打ち切りとテスト通知の503判定がこれを見る
+ */
 export function isPushConfigured(): boolean {
-  return getVapidConfig() !== null;
+  return getVapidConfig() !== null || isApnsConfigured();
 }
 
 /**
@@ -121,14 +131,44 @@ export async function sendPushNotification(
   const result: PushSendResult = { sent: 0, removed: 0, failed: 0 };
   if (targets.length === 0) return result;
 
-  const vapid = getVapidConfig();
-  if (!vapid) return result;
-
-  const body = JSON.stringify(payload);
   const goneIds: string[] = [];
 
+  // iOSアプリ（APNs）宛て。設定が無ければ送らずに残す（消さない）
+  const apnsTargets = targets.filter((target) => isApnsEndpoint(target.endpoint));
+  const apns = getApnsConfig();
+  if (apnsTargets.length > 0 && apns) {
+    const outcomes = await sendApnsNotifications(
+      apnsTargets.map((target) => target.endpoint.slice(APNS_ENDPOINT_PREFIX.length)),
+      payload,
+      apns,
+    );
+    for (const target of apnsTargets) {
+      const outcome = outcomes.get(target.endpoint.slice(APNS_ENDPOINT_PREFIX.length));
+      if (outcome?.kind === "sent") result.sent += 1;
+      else if (outcome?.kind === "gone") {
+        goneIds.push(target.id);
+        result.removed += 1;
+      } else {
+        result.failed += 1;
+        console.error("[push] APNsへ送れませんでした", outcome);
+      }
+    }
+  }
+
+  // Web Push宛て。VAPID未設定なら送らない
+  const vapid = getVapidConfig();
+  const webTargets = targets.filter((target) => !isApnsEndpoint(target.endpoint));
+  if (!vapid || webTargets.length === 0) {
+    if (goneIds.length > 0) {
+      await db.pushSubscription.deleteMany({ where: { id: { in: goneIds } } });
+    }
+    return result;
+  }
+
+  const body = JSON.stringify(payload);
+
   await Promise.all(
-    targets.map(async (target) => {
+    webTargets.map(async (target) => {
       try {
         await webpush.sendNotification(
           {

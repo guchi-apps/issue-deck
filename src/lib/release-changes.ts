@@ -1,4 +1,10 @@
-import { toPullRequestChanges, type PullRequestCommitSource } from "@/lib/pull-request-changes";
+import {
+  tallyChangeReviews,
+  toPullRequestChanges,
+  type PullRequestCommitSource,
+} from "@/lib/pull-request-changes";
+import { parsePullRequestReviewVerdict } from "@/lib/github/pull-request-review-verdict";
+import type { ReleaseVerificationTally } from "@/lib/github/release-verification";
 import type { ReleaseChangeCommit, ReleaseChangePullRequest } from "@/types/pull-request";
 
 /**
@@ -32,8 +38,53 @@ export function toReleaseChanges(commits: readonly PullRequestCommitSource[]): {
       title: change.title,
       issueNumber: change.issueNumber,
       isVersionBump: change.kind === "version-bump",
+      // 本文は別に取得して`withReleaseReviews`で埋める
+      review: null,
+      prHeadSha: null,
+      reviewUnavailable: false,
     });
   }
 
   return { pullRequests, unknownCommits };
+}
+
+/**
+ * 各PRへ、取得したPR本文から読んだ判定を付ける（#4245）。
+ *
+ * `bodies`に無いPRは「本文を取得できなかった」として`reviewUnavailable`にする。**記録が無い
+ * （本文に節が無い）こととは別**で、混ぜると取得の失敗が「記録なし」という穏やかな表示に
+ * 化けて、見過ごした指摘が無いかを確かめる場で何も言わないことになる。バンプPRはレビューの
+ * 対象ではないので取得も不可扱いもしない。
+ */
+export function withReleaseReviews(
+  pullRequests: readonly ReleaseChangePullRequest[],
+  bodies: ReadonlyMap<number, { body: string | null; headSha: string }>,
+): ReleaseChangePullRequest[] {
+  return pullRequests.map((pr) => {
+    if (pr.isVersionBump) return pr;
+    const found = bodies.get(pr.number);
+    if (!found) return { ...pr, reviewUnavailable: true };
+    return {
+      ...pr,
+      review: parsePullRequestReviewVerdict(found.body),
+      prHeadSha: found.headSha,
+    };
+  });
+}
+
+/** 一覧の判定の内訳。`unavailable`は取得できなかったPR（`tallyChangeReviews`の分母には入れない） */
+export function tallyReleaseReviews(
+  pullRequests: readonly ReleaseChangePullRequest[],
+): ReleaseVerificationTally & { unavailable: number } {
+  const available = pullRequests.filter((pr) => !pr.reviewUnavailable);
+  const tally = tallyChangeReviews(
+    available.map((pr) => ({
+      kind: pr.isVersionBump ? ("version-bump" as const) : ("issue" as const),
+      reviewKind: pr.review?.reviewKind ?? "unknown",
+    })),
+  );
+  return {
+    ...tally,
+    unavailable: pullRequests.filter((pr) => pr.reviewUnavailable).length,
+  };
 }

@@ -10,7 +10,9 @@
 | 署名 | Automatic（Apple Developer Program のチーム `6AA3WFTR94`。kurashio・YoteiFlow・morrow と同じチーム） |
 | 対応 | iPhone・縦向き・iOS 18以上 |
 | 認証シートの戻り先 | `issuedeck://auth-callback` |
-| Associated Domains / Push / App Group | 使わない（初版スコープ外） |
+| 共有メニュー（Share Extension） | `ios/ShareExtension/`。Bundle ID `com.gucchii.issuedeck.ShareExtension`。App Group `group.com.gucchii.issuedeck`（下書きの受け渡し。方式は [docs/ios-app.md](../docs/ios-app.md)「共有メニューからの起案」） |
+| Associated Domains | 使わない |
+| Push通知（APNs） | 使う（#4250）。`aps-environment`は`development`と書いてあり、配布の書き出しで本番へ置き換わる。方式は [docs/ios-app.md](../docs/ios-app.md)「ネイティブ通知」 |
 
 ## 更新が要る場所
 
@@ -121,7 +123,7 @@ ios/scripts/remote-upload-testflight.sh    # Mac で main を取り込み、Test
 
 ### 通知・オフライン表示について
 
-WKWebView では Web Push（`public/sw.js`）も Service Worker も使えない可能性が高く、ネイティブ通知は後続です。通信できないときは PWA の保存済み画面の代わりに再試行の画面を出します。
+WKWebView では Web Push（`public/sw.js`）も Service Worker も使えない可能性が高く、ネイティブ通知はAPNsで受け取ります（#4250。[docs/ios-app.md](../docs/ios-app.md)「ネイティブ通知」）。通信できないときは PWA の保存済み画面の代わりに再試行の画面を出します。
 
 ## 初回登録（本人の操作）と確認
 

@@ -8,6 +8,9 @@ import WebKit
 final class WebViewModel: NSObject, ObservableObject {
     @Published private(set) var failure: LoadFailure?
     @Published private(set) var isRetrying = false
+    /// 共有メニューから受け取った素材の取り込み状況（#3847）
+    @Published private(set) var shareImport: ShareImportState = .idle
+    private var isImportingShare = false
 
     let webView: WKWebView
 
@@ -35,6 +38,10 @@ final class WebViewModel: NSObject, ObservableObject {
         webView.isOpaque = false
         webView.backgroundColor = UIColor(named: "HeaderBand")
         webView.scrollView.backgroundColor = UIColor(named: "HeaderBand")
+
+        // ネイティブ通知（#4250）。トークンが届いたら登録し、通知のタップは該当画面を開く
+        PushCenter.shared.onDeviceToken = { [weak self] in self?.registerPushToken() }
+        PushCenter.shared.onOpenPath = { [weak self] in self?.loadAppPath($0) }
     }
 
     deinit {
@@ -56,6 +63,53 @@ final class WebViewModel: NSObject, ObservableObject {
     func retry() {
         isRetrying = true
         load(lastRequestedURL ?? AppConfig.baseURL)
+    }
+
+    /// 共有メニューの下書きを取り込む。前面に出たとき・ページを読み終えたとき・ログイン後に呼ぶ。
+    /// 同時に2つは走らせない（同じ素材を二重にアップロードしない）
+    func importSharedDrafts() {
+        guard !isImportingShare else { return }
+        isImportingShare = true
+        Task { @MainActor in
+            defer { isImportingShare = false }
+            let importer = ShareImporter(webView: webView)
+            if !ShareDraftStore.list().isEmpty { shareImport = .importing }
+            switch await importer.run(openPath: { [weak self] in self?.loadAppPath($0) }) {
+            case .imported, .nothingToDo:
+                shareImport = .idle
+            case .waitingForLogin(let count):
+                shareImport = .waitingForLogin(count: count)
+            case .failed(let message):
+                shareImport = .failed(message: message)
+            }
+        }
+    }
+
+    /// 端末トークンをサーバーへ登録する。ログインCookieはWebViewの中にしか無いので、
+    /// WebViewの中から`fetch`する。未ログイン（401）なら登録せず、次にページを読み終えたとき再試行する。
+    /// 同じトークンの再登録は上書きなので、毎回呼んでよい
+    func registerPushToken() {
+        guard let token = PushCenter.shared.deviceToken, failure == nil else { return }
+        Task { @MainActor in
+            _ = try? await webView.callAsyncJavaScript(
+                """
+                await fetch('/api/notifications/apns', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  credentials: 'same-origin',
+                  body: JSON.stringify({ deviceToken: token })
+                });
+                """,
+                arguments: ["token": token],
+                contentWorld: .page
+            )
+        }
+    }
+
+    /// 取り込めない素材を利用者が破棄する
+    func discardSharedDrafts() {
+        ShareDraftStore.list().forEach(ShareDraftStore.delete)
+        shareImport = .idle
     }
 
     private func load(_ url: URL) {
@@ -236,6 +290,10 @@ extension WebViewModel: WKNavigationDelegate {
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         isRetrying = false
         failure = nil
+        // ログイン後の画面を読み終えたとき、待っていた共有の素材を取り込む
+        importSharedDrafts()
+        // ログインが済んでいれば端末トークンを登録する（未ログインなら何も起きない）
+        registerPushToken()
     }
 
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
