@@ -634,7 +634,9 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
     担当は[`lib/release-review-assignee.ts`](../src/lib/release-review-assignee.ts)（`appAiModelReasoning`に従い、画面とジョブで同じ関数）、
     結果の正規化は[`lib/release-review-result.ts`](../src/lib/release-review-result.ts)、実行はサブPCの`scripts/run-release-review.sh`。
     画面の3区分は[`components/dashboard/release-review-sections.tsx`](../src/components/dashboard/release-review-sections.tsx)
-    （PCは`GET /api/repositories/release/verification`、スマホは`GET /api/repositories/release`の`releasePullRequest.verification`）
+    （PC・スマホ・本番マージの確認ダイアログで共通。`GET /api/repositories/release/verification`を部品自身が取る）。
+    進捗（待機理由・工程・経過）は[`lib/release-verification-progress.ts`](../src/lib/release-verification-progress.ts)が
+    `DispatchJob.progress`（実行側の`running`報告）から作る（#4277）
   - **リポジトリ名の変更は`RepositoryNameAlias`で引き継ぐ**（#3613）。`SessionUsage.repository`は
     作業ディレクトリ名の短い名前で、改名すると旧名の行が別リポジトリに分かれる。
     [`lib/repository-alias.ts`](../src/lib/repository-alias.ts)がリポジトリ同期（と

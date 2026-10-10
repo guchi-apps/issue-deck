@@ -18,6 +18,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib/local-repo-resolve.sh"
 # shellcheck source=scripts/lib/review-usage.sh
 source "$SCRIPT_DIR/lib/review-usage.sh"
+# shellcheck source=scripts/lib/release-progress.sh
+source "$SCRIPT_DIR/lib/release-progress.sh"
 
 WORK_ROOT="${ISSUE_DECK_RELEASE_VERIFY_ROOT:-${TMPDIR:-/tmp}/issue-deck-release-verify}"
 STEP_TIMEOUT="${ISSUE_DECK_RELEASE_VERIFY_STEP_TIMEOUT_SECONDS:-1500}"
@@ -32,8 +34,13 @@ HEARTBEAT_PID=""
 # release_verify_report <running|succeeded|failed> <メッセージ> [releaseVerification JSON]
 release_verify_report() {
   local status="$1" message="${2:-}" result="${3:-}"
-  local app_base_url dispatch_secret host_name body
+  local app_base_url dispatch_secret host_name body progress="null"
   [[ -n "$JOB_ID" ]] || return 0
+  # 実行中の報告は、heartbeatからも最新の工程を送れるようファイルから読む（#4277）
+  if [[ "$status" == "running" && -s "$RELEASE_PROGRESS_FILE" ]]; then
+    message="$(release_progress_message)"
+    progress="$(release_progress_json)"
+  fi
   app_base_url="$(_review_usage_env_value APP_BASE_URL)"
   dispatch_secret="$(_review_usage_env_value DISPATCH_SECRET)"
   [[ -n "$app_base_url" && -n "$dispatch_secret" ]] || return 0
@@ -42,8 +49,10 @@ release_verify_report() {
   command -v jq >/dev/null 2>&1 || return 0
   body="$(jq -nc --arg jobId "$JOB_ID" --arg host "$host_name" --arg status "$status" \
     --arg message "$message" --arg session "${TMUX_SESSION_NAME:-}" --arg result "$result" \
+    --argjson progress "$progress" \
     '{jobId: $jobId, host: $host, status: $status}
       + (if $message == "" then {} else {message: $message} end)
+      + (if $progress == null then {} else {progress: $progress} end)
       + (if $session == "" then {} else {tmuxSessionName: $session} end)
       + (if $result == "" then {} else {releaseVerification: ($result | fromjson)} end)')" || return 0
   # シークレットはコマンドライン引数に置かない（`ps`で見えるため）
@@ -93,6 +102,7 @@ cleanup() {
   if [[ -n "$WORKTREE" && -n "$LOCAL_PATH" ]]; then
     git -C "$LOCAL_PATH" worktree remove --force "$WORKTREE" >/dev/null 2>&1 || rm -rf "$WORKTREE"
   fi
+  release_progress_cleanup
 }
 
 # 検証結果のJSON。state=passed|failed|needs_check|not_applicable
@@ -109,6 +119,7 @@ main() {
   JOB_ID="$6"
   local commands_json="$7" mac_check="${8:-false}"
   local full_name="$owner/$repo" summary="" unverified="" evidence="" step output_file ci_json ci_url
+  local plan command_count step_index=0
 
   trap cleanup EXIT
   TMUX_SESSION_NAME="${TMUX_SESSION_NAME:-}"
@@ -125,6 +136,12 @@ main() {
     return 0
   }
 
+  # 工程の計画（準備→統合→検証コマンド…→Mac検証）。heartbeatより先に作り、子プロセスへも見せる
+  plan="$(release_progress_integration_plan "$commands_json" "$mac_check")"
+  command_count="$(jq 'length' <<<"$commands_json")"
+  release_progress_init "$plan"
+  release_progress_set prepare 0 "$RUNNING_MESSAGE"
+  release_verify_report running "$RUNNING_MESSAGE"
   heartbeat_start
   LOCAL_PATH="$(local_repo_resolve_path "$full_name")"
   mkdir -p "$WORK_ROOT"
@@ -140,6 +157,8 @@ main() {
   }
 
   # 統合状態: mainの先端（base）へリリースのheadをマージする。競合はそのまま失敗として返す
+  release_progress_set merge 1 "mainの先端へリリースを統合しています"
+  release_verify_report running ""
   git -C "$LOCAL_PATH" worktree add --detach "$WORKTREE" "$base_sha" >/dev/null 2>&1
   if ! git -C "$WORKTREE" -c user.name="Claude Code" -c user.email="claude-code@example.com" \
     merge --no-edit "$head_sha" >/dev/null 2>&1; then
@@ -162,6 +181,9 @@ main() {
   # 統合状態でのビルド・テスト
   while IFS= read -r step; do
     RUNNING_MESSAGE="統合検証を実行中です: ${step}"
+    release_progress_set "$(jq -r --argjson i "$((2 + step_index))" '.[$i]' <<<"$plan")" \
+      "$((2 + step_index))" "$RUNNING_MESSAGE" "$step"
+    step_index=$((step_index + 1))
     release_verify_report running "$RUNNING_MESSAGE"
     output_file="$WORK_ROOT/${repo}-${pr_number}-${head_sha:0:12}.out"
     if (cd "$WORKTREE" && timeout "$STEP_TIMEOUT" bash -c "$step") >"$output_file" 2>&1; then
@@ -185,6 +207,7 @@ main() {
       summary+="Mac検証: 未実施（Macへ接続できません）"$'\n'
     else
       RUNNING_MESSAGE="Macでのビルド確認を実行中です"
+      release_progress_set mac "$((2 + command_count))" "$RUNNING_MESSAGE"
       release_verify_report running "$RUNNING_MESSAGE"
       if (cd "$WORKTREE" && timeout "$STEP_TIMEOUT" bash ios/scripts/remote-build-check.sh) >"$WORK_ROOT/${repo}-${pr_number}-mac.out" 2>&1; then
         summary+="Mac検証: 実施・成功"$'\n'
