@@ -6,6 +6,7 @@ import type {
   MergePrecheck,
   MergePrecheckLevel,
   MergePrecheckOverall,
+  MergePrecheckRow,
 } from "@/lib/pull-request-merge-precheck";
 import { cn } from "@/lib/utils";
 
@@ -96,5 +97,36 @@ export function PullRequestMergePrecheck({ precheck }: { precheck: MergePrecheck
         })}
       </ul>
     </div>
+  );
+}
+
+/**
+ * 「リリースの検証」の枠の末尾に置く、CI・コンフリクトの1行（#4277）。独立した「マージ前の確認」の
+ * 枠を出さず、3区分と同じ枠に収めてスマホでも1画面で見渡せるようにする。補足（失敗したチェック名・
+ * 自動修正の実行中）は2行目に出す。
+ */
+export function MergePrecheckInlineRows({ rows }: { rows: MergePrecheckRow[] }) {
+  const details = rows.filter((row) => row.detail).map((row) => `${row.label}: ${row.detail}`);
+  return (
+    <section className="flex flex-col gap-1 border-b px-3 py-2 text-xs last:border-b-0" data-testid="merge-precheck-inline">
+      <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
+        <h3 className="text-xs font-semibold">CI・コンフリクト</h3>
+        {rows.map((row) => {
+          const kind = LEVEL_KIND[row.level];
+          return (
+            <span key={row.id} className="inline-flex items-center gap-1.5">
+              <span className="text-[11px] text-muted-foreground">{row.label}</span>
+              <span className={cn("inline-flex items-center gap-1 font-bold", REVIEW_TONE[kind])}>
+                <span aria-hidden="true" className="text-[10px] leading-none">
+                  {REVIEW_MARK[kind]}
+                </span>
+                {row.summary}
+              </span>
+            </span>
+          );
+        })}
+      </div>
+      {details.length > 0 && <p className="text-[11px] text-muted-foreground">{details.join("。")}</p>}
+    </section>
   );
 }

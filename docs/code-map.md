@@ -634,7 +634,9 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
     担当は[`lib/release-review-assignee.ts`](../src/lib/release-review-assignee.ts)（`appAiModelReasoning`に従い、画面とジョブで同じ関数）、
     結果の正規化は[`lib/release-review-result.ts`](../src/lib/release-review-result.ts)、実行はサブPCの`scripts/run-release-review.sh`。
     画面の3区分は[`components/dashboard/release-review-sections.tsx`](../src/components/dashboard/release-review-sections.tsx)
-    （PCは`GET /api/repositories/release/verification`、スマホは`GET /api/repositories/release`の`releasePullRequest.verification`）
+    （PC・スマホ・本番マージの確認ダイアログで共通。`GET /api/repositories/release/verification`を部品自身が取る）。
+    進捗（待機理由・工程・経過）は[`lib/release-verification-progress.ts`](../src/lib/release-verification-progress.ts)が
+    `DispatchJob.progress`（実行側の`running`報告）から作る（#4277）
   - **リポジトリ名の変更は`RepositoryNameAlias`で引き継ぐ**（#3613）。`SessionUsage.repository`は
     作業ディレクトリ名の短い名前で、改名すると旧名の行が別リポジトリに分かれる。
     [`lib/repository-alias.ts`](../src/lib/repository-alias.ts)がリポジトリ同期（と
@@ -4587,3 +4589,7 @@ Webhookで取り込む。運用・移行・ロールバックは[backup-ci.md](b
 - 一覧はSwiftソースの宣言（`: Widget`・`ActivityConfiguration`・`ControlWidget`・`.accessory*`）からの**推定**。`api/repositories/ios-extensions/route.ts`がデフォルトブランチのツリーから拡張らしい名前のSwiftを最大40件読み、5分キャッシュする。命名次第で漏れるため画面にも「検出結果」と出している
 - 起票ダイアログ（`ios-extension-issue-dialog.tsx`）は、起票後の「実装を開始」を閉じる（キャンセル含む）とIssue詳細へ移る（#4172）。計画の承認パネル・計画コメントは詳細にしか出ないため、通常の作成フォームと同じ挙動に揃えている
 - 追加・編集は画面からSwiftを生成せず、種類別テンプレート（`buildIosExtensionIssue`）でIssueを起票して通常の実装経路へ渡す（`POST /api/issues`）
+
+### VPSメモリの自動計測（#4256）
+
+サブPCの`scripts/vps-memory-probe.mjs`（純粋な部分は`scripts/lib/vps-memory-probe-core.mjs`）がSSH経由でVPSの`/proc`を読み、`POST /api/integrations/vps-memory/samples`で`VpsMemorySample`へ保存する。AIDE向けの読み取りは`GET /api/integrations/vps-memory`。検証・区間分け・保存は`lib/vps-memory/`、認証は`lib/vps-memory/auth.ts`。設定・取得できる項目・保存期間は[vps-memory-probe.md](vps-memory-probe.md)。

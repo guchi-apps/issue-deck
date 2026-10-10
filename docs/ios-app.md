@@ -72,6 +72,19 @@
 
 `isPushConfigured()`はVAPIDまたはAPNsのどちらかが設定済みで真。Apple Developerでの鍵発行・App IDのPush Notifications有効化・`.env`への登録は本人の手作業（`71.manual-step`）。
 
+### 設定 > 通知からのオン・オフ（#4275）
+
+アプリ内（UAに`IssueDeckIOS`）の通知欄はWeb Push（`usePushSubscription`）ではなく、`src/hooks/use-native-push.ts`が状態を決める。Swift側の窓口はWebViewModelの`issueDeckPush`メッセージハンドラ（`status`／`enable`／`disable`／`openSettings`。アプリ自身のメインフレームからだけ受け付ける）。
+
+| 項目 | 方針 |
+| --- | --- |
+| 状態 | 純関数`describeNativePushState`（`src/lib/native-push.ts`）。許可・受信設定・端末トークン・サーバーの`endpointKey`（`apns:<token>`）がそろったときだけ「オン」。トークンはあるのにサーバーに無ければ「失効」、取れていなければ「確認中」 |
+| 受信設定 | `UserDefaults`の`pushReceivingEnabled`（既定オン）。**オフの間は起動時の許可要求・トークン登録・ページ読み込み後の再登録をしない**。オフのときはページ読み込みのたびに、サーバーに残った登録の解除（DELETE）を再試行する（最後のトークンは`pushLastDeviceToken`に残す） |
+| 拒否済み | OSの許可は変えず、「iPhoneの設定を開く」だけを出す。前面復帰時にSwiftが`issue-deck:native-push-refresh`を投げ、状態を取り直す |
+| テスト通知 | `POST /api/notifications/test`に`endpointKey`を渡すと、その端末だけに送る（省略時は従来どおり全購読） |
+
+この変更は`ios/`に及ぶため、TestFlightの再配布後に実機で確認する。
+
 ## 更新と配布
 
 **Webだけの更新とiOSバイナリの更新を区別する。**
@@ -92,6 +105,7 @@ issue-deck自身の配布状況は、既存の他アプリと同じ経路で画�
 - WKWebViewではWeb Push（`public/sw.js`）が動かない。ネイティブ通知は「ネイティブ通知（#4250）」のとおりAPNsで受け取る
 - キーボード・日本語入力・画面余白は実機で確認する（Webのsafe-area対応との両立を#3846で確認）
 - WebViewは下端まで広げており、`contentInsetAdjustmentBehavior`が既定のままだと下の安全領域ぶんだけWebのレイアウト高さが縮み、フッター下に空きが出る（#4258）。`.never`にしてPWAと同じ下端までの描画に揃えている。実機（TestFlight）で確認する
+- iPad対応（#4283）: 以前は対応端末がiPhoneのみ（`TARGETED_DEVICE_FAMILY = 1`）だったため、iPadでは互換モードのスマホ縦画面（幅約393px）で動いていた。アプリ本体・ShareExtensionとも`1,2`にし、iPadの向きは縦・横すべてを許可している（iPhoneは縦のまま）。iPadの横向き（幅1180px）はWebの`md:`・`lg:`の既存レスポンシブでPC相当の配置になる。Xcodeがsubpcに無いため、iPadでの見た目と回転は実機（TestFlight）で確認する
 
 ## 完了の判定と記録
 

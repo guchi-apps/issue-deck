@@ -121,6 +121,7 @@ import {
 } from "@/lib/dispatch/dispatch-job";
 import { MANUAL_STEP_LABEL } from "@/lib/github/approval-labels";
 import { HIGH_PRIORITY_LABEL } from "@/lib/branch-flow";
+import { parseReleaseProgress } from "@/lib/release-verification-progress";
 import {
   extractRunnableManualStepCommands,
   fillManualStepPlaceholders,
@@ -2142,6 +2143,11 @@ export async function reportDispatchJob(params: {
    * 届いたときだけ`TIMEOUT`として記録する（他の種別では読まない）
    */
   timedOut?: boolean;
+  /**
+   * リリースの統合検証・全体レビュー（#4277）の現在の工程。**受け口ではそのまま渡し、ここで
+   * ジョブの種別に合う工程だけを通す**（種別はジョブを読むまで分からないため）
+   */
+  progress?: unknown;
   now?: Date;
 }): Promise<ReportDispatchJobResult> {
   const now = params.now ?? new Date();
@@ -2159,6 +2165,12 @@ export async function reportDispatchJob(params: {
     exitCode: params.exitCode ?? job.exitCode,
     commandOutput: params.output ?? job.commandOutput,
   };
+
+  // リリース検証の工程（#4277）。届かなければ触らない（最後の工程を終了後も残す）
+  const releaseKind =
+    job.kind === "RELEASE_VERIFY" ? "integration" : job.kind === "RELEASE_REVIEW" ? "ai_review" : null;
+  const progress = releaseKind ? parseReleaseProgress(releaseKind, params.progress) : null;
+  if (progress) data.progress = progress;
 
   // ペアリングコード（#2524）。**コードと期限は必ず組で入れる。** 片方だけを更新すると、
   // 期限の分からないコードか、コードの無い期限が残る（どちらも掃除の条件から外れる）

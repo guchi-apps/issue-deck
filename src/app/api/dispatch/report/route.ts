@@ -94,6 +94,8 @@ export async function POST(request: NextRequest) {
     reviewVerdict: parsePrReviewVerdict(payload?.reviewVerdict),
     // コードレビューのランナー（#4116）が実行上限で打ち切ったとき。真偽値だけを通す
     timedOut: payload?.timedOut === true,
+    // リリース検証の工程（#4277）。形と種別はreportDispatchJobが通す
+    progress: payload?.progress,
   });
 
   if (!result.ok) {

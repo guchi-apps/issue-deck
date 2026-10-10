@@ -138,13 +138,14 @@ export function RepositoryReleaseButton({
         setConfirmOpen(open);
         if (!open) setAllowFailedDeploy(false);
       }}>
-        <AlertDialogContent>
+        <AlertDialogContent className="flex flex-col gap-4 overflow-hidden">
           <AlertDialogHeader>
             <AlertDialogTitle>リリースworkflowを起動しますか？</AlertDialogTitle>
             <AlertDialogDescription>
               {repositoryFullName}のdevelopをmainへ反映するリリースworkflowを起動します。
             </AlertDialogDescription>
           </AlertDialogHeader>
+          <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto">
           <ReleaseBumpKindSelect
             value={bumpKind}
             onChange={setBumpKind}
@@ -163,6 +164,7 @@ export function RepositoryReleaseButton({
           )}
           <ReleaseChangeList repositoryFullName={repositoryFullName} enabled={confirmOpen} />
           {error && <p className="text-xs text-destructive">{error}</p>}
+          </div>
           <AlertDialogFooter>
             <AlertDialogCancel disabled={isTriggering}>キャンセル</AlertDialogCancel>
             <AlertDialogAction

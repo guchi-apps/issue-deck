@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { PullRequestMergeProduction } from "@/components/dashboard/pull-request-merge-production";
@@ -136,12 +136,12 @@ describe("PullRequestMergeProduction", () => {
     const button = (await screen.findByText("要修正のPR")).closest("button");
     expect(button?.textContent).toContain("要修正");
     expect(screen.getByText("問題なしのPR").closest("button")?.textContent).not.toContain("要");
-    expect(screen.getByRole("img", { name: "Claudeレビュー: 要修正" })).toBeTruthy();
-    expect(screen.getByRole("img", { name: "Claudeレビュー: 問題なし" }).className).toContain(
+    expect(screen.getByRole("img", { name: "AIレビュー: 要修正" })).toBeTruthy();
+    expect(screen.getByRole("img", { name: "AIレビュー: 問題なし" }).className).toContain(
       "bg-green-600",
     );
     // 判定表にない変更も、未確認であることを灰色の丸から読める
-    expect(screen.getByRole("img", { name: "Claudeレビュー: 記録なし" })).toBeTruthy();
+    expect(screen.getByRole("img", { name: "AIレビュー: 記録なし" })).toBeTruthy();
     // PR番号が取れない行は押せない
     expect(screen.getByText("番号なしの変更").closest("button")).toBeNull();
 
@@ -219,8 +219,8 @@ describe("PullRequestMergeProduction", () => {
     expect(screen.getByText("止めるべき項目があります（1件）")).toBeTruthy();
     // 一覧の各行には状態の丸を付け、問題なしの判定文は並べない（#3904）
     expect(screen.queryByText("問題なし（LGTM）")).toBeNull();
-    expect(screen.getByRole("img", { name: "Claudeレビュー: 要修正" })).toBeTruthy();
-    expect(screen.getByRole("img", { name: "Claudeレビュー: 問題なし" })).toBeTruthy();
+    expect(screen.getByRole("img", { name: "AIレビュー: 要修正" })).toBeTruthy();
+    expect(screen.getByRole("img", { name: "AIレビュー: 問題なし" })).toBeTruthy();
     expect(
       screen.getByText("自動マージ失敗時の理由表示機能の追加").closest("button")?.textContent,
     ).toContain("要修正");
@@ -298,4 +298,82 @@ describe("PullRequestMergeProduction", () => {
     );
     expect(screen.getByText(/100件以上/)).toBeTruthy();
   });
+
+  it("凍結ブランチのリリースPRでは、3区分とCI・コンフリクトを「リリースの検証」1枚にまとめる（#4277）", async () => {
+    const requestedUrls: string[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        requestedUrls.push(url);
+        if (url.startsWith("/api/repositories/release/verification")) {
+          const section = (kind: string, state: string) => ({
+            kind, state, reason: null, summary: null, evidenceUrl: null, agent: null, updatedAt: null,
+            findings: [], affectedPullRequests: [], affectedFiles: [], reviewedFiles: null, totalFiles: null, progress: null,
+          });
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              verification: {
+                enforced: false,
+                gateStatus: "blocked",
+                blockers: [],
+                integration: section("integration", "passed"),
+                aiReview: section("ai_review", "not_run"),
+                aiReviewAssignee: "Codex · gpt-6-sol",
+                target: { baseSha: "b".repeat(40), headSha: "a".repeat(40) },
+              },
+            }),
+          };
+        }
+        if (url.startsWith("/api/repositories/release/changes")) {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              pullRequests: [
+                {
+                  number: 2077, title: "要修正のPR", issueNumber: 2062, isVersionBump: false, prHeadSha: null, reviewUnavailable: false,
+                  review: { reviewKind: "changes-requested", reviewLabel: "要修正", riskKind: "unknown", riskLabel: "", riskReasons: [], confirmLabel: null, reviewedSha: null },
+                },
+              ],
+              unknownCommits: [],
+              source: "release-pr",
+              headSha: null,
+              truncated: false,
+            }),
+          };
+        }
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ changes: [makeChange({ title: "要修正のPR" })], commitCount: 1, truncated: false, previousVersion: "4.18.0" }),
+        };
+      }),
+    );
+
+    render(
+      <PullRequestMergeProduction
+        pullRequest={makePullRequest({ headRef: "release-main/v4.19.0", ciState: "success", mergeable: true })}
+        open
+      />,
+    );
+
+    expect(await screen.findByText("リリースの検証")).toBeTruthy();
+    expect(await screen.findByText("要修正 1")).toBeTruthy();
+    const titles = screen.getAllByRole("heading", { level: 3 }).map((h) => h.textContent);
+    expect(titles).toEqual(["全体レビュー", "統合検証", "個別PRレビュー", "CI・コンフリクト"]);
+    // 実際の担当が決まる前は「担当予定」。未実施を問題なしにしない
+    expect(screen.getByText("担当予定: Codex · gpt-6-sol")).toBeTruthy();
+    expect(screen.getByText("未実施")).toBeTruthy();
+    // 旧「マージ前の確認」の枠と「Claudeのレビュー」行は出さない（個別PRレビューへ統合）
+    expect(screen.queryByText("マージ前の確認")).toBeNull();
+    expect(screen.queryByText("Claudeのレビュー")).toBeNull();
+    expect(within(screen.getByTestId("merge-precheck-inline")).getByText("成功")).toBeTruthy();
+    // 変更一覧は個別PRレビューを開いた中にあり、判定は区分と同じ取得から引く
+    expect(screen.getByRole("img", { name: "AIレビュー: 要修正" })).toBeTruthy();
+    expect(requestedUrls.some((u) => u.includes("/api/repositories/release/verification?owner=guchi-apps&repo=issue-deck&pullRequest=2075"))).toBe(true);
+  });
 });
+

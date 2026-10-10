@@ -1,0 +1,25 @@
+-- 本番VPSのissue-deckプロセスのメモリ計測サンプル（#4256）。
+CREATE TABLE `VpsMemorySample` (
+    `id` VARCHAR(191) NOT NULL,
+    `sampledAt` DATETIME(3) NOT NULL,
+    `receivedAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    `status` VARCHAR(16) NOT NULL,
+    `reason` VARCHAR(32) NULL,
+    `segmentKey` VARCHAR(48) NULL,
+    `pid` INTEGER NULL,
+    `startedAt` DATETIME(3) NULL,
+    `rssKb` INTEGER NULL,
+    `hwmKb` INTEGER NULL,
+    `threads` INTEGER NULL,
+    `uptimeSec` INTEGER NULL,
+    `memTotalKb` BIGINT NULL,
+    `memAvailableKb` BIGINT NULL,
+    `swapTotalKb` BIGINT NULL,
+    `swapFreeKb` BIGINT NULL,
+    `nodeArgs` VARCHAR(255) NULL,
+    `runId` VARCHAR(40) NULL,
+    `mode` VARCHAR(16) NULL,
+    INDEX `VpsMemorySample_sampledAt_idx`(`sampledAt`),
+    INDEX `VpsMemorySample_segmentKey_idx`(`segmentKey`),
+    PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
