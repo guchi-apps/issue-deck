@@ -2,12 +2,15 @@ import { NextResponse, type NextRequest } from "next/server";
 
 import { requireUserId } from "@/lib/auth-user";
 import { db } from "@/lib/db";
-import { mergePullRequest } from "@/lib/github/actions-api";
+import { fetchPullRequest, mergePullRequest } from "@/lib/github/actions-api";
 import { withGithubApiFeature } from "@/lib/github/api-usage";
 import { getInstallationToken } from "@/lib/github/app-auth";
 import { recordDeployLaunchWatch } from "@/lib/github/deploy-launch-watch";
 import { GithubApiError } from "@/lib/github/issues-api";
 import { previewModeGuard } from "@/lib/preview-mode";
+import { evaluateReleaseMergeGate, isReleasePullRequest } from "@/lib/release-merge-gate";
+import { listReleaseVerificationRecords } from "@/lib/release-verification";
+import { getReleaseVerificationConfig } from "@/lib/release-verification-config";
 
 async function findRepository(userId: string, owner: string, repo: string) {
   return db.repository.findFirst({
@@ -31,7 +34,7 @@ async function handlePOST(request: NextRequest) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
-  const body: { owner?: string; repo?: string; number?: number } = await request
+  const body: { owner?: string; repo?: string; number?: number; acknowledgeVerification?: boolean } = await request
     .json()
     .catch(() => ({}));
   const { owner, repo, number } = body;
@@ -47,7 +50,38 @@ async function handlePOST(request: NextRequest) {
 
   try {
     const token = await getInstallationToken(repository.installation.installationId);
-    const merged = await mergePullRequest(owner, repo, Number(number), token);
+
+    // リリースPR（base=main・head=release-main/v*）だけに、固定内容の検証ゲートを掛ける（#4212）。
+    // **表示だけに頼らず、マージ直前にbase/headを取り直して記録のSHAと突き合わせる。**
+    // develop向けPR・知見昇格PRなど他のPRは従来どおり。
+    let expectedHeadSha: string | undefined;
+    const pr = await fetchPullRequest(owner, repo, Number(number), token);
+    if (pr.base && pr.head.ref && isReleasePullRequest({ baseRef: pr.base.ref, headRef: pr.head.ref })) {
+      expectedHeadSha = pr.head.sha;
+      const records = await listReleaseVerificationRecords(`${owner}/${repo}`, Number(number));
+      const gate = evaluateReleaseMergeGate({
+        current: { baseSha: pr.base.sha, headSha: pr.head.sha },
+        records,
+        enforced: getReleaseVerificationConfig(`${owner}/${repo}`).enforced,
+      });
+      // 失敗・未実施・古い結果は確認済みにできない。要確認だけが明示確認（acknowledgeVerification）で通れる
+      const overridable = gate.status === "needs_confirmation" && body.acknowledgeVerification === true;
+      if (gate.status === "blocked" || (gate.status === "needs_confirmation" && !overridable)) {
+        return NextResponse.json(
+          { error: "release_verification_required", gate },
+          { status: 409 },
+        );
+      }
+      if (overridable) {
+        console.warn(
+          `[POST /api/issues/pull-request-merge] ${owner}/${repo}#${number} 要確認の検証を明示確認のうえマージ: ${gate.blockers
+            .map((b) => b.reason)
+            .join(" / ")}`,
+        );
+      }
+    }
+
+    const merged = await mergePullRequest(owner, repo, Number(number), token, expectedHeadSha);
 
     // mainへのマージなら、本番デプロイが本当に起動したかを見張る行を1つ置く（#2703）。
     // **GitHubはマージのイベントを配送し損ねることがあり**、そのときはワークフローの定義が
