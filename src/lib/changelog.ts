@@ -42,6 +42,17 @@ export type ChangelogEntry = {
  */
 export const APP_CHANGELOG: ChangelogEntry[] = [
   {
+    version: "8.46.0",
+    date: "2026-10-10",
+    changes: [
+      "Issue詳細からPR詳細を開いたとき、直前に見ていた状態別の絞り込みを引き継がず、「すべてのPR」として表示されるようになりました。また、実行キューのCodex CLIの横にあった接続ボタンを削除しました。",
+    ],
+    usage: [
+      "1. Issue詳細を開き、対応PRの項目からPR詳細を開く。",
+      "2. PR一覧が直前の状態別ビューではなく「すべてのPR」で表示されていれば成功。",
+    ],
+  },
+  {
     version: "8.45.2",
     date: "2026-10-10",
     changes: [
