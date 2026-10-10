@@ -1,7 +1,7 @@
 import { isPlanComment } from "@/lib/github/planning-phase";
 import type { IssueComment } from "@/types/issue";
 
-const PLAN_REVIEW_MARKER = "<!-- supervisor:plan-review -->";
+export const PLAN_REVIEW_MARKER = "<!-- supervisor:plan-review -->";
 const PLAN_REVISER_MARKER = "<!-- issue-deck-agent:plan-reviser -->";
 
 /**

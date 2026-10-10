@@ -366,13 +366,17 @@ describe("PullRequestMergeProduction", () => {
     expect(titles).toEqual(["全体レビュー", "統合検証", "個別PRレビュー", "CI・コンフリクト"]);
     // 実際の担当が決まる前は「担当予定」。未実施を問題なしにしない
     expect(screen.getByText("担当予定: Codex · gpt-6-sol")).toBeTruthy();
-    expect(screen.getByText("未実施")).toBeTruthy();
+    // 全体レビュー区分と、各PR行の「全体〔共通〕」の両方が同じ「未実施」を出す（#4305）
+    expect(screen.getAllByText("未実施").length).toBeGreaterThan(0);
     // 旧「マージ前の確認」の枠と「Claudeのレビュー」行は出さない（個別PRレビューへ統合）
     expect(screen.queryByText("マージ前の確認")).toBeNull();
     expect(screen.queryByText("Claudeのレビュー")).toBeNull();
     expect(within(screen.getByTestId("merge-precheck-inline")).getByText("成功")).toBeTruthy();
     // 変更一覧は個別PRレビューを開いた中にあり、判定は区分と同じ取得から引く
-    expect(screen.getByRole("img", { name: "AIレビュー: 要修正" })).toBeTruthy();
+    // 各PR行の5チェック（#4305）。旧来の丸は、コードのチェックが引き継ぐ
+    expect(screen.getByRole("button", { name: "コードレビュー（このPRのAIレビュー）: 要修正" })).toBeTruthy();
+    expect(screen.getAllByRole("button", { name: /^全体レビュー（リリース全体の共通結果）/ }).length).toBeGreaterThan(0);
+    expect(requestedUrls.some((u) => u.includes("include=merge-checks"))).toBe(true);
     expect(requestedUrls.some((u) => u.includes("/api/repositories/release/verification?owner=guchi-apps&repo=issue-deck&pullRequest=2075"))).toBe(true);
   });
 });

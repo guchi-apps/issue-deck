@@ -12,8 +12,22 @@ import {
   fetchPullRequestCommits,
   PULL_REQUEST_COMMITS_PER_PAGE,
 } from "@/lib/github/pull-requests-api";
-import { toReleaseChanges, withReleaseReviews } from "@/lib/release-changes";
-import type { ReleaseChangeListResponse } from "@/types/pull-request";
+import { fetchPullRequestRollups, pullRequestRollupKey } from "@/lib/github/check-rollup";
+import { mapComment } from "@/lib/github/issue-mapper";
+import { fetchCommentsForIssue } from "@/lib/github/issues-api";
+import { resolvePlanCheck } from "@/lib/github/release-plan-check";
+import {
+  toReleaseChanges,
+  toReleaseChangeCi,
+  withMergeChecks,
+  withReleaseReviews,
+} from "@/lib/release-changes";
+import type {
+  ReleaseChangeCiCheck,
+  ReleaseChangeListResponse,
+  ReleaseChangePlanCheck,
+  ReleaseChangePullRequest,
+} from "@/types/pull-request";
 
 /** closed一覧に無いPRの本文を単体で補う上限。超えた分は「取得できませんでした」にする */
 const MAX_BODY_FETCHES = 20;
@@ -53,6 +67,47 @@ async function fetchPullRequestBodies(
   return bodies;
 }
 
+/**
+ * 5チェック（#4305）の追加取得。**`include=merge-checks`を付けた呼び出し（本番マージ確認ダイアログ）
+ * だけが呼ぶ**——この応答は他の画面も使うので、全員にGitHubの呼び出しを増やさない。
+ * CIはPRのhead（個別PRの過去の結果）をGraphQL1本でまとめて引き、計画は関連Issueのコメントを
+ * 上限付きで読む。失敗したPRは結果に入れない（`withMergeChecks`が取得不可にする）。
+ */
+async function fetchMergeChecks(
+  owner: string,
+  repo: string,
+  pullRequests: readonly ReleaseChangePullRequest[],
+  token: string,
+): Promise<{ ci: Map<number, ReleaseChangeCiCheck>; plan: Map<number, ReleaseChangePlanCheck> }> {
+  const targets = pullRequests.filter((pr) => !pr.isVersionBump);
+  const ci = new Map<number, ReleaseChangeCiCheck>();
+  const plan = new Map<number, ReleaseChangePlanCheck>();
+
+  const rollups = await fetchPullRequestRollups(
+    targets.map((pr) => ({ owner, repo, number: pr.number })),
+    token,
+  ).catch(() => new Map());
+  for (const pr of targets) {
+    const rollup = rollups.get(pullRequestRollupKey(owner, repo, pr.number));
+    if (rollup) ci.set(pr.number, toReleaseChangeCi(rollup.rollup?.state));
+  }
+
+  await Promise.all(
+    targets
+      .filter((pr): pr is ReleaseChangePullRequest & { issueNumber: number } => pr.issueNumber !== null)
+      .slice(0, MAX_BODY_FETCHES)
+      .map(async (pr) => {
+        try {
+          const comments = await fetchCommentsForIssue(owner, repo, pr.issueNumber, token);
+          plan.set(pr.number, resolvePlanCheck(comments.map(mapComment)));
+        } catch {
+          // 入れない＝取得不可として画面に出る
+        }
+      }),
+  );
+  return { ci, plan };
+}
+
 export function GET(request: NextRequest) {
   return withGithubApiFeature("release_changes", () => handleGET(request));
 }
@@ -78,6 +133,7 @@ async function handleGET(request: NextRequest) {
   const owner = searchParams.get("owner");
   const repo = searchParams.get("repo");
   const pullRequestParam = searchParams.get("pullRequest");
+  const includeMergeChecks = searchParams.get("include") === "merge-checks";
   const pullRequestNumber = pullRequestParam === null ? null : Number(pullRequestParam);
 
   if (
@@ -121,8 +177,14 @@ async function handleGET(request: NextRequest) {
       pullRequests.filter((pr) => !pr.isVersionBump).map((pr) => pr.number),
       token,
     );
+    const reviewed = withReleaseReviews(pullRequests, bodies);
+    let withChecks = reviewed;
+    if (includeMergeChecks) {
+      const checks = await fetchMergeChecks(owner, repo, reviewed, token);
+      withChecks = withMergeChecks(reviewed, checks.ci, checks.plan);
+    }
     const response: ReleaseChangeListResponse = {
-      pullRequests: withReleaseReviews(pullRequests, bodies),
+      pullRequests: withChecks,
       unknownCommits,
       source: pullRequestNumber !== null ? "release-pr" : "develop",
       // 打ち切ったときは末尾が終端とは限らないので出さない
