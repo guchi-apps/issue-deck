@@ -48,6 +48,7 @@ import {
   type PlanReviewAgent,
   type PlanReviewAgentSetting,
 } from "@/lib/app-settings";
+import { describeReleaseReviewAssignee, resolveReleaseReviewAssignee } from "@/lib/release-review-assignee";
 import { NO_AI_PROVIDER_OVERRIDES, type AiProviderOverrides } from "@/lib/execution-flow-settings";
 
 export type AppSettingsValues = {
@@ -852,6 +853,11 @@ export function ExecutionSettingsSection({
             ))}
           </SelectContent>
         </Select>
+        {/* リリースPRの全体AIレビュー（#4238）の担当は、この設定で決まる。画面の表示と実際に積むジョブは同じ関数を使う */}
+        <p className="text-xs text-muted-foreground" data-testid="release-review-assignee">
+          リリース全体レビューの担当（実効）:{" "}
+          {describeReleaseReviewAssignee(resolveReleaseReviewAssignee({ appAiModelReasoning, aiExecutionProvider }))}
+        </p>
       </div>
       </>}
 

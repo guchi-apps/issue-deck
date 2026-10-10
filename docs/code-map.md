@@ -629,6 +629,12 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
     実行はサブPCの`scripts/run-release-verify.sh`、結果は`/api/dispatch/report`の`releaseVerification`から`ReleaseVerification`へ記録。
     コマンドはリポジトリ別に[`lib/release-verification-config.ts`](../src/lib/release-verification-config.ts)が持つ。
     設計は[multi-agent/release-verification.md](multi-agent/release-verification.md)
+  - **リリース全体のAIレビューは`DispatchJob`（`kind=RELEASE_REVIEW`）**（#4238）。積む処理は
+    [`lib/dispatch/release-review-jobs.ts`](../src/lib/dispatch/release-review-jobs.ts)（`release-verify`の`request`が統合検証と並べて呼ぶ）、
+    担当は[`lib/release-review-assignee.ts`](../src/lib/release-review-assignee.ts)（`appAiModelReasoning`に従い、画面とジョブで同じ関数）、
+    結果の正規化は[`lib/release-review-result.ts`](../src/lib/release-review-result.ts)、実行はサブPCの`scripts/run-release-review.sh`。
+    画面の3区分は[`components/dashboard/release-review-sections.tsx`](../src/components/dashboard/release-review-sections.tsx)
+    （PCは`GET /api/repositories/release/verification`、スマホは`GET /api/repositories/release`の`releasePullRequest.verification`）
   - **リポジトリ名の変更は`RepositoryNameAlias`で引き継ぐ**（#3613）。`SessionUsage.repository`は
     作業ディレクトリ名の短い名前で、改名すると旧名の行が別リポジトリに分かれる。
     [`lib/repository-alias.ts`](../src/lib/repository-alias.ts)がリポジトリ同期（と

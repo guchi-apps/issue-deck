@@ -1,4 +1,5 @@
 import { db } from "@/lib/db";
+import type { ReleaseVerificationDetailRow } from "@/lib/release-verification-summary";
 import {
   RELEASE_VERIFICATION_KINDS,
   type ReleaseVerificationKind,
@@ -79,5 +80,36 @@ export async function listReleaseVerificationRecords(
     const state = parseReleaseVerificationState(row.state);
     if (!kind || !state) return [];
     return [{ kind, state, baseSha: row.baseSha, headSha: row.headSha, unverifiedScope: row.unverifiedScope }];
+  });
+}
+
+/** 画面向けに、要約・指摘・担当を含む行を返す（#4238）。古いSHAの行も含め、判定側が無効にする */
+export async function listReleaseVerificationDetails(
+  repoFullName: string,
+  prNumber: number,
+): Promise<ReleaseVerificationDetailRow[]> {
+  const rows = await db.releaseVerification.findMany({
+    where: { repoFullName, prNumber },
+    orderBy: { updatedAt: "desc" },
+  });
+  return rows.flatMap((row) => {
+    const kind = parseReleaseVerificationKind(row.kind);
+    const state = parseReleaseVerificationState(row.state);
+    if (!kind || !state) return [];
+    return [
+      {
+        kind,
+        state,
+        baseSha: row.baseSha,
+        headSha: row.headSha,
+        agent: row.agent,
+        summary: row.summary,
+        findings: row.findings,
+        unverifiedScope: row.unverifiedScope,
+        evidenceUrl: row.evidenceUrl,
+        message: row.message,
+        updatedAt: row.updatedAt,
+      },
+    ];
   });
 }

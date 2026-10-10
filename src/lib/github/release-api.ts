@@ -330,6 +330,8 @@ export type GithubApiPullRequest = {
   title: string;
   body: string | null;
   head: { ref: string; sha: string };
+  /** GitHubの一覧応答は常に返す。検証記録の対象（mainの先端）の照合に使う（#4238） */
+  base?: { ref: string; sha: string };
 };
 
 /**
