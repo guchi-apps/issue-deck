@@ -2,21 +2,18 @@ import { NextResponse, type NextRequest } from "next/server";
 
 import { requireUserId } from "@/lib/auth-user";
 import { db } from "@/lib/db";
-import { closePullRequest } from "@/lib/github/actions-api";
 import { withGithubApiFeature } from "@/lib/github/api-usage";
 import { getInstallationToken } from "@/lib/github/app-auth";
 import { GithubApiError } from "@/lib/github/github-api-error";
-import { createComment } from "@/lib/github/issues-api";
 import {
-  deleteBranch,
-  dispatchReleaseWorkflow,
   fetchOpenPullRequestsForBase,
   fetchReleaseRebuildCandidate,
   type GithubApiPullRequest,
 } from "@/lib/github/release-api";
 import { releaseWorkflowExists } from "@/lib/github/release-workflow-cache";
 import { previewModeGuard } from "@/lib/preview-mode";
-import { canRebuildRelease, releaseRebuildCloseComment } from "@/lib/release-rebuild";
+import { canRebuildRelease } from "@/lib/release-rebuild";
+import { rebuildReleaseCandidate } from "@/lib/release-rebuild-run";
 import { isBumpKind } from "@/lib/semver-bump";
 
 /**
@@ -152,15 +149,17 @@ async function handlePOST(request: NextRequest) {
       return NextResponse.json({ error: "nothing_to_rebuild" }, { status: 409 });
     }
 
-    // **閉じてから起動する。** 先に起動すると、workflowの状態判定が「リリースPRが開いている」
-    // と見てスキップすることがある。
-    await createComment(owner, repo, releasePr.number, token, {
-      body: releaseRebuildCloseComment(candidate),
+    await rebuildReleaseCandidate({
+      owner,
+      repo,
+      token,
+      releasePr,
+      candidate,
+      bumpKind: isBumpKind(bumpKind) ? bumpKind : undefined,
+      onClosed: () => {
+        closed = true;
+      },
     });
-    await closePullRequest(owner, repo, releasePr.number, token);
-    closed = true;
-    await deleteBranch(owner, repo, releasePr.head.ref, token);
-    await dispatchReleaseWorkflow(owner, repo, token, isBumpKind(bumpKind) ? bumpKind : undefined);
     return NextResponse.json({ ok: true });
   } catch (error) {
     // 起動だけが落ちた場合は、リリースPRが閉じたまま残る。画面の「リリースする」から

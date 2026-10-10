@@ -3,6 +3,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { ChevronRight, ExternalLink, RotateCcw } from "lucide-react";
 
+import { ReleaseFixCreate, ReleaseFixSeriesPanel } from "@/components/dashboard/release-fix-panel";
 import { REVIEW_MARK, REVIEW_TONE } from "@/components/dashboard/review-verdict";
 import { ReleaseRebuildButton } from "@/components/dashboard/release-rebuild-button";
 import { useReleaseChanges, type UseReleaseChangesResult } from "@/hooks/use-release-changes";
@@ -419,6 +420,7 @@ function AiReviewSection({
   pullRequestNumber,
   target,
   onReload,
+  onFixCreated,
   nowMs,
 }: {
   section: ReleaseVerificationSection;
@@ -427,6 +429,7 @@ function AiReviewSection({
   pullRequestNumber?: number;
   target?: { baseSha: string; headSha: string };
   onReload?: () => void;
+  onFixCreated?: () => void;
   nowMs: number;
 }) {
   const baseHead = describeSection(section, nowMs);
@@ -615,16 +618,42 @@ function AiReviewSection({
               <ReleaseRebuildButton repositoryFullName={repositoryFullName} />
             </div>
           )}
+          {section.findings.length > 0 && !executionFailed && pullRequestNumber !== undefined && target && (
+            <ReleaseFixCreate
+              repositoryFullName={repositoryFullName}
+              pullRequestNumber={pullRequestNumber}
+              target={target}
+              sourceKind="review_finding"
+              findings={section.findings}
+              onDone={onFixCreated}
+            />
+          )}
         </>
       ) : undefined}
     </SectionRow>
   );
 }
 
-function IntegrationSection({ section, nowMs }: { section: ReleaseVerificationSection; nowMs: number }) {
+function IntegrationSection({
+  section,
+  nowMs,
+  repositoryFullName,
+  pullRequestNumber,
+  target,
+  onFixCreated,
+}: {
+  section: ReleaseVerificationSection;
+  nowMs: number;
+  repositoryFullName: string;
+  pullRequestNumber?: number;
+  target?: { baseSha: string; headSha: string };
+  onFixCreated?: () => void;
+}) {
   const head = describeSection(section, nowMs);
   const progress = section.progress;
-  const hasDetail = Boolean(section.summary) || Boolean(section.evidenceUrl) || progress !== null;
+  const canDraftFix =
+    (section.state === "failed" || section.state === "needs_check") && pullRequestNumber !== undefined && target !== undefined;
+  const hasDetail = Boolean(section.summary) || Boolean(section.evidenceUrl) || progress !== null || canDraftFix;
   return (
     <SectionRow
       title="統合検証"
@@ -674,6 +703,15 @@ function IntegrationSection({ section, nowMs }: { section: ReleaseVerificationSe
               既存CIの記録
               <ExternalLink aria-hidden className="size-3" />
             </a>
+          )}
+          {canDraftFix && pullRequestNumber !== undefined && target && (
+            <ReleaseFixCreate
+              repositoryFullName={repositoryFullName}
+              pullRequestNumber={pullRequestNumber}
+              target={target}
+              sourceKind="integration_failure"
+              onDone={onFixCreated}
+            />
           )}
         </>
       ) : undefined}
@@ -888,6 +926,11 @@ export function ReleaseReviewSections({
       (section) => section.state === "waiting" || section.state === "running",
     );
   const nowMs = useNow(active);
+  const [fixTick, setFixTick] = useState(0);
+  const onFixCreated = () => {
+    setFixTick((n) => n + 1);
+    onReload?.();
+  };
   if (!headRef.startsWith(RELEASE_BRANCH_PREFIX)) return null;
 
   const gate = verification && verification.enforced && verification.gateStatus !== "not_enforced"
@@ -931,9 +974,17 @@ export function ReleaseReviewSections({
             pullRequestNumber={pullRequestNumber}
             target={verification.target}
             onReload={onReload}
+            onFixCreated={onFixCreated}
             nowMs={nowMs}
           />
-          <IntegrationSection section={verification.integration} nowMs={nowMs} />
+          <IntegrationSection
+            section={verification.integration}
+            nowMs={nowMs}
+            repositoryFullName={repositoryFullName}
+            pullRequestNumber={pullRequestNumber}
+            target={verification.target}
+            onFixCreated={onFixCreated}
+          />
         </>
       ) : (
         <>
@@ -964,6 +1015,13 @@ export function ReleaseReviewSections({
             }
           />
         </>
+      )}
+      {pullRequestNumber !== undefined && (
+        <ReleaseFixSeriesPanel
+          repositoryFullName={repositoryFullName}
+          pullRequestNumber={pullRequestNumber}
+          reloadToken={fixTick}
+        />
       )}
       <IndividualReviewSection
         changes={changes}
