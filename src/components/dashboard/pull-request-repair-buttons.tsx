@@ -35,7 +35,7 @@ type AutoRepairLoop = {
 const STOP_REASON_LABEL: Record<string, string> = {
   user_action_required: "判断が必要なレビュー指摘があります。",
   max_rounds_reached: "自動修正が上限の3回に達しました。",
-  repeated_problem: "同じ問題が修正後も再発しました。",
+  repeated_problem: "同じ問題が修正後も残っています。修正コミットが無い場合は再レビューを実行してください。",
   pull_request_closed: "Pull Requestがクローズされました。",
   timed_out: "CI・レビュー待ちが一定時間を超えたため停止しました。",
   dispatch_failed: "自動修正ワークフローの起動に失敗しました。",

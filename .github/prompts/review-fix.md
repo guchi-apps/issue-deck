@@ -73,6 +73,13 @@ GITHUB_TOKENです。以下の`gh pr comment` / `gh issue comment`は、トー�
 - 投稿したら停止する。**直した指摘をpushした場合もラベルは外さない**——外すと、再レビューが
   判断の要る指摘を見落としたときに自動マージされうる
 
+### コード変更なしで指摘が解消した場合
+指摘が別の手段で解消した（手作業Issueの起票・既に対応済みと確認した等）ためコミットが要らない場合も、
+**HEADが変わらないと再レビューが走らず、「要修正」判定が同じHEADに残って自動修復が
+「同じ問題が再発」で止まる**（#4270）。対応内容を`gh pr comment ${PR_NUMBER}`で報告したうえで、
+`git commit --allow-empty -m "レビュー指摘への対応を報告（コード変更なし） #${ISSUE_NUMBER}"`
+（Authorは`Claude Code <claude-code@example.com>`）を作って`git push origin ${BRANCH}`し、再レビューを起動する。
+
 ### すべて直せた場合
 最後に `gh issue comment ${ISSUE_NUMBER} --body "..."` で、Issueにも修正が完了した旨と
 対象PR（${PR_URL}）を日本語で報告する（無人実行のため、この報告が使用者にとって唯一の
