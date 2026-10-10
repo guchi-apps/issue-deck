@@ -61,6 +61,7 @@ import {
   IosDistributionIcon,
   useIosDistributionState,
 } from "@/components/dashboard/ios-distribution-icon";
+import { ReleasePreparationAlert } from "@/components/dashboard/release-preparation-alert";
 import { ReleaseRebuildButton } from "@/components/dashboard/release-rebuild-button";
 import { getWebviewIosRepository } from "@/lib/webview-ios-repos";
 import { ResizeHandle } from "@/components/dashboard/resize-handle";
@@ -1399,6 +1400,15 @@ function ReleaseFlowGraph({
           runUrl={deployFailure.htmlUrl}
           isPending={deployTriggerPending}
           onTriggered={onDeployTriggered}
+          className="mb-2"
+        />
+      )}
+
+      {/* リリース準備の失敗（#4335）。個別Issueを確認待ちにせず、ここへ1件として出す */}
+      {!repository.deviceBuild && (
+        <ReleasePreparationAlert
+          repositoryFullName={repository.repositoryFullName}
+          onResumed={onReleaseTriggered}
           className="mb-2"
         />
       )}

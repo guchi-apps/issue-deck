@@ -2648,3 +2648,33 @@ model ReleaseFixSeries {
   @@index([repositoryFullName, releasePrNumber])
   @@index([status])
 }
+
+// リリース準備（`release-develop-to-main.yml`の`release`ジョブ）の失敗記録（#4335）。
+// 共通のリリース処理が失敗しても対象Issue全件へ`00.check-user`を付けず、リリース画面に1件として出す。
+// 失敗した工程・エラー抜粋はworkflowの申告ではなく、サーバーがGitHubのrun/ジョブ/ログから取り直す。
+model ReleasePreparationFailure {
+  id                 String    @id @default(cuid())
+  repositoryFullName String    @db.VarChar(191)
+  runId              String    @db.VarChar(32)
+  runUrl             String    @db.VarChar(512)
+  // `workflow_dispatch` / `push` / `schedule`
+  event              String?   @db.VarChar(32)
+  // 起動時に指定された上げ幅（再開時に同じ指定で起動し直す）
+  bumpKind           String?   @db.VarChar(16)
+  jobName            String?   @db.VarChar(255)
+  stepName           String?   @db.VarChar(255)
+  // 機密除去済みのエラー行（`##[error]`）。生ログ全文は持たない
+  errorExcerpt       String?   @db.Text
+  // `open`（未解決） / `resolved`（後続のrunで準備が進んだ）
+  status             String    @db.VarChar(16)
+  resolvedAt         DateTime?
+  resolvedRunUrl     String?   @db.VarChar(512)
+  // 解決時に整理した（今回の失敗由来と確認できた）確認待ちラベルのIssue番号（JSON配列）
+  clearedIssues      Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([repositoryFullName, runId])
+  @@index([repositoryFullName, status])
+}
