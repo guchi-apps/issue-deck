@@ -113,6 +113,8 @@ export type UsageDay = UsageTotals & {
   byAgent: UsageByAgent;
   bySource: UsageBySource;
   modelTiers: UsageModelTiers;
+  /** その日に動いたIssue・PRの件数（重複除去。番号を持たないセッションは数えない。#4285） */
+  issues: number;
   /** その日に使われたモデルの表示ラベル（`sessionUsageModelLabel`、重複除去・出現順） */
   modelLabels: string[];
 };
@@ -122,6 +124,11 @@ export type UsageGroup = UsageTotals & {
   bySource: UsageBySource;
   /** エージェント×モデルの重さ別の内訳（#3552）。`byDay`と同じ`addEntryModelTier`で積む */
   modelTiers: UsageModelTiers;
+  /**
+   * このグループに現れたIssue・PRの件数（重複除去。#4285）。**分母がグループごとに別なので、
+   * グループ間の和は期間全体の件数と一致しない**（同じIssueが複数の日・リポジトリ・種別に現れる）
+   */
+  issues: number;
 };
 
 /**
@@ -570,6 +577,7 @@ export function fillUsageDays(days: UsageDay[], since: string, until: string): U
         byAgent: emptyByAgent(),
         bySource: emptyBySource(),
         modelTiers: emptyModelTiers(),
+        issues: 0,
         modelLabels: [],
       });
     }
@@ -624,12 +632,25 @@ export function buildSessionUsageSummary({
   const byKind = new Map<string, UsageGroup>();
   const byIssue = new Map<string, UsageIssue>();
   const hosts = new Set<string>();
+  // Issue数の重複除去用（#4285）。グループごとに別のSetで数える
+  const dayIssueKeys = new Map<string, Set<string>>();
+  const repositoryIssueKeys = new Map<string, Set<string>>();
+  const kindIssueKeys = new Map<string, Set<string>>();
+  const noteIssue = (map: Map<string, Set<string>>, key: string, issueKey: string | null) => {
+    if (issueKey === null) return;
+    const keys = map.get(key) ?? new Set<string>();
+    keys.add(issueKey);
+    map.set(key, keys);
+  };
   let implementationSessions = 0;
   const usageGaps = { missing: 0, unpriced: 0 };
 
   for (const entry of inPeriod) {
     const gap = sessionUsageGap(entry);
     if (gap) usageGaps[gap] += 1;
+    // **Issue番号もPR番号も無いセッションはIssue数に数えない**（「Issue・PR別」と同じ基準。#3427）
+    const countedIssueKey =
+      entry.issueNumber === null && entry.prNumber === null ? null : sessionUsageIssueKey(entry);
     addEntry(totals, entry);
     addEntry(totalsByAgent[entry.agent], entry);
     addEntry(totalsBySource[entry.source === "github-actions" ? "github-actions" : "local"], entry);
@@ -643,8 +664,10 @@ export function buildSessionUsageSummary({
         byAgent: emptyByAgent(),
         bySource: emptyBySource(),
         modelTiers: emptyModelTiers(),
+        issues: 0,
         modelLabels: [],
       };
+      noteIssue(dayIssueKeys, dateKey, countedIssueKey);
       addEntryWithAgent(day, entry);
       addEntryWithSource(day, entry);
       addEntryModelTier(day.modelTiers, entry);
@@ -663,7 +686,9 @@ export function buildSessionUsageSummary({
       byAgent: emptyByAgent(),
       bySource: emptyBySource(),
       modelTiers: emptyModelTiers(),
+      issues: 0,
     };
+    noteIssue(repositoryIssueKeys, repositoryKey, countedIssueKey);
     addEntryWithAgent(repository, entry);
     addEntryWithSource(repository, entry);
     addEntryModelTier(repository.modelTiers, entry);
@@ -678,7 +703,9 @@ export function buildSessionUsageSummary({
         byAgent: emptyByAgent(),
         bySource: emptyBySource(),
         modelTiers: emptyModelTiers(),
+        issues: 0,
       };
+      noteIssue(kindIssueKeys, row.key, countedIssueKey);
       addEntryWithAgent(kind, row.entry);
       addEntryWithSource(kind, row.entry);
       addEntryModelTier(kind.modelTiers, row.entry);
@@ -722,6 +749,9 @@ export function buildSessionUsageSummary({
   }
 
   const byCost = (a: { costUsd: number }, b: { costUsd: number }) => b.costUsd - a.costUsd;
+  for (const [key, day] of byDay) day.issues = dayIssueKeys.get(key)?.size ?? 0;
+  for (const [key, repository] of byRepository) repository.issues = repositoryIssueKeys.get(key)?.size ?? 0;
+  for (const [key, kind] of byKind) kind.issues = kindIssueKeys.get(key)?.size ?? 0;
 
   const issues = [...byIssue.values()].map((issue) => {
     // **進行中のセッションほど上へ出す。** 使用量順では、開始直後で金額の小さいセッションが
@@ -744,6 +774,8 @@ export function buildSessionUsageSummary({
           byAgent: emptyByAgent(),
           bySource: emptyBySource(),
           modelTiers: emptyModelTiers(),
+          // Issue単位の内訳なので常に1件
+          issues: 1,
           models: [],
         };
         addEntryWithAgent(kind, row.entry);
@@ -888,7 +920,8 @@ export type RepositoryPieSlice = {
   /** リポジトリ名。「その他」は空文字（`isOther`で見分ける） */
   key: string;
   label: string;
-  costUsd: number;
+  /** 選んだ基準（#4285）の値。金額基準のときは金額（USD） */
+  value: number;
   /** 全体に対する割合（0〜1） */
   fraction: number;
   /** 「その他」にまとめたリポジトリの数。上位の切れは1 */
@@ -905,35 +938,93 @@ export const REPOSITORY_PIE_MIN_FRACTION = 0.03;
  * 金額が0のリポジトリは切れにしない。割合は金額0を除いた合計に対する比。
  */
 export function buildRepositoryPieSlices(
-  groups: Pick<UsageGroup, "key" | "costUsd">[],
+  groups: (Pick<UsageGroup, "key"> & Partial<UsageBasisRow>)[],
+  basis: UsageBasis = "cost",
   minFraction = REPOSITORY_PIE_MIN_FRACTION,
 ): RepositoryPieSlice[] {
-  const ranked = groups.filter((group) => group.costUsd > 0).sort((a, b) => b.costUsd - a.costUsd);
-  const total = ranked.reduce((sum, group) => sum + group.costUsd, 0);
+  const valueOf = (group: (typeof groups)[number]) => usageBasisValue(group, basis);
+  const ranked = groups.filter((group) => valueOf(group) > 0).sort((a, b) => valueOf(b) - valueOf(a));
+  const total = ranked.reduce((sum, group) => sum + valueOf(group), 0);
   if (total <= 0) return [];
 
-  const shown = ranked.filter((group) => group.costUsd / total >= minFraction);
+  const shown = ranked.filter((group) => valueOf(group) / total >= minFraction);
   const slices: RepositoryPieSlice[] = shown.map((group) => ({
     key: group.key,
     label: group.key || "(不明)",
-    costUsd: group.costUsd,
-    fraction: group.costUsd / total,
+    value: valueOf(group),
+    fraction: valueOf(group) / total,
     repositoryCount: 1,
     isOther: false,
   }));
   const rest = ranked.slice(shown.length);
   if (rest.length > 0) {
-    const restCost = rest.reduce((sum, group) => sum + group.costUsd, 0);
+    const restValue = rest.reduce((sum, group) => sum + valueOf(group), 0);
     slices.push({
       key: "",
       label: "その他",
-      costUsd: restCost,
-      fraction: restCost / total,
+      value: restValue,
+      fraction: restValue / total,
       repositoryCount: rest.length,
       isOther: true,
     });
   }
   return slices;
+}
+
+/**
+ * 「日別・リポジトリ別・セッション種別別」を何で測るか（#4285）。集計期間の下のカードで選ぶ。
+ * `cost`は従量課金相当（従来の表示）。
+ */
+export const USAGE_BASES = ["cost", "responses", "tokens", "sessions", "issues"] as const;
+export type UsageBasis = (typeof USAGE_BASES)[number];
+
+export const USAGE_BASIS_LABELS: Record<UsageBasis, string> = {
+  cost: "従量課金相当",
+  responses: "応答",
+  tokens: "トークン",
+  sessions: "セッション",
+  issues: "実行したIssue",
+};
+
+export type UsageBasisRow = {
+  costUsd: number;
+  responses: number;
+  contextTokens: number;
+  outputTokens: number;
+  sessions: number;
+  issues: number;
+};
+
+/** 基準に応じた値の取り出し。`issues`を持たない行（Issue数を集計していない合計など）は0 */
+export function usageBasisValue(row: Partial<UsageBasisRow>, basis: UsageBasis): number {
+  switch (basis) {
+    case "cost":
+      return row.costUsd ?? 0;
+    case "responses":
+      return row.responses ?? 0;
+    case "tokens":
+      return (row.contextTokens ?? 0) + (row.outputTokens ?? 0);
+    case "sessions":
+      return row.sessions ?? 0;
+    case "issues":
+      return row.issues ?? 0;
+  }
+}
+
+/** 基準ごとの値の書式。金額は`formatUsageUsd`、トークンは`formatUsageTokens`、残りは件数 */
+export function formatUsageBasisValue(value: number, basis: UsageBasis): string {
+  switch (basis) {
+    case "cost":
+      return formatUsageUsd(value);
+    case "tokens":
+      return formatUsageTokens(value);
+    case "responses":
+      return `${Math.round(value).toLocaleString()}応答`;
+    case "sessions":
+      return `${Math.round(value).toLocaleString()}セッション`;
+    case "issues":
+      return `${Math.round(value).toLocaleString()}件`;
+  }
 }
 
 /**

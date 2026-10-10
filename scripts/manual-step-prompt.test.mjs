@@ -17,6 +17,20 @@ describe("手作業セッションの自律実行プロンプト（#3870）", ()
   it("秘密値・本人操作・未確定の不可逆な変更は引き続き質問へ戻す", () => {
     expect(prompt).toContain("ユーザー本人の操作・秘密値・対話認証が必要なとき");
     expect(prompt).toContain("外部状態を大きく変える判断が未確定なとき");
-    expect(prompt).toContain("クローズだけは自動で決めません");
+  });
+
+  it("完了は検証結果だけで判定し、確認質問も自己申告も使わない（#4315）", () => {
+    expect(prompt).toContain("<!-- issue-deck:manual-step-investigation -->");
+    expect(prompt).toContain("<!-- issue-deck:manual-step-verification -->");
+    expect(prompt).toContain("すべて終了コード0のときだけ");
+    expect(prompt).toContain("1つでも失敗した・権限が足りない・確認自体ができないときはクローズしません");
+    expect(prompt).not.toContain("クローズだけは自動で決めません");
+    expect(prompt).not.toContain("完了としてクローズする」「画面からクローズする");
+  });
+
+  it("VPSでは所有者を確認し、cd && …とユーザー切り替えを1行に含める（#4315）", () => {
+    expect(prompt).toContain("対象サービス・ファイルの所有者と実行環境を先に確認します");
+    expect(prompt).toContain("`cd … && …`から始めます");
+    expect(prompt).toContain("別ユーザーのPM2を誤って起動しない");
   });
 });

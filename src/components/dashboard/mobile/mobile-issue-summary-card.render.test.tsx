@@ -41,8 +41,14 @@ function issue(overrides: Partial<Issue> = {}): Issue {
   };
 }
 
-function renderCard(overrides: Partial<Issue> = {}) {
-  render(<MobileIssueSummaryCard issue={issue(overrides)} onSelectRepository={vi.fn()} />);
+function renderCard(overrides: Partial<Issue> = {}, planReviewCreating = false) {
+  render(
+    <MobileIssueSummaryCard
+      issue={issue(overrides)}
+      onSelectRepository={vi.fn()}
+      planReviewCreating={planReviewCreating}
+    />,
+  );
 }
 
 describe("MobileIssueSummaryCard（#1646）", () => {
@@ -69,6 +75,19 @@ describe("MobileIssueSummaryCard（#1646）", () => {
     renderCard({ projectStatus: null });
 
     expect(screen.queryByText("未着手")).toBeNull();
+  });
+
+  // #4304: 計画レビュー待ちのあいだは、確認待ちラベルが付いていても橙のバッジを出さない
+  it("計画レビュー待ちのときは確認待ちのバッジを出さず、進捗を出す（#4304）", () => {
+    renderCard(
+      {
+        projectStatus: "Planning",
+        labels: [label("00.check-user"), label("01.check-plan")],
+      },
+      true,
+    );
+
+    expect(screen.queryByText(/確認待ち/)).toBeNull();
   });
 
   it("確認待ちのときは理由まで出し、進捗の代わりに前へ出す", () => {

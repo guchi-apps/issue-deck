@@ -2534,6 +2534,26 @@ export function isPlanReviewJobCreating(
   return phase === "queued" || phase === "creating";
 }
 
+/**
+ * 計画レビュー待ちのために、確認待ち（橙）の表示を保留するかどうか（#4304）。
+ * PC・モバイルの概要・進捗・バッジ・承認パネルがすべてこの1つを読む（画面ごとに判定が分かれると、
+ * prop渡し忘れで「起動待ち」と「確認待ち」が同時に出る）。
+ *
+ * - 状態取得前（`isLoaded`がfalse）は、理由が計画の確認待ちに限り保留する。取得前を
+ *   「レビュー待ちではない」と扱うと確認待ちが一瞬出てから消える
+ * - 取得後は`isPlanReviewJobCreating`と同じ（起動待ち・作成中・採否判定中・自動反映中）。
+ *   **指摘コメントの到着では外さない**（通知・一覧は採否が決まるまで保留しており、揃える）
+ */
+export function isPlanReviewAttentionHeld(params: {
+  job: Pick<DispatchJobView, "status" | "createdAt" | "finishedAt" | "planReviewDecidedAt"> | null;
+  now: Date;
+  isLoaded: boolean;
+  isPlanReason: boolean;
+}): boolean {
+  if (!params.isLoaded) return params.isPlanReason;
+  return isPlanReviewJobCreating(params.job, params.now);
+}
+
 function findJobForIssue(
   jobs: readonly DispatchJobView[],
   repositoryFullName: string,

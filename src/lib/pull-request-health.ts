@@ -1,4 +1,4 @@
-import { autoRepairStopReasonLabel } from "@/lib/github/pull-request-auto-repair-status";
+import { autoRepairStopReasonLabel, classifyAutoRepairStopReason } from "@/lib/github/pull-request-auto-repair-status";
 import { REPAIR_KIND_RUNNING_SHORT_LABEL } from "@/lib/github/pull-request-repair";
 import { resolveReviewVerdictFreshness } from "@/lib/github/review-verdict-freshness";
 import { resolveAiReviewVerdictState } from "@/lib/pull-request-list";
@@ -20,7 +20,11 @@ import type { PullRequestSummary } from "@/types/pull-request";
  * 「なし」と言わない。
  */
 
-export type PullRequestHealthTone = "bad" | "warn" | "run" | "ok" | "idle";
+/**
+ * 状態の配色の意味（#4293）。`wait`＝人の承認・確認・操作待ち（琥珀）、`bad`＝失敗・要修正・問題による停止（赤）、
+ * `run`＝実行中（紫）、`idle`＝実行待ち・未確認・意図的な停止（灰色＋状態ごとのアイコン）、`ok`＝成功・完了（緑）。
+ */
+export type PullRequestHealthTone = "bad" | "wait" | "run" | "ok" | "idle";
 
 export type PullRequestHealthSlotKey = "ci" | "review" | "conflict" | "repair";
 
@@ -32,6 +36,7 @@ export type PullRequestHealthCategory =
   | "ci-failed"
   | "review-changes-requested"
   | "review-needs-check"
+  | "review-failed"
   | "conflict"
   | "ci-running"
   | "review-running"
@@ -86,6 +91,8 @@ export type PullRequestHealth = {
   disposition: PullRequestHealthDisposition;
   /** 要修正・CI失敗・コンフリクト・検証中のいずれかがあり、単なる「マージ待ち」と言えない */
   blocksPlainMergeWait: boolean;
+  /** 失敗・要修正・問題による停止（赤）の枠が1つでもある。レーン見出しを赤にするかの判定に使う */
+  failing: boolean;
 };
 
 type HealthSource = Pick<
@@ -116,18 +123,18 @@ const COLUMN_LABEL: Record<PullRequestHealthSlotKey, string> = {
 /** check-runのstatusのうち、まだ始まっていないもの */
 const QUEUED_CHECK_STATUSES = new Set(["queued", "waiting", "pending", "requested"]);
 
-const TONE_SEVERITY: Record<PullRequestHealthTone, number> = { ok: 0, idle: 1, run: 2, warn: 3, bad: 4 };
+const TONE_SEVERITY: Record<PullRequestHealthTone, number> = { ok: 0, idle: 1, run: 2, wait: 3, bad: 4 };
 
 /** エージェント別レビューの状態 → [記号, 文言, 色, 数えるカテゴリ] */
 const AGENT_REVIEW_STATE: Record<
   PullRequestAgentReviewState,
   [string, string, PullRequestHealthTone, PullRequestHealthCategory | null]
 > = {
-  pending: ["●", "レビュー実施中", "run", "review-running"],
+  pending: ["●", "レビュー中", "run", "review-running"],
   lgtm: ["✓", "LGTM", "ok", null],
-  "needs-check": ["△", "要確認", "warn", "review-needs-check"],
+  "needs-check": ["△", "要確認", "wait", "review-needs-check"],
   "changes-requested": ["✕", "要修正", "bad", "review-changes-requested"],
-  failed: ["✕", "レビュー失敗", "bad", "review-needs-check"],
+  failed: ["✕", "レビュー失敗", "bad", "review-failed"],
 };
 
 type SlotInput = Omit<PullRequestHealthSlot, "key" | "columnLabel">;
@@ -143,7 +150,7 @@ export function isHealthTarget(pullRequest: Pick<HealthSource, "state" | "merged
 
 export function resolvePullRequestHealth(pullRequest: HealthSource): PullRequestHealth {
   if (!isHealthTarget(pullRequest)) {
-    return { slots: [], categories: [], disposition: "clear", blocksPlainMergeWait: false };
+    return { slots: [], categories: [], disposition: "clear", blocksPlainMergeWait: false, failing: false };
   }
 
   const categories = new Set<PullRequestHealthCategory>();
@@ -156,6 +163,7 @@ export function resolvePullRequestHealth(pullRequest: HealthSource): PullRequest
     "ci-failed",
     "review-changes-requested",
     "review-needs-check",
+    "review-failed",
     "conflict",
   ];
   const hasProblem = problems.some((category) => categories.has(category));
@@ -184,6 +192,7 @@ export function resolvePullRequestHealth(pullRequest: HealthSource): PullRequest
     categories: [...categories],
     disposition,
     blocksPlainMergeWait: hasProblem || inProgress || categories.has("repair-stopped"),
+    failing: [ci, review, conflict, repair].some((slot) => slot?.tone === "bad"),
   };
 
   function ciSlot(): PullRequestHealthSlot {
@@ -216,12 +225,12 @@ export function resolvePullRequestHealth(pullRequest: HealthSource): PullRequest
           unfinished.length > 0 &&
           unfinished.every((check) => QUEUED_CHECK_STATUSES.has(check.status));
         // 根拠（check-runのstatus）が取れないときは、実行中とも待機とも言い切らない
-        const [icon, label, title] = running
-          ? ["●", "CI実行中", "実行中のチェックがあります。"]
+        const [icon, label, title, tone] = running
+          ? (["●", "CI実行中", "実行中のチェックがあります。", "run"] as const)
           : queued
-            ? ["◔", "CI待機", "チェックはまだ開始されていません（実行待ち）。"]
-            : ["◔", "CI未完了", "チェックが完了していません。待機か実行中かは取得できていません。"];
-        return makeSlot("ci", { icon, label, tone: "run", title, href: null, detail });
+            ? (["◔", "CI待機", "チェックはまだ開始されていません（実行待ち）。", "idle"] as const)
+            : (["？", "CI未完了", "チェックが完了していません。待機か実行中かは取得できていません。", "idle"] as const);
+        return makeSlot("ci", { icon, label, tone, title, href: null, detail });
       }
       default:
         return makeSlot("ci", {
@@ -298,7 +307,7 @@ export function resolvePullRequestHealth(pullRequest: HealthSource): PullRequest
       const stale = freshness === "stale";
       return makeSlot("review", {
         icon: "●",
-        label: stale ? "再レビュー中" : "レビュー実施中",
+        label: stale ? "再レビュー中" : "レビュー中",
         tone: "run",
         title: stale
           ? "新しいコミットに対するレビューが実行されています。"
@@ -337,13 +346,13 @@ export function resolvePullRequestHealth(pullRequest: HealthSource): PullRequest
         return makeSlot("review", {
           icon: "△",
           label: "レビュー要確認",
-          tone: "warn",
+          tone: "wait",
           title: "マージ前に人が確認すべき点があります。",
           href,
           detail,
         });
       case "failed":
-        categories.add("review-needs-check");
+        categories.add("review-failed");
         return makeSlot("review", {
           icon: "✕",
           label: "レビュー失敗",
@@ -398,7 +407,7 @@ export function resolvePullRequestHealth(pullRequest: HealthSource): PullRequest
       categories.add("conflict");
       return makeSlot("conflict", {
         icon: "✕",
-        label: "コンフリクトあり",
+        label: "競合あり",
         tone: "bad",
         title: "baseブランチとコンフリクトしています。解消するまでマージできません。",
         href: null,
@@ -408,7 +417,7 @@ export function resolvePullRequestHealth(pullRequest: HealthSource): PullRequest
     if (pullRequest.mergeable === true) {
       return makeSlot("conflict", {
         icon: "✓",
-        label: "コンフリクトなし",
+        label: "競合なし",
         tone: "ok",
         title: "baseブランチとコンフリクトしていません。",
         href: null,
@@ -417,7 +426,7 @@ export function resolvePullRequestHealth(pullRequest: HealthSource): PullRequest
     }
     return makeSlot("conflict", {
       icon: "？",
-      label: "コンフリクト判定中",
+      label: "競合未確認",
       tone: "idle",
       title: "GitHubが判定中か、まだ取得できていません。「なし」とは限りません。",
       href: null,
@@ -444,18 +453,22 @@ export function resolvePullRequestHealth(pullRequest: HealthSource): PullRequest
       return makeSlot("repair", {
         icon: "◔",
         label: `再検証待ち ${loop.round}/${loop.maxRounds}`,
-        tone: "run",
+        // 新しいコミットの結果を待っているだけで、何かが実行中だとは言えない
+        tone: "idle",
         title: "修正を反映しました。新しいコミットのCI・レビューの結果を待っています。",
         href: null,
         detail: "pull-request",
       });
     }
     if (loop?.status === "stopped" && hasUnresolvedProblem()) {
-      categories.add("repair-stopped");
+      // 停止理由で分ける。人が止めた・PRが閉じられた＝意図的（灰）、人の判断待ち＝琥珀、
+      // それ以外と理由不明は問題による停止（赤）。理由不明を意図的とは推測しない
+      const stopKind = classifyAutoRepairStopReason(loop.stopReason);
+      if (stopKind === "problem") categories.add("repair-stopped");
       return makeSlot("repair", {
-        icon: "■",
-        label: "自動修正停止",
-        tone: "warn",
+        icon: stopKind === "intentional" ? "⏸" : stopKind === "waiting" ? "△" : "■",
+        label: `自動修正停止 ${loop.round}/${loop.maxRounds}`,
+        tone: stopKind === "intentional" ? "idle" : stopKind === "waiting" ? "wait" : "bad",
         title: `自動修正が止まりました: ${autoRepairStopReasonLabel(loop.stopReason)}`,
         href: null,
         detail: "pull-request",
@@ -470,7 +483,8 @@ export function resolvePullRequestHealth(pullRequest: HealthSource): PullRequest
       categories.has("ci-failed") ||
       categories.has("conflict") ||
       categories.has("review-changes-requested") ||
-      categories.has("review-needs-check")
+      categories.has("review-needs-check") ||
+      categories.has("review-failed")
     );
   }
 }
@@ -481,6 +495,7 @@ export const EMPTY_HEALTH_COUNTS: PullRequestHealthCounts = {
   "ci-failed": 0,
   "review-changes-requested": 0,
   "review-needs-check": 0,
+  "review-failed": 0,
   conflict: 0,
   "ci-running": 0,
   "review-running": 0,

@@ -59,6 +59,7 @@ import {
   findPlanReviewJobForIssue,
   isActiveDispatchJobStatus,
   isIssueExecutionPending,
+  isPlanReviewAttentionHeld,
   resolveDefaultDispatchHost,
 } from "@/lib/dispatch/dispatch-job";
 import { formatDispatchHostName } from "@/lib/dispatch/host-label";
@@ -224,7 +225,6 @@ type MobileIssueDetailProps = {
   /** 「実装を開始」で次の5時間枠へ積めたときに呼ぶ（`useNightlyRun`の`refresh`）。#2866 */
   onNightlyRunQueued?: () => void;
   /** 手作業アシスタント（#1826）をこのIssueから開く */
-  onStartManualStepGuide: (startIssueId: string) => void;
   /**
    * アプリ設定「サブPC（Claude）：計画・実装」の現在値（#2776・#3106）。「実装を開始」ダイアログの
    * モデル欄で最初から選ぶモデル（「おまかせ」なら開いた直後に判定する）として、
@@ -260,7 +260,6 @@ export function MobileIssueDetail({
   onOpenNightlyRun,
   onCancelNightlyRun,
   onNightlyRunQueued,
-  onStartManualStepGuide,
   claudeLocalModel,
   codexModel,
   defaultDispatchAgent = "claude",
@@ -408,6 +407,13 @@ export function MobileIssueDetail({
     issue.repositoryFullName,
     issue.number,
   );
+  // 計画レビュー待ちのあいだは確認待ち（橙）を出さない（#4304。PCの詳細と同じ判定）
+  const planReviewCreating = isPlanReviewAttentionHeld({
+    job: planReviewJob,
+    now: new Date(),
+    isLoaded: dispatch.isLoaded,
+    isPlanReason: checkUserReason(issue.labels) === "plan",
+  });
   // PC版と同じく、計画を出し直した時とレビューの投稿時にコメントを取り直す（#3936）。
   // 古いレビューが手元にあると、下の定期再取得だけでは新しいレビューを拾えない。
   useEffect(() => {
@@ -968,7 +974,11 @@ export function MobileIssueDetail({
       >
         {/* リポジトリ・タイトル・状態・進捗・担当者・コメント数・更新・ラベルを1枚へ畳む（#1646）。
             以前はこれらが独立した6ブロックとして縦に並び、説明が初期表示から押し出されていた */}
-        <MobileIssueSummaryCard issue={issue} onSelectRepository={onSelectRepository} />
+        <MobileIssueSummaryCard
+          issue={issue}
+          onSelectRepository={onSelectRepository}
+          planReviewCreating={planReviewCreating}
+        />
 
         {/* 進捗ステップ・積んだジョブ・セッションの様子・横断質問・回答待ち・実行のキャンセルを
             1枚に集約する（#1577）。PCの詳細と同じものを使う。走っているものが1つも無いIssueでは
@@ -986,6 +996,7 @@ export function MobileIssueDetail({
           checkUserGuidance={checkUserGuidance}
           planningSkipped={planningSkipped}
           pullRequestProgress={pullRequestProgress}
+          planReviewCreating={planReviewCreating}
         />
 
         {/* 質問の回答（#2189）。PCの詳細と同じ位置・同じ理由で、アーティファクト・計画の
@@ -1134,14 +1145,11 @@ export function MobileIssueDetail({
         {canCompleteManualStep(issue) && (
           <ManualStepPanel
             isSubmitting={isSubmitting}
-            onComplete={() => handleClose("completed")}
-            onSkip={() => handleClose("not_planned")}
-            onStartGuide={() => onStartManualStepGuide(issue.id)}
             prerequisites={manualStepPrerequisites.prerequisites}
             prerequisiteSummary={manualStepPrerequisites.summary}
             dependents={manualStepPrerequisites.dependents}
             verifiedAt={issue.manualStepVerifiedAt}
-            body={issue.body}
+            comments={comments}
             configTargets={infraConfigTargets}
             onCreateConfigIssue={(target) => onCreateConfigIssue(issue, target)}
             repositoryFullName={issue.repositoryFullName}

@@ -31,6 +31,7 @@ function section(overrides: Partial<ReleaseVerificationSection> = {}): ReleaseVe
     reviewedFiles: null,
     totalFiles: null,
     progress: null,
+    diagnostic: null,
     ...overrides,
   };
 }
@@ -195,6 +196,73 @@ describe("ReleaseReviewSections", () => {
     expect(within(ai).getByText("指摘 2件（重大 0・中 1・軽微 1）")).toBeTruthy();
     expect(within(ai).getByText("担当: Codex · gpt-6-sol")).toBeTruthy();
     expect(within(ai).getByText("中: 取消時に進捗が残る")).toBeTruthy();
+  });
+
+  it("実行障害はレビュー未完了として出し、コード不合格・問題なしと区別する（#4300）", () => {
+    const target = { baseSha: "3f2a91c".padEnd(40, "0"), headSha: "9b07e4d".padEnd(40, "0") };
+    renderSections(
+      summary({
+        aiReview: section({
+          state: "failed",
+          reason: "全体レビューを完走できませんでした（終了コード 126）",
+          updatedAt: "2026-10-10T09:42:00.000Z",
+          diagnostic: {
+            stage: "review",
+            cause: "launch_failed",
+            exitCode: 126,
+            excerpt: "claude: Permission denied",
+            targetBaseSha: target.baseSha,
+            targetHeadSha: target.headSha,
+          },
+        }),
+      }),
+    );
+    const ai = row("全体レビュー");
+    expect(within(ai).getByText("レビュー未完了")).toBeTruthy();
+    expect(within(ai).queryByText("失敗")).toBeNull();
+    expect(within(ai).queryByText("問題なし")).toBeNull();
+    expect(within(ai).getByText("原因: AI CLIを起動できませんでした")).toBeTruthy();
+    expect(within(ai).getByText(/AIレビュー$/)).toBeTruthy();
+    expect(within(ai).getAllByText(/終了コード 126/).length).toBeGreaterThan(0);
+    expect(within(ai).getByText("claude: Permission denied")).toBeTruthy();
+    // 直すコードは無いので、作り直しの案内は出さない
+    expect(within(ai).queryByText(/developへ入れてから作り直します/)).toBeNull();
+  });
+
+  it("診断が無い失敗は原因未特定として出し、権限などを断定しない", () => {
+    renderSections(summary({ aiReview: section({ state: "failed", reason: "古い実行側の失敗" }) }));
+    const ai = row("全体レビュー");
+    expect(within(ai).getByText("レビュー未完了")).toBeTruthy();
+    expect(within(ai).getByText(/原因未特定です/)).toBeTruthy();
+    expect(within(ai).queryByText(/権限/)).toBeNull();
+  });
+
+  it("要修正の指摘は影響・根拠・推奨対応・行を読め、作り直しの案内を維持する", () => {
+    renderSections(
+      summary({
+        aiReview: section({
+          state: "needs_check",
+          findings: [
+            {
+              severity: "high",
+              title: "退行",
+              detail: "概要",
+              impact: "本番で保存できない",
+              evidence: "a.tsの呼び出しが未更新",
+              recommendation: "呼び出し元を更新する",
+              file: "a.ts",
+              line: 12,
+              pullRequests: [3],
+            },
+          ],
+        }),
+      }),
+    );
+    const ai = row("全体レビュー");
+    expect(within(ai).getByText("影響: 本番で保存できない")).toBeTruthy();
+    expect(within(ai).getByText("推奨対応: 呼び出し元を更新する")).toBeTruthy();
+    expect(within(ai).getByText("a.ts:12")).toBeTruthy();
+    expect(within(ai).getByText(/developへ入れてから作り直します/)).toBeTruthy();
   });
 
   it("古い対象の結果は古い結果として出す", () => {

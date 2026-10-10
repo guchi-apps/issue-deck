@@ -83,7 +83,7 @@ export type ChatIntent =
   | { type: "repair"; ref: ChatRef | null }
   | { type: "create_issue"; title: string | null }
   /** 状態の言い換えでは答えられない質問・依頼。AIが読み取り専用ツールで調べて答える（#4045） */
-  | { type: "investigate"; ref: ChatRef | null; fix?: boolean }
+  | { type: "investigate"; ref: ChatRef | null; fix?: boolean; request?: boolean }
   | { type: "unknown" };
 
 export type ChatRef = { repo: string | null; number: number };

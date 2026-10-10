@@ -40,6 +40,7 @@ import {
   resolvePlanReviewRejection,
   describePlanReviewRejection,
   findPlanReviewJobForIssue,
+  isPlanReviewAttentionHeld,
   isPlanReviewJobCreating,
   resolvePlanReviewJobPhase,
   canCodeReviewRepository,
@@ -1659,6 +1660,42 @@ describe("isPlanReviewJobCreating（#3565）", () => {
           now,
         ),
       ).toBeNull();
+    });
+  });
+
+  // #4304: 概要・進捗・承認パネルが共有する保留判定
+  describe("isPlanReviewAttentionHeld（#4304）", () => {
+    const base = { now, isLoaded: true, isPlanReason: true };
+    const queued = () => planReviewJob({ status: "QUEUED", createdAt: "2026-08-17T00:05:00.000Z" });
+
+    it("起動待ち（10分以内）・作成中は保留する", () => {
+      expect(isPlanReviewAttentionHeld({ ...base, job: queued() })).toBe(true);
+      expect(isPlanReviewAttentionHeld({ ...base, job: planReviewJob({ status: "RUNNING" }) })).toBe(true);
+    });
+
+    it("成功後で採否が未決定のあいだ（採否判定中・自動反映中）も保留する", () => {
+      const job = planReviewJob({ status: "SUCCEEDED", finishedAt: "2026-08-17T00:08:00.000Z" });
+      expect(isPlanReviewAttentionHeld({ ...base, job })).toBe(true);
+    });
+
+    it("採否が決まった・起動待ち10分超・失敗・ジョブ無しは保留しない", () => {
+      const decided = planReviewJob({
+        status: "SUCCEEDED",
+        finishedAt: "2026-08-17T00:08:00.000Z",
+        planReviewDecidedAt: "2026-08-17T00:09:00.000Z",
+      });
+      const overdue = planReviewJob({ status: "QUEUED", createdAt: "2026-08-17T00:00:00.000Z" });
+      expect(isPlanReviewAttentionHeld({ ...base, job: decided })).toBe(false);
+      expect(isPlanReviewAttentionHeld({ ...base, job: overdue })).toBe(false);
+      expect(isPlanReviewAttentionHeld({ ...base, job: planReviewJob({ status: "FAILED" }) })).toBe(false);
+      expect(isPlanReviewAttentionHeld({ ...base, job: null })).toBe(false);
+    });
+
+    it("状態取得前は計画の確認待ちに限り保留し、他の理由は保留しない", () => {
+      expect(isPlanReviewAttentionHeld({ ...base, job: null, isLoaded: false })).toBe(true);
+      expect(
+        isPlanReviewAttentionHeld({ ...base, job: null, isLoaded: false, isPlanReason: false }),
+      ).toBe(false);
     });
   });
 });

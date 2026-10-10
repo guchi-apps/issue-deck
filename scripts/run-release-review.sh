@@ -33,6 +33,57 @@ RUNNING_MESSAGE="全体レビューを準備しています"
 HEARTBEAT_PID=""
 WORKTREE=""
 LOCAL_PATH=""
+ERR_FILE=""
+
+# 実行失敗の診断（#4300）。**コードへの指摘ではなく「レビューを最後まで行えなかった理由」**で、
+# 画面に出す。原因は観測できた事実だけで決め、決められなければ unknown（原因未特定）にする。
+# 抜粋は末尾だけ・機密を伏せる（サーバー側でも同じ除去を通す。ここは外へ出す前の一次防御）。
+diag_redact() {
+  sed -E \
+    -e 's/(Bearer|Basic)[[:space:]]+[A-Za-z0-9._~+\/=-]{8,}/\1 [除去]/Ig' \
+    -e 's#op://[^[:space:]]+#op://[除去]#g' \
+    -e 's#(https?://)[^[:space:]/@:]+(:[^[:space:]/@]*)?@#\1[除去]@#Ig' \
+    -e 's/(gh[pousr]_|github_pat_|sk-ant-|sk-|xox[abprs]-|AKIA|AIza|eyJ)[A-Za-z0-9_.-]{8,}/[トークンを除去]/g' \
+    -e 's/([A-Za-z0-9_]*(TOKEN|SECRET|PASSWORD|PASSWD|API_?KEY|AUTHORIZATION|CREDENTIAL)[A-Za-z0-9_]*)[[:space:]]*[=:][[:space:]]*[^[:space:]]+/\1=[除去]/Ig'
+}
+
+# diag_excerpt <ファイル>: 末尾30行・2000文字までを機密除去して返す（無ければ空）
+diag_excerpt() {
+  local file="${1:-}"
+  [[ -n "$file" && -s "$file" ]] || return 0
+  tail -n 30 "$file" 2>/dev/null | tr -d '\000' | diag_redact | tail -c 2000 || true
+}
+
+# diag_stage: 最後に確認できた工程（進捗ファイルの現在の工程）。無ければ空
+diag_stage() {
+  [[ -n "${RELEASE_PROGRESS_FILE:-}" && -s "$RELEASE_PROGRESS_FILE" ]] || return 0
+  jq -r '.progress.step // empty' "$RELEASE_PROGRESS_FILE" 2>/dev/null || true
+}
+
+# diag_payload <原因> [終了コード] [抜粋ファイル] [工程]: releaseReviewとして報告するJSON
+diag_payload() {
+  local cause="$1" code="${2:-}" excerpt_file="${3:-}" stage="${4:-}"
+  [[ -n "$stage" ]] || stage="$(diag_stage)"
+  jq -nc --arg cause "$cause" --arg code "$code" --arg stage "$stage" --arg excerpt "$(diag_excerpt "$excerpt_file")" \
+    '{diagnostic: ({cause: $cause}
+      + (if $stage == "" then {} else {stage: $stage} end)
+      + (if $code == "" then {} else {exitCode: ($code | tonumber)} end)
+      + (if $excerpt == "" then {} else {excerpt: $excerpt} end))}' 2>/dev/null || true
+}
+
+# diag_ai_cause <終了コード> <ログ>: AI CLIが非0で終わったときの原因。事実が無ければ unknown
+diag_ai_cause() {
+  local code="$1" log="$2"
+  case "$code" in
+    124 | 137) printf 'timeout'; return ;;
+    126 | 127) printf 'launch_failed'; return ;;
+  esac
+  if [[ -s "$log" ]] && tail -n 60 "$log" | grep -qiE 'not logged in|please (log ?in|run .*login)|unauthorized|authentication (failed|error)|invalid (api key|token)|\b401\b|expired (token|session)'; then
+    printf 'auth_failed'
+    return
+  fi
+  printf 'unknown'
+}
 
 # review_report <running|succeeded|failed> <メッセージ> [releaseReview JSON]
 review_report() {
@@ -98,8 +149,11 @@ finish() {
 cleanup() {
   local code=$?
   if ((code != 0)); then
-    finish failed "全体レビューの実行中に失敗しました（終了コード ${code}）。サブPCのtmuxセッション ${TMUX_SESSION_NAME:-不明}を確認してください。"
+    # 想定外の失敗。原因は特定できないので unknown とし、最後の工程とstderr末尾だけを残す
+    finish failed "全体レビューの実行中に失敗しました（終了コード ${code}）。" \
+      "$(diag_payload unknown "$code" "$ERR_FILE")"
   fi
+  [[ -n "$ERR_FILE" ]] && rm -f "$ERR_FILE"
   if [[ -n "$WORKTREE" && -n "$LOCAL_PATH" ]]; then
     git -C "$LOCAL_PATH" worktree remove --force "$WORKTREE" >/dev/null 2>&1 || rm -rf "$WORKTREE"
   fi
@@ -123,6 +177,9 @@ main() {
   local -a files=() omitted=() claude_args=() codex_args=()
 
   trap cleanup EXIT
+  # 想定外の失敗でstderrの末尾を診断へ載せるため、写しを取る（端末への出力はそのまま残る）
+  ERR_FILE="$(mktemp "${TMPDIR:-/tmp}/issue-deck-release-review-err.XXXXXX")"
+  exec 2> >(tee -a "$ERR_FILE" >&2)
   TMUX_SESSION_NAME="${TMUX_SESSION_NAME:-}"
   for tool in git jq timeout; do
     command -v "$tool" >/dev/null 2>&1 || { echo "Error: $tool コマンドが見つかりません。" >&2; exit 1; }
@@ -150,7 +207,8 @@ main() {
     git -C "$LOCAL_PATH" fetch --quiet origin 2>/dev/null || true
   git -C "$LOCAL_PATH" cat-file -e "${base_sha}^{commit}" 2>/dev/null &&
     git -C "$LOCAL_PATH" cat-file -e "${head_sha}^{commit}" 2>/dev/null || {
-    finish failed "対象のコミットを取得できません（base ${base_sha:0:7} / head ${head_sha:0:7}）"
+    finish failed "対象のコミットを取得できません（base ${base_sha:0:7} / head ${head_sha:0:7}）" \
+      "$(diag_payload target_missing "" "" prepare)"
     return 0
   }
   git -C "$LOCAL_PATH" worktree add --detach "$WORKTREE" "$head_sha" >/dev/null 2>&1
@@ -187,18 +245,38 @@ main() {
   prompt_file="$WORK_ROOT/${repo}-${pr_number}-${head_sha:0:12}.prompt"
   output_file="$WORK_ROOT/${repo}-${pr_number}-${head_sha:0:12}.out"
   log_file="$WORK_ROOT/${repo}-${pr_number}-${head_sha:0:12}.log"
-  python3 - "$SCRIPT_DIR/prompts/release-review-agent.md" "$prompt_file" "$full_name" "$pr_number" "$base_sha" "$head_sha" \
-    "$coverage" "$prs_text" "$diff_text" <<'PY'
+  # 前回の実行の出力・ログを今回の結果として読まない（同じSHAの再実行）
+  rm -f "$output_file" "$log_file"
+  # 差分などの大きな本文は引数・環境変数に載せない（Linuxは1引数128KiBまでで、超えるとexecveが
+  # E2BIG＝終了コード126になる。#4316）。ファイルへ書き、Pythonにはパスだけを渡す
+  local part_dir="$WORK_ROOT/${repo}-${pr_number}-${head_sha:0:12}.parts"
+  rm -rf "$part_dir"
+  mkdir -p "$part_dir"
+  printf '%s' "$coverage" >"$part_dir/coverage"
+  printf '%s' "$prs_text" >"$part_dir/prs"
+  printf '%s' "$diff_text" >"$part_dir/diff"
+  if ! python3 - "$SCRIPT_DIR/prompts/release-review-agent.md" "$prompt_file" "$full_name" "$pr_number" "$base_sha" "$head_sha" \
+    "$part_dir" <<'PY'
 import sys
-template, out, repo, pr, base, head, coverage, prs, diff = sys.argv[1:10]
+template, out, repo, pr, base, head, parts = sys.argv[1:8]
+def part(name):
+    return open(parts + "/" + name, encoding="utf-8", errors="replace").read()
 text = open(template, encoding="utf-8").read()
 for key, value in {
     "{{REPOSITORY}}": repo, "{{PR_NUMBER}}": pr, "{{BASE_SHA}}": base, "{{HEAD_SHA}}": head,
-    "{{COVERAGE}}": coverage, "{{PULL_REQUESTS}}": prs, "{{DIFF}}": diff,
+    "{{COVERAGE}}": part("coverage"), "{{PULL_REQUESTS}}": part("prs"), "{{DIFF}}": part("diff"),
 }.items():
     text = text.replace(key, value)
 open(out, "w", encoding="utf-8").write(text)
 PY
+  then
+    # AI CLIの失敗ではなく、プロンプトの準備段階の失敗として区別して報告する
+    rm -rf "$part_dir"
+    finish failed "レビュー用のプロンプトを準備できませんでした（AI CLIは起動していません）" \
+      "$(diag_payload unknown "" "$ERR_FILE" prepare)"
+    return 0
+  fi
+  rm -rf "$part_dir"
 
   RUNNING_MESSAGE="全体レビューを実行中です（${agent}・${claude_model:-$codex_model}・差分${reviewed_files}/${total_files}ファイル）"
   release_progress_set review 2 "$RUNNING_MESSAGE" "" "$total_files"
@@ -207,28 +285,38 @@ PY
   if [[ "$agent" == "codex" ]]; then
     local codex_command
     codex_command="$(agent_cli_codex_command)"
-    command -v "$codex_command" >/dev/null 2>&1 || { finish failed "Codex CLIが見つかりません"; return 0; }
+    command -v "$codex_command" >/dev/null 2>&1 || {
+      finish failed "Codex CLIが見つかりません" "$(diag_payload launch_failed "" "" review)"
+      return 0
+    }
     codex_args=(exec --sandbox read-only --ephemeral -m "$codex_model" --output-last-message "$output_file" -C "$WORKTREE")
     (cd "$WORKTREE" && timeout -k 60 "$TIMEOUT_SECONDS" "$codex_command" "${codex_args[@]}" <"$prompt_file" >"$log_file" 2>&1) || exit_code=$?
   else
-    command -v claude >/dev/null 2>&1 || { finish failed "claude CLIが見つかりません"; return 0; }
+    command -v claude >/dev/null 2>&1 || {
+      finish failed "claude CLIが見つかりません" "$(diag_payload launch_failed "" "" review)"
+      return 0
+    }
     claude_args=(-p --model "$claude_model" --allowedTools Read Grep Glob)
     (cd "$WORKTREE" && timeout -k 60 "$TIMEOUT_SECONDS" claude "${claude_args[@]}" <"$prompt_file" >"$output_file" 2>"$log_file") || exit_code=$?
   fi
   if ((exit_code != 0)); then
-    finish failed "全体レビューを完走できませんでした（終了コード ${exit_code}。124は時間切れ）"
+    local cause
+    cause="$(diag_ai_cause "$exit_code" "$log_file")"
+    finish failed "全体レビューを完走できませんでした（終了コード ${exit_code}）" \
+      "$(diag_payload "$cause" "$exit_code" "$log_file" review)"
     return 0
   fi
   release_progress_set finalize 3 "全体レビューの結果を整理しています" "" "$total_files"
   review_report running ""
   if ! ai_json="$(extract_result_json "$output_file")"; then
-    finish failed "全体レビューの結果をJSONとして読めませんでした"
+    finish failed "全体レビューの結果をJSONとして読めませんでした" \
+      "$(diag_payload parse_failed "" "$output_file" finalize)"
     return 0
   fi
   # 確認できたファイル数はこちらで確定した値を載せる（AIの自己申告に任せない）
   ai_json="$(jq -c --argjson total "$total_files" --argjson reviewed "$reviewed_files" \
     '. + {totalFiles: $total, reviewedFiles: $reviewed}' <<<"$ai_json")" ||
-    { finish failed "全体レビューの結果を整形できませんでした"; return 0; }
+    { finish failed "全体レビューの結果を整形できませんでした" "$(diag_payload parse_failed "" "" finalize)"; return 0; }
   finish succeeded "全体レビューを完了しました" "$ai_json"
 }
 

@@ -214,7 +214,6 @@ function detailElement(issue: Issue, overrides: Partial<ComponentProps<typeof Is
       onBulkCreateCodeReviewFindingIssues={vi.fn()}
       onStartCodeReview={vi.fn()}
       onSelectRepository={vi.fn()}
-      onStartManualStepGuide={vi.fn()}
       claudeLocalModel="sonnet"
       codexModel="gpt-5.6-terra"
       {...overrides}
@@ -249,7 +248,6 @@ function mobileDetailElement(
       onBulkCreateCodeReviewFindingIssues={vi.fn()}
       onStartCodeReview={vi.fn()}
       onSelectRepository={vi.fn()}
-      onStartManualStepGuide={vi.fn()}
       {...overrides}
     />
   );

@@ -6,11 +6,16 @@ import {
   PullRequestMergePrecheck,
 } from "@/components/dashboard/pull-request-merge-precheck";
 import { PullRequestMergeVersion } from "@/components/dashboard/pull-request-merge-version";
-import { ConnectedReleaseReviewSections } from "@/components/dashboard/release-review-sections";
+import {
+  ConnectedReleaseReviewSections,
+  describeSection,
+  type IndividualListContext,
+} from "@/components/dashboard/release-review-sections";
 import { useReferenceNavigation } from "@/hooks/use-reference-navigation";
 import { usePullRequestChanges } from "@/hooks/use-pull-request-changes";
 import { releaseVersionFromTitle } from "@/lib/branch-flow";
 import type { ReviewVerdictKind } from "@/lib/github/release-verification";
+import type { SharedMergeCheck } from "@/lib/pull-request-merge-checks";
 import { applyReviewVerdicts } from "@/lib/pull-request-changes";
 import { RELEASE_BRANCH_PREFIX } from "@/lib/pull-request-list";
 import {
@@ -19,6 +24,25 @@ import {
   type MergePrecheckReviews,
 } from "@/lib/pull-request-merge-precheck";
 import type { PullRequestSummary, ReleaseChangeListResponse } from "@/types/pull-request";
+
+/** 全体レビュー区分（`AiReviewSection`）と同じ判定を、各PR行の「全体〔共通〕」へ渡す形にする（#4305） */
+function overallCheck({ verification, verificationError, nowMs }: IndividualListContext): SharedMergeCheck {
+  if (!verification) {
+    return verificationError
+      ? { mark: "？", state: "取得不可", tone: "warn", reason: `${verificationError}。問題なしとは扱いません` }
+      : { mark: "◷", state: "取得中", tone: "muted", reason: null };
+  }
+  const head = describeSection(verification.aiReview, nowMs);
+  return { mark: head.mark, state: head.label, tone: head.tone, reason: head.reason };
+}
+
+/** リリース候補のコンフリクト（`buildCiConflictRows`の2行目）を、行へ渡す形にする */
+function conflictCheck(pullRequest: PullRequestSummary): SharedMergeCheck {
+  const row = buildCiConflictRows(pullRequest)[1];
+  const level = { ok: ["●", "ok"], bad: ["■", "bad"], warn: ["▲", "warn"], neutral: ["–", "muted"] } as const;
+  const [mark, tone] = level[row.level];
+  return { mark, state: row.summary, tone, reason: row.detail };
+}
 
 /**
  * mainへのPRの確認ダイアログの中身（#3093）。先頭には「どの版からどの版へ上げるか」を独立して置く
@@ -65,7 +89,7 @@ export function PullRequestMergeProduction({
 
   if (frozen) {
     // 一覧の各行の判定は、区分の集計と同じ取得（各PR本文の判定）から引く
-    const renderList = (data: ReleaseChangeListResponse) => {
+    const renderList = (data: ReleaseChangeListResponse, context: IndividualListContext) => {
       const byNumber = new Map(data.pullRequests.map((pr) => [pr.number, pr]));
       const reviewKinds = new Map<string, ReviewVerdictKind>();
       for (const change of state.changes ?? []) {
@@ -80,6 +104,19 @@ export function PullRequestMergeProduction({
           state={state}
           reviewKinds={reviewKinds}
           onOpenPullRequest={openChange}
+          mergeChecks={{
+            byNumber,
+            shared: {
+              overall: overallCheck(context),
+              conflict: conflictCheck(pullRequest),
+              releaseCi: pullRequest.ciState,
+              releaseHeadRef: pullRequest.headRef,
+            },
+            onOpenOverall: () =>
+              document
+                .querySelector('[data-testid="release-review-sections"]')
+                ?.scrollIntoView({ block: "start", behavior: "smooth" }),
+          }}
         />
       );
     };
@@ -92,6 +129,7 @@ export function PullRequestMergeProduction({
           headRef={pullRequest.headRef}
           enabled={open}
           renderIndividualList={renderList}
+          includeMergeChecks
           onOpenPullRequest={openChange}
           extraRows={<MergePrecheckInlineRows rows={buildCiConflictRows(pullRequest)} />}
         />

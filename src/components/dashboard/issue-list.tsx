@@ -12,7 +12,6 @@ import {
   Clock,
   ExternalLink,
   GitMerge,
-  ListChecks,
   Loader2,
   Lock,
   MessageCircleQuestion,
@@ -27,7 +26,6 @@ import { useCodeReviewRecommendSettings } from "@/components/dashboard/use-code-
 import { CodeReviewRepoOverview } from "@/components/dashboard/code-review-repo-overview";
 import { CodeReviewResultBadges } from "@/components/dashboard/code-review-result-badges";
 import { IssueAgentBadge } from "@/components/dashboard/issue-agent-badge";
-import { ManualStepRunBadge } from "@/components/dashboard/manual-step-run-badge";
 import { PullToRefreshIndicator } from "@/components/dashboard/pull-to-refresh-indicator";
 import { Checkbox } from "@/components/ui/checkbox";
 import { parseBulkReserveModelChoice } from "@/lib/app-settings";
@@ -88,10 +86,6 @@ import { resolvePlanReviewListState } from "@/lib/dispatch/plan-review-list-stat
 import { PlanReviewStateBadge } from "@/components/dashboard/plan-review-state-badge";
 import { findQuestionRequestForIssue } from "@/lib/dispatch/session-question-request";
 import { shouldEmphasizeRemoteControl } from "@/lib/remote-control-attention";
-import {
-  isActiveManualStepRun,
-  sortManualStepRunsForList,
-} from "@/lib/manual-step-run-view";
 import type { DispatchSessionView } from "@/lib/dispatch/session-state";
 import { formatDateTime, formatTimeOfDay } from "@/lib/format-date-time";
 import { formatRelativeDate } from "@/lib/format-relative-date";
@@ -255,14 +249,6 @@ type IssueListProps = {
    * 同じ画面の2か所が同じIssueについて逆のことを言うことになる。
    */
   checkUserRunningIssueIds?: ReadonlySet<string>;
-  /**
-   * 手作業アシスタント（#1826）を開く。「ユーザーの作業待ち」でだけ使う。
-   * 渡さない・実行できる手作業が1件も無い場合はボタンを出さない。
-   *
-   * `startIssueId`を渡すとそのIssueが案内の先頭になる（自動実行バッジの一覧から
-   * 開くときに使う。#2119）。省略すると今までどおり`buildManualStepQueue`の並び順
-   */
-  onStartManualStepGuide?: (startIssueId?: string) => void;
   /**
    * コードレビュー（#698）を実行するダイアログを開く。「コードレビュー」ビューでだけ使う。
    *
@@ -504,7 +490,6 @@ export function IssueList({
   onSnooze,
   onUnsnooze,
   checkUserRunningIssueIds,
-  onStartManualStepGuide,
   onStartCodeReview,
   codeReviewIssues,
   codeReviewRepositoryFullNames,
@@ -873,34 +858,6 @@ export function IssueList({
     (view === "question" ? formatQuestionListCount(issues, listedCount, snoozedTotal) : null) ??
     formatCheckUserListCount(listedCount, checkUserRunningCount, snoozedTotal) ??
     `${listedCount}件`;
-
-  // アシスタントが案内できるのは「いま実行できる」手作業だけ（`buildManualStepQueue`）。
-  // 1件も無いときにボタンを出すと、押しても何も案内されない画面が開く
-  const guidableManualStepCount =
-    view === "manual-step" && prerequisiteReadiness
-      ? issues.filter((issue) => prerequisiteReadiness.get(issue.id)?.ready === true).length
-      : 0;
-
-  // 走っている自動実行（#1882）。**入口に出すのはこの一覧に居る手作業の分だけ**——
-  // 別のビューを見ているときに手作業の進捗を割り込ませない。
-  // **#2073で実行キューの節を撤去したので、進み具合が出る常設の場所はここだけ**
-  // （ここはバッジで、中断できるのはアシスタントの中）
-  // **拾うのは走っている全件**（#2119）。`.find`で先頭1件しか見ていなかったため、
-  // 複数走っていても1件ぶんの進捗しか出ず、2本目以降は画面のどこにも出ていなかった
-  const activeManualStepRuns =
-    view === "manual-step"
-      ? sortManualStepRunsForList(
-          (dispatch.manualStepRuns ?? []).filter(
-            (run) =>
-              isActiveManualStepRun(run.status) &&
-              issues.some(
-                (issue) =>
-                  issue.repositoryFullName === run.repositoryFullName &&
-                  issue.number === run.issueNumber,
-              ),
-          ),
-        )
-      : [];
 
   /**
    * 保留中の行（#2398）。**通常の行より情報を削る**——ここに来るのは解除するときだけで、
@@ -1502,44 +1459,6 @@ export function IssueList({
           onExit={bulk.exit}
         />
       )}
-
-      {/* 溜まった手作業を1件ずつ案内する入口（#1826）。**ヘッダーではなく一覧の上に置く**——
-          スマホの一覧はこのコンポーネントのヘッダーを出さず（`showHeader={false}`）、
-          画面側のヘッダーには操作を足さない決まりのため（#1646）。ここならPC・スマホの
-          どちらにも同じ位置で出る */}
-      {onStartManualStepGuide &&
-        (guidableManualStepCount > 0 || activeManualStepRuns.length > 0) && (
-          <div className={cn(COUNT_BAR_CLASS, "bg-violet-500/5")}>
-            <p className={COUNT_BAR_TEXT_CLASS}>
-              いま実行できる手作業が
-              <span className="font-medium text-foreground tabular-nums">
-                {guidableManualStepCount}件
-              </span>
-              あります。
-            </p>
-            <div className={COUNT_BAR_ACTIONS_CLASS}>
-              {/* 走っている自動実行があることを入口に出す（#1882）。**閉じても進んでいる**ので、
-                  戻ってこられる目印がここに要る。押すと走っている実行が全部並び、行から
-                  そのIssueのアシスタントを開ける（#2119） */}
-              <ManualStepRunBadge
-                runs={activeManualStepRuns}
-                onOpenRun={(run) => {
-                  // `run.issueId`は引けないことがあるので、並んでいるIssueから引き直す
-                  const issue = issues.find(
-                    (candidate) =>
-                      candidate.repositoryFullName === run.repositoryFullName &&
-                      candidate.number === run.issueNumber,
-                  );
-                  onStartManualStepGuide(issue?.id ?? run.issueId ?? undefined);
-                }}
-              />
-              <Button size="xs" className="shrink-0" onClick={() => onStartManualStepGuide()}>
-                <ListChecks />
-                順番に進める
-              </Button>
-            </div>
-          </div>
-        )}
 
       {/* リポジトリ別のレビュー状況（#3092）。リポジトリ全体のコードレビューを実行する入口
           （#698）も兼ねる。**このビュー唯一の起動口**なので、並んでいるIssueが0件でも出す */}

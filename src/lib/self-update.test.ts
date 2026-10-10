@@ -78,7 +78,34 @@ describe("self_update_prepare_worktree", () => {
     expect(readFileSync(path.join(clone, "ports.conf"), "utf-8")).toBe("guchi-apps/kurashio 13000\n");
   });
 
-  it("取り込み先と違う内容の変更があれば止め、ファイル名を返す", () => {
+  function pushUpstream(file: string, content: string) {
+    writeFileSync(path.join(upstream, file), content);
+    git(upstream, "add", ".");
+    git(upstream, "commit", "-q", "-m", `change ${file}`);
+    git(upstream, "push", "-q", "origin", "develop");
+  }
+
+  it("取り込みと重ならない変更は残したまま続ける（#4297）", () => {
+    pushUpstream("other.txt", "new\n");
+    writeFileSync(path.join(clone, "ports.conf"), "guchi-apps/kurashio 13000\n");
+
+    expect(prepare(clone).status).toBe(0);
+    git(clone, "pull", "-q", "--ff-only");
+    expect(readFileSync(path.join(clone, "ports.conf"), "utf-8")).toBe("guchi-apps/kurashio 13000\n");
+    expect(readFileSync(path.join(clone, "other.txt"), "utf-8")).toBe("new\n");
+  });
+
+  it("取り込みと同じパスの未追跡ファイルは止める", () => {
+    pushUpstream("memo.txt", "up\n");
+    writeFileSync(path.join(clone, "memo.txt"), "x\n");
+
+    const result = prepare(clone);
+    expect(result.status).toBe(1);
+    expect(result.stdout).toContain("memo.txt");
+  });
+
+  it("取り込み先と違う内容の変更があり、取り込みと重なるなら止め、ファイル名を返す", () => {
+    pushUpstream("ports.conf", "guchi-apps/other 14000\n");
     writeFileSync(path.join(clone, "ports.conf"), "guchi-apps/kurashio 13000\n");
 
     const result = prepare(clone);
@@ -101,16 +128,9 @@ describe("self_update_prepare_worktree", () => {
     expect(readFileSync(path.join(clone, "ports.conf"), "utf-8")).toBe("guchi-apps/kurashio 13000\n");
   });
 
-  it("未追跡のファイルがあれば止める", () => {
-    writeFileSync(path.join(clone, "memo.txt"), "x\n");
-
-    const result = prepare(clone);
-    expect(result.status).toBe(1);
-    expect(result.stdout).toContain("memo.txt");
-  });
-
   it("4件以上はファイル名を3件に縮めて残りを件数で出す", () => {
     for (const name of ["a.txt", "b.txt", "c.txt", "d.txt", "e.txt"]) {
+      pushUpstream(name, "up\n");
       writeFileSync(path.join(clone, name), "x\n");
     }
 

@@ -1,8 +1,9 @@
 "use client";
 
 import { useState } from "react";
-import { Boxes, KeyRound, Link2, RefreshCw, ScanSearch, ShieldCheck } from "lucide-react";
+import { Boxes, KeyRound, LifeBuoy, Link2, RefreshCw, ScanSearch, ShieldCheck } from "lucide-react";
 
+import { BackupCiRolloutSection } from "@/components/dashboard/settings/backup-ci-rollout-section";
 import { SecretsSyncSection } from "@/components/dashboard/secrets-sync-section";
 import { FineGrainedTokensSection } from "@/components/dashboard/settings/fine-grained-tokens-section";
 import { LazyFleetPanel } from "@/components/dashboard/settings/lazy-fleet-panel";
@@ -138,6 +139,16 @@ export function FleetOpsSection({
           onDraftIssue={onDraftReviewGateIssue}
           creatableRepositoryNames={creatableRepositoryNames}
         />
+      </LazyFleetPanel>
+
+      {/* 開くまで何も取得しない。リポジトリを選んだときだけ、その1件をGitHubへ問い合わせる（#4308） */}
+      <LazyFleetPanel
+        icon={LifeBuoy}
+        title="バックアップCI（CircleCI）の展開"
+        description="GitHub Actions障害時に使うバックアップCIを、選んだリポジトリへ導入・更新する"
+        loadHint="開いてリポジトリを選ぶと、その1件の導入状態をGitHubへ問い合わせます"
+      >
+        <BackupCiRolloutSection />
       </LazyFleetPanel>
 
       <GroupHeading>認証情報</GroupHeading>

@@ -5,7 +5,12 @@ import {
 } from "@/lib/pull-request-changes";
 import { parsePullRequestReviewVerdict } from "@/lib/github/pull-request-review-verdict";
 import type { ReleaseVerificationTally } from "@/lib/github/release-verification";
-import type { ReleaseChangeCommit, ReleaseChangePullRequest } from "@/types/pull-request";
+import type {
+  ReleaseChangeCiCheck,
+  ReleaseChangeCommit,
+  ReleaseChangePlanCheck,
+  ReleaseChangePullRequest,
+} from "@/types/pull-request";
 
 /**
  * リリース差分のコミットを、PR単位の一覧へ畳む（#4201）。
@@ -87,4 +92,46 @@ export function tallyReleaseReviews(
     ...tally,
     unavailable: pullRequests.filter((pr) => pr.reviewUnavailable).length,
   };
+}
+
+/** GitHubのチェック集約（`statusCheckRollup.state`）を5チェックのCIの記録へ写す。無ければ`none` */
+export function toReleaseChangeCi(rollupState: string | null | undefined): ReleaseChangeCiCheck {
+  switch (rollupState) {
+    case "success":
+      return { state: "success" };
+    case "pending":
+    case "expected":
+      return { state: "pending" };
+    case "failure":
+    case "error":
+      return { state: "failure" };
+    default:
+      return { state: "none" };
+  }
+}
+
+/**
+ * 5チェック用の追加取得の結果を各PRへ付ける（#4305）。
+ *
+ * **取れなかったものは`unavailable`にする**（成功へ倒さない）。対応Issueが特定できないPRの計画は
+ * 取得対象外なので`not-applicable`。バージョンバンプPRはレビュー・CIの対象ではないので触らない。
+ */
+export function withMergeChecks(
+  pullRequests: readonly ReleaseChangePullRequest[],
+  ci: ReadonlyMap<number, ReleaseChangeCiCheck>,
+  plan: ReadonlyMap<number, ReleaseChangePlanCheck>,
+): ReleaseChangePullRequest[] {
+  return pullRequests.map((pr) => {
+    if (pr.isVersionBump) return pr;
+    return {
+      ...pr,
+      mergeChecks: {
+        ci: ci.get(pr.number) ?? { state: "unavailable" },
+        plan:
+          pr.issueNumber === null
+            ? { state: "not-applicable", reason: "対応するIssueを特定できません" }
+            : (plan.get(pr.number) ?? { state: "unavailable", reason: "計画の記録を取得できませんでした" }),
+      },
+    };
+  });
 }

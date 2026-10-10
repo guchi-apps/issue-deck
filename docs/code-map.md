@@ -637,6 +637,10 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
     （PC・スマホ・本番マージの確認ダイアログで共通。`GET /api/repositories/release/verification`を部品自身が取る）。
     進捗（待機理由・工程・経過）は[`lib/release-verification-progress.ts`](../src/lib/release-verification-progress.ts)が
     `DispatchJob.progress`（実行側の`running`報告）から作る（#4277）
+  - **リリース候補の修正系列は`ReleaseFixSeries`**（#4317）。判断は[`lib/release-fix-series.ts`](../src/lib/release-fix-series.ts)（純関数）、
+    起案・巡回・作り直しは[`lib/release-fix-series-run.ts`](../src/lib/release-fix-series-run.ts)、作り直しの実行は画面と共通の
+    [`lib/release-rebuild-run.ts`](../src/lib/release-rebuild-run.ts)、API・巡回の入口は`app/api/repositories/release/fix-series/`、
+    画面は[`components/dashboard/release-fix-panel.tsx`](../src/components/dashboard/release-fix-panel.tsx)。設計は[multi-agent/release-verification.md](multi-agent/release-verification.md)
   - **リポジトリ名の変更は`RepositoryNameAlias`で引き継ぐ**（#3613）。`SessionUsage.repository`は
     作業ディレクトリ名の短い名前で、改名すると旧名の行が別リポジトリに分かれる。
     [`lib/repository-alias.ts`](../src/lib/repository-alias.ts)がリポジトリ同期（と
@@ -1516,8 +1520,15 @@ export function POST(request: NextRequest) {
     `PushMutedKind`＝**行があればOFF・ユーザー単位**）。各送信は宛先に`notMutedWhere(kind)`を足す。
     席を先に取る確認待ち・本番マージ待ちは、**OFFのせいで宛先が空になったときも席を取らない**
     （保留と同じ理由。ONに戻したあとに鳴らせなくなる）。
-- **溜まった手作業は「手作業アシスタント」が1手順ずつ順番に案内する**（#1826。
-  [`manual-step-guide-dialog.tsx`](../src/components/dashboard/manual-step-guide-dialog.tsx)）。
+- **【#4315で撤去】手順ウィザード「手作業アシスタント」（`manual-step-guide-dialog.tsx`・一覧の
+  「順番に進める」バー・`use-manual-step-guide.ts`・`manual-step-{run,autorun,fix,trouble}-panel.tsx`・
+  `manual-step-placeholder-fill.tsx`・自己申告の完了ボタン）は無い。** 手作業Issueは手作業セッション
+  （AI主導。`manual-step-session-panel.tsx`・`scripts/prompts/manual-step-agent.md`）が調査・実行・検証を
+  進め、詳細は`ManualStepPanel`の「作業の状況」（`lib/manual-step-investigation.ts`が読む事前調査と
+  完了検証のコメント）を出す。完了は検証コマンドがすべて終了コード0のときだけセッションがcloseする。
+  **以下の箇条書きは撤去前の設計の記録で、サーバー側の代行実行（`/api/manual-steps/*`・`lib/manual-step-*.ts`）
+  は残っている。** 画面側のファイル名・番号表示・ボタンの記述は現行のコードに存在しない。
+- **（撤去前の記録）溜まった手作業は「手作業アシスタント」が1手順ずつ順番に案内する**（#1826）。
   本文はテンプレートで見出しの並びが決まっているのに、実行する人は「一覧を開く → Issueを開く →
   本文を上から読み直して、実行する場所とコマンドを自分で拾う」を件数ぶん繰り返していた。
   本文を「目的 → 手順1..n → 完了の確認」へ割り、**実行する場所（デバイス・ディレクトリ・
@@ -2512,6 +2523,11 @@ export function POST(request: NextRequest) {
   自動修復系列（`PullRequestAutoRepairLoop`）の状態は`/api/pull-requests`が`autoRepair`として載せる
   （`lib/github/pull-request-auto-repair-status.ts`。DB1クエリでGitHub APIは増えない）。
   **Codexなどエージェント別のレビュー判定は`PullRequestSummary`に載っていないため、この表示の対象外**。
+  **配色の意味（#4293）**: 琥珀＝人の承認・確認・操作待ち（`wait`）、赤＝失敗・要修正・問題による停止
+  （`bad`）、紫＝実行中（`run`）、灰＋アイコン＝実行待ち・未確認・意図的な停止（`idle`）、緑＝成功（`ok`）。
+  3枠（CI・レビュー・競合）は1行に固定し、修正中・再検証待ち・修正停止は別行。自動修正の停止理由は
+  `classifyAutoRepairStopReason`で「意図的（灰）／人の判断待ち（琥珀）／問題（赤）」に分け、理由不明は問題
+  （意図的と推測しない）。レビュー失敗は`review-failed`カテゴリで赤、要確認（琥珀）と分けて数える。
   **IssueとPRの対応は1対1に限らない。** 同じIssueでもブランチが違えばレーンは分かれ（レーンの
   キーはブランチ名）、1本のPRが複数のIssueを扱う場合は`PullRequestSummary.linkedIssueNumbers`
   （`extractLinkedIssueNumbers`が確度の高い順に全参照を返す）の2件目以降を「関連Issue」として
@@ -4571,7 +4587,7 @@ GitHub Actions障害時に、PR詳細からCircleCIを直接起動してdevelop�
 **共通チェックの発行は`gate-service.ts`の`syncPullRequestCiGate`だけが行う**（#4113）。通常時のActions
 （ci.ymlの必須ジョブ）とバックアップCIの両方の最新の試行から、最後に始まった方を採用し（判定は`gate.ts`）、
 採用した経路は`CiGateState`に残す。Actionsの結果はpollerの巡回（`sweepCiGateMirror`）と`workflow_run`の
-Webhookで取り込む。運用・移行・ロールバックは[backup-ci.md](backup-ci.md)。
+Webhookで取り込む。運用・移行・ロールバックは[backup-ci.md](backup-ci.md)。 他リポジトリへの展開（#4308）は`src/lib/backup-ci/rollout.ts`・`rollout-service.ts`・`/api/backup-ci/rollout`・`.github/scripts/propagate-backup-ci.sh`（[backup-ci.md](backup-ci.md) 9章）。
 バックアップCIの合格を採用したPRは、Actionsを経由せずにissue-deckがサブPCのCodexレビュー（`PR_REVIEW`）を
 積み、LGTMならdevelopへマージする（#4114。判定は`merge.ts`、実行と巡回は`merge-service.ts`の
 `sweepBackupCiMerges`。進み具合は`BackupCiRun.mergeStatus`）。

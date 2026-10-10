@@ -23,8 +23,10 @@ export function useReleaseChanges(
   pullRequestNumber: number | null = null,
   /** 変えると取り直す（画面の「更新」。#4277） */
   reloadToken = 0,
+  /** 本番マージ確認ダイアログの5チェック用に、PRごとのCI・計画レビューも取る（#4305） */
+  includeMergeChecks = false,
 ): UseReleaseChangesResult {
-  const key = `${repositoryFullName}#${pullRequestNumber ?? "develop"}`;
+  const key = `${repositoryFullName}#${pullRequestNumber ?? "develop"}${includeMergeChecks ? "+checks" : ""}`;
   const [loaded, setLoaded] = useState<{ key: string; data: ReleaseChangeListResponse } | null>(null);
   const [failure, setFailure] = useState<{ key: string; message: string } | null>(null);
 
@@ -34,6 +36,7 @@ export function useReleaseChanges(
     const [owner, repo] = repositoryFullName.split("/");
     const params = new URLSearchParams({ owner, repo });
     if (pullRequestNumber !== null) params.set("pullRequest", String(pullRequestNumber));
+    if (includeMergeChecks) params.set("include", "merge-checks");
 
     void (async () => {
       try {
@@ -66,7 +69,7 @@ export function useReleaseChanges(
       setLoaded(null);
       setFailure(null);
     };
-  }, [enabled, repositoryFullName, pullRequestNumber, key, reloadToken]);
+  }, [enabled, repositoryFullName, pullRequestNumber, includeMergeChecks, key, reloadToken]);
 
   const data = loaded !== null && loaded.key === key ? loaded.data : null;
   const error = failure !== null && failure.key === key ? failure.message : null;

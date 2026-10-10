@@ -3,6 +3,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { ChevronRight, ExternalLink, RotateCcw } from "lucide-react";
 
+import { ReleaseFixCreate, ReleaseFixSeriesPanel } from "@/components/dashboard/release-fix-panel";
 import { REVIEW_MARK, REVIEW_TONE } from "@/components/dashboard/review-verdict";
 import { ReleaseRebuildButton } from "@/components/dashboard/release-rebuild-button";
 import { useReleaseChanges, type UseReleaseChangesResult } from "@/hooks/use-release-changes";
@@ -12,6 +13,7 @@ import type { ReviewVerdictKind } from "@/lib/github/release-verification";
 import { toJstParts } from "@/lib/format-date-time";
 import { RELEASE_BRANCH_PREFIX } from "@/lib/pull-request-list";
 import { tallyReleaseReviews } from "@/lib/release-changes";
+import { describeReleaseReviewDiagnostic } from "@/lib/release-review-diagnostic";
 import {
   formatReleaseElapsed,
   formatReleaseReviewAgent,
@@ -40,7 +42,17 @@ import type { ReleaseChangeListResponse } from "@/types/pull-request";
  * 作り直すとSHAが変わるので、新しいSHAで統合検証・全体レビューをやり直す。
  */
 
-type Tone = "ok" | "warn" | "bad" | "run" | "muted";
+/**
+ * 個別PRレビューの一覧を差し替える描画関数が受け取る、リリース共通の検証の状態（#4305）。
+ * 各PR行の「全体〔共通〕」に、全体レビュー区分と同じ判定を渡すために使う
+ */
+export type IndividualListContext = {
+  verification: ReleaseVerificationSummary | null;
+  verificationError: string | null;
+  nowMs: number;
+};
+
+export type Tone = "ok" | "warn" | "bad" | "run" | "muted";
 
 const TONE_CLASS: Record<Tone, string> = {
   ok: "bg-green-50 text-green-700 dark:bg-green-950/40 dark:text-green-400",
@@ -188,7 +200,7 @@ function ProgressSteps({
   );
 }
 
-type SectionHead = {
+export type SectionHead = {
   tone: Tone;
   mark: string;
   label: string;
@@ -207,7 +219,7 @@ type SectionHead = {
  * 統合検証・全体レビューの区分の「閉じた1行」を、記録の状態と進捗から決める。
  * **記録が待機・実行中でないときは進捗で状態を上書きしない**（結果が正）。
  */
-function describeSection(section: ReleaseVerificationSection, nowMs: number): SectionHead {
+export function describeSection(section: ReleaseVerificationSection, nowMs: number): SectionHead {
   const progress = section.progress;
   const view = progress ? viewReleaseProgress(progress, nowMs) : null;
   const base = { meta: [] as string[], reason: section.reason, reasonTone: "muted" as Tone, steps: null, ticking: false };
@@ -341,18 +353,104 @@ function HeadLine({ head, extra }: { head: SectionHead; extra?: ReactNode }) {
 
 const SEVERITY_LABEL = { high: "重大", medium: "中", low: "軽微" } as const;
 
+/**
+ * 実行障害のときの「再実行」。コードを直さずに、同じ対象（今のリリースPR）でやり直す（#4300）。
+ * 対象はサーバーが解決し、ここで送るSHAは「見ていた対象との一致確認」にだけ使われる
+ */
+function ReviewRerunButton({
+  repositoryFullName,
+  pullRequestNumber,
+  baseSha,
+  headSha,
+  onDone,
+}: {
+  repositoryFullName: string;
+  pullRequestNumber: number;
+  baseSha: string;
+  headSha: string;
+  onDone?: () => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+  const run = async () => {
+    setBusy(true);
+    setMessage(null);
+    try {
+      const [owner, repo] = repositoryFullName.split("/");
+      const res = await fetch("/api/repositories/release/review-rerun", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ owner, repo, pullRequestNumber, baseSha, headSha }),
+      });
+      const body: { outcome?: string; error?: string; message?: string } = await res.json().catch(() => ({}));
+      if (res.status === 409 && body.error === "release_pr_changed") {
+        setMessage("リリースPRが更新されています。「更新」で最新の状態を読み込んでください。");
+      } else if (!res.ok) {
+        setMessage(body.message ?? `再実行を依頼できませんでした (${res.status})`);
+      } else {
+        setMessage(body.outcome === "already_queued" ? "すでに実行中または待機中です。" : "再実行を依頼しました。");
+        onDone?.();
+      }
+    } catch {
+      setMessage("再実行を依頼できませんでした（通信に失敗しました）。");
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <span className="inline-flex flex-wrap items-center gap-2">
+      <button
+        type="button"
+        onClick={run}
+        disabled={busy}
+        className="inline-flex items-center gap-1 rounded border px-2 py-0.5 text-[11.5px] font-medium text-foreground hover:bg-muted disabled:opacity-50"
+      >
+        <RotateCcw aria-hidden className="size-3" />
+        {busy ? "依頼中…" : "全体レビューを再実行"}
+      </button>
+      {message && <span role="status">{message}</span>}
+    </span>
+  );
+}
+
 function AiReviewSection({
   section,
   assignee,
   repositoryFullName,
+  pullRequestNumber,
+  target,
+  onReload,
+  onFixCreated,
   nowMs,
 }: {
   section: ReleaseVerificationSection;
   assignee: string;
   repositoryFullName: string;
+  pullRequestNumber?: number;
+  target?: { baseSha: string; headSha: string };
+  onReload?: () => void;
+  onFixCreated?: () => void;
   nowMs: number;
 }) {
-  const head = describeSection(section, nowMs);
+  const baseHead = describeSection(section, nowMs);
+  // 実行障害（レビューを最後まで行えなかった）は、コードへの指摘とは別の見た目にする（#4300）。
+  // 「失敗」「不合格」と読ませず、レビュー未完了であることと工程・原因・次の操作を出す
+  const executionFailed = section.state === "failed";
+  const diagnosticView = executionFailed ? describeReleaseReviewDiagnostic(section.diagnostic) : null;
+  const head: SectionHead =
+    executionFailed && diagnosticView
+      ? {
+          ...baseHead,
+          tone: "warn",
+          mark: "◌",
+          label: "レビュー未完了",
+          detail: diagnosticView.stageLabel ? `${diagnosticView.stageLabel}の工程で中断` : "実行障害（コードへの指摘ではありません）",
+          reason: diagnosticView.unidentified
+            ? "原因未特定です。コードの問題と判断されたわけではありません"
+            : `原因: ${diagnosticView.causeLabel}`,
+          reasonTone: "warn",
+        }
+      : baseHead;
   const recordedAgent = section.agent ?? section.progress?.agent ?? null;
   const agentLabel = recordedAgent ? `担当: ${formatReleaseReviewAgent(recordedAgent)}` : `担当予定: ${assignee}`;
   const finished = ["passed", "failed", "needs_check"].includes(section.state);
@@ -371,10 +469,15 @@ function AiReviewSection({
   const reason =
     head.reason ?? (top ? `${SEVERITY_LABEL[top.severity] ?? "中"}: ${top.title}` : null);
   const reasonTone: Tone = head.reason ? head.reasonTone : top?.severity === "high" ? "bad" : top ? "warn" : "muted";
-  const needsFix =
-    section.findings.length > 0 || section.state === "failed" || section.state === "invalidated";
+  // 実行障害にはコード修正→作り直しを勧めない（直すものが無い）。再実行が主導線
+  const needsFix = section.findings.length > 0 || section.state === "invalidated";
   const hasDetail =
-    Boolean(section.summary) || section.findings.length > 0 || section.totalFiles !== null || needsFix || section.progress !== null;
+    Boolean(section.summary) ||
+    section.findings.length > 0 ||
+    section.totalFiles !== null ||
+    needsFix ||
+    section.progress !== null ||
+    executionFailed;
 
   return (
     <SectionRow
@@ -423,6 +526,57 @@ function AiReviewSection({
               </>
             )}
           </dl>
+          {executionFailed && diagnosticView && (
+            <div className="flex flex-col gap-1 rounded border border-amber-300 bg-amber-50/60 px-2 py-1.5 dark:border-amber-800 dark:bg-amber-950/20">
+              <p className="font-medium">
+                レビューは最後まで行えていません。コードの品質が不合格になったわけではなく、問題なしとも扱いません。
+              </p>
+              <dl className="grid grid-cols-[6.5rem_1fr] gap-x-2 gap-y-0.5 text-[11.5px]">
+                <dt className="text-muted-foreground">失敗した工程</dt>
+                <dd>{diagnosticView.stageLabel ?? "特定できていません"}</dd>
+                <dt className="text-muted-foreground">確認できた原因</dt>
+                <dd>
+                  {diagnosticView.causeLabel}
+                  {section.diagnostic?.exitCode != null && `（終了コード ${section.diagnostic.exitCode}）`}
+                </dd>
+                {section.updatedAt && (
+                  <>
+                    <dt className="text-muted-foreground">記録した時刻</dt>
+                    <dd>{clock(section.updatedAt)}</dd>
+                  </>
+                )}
+                {target && (
+                  <>
+                    <dt className="text-muted-foreground">対象</dt>
+                    <dd className="font-mono">
+                      main {shortSha(target.baseSha)} ← release {shortSha(target.headSha)}
+                    </dd>
+                  </>
+                )}
+              </dl>
+              {section.reason && (
+                <p className="break-words text-muted-foreground">実行側の報告: {section.reason}</p>
+              )}
+              <p>次の操作: {diagnosticView.action}</p>
+              {section.diagnostic?.excerpt && (
+                <details>
+                  <summary className="cursor-pointer text-muted-foreground">エラーの抜粋（機密は除去済み・末尾のみ）</summary>
+                  <pre className="mt-1 max-h-48 overflow-auto rounded bg-muted/50 p-2 text-[11px] whitespace-pre-wrap">
+                    {section.diagnostic.excerpt}
+                  </pre>
+                </details>
+              )}
+              {pullRequestNumber !== undefined && target && (
+                <ReviewRerunButton
+                  repositoryFullName={repositoryFullName}
+                  pullRequestNumber={pullRequestNumber}
+                  baseSha={target.baseSha}
+                  headSha={target.headSha}
+                  onDone={onReload}
+                />
+              )}
+            </div>
+          )}
           {section.summary && <p className="whitespace-pre-wrap">{section.summary}</p>}
           {section.findings.length > 0 && (
             <ul className="flex flex-col gap-1">
@@ -431,8 +585,16 @@ function AiReviewSection({
                   <span className={finding.severity === "high" ? "font-medium text-destructive" : "font-medium"}>
                     [{SEVERITY_LABEL[finding.severity] ?? "中"}] {finding.title}
                   </span>
-                  {finding.file && <span className="ml-2 break-all text-muted-foreground">{finding.file}</span>}
+                  {finding.file && (
+                    <span className="ml-2 break-all text-muted-foreground">
+                      {finding.file}
+                      {finding.line ? `:${finding.line}` : ""}
+                    </span>
+                  )}
                   {finding.detail && <p className="whitespace-pre-wrap text-muted-foreground">{finding.detail}</p>}
+                  {finding.impact && <p className="whitespace-pre-wrap">影響: {finding.impact}</p>}
+                  {finding.evidence && <p className="whitespace-pre-wrap text-muted-foreground">根拠: {finding.evidence}</p>}
+                  {finding.recommendation && <p className="whitespace-pre-wrap">推奨対応: {finding.recommendation}</p>}
                   {finding.pullRequests?.length > 0 && (
                     <p className="text-muted-foreground">影響PR: {finding.pullRequests.map((n) => `#${n}`).join(" ")}</p>
                   )}
@@ -456,16 +618,42 @@ function AiReviewSection({
               <ReleaseRebuildButton repositoryFullName={repositoryFullName} />
             </div>
           )}
+          {section.findings.length > 0 && !executionFailed && pullRequestNumber !== undefined && target && (
+            <ReleaseFixCreate
+              repositoryFullName={repositoryFullName}
+              pullRequestNumber={pullRequestNumber}
+              target={target}
+              sourceKind="review_finding"
+              findings={section.findings}
+              onDone={onFixCreated}
+            />
+          )}
         </>
       ) : undefined}
     </SectionRow>
   );
 }
 
-function IntegrationSection({ section, nowMs }: { section: ReleaseVerificationSection; nowMs: number }) {
+function IntegrationSection({
+  section,
+  nowMs,
+  repositoryFullName,
+  pullRequestNumber,
+  target,
+  onFixCreated,
+}: {
+  section: ReleaseVerificationSection;
+  nowMs: number;
+  repositoryFullName: string;
+  pullRequestNumber?: number;
+  target?: { baseSha: string; headSha: string };
+  onFixCreated?: () => void;
+}) {
   const head = describeSection(section, nowMs);
   const progress = section.progress;
-  const hasDetail = Boolean(section.summary) || Boolean(section.evidenceUrl) || progress !== null;
+  const canDraftFix =
+    (section.state === "failed" || section.state === "needs_check") && pullRequestNumber !== undefined && target !== undefined;
+  const hasDetail = Boolean(section.summary) || Boolean(section.evidenceUrl) || progress !== null || canDraftFix;
   return (
     <SectionRow
       title="統合検証"
@@ -515,6 +703,15 @@ function IntegrationSection({ section, nowMs }: { section: ReleaseVerificationSe
               既存CIの記録
               <ExternalLink aria-hidden className="size-3" />
             </a>
+          )}
+          {canDraftFix && pullRequestNumber !== undefined && target && (
+            <ReleaseFixCreate
+              repositoryFullName={repositoryFullName}
+              pullRequestNumber={pullRequestNumber}
+              target={target}
+              sourceKind="integration_failure"
+              onDone={onFixCreated}
+            />
           )}
         </>
       ) : undefined}
@@ -593,11 +790,13 @@ function IndividualReviewSection({
   changes,
   repositoryFullName,
   renderList,
+  context,
   onOpenPullRequest,
 }: {
   changes: UseReleaseChangesResult;
   repositoryFullName: string;
-  renderList?: (data: ReleaseChangeListResponse) => ReactNode;
+  renderList?: (data: ReleaseChangeListResponse, context: IndividualListContext) => ReactNode;
+  context: IndividualListContext;
   onOpenPullRequest?: (pullRequestNumber: number) => void;
 }) {
   const { data, isLoading, error } = changes;
@@ -678,7 +877,7 @@ function IndividualReviewSection({
       reasonTone={tally.changesRequested > 0 ? "bad" : "warn"}
     >
       {renderList ? (
-        renderList(data)
+        renderList(data, context)
       ) : (
         <IndividualList data={data} repositoryFullName={repositoryFullName} onOpenPullRequest={onOpenPullRequest} />
       )}
@@ -694,6 +893,7 @@ const GATE_LABEL: Record<Exclude<ReleaseVerificationSummary["gateStatus"], "not_
 
 export function ReleaseReviewSections({
   repositoryFullName,
+  pullRequestNumber,
   headRef,
   verification,
   verificationError,
@@ -705,6 +905,8 @@ export function ReleaseReviewSections({
   className,
 }: {
   repositoryFullName: string;
+  /** 全体レビューの再実行に使う。無ければ再実行の導線を出さない */
+  pullRequestNumber?: number;
   /** 凍結ブランチ（`release-main/…`）のリリースPRにだけ出す。旧世代（head=develop）は検証の対象外 */
   headRef: string;
   verification: ReleaseVerificationSummary | null;
@@ -712,7 +914,7 @@ export function ReleaseReviewSections({
   changes: UseReleaseChangesResult;
   onReload?: () => void;
   /** 個別PRレビューを開いたときの一覧を差し替える（確認ダイアログは既存の変更一覧を入れる） */
-  renderIndividualList?: (data: ReleaseChangeListResponse) => ReactNode;
+  renderIndividualList?: (data: ReleaseChangeListResponse, context: IndividualListContext) => ReactNode;
   onOpenPullRequest?: (pullRequestNumber: number) => void;
   /** 3区分の後に同じ枠で並べる行（確認ダイアログのCI・コンフリクト） */
   extraRows?: ReactNode;
@@ -724,6 +926,11 @@ export function ReleaseReviewSections({
       (section) => section.state === "waiting" || section.state === "running",
     );
   const nowMs = useNow(active);
+  const [fixTick, setFixTick] = useState(0);
+  const onFixCreated = () => {
+    setFixTick((n) => n + 1);
+    onReload?.();
+  };
   if (!headRef.startsWith(RELEASE_BRANCH_PREFIX)) return null;
 
   const gate = verification && verification.enforced && verification.gateStatus !== "not_enforced"
@@ -764,9 +971,20 @@ export function ReleaseReviewSections({
             section={verification.aiReview}
             assignee={verification.aiReviewAssignee}
             repositoryFullName={repositoryFullName}
+            pullRequestNumber={pullRequestNumber}
+            target={verification.target}
+            onReload={onReload}
+            onFixCreated={onFixCreated}
             nowMs={nowMs}
           />
-          <IntegrationSection section={verification.integration} nowMs={nowMs} />
+          <IntegrationSection
+            section={verification.integration}
+            nowMs={nowMs}
+            repositoryFullName={repositoryFullName}
+            pullRequestNumber={pullRequestNumber}
+            target={verification.target}
+            onFixCreated={onFixCreated}
+          />
         </>
       ) : (
         <>
@@ -798,10 +1016,18 @@ export function ReleaseReviewSections({
           />
         </>
       )}
+      {pullRequestNumber !== undefined && (
+        <ReleaseFixSeriesPanel
+          repositoryFullName={repositoryFullName}
+          pullRequestNumber={pullRequestNumber}
+          reloadToken={fixTick}
+        />
+      )}
       <IndividualReviewSection
         changes={changes}
         repositoryFullName={repositoryFullName}
         renderList={renderIndividualList}
+        context={{ verification, verificationError: verificationError ?? null, nowMs }}
         onOpenPullRequest={onOpenPullRequest}
       />
       {extraRows}
@@ -844,25 +1070,35 @@ export function ConnectedReleaseReviewSections({
   renderIndividualList,
   onOpenPullRequest,
   extraRows,
+  includeMergeChecks = false,
   className,
 }: {
   repositoryFullName: string;
   pullRequestNumber: number;
   headRef: string;
   enabled?: boolean;
-  renderIndividualList?: (data: ReleaseChangeListResponse) => ReactNode;
+  renderIndividualList?: (data: ReleaseChangeListResponse, context: IndividualListContext) => ReactNode;
   onOpenPullRequest?: (pullRequestNumber: number) => void;
   extraRows?: ReactNode;
+  /** PRごとのCI・計画レビューも取る（本番マージ確認ダイアログの5チェック。#4305） */
+  includeMergeChecks?: boolean;
   className?: string;
 }) {
   const [reloadToken, setReloadToken] = useState(0);
   const target = enabled && headRef.startsWith(RELEASE_BRANCH_PREFIX);
   const { verification, error } = useReleaseVerification(repositoryFullName, pullRequestNumber, target, reloadToken);
-  const changes = useReleaseChanges(repositoryFullName, target, pullRequestNumber, reloadToken);
+  const changes = useReleaseChanges(
+    repositoryFullName,
+    target,
+    pullRequestNumber,
+    reloadToken,
+    includeMergeChecks,
+  );
   const { openPullRequest } = useReferenceNavigation();
   return (
     <ReleaseReviewSections
       repositoryFullName={repositoryFullName}
+      pullRequestNumber={pullRequestNumber}
       headRef={headRef}
       verification={verification}
       verificationError={error}

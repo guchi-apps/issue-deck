@@ -544,6 +544,7 @@ CLAUDE.mdに**無いことを明記**しておかないと、エージェント�
 | `ios-testflight.yml` | iOSアプリ本体の更新が要るリリースだけ、TestFlightの内部テストグループへ自動配布する（#591・#3846）。App Store Connect APIキーとして`ASC_KEY_ID`・`ASC_ISSUER_ID`・`ASC_KEY_P8`のSecretsを使う（未登録でもWebのデプロイは失敗せず、iOS配布のジョブだけが止まる） | issue-deck固有（iOSアプリを持つリポジトリのみ）。不要 |
 | `propagate-workflow-tag.yml` | 共有ワークフローの参照タグ（`uses:`・`prompts-ref`）を、展開済みの他リポジトリへ配るPRを作成する（`workflow_dispatch`）。issue-deck画面（設定ダイアログ）から起動される（#1173） | issue-deck固有（配布元としての役割）。対象リポジトリ側には何もコピーしない。不要 |
 | `propagate-shared-files.yml` | ワークフロー以外の配布物（`.github/scripts/signaly-notify.sh`等、`.github/scripts/`配下にコピーして使うファイル）を、配布元（issue-deck）の内容へそろえるPRを配布先ごとに作成する（`workflow_dispatch`）。issue-deck画面（設定＞フリート運用＞共有ワークフローのバージョン「共有スクリプト」欄）から起動される（#2240） | issue-deck固有（配布元としての役割）。対象リポジトリ側には何もコピーしない。不要 |
+| `propagate-backup-ci.yml` | 選んだ1リポジトリへバックアップCI（CircleCI）の導入・更新PRを作成する（`workflow_dispatch`、入力は`repository`）。配るのは`.circleci/config.yml`・`scripts/ci/run-required-checks.mjs`（配布元の実物）と、対象のci.ymlから生成する`ci/required-checks.json`。自動マージしない。issue-deck画面（設定＞フリート運用＞バックアップCI（CircleCI）の展開）から起動される（#4308） | issue-deck固有（配布元としての役割）。対象リポジトリ側には何もコピーしない。不要 |
 | `sync-secrets.yml` | 1Password（値の正）から、そのリポジトリのGitHub secret / variableへ値を同期する（`workflow_dispatch`）。本体は`reusable-sync-secrets.yml`で、ここは薄いcaller。issue-deck画面（設定ダイアログ → シークレットの同期）から起動される（#1309） | **展開する。** 下記「シークレット同期を画面のボタンから起こす」を参照 |
 | `reusable-sync-secrets.yml` | 上記の本体（`workflow_call`）。`scripts/sync-github-secrets.sh`をそのまま実行し、結果（件数と、同期・スキップ・失敗した項目名だけ）をissue-deckへ報告する（#1309・#2022） | 配布元としてissue-deckに置く。対象リポジトリはcallerから`@workflows/vN`で参照する |
 

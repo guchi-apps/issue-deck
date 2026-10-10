@@ -165,8 +165,9 @@ export function PlanApprovalPanel({
   // 届いた後は下の`PlanReviewFindings`カードがそちらを表す。
   // **起動待ち（`QUEUED`）は作成中と分けて出す**（#3772）。サブPCが空きを待っている間も
   // 「作成中」と出していたため、5時間超その表示のままになっていた
-  const planReviewPhase =
-    planReview === null ? resolvePlanReviewJobPhase(planReviewJob ?? null, new Date()) : null;
+  // 指摘コメントが届いていても、採否判定中・自動反映中（`planReviewDecidedAt`未確定）は
+  // 作成中のまま出す。通知・一覧・概要のバッジと同じ判定にそろえる（#4304）
+  const planReviewPhase = resolvePlanReviewJobPhase(planReviewJob ?? null, new Date());
   const planReviewCreating = planReviewPhase === "creating" || planReviewPhase === "queued";
   // 計画レビューの作成中は、オレンジの承認枠ごと出さず作成中カードだけを出す（#3726）。
   // 採否が決まるまで人が押す場面が無く、Push通知も保留している間なので、目を引く枠は要らない。

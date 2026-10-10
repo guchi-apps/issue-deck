@@ -319,6 +319,8 @@ extension WebViewModel: WKNavigationDelegate {
         importSharedDrafts()
         // ログインが済んでいれば端末トークンを登録する（未ログインなら何も起きない）
         registerPushToken()
+        // 共有画面から直接Issueを作るための専用セッションを更新する（#4298）。未ログインなら消す
+        Task { @MainActor in await ShareSessionIssuer(webView: webView).refresh() }
     }
 
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
@@ -438,7 +440,7 @@ extension WebViewModel: WKScriptMessageHandlerWithReply {
                 }
                 reply.send(await self.pushStatus(serverOk: ok))
             case "openSettings":
-                if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) }
+                if let url = URL(string: UIApplication.openSettingsURLString) { _ = await UIApplication.shared.open(url) }
                 reply.send(nil)
             default:
                 reply.fail("unsupported")

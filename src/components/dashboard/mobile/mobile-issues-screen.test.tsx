@@ -82,7 +82,6 @@ function renderScreen(
       onChangeView={vi.fn()}
       onChangeFilters={vi.fn()}
       onSelectIssue={vi.fn()}
-      onStartManualStepGuide={vi.fn()}
     />,
   );
 }
