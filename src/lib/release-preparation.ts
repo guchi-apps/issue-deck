@@ -1,3 +1,4 @@
+import type { RebuildSelection } from "@/lib/release-rebuild-selection";
 import { redactDiagnosticText } from "@/lib/release-review-diagnostic";
 
 /**
@@ -141,6 +142,8 @@ export type ReleasePreparationFailureView = {
   jobName: string | null;
   stepName: string | null;
   errorExcerpt: string | null;
+  /** 選んで作り直していたときの指定（元の候補と選んだPR）。再開時は現在の状態で検証し直す */
+  rebuildSelection: RebuildSelection | null;
   createdAt: string;
 };
 
