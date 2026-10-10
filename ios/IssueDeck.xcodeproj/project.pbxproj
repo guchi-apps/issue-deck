@@ -265,7 +265,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 8.43.3;
+				MARKETING_VERSION = 8.45.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.gucchii.issuedeck;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -299,7 +299,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 8.43.3;
+				MARKETING_VERSION = 8.45.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.gucchii.issuedeck;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
