@@ -56,7 +56,7 @@ import {
   findPlanReviewJobForIssue,
   isActiveDispatchJobStatus,
   isIssueExecutionPending,
-  isPlanReviewJobCreating,
+  isPlanReviewAttentionHeld,
   resolveDefaultDispatchHost,
 } from "@/lib/dispatch/dispatch-job";
 import { formatDispatchHostName } from "@/lib/dispatch/host-label";
@@ -733,8 +733,13 @@ export function IssueDetail({
     issue.repositoryFullName,
     issue.number,
   );
-  const planReviewJobCreating =
-    pendingPlanReview === null && isPlanReviewJobCreating(planReviewJob, new Date());
+  // 指摘コメントの到着では外さない（採否判定中・自動反映中も作成中として扱い、通知・一覧と揃える。#4304）
+  const planReviewJobCreating = isPlanReviewAttentionHeld({
+    job: planReviewJob,
+    now: new Date(),
+    isLoaded: dispatch.isLoaded,
+    isPlanReason: checkUserReason(issue.labels) === "plan",
+  });
   // 質問への回答待ち（#2189）。計画の返事待ちと同じ扱いで、**待っている間、端末には
   // 選択フォームが出ていない**ので、ここが唯一の答える場所になる
   const questionRequest = findQuestionRequestForIssue(
