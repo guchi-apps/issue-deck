@@ -23,6 +23,7 @@ import {
   buildRepositoryPieSlices,
   fillUsageDays,
   formatSessionElapsed,
+  formatUsageBasisValue,
   formatUsageTokens,
   formatUsageUsd,
   indexCurrentSessionsByIssueKey,
@@ -36,7 +37,10 @@ import {
   sessionUsageLocationLabel,
   sessionUsageModelLabel,
   sessionUsagePhaseSplit,
+  USAGE_BASIS_LABELS,
+  usageBasisValue,
   usagePhaseKindKey,
+  type UsageBasis,
   type CurrentSessionTone,
   type CurrentSessionUsage,
   type SessionUsageEntry,
@@ -134,21 +138,68 @@ function Tile({
   value,
   sub,
   bar,
+  selected,
+  onSelect,
 }: {
   label: string;
   value: string;
   sub: string;
   /** 値と`sub`のあいだに挟む細い帯（入力トークンの内訳）。無ければ出さない */
   bar?: ReactNode;
+  /** 日別・リポジトリ別・種別別の表示基準として選ばれているか（#4285） */
+  selected?: boolean;
+  /** 渡すとカード全体が押せる。押すとこのカードの基準へ内訳が切り替わる */
+  onSelect?: () => void;
 }) {
-  return (
-    <div className="flex flex-col gap-0.5 rounded-lg border p-3">
+  const body = (
+    <>
       <span className="text-[10px] font-semibold tracking-wide text-muted-foreground">{label}</span>
       <span className="text-xl font-bold tabular-nums sm:text-2xl">{value}</span>
       {bar}
       <span className="text-[11px] text-muted-foreground tabular-nums">{sub}</span>
-    </div>
+    </>
   );
+  if (!onSelect) return <div className="flex flex-col gap-0.5 rounded-lg border p-3">{body}</div>;
+  return (
+    <button
+      type="button"
+      aria-pressed={selected}
+      onClick={onSelect}
+      className={cn(
+        "flex flex-col items-start gap-0.5 rounded-lg border p-3 text-left",
+        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+        selected ? "border-primary bg-accent ring-1 ring-primary" : "hover:bg-accent/50",
+      )}
+    >
+      {body}
+    </button>
+  );
+}
+
+/** 見出しの横に出す、選んだ表示基準の印（金額以外のときだけ。#4285） */
+function BasisChip({ label }: { label: string }) {
+  return (
+    <span className="ml-1.5 rounded bg-muted px-1.5 py-px text-[10px] font-medium text-foreground">
+      {label}
+    </span>
+  );
+}
+
+/** 金額以外の基準で使う単色の棒。濃淡は金額の内訳でしかないので、件数・トークンでは使わない */
+const BASIS_BAR_COLOR = "#6366f1";
+
+/** 縦軸の目盛り。金額以外は整数の目盛りに丸める（件数に`0.8`の目盛りは出さない） */
+function basisAxisScale(peak: number, basis: UsageBasis) {
+  const scale = niceAxisScale(peak);
+  if (basis === "cost" || scale.step >= 1) return scale;
+  const max = Math.max(1, Math.ceil(peak));
+  return { max, step: 1, ticks: Array.from({ length: max + 1 }, (_, index) => index) };
+}
+
+function formatAxisBasis(value: number, basis: UsageBasis): string {
+  if (basis === "cost") return formatAxisUsd(value);
+  if (basis === "tokens") return formatUsageTokens(value);
+  return Math.round(value).toLocaleString();
 }
 
 /**
@@ -417,14 +468,23 @@ function CostBar({
   row,
   widthPercent,
   highlighted,
+  basis = "cost",
+  titleText,
 }: {
   row: CostRow;
+  /** 金額以外の基準のときのツールチップ（#4285）。省略するとClaude／Codexの金額を出す */
+  titleText?: string;
+  /** 金額以外の基準（#4285）のときは単色の棒にする */
+  basis?: UsageBasis;
   widthPercent: number;
   /** いちばん新しい日（集計途中）だけ枠線を足す */
   highlighted?: boolean;
 }) {
   const toPercent = (value: number) => (row.costUsd > 0 ? (value / row.costUsd) * 100 : 0);
-  const parts = agentModelTierParts(row);
+  const parts =
+    basis === "cost"
+      ? agentModelTierParts(row)
+      : [{ key: "basis", value: row.costUsd, color: BASIS_BAR_COLOR }];
   const title = [
     { label: "Claude", value: row.byAgent.claude.costUsd },
     { label: "Codex", value: row.byAgent.codex.costUsd },
@@ -437,13 +497,16 @@ function CostBar({
         "h-2.5 overflow-hidden rounded-full bg-muted",
         highlighted && "ring-1 ring-muted-foreground/40",
       )}
-      title={title}
+      title={titleText ?? title}
     >
       <div className="flex h-full overflow-hidden rounded-full" style={{ width: `${widthPercent}%` }}>
         {parts.map((part) => (
           <span
             key={part.key}
-            style={{ width: `${toPercent(part.value)}%`, backgroundColor: part.color }}
+            style={{
+              width: basis === "cost" ? `${toPercent(part.value)}%` : "100%",
+              backgroundColor: part.color,
+            }}
           />
         ))}
       </div>
@@ -533,18 +596,22 @@ const DAILY_VALUE_LABELS_MAX_DAYS = 7;
 function DailyChart({
   days,
   todayKey,
+  basis = "cost",
 }: {
   days: SessionUsageResponse["byDay"];
   todayKey: string;
+  /** 縦軸を何で測るか（#4285）。金額以外は単色の棒で、平均線は日別の値の平均 */
+  basis?: UsageBasis;
 }) {
   if (days.length === 0) {
     return <p className="text-xs text-muted-foreground">記録がありません</p>;
   }
 
-  const peak = days.reduce((top, day) => Math.max(top, day.costUsd), 0);
-  const scale = niceAxisScale(peak);
-  const average = days.reduce((sum, day) => sum + day.costUsd, 0) / days.length;
-  const peakIndex = days.findIndex((day) => day.costUsd === peak);
+  const valueOf = (day: (typeof days)[number]) => usageBasisValue(day, basis);
+  const peak = days.reduce((top, day) => Math.max(top, valueOf(day)), 0);
+  const scale = basisAxisScale(peak, basis);
+  const average = days.reduce((sum, day) => sum + valueOf(day), 0) / days.length;
+  const peakIndex = days.findIndex((day) => valueOf(day) === peak);
   const isFewDays = days.length <= DAILY_VALUE_LABELS_MAX_DAYS;
   const showsEveryLabel = days.length <= DAILY_ALL_LABELS_MAX_DAYS;
   const barsGap = isFewDays ? "gap-2 sm:gap-3" : "gap-[2px] sm:gap-1";
@@ -559,7 +626,7 @@ function DailyChart({
             className="absolute right-0 translate-y-1/2 leading-none whitespace-nowrap"
             style={{ bottom: `${(tick / scale.max) * 100}%` }}
           >
-            {formatAxisUsd(tick)}
+            {formatAxisBasis(tick, basis)}
           </span>
         ))}
       </div>
@@ -574,14 +641,20 @@ function DailyChart({
         ))}
         <div className={cn("absolute inset-0 flex items-end", barsGap)}>
           {days.map((day, index) => {
-            const parts = agentModelTierParts(day);
-            const isZero = day.costUsd <= 0;
+            const dayValue = valueOf(day);
+            const parts =
+              basis === "cost"
+                ? agentModelTierParts(day)
+                : [{ key: "basis", value: day.costUsd, color: BASIS_BAR_COLOR }];
+            const isZero = dayValue <= 0;
             const showsValue = !isZero && (isFewDays || index === peakIndex);
             const modelNote = day.modelLabels.length > 0 ? `　・　モデル: ${day.modelLabels.join(", ")}` : "";
             const dayTitle =
-              `${day.date}　${formatUsageUsd(day.costUsd)}　${day.responses.toLocaleString()}応答　・　` +
-              `Claude ${formatUsageUsd(day.byAgent.claude.costUsd)} / Codex ${formatUsageUsd(day.byAgent.codex.costUsd)}` +
-              `${modelNote}`;
+              basis === "cost"
+                ? `${day.date}　${formatUsageUsd(day.costUsd)}　${day.responses.toLocaleString()}応答　・　` +
+                  `Claude ${formatUsageUsd(day.byAgent.claude.costUsd)} / Codex ${formatUsageUsd(day.byAgent.codex.costUsd)}` +
+                  `${modelNote}`
+                : `${day.date}　${USAGE_BASIS_LABELS[basis]} ${formatUsageBasisValue(dayValue, basis)}　・　${formatUsageUsd(day.costUsd)}`;
             return (
               <div
                 key={day.date}
@@ -601,14 +674,14 @@ function DailyChart({
                       barMaxWidth,
                       day.date === todayKey && "outline outline-1 outline-offset-1 outline-muted-foreground/60",
                     )}
-                    style={{ height: `${(day.costUsd / scale.max) * 100}%` }}
+                    style={{ height: `${(dayValue / scale.max) * 100}%` }}
                   >
                     {parts.map((part) => (
                       <span
                         key={part.key}
                         className="block w-full"
                         style={{
-                          height: `${(part.value / day.costUsd) * 100}%`,
+                          height: basis === "cost" ? `${(part.value / day.costUsd) * 100}%` : "100%",
                           backgroundColor: part.color,
                         }}
                       />
@@ -618,9 +691,9 @@ function DailyChart({
                 {showsValue && (
                   <span
                     className="absolute left-1/2 -translate-x-1/2 pb-[3px] text-[10px] leading-none font-bold whitespace-nowrap text-foreground"
-                    style={{ bottom: `calc(${(day.costUsd / scale.max) * 100}% + 1px)` }}
+                    style={{ bottom: `calc(${(dayValue / scale.max) * 100}% + 1px)` }}
                   >
-                    {formatUsageUsd(day.costUsd)}
+                    {basis === "cost" ? formatUsageUsd(dayValue) : formatAxisBasis(dayValue, basis)}
                   </span>
                 )}
               </div>
@@ -633,7 +706,7 @@ function DailyChart({
           style={{ bottom: `${(average / scale.max) * 100}%` }}
         >
           <em className="absolute right-0 bottom-[3px] rounded-full border border-sky-600 bg-card px-1.5 py-px text-[10.5px] leading-snug font-bold text-sky-700 not-italic dark:border-sky-400 dark:text-sky-300">
-            平均 {formatUsageUsd(average)}
+            平均 {basis === "cost" ? formatUsageUsd(average) : formatUsageBasisValue(average, basis)}
           </em>
         </div>
       </div>
@@ -665,11 +738,33 @@ function DailyChart({
  * **GitHub Actionsは実行経路として単色にせず、Claudeの濃淡へ合流済み**（#3564）。
  * トークンの帯は日別では出さない（#3038）。
  */
-function DailyLegend() {
+function DailyLegend({ basis = "cost" }: { basis?: UsageBasis }) {
   const agents = [
     { key: "claude", label: "Claude" },
     { key: "codex", label: "Codex" },
   ] as const;
+  if (basis !== "cost") {
+    return (
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
+        <span>
+          <i
+            aria-hidden
+            className="mr-1 inline-block size-2 rounded-[2px] align-middle"
+            style={{ backgroundColor: BASIS_BAR_COLOR }}
+          />
+          <span className="text-foreground">{USAGE_BASIS_LABELS[basis]}</span>
+        </span>
+        {basis === "issues" && <span>その日に動いたIssue・PRの件数（日をまたいだ重複は数え直す）</span>}
+        <span>
+          <i
+            aria-hidden
+            className="mr-1.5 inline-block w-4 border-t-[1.5px] border-dashed border-sky-600 align-middle dark:border-sky-400"
+          />
+          <span className="text-foreground">期間の平均</span>
+        </span>
+      </div>
+    );
+  }
   return (
     <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
       {agents.map((agent) => (
@@ -718,8 +813,14 @@ function Breakdown({
   rows,
   colorOf,
   separator,
+  basis = "cost",
+  titleSuffix,
 }: {
+  /** 棒の長さと右端の数値を何で測るか（#4285） */
+  basis?: UsageBasis;
   title: string;
+  /** 見出しの後ろに添える印（選んだ基準。#4285） */
+  titleSuffix?: ReactNode;
   hint: string;
   rows: (UsageGroup & { label: string })[];
   colorOf?: (key: string) => string | undefined;
@@ -727,7 +828,7 @@ function Breakdown({
   separator?: { label: string; isBefore: (key: string) => boolean };
 }) {
   // **棒の基準は先頭の行ではなく最大の行**（#2954）。種別別は作業の順に並べるため、先頭が最大とは限らない。
-  const max = rows.reduce((peak, row) => Math.max(peak, row.costUsd), 0);
+  const max = rows.reduce((peak, row) => Math.max(peak, usageBasisValue(row, basis)), 0);
   const separatorIndex = separator ? rows.findIndex((row) => separator.isBefore(row.key)) : -1;
 
   return (
@@ -735,7 +836,10 @@ function Breakdown({
       <div className="flex items-baseline justify-between gap-2">
         {/* **見出しは折り返さない**（#2752）。スマホ幅では見出しと補足が2行ずつに割れて
             カードの上半分が文字で埋まっていた。あふれたときに省略記号へ落ちるのは補足だけ */}
-        <span className="shrink-0 text-xs font-semibold whitespace-nowrap">{title}</span>
+        <span className="shrink-0 text-xs font-semibold whitespace-nowrap">
+          {title}
+          {titleSuffix}
+        </span>
         <span className="min-w-0 truncate text-[11px] text-muted-foreground tabular-nums">
           {hint}
         </span>
@@ -768,14 +872,25 @@ function Breakdown({
                       )}
                       <span className="truncate">{row.label}</span>
                     </span>
-                    <span className="shrink-0 text-muted-foreground tabular-nums">
-                      {row.sessions}セッション
-                    </span>
+                    {basis !== "sessions" && (
+                      <span className="shrink-0 text-muted-foreground tabular-nums">
+                        {row.sessions}セッション
+                      </span>
+                    )}
                     <span className="shrink-0 font-semibold tabular-nums">
-                      {formatUsageUsd(row.costUsd)}
+                      {formatUsageBasisValue(usageBasisValue(row, basis), basis)}
                     </span>
                   </div>
-                  <CostBar row={row} widthPercent={max > 0 ? (row.costUsd / max) * 100 : 0} />
+                  <CostBar
+                    row={row}
+                    basis={basis}
+                    widthPercent={max > 0 ? (usageBasisValue(row, basis) / max) * 100 : 0}
+                    titleText={
+                      basis === "cost"
+                        ? undefined
+                        : `${USAGE_BASIS_LABELS[basis]} ${formatUsageBasisValue(usageBasisValue(row, basis), basis)}`
+                    }
+                  />
                 </li>
               </Fragment>
             );
@@ -1823,6 +1938,8 @@ export function SessionUsagePanel({
   className,
 }: SessionUsagePanelProps) {
   const [visibleIssues, setVisibleIssues] = useState(VISIBLE_ISSUES_STEP);
+  // 日別・リポジトリ別・種別別を何で測るか（#4285）。集計期間の下のカードで切り替える
+  const [basis, setBasis] = useState<UsageBasis>("cost");
   // 「リポジトリ別」の全件の表（#3423）。円グラフは3%以上＋その他なので、3%未満の金額はここで読む
   const [repositoryListOpen, setRepositoryListOpen] = useState(false);
   // Issue・PRの行ごとの開閉状態。キーが無ければ既定（一番新しい行だけ開く）に従う（#2653）。
@@ -1843,7 +1960,10 @@ export function SessionUsagePanel({
   const todayKey = dailyDays.at(-1)?.date ?? "";
   const issues = period?.byIssue ?? [];
   const liveSessionsByKey = indexCurrentSessionsByIssueKey(data?.currentSessions ?? []);
-  const repositoryPieSlices = period ? buildRepositoryPieSlices(period.byRepository) : [];
+  const repositoryPieSlices = period ? buildRepositoryPieSlices(period.byRepository, basis) : [];
+  // 全体のIssue数は期間全体の重複除去（明細に出していない分も含む）。日別などの和ではない
+  const issueTotal = period ? period.byIssue.length + period.omittedIssues : 0;
+  const basisLabel = USAGE_BASIS_LABELS[basis];
   const agentCostSub = period
     ? `Claude ${formatUsageUsd(period.totalsByAgent.claude.costUsd)}・Codex ${formatUsageUsd(period.totalsByAgent.codex.costUsd)}・Actions ${formatUsageUsd(period.totalsBySource["github-actions"].costUsd)}`
     : "";
@@ -1922,44 +2042,63 @@ export function SessionUsagePanel({
 
       {period && (
         <>
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
             <Tile
+              selected={basis === "cost"}
+              onSelect={() => setBasis("cost")}
               label="従量課金相当"
               value={formatUsageUsd(period.totalsByAgent.claude.costUsd + period.totalsByAgent.codex.costUsd)}
               sub={agentCostSub}
             />
             <Tile
+              selected={basis === "responses"}
+              onSelect={() => setBasis("responses")}
               label="応答"
               value={period.totals.responses.toLocaleString()}
               /* 入力トークンタイルのsubを内訳に使ったので、1応答あたりの平均はこちらへ寄せる */
               sub={`1応答 ${formatUsageUsd(perResponseUsd)}・平均 ${formatUsageTokens(avgContext)}`}
             />
             <Tile
+              selected={basis === "tokens"}
+              onSelect={() => setBasis("tokens")}
               label="入力トークン"
               value={formatUsageTokens(period.totals.contextTokens)}
               bar={<ContextBar totals={period.totals} />}
               sub={`内訳 入力 ${formatUsageTokens(period.totals.inputTokens)}・書込 ${formatUsageTokens(period.totals.cacheCreateTokens)}・読出 ${formatUsageTokens(period.totals.cacheReadTokens)}`}
             />
             <Tile
+              selected={basis === "sessions"}
+              onSelect={() => setBasis("sessions")}
               label="セッション"
               value={period.totals.sessions.toLocaleString()}
               /* 実装の本数は`byKind`から数えられない（フェーズごとの行へ割ってあり、
                  1本が最大5行に現れる）ため、集計側が数えた本数を使う（#2779） */
               sub={`実装 ${period.implementationSessions}・計画レビュー ${planReview?.sessions ?? 0}・CI/CD・レビュー ${ciReview?.sessions ?? 0}`}
             />
+            <Tile
+              selected={basis === "issues"}
+              onSelect={() => setBasis("issues")}
+              label="実行したIssue"
+              value={`${issueTotal.toLocaleString()}件`}
+              sub={`今日 ${(dailyDays.at(-1)?.issues ?? 0).toLocaleString()}件`}
+            />
           </div>
+          <p className="-mt-1 text-[11px] text-muted-foreground">
+            カードを押すと、下の日別・リポジトリ別・セッション種別別の表示基準が切り替わります。
+            {basis === "issues" && "　Issue数は内訳ごとの重複除去のため、内訳の和は全体の件数と一致しません"}
+          </p>
 
           <section className="flex flex-col gap-2 rounded-lg border p-3">
             <div className="flex items-baseline justify-between gap-2">
-              <span className="text-xs font-semibold">日別</span>
+              <span className="text-xs font-semibold">日別{basis !== "cost" && <BasisChip label={basisLabel} />}</span>
               {/* 棒の色と平均線の説明は下の`DailyLegend`に置く。枠線の意味（集計途中で必ず
                   低く出る）はここにしか無いので残す */}
               <span className="text-[11px] text-muted-foreground">
                 いちばん新しい日は集計中
               </span>
             </div>
-            <DailyLegend />
-            <DailyChart days={dailyDays} todayKey={todayKey} />
+            <DailyLegend basis={basis} />
+            <DailyChart days={dailyDays} todayKey={todayKey} basis={basis} />
           </section>
 
           <div
@@ -1969,7 +2108,7 @@ export function SessionUsagePanel({
                 トークンの区別は持たない。下の凡例（太い棒＝金額／細い帯＝トークン）は当てはまらない */}
             <section className="flex flex-col gap-2 rounded-lg border p-3">
               <div className="flex items-baseline justify-between gap-2">
-                <span className="shrink-0 text-xs font-semibold whitespace-nowrap">リポジトリ別</span>
+                <span className="shrink-0 text-xs font-semibold whitespace-nowrap">リポジトリ別{basis !== "cost" && <BasisChip label={basisLabel} />}</span>
                 <button
                   type="button"
                   aria-expanded={repositoryListOpen}
@@ -1986,7 +2125,7 @@ export function SessionUsagePanel({
               {repositoryPieSlices.length === 0 ? (
                 <p className="text-xs text-muted-foreground">記録がありません</p>
               ) : (
-                <RepositoryPieChart slices={repositoryPieSlices} />
+                <RepositoryPieChart slices={repositoryPieSlices} basis={basis} />
               )}
               {repositoryListOpen && <RepositoryUsageTable groups={period.byRepository} />}
             </section>
@@ -1996,6 +2135,8 @@ export function SessionUsagePanel({
                   **行は金額順ではなく作業の順**（#2954。並びは`compareUsageKinds`が決める） */}
               <Breakdown
                 title="セッション種別別"
+                titleSuffix={basis !== "cost" ? <BasisChip label={basisLabel} /> : null}
+                basis={basis}
                 hint="実装はフェーズで分割（転記から推定）"
                 rows={period.byKind.map((row) => ({ ...row, label: sessionUsageKindLabel(row.key) }))}
                 colorOf={(key) => KIND_ROW_COLORS[key]}

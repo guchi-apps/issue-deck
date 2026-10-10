@@ -8,6 +8,7 @@ import {
   buildSessionUsageSummary,
   fillUsageDays,
   formatSessionElapsed,
+  formatUsageBasisValue,
   formatUsageTokens,
   formatUsageUsd,
   indexCurrentSessionsByIssueKey,
@@ -22,6 +23,7 @@ import {
   sessionUsageImplementationPhases,
   sessionUsageKindLabel,
   sessionUsagePhaseSplit,
+  usageBasisValue,
   type CurrentSessionInput,
   type SessionUsageEntry,
 } from "@/lib/session-usage-view";
@@ -882,6 +884,7 @@ describe("fillUsageDays", () => {
             claude: { costUsd: [0, 0, 0, 0], unresolvedCostUsd: 3 },
             codex: { costUsd: [0, 0, 0, 0], unresolvedCostUsd: 0 },
           },
+          issues: 0,
           modelLabels: [],
         },
       ],
@@ -931,7 +934,7 @@ describe("buildRepositoryPieSlices（#3060）", () => {
     expect(slices.map((slice) => slice.label)).toEqual(["a", "b", "c", "d", "e", "その他"]);
     const other = slices[5];
     expect(other.isOther).toBe(true);
-    expect(other.costUsd).toBe(2);
+    expect(other.value).toBe(2);
     expect(other.repositoryCount).toBe(2);
     expect(slices.reduce((sum, slice) => sum + slice.fraction, 0)).toBeCloseTo(1);
     expect(slices[0].fraction).toBeCloseTo(0.6);
@@ -1099,5 +1102,45 @@ describe("indexCurrentSessionsByIssueKey（#3435）", () => {
     ]);
     expect(map.size).toBe(1);
     expect(map.get("issue-deck#1")?.tmuxSessionName).toBe("b");
+  });
+});
+
+describe("表示基準（#4285）", () => {
+  it("Issue数は日別・リポジトリ別・種別別に重複除去して数え、番号の無いセッションは数えない", () => {
+    const summary = buildSessionUsageSummary({
+      entries: [
+        entry({ sessionId: "a1", issueNumber: 1 }),
+        entry({ sessionId: "a2", issueNumber: 1, kind: "plan-review" }),
+        entry({ sessionId: "b", issueNumber: 2 }),
+        entry({ sessionId: "none", issueNumber: null, prNumber: null }),
+      ],
+      nowMs: NOW_MS,
+      days: 7,
+      reportedAt: null,
+    });
+    expect(summary.byDay[0].issues).toBe(2);
+    expect(summary.byRepository[0].issues).toBe(2);
+    expect(summary.byKind.find((row) => row.key === "plan-review")?.issues).toBe(1);
+    // 同じIssueが複数の種別に現れるので、種別の和は全体の件数と一致しない
+    expect(summary.byKind.reduce((sum, row) => sum + row.issues, 0)).toBeGreaterThan(summary.byIssue.length);
+  });
+
+  it("基準ごとの値の取り出しと書式", () => {
+    const row = { costUsd: 2, responses: 30, contextTokens: 900, outputTokens: 100, sessions: 4, issues: 3 };
+    expect(usageBasisValue(row, "cost")).toBe(2);
+    expect(usageBasisValue(row, "tokens")).toBe(1000);
+    expect(usageBasisValue(row, "issues")).toBe(3);
+    expect(usageBasisValue({}, "issues")).toBe(0);
+    expect(formatUsageBasisValue(30, "responses")).toBe("30応答");
+    expect(formatUsageBasisValue(3, "issues")).toBe("3件");
+  });
+
+  it("円グラフは基準ごとに3%の閾値を分け直す", () => {
+    const rows = [
+      { key: "a", costUsd: 100, sessions: 1 },
+      { key: "b", costUsd: 1, sessions: 50 },
+    ];
+    expect(buildRepositoryPieSlices(rows, "cost").map((slice) => slice.label)).toEqual(["a", "その他"]);
+    expect(buildRepositoryPieSlices(rows, "sessions").map((slice) => slice.label)).toEqual(["b", "その他"]);
   });
 });
