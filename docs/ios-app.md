@@ -105,6 +105,7 @@ issue-deck自身の配布状況は、既存の他アプリと同じ経路で画�
 - WKWebViewではWeb Push（`public/sw.js`）が動かない。ネイティブ通知は「ネイティブ通知（#4250）」のとおりAPNsで受け取る
 - キーボード・日本語入力・画面余白は実機で確認する（Webのsafe-area対応との両立を#3846で確認）
 - WebViewは下端まで広げており、`contentInsetAdjustmentBehavior`が既定のままだと下の安全領域ぶんだけWebのレイアウト高さが縮み、フッター下に空きが出る（#4258）。`.never`にしてPWAと同じ下端までの描画に揃えている。実機（TestFlight）で確認する
+- iPad対応（#4283）: 以前は対応端末がiPhoneのみ（`TARGETED_DEVICE_FAMILY = 1`）だったため、iPadでは互換モードのスマホ縦画面（幅約393px）で動いていた。アプリ本体・ShareExtensionとも`1,2`にし、iPadの向きは縦・横すべてを許可している（iPhoneは縦のまま）。iPadの横向き（幅1180px）はWebの`md:`・`lg:`の既存レスポンシブでPC相当の配置になる。Xcodeがsubpcに無いため、iPadでの見た目と回転は実機（TestFlight）で確認する
 
 ## 完了の判定と記録
 
