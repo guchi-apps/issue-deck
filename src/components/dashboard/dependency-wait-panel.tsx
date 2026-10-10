@@ -13,6 +13,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { InputStashList, StashConfirmDialog } from "@/components/dashboard/input-stash";
 import { Button } from "@/components/ui/button";
 import type { DispatchStateHandle } from "@/hooks/use-dispatch-state";
 import {
@@ -21,6 +22,8 @@ import {
   type DependencyWaitNotice,
   type DependencyWaitView,
 } from "@/lib/dispatch/dependency-wait";
+import { buildDependencyResumeInstruction } from "@/lib/dispatch/dependency-wait";
+import { classifyInstructionSkip } from "@/lib/dispatch/input-stash";
 import { formatDateTime, formatDateTimeFull } from "@/lib/format-date-time";
 import { cn } from "@/lib/utils";
 
@@ -79,10 +82,17 @@ export function DependencyWaitPanel({
     wait.status === "WAITING" || wait.status === "NEEDS_CONFIRM" || wait.status === "RESUME_FAILED";
 
   const [confirmingCancel, setConfirmingCancel] = useState(false);
+  const [confirmingStash, setConfirmingStash] = useState(false);
+  // 未送信入力が理由で再開の指示が見送られたときだけ、確認付きの退避で再開できる（#4383）
+  const canStash =
+    wait.status === "RESUME_FAILED" && classifyInstructionSkip(wait.failureReason).canStash;
+  const session = (dispatch.sessions ?? []).find(
+    (s) => s.repositoryFullName === wait.repositoryFullName && s.issueNumber === wait.issueNumber,
+  );
 
-  async function run(action: "recheck" | "resume" | "cancel") {
+  async function run(action: "recheck" | "resume" | "cancel", options?: { stashInput?: boolean }) {
     setMessage(null);
-    const result = await dispatch.controlDependencyWait({ id: wait.id, action });
+    const result = await dispatch.controlDependencyWait({ id: wait.id, action, ...options });
     if (!result.ok) setMessage(result.message);
   }
 
@@ -168,6 +178,17 @@ export function DependencyWaitPanel({
               作業を再開
             </Button>
           )}
+          {canStash && session && (
+            <Button
+              type="button"
+              size="sm"
+              disabled={dispatch.isSubmitting}
+              onClick={() => setConfirmingStash(true)}
+            >
+              <Send className="size-3.5" />
+              未送信の入力を退避して、再開指示を送信
+            </Button>
+          )}
           <Button
             type="button"
             size="sm"
@@ -182,6 +203,28 @@ export function DependencyWaitPanel({
       )}
       {message && <p className="text-xs text-destructive">{message}</p>}
 
+      <InputStashList
+        repositoryFullName={wait.repositoryFullName}
+        issueNumber={wait.issueNumber}
+        reloadKey={wait.status}
+      />
+      {session && (
+        <StashConfirmDialog
+          open={confirmingStash}
+          onOpenChange={setConfirmingStash}
+          target={{
+            repositoryFullName: wait.repositoryFullName,
+            issueNumber: wait.issueNumber,
+            host: session.host,
+            tmuxSessionName: session.tmuxSessionName,
+          }}
+          instruction={buildDependencyResumeInstruction(wait.dependency)}
+          busy={dispatch.isSubmitting}
+          onConfirm={async () => {
+            await run("resume", { stashInput: true });
+          }}
+        />
+      )}
       <AlertDialog open={confirmingCancel} onOpenChange={setConfirmingCancel}>
         <AlertDialogContent>
           <AlertDialogHeader>

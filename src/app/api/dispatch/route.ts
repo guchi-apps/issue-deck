@@ -421,6 +421,8 @@ export async function POST(request: NextRequest) {
       hostName,
       kind,
       instruction,
+      // 未送信入力の退避（#4383）は、確認ダイアログを通った操作だけが`true`を送る
+      stashInput: kind === "INSTRUCTION" && payload?.stashInput === true,
       requestedByUserId: userId,
     });
     if (!controlResult.ok) {

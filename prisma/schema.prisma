@@ -964,6 +964,14 @@ model DispatchJob {
   // **古いpollerはこの項目を読まない。** その場合は従来どおり`Stop`だけが許可され、
   // APIエラーの復旧は「セッションが作業中のため送りませんでした」として見送られる（札は残る）。
   recovery              Boolean           @default(false)
+  // 未送信入力を確認付きで退避してから送る追加指示か（#4383。`kind`が`INSTRUCTION`のときだけ意味がある）。
+  //
+  // **立てられるのは、人が確認ダイアログで「退避して送信」を押したときだけ。** pollerは入力欄に
+  // 残った未送信の文字を、完全に取得できると確かめた場合に限り`SessionInputStash`へ保存し、
+  // 保存できたことを確かめてから入力欄を空にして今回の指示を送る。取得を保証できない・
+  // 作業中・承認待ち・状態不明のときは何も消さずに見送る。古いpollerはこの項目を読まず、
+  // 従来どおり未送信入力があれば見送る。
+  stashInput            Boolean           @default(false)
   // 手作業アシスタントから代行実行するコマンド（#1828。`kind`が`MANUAL_STEP`のときだけ入る）。
   //
   // **入るのはサーバーが手作業Issueの本文から抽出し直したものだけ。** 画面から届いた文字列は
@@ -2783,4 +2791,26 @@ model SessionDependencyWait {
 
   @@index([repositoryFullName, issueNumber])
   @@index([status])
+}
+
+// 追加指示の送信前に退避した、セッション入力欄の未送信入力（#4383）。
+//
+// **本文は機密を含み得る。** GitHubのコメント・通常ログ・通知・ジョブの`message`へは出さず、
+// ログイン必須の画面（本人だけ）から確認・コピー・削除できる。元の入力は自動では再送しない。
+// 保持期限は`expiresAt`（既定7日）で、期限を過ぎた行は参照のたびに削除する。
+// `jobId`のunique制約で、通信の再試行や二重クリックが二重に退避しても1件にする。
+model SessionInputStash {
+  id                 String    @id @default(cuid())
+  jobId              String    @unique
+  repositoryFullName String
+  issueNumber        Int
+  host               String
+  tmuxSessionName    String
+  content            String    @db.MediumText
+  charCount          Int
+  createdAt          DateTime  @default(now())
+  expiresAt          DateTime
+
+  @@index([repositoryFullName, issueNumber])
+  @@index([expiresAt])
 }

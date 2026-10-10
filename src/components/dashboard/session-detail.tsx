@@ -14,6 +14,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
+import { InputStashList, StashConfirmDialog } from "@/components/dashboard/input-stash";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import type { DispatchStateHandle } from "@/hooks/use-dispatch-state";
@@ -26,6 +27,7 @@ import {
   resolveSessionControlRejection,
   SESSION_INSTRUCTION_MAX_LENGTH,
 } from "@/lib/dispatch/dispatch-job";
+import { classifyInstructionSkip } from "@/lib/dispatch/input-stash";
 import { formatDispatchHostName } from "@/lib/dispatch/host-label";
 import {
   describeSessionPermission,
@@ -163,6 +165,7 @@ export function SessionDetail({ session, dispatch }: { session: DispatchSessionV
   const [instruction, setInstruction] = useState("");
   const [message, setMessage] = useState<string | null>(null);
   const [confirmingKill, setConfirmingKill] = useState(false);
+  const [confirmingStash, setConfirmingStash] = useState(false);
   const summary = summarizeIssueSession(session);
   const controlJob = findSessionControlJobForIssue(
     dispatch.jobs,
@@ -172,6 +175,17 @@ export function SessionDetail({ session, dispatch }: { session: DispatchSessionV
   const controlStatus = controlJob
     ? describeDispatchJobStatus(controlJob.status, controlJob.kind)
     : null;
+  // 未送信入力が理由で見送られた追加指示は、確認付きの退避で同じ指示を送り直せる（#4383）
+  const stashRetry =
+    controlJob !== null &&
+    controlJob.kind === "INSTRUCTION" &&
+    controlJob.status === "SKIPPED" &&
+    controlJob.instruction !== null &&
+    classifyInstructionSkip(controlJob.message).canStash &&
+    session.state === "ALIVE" &&
+    !controlJob.stashInput
+      ? controlJob.instruction
+      : null;
   const step = describeSessionStep(session);
   const reap = describeSessionReap(session);
   const permission = describeSessionPermission(session);
@@ -383,6 +397,11 @@ export function SessionDetail({ session, dispatch }: { session: DispatchSessionV
                   {message}
                 </p>
               )}
+              <InputStashList
+                repositoryFullName={session.repositoryFullName}
+                issueNumber={session.issueNumber}
+                reloadKey={controlJob?.status ?? null}
+              />
               {controlJob && controlStatus && (
                 <div className="space-y-1 text-xs" role="status">
                   <p className={controlStatus.tone === "error" ? "text-destructive" : "text-muted-foreground"}>
@@ -393,12 +412,48 @@ export function SessionDetail({ session, dispatch }: { session: DispatchSessionV
                   {controlJob.message && !isActiveDispatchJobStatus(controlJob.status) && (
                     <p className="text-muted-foreground">{controlJob.message}</p>
                   )}
+                  {stashRetry && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={dispatch.isSubmitting}
+                      onClick={() => setConfirmingStash(true)}
+                    >
+                      <SendHorizonal />
+                      未送信の入力を退避して、指示を送信
+                    </Button>
+                  )}
                 </div>
               )}
             </div>
           )}
         </DialogContent>
       </Dialog>
+      {stashRetry && (
+        <StashConfirmDialog
+          open={confirmingStash}
+          onOpenChange={setConfirmingStash}
+          target={{
+            repositoryFullName: session.repositoryFullName,
+            issueNumber: session.issueNumber,
+            host: session.host,
+            tmuxSessionName: session.tmuxSessionName,
+          }}
+          instruction={stashRetry}
+          busy={dispatch.isSubmitting}
+          onConfirm={async () => {
+            const result = await dispatch.sendSessionControl({
+              repositoryFullName: session.repositoryFullName,
+              issueNumber: session.issueNumber,
+              hostName: session.host,
+              kind: "instruction",
+              instruction: stashRetry,
+              stashInput: true,
+            });
+            setMessage(result.ok ? "退避と指示の送信を依頼しました。反映まで最大1分ほどかかります。" : result.message);
+          }}
+        />
+      )}
       <AlertDialog open={confirmingKill} onOpenChange={setConfirmingKill}>
         <AlertDialogContent>
           <AlertDialogHeader>
