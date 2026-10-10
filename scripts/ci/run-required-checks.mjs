@@ -53,7 +53,7 @@ export function expandChecks(manifest, groupNames) {
 }
 
 function parseArgs(argv) {
-  const args = { groups: [], all: false, result: null, manifest: null, list: false };
+  const args = { groups: [], all: false, result: null, manifest: null, list: false, check: null };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if (arg === "--group") args.groups.push(argv[++i]);
@@ -61,6 +61,10 @@ function parseArgs(argv) {
     else if (arg === "--result") args.result = argv[++i];
     else if (arg === "--manifest") args.manifest = argv[++i];
     else if (arg === "--list") args.list = true;
+    else if (arg === "--check") {
+      args.check = argv[++i];
+      if (!args.check || args.check.startsWith("--")) throw new Error("--check に検査IDが必要です");
+    }
     else throw new Error(`不明な引数です: ${arg}`);
   }
   if (!args.all && args.groups.length === 0 && !args.list) {
@@ -79,7 +83,11 @@ function main() {
   const manifestPath = args.manifest ?? path.join(ROOT, "ci/required-checks.json");
   const raw = readFileSync(manifestPath);
   const manifest = JSON.parse(raw.toString("utf8"));
-  const checks = expandChecks(manifest, args.all || args.list ? null : args.groups);
+  let checks = expandChecks(manifest, args.all || args.list ? null : args.groups);
+  if (args.check) {
+    checks = checks.filter((check) => check.id === args.check);
+    if (checks.length !== 1) throw new Error(`検査 ${args.check} は選択範囲に一意に存在する必要があります`);
+  }
   const definitionDigest = digestDefinition(raw);
 
   if (args.list) {
