@@ -62,4 +62,20 @@ describe("useReferenceNavigation", () => {
     expect(url).toContain("pane=pull-requests");
     expect(url).toContain("pr=owner%2Frepo%2334");
   });
+
+  it("PR一覧の外（Issue詳細）からPRを開くと、直前の状態別ビューを引き継がない（#4239）", () => {
+    const { result } = renderNavigation("issue=5&prview=running");
+
+    act(() => result.current.openPullRequest("owner/repo#34"));
+
+    expect(urlOf(push.mock.calls[0])).not.toContain("prview=");
+  });
+
+  it("PR一覧の中でPRを開くときは、今の状態別ビューを保つ（#4239）", () => {
+    const { result } = renderNavigation("pane=pull-requests&prview=running&pr=owner%2Frepo%2312");
+
+    act(() => result.current.openPullRequest("owner/repo#34"));
+
+    expect(urlOf(push.mock.calls[0])).toContain("prview=running");
+  });
 });
