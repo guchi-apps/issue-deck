@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 type Row = Record<string, unknown> & { id: string };
 const rows: Row[] = [];
-const jobs = new Map<string, { status: string }>();
+const jobs = new Map<string, { status: string; message?: string | null }>();
 let seq = 0;
 
 function copy(row: Row | null): Row | null {
@@ -162,6 +162,56 @@ describe("再開の追跡", () => {
     const failed = await advanceDependencyWait(id, { manual: false }, depsWith(closed, new Date("2026-10-10T13:00:00Z")));
     expect(failed?.status).toBe("RESUME_FAILED");
     expect(failed?.failureReason).toContain("確認できませんでした");
+  });
+
+  it("見送られた理由（未送信入力）をSKIPPEDだけにせず失敗理由へ載せる", async () => {
+    await register(["closed"], closed);
+    jobs.set("job1", { status: "SKIPPED", message: "入力欄に未送信の文字が残っているため送りませんでした" });
+    const failed = await advanceDependencyWait(rows[0].id, { manual: false }, depsWith(closed));
+    expect(failed?.status).toBe("RESUME_FAILED");
+    expect(failed?.failureReason).toContain("未送信の文字が残");
+    expect(failed?.failureReason).not.toBe("SKIPPED");
+  });
+
+  it("作業中・承認待ちの見送りは入力欄に触れる退避の対象として扱わない", async () => {
+    await register(["closed"], closed);
+    jobs.set("job1", { status: "SKIPPED", message: "承認プロンプトまたは選択フォームの表示中のため送りませんでした" });
+    const failed = await advanceDependencyWait(rows[0].id, { manual: false }, depsWith(closed));
+    expect(failed?.failureReason).toContain("承認プロンプト");
+    expect(failed?.failureReason).not.toContain("未送信");
+  });
+
+  it("送信待ちのジョブが期限を過ぎても未処理なら、理由付きで止める", async () => {
+    await register(["closed"], closed);
+    jobs.set("job1", { status: "QUEUED" });
+    rows[0].resumeRequestedAt = new Date("2026-10-10T12:00:00Z");
+    const failed = await advanceDependencyWait(rows[0].id, { manual: false }, depsWith(closed, new Date("2026-10-10T13:00:00Z")));
+    expect(failed?.status).toBe("RESUME_FAILED");
+    expect(failed?.failureReason).toContain("期限");
+  });
+
+  it("手動の再開で確認済みのときだけ、退避付きで指示を積む", async () => {
+    await register(["closed"], closed);
+    jobs.set("job1", { status: "SKIPPED", message: "入力欄に未送信の文字が残っているため送りませんでした" });
+    const id = rows[0].id;
+    await advanceDependencyWait(id, { manual: false }, depsWith(closed));
+    expect(enqueue.mock.calls[0][0].stashInput).toBe(false);
+
+    enqueue.mockClear();
+    enqueue.mockResolvedValue({ ok: true, job: { id: "job2" } });
+    await advanceDependencyWait(id, { manual: true, stashInput: true }, depsWith(closed));
+    expect(enqueue).toHaveBeenCalledTimes(1);
+    expect(enqueue.mock.calls[0][0].stashInput).toBe(true);
+    expect(enqueue.mock.calls[0][0].instruction).toContain("614");
+  });
+
+  it("自動の巡回は退避付きの指示を積まない", async () => {
+    await register(["closed"], closed);
+    const id = rows[0].id;
+    jobs.set("job1", { status: "SKIPPED", message: "入力欄に未送信の文字が残っているため送りませんでした" });
+    await advanceDependencyWait(id, { manual: false, stashInput: true }, depsWith(closed));
+    // 失敗後に自動では再開しない（人の「作業を再開」を待つ）。stashInputだけ立っていても積まない
+    expect(enqueue).toHaveBeenCalledTimes(1);
   });
 
   it("セッションが終了していれば、待ちの記録を残したまま復旧を案内する", async () => {

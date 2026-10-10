@@ -355,6 +355,8 @@ export function useDispatchState(enabled: boolean) {
       kind: "interrupt" | "kill" | "instruction";
       /** `kind`が`instruction`のときの本文（#1012）。1行・500文字まで */
       instruction?: string;
+      /** 未送信入力を退避してから送る（#4383）。確認ダイアログを通した操作だけが立てる */
+      stashInput?: boolean;
     }): Promise<{ ok: true } | { ok: false; message: string }> => {
       setIsSubmitting(true);
       try {
@@ -367,6 +369,7 @@ export function useDispatchState(enabled: boolean) {
             host: params.hostName,
             kind: params.kind,
             instruction: params.instruction,
+            ...(params.stashInput ? { stashInput: true } : {}),
           }),
         });
         if (!res.ok) return { ok: false, message: await readErrorMessage(res) };
@@ -1036,6 +1039,8 @@ export function useDispatchState(enabled: boolean) {
     async (params: {
       id: string;
       action: "recheck" | "resume" | "cancel";
+      /** 未送信入力を退避してから再開指示を送る（#4383）。確認ダイアログを通した再開だけが立てる */
+      stashInput?: boolean;
     }): Promise<{ ok: true; wait: DependencyWaitView } | { ok: false; message: string }> => {
       setIsSubmitting(true);
       try {

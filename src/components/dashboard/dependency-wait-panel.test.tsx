@@ -51,3 +51,53 @@ describe("DependencyWaitPanel の待機解除", () => {
     expect(screen.queryByRole("button", { name: "待機を解除" })).toBeNull();
   });
 });
+
+describe("DependencyWaitPanel の未送信入力の退避（#4383）", () => {
+  const session = {
+    repositoryFullName: "guchi-apps/issue-deck",
+    issueNumber: 1,
+    host: "subpc",
+    tmuxSessionName: "issue-deck-issue-1",
+  };
+  const failed = makeWait({
+    status: "RESUME_FAILED",
+    failureReason: "再開の指示は見送られました: 入力欄に未送信の文字が残っています",
+  });
+
+  it("確認画面で対象と今回の指示を見せ、確認後だけ stashInput 付きで再開する", async () => {
+    const controlDependencyWait = vi.fn().mockResolvedValue({ ok: true, wait: failed });
+    const dispatch = { isSubmitting: false, controlDependencyWait, sessions: [session] } as unknown as DispatchStateHandle;
+    render(<DependencyWaitPanel wait={failed} dispatch={dispatch} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "未送信の入力を退避して、再開指示を送信" }));
+    const dialog = await screen.findByTestId("stash-confirm-dialog");
+    expect(dialog.textContent).toContain("subpc");
+    expect(dialog.textContent).toContain("issue-deck-issue-1");
+    expect(dialog.textContent).toContain("退避");
+    expect(controlDependencyWait).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "退避して送信" }));
+    await waitFor(() =>
+      expect(controlDependencyWait).toHaveBeenCalledWith({ id: "wait-1", action: "resume", stashInput: true }),
+    );
+  });
+
+  it("キャンセルでは何も送らない", async () => {
+    const controlDependencyWait = vi.fn();
+    const dispatch = { isSubmitting: false, controlDependencyWait, sessions: [session] } as unknown as DispatchStateHandle;
+    render(<DependencyWaitPanel wait={failed} dispatch={dispatch} />);
+    fireEvent.click(screen.getByRole("button", { name: "未送信の入力を退避して、再開指示を送信" }));
+    fireEvent.click(await screen.findByRole("button", { name: "キャンセル" }));
+    expect(controlDependencyWait).not.toHaveBeenCalled();
+  });
+
+  it("承認待ち・作業中の見送りでは退避ボタンを出さない", () => {
+    const blocked = makeWait({
+      status: "RESUME_FAILED",
+      failureReason: "再開の指示は見送られました: 承認プロンプトまたは選択フォームの表示中です",
+    });
+    const dispatch = { isSubmitting: false, controlDependencyWait: vi.fn(), sessions: [session] } as unknown as DispatchStateHandle;
+    render(<DependencyWaitPanel wait={blocked} dispatch={dispatch} />);
+    expect(screen.queryByRole("button", { name: "未送信の入力を退避して、再開指示を送信" })).toBeNull();
+  });
+});
