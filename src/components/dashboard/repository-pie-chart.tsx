@@ -4,8 +4,10 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import { layoutPie, pieGeometryForWidth } from "@/lib/pie-chart-layout";
 import {
-  formatUsageUsd,
+  formatUsageBasisValue,
+  USAGE_BASIS_LABELS,
   type RepositoryPieSlice,
+  type UsageBasis,
 } from "@/lib/session-usage-view";
 
 /**
@@ -47,7 +49,14 @@ function percentText(fraction: number): string {
   return `${(fraction * 100).toFixed(1)}%`;
 }
 
-export function RepositoryPieChart({ slices }: { slices: RepositoryPieSlice[] }) {
+export function RepositoryPieChart({
+  slices,
+  basis = "cost",
+}: {
+  slices: RepositoryPieSlice[];
+  /** 何で測った内訳か（#4285）。金額以外のときは数値の書式と読み上げが変わる */
+  basis?: UsageBasis;
+}) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(INITIAL_WIDTH);
 
@@ -71,15 +80,15 @@ export function RepositoryPieChart({ slices }: { slices: RepositoryPieSlice[] })
           note: slice.isOther ? `${slice.repositoryCount}リポジトリ` : undefined,
           fraction: slice.fraction,
           percentText: percentText(slice.fraction),
-          amountText: formatUsageUsd(slice.costUsd),
+          amountText: formatUsageBasisValue(slice.value, basis),
         })),
         geometry,
       ),
-    [slices, geometry],
+    [slices, geometry, basis],
   );
 
   const summary = slices
-    .map((slice) => `${slice.label} ${percentText(slice.fraction)}（${formatUsageUsd(slice.costUsd)}）`)
+    .map((slice) => `${slice.label} ${percentText(slice.fraction)}（${formatUsageBasisValue(slice.value, basis)}）`)
     .join("、");
   const { fontSize } = geometry;
 
@@ -88,12 +97,12 @@ export function RepositoryPieChart({ slices }: { slices: RepositoryPieSlice[] })
       <svg
         viewBox={`0 0 ${geometry.width} ${geometry.height}`}
         role="img"
-        aria-label={`リポジトリ別の金額の内訳。${summary}`}
+        aria-label={`リポジトリ別の${USAGE_BASIS_LABELS[basis]}の内訳。${summary}`}
         className="block h-auto w-full overflow-visible"
       >
         {slices.map((slice, index) => {
           const layout = layouts[index];
-          const amountText = formatUsageUsd(slice.costUsd);
+          const amountText = formatUsageBasisValue(slice.value, basis);
           const detail = `${slice.label}${slice.isOther ? `（${slice.repositoryCount}リポジトリ）` : ""}: ${percentText(slice.fraction)}（${amountText}）`;
           return (
             <g key={slice.isOther ? "__other" : slice.key}>

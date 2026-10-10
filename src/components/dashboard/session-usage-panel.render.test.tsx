@@ -925,6 +925,22 @@ describe("SessionUsagePanel", () => {
     expect(within(container).queryByText(/サブスクの実費ではありません/)).toBeNull();
   });
 
+  it("カードを押すと、日別・リポジトリ別・種別別が選んだ基準へ切り替わる（#4285）", () => {
+    const { container } = renderPanel(response([entry({ issueNumber: 1 }), entry({ sessionId: "s2", issueNumber: 2 })]));
+    const tile = within(container).getByRole("button", { name: /実行したIssue/ });
+    expect(tile.getAttribute("aria-pressed")).toBe("false");
+    expect(within(container).getByRole("button", { name: /従量課金相当/ }).getAttribute("aria-pressed")).toBe("true");
+
+    fireEvent.click(tile);
+
+    expect(tile.getAttribute("aria-pressed")).toBe("true");
+    const daily = within(container).getByText("日別").closest("section") as HTMLElement;
+    expect(within(daily).getAllByText("実行したIssue").length).toBeGreaterThan(0);
+    // 種別別の行の右端が「件」の表記になる
+    const kinds = within(container).getByText("セッション種別別").closest("section") as HTMLElement;
+    expect(within(kinds).getAllByText("2件").length).toBeGreaterThan(0);
+  });
+
   it("quotaPercentが入っていても、Issue行に直近5時間枠の割合は出さない（#3432。#2988の表示を削除）", () => {
     const data = response([entry()]);
     data.byIssue[0].quotaPercent = 12.4;
