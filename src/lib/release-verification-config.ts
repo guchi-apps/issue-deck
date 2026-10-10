@@ -79,7 +79,7 @@ export const RELEASE_VERIFICATION_REPOS: Readonly<Record<string, ReleaseVerifica
       "node --test ios/scripts/*.test.mjs",
     ],
     macBuildCheck: true,
-    macScriptDistributed: false,
+    macScriptDistributed: true,
   },
   "guchi-apps/kurashio": {
     enforced: false,
@@ -91,13 +91,13 @@ export const RELEASE_VERIFICATION_REPOS: Readonly<Record<string, ReleaseVerifica
       "node --test ios/scripts/*.test.mjs",
     ],
     macBuildCheck: true,
-    macScriptDistributed: false,
+    macScriptDistributed: true,
   },
   "guchi-apps/asset-manager": {
     enforced: false,
     stack: "Node（npm）＋Prisma",
-    integrationCommands: [NPM_CI, "npm run lint", "npm test"],
-    setupGaps: ["CIのビルドは`prisma db push`が要るため、検証用DBと接続設定が未整備でビルドを検証できない"],
+    integrationCommands: [NPM_CI, "npm run lint", "npm test", "npm run verify:build"],
+    setupGaps: ["検証用DB`asset_manager_verify`が未作成です（サブPCで`npm run db:setup:verify`の実行が要る。sudoが必要）"],
   },
   "guchi-apps/yoteiflow": {
     enforced: false,
@@ -111,7 +111,7 @@ export const RELEASE_VERIFICATION_REPOS: Readonly<Record<string, ReleaseVerifica
       "pnpm build:ci",
     ],
     macBuildCheck: true,
-    macScriptDistributed: false,
+    macScriptDistributed: true,
   },
   "guchi-apps/morrow": {
     enforced: false,
@@ -124,7 +124,7 @@ export const RELEASE_VERIFICATION_REPOS: Readonly<Record<string, ReleaseVerifica
       "pnpm build:ci",
     ],
     macBuildCheck: true,
-    macScriptDistributed: false,
+    macScriptDistributed: true,
   },
   "guchi-apps/status-hub": {
     enforced: false,
@@ -157,8 +157,7 @@ export const RELEASE_VERIFICATION_REPOS: Readonly<Record<string, ReleaseVerifica
   "guchi-apps/db-console": {
     enforced: false,
     stack: "Node（npm）＋Prisma",
-    integrationCommands: [NPM_CI, "npm run lint", "npx tsc --noEmit", "npm test"],
-    setupGaps: ["CIのビルドは`prisma migrate deploy`が要るため、検証用DBと接続設定が未整備でビルドを検証できない"],
+    integrationCommands: [NPM_CI, "npm run lint", "npx tsc --noEmit", "npm test", "bash scripts/verify-build.sh"],
   },
   "guchi-apps/stockly": {
     enforced: false,

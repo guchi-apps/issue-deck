@@ -44,12 +44,14 @@ describe("対象外と設定不足の区別", () => {
   });
 
   it("DBが要るビルドの前提が無いものは設定不足", () => {
-    expect(describeIntegrationSetupGap("guchi-apps/db-console")).toContain("前提が未整備");
+    expect(describeIntegrationSetupGap("guchi-apps/asset-manager")).toContain("前提が未整備");
   });
 
-  it("Mac検証のスクリプト未配布はMac前提不足として出るが、Linux統合検証は止めない", () => {
-    expect(describeMacSetupGap("guchi-apps/aide")).toContain("remote-build-check.sh");
-    expect(describeIntegrationSetupGap("guchi-apps/aide")).toBeNull();
-    expect(describeMacSetupGap("guchi-apps/issue-deck")).toBeNull();
+  it("Mac検証のスクリプトが配布済みなら、Mac前提不足もLinux統合検証の止まりも無い", () => {
+    for (const repo of ["aide", "kurashio", "yoteiflow", "morrow", "issue-deck"]) {
+      expect(describeMacSetupGap(`guchi-apps/${repo}`), repo).toBeNull();
+      expect(describeIntegrationSetupGap(`guchi-apps/${repo}`), repo).toBeNull();
+    }
+    expect(describeIntegrationSetupGap("guchi-apps/db-console")).toBeNull();
   });
 });
