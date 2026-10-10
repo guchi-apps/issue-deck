@@ -192,13 +192,31 @@ describe("PlanApprovalPanel", () => {
     expect(screen.queryByText("計画レビューを作成中")).toBeNull();
   });
 
-  it("指摘コメントが届いた後は、ジョブが作成中のままでも出さない（指摘のカードに切り替わる）", () => {
+  it("指摘コメントが届いても、ジョブが作成中のあいだ（採否判定中）は作成中を出し続ける（#4304）", () => {
     render(
       <PlanApprovalPanel
         request={request()}
         session={session()}
         dispatch={dispatchHandle()}
         planReviewJob={planReviewJob({ status: "RUNNING" })}
+        planReview={pendingReview("自由に書かれた講評\n\n<!-- supervisor:plan-review -->")}
+      />,
+    );
+    expect(screen.getByText("計画レビューを作成中")).toBeTruthy();
+    expect(screen.queryByText("計画の承認を待っています")).toBeNull();
+  });
+
+  it("指摘コメントが届き、採否が決まったら指摘のカードに切り替わる", () => {
+    render(
+      <PlanApprovalPanel
+        request={request()}
+        session={session()}
+        dispatch={dispatchHandle()}
+        planReviewJob={planReviewJob({
+          status: "SUCCEEDED",
+          finishedAt: new Date().toISOString(),
+          planReviewDecidedAt: new Date().toISOString(),
+        })}
         planReview={pendingReview("自由に書かれた講評\n\n<!-- supervisor:plan-review -->")}
       />,
     );

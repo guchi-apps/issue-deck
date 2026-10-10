@@ -59,6 +59,7 @@ import {
   findPlanReviewJobForIssue,
   isActiveDispatchJobStatus,
   isIssueExecutionPending,
+  isPlanReviewAttentionHeld,
   resolveDefaultDispatchHost,
 } from "@/lib/dispatch/dispatch-job";
 import { formatDispatchHostName } from "@/lib/dispatch/host-label";
@@ -408,6 +409,13 @@ export function MobileIssueDetail({
     issue.repositoryFullName,
     issue.number,
   );
+  // 計画レビュー待ちのあいだは確認待ち（橙）を出さない（#4304。PCの詳細と同じ判定）
+  const planReviewCreating = isPlanReviewAttentionHeld({
+    job: planReviewJob,
+    now: new Date(),
+    isLoaded: dispatch.isLoaded,
+    isPlanReason: checkUserReason(issue.labels) === "plan",
+  });
   // PC版と同じく、計画を出し直した時とレビューの投稿時にコメントを取り直す（#3936）。
   // 古いレビューが手元にあると、下の定期再取得だけでは新しいレビューを拾えない。
   useEffect(() => {
@@ -968,7 +976,11 @@ export function MobileIssueDetail({
       >
         {/* リポジトリ・タイトル・状態・進捗・担当者・コメント数・更新・ラベルを1枚へ畳む（#1646）。
             以前はこれらが独立した6ブロックとして縦に並び、説明が初期表示から押し出されていた */}
-        <MobileIssueSummaryCard issue={issue} onSelectRepository={onSelectRepository} />
+        <MobileIssueSummaryCard
+          issue={issue}
+          onSelectRepository={onSelectRepository}
+          planReviewCreating={planReviewCreating}
+        />
 
         {/* 進捗ステップ・積んだジョブ・セッションの様子・横断質問・回答待ち・実行のキャンセルを
             1枚に集約する（#1577）。PCの詳細と同じものを使う。走っているものが1つも無いIssueでは
@@ -986,6 +998,7 @@ export function MobileIssueDetail({
           checkUserGuidance={checkUserGuidance}
           planningSkipped={planningSkipped}
           pullRequestProgress={pullRequestProgress}
+          planReviewCreating={planReviewCreating}
         />
 
         {/* 質問の回答（#2189）。PCの詳細と同じ位置・同じ理由で、アーティファクト・計画の

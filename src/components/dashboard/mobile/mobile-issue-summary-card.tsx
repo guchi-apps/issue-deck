@@ -19,6 +19,8 @@ import type { Issue } from "@/types/issue";
 type MobileIssueSummaryCardProps = {
   issue: Issue;
   onSelectRepository: (repositoryFullName: string) => void;
+  /** 計画レビュー待ちのあいだは確認待ちのバッジを出さない（#4304） */
+  planReviewCreating?: boolean;
 };
 
 /**
@@ -33,12 +35,16 @@ type MobileIssueSummaryCardProps = {
  * 見るだけのときも編集UIの場所代を払うことになり、元の状態に戻る。**ここに出る進捗は読むだけ**で、
  * 変えられる場所は折りたたみの行（`進捗 実装中 ・ 担当 …`）が指す（#1920）。
  */
-export function MobileIssueSummaryCard({ issue, onSelectRepository }: MobileIssueSummaryCardProps) {
+export function MobileIssueSummaryCard({
+  issue,
+  onSelectRepository,
+  planReviewCreating = false,
+}: MobileIssueSummaryCardProps) {
   // Projectへ未登録（`projectStatus`がnull）は「未着手」と偽らず、進捗そのものを出さない。
   // 盤面に載っていないIssueに段階は無い（PCのプロパティパネルと同じ扱い）
   const progress = issue.projectStatus ? getProgressStatusDef(resolveProgressStatus(issue)) : null;
   const ProgressIcon = progress?.icon ?? null;
-  const approvalPending = isApprovalPending(issue.labels);
+  const approvalPending = isApprovalPending(issue.labels) && !planReviewCreating;
   // 何を求められているかまで出す（#1490）。理由ラベルが配られていないリポジトリではnullになる
   const reason = checkUserReason(issue.labels);
   // 確認待ちのバッジを出しているあいだは、同じことを言う`00.check-user`・`01.check-*`を
