@@ -25,10 +25,10 @@ import { getIssuesForUser } from "@/lib/issues-for-user";
 function row(number: number, state: "OPEN" | "CLOSED") {
   const date = new Date("2026-01-01T00:00:00.000Z");
   return {
+    id: `id-${number}`,
     githubIssueId: BigInt(number),
     number,
     title: `Issue ${number}`,
-    body: `本文 ${number}`,
     state,
     stateReason: null,
     authorLogin: "author",
@@ -54,7 +54,9 @@ function row(number: number, state: "OPEN" | "CLOSED") {
 
 describe("getIssuesForUser の本文（#3390）", () => {
   beforeEach(() => {
-    issueFindMany.mockReset().mockResolvedValue([row(1, "OPEN"), row(2, "CLOSED")]);
+    issueFindMany.mockReset().mockImplementation(async (args: { select?: unknown }) =>
+      args.select ? [{ id: "id-1", body: "本文 1" }] : [row(1, "OPEN"), row(2, "CLOSED")],
+    );
   });
 
   it("既定ではopenの本文だけを持たせ、closedは外して印を立てる", async () => {
@@ -63,6 +65,19 @@ describe("getIssuesForUser の本文（#3390）", () => {
     expect(open.bodyOmitted).toBeUndefined();
     expect(closed.body).toBe("");
     expect(closed.bodyOmitted).toBe(true);
+  });
+
+  it("一覧の本体クエリは本文を読まず、open分だけを別クエリで引く（#4255）", async () => {
+    await getIssuesForUser("user-1");
+    const [main, bodies] = issueFindMany.mock.calls.map(([args]) => args);
+    expect(main.omit).toEqual({ body: true });
+    expect(bodies.where.state).toBe("OPEN");
+    expect(bodies.select).toEqual({ id: true, body: true });
+  });
+
+  it("`none`なら本文用のクエリを発行しない（#4255）", async () => {
+    await getIssuesForUser("user-1", { bodies: "none" });
+    expect(issueFindMany).toHaveBeenCalledTimes(1);
   });
 
   it("`none`なら全件の本文を外す", async () => {
