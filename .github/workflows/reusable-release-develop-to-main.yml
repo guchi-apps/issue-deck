@@ -1238,6 +1238,8 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.WORKFLOW_PAT }}
           GH_REPO: ${{ github.repository }}
+          APP_BASE_URL: ${{ vars.APP_BASE_URL }}
+          PROGRESS_REPORT_SECRET: ${{ secrets.PROGRESS_REPORT_SECRET }}
           DEV_VERSION: ${{ steps.state.outputs.dev_version }}
           FREEZE_SHA_INPUT: ${{ steps.issues.outputs.freeze_sha }}
           REASON: ${{ steps.reason.outputs.reason }}
@@ -1304,6 +1306,29 @@ jobs:
           gh pr create --base main --head "$RELEASE_BRANCH" \
             --title "v${DEV_VERSION}をmainへリリースする" \
             --body-file /tmp/main-pr-body.md
+
+          # 固定したリリース内容（main先端 + リリースhead）の統合検証を依頼する（#4237・#4212）。
+          # **ベストエフォート**: 設定不足・通信失敗・依頼の拒否は警告に留め、リリースPRの作成は止めない
+          # （検証の記録が無ければ、画面とマージ側が「未実施」として扱うので、安全側に倒れる）。
+          # 作り直し・head更新で対象のSHAが変わると、旧SHAの結果は「対象変更による無効」になる
+          if [ -z "${APP_BASE_URL:-}" ] || [ -z "${PROGRESS_REPORT_SECRET:-}" ]; then
+            echo "::warning::APP_BASE_URL / PROGRESS_REPORT_SECRET が未設定のため、統合検証を依頼できません"
+          else
+            VERIFY_PR_JSON="$(gh pr view "$RELEASE_BRANCH" --json number,baseRefOid,headRefOid 2>/dev/null || true)"
+            VERIFY_BODY="$(printf '%s' "$VERIFY_PR_JSON" | jq -c --arg repository "$GH_REPO" \
+              '{action:"request", repository:$repository, pullRequest:.number, baseSha:.baseRefOid, headSha:.headRefOid}' 2>/dev/null || true)"
+            if [ -z "$VERIFY_BODY" ]; then
+              echo "::warning::リリースPRの情報を取得できず、統合検証を依頼できません"
+            else
+              VERIFY_CODE="$(curl -sS -m 30 -o /dev/null -w '%{http_code}' -X POST "${APP_BASE_URL%/}/api/dispatch/release-verify" \
+                -H "Authorization: Bearer $PROGRESS_REPORT_SECRET" -H "Content-Type: application/json" -d "$VERIFY_BODY" 2>/dev/null)" || VERIFY_CODE=000
+              if [ "$VERIFY_CODE" = "200" ]; then
+                echo "統合検証を依頼しました"
+              else
+                echo "::warning::統合検証を依頼できませんでした（HTTP ${VERIFY_CODE}）"
+              fi
+            fi
+          fi
 
   # releaseジョブが失敗した場合の通知(#727)。他の3ワークフロー
   # （claude-issue-dispatch.ymlのnotify-failure、claude-review-develop.ymlの

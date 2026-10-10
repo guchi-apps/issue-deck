@@ -138,6 +138,8 @@ export async function POST(request: NextRequest) {
     // 非対応扱い**（配ると未知の種別として`failed`になり、PRのレビューが必ず失敗として残る）
     reviewFixCapable: typeof payload?.reviewFix === "boolean" ? payload.reviewFix : null,
     prReviewCapable: typeof payload?.prReview === "boolean" ? payload.prReview : null,
+    // リリースの統合検証（#4237）を実行できるpollerだけが送ってくる。未申告はnull＝非対応扱い
+    releaseVerifyCapable: typeof payload?.releaseVerify === "boolean" ? payload.releaseVerify : null,
     // チャット相談のCodex実行（#4109）に対応したpollerだけが送ってくる。**未申告はnull＝非対応扱い**
     chatCodexCapable: typeof payload?.chatCodex === "boolean" ? payload.chatCodex : null,
     selfUpdateCapable:

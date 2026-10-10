@@ -89,6 +89,9 @@ export type DispatchJobStatus =
  *   サブPCのpollerが取ってCodex CLIを走らせ、完了の報告で最終マージ判定（`auto-merge`ジョブ）が
  *   再開される。`CODE_REVIEW`（リポジトリ全体を人が起こす）とは別物。**`issueNumber`にはPR番号を
  *   埋め草として入れる**（必須列。GitHubはIssueとPRで番号を共有するので衝突しない）
+ * - `RELEASE_VERIFY` … リリースPR（base=`main`）の固定内容に対する統合検証（#4237）。`PR_REVIEW`と
+ *   同じ専用列（PR番号・base/head SHA）を使い、`activeKey`は`release_verify:repo#PR@base:head:kind`。
+ *   サブPCがmainとリリースheadの統合状態でビルド・テストし、結果は`ReleaseVerification`へ記録する
  */
 export type DispatchJobKind =
   | "LAUNCH"
@@ -108,7 +111,8 @@ export type DispatchJobKind =
   | "MANUAL_STEP_SESSION"
   | "PR_REVIEW"
   | "REVIEW_FIX"
-  | "CHAT_TURN";
+  | "CHAT_TURN"
+  | "RELEASE_VERIFY";
 
 /**
  * 既に立っているセッションを操作するジョブ（起動しないジョブ）。
@@ -197,6 +201,7 @@ export function parseDispatchJobKind(value: unknown): DispatchJobKind | null {
   if (value === "manual_step_session") return "MANUAL_STEP_SESSION";
   if (value === "review_fix") return "REVIEW_FIX";
   if (value === "pr_review") return "PR_REVIEW";
+  if (value === "release_verify") return "RELEASE_VERIFY";
   return null;
 }
 
@@ -633,6 +638,8 @@ export type DispatchJobView = {
   prNumber?: number | null;
   baseSha?: string | null;
   headSha?: string | null;
+  /** 統合検証（`RELEASE_VERIFY`・#4237）で実行する内容。ほかの種別では入らない */
+  releaseVerify?: { commands: string[]; macBuildCheck: boolean };
   /** `lgtm` / `needs-check` / `changes-requested`。失敗・時間切れは入らず`status`と`message`が持つ */
   reviewVerdict?: string | null;
   /**
@@ -767,6 +774,7 @@ export type DispatchHostView = {
    */
   reviewFixCapable?: boolean | null;
   prReviewCapable?: boolean | null;
+  releaseVerifyCapable?: boolean | null;
   /**
    * チャット相談のモデル呼び出し（`CHAT_TURN`・#4109）をCodex CLIで実行できるか。
    * **`null`は「できない」**（古いpollerへ配ると未知の種別として`failed`になり、回答が必ず失敗する）
@@ -1201,6 +1209,8 @@ export function describeDispatchJobKind(kind: DispatchJobKind): string {
       return "レビュー指摘の修正";
     case "PR_REVIEW":
       return "PRレビュー";
+    case "RELEASE_VERIFY":
+      return "リリース統合検証";
     case "CHAT_TURN":
       return "チャットの回答";
     case "INTERRUPT":
@@ -1996,7 +2006,7 @@ export function describeDispatchJobStatus(
   if (kind === "MANUAL_STEP") return describeManualStepJobStatus(status);
   if (kind === "PLAN_REVIEW") return describePlanReviewJobStatus(status);
   if (kind === "CODE_REVIEW") return describeCodeReviewJobStatus(status);
-  if (kind === "PR_REVIEW") return describePrReviewJobStatus(status);
+  if (kind === "PR_REVIEW" || kind === "RELEASE_VERIFY") return describePrReviewJobStatus(status);
   if (kind !== "LAUNCH") return describeSessionControlJobStatus(status, kind);
   switch (status) {
     case "QUEUED":
