@@ -59,5 +59,6 @@ PM2の再起動は、PID・起動時刻の変化（区間の切り替わり）�
 
 ## 残り（別Issueで追う）
 
-- AIDEのMCPツール（`guchi-apps/aide`）
-- heap・PM2再起動数・smaps上位（`guchi-apps/vps`のsudoers整備）
+- 共有トークン登録と本番での取得確認: [issue-deck#4269](https://github.com/guchi-apps/issue-deck/issues/4269)（`71.manual-step`）。本番デプロイとマイグレーション適用後に、サブPCで `--once --post` を実行し、読み取りAPIが200を返して最新サンプルを含むことを確認する。未実施の間は #4256 を完了扱いにしない
+- AIDEのMCPツール: [aide#608](https://github.com/guchi-apps/aide/issues/608)
+- heap・PM2再起動数・smaps上位とPID確定: [vps#287](https://github.com/guchi-apps/vps/issues/287)（sudoers整備）
