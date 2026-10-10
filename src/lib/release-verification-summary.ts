@@ -6,6 +6,11 @@ import {
   type ReleaseVerificationKind,
   type ReleaseVerificationState,
 } from "@/lib/release-merge-gate";
+import {
+  describeReleaseMac,
+  type ReleaseMacRow,
+  type ReleaseMacSection,
+} from "@/lib/release-mac-verification";
 import { readReleaseReviewDiagnostic, type ReleaseReviewDiagnostic } from "@/lib/release-review-diagnostic";
 import type { ReleaseReviewFinding } from "@/lib/release-review-result";
 import type { ReleaseVerificationProgress } from "@/lib/release-verification-progress";
@@ -64,6 +69,8 @@ export type ReleaseVerificationSummary = {
   blockers: ReleaseMergeGateBlocker[];
   integration: ReleaseVerificationSection;
   aiReview: ReleaseVerificationSection;
+  /** Mac検証（#4366）。統合検証とは別の記録で、ゲートの判定には使わない */
+  mac: ReleaseMacSection;
   /** 全体レビューを今積んだ場合の実効担当（表示用。例: `Claude Code · opus`） */
   aiReviewAssignee: string;
   /** 判定の対象（GitHubから取った現在のbase・head）。画面は「どのSHAの結果か」を出すのに使う */
@@ -83,6 +90,12 @@ function readDetail(findings: unknown) {
   };
 }
 
+/** 現在の対象の統合検証ジョブが、今Mac工程を実行しているか */
+function isRunningMacStep(progress: ReleaseVerificationProgress | null): boolean {
+  if (!progress || progress.jobStatus !== "running" || progress.currentIndex === null) return false;
+  return progress.steps[progress.currentIndex]?.key === "mac";
+}
+
 export function summarizeReleaseVerification(input: {
   current: { baseSha: string; headSha: string };
   rows: readonly ReleaseVerificationDetailRow[];
@@ -90,6 +103,10 @@ export function summarizeReleaseVerification(input: {
   aiReviewAssignee: string;
   /** 区分ごとの進捗（`loadReleaseVerificationSummary`が現在の対象のジョブから作る） */
   progress?: Partial<Record<ReleaseVerificationKind, ReleaseVerificationProgress | null>>;
+  /** Mac検証の記録（表示専用。無ければ空） */
+  macRows?: readonly ReleaseMacRow[];
+  /** このリポジトリがMac検証を行う設定か。省略時は設定ありとして扱う */
+  macConfigured?: boolean;
 }): ReleaseVerificationSummary {
   const { current, rows } = input;
   const views = viewReleaseVerifications(current, rows);
@@ -130,6 +147,12 @@ export function summarizeReleaseVerification(input: {
     blockers: gate.blockers,
     integration: section("integration"),
     aiReview: section("ai_review"),
+    mac: describeReleaseMac({
+      current,
+      rows: input.macRows ?? [],
+      runningNow: isRunningMacStep(input.progress?.integration ?? null),
+      configured: input.macConfigured,
+    }),
     aiReviewAssignee: input.aiReviewAssignee,
     target: { baseSha: current.baseSha, headSha: current.headSha },
   };

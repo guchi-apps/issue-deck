@@ -83,18 +83,13 @@ describe("withMergeChecks（#4305）", () => {
   const base = (number: number, issueNumber: number | null, isVersionBump = false) =>
     ({ number, title: "t", issueNumber, isVersionBump, review: null, prHeadSha: null, reviewUnavailable: false }) as never;
 
-  it("取れなかったCI・計画は取得不可にし、Issue無しは対象外、バンプは触らない", () => {
+  it("取れなかったCIは取得不可にし、バンプは触らない（計画は持たない）", () => {
     const result = withMergeChecks(
       [base(1, 10), base(2, null), base(3, 11, true)],
       new Map([[1, { state: "success" as const }]]),
-      new Map(),
     );
-    expect(result[0].mergeChecks).toEqual({
-      ci: { state: "success" },
-      plan: { state: "unavailable", reason: "計画の記録を取得できませんでした" },
-    });
+    expect(result[0].mergeChecks).toEqual({ ci: { state: "success" } });
     expect(result[1].mergeChecks?.ci.state).toBe("unavailable");
-    expect(result[1].mergeChecks?.plan.state).toBe("not-applicable");
     expect(result[2].mergeChecks).toBeUndefined();
   });
 

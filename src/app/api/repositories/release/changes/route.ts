@@ -13,9 +13,6 @@ import {
   PULL_REQUEST_COMMITS_PER_PAGE,
 } from "@/lib/github/pull-requests-api";
 import { fetchPullRequestRollups, pullRequestRollupKey } from "@/lib/github/check-rollup";
-import { mapComment } from "@/lib/github/issue-mapper";
-import { fetchCommentsForIssue } from "@/lib/github/issues-api";
-import { resolvePlanCheck } from "@/lib/github/release-plan-check";
 import {
   toReleaseChanges,
   toReleaseChangeCi,
@@ -25,7 +22,6 @@ import {
 import type {
   ReleaseChangeCiCheck,
   ReleaseChangeListResponse,
-  ReleaseChangePlanCheck,
   ReleaseChangePullRequest,
 } from "@/types/pull-request";
 
@@ -68,20 +64,18 @@ async function fetchPullRequestBodies(
 }
 
 /**
- * 5チェック（#4305）の追加取得。**`include=merge-checks`を付けた呼び出し（本番マージ確認ダイアログ）
+ * 6チェック（#4305・#4366）の追加取得。**`include=merge-checks`を付けた呼び出し（本番マージ確認ダイアログ）
  * だけが呼ぶ**——この応答は他の画面も使うので、全員にGitHubの呼び出しを増やさない。
- * CIはPRのhead（個別PRの過去の結果）をGraphQL1本でまとめて引き、計画は関連Issueのコメントを
- * 上限付きで読む。失敗したPRは結果に入れない（`withMergeChecks`が取得不可にする）。
+ * CIはPRのhead（個別PRの過去の結果）をGraphQL1本でまとめて引く。計画レビューはPRのチェックに含めない。失敗したPRは結果に入れない（`withMergeChecks`が取得不可にする）。
  */
 async function fetchMergeChecks(
   owner: string,
   repo: string,
   pullRequests: readonly ReleaseChangePullRequest[],
   token: string,
-): Promise<{ ci: Map<number, ReleaseChangeCiCheck>; plan: Map<number, ReleaseChangePlanCheck> }> {
+): Promise<{ ci: Map<number, ReleaseChangeCiCheck> }> {
   const targets = pullRequests.filter((pr) => !pr.isVersionBump);
   const ci = new Map<number, ReleaseChangeCiCheck>();
-  const plan = new Map<number, ReleaseChangePlanCheck>();
 
   const rollups = await fetchPullRequestRollups(
     targets.map((pr) => ({ owner, repo, number: pr.number })),
@@ -92,20 +86,7 @@ async function fetchMergeChecks(
     if (rollup) ci.set(pr.number, toReleaseChangeCi(rollup.rollup?.state));
   }
 
-  await Promise.all(
-    targets
-      .filter((pr): pr is ReleaseChangePullRequest & { issueNumber: number } => pr.issueNumber !== null)
-      .slice(0, MAX_BODY_FETCHES)
-      .map(async (pr) => {
-        try {
-          const comments = await fetchCommentsForIssue(owner, repo, pr.issueNumber, token);
-          plan.set(pr.number, resolvePlanCheck(comments.map(mapComment)));
-        } catch {
-          // 入れない＝取得不可として画面に出る
-        }
-      }),
-  );
-  return { ci, plan };
+  return { ci };
 }
 
 export function GET(request: NextRequest) {
@@ -181,7 +162,7 @@ async function handleGET(request: NextRequest) {
     let withChecks = reviewed;
     if (includeMergeChecks) {
       const checks = await fetchMergeChecks(owner, repo, reviewed, token);
-      withChecks = withMergeChecks(reviewed, checks.ci, checks.plan);
+      withChecks = withMergeChecks(reviewed, checks.ci);
     }
     const response: ReleaseChangeListResponse = {
       pullRequests: withChecks,

@@ -43,6 +43,7 @@ function summary(overrides: Partial<ReleaseVerificationSummary> = {}): ReleaseVe
     blockers: [],
     integration: section({ kind: "integration" }),
     aiReview: section(),
+    mac: { state: "not_recorded", reason: null, summary: null, evidenceUrl: null, updatedAt: null },
     aiReviewAssignee: "Claude Code · opus",
     target: { baseSha: "3f2a91c".padEnd(40, "0"), headSha: "9b07e4d".padEnd(40, "0") },
     ...overrides,

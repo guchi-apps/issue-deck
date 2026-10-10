@@ -22,6 +22,7 @@ import {
   pullRequestKindLabel,
 } from "@/components/dashboard/pull-request-badges";
 import { PullRequestActionsMenu } from "@/components/dashboard/pull-request-actions-menu";
+import { PullRequestChecksStrip } from "@/components/dashboard/pull-request-checks-strip";
 import { PullRequestAiReviewJobs } from "@/components/dashboard/pull-request-ai-review-jobs";
 import { PullRequestFileList } from "@/components/dashboard/pull-request-file-list";
 import { PullRequestReviewRound } from "@/components/dashboard/pull-request-review-round";
@@ -415,6 +416,9 @@ export function PullRequestDetail({
               />
             )}
           </div>
+
+          {/* PR一覧・ブランチ画面と同じ6チェック（#4366）。バッジは操作の入口として残し、結果の比較はここで読む */}
+          <PullRequestChecksStrip pullRequest={pullRequest} className="-mx-1 px-0" />
 
           {/* ユーザーのマージが必要な理由（#4088）。バッジの直下に出して押す前に読めるようにする */}
           {requiresUserMerge(pullRequest) && currentDetail?.userMergeReasons && (

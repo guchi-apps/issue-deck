@@ -8,7 +8,12 @@ import { REVIEW_MARK, REVIEW_TONE } from "@/components/dashboard/review-verdict"
 import { Skeleton } from "@/components/ui/skeleton";
 import type { UsePullRequestChangesResult } from "@/hooks/use-pull-request-changes";
 import type { ReviewVerdictKind } from "@/lib/github/release-verification";
-import { buildMergeChecks, type MergeChecksInput } from "@/lib/pull-request-merge-checks";
+import {
+  buildMergeChecks,
+  cellsFromReleaseChange,
+  type PerPullRequestCell,
+} from "@/lib/pull-request-merge-checks";
+import type { ReleaseCheckCells } from "@/lib/release-candidate-checks";
 import { pullRequestChangeIssueLabel, pullRequestChangeLabel } from "@/lib/pull-request-changes";
 import { cn } from "@/lib/utils";
 import type {
@@ -69,13 +74,17 @@ type PullRequestMergeChangesProps = {
   /** 行を押したときにPR詳細を開く（#3592）。PR番号が取れない行は押せない */
   onOpenPullRequest?: (pullRequestNumber: number) => void;
   /**
-   * 凍結リリースPRの一覧で5チェック（CI・計画・コード・全体〔共通〕・競合。#4305）を各行に出すための材料。
+   * 凍結リリースPRの一覧で6チェック（CI・コード・競合・全体・統合・Mac。#4366）を各行に出すための材料。
    * あれば旧来のコードレビューの丸とピルは出さない（コードのチェックが引き継ぐ）
    */
   mergeChecks?: {
     byNumber: ReadonlyMap<number, ReleaseChangePullRequest>;
-    shared: Omit<MergeChecksInput, "pullRequest">;
-    onOpenOverall: () => void;
+    /** リリース候補のコンフリクト（全行共通。個別PRの過去の結果ではない） */
+    conflict: PerPullRequestCell;
+    /** 個別PRのCIに併記する、リリース候補のCI（別の判定） */
+    releaseCiNote: string;
+    release: ReleaseCheckCells;
+    onOpenCandidate: () => void;
   };
 };
 
@@ -231,23 +240,22 @@ export function PullRequestMergeChanges({
                 mergeChecks ? (
                   <PullRequestMergeChecks
                     checks={buildMergeChecks({
-                      ...mergeChecks.shared,
-                      pullRequest:
+                      ...cellsFromReleaseChange(
                         change.pullRequestNumber !== null
                           ? (mergeChecks.byNumber.get(change.pullRequestNumber) ?? null)
                           : null,
+                        mergeChecks.releaseCiNote,
+                      ),
+                      conflict: mergeChecks.conflict,
+                      release: mergeChecks.release,
                     })}
-                    issueUrl={
-                      change.issueNumber !== null
-                        ? `https://github.com/${pullRequest.repositoryFullName}/issues/${change.issueNumber}`
-                        : null
-                    }
+                    candidate={mergeChecks.release.candidate}
                     onOpenPullRequest={
                       onOpenPullRequest && change.pullRequestNumber !== null
                         ? () => onOpenPullRequest(change.pullRequestNumber as number)
                         : null
                     }
-                    onOpenOverall={mergeChecks.onOpenOverall}
+                    onOpenCandidate={mergeChecks.onOpenCandidate}
                   />
                 ) : null
               }

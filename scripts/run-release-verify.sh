@@ -114,6 +114,24 @@ result_json() {
       + (if $evidence == "" then {} else {evidenceUrl: $evidence} end)'
 }
 
+# Mac検証を統合検証とは別の記録として報告する（#4366）。統合検証の結果JSONへ`mac`を足す。
+# 統合検証の判定（unverifiedScope・failed）は従来どおり変えない。旧版のサーバーは`mac`を無視する。
+MAC_RESULT_JSON=""
+mac_result_set() {
+  local state="$1" summary="$2" unverified="${3:-}"
+  MAC_RESULT_JSON="$(jq -nc --arg state "$state" --arg summary "$summary" --arg unverified "$unverified" \
+    '{state: $state, summary: $summary}
+      + (if $unverified == "" then {} else {unverifiedScope: $unverified} end)')"
+}
+with_mac() {
+  local result="$1"
+  if [[ -z "$MAC_RESULT_JSON" ]]; then
+    printf '%s' "$result"
+    return 0
+  fi
+  jq -c --argjson mac "$MAC_RESULT_JSON" '. + {mac: $mac}' <<<"$result"
+}
+
 main() {
   local owner="$1" repo="$2" pr_number="$3" base_sha="$4" head_sha="$5"
   JOB_ID="$6"
@@ -206,27 +224,32 @@ main() {
   if [[ "$mac_check" == "true" ]]; then
     if [[ -z "$(git -C "$WORKTREE" diff --name-only "$base_sha" "$head_sha" -- ios 2>/dev/null | head -1)" ]]; then
       summary+="Mac検証: 対象外（ios/に差分なし）"$'\n'
+      mac_result_set not_applicable "ios/に差分がないため対象外です"
     elif [[ ! -x "$WORKTREE/ios/scripts/remote-build-check.sh" ]]; then
       unverified="Mac検証（remote-build-check.sh）が未接続です"
       summary+="Mac検証: 未実施（スクリプトがありません）"$'\n'
+      mac_result_set needs_check "$unverified" "$unverified"
     elif ! ssh -o BatchMode=yes -o ConnectTimeout=5 "$MAC_HOST_NAME" true >/dev/null 2>&1; then
       unverified="Mac（${MAC_HOST_NAME}）へ接続できず、iOSのビルドを確認できていません"
       summary+="Mac検証: 未実施（Macへ接続できません）"$'\n'
+      mac_result_set needs_check "$unverified" "$unverified"
     else
       RUNNING_MESSAGE="Macでのビルド確認を実行中です"
       release_progress_set mac "$((2 + command_count))" "$RUNNING_MESSAGE"
       release_verify_report running "$RUNNING_MESSAGE"
       if (cd "$WORKTREE" && timeout "$STEP_TIMEOUT" bash ios/scripts/remote-build-check.sh) >"$WORK_ROOT/${repo}-${pr_number}-mac.out" 2>&1; then
         summary+="Mac検証: 実施・成功"$'\n'
+        mac_result_set passed "Macでのビルド確認に成功しました"
       else
         summary+="Mac検証: 実施・失敗"$'\n'"$(tail -n 20 "$WORK_ROOT/${repo}-${pr_number}-mac.out")"$'\n'
-        finish succeeded "Mac検証が失敗しました" "$(result_json failed "$summary" "" "$evidence")"
+        mac_result_set failed "$(tail -n 20 "$WORK_ROOT/${repo}-${pr_number}-mac.out")"
+        finish succeeded "Mac検証が失敗しました" "$(with_mac "$(result_json failed "$summary" "" "$evidence")")"
         return 0
       fi
     fi
   fi
 
-  finish succeeded "統合検証を完了しました" "$(result_json passed "$summary" "$unverified" "$evidence")"
+  finish succeeded "統合検証を完了しました" "$(with_mac "$(result_json passed "$summary" "$unverified" "$evidence")")"
 }
 
 if [[ "${1:-}" == "--run" ]]; then

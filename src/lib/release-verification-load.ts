@@ -2,6 +2,7 @@ import { db } from "@/lib/db";
 import { DISPATCH_HEARTBEAT_TIMEOUT_MS, isDispatchHostOnline } from "@/lib/dispatch/dispatch-job";
 import type { ReleaseVerificationKind } from "@/lib/release-merge-gate";
 import { describeReleaseReviewAssignee, resolveReleaseReviewAssignee } from "@/lib/release-review-assignee";
+import { listReleaseMacRows } from "@/lib/release-mac-verification";
 import { listReleaseVerificationDetails } from "@/lib/release-verification";
 import { getReleaseVerificationConfig } from "@/lib/release-verification-config";
 import {
@@ -30,6 +31,8 @@ export async function loadReleaseVerificationSummary(
   return summarizeReleaseVerification({
     current,
     rows: await listReleaseVerificationDetails(repoFullName, prNumber),
+    macRows: await listReleaseMacRows(repoFullName, prNumber),
+    macConfigured: getReleaseVerificationConfig(repoFullName).macBuildCheck === true,
     enforced: getReleaseVerificationConfig(repoFullName).enforced,
     aiReviewAssignee: describeReleaseReviewAssignee(resolveReleaseReviewAssignee(setting)),
     progress: await loadReleaseVerificationProgress(repoFullName, prNumber, current),
