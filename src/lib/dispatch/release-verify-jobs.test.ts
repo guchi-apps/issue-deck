@@ -49,8 +49,22 @@ describe("buildReleaseVerifyActiveKey", () => {
 });
 
 describe("requestReleaseVerifyJob", () => {
-  it("検証コマンドの無いリポジトリはジョブを積まずnot_applicableで記録する", async () => {
+  it("台帳に無いリポジトリは対象外にせず、設定不足としてfailedで記録する", async () => {
     const result = await requestReleaseVerifyJob({ ...target, repoFullName: "guchi-apps/other" }, NOW);
+    expect(result).toMatchObject({ ok: false, rejection: "not_configured" });
+    expect(jobCreate).not.toHaveBeenCalled();
+    expect(verificationUpdateMany.mock.calls[0][0].data).toMatchObject({ state: "failed" });
+  });
+
+  it("前提が未整備のリポジトリはジョブを積まず、failedで理由を残す", async () => {
+    const result = await requestReleaseVerifyJob({ ...target, repoFullName: "guchi-apps/asset-manager" }, NOW);
+    expect(result).toMatchObject({ ok: false, rejection: "not_configured" });
+    expect(jobCreate).not.toHaveBeenCalled();
+    expect(verificationUpdateMany.mock.calls[0][0].data).toMatchObject({ state: "failed" });
+  });
+
+  it("根拠付きの対象外（アーカイブ等）だけがnot_applicableになる", async () => {
+    const result = await requestReleaseVerifyJob({ ...target, repoFullName: "guchi-apps/trainroute" }, NOW);
     expect(result).toMatchObject({ ok: true, outcome: "not_applicable" });
     expect(jobCreate).not.toHaveBeenCalled();
     expect(verificationUpdateMany.mock.calls[0][0].data).toMatchObject({ state: "not_applicable" });
