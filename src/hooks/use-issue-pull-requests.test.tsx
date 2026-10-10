@@ -30,6 +30,7 @@ function pullRequest(number: number): IssuePullRequest {
     state: "open",
     draft: false,
     merged: false,
+    baseRef: "develop",
     ciStatus: "success",
     mergeJudgement: { state: "settled", step: null, runUrl: null, aiReview: AI_REVIEW_NONE },
     mergeable: true,

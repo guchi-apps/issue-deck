@@ -241,6 +241,8 @@ export type IssuePullRequest = {
   draft: boolean;
   /** マージ済みか。`state`がclosedのときだけtrueになりうる */
   merged: boolean;
+  /** マージ先ブランチ（#4223）。マージ済みPRがdevelopまでなのかmainまで届いたのかの判定に使う */
+  baseRef: string;
   /**
    * headコミットのCI状態。openかつdraftでないPRでのみ取得し、それ以外はnull
    * （closedやdraftでCIを見ても判断に使わないため、1リクエストを使わない）

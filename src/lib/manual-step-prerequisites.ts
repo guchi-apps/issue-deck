@@ -296,7 +296,13 @@ export function resolveManualStepPrerequisites(
       reference.repositoryFullName === repositoryFullName
         ? pullRequestByNumber.get(reference.number)
         : undefined;
-    if (pullRequest) return fromPullRequest(reference, pullRequest);
+    if (pullRequest) {
+      const linkedIssue =
+        pullRequest.linkedIssueNumber !== null
+          ? issueByKey.get(`${repositoryFullName}#${pullRequest.linkedIssueNumber}`)
+          : undefined;
+      return fromPullRequest(reference, pullRequest, linkedIssue);
+    }
 
     return {
       ...reference,
@@ -398,6 +404,7 @@ function fromIssue(reference: ManualStepReference, issue: Issue): ManualStepPrer
 function fromPullRequest(
   reference: ManualStepReference,
   pullRequest: IssuePullRequest,
+  linkedIssue?: Issue,
 ): ManualStepPrerequisite {
   const base = {
     ...reference,
@@ -409,6 +416,14 @@ function fromPullRequest(
     manualStep: false,
   };
   if (pullRequest.merged) {
+    // developへマージしただけでは本番へ出ていない（#4223）。対応Issueがmainへ反映済み（Done）と
+    // 分かる場合だけ満たされたとみなし、分からないうちは待ちに数える
+    if (pullRequest.baseRef === "develop") {
+      const released = linkedIssue !== undefined && resolveProgressStatus(linkedIssue) === "done";
+      if (!released) {
+        return { ...base, stage: "develop", label: "developへマージ済み・本番未反映", satisfied: false };
+      }
+    }
     return { ...base, stage: "merged", label: "マージ済み", satisfied: true };
   }
   if (pullRequest.state === "closed") {

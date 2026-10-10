@@ -464,7 +464,7 @@ Claude Code実行前に、以下のステップを挟む。
 ### 9.2 格上げ判定（`guchi-apps/docs`のワークフロー）
 
 判定エージェントは`guchi-apps/docs`のGitHub Actionsとして動き、issue-deckを含む
-`guchi-apps`配下の全リポジトリを対象に、次を行う。起動契機は2つで、**都度**（issue-deckが進捗を`develop`・`done`・`closed`へ進めた時点で`workflow_dispatch`する。#3814。失敗の知見が反映される前に別リポジトリで同じ失敗をするのを減らすため）と、**取りこぼしの回収**（毎日05:00 JSTのcron）。都度起動は10分間隔で間引き、docs側のconcurrencyが同時実行を1本に絞る。
+`guchi-apps`配下の全リポジトリを対象に、次を行う。起動契機は2つで、**都度**（issue-deckが進捗を`develop`・`done`・`closed`へ進めた時点で`workflow_dispatch`する。#3814。失敗の知見が反映される前に別リポジトリで同じ失敗をするのを減らすため）と、**取りこぼしの回収**（毎日05:00 JSTのcron）。都度起動は10分間隔で間引き、docs側のconcurrencyが同時実行を1本に絞る。**起動前に、判定対象になりうる未処理の知見メモ（下の1〜2の条件。判定済みIssueに後から付いたメモを含む）があるかを軽量に確認し、無ければ起動しない**（#4211。AIは呼ばず、理由は`[knowledge-promotion-dispatch]`のログに残る。確認に失敗したときは候補なしと区別して記録し、取りこぼしを避けるため起動する）。省いた分は日次cronが回収する（実装は`src/lib/github/knowledge-promotion-candidates.ts`。判定対象の条件の正はdocs側のワークフローで、変えたら揃える）。
 
 1. 各リポジトリのIssueから、`<!-- knowledge-candidate -->`があり
    `<!-- knowledge-promotion:judged -->`が**まだ無い**ものを集める。**対象を日付で絞らない**ため、

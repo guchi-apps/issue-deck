@@ -42,6 +42,13 @@ export type ChangelogEntry = {
  */
 export const APP_CHANGELOG: ChangelogEntry[] = [
   {
+    version: "8.45.1",
+    date: "2026-10-10",
+    changes: [
+      "手作業Issueの「先に完了している必要があるIssue・PR」の判定を修正しました。developへマージしただけで本番にはまだ出ていないPRを、本番反映済みとして扱わないようになりました。",
+    ],
+  },
+  {
     version: "8.44.0",
     date: "2026-10-10",
     changes: [

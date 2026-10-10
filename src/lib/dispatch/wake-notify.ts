@@ -35,7 +35,7 @@ export function parseWakeTargets(raw: string | undefined): Map<string, string> {
       const url = new URL(value);
       // tailnet内（WireGuardで暗号化済み）の素のHTTPだけ。資格情報・パス・クエリ付きは拒否する
       if (url.protocol !== "http:" || url.username || url.password || url.search || url.hash) continue;
-      if (url.pathname !== "/" ) continue;
+      if (url.pathname !== "/") continue;
       targets.set(host, url.origin);
     } catch {
       continue;

@@ -56,6 +56,7 @@ function makePullRequest(overrides: Partial<IssuePullRequest> = {}): IssuePullRe
     state: "open",
     draft: false,
     merged: false,
+    baseRef: "develop",
     ciStatus: null,
     mergeJudgement: { state: "unknown", step: null, runUrl: null, aiReview: AI_REVIEW_NONE },
     mergeable: true,
@@ -201,11 +202,22 @@ describe("resolveManualStepPrerequisites", () => {
     expect(first.satisfied).toBe(true);
   });
 
+  it("developへマージしただけのPRは本番未反映として待ちに数える（#4223）", () => {
+    const [first] = resolveManualStepPrerequisites(
+      [{ repositoryFullName: REPO, number: 1704, origin: false, explicit: true }],
+      [],
+      [makePullRequest({ number: 1704, state: "closed", merged: true, baseRef: "develop" })],
+      REPO,
+    );
+
+    expect(first).toMatchObject({ stage: "develop", satisfied: false });
+  });
+
   it("マージ済みPRは満たされたものとして扱い、3段階には載せない", () => {
     const [first] = resolveManualStepPrerequisites(
       [{ repositoryFullName: REPO, number: 1704, origin: false, explicit: true }],
       [],
-      [makePullRequest({ number: 1704, state: "closed", merged: true })],
+      [makePullRequest({ number: 1704, state: "closed", merged: true, baseRef: "main" })],
       REPO,
     );
 
