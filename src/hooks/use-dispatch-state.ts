@@ -11,6 +11,7 @@ import {
   type DispatchHostView,
   type DispatchJobView,
 } from "@/lib/dispatch/dispatch-job";
+import type { DependencyWaitView } from "@/lib/dispatch/dependency-wait";
 import type { SessionPlanRequestView } from "@/lib/dispatch/session-plan-request";
 import type {
   SessionQuestionAnswerInput,
@@ -54,6 +55,11 @@ export type DispatchState = {
    * 止まっている**ので短い方の間隔に寄せる。
    */
   questionRequests: SessionQuestionRequestView[];
+  /**
+   * 実装セッションの依存待ち（#4321）。**テストの差し込みや古い応答では欠けうる**ので、
+   * 無ければ「待ちは無い」として読む。
+   */
+  dependencyWaits?: DependencyWaitView[];
   concurrency: number;
   /** エージェント別の新規実行の一時停止状態（#2994） */
   agentPause: DispatchAgentPauseState;
@@ -1022,6 +1028,46 @@ export function useDispatchState(enabled: boolean) {
     [markChanged, refresh],
   );
 
+  /**
+   * 依存待ちの再確認・再開・解除（#4321）。結果はその場で`dependencyWaits`へ反映し、
+   * 次の取得を待たない（スマホから押した結果がすぐ見える）。
+   */
+  const controlDependencyWait = useCallback(
+    async (params: {
+      id: string;
+      action: "recheck" | "resume" | "cancel";
+    }): Promise<{ ok: true; wait: DependencyWaitView } | { ok: false; message: string }> => {
+      setIsSubmitting(true);
+      try {
+        const res = await fetch("/api/dispatch/dependency-wait", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(params),
+        });
+        if (!res.ok) return { ok: false, message: await readErrorMessage(res) };
+        const json = (await res.json()) as { wait: DependencyWaitView };
+        setState((prev) =>
+          prev
+            ? {
+                ...prev,
+                dependencyWaits: [
+                  json.wait,
+                  ...(prev.dependencyWaits ?? []).filter((w) => w.id !== json.wait.id),
+                ],
+              }
+            : prev,
+        );
+        markChanged();
+        return { ok: true, wait: json.wait };
+      } catch (err) {
+        return { ok: false, message: err instanceof Error ? err.message : String(err) };
+      } finally {
+        setIsSubmitting(false);
+      }
+    },
+    [markChanged],
+  );
+
   return {
     hosts: state?.hosts ?? [],
     jobs: state?.jobs ?? [],
@@ -1029,6 +1075,8 @@ export function useDispatchState(enabled: boolean) {
     manualStepRuns: state?.manualStepRuns ?? [],
     planRequests: state?.planRequests ?? [],
     questionRequests: state?.questionRequests ?? [],
+    dependencyWaits: state?.dependencyWaits ?? [],
+    controlDependencyWait,
     concurrency: state?.concurrency ?? null,
     agentPause: state?.agentPause ?? { claude: null, codex: null },
     isLoaded,
