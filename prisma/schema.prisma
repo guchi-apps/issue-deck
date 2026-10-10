@@ -2521,3 +2521,19 @@ model NativeAuthHandoff {
 
   @@index([expiresAt])
 }
+
+/// Issue作成の冪等キー（#3847）。同じキーの再送（連打・応答不明からの再試行）で同じIssueを
+/// 二重に作らないため、GitHubへ作成する前に予約し、成功したら結果を保存する。
+model IssueCreateRequest {
+  id         String   @id @default(cuid())
+  userId     String
+  /// クライアントが作成操作ごとに採る一意の値（ユーザー単位で一意）
+  key        String   @db.VarChar(64)
+  /// "pending"（作成中・結果不明）／"done"（作成済み。resultJsonに結果）
+  status     String   @db.VarChar(16)
+  resultJson String?  @db.LongText
+  createdAt  DateTime @default(now())
+
+  @@unique([userId, key])
+  @@index([createdAt])
+}
