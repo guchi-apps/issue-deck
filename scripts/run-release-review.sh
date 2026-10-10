@@ -247,18 +247,36 @@ main() {
   log_file="$WORK_ROOT/${repo}-${pr_number}-${head_sha:0:12}.log"
   # 前回の実行の出力・ログを今回の結果として読まない（同じSHAの再実行）
   rm -f "$output_file" "$log_file"
-  python3 - "$SCRIPT_DIR/prompts/release-review-agent.md" "$prompt_file" "$full_name" "$pr_number" "$base_sha" "$head_sha" \
-    "$coverage" "$prs_text" "$diff_text" <<'PY'
+  # 差分などの大きな本文は引数・環境変数に載せない（Linuxは1引数128KiBまでで、超えるとexecveが
+  # E2BIG＝終了コード126になる。#4316）。ファイルへ書き、Pythonにはパスだけを渡す
+  local part_dir="$WORK_ROOT/${repo}-${pr_number}-${head_sha:0:12}.parts"
+  rm -rf "$part_dir"
+  mkdir -p "$part_dir"
+  printf '%s' "$coverage" >"$part_dir/coverage"
+  printf '%s' "$prs_text" >"$part_dir/prs"
+  printf '%s' "$diff_text" >"$part_dir/diff"
+  if ! python3 - "$SCRIPT_DIR/prompts/release-review-agent.md" "$prompt_file" "$full_name" "$pr_number" "$base_sha" "$head_sha" \
+    "$part_dir" <<'PY'
 import sys
-template, out, repo, pr, base, head, coverage, prs, diff = sys.argv[1:10]
+template, out, repo, pr, base, head, parts = sys.argv[1:8]
+def part(name):
+    return open(parts + "/" + name, encoding="utf-8", errors="replace").read()
 text = open(template, encoding="utf-8").read()
 for key, value in {
     "{{REPOSITORY}}": repo, "{{PR_NUMBER}}": pr, "{{BASE_SHA}}": base, "{{HEAD_SHA}}": head,
-    "{{COVERAGE}}": coverage, "{{PULL_REQUESTS}}": prs, "{{DIFF}}": diff,
+    "{{COVERAGE}}": part("coverage"), "{{PULL_REQUESTS}}": part("prs"), "{{DIFF}}": part("diff"),
 }.items():
     text = text.replace(key, value)
 open(out, "w", encoding="utf-8").write(text)
 PY
+  then
+    # AI CLIの失敗ではなく、プロンプトの準備段階の失敗として区別して報告する
+    rm -rf "$part_dir"
+    finish failed "レビュー用のプロンプトを準備できませんでした（AI CLIは起動していません）" \
+      "$(diag_payload unknown "" "$ERR_FILE" prepare)"
+    return 0
+  fi
+  rm -rf "$part_dir"
 
   RUNNING_MESSAGE="全体レビューを実行中です（${agent}・${claude_model:-$codex_model}・差分${reviewed_files}/${total_files}ファイル）"
   release_progress_set review 2 "$RUNNING_MESSAGE" "" "$total_files"
