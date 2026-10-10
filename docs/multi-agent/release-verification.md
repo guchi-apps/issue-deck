@@ -116,6 +116,16 @@ PC（リリースPR詳細）・スマホ（リリースシート）・**本番�
 作り直しで変わったbase/head SHAに対して統合検証・全体レビューをやり直す（古いSHAの結果は「古い結果」になり流用されない）。CI失敗・コンフリクトは従来どおり`reusable-claude-pr-repair`の修復ボタン。
 **手動で作り直す代わりに、画面から修正Issueを起案して作り直しまで自動で進める経路が次節の修正系列（#4317）。**
 
+## PRの6チェック表示とMac検証の独立記録（#4366）
+
+PR詳細・PR一覧・ブランチ画面・本番マージ確認の一覧は、同じ6項目を同じ順で出す（`src/lib/pull-request-merge-checks.ts`・`src/components/dashboard/pull-request-merge-checks.tsx`）: **CI／コードレビュー／コンフリクト／全体レビュー／統合検証／Mac検証**。#4305の5項目にあった計画レビューはPRのチェックに含めない（Issue側の計画レビューは別機能として残る）。
+
+- **個別PRの項目**（CI・コード・コンフリクト）は`PullRequestSummary`（本番マージ一覧は`ReleaseChangePullRequest`）から作る。headが進んだレビュー判定は「無効」、取れなかったものは「取得不可」で、成功へ倒さない。
+- **共通結果の項目**（全体・統合・Mac）はリリース候補（base=main・head=`release-main/v*`のopenなPR）の結果。`GET /api/repositories/release/candidates`が候補ごとのコミット範囲に含まれるPR番号と検証要約を返し、`src/lib/release-candidate-checks.ts`が対象を決める。**含む候補が無ければ「リリース未作成」の理由付き未実施**で、無関係な最新候補の結果は使わない。複数候補に含まれるときは新しい候補が既定で、詳細から選べる。判定対象は常に候補PR・head SHAを添える。表示のために検証は起動しない（読むだけ）。
+- **Mac検証は統合検証とは別の記録**。`ReleaseVerification`表へ`kind="mac"`で保存する（`src/lib/release-mac-verification.ts`。`kind`は文字列列でマイグレーション不要）。**マージゲートの種別（`RELEASE_VERIFICATION_KINDS`）には入れない表示専用**で、ゲート・待ち判定・依頼時の行作成は変わらない。ゲートへ入れるかは#4365と整合させて別途決める。
+  - 統合検証ジョブ（`scripts/run-release-verify.sh`）が、結果JSONに`mac`（`state`・`summary`・`unverifiedScope`）を足して報告し、`applyReleaseVerifyReport`が統合検証とは別に記録する。**統合検証側の判定（Mac未接続の要確認・Mac失敗のfailed）は従来どおり**変えない。
+  - 状態: 成功／失敗／実行中（統合検証の現在工程がMac）／対象外（`ios/`に差分なし、またはMac検証の設定が無いリポジトリ）／設定不足（スクリプト無し・Mac未接続）／未実施（記録なし。統合検証が先に失敗した場合や、`mac`を送らない旧版のランナーもここ）／古い結果（対象のSHAが違う記録）。**未実施を成功や対象外へ置き換えない。**
+
 ## 修正系列：起案から修正候補の再検証まで（#4317）
 
 全体レビューの指摘・統合検証の失敗から**修正Issueを起案**し、修正PRのdevelop取り込み→候補の作り直し→新しいSHAでの再検証を追跡する。

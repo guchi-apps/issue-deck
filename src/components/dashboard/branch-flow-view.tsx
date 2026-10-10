@@ -31,6 +31,7 @@ import {
 
 import { DeviceBuildInstructions, shortOid } from "@/components/dashboard/device-build-instructions";
 import { GithubReferenceLink } from "@/components/dashboard/github-reference-link";
+import { PullRequestChecksStrip } from "@/components/dashboard/pull-request-checks-strip";
 import {
   PullRequestHealthRow,
   hasPullRequestHealthChips,
@@ -665,6 +666,7 @@ function PullRequestLine({
   const canMerge = userMerge && canMergeFromDeck(pullRequest);
 
   return (
+    <>
     <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
       <PullRequestStateIcon pullRequest={pullRequest} className="size-3.5 shrink-0" />
       <GithubReferenceLink
@@ -709,6 +711,9 @@ function PullRequestLine({
         />
       )}
     </div>
+    {/* PR詳細・PR一覧と同じ6チェック（#4366）。共通結果は対象の候補PR・SHAを添えて出す */}
+    <PullRequestChecksStrip pullRequest={pullRequest} className="max-w-2xl px-0" />
+    </>
   );
 }
 

@@ -8,14 +8,14 @@ import {
 import { PullRequestMergeVersion } from "@/components/dashboard/pull-request-merge-version";
 import {
   ConnectedReleaseReviewSections,
-  describeSection,
   type IndividualListContext,
 } from "@/components/dashboard/release-review-sections";
 import { useReferenceNavigation } from "@/hooks/use-reference-navigation";
 import { usePullRequestChanges } from "@/hooks/use-pull-request-changes";
 import { releaseVersionFromTitle } from "@/lib/branch-flow";
 import type { ReviewVerdictKind } from "@/lib/github/release-verification";
-import type { SharedMergeCheck } from "@/lib/pull-request-merge-checks";
+import { RELEASE_CI_LABEL, type PerPullRequestCell } from "@/lib/pull-request-merge-checks";
+import { buildReleaseCheckCells, type ReleaseCandidatesSource } from "@/lib/release-candidate-checks";
 import { applyReviewVerdicts } from "@/lib/pull-request-changes";
 import { RELEASE_BRANCH_PREFIX } from "@/lib/pull-request-list";
 import {
@@ -25,23 +25,43 @@ import {
 } from "@/lib/pull-request-merge-precheck";
 import type { PullRequestSummary, ReleaseChangeListResponse } from "@/types/pull-request";
 
-/** 全体レビュー区分（`AiReviewSection`）と同じ判定を、各PR行の「全体〔共通〕」へ渡す形にする（#4305） */
-function overallCheck({ verification, verificationError, nowMs }: IndividualListContext): SharedMergeCheck {
+/** 本番マージ確認では、一覧の対象は開いているリリース候補そのもの。検証の取得結果を候補の取得状態へ揃える（#4366） */
+function candidateSource(
+  pullRequest: PullRequestSummary,
+  { verification, verificationError }: IndividualListContext,
+): ReleaseCandidatesSource {
   if (!verification) {
-    return verificationError
-      ? { mark: "？", state: "取得不可", tone: "warn", reason: `${verificationError}。問題なしとは扱いません` }
-      : { mark: "◷", state: "取得中", tone: "muted", reason: null };
+    return verificationError ? { status: "error", message: verificationError } : { status: "loading" };
   }
-  const head = describeSection(verification.aiReview, nowMs);
-  return { mark: head.mark, state: head.label, tone: head.tone, reason: head.reason };
+  return {
+    status: "loaded",
+    candidates: [
+      {
+        number: pullRequest.number,
+        title: pullRequest.title,
+        headRef: pullRequest.headRef,
+        baseSha: verification.target.baseSha,
+        headSha: verification.target.headSha,
+        pullRequestNumbers: [],
+        verification,
+      },
+    ],
+  };
 }
 
-/** リリース候補のコンフリクト（`buildCiConflictRows`の2行目）を、行へ渡す形にする */
-function conflictCheck(pullRequest: PullRequestSummary): SharedMergeCheck {
+/** リリース候補のコンフリクト（`buildCiConflictRows`の2行目）を、行へ渡す形にする。個別PRの過去の結果ではない */
+function conflictCheck(pullRequest: PullRequestSummary): PerPullRequestCell {
   const row = buildCiConflictRows(pullRequest)[1];
   const level = { ok: ["●", "ok"], bad: ["■", "bad"], warn: ["▲", "warn"], neutral: ["–", "muted"] } as const;
   const [mark, tone] = level[row.level];
-  return { mark, state: row.summary, tone, reason: row.detail };
+  return {
+    mark,
+    state: row.summary,
+    tone,
+    reason: row.detail,
+    target: `リリース候補 ${pullRequest.headRef} をmainへ統合した結果。個別PRの過去の結果ではありません`,
+    evidence: null,
+  };
 }
 
 /**
@@ -106,13 +126,15 @@ export function PullRequestMergeProduction({
           onOpenPullRequest={openChange}
           mergeChecks={{
             byNumber,
-            shared: {
-              overall: overallCheck(context),
-              conflict: conflictCheck(pullRequest),
-              releaseCi: pullRequest.ciState,
-              releaseHeadRef: pullRequest.headRef,
-            },
-            onOpenOverall: () =>
+            conflict: conflictCheck(pullRequest),
+            releaseCiNote: `リリース候補 ${pullRequest.headRef} のCIは${RELEASE_CI_LABEL[pullRequest.ciState]}（別の判定）`,
+            release: buildReleaseCheckCells({
+              source: candidateSource(pullRequest, context),
+              pullRequestNumber: pullRequest.number,
+              nowMs: context.nowMs,
+            }),
+            // 共通結果の詳細はこのダイアログの「リリースの検証」枠にある
+            onOpenCandidate: () =>
               document
                 .querySelector('[data-testid="release-review-sections"]')
                 ?.scrollIntoView({ block: "start", behavior: "smooth" }),

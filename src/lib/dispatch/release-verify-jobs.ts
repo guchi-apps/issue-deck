@@ -1,5 +1,6 @@
 import type { DispatchJob } from "@prisma/client";
 
+import { parseReleaseMacReport, recordReleaseMacResult } from "@/lib/release-mac-verification";
 import { db } from "@/lib/db";
 import {
   DISPATCH_HOST_ONLINE_WINDOW_MS,
@@ -153,6 +154,10 @@ export async function applyReleaseVerifyReport(
     ? (raw.state as (typeof REPORTABLE_STATES)[number])
     : null;
   if (status === "succeeded" && reported) {
+    // Mac検証は統合検証とは別の記録にする（#4366）。ランナーが`mac`を送らない旧版・統合検証が
+    // 先に失敗した場合は記録しない（記録なし＝未実施であり、成功や対象外には置き換えない）
+    const mac = parseReleaseMacReport(raw.mac);
+    if (mac) await recordReleaseMacResult(target, mac);
     return recordReleaseVerificationResult(target, {
       kind: "integration",
       state: reported,

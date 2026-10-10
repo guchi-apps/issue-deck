@@ -378,7 +378,7 @@ describe("PullRequestMergeProduction", () => {
     // 変更一覧は個別PRレビューを開いた中にあり、判定は区分と同じ取得から引く
     // 各PR行の5チェック（#4305）。旧来の丸は、コードのチェックが引き継ぐ
     expect(screen.getByRole("button", { name: "コードレビュー（このPRのAIレビュー）: 要修正" })).toBeTruthy();
-    expect(screen.getAllByRole("button", { name: /^全体レビュー（リリース全体の共通結果）/ }).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole("button", { name: /^全体レビュー（リリース候補の共通結果）/ }).length).toBeGreaterThan(0);
     expect(requestedUrls.some((u) => u.includes("include=merge-checks"))).toBe(true);
     expect(requestedUrls.some((u) => u.includes("/api/repositories/release/verification?owner=guchi-apps&repo=issue-deck&pullRequest=2075"))).toBe(true);
   });
