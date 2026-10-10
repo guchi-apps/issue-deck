@@ -1773,7 +1773,6 @@ const PlanUsageSection = memo(function PlanUsageSection({
   codex,
   claudeNotConfigured,
   codexNotConfigured,
-  quotaEstimate,
   isLoading,
   error,
 }: {
@@ -1781,7 +1780,6 @@ const PlanUsageSection = memo(function PlanUsageSection({
   codex: SessionUsagePlan["planUsage"]["codex"];
   claudeNotConfigured: boolean;
   codexNotConfigured: boolean;
-  quotaEstimate: SessionUsagePlan["quotaEstimate"];
   isLoading: boolean;
   error: string | null;
 }) {
@@ -1794,7 +1792,6 @@ const PlanUsageSection = memo(function PlanUsageSection({
           isLoading={isLoading}
           error={error}
           notConfigured={claudeNotConfigured}
-          quotaEstimate={quotaEstimate}
         />
       </div>
       <div>
@@ -1899,7 +1896,6 @@ export function SessionUsagePanel({
         codex={plan.data?.planUsage.codex ?? null}
         claudeNotConfigured={plan.data?.planNotConfigured.claude ?? false}
         codexNotConfigured={plan.data?.planNotConfigured.codex ?? false}
-        quotaEstimate={plan.data?.quotaEstimate ?? null}
         isLoading={plan.data === null && plan.error === null}
         error={plan.error}
       />
