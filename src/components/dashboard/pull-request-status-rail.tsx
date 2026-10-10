@@ -110,10 +110,21 @@ export function PullRequestStatusRail({
         className="grid grid-cols-2 gap-1 @min-[20rem]:grid-cols-3"
         aria-label="CI・コンフリクト・レビューの状況"
       >
-              {slots.map((slot) => (
+        {slots.slice(0, 3).map((slot) => (
           <RailSlot key={slot.key} slot={slot} linkable={linkable} />
         ))}
       </span>
+      {/* リリースPRだけの2段目（#4349）。破線で区切り、通常のPRでは出さない */}
+      {slots.length > 3 && (
+        <span
+          className="mt-0.5 grid grid-cols-2 gap-1 border-t border-dashed pt-0.5"
+          aria-label="全体レビュー・統合検証の状況"
+        >
+          {slots.slice(3).map((slot) => (
+            <RailSlot key={slot.key} slot={slot} linkable={linkable} />
+          ))}
+        </span>
+      )}
     </span>
   );
 }
