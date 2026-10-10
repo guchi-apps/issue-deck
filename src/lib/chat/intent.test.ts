@@ -169,3 +169,45 @@ describe("番号のない設計相談（#4093）", () => {
     expect(resolveIntent(parseIntent("確認して"), ctx([]))).toMatchObject({ type: "ask" });
   });
 });
+
+describe("番号なしの改善依頼（#4281）", () => {
+  const original =
+    "カレンダーから予定を足す時に、Googleマップが開いてそのときに移動元と移動先が自動入力されている状態でGoogleマップが開いて欲しい";
+
+  it("「状態」「状況」を含む改善依頼を状態確認にしない", () => {
+    for (const text of [original, "入力済みの状態で開いてほしい", "状況に応じて表示を変えたい"]) {
+      expect(parseIntent(text)).toEqual({ type: "investigate", ref: null, request: true });
+    }
+  });
+
+  it("初回でも番号要求にならず、調査へ進む（対象は結び付けない）", () => {
+    const resolved = resolveIntent(parseIntent(original), { ...EMPTY_CHAT_CONTEXT, repo: "guchi-apps/yoteiflow" });
+    expect(resolved).toEqual({ type: "investigate", target: null, candidates: [], request: true });
+  });
+
+  it("直前にPRを見た会話でも、新しい要望を無関係なPRへ結び付けない", () => {
+    expect(resolveIntent(parseIntent(original), ctx([3966]))).toEqual({
+      type: "investigate",
+      target: null,
+      candidates: [],
+      request: true,
+    });
+  });
+
+  it("従来の経路は変わらない", () => {
+    expect(parseIntent("3966どうなってる？")).toEqual({ type: "status", refs: [{ repo: null, number: 3966 }] });
+    expect(parseIntent("#3966を直してほしい")).toEqual({ type: "investigate", ref: { repo: null, number: 3966 }, fix: true });
+    expect(parseIntent("自動修正して")).toEqual({ type: "repair", ref: null });
+    expect(parseIntent("状況は？")).toEqual({ type: "recheck" });
+    expect(resolveIntent(parseIntent("直してほしい"), ctx([3966]))).toEqual({
+      type: "investigate",
+      target: { repo: REPO, number: 3966 },
+      candidates: [],
+      fix: true,
+    });
+  });
+
+  it("長い具体的な文は状態確認の言い換えにしない", () => {
+    expect(parseIntent("勤務画面の一覧の状態表示の並び順が日付ごとに分かれて見えていて少し分かりにくいと感じる件について")).toEqual({ type: "unknown" });
+  });
+});
