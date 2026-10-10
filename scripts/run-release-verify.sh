@@ -186,7 +186,14 @@ main() {
     step_index=$((step_index + 1))
     release_verify_report running "$RUNNING_MESSAGE"
     output_file="$WORK_ROOT/${repo}-${pr_number}-${head_sha:0:12}.out"
-    if (cd "$WORKTREE" && timeout "$STEP_TIMEOUT" bash -c "$step") >"$output_file" 2>&1; then
+    # IssueDeckのビルドは通常CIの正本から検証用envを適用する（#4331）。
+    # ランナーは更新済みサブPC、cwdは要求された統合worktree。旧候補にも適用できる。
+    # 他の検証や他リポジトリへダミー設定をexportしない。
+    local -a step_command=(bash -c "$step")
+    if [[ "$full_name" == "guchi-apps/issue-deck" && ( "$step" == "pnpm run build:ci" || "$step" == "pnpm build:ci" ) ]]; then
+      step_command=(node "$SCRIPT_DIR/ci/run-required-checks.mjs" --group lint-and-build --check build)
+    fi
+    if (cd "$WORKTREE" && timeout "$STEP_TIMEOUT" "${step_command[@]}") >"$output_file" 2>&1; then
       summary+="実施・成功: ${step}"$'\n'
     else
       summary+="実施・失敗: ${step}"$'\n'"$(tail -n 20 "$output_file")"$'\n'
