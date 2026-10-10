@@ -85,7 +85,7 @@ describe("resolvePullRequestHealth（#4015）", () => {
     );
     expect(labelOf(health, "ci")).toBe("CI成功");
     expect(labelOf(health, "review")).toBe("レビュー要修正");
-    expect(labelOf(health, "conflict")).toBe("コンフリクトあり");
+    expect(labelOf(health, "conflict")).toBe("競合あり");
     expect(health.categories).toEqual(
       expect.arrayContaining(["review-changes-requested", "conflict"]),
     );
@@ -115,7 +115,8 @@ describe("resolvePullRequestHealth（#4015）", () => {
     expect(labelOf(resolvePullRequestHealth(pr(withReview("passed", "ok"))), "review")).toBe("レビューLGTM");
     const failed = resolvePullRequestHealth(pr(withReview("failed", null)));
     expect(labelOf(failed, "review")).toBe("レビュー失敗");
-    expect(failed.categories).toContain("review-needs-check");
+    expect(failed.categories).toContain("review-failed");
+    expect(failed.categories).not.toContain("review-needs-check");
   });
 
   it("Claudeだけ・Codexだけのレビュー完了を、全体の完了にしない（#4024）", () => {
@@ -123,7 +124,7 @@ describe("resolvePullRequestHealth（#4015）", () => {
     const codexPending = resolvePullRequestHealth(
       pr({ ...claudeOk, agentReviews: [{ agent: "codex", state: "pending" }] }),
     );
-    expect(labelOf(codexPending, "review")).toBe("Codexレビュー実施中");
+    expect(labelOf(codexPending, "review")).toBe("Codexレビュー中");
     expect(codexPending.categories).toContain("review-running");
     const codexNg = resolvePullRequestHealth(
       pr({ ...claudeOk, agentReviews: [{ agent: "codex", state: "changes-requested" }] }),
@@ -151,12 +152,12 @@ describe("resolvePullRequestHealth（#4015）", () => {
 
   it("再レビュー中と言うのは、実際にレビューが走っているときだけ", () => {
     expect(labelOf(resolvePullRequestHealth(pr(withReview("pending", "ok", OLD_HEAD))), "review")).toBe("再レビュー中");
-    expect(labelOf(resolvePullRequestHealth(pr(withReview("pending", null))), "review")).toBe("レビュー実施中");
+    expect(labelOf(resolvePullRequestHealth(pr(withReview("pending", null))), "review")).toBe("レビュー中");
   });
 
   it("コンフリクトの未取得を「なし」と言わない", () => {
-    expect(labelOf(resolvePullRequestHealth(pr({ mergeable: null })), "conflict")).toBe("コンフリクト判定中");
-    expect(labelOf(resolvePullRequestHealth(pr({ mergeable: true })), "conflict")).toBe("コンフリクトなし");
+    expect(labelOf(resolvePullRequestHealth(pr({ mergeable: null })), "conflict")).toBe("競合未確認");
+    expect(labelOf(resolvePullRequestHealth(pr({ mergeable: true })), "conflict")).toBe("競合なし");
   });
 
   it("自動修正中は問題の表示を残したまま、待てば進む側へ分類する", () => {
@@ -184,12 +185,49 @@ describe("resolvePullRequestHealth（#4015）", () => {
         autoRepair: { status: "stopped", round: 3, maxRounds: 3, stopReason: "max_rounds_reached" },
       }),
     );
-    expect(labelOf(stopped, "repair")).toBe("自動修正停止");
+    expect(labelOf(stopped, "repair")).toBe("自動修正停止 3/3");
     expect(stopped.slots.find((slot) => slot.key === "repair")?.title).toContain("上限回数");
     expect(stopped.disposition).toBe("human");
 
     // 問題が残っていなければ、止まった過去の系列を出さない
     expect(labelOf(resolvePullRequestHealth(pr({ autoRepair: { status: "stopped", round: 1, maxRounds: 3, stopReason: "timed_out" } })), "repair")).toBeUndefined();
+  });
+
+  it("停止理由で配色を分ける。問題は赤、人の判断待ちは琥珀、意図的な停止は灰、理由不明は赤（#4293）", () => {
+    const toneFor = (stopReason: string | null) =>
+      resolvePullRequestHealth(
+        pr({ ciState: "failure", autoRepair: { status: "stopped", round: 1, maxRounds: 3, stopReason } }),
+      ).slots.find((slot) => slot.key === "repair");
+    expect(toneFor("max_rounds_reached")?.tone).toBe("bad");
+    expect(toneFor(null)?.tone).toBe("bad");
+    expect(toneFor("unknown_reason")?.tone).toBe("bad");
+    expect(toneFor("user_action_required")?.tone).toBe("wait");
+    expect(toneFor("stopped_by_user")?.tone).toBe("idle");
+    expect(toneFor("pull_request_closed")?.tone).toBe("idle");
+    const bad = resolvePullRequestHealth(
+      pr({ ciState: "failure", autoRepair: { status: "stopped", round: 1, maxRounds: 3, stopReason: "timed_out" } }),
+    );
+    expect(bad.failing).toBe(true);
+    expect(bad.categories).toContain("repair-stopped");
+    const intentional = resolvePullRequestHealth(
+      pr({ autoRepair: { status: "stopped", round: 1, maxRounds: 3, stopReason: "stopped_by_user" }, mergeable: false }),
+    );
+    expect(intentional.categories).not.toContain("repair-stopped");
+  });
+
+  it("再検証待ちとCI待機は灰、実行中だけが紫（#4293）", () => {
+    const waiting = resolvePullRequestHealth(
+      pr({ ciState: "failure", autoRepair: { status: "running", round: 1, maxRounds: 3, stopReason: null } }),
+    );
+    expect(waiting.slots.find((slot) => slot.key === "repair")?.tone).toBe("idle");
+    const queued = resolvePullRequestHealth(
+      pr({
+        ciState: "pending",
+        ciChecks: [{ name: "build", status: "queued", conclusion: null, startedAt: null, completedAt: null, htmlUrl: null, runId: 1 }],
+      }),
+    );
+    expect(queued.slots.find((slot) => slot.key === "ci")?.tone).toBe("idle");
+    expect(queued.categories).toContain("ci-running");
   });
 
   it("マージ済み・クローズ済み・ドラフトは現在の状態を持たない", () => {
