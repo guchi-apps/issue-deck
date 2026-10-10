@@ -317,7 +317,7 @@ CI失敗の判定では、ワークフロー名を`CI`に決め打ちせず「�
 | --- | --- |
 | 渡すかを決める | `reusable-claude-review-develop.yml`の`auto-merge`ジョブ（「マージ保留の判定を反映する」） |
 | 直す | `claude-review-fix.yml`（本体`reusable-claude-review-fix.yml`・プロンプト`.github/prompts/review-fix.md`） |
-| 起動 | レビューの完了（`workflow_run`）と、画面の「レビュー指摘を自動修正」（`workflow_dispatch`） |
+| 起動 | レビューの完了（`workflow_run`）と、画面の「PRを自動修正」（`workflow_dispatch`） |
 | 上限 | 1つのIssueにつき自動の渡しは2回まで。超えたら従来どおり人へ渡し、その旨をIssueへ書く |
 
 ### 直してよいかを決めるのはレビュー側
@@ -352,23 +352,36 @@ CI失敗の判定では、ワークフロー名を`CI`に決め打ちせず「�
 直せたものだけ直してから、決めてほしいことと選択肢をIssueへ書いて止まる。先にラベルを
 付けるのは、pushで走る再レビューが先に終わると自動マージされうるため。
 
-人が方針をIssueへ書いて画面の「レビュー指摘を自動修正」を押すと、その方針で直す。**手動の起動では
+人が方針をIssueへ書いて画面の「PRを自動修正」を押すと、その方針で直す。**手動の起動では
 渡しの印を求めず、着手時に`00.check-user`と理由ラベルを外す**——付いたままだと、直した後の
 再レビューがLGTMでもマージが見送られるため。
 
 ### 画面
 
-- ピル「レビュー指摘を自動修正中」（`RepairRunBadge`。`PullRequestRepairRun.kind`が`review`）。
+- ピル「PRを自動修正中」（`RepairRunBadge`。`PullRequestRepairRun.kind`が`review`）。
   **レビュー指摘はPRの状態から「直った」と言えない**（修正のpushで判定はいったん未判定へ戻る）
   ため、`visibleRepairRun`で症状から消さず、終了の報告と時間切れで消す。ジョブは
   `cancel-in-progress: false`で直列化しており、始まる前にキャンセルされて報告が落ちる経路は無い
-- 修復ボタン「レビュー指摘を自動修正」は、PR本文の`## 検証結果`が要修正の、develop向け
+- 修復ボタン「PRを自動修正」は、PR本文の`## 検証結果`が要修正の、develop向け
   `issue-<番号>`PRにだけ出る（`repairKindsFor`）
 
 レビュー指摘を直す通常導線はこの修復ボタンだけであり、`review-fix`は既存PRのhead branchへ
 commit/pushして同じPRを再レビューする。レビュー指摘を起点に修正Issue・後継ブランチ・後継PRを
 作る経路は持たない。現在のPRをマージ可能にするためではない独立課題だけは、通常のIssue作成から
 明示的に切り出す。
+
+### handoffで始まった修正は自動修復系列へ載る（#4318）
+
+handoffで`review-fix`が始まると、`recordReviewFixHandoffStarted`（`pull-request-auto-repair-start.ts`）が
+`PullRequestAutoRepairLoop`へ登録する。登録点は、Claudeは`POST /api/pull-requests/repair-runs`の
+`kind=review`開始報告、Codexは`POST /api/dispatch/review-fix`の依頼。HEADは登録側がGitHubから引く。
+以後は既存の巡回が新HEADのCI・再レビューを待ち、残存指摘を再修正する。
+
+- 系列が無い・`completed`なら`round: 1`で始め、待機中の系列では1回に数えて`maxRounds`（3）を超えない。
+  `stopped`は止めた理由を残すため上書きしない。巡回が起動した直後の報告（`currentKind`が`review`）は数え直さない
+- Codexの修正は`RepairRun`を持たないため、巡回は動いている`REVIEW_FIX`のDispatchJobがある間は待つ
+- 手動開始・巡回・handoffは`isLoopInProgress`と同じHEAD・同じ指摘の`lastFingerprint`で重ならない
+- レビュー指摘欄にも同じ「PRを自動修正」の操作と状態別の案内を出す（スマホで上部を探さなくて済む）
 
 ### 取りこぼしうるもの
 

@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 
+import { recordReviewFixHandoffStarted } from "@/lib/github/pull-request-auto-repair-start";
 import {
   isRepairKind,
   isRepairRunStatus,
@@ -61,6 +62,14 @@ export async function POST(request: NextRequest) {
     status: payload.status,
     runUrl: typeof payload?.runUrl === "string" && payload.runUrl !== "" ? payload.runUrl : null,
   });
+
+  // レビューのhandoffで始まった修正は、自動修復系列へも載せてpush後のCI・再レビューを追わせる（#4318）。
+  // 失敗しても修正自体は止めない（画面の表示用の記録は上で済んでいる）。
+  if (payload.kind === "review" && payload.status === "running") {
+    await recordReviewFixHandoffStarted({ repositoryFullName, pullRequestNumber }).catch((error: unknown) => {
+      console.error("[POST /api/pull-requests/repair-runs] 系列への登録に失敗:", error);
+    });
+  }
 
   return NextResponse.json({ ok: true }, { headers: { "Cache-Control": "no-store" } });
 }

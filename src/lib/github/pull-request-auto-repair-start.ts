@@ -1,4 +1,6 @@
 import { db } from "@/lib/db";
+import { getInstallationToken } from "@/lib/github/app-auth";
+import { fetchPullRequest } from "@/lib/github/pull-requests-api";
 import { resolveRepairDispatch, type RepairKind } from "@/lib/github/pull-request-repair";
 import { recordPullRequestRepairRun } from "@/lib/github/pull-request-repair-run";
 import { AUTO_REPAIR_MAX_ROUNDS } from "@/lib/github/pull-request-repair-loop";
@@ -118,4 +120,63 @@ export async function enrollPullRequestAutoRepairLoop(params: {
     update: state,
   });
   return true;
+}
+
+/**
+ * レビューのhandoff（#3363・#4043）で`review-fix`が始まったことを自動修復系列へ載せる（#4318）。
+ *
+ * handoffは系列を作らないため、修正をpushした後のCI・再レビュー・残存指摘の再修正が系列側から
+ * 見えなかった。ClaudeはrepairRuns報告、Codexは`/api/dispatch/review-fix`の依頼から呼ぶ。
+ * 報告にHEADのSHAが無い旧形式でも動くよう、HEADはここでGitHubから引く。
+ *
+ * - 系列が無い・`completed`なら、1回目を消化済み（`round: 1`・`currentKind: review`）で始める
+ * - 巡回が`review`を起動した直後の報告（`currentKind`がすでに`review`）は数え直さない
+ * - 待機中の系列にhandoffが始まったときは1回に数え、同じHEADを巡回が重ねて起動しないよう
+ *   `lastFingerprint`を揃える。上限は系列の`maxRounds`（3）を超えて増やさない
+ * - `stopped`は止めた理由を残すため上書きしない
+ * 失敗してもhandoff自体は止めない（呼び出し側が握る）。
+ */
+export async function recordReviewFixHandoffStarted(params: {
+  repositoryFullName: string;
+  pullRequestNumber: number;
+}): Promise<"registered" | "counted" | "skipped"> {
+  const target = { repositoryFullName: params.repositoryFullName, pullRequestNumber: params.pullRequestNumber };
+  const existing = await db.pullRequestAutoRepairLoop.findUnique({ where: loopKey(target), select: { status: true, currentKind: true, round: true, maxRounds: true } });
+  if (existing?.status === "stopped") return "skipped";
+  if (existing && (existing.status === "dispatching" || existing.currentKind === "review")) return "skipped";
+
+  const repository = await db.repository.findFirst({ where: { fullName: target.repositoryFullName }, include: { installation: true } });
+  const [owner, repo] = target.repositoryFullName.split("/");
+  if (!repository || !owner || !repo) return "skipped";
+  const token = await getInstallationToken(repository.installation.installationId);
+  const pullRequest = await fetchPullRequest(owner, repo, target.pullRequestNumber, token);
+  if (pullRequest.state !== "open" || pullRequest.draft) return "skipped";
+
+  const fingerprint = `${pullRequest.head.sha}:review`;
+  if (existing?.status === "running") {
+    await db.pullRequestAutoRepairLoop.update({
+      where: loopKey(target),
+      data: {
+        headSha: pullRequest.head.sha,
+        round: Math.min(existing.round + 1, existing.maxRounds),
+        currentKind: "review",
+        lastFingerprint: fingerprint,
+        waitStartedAt: null,
+      },
+    });
+    return "counted";
+  }
+  const state = {
+    status: "running",
+    headSha: pullRequest.head.sha,
+    round: 1,
+    currentKind: "review",
+    lastFingerprint: fingerprint,
+    stopReason: null,
+    lastSweepAt: null,
+    waitStartedAt: null,
+    maxRounds: AUTO_REPAIR_MAX_ROUNDS,
+  };
+  await db.pullRequestAutoRepairLoop.upsert({ where: loopKey(target), create: { ...target, ...state }, update: state });
+  return "registered";
 }
