@@ -10,7 +10,7 @@ name: Reusable Claude / Codex Review Fix
 # `<!-- issue-deck-review-fix:handoff sha=<head SHA> -->`付きのコメントを残す）だけ、
 # workflow_run起点のこのワークフローが着手する。渡されていなければ何もしない
 # （印が無いときは従来どおり00.check-userで人へ渡っている）。
-# 画面の「レビュー指摘を自動修正」ボタン（workflow_dispatch）は人が押したものなので、
+# 画面の「PRを自動修正」ボタン（workflow_dispatch）は人が押したものなので、
 # 渡しの印を求めない。
 #
 # ジョブの形は reusable-claude-ci-fix.yml と揃えてある（入力・トークン・プロンプトの取得・
@@ -354,7 +354,7 @@ jobs:
           echo "agent=$provider" >> "$GITHUB_OUTPUT"
 
       - name: 手動実行のときは確認待ちを外す
-        # 画面の「レビュー指摘を自動修正」を押すのは、人が確認したうえで直しを任せたということ。
+        # 画面の「PRを自動修正」を押すのは、人が確認したうえで直しを任せたということ。
         # 00.check-user（と理由ラベル）が付いたままだと、直した後の再レビューがLGTMでも
         # auto-mergeジョブが「確認待ち」としてマージを見送るため、ここで外す。
         # 自動（workflow_run）の経路では00.check-userが付いていれば上で着手自体を見送っている。
@@ -428,7 +428,7 @@ jobs:
           gh issue comment "$ISSUE_NUMBER" --body "$BODY"
 
       - name: 自動修正の開始をissue-deckへ報告する
-        # 画面（PR一覧・PR詳細・通知ベル）へ「レビュー指摘を自動修正中」を出すため（#2072・#3363）。
+        # 画面（PR一覧・PR詳細・通知ベル）へ「PRを自動修正中」を出すため（#2072・#3363）。
         # **GitHub APIからは引けない**——このワークフローは`workflow_run`で起動するため、
         # runの`head_branch`・`head_sha`が対象PRではなくデフォルトブランチを指し、
         # 実行から対象PRへ辿る手段が無い。走っている側から報告する。
@@ -569,7 +569,7 @@ jobs:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           # claude-code-actionの非人間アクター拒否機構を明示的に許可する（#1328）。
           # workflow_run（レビューの完了）で起動する場合のactorはレビューを起こしたpushの実行者で、
-          # 自動修正自身のpush・claude[bot]のPRではbotになる。画面の「レビュー指摘を自動修正」ボタンは
+          # 自動修正自身のpush・claude[bot]のPRではbotになる。画面の「PRを自動修正」ボタンは
           # GitHub Appのインストールトークンでworkflow_dispatchするためactorが
           # issue-deck[bot]になり、指定が無いと`Workflow initiated by non-human actor`で
           # 必ず失敗する。claude[bot]名義のpushでCIが失敗した場合も同様に通す
