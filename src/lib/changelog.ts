@@ -42,6 +42,13 @@ export type ChangelogEntry = {
  */
 export const APP_CHANGELOG: ChangelogEntry[] = [
   {
+    version: "8.44.0",
+    date: "2026-10-10",
+    changes: [
+      "チャットでの調査が、同じ調べ物を繰り返して途中で止まってしまった場合でも、それまでに集めた情報から回答を残すようになりました。",
+    ],
+  },
+  {
     version: "8.43.3",
     date: "2026-10-10",
     changes: [
