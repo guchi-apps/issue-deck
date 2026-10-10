@@ -987,7 +987,8 @@ KICKOFF_CONTEXT="$(kickoff_prompt_context_block \
 RESUME_CONVERSATION=0
 CODEX_RESUME_THREAD=""
 CLAUDE_RESUME_FLAG="--continue"
-if [[ "$AGENT_KIND" == "claude" && "${ISSUE_DECK_SESSION_KIND:-implementation}" == "question" &&
+if [[ "$AGENT_KIND" == "claude" && ( "${ISSUE_DECK_SESSION_KIND:-implementation}" == "question" ||
+  "${ISSUE_DECK_SESSION_KIND:-implementation}" == "manual-step" ) &&
   "${ISSUE_DECK_CLAUDE_RESUME:-1}" != "0" && -n "$TMUX_SESSION_NAME" ]]; then
   # 横断質問セッション（#3033）。**`--continue`は使わない。** 質問セッションのcwdは質問Issueごとでは
   # なくリポジトリごとに固定されている（#1529）ため、「そのcwdで最後に動いた会話」は別の質問の
@@ -1002,6 +1003,7 @@ if [[ "$AGENT_KIND" == "claude" && "${ISSUE_DECK_SESSION_KIND:-implementation}" 
     CLAUDE_RESUME_FLAG="--resume"
   fi
 elif [[ "$AGENT_KIND" == "claude" && "${ISSUE_DECK_SESSION_KIND:-implementation}" != "question" &&
+  "${ISSUE_DECK_SESSION_KIND:-implementation}" != "manual-step" &&
   "${ISSUE_DECK_CLAUDE_RESUME:-1}" != "0" ]]; then
   CLAUDE_HISTORY_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects/$(printf '%s' "$PWD" | sed 's/[^a-zA-Z0-9]/-/g')"
   if compgen -G "$CLAUDE_HISTORY_DIR/*.jsonl" >/dev/null 2>&1; then
@@ -1033,7 +1035,8 @@ if [[ "$AGENT_KIND" == "codex" && "$RESUME_CONVERSATION" != "1" && -n "$TMUX_SES
   session_state_clear_codex_thread "$TMUX_SESSION_NAME" || true
 fi
 # 質問セッション（#3033）も、新しい会話で始めるなら前回のsessionIdを残さない
-if [[ "$AGENT_KIND" == "claude" && "${ISSUE_DECK_SESSION_KIND:-implementation}" == "question" &&
+if [[ "$AGENT_KIND" == "claude" && ( "${ISSUE_DECK_SESSION_KIND:-implementation}" == "question" ||
+  "${ISSUE_DECK_SESSION_KIND:-implementation}" == "manual-step" ) &&
   "$RESUME_CONVERSATION" != "1" && -n "$TMUX_SESSION_NAME" ]]; then
   session_state_clear_claude_session "$TMUX_SESSION_NAME" || true
 fi
@@ -1043,6 +1046,9 @@ if [[ "$RESUME_CONVERSATION" == "1" && "${ISSUE_DECK_SESSION_KIND:-implementatio
   # `--repo`が要る（無いと別のリポジトリの同じ番号を引くか失敗する）。やることも「作業の続き」
   # ではなく「追加のコメント（追い質問）への回答」なので、言い方を分ける。
   KICKOFF_PROMPT="${ISSUE_LABEL}の質問セッションを再開しました。前回の会話の続きです。最初からやり直さず、まず gh issue view $ISSUE_NUMBER --repo ${REPO_SLUG:-<質問Issueのリポジトリ>} --comments で前回以降に追加されたコメント（追い質問）を確認し、$PROMPT_FILE を読み直したうえで、まだ回答していない質問があれば同じ手順で調べて回答コメントを投稿してください。無ければ、追い質問が届くのを待ってください。"
+elif [[ "$RESUME_CONVERSATION" == "1" && "${ISSUE_DECK_SESSION_KIND:-implementation}" == "manual-step" ]]; then
+  # 手作業セッション（#4231）。実施済みの手順をやり直さないよう、本文のチェック状況を読み直させる
+  KICKOFF_PROMPT="${ISSUE_LABEL}の手作業セッションを再開しました。前回の会話の続きです。最初からやり直さず、まず gh issue view $ISSUE_NUMBER --repo ${REPO_SLUG:-<手作業Issueのリポジトリ>} --comments で本文のチェック状況と前回以降のコメントを確認し、$PROMPT_FILE を読み直したうえで、実施済みの手順は繰り返さず残りを続けてください。"
 elif [[ "$RESUME_CONVERSATION" == "1" ]]; then
   # **「実装を開始してください」を渡してはいけない。** 前回の会話が載った状態でこの1行を渡すと、
   # 済んだ作業を最初からやり直しかねない。代わりに、前回以降に増えたもの（Issueコメント・

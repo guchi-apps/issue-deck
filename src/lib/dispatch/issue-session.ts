@@ -549,7 +549,7 @@ export type SessionRecoveryNotice = {
 
 export function describeSessionRecovery(
   session: DispatchSessionView,
-  options: { isCrossRepoQuestion?: boolean } = {},
+  options: { isCrossRepoQuestion?: boolean; isManualStep?: boolean } = {},
 ): SessionRecoveryNotice | null {
   // 動いているセッションには復旧する相手がいない（止めたい・送りたいは既存の操作の担当）
   if (session.state === "ALIVE") return null;
@@ -560,6 +560,13 @@ export function describeSessionRecovery(
     return {
       primary: session.activity === "WAITING_INPUT",
       detail: `${formatDispatchHostName(session.host)}で前回の会話の続きから再開します（会話の記録が残っていない場合は、質問Issueのコメントを読み直した新しい会話で始まります）`,
+    };
+  }
+  // 手作業セッション（#4231）。worktreeもラベルも無く、戻れるかはホストが控えたsessionId次第
+  if (options.isManualStep) {
+    return {
+      primary: session.activity === "WAITING_INPUT",
+      detail: `${formatDispatchHostName(session.host)}で前回の会話の続きから再開します（会話の記録が残っていない場合は、本文のチェック状況を読み直した新しい会話で始まります）`,
     };
   }
   return {

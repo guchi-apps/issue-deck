@@ -66,6 +66,13 @@ jobs:
             git show "$REQUIRED_CHECKS_BASE_SHA:ci/required-checks.json" > /tmp/trusted/required-checks.json
             git show "$REQUIRED_CHECKS_BASE_SHA:scripts/ci/run-required-checks.mjs" > /tmp/trusted/run-required-checks.mjs
       - run:
+          name: PyYAMLを用意する（ワークフロー検査スクリプトが python3 の import yaml を使う。cimg/base には無い）
+          command: |
+            set -euo pipefail
+            sudo apt-get update
+            sudo apt-get install -y python3-yaml
+            python3 -c 'import yaml; print("PyYAML", yaml.__version__)'
+      - run:
           name: Node.jsとpnpmを用意する（ci/required-checks.json の runtime と同じ）
           command: |
             set -euo pipefail

@@ -236,6 +236,14 @@ describe("summarizeIssueSession", () => {
       expect(recovery?.detail).not.toContain("11.local");
     });
 
+    // #4231。cwdが手作業間で共有されるため、戻れるかはホストが控えたsessionId次第
+    it("手作業セッションでは、記録が無ければ新しい会話になることを添える", () => {
+      const recovery = describeSessionRecovery(session({ state: "GONE" }), { isManualStep: true });
+      expect(recovery?.detail).toContain("前回の会話の続き");
+      expect(recovery?.detail).toContain("記録が残っていない場合");
+      expect(recovery?.detail).not.toContain("11.local");
+    });
+
     it("横断質問セッションでも動いているものには出さない", () => {
       expect(
         describeSessionRecovery(session({ state: "ALIVE" }), { isCrossRepoQuestion: true }),

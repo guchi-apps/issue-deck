@@ -97,6 +97,13 @@ PR詳細（develop向けの未マージPR）の「バックアップCI（GitHub 
 入っている（#4113）。1Passwordへ入れたあと`scripts/sync-github-secrets.sh`で同期し、本番をデプロイし直すと
 サーバーの`.env`へ入る。どちらも未設定のままでもデプロイは通る（バックアップCIの起動・Webhookの受信だけができない）。
 
+### 実行環境の前提（PyYAML）
+
+実行環境`cimg/base:current`にはPyYAMLが無い（GitHub Actionsの`ubuntu-latest`には入っている）。
+`scripts/check-workflow-gh-repo.sh`・`scripts/check-workflow-job-permissions.sh`が`python3`の
+`import yaml`を使うため、`.circleci/config.yml`が`apt-get install -y python3-yaml`で用意する（#4232）。
+検査スクリプトが使うPythonライブラリを増やしたら、このステップも合わせる。
+
 ### 無料枠の制約
 
 - CircleCI Freeプランは月ごとのクレジット制。`resource_class: large`で1回あたり十数分（ビルド・単体テスト込み）を
