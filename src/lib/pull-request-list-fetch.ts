@@ -27,6 +27,7 @@ import {
   type PullRequestCiState,
 } from "@/lib/github/release-api";
 import { fetchRepairWorkflowAvailability } from "@/lib/github/repair-workflow-cache";
+import { fetchReleaseChecks, releaseChecksKey } from "@/lib/pull-request-release-checks";
 import { checkUserIssueKey, fetchCheckUserIssueReasons } from "@/lib/pull-request-check-user";
 import type {
   PullRequestListResponse,
@@ -217,6 +218,33 @@ export async function fetchPullRequestListForUser(
   for (const pullRequest of allPullRequests) {
     pullRequest.agentReviews =
       agentReviews.get(agentReviewKey(pullRequest.repositoryFullName, pullRequest.number)) ?? [];
+  }
+
+  // リリースPRの統合検証・全体レビューの状態（#4349）。基準SHAは一覧の応答から引き、
+  // DBを1クエリ引くだけでGitHub APIは使わない
+  const baseShas = new Map<string, string>();
+  for (const repository of fetched) {
+    for (const pullRequest of repository.openPullRequests) {
+      if (pullRequest.base.sha) {
+        baseShas.set(releaseChecksKey(repository.context.fullName, pullRequest.number), pullRequest.base.sha);
+      }
+    }
+  }
+  const releaseChecks = await fetchReleaseChecks(
+    allPullRequests
+      .filter((pullRequest) => pullRequest.state === "open")
+      .map((pullRequest) => ({
+        repositoryFullName: pullRequest.repositoryFullName,
+        number: pullRequest.number,
+        baseRef: pullRequest.baseRef,
+        headRef: pullRequest.headRef,
+        headSha: pullRequest.headSha,
+        baseSha: baseShas.get(releaseChecksKey(pullRequest.repositoryFullName, pullRequest.number)) ?? null,
+      })),
+  );
+  for (const pullRequest of allPullRequests) {
+    pullRequest.releaseChecks =
+      releaseChecks.get(releaseChecksKey(pullRequest.repositoryFullName, pullRequest.number)) ?? null;
   }
 
   const response: PullRequestListResponse = {

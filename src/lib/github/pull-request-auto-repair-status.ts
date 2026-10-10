@@ -23,6 +23,8 @@ const STOP_REASON_LABEL: Record<string, string> = {
   pull_request_closed: "PRが閉じられました",
   dispatch_failed: "修復の起動に失敗しました",
   timed_out: "待機がタイムアウトしました",
+  handoff_workflow_missing: "自動修正のworkflowがこのリポジトリに配られていません",
+  handoff_unsupported: "このリポジトリは自動修正の配布対象外です",
   stopped_by_user: "人が停止しました",
 };
 

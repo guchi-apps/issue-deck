@@ -104,8 +104,13 @@ pushすると、修正がmainにだけ残りdevelopから消え、次のリリ�
    作ったバンプPRのマージ（件名`Merge pull request #N from <owner>/release/vX.Y.Z`）の後に
    developへコミットが入っているものを**作り直し**と見て`need_bump`にする（`rebuild_from`に
    そのマージコミットを渡す）。後に何も入っていなければ従来どおりリリースPRだけを作る
-3. バンプのステップが前回のバンプを`git revert -m 1`で取り消し（更新履歴・
-   `.github/release-notes.md`がバンプ前へ戻る）、そのうえで通常どおりバンプする。上げ幅・
+3. バンプのステップが**mainへ出ていないバンプのマージを新しい順に全部**`git revert -m 1`で取り消し
+   （更新履歴・`.github/release-notes.md`がバンプ前へ戻る）、そのうえで通常どおりバンプする。
+   **作り直しを繰り返すとバンプは1回分とは限らない**（#4335。`release/v8.50.0`→`release/v8.50.1`と
+   積まれた状態で直前の1回だけを戻すと8.50.0が残り、main 8.49.0と一致せず止まっていた）。対象は
+   `origin/main..origin/develop`の本流（first-parent）上の`release/v*`のマージ（`rebuild_reverts`）で、
+   本番へ出た版とタグには触れず、実装の変更はそのまま残る。全部戻してもmainと一致しないのは
+   バンプPR以外で版を書き換えたコミットがあるときで、そのコミットを示して止める。上げ幅・
    更新履歴・使い方・対象一覧は修正込みの差分から作り直される。**版ファイルだけは取り消す版の
    まま据え置く**——上げ幅を引数に取るbump-command（signalyの`bump_version.py "$BUMP_KIND"`）は
    ファイル上の版から上げるため、mainの版へ戻すと次の繰り上げと結果が一致しない
@@ -127,9 +132,33 @@ pushすると、修正がmainにだけ残りdevelopから消え、次のリリ�
 - **参照タグが古い配布先では作り直しにならない。** 旧workflowは手動起動でもリリースPRを
   作るだけなので、修正は入るが更新履歴はバンプ時のままになる（今までの「閉じて起動し直す」と同じ）
 - **バンプ後に更新履歴ファイルを手で直していると、取り消しが衝突して失敗する。** 失敗は
-  `notify-failure`に乗る。衝突したファイルをdevelopで戻してから「リリースする」で起動し直す
-  （リリースPRは閉じたままなので、手動起動は同じ作り直しになる）
+  リリース画面の「リリース準備に失敗しました」に出る（下記）。衝突したファイルをdevelopで戻してから
+  「再開」で起動し直す（リリースPRは閉じたままなので、手動起動は同じ作り直しになる）
 - 手でリリースPRを閉じて「リリースする」を押した場合も、後に変更があれば作り直しになる
+
+**PRを選んで作り直す（#4335）。** 対応したリポジトリでは、上の手順の1〜2の代わりに、元の候補へ
+選んだPRのマージ差分だけを足した状態からバンプする（元の候補は後継のリリースPRを作れてから閉じる）。
+仕組み・検証・失敗時の扱いは[release-verification.md](release-verification.md)「PRを選んだ作り直し」を参照。
+
+### リリース準備の失敗は、Issueではなくリリース画面に出す（#4335）
+
+`release`ジョブが失敗すると、`notify-failure`は**run番号だけ**を`POST /api/dispatch/release-preparation`
+（`action=failed`）へ送る。issue-deckはGitHubからrun・ジョブ・ログを取り直し、失敗した工程と
+`##[error]`の行（機密除去済み）を`ReleasePreparationFailure`に記録する。リリース画面（PCのブランチ
+画面・スマホのリリースシート）には「リリース準備に失敗しました」として、工程・エラー・実行ログ・
+次の操作・「再開」（同じ上げ幅で起動し直す）が出る。
+
+- **個別Issueへ`00.check-user`を付けない。** 以前はDevelop・ReleaseにいるIssue全件へ`00.check-user`＋
+  `01.check-blocked`を付け、他の理由ラベルまで外していた。共通処理1件の失敗で全件が確認待ちになり、
+  本当に人の判断を待つIssueと区別できなかった。Issueは本番反映待ちのまま保つ
+- **原因を推測で案内しない。** 以前の通知が毎回添えていた「GitHub Actions側の障害の場合があります」は
+  根拠が無いので出さない
+- 準備が進んだrun（バンプPRかリリースPRを作れた）は`notify-prepared`が`action=prepared`で報告し、
+  未解決の失敗を解決にする。同時に、**旧`notify-failure`が付けたと確認できるラベルだけ**を外す
+  （`releaseFailureDerivedLabels`）。外すのは「`00.check-user`の最後の付与がbotで、同じ時刻帯にbotが
+  リリース失敗の通知コメントを投稿している」「理由ラベルが`01.check-blocked`だけ」のときに限る。
+  別の質問・承認で付け直されたもの、由来の分からないものは外さない
+- 配布先は参照タグを上げるまで旧`notify-failure`のまま（ラベルを付ける）
 
 **作り直しの前提になる「自動修復のPRをdevelopへ入れる」は自動では進まない**（#2230）。
 `reusable-claude-review-develop.yml`の`identify-issue`は対応Issue番号をブランチ名
@@ -874,3 +903,17 @@ main起点の`deploy-recovery/*`ブランチへ取り込む。**`merges`APIは�
 - 本文は`GET /api/repositories/release/changes`が取る。`base=develop`のclosed PR一覧（1回・ETag）から引き、足りない
   PRだけ`fetchPullRequest`で補う（上限20件）。取れなかったPRは**「記録なし」ではなく「取得不可」**として出す
 - バージョンバンプPRはレビューの対象ではないので判定を出さず、内訳の分母にも入れない（`tallyChangeReviews`を再利用）
+
+## リリース候補の作り直しの操作履歴を残す（#4359）
+
+「自動で作り直しました」というコメントだけでは、手動の追加承認があったのか、関連修正だけで自動に進んだのかが分からなかった（#4345）。
+作り直しの操作ごとに追記専用の記録`ReleaseRebuildEvent`を残し、ブランチ画面・スマホのリリースシートの
+「リリース候補の作り直しの履歴」（`ReleaseRebuildHistoryPanel`）が読む。**取得はDBだけ**でGitHub APIは叩かない。
+
+- **種別**: `approval`（手動の追加承認）・`decision_waiting`（判断待ち）・`rebuild_started`・`rebuild_failed`・`successor_created`・`stopped`・`superseded`（元候補の取消・置換）
+- **契機（`trigger`）**: `manual`・`resume`・`fix_series_related`（関連修正のみの自動）・`fix_series_after_approval`（手動承認を根拠にした自動。承認イベントのidを`payload.approvalEventId`へ持つ）・`sweep`・`workflow`
+- **承認範囲は承認時点のものを保持する。** 承認できるのは判断待ちにした時点で示したPR（`decision_waiting`の`pendingPrs`）と修正PRだけで、承認の操作までに入ったPRは承認済みにならない。判断待ちの範囲を記録していない既存の待ちは、承認時点の候補全体を範囲にし、その旨を理由に残す
+- **重複は`dedupeKey`のユニーク制約で1件に絞る**（二重クリック・巡回の重なり・再起動後の再実行）。承認は`status: awaiting_decision`の条件付き更新で、同時の承認・巡回に負けた側は何も書き換えない
+- **記録が無い履歴は「操作経路不明」と出す。** 後継候補だけが残る既存の修正系列は、画面側で合成して補い、承認や操作者を推測しない
+- 後継候補は、修正系列の巡回と、リリース準備の完了報告（`notify-prepared`）で観測して記録する
+- 記録の失敗は本処理を止めない。理由は機密除去してから保存する

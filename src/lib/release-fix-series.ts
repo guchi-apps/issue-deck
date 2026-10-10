@@ -310,19 +310,31 @@ export type ReleaseCandidateObservation = {
 export type ReleaseFixDecision =
   | { action: "wait" }
   | { action: "stop"; status: "stopped" | "superseded" | "awaiting_decision"; reason: string; /** 止める対象の系列ID */ seriesIds: string[] }
-  | { action: "rebuild"; seriesIds: string[] };
+  | {
+      action: "rebuild";
+      seriesIds: string[];
+      /**
+       * PRを選んだ作り直し（#4335）で元の候補へ足すPR。修正PRと、利用者が「含めてよい」と確認したPRだけ。
+       * 選んだ作り直しに対応していないリポジトリでは空（従来どおりdevelopの最新を取り込む）
+       */
+      selectedPrs: number[];
+    };
 
 /**
  * 同じリリースPRに結び付いた進行中の系列をまとめて見て、次の操作を決める。
  *
  * - 元リリースPRが取消・マージ・置き換えされていたら、**誤った候補へ取り込まない**（`superseded`）
  * - 全部の修正PRがdevelopへ入るまで待つ。修正PRが閉じられたら理由付きで止める
- * - 作り直しはdevelop全体を取り込むため、**修正と無関係な変更**が入っていれば自動で作り直さず、
- *   該当PRを示して判断待ちにする（利用者が「含めてよい」と確認したPRは除く）
+ * - **PRを選んだ作り直し（#4335）に対応したリポジトリでは、修正PRだけを元の候補へ足す**。無関係な変更は
+ *   入らないので判断待ちにしない（画面の手動選択と同じ`requestSelectiveRebuild`を通る）
+ * - 対応していないリポジトリの作り直しはdevelop全体を取り込むため、**修正と無関係な変更**が入っていれば
+ *   自動で作り直さず、該当PRを示して判断待ちにする（利用者が「含めてよい」と確認したPRは除く）
  */
 export function decideReleaseFix(input: {
   series: readonly ReleaseFixSeriesSnapshot[];
   candidate: ReleaseCandidateObservation;
+  /** 選んだ作り直しに対応しているか（未指定は非対応＝従来どおり） */
+  selective?: boolean;
 }): ReleaseFixDecision {
   const waiting = input.series.filter((s) => ["issue_created", "fix_in_progress", "fix_merged", "awaiting_decision"].includes(s.status));
   if (waiting.length === 0) return { action: "wait" };
@@ -354,6 +366,20 @@ export function decideReleaseFix(input: {
 
   const fixPrs = new Set(waiting.map((s) => s.fixPrNumber).filter((n): n is number => n !== null));
   const accepted = new Set(waiting.flatMap((s) => s.acceptedExtraPrs));
+  if (input.selective) {
+    // 元の候補へ足すのは修正PR（＋確認済みのPR）のうち、元の候補の後にdevelopへ入ったものだけ
+    const developed = new Set(input.candidate.developPullRequests);
+    const selectedPrs = [...new Set([...fixPrs, ...accepted])].filter((n) => developed.has(n)).sort((a, b) => a - b);
+    if (selectedPrs.length === 0) {
+      return {
+        action: "stop",
+        status: "stopped",
+        reason: "修正PRが元の候補の後にdevelopへ入っていないため、足すものがありません。修正PRがすでに候補に含まれていないかを確認してください",
+        seriesIds: ids,
+      };
+    }
+    return { action: "rebuild", seriesIds: ids, selectedPrs };
+  }
   const unrelated = input.candidate.developPullRequests.filter((n) => !fixPrs.has(n) && !accepted.has(n));
   if (unrelated.length > 0) {
     return {
@@ -365,7 +391,7 @@ export function decideReleaseFix(input: {
       seriesIds: ids,
     };
   }
-  return { action: "rebuild", seriesIds: ids };
+  return { action: "rebuild", seriesIds: ids, selectedPrs: [] };
 }
 
 /** 再検証の結果から、候補が本番承認待ちになったか・修正が要るかを決める */

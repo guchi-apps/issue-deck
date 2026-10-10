@@ -56,6 +56,16 @@ on:
         required: false
         type: boolean
         default: false
+      rebuild-selection:
+        # 「修正を入れて作り直す」で、元の候補へ足すPRを選んだときの指定（#4335。workflow_dispatchのみ）。
+        # issue-deckのサーバーが組み立てるJSONで、`{"origin":{"pr":<元のリリースPR>,"headSha":"<そのhead>"},
+        # "prs":[{"number":<PR>,"mergeSha":"<developへのマージコミット>"}]}`。空なら従来どおり
+        # （作り直しはdevelopの最新を取り込む）。指定があると、元の候補のheadへ選んだPRのマージ差分だけを
+        # `cherry-pick -m 1`で足した状態からバンプする。選んでいないdevelopの変更は入らない
+        description: "作り直しで元の候補へ足すPRの指定（issue-deckが作るJSON。空なら従来どおり）"
+        required: false
+        type: string
+        default: ""
       bump-command:
         description: >-
           バージョンを書き換えるコマンド。空なら
@@ -73,6 +83,10 @@ on:
 jobs:
   release:
     runs-on: ubuntu-latest
+    # 準備が進んだ（バンプPRかリリースPRを作れた）かどうか。`notify-prepared`が、過去の
+    # 失敗の記録を解決にするために使う（#4335）。何もしなかったrun（schedule・対象なし）は報告しない
+    outputs:
+      prepared: ${{ steps.bump-pr.outcome == 'success' || steps.main-pr.outcome == 'success' }}
     permissions:
       contents: write
       pull-requests: write
@@ -121,6 +135,7 @@ jobs:
           VERSION_FILE: ${{ inputs.version-file }}
           VERSION_QUERY: ${{ inputs.version-query }}
           EVENT_NAME: ${{ github.event_name }}
+          REBUILD_SELECTION: ${{ inputs.rebuild-selection }}
         run: |
           set -e
 
@@ -129,13 +144,151 @@ jobs:
           # version.json が1件（signaly）。version-query は全件 .version だった。
           MAIN_VERSION="$(git show "origin/main:$VERSION_FILE" | jq -r "$VERSION_QUERY")"
           DEV_VERSION="$(jq -r "$VERSION_QUERY" "$VERSION_FILE")"
-          echo "main_version=$MAIN_VERSION" >> "$GITHUB_OUTPUT"
-          echo "dev_version=$DEV_VERSION" >> "$GITHUB_OUTPUT"
 
           NEED_BUMP=false
           NEED_MAIN_PR=false
+          # バンプの起点。通常はdevelopの先端で、選んで作り直すとき（#4335）だけ
+          # 「元の候補＋選んだPR」を置いたローカルブランチ`rebuild-preview`になる
+          DEVELOP_REF="origin/develop"
+          SELECTIVE=""
+          CLOSE_ORIGIN=""
+          CLOSE_ORIGIN_REF=""
 
-          if [ "$MAIN_VERSION" = "$DEV_VERSION" ]; then
+          # **mainへ出ていないバンプを、新しい順に列挙する**（#4335）。対象は`origin/main..<ref>`の本流
+          # （first-parent）上の、バンプPR（`release/v*`）のマージと、凍結ブランチの先端にあるバンプの
+          # コミットそのもの（選んで作り直すときは、元の候補の先端＝バンプのコミットが本流に乗る）。
+          # 作り直しを繰り返すとバンプは1回分とは限らず、直前の1回だけを戻すと前回の版が残る。
+          unpublished_bumps() {
+            git log --first-parent --format='%H%x09%P%x09%s' "origin/main..$1" | awk -F '\t' '
+              { n = split($2, parents, " "); subject = $3 }
+              n >= 2 && subject ~ /^Merge pull request #[0-9]+ from [^\/ ]+\/release\/v[0-9]/ { print $1; next }
+              n == 1 && subject ~ /^v[0-9]+\.[0-9]+\.[0-9]+をリリースする。$/ { print $1 }' \
+              | tr '\n' ' ' | sed 's/ *$//'
+          }
+
+          # **選んだPRだけを元の候補へ足して作り直す**（#4335）。issue-deckのサーバーが元の候補と
+          # PR・マージコミットを検証してから渡すが、ここでも現在の状態と突き合わせ直す（押してから
+          # 起動までの間に候補が更新・取消されていたら作らない）。**選択は広げない**——依存PRが要る・
+          # 競合する・既に入っているなどで適用できなければ、理由と必要な追加範囲を示して止める。
+          if [ -n "$REBUILD_SELECTION" ]; then
+            if [ "$EVENT_NAME" != "workflow_dispatch" ]; then
+              echo "::error::PRを選んだ作り直しは手動起動でだけ受け付けます"
+              exit 1
+            fi
+            if ! printf '%s' "$REBUILD_SELECTION" | jq -e '(.origin.pr | type == "number") and (.origin.headSha | type == "string") and (.prs | type == "array" and length > 0)' >/dev/null 2>&1; then
+              echo "::error::作り直しの指定（rebuild-selection）の形式が正しくありません"
+              exit 1
+            fi
+            ORIGIN_PR="$(printf '%s' "$REBUILD_SELECTION" | jq -r '.origin.pr')"
+            ORIGIN_HEAD="$(printf '%s' "$REBUILD_SELECTION" | jq -r '.origin.headSha')"
+            ORIGIN_JSON="$(gh pr view "$ORIGIN_PR" --json state,baseRefName,headRefName,headRefOid)"
+            ORIGIN_STATE="$(printf '%s' "$ORIGIN_JSON" | jq -r '.state')"
+            ORIGIN_REF="$(printf '%s' "$ORIGIN_JSON" | jq -r '.headRefName')"
+            ORIGIN_OID="$(printf '%s' "$ORIGIN_JSON" | jq -r '.headRefOid')"
+            if [ "$ORIGIN_STATE" != "OPEN" ] || [ "$(printf '%s' "$ORIGIN_JSON" | jq -r '.baseRefName')" != "main" ] \
+              || [ "${ORIGIN_REF#release-main/v}" = "$ORIGIN_REF" ] || [ "$ORIGIN_OID" != "$ORIGIN_HEAD" ]; then
+              echo "::error::元の候補 #$ORIGIN_PR が更新・取消されています（選んだ時点のhead: $ORIGIN_HEAD、現在: $ORIGIN_STATE $ORIGIN_REF $ORIGIN_OID）。画面で選び直してください"
+              exit 1
+            fi
+            EXISTING_BUMP_PR="$(gh pr list --base develop --state open --json number,headRefName --jq '[.[] | select(.headRefName | startswith("release/v"))] | .[0].number // empty')"
+            if [ -n "$EXISTING_BUMP_PR" ]; then
+              echo "::error::バージョンbump用のPR #$EXISTING_BUMP_PR が開いているため、作り直しを始められません。そのPRのマージか取り消しを待ってください"
+              exit 1
+            fi
+            if ! git cat-file -e "${ORIGIN_HEAD}^{commit}" 2>/dev/null; then
+              echo "::error::元の候補のhead（$ORIGIN_HEAD）を取得できませんでした"
+              exit 1
+            fi
+
+            git config user.name "Claude Code"
+            git config user.email "claude-code@example.com"
+            git checkout -q --detach "$ORIGIN_HEAD"
+            : > /tmp/rebuild-allowed-files.txt
+            : > /tmp/rebuild-selected-lines.txt
+
+            # developへ入った順（mainからの本流の距離）に並べて当てる。後に入ったPRが先のPRに依存する場合に、
+            # 選んだ順序で結果が変わらないようにする
+            SELECTED_NUMBERS=" $(printf '%s' "$REBUILD_SELECTION" | jq -r '[.prs[].number] | map(tostring) | join(" ")') "
+            ORDERED="$(printf '%s' "$REBUILD_SELECTION" | jq -r '.prs[] | "\(.number) \(.mergeSha)"' | while read -r N SHA; do
+              if git cat-file -e "${SHA}^{commit}" 2>/dev/null && git merge-base --is-ancestor "$SHA" origin/develop; then
+                echo "$(git rev-list --first-parent --count "origin/main..$SHA") $N $SHA"
+              else
+                echo "0 $N $SHA"
+              fi
+            done | sort -n)"
+
+            while read -r POS N SHA; do
+              [ -n "$N" ] || continue
+              if [ "$POS" = "0" ]; then
+                echo "::error::#$N のマージコミット（$SHA）がdevelopにありません。PRがdevelopへマージされているか、選んだ後に履歴が変わっていないかを確認してください"
+                exit 1
+              fi
+              SUBJECT="$(git log -1 --format='%s' "$SHA")"
+              case "$SUBJECT" in
+                "Merge pull request #$N from "*) ;;
+                *)
+                  echo "::error::#$N の指定コミット（$SHA）は、そのPRのdevelopへのマージではありません（件名: $SUBJECT）"
+                  exit 1
+                  ;;
+              esac
+              if git merge-base --is-ancestor "$SHA" "$ORIGIN_HEAD"; then
+                echo "::error::#$N は元の候補 #$ORIGIN_PR に既に含まれています。選択から外してください"
+                exit 1
+              fi
+              git diff --name-only "${SHA}^1" "$SHA" >> /tmp/rebuild-allowed-files.txt
+              if ! git cherry-pick -m 1 "$SHA" >/tmp/rebuild-cherry-pick.log 2>&1; then
+                mapfile -t CONFLICTS < <(git diff --name-only --diff-filter=U)
+                if [ "${#CONFLICTS[@]}" -eq 0 ] && [ -z "$(git status --porcelain --untracked-files=no)" ]; then
+                  git cherry-pick --abort >/dev/null 2>&1 || git cherry-pick --skip >/dev/null 2>&1 || true
+                  echo "::error::#$N の変更は元の候補 #$ORIGIN_PR に既に含まれています（当てても差分が出ません）。選択から外してください"
+                  exit 1
+                fi
+                DEPS=""
+                if [ "${#CONFLICTS[@]}" -gt 0 ]; then
+                  DEPS="$(git log --first-parent --format='%s' "$ORIGIN_HEAD..${SHA}^1" -- "${CONFLICTS[@]}" \
+                    | sed -nE 's|^Merge pull request #([0-9]+) from [^/]+/(.*)$|\1 \2|p' \
+                    | while read -r DEP BRANCH_NAME; do
+                        case "$BRANCH_NAME" in release/*|release-main/*) continue ;; esac
+                        case "$SELECTED_NUMBERS" in *" $DEP "*) continue ;; esac
+                        printf '#%s ' "$DEP"
+                      done)"
+                fi
+                git cherry-pick --abort >/dev/null 2>&1 || true
+                echo "::error::#$N を元の候補 #$ORIGIN_PR へそのまま適用できません（競合: ${CONFLICTS[*]:-不明}）。${DEPS:+先に必要な可能性があるPR: ${DEPS}。}選択を見直して作り直してください（選択は自動では広げません）"
+                exit 1
+              fi
+              TITLE="$(git log -1 --format='%b' "$SHA" | sed -n '1p')"
+              echo "- #$N ${TITLE:-$SUBJECT}（\`${SHA:0:12}\`）" >> /tmp/rebuild-selected-lines.txt
+            done <<< "$ORDERED"
+
+            # **適用した差分が選んだPRの範囲に収まることを確かめる**。PR番号を信じるのではなく、
+            # 元の候補との差分のファイルが、選んだPRのマージ差分に出てくるファイルだけであること
+            OUTSIDE="$(git diff --name-only "$ORIGIN_HEAD" HEAD | grep -vxF -f /tmp/rebuild-allowed-files.txt || true)"
+            if [ -n "$OUTSIDE" ]; then
+              echo "::error::選んだPR以外の差分が混ざりました（$(printf '%s' "$OUTSIDE" | tr '\n' ' ')）。作り直しを止めます"
+              exit 1
+            fi
+
+            git branch -f rebuild-preview HEAD
+            DEVELOP_REF="rebuild-preview"
+            SELECTIVE=true
+            DEV_VERSION="$(git show "$ORIGIN_HEAD:$VERSION_FILE" | jq -r "$VERSION_QUERY")"
+            REBUILD_FROM="$ORIGIN_HEAD"
+            REBUILD_REVERTS="$(unpublished_bumps rebuild-preview)"
+            # 元の候補の先端は凍結したバンプのコミットそのもの。件名を手で変えていても取りこぼさないよう、
+            # 版ファイルを変えているなら必ず取り消す対象にする（選んだPRのコミットより後ろ＝先頭に置く）
+            case " $REBUILD_REVERTS " in
+              *" $ORIGIN_HEAD "*) ;;
+              *)
+                if ! git diff --quiet "${ORIGIN_HEAD}^" "$ORIGIN_HEAD" -- "$VERSION_FILE"; then
+                  REBUILD_REVERTS="$(printf '%s %s' "$ORIGIN_HEAD" "$REBUILD_REVERTS" | sed 's/ *$//')"
+                fi
+                ;;
+            esac
+            NEED_BUMP=true
+            echo "元の候補 #$ORIGIN_PR（$ORIGIN_HEAD）へ選んだPRを適用しました（$(git rev-parse HEAD)）。この状態からバンプします"
+            cat /tmp/rebuild-selected-lines.txt
+          elif [ "$MAIN_VERSION" = "$DEV_VERSION" ]; then
             if git diff --quiet origin/main origin/develop; then
               echo "developとmainに差分が無いため、リリースするものがありません"
             else
@@ -151,8 +304,22 @@ jobs:
             # リリースPRのheadは固定ブランチ`release-main/vX.Y.Z`（#2117）。`--head`で絞ると
             # 版が違うだけの取りこぼしが出るため、base=mainのopenなPRを接頭辞で拾う。
             # `develop`は#2117以前に作られたPR（移行期間中のみ存在しうる）。
-            EXISTING_MAIN_PR="$(gh pr list --base main --state open --json url,headRefName \
-              --jq '[.[] | select(.headRefName == "develop" or (.headRefName | startswith("release-main/v")))] | .[0].url // empty')"
+            EXISTING_MAIN_JSON="$(gh pr list --base main --state open --json number,url,headRefName \
+              --jq '[.[] | select(.headRefName == "develop" or (.headRefName | startswith("release-main/v")))] | .[0] // empty')"
+            EXISTING_MAIN_PR="$(printf '%s' "$EXISTING_MAIN_JSON" | jq -r '.url // empty' 2>/dev/null || true)"
+            # **選んで作り直したバンプPRのマージ**（#4335）では、元の候補はまだ開いている（後継を作れてから
+            # 閉じる）。バンプPR本文の目印が指す元の候補だけは「開いている」と数えず、後継を作ってから閉じる
+            if [ -n "$EXISTING_MAIN_PR" ] && [ "$EVENT_NAME" = "push" ]; then
+              EXISTING_MAIN_NUMBER="$(printf '%s' "$EXISTING_MAIN_JSON" | jq -r '.number')"
+              MARKED_ORIGIN="$(gh pr list --base develop --head "release/v$DEV_VERSION" --state merged --json body --jq '.[0].body // empty' 2>/dev/null \
+                | sed -nE 's/.*<!-- issue-deck-rebuild-origin:#([0-9]+) -->.*/\1/p' | head -n 1 || true)"
+              if [ -n "$MARKED_ORIGIN" ] && [ "$MARKED_ORIGIN" = "$EXISTING_MAIN_NUMBER" ]; then
+                CLOSE_ORIGIN="$EXISTING_MAIN_NUMBER"
+                CLOSE_ORIGIN_REF="$(printf '%s' "$EXISTING_MAIN_JSON" | jq -r '.headRefName')"
+                EXISTING_MAIN_PR=""
+                echo "元の候補 #$CLOSE_ORIGIN は選んで作り直した後継に置き換えるため、後継のリリースPRを作ってから閉じます"
+              fi
+            fi
             if [ -n "$EXISTING_MAIN_PR" ]; then
               echo "develop→mainのPR（$EXISTING_MAIN_PR）が既にオープン中のため、新規作成をスキップします"
             else
@@ -169,6 +336,7 @@ jobs:
               # バンプPRはgitの件名（`Merge pull request #N from <owner>/release/vX.Y.Z`）から探す。
               # バンプPR上で人が版を直していた場合は見つからず、従来どおりの動きになる。
               REBUILD_FROM=""
+              REBUILD_REVERTS=""
               if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
                 BUMP_MERGE="$(git log --first-parent --merges --format='%H %s' origin/main..origin/develop \
                   | awk -v branch="release/v$DEV_VERSION" '$2 == "Merge" && $3 == "pull" && $4 == "request" && $6 == "from" { ref = $7; sub(/^[^\/]*\//, "", ref); if (ref == branch) { print $1; exit } }')"
@@ -176,6 +344,13 @@ jobs:
                   AHEAD="$(git rev-list --count "$BUMP_MERGE..origin/develop")"
                   if [ "$AHEAD" -gt 0 ]; then
                     REBUILD_FROM="$BUMP_MERGE"
+                    # **未公開のバンプは1回分とは限らない**（#4335）。作り直しを繰り返すと
+                    # `release/v8.50.0`→`release/v8.50.1`のようにバンプPRのマージがmainより後に
+                    # 積み重なり、直前の1回を戻しても前回の版（8.50.0）が残る。mainへ出ていない
+                    # バンプのマージを**新しい順に全部**取り消せば、版・更新履歴・release-notesは
+                    # mainの状態へ戻り、実装の変更（バンプ以外のコミット）はそのまま残る。
+                    # 求め方は`unpublished_bumps`。本番へ出た版（mainから届く）とタグには触れない。
+                    REBUILD_REVERTS="$(unpublished_bumps origin/develop)"
                   else
                     echo "バンプPRのマージ（$BUMP_MERGE）以降にdevelopへ入った変更が無いため、作り直さずリリースPRを作成します"
                   fi
@@ -199,7 +374,14 @@ jobs:
           echo "need_bump=$NEED_BUMP" >> "$GITHUB_OUTPUT"
           echo "need_main_pr=$NEED_MAIN_PR" >> "$GITHUB_OUTPUT"
           echo "rebuild_from=${REBUILD_FROM:-}" >> "$GITHUB_OUTPUT"
-          echo "判定結果: need_bump=$NEED_BUMP need_main_pr=$NEED_MAIN_PR main_version=$MAIN_VERSION dev_version=$DEV_VERSION rebuild_from=${REBUILD_FROM:-}"
+          echo "rebuild_reverts=${REBUILD_REVERTS:-}" >> "$GITHUB_OUTPUT"
+          echo "main_version=$MAIN_VERSION" >> "$GITHUB_OUTPUT"
+          echo "dev_version=$DEV_VERSION" >> "$GITHUB_OUTPUT"
+          echo "develop_ref=$DEVELOP_REF" >> "$GITHUB_OUTPUT"
+          echo "selective=$SELECTIVE" >> "$GITHUB_OUTPUT"
+          echo "close_origin=$CLOSE_ORIGIN" >> "$GITHUB_OUTPUT"
+          echo "close_origin_ref=$CLOSE_ORIGIN_REF" >> "$GITHUB_OUTPUT"
+          echo "判定結果: need_bump=$NEED_BUMP need_main_pr=$NEED_MAIN_PR main_version=$MAIN_VERSION dev_version=$DEV_VERSION rebuild_from=${REBUILD_FROM:-} rebuild_reverts=${REBUILD_REVERTS:-}"
 
       - name: 直近の本番デプロイ失敗を確認する
         # 失敗した版を直さないまま次のリリースを始めると、未反映の版と修正内容が追えなくなる。
@@ -263,6 +445,7 @@ jobs:
           VERSION_QUERY: ${{ inputs.version-query }}
           EVENT_NAME: ${{ github.event_name }}
           PUSHED_SHA: ${{ github.sha }}
+          DEVELOP_REF: ${{ steps.state.outputs.develop_ref || 'origin/develop' }}
         run: |
           set -e
 
@@ -295,20 +478,45 @@ jobs:
                 fi
               fi
             fi
+            # **選んで作り直したバンプPRのマージでは、凍結点はバンプPRのheadではなく後継の候補**（#4335）。
+            # バンプPRにはdevelopの先端へ版の書き換えだけを当てたものを出しており、headには選んでいない
+            # developの変更まで入っている。本文の目印が指す候補（元の候補＋選んだPR＋同じ版の書き換え）を使う
+            if [ "$EVENT_NAME" = "push" ]; then
+              MARKED_CANDIDATE="$(gh pr list --base develop --head "release/v$DEV_VERSION" --state merged --json body --jq '.[0].body // empty' 2>/dev/null \
+                | sed -nE 's/.*<!-- issue-deck-rebuild-candidate:([0-9a-f]{40}) -->.*/\1/p' | head -n 1 || true)"
+              if [ -n "$MARKED_CANDIDATE" ]; then
+                git fetch --quiet origin "refs/heads/release-candidate/v$DEV_VERSION" || true
+                CANDIDATE_VERSION="$(git show "$MARKED_CANDIDATE:$VERSION_FILE" 2>/dev/null | jq -r "$VERSION_QUERY" || true)"
+                if [ "$CANDIDATE_VERSION" = "$DEV_VERSION" ]; then
+                  FREEZE_SHA="$MARKED_CANDIDATE"
+                  echo "選んで作り直した後継の候補（$MARKED_CANDIDATE）を凍結点にします"
+                else
+                  # 後継の候補が無いまま develop の先端で凍結すると、選んでいない変更が入る。止める
+                  echo "::error::選んで作り直した後継の候補（$MARKED_CANDIDATE）を読めないか、版（${CANDIDATE_VERSION:-不明}）が v$DEV_VERSION と一致しません"
+                  exit 1
+                fi
+              fi
+            fi
             if [ -z "$FREEZE_SHA" ]; then
               FREEZE_SHA="$(git rev-parse origin/develop)"
             fi
             echo "freeze_sha=$FREEZE_SHA" >> "$GITHUB_OUTPUT"
             RANGE_END="$FREEZE_SHA"
           else
-            RANGE_END="$(git rev-parse origin/develop)"
+            # 選んで作り直すとき（#4335）は「元の候補＋選んだPR」がバンプの起点になる
+            RANGE_END="$(git rev-parse "${DEVELOP_REF:-origin/develop}")"
           fi
           echo "リリース範囲: origin/main..$RANGE_END"
 
           # **`--first-parent`でdevelopの本流だけを辿る。** 付けないと、作業ブランチ側で
           # developを取り込んだマージコミットまで「今回入ったPR」として並ぶ。
+          #
+          # **`--merges`では絞らず件名で選ぶ**（#4335）。選んで作り直した候補では、PRのマージ差分を
+          # `cherry-pick -m 1`で当てたコミット（件名はマージのまま、親は1つ）が本流に乗る。
+          # mainへ出た候補でcherry-pickされたPRは、developの元のマージが次のリリース範囲に残るため除く。
           ISSUE_NUMBERS=""
-          for SHA in $(git log --first-parent --merges --format='%H' "origin/main..$RANGE_END"); do
+          RELEASED_BY_PICK=" $(git log --no-merges --format='%s' origin/main | sed -nE 's/^Merge pull request #([0-9]+) from .*/\1/p' | tr '\n' ' ') "
+          for SHA in $(git log --first-parent --format='%H' "origin/main..$RANGE_END"); do
             SUBJECT="$(git log -1 --format='%s' "$SHA")"
             case "$SUBJECT" in
               "Merge pull request #"*) ;;
@@ -316,6 +524,7 @@ jobs:
             esac
             PR_NUM="$(printf '%s' "$SUBJECT" | sed -nE 's/^Merge pull request #([0-9]+) from .*/\1/p')"
             [ -n "$PR_NUM" ] || continue
+            case "$RELEASED_BY_PICK" in *" $PR_NUM "*) continue ;; esac
             # `Merge pull request #123 from guchi-apps/issue-456` のブランチ名部分
             BRANCH="$(printf '%s' "$SUBJECT" | sed -nE 's|^Merge pull request #[0-9]+ from [^/]+/([^ ]+).*|\1|p')"
             # マージコミットの本文1行目にはGitHubが既定でPRのタイトルを入れる。空なら件名で代替する
@@ -526,8 +735,8 @@ jobs:
             内容そのものだけから判断してください。
 
             ## 確認すること
-            - `git diff origin/main origin/develop` で実際のコード変更内容を確認する
-            - `git log origin/main..origin/develop --oneline` でコミット一覧も参考にする
+            - `git diff origin/main ${{ steps.state.outputs.develop_ref || 'origin/develop' }}` で実際のコード変更内容を確認する
+            - `git log origin/main..${{ steps.state.outputs.develop_ref || 'origin/develop' }} --oneline` でコミット一覧も参考にする
 
             ## 判定基準
             - major: 既存の挙動・データ構造・公開APIに対する後方互換性のない変更
@@ -674,6 +883,7 @@ jobs:
           echo "usage: $USAGE"
 
       - name: バージョンをbumpしてdevelop向けPRを作成する
+        id: bump-pr
         if: always() && steps.deploy-gate.outputs.ready == 'true' && steps.state.outputs.need_bump == 'true' && (github.event_name == 'workflow_dispatch' || steps.gate.outputs.ready == 'true')
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.WORKFLOW_PAT }}
@@ -682,6 +892,10 @@ jobs:
           # 作り直し（#3014）のときだけ値が入る。DEV_VERSIONは取り消す側の版
           DEV_VERSION: ${{ steps.state.outputs.dev_version }}
           REBUILD_FROM: ${{ steps.state.outputs.rebuild_from }}
+          REBUILD_REVERTS: ${{ steps.state.outputs.rebuild_reverts }}
+          DEVELOP_REF: ${{ steps.state.outputs.develop_ref || 'origin/develop' }}
+          SELECTIVE: ${{ steps.state.outputs.selective }}
+          REBUILD_SELECTION: ${{ inputs.rebuild-selection }}
           VERSION_FILE: ${{ inputs.version-file }}
           VERSION_QUERY: ${{ inputs.version-query }}
           BUMP_COMMAND: ${{ inputs.bump-command }}
@@ -738,25 +952,40 @@ jobs:
 
           git config user.name "Claude Code"
           git config user.email "claude-code@example.com"
-          git checkout -b "$BRANCH" origin/develop
+          # 選んで作り直すとき（#4335）は「元の候補＋選んだPR」でバンプする。そのコミットが後継の候補になり、
+          # developへは同じ版の書き換えだけを別に当てる（後述）
+          git checkout -b "$BRANCH" "${DEVELOP_REF:-origin/develop}"
 
           # 作り直しでは、まず前回のバンプ（バンプPRのマージコミット）を取り消し、developを
           # 「バンプ前＋その後の修正」の状態に戻してから通常どおりバンプする（#3014）。
           # 更新履歴ファイルや`.github/release-notes.md`の前回分もこれで消えるので、
           # 版を書き換えるコマンド（`npm version`・bump-command）の種類によらず同じ手順で済む。
           if [ -n "$REBUILD_FROM" ]; then
-            REVERT_MAINLINE=()
-            if git rev-parse --verify --quiet "${REBUILD_FROM}^2" >/dev/null; then
-              REVERT_MAINLINE=(-m 1)
+            # mainへ出ていないバンプを新しい順に全部取り消す（#4335。求め方は状態判定ステップ）。
+            # 旧い出力（空）のときは従来どおり直前の1回だけを戻す
+            for BUMP_SHA in ${REBUILD_REVERTS:-$REBUILD_FROM}; do
+            # 暫定復旧: 公開済みの版まで戻ったら、それ以前のバンプは取り消さない。
+            # 凍結候補とdevelopのマージSHAが異なる場合も既存のmain整合検査は維持する。
+            if [ "$(jq -r "$VERSION_QUERY" "$VERSION_FILE")" = "$MAIN_VERSION" ]; then
+              echo "公開済みの版 v$MAIN_VERSION に達したため、バンプの取り消しを終了します"
+              break
             fi
-            if ! git revert --no-commit "${REVERT_MAINLINE[@]}" "$REBUILD_FROM"; then
-              git status --short
-              echo "::error::v$DEV_VERSION のバンプ（$REBUILD_FROM）を取り消せませんでした。バンプ後に更新履歴などを手で直していると衝突します。衝突したファイルをdevelopで戻してから起動し直してください"
-              exit 1
-            fi
+              REVERT_MAINLINE=()
+              if git rev-parse --verify --quiet "${BUMP_SHA}^2" >/dev/null; then
+                REVERT_MAINLINE=(-m 1)
+              fi
+              if ! git revert --no-commit "${REVERT_MAINLINE[@]}" "$BUMP_SHA"; then
+                git status --short
+                echo "::error::未公開のバンプ（$BUMP_SHA）を取り消せませんでした。バンプ後に更新履歴などを手で直していると衝突します。衝突したファイルをdevelopで戻してから起動し直してください"
+                exit 1
+              fi
+              echo "未公開のバンプ（$BUMP_SHA）を取り消しました"
+            done
             REVERTED="$(jq -r "$VERSION_QUERY" "$VERSION_FILE")"
             if [ "$REVERTED" != "$MAIN_VERSION" ]; then
-              echo "::error::バンプを取り消した後の版（$REVERTED）がmain（$MAIN_VERSION）と一致しません。作り直せないため、手で確認してください"
+              # 全部戻しても一致しないのは、バンプPR以外の経路（手で版を書き換えたコミットなど）で
+              # 版が動いている場合。どこで動いたかを示して止める（実装変更ごと戻して辻褄を合わせない）
+              echo "::error::未公開のバンプ（${REBUILD_REVERTS:-$REBUILD_FROM}）を取り消した後の版（$REVERTED）がmain（$MAIN_VERSION）と一致しません。バンプPR以外で版を書き換えたコミットがあります: $(git log --format='%h %s' "origin/main..${DEVELOP_REF:-origin/develop}" -- "$VERSION_FILE" | head -n 5 | tr '\n' ';')"
               exit 1
             fi
             # **版ファイルだけは取り消す版（DEV_VERSION）に据え置く。** 上げ幅を引数に取る
@@ -844,12 +1073,44 @@ jobs:
           git status --porcelain
           git add -A
           git commit -m "v${NEW_VERSION}をリリースする。"
+
+          # **選んで作り直すとき（#4335）は、後継の候補とdevelopへのバンプPRを分ける。** いまのコミット
+          # （元の候補＋選んだPR＋版の書き換え）を後継の候補として`release-candidate/v新版`に置き、
+          # バンプPRにはdevelopの先端へ**版の書き換えだけ**を当てたものを出す。候補ごとdevelopへマージすると、
+          # 選んだPRの後にdevelopで同じ行を直したPRがあったときに衝突する。バンプPRのマージで起きるrunは、
+          # 本文の目印から凍結点をこの候補にする（「リリース対象のプルリクエストとissueを特定する」）
+          if [ -n "$SELECTIVE" ]; then
+            CANDIDATE_SHA="$(git rev-parse HEAD)"
+            git push --force origin "${CANDIDATE_SHA}:refs/heads/release-candidate/v${NEW_VERSION}"
+            git checkout -q -B "$BRANCH" origin/develop
+            if ! git cherry-pick "$CANDIDATE_SHA" >/tmp/rebuild-bump-pick.log 2>&1; then
+              CONFLICTS="$(git diff --name-only --diff-filter=U | tr '\n' ' ')"
+              git cherry-pick --abort >/dev/null 2>&1 || true
+              git push origin --delete "release-candidate/v${NEW_VERSION}" >/dev/null 2>&1 || true
+              echo "::error::版の書き換えをdevelopへ当てられませんでした（競合: ${CONFLICTS:-不明}）。元の候補の後にdevelopで版・更新履歴のファイルが変わっています"
+              exit 1
+            fi
+            echo "後継の候補を ${CANDIDATE_SHA} に置き、developへは版の書き換えだけを出します"
+          fi
           git push -u origin "$BRANCH"
 
           {
             echo "developへの取り込み待ちの変更を v${NEW_VERSION} としてリリースします。"
             echo
-            if [ -n "$REBUILD_FROM" ]; then
+            if [ -n "$SELECTIVE" ]; then
+              ORIGIN_PR="$(printf '%s' "$REBUILD_SELECTION" | jq -r '.origin.pr')"
+              echo "**v${DEV_VERSION} の候補 #${ORIGIN_PR} に、選んだPRだけを足して作り直しています**（#4335）。元の候補の内容はそのまま、選んでいないdevelopの変更は含みません。v${DEV_VERSION} は本番へ出ていないため欠番になります。"
+              echo
+              echo "## 元の候補へ足したPR"
+              echo
+              cat /tmp/rebuild-selected-lines.txt
+              echo
+              echo "このPRがdevelopへマージされると後継のリリースPRが作られ、そのあとで元の候補 #${ORIGIN_PR} を閉じます。新しいSHAで統合検証と全体レビューをやり直します。"
+              echo
+              echo "<!-- issue-deck-rebuild-origin:#${ORIGIN_PR} -->"
+              echo "<!-- issue-deck-rebuild-candidate:${CANDIDATE_SHA} -->"
+              echo
+            elif [ -n "$REBUILD_FROM" ]; then
               echo "**v${DEV_VERSION} のリリースを作り直しています**（#3014）。v${DEV_VERSION} のバンプを取り消し、その後にdevelopへ入った変更を含めて判定・更新履歴を作り直しました。v${DEV_VERSION} は本番へ出ていないため欠番になります。"
               echo
             fi
@@ -1234,6 +1495,7 @@ jobs:
           cat "$OUT"
 
       - name: develop→mainのPRを作成する
+        id: main-pr
         if: steps.deploy-gate.outputs.ready == 'true' && steps.state.outputs.need_main_pr == 'true'
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.WORKFLOW_PAT }}
@@ -1243,6 +1505,8 @@ jobs:
           DEV_VERSION: ${{ steps.state.outputs.dev_version }}
           FREEZE_SHA_INPUT: ${{ steps.issues.outputs.freeze_sha }}
           REASON: ${{ steps.reason.outputs.reason }}
+          CLOSE_ORIGIN: ${{ steps.state.outputs.close_origin }}
+          CLOSE_ORIGIN_REF: ${{ steps.state.outputs.close_origin_ref }}
         run: |
           set -e
 
@@ -1307,6 +1571,20 @@ jobs:
             --title "v${DEV_VERSION}をmainへリリースする" \
             --body-file /tmp/main-pr-body.md
 
+          # 後継の候補の一時ブランチは凍結ブランチへ移したので消す（無ければ何もしない）
+          git push origin --delete "release-candidate/v${DEV_VERSION}" >/dev/null 2>&1 || true
+
+          # 選んで作り直した後継を作れたので、元の候補を閉じる（#4335）。**後継を作れてから閉じる**ので、
+          # 途中で失敗しても元の候補は開いたまま残る。元の候補の履歴（PR・指摘・検証）は閉じたPRとして残る
+          if [ -n "$CLOSE_ORIGIN" ]; then
+            SUCCESSOR_URL="$(gh pr view "$RELEASE_BRANCH" --json url --jq '.url')"
+            gh pr comment "$CLOSE_ORIGIN" --body "選んだPRを足した後継の候補 ${SUCCESSOR_URL}（v${DEV_VERSION}）を作成したため、このリリースPRを閉じます（#4335）。このPRの版は本番へ出ていないため欠番です。"
+            gh pr close "$CLOSE_ORIGIN"
+            if [ -n "$CLOSE_ORIGIN_REF" ] && [ "${CLOSE_ORIGIN_REF#release-main/v}" != "$CLOSE_ORIGIN_REF" ]; then
+              git push origin --delete "$CLOSE_ORIGIN_REF" || echo "::warning::元の候補の凍結ブランチ（$CLOSE_ORIGIN_REF）を削除できませんでした"
+            fi
+          fi
+
           # 固定したリリース内容（main先端 + リリースhead）の統合検証を依頼する（#4237・#4212）。
           # **ベストエフォート**: 設定不足・通信失敗・依頼の拒否は警告に留め、リリースPRの作成は止めない
           # （検証の記録が無ければ、画面とマージ側が「未実施」として扱うので、安全側に倒れる）。
@@ -1330,94 +1608,68 @@ jobs:
             fi
           fi
 
-  # releaseジョブが失敗した場合の通知(#727)。他の3ワークフロー
-  # （claude-issue-dispatch.ymlのnotify-failure、claude-review-develop.ymlの
-  # claude-review-fallback/auto-merge-fallback、claude-conflict-resolve.ymlのフォールバック通知）
-  # と異なり、本ワークフローにはこれまで失敗時の通知が一切無く、Actionsの実行ログ以外に
-  # 失敗の痕跡が残らなかった。
+  # releaseジョブが失敗した場合の記録(#727・#4335)。
   #
-  # releaseジョブがどのステップ（状態判定・バージョン判定・バンプPR作成・develop→mainのPR作成）
-  # で失敗しても対象issueを特定できるよう、releaseジョブの
-  # 「リリース対象のプルリクエストとissueを特定する」ステップの出力には依存せず、このジョブでも
-  # `Develop`・`Release`にいるissueの一覧を独立に取得する（#991 Phase 5でラベル検索から
-  # issue-deckへの問い合わせに変わった）。
+  # **個別Issueへ`00.check-user`を付けない**（#4335）。以前はDevelop・ReleaseにいるIssue全件へ
+  # `00.check-user`＋`01.check-blocked`を付け、他の理由ラベル（`01.check-plan`など）まで外していた。
+  # 失敗は共通のリリース処理1件なのに、個別Issueが一斉に確認待ちになり、本当に人の判断を待つIssueと
+  # 見分けられなくなる。いまはissue-deckへrun番号だけを送り、issue-deckがGitHubから失敗した工程と
+  # エラー行を取り直してリリース画面へ1件として出す（`/api/dispatch/release-preparation`）。
+  # 根拠の無い「GitHub Actions側の障害かもしれない」という案内も出さない。
   notify-failure:
     needs: [release]
     if: always() && needs.release.result == 'failure'
     runs-on: ubuntu-latest
-    permissions:
-      issues: write
+    permissions: {}
     steps:
-      - name: リリース対象issueへ失敗を通知する
+      - name: リリース準備の失敗をissue-deckへ記録する
         env:
-          GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          RUN_ID: ${{ github.run_id }}
+          EVENT_NAME: ${{ github.event_name }}
+          BUMP_KIND: ${{ inputs.bump-kind }}
+          REBUILD_SELECTION: ${{ inputs.rebuild-selection }}
           APP_BASE_URL: ${{ vars.APP_BASE_URL }}
           PROGRESS_REPORT_SECRET: ${{ secrets.PROGRESS_REPORT_SECRET }}
         run: |
-          set -e
-
-          # 「対象が0件」と「issue-deckへ届かなかった」を区別する(#1124)。後者は本来通知すべき
-          # 相手がいるのに通知できていない状態で、放置するとリリース失敗そのものに気づけない。
-          ISSUE_NUMBERS=""
+          # 「記録できなかった」はrunを落とさず警告に留める（リリースの失敗自体はこのrunの失敗として残る）
           if [ -z "$APP_BASE_URL" ] || [ -z "$PROGRESS_REPORT_SECRET" ]; then
-            echo "::warning::APP_BASE_URL / PROGRESS_REPORT_SECRET が未設定のため、通知先を特定できません"
+            echo "::warning::APP_BASE_URL / PROGRESS_REPORT_SECRET が未設定のため、失敗をissue-deckへ記録できません"
             exit 0
           fi
-          BODY_FILE="${RUNNER_TEMP:-/tmp}/notify-progress.json"
-          CODE="$(curl -sS -m 20 -o "$BODY_FILE" -w '%{http_code}' \
-            -H "Authorization: Bearer $PROGRESS_REPORT_SECRET" \
-            "$APP_BASE_URL/api/progress?repository=$GH_REPO&status=develop,release")" || CODE=000
+          # 選んで作り直していた場合は選択も渡す。issue-deckは再開時にこれを現在の状態で検証し直す
+          BODY="$(jq -nc --arg repo "$GH_REPO" --arg run "$RUN_ID" --arg event "$EVENT_NAME" --arg bump "$BUMP_KIND" --arg selection "$REBUILD_SELECTION" \
+            '{action: "failed", repository: $repo, runId: ($run | tonumber), event: $event, bumpKind: $bump, rebuildSelection: $selection}')"
+          CODE="$(curl -sS -m 30 -o /dev/null -w '%{http_code}' -X POST \
+            -H "Authorization: Bearer $PROGRESS_REPORT_SECRET" -H "Content-Type: application/json" \
+            --data "$BODY" "$APP_BASE_URL/api/dispatch/release-preparation")" || CODE=000
           if [ "$CODE" != "200" ]; then
-            echo "::warning::issue-deckへ問い合わせできませんでした（HTTP $CODE）。通知先を特定できません"
-            exit 0
-          fi
-          if [ "$(jq -r '.available // false' "$BODY_FILE" 2>/dev/null || echo false)" != "true" ]; then
-            echo "::warning::issue-deckが進捗を返せませんでした（reason=$(jq -r '.reason // "unknown"' "$BODY_FILE" 2>/dev/null || echo unknown)）。通知先を特定できません"
-            exit 0
-          fi
-          ISSUE_NUMBERS="$(jq -r '.issues[]' "$BODY_FILE" 2>/dev/null || true)"
-
-          if [ -z "$ISSUE_NUMBERS" ]; then
-            echo "Develop・Releaseにいるopenなissueはありません（対象なしのため通知しません）"
-            exit 0
+            echo "::warning::issue-deckへ失敗を記録できませんでした（HTTP $CODE）。実行ログ: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          else
+            echo "リリース準備の失敗をissue-deckへ記録しました。リリース画面に失敗した工程と再開の操作が出ます"
           fi
 
-          BODY='⚠️ develop→mainのリリースワークフロー（release-develop-to-main.yml）が失敗しました。'
-          BODY="$BODY"$'\n\n'"実行ログ: $RUN_URL"
-          BODY="$BODY"$'\n\n''GitHub Actions側の障害が原因の場合があります。https://www.githubstatus.com で `Actions` の状態をご確認ください。'
-          BODY="$BODY"$'\n\n''復旧している場合は、リポジトリのissue-deck画面から手動でリリースを再実行できます。'
-          BODY="$BODY"$'\n\n<!-- issue-deck-fallback-notice -->'
-
-          # リリースが失敗して続け方の指示が要る状態なので、理由は`01.check-blocked`(#1490)。
-          # 展開先リポジトリにラベル自体が定義されていない場合でもこのステップを落とさないよう、
-          # 付与・除去の前にリポジトリのラベル一覧と突き合わせる(#975)。ラベルの構成はIssueに
-          # よらず同じなので、対象Issueのループの外で1度だけ組み立てる。
-          REASON_LABEL="01.check-blocked"
-          DEFINED_LABELS="$(gh label list --json name --jq '.[].name' --limit 200)"
-          LABEL_ARGS=()
-          for name in "00.check-user" "$REASON_LABEL"; do
-            if grep -qx "$name" <<<"$DEFINED_LABELS"; then
-              LABEL_ARGS+=(--add-label "$name")
-            else
-              echo "::warning::ラベル '$name' がリポジトリに存在しないため付与をスキップします"
-            fi
-          done
-          for name in 01.check-plan 01.check-input 01.check-merge 01.check-blocked 01.check-answered 00.qa-answered; do
-            if [ "$name" != "$REASON_LABEL" ] && grep -qx "$name" <<<"$DEFINED_LABELS"; then
-              LABEL_ARGS+=(--remove-label "$name")
-            fi
-          done
-
-          for NUM in $ISSUE_NUMBERS; do
-            # dispatchジョブ側の他の通知と同様、同一runのURLを含むコメントが既にあれば重複通知しない。
-            if gh issue view "$NUM" --json comments --jq '.comments[-20:][].body' 2>/dev/null | grep -qF "$RUN_URL"; then
-              echo "issue #$NUM は同一runの通知コメントを確認できたため、重複通知をスキップします"
-              continue
-            fi
-            gh issue comment "$NUM" --body "$BODY"
-            if [ "${#LABEL_ARGS[@]}" -gt 0 ]; then
-              gh issue edit "$NUM" "${LABEL_ARGS[@]}"
-            fi
-          done
+  # 準備が進んだrunの報告（#4335）。issue-deckが未解決の失敗を解決にし、旧`notify-failure`が付けたと
+  # 確認できる確認待ちラベルだけを外す（他の理由で付いたもの・由来の分からないものは外さない）。
+  notify-prepared:
+    needs: [release]
+    if: needs.release.result == 'success' && needs.release.outputs.prepared == 'true'
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - name: リリース準備が進んだことをissue-deckへ報告する
+        env:
+          GH_REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+          APP_BASE_URL: ${{ vars.APP_BASE_URL }}
+          PROGRESS_REPORT_SECRET: ${{ secrets.PROGRESS_REPORT_SECRET }}
+        run: |
+          if [ -z "$APP_BASE_URL" ] || [ -z "$PROGRESS_REPORT_SECRET" ]; then
+            echo "APP_BASE_URL / PROGRESS_REPORT_SECRET が未設定のため、報告しません"
+            exit 0
+          fi
+          BODY="$(jq -nc --arg repo "$GH_REPO" --arg run "$RUN_ID" '{action: "prepared", repository: $repo, runId: ($run | tonumber)}')"
+          CODE="$(curl -sS -m 60 -o /dev/null -w '%{http_code}' -X POST \
+            -H "Authorization: Bearer $PROGRESS_REPORT_SECRET" -H "Content-Type: application/json" \
+            --data "$BODY" "$APP_BASE_URL/api/dispatch/release-preparation")" || CODE=000
+          [ "$CODE" = "200" ] || echo "::warning::issue-deckへ報告できませんでした（HTTP $CODE）"

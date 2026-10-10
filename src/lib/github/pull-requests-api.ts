@@ -26,7 +26,8 @@ export type GithubApiOpenPullRequest = {
    */
   merged_at: string | null;
   user: { login: string } | null;
-  base: { ref: string };
+  /** `sha`はリリースPRの検証記録（#4349）を現在の対象と突き合わせるために使う */
+  base: { ref: string; sha?: string };
   head: { ref: string; sha: string; repo?: { full_name: string } | null };
   labels?: { name: string }[];
   /** Auto-mergeが有効なPRのみオブジェクトが入る。無効ならnull */

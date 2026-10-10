@@ -30,8 +30,10 @@ AIレビューはテスト実行の代わりにしない。個別レビューの
 - **`POST /api/issues/pull-request-merge`のゲートは、base=main・head=`release-main/v*`のPRにだけ掛ける。** develop向けPR・知見昇格PR等は従来どおり。
   マージ直前にGitHubからbase/headを取り直して記録のSHAと突き合わせ、`mergePullRequest`へexpectedHeadShaを渡す
 - `blocked`（失敗・未実施・実行中・古い結果）は確認済みにできない。`needs_confirmation`だけが`acknowledgeVerification: true`で通れる（サーバーログに残す）
+- **判定の完了待ち（#4354）。** 統合検証・全体レビューが`waiting`／`running`のあいだは、**`enforced`に関わらず**マージAPIが409（`release_verification_pending`）で止める。
+  結果（失敗・要確認・古い結果）では止めず、記録が無い（依頼されていない）ものも待たない。報告が来ず待ちのまま止まった場合は`acknowledgeVerification: true`で上書きできる（サーバーログに残す）。判断は`evaluateReleaseVerificationWait`
 - **AIのLGTMだけで自動マージはしない。** 最終承認は従来どおり人
-- 強制は`src/lib/release-verification-config.ts`のリポジトリ別`enforced`で切り替える。**検証の実行経路が配布されるまで`false`**（未配布を導入済みと扱わない）
+- 結果による強制は`src/lib/release-verification-config.ts`のリポジトリ別`enforced`で切り替える（上の完了待ちは対象外）。**検証の実行経路が配布されるまで`false`**（未配布を導入済みと扱わない）
 
 ### ゲートが及ばない経路
 
@@ -126,11 +128,37 @@ PC（リリースPR詳細）・スマホ（リリースシート）・**本番�
 - **二重起案の防止**: 鍵は「リポジトリ・リリースPR・base/head SHA・種別・指摘」から決め、進行中の系列は`activeKey`のユニーク制約で1本に絞る。同じ対象は既存の系列（Issue・修正PR・進捗）を返す。同時起案に負けたIssueは閉じる
 - **区別**: 全体レビューの実行障害（`failed`）は起案しない（再実行が主導線）。統合検証の失敗は文面から実行障害（終了コード126/127・接続失敗・Mac/ホスト無しなど）と見分け、疑わしいときは再実行を先に勧める。**利用者が明示（「コードの修正として起案する」）したときだけ起案する**。仕様判断が要るときは判断内容を必須にし、`21.plan-required`を付けて**計画の承認を省かない**
 - **取り込み**: 修正PRのマージは**既存の自動レビュー・マージ機構**が行い、系列は`issue-<番号>`ブランチのdevelop向けPRを観測するだけ（GitHubの保護は外さない）。修正PRがマージされずに閉じたら理由付きで止める
-- **作り直し**: 同じリリースPRに結び付いた系列が**全部**マージ済みになったら、既存の`release-rebuild`（`release-rebuild-run.ts`。画面の作り直しと同じ経路）で後継候補を作る。凍結ブランチは書き換えず、閉じて作り直す（採番はworkflowの現行ルール）。`rebuildClaimedAt`の条件付き更新で二重の作り直しを防ぐ
-- **混入の防止**: 作り直しはdevelopの最新を取り込む。**修正PR以外の変更が入っていたら自動では作り直さず、PR番号を示して`awaiting_decision`（判断待ち）で止める**。「無関係な変更も含めて作り直す」で確認した番号だけを`acceptedExtraPrs`に記録する。**修正だけを選んで適用する仕組みは未実装**（残作業）
+- **作り直し**: 同じリリースPRに結び付いた系列が**全部**マージ済みになったら後継候補を作る。**PRを選んだ作り直し（#4335）に対応したリポジトリでは、画面の手動選択と同じ`requestSelectiveRebuild`（`release-rebuild-selection-run.ts`）で、修正PR（＋確認済みの`acceptedExtraPrs`）だけを元の候補へ足す**。未対応のリポジトリは従来の`release-rebuild`（閉じてdevelopの最新で作り直す）。`rebuildClaimedAt`の条件付き更新と、作り直し依頼の`activeKey`で二重の作り直しを防ぐ
+- **混入の防止**: 選んだ作り直しでは、選んでいないdevelopの変更は入らないので判断待ちにしない（下記「PRを選んだ作り直し」）。未対応のリポジトリだけ、**修正PR以外の変更が入っていたら自動では作り直さず、PR番号を示して`awaiting_decision`（判断待ち）で止める**。「無関係な変更も含めて作り直す」で確認した番号だけを`acceptedExtraPrs`に記録する
 - **再検証**: 後継候補を検出したら`reverifying`。新しいbase/headの統合検証・全体レビューがどちらも成功したときだけ`ready`（本番承認待ち）。失敗・要確認は`stopped`にし、後継候補から再度起案すると**同じ系列の次の世代**になる（上限3世代・同一指摘の再発は理由付きで拒否）。後継候補がさらに更新・取消・マージされたら`superseded`にして誤った候補を追わない
 - **巡回**: `scripts/subpc-dispatch-poller.sh`の`sweep_release_fix_series`（`DISPATCH_POLLER_VERSION=37`）が`POST /api/repositories/release/fix-series/sweep`を呼ぶ。進行はすべてDBの行にあり、再起動しても続きから進む。止まった・判断待ちのときは修正Issueへ理由をコメントし`00.check-user`＋`01.check-blocked`を付ける
 - **画面**: 全体レビューの指摘・統合検証の失敗の下に「修正Issueを作成」、検証区分の下に「この候補への修正の進捗」（Issue作成→計画・実装→PR検証→develop取り込み→候補作り直し→再検証→本番承認待ちの現在地・関連リンク・停止理由・各SHA）。PC・スマホ共通の部品
+
+## PRを選んだ作り直し（#4335）
+
+「修正を入れて作り直す」は、元の候補（`release-main/vX.Y.Z`のhead）へ**選んだPRのdevelopへのマージ差分だけ**を
+`cherry-pick -m 1`で足した状態からバンプする。以前はdevelopの最新を丸ごと取り込んでいたため、元の候補の後に入った
+無関係な変更まで混ざっていた。GitHubのmerge APIで祖先ごと取り込む方式は、選んだ差分だけになる保証が無いので採らない。
+
+- **画面**（`release-rebuild-button.tsx`・`release-rebuild-selection-list.tsx`。PC・スマホ共通）: 元の候補の後にdevelopへ入ったPRと
+  当該リリースの修正PR（未マージを含む）を、番号・題・関連Issue・マージ／CIの状態つきで並べ、複数選べる。**既定は当該リリースの
+  修正系列の修正PRだけ**で、無関係なPRは選ばない。未マージ・取り込み済みは理由を添えて選べない（developのレビュー・マージを省かない）。
+  押す前に「追加される範囲」を出す
+- **検証**（`release-rebuild-selection.ts`・`-run.ts`）: PR番号だけでなく、マージ済みか・base=developか・バンプPRでないか・
+  マージコミットが選んだ時点と同じか・元の候補に既に含まれていないかを確かめ、元の候補のPR番号とheadと一緒に
+  `rebuild_selection` inputとしてworkflowへ渡す。同じ元の候補（番号＋head）への起動は`ReleaseRebuildRequest.activeKey`で1本に絞る
+- **workflow**（`reusable-release-develop-to-main.yml`の状態判定）: 元の候補が今も同じheadで開いているかを確かめ直し、PRを
+  developへ入った順に当てる。マージコミットの件名がそのPRのものでなければ、既に元の候補にあれば、当てて競合すれば止める。
+  競合したときは、元の候補の後に同じファイルを触ったPRを「先に必要な可能性があるPR」として示す。**選択は自動では広げない**。
+  当てた結果の差分のファイルが、選んだPRのマージ差分の範囲に収まることも確かめる
+- **後継の候補とバンプPRを分ける**: 「元の候補＋選んだPR＋版の書き換え」を後継の候補として`release-candidate/v新版`に置き、
+  developへのバンプPRには**版の書き換えだけ**を当てる（候補ごとdevelopへマージすると、選んだPRの後にdevelopで同じ行を直した
+  PRがあったとき衝突する）。バンプPR本文の`<!-- issue-deck-rebuild-candidate:<SHA> -->`から、マージで起きるrunが凍結点を
+  この候補にする。**元の候補は後継のリリースPRを作れてから閉じる**（`<!-- issue-deck-rebuild-origin:#N -->`）ので、途中で失敗しても
+  元の候補は残り、失敗の記録に選択が残る（リリース画面の「再開」は、同じ選択を現在の状態で検証し直してから起動する）
+- 後継の候補のSHAで統合検証・全体レビューが走り直す（旧SHAの成功は流用しない）。本番mainへのマージは従来どおり人が承認する
+- **未対応のcaller**（配布先の旧タグ）には選択を出さず、従来の作り直しだけにする（`releaseCallerSupportsSelection`がdevelopのcallerに
+  `rebuild_selection`があるかを読む）。新規アプリの雛形（`src/lib/new-app/scaffold-workflows.ts`）は最初から対応している
 
 ## 既存検証の棚卸し（重複実装しない）
 
@@ -140,7 +168,7 @@ PC（リリースPR詳細）・スマホ（リリースシート）・**本番�
 ## 残作業
 
 - PR2（#4237）・PR3（#4238）: 完了。`enforced`はまだ`false`のまま（運用検証後に別途有効化）
-- 修正系列（#4317）: 修正だけを選んでリリース候補へ適用する仕組み（現状はdevelop全体を取り込むため、無関係な変更があれば判断待ちで止める）、実行障害の統合検証の再実行導線、PC/スマホの実機確認
+- 修正系列（#4317）: 実行障害の統合検証の再実行導線、PC/スマホの実機確認（修正だけを選んで適用する仕組みは#4335で実装）
 - 手作業: 他リポジトリへの配布・必須チェック設定・代表例の運用検証（別Issueで追跡）
 
 ## 統合ビルドの検証用環境（#4331）

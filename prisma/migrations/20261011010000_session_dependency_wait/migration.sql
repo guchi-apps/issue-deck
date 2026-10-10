@@ -1,0 +1,32 @@
+-- 実装セッションの依存待ち（#4321）。
+CREATE TABLE `SessionDependencyWait` (
+  `id` VARCHAR(191) NOT NULL,
+  `repositoryFullName` VARCHAR(191) NOT NULL,
+  `issueNumber` INTEGER NOT NULL,
+  `depRepository` VARCHAR(191) NOT NULL,
+  `depNumber` INTEGER NOT NULL,
+  `depKind` VARCHAR(8) NOT NULL,
+  `conditions` JSON NOT NULL,
+  `reason` VARCHAR(300) NOT NULL,
+  `status` VARCHAR(24) NOT NULL,
+  `source` VARCHAR(16) NOT NULL,
+  `lastObservation` JSON NULL,
+  `lastCheckedAt` DATETIME(3) NULL,
+  `lastError` VARCHAR(300) NULL,
+  `lastSweepAt` DATETIME(3) NULL,
+  `satisfiedAt` DATETIME(3) NULL,
+  `resumeJobId` VARCHAR(40) NULL,
+  `resumeRequestedAt` DATETIME(3) NULL,
+  `resumeSentAt` DATETIME(3) NULL,
+  `resumedAt` DATETIME(3) NULL,
+  `failureReason` VARCHAR(300) NULL,
+  `activeKey` VARCHAR(255) NULL,
+  `notifiedKey` VARCHAR(64) NULL,
+  `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  `updatedAt` DATETIME(3) NOT NULL,
+
+  UNIQUE INDEX `SessionDependencyWait_activeKey_key`(`activeKey`),
+  INDEX `SessionDependencyWait_repositoryFullName_issueNumber_idx`(`repositoryFullName`, `issueNumber`),
+  INDEX `SessionDependencyWait_status_idx`(`status`),
+  PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;

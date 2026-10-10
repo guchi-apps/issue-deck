@@ -14,14 +14,19 @@ import { releaseWorkflowExists } from "@/lib/github/release-workflow-cache";
 import { previewModeGuard } from "@/lib/preview-mode";
 import { canRebuildRelease } from "@/lib/release-rebuild";
 import { rebuildReleaseCandidate } from "@/lib/release-rebuild-run";
+import { loadRebuildSelectionOptions, requestSelectiveRebuild } from "@/lib/release-rebuild-selection-run";
+import { releaseCallerSupportsSelection } from "@/lib/github/release-api";
 import { isBumpKind } from "@/lib/semver-bump";
 
 /**
  * リリースの作り直し（#3014）。
  *
- * - GET: 開いているリリースPRと、その後にdevelopへ入った変更（確認ダイアログの材料）
- * - POST: リリースPRを閉じて凍結ブランチを消し、リリースworkflowを起動し直す。workflowが
- *   前回のバンプを取り消してバンプから作り直す（`reusable-release-develop-to-main.yml`）
+ * - GET: 開いているリリースPRと、その後にdevelopへ入った変更（確認ダイアログの材料）。PRを選んだ
+ *   作り直し（#4335）に対応したリポジトリでは、選べるPR・状態・既定の選択（`selection`）も返す
+ * - POST: 対応したリポジトリでは`selectedPullRequests`で選んだPRだけを元の候補へ足して作り直す
+ *   （元の候補は後継ができてから閉じる。`requestSelectiveRebuild`）。**選択の無い作り直しは受け付けない**
+ *   （developの最新を丸ごと取り込むと、選んでいない変更が混ざるため）。未対応のリポジトリでは従来どおり、
+ *   リリースPRを閉じて凍結ブランチを消し、リリースworkflowを起動し直す
  *
  * **作り直せるのはheadが凍結ブランチ`release-main/vX.Y.Z`のリリースPRだけ。** 参照タグが古い
  * リポジトリではheadが`develop`のことがあり（#2117以前）、その場合にブランチを消すとdevelopが
@@ -86,14 +91,17 @@ async function handleGET(request: NextRequest) {
       return NextResponse.json({ releasePullRequest: null, candidate: null });
     }
     const candidate = await fetchReleaseRebuildCandidate(owner, repo, releasePr.head.sha, token);
+    const selection = await loadRebuildSelectionOptions({ owner, repo, token, releasePr });
     return NextResponse.json({
       releasePullRequest: {
         number: releasePr.number,
         title: releasePr.title,
         url: releasePr.html_url,
         version: releasePr.head.ref.slice(FROZEN_RELEASE_PREFIX.length),
+        headSha: releasePr.head.sha,
       },
       candidate,
+      selection,
     });
   } catch (error) {
     return githubError("GET", error);
@@ -117,11 +125,19 @@ async function handlePOST(request: NextRequest) {
   const repo = payload?.repo;
   const pullRequestNumber = payload?.pullRequestNumber;
   const bumpKind = payload?.bumpKind;
+  const rawSelected: unknown = payload?.selectedPullRequests;
+  const selected = Array.isArray(rawSelected)
+    ? rawSelected
+        .filter((item): item is { number: number; mergeSha?: unknown } => Number.isInteger(item?.number) && item.number > 0)
+        .map((item) => ({ number: item.number, expectedMergeSha: typeof item.mergeSha === "string" ? item.mergeSha : null }))
+    : null;
+  const expectedHeadSha = typeof payload?.headSha === "string" ? payload.headSha : null;
   if (
     typeof owner !== "string" ||
     typeof repo !== "string" ||
     typeof pullRequestNumber !== "number" ||
-    (bumpKind !== undefined && bumpKind !== null && !isBumpKind(bumpKind))
+    (bumpKind !== undefined && bumpKind !== null && !isBumpKind(bumpKind)) ||
+    (rawSelected !== undefined && (selected === null || selected.length !== (rawSelected as unknown[]).length))
   ) {
     return NextResponse.json({ error: "invalid_request" }, { status: 400 });
   }
@@ -141,9 +157,31 @@ async function handlePOST(request: NextRequest) {
     // ダイアログを開いた後にマージ・作り直しされていないかを確かめる。別のPRを閉じないため、
     // 押したときに見ていたPR番号と一致するものだけを対象にする。
     const releasePr = await findFrozenReleasePullRequest(owner, repo, token);
-    if (!releasePr || releasePr.number !== pullRequestNumber) {
+    if (!releasePr || releasePr.number !== pullRequestNumber || (expectedHeadSha && releasePr.head.sha !== expectedHeadSha)) {
       return NextResponse.json({ error: "release_pr_changed" }, { status: 409 });
     }
+
+    // PRを選んだ作り直し（#4335）。元の候補は閉じず、workflowが後継を作れたときに閉じる
+    if (selected !== null) {
+      const result = await requestSelectiveRebuild({
+        owner,
+        repo,
+        token,
+        releasePr,
+        selected,
+        bumpKind: isBumpKind(bumpKind) ? bumpKind : undefined,
+        source: "manual",
+        userId,
+      });
+      if (!result.ok) {
+        return NextResponse.json(result, { status: result.error === "dispatch_failed" ? 502 : 409 });
+      }
+      return NextResponse.json({ ok: true, selective: true, selection: result.selection });
+    }
+    if (await releaseCallerSupportsSelection(owner, repo, token)) {
+      return NextResponse.json({ error: "selection_required" }, { status: 400 });
+    }
+
     const candidate = await fetchReleaseRebuildCandidate(owner, repo, releasePr.head.sha, token);
     if (!canRebuildRelease(candidate)) {
       return NextResponse.json({ error: "nothing_to_rebuild" }, { status: 409 });

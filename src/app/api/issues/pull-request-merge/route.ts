@@ -8,7 +8,11 @@ import { getInstallationToken } from "@/lib/github/app-auth";
 import { recordDeployLaunchWatch } from "@/lib/github/deploy-launch-watch";
 import { GithubApiError } from "@/lib/github/issues-api";
 import { previewModeGuard } from "@/lib/preview-mode";
-import { evaluateReleaseMergeGate, isReleasePullRequest } from "@/lib/release-merge-gate";
+import {
+  evaluateReleaseMergeGate,
+  evaluateReleaseVerificationWait,
+  isReleasePullRequest,
+} from "@/lib/release-merge-gate";
 import { listReleaseVerificationRecords } from "@/lib/release-verification";
 import { getReleaseVerificationConfig } from "@/lib/release-verification-config";
 
@@ -64,6 +68,22 @@ async function handlePOST(request: NextRequest) {
         records,
         enforced: getReleaseVerificationConfig(`${owner}/${repo}`).enforced,
       });
+      // 統合検証・全体レビューの判定が出るまで待たせる（#4354）。結果では止めず、`enforced`にも依らない。
+      // 報告が来ず待ちのまま止まった場合に備え、明示確認（acknowledgeVerification）で上書きできる
+      const pending = evaluateReleaseVerificationWait({
+        current: { baseSha: pr.base.sha, headSha: pr.head.sha },
+        records,
+      });
+      if (pending.length > 0) {
+        if (body.acknowledgeVerification !== true) {
+          return NextResponse.json({ error: "release_verification_pending", pending }, { status: 409 });
+        }
+        console.warn(
+          `[POST /api/issues/pull-request-merge] ${owner}/${repo}#${number} 判定待ちの検証を明示確認のうえマージ: ${pending
+            .map((b) => b.reason)
+            .join(" / ")}`,
+        );
+      }
       // 失敗・未実施・古い結果は確認済みにできない。要確認だけが明示確認（acknowledgeVerification）で通れる
       const overridable = gate.status === "needs_confirmation" && body.acknowledgeVerification === true;
       if (gate.status === "blocked" || (gate.status === "needs_confirmation" && !overridable)) {

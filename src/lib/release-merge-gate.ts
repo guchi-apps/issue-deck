@@ -55,7 +55,10 @@ export type ReleaseMergeGateInput = {
   /** マージ直前にGitHubから取り直した現在のSHA */
   current: { baseSha: string; headSha: string };
   records: readonly ReleaseVerificationRecord[];
-  /** 検証の強制を有効にしているか。無効なら従来どおり判定しない（未配布を導入済みと扱わない） */
+  /**
+   * 検証の結果による強制を有効にしているか。無効なら従来どおり結果では判定しない（未配布を導入済みと扱わない）。
+   * **実行中・待機中の完了待ち（`evaluateReleaseVerificationWait`）はこのフラグの対象外**で、常に有効
+   */
   enforced: boolean;
 };
 
@@ -142,6 +145,26 @@ export function evaluateReleaseMergeGate(input: ReleaseMergeGateInput): ReleaseM
   if (hard.length > 0) return { status: "blocked", views, blockers: [...hard, ...soft] };
   if (soft.length > 0) return { status: "needs_confirmation", views, blockers: soft };
   return { status: "ready", views, blockers: [] };
+}
+
+export type ReleaseVerificationPending = { kind: ReleaseVerificationKind; state: "waiting" | "running"; reason: string };
+
+/**
+ * 統合検証・全体レビューの判定が出るまでのマージ待ち（#4354）。
+ * **結果（失敗・要確認・古い結果）では止めない。** 実行中・待機中の検証だけを待ちとして返す。
+ * 記録が無い（依頼されていない）ものは待たない。`enforced`とは独立に効く
+ */
+export function evaluateReleaseVerificationWait(input: {
+  current: { baseSha: string; headSha: string };
+  records: readonly ReleaseVerificationRecord[];
+}): ReleaseVerificationPending[] {
+  const pending: ReleaseVerificationPending[] = [];
+  for (const view of viewReleaseVerifications(input.current, input.records)) {
+    if (view.state === "waiting" || view.state === "running") {
+      pending.push({ kind: view.kind, state: view.state, reason: `${KIND_LABEL[view.kind]}の判定が出ていません` });
+    }
+  }
+  return pending;
 }
 
 /** マージ対象がリリースPR（base=main・head=`release-main/v*`）か。ゲートはここにだけ掛ける */

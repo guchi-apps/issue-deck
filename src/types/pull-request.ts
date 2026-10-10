@@ -34,6 +34,21 @@ export type PullRequestKind =
  * closedが載る（#1312）。そのため`state`・`merged`を持ち、
  * 詳細（`/api/pull-requests/detail`）も同じ形をあわせて返す。
  */
+/** 一覧に出す検証1区分の状態（`viewReleaseVerifications`の状態を一覧向けに畳んだもの） */
+export type PullRequestReleaseCheckState =
+  | "passed"
+  | "running"
+  | "needs_check"
+  | "failed"
+  | "not_run"
+  | "invalidated"
+  | "not_applicable";
+
+export type PullRequestReleaseChecks = {
+  aiReview: PullRequestReleaseCheckState;
+  integration: PullRequestReleaseCheckState;
+};
+
 export type PullRequestSummary = {
   /** 一覧のkey・選択状態に使う識別子（`<owner>/<repo>#<番号>`） */
   id: string;
@@ -182,6 +197,12 @@ export type PullRequestSummary = {
    * 読み直している。
    */
   releaseVerification: ReleaseVerification | null;
+  /**
+   * リリースPRの統合検証・全体AIレビューの状態（#4349）。リリースPR以外・記録を読めなかった
+   * 場合はnull／省略で、その場合は枠自体を出さない（成功と推測しない）。DBの記録を引くだけで
+   * GitHub APIの消費は増えない。
+   */
+  releaseChecks?: PullRequestReleaseChecks | null;
   createdAt: string;
   updatedAt: string;
 };

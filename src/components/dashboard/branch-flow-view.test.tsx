@@ -8,6 +8,11 @@ import { AI_REVIEW_NONE } from "@/lib/github/check-rollup";
 import type { RepositoryBranchStatus, RepositoryDeployStatus } from "@/types/branch-flow";
 import type { PullRequestSummary } from "@/types/pull-request";
 
+// リリース準備の失敗の帯（#4335）は自分で取得するため、fetchの回数を数えるテストから外す
+vi.mock("@/components/dashboard/release-preparation-alert", () => ({ ReleasePreparationAlert: () => null }));
+// 作り直しの履歴（#4359）も自分で取得するため同様に外す
+vi.mock("@/components/dashboard/release-rebuild-history-panel", () => ({ ReleaseRebuildHistoryPanel: () => null }));
+
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn(), replace: vi.fn(), back: vi.fn() }),
   usePathname: () => "/dashboard",
@@ -1150,8 +1155,8 @@ describe("BranchFlowView", () => {
       // 既定は自動判定
       expect(options[0].getAttribute("aria-checked")).toBe("true");
 
-      fireEvent.click(screen.getByText("マイナー"));
-      expect(screen.getByText("マイナー").closest("[role='radio']")?.getAttribute("aria-checked")).toBe(
+      fireEvent.click(screen.getByText("minor"));
+      expect(screen.getByText("minor").closest("[role='radio']")?.getAttribute("aria-checked")).toBe(
         "true",
       );
       expect(options[0].getAttribute("aria-checked")).toBe("false");

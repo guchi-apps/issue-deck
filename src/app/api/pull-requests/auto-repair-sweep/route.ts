@@ -3,6 +3,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { requireUserId } from "@/lib/auth-user";
 import { db } from "@/lib/db";
 import { authorizeDispatch } from "@/lib/dispatch/dispatch-auth";
+import { runReviewHandoffRescueSweep } from "@/lib/github/pull-request-review-handoff-rescue";
 import { runPullRequestAutoRepairSweep } from "@/lib/github/pull-request-auto-repair-sweep";
 import { previewModeGuard } from "@/lib/preview-mode";
 
@@ -14,7 +15,12 @@ export async function POST(request: NextRequest) {
   if (auth === "not_configured") return NextResponse.json({ error: "not_configured" }, { status: 503 });
   if (auth === "unauthorized") return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   try {
-    return NextResponse.json({ ok: true, ...(await runPullRequestAutoRepairSweep()) }, { headers: { "Cache-Control": "no-store" } });
+    // handoffの取りこぼしを先に系列へ載せ、同じ巡回で進められるようにする（#4334）。失敗しても系列の巡回は止めない。
+    const rescue = await runReviewHandoffRescueSweep().catch((error: unknown) => {
+      console.error("[POST /api/pull-requests/auto-repair-sweep] handoffの拾い直しに失敗:", error);
+      return null;
+    });
+    return NextResponse.json({ ok: true, ...(await runPullRequestAutoRepairSweep()), rescued: rescue?.started.length ?? 0 }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     console.error("[POST /api/pull-requests/auto-repair-sweep]", error);
     return NextResponse.json({ error: "sweep_failed" }, { status: 500 });
