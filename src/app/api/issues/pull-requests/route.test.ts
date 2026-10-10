@@ -103,6 +103,7 @@ describe("GET /api/issues/pull-requests", () => {
       draft: false,
       merged: false,
       head: { ref: "issue-213" },
+      base: { ref: "develop" },
       body: "",
     });
     fetchPullRequestCiStates.mockReset().mockResolvedValue(ciStates(false));
@@ -150,6 +151,7 @@ describe("GET /api/issues/pull-requests", () => {
       draft: false,
       merged: false,
       head: { ref: "issue-213" },
+      base: { ref: "develop" },
       body: "- Issueを閉じるPRか、途中PRか: 最終PRです。<!-- issue-deck-pr-role:closing -->",
     });
 
