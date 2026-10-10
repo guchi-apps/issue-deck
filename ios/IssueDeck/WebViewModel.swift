@@ -438,7 +438,7 @@ extension WebViewModel: WKScriptMessageHandlerWithReply {
                 }
                 reply.send(await self.pushStatus(serverOk: ok))
             case "openSettings":
-                if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) }
+                if let url = URL(string: UIApplication.openSettingsURLString) { _ = await UIApplication.shared.open(url) }
                 reply.send(nil)
             default:
                 reply.fail("unsupported")
