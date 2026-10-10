@@ -6,12 +6,52 @@ import { withGithubApiFeature } from "@/lib/github/api-usage";
 import { getInstallationToken } from "@/lib/github/app-auth";
 import { githubApiErrorMessage } from "@/lib/github/network-error";
 import {
+  fetchClosedPullRequestsForBase,
   fetchCompareCommits,
+  fetchPullRequest,
   fetchPullRequestCommits,
   PULL_REQUEST_COMMITS_PER_PAGE,
 } from "@/lib/github/pull-requests-api";
-import { toReleaseChanges } from "@/lib/release-changes";
+import { toReleaseChanges, withReleaseReviews } from "@/lib/release-changes";
 import type { ReleaseChangeListResponse } from "@/types/pull-request";
+
+/** closed一覧に無いPRの本文を単体で補う上限。超えた分は「取得できませんでした」にする */
+const MAX_BODY_FETCHES = 20;
+
+/**
+ * 各PRの本文（`## 検証結果`の節を持つ）を集める。まずdevelop向けのclosed一覧を1回で引き
+ * （ETagで条件付きGET）、足りないPRだけ単体取得で補う。取れなかったPRは結果に入れない。
+ */
+async function fetchPullRequestBodies(
+  owner: string,
+  repo: string,
+  numbers: readonly number[],
+  token: string,
+): Promise<Map<number, { body: string | null; headSha: string }>> {
+  const bodies = new Map<number, { body: string | null; headSha: string }>();
+  if (numbers.length === 0) return bodies;
+  const wanted = new Set(numbers);
+  try {
+    for (const pr of await fetchClosedPullRequestsForBase(owner, repo, "develop", token)) {
+      if (wanted.has(pr.number)) bodies.set(pr.number, { body: pr.body, headSha: pr.head.sha });
+    }
+  } catch (error) {
+    // 一覧が取れなくても、単体取得で補えるぶんは補う
+    console.error(`[release/changes] closed一覧を取得できませんでした ${owner}/${repo}:`, error);
+  }
+  const missing = numbers.filter((n) => !bodies.has(n)).slice(0, MAX_BODY_FETCHES);
+  await Promise.all(
+    missing.map(async (n) => {
+      try {
+        const pr = await fetchPullRequest(owner, repo, n, token);
+        bodies.set(n, { body: pr.body, headSha: pr.head.sha });
+      } catch {
+        // 入れない＝取得不可として画面に出る
+      }
+    }),
+  );
+  return bodies;
+}
 
 export function GET(request: NextRequest) {
   return withGithubApiFeature("release_changes", () => handleGET(request));
@@ -75,8 +115,14 @@ async function handleGET(request: NextRequest) {
     const { pullRequests, unknownCommits } = toReleaseChanges(
       commits.map((commit) => ({ sha: commit.sha, message: commit.commit.message })),
     );
+    const bodies = await fetchPullRequestBodies(
+      owner,
+      repo,
+      pullRequests.filter((pr) => !pr.isVersionBump).map((pr) => pr.number),
+      token,
+    );
     const response: ReleaseChangeListResponse = {
-      pullRequests,
+      pullRequests: withReleaseReviews(pullRequests, bodies),
       unknownCommits,
       source: pullRequestNumber !== null ? "release-pr" : "develop",
       // 打ち切ったときは末尾が終端とは限らないので出さない

@@ -1076,7 +1076,32 @@ describe("BranchFlowView", () => {
         new Response(
           JSON.stringify({
             pullRequests: [
-              { number: 1460, title: "本番へ出したい変更", issueNumber: 1456, isVersionBump: false },
+              {
+                number: 1460,
+                title: "本番へ出したい変更",
+                issueNumber: 1456,
+                isVersionBump: false,
+                review: {
+                  reviewKind: "needs-check",
+                  reviewLabel: "要確認",
+                  riskKind: "hit",
+                  riskLabel: "該当あり",
+                  riskReasons: ["認証・認可に関わる変更"],
+                  confirmLabel: null,
+                  reviewedSha: null,
+                },
+                prHeadSha: "def5678",
+                reviewUnavailable: false,
+              },
+              {
+                number: 1461,
+                title: "本文を取れなかった変更",
+                issueNumber: null,
+                isVersionBump: false,
+                review: null,
+                prHeadSha: null,
+                reviewUnavailable: true,
+              },
             ],
             unknownCommits: [],
             source: "develop",
@@ -1095,6 +1120,10 @@ describe("BranchFlowView", () => {
       expect(await screen.findByText("#1460 本番へ出したい変更")).toBeTruthy();
       expect(screen.getByText(/今回反映する内容/)).toBeTruthy();
       expect(screen.getByText("関連Issue #1456")).toBeTruthy();
+      // PRごとのレビュー判定（#4245）。取得できなかったPRは「記録なし」と区別して出す
+      expect(screen.getAllByText("要確認").length).toBeGreaterThan(0);
+      expect(screen.getByText("・認証・認可に関わる変更")).toBeTruthy();
+      expect(screen.getByText(/レビューを取得できませんでした/)).toBeTruthy();
     });
 
     it("反映内容の取得に失敗したときは0件とせず失敗を出す（#4201）", async () => {

@@ -228,7 +228,7 @@ export function applyReviewVerdicts(
  * 「実施なし」が積まれ、分母が実態とずれる。
  */
 export function tallyChangeReviews(
-  changes: readonly PullRequestChangeReview[],
+  changes: readonly Pick<PullRequestChangeReview, "kind" | "reviewKind">[],
 ): ReleaseVerificationTally {
   const reviewable = changes.filter((change) => change.kind !== "version-bump");
   const count = (kind: ReviewVerdictKind) =>

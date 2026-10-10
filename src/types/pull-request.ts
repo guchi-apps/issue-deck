@@ -487,6 +487,15 @@ export type ReleaseChangePullRequest = {
   /** ブランチ名`issue-<番号>`から取れた対応Issue。取れなければnull（補足にだけ使う） */
   issueNumber: number | null;
   isVersionBump: boolean;
+  /**
+   * PR本文の`## 検証結果`から読んだ自動レビュー判定（PR作成時に記録済み）。記録が無ければnull。
+   * バージョンバンプPRはレビューの対象ではないので常にnull
+   */
+  review: PullRequestReviewVerdict | null;
+  /** そのPRの最新コミット。判定時点のコミットと突き合わせる鮮度の表示に使う。取れなければnull */
+  prHeadSha: string | null;
+  /** 本文を取得できなかった。**「記録なし」（`review: null`）とは別物**で、画面は取得不可と出す */
+  reviewUnavailable: boolean;
 };
 
 /** PR番号を特定できなかったコミット */
