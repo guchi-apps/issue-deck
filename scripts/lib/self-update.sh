@@ -49,11 +49,6 @@ self_update_prepare_worktree() {
   dirty_summary="$(printf '%s\n' "$porcelain" | cut -c4- | sed 's/.* -> //' | self_update_summarize_files)"
   local stop_message="作業ツリーに未コミットの変更があります（${dirty_summary}）。手元で確認してください。"
 
-  if printf '%s\n' "$porcelain" | grep -q '^??'; then
-    printf '%s' "$stop_message"
-    return 1
-  fi
-
   # 比較の前に取り込み先を最新にする（`pull`の前なので、しないと古い`@{u}`と比べてしまう）
   if ! timeout 120 git -C "$dir" fetch --quiet >/dev/null 2>&1 \
     || ! git -C "$dir" rev-parse --verify --quiet '@{u}' >/dev/null; then
@@ -61,12 +56,38 @@ self_update_prepare_worktree() {
     return 1
   fi
 
-  local -a files=()
+  # **取り込みが触れないファイルだけが汚れているなら、そのまま進める**（#4297）。手で書いた
+  # 変更（例: docs/の追記）が残っているだけで毎回「更新して再起動」が止まっていた。変更を
+  # 捨てず、`pull --ff-only`にも触れ合うファイルが無いので、巻き込んで消すことはない。
+  # 触れ合う場合・未追跡ファイルが取り込みと同じパスの場合は、`pull`自身が拒否して失敗として返る。
+  local -a incoming=()
   local file
+  while IFS= read -r file; do
+    [[ -n "$file" ]] && incoming+=("$file")
+  done < <(git -C "$dir" diff --name-only HEAD '@{u}' --)
+  local overlap=0 dirty_path
+  while IFS= read -r dirty_path; do
+    [[ -z "$dirty_path" ]] && continue
+    for file in ${incoming[@]+"${incoming[@]}"}; do
+      [[ "$file" == "$dirty_path" ]] && overlap=1
+    done
+  done < <(printf '%s\n' "$porcelain" | cut -c4- | sed 's/.* -> //')
+
+  if printf '%s\n' "$porcelain" | grep -q '^??'; then
+    ((overlap == 0)) || { printf '%s' "$stop_message"; return 1; }
+    echo "未追跡のファイルを残したまま更新します: ${dirty_summary}" >&2
+    return 0
+  fi
+
+  local -a files=()
   while IFS= read -r file; do
     [[ -n "$file" ]] && files+=("$file")
   done < <(git -C "$dir" diff --name-only HEAD --)
   if ((${#files[@]} == 0)) || ! git -C "$dir" diff --quiet '@{u}' -- "${files[@]}"; then
+    if ((overlap == 0)); then
+      echo "取り込みと重ならない未コミットの変更を残したまま更新します: ${dirty_summary}" >&2
+      return 0
+    fi
     printf '%s' "$stop_message"
     return 1
   fi
