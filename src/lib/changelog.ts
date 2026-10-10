@@ -42,6 +42,13 @@ export type ChangelogEntry = {
  */
 export const APP_CHANGELOG: ChangelogEntry[] = [
   {
+    version: "8.45.2",
+    date: "2026-10-10",
+    changes: [
+      "手作業のIssueで作業セッションが消えてしまった場合でも、「セッションを復旧」を押すと前の会話の続きから再開できるようになりました。",
+    ],
+  },
+  {
     version: "8.45.1",
     date: "2026-10-10",
     changes: [
