@@ -96,7 +96,10 @@ export function extractReleaseHighlights(
       return { text, key };
     })
     .filter((item) => item.text.length > 0)
-    .filter((item) => !VERSION_BUMP_TITLE.test(item.text));
+    .filter((item) => !VERSION_BUMP_TITLE.test(item.text))
+    // 同じPRが本文へ複数回載ることがある（#4287。8.47.0では同じ4件が2回並んだ）。
+    // 先に出たものを残し、同じ`key`の行は捨てる
+    .filter((item, index, all) => all.findIndex((other) => other.key === item.key) === index);
 
   return {
     lines: bulletLines.slice(0, max),

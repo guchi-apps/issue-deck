@@ -57,6 +57,18 @@ describe("selectVisibleReleaseHistory", () => {
 });
 
 describe("extractReleaseHighlights", () => {
+  it("同じPRが複数回載っていても1行にまとめる（#4287）", () => {
+    const body = [
+      "* 機能A by @u in https://github.com/o/r/pull/1",
+      "* 機能B by @u in https://github.com/o/r/pull/2",
+      "* 機能A by @u in https://github.com/o/r/pull/1",
+      "* 機能B by @u in https://github.com/o/r/pull/2",
+    ].join("\n");
+    const result = extractReleaseHighlights(body, 10);
+    expect(result.lines.map((line) => line.text)).toEqual(["機能A", "機能B"]);
+    expect(result.moreCount).toBe(0);
+  });
+
   it("自動生成された箇条書きから、by @user in ... を落としてタイトルだけにする", () => {
     const body = [
       "## What's Changed",
