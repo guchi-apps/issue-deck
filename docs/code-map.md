@@ -2512,6 +2512,11 @@ export function POST(request: NextRequest) {
   自動修復系列（`PullRequestAutoRepairLoop`）の状態は`/api/pull-requests`が`autoRepair`として載せる
   （`lib/github/pull-request-auto-repair-status.ts`。DB1クエリでGitHub APIは増えない）。
   **Codexなどエージェント別のレビュー判定は`PullRequestSummary`に載っていないため、この表示の対象外**。
+  **配色の意味（#4293）**: 琥珀＝人の承認・確認・操作待ち（`wait`）、赤＝失敗・要修正・問題による停止
+  （`bad`）、紫＝実行中（`run`）、灰＋アイコン＝実行待ち・未確認・意図的な停止（`idle`）、緑＝成功（`ok`）。
+  3枠（CI・レビュー・競合）は1行に固定し、修正中・再検証待ち・修正停止は別行。自動修正の停止理由は
+  `classifyAutoRepairStopReason`で「意図的（灰）／人の判断待ち（琥珀）／問題（赤）」に分け、理由不明は問題
+  （意図的と推測しない）。レビュー失敗は`review-failed`カテゴリで赤、要確認（琥珀）と分けて数える。
   **IssueとPRの対応は1対1に限らない。** 同じIssueでもブランチが違えばレーンは分かれ（レーンの
   キーはブランチ名）、1本のPRが複数のIssueを扱う場合は`PullRequestSummary.linkedIssueNumbers`
   （`extractLinkedIssueNumbers`が確度の高い順に全参照を返す）の2件目以降を「関連Issue」として

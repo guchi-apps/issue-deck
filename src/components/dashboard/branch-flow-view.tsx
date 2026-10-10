@@ -289,6 +289,7 @@ function LaneStatusBadge({
   pullRequests?: PullRequestSummary[];
 }) {
   const disposition = status === "open" ? laneDisposition(pullRequests) : "clear";
+  const failing = status === "open" && pullRequests.some((pullRequest) => resolvePullRequestHealth(pullRequest).failing);
   const label =
     disposition === "human"
       ? "要対応"
@@ -300,11 +301,16 @@ function LaneStatusBadge({
     <span
       className={cn(
         "shrink-0 rounded-full px-2 py-0.5 text-xs ring-1 ring-inset",
+        // 琥珀は人の確認待ち、赤は問題を抱えた状態、紫は検証・修正の実行中（#4293）
         disposition === "human"
-          ? "bg-amber-500/15 text-amber-700 ring-amber-500 dark:text-amber-400"
-          : status === "open"
-            ? "bg-primary/15 text-primary ring-primary"
-            : "bg-muted text-muted-foreground ring-border",
+          ? failing
+            ? "bg-destructive/10 text-destructive ring-destructive/60"
+            : "bg-amber-500/15 text-amber-700 ring-amber-500 dark:text-amber-400"
+          : disposition === "auto"
+            ? "bg-violet-500/10 text-violet-700 ring-violet-500/60 dark:text-violet-300"
+            : status === "open"
+              ? "bg-primary/15 text-primary ring-primary"
+              : "bg-muted text-muted-foreground ring-border",
       )}
     >
       {label}

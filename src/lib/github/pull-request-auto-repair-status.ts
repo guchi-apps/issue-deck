@@ -32,6 +32,18 @@ export function autoRepairStopReasonLabel(reason: string | null): string {
   return STOP_REASON_LABEL[reason] ?? reason;
 }
 
+/**
+ * 停止理由の分類（#4293）。`intentional`＝人が止めた・PRが閉じられた（問題ではない）、
+ * `waiting`＝人の判断待ち、`problem`＝それ以外。**理由不明・未知の値は`problem`**（意図的と推測しない）。
+ */
+export type AutoRepairStopKind = "intentional" | "waiting" | "problem";
+
+export function classifyAutoRepairStopReason(reason: string | null): AutoRepairStopKind {
+  if (reason === "stopped_by_user" || reason === "pull_request_closed") return "intentional";
+  if (reason === "user_action_required") return "waiting";
+  return "problem";
+}
+
 export function autoRepairLoopKey(repositoryFullName: string, pullRequestNumber: number): string {
   return `${repositoryFullName}#${pullRequestNumber}`;
 }
