@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Boxes, KeyRound, LifeBuoy, Link2, RefreshCw, ScanSearch, ShieldCheck } from "lucide-react";
 
+import { ReleaseRolloutSection } from "@/components/dashboard/settings/release-rollout-section";
 import { BackupCiRolloutSection } from "@/components/dashboard/settings/backup-ci-rollout-section";
 import { SecretsSyncSection } from "@/components/dashboard/secrets-sync-section";
 import { FineGrainedTokensSection } from "@/components/dashboard/settings/fine-grained-tokens-section";
@@ -149,6 +150,15 @@ export function FleetOpsSection({
         loadHint="開いてリポジトリを選ぶと、その1件の導入状態をGitHubへ問い合わせます"
       >
         <BackupCiRolloutSection />
+      </LazyFleetPanel>
+
+      <LazyFleetPanel
+        icon={ShieldCheck}
+        title="リリース検証（統合検証・全体レビュー）の導入状況"
+        description="全管理対象の導入状態と、未導入・設定不足・配布待ち・検証待ちの理由を確認する"
+        loadHint="開くと導入台帳と実行ホスト・検証記録から状態を取得します（検証は起動しません）"
+      >
+        <ReleaseRolloutSection />
       </LazyFleetPanel>
 
       <GroupHeading>認証情報</GroupHeading>

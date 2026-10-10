@@ -170,6 +170,26 @@ PR詳細・PR一覧・ブランチ画面・本番マージ確認の一覧は、�
 - **未対応のcaller**（配布先の旧タグ）には選択を出さず、従来の作り直しだけにする（`releaseCallerSupportsSelection`がdevelopのcallerに
   `rebuild_selection`があるかを読む）。新規アプリの雛形（`src/lib/new-app/scaffold-workflows.ts`）は最初から対応している
 
+## 全リポジトリへの展開と導入台帳（#4365）
+
+**宣言はコード、状態は導出。** `release-verification-config.ts`が正本で、`RELEASE_VERIFICATION_REPOS`（検証コマンド・技術構成・前提不足`setupGaps`・Mac検証の有無と配布状況）と
+`RELEASE_VERIFICATION_EXCLUSIONS`（アーカイブ・本番リリース経路なしの**根拠付き**対象外）を持つ。導入状態は`release-rollout.ts`が宣言と
+`ReleaseVerification`・`DispatchHost`の申告から導く（新規テーブルは無い）。画面は設定＞フリート運用の「リリース検証の導入状況」（`GET /api/repositories/release/rollout`）。
+
+状態（上ほど優先）: 対象外／未導入（管理対象なのに台帳が無い）／設定不足／配布待ち（実行できるホストの申告が無い・poller未対応）／検証待ち／検証済み（必須化待ち）／必須化済み。
+
+- **設定不足を対象外にしない。** `not_applicable`はゲートで合格扱いになるため、根拠のある対象外（`RELEASE_VERIFICATION_EXCLUSIONS`・`integrationNotApplicableReason`）だけに使う。
+  台帳に無い・コマンドが空・`setupGaps`がある場合、統合検証の依頼は**`failed`（理由付き）を記録してジョブを積まない**（`describeIntegrationSetupGap`）
+- **Mac検証の前提**（`ios/scripts/remote-build-check.sh`の配布）は`describeMacSetupGap`。Linuxの統合検証は止めないが、導入状態は設定不足で、`enforced`にもできない（テストが守る）
+- **`enforced`を立てる条件**: 設定不足が無く、実リリース候補で統合検証・全体レビューが合格し、ホストが申告している。1リポジトリずつ立て、全対象が揃うまで#4365は完了にしない
+
+### 新規リポジトリを足すとき
+
+1. 本番リリース経路（develop→main）があるか確認する。無ければ`RELEASE_VERIFICATION_EXCLUSIONS`へ**理由付きで**足す
+2. 有るなら、そのリポジトリの`ci.yml`に合わせて`RELEASE_VERIFICATION_REPOS`へ宣言する（`integrationCommands`は各々単独の`bash -c`。pnpmの流用をしない。DB・環境変数が要るなら`setupGaps`へ書く。iOSがあれば`macBuildCheck`と`ios/scripts/remote-build-check.sh`の配布）
+3. サブPCの`DispatchHost`にリポジトリを申告させ、poller（`releaseVerify`・`releaseReview`対応版）を更新する
+4. 次のリリース候補で実走させて合格を確認し、`enforced: true`にする。台帳へ載せ忘れた管理対象は、導入状況の一覧に「未導入」として出る
+
 ## 既存検証の棚卸し（重複実装しない）
 
 - `ci.yml`: `lint-and-build`・`docs-sync-check`・`workflow-expression-length-check`（`scripts/ci/run-required-checks.mjs`）。リリースPRのheadに対するCIは、同じSHAなら統合検証の証跡として再利用する（PR2で実装済み）
