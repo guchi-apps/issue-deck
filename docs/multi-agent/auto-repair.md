@@ -383,11 +383,30 @@ handoffで`review-fix`が始まると、`recordReviewFixHandoffStarted`（`pull-
 - 手動開始・巡回・handoffは`isLoopInProgress`と同じHEAD・同じ指摘の`lastFingerprint`で重ならない
 - レビュー指摘欄にも同じ「PRを自動修正」の操作と状態別の案内を出す（スマホで上部を探さなくて済む）
 
+### handoffの取りこぼしは巡回で拾い直す（#4334）
+
+渡した後に`claude-review-fix.yml`が起動しなかった（`workflow_run`の未配送など）PRを、
+`POST /api/pull-requests/auto-repair-sweep`が呼ぶ`runReviewHandoffRescueSweep`
+（`pull-request-review-handoff-rescue.ts`）が拾い、手動開始と同じ`startPullRequestAutoRepairLoop`
+（`kind: review`）で系列へ載せる。PR一覧の取得は3分に1回で、コメントを引くのは本文の判定が
+「現在のHEADで要修正」のPRだけ。判定は純関数`decideHandoffRescue`。
+
+- **拾う条件**: develop向け`issue-<番号>`のopenなPRで、本文の判定が現在のHEADの`changes-requested`、
+  現在のHEADの`issue-deck-review-autofix:ok`（`selectReviewFixComments`）と対応Issueの
+  handoffコメントがあり、そのコメントから10分経っている
+- **見送る条件（二重起動の防止）**: 系列が`running`/`dispatching`、同じHEADで`stopped`/`completed`の系列がある
+  （止めた理由を上書きしない）、同じHEADの`REVIEW_FIX`ジョブ（Codex）がある、handoff以降に
+  `review`の修復記録（Claude）が始まっている
+- **起動できないとき**: `claude-review-fix.yml`が未配布なら`handoff_workflow_missing`、配布対象外なら
+  `handoff_unsupported`を停止理由として系列へ残し、PR詳細の「自動修復を停止しました」に原因と次の操作
+  （配布・手動修正）を出す。起動の失敗は従来どおり`dispatch_failed`
+- 手動開始・handoffと重ならないのは、開始側が`running`/`dispatching`の系列へは起動しないのと、
+  上の見送り条件による
+
 ### 取りこぼしうるもの
 
-- **渡した後に`claude-review-fix.yml`が起動しなかった場合**、PRは`00.check-user`の無いまま
-  「要修正」で残る（赤い帯は出ているので画面では分かる）。GitHubのイベント配送の取りこぼしは
-  コンフリクトで実例がある（上記「issue-deckからの巡回検知」）が、巡回での拾い直しはまだ無い
+- **渡した後に`claude-review-fix.yml`が起動しなかった場合**は、上の巡回が約10〜13分後に拾い直す。
+  拾えるのは巡回の対象（連携済みのリポジトリ）に限る
 - **`.github/workflows/**`を変更するPRはレビュー自体が走らない**ため、この経路にも乗らない
 - **他リポジトリへは2段階で届く。** 渡しの判断は`reusable-claude-review-develop.yml`にあり
   参照タグで届くが、callerの`claude-review-fix.yml`は設定＞フリート運用から配る

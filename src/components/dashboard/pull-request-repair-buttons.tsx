@@ -38,6 +38,8 @@ const STOP_REASON_LABEL: Record<string, string> = {
   repeated_problem: "修正後もHEADが変わらず、同じ問題が残っています。指摘内容を確認し、方針をコメントしてから再実行してください。",
   pull_request_closed: "Pull Requestがクローズされました。",
   timed_out: "CI・レビュー待ちが一定時間を超えたため停止しました。Actionsの状況を確認し、必要なら再レビューを実行するか、「PRを自動修正」で再実行してください。",
+  handoff_workflow_missing: "レビュー指摘の自動修正を始められませんでした。自動修正のworkflow（claude-review-fix.yml）がこのリポジトリに配られていません。設定＞フリート運用から配ってください。配布後は「PRを自動修正」で再実行できます。",
+  handoff_unsupported: "レビュー指摘の自動修正を始められませんでした。このリポジトリは自動修正の配布対象外です。指摘を確認し、手動で修正するか、Issueへ修正を依頼してください。",
   dispatch_failed: "自動修正ワークフローの起動に失敗しました。ワークフローの配布状況を確認し、「PRを自動修正」で再実行してください。",
 };
 
