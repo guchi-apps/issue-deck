@@ -73,6 +73,10 @@ on:
 jobs:
   release:
     runs-on: ubuntu-latest
+    # 準備が進んだ（バンプPRかリリースPRを作れた）かどうか。`notify-prepared`が、過去の
+    # 失敗の記録を解決にするために使う（#4335）。何もしなかったrun（schedule・対象なし）は報告しない
+    outputs:
+      prepared: ${{ steps.bump-pr.outcome == 'success' || steps.main-pr.outcome == 'success' }}
     permissions:
       contents: write
       pull-requests: write
@@ -169,6 +173,7 @@ jobs:
               # バンプPRはgitの件名（`Merge pull request #N from <owner>/release/vX.Y.Z`）から探す。
               # バンプPR上で人が版を直していた場合は見つからず、従来どおりの動きになる。
               REBUILD_FROM=""
+              REBUILD_REVERTS=""
               if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
                 BUMP_MERGE="$(git log --first-parent --merges --format='%H %s' origin/main..origin/develop \
                   | awk -v branch="release/v$DEV_VERSION" '$2 == "Merge" && $3 == "pull" && $4 == "request" && $6 == "from" { ref = $7; sub(/^[^\/]*\//, "", ref); if (ref == branch) { print $1; exit } }')"
@@ -176,6 +181,16 @@ jobs:
                   AHEAD="$(git rev-list --count "$BUMP_MERGE..origin/develop")"
                   if [ "$AHEAD" -gt 0 ]; then
                     REBUILD_FROM="$BUMP_MERGE"
+                    # **未公開のバンプは1回分とは限らない**（#4335）。作り直しを繰り返すと
+                    # `release/v8.50.0`→`release/v8.50.1`のようにバンプPRのマージがmainより後に
+                    # 積み重なり、直前の1回を戻しても前回の版（8.50.0）が残る。mainへ出ていない
+                    # バンプのマージを**新しい順に全部**取り消せば、版・更新履歴・release-notesは
+                    # mainの状態へ戻り、実装の変更（バンプ以外のコミット）はそのまま残る。
+                    # 対象はmainから届かない本流（first-parent）上の`release/v*`のマージだけで、
+                    # 本番へ出た版（mainから届く）とタグには触れない。
+                    REBUILD_REVERTS="$(git log --first-parent --merges --format='%H %s' origin/main..origin/develop \
+                      | awk '$2 == "Merge" && $3 == "pull" && $4 == "request" && $6 == "from" { ref = $7; sub(/^[^\/]*\//, "", ref); if (ref ~ /^release\/v[0-9]/) print $1 }' \
+                      | tr '\n' ' ' | sed 's/ *$//')"
                   else
                     echo "バンプPRのマージ（$BUMP_MERGE）以降にdevelopへ入った変更が無いため、作り直さずリリースPRを作成します"
                   fi
@@ -199,7 +214,8 @@ jobs:
           echo "need_bump=$NEED_BUMP" >> "$GITHUB_OUTPUT"
           echo "need_main_pr=$NEED_MAIN_PR" >> "$GITHUB_OUTPUT"
           echo "rebuild_from=${REBUILD_FROM:-}" >> "$GITHUB_OUTPUT"
-          echo "判定結果: need_bump=$NEED_BUMP need_main_pr=$NEED_MAIN_PR main_version=$MAIN_VERSION dev_version=$DEV_VERSION rebuild_from=${REBUILD_FROM:-}"
+          echo "rebuild_reverts=${REBUILD_REVERTS:-}" >> "$GITHUB_OUTPUT"
+          echo "判定結果: need_bump=$NEED_BUMP need_main_pr=$NEED_MAIN_PR main_version=$MAIN_VERSION dev_version=$DEV_VERSION rebuild_from=${REBUILD_FROM:-} rebuild_reverts=${REBUILD_REVERTS:-}"
 
       - name: 直近の本番デプロイ失敗を確認する
         # 失敗した版を直さないまま次のリリースを始めると、未反映の版と修正内容が追えなくなる。
@@ -674,6 +690,7 @@ jobs:
           echo "usage: $USAGE"
 
       - name: バージョンをbumpしてdevelop向けPRを作成する
+        id: bump-pr
         if: always() && steps.deploy-gate.outputs.ready == 'true' && steps.state.outputs.need_bump == 'true' && (github.event_name == 'workflow_dispatch' || steps.gate.outputs.ready == 'true')
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.WORKFLOW_PAT }}
@@ -682,6 +699,7 @@ jobs:
           # 作り直し（#3014）のときだけ値が入る。DEV_VERSIONは取り消す側の版
           DEV_VERSION: ${{ steps.state.outputs.dev_version }}
           REBUILD_FROM: ${{ steps.state.outputs.rebuild_from }}
+          REBUILD_REVERTS: ${{ steps.state.outputs.rebuild_reverts }}
           VERSION_FILE: ${{ inputs.version-file }}
           VERSION_QUERY: ${{ inputs.version-query }}
           BUMP_COMMAND: ${{ inputs.bump-command }}
@@ -745,18 +763,25 @@ jobs:
           # 更新履歴ファイルや`.github/release-notes.md`の前回分もこれで消えるので、
           # 版を書き換えるコマンド（`npm version`・bump-command）の種類によらず同じ手順で済む。
           if [ -n "$REBUILD_FROM" ]; then
-            REVERT_MAINLINE=()
-            if git rev-parse --verify --quiet "${REBUILD_FROM}^2" >/dev/null; then
-              REVERT_MAINLINE=(-m 1)
-            fi
-            if ! git revert --no-commit "${REVERT_MAINLINE[@]}" "$REBUILD_FROM"; then
-              git status --short
-              echo "::error::v$DEV_VERSION のバンプ（$REBUILD_FROM）を取り消せませんでした。バンプ後に更新履歴などを手で直していると衝突します。衝突したファイルをdevelopで戻してから起動し直してください"
-              exit 1
-            fi
+            # mainへ出ていないバンプを新しい順に全部取り消す（#4335。求め方は状態判定ステップ）。
+            # 旧い出力（空）のときは従来どおり直前の1回だけを戻す
+            for BUMP_SHA in ${REBUILD_REVERTS:-$REBUILD_FROM}; do
+              REVERT_MAINLINE=()
+              if git rev-parse --verify --quiet "${BUMP_SHA}^2" >/dev/null; then
+                REVERT_MAINLINE=(-m 1)
+              fi
+              if ! git revert --no-commit "${REVERT_MAINLINE[@]}" "$BUMP_SHA"; then
+                git status --short
+                echo "::error::未公開のバンプ（$BUMP_SHA）を取り消せませんでした。バンプ後に更新履歴などを手で直していると衝突します。衝突したファイルをdevelopで戻してから起動し直してください"
+                exit 1
+              fi
+              echo "未公開のバンプ（$BUMP_SHA）を取り消しました"
+            done
             REVERTED="$(jq -r "$VERSION_QUERY" "$VERSION_FILE")"
             if [ "$REVERTED" != "$MAIN_VERSION" ]; then
-              echo "::error::バンプを取り消した後の版（$REVERTED）がmain（$MAIN_VERSION）と一致しません。作り直せないため、手で確認してください"
+              # 全部戻しても一致しないのは、バンプPR以外の経路（手で版を書き換えたコミットなど）で
+              # 版が動いている場合。どこで動いたかを示して止める（実装変更ごと戻して辻褄を合わせない）
+              echo "::error::未公開のバンプ（${REBUILD_REVERTS:-$REBUILD_FROM}）を取り消した後の版（$REVERTED）がmain（$MAIN_VERSION）と一致しません。バンプPR以外で版を書き換えたコミットがあります: $(git log --format='%h %s' origin/main..origin/develop -- "$VERSION_FILE" | head -n 5 | tr '\n' ';')"
               exit 1
             fi
             # **版ファイルだけは取り消す版（DEV_VERSION）に据え置く。** 上げ幅を引数に取る
@@ -1234,6 +1259,7 @@ jobs:
           cat "$OUT"
 
       - name: develop→mainのPRを作成する
+        id: main-pr
         if: steps.deploy-gate.outputs.ready == 'true' && steps.state.outputs.need_main_pr == 'true'
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.WORKFLOW_PAT }}
@@ -1330,94 +1356,66 @@ jobs:
             fi
           fi
 
-  # releaseジョブが失敗した場合の通知(#727)。他の3ワークフロー
-  # （claude-issue-dispatch.ymlのnotify-failure、claude-review-develop.ymlの
-  # claude-review-fallback/auto-merge-fallback、claude-conflict-resolve.ymlのフォールバック通知）
-  # と異なり、本ワークフローにはこれまで失敗時の通知が一切無く、Actionsの実行ログ以外に
-  # 失敗の痕跡が残らなかった。
+  # releaseジョブが失敗した場合の記録(#727・#4335)。
   #
-  # releaseジョブがどのステップ（状態判定・バージョン判定・バンプPR作成・develop→mainのPR作成）
-  # で失敗しても対象issueを特定できるよう、releaseジョブの
-  # 「リリース対象のプルリクエストとissueを特定する」ステップの出力には依存せず、このジョブでも
-  # `Develop`・`Release`にいるissueの一覧を独立に取得する（#991 Phase 5でラベル検索から
-  # issue-deckへの問い合わせに変わった）。
+  # **個別Issueへ`00.check-user`を付けない**（#4335）。以前はDevelop・ReleaseにいるIssue全件へ
+  # `00.check-user`＋`01.check-blocked`を付け、他の理由ラベル（`01.check-plan`など）まで外していた。
+  # 失敗は共通のリリース処理1件なのに、個別Issueが一斉に確認待ちになり、本当に人の判断を待つIssueと
+  # 見分けられなくなる。いまはissue-deckへrun番号だけを送り、issue-deckがGitHubから失敗した工程と
+  # エラー行を取り直してリリース画面へ1件として出す（`/api/dispatch/release-preparation`）。
+  # 根拠の無い「GitHub Actions側の障害かもしれない」という案内も出さない。
   notify-failure:
     needs: [release]
     if: always() && needs.release.result == 'failure'
     runs-on: ubuntu-latest
-    permissions:
-      issues: write
+    permissions: {}
     steps:
-      - name: リリース対象issueへ失敗を通知する
+      - name: リリース準備の失敗をissue-deckへ記録する
         env:
-          GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          RUN_ID: ${{ github.run_id }}
+          EVENT_NAME: ${{ github.event_name }}
+          BUMP_KIND: ${{ inputs.bump-kind }}
           APP_BASE_URL: ${{ vars.APP_BASE_URL }}
           PROGRESS_REPORT_SECRET: ${{ secrets.PROGRESS_REPORT_SECRET }}
         run: |
-          set -e
-
-          # 「対象が0件」と「issue-deckへ届かなかった」を区別する(#1124)。後者は本来通知すべき
-          # 相手がいるのに通知できていない状態で、放置するとリリース失敗そのものに気づけない。
-          ISSUE_NUMBERS=""
+          # 「記録できなかった」はrunを落とさず警告に留める（リリースの失敗自体はこのrunの失敗として残る）
           if [ -z "$APP_BASE_URL" ] || [ -z "$PROGRESS_REPORT_SECRET" ]; then
-            echo "::warning::APP_BASE_URL / PROGRESS_REPORT_SECRET が未設定のため、通知先を特定できません"
+            echo "::warning::APP_BASE_URL / PROGRESS_REPORT_SECRET が未設定のため、失敗をissue-deckへ記録できません"
             exit 0
           fi
-          BODY_FILE="${RUNNER_TEMP:-/tmp}/notify-progress.json"
-          CODE="$(curl -sS -m 20 -o "$BODY_FILE" -w '%{http_code}' \
-            -H "Authorization: Bearer $PROGRESS_REPORT_SECRET" \
-            "$APP_BASE_URL/api/progress?repository=$GH_REPO&status=develop,release")" || CODE=000
+          BODY="$(jq -nc --arg repo "$GH_REPO" --arg run "$RUN_ID" --arg event "$EVENT_NAME" --arg bump "$BUMP_KIND" \
+            '{action: "failed", repository: $repo, runId: ($run | tonumber), event: $event, bumpKind: $bump}')"
+          CODE="$(curl -sS -m 30 -o /dev/null -w '%{http_code}' -X POST \
+            -H "Authorization: Bearer $PROGRESS_REPORT_SECRET" -H "Content-Type: application/json" \
+            --data "$BODY" "$APP_BASE_URL/api/dispatch/release-preparation")" || CODE=000
           if [ "$CODE" != "200" ]; then
-            echo "::warning::issue-deckへ問い合わせできませんでした（HTTP $CODE）。通知先を特定できません"
-            exit 0
-          fi
-          if [ "$(jq -r '.available // false' "$BODY_FILE" 2>/dev/null || echo false)" != "true" ]; then
-            echo "::warning::issue-deckが進捗を返せませんでした（reason=$(jq -r '.reason // "unknown"' "$BODY_FILE" 2>/dev/null || echo unknown)）。通知先を特定できません"
-            exit 0
-          fi
-          ISSUE_NUMBERS="$(jq -r '.issues[]' "$BODY_FILE" 2>/dev/null || true)"
-
-          if [ -z "$ISSUE_NUMBERS" ]; then
-            echo "Develop・Releaseにいるopenなissueはありません（対象なしのため通知しません）"
-            exit 0
+            echo "::warning::issue-deckへ失敗を記録できませんでした（HTTP $CODE）。実行ログ: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          else
+            echo "リリース準備の失敗をissue-deckへ記録しました。リリース画面に失敗した工程と再開の操作が出ます"
           fi
 
-          BODY='⚠️ develop→mainのリリースワークフロー（release-develop-to-main.yml）が失敗しました。'
-          BODY="$BODY"$'\n\n'"実行ログ: $RUN_URL"
-          BODY="$BODY"$'\n\n''GitHub Actions側の障害が原因の場合があります。https://www.githubstatus.com で `Actions` の状態をご確認ください。'
-          BODY="$BODY"$'\n\n''復旧している場合は、リポジトリのissue-deck画面から手動でリリースを再実行できます。'
-          BODY="$BODY"$'\n\n<!-- issue-deck-fallback-notice -->'
-
-          # リリースが失敗して続け方の指示が要る状態なので、理由は`01.check-blocked`(#1490)。
-          # 展開先リポジトリにラベル自体が定義されていない場合でもこのステップを落とさないよう、
-          # 付与・除去の前にリポジトリのラベル一覧と突き合わせる(#975)。ラベルの構成はIssueに
-          # よらず同じなので、対象Issueのループの外で1度だけ組み立てる。
-          REASON_LABEL="01.check-blocked"
-          DEFINED_LABELS="$(gh label list --json name --jq '.[].name' --limit 200)"
-          LABEL_ARGS=()
-          for name in "00.check-user" "$REASON_LABEL"; do
-            if grep -qx "$name" <<<"$DEFINED_LABELS"; then
-              LABEL_ARGS+=(--add-label "$name")
-            else
-              echo "::warning::ラベル '$name' がリポジトリに存在しないため付与をスキップします"
-            fi
-          done
-          for name in 01.check-plan 01.check-input 01.check-merge 01.check-blocked 01.check-answered 00.qa-answered; do
-            if [ "$name" != "$REASON_LABEL" ] && grep -qx "$name" <<<"$DEFINED_LABELS"; then
-              LABEL_ARGS+=(--remove-label "$name")
-            fi
-          done
-
-          for NUM in $ISSUE_NUMBERS; do
-            # dispatchジョブ側の他の通知と同様、同一runのURLを含むコメントが既にあれば重複通知しない。
-            if gh issue view "$NUM" --json comments --jq '.comments[-20:][].body' 2>/dev/null | grep -qF "$RUN_URL"; then
-              echo "issue #$NUM は同一runの通知コメントを確認できたため、重複通知をスキップします"
-              continue
-            fi
-            gh issue comment "$NUM" --body "$BODY"
-            if [ "${#LABEL_ARGS[@]}" -gt 0 ]; then
-              gh issue edit "$NUM" "${LABEL_ARGS[@]}"
-            fi
-          done
+  # 準備が進んだrunの報告（#4335）。issue-deckが未解決の失敗を解決にし、旧`notify-failure`が付けたと
+  # 確認できる確認待ちラベルだけを外す（他の理由で付いたもの・由来の分からないものは外さない）。
+  notify-prepared:
+    needs: [release]
+    if: needs.release.result == 'success' && needs.release.outputs.prepared == 'true'
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - name: リリース準備が進んだことをissue-deckへ報告する
+        env:
+          GH_REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+          APP_BASE_URL: ${{ vars.APP_BASE_URL }}
+          PROGRESS_REPORT_SECRET: ${{ secrets.PROGRESS_REPORT_SECRET }}
+        run: |
+          if [ -z "$APP_BASE_URL" ] || [ -z "$PROGRESS_REPORT_SECRET" ]; then
+            echo "APP_BASE_URL / PROGRESS_REPORT_SECRET が未設定のため、報告しません"
+            exit 0
+          fi
+          BODY="$(jq -nc --arg repo "$GH_REPO" --arg run "$RUN_ID" '{action: "prepared", repository: $repo, runId: ($run | tonumber)}')"
+          CODE="$(curl -sS -m 60 -o /dev/null -w '%{http_code}' -X POST \
+            -H "Authorization: Bearer $PROGRESS_REPORT_SECRET" -H "Content-Type: application/json" \
+            --data "$BODY" "$APP_BASE_URL/api/dispatch/release-preparation")" || CODE=000
+          [ "$CODE" = "200" ] || echo "::warning::issue-deckへ報告できませんでした（HTTP $CODE）"

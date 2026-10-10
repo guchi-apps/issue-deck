@@ -9,6 +9,7 @@ import { GithubReferenceLink } from "@/components/dashboard/github-reference-lin
 import { ReleaseChangeList } from "@/components/dashboard/release-change-list";
 import { ReleaseProgress } from "@/components/dashboard/release-progress";
 import { ConnectedReleaseReviewSections } from "@/components/dashboard/release-review-sections";
+import { ReleasePreparationAlert } from "@/components/dashboard/release-preparation-alert";
 import { ReleaseRebuildButton } from "@/components/dashboard/release-rebuild-button";
 import { IosTestflightStatus } from "@/components/dashboard/ios-testflight-status";
 import { WebviewIosInstructions } from "@/components/dashboard/webview-ios-instructions";
@@ -122,6 +123,7 @@ export function MobileReleaseSheet({
                   )}
                 </span>
               </div>
+              <ReleasePreparationAlert repositoryFullName={repository.fullName} />
               <ReleaseProgress
                 status={releaseStatus}
                 repoFullName={repository.fullName}
