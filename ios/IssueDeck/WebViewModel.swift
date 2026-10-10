@@ -319,6 +319,8 @@ extension WebViewModel: WKNavigationDelegate {
         importSharedDrafts()
         // ログインが済んでいれば端末トークンを登録する（未ログインなら何も起きない）
         registerPushToken()
+        // 共有画面から直接Issueを作るための専用セッションを更新する（#4298）。未ログインなら消す
+        Task { @MainActor in await ShareSessionIssuer(webView: webView).refresh() }
     }
 
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {

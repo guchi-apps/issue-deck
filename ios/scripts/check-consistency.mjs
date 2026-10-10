@@ -74,6 +74,27 @@ export function checkConsistency() {
     problems.push("共有メニュー（Share Extension）がアプリへ組み込まれていません");
   }
 
+  // 共有画面から直接Issueを作る（#4298）。拡張側のサーバーURL・Keychain共有グループ・呼ぶAPIが本体と揃う
+  const swiftBase = appConfig.match(/baseURL = URL\(string: "([^"]+)"\)!/)?.[1];
+  const shareBase = shareDraft.match(/serverBaseURL = URL\(string: "([^"]+)"\)!/)?.[1];
+  if (!swiftBase || swiftBase !== shareBase) {
+    problems.push(`拡張のサーバーURLが本体と一致しません: 本体=${swiftBase} / 拡張=${shareBase}`);
+  }
+  for (const file of ["ios/Config/IssueDeck.entitlements", "ios/Config/ShareExtension.entitlements"]) {
+    if (!read(file).includes("$(AppIdentifierPrefix)com.gucchii.issuedeck.share")) {
+      problems.push(`${file} にKeychain共有グループがありません`);
+    }
+  }
+  for (const path of ["api/share/repositories", "api/share/issues", "api/issues/images"]) {
+    if (!shareDraft.includes(`"${path}"`)) problems.push(`ShareDraft.swift が ${path} を呼んでいません`);
+  }
+  if (!read("ios/IssueDeck/ShareSessionIssuer.swift").includes("/api/share/token")) {
+    problems.push("ShareSessionIssuer.swift が /api/share/token を呼んでいません");
+  }
+  for (const route of ["token", "repositories", "issues"]) {
+    read(`src/app/api/share/${route}/route.ts`);
+  }
+
   // 開発用のURLをコミットしていない
   if (!/baseURL = URL\(string: "https:\/\/issuedeck\.gucchii\.com\/"\)!/.test(appConfig)) {
     problems.push("AppConfig.baseURL が本番URLではありません（開発用のまま？）");
