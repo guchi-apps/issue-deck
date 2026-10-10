@@ -144,7 +144,9 @@ export async function forceCancelWorkflowRun(
 }
 
 export type GithubApiPullRequest = {
-  head: { sha: string };
+  head: { sha: string; ref?: string };
+  /** リリースPRの検証ゲート（#4212）がマージ直前のbase先端を取り直すために読む */
+  base?: { sha: string; ref: string };
 };
 
 export async function fetchPullRequest(
