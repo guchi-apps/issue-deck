@@ -72,6 +72,10 @@ const MAX_ACTIONS = 20;
 const FIX_INVESTIGATION_NOTE =
   "修正の依頼。自動修正を再起動する前に、停止理由・直近の自動修正の結果・親Issueの要件とコメント・この会話での合意を読み、コード修正／管理情報（PR本文の役割・親Issue本文の残作業追跡）の修正／判断待ち／実行中／修正済みのどれかを説明し、必要な修正を提案すること。";
 
+/** 番号のない改善依頼を調査へ渡すときの補足（#4281） */
+const REQUEST_INVESTIGATION_NOTE =
+  "番号のない改善依頼。既存のIssue/PRの状態確認ではない。選択リポジトリの現在の実装・規約・関連Issueを読み、現状、要望との差、対応案、根拠リンク、未確認の部分を説明すること。実装を読めなかった場合は現状を推測で断定せず、確認できなかったと明示すること。起案を求められたら目的・要件・対象範囲・完了条件を整理し、重複確認のうえIssue案（proposal_kind=\"issue\"）を返す。";
+
 type StatusLoad =
   | { ok: true; card: ChatStatusCard }
   | { ok: false; message: string };
@@ -216,7 +220,7 @@ export async function handleChatMessage(params: {
       const reply = await investigate(
         resolved.target,
         resolved.candidates,
-        resolved.fix ? FIX_INVESTIGATION_NOTE : undefined,
+        resolved.fix ? FIX_INVESTIGATION_NOTE : resolved.request ? REQUEST_INVESTIGATION_NOTE : undefined,
       );
       return reply;
     }

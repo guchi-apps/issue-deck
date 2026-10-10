@@ -40,6 +40,14 @@ const CHECK_THEN_FIX = /(確認|調べ|調査|見て|読んで|レビュー|指�
  */
 const CONSULT_WORDS =
   /(相談したい|相談です|相談に乗|どの案|どちらがいい|どっちがいい|どれがいい|どれがよい|直すなら|直すとしたら|直すべき|にする前に|起案する前に|起票する前に|してもいい？|でいい？|がよい？|がいい？)/;
+/**
+ * 機能・挙動の改善依頼（#4281）。「〜したい」「〜してほしい」のように要望の形をした文。
+ * 文中の「状態」「状況」で状態確認と取り違えないよう、単語ではなく依頼の文末の形で判定する
+ */
+const REQUEST_WORDS =
+  /(たい(です|な|かも)?[。！!\s]*$|[てでに]ほしい|[てでに]欲しい|ほしい|欲しい|ようにして|ようにしたい|ように(なって|なると)|できると(いい|嬉し|助か|うれし)|できれば|あるといい|があれば|ならいい|のほうがいい|方がいい)/;
+/** 状態確認の言い換えとみなす発言の長さ。これより長い具体的な文は状態確認にしない */
+const RECHECK_MAX_LENGTH = 30;
 const PR_WORDS = /^(pr|プルリク|pull\s*request)(は|って|を)?[？?\s]*$/i;
 
 export function parseIntent(text: string): ChatIntent {
@@ -66,9 +74,15 @@ export function parseIntent(text: string): ChatIntent {
     return { type: "investigate", ref: refs[0] ?? null, fix: true };
   }
   if (MERGE_WORDS.test(trimmed)) return { type: "merge_check" };
+  // 番号のない改善依頼は、既存のIssue/PRとは結び付けず実装の調査へ回す（修正系の語は上で先に判定済み）
+  if (refs.length === 0 && REQUEST_WORDS.test(trimmed)) {
+    return { type: "investigate", ref: null, request: true };
+  }
   if (INVESTIGATE_WORDS.test(trimmed)) return { type: "investigate", ref: refs[0] ?? null };
   if (refs.length > 0) return { type: "status", refs };
-  if (RECHECK_WORDS.test(trimmed) || PR_WORDS.test(trimmed)) return { type: "recheck" };
+  if ((trimmed.length <= RECHECK_MAX_LENGTH && RECHECK_WORDS.test(trimmed)) || PR_WORDS.test(trimmed)) {
+    return { type: "recheck" };
+  }
   return { type: "unknown" };
 }
 
@@ -79,7 +93,7 @@ export type ResolvedIntent =
   | { type: "create_issue"; title: string | null; repo: string; source: ChatTarget | null }
   | { type: "ask"; question: string; options: { label: string; send: string }[] }
   /** AIが読み取りツールで調べる。対象が決まらなくても聞き返さず、調査側が必要なら聞く */
-  | { type: "investigate"; target: ResolvedRef | null; candidates: ChatTarget[]; fix?: boolean }
+  | { type: "investigate"; target: ResolvedRef | null; candidates: ChatTarget[]; fix?: boolean; request?: boolean }
   | { type: "unknown" };
 
 export type ResolvedRef = { repo: string; number: number };
@@ -160,6 +174,8 @@ export function resolveIntent(intent: ChatIntent, context: ChatContext): Resolve
     }
     case "investigate": {
       const fix = intent.fix ? { fix: true } : {};
+      // 新しい機能要望は、直前に見たPRや前の調査対象へ結び付けない（選択リポジトリの実装を調べる）
+      if (intent.request) return { type: "investigate", target: null, candidates: [], request: true };
       const explicit = intent.ref ? withRepo(intent.ref, context) : null;
       if (explicit) return { type: "investigate", target: explicit, candidates: [], ...fix };
       const known = context.investigation?.target ?? null;
