@@ -93,7 +93,7 @@ final class PushCenter {
         onDeviceToken?()
     }
 
-    fileprivate func open(path: String) {
+    func open(path: String) {
         pendingPath = path
         flushPendingPath()
     }

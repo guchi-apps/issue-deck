@@ -4,6 +4,7 @@ import { Loader2, Server } from "lucide-react";
 import { useState } from "react";
 
 import { CancelWorkflowRunButton } from "@/components/dashboard/cancel-workflow-run-button";
+import { DependencyWaitPanel, LegacyHoldNotice } from "@/components/dashboard/dependency-wait-panel";
 import { CheckUserReasonNotice } from "@/components/dashboard/check-user-reason-notice";
 import { CodeReviewJobStatus } from "@/components/dashboard/code-review-job-status";
 import { CrossRepoQuestionJobStatus } from "@/components/dashboard/cross-repo-question-job-status";
@@ -136,7 +137,13 @@ export function IssueStatusCard({
    */
   const localOnly =
     !executionTarget.expectsActionsRun && dispatchJob === null && issueSession === null;
+  // 実装セッションの依存待ち（#4321）。待ち中のものと、直近に終わったもの（再開失敗を含む）
+  const dependencyWait =
+    (dispatch.dependencyWaits ?? []).find(
+      (w) => w.repositoryFullName === issue.repositoryFullName && w.issueNumber === issue.number,
+    ) ?? null;
   const hasActivity =
+    dependencyWait !== null ||
     dispatchJob !== null ||
     issueSession !== null ||
     localOnly ||
@@ -205,6 +212,14 @@ export function IssueStatusCard({
               isSubmitting={dispatch.isSubmitting}
               onCancel={() => void dispatch.cancel(dispatchJob.id)}
               waitReason={describeDispatchJobWaitReason(dispatchJob, dispatch.hosts)}
+            />
+          )}
+          {dependencyWait && <DependencyWaitPanel wait={dependencyWait} dispatch={dispatch} />}
+          {!dependencyWait && issue.labels.some((l) => l.name === "11.local") && (
+            <LegacyHoldNotice
+              repositoryFullName={issue.repositoryFullName}
+              issueNumber={issue.number}
+              dispatch={dispatch}
             />
           )}
           {issueSession && (

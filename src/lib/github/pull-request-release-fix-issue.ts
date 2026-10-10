@@ -26,7 +26,7 @@ export function buildPullRequestFixIssueDraft(
     PullRequestSummary,
     "repositoryFullName" | "number" | "title" | "mergedAt" | "linkedIssueNumber"
   >,
-): { repositoryFullName: string; title: string; body: string } {
+): { repositoryFullName: string; title: string; body: string; bodyPrefix: string } {
   const lines = [
     `${pullRequest.repositoryFullName} の #${pullRequest.number} をリリース後に実機で確認したところ、` +
       "意図どおりに反映されていませんでした。",
@@ -37,12 +37,13 @@ export function buildPullRequestFixIssueDraft(
     "",
     RELEASE_FIX_ISSUE_OBSERVATION_HEADING,
     "",
-    "（何をしたら、どうなったか。期待していた動作との違いを書く）",
   ];
 
   return {
     repositoryFullName: pullRequest.repositoryFullName,
     title: `#${pullRequest.number} の修正: ${pullRequest.title}`,
-    body: lines.join("\n"),
+    // 前半は入力欄へ入れず、編集不可の固定接頭辞として渡す（Issueからの引き継ぎ作成と同じ。#4347）
+    body: "",
+    bodyPrefix: lines.join("\n"),
   };
 }

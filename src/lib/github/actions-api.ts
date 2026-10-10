@@ -15,6 +15,8 @@ export type GithubApiWorkflowRun = {
   name?: string | null;
   html_url?: string;
   run_attempt?: number;
+  /** ワークフローファイルのパス（`.github/workflows/x.yml`。再利用時は`@ref`が付くことがある）。#4335 */
+  path?: string;
 };
 
 export async function fetchWorkflowRun(

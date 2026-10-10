@@ -14,7 +14,7 @@ name: Claude Review Fix
 #   渡すのは「要修正」かつ「人の判断が要らない指摘だけ」とレビューが印を付けた場合に限られ、
 #   それ以外は従来どおり00.check-userで人へ渡る。名前はclaude-review-develop.ymlのname:と
 #   一致している必要がある（違うと黙って発火しなくなる）
-# - workflow_dispatch: issue-deckの画面の「レビュー指摘を自動修正」ボタンと手動実行
+# - workflow_dispatch: issue-deckの画面の「PRを自動修正」ボタンと手動実行
 on:
   workflow_run:
     workflows: ["Claude Code / Codex Review (develop向けPR)", "Claude Code Review (develop向けPR)"]

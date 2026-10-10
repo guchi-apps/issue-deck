@@ -317,7 +317,7 @@ CI失敗の判定では、ワークフロー名を`CI`に決め打ちせず「�
 | --- | --- |
 | 渡すかを決める | `reusable-claude-review-develop.yml`の`auto-merge`ジョブ（「マージ保留の判定を反映する」） |
 | 直す | `claude-review-fix.yml`（本体`reusable-claude-review-fix.yml`・プロンプト`.github/prompts/review-fix.md`） |
-| 起動 | レビューの完了（`workflow_run`）と、画面の「レビュー指摘を自動修正」（`workflow_dispatch`） |
+| 起動 | レビューの完了（`workflow_run`）と、画面の「PRを自動修正」（`workflow_dispatch`） |
 | 上限 | 1つのIssueにつき自動の渡しは2回まで。超えたら従来どおり人へ渡し、その旨をIssueへ書く |
 
 ### 直してよいかを決めるのはレビュー側
@@ -352,17 +352,17 @@ CI失敗の判定では、ワークフロー名を`CI`に決め打ちせず「�
 直せたものだけ直してから、決めてほしいことと選択肢をIssueへ書いて止まる。先にラベルを
 付けるのは、pushで走る再レビューが先に終わると自動マージされうるため。
 
-人が方針をIssueへ書いて画面の「レビュー指摘を自動修正」を押すと、その方針で直す。**手動の起動では
+人が方針をIssueへ書いて画面の「PRを自動修正」を押すと、その方針で直す。**手動の起動では
 渡しの印を求めず、着手時に`00.check-user`と理由ラベルを外す**——付いたままだと、直した後の
 再レビューがLGTMでもマージが見送られるため。
 
 ### 画面
 
-- ピル「レビュー指摘を自動修正中」（`RepairRunBadge`。`PullRequestRepairRun.kind`が`review`）。
+- ピル「PRを自動修正中」（`RepairRunBadge`。`PullRequestRepairRun.kind`が`review`）。
   **レビュー指摘はPRの状態から「直った」と言えない**（修正のpushで判定はいったん未判定へ戻る）
   ため、`visibleRepairRun`で症状から消さず、終了の報告と時間切れで消す。ジョブは
   `cancel-in-progress: false`で直列化しており、始まる前にキャンセルされて報告が落ちる経路は無い
-- 修復ボタン「レビュー指摘を自動修正」は、PR本文の`## 検証結果`が要修正の、develop向け
+- 修復ボタン「PRを自動修正」は、PR本文の`## 検証結果`が要修正の、develop向け
   `issue-<番号>`PRにだけ出る（`repairKindsFor`）
 
 レビュー指摘を直す通常導線はこの修復ボタンだけであり、`review-fix`は既存PRのhead branchへ
@@ -370,11 +370,43 @@ commit/pushして同じPRを再レビューする。レビュー指摘を起点�
 作る経路は持たない。現在のPRをマージ可能にするためではない独立課題だけは、通常のIssue作成から
 明示的に切り出す。
 
+### handoffで始まった修正は自動修復系列へ載る（#4318）
+
+handoffで`review-fix`が始まると、`recordReviewFixHandoffStarted`（`pull-request-auto-repair-start.ts`）が
+`PullRequestAutoRepairLoop`へ登録する。登録点は、Claudeは`POST /api/pull-requests/repair-runs`の
+`kind=review`開始報告、Codexは`POST /api/dispatch/review-fix`の依頼。HEADは登録側がGitHubから引く。
+以後は既存の巡回が新HEADのCI・再レビューを待ち、残存指摘を再修正する。
+
+- 系列が無い・`completed`なら`round: 1`で始め、待機中の系列では1回に数えて`maxRounds`（3）を超えない。
+  `stopped`は止めた理由を残すため上書きしない。巡回が起動した直後の報告（`currentKind`が`review`）は数え直さない
+- Codexの修正は`RepairRun`を持たないため、巡回は動いている`REVIEW_FIX`のDispatchJobがある間は待つ
+- 手動開始・巡回・handoffは`isLoopInProgress`と同じHEAD・同じ指摘の`lastFingerprint`で重ならない
+- レビュー指摘欄にも同じ「PRを自動修正」の操作と状態別の案内を出す（スマホで上部を探さなくて済む）
+
+### handoffの取りこぼしは巡回で拾い直す（#4334）
+
+渡した後に`claude-review-fix.yml`が起動しなかった（`workflow_run`の未配送など）PRを、
+`POST /api/pull-requests/auto-repair-sweep`が呼ぶ`runReviewHandoffRescueSweep`
+（`pull-request-review-handoff-rescue.ts`）が拾い、手動開始と同じ`startPullRequestAutoRepairLoop`
+（`kind: review`）で系列へ載せる。PR一覧の取得は3分に1回で、コメントを引くのは本文の判定が
+「現在のHEADで要修正」のPRだけ。判定は純関数`decideHandoffRescue`。
+
+- **拾う条件**: develop向け`issue-<番号>`のopenなPRで、本文の判定が現在のHEADの`changes-requested`、
+  現在のHEADの`issue-deck-review-autofix:ok`（`selectReviewFixComments`）と対応Issueの
+  handoffコメントがあり、そのコメントから10分経っている
+- **見送る条件（二重起動の防止）**: 系列が`running`/`dispatching`、同じHEADで`stopped`/`completed`の系列がある
+  （止めた理由を上書きしない）、同じHEADの`REVIEW_FIX`ジョブ（Codex）がある、handoff以降に
+  `review`の修復記録（Claude）が始まっている
+- **起動できないとき**: `claude-review-fix.yml`が未配布なら`handoff_workflow_missing`、配布対象外なら
+  `handoff_unsupported`を停止理由として系列へ残し、PR詳細の「自動修復を停止しました」に原因と次の操作
+  （配布・手動修正）を出す。起動の失敗は従来どおり`dispatch_failed`
+- 手動開始・handoffと重ならないのは、開始側が`running`/`dispatching`の系列へは起動しないのと、
+  上の見送り条件による
+
 ### 取りこぼしうるもの
 
-- **渡した後に`claude-review-fix.yml`が起動しなかった場合**、PRは`00.check-user`の無いまま
-  「要修正」で残る（赤い帯は出ているので画面では分かる）。GitHubのイベント配送の取りこぼしは
-  コンフリクトで実例がある（上記「issue-deckからの巡回検知」）が、巡回での拾い直しはまだ無い
+- **渡した後に`claude-review-fix.yml`が起動しなかった場合**は、上の巡回が約10〜13分後に拾い直す。
+  拾えるのは巡回の対象（連携済みのリポジトリ）に限る
 - **`.github/workflows/**`を変更するPRはレビュー自体が走らない**ため、この経路にも乗らない
 - **他リポジトリへは2段階で届く。** 渡しの判断は`reusable-claude-review-develop.yml`にあり
   参照タグで届くが、callerの`claude-review-fix.yml`は設定＞フリート運用から配る

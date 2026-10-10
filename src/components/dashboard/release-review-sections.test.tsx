@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { ReleaseReviewSections } from "@/components/dashboard/release-review-sections";
+import { ReleaseReviewSections, ReleaseVerificationBrief } from "@/components/dashboard/release-review-sections";
 import type { UseReleaseChangesResult } from "@/hooks/use-release-changes";
 import type { ReleaseVerificationProgress } from "@/lib/release-verification-progress";
 import type { ReleaseVerificationSection, ReleaseVerificationSummary } from "@/lib/release-verification-summary";
@@ -307,5 +307,53 @@ describe("ReleaseReviewSections", () => {
       />,
     );
     expect(screen.queryByTestId("release-review-sections")).toBeNull();
+  });
+});
+
+describe("ReleaseVerificationBrief（ブランチ画面。#4357）", () => {
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+  });
+
+  function stubFetch(verification: ReleaseVerificationSummary) {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify({ verification }), { status: 200 })),
+    );
+  }
+
+  it("全体レビューと統合検証を名前付きで別々に出し、個別PRレビューは出さない", async () => {
+    stubFetch(
+      summary({
+        aiReview: section({ state: "passed" }),
+        integration: section({ kind: "integration", state: "failed", reason: "テストが失敗しました" }),
+      }),
+    );
+    render(
+      <ReleaseVerificationBrief repositoryFullName="guchi-apps/issue-deck" pullRequestNumber={4345} headRef={HEAD} />,
+    );
+    await waitFor(() => expect(within(row("全体レビュー")).getByText("問題なし")).toBeTruthy());
+    expect(within(row("統合検証")).getByText("失敗")).toBeTruthy();
+    expect(screen.queryByText("個別PRレビュー")).toBeNull();
+  });
+
+  it("要修正でも作り直しの案内・ボタンは出さない（追加PR群の直下に1つだけ置くため）", async () => {
+    stubFetch(summary({ aiReview: section({ state: "invalidated" }) }));
+    render(
+      <ReleaseVerificationBrief repositoryFullName="guchi-apps/issue-deck" pullRequestNumber={4345} headRef={HEAD} />,
+    );
+    await waitFor(() => expect(within(row("全体レビュー")).getByText("古い結果")).toBeTruthy());
+    fireEvent.click(within(row("全体レビュー")).getByText("古い結果"));
+    expect(screen.queryByText(/developへ入れてから作り直します/)).toBeNull();
+    expect(screen.queryByRole("button", { name: /作り直す/ })).toBeNull();
+  });
+
+  it("凍結ブランチ以外では何も出さない", () => {
+    stubFetch(summary());
+    const { container } = render(
+      <ReleaseVerificationBrief repositoryFullName="guchi-apps/issue-deck" pullRequestNumber={1} headRef="develop" />,
+    );
+    expect(container.innerHTML).toBe("");
   });
 });

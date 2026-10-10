@@ -33,6 +33,33 @@ describe("PullRequestReviewFindings", () => {
     expect(screen.getByText(/progress-drag\.ts:88/)).toBeTruthy();
   });
 
+  it("修復操作を渡すと、指摘欄に実際のボタン名「PRを自動修正」と案内を出す（#4318）", () => {
+    render(
+      <PullRequestReviewFindings
+        review={review()}
+        pullRequestNumber={4307}
+        repair={{ repositoryFullName: "guchi-apps/issue-deck", kinds: ["review"] }}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "PRを自動修正" })).toBeTruthy();
+    expect(screen.getByText(/CI・再レビューまで進めます/)).toBeTruthy();
+    expect(screen.queryByText(/レビュー指摘を自動修正/)).toBeNull();
+  });
+
+  it("自動修正中は「押してください」の案内を出さない（#4318）", () => {
+    render(
+      <PullRequestReviewFindings
+        review={review()}
+        pullRequestNumber={4307}
+        repair={{ repositoryFullName: "guchi-apps/issue-deck", kinds: ["review"], runningKind: "review" }}
+      />,
+    );
+
+    expect(screen.queryByText(/CI・再レビューまで進めます/)).toBeNull();
+    expect(screen.getByRole("button", { name: "PRを自動修正" }).hasAttribute("disabled")).toBe(true);
+  });
+
   it("本文は畳める", () => {
     render(<PullRequestReviewFindings review={review()} pullRequestNumber={2851} />);
 

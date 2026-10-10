@@ -69,7 +69,31 @@ describe("decideReleaseFix", () => {
       series: [snapshot(), snapshot({ id: "s2", fixPrNumber: 101 })],
       candidate: { ...open, developPullRequests: [100, 101] },
     });
-    expect(decision).toEqual({ action: "rebuild", seriesIds: ["s1", "s2"] });
+    expect(decision).toEqual({ action: "rebuild", seriesIds: ["s1", "s2"], selectedPrs: [] });
+  });
+  it("選んだ作り直しに対応していれば、無関係な変更があっても修正PRだけを選んで作り直す（#4335）", () => {
+    const decision = decideReleaseFix({
+      series: [snapshot()],
+      candidate: { ...open, developPullRequests: [100, 200] },
+      selective: true,
+    });
+    expect(decision).toEqual({ action: "rebuild", seriesIds: ["s1"], selectedPrs: [100] });
+  });
+  it("選んだ作り直しでは、確認済みのPRも足すが、developに入っていないものは選ばない", () => {
+    const decision = decideReleaseFix({
+      series: [snapshot({ acceptedExtraPrs: [200, 300] })],
+      candidate: { ...open, developPullRequests: [100, 200] },
+      selective: true,
+    });
+    expect(decision).toEqual({ action: "rebuild", seriesIds: ["s1"], selectedPrs: [100, 200] });
+  });
+  it("選んだ作り直しで足す修正PRが無ければ止める", () => {
+    const decision = decideReleaseFix({
+      series: [snapshot()],
+      candidate: { ...open, developPullRequests: [200] },
+      selective: true,
+    });
+    expect(decision).toMatchObject({ action: "stop", status: "stopped" });
   });
   it("無関係な変更が入っていたら作り直さず判断待ちにする", () => {
     const decision = decideReleaseFix({

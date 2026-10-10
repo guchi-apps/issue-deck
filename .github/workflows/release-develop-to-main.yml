@@ -39,6 +39,13 @@ on:
         required: false
         type: boolean
         default: false
+      rebuild_selection:
+        # 「修正を入れて作り直す」で元の候補へ足すPRの指定（#4335）。issue-deckのサーバーが
+        # 組み立てるJSONで、手で入力するものではない（形式は reusable 側の rebuild-selection）
+        description: "作り直しで元の候補へ足すPR（issue-deckが指定する）"
+        required: false
+        type: string
+        default: ""
   schedule:
     # 実装中issueが無いタイミングでの自動起動（#3404）。実際の実行間隔は画面の設定
     # （#3416）で、cronは変えられないため15分おきに起動し、reusable側のgateが設定した
@@ -68,14 +75,15 @@ jobs:
       # 自動判定のみを使う。
       bump-kind: ${{ github.event_name == 'workflow_dispatch' && inputs.bump_kind || '' }}
       allow-failed-deploy: ${{ github.event_name == 'workflow_dispatch' && inputs.allow_failed_deploy == true }}
+      rebuild-selection: ${{ github.event_name == 'workflow_dispatch' && inputs.rebuild_selection || '' }}
     secrets: inherit
     # **呼ばれる側の権限はcallerの付与範囲を超えられない。** 通常のワークフローではjobが
     # workflowレベルの既定を上回る指定をしてよいが、再利用可能ワークフローでは
     # callerが渡した範囲が上限になる。超えると startup_failure になる（#1181で2度踏んだ）。
     #
-    # issues が write なのは、reusable側の notify-failure ジョブがリリース対象issueへ
-    # 失敗を通知するため。元のコピー方式では workflow レベルが read で notify-failure だけが
-    # write へ上書きしており、その書き方は再利用可能ワークフローでは通らない。
+    # issues が write なのは、旧世代の reusable 側の notify-failure ジョブがリリース対象issueへ
+    # 失敗を通知していたため（#4335でissue-deckへの記録に変わり、現行は使わない。配布先の
+    # callerと揃えて残している）。
     permissions:
       contents: write
       pull-requests: write

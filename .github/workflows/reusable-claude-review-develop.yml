@@ -1370,7 +1370,7 @@ jobs:
               exit 0
             elif [ "$HANDOFF_COUNT" -ge "$HANDOFF_MAX" ]; then
               HANDOFF_BLOCKER="自動修正を${HANDOFF_COUNT}回試みた"
-              LIMIT_BODY="⚠️ レビュー指摘の自動修正を${HANDOFF_COUNT}回試みましたが、まだ「要修正」と判定されています。繰り返しを避けるため自動修正を止め、確認を待ちます。内容を確認してから、issue-deckのPR画面の「レビュー指摘を自動修正」で再実行するか、修正を依頼してください。"
+              LIMIT_BODY="⚠️ レビュー指摘の自動修正を${HANDOFF_COUNT}回試みましたが、まだ「要修正」と判定されています。繰り返しを避けるため自動修正を止め、確認を待ちます。内容を確認してから、issue-deckのPR画面の「PRを自動修正」で再実行するか、修正を依頼してください。"
               gh issue comment "$ISSUE_NUMBER" --body "$LIMIT_BODY"$'\n\n<!-- issue-deck-source:claude-review-fix -->' \
                 || echo "::warning::上限到達のコメントを投稿できませんでした"
             fi

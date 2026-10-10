@@ -5,11 +5,11 @@ import { DISPATCH_HOST_ONLINE_WINDOW_MS, buildDispatchActiveKey, parseDispatchHo
 import { getInstallationToken } from "@/lib/github/app-auth";
 import { GITHUB_API, githubFetch } from "@/lib/github/request";
 
-type Comment = { body: string; created_at: string; author_association?: string; user?: { login: string } };
+export type Comment = { body: string; created_at: string; author_association?: string; user?: { login: string } };
 export type ReviewFixTarget = { repository: string; issueNumber: number; pullRequest: number; headSha: string; manual: boolean; runId?: string };
 const activeStatuses = ["QUEUED", "CLAIMED", "RUNNING"] as const;
 
-function trustedComment(comment: Comment): boolean {
+export function trustedComment(comment: Comment): boolean {
   return /^(OWNER|MEMBER|COLLABORATOR)$/.test(comment.author_association ?? "") || ["claude[bot]", "issue-deck[bot]", "github-actions[bot]"].includes(comment.user?.login ?? "");
 }
 
@@ -31,7 +31,7 @@ async function githubJson<T>(path: string, token: string): Promise<T> {
   if (!response.ok) throw new Error(`GitHubの状態を確認できません（HTTP ${response.status}）`);
   return response.json() as Promise<T>;
 }
-async function comments(repository: string, number: number, token: string) {
+export async function fetchAllComments(repository: string, number: number, token: string) {
   const all: Comment[] = [];
   for (let page = 1; ; page++) {
     const rows = await githubJson<Comment[]>(`repos/${repository}/issues/${number}/comments?per_page=100&page=${page}`, token);
@@ -49,7 +49,7 @@ export async function validateReviewFixTarget(target: ReviewFixTarget) {
   const [pr, issue, reviews, handoffs] = await Promise.all([
     githubJson<{ state: string; draft: boolean; head: { sha: string; ref: string; repo: { full_name: string } }; base: { ref: string } }>(`repos/${target.repository}/pulls/${target.pullRequest}`, token),
     githubJson<{ state: string; labels: { name: string }[] }>(`repos/${target.repository}/issues/${target.issueNumber}`, token),
-    comments(target.repository, target.pullRequest, token), comments(target.repository, target.issueNumber, token),
+    fetchAllComments(target.repository, target.pullRequest, token), fetchAllComments(target.repository, target.issueNumber, token),
   ]);
   if (pr.state !== "open" || pr.draft || issue.state !== "open" || pr.head.sha !== target.headSha || pr.head.ref !== `issue-${target.issueNumber}` || pr.head.repo.full_name !== target.repository || !["main", "develop"].includes(pr.base.ref)) throw new Error("PRのHEAD・ブランチ・状態が変わったため停止しました");
   if (issue.labels.some((l) => l.name === "11.local" || l.name === "00.check-user")) throw new Error("ローカル対応中または確認待ちのため停止しました");

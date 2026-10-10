@@ -23,6 +23,7 @@ import {
 
 import { BulkReserveDock, BulkReserveEntryBar } from "@/components/dashboard/bulk-reserve-bar";
 import { useCodeReviewRecommendSettings } from "@/components/dashboard/use-code-review-recommend-settings";
+import { DependencyWaitBadge } from "@/components/dashboard/dependency-wait-panel";
 import { CodeReviewRepoOverview } from "@/components/dashboard/code-review-repo-overview";
 import { CodeReviewResultBadges } from "@/components/dashboard/code-review-result-badges";
 import { IssueAgentBadge } from "@/components/dashboard/issue-agent-badge";
@@ -963,6 +964,15 @@ export function IssueList({
     const bulkChecked = bulkActive && bulk.selected.has(issue.id);
     const bulkFailure = bulkActive ? (bulk.failures.get(issue.id) ?? null) : null;
     const issueSession = sessionByIssueId.get(issue.id) ?? null;
+    // 実装セッションの依存待ち（#4321）。待機は「実装中」「ユーザー確認待ち」ではなく専用の印で出す
+    const dependencyWait =
+      (dispatch.dependencyWaits ?? []).find(
+        (w) =>
+          w.repositoryFullName === issue.repositoryFullName &&
+          w.issueNumber === issue.number &&
+          w.status !== "RESUMED" &&
+          w.status !== "CANCELLED",
+      ) ?? null;
     // 実行中は一覧から保留にして処理を隠せないようにする（#2610）。GitHub Actionsと
     // ローカルエージェントの判定は、それぞれ既存の一覧用の状態をそのまま使う。
     const isRunning =
@@ -1236,6 +1246,7 @@ export function IssueList({
               {issueSession && (
                 <IssueAgentBadge agent={resolveIssueImplementationAgent(issueSession)} />
               )}
+              {dependencyWait && <DependencyWaitBadge wait={dependencyWait} />}
               <QuestionStateBadge
                 state={resolveQuestionState(issue)}
                 waiting={isQaAnswerWaiting(issue) && !stepBadgeShowsQaAnswerPending}

@@ -17,6 +17,8 @@ export type ReleaseRebuildPullRequest = {
   title: string;
   /** ブランチ名`issue-<番号>`から取れた対応Issue。取れなければnull */
   issueNumber: number | null;
+  /** developへのマージコミット（PRを選んだ作り直しで当てる差分。#4335）。compareに無ければnull */
+  mergeSha?: string | null;
 };
 
 /** リリースPRの後にdevelopへ入った変更。作り直しボタンの可否と確認ダイアログに使う */
@@ -28,7 +30,7 @@ export type ReleaseRebuildCandidate = {
 };
 
 /** `GET /repos/{owner}/{repo}/compare/{base}...{head}`の`commits[]`のうち使う部分 */
-export type CompareCommit = { commit: { message: string } };
+export type CompareCommit = { sha?: string; commit: { message: string } };
 
 const MERGE_SUBJECT = /^Merge pull request #(\d+) from [^/\s]+\/(\S+)/;
 
@@ -41,7 +43,7 @@ const MERGE_SUBJECT = /^Merge pull request #(\d+) from [^/\s]+\/(\S+)/;
  */
 export function parseRebuildPullRequests(commits: CompareCommit[]): ReleaseRebuildPullRequest[] {
   const pullRequests: ReleaseRebuildPullRequest[] = [];
-  for (const { commit } of commits) {
+  for (const { sha, commit } of commits) {
     const [subject = "", ...rest] = commit.message.split("\n");
     const match = MERGE_SUBJECT.exec(subject);
     if (!match) continue;
@@ -53,6 +55,7 @@ export function parseRebuildPullRequests(commits: CompareCommit[]): ReleaseRebui
       number: Number(match[1]),
       title,
       issueNumber: issueMatch ? Number(issueMatch[1]) : null,
+      ...(sha ? { mergeSha: sha } : {}),
     });
   }
   return pullRequests.sort((a, b) => a.number - b.number);

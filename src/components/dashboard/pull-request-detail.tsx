@@ -438,6 +438,12 @@ export function PullRequestDetail({
               pullRequestNumber={pullRequest.number}
               pullRequestUrl={pullRequest.htmlUrl}
               reviewRunUrl={pullRequest.mergeJudgement.aiReview.runUrl}
+              repair={{
+                repositoryFullName: pullRequest.repositoryFullName,
+                kinds: repairKinds,
+                availability: pullRequest.repairWorkflowAvailability,
+                runningKind: pullRequest.repairRun?.kind ?? null,
+              }}
             />
           )}
 

@@ -62,6 +62,16 @@ export async function runPullRequestAutoRepairSweep(): Promise<{ scanned: number
               : "needs-check"
           : null;
       const recordedActive = await fetchActivePullRequestRepairRun(stored.repositoryFullName, stored.pullRequestNumber);
+      // Codexのレビュー修正はRepairRunを持たずDispatchJobだけが正（#4318）。動いている間は待つ。
+      const codexReviewFixActive =
+        (await db.dispatchJob.count({
+          where: {
+            kind: "REVIEW_FIX",
+            repositoryFullName: stored.repositoryFullName,
+            prNumber: stored.pullRequestNumber,
+            status: { in: ["QUEUED", "CLAIMED", "RUNNING"] },
+          },
+        })) > 0;
       // 現在この系列が起動したkindは、症状が先に消えてもworkflow終了まで待つ。
       // 一方、別kindの古いrunning行は、対象症状が既に解消済みなら終了報告欠落の残留記録として無視する。
       const active =
@@ -75,7 +85,7 @@ export async function runPullRequestAutoRepairSweep(): Promise<{ scanned: number
           : null;
       // workflow実行中に30分を超えても、終了後のCI・レビュー待ちはそこから30分確保する。
       // currentKindが残っていてactiveが消えた最初の巡回を「workflow終了観測」とし、待機時計をリセットする。
-      if (active === null && stored.currentKind !== null) {
+      if (active === null && !codexReviewFixActive && stored.currentKind !== null) {
         await db.pullRequestAutoRepairLoop.update({
           where: { repositoryFullName_pullRequestNumber: { repositoryFullName: stored.repositoryFullName, pullRequestNumber: stored.pullRequestNumber } },
           data: { currentKind: null, waitStartedAt: now },
@@ -84,7 +94,7 @@ export async function runPullRequestAutoRepairSweep(): Promise<{ scanned: number
       }
       // workflowが実際に走っている間は既存のRepairRun（最大6時間）を正とし、待機タイムアウトしない。
       // workflow終了を観測してcurrentKindを消した後、CI/レビュー待ちだけが30分以上続いた場合に停止する。
-      if (active === null && stored.currentKind === null && stored.waitStartedAt !== null && stored.waitStartedAt < timeoutAt) {
+      if (active === null && !codexReviewFixActive && stored.currentKind === null && stored.waitStartedAt !== null && stored.waitStartedAt < timeoutAt) {
         await db.pullRequestAutoRepairLoop.update({
           where: { repositoryFullName_pullRequestNumber: { repositoryFullName: stored.repositoryFullName, pullRequestNumber: stored.pullRequestNumber } },
           data: { status: "stopped", currentKind: null, headSha: pullRequest.head.sha, stopReason: "timed_out" },
@@ -113,7 +123,7 @@ export async function runPullRequestAutoRepairSweep(): Promise<{ scanned: number
         mergeable: current.mergeable,
         ciState: current.ciState,
         review,
-        repairRunning: active !== null,
+        repairRunning: active !== null || codexReviewFixActive,
       });
       if (decision.action === "wait") continue;
       if (decision.action === "complete") {

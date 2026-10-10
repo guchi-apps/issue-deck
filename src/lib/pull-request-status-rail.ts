@@ -1,5 +1,5 @@
 import { buildIssuePullRequestProgress } from "@/lib/issue-pull-request-progress";
-import type { PullRequestSummary } from "@/types/pull-request";
+import type { PullRequestReleaseCheckState, PullRequestSummary } from "@/types/pull-request";
 
 /**
  * PR一覧の各行に、**場所を固定して**並べる状態の列（#2942）。
@@ -22,7 +22,12 @@ import type { PullRequestSummary } from "@/types/pull-request";
  * この判定の外に残すのは`repairRun`（自動修復の実行中）だけで、あちらは経過時間を数え直す
  * 生きたバッジ（`RepairRunBadge`）なので、レールの右へ今までどおり別に並べる。
  */
-export type PullRequestRailSlotKey = "ci" | "conflict" | "ai-review";
+export type PullRequestRailSlotKey =
+  | "ci"
+  | "conflict"
+  | "ai-review"
+  | "release-review"
+  | "release-integration";
 
 /**
  * 1枠の状態。色とアイコンの出し分けはこれだけで決まる。
@@ -64,6 +69,26 @@ const COLUMN_LABEL: Record<PullRequestRailSlotKey, string> = {
   ci: "CI",
   conflict: "コンフリクト",
   "ai-review": "レビュー",
+  "release-review": "全体レビュー",
+  "release-integration": "統合検証",
+};
+
+/** リリースPRの検証1区分の見せ方（#4349）。一覧で「成功と推測しない」ため、未実施・古い結果は別の文言にする */
+const RELEASE_CHECK_SLOT: Record<
+  PullRequestReleaseCheckState,
+  { state: PullRequestRailSlotState; statusText?: string; title: string }
+> = {
+  passed: { state: "done", title: "対象の現在の内容に対して問題ありません。" },
+  running: { state: "current", title: "実行中、または実行の順番待ちです。" },
+  needs_check: { state: "needs-check", title: "未確認の範囲があります。内容を確かめてください。" },
+  failed: { state: "failed", title: "失敗しています。" },
+  not_run: { state: "pending", statusText: "未実施", title: "まだ実施されていません。" },
+  invalidated: {
+    state: "pending",
+    statusText: "古い",
+    title: "対象（mainの先端またはリリースブランチの先端）が変わったため、古い結果は使えません。",
+  },
+  not_applicable: { state: "absent", statusText: "対象外", title: "この検証は対象外です。" },
 };
 
 /** ドラフトのPRではCI状態も判定も取りに行っていない（`fetchPullRequestCiStates`） */
@@ -87,7 +112,7 @@ const AUTO_MERGE_LABEL = "自動マージ";
 const AUTO_MERGE_TITLE = "Auto-mergeが有効です。CI通過後に自動でマージされます。";
 
 /**
- * 1本のPRから、一覧に並べる3枠を作る（#2942）。**枠は常に3つ返す**——1つでも欠けると
+ * 1本のPRから、一覧に並べる3枠を作る（#2942）。**通常のPRでは枠は常に3つ返す**（リリースPRだけ検証の2枠が続く。#4349）——1つでも欠けると
  * 行をまたいだ列の位置がずれ、縦に読み比べるという狙いそのものが崩れる。
  */
 export function buildPullRequestStatusRail(
@@ -97,7 +122,30 @@ export function buildPullRequestStatusRail(
   const stepOf = (key: "ci" | "ai-review" | "merge") =>
     progress.steps.find((step) => step.key === key) ?? null;
 
-  return [ciSlot(), conflictSlot(), aiReviewSlot()];
+  const releaseChecks = pullRequest.releaseChecks ?? null;
+  return [
+    ciSlot(),
+    conflictSlot(),
+    aiReviewSlot(),
+    // 記録を読めたリリースPRだけ2枠を足す。それ以外は3枠のまま（行の高さを変えない）
+    ...(releaseChecks
+      ? [
+          releaseSlot("release-review", releaseChecks.aiReview),
+          releaseSlot("release-integration", releaseChecks.integration),
+        ]
+      : []),
+  ];
+
+  function releaseSlot(
+    key: "release-review" | "release-integration",
+    state: PullRequestReleaseCheckState,
+  ): PullRequestRailSlot {
+    const view = RELEASE_CHECK_SLOT[state];
+    return {
+      ...slot(key, view.statusText ?? "", view.state, view.title, null),
+      ...(view.statusText ? { statusText: view.statusText } : {}),
+    };
+  }
 
   function ciSlot(): PullRequestRailSlot {
     if (pullRequest.draft) {

@@ -218,3 +218,29 @@ describe("PullRequestStatusRail（#2942）", () => {
     expect(slotLabels(container)[1]).toBe("コンフリクト実施中");
   });
 });
+
+describe("PullRequestStatusRail: リリースPRの検証枠（#4349）", () => {
+  afterEach(cleanup);
+
+  it("releaseChecksがあるときだけ全体レビューと統合検証を出す", () => {
+    const { container, rerender } = render(
+      <PullRequestStatusRail
+        pullRequest={makePullRequest({ releaseChecks: { aiReview: "passed", integration: "failed" } })}
+      />,
+    );
+    expect(screen.getByText("全体レビュー")).toBeTruthy();
+    expect(screen.getByText("統合検証")).toBeTruthy();
+    rerender(<PullRequestStatusRail pullRequest={makePullRequest({ releaseChecks: null })} />);
+    expect(container.textContent).not.toContain("統合検証");
+  });
+
+  it("未実施・古い結果は成功の印にしない", () => {
+    render(
+      <PullRequestStatusRail
+        pullRequest={makePullRequest({ releaseChecks: { aiReview: "not_run", integration: "invalidated" } })}
+      />,
+    );
+    expect(screen.getByText("未実施")).toBeTruthy();
+    expect(screen.getByText("古い")).toBeTruthy();
+  });
+});

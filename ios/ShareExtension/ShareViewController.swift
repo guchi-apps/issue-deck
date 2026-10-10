@@ -255,7 +255,7 @@ final class ShareModel: ObservableObject {
     }
 
     func openIssue() {
-        if case .succeeded(let issue) = phase, let url = issue.githubURL { onOpenURL(url) }
+        if case .succeeded(let issue) = phase, let url = issue.appURL { onOpenURL(url) }
     }
 
     private func loadData(_ provider: NSItemProvider, type: UTType) async -> Data? {
@@ -457,9 +457,6 @@ private struct SucceededView: View {
             Image(systemName: "checkmark.circle.fill").font(.system(size: 48)).foregroundStyle(.green)
             Text("Issueを作成しました").font(.title3.bold())
             Text("\(issue.repositoryFullName) #\(issue.number)").font(.subheadline.monospaced())
-            if let url = issue.githubURL {
-                Text(url.absoluteString).font(.footnote).foregroundStyle(.secondary).multilineTextAlignment(.center)
-            }
             Text("タイトルが空欄の場合は、自動で記入されます").font(.caption).foregroundStyle(.secondary)
             Button("Issueを開く") { model.openIssue() }.buttonStyle(.borderedProminent)
         }

@@ -26,14 +26,16 @@ describe("buildPullRequestFixIssueDraft", () => {
     const draft = buildPullRequestFixIssueDraft(base);
     expect(draft.repositoryFullName).toBe("guchi-apps/example");
     expect(draft.title).toBe("#12 の修正: 一覧を直す");
-    expect(draft.body).toContain("- 対象PR: #12 一覧を直す");
-    expect(draft.body).toContain("- 元Issue: #7");
-    expect(draft.body).toContain(RELEASE_FIX_ISSUE_OBSERVATION_HEADING);
+    expect(draft.bodyPrefix).toContain("- 対象PR: #12 一覧を直す");
+    expect(draft.bodyPrefix).toContain("- 元Issue: #7");
+    expect(draft.bodyPrefix).toContain(RELEASE_FIX_ISSUE_OBSERVATION_HEADING);
+    // 前半は編集不可の接頭辞に入り、入力欄は空で始まる
+    expect(draft.body).toBe("");
   });
 
   it("元Issueやマージ日時が無ければその行を出さない", () => {
     const draft = buildPullRequestFixIssueDraft({ ...base, mergedAt: null, linkedIssueNumber: null });
-    expect(draft.body).not.toContain("元Issue");
-    expect(draft.body).not.toContain("マージ日時");
+    expect(draft.bodyPrefix).not.toContain("元Issue");
+    expect(draft.bodyPrefix).not.toContain("マージ日時");
   });
 });

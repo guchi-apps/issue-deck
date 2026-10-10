@@ -173,6 +173,13 @@ on:
         type: choice
         default: auto
         options: [auto, patch, minor, major]
+      rebuild_selection:
+        # 「修正を入れて作り直す」で元の候補へ足すPRの指定（guchi-apps/issue-deck#4335）。
+        # issue-deckのサーバーが組み立てるJSONで、手で入力するものではない
+        description: "作り直しで元の候補へ足すPR（issue-deckが指定する）"
+        required: false
+        type: string
+        default: ""
   push:
     branches: [develop]
     paths:
@@ -193,6 +200,7 @@ jobs:
     with:
       # pushトリガー（バンプPRのマージ）で起動したときは\`inputs\`自体が無いため空文字を渡す。
       bump-kind: \${{ github.event_name == 'workflow_dispatch' && inputs.bump_kind || '' }}
+      rebuild-selection: \${{ github.event_name == 'workflow_dispatch' && inputs.rebuild_selection || '' }}
     secrets: inherit
     # **呼ばれる側の権限はcallerの付与範囲を超えられない。** issues が write なのは、
     # 呼ばれる側の notify-failure ジョブがリリース対象issueへ失敗を通知するため。

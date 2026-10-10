@@ -10,6 +10,8 @@ const deleteBranch = vi.fn();
 const dispatchReleaseWorkflow = vi.fn();
 const closePullRequest = vi.fn();
 const createComment = vi.fn();
+const releaseCallerSupportsSelection = vi.fn();
+const requestSelectiveRebuild = vi.fn();
 const calls: string[] = [];
 
 vi.mock("@/lib/auth-user", () => ({
@@ -53,6 +55,16 @@ vi.mock("@/lib/github/release-api", () => ({
   get dispatchReleaseWorkflow() {
     return dispatchReleaseWorkflow;
   },
+  get releaseCallerSupportsSelection() {
+    return releaseCallerSupportsSelection;
+  },
+}));
+
+vi.mock("@/lib/release-rebuild-selection-run", () => ({
+  get requestSelectiveRebuild() {
+    return requestSelectiveRebuild;
+  },
+  loadRebuildSelectionOptions: vi.fn(),
 }));
 
 vi.mock("@/lib/github/actions-api", () => ({
@@ -99,6 +111,11 @@ describe("POST /api/repositories/release/rebuild", () => {
     closePullRequest.mockReset().mockImplementation(async () => calls.push("close"));
     deleteBranch.mockReset().mockImplementation(async () => calls.push("delete"));
     dispatchReleaseWorkflow.mockReset().mockImplementation(async () => calls.push("dispatch"));
+    releaseCallerSupportsSelection.mockReset().mockResolvedValue(false);
+    requestSelectiveRebuild.mockReset().mockImplementation(async () => {
+      calls.push("selective");
+      return { ok: true, requestId: "r1", selection: [{ number: 3022, mergeSha: "m", title: "直す" }] };
+    });
   });
 
   it("リリースPRを閉じて凍結ブランチを消してから、workflowを起動する", async () => {
@@ -140,5 +157,54 @@ describe("POST /api/repositories/release/rebuild", () => {
     );
     expect(res.status).toBe(502);
     expect((await res.json()).error).toBe("rebuild_dispatch_bump_kind_unsupported");
+  });
+
+  describe("PRを選んだ作り直し（#4335）", () => {
+    it("選んだPRを検証つきの共通処理へ渡し、元の候補は閉じない", async () => {
+      const res = await POST(
+        request({
+          owner: "guchi-apps",
+          repo: "issue-deck",
+          pullRequestNumber: 3021,
+          headSha: "abc",
+          selectedPullRequests: [{ number: 3022, mergeSha: "m" }],
+        }),
+      );
+      expect(res.status).toBe(200);
+      expect(calls).toEqual(["selective"]);
+      expect(requestSelectiveRebuild).toHaveBeenCalledWith(
+        expect.objectContaining({ selected: [{ number: 3022, expectedMergeSha: "m" }], source: "manual", userId: "user-1" }),
+      );
+      expect(closePullRequest).not.toHaveBeenCalled();
+    });
+
+    it("見ていた元の候補のheadが変わっていれば起動しない", async () => {
+      const res = await POST(
+        request({ owner: "guchi-apps", repo: "issue-deck", pullRequestNumber: 3021, headSha: "old", selectedPullRequests: [{ number: 3022 }] }),
+      );
+      expect(res.status).toBe(409);
+      expect(requestSelectiveRebuild).not.toHaveBeenCalled();
+    });
+
+    it("対応したリポジトリで選択が無ければ、developの最新を丸ごと取り込む作り直しはしない", async () => {
+      releaseCallerSupportsSelection.mockResolvedValue(true);
+      const res = await POST(request({ owner: "guchi-apps", repo: "issue-deck", pullRequestNumber: 3021 }));
+      expect(res.status).toBe(400);
+      expect((await res.json()).error).toBe("selection_required");
+      expect(calls).toEqual([]);
+    });
+
+    it("選べないPRがあれば理由を返す", async () => {
+      requestSelectiveRebuild.mockResolvedValue({
+        ok: false,
+        error: "invalid_selection",
+        problems: [{ number: 3022, problem: "not_merged", label: "developへ未マージです" }],
+      });
+      const res = await POST(
+        request({ owner: "guchi-apps", repo: "issue-deck", pullRequestNumber: 3021, selectedPullRequests: [{ number: 3022 }] }),
+      );
+      expect(res.status).toBe(409);
+      expect((await res.json()).problems[0].problem).toBe("not_merged");
+    });
   });
 });

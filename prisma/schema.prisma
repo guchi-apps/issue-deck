@@ -2648,3 +2648,139 @@ model ReleaseFixSeries {
   @@index([repositoryFullName, releasePrNumber])
   @@index([status])
 }
+
+// リリース準備（`release-develop-to-main.yml`の`release`ジョブ）の失敗記録（#4335）。
+// 共通のリリース処理が失敗しても対象Issue全件へ`00.check-user`を付けず、リリース画面に1件として出す。
+// 失敗した工程・エラー抜粋はworkflowの申告ではなく、サーバーがGitHubのrun/ジョブ/ログから取り直す。
+model ReleasePreparationFailure {
+  id                 String    @id @default(cuid())
+  repositoryFullName String    @db.VarChar(191)
+  runId              String    @db.VarChar(32)
+  runUrl             String    @db.VarChar(512)
+  // `workflow_dispatch` / `push` / `schedule`
+  event              String?   @db.VarChar(32)
+  // 起動時に指定された上げ幅（再開時に同じ指定で起動し直す）
+  bumpKind           String?   @db.VarChar(16)
+  jobName            String?   @db.VarChar(255)
+  stepName           String?   @db.VarChar(255)
+  // 機密除去済みのエラー行（`##[error]`）。生ログ全文は持たない
+  errorExcerpt       String?   @db.Text
+  // `open`（未解決） / `resolved`（後続のrunで準備が進んだ）
+  status             String    @db.VarChar(16)
+  resolvedAt         DateTime?
+  resolvedRunUrl     String?   @db.VarChar(512)
+  // 解決時に整理した（今回の失敗由来と確認できた）確認待ちラベルのIssue番号（JSON配列）
+  clearedIssues      Json?
+  // 選んで作り直していたときの指定（`rebuild-selection`のJSON）。再開時は現在の状態で検証し直してから渡す（#4335）
+  rebuildSelection   String?   @db.Text
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([repositoryFullName, runId])
+  @@index([repositoryFullName, status])
+}
+
+// 「修正を入れて作り直す」で、元の候補へ足すPRを選んだ依頼（#4335）。画面の手動選択と修正系列（#4317）の
+// 自動作り直しが同じ記録を使い、同じ元の候補への二重の作り直しを`activeKey`で止める。
+// **権限や判断の根拠はこの記録（元の候補のPR番号・head SHA・PRごとのマージコミット）で持つ。**
+model ReleaseRebuildRequest {
+  id                 String   @id @default(cuid())
+  repositoryFullName String   @db.VarChar(191)
+  // 元の候補（凍結ブランチ`release-main/vX.Y.Z`のリリースPR）とそのhead
+  originPrNumber     Int
+  originHeadSha      String   @db.VarChar(64)
+  // 選んだPR（JSON配列 `[{ number, mergeSha, title }]`）。developへのマージ順
+  selection          Json
+  // `manual`（画面） / `fix_series`（修正系列） / `resume`（失敗からの再開）
+  source             String   @db.VarChar(32)
+  // `dispatched`（workflowを起動した） / `failed`（準備に失敗した） / `expired`（期限切れ）
+  status             String   @db.VarChar(16)
+  failureReason      String?  @db.Text
+  // 進行中の間だけ`repositoryFullName#originPrNumber@originHeadSha`を入れる
+  activeKey          String?  @unique @db.VarChar(255)
+  requestedByUserId  String?  @db.VarChar(40)
+
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([repositoryFullName, originPrNumber])
+}
+
+// リリース候補の作り直しの操作履歴（#4359）。追記だけで更新しない。
+// 手動の追加承認・関連修正だけの自動作り直し・承認を契機にした自動作り直し・失敗・後継候補の作成・
+// 元候補の取消／置換を区別して残し、「自動で作り直しました」だけでは分からない操作者・契機・範囲を追跡する。
+// **秘密値・認証トークンは入れない**（理由は機密除去済みの文字列だけ）。同じ依頼の重複イベントは`dedupeKey`で1件に絞る。
+model ReleaseRebuildEvent {
+  id                 String   @id @default(cuid())
+  repositoryFullName String   @db.VarChar(191)
+  // 元の候補（凍結ブランチのリリースPR）とそのhead
+  originPrNumber     Int
+  originHeadSha      String   @db.VarChar(64)
+  // `approval` / `decision_waiting` / `rebuild_started` / `rebuild_failed` / `successor_created` / `stopped` / `superseded`
+  kind               String   @db.VarChar(32)
+  // `user`（認証済みユーザー） / `system`
+  actorKind          String   @db.VarChar(16)
+  actorUserId        String?  @db.VarChar(40)
+  // 起動経路。`manual`（画面の選択） / `resume`（失敗からの再開） / `fix_series_related`（関連修正のみの自動） /
+  // `fix_series_after_approval`（手動承認を契機にした自動） / `sweep`（巡回の観測） / `workflow`（workflowの報告）
+  trigger            String   @db.VarChar(32)
+  reason             String?  @db.Text
+  seriesId           String?  @db.VarChar(40)
+  // 種別ごとの詳細（選んだ・除外したPR、適用時のコミット、後継PR・SHA、承認イベントのid、実行リンク）。JSON
+  payload            Json?
+  dedupeKey          String   @unique @db.VarChar(255)
+
+  createdAt DateTime @default(now())
+
+  @@index([repositoryFullName, originPrNumber])
+  @@index([repositoryFullName, createdAt])
+}
+
+// 実装セッションの依存待ち（#4321）。
+//
+// **DispatchSessionとは別のモデルにしている。** セッションが畳まれても（GONE・EXITED）待ちの
+// 記録と再開条件は残し、復旧経路へ渡せるようにするため。`11.local`は「ローカルで対応中」という
+// 抑止のフラグで、何を待っているのかは表せない。ここが待ち理由・依存先・再開条件の正になる。
+model SessionDependencyWait {
+  id                 String   @id @default(cuid())
+  repositoryFullName String   @db.VarChar(191)
+  issueNumber        Int
+  // 依存先（`owner/repo`と番号）。`issue`か`pr`
+  depRepository      String   @db.VarChar(191)
+  depNumber          Int
+  depKind            String   @db.VarChar(8)
+  // 再開条件（JSON配列。`closed` / `merged` / `released` / `verified`）
+  conditions         Json
+  // 短い日本語の保留理由（セッションが報告した原文。画面にそのまま出す）
+  reason             String   @db.VarChar(300)
+  // WAITING / NEEDS_CONFIRM / RESUME_REQUESTED / RESUME_SENT / RESUMED / RESUME_FAILED / CANCELLED
+  status             String   @db.VarChar(24)
+  // 報告の出どころ。`session`（セッション自身の報告）か`manual`（画面からの登録）
+  source             String   @db.VarChar(16)
+  // 直近の評価結果（条件ごとの成否と説明。JSON）と時刻・取得失敗
+  lastObservation    Json?
+  lastCheckedAt      DateTime?
+  lastError          String?  @db.VarChar(300)
+  // 実行権の取得（巡回の間引きと二重評価の防止）
+  lastSweepAt        DateTime?
+  satisfiedAt        DateTime?
+  // 再開の追跡。要求→送信済み→実際の再開確認を分けて持つ
+  resumeJobId        String?  @db.VarChar(40)
+  resumeRequestedAt  DateTime?
+  resumeSentAt       DateTime?
+  resumedAt          DateTime?
+  failureReason      String?  @db.VarChar(300)
+  // 待ちが続いている間だけ`repo#issue`を入れる（同じIssueの二重登録を止める）
+  activeKey          String?  @unique @db.VarChar(255)
+  // 条件成立・失敗の通知を出し済みか（同じ待機理由で繰り返さない）
+  notifiedKey        String?  @db.VarChar(64)
+
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([repositoryFullName, issueNumber])
+  @@index([status])
+}

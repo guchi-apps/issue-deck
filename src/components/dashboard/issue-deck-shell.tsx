@@ -589,11 +589,17 @@ export function IssueDeckShell({
   }
 
   /** 下書き入りの新規Issue作成ダイアログを開く。ここでは起票しない。 */
-  function openIssueDraftDialog(draft: { repositoryFullName: string; title: string; body: string }) {
+  function openIssueDraftDialog(draft: {
+    repositoryFullName: string;
+    title: string;
+    body: string;
+    /** 本文の先頭に固定で付く編集不可の文面（入力欄には入れない） */
+    bodyPrefix?: string;
+  }) {
     setCreateDialogRepo(draft.repositoryFullName);
     setCreateDialogTitle(draft.title);
     setCreateDialogBody(draft.body);
-    setCreateDialogBodyPrefix(null);
+    setCreateDialogBodyPrefix(draft.bodyPrefix ?? null);
     setConfigIssueOrigin(null);
     setIosFixOrigin(null);
     setCreateDialogOpen(true);

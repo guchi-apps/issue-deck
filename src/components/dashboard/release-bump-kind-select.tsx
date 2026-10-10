@@ -23,7 +23,7 @@ type ReleaseBumpKindSelectProps = {
  * 選べるようにして、後から直す必要そのものを無くす。
  *
  * 既定は「自動判定」（`null`）で、選ばなければ起動の挙動は今までと変わらない。
- * メジャー・マイナー・パッチは横3列で並べ、基準の説明文は出さない（#4310）。
+ * major・minor・patchは横3列で並べ、基準の説明文は出さない（#4310）。
  * スクロール領域の中でも上部に固定表示する。
  *
  * 起動の導線は2か所（ヘッダーのロケットボタンと「ブランチ」画面）あるため、
@@ -88,7 +88,7 @@ export function ReleaseBumpKindSelect({
   );
 }
 
-const KIND_LABEL: Record<BumpKind, string> = { major: "メジャー", minor: "マイナー", patch: "パッチ" };
+const KIND_LABEL: Record<BumpKind, string> = { major: "major", minor: "minor", patch: "patch" };
 
 /** `→ 3.22.0`の目安。現在のバージョンが読めない場合は空文字（何も出さない） */
 function hintFor(currentVersion: string | null, kind: BumpKind): string {

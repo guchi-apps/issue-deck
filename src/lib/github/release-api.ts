@@ -388,6 +388,68 @@ export async function fetchOpenPullRequestsForBase(
   return res.json();
 }
 
+/**
+ * リリースworkflowのcallerが、PRを選んだ作り直し（`rebuild_selection` input。#4335）を受け付けるか。
+ * **developにあるcallerの定義を読んで決める。** 配布先は参照タグとcallerを更新するまで受け付けず、
+ * 受け付けないcallerへinputを送ると422で落ちる。読めなければ受け付けないものとして扱う（従来の作り直しになる）
+ */
+export async function releaseCallerSupportsSelection(owner: string, repo: string, token: string): Promise<boolean> {
+  const url = `${GITHUB_API}/repos/${owner}/${repo}/contents/.github/workflows/${RELEASE_WORKFLOW_FILE}?ref=develop`;
+  const res = await githubFetch(url, token);
+  if (!res.ok) return false;
+  const data: { content?: string; encoding?: string } = await res.json().catch(() => ({}));
+  if (!data.content) return false;
+  const text = Buffer.from(data.content, data.encoding === "base64" ? "base64" : "utf-8").toString("utf-8");
+  return /^\s+rebuild_selection:/m.test(text) && text.includes("rebuild-selection:");
+}
+
+/** PRを選んだ作り直しで、選んだPRを検証するための取得結果（#4335） */
+export type GithubApiMergedPullRequest = {
+  number: number;
+  title: string;
+  html_url: string;
+  state: "open" | "closed";
+  merged_at: string | null;
+  merge_commit_sha: string | null;
+  base: { ref: string };
+  head: { ref: string; sha: string };
+};
+
+/** PR1件を取る。無ければnull */
+export async function fetchPullRequestForRebuild(
+  owner: string,
+  repo: string,
+  number: number,
+  token: string,
+): Promise<GithubApiMergedPullRequest | null> {
+  const url = `${GITHUB_API}/repos/${owner}/${repo}/pulls/${number}`;
+  const res = await githubFetch(url, token);
+  if (res.status === 404) return null;
+  if (!res.ok) {
+    const detail = await res.text().catch(() => "");
+    throw new GithubApiError(res.status, `GitHub API request failed: ${res.status} ${url} ${detail}`);
+  }
+  return res.json();
+}
+
+/** `ancestor`が`descendant`の祖先（または同一）か。compareの`status`で判定する */
+export async function isAncestorCommit(
+  owner: string,
+  repo: string,
+  ancestor: string,
+  descendant: string,
+  token: string,
+): Promise<boolean> {
+  const url = `${GITHUB_API}/repos/${owner}/${repo}/compare/${ancestor}...${descendant}?per_page=1`;
+  const res = await githubFetch(url, token);
+  if (!res.ok) {
+    const detail = await res.text().catch(() => "");
+    throw new GithubApiError(res.status, `GitHub API request failed: ${res.status} ${url} ${detail}`);
+  }
+  const data: { status?: string } = await res.json();
+  return data.status === "ahead" || data.status === "identical";
+}
+
 /** 修正PR（develop向け）の取得結果。マージ・クローズの判定に使う（#4317） */
 export type GithubApiPullRequestByHead = GithubApiPullRequest & {
   state: "open" | "closed";
@@ -839,17 +901,23 @@ export async function dispatchReleaseWorkflow(
   token: string,
   bumpKind?: BumpKind,
   allowFailedDeploy = false,
+  /**
+   * 「修正を入れて作り直す」で元の候補へ足すPRの指定（#4335。`rebuild_selection` input）。
+   * 対応していないcallerへ送ると422になるので、呼び出し側は`releaseCallerSupportsSelection`で確かめてから渡す
+   */
+  rebuildSelection?: string,
 ): Promise<void> {
   const url = `${GITHUB_API}/repos/${owner}/${repo}/actions/workflows/${RELEASE_WORKFLOW_FILE}/dispatches`;
   const res = await githubFetch(url, token, {
     method: "POST",
     body: {
       ref: "develop",
-      ...(bumpKind || allowFailedDeploy
+      ...(bumpKind || allowFailedDeploy || rebuildSelection
         ? {
             inputs: {
               ...(bumpKind ? { bump_kind: bumpKind } : {}),
               ...(allowFailedDeploy ? { allow_failed_deploy: "true" } : {}),
+              ...(rebuildSelection ? { rebuild_selection: rebuildSelection } : {}),
             },
           }
         : {}),

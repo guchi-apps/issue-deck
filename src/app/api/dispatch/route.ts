@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 
 import { parseClaudeLocalModel, parseCodexLocalModel } from "@/lib/app-settings";
 import { requireUserId } from "@/lib/auth-user";
+import { listDependencyWaitViews } from "@/lib/dispatch/dependency-wait-run";
 import {
   DEFAULT_DISPATCH_AGENT,
   isSessionControlJobKind,
@@ -72,12 +73,18 @@ export async function GET() {
   // （セッション・#1217と同じ理由で、分けると同じ画面のためにポーリングが2本走る）。
   // **`listDispatchState`の中では呼ばない**——あちらを呼ぶのは自動実行の側（ジョブを積む）で、
   // 逆向きの参照を足すと相互参照になる
-  const [state, manualStepRuns] = await Promise.all([
+  // 実装セッションの依存待ち（#4321）も同じ応答に載せる（取得口を増やさない）。
+  // **取得に失敗しても状態の取得は続ける**（表示が欠けるだけで、実行状況の画面は止めない）
+  const [state, manualStepRuns, dependencyWaits] = await Promise.all([
     listDispatchState(),
     listManualStepRunViews(),
+    listDependencyWaitViews().catch((error) => {
+      console.error("[GET /api/dispatch] 依存待ちを取得できませんでした:", error);
+      return [];
+    }),
   ]);
   return NextResponse.json(
-    { ...state, manualStepRuns },
+    { ...state, manualStepRuns, dependencyWaits },
     { headers: { "Cache-Control": "no-store" } },
   );
 }

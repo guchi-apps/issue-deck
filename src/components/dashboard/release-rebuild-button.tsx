@@ -5,6 +5,7 @@ import { Loader2, RotateCcw } from "lucide-react";
 
 import { GithubReferenceLink } from "@/components/dashboard/github-reference-link";
 import { ReleaseBumpKindSelect } from "@/components/dashboard/release-bump-kind-select";
+import { ReleaseRebuildSelectionList } from "@/components/dashboard/release-rebuild-selection-list";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -65,6 +66,8 @@ export function ReleaseRebuildButton({
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [bumpKind, setBumpKind] = useState<BumpKind | null>(null);
+  // PRを選んだ作り直し（#4335）で元の候補へ足すPR。既定はサーバーの`defaultSelected`（当該リリースの修正PRだけ）
+  const [selected, setSelected] = useState<Set<number>>(new Set());
 
   // 呼び出し側が判定できないときだけ、変更の有無を先に確かめる。取得に失敗したら隠さない
   // （押せば確認ダイアログでエラーが読める）
@@ -90,9 +93,12 @@ export function ReleaseRebuildButton({
     setInfo(null);
     setError(null);
     setBumpKind(null);
+    setSelected(new Set());
     setLoading(true);
     try {
-      setInfo(await fetchReleaseRebuild(repositoryFullName));
+      const loaded = await fetchReleaseRebuild(repositoryFullName);
+      setInfo(loaded);
+      setSelected(new Set(loaded.selection?.defaultSelected ?? []));
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -106,7 +112,20 @@ export function ReleaseRebuildButton({
     setSubmitting(true);
     setError(null);
     try {
-      await requestReleaseRebuild(repositoryFullName, pullRequest.number, bumpKind ?? undefined);
+      const selection = info?.selection;
+      await requestReleaseRebuild(
+        repositoryFullName,
+        pullRequest.number,
+        bumpKind ?? undefined,
+        selection?.supported && pullRequest.headSha
+          ? {
+              headSha: pullRequest.headSha,
+              pullRequests: selection.options
+                .filter((option) => selected.has(option.number))
+                .map((option) => ({ number: option.number, mergeSha: option.mergeSha })),
+            }
+          : undefined,
+      );
       setOpen(false);
       onTriggered?.();
     } catch (err) {
@@ -118,7 +137,11 @@ export function ReleaseRebuildButton({
 
   const pullRequest = info?.releasePullRequest ?? null;
   const candidate = info?.candidate ?? null;
-  const rebuildable = pullRequest !== null && canRebuildRelease(candidate);
+  const selection = info?.selection ?? null;
+  const selective = selection?.supported === true;
+  const rebuildable = selective
+    ? pullRequest !== null && selected.size > 0 && selection.inProgress === null
+    : pullRequest !== null && canRebuildRelease(candidate);
 
   if (hasChanges === false || (hasChanges === undefined && probedEmpty && !open)) return null;
 
@@ -144,8 +167,9 @@ export function ReleaseRebuildButton({
               {pullRequest ? `v${pullRequest.version} のリリースを作り直しますか？` : "リリースを作り直しますか？"}
             </AlertDialogTitle>
             <AlertDialogDescription>
-              まだ本番へ出ていないリリースPRを閉じ、developの最新の内容でバージョンバンプからやり直します。
-              修正は先にdevelopへマージしておいてください。
+              {selective
+                ? "元の候補の内容はそのままに、選んだPRだけを足してバージョンバンプからやり直します。選んでいないdevelopの変更は入りません。"
+                : "まだ本番へ出ていないリリースPRを閉じ、developの最新の内容でバージョンバンプからやり直します。修正は先にdevelopへマージしておいてください。"}
             </AlertDialogDescription>
           </AlertDialogHeader>
 
@@ -162,7 +186,49 @@ export function ReleaseRebuildButton({
             </p>
           )}
 
-          {pullRequest && candidate && (
+          {pullRequest && selection && selective && (
+            <>
+              <ol className="flex list-decimal flex-col gap-1 pl-5 text-xs">
+                <li>
+                  元の候補{" "}
+                  <GithubReferenceLink href={pullRequest.url} className="text-primary hover:underline">
+                    #{pullRequest.number}
+                  </GithubReferenceLink>{" "}
+                  （v{pullRequest.version}）のheadへ、選んだPRのマージ差分だけを足します
+                </li>
+                <li>
+                  v{pullRequest.version} までの未公開のバンプを取り消し、上げ幅と更新履歴を判定し直します（v
+                  {pullRequest.version} は欠番になり、次は v{pullRequest.version} より上の版になります）
+                </li>
+                <li>
+                  バンプPRがdevelopへ自動マージされると後継のリリースPRが作られ、そのあとで元の候補を閉じます。新しいSHAで統合検証と全体レビューをやり直します
+                </li>
+              </ol>
+              {selection.inProgress ? (
+                <p className="text-xs text-amber-700 dark:text-amber-400">
+                  この候補への作り直しは既に起動しています（{selection.inProgress.selection.map((pr) => `#${pr.number}`).join("、")}）。
+                  リリース画面の進捗を確認してください。
+                </p>
+              ) : (
+                <ReleaseRebuildSelectionList
+                  options={selection.options}
+                  selected={selected}
+                  onChange={setSelected}
+                  disabled={submitting}
+                />
+              )}
+              {rebuildable && (
+                <ReleaseBumpKindSelect
+                  value={bumpKind}
+                  onChange={setBumpKind}
+                  currentVersion={mainVersion}
+                  disabled={submitting}
+                />
+              )}
+            </>
+          )}
+
+          {pullRequest && candidate && !selective && (
             <>
               <ol className="flex list-decimal flex-col gap-1 pl-5 text-xs">
                 <li>
@@ -234,7 +300,7 @@ export function ReleaseRebuildButton({
                 void handleRebuild();
               }}
             >
-              {submitting ? "作り直し中..." : "作り直す"}
+              {submitting ? "作り直し中..." : selective ? `選んだ${selected.size}件で作り直す` : "作り直す"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

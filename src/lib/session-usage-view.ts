@@ -105,7 +105,10 @@ export type UsageBySource = Record<"local" | "github-actions", UsageTotals>;
 export type UsageModelTierTotals = {
   costUsd: readonly [number, number, number, number];
   unresolvedCostUsd: number;
+  /** 金額以外の基準（#4285・#4341）でも同じ濃淡で塗るための、tier別の値。`costUsd`と同じ並び */
+  byBasis: Record<Exclude<UsageBasis, "cost">, UsageTierValues>;
 };
+export type UsageTierValues = { tiers: readonly [number, number, number, number]; unresolved: number };
 export type UsageModelTiers = Record<SessionUsageEntry["agent"], UsageModelTierTotals>;
 
 export type UsageDay = UsageTotals & {
@@ -361,11 +364,36 @@ function emptyBySource(): UsageBySource {
   return { local: emptyTotals(), "github-actions": emptyTotals() };
 }
 
-function emptyModelTiers(): UsageModelTiers {
+function emptyTierValues(): UsageTierValues {
+  return { tiers: [0, 0, 0, 0], unresolved: 0 };
+}
+
+function emptyModelTierTotals(): UsageModelTierTotals {
   return {
-    claude: { costUsd: [0, 0, 0, 0], unresolvedCostUsd: 0 },
-    codex: { costUsd: [0, 0, 0, 0], unresolvedCostUsd: 0 },
+    costUsd: [0, 0, 0, 0],
+    unresolvedCostUsd: 0,
+    byBasis: {
+      responses: emptyTierValues(),
+      tokens: emptyTierValues(),
+      sessions: emptyTierValues(),
+      issues: emptyTierValues(),
+    },
   };
+}
+
+function emptyModelTiers(): UsageModelTiers {
+  return { claude: emptyModelTierTotals(), codex: emptyModelTierTotals() };
+}
+
+/** Issue数を段ごとに重複除去して数えるための記録（#4341）。バケットごとに「段×Issueキー」を持つ */
+const tierIssueKeys = new WeakMap<UsageModelTierTotals, Set<string>>();
+
+function addTierValue(values: UsageTierValues, tier: number | null, amount: number): void {
+  if (tier === null) {
+    values.unresolved += amount;
+  } else {
+    (values.tiers as unknown as number[])[tier] += amount;
+  }
 }
 
 /**
@@ -380,9 +408,26 @@ function emptyModelTiers(): UsageModelTiers {
  * `entry.models`はセッション全体のまま複製されるため、同じセッションの計画・調査・実装・検証・
  * 仕上げは全フェーズが同じ色（セッション全体でいちばん重いモデル）になる。
  */
-function addEntryModelTier(tiers: UsageModelTiers, entry: SessionUsageEntry): void {
+function addEntryModelTier(
+  tiers: UsageModelTiers,
+  entry: SessionUsageEntry,
+  issueKey: string | null = null,
+): void {
   const tier = modelWeightTier(pickPrimaryModel(entry.models));
   const bucket = tiers[entry.agent];
+  // 金額以外の基準の値も同じ段へ積む（#4341）。Issue数は同じ段の中で重複を除く。
+  addTierValue(bucket.byBasis.responses, tier, entry.responses);
+  addTierValue(bucket.byBasis.tokens, tier, entry.contextTokens + entry.outputTokens);
+  addTierValue(bucket.byBasis.sessions, tier, 1);
+  if (issueKey !== null) {
+    const seen = tierIssueKeys.get(bucket) ?? new Set<string>();
+    const slotKey = `${tier ?? "u"}|${issueKey}`;
+    if (!seen.has(slotKey)) {
+      seen.add(slotKey);
+      addTierValue(bucket.byBasis.issues, tier, 1);
+    }
+    tierIssueKeys.set(bucket, seen);
+  }
   if (tier === null) {
     bucket.unresolvedCostUsd += entry.costUsd;
   } else {
@@ -670,7 +715,7 @@ export function buildSessionUsageSummary({
       noteIssue(dayIssueKeys, dateKey, countedIssueKey);
       addEntryWithAgent(day, entry);
       addEntryWithSource(day, entry);
-      addEntryModelTier(day.modelTiers, entry);
+      addEntryModelTier(day.modelTiers, entry, countedIssueKey);
       for (const model of entry.models) {
         const label = sessionUsageModelLabel(model);
         if (!day.modelLabels.includes(label)) day.modelLabels.push(label);
@@ -691,7 +736,7 @@ export function buildSessionUsageSummary({
     noteIssue(repositoryIssueKeys, repositoryKey, countedIssueKey);
     addEntryWithAgent(repository, entry);
     addEntryWithSource(repository, entry);
-    addEntryModelTier(repository.modelTiers, entry);
+    addEntryModelTier(repository.modelTiers, entry, countedIssueKey);
     byRepository.set(repositoryKey, repository);
 
     // **実装はフェーズごとの行へ割る**（#2779）。ほかの種別は1本＝1行のまま。
@@ -708,7 +753,7 @@ export function buildSessionUsageSummary({
       noteIssue(kindIssueKeys, row.key, countedIssueKey);
       addEntryWithAgent(kind, row.entry);
       addEntryWithSource(kind, row.entry);
-      addEntryModelTier(kind.modelTiers, row.entry);
+      addEntryModelTier(kind.modelTiers, row.entry, countedIssueKey);
       byKind.set(row.key, kind);
     }
 
@@ -742,7 +787,7 @@ export function buildSessionUsageSummary({
       } satisfies UsageIssue);
     addEntryWithAgent(issue, entry);
     addEntryWithSource(issue, entry);
-    addEntryModelTier(issue.modelTiers, entry);
+    addEntryModelTier(issue.modelTiers, entry, issueKey);
     issue.entries.push(entry);
     if (entry.startedAt > issue.latestStartedAt) issue.latestStartedAt = entry.startedAt;
     byIssue.set(issueKey, issue);
@@ -780,7 +825,7 @@ export function buildSessionUsageSummary({
         };
         addEntryWithAgent(kind, row.entry);
         addEntryWithSource(kind, row.entry);
-        addEntryModelTier(kind.modelTiers, row.entry);
+        addEntryModelTier(kind.modelTiers, row.entry, sessionUsageIssueKey(entry));
         addPhaseModels(kind.models, row.entry.models);
         issueByKind.set(row.key, kind);
       }
