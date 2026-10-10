@@ -1,0 +1,71 @@
+name: Propagate backup CI
+
+# 選んだリポジトリへ、バックアップCI（CircleCI）の導入・更新PRを作る（#4308）。
+# 配るのは .circleci/config.yml・scripts/ci/run-required-checks.mjs（配布元の実物）と、
+# 対象の ci.yml から生成する ci/required-checks.json。
+#
+# **対象は呼び出し元（issue-deckの画面）が1件ずつ選んで渡す**（全リポジトリへ一律には配らない）。
+# **自動マージはしない。** Actions/CI設定の変更のため、配布先でPRを確認して人がマージする。
+# 既存のopenなPRがあれば新しいPRは作らず、ブランチを更新する。
+on:
+  workflow_dispatch:
+    inputs:
+      repository:
+        description: "配布先（owner/repo）"
+        required: true
+        type: string
+
+concurrency:
+  group: propagate-backup-ci-${{ inputs.repository }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  propagate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        # 配る中身（.circleci/config.yml・scripts/ci/run-required-checks.mjs）もこのチェックアウトから読む
+        uses: actions/checkout@v4
+
+      - name: 入力を検証する
+        env:
+          REPOSITORY: ${{ inputs.repository }}
+        run: |
+          set -euo pipefail
+          # owner/repo 以外を弾く。ここを緩めるとgh apiの宛先を任意に指定できてしまう
+          if ! printf '%s' "$REPOSITORY" | grep -Eq '^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$'; then
+            echo "::error::repository は owner/repo 形式である必要があります"
+            exit 1
+          fi
+          # 配布元自身へは配らない（issue-deckは自分の実物が正本）
+          if [ "$REPOSITORY" = "$GITHUB_REPOSITORY" ]; then
+            echo "::error::配布元自身は対象外です"
+            exit 1
+          fi
+
+      - name: GitHub Appのインストールトークンを発行する
+        # propagate-shared-files.yml と同じ（他リポジトリの.github/workflows・.circleciを書き換えるため）
+        id: app-token
+        if: ${{ vars.WORKFLOW_APP_ID != '' }}
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ vars.WORKFLOW_APP_ID }}
+          private-key: ${{ secrets.WORKFLOW_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          permission-contents: write
+          permission-workflows: write
+          permission-pull-requests: write
+
+      - name: PRを作成する
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.WORKFLOW_PAT }}
+          REPOSITORY: ${{ inputs.repository }}
+          SOURCE_REPOSITORY: ${{ github.repository }}
+        run: |
+          set -uo pipefail
+          git config --global user.name "Claude Code"
+          git config --global user.email "claude-code@example.com"
+          bash .github/scripts/propagate-backup-ci.sh "$REPOSITORY" "$SOURCE_REPOSITORY"
