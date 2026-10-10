@@ -92,6 +92,8 @@ export type DispatchJobStatus =
  * - `RELEASE_VERIFY` … リリースPR（base=`main`）の固定内容に対する統合検証（#4237）。`PR_REVIEW`と
  *   同じ専用列（PR番号・base/head SHA）を使い、`activeKey`は`release_verify:repo#PR@base:head:kind`。
  *   サブPCがmainとリリースheadの統合状態でビルド・テストし、結果は`ReleaseVerification`へ記録する
+ * - `RELEASE_REVIEW` … リリースPRの差分全体のAIレビュー（#4238）。`activeKey`は`release_review:repo#PR@base:head`。
+ *   担当（claude／codex）とモデルは`resolveReleaseReviewAssignee`で決めて`agent`列と表示へ載せる。結果は`ReleaseVerification`（`ai_review`）へ記録する
  */
 export type DispatchJobKind =
   | "LAUNCH"
@@ -112,7 +114,8 @@ export type DispatchJobKind =
   | "PR_REVIEW"
   | "REVIEW_FIX"
   | "CHAT_TURN"
-  | "RELEASE_VERIFY";
+  | "RELEASE_VERIFY"
+  | "RELEASE_REVIEW";
 
 /**
  * 既に立っているセッションを操作するジョブ（起動しないジョブ）。
@@ -202,6 +205,7 @@ export function parseDispatchJobKind(value: unknown): DispatchJobKind | null {
   if (value === "review_fix") return "REVIEW_FIX";
   if (value === "pr_review") return "PR_REVIEW";
   if (value === "release_verify") return "RELEASE_VERIFY";
+  if (value === "release_review") return "RELEASE_REVIEW";
   return null;
 }
 
@@ -775,6 +779,7 @@ export type DispatchHostView = {
   reviewFixCapable?: boolean | null;
   prReviewCapable?: boolean | null;
   releaseVerifyCapable?: boolean | null;
+  releaseReviewCapable?: boolean | null;
   /**
    * チャット相談のモデル呼び出し（`CHAT_TURN`・#4109）をCodex CLIで実行できるか。
    * **`null`は「できない」**（古いpollerへ配ると未知の種別として`failed`になり、回答が必ず失敗する）
@@ -1211,6 +1216,8 @@ export function describeDispatchJobKind(kind: DispatchJobKind): string {
       return "PRレビュー";
     case "RELEASE_VERIFY":
       return "リリース統合検証";
+    case "RELEASE_REVIEW":
+      return "リリース全体レビュー";
     case "CHAT_TURN":
       return "チャットの回答";
     case "INTERRUPT":
@@ -2006,7 +2013,7 @@ export function describeDispatchJobStatus(
   if (kind === "MANUAL_STEP") return describeManualStepJobStatus(status);
   if (kind === "PLAN_REVIEW") return describePlanReviewJobStatus(status);
   if (kind === "CODE_REVIEW") return describeCodeReviewJobStatus(status);
-  if (kind === "PR_REVIEW" || kind === "RELEASE_VERIFY") return describePrReviewJobStatus(status);
+  if (kind === "PR_REVIEW" || kind === "RELEASE_VERIFY" || kind === "RELEASE_REVIEW") return describePrReviewJobStatus(status);
   if (kind !== "LAUNCH") return describeSessionControlJobStatus(status, kind);
   switch (status) {
     case "QUEUED":

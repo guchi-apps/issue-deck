@@ -285,6 +285,7 @@ function toHostView(host: DispatchHost, now: Date): DispatchHostView {
     reviewFixCapable: host.reviewFixCapable,
     prReviewCapable: host.prReviewCapable,
     releaseVerifyCapable: host.releaseVerifyCapable,
+    releaseReviewCapable: host.releaseReviewCapable,
     chatCodexCapable: host.chatCodexCapable,
     selfUpdateCapable: host.selfUpdateCapable,
     maxSessions: host.maxSessions,
@@ -569,6 +570,7 @@ export async function expireStaleDispatchJobs(now: Date = new Date()): Promise<n
         { status: "QUEUED", kind: "PR_REVIEW", createdAt: { lt: controlDeadline } },
         // リリースの統合検証（#4237）も同じ。取りに来られないなら早く`TIMEOUT`にして画面へ出す
         { status: "QUEUED", kind: "RELEASE_VERIFY", createdAt: { lt: controlDeadline } },
+        { status: "QUEUED", kind: "RELEASE_REVIEW", createdAt: { lt: controlDeadline } },
         { status: "QUEUED", kind: "REVIEW_FIX", createdAt: { lt: new Date(now.getTime() - 30 * 60_000) } },
       ],
     },
@@ -1967,6 +1969,8 @@ export async function claimDispatchJobs(params: {
   if (host?.prReviewCapable === true) controlKinds.push("PR_REVIEW");
   // リリースの統合検証（#4237）も申告したpollerにだけ枠外で配る
   if (host?.releaseVerifyCapable === true) controlKinds.push("RELEASE_VERIFY");
+  // リリース全体のAIレビュー（#4238）も申告したpollerにだけ枠外で配る
+  if (host?.releaseReviewCapable === true) controlKinds.push("RELEASE_REVIEW");
   if (controlKinds.length > 0) {
     const controls = await db.dispatchJob.findMany({
       where: {
@@ -2622,6 +2626,7 @@ export async function announceDispatchHost(params: {
   reviewFixCapable?: boolean | null;
   prReviewCapable?: boolean | null;
   releaseVerifyCapable?: boolean | null;
+  releaseReviewCapable?: boolean | null;
   chatCodexCapable?: boolean | null;
   selfUpdateCapable: boolean | null;
   /**
@@ -2697,6 +2702,7 @@ export async function announceDispatchHost(params: {
     reviewFixCapable: params.reviewFixCapable ?? null,
     prReviewCapable: params.prReviewCapable ?? null,
     releaseVerifyCapable: params.releaseVerifyCapable ?? null,
+    releaseReviewCapable: params.releaseReviewCapable ?? null,
     chatCodexCapable: params.chatCodexCapable ?? null,
     selfUpdateCapable: params.selfUpdateCapable,
     maxSessions: params.maxSessions,

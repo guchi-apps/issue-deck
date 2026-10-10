@@ -8,6 +8,7 @@ import { DeviceBuildInstructions } from "@/components/dashboard/device-build-ins
 import { GithubReferenceLink } from "@/components/dashboard/github-reference-link";
 import { ReleaseChangeList } from "@/components/dashboard/release-change-list";
 import { ReleaseProgress } from "@/components/dashboard/release-progress";
+import { ReleaseReviewSections } from "@/components/dashboard/release-review-sections";
 import { ReleaseRebuildButton } from "@/components/dashboard/release-rebuild-button";
 import { IosTestflightStatus } from "@/components/dashboard/ios-testflight-status";
 import { WebviewIosInstructions } from "@/components/dashboard/webview-ios-instructions";
@@ -126,6 +127,15 @@ export function MobileReleaseSheet({
                 repoFullName={repository.fullName}
                 isDeviceBuild={deviceBuild !== null}
               />
+              {/* リリースPRの3区分（個別PRレビュー／統合検証／全体レビュー。#4238） */}
+              {releaseStatus.phase === "release_pr_open" && releaseStatus.releasePullRequest?.headRef && (
+                <ReleaseReviewSections
+                  repositoryFullName={repository.fullName}
+                  pullRequestNumber={releaseStatus.releasePullRequest.number}
+                  headRef={releaseStatus.releasePullRequest.headRef}
+                  verification={releaseStatus.releasePullRequest.verification ?? null}
+                />
+              )}
               {/* リリースPRを出した後の修正は、凍結ブランチへ足さずバンプから作り直す（#3014）。
                   状態はこのシートのポーリングが拾うので、押した後の再取得は要らない */}
               {releaseStatus.phase === "release_pr_open" &&

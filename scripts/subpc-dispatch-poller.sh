@@ -177,7 +177,8 @@ set -euo pipefail
 #     時間切れはレビューのランナー（`run-code-review.sh`）が結果コメントの到達を確かめてから報告する。
 #     本数の上限は死んだペインだけが残るセッションを数えない（#4116）。
 # 35: リリースPRの統合検証（`RELEASE_VERIFY`）を受け取り、`run-release-verify.sh`をtmuxで起動する（#4237）。
-DISPATCH_POLLER_VERSION="35"
+# 36: リリースPRの全体AIレビュー（`RELEASE_REVIEW`）を受け取り、`run-release-review.sh`をtmuxで起動する（#4238）。
+DISPATCH_POLLER_VERSION="36"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -276,6 +277,8 @@ CODE_REVIEW_LAUNCHER="$SCRIPT_DIR/start-code-review.sh"
 CODEX_PR_REVIEW_LAUNCHER="$SCRIPT_DIR/start-codex-pr-review.sh"
 # リリースPRの統合検証（`RELEASE_VERIFY`・#4237）のランナー
 RELEASE_VERIFY_RUNNER="$SCRIPT_DIR/run-release-verify.sh"
+# リリースPRの全体AIレビュー（`RELEASE_REVIEW`・#4238）のランナー
+RELEASE_REVIEW_RUNNER="$SCRIPT_DIR/run-release-review.sh"
 CHAT_CODEX_RUNNER="$SCRIPT_DIR/run-chat-codex.sh"
 CODEX_REVIEW_FIX_LAUNCHER="$SCRIPT_DIR/start-codex-review-fix.sh"
 # 確認環境（#2444）。**セッションを立てないジョブ**（`SELF_UPDATE`・`MANUAL_STEP`と同じ枠外）で、
@@ -880,6 +883,17 @@ release_verify_capable() {
   fi
 }
 
+# リリースPRの全体AIレビュー（`RELEASE_REVIEW`・#4238）を実行できるか。ランナーと`git`・`jq`・`claude`が
+# 手元にあるかで判定する（担当がCodexのときはサーバー側が`codexCapable`も見て振り分ける）。
+release_review_capable() {
+  if [[ -f "$RELEASE_REVIEW_RUNNER" ]] && command -v git >/dev/null 2>&1 &&
+    command -v jq >/dev/null 2>&1 && command -v claude >/dev/null 2>&1; then
+    printf 'true'
+  else
+    printf 'false'
+  fi
+}
+
 # チャット相談のモデル呼び出し（`CHAT_TURN`・#4109）を実行できるか。**実行するスクリプトと
 # Codex CLIの両方が手元にあるかで判定する**（`pr_review_capable`と同じ向き）。ログイン状態は
 # ここでは見ない（見送りの理由をチャットへ返せるよう、実行時に確かめて`not_logged_in`で返す）。
@@ -1393,6 +1407,7 @@ announce() {
     --argjson reviewFix "$(if [[ -f "$CODEX_REVIEW_FIX_LAUNCHER" ]] && [[ "$(pr_review_capable)" == true ]]; then echo true; else echo false; fi)" \
     --argjson prReview "$(pr_review_capable)" \
     --argjson releaseVerify "$(release_verify_capable)" \
+    --argjson releaseReview "$(release_review_capable)" \
     --argjson chatCodex "$(chat_codex_capable)" \
     --argjson codex "$codex_flag" \
     --argjson codexRemoteControl "$(codex_remote_control_capable)" \
@@ -1406,7 +1421,7 @@ announce() {
     --argjson launchHold "${LAUNCH_HOLD_JSON:-null}" \
     --argjson checkout "${checkout:-null}" \
     --argjson planReviewSessions "$plan_review_sessions" \
-    '{host: $host, repositories: $repositories, contractVersion: $contractVersion, agentVersion: $agentVersion, sessionControl: true, instruction: true, crossRepoQuestion: $crossRepoQuestion, manualStep: $manualStep, manualStepAbort: $manualStepAbort, manualStepValues: $manualStepValues, manualStepVps: $manualStepVps, manualStepSession: $manualStepSession, planReview: $planReview, planReviewAgent: $planReviewAgent, codeReview: $codeReview, prReview: $prReview, releaseVerify: $releaseVerify, chatCodex: $chatCodex, reviewFix: $reviewFix, codex: $codex, codexRemoteControl: $codexRemoteControl, selfUpdate: $selfUpdate, reboot: $reboot, rebootState: $rebootState, preview: $preview, previewState: $previewState, previewRepositories: $previewRepositories, maxSessions: $maxSessions, liveSessions: $liveSessions, metrics: $metrics, launchHold: $launchHold, checkout: $checkout, planReviewSessions: $planReviewSessions}')"
+    '{host: $host, repositories: $repositories, contractVersion: $contractVersion, agentVersion: $agentVersion, sessionControl: true, instruction: true, crossRepoQuestion: $crossRepoQuestion, manualStep: $manualStep, manualStepAbort: $manualStepAbort, manualStepValues: $manualStepValues, manualStepVps: $manualStepVps, manualStepSession: $manualStepSession, planReview: $planReview, planReviewAgent: $planReviewAgent, codeReview: $codeReview, prReview: $prReview, releaseVerify: $releaseVerify, releaseReview: $releaseReview, chatCodex: $chatCodex, reviewFix: $reviewFix, codex: $codex, codexRemoteControl: $codexRemoteControl, selfUpdate: $selfUpdate, reboot: $reboot, rebootState: $rebootState, preview: $preview, previewState: $previewState, previewRepositories: $previewRepositories, maxSessions: $maxSessions, liveSessions: $liveSessions, metrics: $metrics, launchHold: $launchHold, checkout: $checkout, planReviewSessions: $planReviewSessions}')"
 
   if ! api_call POST /api/dispatch/hosts "$payload"; then
     report_api_failure "ホストの申告に失敗しました"
@@ -3695,6 +3710,44 @@ run_release_verify_job() {
   report_job "$job_id" running "統合検証を起動しました（$owner/$repo#$pr_number）" "$session"
 }
 
+# リリースPRの全体AIレビュー（#4238）のジョブを起動する。起動前の失敗はここで即座に`failed`で報告し、
+# 起動後はランナーが生存報告と結果の報告を引き継ぐ（`run_release_verify_job`と同じ形）。
+#
+#   $1 ジョブID / $2 owner / $3 repo / $4 PR番号 / $5 base SHA / $6 head SHA / $7 agent / $8 Claudeモデル / $9 Codexモデル
+run_release_review_job() {
+  local job_id="$1" owner="$2" repo="$3" pr_number="$4" base_sha="$5" head_sha="$6" agent="$7" claude_model="$8" codex_model="$9"
+  local session
+  if [[ ! -f "$RELEASE_REVIEW_RUNNER" ]]; then
+    report_job "$job_id" failed "全体レビューのランナーがありません（$RELEASE_REVIEW_RUNNER）。"
+    return 0
+  fi
+  if [[ ! "$pr_number" =~ ^[1-9][0-9]*$ || ! "$base_sha" =~ ^[0-9a-f]{40,64}$ || ! "$head_sha" =~ ^[0-9a-f]{40,64}$ ]]; then
+    report_job "$job_id" failed "PR番号またはSHAが不正です: #$pr_number base=$base_sha head=$head_sha"
+    return 0
+  fi
+  session="${repo//[^A-Za-z0-9_-]/-}-release-review-${pr_number}-${head_sha:0:12}"
+  if tmux has-session -t "=$session" 2>/dev/null &&
+    [[ "$(tmux list-panes -t "=$session" -F '#{pane_dead}' 2>/dev/null | head -1)" == "1" ]]; then
+    tmux kill-session -t "=$session" 2>/dev/null || true
+  fi
+  if tmux has-session -t "=$session" 2>/dev/null; then
+    report_job "$job_id" skipped "同じ対象の全体レビューが既に動いています: $session" "$session"
+    return 0
+  fi
+  if [[ "$DRY_RUN" -eq 1 ]]; then
+    echo "  --dry-run のため起動しません（全体レビュー $owner/$repo#$pr_number）"
+    return 0
+  fi
+  ensure_tmux_server_scope
+  if ! tmux new-session -d -s "$session" -c "$HOME" \
+    "TMUX_SESSION_NAME=$(printf '%q' "$session") bash $(printf '%q' "$RELEASE_REVIEW_RUNNER") --run $(printf '%q' "$owner") $(printf '%q' "$repo") $(printf '%q' "$pr_number") $(printf '%q' "$base_sha") $(printf '%q' "$head_sha") $(printf '%q' "$job_id") $(printf '%q' "$agent") $(printf '%q' "$claude_model") $(printf '%q' "$codex_model")"; then
+    report_job "$job_id" failed "全体レビューのtmuxセッションを起動できませんでした: $session"
+    return 0
+  fi
+  tmux set-option -t "$session:" -w remain-on-exit failed >/dev/null 2>&1 || true
+  report_job "$job_id" running "全体レビューを起動しました（$owner/$repo#$pr_number・$agent）" "$session"
+}
+
 # リポジトリ全体のコードレビュー（#698・#4116）を起動する。
 #
 # **`launch_and_report`は使わない。** あちらは「tmuxが立った」時点で`succeeded`を報告するが、
@@ -3888,6 +3941,16 @@ run_job() {
       "$(printf '%s' "$job_json" | jq -r '.headSha // ""')" \
       "$(printf '%s' "$job_json" | jq -c '.releaseVerify.commands // []')" \
       "$(printf '%s' "$job_json" | jq -r '.releaseVerify.macBuildCheck // false')"
+    return 0
+  fi
+  if [[ "$kind" == "RELEASE_REVIEW" ]]; then
+    run_release_review_job "$job_id" "$owner" "$repo" \
+      "$(printf '%s' "$job_json" | jq -r '.prNumber // ""')" \
+      "$(printf '%s' "$job_json" | jq -r '.baseSha // ""')" \
+      "$(printf '%s' "$job_json" | jq -r '.headSha // ""')" \
+      "$agent" \
+      "$(printf '%s' "$job_json" | jq -r '.claudeModel // ""')" \
+      "$(printf '%s' "$job_json" | jq -r '.codexModel // ""')"
     return 0
   fi
   if [[ "$kind" == "PR_REVIEW" ]]; then

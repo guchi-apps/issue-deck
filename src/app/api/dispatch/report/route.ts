@@ -9,6 +9,7 @@ import { authorizeDispatch } from "@/lib/dispatch/dispatch-auth";
 import { parseDispatchHostName, parseDispatchReportStatus } from "@/lib/dispatch/dispatch-job";
 import { reportDispatchJob } from "@/lib/dispatch/jobs";
 import { parsePrReviewVerdict } from "@/lib/dispatch/pr-review";
+import { applyReleaseReviewReport } from "@/lib/dispatch/release-review-jobs";
 import { applyReleaseVerifyReport } from "@/lib/dispatch/release-verify-jobs";
 import { resumePrReviewMerge } from "@/lib/dispatch/pr-review-jobs";
 import { resolveFixedInstructionCheckUser } from "@/lib/dispatch/session-escalation";
@@ -130,6 +131,15 @@ export async function POST(request: NextRequest) {
       await applyReleaseVerifyReport(result.job, status, message, payload?.releaseVerification);
     } catch (error) {
       console.error(`[POST /api/dispatch/report] 統合検証の結果を記録できませんでした ${jobId}:`, error);
+    }
+  }
+
+  // リリース全体のAIレビュー（#4238）の結果を、ジョブの対象（PR・base・head）の記録へ反映する
+  if (result.job.kind === "RELEASE_REVIEW" && status !== "running") {
+    try {
+      await applyReleaseReviewReport(result.job, status, message, payload?.releaseReview);
+    } catch (error) {
+      console.error(`[POST /api/dispatch/report] 全体レビューの結果を記録できませんでした ${jobId}:`, error);
     }
   }
 

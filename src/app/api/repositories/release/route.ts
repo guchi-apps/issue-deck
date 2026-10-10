@@ -30,6 +30,8 @@ import { releaseWorkflowExists } from "@/lib/github/release-workflow-cache";
 import { fetchRepairWorkflowAvailability } from "@/lib/github/repair-workflow-cache";
 import { previewModeGuard } from "@/lib/preview-mode";
 import { isReleaseHeadRef } from "@/lib/pull-request-list";
+import { loadReleaseVerificationSummary } from "@/lib/release-verification-load";
+import type { ReleaseVerificationSummary } from "@/lib/release-verification-summary";
 import { isBumpKind } from "@/lib/semver-bump";
 
 /** バンプPRのブランチ名（`release/v1.2.3`）から次バージョンを取り出す */
@@ -158,6 +160,20 @@ async function handleGET(request: NextRequest) {
         .map((number) => ({ repositoryFullName: `${owner}/${repo}`, pullRequestNumber: number })),
     );
 
+    // リリースPRの固定内容に対する統合検証・全体AIレビューの状態（#4238）。個別PRのレビューは
+    // 既存の「今回反映する内容」が持つので、ここは2区分だけ。記録が読めなくても画面全体は落とさない
+    let verification: ReleaseVerificationSummary | null = null;
+    if (releasePr?.base?.sha) {
+      try {
+        verification = await loadReleaseVerificationSummary(`${owner}/${repo}`, releasePr.number, {
+          baseSha: releasePr.base.sha,
+          headSha: releasePr.head.sha,
+        });
+      } catch (error) {
+        console.error(`[GET /api/repositories/release] 検証記録を読めませんでした ${owner}/${repo}:`, error);
+      }
+    }
+
     // 進捗の論理段階を版数とオープン中PRから判定する（このAPI以外に状態は持たない）。
     // - bump_pr_open:   バンプPRがオープン中（CI・developマージ待ち）
     // - release_pr_open: develop→mainのPRがオープン中（mainマージ待ち＝人手）
@@ -216,6 +232,7 @@ async function handleGET(request: NextRequest) {
               { mergeable: releaseState?.mergeable ?? null, ciState: releaseState?.ciState ?? null },
             ),
             mergeJudgement: releaseState?.mergeJudgement ?? MERGE_JUDGEMENT_UNKNOWN,
+            verification,
           }
         : null,
       otherPullRequests,
