@@ -840,6 +840,7 @@ enum DispatchJobKind {
   PR_REVIEW
   REVIEW_FIX
   CHAT_TURN
+  RELEASE_VERIFY
 }
 
 // issue-deckの画面から積み、サブPCのpollerがポーリングで取りに来るジョブ（#1179）。
@@ -1192,6 +1193,8 @@ model DispatchHost {
   // 起動用スクリプトが揃っているpollerだけが申告する。`null`（未申告）は「できない」
   reviewFixCapable          Boolean?
   prReviewCapable           Boolean?
+  // リリースPRの統合検証（`RELEASE_VERIFY`・#4237）を実行できるか。`null`（未申告）は「できない」
+  releaseVerifyCapable      Boolean?
   manualStepSessionCapable  Boolean?
   // チャット相談のモデル呼び出し（`CHAT_TURN`・#4109）をCodex CLIで実行できるか。ランチャーと
   // Codex CLIが揃っているpollerだけが申告する。`null`（未申告）は「できない」

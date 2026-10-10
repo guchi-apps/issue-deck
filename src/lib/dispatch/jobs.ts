@@ -9,6 +9,7 @@ import {
   type CodexLocalModel,
 } from "@/lib/app-settings";
 import { fetchClaudeUsage } from "@/lib/claude/usage";
+import { getReleaseVerificationConfig } from "@/lib/release-verification-config";
 import { db } from "@/lib/db";
 import {
   buildCodexPairingActiveKey,
@@ -224,6 +225,16 @@ function toJobView(
     prNumber: job.prNumber,
     baseSha: job.baseSha,
     headSha: job.headSha,
+    // 統合検証（#4237）で実行するコマンド。**サーバーの設定を正にして、pollerへ渡す**
+    // （チェックアウトの中身に実行内容を決めさせない）
+    ...(job.kind === "RELEASE_VERIFY"
+      ? {
+          releaseVerify: {
+            commands: [...(getReleaseVerificationConfig(job.repositoryFullName).integrationCommands ?? [])],
+            macBuildCheck: getReleaseVerificationConfig(job.repositoryFullName).macBuildCheck === true,
+          },
+        }
+      : {}),
     reviewVerdict: job.reviewVerdict,
     queuePriority: job.queuePriority,
     createdAt: job.createdAt.toISOString(),
@@ -273,6 +284,7 @@ function toHostView(host: DispatchHost, now: Date): DispatchHostView {
     manualStepSessionCapable: host.manualStepSessionCapable,
     reviewFixCapable: host.reviewFixCapable,
     prReviewCapable: host.prReviewCapable,
+    releaseVerifyCapable: host.releaseVerifyCapable,
     chatCodexCapable: host.chatCodexCapable,
     selfUpdateCapable: host.selfUpdateCapable,
     maxSessions: host.maxSessions,
@@ -555,6 +567,8 @@ export async function expireStaleDispatchJobs(now: Date = new Date()): Promise<n
         // 確定させる**——これがActionsの最大30分ポーリングを廃止できる前提。サブPCが
         // オフライン・pollerが対応していない場合、ここで`TIMEOUT`になり最終マージ判定が再開される
         { status: "QUEUED", kind: "PR_REVIEW", createdAt: { lt: controlDeadline } },
+        // リリースの統合検証（#4237）も同じ。取りに来られないなら早く`TIMEOUT`にして画面へ出す
+        { status: "QUEUED", kind: "RELEASE_VERIFY", createdAt: { lt: controlDeadline } },
         { status: "QUEUED", kind: "REVIEW_FIX", createdAt: { lt: new Date(now.getTime() - 30 * 60_000) } },
       ],
     },
@@ -1951,6 +1965,8 @@ export async function claimDispatchJobs(params: {
   // develop向けPRのAIレビュー（#3990）は申告したpollerにだけ、枠外で配る。**セッション枠を消費しない**
   // （Codex CLIを1回走らせて終わる。5分で失効するため、起動待ちの後ろに並ばせない）
   if (host?.prReviewCapable === true) controlKinds.push("PR_REVIEW");
+  // リリースの統合検証（#4237）も申告したpollerにだけ枠外で配る
+  if (host?.releaseVerifyCapable === true) controlKinds.push("RELEASE_VERIFY");
   if (controlKinds.length > 0) {
     const controls = await db.dispatchJob.findMany({
       where: {
@@ -2605,6 +2621,7 @@ export async function announceDispatchHost(params: {
   /** develop向けPRのAIレビュー（#3990）を実行できるか。申告していないpollerでは未定義＝非対応 */
   reviewFixCapable?: boolean | null;
   prReviewCapable?: boolean | null;
+  releaseVerifyCapable?: boolean | null;
   chatCodexCapable?: boolean | null;
   selfUpdateCapable: boolean | null;
   /**
@@ -2679,6 +2696,7 @@ export async function announceDispatchHost(params: {
     manualStepSessionCapable: params.manualStepSessionCapable,
     reviewFixCapable: params.reviewFixCapable ?? null,
     prReviewCapable: params.prReviewCapable ?? null,
+    releaseVerifyCapable: params.releaseVerifyCapable ?? null,
     chatCodexCapable: params.chatCodexCapable ?? null,
     selfUpdateCapable: params.selfUpdateCapable,
     maxSessions: params.maxSessions,

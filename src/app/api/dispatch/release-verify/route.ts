@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 
+import { requestReleaseVerifyJob } from "@/lib/dispatch/release-verify-jobs";
 import { parsePrReviewSha } from "@/lib/dispatch/pr-review";
 import { authorizeProgressReport } from "@/lib/progress-report-auth";
 import {
@@ -18,7 +19,7 @@ import { getReleaseVerificationConfig } from "@/lib/release-verification-config"
  * 固定リリースの検証記録（#4212）の依頼・結果の記録・状態の取得。
  *
  * 認証は`POST /api/progress`と同じ共有シークレット。
- * - `request` … 対象（リポジトリ・PR・base/head SHA）の行を作る。冪等で、同じ対象は重複しない
+ * - `request` … 対象（リポジトリ・PR・base/head SHA）の行を作り、統合検証のジョブを積む（#4237）。冪等で、同じ対象は重複しない
  * - `report` … 種別ごとの結果を記録する。依頼の無い対象・種別には書かない
  * - `status` … 現在のSHAに対する検証区分のゲート判定を返す
  *
@@ -48,7 +49,18 @@ export async function POST(request: NextRequest) {
 
   if (action === "request") {
     const { created } = await registerReleaseVerification(target);
-    return NextResponse.json({ ok: true, created }, noStore);
+    // 実行を依頼する（#4237）。積めなくても記録の行は残し、`integration`は失敗として記録される
+    const queued = await requestReleaseVerifyJob(target);
+    return NextResponse.json(
+      {
+        ok: true,
+        created,
+        integration: queued.ok ? queued.outcome : queued.rejection,
+        ...(queued.ok && queued.outcome === "queued" ? { jobId: queued.job.id } : {}),
+        ...(queued.ok ? {} : { message: queued.message }),
+      },
+      noStore,
+    );
   }
 
   if (action === "report") {
