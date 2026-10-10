@@ -1516,8 +1516,15 @@ export function POST(request: NextRequest) {
     `PushMutedKind`＝**行があればOFF・ユーザー単位**）。各送信は宛先に`notMutedWhere(kind)`を足す。
     席を先に取る確認待ち・本番マージ待ちは、**OFFのせいで宛先が空になったときも席を取らない**
     （保留と同じ理由。ONに戻したあとに鳴らせなくなる）。
-- **溜まった手作業は「手作業アシスタント」が1手順ずつ順番に案内する**（#1826。
-  [`manual-step-guide-dialog.tsx`](../src/components/dashboard/manual-step-guide-dialog.tsx)）。
+- **【#4315で撤去】手順ウィザード「手作業アシスタント」（`manual-step-guide-dialog.tsx`・一覧の
+  「順番に進める」バー・`use-manual-step-guide.ts`・`manual-step-{run,autorun,fix,trouble}-panel.tsx`・
+  `manual-step-placeholder-fill.tsx`・自己申告の完了ボタン）は無い。** 手作業Issueは手作業セッション
+  （AI主導。`manual-step-session-panel.tsx`・`scripts/prompts/manual-step-agent.md`）が調査・実行・検証を
+  進め、詳細は`ManualStepPanel`の「作業の状況」（`lib/manual-step-investigation.ts`が読む事前調査と
+  完了検証のコメント）を出す。完了は検証コマンドがすべて終了コード0のときだけセッションがcloseする。
+  **以下の箇条書きは撤去前の設計の記録で、サーバー側の代行実行（`/api/manual-steps/*`・`lib/manual-step-*.ts`）
+  は残っている。** 画面側のファイル名・番号表示・ボタンの記述は現行のコードに存在しない。
+- **（撤去前の記録）溜まった手作業は「手作業アシスタント」が1手順ずつ順番に案内する**（#1826）。
   本文はテンプレートで見出しの並びが決まっているのに、実行する人は「一覧を開く → Issueを開く →
   本文を上から読み直して、実行する場所とコマンドを自分で拾う」を件数ぶん繰り返していた。
   本文を「目的 → 手順1..n → 完了の確認」へ割り、**実行する場所（デバイス・ディレクトリ・

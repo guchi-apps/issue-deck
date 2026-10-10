@@ -412,14 +412,13 @@ describe("QuestionAnswerPanel（手作業の手順）", () => {
     );
 
     expect(screen.getByText("この手順でやること")).toBeTruthy();
-    expect(screen.getByText("手順 1 / 1")).toBeTruthy();
+    // 順番・進捗の表示は出さない（#4315）
+    expect(screen.queryByText(/手順 \d+ \/ \d+/)).toBeNull();
     // 端末は手順の文頭の`（VPS）`から取る（`## 前提条件`の既定値はサブPC）
     expect(screen.getByText("VPS")).toBeTruthy();
-    // 「手元で実行する」に接続・移動・コマンドが並ぶ
+    // 「手元で実行する」に接続・移動・コマンドが1行で出る（#4315）
     expect(screen.getByText(/手元で実行する/)).toBeTruthy();
-    expect(screen.getByText("ssh subpc")).toBeTruthy();
-    expect(screen.getByText("cd ~/apps/issue-deck")).toBeTruthy();
-    expect(screen.getByText("pm2 restart issue-deck")).toBeTruthy();
+    expect(screen.getByText("ssh subpc 'cd ~/apps/issue-deck && pm2 restart issue-deck'")).toBeTruthy();
   });
 
   // 自動で流すようになったぶん、止まった時点の位置が分からないまま答えることになる（#2830）

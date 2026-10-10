@@ -178,7 +178,6 @@ import {
   type SnoozeMap,
   type SnoozeTarget,
 } from "@/lib/snooze";
-import { cn } from "@/lib/utils";
 import type { Issue } from "@/types/issue";
 import type { ConnectedRepository } from "@/types/repository";
 
@@ -225,7 +224,6 @@ type IssueDetailProps = {
   /** 「実装を開始」で次の5時間枠へ積めたときに呼ぶ（`useNightlyRun`の`refresh`）。#2866 */
   onNightlyRunQueued?: () => void;
   /** 手作業アシスタント（#1826）をこのIssueから開く */
-  onStartManualStepGuide: (startIssueId: string) => void;
   /**
    * アプリ設定「サブPC（Claude）：計画・実装」の現在値（#2776・#3106）。「実装を開始」ダイアログの
    * モデル欄で最初から選ぶモデル（「おまかせ」なら開いた直後に判定する）として、
@@ -260,7 +258,6 @@ export function IssueDetail({
   onOpenNightlyRun,
   onCancelNightlyRun,
   onNightlyRunQueued,
-  onStartManualStepGuide,
   claudeLocalModel,
   codexModel,
   defaultDispatchAgent = "claude",
@@ -1231,14 +1228,11 @@ export function IssueDetail({
           {canCompleteManualStep(issue) && (
             <ManualStepPanel
               isSubmitting={isSubmitting}
-              onComplete={() => handleClose("completed")}
-              onSkip={() => handleClose("not_planned")}
-              onStartGuide={() => onStartManualStepGuide(issue.id)}
               prerequisites={manualStepPrerequisites.prerequisites}
               prerequisiteSummary={manualStepPrerequisites.summary}
               dependents={manualStepPrerequisites.dependents}
               verifiedAt={issue.manualStepVerifiedAt}
-              body={issue.body}
+              comments={comments}
               configTargets={infraConfigTargets}
               onCreateConfigIssue={(target) => onCreateConfigIssue(issue, target)}
               repositoryFullName={issue.repositoryFullName}

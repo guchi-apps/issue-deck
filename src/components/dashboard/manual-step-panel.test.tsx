@@ -3,6 +3,11 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ManualStepPanel } from "@/components/dashboard/manual-step-panel";
+import {
+  MANUAL_STEP_INVESTIGATION_MARKER,
+  MANUAL_STEP_VERIFICATION_MARKER,
+} from "@/lib/manual-step-investigation";
+import type { IssueComment } from "@/types/issue";
 import { detectInfraConfigTargets } from "@/lib/infra-config-repos";
 import {
   summarizeManualStepPrerequisites,
@@ -33,8 +38,6 @@ function renderWithPrerequisites(prerequisites: ManualStepPrerequisite[]) {
   render(
     <ManualStepPanel
       isSubmitting={false}
-      onComplete={vi.fn()}
-      onSkip={vi.fn()}
       prerequisites={prerequisites}
       prerequisiteSummary={summarizeManualStepPrerequisites(prerequisites, REPO)}
       repositoryFullName={REPO}
@@ -52,8 +55,6 @@ describe("ManualStepPanel", () => {
     render(
       <ManualStepPanel
         isSubmitting={false}
-        onComplete={vi.fn()}
-        onSkip={vi.fn()}
         dependents={[
           {
             id: "38",
@@ -75,96 +76,91 @@ describe("ManualStepPanel", () => {
     expect(screen.getByText("このIssueが終わるまで #38 は先へ進めません。")).toBeTruthy();
   });
 
-  it("完了・実施せずのそれぞれのクローズを呼び分ける", () => {
-    const onComplete = vi.fn();
-    const onSkip = vi.fn();
-    render(<ManualStepPanel isSubmitting={false} onComplete={onComplete} onSkip={onSkip} />);
+  // #4315: 旧3ボタン（順番に進める・手作業を完了してクローズ・実施せずクローズ）は持たない
+  it("旧ウィザード・自己申告の完了ボタンを出さない", () => {
+    render(<ManualStepPanel isSubmitting={false} />);
 
-    fireEvent.click(screen.getByRole("button", { name: "手作業を完了してクローズ" }));
-    expect(onComplete).toHaveBeenCalledTimes(1);
-    expect(onSkip).not.toHaveBeenCalled();
-
-    fireEvent.click(screen.getByRole("button", { name: "実施せずクローズ" }));
-    expect(onSkip).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("button", { name: "順番に進める" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /クローズ/ })).toBeNull();
+    expect(screen.queryByText(/手順\s*\d/)).toBeNull();
   });
 
-  // #2256: aide-botの立ち上げでは、チェックが付いたまま未実施のIssueがcloseされた
-  describe("確認が通っていないままのクローズ", () => {
-    const BODY = [
-      "## やること",
-      "",
-      "- [ ] （サブPC）pollerを入れ替える",
-      "",
-      "  ```bash",
-      "  systemctl --user restart issue-deck-dispatch-poller.service",
-      "  ```",
-      "",
-      "## 完了の確認方法",
-      "",
-      "- 動いている",
-      "",
-      "  ```bash",
-      "  systemctl --user is-active issue-deck-dispatch-poller.service",
-      "  ```",
-    ].join("\n");
+  describe("作業の状況（#4315）", () => {
+    const ISSUE = { repositoryFullName: REPO, number: 1, labels: [], body: "## やること\n" };
+    function comment(body: string) {
+      return {
+        id: "c1",
+        author: { login: "bot" },
+        authorTrusted: true,
+        createdAtLabel: "",
+        body,
+        reactionCount: 0,
+      } as unknown as IssueComment;
+    }
 
-    it("1回目は聞き返し、2回目で閉じる", () => {
-      const onComplete = vi.fn();
-      render(
-        <ManualStepPanel isSubmitting={false} onComplete={onComplete} onSkip={vi.fn()} body={BODY} />,
-      );
+    it("調査報告が無いときは「未確認」と出し、調査済みと取り違えない", () => {
+      render(<ManualStepPanel isSubmitting={false} sessionIssue={ISSUE as never} comments={[]} />);
 
-      fireEvent.click(screen.getByRole("button", { name: "手作業を完了してクローズ" }));
-      expect(onComplete).not.toHaveBeenCalled();
-      expect(screen.getByText("確認コマンドが通った記録がありません")).toBeTruthy();
-      // 手元へ貼って確かめられるよう、コマンドをそのまま出す
-      expect(
-        screen.getByText("systemctl --user is-active issue-deck-dispatch-poller.service"),
-      ).toBeTruthy();
-
-      fireEvent.click(screen.getByRole("button", { name: "確認せずクローズ" }));
-      expect(onComplete).toHaveBeenCalledTimes(1);
+      expect(screen.getByText("作業の状況")).toBeTruthy();
+      expect(screen.getAllByText(/未確認/).length).toBeGreaterThan(0);
     });
 
-    it("確認が通っていれば聞き返さない", () => {
-      const onComplete = vi.fn();
+    it("調査報告の4分類と1ライナーを出し、コピーできる", () => {
+      const body = [
+        MANUAL_STEP_INVESTIGATION_MARKER,
+        "### 目的",
+        "DBを作る",
+        "### AI実施済み",
+        "- DB未作成を確認",
+        "### 自動実行できる",
+        "- DB作成",
+        "### あなたの操作",
+        "- パスワードの登録（理由: 秘密値）",
+        "```",
+        "cd ~/apps/x && op item create",
+        "```",
+      ].join("\n");
       render(
         <ManualStepPanel
           isSubmitting={false}
-          onComplete={onComplete}
-          onSkip={vi.fn()}
-          body={BODY}
-          verifiedAt="2026-08-20T09:00:00.000Z"
+          sessionIssue={ISSUE as never}
+          comments={[comment(body)]}
         />,
       );
 
-      fireEvent.click(screen.getByRole("button", { name: "手作業を完了してクローズ" }));
-      expect(onComplete).toHaveBeenCalledTimes(1);
+      expect(screen.getByText("AIが実施済み")).toBeTruthy();
+      expect(screen.getByText("DB未作成を確認")).toBeTruthy();
+      expect(screen.getByText("パスワードの登録（理由: 秘密値）")).toBeTruthy();
+      expect(screen.getByText("cd ~/apps/x && op item create")).toBeTruthy();
+      expect(screen.getByRole("button", { name: /コピー/ })).toBeTruthy();
     });
-  });
 
-  // 手順は本文テンプレートの見出しと重複していたので出さない（#1732）
-  it("手順の説明は出さず、クローズのボタンだけを出す", () => {
-    render(<ManualStepPanel isSubmitting={false} onComplete={vi.fn()} onSkip={vi.fn()} />);
+    it("検証が失敗した報告は完了にせず、理由の確認を促す", () => {
+      const body = `${MANUAL_STEP_VERIFICATION_MARKER}\n- 終了コード22: \`curl -fsS x\`\n`;
+      render(
+        <ManualStepPanel
+          isSubmitting={false}
+          sessionIssue={ISSUE as never}
+          comments={[comment(body)]}
+        />,
+      );
 
-    expect(screen.queryByText("あなたの手作業を待っています")).toBeNull();
-    expect(screen.queryByText(/実装エージェントへは送りません/)).toBeNull();
-    expect(screen.queryByRole("list")).toBeNull();
-    expect(screen.queryByText(/進捗（Status）はReadyのまま/)).toBeNull();
-    expect(screen.getAllByRole("button")).toHaveLength(2);
-  });
+      expect(screen.getByText(/完了にはなりません/)).toBeTruthy();
+      expect(screen.getByText("検証失敗・未完了")).toBeTruthy();
+    });
 
-  it("送信中はどちらのボタンも押せない", () => {
-    const onComplete = vi.fn();
-    const onSkip = vi.fn();
-    render(<ManualStepPanel isSubmitting onComplete={onComplete} onSkip={onSkip} />);
+    it("検証がすべて成功した報告は「検証済み」にする", () => {
+      const body = `${MANUAL_STEP_VERIFICATION_MARKER}\n- 終了コード0: \`curl -fsS x\`\n`;
+      render(
+        <ManualStepPanel
+          isSubmitting={false}
+          sessionIssue={ISSUE as never}
+          comments={[comment(body)]}
+        />,
+      );
 
-    for (const button of screen.getAllByRole<HTMLButtonElement>("button")) {
-      expect(button.disabled).toBe(true);
-      fireEvent.click(button);
-    }
-    expect(onComplete).not.toHaveBeenCalled();
-    expect(onSkip).not.toHaveBeenCalled();
+      expect(screen.getByText("検証済み")).toBeTruthy();
+    });
   });
 
   it("前提条件が揃っていなければ、待っている相手と何を待っているかを出す", () => {
@@ -189,15 +185,6 @@ describe("ManualStepPanel", () => {
     expect(screen.getByText("PR #1704")).toBeTruthy();
   });
 
-  // 判定は本文の記載からの推定なので、外したときに完了できなくなる方が損が大きい
-  it("前提条件が揃っていなくてもクローズのボタンは押せる", () => {
-    renderWithPrerequisites([prerequisite()]);
-
-    for (const button of screen.getAllByRole<HTMLButtonElement>("button")) {
-      expect(button.disabled).toBe(false);
-    }
-  });
-
   it("前提条件がすべて満たされていれば実行できる旨を出す", () => {
     renderWithPrerequisites([
       prerequisite({ stage: "done-main", label: "mainへ反映済み", satisfied: true, stepIndex: 2 }),
@@ -218,8 +205,6 @@ describe("ManualStepPanel", () => {
     render(
       <ManualStepPanel
         isSubmitting={false}
-        onComplete={vi.fn()}
-        onSkip={vi.fn()}
         verifiedAt="2026-08-20T00:12:00.000Z"
         repositoryFullName={REPO}
       />,
@@ -227,15 +212,13 @@ describe("ManualStepPanel", () => {
 
     expect(screen.getByText("完了済みの可能性があります。")).toBeTruthy();
     // 断定はしない（終了コードしか見ていないため、確かめるのは人）
-    expect(screen.getByText(/確かめてからクローズしてください/)).toBeTruthy();
+    expect(screen.getByText(/セッションの完了検証で確かめます/)).toBeTruthy();
   });
 
   it("通っていなければ何も出さない", () => {
     render(
       <ManualStepPanel
         isSubmitting={false}
-        onComplete={vi.fn()}
-        onSkip={vi.fn()}
         verifiedAt={null}
         repositoryFullName={REPO}
       />,
@@ -273,8 +256,6 @@ describe("ManualStepPanel（設定変更Issueの切り出し）", () => {
     render(
       <ManualStepPanel
         isSubmitting={false}
-        onComplete={vi.fn()}
-        onSkip={vi.fn()}
         configTargets={targets}
         onCreateConfigIssue={onCreateConfigIssue}
         repositoryFullName={REPO}
@@ -291,8 +272,6 @@ describe("ManualStepPanel（設定変更Issueの切り出し）", () => {
     render(
       <ManualStepPanel
         isSubmitting={false}
-        onComplete={vi.fn()}
-        onSkip={vi.fn()}
         configTargets={[]}
         onCreateConfigIssue={vi.fn()}
         repositoryFullName={REPO}
@@ -307,8 +286,6 @@ describe("ManualStepPanel（設定変更Issueの切り出し）", () => {
     render(
       <ManualStepPanel
         isSubmitting={false}
-        onComplete={vi.fn()}
-        onSkip={vi.fn()}
         configTargets={detectInfraConfigTargets(CONFIG_BODY)}
         repositoryFullName={REPO}
       />,

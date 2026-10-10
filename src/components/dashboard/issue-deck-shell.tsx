@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import dynamic from "next/dynamic";
 
 import { CodeReviewDialog } from "@/components/dashboard/code-review-dialog";
 import { CrossRepoQuestionDialog } from "@/components/dashboard/cross-repo-question-dialog";
@@ -77,7 +76,6 @@ import { useIssueAiSearch } from "@/hooks/use-issue-ai-search";
 import { useIssueBodies } from "@/hooks/use-issue-bodies";
 import { useIssueFilters } from "@/hooks/use-issue-filters";
 import { useIssuePolling } from "@/hooks/use-issue-polling";
-import { useManualStepGuide } from "@/hooks/use-manual-step-guide";
 import { useMediaQuery } from "@/hooks/use-media-query";
 import { useMobileScreen } from "@/hooks/use-mobile-screen";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
@@ -166,7 +164,6 @@ import { getNavViewLabel } from "@/lib/nav-views";
 import {
   computeIssuePrerequisiteReadiness,
   computeManualStepAttention,
-  computeManualStepReadiness,
 } from "@/lib/manual-step-attention";
 import { countMergePendingAttention } from "@/lib/merge-pending-attention";
 import { countUnconfirmedQuestions, countWaitingQuestions } from "@/lib/question-attention";
@@ -189,10 +186,6 @@ import {
 } from "@/lib/pull-request-list";
 import type { Issue } from "@/types/issue";
 
-// 手作業ガイドは明示的に開くまで表示しないため、初回表示のチャンクから外す（#3391）。
-const ManualStepGuideDialog = dynamic(
-  () => import("@/components/dashboard/manual-step-guide-dialog").then((module) => module.ManualStepGuideDialog),
-);
 import type { PullRequestSummary } from "@/types/pull-request";
 import type { ConnectedRepository } from "@/types/repository";
 import type { CurrentUser } from "@/types/user";
@@ -1246,21 +1239,11 @@ export function IssueDeckShell({
     () => countWaitingQuestions(questionAttentionIssues),
     [questionAttentionIssues],
   );
-  // 一覧の行に出す「いま実行できるか」（#1763）。母集団は絞り込み前の全Issue——
-  // 「ユーザーの作業待ち」の一覧には手作業Issueしか並ばず、絞り込み後の集合では
-  // 参照先のIssueを1件も引けない。
-  const manualStepReadiness = useMemo(() => computeManualStepReadiness(issues), [issues]);
-  // 一覧の行に出す前提待ちの印は、手作業Issue以外にも広げる（#2003）。手作業アシスタントと
-  // 左メニューの件数は`manualStepReadiness`（手作業Issueだけ）のままにする——あちらは
-  // 「いま手を動かせば盤面が進む手作業が何件あるか」を答えるもので、一般のIssueを混ぜると
-  // 別の数になる
+  // 一覧の行に出す前提待ちの印は、手作業Issue以外にも広げる（#2003）。
   const prerequisiteReadiness = useMemo(
     () => computeIssuePrerequisiteReadiness(issues),
     [issues],
   );
-  // 手作業アシスタント（#1826）。PC・スマホのどちらの入口から開いても同じ状態を使うため、
-  // 状態とダイアログはここに1つだけ置く
-  const manualStepGuide = useManualStepGuide(issues, manualStepReadiness);
   // スマホの絞り込みシートに出すラベルの選択肢。スマホはPC側の絞り込み（filters）とは別の
   // クエリ（mview/mlabels等）で動くため、絞り込み前の全Issueから求める。
   const labelSummary = useMemo(() => computeLabelSummary(issues), [issues]);
@@ -2281,7 +2264,6 @@ export function IssueDeckShell({
                   onRefresh={issuePolling.refresh}
                   fetchedAt={issuePolling.fetchedAt}
                   autoRefreshIntervalMs={issuePolling.pollIntervalMs}
-                  onStartManualStepGuide={manualStepGuide.start}
                   onStartCodeReview={openCodeReviewDialog}
                   codeReviewIssues={codeReviewIssues}
                   codeReviewRepositoryFullNames={codeReviewRepositoryFullNames}
@@ -2405,7 +2387,6 @@ export function IssueDeckShell({
                   onOpenNightlyRun={selectNightlyRun}
                   onCancelNightlyRun={(entryId) => void nightlyRun.cancel(entryId)}
                   onNightlyRunQueued={nightlyRun.refresh}
-                  onStartManualStepGuide={manualStepGuide.start}
                   claudeLocalModel={claudeLocalModel}
                   codexModel={codexModel}
                   defaultDispatchAgent={defaultDispatchAgent}
@@ -2726,7 +2707,6 @@ export function IssueDeckShell({
                 // ディスパッチの取得はこの画面で1本にまとめる（#1262の取り決め）
                 dispatch={dispatch}
                 // 溜まった手作業を1件ずつ案内する入口（#1826）
-                onStartManualStepGuide={manualStepGuide.start}
                 // リポジトリ全体のコードレビューを実行する入口（#698）
                 // リポジトリ別の枠（#3092）の「コードレビューを実行」モーダルで選んだリポジトリを渡す
                 onStartCodeReview={openCodeReviewDialog}
@@ -2767,7 +2747,6 @@ export function IssueDeckShell({
                   onOpenNightlyRun={selectNightlyRunPane}
                   onCancelNightlyRun={(entryId) => void nightlyRun.cancel(entryId)}
                   onNightlyRunQueued={nightlyRun.refresh}
-                  onStartManualStepGuide={manualStepGuide.start}
                   claudeLocalModel={claudeLocalModel}
                   codexModel={codexModel}
                   defaultDispatchAgent={defaultDispatchAgent}
@@ -2816,17 +2795,6 @@ export function IssueDeckShell({
           onClose={() => goBackOrFallback(() => selectPullRequestModal(null))}
           issueSuggestions={modalPullRequestIssueSuggestions}
         />
-
-        {/* 手作業アシスタント（#1826）。PC・スマホの入口が同じ1つを開く */}
-        {manualStepGuide.open && (
-          <ManualStepGuideDialog
-            queueIds={manualStepGuide.queueIds}
-            issues={allIssues}
-            open
-            onOpenChange={manualStepGuide.setOpen}
-            onIssueUpdated={handleIssueUpdated}
-          />
-        )}
 
         <CreateIssueDialog
           open={createDialogOpen}
