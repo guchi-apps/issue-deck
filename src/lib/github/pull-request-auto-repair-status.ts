@@ -19,7 +19,7 @@ export type PullRequestAutoRepairSummary = {
 const STOP_REASON_LABEL: Record<string, string> = {
   user_action_required: "人の判断が必要です",
   max_rounds_reached: "修復の上限回数に達しました",
-  repeated_problem: "修正後も同じ問題が残っています（修正コミットなし）",
+  repeated_problem: "修正後もHEADが変わらず、同じ問題が残っています",
   pull_request_closed: "PRが閉じられました",
   dispatch_failed: "修復の起動に失敗しました",
   timed_out: "待機がタイムアウトしました",
