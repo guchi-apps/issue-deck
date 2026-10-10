@@ -22,14 +22,17 @@ import {
   ACTIONS_RUNNING_ENQUEUE_REASON,
   describeCrossRepoQuestionRejection,
   describeDispatchEnqueueRejection,
+  describeManualStepSessionRejection,
   findBlockingSession,
   findCrossRepoQuestionJobForIssue,
   findDispatchJobForIssue,
+  findManualStepSessionJobForIssue,
   isActionsRunInProgress,
   isActiveDispatchJobStatus,
   isDispatchAgentSelectable,
   resolveCrossRepoQuestionRejection,
   resolveDispatchTargetRejection,
+  resolveManualStepSessionRejection,
   type DispatchAgent,
 } from "@/lib/dispatch/dispatch-job";
 import {
@@ -119,17 +122,23 @@ export function SessionRecoveryButton({
   );
   const isQuestion = questionJob !== null;
 
-  const recovery = describeSessionRecovery(session, { isCrossRepoQuestion: isQuestion });
-  // closedなIssue・手作業Issueには起動する相手がいない（`StartLocalSessionButton`と同じ判定）
+  // 手作業Issue（#4231）。積むのは`LAUNCH`ではなく手作業セッションのジョブ
+  const isManualStep = isManualStepIssue(issue.labels);
+  const recovery = describeSessionRecovery(session, {
+    isCrossRepoQuestion: isQuestion,
+    isManualStep,
+  });
+  // closedなIssueには起動する相手がいない（`StartLocalSessionButton`と同じ判定）
   const isAvailable =
-    parseRepositoryFullName(issue.repositoryFullName) !== null &&
-    issue.state === "open" &&
-    !isManualStepIssue(issue.labels);
+    parseRepositoryFullName(issue.repositoryFullName) !== null && issue.state === "open";
 
   const host = dispatch.hosts.find((candidate) => candidate.name === session.host) ?? null;
   const job = findDispatchJobForIssue(dispatch.jobs, issue.repositoryFullName, issue.number);
   // 未処理のジョブは、積む種別のものだけを見る（質問を積む導線が実装の起動ジョブに塞がれない）
-  const relevantJob = isQuestion ? questionJob : job;
+  const manualJob = isManualStep
+    ? findManualStepSessionJobForIssue(dispatch.jobs, issue.repositoryFullName, issue.number)
+    : null;
+  const relevantJob = isQuestion ? questionJob : isManualStep ? manualJob : job;
   const hasActiveJob = relevantJob !== null && isActiveDispatchJobStatus(relevantJob.status);
   // 既に立ち上がり直している場合は積ませない（#1311と同じ判定）
   const blockingSession = findBlockingSession({
@@ -141,27 +150,39 @@ export function SessionRecoveryButton({
   const questionRejection = isQuestion
     ? resolveCrossRepoQuestionRejection({ host, hasActiveJob, blockingSession })
     : null;
-  const launchRejection = isQuestion
-    ? null
-    : resolveDispatchTargetRejection({
+  const manualRejection = isManualStep
+    ? resolveManualStepSessionRejection({
+        host,
+        isManualStepIssue: true,
+        hasActiveJob,
+        blockingSession,
+        agent: resolveIssueImplementationAgent(session),
+      })
+    : null;
+  const launchRejection =
+    isQuestion || isManualStep
+      ? null
+      : resolveDispatchTargetRejection({
         host,
         repositoryFullName: issue.repositoryFullName,
         hasActiveJob,
         blockingSession,
       });
-  const rejection = questionRejection ?? launchRejection;
+  const rejection = questionRejection ?? manualRejection ?? launchRejection;
 
   // Actionsが走っている間は復旧させない（#2032）。**ボタンごと消さず、理由を出して押せなく
   // する**——このコンポーネントは「なぜ復旧できないのかを画面から分かるようにする」ために
   // 導線を残す方針で作られている（`rejection`の扱いと同じ）。質問セッションはActionsと
   // 同じブランチを進める心配が無いので見ない
-  const actionsRunning = !isQuestion && isActionsRunInProgress(actionsRun);
+  const actionsRunning = !isQuestion && !isManualStep && isActionsRunInProgress(actionsRun);
 
   if (!recovery || !isAvailable) return null;
 
   const rejectionMessage = questionRejection
     ? describeCrossRepoQuestionRejection(questionRejection, { hostName: session.host })
-    : launchRejection
+    : manualRejection
+      ? describeManualStepSessionRejection(manualRejection, { hostName: session.host })
+      : launchRejection
       ? describeDispatchEnqueueRejection(launchRejection, {
           hostName: session.host,
           repositoryFullName: issue.repositoryFullName,
@@ -182,6 +203,15 @@ export function SessionRecoveryButton({
       });
       return;
     }
+    if (isManualStep) {
+      void dispatch.startManualStepSession({
+        repositoryFullName: issue.repositoryFullName,
+        issueNumber: issue.number,
+        hostName: session.host,
+        agent: resolveIssueImplementationAgent(session),
+      });
+      return;
+    }
     void launch(session.host, resolveIssueImplementationAgent(session));
   }
 
@@ -195,6 +225,16 @@ export function SessionRecoveryButton({
    * `agent`・`model`を渡すだけで、継続するかどうかの判定はサブPCに任せる。
    */
   function recoverWith(agentChoice: DispatchAgent, model: ClaudeLocalModel | CodexLocalModel) {
+    if (isManualStep) {
+      void dispatch.startManualStepSession({
+        repositoryFullName: issue.repositoryFullName,
+        issueNumber: issue.number,
+        hostName: session.host,
+        agent: agentChoice,
+        model,
+      });
+      return;
+    }
     void launch(session.host, agentChoice, model);
   }
 

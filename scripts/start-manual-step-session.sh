@@ -238,8 +238,8 @@ build_env_prefix() {
   # 回収の条件を実装セッションと分ける印。worktreeを持たないため、質問セッションと同じ
   # 放置の猶予で畳む（scripts/reap-sessions.sh）
   prefix+="export ISSUE_DECK_SESSION_KIND=manual-step; "
-  # **前回の会話を引き継がない。** cwdはIssueごとではないので、残っている会話は別の手作業のもの
-  prefix+="export ISSUE_DECK_CLAUDE_RESUME=0; "
+  # 前回の会話へ戻すかはランチャーが決める（#4231）。cwdはIssueごとではないので`--continue`は
+  # 使わず、フックが控えたsessionIdを`--resume`する（控えが無ければ新しい会話）
   for var in ISSUE_DECK_SHARED_CONTEXT_DIR ISSUE_DECK_AGENT ISSUE_DECK_CLAUDE_PERMISSION_MODE \
     ISSUE_DECK_SESSION_REAPABLE ISSUE_DECK_SESSION_STATE_DIR ISSUE_DECK_CLAUDE_MODEL ISSUE_DECK_CODEX_MODEL; do
     value="${!var:-}"
