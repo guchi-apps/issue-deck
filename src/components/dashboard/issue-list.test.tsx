@@ -823,39 +823,7 @@ describe("IssueList ヘッダーの自動更新の状態（#1797）", () => {
   });
 });
 
-/**
- * 一覧の上に並ぶ「〜が n件あります。」の入口バー（#2107）。
- *
- * **折り返しはjsdomでは再現できない**（レイアウトを計算しないため）ので、
- * 幅が足りないときに折り返すための指定が残っているかをクラスで見張る。1行固定の`flex`へ
- * 戻ると、狭いカラムでテキストが幅0まで潰れて1文字ずつ縦に並ぶ。
- */
-describe("件数バーの折り返し（#2107）", () => {
-  function barOf(text: RegExp): HTMLElement {
-    return screen.getByText(text).closest("div")!;
-  }
-
-  it("手作業の入口バーは、入りきらないときに折り返せる", () => {
-    const readiness = new Map([
-      ["1", { ready: true, blocking: [], message: "" }],
-      ["2", { ready: true, blocking: [], message: "" }],
-    ]);
-    renderList({
-      view: "manual-step",
-      prerequisiteReadiness: readiness,
-      onStartManualStepGuide: vi.fn(),
-    });
-
-    const bar = barOf(/いま実行できる手作業が/);
-    expect(bar.className).toContain("flex-wrap");
-    // テキストに基準幅が無いと、縮むだけで折り返しの合図にならない
-    expect(screen.getByText(/いま実行できる手作業が/).className).toContain("basis-48");
-    // ボタン側は折り返した後も右端に残す
-    expect(screen.getByRole("button", { name: "順番に進める" }).closest("div")!.className).toContain(
-      "ml-auto",
-    );
-  });
-
+describe("コードレビュー ビューの入口", () => {
   // #698。**このビュー唯一の起動口**（リポジトリ別の枠の「コードレビューを実行」モーダル）なので、Issueが0件でも出す
   it("「コードレビュー」ビューでは、Issueが1件も無くても実行の入口の枠を出す", () => {
     renderList({ issues: [], view: "code-review", onStartCodeReview: vi.fn() });
@@ -869,89 +837,6 @@ describe("件数バーの折り返し（#2107）", () => {
     renderList({ view: "all", onStartCodeReview: vi.fn() });
 
     expect(screen.queryByRole("region", { name: "リポジトリ別のレビュー" })).toBeNull();
-  });
-});
-
-/**
- * 手作業の入口に出る自動実行のバッジ（#1882）と、押して開く一覧（#2119）。
- *
- * バッジは`.find`で先頭1件しか拾っておらず、複数走っていても1件ぶんの進捗しか出ていなかった。
- */
-describe("自動実行バッジの一覧（#2119）", () => {
-  function manualStepRun(overrides: Partial<ManualStepRunView> = {}): ManualStepRunView {
-    return {
-      repositoryFullName: "guchi-apps/issue-deck",
-      issueNumber: 1,
-      issueTitle: "Issue 1",
-      issueId: "1",
-      targetHost: "subpc",
-      status: "RUNNING",
-      pausedReason: null,
-      done: 1,
-      total: 4,
-      currentLine: 10,
-      currentLabel: null,
-      currentJobId: null,
-      message: null,
-      diagnoseConsent: false,
-      startedAt: "2026-08-22T00:00:00Z",
-      finishedAt: null,
-      ...overrides,
-    };
-  }
-
-  function renderManualStepList(onStartManualStepGuide = vi.fn()) {
-    renderList({
-      view: "manual-step",
-      prerequisiteReadiness: new Map([["1", { ready: true, blocking: [], message: "" }]]),
-      onStartManualStepGuide,
-    });
-    return onStartManualStepGuide;
-  }
-
-  it("走っている実行を全部数える（先頭1件で打ち切らない）", () => {
-    dispatchState.manualStepRuns = [
-      manualStepRun({ issueNumber: 1, done: 1, total: 4 }),
-      manualStepRun({ issueNumber: 2, issueId: "2", done: 3, total: 5 }),
-    ];
-    renderManualStepList();
-
-    expect(screen.getByRole("button", { name: /自動実行/ }).textContent).toContain(
-      "自動実行 2件 4 / 9",
-    );
-  });
-
-  // 一覧に並んでいない実行まで拾うと、別のビューの進捗がここへ割り込む
-  it("この一覧に居ないIssueの実行は数えない", () => {
-    dispatchState.manualStepRuns = [
-      manualStepRun({ issueNumber: 1, done: 1, total: 4 }),
-      manualStepRun({ repositoryFullName: "guchi-apps/vps", issueNumber: 48, issueId: "vps-48" }),
-    ];
-    renderManualStepList();
-
-    expect(screen.getByRole("button", { name: /自動実行/ }).textContent).toContain("自動実行 1 / 4");
-  });
-
-  it("一覧の行を押すと、そのIssueを先頭にしたアシスタントが開く", () => {
-    dispatchState.manualStepRuns = [
-      manualStepRun({ issueNumber: 1 }),
-      manualStepRun({ issueNumber: 2, issueId: "2", issueTitle: "Issue 2" }),
-    ];
-    const onStartManualStepGuide = renderManualStepList();
-
-    fireEvent.click(screen.getByRole("button", { name: /自動実行/ }));
-    fireEvent.click(screen.getByText("Issue 2"));
-
-    expect(onStartManualStepGuide).toHaveBeenCalledWith("2");
-  });
-
-  // 「順番に進める」は今までどおり並び順に任せる（起点を渡さない）
-  it("「順番に進める」は起点を渡さずに開く", () => {
-    const onStartManualStepGuide = renderManualStepList();
-
-    fireEvent.click(screen.getByRole("button", { name: "順番に進める" }));
-
-    expect(onStartManualStepGuide).toHaveBeenCalledWith();
   });
 });
 

@@ -15,7 +15,7 @@ import {
 
 import { MarkdownBody } from "@/components/dashboard/markdown-body";
 import {
-  buildWhereToRunLines,
+  buildManualStepOneLiner,
   ManualStepWhereToRun,
 } from "@/components/dashboard/manual-step-where-to-run";
 import { formatRemaining, useRemainingMs } from "@/components/dashboard/use-remaining-ms";
@@ -430,7 +430,7 @@ function ManualStepQuestionCard({
   // 「手元で実行する」が出るときだけ本文のコードブロックを畳む（#2403と同じ判定）。
   // 接続先もカレントディレクトリも本文に無い手順ではその並びごと出ないので、
   // そのまま畳むとコマンドが画面から消える
-  const whereLines = buildWhereToRunLines(guide.where, guide.command, guide.device);
+  const oneLiner = buildManualStepOneLiner(guide.where, guide.command, guide.device);
 
   return (
     <section className="overflow-hidden rounded-md border border-violet-500/40 bg-violet-500/5">
@@ -438,9 +438,6 @@ function ManualStepQuestionCard({
         <span className="flex items-center gap-1 text-xs font-semibold text-violet-700 dark:text-violet-300">
           <ListChecks className="size-3" aria-hidden />
           この手順でやること
-        </span>
-        <span className="rounded border bg-card px-1.5 py-px text-[10.5px] font-semibold tabular-nums text-muted-foreground">
-          手順 {guide.order} / {guide.total}
         </span>
         {guide.device !== null && (
           <span className="rounded border border-violet-500/40 bg-card px-1.5 py-px text-[10.5px] font-semibold text-violet-700 dark:text-violet-300">
@@ -453,12 +450,12 @@ function ManualStepQuestionCard({
             スマホから範囲選択なしで拾えるようにする（手作業アシスタントと同じ） */}
         <MarkdownBody
           content={
-            whereLines.length > 0 ? stripCodeBlocks(guide.step.markdown) : guide.step.markdown
+            oneLiner !== null ? stripCodeBlocks(guide.step.markdown) : guide.step.markdown
           }
           repositoryFullName={repositoryFullName}
           copyableInlineCode
         />
-        {whereLines.length > 0 ? (
+        {oneLiner !== null ? (
           <ManualStepWhereToRun
             where={guide.where}
             device={guide.device}

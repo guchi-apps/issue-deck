@@ -83,7 +83,6 @@ type MobileIssuesScreenProps = {
   /** 自動更新の間隔（#1797）。`MobileIssueListScreen`へそのまま渡す */
   autoRefreshIntervalMs?: AutoRefreshIntervalMs;
   /** 手作業アシスタント（#1826）を開く */
-  onStartManualStepGuide: () => void;
   /** コードレビュー（#698）を実行するダイアログを開く。「コードレビュー」ビューでだけ出る */
   onStartCodeReview?: (repositoryFullName: string) => void;
   /** リポジトリ別の枠（#3092）の材料。一覧へそのまま渡す */
@@ -119,7 +118,6 @@ export function MobileIssuesScreen({
   onRefresh,
   fetchedAt,
   autoRefreshIntervalMs,
-  onStartManualStepGuide,
   onStartCodeReview,
   codeReviewIssues,
   codeReviewRepositoryFullNames,
@@ -261,7 +259,6 @@ export function MobileIssuesScreen({
       codeReviewFindingIssues={issues}
       checkUserRunningIssueIds={checkUserRunningIssueIds}
       pullRequests={pullRequests}
-      onStartManualStepGuide={onStartManualStepGuide}
       onStartCodeReview={onStartCodeReview}
       codeReviewIssues={codeReviewIssues}
       codeReviewRepositoryFullNames={codeReviewRepositoryFullNames}

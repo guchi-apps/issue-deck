@@ -129,7 +129,6 @@ type MobileIssueListScreenProps = {
    */
   pullRequests?: PullRequestSummary[];
   /** 手作業アシスタント（#1826）を開く。「ユーザーの作業待ち」でだけ使う */
-  onStartManualStepGuide?: (startIssueId?: string) => void;
   /** コードレビュー（#698）を実行するダイアログを開く。「コードレビュー」ビューでだけ出る */
   onStartCodeReview?: (repositoryFullName: string) => void;
   /** リポジトリ別の枠（#3092）の材料。`IssueList`へそのまま渡す */
@@ -189,7 +188,6 @@ export function MobileIssueListScreen({
   codeReviewFindingIssues,
   checkUserRunningIssueIds,
   pullRequests,
-  onStartManualStepGuide,
   onStartCodeReview,
   codeReviewIssues,
   codeReviewRepositoryFullNames,
@@ -384,7 +382,6 @@ export function MobileIssueListScreen({
         codeReviewFindingIssues={codeReviewFindingIssues}
         checkUserRunningIssueIds={checkUserRunningIssueIds}
         pullRequests={pullRequests}
-        onStartManualStepGuide={onStartManualStepGuide}
         onStartCodeReview={onStartCodeReview}
         codeReviewIssues={codeReviewIssues}
         codeReviewRepositoryFullNames={codeReviewRepositoryFullNames}
