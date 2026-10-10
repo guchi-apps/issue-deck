@@ -15,10 +15,13 @@ export type CircleciFetch = (url: string, init: RequestInit) => Promise<Response
 export type TriggerPipelineInput = {
   projectSlug: string;
   definitionId: string;
-  /** 設定を読むブランチ（信頼済み。PRのbase） */
-  configBranch: string;
-  /** チェックアウトするブランチ（PRのhead） */
-  checkoutBranch: string;
+  /**
+   * 設定を読み、チェックアウトもするブランチ（信頼済み。PRのbase）。configとcheckoutが同じ
+   * リポジトリのとき、CircleCIは両者のrefが一致しないと起動を拒否する（HTTP 400「Config ref must
+   * match checkout ref」。#4215）ため、1つしか受け取らない。PRのheadはジョブの中で`head_sha`を
+   * SHA指定で`git fetch`して取り出す
+   */
+  branch: string;
   parameters: Record<string, string | boolean>;
 };
 
@@ -53,8 +56,8 @@ export function createCircleciClient(token: string, fetcher: CircleciFetch = fet
           signal: AbortSignal.timeout(TIMEOUT_MS),
           body: JSON.stringify({
             definition_id: input.definitionId,
-            config: { branch: input.configBranch },
-            checkout: { branch: input.checkoutBranch },
+            config: { branch: input.branch },
+            checkout: { branch: input.branch },
             parameters: input.parameters,
           }),
         });

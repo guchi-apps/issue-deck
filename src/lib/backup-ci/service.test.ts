@@ -123,6 +123,7 @@ let workflowStatus = "success";
 let resultOverrides: Record<string, unknown> = {};
 const statuses: { sha: string; state: string }[] = [];
 let triggerCalls = 0;
+let triggerBodies: Record<string, unknown>[] = [];
 /** GitHub Actions（ci.yml）の実行。`/actions/runs?head_sha=`の応答になる */
 type ActionsRun = {
   id: number;
@@ -160,6 +161,7 @@ beforeEach(() => {
   actionsRuns = [];
   statuses.length = 0;
   triggerCalls = 0;
+  triggerBodies = [];
   pr = { headSha: HEAD, baseSha: BASE, state: "open" };
   workflowStatus = "success";
   resultOverrides = {};
@@ -222,6 +224,7 @@ beforeEach(() => {
       }
       if (url.endsWith("/pipeline/run")) {
         triggerCalls += 1;
+        triggerBodies.push(JSON.parse(String(init?.body)));
         return triggerResponse();
       }
       if (url.endsWith("/pipeline/pipe-1/workflow")) {
@@ -270,6 +273,17 @@ describe("startBackupCiRun", () => {
     expect(run.externalPipelineId).toBe("pipe-1");
     expect(run.definitionDigest).toMatch(/^sha256:/);
     expect(statuses).toEqual([{ sha: HEAD, state: "pending" }]);
+  });
+
+  it("設定もチェックアウトもbaseブランチで起動し、headはSHAで渡す（#4215）", async () => {
+    await service.startBackupCiRun({ repositoryFullName: "o/r", prNumber: 1, userId: "u" });
+    expect(triggerBodies).toHaveLength(1);
+    // 同じリポジトリでconfigとcheckoutのrefが違うと、CircleCIはHTTP 400で拒否する
+    expect(triggerBodies[0]).toMatchObject({
+      config: { branch: "develop" },
+      checkout: { branch: "develop" },
+      parameters: { backup_ci: true, head_sha: HEAD, base_sha: BASE },
+    });
   });
 
   it("実行中に押し直しても新しく起動しない（二重起動を防ぐ）", async () => {
