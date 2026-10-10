@@ -2701,8 +2701,56 @@ model ReleaseRebuildRequest {
   activeKey          String?  @unique @db.VarChar(255)
   requestedByUserId  String?  @db.VarChar(40)
 
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@index([repositoryFullName, originPrNumber])
+}
+
+// 実装セッションの依存待ち（#4321）。
+//
+// **DispatchSessionとは別のモデルにしている。** セッションが畳まれても（GONE・EXITED）待ちの
+// 記録と再開条件は残し、復旧経路へ渡せるようにするため。`11.local`は「ローカルで対応中」という
+// 抑止のフラグで、何を待っているのかは表せない。ここが待ち理由・依存先・再開条件の正になる。
+model SessionDependencyWait {
+  id                 String   @id @default(cuid())
+  repositoryFullName String   @db.VarChar(191)
+  issueNumber        Int
+  // 依存先（`owner/repo`と番号）。`issue`か`pr`
+  depRepository      String   @db.VarChar(191)
+  depNumber          Int
+  depKind            String   @db.VarChar(8)
+  // 再開条件（JSON配列。`closed` / `merged` / `released` / `verified`）
+  conditions         Json
+  // 短い日本語の保留理由（セッションが報告した原文。画面にそのまま出す）
+  reason             String   @db.VarChar(300)
+  // WAITING / NEEDS_CONFIRM / RESUME_REQUESTED / RESUME_SENT / RESUMED / RESUME_FAILED / CANCELLED
+  status             String   @db.VarChar(24)
+  // 報告の出どころ。`session`（セッション自身の報告）か`manual`（画面からの登録）
+  source             String   @db.VarChar(16)
+  // 直近の評価結果（条件ごとの成否と説明。JSON）と時刻・取得失敗
+  lastObservation    Json?
+  lastCheckedAt      DateTime?
+  lastError          String?  @db.VarChar(300)
+  // 実行権の取得（巡回の間引きと二重評価の防止）
+  lastSweepAt        DateTime?
+  satisfiedAt        DateTime?
+  // 再開の追跡。要求→送信済み→実際の再開確認を分けて持つ
+  resumeJobId        String?  @db.VarChar(40)
+  resumeRequestedAt  DateTime?
+  resumeSentAt       DateTime?
+  resumedAt          DateTime?
+  failureReason      String?  @db.VarChar(300)
+  // 待ちが続いている間だけ`repo#issue`を入れる（同じIssueの二重登録を止める）
+  activeKey          String?  @unique @db.VarChar(255)
+  // 条件成立・失敗の通知を出し済みか（同じ待機理由で繰り返さない）
+  notifiedKey        String?  @db.VarChar(64)
+
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([repositoryFullName, issueNumber])
+  @@index([status])
 }

@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { db } from "@/lib/db";
 import { authorizeDispatch } from "@/lib/dispatch/dispatch-auth";
 import { authorizeProgressReport } from "@/lib/progress-report-auth";
+import { recordReviewFixHandoffStarted } from "@/lib/github/pull-request-auto-repair-start";
 import { requestReviewFixJob, validateReviewFixTarget } from "@/lib/dispatch/review-fix-jobs";
 
 export async function POST(request: NextRequest) {
@@ -19,6 +20,10 @@ export async function POST(request: NextRequest) {
   try {
     if (p.action === "validate") return NextResponse.json({ review: await validateReviewFixTarget(target) }, { headers: { "Cache-Control": "no-store" } });
     const job = await requestReviewFixJob(target);
+    // Codexへ渡したレビュー修正も自動修復系列に載せる（#4318）。失敗しても依頼自体は成功として返す。
+    await recordReviewFixHandoffStarted({ repositoryFullName: p.repository, pullRequestNumber: p.pullRequest }).catch((error: unknown) => {
+      console.error("[POST /api/dispatch/review-fix] 系列への登録に失敗:", error);
+    });
     return NextResponse.json({ jobId: job.id, status: job.status }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     return NextResponse.json({ error: error instanceof Error ? error.message : "レビュー修正を依頼できませんでした" }, { status: 409 });

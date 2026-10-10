@@ -37,6 +37,15 @@ struct ContentView: View {
             }
         }
         .animation(.easeOut(duration: 0.2), value: model.failure)
+        // 共有画面の「Issueを開く」（`issuedeck://issue?id=…`）。GitHubではなくIssueDeckのIssue詳細を開く
+        .onOpenURL { url in
+            guard url.scheme == AppConfig.authCallbackScheme, url.host == "issue",
+                  let id = URLComponents(url: url, resolvingAgainstBaseURL: false)?
+                    .queryItems?.first(where: { $0.name == "id" })?.value,
+                  !id.isEmpty, id.allSatisfy(\.isNumber)
+            else { return }
+            PushCenter.shared.open(path: "/dashboard?issue=\(id)&mscreen=issue-detail&missue=\(id)")
+        }
         .onAppear { model.startIfNeeded() }
         .onChange(of: scenePhase) { _, phase in
             // 別アプリへ行っているあいだに回線が戻っていることがある

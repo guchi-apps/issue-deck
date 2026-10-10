@@ -1625,6 +1625,23 @@ sweep_deploy_recoveries() {
   return 0
 }
 
+# 実装セッションの依存待ち（#4321）を定期照合する。依存先の条件成立の判断・再開の指示・
+# 「送信しただけで実行中にしない」確認はissue-deck側が持ち、ここは呼ぶだけにする。
+# イベントの欠落・サービス再起動で取りこぼした成立を回収する役目を兼ねる。
+sweep_dependency_waits() {
+  if ! api_call POST /api/dispatch/dependency-wait/sweep '{}'; then
+    case "$API_RESPONSE_STATUS" in
+      404|000) return 0 ;;
+      *) report_api_failure "依存待ちの巡回に失敗しました" ;;
+    esac
+    return 0
+  fi
+  printf '%s' "$API_RESPONSE_BODY" |
+    jq -r '.actions[]? | "依存待ちを進めました: \(.id) \(.status)"' 2>/dev/null ||
+    true
+  return 0
+}
+
 # リリース候補の修正系列（#4317）を進める。修正PRのdevelop取り込みの観測・候補の作り直し・
 # 新しいSHAでの再検証の判定はissue-deck側が持ち、ここは呼ぶだけにする。
 sweep_release_fix_series() {
@@ -4359,6 +4376,9 @@ run_once() {
     sweep_deploy_recoveries
     # リリース候補の修正系列（#4317）。**dry-runでは呼ばない**（候補の作り直しという外向きの副作用があるため）。
     sweep_release_fix_series
+    # 実装セッションの依存待ち（#4321）。**dry-runでは呼ばない**（セッションへの再開指示と
+    # Issueコメントという外向きの副作用があるため）。
+    sweep_dependency_waits
     sweep_codex_pull_request_reviews
     # iOS配布失敗の巡回検知（#3745）。**dry-runでは呼ばない**（Issueの起票という外向きの副作用があるため）。
     sweep_ios_distribution_failures
