@@ -1,9 +1,9 @@
 import { NextResponse, type NextRequest } from "next/server";
 
-import { requireUserId } from "@/lib/auth-user";
+import { getCurrentUser } from "@/lib/auth-user";
 import { db } from "@/lib/db";
 import { getInstallationToken } from "@/lib/github/app-auth";
-import { fetchReleaseBodyByTag, updateReleaseBody } from "@/lib/github/release-body-api";
+import { fetchReleaseBodyByTag, fetchUserCanWriteRepo, updateReleaseBody } from "@/lib/github/release-body-api";
 import { applyReleaseBodyTaskToggle, parseReleaseBodyTasks } from "@/lib/release-body-tasks";
 
 /**
@@ -58,10 +58,11 @@ async function parseBody(request: NextRequest): Promise<ParsedBody | null> {
 }
 
 async function handle(request: NextRequest, checked: boolean) {
-  const userId = await requireUserId();
-  if (!userId) {
+  const user = await getCurrentUser();
+  if (!user) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
+  const userId = user.id;
 
   const body = await parseBody(request);
   if (!body) {
@@ -83,10 +84,28 @@ async function handle(request: NextRequest, checked: boolean) {
   const { ownerLogin: owner, name: repo } = repository;
 
   try {
+    // 接続できるだけでは足りない。GitHub上でReleaseを編集できる権限（write以上）が要る（#4395）
+    const permission = await fetchUserCanWriteRepo(owner, repo, user.githubLogin, token);
+    if (!permission.ok) return NextResponse.json({ error: "github_error" }, { status: 502 });
+    if (!permission.canWrite) return NextResponse.json({ error: "forbidden" }, { status: 403 });
+
     const fetched = await fetchReleaseBodyByTag(owner, repo, body.tagName, token);
     if (!fetched.ok) {
       // Releaseが無い版（失敗版など）はGitHubへ同期できない。保存済みにしない
       return NextResponse.json({ error: fetched.reason }, { status: fetched.reason === "not_found" ? 404 : 502 });
+    }
+
+    // 本文に無い行を書き足せるのは、引き継ぎ元の版に同じ行（キーと表示文言）が実在するときだけ。
+    // 任意の文言・見出しを送って他人のリリース本文へ追記させない
+    const alreadyInBody = parseReleaseBodyTasks(fetched.release.body).some((task) => task.key === body.lineKey);
+    if (!alreadyInBody && body.lineText !== undefined && body.carriedFrom !== undefined) {
+      const source = await fetchReleaseBodyByTag(owner, repo, body.carriedFrom, token);
+      const sourceHasLine =
+        source.ok &&
+        parseReleaseBodyTasks(source.release.body).some(
+          (task) => task.key === body.lineKey && task.text === body.lineText,
+        );
+      if (!sourceHasLine) return NextResponse.json({ error: "line_not_found" }, { status: 409 });
     }
 
     const toggled = applyReleaseBodyTaskToggle(fetched.release.body, {
