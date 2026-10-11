@@ -99,34 +99,13 @@ export function ManualStepSessionPanel({
   showRunPlan?: boolean;
   className?: string;
 }) {
-  const [error, setError] = useState<string | null>(null);
   const [agent, setAgent] = useState<DispatchAgent>(DEFAULT_DISPATCH_AGENT);
   // 手作業の内容を見て人が選ぶ入口なので、「設定に従う」は置かない。どのモデルで始まるかを
   // 起動前に明示するため、通常の実装開始と同じ3候補から既定のSonnetを選んだ状態で始める。
   const [claudeModel, setClaudeModel] = useState<ClaudeLocalModel>(CLAUDE_LOCAL_MODEL_DEFAULT);
   const [codexModel, setCodexModel] = useState<CodexLocalModel>("gpt-5.6-terra");
-
-  // 起動先は**手作業セッションに対応したオンラインのホスト**。無ければ代行実行と同じ既定の
-  // ホストを「理由を出す相手」として使う（申告が無い理由を、ホスト名つきで出せる）
-  const host =
-    resolveDefaultManualStepSessionHost(dispatch.hosts) ?? resolveManualStepHost(dispatch.hosts);
-  const hostName = host?.name ?? "サブPC";
-  const job = findManualStepSessionJobForIssue(
-    dispatch.jobs,
-    issue.repositoryFullName,
-    issue.number,
-  );
-  const hasActiveJob = job !== null && isActiveDispatchJobStatus(job.status);
-  const session = findSessionForIssue(dispatch.sessions, issue.repositoryFullName, issue.number);
-  const aliveSession = session?.state === "ALIVE" ? session : null;
-  const isManualStep = isManualStepIssue(issue.labels);
-  const rejection = resolveManualStepSessionRejection({
-    host,
-    isManualStepIssue: isManualStep,
-    hasActiveJob,
-    blockingSession: aliveSession,
-    agent,
-  });
+  const { host, hostName, job, hasActiveJob, aliveSession, isManualStep, rejection, error, start } =
+    useManualStepSessionLauncher(issue, dispatch, agent);
 
   // 本文の解析は毎レンダー行う（`parseManualStepGuide`は文字列を1回走査するだけで、
   // 手作業パネルの他の部品も同じことをしている）
@@ -134,15 +113,7 @@ export function ManualStepSessionPanel({
 
   async function handleStart() {
     if (!host) return;
-    setError(null);
-    const result = await dispatch.startManualStepSession({
-      repositoryFullName: issue.repositoryFullName,
-      issueNumber: issue.number,
-      hostName: host.name,
-      agent,
-      model: agent === "codex" ? codexModel : claudeModel,
-    });
-    if (!result.ok) setError(result.message);
+    await start(agent === "codex" ? codexModel : claudeModel);
   }
 
   return (
@@ -279,6 +250,62 @@ export function ManualStepSessionPanel({
       )}
     </section>
   );
+}
+
+/**
+ * 手作業セッションを起動するための判断材料と起動処理（#2771・#4426）。
+ *
+ * Issue詳細の主操作（「操作したのでAIに確認を依頼」など）と、このパネルの起動ボタンが
+ * **同じ起動先・同じ押せない理由**を使うために切り出している。起動するのは既存の
+ * 手作業セッションのジョブだけで、確認依頼のための別の経路は持たない。
+ */
+export function useManualStepSessionLauncher(
+  issue: Pick<Issue, "repositoryFullName" | "number" | "labels">,
+  dispatch: DispatchStateHandle,
+  agent: DispatchAgent = DEFAULT_DISPATCH_AGENT,
+) {
+  const [error, setError] = useState<string | null>(null);
+  // 起動先は**手作業セッションに対応したオンラインのホスト**。無ければ代行実行と同じ既定の
+  // ホストを「理由を出す相手」として使う（申告が無い理由を、ホスト名つきで出せる）
+  const host =
+    resolveDefaultManualStepSessionHost(dispatch.hosts) ?? resolveManualStepHost(dispatch.hosts);
+  const hostName = host?.name ?? "サブPC";
+  const job = findManualStepSessionJobForIssue(
+    dispatch.jobs,
+    issue.repositoryFullName,
+    issue.number,
+  );
+  const hasActiveJob = job !== null && isActiveDispatchJobStatus(job.status);
+  const session = findSessionForIssue(dispatch.sessions, issue.repositoryFullName, issue.number);
+  const aliveSession = session?.state === "ALIVE" ? session : null;
+  const isManualStep = isManualStepIssue(issue.labels);
+  const rejection = resolveManualStepSessionRejection({
+    host,
+    isManualStepIssue: isManualStep,
+    hasActiveJob,
+    blockingSession: aliveSession,
+    agent,
+  });
+
+  async function start(
+    model: ClaudeLocalModel | CodexLocalModel = agent === "codex"
+      ? "gpt-5.6-terra"
+      : CLAUDE_LOCAL_MODEL_DEFAULT,
+  ) {
+    if (!host) return false;
+    setError(null);
+    const result = await dispatch.startManualStepSession({
+      repositoryFullName: issue.repositoryFullName,
+      issueNumber: issue.number,
+      hostName: host.name,
+      agent,
+      model,
+    });
+    if (!result.ok) setError(result.message);
+    return result.ok;
+  }
+
+  return { host, hostName, job, hasActiveJob, aliveSession, isManualStep, rejection, error, start };
 }
 
 /**

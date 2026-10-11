@@ -139,7 +139,7 @@ import {
   selectVisiblePullRequestLinks,
   summarizeIssuePullRequestStates,
 } from "@/lib/issue-pull-requests";
-import { checkUserTargetProps } from "@/lib/check-user-focus";
+import { checkUserTargetProps, focusCheckUserTarget } from "@/lib/check-user-focus";
 import type { ClaudeLocalModelSetting, CodexModelSetting, DefaultDispatchAgent } from "@/lib/app-settings";
 import { findPlanRequestForIssue } from "@/lib/dispatch/session-plan-request";
 import { findQuestionPremise } from "@/lib/dispatch/question-premise";
@@ -999,6 +999,28 @@ export function MobileIssueDetail({
           planReviewCreating={planReviewCreating}
         />
 
+        {/* 手作業Issueの状態と、あなたの作業・主操作（#1280・#4426）。**状態カードの直後・質問パネルの
+            直前**に置く——いま必要な行動を最初に見せ、確認の依頼はすぐ下の質問パネルで答える */}
+        {canCompleteManualStep(issue) && (
+          <ManualStepPanel
+            isSubmitting={isSubmitting}
+            prerequisites={manualStepPrerequisites.prerequisites}
+            prerequisiteSummary={manualStepPrerequisites.summary}
+            dependents={manualStepPrerequisites.dependents}
+            verifiedAt={issue.manualStepVerifiedAt}
+            comments={comments}
+            configTargets={infraConfigTargets}
+            onCreateConfigIssue={(target) => onCreateConfigIssue(issue, target)}
+            repositoryFullName={issue.repositoryFullName}
+            sessionIssue={issue}
+            dispatch={dispatch}
+            questionPending={questionAnswerPending}
+            questionAnswered={questionRequest?.status === "ANSWERED"}
+            onShowQuestion={() => focusCheckUserTarget("question")}
+            compact
+          />
+        )}
+
         {/* 質問の回答（#2189）。PCの詳細と同じ位置・同じ理由で、アーティファクト・計画の
             どちらよりも上に置く（#2860でアーティファクトを計画の上へ移した後も変わらない） */}
         {/* 計画なしの質問待ちのアーティファクト（#3686）。PC版と同じく質問パネルのすぐ上へ出す */}
@@ -1141,22 +1163,6 @@ export function MobileIssueDetail({
           />
         )}
 
-        {/* 手作業Issueの案内と出口（#1280）。説明（「やること」）のすぐ上に置く */}
-        {canCompleteManualStep(issue) && (
-          <ManualStepPanel
-            isSubmitting={isSubmitting}
-            prerequisites={manualStepPrerequisites.prerequisites}
-            prerequisiteSummary={manualStepPrerequisites.summary}
-            dependents={manualStepPrerequisites.dependents}
-            verifiedAt={issue.manualStepVerifiedAt}
-            comments={comments}
-            configTargets={infraConfigTargets}
-            onCreateConfigIssue={(target) => onCreateConfigIssue(issue, target)}
-            repositoryFullName={issue.repositoryFullName}
-            sessionIssue={issue}
-            dispatch={dispatch}
-          />
-        )}
 
         {/* 実施順序（#2003）。手作業Issueでは上の手作業パネルの中に出しているので、
             ここでは出さない（同じものが2回並ぶ） */}

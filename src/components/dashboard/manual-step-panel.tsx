@@ -1,25 +1,67 @@
 "use client";
 
-import { BadgeCheck, Check, Copy, GitBranch, TriangleAlert } from "lucide-react";
+import {
+  BadgeCheck,
+  Bot,
+  Check,
+  CircleDashed,
+  CirclePause,
+  CircleSlash,
+  Copy,
+  GitBranch,
+  Hand,
+  Hourglass,
+  Loader2,
+  RotateCcw,
+  Search,
+  TriangleAlert,
+  User,
+} from "lucide-react";
 import { useState } from "react";
 
 import { IssueDependents } from "@/components/dashboard/issue-dependents";
 import { ManualStepPrerequisites } from "@/components/dashboard/manual-step-prerequisites";
 import { Button } from "@/components/ui/button";
 import { formatDateTime, formatDateTimeFull } from "@/lib/format-date-time";
-import { ManualStepSessionPanel } from "@/components/dashboard/manual-step-session-panel";
+import {
+  ManualStepSessionPanel,
+  useManualStepSessionLauncher,
+} from "@/components/dashboard/manual-step-session-panel";
 import type { DispatchStateHandle } from "@/hooks/use-dispatch-state";
 import type { IssueDependent } from "@/lib/issue-dependents";
 import type { Issue, IssueComment } from "@/types/issue";
 import type { InfraConfigTarget } from "@/lib/infra-config-repos";
 import { copyText } from "@/lib/copy-text";
 import {
-  findLatestManualStepInvestigation,
-  findLatestManualStepVerification,
+  findLatestManualStepReports,
   type ManualStepInvestigation,
+  type ManualStepUserAction,
   type ManualStepVerificationRecord,
 } from "@/lib/manual-step-investigation";
-import { buildManualStepSessionPlan } from "@/lib/manual-step-session-plan";
+import {
+  buildManualStepSessionPlan,
+  type ManualStepSessionPlan,
+} from "@/lib/manual-step-session-plan";
+import {
+  describeDispatchJobStatus,
+  describeManualStepSessionRejection,
+  findManualStepSessionJobForIssue,
+  isActiveDispatchJobStatus,
+} from "@/lib/dispatch/dispatch-job";
+import { formatDispatchHostName } from "@/lib/dispatch/host-label";
+import { findSessionForIssue } from "@/lib/dispatch/issue-session";
+import { extractVerificationCommands } from "@/lib/manual-step-command";
+import {
+  matchManualStepDeviceNames,
+  parseManualStepGuide,
+  type ManualStepGuideWhere,
+} from "@/lib/manual-step-guide";
+import {
+  resolveManualStepPhase,
+  resolveManualStepPrimaryAction,
+  type ManualStepPhase,
+  type ManualStepPrimaryAction,
+} from "@/lib/manual-step-phase";
 import { isManualStepIssue } from "@/lib/github/approval-labels";
 import type {
   ManualStepPrerequisite,
@@ -36,13 +78,16 @@ import { cn } from "@/lib/utils";
  * 検証コマンドを流した結果（`manual-step-verification`コメント）だけで判定し、画面は結果と
  * 証跡を見せる。中止・失敗・未実施を完了と混同しない。
  *
- * 出すのは「作業の状況」（目的・AI実施済み・自動実行できる・あなたの操作）、前提条件、
- * このIssueを待っているIssue、完了検証の結果、セッションの入口。**番号・順番の進捗は出さない**。
- * 実際に必要な技術的依存は、前提条件（不足前提・待機理由）として残す。
+ * 並びは「いまの状態 → あなたの作業 → 主操作 → AIの実施内容・根拠 → 補足」（#4426）。
+ * 代表状態は`resolveManualStepPhase`が既存の報告・セッション・質問待ちから1つに決め、
+ * 主操作も既存の経路（セッションの起動・質問への回答）だけを使う。PCで詳細ペインが広ければ
+ * 主作業と根拠を左右に分け（`@container`）、狭いペインとスマホでは1列にする。
+ * **番号・順番の進捗は出さない**。実際に必要な技術的依存は、前提条件（不足前提・待機理由）
+ * として残し、待っている間は理由を先頭カードにも出す。
  *
- * 配色にamberを使わないのは、amberが「ユーザーの確認待ち」（`00.check-user`）の色として
- * 使われているため（sidebar-nav・workflow-status-steps）。violetは`71.manual-step`
- * ラベル自体の色（`d876e3`、cross-repo-setup-guide.md）に合わせている。
+ * amberは「ユーザーの確認待ち」（`00.check-user`）の色（sidebar-nav・workflow-status-steps）
+ * なので、**あなたの操作待ちの状態だけ**に使う。AIが進めている状態はviolet（`71.manual-step`
+ * ラベル自体の色`d876e3`、cross-repo-setup-guide.md）にする。
  */
 export function ManualStepPanel({
   isSubmitting,
@@ -56,6 +101,10 @@ export function ManualStepPanel({
   repositoryFullName,
   sessionIssue,
   dispatch,
+  questionPending = false,
+  questionAnswered = false,
+  onShowQuestion,
+  compact = false,
   className,
 }: {
   isSubmitting: boolean;
@@ -80,33 +129,34 @@ export function ManualStepPanel({
   /**
    * 手作業セッション（#2771）の入口を出すためのIssueとディスパッチの状態。**両方揃ったときだけ出す**
    */
-  sessionIssue?: Pick<Issue, "repositoryFullName" | "number" | "labels" | "body">;
+  sessionIssue?: Pick<Issue, "repositoryFullName" | "number" | "labels" | "body"> &
+    Partial<Pick<Issue, "state">>;
   dispatch?: DispatchStateHandle;
+  /** このIssueへの質問が回答待ち（#4426）。主操作を質問パネルへの移動にする */
+  questionPending?: boolean;
+  /** 質問に答えた直後（結果表示の行が残っている間）。「AIが確認中」の判定に使う */
+  questionAnswered?: boolean;
+  /** 質問パネルへ移動する。渡さなければ移動ボタンは出さず、案内文だけにする */
+  onShowQuestion?: () => void;
+  /** スマホの詳細。補足（AIの実施内容・根拠）を畳んだ状態で出す */
+  compact?: boolean;
   className?: string;
 }) {
-  const investigation = comments ? findLatestManualStepInvestigation(comments) : null;
-  const verification = comments ? findLatestManualStepVerification(comments) : null;
+  const reports = comments
+    ? findLatestManualStepReports(comments)
+    : { investigation: null, investigationIndex: -1, verification: null, verificationIndex: -1 };
+  const blocking = prerequisiteSummary?.blocking.length ? prerequisiteSummary : null;
 
-  return (
-    <section className={cn("flex flex-col gap-2", className)} aria-label="手作業の状況">
-      {sessionIssue && (
-        <ManualStepStatusBlock
-          investigation={investigation}
-          verification={verification}
-          body={sessionIssue.body}
-          labels={sessionIssue.labels}
-        />
-      )}
-      {/* 待っている相手の状況（#1705）。不足前提・待機理由として出す */}
+  // 前提条件・待っているIssue・設定変更の案内は、どの状態でも補足として出す
+  const supplements = (
+    <>
+      {/* 待っている相手の状況（#1705）。待っている間は理由を先頭カードにも1行で残す */}
       {prerequisiteSummary && prerequisites && prerequisites.length > 0 && repositoryFullName && (
         <ManualStepPrerequisites
           prerequisites={prerequisites}
           summary={prerequisiteSummary}
           repositoryFullName={repositoryFullName}
         />
-      )}
-      {dependents && dependents.length > 0 && repositoryFullName && (
-        <IssueDependents dependents={dependents} repositoryFullName={repositoryFullName} />
       )}
       {/* 実機を直接書き換える手順は、リポジトリ経由へ寄せられる（#2021） */}
       {onCreateConfigIssue && configTargets && configTargets.length > 0 && (
@@ -116,104 +166,515 @@ export function ManualStepPanel({
           isSubmitting={isSubmitting}
         />
       )}
-      {verifiedAt && !verification?.passed && <ManualStepVerifiedNotice verifiedAt={verifiedAt} />}
-      {/* 手作業セッション（#2771）。セッションの行は`IssueStatusCard`が出すので、ここは入口だけ */}
-      {sessionIssue && dispatch && <ManualStepSessionPanel issue={sessionIssue} dispatch={dispatch} />}
+    </>
+  );
+
+  if (!sessionIssue) {
+    return (
+      <section className={cn("flex flex-col gap-2", className)} aria-label="手作業の状況">
+        {supplements}
+        {dependents && dependents.length > 0 && repositoryFullName && (
+          <IssueDependents dependents={dependents} repositoryFullName={repositoryFullName} />
+        )}
+        {verifiedAt && <ManualStepVerifiedNotice verifiedAt={verifiedAt} />}
+      </section>
+    );
+  }
+
+  const job = dispatch
+    ? findManualStepSessionJobForIssue(dispatch.jobs, sessionIssue.repositoryFullName, sessionIssue.number)
+    : null;
+  const jobActive = job !== null && isActiveDispatchJobStatus(job.status);
+  const session = dispatch
+    ? findSessionForIssue(dispatch.sessions, sessionIssue.repositoryFullName, sessionIssue.number)
+    : null;
+  const sessionAlive = session?.state === "ALIVE";
+  const phase = resolveManualStepPhase({
+    reports,
+    isOpen: sessionIssue.state !== "closed",
+    sessionAlive,
+    jobActive,
+    questionPending,
+    questionAnswered,
+  });
+  const primary = resolveManualStepPrimaryAction(phase, questionPending);
+  const guide = parseManualStepGuide(sessionIssue.body);
+  const verificationCount = extractVerificationCommands(sessionIssue.body, guide).length;
+  const plan = reports.investigation
+    ? null
+    : buildManualStepSessionPlan(sessionIssue.body, {
+        isManualStepIssue: isManualStepIssue(sessionIssue.labels),
+      });
+  const userActions =
+    reports.investigation && phase !== "done" && phase !== "closed" ? reports.investigation.user : [];
+
+  return (
+    <section className={cn("@container flex flex-col gap-2", className)} aria-label="手作業の状況">
+      <div className="grid gap-2 @3xl:grid-cols-[minmax(0,1fr)_17rem] @3xl:items-start">
+        <div className="flex min-w-0 flex-col gap-2">
+          <ManualStepPhaseCard
+            phase={phase}
+            userActionCount={userActions.length}
+            hasInvestigation={reports.investigation !== null}
+            jobActive={jobActive && !sessionAlive}
+            questionPending={questionPending}
+            plan={plan}
+            purpose={reports.investigation?.purpose ?? null}
+            blockingMessage={blocking?.message ?? null}
+          />
+          {userActions.length > 0 && (
+            <ManualStepUserActions
+              actions={userActions}
+              where={guide.where}
+              verificationCount={verificationCount}
+              answered={phase === "ai_verifying"}
+            >
+              <ManualStepPrimary
+                primary={primary}
+                phase={phase}
+                sessionIssue={sessionIssue}
+                dispatch={dispatch}
+                onShowQuestion={onShowQuestion}
+              />
+            </ManualStepUserActions>
+          )}
+          {userActions.length === 0 && primary !== "none" && (
+            <ManualStepPrimary
+              primary={primary}
+              phase={phase}
+              sessionIssue={sessionIssue}
+              dispatch={dispatch}
+              onShowQuestion={onShowQuestion}
+            />
+          )}
+        </div>
+        <ManualStepEvidence
+          investigation={reports.investigation}
+          verification={reports.verification}
+          verificationIsLatest={reports.verificationIndex > reports.investigationIndex}
+          verifiedAt={verifiedAt ?? null}
+          dependents={dependents}
+          repositoryFullName={repositoryFullName}
+          compact={compact}
+        />
+      </div>
+      {supplements}
+      {/* 調査前は起動の選択（エージェント・モデル）そのものが主操作なので上に出している。
+          それ以外の状態では、セッションの様子と本文から読み取った手順を補足として畳む */}
+      {dispatch && primary !== "start" && (
+        <details className="group rounded-md border bg-background px-2.5">
+          <summary className="flex min-h-11 cursor-pointer items-center text-xs font-medium">
+            セッション・本文から読み取った手順
+          </summary>
+          <ManualStepSessionPanel issue={sessionIssue} dispatch={dispatch} className="mb-2.5" />
+        </details>
+      )}
     </section>
   );
+}
+
+const PHASE_VIEW: Record<
+  ManualStepPhase,
+  { label: string; tone: "attention" | "ai" | "danger" | "success" | "muted"; Icon: typeof Bot }
+> = {
+  not_investigated: { label: "未調査", tone: "muted", Icon: CircleDashed },
+  ai_working: { label: "AIが作業中・操作不要", tone: "ai", Icon: Bot },
+  user_action: { label: "あなたの操作を待っています", tone: "attention", Icon: Hand },
+  ai_verifying: { label: "AIが確認中・操作不要", tone: "ai", Icon: Search },
+  ai_stopped: { label: "AIの作業が止まっています", tone: "danger", Icon: CirclePause },
+  verify_failed: { label: "完了検証が成功していません", tone: "danger", Icon: TriangleAlert },
+  done: { label: "完了検証がすべて成功", tone: "success", Icon: BadgeCheck },
+  closed: { label: "クローズ済み・完了検証なし", tone: "muted", Icon: CircleSlash },
+};
+
+const TONE_CLASS = {
+  // amberは「ユーザーの確認待ち」（`00.check-user`）の色。あなたの操作待ちだけに使う
+  attention: "border-l-amber-500 [--pill:var(--color-amber-700)] dark:[--pill:var(--color-amber-300)]",
+  ai: "border-l-violet-500 [--pill:var(--color-violet-700)] dark:[--pill:var(--color-violet-300)]",
+  danger: "border-l-destructive [--pill:var(--destructive)]",
+  success: "border-l-emerald-500 [--pill:var(--color-emerald-700)] dark:[--pill:var(--color-emerald-300)]",
+  muted: "border-l-border [--pill:var(--muted-foreground)]",
+} as const;
+
+/**
+ * 先頭の状態カード（#4426）。「いまどうなっていて、自分は何をするのか」を1枚で言う。
+ * 待っている前提があれば、補足を畳んでいても分かるよう理由をここに1行で残す。
+ */
+function ManualStepPhaseCard({
+  phase,
+  userActionCount,
+  hasInvestigation,
+  jobActive,
+  questionPending,
+  plan,
+  purpose,
+  blockingMessage,
+}: {
+  phase: ManualStepPhase;
+  userActionCount: number;
+  hasInvestigation: boolean;
+  /** 起動ジョブが未処理で、セッションはまだ立っていない */
+  jobActive: boolean;
+  questionPending: boolean;
+  plan: ManualStepSessionPlan | null;
+  purpose: string | null;
+  blockingMessage: string | null;
+}) {
+  const view = PHASE_VIEW[phase];
+  const [title, description] = describePhase({
+    phase,
+    userActionCount,
+    hasInvestigation,
+    jobActive,
+    questionPending,
+    plan,
+  });
+  return (
+    <section
+      className={cn("rounded-md border border-l-4 bg-background p-3", TONE_CLASS[view.tone])}
+      aria-labelledby="manual-step-status-title"
+      data-phase={phase}
+    >
+      <p className="flex flex-wrap items-center gap-2">
+        <span className="sr-only">作業の状況：</span>
+        <span className="inline-flex items-center gap-1 rounded-full border border-current px-2 py-px text-xs font-semibold text-[var(--pill)]">
+          <view.Icon className="size-3.5" aria-hidden />
+          {view.label}
+        </span>
+      </p>
+      <h3 id="manual-step-status-title" className="mt-1.5 text-sm font-semibold">
+        {title}
+      </h3>
+      <p className="mt-0.5 text-sm text-muted-foreground">{description}</p>
+      {purpose && <p className="mt-1 text-xs text-muted-foreground">目的：{purpose}</p>}
+      {blockingMessage && (
+        <p className="mt-2 flex items-start gap-1.5 rounded border bg-muted/40 px-2 py-1.5 text-xs">
+          <Hourglass className="mt-0.5 size-3.5 shrink-0" aria-hidden />
+          <span>{blockingMessage}</span>
+        </p>
+      )}
+    </section>
+  );
+}
+
+function describePhase({
+  phase,
+  userActionCount,
+  hasInvestigation,
+  jobActive,
+  questionPending,
+  plan,
+}: {
+  phase: ManualStepPhase;
+  userActionCount: number;
+  hasInvestigation: boolean;
+  jobActive: boolean;
+  questionPending: boolean;
+  plan: ManualStepSessionPlan | null;
+}): [string, string] {
+  switch (phase) {
+    case "not_investigated":
+      return [
+        "AIの事前調査がまだです",
+        plan && plan.entries.length > 0
+          ? `未確認：本文からの見込みは、自動実行${plan.auto}件・あなたの操作${plan.user}件です（調査で変わることがあります）。下からAIセッションを起動すると、調査と実行を始めます。`
+          : "未確認：セッションの事前調査はまだ報告されていません。下からAIセッションを起動すると、調査と実行を始めます。",
+      ];
+    case "ai_working":
+      if (jobActive) {
+        return ["セッションの起動を待っています", "反映まで30秒ほどかかります。あなたの操作は不要です。"];
+      }
+      return [
+        hasInvestigation ? "AIが作業しています" : "AIが調査しています",
+        "サブPCのセッションが進めています。あなたの操作が必要になると、質問としてこの下に出ます。",
+      ];
+    case "user_action":
+      if (questionPending) {
+        return [
+          userActionCount > 0 ? `${userActionCount}件の操作が必要です` : "AIから質問が届いています",
+          "操作を終えたら「操作したのでAIに確認を依頼」から質問に答えてください。答えるとAIが結果を確かめます。",
+        ];
+      }
+      return [
+        `${userActionCount}件の操作が必要です`,
+        "AIのセッションは終了しています。操作を終えたら「操作したのでAIに確認を依頼」を押してください。",
+      ];
+    case "ai_verifying":
+      return [
+        "あなたの回答を受けて、AIが確かめています",
+        "セッションが結果と「完了の確認方法」を実行しています。あなたの操作は不要です。",
+      ];
+    case "ai_stopped":
+      return [
+        "AIの作業が途中で止まっています",
+        "調査の報告はありますが、セッションが終了し、完了検証もまだです。完了にはなっていません。",
+      ];
+    case "verify_failed":
+      return [
+        "完了にはなっていません",
+        "最新の完了検証で成功しなかったコマンドがあります。根拠を確認し、AIに再確認を依頼してください。",
+      ];
+    case "done":
+      return ["手作業は完了しています", "セッションの完了検証で、確認コマンドがすべて成功しました。"];
+    case "closed":
+      return [
+        "完了検証が成功しないままクローズされています",
+        "このIssueは完了を確かめないまま閉じられました。",
+      ];
+  }
 }
 
 /**
- * 作業の状況（#4315）。セッションの事前調査報告があればそれを、無ければ本文の静的な解析を
- * 「未確認」として出す。**未確認と調査済みを取り違えない**ため、静的な内訳には必ず
- * 「未確認」の印を付ける。
+ * あなたの作業（#4426）。実行場所・必要な操作・コマンド（コピー）・完了後の確認を1件ずつ出す。
+ *
+ * 実行場所は調査報告の項目に構造化されていないため、項目本文の端末名（`MANUAL_STEP_DEVICE_NAMES`）
+ * を読み、無ければ本文`## 前提条件`の既定の端末を使う。**決まらなければ推測せず「未記載」と出す。**
+ * コマンドはセッションが書いたまま出す（作業ディレクトリへの`cd`やユーザーの切り替えを含む1行）。
  */
-function ManualStepStatusBlock({
-  investigation,
-  verification,
-  body,
-  labels,
+function ManualStepUserActions({
+  actions,
+  where,
+  verificationCount,
+  answered,
+  children,
 }: {
-  investigation: ManualStepInvestigation | null;
-  verification: ManualStepVerificationRecord | null;
-  body: string | null;
-  labels: Issue["labels"];
+  actions: ManualStepUserAction[];
+  where: ManualStepGuideWhere;
+  verificationCount: number;
+  /** 回答済みでAIが確かめている */
+  answered: boolean;
+  children?: React.ReactNode;
 }) {
-  const plan = investigation ? null : buildManualStepSessionPlan(body, { isManualStepIssue: isManualStepIssue(labels) });
   return (
-    <section
-      className="rounded-md border border-violet-500/40 bg-background p-2.5"
-      aria-labelledby="manual-step-status-title"
-    >
-      <div className="flex flex-wrap items-center gap-2">
-        <h3 id="manual-step-status-title" className="text-xs font-medium">
-          作業の状況
-        </h3>
-        <StatusPill investigation={investigation} verification={verification} />
-      </div>
-      {investigation ? (
-        <div className="mt-2 flex flex-col gap-2">
-          {investigation.purpose && (
-            <p className="text-xs text-muted-foreground">目的：{investigation.purpose}</p>
-          )}
-          <div className="grid gap-2 sm:grid-cols-3">
-            <StatusList title="AIが実施済み" items={investigation.done} />
-            <StatusList title="これから自動実行" items={investigation.auto} />
-            <StatusList title="あなたの操作" items={investigation.user.map((u) => u.text)} />
-          </div>
-          {investigation.user.map((action, i) =>
-            action.command ? <CommandLine key={i} command={action.command} /> : null,
-          )}
-        </div>
-      ) : (
-        <p className="mt-2 text-xs text-muted-foreground">
-          {plan
-            ? `未確認：セッションの事前調査はまだ報告されていません。本文からの見込みは、自動実行${plan.auto}件・あなたの操作${plan.user}件です（調査で変わることがあります）。`
-            : "未確認：セッションの事前調査はまだ報告されていません。"}
-        </p>
-      )}
-      {verification && <VerificationResult verification={verification} />}
+    <section className="rounded-md border bg-background p-3" aria-labelledby="manual-step-user-title">
+      <h3 id="manual-step-user-title" className="flex items-center gap-1.5 text-sm font-semibold">
+        <User className="size-4 shrink-0" aria-hidden />
+        あなたの作業（{actions.length}件{answered ? "・実施済みと回答" : ""}）
+      </h3>
+      <ol className="mt-2 flex flex-col gap-2">
+        {actions.map((action, i) => {
+          const device = resolveUserActionDevice(action, where);
+          return (
+            <li key={`${i}:${action.text}`} className="rounded-md border p-2.5">
+              <p className="flex flex-wrap gap-1.5">
+                <Chip label="実行場所" value={device ?? "未記載"} />
+                {where.directory && action.command === null && (
+                  <Chip label="作業ディレクトリ" value={where.directory} />
+                )}
+              </p>
+              <p className="mt-1.5 text-sm">{action.text}</p>
+              {action.command && <CommandLine command={action.command} />}
+            </li>
+          );
+        })}
+      </ol>
+      <p className="mt-2 text-xs text-muted-foreground">
+        {verificationCount > 0
+          ? `完了後：AIが本文「完了の確認方法」の${verificationCount}件のコマンドを実行して確かめます。すべて成功するまで完了にはなりません。`
+          : "完了後：AIが目的に照らした読み取りの確認で確かめます。確認が成功するまで完了にはなりません。"}
+      </p>
+      {children && <div className="mt-3">{children}</div>}
     </section>
   );
 }
 
-function StatusPill({
-  investigation,
-  verification,
-}: {
-  investigation: ManualStepInvestigation | null;
-  verification: ManualStepVerificationRecord | null;
-}) {
-  const [text, tone] = verification?.passed
-    ? ["検証済み", "text-emerald-700 dark:text-emerald-300"]
-    : verification
-      ? ["検証失敗・未完了", "text-destructive"]
-      : investigation
-        ? investigation.user.length > 0
-          ? ["あなたの操作を待っています", "text-violet-700 dark:text-violet-300"]
-          : ["AIが実行中", "text-violet-700 dark:text-violet-300"]
-        : ["未確認", "text-muted-foreground"];
+function resolveUserActionDevice(
+  action: ManualStepUserAction,
+  where: ManualStepGuideWhere,
+): string | null {
+  const names = matchManualStepDeviceNames(action.text);
+  if (names.length === 1) return names[0];
+  // 項目に2つ以上の端末名があるときは決まらない（既定値で埋めない）
+  if (names.length > 1) return null;
+  return where.defaultDevice;
+}
+
+function Chip({ label, value }: { label: string; value: string }) {
   return (
-    <span className={cn("rounded-full border border-current px-2 text-[11px] font-medium", tone)}>
-      {text}
+    <span className="inline-flex max-w-full items-center gap-1 rounded-full border px-2 py-px text-xs text-muted-foreground">
+      {label}
+      <span className="min-w-0 truncate font-semibold text-foreground">{value}</span>
     </span>
   );
 }
 
-function StatusList({ title, items }: { title: string; items: string[] }) {
+/**
+ * 主操作（#4426）。新しい経路は作らず、既存の質問回答と手作業セッションの起動だけを使う。
+ * **押しても完了・クローズにはしない**——完了は完了検証の報告だけで決まる。
+ */
+function ManualStepPrimary({
+  primary,
+  phase,
+  sessionIssue,
+  dispatch,
+  onShowQuestion,
+}: {
+  primary: ManualStepPrimaryAction;
+  phase: ManualStepPhase;
+  sessionIssue: Pick<Issue, "repositoryFullName" | "number" | "labels" | "body">;
+  dispatch?: DispatchStateHandle;
+  onShowQuestion?: () => void;
+}) {
+  if (primary === "none") return null;
+  if (primary === "start") {
+    return dispatch ? <ManualStepSessionPanel issue={sessionIssue} dispatch={dispatch} /> : null;
+  }
+  if (primary === "answer_question") {
+    return (
+      <div className="flex flex-wrap items-center gap-2">
+        {onShowQuestion && (
+          <Button className="min-h-11" onClick={onShowQuestion}>
+            <Check />
+            操作したのでAIに確認を依頼
+          </Button>
+        )}
+        <span className="text-xs text-muted-foreground">
+          下の質問パネルで「実行した・次へ」を選んで送ります。送っただけでは完了になりません。
+        </span>
+      </div>
+    );
+  }
+  if (!dispatch) return null;
   return (
-    <div className="min-w-0 rounded border px-2 py-1.5">
-      <p className="text-[11px] font-medium">{title}</p>
-      {items.length === 0 ? (
-        <p className="text-xs text-muted-foreground">なし</p>
-      ) : (
-        <ul className="list-disc pl-4 text-xs text-muted-foreground">
-          {items.map((item) => (
-            <li key={item}>{item}</li>
-          ))}
-        </ul>
+    <ManualStepLaunchButton
+      label={
+        primary === "request_check"
+          ? "操作したのでAIに確認を依頼"
+          : phase === "ai_stopped"
+            ? "AIに作業の再開を依頼"
+            : "AIに再確認を依頼"
+      }
+      sessionIssue={sessionIssue}
+      dispatch={dispatch}
+    />
+  );
+}
+
+/** 手作業セッションを既定のエージェント・モデルで起動し直す（選びたいときは補足の起動欄から） */
+function ManualStepLaunchButton({
+  label,
+  sessionIssue,
+  dispatch,
+}: {
+  label: string;
+  sessionIssue: Pick<Issue, "repositoryFullName" | "number" | "labels">;
+  dispatch: DispatchStateHandle;
+}) {
+  const launcher = useManualStepSessionLauncher(sessionIssue, dispatch);
+  const jobStatus = launcher.job ? describeDispatchJobStatus(launcher.job.status, launcher.job.kind) : null;
+  return (
+    <div className="flex flex-col gap-1.5">
+      <div className="flex flex-wrap items-center gap-2">
+        <Button
+          className="min-h-11"
+          disabled={launcher.rejection !== null || dispatch.isSubmitting}
+          onClick={() => void launcher.start()}
+        >
+          {dispatch.isSubmitting ? <Loader2 className="animate-spin" /> : <RotateCcw />}
+          {label}
+        </Button>
+        <span className="text-xs text-muted-foreground">
+          {formatDispatchHostName(launcher.hostName)}
+          で手作業セッションを起動し、AIが結果を確かめます。完了検証が成功するまで完了になりません。
+        </span>
+      </div>
+      {launcher.rejection !== null && launcher.rejection !== "already_queued" && (
+        <p className="text-xs text-muted-foreground">
+          {describeManualStepSessionRejection(launcher.rejection, { hostName: launcher.hostName })}
+        </p>
+      )}
+      {launcher.job && launcher.hasActiveJob && jobStatus && (
+        <p className="text-xs text-muted-foreground">{jobStatus.label}（反映まで30秒ほどかかります）</p>
+      )}
+      {launcher.error && <p className="text-xs text-destructive">{launcher.error}</p>}
+    </div>
+  );
+}
+
+/**
+ * AIの実施内容と根拠（#4426）。PCでは主作業の右、狭いペインとスマホでは主作業の下に出す。
+ * **未確認を実施済みと表示しない**——調査報告が無ければ「AI実施済み」は空ではなく未確認と言う。
+ */
+function ManualStepEvidence({
+  investigation,
+  verification,
+  verificationIsLatest,
+  verifiedAt,
+  dependents,
+  repositoryFullName,
+  compact,
+}: {
+  investigation: ManualStepInvestigation | null;
+  verification: ManualStepVerificationRecord | null;
+  verificationIsLatest: boolean;
+  verifiedAt: string | null;
+  dependents?: IssueDependent[];
+  repositoryFullName?: string;
+  compact: boolean;
+}) {
+  return (
+    <div className="flex min-w-0 flex-col gap-2">
+      <EvidenceSection title="AIが実施済み" count={investigation?.done.length} compact={compact}>
+        {investigation ? (
+          <EvidenceList items={investigation.done} />
+        ) : (
+          <p className="text-xs text-muted-foreground">未確認（事前調査の報告がありません）</p>
+        )}
+      </EvidenceSection>
+      <EvidenceSection title="これからAIが行うこと" count={investigation?.auto.length} compact={compact}>
+        {investigation ? (
+          <EvidenceList items={investigation.auto} />
+        ) : (
+          <p className="text-xs text-muted-foreground">未確認（調査で決まります）</p>
+        )}
+      </EvidenceSection>
+      <EvidenceSection title="完了の根拠" compact={compact}>
+        {verification ? (
+          <VerificationResult verification={verification} stale={!verificationIsLatest} />
+        ) : (
+          <p className="text-xs text-muted-foreground">完了検証：まだ実行していません（未確認）</p>
+        )}
+        {verifiedAt && !(verification?.passed && verificationIsLatest) && (
+          <ManualStepVerifiedNotice verifiedAt={verifiedAt} className="mt-2" />
+        )}
+      </EvidenceSection>
+      {dependents && dependents.length > 0 && repositoryFullName && (
+        <IssueDependents dependents={dependents} repositoryFullName={repositoryFullName} />
       )}
     </div>
+  );
+}
+
+function EvidenceSection({
+  title,
+  count,
+  compact,
+  children,
+}: {
+  title: string;
+  count?: number;
+  compact: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <details className="rounded-md border bg-background px-2.5" open={!compact}>
+      <summary className="flex min-h-11 cursor-pointer items-center gap-1.5 text-xs font-semibold">
+        {title}
+        {count !== undefined && <span className="font-normal text-muted-foreground">{count}件</span>}
+      </summary>
+      <div className="pb-2.5">{children}</div>
+    </details>
+  );
+}
+
+function EvidenceList({ items }: { items: string[] }) {
+  if (items.length === 0) return <p className="text-xs text-muted-foreground">なし</p>;
+  return (
+    <ul className="list-disc space-y-0.5 pl-4 text-xs text-muted-foreground">
+      {items.map((item) => (
+        <li key={item}>{item}</li>
+      ))}
+    </ul>
   );
 }
 
@@ -221,27 +682,40 @@ function StatusList({ title, items }: { title: string; items: string[] }) {
 function CommandLine({ command }: { command: string }) {
   const [copied, setCopied] = useState(false);
   return (
-    <div className="flex items-start gap-1.5">
-      <code className="min-w-0 flex-1 overflow-x-auto whitespace-pre rounded bg-muted px-1.5 py-1 text-xs">
+    <div className="mt-2 flex flex-col gap-1.5 @md:flex-row @md:items-start">
+      {/* 長いコマンドでも主操作を押し出さないよう、横スクロールではなく折り返す */}
+      <code className="min-w-0 flex-1 whitespace-pre-wrap break-all rounded border bg-muted px-2 py-1.5 font-mono text-xs leading-relaxed">
         {command}
       </code>
       <Button
         variant="outline"
         size="sm"
+        className="min-h-11 shrink-0 @md:min-h-8"
         onClick={async () => {
           setCopied(await copyText(command));
         }}
       >
         {copied ? <Check /> : <Copy />}
-        コピー
+        {copied ? "コピーしました" : "コピー"}
       </Button>
+      <span role="status" aria-live="polite" className="sr-only">
+        {copied ? "コマンドをコピーしました" : ""}
+      </span>
     </div>
   );
 }
 
-function VerificationResult({ verification }: { verification: ManualStepVerificationRecord }) {
+function VerificationResult({
+  verification,
+  stale,
+}: {
+  verification: ManualStepVerificationRecord;
+  /** この検証のあとで調査がやり直されている（前回の試みの結果） */
+  stale: boolean;
+}) {
   return (
-    <div className="mt-2 text-xs">
+    <div className="text-xs">
+      {stale && <p className="mb-1 text-muted-foreground">前回の試みの結果です（その後に調査がやり直されています）。</p>}
       <p className={verification.passed ? "text-emerald-700 dark:text-emerald-300" : "text-destructive"}>
         {verification.passed ? <BadgeCheck className="mr-1 inline size-3.5" /> : <TriangleAlert className="mr-1 inline size-3.5" />}
         {verification.passed
@@ -269,10 +743,16 @@ function VerificationResult({ verification }: { verification: ManualStepVerifica
  * **出力そのものはここに出さない。** 手作業の出力にはシークレットが混ざりうるため、置き場は
  * 実行キューのジョブ1か所に留める（#1828「出力は画面にだけ出す」）。
  */
-function ManualStepVerifiedNotice({ verifiedAt }: { verifiedAt: string }) {
+function ManualStepVerifiedNotice({
+  verifiedAt,
+  className,
+}: {
+  verifiedAt: string;
+  className?: string;
+}) {
   return (
     <p
-      className="flex items-start gap-1.5 rounded-md border border-emerald-500/40 bg-emerald-500/5 px-2 py-1.5 text-xs text-emerald-700 dark:text-emerald-300"
+      className={cn("flex items-start gap-1.5 rounded-md border border-emerald-500/40 bg-emerald-500/5 px-2 py-1.5 text-xs text-emerald-700 dark:text-emerald-300", className)}
       title={formatDateTimeFull(verifiedAt)}
     >
       <BadgeCheck className="mt-0.5 size-3.5 shrink-0" />

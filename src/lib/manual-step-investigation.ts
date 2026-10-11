@@ -138,3 +138,45 @@ export function findLatestManualStepVerification(
   }
   return null;
 }
+
+/**
+ * 最新の調査報告・完了検証報告と、それぞれのコメント位置（#4426）。
+ *
+ * 画面の代表状態は「どちらが新しいか」で変わる（検証に失敗したあとで再調査が始まれば、
+ * 表示すべきは失敗ではなく新しい調査の結果）。位置は`comments`の添字で、無ければ`-1`。
+ */
+export type ManualStepReports = {
+  investigation: ManualStepInvestigation | null;
+  investigationIndex: number;
+  verification: ManualStepVerificationRecord | null;
+  verificationIndex: number;
+};
+
+export function findLatestManualStepReports(comments: readonly IssueComment[]): ManualStepReports {
+  const result: ManualStepReports = {
+    investigation: null,
+    investigationIndex: -1,
+    verification: null,
+    verificationIndex: -1,
+  };
+  for (let i = comments.length - 1; i >= 0; i--) {
+    const comment = comments[i];
+    if (!trusted(comment)) continue;
+    if (!result.investigation) {
+      const parsed = parseManualStepInvestigation(comment.body);
+      if (parsed) {
+        result.investigation = parsed;
+        result.investigationIndex = i;
+      }
+    }
+    if (!result.verification) {
+      const parsed = parseManualStepVerification(comment.body);
+      if (parsed) {
+        result.verification = parsed;
+        result.verificationIndex = i;
+      }
+    }
+    if (result.investigation && result.verification) break;
+  }
+  return result;
+}
