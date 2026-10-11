@@ -113,7 +113,7 @@ describe("PullRequestList", () => {
   it("CI通過済みのPRにはマージボタンを出す", () => {
     renderList([makePullRequest({ ciState: "success" })]);
     expect(screen.getByRole("button", { name: "マージする" })).toBeTruthy();
-    expect(screen.getByTitle("CI: CI通過")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "CI（個別PRのチェック）: 成功" })).toBeTruthy();
   });
 
   it("CI実行中・Auto-merge有効のPRにもマージボタンを出す（#1087）", () => {
@@ -122,22 +122,22 @@ describe("PullRequestList", () => {
       makePullRequest({ number: 3, autoMergeEnabled: true }),
     ]);
     expect(screen.getAllByRole("button", { name: "マージする" })).toHaveLength(2);
-    expect(screen.getAllByText("実施中").length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/実行中/).length).toBeGreaterThan(0);
   });
 
   // 一覧も`mergeable`を持つようになった（#1742）。CI通過だけを見て「入れられる」と読めてしまう
   // 状態を無くすのが目的なので、バッジと自動解消ボタンをここで確かめる。
   it("コンフリクトしているPRはその旨と自動解消ボタンを出し、マージボタンを出さない（#1742）", () => {
     renderList([makePullRequest({ ciState: "success", mergeable: false })]);
-    expect(screen.getByTitle("CI: CI通過")).toBeTruthy();
-    expect(screen.getByTitle(/コンフリクト: baseブランチとコンフリクトしています/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "CI（個別PRのチェック）: 成功" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "コンフリクト: あり" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "PRを自動修正" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "マージする" })).toBeNull();
   });
 
   it("コンフリクトの判定が出ていないPRは確認中で表示する（#1742）", () => {
     renderList([makePullRequest({ mergeable: null })]);
-    expect(screen.getByTitle("コンフリクト: コンフリクトの有無を確認しています。")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /^コンフリクト: / })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "PRを自動修正" })).toBeNull();
     expect(screen.getByRole("button", { name: "マージする" })).toBeTruthy();
   });
@@ -212,7 +212,7 @@ describe("PullRequestList", () => {
       "https://github.com/guchi-apps/issue-deck/actions/runs/1",
     );
     // 失敗している事実は打ち消さず、その隣に重ねて出す。
-    expect(screen.getByTitle("CI: CI失敗")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "CI（個別PRのチェック）: 失敗" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "PRを自動修正" }).hasAttribute("disabled")).toBe(
       true,
     );
@@ -233,7 +233,7 @@ describe("PullRequestList", () => {
   it("draftのPRはGitHubがマージを受け付けないためボタンを出さない", () => {
     renderList([makePullRequest({ draft: true })]);
     expect(screen.queryByRole("button", { name: "マージする" })).toBeNull();
-    expect(screen.getByTitle("CI: ドラフトのPRでは、CI状態もマージ可否の判定も取得していません。")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /^CI（個別PRのチェック）: / })).toBeTruthy();
   });
 
   it("自動マージ可否の判定中は「判定中」で押せなくする（#1968）", () => {

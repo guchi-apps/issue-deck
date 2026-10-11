@@ -15,7 +15,6 @@ import { PullRequestMergeButton } from "@/components/dashboard/pull-request-merg
 import { PullRequestMergeHoldNotice } from "@/components/dashboard/pull-request-merge-hold";
 import { PullRequestRepairButtons } from "@/components/dashboard/pull-request-repair-buttons";
 import { PullRequestChecksStrip } from "@/components/dashboard/pull-request-checks-strip";
-import { PullRequestStatusRail } from "@/components/dashboard/pull-request-status-rail";
 import { PullToRefreshIndicator } from "@/components/dashboard/pull-to-refresh-indicator";
 import { UserAvatar } from "@/components/dashboard/user-avatar";
 import { usePullToRefresh } from "@/hooks/use-pull-to-refresh";
@@ -144,14 +143,17 @@ function PullRequestCard({
         </span>
       </div>
 
-      {/* 状態は「出るものだけ横に並べる」のをやめ、CI → Claudeのレビュー → マージを
-          固定の位置に置く（#2942）。以前は行ごとにバッジの数も並び順も変わり、縦に読み
-          比べられなかった。判定と文言は`lib/pull-request-status-rail.ts`が持つ */}
+      {/* PR詳細・ブランチ画面と同じ6チェック（#4366）を作者行の直下へ置く（#4414）。
+          共通結果は候補PR・SHAを添えて出す。CI・コンフリクト・レビューの3項目欄
+          （`PullRequestStatusRail`）は、この6チェックと内容が重なるためここでは出さない */}
+      <PullRequestChecksStrip
+        pullRequest={pullRequest}
+        onOpenPullRequest={onSelect ? () => onSelect(pullRequest) : null}
+        className="-mx-1 px-0"
+      />
       <div className="flex min-w-0 flex-wrap items-center gap-2">
-        <PullRequestStatusRail pullRequest={pullRequest} />
-        {/* 自動修復はめったに出ず、経過時間を数え直す生きたバッジなのでレールの外へ足す
-            （#2072）。CI失敗・コンフリクトの枠を打ち消さず、その隣で「いま自動で直しに
-            いっている」を言う */}
+        {/* 自動修復はめったに出ず、経過時間を数え直す生きたバッジ（#2072）。
+            「いま自動で直しにいっている」を言う */}
         <RepairRunBadge run={pullRequest.repairRun} />
         <PullRequestRepairButtons
           repositoryFullName={pullRequest.repositoryFullName}
@@ -169,12 +171,6 @@ function PullRequestCard({
         )}
       </div>
       <PullRequestMergeHoldNotice pullRequest={pullRequest} />
-      {/* PR詳細・ブランチ画面と同じ6チェック（#4366）。共通結果は候補PR・SHAを添えて出す */}
-      <PullRequestChecksStrip
-        pullRequest={pullRequest}
-        onOpenPullRequest={onSelect ? () => onSelect(pullRequest) : null}
-        className="-mx-1 px-0"
-      />
     </li>
   );
 }
