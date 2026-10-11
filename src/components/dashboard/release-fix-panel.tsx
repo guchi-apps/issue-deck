@@ -307,6 +307,7 @@ export function ReleaseFixOverviewPanel({
   verificationError,
   changes,
   reloadToken,
+  onPreviousResultsChange,
 }: {
   repositoryFullName: string;
   pullRequestNumber: number;
@@ -314,6 +315,8 @@ export function ReleaseFixOverviewPanel({
   verificationError: string | null;
   changes: UseReleaseChangesResult;
   reloadToken?: number;
+  /** 表示中の検証結果が修正前のリリースのものか。trueの間、呼び出し側は結果を履歴の折りたたみへ移す */
+  onPreviousResultsChange?: (previous: boolean) => void;
 }) {
   const [series, setSeries] = useState<{ key: string; list: ReleaseFixSeriesView[] } | null>(null);
   const [episodes, setEpisodes] = useState<{ key: string; list: RebuildEpisode[] } | null>(null);
@@ -370,6 +373,12 @@ export function ReleaseFixOverviewPanel({
   const current = list?.find((s) => s.active) ?? list?.[0] ?? null;
   // 修正の記録を読み終えるまでは、修正前の指摘を現在状態として見せない
   const seriesPending = list === null && error === null;
+  // 作り直し・修正後のチェック中に、作り直し前のリリースPRを見ている間、その検証結果は修正前のもの
+  const previousResults =
+    current !== null && (current.status === "rebuilding" || current.status === "reverifying") && current.releasePrNumber === pullRequestNumber;
+  useEffect(() => {
+    onPreviousResultsChange?.(previousResults);
+  }, [previousResults, onPreviousResultsChange]);
   const overview = seriesPending
     ? describeFixOverview({ series: null, checks: null })
     : describeFixOverview({
@@ -426,6 +435,12 @@ export function ReleaseFixOverviewPanel({
                 seriesId={current.id}
                 startState={current.startState}
               />
+            )}
+            {action.kind === "retry_rebuild" && (
+              <>
+                <span className="break-words font-medium">{action.label}</span>
+                {current && <ExtLink href={issueUrl(repositoryFullName, current.issueNumber, "issues")}>修正Issue #{current.issueNumber}（作成済み）</ExtLink>}
+              </>
             )}
             {(action.kind === "start_fix" || action.kind === "view_progress") && current && (
               <ExtLink href={issueUrl(repositoryFullName, current.fixPrNumber && action.kind === "view_progress" ? current.fixPrNumber : current.issueNumber, current.fixPrNumber && action.kind === "view_progress" ? "pull" : "issues")}>

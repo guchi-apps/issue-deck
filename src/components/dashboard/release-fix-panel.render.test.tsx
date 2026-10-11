@@ -27,14 +27,14 @@ const seriesRow = {
   id: "s1", status: "stopped", statusLabel: "修正が止まっています", active: false, stepIndex: 5, sourceKind: "review_finding", causeClass: "code",
   itemTitles: ["指摘A"], releasePrNumber: 4394, originBaseSha: "c".repeat(40), originHeadSha: "d".repeat(40), issueNumber: 4395,
   fixPrNumber: 4397, successorPrNumber: 4400, successorBaseSha: "e".repeat(40), successorHeadSha: "f".repeat(40), generation: 1, parentId: null,
-  stopReason: "長い停止理由", startState: "none", createdAt: "2026-10-11T00:00:00.000Z",
+  stopReason: "長い停止理由", rebuildFailed: false, startState: "none", createdAt: "2026-10-11T00:00:00.000Z",
 };
 
-function stub() {
+function stub(row: Record<string, unknown> = seriesRow) {
   vi.stubGlobal(
     "fetch",
     vi.fn(async (url: string) =>
-      new Response(JSON.stringify(url.includes("fix-series") ? { series: [seriesRow] } : { episodes: [{ successor: { number: 4400 }, selectedPrs: [{ number: 2 }], excludedPrs: [3] }] }), { status: 200 }),
+      new Response(JSON.stringify(url.includes("fix-series") ? { series: [row] } : { episodes: [{ successor: { number: 4400 }, selectedPrs: [{ number: 2 }], excludedPrs: [3] }] }), { status: 200 }),
     ),
   );
 }
@@ -72,6 +72,43 @@ describe("ReleaseFixOverviewPanel", () => {
     expect(tech.tagName).toBe("DETAILS");
     expect(tech.textContent).toContain("修正を反映したリリース #4400");
     expect(tech.textContent).toContain("長い停止理由");
+  });
+
+  const noChanges = { data: null, isLoading: true, error: null };
+
+  it("作り直し中に作り直し前のPRを見ているときは、検証結果を修正前として退避させる", async () => {
+    stub({ ...seriesRow, status: "rebuilding", active: true, successorPrNumber: null, stopReason: null });
+    const onPrevious = vi.fn();
+    render(
+      <ReleaseFixOverviewPanel repositoryFullName="o/r" pullRequestNumber={4394} verification={verification} verificationError={null}
+        changes={noChanges} onPreviousResultsChange={onPrevious} />,
+    );
+    await waitFor(() => expect(onPrevious).toHaveBeenLastCalledWith(true));
+    expect(screen.getByTestId("release-fix-headline").textContent).toBe("修正版のリリースを準備しています");
+  });
+
+  it("新しいリリースPRを見ているときは退避しない（現在の結果）", async () => {
+    stub({ ...seriesRow, status: "reverifying", active: true, stopReason: null });
+    const onPrevious = vi.fn();
+    render(
+      <ReleaseFixOverviewPanel repositoryFullName="o/r" pullRequestNumber={4400} verification={verification} verificationError={null}
+        changes={noChanges} onPreviousResultsChange={onPrevious} />,
+    );
+    await waitFor(() => expect(screen.getByTestId("release-fix-headline").textContent).toBe("修正後のチェックを実行しています"));
+    expect(onPrevious).not.toHaveBeenCalledWith(true);
+  });
+
+  it("準備に失敗: 原因と再試行を出し、「修正Issueを作成」は出さない", async () => {
+    stub({ ...seriesRow, status: "stopped", successorPrNumber: null, rebuildFailed: true, stopReason: "候補の作り直しに失敗しました" });
+    render(
+      <ReleaseFixOverviewPanel repositoryFullName="o/r" pullRequestNumber={4394} verification={verification} verificationError={null}
+        changes={noChanges} />,
+    );
+    await waitFor(() => expect(screen.getByTestId("release-fix-headline").textContent).toBe("修正を反映したリリースの準備に失敗しました"));
+    const summary = screen.getByTestId("release-fix-summary").textContent ?? "";
+    expect(summary).toContain("候補の作り直しに失敗しました");
+    expect(summary).toContain("再試行");
+    expect(summary).not.toContain("修正Issueを作成");
   });
 
   it("変更の取得失敗は変更なしと表示しない", () => {

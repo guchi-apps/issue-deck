@@ -19,6 +19,8 @@ export type OverviewActionKind =
   | "view_progress"
   /** 判断待ち。無関係な変更も含めて反映する */
   | "accept_extra"
+  /** 準備の失敗。修正Issueは作成済みなので作らず、ブランチ画面の「修正を入れて作り直す」から再試行する */
+  | "retry_rebuild"
   | "none";
 
 export type OverviewAction = { kind: OverviewActionKind; label: string };
@@ -28,6 +30,7 @@ export const OVERVIEW_ACTION_LABEL: Record<Exclude<OverviewActionKind, "none">, 
   start_fix: "修正を開始",
   view_progress: "進捗を見る",
   accept_extra: "無関係な変更も含めて修正をリリースに反映",
+  retry_rebuild: "ブランチ画面の「修正を入れて作り直す」で再試行",
 };
 
 export type OverviewSeries = {
@@ -36,6 +39,8 @@ export type OverviewSeries = {
   /** 修正を反映したリリースPR。作成前はnull（反映済みと呼ばない） */
   successorPrNumber: number | null;
   stopReason: string | null;
+  /** 修正を反映したリリースの準備に失敗して止まっている */
+  rebuildFailed?: boolean;
 };
 
 type CheckState = "not_run" | "waiting" | "running" | "passed" | "failed" | "needs_check" | "not_applicable" | "invalidated";
@@ -121,6 +126,10 @@ export function describeFixOverview(input: {
   }
   if (series?.status === "awaiting_decision") {
     return { ...base, tone: "warn", pill: "判断が必要", headline: "修正の続行に、あなたの判断が必要です", detail: series.stopReason, action: act("accept_extra") };
+  }
+  // 準備の失敗は、チェック結果（修正前のもの）や「修正Issueを作成」より先に決める。Issueは作成済みで、重複して作らない
+  if (series?.status === "stopped" && series.rebuildFailed) {
+    return { ...base, tone: "bad", pill: "準備に失敗", headline: "修正を反映したリリースの準備に失敗しました", detail: series.stopReason, action: act("retry_rebuild") };
   }
   if (series?.status === "issue_created") {
     return { ...base, tone: "warn", pill: "修正は未開始", headline: "修正Issueを作成しました。修正はまだ始まっていません", detail: null, action: act("start_fix") };

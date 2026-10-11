@@ -20,6 +20,7 @@ import {
   decideReleaseFix,
   decideReverification,
   defaultVerifyConditions,
+  isRebuildFailureReason,
   isReleaseFixActive,
   itemFromFinding,
   parseReleaseFixStatus,
@@ -27,6 +28,7 @@ import {
   releaseFixStepIndex,
   reviewFindingKey,
   RELEASE_FIX_STATUS_LABEL,
+  REBUILD_FAILURE_REASONS,
   type ReleaseFixCauseClass,
   type ReleaseFixDraftItem,
   type ReleaseFixSourceKind,
@@ -81,6 +83,8 @@ export type ReleaseFixSeriesView = {
   generation: number;
   parentId: string | null;
   stopReason: string | null;
+  /** 修正を反映したリリースの準備に失敗して止まっている（#4398）。修正Issueは作成済みなので作り直さない */
+  rebuildFailed: boolean;
   createdAt: string;
   /** 修正Issueの実行の状況（#4396）。一覧の取得時にだけ埋め、それ以外は`none` */
   startState: ReleaseFixStartState;
@@ -113,6 +117,7 @@ export function toReleaseFixSeriesView(row: ReleaseFixSeries): ReleaseFixSeriesV
     generation: row.generation,
     parentId: row.parentId,
     stopReason: row.stopReason,
+    rebuildFailed: status === "stopped" && isRebuildFailureReason(row.stopReason),
     createdAt: row.createdAt.toISOString(),
     startState: "none",
   };
@@ -536,7 +541,7 @@ async function sweepGroup(repositoryFullName: string, releasePrNumber: number, r
           ? "同じ候補への作り直しが既に起動されています。画面の進捗を確認してください"
           : result.error === "invalid_selection"
             ? `修正PRを元の候補へ足せません（${result.problems.map((p) => `#${p.number}: ${p.label}`).join("、")}）`
-            : "選んだ修正PRで候補を作り直せませんでした。画面の「修正を入れて作り直す」から手動で作り直せます";
+            : REBUILD_FAILURE_REASONS.selective;
       return { rebuilt: false, changed: await stopRows(ctx, decision.seriesIds, "stopped", reason) };
     }
     return { rebuilt: true, changed: decision.seriesIds.length };
@@ -574,8 +579,8 @@ async function sweepGroup(repositoryFullName: string, releasePrNumber: number, r
   } catch (error) {
     console.error("[release-fix-series] rebuild failed", error);
     const reason = closed
-      ? "元の候補を閉じたあと、リリースworkflowの起動に失敗しました。画面の「リリースする」から起動し直してください"
-      : "候補の作り直しに失敗しました。修正は取り込み済みです。画面の「修正を入れて作り直す」から手動で作り直せます";
+      ? REBUILD_FAILURE_REASONS.closedThenDispatchFailed
+      : REBUILD_FAILURE_REASONS.full;
     return { rebuilt: false, changed: await stopRows(ctx, decision.seriesIds, "stopped", reason) };
   }
   return { rebuilt: true, changed: decision.seriesIds.length };

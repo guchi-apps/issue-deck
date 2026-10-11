@@ -13,6 +13,7 @@ const series = (status: ReleaseFixStatus, successor: number | null = null) => ({
   issueNumber: 4395,
   successorPrNumber: successor,
   stopReason: "理由",
+  rebuildFailed: false,
 });
 
 describe("describeFixOverview", () => {
@@ -51,6 +52,31 @@ describe("describeFixOverview", () => {
     const o = describeFixOverview({ series: series("awaiting_decision"), checks: null });
     expect(o.detail).toBe("理由");
     expect(o.action.kind).toBe("accept_extra");
+  });
+});
+
+describe("describeFixOverview: 作り直しの失敗と時系列（#4398）", () => {
+  it("準備に失敗: 失敗と原因を出し、作成済みの修正Issueを重複して作らない", () => {
+    const failing = checks({ aiReview: { state: "failed", findingCount: 2 } });
+    const o = describeFixOverview({ series: { ...series("stopped"), rebuildFailed: true, stopReason: "候補の作り直しに失敗しました" }, checks: failing });
+    expect(o.headline).toBe("修正を反映したリリースの準備に失敗しました");
+    expect(o.detail).toBe("候補の作り直しに失敗しました");
+    expect(o.action.kind).toBe("retry_rebuild");
+    expect(o.pill).not.toContain("承認待ち");
+    // 修正前のチェックが通っていても「本番承認待ち」へ落ちない
+    expect(describeFixOverview({ series: { ...series("stopped"), rebuildFailed: true }, checks: checks() }).pill).toBe("準備に失敗");
+  });
+
+  it("新しいチェックの片方だけ完了していても承認待ちにしない", () => {
+    const o = describeFixOverview({ series: series("ready", 4400), checks: checks({ integration: { state: "running" } }) });
+    expect(o.pill).toBe("チェック中");
+    expect(o.tone).toBe("progress");
+  });
+
+  it("新しいリリースPRが出る前（作り直し中）は修正前の結果で承認待ち・指摘を出さない", () => {
+    const o = describeFixOverview({ series: series("rebuilding"), checks: checks() });
+    expect(o.pill).toBe("修正版を準備中");
+    expect(o.action.kind).toBe("view_progress");
   });
 });
 

@@ -64,6 +64,20 @@ export const RELEASE_FIX_STATUS_LABEL: Record<ReleaseFixStatus, string> = {
   superseded: "新しいリリースに置き換え済み",
 };
 
+/**
+ * 修正を反映したリリースの準備（作り直し）に失敗して止めるときの理由（#4398）。
+ * 巡回が`stopReason`へ書く文面と、画面が「準備に失敗」と判別する条件を同じ定数で持つ。
+ */
+export const REBUILD_FAILURE_REASONS = {
+  selective: "選んだ修正PRで候補を作り直せませんでした。画面の「修正を入れて作り直す」から手動で作り直せます",
+  closedThenDispatchFailed: "元の候補を閉じたあと、リリースworkflowの起動に失敗しました。画面の「リリースする」から起動し直してください",
+  full: "候補の作り直しに失敗しました。修正は取り込み済みです。画面の「修正を入れて作り直す」から手動で作り直せます",
+} as const;
+
+export function isRebuildFailureReason(reason: string | null | undefined): boolean {
+  return reason != null && (Object.values(REBUILD_FAILURE_REASONS) as string[]).includes(reason);
+}
+
 /** 画面の現在地ステップ（左から右へ進む）。`awaiting_decision`・`stopped`は進んだところで止まる */
 export const RELEASE_FIX_STEPS = [
   "Issue作成",
