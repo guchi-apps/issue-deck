@@ -7,8 +7,11 @@ import { withGithubApiFeature } from "@/lib/github/api-usage";
 import { getInstallationToken } from "@/lib/github/app-auth";
 import { githubApiErrorMessage } from "@/lib/github/network-error";
 import type { GithubApiPullRequest } from "@/lib/github/release-api";
+import { getIssueForUser } from "@/lib/issues-for-user";
 import { previewModeGuard } from "@/lib/preview-mode";
 import {
+  decideReleaseFixStart,
+  parseReleaseFixStatus,
   RELEASE_FIX_CAUSE_CLASSES,
   RELEASE_FIX_SOURCE_KINDS,
   type ReleaseFixCauseClass,
@@ -18,6 +21,7 @@ import {
   acceptReleaseFixExtraPullRequests,
   createReleaseFixSeries,
   listReleaseFixSeries,
+  readReleaseFixStartState,
 } from "@/lib/release-fix-series-run";
 import { isReleasePullRequest } from "@/lib/release-merge-gate";
 import { loadReleaseVerificationSummary } from "@/lib/release-verification-load";
@@ -26,6 +30,7 @@ import { loadReleaseVerificationSummary } from "@/lib/release-verification-load"
  * リリース候補の修正系列（#4317）。
  *
  * - GET: このリリースPRに関わる系列（起案済みの修正Issue・修正PR・後継候補・現在地・停止理由）
+ * - GET `startCheck=<系列ID>`: 「修正を開始」の前にサーバーが対象を確かめ、起動ダイアログへ渡すIssueを返す（#4396）
  * - POST `action=create`: 全体レビューの指摘・統合検証の失敗から修正Issueを起案する。**対象は現在のSHAの結果だけ**
  *   （サーバーが記録から読み直し、クライアントの内容を信用しない）。同じ対象は既存の系列を返す
  * - POST `action=accept_extra`: 修正と無関係なdevelopの変更を含めて作り直すことを確認する
@@ -48,6 +53,8 @@ async function handleGET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const owner = searchParams.get("owner");
   const repo = searchParams.get("repo");
+  const startCheck = searchParams.get("startCheck");
+  if (startCheck) return handleStartCheck(userId, owner, repo, startCheck);
   const number = Number(searchParams.get("pullRequest"));
   if (!owner || !repo || !Number.isInteger(number) || number <= 0) {
     return NextResponse.json({ error: "invalid_request" }, { status: 400 });
@@ -55,6 +62,33 @@ async function handleGET(request: NextRequest) {
   if (!(await findRepository(userId, owner, repo))) return NextResponse.json({ error: "not_found" }, { status: 404 });
   const series = await listReleaseFixSeries(`${owner}/${repo}`, number);
   return NextResponse.json({ series }, { headers: { "Cache-Control": "no-store" } });
+}
+
+/**
+ * 「修正を開始」を押す前の確認（#4396）。**起動の前にサーバーが対象を確かめる**: 系列がこのリポジトリのもので、
+ * ユーザーが見えるリポジトリであり、後継の世代に置き換わっておらず、Issueが開いていて未開始のときだけ、
+ * 起動ダイアログに渡すIssueを返す。実際の起動（権限・ホスト・確認待ち・重複ジョブの防止）は既存の配車APIが行う。
+ */
+async function handleStartCheck(userId: string, owner: string | null, repo: string | null, seriesId: string) {
+  if (!owner || !repo) return NextResponse.json({ error: "invalid_request" }, { status: 400 });
+  if (!(await findRepository(userId, owner, repo))) return NextResponse.json({ error: "not_found" }, { status: 404 });
+  const repositoryFullName = `${owner}/${repo}`;
+  const row = await db.releaseFixSeries.findFirst({ where: { id: seriesId, repositoryFullName } });
+  if (!row) return NextResponse.json({ error: "not_found" }, { status: 404 });
+  const issue = await getIssueForUser(userId, repositoryFullName, row.issueNumber);
+  if (!issue) return NextResponse.json({ error: "issue_not_synced", message: "修正Issueがまだ一覧に取り込まれていません。少し待ってから再度押してください。" }, { status: 409 });
+  const [successor, startState] = await Promise.all([
+    db.releaseFixSeries.findFirst({ where: { parentId: row.id }, select: { id: true } }),
+    readReleaseFixStartState(repositoryFullName, row.issueNumber),
+  ]);
+  const decision = decideReleaseFixStart({
+    status: parseReleaseFixStatus(row.status) ?? "stopped",
+    hasSuccessor: successor !== null,
+    issueState: issue.state === "closed" ? "closed" : "open",
+    startState,
+  });
+  if (!decision.ok) return NextResponse.json({ error: decision.reason, message: decision.message, issue: decision.reason === "already_started" ? issue : undefined }, { status: 409, headers: { "Cache-Control": "no-store" } });
+  return NextResponse.json({ ok: true, issue }, { headers: { "Cache-Control": "no-store" } });
 }
 
 export function POST(request: NextRequest) {

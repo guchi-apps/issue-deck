@@ -1,12 +1,16 @@
 "use client";
 
 import { ExternalLink } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useContext, useEffect, useState } from "react";
 
-import { RELEASE_FIX_STEPS, RELEASE_FIX_MAX_GENERATION, type ReleaseFixSourceKind } from "@/lib/release-fix-series";
+import { ReleaseFixStartContext } from "@/components/dashboard/release-fix-start-context";
+import { useReferenceNavigation } from "@/hooks/use-reference-navigation";
+
+import { RELEASE_FIX_STEPS, RELEASE_FIX_MAX_GENERATION, type ReleaseFixSourceKind, type ReleaseFixStartState } from "@/lib/release-fix-series";
 import type { ReleaseFixSeriesView } from "@/lib/release-fix-series-run";
 import type { ReleaseReviewFinding } from "@/lib/release-review-result";
 import { cn } from "@/lib/utils";
+import type { Issue } from "@/types/issue";
 
 /**
  * リリース候補の修正起案と進捗（#4317）。PC・スマホで同じ部品を使う。
@@ -14,6 +18,84 @@ import { cn } from "@/lib/utils";
  */
 
 const SEVERITY_LABEL = { high: "重大", medium: "中", low: "軽微" } as const;
+
+const START_STATE_LABEL: Record<Exclude<ReleaseFixStartState, "none">, string> = {
+  queued: "受付済み・起動待ち",
+  running: "修正を実行中",
+};
+
+/**
+ * 修正Issueの「修正を開始」（#4396）。押すとサーバーが対象を確かめ、既存の「実装を開始」ダイアログを開く。
+ * 作成の成功と実行の開始は別で、失敗しても修正Issueは残り、同じボタンで再試行できる（Issueは作り直さない）。
+ * 受付済み・実行中なら重複して開始せず、状態とIssue詳細への導線を出す。
+ */
+export function ReleaseFixStartButton({
+  repositoryFullName,
+  seriesId,
+  startState,
+}: {
+  repositoryFullName: string;
+  seriesId: string;
+  startState: ReleaseFixStartState;
+}) {
+  const openStart = useContext(ReleaseFixStartContext);
+  const { openIssue } = useReferenceNavigation();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  if (!openStart) return null;
+
+  const check = async (): Promise<{ issue?: Issue; ok: boolean; message?: string }> => {
+    const [owner, repo] = repositoryFullName.split("/");
+    const res = await fetch(
+      `/api/repositories/release/fix-series?owner=${owner}&repo=${repo}&startCheck=${encodeURIComponent(seriesId)}`,
+    );
+    const body: { ok?: boolean; issue?: Issue; message?: string } = await res.json().catch(() => ({}));
+    return { ok: res.ok && body.ok === true, issue: body.issue, message: body.message ?? `開始できませんでした (${res.status})` };
+  };
+
+  const onClick = async () => {
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const result = await check();
+      if (result.ok && result.issue) openStart(result.issue);
+      else if (startState !== "none" && result.issue) openIssue(result.issue.id);
+      else setError(result.message ?? "開始できませんでした");
+    } catch {
+      setError("開始できませんでした（通信に失敗しました）。もう一度押してください。");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const started = startState !== "none";
+  return (
+    <span className="inline-flex flex-wrap items-center gap-x-2 gap-y-1" data-testid="release-fix-start">
+      {started && (
+        <span className="rounded-full bg-sky-100 px-2 py-0.5 text-[11px] text-sky-900 dark:bg-sky-950 dark:text-sky-300">
+          {START_STATE_LABEL[startState]}
+        </span>
+      )}
+      <button
+        type="button"
+        onClick={onClick}
+        disabled={busy}
+        className={cn(
+          "min-h-8 rounded border px-3 py-1 text-[11.5px] disabled:opacity-50",
+          started ? "hover:bg-muted" : "bg-primary font-medium text-primary-foreground hover:opacity-90",
+        )}
+      >
+        {busy ? "確認中…" : started ? "進捗を見る" : error ? "もう一度開始" : "修正を開始"}
+      </button>
+      {error && (
+        <span role="alert" className="break-words text-destructive">
+          {error}（修正Issueは作成済みです）
+        </span>
+      )}
+    </span>
+  );
+}
 
 type CreateResponse = { outcome?: string; error?: string; message?: string; series?: ReleaseFixSeriesView };
 
@@ -39,6 +121,7 @@ export function ReleaseFixCreate({
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [executionWarning, setExecutionWarning] = useState<string | null>(null);
+  const [created, setCreated] = useState<ReleaseFixSeriesView | null>(null);
 
   const submit = useCallback(
     async (acknowledgeExecutionFailure: boolean) => {
@@ -72,10 +155,11 @@ export function ReleaseFixCreate({
           setMessage(body.message ?? `起案できませんでした (${res.status})`);
         } else {
           setExecutionWarning(null);
+          setCreated(body.series ?? null);
           setMessage(
             body.outcome === "existing"
               ? `すでに起案済みです（Issue #${body.series?.issueNumber}）。重複して作りません。`
-              : `修正Issue #${body.series?.issueNumber} を作成しました。実装は通常のIssueと同じく開始してください。`,
+              : `修正Issue #${body.series?.issueNumber} を作成しました（実装はまだ始まっていません）。`,
           );
           onDone?.();
         }
@@ -154,6 +238,16 @@ export function ReleaseFixCreate({
         </button>
         {message && <span role="status">{message}</span>}
       </span>
+      {created && (
+        <div className="flex flex-col gap-1">
+          {created.itemTitles[0] && <p className="break-words text-muted-foreground">{created.itemTitles[0]}</p>}
+          <ReleaseFixStartButton
+            repositoryFullName={repositoryFullName}
+            seriesId={created.id}
+            startState={created.startState}
+          />
+        </div>
+      )}
     </div>
   );
 }
@@ -198,6 +292,13 @@ function SeriesRow({
           世代 {series.generation}/{RELEASE_FIX_MAX_GENERATION} · 元リリースPR #{series.releasePrNumber}
         </span>
         {link("修正Issue", series.issueNumber, "issues")}
+        {series.status === "issue_created" && (
+          <ReleaseFixStartButton
+            repositoryFullName={repositoryFullName}
+            seriesId={series.id}
+            startState={series.startState}
+          />
+        )}
         {link("修正PR", series.fixPrNumber, "pull")}
         {link("後継候補", series.successorPrNumber, "pull")}
       </div>

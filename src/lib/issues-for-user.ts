@@ -1,6 +1,6 @@
 import { db } from "@/lib/db";
 import { buildDispatchActiveKey } from "@/lib/dispatch/dispatch-job";
-import { getPendingDispatchAtByIssue } from "@/lib/dispatch/pending-dispatch";
+import { getPendingDispatchAt, getPendingDispatchAtByIssue } from "@/lib/dispatch/pending-dispatch";
 import { listManualStepVerifiedAtByIssue } from "@/lib/manual-step-verification-patrol";
 import { dbIssueToDisplayIssue } from "@/lib/github/issue-mapper";
 import type { Issue } from "@/types/issue";
@@ -69,4 +69,36 @@ function shouldOmitBody(issue: Issue, bodies: IssueListBodies): boolean {
 /** 本文を外した形にする（#3390）。空文字にしたうえで印を立て、「本文が無い」と区別する */
 export function omitIssueBody(issue: Issue): Issue {
   return { ...issue, body: "", bodyOmitted: true };
+}
+
+/**
+ * 1件ぶんの取得（#4396）。権限は一覧と同じ「ユーザーが見えるインストールのリポジトリ」。
+ * 一覧を丸ごと作らずに、起動の導線が対象のIssueだけを読めるようにする
+ */
+export async function getIssueForUser(
+  userId: string,
+  repositoryFullName: string,
+  number: number,
+): Promise<Issue | null> {
+  const row = await db.issue.findFirst({
+    where: {
+      number,
+      repository: { fullName: repositoryFullName, installation: { userInstallations: { some: { userId } } } },
+    },
+    include: {
+      labels: { orderBy: { id: "asc" } },
+      repository: true,
+      commentReadBy: { where: { userId } },
+    },
+  });
+  if (!row) return null;
+  const readCommentCount = row.commentReadBy[0]?.readCommentCount ?? 0;
+  const dispatchedAt = await getPendingDispatchAt(buildDispatchActiveKey(row.repository.fullName, row.number));
+  return {
+    ...dbIssueToDisplayIssue(row.repository, row),
+    hasUnreadComments: row.commentCount > readCommentCount,
+    readCommentCount,
+    dispatchPendingAt: dispatchedAt?.toISOString() ?? null,
+    manualStepVerifiedAt: null,
+  };
 }
