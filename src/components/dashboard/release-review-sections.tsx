@@ -905,6 +905,8 @@ export function ReleaseReviewSections({
   renderIndividualList,
   onOpenPullRequest,
   extraRows,
+  hideOverview = false,
+  previousResults: previousResultsProp,
   className,
 }: {
   repositoryFullName: string;
@@ -921,6 +923,12 @@ export function ReleaseReviewSections({
   onOpenPullRequest?: (pullRequestNumber: number) => void;
   /** 3区分の後に同じ枠で並べる行（確認ダイアログのCI・コンフリクト） */
   extraRows?: ReactNode;
+  /**
+   * 上部の要約（`ReleaseFixOverviewPanel`）を出さない（#4428）。本番PR詳細は要約・今回の変更・履歴を
+   * 別の位置へ並べるため、ここでは検証の区分だけを出す。そのとき修正前の結果かどうかは`previousResults`で受け取る
+   */
+  hideOverview?: boolean;
+  previousResults?: boolean;
   className?: string;
 }) {
   const active =
@@ -931,7 +939,8 @@ export function ReleaseReviewSections({
   const nowMs = useNow(active);
   const [fixTick, setFixTick] = useState(0);
   // 作り直し・修正後のチェック中は、作り直し前のリリースの結果を現在の結果として見せず、履歴へ移す（#4398）
-  const [previousResults, setPreviousResults] = useState(false);
+  const [previousResultsState, setPreviousResults] = useState(false);
+  const previousResults = hideOverview ? (previousResultsProp ?? false) : previousResultsState;
   const onFixCreated = () => {
     setFixTick((n) => n + 1);
     onReload?.();
@@ -962,7 +971,7 @@ export function ReleaseReviewSections({
           </button>
         )}
       </div>
-      {pullRequestNumber !== undefined && (
+      {pullRequestNumber !== undefined && !hideOverview && (
         <ReleaseFixOverviewPanel
           repositoryFullName={repositoryFullName}
           pullRequestNumber={pullRequestNumber}

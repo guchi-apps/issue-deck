@@ -647,6 +647,8 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
     起案・巡回・作り直しは[`lib/release-fix-series-run.ts`](../src/lib/release-fix-series-run.ts)、作り直しの実行は画面と共通の
     [`lib/release-rebuild-run.ts`](../src/lib/release-rebuild-run.ts)、API・巡回の入口は`app/api/repositories/release/fix-series/`、
     画面は[`components/dashboard/release-fix-panel.tsx`](../src/components/dashboard/release-fix-panel.tsx)。設計は[multi-agent/release-verification.md](multi-agent/release-verification.md)
+  - **本番PR詳細の上部**（#4428）は[`components/dashboard/release-pull-request-overview.tsx`](../src/components/dashboard/release-pull-request-overview.tsx)。
+    `pull-request-detail.tsx`は開いている凍結ブランチのリリースPRのときだけこれを先頭に出し、既存の表示を「詳細・履歴」として下に残す
   - **PRを選んだ作り直しは`ReleaseRebuildRequest`**（#4335）。選択の検証は[`lib/release-rebuild-selection.ts`](../src/lib/release-rebuild-selection.ts)（純関数）、
     起動と二重防止は[`lib/release-rebuild-selection-run.ts`](../src/lib/release-rebuild-selection-run.ts)（画面と修正系列で共通）、
     画面は[`components/dashboard/release-rebuild-selection-list.tsx`](../src/components/dashboard/release-rebuild-selection-list.tsx)。

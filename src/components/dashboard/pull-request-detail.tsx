@@ -31,7 +31,10 @@ import { PullRequestMergeHoldNotice } from "@/components/dashboard/pull-request-
 import { PullRequestRepairButtons } from "@/components/dashboard/pull-request-repair-buttons";
 import { PullRequestBackupCi } from "@/components/dashboard/pull-request-backup-ci";
 import { PullRequestReviewFindings } from "@/components/dashboard/pull-request-review-findings";
-import { ConnectedReleaseReviewSections } from "@/components/dashboard/release-review-sections";
+import {
+  isOpenReleaseCandidate,
+  ReleasePullRequestOverview,
+} from "@/components/dashboard/release-pull-request-overview";
 import { UserAvatar } from "@/components/dashboard/user-avatar";
 import { VerificationSummaryPanel } from "@/components/dashboard/verification-summary-panel";
 import { WorkflowRunProgressPanel } from "@/components/dashboard/workflow-run-progress-panel";
@@ -43,7 +46,7 @@ import { formatRelativeDate } from "@/lib/format-relative-date";
 import { selectPullRequestReviewComment } from "@/lib/github/pull-request-review-comment";
 import { repairKindsFor } from "@/lib/github/pull-request-repair";
 import { parseReleaseVerification, type ReleaseVerificationRow } from "@/lib/github/release-verification";
-import { canMergeFromDeck, RELEASE_BRANCH_PREFIX, requiresUserMerge } from "@/lib/pull-request-list";
+import { canMergeFromDeck, requiresUserMerge } from "@/lib/pull-request-list";
 import { cn } from "@/lib/utils";
 import type {
   PullRequestSummary,
@@ -219,6 +222,9 @@ export function PullRequestDetail({
   }
 
   const kindLabel = pullRequestKindLabel(pullRequest.kind);
+  // 開いている本番PR（#4428）。ヘッダーを短くし、本文の先頭に現在状態・検証・今回の変更を出す。
+  // 既存のバッジ・内訳・本文・コメントは、その下の「詳細・履歴」としてそのまま残す
+  const releaseCandidate = isOpenReleaseCandidate(pullRequest);
   // 取得結果が選択中PRのものか（切り替え直後に前のPRの本文を出さないための保険）
   const currentDetail = detail && detail.id === pullRequest.id ? detail : null;
   // `mergeable`は一覧・詳細のどちらの`summary`にも入っている（#1742）ので、CI失敗と
@@ -282,7 +288,7 @@ export function PullRequestDetail({
           <div className="flex min-w-0 items-start gap-2">
             <PullRequestStateIcon pullRequest={pullRequest} className="mt-0.5 size-4 shrink-0" />
             <h1 className="min-w-0 flex-1 text-sm font-semibold">
-              #{pullRequest.number} {pullRequest.title}
+              {releaseCandidate ? `本番PR #${pullRequest.number}` : `#${pullRequest.number} ${pullRequest.title}`}
             </h1>
             <a
               href={pullRequest.htmlUrl}
@@ -323,6 +329,10 @@ export function PullRequestDetail({
       </header>
 
       <div className="flex-1 overflow-y-auto overscroll-contain">
+        {releaseCandidate && <ReleasePullRequestOverview pullRequest={pullRequest} onMerged={onMerged} />}
+        {releaseCandidate && (
+          <h2 className="border-b bg-muted/50 px-4 py-2 text-xs font-semibold">詳細・履歴</h2>
+        )}
         <div className="flex flex-col gap-2 border-b px-4 py-3">
           <div className="flex min-w-0 flex-wrap items-center gap-2">
             <BranchBadge baseRef={pullRequest.baseRef} headRef={pullRequest.headRef} />
@@ -408,7 +418,8 @@ export function PullRequestDetail({
               availability={pullRequest.repairWorkflowAvailability}
               runningKind={pullRequest.repairRun?.kind ?? null}
             />
-            {canMergeFromDeck(pullRequest) && (
+            {/* 本番PRの主操作は上の「現在の状態と次の操作」が持つ（同じ操作を2か所に置かない） */}
+            {canMergeFromDeck(pullRequest) && !releaseCandidate && (
               <PullRequestMergeButton
                 pullRequest={pullRequest}
                 onMerged={onMerged}
@@ -419,7 +430,7 @@ export function PullRequestDetail({
           </div>
 
           {/* PR一覧・ブランチ画面と同じ6チェック（#4366）。バッジは操作の入口として残し、結果の比較はここで読む */}
-          <PullRequestChecksStrip pullRequest={pullRequest} className="-mx-1 px-0" />
+          {!releaseCandidate && <PullRequestChecksStrip pullRequest={pullRequest} className="-mx-1 px-0" />}
 
           <PullRequestMergeHoldNotice pullRequest={pullRequest} className="mt-2" />
 
@@ -513,22 +524,6 @@ export function PullRequestDetail({
                 最初に知りたいのは「何件のうち何件が問題なしか」で、本文の表まで
                 スクロールしないと読めないのでは判断材料として遅い。
                 見出しを持たないPR（＝リリースPR以外）ではparseがnullを返すので何も出ない */}
-            {/* リリースPRの3区分（全体レビュー／統合検証／個別PRレビュー。#4238・#4277）。個別PRの判定は
-                下の「コードレビューの検証結果」と同じ材料で、ここでは他の2区分と並べて見せる。
-                並びと形式は本番マージの確認ダイアログ・スマホのリリースシートと同じ部品で揃える */}
-            {pullRequest.kind === "release" &&
-              !pullRequest.merged &&
-              pullRequest.state === "open" &&
-              pullRequest.headRef.startsWith(RELEASE_BRANCH_PREFIX) && (
-                <div className="border-b px-4 py-3">
-                  <ConnectedReleaseReviewSections
-                    repositoryFullName={pullRequest.repositoryFullName}
-                    pullRequestNumber={pullRequest.number}
-                    headRef={pullRequest.headRef}
-                  />
-                </div>
-              )}
-
             {verification && (
               <VerificationSummaryPanel
                 verification={verification}

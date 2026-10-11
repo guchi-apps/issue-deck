@@ -40,6 +40,8 @@ type PullRequestMergeButtonProps = {
   className?: string;
   /** 詳細ペインでは主要な操作なので塗りつぶし、一覧では控えめな枠線にする */
   variant?: "default" | "outline";
+  /** 押せる状態のボタンの文言（本番PR詳細の「本番公開へ進む」。#4428）。押した後の確認・判定は変わらない */
+  label?: string;
 };
 
 /**
@@ -86,6 +88,7 @@ export function PullRequestMergeButton({
   onMerged,
   className,
   variant = "outline",
+  label = "マージする",
 }: PullRequestMergeButtonProps) {
   const { mergePullRequest, isSubmitting, error, reviewConfirmation, clearReviewConfirmation } =
     usePullRequestMergeMutation();
@@ -146,7 +149,7 @@ export function PullRequestMergeButton({
               ? MERGE_JUDGEMENT_PENDING_LABEL
               : verificationWait !== null
                 ? "検証の完了待ち"
-                : "マージする"}
+                : label}
       </Button>
 
       <AlertDialog

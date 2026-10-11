@@ -3,7 +3,7 @@ import type { ReleaseFixStatus } from "@/lib/release-fix-series";
 /**
  * リリースの検証・修正画面の上部に出す「現在の状態・検証の要約・主操作」（#4398）。**純関数だけ**を置く。
  *
- * 現在状態は1つだけ決める。「停止」「要確認」「本番承認待ち」を並べて見せない。待てば進む状態は
+ * 現在状態は1つだけ決める。「停止」「要確認」「公開操作待ち」を並べて見せない。待てば進む状態は
  * 「チェック中」「修正中」とし、人の操作が要る状態だけ理由と操作を隣に出す。
  * 主操作は種別（`action.kind`）だけを返す。ボタンの実装（#4396の「修正を開始」など）は画面が差し込む。
  */
@@ -64,7 +64,26 @@ export type FixOverview = {
   /** 残っている指摘の件数。取得できていないときはnull */
   remainingFindings: number | null;
   action: OverviewAction;
+  /**
+   * 待てば自動で進む状態か（#4428）。trueのときだけ画面は「操作は不要です」と添える。
+   * 失敗・取得不能・判断待ち・未開始は待機扱いしない
+   */
+  autoProgress: boolean;
 };
+
+/**
+ * 利用者に見せる修正の工程（#4428）。内部の7段階（`RELEASE_FIX_STEPS`）を4つにまとめる。
+ * 修正の記録（系列）があるリリースにだけ使い、修正の無い通常リリースには出さない
+ */
+export const RELEASE_FIX_PHASES = ["修正", "取り込み", "再検証", "公開"] as const;
+
+/** `RELEASE_FIX_STEPS`の番号（0始まり）を`RELEASE_FIX_PHASES`の番号へ */
+export function releaseFixPhaseIndex(stepIndex: number): number {
+  if (stepIndex <= 2) return 0; // Issue作成・計画・実装・PR検証
+  if (stepIndex <= 4) return 1; // develop取り込み・修正をリリースに反映
+  if (stepIndex === 5) return 2; // 修正後のチェック
+  return 3; // 本番承認待ち
+}
 
 function checkWord(state: CheckState, findingCount: number): string {
   switch (state) {
@@ -113,32 +132,32 @@ export function describeFixOverview(input: {
   const { series, checks, checksError } = input;
   const checksLine = summarizeChecks(checks);
   const findings = checks ? checks.aiReview.findingCount : null;
-  const base = { checksLine, remainingFindings: findings } as const;
+  const base = { checksLine, remainingFindings: findings, autoProgress: false } as const;
   const none: OverviewAction = { kind: "none", label: "" };
   const act = (kind: Exclude<OverviewActionKind, "none">): OverviewAction => ({ kind, label: OVERVIEW_ACTION_LABEL[kind] });
 
   // 作り直し・再チェック中は、修正前の結果を現在状態に使わない
   if (series?.status === "rebuilding") {
-    return { ...base, tone: "progress", pill: "修正版を準備中", headline: "修正版のリリースを準備しています", detail: "完了すると、修正後のチェックが始まります。", action: { kind: "view_progress", label: OVERVIEW_ACTION_LABEL.view_progress } };
+    return { ...base, tone: "progress", pill: "修正取り込み準備中", headline: "修正を反映したリリース候補を準備しています", detail: "完了すると、修正後のチェックが始まります。", action: { kind: "view_progress", label: OVERVIEW_ACTION_LABEL.view_progress }, autoProgress: true };
   }
   if (series?.status === "reverifying" || (series?.successorPrNumber != null && checks && (isBusy(checks.aiReview.state) || isBusy(checks.integration.state)))) {
-    return { ...base, tone: "progress", pill: "チェック中", headline: "修正後のチェックを実行しています", detail: "結果が出ると、この表示が更新されます。", action: { kind: "view_progress", label: OVERVIEW_ACTION_LABEL.view_progress } };
+    return { ...base, tone: "progress", pill: "チェック中", headline: "修正後のチェックを実行しています", detail: "結果が出ると、この表示が更新されます。", action: { kind: "view_progress", label: OVERVIEW_ACTION_LABEL.view_progress }, autoProgress: true };
   }
   if (series?.status === "awaiting_decision") {
-    return { ...base, tone: "warn", pill: "判断が必要", headline: "修正の続行に、あなたの判断が必要です", detail: series.stopReason, action: act("accept_extra") };
+    return { ...base, tone: "warn", pill: "あなたの操作が必要", headline: "修正の続行に、あなたの判断が必要です", detail: series.stopReason, action: act("accept_extra") };
   }
   // 準備の失敗は、チェック結果（修正前のもの）や「修正Issueを作成」より先に決める。Issueは作成済みで、重複して作らない
   if (series?.status === "stopped" && series.rebuildFailed) {
     return { ...base, tone: "bad", pill: "準備に失敗", headline: "修正を反映したリリースの準備に失敗しました", detail: series.stopReason, action: act("retry_rebuild") };
   }
   if (series?.status === "issue_created") {
-    return { ...base, tone: "warn", pill: "修正は未開始", headline: "修正Issueを作成しました。修正はまだ始まっていません", detail: null, action: act("start_fix") };
+    return { ...base, tone: "warn", pill: "あなたの操作が必要", headline: "修正Issueを作成しました。修正はまだ始まっていません", detail: null, action: act("start_fix") };
   }
   if (series?.status === "fix_in_progress") {
-    return { ...base, tone: "progress", pill: "修正中", headline: "指摘への修正内容を作成しています", detail: null, action: act("view_progress") };
+    return { ...base, tone: "progress", pill: "修正中", headline: "指摘への修正内容を作成しています", detail: null, action: act("view_progress"), autoProgress: true };
   }
   if (series?.status === "fix_merged") {
-    return { ...base, tone: "progress", pill: "反映待ち", headline: "修正をdevelopへ取り込みました。リリースへの反映を待っています", detail: null, action: act("view_progress") };
+    return { ...base, tone: "progress", pill: "修正取り込み準備中", headline: "修正をdevelopへ取り込みました。リリースへの反映を待っています", detail: null, action: act("view_progress"), autoProgress: true };
   }
 
   // ここから先は、現在のSHAの検証結果で決める
@@ -160,17 +179,17 @@ export function describeFixOverview(input: {
     return {
       ...base,
       tone: "bad",
-      pill: "指摘が残っています",
+      pill: "修正が必要",
       headline: reflected ? `修正を反映しましたが、チェックで${left}が残っています` : n > 0 ? `チェックで${n}件の指摘があります` : "チェックで問題が見つかりました",
       detail: series?.status === "stopped" ? series.stopReason : null,
       action: act("create_issue"),
     };
   }
   if (isBusy(checks.aiReview.state) || isBusy(checks.integration.state)) {
-    return { ...base, tone: "progress", pill: "チェック中", headline: "チェックを実行しています", detail: null, action: none };
+    return { ...base, tone: "progress", pill: "チェック中", headline: "チェックを実行しています", detail: "結果が出ると、この表示が更新されます。", action: none, autoProgress: true };
   }
   if (isDone(checks.aiReview.state) && isDone(checks.integration.state)) {
-    return { ...base, tone: "ok", pill: "本番承認待ち", headline: reflected ? "修正を反映し、チェックを通過しました" : "チェックを通過しました", detail: "本番へのマージ・デプロイは人が承認します。", action: none };
+    return { ...base, tone: "ok", pill: "公開操作待ち", headline: reflected ? "修正を反映し、チェックを通過しました" : "チェックを通過しました", detail: "本番へのマージは、確認画面で対象を確かめてから人が行います。マージ後、デプロイが完了するまでは本番に反映されていません。", action: none };
   }
   if (series?.status === "stopped") {
     return { ...base, tone: "bad", pill: "修正が止まっています", headline: "修正が止まっています", detail: series.stopReason, action: act("create_issue") };
