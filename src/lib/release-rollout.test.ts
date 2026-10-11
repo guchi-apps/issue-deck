@@ -31,8 +31,8 @@ describe("evaluateRollout", () => {
     expect(evaluateRollout({ fullName: "guchi-apps/docs", hosts: [], latest: {} }).status).toBe("excluded");
   });
 
-  it("前提不足・Mac検証スクリプト未配布は設定不足で、実走済みでも検証済みにしない", () => {
-    for (const repo of ["guchi-apps/db-console", "guchi-apps/aide"]) {
+  it("前提不足は設定不足で、実走済みでも検証済みにしない", () => {
+    for (const repo of ["guchi-apps/asset-manager"]) {
       const row = evaluateRollout({ fullName: repo, hosts: [host([repo])], latest: passedBoth });
       expect(row.status, repo).toBe("setup_missing");
       expect(row.reasons.length).toBeGreaterThan(0);
