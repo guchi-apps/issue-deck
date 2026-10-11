@@ -26,6 +26,7 @@ import { useCodeReviewRecommendSettings } from "@/components/dashboard/use-code-
 import { DependencyWaitBadge } from "@/components/dashboard/dependency-wait-panel";
 import { CodeReviewRepoOverview } from "@/components/dashboard/code-review-repo-overview";
 import { CodeReviewResultBadges } from "@/components/dashboard/code-review-result-badges";
+import { IssueAttentionLine } from "@/components/dashboard/issue-attention-line";
 import { IssueAgentBadge } from "@/components/dashboard/issue-agent-badge";
 import { PullToRefreshIndicator } from "@/components/dashboard/pull-to-refresh-indicator";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -86,6 +87,7 @@ import { findPlanRequestForIssue } from "@/lib/dispatch/session-plan-request";
 import { resolvePlanReviewListState } from "@/lib/dispatch/plan-review-list-state";
 import { PlanReviewStateBadge } from "@/components/dashboard/plan-review-state-badge";
 import { findQuestionRequestForIssue } from "@/lib/dispatch/session-question-request";
+import { resolveIssueAttention } from "@/lib/issue-attention-state";
 import { shouldEmphasizeRemoteControl } from "@/lib/remote-control-attention";
 import type { DispatchSessionView } from "@/lib/dispatch/session-state";
 import { formatDateTime, formatTimeOfDay } from "@/lib/format-date-time";
@@ -1062,6 +1064,22 @@ export function IssueList({
     // 親Issue／子Issueの区別（#3469）。質問に答える・Remote・コメント数・時刻と同じ行には
     // 収まらないため、独立した行に出す（#3580）
     const hierarchyBadges = resolveIssueHierarchyBadges(issue);
+    // 代表状態＋次の行動（#4425）。詳細（PC・スマホ）と同じ`resolveIssueAttention`の結果を読む
+    const attention = resolveIssueAttention({
+      permissionPending,
+      questionPending,
+      planPending,
+      mergePending,
+      planReviewState,
+      dependencyWaitLabel: dependencyWait ? `#${dependencyWait.dependency.number}` : null,
+      reserved: nightlyRunMark !== null,
+      // 実行キューの待ちは進捗バー（`WorkflowStepBadge`・`QueueStepBadge`）が言うので、
+      // 同じ行で2回言わせない。詳細は`queueLabel`を渡す
+      queueLabel: null,
+      running: isRunning,
+      notStarted:
+        issue.state === "open" && (issue.projectStatus === null || issue.projectStatus === "Ready"),
+    });
     return (
       <li
         key={issue.id}
@@ -1205,6 +1223,7 @@ export function IssueList({
               #{issue.number} {issue.title}
             </span>
           </p>
+          {attention && <IssueAttentionLine attention={attention} compact />}
           {planReviewState && (
             <div>
               <PlanReviewStateBadge state={planReviewState} />
@@ -1289,8 +1308,8 @@ export function IssueList({
                   variant="outline"
                   size="xs"
                   className="pointer-events-auto border-amber-500 text-amber-700 hover:text-amber-700 dark:border-amber-500 dark:text-amber-400 dark:hover:text-amber-400"
-                  title="質問に答える"
-                  aria-label={`#${issue.number}の質問に答える`}
+                  title="質問を確認する（詳細を開きます）"
+                  aria-label={`#${issue.number}の質問を確認する`}
                   onClick={(event) => {
                     event.stopPropagation();
                     setOptimisticSelectedId(issue.id);
@@ -1298,7 +1317,7 @@ export function IssueList({
                   }}
                 >
                   <MessageCircleQuestion />
-                  質問に答える
+                  質問を確認
                 </Button>
               )}
               {planPending && !questionPending && (
@@ -1306,8 +1325,8 @@ export function IssueList({
                   variant="outline"
                   size="xs"
                   className="pointer-events-auto border-amber-500 text-amber-700 hover:text-amber-700 dark:border-amber-500 dark:text-amber-400 dark:hover:text-amber-400"
-                  title="計画を承認する"
-                  aria-label={`#${issue.number}の計画を承認する`}
+                  title="計画を確認する（詳細を開きます）"
+                  aria-label={`#${issue.number}の計画を確認する`}
                   onClick={(event) => {
                     // 行そのものの当たり判定（カード全面のボタン）へ伝わらないようにする。
                     // 開く先は同じだが、二重に走らせない
@@ -1317,7 +1336,7 @@ export function IssueList({
                   }}
                 >
                   <ScrollText />
-                  計画を承認
+                  計画を確認
                 </Button>
               )}
               {mergePending && (
@@ -1325,8 +1344,8 @@ export function IssueList({
                   variant="outline"
                   size="xs"
                   className="pointer-events-auto border-amber-500 text-amber-700 hover:text-amber-700 dark:border-amber-500 dark:text-amber-400 dark:hover:text-amber-400"
-                  title="自動マージされなかったPRをマージする"
-                  aria-label={`#${issue.number}のPRをマージする`}
+                  title="自動マージされなかったPRを確認する（詳細を開きます）"
+                  aria-label={`#${issue.number}のPRを確認する`}
                   onClick={(event) => {
                     event.stopPropagation();
                     setOptimisticSelectedId(issue.id);
@@ -1334,7 +1353,7 @@ export function IssueList({
                   }}
                 >
                   <GitMerge />
-                  PRをマージ
+                  PRを確認
                 </Button>
               )}
               {/* 走っているセッションを一覧から開く（#1915）。**カード下段の右端に置く**——
