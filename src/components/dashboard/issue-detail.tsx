@@ -23,17 +23,18 @@ import { BodyCleanupButton } from "@/components/dashboard/body-cleanup-button";
 import { CommentThread } from "@/components/dashboard/comment-thread";
 import { DeleteIssueDialog } from "@/components/dashboard/delete-issue-dialog";
 import { IssueArtifactPanel } from "@/components/dashboard/issue-artifact-panel";
-import { IssueDetailHeader } from "@/components/dashboard/issue-detail-header";
-import { IssueDetailSection } from "@/components/dashboard/issue-detail-section";
-import { IssuePropertiesPanel } from "@/components/dashboard/issue-properties-panel";
+import { IssueDetailHeader, IssueDetailTitle } from "@/components/dashboard/issue-detail-header";
 import {
-  IssuePullRequestList,
-  IssuePullRequestStateCounts,
-} from "@/components/dashboard/issue-pull-request-list";
+  IssueDetailLayout,
+  IssuePullRequestsSection,
+  IssueSubIssuesSection,
+} from "@/components/dashboard/issue-detail-layout";
+import { IssuePropertiesPanel } from "@/components/dashboard/issue-properties-panel";
+import { resolveIssueDetailAttentionFromState } from "@/lib/issue-attention-state";
+import { IssueAttentionLine } from "@/components/dashboard/issue-attention-line";
 import { IssueStatusCard } from "@/components/dashboard/issue-status-card";
 import { IssueBodyPending } from "@/components/dashboard/issue-body-pending";
 import { MarkdownBody } from "@/components/dashboard/markdown-body";
-import { MergeCheckReasonNotice } from "@/components/dashboard/merge-check-reason-notice";
 import { NightlyRunNotice } from "@/components/dashboard/nightly-run-marks";
 import {
   isPlanReviewPending,
@@ -49,7 +50,6 @@ import { getRepoIssueSuggestions, MentionTextarea } from "@/components/dashboard
 import { ScrollToLatestCommentButton } from "@/components/dashboard/scroll-to-latest-comment-button";
 import { StartImplementationDialog } from "@/components/dashboard/start-implementation-dialog";
 import { StartLocalSessionButton } from "@/components/dashboard/start-local-session-button";
-import { SubIssueProgress } from "@/components/dashboard/sub-issue-progress";
 import {
   findBlockingSession,
   findDispatchJobForIssue,
@@ -96,7 +96,6 @@ import {
   DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Separator } from "@/components/ui/separator";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { useFirstUnreadCommentIndex } from "@/hooks/use-first-unread-comment-index";
 import { useIssueCommentMutations } from "@/hooks/use-issue-comment-mutations";
@@ -168,7 +167,7 @@ import {
   selectVisiblePullRequestLinks,
   summarizeIssuePullRequestStates,
 } from "@/lib/issue-pull-requests";
-import { checkUserTargetProps } from "@/lib/check-user-focus";
+import { checkUserTargetProps, focusCheckUserTarget } from "@/lib/check-user-focus";
 import type { ClaudeLocalModelSetting, CodexModelSetting, DefaultDispatchAgent } from "@/lib/app-settings";
 import { detectInfraConfigTargets, type InfraConfigTarget } from "@/lib/infra-config-repos";
 import { resolveMergeCheckReasons } from "@/lib/merge-check-reasons";
@@ -790,6 +789,17 @@ export function IssueDetail({
   // 予約実行に積まれているか（#2866）。**判定は一覧のチップと同じ引き当て表**で、
   // 一覧では今夜と出ているのに詳細では何も出ない、という食い違いが起きないようにする
   const nightlyRunMark = findScheduledRunQueuedMark(nightlyRunQueued, issue.id);
+  // 現在状態と次の操作（#4425）。一覧の行・スマホ詳細と同じ`resolveIssueAttention`の結果
+  const attention = resolveIssueDetailAttentionFromState({
+    issue,
+    session: issueSession,
+    dependencyWaits: dispatch.dependencyWaits,
+    planDecisionPending,
+    questionAnswerPending,
+    mergeApprovalPending,
+    planReviewCreating: planReviewJobCreating,
+    reserved: nightlyRunMark !== null,
+  });
   // 「起動コマンドをコピー」は、対象リポジトリがローカル起動プロトコルに適合しているときだけ
   // 出す（#1073）。貼った先で受け口が止まるだけの選択肢を並べないため。
   const localSessionCommand = canStartLocalSession(currentRepository?.hasLocalStartScript)
@@ -841,9 +851,6 @@ export function IssueDetail({
         <IssueDetailHeader
           issue={issue}
           onSelectRepository={onSelectRepository}
-          implementationAgent={
-            issueSession ? resolveIssueImplementationAgent(issueSession) : null
-          }
           /* 予約実行に積まれている注釈（#2866）。開始ボタンと同じヘッダーの中に
              置き、押す直前に読めるようにする。積まれていなければ何も描かない */
           notice={
@@ -1055,430 +1062,409 @@ export function IssueDetail({
             p-4（1rem）のままだと最下部までスクロールしたときコメント入力欄の操作列
             （「コメント」「回答を確認してクローズ」など）へボタンが重なる */}
         <div className="flex flex-col gap-3 p-4 pb-16">
-          {/* 進捗・ジョブ・セッション・回答待ち・実行キャンセルを1枚に集約する（#1577）。
-              走っているものが1つも無いIssueでは何も描かない */}
-          <IssueStatusCard
-            issue={issue}
-            onIssueUpdated={onIssueUpdated}
-            dispatch={dispatch}
-            dispatchJob={dispatchJob}
-            issueSession={issueSession}
-            executionTarget={executionTarget}
-            workflowRun={workflowRun}
-            workflowRunId={workflowRunId}
-            qaAnswerPending={qaAnswerPending}
-            checkUserGuidance={checkUserGuidance}
-            planningSkipped={planningSkipped}
-            pullRequestProgress={pullRequestProgress}
-            planReviewCreating={planReviewJobCreating}
-            handoff={{
-              comments,
-              claudeLocalModel,
-              codexModel,
-              onCommentCreated: (comment) => setComments((prev) => [...prev, comment]),
-            }}
-          />
-
-          {/* 停滞したセッションの復旧（#2886）。**質問・計画より上**に置く——停滞している間は
-              質問も計画も進まないので、このIssueで最初に片付ける必要がある操作になる。
-              停滞していなければ`SessionStallPanel`自身が何も描かない */}
-          <SessionStallPanel session={issueSession} dispatch={dispatch} />
-
-          {/* 計画なしの質問待ちのアーティファクト（#3686）。`25.artifact-required`で計画を
-              挟まないときは見た目の承認を質問で待つので、計画承認待ちと同じく**承認する場所の
-              すぐ上**へ独立カードを出す（判断材料を先に見せる。計画承認待ちでは下記の位置） */}
-          {questionAnswerPending && !planDecisionPending && (
-            <IssueArtifactPanel artifacts={artifacts} onReload={reloadArtifacts} />
-          )}
-
-          {/* 質問の回答（#2189）。**セッション表示のすぐ下**に置く——計画パネルよりも上
-              （アーティファクトは、質問待ちのときだけこの上に出る。#3686） */}
-          {questionRequest && (
-            <div {...checkUserTargetProps("question")}>
-              {/* **質問が変われば作り直す**（#2158と同じ理由。Issue詳細はIssueを切り替えても
-                  マウントされたままなので、`key`が無いと選んだ内容が次の質問へ持ち越される） */}
-              <QuestionAnswerPanel
-                key={questionRequest.id}
-                request={questionRequest}
-                session={issueSession}
-                dispatch={dispatch}
-                premise={questionPremise}
-                manualStep={questionManualStep}
-                onCheckUserResolved={handleCheckUserResolved}
-              />
-            </div>
-          )}
-
-          {/* アーティファクト（#2154・#2860・#2926）。**計画承認待ちの間だけ計画パネルのすぐ上**に
-              置く——`25.artifact-required`の基本形は「計画と見た目を1回のやり取りで承認する」
-              なので、承認する場所の隣に見た目への入口が要る。承認するかどうかを判断する材料
-              （見た目）が、判断そのもの（計画の承認）より先に目に入るようにする。承認後の本来の
-              置き場所は対応PRの並びの上側（下記）で、ここに出すのは初めて見るときに見逃されない
-              ようにするための一時的な位置。畳めるセクションではなく独立したカード（#2190） */}
-          {planDecisionPending && (
-            <IssueArtifactPanel artifacts={artifacts} onReload={reloadArtifacts} />
-          )}
-
-          {/* 計画の承認・修正（#2061）。**セッション表示のすぐ下・対応PRより上**に置く。
-              待っている間セッションは止まっているので、このIssueで今いちばん急ぐ操作になる */}
-          {planRequest && (
-            <div {...checkUserTargetProps("plan")}>
-              {/* **計画が変われば作り直す**（#2158）。Issue詳細はIssueを切り替えても
-                  マウントされたままなので、`key`が無いと押した結果や書きかけの修正本文が
-                  次の計画へ持ち越される */}
-              <PlanApprovalPanel
-                key={planRequest.id}
-                request={planRequest}
-                session={issueSession}
-                dispatch={dispatch}
-                onCheckUserResolved={handleCheckUserResolved}
-                planReview={pendingPlanReview}
-                planReviewNotice={planReviewNotice}
-                planReviewJob={planReviewJob}
-                artifactsMissing={
-                  isArtifactsLoaded && !isArtifactsFailed &&
-                  artifacts.length === 0
+          <IssueDetailLayout
+            title={
+              <IssueDetailTitle
+                issue={issue}
+                implementationAgent={
+                  issueSession ? resolveIssueImplementationAgent(issueSession) : null
                 }
               />
-            </div>
-          )}
-
-          {/* 無人実行の計画への計画レビュー（#3554）。計画承認パネルが出ない経路なので、同じ
-              位置（対応PRより上）へカードだけを出し、送るのは承認欄の「修正」と同じ`@claude`
-              コメント（`handleReject`）。**ローカルの計画では出さない**——計画承認パネルの中にも
-              同じカードがあり、送信ボタンが2つ並ぶ */}
-          {executionTarget.expectsActionsRun &&
-            !planDecisionPending &&
-            checkUserReason(issue.labels) === "plan" &&
-            pendingPlanReview && (
-              <PlanReviewFindings
-                key={pendingPlanReview.commentId}
-                review={pendingPlanReview.review}
-                reviewedAtLabel={pendingPlanReview.createdAtLabel}
-                round={pendingPlanReview.round}
-                repositoryFullName={issue.repositoryFullName}
-                submitLabel="選んだ指摘で修正を依頼"
-                fallbackSubmitLabel="レビューを反映するよう修正を依頼"
-                approveHint="下の承認欄の「承認」を押す"
-                disabled={isSubmitting}
-                isSubmitting={isSubmitting}
-                additional={planReviewAdditional}
-                onAdditionalChange={setPlanReviewAdditional}
-                onSubmit={handleReject}
-              />
-            )}
-
-          {/* アーティファクト（#2926）の本来の置き場所——対応PRの並びの上側。承認待ちの間は
-              上記（計画パネルの上）に出しているので、ここでは非承認待ちのときだけ出す。
-              承認材料としての役目は終えているので、対応PRと同じ畳めるセクション様式にする */}
-          {!planDecisionPending && !questionAnswerPending && (
-            <IssueArtifactPanel artifacts={artifacts} onReload={reloadArtifacts} variant="section" />
-          )}
-
-          {/* 対応PRはIssue本文より上に置く。マージボタンをこの各行の中だけに置いても、
-              コメント欄まで下げずに押せる位置を保つため（#1288の意図・#1339）。
-              既定では畳み、マージ待ちのときだけ開いたままにする（#1577） */}
-          {visiblePullRequestLinks.length > 0 && (
-            <IssueDetailSection
-              id="pull-requests"
-              /* 上部の案内から「対応PRへ移動」で飛んでくる先（#1663） */
-              targetProps={checkUserTargetProps("pull-requests")}
-              title={mergeApprovalPending ? "対応PR・マージ待ち" : "対応PR"}
-              count={pullRequestSummary.total}
-              forceOpen={mergeApprovalPending || hasFailingPullRequest}
-              tone={hasFailingPullRequest ? "danger" : mergeApprovalPending ? "attention" : "default"}
-              summary={<IssuePullRequestStateCounts buckets={pullRequestSummary.buckets} />}
-            >
-              <IssuePullRequestList
-                variant="plain"
-                /* なぜ自動マージされず自分の操作が要るのかを、PR詳細への導線と同じ枠の中に
-                   出す（#1631）。理由はコメントの奥にしかなく、押す場所から離れていた */
-                notice={
-                  mergeApprovalPending ? (
-                    <MergeCheckReasonNotice reasons={mergeCheckReasons} />
-                  ) : undefined
-                }
-                links={pullRequestLinks}
-                pullRequests={pullRequests}
-                mergeApprovalPending={mergeApprovalPending}
-              />
-            </IssueDetailSection>
-          )}
-
-          {/* コードレビューの結果（#698）。**本文より上に置く**——レビューIssueの本文は
-              「何を見るか」の指定だけで、読みたいのは結果の方 */}
-          {codeReview && (
-            <CodeReviewPanel
-              report={codeReview.report}
-              runStatus={codeReviewRun?.runStatus ?? "missing"}
-              job={codeReviewRun?.job}
-              onRerun={() => void codeReviewRun?.rerun()}
-              isRerunning={codeReviewRun?.isRerunning}
-              rerunError={codeReviewRun?.rerunError}
-              createdFindingIssues={codeReview.createdFindingIssues}
-              onRestartReview={() => onStartCodeReview(issue.repositoryFullName)}
-              onCreateFindingIssue={(finding) => onCreateCodeReviewFindingIssue(issue, finding)}
-              onBulkCreateFindingIssues={(findings) =>
-                onBulkCreateCodeReviewFindingIssues(issue, findings)
-              }
-            />
-          )}
-
-          {/* 手作業Issueの案内と出口（#1280）。説明（「やること」）のすぐ上に置く */}
-          {canCompleteManualStep(issue) && (
-            <ManualStepPanel
-              isSubmitting={isSubmitting}
-              prerequisites={manualStepPrerequisites.prerequisites}
-              prerequisiteSummary={manualStepPrerequisites.summary}
-              dependents={manualStepPrerequisites.dependents}
-              verifiedAt={issue.manualStepVerifiedAt}
-              comments={comments}
-              configTargets={infraConfigTargets}
-              onCreateConfigIssue={(target) => onCreateConfigIssue(issue, target)}
-              repositoryFullName={issue.repositoryFullName}
-              sessionIssue={issue}
-              dispatch={dispatch}
-            />
-          )}
-
-          {/* 実施順序（#2003）。手作業Issueでは上の手作業パネルの中に出しているので、
-              ここでは出さない（同じものが2回並ぶ） */}
-          {!canCompleteManualStep(issue) && (
-            <IssueOrderSection
-              prerequisites={manualStepPrerequisites.prerequisites}
-              prerequisiteSummary={manualStepPrerequisites.summary}
-              dependents={manualStepPrerequisites.dependents}
-              repositoryFullName={issue.repositoryFullName}
-              idPrefix="pc"
-            />
-          )}
-
-          {/* 子イシューの進捗は説明より上に出す（#1340）。本文を読み始める前に分割済みの
-              子イシューがあることに気付けるよう、畳んでいても完了率は見えるようにする */}
-          {hasSubIssueRelations && (
-            <IssueDetailSection
-              id="sub-issues"
-              title={subIssueRelations.children.length > 0 ? "子Issue" : "親Issue"}
-              count={subIssueRelations.childCount}
-              summary={
-                subIssueRelations.children.length > 0 ? (
-                  <>
-                    <span
-                      className="h-1.5 w-16 shrink-0 overflow-hidden rounded-full bg-muted"
-                      role="progressbar"
-                      aria-valuenow={subIssueSummary.percent}
-                      aria-valuemin={0}
-                      aria-valuemax={100}
-                      aria-label="子Issueの完了率"
-                    >
-                      <span
-                        className="block h-full rounded-full bg-primary"
-                        style={{ width: `${subIssueSummary.percent}%` }}
-                      />
-                    </span>
-                    <span className="text-xs text-muted-foreground">
-                      {subIssueSummary.done} / {subIssueSummary.total} 完了
-                    </span>
-                  </>
-                ) : (
-                  <span className="truncate text-xs text-muted-foreground">
-                    #{subIssueRelations.parent?.number} {subIssueRelations.parent?.title}
-                  </span>
-                )
-              }
-            >
-              <SubIssueProgress
-                relations={subIssueRelations}
-                baseRepositoryFullName={issue.repositoryFullName}
-                showHeading={false}
-              />
-            </IssueDetailSection>
-          )}
-
-          <Separator />
-
-          {/* 説明とコメントだけが本来の見出しの重さを持つ（#1577）。補助情報（対応PR・
-              子Issue）は畳めるセクションの小さなラベルにしてあり、形で主従が読み取れる */}
-          <div>
-            <div className="mb-2 flex items-center justify-between gap-2">
-              <h2 className="text-base font-semibold">説明</h2>
-              {/* 本文にタスクリストがあるときだけ進捗を出す。手作業Issueの「やること」を
-                  消し込みながら進めるための目印（#1486） */}
-              {taskList.progress.total > 0 && (
-                <span className="shrink-0 text-xs text-muted-foreground">
-                  タスク {taskList.progress.completed} / {taskList.progress.total} 完了
-                </span>
-              )}
-            </div>
-            <ApiErrorMessage message={taskList.error} />
-            {issue.bodyOmitted ? (
-              <IssueBodyPending failed={Boolean(issue.bodyLoadFailed)} />
-            ) : (
-              <MarkdownBody
-                content={taskList.body}
-                repositoryFullName={issue.repositoryFullName}
-                onToggleTask={taskList.toggleTask}
-                isTaskToggling={taskList.isToggling}
-              />
-            )}
-          </div>
-
-          <Separator />
-
-          <div>
-            <div className="mb-3 flex items-center justify-between">
-              <h2 className="text-base font-semibold">
-                コメント <span className="text-muted-foreground">{issue.commentCount}</span>
-              </h2>
-            </div>
-            <CommentThread
-              comments={comments}
-              isLoading={isLoading}
-              error={error}
-              currentUserLogin={currentUserLogin}
-              repositoryFullName={issue.repositoryFullName}
-              issueSuggestions={issueSuggestions}
-              onUpdate={handleUpdateComment}
-              onDelete={handleDeleteComment}
-              isUpdating={isCommentSubmitting}
-              approvalPending={isApprovalPending(issue.labels)}
-              checkUserReason={checkUserReason(issue.labels)}
-              localSessionNotice={
-                executionTarget.expectsActionsRun ? undefined : sessionWaitingInput ? (
-                  <LocalSessionWaitingInputNotice
-                    session={issueSession}
-                    planDecisionPending={planRequest?.status === "WAITING"}
-                    questionAnswerPending={questionAnswerPending}
-                  />
-                ) : (
-                  <LocalSessionApprovalNotice session={issueSession} />
-                )
-              }
-              planReviewAction={
-                /* 計画の承認待ちのときだけ出す（#1855）。**自動起動が主経路**で、ここは
-                   走らなかったとき・計画を直してもう一度かけたいときの入口 */
-                checkUserReason(issue.labels) === "plan" ? (
-                  <PlanReviewButton
-                    issue={issue}
-                    dispatch={dispatch}
-                    // 承認パネル側に同じ「作成中」表示が出ているときだけ隠す（#3565）。
-                    // 失敗・見送り等の理由はここでしか出ないため消さない
-                    hideStatus={planReviewJobCreating}
-                  />
-                ) : undefined
-              }
-              sessionWaitingInput={sessionWaitingInput}
-              sessionStatePending={sessionStatePending}
-              localSession={!executionTarget.expectsActionsRun}
-              sessionAlive={sessionAlive}
-              canAskClaude={canAskClaude(issue)}
-              qaAnswerPending={qaAnswerPending}
-              onComment={handleApprovalComment}
-              onAskClaude={handleApprovalAskClaude}
-              onDismissCheckUser={handleDismissCheckUser}
-              mergeApprovalPending={mergeApprovalPending}
-              hasPullRequestSection={visiblePullRequestLinks.length > 0}
-              pullRequestStop={pullRequestStop}
-              workflowRun={workflowRun}
-              workflowRunCommentId={workflowRunCommentId}
-              onApprove={handleApprove}
-              onReject={handleReject}
-              onWithdraw={handleWithdraw}
-              onRequestContinuation={handleRequestContinuation}
-              isApproving={isSubmitting}
-              isRejecting={isCommentSubmitting}
-              isWithdrawing={isSubmitting}
-              isRequestingContinuation={isCommentSubmitting}
-              targetCommentIndex={targetCommentIndex}
-              targetCommentRef={targetCommentRef}
-              commentSummary={commentSummary}
-            />
-
-            <div className="mt-4 flex flex-col gap-2">
-              {/* ローカルで走っているIssueでは、ここへ書いたコメントがセッションへ届かない
-                  （#1287）。承認欄の案内（#1264）は承認待ちのときしか出ないが、届かないのは
-                  承認コメントに限らないため、入力欄そのものにも出す */}
-              {!executionTarget.expectsActionsRun && (
-                <LocalSessionCommentNotice session={issueSession} />
-              )}
-              <MentionTextarea
-                placeholder={composerPlaceholder}
-                className="min-h-20"
-                value={newCommentBody}
-                onChange={setNewCommentBody}
-                issueSuggestions={issueSuggestions}
-                disabled={isCommentSubmitting}
-                onUploadingChange={setIsImageUploading}
-                repositoryFullName={issue.repositoryFullName}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-                    e.preventDefault();
-                    handleSubmitPrimary();
-                  }
+            }
+            status={
+              <>
+              {/* 進捗・ジョブ・セッション・回答待ち・実行キャンセルを1枚に集約する（#1577）。
+                  走っているものが1つも無いIssueでは何も描かない */}
+              {attention && <IssueAttentionLine attention={attention} className="rounded-lg border bg-card px-3 py-2 text-sm" />}
+              <IssueStatusCard
+                issue={issue}
+                onIssueUpdated={onIssueUpdated}
+                dispatch={dispatch}
+                dispatchJob={dispatchJob}
+                issueSession={issueSession}
+                executionTarget={executionTarget}
+                workflowRun={workflowRun}
+                workflowRunId={workflowRunId}
+                qaAnswerPending={qaAnswerPending}
+                checkUserGuidance={checkUserGuidance}
+                planningSkipped={planningSkipped}
+                pullRequestProgress={pullRequestProgress}
+                planReviewCreating={planReviewJobCreating}
+                handoff={{
+                  comments,
+                  claudeLocalModel,
+                  codexModel,
+                  onCommentCreated: (comment) => setComments((prev) => [...prev, comment]),
                 }}
               />
-              <BodyCleanupButton value={newCommentBody} onCleaned={setNewCommentBody} />
-              <div className="flex flex-wrap items-center justify-end gap-2">
-                {/* Ctrl+Enterの宛先は状態で変わる（#2345）。主ボタンの塗りつぶしと文言を
-                    一致させて、どちらへ飛ぶのかを押す前に読めるようにする */}
-                <span className="mr-auto text-xs text-muted-foreground">
-                  <kbd className="rounded border bg-muted px-1 py-0.5 font-mono text-[0.7rem]">
-                    Ctrl
-                  </kbd>
-                  <span className="mx-0.5">+</span>
-                  <kbd className="rounded border bg-muted px-1 py-0.5 font-mono text-[0.7rem]">
-                    Enter
-                  </kbd>
-                  <span className="ml-1">
-                    で{composerPrimaryAction === "question" ? "質問" : "コメント"}
-                  </span>
-                </span>
-                {canCreateFollowupFromComment(issue) && (
-                  <Button variant="outline" onClick={() => onCreateFollowupIssue(issue)}>
-                    <FilePlus2 />
-                    引き継いでIssueを作成
-                  </Button>
-                )}
-                {/* ヘッダーの「Claudeに質問する」を畳んだぶん、ダイアログが出していた説明を
-                    ここへ引き継ぐ（#1913） */}
-                {canAskClaude(issue) && (
-                  <Button
-                    variant={composerPrimaryAction === "question" ? "default" : "outline"}
-                    title="入力した内容をClaudeへの質問として投稿します。コードは変更されません。回答はコメントとして返るまで数十秒〜数分かかります。"
-                    onClick={handleAskClaudeFromComposer}
-                    disabled={!newCommentBody.trim() || isCommentSubmitting || isImageUploading}
-                  >
-                    <MessageCircleQuestion />
-                    質問する
-                  </Button>
-                )}
-                {/* 質問Issueでは「コメント」を主ボタンにしない（#1770）。さらに枠線でもなく
-                    枠なしまで沈める（#2345）——質問Issueへ書いたふつうのコメントは誰も読まない */}
-                <Button
-                  variant={composerPrimaryAction === "comment" ? "default" : "ghost"}
-                  onClick={handleCreateComment}
-                  disabled={!newCommentBody.trim() || isCommentSubmitting || isImageUploading}
-                >
-                  {isCommentSubmitting && <Loader2 className="animate-spin" />}
-                  {isCommentSubmitting ? "送信中..." : "コメント"}
-                </Button>
-                {/* 回答を読み終えた位置に出口を置く（#1770）。ヘッダーにも同じ操作があるが、
-                    コメントを読み進めるとそちらは押す対象として遠い。書きかけがあるときは
-                    主ボタンを「質問する」へ譲って枠線まで下がる（#2345） */}
-                {canCloseQuestion && (
-                  <Button
-                    variant={composerPrimaryAction === "close" ? "default" : "outline"}
+
+              {/* 停滞したセッションの復旧（#2886）。**質問・計画より上**に置く——停滞している間は
+                  質問も計画も進まないので、このIssueで最初に片付ける必要がある操作になる。
+                  停滞していなければ`SessionStallPanel`自身が何も描かない */}
+              <SessionStallPanel session={issueSession} dispatch={dispatch} />
+
+              {/* 手作業Issueの状態と、あなたの作業・主操作（#1280・#4426）。**状態カードの直後・質問パネルの
+                  直前**に置く——いま必要な行動を最初に見せ、確認の依頼はすぐ下の質問パネルで答える */}
+              {canCompleteManualStep(issue) && (
+                <ManualStepPanel
+                  isSubmitting={isSubmitting}
+                  prerequisites={manualStepPrerequisites.prerequisites}
+                  prerequisiteSummary={manualStepPrerequisites.summary}
+                  dependents={manualStepPrerequisites.dependents}
+                  verifiedAt={issue.manualStepVerifiedAt}
+                  comments={comments}
+                  configTargets={infraConfigTargets}
+                  onCreateConfigIssue={(target) => onCreateConfigIssue(issue, target)}
+                  repositoryFullName={issue.repositoryFullName}
+                  sessionIssue={issue}
+                  dispatch={dispatch}
+                  questionPending={questionAnswerPending}
+                  questionAnswered={questionRequest?.status === "ANSWERED"}
+                  onShowQuestion={() => focusCheckUserTarget("question")}
+                />
+              )}
+              </>
+            }
+            decision={
+              <>
+              {/* 計画なしの質問待ちのアーティファクト（#3686）。`25.artifact-required`で計画を
+                  挟まないときは見た目の承認を質問で待つので、計画承認待ちと同じく**承認する場所の
+                  すぐ上**へ独立カードを出す（判断材料を先に見せる。計画承認待ちでは下記の位置） */}
+              {questionAnswerPending && !planDecisionPending && (
+                <IssueArtifactPanel artifacts={artifacts} onReload={reloadArtifacts} />
+              )}
+
+              {/* 質問の回答（#2189）。**セッション表示のすぐ下**に置く——計画パネルよりも上
+                  （アーティファクトは、質問待ちのときだけこの上に出る。#3686） */}
+              {questionRequest && (
+                <div {...checkUserTargetProps("question")}>
+                  {/* **質問が変われば作り直す**（#2158と同じ理由。Issue詳細はIssueを切り替えても
+                      マウントされたままなので、`key`が無いと選んだ内容が次の質問へ持ち越される） */}
+                  <QuestionAnswerPanel
+                    key={questionRequest.id}
+                    request={questionRequest}
+                    session={issueSession}
+                    dispatch={dispatch}
+                    premise={questionPremise}
+                    manualStep={questionManualStep}
+                    onCheckUserResolved={handleCheckUserResolved}
+                  />
+                </div>
+              )}
+
+              {/* アーティファクト（#2154・#2860・#2926）。**計画承認待ちの間だけ計画パネルのすぐ上**に
+                  置く——`25.artifact-required`の基本形は「計画と見た目を1回のやり取りで承認する」
+                  なので、承認する場所の隣に見た目への入口が要る。承認するかどうかを判断する材料
+                  （見た目）が、判断そのもの（計画の承認）より先に目に入るようにする。承認後の本来の
+                  置き場所は対応PRの並びの上側（下記）で、ここに出すのは初めて見るときに見逃されない
+                  ようにするための一時的な位置。畳めるセクションではなく独立したカード（#2190） */}
+              {planDecisionPending && (
+                <IssueArtifactPanel artifacts={artifacts} onReload={reloadArtifacts} />
+              )}
+
+              {/* 計画の承認・修正（#2061）。**セッション表示のすぐ下・対応PRより上**に置く。
+                  待っている間セッションは止まっているので、このIssueで今いちばん急ぐ操作になる */}
+              {planRequest && (
+                <div {...checkUserTargetProps("plan")}>
+                  {/* **計画が変われば作り直す**（#2158）。Issue詳細はIssueを切り替えても
+                      マウントされたままなので、`key`が無いと押した結果や書きかけの修正本文が
+                      次の計画へ持ち越される */}
+                  <PlanApprovalPanel
+                    key={planRequest.id}
+                    request={planRequest}
+                    session={issueSession}
+                    dispatch={dispatch}
+                    onCheckUserResolved={handleCheckUserResolved}
+                    planReview={pendingPlanReview}
+                    planReviewNotice={planReviewNotice}
+                    planReviewJob={planReviewJob}
+                    artifactsMissing={
+                      isArtifactsLoaded && !isArtifactsFailed &&
+                      artifacts.length === 0
+                    }
+                  />
+                </div>
+              )}
+
+              {/* 無人実行の計画への計画レビュー（#3554）。計画承認パネルが出ない経路なので、同じ
+                  位置（対応PRより上）へカードだけを出し、送るのは承認欄の「修正」と同じ`@claude`
+                  コメント（`handleReject`）。**ローカルの計画では出さない**——計画承認パネルの中にも
+                  同じカードがあり、送信ボタンが2つ並ぶ */}
+              {executionTarget.expectsActionsRun &&
+                !planDecisionPending &&
+                checkUserReason(issue.labels) === "plan" &&
+                pendingPlanReview && (
+                  <PlanReviewFindings
+                    key={pendingPlanReview.commentId}
+                    review={pendingPlanReview.review}
+                    reviewedAtLabel={pendingPlanReview.createdAtLabel}
+                    round={pendingPlanReview.round}
+                    repositoryFullName={issue.repositoryFullName}
+                    submitLabel="選んだ指摘で修正を依頼"
+                    fallbackSubmitLabel="レビューを反映するよう修正を依頼"
+                    approveHint="下の承認欄の「承認」を押す"
                     disabled={isSubmitting}
-                    onClick={() => handleClose("completed")}
-                  >
-                    <XCircle />
-                    回答を確認してクローズ
-                  </Button>
+                    isSubmitting={isSubmitting}
+                    additional={planReviewAdditional}
+                    onAdditionalChange={setPlanReviewAdditional}
+                    onSubmit={handleReject}
+                  />
+                )}
+
+              {/* コードレビューの結果（#698）。**本文より上に置く**——レビューIssueの本文は
+                  「何を見るか」の指定だけで、読みたいのは結果の方 */}
+              {codeReview && (
+                <CodeReviewPanel
+                  report={codeReview.report}
+                  runStatus={codeReviewRun?.runStatus ?? "missing"}
+                  job={codeReviewRun?.job}
+                  onRerun={() => void codeReviewRun?.rerun()}
+                  isRerunning={codeReviewRun?.isRerunning}
+                  rerunError={codeReviewRun?.rerunError}
+                  createdFindingIssues={codeReview.createdFindingIssues}
+                  onRestartReview={() => onStartCodeReview(issue.repositoryFullName)}
+                  onCreateFindingIssue={(finding) => onCreateCodeReviewFindingIssue(issue, finding)}
+                  onBulkCreateFindingIssues={(findings) =>
+                    onBulkCreateCodeReviewFindingIssues(issue, findings)
+                  }
+                />
+              )}
+
+
+              {/* 実施順序（#2003）。手作業Issueでは上の手作業パネルの中に出しているので、
+                  ここでは出さない（同じものが2回並ぶ） */}
+              {!canCompleteManualStep(issue) && (
+                <IssueOrderSection
+                  prerequisites={manualStepPrerequisites.prerequisites}
+                  prerequisiteSummary={manualStepPrerequisites.summary}
+                  dependents={manualStepPrerequisites.dependents}
+                  repositoryFullName={issue.repositoryFullName}
+                  idPrefix="pc"
+                />
+              )}
+              </>
+            }
+            overview={
+              <>
+              {/* 説明とコメントだけが本来の見出しの重さを持つ（#1577）。補助情報（対応PR・
+                  子Issue）は畳めるセクションの小さなラベルにしてあり、形で主従が読み取れる */}
+              <div>
+                <div className="mb-2 flex items-center justify-between gap-2">
+                  <h2 className="text-base font-semibold">説明</h2>
+                  {/* 本文にタスクリストがあるときだけ進捗を出す。手作業Issueの「やること」を
+                      消し込みながら進めるための目印（#1486） */}
+                  {taskList.progress.total > 0 && (
+                    <span className="shrink-0 text-xs text-muted-foreground">
+                      タスク {taskList.progress.completed} / {taskList.progress.total} 完了
+                    </span>
+                  )}
+                </div>
+                <ApiErrorMessage message={taskList.error} />
+                {issue.bodyOmitted ? (
+                  <IssueBodyPending failed={Boolean(issue.bodyLoadFailed)} />
+                ) : (
+                  <MarkdownBody
+                    content={taskList.body}
+                    repositoryFullName={issue.repositoryFullName}
+                    onToggleTask={taskList.toggleTask}
+                    isTaskToggling={taskList.isToggling}
+                  />
                 )}
               </div>
-              <ApiErrorMessage message={commentMutationError} />
-            </div>
-          </div>
+              </>
+            }
+            related={
+              <>
+                {/* 子イシューの進捗（#1340）。畳んでいても完了率は見えるようにする */}
+                {hasSubIssueRelations && (
+                  <IssueSubIssuesSection
+                    relations={subIssueRelations}
+                    summary={subIssueSummary}
+                    baseRepositoryFullName={issue.repositoryFullName}
+                  />
+                )}
+
+              {/* アーティファクト（#2926）の本来の置き場所——対応PRの並びの上側。承認待ちの間は
+                  上記（計画パネルの上）に出しているので、ここでは非承認待ちのときだけ出す。
+                  承認材料としての役目は終えているので、対応PRと同じ畳めるセクション様式にする */}
+              {!planDecisionPending && !questionAnswerPending && (
+                <IssueArtifactPanel artifacts={artifacts} onReload={reloadArtifacts} variant="section" />
+              )}
+              </>
+            }
+            /* 対応PR（#1288・#1339・#4440）。マージ待ち・PR失敗のときだけ判断材料の末尾へ上がる */
+            pullRequests={
+              visiblePullRequestLinks.length > 0 ? (
+                <IssuePullRequestsSection
+                  summary={pullRequestSummary}
+                  mergeApprovalPending={mergeApprovalPending}
+                  hasFailingPullRequest={hasFailingPullRequest}
+                  mergeCheckReasons={mergeCheckReasons}
+                  links={pullRequestLinks}
+                  pullRequests={pullRequests}
+                />
+              ) : null
+            }
+            promotePullRequests={mergeApprovalPending || hasFailingPullRequest}
+            activity={
+              <>
+              <div>
+                <div className="mb-3 flex items-center justify-between">
+                  <h2 className="text-base font-semibold">
+                    コメント <span className="text-muted-foreground">{issue.commentCount}</span>
+                  </h2>
+                </div>
+                <CommentThread
+                  comments={comments}
+                  isLoading={isLoading}
+                  error={error}
+                  currentUserLogin={currentUserLogin}
+                  repositoryFullName={issue.repositoryFullName}
+                  issueSuggestions={issueSuggestions}
+                  onUpdate={handleUpdateComment}
+                  onDelete={handleDeleteComment}
+                  isUpdating={isCommentSubmitting}
+                  approvalPending={isApprovalPending(issue.labels)}
+                  checkUserReason={checkUserReason(issue.labels)}
+                  localSessionNotice={
+                    executionTarget.expectsActionsRun ? undefined : sessionWaitingInput ? (
+                      <LocalSessionWaitingInputNotice
+                        session={issueSession}
+                        planDecisionPending={planRequest?.status === "WAITING"}
+                        questionAnswerPending={questionAnswerPending}
+                      />
+                    ) : (
+                      <LocalSessionApprovalNotice session={issueSession} />
+                    )
+                  }
+                  planReviewAction={
+                    /* 計画の承認待ちのときだけ出す（#1855）。**自動起動が主経路**で、ここは
+                       走らなかったとき・計画を直してもう一度かけたいときの入口 */
+                    checkUserReason(issue.labels) === "plan" ? (
+                      <PlanReviewButton
+                        issue={issue}
+                        dispatch={dispatch}
+                        // 承認パネル側に同じ「作成中」表示が出ているときだけ隠す（#3565）。
+                        // 失敗・見送り等の理由はここでしか出ないため消さない
+                        hideStatus={planReviewJobCreating}
+                      />
+                    ) : undefined
+                  }
+                  sessionWaitingInput={sessionWaitingInput}
+                  sessionStatePending={sessionStatePending}
+                  localSession={!executionTarget.expectsActionsRun}
+                  sessionAlive={sessionAlive}
+                  canAskClaude={canAskClaude(issue)}
+                  qaAnswerPending={qaAnswerPending}
+                  onComment={handleApprovalComment}
+                  onAskClaude={handleApprovalAskClaude}
+                  onDismissCheckUser={handleDismissCheckUser}
+                  mergeApprovalPending={mergeApprovalPending}
+                  hasPullRequestSection={visiblePullRequestLinks.length > 0}
+                  pullRequestStop={pullRequestStop}
+                  workflowRun={workflowRun}
+                  workflowRunCommentId={workflowRunCommentId}
+                  onApprove={handleApprove}
+                  onReject={handleReject}
+                  onWithdraw={handleWithdraw}
+                  onRequestContinuation={handleRequestContinuation}
+                  isApproving={isSubmitting}
+                  isRejecting={isCommentSubmitting}
+                  isWithdrawing={isSubmitting}
+                  isRequestingContinuation={isCommentSubmitting}
+                  targetCommentIndex={targetCommentIndex}
+                  targetCommentRef={targetCommentRef}
+                  commentSummary={commentSummary}
+                />
+
+                <div className="mt-4 flex flex-col gap-2">
+                  {/* ローカルで走っているIssueでは、ここへ書いたコメントがセッションへ届かない
+                      （#1287）。承認欄の案内（#1264）は承認待ちのときしか出ないが、届かないのは
+                      承認コメントに限らないため、入力欄そのものにも出す */}
+                  {!executionTarget.expectsActionsRun && (
+                    <LocalSessionCommentNotice session={issueSession} />
+                  )}
+                  <MentionTextarea
+                    placeholder={composerPlaceholder}
+                    className="min-h-20"
+                    value={newCommentBody}
+                    onChange={setNewCommentBody}
+                    issueSuggestions={issueSuggestions}
+                    disabled={isCommentSubmitting}
+                    onUploadingChange={setIsImageUploading}
+                    repositoryFullName={issue.repositoryFullName}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+                        e.preventDefault();
+                        handleSubmitPrimary();
+                      }
+                    }}
+                  />
+                  <BodyCleanupButton value={newCommentBody} onCleaned={setNewCommentBody} />
+                  <div className="flex flex-wrap items-center justify-end gap-2">
+                    {/* Ctrl+Enterの宛先は状態で変わる（#2345）。主ボタンの塗りつぶしと文言を
+                        一致させて、どちらへ飛ぶのかを押す前に読めるようにする */}
+                    <span className="mr-auto text-xs text-muted-foreground">
+                      <kbd className="rounded border bg-muted px-1 py-0.5 font-mono text-[0.7rem]">
+                        Ctrl
+                      </kbd>
+                      <span className="mx-0.5">+</span>
+                      <kbd className="rounded border bg-muted px-1 py-0.5 font-mono text-[0.7rem]">
+                        Enter
+                      </kbd>
+                      <span className="ml-1">
+                        で{composerPrimaryAction === "question" ? "質問" : "コメント"}
+                      </span>
+                    </span>
+                    {canCreateFollowupFromComment(issue) && (
+                      <Button variant="outline" onClick={() => onCreateFollowupIssue(issue)}>
+                        <FilePlus2 />
+                        引き継いでIssueを作成
+                      </Button>
+                    )}
+                    {/* ヘッダーの「Claudeに質問する」を畳んだぶん、ダイアログが出していた説明を
+                        ここへ引き継ぐ（#1913） */}
+                    {canAskClaude(issue) && (
+                      <Button
+                        variant={composerPrimaryAction === "question" ? "default" : "outline"}
+                        title="入力した内容をClaudeへの質問として投稿します。コードは変更されません。回答はコメントとして返るまで数十秒〜数分かかります。"
+                        onClick={handleAskClaudeFromComposer}
+                        disabled={!newCommentBody.trim() || isCommentSubmitting || isImageUploading}
+                      >
+                        <MessageCircleQuestion />
+                        質問する
+                      </Button>
+                    )}
+                    {/* 質問Issueでは「コメント」を主ボタンにしない（#1770）。さらに枠線でもなく
+                        枠なしまで沈める（#2345）——質問Issueへ書いたふつうのコメントは誰も読まない */}
+                    <Button
+                      variant={composerPrimaryAction === "comment" ? "default" : "ghost"}
+                      onClick={handleCreateComment}
+                      disabled={!newCommentBody.trim() || isCommentSubmitting || isImageUploading}
+                    >
+                      {isCommentSubmitting && <Loader2 className="animate-spin" />}
+                      {isCommentSubmitting ? "送信中..." : "コメント"}
+                    </Button>
+                    {/* 回答を読み終えた位置に出口を置く（#1770）。ヘッダーにも同じ操作があるが、
+                        コメントを読み進めるとそちらは押す対象として遠い。書きかけがあるときは
+                        主ボタンを「質問する」へ譲って枠線まで下がる（#2345） */}
+                    {canCloseQuestion && (
+                      <Button
+                        variant={composerPrimaryAction === "close" ? "default" : "outline"}
+                        disabled={isSubmitting}
+                        onClick={() => handleClose("completed")}
+                      >
+                        <XCircle />
+                        回答を確認してクローズ
+                      </Button>
+                    )}
+                  </div>
+                  <ApiErrorMessage message={commentMutationError} />
+                </div>
+              </div>
+              </>
+            }
+          />
         </div>
       </div>
 

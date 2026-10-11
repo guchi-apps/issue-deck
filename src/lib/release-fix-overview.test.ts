@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
 
 import type { ReleaseFixStatus } from "@/lib/release-fix-series";
-import { describeFixOverview, summarizeChecks, type OverviewChecks } from "@/lib/release-fix-overview";
+import {
+  describeFixOverview,
+  RELEASE_FIX_PHASES,
+  releaseFixPhaseIndex,
+  summarizeChecks,
+  type OverviewChecks,
+} from "@/lib/release-fix-overview";
 
 const checks = (over: Partial<OverviewChecks> = {}): OverviewChecks => ({
   aiReview: { state: "passed", findingCount: 0 },
@@ -37,12 +43,12 @@ describe("describeFixOverview", () => {
 
   it("作り直し中・再チェック中は修正前の指摘を現在状態にしない", () => {
     const old = checks({ aiReview: { state: "failed", findingCount: 3 } });
-    expect(describeFixOverview({ series: series("rebuilding"), checks: old }).headline).toBe("修正版のリリースを準備しています");
+    expect(describeFixOverview({ series: series("rebuilding"), checks: old }).headline).toBe("修正を反映したリリース候補を準備しています");
     expect(describeFixOverview({ series: series("reverifying", 4394), checks: old }).pill).toBe("チェック中");
   });
 
-  it("通過なら本番承認待ち。取得失敗は問題なしとしない", () => {
-    expect(describeFixOverview({ series: null, checks: checks() }).pill).toBe("本番承認待ち");
+  it("通過なら公開操作待ち。取得失敗は問題なしとしない", () => {
+    expect(describeFixOverview({ series: null, checks: checks() }).pill).toBe("公開操作待ち");
     const err = describeFixOverview({ series: null, checks: null, checksError: true });
     expect(err.headline).toContain("問題なしとは扱いません");
     expect(err.action.kind).toBe("none");
@@ -75,7 +81,7 @@ describe("describeFixOverview: 作り直しの失敗と時系列（#4398）", ()
 
   it("新しいリリースPRが出る前（作り直し中）は修正前の結果で承認待ち・指摘を出さない", () => {
     const o = describeFixOverview({ series: series("rebuilding"), checks: checks() });
-    expect(o.pill).toBe("修正版を準備中");
+    expect(o.pill).toBe("修正取り込み準備中");
     expect(o.action.kind).toBe("view_progress");
   });
 });
@@ -85,5 +91,22 @@ describe("summarizeChecks", () => {
     expect(summarizeChecks(checks({ aiReview: { state: "failed", findingCount: 2 }, mac: { state: "passed" } }))).toBe(
       "全体レビュー: 指摘2件 ／ 統合検証: 問題なし ／ Mac検証: 問題なし",
     );
+  });
+});
+
+describe("操作不要の判定と工程（#4428）", () => {
+  it("待てば進む状態だけautoProgressにし、失敗・判断待ち・公開操作待ちは待機扱いしない", () => {
+    const series = (status: string, extra: Record<string, unknown> = {}) =>
+      ({ status, issueNumber: 1, successorPrNumber: null, stopReason: "理由", ...extra }) as never;
+    expect(describeFixOverview({ series: series("rebuilding"), checks: null }).autoProgress).toBe(true);
+    expect(describeFixOverview({ series: series("fix_merged"), checks: null }).autoProgress).toBe(true);
+    expect(describeFixOverview({ series: series("awaiting_decision"), checks: null }).autoProgress).toBe(false);
+    expect(describeFixOverview({ series: series("stopped", { rebuildFailed: true }), checks: null }).autoProgress).toBe(false);
+    expect(describeFixOverview({ series: null, checks: null, checksError: true }).autoProgress).toBe(false);
+  });
+
+  it("内部の7段階を修正→取り込み→再検証→公開の4つへまとめる", () => {
+    expect(RELEASE_FIX_PHASES).toEqual(["修正", "取り込み", "再検証", "公開"]);
+    expect([0, 1, 2, 3, 4, 5, 6].map(releaseFixPhaseIndex)).toEqual([0, 0, 0, 1, 1, 2, 3]);
   });
 });

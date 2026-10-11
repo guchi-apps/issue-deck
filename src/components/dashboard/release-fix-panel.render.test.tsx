@@ -84,7 +84,7 @@ describe("ReleaseFixOverviewPanel", () => {
         changes={noChanges} onPreviousResultsChange={onPrevious} />,
     );
     await waitFor(() => expect(onPrevious).toHaveBeenLastCalledWith(true));
-    expect(screen.getByTestId("release-fix-headline").textContent).toBe("修正版のリリースを準備しています");
+    expect(screen.getByTestId("release-fix-headline").textContent).toBe("修正を反映したリリース候補を準備しています");
   });
 
   it("新しいリリースPRを見ているときは退避しない（現在の結果）", async () => {

@@ -110,15 +110,16 @@ describe("アーティファクトの表示位置（#2860・#2926）", () => {
   });
 
   it.each(DETAIL_SOURCES)("%s で通常版のアーティファクトが対応PRより前に出る", (path) => {
+    // #4440で対応PRは共通部品`IssuePullRequestsSection`になり、並び（関連→対応PR）は
+    // `IssueDetailLayout`が持つ。通常版（`variant="section"`）は関連スロットに渡す
     const source = readFileSync(path, "utf8");
-    const secondArtifactIndex = source.indexOf(
-      "<IssueArtifactPanel",
-      source.indexOf("<IssueArtifactPanel") + 1,
-    );
-    const pullRequestsIndex = source.indexOf('id="pull-requests"');
-    expect(secondArtifactIndex).toBeGreaterThan(-1);
+    const sectionArtifactIndex = source.indexOf('variant="section"');
+    const relatedIndex = source.indexOf("related={");
+    const pullRequestsIndex = source.indexOf("<IssuePullRequestsSection");
+    expect(sectionArtifactIndex).toBeGreaterThan(relatedIndex);
+    expect(relatedIndex).toBeGreaterThan(-1);
     expect(pullRequestsIndex).toBeGreaterThan(-1);
-    expect(secondArtifactIndex).toBeLessThan(pullRequestsIndex);
+    expect(sectionArtifactIndex).toBeLessThan(pullRequestsIndex);
   });
 
   it.each(DETAIL_SOURCES)("%s がアーティファクトを計画承認待ちの有無で出し分ける", (path) => {

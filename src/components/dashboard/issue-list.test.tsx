@@ -550,17 +550,17 @@ describe("Remoteボタンの強調（#1964）", () => {
  */
 describe("計画の承認への入口（#2061）", () => {
   function planButton(issueNumber: number): HTMLElement {
-    return screen.getByRole("button", { name: `#${issueNumber}の計画を承認する` });
+    return screen.getByRole("button", { name: `#${issueNumber}の計画を確認する` });
   }
 
-  it("計画の返事を待っている行にだけ「計画を承認」を出す", () => {
+  it("計画の返事を待っている行にだけ「計画を確認」を出す", () => {
     renderList({
       issues: [makeIssue({ number: 1 }), makeIssue({ number: 2 })],
       dispatch: makeDispatch([makeSession({ activity: "WAITING_INPUT" })], [makePlanRequest()]),
     });
 
     expect(planButton(1)).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "#2の計画を承認する" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "#2の計画を確認する" })).toBeNull();
   });
 
   it("押すとそのIssueを開く（外部へは出ない）", () => {
@@ -577,7 +577,7 @@ describe("計画の承認への入口（#2061）", () => {
   });
 
   /** 行の中でオレンジが2つ並ぶと、どちらを押せばよいのか分からなくなる */
-  it("「計画を承認」を出す行では、Remote Controlの強調を下ろす", () => {
+  it("「計画を確認」を出す行では、Remote Controlの強調を下ろす", () => {
     renderList({
       dispatch: makeDispatch([makeSession({ activity: "WAITING_INPUT" })], [makePlanRequest()]),
     });
@@ -596,7 +596,7 @@ describe("計画の承認への入口（#2061）", () => {
       ),
     });
 
-    expect(screen.queryByRole("button", { name: "#1の計画を承認する" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "#1の計画を確認する" })).toBeNull();
   });
 });
 
@@ -625,7 +625,7 @@ describe("計画レビュー中の詳細状態（#3941）", () => {
 describe("PRのマージへの入口（#3083）", () => {
   const mergeLabels = [{ name: "00.check-user" }, { name: "01.check-merge" }] as IssueLabel[];
 
-  it("理由が01.check-mergeの行に「PRをマージ」を出し、押すとそのIssueを開く", () => {
+  it("理由が01.check-mergeの行に「PRを確認」を出し、押すとそのIssueを開く", () => {
     const onSelectIssue = vi.fn();
     renderList({
       onSelectIssue,
@@ -633,7 +633,7 @@ describe("PRのマージへの入口（#3083）", () => {
       dispatch: makeDispatch([makeSession({ activity: "WORKING" })]),
     });
 
-    fireEvent.click(screen.getByRole("button", { name: "#1のPRをマージする" }));
+    fireEvent.click(screen.getByRole("button", { name: "#1のPRを確認する" }));
 
     expect(onSelectIssue).toHaveBeenCalledTimes(1);
     expect(onSelectIssue.mock.calls[0][0].number).toBe(1);
@@ -644,7 +644,7 @@ describe("PRのマージへの入口（#3083）", () => {
       issues: [makeIssue({ number: 1, labels: [{ name: "01.check-merge" }] as IssueLabel[] })],
     });
 
-    expect(screen.queryByRole("button", { name: "#1のPRをマージする" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "#1のPRを確認する" })).toBeNull();
   });
 
   it("理由がマージ以外なら出さない", () => {
@@ -657,7 +657,7 @@ describe("PRのマージへの入口（#3083）", () => {
       ],
     });
 
-    expect(screen.queryByRole("button", { name: "#1のPRをマージする" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "#1のPRを確認する" })).toBeNull();
   });
 
   /** 行の中でオレンジが2つ並ぶと、どちらを押せばよいのか分からなくなる */
@@ -667,8 +667,8 @@ describe("PRのマージへの入口（#3083）", () => {
       dispatch: makeDispatch([makeSession({ activity: "WAITING_INPUT" })], [makePlanRequest()]),
     });
 
-    expect(screen.getByRole("button", { name: "#1の計画を承認する" })).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "#1のPRをマージする" })).toBeNull();
+    expect(screen.getByRole("button", { name: "#1の計画を確認する" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "#1のPRを確認する" })).toBeNull();
   });
 });
 

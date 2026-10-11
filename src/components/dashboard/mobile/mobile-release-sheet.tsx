@@ -125,7 +125,6 @@ export function MobileReleaseSheet({
                 </span>
               </div>
               <ReleasePreparationAlert repositoryFullName={repository.fullName} />
-              <ReleaseRebuildHistoryPanel repositoryFullName={repository.fullName} />
               <ReleaseProgress
                 status={releaseStatus}
                 repoFullName={repository.fullName}
@@ -172,6 +171,8 @@ export function MobileReleaseSheet({
                 />
               )}
               {webviewIos && <WebviewIosInstructions repo={webviewIos} />}
+              {/* 作り直しの履歴（#4359）は、現在の検証と操作の後ろに置く（#4428） */}
+              <ReleaseRebuildHistoryPanel repositoryFullName={repository.fullName} />
             </div>
           )}
         </div>

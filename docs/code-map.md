@@ -261,6 +261,11 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   **選べるかの判定は`nightly-run.ts`の`resolveBulkReserveRejection`**で、行の状態を読める
   `issue-list.tsx`が材料を渡す。積む口は「実装を開始」と同じ`POST /api/nightly-run`
   （[docs/multi-agent/subpc-dispatch.md](multi-agent/subpc-dispatch.md)「次枠実行」）。
+- **Issueの代表状態と次の行動は`lib/issue-attention-state.ts`の`resolveIssueAttention`が1か所で決め**
+  （#4425）、Issue一覧の行・PC詳細・スマホ詳細は`issue-attention-line.tsx`で同じ結果を描く。
+  一覧のボタンは詳細を開くだけなので「計画を確認」「PRを確認」「質問を確認」と呼び、承認・マージとは
+  書かない。権限待ちは外部でしか解消できないことを状態説明に出す。実行キューの待ちは進捗バーが
+  言うので、一覧では`queueLabel`を渡さない（同じ状態を2か所で言わせない）。#4426〜#4428も同じ部品を使う
 - **Issue一覧の行は「カード全面に敷いた選択用の`<button>`」と本文が兄弟**（#1915。
   `issue-list.tsx`の`renderIssueRow`）。行に操作（リンク・ボタン）を足すときは、
   **本文側（`pointer-events-none`）の中で`pointer-events-auto`を付けて置く**。
@@ -642,6 +647,8 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
     起案・巡回・作り直しは[`lib/release-fix-series-run.ts`](../src/lib/release-fix-series-run.ts)、作り直しの実行は画面と共通の
     [`lib/release-rebuild-run.ts`](../src/lib/release-rebuild-run.ts)、API・巡回の入口は`app/api/repositories/release/fix-series/`、
     画面は[`components/dashboard/release-fix-panel.tsx`](../src/components/dashboard/release-fix-panel.tsx)。設計は[multi-agent/release-verification.md](multi-agent/release-verification.md)
+  - **本番PR詳細の上部**（#4428）は[`components/dashboard/release-pull-request-overview.tsx`](../src/components/dashboard/release-pull-request-overview.tsx)。
+    `pull-request-detail.tsx`は開いている凍結ブランチのリリースPRのときだけこれを先頭に出し、既存の表示を「詳細・履歴」として下に残す
   - **PRを選んだ作り直しは`ReleaseRebuildRequest`**（#4335）。選択の検証は[`lib/release-rebuild-selection.ts`](../src/lib/release-rebuild-selection.ts)（純関数）、
     起動と二重防止は[`lib/release-rebuild-selection-run.ts`](../src/lib/release-rebuild-selection-run.ts)（画面と修正系列で共通）、
     画面は[`components/dashboard/release-rebuild-selection-list.tsx`](../src/components/dashboard/release-rebuild-selection-list.tsx)。
@@ -1195,13 +1202,23 @@ export function POST(request: NextRequest) {
   Projectの場所は`PROJECT_V2_OWNER`・`PROJECT_V2_NUMBER`で指定し、**未設定なら
   Project連携を一切行わない**。設計の一次情報源は
   [progress-status-architecture.md](progress-status-architecture.md)（#991）。
-- **PCのIssue詳細は「固定ヘッダー → 実行状況カード → 折りたためる補助情報 → 説明・コメント」の
-  4層**（#1577。[`components/dashboard/issue-detail.tsx`](../src/components/dashboard/issue-detail.tsx)）。
-  積み上がった上部の表示を整理したもので、次の3点が判断の要る箇所。
+- **Issue詳細（PC・スマホ）は「短い固定ヘッダー → 正式タイトル → 状態と主操作 → 判断材料 →
+  概要（説明）→ 関連・対応PR → 活動（コメント）」の順**（#1577・#4425・#4440）。**並びの正は
+  [`issue-detail-layout.tsx`](../src/components/dashboard/issue-detail-layout.tsx)の`IssueDetailLayout`**で、
+  PC（[`issue-detail.tsx`](../src/components/dashboard/issue-detail.tsx)）とスマホ
+  （`mobile/mobile-issue-detail.tsx`）はスロットへ中身を渡すだけにする（並びを各画面に書き戻さない。
+  `issue-detail-layout.test.tsx`が固定）。外枠は持たず、スクロール領域の`ref`・`flex-1`・下端の余白は
+  各画面が持つ。次の点が判断の要る箇所。
+  - **対応PRは、マージ待ち・PR失敗のときだけ判断材料の末尾へ上がる**（`promotePullRequests`）。それ以外は
+    説明・子Issueの下に畳む。以前は常に説明より上に置いて「マージボタンをコメント欄まで下げずに押せる」
+    （#1288・#1339）を保っていたが、PRを見る必要があるときだけ上げれば同じ意図を保てる。
   - **ヘッダー**（[`issue-detail-header.tsx`](../src/components/dashboard/issue-detail-header.tsx)）は
-    スクロール領域の先頭で`sticky`。**実体のボタンとして置くのは主操作だけ**にし、「GitHubで開く」は
+    スクロール領域の先頭で`sticky`。リポジトリ・番号・1行に省略したタイトル・操作だけを持ち、
+    正式タイトル（全文）とメタは本文先頭の`IssueDetailTitle`に置く（固定領域を薄くする）。
+    **実体のボタンとして置くのは主操作だけ**にし、「GitHubで開く」は
     アイコン、編集・クローズ・削除は`⋯`へ寄せる（増やすと折り返しで主操作の位置が動く。#998）。
     メタは`Open`・作成者・更新（相対時刻）だけで、**担当者と日付はプロパティパネルに置く**（重複を作らない）。
+    スマホのヘッダー・概要カード（`MobileIssueSummaryCard`）は以前からこの形。
   - **実行状況カード**（[`issue-status-card.tsx`](../src/components/dashboard/issue-status-card.tsx)）は
     進捗ステップ・積んだジョブ・セッション・横断質問・Claudeの回答待ち・実行キャンセルを1枚に集める。
     **どれも無いIssueではカードごと描かない**ので、判定は各子コンポーネントと同じ関数
@@ -1531,7 +1548,7 @@ export function POST(request: NextRequest) {
   `manual-step-placeholder-fill.tsx`・自己申告の完了ボタン）は無い。** 手作業Issueは手作業セッション
   （AI主導。`manual-step-session-panel.tsx`・`scripts/prompts/manual-step-agent.md`）が調査・実行・検証を
   進め、詳細は`ManualStepPanel`の「作業の状況」（`lib/manual-step-investigation.ts`が読む事前調査と
-  完了検証のコメント）を出す。完了は検証コマンドがすべて終了コード0のときだけセッションがcloseする。
+  完了検証のコメント。代表状態は`lib/manual-step-phase.ts`。#4426）を出す。完了は検証コマンドがすべて終了コード0のときだけセッションがcloseする。
   **以下の箇条書きは撤去前の設計の記録で、サーバー側の代行実行（`/api/manual-steps/*`・`lib/manual-step-*.ts`）
   は残っている。** 画面側のファイル名・番号表示・ボタンの記述は現行のコードに存在しない。
 - **（撤去前の記録）溜まった手作業は「手作業アシスタント」が1手順ずつ順番に案内する**（#1826）。
@@ -2028,8 +2045,7 @@ export function POST(request: NextRequest) {
     ただしカード全体が`<button>`なので`linkable={false}`を渡す——`<button>`の中に`<a>`を置くのは
     HTMLとして不正で、押したときの当たり判定も読み上げも壊れる（レールの外枠を`<div>`ではなく
     `<span>`にしているのも同じ理由）。
-  - **PR詳細（`pull-request-detail.tsx`）は今までのバッジ列のまま。** 一覧性が要るのは並ぶ側だけで、
-    詳細では`AiReviewBadge`・`ConflictBadge`が全文と実行ログを持つ。
+  - **PR詳細（`pull-request-detail.tsx`）は#4427で「主操作と6チェック」中心に組み直した**（下の「PR一覧・通常PR詳細の情報階層」）。
 - **対応PRのポーリングを止める条件は「CI実行中か」だけにしない**（#2145・#2915。
   [`lib/issue-pull-requests.ts`](../src/lib/issue-pull-requests.ts)の
   `issuePullRequestPollIntervalMs`が間隔を決め、
@@ -4611,6 +4627,14 @@ Webhookで取り込む。運用・移行・ロールバックは[backup-ci.md](b
 - 一覧はSwiftソースの宣言（`: Widget`・`ActivityConfiguration`・`ControlWidget`・`.accessory*`）からの**推定**。`api/repositories/ios-extensions/route.ts`がデフォルトブランチのツリーから拡張らしい名前のSwiftを最大40件読み、5分キャッシュする。命名次第で漏れるため画面にも「検出結果」と出している
 - 起票ダイアログ（`ios-extension-issue-dialog.tsx`）は、起票後の「実装を開始」を閉じる（キャンセル含む）とIssue詳細へ移る（#4172）。計画の承認パネル・計画コメントは詳細にしか出ないため、通常の作成フォームと同じ挙動に揃えている
 - 追加・編集は画面からSwiftを生成せず、種類別テンプレート（`buildIosExtensionIssue`）でIssueを起票して通常の実装経路へ渡す（`POST /api/issues`）
+
+### PR一覧・通常PR詳細の情報階層（#4427）
+
+- **代表状態は[`lib/pull-request-primary-state.ts`](../src/lib/pull-request-primary-state.ts)の`derivePrimaryState`が1か所で決める。** CI失敗・競合・レビュー指摘・修正中・判定中・マージ可能などを既存の値（`ciState`・`mergeable`・`reviewVerdict`・`repairRun`・`deriveMergeHold`）から畳むだけの表示用の純関数で、**マージ可否の判定は変えない**（マージ可否は`canMergeFromDeck`・`mergeWarnings`・確認ダイアログのまま）。古いheadへのレビュー判定は現在の指摘にしない。読めない値は成功へ倒さない。
+- **リリース候補の有無（`describeReleaseCandidate`）は通常PRの代表状態とは別軸。** 候補が無くても通常PRに新しいマージ条件は足さない。
+- 一覧（`pull-request-list.tsx`）の行は「リポジトリ・番号 → タイトル → 代表状態と理由（＋自動マージ保留）→ 6チェック → 詳細への導線」。**マージ・自動修正の操作は一覧に置かず**、詳細の主操作帯へ集約した。
+- 詳細（`pull-request-detail.tsx`）は「短い固定ヘッダー → 本文内の全文タイトル → 主操作帯（状態・理由・自動修正・マージ・保留・デプロイ）→ 6チェック → 補足の属性 → タブ（概要／指摘／変更ファイル／活動）」。CI・レビューの根拠は「指摘」タブ、バックアップCIは「概要」の補足。
+- 6チェック（`pull-request-merge-checks.tsx`）は`grouped`で「このPR（CI・コード・競合）」「リリース候補（全体・統合・Mac）」に分ける。ブランチ画面・本番マージ確認は従来の1列表示（`grouped`省略）のまま。
 
 ### VPSメモリの自動計測（#4256）
 

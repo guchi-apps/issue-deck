@@ -110,91 +110,46 @@ describe("PullRequestList", () => {
     expect(screen.getByText("3件")).toBeTruthy();
   });
 
-  it("CI通過済みのPRにはマージボタンを出す", () => {
-    renderList([makePullRequest({ ciState: "success" })]);
-    expect(screen.getByRole("button", { name: "マージする" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "CI（個別PRのチェック）: 成功" })).toBeTruthy();
-  });
-
-  it("CI実行中・Auto-merge有効のPRにもマージボタンを出す（#1087）", () => {
-    renderList([
-      makePullRequest({ number: 1, ciState: "pending" }),
-      makePullRequest({ number: 3, autoMergeEnabled: true }),
-    ]);
-    expect(screen.getAllByRole("button", { name: "マージする" })).toHaveLength(2);
-    expect(screen.getAllByText(/実行中/).length).toBeGreaterThan(0);
-  });
-
-  // 一覧も`mergeable`を持つようになった（#1742）。CI通過だけを見て「入れられる」と読めてしまう
-  // 状態を無くすのが目的なので、バッジと自動解消ボタンをここで確かめる。
-  it("コンフリクトしているPRはその旨と自動解消ボタンを出し、マージボタンを出さない（#1742）", () => {
-    renderList([makePullRequest({ ciState: "success", mergeable: false })]);
-    expect(screen.getByRole("button", { name: "CI（個別PRのチェック）: 成功" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "コンフリクト: あり" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "PRを自動修正" })).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "マージする" })).toBeNull();
-  });
-
-  it("コンフリクトの判定が出ていないPRは確認中で表示する（#1742）", () => {
-    renderList([makePullRequest({ mergeable: null })]);
-    expect(screen.getByRole("button", { name: /^コンフリクト: / })).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "PRを自動修正" })).toBeNull();
-    expect(screen.getByRole("button", { name: "マージする" })).toBeTruthy();
-  });
-
-  it("CI失敗のPRには自動修正ボタンを出す（#1293）", () => {
-    renderList([makePullRequest({ ciState: "failure" })]);
-    expect(screen.getByRole("button", { name: "PRを自動修正" })).toBeTruthy();
-  });
-
-  // 自動修復ワークフローが配られていないリポジトリでは、押しても404で起動しない（#1960）。
-  // ボタンは消さず、押せなくしたうえで理由と配り先を添える。
-  it("自動修復ワークフローが未配布なら修復ボタンを押せなくして理由を添える（#1960）", () => {
-    renderList([
-      makePullRequest({
-        ciState: "failure",
-        mergeable: false,
-        repairWorkflowAvailability: { ci: "missing", conflict: "missing" },
-      }),
-    ]);
-
-    expect(screen.getByRole("button", { name: "PRを自動修正" }).hasAttribute("disabled")).toBe(true);
-    expect(
-      screen.getByText(
-        "自動修復ワークフローが未配布です。設定 › フリート運用 から、このリポジトリへ配布できます。",
-      ),
-    ).toBeTruthy();
-  });
-
-  it("修正対象の一部が未配布なら統合した修正操作を押せなくする（#1960）", () => {
-    renderList([
-      makePullRequest({
-        ciState: "failure",
-        mergeable: false,
-        repairWorkflowAvailability: { ci: "available", conflict: "missing" },
-      }),
-    ]);
-
-    expect(screen.getByRole("button", { name: "PRを自動修正" }).hasAttribute("disabled")).toBe(true);
-    expect(
-      screen.getByText(
-        "自動修復ワークフローが未配布です。設定 › フリート運用 から、このリポジトリへ配布できます。",
-      ),
-    ).toBeTruthy();
-  });
-
-  it("配布状況を判定していないPRは従来どおり押せる（#1960）", () => {
-    renderList([makePullRequest({ ciState: "failure", repairWorkflowAvailability: {} })]);
-
-    expect(screen.getByRole("button", { name: "PRを自動修正" }).hasAttribute("disabled")).toBe(
-      false,
+  // マージ・自動修正の操作は詳細の主操作へ集約した（#4427）。一覧は状態を読んで詳細へ進む場所
+  it("一覧にはマージ・自動修正の操作を置かず、詳細への導線を出す（#4427）", () => {
+    renderList(
+      [
+        makePullRequest({ number: 1, ciState: "success", mergeable: true }),
+        makePullRequest({ number: 2, ciState: "failure" }),
+        makePullRequest({ number: 3, mergeable: false }),
+      ],
+      { onSelectPullRequest: vi.fn() },
     );
-    expect(screen.queryByText(/未配布/)).toBeNull();
+    expect(screen.queryByRole("button", { name: /マージする|判定中|PRを自動修正/ })).toBeNull();
+    expect(screen.getAllByRole("button", { name: /詳細を開く/ })).toHaveLength(3);
   });
 
-  // CI失敗の自動修正は人の操作なしに走るが、画面には赤い「チェック失敗」しか出ておらず、
-  // 放っておけば片付くのか自分で直すのかが判断できなかった（#2072）。
-  it("自動修正が走っているあいだはバッジを出し、同じ種類のボタンを押せなくする（#2072）", () => {
+  it("代表状態と理由を、状態ごとに区別して出す（#4427）", () => {
+    renderList([
+      makePullRequest({ number: 1, ciState: "success", mergeable: true }),
+      makePullRequest({ number: 2, ciState: "failure" }),
+      makePullRequest({ number: 3, mergeable: false }),
+      makePullRequest({ number: 4, ciState: "pending" }),
+      makePullRequest({
+        number: 5,
+        mergeable: true,
+        mergeJudgement: { state: "pending", step: null, runUrl: null, aiReview: AI_REVIEW_NONE },
+      }),
+      makePullRequest({ number: 6, mergeable: null }),
+    ]);
+    const labels = screen
+      .getAllByTestId("pull-request-primary-state")
+      .map((element) => element.textContent ?? "");
+    expect(labels[0]).toContain("マージ可能");
+    expect(labels[1]).toContain("CI失敗");
+    expect(labels[2]).toContain("競合あり");
+    expect(labels[3]).toContain("CI実行中");
+    expect(labels[4]).toContain("判定中");
+    // 読めない値は成功へ倒さない
+    expect(labels[5]).toContain("競合を確認中");
+  });
+
+  it("自動修正が走っているあいだは「修正中」と経過を出し、再起動は促さない（#2072・#4427）", () => {
     renderList([
       makePullRequest({
         ciState: "failure",
@@ -205,48 +160,32 @@ describe("PullRequestList", () => {
         },
       }),
     ]);
-
-    const badge = screen.getByText("PRを自動修正中（3分経過）");
-    // ピルごと実行ログへのリンクにする（`DeployStatusBadge`と同じ形）。
-    expect(badge.closest("a")?.getAttribute("href")).toBe(
+    expect(screen.getByTestId("pull-request-primary-state").textContent).toContain("修正中");
+    expect(screen.getByText(/自動修正中（3分経過）/).closest("a")?.getAttribute("href")).toBe(
       "https://github.com/guchi-apps/issue-deck/actions/runs/1",
     );
-    // 失敗している事実は打ち消さず、その隣に重ねて出す。
-    expect(screen.getByRole("button", { name: "CI（個別PRのチェック）: 失敗" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "PRを自動修正" }).hasAttribute("disabled")).toBe(
-      true,
-    );
+    expect(screen.queryByRole("button", { name: "PRを自動修正" })).toBeNull();
   });
 
-  it("自動修正中は対象が複数でも統合した修正操作を押せなくする（#2072）", () => {
+  it("自動マージの保留理由は一覧にも残す（#4377・#4427）", () => {
     renderList([
-      makePullRequest({
-        ciState: "failure",
-        mergeable: false,
-        repairRun: { kind: "conflict", startedAt: new Date().toISOString(), runUrl: null },
-      }),
+      makePullRequest({ ciState: "success", mergeable: true, linkedIssueCheckUser: true, linkedIssueCheckReason: "merge" }),
     ]);
+    expect(screen.getByTestId("merge-hold").textContent).toContain("マージ前の確認待ち");
+  });
 
-    expect(screen.getByRole("button", { name: "PRを自動修正" }).hasAttribute("disabled")).toBe(true);
+  it("6チェックを2グループ（このPR／リリース候補）に分けて出す（#4427）", () => {
+    renderList([makePullRequest({ ciState: "success", mergeable: false })]);
+    expect(screen.getByRole("button", { name: "CI（個別PRのチェック）: 成功" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "コンフリクト: あり" })).toBeTruthy();
+    expect(screen.getByLabelText("このPRのチェック")).toBeTruthy();
+    expect(screen.getByLabelText("リリース候補のチェック")).toBeTruthy();
   });
 
   it("draftのPRはGitHubがマージを受け付けないためボタンを出さない", () => {
     renderList([makePullRequest({ draft: true })]);
     expect(screen.queryByRole("button", { name: "マージする" })).toBeNull();
     expect(screen.getByRole("button", { name: /^CI（個別PRのチェック）: / })).toBeTruthy();
-  });
-
-  it("自動マージ可否の判定中は「判定中」で押せなくする（#1968）", () => {
-    // PR #1959の再現。CIは通っていても判定が終わるまではマージさせない。
-    renderList([
-      makePullRequest({
-        ciState: "success",
-        mergeJudgement: { state: "pending", step: null, runUrl: null, aiReview: AI_REVIEW_NONE },
-      }),
-    ]);
-    const button = screen.getByRole("button", { name: "判定中" }) as HTMLButtonElement;
-    expect(button.disabled).toBe(true);
-    expect(screen.queryByRole("button", { name: "マージする" })).toBeNull();
   });
 
   it("判定が終わっていれば判定中のバッジは出さない（#2059）", () => {
@@ -258,13 +197,6 @@ describe("PullRequestList", () => {
     ]);
     expect(screen.queryByText("マージ可否を判定中")).toBeNull();
     expect(screen.queryByText("レビュー実施中")).toBeNull();
-  });
-
-  it("そのままマージしてよいか怪しいPRは確認ダイアログを挟む", () => {
-    renderList([makePullRequest({ ciState: "failure" })]);
-    fireEvent.click(screen.getByRole("button", { name: "マージする" }));
-    expect(screen.getByText("このPRをマージしますか？")).toBeTruthy();
-    expect(screen.getByText("CIが失敗しています。")).toBeTruthy();
   });
 
   it("種別・ブランチ・対応Issueへの導線を表示する", () => {
@@ -301,11 +233,12 @@ describe("PullRequestList", () => {
     expect(screen.queryByText("処理中のPull Requestはありません。")).toBeNull();
   });
 
-  it("PR番号をタイトルの前に表示し、GitHubのPRへのリンクを併記する", () => {
+  it("リポジトリ・番号をタイトルの前の行に表示し、GitHubのPRへのリンクを併記する", () => {
     renderList([makePullRequest({ number: 42, title: "マージ待ちPR一覧を追加する" })]);
-    // Issue一覧と同じ「#番号 タイトル」の並び
+    // 上の行にリポジトリと番号、その下にタイトル。タイトルのボタンは読み上げ用に番号を含める
     const title = screen.getByRole("button", { name: /マージ待ちPR一覧を追加する/ });
-    expect(title.textContent?.startsWith("#42 マージ待ちPR一覧を追加する")).toBe(true);
+    expect(title.textContent).toBe("マージ待ちPR一覧を追加する");
+    expect(title.getAttribute("aria-label")).toBe("#42 マージ待ちPR一覧を追加する");
     const link = screen.getByRole("link", { name: "#42 をGitHubで開く" });
     expect(link.getAttribute("href")).toBe("https://github.com/guchi-apps/issue-deck/pull/42");
   });
