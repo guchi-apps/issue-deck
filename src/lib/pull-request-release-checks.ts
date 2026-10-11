@@ -1,5 +1,6 @@
 import { db } from "@/lib/db";
-import { getReleaseVerificationConfig } from "@/lib/release-verification-config";
+import { describeIntegrationSetupGap, getReleaseVerificationConfig } from "@/lib/release-verification-config";
+import { parseReleaseProgress } from "@/lib/release-verification-progress";
 import {
   isReleasePullRequest,
   parseReleaseVerificationKind,
@@ -51,28 +52,51 @@ export function releaseChecksKey(repositoryFullName: string, number: number): st
   return `${repositoryFullName}#${number}`;
 }
 
+const UNAVAILABLE: PullRequestReleaseChecks = {
+  aiReview: "not_run",
+  integration: "not_run",
+  unavailable: true,
+};
+
 /**
- * リリースPR（base=main・head=`release-main/v*`）の検証状態を、全リポジトリぶんまとめて1クエリで引く。
- * 基準SHAが取れない・DBを読めないときは何も返さず、一覧は枠を出さない（成功と推測しない）。
+ * リリースPR（base=main・head=`release-main/v*`）の検証状態を、全リポジトリぶんまとめて引く。
+ *
+ * **強制していないリポジトリのリリースPRにも返す**（#4390）。#4354の完了待ちは強制の有無に依らず効くため、
+ * 「mainへマージ待ち」の判定（`release-candidate-status.ts`）が検証中を知る必要がある。PR一覧の2枠は
+ * `enforced`を見て従来どおり強制しているリポジトリだけに出す。
+ *
+ * 基準SHAが取れない・DBを読めないときは`unavailable`を返す（成功と推測せず、マージ待ちにもしない）。
+ * 実行中と待機中を分けるため、現在の対象の実行中ジョブを1クエリ足して引く（GitHub APIは使わない）。
  */
 export async function fetchReleaseChecks(
   targets: Target[],
 ): Promise<Map<string, PullRequestReleaseChecks>> {
   const result = new Map<string, PullRequestReleaseChecks>();
-  const releases = targets.filter(
-    // 検証を強制していないリポジトリはマージゲートも判定しないので、一覧にも出さない
-    (target) =>
-      isReleasePullRequest(target) &&
-      target.baseSha !== null &&
-      getReleaseVerificationConfig(target.repositoryFullName).enforced,
-  );
+  const releases: (Target & { baseSha: string })[] = [];
+  for (const target of targets) {
+    if (!isReleasePullRequest(target)) continue;
+    if (target.baseSha === null) {
+      result.set(releaseChecksKey(target.repositoryFullName, target.number), UNAVAILABLE);
+      continue;
+    }
+    releases.push({ ...target, baseSha: target.baseSha });
+  }
   if (releases.length === 0) return result;
   try {
-    const rows = await db.releaseVerification.findMany({
-      where: { OR: releases.map((t) => ({ repoFullName: t.repositoryFullName, prNumber: t.number })) },
-      orderBy: { updatedAt: "desc" },
-    });
+    const where = { OR: releases.map((t) => ({ repoFullName: t.repositoryFullName, prNumber: t.number })) };
+    const [rows, runningJobs] = await Promise.all([
+      db.releaseVerification.findMany({ where, orderBy: { updatedAt: "desc" } }),
+      db.dispatchJob.findMany({
+        where: {
+          kind: { in: ["RELEASE_VERIFY", "RELEASE_REVIEW"] },
+          status: "RUNNING",
+          OR: releases.map((t) => ({ repositoryFullName: t.repositoryFullName, prNumber: t.number })),
+        },
+        select: { kind: true, repositoryFullName: true, prNumber: true, baseSha: true, headSha: true, progress: true },
+      }),
+    ]);
     for (const target of releases) {
+      const current = { baseSha: target.baseSha, headSha: target.headSha };
       const records = rows
         .filter((row) => row.repoFullName === target.repositoryFullName && row.prNumber === target.number)
         .flatMap((row) => {
@@ -81,13 +105,35 @@ export async function fetchReleaseChecks(
           if (!kind || !state) return [];
           return [{ kind, state, baseSha: row.baseSha, headSha: row.headSha, unverifiedScope: row.unverifiedScope }];
         });
-      result.set(
-        releaseChecksKey(target.repositoryFullName, target.number),
-        summarizeReleaseChecks({ baseSha: target.baseSha as string, headSha: target.headSha }, records),
+      // 候補のSHAが変わったら古い対象のジョブは見ない（旧候補の進行を現在の候補へ流用しない）
+      const jobs = runningJobs.filter(
+        (job) =>
+          job.repositoryFullName === target.repositoryFullName &&
+          job.prNumber === target.number &&
+          job.baseSha === current.baseSha &&
+          job.headSha === current.headSha,
       );
+      const integrationJob = jobs.find((job) => job.kind === "RELEASE_VERIFY");
+      const recordedRunning = (kind: "integration" | "ai_review") =>
+        records.some(
+          (r) => r.kind === kind && r.state === "running" && r.baseSha === current.baseSha && r.headSha === current.headSha,
+        );
+      result.set(releaseChecksKey(target.repositoryFullName, target.number), {
+        ...summarizeReleaseChecks(current, records),
+        enforced: getReleaseVerificationConfig(target.repositoryFullName).enforced,
+        started: {
+          aiReview: jobs.some((job) => job.kind === "RELEASE_REVIEW") || recordedRunning("ai_review"),
+          integration: integrationJob !== undefined || recordedRunning("integration"),
+          mac: parseReleaseProgress("integration", integrationJob?.progress)?.step === "mac",
+        },
+        integrationSetupGap: describeIntegrationSetupGap(target.repositoryFullName),
+      });
     }
   } catch (error) {
-    console.error("[GET /api/pull-requests] 検証記録を読めませんでした:", error);
+    console.error("[fetchReleaseChecks] 検証記録を読めませんでした:", error);
+    for (const target of releases) {
+      result.set(releaseChecksKey(target.repositoryFullName, target.number), UNAVAILABLE);
+    }
   }
   return result;
 }

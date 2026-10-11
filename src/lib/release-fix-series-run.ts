@@ -6,6 +6,8 @@ import { getInstallationToken } from "@/lib/github/app-auth";
 import { addIssueLabels, createComment, createIssue, updateIssue } from "@/lib/github/issues-api";
 import {
   fetchOpenPullRequestsForBase,
+  fetchPullRequestForRebuild,
+  isAncestorCommit,
   fetchPullRequestsByHead,
   fetchReleaseRebuildCandidate,
   type GithubApiPullRequest,
@@ -20,6 +22,8 @@ import {
   decideReleaseFix,
   decideReverification,
   defaultVerifyConditions,
+  isRebuildFailureReason,
+  NOTHING_TO_ADD_REASON,
   isReleaseFixActive,
   itemFromFinding,
   parseReleaseFixStatus,
@@ -27,11 +31,14 @@ import {
   releaseFixStepIndex,
   reviewFindingKey,
   RELEASE_FIX_STATUS_LABEL,
+  REBUILD_FAILURE_REASONS,
   type ReleaseFixCauseClass,
   type ReleaseFixDraftItem,
   type ReleaseFixSourceKind,
+  type ReleaseFixStartState,
   type ReleaseFixStatus,
 } from "@/lib/release-fix-series";
+import { buildDispatchActiveKey } from "@/lib/dispatch/dispatch-job";
 import { redactDiagnosticText } from "@/lib/release-review-diagnostic";
 import {
   decideAutoRebuildTrigger,
@@ -79,7 +86,11 @@ export type ReleaseFixSeriesView = {
   generation: number;
   parentId: string | null;
   stopReason: string | null;
+  /** 修正を反映したリリースの準備に失敗して止まっている（#4398）。修正Issueは作成済みなので作り直さない */
+  rebuildFailed: boolean;
   createdAt: string;
+  /** 修正Issueの実行の状況（#4396）。一覧の取得時にだけ埋め、それ以外は`none` */
+  startState: ReleaseFixStartState;
 };
 
 export function toReleaseFixSeriesView(row: ReleaseFixSeries): ReleaseFixSeriesView {
@@ -109,7 +120,9 @@ export function toReleaseFixSeriesView(row: ReleaseFixSeries): ReleaseFixSeriesV
     generation: row.generation,
     parentId: row.parentId,
     stopReason: row.stopReason,
+    rebuildFailed: status === "stopped" && isRebuildFailureReason(row.stopReason),
     createdAt: row.createdAt.toISOString(),
+    startState: "none",
   };
 }
 
@@ -126,7 +139,35 @@ export async function listReleaseFixSeries(
     orderBy: { createdAt: "desc" },
     take: 30,
   });
-  return rows.map(toReleaseFixSeriesView);
+  const views = rows.map(toReleaseFixSeriesView);
+  // 開始前（修正PRがまだ無い）の系列だけ、実行の状況を読む（#4396）
+  const pending = views.filter((view) => view.status === "issue_created");
+  if (pending.length === 0) return views;
+  const states = await Promise.all(pending.map((view) => readReleaseFixStartState(repositoryFullName, view.issueNumber)));
+  pending.forEach((view, index) => {
+    view.startState = states[index];
+  });
+  return views;
+}
+
+/**
+ * 修正Issueの実行の状況（#4396）。受付済みは未完了の配車ジョブ、実行中は`11.local`ラベル
+ * （ローカル起動・サブPCの起動で付く。無人実行は修正PRができた時点で`fix_in_progress`へ進む）。
+ */
+export async function readReleaseFixStartState(
+  repositoryFullName: string,
+  issueNumber: number,
+): Promise<ReleaseFixStartState> {
+  const job = await db.dispatchJob.findUnique({
+    where: { activeKey: buildDispatchActiveKey(repositoryFullName, issueNumber) },
+    select: { id: true },
+  });
+  if (job) return "queued";
+  const labelled = await db.issue.findFirst({
+    where: { number: issueNumber, repository: { fullName: repositoryFullName }, labels: { some: { name: "11.local" } } },
+    select: { id: true },
+  });
+  return labelled ? "running" : "none";
 }
 
 export type CreateReleaseFixInput = {
@@ -435,12 +476,29 @@ async function sweepGroup(repositoryFullName: string, releasePrNumber: number, r
   const candidate = frozen && originStillOpen ? await fetchReleaseRebuildCandidate(owner, repo, frozen.head.sha, token) : null;
   // 選んだ作り直し（#4335）に対応していれば、修正PRだけを元の候補へ足す（無関係な変更で判断待ちにしない）
   const selective = frozen && originStillOpen ? await releaseCallerSupportsSelection(owner, repo, token) : false;
+  // 修正PRが候補の一覧に無くても、実際にdevelopへマージ済みで元の候補の祖先でなければ「足せるPR」として扱う（#4422）。
+  // 手動の選択画面と同じ照合。取得に失敗したら断定せず次の巡回へ回す
+  const developPullRequests = candidate?.pullRequests.map((pr) => pr.number) ?? [];
+  if (candidate && frozen) {
+    try {
+      for (const row of observed) {
+        const n = row.fixPrNumber;
+        if (n === null || row.fixPrMergedAt === null || developPullRequests.includes(n)) continue;
+        const pr = await fetchPullRequestForRebuild(owner, repo, n, token);
+        if (!pr?.merged_at || !pr.merge_commit_sha || pr.base.ref !== "develop") continue;
+        if (!(await isAncestorCommit(owner, repo, pr.merge_commit_sha, frozen.head.sha, token))) developPullRequests.push(n);
+      }
+    } catch (error) {
+      console.error("[release-fix-series] fix PR lookup failed", releasePrNumber, error);
+      return { rebuilt: false, changed: 0 };
+    }
+  }
 
   const decision = decideReleaseFix({
     selective,
     series: observed.map((row) => ({
       id: row.id,
-      status: parseReleaseFixStatus(row.status) ?? "stopped",
+      status: row.status === "stopped" && row.stopReason === NOTHING_TO_ADD_REASON ? "fix_merged" : parseReleaseFixStatus(row.status) ?? "stopped",
       issueNumber: row.issueNumber,
       fixPrNumber: row.fixPrNumber,
       fixPrMerged: row.fixPrMergedAt !== null,
@@ -450,11 +508,16 @@ async function sweepGroup(repositoryFullName: string, releasePrNumber: number, r
     candidate: {
       originStillOpen,
       originMerged,
-      developPullRequests: candidate?.pullRequests.map((pr) => pr.number) ?? [],
+      developPullRequests,
+      complete: candidate?.complete !== false,
     },
   });
   if (decision.action === "wait") return { rebuilt: false, changed: 0 };
   if (decision.action === "stop") {
+    // 再評価でも同じ理由なら、停止の記録を重ねない
+    if (decision.reason === NOTHING_TO_ADD_REASON && decision.seriesIds.every((id) => observed.find((r) => r.id === id)?.status === "stopped")) {
+      return { rebuilt: false, changed: 0 };
+    }
     return { rebuilt: false, changed: await stopRows(ctx, decision.seriesIds, decision.status, decision.reason) };
   }
 
@@ -503,7 +566,7 @@ async function sweepGroup(repositoryFullName: string, releasePrNumber: number, r
           ? "同じ候補への作り直しが既に起動されています。画面の進捗を確認してください"
           : result.error === "invalid_selection"
             ? `修正PRを元の候補へ足せません（${result.problems.map((p) => `#${p.number}: ${p.label}`).join("、")}）`
-            : "選んだ修正PRで候補を作り直せませんでした。画面の「修正を入れて作り直す」から手動で作り直せます";
+            : REBUILD_FAILURE_REASONS.selective;
       return { rebuilt: false, changed: await stopRows(ctx, decision.seriesIds, "stopped", reason) };
     }
     return { rebuilt: true, changed: decision.seriesIds.length };
@@ -541,8 +604,8 @@ async function sweepGroup(repositoryFullName: string, releasePrNumber: number, r
   } catch (error) {
     console.error("[release-fix-series] rebuild failed", error);
     const reason = closed
-      ? "元の候補を閉じたあと、リリースworkflowの起動に失敗しました。画面の「リリースする」から起動し直してください"
-      : "候補の作り直しに失敗しました。修正は取り込み済みです。画面の「修正を入れて作り直す」から手動で作り直せます";
+      ? REBUILD_FAILURE_REASONS.closedThenDispatchFailed
+      : REBUILD_FAILURE_REASONS.full;
     return { rebuilt: false, changed: await stopRows(ctx, decision.seriesIds, "stopped", reason) };
   }
   return { rebuilt: true, changed: decision.seriesIds.length };
@@ -629,7 +692,13 @@ async function sweepSuccessor(row: ReleaseFixSeries): Promise<number> {
 /** 進行中の系列を1回分進める。poller（`scripts/subpc-dispatch-poller.sh`）が定期的に呼ぶ */
 export async function runReleaseFixSweep(): Promise<SweepResult> {
   const active = await db.releaseFixSeries.findMany({
-    where: { status: { in: ["issue_created", "fix_in_progress", "fix_merged", "awaiting_decision", "rebuilding", "reverifying"] } },
+    where: {
+      OR: [
+        { status: { in: ["issue_created", "fix_in_progress", "fix_merged", "awaiting_decision", "rebuilding", "reverifying"] } },
+        // 候補の取りこぼしで「足すものがない」と止まった系列は、修正後に同じ元候補で再評価する（#4422）
+        { status: "stopped", stopReason: NOTHING_TO_ADD_REASON },
+      ],
+    },
     orderBy: { createdAt: "asc" },
     take: 100,
   });

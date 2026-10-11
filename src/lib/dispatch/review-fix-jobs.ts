@@ -41,8 +41,9 @@ export async function fetchAllComments(repository: string, number: number, token
 }
 
 /** 依頼時・実行直前・push直前に同じ正本を検証する。コメント本文は依頼元から受け取らない。 */
-export async function validateReviewFixTarget(target: ReviewFixTarget) {
-  if (await resolveImplementationProvider(target.repository, target.issueNumber) !== "codex") throw new Error("実装担当がCodexと確認できないため停止しました");
+export async function validateReviewFixTarget(target: ReviewFixTarget, options: { agent?: "codex" | "claude" } = {}) {
+  const agent = options.agent ?? "codex";
+  if (agent === "codex" && await resolveImplementationProvider(target.repository, target.issueNumber) !== "codex") throw new Error("実装担当がCodexと確認できないため停止しました");
   const repository = await db.repository.findFirst({ where: { fullName: target.repository }, include: { installation: true } });
   if (!repository) throw new Error("登録済みリポジトリが見つかりません");
   const token = await getInstallationToken(repository.installation.installationId);
@@ -52,7 +53,8 @@ export async function validateReviewFixTarget(target: ReviewFixTarget) {
     fetchAllComments(target.repository, target.pullRequest, token), fetchAllComments(target.repository, target.issueNumber, token),
   ]);
   if (pr.state !== "open" || pr.draft || issue.state !== "open" || pr.head.sha !== target.headSha || pr.head.ref !== `issue-${target.issueNumber}` || pr.head.repo.full_name !== target.repository || !["main", "develop"].includes(pr.base.ref)) throw new Error("PRのHEAD・ブランチ・状態が変わったため停止しました");
-  if (issue.labels.some((l) => l.name === "11.local" || l.name === "00.check-user")) throw new Error("ローカル対応中または確認待ちのため停止しました");
+  // Claudeの自動修正は判断が要る指摘で先に00.check-userを付けるため、起票の検証では確認待ちを理由に止めない。
+  if (issue.labels.some((l) => l.name === "11.local" || (agent === "codex" && l.name === "00.check-user"))) throw new Error("ローカル対応中または確認待ちのため停止しました");
   if (!target.manual) {
     const handed = handoffs.filter((c) => trustedComment(c) && c.body.includes("<!-- issue-deck-review-fix:handoff sha="));
     if (handed.length > 2 || !handed.some((c) => c.body.includes(`<!-- issue-deck-review-fix:handoff sha=${target.headSha} -->`))) throw new Error("有効な自動修正の引継ぎがありません");

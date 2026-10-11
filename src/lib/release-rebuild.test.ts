@@ -75,3 +75,18 @@ describe("releaseRebuildCloseComment", () => {
     expect(body).toContain("- #3022 直す（Issue #3020）");
   });
 });
+
+describe("旧形式のリリースPRの除外（#4422）", () => {
+  it("headがdevelop・mainのマージ（旧形式のdevelop→mainのリリースPR）は候補にしない", () => {
+    const commits = [
+      { sha: "a", commit: { message: "Merge pull request #184 from guchi-apps/develop\n\nv0.9.0" } },
+      { sha: "b", commit: { message: "Merge pull request #4419 from guchi-apps/issue-4418\n\n修正" } },
+    ];
+    expect(parseRebuildPullRequests(commits).map((pr) => pr.number)).toEqual([4419]);
+    expect(buildRebuildCandidate(commits).aheadBy).toBe(1);
+  });
+
+  it("取得が不完全なら complete が false になる", () => {
+    expect(buildRebuildCandidate([], false).complete).toBe(false);
+  });
+});

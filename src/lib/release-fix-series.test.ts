@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  decideReleaseFixStart,
   buildReleaseFixIssue,
   buildReleaseFixSourceKey,
   canStartNextGeneration,
@@ -192,5 +193,30 @@ describe("buildReleaseFixIssue", () => {
     for (const text of ["aaaa", "bbbb", "v1.2.3", "AかB", "#9", "#7", "条件1", "a.ts:3"]) {
       expect(body).toContain(text);
     }
+  });
+});
+
+describe("decideReleaseFixStart（#4396）", () => {
+  const base = { status: "issue_created", hasSuccessor: false, issueState: "open", startState: "none" } as const;
+  it("未開始のissue_createdは開始できる", () => {
+    expect(decideReleaseFixStart(base)).toEqual({ ok: true });
+  });
+  it("後継の世代がある・修正PRが進んでいる・閉じている・起動済みは弾く", () => {
+    expect(decideReleaseFixStart({ ...base, hasSuccessor: true })).toMatchObject({ ok: false, reason: "superseded" });
+    expect(decideReleaseFixStart({ ...base, status: "fix_in_progress" })).toMatchObject({ ok: false, reason: "not_startable" });
+    expect(decideReleaseFixStart({ ...base, issueState: "closed" })).toMatchObject({ ok: false, reason: "issue_closed" });
+    expect(decideReleaseFixStart({ ...base, startState: "queued" })).toMatchObject({ ok: false, reason: "already_started" });
+    expect(decideReleaseFixStart({ ...base, startState: "running" })).toMatchObject({ ok: false, reason: "already_started" });
+  });
+});
+
+describe("候補の取得が不完全なとき（#4422）", () => {
+  it("足すPRが見つからなくても、取得が不完全なら停止せず待つ", () => {
+    const decision = decideReleaseFix({
+      selective: true,
+      series: [{ id: "s", status: "fix_merged", issueNumber: 1, fixPrNumber: 10, fixPrMerged: true, fixPrClosedUnmerged: false, acceptedExtraPrs: [] }],
+      candidate: { originStillOpen: true, originMerged: false, developPullRequests: [], complete: false },
+    });
+    expect(decision.action).toBe("wait");
   });
 });

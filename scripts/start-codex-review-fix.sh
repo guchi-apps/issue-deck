@@ -63,7 +63,13 @@ cat > "$promptdir/prompt.md" <<PROMPT
 あなたは $full_name のIssue #$issue / PR #$pr のレビュー指摘を修正します。日本語で応答してください。
 CLAUDE.mdとリポジトリの規約を読み、$promptdir/review.mdの指摘だけを修正してください。
 人の判断が必要なら変更せず停止してください。依存追加は禁止です。
-commit、push、PR/Issue作成、ラベル変更はしないでください。検証とpushは呼出元が行います。
+commit、push、PR作成、ラベル変更はしないでください。検証とpushは呼出元が行います。
+レビューが「手作業Issueの起票漏れ」「手作業Issueの記載不足」を指摘している場合は、あなたはGitHubへ書けないため、
+起票したい内容を $workdir/.issue-deck-manual-steps.json へJSON配列で書いてください（呼出元が検証して起票します）。
+各要素は {"key":"小文字・数字・ハイフンの安定キー","targetRepository":"owner/repo（残作業を実施する対象）","title":"[手作業] <実行する場所>: <やること>","body":"本文"} です。
+本文は docs/multi-agent/labels.md の手作業Issue雛形（この作業でできるようになること／前提条件／やること／完了の確認方法／関連）に従い、
+AIで実施できる範囲は先に実施したうえで、人の操作が必要な残作業だけを書いてください。秘密値は書かないでください。
+同じ内容の既存Issueがあれば呼出元が再利用します。起票だけで足りる場合はコードを変更しないでください。
 修正できない場合は終了結果に REVIEW_FIX_BLOCKED と明記してください。
 PROMPT
 codex_command="$(agent_cli_codex_command)"
@@ -80,6 +86,30 @@ timeout "${ISSUE_DECK_CODEX_REVIEW_FIX_TIMEOUT_SECONDS:-1800}" "$codex_command" 
 rm -f "$output"
 [[ "$(git -C "$workdir" rev-parse HEAD)" == "$sha" ]] || exit 1
 cd "$workdir"
+# 手作業Issueの起票依頼（構造化JSON）を取り出す。差分には含めない。
+manual_steps='[]'
+if [[ -f .issue-deck-manual-steps.json ]]; then
+  manual_steps="$(jq -c '.' .issue-deck-manual-steps.json)" || { echo '起票依頼のJSONが不正です' >&2; exit 1; }
+  rm -f .issue-deck-manual-steps.json
+fi
+file_manual_steps() {
+  local restart="$1" payload response
+  payload="$(jq -nc --arg jobId "$JOB_ID" --arg host "$host_name" --argjson requests "$manual_steps" --argjson restart "$restart" '{action:"file-manual-steps",jobId:$jobId,host:$host,requests:$requests,restartReview:$restart}')"
+  response="$(printf 'Authorization: Bearer %s\n' "$DISPATCH_SECRET" | curl -sS --max-time 120 -X POST -H @- -H 'Content-Type: application/json' --data-binary "$payload" "${APP_BASE_URL%/}/api/dispatch/review-fix")"
+  if ! jq -e '.results | type == "array" and length > 0' <<<"$response" >/dev/null; then
+    echo "手作業Issueの起票に失敗しました: $(jq -r '.error // "不明なエラー"' <<<"$response")" >&2
+    return 1
+  fi
+}
+have_manual_steps=0
+[[ "$(jq 'length' <<<"$manual_steps")" == 0 ]] || have_manual_steps=1
+# 起票とリンクだけで解消する場合は、コード差分も空コミットも作らず、起票の検証と同一HEADの再レビュー起動で完了とする。
+if [[ "$have_manual_steps" == 1 && -z "$(git status --porcelain -- . ':!node_modules')" ]]; then
+  file_manual_steps true
+  pr_review_report "$JOB_ID" succeeded '手作業Issueを起票・関連付けし、同じHEADで再レビューを起動しました。再レビューの結果を待ちます'
+  finished=1
+  exit 0
+fi
 git diff --check
 # 実行可能な検証が無いリポジトリを成功扱いしない。
 [[ -f package.json ]] || { echo 'package.jsonの検証手順がありません。手動確認が必要です' >&2; exit 1; }
@@ -102,6 +132,8 @@ done
 [[ "$(validate | jq -er '.review')" == "$review" ]] || { echo 'レビュー内容が更新されたため停止しました' >&2; exit 1; }
 # 共有用symlinkをgit addへ渡さない（対象repoの.gitignoreには依存しない）。
 [[ ! -L node_modules ]] || rm node_modules
+# 起票依頼があるときは、push前に起票する（pushが再レビューを起動するので、ここでは再レビューを起動しない）。
+[[ "$have_manual_steps" != 1 ]] || file_manual_steps false
 git add -A
 git -c user.name='Codex' -c user.email='codex@openai.com' commit -m "レビュー指摘を修正する #${issue}"
 # forceもrebaseも行わない。検証後の追いコミットは通常pushが拒否する。

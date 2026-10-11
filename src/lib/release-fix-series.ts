@@ -53,16 +53,34 @@ export function parseReleaseFixStatus(value: string): ReleaseFixStatus | null {
 }
 
 export const RELEASE_FIX_STATUS_LABEL: Record<ReleaseFixStatus, string> = {
-  issue_created: "修正Issue作成済み",
-  fix_in_progress: "修正PRの作業中",
-  fix_merged: "developへ取り込み済み",
-  rebuilding: "候補を作り直し中",
-  reverifying: "再検証中",
-  ready: "本番承認待ち",
+  issue_created: "修正Issueを作成済み（未開始）",
+  fix_in_progress: "指摘への修正内容を作業中",
+  fix_merged: "修正をdevelopへ取り込み済み（リリースへの反映待ち）",
+  rebuilding: "修正版のリリースを準備中",
+  reverifying: "修正後のチェック中",
+  ready: "チェックを通過（本番承認待ち）",
   awaiting_decision: "判断待ち",
-  stopped: "停止",
-  superseded: "対象外（置き換え済み）",
+  stopped: "修正が止まっています",
+  superseded: "新しいリリースに置き換え済み",
 };
+
+/**
+ * 修正を反映したリリースの準備（作り直し）に失敗して止めるときの理由（#4398）。
+ * 巡回が`stopReason`へ書く文面と、画面が「準備に失敗」と判別する条件を同じ定数で持つ。
+ */
+export const REBUILD_FAILURE_REASONS = {
+  selective: "選んだ修正PRで候補を作り直せませんでした。画面の「修正を入れて作り直す」から手動で作り直せます",
+  closedThenDispatchFailed: "元の候補を閉じたあと、リリースworkflowの起動に失敗しました。画面の「リリースする」から起動し直してください",
+  full: "候補の作り直しに失敗しました。修正は取り込み済みです。画面の「修正を入れて作り直す」から手動で作り直せます",
+} as const;
+
+/** 修正PRが足せる候補に無いと判断して止めたときの理由。この理由で止まった系列は巡回が再評価する（#4422） */
+export const NOTHING_TO_ADD_REASON =
+  "修正PRが元の候補の後にdevelopへ入っていないため、足すものがありません。修正PRがすでに候補に含まれていないかを確認してください";
+
+export function isRebuildFailureReason(reason: string | null | undefined): boolean {
+  return reason != null && (Object.values(REBUILD_FAILURE_REASONS) as string[]).includes(reason);
+}
 
 /** 画面の現在地ステップ（左から右へ進む）。`awaiting_decision`・`stopped`は進んだところで止まる */
 export const RELEASE_FIX_STEPS = [
@@ -70,8 +88,8 @@ export const RELEASE_FIX_STEPS = [
   "計画・実装",
   "PR検証",
   "develop取り込み",
-  "候補作り直し",
-  "再検証",
+  "修正をリリースに反映",
+  "修正後のチェック",
   "本番承認待ち",
 ] as const;
 
@@ -305,6 +323,8 @@ export type ReleaseCandidateObservation = {
   originMerged: boolean;
   /** 元のリリースPRのheadより後にdevelopへ入ったPR番号（バンプPR・リリースPRは除く） */
   developPullRequests: number[];
+  /** 候補の取得が最後まで済んだか。falseなら「足すものがない」と断定せず待つ（#4422）。未指定はtrue */
+  complete?: boolean;
 };
 
 export type ReleaseFixDecision =
@@ -371,10 +391,11 @@ export function decideReleaseFix(input: {
     const developed = new Set(input.candidate.developPullRequests);
     const selectedPrs = [...new Set([...fixPrs, ...accepted])].filter((n) => developed.has(n)).sort((a, b) => a - b);
     if (selectedPrs.length === 0) {
+      if (input.candidate.complete === false) return { action: "wait" };
       return {
         action: "stop",
         status: "stopped",
-        reason: "修正PRが元の候補の後にdevelopへ入っていないため、足すものがありません。修正PRがすでに候補に含まれていないかを確認してください",
+        reason: NOTHING_TO_ADD_REASON,
         seriesIds: ids,
       };
     }
@@ -419,6 +440,42 @@ export function canStartNextGeneration(input: {
   }
   if (input.ancestorSourceKeys.includes(input.sourceKey)) {
     return { ok: false, reason: "前の世代と同じ指摘が再発しています。同じ修正を繰り返さず、原因を人が確認してください" };
+  }
+  return { ok: true };
+}
+
+/** 修正Issueの実行の状況（#4396）。`none`は未開始、`queued`は受付済み（起動待ち）、`running`は実行中 */
+export type ReleaseFixStartState = "none" | "queued" | "running";
+
+export type ReleaseFixStartDecision =
+  | { ok: true }
+  | { ok: false; reason: "not_startable" | "superseded" | "issue_closed" | "already_started"; message: string };
+
+/**
+ * 「修正を開始」を押してよいか（#4396）。**開始の導線が対象を取り違えないための判断**で、
+ * 起動そのもの（権限・ホスト・確認待ち）は既存の「実装を開始」ダイアログと配車APIが担う。
+ *
+ * - 修正PRがまだ無い`issue_created`の系列だけが対象（作業中・終端は状態の確認に導く）
+ * - 作り直しで後継の世代ができた系列、閉じたIssueは起動しない
+ * - すでに受付済み・実行中なら重複して起動せず、状態の確認へ導く
+ */
+export function decideReleaseFixStart(input: {
+  status: ReleaseFixStatus;
+  hasSuccessor: boolean;
+  issueState: "open" | "closed";
+  startState: ReleaseFixStartState;
+}): ReleaseFixStartDecision {
+  if (input.hasSuccessor) {
+    return { ok: false, reason: "superseded", message: "この修正は新しい世代に置き換わっています。最新の修正から開始してください。" };
+  }
+  if (input.status !== "issue_created") {
+    return { ok: false, reason: "not_startable", message: "この修正はすでに進行中か終了しているため、開始できません。" };
+  }
+  if (input.issueState !== "open") {
+    return { ok: false, reason: "issue_closed", message: "修正Issueが閉じられているため、開始できません。" };
+  }
+  if (input.startState !== "none") {
+    return { ok: false, reason: "already_started", message: "すでに実行が受け付けられています。状態を確認してください。" };
   }
   return { ok: true };
 }

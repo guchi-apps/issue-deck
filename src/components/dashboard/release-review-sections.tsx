@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { ChevronRight, ExternalLink, RotateCcw } from "lucide-react";
 
-import { ReleaseFixCreate, ReleaseFixSeriesPanel } from "@/components/dashboard/release-fix-panel";
+import { ReleaseFixCreate, ReleaseFixOverviewPanel } from "@/components/dashboard/release-fix-panel";
 import { REVIEW_MARK, REVIEW_TONE } from "@/components/dashboard/review-verdict";
 import { ReleaseRebuildButton } from "@/components/dashboard/release-rebuild-button";
 import { useReleaseChanges, type UseReleaseChangesResult } from "@/hooks/use-release-changes";
@@ -930,6 +930,8 @@ export function ReleaseReviewSections({
     );
   const nowMs = useNow(active);
   const [fixTick, setFixTick] = useState(0);
+  // 作り直し・修正後のチェック中は、作り直し前のリリースの結果を現在の結果として見せず、履歴へ移す（#4398）
+  const [previousResults, setPreviousResults] = useState(false);
   const onFixCreated = () => {
     setFixTick((n) => n + 1);
     onReload?.();
@@ -960,7 +962,18 @@ export function ReleaseReviewSections({
           </button>
         )}
       </div>
-      {gate && (
+      {pullRequestNumber !== undefined && (
+        <ReleaseFixOverviewPanel
+          repositoryFullName={repositoryFullName}
+          pullRequestNumber={pullRequestNumber}
+          verification={verification}
+          verificationError={verificationError ?? null}
+          changes={changes}
+          reloadToken={fixTick}
+          onPreviousResultsChange={setPreviousResults}
+        />
+      )}
+      {gate && !previousResults && (
         <p className={cn("flex items-center gap-1.5 border-b px-3 py-1.5 text-xs font-bold", TONE_CLASS[gate.tone])}>
           <span aria-hidden="true" className="text-[10px]">
             {gate.mark}
@@ -969,26 +982,48 @@ export function ReleaseReviewSections({
         </p>
       )}
       {verification ? (
-        <>
-          <AiReviewSection
-            section={verification.aiReview}
-            assignee={verification.aiReviewAssignee}
-            repositoryFullName={repositoryFullName}
-            pullRequestNumber={pullRequestNumber}
-            target={verification.target}
-            onReload={onReload}
-            onFixCreated={onFixCreated}
-            nowMs={nowMs}
-          />
-          <IntegrationSection
-            section={verification.integration}
-            nowMs={nowMs}
-            repositoryFullName={repositoryFullName}
-            pullRequestNumber={pullRequestNumber}
-            target={verification.target}
-            onFixCreated={onFixCreated}
-          />
-        </>
+        previousResults ? (
+          <details className="border-b px-3 py-1.5" data-testid="release-previous-results">
+            <summary className="cursor-pointer text-muted-foreground">修正前のリリース・検証履歴（現在の結果ではありません）</summary>
+            <div className="mt-1 opacity-80">
+              <AiReviewSection
+                section={verification.aiReview}
+                hideRebuild
+                assignee={verification.aiReviewAssignee}
+                repositoryFullName={repositoryFullName}
+                target={verification.target}
+                nowMs={nowMs}
+              />
+              <IntegrationSection
+                section={verification.integration}
+                nowMs={nowMs}
+                repositoryFullName={repositoryFullName}
+                target={verification.target}
+              />
+            </div>
+          </details>
+        ) : (
+          <>
+            <AiReviewSection
+              section={verification.aiReview}
+              assignee={verification.aiReviewAssignee}
+              repositoryFullName={repositoryFullName}
+              pullRequestNumber={pullRequestNumber}
+              target={verification.target}
+              onReload={onReload}
+              onFixCreated={onFixCreated}
+              nowMs={nowMs}
+            />
+            <IntegrationSection
+              section={verification.integration}
+              nowMs={nowMs}
+              repositoryFullName={repositoryFullName}
+              pullRequestNumber={pullRequestNumber}
+              target={verification.target}
+              onFixCreated={onFixCreated}
+            />
+          </>
+        )
       ) : (
         <>
           <SectionRow
@@ -1018,13 +1053,6 @@ export function ReleaseReviewSections({
             }
           />
         </>
-      )}
-      {pullRequestNumber !== undefined && (
-        <ReleaseFixSeriesPanel
-          repositoryFullName={repositoryFullName}
-          pullRequestNumber={pullRequestNumber}
-          reloadToken={fixTick}
-        />
       )}
       <IndividualReviewSection
         changes={changes}
@@ -1128,15 +1156,41 @@ export function ReleaseVerificationBrief({
   pullRequestNumber,
   headRef,
   className,
+  onStatusChanged,
 }: {
   repositoryFullName: string;
   pullRequestNumber: number;
   headRef: string;
   className?: string;
+  /**
+   * 取り直した検証の状態（区分ごとの状態・対象SHA）が前回と変わったとき（#4390）。初回の取得では呼ばない。
+   * ブランチ画面はここでPR一覧を取り直し、見出しの「リリース検証中」「mainへマージ待ち」を詳細枠に揃える
+   */
+  onStatusChanged?: () => void;
 }) {
   const [reloadToken, setReloadToken] = useState(0);
   const enabled = headRef.startsWith(RELEASE_BRANCH_PREFIX);
   const { verification, error } = useReleaseVerification(repositoryFullName, pullRequestNumber, enabled, reloadToken);
+  const signature = verification
+    ? [
+        verification.aiReview.state,
+        verification.integration.state,
+        verification.mac.state,
+        verification.target.baseSha,
+        verification.target.headSha,
+      ].join("|")
+    : null;
+  const lastSignature = useRef<string | null>(null);
+  const onStatusChangedRef = useRef(onStatusChanged);
+  useEffect(() => {
+    onStatusChangedRef.current = onStatusChanged;
+  });
+  useEffect(() => {
+    if (signature === null) return;
+    const previous = lastSignature.current;
+    lastSignature.current = signature;
+    if (previous !== null && previous !== signature) onStatusChangedRef.current?.();
+  }, [signature]);
   const active =
     verification !== null &&
     [verification.aiReview, verification.integration].some(
@@ -1215,41 +1269,3 @@ export function ReleaseVerificationBrief({
   );
 }
 
-/**
- * 畳んだリポジトリ行に出す、検証の短い要約（#4357）。進行中なら「検証中」、止まっている・
- * 要確認・失敗なら「検証に問題」。**問題なし・未取得のときは何も出さない**（静かな状態でバッジを埋めない）
- */
-export function ReleaseVerificationSummaryPill({
-  repositoryFullName,
-  pullRequestNumber,
-  headRef,
-}: {
-  repositoryFullName: string;
-  pullRequestNumber: number;
-  headRef: string;
-}) {
-  const { verification } = useReleaseVerification(
-    repositoryFullName,
-    pullRequestNumber,
-    headRef.startsWith(RELEASE_BRANCH_PREFIX),
-  );
-  if (!verification) return null;
-  const sections = [verification.aiReview, verification.integration];
-  const problem = sections.some((s) => s.state === "failed" || s.state === "needs_check" || s.state === "invalidated");
-  const running = sections.some((s) => s.state === "waiting" || s.state === "running");
-  if (problem) {
-    return (
-      <Pill tone="bad" mark="■">
-        検証に問題
-      </Pill>
-    );
-  }
-  if (running) {
-    return (
-      <Pill tone="run" mark="●">
-        検証中
-      </Pill>
-    );
-  }
-  return null;
-}

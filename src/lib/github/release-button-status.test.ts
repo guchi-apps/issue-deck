@@ -497,3 +497,47 @@ describe("releaseAttentionRank", () => {
     ]);
   });
 });
+
+describe("リリース候補の検証（#4390）", () => {
+  const base: ReleaseStatusSummaryInput = {
+    workflowRun: null,
+    deployWorkflowRun: null,
+    bumpPullRequest: null,
+    releasePullRequest: null,
+    releasePending: false,
+  };
+  const release = (verification: "progressing" | "problem" | null) => ({
+    ...base,
+    releasePullRequest: { ciState: "success" as const, mergeJudgementPending: false, verification },
+  });
+
+  it("検証の進行中はマージ待ちにせず、待てば進む扱いにする", () => {
+    expect(summarizeReleaseStatus(release("progressing"))).toBe("progressing");
+    expect(summarizeReleaseStatus(release(null))).toBe("action_required");
+  });
+
+  it("検証の問題は人の対応が要るが、バッジはマージ待ちと言わず理由の名前を赤で出す", () => {
+    expect(summarizeReleaseStatus(release("problem"))).toBe("action_required");
+    expect(
+      describeReleaseStatusBadge({
+        status: "action_required",
+        failedWorkflow: null,
+        mergeTarget: null,
+        ciState: null,
+        verification: { block: "problem", label: "検証失敗", detail: "全体レビューが失敗しています" },
+      }),
+    ).toEqual({ label: "検証失敗", tone: "error" });
+  });
+
+  it("進行中のバッジは「実施中」ではなく「リリース検証中」と出す", () => {
+    expect(
+      describeReleaseStatusBadge({
+        status: "progressing",
+        failedWorkflow: null,
+        mergeTarget: null,
+        ciState: null,
+        verification: { block: "progressing", label: "リリース検証中", detail: null },
+      }),
+    ).toEqual({ label: "リリース検証中", tone: "progressing" });
+  });
+});

@@ -108,15 +108,25 @@ export async function loadRebuildSelectionOptions(input: {
   // 修正系列の修正PRのうち、まだdevelopへ入っていないものも状態付きで並べる（選べない）
   for (const number of related) {
     if (options.some((option) => option.number === number)) continue;
-    const pr = await fetchPullRequestForRebuild(owner, repo, number, token).catch(() => null);
-    const check = checkRebuildPullRequest({
-      number,
-      pr: pr
-        ? { title: pr.title, mergedAt: pr.merged_at, mergeSha: pr.merge_commit_sha, baseRef: pr.base.ref, headRef: pr.head.ref }
-        : null,
-      // 候補の一覧に無い＝元の候補の後にdevelopへ入っていない。マージ済みなら元の候補に含まれている
-      includedInOrigin: pr?.merged_at != null,
-    });
+    let pr: Awaited<ReturnType<typeof fetchPullRequestForRebuild>> = null;
+    let lookupFailed = false;
+    let includedInOrigin = false;
+    try {
+      pr = await fetchPullRequestForRebuild(owner, repo, number, token);
+      // 一覧に無いことだけで取り込み済みと推測しない。マージコミットが元の候補の祖先かを実際に確かめる（#4422）
+      if (pr?.merge_commit_sha) includedInOrigin = await isAncestorCommit(owner, repo, pr.merge_commit_sha, releasePr.head.sha, token);
+    } catch {
+      lookupFailed = true;
+    }
+    const check = lookupFailed
+      ? ({ ok: false, problem: "lookup_failed" } as const)
+      : checkRebuildPullRequest({
+          number,
+          pr: pr
+            ? { title: pr.title, mergedAt: pr.merged_at, mergeSha: pr.merge_commit_sha, baseRef: pr.base.ref, headRef: pr.head.ref }
+            : null,
+          includedInOrigin,
+        });
     const problem = check.ok ? null : check.problem;
     options.push({
       number,

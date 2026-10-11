@@ -15,6 +15,7 @@ import { GithubApiError } from "@/lib/github/github-api-error";
 import { GITHUB_API, githubFetch } from "@/lib/github/request";
 import {
   buildRebuildCandidate,
+  isReleaseBranch,
   type CompareCommit,
   type ReleaseRebuildCandidate,
 } from "@/lib/release-rebuild";
@@ -344,15 +345,41 @@ export async function fetchReleaseRebuildCandidate(
   releaseHeadSha: string,
   token: string,
 ): Promise<ReleaseRebuildCandidate> {
-  const url = `${GITHUB_API}/repos/${owner}/${repo}/compare/${releaseHeadSha}...develop?per_page=250`;
-  const res = await githubFetch(url, token);
-  if (!res.ok) {
-    const detail = await res.text().catch(() => "");
-    throw new GithubApiError(res.status, `GitHub API request failed: ${res.status} ${url} ${detail}`);
+  // compareは1ページ最大250件で、リリースPRが長く開いていると超える（#4422。351件の実例）。
+  // 全ページを読む。途中のページが失敗したら例外にし、欠けた一覧を「候補なし」と見せない
+  const commits: CompareCommit[] = [];
+  let complete = false;
+  for (let page = 1; page <= REBUILD_COMPARE_MAX_PAGES; page++) {
+    const url = `${GITHUB_API}/repos/${owner}/${repo}/compare/${releaseHeadSha}...develop?per_page=100&page=${page}`;
+    const res = await githubFetch(url, token);
+    if (!res.ok) {
+      const detail = await res.text().catch(() => "");
+      throw new GithubApiError(res.status, `GitHub API request failed: ${res.status} ${url} ${detail}`);
+    }
+    const data: { commits?: CompareCommit[]; total_commits?: number } = await res.json();
+    const batch = data.commits ?? [];
+    commits.push(...batch);
+    if (batch.length === 0 || (typeof data.total_commits === "number" ? commits.length >= data.total_commits : batch.length < 100)) {
+      complete = true;
+      break;
+    }
   }
-  const data: { commits?: CompareCommit[] } = await res.json();
-  return buildRebuildCandidate(data.commits ?? []);
+  const candidate = buildRebuildCandidate(commits, complete);
+  // 件名の名前だけでは旧形式のリリースPRを見分けきれないので、実際のbaseがdevelopのPRに絞る
+  const verified: ReleaseRebuildCandidate["pullRequests"] = [];
+  const queue = [...candidate.pullRequests];
+  await Promise.all(
+    Array.from({ length: 8 }, async () => {
+      for (let pr = queue.shift(); pr; pr = queue.shift()) {
+        const actual = await fetchPullRequestForRebuild(owner, repo, pr.number, token);
+        if (actual && actual.base.ref === "develop" && !isReleaseBranch(actual.head.ref)) verified.push(pr);
+      }
+    }),
+  );
+  return { ...candidate, pullRequests: verified.sort((a, b) => a.number - b.number) };
 }
+
+const REBUILD_COMPARE_MAX_PAGES = 100;
 
 /**
  * ブランチを削除する（#3014。作り直しで閉じたリリースPRの凍結ブランチ）。

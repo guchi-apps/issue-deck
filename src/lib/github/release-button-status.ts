@@ -1,6 +1,13 @@
 import type { ReleaseStatus } from "@/hooks/use-release-status";
 import type { CiState } from "@/lib/github/release-api";
 import { isMergeJudgementPending } from "@/lib/pull-request-list";
+import {
+  releaseChecksFromSummary,
+  releaseVerificationBlock,
+  resolveReleaseCandidateVerification,
+  type ReleaseVerificationBadgeInfo,
+  type ReleaseVerificationBlock,
+} from "@/lib/release-candidate-status";
 
 type AvailableReleaseStatus = Extract<ReleaseStatus, { available: true }>;
 
@@ -27,6 +34,11 @@ export type PendingMergePullRequestState = {
   ciState: CiState | null;
   /** 自動マージ可否の判定（`claude-review-develop.yml`）がまだ走っているか（#1968・#2326） */
   mergeJudgementPending: boolean;
+  /**
+   * リリース候補の統合検証・全体レビューから見た止まり方（#4390。`releaseVerificationBlock`）。
+   * 検証の対象でない（バンプPR・旧世代のリリースPR）・問題も進行も無いときはnull／省略
+   */
+  verification?: ReleaseVerificationBlock | null;
 };
 
 /**
@@ -94,6 +106,8 @@ export function summarizeReleaseStatus(input: ReleaseStatusSummaryInput): Releas
 
   if (resolveFailedReleaseWorkflow(input)) return "error";
 
+  // 検証の失敗・要確認・設定不足・取得不能は人の対応が要る。マージ待ちとは文言で分ける（#4390）
+  if (releasePullRequest?.verification === "problem") return "action_required";
   if (isWaitingUserMerge(releasePullRequest)) return "action_required";
   if (isWaitingUserMerge(bumpPullRequest)) return "action_required";
 
@@ -117,6 +131,8 @@ export function summarizeReleaseStatus(input: ReleaseStatusSummaryInput): Releas
  */
 export function isWaitingUserMerge(pullRequest: PendingMergePullRequestState | null): boolean {
   if (pullRequest === null) return false;
+  // 統合検証・全体レビューが進行中・問題ありのあいだは「人が押す番」と言わない（#4390）
+  if (pullRequest.verification) return false;
   return pullRequest.ciState !== "pending" && !pullRequest.mergeJudgementPending;
 }
 
@@ -152,6 +168,16 @@ export function summarizeReleaseButtonStatus(
             mergeJudgementPending: isMergeJudgementPending(
               status.releasePullRequest.mergeJudgement,
             ),
+            // 検証の要約はリリースPR（`release-main/v*`）のときだけ載る（#4238）。載っていないのは
+            // 旧世代のリリースPRか取得失敗で、ここでは区別できないため判定に使わない
+            verification: status.releasePullRequest.verification
+              ? releaseVerificationBlock(
+                  resolveReleaseCandidateVerification(
+                    releaseChecksFromSummary(status.releasePullRequest.verification),
+                    true,
+                  ),
+                )
+              : null,
           }
         : null,
     releasePending: status.phase === "release_pending" && !isDeviceBuild,
@@ -193,8 +219,10 @@ export function describeReleaseStatusBadge(input: {
   mergeTarget: ReleaseMergeTarget | null;
   /** マージ待ちPRのCI状態。マージ待ちでなければnull */
   ciState: CiState | null;
+  /** リリース候補の検証の進行・問題（#4390）。無ければnull／省略 */
+  verification?: ReleaseVerificationBadgeInfo | null;
 }): ReleaseStatusBadge | null {
-  const { status, failedWorkflow, mergeTarget, ciState } = input;
+  const { status, failedWorkflow, mergeTarget, ciState, verification } = input;
 
   if (status === "idle") return null;
 
@@ -206,10 +234,15 @@ export function describeReleaseStatusBadge(input: {
     return { label: failedWorkflow === "deploy" ? "デプロイ失敗" : "リリース失敗", tone: "error" };
   }
 
+  // 検証の問題は「マージ待ち」と言わない。理由ごとの短い名前を赤で出す（#4390）
+  if (verification?.block === "problem") return { label: verification.label, tone: "error" };
+
   if (status === "action_required") {
     return { label: releaseMergeTargetLabel(mergeTarget), tone: "action" };
   }
 
+  // 「リリース検証中」「リリース検証待ち」は待てば進む（#4390）
+  if (verification?.block === "progressing") return { label: verification.label, tone: "progressing" };
   return { label: "実施中", tone: "progressing" };
 }
 

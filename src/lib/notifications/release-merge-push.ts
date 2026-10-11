@@ -19,6 +19,8 @@ import {
   type PushNotificationPayload,
 } from "@/lib/notifications/push";
 import { isMergeJudgementPending, isReleaseHeadRef } from "@/lib/pull-request-list";
+import { fetchReleaseChecks, releaseChecksKey } from "@/lib/pull-request-release-checks";
+import { releaseVerificationBlock, resolvePullRequestReleaseVerification } from "@/lib/release-candidate-status";
 
 /**
  * 本番へのマージ待ち（develop→mainのリリースPR）のPush通知（#2376）。
@@ -248,9 +250,29 @@ export async function runReleaseMergePushSweep(
         releasePr.head.ref,
         token,
       );
+      // 統合検証・全体レビューが進行中・問題ありの間は鳴らさない（#4390）。判定が揃ってから
+      // 「mainへマージ待ち」として1回だけ鳴る（送った記録は鳴らした時点で残る）
+      const verification = resolvePullRequestReleaseVerification({
+        baseRef: releasePr.base?.ref ?? MAIN_BRANCH,
+        headRef: releasePr.head.ref,
+        releaseChecks:
+          (
+            await fetchReleaseChecks([
+              {
+                repositoryFullName: repository.fullName,
+                number: releasePr.number,
+                baseRef: releasePr.base?.ref ?? MAIN_BRANCH,
+                headRef: releasePr.head.ref,
+                baseSha: releasePr.base?.sha ?? null,
+                headSha: releasePr.head.sha,
+              },
+            ])
+          ).get(releaseChecksKey(repository.fullName, releasePr.number)) ?? null,
+      });
       const waiting = isWaitingUserMerge({
         ciState: check.ciState,
         mergeJudgementPending: isMergeJudgementPending(check.mergeJudgement),
+        verification: releaseVerificationBlock(verification),
       });
       if (!waiting) continue;
 
