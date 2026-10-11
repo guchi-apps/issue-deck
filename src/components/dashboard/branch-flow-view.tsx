@@ -719,7 +719,7 @@ function PullRequestLine({
       )}
     </div>
     {/* PR詳細・PR一覧と同じ6チェック（#4366）。共通結果は対象の候補PR・SHAを添えて出す */}
-    <PullRequestChecksStrip pullRequest={pullRequest} className="max-w-2xl px-0" />
+    <PullRequestChecksStrip pullRequest={pullRequest} grouped={false} className="max-w-2xl px-0" />
     {onMerged !== undefined && <PullRequestMergeHoldNotice pullRequest={pullRequest} className="max-w-2xl" />}
     </>
   );

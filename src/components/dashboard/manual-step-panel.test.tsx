@@ -101,8 +101,11 @@ describe("ManualStepPanel", () => {
     it("調査報告が無いときは「未確認」と出し、調査済みと取り違えない", () => {
       render(<ManualStepPanel isSubmitting={false} sessionIssue={ISSUE as never} comments={[]} />);
 
-      expect(screen.getByText("作業の状況")).toBeTruthy();
+      expect(screen.getByText("未調査")).toBeTruthy();
+      expect(screen.getByText("AIの事前調査がまだです")).toBeTruthy();
       expect(screen.getAllByText(/未確認/).length).toBeGreaterThan(0);
+      // #4426: 未調査のときに架空の「あなたの作業」を出さない
+      expect(screen.queryByText(/あなたの作業/)).toBeNull();
     });
 
     it("調査報告の4分類と1ライナーを出し、コピーできる", () => {
@@ -146,7 +149,8 @@ describe("ManualStepPanel", () => {
       );
 
       expect(screen.getByText(/完了にはなりません/)).toBeTruthy();
-      expect(screen.getByText("検証失敗・未完了")).toBeTruthy();
+      expect(screen.getByText("完了にはなっていません")).toBeTruthy();
+      expect(document.querySelector("[data-phase]")?.getAttribute("data-phase")).toBe("verify_failed");
     });
 
     it("検証がすべて成功した報告は「検証済み」にする", () => {
@@ -159,7 +163,95 @@ describe("ManualStepPanel", () => {
         />,
       );
 
-      expect(screen.getByText("検証済み")).toBeTruthy();
+      expect(screen.getByText("完了検証がすべて成功")).toBeTruthy();
+      expect(screen.getByText("手作業は完了しています")).toBeTruthy();
+    });
+
+    const USER_ACTION_BODY = [
+      MANUAL_STEP_INVESTIGATION_MARKER,
+      "### 目的",
+      "PM2を再起動する",
+      "### AI実施済み",
+      "- .envの値を確認（根拠: grep -c → 1）",
+      "### 自動実行できる",
+      "- 再起動後のヘルスチェック",
+      "### あなたの操作",
+      "- VPSでPM2を所有者で再起動する（理由: sudoが必要）",
+      "```",
+      "sudo -u app bash -lc 'cd /apps/x && pm2 restart x'",
+      "```",
+    ].join("\n");
+
+    // #4426: あなたの作業は実行場所・コマンド・完了後の確認つきで先頭に出す
+    it("あなたの作業に実行場所と完了後の確認を出す", () => {
+      render(
+        <ManualStepPanel
+          isSubmitting={false}
+          sessionIssue={ISSUE as never}
+          comments={[comment(USER_ACTION_BODY)]}
+        />,
+      );
+
+      expect(screen.getByText("あなたの操作を待っています")).toBeTruthy();
+      expect(screen.getByText("あなたの作業（1件）")).toBeTruthy();
+      expect(screen.getByText("VPS")).toBeTruthy();
+      expect(screen.getByText(/完了後：/)).toBeTruthy();
+      expect(screen.getByText("sudo -u app bash -lc 'cd /apps/x && pm2 restart x'")).toBeTruthy();
+    });
+
+    it("端末名が読めなければ実行場所を推測せず「未記載」と出す", () => {
+      render(
+        <ManualStepPanel
+          isSubmitting={false}
+          sessionIssue={ISSUE as never}
+          comments={[comment(USER_ACTION_BODY.replace("VPSで", ""))]}
+        />,
+      );
+
+      expect(screen.getByText("未記載")).toBeTruthy();
+    });
+
+    it("質問待ちなら主操作は質問パネルへの移動で、押しても完了にしない", () => {
+      const onShowQuestion = vi.fn();
+      render(
+        <ManualStepPanel
+          isSubmitting={false}
+          sessionIssue={ISSUE as never}
+          comments={[comment(USER_ACTION_BODY)]}
+          questionPending
+          onShowQuestion={onShowQuestion}
+        />,
+      );
+
+      fireEvent.click(screen.getByRole("button", { name: "操作したのでAIに確認を依頼" }));
+      expect(onShowQuestion).toHaveBeenCalledTimes(1);
+      expect(screen.queryByText("手作業は完了しています")).toBeNull();
+      expect(screen.queryByRole("button", { name: /クローズ/ })).toBeNull();
+    });
+
+    it("調査報告が無ければ、AI実施済みを空ではなく未確認と出す", () => {
+      render(<ManualStepPanel isSubmitting={false} sessionIssue={ISSUE as never} comments={[]} />);
+
+      expect(screen.getByText("未確認（事前調査の報告がありません）")).toBeTruthy();
+      expect(screen.getByText("完了検証：まだ実行していません（未確認）")).toBeTruthy();
+    });
+
+    it("前提を待っている間は、理由を先頭のカードにも出す", () => {
+      const prerequisites = [prerequisite()];
+      render(
+        <ManualStepPanel
+          isSubmitting={false}
+          sessionIssue={ISSUE as never}
+          comments={[]}
+          prerequisites={prerequisites}
+          prerequisiteSummary={summarizeManualStepPrerequisites(prerequisites, REPO)}
+          repositoryFullName={REPO}
+        />,
+      );
+
+      const card = document.querySelector("[data-phase]")!;
+      const summary = summarizeManualStepPrerequisites(prerequisites, REPO);
+      expect(card.textContent).toContain(summary.message);
     });
   });
 

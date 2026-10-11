@@ -3,6 +3,7 @@
 import { useState } from "react";
 
 import type { MergeCheckItem, MergeCheckTone } from "@/lib/pull-request-merge-checks";
+import { releaseVersionFromRef } from "@/lib/pull-request-primary-state";
 import { describeCandidateTarget, type ReleaseCandidate } from "@/lib/release-candidate-checks";
 import { cn } from "@/lib/utils";
 
@@ -31,6 +32,9 @@ export function PullRequestMergeChecks({
   onSelectCandidate,
   onOpenPullRequest,
   onOpenCandidate,
+  grouped = false,
+  showCandidateNote = false,
+  pullRequestEvidenceLabel,
   className,
 }: {
   checks: readonly MergeCheckItem[];
@@ -42,43 +46,85 @@ export function PullRequestMergeChecks({
   onOpenPullRequest: (() => void) | null;
   /** 共通結果の詳細（候補PRの詳細）を開く */
   onOpenCandidate: ((candidateNumber: number) => void) | null;
+  /**
+   * 「このPR（CI・コード・競合）」と「リリース候補（全体・統合・Mac）」の2グループに分けて出す（#4427）。
+   * 一覧・通常PR詳細が使う。省略時は従来どおり6項目を1つの並びで出す（ブランチ画面・本番マージ確認）
+   */
+  grouped?: boolean;
+  /** `grouped`のとき、候補が無い・読めない理由を共通説明として1回出す（詳細向け。一覧は見出しの印だけ） */
+  showCandidateNote?: boolean;
+  /** このPRの証跡の導線の文言を差し替える（詳細では「PR詳細を開く」が自画面を指してしまうため） */
+  pullRequestEvidenceLabel?: string;
   className?: string;
 }) {
   const [openKey, setOpenKey] = useState<string | null>(null);
   const open = checks.find((check) => check.key === openKey) ?? null;
 
+  const renderButton = (check: MergeCheckItem) => (
+    <div key={check.key} className="min-w-0">
+      <button
+        type="button"
+        aria-expanded={openKey === check.key}
+        aria-label={`${check.fullName}: ${check.state}`}
+        onClick={() => setOpenKey(openKey === check.key ? null : check.key)}
+        className={cn(
+          "flex min-h-11 w-full flex-col items-start justify-center rounded px-1 py-0.5 text-left hover:bg-muted/50 focus-visible:bg-muted/50 focus-visible:outline-none",
+          openKey === check.key && "bg-muted",
+        )}
+      >
+        <span
+          className={cn(
+            "text-[10px] leading-4 whitespace-nowrap text-muted-foreground",
+            !grouped && check.common && "font-bold text-foreground",
+          )}
+        >
+          {grouped ? check.shortLabel.replace("〔共通〕", "") : check.shortLabel}
+        </span>
+        <span className={cn("text-[11px] leading-4 font-bold", TONE_TEXT[check.tone])}>
+          <span aria-hidden="true">{check.mark}</span> {check.state}
+        </span>
+      </button>
+    </div>
+  );
+
+  const own = checks.filter((check) => !check.common);
+  const common = checks.filter((check) => check.common);
+  const candidateLabel = candidate
+    ? [releaseVersionFromRef(candidate.headRef), `#${candidate.number}`].filter(Boolean).join("・")
+    : null;
+  const candidateNote = common[0]?.reason ?? null;
+
   return (
     <div className={cn("px-3 pb-1.5", className)} data-testid="pull-request-checks">
-      <div className="grid grid-cols-3 sm:grid-cols-6">
-        {checks.map((check) => (
-          <div key={check.key} className="min-w-0">
-            <button
-              type="button"
-              aria-expanded={openKey === check.key}
-              aria-label={`${check.fullName}: ${check.state}`}
-              onClick={() => setOpenKey(openKey === check.key ? null : check.key)}
-              className={cn(
-                "flex min-h-11 w-full flex-col items-start justify-center rounded px-1 py-0.5 text-left hover:bg-muted/50 focus-visible:bg-muted/50 focus-visible:outline-none",
-                openKey === check.key && "bg-muted",
-              )}
-            >
-              <span
-                className={cn(
-                  "text-[10px] leading-4 whitespace-nowrap text-muted-foreground",
-                  check.common && "font-bold text-foreground",
-                )}
-              >
-                {check.shortLabel}
+      {grouped ? (
+        <div className="grid grid-cols-1 gap-x-3 gap-y-1 sm:grid-cols-2">
+          <section aria-label="このPRのチェック" className="min-w-0">
+            <h3 className="px-1 text-[10.5px] leading-4 font-semibold text-muted-foreground">
+              このPR<span className="font-normal">（CI・コード・競合）</span>
+            </h3>
+            <div className="grid grid-cols-3">{own.map(renderButton)}</div>
+          </section>
+          <section aria-label="リリース候補のチェック" className="min-w-0">
+            <h3 className="px-1 text-[10.5px] leading-4 font-semibold text-muted-foreground">
+              リリース候補
+              <span className="font-normal">
+                {candidateLabel ? `（${candidateLabel}）` : "（全体・統合・Mac）"}
               </span>
-              <span className={cn("text-[11px] leading-4 font-bold", TONE_TEXT[check.tone])}>
-                <span aria-hidden="true">{check.mark}</span> {check.state}
-              </span>
-            </button>
-          </div>
-        ))}
-      </div>
+            </h3>
+            <div className="grid grid-cols-3">{common.map(renderButton)}</div>
+          </section>
+        </div>
+      ) : (
+        <div className="grid grid-cols-3 sm:grid-cols-6">{checks.map(renderButton)}</div>
+      )}
 
-      {candidate && (
+      {grouped && showCandidateNote && !candidate && candidateNote && (
+        <p className="mt-0.5 px-1 text-[11px] leading-4 text-muted-foreground" data-testid="release-candidate-note">
+          リリース候補: {candidateNote}。通常PRのマージ条件には影響しません。
+        </p>
+      )}
+
+      {!grouped && candidate && (
         <p className="mt-0.5 px-1 text-[10.5px] leading-4 text-muted-foreground">
           共通結果の対象: {describeCandidateTarget(candidate)}
         </p>
@@ -138,7 +184,7 @@ export function PullRequestMergeChecks({
                       onClick={onOpenPullRequest}
                       className="min-h-8 text-primary underline-offset-2 hover:underline"
                     >
-                      {open.evidence.label} ›
+                      {pullRequestEvidenceLabel ?? open.evidence.label} ›
                     </button>
                   )}
             </p>

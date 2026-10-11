@@ -12,9 +12,7 @@ import {
   AiReviewStatusButton,
   BranchBadge,
   CiStatusButton,
-  ConflictBadge,
   DeployStatusBadge,
-  MergeJudgementBadge,
   PullRequestMetaBadge,
   PullRequestStateIcon,
   RepairRunBadge,
@@ -35,6 +33,7 @@ import {
   isOpenReleaseCandidate,
   ReleasePullRequestOverview,
 } from "@/components/dashboard/release-pull-request-overview";
+import { ConnectedReleaseReviewSections } from "@/components/dashboard/release-review-sections";
 import { UserAvatar } from "@/components/dashboard/user-avatar";
 import { VerificationSummaryPanel } from "@/components/dashboard/verification-summary-panel";
 import { WorkflowRunProgressPanel } from "@/components/dashboard/workflow-run-progress-panel";
@@ -46,7 +45,8 @@ import { formatRelativeDate } from "@/lib/format-relative-date";
 import { selectPullRequestReviewComment } from "@/lib/github/pull-request-review-comment";
 import { repairKindsFor } from "@/lib/github/pull-request-repair";
 import { parseReleaseVerification, type ReleaseVerificationRow } from "@/lib/github/release-verification";
-import { canMergeFromDeck, requiresUserMerge } from "@/lib/pull-request-list";
+import { canMergeFromDeck, RELEASE_BRANCH_PREFIX, requiresUserMerge } from "@/lib/pull-request-list";
+import { derivePrimaryState, type PrimaryStateTone } from "@/lib/pull-request-primary-state";
 import { cn } from "@/lib/utils";
 import type {
   PullRequestSummary,
@@ -90,6 +90,24 @@ type PullRequestDetailProps = {
   style?: CSSProperties;
   /** スマホのボトムナビと最後の項目が重ならないよう末尾に余白を入れる */
   footerSpacing?: boolean;
+};
+
+/** 詳細のタブ（#4427）。概要＝本文と補足、指摘＝CI・レビューの根拠、変更ファイル、活動＝コメント */
+type DetailTab = "overview" | "findings" | "files" | "activity";
+
+const DETAIL_TAB_LABEL: Record<DetailTab, string> = {
+  overview: "概要",
+  findings: "指摘",
+  files: "変更ファイル",
+  activity: "活動",
+};
+
+const PRIMARY_TONE_CLASS: Record<PrimaryStateTone, string> = {
+  ok: "text-green-700 dark:text-green-400",
+  bad: "text-destructive",
+  warn: "text-amber-700 dark:text-amber-400",
+  run: "text-blue-700 dark:text-blue-400",
+  muted: "text-muted-foreground",
 };
 
 const REVIEW_STATE_LABEL: Record<PullRequestReviewState, string> = {
@@ -192,6 +210,8 @@ export function PullRequestDetail({
   // レビュー本文もCIと同じく、開いたPRのidで状態を持つ。PRを切り替えたときに前の本文を
   // 誤って残さないため（#3319）。
   const [reviewDetailPullRequestId, setReviewDetailPullRequestId] = useState<string | null>(null);
+  // 開いているタブ。**PRのidで持つ**（切り替えたら概要へ戻す。前のPRのタブを引き継がない）
+  const [tabState, setTabState] = useState<{ pullRequestId: string; tab: DetailTab } | null>(null);
 
   // 画面内のリンクから一覧に無いPRを開いた場合、ヘッダーの材料（summary）が届くまで
   // 選択中PRはnullのまま。「PRを選ぶと〜」ではなく読み込み中・失敗として見せる（#1260）。
@@ -280,34 +300,36 @@ export function PullRequestDetail({
       )
     : null;
 
+  const primary = derivePrimaryState(pullRequest);
+  const activeTab: DetailTab = tabState?.pullRequestId === pullRequest.id ? tabState.tab : "overview";
+  const selectTab = (tab: DetailTab) => setTabState({ pullRequestId: pullRequest.id, tab });
+  const isDevelopOpen = pullRequest.baseRef === "develop" && pullRequest.state === "open" && !pullRequest.merged;
+  const findingsNeedAttention = primary.kind === "ci-failed" || primary.kind === "review-findings";
+
   return (
     <div className={cn("flex flex-col overflow-hidden", className)} style={style}>
-      <header className="flex shrink-0 items-start gap-2 border-b px-4 py-3">
+      {/* 短い固定ヘッダー（#4427）。戻る・画面種別・番号・更新・その他だけを置き、長い正式タイトルは本文側で全文を出す */}
+      <header className="flex min-h-12 shrink-0 items-center gap-2 border-b px-4 py-1.5">
         {headerLeading}
-        <div className="min-w-0 flex-1">
-          <div className="flex min-w-0 items-start gap-2">
-            <PullRequestStateIcon pullRequest={pullRequest} className="mt-0.5 size-4 shrink-0" />
-            <h1 className="min-w-0 flex-1 text-sm font-semibold">
-              {releaseCandidate ? `本番PR #${pullRequest.number}` : `#${pullRequest.number} ${pullRequest.title}`}
-            </h1>
-            <a
-              href={pullRequest.htmlUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="mt-0.5 shrink-0 rounded p-0.5 text-muted-foreground hover:text-foreground"
-              aria-label={`#${pullRequest.number} をGitHubで開く`}
-            >
-              <ExternalLink className="size-3.5" />
-            </a>
-          </div>
-          <p className="mt-1 truncate text-xs text-muted-foreground">
-            {pullRequest.repositoryFullName}
+        <div className="flex min-w-0 flex-1 items-center gap-2">
+          <PullRequestStateIcon pullRequest={pullRequest} className="size-4 shrink-0" />
+          <p className="min-w-0 truncate text-sm font-semibold">
+            {releaseCandidate ? "本番PR" : "Pull Request"} <span className="tabular-nums text-muted-foreground">#{pullRequest.number}</span>
           </p>
         </div>
+        <a
+          href={pullRequest.htmlUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="flex size-11 shrink-0 items-center justify-center rounded text-muted-foreground hover:text-foreground"
+          aria-label={`#${pullRequest.number} をGitHubで開く`}
+        >
+          <ExternalLink className="size-4" />
+        </a>
         <Button
           size="sm"
           variant="ghost"
-          className="h-8 shrink-0"
+          className="h-9 shrink-0"
           disabled={isLoading}
           onClick={onRefresh}
         >
@@ -329,14 +351,100 @@ export function PullRequestDetail({
       </header>
 
       <div className="flex-1 overflow-y-auto overscroll-contain">
-        {releaseCandidate && <ReleasePullRequestOverview pullRequest={pullRequest} onMerged={onMerged} />}
-        {releaseCandidate && (
-          <h2 className="border-b bg-muted/50 px-4 py-2 text-xs font-semibold">詳細・履歴</h2>
-        )}
-        <div className="flex flex-col gap-2 border-b px-4 py-3">
-          <div className="flex min-w-0 flex-wrap items-center gap-2">
+        <div className="flex flex-col gap-3 border-b px-4 py-4">
+          <div className="min-w-0">
+            <p className="truncate text-xs text-muted-foreground">{pullRequest.repositoryFullName}</p>
+            <h1 className="mt-0.5 text-lg leading-snug font-bold break-words">
+              #{pullRequest.number} {pullRequest.title}
+            </h1>
+          </div>
+
+          {/* 本番PRの状態・主操作・検証・今回の変更は専用の要約が持つ（#4428）。同じ操作を2か所に置かない */}
+          {releaseCandidate && <ReleasePullRequestOverview pullRequest={pullRequest} onMerged={onMerged} />}
+          {releaseCandidate && <h2 className="-mx-4 border-y bg-muted/50 px-4 py-2 text-xs font-semibold">詳細・履歴</h2>}
+
+          {!releaseCandidate && (
+          <section
+            aria-label="現在の状態と主操作"
+            data-testid="pull-request-primary-action"
+            className="flex flex-col gap-2 rounded-lg border bg-card px-4 py-3"
+          >
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+              <div className="min-w-0 flex-1 basis-56">
+                <p className={cn("text-sm font-bold", PRIMARY_TONE_CLASS[primary.tone])}>
+                  <span aria-hidden="true">{primary.mark}</span> {primary.label}
+                </p>
+                <p className="text-xs text-muted-foreground">{primary.reason}</p>
+              </div>
+              <div className="flex min-w-0 flex-wrap items-center gap-2">
+                {/* 失敗の隣に「いま自動で直しにいっている」を出す（#2072）。進捗は経過時間つきで、再起動は促さない */}
+                <RepairRunBadge run={pullRequest.repairRun} />
+                <PullRequestRepairButtons
+                  repositoryFullName={pullRequest.repositoryFullName}
+                  pullRequestNumber={pullRequest.number}
+                  kinds={repairKinds}
+                  availability={pullRequest.repairWorkflowAvailability}
+                  runningKind={pullRequest.repairRun?.kind ?? null}
+                />
+                {canMergeFromDeck(pullRequest) && (
+                  <PullRequestMergeButton
+                    pullRequest={pullRequest}
+                    onMerged={onMerged}
+                    variant={repairKinds.length === 0 ? "default" : "outline"}
+                  />
+                )}
+                {onDraftFixIssue && showsPullRequestFixIssueButton(pullRequest) && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-9 text-xs"
+                    onClick={() => onDraftFixIssue(pullRequest)}
+                  >
+                    <Wrench className="size-3.5" />
+                    修正Issueを起案
+                  </Button>
+                )}
+              </div>
+            </div>
+
+            <PullRequestMergeHoldNotice pullRequest={pullRequest} />
+
+            {requiresUserMerge(pullRequest) && <UserMergeRequiredBadge />}
+            {/* ユーザーのマージが必要な理由（#4088）。押す前に読めるようにする */}
+            {requiresUserMerge(pullRequest) && currentDetail?.userMergeReasons && (
+              <MergeCheckReasonNotice reasons={currentDetail.userMergeReasons} />
+            )}
+            <DeployStatusBadge status={deployStatus} />
+            {/* このPRの変更が本番へ出ていないとき、押せる場所をその場に出す（#2236）。失敗しているときだけ */}
+            {deployStatus?.kind === "failed" && (
+              <DeployFailureAlert
+                repositoryFullName={pullRequest.repositoryFullName}
+                title="このPRの変更は本番へ出ていません"
+                version={deployStatus.version}
+                runUrl={deployStatus.deployRunUrl}
+              />
+            )}
+          </section>
+          )}
+
+          {/* チェックの根拠（#4366・#4427）。このPR（CI・コード・競合）とリリース候補（全体・統合・Mac）を分けて読む。
+              リリース候補が未作成でも通常PRのマージ条件は増えない */}
+          {!releaseCandidate && (
+            <PullRequestChecksStrip
+              pullRequest={pullRequest}
+              onOpenPullRequest={() => selectTab("findings")}
+              showCandidateNote
+              pullRequestEvidenceLabel="指摘・CIの内訳を開く"
+              className="-mx-1 px-0"
+            />
+          )}
+
+          {/* 補足（属性）。現在の阻害要因は上の主操作に出るので、ここは読み物 */}
+          <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
             <BranchBadge baseRef={pullRequest.baseRef} headRef={pullRequest.headRef} />
             {kindLabel && <PullRequestMetaBadge>{kindLabel}</PullRequestMetaBadge>}
+            {pullRequest.draft && <PullRequestMetaBadge>ドラフト</PullRequestMetaBadge>}
+            {pullRequest.autoMergeEnabled && <PullRequestMetaBadge>Auto-merge有効</PullRequestMetaBadge>}
             {pullRequest.linkedIssueNumber !== null && (
               <GithubReferenceLink
                 href={`https://github.com/${pullRequest.repositoryFullName}/issues/${pullRequest.linkedIssueNumber}`}
@@ -350,160 +458,87 @@ export function PullRequestDetail({
                 Issue #{pullRequest.linkedIssueNumber}
               </GithubReferenceLink>
             )}
-            {onDraftFixIssue && showsPullRequestFixIssueButton(pullRequest) && (
-              <Button
-                size="sm"
-                variant="outline"
-                className="ml-auto h-7 text-xs"
-                onClick={() => onDraftFixIssue(pullRequest)}
-              >
-                <Wrench className="size-3.5" />
-                修正Issueを起案
-              </Button>
-            )}
-          </div>
-
-          <div className="flex min-w-0 flex-wrap items-center gap-2">
-            {pullRequest.merged ? (
-              <span className="inline-flex w-fit items-center rounded-full bg-purple-600/15 px-2 py-0.5 text-xs font-medium text-purple-700 ring-1 ring-inset ring-purple-600 dark:text-purple-400">
-                マージ済み
-              </span>
-            ) : pullRequest.state === "closed" ? (
-              <span className="inline-flex w-fit items-center rounded-full bg-destructive/15 px-2 py-0.5 text-xs font-medium text-destructive ring-1 ring-inset ring-destructive">
-                クローズ済み
-              </span>
-            ) : pullRequest.draft ? (
-              <PullRequestMetaBadge>ドラフト</PullRequestMetaBadge>
-            ) : (
-              <CiStatusButton
-                ciState={pullRequest.ciState}
-                expanded={ciDetailOpen}
-                onClick={() => setCiDetailPullRequestId(ciDetailOpen ? null : pullRequest.id)}
-              />
-            )}
-            {/* CIとは別の軸のレビュー状態。実行中・省略・失敗・完了を同じ操作表示で出す（#3319）。 */}
-            <AiReviewStatusButton
-              aiReview={pullRequest.mergeJudgement.aiReview}
-              reviewVerdict={pullRequest.reviewVerdict}
-              expanded={reviewDetailOpen}
-              onClick={() => setReviewDetailPullRequestId(reviewDetailOpen ? null : pullRequest.id)}
-            />
-            {/* レビュー実施中は上の四角い操作表示が担う。同じ文言の丸い判定バッジを重ねない。 */}
-            {pullRequest.mergeJudgement.aiReview.state !== "pending" && (
-              <MergeJudgementBadge
-                mergeJudgement={pullRequest.mergeJudgement}
-                ciState={pullRequest.ciState}
-              />
-            )}
-            <DeployStatusBadge status={deployStatus} />
-            {pullRequest.autoMergeEnabled && (
-              <PullRequestMetaBadge>Auto-merge有効</PullRequestMetaBadge>
-            )}
-            {requiresUserMerge(pullRequest) && <UserMergeRequiredBadge />}
-            <ConflictBadge mergeable={pullRequest.mergeable} />
-            {/* 失敗の赤の隣に「いま自動で直しにいっている」を出す（#2072）。 */}
-            <RepairRunBadge run={pullRequest.repairRun} />
-
-            <span className="flex items-center gap-1 text-xs text-muted-foreground">
+            <span className="flex items-center gap-1">
               <UserAvatar login={pullRequest.authorLogin} className="size-4" />
               {pullRequest.authorLogin}
             </span>
-            <span className="text-xs text-muted-foreground">
-              {formatRelativeDate(pullRequest.createdAt)}
-            </span>
-            <PullRequestRepairButtons
-              repositoryFullName={pullRequest.repositoryFullName}
-              pullRequestNumber={pullRequest.number}
-              kinds={repairKinds}
-              availability={pullRequest.repairWorkflowAvailability}
-              runningKind={pullRequest.repairRun?.kind ?? null}
-            />
-            {/* 本番PRの主操作は上の「現在の状態と次の操作」が持つ（同じ操作を2か所に置かない） */}
-            {canMergeFromDeck(pullRequest) && !releaseCandidate && (
-              <PullRequestMergeButton
-                pullRequest={pullRequest}
-                onMerged={onMerged}
-                variant={repairKinds.length === 0 ? "default" : "outline"}
-                className="ml-auto"
-              />
+            <span>{formatRelativeDate(pullRequest.createdAt)}</span>
+            {currentDetail && (
+              <span>
+                <span className="text-green-600">+{currentDetail.additions}</span>{" "}
+                <span className="text-destructive">-{currentDetail.deletions}</span>
+                {` ・ ${currentDetail.changedFiles}ファイル ・ ${currentDetail.commits}コミット`}
+              </span>
             )}
           </div>
-
-          {/* PR一覧・ブランチ画面と同じ6チェック（#4366）。バッジは操作の入口として残し、結果の比較はここで読む */}
-          {!releaseCandidate && <PullRequestChecksStrip pullRequest={pullRequest} className="-mx-1 px-0" />}
-
-          <PullRequestMergeHoldNotice pullRequest={pullRequest} className="mt-2" />
-
-          {/* ユーザーのマージが必要な理由（#4088）。バッジの直下に出して押す前に読めるようにする */}
-          {requiresUserMerge(pullRequest) && currentDetail?.userMergeReasons && (
-            <MergeCheckReasonNotice reasons={currentDetail.userMergeReasons} className="mt-2" />
-          )}
-
-          {/* CIのジョブ単位の内訳（#2777）。押したときだけ取得する */}
-          {ciDetailOpen && (
-            <WorkflowRunProgressPanel
-              repositoryFullName={pullRequest.repositoryFullName}
-              runId={ciRunId}
-              open={ciDetailOpen}
-              title="CIの内訳"
-              checks={ciChecks}
-            />
-          )}
-
-          {reviewDetailOpen && (
-            <PullRequestReviewFindings
-              review={review}
-              pullRequestNumber={pullRequest.number}
-              pullRequestUrl={pullRequest.htmlUrl}
-              reviewRunUrl={pullRequest.mergeJudgement.aiReview.runUrl}
-              repair={{
-                repositoryFullName: pullRequest.repositoryFullName,
-                kinds: repairKinds,
-                availability: pullRequest.repairWorkflowAvailability,
-                runningKind: pullRequest.repairRun?.kind ?? null,
-              }}
-            />
-          )}
-
-          {/* このPRの変更が本番へ出ていないとき、押せる場所をその場に出す（#2236）。
-              ピルは実行ログへのリンクにしかならず、出し直すには別画面へ移る必要があった。
-              **失敗しているときだけ出す**——それ以外の状態でこの帯を出す意味が無い */}
-          {deployStatus?.kind === "failed" && (
-            <DeployFailureAlert
-              repositoryFullName={pullRequest.repositoryFullName}
-              title="このPRの変更は本番へ出ていません"
-              version={deployStatus.version}
-              runUrl={deployStatus.deployRunUrl}
-            />
-          )}
-
-          {currentDetail && (
-            <p className="text-xs text-muted-foreground">
-              <span className="text-green-600">+{currentDetail.additions}</span>{" "}
-              <span className="text-destructive">-{currentDetail.deletions}</span>
-              {` ・ ${currentDetail.changedFiles}ファイル ・ ${currentDetail.commits}コミット`}
-            </p>
-          )}
         </div>
 
-        {/* サブPCで走るAIレビュー（PR_REVIEW・#3990）の状態。develop向けの未マージPRだけ */}
-        {pullRequest.baseRef === "develop" && pullRequest.state === "open" && !pullRequest.merged && (
-          <PullRequestAiReviewJobs
-            repositoryFullName={pullRequest.repositoryFullName}
-            prNumber={pullRequest.number}
-            headSha={pullRequest.headSha}
-          />
-        )}
+        <div role="tablist" aria-label="PR詳細の表示切り替え" className="sticky top-0 z-10 flex gap-1 overflow-x-auto border-b bg-background px-2">
+          {(Object.keys(DETAIL_TAB_LABEL) as DetailTab[]).map((tab) => (
+            <button
+              key={tab}
+              type="button"
+              role="tab"
+              aria-selected={activeTab === tab}
+              onClick={() => selectTab(tab)}
+              className={cn(
+                "flex min-h-11 shrink-0 items-center gap-1 px-3 text-sm font-medium text-muted-foreground hover:text-foreground",
+                activeTab === tab && "border-b-2 border-primary text-primary",
+              )}
+            >
+              {DETAIL_TAB_LABEL[tab]}
+              {tab === "findings" && findingsNeedAttention && (
+                <span aria-label="対応が必要" className="size-2 rounded-full bg-destructive" />
+              )}
+            </button>
+          ))}
+        </div>
 
-        {/* GitHub Actions障害時のバックアップCI（#4065）。develop向けの未マージPRだけ */}
-        {pullRequest.baseRef === "develop" && pullRequest.state === "open" && !pullRequest.merged && (
-          <PullRequestBackupCi
-            repositoryFullName={pullRequest.repositoryFullName}
-            prNumber={pullRequest.number}
-            headSha={pullRequest.headSha}
-            headRef={pullRequest.headRef}
-            actionsChecks={ciChecks}
-          />
+        {activeTab === "findings" && (
+          <section aria-label="指摘" className="border-b px-4 py-3">
+            <div className="flex min-w-0 flex-wrap items-center gap-2">
+              {pullRequest.merged ? null : pullRequest.state === "closed" ? null : pullRequest.draft ? null : (
+                <CiStatusButton
+                  ciState={pullRequest.ciState}
+                  expanded={ciDetailOpen}
+                  onClick={() => setCiDetailPullRequestId(ciDetailOpen ? null : pullRequest.id)}
+                />
+              )}
+              {/* CIとは別の軸のレビュー状態（#3319）。実行中・省略・失敗・完了を同じ操作表示で出す */}
+              <AiReviewStatusButton
+                aiReview={pullRequest.mergeJudgement.aiReview}
+                reviewVerdict={pullRequest.reviewVerdict}
+                expanded={reviewDetailOpen}
+                onClick={() => setReviewDetailPullRequestId(reviewDetailOpen ? null : pullRequest.id)}
+              />
+            </div>
+
+            {/* CIのジョブ単位の内訳（#2777）。押したときだけ取得する */}
+            {ciDetailOpen && (
+              <WorkflowRunProgressPanel
+                repositoryFullName={pullRequest.repositoryFullName}
+                runId={ciRunId}
+                open={ciDetailOpen}
+                title="CIの内訳"
+                checks={ciChecks}
+              />
+            )}
+
+            {reviewDetailOpen && (
+              <PullRequestReviewFindings
+                review={review}
+                pullRequestNumber={pullRequest.number}
+                pullRequestUrl={pullRequest.htmlUrl}
+                reviewRunUrl={pullRequest.mergeJudgement.aiReview.runUrl}
+                repair={{
+                  repositoryFullName: pullRequest.repositoryFullName,
+                  kinds: repairKinds,
+                  availability: pullRequest.repairWorkflowAvailability,
+                  runningKind: pullRequest.repairRun?.kind ?? null,
+                }}
+              />
+            )}
+          </section>
         )}
 
         {error && <p className="px-4 py-3 text-sm text-destructive">{error}</p>}
@@ -516,14 +551,36 @@ export function PullRequestDetail({
           </div>
         )}
 
-        {currentDetail && (
+        {/* サブPCで走るAIレビュー（PR_REVIEW・#3990）の状態。develop向けの未マージPRだけ。指摘の根拠なので指摘タブへ置く */}
+        {activeTab === "findings" && isDevelopOpen && (
+          <PullRequestAiReviewJobs
+            repositoryFullName={pullRequest.repositoryFullName}
+            prNumber={pullRequest.number}
+            headSha={pullRequest.headSha}
+          />
+        )}
+
+        {currentDetail && activeTab === "overview" && (
           <>
             {pullRequest.kind !== "release" && <PullRequestReviewRound pullRequest={pullRequest} />}
 
-            {/* リリースPRの検証結果は、本文より先に出す（#2448）。mainへ出すかを決める人が
-                最初に知りたいのは「何件のうち何件が問題なしか」で、本文の表まで
-                スクロールしないと読めないのでは判断材料として遅い。
-                見出しを持たないPR（＝リリースPR以外）ではparseがnullを返すので何も出ない */}
+            {/* リリースPRの3区分（全体レビュー／統合検証／個別PRレビュー。#4238・#4277）。並びと形式は本番マージの
+                確認ダイアログ・スマホのリリースシートと同じ部品で揃える */}
+            {pullRequest.kind === "release" &&
+              !releaseCandidate &&
+              !pullRequest.merged &&
+              pullRequest.state === "open" &&
+              pullRequest.headRef.startsWith(RELEASE_BRANCH_PREFIX) && (
+                <div className="border-b px-4 py-3">
+                  <ConnectedReleaseReviewSections
+                    repositoryFullName={pullRequest.repositoryFullName}
+                    pullRequestNumber={pullRequest.number}
+                    headRef={pullRequest.headRef}
+                  />
+                </div>
+              )}
+
+            {/* リリースPRの検証結果は、本文より先に出す（#2448）。見出しを持たないPRではparseがnullを返すので何も出ない */}
             {verification && (
               <VerificationSummaryPanel
                 verification={verification}
@@ -556,36 +613,52 @@ export function PullRequestDetail({
               )}
             </section>
 
-            <PullRequestFileList
-              pullRequestId={pullRequest.id}
-              htmlUrl={pullRequest.htmlUrl}
-              changedFiles={currentDetail.changedFiles}
-              additions={currentDetail.additions}
-              deletions={currentDetail.deletions}
-              refreshKey={currentDetail.fetchedAt}
-            />
-
-            <section>
-              <h2 className="border-b bg-muted/50 px-4 py-2 text-xs font-semibold">
-                コメント {currentDetail.events.length}件
-              </h2>
-              {currentDetail.events.length === 0 ? (
-                <p className="px-4 py-8 text-center text-sm text-muted-foreground">
-                  コメントはまだありません。
-                </p>
-              ) : (
-                <ul>
-                  {currentDetail.events.map((event) => (
-                    <EventItem
-                      key={event.id}
-                      event={event}
-                      repositoryFullName={pullRequest.repositoryFullName}
-                    />
-                  ))}
-                </ul>
-              )}
-            </section>
+            {/* GitHub Actions障害時のバックアップCI（#4065）。補足なのでここへ置く。
+                develop向けの未マージPRだけ。CIが現在の阻害要因のときは上の主操作に理由を出している */}
+            {isDevelopOpen && (
+              <PullRequestBackupCi
+                repositoryFullName={pullRequest.repositoryFullName}
+                prNumber={pullRequest.number}
+                headSha={pullRequest.headSha}
+                headRef={pullRequest.headRef}
+                actionsChecks={ciChecks}
+              />
+            )}
           </>
+        )}
+
+        {currentDetail && activeTab === "files" && (
+          <PullRequestFileList
+            pullRequestId={pullRequest.id}
+            htmlUrl={pullRequest.htmlUrl}
+            changedFiles={currentDetail.changedFiles}
+            additions={currentDetail.additions}
+            deletions={currentDetail.deletions}
+            refreshKey={currentDetail.fetchedAt}
+          />
+        )}
+
+        {currentDetail && activeTab === "activity" && (
+          <section>
+            <h2 className="border-b bg-muted/50 px-4 py-2 text-xs font-semibold">
+              コメント {currentDetail.events.length}件
+            </h2>
+            {currentDetail.events.length === 0 ? (
+              <p className="px-4 py-8 text-center text-sm text-muted-foreground">
+                コメントはまだありません。
+              </p>
+            ) : (
+              <ul>
+                {currentDetail.events.map((event) => (
+                  <EventItem
+                    key={event.id}
+                    event={event}
+                    repositoryFullName={pullRequest.repositoryFullName}
+                  />
+                ))}
+              </ul>
+            )}
+          </section>
         )}
 
         {footerSpacing && <div className="h-14" aria-hidden="true" />}

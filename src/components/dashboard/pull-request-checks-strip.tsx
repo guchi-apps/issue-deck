@@ -20,10 +20,17 @@ import type { PullRequestSummary } from "@/types/pull-request";
 export function PullRequestChecksStrip({
   pullRequest,
   onOpenPullRequest,
+  grouped = true,
+  showCandidateNote = false,
+  pullRequestEvidenceLabel,
   className,
 }: {
   pullRequest: PullRequestSummary;
   onOpenPullRequest?: (() => void) | null;
+  /** 2グループ表示（#4427）。ブランチ画面など従来の1列表示が要る場所だけfalse */
+  grouped?: boolean;
+  showCandidateNote?: boolean;
+  pullRequestEvidenceLabel?: string;
   className?: string;
 }) {
   const source = useReleaseCandidates(pullRequest.repositoryFullName);
@@ -43,6 +50,9 @@ export function PullRequestChecksStrip({
   return (
     <PullRequestMergeChecks
       className={className}
+      grouped={grouped}
+      showCandidateNote={showCandidateNote}
+      pullRequestEvidenceLabel={pullRequestEvidenceLabel}
       checks={checks}
       candidate={release.candidate}
       choices={release.choices}
