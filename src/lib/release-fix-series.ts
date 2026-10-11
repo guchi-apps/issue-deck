@@ -74,6 +74,10 @@ export const REBUILD_FAILURE_REASONS = {
   full: "候補の作り直しに失敗しました。修正は取り込み済みです。画面の「修正を入れて作り直す」から手動で作り直せます",
 } as const;
 
+/** 修正PRが足せる候補に無いと判断して止めたときの理由。この理由で止まった系列は巡回が再評価する（#4422） */
+export const NOTHING_TO_ADD_REASON =
+  "修正PRが元の候補の後にdevelopへ入っていないため、足すものがありません。修正PRがすでに候補に含まれていないかを確認してください";
+
 export function isRebuildFailureReason(reason: string | null | undefined): boolean {
   return reason != null && (Object.values(REBUILD_FAILURE_REASONS) as string[]).includes(reason);
 }
@@ -319,6 +323,8 @@ export type ReleaseCandidateObservation = {
   originMerged: boolean;
   /** 元のリリースPRのheadより後にdevelopへ入ったPR番号（バンプPR・リリースPRは除く） */
   developPullRequests: number[];
+  /** 候補の取得が最後まで済んだか。falseなら「足すものがない」と断定せず待つ（#4422）。未指定はtrue */
+  complete?: boolean;
 };
 
 export type ReleaseFixDecision =
@@ -385,10 +391,11 @@ export function decideReleaseFix(input: {
     const developed = new Set(input.candidate.developPullRequests);
     const selectedPrs = [...new Set([...fixPrs, ...accepted])].filter((n) => developed.has(n)).sort((a, b) => a - b);
     if (selectedPrs.length === 0) {
+      if (input.candidate.complete === false) return { action: "wait" };
       return {
         action: "stop",
         status: "stopped",
-        reason: "修正PRが元の候補の後にdevelopへ入っていないため、足すものがありません。修正PRがすでに候補に含まれていないかを確認してください",
+        reason: NOTHING_TO_ADD_REASON,
         seriesIds: ids,
       };
     }

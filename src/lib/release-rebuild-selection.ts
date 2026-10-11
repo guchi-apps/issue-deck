@@ -55,7 +55,8 @@ export type RebuildPullRequestProblem =
   | "not_develop"
   | "release_branch"
   | "already_included"
-  | "sha_changed";
+  | "sha_changed"
+  | "lookup_failed";
 
 export const REBUILD_PR_PROBLEM_LABEL: Record<RebuildPullRequestProblem, string> = {
   not_found: "PRが見つかりません",
@@ -64,6 +65,7 @@ export const REBUILD_PR_PROBLEM_LABEL: Record<RebuildPullRequestProblem, string>
   release_branch: "バンプPR・リリースPRは選べません",
   already_included: "元の候補に既に含まれています",
   sha_changed: "選んだ後にPRのマージコミットが変わりました。選び直してください",
+  lookup_failed: "GitHubからPRの状態を取得できませんでした。時間をおいて開き直してください（取り込み済みとは判定していません）",
 };
 
 export type RebuildPullRequestFacts = {

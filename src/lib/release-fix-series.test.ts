@@ -209,3 +209,14 @@ describe("decideReleaseFixStart（#4396）", () => {
     expect(decideReleaseFixStart({ ...base, startState: "running" })).toMatchObject({ ok: false, reason: "already_started" });
   });
 });
+
+describe("候補の取得が不完全なとき（#4422）", () => {
+  it("足すPRが見つからなくても、取得が不完全なら停止せず待つ", () => {
+    const decision = decideReleaseFix({
+      selective: true,
+      series: [{ id: "s", status: "fix_merged", issueNumber: 1, fixPrNumber: 10, fixPrMerged: true, fixPrClosedUnmerged: false, acceptedExtraPrs: [] }],
+      candidate: { originStillOpen: true, originMerged: false, developPullRequests: [], complete: false },
+    });
+    expect(decision.action).toBe("wait");
+  });
+});
