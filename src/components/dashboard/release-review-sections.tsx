@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { ChevronRight, ExternalLink, RotateCcw } from "lucide-react";
 
-import { ReleaseFixCreate, ReleaseFixSeriesPanel } from "@/components/dashboard/release-fix-panel";
+import { ReleaseFixCreate, ReleaseFixOverviewPanel } from "@/components/dashboard/release-fix-panel";
 import { REVIEW_MARK, REVIEW_TONE } from "@/components/dashboard/review-verdict";
 import { ReleaseRebuildButton } from "@/components/dashboard/release-rebuild-button";
 import { useReleaseChanges, type UseReleaseChangesResult } from "@/hooks/use-release-changes";
@@ -930,6 +930,8 @@ export function ReleaseReviewSections({
     );
   const nowMs = useNow(active);
   const [fixTick, setFixTick] = useState(0);
+  // 作り直し・修正後のチェック中は、作り直し前のリリースの結果を現在の結果として見せず、履歴へ移す（#4398）
+  const [previousResults, setPreviousResults] = useState(false);
   const onFixCreated = () => {
     setFixTick((n) => n + 1);
     onReload?.();
@@ -960,7 +962,18 @@ export function ReleaseReviewSections({
           </button>
         )}
       </div>
-      {gate && (
+      {pullRequestNumber !== undefined && (
+        <ReleaseFixOverviewPanel
+          repositoryFullName={repositoryFullName}
+          pullRequestNumber={pullRequestNumber}
+          verification={verification}
+          verificationError={verificationError ?? null}
+          changes={changes}
+          reloadToken={fixTick}
+          onPreviousResultsChange={setPreviousResults}
+        />
+      )}
+      {gate && !previousResults && (
         <p className={cn("flex items-center gap-1.5 border-b px-3 py-1.5 text-xs font-bold", TONE_CLASS[gate.tone])}>
           <span aria-hidden="true" className="text-[10px]">
             {gate.mark}
@@ -969,26 +982,48 @@ export function ReleaseReviewSections({
         </p>
       )}
       {verification ? (
-        <>
-          <AiReviewSection
-            section={verification.aiReview}
-            assignee={verification.aiReviewAssignee}
-            repositoryFullName={repositoryFullName}
-            pullRequestNumber={pullRequestNumber}
-            target={verification.target}
-            onReload={onReload}
-            onFixCreated={onFixCreated}
-            nowMs={nowMs}
-          />
-          <IntegrationSection
-            section={verification.integration}
-            nowMs={nowMs}
-            repositoryFullName={repositoryFullName}
-            pullRequestNumber={pullRequestNumber}
-            target={verification.target}
-            onFixCreated={onFixCreated}
-          />
-        </>
+        previousResults ? (
+          <details className="border-b px-3 py-1.5" data-testid="release-previous-results">
+            <summary className="cursor-pointer text-muted-foreground">修正前のリリース・検証履歴（現在の結果ではありません）</summary>
+            <div className="mt-1 opacity-80">
+              <AiReviewSection
+                section={verification.aiReview}
+                hideRebuild
+                assignee={verification.aiReviewAssignee}
+                repositoryFullName={repositoryFullName}
+                target={verification.target}
+                nowMs={nowMs}
+              />
+              <IntegrationSection
+                section={verification.integration}
+                nowMs={nowMs}
+                repositoryFullName={repositoryFullName}
+                target={verification.target}
+              />
+            </div>
+          </details>
+        ) : (
+          <>
+            <AiReviewSection
+              section={verification.aiReview}
+              assignee={verification.aiReviewAssignee}
+              repositoryFullName={repositoryFullName}
+              pullRequestNumber={pullRequestNumber}
+              target={verification.target}
+              onReload={onReload}
+              onFixCreated={onFixCreated}
+              nowMs={nowMs}
+            />
+            <IntegrationSection
+              section={verification.integration}
+              nowMs={nowMs}
+              repositoryFullName={repositoryFullName}
+              pullRequestNumber={pullRequestNumber}
+              target={verification.target}
+              onFixCreated={onFixCreated}
+            />
+          </>
+        )
       ) : (
         <>
           <SectionRow
@@ -1018,13 +1053,6 @@ export function ReleaseReviewSections({
             }
           />
         </>
-      )}
-      {pullRequestNumber !== undefined && (
-        <ReleaseFixSeriesPanel
-          repositoryFullName={repositoryFullName}
-          pullRequestNumber={pullRequestNumber}
-          reloadToken={fixTick}
-        />
       )}
       <IndividualReviewSection
         changes={changes}

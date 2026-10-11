@@ -70,19 +70,19 @@ export type RebuildEventView = {
 export const REBUILD_EVENT_LABEL: Record<RebuildEventKind, string> = {
   approval: "追加PRの承認",
   decision_waiting: "判断待ち",
-  rebuild_started: "作り直しを開始",
-  rebuild_failed: "作り直しの失敗",
-  successor_created: "後継候補を作成",
+  rebuild_started: "修正をリリースに反映する作業を開始",
+  rebuild_failed: "修正の反映に失敗",
+  successor_created: "修正を反映したリリースを作成",
   stopped: "停止",
-  superseded: "元候補の取消・置換",
+  superseded: "元のリリースの取消・置換",
   legacy_unknown: "操作経路不明",
 };
 
 export const REBUILD_TRIGGER_LABEL: Record<RebuildEventTrigger, string> = {
   manual: "画面の操作",
   resume: "失敗からの再開",
-  fix_series_related: "関連修正のみの自動作り直し",
-  fix_series_after_approval: "手動承認を契機にした自動作り直し",
+  fix_series_related: "関連修正のみの自動反映",
+  fix_series_after_approval: "手動承認を契機にした自動反映",
   sweep: "巡回の観測",
   workflow: "リリースworkflowの報告",
   unknown: "不明",
@@ -104,12 +104,12 @@ export type RebuildPhase =
   | "unknown";
 
 export const REBUILD_PHASE_LABEL: Record<RebuildPhase, string> = {
-  approved: "承認済み・作り直しの開始待ち",
+  approved: "承認済み（修正の反映の開始待ち）",
   awaiting_decision: "判断待ち",
-  preparing: "後継候補を準備中",
+  preparing: "修正を反映したリリースを準備中",
   failed: "失敗・停止（再開できます）",
-  successor_created: "後継候補を作成済み",
-  superseded: "元候補が取消・置換されました",
+  successor_created: "修正を反映したリリースを作成済み",
+  superseded: "元のリリースが取消・置換されました",
   unknown: "操作経路不明",
 };
 
