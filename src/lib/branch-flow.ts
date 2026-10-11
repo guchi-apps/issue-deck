@@ -12,6 +12,10 @@ import {
   requiresUserMerge,
 } from "@/lib/pull-request-list";
 import { summarizePullRequestHealth } from "@/lib/pull-request-health";
+import {
+  isReleaseCandidateClear,
+  resolvePullRequestReleaseVerification,
+} from "@/lib/release-candidate-status";
 import type {
   BranchComparison,
   BranchFlowDeployRun,
@@ -277,7 +281,10 @@ export function isReleaseAutoProgressing(
 ): boolean {
   return pullRequests.some(
     (pullRequest) =>
-      pullRequest?.ciState === "pending" || isMergeJudgementPending(pullRequest?.mergeJudgement),
+      pullRequest?.ciState === "pending" ||
+      isMergeJudgementPending(pullRequest?.mergeJudgement) ||
+      // 統合検証・全体レビューの実行中・待機中も、待てば進む（#4390）
+      (pullRequest !== null && resolvePullRequestReleaseVerification(pullRequest).progress !== null),
   );
 }
 
@@ -321,6 +328,8 @@ export function resolveReleaseMergeTarget(
 function isWaitingUserMerge(pullRequest: PullRequestSummary | null): boolean {
   if (pullRequest === null || pullRequest.state !== "open") return false;
   if (isMergeJudgementPending(pullRequest.mergeJudgement)) return false;
+  // リリース候補は、統合検証・全体レビューが進行中・問題ありのあいだ「マージ待ち」にしない（#4390）
+  if (!isReleaseCandidateClear(resolvePullRequestReleaseVerification(pullRequest))) return false;
   return pullRequest.ciState !== "pending" && pullRequest.ciState !== "failure";
 }
 
@@ -598,6 +607,10 @@ function buildRepository({
     // 人が押す番になったら、紫の「リリース中」から琥珀の「mainへマージ待ち」へ変える（#2038）。
     // 展開したときの見出しと同じ判定・同じ文言を、開かなくても読めるところまで引き上げる。
     releaseMergeTarget: resolveReleaseMergeTarget(releasePullRequest, bumpPullRequest),
+    // 検証の進行・問題（#4390）。見出しと畳んだ1行・集計が同じ値を読む
+    releaseVerification: releasePullRequest
+      ? resolvePullRequestReleaseVerification(releasePullRequest)
+      : null,
     // 畳んだ1行にアイコンと数字だけで出す（#1704・#1886）。手が要るものではないので、
     // 「手が要るもの◯件」の判定（`needsAttention`）には入れない。
     startedIssueCount: startedIssues.length,

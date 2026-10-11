@@ -27,6 +27,10 @@ import {
   mergeWarnings,
 } from "@/lib/pull-request-list";
 import { needsReviewMergeConfirmation } from "@/lib/pull-request-merge-hold";
+import {
+  describeReleaseVerificationWait,
+  resolvePullRequestReleaseVerification,
+} from "@/lib/release-candidate-status";
 import { cn } from "@/lib/utils";
 import type { PullRequestSummary } from "@/types/pull-request";
 
@@ -72,6 +76,10 @@ const PRODUCTION_MERGE_OUTLINE =
  * **自動マージ可否の判定中は「判定中」で無効にする**（#1968。`isMergeJudgementPending`）。
  * 判定のcheck-runはCI状態の集約から外れている（#1799）ため、そこを塞がないと判定より先に
  * 確認なしでマージできてしまう。
+ *
+ * **リリース候補の統合検証・全体レビューが実行中・待機中のあいだも無効にする**（#4390）。サーバーは
+ * 同じ条件で409を返す（#4354の完了待ち）ので、押せるように見せて弾かれるより、待っている検証の名前を
+ * 出して押せなくする。失敗・要確認などの結果ではここで止めない（既存のゲートと確認画面が扱う）。
  */
 export function PullRequestMergeButton({
   pullRequest,
@@ -90,6 +98,7 @@ export function PullRequestMergeButton({
   const ciWarningText = productionMerge ? ciWarning(pullRequest) : null;
   const shownWarnings = warnings.filter((warning) => warning !== ciWarningText);
   const judgementPending = isMergeJudgementPending(pullRequest.mergeJudgement);
+  const verificationWait = describeReleaseVerificationWait(resolvePullRequestReleaseVerification(pullRequest));
   const [owner, repo] = pullRequest.repositoryFullName.split("/");
   // 要修正・要確認の判定が残るPRは、確認画面（修正が主操作）を必ず通す（#4377）。
   // サーバーが確認を求め直した（HEADが動いた等）ときも、同じ画面で確認し直させる
@@ -121,8 +130,12 @@ export function PullRequestMergeButton({
           "h-7 shrink-0",
           productionMerge && (variant === "default" ? PRODUCTION_MERGE_FILLED : PRODUCTION_MERGE_OUTLINE),
         )}
-        disabled={isSubmitting || isMerged || judgementPending}
-        title={judgementPending ? mergeJudgementReason(pullRequest.mergeJudgement.step) : undefined}
+        disabled={isSubmitting || isMerged || judgementPending || verificationWait !== null}
+        title={
+          judgementPending
+            ? mergeJudgementReason(pullRequest.mergeJudgement.step)
+            : (verificationWait ?? undefined)
+        }
         onClick={() => (warnings.length > 0 || reviewGate ? setConfirmOpen(true) : runMerge())}
       >
         {isMerged
@@ -131,7 +144,9 @@ export function PullRequestMergeButton({
             ? "マージ中..."
             : judgementPending
               ? MERGE_JUDGEMENT_PENDING_LABEL
-              : "マージする"}
+              : verificationWait !== null
+                ? "検証の完了待ち"
+                : "マージする"}
       </Button>
 
       <AlertDialog

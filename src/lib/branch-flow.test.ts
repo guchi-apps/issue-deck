@@ -402,6 +402,7 @@ describe("buildBranchFlow", () => {
       releaseInProgress: false,
       releaseAutoProgressing: false,
       releaseMergeTarget: null,
+      releaseVerification: null,
       deploy: null,
     });
   });
@@ -1760,6 +1761,7 @@ describe("サマリー行の集計", () => {
       releaseInProgress: false,
       releaseAutoProgressing: false,
       releaseMergeTarget: null,
+      releaseVerification: null,
       deploy: null,
     });
   });
@@ -1903,6 +1905,37 @@ describe("リリースのマージ待ち（releaseMergeTarget）", () => {
 
   it("CIが終わったリリースPRはmainへのマージ待ち", () => {
     expect(summaryOf([releasePullRequest({ ciState: "success" })]).releaseMergeTarget).toBe("main");
+  });
+
+  /**
+   * #554相当（#4390）: CI成功・競合なし・判定済みでも、リリース候補の全体レビューが実行中なら
+   * 「mainへマージ待ち」にせず、自動で進んでいる扱いにする。検証が揃ったら初めてマージ待ちになる
+   */
+  it("リリース候補の全体レビュー実行中はmainへのマージ待ちにせず、揃ったら待ちへ移る（#4390）", () => {
+    const candidate = (releaseChecks: PullRequestSummary["releaseChecks"]) =>
+      releasePullRequest({ headRef: "release-main/v3.23.0", ciState: "success", releaseChecks });
+    const verifying = summaryOf([
+      candidate({
+        aiReview: "running",
+        integration: "not_applicable",
+        enforced: false,
+        started: { aiReview: true, integration: false, mac: false },
+      }),
+    ]);
+    expect(verifying.releaseMergeTarget).toBeNull();
+    expect(verifying.releaseAutoProgressing).toBe(true);
+    expect(verifying.releaseVerification?.progress?.label).toBe("リリース検証中");
+
+    const failed = summaryOf([candidate({ aiReview: "failed", integration: "passed", enforced: false })]);
+    expect(failed.releaseMergeTarget).toBeNull();
+    expect(failed.releaseVerification?.problem?.label).toBe("検証失敗");
+
+    // 候補なのに検証の状態を取れていない（未取得）ものもマージ待ちにしない
+    expect(summaryOf([candidate(undefined)]).releaseMergeTarget).toBeNull();
+
+    const settled = summaryOf([candidate({ aiReview: "passed", integration: "not_applicable", enforced: false })]);
+    expect(settled.releaseMergeTarget).toBe("main");
+    expect(settled.releaseAutoProgressing).toBe(false);
   });
 
   it("CI実行中は待ちにしない（まだマージできない操作を促さない）", () => {

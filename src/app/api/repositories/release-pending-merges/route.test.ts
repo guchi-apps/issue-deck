@@ -8,6 +8,7 @@ const fetchRefCheckState = vi.fn();
 const fetchLatestReleaseWorkflowRun = vi.fn();
 const fetchLatestDeployWorkflowRun = vi.fn();
 const releaseWorkflowExists = vi.fn();
+const fetchReleaseChecks = vi.fn();
 
 vi.mock("@/lib/auth-user", () => ({
   get requireUserId() {
@@ -50,6 +51,16 @@ vi.mock("@/lib/github/release-api", async (importOriginal) => {
   };
 });
 
+vi.mock("@/lib/pull-request-release-checks", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/pull-request-release-checks")>();
+  return {
+    ...actual,
+    get fetchReleaseChecks() {
+      return fetchReleaseChecks;
+    },
+  };
+});
+
 vi.mock("@/lib/github/release-workflow-cache", () => ({
   get releaseWorkflowExists() {
     return releaseWorkflowExists;
@@ -59,6 +70,20 @@ vi.mock("@/lib/github/release-workflow-cache", () => ({
 import { GET } from "@/app/api/repositories/release-pending-merges/route";
 import { MERGE_JUDGEMENT_UNKNOWN, type MergeJudgement } from "@/lib/github/check-rollup";
 import type { CiState, RefCheckState } from "@/lib/github/release-api";
+import type { PullRequestReleaseChecks } from "@/types/pull-request";
+
+/** リリースPR #12の検証状態を返す`fetchReleaseChecks`の実装（#4390） */
+function releaseChecksOf(checks: PullRequestReleaseChecks) {
+  return async () => new Map([["owner/repo-a#12", checks]]);
+}
+
+const CHECKS_PASSED: PullRequestReleaseChecks = {
+  aiReview: "passed",
+  integration: "passed",
+  enforced: false,
+  started: { aiReview: false, integration: false, mac: false },
+  integrationSetupGap: null,
+};
 
 const REPO_A = {
   fullName: "owner/repo-a",
@@ -126,6 +151,7 @@ describe("GET /api/repositories/release-pending-merges", () => {
     fetchRefCheckState.mockReset().mockResolvedValue(checkState("success"));
     fetchLatestReleaseWorkflowRun.mockReset().mockResolvedValue(null);
     fetchLatestDeployWorkflowRun.mockReset().mockResolvedValue(null);
+    fetchReleaseChecks.mockReset().mockImplementation(releaseChecksOf(CHECKS_PASSED));
     vi.spyOn(console, "error").mockImplementation(() => {});
   });
 
@@ -236,6 +262,65 @@ describe("GET /api/repositories/release-pending-merges", () => {
         pendingMerge: null,
       },
     ]);
+  });
+
+  it("全体レビューが実行中のリリース候補はマージ待ちにせず、リリース検証中として返す（#4390）", async () => {
+    fetchOpenPullRequestsForBase.mockImplementation(
+      openPullRequestsFor({ repo: "repo-a", base: "main", pullRequest: RELEASE_PR }),
+    );
+    fetchReleaseChecks.mockImplementation(
+      releaseChecksOf({
+        ...CHECKS_PASSED,
+        aiReview: "running",
+        integration: "not_applicable",
+        started: { aiReview: true, integration: false, mac: false },
+      }),
+    );
+
+    const json = await (await GET()).json();
+
+    expect(json.releaseStatuses).toEqual([
+      {
+        repoFullName: "owner/repo-a",
+        status: "progressing",
+        failedWorkflow: null,
+        pendingMerge: null,
+        verification: { block: "progressing", label: "リリース検証中", detail: "全体レビューの実行中です" },
+      },
+    ]);
+  });
+
+  it("統合検証の設定不足は理由付きの要対応として返し、マージ待ちにしない（#4390）", async () => {
+    fetchOpenPullRequestsForBase.mockImplementation(
+      openPullRequestsFor({ repo: "repo-a", base: "main", pullRequest: RELEASE_PR }),
+    );
+    fetchReleaseChecks.mockImplementation(
+      releaseChecksOf({ ...CHECKS_PASSED, integration: "failed", integrationSetupGap: "コマンド未設定" }),
+    );
+
+    const json = await (await GET()).json();
+
+    expect(json.releaseStatuses).toEqual([
+      {
+        repoFullName: "owner/repo-a",
+        status: "action_required",
+        failedWorkflow: null,
+        pendingMerge: null,
+        verification: { block: "problem", label: "検証の設定不足", detail: "統合検証: コマンド未設定" },
+      },
+    ]);
+  });
+
+  it("検証の記録を読めないリリース候補はマージ待ちにしない（#4390）", async () => {
+    fetchOpenPullRequestsForBase.mockImplementation(
+      openPullRequestsFor({ repo: "repo-a", base: "main", pullRequest: RELEASE_PR }),
+    );
+    fetchReleaseChecks.mockResolvedValue(new Map());
+
+    const json = await (await GET()).json();
+
+    expect(json.releaseStatuses[0].pendingMerge).toBeNull();
+    expect(json.releaseStatuses[0].verification.label).toBe("検証状態を取得できません");
   });
 
   it("バンプPRがCI通過後も残っているリポジトリはdevelopへのマージ待ちとして返す", async () => {
