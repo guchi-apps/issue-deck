@@ -1,0 +1,80 @@
+// @vitest-environment jsdom
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+import { ReleaseFixOverviewPanel } from "@/components/dashboard/release-fix-panel";
+import type { ReleaseVerificationSummary } from "@/lib/release-verification-summary";
+
+const section = (state: string, findings: unknown[] = []) =>
+  ({ kind: "x", state, reason: null, summary: null, evidenceUrl: null, agent: null, updatedAt: null, findings, affectedPullRequests: [], affectedFiles: [], reviewedFiles: null, totalFiles: null, progress: null, diagnostic: null }) as never;
+const verification = {
+  enforced: true,
+  gateStatus: "blocked",
+  blockers: [],
+  integration: section("passed"),
+  aiReview: section("needs_check", [{ title: "a", severity: "medium" }, { title: "b", severity: "medium" }]),
+  mac: { state: "not_applicable", reason: null, summary: null, evidenceUrl: null, updatedAt: null },
+  aiReviewAssignee: "x",
+  target: { baseSha: "a".repeat(40), headSha: "b".repeat(40) },
+} as unknown as ReleaseVerificationSummary;
+
+const seriesRow = {
+  id: "s1", status: "stopped", statusLabel: "修正が止まっています", active: false, stepIndex: 5, sourceKind: "review_finding", causeClass: "code",
+  itemTitles: ["指摘A"], releasePrNumber: 4394, originBaseSha: "c".repeat(40), originHeadSha: "d".repeat(40), issueNumber: 4395,
+  fixPrNumber: 4397, successorPrNumber: 4400, successorBaseSha: "e".repeat(40), successorHeadSha: "f".repeat(40), generation: 1, parentId: null,
+  stopReason: "長い停止理由", createdAt: "2026-10-11T00:00:00.000Z",
+};
+
+function stub() {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url: string) =>
+      new Response(JSON.stringify(url.includes("fix-series") ? { series: [seriesRow] } : { episodes: [{ successor: { number: 4400 }, selectedPrs: [{ number: 2 }], excludedPrs: [3] }] }), { status: 200 }),
+    ),
+  );
+}
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+});
+
+describe("ReleaseFixOverviewPanel", () => {
+  it("指摘残存: 先頭に状態・残件・主操作を出し、内部情報は折りたたみに置く。無関係Bは含めない", async () => {
+    stub();
+    const pr = (n: number) => ({ number: n, title: `PR${n}`, issueNumber: null, isVersionBump: false, review: null, prHeadSha: null, reviewUnavailable: false });
+    render(
+      <ReleaseFixOverviewPanel
+        repositoryFullName="o/r"
+        pullRequestNumber={4400}
+        verification={verification}
+        verificationError={null}
+        changes={{ data: { pullRequests: [pr(1), pr(2)], unknownCommits: [], source: "release-pr", headSha: null, truncated: false }, isLoading: false, error: null }}
+      />,
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId("release-fix-headline").textContent).toBe("修正を反映しましたが、チェックで2件の指摘が残っています"),
+    );
+    expect(screen.getByTestId("release-fix-primary-action").textContent).toContain("修正Issueを作成");
+    await waitFor(() => expect(screen.getByTestId("release-fix-technical")).toBeTruthy());
+    const contents = screen.getByTestId("release-contents").textContent ?? "";
+    expect(contents).toContain("今回の修正で追加");
+    expect(contents).toContain("今回は含めない変更");
+    expect(contents).toContain("#3");
+    const summary = screen.getByTestId("release-fix-summary").textContent ?? "";
+    expect(summary).not.toContain("後継候補");
+    expect(summary).not.toMatch(/[0-9a-f]{7}/);
+    const tech = screen.getByTestId("release-fix-technical");
+    expect(tech.tagName).toBe("DETAILS");
+    expect(tech.textContent).toContain("修正を反映したリリース #4400");
+    expect(tech.textContent).toContain("長い停止理由");
+  });
+
+  it("変更の取得失敗は変更なしと表示しない", () => {
+    stub();
+    render(
+      <ReleaseFixOverviewPanel repositoryFullName="o/r" pullRequestNumber={4400} verification={verification} verificationError={null}
+        changes={{ data: null, isLoading: false, error: "失敗" }} />,
+    );
+    expect(screen.getByTestId("release-contents").textContent).toContain("変更なしとは扱いません");
+  });
+});

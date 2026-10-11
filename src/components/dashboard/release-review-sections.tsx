@@ -3,7 +3,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { ChevronRight, ExternalLink, RotateCcw } from "lucide-react";
 
-import { ReleaseFixCreate, ReleaseFixSeriesPanel } from "@/components/dashboard/release-fix-panel";
+import { ReleaseFixCreate, ReleaseFixOverviewPanel } from "@/components/dashboard/release-fix-panel";
 import { REVIEW_MARK, REVIEW_TONE } from "@/components/dashboard/review-verdict";
 import { ReleaseRebuildButton } from "@/components/dashboard/release-rebuild-button";
 import { useReleaseChanges, type UseReleaseChangesResult } from "@/hooks/use-release-changes";
@@ -960,6 +960,16 @@ export function ReleaseReviewSections({
           </button>
         )}
       </div>
+      {pullRequestNumber !== undefined && (
+        <ReleaseFixOverviewPanel
+          repositoryFullName={repositoryFullName}
+          pullRequestNumber={pullRequestNumber}
+          verification={verification}
+          verificationError={verificationError ?? null}
+          changes={changes}
+          reloadToken={fixTick}
+        />
+      )}
       {gate && (
         <p className={cn("flex items-center gap-1.5 border-b px-3 py-1.5 text-xs font-bold", TONE_CLASS[gate.tone])}>
           <span aria-hidden="true" className="text-[10px]">
@@ -1018,13 +1028,6 @@ export function ReleaseReviewSections({
             }
           />
         </>
-      )}
-      {pullRequestNumber !== undefined && (
-        <ReleaseFixSeriesPanel
-          repositoryFullName={repositoryFullName}
-          pullRequestNumber={pullRequestNumber}
-          reloadToken={fixTick}
-        />
       )}
       <IndividualReviewSection
         changes={changes}

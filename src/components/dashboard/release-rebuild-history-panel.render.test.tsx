@@ -37,10 +37,10 @@ describe("ReleaseRebuildHistoryPanel", () => {
     render(<ReleaseRebuildHistoryPanel repositoryFullName="o/r" />);
     await waitFor(() => expect(screen.getByTestId("release-rebuild-history")).toBeTruthy());
     const text = screen.getByTestId("release-rebuild-history").textContent ?? "";
-    expect(text).toContain("元候補 #4345");
-    expect(text).toContain("後継候補を準備中");
+    expect(text).toContain("元のリリース #4345");
+    expect(text).toContain("修正を反映したリリースを準備中");
     expect(text).toContain("guchi（ユーザー）");
-    expect(text).toContain("手動承認を契機にした自動作り直し");
+    expect(text).toContain("手動承認を契機にした自動反映");
     expect(text).toContain("今回は含めない");
     expect(text).toContain("#4400");
     expect(text).not.toContain("操作経路不明: この作り直し");

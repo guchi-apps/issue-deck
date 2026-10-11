@@ -53,15 +53,15 @@ export function parseReleaseFixStatus(value: string): ReleaseFixStatus | null {
 }
 
 export const RELEASE_FIX_STATUS_LABEL: Record<ReleaseFixStatus, string> = {
-  issue_created: "修正Issue作成済み",
-  fix_in_progress: "修正PRの作業中",
-  fix_merged: "developへ取り込み済み",
-  rebuilding: "候補を作り直し中",
-  reverifying: "再検証中",
-  ready: "本番承認待ち",
+  issue_created: "修正Issueを作成済み（未開始）",
+  fix_in_progress: "指摘への修正内容を作業中",
+  fix_merged: "修正をdevelopへ取り込み済み（リリースへの反映待ち）",
+  rebuilding: "修正版のリリースを準備中",
+  reverifying: "修正後のチェック中",
+  ready: "チェックを通過（本番承認待ち）",
   awaiting_decision: "判断待ち",
-  stopped: "停止",
-  superseded: "対象外（置き換え済み）",
+  stopped: "修正が止まっています",
+  superseded: "新しいリリースに置き換え済み",
 };
 
 /** 画面の現在地ステップ（左から右へ進む）。`awaiting_decision`・`stopped`は進んだところで止まる */
@@ -70,8 +70,8 @@ export const RELEASE_FIX_STEPS = [
   "計画・実装",
   "PR検証",
   "develop取り込み",
-  "候補作り直し",
-  "再検証",
+  "修正をリリースに反映",
+  "修正後のチェック",
   "本番承認待ち",
 ] as const;
 

@@ -3,7 +3,12 @@
 import { ExternalLink } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 
+import { classifyReleaseContents } from "@/lib/release-contents";
+import { describeFixOverview, type OverviewChecks, type OverviewTone } from "@/lib/release-fix-overview";
 import { RELEASE_FIX_STEPS, RELEASE_FIX_MAX_GENERATION, type ReleaseFixSourceKind } from "@/lib/release-fix-series";
+import type { RebuildEpisode } from "@/lib/release-rebuild-history";
+import type { UseReleaseChangesResult } from "@/hooks/use-release-changes";
+import type { ReleaseVerificationSummary } from "@/lib/release-verification-summary";
 import type { ReleaseFixSeriesView } from "@/lib/release-fix-series-run";
 import type { ReleaseReviewFinding } from "@/lib/release-review-result";
 import { cn } from "@/lib/utils";
@@ -90,8 +95,8 @@ export function ReleaseFixCreate({
 
   const canSubmit = !busy && (sourceKind === "integration_failure" || selected.length > 0) && (!needsDecision || question.trim() !== "");
   return (
-    <div className="flex flex-col gap-1.5 rounded border border-dashed px-2 py-1.5" data-testid="release-fix-create">
-      <p className="font-medium">修正Issueを作成（リリース候補への修正として追跡します）</p>
+    <div id="release-fix-create" className="flex flex-col gap-1.5 rounded border border-dashed px-2 py-1.5" data-testid="release-fix-create">
+      <p className="font-medium">修正Issueを作成（このリリースへの修正として追跡します）</p>
       {sourceKind === "review_finding" && findings && findings.length > 1 && (
         <ul className="flex flex-col gap-0.5">
           {findings.map((finding, index) => (
@@ -166,93 +171,63 @@ function shortSha(sha: string | null): string {
   return sha ? sha.slice(0, 7) : "-";
 }
 
-function SeriesRow({
-  series,
-  repositoryFullName,
-  onAcceptExtra,
-}: {
-  series: ReleaseFixSeriesView;
-  repositoryFullName: string;
-  onAcceptExtra: (seriesId: string) => void;
-}) {
-  const stopped = series.status === "stopped" || series.status === "superseded" || series.status === "awaiting_decision";
-  const link = (label: string, number: number | null, kind: "issues" | "pull") =>
-    number === null ? null : (
-      <a
-        href={issueUrl(repositoryFullName, number, kind)}
-        target="_blank"
-        rel="noreferrer"
-        className="inline-flex items-center gap-0.5 underline"
-      >
-        {label} #{number}
-        <ExternalLink aria-hidden className="size-3" />
-      </a>
-    );
+const TONE_PILL: Record<OverviewTone, string> = {
+  ok: "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300",
+  warn: "bg-amber-100 text-amber-900 dark:bg-amber-950 dark:text-amber-300",
+  bad: "bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-300",
+  progress: "bg-sky-100 text-sky-900 dark:bg-sky-950 dark:text-sky-300",
+  muted: "bg-muted text-muted-foreground",
+};
+
+function ExtLink({ href, children }: { href: string; children: React.ReactNode }) {
   return (
-    <li className="flex flex-col gap-1 rounded bg-muted/40 px-2 py-1.5" data-testid="release-fix-series">
-      <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
-        <span className={cn("font-medium", series.status === "ready" && "text-emerald-700 dark:text-emerald-400")}>
-          {series.statusLabel}
-        </span>
-        <span className="text-muted-foreground">
-          世代 {series.generation}/{RELEASE_FIX_MAX_GENERATION} · 元リリースPR #{series.releasePrNumber}
-        </span>
-        {link("修正Issue", series.issueNumber, "issues")}
-        {link("修正PR", series.fixPrNumber, "pull")}
-        {link("後継候補", series.successorPrNumber, "pull")}
-      </div>
-      <p className="break-words">{series.itemTitles.slice(0, 3).join(" / ")}{series.itemTitles.length > 3 ? ` ほか${series.itemTitles.length - 3}件` : ""}</p>
-      <ol className="flex flex-wrap gap-x-1 gap-y-0.5 text-[10.5px]" aria-label="現在地">
-        {RELEASE_FIX_STEPS.map((step, index) => (
-          <li
-            key={step}
-            className={cn(
-              "rounded px-1.5 py-0.5",
-              index < series.stepIndex && "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300",
-              index === series.stepIndex &&
-                (stopped ? "bg-amber-100 text-amber-900 dark:bg-amber-950 dark:text-amber-300" : "bg-sky-100 font-semibold text-sky-900 dark:bg-sky-950 dark:text-sky-300"),
-              index > series.stepIndex && "text-muted-foreground",
-            )}
-            aria-current={index === series.stepIndex ? "step" : undefined}
-          >
-            {step}
-          </li>
-        ))}
-      </ol>
-      <p className="font-mono text-[10.5px] text-muted-foreground">
-        起案時 main {shortSha(series.originBaseSha)} ← release {shortSha(series.originHeadSha)}
-        {series.successorHeadSha && ` ／ 後継 main ${shortSha(series.successorBaseSha)} ← release ${shortSha(series.successorHeadSha)}`}
-      </p>
-      {series.stopReason && <p className="break-words text-amber-800 dark:text-amber-300">停止の理由: {series.stopReason}</p>}
-      {series.status === "awaiting_decision" && (
-        <button
-          type="button"
-          onClick={() => onAcceptExtra(series.id)}
-          className="w-fit rounded border px-2 py-0.5 text-[11.5px] hover:bg-muted"
-        >
-          無関係な変更も含めて作り直す
-        </button>
-      )}
-      {series.status === "ready" && (
-        <p className="text-muted-foreground">検証済みの候補の準備が整いました。本番へのマージ・デプロイは人が承認します。</p>
-      )}
-    </li>
+    <a href={href} target="_blank" rel="noreferrer" className="inline-flex items-center gap-0.5 underline">
+      {children}
+      <ExternalLink aria-hidden className="size-3" />
+    </a>
   );
 }
 
-/** 起案済みの修正系列の現在地。進行中は10秒おきに取り直す（解決完了は「本番承認待ち」まで進んだものだけ） */
-export function ReleaseFixSeriesPanel({
+/** 検証の取得結果から、要約帯が使う形（現在のSHAの結果だけ）へ */
+export function toOverviewChecks(verification: ReleaseVerificationSummary | null): OverviewChecks | null {
+  if (!verification) return null;
+  const macState = verification.mac?.state;
+  return {
+    aiReview: { state: verification.aiReview.state, findingCount: verification.aiReview.findings.length },
+    integration: { state: verification.integration.state },
+    mac:
+      macState === "passed" || macState === "failed" || macState === "running"
+        ? { state: macState }
+        : null,
+  };
+}
+
+/**
+ * リリースの検証・修正画面の上部（#4398）。現在の状態を一文で出し、検証の要約・残件・主操作を隣に置く。
+ * 世代・SHA・番号・工程は折りたたんだ「修正履歴」「技術的な詳細」へ移す（記録は消さない）。
+ * 進行中は10秒おきに取り直し、`reloadToken`の更新でも取り直す。
+ */
+export function ReleaseFixOverviewPanel({
   repositoryFullName,
   pullRequestNumber,
+  verification,
+  verificationError,
+  changes,
   reloadToken,
 }: {
   repositoryFullName: string;
   pullRequestNumber: number;
+  verification: ReleaseVerificationSummary | null;
+  verificationError: string | null;
+  changes: UseReleaseChangesResult;
   reloadToken?: number;
 }) {
-  const [series, setSeries] = useState<ReleaseFixSeriesView[] | null>(null);
+  const [series, setSeries] = useState<{ key: string; list: ReleaseFixSeriesView[] } | null>(null);
+  const [episodes, setEpisodes] = useState<{ key: string; list: RebuildEpisode[] } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [tick, setTick] = useState(0);
+  // 取得結果が別のPR・リポジトリのものなら使わない（切替直後に対象を取り違えない）
+  const key = `${repositoryFullName}#${pullRequestNumber}`;
 
   useEffect(() => {
     let cancelled = false;
@@ -264,18 +239,25 @@ export function ReleaseFixSeriesPanel({
       })
       .then((body) => {
         if (cancelled) return;
-        setSeries(Array.isArray(body.series) ? body.series : []);
+        setSeries({ key, list: Array.isArray(body.series) ? body.series : [] });
         setError(null);
       })
       .catch(() => {
         if (!cancelled) setError("修正の進捗を取得できませんでした");
       });
+    fetch(`/api/repositories/release/rebuild-history?owner=${owner}&repo=${repo}`)
+      .then(async (res) => (res.ok ? ((await res.json()) as { episodes?: RebuildEpisode[] }) : null))
+      .then((body) => {
+        if (!cancelled && body) setEpisodes({ key, list: Array.isArray(body.episodes) ? body.episodes : [] });
+      })
+      .catch(() => undefined);
     return () => {
       cancelled = true;
     };
-  }, [repositoryFullName, pullRequestNumber, reloadToken, tick]);
+  }, [repositoryFullName, pullRequestNumber, reloadToken, tick, key]);
 
-  const anyActive = series?.some((s) => s.active) ?? false;
+  const list = series && series.key === key ? series.list : null;
+  const anyActive = list?.some((s) => s.active) ?? false;
   useEffect(() => {
     if (!anyActive) return;
     const timer = setInterval(() => setTick((n) => n + 1), 10_000);
@@ -292,18 +274,177 @@ export function ReleaseFixSeriesPanel({
     setTick((n) => n + 1);
   };
 
-  if (series === null && !error) return null;
-  if (series !== null && series.length === 0 && !error) return null;
+  const current = list?.find((s) => s.active) ?? list?.[0] ?? null;
+  // 修正の記録を読み終えるまでは、修正前の指摘を現在状態として見せない
+  const seriesPending = list === null && error === null;
+  const overview = seriesPending
+    ? describeFixOverview({ series: null, checks: null })
+    : describeFixOverview({
+        series: current,
+        checks: toOverviewChecks(verification),
+        checksError: verification === null && verificationError !== null,
+      });
+  const episode = (episodes && episodes.key === key ? episodes.list : []).find(
+    (e) => e.successor?.number === pullRequestNumber,
+  );
+  const contents = classifyReleaseContents({
+    changes: changes.data,
+    isLoading: changes.isLoading,
+    error: changes.error,
+    addedPrNumbers: episode?.selectedPrs.map((p) => p.number) ?? [],
+    excludedPrNumbers: episode?.excludedPrs ?? [],
+  });
+  const prUrl = (n: number) => issueUrl(repositoryFullName, n, "pull");
+  const action = overview.action;
+
   return (
-    <div className="flex flex-col gap-1.5 border-t px-3 py-2 text-[11.5px]" data-testid="release-fix-series-panel">
-      <p className="text-xs font-semibold">この候補への修正の進捗</p>
-      {error && <p className="text-destructive">{error}</p>}
-      {series && (
-        <ul className="flex flex-col gap-1.5">
-          {series.map((item) => (
-            <SeriesRow key={item.id} series={item} repositoryFullName={repositoryFullName} onAcceptExtra={acceptExtra} />
-          ))}
-        </ul>
+    <div className="flex flex-col text-xs" data-testid="release-fix-overview">
+      <div className="flex flex-col gap-1.5 border-b px-3 py-2.5" data-testid="release-fix-summary">
+        <span className={cn("w-fit rounded px-1.5 py-0.5 text-[11px] font-bold", TONE_PILL[overview.tone])}>{overview.pill}</span>
+        <p className="break-words text-[13.5px] font-semibold" data-testid="release-fix-headline">
+          {overview.headline}
+        </p>
+        {overview.detail && <p className="line-clamp-3 break-words text-muted-foreground">{overview.detail}</p>}
+        {overview.checksLine && <p className="break-words text-muted-foreground">{overview.checksLine}</p>}
+        {error && <p className="text-destructive">{error}</p>}
+        {action.kind !== "none" && (
+          <div className="flex flex-wrap items-center gap-2" data-testid="release-fix-primary-action">
+            {action.kind === "create_issue" && (
+              <button
+                type="button"
+                onClick={() => document.getElementById("release-fix-create")?.scrollIntoView({ block: "center" })}
+                className="rounded border border-primary bg-primary px-3 py-1 text-[12px] font-semibold text-primary-foreground"
+              >
+                {action.label}
+              </button>
+            )}
+            {action.kind === "accept_extra" && current && (
+              <button
+                type="button"
+                onClick={() => acceptExtra(current.id)}
+                className="rounded border border-primary bg-primary px-3 py-1 text-[12px] font-semibold text-primary-foreground"
+              >
+                {action.label}
+              </button>
+            )}
+            {(action.kind === "start_fix" || action.kind === "view_progress") && current && (
+              // 「修正を開始」の実行は#4396が差し込む。ここでは対象のIssue・PRへの導線だけを出す
+              <ExtLink href={issueUrl(repositoryFullName, current.fixPrNumber && action.kind === "view_progress" ? current.fixPrNumber : current.issueNumber, current.fixPrNumber && action.kind === "view_progress" ? "pull" : "issues")}>
+                {action.kind === "start_fix" ? `${action.label}（修正Issue #${current.issueNumber}）` : action.label}
+              </ExtLink>
+            )}
+          </div>
+        )}
+      </div>
+
+      <div className="flex flex-col gap-1 border-b px-3 py-2" data-testid="release-contents">
+        <p className="font-semibold">今回リリースする変更</p>
+        {contents.kind === "loading" && <p className="text-muted-foreground">取得中です…</p>}
+        {contents.kind === "error" && (
+          <p className="text-destructive">変更の一覧を取得できません（{contents.message}）。変更なしとは扱いません</p>
+        )}
+        {contents.kind === "ready" && (
+          <>
+            <ul className="flex flex-col gap-0.5">
+              {contents.original.map((pr) => (
+                <li key={pr.number} className="flex min-w-0 gap-1.5">
+                  <span className="shrink-0 rounded bg-muted px-1 text-[10.5px] text-muted-foreground">元から含む</span>
+                  <span className="min-w-0 break-words">
+                    <ExtLink href={prUrl(pr.number)}>#{pr.number}</ExtLink> {pr.title}
+                  </span>
+                </li>
+              ))}
+              {contents.added.map((pr) => (
+                <li key={pr.number} className="flex min-w-0 gap-1.5">
+                  <span className="shrink-0 rounded bg-sky-100 px-1 text-[10.5px] text-sky-900 dark:bg-sky-950 dark:text-sky-300">今回の修正で追加</span>
+                  <span className="min-w-0 break-words">
+                    <ExtLink href={prUrl(pr.number)}>#{pr.number}</ExtLink> {pr.title}
+                  </span>
+                </li>
+              ))}
+            </ul>
+            {contents.original.length + contents.added.length === 0 && contents.unknownCommits.length === 0 && (
+              <p className="text-muted-foreground">PRに紐づく変更は見つかりませんでした</p>
+            )}
+            {contents.unknownCommits.length > 0 && (
+              <p className="text-muted-foreground">PRを特定できない変更が{contents.unknownCommits.length}件あります（PRに紐づかないコミット）</p>
+            )}
+            {contents.truncated && (
+              <p className="text-amber-800 dark:text-amber-300">一覧は先頭だけです。残りはGitHubのリリースPRで確認してください（全件ではありません）</p>
+            )}
+            {contents.excluded.length > 0 && (
+              <p className="break-words text-muted-foreground">
+                今回は含めない変更（developにありますが、このリリースには入りません）:{" "}
+                {contents.excluded.map((n) => (
+                  <span key={n} className="mr-1">
+                    <ExtLink href={prUrl(n)}>#{n}</ExtLink>
+                  </span>
+                ))}
+              </p>
+            )}
+          </>
+        )}
+      </div>
+
+      {list && list.length > 0 && (
+        <>
+          <details className="border-b px-3 py-1.5" data-testid="release-fix-history">
+            <summary className="cursor-pointer text-muted-foreground">修正履歴（{list.length}件）</summary>
+            <ul className="mt-1 flex flex-col gap-1">
+              {list.map((item) => (
+                <li key={item.id} className="flex flex-col rounded bg-muted/40 px-2 py-1" data-testid="release-fix-series">
+                  <span className="font-medium">{item.statusLabel}</span>
+                  <span className="break-words text-muted-foreground">
+                    {item.itemTitles.slice(0, 3).join(" / ")}
+                    {item.itemTitles.length > 3 ? ` ほか${item.itemTitles.length - 3}件` : ""}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </details>
+          <details className="px-3 py-1.5" data-testid="release-fix-technical">
+            <summary className="cursor-pointer text-muted-foreground">技術的な詳細</summary>
+            <ul className="mt-1 flex flex-col gap-1.5">
+              {list.map((item) => (
+                <li key={item.id} className="flex flex-col gap-1 rounded bg-muted/40 px-2 py-1.5">
+                  <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                    <span className="text-muted-foreground">
+                      世代 {item.generation}/{RELEASE_FIX_MAX_GENERATION} · 元のリリースPR #{item.releasePrNumber}
+                    </span>
+                    <ExtLink href={issueUrl(repositoryFullName, item.issueNumber, "issues")}>修正Issue #{item.issueNumber}</ExtLink>
+                    {item.fixPrNumber !== null && (
+                      <ExtLink href={prUrl(item.fixPrNumber)}>指摘への修正内容 #{item.fixPrNumber}</ExtLink>
+                    )}
+                    {item.successorPrNumber !== null && (
+                      <ExtLink href={prUrl(item.successorPrNumber)}>修正を反映したリリース #{item.successorPrNumber}</ExtLink>
+                    )}
+                  </div>
+                  <ol className="flex flex-wrap gap-x-1 gap-y-0.5 text-[10.5px]" aria-label="工程">
+                    {RELEASE_FIX_STEPS.map((step, index) => (
+                      <li
+                        key={step}
+                        className={cn(
+                          "rounded px-1.5 py-0.5",
+                          index < item.stepIndex && "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300",
+                          index === item.stepIndex && "bg-sky-100 font-semibold text-sky-900 dark:bg-sky-950 dark:text-sky-300",
+                          index > item.stepIndex && "text-muted-foreground",
+                        )}
+                        aria-current={index === item.stepIndex ? "step" : undefined}
+                      >
+                        {step}
+                      </li>
+                    ))}
+                  </ol>
+                  <p className="font-mono text-[10.5px] text-muted-foreground">
+                    起案時 main {shortSha(item.originBaseSha)} ← release {shortSha(item.originHeadSha)}
+                    {item.successorHeadSha && ` ／ 反映後 main ${shortSha(item.successorBaseSha)} ← release ${shortSha(item.successorHeadSha)}`}
+                  </p>
+                  {item.stopReason && <p className="break-words text-muted-foreground">停止の理由: {item.stopReason}</p>}
+                </li>
+              ))}
+            </ul>
+          </details>
+        </>
       )}
     </div>
   );

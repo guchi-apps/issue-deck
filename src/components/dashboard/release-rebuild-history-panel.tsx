@@ -15,8 +15,8 @@ import {
 import { cn } from "@/lib/utils";
 
 /**
- * リリース候補の作り直しの履歴（#4359）。後継候補がまだ無い間も、**元候補・承認した範囲・今回取り込むPR・
- * 含めないPR・後継候補**を読めるようにする。元PRが閉じられていても残る（記録はDBにあり、PRの状態に依存しない）。
+ * 修正をリリースに反映した履歴（#4359）。反映したリリースがまだ無い間も、**元のリリース・承認した範囲・今回取り込むPR・
+ * 含めないPR・修正を反映したリリース**を読めるようにする。元PRが閉じられていても残る（記録はDBにあり、PRの状態に依存しない）。
  *
  * 取得はDBだけ（GitHub APIは叩かない）。記録が無い履歴は「操作経路不明」と出し、承認したとは見せない。
  * PCもスマホも同じ部品で、折り返して読める幅にしてある。
@@ -54,11 +54,11 @@ export function ReleaseRebuildHistoryPanel({
   if (episodes.length === 0) return null;
   return (
     <section
-      aria-label="リリース候補の作り直しの履歴"
+      aria-label="修正をリリースに反映した履歴"
       className={cn("flex min-w-0 flex-col gap-1.5 rounded-lg border bg-muted/20 p-2.5 text-xs", className)}
       data-testid="release-rebuild-history"
     >
-      <p className="font-semibold">リリース候補の作り直しの履歴</p>
+      <p className="font-semibold">修正をリリースに反映した履歴</p>
       <ul className="flex flex-col gap-1.5">
         {episodes.map((episode, index) => (
           <EpisodeItem key={episode.key} episode={episode} repositoryFullName={repositoryFullName} defaultOpen={index === 0} />
@@ -115,7 +115,7 @@ function EpisodeItem({
     <li className="rounded bg-background/70" data-testid="release-rebuild-episode">
       <details open={defaultOpen} className="group">
         <summary className="flex cursor-pointer flex-wrap items-center gap-x-2 gap-y-0.5 px-2 py-1.5">
-          <span className="font-medium">元候補 #{episode.originPrNumber}</span>
+          <span className="font-medium">元のリリース #{episode.originPrNumber}</span>
           <span
             className={cn(
               "rounded px-1.5 py-0.5 text-[11px]",
@@ -131,19 +131,22 @@ function EpisodeItem({
           <span className="text-muted-foreground">{formatMonthDayTime(episode.updatedAt)}</span>
         </summary>
         <div className="flex flex-col gap-1.5 px-2 pb-2">
-          <p className="break-words font-mono text-[10.5px] text-muted-foreground">
-            元候補 <PrLink repositoryFullName={repositoryFullName} number={episode.originPrNumber} /> release {shortSha(episode.originHeadSha)}
+          <details className="text-muted-foreground">
+            <summary className="cursor-pointer">技術的な詳細</summary>
+            <p className="break-words font-mono text-[10.5px] text-muted-foreground">
+            元のリリース <PrLink repositoryFullName={repositoryFullName} number={episode.originPrNumber} /> release {shortSha(episode.originHeadSha)}
             {episode.successor && (
               <>
-                {" → 後継候補 "}
+                {" → 修正を反映したリリース "}
                 <PrLink repositoryFullName={repositoryFullName} number={episode.successor.number} />
                 {` release ${shortSha(episode.successor.headSha)}`}
               </>
             )}
-          </p>
+            </p>
+          </details>
           {episode.pathUnknown && (
             <p className="rounded border border-amber-300 bg-amber-50/60 px-2 py-1 dark:border-amber-800 dark:bg-amber-950/20">
-              操作経路不明: この作り直しの操作記録がありません。承認の有無・操作者は確認できません。
+              操作経路不明: この反映の操作記録がありません。承認の有無・操作者は確認できません。
             </p>
           )}
           {approvedAll.length > 0 && (
@@ -159,13 +162,13 @@ function EpisodeItem({
           )}
           {episode.selectedPrs.length > 0 && (
             <div>
-              <p className="font-medium">今回の候補に含める（元候補へ追加）</p>
+              <p className="font-medium">今回のリリースに含める（元の変更へ追加）</p>
               <PrList repositoryFullName={repositoryFullName} prs={episode.selectedPrs} />
             </div>
           )}
           {episode.excludedPrs.length > 0 && (
             <p className="break-words">
-              <span className="font-medium">今回は含めない</span>（developへはマージ済みですが、この本番候補には入りません）:{" "}
+              <span className="font-medium">今回は含めない</span>（developへはマージ済みですが、この本番リリースには入りません）:{" "}
               {episode.excludedPrs.map((n) => (
                 <span key={n} className="mr-1">
                   <PrLink repositoryFullName={repositoryFullName} number={n} />
