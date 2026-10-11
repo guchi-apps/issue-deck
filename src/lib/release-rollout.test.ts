@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 
+import { RELEASE_VERIFICATION_REPOS } from "@/lib/release-verification-config";
+import { getReleaseVerificationConfig } from "@/lib/release-verification-config";
 import { evaluateRollout, isRolloutComplete, sortRolloutRows, type RolloutHost } from "@/lib/release-rollout";
 
 const host = (repos: string[], overrides: Partial<RolloutHost> = {}): RolloutHost => ({
@@ -67,5 +69,20 @@ describe("一覧", () => {
     expect(rows[0].status).toBe("not_registered");
     expect(isRolloutComplete(rows)).toBe(false);
     expect(isRolloutComplete([rows[1]])).toBe(true);
+  });
+});
+
+describe("evaluateRollout: 別々の候補の成功", () => {
+  it("統合検証と全体レビューが別候補で合格しても検証済みにしない", () => {
+    const repo = Object.keys(RELEASE_VERIFICATION_REPOS).find((r) => !getReleaseVerificationConfig(r)?.enforced)!;
+    const row = evaluateRollout({
+      fullName: repo,
+      hosts: [host([repo])],
+      latest: {
+        integration: { state: "passed", headSha: "a", prNumber: 1, baseSha: "b" },
+        ai_review: { state: "passed", headSha: "c", prNumber: 2, baseSha: "b" },
+      },
+    });
+    expect(row.status).not.toBe("verified");
   });
 });

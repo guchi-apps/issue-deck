@@ -47,17 +47,33 @@ export async function GET() {
     where: { repoFullName: { in: [...names] }, kind: { in: ["integration", "ai_review"] } },
     orderBy: { updatedAt: "desc" },
     take: 1000,
-    select: { repoFullName: true, kind: true, state: true, headSha: true },
+    select: { repoFullName: true, kind: true, state: true, prNumber: true, baseSha: true, headSha: true },
   });
-  const latestByRepo = new Map<string, RolloutLatestRecords>();
+  // 候補（PR・base・head）ごとに2種類をまとめる。**両方が同じ候補で合格した組**があればそれを採り、
+  // 無ければ種別ごとの最新を表示用に使う（evaluateRolloutは別候補の組を検証済みにしない）
+  const byCandidate = new Map<string, Map<string, RolloutLatestRecords>>();
+  const newestByRepo = new Map<string, RolloutLatestRecords>();
   for (const record of records) {
-    const latest = latestByRepo.get(record.repoFullName) ?? {};
     const kind = record.kind as "integration" | "ai_review";
-    // 実走の記録だけを見る（依頼しただけの`waiting`・対象外は、合格の証跡にしない）
-    if (!latest[kind]) latest[kind] = { state: record.state, headSha: record.headSha };
-    latestByRepo.set(record.repoFullName, latest);
-  }
+    const entry = { state: record.state, headSha: record.headSha, prNumber: record.prNumber, baseSha: record.baseSha };
+    const newest = newestByRepo.get(record.repoFullName) ?? {};
+    if (!newest[kind]) newest[kind] = entry;
+    newestByRepo.set(record.repoFullName, newest);
 
+    const candidates = byCandidate.get(record.repoFullName) ?? new Map<string, RolloutLatestRecords>();
+    const key = `${record.prNumber}:${record.baseSha}:${record.headSha}`;
+    const group = candidates.get(key) ?? {};
+    if (!group[kind]) group[kind] = entry;
+    candidates.set(key, group);
+    byCandidate.set(record.repoFullName, candidates);
+  }
+  const latestByRepo = new Map<string, RolloutLatestRecords>();
+  for (const name of names) {
+    const pair = [...(byCandidate.get(name)?.values() ?? [])].find(
+      (g) => g.integration?.state === "passed" && g.ai_review?.state === "passed",
+    );
+    latestByRepo.set(name, pair ?? newestByRepo.get(name) ?? {});
+  }
   const rows = sortRolloutRows(
     [...names].map((fullName) =>
       evaluateRollout({

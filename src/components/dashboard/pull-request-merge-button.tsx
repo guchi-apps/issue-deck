@@ -162,8 +162,16 @@ export function PullRequestMergeButton({
                 <li key={warning}>{warning}</li>
               ))}
             </ul>
-            {reviewGate && !productionMerge ? (
+            {reviewGate ? (
               <>
+              {/* 本番マージでも、要修正・要確認の判定が残るなら確認SHA付きの確認画面を通す（#4389） */}
+              {productionMerge && (
+                <PullRequestMergeProduction
+                  pullRequest={pullRequest}
+                  open={confirmOpen}
+                  onNavigate={() => setConfirmOpen(false)}
+                />
+              )}
               <PullRequestMergeReview
                 verdict={pullRequest.reviewVerdict}
                 htmlUrl={pullRequest.htmlUrl}
@@ -195,7 +203,7 @@ export function PullRequestMergeButton({
             )}
             <ApiErrorMessage message={error} />
           </div>
-          {!(reviewGate && !productionMerge) && (
+          {!reviewGate && (
           <AlertDialogFooter className="flex-row gap-2.5 border-t px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:justify-stretch sm:px-6 sm:pt-4 sm:pb-4">
             <AlertDialogCancel className="flex-1" disabled={isSubmitting}>
               キャンセル
