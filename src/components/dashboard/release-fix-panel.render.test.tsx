@@ -1,9 +1,14 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { ReleaseFixOverviewPanel } from "@/components/dashboard/release-fix-panel";
+import { ReleaseFixOverviewPanel, ReleaseFixStartButton } from "@/components/dashboard/release-fix-panel";
+import { ReleaseFixStartContext } from "@/components/dashboard/release-fix-start-context";
 import type { ReleaseVerificationSummary } from "@/lib/release-verification-summary";
+
+vi.mock("@/hooks/use-reference-navigation", () => ({
+  useReferenceNavigation: () => ({ openIssue: vi.fn(), openPullRequest: vi.fn() }),
+}));
 
 const section = (state: string, findings: unknown[] = []) =>
   ({ kind: "x", state, reason: null, summary: null, evidenceUrl: null, agent: null, updatedAt: null, findings, affectedPullRequests: [], affectedFiles: [], reviewedFiles: null, totalFiles: null, progress: null, diagnostic: null }) as never;
@@ -22,7 +27,7 @@ const seriesRow = {
   id: "s1", status: "stopped", statusLabel: "修正が止まっています", active: false, stepIndex: 5, sourceKind: "review_finding", causeClass: "code",
   itemTitles: ["指摘A"], releasePrNumber: 4394, originBaseSha: "c".repeat(40), originHeadSha: "d".repeat(40), issueNumber: 4395,
   fixPrNumber: 4397, successorPrNumber: 4400, successorBaseSha: "e".repeat(40), successorHeadSha: "f".repeat(40), generation: 1, parentId: null,
-  stopReason: "長い停止理由", createdAt: "2026-10-11T00:00:00.000Z",
+  stopReason: "長い停止理由", startState: "none", createdAt: "2026-10-11T00:00:00.000Z",
 };
 
 function stub() {
@@ -76,5 +81,47 @@ describe("ReleaseFixOverviewPanel", () => {
         changes={{ data: null, isLoading: false, error: "失敗" }} />,
     );
     expect(screen.getByTestId("release-contents").textContent).toContain("変更なしとは扱いません");
+  });
+});
+
+describe("ReleaseFixStartButton", () => {
+  it("Contextが無ければ何も出さない", () => {
+    const { container } = render(<ReleaseFixStartButton repositoryFullName="o/r" seriesId="s1" startState="none" />);
+    expect(container.textContent).toBe("");
+  });
+
+  it("確認が通れば開始ダイアログへIssueを渡す", async () => {
+    const issue = { id: "i1", number: 5 };
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ ok: true, issue }), { status: 200 })));
+    const open = vi.fn();
+    render(
+      <ReleaseFixStartContext.Provider value={open}>
+        <ReleaseFixStartButton repositoryFullName="o/r" seriesId="s1" startState="none" />
+      </ReleaseFixStartContext.Provider>,
+    );
+    fireEvent.click(screen.getByText("修正を開始"));
+    await waitFor(() => expect(open).toHaveBeenCalledWith(issue));
+  });
+
+  it("失敗してもIssueは作成済みと伝え、再試行できる", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ message: "確認待ちです" }), { status: 409 })));
+    render(
+      <ReleaseFixStartContext.Provider value={vi.fn()}>
+        <ReleaseFixStartButton repositoryFullName="o/r" seriesId="s1" startState="none" />
+      </ReleaseFixStartContext.Provider>,
+    );
+    fireEvent.click(screen.getByText("修正を開始"));
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("修正Issueは作成済みです"));
+    expect(screen.getByText("もう一度開始")).toBeTruthy();
+  });
+
+  it("受付済みなら状態と「進捗を見る」を出す", () => {
+    render(
+      <ReleaseFixStartContext.Provider value={vi.fn()}>
+        <ReleaseFixStartButton repositoryFullName="o/r" seriesId="s1" startState="queued" />
+      </ReleaseFixStartContext.Provider>,
+    );
+    expect(screen.getByText("受付済み・起動待ち")).toBeTruthy();
+    expect(screen.getByText("進捗を見る")).toBeTruthy();
   });
 });

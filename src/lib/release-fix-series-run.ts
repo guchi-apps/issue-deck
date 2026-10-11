@@ -30,8 +30,10 @@ import {
   type ReleaseFixCauseClass,
   type ReleaseFixDraftItem,
   type ReleaseFixSourceKind,
+  type ReleaseFixStartState,
   type ReleaseFixStatus,
 } from "@/lib/release-fix-series";
+import { buildDispatchActiveKey } from "@/lib/dispatch/dispatch-job";
 import { redactDiagnosticText } from "@/lib/release-review-diagnostic";
 import {
   decideAutoRebuildTrigger,
@@ -80,6 +82,8 @@ export type ReleaseFixSeriesView = {
   parentId: string | null;
   stopReason: string | null;
   createdAt: string;
+  /** 修正Issueの実行の状況（#4396）。一覧の取得時にだけ埋め、それ以外は`none` */
+  startState: ReleaseFixStartState;
 };
 
 export function toReleaseFixSeriesView(row: ReleaseFixSeries): ReleaseFixSeriesView {
@@ -110,6 +114,7 @@ export function toReleaseFixSeriesView(row: ReleaseFixSeries): ReleaseFixSeriesV
     parentId: row.parentId,
     stopReason: row.stopReason,
     createdAt: row.createdAt.toISOString(),
+    startState: "none",
   };
 }
 
@@ -126,7 +131,35 @@ export async function listReleaseFixSeries(
     orderBy: { createdAt: "desc" },
     take: 30,
   });
-  return rows.map(toReleaseFixSeriesView);
+  const views = rows.map(toReleaseFixSeriesView);
+  // 開始前（修正PRがまだ無い）の系列だけ、実行の状況を読む（#4396）
+  const pending = views.filter((view) => view.status === "issue_created");
+  if (pending.length === 0) return views;
+  const states = await Promise.all(pending.map((view) => readReleaseFixStartState(repositoryFullName, view.issueNumber)));
+  pending.forEach((view, index) => {
+    view.startState = states[index];
+  });
+  return views;
+}
+
+/**
+ * 修正Issueの実行の状況（#4396）。受付済みは未完了の配車ジョブ、実行中は`11.local`ラベル
+ * （ローカル起動・サブPCの起動で付く。無人実行は修正PRができた時点で`fix_in_progress`へ進む）。
+ */
+export async function readReleaseFixStartState(
+  repositoryFullName: string,
+  issueNumber: number,
+): Promise<ReleaseFixStartState> {
+  const job = await db.dispatchJob.findUnique({
+    where: { activeKey: buildDispatchActiveKey(repositoryFullName, issueNumber) },
+    select: { id: true },
+  });
+  if (job) return "queued";
+  const labelled = await db.issue.findFirst({
+    where: { number: issueNumber, repository: { fullName: repositoryFullName }, labels: { some: { name: "11.local" } } },
+    select: { id: true },
+  });
+  return labelled ? "running" : "none";
 }
 
 export type CreateReleaseFixInput = {

@@ -87,6 +87,7 @@ export function MobileReposScreen({
         failedWorkflow: releaseStatus.failedWorkflow,
         mergeTarget: releaseStatus.pendingMerge?.mergeTarget ?? null,
         ciState: releaseStatus.pendingMerge?.ciState ?? null,
+        verification: releaseStatus.verification ?? null,
       });
       if (badge) map.set(releaseStatus.repoFullName, badge);
     });

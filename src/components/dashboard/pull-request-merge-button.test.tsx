@@ -129,6 +129,39 @@ describe("PullRequestMergeButton", () => {
     expect(screen.getByRole("button", { name: "マージする" }).className).not.toContain("orange");
   });
 
+  it("リリース候補の検証が実行中・待機中のあいだは押せず、待っている検証の名前を出す（#4390）", () => {
+    render(
+      <PullRequestMergeButton
+        pullRequest={makePullRequest({
+          headRef: "release-main/v1.2.3",
+          releaseChecks: {
+            aiReview: "running",
+            integration: "running",
+            enforced: false,
+            started: { aiReview: true, integration: false, mac: false },
+          },
+        })}
+        onMerged={() => {}}
+      />,
+    );
+    const button = screen.getByRole("button", { name: "検証の完了待ち" }) as HTMLButtonElement;
+    expect(button.disabled).toBe(true);
+    expect(button.title).toBe("全体レビュー（実行中）・統合検証（開始待ち）の判定が出るまでマージできません");
+  });
+
+  it("検証の結果（失敗など）ではボタンを止めない（止めるかは既存のゲートと確認画面が決める。#4390）", () => {
+    render(
+      <PullRequestMergeButton
+        pullRequest={makePullRequest({
+          headRef: "release-main/v1.2.3",
+          releaseChecks: { aiReview: "failed", integration: "passed", enforced: false },
+        })}
+        onMerged={() => {}}
+      />,
+    );
+    expect((screen.getByRole("button", { name: "マージする" }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
   it("mainへのPRでは、CIの状態を警告リストではなく「マージ前の確認」に出す（#3093）", () => {
     stubChanges();
     render(

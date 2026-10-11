@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { ChevronRight, ExternalLink, RotateCcw } from "lucide-react";
 
 import { ReleaseFixCreate, ReleaseFixOverviewPanel } from "@/components/dashboard/release-fix-panel";
@@ -1131,15 +1131,41 @@ export function ReleaseVerificationBrief({
   pullRequestNumber,
   headRef,
   className,
+  onStatusChanged,
 }: {
   repositoryFullName: string;
   pullRequestNumber: number;
   headRef: string;
   className?: string;
+  /**
+   * 取り直した検証の状態（区分ごとの状態・対象SHA）が前回と変わったとき（#4390）。初回の取得では呼ばない。
+   * ブランチ画面はここでPR一覧を取り直し、見出しの「リリース検証中」「mainへマージ待ち」を詳細枠に揃える
+   */
+  onStatusChanged?: () => void;
 }) {
   const [reloadToken, setReloadToken] = useState(0);
   const enabled = headRef.startsWith(RELEASE_BRANCH_PREFIX);
   const { verification, error } = useReleaseVerification(repositoryFullName, pullRequestNumber, enabled, reloadToken);
+  const signature = verification
+    ? [
+        verification.aiReview.state,
+        verification.integration.state,
+        verification.mac.state,
+        verification.target.baseSha,
+        verification.target.headSha,
+      ].join("|")
+    : null;
+  const lastSignature = useRef<string | null>(null);
+  const onStatusChangedRef = useRef(onStatusChanged);
+  useEffect(() => {
+    onStatusChangedRef.current = onStatusChanged;
+  });
+  useEffect(() => {
+    if (signature === null) return;
+    const previous = lastSignature.current;
+    lastSignature.current = signature;
+    if (previous !== null && previous !== signature) onStatusChangedRef.current?.();
+  }, [signature]);
   const active =
     verification !== null &&
     [verification.aiReview, verification.integration].some(
@@ -1218,41 +1244,3 @@ export function ReleaseVerificationBrief({
   );
 }
 
-/**
- * 畳んだリポジトリ行に出す、検証の短い要約（#4357）。進行中なら「検証中」、止まっている・
- * 要確認・失敗なら「検証に問題」。**問題なし・未取得のときは何も出さない**（静かな状態でバッジを埋めない）
- */
-export function ReleaseVerificationSummaryPill({
-  repositoryFullName,
-  pullRequestNumber,
-  headRef,
-}: {
-  repositoryFullName: string;
-  pullRequestNumber: number;
-  headRef: string;
-}) {
-  const { verification } = useReleaseVerification(
-    repositoryFullName,
-    pullRequestNumber,
-    headRef.startsWith(RELEASE_BRANCH_PREFIX),
-  );
-  if (!verification) return null;
-  const sections = [verification.aiReview, verification.integration];
-  const problem = sections.some((s) => s.state === "failed" || s.state === "needs_check" || s.state === "invalidated");
-  const running = sections.some((s) => s.state === "waiting" || s.state === "running");
-  if (problem) {
-    return (
-      <Pill tone="bad" mark="■">
-        検証に問題
-      </Pill>
-    );
-  }
-  if (running) {
-    return (
-      <Pill tone="run" mark="●">
-        検証中
-      </Pill>
-    );
-  }
-  return null;
-}

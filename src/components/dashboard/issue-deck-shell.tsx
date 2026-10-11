@@ -15,6 +15,10 @@ import { BulkCreateCodeReviewIssuesDialog } from "@/components/dashboard/bulk-cr
 import type { AppSettingsValues } from "@/components/dashboard/settings/execution-settings-section";
 import { SettingsDialog } from "@/components/dashboard/settings/settings-dialog";
 import { EditIssueDialog } from "@/components/dashboard/edit-issue-dialog";
+import { StartImplementationDialog } from "@/components/dashboard/start-implementation-dialog";
+import { startImplementationDisabledReason } from "@/lib/github/start-implementation";
+import { buildLocalSessionCommand, canStartLocalSession } from "@/lib/local-session";
+import { ReleaseFixStartContext } from "@/components/dashboard/release-fix-start-context";
 import { DeployFailureFixIssueContext } from "@/components/dashboard/deploy-failure-alert";
 import { GithubReferenceNavigationProvider } from "@/components/dashboard/github-reference-navigation";
 import { IssueDetail } from "@/components/dashboard/issue-detail";
@@ -323,6 +327,8 @@ export function IssueDeckShell({
   const [claudeLocalModel, setClaudeLocalModel] =
     useState<ClaudeLocalModelSetting>(initialClaudeLocalModel);
   const [codexModel, setCodexModel] = useState<CodexModelSetting>(initialCodexModel);
+  /** 「修正を開始」で開いている修正Issue（#4396） */
+  const [releaseFixStartIssue, setReleaseFixStartIssue] = useState<Issue | null>(null);
   const [defaultDispatchAgent, setDefaultDispatchAgent] = useState<DefaultDispatchAgent>(
     initialDefaultDispatchAgent,
   );
@@ -639,6 +645,15 @@ export function IssueDeckShell({
    * 新規作成ダイアログは、作った直後にどこへ進むかを選ばせるようになったため
    * （`PostCreateNavigationDialog`）、反映と遷移を別々に呼べる必要がある。
    */
+  /**
+   * リリース修正Issueの「修正を開始」（#4396）。サーバーが確かめたIssueを一覧へ入れ、
+   * 既存の「実装を開始」ダイアログを開く。起動の制約はそのダイアログ・配車APIにある。
+   */
+  function openReleaseFixStart(issue: Issue) {
+    setAllIssues((prev) => upsertIssue(prev, issue));
+    setReleaseFixStartIssue(issue);
+  }
+
   function registerCreatedIssue(issue: Issue) {
     // 作成直後にポーリングが先に反映済みの場合があり、単純な先頭追加だと
     // 同じIssueが重複表示される（#449）。既存分があれば更新、なければ先頭に追加する。
@@ -1528,6 +1543,9 @@ export function IssueDeckShell({
 
   // iOS拡張ダイアログの起票後「実装を開始」へ渡す値（作成フォームと同じ）。更新の反映先は
   // 画面を移さない`registerCreatedIssue`（詳細を開く`handleIosExtensionIssueCreated`ではない）
+  const releaseFixStartRepository = releaseFixStartIssue
+    ? repositories.find((repo) => repo.fullName === releaseFixStartIssue.repositoryFullName)
+    : undefined;
   const iosExtensionStartProps = {
     repositories,
     issues: allIssues,
@@ -1975,6 +1993,7 @@ export function IssueDeckShell({
 
   return (
     <DeployFailureFixIssueContext.Provider value={openIssueDraftDialog}>
+    <ReleaseFixStartContext.Provider value={openReleaseFixStart}>
     <GithubReferenceNavigationProvider openReference={openReference}>
       {/* 通知ベルの材料（#1772）。PCのトップバーとスマホの各画面のヘッダーが同じものを読む。
           リリース状況の取得を1本に保つため、ここで1回だけ用意して配る。
@@ -2882,6 +2901,35 @@ export function IssueDeckShell({
           onDraftReviewGateIssue={openReviewGateIssueDialog}
           creatableRepositoryNames={creatableRepositoryNames}
         />
+        {releaseFixStartIssue && (
+          <StartImplementationDialog
+            issue={releaseFixStartIssue}
+            open
+            onOpenChange={(nextOpen) => {
+              if (!nextOpen) setReleaseFixStartIssue(null);
+            }}
+            onIssueUpdated={(updated) => {
+              // 閉じた後に届いた更新で開き直さない
+              setReleaseFixStartIssue((prev) => (prev ? updated : prev));
+              registerCreatedIssue(updated);
+            }}
+            onCommentCreated={() => {}}
+            onNightlyRunQueued={nightlyRun.refresh}
+            includeDispatchTargets
+            actionsDisabledReason={startImplementationDisabledReason(releaseFixStartRepository?.hasClaudeWorkflow)}
+            localSessionCommand={
+              canStartLocalSession(releaseFixStartRepository?.hasLocalStartScript)
+                ? buildLocalSessionCommand(releaseFixStartIssue.repositoryFullName, releaseFixStartIssue.number)
+                : null
+            }
+            subIssueRelations={{ parent: null, children: [], childCount: 0 }}
+            claudeLocalModel={claudeLocalModel}
+            codexModel={codexModel}
+            defaultDispatchAgent={defaultDispatchAgent}
+            dispatchFailoverEnabled={dispatchFailoverEnabled}
+            dispatchFailoverThresholdPercent={dispatchFailoverThresholdPercent}
+          />
+        )}
         <EditIssueDialog
           open={editingIssue !== null}
           onOpenChange={(open) => {
@@ -2899,6 +2947,7 @@ export function IssueDeckShell({
       </div>
       </NotificationProvider>
     </GithubReferenceNavigationProvider>
+    </ReleaseFixStartContext.Provider>
     </DeployFailureFixIssueContext.Provider>
   );
 }

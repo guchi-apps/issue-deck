@@ -32,6 +32,15 @@ AIレビューはテスト実行の代わりにしない。個別レビューの
 - `blocked`（失敗・未実施・実行中・古い結果）は確認済みにできない。`needs_confirmation`だけが`acknowledgeVerification: true`で通れる（サーバーログに残す）
 - **判定の完了待ち（#4354）。** 統合検証・全体レビューが`waiting`／`running`のあいだは、**`enforced`に関わらず**マージAPIが409（`release_verification_pending`）で止める。
   結果（失敗・要確認・古い結果）では止めず、記録が無い（依頼されていない）ものも待たない。報告が来ず待ちのまま止まった場合は`acknowledgeVerification: true`で上書きできる（サーバーログに残す）。判断は`evaluateReleaseVerificationWait`
+- **「mainへマージ待ち」は検証が揃ってから出す（#4390）。** 判定の正は`src/lib/release-candidate-status.ts`の1か所で、
+  ブランチ画面（畳んだ行・束の見出し・「手が要るもの／待てば進むもの」）、マージボタン、ヘッダーのリリース状況
+  （`release-button-status.ts`の`isWaitingUserMerge`）、反映待ち件数・通知ベル（`release-pending-merges`）、本番マージ待ちPush
+  （`release-merge-push.ts`）が同じ判定を通す。材料はPR一覧の`releaseChecks`（`fetchReleaseChecks`。DBのみ）で、
+  **`enforced`でないリポジトリのリリースPRにも載せる**（完了待ちが強制の有無に依らないため。PR一覧の2枠だけは従来どおり強制時のみ）
+  - 実行中・待機中 → 「リリース検証中」「リリース検証待ち」（待てば進む）。マージボタンは「検証の完了待ち」で無効（#4354と同条件）
+  - 失敗／設定不足（`describeIntegrationSetupGap`）／要確認／対象変更で無効／未実施（強制時のみ）／取得不能 → 理由付きの問題（手が要る）。
+    結果ではボタンを止めない（禁止・例外確認は既存ゲートのまま）
+  - 見出しはPR一覧の更新周期に従う。検証の詳細枠（5秒間隔）が状態の変化を見つけたらブランチ画面の再取得を促して揃える
 - **AIのLGTMだけで自動マージはしない。** 最終承認は従来どおり人
 - 結果による強制は`src/lib/release-verification-config.ts`のリポジトリ別`enforced`で切り替える（上の完了待ちは対象外）。**検証の実行経路が配布されるまで`false`**（未配布を導入済みと扱わない）
 

@@ -8,6 +8,7 @@ import type {
   ReleaseButtonStatus,
   ReleaseMergeTarget,
 } from "@/lib/github/release-button-status";
+import type { ReleaseVerificationBadgeInfo } from "@/lib/release-candidate-status";
 
 export type { ReleaseMergeTarget };
 
@@ -28,6 +29,11 @@ export type RepositoryReleaseStatus = {
   failedWorkflow: "deploy" | "release" | null;
   /** 人のマージ操作を待っているPR。待っていなければnull */
   pendingMerge: ReleasePendingMerge | null;
+  /**
+   * リリース候補の統合検証・全体レビューの進行・問題（#4390）。あれば`pendingMerge`はnullで、
+   * バッジはこちらの文言（「リリース検証中」「検証失敗」など）を出す。古い応答では省略される
+   */
+  verification?: ReleaseVerificationBadgeInfo | null;
 };
 
 /**

@@ -12,6 +12,7 @@ import {
   runReleaseMergePushSweep,
 } from "@/lib/notifications/release-merge-push";
 import { isPushConfigured, sendPushNotification } from "@/lib/notifications/push";
+import { fetchReleaseChecks } from "@/lib/pull-request-release-checks";
 
 vi.mock("@/lib/db", () => ({ db: {} }));
 vi.mock("@/lib/notifications/push", () => ({
@@ -21,6 +22,18 @@ vi.mock("@/lib/notifications/push", () => ({
 vi.mock("@/lib/github/app-auth", () => ({ getInstallationToken: vi.fn(async () => "token") }));
 vi.mock("@/lib/github/release-workflow-cache", () => ({
   releaseWorkflowExists: vi.fn(async () => true),
+}));
+// 検証の記録は既定で両方合格（#4390）。検証中の挙動は個別のテストで差し替える
+vi.mock("@/lib/pull-request-release-checks", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/pull-request-release-checks")>()),
+  fetchReleaseChecks: vi.fn(async (targets: { repositoryFullName: string; number: number }[]) =>
+    new Map(
+      targets.map((t) => [
+        `${t.repositoryFullName}#${t.number}`,
+        { aiReview: "passed", integration: "passed", enforced: false },
+      ]),
+    ),
+  ),
 }));
 vi.mock("@/lib/github/release-api", () => ({
   fetchOpenPullRequestsForBase: vi.fn(async () => []),
@@ -153,6 +166,29 @@ describe("runReleaseMergePushSweep", () => {
       ciState: "success",
       mergeJudgement: { ...MERGE_JUDGEMENT_UNKNOWN, state: "pending" },
     } as never);
+
+    const result = await runReleaseMergePushSweep({ now: NOW });
+
+    expect(result.pending).toHaveLength(0);
+    expect(sendPushNotification).not.toHaveBeenCalled();
+  });
+
+  it("統合検証・全体レビューの実行中は鳴らさない（#4390）", async () => {
+    stubDb({ repositories: [REPOSITORY] });
+    vi.mocked(fetchOpenPullRequestsForBase).mockResolvedValue([RELEASE_PR] as never);
+    vi.mocked(fetchReleaseChecks).mockResolvedValueOnce(
+      new Map([
+        [
+          "guchi-apps/issue-deck#2381",
+          {
+            aiReview: "running",
+            integration: "passed",
+            enforced: false,
+            started: { aiReview: true, integration: false, mac: false },
+          },
+        ],
+      ]),
+    );
 
     const result = await runReleaseMergePushSweep({ now: NOW });
 
