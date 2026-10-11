@@ -30,8 +30,7 @@ import {
   IssuePullRequestList,
   IssuePullRequestStateCounts,
 } from "@/components/dashboard/issue-pull-request-list";
-import { findActiveDependencyWaitLabel, resolveIssueDetailAttention } from "@/lib/issue-attention-state";
-import { describeSessionPermission } from "@/lib/dispatch/issue-session";
+import { resolveIssueDetailAttentionFromState } from "@/lib/issue-attention-state";
 import { IssueAttentionLine } from "@/components/dashboard/issue-attention-line";
 import { IssueStatusCard } from "@/components/dashboard/issue-status-card";
 import { IssueBodyPending } from "@/components/dashboard/issue-body-pending";
@@ -794,22 +793,16 @@ export function IssueDetail({
   // 一覧では今夜と出ているのに詳細では何も出ない、という食い違いが起きないようにする
   const nightlyRunMark = findScheduledRunQueuedMark(nightlyRunQueued, issue.id);
   // 現在状態と次の操作（#4425）。一覧の行・スマホ詳細と同じ`resolveIssueAttention`の結果
-  const attention =
-    resolveIssueDetailAttention({
-      issue,
-      session: issueSession,
-      permissionPending: issueSession ? describeSessionPermission(issueSession) !== null : false,
-      planDecisionPending,
-      questionAnswerPending,
-      mergeApprovalPending,
-      planReviewCreating: planReviewJobCreating,
-      dependencyWaitLabel: findActiveDependencyWaitLabel(
-        dispatch.dependencyWaits ?? [],
-        issue.repositoryFullName,
-        issue.number,
-      ),
-      reserved: nightlyRunMark !== null,
-    });
+  const attention = resolveIssueDetailAttentionFromState({
+    issue,
+    session: issueSession,
+    dependencyWaits: dispatch.dependencyWaits,
+    planDecisionPending,
+    questionAnswerPending,
+    mergeApprovalPending,
+    planReviewCreating: planReviewJobCreating,
+    reserved: nightlyRunMark !== null,
+  });
   // 「起動コマンドをコピー」は、対象リポジトリがローカル起動プロトコルに適合しているときだけ
   // 出す（#1073）。貼った先で受け口が止まるだけの選択肢を並べないため。
   const localSessionCommand = canStartLocalSession(currentRepository?.hasLocalStartScript)

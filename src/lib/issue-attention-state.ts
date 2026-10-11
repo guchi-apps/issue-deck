@@ -1,3 +1,4 @@
+import { describeSessionPermission } from "@/lib/dispatch/issue-session";
 import type { PlanReviewListState } from "@/lib/dispatch/plan-review-list-state";
 
 /**
@@ -206,6 +207,38 @@ export function resolveIssueDetailAttention(params: {
     notStarted:
       params.issue.state === "open" &&
       (params.issue.projectStatus === null || params.issue.projectStatus === "Ready"),
+  });
+}
+
+/**
+ * PC・スマホの詳細が、手元の状態からそのまま代表状態を引くための入口（#4436）。
+ *
+ * 許可待ちの判定と依存待ちの引き当てまでここで行い、画面側に同じ組み立てを2回書かない。
+ */
+export function resolveIssueDetailAttentionFromState(params: {
+  issue: { state: string; projectStatus: string | null; repositoryFullName: string; number: number };
+  session: Parameters<typeof describeSessionPermission>[0] | null;
+  dependencyWaits: Parameters<typeof findActiveDependencyWaitLabel>[0] | undefined;
+  planDecisionPending: boolean;
+  questionAnswerPending: boolean;
+  mergeApprovalPending: boolean;
+  planReviewCreating: boolean;
+  reserved: boolean;
+}): IssueAttention | null {
+  return resolveIssueDetailAttention({
+    issue: params.issue,
+    session: params.session,
+    permissionPending: params.session ? describeSessionPermission(params.session) !== null : false,
+    planDecisionPending: params.planDecisionPending,
+    questionAnswerPending: params.questionAnswerPending,
+    mergeApprovalPending: params.mergeApprovalPending,
+    planReviewCreating: params.planReviewCreating,
+    dependencyWaitLabel: findActiveDependencyWaitLabel(
+      params.dependencyWaits ?? [],
+      params.issue.repositoryFullName,
+      params.issue.number,
+    ),
+    reserved: params.reserved,
   });
 }
 
