@@ -22,6 +22,13 @@ import {
 } from "@/lib/github/release-button-status";
 import { releaseWorkflowExists } from "@/lib/github/release-workflow-cache";
 import { isMergeJudgementPending, isReleaseHeadRef } from "@/lib/pull-request-list";
+import {
+  describeReleaseVerificationBadge,
+  releaseVerificationBlock,
+  resolvePullRequestReleaseVerification,
+  type ReleaseVerificationBadgeInfo,
+} from "@/lib/release-candidate-status";
+import { fetchReleaseChecks, releaseChecksKey } from "@/lib/pull-request-release-checks";
 
 export type ReleasePendingMerge = {
   mergeTarget: ReleaseMergeTarget;
@@ -46,6 +53,8 @@ export type RepositoryReleaseStatus = {
   failedWorkflow: "deploy" | "release" | null;
   /** 人のマージ操作を待っているPR。待っていなければnull */
   pendingMerge: ReleasePendingMerge | null;
+  /** リリース候補の統合検証・全体レビューの進行・問題（#4390）。あれば`pendingMerge`はnull。無ければ省く */
+  verification?: ReleaseVerificationBadgeInfo;
 };
 
 export function GET() {
@@ -146,6 +155,28 @@ async function handleGET() {
         const releaseCiState = releaseCheck?.ciState ?? null;
         const bumpCiState = bumpCheck?.ciState ?? null;
         const releaseJudgementPending = isMergeJudgementPending(releaseCheck?.mergeJudgement);
+        // 統合検証・全体レビューの状態（#4390）。ブランチ画面と同じ`fetchReleaseChecks`をDBから引く
+        // （GitHub APIは増えない）。読めなければ「取得不能」になり、マージ待ちとは数えない
+        const releaseVerification = releasePr
+          ? resolvePullRequestReleaseVerification({
+              // `fetchOpenPullRequestsForBase(..., "main")`で引いたPRなのでbaseはmain
+              baseRef: releasePr.base?.ref ?? "main",
+              headRef: releasePr.head.ref,
+              releaseChecks:
+                (
+                  await fetchReleaseChecks([
+                    {
+                      repositoryFullName: repository.fullName,
+                      number: releasePr.number,
+                      baseRef: releasePr.base?.ref ?? "main",
+                      headRef: releasePr.head.ref,
+                      baseSha: releasePr.base?.sha ?? null,
+                      headSha: releasePr.head.sha,
+                    },
+                  ])
+                ).get(releaseChecksKey(repository.fullName, releasePr.number)) ?? null,
+            })
+          : null;
         const bumpJudgementPending = isMergeJudgementPending(bumpCheck?.mergeJudgement);
 
         // `release_pending`（developだけbump済みでdevelop→mainのPRが未作成）は判定しない。
@@ -161,7 +192,11 @@ async function handleGET() {
               ? { ciState: bumpCiState, mergeJudgementPending: bumpJudgementPending }
               : null,
           releasePullRequest: releasePr
-            ? { ciState: releaseCiState, mergeJudgementPending: releaseJudgementPending }
+            ? {
+                ciState: releaseCiState,
+                mergeJudgementPending: releaseJudgementPending,
+                verification: releaseVerification ? releaseVerificationBlock(releaseVerification) : null,
+              }
             : null,
           releasePending: false,
         };
@@ -199,6 +234,8 @@ async function handleGET() {
           status,
           failedWorkflow: resolveFailedReleaseWorkflow(summaryInput),
           pendingMerge,
+          verification:
+            (releaseVerification && describeReleaseVerificationBadge(releaseVerification)) ?? undefined,
         };
       } catch (error) {
         // 1リポジトリの取得失敗で他リポジトリの表示まで巻き込まないよう、ログのみ残してスキップする。

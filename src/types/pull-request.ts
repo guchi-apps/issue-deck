@@ -47,6 +47,20 @@ export type PullRequestReleaseCheckState =
 export type PullRequestReleaseChecks = {
   aiReview: PullRequestReleaseCheckState;
   integration: PullRequestReleaseCheckState;
+  /**
+   * 検証結果を通常マージの必須条件にしているか（#4365の台帳）。省略時は強制ありとして扱う。
+   * PR一覧の2枠は強制しているリポジトリだけに出す（#4349）。見出しの状態（#4390）は強制の有無にかかわらず使う
+   */
+  enforced?: boolean;
+  /**
+   * `running`のうち、実行側が実際に動き出している区分（#4390）。`false`は順番待ち（待機中）。
+   * `mac`は統合検証ジョブが今Mac検証の工程にいる
+   */
+  started?: { aiReview: boolean; integration: boolean; mac: boolean };
+  /** 統合検証の設定不足の理由（#4365）。`integration`が`failed`ならこれが原因。対象外とは混同しない */
+  integrationSetupGap?: string | null;
+  /** 検証の記録を読めなかった。状態は推測せず、マージ待ちにもしない（#4390） */
+  unavailable?: boolean;
 };
 
 export type PullRequestSummary = {

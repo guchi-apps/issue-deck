@@ -144,19 +144,27 @@ function buildReleaseNotifications(
         failedWorkflow: releaseStatus.failedWorkflow,
         mergeTarget: releaseStatus.pendingMerge?.mergeTarget ?? null,
         ciState: releaseStatus.pendingMerge?.ciState ?? null,
+        verification: releaseStatus.verification ?? null,
       });
       if (badge === null || badge.tone === "progressing") return [];
 
       const pendingMerge = releaseStatus.pendingMerge;
+      // 検証の問題（#4390）は理由をそのまま出す。「マージ待ち」と言わないぶん、何が止めているかを書く
+      const verificationProblem =
+        releaseStatus.verification?.block === "problem" ? releaseStatus.verification : null;
       const title = pendingMerge
         ? `#${pendingMerge.pullRequestNumber} ${pendingMerge.pullRequestTitle}`
-        : releaseStatus.failedWorkflow === "deploy"
-          ? "本番デプロイの実行が失敗しました"
-          : "リリースの実行が失敗しました";
+        : verificationProblem
+          ? (verificationProblem.detail ?? verificationProblem.label)
+          : releaseStatus.failedWorkflow === "deploy"
+            ? "本番デプロイの実行が失敗しました"
+            : "リリースの実行が失敗しました";
 
       return [
         {
-          id: `release:${releaseStatus.repoFullName}:${pendingMerge?.pullRequestNumber ?? "run"}`,
+          id: `release:${releaseStatus.repoFullName}:${
+            pendingMerge?.pullRequestNumber ?? (verificationProblem ? "verification" : "run")
+          }`,
           group: "release",
           tone: badge.tone === "error" ? "error" : "action",
           title,

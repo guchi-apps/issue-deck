@@ -122,7 +122,11 @@ export function buildPullRequestStatusRail(
   const stepOf = (key: "ci" | "ai-review" | "merge") =>
     progress.steps.find((step) => step.key === key) ?? null;
 
-  const releaseChecks = pullRequest.releaseChecks ?? null;
+  // 強制していないリポジトリ・記録を読めなかったときは2枠を出さない（#4349の範囲を保つ。#4390）
+  const releaseChecks =
+    pullRequest.releaseChecks && pullRequest.releaseChecks.enforced !== false && !pullRequest.releaseChecks.unavailable
+      ? pullRequest.releaseChecks
+      : null;
   return [
     ciSlot(),
     conflictSlot(),

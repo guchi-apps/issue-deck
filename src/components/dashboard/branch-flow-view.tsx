@@ -1,7 +1,9 @@
 "use client";
 
 import {
+  createContext,
   useCallback,
+  useContext,
   useEffect,
   useLayoutEffect,
   useRef,
@@ -68,7 +70,6 @@ import { ReleaseRebuildHistoryPanel } from "@/components/dashboard/release-rebui
 import { ReleaseRebuildButton } from "@/components/dashboard/release-rebuild-button";
 import {
   ReleaseVerificationBrief,
-  ReleaseVerificationSummaryPill,
 } from "@/components/dashboard/release-review-sections";
 import { getWebviewIosRepository } from "@/lib/webview-ios-repos";
 import { ResizeHandle } from "@/components/dashboard/resize-handle";
@@ -106,6 +107,11 @@ import {
   unreleasedSummary,
   type BranchFlow,
 } from "@/lib/branch-flow";
+import {
+  isReleaseCandidateClear,
+  resolvePullRequestReleaseVerification,
+  type ReleaseCandidateVerification,
+} from "@/lib/release-candidate-status";
 import { formatMonthDay, formatMonthDayTime, formatTimeOfDay } from "@/lib/format-date-time";
 import { releaseMergeTargetLabel } from "@/lib/github/release-button-status";
 import { getProgressStatusDef } from "@/lib/issue-progress";
@@ -980,6 +986,68 @@ function ReleaseProgressPill({
 }
 
 /**
+ * 検証の詳細枠（5秒ごとに取り直す）が状態の変化を見つけたときに、PR一覧を取り直させる（#4390）。
+ * 見出し・畳んだ1行・集計はPR一覧の`releaseChecks`から決まり、この画面の自動更新は既定で止まっているため、
+ * 詳細枠だけが「完了」へ進んで見出しが「リリース検証中」のまま残る、という食い違いを防ぐ。
+ */
+const BranchFlowRefreshContext = createContext<(() => void) | null>(null);
+
+/**
+ * リリース候補の検証の問題（赤）と進行（紫）のピル（#4390）。畳んだ1行と束の見出しで同じものを使う。
+ *
+ * **問題と進行を両方出す**——一方の検証が失敗し、もう一方が実行中のとき、どちらかを隠すと
+ * 「待てば進む」か「直す必要がある」かを取り違える。問題が無く進行も無いときは呼ばれない。
+ * 理由は`title`と読み上げに入れ、スマホでも読めるよう見出しでは本文の1行（`ReleaseCandidateVerificationReason`）にも出す。
+ */
+function ReleaseCandidateVerificationPills({
+  verification,
+  autoProgressing,
+}: {
+  verification: ReleaseCandidateVerification;
+  /** CI・自動マージ判定も含めて自動で進んでいる最中か（進行のピルを回す） */
+  autoProgressing: boolean;
+}) {
+  const { problem, progress } = verification;
+  return (
+    <>
+      {problem && (
+        <span
+          className="inline-flex shrink-0 items-center gap-1 rounded-full bg-red-500/10 px-2 py-0.5 text-xs font-medium text-destructive ring-1 ring-inset ring-red-500/60"
+          title={problem.reasons.join("\n")}
+          aria-label={`${problem.label}: ${problem.reasons.join("。")}`}
+        >
+          <span aria-hidden="true" className="text-[10px] leading-none">
+            ■
+          </span>
+          {problem.label}
+        </span>
+      )}
+      {progress && (
+        <span title={verification.detail ?? undefined}>
+          <ReleaseProgressPill
+            label={progress.label}
+            spinning={autoProgressing}
+            note={progress.checks
+              .map((check) => `${check.name}${check.started ? "実行中" : "開始待ち"}`)
+              .join("・")}
+          />
+        </span>
+      )}
+    </>
+  );
+}
+
+/** 検証の理由を見出しの下へ1行で出す（#4390）。ホバーできないスマホでも読めるようにする */
+function ReleaseCandidateVerificationReason({ verification }: { verification: ReleaseCandidateVerification }) {
+  if (!verification.detail) return null;
+  return (
+    <p className={cn("text-xs", verification.problem ? "text-destructive" : "text-muted-foreground")}>
+      {verification.detail}
+    </p>
+  );
+}
+
+/**
  * リリース1回ぶんの横線（#1510）。`main`のレールと`develop`のレールを結ぶ。
  *
  * **この線より下にぶら下がっているレーンが、そのバージョンに乗った変更。** 本番へ出た版は
@@ -1009,6 +1077,7 @@ function ReleaseGroupHeader({
 }) {
   // デプロイの内訳（#2777）。**既定は閉じたまま**——開いている間だけGitHub APIを消費する。
   const [runDetailOpen, setRunDetailOpen] = useState(false);
+  const refreshFlow = useContext(BranchFlowRefreshContext);
   const deployRunId = group.deploy?.runId ?? null;
   const toggleRunDetail = deployRunId !== null ? () => setRunDetailOpen((open) => !open) : undefined;
   const released = group.mergedAt !== null;
@@ -1043,8 +1112,20 @@ function ReleaseGroupHeader({
   // **Xcodeで実機へ反映するリポジトリ（#3468）では「マージ待ち」と言わない。** mainへは
   // Macのスクリプトが実機に入れた版だけを入れるので、画面で待っているのはマージではなく
   // Macでのビルドからインストール・実機確認まで。そのあいだは`pendingLabel`（「実機未反映」）を出し続ける。
+  //
+  // **統合検証・全体レビューが進行中・問題ありのあいだも「マージ待ち」と言わない**（#4390）。
+  // 判定は畳んだ1行・集計と同じ`resolvePullRequestReleaseVerification`を通す
+  const candidateVerification =
+    !deviceBuild && !released && group.pullRequest && group.pullRequest.state === "open"
+      ? resolvePullRequestReleaseVerification(group.pullRequest)
+      : null;
+  const verificationShown =
+    candidateVerification !== null && !isReleaseCandidateClear(candidateVerification)
+      ? candidateVerification
+      : null;
   const waitingUserMerge =
     !deviceBuild &&
+    verificationShown === null &&
     group.pullRequest !== null &&
     group.pullRequest.state === "open" &&
     group.pullRequest.ciState !== "pending" &&
@@ -1145,6 +1226,11 @@ function ReleaseGroupHeader({
             <AttentionPill>{releaseMergeTargetLabel("main")}</AttentionPill>
           ) : deviceBuild ? (
             <AttentionPill>{deviceBuild.pendingLabel}</AttentionPill>
+          ) : verificationShown ? (
+            <ReleaseCandidateVerificationPills
+              verification={verificationShown}
+              autoProgressing={isReleaseAutoProgressing(group.pullRequest, group.bumpPullRequest)}
+            />
           ) : (
             <ReleaseProgressPill
               label={
@@ -1166,6 +1252,8 @@ function ReleaseGroupHeader({
           )}
           {releaseButton}
         </div>
+
+        {verificationShown && <ReleaseCandidateVerificationReason verification={verificationShown} />}
 
         {/* デプロイのジョブ単位の内訳（#2777）。押したときだけ取得する */}
         {deployRunId !== null && (
@@ -1207,6 +1295,7 @@ function ReleaseGroupHeader({
               pullRequestNumber={group.pullRequest.number}
               headRef={group.pullRequest.headRef}
               className="mt-1 max-w-2xl"
+              onStatusChanged={refreshFlow ?? undefined}
             />
           )}
         {group.bumpPullRequest && (
@@ -1763,19 +1852,11 @@ function RepositorySummaryRow({
       ?.pullRequest?.number ?? null,
     webviewIos !== null,
   );
-  // 検証の要約を出す候補（開いているリリースPR・凍結ブランチ。#4357）
-  const verifyTarget =
-    !repository.deviceBuild
-      ? (repository.releaseGroups.find(
-          (group) =>
-            group.mergedAt === null &&
-            group.pullRequest?.state === "open" &&
-            group.pullRequest.headRef.startsWith(RELEASE_BRANCH_PREFIX),
-        )?.pullRequest ?? null)
-      : null;
+  // 開いているリリース候補の検証の進行・問題（#4357・#4390）。見出しと同じ値を読む
+  const verification = candidateVerificationOf(repository);
   // 状態バッジが1つでもあるか。無いときは2行目を作らない（#4032）
   const hasBadges =
-    verifyTarget !== null ||
+    verification !== null ||
     hasPullRequestHealthChips(summary.pullRequestHealth) ||
     summary.releaseInProgress ||
     releaseLaunching ||
@@ -1914,13 +1995,6 @@ function RepositorySummaryRow({
       {/* 問題と進行状況を並べる（#4015）。CI失敗だけでなく、レビュー要修正・コンフリクト・
           自動修正中なども開かずに分かる。成功状態は出さず、記号と文字を常時表示してホバー不要にする */}
       <PullRequestHealthSummaryChips summary={summary.pullRequestHealth} />
-      {verifyTarget && (
-        <ReleaseVerificationSummaryPill
-          repositoryFullName={repository.repositoryFullName}
-          pullRequestNumber={verifyTarget.number}
-          headRef={verifyTarget.headRef}
-        />
-      )}
       {summary.releaseInProgress ? (
         // 人が押す番になったら紫（自動で進む）から琥珀（手が要る）へ変える（#2038）。
         // 回るアイコンの有無だけが手掛かりだったころは、一覧を流し見して自分の番の
@@ -1931,6 +2005,12 @@ function RepositorySummaryRow({
           <AttentionPill>{repository.deviceBuild.pendingLabel}</AttentionPill>
         ) : summary.releaseMergeTarget ? (
           <AttentionPill>{releaseMergeTargetLabel(summary.releaseMergeTarget)}</AttentionPill>
+        ) : verification ? (
+          // 検証中・検証待ち・検証の問題を「mainへマージ待ち」と併記しない（#4390）
+          <ReleaseCandidateVerificationPills
+            verification={verification}
+            autoProgressing={summary.releaseAutoProgressing}
+          />
         ) : (
           <ReleaseProgressPill
             label="リリース中"
@@ -2091,8 +2171,20 @@ function needsAttention(repository: BranchFlowRepository): boolean {
     summary.pullRequestHealth.humanCount > 0 ||
     summary.needsUserMerge ||
     summary.releaseMergeTarget !== null ||
+    // 検証の失敗・要確認・設定不足・取得不能は手が要る。実行中・待機中だけなら待てば進む（#4390）
+    candidateVerificationOf(repository)?.problem != null ||
     summary.deploy?.kind === "failure"
   );
+}
+
+/**
+ * 開いているリリース候補の検証状態のうち、画面へ出すもの（#4390）。問題なし・候補なしならnull。
+ * Xcodeで実機へ反映するリポジトリ（#3468）は画面からマージしないので出さない（従来の#4357と同じ範囲）
+ */
+function candidateVerificationOf(repository: BranchFlowRepository): ReleaseCandidateVerification | null {
+  const verification = repository.summary.releaseVerification;
+  if (repository.deviceBuild || verification === null || isReleaseCandidateClear(verification)) return null;
+  return verification;
 }
 
 /**
@@ -2354,6 +2446,7 @@ export function BranchFlowView({
 
   return (
     <IosFixIssueDraftContext.Provider value={onDraftIosFixIssue}>
+    <BranchFlowRefreshContext.Provider value={onRefresh}>
     <div ref={layoutRef} className={cn("flex flex-col overflow-hidden", className)} style={style}>
       {/*
         スマホ（`md`未満）ではヘッダーを2段にする（#1638）。1段のままだと、見出しと
@@ -2589,6 +2682,7 @@ export function BranchFlowView({
         )}
       </div>
     </div>
+    </BranchFlowRefreshContext.Provider>
     </IosFixIssueDraftContext.Provider>
   );
 }

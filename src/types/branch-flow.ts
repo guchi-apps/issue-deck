@@ -1,4 +1,5 @@
 import type { ReleaseMergeTarget } from "@/lib/github/release-button-status";
+import type { ReleaseCandidateVerification } from "@/lib/release-candidate-status";
 import type { PullRequestHealthSummary } from "@/lib/pull-request-health";
 import type { ProgressStatusKey } from "@/lib/issue-progress";
 import type { PullRequestKind, PullRequestSummary } from "@/types/pull-request";
@@ -425,6 +426,14 @@ export type BranchFlowRepositorySummary = {
    * だけで、待っているものが画面から消える方が困る）。
    */
   releaseMergeTarget: ReleaseMergeTarget | null;
+  /**
+   * openなリリース候補の統合検証・全体レビューの状態（#4390）。候補が無ければnull。
+   *
+   * **`releaseMergeTarget`の「main」はこれが進行中・問題なしのときだけ立つ**（同じ判定
+   * `release-candidate-status.ts`を通す）。畳んだ1行・束の見出し・「手が要るもの／待てば進むもの」の
+   * 集計が同じ値を読み、検証中に「mainへマージ待ち」を併記しない。
+   */
+  releaseVerification: ReleaseCandidateVerification | null;
   /**
    * 実行ボタンを押したがまだブランチが無いIssueの件数（#1704・#2386）。畳んだ1行に再生マークの丸の
    * アイコンと数字だけで出す（#1886・#3163。言葉は`title`と`aria-label`が持つ）。

@@ -1928,6 +1928,54 @@ describe("BranchFlowView", () => {
       expect(screen.queryByText(/手が要るもの/)).toBeNull();
     });
 
+    // #554相当（#4390）: CI成功・判定済みでも、全体レビューの実行中はマージ待ちと併記しない
+    function renderCandidate(releaseChecks: PullRequestSummary["releaseChecks"]) {
+      renderFlow({
+        pullRequests: [
+          makeReleasePullRequest({
+            number: 1600,
+            title: "v3.23.0をmainへリリースする",
+            headRef: "release-main/v3.23.0",
+            state: "open",
+            ciState: "success",
+            releaseChecks,
+          }),
+        ],
+        branchStatuses: [unreleased],
+      });
+    }
+
+    it("全体レビューの実行中は「リリース検証中」で、マージ待ちを出さず「待てば進むもの」に数える（#4390）", () => {
+      renderCandidate({
+        aiReview: "running",
+        integration: "not_applicable",
+        enforced: false,
+        started: { aiReview: true, integration: false, mac: false },
+      });
+
+      expect(screen.getByText("リリース検証中")).toBeTruthy();
+      expect(screen.queryByText("mainへマージ待ち")).toBeNull();
+      expect(screen.queryByText("リリース中")).toBeNull();
+      expect(screen.getByText(/待てば進むもの1件/)).toBeTruthy();
+      expect(screen.queryByText(/手が要るもの/)).toBeNull();
+    });
+
+    it("検証の失敗は理由付きの「検証失敗」で、マージ待ちではなく「手が要るもの」に数える（#4390）", () => {
+      renderCandidate({ aiReview: "failed", integration: "passed", enforced: false });
+
+      expect(screen.getByText("検証失敗")).toBeTruthy();
+      expect(screen.getByLabelText("検証失敗: 全体レビューが失敗しています")).toBeTruthy();
+      expect(screen.queryByText("mainへマージ待ち")).toBeNull();
+      expect(screen.getByText(/手が要るもの1件/)).toBeTruthy();
+    });
+
+    it("必要な検証が揃ったリリース候補は「mainへマージ待ち」になる（#4390）", () => {
+      renderCandidate({ aiReview: "passed", integration: "passed", enforced: true });
+
+      expect(screen.getByText("mainへマージ待ち")).toBeTruthy();
+      expect(screen.queryByText("リリース検証中")).toBeNull();
+    });
+
     // 赤の「CI失敗」と重ねない（直すのかマージするのかを取り違えさせない。#1059）
     it("CIが落ちていれば「CI失敗」だけを出す", () => {
       renderRelease("failure");
