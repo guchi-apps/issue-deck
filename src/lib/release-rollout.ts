@@ -51,9 +51,17 @@ export type RolloutHost = {
 
 /** リポジトリのいずれかのリリース候補で、種別ごとに最新の記録 */
 export type RolloutLatestRecords = {
-  integration?: { state: string; headSha: string };
-  ai_review?: { state: string; headSha: string };
+  integration?: RolloutRecord;
+  ai_review?: RolloutRecord;
 };
+
+/** `prNumber`・`baseSha`は省略可。両方の記録が持つときは同じ候補かどうかの照合に使う */
+export type RolloutRecord = { state: string; headSha: string; prNumber?: number; baseSha?: string };
+
+/** 統合検証と全体レビューが、同じリリース候補（PR・base・head）の記録か */
+function isSameCandidate(a: RolloutRecord, b: RolloutRecord): boolean {
+  return a.headSha === b.headSha && a.prNumber === b.prNumber && a.baseSha === b.baseSha;
+}
 
 export type RolloutRow = {
   fullName: string;
@@ -132,8 +140,12 @@ export function evaluateRollout(input: RolloutInput): RolloutRow {
     };
   }
 
+  const { integration, ai_review: aiReview } = input.latest;
+  // 別々の候補で1種類ずつ成功した組み合わせは、検証済みとして扱わない
   const passed =
-    input.latest.integration?.state === "passed" && input.latest.ai_review?.state === "passed";
+    integration?.state === "passed" &&
+    aiReview?.state === "passed" &&
+    isSameCandidate(integration, aiReview);
   if (passed) {
     return { ...base, status: "verified", reasons: ["実リリース候補で統合検証・全体レビューが合格済みです。必須化を判断できます"], hosts };
   }
@@ -142,6 +154,7 @@ export function evaluateRollout(input: RolloutInput): RolloutRow {
     .map((kind) => {
       const label = kind === "integration" ? "統合検証" : "全体レビュー";
       const state = input.latest[kind]?.state;
+      if (state === "passed") return `${label}: 合格済みだが、もう一方と別のリリース候補の結果です`;
       return state ? `${label}: 直近の結果は「${state}」` : `${label}: 実リリース候補での実走記録がありません`;
     });
   return { ...base, status: "awaiting_verification", reasons: missing, hosts };

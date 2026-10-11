@@ -11,6 +11,14 @@ import {
 } from "@/lib/dispatch/input-stash";
 import { previewModeGuard } from "@/lib/preview-mode";
 
+async function canAccessRepository(userId: string, fullName: string): Promise<boolean> {
+  const repo = await db.repository.findFirst({
+    where: { fullName, installation: { userInstallations: { some: { userId } } } },
+    select: { id: true },
+  });
+  return repo !== null;
+}
+
 const NO_STORE = { "Cache-Control": "no-store" };
 
 /**
@@ -62,6 +70,7 @@ export async function POST(request: NextRequest) {
         tmuxSessionName,
         content,
         charCount: [...content].length,
+        requestedByUserId: job.requestedByUserId,
         expiresAt: stashExpiry(now),
       },
       select: { id: true },
@@ -87,10 +96,18 @@ export async function GET(request: NextRequest) {
   );
   if (!target) return NextResponse.json({ error: "invalid_request" }, { status: 400 });
 
+  if (!(await canAccessRepository(userId, target.repositoryFullName))) {
+    return NextResponse.json({ error: "forbidden" }, { status: 403 });
+  }
+
   const now = new Date();
   await db.sessionInputStash.deleteMany({ where: { expiresAt: { lt: now } } });
   const rows = await db.sessionInputStash.findMany({
-    where: { repositoryFullName: target.repositoryFullName, issueNumber: target.issueNumber },
+    where: {
+      repositoryFullName: target.repositoryFullName,
+      issueNumber: target.issueNumber,
+      requestedByUserId: userId,
+    },
     orderBy: { createdAt: "desc" },
     take: 20,
   });
@@ -116,6 +133,14 @@ export async function DELETE(request: NextRequest) {
 
   const id = request.nextUrl.searchParams.get("id");
   if (!id) return NextResponse.json({ error: "invalid_request" }, { status: 400 });
-  await db.sessionInputStash.deleteMany({ where: { id } });
+  // 依頼者本人の行だけを、今もそのリポジトリへ権限がある場合に限って消す
+  const row = await db.sessionInputStash.findFirst({
+    where: { id, requestedByUserId: userId },
+    select: { repositoryFullName: true },
+  });
+  if (!row || !(await canAccessRepository(userId, row.repositoryFullName))) {
+    return NextResponse.json({ error: "not_found" }, { status: 404 });
+  }
+  await db.sessionInputStash.deleteMany({ where: { id, requestedByUserId: userId } });
   return NextResponse.json({ ok: true }, { headers: NO_STORE });
 }

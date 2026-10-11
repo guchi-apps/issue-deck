@@ -2808,9 +2808,13 @@ model SessionInputStash {
   tmuxSessionName    String
   content            String    @db.MediumText
   charCount          Int
+  // 退避を依頼した（確認ダイアログを通した）ユーザー。GET/DELETEはこの値とリポジトリ権限で絞る。
+  // 列を足す前の行はnullで、誰にも返さない（期限で消える）
+  requestedByUserId  String?
   createdAt          DateTime  @default(now())
   expiresAt          DateTime
 
+  @@index([requestedByUserId])
   @@index([repositoryFullName, issueNumber])
   @@index([expiresAt])
 }
