@@ -1,9 +1,9 @@
 import { NextResponse, type NextRequest } from "next/server";
 
-import { requireUserId } from "@/lib/auth-user";
+import { getCurrentUser } from "@/lib/auth-user";
 import { db } from "@/lib/db";
 import { getInstallationToken } from "@/lib/github/app-auth";
-import { fetchReleaseBodyByTag, updateReleaseBody } from "@/lib/github/release-body-api";
+import { fetchReleaseBodyByTag, fetchUserCanWriteRepo, updateReleaseBody } from "@/lib/github/release-body-api";
 import { convertBulletsToTasks, parseReleaseBodyTasks } from "@/lib/release-body-tasks";
 
 /**
@@ -11,6 +11,8 @@ import { convertBulletsToTasks, parseReleaseBodyTasks } from "@/lib/release-body
  *
  * 規則（`docs/release-check-github-sync.md`）:
  * - 対象は、ログインユーザーが見られるリポジトリの旧記録があるリリース（複数ユーザーぶんは和集合）
+ * - **GitHub上でwrite以上の権限があるリポジトリだけ**を扱う（通常更新APIと同じ`fetchUserCanWriteRepo`。#4404）。
+ *   権限が無いリポジトリは`forbidden`として本文を読まず・書かない。対象がすべて権限不足なら403を返す
  * - 本文が通常の箇条書きの行だけを`- [x]`（旧記録あり）/`- [ ]`（なし）へ変換する。
  *   **すでにタスクリストの行は触らない**（GitHubのチェックを旧記録で上書きしない）
  * - 旧記録の行が本文に無い（引き継ぎ項目）ものは移せないので件数だけ返し、DBに残す
@@ -22,10 +24,11 @@ import { convertBulletsToTasks, parseReleaseBodyTasks } from "@/lib/release-body
 const MAX_RELEASES_PER_CALL = 30;
 
 export async function POST(request: NextRequest) {
-  const userId = await requireUserId();
-  if (!userId) {
+  const user = await getCurrentUser();
+  if (!user) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
+  const userId = user.id;
   const payload = await request.json().catch(() => ({}));
   const dryRun = payload?.dryRun !== false;
   const offset = Number.isInteger(payload?.offset) && payload.offset > 0 ? payload.offset : 0;
@@ -61,10 +64,29 @@ export async function POST(request: NextRequest) {
   const batch = targets.slice(offset, offset + MAX_RELEASES_PER_CALL);
   const results: { repoFullName: string; tagName: string; status: string; converted: number; unmigratable: number }[] = [];
 
+  // リポジトリごとの書込権限（同じリポジトリの複数リリースで1回だけ確認する）
+  const writeChecks = new Map<string, "write" | "forbidden" | "error">();
+
   for (const group of batch) {
     const { repo, tagName, keys } = group;
     try {
       const token = await getInstallationToken(repo.installation.installationId);
+      let access = writeChecks.get(repo.fullName);
+      if (!access) {
+        const permission = await fetchUserCanWriteRepo(repo.ownerLogin, repo.name, user.githubLogin, token);
+        access = !permission.ok ? "error" : permission.canWrite ? "write" : "forbidden";
+        writeChecks.set(repo.fullName, access);
+      }
+      if (access !== "write") {
+        results.push({
+          repoFullName: repo.fullName,
+          tagName,
+          status: access === "forbidden" ? "forbidden" : "github_error",
+          converted: 0,
+          unmigratable: 0,
+        });
+        continue;
+      }
       const fetched = await fetchReleaseBodyByTag(repo.ownerLogin, repo.name, tagName, token);
       if (!fetched.ok) {
         results.push({ repoFullName: repo.fullName, tagName, status: fetched.reason, converted: 0, unmigratable: keys.size });
@@ -92,6 +114,10 @@ export async function POST(request: NextRequest) {
       console.error(`[release-check-lines/migrate] ${repo.fullName}@${tagName}:`, error);
       results.push({ repoFullName: repo.fullName, tagName, status: "github_error", converted: 0, unmigratable: 0 });
     }
+  }
+
+  if (results.length > 0 && results.every((result) => result.status === "forbidden")) {
+    return NextResponse.json({ error: "forbidden", results }, { status: 403 });
   }
 
   return NextResponse.json({
