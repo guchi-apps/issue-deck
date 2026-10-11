@@ -1,24 +1,34 @@
+import { NextRequest } from "next/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const create = vi.fn();
 const findUniqueStash = vi.fn();
 const findUniqueJob = vi.fn();
+const findManyStash = vi.fn();
+const findFirstStash = vi.fn();
+const deleteManyStash = vi.fn();
+const findFirstRepo = vi.fn();
+let currentUser: string | null = null;
 vi.mock("@/lib/db", () => ({
   db: {
     dispatchJob: { findUnique: (...a: unknown[]) => findUniqueJob(...a) },
     sessionInputStash: {
       create: (...a: unknown[]) => create(...a),
       findUnique: (...a: unknown[]) => findUniqueStash(...a),
+      findMany: (...a: unknown[]) => findManyStash(...a),
+      findFirst: (...a: unknown[]) => findFirstStash(...a),
+      deleteMany: (...a: unknown[]) => deleteManyStash(...a),
     },
+    repository: { findFirst: (...a: unknown[]) => findFirstRepo(...a) },
   },
 }));
 vi.mock("@/lib/dispatch/dispatch-auth", () => ({
   authorizeDispatch: (h: string | null) => (h === "Bearer ok" ? "ok" : "unauthorized"),
 }));
-vi.mock("@/lib/auth-user", () => ({ requireUserId: async () => null }));
+vi.mock("@/lib/auth-user", () => ({ requireUserId: async () => currentUser }));
 vi.mock("@/lib/preview-mode", () => ({ previewModeGuard: () => null }));
 
-import { GET, POST } from "./route";
+import { DELETE, GET, POST } from "./route";
 
 function req(body: unknown, auth = "Bearer ok") {
   return new Request("http://localhost/api/dispatch/input-stash", {
@@ -36,6 +46,7 @@ const goodJob = {
   status: "RUNNING",
   repositoryFullName: "guchi-apps/issue-deck",
   issueNumber: 4378,
+  requestedByUserId: "userA",
 };
 const body = { jobId: "job1", host: "subpc", tmuxSessionName: "s", content: "改行なし 日本語 😀" };
 
@@ -43,6 +54,11 @@ beforeEach(() => {
   create.mockReset();
   findUniqueStash.mockReset();
   findUniqueJob.mockReset();
+  findManyStash.mockReset().mockResolvedValue([]);
+  findFirstStash.mockReset();
+  deleteManyStash.mockReset().mockResolvedValue({ count: 1 });
+  findFirstRepo.mockReset().mockResolvedValue({ id: "r" });
+  currentUser = null;
   findUniqueJob.mockResolvedValue(goodJob);
   create.mockResolvedValue({ id: "stash1" });
 });
@@ -87,7 +103,40 @@ describe("POST /api/dispatch/input-stash", () => {
 
 describe("GET /api/dispatch/input-stash", () => {
   it("ログインしていなければ本文を返さない", async () => {
-    const res = await GET(new Request("http://localhost/api/dispatch/input-stash?repository=a/b&issue=1") as never);
+    const res = await GET(new NextRequest("http://localhost/api/dispatch/input-stash?repository=a/b&issue=1") as never);
     expect(res.status).toBe(401);
+  });
+
+  it("リポジトリへ権限が無いユーザーには本文を返さない", async () => {
+    currentUser = "userB";
+    findFirstRepo.mockResolvedValue(null);
+    const res = await GET(new NextRequest("http://localhost/api/dispatch/input-stash?repository=a/b&issue=1") as never);
+    expect(res.status).toBe(403);
+    expect(findManyStash).not.toHaveBeenCalled();
+  });
+
+  it("依頼者本人の行だけを検索する", async () => {
+    currentUser = "userA";
+    await GET(new NextRequest("http://localhost/api/dispatch/input-stash?repository=a/b&issue=1") as never);
+    expect(findManyStash.mock.calls[0][0].where.requestedByUserId).toBe("userA");
+  });
+});
+
+describe("DELETE /api/dispatch/input-stash", () => {
+  const del = () => DELETE(new NextRequest("http://localhost/api/dispatch/input-stash?id=s1", { method: "DELETE" }) as never);
+
+  it("他人の行は消さない", async () => {
+    currentUser = "userB";
+    findFirstStash.mockResolvedValue(null);
+    expect((await del()).status).toBe(404);
+    expect(findFirstStash.mock.calls[0][0].where).toEqual({ id: "s1", requestedByUserId: "userB" });
+    expect(deleteManyStash).not.toHaveBeenCalled();
+  });
+
+  it("本人かつ権限があれば消す", async () => {
+    currentUser = "userA";
+    findFirstStash.mockResolvedValue({ repositoryFullName: "a/b" });
+    expect((await del()).status).toBe(200);
+    expect(deleteManyStash).toHaveBeenCalledWith({ where: { id: "s1", requestedByUserId: "userA" } });
   });
 });
