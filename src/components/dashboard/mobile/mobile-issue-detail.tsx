@@ -30,8 +30,7 @@ import {
   IssuePullRequestList,
   IssuePullRequestStateCounts,
 } from "@/components/dashboard/issue-pull-request-list";
-import { findActiveDependencyWaitLabel, resolveIssueDetailAttention } from "@/lib/issue-attention-state";
-import { describeSessionPermission } from "@/lib/dispatch/issue-session";
+import { resolveIssueDetailAttentionFromState } from "@/lib/issue-attention-state";
 import { IssueAttentionLine } from "@/components/dashboard/issue-attention-line";
 import { IssueStatusCard } from "@/components/dashboard/issue-status-card";
 import { isPlanReviewPending, resolvePendingPlanReview } from "@/lib/github/plan-review";
@@ -498,19 +497,14 @@ export function MobileIssueDetail({
   const pullRequestLinks = usePullRequestLinks(issue.repositoryFullName, issue.number, comments);
   const mergeApprovalPending = isMergeApprovalPending(issue, comments);
   // 現在状態と次の操作（#4425）。一覧の行・PC詳細と同じ`resolveIssueAttention`の結果
-  const attention = resolveIssueDetailAttention({
+  const attention = resolveIssueDetailAttentionFromState({
     issue,
     session: issueSession,
-    permissionPending: issueSession ? describeSessionPermission(issueSession) !== null : false,
+    dependencyWaits: dispatch.dependencyWaits,
     planDecisionPending,
     questionAnswerPending,
     mergeApprovalPending,
     planReviewCreating,
-    dependencyWaitLabel: findActiveDependencyWaitLabel(
-      dispatch.dependencyWaits ?? [],
-      issue.repositoryFullName,
-      issue.number,
-    ),
     reserved: nightlyRunMark !== null,
   });
   // 自動マージされなかった理由（#1631）。対応PR一覧とコメント欄のマージ待ちカードへ同じ値を渡す
