@@ -629,6 +629,50 @@ jobs:
           fi
           "$CLAUDE_USAGE_SCRIPT" "Claude Code（レビュー指摘修正）" "${{ steps.claude_review_fix.outputs.execution_file }}"
 
+      - name: 手作業Issueの起票依頼を検証して起票し、同じHEADで再レビューを起動する
+        # Claudeは`/tmp/manual-step-requests.json`へ構造化された依頼を書くだけで、GitHubへは書かない（#4387）。
+        # issue-deck側が対象リポジトリ・本文・HEAD・レビューを検証し、重複を確かめて起票する。
+        # 起票できなかったときは理由を報告して失敗させ、成功扱いにしない。
+        if: always() && steps.state.outputs.should_fix == 'true' && steps.provider.outputs.agent == 'claude'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          APP_BASE_URL: ${{ vars.APP_BASE_URL }}
+          PROGRESS_REPORT_SECRET: ${{ secrets.PROGRESS_REPORT_SECRET }}
+          REPOSITORY: ${{ github.repository }}
+          ISSUE_NUMBER: ${{ needs.detect.outputs.issue_number }}
+          PR_NUMBER: ${{ steps.state.outputs.pr_number }}
+          HEAD_SHA: ${{ steps.state.outputs.head_sha }}
+          BRANCH: ${{ steps.state.outputs.branch }}
+          MANUAL: ${{ needs.detect.outputs.manual }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          [ -s /tmp/manual-step-requests.json ] || { echo '起票依頼が無いため何もしません'; exit 0; }
+          # 起票の検証はPRの現在のHEAD（レビュー指摘がある$HEAD_SHA）に対して行うため、Claudeは
+          # コードを直した場合もpushせずコミットまでで止まる。起票に成功してから、残ったコミットをpushする。
+          # 未pushのコミットがあればpushが再レビューを起動するので、ここでは起動しない。
+          remote_head="$(git ls-remote origin "refs/heads/$BRANCH" | cut -f1)"
+          if [ -n "$remote_head" ] && [ "$remote_head" != "$HEAD_SHA" ]; then
+            echo "::error::起票の前にHEADが進んでいる（$HEAD_SHA → $remote_head）ため起票できません。起票はpushより先に行ってください"
+            gh issue comment "$ISSUE_NUMBER" --body "手作業Issueの起票依頼を検証・実行できませんでした（理由: 起票より先にpushされ、PRのHEADが進みました）。画面の「PRを自動修正」を押し直してください。<!-- issue-deck-source:claude-review-fix -->"
+            exit 1
+          fi
+          restart=true
+          [ "$(git rev-parse HEAD)" = "$HEAD_SHA" ] || restart=false
+          target_sha="$HEAD_SHA"
+          body="$(jq -nc --arg repository "$REPOSITORY" --argjson issueNumber "$ISSUE_NUMBER" --argjson pullRequest "$PR_NUMBER" --arg headSha "$target_sha" --argjson manual "$MANUAL" --arg runId "$RUN_ID" --argjson restart "$restart" --slurpfile requests /tmp/manual-step-requests.json '{runId:$runId,action:"file-manual-steps-ci",repository:$repository,issueNumber:$issueNumber,pullRequest:$pullRequest,headSha:$headSha,manual:$manual,restartReview:$restart,requests:$requests[0]}')"
+          result="$(curl -sS --max-time 120 -X POST -H "Authorization: Bearer $PROGRESS_REPORT_SECRET" -H 'Content-Type: application/json' --data-binary "$body" "${APP_BASE_URL%/}/api/dispatch/review-fix")"
+          if ! jq -e '.results | type == "array" and length > 0' <<<"$result" >/dev/null; then
+            reason="$(jq -r '.error // "不明なエラー"' <<<"$result")"
+            gh issue comment "$ISSUE_NUMBER" --body "手作業Issueの起票依頼を検証・実行できませんでした（理由: $reason）。修正後に画面の「PRを自動修正」を押し直してください。<!-- issue-deck-source:claude-review-fix -->"
+            echo "::error::手作業Issueの起票に失敗しました: $reason"
+            exit 1
+          fi
+          jq -r '.results[] | "起票: \(.repository)#\(.number) (\(.outcome))"' <<<"$result"
+          if [ "$restart" = false ]; then
+            git push origin "$BRANCH" || { git pull --rebase origin "$BRANCH" && git push origin "$BRANCH"; }
+          fi
+
       - name: Project Status を Develop PR へ戻す
         # reusable-issue-labels.ymlのwip-on-pushジョブが、issue-<番号>ブランチへのpush
         # （このジョブが上記ステップで行うpushを含む）をトリガーに無条件でImplementationを

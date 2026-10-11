@@ -370,6 +370,35 @@ commit/pushして同じPRを再レビューする。レビュー指摘を起点�
 作る経路は持たない。現在のPRをマージ可能にするためではない独立課題だけは、通常のIssue作成から
 明示的に切り出す。
 
+### 手作業Issueの起票漏れは自動修正が起票して再レビューまで進める（#4387）
+
+レビューが「手作業（`71.manual-step`）Issueの起票漏れ・関連付けの不足・記載不足」を指摘したとき、
+**「起票は実装側の責務」を理由に自動修正の対象外にしない**（`asset-manager#699`で、この文言のまま
+要修正で停止した）。コード差分が無くても、起票・関連付けだけで修正を完了できる。
+
+- **エージェントはGitHubへ書かず、構造化された依頼を渡す。** Claudeは`/tmp/manual-step-requests.json`、
+  Codexは作業ツリーの`.issue-deck-manual-steps.json`へ`[{key, targetRepository, title, body}]`を書く。
+  `gh issue create`は使わない（Codexはサンドボックスで書けず、Claudeの`gh`は実行中のリポジトリにしか届かない）
+- **起票はissue-deck（`src/lib/dispatch/manual-step-filing.ts`）が行う。** 経路は`POST /api/dispatch/review-fix`の
+  `file-manual-steps`（Codex。claim済みjobで認証）と`file-manual-steps-ci`（Claude。`PROGRESS_REPORT_SECRET`）。
+  どちらも`validateReviewFixTarget`で対象PR・元Issue・現行HEAD・最新レビューを検証してから書く。
+  対象リポジトリはissue-deckへ登録済みのものに限り、本文は`checkManualStepBody`で`error`が無いこと・秘密値らしき
+  文字列が無いことを確かめる。1回5件まで
+- **重複しない。** 依頼の`key`と起点Issueから作るマーカー`<!-- issue-deck-manual-step-key:<repo>#<issue>:<key> -->`で
+  既存（openでもclosedでも。完了記録を尊重する）を探して再利用する。無ければopenで同一タイトルを探し、起票後に
+  マーカーで再確認して、並行起動で重複したら番号の若い方だけを残す
+- **起票したら実在・ラベル・本文を再取得して確かめ、**起点Issueへサブissueとして紐付け、起点IssueとPRへ
+  リンクのコメントを残す（同じキー集合のコメントは1回だけ）。1件でも失敗したら成功扱いにせず理由をコメントで返す
+- **同一HEADの再レビューはPRのclose→reopenで起動する**（`pull_request: reopened`で既存のレビューが走る）。
+  コード修正もpushする場合はpushが再レビューを起動するので`restartReview: false`にする。起票しただけで
+  レビュー成功・マージ可能とは扱わない。空コミットは作らず、成功条件にもしない
+- Claude/Codexとも、手動の「PRを自動修正」と自動引継ぎの両方で同じ検証を通る
+
+**共有ワークフローを使う他リポジトリへは、タグを切って配るまで反映されない。**
+`reusable-claude-review-fix.yml`・`.github/prompts/review-fix.md`・`review-develop.md`の変更は、
+`develop`→`main`のリリース後に画面（設定＞フリート運用）の「新しいタグを切って配る」で
+`@workflows/vN`と`prompts-ref`を更新するまで、各callerが固定している旧タグ（`asset-manager`は`workflows/v49`）で動く。
+
 ### handoffで始まった修正は自動修復系列へ載る（#4318）
 
 handoffで`review-fix`が始まると、`recordReviewFixHandoffStarted`（`pull-request-auto-repair-start.ts`）が
