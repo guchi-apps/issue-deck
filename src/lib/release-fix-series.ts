@@ -422,3 +422,39 @@ export function canStartNextGeneration(input: {
   }
   return { ok: true };
 }
+
+/** 修正Issueの実行の状況（#4396）。`none`は未開始、`queued`は受付済み（起動待ち）、`running`は実行中 */
+export type ReleaseFixStartState = "none" | "queued" | "running";
+
+export type ReleaseFixStartDecision =
+  | { ok: true }
+  | { ok: false; reason: "not_startable" | "superseded" | "issue_closed" | "already_started"; message: string };
+
+/**
+ * 「修正を開始」を押してよいか（#4396）。**開始の導線が対象を取り違えないための判断**で、
+ * 起動そのもの（権限・ホスト・確認待ち）は既存の「実装を開始」ダイアログと配車APIが担う。
+ *
+ * - 修正PRがまだ無い`issue_created`の系列だけが対象（作業中・終端は状態の確認に導く）
+ * - 作り直しで後継の世代ができた系列、閉じたIssueは起動しない
+ * - すでに受付済み・実行中なら重複して起動せず、状態の確認へ導く
+ */
+export function decideReleaseFixStart(input: {
+  status: ReleaseFixStatus;
+  hasSuccessor: boolean;
+  issueState: "open" | "closed";
+  startState: ReleaseFixStartState;
+}): ReleaseFixStartDecision {
+  if (input.hasSuccessor) {
+    return { ok: false, reason: "superseded", message: "この修正は新しい世代に置き換わっています。最新の修正から開始してください。" };
+  }
+  if (input.status !== "issue_created") {
+    return { ok: false, reason: "not_startable", message: "この修正はすでに進行中か終了しているため、開始できません。" };
+  }
+  if (input.issueState !== "open") {
+    return { ok: false, reason: "issue_closed", message: "修正Issueが閉じられているため、開始できません。" };
+  }
+  if (input.startState !== "none") {
+    return { ok: false, reason: "already_started", message: "すでに実行が受け付けられています。状態を確認してください。" };
+  }
+  return { ok: true };
+}
