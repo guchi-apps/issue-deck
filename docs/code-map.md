@@ -1200,13 +1200,23 @@ export function POST(request: NextRequest) {
   Projectの場所は`PROJECT_V2_OWNER`・`PROJECT_V2_NUMBER`で指定し、**未設定なら
   Project連携を一切行わない**。設計の一次情報源は
   [progress-status-architecture.md](progress-status-architecture.md)（#991）。
-- **PCのIssue詳細は「固定ヘッダー → 実行状況カード → 折りたためる補助情報 → 説明・コメント」の
-  4層**（#1577。[`components/dashboard/issue-detail.tsx`](../src/components/dashboard/issue-detail.tsx)）。
-  積み上がった上部の表示を整理したもので、次の3点が判断の要る箇所。
+- **Issue詳細（PC・スマホ）は「短い固定ヘッダー → 正式タイトル → 状態と主操作 → 判断材料 →
+  概要（説明）→ 関連・対応PR → 活動（コメント）」の順**（#1577・#4425・#4440）。**並びの正は
+  [`issue-detail-layout.tsx`](../src/components/dashboard/issue-detail-layout.tsx)の`IssueDetailLayout`**で、
+  PC（[`issue-detail.tsx`](../src/components/dashboard/issue-detail.tsx)）とスマホ
+  （`mobile/mobile-issue-detail.tsx`）はスロットへ中身を渡すだけにする（並びを各画面に書き戻さない。
+  `issue-detail-layout.test.tsx`が固定）。外枠は持たず、スクロール領域の`ref`・`flex-1`・下端の余白は
+  各画面が持つ。次の点が判断の要る箇所。
+  - **対応PRは、マージ待ち・PR失敗のときだけ判断材料の末尾へ上がる**（`promotePullRequests`）。それ以外は
+    説明・子Issueの下に畳む。以前は常に説明より上に置いて「マージボタンをコメント欄まで下げずに押せる」
+    （#1288・#1339）を保っていたが、PRを見る必要があるときだけ上げれば同じ意図を保てる。
   - **ヘッダー**（[`issue-detail-header.tsx`](../src/components/dashboard/issue-detail-header.tsx)）は
-    スクロール領域の先頭で`sticky`。**実体のボタンとして置くのは主操作だけ**にし、「GitHubで開く」は
+    スクロール領域の先頭で`sticky`。リポジトリ・番号・1行に省略したタイトル・操作だけを持ち、
+    正式タイトル（全文）とメタは本文先頭の`IssueDetailTitle`に置く（固定領域を薄くする）。
+    **実体のボタンとして置くのは主操作だけ**にし、「GitHubで開く」は
     アイコン、編集・クローズ・削除は`⋯`へ寄せる（増やすと折り返しで主操作の位置が動く。#998）。
     メタは`Open`・作成者・更新（相対時刻）だけで、**担当者と日付はプロパティパネルに置く**（重複を作らない）。
+    スマホのヘッダー・概要カード（`MobileIssueSummaryCard`）は以前からこの形。
   - **実行状況カード**（[`issue-status-card.tsx`](../src/components/dashboard/issue-status-card.tsx)）は
     進捗ステップ・積んだジョブ・セッション・横断質問・Claudeの回答待ち・実行キャンセルを1枚に集める。
     **どれも無いIssueではカードごと描かない**ので、判定は各子コンポーネントと同じ関数
