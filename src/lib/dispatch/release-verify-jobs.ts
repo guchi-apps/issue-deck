@@ -1,5 +1,6 @@
 import type { DispatchJob } from "@prisma/client";
 
+import { parseReleaseMacReport, recordReleaseMacResult } from "@/lib/release-mac-verification";
 import { db } from "@/lib/db";
 import {
   DISPATCH_HOST_ONLINE_WINDOW_MS,
@@ -9,7 +10,10 @@ import {
 import { expireStaleDispatchJobs } from "@/lib/dispatch/jobs";
 import { notifyDispatchHostWake } from "@/lib/dispatch/wake-notify";
 import type { ReleaseVerificationKind } from "@/lib/release-merge-gate";
-import { describeIntegrationNotApplicable } from "@/lib/release-verification-config";
+import {
+  describeIntegrationNotApplicable,
+  describeIntegrationSetupGap,
+} from "@/lib/release-verification-config";
 import {
   recordReleaseVerificationResult,
   type ReleaseVerificationTarget,
@@ -33,7 +37,7 @@ export type RequestReleaseVerifyResult =
   | { ok: true; outcome: "queued" | "already_queued"; job: DispatchJob }
   /** このリポジトリは検証できない。ジョブは積まず、`not_applicable`として記録した */
   | { ok: true; outcome: "not_applicable"; reason: string }
-  | { ok: false; rejection: "no_host"; message: string };
+  | { ok: false; rejection: "no_host" | "not_configured"; message: string };
 
 async function pickReleaseVerifyHost(repositoryFullName: string, now: Date): Promise<string | null> {
   const hosts = await db.dispatchHost.findMany({
@@ -52,7 +56,7 @@ async function pickReleaseVerifyHost(repositoryFullName: string, now: Date): Pro
 /**
  * 統合検証を積む（冪等）。同じ対象（PR・base・head）に未完了のジョブがあればそれを返す。
  * 新しいbase/headが積まれたら、同じPRの**古い対象の待機中ジョブは取り消す**（結果は「対象変更による
- * 無効」になり使われない）。検証できないリポジトリは`not_applicable`を理由付きで記録して終える。
+ * 無効」になり使われない）。根拠のある対象外は`not_applicable`、設定不足は`failed`を理由付きで記録して終える（設定不足を対象外にして通さない）。
  */
 export async function requestReleaseVerifyJob(
   target: ReleaseVerificationTarget,
@@ -66,6 +70,13 @@ export async function requestReleaseVerifyJob(
       message: notApplicable,
     });
     return { ok: true, outcome: "not_applicable", reason: notApplicable };
+  }
+
+  // 設定不足は対象外にしない（`not_applicable`は合格扱いになる）。失敗として理由を残し、ゲートを通さない（#4365）
+  const setupGap = describeIntegrationSetupGap(target.repoFullName);
+  if (setupGap !== null) {
+    await recordReleaseVerificationResult(target, { kind: "integration", state: "failed", message: setupGap });
+    return { ok: false, rejection: "not_configured", message: setupGap };
   }
 
   await expireStaleDispatchJobs(now);
@@ -153,6 +164,10 @@ export async function applyReleaseVerifyReport(
     ? (raw.state as (typeof REPORTABLE_STATES)[number])
     : null;
   if (status === "succeeded" && reported) {
+    // Mac検証は統合検証とは別の記録にする（#4366）。ランナーが`mac`を送らない旧版・統合検証が
+    // 先に失敗した場合は記録しない（記録なし＝未実施であり、成功や対象外には置き換えない）
+    const mac = parseReleaseMacReport(raw.mac);
+    if (mac) await recordReleaseMacResult(target, mac);
     return recordReleaseVerificationResult(target, {
       kind: "integration",
       state: reported,

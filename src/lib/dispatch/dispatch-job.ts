@@ -563,6 +563,11 @@ export type DispatchJobView = {
    */
   recovery: boolean;
   /**
+   * 未送信入力を確認付きで退避してから送る追加指示か（#4383）。pollerが入力欄の未送信入力を
+   * 保存してよい唯一の印。**本文は返さない**（機密を含み得るため、退避の閲覧は別の受け口）。
+   */
+  stashInput?: boolean;
+  /**
    * 代行実行したコマンド（#1828。`kind`が`MANUAL_STEP`のときだけ入る）。
    *
    * **サーバーが手作業Issueの本文から抽出し直したものが入る。** 画面はこれを「承認したものと
@@ -688,6 +693,7 @@ export type DispatchHostView = {
    * こちらは**内容のある文字列**を送るため、対応していないpollerへ渡したときの事故の質が違う。
    */
   instructionCapable: boolean | null;
+  stashInputCapable?: boolean | null;
   /**
    * 複数リポジトリ横断の質問セッション（#1454）を起こせるか。**`null`（未申告）は「できない」として
    * 扱う**（`sessionControlCapable`と同じ）。古いpollerは未知の種別を`failed`で返すため、
@@ -1403,6 +1409,7 @@ export type SessionControlRejection =
   | "host_offline"
   | "session_control_unsupported"
   | "instruction_unsupported"
+  | "stash_input_unsupported"
   | "session_not_found"
   | "session_not_alive"
   | "codex_thread_unknown"
@@ -1422,6 +1429,8 @@ export function describeSessionControlRejection(
       // **何をすれば押せるようになるかまで書く。** pollerはサブPC側の作業ツリーから動くため、
       // 更新するのは人の作業になる（issue-deck側を新しくしても解消しない）
       return `${formatDispatchHostName(context.hostName)} のpollerがセッションの操作に対応していません（更新してから押せるようになります）。`;
+    case "stash_input_unsupported":
+      return `${formatDispatchHostName(context.hostName)} のpollerが未送信入力の退避に対応していません。ホストの「更新して再起動」を実行し、対応の申告を待ってください。`;
     case "instruction_unsupported":
       // **停止・終了とは別に断る**（#1012）。あちらに対応していても、文字列を送る3段階
       // プロトコルはpollerを更新しないと入らない
@@ -1449,12 +1458,13 @@ export function describeSessionControlRejection(
  */
 export function resolveSessionControlRejection(params: {
   host:
-    | Pick<DispatchHostView, "online" | "sessionControlCapable" | "instructionCapable">
+    | Pick<DispatchHostView, "online" | "sessionControlCapable" | "instructionCapable" | "stashInputCapable">
     | null
     | undefined;
   session: Pick<DispatchSessionView, "state" | "codexThreadKnown"> | null | undefined;
   kind: SessionControlJobKind;
   hasActiveControlJob: boolean;
+  stashInput?: boolean;
 }): SessionControlRejection | null {
   if (!params.host) return "host_unknown";
   if (!params.host.online) return "host_offline";
@@ -1462,6 +1472,7 @@ export function resolveSessionControlRejection(params: {
   // 送る3段階プロトコルは別に申告が要る
   if (params.kind === "INSTRUCTION") {
     if (params.host.instructionCapable !== true) return "instruction_unsupported";
+    if (params.stashInput && params.host.stashInputCapable !== true) return "stash_input_unsupported";
   } else if (params.host.sessionControlCapable !== true) {
     return "session_control_unsupported";
   }

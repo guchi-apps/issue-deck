@@ -1,6 +1,7 @@
 import { formatJstWeekday, toJstParts } from "@/lib/format-date-time";
 import { buildPullRequestId, parseGithubReferenceUrl, parsePullRequestId } from "@/lib/github-reference";
 import type { ReleaseHistoryItem } from "@/lib/github/release-api";
+import { parseReleaseBodyTasks } from "@/lib/release-body-tasks";
 import type { ConnectedRepository } from "@/types/repository";
 
 /**
@@ -41,8 +42,6 @@ export function selectVisibleReleaseHistory(
   if (hiddenFullNames.size === 0) return [...entries];
   return entries.filter((entry) => !hiddenFullNames.has(entry.repoFullName));
 }
-
-const GENERATED_BULLET_LINE = /^\*\s+(.+?)\s+by\s+@\S+\s+in\s+(\S+)\s*$/;
 
 /**
  * バージョンバンプだけを行うPRのタイトル。`reusable-release-develop-to-main.yml`が作る
@@ -85,17 +84,11 @@ export function extractReleaseHighlights(
 ): { lines: ReleaseHighlightLine[]; moreCount: number } {
   if (!body) return { lines: [], moreCount: 0 };
 
-  const bulletLines = body
-    .split("\n")
-    .map((line) => line.trim())
-    .filter((line) => line.startsWith("* "))
-    .map((line) => {
-      const match = GENERATED_BULLET_LINE.exec(line);
-      const text = (match ? match[1] : line.slice(2)).trim();
-      const key = match ? match[2] : text;
-      return { text, key };
-    })
-    .filter((item) => item.text.length > 0)
+  // 通常の箇条書き（`* `・`- `）とタスクリスト（`- [ ]`・`- [x]`。#4374）のどちらも拾う。
+  // 引き継ぎ項目として書き足した行（目印付き）は、引き継ぎ元の節で別に出すのでここでは除く
+  const bulletLines = parseReleaseBodyTasks(body)
+    .filter((task) => !task.carried)
+    .map((task) => ({ text: task.text, key: task.key }))
     .filter((item) => !VERSION_BUMP_TITLE.test(item.text))
     // 同じPRが本文へ複数回載ることがある（#4287。8.47.0では同じ4件が2回並んだ）。
     // 先に出たものを残し、同じ`key`の行は捨てる

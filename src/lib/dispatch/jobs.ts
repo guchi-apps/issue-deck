@@ -195,6 +195,7 @@ function toJobView(
     // 停滞からの復旧として送った追加指示か（#2886）。pollerが許可する状態イベントを
     // 広げる判断材料でもあり、`succeeded`の報告で確認待ちを外す条件でもある
     recovery: job.recovery,
+    stashInput: job.stashInput,
     command: job.command,
     placeholderValues: manualStepValues,
     // **サーバー側で差し込んだ結果も渡す**（#2403）。pollerは自分でも差し込み直し、
@@ -272,6 +273,7 @@ function toHostView(host: DispatchHost, now: Date): DispatchHostView {
     lastSeenAt: host.lastSeenAt.toISOString(),
     sessionControlCapable: host.sessionControlCapable,
     instructionCapable: host.instructionCapable,
+    stashInputCapable: host.stashInputCapable,
     crossRepoQuestionCapable: host.crossRepoQuestionCapable,
     manualStepCapable: host.manualStepCapable,
     manualStepAbortCapable: host.manualStepAbortCapable,
@@ -1311,6 +1313,11 @@ export async function enqueueSessionControlJob(params: {
    *   知らせる。セッションが今も生きていることを確かめる
    */
   recovery?: boolean;
+  /**
+   * 入力欄の未送信入力を、確認付きで退避してから送るか（#4383。`kind`が`INSTRUCTION`のときだけ
+   * 意味がある）。**人が確認ダイアログで押したときだけ**立てる。
+   */
+  stashInput?: boolean;
   requestedByUserId: string | null;
   now?: Date;
 }): Promise<EnqueueSessionControlJobResult> {
@@ -1344,10 +1351,12 @@ export async function enqueueSessionControlJob(params: {
           online: isDispatchHostOnline(host.lastSeenAt, now),
           sessionControlCapable: host.sessionControlCapable,
           instructionCapable: host.instructionCapable,
+          stashInputCapable: host.stashInputCapable,
         }
       : null,
     session,
     kind: params.kind,
+    stashInput: params.stashInput,
     // 二重投入はactiveKeyのunique制約が確実に止める（下のcatch）。ここでは先読みしない
     hasActiveControlJob: false,
   });
@@ -1371,6 +1380,8 @@ export async function enqueueSessionControlJob(params: {
         instruction: params.kind === "INSTRUCTION" ? (params.instruction ?? null) : null,
         // 停滞からの復旧（#2886）。それ以外の種別ではfalseのまま
         recovery: params.kind === "INSTRUCTION" ? (params.recovery ?? false) : false,
+        // 未送信入力の退避（#4383）。それ以外の種別ではfalseのまま
+        stashInput: params.kind === "INSTRUCTION" ? (params.stashInput ?? false) : false,
         // どのセッションを指した操作かを残す。**pollerはこの名前をそのまま使わず突き合わせる**
         tmuxSessionName: session?.tmuxSessionName ?? null,
       },
@@ -1978,6 +1989,7 @@ export async function claimDispatchJobs(params: {
         targetHost: params.hostName,
         status: "QUEUED",
         kind: { in: controlKinds },
+        ...(host?.stashInputCapable === true ? {} : { stashInput: false }),
       },
       orderBy: { createdAt: "asc" },
       take: MAX_CONTROL_JOBS_PER_CLAIM,
@@ -2609,6 +2621,7 @@ export async function announceDispatchHost(params: {
   sessionControlCapable: boolean | null;
   /** 追加指示を送れるか（#1012）。申告していないpollerでは`null`＝非対応 */
   instructionCapable: boolean | null;
+  stashInputCapable?: boolean | null;
   /** 横断質問セッションを起こせるか（#1454）。申告していないpollerでは`null`＝非対応 */
   crossRepoQuestionCapable: boolean | null;
   /** 手作業の代行実行を実行できるか（#1828）。申告していないpollerでは`null`＝非対応 */
@@ -2700,6 +2713,7 @@ export async function announceDispatchHost(params: {
     agentVersion: params.agentVersion,
     sessionControlCapable: params.sessionControlCapable,
     instructionCapable: params.instructionCapable,
+    stashInputCapable: params.stashInputCapable ?? null,
     crossRepoQuestionCapable: params.crossRepoQuestionCapable,
     manualStepCapable: params.manualStepCapable,
     manualStepAbortCapable: params.manualStepAbortCapable,

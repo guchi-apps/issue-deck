@@ -149,6 +149,8 @@ export type GithubApiPullRequest = {
   head: { sha: string; ref?: string };
   /** リリースPRの検証ゲート（#4212）がマージ直前のbase先端を取り直すために読む */
   base?: { sha: string; ref: string };
+  /** 自動レビューの判定（`## 検証結果`）を読む材料（#4377）。GitHubは常に返すが、無いときはnull */
+  body?: string | null;
 };
 
 export async function fetchPullRequest(

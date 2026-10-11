@@ -199,3 +199,37 @@ describe("PullRequestMergeButton", () => {
     expect(screen.getByText("認証・認可に関わる変更")).toBeTruthy();
   });
 });
+
+describe("要修正PRのマージ確認（#4377）", () => {
+  const reviewVerdict = {
+    reviewKind: "changes-requested" as const,
+    reviewLabel: "要修正",
+    riskKind: "none" as const,
+    riskLabel: "該当なし",
+    riskReasons: [],
+    confirmLabel: null,
+    reviewedSha: "1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b",
+  };
+
+  it("最初のクリックではマージ要求を送らず、自動修正が主操作の確認画面を開く", async () => {
+    const fetchMock = vi.fn(async (url: string) => {
+      if (String(url).includes("/api/pull-requests/review")) {
+        return { ok: true, json: async () => ({ review: null, headSha: "1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b" }) };
+      }
+      return { ok: true, json: async () => ({}) };
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(
+      <PullRequestMergeButton
+        pullRequest={makePullRequest({ kind: "issue", baseRef: "develop", reviewVerdict })}
+        onMerged={() => {}}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "マージする" }));
+
+    expect(await screen.findByRole("button", { name: "PRを自動修正" })).toBeTruthy();
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("pull-request-merge"))).toBe(false);
+    const mergeWithoutFix = screen.getByRole("button", { name: "修正せずマージする" }) as HTMLButtonElement;
+    expect(mergeWithoutFix.disabled).toBe(true);
+  });
+});

@@ -11,6 +11,7 @@ import type {
   ReleaseCheckLineRecord,
   ReleaseCheckRecord,
   ReleaseCheckTargetSummary,
+  ReleaseLineToggleTarget,
 } from "@/lib/release-check";
 
 /**
@@ -47,7 +48,7 @@ export function MobileReleaseHistoryScreen({
   checkRepositoryOptions: ReleaseCheckRepositoryOption[];
   onToggleChecked: (target: { repoFullName: string; tagName: string }, checked: boolean) => void;
   onToggleCheckedLine: (
-    target: { repoFullName: string; tagName: string; lineKey: string },
+    target: ReleaseLineToggleTarget,
     checked: boolean,
   ) => void;
   onToggleCheckTarget: (repository: { id: string; fullName: string }, targeted: boolean) => void;

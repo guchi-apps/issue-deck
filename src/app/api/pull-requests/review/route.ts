@@ -73,7 +73,7 @@ async function handleGET(request: NextRequest) {
       pullRequest.head.sha,
     );
 
-    return NextResponse.json({ review });
+    return NextResponse.json({ review, headSha: pullRequest.head.sha });
   } catch (error) {
     console.error(`[GET /api/pull-requests/review] ${owner}/${repo}#${number}:`, error);
     return NextResponse.json(

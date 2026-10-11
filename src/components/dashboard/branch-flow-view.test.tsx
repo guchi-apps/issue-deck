@@ -154,6 +154,11 @@ function branchStatus(overrides: Partial<RepositoryBranchStatus> = {}): Reposito
   };
 }
 
+/** 6チェックの表示が読むリリース候補の取得（GET）を除いた、マージ要求の呼び出し */
+function mergeCalls(fetchMock: { mock: { calls: unknown[][] } }) {
+  return fetchMock.mock.calls.filter(([url]) => !String(url).includes("/api/repositories/release/candidates"));
+}
+
 describe("BranchFlowView", () => {
   afterEach(() => {
     cleanup();
@@ -1386,7 +1391,8 @@ describe("BranchFlowView", () => {
       fireEvent.click(screen.getByText("マージする"));
 
       await screen.findByText("マージ済み");
-      expect(fetchMock).toHaveBeenCalledTimes(1);
+      // 6チェックの表示用の読み取り（リリース候補の取得）は数えない。マージ要求が1回だけであること
+      expect(mergeCalls(fetchMock)).toHaveLength(1);
       expect(onMerged).toHaveBeenCalledWith(expect.objectContaining({ id: pullRequest.id }));
     });
 
@@ -1402,7 +1408,7 @@ describe("BranchFlowView", () => {
 
       const merged = await screen.findByText("マージ済み");
       fireEvent.click(merged);
-      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(mergeCalls(fetchMock)).toHaveLength(1);
     });
 
     it("マージ済みになったPRからはボタンが消える（親が取得を待たず反映した後）", () => {

@@ -12,7 +12,9 @@ import {
   pullRequestKindLabel,
 } from "@/components/dashboard/pull-request-badges";
 import { PullRequestMergeButton } from "@/components/dashboard/pull-request-merge-button";
+import { PullRequestMergeHoldNotice } from "@/components/dashboard/pull-request-merge-hold";
 import { PullRequestRepairButtons } from "@/components/dashboard/pull-request-repair-buttons";
+import { PullRequestChecksStrip } from "@/components/dashboard/pull-request-checks-strip";
 import { PullRequestStatusRail } from "@/components/dashboard/pull-request-status-rail";
 import { PullToRefreshIndicator } from "@/components/dashboard/pull-to-refresh-indicator";
 import { UserAvatar } from "@/components/dashboard/user-avatar";
@@ -166,6 +168,13 @@ function PullRequestCard({
           />
         )}
       </div>
+      <PullRequestMergeHoldNotice pullRequest={pullRequest} />
+      {/* PR詳細・ブランチ画面と同じ6チェック（#4366）。共通結果は候補PR・SHAを添えて出す */}
+      <PullRequestChecksStrip
+        pullRequest={pullRequest}
+        onOpenPullRequest={onSelect ? () => onSelect(pullRequest) : null}
+        className="-mx-1 px-0"
+      />
     </li>
   );
 }

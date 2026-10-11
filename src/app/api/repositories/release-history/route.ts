@@ -22,6 +22,7 @@ import {
   type ReleaseCheckLineRecord,
   type ReleaseCheckRecord,
 } from "@/lib/release-check";
+import { buildCheckLineRecordsFromBodies } from "@/lib/release-body-tasks";
 import { mergeReleaseHistory } from "@/lib/release-history";
 
 export function GET() {
@@ -63,8 +64,11 @@ async function handleGET() {
       where: { userId },
       select: { tagName: true, checkedAt: true, repository: { select: { fullName: true } } },
     }),
+    // 旧記録（ユーザーごとのDB。#4374）。確認状態の正はGitHub Release本文のタスクリストで、
+    // ここはまだタスクリストになっていない行のフォールバックにだけ使う。複数ユーザーぶんは
+    // 和集合（誰かが確認していれば確認済み）で、`buildCheckLineRecordsFromBodies`が畳む
     db.releaseCheckLine.findMany({
-      where: { userId },
+      where: { repositoryId: { in: repositories.map((repository) => repository.id) } },
       select: {
         tagName: true,
         lineKey: true,
@@ -83,7 +87,7 @@ async function handleGET() {
     tagName: row.tagName,
     checkedAt: row.checkedAt.toISOString(),
   }));
-  const checkLineRecords: ReleaseCheckLineRecord[] = checkLineRecordRows.map((row) => ({
+  const legacyCheckLineRecords: ReleaseCheckLineRecord[] = checkLineRecordRows.map((row) => ({
     repoFullName: row.repository.fullName,
     tagName: row.tagName,
     lineKey: row.lineKey,
@@ -179,10 +183,12 @@ async function handleGET() {
     }),
   );
 
+  const entries = mergeReleaseHistory(perRepository);
   return NextResponse.json({
-    entries: mergeReleaseHistory(perRepository),
+    entries,
     checkRecords,
-    checkLineRecords,
+    // 項目ごとの確認状態はGitHub Release本文のタスクリストが正（#4374）。取得のたびに本文から組み直す
+    checkLineRecords: buildCheckLineRecordsFromBodies(entries, legacyCheckLineRecords),
   });
 }
 

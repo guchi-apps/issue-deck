@@ -8,7 +8,6 @@ import type { ReleaseVerificationTally } from "@/lib/github/release-verification
 import type {
   ReleaseChangeCiCheck,
   ReleaseChangeCommit,
-  ReleaseChangePlanCheck,
   ReleaseChangePullRequest,
 } from "@/types/pull-request";
 
@@ -111,27 +110,19 @@ export function toReleaseChangeCi(rollupState: string | null | undefined): Relea
 }
 
 /**
- * 5チェック用の追加取得の結果を各PRへ付ける（#4305）。
+ * 6チェック用の追加取得（個別PRのCI）の結果を各PRへ付ける（#4305・#4366。計画レビューはPRのチェックに含めない）。
  *
- * **取れなかったものは`unavailable`にする**（成功へ倒さない）。対応Issueが特定できないPRの計画は
- * 取得対象外なので`not-applicable`。バージョンバンプPRはレビュー・CIの対象ではないので触らない。
+ * **取れなかったものは`unavailable`にする**（成功へ倒さない）。バージョンバンプPRはレビュー・CIの対象ではないので触らない。
  */
 export function withMergeChecks(
   pullRequests: readonly ReleaseChangePullRequest[],
   ci: ReadonlyMap<number, ReleaseChangeCiCheck>,
-  plan: ReadonlyMap<number, ReleaseChangePlanCheck>,
 ): ReleaseChangePullRequest[] {
   return pullRequests.map((pr) => {
     if (pr.isVersionBump) return pr;
     return {
       ...pr,
-      mergeChecks: {
-        ci: ci.get(pr.number) ?? { state: "unavailable" },
-        plan:
-          pr.issueNumber === null
-            ? { state: "not-applicable", reason: "対応するIssueを特定できません" }
-            : (plan.get(pr.number) ?? { state: "unavailable", reason: "計画の記録を取得できませんでした" }),
-      },
+      mergeChecks: { ci: ci.get(pr.number) ?? { state: "unavailable" } },
     };
   });
 }

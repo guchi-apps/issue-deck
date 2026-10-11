@@ -627,7 +627,8 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   - **リリースPRの統合検証は`DispatchJob`（`kind=RELEASE_VERIFY`）**（#4237）。積む処理は
     [`lib/dispatch/release-verify-jobs.ts`](../src/lib/dispatch/release-verify-jobs.ts)（`POST /api/dispatch/release-verify`の`request`が呼ぶ）、
     実行はサブPCの`scripts/run-release-verify.sh`、結果は`/api/dispatch/report`の`releaseVerification`から`ReleaseVerification`へ記録。
-    コマンドはリポジトリ別に[`lib/release-verification-config.ts`](../src/lib/release-verification-config.ts)が持つ。
+    コマンドはリポジトリ別に[`lib/release-verification-config.ts`](../src/lib/release-verification-config.ts)が持つ（全管理対象の導入台帳・根拠付き対象外。#4365）。
+    導入状態は[`lib/release-rollout.ts`](../src/lib/release-rollout.ts)が導出し、設定＞フリート運用で一覧できる。
     設計は[multi-agent/release-verification.md](multi-agent/release-verification.md)
   - **リリース全体のAIレビューは`DispatchJob`（`kind=RELEASE_REVIEW`）**（#4238）。積む処理は
     [`lib/dispatch/release-review-jobs.ts`](../src/lib/dispatch/release-review-jobs.ts)（`release-verify`の`request`が統合検証と並べて呼ぶ）、

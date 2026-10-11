@@ -49,7 +49,12 @@ export async function POST(request: NextRequest) {
     const wait =
       action === "cancel"
         ? await cancelDependencyWait(id)
-        : await recheckDependencyWait(id, { resume: action === "resume", userId });
+        : await recheckDependencyWait(id, {
+            resume: action === "resume",
+            userId,
+            // 未送信入力の退避（#4383）は、確認ダイアログを通した再開だけが`true`を送る
+            stashInput: action === "resume" && payload?.stashInput === true,
+          });
     if (!wait) return NextResponse.json({ error: "not_found" }, { status: 404 });
     return NextResponse.json({ wait }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {

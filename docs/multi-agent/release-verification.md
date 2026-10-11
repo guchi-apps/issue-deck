@@ -116,6 +116,16 @@ PC（リリースPR詳細）・スマホ（リリースシート）・**本番�
 作り直しで変わったbase/head SHAに対して統合検証・全体レビューをやり直す（古いSHAの結果は「古い結果」になり流用されない）。CI失敗・コンフリクトは従来どおり`reusable-claude-pr-repair`の修復ボタン。
 **手動で作り直す代わりに、画面から修正Issueを起案して作り直しまで自動で進める経路が次節の修正系列（#4317）。**
 
+## PRの6チェック表示とMac検証の独立記録（#4366）
+
+PR詳細・PR一覧・ブランチ画面・本番マージ確認の一覧は、同じ6項目を同じ順で出す（`src/lib/pull-request-merge-checks.ts`・`src/components/dashboard/pull-request-merge-checks.tsx`）: **CI／コードレビュー／コンフリクト／全体レビュー／統合検証／Mac検証**。#4305の5項目にあった計画レビューはPRのチェックに含めない（Issue側の計画レビューは別機能として残る）。
+
+- **個別PRの項目**（CI・コード・コンフリクト）は`PullRequestSummary`（本番マージ一覧は`ReleaseChangePullRequest`）から作る。headが進んだレビュー判定は「無効」、取れなかったものは「取得不可」で、成功へ倒さない。
+- **共通結果の項目**（全体・統合・Mac）はリリース候補（base=main・head=`release-main/v*`のopenなPR）の結果。`GET /api/repositories/release/candidates`が候補ごとのコミット範囲に含まれるPR番号と検証要約を返し、`src/lib/release-candidate-checks.ts`が対象を決める。**含む候補が無ければ「リリース未作成」の理由付き未実施**で、無関係な最新候補の結果は使わない。複数候補に含まれるときは新しい候補が既定で、詳細から選べる。判定対象は常に候補PR・head SHAを添える。表示のために検証は起動しない（読むだけ）。
+- **Mac検証は統合検証とは別の記録**。`ReleaseVerification`表へ`kind="mac"`で保存する（`src/lib/release-mac-verification.ts`。`kind`は文字列列でマイグレーション不要）。**マージゲートの種別（`RELEASE_VERIFICATION_KINDS`）には入れない表示専用**で、ゲート・待ち判定・依頼時の行作成は変わらない。ゲートへ入れるかは#4365と整合させて別途決める。
+  - 統合検証ジョブ（`scripts/run-release-verify.sh`）が、結果JSONに`mac`（`state`・`summary`・`unverifiedScope`）を足して報告し、`applyReleaseVerifyReport`が統合検証とは別に記録する。**統合検証側の判定（Mac未接続の要確認・Mac失敗のfailed）は従来どおり**変えない。
+  - 状態: 成功／失敗／実行中（統合検証の現在工程がMac）／対象外（`ios/`に差分なし、またはMac検証の設定が無いリポジトリ）／設定不足（スクリプト無し・Mac未接続）／未実施（記録なし。統合検証が先に失敗した場合や、`mac`を送らない旧版のランナーもここ）／古い結果（対象のSHAが違う記録）。**未実施を成功や対象外へ置き換えない。**
+
 ## 修正系列：起案から修正候補の再検証まで（#4317）
 
 全体レビューの指摘・統合検証の失敗から**修正Issueを起案**し、修正PRのdevelop取り込み→候補の作り直し→新しいSHAでの再検証を追跡する。
@@ -159,6 +169,26 @@ PC（リリースPR詳細）・スマホ（リリースシート）・**本番�
 - 後継の候補のSHAで統合検証・全体レビューが走り直す（旧SHAの成功は流用しない）。本番mainへのマージは従来どおり人が承認する
 - **未対応のcaller**（配布先の旧タグ）には選択を出さず、従来の作り直しだけにする（`releaseCallerSupportsSelection`がdevelopのcallerに
   `rebuild_selection`があるかを読む）。新規アプリの雛形（`src/lib/new-app/scaffold-workflows.ts`）は最初から対応している
+
+## 全リポジトリへの展開と導入台帳（#4365）
+
+**宣言はコード、状態は導出。** `release-verification-config.ts`が正本で、`RELEASE_VERIFICATION_REPOS`（検証コマンド・技術構成・前提不足`setupGaps`・Mac検証の有無と配布状況）と
+`RELEASE_VERIFICATION_EXCLUSIONS`（アーカイブ・本番リリース経路なしの**根拠付き**対象外）を持つ。導入状態は`release-rollout.ts`が宣言と
+`ReleaseVerification`・`DispatchHost`の申告から導く（新規テーブルは無い）。画面は設定＞フリート運用の「リリース検証の導入状況」（`GET /api/repositories/release/rollout`）。
+
+状態（上ほど優先）: 対象外／未導入（管理対象なのに台帳が無い）／設定不足／配布待ち（実行できるホストの申告が無い・poller未対応）／検証待ち／検証済み（必須化待ち）／必須化済み。
+
+- **設定不足を対象外にしない。** `not_applicable`はゲートで合格扱いになるため、根拠のある対象外（`RELEASE_VERIFICATION_EXCLUSIONS`・`integrationNotApplicableReason`）だけに使う。
+  台帳に無い・コマンドが空・`setupGaps`がある場合、統合検証の依頼は**`failed`（理由付き）を記録してジョブを積まない**（`describeIntegrationSetupGap`）
+- **Mac検証の前提**（`ios/scripts/remote-build-check.sh`の配布）は`describeMacSetupGap`。Linuxの統合検証は止めないが、導入状態は設定不足で、`enforced`にもできない（テストが守る）
+- **`enforced`を立てる条件**: 設定不足が無く、実リリース候補で統合検証・全体レビューが合格し、ホストが申告している。1リポジトリずつ立て、全対象が揃うまで#4365は完了にしない
+
+### 新規リポジトリを足すとき
+
+1. 本番リリース経路（develop→main）があるか確認する。無ければ`RELEASE_VERIFICATION_EXCLUSIONS`へ**理由付きで**足す
+2. 有るなら、そのリポジトリの`ci.yml`に合わせて`RELEASE_VERIFICATION_REPOS`へ宣言する（`integrationCommands`は各々単独の`bash -c`。pnpmの流用をしない。DB・環境変数が要るなら`setupGaps`へ書く。iOSがあれば`macBuildCheck`と`ios/scripts/remote-build-check.sh`の配布）
+3. サブPCの`DispatchHost`にリポジトリを申告させ、poller（`releaseVerify`・`releaseReview`対応版）を更新する
+4. 次のリリース候補で実走させて合格を確認し、`enforced: true`にする。台帳へ載せ忘れた管理対象は、導入状況の一覧に「未導入」として出る
 
 ## 既存検証の棚卸し（重複実装しない）
 

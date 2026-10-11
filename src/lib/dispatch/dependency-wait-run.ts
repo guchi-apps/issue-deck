@@ -20,6 +20,7 @@ import {
   type DependencyWaitView,
 } from "@/lib/dispatch/dependency-wait";
 import { addCheckUserWithReason } from "@/lib/dispatch/check-user-labels";
+import { describeInstructionJobFailure } from "@/lib/dispatch/input-stash";
 import { resolveInstallationToken } from "@/lib/dispatch/installation-token";
 import { enqueueSessionControlJob } from "@/lib/dispatch/jobs";
 import { findDispatchSessionForIssue } from "@/lib/dispatch/sessions";
@@ -260,7 +261,11 @@ async function failResume(row: SessionDependencyWait, reason: string): Promise<S
  * 条件が成立した待ちを再開する。**`WAITING`/`NEEDS_CONFIRM`/`RESUME_FAILED`→`RESUME_REQUESTED`の
  * 遷移を`updateMany`で1本だけが取る**ので、巡回・イベント・手動操作が重なっても指示は1回しか積まない。
  */
-async function requestResume(row: SessionDependencyWait, userId: string | null): Promise<SessionDependencyWait> {
+async function requestResume(
+  row: SessionDependencyWait,
+  userId: string | null,
+  stashInput = false,
+): Promise<SessionDependencyWait> {
   const claimed = await db.sessionDependencyWait.updateMany({
     where: { id: row.id, status: { in: ["WAITING", "NEEDS_CONFIRM", "RESUME_FAILED"] } },
     data: {
@@ -296,6 +301,8 @@ async function requestResume(row: SessionDependencyWait, userId: string | null):
       kind: row.depKind === "pr" ? "pr" : "issue",
     }),
     recovery: false,
+    // 未送信入力の退避（#4383）。確認ダイアログを通した手動の再開だけが立てる
+    stashInput,
     requestedByUserId: userId,
   });
   if (!result.ok) return failResume(current, result.message);
@@ -311,7 +318,7 @@ async function requestResume(row: SessionDependencyWait, userId: string | null):
  */
 export async function advanceDependencyWait(
   id: string,
-  options: { manual: boolean; userId?: string | null },
+  options: { manual: boolean; userId?: string | null; stashInput?: boolean },
   deps: Deps = defaultDeps,
 ): Promise<DependencyWaitView | null> {
   let row = await db.sessionDependencyWait.findUnique({ where: { id } });
@@ -378,7 +385,7 @@ export async function advanceDependencyWait(
 
   // 自動で再開してよいのは、全条件が機械で成立したとき（resume）か、人が押したとき
   if (decision === "resume" || manualOverride) {
-    const requested = await requestResume(row, options.userId ?? null);
+    const requested = await requestResume(row, options.userId ?? null, options.manual && options.stashInput === true);
     return toDependencyWaitView(requested);
   }
   return toDependencyWaitView(row);
@@ -393,7 +400,10 @@ async function trackRequested(row: SessionDependencyWait, now: Date): Promise<Se
     }
     return row;
   }
-  const job = await db.dispatchJob.findUnique({ where: { id: row.resumeJobId }, select: { status: true } });
+  const job = await db.dispatchJob.findUnique({
+    where: { id: row.resumeJobId },
+    select: { status: true, message: true },
+  });
   if (!job) return failResume(row, "再開の指示ジョブが見つかりません");
   if (job.status === "SUCCEEDED") {
     return db.sessionDependencyWait.update({
@@ -402,7 +412,13 @@ async function trackRequested(row: SessionDependencyWait, now: Date): Promise<Se
     });
   }
   if (job.status === "FAILED" || job.status === "TIMEOUT" || job.status === "CANCELED" || job.status === "SKIPPED") {
-    return failResume(row, `再開の指示を送れませんでした（${job.status}）`);
+    // ジョブの具体的な理由を失敗理由へ載せる（#4383。「SKIPPED」だけで終えない）
+    return failResume(row, describeInstructionJobFailure(job.status, job.message));
+  }
+  // 未処理のまま期限を過ぎたら、理由付きで止めて再試行を促す（送信待ちを無期限にしない）
+  const requestedAt = row.resumeRequestedAt?.getTime() ?? now.getTime();
+  if (now.getTime() - requestedAt > DEPENDENCY_WAIT_RESUME_CONFIRM_TIMEOUT_MS) {
+    return failResume(row, "再開の指示がサブPCに取り込まれないまま期限を過ぎました。サブPCの稼働を確認して再試行してください");
   }
   return row;
 }
@@ -442,10 +458,14 @@ async function trackSent(row: SessionDependencyWait, now: Date): Promise<Session
 /** 手動の再確認／再開（画面の「条件を再確認」「作業を再開」） */
 export async function recheckDependencyWait(
   id: string,
-  options: { resume: boolean; userId: string },
+  options: { resume: boolean; userId: string; stashInput?: boolean },
   deps: Deps = defaultDeps,
 ): Promise<DependencyWaitView | null> {
-  return advanceDependencyWait(id, { manual: options.resume, userId: options.userId }, deps);
+  return advanceDependencyWait(
+    id,
+    { manual: options.resume, userId: options.userId, stashInput: options.stashInput },
+    deps,
+  );
 }
 
 /**

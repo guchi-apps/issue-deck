@@ -178,7 +178,10 @@ set -euo pipefail
 #     本数の上限は死んだペインだけが残るセッションを数えない（#4116）。
 # 35: リリースPRの統合検証（`RELEASE_VERIFY`）を受け取り、`run-release-verify.sh`をtmuxで起動する（#4237）。
 # 36: リリースPRの全体AIレビュー（`RELEASE_REVIEW`）を受け取り、`run-release-review.sh`をtmuxで起動する（#4238）。
-DISPATCH_POLLER_VERSION="37"
+# 38: 追加指示の`stashInput`を読み、入力欄の未送信入力を完全に取得・保存できたときだけ消して
+#     今回の指示を送る（#4383）。37以前は未送信入力があれば従来どおり見送る。
+# 39: 未送信入力の退避対応をstashInputとして明示申告する（#4408）。
+DISPATCH_POLLER_VERSION="39"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -1421,7 +1424,7 @@ announce() {
     --argjson launchHold "${LAUNCH_HOLD_JSON:-null}" \
     --argjson checkout "${checkout:-null}" \
     --argjson planReviewSessions "$plan_review_sessions" \
-    '{host: $host, repositories: $repositories, contractVersion: $contractVersion, agentVersion: $agentVersion, sessionControl: true, instruction: true, crossRepoQuestion: $crossRepoQuestion, manualStep: $manualStep, manualStepAbort: $manualStepAbort, manualStepValues: $manualStepValues, manualStepVps: $manualStepVps, manualStepSession: $manualStepSession, planReview: $planReview, planReviewAgent: $planReviewAgent, codeReview: $codeReview, prReview: $prReview, releaseVerify: $releaseVerify, releaseReview: $releaseReview, chatCodex: $chatCodex, reviewFix: $reviewFix, codex: $codex, codexRemoteControl: $codexRemoteControl, selfUpdate: $selfUpdate, reboot: $reboot, rebootState: $rebootState, preview: $preview, previewState: $previewState, previewRepositories: $previewRepositories, maxSessions: $maxSessions, liveSessions: $liveSessions, metrics: $metrics, launchHold: $launchHold, checkout: $checkout, planReviewSessions: $planReviewSessions}')"
+    '{host: $host, repositories: $repositories, contractVersion: $contractVersion, agentVersion: $agentVersion, sessionControl: true, instruction: true, stashInput: true, crossRepoQuestion: $crossRepoQuestion, manualStep: $manualStep, manualStepAbort: $manualStepAbort, manualStepValues: $manualStepValues, manualStepVps: $manualStepVps, manualStepSession: $manualStepSession, planReview: $planReview, planReviewAgent: $planReviewAgent, codeReview: $codeReview, prReview: $prReview, releaseVerify: $releaseVerify, releaseReview: $releaseReview, chatCodex: $chatCodex, reviewFix: $reviewFix, codex: $codex, codexRemoteControl: $codexRemoteControl, selfUpdate: $selfUpdate, reboot: $reboot, rebootState: $rebootState, preview: $preview, previewState: $previewState, previewRepositories: $previewRepositories, maxSessions: $maxSessions, liveSessions: $liveSessions, metrics: $metrics, launchHold: $launchHold, checkout: $checkout, planReviewSessions: $planReviewSessions}')"
 
   if ! api_call POST /api/dispatch/hosts "$payload"; then
     report_api_failure "ホストの申告に失敗しました"
@@ -2752,9 +2755,104 @@ instruction_ready() {
   rest="${rest//$'\u00a0'/}"
   if [[ -n "${rest//[[:space:]]/}" ]]; then
     echo "入力欄に未送信の文字が残っているため送りませんでした"
+    # **3は「入力欄の未送信入力だけが理由」**（#4383）。ここまでの状態確認（作業中・承認
+    # プロンプト・状態不明）はすべて通っているので、確認付きの退避に進んでよい唯一の返り値
+    return 3
+  fi
+
+  return 0
+}
+
+# 入力欄の未送信入力を、**完全に取得できると確かめられた場合だけ**標準出力へ返す（#4383）。
+# 返せなければ理由を標準出力に出して1を返す（このとき入力欄には一切触れない）。
+#
+# 画面（`capture-pane`）から読み戻す以上、内容の正しさを保証できる形は限られる。次の全部を
+# 満たすときだけ「完全」とみなし、満たさなければ消さない側へ倒す。
+#   - 入力欄が1行で、直下が枠線である（折り返し・複数行は、改行と折り返しを見分けられない）
+#   - カーソル位置が、読み取った文字列の表示幅（全角は2桁）の末尾と一致する
+#     （末尾の空白・読み取れない文字・カーソルが途中にある状態を弾く）
+instruction_capture_input() {
+  local session="$1" pane line_no input_line rest next_line cursor_x width_expected
+  pane="$(tmux capture-pane -p -J -t "=$session:" 2>/dev/null || true)"
+  [[ -n "$pane" ]] || { echo "画面を読み取れませんでした"; return 1; }
+
+  line_no="$(printf '%s\n' "$pane" | grep -nF "$INSTRUCTION_PROMPT_MARK" | tail -1 | cut -d: -f1)"
+  [[ -n "$line_no" ]] || { echo "入力欄が見つかりませんでした"; return 1; }
+  input_line="$(printf '%s\n' "$pane" | sed -n "${line_no}p")"
+  next_line="$(printf '%s\n' "$pane" | sed -n "$((line_no + 1))p")"
+  # 直下が枠線（`─`か`╰`で始まる）でなければ、複数行または折り返しとして扱う
+  if [[ "$next_line" != "─"* && "$next_line" != "╰"* && "$next_line" != "└"* ]]; then
+    echo "入力が複数行または折り返しを含み、完全に取得できないため退避できません"
     return 1
   fi
 
+  rest="${input_line#*"$INSTRUCTION_PROMPT_MARK"}"
+  rest="${rest//$'\u00a0'/ }"
+  rest="${rest# }"
+  # 行末に枠の縦線が付く画面もあるため、末尾の`│`と空白は枠として落とす
+  rest="${rest%%[[:space:]]│}"
+  [[ -n "${rest//[[:space:]]/}" ]] || { echo "入力欄が空です"; return 1; }
+
+  cursor_x="$(tmux display-message -p -t "=$session:" '#{cursor_x}' 2>/dev/null || true)"
+  [[ "$cursor_x" =~ ^[0-9]+$ ]] || { echo "カーソル位置を取得できず、完全に取得できないため退避できません"; return 1; }
+  width_expected="$(INPUT_TEXT="$rest" INPUT_PREFIX="${input_line%%"$INSTRUCTION_PROMPT_MARK"*}$INSTRUCTION_PROMPT_MARK " python3 -I -c '
+import os, unicodedata
+def w(t):
+    return sum(2 if unicodedata.east_asian_width(c) in "WF" else (0 if unicodedata.combining(c) else 1) for c in t)
+print(w(os.environ["INPUT_PREFIX"]) + w(os.environ["INPUT_TEXT"]))
+' 2>/dev/null || true)"
+  if [[ ! "$width_expected" =~ ^[0-9]+$ || "$width_expected" != "$cursor_x" ]]; then
+    echo "カーソル位置と入力の長さが一致せず、完全に取得できないため退避できません（末尾の空白や特殊な文字を含む可能性があります）"
+    return 1
+  fi
+
+  printf '%s' "$rest"
+  return 0
+}
+
+# 未送信入力を退避し、入力欄を空にする（#4383）。**呼ぶのは`instruction_ready`が3を返した
+# （＝状態確認を通り、未送信入力だけが理由）ときだけ。** 成功なら0。失敗時は理由を標準出力へ
+# 出して1を返し、**退避の保存に成功するまでは入力欄に1キーも送らない。**
+#
+# 手順: 取得（1回目）→ 状態の再確認と取得（2回目・内容が一致）→ 保存（issue-deckの応答を確認）
+# → 消去（`C-e`で行末へ→`C-u`で行頭まで削除）→ 空になったことの確認。
+# 本文はどのログにも出さない（件数だけ）。
+stash_and_clear_input() {
+  local job_id="$1" session="$2" first second reason payload status=0
+  if ! first="$(instruction_capture_input "$session")"; then
+    echo "$first"
+    return 1
+  fi
+  # 確認画面を開いた後の編集・別端末の操作・状態の変化を拾うため、実行直前にもう一度確かめる
+  instruction_ready "$session" >/dev/null || status=$?
+  if [[ "$status" -ne 3 ]]; then
+    echo "退避の直前にセッションの状態が変わったため、何も変更せず中止しました。再確認してください"
+    return 1
+  fi
+  if ! second="$(instruction_capture_input "$session")" || [[ "$second" != "$first" ]]; then
+    echo "退避の直前に入力欄の内容が変わったため、何も変更せず中止しました。再確認してください"
+    return 1
+  fi
+
+  payload="$(jq -nc --arg jobId "$job_id" --arg host "$HOST_NAME" --arg session "$session" --arg content "$first" \
+    '{jobId: $jobId, host: $host, tmuxSessionName: $session, content: $content}')"
+  if ! api_call POST /api/dispatch/input-stash "$payload"; then
+    echo "退避を保存できません（応答 ${API_RESPONSE_STATUS:-000}）。入力欄は消していません"
+    return 1
+  fi
+
+  if ! tmux send-keys -t "=$session:" C-e C-u 2>/dev/null; then
+    echo "退避は保存しましたが、入力欄の消去キーを送れませんでした。IssueDeckで退避内容を確認し、入力欄を確認してください"
+    return 1
+  fi
+  sleep 0.3
+  status=0
+  instruction_ready "$session" >/dev/null || status=$?
+  if [[ "$status" -ne 0 ]]; then
+    echo "退避は保存しましたが、入力欄を空にできたことを確認できませんでした。指示は送っていません。IssueDeckで退避内容を確認してください"
+    return 1
+  fi
+  echo "退避しました（${#first}文字）"
   return 0
 }
 
@@ -2794,7 +2892,7 @@ deliver_codex_instruction() {
 # 返り値: 0=送った / 1=見送り（安全機構が正常に止めた）/ 2=送れなかった（異常）
 # 1・2のときは理由を標準出力へ1行で返す。**呼び出し元が報告の形（ジョブ／ログ）を決める。**
 deliver_session_instruction() {
-  local session="$1" body="$2" allowed="${3:-Stop}" reason
+  local session="$1" body="$2" allowed="${3:-Stop}" stash="${4:-false}" reason ready_status=0
 
   if [[ -z "$body" ]]; then
     echo "追加指示の本文が空です"
@@ -2819,7 +2917,18 @@ deliver_session_instruction() {
   fi
 
   # 段1: 状態確認
-  if ! reason="$(instruction_ready "$session" "$allowed")"; then
+  reason="$(instruction_ready "$session" "$allowed")" || ready_status=$?
+  if [[ "$ready_status" -eq 3 && "$stash" == "true" ]]; then
+    # 確認ダイアログを通した「退避して送信」（#4383）。状態確認は通っていて、未送信入力だけが
+    # 理由のときに限る。退避・消去に失敗したら、入力は残したまま指示も送らない
+    if ! reason="$(stash_and_clear_input "$STASH_JOB_ID" "$session")"; then
+      echo "$reason"
+      return 1
+    fi
+    STASH_NOTE="$reason"
+    ready_status=0
+  fi
+  if [[ "$ready_status" -ne 0 ]]; then
     # **失敗ではなく見送り。** 安全機構が正常に働いた結果で、何も壊れていない（#1229と同じ扱い）。
     echo "$reason"
     return 1
@@ -2858,14 +2967,26 @@ deliver_session_instruction() {
 # （受け口`POST /api/dispatch/session-recovery`が本文と停滞をサーバー側で検証する）。
 # **`permission_prompt`はここでも許可しない**（事故が起きたのはまさにこの状態）。
 send_session_instruction() {
-  local job_id="$1" session="$2" body="$3" recovery="${4:-false}" message status=0 allowed="Stop"
+  local job_id="$1" session="$2" body="$3" recovery="${4:-false}" stash="${5:-false}" message status=0 allowed="Stop"
 
   [[ "$recovery" == "true" ]] && allowed='Stop|working'
 
-  message="$(deliver_session_instruction "$session" "$body" "$allowed")" || status=$?
+  # 退避の対象ジョブ・結果の注記は、サブシェル越しに渡せないためここで一時ファイルを介さず
+  # 同じシェルの変数で受ける（`$(...)`ではなく出力ファイルへ受ける）
+  STASH_JOB_ID="$job_id"
+  STASH_NOTE=""
+  local out_file
+  out_file="$(mktemp)"
+  deliver_session_instruction "$session" "$body" "$allowed" "$stash" >"$out_file" || status=$?
+  message="$(cat "$out_file")"
+  rm -f "$out_file"
   case "$status" in
     0)
-      report_job "$job_id" succeeded "追加指示を送りました: $session" "$session"
+      if [[ -n "$STASH_NOTE" ]]; then
+        report_job "$job_id" succeeded "未送信の入力を退避し（$STASH_NOTE）、追加指示を送りました: $session" "$session"
+      else
+        report_job "$job_id" succeeded "追加指示を送りました: $session" "$session"
+      fi
       ;;
     1)
       # 理由はジョブの`message`として画面に出るので、送り直すかどうかは人が判断できる。
@@ -3141,6 +3262,8 @@ run_control_job() {
   local instruction="${6:-}"
   # 停滞からの復旧か（#2886）。`INSTRUCTION`のときだけ意味がある
   local recovery="${7:-false}"
+  # 未送信入力を確認付きで退避してから送るか（#4383）
+  local stash_input="${8:-false}"
   local session action reason
 
   session="$(expected_session_name "$repo" "$issue_number")"
@@ -3188,7 +3311,7 @@ run_control_job() {
 
   case "$kind" in
     INSTRUCTION)
-      send_session_instruction "$job_id" "$session" "$instruction" "$recovery"
+      send_session_instruction "$job_id" "$session" "$instruction" "$recovery" "$stash_input"
       return 0
       ;;
     INTERRUPT)
@@ -3862,7 +3985,7 @@ run_review_fix_job() {
 # 組み立てると規約がずれた瞬間に「起動したのに失敗と報告する」誤判定になる。
 run_job() {
   local job_json="$1"
-  local job_id owner repo full_name issue_number kind requested_session instruction command recovery
+  local job_id owner repo full_name issue_number kind requested_session instruction command recovery stash_input
   local placeholder_values resolved_command manual_step_run_target agent claude_local_model
   local codex_model handoff_from handoff_transcript
   job_id="$(printf '%s' "$job_json" | jq -r '.id')"
@@ -3876,6 +3999,8 @@ run_job() {
   # その追加指示が「停滞からの復旧」か（#2886）。**古いissue-deckは返さない**ので既定はfalse。
   # 立っているときだけ、送ってよい状態イベントに`working`を足す（下の`send_session_instruction`）
   recovery="$(printf '%s' "$job_json" | jq -r 'if .recovery == true then "true" else "false" end')"
+  # 未送信入力を確認付きで退避してから送るか（#4383）。**古いissue-deckは返さない**ので既定はfalse
+  stash_input="$(printf '%s' "$job_json" | jq -r 'if .stashInput == true then "true" else "false" end')"
   # 代行実行するコマンド（#1828）。`MANUAL_STEP`以外では空。
   # **`<…>`が入ったままのテンプレート**（#2403）で、本文との照合はこれで行う
   command="$(printf '%s' "$job_json" | jq -r '.command // ""')"
@@ -4116,7 +4241,7 @@ run_job() {
   # 起動しないジョブ（#1332）はここで終わる。**cloneの有無や版数は問わない**
   # （既に立っているセッションを操作するだけで、リポジトリには触らない）。
   if [[ "$kind" != "LAUNCH" ]]; then
-    run_control_job "$job_id" "$kind" "$repo" "$issue_number" "$requested_session" "$instruction" "$recovery"
+    run_control_job "$job_id" "$kind" "$repo" "$issue_number" "$requested_session" "$instruction" "$recovery" "$stash_input"
     return 0
   fi
 

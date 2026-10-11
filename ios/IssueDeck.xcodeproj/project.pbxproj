@@ -157,9 +157,10 @@
 				};
 			};
 			buildConfigurationList = 4B52A1EC3061842200F8C8D5 /* Build configuration list for PBXProject "IssueDeck" */;
-			developmentRegion = en;
+			developmentRegion = ja;
 			hasScannedForEncodings = 0;
 			knownRegions = (
+				ja,
 				en,
 				Base,
 			);
@@ -364,7 +365,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 8.51.0;
+				MARKETING_VERSION = 8.52.4;
 				PRODUCT_BUNDLE_IDENTIFIER = com.gucchii.issuedeck;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -401,7 +402,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 8.51.0;
+				MARKETING_VERSION = 8.52.4;
 				PRODUCT_BUNDLE_IDENTIFIER = com.gucchii.issuedeck;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -429,7 +430,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 8.51.0;
+				MARKETING_VERSION = 8.52.4;
 				PRODUCT_BUNDLE_IDENTIFIER = com.gucchii.issuedeck.ShareExtension;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
@@ -457,7 +458,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 8.51.0;
+				MARKETING_VERSION = 8.52.4;
 				PRODUCT_BUNDLE_IDENTIFIER = com.gucchii.issuedeck.ShareExtension;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;

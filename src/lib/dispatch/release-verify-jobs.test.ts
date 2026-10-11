@@ -49,8 +49,22 @@ describe("buildReleaseVerifyActiveKey", () => {
 });
 
 describe("requestReleaseVerifyJob", () => {
-  it("検証コマンドの無いリポジトリはジョブを積まずnot_applicableで記録する", async () => {
+  it("台帳に無いリポジトリは対象外にせず、設定不足としてfailedで記録する", async () => {
     const result = await requestReleaseVerifyJob({ ...target, repoFullName: "guchi-apps/other" }, NOW);
+    expect(result).toMatchObject({ ok: false, rejection: "not_configured" });
+    expect(jobCreate).not.toHaveBeenCalled();
+    expect(verificationUpdateMany.mock.calls[0][0].data).toMatchObject({ state: "failed" });
+  });
+
+  it("前提が未整備のリポジトリはジョブを積まず、failedで理由を残す", async () => {
+    const result = await requestReleaseVerifyJob({ ...target, repoFullName: "guchi-apps/asset-manager" }, NOW);
+    expect(result).toMatchObject({ ok: false, rejection: "not_configured" });
+    expect(jobCreate).not.toHaveBeenCalled();
+    expect(verificationUpdateMany.mock.calls[0][0].data).toMatchObject({ state: "failed" });
+  });
+
+  it("根拠付きの対象外（アーカイブ等）だけがnot_applicableになる", async () => {
+    const result = await requestReleaseVerifyJob({ ...target, repoFullName: "guchi-apps/trainroute" }, NOW);
     expect(result).toMatchObject({ ok: true, outcome: "not_applicable" });
     expect(jobCreate).not.toHaveBeenCalled();
     expect(verificationUpdateMany.mock.calls[0][0].data).toMatchObject({ state: "not_applicable" });
@@ -95,6 +109,23 @@ describe("applyReleaseVerifyReport", () => {
       where: { ...target, kind: "integration" },
       data: { state: "passed", unverifiedScope: "Mac" },
     });
+  });
+
+  it("macの結果があれば統合検証とは別のkind=macの記録にし、統合検証の記録は変えない（#4366）", async () => {
+    await applyReleaseVerifyReport(job, "succeeded", null, {
+      state: "passed",
+      summary: "ok",
+      mac: { state: "needs_check", summary: "未接続", unverifiedScope: "Macへ接続できません" },
+    });
+    const calls = verificationUpdateMany.mock.calls.map(([arg]) => arg);
+    expect(calls.map((c) => c.where.kind)).toEqual(["mac", "integration"]);
+    expect(calls[0].data).toMatchObject({ state: "needs_check", unverifiedScope: "Macへ接続できません" });
+    expect(calls[1].data).toMatchObject({ state: "passed" });
+  });
+
+  it("macを送らない旧版のランナーでは、macの記録を作らない", async () => {
+    await applyReleaseVerifyReport(job, "succeeded", null, { state: "passed" });
+    expect(verificationUpdateMany.mock.calls.map(([arg]) => arg.where.kind)).toEqual(["integration"]);
   });
 
   it("結果の無い成功はfailedにする", async () => {
