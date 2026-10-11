@@ -30,6 +30,9 @@ import {
   IssuePullRequestList,
   IssuePullRequestStateCounts,
 } from "@/components/dashboard/issue-pull-request-list";
+import { findActiveDependencyWaitLabel, resolveIssueDetailAttention } from "@/lib/issue-attention-state";
+import { describeSessionPermission } from "@/lib/dispatch/issue-session";
+import { IssueAttentionLine } from "@/components/dashboard/issue-attention-line";
 import { IssueStatusCard } from "@/components/dashboard/issue-status-card";
 import { isPlanReviewPending, resolvePendingPlanReview } from "@/lib/github/plan-review";
 import { PlanReviewFindings } from "@/components/dashboard/plan-review-findings";
@@ -494,6 +497,22 @@ export function MobileIssueDetail({
   const planningSkipped = isPlanningPhaseSkipped(issue, comments, isLoading);
   const pullRequestLinks = usePullRequestLinks(issue.repositoryFullName, issue.number, comments);
   const mergeApprovalPending = isMergeApprovalPending(issue, comments);
+  // 現在状態と次の操作（#4425）。一覧の行・PC詳細と同じ`resolveIssueAttention`の結果
+  const attention = resolveIssueDetailAttention({
+    issue,
+    session: issueSession,
+    permissionPending: issueSession ? describeSessionPermission(issueSession) !== null : false,
+    planDecisionPending,
+    questionAnswerPending,
+    mergeApprovalPending,
+    planReviewCreating,
+    dependencyWaitLabel: findActiveDependencyWaitLabel(
+      dispatch.dependencyWaits ?? [],
+      issue.repositoryFullName,
+      issue.number,
+    ),
+    reserved: nightlyRunMark !== null,
+  });
   // 自動マージされなかった理由（#1631）。対応PR一覧とコメント欄のマージ待ちカードへ同じ値を渡す
   const mergeCheckReasons = resolveMergeCheckReasons(issue.labels, comments);
   // 質問Issueをワンボタンで終える導線の表示条件（#1770）。⋯メニューとコメント欄の下の
@@ -983,6 +1002,12 @@ export function MobileIssueDetail({
         {/* 進捗ステップ・積んだジョブ・セッションの様子・横断質問・回答待ち・実行のキャンセルを
             1枚に集約する（#1577）。PCの詳細と同じものを使う。走っているものが1つも無いIssueでは
             カードごと描かれない */}
+        {attention && (
+          <IssueAttentionLine
+            attention={attention}
+            className="rounded-lg border bg-card px-3 py-2 text-sm"
+          />
+        )}
         <IssueStatusCard
           issue={issue}
           onIssueUpdated={onIssueUpdated}

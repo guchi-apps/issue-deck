@@ -261,6 +261,11 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   **選べるかの判定は`nightly-run.ts`の`resolveBulkReserveRejection`**で、行の状態を読める
   `issue-list.tsx`が材料を渡す。積む口は「実装を開始」と同じ`POST /api/nightly-run`
   （[docs/multi-agent/subpc-dispatch.md](multi-agent/subpc-dispatch.md)「次枠実行」）。
+- **Issueの代表状態と次の行動は`lib/issue-attention-state.ts`の`resolveIssueAttention`が1か所で決め**
+  （#4425）、Issue一覧の行・PC詳細・スマホ詳細は`issue-attention-line.tsx`で同じ結果を描く。
+  一覧のボタンは詳細を開くだけなので「計画を確認」「PRを確認」「質問を確認」と呼び、承認・マージとは
+  書かない。権限待ちは外部でしか解消できないことを状態説明に出す。実行キューの待ちは進捗バーが
+  言うので、一覧では`queueLabel`を渡さない（同じ状態を2か所で言わせない）。#4426〜#4428も同じ部品を使う
 - **Issue一覧の行は「カード全面に敷いた選択用の`<button>`」と本文が兄弟**（#1915。
   `issue-list.tsx`の`renderIssueRow`）。行に操作（リンク・ボタン）を足すときは、
   **本文側（`pointer-events-none`）の中で`pointer-events-auto`を付けて置く**。
