@@ -57,6 +57,8 @@ describe("DependencyWaitPanel の未送信入力の退避（#4383）", () => {
     repositoryFullName: "guchi-apps/issue-deck",
     issueNumber: 1,
     host: "subpc",
+    state: "ALIVE",
+    codexThreadKnown: null,
     tmuxSessionName: "issue-deck-issue-1",
   };
   const failed = makeWait({
@@ -66,7 +68,7 @@ describe("DependencyWaitPanel の未送信入力の退避（#4383）", () => {
 
   it("確認画面で対象と今回の指示を見せ、確認後だけ stashInput 付きで再開する", async () => {
     const controlDependencyWait = vi.fn().mockResolvedValue({ ok: true, wait: failed });
-    const dispatch = { isSubmitting: false, controlDependencyWait, sessions: [session] } as unknown as DispatchStateHandle;
+    const dispatch = { isSubmitting: false, controlDependencyWait, hosts: [{ name: "subpc", online: true, instructionCapable: true, stashInputCapable: true }], sessions: [session] } as unknown as DispatchStateHandle;
     render(<DependencyWaitPanel wait={failed} dispatch={dispatch} />);
 
     fireEvent.click(screen.getByRole("button", { name: "未送信の入力を退避して、再開指示を送信" }));
@@ -82,9 +84,18 @@ describe("DependencyWaitPanel の未送信入力の退避（#4383）", () => {
     );
   });
 
+  it("旧pollerでは退避操作を無効にし更新を案内する", () => {
+    const controlDependencyWait = vi.fn();
+    const dispatch = { isSubmitting: false, controlDependencyWait, sessions: [session], hosts: [{ name: "subpc", online: true, instructionCapable: true }] } as unknown as DispatchStateHandle;
+    render(<DependencyWaitPanel wait={failed} dispatch={dispatch} />);
+    expect((screen.getByRole("button", { name: "未送信の入力を退避して、再開指示を送信" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByText(/更新して再起動/)).not.toBeNull();
+    expect(controlDependencyWait).not.toHaveBeenCalled();
+  });
+
   it("キャンセルでは何も送らない", async () => {
     const controlDependencyWait = vi.fn();
-    const dispatch = { isSubmitting: false, controlDependencyWait, sessions: [session] } as unknown as DispatchStateHandle;
+    const dispatch = { isSubmitting: false, controlDependencyWait, hosts: [{ name: "subpc", online: true, instructionCapable: true, stashInputCapable: true }], sessions: [session] } as unknown as DispatchStateHandle;
     render(<DependencyWaitPanel wait={failed} dispatch={dispatch} />);
     fireEvent.click(screen.getByRole("button", { name: "未送信の入力を退避して、再開指示を送信" }));
     fireEvent.click(await screen.findByRole("button", { name: "キャンセル" }));
@@ -96,7 +107,7 @@ describe("DependencyWaitPanel の未送信入力の退避（#4383）", () => {
       status: "RESUME_FAILED",
       failureReason: "再開の指示は見送られました: 承認プロンプトまたは選択フォームの表示中です",
     });
-    const dispatch = { isSubmitting: false, controlDependencyWait: vi.fn(), sessions: [session] } as unknown as DispatchStateHandle;
+    const dispatch = { isSubmitting: false, controlDependencyWait: vi.fn(), hosts: [{ name: "subpc", online: true, instructionCapable: true, stashInputCapable: true }], sessions: [session] } as unknown as DispatchStateHandle;
     render(<DependencyWaitPanel wait={blocked} dispatch={dispatch} />);
     expect(screen.queryByRole("button", { name: "未送信の入力を退避して、再開指示を送信" })).toBeNull();
   });

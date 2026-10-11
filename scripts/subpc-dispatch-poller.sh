@@ -180,7 +180,8 @@ set -euo pipefail
 # 36: リリースPRの全体AIレビュー（`RELEASE_REVIEW`）を受け取り、`run-release-review.sh`をtmuxで起動する（#4238）。
 # 38: 追加指示の`stashInput`を読み、入力欄の未送信入力を完全に取得・保存できたときだけ消して
 #     今回の指示を送る（#4383）。37以前は未送信入力があれば従来どおり見送る。
-DISPATCH_POLLER_VERSION="38"
+# 39: 未送信入力の退避対応をstashInputとして明示申告する（#4408）。
+DISPATCH_POLLER_VERSION="39"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -1423,7 +1424,7 @@ announce() {
     --argjson launchHold "${LAUNCH_HOLD_JSON:-null}" \
     --argjson checkout "${checkout:-null}" \
     --argjson planReviewSessions "$plan_review_sessions" \
-    '{host: $host, repositories: $repositories, contractVersion: $contractVersion, agentVersion: $agentVersion, sessionControl: true, instruction: true, crossRepoQuestion: $crossRepoQuestion, manualStep: $manualStep, manualStepAbort: $manualStepAbort, manualStepValues: $manualStepValues, manualStepVps: $manualStepVps, manualStepSession: $manualStepSession, planReview: $planReview, planReviewAgent: $planReviewAgent, codeReview: $codeReview, prReview: $prReview, releaseVerify: $releaseVerify, releaseReview: $releaseReview, chatCodex: $chatCodex, reviewFix: $reviewFix, codex: $codex, codexRemoteControl: $codexRemoteControl, selfUpdate: $selfUpdate, reboot: $reboot, rebootState: $rebootState, preview: $preview, previewState: $previewState, previewRepositories: $previewRepositories, maxSessions: $maxSessions, liveSessions: $liveSessions, metrics: $metrics, launchHold: $launchHold, checkout: $checkout, planReviewSessions: $planReviewSessions}')"
+    '{host: $host, repositories: $repositories, contractVersion: $contractVersion, agentVersion: $agentVersion, sessionControl: true, instruction: true, stashInput: true, crossRepoQuestion: $crossRepoQuestion, manualStep: $manualStep, manualStepAbort: $manualStepAbort, manualStepValues: $manualStepValues, manualStepVps: $manualStepVps, manualStepSession: $manualStepSession, planReview: $planReview, planReviewAgent: $planReviewAgent, codeReview: $codeReview, prReview: $prReview, releaseVerify: $releaseVerify, releaseReview: $releaseReview, chatCodex: $chatCodex, reviewFix: $reviewFix, codex: $codex, codexRemoteControl: $codexRemoteControl, selfUpdate: $selfUpdate, reboot: $reboot, rebootState: $rebootState, preview: $preview, previewState: $previewState, previewRepositories: $previewRepositories, maxSessions: $maxSessions, liveSessions: $liveSessions, metrics: $metrics, launchHold: $launchHold, checkout: $checkout, planReviewSessions: $planReviewSessions}')"
 
   if ! api_call POST /api/dispatch/hosts "$payload"; then
     report_api_failure "ホストの申告に失敗しました"

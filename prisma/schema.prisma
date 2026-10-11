@@ -1132,6 +1132,7 @@ model DispatchHost {
   // こちらは**内容のある文字列**を送るため、対応版でないpollerへ配ると事故の質が違う
   // （`null`＝未申告は「できない」として扱うのは同じ）
   instructionCapable        Boolean?
+  stashInputCapable          Boolean?
   // 複数リポジトリ横断の質問セッション（#1454）を起こせるか。`scripts/start-cross-repo-question.sh`を
   // 持つpollerだけが申告する。**`null`（未申告＝古いpoller）は「できない」として扱う**
   // （`sessionControlCapable`・`instructionCapable`と同じ向き。古いpollerへ配ると未知の種別として

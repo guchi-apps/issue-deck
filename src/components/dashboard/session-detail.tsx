@@ -193,6 +193,7 @@ export function SessionDetail({ session, dispatch }: { session: DispatchSessionV
   const modelLabel =
     session.models.length > 0 ? session.models.map(sessionUsageModelLabel).join("・") : null;
   const host = dispatch.hosts.find((candidate) => candidate.name === session.host) ?? null;
+  const stashRejection = resolveSessionControlRejection({ host, session, kind: "INSTRUCTION", stashInput: true, hasActiveControlJob: false });
   const hasActiveControlJob = controlJob !== null && isActiveDispatchJobStatus(controlJob.status);
   const rejection = (kind: "INTERRUPT" | "KILL" | "INSTRUCTION") =>
     resolveSessionControlRejection({ host, session, kind, hasActiveControlJob });
@@ -412,11 +413,12 @@ export function SessionDetail({ session, dispatch }: { session: DispatchSessionV
                   {controlJob.message && !isActiveDispatchJobStatus(controlJob.status) && (
                     <p className="text-muted-foreground">{controlJob.message}</p>
                   )}
+                  {stashRetry && stashRejection && <p className="text-muted-foreground">{describeSessionControlRejection(stashRejection, { hostName: session.host, kind: "INSTRUCTION" })}</p>}
                   {stashRetry && (
                     <Button
                       variant="outline"
                       size="sm"
-                      disabled={dispatch.isSubmitting}
+                      disabled={dispatch.isSubmitting || stashRejection !== null}
                       onClick={() => setConfirmingStash(true)}
                     >
                       <SendHorizonal />
@@ -429,7 +431,7 @@ export function SessionDetail({ session, dispatch }: { session: DispatchSessionV
           )}
         </DialogContent>
       </Dialog>
-      {stashRetry && (
+      {stashRetry && stashRejection === null && (
         <StashConfirmDialog
           open={confirmingStash}
           onOpenChange={setConfirmingStash}

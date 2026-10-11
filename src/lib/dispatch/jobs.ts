@@ -273,6 +273,7 @@ function toHostView(host: DispatchHost, now: Date): DispatchHostView {
     lastSeenAt: host.lastSeenAt.toISOString(),
     sessionControlCapable: host.sessionControlCapable,
     instructionCapable: host.instructionCapable,
+    stashInputCapable: host.stashInputCapable,
     crossRepoQuestionCapable: host.crossRepoQuestionCapable,
     manualStepCapable: host.manualStepCapable,
     manualStepAbortCapable: host.manualStepAbortCapable,
@@ -1350,10 +1351,12 @@ export async function enqueueSessionControlJob(params: {
           online: isDispatchHostOnline(host.lastSeenAt, now),
           sessionControlCapable: host.sessionControlCapable,
           instructionCapable: host.instructionCapable,
+          stashInputCapable: host.stashInputCapable,
         }
       : null,
     session,
     kind: params.kind,
+    stashInput: params.stashInput,
     // 二重投入はactiveKeyのunique制約が確実に止める（下のcatch）。ここでは先読みしない
     hasActiveControlJob: false,
   });
@@ -1986,6 +1989,7 @@ export async function claimDispatchJobs(params: {
         targetHost: params.hostName,
         status: "QUEUED",
         kind: { in: controlKinds },
+        ...(host?.stashInputCapable === true ? {} : { stashInput: false }),
       },
       orderBy: { createdAt: "asc" },
       take: MAX_CONTROL_JOBS_PER_CLAIM,
@@ -2617,6 +2621,7 @@ export async function announceDispatchHost(params: {
   sessionControlCapable: boolean | null;
   /** 追加指示を送れるか（#1012）。申告していないpollerでは`null`＝非対応 */
   instructionCapable: boolean | null;
+  stashInputCapable?: boolean | null;
   /** 横断質問セッションを起こせるか（#1454）。申告していないpollerでは`null`＝非対応 */
   crossRepoQuestionCapable: boolean | null;
   /** 手作業の代行実行を実行できるか（#1828）。申告していないpollerでは`null`＝非対応 */
@@ -2708,6 +2713,7 @@ export async function announceDispatchHost(params: {
     agentVersion: params.agentVersion,
     sessionControlCapable: params.sessionControlCapable,
     instructionCapable: params.instructionCapable,
+    stashInputCapable: params.stashInputCapable ?? null,
     crossRepoQuestionCapable: params.crossRepoQuestionCapable,
     manualStepCapable: params.manualStepCapable,
     manualStepAbortCapable: params.manualStepAbortCapable,

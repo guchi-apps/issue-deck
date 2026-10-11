@@ -82,6 +82,8 @@ export async function POST(request: NextRequest) {
     // 追加指示の3段階プロトコル（#1012）に対応したpollerだけが送ってくる。**未申告はnull＝
     // 非対応扱い**。`sessionControl`と分けるのは、あちらが固定の`C-c`だけを送るのに対し、
     // こちらは内容のある文字列を送るため、対応していないpollerへ渡したときの事故の質が違うため
+    stashInputCapable:
+      typeof payload?.stashInput === "boolean" ? payload.stashInput : null,
     instructionCapable:
       typeof payload?.instruction === "boolean" ? payload.instruction : null,
     // 横断質問セッション（#1454）を起こせるpollerだけが送ってくる。**未申告はnull＝非対応扱い**で、
