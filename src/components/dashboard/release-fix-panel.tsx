@@ -1,13 +1,20 @@
 "use client";
 
 import { ExternalLink } from "lucide-react";
-import { useCallback, useContext, useEffect, useState } from "react";
+import { useCallback, useContext, useEffect, useState, type ReactNode } from "react";
 
 import { ReleaseFixStartContext } from "@/components/dashboard/release-fix-start-context";
 import { useReferenceNavigation } from "@/hooks/use-reference-navigation";
 import type { UseReleaseChangesResult } from "@/hooks/use-release-changes";
 import { classifyReleaseContents } from "@/lib/release-contents";
-import { describeFixOverview, type OverviewChecks, type OverviewTone } from "@/lib/release-fix-overview";
+import {
+  describeFixOverview,
+  RELEASE_FIX_PHASES,
+  releaseFixPhaseIndex,
+  type FixOverview,
+  type OverviewChecks,
+  type OverviewTone,
+} from "@/lib/release-fix-overview";
 import { RELEASE_FIX_STEPS, RELEASE_FIX_MAX_GENERATION, type ReleaseFixSourceKind, type ReleaseFixStartState } from "@/lib/release-fix-series";
 import type { RebuildEpisode } from "@/lib/release-rebuild-history";
 import type { ReleaseVerificationSummary } from "@/lib/release-verification-summary";
@@ -272,6 +279,9 @@ const TONE_PILL: Record<OverviewTone, string> = {
   muted: "bg-muted text-muted-foreground",
 };
 
+/** 色だけで状態を伝えないための記号（#4428） */
+const TONE_MARK: Record<OverviewTone, string> = { ok: "✓", warn: "▲", bad: "■", progress: "●", muted: "–" };
+
 function ExtLink({ href, children }: { href: string; children: React.ReactNode }) {
   return (
     <a href={href} target="_blank" rel="noreferrer" className="inline-flex items-center gap-0.5 underline">
@@ -295,19 +305,32 @@ export function toOverviewChecks(verification: ReleaseVerificationSummary | null
   };
 }
 
+/** `useReleaseFixOverview`が返す、要約帯・今回の変更・修正履歴の材料（#4398・#4428） */
+export type ReleaseFixOverviewState = {
+  repositoryFullName: string;
+  overview: FixOverview;
+  /** 表示する修正系列（進行中を優先）。修正の記録が無ければnull */
+  current: ReleaseFixSeriesView | null;
+  /** 修正系列の一覧。取得前はnull */
+  list: ReleaseFixSeriesView[] | null;
+  error: string | null;
+  contents: ReturnType<typeof classifyReleaseContents>;
+  /** 表示中の検証結果が修正前のリリースのものか */
+  previousResults: boolean;
+  acceptExtra: (seriesId: string) => Promise<void>;
+};
+
 /**
- * リリースの検証・修正画面の上部（#4398）。現在の状態を一文で出し、検証の要約・残件・主操作を隣に置く。
- * 世代・SHA・番号・工程は折りたたんだ「修正履歴」「技術的な詳細」へ移す（記録は消さない）。
- * 進行中は10秒おきに取り直し、`reloadToken`の更新でも取り直す。
+ * 修正系列・作り直し履歴を取得し、現在状態（`describeFixOverview`）と「今回リリースする変更」を決める（#4398）。
+ * 進行中は10秒おきに取り直し、`reloadToken`の更新でも取り直す。画面の並べ方は呼び出し側が決める（#4428）
  */
-export function ReleaseFixOverviewPanel({
+export function useReleaseFixOverview({
   repositoryFullName,
   pullRequestNumber,
   verification,
   verificationError,
   changes,
   reloadToken,
-  onPreviousResultsChange,
 }: {
   repositoryFullName: string;
   pullRequestNumber: number;
@@ -315,9 +338,7 @@ export function ReleaseFixOverviewPanel({
   verificationError: string | null;
   changes: UseReleaseChangesResult;
   reloadToken?: number;
-  /** 表示中の検証結果が修正前のリリースのものか。trueの間、呼び出し側は結果を履歴の折りたたみへ移す */
-  onPreviousResultsChange?: (previous: boolean) => void;
-}) {
+}): ReleaseFixOverviewState {
   const [series, setSeries] = useState<{ key: string; list: ReleaseFixSeriesView[] } | null>(null);
   const [episodes, setEpisodes] = useState<{ key: string; list: RebuildEpisode[] } | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -376,9 +397,6 @@ export function ReleaseFixOverviewPanel({
   // 作り直し・修正後のチェック中に、作り直し前のリリースPRを見ている間、その検証結果は修正前のもの
   const previousResults =
     current !== null && (current.status === "rebuilding" || current.status === "reverifying") && current.releasePrNumber === pullRequestNumber;
-  useEffect(() => {
-    onPreviousResultsChange?.(previousResults);
-  }, [previousResults, onPreviousResultsChange]);
   const overview = seriesPending
     ? describeFixOverview({ series: null, checks: null })
     : describeFixOverview({
@@ -396,170 +414,275 @@ export function ReleaseFixOverviewPanel({
     addedPrNumbers: episode?.selectedPrs.map((p) => p.number) ?? [],
     excludedPrNumbers: episode?.excludedPrs ?? [],
   });
-  const prUrl = (n: number) => issueUrl(repositoryFullName, n, "pull");
+  return { repositoryFullName, overview, current, list, error, contents, previousResults, acceptExtra };
+}
+
+/**
+ * 修正の工程（修正→取り込み→再検証→公開。#4428）。**修正の記録がある候補にだけ**出し、
+ * 修正の無い通常リリースには架空の工程を出さない（呼び出し側は`current`が無ければ描かない）
+ */
+export function ReleaseFixPhases({ current, className }: { current: ReleaseFixSeriesView; className?: string }) {
+  const phase = releaseFixPhaseIndex(current.stepIndex);
+  return (
+    <ol className={cn("flex flex-wrap gap-1.5 text-xs", className)} aria-label="修正の工程" data-testid="release-fix-phases">
+      {RELEASE_FIX_PHASES.map((label, index) => (
+        <li
+          key={label}
+          className={cn(
+            "rounded-full px-2.5 py-0.5",
+            index < phase && "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300",
+            index === phase && "bg-sky-100 font-semibold text-sky-900 dark:bg-sky-950 dark:text-sky-300",
+            index > phase && "bg-muted text-muted-foreground",
+          )}
+          aria-current={index === phase ? "step" : undefined}
+        >
+          <span aria-hidden="true">{index < phase ? "✓ " : ""}</span>
+          {label}
+        </li>
+      ))}
+    </ol>
+  );
+}
+
+/** 現在状態の主操作（修正Issueの作成・修正の開始・判断・再試行・進捗）。操作が無ければ何も出さない */
+export function ReleaseFixPrimaryAction({ state }: { state: ReleaseFixOverviewState }) {
+  const { overview, current, repositoryFullName, acceptExtra } = state;
   const action = overview.action;
+  if (action.kind === "none") return null;
+  return (
+    <div className="flex flex-wrap items-center gap-2" data-testid="release-fix-primary-action">
+      {action.kind === "create_issue" && (
+        <button
+          type="button"
+          onClick={() => document.getElementById("release-fix-create")?.scrollIntoView({ block: "center" })}
+          className="rounded border border-primary bg-primary px-3 py-1 text-[12px] font-semibold text-primary-foreground"
+        >
+          {action.label}
+        </button>
+      )}
+      {action.kind === "accept_extra" && current && (
+        <button
+          type="button"
+          onClick={() => acceptExtra(current.id)}
+          className="rounded border border-primary bg-primary px-3 py-1 text-[12px] font-semibold text-primary-foreground"
+        >
+          {action.label}
+        </button>
+      )}
+      {action.kind === "start_fix" && current && (
+        <ReleaseFixStartButton
+          repositoryFullName={repositoryFullName}
+          seriesId={current.id}
+          startState={current.startState}
+        />
+      )}
+      {action.kind === "retry_rebuild" && (
+        <>
+          <span className="break-words font-medium">{action.label}</span>
+          {current && <ExtLink href={issueUrl(repositoryFullName, current.issueNumber, "issues")}>修正Issue #{current.issueNumber}（作成済み）</ExtLink>}
+        </>
+      )}
+      {(action.kind === "start_fix" || action.kind === "view_progress") && current && (
+        <ExtLink href={issueUrl(repositoryFullName, current.fixPrNumber && action.kind === "view_progress" ? current.fixPrNumber : current.issueNumber, current.fixPrNumber && action.kind === "view_progress" ? "pull" : "issues")}>
+          {action.kind === "start_fix" ? `${action.label}（修正Issue #${current.issueNumber}）` : action.label}
+        </ExtLink>
+      )}
+    </div>
+  );
+}
+
+/** 現在状態の要約（状態ラベル・見出し・理由・検証の要約）。理由は現在の操作に必要なので折りたたまない */
+export function ReleaseFixSummary({
+  state,
+  showPhases = false,
+  extraAction,
+  className,
+}: {
+  state: ReleaseFixOverviewState;
+  /** 修正の工程を出すか（本番PR詳細。修正の記録があるときだけ実際に出る） */
+  showPhases?: boolean;
+  /** 修正の操作が無いときに置く主操作（本番PR詳細の「本番公開へ進む」） */
+  extraAction?: ReactNode;
+  className?: string;
+}) {
+  const { overview, current, error } = state;
+  return (
+    <div className={cn("flex flex-col gap-1.5", className)} data-testid="release-fix-summary">
+      <span className={cn("w-fit rounded px-1.5 py-0.5 text-[11px] font-bold", TONE_PILL[overview.tone])}>
+        <span aria-hidden="true">{TONE_MARK[overview.tone]} </span>
+        {overview.pill}
+      </span>
+      <p className="break-words text-[13.5px] font-semibold" data-testid="release-fix-headline">
+        {overview.headline}
+      </p>
+      {/* 停止・判断の理由は現在の操作に必要なので、行数で切らない（#4428） */}
+      {overview.detail && <p className="break-words text-muted-foreground">{overview.detail}</p>}
+      {overview.autoProgress && <p className="text-muted-foreground" data-testid="release-fix-auto">操作は不要です。自動で進みます。</p>}
+      {overview.checksLine && <p className="break-words text-muted-foreground">{overview.checksLine}</p>}
+      {showPhases && current && current.status !== "superseded" && <ReleaseFixPhases current={current} className="mt-0.5" />}
+      {error && <p className="text-destructive">{error}</p>}
+      {overview.action.kind !== "none" ? <ReleaseFixPrimaryAction state={state} /> : extraAction}
+    </div>
+  );
+}
+
+/** 「今回リリースする変更」。元から含む・今回の修正で追加・今回は含めないを分け、不明なものは不明と出す */
+export function ReleaseContentsList({ state, className }: { state: ReleaseFixOverviewState; className?: string }) {
+  const { contents, repositoryFullName } = state;
+  const prUrl = (n: number) => issueUrl(repositoryFullName, n, "pull");
+  return (
+    <div className={cn("flex flex-col gap-1", className)} data-testid="release-contents">
+      <p className="font-semibold">今回リリースする変更</p>
+      {contents.kind === "loading" && <p className="text-muted-foreground">取得中です…</p>}
+      {contents.kind === "error" && (
+        <p className="text-destructive">変更の一覧を取得できません（{contents.message}）。変更なしとは扱いません</p>
+      )}
+      {contents.kind === "ready" && (
+        <>
+          <ul className="flex flex-col gap-0.5">
+            {contents.original.map((pr) => (
+              <li key={pr.number} className="flex min-w-0 gap-1.5">
+                <span className="shrink-0 rounded bg-muted px-1 text-[10.5px] text-muted-foreground">元から含む</span>
+                <span className="min-w-0 break-words">
+                  <ExtLink href={prUrl(pr.number)}>#{pr.number}</ExtLink> {pr.title}
+                </span>
+              </li>
+            ))}
+            {contents.added.map((pr) => (
+              <li key={pr.number} className="flex min-w-0 gap-1.5">
+                <span className="shrink-0 rounded bg-sky-100 px-1 text-[10.5px] text-sky-900 dark:bg-sky-950 dark:text-sky-300">今回の修正で追加</span>
+                <span className="min-w-0 break-words">
+                  <ExtLink href={prUrl(pr.number)}>#{pr.number}</ExtLink> {pr.title}
+                </span>
+              </li>
+            ))}
+          </ul>
+          {contents.original.length + contents.added.length === 0 && contents.unknownCommits.length === 0 && (
+            <p className="text-muted-foreground">PRに紐づく変更は見つかりませんでした</p>
+          )}
+          {contents.unknownCommits.length > 0 && (
+            <p className="text-muted-foreground">PRを特定できない変更が{contents.unknownCommits.length}件あります（PRに紐づかないコミット）</p>
+          )}
+          {contents.truncated && (
+            <p className="text-amber-800 dark:text-amber-300">一覧は先頭だけです。残りはGitHubのリリースPRで確認してください（全件ではありません）</p>
+          )}
+          {contents.excluded.length > 0 && (
+            <p className="break-words text-muted-foreground">
+              今回は含めない変更（developにありますが、このリリースには入りません）:{" "}
+              {contents.excluded.map((n) => (
+                <span key={n} className="mr-1">
+                  <ExtLink href={prUrl(n)}>#{n}</ExtLink>
+                </span>
+              ))}
+            </p>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+/** 修正履歴と技術的な詳細（世代・SHA・番号・工程）。記録は消さず折りたたみに置く。修正の記録が無ければ何も出さない */
+export function ReleaseFixHistory({ state }: { state: ReleaseFixOverviewState }) {
+  const { list, repositoryFullName } = state;
+  if (!list || list.length === 0) return null;
+  const prUrl = (n: number) => issueUrl(repositoryFullName, n, "pull");
+  return (
+    <>
+      <details className="border-b px-3 py-1.5" data-testid="release-fix-history">
+        <summary className="cursor-pointer text-muted-foreground">修正履歴（{list.length}件）</summary>
+        <ul className="mt-1 flex flex-col gap-1">
+          {list.map((item) => (
+            <li key={item.id} className="flex flex-col rounded bg-muted/40 px-2 py-1" data-testid="release-fix-series">
+              <span className="font-medium">{item.statusLabel}</span>
+              <span className="break-words text-muted-foreground">
+                {item.itemTitles.slice(0, 3).join(" / ")}
+                {item.itemTitles.length > 3 ? ` ほか${item.itemTitles.length - 3}件` : ""}
+              </span>
+            </li>
+          ))}
+        </ul>
+      </details>
+      <details className="px-3 py-1.5" data-testid="release-fix-technical">
+        <summary className="cursor-pointer text-muted-foreground">技術的な詳細</summary>
+        <ul className="mt-1 flex flex-col gap-1.5">
+          {list.map((item) => (
+            <li key={item.id} className="flex flex-col gap-1 rounded bg-muted/40 px-2 py-1.5">
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                <span className="text-muted-foreground">
+                  世代 {item.generation}/{RELEASE_FIX_MAX_GENERATION} · 元のリリースPR #{item.releasePrNumber}
+                </span>
+                <ExtLink href={issueUrl(repositoryFullName, item.issueNumber, "issues")}>修正Issue #{item.issueNumber}</ExtLink>
+                {item.fixPrNumber !== null && (
+                  <ExtLink href={prUrl(item.fixPrNumber)}>指摘への修正内容 #{item.fixPrNumber}</ExtLink>
+                )}
+                {item.successorPrNumber !== null && (
+                  <ExtLink href={prUrl(item.successorPrNumber)}>修正を反映したリリース #{item.successorPrNumber}</ExtLink>
+                )}
+              </div>
+              <ol className="flex flex-wrap gap-x-1 gap-y-0.5 text-[10.5px]" aria-label="工程">
+                {RELEASE_FIX_STEPS.map((step, index) => (
+                  <li
+                    key={step}
+                    className={cn(
+                      "rounded px-1.5 py-0.5",
+                      index < item.stepIndex && "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300",
+                      index === item.stepIndex && "bg-sky-100 font-semibold text-sky-900 dark:bg-sky-950 dark:text-sky-300",
+                      index > item.stepIndex && "text-muted-foreground",
+                    )}
+                    aria-current={index === item.stepIndex ? "step" : undefined}
+                  >
+                    {step}
+                  </li>
+                ))}
+              </ol>
+              <p className="font-mono text-[10.5px] text-muted-foreground">
+                起案時 main {shortSha(item.originBaseSha)} ← release {shortSha(item.originHeadSha)}
+                {item.successorHeadSha && ` ／ 反映後 main ${shortSha(item.successorBaseSha)} ← release ${shortSha(item.successorHeadSha)}`}
+              </p>
+              {item.stopReason && <p className="break-words text-muted-foreground">停止の理由: {item.stopReason}</p>}
+            </li>
+          ))}
+        </ul>
+      </details>
+    </>
+  );
+}
+
+/**
+ * リリースの検証・修正画面の上部（#4398）。現在の状態を一文で出し、検証の要約・残件・主操作を隣に置く。
+ * 世代・SHA・番号・工程は折りたたんだ「修正履歴」「技術的な詳細」へ移す（記録は消さない）。
+ * スマホのリリースシート・本番マージの確認ダイアログが使う。本番PR詳細は部品を並べ替えて使う（#4428）
+ */
+export function ReleaseFixOverviewPanel({
+  repositoryFullName,
+  pullRequestNumber,
+  verification,
+  verificationError,
+  changes,
+  reloadToken,
+  onPreviousResultsChange,
+}: {
+  repositoryFullName: string;
+  pullRequestNumber: number;
+  verification: ReleaseVerificationSummary | null;
+  verificationError: string | null;
+  changes: UseReleaseChangesResult;
+  reloadToken?: number;
+  /** 表示中の検証結果が修正前のリリースのものか。trueの間、呼び出し側は結果を履歴の折りたたみへ移す */
+  onPreviousResultsChange?: (previous: boolean) => void;
+}) {
+  const state = useReleaseFixOverview({ repositoryFullName, pullRequestNumber, verification, verificationError, changes, reloadToken });
+  const { previousResults } = state;
+  useEffect(() => {
+    onPreviousResultsChange?.(previousResults);
+  }, [previousResults, onPreviousResultsChange]);
 
   return (
     <div className="flex flex-col text-xs" data-testid="release-fix-overview">
-      <div className="flex flex-col gap-1.5 border-b px-3 py-2.5" data-testid="release-fix-summary">
-        <span className={cn("w-fit rounded px-1.5 py-0.5 text-[11px] font-bold", TONE_PILL[overview.tone])}>{overview.pill}</span>
-        <p className="break-words text-[13.5px] font-semibold" data-testid="release-fix-headline">
-          {overview.headline}
-        </p>
-        {overview.detail && <p className="line-clamp-3 break-words text-muted-foreground">{overview.detail}</p>}
-        {overview.checksLine && <p className="break-words text-muted-foreground">{overview.checksLine}</p>}
-        {error && <p className="text-destructive">{error}</p>}
-        {action.kind !== "none" && (
-          <div className="flex flex-wrap items-center gap-2" data-testid="release-fix-primary-action">
-            {action.kind === "create_issue" && (
-              <button
-                type="button"
-                onClick={() => document.getElementById("release-fix-create")?.scrollIntoView({ block: "center" })}
-                className="rounded border border-primary bg-primary px-3 py-1 text-[12px] font-semibold text-primary-foreground"
-              >
-                {action.label}
-              </button>
-            )}
-            {action.kind === "accept_extra" && current && (
-              <button
-                type="button"
-                onClick={() => acceptExtra(current.id)}
-                className="rounded border border-primary bg-primary px-3 py-1 text-[12px] font-semibold text-primary-foreground"
-              >
-                {action.label}
-              </button>
-            )}
-            {action.kind === "start_fix" && current && (
-              <ReleaseFixStartButton
-                repositoryFullName={repositoryFullName}
-                seriesId={current.id}
-                startState={current.startState}
-              />
-            )}
-            {action.kind === "retry_rebuild" && (
-              <>
-                <span className="break-words font-medium">{action.label}</span>
-                {current && <ExtLink href={issueUrl(repositoryFullName, current.issueNumber, "issues")}>修正Issue #{current.issueNumber}（作成済み）</ExtLink>}
-              </>
-            )}
-            {(action.kind === "start_fix" || action.kind === "view_progress") && current && (
-              <ExtLink href={issueUrl(repositoryFullName, current.fixPrNumber && action.kind === "view_progress" ? current.fixPrNumber : current.issueNumber, current.fixPrNumber && action.kind === "view_progress" ? "pull" : "issues")}>
-                {action.kind === "start_fix" ? `${action.label}（修正Issue #${current.issueNumber}）` : action.label}
-              </ExtLink>
-            )}
-          </div>
-        )}
-      </div>
-
-      <div className="flex flex-col gap-1 border-b px-3 py-2" data-testid="release-contents">
-        <p className="font-semibold">今回リリースする変更</p>
-        {contents.kind === "loading" && <p className="text-muted-foreground">取得中です…</p>}
-        {contents.kind === "error" && (
-          <p className="text-destructive">変更の一覧を取得できません（{contents.message}）。変更なしとは扱いません</p>
-        )}
-        {contents.kind === "ready" && (
-          <>
-            <ul className="flex flex-col gap-0.5">
-              {contents.original.map((pr) => (
-                <li key={pr.number} className="flex min-w-0 gap-1.5">
-                  <span className="shrink-0 rounded bg-muted px-1 text-[10.5px] text-muted-foreground">元から含む</span>
-                  <span className="min-w-0 break-words">
-                    <ExtLink href={prUrl(pr.number)}>#{pr.number}</ExtLink> {pr.title}
-                  </span>
-                </li>
-              ))}
-              {contents.added.map((pr) => (
-                <li key={pr.number} className="flex min-w-0 gap-1.5">
-                  <span className="shrink-0 rounded bg-sky-100 px-1 text-[10.5px] text-sky-900 dark:bg-sky-950 dark:text-sky-300">今回の修正で追加</span>
-                  <span className="min-w-0 break-words">
-                    <ExtLink href={prUrl(pr.number)}>#{pr.number}</ExtLink> {pr.title}
-                  </span>
-                </li>
-              ))}
-            </ul>
-            {contents.original.length + contents.added.length === 0 && contents.unknownCommits.length === 0 && (
-              <p className="text-muted-foreground">PRに紐づく変更は見つかりませんでした</p>
-            )}
-            {contents.unknownCommits.length > 0 && (
-              <p className="text-muted-foreground">PRを特定できない変更が{contents.unknownCommits.length}件あります（PRに紐づかないコミット）</p>
-            )}
-            {contents.truncated && (
-              <p className="text-amber-800 dark:text-amber-300">一覧は先頭だけです。残りはGitHubのリリースPRで確認してください（全件ではありません）</p>
-            )}
-            {contents.excluded.length > 0 && (
-              <p className="break-words text-muted-foreground">
-                今回は含めない変更（developにありますが、このリリースには入りません）:{" "}
-                {contents.excluded.map((n) => (
-                  <span key={n} className="mr-1">
-                    <ExtLink href={prUrl(n)}>#{n}</ExtLink>
-                  </span>
-                ))}
-              </p>
-            )}
-          </>
-        )}
-      </div>
-
-      {list && list.length > 0 && (
-        <>
-          <details className="border-b px-3 py-1.5" data-testid="release-fix-history">
-            <summary className="cursor-pointer text-muted-foreground">修正履歴（{list.length}件）</summary>
-            <ul className="mt-1 flex flex-col gap-1">
-              {list.map((item) => (
-                <li key={item.id} className="flex flex-col rounded bg-muted/40 px-2 py-1" data-testid="release-fix-series">
-                  <span className="font-medium">{item.statusLabel}</span>
-                  <span className="break-words text-muted-foreground">
-                    {item.itemTitles.slice(0, 3).join(" / ")}
-                    {item.itemTitles.length > 3 ? ` ほか${item.itemTitles.length - 3}件` : ""}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          </details>
-          <details className="px-3 py-1.5" data-testid="release-fix-technical">
-            <summary className="cursor-pointer text-muted-foreground">技術的な詳細</summary>
-            <ul className="mt-1 flex flex-col gap-1.5">
-              {list.map((item) => (
-                <li key={item.id} className="flex flex-col gap-1 rounded bg-muted/40 px-2 py-1.5">
-                  <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
-                    <span className="text-muted-foreground">
-                      世代 {item.generation}/{RELEASE_FIX_MAX_GENERATION} · 元のリリースPR #{item.releasePrNumber}
-                    </span>
-                    <ExtLink href={issueUrl(repositoryFullName, item.issueNumber, "issues")}>修正Issue #{item.issueNumber}</ExtLink>
-                    {item.fixPrNumber !== null && (
-                      <ExtLink href={prUrl(item.fixPrNumber)}>指摘への修正内容 #{item.fixPrNumber}</ExtLink>
-                    )}
-                    {item.successorPrNumber !== null && (
-                      <ExtLink href={prUrl(item.successorPrNumber)}>修正を反映したリリース #{item.successorPrNumber}</ExtLink>
-                    )}
-                  </div>
-                  <ol className="flex flex-wrap gap-x-1 gap-y-0.5 text-[10.5px]" aria-label="工程">
-                    {RELEASE_FIX_STEPS.map((step, index) => (
-                      <li
-                        key={step}
-                        className={cn(
-                          "rounded px-1.5 py-0.5",
-                          index < item.stepIndex && "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300",
-                          index === item.stepIndex && "bg-sky-100 font-semibold text-sky-900 dark:bg-sky-950 dark:text-sky-300",
-                          index > item.stepIndex && "text-muted-foreground",
-                        )}
-                        aria-current={index === item.stepIndex ? "step" : undefined}
-                      >
-                        {step}
-                      </li>
-                    ))}
-                  </ol>
-                  <p className="font-mono text-[10.5px] text-muted-foreground">
-                    起案時 main {shortSha(item.originBaseSha)} ← release {shortSha(item.originHeadSha)}
-                    {item.successorHeadSha && ` ／ 反映後 main ${shortSha(item.successorBaseSha)} ← release ${shortSha(item.successorHeadSha)}`}
-                  </p>
-                  {item.stopReason && <p className="break-words text-muted-foreground">停止の理由: {item.stopReason}</p>}
-                </li>
-              ))}
-            </ul>
-          </details>
-        </>
-      )}
+      <ReleaseFixSummary state={state} className="border-b px-3 py-2.5" />
+      <ReleaseContentsList state={state} className="border-b px-3 py-2" />
+      <ReleaseFixHistory state={state} />
     </div>
   );
 }

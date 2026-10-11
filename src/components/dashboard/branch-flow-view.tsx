@@ -1048,52 +1048,13 @@ function ReleaseCandidateVerificationReason({ verification }: { verification: Re
 }
 
 /**
- * リリース1回ぶんの横線（#1510）。`main`のレールと`develop`のレールを結ぶ。
- *
- * **この線より下にぶら下がっているレーンが、そのバージョンに乗った変更。** 本番へ出た版は
- * 実線とひし形、まだ出ていない版は破線と中抜きのひし形で描く。
- *
- * 未リリースの束には、バージョンバンプPR（幹の一部）とmainへのマージ導線も置く（#1548）。
+ * 未リリースの束の状態（#4390の判定を通す）。束の見出しと「次のリリース」カード（#4428）で同じ値を使う。
  */
-function ReleaseGroupHeader({
-  repositoryFullName,
-  group,
-  releaseButton,
-  deviceBuild,
-  showIosDistribution = false,
-  onMerged,
-}: {
-  repositoryFullName: string;
-  group: BranchFlowReleaseGroup;
-  releaseButton?: React.ReactNode;
-  /** iOS配布のパネルを出すか。最新のマージ済みの束だけに出す（#3808） */
-  showIosDistribution?: boolean;
-  /**
-   * Xcodeで実機へ反映するリポジトリ（#3468）。渡されたときは「本番」の文言を置き換え、
-   * mainへのマージボタンを出さない（mainへはMacのスクリプトがビルドした版だけを入れる）
-   */
-  deviceBuild?: BranchFlowDeviceBuild | null;
-  onMerged: (pullRequest: PullRequestSummary) => void;
-}) {
-  // デプロイの内訳（#2777）。**既定は閉じたまま**——開いている間だけGitHub APIを消費する。
-  const [runDetailOpen, setRunDetailOpen] = useState(false);
-  const refreshFlow = useContext(BranchFlowRefreshContext);
-  const deployRunId = group.deploy?.runId ?? null;
-  const toggleRunDetail = deployRunId !== null ? () => setRunDetailOpen((open) => !open) : undefined;
+function releaseGroupStateOf(
+  group: BranchFlowReleaseGroup,
+  deviceBuild: BranchFlowDeviceBuild | null,
+): { verificationShown: ReleaseCandidateVerification | null; waitingUserMerge: boolean } {
   const released = group.mergedAt !== null;
-  const webviewIos = getWebviewIosRepository(repositoryFullName);
-  // `main`へ直接マージされた作業の束（#2911）。**版もリリースPRも持たない**ので、
-  // 「v◯」とも「リリース済み」とも言えず、デプロイの状態も判定できない
-  // （`group.deploy`は常にnull）。見出しと日付の文言だけを別にする。
-  const mergedToMain = group.key === MERGED_TO_MAIN_GROUP_KEY;
-  // **「本番反映」と言い切ってよいのは、デプロイまで済んだときだけ**（#1579）。
-  // デプロイの状態が分からない（`deploy`がnull）場合は、従来どおりの文言に戻す。
-  //
-  // **手動の出し直し（#2020）はこの判定に効かせない。** 出し直しはすでに本番へ出たmainを
-  // もう一度出しているだけなので、走っている間や失敗したときにこの版の「本番反映」を
-  // 取り消すと、出ている版が出ていないように読める。状態そのものはバッジで出す。
-  const inProduction =
-    group.deploy === null || group.deploy.kind === "success" || group.deploy.manual;
   // **CIが実行中の間は「マージ待ち」と言わない**（#1433と同じ基準）。まだマージできない操作を
   // 人へ促すことになるため、そのあいだは自動で進む「リリース中」のままにする。
   //
@@ -1130,6 +1091,99 @@ function ReleaseGroupHeader({
     group.pullRequest.state === "open" &&
     group.pullRequest.ciState !== "pending" &&
     !isMergeJudgementPending(group.pullRequest.mergeJudgement);
+  return { verificationShown, waitingUserMerge };
+}
+
+/**
+ * 未リリースの束の状態ピル。人のマージ待ち（琥珀）・実機未反映・検証の問題/進行・自動で進行中（紫）のどれか1つ。
+ * 束の見出しと「次のリリース」カード（#4428）で同じものを出す
+ */
+function ReleaseGroupStatePill({
+  group,
+  deviceBuild,
+}: {
+  group: BranchFlowReleaseGroup;
+  deviceBuild: BranchFlowDeviceBuild | null;
+}) {
+  const { verificationShown, waitingUserMerge } = releaseGroupStateOf(group, deviceBuild);
+  if (waitingUserMerge) {
+    // mainへのマージだけは人が行う。待っているのが人の操作であることを、
+    // ヘッダーのリリース状況・スマホの一覧と同じ文言・同じ色で出す（#1579）
+    return <AttentionPill>{releaseMergeTargetLabel("main")}</AttentionPill>;
+  }
+  if (deviceBuild) return <AttentionPill>{deviceBuild.pendingLabel}</AttentionPill>;
+  if (verificationShown) {
+    return (
+      <ReleaseCandidateVerificationPills
+        verification={verificationShown}
+        autoProgressing={isReleaseAutoProgressing(group.pullRequest, group.bumpPullRequest)}
+      />
+    );
+  }
+  return (
+    <ReleaseProgressPill
+      label={group.pullRequest ? "リリース中" : group.bumpPullRequest ? "バージョンバンプ中" : "本番未反映"}
+      // 「本番未反映」はまだPRが無い状態なので、そもそもCIも判定も走っていない
+      spinning={isReleaseAutoProgressing(group.pullRequest, group.bumpPullRequest)}
+      note="チェック・判定の実行中"
+    />
+  );
+}
+
+/**
+ * リリース1回ぶんの横線（#1510）。`main`のレールと`develop`のレールを結ぶ。
+ *
+ * **この線より下にぶら下がっているレーンが、そのバージョンに乗った変更。** 本番へ出た版は
+ * 実線とひし形、まだ出ていない版は破線と中抜きのひし形で描く。
+ *
+ * 未リリースの束には、バージョンバンプPR（幹の一部）とmainへのマージ導線も置く（#1548）。
+ */
+function ReleaseGroupHeader({
+  repositoryFullName,
+  group,
+  releaseButton,
+  deviceBuild,
+  showIosDistribution = false,
+  summarizedInCard = false,
+  onMerged,
+}: {
+  repositoryFullName: string;
+  group: BranchFlowReleaseGroup;
+  releaseButton?: React.ReactNode;
+  /**
+   * この束の状態・主操作・検証を「次のリリース」カード（#4428）が持つ。見出しには状態だけを残し、
+   * 同じ操作・検証を2か所に出さない
+   */
+  summarizedInCard?: boolean;
+  /** iOS配布のパネルを出すか。最新のマージ済みの束だけに出す（#3808） */
+  showIosDistribution?: boolean;
+  /**
+   * Xcodeで実機へ反映するリポジトリ（#3468）。渡されたときは「本番」の文言を置き換え、
+   * mainへのマージボタンを出さない（mainへはMacのスクリプトがビルドした版だけを入れる）
+   */
+  deviceBuild?: BranchFlowDeviceBuild | null;
+  onMerged: (pullRequest: PullRequestSummary) => void;
+}) {
+  // デプロイの内訳（#2777）。**既定は閉じたまま**——開いている間だけGitHub APIを消費する。
+  const [runDetailOpen, setRunDetailOpen] = useState(false);
+  const refreshFlow = useContext(BranchFlowRefreshContext);
+  const deployRunId = group.deploy?.runId ?? null;
+  const toggleRunDetail = deployRunId !== null ? () => setRunDetailOpen((open) => !open) : undefined;
+  const released = group.mergedAt !== null;
+  const webviewIos = getWebviewIosRepository(repositoryFullName);
+  // `main`へ直接マージされた作業の束（#2911）。**版もリリースPRも持たない**ので、
+  // 「v◯」とも「リリース済み」とも言えず、デプロイの状態も判定できない
+  // （`group.deploy`は常にnull）。見出しと日付の文言だけを別にする。
+  const mergedToMain = group.key === MERGED_TO_MAIN_GROUP_KEY;
+  // **「本番反映」と言い切ってよいのは、デプロイまで済んだときだけ**（#1579）。
+  // デプロイの状態が分からない（`deploy`がnull）場合は、従来どおりの文言に戻す。
+  //
+  // **手動の出し直し（#2020）はこの判定に効かせない。** 出し直しはすでに本番へ出たmainを
+  // もう一度出しているだけなので、走っている間や失敗したときにこの版の「本番反映」を
+  // 取り消すと、出ている版が出ていないように読める。状態そのものはバッジで出す。
+  const inProduction =
+    group.deploy === null || group.deploy.kind === "success" || group.deploy.manual;
+  const { verificationShown } = releaseGroupStateOf(group, deviceBuild ?? null);
 
   return (
     <li className="relative pt-3 pb-1 pl-[3.35rem] max-sm:pl-[2.6rem]">
@@ -1220,40 +1274,21 @@ function ReleaseGroupHeader({
                 </>
               )}
             </>
-          ) : waitingUserMerge ? (
-            // mainへのマージだけは人が行う。待っているのが人の操作であることを、
-            // ヘッダーのリリース状況・スマホの一覧と同じ文言・同じ色で出す（#1579）
-            <AttentionPill>{releaseMergeTargetLabel("main")}</AttentionPill>
-          ) : deviceBuild ? (
-            <AttentionPill>{deviceBuild.pendingLabel}</AttentionPill>
-          ) : verificationShown ? (
-            <ReleaseCandidateVerificationPills
-              verification={verificationShown}
-              autoProgressing={isReleaseAutoProgressing(group.pullRequest, group.bumpPullRequest)}
-            />
-          ) : (
-            <ReleaseProgressPill
-              label={
-                group.pullRequest
-                  ? "リリース中"
-                  : group.bumpPullRequest
-                    ? "バージョンバンプ中"
-                    : "本番未反映"
-              }
-              // 「本番未反映」はまだPRが無い状態なので、そもそもCIも判定も走っていない
-              spinning={isReleaseAutoProgressing(group.pullRequest, group.bumpPullRequest)}
-              note="チェック・判定の実行中"
-            />
+          ) : summarizedInCard ? null : (
+            <ReleaseGroupStatePill group={group} deviceBuild={deviceBuild ?? null} />
           )}
           {/* mainへのマージはこの画面で完結させる（#1548）。押すと本番デプロイまで走るため、
               `mergeWarnings`が返す警告で必ず確認ダイアログを通る */}
-          {!deviceBuild && group.pullRequest && group.pullRequest.state === "open" && (
+          {!summarizedInCard && !deviceBuild && group.pullRequest && group.pullRequest.state === "open" && (
             <ReleaseMergeButton pullRequest={group.pullRequest} onMerged={onMerged} />
           )}
-          {releaseButton}
+          {!summarizedInCard && releaseButton}
+          {summarizedInCard && (
+            <span className="text-xs text-muted-foreground">状態・操作・検証は上の「次のリリース」にあります</span>
+          )}
         </div>
 
-        {verificationShown && <ReleaseCandidateVerificationReason verification={verificationShown} />}
+        {!summarizedInCard && verificationShown && <ReleaseCandidateVerificationReason verification={verificationShown} />}
 
         {/* デプロイのジョブ単位の内訳（#2777）。押したときだけ取得する */}
         {deployRunId !== null && (
@@ -1285,7 +1320,8 @@ function ReleaseGroupHeader({
         {group.pullRequest && <PullRequestLine pullRequest={group.pullRequest} />}
         {/* 全体レビュー・統合検証の進捗（#4357）。PRのCI・レビューとは別枠で、開いている
             リリース候補（凍結ブランチ）にだけ出す */}
-        {!deviceBuild &&
+        {!summarizedInCard &&
+          !deviceBuild &&
           !released &&
           group.pullRequest &&
           group.pullRequest.state === "open" &&
@@ -1352,6 +1388,129 @@ function ReleaseGroupNote({ lanes, released }: { lanes: BranchFlowLane[]; releas
     <li className="pb-0.5 pl-[3.35rem] text-xs text-muted-foreground max-sm:pl-[2.6rem]">
       {parts.join(" ・ ")}
     </li>
+  );
+}
+
+/**
+ * 開いたリポジトリの先頭に出す「次のリリース」（#4428）。**本番稼働中の版・次の候補・開発中の変更**を
+ * 並べて識別し、その下に次の候補の状態・理由・主操作・現在の検証を置く。流れ図（上流→下流）の並びは
+ * 崩さず、その上に要約を足す形にする。状態の判定は束の見出しと同じ`releaseGroupStateOf`を通し、
+ * 主操作（mainへのマージ・リリース）はここへ集約して束の見出しからは外す（同じ操作を2か所に置かない）。
+ * 作り直し履歴は流れ図の下へ置き、現在の検証と主操作より前に長い履歴を出さない。
+ */
+function NextReleaseCard({
+  repository,
+  group,
+  developingCount,
+  latestReleaseMergedAt,
+  releaseButton,
+  onMerged,
+}: {
+  repository: BranchFlowRepository;
+  /** 次のリリースに乗る束。未リリースの変更が無ければnull */
+  group: BranchFlowReleaseGroup | null;
+  developingCount: number;
+  latestReleaseMergedAt: string | null;
+  releaseButton?: React.ReactNode;
+  onMerged: (pullRequest: PullRequestSummary) => void;
+}) {
+  const refreshFlow = useContext(BranchFlowRefreshContext);
+  const pullRequest = group?.pullRequest && group.pullRequest.state === "open" ? group.pullRequest : null;
+  const { verificationShown } = group ? releaseGroupStateOf(group, null) : { verificationShown: null };
+  // この版に乗る変更に残っている手作業。実データのレーンにぶら下がっているものだけを出す
+  const manualSteps = (group?.lanes ?? [])
+    .flatMap((lane) => lane.manualSteps.filter((step) => step.state === "open"))
+    .filter((step, index, all) => all.findIndex((other) => other.number === step.number) === index);
+
+  return (
+    <section
+      aria-label="次のリリース"
+      className="@container mb-3 flex flex-col gap-2.5 rounded-[10px] border bg-card p-3 text-xs"
+      data-testid="next-release-card"
+    >
+      <p className="text-[11px] font-semibold tracking-wide text-primary">次のリリース</p>
+      <dl className="grid grid-cols-1 gap-2 @md:grid-cols-3">
+        <div className="min-w-0 rounded-md border px-2.5 py-1.5">
+          <dt className="text-muted-foreground">本番稼働中</dt>
+          <dd className="flex flex-wrap items-center gap-x-1.5 text-sm font-semibold">
+            {repository.release.latestVersion ? `v${repository.release.latestVersion}` : "リリース済みの版なし"}
+          </dd>
+          {/* デプロイの成否は見出しの行・失敗の帯が出すので、ここではmainへ入った日だけを添える */}
+          {latestReleaseMergedAt && (
+            <dd className="text-muted-foreground">mainへのマージ: {formatMonthDay(latestReleaseMergedAt)}</dd>
+          )}
+        </div>
+        <div className="min-w-0 rounded-md border px-2.5 py-1.5">
+          <dt className="text-muted-foreground">次の候補</dt>
+          <dd className="text-sm font-semibold">
+            {group ? (group.version ? `v${group.version}` : "未作成") : "なし"}
+          </dd>
+          <dd className="min-w-0 break-words text-muted-foreground">
+            {pullRequest ? (
+              <GithubReferenceLink
+                href={pullRequest.htmlUrl}
+                reference={{ repositoryFullName: pullRequest.repositoryFullName, number: pullRequest.number, kind: "pull" }}
+                className="text-primary hover:underline"
+              >
+                本番PR #{pullRequest.number} の詳細
+              </GithubReferenceLink>
+            ) : group?.bumpPullRequest ? (
+              "バージョン更新のPRを処理中"
+            ) : group ? (
+              "リリースはまだ作成していません"
+            ) : (
+              "次に公開する変更はありません"
+            )}
+          </dd>
+        </div>
+        <div className="min-w-0 rounded-md border px-2.5 py-1.5">
+          <dt className="text-muted-foreground">開発中の変更</dt>
+          <dd className="text-sm font-semibold">{developingCount}件</dd>
+          <dd className="text-muted-foreground">developへ未マージ</dd>
+        </div>
+      </dl>
+
+      {group && (
+        <div className="flex flex-col gap-1.5">
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
+            <ReleaseGroupStatePill group={group} deviceBuild={null} />
+          </div>
+          {verificationShown && <ReleaseCandidateVerificationReason verification={verificationShown} />}
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
+            {pullRequest ? (
+              <PullRequestMergeButton
+                pullRequest={pullRequest}
+                onMerged={() => onMerged(pullRequest)}
+                variant="default"
+                label="本番公開へ進む"
+                className="shrink-0"
+              />
+            ) : (
+              releaseButton
+            )}
+            {manualSteps.map((step) => (
+              <GithubReferenceLink
+                key={step.number}
+                href={`https://github.com/${repository.repositoryFullName}/issues/${step.number}`}
+                reference={{ repositoryFullName: repository.repositoryFullName, number: step.number, kind: "issue" }}
+                className="inline-flex items-center gap-1 text-amber-700 hover:underline dark:text-amber-400"
+              >
+                <Wrench className="size-3" aria-hidden="true" />
+                手作業 #{step.number}
+              </GithubReferenceLink>
+            ))}
+          </div>
+          {pullRequest && pullRequest.headRef.startsWith(RELEASE_BRANCH_PREFIX) && (
+            <ReleaseVerificationBrief
+              repositoryFullName={repository.repositoryFullName}
+              pullRequestNumber={pullRequest.number}
+              headRef={pullRequest.headRef}
+              onStatusChanged={refreshFlow ?? undefined}
+            />
+          )}
+        </div>
+      )}
+    </section>
   );
 }
 
@@ -1465,8 +1624,69 @@ function ReleaseFlowGraph({
   const deploy = repository.summary.deploy;
   const deployFailure = deploy !== null && deploy.kind === "failure" && !deploy.manual ? deploy : null;
 
+  // 「次のリリース」カード（#4428）が受け持つ束。Xcodeで実機へ反映するリポジトリは従来の見出しのまま
+  const nextGroup = repository.deviceBuild
+    ? null
+    : (pendingGroups.find((group) => group.key !== MERGED_TO_MAIN_GROUP_KEY) ?? null);
+  /* **Xcodeで実機へ反映するリポジトリには出さない**（#3468）。リリースPRの作成から
+     mainへのマージまでをMacのスクリプトが持ち、画面の導線はコマンドの表示だけにする。
+     **未リリースの束には必ずリリースの導線を置く**（#2711）。以前は
+     `canTriggerRelease`のときだけ出していたため、押せない状態では「次のリリース
+     （本番未反映）」と言いながら本番へ出す手段が画面のどこにも無かった。押せない
+     ときは無効のボタンと理由（`releaseBlockedReason`）を出す。
+     **リリースPR・バンプPRが出ている間は出さない**——その行が「mainへマージ」
+     （`ReleaseMergeButton`）を持っており、同じ場所に押せないボタンを足すと
+     押せる操作の隣に押せない操作が並ぶだけになる */
+  const releaseButtonFor = (group: BranchFlowReleaseGroup) =>
+    !repository.deviceBuild &&
+    group.mergedAt === null &&
+    group.pullRequest === null &&
+    group.bumpPullRequest === null ? (
+      <RepositoryReleaseButton
+        repositoryFullName={repository.repositoryFullName}
+        currentVersion={repository.release.latestVersion}
+        isPending={releaseTriggerPending}
+        blockedReason={repository.releaseBlockedReason}
+        onTriggered={onReleaseTriggered}
+      />
+    ) : undefined;
+
   return (
     <div className="relative px-4 py-3">
+      {/* 本番デプロイの失敗・リリース準備の失敗は現在止まっている理由なので、要約より先に出す */}
+      {deployFailure && (
+        <DeployFailureAlert
+          repositoryFullName={repository.repositoryFullName}
+          title="本番デプロイが失敗しています"
+          version={repository.release.latestVersion}
+          autoRetried={deployFailure.autoRetried}
+          runUrl={deployFailure.htmlUrl}
+          isPending={deployTriggerPending}
+          onTriggered={onDeployTriggered}
+          className="mb-2"
+        />
+      )}
+
+      {/* リリース準備の失敗（#4335）。個別Issueを確認待ちにせず、ここへ1件として出す */}
+      {!repository.deviceBuild && (
+        <ReleasePreparationAlert
+          repositoryFullName={repository.repositoryFullName}
+          onResumed={onReleaseTriggered}
+          className="mb-2"
+        />
+      )}
+
+      {!repository.deviceBuild && (
+        <NextReleaseCard
+          repository={repository}
+          group={nextGroup}
+          developingCount={activeLanes.length}
+          latestReleaseMergedAt={latestReleaseMergedAt}
+          releaseButton={nextGroup ? releaseButtonFor(nextGroup) : undefined}
+          onMerged={onMerged}
+        />
+      )}
+
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 pb-2 text-xs text-muted-foreground">
         <span className="flex items-center gap-1.5">
           <span aria-hidden="true" className="inline-block h-0.5 w-3 rounded bg-purple-500" />
@@ -1498,36 +1718,6 @@ function ReleaseFlowGraph({
           </>
         )}
       </div>
-
-      {/* 本番デプロイが失敗しているときだけ出す帯（#2236）。**畳まれない場所（リポジトリの節）に
-          置く**ので、直らないまま次のリリースが動き出しても消えない。押す口はここに1つだけで、
-          上の行の「本番へ再デプロイ」はこのあいだ出さない（同じ操作を2つ並べない） */}
-      {deployFailure && (
-        <DeployFailureAlert
-          repositoryFullName={repository.repositoryFullName}
-          title="本番デプロイが失敗しています"
-          version={repository.release.latestVersion}
-          autoRetried={deployFailure.autoRetried}
-          runUrl={deployFailure.htmlUrl}
-          isPending={deployTriggerPending}
-          onTriggered={onDeployTriggered}
-          className="mb-2"
-        />
-      )}
-
-      {/* リリース準備の失敗（#4335）。個別Issueを確認待ちにせず、ここへ1件として出す */}
-      {!repository.deviceBuild && (
-        <ReleasePreparationAlert
-          repositoryFullName={repository.repositoryFullName}
-          onResumed={onReleaseTriggered}
-          className="mb-2"
-        />
-      )}
-
-      {/* 作り直しの履歴（#4359）。後継候補が出るまでの元候補・承認範囲・含めないPRをここで読める */}
-      {!repository.deviceBuild && (
-        <ReleaseRebuildHistoryPanel repositoryFullName={repository.repositoryFullName} className="mb-2" />
-      )}
 
       {repository.deviceBuild && <DeviceBuildInstalledBand deviceBuild={repository.deviceBuild} />}
 
@@ -1565,29 +1755,8 @@ function ReleaseFlowGraph({
             onMerged={onMerged}
             deviceBuild={repository.deviceBuild}
             showIosDistribution={group.key === latestMergedGroupKey}
-            releaseButton={
-              /* **Xcodeで実機へ反映するリポジトリには出さない**（#3468）。リリースPRの作成から
-                 mainへのマージまでをMacのスクリプトが持ち、画面の導線はコマンドの表示だけにする。
-                 **未リリースの束には必ずリリースの導線を置く**（#2711）。以前は
-                 `canTriggerRelease`のときだけ出していたため、押せない状態では「次のリリース
-                 （本番未反映）」と言いながら本番へ出す手段が画面のどこにも無かった。押せない
-                 ときは無効のボタンと理由（`releaseBlockedReason`）を出す。
-                 **リリースPR・バンプPRが出ている間は出さない**——その行が「mainへマージ」
-                 （`ReleaseMergeButton`）を持っており、同じ場所に押せないボタンを足すと
-                 押せる操作の隣に押せない操作が並ぶだけになる */
-              !repository.deviceBuild &&
-              group.mergedAt === null &&
-              group.pullRequest === null &&
-              group.bumpPullRequest === null ? (
-                <RepositoryReleaseButton
-                  repositoryFullName={repository.repositoryFullName}
-                  currentVersion={repository.release.latestVersion}
-                  isPending={releaseTriggerPending}
-                  blockedReason={repository.releaseBlockedReason}
-                  onTriggered={onReleaseTriggered}
-                />
-              ) : undefined
-            }
+            releaseButton={releaseButtonFor(group)}
+            summarizedInCard={group === nextGroup}
             rebuildButton={
               /* リリースPRを出した後の修正は、凍結ブランチへ足さずバンプから作り直す（#3014）。
                  headが凍結ブランチでない旧世代のリリースPR（head=develop）は作り直す必要が無く、
@@ -1669,6 +1838,12 @@ function ReleaseFlowGraph({
         )}
       </ul>
 
+      {/* 作り直しの履歴（#4359）。後継候補が出るまでの元候補・承認範囲・含めないPRをここで読める。
+          現在の検証と主操作（上の「次のリリース」）より前に長い履歴を置かない（#4428） */}
+      {!repository.deviceBuild && (
+        <ReleaseRebuildHistoryPanel repositoryFullName={repository.repositoryFullName} className="mt-3" />
+      )}
+
       {remainingManualSteps.length > 0 && (
         <RemainingManualSteps
           repositoryFullName={repository.repositoryFullName}
@@ -1703,6 +1878,7 @@ function ReleaseGroupHeaderWithLanes({
   group,
   releaseButton,
   rebuildButton,
+  summarizedInCard = false,
   deviceBuild,
   showIosDistribution,
   onMerged,
@@ -1711,6 +1887,8 @@ function ReleaseGroupHeaderWithLanes({
   group: BranchFlowReleaseGroup;
   releaseButton?: React.ReactNode;
   rebuildButton?: React.ReactNode;
+  /** 状態・主操作・検証を「次のリリース」カードが持つ束か（#4428） */
+  summarizedInCard?: boolean;
   deviceBuild?: BranchFlowDeviceBuild | null;
   showIosDistribution?: boolean;
   onMerged: (pullRequest: PullRequestSummary) => void;
@@ -1751,6 +1929,7 @@ function ReleaseGroupHeaderWithLanes({
         repositoryFullName={repositoryFullName}
         group={group}
         releaseButton={releaseButton}
+        summarizedInCard={summarizedInCard}
         deviceBuild={deviceBuild}
         showIosDistribution={showIosDistribution}
         onMerged={onMerged}
@@ -2030,6 +2209,16 @@ function RepositorySummaryRow({
       {iosDistribution.running && <IosDistributingBadge />}
       <DeployStateBadge deploy={deploy} compact linkToRun={false} />
       </span>
+      )}
+      {/* 状態の理由を1行で（#4428）。開かなくても、待てば進むのか直す必要があるのかが分かる。
+          ボタンの中なので<p>ではなく<span>にする。全文は開いた先の「次のリリース」で読める */}
+      {summary.releaseInProgress && !summary.releaseMergeTarget && verification?.detail && (
+        <span
+          className={cn("block w-full truncate text-xs", verification.problem ? "text-destructive" : "text-muted-foreground")}
+          title={verification.detail}
+        >
+          {verification.detail}
+        </span>
       )}
       {/* **PRのマージ待ちは畳んだ行に出さない**（#2172）。マージの導線は開いたPR行と
           PR一覧画面が持っている。ヘッダーの「手が要るもの◯件」には引き続き数える（`needsAttention`） */}

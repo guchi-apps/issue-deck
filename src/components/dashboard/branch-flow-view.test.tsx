@@ -542,8 +542,8 @@ describe("BranchFlowView", () => {
       openRepository();
       // 次のリリースに乗る分が無いので、いちばん新しい版の束が既定で開いている（#1711）
       expect(screen.getByText("issue-1456")).toBeTruthy();
-      // 畳んだ行の現在の版と、束の見出しの両方に出る
-      expect(screen.getAllByText("v3.17.0")).toHaveLength(2);
+      // 畳んだ行の現在の版・「次のリリース」の本番稼働中（#4428）・束の見出しに出る
+      expect(screen.getAllByText("v3.17.0")).toHaveLength(3);
       expect(screen.getByText("このバージョンに乗った変更 1件")).toBeTruthy();
       // 旧表示のピルはもう出さない
       expect(screen.queryByText("developへマージ済み")).toBeNull();
@@ -1279,7 +1279,8 @@ describe("BranchFlowView", () => {
       });
 
       ensureRepositoryOpen();
-      expect(screen.getByText("マージする")).toBeTruthy();
+      // 主操作は「次のリリース」カードへ集約する（#4428）
+      expect(screen.getByText("本番公開へ進む")).toBeTruthy();
     });
 
     it("押すと本番デプロイが走る旨の確認を挟む", () => {
@@ -1295,7 +1296,7 @@ describe("BranchFlowView", () => {
       });
 
       ensureRepositoryOpen();
-      fireEvent.click(screen.getByText("マージする"));
+      fireEvent.click(screen.getByText("本番公開へ進む"));
 
       expect(screen.getByText("このPRをマージしますか？")).toBeTruthy();
       expect(
@@ -1426,7 +1427,7 @@ describe("BranchFlowView", () => {
       expect(screen.queryByText("マージする")).toBeNull();
     });
 
-    it("リリースPRのマージボタンは束の見出しの1つだけ（行と二重に出さない）", () => {
+    it("リリースPRのマージボタンは「次のリリース」の1つだけ（見出し・行と二重に出さない）", () => {
       renderFlow({
         pullRequests: [
           makeReleasePullRequest({
@@ -1441,7 +1442,8 @@ describe("BranchFlowView", () => {
       });
 
       ensureRepositoryOpen();
-      expect(screen.getAllByText("マージする")).toHaveLength(1);
+      expect(screen.getAllByText("本番公開へ進む")).toHaveLength(1);
+      expect(screen.queryByText("マージする")).toBeNull();
     });
   });
 

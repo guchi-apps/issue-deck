@@ -1,0 +1,228 @@
+"use client";
+
+import { useState } from "react";
+
+import { PullRequestMergeButton } from "@/components/dashboard/pull-request-merge-button";
+import {
+  ReleaseContentsList,
+  ReleaseFixHistory,
+  ReleaseFixSummary,
+  useReleaseFixOverview,
+} from "@/components/dashboard/release-fix-panel";
+import { ReleaseReviewSections } from "@/components/dashboard/release-review-sections";
+import { useNow } from "@/hooks/use-now";
+import { useReferenceNavigation } from "@/hooks/use-reference-navigation";
+import { useReleaseCandidates } from "@/hooks/use-release-candidates";
+import { useReleaseChanges } from "@/hooks/use-release-changes";
+import { useReleaseVerification } from "@/hooks/use-release-verification";
+import { buildMergeChecks, cellsFromSummary, type MergeCheckItem, type MergeCheckTone } from "@/lib/pull-request-merge-checks";
+import { canMergeFromDeck, RELEASE_BRANCH_PREFIX } from "@/lib/pull-request-list";
+import { buildReleaseCheckCells, describeCandidateTarget } from "@/lib/release-candidate-checks";
+import { cn } from "@/lib/utils";
+import type { PullRequestSummary } from "@/types/pull-request";
+
+/**
+ * 本番PR詳細の上部に出すか（#4428）。開いている凍結ブランチ（`release-main/…`）のリリースPRだけ。
+ * マージ済み・クローズ済み・旧世代（head=develop）は従来の詳細のまま
+ */
+export function isOpenReleaseCandidate(pullRequest: PullRequestSummary): boolean {
+  return (
+    pullRequest.kind === "release" &&
+    !pullRequest.merged &&
+    pullRequest.state === "open" &&
+    pullRequest.headRef.startsWith(RELEASE_BRANCH_PREFIX)
+  );
+}
+
+const TONE_TEXT: Record<MergeCheckTone, string> = {
+  ok: "text-green-700 dark:text-green-400",
+  warn: "text-amber-700 dark:text-amber-400",
+  bad: "text-destructive",
+  run: "text-blue-700 dark:text-blue-400",
+  muted: "text-muted-foreground",
+};
+
+/**
+ * 本番PR詳細の「現在候補の検証」（6チェック。#4366の判定をそのまま使う）。
+ *
+ * 一覧・通常PR詳細の並び（`PullRequestMergeChecks`）とは別に、**利用できる幅で列数を変える**。
+ * スマホ・狭い詳細ペインは2列×3段、中くらいは3列×2段、十分な幅では6列（コンテナ幅で判定するので、
+ * PCで詳細ペインが狭いときも詰め込まない）。各項目を押すと理由・対象・根拠を開く。
+ * 共通結果（全体・統合・Mac）は**このリリースPR自身**を候補として読み、別の候補の結果で代用しない。
+ */
+function ReleaseCandidateChecks({ pullRequest }: { pullRequest: PullRequestSummary }) {
+  const source = useReleaseCandidates(pullRequest.repositoryFullName);
+  const now = useNow(5_000, source.status === "loaded" && source.candidates.length > 0);
+  const [openKey, setOpenKey] = useState<string | null>(null);
+  const release = buildReleaseCheckCells({
+    source,
+    pullRequestNumber: pullRequest.number,
+    selectedNumber: pullRequest.number,
+    nowMs: now ?? 0,
+  });
+  const checks = buildMergeChecks({ ...cellsFromSummary(pullRequest), release });
+  const open = checks.find((check) => check.key === openKey) ?? null;
+  // 自分自身が候補として見つからないとき、別の候補（古い候補など）の結果を現在値として出さない
+  const candidateIsSelf = release.candidate?.number === pullRequest.number;
+
+  return (
+    <div className="@container" data-testid="release-candidate-checks">
+      <div className="grid grid-cols-2 gap-1.5 @md:grid-cols-3 @3xl:grid-cols-6">
+        {checks.map((check) => (
+          <CheckButton
+            key={check.key}
+            check={candidateIsSelf || !check.common ? check : unavailable(check)}
+            expanded={openKey === check.key}
+            onToggle={() => setOpenKey(openKey === check.key ? null : check.key)}
+          />
+        ))}
+      </div>
+      {release.candidate && candidateIsSelf && (
+        <p className="mt-1 text-[11px] text-muted-foreground">共通結果の対象: {describeCandidateTarget(release.candidate)}</p>
+      )}
+      {open && <CheckDetail check={candidateIsSelf || !open.common ? open : unavailable(open)} />}
+    </div>
+  );
+}
+
+/** 候補の取得結果にこのPRが無いときの共通結果。成功・失敗のどちらとも扱わない */
+function unavailable(check: MergeCheckItem): MergeCheckItem {
+  return {
+    ...check,
+    mark: "–",
+    state: "取得中",
+    tone: "muted",
+    reason: "このリリースPRの検証結果をまだ取得できていません。別の候補の結果は使いません",
+    evidence: null,
+  };
+}
+
+function CheckButton({ check, expanded, onToggle }: { check: MergeCheckItem; expanded: boolean; onToggle: () => void }) {
+  return (
+    <button
+      type="button"
+      aria-expanded={expanded}
+      aria-label={`${check.fullName}: ${check.state}`}
+      onClick={onToggle}
+      className={cn(
+        "flex min-h-12 min-w-0 flex-col items-start justify-center rounded-md border px-2.5 py-1 text-left hover:bg-muted/50 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
+        expanded && "bg-muted",
+      )}
+    >
+      <span className="text-[11px] leading-4 text-muted-foreground">{check.shortLabel.replace("〔共通〕", "")}</span>
+      <span className={cn("text-[13px] leading-5 font-bold", TONE_TEXT[check.tone])}>
+        <span aria-hidden="true">{check.mark}</span> {check.state}
+      </span>
+    </button>
+  );
+}
+
+function CheckDetail({ check }: { check: MergeCheckItem }) {
+  return (
+    <div role="group" aria-label={`${check.fullName}の詳細`} className="mt-1.5 rounded-md border bg-muted/30 px-3 py-2 text-xs">
+      <p className="font-semibold">{check.fullName}</p>
+      <dl className="mt-1 grid grid-cols-[5rem_1fr] gap-x-2 gap-y-0.5">
+        <dt className="text-muted-foreground">状態</dt>
+        <dd className={cn("font-bold", TONE_TEXT[check.tone])}>
+          <span aria-hidden="true">{check.mark}</span> {check.state}
+        </dd>
+        <dt className="text-muted-foreground">判定対象</dt>
+        <dd className="min-w-0 break-words">{check.target}</dd>
+        <dt className="text-muted-foreground">理由・指摘</dt>
+        <dd className="min-w-0 break-words">{check.reason ?? "なし"}</dd>
+      </dl>
+      {check.common && <p className="mt-1 text-muted-foreground">根拠（指摘本文・ログ・再実行）は下の「リリースの検証」の各区分で確認できます。</p>}
+    </div>
+  );
+}
+
+/**
+ * 本番PR詳細の上部（#4428）。**現在状態＋次の主操作 → 現在候補の検証 → 今回リリースする変更 → 詳細・履歴**
+ * の順に並べる。状態の判定は#4398の`describeFixOverview`、マージの可否は#4390の判定を持つ
+ * `PullRequestMergeButton`をそのまま使い、ここでは並べ方だけを持つ。
+ *
+ * 修正の操作が要る間（指摘あり・修正の開始・判断待ちなど）は修正の操作を主操作にし、マージのボタンは出さない。
+ * 修正の操作が無いときだけ「本番公開へ進む」を置く（押すと既存の本番マージ確認を必ず通る）。
+ * 検証中・準備中はボタン自身が理由付きで押せなくなる。
+ */
+export function ReleasePullRequestOverview({
+  pullRequest,
+  onMerged,
+}: {
+  pullRequest: PullRequestSummary;
+  onMerged: () => void;
+}) {
+  const [reloadToken, setReloadToken] = useState(0);
+  const { repositoryFullName, number, headRef } = pullRequest;
+  const { verification, error } = useReleaseVerification(repositoryFullName, number, true, reloadToken);
+  const changes = useReleaseChanges(repositoryFullName, true, number, reloadToken, false);
+  const state = useReleaseFixOverview({
+    repositoryFullName,
+    pullRequestNumber: number,
+    verification,
+    verificationError: error,
+    changes,
+    reloadToken,
+  });
+  const { openPullRequest } = useReferenceNavigation();
+  const reload = () => setReloadToken((n) => n + 1);
+
+  return (
+    <div className="flex flex-col gap-3 border-b px-4 py-4 text-xs" data-testid="release-pull-request-overview">
+      <div className="flex min-w-0 flex-col gap-0.5">
+        <h2 className="break-words text-xl leading-snug font-bold sm:text-2xl">{pullRequest.title}</h2>
+        <p className="break-words text-xs text-muted-foreground">
+          {repositoryFullName} ・ {headRef} → {pullRequest.baseRef}
+        </p>
+      </div>
+
+      <section aria-label="現在の状態と次の操作" className="rounded-[10px] border bg-card p-3.5 text-sm">
+        <ReleaseFixSummary
+          state={state}
+          showPhases
+          extraAction={
+            canMergeFromDeck(pullRequest) ? (
+              <div className="pt-1">
+                <PullRequestMergeButton pullRequest={pullRequest} onMerged={onMerged} variant="default" label="本番公開へ進む" />
+              </div>
+            ) : null
+          }
+        />
+      </section>
+
+      <section aria-label="現在候補の検証" className="flex flex-col gap-2 rounded-[10px] border bg-card p-3.5">
+        <h3 className="text-sm font-semibold">現在候補の検証</h3>
+        {state.previousResults ? (
+          // 修正後の候補が未作成・取得中の間は、旧候補の成功や指摘を現在値として代用しない（#4428）
+          <p className="text-muted-foreground">
+            修正を反映したリリース候補はまだできていません。修正前の結果は下の「修正前のリリース・検証履歴」にあります（現在の結果ではありません）。
+          </p>
+        ) : (
+          <ReleaseCandidateChecks pullRequest={pullRequest} />
+        )}
+        <ReleaseReviewSections
+          repositoryFullName={repositoryFullName}
+          pullRequestNumber={number}
+          headRef={headRef}
+          verification={verification}
+          verificationError={error}
+          changes={changes}
+          onReload={reload}
+          onOpenPullRequest={(n) => openPullRequest(`${repositoryFullName}#${n}`)}
+          hideOverview
+          previousResults={state.previousResults}
+        />
+      </section>
+
+      <section aria-label="今回リリースする変更" className="rounded-[10px] border bg-card p-3.5">
+        <ReleaseContentsList state={state} />
+      </section>
+
+      {state.list && state.list.length > 0 && (
+        <section aria-label="修正の履歴" className="overflow-hidden rounded-[10px] border bg-card">
+          <ReleaseFixHistory state={state} />
+        </section>
+      )}
+    </div>
+  );
+}

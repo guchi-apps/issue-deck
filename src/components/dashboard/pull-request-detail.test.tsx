@@ -12,6 +12,11 @@ import type {
 } from "@/types/pull-request";
 
 vi.mock("@/components/dashboard/pull-request-ai-review-jobs", () => ({ PullRequestAiReviewJobs: () => null }));
+// 本番PR詳細の上部（#4428）は取得を伴うので、ここでは置き場所と並びだけを見る
+vi.mock("@/components/dashboard/release-pull-request-overview", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/components/dashboard/release-pull-request-overview")>()),
+  ReleasePullRequestOverview: () => <div data-testid="release-overview-stub" />,
+}));
 
 function makePullRequest(overrides: Partial<PullRequestSummary> = {}): PullRequestSummary {
   return {
@@ -634,6 +639,37 @@ describe("PullRequestDetail", () => {
     });
     expect(screen.getByText("Pull Requestを開けませんでした")).toBeTruthy();
     expect(screen.getByText("このPull Requestは見つかりませんでした")).toBeTruthy();
+  });
+
+  describe("本番PR詳細（#4428）", () => {
+    const release = () =>
+      makePullRequest({
+        kind: "release",
+        baseRef: "main",
+        headRef: "release-main/v8.54.0",
+        title: "v8.54.0をmainへリリースする",
+      });
+
+    it("開いている本番PRは短いヘッダーにし、状態・検証を詳細・履歴より先に出す", () => {
+      renderDetail({ pullRequest: release() });
+      expect(screen.getByText(/本番PR/)).toBeTruthy();
+      expect(screen.getByRole("heading", { level: 1 }).textContent).toContain("v8.54.0をmainへリリースする");
+      const overview = screen.getByTestId("release-overview-stub");
+      const history = screen.getByText("詳細・履歴");
+      expect(overview.compareDocumentPosition(history) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      // 主操作は上部が持つので、バッジの行にはマージボタンを重ねない
+      expect(screen.queryByText("マージする")).toBeNull();
+    });
+
+    it("マージ済みの本番PRと通常PRは従来の詳細のまま", () => {
+      renderDetail({ pullRequest: makePullRequest({ ...release(), merged: true, state: "closed" }) });
+      expect(screen.queryByTestId("release-overview-stub")).toBeNull();
+      expect(screen.getByRole("heading", { level: 1 }).textContent).toContain("v8.54.0をmainへリリースする");
+      cleanup();
+      renderDetail();
+      expect(screen.queryByTestId("release-overview-stub")).toBeNull();
+      expect(screen.queryByText("詳細・履歴")).toBeNull();
+    });
   });
 
   // #2448。本文は`reusable-release-develop-to-main.yml`が書く形をそのまま写している

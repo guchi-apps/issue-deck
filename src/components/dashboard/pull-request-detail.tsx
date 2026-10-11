@@ -29,6 +29,10 @@ import { PullRequestMergeHoldNotice } from "@/components/dashboard/pull-request-
 import { PullRequestRepairButtons } from "@/components/dashboard/pull-request-repair-buttons";
 import { PullRequestBackupCi } from "@/components/dashboard/pull-request-backup-ci";
 import { PullRequestReviewFindings } from "@/components/dashboard/pull-request-review-findings";
+import {
+  isOpenReleaseCandidate,
+  ReleasePullRequestOverview,
+} from "@/components/dashboard/release-pull-request-overview";
 import { ConnectedReleaseReviewSections } from "@/components/dashboard/release-review-sections";
 import { UserAvatar } from "@/components/dashboard/user-avatar";
 import { VerificationSummaryPanel } from "@/components/dashboard/verification-summary-panel";
@@ -238,6 +242,9 @@ export function PullRequestDetail({
   }
 
   const kindLabel = pullRequestKindLabel(pullRequest.kind);
+  // 開いている本番PR（#4428）。ヘッダーを短くし、本文の先頭に現在状態・検証・今回の変更を出す。
+  // 既存のバッジ・内訳・本文・コメントは、その下の「詳細・履歴」としてそのまま残す
+  const releaseCandidate = isOpenReleaseCandidate(pullRequest);
   // 取得結果が選択中PRのものか（切り替え直後に前のPRの本文を出さないための保険）
   const currentDetail = detail && detail.id === pullRequest.id ? detail : null;
   // `mergeable`は一覧・詳細のどちらの`summary`にも入っている（#1742）ので、CI失敗と
@@ -307,7 +314,7 @@ export function PullRequestDetail({
         <div className="flex min-w-0 flex-1 items-center gap-2">
           <PullRequestStateIcon pullRequest={pullRequest} className="size-4 shrink-0" />
           <p className="min-w-0 truncate text-sm font-semibold">
-            Pull Request <span className="tabular-nums text-muted-foreground">#{pullRequest.number}</span>
+            {releaseCandidate ? "本番PR" : "Pull Request"} <span className="tabular-nums text-muted-foreground">#{pullRequest.number}</span>
           </p>
         </div>
         <a
@@ -352,7 +359,11 @@ export function PullRequestDetail({
             </h1>
           </div>
 
-          {/* 現在の状態・理由と主操作（#4427）。マージ（developへ）と本番公開は別の操作で、ここは前者だけ */}
+          {/* 本番PRの状態・主操作・検証・今回の変更は専用の要約が持つ（#4428）。同じ操作を2か所に置かない */}
+          {releaseCandidate && <ReleasePullRequestOverview pullRequest={pullRequest} onMerged={onMerged} />}
+          {releaseCandidate && <h2 className="-mx-4 border-y bg-muted/50 px-4 py-2 text-xs font-semibold">詳細・履歴</h2>}
+
+          {!releaseCandidate && (
           <section
             aria-label="現在の状態と主操作"
             data-testid="pull-request-primary-action"
@@ -414,16 +425,19 @@ export function PullRequestDetail({
               />
             )}
           </section>
+          )}
 
           {/* チェックの根拠（#4366・#4427）。このPR（CI・コード・競合）とリリース候補（全体・統合・Mac）を分けて読む。
               リリース候補が未作成でも通常PRのマージ条件は増えない */}
-          <PullRequestChecksStrip
-            pullRequest={pullRequest}
-            onOpenPullRequest={() => selectTab("findings")}
-            showCandidateNote
-            pullRequestEvidenceLabel="指摘・CIの内訳を開く"
-            className="-mx-1 px-0"
-          />
+          {!releaseCandidate && (
+            <PullRequestChecksStrip
+              pullRequest={pullRequest}
+              onOpenPullRequest={() => selectTab("findings")}
+              showCandidateNote
+              pullRequestEvidenceLabel="指摘・CIの内訳を開く"
+              className="-mx-1 px-0"
+            />
+          )}
 
           {/* 補足（属性）。現在の阻害要因は上の主操作に出るので、ここは読み物 */}
           <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
@@ -553,6 +567,7 @@ export function PullRequestDetail({
             {/* リリースPRの3区分（全体レビュー／統合検証／個別PRレビュー。#4238・#4277）。並びと形式は本番マージの
                 確認ダイアログ・スマホのリリースシートと同じ部品で揃える */}
             {pullRequest.kind === "release" &&
+              !releaseCandidate &&
               !pullRequest.merged &&
               pullRequest.state === "open" &&
               pullRequest.headRef.startsWith(RELEASE_BRANCH_PREFIX) && (
