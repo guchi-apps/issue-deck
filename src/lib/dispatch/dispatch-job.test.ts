@@ -2318,3 +2318,15 @@ describe("resolveManualStepSessionRejection（#2771）", () => {
     expect(isSessionReportedJobKind("MANUAL_STEP_SESSION")).toBe(true);
   });
 });
+
+
+describe("退避指示の対応判定（#4408）", () => {
+  it.each([undefined, null, false])("未対応申告 %s では退避だけを拒否する", (stashInputCapable) => {
+    const params = { host: { online: true, instructionCapable: true, sessionControlCapable: true, stashInputCapable }, session: { state: "ALIVE" as const, codexThreadKnown: null }, kind: "INSTRUCTION" as const, hasActiveControlJob: false };
+    expect(resolveSessionControlRejection({ ...params, stashInput: true })).toBe("stash_input_unsupported");
+    expect(resolveSessionControlRejection(params)).toBeNull();
+  });
+  it("対応申告なら退避付き指示を許可する", () => {
+    expect(resolveSessionControlRejection({ host: { online: true, instructionCapable: true, sessionControlCapable: true, stashInputCapable: true }, session: { state: "ALIVE", codexThreadKnown: null }, kind: "INSTRUCTION", stashInput: true, hasActiveControlJob: false })).toBeNull();
+  });
+});
