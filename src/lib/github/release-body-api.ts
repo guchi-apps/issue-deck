@@ -55,3 +55,27 @@ export async function updateReleaseBody(
   }
   return { ok: false, reason: "github_error", status: res.status };
 }
+
+export type RepoWritePermissionResult =
+  | { ok: true; canWrite: boolean }
+  | { ok: false; reason: "github_error"; status: number };
+
+/**
+ * ユーザーが対象リポジトリへ書き込める権限（write・maintain・admin）を持つかを確かめる（#4395）。
+ * IssueDeckへ接続できることと、GitHub上でReleaseを編集できることは別なので、Release本文を書き換える前に使う。
+ */
+export async function fetchUserCanWriteRepo(
+  owner: string,
+  repo: string,
+  login: string,
+  token: string,
+): Promise<RepoWritePermissionResult> {
+  const res = await githubFetch(
+    `${GITHUB_API}/repos/${owner}/${repo}/collaborators/${encodeURIComponent(login)}/permission`,
+    token,
+  );
+  if (res.status === 404 || res.status === 403) return { ok: true, canWrite: false };
+  if (!res.ok) return { ok: false, reason: "github_error", status: res.status };
+  const json: { permission?: string } = await res.json().catch(() => ({}));
+  return { ok: true, canWrite: ["admin", "maintain", "write"].includes(json.permission ?? "") };
+}

@@ -9,12 +9,11 @@ import {
   sortRolloutRows,
   type RolloutLatestRecords,
 } from "@/lib/release-rollout";
-import { RELEASE_VERIFICATION_EXCLUSIONS, RELEASE_VERIFICATION_REPOS } from "@/lib/release-verification-config";
 
 /**
  * リリース検証（統合検証・全体レビュー）の導入状況の一覧（#4365）。読み取り専用で、検証は起動しない。
  *
- * 対象は「ユーザーが管理するリポジトリ」と「台帳に載せたリポジトリ」の和集合。台帳に載っていない
+ * 対象はユーザーが接続済み（アクセスできる）リポジトリだけ（#4395）。台帳に載っていない
  * 管理対象は`not_registered`として出し、導入漏れを成功扱いにしない。状態は宣言（コード）と
  * `ReleaseVerification`・`DispatchHost`から導出する（`release-rollout.ts`）。
  */
@@ -27,21 +26,22 @@ export async function GET() {
     select: { fullName: true, archived: true },
   });
   const archived = new Map(managed.map((repo) => [repo.fullName, repo.archived]));
-  const names = new Set([
-    ...managed.map((repo) => repo.fullName),
-    ...Object.keys(RELEASE_VERIFICATION_REPOS),
-    ...Object.keys(RELEASE_VERIFICATION_EXCLUSIONS),
-  ]);
+  // 応答対象はユーザーが接続済みのリポジトリに限る。設定ファイル上の他の管理対象を加えると、
+  // アクセスできないリポジトリ名・検証状況・ホスト名まで見えてしまう（#4395）
+  const names = new Set(managed.map((repo) => repo.fullName));
 
   const now = new Date();
   const hostRows = await db.dispatchHost.findMany();
-  const hosts = hostRows.map((host) => ({
-    name: host.name,
-    online: isDispatchHostOnline(host.lastSeenAt, now),
-    repositories: parseDispatchHostRepositories(host.repositories),
-    releaseVerifyCapable: host.releaseVerifyCapable === true,
-    releaseReviewCapable: host.releaseReviewCapable === true,
-  }));
+  // ホストも同じ可視範囲に絞る。担当リポジトリを見える範囲へ限り、見えるリポジトリを担当しないホストは返さない
+  const hosts = hostRows
+    .map((host) => ({
+      name: host.name,
+      online: isDispatchHostOnline(host.lastSeenAt, now),
+      repositories: parseDispatchHostRepositories(host.repositories).filter((name) => names.has(name)),
+      releaseVerifyCapable: host.releaseVerifyCapable === true,
+      releaseReviewCapable: host.releaseReviewCapable === true,
+    }))
+    .filter((host) => host.repositories.length > 0);
 
   const records = await db.releaseVerification.findMany({
     where: { repoFullName: { in: [...names] }, kind: { in: ["integration", "ai_review"] } },
