@@ -11,9 +11,7 @@ import {
   RepairRunBadge,
   pullRequestKindLabel,
 } from "@/components/dashboard/pull-request-badges";
-import { PullRequestMergeButton } from "@/components/dashboard/pull-request-merge-button";
 import { PullRequestMergeHoldNotice } from "@/components/dashboard/pull-request-merge-hold";
-import { PullRequestRepairButtons } from "@/components/dashboard/pull-request-repair-buttons";
 import { PullRequestChecksStrip } from "@/components/dashboard/pull-request-checks-strip";
 import { PullToRefreshIndicator } from "@/components/dashboard/pull-to-refresh-indicator";
 import { UserAvatar } from "@/components/dashboard/user-avatar";
@@ -21,8 +19,8 @@ import { usePullToRefresh } from "@/hooks/use-pull-to-refresh";
 import { describeAutoRefreshState, type AutoRefreshIntervalMs } from "@/lib/auto-refresh";
 import { formatTimeOfDay } from "@/lib/format-date-time";
 import { formatRelativeDate } from "@/lib/format-relative-date";
-import { repairKindsFor } from "@/lib/github/pull-request-repair";
-import { canMergeFromDeck, groupPullRequestsByRepository } from "@/lib/pull-request-list";
+import { groupPullRequestsByRepository } from "@/lib/pull-request-list";
+import { derivePrimaryState, type PrimaryStateTone } from "@/lib/pull-request-primary-state";
 import { getPullRequestView } from "@/lib/pull-request-views";
 import { getRepoColor } from "@/lib/repo-color";
 import { cn } from "@/lib/utils";
@@ -51,7 +49,10 @@ type PullRequestListProps = {
   selectedPullRequestId?: string | null;
   /** PRを選んだとき（詳細の表示）。渡さない場合もタイトルのリンクからGitHubは開ける */
   onSelectPullRequest?: (pullRequest: PullRequestSummary) => void;
-  /** マージが成功したとき。マージ済みとして反映する・再取得するといった後始末は親が行う */
+  /**
+   * 互換のために受け取るだけで、この一覧は使わない（#4427）。マージ・自動修正の操作は詳細の
+   * 主操作へ集約したため、一覧からマージが成功することは無い
+   */
   onMerged?: (pullRequest: PullRequestSummary) => void;
   /** ヘッダーの左に置く戻るボタン等（スマホ画面向け） */
   headerLeading?: React.ReactNode;
@@ -70,21 +71,30 @@ type PullRequestListProps = {
   footerSpacing?: boolean;
 };
 
+const PRIMARY_TONE_CLASS: Record<PrimaryStateTone, string> = {
+  ok: "text-green-700 dark:text-green-400",
+  bad: "text-destructive",
+  warn: "text-amber-700 dark:text-amber-400",
+  run: "text-blue-700 dark:text-blue-400",
+  muted: "text-muted-foreground",
+};
+
+/**
+ * 一覧の1行（#4427）。上から「リポジトリ・番号 → タイトル → 代表状態と理由 → 6チェック → 詳細への導線」。
+ * マージ・自動修正の操作は詳細の主操作へ集約し、ここには置かない（一覧は状態を読んで詳細へ進む場所）。
+ * 自動マージの保留・警告は理由の直下に残す。
+ */
 function PullRequestCard({
   pullRequest,
   selected,
   onSelect,
-  onMerged,
 }: {
   pullRequest: PullRequestSummary;
   selected: boolean;
   onSelect?: (pullRequest: PullRequestSummary) => void;
-  onMerged: () => void;
 }) {
   const kindLabel = pullRequestKindLabel(pullRequest.kind);
-  // 一覧も`mergeable`を持つ（#1742）。CI状態と同じ1回のGraphQLで取っているので、
-  // コンフリクトの表示と自動解消ボタンを出してもGitHub APIの消費は増えない。
-  const repairKinds = repairKindsFor(pullRequest, pullRequest.mergeable);
+  const primary = derivePrimaryState(pullRequest);
 
   return (
     <li
@@ -93,84 +103,83 @@ function PullRequestCard({
         selected && "border-l-primary bg-accent",
       )}
     >
-      <div className="flex min-w-0 items-start gap-2">
-        <PullRequestStateIcon pullRequest={pullRequest} className="mt-0.5 size-4 shrink-0" />
-        {/* 「#番号 タイトル」の並びはIssue一覧（issue-list.tsx）に揃えている。
-            行末に番号を置くとタイトルが長いときに見切れて、PRの識別子が読めなくなるため。
-            タイトルは詳細を開くボタンで、GitHubへは右のアイコンから開く（#1087）。 */}
-        <button
-          type="button"
-          onClick={() => onSelect?.(pullRequest)}
-          className="min-w-0 flex-1 text-left text-sm font-medium hover:underline"
-        >
-          #{pullRequest.number} {pullRequest.title}
-        </button>
+      <div className="flex min-w-0 items-center gap-2">
+        <PullRequestStateIcon pullRequest={pullRequest} className="size-4 shrink-0" />
+        <p className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
+          {pullRequest.repositoryFullName}
+          <span className="ml-1.5 font-medium text-foreground">#{pullRequest.number}</span>
+        </p>
         <a
           href={pullRequest.htmlUrl}
           target="_blank"
           rel="noopener noreferrer"
-          className="shrink-0 rounded p-0.5 text-muted-foreground hover:text-foreground"
+          className="flex size-8 shrink-0 items-center justify-center rounded text-muted-foreground hover:text-foreground"
           aria-label={`#${pullRequest.number} をGitHubで開く`}
         >
           <ExternalLink className="size-3.5" />
         </a>
       </div>
 
-      <div className="flex min-w-0 flex-wrap items-center gap-2">
-        <BranchBadge baseRef={pullRequest.baseRef} headRef={pullRequest.headRef} />
-        {kindLabel && <PullRequestMetaBadge>{kindLabel}</PullRequestMetaBadge>}
-        {pullRequest.linkedIssueNumber !== null && (
-          <GithubReferenceLink
-            href={`https://github.com/${pullRequest.repositoryFullName}/issues/${pullRequest.linkedIssueNumber}`}
-            reference={{
-              repositoryFullName: pullRequest.repositoryFullName,
-              number: pullRequest.linkedIssueNumber,
-              kind: "issue",
-            }}
-            className="text-xs text-primary hover:underline"
-          >
-            Issue #{pullRequest.linkedIssueNumber}
-          </GithubReferenceLink>
-        )}
-        {/* 作者と作成時刻はここへ移した（#2942）。状態の行をレールだけの行にするためで、
-            行数は今までと同じ3行のまま */}
-        <span className="flex items-center gap-1 text-xs text-muted-foreground">
-          <UserAvatar login={pullRequest.authorLogin} className="size-4" />
-          {pullRequest.authorLogin}
-        </span>
-        <span className="text-xs text-muted-foreground">
-          {formatRelativeDate(pullRequest.createdAt)}
-        </span>
-      </div>
+      {/* タイトルは詳細を開くボタン。番号は上の行にあるので、読み上げ用のラベルにだけ含める（#1087） */}
+      <button
+        type="button"
+        onClick={() => onSelect?.(pullRequest)}
+        aria-label={`#${pullRequest.number} ${pullRequest.title}`}
+        className="min-w-0 text-left text-sm font-semibold leading-snug break-words hover:underline"
+      >
+        {pullRequest.title}
+      </button>
 
-      {/* PR詳細・ブランチ画面と同じ6チェック（#4366）を作者行の直下へ置く（#4414）。
-          共通結果は候補PR・SHAを添えて出す。CI・コンフリクト・レビューの3項目欄
-          （`PullRequestStatusRail`）は、この6チェックと内容が重なるためここでは出さない */}
+      {/* 代表状態と理由。色だけに頼らず記号と日本語を併記する */}
+      <div className="flex min-w-0 flex-wrap items-start gap-x-2 gap-y-1" data-testid="pull-request-primary-state">
+        <span className={cn("text-xs font-bold", PRIMARY_TONE_CLASS[primary.tone])}>
+          <span aria-hidden="true">{primary.mark}</span> {primary.label}
+        </span>
+        <RepairRunBadge run={pullRequest.repairRun} compact />
+        <span className="min-w-0 flex-1 basis-40 text-xs text-muted-foreground">{primary.reason}</span>
+      </div>
+      <PullRequestMergeHoldNotice pullRequest={pullRequest} />
+
+      {/* PR詳細・ブランチ画面と同じ6チェック（#4366）。一覧では2グループに分け、候補の版・PR番号を見出しに添える */}
       <PullRequestChecksStrip
         pullRequest={pullRequest}
         onOpenPullRequest={onSelect ? () => onSelect(pullRequest) : null}
         className="-mx-1 px-0"
       />
-      <div className="flex min-w-0 flex-wrap items-center gap-2">
-        {/* 自動修復はめったに出ず、経過時間を数え直す生きたバッジ（#2072）。
-            「いま自動で直しにいっている」を言う */}
-        <RepairRunBadge run={pullRequest.repairRun} />
-        <PullRequestRepairButtons
-          repositoryFullName={pullRequest.repositoryFullName}
-          pullRequestNumber={pullRequest.number}
-          kinds={repairKinds}
-          availability={pullRequest.repairWorkflowAvailability}
-          runningKind={pullRequest.repairRun?.kind ?? null}
-        />
-        {canMergeFromDeck(pullRequest) && (
-          <PullRequestMergeButton
-            pullRequest={pullRequest}
-            onMerged={onMerged}
-            className="ml-auto"
-          />
+
+      <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
+        {onSelect && (
+          <button
+            type="button"
+            onClick={() => onSelect(pullRequest)}
+            className="flex min-h-11 items-center text-xs font-semibold text-primary hover:underline"
+          >
+            詳細を開く ›
+          </button>
         )}
+        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+          <BranchBadge baseRef={pullRequest.baseRef} headRef={pullRequest.headRef} />
+          {kindLabel && <PullRequestMetaBadge>{kindLabel}</PullRequestMetaBadge>}
+          {pullRequest.linkedIssueNumber !== null && (
+            <GithubReferenceLink
+              href={`https://github.com/${pullRequest.repositoryFullName}/issues/${pullRequest.linkedIssueNumber}`}
+              reference={{
+                repositoryFullName: pullRequest.repositoryFullName,
+                number: pullRequest.linkedIssueNumber,
+                kind: "issue",
+              }}
+              className="text-xs text-primary hover:underline"
+            >
+              Issue #{pullRequest.linkedIssueNumber}
+            </GithubReferenceLink>
+          )}
+          <span className="flex items-center gap-1">
+            <UserAvatar login={pullRequest.authorLogin} className="size-4" />
+            {pullRequest.authorLogin}
+          </span>
+          <span>{formatRelativeDate(pullRequest.createdAt)}</span>
+        </div>
       </div>
-      <PullRequestMergeHoldNotice pullRequest={pullRequest} />
     </li>
   );
 }
@@ -193,7 +202,6 @@ export function PullRequestList({
   onPullToRefresh,
   selectedPullRequestId = null,
   onSelectPullRequest,
-  onMerged,
   headerLeading,
   headerActions,
   footer,
@@ -310,7 +318,6 @@ export function PullRequestList({
                         onSelectPullRequest(selectedPullRequest);
                       })
                     }
-                    onMerged={() => onMerged?.(pullRequest)}
                   />
                 ))}
               </ul>

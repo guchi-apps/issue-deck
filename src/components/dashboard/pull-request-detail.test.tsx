@@ -101,6 +101,11 @@ function renderDetail(
   );
 }
 
+/** 詳細のタブ（#4427）を開く */
+function openTab(name: "概要" | "指摘" | "変更ファイル" | "活動") {
+  fireEvent.click(screen.getByRole("tab", { name: new RegExp(name) }));
+}
+
 /** 本番デプロイ状況の取得（#1814）。既定では「判定できない」を返し、バッジを出さない */
 function mockDeployStatus(status: PullRequestDeployStatus | null = null) {
   const fetchMock = vi.fn(async () => ({
@@ -130,12 +135,14 @@ describe("PullRequestDetail", () => {
     renderDetail();
     expect(screen.getByText("実装内容")).toBeTruthy();
     expect(screen.getByText("PR詳細ペインを追加した。")).toBeTruthy();
-    // 増減はヘッダーの統計と「変更ファイル」の見出し（#1987）の2か所に出る。長い本文の
-    // 下まで読み進めても規模が分かるようにしているため、重複はそのまま許容する。
-    expect(screen.getAllByText("+120")).toHaveLength(2);
-    expect(screen.getAllByText("-8")).toHaveLength(2);
+    // 増減は補足の統計に出る。「変更ファイル」タブを開くと、その見出し（#1987）にも出る。
+    expect(screen.getAllByText("+120")).toHaveLength(1);
+    expect(screen.getAllByText("-8")).toHaveLength(1);
     expect(screen.getByText(/5ファイル ・ 2コミット/)).toBeTruthy();
-    expect(screen.getByText("変更ファイル")).toBeTruthy();
+    openTab("変更ファイル");
+    expect(screen.getAllByText("+120")).toHaveLength(2);
+    expect(screen.getAllByText("変更ファイル").length).toBeGreaterThan(1);
+    openTab("活動");
     expect(screen.getByText("コメント 1件")).toBeTruthy();
     expect(screen.getByText("実装が完了しました。")).toBeTruthy();
   });
@@ -143,6 +150,7 @@ describe("PullRequestDetail", () => {
   it("本文が空のPRはその旨を出す", () => {
     renderDetail({ detail: makeDetail({ body: "", events: [] }) });
     expect(screen.getByText("本文はありません。")).toBeTruthy();
+    openTab("活動");
     expect(screen.getByText("コメントはまだありません。")).toBeTruthy();
   });
 
@@ -162,6 +170,7 @@ describe("PullRequestDetail", () => {
       }),
     });
 
+    openTab("活動");
     expect(screen.getByText("変更を要求")).toBeTruthy();
     expect(screen.getByText("src/lib/foo.ts:12")).toBeTruthy();
   });
@@ -169,9 +178,81 @@ describe("PullRequestDetail", () => {
   // `mergeable`は詳細ではなくsummaryが持つ（一覧・詳細で同じ判定にするため。#1742）
   it("コンフリクトしているPRは警告と統合した自動修正ボタンを出し、マージボタンを出さない", () => {
     renderDetail({ pullRequest: makePullRequest({ mergeable: false }) });
-    expect(screen.getByText("コンフリクトあり")).toBeTruthy();
+    expect(screen.getByTestId("pull-request-primary-action").textContent).toContain("競合あり");
     expect(screen.getByRole("button", { name: "PRを自動修正" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "マージする" })).toBeNull();
+  });
+
+  // 一覧から主操作を詳細へ集約した（#4427）。一覧にあった修復ボタンの条件はここで確かめる。
+  it("マージできるPRには主操作の帯にマージボタンを出し、状態と理由を添える（#4427）", () => {
+    renderDetail({ pullRequest: makePullRequest({ ciState: "success", mergeable: true }) });
+    const band = within(screen.getByTestId("pull-request-primary-action"));
+    expect(band.getByText(/マージ可能/)).toBeTruthy();
+    expect(band.getByRole("button", { name: "マージする" })).toBeTruthy();
+  });
+
+  it("CI失敗のPRには自動修正ボタンを出し、確認ダイアログを挟む（#1293）", () => {
+    renderDetail({ pullRequest: makePullRequest({ ciState: "failure" }) });
+    expect(screen.getByRole("button", { name: "PRを自動修正" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "マージする" }));
+    expect(screen.getByText("このPRをマージしますか？")).toBeTruthy();
+    expect(screen.getByText("CIが失敗しています。")).toBeTruthy();
+  });
+
+  it("自動修復ワークフローが未配布なら修復ボタンを押せなくして理由を添える（#1960）", () => {
+    renderDetail({
+      pullRequest: makePullRequest({
+        ciState: "failure",
+        mergeable: false,
+        repairWorkflowAvailability: { ci: "missing", conflict: "missing" },
+      }),
+    });
+    expect(screen.getByRole("button", { name: "PRを自動修正" }).hasAttribute("disabled")).toBe(true);
+    expect(
+      screen.getByText("自動修復ワークフローが未配布です。設定 › フリート運用 から、このリポジトリへ配布できます。"),
+    ).toBeTruthy();
+    cleanup();
+
+    renderDetail({ pullRequest: makePullRequest({ ciState: "failure", repairWorkflowAvailability: {} }) });
+    expect(screen.getByRole("button", { name: "PRを自動修正" }).hasAttribute("disabled")).toBe(false);
+    expect(screen.queryByText(/未配布/)).toBeNull();
+  });
+
+  it("自動修正が走っているあいだは「修正中」と経過を出し、ボタンを押せなくする（#2072・#4427）", () => {
+    renderDetail({
+      pullRequest: makePullRequest({
+        ciState: "failure",
+        repairRun: {
+          kind: "ci",
+          startedAt: new Date(Date.now() - 3 * 60_000).toISOString(),
+          runUrl: "https://github.com/guchi-apps/issue-deck/actions/runs/1",
+        },
+      }),
+    });
+    const band = within(screen.getByTestId("pull-request-primary-action"));
+    expect(band.getByText(/修正中/, { selector: "p" })).toBeTruthy();
+    expect(band.getByText("PRを自動修正中（3分経過）")).toBeTruthy();
+    expect(band.getByRole("button", { name: "PRを自動修正" }).hasAttribute("disabled")).toBe(true);
+  });
+
+  it("自動マージ可否の判定中は「判定中」で押せなくする（#1968）", () => {
+    renderDetail({
+      pullRequest: makePullRequest({
+        ciState: "success",
+        mergeJudgement: { state: "pending", step: null, runUrl: null, aiReview: AI_REVIEW_NONE },
+      }),
+    });
+    const button = screen.getByRole("button", { name: "判定中" }) as HTMLButtonElement;
+    expect(button.disabled).toBe(true);
+    expect(screen.queryByRole("button", { name: "マージする" })).toBeNull();
+  });
+
+  it("リリース候補が未作成でも通常PRのマージ判定は変わらず、共通説明を1回だけ出す（#4427）", () => {
+    renderDetail({ pullRequest: makePullRequest({ ciState: "success", mergeable: true }) });
+    expect(screen.getByRole("button", { name: "マージする" })).toBeTruthy();
+    expect(screen.getByLabelText("このPRのチェック")).toBeTruthy();
+    expect(screen.getByLabelText("リリース候補のチェック")).toBeTruthy();
+    expect(screen.queryAllByTestId("release-candidate-note").length).toBeLessThanOrEqual(1);
   });
 
   it("自動でマージされないPRには「ユーザーのマージが必要です」を出す（#1469）", () => {
@@ -215,6 +296,7 @@ describe("PullRequestDetail", () => {
         },
       }),
     });
+    openTab("指摘");
     expect(screen.getByRole("button", { name: /CI通過/ })).toBeTruthy();
     expect(screen.getByRole("button", { name: /レビュー完了/ })).toBeTruthy();
   });
@@ -241,6 +323,7 @@ describe("PullRequestDetail", () => {
         },
       }),
     });
+    openTab("指摘");
     expect(screen.getByRole("button", { name: /レビュー要確認/ })).toBeTruthy();
     expect(screen.queryByRole("button", { name: /レビュー完了/ })).toBeNull();
     cleanup();
@@ -264,6 +347,7 @@ describe("PullRequestDetail", () => {
         },
       }),
     });
+    openTab("指摘");
     expect(screen.getByRole("button", { name: /レビュー要修正/ })).toBeTruthy();
   });
 
@@ -302,6 +386,7 @@ describe("PullRequestDetail", () => {
         },
       }),
     });
+    openTab("指摘");
     expect(screen.getByText("レビュー省略")).toBeTruthy();
   });
 
@@ -317,6 +402,7 @@ describe("PullRequestDetail", () => {
       }),
     });
 
+    openTab("指摘");
     expect(screen.getAllByText("レビュー実施中")).toHaveLength(1);
     expect(screen.getByRole("button", { name: /レビュー実施中/ })).toBeTruthy();
   });
@@ -344,6 +430,7 @@ describe("PullRequestDetail", () => {
       }),
     });
 
+    openTab("指摘");
     const status = screen.getByRole("button", { name: /CI実行中/ });
     expect(status.getAttribute("aria-expanded")).toBe("false");
     fireEvent.click(status);
@@ -376,6 +463,7 @@ describe("PullRequestDetail", () => {
         onMerged={vi.fn()}
       />,
     );
+    openTab("指摘");
     const status = screen.getByRole("button", { name: /CI通過/ });
     expect(status.getAttribute("aria-expanded")).toBe("false");
     fireEvent.click(status);
@@ -414,11 +502,13 @@ describe("PullRequestDetail", () => {
       }),
     });
 
+    openTab("指摘");
     const status = screen.getByRole("button", { name: /レビュー失敗/ });
     fireEvent.click(status);
     expect(status.getAttribute("aria-expanded")).toBe("true");
     expect(screen.getByText("要修正")).toBeTruthy();
-    expect(screen.getAllByText("修正が必要です。")).toHaveLength(2);
+    // 指摘タブのレビュー本文だけが出る（コメントは「活動」タブ側）
+    expect(screen.getAllByText("修正が必要です。")).toHaveLength(1);
   });
 
   it("別のPRの取得結果は表示しない", () => {
@@ -520,7 +610,7 @@ describe("PullRequestDetail", () => {
     });
     renderDetail();
 
-    await waitFor(() => expect(screen.getByText("コメント 1件")).toBeTruthy());
+    await waitFor(() => expect(screen.getByRole("tab", { name: /活動/ })).toBeTruthy());
     const requestedUrls = (fetchMock.mock.calls as unknown as unknown[][]).map((call) =>
       String(call[0]),
     );

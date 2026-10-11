@@ -2028,8 +2028,7 @@ export function POST(request: NextRequest) {
     ただしカード全体が`<button>`なので`linkable={false}`を渡す——`<button>`の中に`<a>`を置くのは
     HTMLとして不正で、押したときの当たり判定も読み上げも壊れる（レールの外枠を`<div>`ではなく
     `<span>`にしているのも同じ理由）。
-  - **PR詳細（`pull-request-detail.tsx`）は今までのバッジ列のまま。** 一覧性が要るのは並ぶ側だけで、
-    詳細では`AiReviewBadge`・`ConflictBadge`が全文と実行ログを持つ。
+  - **PR詳細（`pull-request-detail.tsx`）は#4427で「主操作と6チェック」中心に組み直した**（下の「PR一覧・通常PR詳細の情報階層」）。
 - **対応PRのポーリングを止める条件は「CI実行中か」だけにしない**（#2145・#2915。
   [`lib/issue-pull-requests.ts`](../src/lib/issue-pull-requests.ts)の
   `issuePullRequestPollIntervalMs`が間隔を決め、
@@ -4611,6 +4610,14 @@ Webhookで取り込む。運用・移行・ロールバックは[backup-ci.md](b
 - 一覧はSwiftソースの宣言（`: Widget`・`ActivityConfiguration`・`ControlWidget`・`.accessory*`）からの**推定**。`api/repositories/ios-extensions/route.ts`がデフォルトブランチのツリーから拡張らしい名前のSwiftを最大40件読み、5分キャッシュする。命名次第で漏れるため画面にも「検出結果」と出している
 - 起票ダイアログ（`ios-extension-issue-dialog.tsx`）は、起票後の「実装を開始」を閉じる（キャンセル含む）とIssue詳細へ移る（#4172）。計画の承認パネル・計画コメントは詳細にしか出ないため、通常の作成フォームと同じ挙動に揃えている
 - 追加・編集は画面からSwiftを生成せず、種類別テンプレート（`buildIosExtensionIssue`）でIssueを起票して通常の実装経路へ渡す（`POST /api/issues`）
+
+### PR一覧・通常PR詳細の情報階層（#4427）
+
+- **代表状態は[`lib/pull-request-primary-state.ts`](../src/lib/pull-request-primary-state.ts)の`derivePrimaryState`が1か所で決める。** CI失敗・競合・レビュー指摘・修正中・判定中・マージ可能などを既存の値（`ciState`・`mergeable`・`reviewVerdict`・`repairRun`・`deriveMergeHold`）から畳むだけの表示用の純関数で、**マージ可否の判定は変えない**（マージ可否は`canMergeFromDeck`・`mergeWarnings`・確認ダイアログのまま）。古いheadへのレビュー判定は現在の指摘にしない。読めない値は成功へ倒さない。
+- **リリース候補の有無（`describeReleaseCandidate`）は通常PRの代表状態とは別軸。** 候補が無くても通常PRに新しいマージ条件は足さない。
+- 一覧（`pull-request-list.tsx`）の行は「リポジトリ・番号 → タイトル → 代表状態と理由（＋自動マージ保留）→ 6チェック → 詳細への導線」。**マージ・自動修正の操作は一覧に置かず**、詳細の主操作帯へ集約した。
+- 詳細（`pull-request-detail.tsx`）は「短い固定ヘッダー → 本文内の全文タイトル → 主操作帯（状態・理由・自動修正・マージ・保留・デプロイ）→ 6チェック → 補足の属性 → タブ（概要／指摘／変更ファイル／活動）」。CI・レビューの根拠は「指摘」タブ、バックアップCIは「概要」の補足。
+- 6チェック（`pull-request-merge-checks.tsx`）は`grouped`で「このPR（CI・コード・競合）」「リリース候補（全体・統合・Mac）」に分ける。ブランチ画面・本番マージ確認は従来の1列表示（`grouped`省略）のまま。
 
 ### VPSメモリの自動計測（#4256）
 
