@@ -41,7 +41,7 @@ export type ManualStepFilingResult = {
   url: string;
   /** `created`は今回起票、`reused`は既存Issue（openでもcloseでも）を再利用した */
   outcome: "created" | "reused";
-  /** 紐付け・コメントなど、失敗しても起票自体は有効な付随処理の失敗 */
+  /** 失敗しても起票自体は有効な付随処理の失敗（サブIssueへの紐付け失敗は含まず、例外にする） */
   warnings: string[];
 };
 
@@ -49,6 +49,8 @@ export const MANUAL_STEP_REQUEST_LIMIT = 5;
 const KEY_PATTERN = /^[a-z0-9][a-z0-9-]{2,63}$/;
 const REPOSITORY_PATTERN = /^[\w.-]+\/[\w.-]+$/;
 const TITLE_PREFIX = "[手作業] ";
+const REOPEN_ATTEMPTS = 6;
+const REOPEN_RETRY_DELAY_MS = 1000;
 
 export function manualStepKeyMarker(origin: ManualStepOrigin, key: string): string {
   return `<!-- issue-deck-manual-step-key:${origin.repository}#${origin.issueNumber}:${key} -->`;
@@ -133,12 +135,19 @@ async function fileOne(request: ManualStepRequest, origin: ManualStepOrigin): Pr
   }
   if (!(verified.body ?? "").includes(marker) && outcome === "created") throw new Error(`${request.targetRepository}#${issue.number}の本文を確認できません`);
 
-  // 起点Issueへサブissueとして紐付ける（既に付いている場合のエラーは警告に留める）。
+  // 起点Issueへサブissueとして紐付ける。紐付けは完了条件なので、失敗は成功扱いにせず例外にする。
+  // 起点と起票先が別Installationでも書けるよう、起点リポジトリ自身のInstallation tokenを使う。
+  const originRegistered = await db.repository.findFirst({ where: { fullName: origin.repository }, include: { installation: true } });
+  if (!originRegistered) throw new Error(`${origin.repository}はissue-deckへ登録されていないためサブIssueへ紐付けできません`);
+  const originToken = await getInstallationToken(originRegistered.installation.installationId);
   const [originOwner, originRepo] = origin.repository.split("/");
-  try {
-    await addSubIssue(originOwner, originRepo, origin.issueNumber, token, verified.id);
-  } catch (error) {
-    warnings.push(`サブIssueへの紐付けに失敗または済み: ${error instanceof Error ? error.message : String(error)}`);
+  const linked = await fetchAllPages<{ id: number }>(`${GITHUB_API}/repos/${originOwner}/${originRepo}/issues/${origin.issueNumber}/sub_issues?per_page=100`, originToken);
+  if (!linked.some((s) => s.id === verified.id)) {
+    try {
+      await addSubIssue(originOwner, originRepo, origin.issueNumber, originToken, verified.id);
+    } catch (error) {
+      throw new Error(`${request.targetRepository}#${issue.number}を${origin.repository}#${origin.issueNumber}のサブIssueへ紐付けできません: ${error instanceof Error ? error.message : String(error)}`);
+    }
   }
   return { key: request.key, repository: request.targetRepository, number: issue.number, url: verified.html_url, outcome, warnings };
 }
@@ -194,8 +203,17 @@ export async function restartReviewAtSameHead(repository: string, pullRequest: n
   const close = await githubFetch(base, token, { method: "PATCH", body: { state: "closed" } });
   if (!close.ok) throw new Error(`PRをcloseできません（HTTP ${close.status}）`);
   let reopened = false;
-  for (let attempt = 0; attempt < 3 && !reopened; attempt++) {
-    reopened = (await githubFetch(base, token, { method: "PATCH", body: { state: "open" } })).ok;
+  for (let attempt = 0; attempt < REOPEN_ATTEMPTS && !reopened; attempt++) {
+    if (attempt > 0) await new Promise((resolve) => setTimeout(resolve, REOPEN_RETRY_DELAY_MS * 2 ** (attempt - 1)));
+    reopened = (await githubFetch(base, token, { method: "PATCH", body: { state: "open" } }).catch(() => null))?.ok ?? false;
   }
-  if (!reopened) throw new Error("PRのreopenに失敗しました。PRがcloseされたままです。手動でreopenしてください");
+  if (!reopened) {
+    // closedのまま残ると系列が止まるので、監視できる形（PRコメント＋確認待ちラベル）で人へ引き上げる。
+    const [owner, repo] = repository.split("/");
+    await createComment(owner, repo, pullRequest, token, {
+      body: `再レビューの起動でPRをcloseしましたが、reopenに失敗しました。**PRがcloseされたままです。** 手動でreopenしてください。\n\n<!-- issue-deck-source:review-restart-reopen-failed -->`,
+    }).catch(() => undefined);
+    await addIssueLabels(owner, repo, pullRequest, token, ["00.check-user", "01.check-blocked"]).catch(() => undefined);
+    throw new Error("PRのreopenに失敗しました。PRがcloseされたままです。手動でreopenしてください");
+  }
 }
