@@ -627,6 +627,19 @@ describe("reportDispatchJob の skipped", () => {
  * （cloneの有無は問わない代わりに、対象のセッションとpollerの対応が要る）。
  */
 describe("enqueueSessionControlJob", () => {
+  it.each([undefined, null, false])("退避未対応 %s にはジョブを作成しない", async (stashInputCapable) => {
+    dispatchHostFindUnique.mockResolvedValue(host({ stashInputCapable }));
+    const result = await enqueueSessionControlJob({ repositoryFullName: REPOSITORY, issueNumber: 1332, hostName: "subpc", kind: "INSTRUCTION", instruction: "続けてください", stashInput: true, requestedByUserId: null, now: NOW });
+    expect(result).toMatchObject({ ok: false, rejection: "stash_input_unsupported" });
+    expect(dispatchJobCreate).not.toHaveBeenCalled();
+  });
+  it("退避対応ホストには退避指定を保持して投入する", async () => {
+    dispatchHostFindUnique.mockResolvedValue(host({ stashInputCapable: true }));
+    const result = await enqueueSessionControlJob({ repositoryFullName: REPOSITORY, issueNumber: 1332, hostName: "subpc", kind: "INSTRUCTION", instruction: "続けてください", stashInput: true, requestedByUserId: null, now: NOW });
+    expect(result.ok).toBe(true);
+    expect(dispatchJobCreate).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ stashInput: true }) }));
+  });
+
   async function control(
     kind: "INTERRUPT" | "KILL" | "INSTRUCTION" = "INTERRUPT",
     instruction?: string,
@@ -971,6 +984,15 @@ describe("enqueueCodeReviewJob", () => {
 });
 
 describe("claimDispatchJobs の制御ジョブ", () => {
+  it.each([undefined, null, false, true])("退避対応 %s を配布時にも確認する", async (stashInputCapable) => {
+    dispatchHostFindUnique.mockResolvedValue(host({ stashInputCapable }));
+    dispatchJobFindMany.mockResolvedValue([]);
+    await claimDispatchJobs({ hostName: "subpc", maxJobs: 0, now: NOW });
+    const query = dispatchJobFindMany.mock.calls.map(c => c[0]?.where).find(w => w?.targetHost && typeof w.kind === "object" && w.kind.in.includes("INSTRUCTION"));
+    expect(query).toBeDefined();
+    expect(query?.stashInput).toBe(stashInputCapable === true ? undefined : false);
+  });
+
   function queuedJob(overrides: Record<string, unknown> = {}) {
     return {
       id: "job-1",

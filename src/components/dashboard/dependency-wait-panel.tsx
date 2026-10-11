@@ -23,6 +23,7 @@ import {
   type DependencyWaitView,
 } from "@/lib/dispatch/dependency-wait";
 import { buildDependencyResumeInstruction } from "@/lib/dispatch/dependency-wait";
+import { resolveSessionControlRejection, describeSessionControlRejection } from "@/lib/dispatch/dispatch-job";
 import { classifyInstructionSkip } from "@/lib/dispatch/input-stash";
 import { formatDateTime, formatDateTimeFull } from "@/lib/format-date-time";
 import { cn } from "@/lib/utils";
@@ -89,6 +90,9 @@ export function DependencyWaitPanel({
   const session = (dispatch.sessions ?? []).find(
     (s) => s.repositoryFullName === wait.repositoryFullName && s.issueNumber === wait.issueNumber,
   );
+
+  const host = (dispatch.hosts ?? []).find((h) => h.name === session?.host);
+  const stashRejection = resolveSessionControlRejection({ host, session, kind: "INSTRUCTION", stashInput: true, hasActiveControlJob: false });
 
   async function run(action: "recheck" | "resume" | "cancel", options?: { stashInput?: boolean }) {
     setMessage(null);
@@ -178,11 +182,12 @@ export function DependencyWaitPanel({
               作業を再開
             </Button>
           )}
+          {canStash && session && stashRejection && <p className="text-muted-foreground">{describeSessionControlRejection(stashRejection, { hostName: session.host, kind: "INSTRUCTION" })}</p>}
           {canStash && session && (
             <Button
               type="button"
               size="sm"
-              disabled={dispatch.isSubmitting}
+              disabled={dispatch.isSubmitting || stashRejection !== null}
               onClick={() => setConfirmingStash(true)}
             >
               <Send className="size-3.5" />
@@ -208,7 +213,7 @@ export function DependencyWaitPanel({
         issueNumber={wait.issueNumber}
         reloadKey={wait.status}
       />
-      {session && (
+      {session && stashRejection === null && (
         <StashConfirmDialog
           open={confirmingStash}
           onOpenChange={setConfirmingStash}
