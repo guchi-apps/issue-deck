@@ -6,6 +6,8 @@ import { getInstallationToken } from "@/lib/github/app-auth";
 import { addIssueLabels, createComment, createIssue, updateIssue } from "@/lib/github/issues-api";
 import {
   fetchOpenPullRequestsForBase,
+  fetchPullRequestForRebuild,
+  isAncestorCommit,
   fetchPullRequestsByHead,
   fetchReleaseRebuildCandidate,
   type GithubApiPullRequest,
@@ -21,6 +23,7 @@ import {
   decideReverification,
   defaultVerifyConditions,
   isRebuildFailureReason,
+  NOTHING_TO_ADD_REASON,
   isReleaseFixActive,
   itemFromFinding,
   parseReleaseFixStatus,
@@ -473,12 +476,29 @@ async function sweepGroup(repositoryFullName: string, releasePrNumber: number, r
   const candidate = frozen && originStillOpen ? await fetchReleaseRebuildCandidate(owner, repo, frozen.head.sha, token) : null;
   // 選んだ作り直し（#4335）に対応していれば、修正PRだけを元の候補へ足す（無関係な変更で判断待ちにしない）
   const selective = frozen && originStillOpen ? await releaseCallerSupportsSelection(owner, repo, token) : false;
+  // 修正PRが候補の一覧に無くても、実際にdevelopへマージ済みで元の候補の祖先でなければ「足せるPR」として扱う（#4422）。
+  // 手動の選択画面と同じ照合。取得に失敗したら断定せず次の巡回へ回す
+  const developPullRequests = candidate?.pullRequests.map((pr) => pr.number) ?? [];
+  if (candidate && frozen) {
+    try {
+      for (const row of observed) {
+        const n = row.fixPrNumber;
+        if (n === null || row.fixPrMergedAt === null || developPullRequests.includes(n)) continue;
+        const pr = await fetchPullRequestForRebuild(owner, repo, n, token);
+        if (!pr?.merged_at || !pr.merge_commit_sha || pr.base.ref !== "develop") continue;
+        if (!(await isAncestorCommit(owner, repo, pr.merge_commit_sha, frozen.head.sha, token))) developPullRequests.push(n);
+      }
+    } catch (error) {
+      console.error("[release-fix-series] fix PR lookup failed", releasePrNumber, error);
+      return { rebuilt: false, changed: 0 };
+    }
+  }
 
   const decision = decideReleaseFix({
     selective,
     series: observed.map((row) => ({
       id: row.id,
-      status: parseReleaseFixStatus(row.status) ?? "stopped",
+      status: row.status === "stopped" && row.stopReason === NOTHING_TO_ADD_REASON ? "fix_merged" : parseReleaseFixStatus(row.status) ?? "stopped",
       issueNumber: row.issueNumber,
       fixPrNumber: row.fixPrNumber,
       fixPrMerged: row.fixPrMergedAt !== null,
@@ -488,11 +508,16 @@ async function sweepGroup(repositoryFullName: string, releasePrNumber: number, r
     candidate: {
       originStillOpen,
       originMerged,
-      developPullRequests: candidate?.pullRequests.map((pr) => pr.number) ?? [],
+      developPullRequests,
+      complete: candidate?.complete !== false,
     },
   });
   if (decision.action === "wait") return { rebuilt: false, changed: 0 };
   if (decision.action === "stop") {
+    // 再評価でも同じ理由なら、停止の記録を重ねない
+    if (decision.reason === NOTHING_TO_ADD_REASON && decision.seriesIds.every((id) => observed.find((r) => r.id === id)?.status === "stopped")) {
+      return { rebuilt: false, changed: 0 };
+    }
     return { rebuilt: false, changed: await stopRows(ctx, decision.seriesIds, decision.status, decision.reason) };
   }
 
@@ -667,7 +692,13 @@ async function sweepSuccessor(row: ReleaseFixSeries): Promise<number> {
 /** 進行中の系列を1回分進める。poller（`scripts/subpc-dispatch-poller.sh`）が定期的に呼ぶ */
 export async function runReleaseFixSweep(): Promise<SweepResult> {
   const active = await db.releaseFixSeries.findMany({
-    where: { status: { in: ["issue_created", "fix_in_progress", "fix_merged", "awaiting_decision", "rebuilding", "reverifying"] } },
+    where: {
+      OR: [
+        { status: { in: ["issue_created", "fix_in_progress", "fix_merged", "awaiting_decision", "rebuilding", "reverifying"] } },
+        // 候補の取りこぼしで「足すものがない」と止まった系列は、修正後に同じ元候補で再評価する（#4422）
+        { status: "stopped", stopReason: NOTHING_TO_ADD_REASON },
+      ],
+    },
     orderBy: { createdAt: "asc" },
     take: 100,
   });

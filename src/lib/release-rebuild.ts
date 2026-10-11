@@ -27,12 +27,26 @@ export type ReleaseRebuildCandidate = {
   aheadBy: number;
   /** そのうちPRのマージとして読み取れたもの（バンプPRは除く） */
   pullRequests: ReleaseRebuildPullRequest[];
+  /**
+   * 取得が最後まで済んだか（#4422）。ページ数の上限で打ち切ったときはfalse。falseの間は
+   * 「候補なし」「既に含まれる」と断定せず、取り込み済みかどうかの判定を保留する。未指定はtrue扱い
+   */
+  complete?: boolean;
 };
 
 /** `GET /repos/{owner}/{repo}/compare/{base}...{head}`の`commits[]`のうち使う部分 */
 export type CompareCommit = { sha?: string; commit: { message: string } };
 
 const MERGE_SUBJECT = /^Merge pull request #(\d+) from [^/\s]+\/(\S+)/;
+
+/**
+ * リリースに関わるブランチ名か（#4422）。バンプPR・リリースPRに加え、旧形式の
+ * develop→mainのリリースPR（headが`develop`・`main`）も追加候補にしない。
+ * ここは名前での粗い除外で、実際のbaseは`fetchReleaseRebuildCandidate`が確認する
+ */
+export function isReleaseBranch(branch: string): boolean {
+  return branch.startsWith("release/v") || branch.startsWith("release-main/v") || branch === "develop" || branch === "main";
+}
 
 /**
  * 比較結果のコミットから、developへマージされたPRを取り出す。
@@ -48,7 +62,7 @@ export function parseRebuildPullRequests(commits: CompareCommit[]): ReleaseRebui
     const match = MERGE_SUBJECT.exec(subject);
     if (!match) continue;
     const branch = match[2];
-    if (branch.startsWith("release/v") || branch.startsWith("release-main/v")) continue;
+    if (isReleaseBranch(branch)) continue;
     const title = rest.map((line) => line.trim()).find((line) => line !== "") ?? subject;
     const issueMatch = /^issue-(\d+)$/.exec(branch);
     pullRequests.push({
@@ -64,7 +78,7 @@ export function parseRebuildPullRequests(commits: CompareCommit[]): ReleaseRebui
 /** バンプPR・リリースPRのマージコミットか。作り直しの「新しい変更」には数えない */
 function isReleaseMergeCommit(message: string): boolean {
   const match = MERGE_SUBJECT.exec(message.split("\n")[0] ?? "");
-  return match !== null && (match[2].startsWith("release/v") || match[2].startsWith("release-main/v"));
+  return match !== null && isReleaseBranch(match[2]);
 }
 
 /**
@@ -75,8 +89,9 @@ function isReleaseMergeCommit(message: string): boolean {
  * 「後に入った変更がある」が常に真になり、押せない条件が効かなくなるため除く。
  * workflow側の判定（バンプPRのマージコミットより後のコミット数）と同じ意味になる。
  */
-export function buildRebuildCandidate(commits: CompareCommit[]): ReleaseRebuildCandidate {
+export function buildRebuildCandidate(commits: CompareCommit[], complete = true): ReleaseRebuildCandidate {
   return {
+    ...(complete ? {} : { complete: false }),
     aheadBy: commits.filter(({ commit }) => !isReleaseMergeCommit(commit.message)).length,
     pullRequests: parseRebuildPullRequests(commits),
   };
