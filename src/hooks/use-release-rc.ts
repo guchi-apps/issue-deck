@@ -2,13 +2,26 @@
 
 import { useCallback, useEffect, useState } from "react";
 
+import type { RcFinalizationOverview } from "@/lib/release-finalize-run";
 import type { RcOverview } from "@/lib/release-rc-run";
+
+/** 候補の状況に、公開準備（#4496）の状況を足したもの。公開準備の無い応答（旧い応答）でも読める */
+export type RcOverviewWithFinalization = RcOverview & { finalization?: RcFinalizationOverview | null };
 
 const ACTIVE_POLL_MS = 10_000;
 const RETRY_POLL_MS = 30_000;
 
 /** 作成・更新・検証が動いている状態。この間だけ短い間隔で取り直す */
-const ACTIVE_STATUSES = new Set(["creating", "fixing", "awaiting_verification", "verifying"]);
+const ACTIVE_STATUSES = new Set([
+  "creating",
+  "fixing",
+  "awaiting_verification",
+  "verifying",
+  "preparing",
+  "awaiting_approval",
+  "deploying",
+  "verifying_production",
+]);
 
 /**
  * リリース候補（#4495）の状況。本番PR詳細から、そのPRに対応する候補（過去のものも含む）と、
@@ -20,9 +33,9 @@ export function useReleaseRc(
   pullRequestNumber: number,
   enabled: boolean,
   reloadToken = 0,
-): { overview: RcOverview | null; error: string | null; reload: () => void } {
+): { overview: RcOverviewWithFinalization | null; error: string | null; reload: () => void } {
   const key = `${repositoryFullName}#${pullRequestNumber}`;
-  const [loaded, setLoaded] = useState<{ key: string; overview: RcOverview } | null>(null);
+  const [loaded, setLoaded] = useState<{ key: string; overview: RcOverviewWithFinalization } | null>(null);
   const [failure, setFailure] = useState<{ key: string; message: string } | null>(null);
   const [localReload, setLocalReload] = useState(0);
   const reload = useCallback(() => setLocalReload((n) => n + 1), []);
@@ -39,7 +52,7 @@ export function useReleaseRc(
       try {
         const res = await fetch(`/api/repositories/release/rc?${params.toString()}`, { signal: controller.signal });
         if (!res.ok) throw new Error(`リリース候補の状況を取得できませんでした (${res.status})`);
-        const body: RcOverview = await res.json();
+        const body: RcOverviewWithFinalization = await res.json();
         setLoaded({ key, overview: body });
         setFailure(null);
         if (body.candidate && ACTIVE_STATUSES.has(body.candidate.status.status)) delay = ACTIVE_POLL_MS;

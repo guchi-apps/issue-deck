@@ -285,6 +285,77 @@ describe("decideCompletionMerge", () => {
   });
 });
 
+describe("公開準備（正式バンプ。#4496）との接続", () => {
+  const finalized = { phase: "awaiting_approval", applied: { preHeadSha: "head1", finalHeadSha: "head2", finalBaseSha: "base1" } };
+
+  it("記録したバンプ前→バンプ後のheadの更新だけを後継として追う", () => {
+    const decision = decideReleaseCompletion(run(), {
+      now,
+      candidate: { ...openCandidate, headSha: "head2" },
+      series: null,
+      checks: passed,
+      finalization: finalized,
+    });
+    expect(decision).toEqual({ action: "follow_successor", prNumber: 10, headSha: "head2", baseSha: "base1" });
+  });
+
+  it("バンプとして記録していないhead変更は、従来どおり候補の変更として止める", () => {
+    const decision = decideReleaseCompletion(run(), {
+      now,
+      candidate: { ...openCandidate, headSha: "other" },
+      series: null,
+      checks: passed,
+      finalization: finalized,
+    });
+    expect(decision).toMatchObject({ action: "stop", reason: "candidate_changed" });
+    // バンプ前のheadが系列の記録と違う（別のバンプ）場合も追わない
+    const otherBase = decideReleaseCompletion(run({ candidateHeadSha: "head0" }), {
+      now,
+      candidate: { ...openCandidate, headSha: "head2" },
+      series: null,
+      checks: passed,
+      finalization: finalized,
+    });
+    expect(otherBase).toMatchObject({ action: "stop", reason: "candidate_changed" });
+  });
+
+  it("新方式の候補は、公開準備と最終検証が済むまで承認待ち・マージ評価へ進めない", () => {
+    const notReady = { phase: "review", applied: null };
+    expect(decideReleaseCompletion(run(), { now, candidate: openCandidate, series: null, checks: passed, finalization: notReady })).toMatchObject({
+      action: "wait",
+      status: "awaiting_approval",
+    });
+    const preparing = { phase: "preparing", applied: { preHeadSha: "h0", finalHeadSha: "head1", finalBaseSha: "base1" } };
+    expect(decideReleaseCompletion(run(), { now, candidate: openCandidate, series: null, checks: passed, finalization: preparing }).action).toBe("wait");
+    const ready = { phase: "awaiting_approval", applied: { preHeadSha: "h0", finalHeadSha: "head1", finalBaseSha: "base1" } };
+    expect(decideReleaseCompletion(run(), { now, candidate: openCandidate, series: null, checks: passed, finalization: ready })).toEqual({ action: "evaluate_merge" });
+  });
+
+  it("旧方式の候補（公開準備なし）は従来どおり評価へ進む", () => {
+    expect(decideReleaseCompletion(run(), { now, candidate: openCandidate, series: null, checks: passed })).toEqual({ action: "evaluate_merge" });
+  });
+
+  it("マージ直前も、最終検証に合格したバンプ後のheadでなければ待つ", () => {
+    const observation: CompletionMergeObservation = {
+      now,
+      pullRequest: { number: 10, state: "open", merged: false, baseRef: "main", headRef: "release-rc/3", headSha: "head1", baseSha: "base1", mergeable: true, labels: [] },
+      mainSha: "base1",
+      gateStatus: "ready",
+      gateReasons: [],
+      macOk: true,
+      ciState: "success",
+    };
+    const merging = run({ status: "merging" });
+    expect(decideCompletionMerge(merging, { ...observation, finalization: { phase: "review", applied: null } })).toEqual({ action: "wait", reason: "finalization_not_ready" });
+    expect(
+      decideCompletionMerge(merging, { ...observation, finalization: { phase: "preparing", applied: { preHeadSha: "h0", finalHeadSha: "head1", finalBaseSha: "base1" } } }),
+    ).toEqual({ action: "wait", reason: "finalization_not_ready" });
+    expect(
+      decideCompletionMerge(merging, { ...observation, finalization: { phase: "awaiting_approval", applied: { preHeadSha: "h0", finalHeadSha: "head1", finalBaseSha: "base1" } } }),
+    ).toEqual({ action: "merge", expectedHeadSha: "head1" });
+  });
+});
+
 describe("releaseCompletionStageIndex", () => {
   it("6段階の位置を返し、引き継いだ本番復旧は本番反映以降として扱う", () => {
     expect(releaseCompletionStageIndex("investigating")).toBe(0);

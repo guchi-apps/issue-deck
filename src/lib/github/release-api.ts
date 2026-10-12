@@ -1015,6 +1015,22 @@ export async function dispatchReleaseWorkflow(
 }
 
 /**
+ * リリースworkflowを公開準備（#4496）の要求で起動する。`finalize_request`だけを送る。
+ * 対応していないcallerへ送ると422になるので、呼び出し側は`parseFinalizeCallerSupport`で確かめてから呼ぶ
+ */
+export async function dispatchReleaseFinalizeWorkflow(owner: string, repo: string, token: string, finalizeRequest: string): Promise<void> {
+  const url = `${GITHUB_API}/repos/${owner}/${repo}/actions/workflows/${RELEASE_WORKFLOW_FILE}/dispatches`;
+  const res = await githubFetch(url, token, {
+    method: "POST",
+    body: { ref: "develop", inputs: { finalize_request: finalizeRequest } },
+  });
+  if (!res.ok) {
+    const detail = await res.text().catch(() => "");
+    throw new GithubApiError(res.status, `GitHub API request failed: ${res.status} ${url} ${detail}`);
+  }
+}
+
+/**
  * 本番デプロイworkflow（`deploy.yml`）をmainブランチに対して手動起動する（#2020）。
  *
  * **inputは送らない。** 各リポジトリの`deploy.yml`は`workflow_dispatch:`をinput無しで
@@ -1109,4 +1125,64 @@ export async function fetchDeployRunForSha(
     .catch(() => ({}));
   const run = data.workflow_runs?.[0];
   return run?.status ? { status: run.status, conclusion: run.conclusion ?? null } : null;
+}
+
+/** 2つのコミットの間で変わったファイルのパス（#4496。バンプの差分が版・更新履歴だけかを確かめる）。最大3000件 */
+export async function fetchCompareChangedFiles(
+  owner: string,
+  repo: string,
+  base: string,
+  head: string,
+  token: string,
+): Promise<string[]> {
+  const paths: string[] = [];
+  for (let page = 1; page <= 30; page++) {
+    const url = `${GITHUB_API}/repos/${owner}/${repo}/compare/${base}...${head}?per_page=100&page=${page}`;
+    const res = await githubFetch(url, token);
+    if (!res.ok) {
+      const detail = await res.text().catch(() => "");
+      throw new GithubApiError(res.status, `GitHub API request failed: ${res.status} ${url} ${detail}`);
+    }
+    const data: { files?: { filename: string }[] } = await res.json();
+    const files = data.files ?? [];
+    paths.push(...files.map((f) => f.filename));
+    if (files.length < 100) break;
+  }
+  return paths;
+}
+
+/** 指定したref時点のファイルをテキストで読む。無ければnull（#4496。版ファイルの内容の照合に使う） */
+export async function fetchFileTextAtRef(
+  owner: string,
+  repo: string,
+  path: string,
+  ref: string,
+  token: string,
+): Promise<string | null> {
+  const url = `${GITHUB_API}/repos/${owner}/${repo}/contents/${path.split("/").map(encodeURIComponent).join("/")}?ref=${encodeURIComponent(ref)}`;
+  const res = await githubFetch(url, token);
+  if (res.status === 404) return null;
+  if (!res.ok) {
+    const detail = await res.text().catch(() => "");
+    throw new GithubApiError(res.status, `GitHub API request failed: ${res.status} ${url} ${detail}`);
+  }
+  const data: { content?: string; encoding?: string } = await res.json();
+  if (!data.content) return null;
+  return Buffer.from(data.content, data.encoding === "base64" ? "base64" : "utf-8").toString("utf-8");
+}
+
+/** PRを作る（#4496。公開後にmainをdevelopへ同期するPR）。同じhead→baseのPRが既にあるときは422になる */
+export async function createPullRequest(
+  owner: string,
+  repo: string,
+  token: string,
+  input: { title: string; body: string; head: string; base: string },
+): Promise<{ number: number; html_url: string }> {
+  const url = `${GITHUB_API}/repos/${owner}/${repo}/pulls`;
+  const res = await githubFetch(url, token, { method: "POST", body: input });
+  if (!res.ok) {
+    const detail = await res.text().catch(() => "");
+    throw new GithubApiError(res.status, `GitHub API request failed: ${res.status} ${url} ${detail}`);
+  }
+  return res.json();
 }

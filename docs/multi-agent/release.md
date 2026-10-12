@@ -1007,7 +1007,7 @@ main起点の`deploy-recovery/*`ブランチへ取り込む。**`merges`APIは�
   検証・マージゲート・修正系列・完了系列・本番PR詳細は旧方式と新方式の両方を対象にし、凍結ブランチを閉じて消す旧方式の作り直し（#3014）だけが旧方式に限る
 - **revisionは同じブランチへ早送りで積む。** 物理PRは原則変わらず、headが変わるので既存の検証記録（PR番号＋base/head SHA）がそのまま「旧revisionの結果は現在の合格にしない」を満たす。PRを作り直した場合もrevisionの`prNumber`で追える
 - 初回は「headが固定したdevelopのSHAそのもの」、2回目以降は「直前のheadから早送り」のときだけ適用する（`decideRcReport`）。版上げ・範囲外のコミット・履歴の書き換えはここで弾く
-- 候補PRは版を上げる前なので`version-tag-check`が必ず赤になる。**マージ防止としてそのまま残し**、PRはdraftで作る（公開準備#4496で解消する）
+- 候補PRは版を上げる前なので`version-tag-check`が必ず赤になる。**マージ防止としてそのまま残し**、PRはdraftで作る（公開準備で解消する。下の「公開準備（正式バンプ。#4496）」）
 
 ### 状態
 
@@ -1033,7 +1033,7 @@ main起点の`deploy-recovery/*`ブランチへ取り込む。**`merges`APIは�
 
 - 開いている`release-main/v*`の候補は**閉じず、バンプも取り消さない**。その間は新方式の候補を作らない（`legacy_open`）
 - 本番PR詳細に「旧方式の候補」と出し、このまま旧方式で完了させるか「新方式へ移行」を選べる。移行は、候補の先端が`vX.Y.Zをリリースする。`の1コミットのときだけ、その親（版を上げる前の固定点）から新しい候補を作り、作れた後にだけ旧PRを閉じる。作り直し・履歴修復で積まれた候補は固定点を推測しないので移行できない
-- 移行した場合、developには旧方式のバンプが残る。公開準備（#4496）が版を確定するときに整合させる
+- 移行した場合、developには旧方式のバンプが残る。公開準備は版ファイルを**公開済みのmainの内容へ戻してから**書き換えるので、版は整合する。旧バンプが更新履歴ファイルへ足した内容は、その版の文面としてlifecycleが作り直す
 
 ### 公開準備へ渡す契約
 
@@ -1061,11 +1061,60 @@ main起点の`deploy-recovery/*`ブランチへ取り込む。**`merges`APIは�
 
 **未有効化の候補機能を、利用可能な新機能として更新案内へ載せない**（#4551）。生成済み案内が実態と食い違った場合は、develop向けの訂正PRでリリースノートと画面内更新履歴を揃え、生成済み文面の訂正理由をIssueに残す。リリース候補を作り直す際も未有効化の説明を維持する。
 
-**callerの有効化は公開準備（#4496）が入ってから行う。** 新方式の候補が開いている間は旧方式のリリースが止まるため、版を確定して公開する経路が無いうちに有効化すると、移行した候補を公開できなくなる。reusable側の候補モードは任意入力なので、callerを変えない限り配布先・issue-deck自身の挙動は変わらない。
+**callerの有効化は公開準備（#4496。reusable側・サーバー側は実装済み）をcallerへ配線してから行う。** 新方式の候補が開いている間は旧方式のリリースが止まるため、版を確定して公開する経路が無いうちに有効化すると、移行した候補を公開できなくなる。reusable側の候補モードは任意入力なので、callerを変えない限り配布先・issue-deck自身の挙動は変わらない。
 
-段階展開の手順（#4496の後）:
+段階展開の手順（#4496の後。callerには`candidate_request`に加えて`finalize_request`のinputと`finalize-request:`の受け渡しも足す）:
 
 1. issue-deck自身のcaller（`.github/workflows/release-develop-to-main.yml`）へ`candidate_request`のinputと`candidate-request:`の受け渡しを足し、作成・取り込み・取消・旧方式の移行・公開までを確認する
+   - **配線済み（#4567）**: issue-deck自身のcallerには`candidate_request`・`finalize_request`の両inputと`candidate-request:`・`finalize-request:`の受け渡しがある（push・schedule起動では空文字）。通しの確認（作成→取り込み→公開準備→最終CI→本番承認→mainマージ→deploy→稼働版→同期PR、公開前の再試行で版が増えないこと）は実リリースを伴うため、人が実施する
 2. `develop`→`main`のリリースを通し、画面の「新しいタグを切って配る」でタグを切る
 3. 対応させるリポジトリのcallerへ`candidate_request`のinputと受け渡しを足すPRを、リポジトリごとに出す（一括で配らない）
 4. 戻すとき（復帰）は、そのリポジトリのcallerから`candidate_request`を外す。判定が未対応へ戻り、以後は旧方式で動く。作成済みの候補の記録は残り、開いている候補PRは画面から取り消してから旧方式のリリースを起動する
+
+## 公開準備（正式バンプ。#4496）
+
+合格した候補（#4495）だけを、公開の直前に正式バンプする。レビュー・修正の間は版を上げない。
+外部操作は`src/lib/release-finalize-run.ts`、判断は純関数の`src/lib/release-finalize.ts`、画面は`ReleaseRcFinalizePanel`が持つ。
+
+### 流れ
+
+1. 画面の「公開準備へ進む」（`POST /api/repositories/release/finalize`）。押した時点の候補のhead・mainの先端・合格した契約（`buildRcFinalizeContract`）が全て一致するときだけ受け付ける（`decideFinalizeStart`）。要求の時点で段階を`review`→`preparing`へ条件付きで進める
+2. 上げ幅は手動指定（patch/minor/major）か自動判定。**手動指定は要求の時点で版を予約**し、**自動判定はworkflowが差分から判定してバンプしたあと、サーバーが版から上げ幅を逆算して予約**する。予定の版は点線、確定した版は実線で出し、確定前の値を確定済みと混同しない
+3. `finalize-request`（`reusable-release-develop-to-main.yml`の`finalize`ジョブ。`release`ジョブは動かない）が、候補ブランチへ版の書き換え・更新履歴だけの**1コミットを早送りで積む**。最新developの変更は取り込まず、force pushもしない。`version-file`・`version-query`・`bump-command`・`RELEASE_CHANGELOG`/`RELEASE_USAGE`は旧方式と同じ契約で、リポジトリ差異はcallerの設定を読む（`parseFinalizeCallerSupport`）
+4. 報告（`POST /api/dispatch/release-finalize`）は要求キーと結果の種別だけを信じ、早送り・版ファイルの版・変更ファイルをGitHubから取り直して照合する（`decideFinalizeReport`）。届かなくても画面の読み込みで同じ照合をする
+5. 適用したら、バンプ後のheadを`finalize_bump`のrevisionとして記録し（修正工程へ戻っても候補の履歴が途切れない）、候補PRのdraftを解除する。**バンプ後のheadで最終CI・ビルド（`version-tag-check`を含む）が成功し、再実行が必要な検証が全て合格したとき**だけ段階が`awaiting_approval`へ進む（`decideFinalizeReadiness`）
+6. 本番承認・mainマージは既存のPR保護・`release-merge-gate`・リリース完了系列（#4480）を通る。バンプ差分だけで合格・保護を迂回しない
+
+### 検証対象の分離と引継ぎ
+
+- 検証行（`ReleaseVerification`）はPR・base・head・種別が対象のキーで、**バンプ前のheadの行は書き換えない**
+- 引継ぎの判定は`decideInheritedVerification`。引き継ぐのは**バンプ前が合格（未確認範囲なし）で、mainが進んでおらず、バンプの差分が版ファイル（と同じ階層のロック）・更新履歴だけ**のときに限る。iOSの設定・依存関係・その他のコード・設定が変わった場合は再検証する。iOS（Mac）検証が必要なリポジトリ（`macBuildCheck`）は、統合検証をバンプ後のheadで必ず再実行する。判定できなければ再検証する
+- 判定と根拠（元のbase/head・バンプ後のbase/head・変更ファイル・理由）は`ReleaseCandidateFinalization.handoffEvidence`へ残す。検証の読み取り（`listReleaseVerificationRecords`・`listReleaseVerificationDetails`）が、証跡と元の結果が今も合格であることを確かめたうえで**バンプ後の対象に対する派生の記録**として足し、`inheritedFromHeadSha`と「バンプ後のheadで実行した結果ではありません」の注記で区別する。**旧SHAの結果を新SHAの実行結果へ書き換えない**
+- 再検証が必要な種別だけを、バンプ後のheadで依頼する（引き継いだ種別の行は作らない）
+
+### 版の予約（`ReleaseVersionReservation`）
+
+- 起点は常に**mainの版**。developの版は見ない（公開後のdevelopは古いので、起点にすると公開済みの版を「バンプ済み」と誤判定する）
+- 計算した版がタグ・消費済み・他の候補の予約にあれば欠番にして次のpatchへ進める（上書きしない）。同じ版を2候補が取れないことは`@@unique([repositoryFullName, version])`が止める
+- **公開前の失敗・再試行では予約を保ち、版を増やさない。** 候補が既に予約した版でバンプ済みなら、新しいコミットも作らずそのまま確定する。候補を取り消したときは、タグ・main上に無いことを確かめて手放し（`released`。再利用してよい）、あれば消費済みにする
+- mainへマージした版は`consumed`（マージSHA・タグを記録）。以後再利用せず、本番に既に出た版のコード修正には新しい版を付ける
+
+### 失敗・鮮度
+
+- バンプ後の最終CI・再検証が失敗したとき、公開準備の記録が失敗として残り、候補は同じ`review`へ戻る（修正工程）。予約は保つ
+- バンプ後に候補のheadが動いた・mainが進んだときは、公開準備を`superseded`にして`review`へ戻し、検証と承認を取り直す
+- 完了系列（#4480）は、**記録したバンプ前→バンプ後のheadの更新だけ**を後継として追う（`decideReleaseCompletion`の`finalization`。修正系列の`successorHeadSha`と同形）。それ以外のhead変更は従来どおり`candidate_changed`で止まる。新方式の候補は、段階が`awaiting_approval`（公開準備と最終検証が済み）でバンプ後のheadと一致するときだけマージの評価へ進む（`isFinalizationReady`）。公開準備を始めるのは人の操作で、系列は代わりに押さない
+- マージ後は、deployの成功**と稼働中の版の一致**（`decideDeployRecoveryRelease`）を確かめるまで`completed`にしない。失敗・不一致は段階を進めず、既存の本番復旧（#4451）が追う。Web本番とTestFlight配布は別の結果で、build番号は正式版と混ぜない
+
+### 公開後のdevelop整合
+
+- 新方式のバンプはdevelopへ入らない。公開後に、mainをdevelopへ同期するPR（`ensureDevelopSync`）を作る。同期されるまで、次の候補は作らない（`develop_not_synced`）
+- 共有workflowの状態判定は、**developの版がmainより古い**ときを「バンプ済み」とみなさない（古いリリースPRを作らない）
+
+### 二重実行しない
+
+要求キーのユニーク制約・同じ候補への未完了を1本に絞る`pendingKey`・段階と状態の条件付き更新・早送りのみのpush・版の予約のユニーク制約・同じheadでバンプ済みなら何もしない、で重ねる。workflowの途中失敗・再起動・報告の重複・画面の二重押しで、バンプ・マージ・タグ・deployは二重に実行されない。
+
+### 範囲外（別Issue）
+
+callerへの`finalize_request`の配線と実リポジトリでの通し確認（段階展開）、TestFlight配布結果の記録は含まない。

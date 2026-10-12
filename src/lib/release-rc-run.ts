@@ -58,7 +58,7 @@ import { listReleaseVerificationRecords, registerReleaseVerification } from "@/l
  * - 旧方式（`release-main/v*`）の候補は閉じず、バンプも取り消さない。移行は明示的な操作だけで行う
  */
 
-type Context = { owner: string; repo: string; token: string };
+export type Context = { owner: string; repo: string; token: string };
 
 const fullNameOf = (ctx: Context) => `${ctx.owner}/${ctx.repo}`;
 
@@ -122,9 +122,9 @@ export type RcOverview = {
   legacy: RcLegacyCandidate | null;
 };
 
-type CandidateRow = NonNullable<Awaited<ReturnType<typeof loadCandidateRow>>>;
+export type CandidateRow = NonNullable<Awaited<ReturnType<typeof loadCandidateRow>>>;
 
-async function loadCandidateRow(where: { id: string } | { activeKey: string }) {
+export async function loadCandidateRow(where: { id: string } | { activeKey: string }) {
   return db.releaseCandidate.findUnique({ where, include: { revisions: { orderBy: { revision: "asc" } } } });
 }
 
@@ -147,12 +147,12 @@ function toRevisionView(row: CandidateRow["revisions"][number]): RcRevisionView 
   };
 }
 
-async function callerSupport(ctx: Context): Promise<RcCallerSupport> {
+export async function callerSupport(ctx: Context): Promise<RcCallerSupport> {
   return parseRcCallerSupport(await fetchReleaseCallerText(ctx.owner, ctx.repo, ctx.token).catch(() => null));
 }
 
 /** 候補ブランチをheadとするmain向けのPR（新しい順の先頭）。PRを作り直していても同じブランチなら追える */
-async function observeCandidatePullRequest(ctx: Context, sequence: number) {
+export async function observeCandidatePullRequest(ctx: Context, sequence: number) {
   const prs = await fetchPullRequestsByHead(ctx.owner, ctx.repo, rcBranchName(sequence), "main", ctx.token);
   return prs.find((pr) => pr.state === "open") ?? prs[0] ?? null;
 }
@@ -412,7 +412,8 @@ export type RcMutationError =
   | "empty_selection"
   | "not_cancellable"
   | "not_migratable"
-  | "legacy_changed";
+  | "legacy_changed"
+  | "develop_not_synced";
 
 export type RcMutationResult =
   | { ok: true; candidateId: string; revision: number; existing: boolean }
