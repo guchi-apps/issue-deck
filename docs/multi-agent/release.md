@@ -140,6 +140,15 @@ pushすると、修正がmainにだけ残りdevelopから消え、次のリリ�
 選んだPRのマージ差分だけを足した状態からバンプする（元の候補は後継のリリースPRを作れてから閉じる）。
 仕組み・検証・失敗時の扱いは[release-verification.md](release-verification.md)「PRを選んだ作り直し」を参照。
 
+**作り直しの履歴は、リリース作成中だけ表示・保持する（#4420）。** 履歴（`ReleaseRebuildEvent`）の保存・表示は
+リポジトリ名で引く全リポジトリ共通の処理で、完了の判定と削除も共通。完了＝`main`へマージ済みのリリースPR
+（`release-main/v*`）。iOSアプリのあるリポジトリ（`webview-ios-repos.ts`）は、そのマージコミットへTestFlight配布
+済みタグ（`ios-testflight/<ビルド番号>`）が付くまで完了にしない（更新不要でタグが付かない版は、後の版の配布で
+まとめて完了になる）。判定はサブPCのpollerが`POST /api/repositories/release/rebuild-history/sweep`を巡回して行い、
+完了したリリースPR番号を`ReleaseRebuildHistoryCutoff`へ記録する。**境界以下の経過は表示せず、イベントも削除する**
+（既に完了済みの分も次の巡回で消える）。完了したリリースPRは、main向けのclosed PRを番号の降順に1ページ100件で遡って探す。作り直しで閉じた候補がclosed PRに積もり、直近30件だけでは古い完了リリースへ届かず履歴が残り続けたため（#4474）。遡るのは、完了したリリースPRが見つかるか、残っている履歴の最小の元候補番号（それより古いリリースはどの経過も完了にできない）に達するまでで、上限は10ページ。`ReleaseFixSeries`は別機能が使うので消さず、境界で「操作経路不明」の補完だけを
+止める。後継候補が境界を超えている作成中の経過・新しいリリースの経過は対象外。失敗・停止中の履歴は完了まで残る。
+
 ### リリース準備の失敗は、Issueではなくリリース画面に出す（#4335）
 
 `release`ジョブが失敗すると、`notify-failure`は**run番号だけ**を`POST /api/dispatch/release-preparation`

@@ -110,3 +110,18 @@ describe("操作不要の判定と工程（#4428）", () => {
     expect([0, 1, 2, 3, 4, 5, 6].map(releaseFixPhaseIndex)).toEqual([0, 0, 0, 1, 1, 2, 3]);
   });
 });
+
+describe("内部確認の保留（#4410）", () => {
+  it("内部確認が済まないまま修正PRが現れた判断待ちは、無関係な変更の確認とは別の表示にする", () => {
+    const overview = describeFixOverview({
+      series: { ...series("awaiting_decision"), stopReason: "内部確認: 独立レビューが未実施です。内部確認が完了するまで修正を候補へ取り込みません" },
+      checks: checks(),
+    });
+    expect(overview.pill).toBe("内部確認が必要");
+    expect(overview.action.kind).toBe("view_progress");
+  });
+  it("無関係な変更の判断待ちは従来どおり", () => {
+    const overview = describeFixOverview({ series: { ...series("awaiting_decision"), stopReason: "修正と無関係な変更（#1）が入りました" }, checks: checks() });
+    expect(overview.action.kind).toBe("accept_extra");
+  });
+});

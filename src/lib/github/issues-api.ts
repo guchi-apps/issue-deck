@@ -330,6 +330,29 @@ export async function fetchIssueState(
 }
 
 /**
+ * `fetchIssueState`と違い、**「存在しない（404・410）」と「取得に失敗した」を区別する。**
+ * 存在しなければ`null`、401を含むそれ以外の非成功応答（403・429・5xxなど）と、200でも本文が不正（JSONでない・
+ * stateがopen/closedでない）な応答は`GithubApiError`を投げる（#4488）。
+ * 取得失敗を「存在しない」と読んで新しいIssueを作る、といった誤判定を避けたい呼び出し側が使う。
+ */
+export async function fetchIssueStateOrThrow(
+  owner: string,
+  repo: string,
+  number: number,
+  token: string,
+): Promise<"open" | "closed" | null> {
+  const url = `${GITHUB_API}/repos/${owner}/${repo}/issues/${number}`;
+  const res = await githubFetch(url, token);
+  if (res.status === 404 || res.status === 410) return null;
+  if (!res.ok) throw new GithubApiError(res.status, `GitHub API request failed: ${res.status} ${url}`);
+  // 200でも本文が読めない・stateが想定外なら「存在しない」ではなく取得失敗として投げる（不存在と読むと新しいIssueを作る）
+  const issue: { state?: unknown } | null = await res.json().catch(() => null);
+  const state = issue && typeof issue === "object" ? issue.state : undefined;
+  if (state === "open" || state === "closed") return state;
+  throw new GithubApiError(res.status, `GitHub API returned an unreadable issue state: ${url}`);
+}
+
+/**
  * Issue本文の**現在の実物**を読む。取得できなければ`null`（401は`fetchIssueState`と同じく投げる）。
  *
  * 手作業Issueの自動整形（#4039）が、書き戻す直前に「整形に使った本文から変わっていないか」を

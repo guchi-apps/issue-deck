@@ -3,7 +3,9 @@ import { describe, expect, it } from "vitest";
 import {
   buildRebuildEpisodes,
   decideAutoRebuildTrigger,
+  decideCompletedThroughPr,
   excludedFromSelection,
+  isEpisodeCompleted,
   rebuildEventKey,
   unapprovedPrs,
   type RebuildEventView,
@@ -110,5 +112,47 @@ describe("rebuildEventKey", () => {
     expect(a).toBe(rebuildEventKey.approval("o/r", 1, "s", [1, 2], ["a", "b"]));
     expect(a).not.toBe(rebuildEventKey.approval("o/r", 1, "s", [1, 2, 3], ["a", "b"]));
     expect(rebuildEventKey.stop("s1", "stopped", "理由")).toBe(rebuildEventKey.stop("s1", "stopped", "理由"));
+  });
+});
+
+describe("完了したリリースの判定（#4420）", () => {
+  it("iOSが無いリポジトリは、マージ済みの最大のリリースPRまでが完了になる", () => {
+    expect(
+      decideCompletedThroughPr({
+        mergedReleasePrs: [
+          { number: 10, mergeSha: null },
+          { number: 14, mergeSha: null },
+        ],
+        requiresIosDelivery: false,
+        deliveredShas: new Set(),
+      }),
+    ).toBe(14);
+  });
+
+  it("マージ済みのリリースPRが無ければ完了にしない", () => {
+    expect(
+      decideCompletedThroughPr({ mergedReleasePrs: [], requiresIosDelivery: false, deliveredShas: new Set() }),
+    ).toBeNull();
+  });
+
+  it("iOSのあるリポジトリは、TestFlight配布済みになるまで完了にしない", () => {
+    const base = {
+      mergedReleasePrs: [
+        { number: 10, mergeSha: "a" },
+        { number: 14, mergeSha: "b" },
+      ],
+      requiresIosDelivery: true,
+    };
+    expect(decideCompletedThroughPr({ ...base, deliveredShas: new Set() })).toBeNull();
+    expect(decideCompletedThroughPr({ ...base, deliveredShas: new Set(["a"]) })).toBe(10);
+    expect(decideCompletedThroughPr({ ...base, deliveredShas: new Set(["b"]) })).toBe(14);
+  });
+
+  it("元候補も後継候補も境界以下の経過だけ完了とし、作成中の後継は巻き込まない", () => {
+    const successor = (number: number) => ({ number, headSha: null, baseSha: null });
+    expect(isEpisodeCompleted({ originPrNumber: 10, successor: successor(12) }, 12)).toBe(true);
+    expect(isEpisodeCompleted({ originPrNumber: 10, successor: successor(13) }, 12)).toBe(false);
+    expect(isEpisodeCompleted({ originPrNumber: 20, successor: null }, 12)).toBe(false);
+    expect(isEpisodeCompleted({ originPrNumber: 10, successor: null }, null)).toBe(false);
   });
 });

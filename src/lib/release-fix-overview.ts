@@ -1,3 +1,4 @@
+import { isInternalHoldReason } from "@/lib/release-fix-internal";
 import type { ReleaseFixStatus } from "@/lib/release-fix-series";
 
 /**
@@ -142,6 +143,10 @@ export function describeFixOverview(input: {
   }
   if (series?.status === "reverifying" || (series?.successorPrNumber != null && checks && (isBusy(checks.aiReview.state) || isBusy(checks.integration.state)))) {
     return { ...base, tone: "progress", pill: "チェック中", headline: "修正後のチェックを実行しています", detail: "結果が出ると、この表示が更新されます。", action: { kind: "view_progress", label: OVERVIEW_ACTION_LABEL.view_progress }, autoProgress: true };
+  }
+  // 内部確認（#4410）が済まないまま修正PRが現れた。無関係な変更の確認（accept_extra）とは別なので、操作を出し分ける
+  if (series?.status === "awaiting_decision" && isInternalHoldReason(series.stopReason)) {
+    return { ...base, tone: "warn", pill: "内部確認が必要", headline: "修正の内部確認が完了していないため、リリースへの反映を保留しています", detail: series.stopReason, action: act("view_progress") };
   }
   if (series?.status === "awaiting_decision") {
     return { ...base, tone: "warn", pill: "あなたの操作が必要", headline: "修正の続行に、あなたの判断が必要です", detail: series.stopReason, action: act("accept_extra") };

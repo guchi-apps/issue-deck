@@ -20,6 +20,7 @@ vi.mock("@/lib/db", () => ({
 vi.mock("@/lib/dispatch/jobs", () => ({ expireStaleDispatchJobs: vi.fn().mockResolvedValue(0) }));
 vi.mock("@/lib/dispatch/wake-notify", () => ({ notifyDispatchHostWake: vi.fn() }));
 
+const { RELEASE_VERIFICATION_REPOS } = await import("@/lib/release-verification-config");
 const { applyReleaseVerifyReport, buildReleaseVerifyActiveKey, requestReleaseVerifyJob } = await import(
   "./release-verify-jobs"
 );
@@ -57,10 +58,28 @@ describe("requestReleaseVerifyJob", () => {
   });
 
   it("前提が未整備のリポジトリはジョブを積まず、failedで理由を残す", async () => {
+    const repo = "guchi-apps/gap-fixture";
+    (RELEASE_VERIFICATION_REPOS as Record<string, unknown>)[repo] = {
+      enforced: false,
+      integrationCommands: ["npm ci"],
+      setupGaps: ["テスト用の前提不足"],
+    };
+    try {
+      const result = await requestReleaseVerifyJob({ ...target, repoFullName: repo }, NOW);
+      expect(result).toMatchObject({ ok: false, rejection: "not_configured" });
+      expect(jobCreate).not.toHaveBeenCalled();
+      expect(verificationUpdateMany.mock.calls[0][0].data).toMatchObject({ state: "failed" });
+    } finally {
+      delete (RELEASE_VERIFICATION_REPOS as Record<string, unknown>)[repo];
+    }
+  });
+
+  it("前提不足の無いasset-managerは静的に止まらず、検証ジョブを積める", async () => {
+    hostFindMany.mockResolvedValue([host({ repositories: JSON.stringify(["guchi-apps/asset-manager"]) })]);
+    jobCreate.mockResolvedValue({ id: "job1" });
     const result = await requestReleaseVerifyJob({ ...target, repoFullName: "guchi-apps/asset-manager" }, NOW);
-    expect(result).toMatchObject({ ok: false, rejection: "not_configured" });
-    expect(jobCreate).not.toHaveBeenCalled();
-    expect(verificationUpdateMany.mock.calls[0][0].data).toMatchObject({ state: "failed" });
+    expect(result).not.toMatchObject({ rejection: "not_configured" });
+    expect(jobCreate).toHaveBeenCalled();
   });
 
   it("根拠付きの対象外（アーカイブ等）だけがnot_applicableになる", async () => {
