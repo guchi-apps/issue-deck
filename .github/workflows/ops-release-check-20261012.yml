@@ -1,0 +1,34 @@
+name: Inspect release verification 20261012
+on:
+  push:
+    branches: [ops/release-check-20261012-2216]
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Read current release verification records
+        uses: appleboy/ssh-action@v1
+        env:
+          TARGET_DIR: ${{ secrets.TARGET_DIR }}
+        with:
+          host: ${{ secrets.HOST }}
+          username: ${{ secrets.USERNAME }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: ${{ secrets.SSH_PORT }}
+          envs: TARGET_DIR
+          script: |
+            set -euo pipefail
+            cd "$TARGET_DIR"
+            node --env-file=.env --input-type=module <<'NODE'
+            import { PrismaClient } from '@prisma/client';
+            const db = new PrismaClient();
+            try {
+            for (const [repoFullName, prNumber] of [['guchi-apps/asset-manager',745],['guchi-apps/issue-deck',4555],['guchi-apps/pi0w',21]]) {
+            const rows = await db.releaseVerification.findMany({where:{repoFullName,prNumber},orderBy:{updatedAt:'desc'},select:{kind:true,state:true,baseSha:true,headSha:true,agent:true,summary:true,findings:true,unverifiedScope:true,evidenceUrl:true,message:true,updatedAt:true}});
+            console.log(JSON.stringify({repoFullName,prNumber,rows}));
+            }
+            } finally {await db.$disconnect();}
+            NODE
