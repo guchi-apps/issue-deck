@@ -22,7 +22,10 @@ vi.mock("@/lib/db", () => ({
     releasePreparationFailure: { upsert: mocks.failureUpsert, updateMany: mocks.failureUpdateMany, findMany: mocks.failureFindMany },
   },
 }));
-vi.mock("@/lib/release-rebuild-history-run", () => ({ observeRebuildSuccessor: vi.fn(async () => 0) }));
+vi.mock("@/lib/release-rebuild-history-run", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/lib/release-rebuild-history-run")>(),
+  observeRebuildSuccessor: vi.fn(async () => 0),
+}));
 vi.mock("@/lib/github/app-auth", () => ({ getInstallationToken: vi.fn(async () => "token") }));
 vi.mock("@/lib/github/actions-api", () => ({
   fetchWorkflowRun: mocks.fetchWorkflowRun,
@@ -35,7 +38,7 @@ vi.mock("@/lib/github/issues-api", () => ({
   fetchCommentsForIssue: mocks.fetchCommentsForIssue,
   removeIssueLabel: mocks.removeIssueLabel,
 }));
-vi.mock("@/lib/github/pull-requests-api", () => ({ fetchClosedPullRequestsForBase: mocks.fetchClosed }));
+vi.mock("@/lib/github/pull-requests-api", () => ({ fetchClosedPullRequestsForBasePage: mocks.fetchClosed, CLOSED_PAGED_PER_PAGE: 100 }));
 vi.mock("@/lib/github/pagination", () => ({ fetchAllPages: mocks.fetchAllPages }));
 
 import { reconcileReleasePreparationFailures, recordReleasePreparationFailure, resolveReleasePreparation } from "@/lib/release-preparation-run";
@@ -168,6 +171,15 @@ describe("reconcileReleasePreparationFailures（#4450）", () => {
     expect(mocks.failureUpdateMany).not.toHaveBeenCalled();
     expect(spy).toHaveBeenCalled();
     spy.mockRestore();
+  });
+
+  it("閉じた候補100件より古い本番公開も次ページで照合する", async () => {
+    mocks.failureFindMany.mockResolvedValue([row()]);
+    mocks.fetchClosed.mockImplementation(async (_owner: string, _repo: string, _base: string, _token: string, page: number) =>
+      page === 1 ? Array.from({ length: 100 }, (_, i) => pr(4600 - i, null)) : [pr(4449, "2026-10-12T00:00:00Z")],
+    );
+    expect(await reconcileReleasePreparationFailures("o/r")).toBe(1);
+    expect(mocks.fetchClosed).toHaveBeenCalledWith("o", "r", "main", "token", 2);
   });
 
   it("再試行などで記録が更新済みなら（updatedAtが変わっていれば）解決しない", async () => {
