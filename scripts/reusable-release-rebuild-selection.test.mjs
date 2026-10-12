@@ -355,3 +355,92 @@ describe("PRを選んだ作り直し（#4335）", () => {
     expect(outputs).toMatchObject({ need_main_pr: "false", close_origin: "" });
   });
 });
+
+describe("履歴だけの修正を選んだ作り直し（#4452）", () => {
+  const view = (origin) =>
+    JSON.stringify({ state: "OPEN", baseRefName: "main", headRefName: "release-main/v1.1.0", headRefOid: origin });
+  const selection = (origin, prs) => JSON.stringify({ origin: { pr: 99, headSha: origin }, prs });
+
+  /** mainと同じ内容（history.txt）を持つ候補と、mainに積まれた別コミット */
+  function setupHistory() {
+    mergePullRequest("issue-5", 10, writeFile("history.txt", "H\n"));
+    const bump = mergeBump("1.1.0", 11, "# v1.1.0\n# v1.0.0\n");
+    const origin = git("rev-parse", `${bump}^2`).trim();
+    const mainBase = git("rev-parse", "origin/main").trim();
+    git("checkout", "-q", "-b", "mainline", mainBase);
+    writeFileSync(path.join(gitDir, "history.txt"), "H\n");
+    git("add", "-A");
+    git("commit", "-q", "-m", "mainの変更");
+    const mainCommit = git("rev-parse", "HEAD").trim();
+    git("update-ref", "refs/remotes/origin/main", mainCommit);
+    git("checkout", "-q", "develop");
+    return { origin, mainCommit };
+  }
+  /** mainの祖先を取り込むだけの修正PR（ファイル差分0件）。`strategy`でmainの内容の扱いを変えられる */
+  function mergeHistoryFix(number, strategy = []) {
+    git("checkout", "-q", "-b", `issue-${number}`, "develop");
+    git("merge", "-q", ...strategy, "mainline", "-m", "mainを取り込む");
+    git("checkout", "-q", "develop");
+    git("merge", "-q", "--no-ff", `issue-${number}`, "-m", `Merge pull request #${number} from guchi-apps/issue-${number}`, "-m", "履歴のみの修正");
+    return git("rev-parse", "HEAD").trim();
+  }
+
+  it("ファイル差分0件でも、mainの祖先だけを足して後継を作り、選んでいないdevelopの変更は入らない", () => {
+    const { origin, mainCommit } = setupHistory();
+    const fix = mergeHistoryFix(40);
+    mergePullRequest("issue-41", 41, writeFile("unrelated.txt", "B\n"));
+
+    const outputs = runState({
+      REBUILD_SELECTION: selection(origin, [{ number: 40, mergeSha: fix }]),
+      STUB_GH_PR_VIEW: view(origin),
+    });
+    expect(outputs).toMatchObject({ need_bump: "true", develop_ref: "rebuild-preview", selective: "true", rebuild_from: origin });
+    // 内容は元の候補のまま
+    expect(git("rev-parse", "rebuild-preview^{tree}").trim()).toBe(git("rev-parse", `${origin}^{tree}`).trim());
+    expect(show("rebuild-preview", "unrelated.txt")).toBeNull();
+    // mainの祖先は入り、修正のマージコミット（developの履歴）は入らない
+    expect(() => git("merge-base", "--is-ancestor", mainCommit, "rebuild-preview")).not.toThrow();
+    expect(() => git("merge-base", "--is-ancestor", fix, "rebuild-preview")).toThrow();
+    expect(git("log", "-1", "--format=%s", "rebuild-preview").trim()).toBe("履歴修復: mainの祖先を取り込む（#40・内容変更なし）");
+    // 後継の凍結とdevelopへのバンプも通り、選んだ行に履歴の取り込みが載る
+    const body = runBump({
+      DEV_VERSION: "1.1.0",
+      REBUILD_FROM: outputs.rebuild_from,
+      REBUILD_REVERTS: outputs.rebuild_reverts,
+      DEVELOP_REF: "rebuild-preview",
+      SELECTIVE: "true",
+      REBUILD_SELECTION: selection(origin, [{ number: 40, mergeSha: fix }]),
+    });
+    expect(git("ls-remote", "origin", "refs/heads/release-candidate/v1.1.1")).not.toBe("");
+    expect(body).toContain("#40");
+    // 候補はmainの先端を祖先に持つので、mainとのマージで競合しない
+    expect(() => git("merge-base", "--is-ancestor", "origin/main", "rebuild-preview")).not.toThrow();
+  });
+
+  it("足すべきmainの祖先が無く内容も同じなら、取り込み済みとして止める", () => {
+    const { origin } = setupHistory();
+    git("checkout", "-q", "-b", "issue-42", "develop");
+    git("commit", "-q", "--allow-empty", "-m", "空");
+    git("checkout", "-q", "develop");
+    git("merge", "-q", "--no-ff", "issue-42", "-m", "Merge pull request #42 from guchi-apps/issue-42");
+    const fix = git("rev-parse", "HEAD").trim();
+    const result = runState({
+      REBUILD_SELECTION: selection(origin, [{ number: 42, mergeSha: fix }]),
+      STUB_GH_PR_VIEW: view(origin),
+    });
+    expect(result.failed).toBe(true);
+    expect(result.output).toContain("内容も履歴も既に含まれています");
+  });
+
+  it("履歴が運ぶmainの変更ファイルの内容が候補と食い違うなら、mainの変更を捨てずに止める", () => {
+    const { origin } = setupHistory();
+    mergePullRequest("issue-43", 43, writeFile("history.txt", "H3\n"));
+    const fix = mergeHistoryFix(44, ["-s", "ours"]);
+    const result = runState({
+      REBUILD_SELECTION: selection(origin, [{ number: 44, mergeSha: fix }]),
+      STUB_GH_PR_VIEW: view(origin),
+    });
+    expect(result.failed).toBe(true);
+    expect(result.output).toContain("内容が元の候補 #99 と食い違います（history.txt");
+  });
+});
