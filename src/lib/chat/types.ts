@@ -1,3 +1,4 @@
+import type { EpicDraft } from "@/lib/epic-draft/types";
 import type { RepairKind } from "@/lib/github/pull-request-repair";
 
 /** 修正依頼の種類。`code`はPRのブランチへのpush、`metadata`はPR本文・Issue本文の追跡情報だけ（pushしない） */
@@ -123,6 +124,17 @@ export type ChatConfirmCard =
       body: string;
       /** 起案前に見つかった、同じ話題の既存Issue（重複確認。#4045） */
       duplicates?: { number: number; title: string; htmlUrl: string; state: string }[];
+    }
+  | {
+      /**
+       * 親子Issue案（#4537）。「実行する」の確認APIで、親・子・GitHubの親子関係・実行計画をまとめて登録する。
+       * Slackの通常起案は承認なしで同じ共通サービスを呼ぶ（`src/lib/epic-draft/`）。
+       */
+      type: "confirm_epic";
+      repo: string;
+      draft: EpicDraft;
+      /** 起案前に見つかった、子ごとの同じ話題の既存Issue（`existing`未指定の子だけ） */
+      duplicates?: Record<string, { number: number; title: string; htmlUrl: string; state: string }[]>;
     }
   | {
       /** 合意した方針で同じPRを直すよう、紐づくIssueへ依頼を渡す（#4045）。実行系は既存の`@claude`経路 */
