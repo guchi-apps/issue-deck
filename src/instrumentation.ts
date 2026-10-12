@@ -4,6 +4,7 @@
  * - GitHub API消費内訳（src/lib/github/api-usage.ts）とAI API消費内訳
  *   （src/lib/claude/api-usage.ts）をDBへ永続化する仕組みの初期化
  * - 本番プロセスのRSSの見張り（src/lib/process-memory-watch.ts。#2331）
+ * - Slack起案の、処理が途中で止まった依頼の拾い直し（src/lib/slack/intake-resume.ts。#4488）
  */
 export async function register() {
   if (process.env.NEXT_RUNTIME !== "nodejs") return;
@@ -46,4 +47,7 @@ export async function register() {
   const heartbeat = () => void sendAccessHeartbeat();
   setTimeout(heartbeat, 10_000).unref();
   setInterval(heartbeat, 4 * 60_000).unref();
+
+  const { startSlackIntakeResume } = await import("@/lib/slack/intake-resume");
+  startSlackIntakeResume();
 }

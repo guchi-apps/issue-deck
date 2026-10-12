@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   requestUpdate: vi.fn(),
   requestUpdateMany: vi.fn(),
   requestFindUnique: vi.fn(),
+  requestFindMany: vi.fn(),
   eventCreate: vi.fn(),
   userFind: vi.fn(),
   repoFindMany: vi.fn(),
@@ -18,13 +19,14 @@ const mocks = vi.hoisted(() => ({
   createComment: vi.fn(),
 }));
 
-vi.mock("@/lib/db", () => ({
-  db: {
+vi.mock("@/lib/db", () => {
+  const db: Record<string, unknown> = {
     slackIntakeRequest: {
       create: mocks.requestCreate,
       update: mocks.requestUpdate,
       updateMany: mocks.requestUpdateMany,
       findUnique: mocks.requestFindUnique,
+      findMany: mocks.requestFindMany,
     },
     slackProcessedEvent: { create: mocks.eventCreate },
     user: { findUnique: mocks.userFind },
@@ -32,9 +34,11 @@ vi.mock("@/lib/db", () => ({
     issue: { findFirst: mocks.issueFindFirst },
     chatConversation: { create: mocks.convCreate, findUnique: mocks.convFind, update: vi.fn() },
     chatMessage: { create: vi.fn() },
-    $transaction: vi.fn(async () => []),
-  },
-}));
+  };
+  // 対話型トランザクションは同じモックをtxとして渡す（配列形式は何もしない）
+  db.$transaction = vi.fn(async (arg: unknown) => (typeof arg === "function" ? (arg as (tx: unknown) => unknown)(db) : []));
+  return { db };
+});
 vi.mock("@/lib/chat/handlers", () => ({
   handleChatMessage: mocks.handleChatMessage,
   executeConfirmedCard: mocks.executeConfirmedCard,
@@ -45,7 +49,19 @@ vi.mock("@/lib/github/with-user-github-token", () => ({
   withUserGithubToken: async (_u: unknown, _c: string, fn: (t: string) => Promise<unknown>) => ({ value: await fn("gh-token") }),
 }));
 
-import { claimEvent, handleInteraction, handleMessageEvent, type IntakeContext } from "@/lib/slack/intake";
+import {
+  acceptMessageEvent,
+  claimEvent,
+  handleInteraction,
+  handleMessageEvent as handleWithEventId,
+  processPendingRequest,
+  resumeStalePendingRequests,
+  type IntakeContext,
+  type SlackMessageEvent,
+} from "@/lib/slack/intake";
+
+const handleMessageEvent = (c: IntakeContext, teamId: string, event: SlackMessageEvent) =>
+  handleWithEventId(c, teamId, `E-${event.ts}`, event);
 
 const config = {
   signingSecret: "s",
@@ -75,6 +91,7 @@ const baseRequest = {
   confirmState: null as string | null,
   issues: [] as unknown,
   selectorTs: "100.2",
+  updatedAt: new Date("2026-10-12T00:00:00Z"),
 };
 
 const postedTexts = () => call.mock.calls.filter(([m]) => m === "chat.postMessage").map(([, b]) => (b as { text: string }).text);
@@ -83,8 +100,16 @@ const issueCard = { type: "confirm_issue", repo: "guchi-apps/car-care", title: "
 beforeEach(() => {
   vi.clearAllMocks();
   call.mockImplementation(async (method: string) => (method === "chat.getPermalink" ? { permalink: "https://slack.example/p100" } : { ts: "200.1" }));
-  mocks.requestCreate.mockImplementation(async ({ data }: { data: object }) => ({ ...baseRequest, ...data }));
-  mocks.requestUpdate.mockResolvedValue({});
+  // 作った行を以後のfindUniqueで返す（受付→ack後の処理の順に読まれるため）
+  mocks.requestCreate.mockImplementation(async ({ data }: { data: object }) => {
+    const created = { ...baseRequest, permalink: null, selectorTs: null, ...data };
+    mocks.requestFindUnique.mockResolvedValue(created);
+    return created;
+  });
+  mocks.requestUpdate.mockImplementation(async ({ data }: { data: object }) => ({ ...baseRequest, ...data }));
+  mocks.requestUpdateMany.mockResolvedValue({ count: 1 });
+  mocks.requestFindMany.mockResolvedValue([]);
+  mocks.eventCreate.mockResolvedValue({});
   mocks.userFind.mockResolvedValue({ id: "user-1", githubAccessToken: "x", githubRefreshToken: null });
   mocks.repoFindMany.mockResolvedValue([
     { fullName: "guchi-apps/car-care", name: "car-care" },
@@ -131,6 +156,128 @@ describe("イベントの受け付け", () => {
     mocks.eventCreate.mockResolvedValueOnce({}).mockRejectedValueOnce(new Prisma.PrismaClientKnownRequestError("dup", { code: "P2002", clientVersion: "x" }));
     expect(await claimEvent("event:E1", "1.0")).toBe(true);
     expect(await claimEvent("event:E1", "1.0")).toBe(false);
+  });
+});
+
+const dup = () => new Prisma.PrismaClientKnownRequestError("dup", { code: "P2002", clientVersion: "x" });
+
+describe("ack前の受付と、ack後の処理の再開（#4488）", () => {
+  it("ack前はDBへの保存だけを行い、処理済み記録と依頼（received）を同じトランザクションで書く", async () => {
+    const accepted = await acceptMessageEvent(config, "T1", "E1", msg({ text: "改善したい" }));
+    expect(accepted).toEqual({ kind: "queued", requestId: "req-1" });
+    expect(mocks.eventCreate).toHaveBeenCalledWith({ data: { eventKey: "event:E1", messageTs: "100.1" } });
+    expect(mocks.requestCreate).toHaveBeenCalledWith({ data: expect.objectContaining({ status: "received", text: "改善したい", parentTs: "100.1" }) });
+    // Slack APIはack前に呼ばない（3秒制限）
+    expect(call).not.toHaveBeenCalled();
+  });
+
+  it("保存前にDBが落ちていたら例外を投げる（受け口が非2xxを返し、Slackが再送する）", async () => {
+    mocks.eventCreate.mockRejectedValueOnce(new Error("connection refused"));
+    await expect(acceptMessageEvent(config, "T1", "E1", msg())).rejects.toThrow("connection refused");
+    mocks.requestCreate.mockRejectedValueOnce(new Error("connection lost"));
+    await expect(acceptMessageEvent(config, "T1", "E1", msg())).rejects.toThrow("connection lost");
+    expect(call).not.toHaveBeenCalled();
+  });
+
+  it("重複配信（同じイベントID・同じ親投稿の別イベント）は依頼を作らず何も投稿しない", async () => {
+    mocks.eventCreate.mockRejectedValueOnce(dup());
+    expect(await acceptMessageEvent(config, "T1", "E1", msg())).toEqual({ kind: "duplicate" });
+    mocks.requestCreate.mockRejectedValueOnce(dup());
+    expect(await acceptMessageEvent(config, "T1", "E2", msg())).toEqual({ kind: "duplicate" });
+    expect(call).not.toHaveBeenCalled();
+  });
+
+  it("ack後に依頼を進めると選択UIを出し、awaiting_repoへ進める", async () => {
+    mocks.requestFindUnique.mockResolvedValue({ ...baseRequest, status: "received", permalink: null, selectorTs: null });
+    await processPendingRequest(ctx, "req-1");
+    expect(mocks.requestUpdateMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: "req-1", status: "received", updatedAt: baseRequest.updatedAt } }),
+    );
+    expect(mocks.requestUpdate).toHaveBeenCalledWith(expect.objectContaining({ data: { permalink: "https://slack.example/p100" } }));
+    expect(mocks.requestUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({ data: { status: "awaiting_repo", selectorTs: "200.1", selectedRepo: null } }),
+    );
+    expect(postedTexts()).toHaveLength(1);
+  });
+
+  it("他で処理中（処理権を取れない）・待ち状態でない・巡回時点でまだ新しい行は進めない", async () => {
+    mocks.requestFindUnique.mockResolvedValue({ ...baseRequest, status: "received" });
+    mocks.requestUpdateMany.mockResolvedValueOnce({ count: 0 });
+    await processPendingRequest(ctx, "req-1");
+    mocks.requestFindUnique.mockResolvedValue({ ...baseRequest, status: "awaiting_repo" });
+    await processPendingRequest(ctx, "req-1");
+    mocks.requestFindUnique.mockResolvedValue({ ...baseRequest, status: "received", updatedAt: new Date("2026-10-12T00:10:00Z") });
+    await processPendingRequest(ctx, "req-1", new Date("2026-10-12T00:05:00Z"));
+    expect(call).not.toHaveBeenCalled();
+  });
+
+  it("ack後にプロセスが止まって受付のまま残った依頼は、巡回が拾い直して選択UIを出す", async () => {
+    const now = new Date("2026-10-12T01:00:00Z");
+    mocks.requestFindMany.mockImplementation(async ({ where }: { where: { status: string } }) =>
+      where.status === "received" ? [{ id: "req-1" }] : [],
+    );
+    mocks.requestFindUnique.mockResolvedValue({ ...baseRequest, status: "received", updatedAt: new Date("2026-10-12T00:00:00Z") });
+    expect(await resumeStalePendingRequests(ctx, now)).toBe(1);
+    expect(mocks.requestFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { status: "received", updatedAt: { lt: new Date("2026-10-12T00:58:00Z") } } }),
+    );
+    expect(mocks.requestFindMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { status: "resuming", updatedAt: { lt: new Date("2026-10-12T00:30:00Z") } } }),
+    );
+    expect(postedTexts().some((t) => t.includes("対象リポジトリ"))).toBe(true);
+  });
+
+  it("調査中（investigating）のまま止まった依頼は、巡回が拾い直して調査をやり直す（Issueは作らない）", async () => {
+    mocks.requestFindMany.mockImplementation(async ({ where }: { where: { status: string } }) =>
+      where.status === "investigating" ? [{ id: "req-1" }] : [],
+    );
+    mocks.requestFindUnique.mockResolvedValue({ ...baseRequest, status: "investigating", selectedRepo: "guchi-apps/car-care" });
+    mocks.handleChatMessage.mockResolvedValue({ text: "案です", cards: [issueCard], needsConfirm: true, nextContext: { repo: "guchi-apps/car-care", targets: [], actions: [] } });
+    expect(await resumeStalePendingRequests(ctx, new Date("2026-10-12T01:00:00Z"))).toBe(1);
+    expect(mocks.handleChatMessage).toHaveBeenCalledTimes(1);
+    expect(mocks.executeConfirmedCard).not.toHaveBeenCalled();
+    expect(mocks.requestUpdate).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ status: "awaiting_confirm", confirmState: "pending" }) }));
+  });
+
+  it("処理権を取れなかった行は再開した件数に数えない", async () => {
+    mocks.requestFindMany.mockImplementation(async ({ where }: { where: { status: string } }) =>
+      where.status === "received" ? [{ id: "req-1" }] : [],
+    );
+    mocks.requestFindUnique.mockResolvedValue({ ...baseRequest, status: "received" });
+    mocks.requestUpdateMany.mockResolvedValueOnce({ count: 0 });
+    expect(await resumeStalePendingRequests(ctx, new Date("2026-10-12T01:00:00Z"))).toBe(0);
+    expect(call).not.toHaveBeenCalled();
+  });
+
+  it("ack後の処理が失敗したら失敗状態で残し、「再開」の返信から続けられる", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    call.mockImplementation(async (method: string) => {
+      if (method === "chat.postMessage") throw new Error("slack down");
+      return {};
+    });
+    await handleMessageEvent(ctx, "T1", msg());
+    expect(mocks.requestUpdate).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ status: "failed" }) }));
+
+    // 再開: ack前に`resuming`へ書き、ack後に選択UIを出し直す
+    call.mockImplementation(async () => ({ ts: "300.1" }));
+    mocks.requestUpdate.mockClear();
+    mocks.requestFindUnique.mockResolvedValue({ ...baseRequest, status: "failed" });
+    const accepted = await acceptMessageEvent(config, "T1", "E-resume", msg({ ts: "101.1", thread_ts: "100.1", text: "再開" }));
+    expect(accepted).toEqual({ kind: "queued", requestId: "req-1" });
+    expect(mocks.requestUpdate).toHaveBeenCalledWith({ where: { id: "req-1" }, data: { status: "resuming", failure: null } });
+    mocks.requestFindUnique.mockResolvedValue({ ...baseRequest, status: "resuming" });
+    await processPendingRequest(ctx, "req-1");
+    expect(mocks.requestUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({ data: { status: "awaiting_repo", selectorTs: "300.1", selectedRepo: null } }),
+    );
+  });
+
+  it("起案前の補足はack前にDBへ足して終える", async () => {
+    mocks.requestFindUnique.mockResolvedValue({ ...baseRequest, status: "awaiting_repo" });
+    const accepted = await acceptMessageEvent(config, "T1", "E5", msg({ ts: "101.1", thread_ts: "100.1", text: "スマホでも" }));
+    expect(accepted).toEqual({ kind: "handled" });
+    expect(mocks.requestUpdate).toHaveBeenCalledWith({ where: { id: "req-1" }, data: { text: `${baseRequest.text}\n\n（補足）スマホでも` } });
+    expect(call).not.toHaveBeenCalled();
   });
 });
 
