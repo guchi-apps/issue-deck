@@ -30,6 +30,26 @@ export function resolveReleasePrepState(input: {
 }
 
 /**
+ * 本番(main)へのリリースPRをマージしてから、自動処理（CI→バンプPR作成）が動き出すまでの待機時間の上限（#4526）。
+ * バンプPRはscheduleで作られ（最大15分粒度）、その間はPRもDBの記録も無い。記録が無いので
+ * 「直近のリリースのマージ時刻＋未リリースの変更あり」から推定し、余裕を見て20分で打ち切る。
+ */
+export const RELEASE_AUTOMATION_WAIT_MS = 20 * 60 * 1000;
+
+/** 直近のmainマージ直後で、バンプPRがまだ出ていない待機か（#4526）。PRが開いている間は別の理由が先に決まる */
+export function isAwaitingReleaseAutomation(input: {
+  latestReleaseMergedAt: string | null;
+  now: number;
+  unreleasedCommitCount: number;
+}): boolean {
+  if (input.latestReleaseMergedAt === null || input.unreleasedCommitCount <= 0) return false;
+  const mergedAt = Date.parse(input.latestReleaseMergedAt);
+  if (Number.isNaN(mergedAt)) return false;
+  const elapsed = input.now - mergedAt;
+  return elapsed >= 0 && elapsed < RELEASE_AUTOMATION_WAIT_MS;
+}
+
+/**
  * ブランチ状況から決まった理由（`base`）へ準備の状態を重ねる。**押せない理由が既にあるときは
  * そちらを優先する**（リリース中・出す変更なし・デプロイ失敗のほうが、画面の事実として強い）。
  */

@@ -221,6 +221,16 @@ pushすると、修正がmainにだけ残りdevelopから消え、次のリリ�
 出ているのは常に`main`宛のPRについてで、修復PRが止まっていることはその結果として現れる。
 設計は[../code-map.md](../code-map.md)の「本番へのマージ待ちもPush通知で届く」。
 
+
+### 本番マージ直後〜バンプPRが出るまでは「自動処理待ち」にする（#4526）
+
+本番(main)へのリリースPRをマージした直後は、バンプPR（`release/vX.Y.Z`）が出るまでscheduleを待つ（最大15分粒度）。
+この間はPRもDBの記録も無いため、`isAwaitingReleaseAutomation`（`src/lib/release-prep-state.ts`）が
+**直近のリリースPRのmainマージ時刻から20分以内で、未リリースの変更がある**ことから推定し、
+`resolveReleaseBlockedReason`が`awaiting-automation`（「自動処理待ち」＋「CIとバージョン更新が自動で実行されます。
+操作せずお待ちください」）を返す。`deploy.yml`は変えない（自動マージ不可カテゴリを避けるため、記録ではなく時刻での推定）。
+`release-preparing`と違い**押せない**（`canTriggerRelease`もfalse。自動のバンプと二重に走るため）。20分を過ぎれば自然に押せる。
+
 ### ブランチ名を変えるときに揃える場所
 
 `release/v`（バンプPR）と接頭辞が重ならない名前にしてある。重なると`classifyPullRequest`の判定順

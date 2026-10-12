@@ -511,6 +511,7 @@ export type BranchFlowRelease = {
  * - `nothing-to-release`: developの中身がmainに入りきっている（#2316・#2678・#2704）
  * - `deploy-failed`: 直近の本番デプロイが失敗している（#3897）
  * - `release-preparing`: 修正を取り込んだリリースの準備が自動で進行中（#4421。PRはまだ無い）
+ * - `awaiting-automation`: 本番マージ直後で、CIとバンプPR作成の自動処理を待っている（#4526。記録もPRも無い）
  * - `preparation-failed`: リリース準備が失敗している（#4421。再開は帯から）
  */
 export type ReleaseBlockedReason =
@@ -520,6 +521,7 @@ export type ReleaseBlockedReason =
   | "nothing-to-release"
   | "deploy-failed"
   | "release-preparing"
+  | "awaiting-automation"
   | "preparation-failed";
 
 /**
