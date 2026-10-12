@@ -42,6 +42,13 @@ export type ChangelogEntry = {
  */
 export const APP_CHANGELOG: ChangelogEntry[] = [
   {
+    version: "8.56.4",
+    date: "2026-10-12",
+    changes: [
+      "マージ前の6つのチェックとIssue一覧のバッジについて、状態表示の文字サイズを揃え、画面幅が広い場合は6列で並べて見やすくしました。リリース画面のバージョン上げ幅の選択は、自動判定を優先して表示し、必要なときだけ変更できるよう折りたたみ表示にしました。",
+    ],
+  },
+  {
     version: "8.56.3",
     date: "2026-10-12",
     changes: [
