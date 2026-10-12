@@ -9,12 +9,13 @@ import { mapComment } from "@/lib/github/issue-mapper";
 import { fetchCommentsForIssue } from "@/lib/github/issues-api";
 import { githubApiErrorMessage } from "@/lib/github/network-error";
 import { buildPullRequestEvents } from "@/lib/github/pull-request-events";
+import { findCurrentFixRequest } from "@/lib/github/pull-request-fix-request-service";
 import { repairKindsFor } from "@/lib/github/pull-request-repair";
 import {
   fetchActivePullRequestRepairRun,
   visibleRepairRun,
 } from "@/lib/github/pull-request-repair-run";
-import { parsePullRequestReviewVerdict } from "@/lib/github/pull-request-review-verdict";
+import { needsReviewAttention, parsePullRequestReviewVerdict } from "@/lib/github/pull-request-review-verdict";
 import { toPullRequestSummary } from "@/lib/github/pull-request-summary";
 import {
   fetchPullRequest,
@@ -26,7 +27,7 @@ import { fetchRepairWorkflowAvailability } from "@/lib/github/repair-workflow-ca
 import { checkUserIssueKey, fetchCheckUserIssueReasons } from "@/lib/pull-request-check-user";
 import { resolveMergeCheckReasons, type MergeCheckReasons } from "@/lib/merge-check-reasons";
 import { extractLinkedIssueNumber, requiresUserMerge } from "@/lib/pull-request-list";
-import type { PullRequestDetail } from "@/types/pull-request";
+import type { PullRequestDetail, PullRequestReviewResponseContext } from "@/types/pull-request";
 
 export function GET(request: NextRequest) {
   return withGithubApiFeature("pull_request_detail", () => handleGET(request));
@@ -159,6 +160,26 @@ async function handleGET(request: NextRequest) {
       });
     }
 
+    // レビュー指摘への対応パネル（#4482）。要修正・要確認が付いたopenなPRでだけ、
+    // 紐づくIssueの「現在のHEADへの修正依頼」と、ローカル対応中（11.local）かを引く。
+    let reviewResponse: PullRequestReviewResponseContext | null = null;
+    if (
+      summary.state === "open" &&
+      !summary.merged &&
+      linkedIssueNumber !== null &&
+      summary.reviewVerdict &&
+      needsReviewAttention(summary.reviewVerdict.reviewKind)
+    ) {
+      reviewResponse = await resolveReviewResponseContext({
+        repositoryId: repository.id,
+        owner,
+        repo,
+        issueNumber: linkedIssueNumber,
+        headSha: pullRequest.head.sha,
+        token,
+      });
+    }
+
     const detail: PullRequestDetail = {
       id: `${repository.fullName}#${number}`,
       summary,
@@ -170,6 +191,7 @@ async function handleGET(request: NextRequest) {
       events: buildPullRequestEvents({ comments, reviews, reviewComments }),
       fetchedAt: new Date().toISOString(),
       userMergeReasons,
+      reviewResponse,
     };
     return NextResponse.json(detail);
   } catch (error) {
@@ -178,6 +200,49 @@ async function handleGET(request: NextRequest) {
       { error: "github_api_error", message: githubApiErrorMessage(error) },
       { status: 502 },
     );
+  }
+}
+
+/**
+ * 対応パネルが「依頼済み」「依頼できない」を押す前に出すための材料（#4482）。
+ * 11.local・closedはDBのIssueキャッシュから読み（GitHub APIを消費しない）、依頼コメントはIssueの
+ * コメントを1回読む。**読めなければ`fetchFailed`にする**——依頼済みを見落として二重に送るより、
+ * 「確認できなかった」と出して送信側（同じ依頼は重複として返る）に任せる。
+ */
+async function resolveReviewResponseContext(params: {
+  repositoryId: string;
+  owner: string;
+  repo: string;
+  issueNumber: number;
+  headSha: string;
+  token: string;
+}): Promise<PullRequestReviewResponseContext> {
+  const issue = await db.issue
+    .findFirst({
+      where: { repositoryId: params.repositoryId, number: params.issueNumber },
+      select: { state: true, labels: { where: { name: "11.local" }, select: { name: true } } },
+    })
+    .catch(() => null);
+  const local = (issue?.labels.length ?? 0) > 0;
+  const closed = issue?.state === "CLOSED";
+  try {
+    const comments = await fetchCommentsForIssue(params.owner, params.repo, params.issueNumber, params.token);
+    return {
+      issueNumber: params.issueNumber,
+      linkedIssueLocal: local,
+      linkedIssueClosed: closed,
+      currentFixRequest: findCurrentFixRequest(comments, params.headSha),
+      fetchFailed: false,
+    };
+  } catch (error) {
+    console.error(`[GET /api/pull-requests/detail] fix-request lookup ${params.owner}/${params.repo}#${params.issueNumber}:`, error);
+    return {
+      issueNumber: params.issueNumber,
+      linkedIssueLocal: local,
+      linkedIssueClosed: closed,
+      currentFixRequest: null,
+      fetchFailed: true,
+    };
   }
 }
 

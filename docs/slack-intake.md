@@ -5,8 +5,8 @@ Slackの`#アプリissue起案`への投稿から、対象リポジトリを**�
 ## 流れと責任境界
 
 ```text
-投稿 → POST /api/slack/events（署名検証→event_idで再送除外→即ack→非同期）
-  └ 新規の親投稿: SlackIntakeRequest作成 → 👀 → 対象選択UI（static_select／候補が100超はexternal_select）
+投稿 → POST /api/slack/events（署名検証→受付〈DBへの保存のみ〉→即ack→非同期）
+  └ 新規の親投稿: ack前にSlackIntakeRequest（received）を作成 → ack後に👀 → 対象選択UI（static_select／候補が100超はexternal_select）
        └ 「この対象で起案する」: 権限を確かめ、確定したowner/repoで調査・重複確認（handleChatMessage）
             └ Issue案＋「この案で起案する」ボタン（⚠️＝確認待ち）。**押すまでIssueは作らない**
                  └ 押下: confirmStateをpending→doneにできた1回だけexecuteConfirmedCard → ✅＋Issueリンク
@@ -25,6 +25,9 @@ Slackの`#アプリissue起案`への投稿から、対象リポジトリを**�
 - 対象リポジトリは「IssueDeckに接続済み**かつ**投稿者の`UserInstallation`に含まれる」ものから生成し、`SLACK_ALLOWED_REPO_OWNERS`で絞れる。本文に一意なアプリ名／リポジトリ名があれば事前選択するが、**確定した選択だけが正本**。
 - 補足は本文を書き換えず**コメントで追記**する（コメントは消せるため。新しいIssueを増やさない側に倒す）。補足・質問・お礼の分類は`src/lib/slack/classify.ts`の決まった言い回しで、LLMには任せない。
 - 失敗（Slack API・GitHub API・権限喪失・対象未選択）は、完了とせず⚠️と**段階・理由・未完了・再試行可否・再開方法**を同じスレッドへ返す。失敗した依頼は「再開」と返信すると同じ段階からやり直す。
+- **ack前に依頼をDBへ残す**（#4488）。親投稿は処理済み記録（`SlackProcessedEvent`）と同じトランザクションで`received`の`SlackIntakeRequest`にし、保存に失敗したら500を返してSlackに再送させる（処理済み記録も巻き戻る）。ack前はDBの読み書きだけで、Slack API・GitHub・AIはack後に呼ぶ（3秒制限）。「再開」の返信もack前に`resuming`へ書き、起案前の補足はack前に本文へ足して終える。
+- ack後の処理がプロセスの停止などで止まった行（`received`は2分、`resuming`・`investigating`は30分`updatedAt`が動いていないもの）は、起動時と5分おきの巡回（`src/lib/slack/intake-resume.ts`）が拾い直す。読んだ時点の`updatedAt`を条件に更新して処理権を取るので、同じ行を2か所で同時に進めない。拾い直しで選択UI・Issue案が重ねて投稿されることはあるが、Issueの作成は「この案で起案する」の押下（`confirmState`）でしか起きないため二重には作られない。
+- **起案済みの依頼への返信（質問・補足のコメント追記・分割）は、返信本文をDBへ残さない。** ack後の失敗はスレッドへ⚠️で返すが、処理中にプロセスが止まるとその返信だけは拾い直せない（依頼とIssueは作成済みで失われない。もう一度返信すれば続く）。本文を残す列の追加はスキーマ変更になるため見送った。
 - 添付ファイルは**名称だけを依頼に残し「内容は未取得・未確認」と明示する**（ファイル本文の取得は未実装）。
 
 ## 設定（サーバーの環境変数。値はリポジトリ・画面・ログへ出さない）

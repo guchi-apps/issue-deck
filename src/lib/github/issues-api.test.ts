@@ -253,4 +253,15 @@ describe("fetchIssueStateOrThrow（#4488）", () => {
     expect(error).toBeInstanceOf(GithubApiError);
     expect((error as GithubApiError).status).toBe(status);
   });
+
+  it.each([
+    ["JSONでない本文", { ok: true, status: 200, json: async () => { throw new SyntaxError("Unexpected token"); } }],
+    ["stateが無い", jsonResponse(200, { number: 1 })],
+    ["stateが想定外", jsonResponse(200, { state: "locked" })],
+    ["本文がnull", jsonResponse(200, null)],
+  ])("200でも%sなら「存在しない」に畳まずGithubApiErrorを投げる", async (_label, response) => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response));
+    const error = await fetchIssueStateOrThrow("o", "r", 1, "t").catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(GithubApiError);
+  });
 });
