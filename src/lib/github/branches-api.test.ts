@@ -364,3 +364,45 @@ describe("mergedHeadRefFromHeadline", () => {
     expect(mergedHeadRefFromHeadline("画面の文言を直す。")).toBeNull();
   });
 });
+
+describe("lookupBranchRefs: 選択適用でmainへ入ったPR（#4528）", () => {
+  it("mainに取り込み痕跡のあるPRは未リリースの件数・mergedHeadRefsから外し、根拠を残す", async () => {
+    const commit = (oid: string, messageHeadline: string, parents: string[]) => ({
+      oid,
+      messageHeadline,
+      parents: { totalCount: parents.length, nodes: parents.map((p) => ({ oid: p })) },
+    });
+    stubGraphql({
+      repository: {
+        comparison: {
+          target: {
+            oid: "main-tip",
+            committedDate: "2026-10-12T00:00:00Z",
+            history: {
+              nodes: [{ messageHeadline: "Merge pull request #4511 from guchi-apps/fix/a", parents: { totalCount: 1 } }],
+            },
+          },
+          compare: {
+            aheadBy: 4,
+            behindBy: 1,
+            baseTarget: { tree: { oid: "tm" } },
+            headTarget: { oid: "m4512", tree: { oid: "td" } },
+            commits: {
+              totalCount: 2,
+              nodes: [
+                commit("m4511", "Merge pull request #4511 from guchi-apps/fix/a", ["x", "w"]),
+                commit("m4512", "Merge pull request #4512 from guchi-apps/issue-4508", ["m4511", "w2"]),
+              ],
+            },
+          },
+        },
+      },
+    });
+    const result = await lookupBranchRefs("guchi-apps", "issue-deck", [], "token");
+    expect(result.developVsMain?.units?.mergeCount).toBe(1);
+    expect(result.developVsMain?.units?.mergedHeadRefs).toEqual(["issue-4508"]);
+    expect(result.developVsMain?.units?.includedInMain).toEqual([
+      { prNumber: 4511, headRef: "fix/a", evidence: "cherry-pick" },
+    ]);
+  });
+});

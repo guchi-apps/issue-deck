@@ -1,5 +1,10 @@
 import { GithubApiError } from "@/lib/github/github-api-error";
 import { githubGraphql, type GraphqlError } from "@/lib/github/graphql";
+import {
+  pickedPullRequestNumbers,
+  resolveMainInclusion,
+  type PullRequestInclusion,
+} from "@/lib/github/main-inclusion";
 import { GITHUB_API, githubFetch } from "@/lib/github/request";
 import { isVersionBumpHeadRef } from "@/lib/pull-request-list";
 import type { BranchComparison, BranchHead, UnreleasedUnits } from "@/types/branch-flow";
@@ -44,7 +49,14 @@ type CompareNode = {
   commits?: { totalCount?: number | null; nodes?: (CompareCommit | null)[] | null } | null;
 } | null;
 
-type HeadTarget = { oid?: string | null; committedDate?: string | null } | null;
+type HeadTarget = {
+  oid?: string | null;
+  committedDate?: string | null;
+  /** mainの本流の直近のコミット。選択適用（cherry-pick）の痕跡を探すのに使う（#4528） */
+  history?: {
+    nodes?: ({ messageHeadline?: string | null; parents?: { totalCount?: number | null } | null } | null)[] | null;
+  } | null;
+} | null;
 
 type GraphqlResult = {
   repository: ({
@@ -93,7 +105,8 @@ export async function lookupBranchRefs(
         comparison: ref(qualifiedName: "refs/heads/main") {
           # mainの先頭（#3468）。Xcodeで実機へ反映するリポジトリでは「実機に入っている版」になる。
           # developが無くても取れるよう、compareではなくref自身のtargetから読む
-          target { ... on Commit { oid committedDate } }
+          # historyは選択適用で取り込まれたPRの痕跡を探すため（#4528）
+          target { ... on Commit { oid committedDate history(first: 100) { nodes { messageHeadline parents { totalCount } } } } }
           compare(headRef: "develop") {
             aheadBy
             behindBy
@@ -145,12 +158,63 @@ export async function lookupBranchRefs(
     (_, index) => (repository[`b${index}`] as RefNode) !== null,
   );
 
+  const compare = repository.comparison?.compare ?? null;
+  const inclusion = await inspectMainInclusion({
+    owner,
+    repo,
+    token,
+    compare,
+    mainTarget: repository.comparison?.target ?? null,
+  });
+
   return {
     existingBranches,
-    developVsMain: toBranchComparison(repository.comparison?.compare ?? null),
+    developVsMain: toBranchComparison(compare, inclusion),
     mainHead: toBranchHead(repository.comparison?.target ?? null),
     developHeadOid: repository.comparison?.compare?.headTarget?.oid ?? null,
   };
+}
+
+/**
+ * `main..develop`の幹に残ったPRのマージのうち、実際にはmainへ入っているものを調べる（#4528）。
+ * 調べられなかった場合は空のMapを返し、従来どおり未リリースとして数える。
+ */
+async function inspectMainInclusion(input: {
+  owner: string;
+  repo: string;
+  token: string;
+  compare: CompareNode;
+  mainTarget: HeadTarget;
+}): Promise<ReadonlyMap<number, PullRequestInclusion>> {
+  const { compare, mainTarget } = input;
+  const mainOid = mainTarget?.oid;
+  const developOid = compare?.headTarget?.oid;
+  if (!compare || !mainOid || !developOid) return new Map();
+  const numbers = listTrunkCommits(compare)
+    .flatMap((commit) => {
+      if ((commit.parents?.totalCount ?? commit.parents?.nodes?.length ?? 0) < 2) return [];
+      const headline = commit.messageHeadline ?? "";
+      const headRef = mergedHeadRefFromHeadline(headline);
+      if (headRef === null || isVersionBumpHeadRef(headRef)) return [];
+      const number = pullRequestNumberFromHeadline(headline);
+      return number === null ? [] : [number];
+    });
+  if (numbers.length === 0) return new Map();
+  const history = (mainTarget.history?.nodes ?? []).flatMap((node) => (node ? [node] : []));
+  return resolveMainInclusion({
+    owner: input.owner,
+    repo: input.repo,
+    token: input.token,
+    mainOid,
+    developOid,
+    pullRequestNumbers: [...new Set(numbers)],
+    picked: pickedPullRequestNumbers(history),
+  });
+}
+
+function pullRequestNumberFromHeadline(headline: string): number | null {
+  const match = /^Merge pull request #(\d+) from /.exec(headline);
+  return match ? Number(match[1]) : null;
 }
 
 function toBranchHead(target: HeadTarget): BranchHead | null {
@@ -185,7 +249,10 @@ function isMissingCompareHeadRef(error: GraphqlError): boolean {
  * **tree OIDが両方取れて一致したときだけ`sameContent: true`。** 取れなかった場合は
  * false（＝差分があるものとして扱う）へ倒し、取得の失敗でリリースを止めないようにする。
  */
-function toBranchComparison(compare: CompareNode): BranchComparison | null {
+function toBranchComparison(
+  compare: CompareNode,
+  inclusion: ReadonlyMap<number, PullRequestInclusion> = new Map(),
+): BranchComparison | null {
   if (!compare) return null;
   const baseTree = compare.baseTarget?.tree?.oid ?? null;
   const headTree = compare.headTarget?.tree?.oid ?? null;
@@ -193,7 +260,7 @@ function toBranchComparison(compare: CompareNode): BranchComparison | null {
     aheadBy: compare.aheadBy,
     behindBy: compare.behindBy,
     sameContent: baseTree !== null && baseTree === headTree,
-    units: toUnreleasedUnits(compare),
+    units: toUnreleasedUnits(compare, inclusion),
   };
 }
 
@@ -223,20 +290,16 @@ export function mergedHeadRefFromHeadline(headline: string): string | null {
  *
  * 数えられない場合は`null`を返し、呼び出し側は従来どおりコミット数を出す。
  */
-function toUnreleasedUnits(compare: NonNullable<CompareNode>): UnreleasedUnits | null {
+function toUnreleasedUnits(
+  compare: NonNullable<CompareNode>,
+  inclusion: ReadonlyMap<number, PullRequestInclusion> = new Map(),
+): UnreleasedUnits | null {
   const nodes = compare.commits?.nodes ?? null;
   if (!nodes) return null;
   // 取得上限を超えた比較では、先端側のコミットが一覧に入っていない可能性がある。
   // 数え落としたまま「◯件」と言い切るより、コミット数へ落とすほうが害が小さい。
   if ((compare.commits?.totalCount ?? nodes.length) > nodes.length) return null;
-
-  const byOid = new Map<string, CompareCommit>();
-  for (const node of nodes) {
-    if (node?.oid) byOid.set(node.oid, node);
-  }
-
-  let cursor: string | null = compare.headTarget?.oid ?? null;
-  if (!cursor || !byOid.has(cursor)) return null;
+  if (!compare.headTarget?.oid || !nodes.some((node) => node?.oid === compare.headTarget?.oid)) return null;
 
   const units: UnreleasedUnits = {
     mergeCount: 0,
@@ -244,24 +307,53 @@ function toUnreleasedUnits(compare: NonNullable<CompareNode>): UnreleasedUnits |
     versionBumpCount: 0,
     mergedHeadRefs: [],
   };
-  const visited = new Set<string>();
-  while (cursor && byOid.has(cursor) && !visited.has(cursor)) {
-    visited.add(cursor);
-    const commit: CompareCommit = byOid.get(cursor)!;
+  const includedInMain: NonNullable<UnreleasedUnits["includedInMain"]> = [];
+  const unverified: NonNullable<UnreleasedUnits["unverified"]> = [];
+  for (const commit of listTrunkCommits(compare)) {
     const parents = commit.parents?.nodes ?? [];
     const parentCount = commit.parents?.totalCount ?? parents.length;
     if (parentCount >= 2) {
-      const headRef = mergedHeadRefFromHeadline(commit.messageHeadline ?? "");
+      const headline = commit.messageHeadline ?? "";
+      const headRef = mergedHeadRefFromHeadline(headline);
+      const prNumber = pullRequestNumberFromHeadline(headline);
+      const verdict = prNumber === null ? undefined : inclusion.get(prNumber);
+      if (headRef !== null && prNumber !== null && verdict?.state === "included" && verdict.evidence) {
+        // 選択適用などでmainへ入っている。祖先でなくても未リリースとして数えない
+        includedInMain.push({ prNumber, headRef, evidence: verdict.evidence });
+        continue;
+      }
+      if (headRef !== null && prNumber !== null && (verdict?.state === "partial" || verdict?.state === "unknown")) {
+        unverified.push({ prNumber, headRef, state: verdict.state });
+      }
       if (headRef !== null) units.mergedHeadRefs.push(headRef);
       if (headRef !== null && isVersionBumpHeadRef(headRef)) units.versionBumpCount += 1;
       else units.mergeCount += 1;
     } else {
       units.directCount += 1;
     }
-    cursor = parents[0]?.oid ?? null;
   }
-
+  if (includedInMain.length > 0) units.includedInMain = includedInMain;
+  if (unverified.length > 0) units.unverified = unverified;
   return units;
+}
+
+/** developの先端から幹（first-parent）をたどったコミット。先端が一覧に無ければ空 */
+function listTrunkCommits(compare: NonNullable<CompareNode>): CompareCommit[] {
+  const nodes = compare.commits?.nodes ?? [];
+  const byOid = new Map<string, CompareCommit>();
+  for (const node of nodes) {
+    if (node?.oid) byOid.set(node.oid, node);
+  }
+  const trunk: CompareCommit[] = [];
+  const visited = new Set<string>();
+  let cursor: string | null = compare.headTarget?.oid ?? null;
+  while (cursor && byOid.has(cursor) && !visited.has(cursor)) {
+    visited.add(cursor);
+    const commit: CompareCommit = byOid.get(cursor)!;
+    trunk.push(commit);
+    cursor = commit.parents?.nodes?.[0]?.oid ?? null;
+  }
+  return trunk;
 }
 
 /**
