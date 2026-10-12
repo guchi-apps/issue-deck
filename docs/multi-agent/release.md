@@ -1066,6 +1066,7 @@ main起点の`deploy-recovery/*`ブランチへ取り込む。**`merges`APIは�
 段階展開の手順（#4496の後。callerには`candidate_request`に加えて`finalize_request`のinputと`finalize-request:`の受け渡しも足す）:
 
 1. issue-deck自身のcaller（`.github/workflows/release-develop-to-main.yml`）へ`candidate_request`のinputと`candidate-request:`の受け渡しを足し、作成・取り込み・取消・旧方式の移行・公開までを確認する
+   - **配線済み（#4567）**: issue-deck自身のcallerには`candidate_request`・`finalize_request`の両inputと`candidate-request:`・`finalize-request:`の受け渡しがある（push・schedule起動では空文字）。通しの確認（作成→取り込み→公開準備→最終CI→本番承認→mainマージ→deploy→稼働版→同期PR、公開前の再試行で版が増えないこと）は実リリースを伴うため、人が実施する
 2. `develop`→`main`のリリースを通し、画面の「新しいタグを切って配る」でタグを切る
 3. 対応させるリポジトリのcallerへ`candidate_request`のinputと受け渡しを足すPRを、リポジトリごとに出す（一括で配らない）
 4. 戻すとき（復帰）は、そのリポジトリのcallerから`candidate_request`を外す。判定が未対応へ戻り、以後は旧方式で動く。作成済みの候補の記録は残り、開いている候補PRは画面から取り消してから旧方式のリリースを起動する

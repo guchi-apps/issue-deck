@@ -46,6 +46,20 @@ on:
         required: false
         type: string
         default: ""
+      candidate_request:
+        # リリース候補の作成・更新の要求（#4495）。issue-deckのサーバーが組み立てるJSONで、手で入力するものではない
+        # （形式は reusable 側の candidate-request）。指定があると旧方式の処理は動かない
+        description: "リリース候補の作成・更新の要求（issue-deckが指定する）"
+        required: false
+        type: string
+        default: ""
+      finalize_request:
+        # 合格した候補の公開準備＝正式バンプの要求（#4496）。issue-deckのサーバーが組み立てるJSONで、
+        # 手で入力するものではない（形式は reusable 側の finalize-request）
+        description: "リリース候補の公開準備（正式バンプ）の要求（issue-deckが指定する）"
+        required: false
+        type: string
+        default: ""
   schedule:
     # 実装中issueが無いタイミングでの自動起動（#3404）。実際の実行間隔は画面の設定
     # （#3416）で、cronは変えられないため15分おきに起動し、reusable側のgateが設定した
@@ -76,6 +90,8 @@ jobs:
       bump-kind: ${{ github.event_name == 'workflow_dispatch' && inputs.bump_kind || '' }}
       allow-failed-deploy: ${{ github.event_name == 'workflow_dispatch' && inputs.allow_failed_deploy == true }}
       rebuild-selection: ${{ github.event_name == 'workflow_dispatch' && inputs.rebuild_selection || '' }}
+      candidate-request: ${{ github.event_name == 'workflow_dispatch' && inputs.candidate_request || '' }}
+      finalize-request: ${{ github.event_name == 'workflow_dispatch' && inputs.finalize_request || '' }}
     secrets: inherit
     # **呼ばれる側の権限はcallerの付与範囲を超えられない。** 通常のワークフローではjobが
     # workflowレベルの既定を上回る指定をしてよいが、再利用可能ワークフローでは
