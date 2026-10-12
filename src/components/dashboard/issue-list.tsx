@@ -409,7 +409,7 @@ function QuestionStateBadge({
           : "回答が届いていますが、まだ開いていません"
       }
       className={cn(
-        "flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-medium ring-1 ring-inset",
+        "flex items-center gap-1 rounded-full px-1.5 py-0.5 text-xs font-medium ring-1 ring-inset",
         waiting
           ? "bg-blue-500/15 text-blue-700 ring-blue-500 dark:text-blue-400"
           : "bg-amber-500/15 text-amber-700 ring-amber-500 dark:text-amber-400",
@@ -1275,7 +1275,7 @@ export function IssueList({
                   （#3159）。付いているものはIssue詳細で見る */}
               {/* レビューとレビューのあいだに入ったPRの件数（#3092）。リポジトリを選んだときだけ */}
               {codeReviewInterval && (
-                <span className="text-[10px] text-muted-foreground tabular-nums">
+                <span className="text-xs text-muted-foreground tabular-nums">
                   {codeReviewInterval}
                 </span>
               )}
@@ -1289,7 +1289,7 @@ export function IssueList({
                 selectKindLabels(issue.labels).map((label) => (
                   <span
                     key={label.name}
-                    className="whitespace-nowrap rounded-full px-1.5 py-0.5 text-[10px] ring-1 ring-inset ring-border"
+                    className="whitespace-nowrap rounded-full px-1.5 py-0.5 text-xs ring-1 ring-inset ring-border"
                     style={getLabelBadgeStyle(label.color)}
                   >
                     {label.name}
@@ -1416,7 +1416,7 @@ export function IssueList({
                   key={badge.kind}
                   title={badge.title}
                   className={cn(
-                    "rounded px-1.5 py-0.5 text-[11px] font-medium whitespace-nowrap ring-1 ring-inset",
+                    "rounded px-1.5 py-0.5 text-sm font-medium whitespace-nowrap ring-1 ring-inset",
                     badge.kind === "parent"
                       ? "bg-violet-500/10 text-violet-700 ring-violet-500/40 dark:text-violet-300"
                       : "text-muted-foreground ring-border",

@@ -74,13 +74,13 @@ export function PullRequestMergeChecks({
       >
         <span
           className={cn(
-            "text-[10px] leading-4 whitespace-nowrap text-muted-foreground",
+            "text-sm leading-5 text-muted-foreground",
             !grouped && check.common && "font-bold text-foreground",
           )}
         >
           {grouped ? check.shortLabel.replace("〔共通〕", "") : check.shortLabel}
         </span>
-        <span className={cn("text-[11px] leading-4 font-bold", TONE_TEXT[check.tone])}>
+        <span className={cn("text-sm leading-5 font-bold", TONE_TEXT[check.tone])}>
           <span aria-hidden="true">{check.mark}</span> {check.state}
         </span>
       </button>
@@ -99,13 +99,13 @@ export function PullRequestMergeChecks({
       {grouped ? (
         <div className="grid grid-cols-1 gap-x-3 gap-y-1 sm:grid-cols-2">
           <section aria-label="このPRのチェック" className="min-w-0">
-            <h3 className="px-1 text-[10.5px] leading-4 font-semibold text-muted-foreground">
+            <h3 className="px-1 text-sm leading-5 font-semibold text-muted-foreground">
               このPR<span className="font-normal">（CI・コード・競合）</span>
             </h3>
             <div className="grid grid-cols-3">{own.map(renderButton)}</div>
           </section>
           <section aria-label="リリース候補のチェック" className="min-w-0">
-            <h3 className="px-1 text-[10.5px] leading-4 font-semibold text-muted-foreground">
+            <h3 className="px-1 text-sm leading-5 font-semibold text-muted-foreground">
               リリース候補
               <span className="font-normal">
                 {candidateLabel ? `（${candidateLabel}）` : "（全体・統合・Mac）"}
@@ -119,19 +119,19 @@ export function PullRequestMergeChecks({
       )}
 
       {grouped && showCandidateNote && !candidate && candidateNote && (
-        <p className="mt-0.5 px-1 text-[11px] leading-4 text-muted-foreground" data-testid="release-candidate-note">
+        <p className="mt-0.5 px-1 text-xs leading-4 text-muted-foreground" data-testid="release-candidate-note">
           リリース候補: {candidateNote}。通常PRのマージ条件には影響しません。
         </p>
       )}
 
       {!grouped && candidate && (
-        <p className="mt-0.5 px-1 text-[10.5px] leading-4 text-muted-foreground">
+        <p className="mt-0.5 px-1 text-xs leading-4 text-muted-foreground">
           共通結果の対象: {describeCandidateTarget(candidate)}
         </p>
       )}
 
       {open && (
-        <div role="group" aria-label={`${open.fullName}の詳細`} className="mt-1 rounded border bg-muted/30 px-2.5 py-2 text-[11.5px]">
+        <div role="group" aria-label={`${open.fullName}の詳細`} className="mt-1 rounded border bg-muted/30 px-2.5 py-2 text-sm">
           <p className="font-semibold">{open.fullName}</p>
           <dl className="mt-1 grid grid-cols-[4.5rem_1fr] gap-x-2 gap-y-0.5">
             <dt className="text-muted-foreground">状態</dt>

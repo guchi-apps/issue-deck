@@ -1430,7 +1430,7 @@ function NextReleaseCard({
       className="@container mb-3 flex flex-col gap-2.5 rounded-[10px] border bg-card p-3 text-xs"
       data-testid="next-release-card"
     >
-      <p className="text-[11px] font-semibold tracking-wide text-primary">次のリリース</p>
+      <p className="text-xs font-semibold tracking-wide text-primary">次のリリース</p>
       <dl className="grid grid-cols-2 gap-2">
         <div className="min-w-0 rounded-md border px-2.5 py-1.5">
           <dt className="text-muted-foreground">本番稼働中</dt>
