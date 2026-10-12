@@ -317,6 +317,16 @@ describe("対象の確定と起案", () => {
     expect(mocks.requestUpdate).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ status: "awaiting_confirm", confirmState: "pending" }) }));
   });
 
+  it("AIが別リポジトリの案を返したら確認待ちへ保存せず、再調査を案内する", async () => {
+    mocks.requestFindUnique.mockResolvedValue({ ...baseRequest });
+    mocks.handleChatMessage.mockResolvedValue({ text: "案です", cards: [{ ...issueCard, repo: "guchi-apps/issue-deck" }], nextContext: {} });
+    await handleInteraction(ctx, confirmPayload());
+    expect(mocks.requestUpdate).not.toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ status: "awaiting_confirm" }) }));
+    expect(mocks.requestUpdate).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ status: "failed" }) }));
+    expect(mocks.executeConfirmedCard).not.toHaveBeenCalled();
+    expect(postedTexts().some((t) => t.includes("起案先が一致しません") && t.includes("再開"))).toBe(true);
+  });
+
   it("連打: 確定済み（updateMany=0）なら2回目は調査も投稿もしない", async () => {
     mocks.requestFindUnique.mockResolvedValue({ ...baseRequest });
     mocks.requestUpdateMany.mockResolvedValue({ count: 0 });
@@ -370,6 +380,16 @@ describe("Issueの作成・追記", () => {
     expect(overrides.body).toContain("https://slack.example/p100");
     expect(overrides.body).toContain("slack-intake: T1/C1/100.1");
     expect(postedTexts().some((t) => t.startsWith("<@U1> ✅") && t.includes("#300"))).toBe(true);
+  });
+
+  it.each(["slack_issue_confirm", "slack_issue_attach"])("保存済みの起案先が違う場合は %s でもGitHubを更新しない", async (actionId) => {
+    mocks.requestFindUnique.mockResolvedValue({ ...proposed, proposal: { card: { ...issueCard, repo: "guchi-apps/issue-deck" }, splitFrom: null } });
+    await handleInteraction(ctx, click(actionId, actionId === "slack_issue_attach" ? "req-1:300" : "req-1"));
+    expect(mocks.executeConfirmedCard).not.toHaveBeenCalled();
+    expect(mocks.createComment).not.toHaveBeenCalled();
+    expect(mocks.requestUpdateMany).not.toHaveBeenCalled();
+    expect(mocks.requestUpdate).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ status: "failed" }) }));
+    expect(postedTexts().some((t) => t.includes("起案先が一致しません") && t.includes("再開"))).toBe(true);
   });
 
   it("GitHubの作成に失敗したら完了とせず⚠️・理由・再開方法を返し、押し直せるよう戻す", async () => {
