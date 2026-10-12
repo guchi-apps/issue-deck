@@ -1,4 +1,4 @@
-name: Read release 4517 validation
+name: Read release 4519 validation
 on:
   push:
     branches: [ops/verify-release-4515]
@@ -28,13 +28,13 @@ jobs:
               const rows = await db.releaseVerification.findMany({
                 where: {
                   repoFullName: "guchi-apps/issue-deck",
-                  prNumber: 4517,
+                  prNumber: 4519,
                   baseSha: "b1e656c68e6d545e7136e935af7be472f3056418",
-                  headSha: "cbbc239dcff875e134a6a0718986c63c2a76323e",
+                  headSha: "787826db727e4e1a67ab2eb41505178cac773942",
                 },
                 select: { kind: true, state: true, summary: true, findings: true, unverifiedScope: true, message: true },
               });
-              console.log("RELEASE_4517_RESULT=" + JSON.stringify(rows));
+              console.log("RELEASE_4519_RESULT=" + JSON.stringify(rows));
             })().catch(e => { console.error(e.message); process.exitCode = 1; }).finally(() => db.$disconnect());
             NODE
 # Refresh final verification observation
