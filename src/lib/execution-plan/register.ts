@@ -146,6 +146,35 @@ export async function verifyPlanAgainstGithub(
   return { errors, warnings, closed };
 }
 
+/**
+ * 再計画で外れる子（更新前の計画の子）の完了状態を照合する。**取得に失敗した子は完了済みかどうか判断できないので、
+ * 外す操作を通さずエラーにする**（`confirmRemove`があっても通さない）
+ */
+async function verifyRemovedChildren(
+  prev: PlanSnapshot,
+  removedKeys: string[],
+  deps: VerifyDeps = defaultVerifyDeps,
+): Promise<{ closed: Set<string>; errors: PlanIssue[] }> {
+  const closed = new Set<string>();
+  const errors: PlanIssue[] = [];
+  for (const key of removedKeys) {
+    const ref = prev.children.find((c) => refKey(c) === key);
+    if (!ref) continue;
+    const token = await deps.tokenFor(ref.repository).catch(() => null);
+    if (!token) {
+      errors.push({ path: "children", message: `外す子${key}の状態を確認できません（${ref.repository}はIssueDeckに接続されていないか権限外です）。完了済みかどうか判断できないため外せません` });
+      continue;
+    }
+    try {
+      const state = await deps.issueState(ref, token);
+      if (state === "closed") closed.add(key);
+    } catch (error) {
+      errors.push({ path: "children", message: `外す子${key}の取得に失敗しました（${error instanceof Error ? error.message : "不明"}）。完了済みかどうか判断できないため外せません` });
+    }
+  }
+  return { closed, errors };
+}
+
 export type PlanView = {
   parent: PlanIssueRef;
   currentVersion: number;
@@ -230,8 +259,14 @@ export async function savePlan(params: {
   if (existing) {
     const prev = existing.versions.find((v) => v.version === existing.currentVersion)?.snapshot as PlanSnapshot;
     diff = diffPlans(prev, parsed.plan);
+    // 更新後の計画から外れる子は`verified`の対象外なので、更新前の計画の子として別に照合する（完了済みの成果を外させない）
+    const removed = await verifyRemovedChildren(prev, diff.removed, params.deps);
+    errors.push(...removed.errors);
     errors.push(
-      ...validateReplan(prev, parsed.plan, { completed: verified.closed, confirmRemove: new Set(params.confirmRemove ?? []) }),
+      ...validateReplan(prev, parsed.plan, {
+        completed: new Set([...verified.closed, ...removed.closed]),
+        confirmRemove: new Set(params.confirmRemove ?? []),
+      }),
     );
   }
   if (errors.length > 0) return { ok: false, status: 422, errors };
