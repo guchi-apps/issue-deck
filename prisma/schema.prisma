@@ -2747,6 +2747,15 @@ model ReleaseRebuildEvent {
   @@index([repositoryFullName, createdAt])
 }
 
+// 作り直し履歴（#4420）の「完了済み」の境界。リリースPR番号はリポジトリ内で単調増加なので、
+// この番号以下の経過は完了済みとして表示せず、`ReleaseRebuildEvent`も削除する。
+// `ReleaseFixSeries`は別機能が使うため消さず、境界で`legacy_unknown`の補完だけを止める。
+model ReleaseRebuildHistoryCutoff {
+  repositoryFullName       String   @id @db.VarChar(191)
+  completedThroughPrNumber Int
+  updatedAt                DateTime @updatedAt
+}
+
 // 実装セッションの依存待ち（#4321）。
 //
 // **DispatchSessionとは別のモデルにしている。** セッションが畳まれても（GONE・EXITED）待ちの

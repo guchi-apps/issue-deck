@@ -1692,6 +1692,15 @@ sweep_codex_pull_request_reviews() {
   return 0
 }
 
+# 完了したリリースの作り直し履歴を削除する（#4420）。失敗しても他の巡回を止めない
+sweep_rebuild_history() {
+  api_call POST /api/repositories/release/rebuild-history/sweep '{}' || return 0
+  local deleted
+  deleted="$(printf '%s' "$API_RESPONSE_BODY" | jq -r '.deleted // 0' 2>/dev/null || echo 0)"
+  [[ "${deleted:-0}" -gt 0 ]] && echo "完了したリリースの作り直し履歴を${deleted}件削除しました。"
+  return 0
+}
+
 # --- iOS配布失敗の巡回検知 ---------------------------------------------------------
 # iOS配布（`ios-testflight.yml`）が失敗したまま止まっているリポジトリを、issue-deckに巡回して
 # 見つけさせ、追跡用のIssueを起票させる（#3745）。上のデプロイ失敗の巡回検知と同じ形で、
@@ -4505,6 +4514,7 @@ run_once() {
     # Issueコメントという外向きの副作用があるため）。
     sweep_dependency_waits
     sweep_codex_pull_request_reviews
+    sweep_rebuild_history
     # iOS配布失敗の巡回検知（#3745）。**dry-runでは呼ばない**（Issueの起票という外向きの副作用があるため）。
     sweep_ios_distribution_failures
     # デプロイ起動漏れの巡回検知と起動し直し（#2703）。**dry-runでは呼ばない**
