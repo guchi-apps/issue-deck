@@ -43,8 +43,9 @@ describe("対象外と設定不足の区別", () => {
     expect(describeIntegrationSetupGap("guchi-apps/new-app")).toContain("未導入");
   });
 
-  it("DBが要るビルドの前提が無いものは設定不足", () => {
-    expect(describeIntegrationSetupGap("guchi-apps/asset-manager")).toContain("前提が未整備");
+  it("検証用DBを準備済みのasset-managerは、静的な前提不足として止めない", () => {
+    expect(describeIntegrationSetupGap("guchi-apps/asset-manager")).toBeNull();
+    expect(RELEASE_VERIFICATION_REPOS["guchi-apps/asset-manager"].integrationCommands).toContain("npm run verify:build");
   });
 
   it("Mac検証のスクリプトが配布済みなら、Mac前提不足もLinux統合検証の止まりも無い", () => {

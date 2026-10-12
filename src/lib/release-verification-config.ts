@@ -97,7 +97,6 @@ export const RELEASE_VERIFICATION_REPOS: Readonly<Record<string, ReleaseVerifica
     enforced: false,
     stack: "Node（npm）＋Prisma",
     integrationCommands: [NPM_CI, "npm run lint", "npm test", "npm run verify:build"],
-    setupGaps: ["検証用DB`asset_manager_verify`が未作成です（サブPCで`npm run db:setup:verify`の実行が要る。sudoが必要）"],
   },
   "guchi-apps/yoteiflow": {
     enforced: false,
