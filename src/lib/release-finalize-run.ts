@@ -297,8 +297,18 @@ export async function requestRcFinalize(
   const ownReserved = reservations.find((r) => r.status === "reserved" && r.candidateId === candidate.id)?.version ?? null;
   const unavailable = new Set<string>(tags.map((t) => t.replace(/^v/, "")));
   for (const r of reservations) if (r.status === "consumed" || (r.status === "reserved" && r.candidateId !== candidate.id)) unavailable.add(r.version);
-  if (input.bumpKind !== null) {
-    const reservation = decideVersionReservation({ candidateId: candidate.id, mainVersion, bumpKind: input.bumpKind, existingTags: tags, reservations });
+  // 自動判定の再試行でも、未消費の自予約が今のmainから引き続き有効なら、その版へ固定する（予約時の上げ幅を逆算）。
+  // 固定しないと、workflowが自動算出した別の版へ予約を取り直し、利用者が予約・確認した版と異なる版でバンプされる
+  const ownBumpKind: BumpKind | null =
+    input.bumpKind === null && ownReserved !== null
+      ? (["patch", "minor", "major"] as const).find((kind) => {
+          const d = decideVersionReservation({ candidateId: candidate.id, mainVersion, bumpKind: kind, existingTags: tags, reservations });
+          return d.action === "reuse" && d.version === ownReserved;
+        }) ?? null
+      : null;
+  const effectiveBumpKind = input.bumpKind ?? ownBumpKind;
+  if (effectiveBumpKind !== null) {
+    const reservation = decideVersionReservation({ candidateId: candidate.id, mainVersion, bumpKind: effectiveBumpKind, existingTags: tags, reservations });
     if (reservation.action === "conflict") {
       return { ok: false, error: "version_conflict", message: reservation.reason === "reserved_by_other" ? `v${reservation.version}は他の候補が予約しています` : "mainの版を読めませんでした" };
     }
@@ -325,7 +335,7 @@ export async function requestRcFinalize(
           preBaseSha: contract.baseSha,
           preHeadSha: contract.headSha,
           reservedVersion,
-          bumpKind: input.bumpKind,
+          bumpKind: effectiveBumpKind,
           bumpKindSource: input.bumpKind === null ? "auto" : "manual",
           status: "requested",
           requestKey: finalizationRequestKey,
@@ -354,7 +364,7 @@ export async function requestRcFinalize(
         revision: contract.revision,
         requestKey: finalizationRequestKey,
         baseHeadSha: contract.headSha,
-        bumpKind: input.bumpKind ?? "auto",
+        bumpKind: effectiveBumpKind ?? "auto",
         version: reservedVersion ?? ownReserved,
         unavailableVersions: [...unavailable],
       }),
