@@ -9,7 +9,7 @@ Slackの`#アプリissue起案`への投稿から、対象リポジトリを**�
   └ 新規の親投稿: ack前にSlackIntakeRequest（received）を作成 → ack後に👀 → 対象選択UI（static_select／候補が100超はexternal_select）
        └ 「この対象で起案する」: 権限を確かめ、確定したowner/repoで調査・重複確認（handleChatMessage）
             └ Issue案＋「この案で起案する」ボタン（⚠️＝確認待ち）。**押すまでIssueは作らない**
-                 └ 押下: confirmStateをpending→doneにできた1回だけexecuteConfirmedCard → ✅＋Issueリンク
+                 └ 押下: ack前にconfirming/queuedを保存 → 既存更新を照合・作成 → 結果とdoneを同時保存 → ✅＋Issueリンク
   └ スレッド返信（依頼者本人のみ）: お礼→何もしない／質問→同じスレッドで回答／補足→既存Issueへコメント追記／
        「別件」と明示→分割案（相互リンク）／Issue未作成の間の返信→材料に足して案を作り直す
 ```
