@@ -1,4 +1,5 @@
 import { db } from "@/lib/db";
+import { isReleaseCandidateHeadRef } from "@/lib/release-branch";
 import { fetchWorkflowJobLogs, fetchWorkflowRun, fetchWorkflowRunJobs } from "@/lib/github/actions-api";
 import { getInstallationToken } from "@/lib/github/app-auth";
 import { fetchCommentsForIssue, fetchIssueLabelNames, removeIssueLabel } from "@/lib/github/issues-api";
@@ -192,8 +193,6 @@ async function clearReleaseFailureLabels(
   return cleared;
 }
 
-const FROZEN_RELEASE_PREFIX = "release-main/v";
-
 /**
  * 未解決の失敗を、後続のリリース成功（本番PRのマージ）と照合して解決にする（#4450）。
  * `notify-prepared`が届かない・別経路（競合修復済みの候補など）で本番公開された場合の整合用で、
@@ -212,7 +211,7 @@ export async function reconcileReleasePreparationFailures(repositoryFullName: st
       { floor: Math.max(0, Math.min(...origins) - 1), enough: Number.MAX_SAFE_INTEGER },
     );
     const mergedReleasePrs = closed
-      .filter((pr) => pr.merged_at !== null && pr.head.ref.startsWith(FROZEN_RELEASE_PREFIX))
+      .filter((pr) => pr.merged_at !== null && isReleaseCandidateHeadRef(pr.head.ref))
       .map((pr) => ({ number: pr.number, mergedAt: pr.merged_at as string, htmlUrl: pr.html_url }));
     let resolved = 0;
     for (const row of open) {

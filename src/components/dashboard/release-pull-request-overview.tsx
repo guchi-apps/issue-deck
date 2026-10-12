@@ -1,6 +1,9 @@
 "use client";
 
 import { useState } from "react";
+import { isRcReleaseCandidateHeadRef, isReleaseCandidateHeadRef } from "@/lib/release-branch";
+import { useReleaseRc } from "@/hooks/use-release-rc";
+import { ReleaseRcIdentity, ReleaseRcLegacyNotice, ReleaseRcRevisionHistory } from "@/components/dashboard/release-rc-identity";
 
 import { PullRequestMergeButton } from "@/components/dashboard/pull-request-merge-button";
 import {
@@ -16,13 +19,13 @@ import { useReleaseCandidates } from "@/hooks/use-release-candidates";
 import { useReleaseChanges } from "@/hooks/use-release-changes";
 import { useReleaseVerification } from "@/hooks/use-release-verification";
 import { buildMergeChecks, cellsFromSummary, type MergeCheckItem, type MergeCheckTone } from "@/lib/pull-request-merge-checks";
-import { canMergeFromDeck, RELEASE_BRANCH_PREFIX } from "@/lib/pull-request-list";
+import { canMergeFromDeck } from "@/lib/pull-request-list";
 import { buildReleaseCheckCells, describeCandidateTarget } from "@/lib/release-candidate-checks";
 import { cn } from "@/lib/utils";
 import type { PullRequestSummary } from "@/types/pull-request";
 
 /**
- * 本番PR詳細の上部に出すか（#4428）。開いている凍結ブランチ（`release-main/…`）のリリースPRだけ。
+ * 本番PR詳細の上部に出すか（#4428）。開いている固定済みのリリース候補（旧方式`release-main/…`・新方式`release-rc/…`。#4495）だけ。
  * マージ済み・クローズ済み・旧世代（head=develop）は従来の詳細のまま
  */
 export function isOpenReleaseCandidate(pullRequest: PullRequestSummary): boolean {
@@ -30,7 +33,7 @@ export function isOpenReleaseCandidate(pullRequest: PullRequestSummary): boolean
     pullRequest.kind === "release" &&
     !pullRequest.merged &&
     pullRequest.state === "open" &&
-    pullRequest.headRef.startsWith(RELEASE_BRANCH_PREFIX)
+    isReleaseCandidateHeadRef(pullRequest.headRef)
   );
 }
 
@@ -166,13 +169,24 @@ export function ReleasePullRequestOverview({
   });
   const { openPullRequest } = useReferenceNavigation();
   const reload = () => setReloadToken((n) => n + 1);
+  // リリース候補（#4495）。新方式は候補ID・revision、旧方式は識別と移行の導線を出す
+  const rc = useReleaseRc(repositoryFullName, number, true, reloadToken);
+  const rcCandidate = isRcReleaseCandidateHeadRef(headRef) ? (rc.overview?.candidate ?? null) : null;
+  const legacy = rc.overview?.legacy?.prNumber === number ? rc.overview.legacy : null;
 
   return (
     <div className="flex flex-col gap-3 border-b px-4 py-4 text-xs" data-testid="release-pull-request-overview">
       {/* 正式タイトルとリポジトリ名は共通詳細の見出しが持つ（#4463）。ここはブランチ情報だけを出す */}
-      <p className="break-words text-xs text-muted-foreground">
-        {headRef} → {pullRequest.baseRef}
-      </p>
+      {rcCandidate ? (
+        <ReleaseRcIdentity candidate={rcCandidate} />
+      ) : (
+        <p className="break-words text-xs text-muted-foreground">
+          {headRef} → {pullRequest.baseRef}
+        </p>
+      )}
+      {rc.overview && legacy && (
+        <ReleaseRcLegacyNotice overview={rc.overview} legacy={legacy} repositoryFullName={repositoryFullName} onChanged={rc.reload} />
+      )}
 
       <section aria-label="現在の状態と次の操作" className="rounded-[10px] border bg-card p-3.5 text-sm">
         <ReleaseFixSummary
@@ -211,6 +225,8 @@ export function ReleasePullRequestOverview({
           previousResults={state.previousResults}
         />
       </section>
+
+      {rcCandidate && <ReleaseRcRevisionHistory candidate={rcCandidate} />}
 
       <section aria-label="今回リリースする変更" className="rounded-[10px] border bg-card p-3.5">
         <ReleaseContentsList state={state} />

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, type CSSProperties } from "react";
+import { isReleaseCandidateHeadRef } from "@/lib/release-branch";
 import { ExternalLink, MessageSquareText, RefreshCw, Wrench } from "lucide-react";
 import { showsPullRequestFixIssueButton } from "@/lib/github/pull-request-release-fix-issue";
 
@@ -50,7 +51,7 @@ import { formatRelativeDate } from "@/lib/format-relative-date";
 import { selectPullRequestReviewComment } from "@/lib/github/pull-request-review-comment";
 import { repairKindsFor } from "@/lib/github/pull-request-repair";
 import { parseReleaseVerification, type ReleaseVerificationRow } from "@/lib/github/release-verification";
-import { canMergeFromDeck, RELEASE_BRANCH_PREFIX, requiresUserMerge } from "@/lib/pull-request-list";
+import { canMergeFromDeck, requiresUserMerge } from "@/lib/pull-request-list";
 import { derivePrimaryState, type PrimaryStateTone } from "@/lib/pull-request-primary-state";
 import { applyReviewAction, deriveReviewAction } from "@/lib/pull-request-review-action";
 import { cn } from "@/lib/utils";
@@ -651,7 +652,7 @@ export function PullRequestDetail({
               !releaseCandidate &&
               !pullRequest.merged &&
               pullRequest.state === "open" &&
-              pullRequest.headRef.startsWith(RELEASE_BRANCH_PREFIX) && (
+              isReleaseCandidateHeadRef(pullRequest.headRef) && (
                 <div className="border-b px-4 py-3">
                   <ConnectedReleaseReviewSections
                     repositoryFullName={pullRequest.repositoryFullName}

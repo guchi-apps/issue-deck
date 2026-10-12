@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { SidebarNav, SidebarNavView } from "@/components/dashboard/sidebar-nav";
@@ -64,7 +64,6 @@ function renderSidebar(
       onSelectReleaseHistory={() => {}}
       onSelectNightlyRun={() => {}}
       ideasCount={ideasCount}
-      onLaunchNewApp={() => {}}
       navCounts={navCounts}
       checkUserPullRequestCount={checkUserPullRequestCount}
       manualStepAttention={manualStepAttention}
@@ -75,7 +74,6 @@ function renderSidebar(
       pullRequestNavCounts={pullRequestNavCounts}
       mergePendingAttention={mergePendingAttention}
       repositories={[]}
-      labelSummary={[]}
     />,
   );
 }
@@ -114,7 +112,6 @@ function renderSidebarWithRepositories(
       onSelectUsage={() => {}}
       onSelectReleaseHistory={() => {}}
       onSelectNightlyRun={() => {}}
-      onLaunchNewApp={() => {}}
       navCounts={NAV_COUNTS}
       checkUserPullRequestCount={0}
       manualStepAttention={NO_MANUAL_STEP}
@@ -124,15 +121,14 @@ function renderSidebarWithRepositories(
       mergePendingAttention={NO_MERGE_PENDING}
       repositories={repositories}
       selectedRepoFullNames={selectedRepoFullNames}
-      labelSummary={[]}
     />,
   );
 }
 
 /** リポジトリ一覧に並んでいる名前を、表示順のまま取り出す（区切り線の行は空なので除く） */
 function repositoryNamesInOrder() {
-  const list = screen.getByRole("heading", { name: "リポジトリ" }).closest("div")
-    ?.parentElement?.querySelector("ul");
+  fireEvent.click(screen.getByRole("button", { name: /リポジトリで絞り込み/ }));
+  const list = document.getElementById("sidebar-repo-filter")?.querySelector("ul");
   if (!list) throw new Error("リポジトリ一覧が見つかりません");
   return Array.from(list.querySelectorAll("li"))
     .map((item) => item.textContent?.trim() ?? "")
@@ -249,7 +245,7 @@ describe("SidebarNav", () => {
       mergePendingAttention: { total: 2, autoMerging: 1, repairing: 0, actionRequired: 1 },
     });
 
-    const title = screen.getByText("マージ待ち").closest("button")?.getAttribute("title") ?? "";
+    const title = screen.getByText("PR：マージ待ち").closest("button")?.getAttribute("title") ?? "";
     expect(title).toContain("2件: 要操作1件・自動マージ待ち1件");
   });
 
@@ -257,7 +253,7 @@ describe("SidebarNav", () => {
   it("確認待ちが残っていても強調するのは件数バッジだけにする", () => {
     renderSidebar({ all: 0, "in-progress": 0, completed: 0 }, { ...NAV_COUNTS, "check-user": 2 });
 
-    const button = screen.getByRole("button", { name: /ユーザーの確認待ち/ });
+    const button = screen.getByRole("button", { name: /確認待ち/ });
     expect(button.className).not.toContain("amber");
     const badge = screen.getByText("2");
     expect(badge.className).toContain("bg-amber-500");
@@ -271,7 +267,7 @@ describe("SidebarNav", () => {
       { checkUserPullRequestCount: 1 },
     );
 
-    expect(screen.getByRole("button", { name: /ユーザーの確認待ち/ }).textContent).toContain("3");
+    expect(screen.getByRole("button", { name: /確認待ち/ }).textContent).toContain("3");
   });
 
   it("Issueが0件でもマージ待ちPRがあれば確認待ちを強調する", () => {
@@ -279,7 +275,7 @@ describe("SidebarNav", () => {
       checkUserPullRequestCount: 1,
     });
 
-    const button = screen.getByRole("button", { name: /ユーザーの確認待ち/ });
+    const button = screen.getByRole("button", { name: /確認待ち/ });
     expect(button.querySelector("span:last-child")?.className).toContain("bg-amber-500");
   });
 
@@ -314,7 +310,7 @@ describe("SidebarNav", () => {
     );
 
     expect(
-      screen.getByRole("button", { name: /ユーザーの作業待ち/ }).getAttribute("title"),
+      screen.getByRole("button", { name: /作業待ち/ }).getAttribute("title"),
     ).toBeNull();
   });
 
@@ -395,40 +391,73 @@ describe("SidebarNav", () => {
     renderSidebar({ all: null, "in-progress": null, completed: null });
 
     for (const view of ["all", "in-progress"] as const) {
-      expect(pullRequestNavItem(view).textContent).toBe(getPullRequestView(view).label);
+      expect(pullRequestNavItem(view).textContent).toBe(getPullRequestView(view).pcLabel);
     }
   });
 
-  // 「まず人が動くもの」を上から順に並べる（#1613）。「コードレビュー」「確認環境」は
-  // Pull Requestの枠の下・リポジトリの枠の上に置く（#2674）。「リリース履歴」は
-  // 「ブランチ」の直下に置く（#2827。ブランチの変更を確認したあと、公開されたリリースを
-  // 続けて見る動線のため）
-  it("要対応・質問・ブランチ・リリース履歴・予約実行・構想・AI使用量・Issue・PR・コードレビューの順に並べる", () => {
+  // 4工程（構想・相談→起案・準備→実行・反映待ち→反映済み）の順に並べる（#4543）。
+  // 一覧と要対応は工程から独立して先頭に置き、リポジトリ絞り込みはさらに上、AI使用量は最下部
+  it("リポジトリ絞り込み・一覧・要対応・4工程・補助メニューの順に並べる", () => {
     renderSidebar({ all: 0, "in-progress": 0, completed: 0 });
 
-    const labels = Array.from(document.querySelectorAll("nav > div button")).map((button) =>
+    const labels = Array.from(document.querySelectorAll("nav button")).map((button) =>
       button.textContent?.replace(/\d+$/, "").trim(),
     );
-    expect(labels.slice(0, 18)).toEqual([
-      "ユーザーの確認待ち",
-      "ユーザーの作業待ち",
+    expect(labels.filter((label) => label)).toEqual([
+      "すべてのリポジトリ",
+      "Issue一覧",
+      "PR一覧",
+      "確認待ち",
+      "作業待ち",
       "質問",
-      "ブランチ",
-      "リリース履歴",
-      "予約実行",
       "チャット",
       "構想",
       "iOS拡張",
-      "AI使用量",
-      "すべてのIssue",
-      "未着手",
-      "実行中",
-      "本番反映待ち",
-      "すべてのPR",
-      "実行中",
-      "マージ待ち",
       "コードレビュー",
+      "Issue：未着手",
+      "予約実行",
+      "Issue：実行中",
+      "PR：検証中",
+      "PR：マージ待ち",
+      "Issue：本番反映待ち",
+      "ブランチ",
+      "リリース履歴",
+      "AI使用量",
     ]);
+    expect(Array.from(document.querySelectorAll("nav h2")).map((h) => h.textContent)).toEqual([
+      "構想・相談",
+      "起案・準備",
+      "実行・反映待ち",
+      "反映済み",
+    ]);
+  });
+
+  it("ラベル一覧と新規アプリの行を出さない", () => {
+    renderSidebar({ all: 0, "in-progress": 0, completed: 0 });
+
+    expect(screen.queryByText("すべてのラベルを見る")).toBeNull();
+    expect(screen.queryByText("新規アプリを立ち上げる")).toBeNull();
+  });
+
+  it("リポジトリ一覧は初期表示で閉じ、押すと開閉できる", () => {
+    renderSidebarWithRepositories([repository("alpha")]);
+
+    const toggle = screen.getByRole("button", { name: /リポジトリで絞り込み/ });
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    expect(screen.queryByText("alpha")).toBeNull();
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
+    expect(screen.getByText("alpha")).toBeTruthy();
+  });
+
+  it("閉じていても選択名を出し、解除できる", () => {
+    renderSidebarWithRepositories(
+      [repository("alpha"), repository("beta")],
+      ["guchi-apps/alpha", "guchi-apps/beta"],
+    );
+
+    expect(screen.getByText("2件のリポジトリ")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "リポジトリの選択を解除" })).toBeTruthy();
   });
 
   // 連携数が増えると選択中の行がスクロール範囲の外へ出てしまうため（#1480）。

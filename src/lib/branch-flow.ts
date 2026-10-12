@@ -1,4 +1,5 @@
 import { getDeviceBuildRepository } from "@/lib/device-build-repos";
+import { isReleaseCandidateHeadRef } from "@/lib/release-branch";
 import { MANUAL_STEP_LABEL } from "@/lib/github/approval-labels";
 import { isAskRepoQuestionIssue } from "@/lib/github/ask-claude";
 import { isCodeReviewIssue } from "@/lib/github/code-review";
@@ -8,7 +9,6 @@ import {
   classifyPullRequest,
   extractLinkedIssueNumber,
   isMergeJudgementPending,
-  RELEASE_BRANCH_PREFIX,
 } from "@/lib/pull-request-list";
 import { summarizePullRequestHealth } from "@/lib/pull-request-health";
 import {
@@ -839,7 +839,7 @@ export function releaseContentFrozenAt(release: {
   createdAt: string;
   mergedAt: string | null;
 }): string {
-  return release.headRef.startsWith(RELEASE_BRANCH_PREFIX)
+  return isReleaseCandidateHeadRef(release.headRef)
     ? release.createdAt
     : (release.mergedAt ?? release.createdAt);
 }
@@ -1124,7 +1124,7 @@ export function splitLanesByReleaseFreeze(
   group: Pick<BranchFlowReleaseGroup, "pullRequest" | "lanes" | "frozenAt">,
 ): { afterFreeze: BranchFlowLane[]; included: BranchFlowLane[] } {
   const release = group.pullRequest;
-  if (release === null || !release.headRef.startsWith(RELEASE_BRANCH_PREFIX)) {
+  if (release === null || !isReleaseCandidateHeadRef(release.headRef)) {
     return { afterFreeze: [], included: group.lanes };
   }
   const frozenAt = new Date(group.frozenAt ?? releaseContentFrozenAt(release)).getTime();

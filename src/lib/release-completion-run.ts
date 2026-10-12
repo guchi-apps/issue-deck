@@ -1,4 +1,5 @@
 import type { ReleaseCompletionRun } from "@prisma/client";
+import { legacyReleaseVersionOf } from "@/lib/release-branch";
 
 import { parseClaudeLocalModel, parseCodexLocalModel, resolveAiExecutionAgent } from "@/lib/app-settings";
 import { db } from "@/lib/db";
@@ -64,7 +65,6 @@ import type { ReleaseVerificationSummary } from "@/lib/release-verification-summ
 
 const SWEEP_INTERVAL_MS = 30 * 1000;
 const CHECK_USER_LABELS = ["00.check-user", "01.check-blocked"];
-const FROZEN_PREFIX = "release-main/v";
 const MARKER = "<!-- issue-deck-release-completion -->";
 
 type RunRow = ReleaseCompletionRun;
@@ -238,7 +238,7 @@ export async function startReleaseCompletionRun(params: {
         repositoryFullName,
         originPrNumber: pr.number,
         originHeadSha: pr.head.sha,
-        releaseVersion: pr.head.ref.startsWith(FROZEN_PREFIX) ? pr.head.ref.slice(FROZEN_PREFIX.length) : null,
+        releaseVersion: legacyReleaseVersionOf(pr.head.ref),
         scope: params.scope,
         startedByUserId: params.userId,
         expiresAt: new Date(now.getTime() + RELEASE_COMPLETION_TTL_MS),
@@ -491,7 +491,8 @@ async function applyDecision(
       return handOff(run, ctx, decision.reason, decision.detail);
     case "follow_successor": {
       const updated = await db.releaseCompletionRun.updateMany({
-        where: { id: run.id, status: run.status, candidatePrNumber: run.candidatePrNumber },
+        // 新方式の候補（#4495）は番号が変わらずheadが進むので、headも条件にして同時の巡回で二重に進めない
+        where: { id: run.id, status: run.status, candidatePrNumber: run.candidatePrNumber, candidateHeadSha: run.candidateHeadSha },
         data: {
           candidatePrNumber: decision.prNumber,
           candidateHeadSha: decision.headSha,

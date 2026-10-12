@@ -9,6 +9,8 @@
  * 画面の手動選択と修正系列（#4317）の自動作り直しは、どちらもここの検証と`requestSelectiveRebuild`を通る。
  */
 
+import { isReleaseCandidateHeadRef } from "@/lib/release-branch";
+
 export type RebuildSelectionPullRequest = { number: number; mergeSha: string; title: string };
 
 export type RebuildSelection = {
@@ -89,7 +91,7 @@ export function checkRebuildPullRequest(
 ): { ok: true; mergeSha: string; title: string } | { ok: false; problem: RebuildPullRequestProblem } {
   const pr = facts.pr;
   if (!pr) return { ok: false, problem: "not_found" };
-  if (pr.headRef.startsWith("release/v") || pr.headRef.startsWith("release-main/v")) return { ok: false, problem: "release_branch" };
+  if (pr.headRef.startsWith("release/v") || isReleaseCandidateHeadRef(pr.headRef)) return { ok: false, problem: "release_branch" };
   if (pr.baseRef !== "develop") return { ok: false, problem: "not_develop" };
   if (!pr.mergedAt || !pr.mergeSha) return { ok: false, problem: "not_merged" };
   if (expectedMergeSha && expectedMergeSha !== pr.mergeSha) return { ok: false, problem: "sha_changed" };

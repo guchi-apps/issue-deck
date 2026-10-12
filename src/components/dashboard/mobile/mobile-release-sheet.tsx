@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { isLegacyReleaseCandidateHeadRef } from "@/lib/release-branch";
 
 import { Rocket } from "lucide-react";
 
@@ -35,7 +36,6 @@ import {
   formatDevelopVersionDisplay,
   formatMainVersionDisplay,
 } from "@/lib/github/release-version-display";
-import { RELEASE_BRANCH_PREFIX } from "@/lib/pull-request-list";
 import { getWebviewIosRepository } from "@/lib/webview-ios-repos";
 import type { Issue } from "@/types/issue";
 import type { ConnectedRepository } from "@/types/repository";
@@ -67,7 +67,8 @@ export function MobileReleaseSheet({
   const [allowFailedDeploy, setAllowFailedDeploy] = useState(false);
   // 準備中・準備失敗は灰色に見せるが、確認のうえ起動できる（#4421。PCの個別ボタンと同じ挙動）
   const preparation = useReleasePreparation(repository.fullName, open);
-  const prepBlocked = preparation.prepState !== "idle";
+  const prepUnknown = preparation.prepState === "unknown";
+  const prepBlocked = preparation.prepState === "running" || preparation.prepState === "failed";
   const [allowPrepOverride, setAllowPrepOverride] = useState(false);
   const deployRun = releaseStatus?.available ? releaseStatus.deployWorkflowRun : null;
   const deployFailed = deployRun?.status === "completed" &&
@@ -148,7 +149,7 @@ export function MobileReleaseSheet({
               {/* リリースPRを出した後の修正は、凍結ブランチへ足さずバンプから作り直す（#3014）。
                   状態はこのシートのポーリングが拾うので、押した後の再取得は要らない */}
               {releaseStatus.phase === "release_pr_open" &&
-                releaseStatus.releasePullRequest?.headRef?.startsWith(RELEASE_BRANCH_PREFIX) && (
+                isLegacyReleaseCandidateHeadRef(releaseStatus.releasePullRequest?.headRef ?? "") && (
                   <ReleaseRebuildButton
                     repositoryFullName={repository.fullName}
                     mainVersion={releaseStatus.mainVersion}
@@ -162,14 +163,16 @@ export function MobileReleaseSheet({
               ) : (
                 <Button
                   variant="outline"
-                  disabled={isTriggeringRelease}
+                  disabled={isTriggeringRelease || prepUnknown}
                   onClick={() => setReleaseConfirmOpen(true)}
-                  className={prepBlocked ? "mt-1 bg-muted text-muted-foreground" : "mt-1"}
+                  className={prepBlocked || prepUnknown ? "mt-1 bg-muted text-muted-foreground" : "mt-1"}
                 >
                   <Rocket className={isTriggeringRelease ? "animate-pulse" : undefined} />
                   {isTriggeringRelease
                     ? "起動中..."
-                    : preparation.prepState === "running"
+                    : prepUnknown
+                      ? "準備状態を確認中"
+                      : preparation.prepState === "running"
                       ? "リリース準備中"
                       : preparation.prepState === "failed"
                         ? "準備に失敗"
@@ -274,7 +277,7 @@ export function MobileReleaseSheet({
             {/* 起動できたことは、閉じた先のこのシートの進捗（`ReleaseProgress`）で分かるため、
                 「リリースを起動しました」のダイアログは出さない（#1590） */}
             <AlertDialogAction
-              disabled={isTriggeringRelease || (deployFailed && !allowFailedDeploy) || (prepBlocked && !allowPrepOverride)}
+              disabled={isTriggeringRelease || prepUnknown || (deployFailed && !allowFailedDeploy) || (prepBlocked && !allowPrepOverride)}
               onClick={() => void triggerRelease(undefined, deployFailed && allowFailedDeploy)}
             >起動する</AlertDialogAction>
           </AlertDialogFooter>

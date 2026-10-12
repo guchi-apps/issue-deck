@@ -1,6 +1,7 @@
 "use client";
 
 import { PullRequestMergeChanges } from "@/components/dashboard/pull-request-merge-changes";
+import { isReleaseCandidateHeadRef } from "@/lib/release-branch";
 import {
   MergePrecheckInlineRows,
   PullRequestMergePrecheck,
@@ -17,7 +18,6 @@ import type { ReviewVerdictKind } from "@/lib/github/release-verification";
 import { RELEASE_CI_LABEL, type PerPullRequestCell } from "@/lib/pull-request-merge-checks";
 import { buildReleaseCheckCells, type ReleaseCandidatesSource } from "@/lib/release-candidate-checks";
 import { applyReviewVerdicts } from "@/lib/pull-request-changes";
-import { RELEASE_BRANCH_PREFIX } from "@/lib/pull-request-list";
 import {
   buildCiConflictRows,
   buildMergePrecheck,
@@ -92,7 +92,7 @@ export function PullRequestMergeProduction({
 }) {
   const state = usePullRequestChanges(pullRequest.id, open);
   const { openPullRequest } = useReferenceNavigation();
-  const frozen = pullRequest.headRef.startsWith(RELEASE_BRANCH_PREFIX);
+  const frozen = isReleaseCandidateHeadRef(pullRequest.headRef);
 
   // 変更一覧のPRはリリースPRと同じリポジトリのもの。IDは`<owner>/<repo>#<番号>`
   const openChange = (number: number) => {

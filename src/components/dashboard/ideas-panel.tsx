@@ -1,6 +1,6 @@
 "use client";
 
-import { ExternalLink, Lightbulb, Loader2, RefreshCw, Trash2 } from "lucide-react";
+import { ExternalLink, Lightbulb, Loader2, RefreshCw, Rocket, Trash2 } from "lucide-react";
 import { useState } from "react";
 
 import { MarkdownBody } from "@/components/dashboard/markdown-body";
@@ -24,11 +24,14 @@ export function IdeasPanel({
   active = true,
   onBack,
   onChanged,
+  onLaunchNewApp,
 }: {
   active?: boolean;
   onBack?: () => void;
   /** 取得・削除のあとに呼ぶ。左メニューの件数の取り直しに使う（件数そのものは渡さない） */
   onChanged?: () => void;
+  /** 新規アプリの立ち上げダイアログを開く（#4543）。PCだけが渡す。構想の作成とは別の操作 */
+  onLaunchNewApp?: () => void;
 }) {
   const { ideas, isLoading, deletingPath, error, refresh, remove } = useIdeas(active, onChanged);
   const [deleteTarget, setDeleteTarget] = useState<IdeaSummary | null>(null);
@@ -44,7 +47,12 @@ export function IdeasPanel({
           </h2>
           <p className="text-[11px] text-muted-foreground">立ち上げ前のアイデアを確認・整理します</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
+          {onLaunchNewApp && (
+            <Button size="sm" onClick={onLaunchNewApp} title="リポジトリの作成と、残りの作業のIssue起票までを行う">
+              <Rocket />新規アプリ
+            </Button>
+          )}
           <Button variant="outline" size="sm" onClick={() => void refresh()} disabled={isLoading}>
             <RefreshCw className={isLoading ? "animate-spin" : ""} />更新
           </Button>
