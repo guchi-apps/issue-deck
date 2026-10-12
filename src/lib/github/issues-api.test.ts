@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { GithubApiError } from "@/lib/github/github-api-error";
 import {
   fetchIssueState,
+  fetchIssueStateOrThrow,
   fetchRepositoryComments,
   hasReopenedEvent,
   IssueTransferPartialError,
@@ -226,5 +227,30 @@ describe("fetchIssueState", () => {
     const error = await fetchIssueState("o", "r", 1, "t").catch((e: unknown) => e);
     expect(error).toBeInstanceOf(GithubApiError);
     expect((error as GithubApiError).status).toBe(401);
+  });
+});
+
+describe("fetchIssueStateOrThrow（#4488）", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("存在しない（404）はnull、open・closedはそのまま返す", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValueOnce(jsonResponse(200, { state: "open" }))
+        .mockResolvedValueOnce(jsonResponse(404, { message: "Not Found" })),
+    );
+    expect(await fetchIssueStateOrThrow("o", "r", 1, "t")).toBe("open");
+    expect(await fetchIssueStateOrThrow("o", "r", 1, "t")).toBeNull();
+  });
+
+  it.each([403, 429, 500, 503])("%dは「存在しない」に畳まずGithubApiErrorを投げる", async (status) => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(status, { message: "x" })));
+    const error = await fetchIssueStateOrThrow("o", "r", 1, "t").catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(GithubApiError);
+    expect((error as GithubApiError).status).toBe(status);
   });
 });
