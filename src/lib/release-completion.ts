@@ -16,6 +16,7 @@
  */
 
 import { isReverifyFailureReason, NOTHING_TO_ADD_REASON } from "@/lib/release-fix-series";
+import { isReleaseCandidateHeadRef } from "@/lib/release-branch";
 
 export const RELEASE_COMPLETION_SCOPE_READY = "until_ready";
 export const RELEASE_COMPLETION_SCOPE_PRODUCTION = "until_production";
@@ -320,7 +321,7 @@ export function decideCompletionMerge(
 
   const pull = observation.pullRequest;
   if (pull === null) return { action: "wait", reason: "pull_request_unobserved" };
-  if (pull.number !== run.candidatePrNumber || pull.baseRef !== "main" || !pull.headRef.startsWith("release-main/")) {
+  if (pull.number !== run.candidatePrNumber || pull.baseRef !== "main" || !isReleaseCandidateHeadRef(pull.headRef)) {
     return { action: "stop", reason: "candidate_changed" };
   }
   if (pull.merged) return { action: "wait", reason: "already_merged" };

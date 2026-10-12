@@ -11,6 +11,8 @@
  * 「バンプ後に変更が無い」と見れば従来どおり同じ版のリリースPRを作り直すだけになる）。
  */
 
+import { isReleaseCandidateHeadRef } from "@/lib/release-branch";
+
 /** リリースPRの後にdevelopへ入ったPR1件 */
 export type ReleaseRebuildPullRequest = {
   number: number;
@@ -45,7 +47,7 @@ const MERGE_SUBJECT = /^Merge pull request #(\d+) from [^/\s]+\/(\S+)/;
  * ここは名前での粗い除外で、実際のbaseは`fetchReleaseRebuildCandidate`が確認する
  */
 export function isReleaseBranch(branch: string): boolean {
-  return branch.startsWith("release/v") || branch.startsWith("release-main/v") || branch === "develop" || branch === "main";
+  return branch.startsWith("release/v") || isReleaseCandidateHeadRef(branch) || branch === "develop" || branch === "main";
 }
 
 /**

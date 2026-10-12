@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { isLegacyReleaseCandidateHeadRef } from "@/lib/release-branch";
 
 import { Rocket } from "lucide-react";
 
@@ -33,7 +34,6 @@ import {
   formatDevelopVersionDisplay,
   formatMainVersionDisplay,
 } from "@/lib/github/release-version-display";
-import { RELEASE_BRANCH_PREFIX } from "@/lib/pull-request-list";
 import { getWebviewIosRepository } from "@/lib/webview-ios-repos";
 import type { Issue } from "@/types/issue";
 import type { ConnectedRepository } from "@/types/repository";
@@ -142,7 +142,7 @@ export function MobileReleaseSheet({
               {/* リリースPRを出した後の修正は、凍結ブランチへ足さずバンプから作り直す（#3014）。
                   状態はこのシートのポーリングが拾うので、押した後の再取得は要らない */}
               {releaseStatus.phase === "release_pr_open" &&
-                releaseStatus.releasePullRequest?.headRef?.startsWith(RELEASE_BRANCH_PREFIX) && (
+                isLegacyReleaseCandidateHeadRef(releaseStatus.releasePullRequest?.headRef ?? "") && (
                   <ReleaseRebuildButton
                     repositoryFullName={repository.fullName}
                     mainVersion={releaseStatus.mainVersion}

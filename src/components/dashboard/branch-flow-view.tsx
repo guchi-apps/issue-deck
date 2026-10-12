@@ -12,6 +12,7 @@ import {
   type RefObject,
 } from "react";
 import { createPortal } from "react-dom";
+import { isReleaseCandidateHeadRef, isLegacyReleaseCandidateHeadRef } from "@/lib/release-branch";
 import {
   ArrowUpToLine,
   Check,
@@ -119,7 +120,6 @@ import { getProgressStatusDef } from "@/lib/issue-progress";
 import {
   canMergeFromDeck,
   isMergeJudgementPending,
-  RELEASE_BRANCH_PREFIX,
   requiresUserMerge,
 } from "@/lib/pull-request-list";
 import { isTriggerPending, RELEASE_TRIGGER_PENDING_MS } from "@/lib/trigger-pending-guard";
@@ -1372,7 +1372,7 @@ function ReleaseGroupHeader({
           !released &&
           group.pullRequest &&
           group.pullRequest.state === "open" &&
-          group.pullRequest.headRef.startsWith(RELEASE_BRANCH_PREFIX) && (
+          isReleaseCandidateHeadRef(group.pullRequest.headRef) && (
             <ReleaseVerificationBrief
               repositoryFullName={repositoryFullName}
               pullRequestNumber={group.pullRequest.number}
@@ -1557,7 +1557,7 @@ function NextReleaseCard({
               </GithubReferenceLink>
             ))}
           </div>
-          {pullRequest && pullRequest.headRef.startsWith(RELEASE_BRANCH_PREFIX) && (
+          {pullRequest && isReleaseCandidateHeadRef(pullRequest.headRef) && (
             <ReleaseVerificationBrief
               repositoryFullName={repository.repositoryFullName}
               pullRequestNumber={pullRequest.number}
@@ -1833,7 +1833,7 @@ function ReleaseFlowGraph({
               group.mergedAt === null &&
               group.pullRequest !== null &&
               group.pullRequest.state === "open" &&
-              group.pullRequest.headRef.startsWith(RELEASE_BRANCH_PREFIX) &&
+              isLegacyReleaseCandidateHeadRef(group.pullRequest.headRef) &&
               hasChangesAfterReleaseFreeze(group) ? (
                 <ReleaseRebuildButton
                   repositoryFullName={repository.repositoryFullName}

@@ -1,4 +1,5 @@
 import type { ReleaseFixSeries } from "@prisma/client";
+import { isReleaseCandidateHeadRef, legacyReleaseVersionOf } from "@/lib/release-branch";
 
 import { parseClaudeLocalModel, parseCodexLocalModel, resolveAiExecutionAgent } from "@/lib/app-settings";
 import { db } from "@/lib/db";
@@ -74,7 +75,6 @@ import type { ReleaseVerificationSection } from "@/lib/release-verification-summ
  * （GitHubの保護を外して取り込まない）。
  */
 
-const FROZEN_PREFIX = "release-main/v";
 const CHECK_USER_LABELS = ["00.check-user", "01.check-blocked"];
 const PLAN_REQUIRED_LABEL = "21.plan-required";
 const REBUILD_TIMEOUT_MS = 30 * 60 * 1000;
@@ -224,7 +224,7 @@ export type CreateReleaseFixResult =
   | { outcome: "blocked"; message: string };
 
 function releaseVersionOf(headRef: string): string | null {
-  return headRef.startsWith(FROZEN_PREFIX) ? headRef.slice(FROZEN_PREFIX.length) : null;
+  return legacyReleaseVersionOf(headRef);
 }
 
 function itemsFromSection(input: CreateReleaseFixInput): { items: ReleaseFixDraftItem[]; keys: string[] } | null {
@@ -418,7 +418,7 @@ async function notifyStop(
 
 async function findOpenFrozenReleasePr(owner: string, repo: string, token: string): Promise<GithubApiPullRequest | null> {
   const open = await fetchOpenPullRequestsForBase(owner, repo, "main", token);
-  return open.find((pr) => pr.head.ref.startsWith(FROZEN_PREFIX)) ?? null;
+  return open.find((pr) => isReleaseCandidateHeadRef(pr.head.ref)) ?? null;
 }
 
 type SweepResult = { checked: number; rebuilt: number; changed: number };
