@@ -119,13 +119,20 @@ export function decideInternalStop(input: {
   findings: readonly InternalFindingRecord[];
   startedAt: Date;
   now: Date;
+  /** 上限内にゲートが完了済みなら、時間上限では止めない（完了後の再評価で巻き戻さない） */
+  gateComplete?: boolean;
 }): { stop: false } | { stop: true; reason: InternalStopReason; detail?: string } {
   const reviewed = input.rounds.filter((r) => r.reviewVerdict !== null).sort((a, b) => a.round - b.round);
 
   const recurring = input.findings.find((f) => f.reopenCount >= INTERNAL_MAX_REOPEN && f.status === "open");
   if (recurring) return { stop: true, reason: "recurring_finding", detail: recurring.key };
 
-  // 最新の往復が合格なら、上限に達していても止めない（完了できる状態を止めない）
+  // 時間上限は、レビューがpassでも完了前なら適用する（テスト完了待ちで120分を超えたらPRを作らせない）
+  if (!input.gateComplete && input.now.getTime() - input.startedAt.getTime() >= INTERNAL_MAX_MINUTES * 60 * 1000) {
+    return { stop: true, reason: "timed_out" };
+  }
+
+  // 最新の往復が合格なら、回数・進捗の上限に達していても止めない（完了できる状態を止めない）
   const latest = reviewed[reviewed.length - 1];
   if (latest?.reviewVerdict === "pass") return { stop: false };
 
