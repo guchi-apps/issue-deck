@@ -38,8 +38,9 @@ export function applyReleasePrepState(
   base: ReleaseBlockedReason | null,
   state: ReleasePrepState,
 ): ReleaseBlockedReason | null {
+  // 未取得は、確認付きで起動できるdeploy-failedよりも先に塞ぐ（準備中かどうか分からないまま起動させない。#4556）
+  if (state === "unknown" && (base === null || base === "deploy-failed")) return "preparation-unknown";
   if (base !== null) return base;
-  if (state === "unknown") return "preparation-unknown";
   if (state === "failed") return "preparation-failed";
   if (state === "running") return "release-preparing";
   return null;

@@ -110,7 +110,10 @@ export function ReleaseBulkButton({
 
       <AlertDialog open={confirmOpen} onOpenChange={(open) => {
         setConfirmOpen(open);
-        if (!open) setAllowPrepOverride(false);
+        if (!open) {
+          setAllowPrepOverride(false);
+          setPrepStates({});
+        }
       }}>
         <AlertDialogContent className="flex flex-col gap-4 overflow-hidden">
           <AlertDialogHeader>
