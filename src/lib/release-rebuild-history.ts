@@ -244,3 +244,35 @@ export const rebuildEventKey = {
   stop: (seriesId: string, kind: string, reason: string) => `${kind}:${seriesId}:${hashText(reason)}`,
   successor: (repo: string, originPr: number, successorPr: number) => `successor:${repo}#${originPr}->${successorPr}`,
 };
+
+/**
+ * 完了したリリースPR番号の境界（#4420）。mainへマージ済みのリリースPRのうち、完了条件を全て満たす
+ * 最大の番号を返す（無ければnull）。**リリースPR番号はリポジトリ内で単調増加**なので、境界以下の経過は
+ * まとめて完了済みとして扱える。
+ *
+ * iOSアプリのあるリポジトリ（`requiresIosDelivery`）は、本番マージに加えてTestFlight配布済みのタグが
+ * そのマージコミットに付くまで完了にしない。後の版が配布済みなら、それより前の版もまとめて完了になる
+ * （更新不要でタグが付かない版が、保持され続けないようにするため）。
+ */
+export function decideCompletedThroughPr(input: {
+  mergedReleasePrs: readonly { number: number; mergeSha: string | null }[];
+  requiresIosDelivery: boolean;
+  /** 配布済みタグが指すコミットSHA（`requiresIosDelivery`のときだけ使う） */
+  deliveredShas: ReadonlySet<string>;
+}): number | null {
+  let best: number | null = null;
+  for (const pr of input.mergedReleasePrs) {
+    const complete = !input.requiresIosDelivery || (pr.mergeSha !== null && input.deliveredShas.has(pr.mergeSha));
+    if (complete && (best === null || pr.number > best)) best = pr.number;
+  }
+  return best;
+}
+
+/** 経過が完了済みか。元候補と後継候補のどちらも境界以下のときだけ完了（作成中の後継を巻き込まない） */
+export function isEpisodeCompleted(
+  episode: Pick<RebuildEpisode, "originPrNumber" | "successor">,
+  completedThrough: number | null,
+): boolean {
+  if (completedThrough === null) return false;
+  return Math.max(episode.originPrNumber, episode.successor?.number ?? 0) <= completedThrough;
+}
