@@ -160,6 +160,23 @@ PR詳細・PR一覧・ブランチ画面・本番マージ確認の一覧は、�
 - **巡回**: `scripts/subpc-dispatch-poller.sh`の`sweep_release_fix_series`（`DISPATCH_POLLER_VERSION=37`）が`POST /api/repositories/release/fix-series/sweep`を呼ぶ。進行はすべてDBの行にあり、再起動しても続きから進む。止まった・判断待ちのときは修正Issueへ理由をコメントし`00.check-user`＋`01.check-blocked`を付ける
 - **画面**: 全体レビューの指摘・統合検証の失敗の下に「修正Issueを作成」、検証区分の下に「この候補への修正の進捗」（Issue作成→計画・実装→PR検証→develop取り込み→候補作り直し→再検証→本番承認待ちの現在地・関連リンク・停止理由・各SHA）。PC・スマホ共通の部品
 
+## 修正の内部確認：1セッション内で往復し、修正PRを1件にまとめる（#4410）
+
+修正Issueのセッション内で「実装 → 独立レビュー → 修正 → テスト」を繰り返し、**内部確認が完了してから**develop向けの修正PRを1件作る。
+レビューのたびに修正Issue・PR・リリース候補が世代をまたいで増えるのを避ける。対象はリリース修正系列（`ReleaseFixSeries.internalReview=true`の系列。旧い系列は従来どおり）で、通常Issueの実装フローは変えない。
+
+- **担当**: 実装は修正Issueのセッション。独立レビューは同じセッションが`Agent`ツールで呼ぶ**読み取り専用の別エージェント**（Claude Code標準の通信機構）。実装担当は合否を決めず、レビューの指摘と検証結果を報告APIへ書き写す。`tmux send-keys`・常駐の監督役は使わない
+- **作業場所**: 元候補（凍結ブランチ）を一時worktreeへ取得し、修正を重ねた状態で確認する。developの最新は混ぜず、内部の往復では候補の作り直し・バージョン更新をしない（手順は修正Issue本文の「内部確認」節。`internalReviewSection`）
+- **記録**（`ReleaseFixInternalRound`・`ReleaseFixFinding`）: 論理セッションは**リポジトリ＋修正Issue番号**で、再検証の失敗で世代が進んでも指摘・往復を引き継ぐ。指摘はサーバーが`F-001`から採番し、解消は根拠つき、再発は`reopenCount`で数える。中断・再起動しても同じ記録から再開する
+- **報告API**（`POST /api/dispatch/release-fix-internal`、`scripts/report-release-fix-round.sh`）: `review`・`test`・`status`。認証は共有シークレット。**対象のSHAは受け取らず、サーバーが`issue-<番号>`ブランチのHEADから取り直す**。進行中の内部確認つき系列に結び付かない報告・整合しない報告（`pass`なのに未解決が残るなど）は記録しない
+- **完了判定**（`evaluateInternalGate`）: 最新の往復で、独立レビューの実施・未解決指摘0件・必要テストの合格が**同じ対象SHA**に対してそろっているときだけ。レビューやテストの後に内容が変わると古い合格は使われない
+- **PR作成**: `scripts/create-release-fix-pr.sh`が完了判定・push済みの内容との一致・開いているPRの有無を確かめ、満たさなければ作らない（再実行でも重複しない）
+- **強制は取り込みの手前**: GitHub側のPR作成そのものはサーバーから止められない。そこで巡回（`sweepGroup`）が修正PRのhead SHAで同じ判定をし、**未完了または確認した内容と違うPRは候補の作り直しへ進めず`awaiting_decision`にする**（`decideReleaseFix`の`internalHold`）。確認が完了すれば次の巡回で自動的に進む
+- **止める条件**（`decideInternalStop`）: 往復5回・経過120分・同一指摘の再発2回・未解決が減らない往復が2回続く。通常の指摘だけでは止めず、止めるときはIssueへ理由と必要な判断を残して`00.check-user`＋`01.check-blocked`を付ける（一度だけ）。判断が要る仕様変更・権限不足・外部作業は、セッションがIssueコメントで相談する
+- **最終検証で追加修正が出たとき**: 元のPRはすでにマージ済みで足せない。既存の世代（`generation+1`）を使い、**同じ修正Issue・同じ`issue-<番号>`ブランチ・引き継いだ内部確認の記録**へ戻して追加PRを1件作る（Issueへ理由を記録。新しいIssueは作らない。Issueが閉じているときだけ新規）。前の世代が使ったPRは次の世代の修正PRとして拾わない
+- **画面**: 修正パネルの現在状態の下に「内部確認」欄（レビュー・テストの状態、未解決指摘、往復と経過時間の消費。`ReleaseFixInternalReview`）
+- **PR取り込み後**: 選択的取り込み・候補再構築・最終候補のSHAでの再検証・GitHub CI・本番マージを人が行う点は従来のまま
+
 ## PRを選んだ作り直し（#4335）
 
 「修正を入れて作り直す」は、元の候補（`release-main/vX.Y.Z`のhead）へ**選んだPRのdevelopへのマージ差分だけ**を

@@ -225,6 +225,10 @@ export type ReleaseFixIssueInput = {
   relatedPullRequests: number[];
   /** 修正後に満たす検証条件 */
   verifyConditions: string[];
+  /** 内部確認（#4410）の手順を本文へ含める。旧い系列・テストは省略 */
+  internalReview?: boolean;
+  /** 世代を進めた起案で、同じ修正Issueへ戻す（新しいIssueを作らず、このコメントとして足す） */
+  continuation?: boolean;
 };
 
 /** 修正Issueの目印。本文の先頭に置き、巡回が起案済みのIssueを本文から探し直せるようにする */
@@ -280,6 +284,7 @@ export function buildReleaseFixIssue(input: ReleaseFixIssueInput, sourceKey: str
     "",
     ...input.verifyConditions.map((condition) => `- ${condition}`),
     "",
+    ...(input.internalReview ? internalReviewSection() : []),
     "## 取り込みの流れ",
     "",
     "- この修正PRがdevelopへマージされると、issue-deckが元リリースPRの作り直しを行い、新しいSHAで統合検証と全体レビューを自動でやり直します（リリースブランチへは直接書き込みません）。",
@@ -287,6 +292,23 @@ export function buildReleaseFixIssue(input: ReleaseFixIssueInput, sourceKey: str
     "- この修正はdevelop向けのPRとして作成してください。リリース候補（`release-main/*`）のブランチは編集しません。",
   );
   return { title, body: lines.join("\n") };
+}
+
+/** 修正Issue本文へ入れる、内部確認（#4410）の手順。実装担当の作業手順として読まれる */
+export function internalReviewSection(): string[] {
+  return [
+    "## 内部確認（このセッションの中で完結させる）",
+    "",
+    "修正は、1つのセッション内で「実装 → 独立レビュー → 修正 → テスト」を繰り返し、**内部確認が完了してから修正PRを1件だけ**作成します。レビューのたびに修正Issue・PR・リリース候補を増やしません。",
+    "",
+    "- 作業場所: 元候補（base/headは上記）の凍結ブランチを一時worktreeへ取得し、そこへ修正を重ねた状態で確認する。**developの最新は混ぜない**。内部の往復では候補の作り直し・バージョン更新をしない",
+    "- 独立レビュー: `Agent`ツールで**読み取り専用の別エージェント**に依頼する（実装した本人は合否を決めない）。差分だけでなく、修正を取り込んだ候補全体との整合（認可・関連エンドポイント・スキーマ・設定と配布物・旧pollerなどの互換性）を確認させ、指摘と検証結果を返させる",
+    "- 修正は実装担当が行う。指摘は`scripts/report-release-fix-round.sh review`で記録するとIDが付く（`F-001`〜）。解消は根拠つきで報告する。対象のSHAは`issue-<番号>`ブランチのHEADからサーバーが取り直すので、**報告の前にpushする**",
+    "- テストは`scripts/report-release-fix-round.sh test`で結果を記録する。内容が変わったら、レビューもテストもやり直す（古い合格は使われない）",
+    "- 完了の条件: 独立レビューの実施・未解決指摘0件・必要テストの合格が、同じ内容に対してそろっていること。そろったら`scripts/create-release-fix-pr.sh`でPRを作る（通常の往復で追加Issue・PRは作らない。再実行してもPRは重複しない）",
+    "- 止まる場合: 往復の上限・時間の上限・同じ指摘の再発・進捗なしで、理由つきで止まり`00.check-user`が付く。判断が必要な仕様変更・権限不足・外部作業も同様にIssueコメントで相談する",
+    "",
+  ];
 }
 
 /** 修正後に満たす検証条件（種別ごとの既定） */
@@ -315,6 +337,11 @@ export type ReleaseFixSeriesSnapshot = {
   /** 修正PRが（マージされずに）閉じられたか */
   fixPrClosedUnmerged: boolean;
   acceptedExtraPrs: number[];
+  /**
+   * 内部確認（#4410）が未完了、または確認した内容と違う修正PRが現れているときの理由。無ければnull/未指定。
+   * PRの作成自体はGitHub側で止められないため、強制は作り直しへ進める手前の判断（`decideReleaseFix`）に置く
+   */
+  internalHold?: string | null;
 };
 
 export type ReleaseCandidateObservation = {
@@ -380,6 +407,12 @@ export function decideReleaseFix(input: {
       reason: `修正PR（Issue #${closed.map((s) => s.issueNumber).join("、#")}）がマージされずに閉じられました。続けるには修正を起案し直してください`,
       seriesIds: closed.map((s) => s.id),
     };
+  }
+
+  // 内部確認が済んでいない修正は候補へ取り込まない。理由を示して人の判断へ回し、確認が完了すれば次の巡回で自動的に進む
+  const held = waiting.filter((s) => s.fixPrNumber !== null && s.internalHold);
+  if (held.length > 0) {
+    return { action: "stop", status: "awaiting_decision", reason: held[0].internalHold as string, seriesIds: held.map((s) => s.id) };
   }
 
   if (!waiting.every((s) => s.fixPrMerged)) return { action: "wait" };

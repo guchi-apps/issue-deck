@@ -3,7 +3,7 @@ import type { ReleaseFixSeries } from "@prisma/client";
 import { db } from "@/lib/db";
 import { fetchPullRequest } from "@/lib/github/actions-api";
 import { getInstallationToken } from "@/lib/github/app-auth";
-import { addIssueLabels, createComment, createIssue, updateIssue } from "@/lib/github/issues-api";
+import { addIssueLabels, createComment, createIssue, fetchIssueState, updateIssue } from "@/lib/github/issues-api";
 import {
   fetchOpenPullRequestsForBase,
   fetchPullRequestForRebuild,
@@ -14,6 +14,8 @@ import {
 } from "@/lib/github/release-api";
 import { releaseWorkflowExists } from "@/lib/github/release-workflow-cache";
 import { isUniqueConstraintError } from "@/lib/prisma-error";
+import { decideInternalHold } from "@/lib/release-fix-internal";
+import { evaluateInternalGateForSweep, loadInternalViewForUi, type InternalStatusView } from "@/lib/release-fix-internal-run";
 import {
   buildReleaseFixIssue,
   buildReleaseFixSourceKey,
@@ -91,6 +93,10 @@ export type ReleaseFixSeriesView = {
   createdAt: string;
   /** 修正Issueの実行の状況（#4396）。一覧の取得時にだけ埋め、それ以外は`none` */
   startState: ReleaseFixStartState;
+  /** 内部確認（#4410）の状態。求めない系列・一覧以外ではnull */
+  internal: InternalStatusView | null;
+  /** 世代を進めた起案が、前の世代と同じ修正Issueへ戻した（追加PRの理由はIssueに記録）か */
+  continuedFromParent: boolean;
 };
 
 export function toReleaseFixSeriesView(row: ReleaseFixSeries): ReleaseFixSeriesView {
@@ -123,6 +129,8 @@ export function toReleaseFixSeriesView(row: ReleaseFixSeries): ReleaseFixSeriesV
     rebuildFailed: status === "stopped" && isRebuildFailureReason(row.stopReason),
     createdAt: row.createdAt.toISOString(),
     startState: "none",
+    internal: null,
+    continuedFromParent: false,
   };
 }
 
@@ -140,6 +148,14 @@ export async function listReleaseFixSeries(
     take: 30,
   });
   const views = rows.map(toReleaseFixSeriesView);
+  // 内部確認の状態（#4410）。記録だけを読む（GitHubは呼ばない）。世代を進めた系列は前の世代と同じIssueを使う
+  await Promise.all(
+    views.map(async (view, index) => {
+      const row = rows[index];
+      view.internal = await loadInternalViewForUi(row.repositoryFullName, row.issueNumber, row.internalReview, row.internalStopReason);
+      view.continuedFromParent = row.parentId !== null && rows.some((other) => other.id === row.parentId && other.issueNumber === row.issueNumber);
+    }),
+  );
   // 開始前（修正PRがまだ無い）の系列だけ、実行の状況を読む（#4396）
   const pending = views.filter((view) => view.status === "issue_created");
   if (pending.length === 0) return views;
@@ -293,14 +309,33 @@ export async function createReleaseFixSeries(input: CreateReleaseFixInput): Prom
       generation,
       relatedPullRequests: [...new Set(picked.items.flatMap((item) => item.pullRequests))],
       verifyConditions: defaultVerifyConditions(input.sourceKind),
+      internalReview: true,
+      continuation: parent !== null,
     },
     sourceKey,
   );
-  const issue = await createIssue(owner, repo, input.token, {
-    title: draft.title,
-    body: draft.body,
-    labels: input.causeClass === "decision" ? [PLAN_REQUIRED_LABEL] : [],
-  });
+  // 再検証で追加の修正が出たとき（世代を進めるとき）は、新しいIssueを起こさず**同じ修正Issue**へ戻す（#4410）。
+  // 元のPRはマージ済みなので足せず、追加PRが不可避になる。その理由と親Issueとの関係を、Issueのコメントに記録する。
+  // Issueが閉じている・見つからないときだけ、従来どおり新しいIssueにする
+  let reusedIssueNumber: number | null = null;
+  if (parent) {
+    const state = await fetchIssueState(owner, repo, parent.issueNumber, input.token).catch(() => null);
+    if (state === "open") {
+      const note =
+        `${draft.body}\n\n---\n\n**追加の修正（世代 ${generation}）。** 前の世代の修正PR${parent.fixPrNumber ? `（#${parent.fixPrNumber}）` : ""}はすでにdevelopへマージ済みで、そのPRには追加できないため、` +
+        "同じ修正Issue・同じ`issue-" + parent.issueNumber + "`ブランチ・引き継いだ内部確認の記録（指摘ID・往復）のまま、追加のPRを1件作ります。新しい修正Issueは作りません。\n\n" +
+        STOP_COMMENT_MARKER;
+      const posted = await createComment(owner, repo, parent.issueNumber, input.token, { body: note }).then(() => true, () => false);
+      if (posted) reusedIssueNumber = parent.issueNumber;
+    }
+  }
+  const issue = reusedIssueNumber
+    ? { number: reusedIssueNumber }
+    : await createIssue(owner, repo, input.token, {
+        title: draft.title,
+        body: draft.body,
+        labels: input.causeClass === "decision" ? [PLAN_REQUIRED_LABEL] : [],
+      });
 
   try {
     const row = await db.releaseFixSeries.create({
@@ -320,15 +355,18 @@ export async function createReleaseFixSeries(input: CreateReleaseFixInput): Prom
         parentId: parent?.id ?? null,
         generation,
         createdByUserId: input.userId,
+        internalReview: true,
       },
     });
     return { outcome: "created", series: toReleaseFixSeriesView(row) };
   } catch (error) {
     if (!isUniqueConstraintError(error)) throw error;
     // 同時の起案に負けた。今作ったIssueは閉じ、先に作られた系列を返す
-    await updateIssue(owner, repo, issue.number, input.token, { state: "closed", state_reason: "not_planned" }).catch(
-      () => undefined,
-    );
+    if (reusedIssueNumber === null) {
+      await updateIssue(owner, repo, issue.number, input.token, { state: "closed", state_reason: "not_planned" }).catch(
+        () => undefined,
+      );
+    }
     const winner = await db.releaseFixSeries.findUnique({ where: { activeKey } });
     if (!winner) throw error;
     return { outcome: "existing", series: toReleaseFixSeriesView(winner) };
@@ -418,11 +456,18 @@ function pendingFromReason(reason: string): number[] {
 async function observeFixPullRequests(
   ctx: { owner: string; repo: string; token: string },
   rows: ReleaseFixSeries[],
-): Promise<{ rows: ReleaseFixSeries[]; closedUnmerged: Set<string> }> {
+): Promise<{ rows: ReleaseFixSeries[]; closedUnmerged: Set<string>; prHeadShas: Map<string, string> }> {
   const result: ReleaseFixSeries[] = [];
   const closedUnmerged = new Set<string>();
+  const prHeadShas = new Map<string, string>();
   for (const row of rows) {
-    const prs = await fetchPullRequestsByHead(ctx.owner, ctx.repo, `issue-${row.issueNumber}`, "develop", ctx.token);
+    // 同じ修正Issueの前の世代が使ったPR（マージ済み）は、この世代の修正PRとして拾わない（#4410）
+    const used = new Set(
+      (await db.releaseFixSeries.findMany({ where: { repositoryFullName: row.repositoryFullName, issueNumber: row.issueNumber, id: { not: row.id } }, select: { fixPrNumber: true } }))
+        .map((other) => other.fixPrNumber)
+        .filter((n): n is number => n !== null),
+    );
+    const prs = (await fetchPullRequestsByHead(ctx.owner, ctx.repo, `issue-${row.issueNumber}`, "develop", ctx.token)).filter((pr) => !used.has(pr.number));
     const merged = prs.find((pr) => pr.merged_at !== null);
     const open = prs.find((pr) => pr.state === "open");
     const target = merged ?? open ?? prs[0] ?? null;
@@ -431,6 +476,7 @@ async function observeFixPullRequests(
       continue;
     }
     if (!merged && !open) closedUnmerged.add(row.id);
+    prHeadShas.set(row.id, target.head.sha);
     const mergedAt = merged?.merged_at ? new Date(merged.merged_at) : null;
     const nextStatus: ReleaseFixStatus | null =
       row.status === "issue_created" || row.status === "fix_in_progress"
@@ -454,7 +500,7 @@ async function observeFixPullRequests(
       }),
     );
   }
-  return { rows: result, closedUnmerged };
+  return { rows: result, closedUnmerged, prHeadShas };
 }
 
 async function sweepGroup(repositoryFullName: string, releasePrNumber: number, rows: ReleaseFixSeries[]): Promise<{ rebuilt: boolean; changed: number }> {
@@ -463,7 +509,15 @@ async function sweepGroup(repositoryFullName: string, releasePrNumber: number, r
   const ctx = access;
   const { owner, repo, token } = access;
 
-  const { rows: observed, closedUnmerged } = await observeFixPullRequests(ctx, rows);
+  const { rows: observed, closedUnmerged, prHeadShas } = await observeFixPullRequests(ctx, rows);
+  // 内部確認（#4410）。PRのhead SHAを確認した内容と照合し、未完了・不一致の修正は取り込まない
+  const internalHolds = new Map<string, string>();
+  for (const row of observed) {
+    if (!row.internalReview || row.fixPrNumber === null) continue;
+    const gate = await evaluateInternalGateForSweep(row, prHeadShas.get(row.id) ?? null);
+    const hold = decideInternalHold({ required: true, gate });
+    if (hold.hold) internalHolds.set(row.id, hold.reason);
+  }
 
   const frozen = await findOpenFrozenReleasePr(owner, repo, token);
   const origin = rows[0];
@@ -504,6 +558,7 @@ async function sweepGroup(repositoryFullName: string, releasePrNumber: number, r
       fixPrMerged: row.fixPrMergedAt !== null,
       fixPrClosedUnmerged: closedUnmerged.has(row.id),
       acceptedExtraPrs: Array.isArray(row.acceptedExtraPrs) ? (row.acceptedExtraPrs as number[]) : [],
+      internalHold: internalHolds.get(row.id) ?? null,
     })),
     candidate: {
       originStillOpen,
