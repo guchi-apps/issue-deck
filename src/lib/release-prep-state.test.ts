@@ -21,6 +21,9 @@ describe("applyReleasePrepState", () => {
     expect(applyReleasePrepState(null, "running")).toBe("release-preparing");
     expect(applyReleasePrepState(null, "failed")).toBe("preparation-failed");
     expect(applyReleasePrepState(null, "idle")).toBeNull();
+    expect(applyReleasePrepState(null, "unknown")).toBe("preparation-unknown");
+    expect(applyReleasePrepState("deploy-failed", "unknown")).toBe("preparation-unknown");
+    expect(applyReleasePrepState("release-in-progress", "unknown")).toBe("release-in-progress");
     expect(applyReleasePrepState("deploy-failed", "running")).toBe("deploy-failed");
     expect(applyReleasePrepState("release-in-progress", "failed")).toBe("release-in-progress");
   });

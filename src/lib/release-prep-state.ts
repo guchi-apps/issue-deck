@@ -9,10 +9,11 @@ import type { ReleaseBlockedReason } from "@/types/branch-flow";
  *
  * - `failed`: 未解決のリリース準備失敗がある（`ReleasePreparationFailure`）
  * - `running`: 修正を取り込んだリリースの準備が進行中（`ReleaseFixSeries`が下の状態）
+ * - `unknown`: 記録をまだ取得できていない（初回・リポジトリ切替・取得失敗。#4556）。**idleと同一視せず起動を塞ぐ**
  * - `idle`: 記録が無い。**本番マージ直後〜CI開始前の純粋な待機は記録が無いため、ここへ入る**
  *   （推測で「実行中」とは出さない）
  */
-export type ReleasePrepState = "idle" | "running" | "failed";
+export type ReleasePrepState = "idle" | "running" | "failed" | "unknown";
 
 /** 作り直しの空白区間（PRが0件になり得る）に当たる系列の状態 */
 export const RELEASE_PREP_RUNNING_SERIES_STATUSES = ["fix_merged", "rebuilding"] as const;
@@ -37,6 +38,8 @@ export function applyReleasePrepState(
   base: ReleaseBlockedReason | null,
   state: ReleasePrepState,
 ): ReleaseBlockedReason | null {
+  // 未取得は、確認付きで起動できるdeploy-failedよりも先に塞ぐ（準備中かどうか分からないまま起動させない。#4556）
+  if (state === "unknown" && (base === null || base === "deploy-failed")) return "preparation-unknown";
   if (base !== null) return base;
   if (state === "failed") return "preparation-failed";
   if (state === "running") return "release-preparing";
@@ -51,6 +54,7 @@ export function isPrepBlockedReason(reason: ReleaseBlockedReason | null | undefi
 /** 準備の状態を承知のうえで起動するときの確認文（個別・スマホ・一括で共通） */
 export const PREP_OVERRIDE_CONFIRM_TEXT: Record<ReleasePrepState, string> = {
   idle: "",
+  unknown: "",
   running: "修正を取り込んだリリースの準備が自動で進行中です。いま起動すると二重に実行される可能性があります。それでも起動します。",
   failed: "リリース準備が失敗しています。原因を確認のうえ、帯の「再開」ではなくここから起動します。",
 };
