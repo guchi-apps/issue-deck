@@ -6,6 +6,11 @@ import { MobileReleaseSheet } from "@/components/dashboard/mobile/mobile-release
 import type { ReleaseStatus } from "@/hooks/use-release-status";
 import type { ConnectedRepository } from "@/types/repository";
 
+const preparationState = vi.hoisted(() => ({ prepState: "idle" as string }));
+vi.mock("@/hooks/use-release-preparation", () => ({
+  useReleasePreparation: () => ({ failure: null, prepState: preparationState.prepState, reload: async () => {} }),
+}));
+
 type AvailableReleaseStatus = Extract<ReleaseStatus, { available: true }>;
 
 function makeStatus(overrides: Partial<AvailableReleaseStatus> = {}): AvailableReleaseStatus {
@@ -53,6 +58,25 @@ const baseProps = {
 describe("MobileReleaseSheet iOSへの反映欄（#3579）", () => {
   afterEach(() => {
     cleanup();
+    preparationState.prepState = "idle";
+  });
+
+  it("準備状態の取得前（unknown）は起動ボタンを無効にし、確認も開けない（#4556）", () => {
+    preparationState.prepState = "unknown";
+    const triggerRelease = vi.fn(async () => true);
+    render(
+      <MobileReleaseSheet
+        {...baseProps}
+        triggerRelease={triggerRelease}
+        repository={makeRepository("guchi-apps/issue-deck")}
+        releaseStatus={makeStatus()}
+      />,
+    );
+    const button = screen.getByRole("button", { name: "準備状態を確認中" });
+    expect(button.hasAttribute("disabled")).toBe(true);
+    fireEvent.click(button);
+    expect(screen.queryByRole("button", { name: "起動する" })).toBeNull();
+    expect(triggerRelease).not.toHaveBeenCalled();
   });
 
   it("aide-iosではMacの手順を出し、リリースworkflow起動ボタンは出さない", () => {
