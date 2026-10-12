@@ -1,0 +1,67 @@
+name: Recover requested release checks
+on:
+  push:
+    branches: [ops/release-check-20261012-2216]
+    paths: [.github/workflows/ops-release-recover-20261012.yml]
+permissions:
+  contents: read
+jobs:
+  pi0w-recheck:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: appleboy/ssh-action@v1
+        env:
+          TARGET_DIR: ${{ secrets.TARGET_DIR }}
+        with:
+          host: ${{ secrets.HOST }}
+          username: ${{ secrets.USERNAME }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: ${{ secrets.SSH_PORT }}
+          envs: TARGET_DIR
+          script: |
+            set -euo pipefail
+            cd "$TARGET_DIR"
+            node --env-file=.env --input-type=module <<'NODE'
+            const payload={action:'request',repository:'guchi-apps/pi0w',pullRequest:21,baseSha:'1f38ed3560dd100d6a35ac791dd35536814dae4f',headSha:'490c9deed3037b800944b76da926751e236bc64b'};
+            const r=await fetch('http://127.0.0.1:3111/api/dispatch/release-verify',{method:'POST',headers:{authorization:'Bearer '+process.env.PROGRESS_REPORT_SECRET,'Content-Type':'application/json'},body:JSON.stringify(payload)});
+            console.log('pi0w recheck',r.status,await r.text()); if(!r.ok) process.exit(1);
+            NODE
+  review-coverage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/create-github-app-token@v3
+        id: token
+        with:
+          app-id: ${{ vars.WORKFLOW_APP_ID }}
+          private-key: ${{ secrets.WORKFLOW_APP_PRIVATE_KEY }}
+          owner: guchi-apps
+          repositories: asset-manager
+          permission-contents: read
+      - uses: actions/checkout@v4
+        with:
+          repository: guchi-apps/asset-manager
+          ref: 2e4d32330743c43312c2680f03fd3727eb810928
+          fetch-depth: 0
+          token: ${{ steps.token.outputs.token }}
+      - name: Identify exact omitted review files and read their diff
+        shell: bash
+        run: |
+          set -euo pipefail
+          base=aa3c96193e65d173cc6bfc2aafb263aa1d34b9a6
+          head=2e4d32330743c43312c2680f03fd3727eb810928
+          used=0
+          count=0
+          while IFS= read -r file; do
+            diff="$(git diff "$base...$head" -- "$file")"
+            size="${#diff}"
+            if ((used+size>300000)); then
+              echo "OMITTED_FILE: $file"
+              printf '%s\n' "$diff"
+            else
+              used=$((used+size))
+              count=$((count+1))
+            fi
+          done < <(git diff --name-only "$base...$head")
+          echo "PREVIOUS_REVIEW_FILES=$count"
