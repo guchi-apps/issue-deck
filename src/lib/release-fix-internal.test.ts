@@ -85,6 +85,11 @@ describe("decideInternalStop", () => {
     const later = new Date(startedAt.getTime() + INTERNAL_MAX_MINUTES * 60_000);
     expect(decideInternalStop({ rounds: [round({ reviewVerdict: "findings", openFindingCount: 1 })], findings: [], startedAt, now: later })).toMatchObject({ reason: "timed_out" });
   });
+  it("最新がpassでもゲート完了前に時間上限を超えたら止める（#4468）", () => {
+    const later = new Date(startedAt.getTime() + INTERNAL_MAX_MINUTES * 60_000);
+    expect(decideInternalStop({ rounds: [round({ reviewVerdict: "pass" })], findings: [], startedAt, now: later })).toMatchObject({ reason: "timed_out" });
+    expect(decideInternalStop({ rounds: [round({ reviewVerdict: "pass" })], findings: [], startedAt, now: later, gateComplete: true }).stop).toBe(false);
+  });
   it("同一指摘の再発で止める", () => {
     expect(decideInternalStop({ rounds: [round({ reviewVerdict: "findings", openFindingCount: 1 })], findings: [finding({ status: "open", reopenCount: 2 })], startedAt, now: soon })).toMatchObject({
       reason: "recurring_finding",

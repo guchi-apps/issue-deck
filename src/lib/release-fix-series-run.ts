@@ -319,14 +319,16 @@ export async function createReleaseFixSeries(input: CreateReleaseFixInput): Prom
   // Issueが閉じている・見つからないときだけ、従来どおり新しいIssueにする
   let reusedIssueNumber: number | null = null;
   if (parent) {
-    const state = await fetchIssueState(owner, repo, parent.issueNumber, input.token).catch(() => null);
+    // 取得に失敗したときは新しいIssueへ逃げず、再試行できる失敗として投げる（#4468）
+    const state = await fetchIssueState(owner, repo, parent.issueNumber, input.token);
     if (state === "open") {
       const note =
         `${draft.body}\n\n---\n\n**追加の修正（世代 ${generation}）。** 前の世代の修正PR${parent.fixPrNumber ? `（#${parent.fixPrNumber}）` : ""}はすでにdevelopへマージ済みで、そのPRには追加できないため、` +
         "同じ修正Issue・同じ`issue-" + parent.issueNumber + "`ブランチ・引き継いだ内部確認の記録（指摘ID・往復）のまま、追加のPRを1件作ります。新しい修正Issueは作りません。\n\n" +
         STOP_COMMENT_MARKER;
-      const posted = await createComment(owner, repo, parent.issueNumber, input.token, { body: note }).then(() => true, () => false);
-      if (posted) reusedIssueNumber = parent.issueNumber;
+      // 継続理由のコメントは記録であって前提ではない。失敗しても同じIssueを継続対象にする
+      await createComment(owner, repo, parent.issueNumber, input.token, { body: note }).catch(() => undefined);
+      reusedIssueNumber = parent.issueNumber;
     }
   }
   const issue = reusedIssueNumber
