@@ -1,4 +1,4 @@
-name: Verify release 4515
+name: Verify release 4517
 on:
   push:
     branches: [ops/verify-release-4515]
@@ -15,7 +15,7 @@ jobs:
         run: |
           set -euo pipefail
           endpoint='https://issuedeck.gucchii.com/api/dispatch/release-verify'
-          target='{"repository":"guchi-apps/issue-deck","pullRequest":4515,"baseSha":"b1e656c68e6d545e7136e935af7be472f3056418","headSha":"757781a15f973d75167aabe808093a9193ab5e2d"}'
+          target='{"repository":"guchi-apps/issue-deck","pullRequest":4517,"baseSha":"b1e656c68e6d545e7136e935af7be472f3056418","headSha":"cbbc239dcff875e134a6a0718986c63c2a76323e"}'
           test -n "$PROGRESS_REPORT_SECRET"
           printf 'Authorization: Bearer %s\n' "$PROGRESS_REPORT_SECRET" > "$RUNNER_TEMP/verify-auth"
           chmod 600 "$RUNNER_TEMP/verify-auth"
@@ -27,7 +27,7 @@ jobs:
             curl --fail-with-body --silent --show-error --max-time 60 -H @"$RUNNER_TEMP/verify-auth" -H 'Content-Type: application/json' --data "$status" "$endpoint" > "$RUNNER_TEMP/status.json"
             jq -c '.views' "$RUNNER_TEMP/status.json"
             if jq -e '[.views[] | select(.state != "passed" and .state != "not_applicable")] | length == 0' "$RUNNER_TEMP/status.json" >/dev/null; then
-              echo 'Full review and integration validation passed for release #4515.' >> "$GITHUB_STEP_SUMMARY"
+              echo 'Full review and integration validation passed for release #4517.' >> "$GITHUB_STEP_SUMMARY"
               cat "$RUNNER_TEMP/status.json" >> "$GITHUB_STEP_SUMMARY"
               exit 0
             fi
