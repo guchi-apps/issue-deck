@@ -59,3 +59,28 @@ describe("resolveIssueAttention", () => {
     expect(a?.needsUser).toBe(true);
   });
 });
+
+describe("応答終了・停止中の区別（#4562）", () => {
+  it("応答を終えたセッションは「実行中・操作不要」ではなく応答終了にする", () => {
+    const a = resolveIssueAttention({ ...base, running: true, responded: true });
+    expect(a?.kind).toBe("responded");
+    expect(a?.nextAction).not.toContain("実装を進めています");
+    // 正常完了・PR作成後も同じ形なので、要対応にはしない
+    expect(a?.needsUser).toBe(false);
+  });
+
+  it("停滞の引き上げを受けたセッションは要対応にし、理由の確認先を示す", () => {
+    const a = resolveIssueAttention({ ...base, running: true, stalled: true });
+    expect(a?.kind).toBe("stalled");
+    expect(a?.needsUser).toBe(true);
+    expect(a?.openButtonLabel).toBe("詳細を確認");
+  });
+
+  it("計画の承認待ち・質問・依存待ちは応答終了より優先する", () => {
+    expect(resolveIssueAttention({ ...base, planPending: true, responded: true })?.kind).toBe("plan");
+    expect(resolveIssueAttention({ ...base, questionPending: true, stalled: true })?.kind).toBe("question");
+    expect(resolveIssueAttention({ ...base, dependencyWaitLabel: "#1", responded: true })?.kind).toBe(
+      "dependency",
+    );
+  });
+});

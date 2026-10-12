@@ -71,6 +71,25 @@ describe("describeSessionStall", () => {
     ).toBeNull();
   });
 
+  // `Stop`起点の引き上げ（`question_asked`・`plan_not_presented`など）は、引き上げの直後に様子を
+  // 入力待ちにする。それを「動き出した」と読むとパネルが一度も出ない（#4562）
+  it("引き上げ直後の入力待ち（許可のツール無し）は動き出したとみなさない", () => {
+    const later = "2026-09-07T10:00:01.000Z";
+    expect(
+      describeSessionStall(
+        session({ interruptedReason: "plan_not_presented", activity: "WAITING_INPUT", activityAt: later }),
+      )?.reason,
+    ).toBe("plan_not_presented");
+    // 承認プロンプトの許可待ちは、その後に動いて別の待ちへ移った印なので出さない
+    expect(
+      describeSessionStall(
+        session({ activity: "WAITING_INPUT", activityAt: later, waitingTool: "Bash" }),
+      ),
+    ).toBeNull();
+    // 人が送って応答が終わった（RESPONDED）なら出さない
+    expect(describeSessionStall(session({ activity: "RESPONDED", activityAt: later }))).toBeNull();
+  });
+
   // `tool_call_stall`・`classifier_blocked`は引き上げの直前に`Stop`が発火する形なので、
   // 同時刻を「動き出した」と読むとパネルが一度も出ない
   it("引き上げと同時刻・それ以前の報告は、まだ停滞しているとみなす", () => {

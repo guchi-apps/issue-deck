@@ -17,7 +17,7 @@ const MAX_DETAIL_LENGTH = 200;
  * 中断・停滞したまま止まっているセッションの引き上げ（#1971・#2280・#2655・#2844・#3174）。
  *
  * 送るのは`scripts/session-notify.sh`で、入口はpollerが合成する`SessionInterrupted`。原因は
- * `reason`で5種類ある。
+ * `reason`で6種類ある。
  *   - `api_error`: Claude CodeがAPIの一時エラーを再試行しきるとturnが打ち切られ、
  *     **`Stop`フックが飛ばない**ため、フックだけを待っていると誰にも伝わらない。pollerが
  *     自動再開を上限まで試したあとに叩く
@@ -29,6 +29,9 @@ const MAX_DETAIL_LENGTH = 200;
  *     「実行中」にしか見えない。pollerが`codex queue`で上限まで送ったあとに叩く
  *   - `question_asked`（#3447）: `AskUserQuestion`を使わず文章での問いかけで応答を終えたセッション。
  *     `Notification`が飛ばず`Stop`だけが届くため、`Stop`フックが末尾の問いかけを検知して叩く
+ *   - `plan_not_presented`（#4562）: 計画ファイルを書いたまま`ExitPlanMode`を呼ばずに応答を終え、
+ *     `Stop`フックの差し戻し（1回）でも提示しなかったセッション。`Stop`フックが叩く（印は
+ *     ホスト側の`plan-not-presented/`）
  *   - `classifier_blocked`（#2844）: auto modeのクラシファイアがコマンドを拒否し、拒否された
  *     エージェントが説明のテキストだけを出してターンを終えたセッション。**拒否には承認
  *     プロンプトが伴わないので`Notification`が飛ばず**、`Stop`は正常に発火するため画面からは
