@@ -164,7 +164,10 @@ function toView(
   versions: { version: number; snapshot: unknown; changeNote: string; author: string; createdAt: Date }[],
 ): PlanView {
   const current = versions.find((v) => v.version === row.currentVersion);
-  const plan = current?.snapshot as PlanSnapshot;
+  if (!current) {
+    throw new Error(`実行計画の現在版v${row.currentVersion}が見つかりません (${row.parentRepository}#${row.parentIssue})`);
+  }
+  const plan = current.snapshot as PlanSnapshot;
   return {
     parent: { repository: row.parentRepository, number: row.parentIssue },
     currentVersion: row.currentVersion,
@@ -250,17 +253,22 @@ export async function savePlan(params: {
     }
   } else {
     const next = existing.currentVersion + 1;
-    // 条件付き更新で、同時に走った更新のどちらか1本だけが版を進める
-    const advanced = await db.executionPlan.updateMany({
-      where: { id: existing.id, currentVersion: existing.currentVersion },
-      data: { currentVersion: next },
+    // 条件付き更新で、同時に走った更新のどちらか1本だけが版を進める。
+    // 版の追加と同じトランザクションにして、currentVersionが存在しない版を指す状態を作らない
+    const conflict = await db.$transaction(async (tx) => {
+      const advanced = await tx.executionPlan.updateMany({
+        where: { id: existing.id, currentVersion: existing.currentVersion },
+        data: { currentVersion: next },
+      });
+      if (advanced.count !== 1) return true;
+      await tx.executionPlanVersion.create({
+        data: { planId: existing.id, version: next, snapshot, changeNote: note, author: params.author },
+      });
+      return false;
     });
-    if (advanced.count !== 1) {
+    if (conflict) {
       return { ok: false, status: 409, errors: [{ path: "expectedVersion", message: "同時に更新されました。取得し直してください" }] };
     }
-    await db.executionPlanVersion.create({
-      data: { planId: existing.id, version: next, snapshot, changeNote: note, author: params.author },
-    });
   }
   const view = await getPlanView(params.parent);
   return { ok: true, view: view as PlanView, diff, warnings: verified.warnings };
