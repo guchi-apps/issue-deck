@@ -48,7 +48,7 @@ export function ReleaseCompletionPanel({ repositoryFullName, pullRequestNumber, 
   const [owner, repo] = repositoryFullName.split("/");
   const [run, setRun] = useState<{ key: string; value: ReleaseCompletionRunView | null } | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
-  const [scope, setScope] = useState<ReleaseCompletionScope>(RELEASE_COMPLETION_SCOPE_PRODUCTION);
+  const [scope, setScope] = useState<ReleaseCompletionScope | null>(null);
   const [busy, setBusy] = useState<"start" | "stop" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
@@ -75,6 +75,7 @@ export function ReleaseCompletionPanel({ repositoryFullName, pullRequestNumber, 
   }, [shown?.active]);
 
   async function start() {
+    if (scope === null) return;
     setBusy("start");
     setError(null);
     try {
@@ -121,7 +122,7 @@ export function ReleaseCompletionPanel({ repositoryFullName, pullRequestNumber, 
     <div className="flex flex-col gap-1.5" data-testid="release-completion">
       {shown && <RunCard run={shown} busy={busy} onStop={() => void stop()} />}
       {showStart && (
-        <Button size="sm" className="h-7 w-fit gap-1 px-3 text-xs" onClick={() => setConfirmOpen(true)} disabled={busy !== null}>
+        <Button size="sm" className="h-7 w-fit gap-1 px-3 text-xs" onClick={() => { setScope(null); setConfirmOpen(true); }} disabled={busy !== null}>
           {busy === "start" ? <Loader2 className="size-3 animate-spin" aria-hidden="true" /> : <Rocket className="size-3" aria-hidden="true" />}
           リリース完了まで進める
         </Button>
@@ -176,7 +177,7 @@ export function ReleaseCompletionPanel({ repositoryFullName, pullRequestNumber, 
                 event.preventDefault();
                 void start();
               }}
-              disabled={busy !== null}
+              disabled={busy !== null || scope === null}
             >
               {busy === "start" && <Loader2 className="size-4 animate-spin" aria-hidden="true" />}
               開始する

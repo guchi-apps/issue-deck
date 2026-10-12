@@ -153,6 +153,7 @@ export function RepositoryReleaseButton({
         if (!open) {
           setAllowFailedDeploy(false);
           setAllowPrepOverride(false);
+          setBumpKind(null);
         }
       }}>
         <AlertDialogContent className="flex flex-col gap-4 overflow-hidden">

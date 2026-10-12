@@ -59,8 +59,11 @@ export function isReleaseHeadRef(headRef: string): boolean {
  */
 const MAIN_BRANCH = "main";
 
-/** タイトル・本文中の`#123`形式のIssue参照 */
-const ISSUE_REFERENCE_PATTERN_GLOBAL = /#(\d+)/g;
+/**
+ * タイトル・本文中の`#123`形式のIssue参照。`owner/repo#123`のような他リポジトリへの参照は、
+ * 同じ番号の自リポジトリのIssueと取り違えないよう拾わない（#4529）。
+ */
+const ISSUE_REFERENCE_PATTERN_GLOBAL = /(?<![\w/.-])#(\d+)/g;
 
 /**
  * PRのbase/headブランチから種別を判定する。

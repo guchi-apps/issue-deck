@@ -133,6 +133,7 @@ import type {
   BranchFlowDeviceBuild,
   BranchFlowIssuePriority,
   BranchFlowIssueRef,
+  BranchFlowReferencedPullRequest,
   BranchFlowLane,
   BranchFlowLaneStatus,
   BranchFlowManualStep,
@@ -531,6 +532,47 @@ function IssueLine({
   );
 }
 
+/** 参照先のPRの実状態を表す語。本番PRはリリースPR（develop→main）を指す（#4529） */
+function describeReferencedPullRequest(pullRequest: BranchFlowReferencedPullRequest): string {
+  const target = pullRequest.kind === "release" ? "本番PR" : "PR";
+  if (pullRequest.merged) return `${target}（マージ済み）`;
+  return pullRequest.state === "open" ? `${target}（オープン）` : `${target}（クローズ済み・置換または取り下げ）`;
+}
+
+/**
+ * レーンのPRが`#番号`で参照している、PRだった番号（#4529）。Issueとは別の「修正対象」として出し、
+ * リンクもIssueでなくPRへ向ける。
+ */
+function ReferencedPullRequestsLine({
+  repositoryFullName,
+  pullRequests,
+}: {
+  repositoryFullName: string;
+  pullRequests: BranchFlowReferencedPullRequest[];
+}) {
+  if (pullRequests.length === 0) return null;
+
+  return (
+    <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+      <span className="shrink-0 text-xs text-muted-foreground">修正対象</span>
+      {pullRequests.map((pullRequest) => (
+        <span key={pullRequest.number} className="flex min-w-0 flex-wrap items-center gap-x-1">
+          <GithubReferenceLink
+            href={pullRequest.htmlUrl}
+            reference={{ repositoryFullName, number: pullRequest.number, kind: "pull" }}
+            className="min-w-0 max-w-full break-words text-xs text-primary hover:underline"
+          >
+            {pullRequest.kind === "release" ? "本番PR" : "PR"} #{pullRequest.number}
+          </GithubReferenceLink>
+          <span className="text-xs text-muted-foreground">
+            {describeReferencedPullRequest(pullRequest)}
+          </span>
+        </span>
+      ))}
+    </div>
+  );
+}
+
 /**
  * 1本のPRが複数のIssueを扱っている場合の2件目以降（#1455）。
  *
@@ -782,9 +824,13 @@ function LaneRow({
             issue={lane.issue}
             pullRequestTitle={headPullRequest?.title}
           />
-        ) : (
+        ) : lane.referencedPullRequests.length === 0 ? (
           <span className="text-xs text-muted-foreground">対応Issue不明</span>
-        )}
+        ) : null}
+        <ReferencedPullRequestsLine
+          repositoryFullName={repositoryFullName}
+          pullRequests={lane.referencedPullRequests}
+        />
         <RelatedIssuesLine
           repositoryFullName={repositoryFullName}
           issues={lane.relatedIssues}
@@ -1407,6 +1453,7 @@ function NextReleaseCard({
   unreleased,
   latestReleaseMergedAt,
   releaseButton,
+  deployButton,
   onMerged,
 }: {
   repository: BranchFlowRepository;
@@ -1415,7 +1462,10 @@ function NextReleaseCard({
   /** 次のリリースで反映されるPRの件数（developにあってmainに無いもの。画面上部の「未リリース」と同じ値） */
   unreleased: UnreleasedSummary;
   latestReleaseMergedAt: string | null;
+  /** 「次のバージョン」カードの中に置く「リリースする」（#4532） */
   releaseButton?: React.ReactNode;
+  /** 「本番稼働中」カードの中に置く「本番へ再デプロイ」（#4532）。出さない条件は呼び出し側が判定する */
+  deployButton?: React.ReactNode;
   onMerged: (pullRequest: PullRequestSummary) => void;
 }) {
   const refreshFlow = useContext(BranchFlowRefreshContext);
@@ -1432,7 +1482,7 @@ function NextReleaseCard({
       className="@container mb-3 flex flex-col gap-2.5 rounded-[10px] border bg-card p-3 text-xs"
       data-testid="next-release-card"
     >
-      <p className="text-[11px] font-semibold tracking-wide text-primary">次のリリース</p>
+      <p className="text-xs font-semibold tracking-wide text-primary">次のリリース</p>
       <dl className="grid grid-cols-2 gap-2">
         <div className="min-w-0 rounded-md border px-2.5 py-1.5">
           <dt className="text-muted-foreground">本番稼働中</dt>
@@ -1443,6 +1493,7 @@ function NextReleaseCard({
           {latestReleaseMergedAt && (
             <dd className="text-muted-foreground">{formatMonthDayTime(latestReleaseMergedAt)} にリリース</dd>
           )}
+          {deployButton && <dd className="mt-1">{deployButton}</dd>}
         </div>
         <div className="min-w-0 rounded-md border px-2.5 py-1.5">
           <dt className="text-muted-foreground">次のバージョン</dt>
@@ -1460,17 +1511,23 @@ function NextReleaseCard({
               </GithubReferenceLink>
             ) : group?.bumpPullRequest ? (
               "バージョン更新のPRを処理中"
-            ) : group ? (
-              "リリースはまだ作成していません"
-            ) : (
+            ) : group ? null : (
               "次に公開する変更はありません"
             )}
           </dd>
+          {releaseButton && <dd className="mt-1">{releaseButton}</dd>}
         </div>
-        <div className="col-span-2 min-w-0 rounded-md border px-2.5 py-1.5">
-          <dt className="text-muted-foreground">次のリリースで反映されるPR</dt>
+        <div className="min-w-0 rounded-md border px-2.5 py-1.5">
+          <dt className="text-muted-foreground">反映待ちのPR</dt>
           <dd className="text-sm font-semibold">{`${unreleased.count}${unreleased.unit}`}</dd>
-          <dd className="text-muted-foreground">developへ未マージ</dd>
+          <dd className="text-muted-foreground">mainへ未反映</dd>
+        </div>
+        <div className="min-w-0 rounded-md border px-2.5 py-1.5">
+          <dt className="text-muted-foreground">次のバージョンに登録済み</dt>
+          <dd className="text-sm font-semibold">{`${group?.version ? group.lanes.length : 0}件`}</dd>
+          <dd className="text-muted-foreground">
+            {group?.version ? "このバージョンに含まれる" : "バージョン作成後に表示"}
+          </dd>
         </div>
       </dl>
 
@@ -1489,9 +1546,7 @@ function NextReleaseCard({
                 label="本番公開へ進む"
                 className="shrink-0"
               />
-            ) : (
-              releaseButton
-            )}
+            ) : null}
             {manualSteps.map((step) => (
               <GithubReferenceLink
                 key={step.number}
@@ -1691,6 +1746,18 @@ function ReleaseFlowGraph({
           unreleased={unreleased}
           latestReleaseMergedAt={latestReleaseMergedAt}
           releaseButton={nextGroup ? releaseButtonFor(nextGroup) : undefined}
+          deployButton={
+            repository.canTriggerDeploy && !deployFailure ? (
+              <RepositoryDeployButton
+                repositoryFullName={repository.repositoryFullName}
+                currentVersion={repository.release.latestVersion}
+                deployedAt={latestReleaseMergedAt}
+                unreleased={unreleased}
+                isPending={deployTriggerPending}
+                onTriggered={onDeployTriggered}
+              />
+            ) : undefined
+          }
           onMerged={onMerged}
         />
       )}
@@ -1707,12 +1774,10 @@ function ReleaseFlowGraph({
         {unreleased.count > 0 && (
           <span>未リリース {formatUnreleasedSummary(unreleased)}</span>
         )}
-        {/* **リリースの束ではなくこの行に置く**（#2020）。束は畳まれたり本番反映済みで
-            隠れたりするため、束に付けると押したいときに画面から消える。ここなら
-            リポジトリを開いている間はつねに同じ位置にある。
-            **失敗しているあいだは、すぐ下の帯（#2236）が同じボタンを持つのでこちらは出さない**
-            ——同じ操作が同じ画面に2つ並ぶのを避ける */}
-        {repository.canTriggerDeploy && !deployFailure && (
+        {/* 「次のリリース」カードを出さないリポジトリ（Xcodeで実機へ反映するもの）だけは、
+            従来どおりこの行に置く。カードを出す場合は「本番稼働中」カードの中にある（#4532）。
+            失敗しているあいだは失敗の帯（#2236）が同じボタンを持つので出さない */}
+        {repository.deviceBuild && repository.canTriggerDeploy && !deployFailure && (
           <>
             <span className="flex-1" />
             <RepositoryDeployButton

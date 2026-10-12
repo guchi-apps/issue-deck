@@ -12,6 +12,7 @@ let runs: Row[] = [];
 let fixSeries: Row[] = [];
 let recoveries: Row[] = [];
 let nextId = 1;
+let afterUpdateMany: ((data: Record<string, unknown>) => Promise<void>) | null = null;
 
 function matches(row: Row, where: Record<string, unknown>): boolean {
   return Object.entries(where).every(([key, value]) => {
@@ -43,6 +44,7 @@ function table(store: () => Row[]) {
     updateMany: vi.fn(async ({ where, data }: { where: Record<string, unknown>; data: Record<string, unknown> }) => {
       const targets = store().filter((row) => matches(row, where));
       for (const row of targets) Object.assign(row, data);
+      await afterUpdateMany?.(data);
       return { count: targets.length };
     }),
   };
@@ -105,7 +107,8 @@ vi.mock("@/lib/github/release-api", () => ({
   fetchMainHeadSha: (...args: unknown[]) => fetchMainHeadSha(...args),
   fetchPullRequestCiState: (...args: unknown[]) => fetchPullRequestCiState(...args),
 }));
-vi.mock("@/lib/github/deploy-launch-watch", () => ({ recordDeployLaunchWatch: vi.fn(async () => true) }));
+const recordDeployLaunchWatch = vi.fn(async () => true);
+vi.mock("@/lib/github/deploy-launch-watch", () => ({ recordDeployLaunchWatch: (...args: unknown[]) => recordDeployLaunchWatch(...(args as [])) }));
 const createComment = vi.fn(async () => ({}));
 const addIssueLabels = vi.fn(async () => []);
 vi.mock("@/lib/github/issues-api", () => ({
@@ -176,6 +179,7 @@ beforeEach(() => {
   fixSeries = [];
   recoveries = [];
   nextId = 1;
+  afterUpdateMany = null;
   vi.clearAllMocks();
   fetchPullRequest.mockResolvedValue(pull());
   loadReleaseVerificationSummary.mockResolvedValue(summary("failed", "passed", [{ title: "認可漏れ" }]));
@@ -261,6 +265,20 @@ describe("runReleaseCompletionSweep", () => {
     expect(runs[0]).toMatchObject({ status: "releasing", mergeSha: "merge1", mergedByRun: true });
   });
 
+  it("マージ応答にSHAが無くても次の巡回で確定したSHAの起動監視を登録する", async () => {
+    await start();
+    loadReleaseVerificationSummary.mockResolvedValue(summary("passed", "passed"));
+    mergePullRequest.mockResolvedValue({ sha: null });
+    await runReleaseCompletionSweep({ hostName: "subpc", now });
+    expect(runs[0]).toMatchObject({ status: "merging", mergeSha: null, mergedByRun: true });
+    recordDeployLaunchWatch.mockClear();
+    fetchPullRequest.mockResolvedValue(pull({ state: "closed", merged: true, merge_commit_sha: "recovered-sha" }));
+    await runReleaseCompletionSweep({ hostName: "subpc", now: later(1) });
+    expect(runs[0]).toMatchObject({ status: "releasing", mergeSha: "recovered-sha", mergedByRun: true });
+    expect(recordDeployLaunchWatch).toHaveBeenCalledWith({ owner: "o", repo: "r", pullRequestNumber: 10, mergeCommitSha: "recovered-sha", token: "token" });
+    expect(mergePullRequest).toHaveBeenCalledTimes(1);
+  });
+
   it("チェック通過までの系列は本番へマージせず、人がマージしたら稼働確認まで追跡する", async () => {
     await start("until_ready");
     loadReleaseVerificationSummary.mockResolvedValue(summary("passed", "passed"));
@@ -291,6 +309,28 @@ describe("runReleaseCompletionSweep", () => {
     expect(result.scanned).toBe(0);
     expect(mergePullRequest).not.toHaveBeenCalled();
     expect(runs[0]).toMatchObject({ status: "stopped", stoppedByUserId: "u1" });
+  });
+
+  it("マージ実行権を取得した直後の停止でも本番マージを行わない", async () => {
+    await start();
+    loadReleaseVerificationSummary.mockResolvedValue(summary("passed", "passed"));
+    afterUpdateMany = async (data) => {
+      if (data.status !== "merging") return;
+      afterUpdateMany = null;
+      await stopReleaseCompletionRun({ repositoryFullName: "o/r", runId: runs[0].id, userId: "u1", token: "t", now });
+    };
+    await runReleaseCompletionSweep({ hostName: "subpc", now });
+    expect(mergePullRequest).not.toHaveBeenCalled();
+    expect(runs[0]).toMatchObject({ status: "stopped", activeKey: null });
+  });
+
+  it("未導入リポジトリの統合検証失敗は設定不足として止め、修正を起案しない", async () => {
+    await start();
+    loadReleaseVerificationSummary.mockResolvedValue(summary("passed", "failed"));
+    await runReleaseCompletionSweep({ hostName: "subpc", now });
+    expect(createReleaseFixSeries).not.toHaveBeenCalled();
+    expect(enqueueDispatchJob).not.toHaveBeenCalled();
+    expect(runs[0]).toMatchObject({ status: "needs_attention", stopReason: "setup_missing", activeKey: null });
   });
 
   it("deployの成功と稼働版の一致で完了。成功でも稼働版を確かめられなければ完了にしない", async () => {

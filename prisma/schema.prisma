@@ -2962,12 +2962,14 @@ model SlackIntakeRequest {
   conversationId String?
   /// 調査が返したIssue案（`confirm_issue`カード）
   proposal       Json?
-  /// `pending` / `done` / `cancelled`
+  /// `pending` / `queued` / `processing` / `reply_pending`（Issue作成済み・Slack結果返信だけ未送信。#4527）/ `done` / `cancelled`
   confirmState   String?  @db.VarChar(16)
   /// 起案・再利用したIssue（先頭が元のIssue）。`[{repo, number, role}]`
   issues         Json     @default("[]")
-  /// 選択UIを出したBot投稿のts
+  /// 選択UIを出したBot投稿のts（対象確認の質問を出したBot投稿のts）
   selectorTs     String?  @db.VarChar(32)
+  /// 対象リポジトリの判定根拠（明示・名称一致・AI判別・利用者の回答。#4527）。処理記録として残す
+  targetBasis    String?  @db.Text
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
