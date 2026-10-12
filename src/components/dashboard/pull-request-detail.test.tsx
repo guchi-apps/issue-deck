@@ -528,6 +528,11 @@ describe("PullRequestDetail", () => {
 
     renderDetail({ pullRequest: makePullRequest({ draft: true }) });
     expect(screen.queryByRole("button", { name: "マージする" })).toBeNull();
+    // ドラフトの主操作は「レビュー可能にする」（#4453）。通常のPRには出さない
+    expect(screen.getByRole("button", { name: "レビュー可能にする" })).toBeTruthy();
+    cleanup();
+    renderDetail();
+    expect(screen.queryByRole("button", { name: "レビュー可能にする" })).toBeNull();
   });
 
   it("取得に失敗したときはエラーを表示する", () => {

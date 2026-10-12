@@ -1,4 +1,5 @@
 import { GithubApiError } from "@/lib/github/github-api-error";
+import { githubGraphql } from "@/lib/github/graphql";
 import { GITHUB_API, githubFetch } from "@/lib/github/request";
 
 export type GithubApiWorkflowRun = {
@@ -287,4 +288,29 @@ export async function fetchRecentSuccessfulRuns(
     if (Number.isFinite(durationMs) && durationMs > 0) runs.push({ id: run.id, durationMs });
   }
   return runs;
+}
+
+const MARK_READY_FOR_REVIEW = `
+mutation($id: ID!) {
+  markPullRequestReadyForReview(input: { pullRequestId: $id }) {
+    pullRequest { isDraft }
+  }
+}`;
+
+/**
+ * ドラフトのPRをレビュー可能へ切り替える（#4453）。GraphQLの`markPullRequestReadyForReview`は
+ * Node IDを取るため、番号から取り直した現在のPRのIDを使う。
+ *
+ * 呼ぶ前に`decideReadyForReview`で判定済みであること。**ここでも`isDraft`の戻り値を見て、
+ * 解除されていなければ成功にしない。**
+ */
+export async function markPullRequestReadyForReview(nodeId: string, token: string): Promise<void> {
+  const data = await githubGraphql<{
+    markPullRequestReadyForReview: { pullRequest: { isDraft: boolean } } | null;
+  }>(token, MARK_READY_FOR_REVIEW, { id: nodeId }, "markPullRequestReadyForReview", {
+    permissionHint: "（GitHub AppのPull requestsの書き込み権限が必要です）",
+  });
+  if (data.markPullRequestReadyForReview?.pullRequest.isDraft !== false) {
+    throw new GithubApiError(502, "markPullRequestReadyForReview did not clear draft state");
+  }
 }

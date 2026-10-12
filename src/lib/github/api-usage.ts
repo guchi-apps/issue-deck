@@ -83,6 +83,8 @@ export const GITHUB_API_FEATURES = [
   { key: "pull_request_close", label: "PRのクローズ（マージしない）" },
   // PR詳細の「編集」（#3161）。タイトル・本文を保存したときだけ消費する。
   { key: "pull_request_update", label: "PRのタイトル・本文の更新" },
+  // PR詳細の「レビュー可能にする」（#4453）。ドラフトを解除したときだけ消費する。
+  { key: "pull_request_ready_for_review", label: "ドラフトPRのレビュー可能化" },
   { key: "pull_request_review_ack", label: "レビュー指摘の確認済み記録" },
   { key: "pull_request_repair", label: "PRの自動修復の起動" },
   // バックアップCI（#4065）の手動起動。PR・baseの検査定義の取得と共通チェックの発行
