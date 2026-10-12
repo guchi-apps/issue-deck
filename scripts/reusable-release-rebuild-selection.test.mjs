@@ -33,7 +33,8 @@ function extractRunScript(stepName) {
   return body.join("\n");
 }
 
-// `gh pr view`（元の候補）・`gh pr list`（main向け／マージ済みバンプPRの本文）だけを環境変数で返す
+// `gh pr view`（元の候補）・`gh pr list`（main向け／マージ済みバンプPRの本文／新方式の候補〈`--jq`はスタブでは
+// 適用されないため、`release-rc`で絞る問い合わせには専用の変数で答える。既定は候補なし〉）だけを環境変数で返す
 const STUB_GH = `#!/usr/bin/env bash
 set -u
 echo "$*" >> "$STUB_GH_LOG"
@@ -42,6 +43,7 @@ case "$1 $2" in
   "pr list")
     case "$*" in
       *"--state merged"*) printf '%s\\n' "\${STUB_GH_MERGED_BODY:-}" ;;
+      *"release-rc"*) printf '%s\\n' "\${STUB_GH_RC_PR:-}" ;;
       *"--base main"*) printf '%s\\n' "\${STUB_GH_MAIN_PR:-}" ;;
     esac
     ;;

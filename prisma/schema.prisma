@@ -2864,6 +2864,82 @@ model ReleaseRebuildHistoryCutoff {
   updatedAt                DateTime @updatedAt
 }
 
+// 正式版を上げる前に固定したリリース候補（#4495）。物理PR・ブランチ・正式版とは別に、リポジトリ内の
+// 候補番号（`RC-<sequence>`）で同じ論理候補を追う。変更ごとの対象SHAは`ReleaseCandidateRevision`に持つ。
+// **次工程へ進めるかの根拠はこの記録（現在のrevisionのSHA・承認範囲）で持ち、ラベルやPR本文は使わない。**
+// 旧方式（`release-main/vX.Y.Z`）の候補は行を作らない。旧方式から明示的に移行したときだけ`migratedFrom*`に残す。
+model ReleaseCandidate {
+  id                   String    @id @default(cuid())
+  repositoryFullName   String    @db.VarChar(191)
+  // リポジトリ内で単調増加する候補番号。ブランチは`release-rc/<sequence>`
+  sequence             Int
+  // 記録で持つ段階（`ReleaseRcPhase`）。検証待ち〜公開準備可能は現在revisionの検証結果から導出する
+  phase                String    @db.VarChar(32)
+  // 固定したdevelopのSHAと、その時点の対象PR（JSON配列 `[{ number, title, mergeSha }]`）
+  frozenDevelopSha     String    @db.VarChar(64)
+  frozenPrs            Json
+  // 固定範囲の外から取り込みを承認したPR（JSON配列 `[{ number, mergeSha, approvedByUserId, approvedAt, reason }]`）
+  approvedExtraPrs     Json
+  // 適用済みの最新revision（0は未作成）
+  currentRevision      Int       @default(0)
+  // 進行中の間だけ`repositoryFullName`を入れる。同じリポジトリで候補を2本同時に持たない
+  activeKey            String?   @unique @db.VarChar(191)
+  // 候補作成の要求キー（画面の二重押し・再送で候補を重複作成しない）
+  requestKey           String    @unique @db.VarChar(64)
+  // 旧方式から移行した場合の元候補（`release-main/vX.Y.Z`のPRと、そのhead）
+  migratedFromPrNumber Int?
+  migratedFromHeadSha  String?   @db.VarChar(64)
+  createdByUserId      String?   @db.VarChar(40)
+  cancelReason         String?   @db.Text
+  cancelledByUserId    String?   @db.VarChar(40)
+  cancelledAt          DateTime?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  revisions ReleaseCandidateRevision[]
+
+  @@unique([repositoryFullName, sequence])
+  @@index([repositoryFullName, phase])
+}
+
+// リリース候補のrevision（#4495）。作成・関連修正の取り込み・履歴修復・移行ごとに1行。
+// 要求の時点で番号を採り、workflowの報告をサーバーがGitHubから取り直して`applied`/`failed`にする。
+// 失敗しても候補の`currentRevision`は進めない（元のrevisionと選択内容を残す）。過去の行は消さない。
+model ReleaseCandidateRevision {
+  id                String    @id @default(cuid())
+  candidateId       String
+  revision          Int
+  // `initial`（作成） / `fix_import`（関連修正の取り込み） / `history_repair`（mainの祖先の取り込み） / `migration`（旧方式からの移行）
+  reason            String    @db.VarChar(32)
+  // `requested` / `applied` / `failed` / `expired`
+  status            String    @db.VarChar(16)
+  // 要求キー（再送・二重押しで同じrevisionを2本作らない）
+  requestKey        String    @unique @db.VarChar(64)
+  // 未完了の間だけ`candidateId`を入れる。同じ候補へ更新を2本同時に走らせない
+  pendingKey        String?   @unique @db.VarChar(40)
+  // 前提にした直前revisionのhead（初回はnull）。報告時にこれから早送りできているかを確かめる
+  expectedHeadSha   String?   @db.VarChar(64)
+  // この版で足すPR（JSON配列 `[{ number, title, mergeSha, related }]`。初回は空）
+  importedPrs       Json
+  // 取り込みの契機になった修正系列（#4317）
+  fixSeriesId       String?   @db.VarChar(40)
+  // 適用後の物理PRと対象SHA（サーバーがGitHubから取り直した値）
+  prNumber          Int?
+  baseSha           String?   @db.VarChar(64)
+  headSha           String?   @db.VarChar(64)
+  runUrl            String?   @db.VarChar(512)
+  failureReason     String?   @db.Text
+  requestedByUserId String?   @db.VarChar(40)
+  appliedAt         DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  candidate ReleaseCandidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+
+  @@unique([candidateId, revision])
+  @@index([candidateId, status])
+}
+
 // 実装セッションの依存待ち（#4321）。
 //
 // **DispatchSessionとは別のモデルにしている。** セッションが畳まれても（GONE・EXITED）待ちの

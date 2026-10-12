@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import { isReleaseCandidateHeadRef } from "@/lib/release-branch";
 import { ChevronRight, ExternalLink, RotateCcw } from "lucide-react";
 
 import { ReleaseFixCreate, ReleaseFixOverviewPanel } from "@/components/dashboard/release-fix-panel";
@@ -11,7 +12,6 @@ import { useReferenceNavigation } from "@/hooks/use-reference-navigation";
 import { useReleaseVerification } from "@/hooks/use-release-verification";
 import type { ReviewVerdictKind } from "@/lib/github/release-verification";
 import { toJstParts } from "@/lib/format-date-time";
-import { RELEASE_BRANCH_PREFIX } from "@/lib/pull-request-list";
 import { tallyReleaseReviews } from "@/lib/release-changes";
 import { describeReleaseReviewDiagnostic } from "@/lib/release-review-diagnostic";
 import {
@@ -945,7 +945,7 @@ export function ReleaseReviewSections({
     setFixTick((n) => n + 1);
     onReload?.();
   };
-  if (!headRef.startsWith(RELEASE_BRANCH_PREFIX)) return null;
+  if (!isReleaseCandidateHeadRef(headRef)) return null;
 
   const gate = verification && verification.enforced && verification.gateStatus !== "not_enforced"
     ? GATE_LABEL[verification.gateStatus]
@@ -1125,7 +1125,7 @@ export function ConnectedReleaseReviewSections({
   className?: string;
 }) {
   const [reloadToken, setReloadToken] = useState(0);
-  const target = enabled && headRef.startsWith(RELEASE_BRANCH_PREFIX);
+  const target = enabled && isReleaseCandidateHeadRef(headRef);
   const { verification, error } = useReleaseVerification(repositoryFullName, pullRequestNumber, target, reloadToken);
   const changes = useReleaseChanges(
     repositoryFullName,
@@ -1178,7 +1178,7 @@ export function ReleaseVerificationBrief({
   onStatusChanged?: () => void;
 }) {
   const [reloadToken, setReloadToken] = useState(0);
-  const enabled = headRef.startsWith(RELEASE_BRANCH_PREFIX);
+  const enabled = isReleaseCandidateHeadRef(headRef);
   const { verification, error } = useReleaseVerification(repositoryFullName, pullRequestNumber, enabled, reloadToken);
   const signature = verification
     ? [

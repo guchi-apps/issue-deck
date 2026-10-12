@@ -8,6 +8,8 @@
  * リリース単位の統合検証・全体レビューとは責務が別。
  */
 
+import { isReleaseCandidateHeadRef } from "@/lib/release-branch";
+
 /** 固定リリースに対する検証の種別 */
 export const RELEASE_VERIFICATION_KINDS = ["integration", "ai_review"] as const;
 export type ReleaseVerificationKind = (typeof RELEASE_VERIFICATION_KINDS)[number];
@@ -167,7 +169,10 @@ export function evaluateReleaseVerificationWait(input: {
   return pending;
 }
 
-/** マージ対象がリリースPR（base=main・head=`release-main/v*`）か。ゲートはここにだけ掛ける */
+/**
+ * マージ対象がリリース候補のPR（base=main・head=`release-main/v*`または新方式の`release-rc/<番号>`）か。
+ * ゲートはここにだけ掛ける（#4495で新方式の候補も対象にした）
+ */
 export function isReleasePullRequest(pr: { baseRef: string; headRef: string }): boolean {
-  return pr.baseRef === "main" && /^release-main\/v\d/.test(pr.headRef);
+  return pr.baseRef === "main" && isReleaseCandidateHeadRef(pr.headRef);
 }

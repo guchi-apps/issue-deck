@@ -1,4 +1,5 @@
 import type { Prisma } from "@prisma/client";
+import { isReleaseCandidateHeadRef } from "@/lib/release-branch";
 
 import { db } from "@/lib/db";
 import { getInstallationToken } from "@/lib/github/app-auth";
@@ -258,7 +259,7 @@ export async function collectMergedReleasePrs(
     const prs = await fetchPage(page);
     for (const pr of prs) {
       if (pr.number <= options.floor) return found;
-      if (pr.merged_at !== null && pr.head.ref.startsWith(FROZEN_PREFIX)) {
+      if (pr.merged_at !== null && isReleaseCandidateHeadRef(pr.head.ref)) {
         found.push(pr);
         if (found.length >= options.enough) return found;
       }

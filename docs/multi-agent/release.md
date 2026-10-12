@@ -232,6 +232,7 @@ pushすると、修正がmainにだけ残りdevelopから消え、次のリリ�
 | `reusable-issue-labels.yml` | `main-pr-in-progress`・`main-pr-merged`のhead条件 |
 | `reusable-claude-pr-repair.yml` | `FIX_BASE_REF`を`develop`に倒すcase |
 | `src/lib/pull-request-list.ts` | `RELEASE_BRANCH_PREFIX`・`isReleaseHeadRef`・`classifyPullRequest` |
+| `src/lib/release-branch.ts` | 候補ブランチの判定（旧方式`release-main/v*`・新方式`release-rc/<番号>`。#4495） |
 | `src/app/api/repositories/release/rebuild/route.ts` | 作り直しで閉じてよい凍結ブランチの判定（#3014） |
 | `src/lib/release-rebuild.ts` | 「後に入った変更」からバンプPR・リリースPRを除く判定 |
 
@@ -978,3 +979,81 @@ main起点の`deploy-recovery/*`ブランチへ取り込む。**`merges`APIは�
 - **記録が無い履歴は「操作経路不明」と出す。** 後継候補だけが残る既存の修正系列は、画面側で合成して補い、承認や操作者を推測しない
 - 後継候補は、修正系列の巡回と、リリース準備の完了報告（`notify-prepared`）で観測して記録する
 - 記録の失敗は本処理を止めない。理由は機密除去してから保存する
+
+## 正式版から独立したリリース候補（#4495）
+
+正式版を上げる前にリリース候補を固定し、レビュー・統合検証・修正を同じ論理候補の中で繰り返す（親: #4494）。
+旧方式（`release-main/vX.Y.Z`）は版を上げてから候補を作り、作り直すたびにバンプの取り消しと再生成が伴っていた。
+新方式では版は公開準備（#4496）で確定し、候補の作成・修正では正式版・公開タグ・公開用の更新履歴を作らない。
+
+### 候補とrevision
+
+| 記録 | 何を持つか |
+| --- | --- |
+| `ReleaseCandidate` | リポジトリ内の候補番号（`RC-<番号>`）・段階（`phase`）・固定したdevelopのSHAと対象PR・固定範囲外から承認したPR・現在のrevision |
+| `ReleaseCandidateRevision` | 作成・関連修正の取り込み・移行ごとの1行。要求キー・前提にした直前のhead・足したPR・適用後のPR番号とbase/head・失敗理由 |
+
+- ブランチは`release-rc/<番号>`（版を入れない）。判定は`src/lib/release-branch.ts`に1か所にまとめ、`release-main/`を直書きしない。
+  検証・マージゲート・修正系列・完了系列・本番PR詳細は旧方式と新方式の両方を対象にし、凍結ブランチを閉じて消す旧方式の作り直し（#3014）だけが旧方式に限る
+- **revisionは同じブランチへ早送りで積む。** 物理PRは原則変わらず、headが変わるので既存の検証記録（PR番号＋base/head SHA）がそのまま「旧revisionの結果は現在の合格にしない」を満たす。PRを作り直した場合もrevisionの`prNumber`で追える
+- 初回は「headが固定したdevelopのSHAそのもの」、2回目以降は「直前のheadから早送り」のときだけ適用する（`decideRcReport`）。版上げ・範囲外のコミット・履歴の書き換えはここで弾く
+- 候補PRは版を上げる前なので`version-tag-check`が必ず赤になる。**マージ防止としてそのまま残し**、PRはdraftで作る（公開準備#4496で解消する）
+
+### 状態
+
+画面・APIに出す状態は12種（作成中・検証待ち・検証中・要修正・修正中・公開準備可能・公開準備中・本番承認待ち・本番反映中・稼働確認中・完了・中止）。
+**記録するのは段階（`creating`・`review`・`preparing`以降）だけ**で、`review`の間の5つは現在revisionの検証結果と未完了の更新から`deriveRcStatus`が導く（記録と実データを食い違わせないため）。
+
+- 合否は`evaluateReleaseMergeGate`（強制あり）を、候補PRの現在のbase/headで評価する。旧revisionの合格・遅れて届いた結果・`unverifiedScope`付きの合格は公開準備可能にしない
+- 候補ブランチのheadが記録したrevisionのheadと違う（記録に無いpush）ときは合格にせず、理由を出す
+- 段階の遷移表は`canTransitionRcPhase`。mainへのマージ以降は取り消せない
+
+### 冪等性・再起動・取消
+
+- 作成・取り込み・移行は画面が生成する**要求キー**で冪等にする（候補・revisionの`requestKey`のユニーク制約）。二重押し・再送は既存を返す
+- 同じリポジトリの候補は`activeKey`で1本、同じ候補への更新は`pendingKey`で1本
+- workflowの報告（`POST /api/dispatch/release-rc`）は要求キーと結果の種別しか信じず、候補ブランチをGitHubから取り直して照合する。**報告が届かなくても、画面の読み込み（`GET /api/repositories/release/rc`）で同じ照合をして取り込む**。2時間結果が無ければ`expired`にしてやり直せるようにする
+- 更新に失敗しても`currentRevision`は進めない。元のrevision・選択・承認は残る。取消は段階を`cancelled`にし、候補PRは理由を書いて閉じる（ブランチと記録は残す）
+
+### 取り込みの承認範囲
+
+関連修正（その候補の修正系列#4317の修正PR）だけは承認なしで取り込める。それ以外は、要求で明示的に承認した番号に限り、承認者・時刻を`approvedExtraPrs`へ記録して取り込む（`decideRcImport`）。依存PRを自動で足さない。PRごとの検証は既存の`checkRebuildPullRequest`を使う。
+
+### 旧方式との共存と移行
+
+- 開いている`release-main/v*`の候補は**閉じず、バンプも取り消さない**。その間は新方式の候補を作らない（`legacy_open`）
+- 本番PR詳細に「旧方式の候補」と出し、このまま旧方式で完了させるか「新方式へ移行」を選べる。移行は、候補の先端が`vX.Y.Zをリリースする。`の1コミットのときだけ、その親（版を上げる前の固定点）から新しい候補を作り、作れた後にだけ旧PRを閉じる。作り直し・履歴修復で積まれた候補は固定点を推測しないので移行できない
+- 移行した場合、developには旧方式のバンプが残る。公開準備（#4496）が版を確定するときに整合させる
+
+### 公開準備へ渡す契約
+
+`buildRcFinalizeContract`は現在revisionが公開準備可能のときだけ、候補ID・候補番号・revision・PR番号・base/head・固定したdevelopのSHA・含めるPR番号を返す。公開準備はこれを固定の入力として扱い、developの最新を取り込まない。
+
+### workflowの候補モード（`candidate-request`）
+
+`reusable-release-develop-to-main.yml`は`candidate-request`入力（手動起動のみ）を受け取ると、旧方式の処理（バンプ・`release-main/v*`）を一切行わず、次だけを行う。結果は最後のステップが要求キーと種別だけを`POST /api/dispatch/release-rc`へ報告する（旧方式の`notify-failure`は動かさない）。
+
+- `mode=create`: 固定SHA（developの祖先であること）をそのまま`release-rc/<番号>`としてpushし、main向けの**draft PR**を作る。既にブランチがあれば同じ内容のときだけ受け付け、書き換えない（再実行で同じ結果）
+- `mode=import`: 候補ブランチの先端が要求の前提（直前revisionのhead）と一致するときだけ、選んだPRを当てて早送りでpushする。当てる処理は旧方式の選択的作り直しと**同じ関数`apply_selection`**（#4335の`cherry-pick -m 1`・範囲外ファイルの検査・#4452の履歴修復）で、取り込み用の別ループは作らない。force pushはしないので、途中で候補が動いていればpushが拒否される
+- 新方式の候補PRが開いている間は、schedule・push・手動起動の旧方式の処理（バンプPR・`release-main/v*`の作成）をしない。開いている旧方式の候補がある間は、issue-deckが新方式の候補を作らない。どちらか一方だけが進む
+
+**状態判定の`run`ブロックはActionsを回さずに確かめられる。** 再利用ワークフローは配布先のチェックアウトで動くため`.github/scripts/`の共通スクリプトを読めず、処理はinlineのbashに置いてある（同じ処理を2経路で使うときは、同じ`run`の中でbash関数に切り出す）。YAMLから`id: state`の`run`を取り出し、`gh`をPATH上のスタブに差し替えて、bareのoriginとcloneで作ったgitサンドボックスで実行すると、分岐ごとのpush先のSHAと`GITHUB_OUTPUT`を確認できる（#4495で作成・取り込み・古い前提の拒否・旧方式の回帰をこの方法で確かめた）
+
+### 修正系列・完了系列との接続
+
+- 修正系列（#4317）は、候補が新方式なら作り直し（`requestSelectiveRebuild`）の代わりに`requestRcImport`で同じ候補へ修正PRを取り込む。要求キーは系列と前提headから決める（`rcFixSeriesRequestKey`）ので、巡回の重なり・再起動で二重に依頼しない。取り込みが適用されたら、そのrevisionのPR・SHAを「後継」として再検証へ進め、失敗・失効なら理由付きで止める（候補と元のrevisionは残る）
+- リリース完了系列（#4480）は、同じPR番号でもheadが進んだ後継を追い、取り込み中（`rebuilding`）にheadが動いても止めずに待つ。後継へ進む更新はheadも条件にして二重に進めない
+- 内部確認（#4410/#4478）・次世代の起案・本番マージ・deploy追跡は既存のまま使う。新しいレビュー・復旧のループは作っていない
+
+### callerの対応世代と段階展開
+
+世代を表す専用の印は無いので、`rebuild_selection`（#4335）と同じく**developのcallerに`candidate_request`のinputと`candidate-request:`の受け渡しがあるか**で判定する（`parseRcCallerSupport`）。未対応・読めないときは理由付きで「旧方式で動作中」と出し、作成・移行の要求は`caller_unsupported`で断る。
+
+**callerの有効化は公開準備（#4496）が入ってから行う。** 新方式の候補が開いている間は旧方式のリリースが止まるため、版を確定して公開する経路が無いうちに有効化すると、移行した候補を公開できなくなる。reusable側の候補モードは任意入力なので、callerを変えない限り配布先・issue-deck自身の挙動は変わらない。
+
+段階展開の手順（#4496の後）:
+
+1. issue-deck自身のcaller（`.github/workflows/release-develop-to-main.yml`）へ`candidate_request`のinputと`candidate-request:`の受け渡しを足し、作成・取り込み・取消・旧方式の移行・公開までを確認する
+2. `develop`→`main`のリリースを通し、画面の「新しいタグを切って配る」でタグを切る
+3. 対応させるリポジトリのcallerへ`candidate_request`のinputと受け渡しを足すPRを、リポジトリごとに出す（一括で配らない）
+4. 戻すとき（復帰）は、そのリポジトリのcallerから`candidate_request`を外す。判定が未対応へ戻り、以後は旧方式で動く。作成済みの候補の記録は残り、開いている候補PRは画面から取り消してから旧方式のリリースを起動する

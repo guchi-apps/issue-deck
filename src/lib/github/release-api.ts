@@ -344,13 +344,15 @@ export async function fetchReleaseRebuildCandidate(
   repo: string,
   releaseHeadSha: string,
   token: string,
+  /** 比較の終点。既定は`develop`の先端。候補の作成（#4495）は固定したSHAを渡し、作成中に入った変更を混ぜない */
+  target = "develop",
 ): Promise<ReleaseRebuildCandidate> {
   // compareは1ページ最大250件で、リリースPRが長く開いていると超える（#4422。351件の実例）。
   // 全ページを読む。途中のページが失敗したら例外にし、欠けた一覧を「候補なし」と見せない
   const commits: CompareCommit[] = [];
   let complete = false;
   for (let page = 1; page <= REBUILD_COMPARE_MAX_PAGES; page++) {
-    const url = `${GITHUB_API}/repos/${owner}/${repo}/compare/${releaseHeadSha}...develop?per_page=100&page=${page}`;
+    const url = `${GITHUB_API}/repos/${owner}/${repo}/compare/${releaseHeadSha}...${target}?per_page=100&page=${page}`;
     const res = await githubFetch(url, token);
     if (!res.ok) {
       const detail = await res.text().catch(() => "");
@@ -428,6 +430,62 @@ export async function releaseCallerSupportsSelection(owner: string, repo: string
   if (!data.content) return false;
   const text = Buffer.from(data.content, data.encoding === "base64" ? "base64" : "utf-8").toString("utf-8");
   return /^\s+rebuild_selection:/m.test(text) && text.includes("rebuild-selection:");
+}
+
+/** developにあるリリースworkflowのcallerの本文（#4495の対応判定用）。読めなければnull */
+export async function fetchReleaseCallerText(owner: string, repo: string, token: string): Promise<string | null> {
+  const url = `${GITHUB_API}/repos/${owner}/${repo}/contents/.github/workflows/${RELEASE_WORKFLOW_FILE}?ref=develop`;
+  const res = await githubFetch(url, token);
+  if (!res.ok) return null;
+  const data: { content?: string; encoding?: string } = await res.json().catch(() => ({}));
+  if (!data.content) return null;
+  return Buffer.from(data.content, data.encoding === "base64" ? "base64" : "utf-8").toString("utf-8");
+}
+
+/** ブランチの先端SHA。無ければnull */
+export async function fetchBranchHeadSha(owner: string, repo: string, branch: string, token: string): Promise<string | null> {
+  const res = await githubFetch(`${GITHUB_API}/repos/${owner}/${repo}/git/ref/heads/${branch}`, token);
+  if (res.status === 404) return null;
+  if (!res.ok) {
+    const detail = await res.text().catch(() => "");
+    throw new GithubApiError(res.status, `GitHub API request failed: ${res.status} ${branch} ${detail}`);
+  }
+  const data: { object?: { sha?: string } } = await res.json().catch(() => ({}));
+  return data.object?.sha ?? null;
+}
+
+/** コミットのメッセージと親（#4495。旧方式の候補の先端が版上げのコミットかを確かめる） */
+export async function fetchCommitSummary(
+  owner: string,
+  repo: string,
+  sha: string,
+  token: string,
+): Promise<{ message: string; parents: string[] }> {
+  const url = `${GITHUB_API}/repos/${owner}/${repo}/git/commits/${sha}`;
+  const res = await githubFetch(url, token);
+  if (!res.ok) {
+    const detail = await res.text().catch(() => "");
+    throw new GithubApiError(res.status, `GitHub API request failed: ${res.status} ${url} ${detail}`);
+  }
+  const data: { message?: string; parents?: { sha: string }[] } = await res.json();
+  return { message: data.message ?? "", parents: (data.parents ?? []).map((p) => p.sha) };
+}
+
+/**
+ * リリースworkflowを候補管理（#4495）の要求で起動する。`candidate_request`だけを送り、版の上げ幅などは送らない
+ * （候補の作成・更新では正式版を上げない）。対応していないcallerへ送ると422になるので、呼び出し側は
+ * `parseRcCallerSupport`で確かめてから呼ぶ
+ */
+export async function dispatchReleaseCandidateWorkflow(owner: string, repo: string, token: string, candidateRequest: string): Promise<void> {
+  const url = `${GITHUB_API}/repos/${owner}/${repo}/actions/workflows/${RELEASE_WORKFLOW_FILE}/dispatches`;
+  const res = await githubFetch(url, token, {
+    method: "POST",
+    body: { ref: "develop", inputs: { candidate_request: candidateRequest } },
+  });
+  if (!res.ok) {
+    const detail = await res.text().catch(() => "");
+    throw new GithubApiError(res.status, `GitHub API request failed: ${res.status} ${url} ${detail}`);
+  }
 }
 
 /** PRを選んだ作り直しで、選んだPRを検証するための取得結果（#4335） */
