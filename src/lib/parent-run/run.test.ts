@@ -186,6 +186,32 @@ describe("親Issueの自動実行", () => {
     expect(enqueue).toHaveBeenCalledWith(expect.objectContaining({ issueNumber: 2 }));
   });
 
+  it("子が本番反映済みでなければ、親全体の本番確認も記録できない", async () => {
+    await start();
+    const r = await applyRunAction(parent, { type: "verify" }, deps());
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toBe("children_not_released");
+  });
+
+  it("実装PRがmain反映済みの子には本番確認を記録できる", async () => {
+    await start();
+    prs[1] = { kind: "one", number: 10 };
+    merged.add(10);
+    const d = deps();
+    d.observePr = async () => ({ merged: true, inProduction: true });
+    const r = await applyRunAction(parent, { type: "verify", child: { repository: R, number: 1 } }, d);
+    expect(r.ok).toBe(true);
+    expect(store.tables.parentRunChild.find((c) => c.number === 1)?.verifiedAt).toBeTruthy();
+  });
+
+  it("未完了の子へは本番確認を記録できない（サーバー側で再観測して拒否）", async () => {
+    await start();
+    const r = await applyRunAction(parent, { type: "verify", child: { repository: R, number: 1 } }, deps());
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toBe("child_not_released");
+    expect(store.tables.parentRunChild.find((c) => c.number === 1)?.verifiedAt ?? null).toBeNull();
+  });
+
   it("一時停止中は未起動の子を起動せず、再開で残りから続ける", async () => {
     await start();
     prs[1] = { kind: "one", number: 10 };
