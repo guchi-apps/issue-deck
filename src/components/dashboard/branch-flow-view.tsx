@@ -131,6 +131,7 @@ import type {
   BranchFlowDeviceBuild,
   BranchFlowIssuePriority,
   BranchFlowIssueRef,
+  BranchFlowReferencedPullRequest,
   BranchFlowLane,
   BranchFlowLaneStatus,
   BranchFlowManualStep,
@@ -529,6 +530,47 @@ function IssueLine({
   );
 }
 
+/** 参照先のPRの実状態を表す語。本番PRはリリースPR（develop→main）を指す（#4529） */
+function describeReferencedPullRequest(pullRequest: BranchFlowReferencedPullRequest): string {
+  const target = pullRequest.kind === "release" ? "本番PR" : "PR";
+  if (pullRequest.merged) return `${target}（マージ済み）`;
+  return pullRequest.state === "open" ? `${target}（オープン）` : `${target}（クローズ済み・置換または取り下げ）`;
+}
+
+/**
+ * レーンのPRが`#番号`で参照している、PRだった番号（#4529）。Issueとは別の「修正対象」として出し、
+ * リンクもIssueでなくPRへ向ける。
+ */
+function ReferencedPullRequestsLine({
+  repositoryFullName,
+  pullRequests,
+}: {
+  repositoryFullName: string;
+  pullRequests: BranchFlowReferencedPullRequest[];
+}) {
+  if (pullRequests.length === 0) return null;
+
+  return (
+    <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+      <span className="shrink-0 text-xs text-muted-foreground">修正対象</span>
+      {pullRequests.map((pullRequest) => (
+        <span key={pullRequest.number} className="flex min-w-0 flex-wrap items-center gap-x-1">
+          <GithubReferenceLink
+            href={pullRequest.htmlUrl}
+            reference={{ repositoryFullName, number: pullRequest.number, kind: "pull" }}
+            className="min-w-0 max-w-full break-words text-xs text-primary hover:underline"
+          >
+            {pullRequest.kind === "release" ? "本番PR" : "PR"} #{pullRequest.number}
+          </GithubReferenceLink>
+          <span className="text-xs text-muted-foreground">
+            {describeReferencedPullRequest(pullRequest)}
+          </span>
+        </span>
+      ))}
+    </div>
+  );
+}
+
 /**
  * 1本のPRが複数のIssueを扱っている場合の2件目以降（#1455）。
  *
@@ -780,9 +822,13 @@ function LaneRow({
             issue={lane.issue}
             pullRequestTitle={headPullRequest?.title}
           />
-        ) : (
+        ) : lane.referencedPullRequests.length === 0 ? (
           <span className="text-xs text-muted-foreground">対応Issue不明</span>
-        )}
+        ) : null}
+        <ReferencedPullRequestsLine
+          repositoryFullName={repositoryFullName}
+          pullRequests={lane.referencedPullRequests}
+        />
         <RelatedIssuesLine
           repositoryFullName={repositoryFullName}
           issues={lane.relatedIssues}

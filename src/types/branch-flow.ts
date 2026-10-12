@@ -266,6 +266,20 @@ export type BranchFlowIssueRef = {
 export type BranchFlowIssuePriority = "high" | "low";
 
 /**
+ * レーンのPRが本文・タイトルで参照している、同じリポジトリの別PR（#4529）。
+ * リリース修正PRが「#4517の指摘に対応」と書いた参照先の旧リリースPRなど。
+ * 番号はIssueとPRで共通のため、PR一覧に実在する番号はIssueではなくPRとして扱う。
+ */
+export type BranchFlowReferencedPullRequest = {
+  number: number;
+  title: string;
+  htmlUrl: string;
+  state: "open" | "closed";
+  merged: boolean;
+  kind: PullRequestKind;
+};
+
+/**
  * 実行ボタンを押して動き出した、まだブランチが無いIssue（#1704・#2386）。
  *
  * ブランチ画面のレーンはPRのheadブランチと実在する作業ブランチの和集合で作るため、
@@ -315,6 +329,8 @@ export type BranchFlowLane = {
    * 扱った場合にここへ入る。**本文の`#番号`は単なる言及も混ざるため「関連」として出す。**
    */
   relatedIssues: BranchFlowIssueRef[];
+  /** `#番号`の参照先がPRだったもの（#4529）。Issueとしては出さず「修正対象PR」として出す */
+  referencedPullRequests: BranchFlowReferencedPullRequest[];
   status: BranchFlowLaneStatus;
   /**
    * 本番（main）へ届いているか。**マージ済みのレーンでのみ意味を持ち**、
