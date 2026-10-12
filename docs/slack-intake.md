@@ -44,10 +44,12 @@ Slackの`#アプリissue起案`への投稿から、対象リポジトリを**�
 
 ## Slack Appの設定（手作業）
 
+リリースによる受け口の配布と、Slack連携の有効化は別の工程です。設定と旧Webhookからの切替は、本番反映後の手作業Issue #4461で行います。有効化前のリリース案内には「Slack連携はまだ有効になっていません」と明記します。
+
 1. https://api.slack.com/apps で新規App（名前: IssueDeck）を作成する
 2. **OAuth & Permissions**のBot Token Scopesに`chat:write`・`reactions:write`・`channels:history`・`channels:read`（privateチャンネルなら`groups:history`・`groups:read`）を付けてWorkspaceへインストールする。スコープを変えたら**再インストール**が必要
 3. **Event Subscriptions**: Request URLに`https://<IssueDeckのホスト>/api/slack/events`（`challenge`に応答して検証が通る）。Subscribe to bot eventsに`message.channels`（privateなら`message.groups`）を追加する
-4. **Interactivity & Shortcuts**: Request URLに`/api/slack/interactions`、Select Menus の Options Load URLに`/api/slack/options`
+4. **Interactivity & Shortcuts**: Request URLに`https://<IssueDeckのホスト>/api/slack/interactions`、Select Menus の Options Load URLに`https://<IssueDeckのホスト>/api/slack/options`（Slackの設定画面には完全なHTTPS URLを指定する）
 5. Signing SecretとBot Tokenをサーバーの`.env`へ置き、アプリを再起動する。`SLACK_USER_MAP`に依頼者を登録する
 6. `#アプリissue起案`で`/invite @IssueDeck`してBotをチャンネルへ参加させる
 
