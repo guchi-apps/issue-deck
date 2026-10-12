@@ -3,6 +3,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { parseClaudeLocalModel, parseCodexLocalModel } from "@/lib/app-settings";
 import { requireUserId } from "@/lib/auth-user";
 import { listDependencyWaitViews } from "@/lib/dispatch/dependency-wait-run";
+import { listParentRunBadges } from "@/lib/parent-run/run";
 import {
   DEFAULT_DISPATCH_AGENT,
   isSessionControlJobKind,
@@ -75,16 +76,21 @@ export async function GET() {
   // 逆向きの参照を足すと相互参照になる
   // 実装セッションの依存待ち（#4321）も同じ応答に載せる（取得口を増やさない）。
   // **取得に失敗しても状態の取得は続ける**（表示が欠けるだけで、実行状況の画面は止めない）
-  const [state, manualStepRuns, dependencyWaits] = await Promise.all([
+  const [state, manualStepRuns, dependencyWaits, parentRuns] = await Promise.all([
     listDispatchState(),
     listManualStepRunViews(),
     listDependencyWaitViews().catch((error) => {
       console.error("[GET /api/dispatch] 依存待ちを取得できませんでした:", error);
       return [];
     }),
+    // 親Issueの自動実行（#4536）の印。取得に失敗しても状態の取得は続ける
+    listParentRunBadges().catch((error) => {
+      console.error("[GET /api/dispatch] 親の自動実行を取得できませんでした:", error);
+      return [];
+    }),
   ]);
   return NextResponse.json(
-    { ...state, manualStepRuns, dependencyWaits },
+    { ...state, manualStepRuns, dependencyWaits, parentRuns },
     { headers: { "Cache-Control": "no-store" } },
   );
 }
