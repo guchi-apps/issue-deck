@@ -186,6 +186,14 @@ describe("親Issueの自動実行", () => {
     expect(enqueue).toHaveBeenCalledWith(expect.objectContaining({ issueNumber: 2 }));
   });
 
+  it("未完了の子へは本番確認を記録できない（サーバー側で再観測して拒否）", async () => {
+    await start();
+    const r = await applyRunAction(parent, { type: "verify", child: { repository: R, number: 1 } }, deps());
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toBe("child_not_released");
+    expect(store.tables.parentRunChild.find((c) => c.number === 1)?.verifiedAt ?? null).toBeNull();
+  });
+
   it("一時停止中は未起動の子を起動せず、再開で残りから続ける", async () => {
     await start();
     prs[1] = { kind: "one", number: 10 };

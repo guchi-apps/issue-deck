@@ -92,7 +92,7 @@ describe("evaluateRun", () => {
   });
 
   it("B・Cの検証が記録されてはじめてDを起動する", () => {
-    const states = { 1: { pr: merged(10) }, 2: { pr: merged(11) }, 3: { pr: merged(12) } };
+    const states = { 1: { pr: merged(10) }, 2: { pr: merged(11, true) }, 3: { pr: merged(12, true) } };
     const launched = { 1: "LAUNCHED", 2: "LAUNCHED", 3: "LAUNCHED" } as const;
     const unverified = run(states, launched);
     expect(unverified.toLaunch).toEqual([]);
@@ -100,6 +100,21 @@ describe("evaluateRun", () => {
     expect(unverified.children[3].display.action).toBe("verify");
     const verified = run(states, launched, {}, [2, 3]);
     expect(verified.toLaunch).toEqual([key(4)]);
+  });
+
+  it("本番確認の記録だけでは、実装PRのmain反映が無い子のverifiedを成立としない", () => {
+    const states = { 1: { pr: merged(10) }, 2: { pr: merged(11, false) }, 3: { pr: merged(12, true) } };
+    const launched = { 1: "LAUNCHED", 2: "LAUNCHED", 3: "LAUNCHED" } as const;
+    const r = run(states, launched, {}, [2, 3]);
+    expect(r.toLaunch).toEqual([]);
+    expect(phase(r, 4)).toBe("waiting");
+  });
+
+  it("全子をPRなしでクローズしても、親の完了（develop・main反映）の証拠にしない", () => {
+    const closed = { issue: "closed" as const };
+    const r = run({ 1: closed, 2: closed, 3: closed, 4: closed }, {}, { parentVerifiedAt: new Date() });
+    expect(r.completion.complete).toBe(false);
+    expect(r.completion.evidence.filter((e) => !e.ok).map((e) => e.label)).toEqual(["子のdevelopマージ", "本番（main）への反映"]);
   });
 
   it("一時停止中は未起動の子を起動しない", () => {

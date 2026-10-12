@@ -10,6 +10,7 @@ import { refKey, type PlanIssueRef, type PlanSnapshot } from "@/lib/execution-pl
 import {
   collectObservedRefs,
   evaluateRun,
+  isChildReleased,
   parseChildLaunchState,
   parseParentRunStatus,
   type ChildDisplay,
@@ -445,6 +446,11 @@ export async function applyRunAction(parent: PlanIssueRef, action: RunAction, de
       if (action.child) {
         const child = row.children.find((c) => c.repository === action.child?.repository && c.number === action.child?.number);
         if (!child) return fail(404, "child_not_found", "この実行の対象に含まれない子です");
+        // 記録の前に、実装PRのdevelopマージ・main反映をサーバー側で観測し直す（未完了の子へ記録させない）
+        const obs = await observeRef({ repository: child.repository, number: child.number }, child, deps);
+        if (!isChildReleased(obs)) {
+          return fail(409, "child_not_released", "実装PRのdevelopマージとmainへの反映を確認できないため、本番確認を記録できません");
+        }
         await db.parentRunChild.update({ where: { id: child.id }, data: { verifiedAt: now } });
       } else {
         await db.parentRun.update({ where: { id: row.id }, data: { verifiedAt: now } });

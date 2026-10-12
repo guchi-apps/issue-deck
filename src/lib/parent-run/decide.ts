@@ -82,10 +82,14 @@ export function isChildDone(obs: RefObservation): boolean {
   return obs.issue === "closed" || (obs.pr.kind === "one" && obs.pr.merged);
 }
 
-/** 本番（main）へ反映済み。Issueのクローズ（Done）も反映済みとして扱う */
+/** 本番（main）へ反映済み。**実装PRでmerged＋mainへの反映を確かめられた場合だけ**（Issueのクローズでは成立としない） */
 export function isChildReleased(obs: RefObservation): boolean {
-  if (obs.pr.kind === "one") return obs.pr.merged && obs.pr.inProduction === true;
-  return obs.issue === "closed";
+  return obs.pr.kind === "one" && obs.pr.merged && obs.pr.inProduction === true;
+}
+
+/** 子のdevelopマージが実装PRで確かめられている。Issueのクローズだけでは成立としない（親の完了条件に使う） */
+export function isChildMerged(obs: RefObservation): boolean {
+  return obs.pr.kind === "one" && obs.pr.merged;
 }
 
 /** 依存先1件の条件を評価する。**取得失敗・曖昧は`null`（成立とも未成立とも言わない）** */
@@ -120,7 +124,12 @@ export function evaluateDependency(
           : { condition, satisfied: false, detail: `PR #${pr.number}はdevelopまで。mainへは未反映です` };
       }
       case "verified":
-        if (verifiedAt) return { condition, satisfied: true, detail: "本番確認が記録されています" };
+        // 記録だけでは成立にしない。実装PRのmerged＋mainへの反映が確かめられているときだけ（記録は保持する）
+        if (verifiedAt) {
+          return isChildReleased(obs)
+            ? { condition, satisfied: true, detail: "本番確認が記録されています" }
+            : { condition, satisfied: false, detail: "本番確認の記録はありますが、実装PRのmain反映を確認できていません" };
+        }
         // 実装が終わる前は「待つ」だけ。終わってからはじめて人の確認（記録）が要る
         return isChildDone(obs)
           ? { condition, satisfied: null, detail: "実環境での確認が必要です（人が記録します）" }
@@ -250,7 +259,8 @@ export function evaluateRun(input: RunEvaluationInput): RunEvaluation {
   const next = nextCandidate ? refKey(nextCandidate.child) : null;
 
   const evidence: CompletionEvidence[] = [];
-  const allDone = ordered.length > 0 && ordered.every((e) => e.display.phase === "done");
+  // 完了条件はIssueのクローズで代用しない。実装PRのdevelopマージを確かめられた子だけを数える
+  const allDone = ordered.length > 0 && ordered.every((e) => e.display.phase === "done" && isChildMerged(obsOf(refKey(e.child))));
   evidence.push({ label: "子のdevelopマージ", ok: allDone, detail: `${counts.done}/${counts.total}` });
   const unreleased = ordered.filter((e) => !isChildReleased(obsOf(refKey(e.child))));
   evidence.push({

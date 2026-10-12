@@ -59,6 +59,45 @@ describe("savePlan（更新）", () => {
     expect(mocks.updateMany).toHaveBeenCalledTimes(1);
   });
 
+  it("更新後の計画から外す子がクローズ済みなら、confirmRemoveがあっても外せない", async () => {
+    mocks.findUnique.mockResolvedValue(existingRow());
+    const next = { ...snapshot, children: [{ repository: parent.repository, number: 2, dependsOn: [] }] };
+    const r = await savePlan({
+      parent,
+      payload: next,
+      author: "a",
+      changeNote: "更新",
+      expectedVersion: 1,
+      confirmRemove: [`${parent.repository}#1`],
+      deps: { ...deps, issueState: async (ref) => (ref.number === 1 ? "closed" : "open") },
+    });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.errors.some((e) => e.message.includes("完了済みの成果なので計画から外せません"))).toBe(true);
+    expect(mocks.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("外す子の状態を取得できなければ、完了済みか判断できないので外せない", async () => {
+    mocks.findUnique.mockResolvedValue(existingRow());
+    const next = { ...snapshot, children: [{ repository: parent.repository, number: 2, dependsOn: [] }] };
+    const r = await savePlan({
+      parent,
+      payload: next,
+      author: "a",
+      changeNote: "更新",
+      expectedVersion: 1,
+      confirmRemove: [`${parent.repository}#1`],
+      deps: {
+        ...deps,
+        issueState: async (ref) => {
+          if (ref.number === 1) throw new Error("HTTP 502");
+          return "open";
+        },
+      },
+    });
+    expect(r.ok).toBe(false);
+    expect(mocks.updateMany).not.toHaveBeenCalled();
+  });
+
   it("同時更新で版を進められなければ409を返し、版を作らない", async () => {
     mocks.findUnique.mockResolvedValue(existingRow());
     mocks.updateMany.mockResolvedValue({ count: 0 });
