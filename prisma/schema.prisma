@@ -2650,12 +2650,63 @@ model ReleaseFixSeries {
   successorBaseSha   String?  @db.VarChar(64)
   successorHeadSha   String?  @db.VarChar(64)
   createdByUserId    String   @db.VarChar(40)
+  // 内部確認（実装→独立レビュー→修正→テストの往復。#4410）を修正PRの前に求める系列か。旧い系列は求めない
+  internalReview     Boolean  @default(false)
+  // 内部確認が上限・再発・進捗なしで止まった理由。入るとIssueへ理由を残して`00.check-user`を付ける
+  internalStopReason String?  @db.Text
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@index([repositoryFullName, releasePrNumber])
   @@index([status])
+}
+
+// 内部確認の往復（#4410）。論理セッションは「リポジトリ＋修正Issue番号」で、世代をまたいで引き継ぐ。
+// 結果は確認した対象（`issue-<番号>`ブランチのHEAD SHA。サーバーがGitHubから取り直す）に紐付け、
+// 対象が変わったあとの合格を流用しない。
+model ReleaseFixInternalRound {
+  id                 String    @id @default(cuid())
+  repositoryFullName String    @db.VarChar(191)
+  issueNumber        Int
+  round              Int
+  // 独立レビューの結果。`pass`（指摘なし）/ `findings`（指摘あり）。未実施はnull
+  reviewVerdict      String?   @db.VarChar(16)
+  reviewTargetSha    String?   @db.VarChar(64)
+  reviewSummary      String?   @db.Text
+  reviewedAt         DateTime?
+  // テストの結果。`passed` / `failed`。未実施はnull
+  testState          String?   @db.VarChar(16)
+  testTargetSha      String?   @db.VarChar(64)
+  testSummary        String?   @db.Text
+  testedAt           DateTime?
+  // この往復のレビューで未解決だった指摘の件数（進捗なしの判定に使う）
+  openFindingCount   Int       @default(0)
+  createdAt          DateTime  @default(now())
+
+  @@unique([repositoryFullName, issueNumber, round])
+}
+
+// 内部確認の指摘（#4410）。IDはサーバーが採番し、再発は同じIDを再オープンして数える。
+model ReleaseFixFinding {
+  id                 String   @id @default(cuid())
+  repositoryFullName String   @db.VarChar(191)
+  issueNumber        Int
+  // `F-001`のような安定した識別子
+  key                String   @db.VarChar(16)
+  title              String   @db.VarChar(255)
+  detail             String?  @db.Text
+  // `open` / `resolved`
+  status             String   @db.VarChar(16)
+  // 解消の検証根拠（レビュー担当の確認内容）
+  resolution         String?  @db.Text
+  firstRound         Int
+  lastRound          Int
+  reopenCount        Int      @default(0)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  @@unique([repositoryFullName, issueNumber, key])
 }
 
 // リリース準備（`release-develop-to-main.yml`の`release`ジョブ）の失敗記録（#4335）。

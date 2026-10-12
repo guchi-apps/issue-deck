@@ -220,3 +220,44 @@ describe("候補の取得が不完全なとき（#4422）", () => {
     expect(decision.action).toBe("wait");
   });
 });
+
+describe("内部確認（#4410）の保留", () => {
+  it("修正PRが内部確認の未完了・不一致のまま現れたら、マージ済みでも作り直しへ進めず判断待ちにする", () => {
+    const decision = decideReleaseFix({ series: [snapshot({ internalHold: "内部確認: 独立レビューが未実施です" })], candidate: open, selective: true });
+    expect(decision).toMatchObject({ action: "stop", status: "awaiting_decision", seriesIds: ["s1"] });
+  });
+  it("保留が無ければ従来どおり作り直す（旧い系列は影響を受けない）", () => {
+    const decision = decideReleaseFix({ series: [snapshot()], candidate: { ...open, developPullRequests: [100] }, selective: true });
+    expect(decision).toMatchObject({ action: "rebuild", selectedPrs: [100] });
+  });
+  it("修正PRがまだ無い系列は保留しない（PRが出るまで待つ）", () => {
+    const decision = decideReleaseFix({ series: [snapshot({ fixPrNumber: null, fixPrMerged: false, internalHold: "内部確認: x" })], candidate: open });
+    expect(decision).toEqual({ action: "wait" });
+  });
+});
+
+describe("修正Issue本文の内部確認の手順", () => {
+  const input = {
+    repositoryFullName: "o/r",
+    releasePrNumber: 5,
+    releaseVersion: "1.0.0",
+    baseSha: "a",
+    headSha: "b",
+    sourceKind: "review_finding" as const,
+    causeClass: "code" as const,
+    items: [{ title: "指摘", detail: null, file: null, evidence: null, recommendation: null, pullRequests: [] }],
+    decisionQuestion: null,
+    previousIssueNumber: null,
+    generation: 1,
+    relatedPullRequests: [],
+    verifyConditions: ["x"],
+  };
+  it("内部確認つきの起案には手順と、PR作成スクリプトの案内が入る", () => {
+    const { body } = buildReleaseFixIssue({ ...input, internalReview: true }, "k");
+    expect(body).toContain("## 内部確認");
+    expect(body).toContain("scripts/create-release-fix-pr.sh");
+  });
+  it("指定しなければ従来の本文のまま", () => {
+    expect(buildReleaseFixIssue(input, "k").body).not.toContain("## 内部確認");
+  });
+});
