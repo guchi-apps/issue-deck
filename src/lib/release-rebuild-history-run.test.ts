@@ -8,9 +8,58 @@ vi.mock("@/lib/github/release-api", () => ({
   fetchPullMergeInfo: vi.fn(),
   fetchTagRefs: vi.fn(),
 }));
-vi.mock("@/lib/github/pull-requests-api", () => ({ fetchClosedPullRequestsForBase: vi.fn() }));
+vi.mock("@/lib/github/pull-requests-api", () => ({ CLOSED_PAGED_PER_PAGE: 100, fetchClosedPullRequestsForBasePage: vi.fn() }));
 
-import { purgeCompletedRebuildEvents } from "./release-rebuild-history-run";
+import type { GithubApiOpenPullRequest } from "@/lib/github/pull-requests-api";
+import { collectMergedReleasePrs, purgeCompletedRebuildEvents } from "./release-rebuild-history-run";
+
+function closedPr(number: number, ref: string, merged: boolean): GithubApiOpenPullRequest {
+  return { number, merged_at: merged ? "2026-10-01T00:00:00Z" : null, head: { ref, sha: `s${number}` } } as GithubApiOpenPullRequest;
+}
+
+/** 番号の降順に並んだclosed PRを100件ずつ返す */
+function pager(prs: GithubApiOpenPullRequest[]) {
+  return vi.fn(async (page: number) => prs.slice((page - 1) * 100, page * 100));
+}
+
+describe("collectMergedReleasePrs（#4474）", () => {
+  it("閉じた作り直し候補が1ページを埋めても、次のページの完了リリースまで遡る", async () => {
+    const prs = [
+      ...Array.from({ length: 120 }, (_, i) => closedPr(500 - i, `release-main/v8.${i}`, false)),
+      closedPr(300, "release-main/v8.0.0", true),
+      closedPr(299, "release-main/v7.9.0", true),
+    ];
+    const fetchPage = pager(prs);
+    const found = await collectMergedReleasePrs(fetchPage, { floor: 0, enough: 1 });
+    expect(found.map((pr) => pr.number)).toEqual([300]);
+    expect(fetchPage).toHaveBeenCalledTimes(2);
+  });
+
+  it("floor以下の番号に達したら打ち切り、それより古いリリースは見ない", async () => {
+    const prs = [closedPr(50, "issue-1", true), closedPr(40, "release-main/v1.0.0", true)];
+    const found = await collectMergedReleasePrs(pager(prs), { floor: 45, enough: 1 });
+    expect(found).toEqual([]);
+  });
+
+  it("リリース以外のマージ済みPRや閉じただけの候補は数えず、enough件まで集める", async () => {
+    const prs = [
+      closedPr(9, "deploy-recovery/x", true),
+      closedPr(8, "release-main/v1.2.0", true),
+      closedPr(7, "release-main/v1.1.9", false),
+      closedPr(6, "release-main/v1.1.0", true),
+      closedPr(5, "release-main/v1.0.0", true),
+    ];
+    const found = await collectMergedReleasePrs(pager(prs), { floor: 0, enough: 2 });
+    expect(found.map((pr) => pr.number)).toEqual([8, 6]);
+  });
+
+  it("ページ数の上限で止まる", async () => {
+    const fetchPage = vi.fn(async (page: number) => Array.from({ length: 100 }, (_, i) => closedPr(100000 - page * 100 - i, "issue-1", true)));
+    const found = await collectMergedReleasePrs(fetchPage, { floor: 0, enough: 1, maxPages: 3 });
+    expect(found).toEqual([]);
+    expect(fetchPage).toHaveBeenCalledTimes(3);
+  });
+});
 
 describe("purgeCompletedRebuildEvents（#4420）", () => {
   beforeEach(() => {
