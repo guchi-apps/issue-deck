@@ -1,10 +1,12 @@
+import { randomUUID } from "node:crypto";
+
 import { Prisma, type SlackIntakeRequest } from "@prisma/client";
 
 import { executeConfirmedCard, handleChatMessage, type ChatUser } from "@/lib/chat/handlers";
 import { parseChatContext } from "@/lib/chat/store";
 import type { ChatConfirmCard, ChatContext } from "@/lib/chat/types";
 import { db } from "@/lib/db";
-import { createComment } from "@/lib/github/issues-api";
+import { createComment, fetchCommentsForIssue, fetchIssuesForRepo } from "@/lib/github/issues-api";
 import { findRepositoryByFullName } from "@/lib/github/issue-create-service";
 import { withUserGithubToken } from "@/lib/github/with-user-github-token";
 import { previewModeGuard } from "@/lib/preview-mode";
@@ -38,7 +40,7 @@ import { isAllowedLocation, resolveIssueDeckUser, type SlackConfig } from "@/lib
  *   ack後の処理が途中で止まった行は`resumeStalePendingRequests`が拾い直す
  * - **対象リポジトリが確定するまでIssueは作らない。** 確定は利用者が選択UIで押した`owner/repo`だけが正本
  * - 調査・Issue案づくりは既存のIssueDeck Chat（`handleChatMessage`）を呼ぶだけ。**作成は人が押す「この案で起案する」**
- *   で初めて走り、`confirmState`の`pending`→`done`を取れた1回だけ`executeConfirmedCard`を呼ぶ
+ *   で初めて走り、`confirmState`の`pending`→`queued`で確認済みの操作を保存し、既存更新を照合してから実行する
  * - 返信は全てBot名義・依頼者メンション付き（`postBotReply`）。失敗は⚠️と理由・再開方法を同じスレッドへ返す
  */
 
@@ -63,6 +65,10 @@ type StoredProposal = {
   card: IssueCard;
   /** 同一スレッドの別成果として分割するとき、分割元のIssue番号 */
   splitFrom: number | null;
+  /** 確認済みの追記先。ack前に保存して巡回でも同じ操作を再開する */
+  attachTo?: number | null;
+  /** 案ごとの外部更新識別子。分割案を作り直しても別の成果を誤って再利用しない */
+  confirmationId?: string;
 };
 
 type IssueRef = { repo: string; number: number; role: "primary" | "split" | "reused" };
@@ -91,7 +97,7 @@ function isUniqueViolation(error: unknown): boolean {
  * 受けた後、`investigating`は調査（AI）中。どれも処理が終わるまでこの値のまま残るので、処理していたプロセスが
  * 止まった行は`resumeStalePendingRequests`が拾い直す（ack前に書くのは`received`・`resuming`だけ）。
  */
-const PENDING_STATUSES = ["received", "resuming", "investigating"] as const;
+const PENDING_STATUSES = ["received", "resuming", "investigating", "confirming"] as const;
 type PendingStatus = (typeof PENDING_STATUSES)[number];
 /** この時間より長く`updatedAt`が動いていない行は、処理していたプロセスが止まったものとみなして拾い直す */
 const PENDING_STALE_MS: Record<PendingStatus, number> = {
@@ -99,6 +105,7 @@ const PENDING_STALE_MS: Record<PendingStatus, number> = {
   // 「再開」と調査は調査（AI）まで同じ処理で走るため、処理中の行を二重に拾わないよう長めに待つ
   resuming: 30 * 60_000,
   investigating: 30 * 60_000,
+  confirming: 30 * 60_000,
 };
 
 function isPendingStatus(status: string): status is PendingStatus {
@@ -234,9 +241,11 @@ export async function processPendingRequest(ctx: IntakeContext, requestId: strin
   if (claimed.count !== 1) return false;
   const current = { ...request, updatedAt: now };
   try {
-    if (current.status === "received") await startRequest(ctx, current);
+    if (current.status === "confirming") await runConfirmation(ctx, current);
+    else if (current.status === "received") await startRequest(ctx, current);
     else await resumeRequest(ctx, current);
   } catch (error) {
+    if (current.status === "confirming") throw error; // 外部更新の成否が不明でも回収対象から外さない
     // 失敗状態として残す（「再開」で続けられる）。ここも失敗したら待ち状態のまま残り、巡回が拾い直す
     await failRequest(ctx, current, "受付", error instanceof SlackApiError ? error.code : "受付の処理に失敗しました", {
       retryable: true,
@@ -665,7 +674,7 @@ async function cancelProposal(ctx: IntakeContext, request: SlackIntakeRequest): 
   await reply(ctx, request, "やめました。Issueは作っていません。");
 }
 
-/** 「この案で起案する」（`attachTo`があれば既存Issueへ追記）。**`pending`→`done`を取れた1回だけ**実行する */
+/** 「この案で起案する」（`attachTo`があれば既存Issueへ追記）。**`pending`→`queued`を取れた1回だけ**保存して実行する */
 async function confirmIssue(ctx: IntakeContext, request: SlackIntakeRequest, attachTo: number | null): Promise<void> {
   const guard = previewModeGuard();
   if (guard) {
@@ -684,11 +693,66 @@ async function confirmIssue(ctx: IntakeContext, request: SlackIntakeRequest, att
     });
     return;
   }
+  const queued = await queueConfirmation(request, attachTo);
+  if (!queued) return;
+  await runConfirmation(ctx, queued);
+}
+
+async function queueConfirmation(request: SlackIntakeRequest, attachTo: number | null): Promise<SlackIntakeRequest | null> {
+  const stored = proposalOf(request);
+  if (!stored || !request.selectedRepo) return null;
+  const proposal = JSON.parse(JSON.stringify({ ...stored, attachTo, confirmationId: stored.confirmationId ?? randomUUID() }));
   const claimed = await db.slackIntakeRequest.updateMany({
-    where: { id: request.id, confirmState: "pending" },
-    data: { confirmState: "done" },
+    where: { id: request.id, status: { in: ["awaiting_confirm", "failed"] }, confirmState: "pending" },
+    data: { status: "confirming", confirmState: "queued", proposal, failure: null },
   });
-  if (claimed.count !== 1) return;
+  return claimed.count === 1 ? { ...request, status: "confirming", confirmState: "queued", proposal } : null;
+}
+
+/** 起案確定だけはack前にDBへ保存する。戻り値undefinedは対象外、nullは無視、文字列は処理待ちの依頼ID。 */
+export async function acceptIssueConfirmation(config: SlackConfig, payload: SlackInteractionPayload): Promise<string | null | undefined> {
+  const action = payload.actions?.[0];
+  const actionId = action?.action_id ?? "";
+  if (actionId !== ACTION_ISSUE_CONFIRM && !actionId.startsWith(ACTION_ISSUE_ATTACH)) return undefined;
+  if (previewModeGuard()) return null;
+  const team = payload.team?.id, channel = payload.channel?.id, user = payload.user?.id;
+  if (!team || !channel || !user || !isAllowedLocation(config, team, channel)) return null;
+  const requestId = (action?.value ?? "").split(":")[0];
+  if (!requestId) return null;
+  const request = await db.slackIntakeRequest.findUnique({ where: { id: requestId } });
+  if (!request || request.teamId !== team || request.channelId !== channel || request.slackUserId !== user) return null;
+  const attachTo = actionId === ACTION_ISSUE_CONFIRM ? null : Number((action?.value ?? "").split(":")[1]);
+  if (attachTo !== null && (!Number.isInteger(attachTo) || attachTo <= 0)) return null;
+  return (await queueConfirmation(request, attachTo))?.id ?? null;
+}
+
+async function runConfirmation(ctx: IntakeContext, request: SlackIntakeRequest): Promise<void> {
+  try {
+    await performConfirmation(ctx, request);
+  } catch (error) {
+    const latest = await db.slackIntakeRequest.findUnique({ where: { id: request.id } });
+    if (latest?.status === "done") {
+      console.error(`[slack-intake] 保存済みの完了結果の通知に失敗しました request=${request.id}`, error);
+      return;
+    }
+    // GitHub側だけ成功した可能性がある。状態を残し、次の巡回でRESTから照合する。
+    await db.slackIntakeRequest.update({ where: { id: request.id }, data: { failure: "Issue確定の処理が中断しました。既存の更新を確認して再開します。" } });
+    console.error(`[slack-intake] Issue確定を再開待ちにします request=${request.id}`, error);
+    await reply(ctx, request, "⚠️ 起案確定の完了を確認できませんでした。依頼と確認した操作は保存済みです。30分以上停止した処理は巡回が既存Issue・コメントを確認して再開します。");
+  }
+}
+
+async function performConfirmation(ctx: IntakeContext, request: SlackIntakeRequest): Promise<void> {
+  const stored = proposalOf(request);
+  const repo = request.selectedRepo;
+  if (!stored || !repo || stored.card.repo !== repo) {
+    await failRequest(ctx, request, "Issue案の起案先確認", "選択したリポジトリと保存済みのIssue案の起案先が一致しません", { retryable: true, unfinished: "Issue案の作成", resume: RESUME_HINT });
+    return;
+  }
+  await db.slackIntakeRequest.update({ where: { id: request.id }, data: { confirmState: "processing" } });
+  const attachTo = stored.attachTo ?? null;
+  if (!stored.confirmationId) throw new Error("確認済み操作の識別子がありません");
+  const marker = `<!-- slack-intake-confirm: ${request.id}/${stored.confirmationId} -->`;
   const revert = () => db.slackIntakeRequest.update({ where: { id: request.id }, data: { confirmState: "pending" } });
 
   const user = await loadChatUser(request.userId);
@@ -703,40 +767,48 @@ async function confirmIssue(ctx: IntakeContext, request: SlackIntakeRequest, att
   }
 
   if (attachTo !== null) {
-    const ok = await appendComment(
-      ctx,
-      request,
-      { repo, number: attachTo, role: "reused" },
-      `Slackの依頼を既存Issueへの追記として受けました。\n\n${quote(request.text)}\n\n元投稿: ${request.permalink ?? "（取得できませんでした）"}\n${FOOTER_MARKER(request)}`,
-      "依頼内容",
-    );
-    if (!ok) await revert();
-    else
-      await db.slackIntakeRequest.update({
-        where: { id: request.id },
-        data: { status: "done", issues: [...issuesOf(request), { repo, number: attachTo, role: "reused" }] },
-      });
+    const [owner, name] = repo.split("/");
+    const comments = await withUserGithubToken(user, `slack-intake reconcile-comment ${repo}`, (token) => fetchCommentsForIssue(owner, name, attachTo, token));
+    if (!("value" in comments)) throw new Error("GitHubコメントの既存更新を確認できません");
+    const existing = comments.value.some((comment) => comment.body?.includes(marker));
+    if (!existing) {
+      const result = await withUserGithubToken(user, `slack-intake confirm-comment ${repo}`, (token) => createComment(owner, name, attachTo, token, {
+        body: `Slackの依頼を既存Issueへの追記として受けました。\n\n${quote(request.text)}\n\n元投稿: ${request.permalink ?? "（取得できませんでした）"}\n${FOOTER_MARKER(request)}\n${marker}`,
+      }));
+      if (!("value" in result)) throw new Error("GitHubへの追記結果を確認できません");
+    }
+    await db.slackIntakeRequest.update({
+      where: { id: request.id },
+      data: { status: "done", confirmState: "done", issues: [...issuesOf(request), { repo, number: attachTo, role: "reused" }] },
+    });
+    await setReaction(ctx.client, { channel: request.channelId, ts: request.parentTs, add: "white_check_mark", remove: "warning" });
+    await reply(ctx, request, `✅ 依頼を <https://github.com/${repo}/issues/${attachTo}|${repo}#${attachTo}> への追記として確認しました（新しいIssueは作っていません）。`);
     return;
   }
 
   const splitNote = stored.splitFrom
     ? `\n\n分割元: #${stored.splitFrom}（同一Slackスレッドで、既存Issueと独立して実装・検証できる別成果のため分割）`
     : "";
-  const body = `${stored.card.body}${splitNote}\n\n---\nSlackの元投稿: ${request.permalink ?? "（取得できませんでした）"}\n${FOOTER_MARKER(request)}`;
-  const outcome = await executeConfirmedCard(user, stored.card, { body });
+  const body = `${stored.card.body}${splitNote}\n\n---\nSlackの元投稿: ${request.permalink ?? "（取得できませんでした）"}\n${FOOTER_MARKER(request)}\n${marker}`;
+  const [owner, name] = repo.split("/");
+  // 検索索引・ローカルDBは遅延するため、closedを含むREST一覧から識別子を照合する。
+  const issues = await withUserGithubToken(user, `slack-intake reconcile-issue ${repo}`, (token) => fetchIssuesForRepo(owner, name, token));
+  if (!("value" in issues)) throw new Error("GitHub Issueの既存更新を確認できません");
+  const matches = issues.value.filter((issue) => issue.body?.includes(marker));
+  if (matches.length > 1) throw new Error("同じ起案操作に複数のIssueが対応しています");
+  const existing = matches[0];
+  const outcome = existing ? {
+    ok: true,
+    text: `Issue #${existing.number} の作成済み結果を回復しました。`,
+    action: { type: "create_issue", status: "created", repo, number: existing.number, at: new Date().toISOString(), message: "中断したSlack起案を回復" },
+  } : await executeConfirmedCard(user, stored.card, { body });
   if (!outcome.ok || outcome.action.number === null) {
-    await revert();
-    await failRequest(ctx, request, "GitHubへのIssue作成", outcome.text.slice(0, 300), {
-      retryable: true,
-      unfinished: "Issueの作成",
-      resume: "もう一度「この案で起案する」を押してください（押し直せます）。",
-    });
-    return;
+    throw new Error(outcome.text.slice(0, 300));
   }
   const created: IssueRef = { repo, number: outcome.action.number, role: stored.splitFrom ? "split" : "primary" };
   await db.slackIntakeRequest.update({
     where: { id: request.id },
-    data: { status: "done", issues: [...issuesOf(request), created] },
+    data: { status: "done", confirmState: "done", issues: [...issuesOf(request), created] },
   });
   if (request.conversationId) {
     const latest = await db.chatConversation.findUnique({ where: { id: request.conversationId } });
