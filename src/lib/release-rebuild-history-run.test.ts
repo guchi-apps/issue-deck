@@ -1,7 +1,20 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-const { findMany, deleteMany } = vi.hoisted(() => ({ findMany: vi.fn(), deleteMany: vi.fn() }));
-vi.mock("@/lib/db", () => ({ db: { releaseRebuildEvent: { findMany, deleteMany } } }));
+const { findMany, deleteMany, aggregate, repositoryFindFirst, cutoffFindUnique, cutoffUpsert } = vi.hoisted(() => ({
+  findMany: vi.fn(),
+  deleteMany: vi.fn(),
+  aggregate: vi.fn(),
+  repositoryFindFirst: vi.fn(),
+  cutoffFindUnique: vi.fn(),
+  cutoffUpsert: vi.fn(),
+}));
+vi.mock("@/lib/db", () => ({
+  db: {
+    releaseRebuildEvent: { findMany, deleteMany, aggregate },
+    repository: { findFirst: repositoryFindFirst },
+    releaseRebuildHistoryCutoff: { findUnique: cutoffFindUnique, upsert: cutoffUpsert },
+  },
+}));
 vi.mock("@/lib/github/app-auth", () => ({ getInstallationToken: vi.fn() }));
 vi.mock("@/lib/github/release-api", () => ({
   fetchOpenPullRequestsForBase: vi.fn(),
@@ -11,7 +24,8 @@ vi.mock("@/lib/github/release-api", () => ({
 vi.mock("@/lib/github/pull-requests-api", () => ({ CLOSED_PAGED_PER_PAGE: 100, fetchClosedPullRequestsForBasePage: vi.fn() }));
 
 import type { GithubApiOpenPullRequest } from "@/lib/github/pull-requests-api";
-import { collectMergedReleasePrs, purgeCompletedRebuildEvents } from "./release-rebuild-history-run";
+import { fetchClosedPullRequestsForBasePage } from "@/lib/github/pull-requests-api";
+import { collectMergedReleasePrs, purgeCompletedRebuildEvents, sweepCompletedRebuildHistory } from "./release-rebuild-history-run";
 
 function closedPr(number: number, ref: string, merged: boolean): GithubApiOpenPullRequest {
   return { number, merged_at: merged ? "2026-10-01T00:00:00Z" : null, head: { ref, sha: `s${number}` } } as GithubApiOpenPullRequest;
@@ -78,5 +92,19 @@ describe("purgeCompletedRebuildEvents（#4420）", () => {
     expect(count).toBe(2);
     expect(deleteMany).toHaveBeenCalledWith({ where: { id: { in: ["a1", "a2"] } } });
     expect(findMany.mock.calls[0][0].where).toEqual({ repositoryFullName: "guchi-apps/x", originPrNumber: { lte: 12 } });
+  });
+});
+
+describe("sweepCompletedRebuildHistory（#4488）", () => {
+  it("残る履歴の最小の元候補がマージ済みリリースPRそのものでも、境界として判定する", async () => {
+    repositoryFindFirst.mockResolvedValue({ ownerLogin: "o", name: "r", installation: { installationId: 1 } });
+    cutoffFindUnique.mockResolvedValue(null);
+    aggregate.mockResolvedValue({ _min: { originPrNumber: 100 } });
+    findMany.mockResolvedValue([]);
+    deleteMany.mockResolvedValue({ count: 0 });
+    vi.mocked(fetchClosedPullRequestsForBasePage).mockResolvedValue([closedPr(100, "release-main/v1.0.0", true)]);
+    const result = await sweepCompletedRebuildHistory("o/r");
+    expect(result.completedThrough).toBe(100);
+    expect(cutoffUpsert).toHaveBeenCalledWith(expect.objectContaining({ create: { repositoryFullName: "o/r", completedThroughPrNumber: 100 } }));
   });
 });

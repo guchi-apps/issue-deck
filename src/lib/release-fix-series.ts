@@ -466,6 +466,67 @@ export function decideReverification(input: {
   return "ready";
 }
 
+/**
+ * 旧い巡回が再検証の失敗で一律に止めたときの停止理由（#4478より前）。この理由で止まった系列は、
+ * 巡回が再評価して同じ修正Issueの次世代へ戻す。
+ */
+export function isLegacyReverificationStopReason(reason: string | null | undefined): boolean {
+  return reason != null && /の再検証で指摘・失敗が残りました（世代 \d+）/.test(reason);
+}
+
+export type ReverificationFollowUp =
+  /** 通常の追加指摘。同じ修正Issueの次世代として自動で続ける */
+  | { action: "continue"; sourceKind: ReleaseFixSourceKind }
+  /** 実行障害の疑い。コードの不具合と断定せず、起案せずに再実行（既存の機構）を待つ */
+  | { action: "wait_rerun"; reason: string }
+  /** 本人の判断・操作が要る。理由は具体的に書く */
+  | { action: "human"; reason: string };
+
+type ReverificationSectionInput = {
+  state: string;
+  reason: string | null;
+  summary: string | null;
+  findingCount: number;
+};
+
+/**
+ * 再検証で修正が要ると判定された（`decideReverification`が`needs_fix`）あとの扱いを、
+ * 失敗というだけで本人確認にせず区別する（#4478）。
+ *
+ * - 全体レビューの指摘（`needs_check`で指摘あり）→ 全件を`review_finding`として継続
+ * - 全体レビューの実行失敗（`failed`）→ 実行障害。起案しない
+ * - 統合検証の失敗 → 本文から実行障害（待つ）／コード（継続）／判断不能（本人）に分ける
+ * - 指摘が読み取れない`needs_check` → 起案する対象が無いため本人へ
+ */
+export function decideReverificationFollowUp(input: {
+  integration: ReverificationSectionInput;
+  aiReview: ReverificationSectionInput;
+}): ReverificationFollowUp {
+  const { integration, aiReview } = input;
+  if (aiReview.state === "needs_check" && aiReview.findingCount > 0) {
+    return { action: "continue", sourceKind: "review_finding" };
+  }
+  const integrationBroken = integration.state === "failed" || integration.state === "needs_check";
+  if (integrationBroken) {
+    const kind = classifyIntegrationFailure([integration.reason, integration.summary].filter(Boolean).join("\n"));
+    if (kind === "code") return { action: "continue", sourceKind: "integration_failure" };
+    if (kind === "execution") {
+      return { action: "wait_rerun", reason: "統合検証が実行障害の疑いで失敗しています。コードの不具合と断定できないため、修正Issueは作らず再実行を待ちます" };
+    }
+    return {
+      action: "human",
+      reason: "統合検証の失敗がコードの不具合か実行障害か判別できません。証跡を確認し、再実行するか、画面から修正Issueを起案してください",
+    };
+  }
+  if (aiReview.state === "failed") {
+    return { action: "wait_rerun", reason: "全体レビューが実行障害で完了していません。修正Issueは作らず再実行を待ちます" };
+  }
+  return {
+    action: "human",
+    reason: "全体レビューが確認を求めていますが、起案できる指摘が読み取れません。レビュー結果を確認し、必要なら画面から修正Issueを起案してください",
+  };
+}
+
 /** 次の世代を起案できるか。上限・同一問題の再発で止める（無限にIssueや候補を増やさない） */
 export function canStartNextGeneration(input: {
   generation: number;

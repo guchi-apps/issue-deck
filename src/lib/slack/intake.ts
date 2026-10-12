@@ -79,6 +79,11 @@ export async function claimEvent(key: string, messageTs: string | null): Promise
   }
 }
 
+/** 処理に失敗したイベントの処理済み記録を外す。再送が来たとき、`duplicate`で恒久的に捨てずに再処理できるようにする */
+export async function releaseEvent(key: string): Promise<void> {
+  await db.slackProcessedEvent.deleteMany({ where: { eventKey: key.slice(0, 160) } });
+}
+
 function issuesOf(request: SlackIntakeRequest): IssueRef[] {
   return Array.isArray(request.issues) ? (request.issues as IssueRef[]) : [];
 }
@@ -165,8 +170,17 @@ export async function handleNewRequest(ctx: IntakeContext, teamId: string, event
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") return;
     throw error;
   }
-  await setReaction(client, { channel: event.channel, ts: event.ts, add: "eyes" });
-  await postSelector(ctx, request);
+  // 依頼の行を作ったあとの失敗は、握り潰さず失敗状態として残す（「再開」で続けられる）
+  try {
+    await setReaction(client, { channel: event.channel, ts: event.ts, add: "eyes" });
+    await postSelector(ctx, request);
+  } catch (error) {
+    await failRequest(ctx, request, "受付", error instanceof SlackApiError ? error.code : "受付の処理に失敗しました", {
+      retryable: true,
+      unfinished: "対象リポジトリの選択",
+      resume: RESUME_HINT,
+    });
+  }
 }
 
 async function postSelector(ctx: IntakeContext, request: SlackIntakeRequest): Promise<void> {

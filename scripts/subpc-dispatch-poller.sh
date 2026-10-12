@@ -1647,8 +1647,11 @@ sweep_dependency_waits() {
 
 # リリース候補の修正系列（#4317）を進める。修正PRのdevelop取り込みの観測・候補の作り直し・
 # 新しいSHAでの再検証の判定はissue-deck側が持ち、ここは呼ぶだけにする。
+# 再検証の追加指摘で次世代の修正Issueへ戻したときは、実装をこのホストで起動するためホスト名を渡す（#4478）。
 sweep_release_fix_series() {
-  if ! api_call POST /api/repositories/release/fix-series/sweep '{}'; then
+  local payload
+  payload="$(jq -n --arg host "$HOST_NAME" '{host: $host}')"
+  if ! api_call POST /api/repositories/release/fix-series/sweep "$payload"; then
     case "$API_RESPONSE_STATUS" in
       404|000) return 0 ;;
       *) report_api_failure "リリース候補の修正系列の巡回に失敗しました" ;;

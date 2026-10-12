@@ -1,6 +1,6 @@
 import { after, NextResponse, type NextRequest } from "next/server";
 
-import { claimEvent, handleMessageEvent, type SlackMessageEvent } from "@/lib/slack/intake";
+import { claimEvent, handleMessageEvent, releaseEvent, type SlackMessageEvent } from "@/lib/slack/intake";
 import { authenticateSlackRequest } from "@/lib/slack/route-helpers";
 
 type EventPayload = {
@@ -34,6 +34,10 @@ export async function POST(request: NextRequest) {
       await handleMessageEvent(auth.ctx, teamId, event);
     } catch (error) {
       console.error("[slack-intake] イベントの処理に失敗しました", error);
+      // 処理済みのまま残すと、再送されたイベントが`duplicate`で恒久的に捨てられる。外して再処理できる状態に戻す
+      await releaseEvent(`event:${eventId}`).catch((releaseError) =>
+        console.error("[slack-intake] 処理済み記録を外せませんでした", releaseError),
+      );
     }
   });
   return NextResponse.json({ ok: true });
