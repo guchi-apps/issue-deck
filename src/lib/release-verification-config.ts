@@ -130,6 +130,13 @@ export const RELEASE_VERIFICATION_REPOS: Readonly<Record<string, ReleaseVerifica
     stack: "Node（npm）",
     integrationCommands: [NPM_CI, "npm run lint", "npx tsc --noEmit", "npm test", "npm run build"],
   },
+  "guchi-apps/pi0w": {
+    enforced: false,
+    stack: "Python（オフライン検証。ARMv6実機確認は別途）",
+    integrationCommands: [
+      "python3 -m venv .venv && . .venv/bin/activate && python -m pip install -r requirements-ci.txt && bash scripts/verify.sh",
+    ],
+  },
   "guchi-apps/signaly": {
     enforced: false,
     stack: "Python（unittest）",
