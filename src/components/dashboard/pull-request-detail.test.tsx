@@ -356,6 +356,85 @@ describe("PullRequestDetail", () => {
     expect(screen.getByRole("button", { name: /レビュー要修正/ })).toBeTruthy();
   });
 
+  // #4482: #4459相当（CI成功・競合なし・最新HEADのneeds-check・ユーザーのマージが必要）。
+  // 原因と「指摘に対応する」を先に出し、マージだけを強調しない。押すと指摘タブの対応パネルへ進む
+  it("レビュー要確認では「指摘に対応する」を主操作にし、マージ案内は詳細へ畳む", () => {
+    const pullRequest = makePullRequest({
+      mergeable: true,
+      linkedIssueCheckUser: true,
+      mergeJudgement: { state: "settled", step: null, runUrl: null, aiReview: { state: "passed", runUrl: null } },
+      reviewVerdict: {
+        reviewKind: "needs-check",
+        reviewLabel: "要確認",
+        riskKind: "none",
+        riskLabel: "",
+        riskReasons: [],
+        confirmLabel: null,
+        reviewedSha: "1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b",
+      },
+    });
+    renderDetail({
+      pullRequest,
+      detail: makeDetail({
+        summary: pullRequest,
+        events: [
+          makeEvent({
+            body: "## 気になった点\n1. Issueの要件が未達です\n\n<!-- issue-deck-review-verdict:needs-check sha=1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b -->",
+          }),
+        ],
+        reviewResponse: { issueNumber: 1087, linkedIssueLocal: false, currentFixRequest: null, fetchFailed: false },
+      }),
+    });
+
+    const primary = within(screen.getByTestId("pull-request-primary-action"));
+    expect(primary.getByText("レビュー要確認")).toBeTruthy();
+    expect(primary.getByText("Issueの要件が未達です")).toBeTruthy();
+    const respond = primary.getByRole("button", { name: "指摘に対応する" });
+    expect(respond.getAttribute("data-variant")).toBe("default");
+    expect(primary.getByRole("button", { name: "マージする" }).getAttribute("data-variant")).toBe("outline");
+    // 「ユーザーのマージが必要です」は詳細の中へ畳み、指摘への対応より先に並べない
+    expect(primary.getByText("マージについて（詳細）")).toBeTruthy();
+
+    fireEvent.click(respond);
+    const panel = within(screen.getByTestId("pull-request-review-response"));
+    expect(panel.getByRole("button", { name: "AIに修正を依頼" })).toBeTruthy();
+    expect(panel.getByRole("textbox", { name: "修正の方針（任意）" })).toBeTruthy();
+    expect(panel.getByRole("button", { name: "マージ確認へ進む" })).toBeTruthy();
+  });
+
+  it("修正を依頼済みのときは「修正を依頼済み」で、依頼ボタンを出さない", () => {
+    const pullRequest = makePullRequest({
+      mergeable: true,
+      reviewVerdict: {
+        reviewKind: "needs-check",
+        reviewLabel: "要確認",
+        riskKind: "none",
+        riskLabel: "",
+        riskReasons: [],
+        confirmLabel: null,
+        reviewedSha: "1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b",
+      },
+    });
+    renderDetail({
+      pullRequest,
+      detail: makeDetail({
+        summary: pullRequest,
+        reviewResponse: {
+          issueNumber: 1087,
+          linkedIssueLocal: false,
+          currentFixRequest: { commentUrl: "https://github.com/x", createdAt: "2026-08-01T03:00:00Z" },
+          fetchFailed: false,
+        },
+      }),
+    });
+    const primary = within(screen.getByTestId("pull-request-primary-action"));
+    expect(primary.getByText("修正を依頼済み")).toBeTruthy();
+    expect(primary.queryByRole("button", { name: "指摘に対応する" })).toBeNull();
+    openTab("指摘");
+    expect(screen.queryByRole("button", { name: "AIに修正を依頼" })).toBeNull();
+    expect(screen.getByText("◷ 修正を依頼済みです")).toBeTruthy();
+  });
+
   it("CI失敗とレビュー要修正が同時でも、修復入口は1つだけで、マージ操作は主要CTAにしない", () => {
     renderDetail({
       pullRequest: makePullRequest({
@@ -528,6 +607,11 @@ describe("PullRequestDetail", () => {
 
     renderDetail({ pullRequest: makePullRequest({ draft: true }) });
     expect(screen.queryByRole("button", { name: "マージする" })).toBeNull();
+    // ドラフトの主操作は「レビュー可能にする」（#4453）。通常のPRには出さない
+    expect(screen.getByRole("button", { name: "レビュー可能にする" })).toBeTruthy();
+    cleanup();
+    renderDetail();
+    expect(screen.queryByRole("button", { name: "レビュー可能にする" })).toBeNull();
   });
 
   it("取得に失敗したときはエラーを表示する", () => {
@@ -654,6 +738,8 @@ describe("PullRequestDetail", () => {
       renderDetail({ pullRequest: release() });
       expect(screen.getByText(/本番PR/)).toBeTruthy();
       expect(screen.getByRole("heading", { level: 1 }).textContent).toContain("v8.54.0をmainへリリースする");
+      // 正式タイトルは本文内で1回だけ（#4463）
+      expect(screen.getAllByText(/v8\.54\.0をmainへリリースする/)).toHaveLength(1);
       const overview = screen.getByTestId("release-overview-stub");
       const history = screen.getByText("詳細・履歴");
       expect(overview.compareDocumentPosition(history) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();

@@ -169,12 +169,10 @@ export function ReleasePullRequestOverview({
 
   return (
     <div className="flex flex-col gap-3 border-b px-4 py-4 text-xs" data-testid="release-pull-request-overview">
-      <div className="flex min-w-0 flex-col gap-0.5">
-        <h2 className="break-words text-xl leading-snug font-bold sm:text-2xl">{pullRequest.title}</h2>
-        <p className="break-words text-xs text-muted-foreground">
-          {repositoryFullName} ・ {headRef} → {pullRequest.baseRef}
-        </p>
-      </div>
+      {/* 正式タイトルとリポジトリ名は共通詳細の見出しが持つ（#4463）。ここはブランチ情報だけを出す */}
+      <p className="break-words text-xs text-muted-foreground">
+        {headRef} → {pullRequest.baseRef}
+      </p>
 
       <section aria-label="現在の状態と次の操作" className="rounded-[10px] border bg-card p-3.5 text-sm">
         <ReleaseFixSummary

@@ -3,17 +3,19 @@ import { fetchWorkflowJobLogs, fetchWorkflowRun, fetchWorkflowRunJobs } from "@/
 import { getInstallationToken } from "@/lib/github/app-auth";
 import { fetchCommentsForIssue, fetchIssueLabelNames, removeIssueLabel } from "@/lib/github/issues-api";
 import { fetchAllPages } from "@/lib/github/pagination";
+import { fetchClosedPullRequestsForBasePage } from "@/lib/github/pull-requests-api";
 import { queryIssuesByProgressStatus } from "@/lib/github/query-progress";
 import { GITHUB_API } from "@/lib/github/request";
 import {
   CHECK_USER,
   extractErrorExcerpt,
   findFailedStep,
+  findSupersedingReleasePr,
   releaseFailureDerivedLabels,
   type IssueLabelEvent,
   type ReleasePreparationFailureView,
 } from "@/lib/release-preparation";
-import { observeRebuildSuccessor } from "@/lib/release-rebuild-history-run";
+import { collectMergedReleasePrs, observeRebuildSuccessor } from "@/lib/release-rebuild-history-run";
 import { markRebuildRequestFailed } from "@/lib/release-rebuild-selection-run";
 import { parseRebuildSelection, serializeRebuildSelection } from "@/lib/release-rebuild-selection";
 import { isBumpKind } from "@/lib/semver-bump";
@@ -188,6 +190,62 @@ async function clearReleaseFailureLabels(
     }
   }
   return cleared;
+}
+
+const FROZEN_RELEASE_PREFIX = "release-main/v";
+
+/**
+ * 未解決の失敗を、後続のリリース成功（本番PRのマージ）と照合して解決にする（#4450）。
+ * `notify-prepared`が届かない・別経路（競合修復済みの候補など）で本番公開された場合の整合用で、
+ * コールバックだけに依存しない。**記録は削除せず`resolved`にするだけ**（保持・削除の方針は変えない）。
+ * GitHubから取得できないときは解決しない（取得不能を解決済みとして扱わない）。
+ */
+export async function reconcileReleasePreparationFailures(repositoryFullName: string): Promise<number> {
+  try {
+    const open = await db.releasePreparationFailure.findMany({ where: { repositoryFullName, status: "open" } });
+    if (open.length === 0) return 0;
+    const context = await resolveRepository(repositoryFullName);
+    if (!context) return 0;
+    const origins = open.map((row) => parseRebuildSelection(row.rebuildSelection)?.origin.pr ?? 1);
+    const closed = await collectMergedReleasePrs(
+      (page) => fetchClosedPullRequestsForBasePage(context.owner, context.repo, "main", context.token, page),
+      { floor: Math.max(0, Math.min(...origins) - 1), enough: Number.MAX_SAFE_INTEGER },
+    );
+    const mergedReleasePrs = closed
+      .filter((pr) => pr.merged_at !== null && pr.head.ref.startsWith(FROZEN_RELEASE_PREFIX))
+      .map((pr) => ({ number: pr.number, mergedAt: pr.merged_at as string, htmlUrl: pr.html_url }));
+    let resolved = 0;
+    for (const row of open) {
+      const superseding = findSupersedingReleasePr({
+        failureCreatedAt: row.createdAt.toISOString(),
+        originPr: parseRebuildSelection(row.rebuildSelection)?.origin.pr ?? null,
+        mergedReleasePrs,
+      });
+      if (!superseding) continue;
+      // 画面を開いた間に別経路で更新（再実行の報告）されていたら消さない
+      const { count } = await db.releasePreparationFailure.updateMany({
+        where: { id: row.id, status: "open", updatedAt: row.updatedAt },
+        data: { status: "resolved", resolvedAt: new Date(), resolvedRunUrl: superseding.htmlUrl },
+      });
+      resolved += count;
+    }
+    return resolved;
+  } catch (error) {
+    console.error(`[release-preparation] 失敗の再照合に失敗しました（${repositoryFullName}）`, error);
+    return 0;
+  }
+}
+
+/** 巡回用: 未解決の失敗を持つ全リポジトリを再照合する */
+export async function reconcileAllReleasePreparationFailures(): Promise<number> {
+  const rows = await db.releasePreparationFailure.findMany({
+    where: { status: "open" },
+    distinct: ["repositoryFullName"],
+    select: { repositoryFullName: true },
+  });
+  let resolved = 0;
+  for (const { repositoryFullName } of rows) resolved += await reconcileReleasePreparationFailures(repositoryFullName);
+  return resolved;
 }
 
 /** 画面に出す未解決の失敗（新しい順の先頭1件） */

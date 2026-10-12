@@ -3,6 +3,7 @@
 import { ExternalLink } from "lucide-react";
 import { useCallback, useContext, useEffect, useState, type ReactNode } from "react";
 
+import { ReleaseCompletionPanel } from "@/components/dashboard/release-completion-panel";
 import { ReleaseFixStartContext } from "@/components/dashboard/release-fix-start-context";
 import { useReferenceNavigation } from "@/hooks/use-reference-navigation";
 import type { UseReleaseChangesResult } from "@/hooks/use-release-changes";
@@ -309,6 +310,9 @@ export function toOverviewChecks(verification: ReleaseVerificationSummary | null
 /** `useReleaseFixOverview`が返す、要約帯・今回の変更・修正履歴の材料（#4398・#4428） */
 export type ReleaseFixOverviewState = {
   repositoryFullName: string;
+  pullRequestNumber: number;
+  /** 検証の対象（現在のbase・head）。取得前はnull。「リリース完了まで進める」の開始で使う（#4480） */
+  target: { baseSha: string; headSha: string } | null;
   overview: FixOverview;
   /** 表示する修正系列（進行中を優先）。修正の記録が無ければnull */
   current: ReleaseFixSeriesView | null;
@@ -415,7 +419,18 @@ export function useReleaseFixOverview({
     addedPrNumbers: episode?.selectedPrs.map((p) => p.number) ?? [],
     excludedPrNumbers: episode?.excludedPrs ?? [],
   });
-  return { repositoryFullName, overview, current, list, error, contents, previousResults, acceptExtra };
+  return {
+    repositoryFullName,
+    pullRequestNumber,
+    target: verification?.target ?? null,
+    overview,
+    current,
+    list,
+    error,
+    contents,
+    previousResults,
+    acceptExtra,
+  };
 }
 
 /**
@@ -591,6 +606,12 @@ export function ReleaseFixSummary({
       {overview.checksLine && <p className="break-words text-muted-foreground">{overview.checksLine}</p>}
       {showPhases && current && current.status !== "superseded" && <ReleaseFixPhases current={current} className="mt-0.5" />}
       {current && current.status !== "superseded" && <ReleaseFixInternalReview current={current} />}
+      <ReleaseCompletionPanel
+        repositoryFullName={state.repositoryFullName}
+        pullRequestNumber={state.pullRequestNumber}
+        target={state.target}
+        canStart={overview.tone === "bad" || current !== null}
+      />
       {error && <p className="text-destructive">{error}</p>}
       {overview.action.kind !== "none" ? <ReleaseFixPrimaryAction state={state} /> : extraAction}
     </div>

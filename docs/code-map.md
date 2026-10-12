@@ -4636,6 +4636,7 @@ Webhookで取り込む。運用・移行・ロールバックは[backup-ci.md](b
 - 一覧（`pull-request-list.tsx`）の行は「リポジトリ・番号 → タイトル → 代表状態と理由（＋自動マージ保留）→ 6チェック → 詳細への導線」。**マージ・自動修正の操作は一覧に置かず**、詳細の主操作帯へ集約した。
 - 詳細（`pull-request-detail.tsx`）は「短い固定ヘッダー → 本文内の全文タイトル → 主操作帯（状態・理由・自動修正・マージ・保留・デプロイ）→ 6チェック → 補足の属性 → タブ（概要／指摘／変更ファイル／活動）」。CI・レビューの根拠は「指摘」タブ、バックアップCIは「概要」の補足。
 - 6チェック（`pull-request-merge-checks.tsx`）は`grouped`で「このPR（CI・コード・競合）」「リリース候補（全体・統合・Mac）」に分ける。ブランチ画面・本番マージ確認は従来の1列表示（`grouped`省略）のまま。
+- **ドラフトPRは詳細の主操作帯の「レビュー可能にする」で解除する（#4453）。** 一覧は理由の文言で案内するだけで、状態は変えない。`POST /api/pull-requests/ready-for-review`が**操作の直前にGitHubから現在のPRを取り直し**、`decideReadyForReview`（[`lib/pull-request-ready-for-review.ts`](../src/lib/pull-request-ready-for-review.ts)）でopen・head SHA一致・draftを確かめてから、Node IDで`markPullRequestReadyForReview`（GraphQL）を1回だけ実行する。既にレビュー可能なら**mutationを撃たず**成功（`alreadyReady`）で返して画面に取り直させる。closed/merged・head変更は409、権限不足は403（`permission_denied`）で、いずれも成功扱いにせず日本語の理由を出す。解除後のマージ条件・確認ダイアログ・ブランチ保護は迂回しない。
 
 ### VPSメモリの自動計測（#4256）
 

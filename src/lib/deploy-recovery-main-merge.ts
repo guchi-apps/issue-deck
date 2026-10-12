@@ -148,6 +148,65 @@ export function decideRecoveryMainMerge(
   return { action: "merge" };
 }
 
+export type ManualRecoveryReleaseObservation = {
+  now: Date;
+  pullRequest: {
+    number: number;
+    state: "open" | "closed";
+    merged: boolean;
+    baseRef: string;
+    headSha: string;
+    /** マージコミットのSHA。マージ済みで取得できなければnull */
+    mergeCommitSha: string | null;
+  } | null;
+  /** 復旧PRの変更ファイル。取得できなければnull */
+  files: { names: readonly string[]; truncated: boolean } | null;
+};
+
+export type ManualRecoveryReleaseDecision =
+  | { action: "wait"; reason: string }
+  /** 紐付けを外して人の対応に戻す。理由は画面・履歴に残す */
+  | { action: "unlink"; reason: string }
+  | { action: "release"; mergeSha: string };
+
+/**
+ * 人が手動の復旧（「既存の修正PRを選んで復旧」）で作って**人がマージした**復旧PRを、本番反映の追跡へ
+ * つないでよいかの判定（#4451）。人がマージするので自動マージの権限（`fix_until_main`）は要らないが、
+ * **記録した復旧PR1本の、記録したHEADと差分だけ**を対象にする。別のPR・HEADが動いたもの・差分が
+ * 増えたものは、承認範囲外としてつながない。
+ */
+export function decideManualRecoveryRelease(
+  series: Pick<
+    RecoveryMergeSeries,
+    "status" | "expiresAt" | "stoppedAt" | "recoveryPullRequestNumber" | "recoveryHeadSha" | "recoveryFiles"
+  >,
+  observation: ManualRecoveryReleaseObservation,
+): ManualRecoveryReleaseDecision {
+  if (series.status !== "awaiting_release" || series.recoveryPullRequestNumber === null || !series.recoveryHeadSha) {
+    return { action: "wait", reason: "not_linked" };
+  }
+  if (series.stoppedAt !== null) return { action: "unlink", reason: "stopped_by_user" };
+  if (observation.now.getTime() >= series.expiresAt.getTime()) return { action: "unlink", reason: "timed_out" };
+  const pull = observation.pullRequest;
+  if (pull === null) return { action: "wait", reason: "pull_request_unobserved" };
+  if (pull.number !== series.recoveryPullRequestNumber || pull.baseRef !== "main") {
+    return { action: "unlink", reason: "recovery_pull_request_mismatch" };
+  }
+  if (!pull.merged) {
+    return pull.state === "closed" ? { action: "unlink", reason: "recovery_pull_request_closed" } : { action: "wait", reason: "open" };
+  }
+  if (pull.headSha !== series.recoveryHeadSha) return { action: "unlink", reason: "head_changed" };
+  const files = observation.files;
+  if (files === null) return { action: "wait", reason: "files_unobserved" };
+  if (files.truncated || files.names.length >= DEPLOY_RECOVERY_PULL_FILES_LIMIT) {
+    return { action: "unlink", reason: "diff_out_of_scope" };
+  }
+  const allowed = new Set(series.recoveryFiles);
+  if (files.names.some((name) => !allowed.has(name))) return { action: "unlink", reason: "diff_out_of_scope" };
+  if (!pull.mergeCommitSha) return { action: "wait", reason: "merge_commit_unobserved" };
+  return { action: "release", mergeSha: pull.mergeCommitSha };
+}
+
 export function recoveryMergeStopMessage(reason: string, detail: string | null): string {
   const suffix = detail ? `（${detail}）` : "";
   switch (reason) {

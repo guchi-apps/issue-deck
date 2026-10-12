@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 
 import { authorizeDispatch } from "@/lib/dispatch/dispatch-auth";
 import { previewModeGuard } from "@/lib/preview-mode";
+import { reconcileAllReleasePreparationFailures } from "@/lib/release-preparation-run";
 import { sweepAllCompletedRebuildHistory } from "@/lib/release-rebuild-history-run";
 
 /**
@@ -16,8 +17,11 @@ export async function POST(request: NextRequest) {
   if (auth === "not_configured") return NextResponse.json({ error: "not_configured" }, { status: 503 });
   if (auth === "unauthorized") return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   try {
+    const history = await sweepAllCompletedRebuildHistory();
+    // 履歴の有無と無関係に、後続のリリース成功で解消済みの準備失敗を解決へ倒す（#4450）
+    const resolvedFailures = await reconcileAllReleasePreparationFailures();
     return NextResponse.json(
-      { ok: true, ...(await sweepAllCompletedRebuildHistory()) },
+      { ok: true, ...history, resolvedFailures },
       { headers: { "Cache-Control": "no-store" } },
     );
   } catch (error) {

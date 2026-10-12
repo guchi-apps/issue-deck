@@ -365,7 +365,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 8.55.6;
+				MARKETING_VERSION = 8.56.3;
 				PRODUCT_BUNDLE_IDENTIFIER = com.gucchii.issuedeck;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -402,7 +402,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 8.55.6;
+				MARKETING_VERSION = 8.56.3;
 				PRODUCT_BUNDLE_IDENTIFIER = com.gucchii.issuedeck;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -430,7 +430,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 8.55.6;
+				MARKETING_VERSION = 8.56.3;
 				PRODUCT_BUNDLE_IDENTIFIER = com.gucchii.issuedeck.ShareExtension;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
@@ -458,7 +458,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 8.55.6;
+				MARKETING_VERSION = 8.56.3;
 				PRODUCT_BUNDLE_IDENTIFIER = com.gucchii.issuedeck.ShareExtension;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;

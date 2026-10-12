@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, type CSSProperties } from "react";
-import { ExternalLink, RefreshCw, Wrench } from "lucide-react";
+import { ExternalLink, MessageSquareText, RefreshCw, Wrench } from "lucide-react";
 import { showsPullRequestFixIssueButton } from "@/lib/github/pull-request-release-fix-issue";
 
 import { DeployFailureAlert } from "@/components/dashboard/deploy-failure-alert";
@@ -24,11 +24,16 @@ import { PullRequestChecksStrip } from "@/components/dashboard/pull-request-chec
 import { PullRequestAiReviewJobs } from "@/components/dashboard/pull-request-ai-review-jobs";
 import { PullRequestFileList } from "@/components/dashboard/pull-request-file-list";
 import { PullRequestReviewRound } from "@/components/dashboard/pull-request-review-round";
+import { PullRequestReadyButton } from "@/components/dashboard/pull-request-ready-button";
 import { PullRequestMergeButton } from "@/components/dashboard/pull-request-merge-button";
 import { PullRequestMergeHoldNotice } from "@/components/dashboard/pull-request-merge-hold";
 import { PullRequestRepairButtons } from "@/components/dashboard/pull-request-repair-buttons";
 import { PullRequestBackupCi } from "@/components/dashboard/pull-request-backup-ci";
 import { PullRequestReviewFindings } from "@/components/dashboard/pull-request-review-findings";
+import {
+  PullRequestReviewResponse,
+  REVIEW_RESPONSE_ANCHOR_ID,
+} from "@/components/dashboard/pull-request-review-response";
 import {
   isOpenReleaseCandidate,
   ReleasePullRequestOverview,
@@ -47,6 +52,7 @@ import { repairKindsFor } from "@/lib/github/pull-request-repair";
 import { parseReleaseVerification, type ReleaseVerificationRow } from "@/lib/github/release-verification";
 import { canMergeFromDeck, RELEASE_BRANCH_PREFIX, requiresUserMerge } from "@/lib/pull-request-list";
 import { derivePrimaryState, type PrimaryStateTone } from "@/lib/pull-request-primary-state";
+import { applyReviewAction, deriveReviewAction } from "@/lib/pull-request-review-action";
 import { cn } from "@/lib/utils";
 import type {
   PullRequestSummary,
@@ -300,11 +306,24 @@ export function PullRequestDetail({
       )
     : null;
 
-  const primary = derivePrimaryState(pullRequest);
+  // レビュー指摘への対応（#4482）。上部と指摘タブの対応パネルは、同じこの結果から作る
+  const reviewAction = deriveReviewAction({ pullRequest, review, context: currentDetail?.reviewResponse });
+  const primary = applyReviewAction(derivePrimaryState(pullRequest), reviewAction);
+  // 指摘への対応・修正が残っている間は「マージする」を主操作にせず、マージの説明は詳細へ畳む
+  const reviewUnresolved = reviewAction.kind === "respond" || reviewAction.kind === "requested" || reviewAction.kind === "repairing";
+  const reviewRespond = reviewAction.kind === "respond" ? reviewAction : null;
   const activeTab: DetailTab = tabState?.pullRequestId === pullRequest.id ? tabState.tab : "overview";
   const selectTab = (tab: DetailTab) => setTabState({ pullRequestId: pullRequest.id, tab });
   const isDevelopOpen = pullRequest.baseRef === "develop" && pullRequest.state === "open" && !pullRequest.merged;
   const findingsNeedAttention = primary.kind === "ci-failed" || primary.kind === "review-findings";
+  // 上部の「指摘に対応する」。指摘タブを開いてレビュー本文も開き、対応パネルの位置まで移動する
+  const openReviewResponse = () => {
+    selectTab("findings");
+    setReviewDetailPullRequestId(pullRequest.id);
+    requestAnimationFrame(() =>
+      document.getElementById(REVIEW_RESPONSE_ANCHOR_ID)?.scrollIntoView({ block: "start", behavior: "smooth" }),
+    );
+  };
 
   return (
     <div className={cn("flex flex-col overflow-hidden", className)} style={style}>
@@ -375,6 +394,15 @@ export function PullRequestDetail({
                   <span aria-hidden="true">{primary.mark}</span> {primary.label}
                 </p>
                 <p className="text-xs text-muted-foreground">{primary.reason}</p>
+                {reviewRespond && reviewRespond.concerns.length > 0 && (
+                  <ul aria-label="レビューの指摘の要点" className="mt-1 list-disc pl-4 text-xs">
+                    {reviewRespond.concerns.map((concern) => (
+                      <li key={concern} className="break-words">
+                        {concern}
+                      </li>
+                    ))}
+                  </ul>
+                )}
               </div>
               <div className="flex min-w-0 flex-wrap items-center gap-2">
                 {/* 失敗の隣に「いま自動で直しにいっている」を出す（#2072）。進捗は経過時間つきで、再起動は促さない */}
@@ -386,11 +414,31 @@ export function PullRequestDetail({
                   availability={pullRequest.repairWorkflowAvailability}
                   runningKind={pullRequest.repairRun?.kind ?? null}
                 />
+                {reviewRespond && (
+                  <Button
+                    size="sm"
+                    variant={reviewRespond.autoRepair || repairKinds.length > 0 ? "outline" : "default"}
+                    className="h-9 text-xs"
+                    onClick={openReviewResponse}
+                  >
+                    <MessageSquareText className="size-3.5" />
+                    指摘に対応する
+                  </Button>
+                )}
+                {pullRequest.draft && pullRequest.state === "open" && !pullRequest.merged && (
+                  <PullRequestReadyButton
+                    pullRequest={pullRequest}
+                    onChanged={() => {
+                      onRefresh();
+                      onUpdated?.();
+                    }}
+                  />
+                )}
                 {canMergeFromDeck(pullRequest) && (
                   <PullRequestMergeButton
                     pullRequest={pullRequest}
                     onMerged={onMerged}
-                    variant={repairKinds.length === 0 ? "default" : "outline"}
+                    variant={repairKinds.length === 0 && !reviewUnresolved ? "default" : "outline"}
                   />
                 )}
                 {onDraftFixIssue && showsPullRequestFixIssueButton(pullRequest) && (
@@ -407,12 +455,32 @@ export function PullRequestDetail({
               </div>
             </div>
 
-            <PullRequestMergeHoldNotice pullRequest={pullRequest} />
+            {reviewUnresolved ? (
+              /* 指摘への対応が残っている間は、マージの保留理由・ユーザー確認を先に並べない（#4482）。
+                 「ユーザーのマージが必要です」は指摘を片付けた後の最終マージの話なので、根拠として畳む */
+              <details className="border-t border-dashed pt-2 text-xs text-muted-foreground">
+                <summary className="cursor-pointer text-foreground">マージについて（詳細）</summary>
+                <div className="mt-2 flex flex-col gap-2">
+                  <p>
+                    指摘への対応・判断が済むまでは、マージを主操作にしていません。修正せずにマージする場合も、マージ確認の画面で指摘を確かめてから進みます。
+                  </p>
+                  <PullRequestMergeHoldNotice pullRequest={pullRequest} />
+                  {requiresUserMerge(pullRequest) && <UserMergeRequiredBadge />}
+                  {requiresUserMerge(pullRequest) && currentDetail?.userMergeReasons && (
+                    <MergeCheckReasonNotice reasons={currentDetail.userMergeReasons} />
+                  )}
+                </div>
+              </details>
+            ) : (
+              <>
+                <PullRequestMergeHoldNotice pullRequest={pullRequest} />
 
-            {requiresUserMerge(pullRequest) && <UserMergeRequiredBadge />}
-            {/* ユーザーのマージが必要な理由（#4088）。押す前に読めるようにする */}
-            {requiresUserMerge(pullRequest) && currentDetail?.userMergeReasons && (
-              <MergeCheckReasonNotice reasons={currentDetail.userMergeReasons} />
+                {requiresUserMerge(pullRequest) && <UserMergeRequiredBadge />}
+                {/* ユーザーのマージが必要な理由（#4088）。押す前に読めるようにする */}
+                {requiresUserMerge(pullRequest) && currentDetail?.userMergeReasons && (
+                  <MergeCheckReasonNotice reasons={currentDetail.userMergeReasons} />
+                )}
+              </>
             )}
             <DeployStatusBadge status={deployStatus} />
             {/* このPRの変更が本番へ出ていないとき、押せる場所をその場に出す（#2236）。失敗しているときだけ */}
@@ -496,6 +564,18 @@ export function PullRequestDetail({
 
         {activeTab === "findings" && (
           <section aria-label="指摘" className="border-b px-4 py-3">
+            {/* 対応パネル（#4482）。上部の「指摘に対応する」の行き先。CI・レビューの内訳より先に置く */}
+            <PullRequestReviewResponse
+              key={pullRequest.id}
+              action={reviewAction}
+              pullRequest={pullRequest}
+              reviewUrl={review?.htmlUrl ?? pullRequest.mergeJudgement.aiReview.runUrl ?? pullRequest.htmlUrl}
+              onRefresh={onRefresh}
+              onRequested={onRefresh}
+              onMerged={onMerged}
+              onDraftFixIssue={onDraftFixIssue}
+              className="mb-3"
+            />
             <div className="flex min-w-0 flex-wrap items-center gap-2">
               {pullRequest.merged ? null : pullRequest.state === "closed" ? null : pullRequest.draft ? null : (
                 <CiStatusButton
@@ -536,6 +616,7 @@ export function PullRequestDetail({
                   availability: pullRequest.repairWorkflowAvailability,
                   runningKind: pullRequest.repairRun?.kind ?? null,
                 }}
+                responseAnchorId={reviewAction.kind === "none" ? undefined : REVIEW_RESPONSE_ANCHOR_ID}
               />
             )}
           </section>

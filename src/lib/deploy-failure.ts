@@ -70,6 +70,10 @@ export function buildDeployRecoveryIssueSection(params: {
   runningSha: string | null;
   logExcerpt: string | null;
   causeMarkerPrefix: string;
+  /** 修正済みのPR番号を報告するマーカーの接頭辞。無ければ`already_fixed`の案内を出さない */
+  fixPrMarkerPrefix?: string;
+  /** 開始者が許可した範囲。`fix_until_main`ならmainへの反映も自動で進む */
+  throughMain?: boolean;
 }): string {
   const facts = [
     `- 失敗した実行: ${params.failedRunUrl}（attempt ${params.failedRunAttempt}）`,
@@ -89,6 +93,11 @@ export function buildDeployRecoveryIssueSection(params: {
     "",
     "1. **最初に**実行ログ・失敗工程・失敗したコミットまでの変更・本番で動いている版を確かめて原因を調べ、区分を次のマーカーのどれか1つを含むIssueコメントで報告する。ログ末尾の推定だけで決めない",
     `   - コードの修正で直る: ${marker("code")}`,
+    ...(params.fixPrMarkerPrefix
+      ? [
+          `   - 原因はすでにdevelopで修正済みで、コードを変える必要が無い（候補へ未反映、履歴だけの競合など）: ${marker("already_fixed")} と、修正済みのPR番号 \`<!-- ${params.fixPrMarkerPrefix}<PR番号> -->\` を同じコメントに書く。**新しいコミットもPRも作らない**`,
+        ]
+      : []),
     `   - 設定・Secrets・外部サービスの設定が原因: ${marker("config")}`,
     `   - DBの状態（失敗したマイグレーションの履歴など）が原因: ${marker("database")}`,
     `   - 外部障害（GitHub・VPS・ネットワークの一時的な障害）: ${marker("external")}`,
@@ -96,7 +105,9 @@ export function buildDeployRecoveryIssueSection(params: {
     "2. `code`以外と判断した場合は、**コミットもPRも作らずに終える。** 報告コメントに、人が次にやる操作（コマンド・設定場所）を具体的に書く。データの削除や状態の分からないDBの修復は行わない",
     "3. `code`の場合だけ修正してdevelop向けPRを作る。修正は失敗の原因に限り、ほかの変更を混ぜない",
     "",
-    "本番（main）への反映は、この段階では自動で行いません。developへのマージ後に人が判断します。",
+    params.throughMain
+      ? "開始者がmainへの反映まで許可しています。developへマージされると、issue-deckが復旧PRを作り、CIが通れば自動でmainへ反映し、稼働中の版が一致するまで確かめます。この反映はあなたが行わないでください。"
+      : "本番（main）への反映は、この段階では自動で行いません。developへのマージ後に人が判断します。",
     ...(params.logExcerpt ? ["", "### 失敗したジョブのログ末尾", "", "````", params.logExcerpt.replace(/`{4,}/g, "```"), "````"] : []),
     "",
     params.seriesMarker,

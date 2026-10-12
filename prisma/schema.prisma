@@ -1944,6 +1944,10 @@ model DeployRecoverySeries {
   releaseRunUrl             String?   @db.Text
   /// 対象版の稼働を確かめた時刻。**これが入るのは`recovered`のときだけ**
   recoveredAt               DateTime?
+  /// 本番反映後のdeploy失敗を同じ系列へ戻した回数と、直近の失敗の署名（失敗したジョブ名）。
+  /// **同じ署名の失敗が続いたら停滞として止める**（#4451）
+  releaseAttempts           Int       @default(0)
+  lastFailureKey            String?
   lastSweepAt               DateTime?
   createdAt                 DateTime  @default(now())
   updatedAt                 DateTime  @updatedAt
@@ -2659,6 +2663,59 @@ model ReleaseFixSeries {
   updatedAt DateTime @updatedAt
 
   @@index([repositoryFullName, releasePrNumber])
+  @@index([status])
+}
+
+// リリース候補の失敗から「リリース完了まで進める」を開始した系列（#4480）。世代ごとの`ReleaseFixSeries`を束ね、
+// 修正Issueの起動・次世代の起案・（許可したときだけ）本番マージ・deploy追跡・稼働確認までを1つの論理作業として持つ。
+// **本番マージの権限はラベルやPR本文ではなく、この記録（開始者・範囲・期限・停止・追っている候補のSHA）で判定する**
+model ReleaseCompletionRun {
+  id                     String    @id @default(cuid())
+  repositoryFullName     String    @db.VarChar(191)
+  // 開始した時点のリリース候補（`release-main/vX.Y.Z`→main）
+  originPrNumber         Int
+  originHeadSha          String    @db.VarChar(64)
+  releaseVersion         String?   @db.VarChar(64)
+  // `until_ready`（チェック通過まで） / `until_production`（本番反映・稼働確認まで）
+  scope                  String    @db.VarChar(32)
+  startedByUserId        String    @db.VarChar(40)
+  expiresAt              DateTime
+  // `ReleaseCompletionStatus`。解釈はアプリ側に寄せる
+  status                 String    @db.VarChar(32)
+  // 進行中の間だけ`repositoryFullName`を入れる。同じリポジトリで2本同時に走らせない
+  activeKey              String?   @unique @db.VarChar(191)
+  // いま追っている候補。修正系列が作り直した後継へ進めたときだけ更新する（系列の外で作り直された候補は追わない）
+  candidatePrNumber      Int
+  candidateHeadSha       String    @db.VarChar(64)
+  candidateBaseSha       String    @db.VarChar(64)
+  // 追ってきた候補の番号（JSON配列。古い順）
+  candidatePrNumbers     Json
+  // 修正Issueを起動した系列（同じ系列を二重に起動しない）
+  dispatchedSeriesId     String?   @db.VarChar(40)
+  dispatchedAt           DateTime?
+  // 費用の上限と、修正Issueのセッションで使った額（`SessionUsage.costUsd`の合計。API換算の目安）
+  costLimitUsd           Float
+  costUsedUsd            Float     @default(0)
+  // 本番へ出したmainのマージSHAとdeployの追跡（#4007と同じ判定を使う）
+  mergeSha               String?   @db.VarChar(64)
+  mergedByRun            Boolean   @default(false)
+  releaseStartedAt       DateTime?
+  releaseRunId           BigInt?
+  releaseRunUrl          String?   @db.Text
+  completedAt            DateTime?
+  // deployが再実行も失敗したときに引き継いだ本番復旧系列（#4451）
+  deployRecoverySeriesId String?   @db.VarChar(40)
+  // 表示用の補足（原因の区分・判断待ちの理由など）
+  note                   String?   @db.Text
+  stopReason             String?   @db.VarChar(64)
+  stopDetail             String?   @db.Text
+  stoppedByUserId        String?   @db.VarChar(40)
+  stoppedAt              DateTime?
+  lastSweepAt            DateTime?
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
+
+  @@index([repositoryFullName, originPrNumber])
   @@index([status])
 }
 

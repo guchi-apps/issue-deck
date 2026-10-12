@@ -434,6 +434,24 @@ export type PullRequestDetail = {
    * 省略されうるのは、この項目を持たない古いレスポンスを読んだ場合のため。
    */
   userMergeReasons?: MergeCheckReasons | null;
+  /**
+   * レビュー指摘への対応パネルの材料（#4482）。要修正・要確認のレビュー判定が付いた、
+   * Issueに紐づくopenなPRでだけ入る。それ以外・古い応答では省略またはnull。
+   */
+  reviewResponse?: PullRequestReviewResponseContext | null;
+};
+
+export type PullRequestReviewResponseContext = {
+  /** 依頼を渡す先のIssue */
+  issueNumber: number;
+  /** そのIssueがローカルセッションで対応中（11.local）か。dispatchが反応しないため依頼を送れない */
+  linkedIssueLocal: boolean;
+  /** そのIssueがクローズ済みか。dispatchは閉じたIssueへの`@claude`をskipするため依頼を送れない */
+  linkedIssueClosed?: boolean;
+  /** 現在のHEADに対して既に出ている修正依頼。無ければnull */
+  currentFixRequest: { commentUrl: string | null; createdAt: string } | null;
+  /** Issueのコメントを読めず、依頼済みかを確かめられなかった */
+  fetchFailed: boolean;
 };
 
 /**

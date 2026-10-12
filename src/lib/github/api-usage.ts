@@ -83,8 +83,12 @@ export const GITHUB_API_FEATURES = [
   { key: "pull_request_close", label: "PRのクローズ（マージしない）" },
   // PR詳細の「編集」（#3161）。タイトル・本文を保存したときだけ消費する。
   { key: "pull_request_update", label: "PRのタイトル・本文の更新" },
+  // PR詳細の「レビュー可能にする」（#4453）。ドラフトを解除したときだけ消費する。
+  { key: "pull_request_ready_for_review", label: "ドラフトPRのレビュー可能化" },
   { key: "pull_request_review_ack", label: "レビュー指摘の確認済み記録" },
   { key: "pull_request_repair", label: "PRの自動修復の起動" },
+  // PR詳細の対応パネル（#4482）。レビュー指摘への修正を紐づくIssueへ依頼したときだけ消費する。
+  { key: "pull_request_fix_request", label: "レビュー指摘の修正依頼" },
   // バックアップCI（#4065）の手動起動。PR・baseの検査定義の取得と共通チェックの発行
   { key: "backup_ci", label: "バックアップCIの起動" },
   // コンフリクトしたPRの巡回検知（#2116）。PR一覧のRESTはETagが効くので、実際に消費するのは

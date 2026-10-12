@@ -2108,3 +2108,8 @@ privateの3件（#1011）と、#1047の起票後に作られた`aide`（#1379）
 `SHARED_TOKEN_WRITE_SECRET` はStatusHubとIssueDeckのみへ配る専用キー。
 1Passwordの`op://apps/issue-deck/shared-token-write-secret`を正とし、GitHub Secretへ同期する。
 SharedTokenのDB・読み取りAPIには登録しない。導入順序は[shared-token-api.md](shared-token-api.md)を参照。
+
+
+## 新規リポジトリのリリース検証登録
+
+共有callerの導入と盤面の再同期に加え、`src/lib/release-verification-config.ts` の台帳へ新しいfull nameを登録する。旧リポジトリの対象外宣言は新側へ自動継承されない。CIの実コマンドを調べ、仮想環境やcdは1つのコマンド内で完結させる。pi0wはrequirements-ci.txtとscripts/verify.shによるPythonオフライン検証を使い、ARMv6/BLE/GPIO・実機配布の確認を成功に含めない。設定変更はIssueDeck本番へ反映後、失敗した候補の現在base/headで再検証する。台帳登録やジョブ起動だけで運用検証済み/enforcedにしない。

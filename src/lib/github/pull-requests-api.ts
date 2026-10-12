@@ -147,6 +147,8 @@ async function fetchPullRequestPage(
  * これらが要らない一覧側で単体取得を回す必要はない（PR1件につき1回APIを消費するため）。
  */
 export type GithubApiPullRequestDetail = GithubApiOpenPullRequest & {
+  /** GraphQLのNode ID。ドラフト解除（`markPullRequestReadyForReview`）の対象指定に使う（#4453） */
+  node_id?: string;
   additions: number;
   deletions: number;
   changed_files: number;

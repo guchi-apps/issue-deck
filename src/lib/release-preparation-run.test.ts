@@ -12,15 +12,20 @@ const mocks = vi.hoisted(() => ({
   fetchCommentsForIssue: vi.fn(),
   removeIssueLabel: vi.fn(),
   fetchAllPages: vi.fn(),
+  failureFindMany: vi.fn(),
+  fetchClosed: vi.fn(),
 }));
 
 vi.mock("@/lib/db", () => ({
   db: {
     repository: { findFirst: mocks.repositoryFindFirst },
-    releasePreparationFailure: { upsert: mocks.failureUpsert, updateMany: mocks.failureUpdateMany },
+    releasePreparationFailure: { upsert: mocks.failureUpsert, updateMany: mocks.failureUpdateMany, findMany: mocks.failureFindMany },
   },
 }));
-vi.mock("@/lib/release-rebuild-history-run", () => ({ observeRebuildSuccessor: vi.fn(async () => 0) }));
+vi.mock("@/lib/release-rebuild-history-run", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/lib/release-rebuild-history-run")>(),
+  observeRebuildSuccessor: vi.fn(async () => 0),
+}));
 vi.mock("@/lib/github/app-auth", () => ({ getInstallationToken: vi.fn(async () => "token") }));
 vi.mock("@/lib/github/actions-api", () => ({
   fetchWorkflowRun: mocks.fetchWorkflowRun,
@@ -33,9 +38,10 @@ vi.mock("@/lib/github/issues-api", () => ({
   fetchCommentsForIssue: mocks.fetchCommentsForIssue,
   removeIssueLabel: mocks.removeIssueLabel,
 }));
+vi.mock("@/lib/github/pull-requests-api", () => ({ fetchClosedPullRequestsForBasePage: mocks.fetchClosed, CLOSED_PAGED_PER_PAGE: 100 }));
 vi.mock("@/lib/github/pagination", () => ({ fetchAllPages: mocks.fetchAllPages }));
 
-import { recordReleasePreparationFailure, resolveReleasePreparation } from "@/lib/release-preparation-run";
+import { reconcileReleasePreparationFailures, recordReleasePreparationFailure, resolveReleasePreparation } from "@/lib/release-preparation-run";
 import { LEGACY_RELEASE_FAILURE_NOTICE_TEXT } from "@/lib/release-preparation";
 
 const RUN = {
@@ -109,5 +115,77 @@ describe("resolveReleasePreparation", () => {
     mocks.fetchWorkflowRunJobs.mockResolvedValue([{ name: "release / release", conclusion: "failure" }]);
     expect(await resolveReleasePreparation({ repositoryFullName: "o/r", runId: 10 })).toEqual({ ok: false, reason: "run_not_concluded" });
     expect(mocks.failureUpdateMany).not.toHaveBeenCalled();
+  });
+});
+
+describe("reconcileReleasePreparationFailures（#4450）", () => {
+  const row = (over: Record<string, unknown> = {}) => ({
+    id: "f1",
+    createdAt: new Date("2026-10-11T20:51:00Z"),
+    updatedAt: new Date("2026-10-11T20:51:00Z"),
+    rebuildSelection: null,
+    ...over,
+  });
+  const pr = (number: number, mergedAt: string | null, head = "release-main/v8.54.0") => ({
+    number,
+    merged_at: mergedAt,
+    head: { ref: head },
+    html_url: `https://github.com/o/r/pull/${number}`,
+  });
+
+  it("失敗より後に本番PRがマージされていれば、記録を消さずに解決へ倒す", async () => {
+    mocks.failureFindMany.mockResolvedValue([row()]);
+    mocks.fetchClosed.mockResolvedValue([pr(4449, "2026-10-11T23:00:00Z")]);
+    expect(await reconcileReleasePreparationFailures("o/r")).toBe(1);
+    expect(mocks.failureUpdateMany.mock.calls[0][0]).toMatchObject({
+      where: { id: "f1", status: "open" },
+      data: { status: "resolved", resolvedRunUrl: "https://github.com/o/r/pull/4449" },
+    });
+  });
+
+  it("失敗より前のマージ・未マージ・リリース以外のPRでは解決しない（本番公開後の新しい失敗も残る）", async () => {
+    mocks.failureFindMany.mockResolvedValue([row()]);
+    mocks.fetchClosed.mockResolvedValue([
+      pr(4445, "2026-10-11T10:00:00Z"),
+      pr(4446, null),
+      pr(4447, "2026-10-12T01:00:00Z", "issue-1"),
+    ]);
+    expect(await reconcileReleasePreparationFailures("o/r")).toBe(0);
+    expect(mocks.failureUpdateMany).not.toHaveBeenCalled();
+  });
+
+  it("作り直し由来の失敗は、元候補より古い番号のマージでは解決しない", async () => {
+    const selection = JSON.stringify({ origin: { pr: 4445, headSha: "a".repeat(40) }, prs: [{ number: 4447, mergeSha: "b".repeat(40) }] });
+    mocks.failureFindMany.mockResolvedValue([row({ rebuildSelection: selection })]);
+    mocks.fetchClosed.mockResolvedValue([pr(4400, "2026-10-12T00:00:00Z")]);
+    expect(await reconcileReleasePreparationFailures("o/r")).toBe(0);
+    mocks.fetchClosed.mockResolvedValue([pr(4449, "2026-10-12T00:00:00Z")]);
+    expect(await reconcileReleasePreparationFailures("o/r")).toBe(1);
+  });
+
+  it("GitHubを取得できないときは解決せず、失敗をログに残す", async () => {
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    mocks.failureFindMany.mockResolvedValue([row()]);
+    mocks.fetchClosed.mockRejectedValue(new Error("boom"));
+    expect(await reconcileReleasePreparationFailures("o/r")).toBe(0);
+    expect(mocks.failureUpdateMany).not.toHaveBeenCalled();
+    expect(spy).toHaveBeenCalled();
+    spy.mockRestore();
+  });
+
+  it("閉じた候補100件より古い本番公開も次ページで照合する", async () => {
+    mocks.failureFindMany.mockResolvedValue([row()]);
+    mocks.fetchClosed.mockImplementation(async (_owner: string, _repo: string, _base: string, _token: string, page: number) =>
+      page === 1 ? Array.from({ length: 100 }, (_, i) => pr(4600 - i, null)) : [pr(4449, "2026-10-12T00:00:00Z")],
+    );
+    expect(await reconcileReleasePreparationFailures("o/r")).toBe(1);
+    expect(mocks.fetchClosed).toHaveBeenCalledWith("o", "r", "main", "token", 2);
+  });
+
+  it("再試行などで記録が更新済みなら（updatedAtが変わっていれば）解決しない", async () => {
+    mocks.failureFindMany.mockResolvedValue([row()]);
+    mocks.fetchClosed.mockResolvedValue([pr(4449, "2026-10-12T00:00:00Z")]);
+    mocks.failureUpdateMany.mockResolvedValue({ count: 0 });
+    expect(await reconcileReleasePreparationFailures("o/r")).toBe(0);
   });
 });
