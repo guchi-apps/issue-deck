@@ -2879,3 +2879,48 @@ model SessionInputStash {
   @@index([repositoryFullName, issueNumber])
   @@index([expiresAt])
 }
+
+/// Slackの`#アプリissue起案`への依頼（#4454）。依頼単位は親投稿の`teamId + channelId + parentTs`で一意。
+/// 対象リポジトリ（`selectedRepo`）が確定するまでIssueは作らない。確認カード（`proposal`）の実行は
+/// `confirmState`を`pending`→`done`へ条件付きで更新できた1回だけ。
+model SlackIntakeRequest {
+  id             String   @id @default(cuid())
+  teamId         String   @db.VarChar(32)
+  channelId      String   @db.VarChar(32)
+  parentTs       String   @db.VarChar(32)
+  /// 依頼者のSlackユーザーID。bot返信の宛先（`<@ID>`）
+  slackUserId    String   @db.VarChar(32)
+  /// 対応するIssueDeckのユーザー
+  userId         String
+  /// 元投稿のpermalink。起案したIssue本文へ入れ、重複確認の検索語にも使う
+  permalink      String?  @db.Text
+  /// 正規化した依頼本文（添付名を含む）
+  text           String   @db.Text
+  /// 選択UIで確定した`owner/repo`。**処理の正本**
+  selectedRepo   String?  @db.VarChar(200)
+  /// `awaiting_repo` / `investigating` / `awaiting_confirm` / `done` / `failed`
+  status         String   @db.VarChar(24)
+  /// 失敗した段階と理由（再開方法の案内用）
+  failure        String?  @db.Text
+  conversationId String?
+  /// 調査が返したIssue案（`confirm_issue`カード）
+  proposal       Json?
+  /// `pending` / `done` / `cancelled`
+  confirmState   String?  @db.VarChar(16)
+  /// 起案・再利用したIssue（先頭が元のIssue）。`[{repo, number, role}]`
+  issues         Json     @default("[]")
+  /// 選択UIを出したBot投稿のts
+  selectorTs     String?  @db.VarChar(32)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@unique([teamId, channelId, parentTs])
+}
+
+/// 処理済みのSlackイベント／操作の鍵。再送・連打・併存での二重処理を防ぐ（#4454）。
+model SlackProcessedEvent {
+  eventKey  String   @id @db.VarChar(160)
+  /// スレッド返信などイベント自身の`message_ts`
+  messageTs String?  @db.VarChar(32)
+  createdAt DateTime @default(now())
+}
