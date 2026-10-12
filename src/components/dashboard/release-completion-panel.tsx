@@ -28,7 +28,41 @@ import { cn } from "@/lib/utils";
 
 const POLL_INTERVAL_MS = 15_000;
 
+/**
+ * 完了系列の取得とポーリング（#4498）。要約帯とこのパネルが別々に取ると更新がずれて見出しが食い違うため、
+ * 親が1回だけ呼んで結果を渡す。`run`は取得前がundefined、系列が無ければnull。別PRの結果は使わない
+ */
+export function useReleaseCompletionRun(repositoryFullName: string, pullRequestNumber: number, enabled = true) {
+  const [owner, repo] = repositoryFullName.split("/");
+  const [stored, setStored] = useState<{ key: string; value: ReleaseCompletionRunView | null } | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
+  const key = `${repositoryFullName}#${pullRequestNumber}`;
+
+  useEffect(() => {
+    if (!enabled) return;
+    let cancelled = false;
+    void fetchRun(owner, repo, pullRequestNumber).then((value) => {
+      if (!cancelled && value !== undefined) setStored({ key, value });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [owner, repo, pullRequestNumber, key, reloadKey, enabled]);
+
+  const run = stored && stored.key === key ? stored.value : undefined;
+  const active = run?.active ?? false;
+  useEffect(() => {
+    if (!enabled || !active) return;
+    const timer = setInterval(() => setReloadKey((n) => n + 1), POLL_INTERVAL_MS);
+    return () => clearInterval(timer);
+  }, [active, enabled]);
+
+  return { run, setRun: (value: ReleaseCompletionRunView | null) => setStored({ key, value }) };
+}
+
 type Props = {
+  /** 親が取得した結果を使う。省略時はこのパネルが自分で取得する */
+  runState?: { run: ReleaseCompletionRunView | null | undefined; setRun: (run: ReleaseCompletionRunView | null) => void };
   repositoryFullName: string;
   pullRequestNumber: number;
   /** 画面で見ている検証の対象。開始時にサーバーが今の候補と照合する */
@@ -44,35 +78,14 @@ type Props = {
  * 本番マージ・デプロイ・稼働確認）ごとの再操作は求めない。押す前に**どこまで自動で進めるか**を選ばせ、
  * 本番へのマージは開始者が選んだ系列だけにする。
  */
-export function ReleaseCompletionPanel({ repositoryFullName, pullRequestNumber, target, canStart }: Props) {
+export function ReleaseCompletionPanel({ runState, repositoryFullName, pullRequestNumber, target, canStart }: Props) {
   const [owner, repo] = repositoryFullName.split("/");
-  const [run, setRun] = useState<{ key: string; value: ReleaseCompletionRunView | null } | null>(null);
+  const own = useReleaseCompletionRun(repositoryFullName, pullRequestNumber, !runState);
+  const { run: shownRun, setRun: setShownRun } = runState ?? own;
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [scope, setScope] = useState<ReleaseCompletionScope | null>(null);
   const [busy, setBusy] = useState<"start" | "stop" | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [reloadKey, setReloadKey] = useState(0);
-  const key = `${repositoryFullName}#${pullRequestNumber}`;
-
-  useEffect(() => {
-    let cancelled = false;
-    void fetchRun(owner, repo, pullRequestNumber).then((value) => {
-      if (!cancelled && value !== undefined) setRun({ key, value });
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [owner, repo, pullRequestNumber, key, reloadKey]);
-
-  // 別のPRの結果は使わない（切替直後に取り違えない）
-  const shown = run && run.key === key ? run.value : null;
-  const loaded = run !== null && run.key === key;
-
-  useEffect(() => {
-    if (!shown?.active) return;
-    const timer = setInterval(() => setReloadKey((n) => n + 1), POLL_INTERVAL_MS);
-    return () => clearInterval(timer);
-  }, [shown?.active]);
 
   async function start() {
     if (scope === null) return;
@@ -85,7 +98,7 @@ export function ReleaseCompletionPanel({ repositoryFullName, pullRequestNumber, 
         body: JSON.stringify({ owner, repo, pullRequestNumber, scope, baseSha: target?.baseSha, headSha: target?.headSha }),
       });
       const data = (await res.json().catch(() => null)) as { run?: ReleaseCompletionRunView; error?: string } | null;
-      if (data?.run) setRun({ key, value: data.run });
+      if (data?.run) setShownRun(data.run);
       if (!res.ok) setError(startErrorMessage(data?.error));
     } catch {
       setError("通信に失敗しました。押し直してください。");
@@ -106,7 +119,7 @@ export function ReleaseCompletionPanel({ repositoryFullName, pullRequestNumber, 
         body: JSON.stringify({ owner, repo, runId: shown.id }),
       });
       const data = (await res.json().catch(() => null)) as { run?: ReleaseCompletionRunView } | null;
-      if (data?.run) setRun({ key, value: data.run });
+      if (data?.run) setShownRun(data.run);
       if (!res.ok) setError("停止できませんでした。押し直してください。");
     } catch {
       setError("通信に失敗しました。押し直してください。");
@@ -115,6 +128,8 @@ export function ReleaseCompletionPanel({ repositoryFullName, pullRequestNumber, 
     }
   }
 
+  const shown = shownRun ?? null;
+  const loaded = shownRun !== undefined;
   const showStart = loaded && canStart && !shown?.active;
   if (!shown && !showStart && !error) return null;
 
