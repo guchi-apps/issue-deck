@@ -4,7 +4,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const claimEvent = vi.fn();
 const handleMessageEvent = vi.fn();
-vi.mock("@/lib/slack/intake", () => ({ claimEvent: (...a: unknown[]) => claimEvent(...a), handleMessageEvent: (...a: unknown[]) => handleMessageEvent(...a) }));
+const releaseEvent = vi.fn();
+vi.mock("@/lib/slack/intake", () => ({ claimEvent: (...a: unknown[]) => claimEvent(...a), handleMessageEvent: (...a: unknown[]) => handleMessageEvent(...a), releaseEvent: (...a: unknown[]) => releaseEvent(...a) }));
 vi.mock("next/server", async (importOriginal) => ({
   ...(await importOriginal<typeof import("next/server")>()),
   after: (fn: () => void) => void fn(),
@@ -30,6 +31,7 @@ describe("POST /api/slack/events", () => {
     vi.stubEnv("SLACK_SIGNING_SECRET", SECRET);
     vi.stubEnv("SLACK_BOT_TOKEN", "xoxb-test-token");
     claimEvent.mockResolvedValue(true);
+    releaseEvent.mockResolvedValue(undefined);
   });
   afterEach(() => vi.unstubAllEnvs());
 
@@ -65,5 +67,13 @@ describe("POST /api/slack/events", () => {
     const retry = await POST(signed(body));
     expect(await retry.json()).toEqual({ ok: true, duplicate: true });
     expect(handleMessageEvent).toHaveBeenCalledTimes(1);
+  });
+
+  it("後処理が失敗したら処理済み記録を外し、再送を再処理できるようにする（#4488）", async () => {
+    handleMessageEvent.mockRejectedValueOnce(new Error("db down"));
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const body = JSON.stringify({ type: "event_callback", team_id: "T1", event_id: "E9", event: { type: "message", ts: "1.0" } });
+    expect((await POST(signed(body))).status).toBe(200);
+    await vi.waitFor(() => expect(releaseEvent).toHaveBeenCalledWith("event:E9"));
   });
 });

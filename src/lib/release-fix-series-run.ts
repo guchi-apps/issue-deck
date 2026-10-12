@@ -3,7 +3,7 @@ import type { ReleaseFixSeries } from "@prisma/client";
 import { db } from "@/lib/db";
 import { fetchPullRequest } from "@/lib/github/actions-api";
 import { getInstallationToken } from "@/lib/github/app-auth";
-import { addIssueLabels, createComment, createIssue, fetchIssueState, updateIssue } from "@/lib/github/issues-api";
+import { addIssueLabels, createComment, createIssue, fetchIssueStateOrThrow, updateIssue } from "@/lib/github/issues-api";
 import {
   fetchOpenPullRequestsForBase,
   fetchPullRequestForRebuild,
@@ -320,7 +320,7 @@ export async function createReleaseFixSeries(input: CreateReleaseFixInput): Prom
   let reusedIssueNumber: number | null = null;
   if (parent) {
     // 取得に失敗したときは新しいIssueへ逃げず、再試行できる失敗として投げる（#4468）
-    const state = await fetchIssueState(owner, repo, parent.issueNumber, input.token);
+    const state = await fetchIssueStateOrThrow(owner, repo, parent.issueNumber, input.token);
     if (state === "open") {
       const note =
         `${draft.body}\n\n---\n\n**追加の修正（世代 ${generation}）。** 前の世代の修正PR${parent.fixPrNumber ? `（#${parent.fixPrNumber}）` : ""}はすでにdevelopへマージ済みで、そのPRには追加できないため、` +
