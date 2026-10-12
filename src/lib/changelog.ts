@@ -42,7 +42,7 @@ export type ChangelogEntry = {
  */
 export const APP_CHANGELOG: ChangelogEntry[] = [
   {
-    version: "8.55.4",
+    version: "8.55.5",
     date: "2026-10-12",
     changes: [
       "Slack連携はまだ有効になっていません。利用開始の設定と旧Webhookからの切替は、本番反映後に手作業Issue #4461で行います。",
