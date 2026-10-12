@@ -43,7 +43,7 @@ export type ChangelogEntry = {
 export const APP_CHANGELOG: ChangelogEntry[] = [
   {
     // #4551: 未有効化の候補機能の利用可能表現を訂正。caller対応は#4496後に実施する。
-    version: "8.57.0",
+    version: "8.57.1",
     date: "2026-10-12",
     changes: [
       "ブランチ画面の「次のバージョン」カードに「リリースする」ボタンを移し、PR件数を2枚のカードに分けて見やすくしました。",
