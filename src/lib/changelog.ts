@@ -42,7 +42,7 @@ export type ChangelogEntry = {
  */
 export const APP_CHANGELOG: ChangelogEntry[] = [
   {
-    version: "8.56.2",
+    version: "8.56.3",
     date: "2026-10-12",
     changes: [
       "ドラフトのプルリクエストを、PR詳細画面からそのままレビュー可能な状態に切り替えられるようになりました。",
