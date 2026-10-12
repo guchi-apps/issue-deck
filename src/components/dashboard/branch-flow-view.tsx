@@ -702,8 +702,15 @@ function RemainingManualSteps({
 function PullRequestLine({
   pullRequest,
   onMerged,
+  showStatus = false,
 }: {
   pullRequest: PullRequestSummary;
+  /**
+   * CI・レビュー・コンフリクト・判定などの結果を出すか（#4540）。**既定は出さない。**
+   * 通常PRの状態はPR一覧・PR詳細が持つので、ここでは番号・タイトルのリンクだけを置く。
+   * 本番リリース工程のPR（リリース候補PR）の行だけがtrueを渡す。
+   */
+  showStatus?: boolean;
   /**
    * マージできたとき。**渡さない行にはマージの導線（バッジもボタンも）を出さない。**
    * リリースの束の見出しはPRの行とは別にマージボタンを持っているため（`ReleaseMergeButton`）、
@@ -730,14 +737,16 @@ function PullRequestLine({
       >
         #{pullRequest.number} {pullRequest.title}
       </GithubReferenceLink>
-      {pullRequest.draft ? (
-        <PullRequestMetaBadge>ドラフト</PullRequestMetaBadge>
-      ) : (
-        // CI・レビュー・コンフリクト・自動修正を並べて出す（#4015）。互いを隠さない
-        <PullRequestHealthRow pullRequest={pullRequest} />
-      )}
+      {showStatus &&
+        (pullRequest.draft ? (
+          <PullRequestMetaBadge>ドラフト</PullRequestMetaBadge>
+        ) : (
+          // CI・レビュー・コンフリクト・自動修正を並べて出す（#4015）。互いを隠さない
+          <PullRequestHealthRow pullRequest={pullRequest} />
+        ))}
       {/* レビュー・CIの待ちは上の枠が言うので、それ以外の判定段階（リスク判定・自動マージ判定）だけ出す */}
-      {pullRequest.mergeJudgement.step !== "claude-review" &&
+      {showStatus &&
+        pullRequest.mergeJudgement.step !== "claude-review" &&
         pullRequest.mergeJudgement.step !== "wait-for-ci" && (
           <MergeJudgementBadge
             mergeJudgement={pullRequest.mergeJudgement}
@@ -762,8 +771,10 @@ function PullRequestLine({
       )}
     </div>
     {/* PR詳細・PR一覧と同じ6チェック（#4366）。共通結果は対象の候補PR・SHAを添えて出す */}
-    <PullRequestChecksStrip pullRequest={pullRequest} grouped={false} className="max-w-2xl px-0" />
-    {onMerged !== undefined && <PullRequestMergeHoldNotice pullRequest={pullRequest} className="max-w-2xl" />}
+    {showStatus && (
+      <PullRequestChecksStrip pullRequest={pullRequest} grouped={false} className="max-w-2xl px-0" />
+    )}
+    {showStatus && onMerged !== undefined && <PullRequestMergeHoldNotice pullRequest={pullRequest} className="max-w-2xl" />}
     </>
   );
 }
@@ -1085,11 +1096,34 @@ function ReleaseCandidateVerificationPills({
 }
 
 /** 検証の理由を見出しの下へ1行で出す（#4390）。ホバーできないスマホでも読めるようにする */
-function ReleaseCandidateVerificationReason({ verification }: { verification: ReleaseCandidateVerification }) {
+function ReleaseCandidateVerificationReason({
+  verification,
+  pullRequest,
+}: {
+  verification: ReleaseCandidateVerification;
+  /** 工程を止めている候補PR。理由の対応先として詳細へのリンクを添える（#4540） */
+  pullRequest?: PullRequestSummary | null;
+}) {
   if (!verification.detail) return null;
   return (
-    <p className={cn("text-xs", verification.problem ? "text-destructive" : "text-muted-foreground")}>
+    <p className={cn("min-w-0 break-words text-xs", verification.problem ? "text-destructive" : "text-muted-foreground")}>
       {verification.detail}
+      {pullRequest && (
+        <>
+          {" "}
+          <GithubReferenceLink
+            href={pullRequest.htmlUrl}
+            reference={{
+              repositoryFullName: pullRequest.repositoryFullName,
+              number: pullRequest.number,
+              kind: "pull",
+            }}
+            className="whitespace-nowrap font-medium underline"
+          >
+            候補PR #{pullRequest.number}
+          </GithubReferenceLink>
+        </>
+      )}
     </p>
   );
 }
@@ -1335,7 +1369,9 @@ function ReleaseGroupHeader({
           )}
         </div>
 
-        {!summarizedInCard && verificationShown && <ReleaseCandidateVerificationReason verification={verificationShown} />}
+        {!summarizedInCard && verificationShown && (
+          <ReleaseCandidateVerificationReason verification={verificationShown} pullRequest={group.pullRequest} />
+        )}
 
         {/* デプロイのジョブ単位の内訳（#2777）。押したときだけ取得する */}
         {deployRunId !== null && (
@@ -1364,7 +1400,7 @@ function ReleaseGroupHeader({
         )}
 
         {/* マージ導線は見出し側（`ReleaseMergeButton`）が持つので、この行には渡さない */}
-        {group.pullRequest && <PullRequestLine pullRequest={group.pullRequest} />}
+        {group.pullRequest && <PullRequestLine pullRequest={group.pullRequest} showStatus />}
         {/* 全体レビュー・統合検証の進捗（#4357）。PRのCI・レビューとは別枠で、開いている
             リリース候補（凍結ブランチ）にだけ出す */}
         {!summarizedInCard &&
@@ -1534,7 +1570,7 @@ function NextReleaseCard({
           <div className="flex min-w-0 flex-wrap items-center gap-2">
             <ReleaseGroupStatePill group={group} deviceBuild={null} />
           </div>
-          {verificationShown && <ReleaseCandidateVerificationReason verification={verificationShown} />}
+          {verificationShown && <ReleaseCandidateVerificationReason verification={verificationShown} pullRequest={pullRequest} />}
           <div className="flex min-w-0 flex-wrap items-center gap-2">
             {pullRequest ? (
               <PullRequestMergeButton
@@ -2287,8 +2323,8 @@ function RepositorySummaryRow({
           {verification.detail}
         </span>
       )}
-      {/* **PRのマージ待ちは畳んだ行に出さない**（#2172）。マージの導線は開いたPR行と
-          PR一覧画面が持っている。ヘッダーの「手が要るもの◯件」には引き続き数える（`needsAttention`） */}
+      {/* **PRのマージ待ちは畳んだ行にもヘッダー件数にも出さない**（#2172・#4540）。通常PRの
+          マージの導線は開いたPR行とPR一覧画面が持っている */}
     </button>
   );
 }
@@ -2422,10 +2458,10 @@ function RepositorySection({
 function needsAttention(repository: BranchFlowRepository): boolean {
   const { summary } = repository;
   return (
+    // 数えるのは本番リリース工程（バンプPR・リリースPR・候補の検証・デプロイ）だけ（#4540）。
     // 自動修正が走っている問題は「待てば進むもの」側へ回る（`pullRequestHealth.autoCount`）。
     // 直している最中でない問題だけを手が要るものに数え、同じリポジトリを両方へ重ねない（#4015）
     summary.pullRequestHealth.humanCount > 0 ||
-    summary.needsUserMerge ||
     summary.releaseMergeTarget !== null ||
     // 検証の失敗・要確認・設定不足・取得不能は手が要る。実行中・待機中だけなら待てば進む（#4390）
     candidateVerificationOf(repository)?.problem != null ||

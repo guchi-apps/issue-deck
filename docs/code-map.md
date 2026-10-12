@@ -2535,9 +2535,15 @@ export function POST(request: NextRequest) {
   無効で数百本が該当し、出しても情報にならなかった。掃除の仕組みは#1478が持つ（この画面は
   ブランチの後始末を扱わない）。
   **PRの状態表示（#4015）**は[`lib/pull-request-health.ts`](../src/lib/pull-request-health.ts)が1か所で
-  持つ。展開したPR行は**CI・レビュー・コンフリクト・自動修正の4枠を並列**に出し
-  （`components/dashboard/pull-request-health-chips.tsx`。CI枠は#3662の内訳を開く）、畳んだ行は
-  同じ判定から数えたopen PR数（`summary.pullRequestHealth`）を件数チップで出す。**件数は
+  持つ。PR一覧・PR詳細は**CI・レビュー・コンフリクト・自動修正の4枠を並列**に出す
+  （`components/dashboard/pull-request-health-chips.tsx`。CI枠は#3662の内訳を開く）。
+  **ブランチ画面は本番リリース工程だけを扱う**（#4540）。畳んだ行の件数チップ・ヘッダーの
+  「手が要るもの／待てば進むもの」は、同じ判定を**バンプPR・リリースPRだけ**に当てた数
+  （`summary.pullRequestHealth`）と候補の検証・マージ待ち・デプロイから決め、通常PRの
+  CI・レビュー・コンフリクト・修正・ユーザーのマージ待ち（旧`needsUserMerge`）は数えない。
+  展開した通常PR行は番号・タイトルのリンクとマージ導線だけを置き、結果バッジは並べない
+  （`PullRequestLine`の`showStatus`。リリース候補PRの行だけが渡す）。工程を止めている理由には
+  候補PRへのリンクを添える（`ReleaseCandidateVerificationReason`）。**件数は
   カテゴリごとのPR数で、同じPRが複数に数えられるため合計はPR数ではない。**
   根拠が無い状態は成功・完了に見せない（CIの待機/実行は`ciChecks[].status`が分かるときだけ区別、
   ジョブ終了でも判定が読めなければ「判定未記録」、旧HEADの判定は「再検証待ち」、
