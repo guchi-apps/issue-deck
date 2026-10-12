@@ -478,7 +478,6 @@ describe("buildBranchFlow", () => {
       pullRequestHealth: { counts: EMPTY_HEALTH_COUNTS, humanCount: 0, autoCount: 0 },
       activeLaneCount: 0,
       hasCiFailure: false,
-      needsUserMerge: false,
       openManualStepCount: 0,
       startedIssueCount: 0,
       readyIssueCount: 0,
@@ -1814,7 +1813,7 @@ describe("本番デプロイの状態（#1579）", () => {
 });
 
 describe("サマリー行の集計", () => {
-  it("CI失敗とユーザーのマージ待ちを拾う", () => {
+  it("通常PRのCI失敗は工程の集計に入らない", () => {
     const flow = build({
       pullRequests: [
         pullRequest({ number: 1, headRef: "issue-1", linkedIssueNumber: 1, ciState: "failure" }),
@@ -1830,14 +1829,10 @@ describe("サマリー行の集計", () => {
     });
 
     expect(flow.repositories[0].summary).toEqual({
-      pullRequestHealth: {
-        counts: { ...EMPTY_HEALTH_COUNTS, "ci-failed": 1 },
-        humanCount: 1,
-        autoCount: 0,
-      },
+      // 通常PRのCI失敗は本番リリース工程の集計に入らない（#4540）
+      pullRequestHealth: { counts: EMPTY_HEALTH_COUNTS, humanCount: 0, autoCount: 0 },
       activeLaneCount: 2,
       hasCiFailure: true,
-      needsUserMerge: true,
       openManualStepCount: 0,
       startedIssueCount: 0,
       readyIssueCount: 0,
@@ -1849,7 +1844,7 @@ describe("サマリー行の集計", () => {
     });
   });
 
-  it("通常PR・バンプPR・リリースPRを数え、マージ済みPRで水増ししない（#4015）", () => {
+  it("バンプPR・リリースPRだけを数え、通常PR・マージ済みPRで水増ししない（#4015・#4540）", () => {
     const flow = build({
       pullRequests: [
         pullRequest({ id: `${REPO}#1`, number: 1, headRef: "issue-1", linkedIssueNumber: 1, mergeable: false }),
@@ -1885,9 +1880,10 @@ describe("サマリー行の集計", () => {
     });
 
     const { pullRequestHealth } = flow.repositories[0].summary;
+    // 通常PR（#1）のコンフリクトは数えず、バンプPR・リリースPRの失敗だけを数える（#4540）
     expect(pullRequestHealth.counts["ci-failed"]).toBe(2);
-    expect(pullRequestHealth.counts.conflict).toBe(1);
-    expect(pullRequestHealth.humanCount).toBe(3);
+    expect(pullRequestHealth.counts.conflict).toBe(0);
+    expect(pullRequestHealth.humanCount).toBe(2);
   });
 
   it("未完了の手作業を数える。同じIssueが複数レーンにあっても1件（#1586）", () => {

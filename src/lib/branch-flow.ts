@@ -9,7 +9,6 @@ import {
   extractLinkedIssueNumber,
   isMergeJudgementPending,
   RELEASE_BRANCH_PREFIX,
-  requiresUserMerge,
 } from "@/lib/pull-request-list";
 import { summarizePullRequestHealth } from "@/lib/pull-request-health";
 import {
@@ -577,9 +576,9 @@ function buildRepository({
   const openLanePullRequests = lanePullRequests.filter(
     (pullRequest) => pullRequest.state === "open",
   );
-  // 通常PR・バージョンバンプPR・リリースPRを漏れなく数える（`hasCiFailure`と同じ母集団）
+  // 畳んだ行・ヘッダー件数の状態集計は本番リリース工程（バンプPR・リリースPR）だけを数える（#4540）。
+  // 通常PRのCI・レビュー・コンフリクト・修正状態はPR一覧・PR詳細が持つ。
   const summarizedPullRequests = [
-    ...openLanePullRequests,
     ...(releasePullRequest ? [releasePullRequest] : []),
     ...(bumpPullRequest ? [bumpPullRequest] : []),
   ];
@@ -593,7 +592,6 @@ function buildRepository({
       ...(releasePullRequest ? [releasePullRequest] : []),
       ...(bumpPullRequest ? [bumpPullRequest] : []),
     ].some((pullRequest) => pullRequest.ciState === "failure"),
-    needsUserMerge: openLanePullRequests.some(requiresUserMerge),
     // 既定で出す束を「次のリリースに乗る分」まで畳んだぶん（#1586）、畳んだ行で件数だけ出す。
     // 本番へ出た版に紐づいたまま残る手作業があるため、リポジトリ全体のレーンから数える。
     openManualStepCount: countOpenManualSteps([

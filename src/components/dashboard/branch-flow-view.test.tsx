@@ -206,7 +206,7 @@ describe("BranchFlowView", () => {
       expect(screen.queryByText("issue-1454")).toBeNull();
     });
 
-    it("CIが失敗しているリポジトリも畳んだまま並べる（#1932）", () => {
+    it("通常PRのCI失敗は畳んだ行にもヘッダーの件数にも出さない（#1932・#4540）", () => {
       renderFlow({
         pullRequests: [
           makePullRequest({ number: 1461, headRef: "issue-1454", ciState: "failure" }),
@@ -216,16 +216,19 @@ describe("BranchFlowView", () => {
         ],
       });
 
-      // 手が要ることは畳んだ行のピルとヘッダーの件数が伝える（開くのはユーザーの操作）
-      expect(screen.getByText("CI失敗")).toBeTruthy();
-      expect(screen.getByText(/手が要るもの1件/)).toBeTruthy();
+      // 通常PRの状態は本番リリース工程ではないので、バッジも件数も出さない（#4540）
+      expect(screen.queryByText("CI失敗")).toBeNull();
+      expect(screen.queryByText(/手が要るもの/)).toBeNull();
       expect(screen.queryByText("issue-1454")).toBeNull();
 
+      // 開いても個別PRの結果バッジは並べず、番号・タイトルのリンクだけが残る
       openRepository();
       expect(screen.getByText("issue-1454")).toBeTruthy();
+      expect(screen.queryByText("CI失敗")).toBeNull();
+      expect(screen.getByText(/#1461/)).toBeTruthy();
     });
 
-    it("ユーザーのマージ待ちは畳んだ行に出さず、ヘッダーの件数だけで伝える（#2172）", () => {
+    it("通常PRのユーザーのマージ待ちは畳んだ行にもヘッダーの件数にも出さない（#2172・#4540）", () => {
       renderFlow({
         pullRequests: [
           makePullRequest({
@@ -242,10 +245,10 @@ describe("BranchFlowView", () => {
 
       // 畳んだ行にピルは出さない（#2172）。文言が長く、スマホ幅で行が2段に折り返していた
       expect(screen.queryByText("ユーザーのマージが必要")).toBeNull();
-      expect(screen.getByText(/手が要るもの1件/)).toBeTruthy();
+      expect(screen.queryByText(/手が要るもの/)).toBeNull();
       expect(screen.queryByText("issue-1454")).toBeNull();
 
-      // 開けば従来どおりバッジとマージボタンが出る（#1469・#1756）
+      // 開けばマージの導線は従来どおり出る（#1469・#1756）
       openRepository();
       expect(screen.getByText("issue-1454")).toBeTruthy();
       expect(screen.getByText("ユーザーのマージが必要です")).toBeTruthy();
