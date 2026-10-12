@@ -115,7 +115,7 @@ export function PullRequestMergeChecks({
           </section>
         </div>
       ) : (
-        <div className="grid grid-cols-3 sm:grid-cols-6">{checks.map(renderButton)}</div>
+        <div className="grid grid-cols-3 xl:grid-cols-6">{checks.map(renderButton)}</div>
       )}
 
       {grouped && showCandidateNote && !candidate && candidateNote && (
