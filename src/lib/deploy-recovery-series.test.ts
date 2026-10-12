@@ -3,6 +3,10 @@ import { describe, expect, it } from "vitest";
 import {
   decideDeployRecovery,
   decideDeployRecoveryRelease,
+  deployFailureKey,
+  deployRecoveryStage,
+  DEPLOY_RECOVERY_MAX_RELEASE_ATTEMPTS,
+  parseDeployRecoveryFixPullRequest,
   DEPLOY_RECOVERY_RELEASE_TIMEOUT_MS,
   DEPLOY_RECOVERY_RETRY_WAIT_MS,
   type DeployRunObservation,
@@ -204,14 +208,95 @@ describe("decideDeployRecoveryRelease（#4007）", () => {
     expect(decide([r], true, later(DEPLOY_RECOVERY_RELEASE_TIMEOUT_MS))).toMatchObject({ action: "stop", reason: "deploy_cancelled" });
   });
 
-  it("1回目の失敗はdeploy-retryの再実行を待ち、再実行も失敗したら止める", () => {
+  it("1回目の失敗はdeploy-retryの再実行を待ち、再実行も失敗したら同じ系列を調査へ戻す", () => {
     const failed = run({ conclusion: "failure" });
     expect(decide([failed], false)).toEqual({ action: "wait" });
-    expect(decide([run({ conclusion: "failure", attempt: 2 })], false)).toMatchObject({ action: "stop", reason: "deploy_failed" });
-    expect(decide([failed], false, later(DEPLOY_RECOVERY_RETRY_WAIT_MS))).toMatchObject({ action: "stop", reason: "deploy_failed" });
+    expect(decide([run({ conclusion: "failure", attempt: 2 })], false)).toMatchObject({ action: "requeue" });
+    expect(decide([failed], false, later(DEPLOY_RECOVERY_RETRY_WAIT_MS))).toMatchObject({ action: "requeue" });
+  });
+
+  it("本番反映の上限時間を過ぎた失敗は戻さず人へ渡す", () => {
+    expect(decide([run({ conclusion: "failure", attempt: 2 })], false, later(DEPLOY_RECOVERY_RELEASE_TIMEOUT_MS))).toMatchObject({
+      action: "stop",
+      reason: "deploy_failed",
+    });
   });
 
   it("timed_outも失敗として扱う", () => {
-    expect(decide([run({ conclusion: "timed_out", attempt: 2 })], false)).toMatchObject({ action: "stop", reason: "deploy_failed" });
+    expect(decide([run({ conclusion: "timed_out", attempt: 2 })], false)).toMatchObject({ action: "requeue" });
+  });
+
+  it("前回と同じ署名の失敗が続いたら停滞として止める", () => {
+    const key = deployFailureKey("failure", ["deploy"]);
+    const failed = run({ conclusion: "failure", attempt: 2 });
+    const state = { ...release, releaseAttempts: 1, lastFailureKey: key };
+    expect(decideDeployRecoveryRelease(state, { now, runs: [failed], versionVerified: false, failureKey: key })).toMatchObject({
+      action: "stop",
+      reason: "release_stalled",
+    });
+    // 違う署名なら戻す
+    expect(
+      decideDeployRecoveryRelease(state, { now, runs: [failed], versionVerified: false, failureKey: deployFailureKey("failure", ["migrate"]) }),
+    ).toMatchObject({ action: "requeue" });
+  });
+
+  it("試行の上限に達したら戻さず止める", () => {
+    const failed = run({ conclusion: "failure", attempt: 2 });
+    const state = { ...release, releaseAttempts: DEPLOY_RECOVERY_MAX_RELEASE_ATTEMPTS - 1, lastFailureKey: "failure:a" };
+    expect(decideDeployRecoveryRelease(state, { now, runs: [failed], versionVerified: false, failureKey: "failure:b" })).toMatchObject({
+      action: "stop",
+      reason: "release_attempts_exhausted",
+    });
+  });
+});
+
+describe("releasingは進行中（#4451）", () => {
+  it("releasing・verifyingは進行中で、停止や自動更新の対象になる", () => {
+    expect(isDeployRecoveryActive("releasing")).toBe(true);
+    expect(isDeployRecoveryActive("verifying")).toBe(true);
+    expect(isDeployRecoveryActive("awaiting_release")).toBe(false);
+    expect(isDeployRecoveryActive("recovered")).toBe(false);
+  });
+
+  it("6段階の現在位置へ写す。止まっている状態は位置を持たない", () => {
+    expect(deployRecoveryStage("investigating")).toMatchObject({ index: 0, label: "原因を調査中" });
+    expect(deployRecoveryStage("fixing").index).toBe(1);
+    expect(deployRecoveryStage("awaiting_main_merge").index).toBe(2);
+    expect(deployRecoveryStage("releasing")).toMatchObject({ index: 3, label: "本番へ反映中" });
+    expect(deployRecoveryStage("verifying")).toMatchObject({ index: 4, label: "稼働確認中" });
+    expect(deployRecoveryStage("recovered")).toMatchObject({ index: 5, label: "完了" });
+    expect(deployRecoveryStage("needs_attention").index).toBe(-1);
+  });
+});
+
+describe("修正済み（already_fixed）の分岐（#4451）", () => {
+  const reported = { reportedCause: "already_fixed" as const };
+  it("修正済みのPRが確かめられるまで待つ", () => {
+    expect(decideDeployRecovery(series(), observed(reported))).toEqual({ action: "wait" });
+  });
+
+  it("マージ済みなら修正の工程を飛ばして復旧PRの工程へ進む（新しいPRは作らない）", () => {
+    const merged = { number: 4447, state: "closed" as const, merged: true };
+    expect(decideDeployRecovery(series({ scope: "fix_until_main" }), observed({ ...reported, pullRequest: merged }))).toEqual({
+      action: "transition",
+      status: "awaiting_main_merge",
+      cause: "already_fixed",
+      pullRequestNumber: 4447,
+    });
+    expect(decideDeployRecovery(series(), observed({ ...reported, pullRequest: merged }))).toMatchObject({ status: "awaiting_release" });
+  });
+
+  it("報告されたPRがマージされていなければ修正済みと扱わない", () => {
+    expect(decideDeployRecovery(series(), observed({ ...reported, pullRequest: openPr }))).toMatchObject({
+      action: "stop",
+      reason: "fix_not_merged",
+    });
+  });
+
+  it("修正済みのPR番号を最後の報告から読む", () => {
+    expect(
+      parseDeployRecoveryFixPullRequest(["<!-- issue-deck-deploy-recovery-fix-pr:4446 -->", "<!-- issue-deck-deploy-recovery-fix-pr:4447 -->"]),
+    ).toBe(4447);
+    expect(parseDeployRecoveryFixPullRequest(["なし", null])).toBeNull();
   });
 });

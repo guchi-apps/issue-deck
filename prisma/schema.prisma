@@ -1944,6 +1944,10 @@ model DeployRecoverySeries {
   releaseRunUrl             String?   @db.Text
   /// 対象版の稼働を確かめた時刻。**これが入るのは`recovered`のときだけ**
   recoveredAt               DateTime?
+  /// 本番反映後のdeploy失敗を同じ系列へ戻した回数と、直近の失敗の署名（失敗したジョブ名）。
+  /// **同じ署名の失敗が続いたら停滞として止める**（#4451）
+  releaseAttempts           Int       @default(0)
+  lastFailureKey            String?
   lastSweepAt               DateTime?
   createdAt                 DateTime  @default(now())
   updatedAt                 DateTime  @updatedAt

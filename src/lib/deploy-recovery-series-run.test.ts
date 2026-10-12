@@ -51,6 +51,8 @@ vi.mock("@/lib/db", () => ({
           pullRequestNumber: null,
           repairRoundsBase: 0,
           repairRoundsUsed: 0,
+          releaseAttempts: 0,
+          lastFailureKey: null,
           stopReason: null,
           stopDetail: null,
           lastSweepAt: null,
@@ -141,6 +143,7 @@ beforeEach(() => {
   fetchLatestDeployWorkflowRun.mockResolvedValue({ id: 100 });
   fetchOpenIssuesForRepo.mockResolvedValue([]);
   createIssue.mockResolvedValue({ number: 55 });
+  createComment.mockResolvedValue({});
   enqueueDispatchJob.mockResolvedValue({ ok: true, job: { id: "job1" } });
 });
 
@@ -237,5 +240,139 @@ describe("runDeployRecoverySweep", () => {
     await Promise.all([runDeployRecoverySweep({ hostName: "subpc" }), runDeployRecoverySweep({ hostName: "subpc" })]);
     expect(createIssue).toHaveBeenCalledTimes(1);
     expect(enqueueDispatchJob).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("本番反映後のdeploy失敗（#4451）", () => {
+  async function releasingSeries(over: Record<string, unknown> = {}) {
+    await start();
+    Object.assign(rows[0], {
+      status: "releasing",
+      issueNumber: 55,
+      pullRequestNumber: 12,
+      cause: "code",
+      repairRoundsUsed: 1,
+      releaseSha: "sha1",
+      releaseStartedAt: new Date(Date.now() - 60_000),
+      recoveryPullRequestNumber: 9,
+      lastSweepAt: null,
+      ...over,
+    });
+  }
+  const deployRuns = (conclusion: string) => {
+    githubFetch.mockImplementation(async (url: string) => {
+      if (url.includes("/actions/workflows/deploy.yml/runs?head_sha=sha1")) {
+        return jsonResponse({
+          workflow_runs: [
+            { id: 200, html_url: "https://github.com/o/r/actions/runs/200", created_at: new Date().toISOString(), head_sha: "sha1", status: "completed", conclusion, run_attempt: 2 },
+          ],
+        });
+      }
+      throw new Error(`unexpected ${url}`);
+    });
+  };
+
+  it("再実行も失敗したら、新しい系列を作らず同じ系列を調査へ戻して前の世代の記録を消す", async () => {
+    await releasingSeries();
+    deployRuns("failure");
+    const result = await runDeployRecoverySweep({ hostName: "subpc" });
+    expect(result.actions).toEqual([expect.objectContaining({ action: "requeue" })]);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      status: "starting",
+      releaseAttempts: 1,
+      lastFailureKey: "failure:deploy",
+      cause: null,
+      pullRequestNumber: null,
+      repairRoundsBase: 1,
+      recoveryPullRequestNumber: null,
+      releaseSha: null,
+      issueNumber: 55,
+      activeKey: "o/r",
+    });
+    expect(createComment).toHaveBeenCalledTimes(1);
+    // 次の巡回は同じIssueで実装を起動し直す（Issueは増やさない）
+    rows[0].lastSweepAt = null;
+    await runDeployRecoverySweep({ hostName: "subpc" });
+    expect(createIssue).not.toHaveBeenCalled();
+    expect(enqueueDispatchJob).toHaveBeenCalledWith(expect.objectContaining({ issueNumber: 55 }));
+    expect(rows[0]).toMatchObject({ status: "investigating" });
+  });
+
+  it("同じ署名の失敗が続いたら戻さずに止める", async () => {
+    await releasingSeries({ releaseAttempts: 1, lastFailureKey: "failure:deploy" });
+    deployRuns("failure");
+    await runDeployRecoverySweep({ hostName: "subpc" });
+    expect(rows[0]).toMatchObject({ status: "needs_attention", activeKey: null, stopReason: "release_stalled" });
+  });
+
+  it("稼働確認が済むまでは復旧済みにしない（deploy成功でも稼働SHA未確認なら確認中）", async () => {
+    await releasingSeries();
+    githubFetch.mockImplementation(async (url: string) => {
+      if (url.includes("/actions/workflows/deploy.yml/runs?head_sha=sha1")) {
+        return jsonResponse({
+          workflow_runs: [
+            { id: 200, html_url: "https://github.com/o/r/actions/runs/200", created_at: new Date().toISOString(), head_sha: "sha1", status: "completed", conclusion: "success", run_attempt: 1 },
+          ],
+        });
+      }
+      // deploy.yml本体に稼働SHAの照合が無い版
+      return { ok: true, status: 200, json: async () => ({ content: Buffer.from("name: deploy").toString("base64"), encoding: "base64" }) };
+    });
+    await runDeployRecoverySweep({ hostName: "subpc" });
+    expect(rows[0]).toMatchObject({ status: "verifying", activeKey: "o/r" });
+    expect(rows[0].recoveredAt).toBeUndefined();
+  });
+
+  it("本番反映中の系列は停止でき、その後は巡回が書き込まない", async () => {
+    await releasingSeries();
+    const { stopDeployRecoverySeries } = await import("@/lib/deploy-recovery-series-run");
+    await stopDeployRecoverySeries({ repositoryFullName: "o/r", seriesId: rows[0].id, userId: "u1", token: "t" });
+    expect(rows[0]).toMatchObject({ status: "stopped", activeKey: null, stopReason: "stopped_by_user" });
+    deployRuns("failure");
+    await runDeployRecoverySweep({ hostName: "subpc" });
+    expect(rows[0]).toMatchObject({ status: "stopped" });
+  });
+});
+
+describe("修正済みの報告（#4451）", () => {
+  it("報告されたPRがdevelopへマージ済みなら、新しいPRを作らず復旧PRの工程へ進む", async () => {
+    await start();
+    Object.assign(rows[0], { status: "investigating", issueNumber: 55, scope: "fix_until_main", dispatchedAt: new Date(Date.now() - 60_000), lastSweepAt: null });
+    githubFetch.mockImplementation(async (url: string) => {
+      if (url.endsWith("/pulls/4447")) {
+        return jsonResponse({ number: 4447, state: "closed", merged_at: "2026-10-12T00:00:00Z", merge_commit_sha: "mc1", base: { ref: "develop" }, head: { sha: "h1" } });
+      }
+      throw new Error(`unexpected ${url}`);
+    });
+    fetchCommentsForIssue.mockResolvedValue([
+      {
+        body: "developに修正済みです <!-- issue-deck-deploy-recovery-cause:already_fixed --> <!-- issue-deck-deploy-recovery-fix-pr:4447 -->",
+        created_at: new Date().toISOString(),
+        user: { login: "owner" },
+        author_association: "OWNER",
+      },
+    ]);
+    await runDeployRecoverySweep({ hostName: "subpc" });
+    expect(rows[0]).toMatchObject({ status: "awaiting_main_merge", cause: "already_fixed", pullRequestNumber: 4447, fixMergeCommitSha: "mc1" });
+    expect(createIssue).not.toHaveBeenCalled();
+  });
+
+  it("報告されたPRがdevelop向けでなければ修正済みと扱わず止める", async () => {
+    await start();
+    Object.assign(rows[0], { status: "investigating", issueNumber: 55, dispatchedAt: new Date(Date.now() - 60_000), lastSweepAt: null });
+    githubFetch.mockImplementation(async () =>
+      jsonResponse({ number: 4447, state: "closed", merged_at: "2026-10-12T00:00:00Z", merge_commit_sha: "mc1", base: { ref: "other" }, head: { sha: "h1" } }),
+    );
+    fetchCommentsForIssue.mockResolvedValue([
+      {
+        body: "<!-- issue-deck-deploy-recovery-cause:already_fixed --> <!-- issue-deck-deploy-recovery-fix-pr:4447 -->",
+        created_at: new Date().toISOString(),
+        user: { login: "owner" },
+        author_association: "OWNER",
+      },
+    ]);
+    await runDeployRecoverySweep({ hostName: "subpc" });
+    expect(rows[0]).toMatchObject({ status: "needs_attention", stopReason: "fix_not_merged" });
   });
 });
