@@ -181,6 +181,19 @@ describe("再検証の追加指摘", () => {
     expect(enqueueDispatchJob).toHaveBeenCalledTimes(2);
   });
 
+  it("恒久的な起動拒否はDBも停止にし、鍵を解放して次の巡回で再通知・再起動しない", async () => {
+    enqueueDispatchJob.mockResolvedValueOnce({ ok: false, rejection: "repository_not_found", message: "リポジトリが登録されていません" });
+    await runReleaseFixSweep({ hostName: "subpc" });
+    expect(state.rows[1]).toMatchObject({ status: "stopped", activeKey: null });
+    expect(String(state.rows[1].stopReason)).toContain("リポジトリが登録されていません");
+    const notified = createComment.mock.calls.length;
+
+    await runReleaseFixSweep({ hostName: "subpc" });
+    expect(enqueueDispatchJob).toHaveBeenCalledTimes(1);
+    expect(createComment).toHaveBeenCalledTimes(notified);
+    expect(state.rows).toHaveLength(2);
+  });
+
   it("後継が既にある旧世代は、起案も起動もせず引き継ぎ済みに畳む", async () => {
     state.rows[0].status = "stopped";
     state.rows[0].stopReason = "後継候補 #11 の再検証で指摘・失敗が残りました（世代 1）。後継候補から修正Issueを起案すると、同じ系列として続きます";

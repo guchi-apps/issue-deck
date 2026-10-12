@@ -875,8 +875,7 @@ async function startContinuation(ctx: SweepContext, series: ReleaseFixSeries, ho
   if (["already_queued", "session_alive", "agent_paused", "host_offline"].includes(enqueued.rejection)) return;
   const reason = `修正Issueの実装を自動で起動できませんでした（${enqueued.message}）。Issue詳細の「修正を開始」から起動してください`;
   if (series.stopReason === reason) return;
-  await db.releaseFixSeries.update({ where: { id: series.id }, data: { stopReason: reason } });
-  await notifyStop(ctx, [series], "stopped", reason);
+  await stopRows(ctx, [series.id], "stopped", reason);
 }
 
 /** 進行中の系列を1回分進める。poller（`scripts/subpc-dispatch-poller.sh`）が定期的に呼ぶ */
