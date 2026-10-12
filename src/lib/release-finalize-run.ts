@@ -166,7 +166,6 @@ async function loadReservations(repositoryFullName: string): Promise<(VersionRes
   return rows.map((r) => ({ id: r.id, version: r.version, candidateId: r.candidateId, status: r.status as VersionReservationStatus }));
 }
 
-/** 版を予約する。手放した版は取り直し、同時に取った側が負ければ`false`（ユニーク制約が競合を止める） */
 type ReserveInput = { repositoryFullName: string; candidateId: string; version: string; release: string[] };
 type ReservationTx = Pick<typeof db, "releaseVersionReservation">;
 
@@ -201,6 +200,7 @@ function isVersionUnavailable(error: unknown): boolean {
   return isUniqueConstraintError(error) || (error instanceof Error && error.message === "version_not_available");
 }
 
+/** 版を予約する。手放した版は取り直し、同時に取った側が負ければ`false`（ユニーク制約が競合を止める） */
 async function reserveVersion(input: ReserveInput): Promise<boolean> {
   try {
     await db.$transaction((tx) => reserveVersionIn(tx, input));

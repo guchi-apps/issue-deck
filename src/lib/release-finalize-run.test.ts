@@ -148,6 +148,13 @@ describe("requestRcFinalize", () => {
     expect(mocks.dispatch).not.toHaveBeenCalled();
   });
 
+  it("予約を取れなければversion_conflictで、workflowを起動しない", async () => {
+    mocks.resCreate.mockRejectedValueOnce(Object.assign(new Error("unique"), { code: "P2002" }));
+    const r = await requestRcFinalize({ ...input, requestKey: "reqkey0005" });
+    expect(r).toMatchObject({ ok: false, error: "version_conflict" });
+    expect(mocks.dispatch).not.toHaveBeenCalled();
+  });
+
   it("合格していない候補（契約が無い）ではバンプしない", async () => {
     mocks.loadRcOverview.mockResolvedValue(overview({ finalizeContract: null }));
     expect(await requestRcFinalize(input)).toEqual({ ok: false, error: "not_ready" });

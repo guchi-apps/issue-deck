@@ -1246,15 +1246,13 @@ export function MobileIssueDetail({
           related={
             <>
               {/* 子イシューの進捗（#1340）。畳んでいても完了率は行に残す（#1646） */}
-              {/* 親Issueの自動実行（#4536）。計画（#4535）を持つ親だけに出る */}
-              {subIssueRelations.children.length > 0 && (
-                <ParentRunSection
-                  repositoryFullName={issue.repositoryFullName}
-                  issueNumber={issue.number}
-                  hosts={dispatch.hosts}
-                  idPrefix="m-"
-                />
-              )}
+              {/* 親Issueの自動実行（#4536）。出すかどうかは計画（#4535）の有無で決まる（パネル自身が計画の無い親では何も描かない） */}
+              <ParentRunSection
+                repositoryFullName={issue.repositoryFullName}
+                issueNumber={issue.number}
+                hosts={dispatch.hosts}
+                idPrefix="m-"
+              />
               {hasSubIssueRelations && (
                 <IssueSubIssuesSection
                   relations={subIssueRelations}
