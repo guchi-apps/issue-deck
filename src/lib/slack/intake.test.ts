@@ -59,6 +59,7 @@ import {
   handleMessageEvent as handleWithEventId,
   processPendingRequest,
   resumeStalePendingRequests,
+  setTargetModelForTest,
   type IntakeContext,
   type SlackMessageEvent,
 } from "@/lib/slack/intake";
@@ -98,7 +99,18 @@ const baseRequest = {
 };
 
 const postedTexts = () => call.mock.calls.filter(([m]) => m === "chat.postMessage").map(([, b]) => (b as { text: string }).text);
-const issueCard = { type: "confirm_issue", repo: "guchi-apps/car-care", title: "車検の期限表示", body: "本文", duplicates: [] };
+const issueCard = { type: "confirm_issue", repo: "guchi-apps/car-care", title: "車検の期限表示", body: "## 目的\n車検の期限をホームで確認したい\n\n## 要件\n- 期限を表示する", duplicates: [] };
+const investigationCard = { type: "investigation", evidence: [{ label: "HomePage.tsx", url: "https://github.com/x", ref: null, fetchedAt: "" }], facts: [], inferences: [], unconfirmed: [], stopReason: null };
+const emptyContext = { repo: "guchi-apps/car-care", targets: [], actions: [] };
+/** 調査が成立し、案が揃った返信 */
+const investigated = (card: object = issueCard, over: object = {}) => ({ text: "調べました", cards: [investigationCard, card], needsConfirm: true, nextContext: emptyContext, ...over });
+const createdOutcome = (number = 300) => ({
+  ok: true,
+  text: `Issue #${number} を作成しました。`,
+  card: { type: "result", ok: true, title: "t", detail: null, htmlUrl: null },
+  action: { type: "create_issue", status: "created", repo: "guchi-apps/car-care", number, at: "", message: "" },
+});
+const ambiguousModel = async () => ({ ok: true as const, text: JSON.stringify({ repo: "", confidence: "low", candidates: ["guchi-apps/car-care", "guchi-apps/issue-deck"], reason: "手がかり不足" }) });
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -109,7 +121,7 @@ beforeEach(() => {
     mocks.requestFindUnique.mockResolvedValue(created);
     return created;
   });
-  mocks.requestUpdate.mockImplementation(async ({ data }: { data: object }) => ({ ...baseRequest, ...data }));
+  mocks.requestUpdate.mockImplementation(async ({ data }: { data: object }) => ({ ...((await mocks.requestFindUnique()) ?? baseRequest), ...data }));
   mocks.requestUpdateMany.mockResolvedValue({ count: 1 });
   mocks.requestFindMany.mockResolvedValue([]);
   mocks.eventCreate.mockResolvedValue({});
@@ -123,6 +135,8 @@ beforeEach(() => {
   mocks.issueFindFirst.mockResolvedValue(null);
   mocks.fetchIssuesForRepo.mockResolvedValue([]);
   mocks.fetchCommentsForIssue.mockResolvedValue([]);
+  mocks.executeConfirmedCard.mockResolvedValue(createdOutcome());
+  setTargetModelForTest(undefined);
 });
 
 const msg = (over: object = {}) => ({ type: "message", user: "U1", ts: "100.1", channel: "C1", text: "改善したい", ...over });
@@ -139,16 +153,45 @@ describe("イベントの受け付け", () => {
     expect(call).not.toHaveBeenCalled();
   });
 
-  it("新規投稿には👀と選択UIを返し、確定前はIssueも調査も始めない。返信は依頼者メンション付き", async () => {
+  it("リポジトリ名のある新規投稿は、選択も承認も無しで調査し、Issueを1件作って「起案しました」と返す", async () => {
+    mocks.handleChatMessage.mockResolvedValue(investigated());
     await handleMessageEvent(ctx, "T1", msg({ text: "car-careのホームに車検の期限表示がほしい" }));
     expect(call.mock.calls.some(([m, b]) => m === "reactions.add" && (b as { name: string }).name === "eyes")).toBe(true);
+    expect(mocks.handleChatMessage).toHaveBeenCalledTimes(1);
+    expect(mocks.executeConfirmedCard).toHaveBeenCalledTimes(1);
+    expect(mocks.requestUpdate).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ selectedRepo: "guchi-apps/car-care", targetBasis: expect.stringContaining("car-care") }) }));
     const texts = postedTexts();
     expect(texts).toHaveLength(1);
-    expect(texts[0].startsWith("<@U1> ")).toBe(true);
-    const blocks = (call.mock.calls.find(([m]) => m === "chat.postMessage")![1] as { blocks: { elements?: { initial_option?: { value: string } }[] }[] }).blocks;
-    expect(JSON.stringify(blocks)).toContain("guchi-apps/car-care");
+    expect(texts[0].startsWith("<@U1> ✅ こういう内容で起案しました")).toBe(true);
+    expect(texts[0]).toContain("guchi-apps/car-care");
+    expect(texts[0]).toContain("車検の期限表示");
+    expect(texts[0]).toContain("guchi-apps/car-care/issues/300");
+    expect(texts[0]).not.toContain("この案で起案する");
+    const posted = call.mock.calls.find(([m]) => m === "chat.postMessage")![1] as { blocks?: unknown };
+    expect(posted.blocks).toBeUndefined();
+  });
+
+  it("リポジトリ名を含まない依頼も、AIが許可候補から一意に判別できれば自動で起案する", async () => {
+    setTargetModelForTest(async () => ({ ok: true, text: JSON.stringify({ repo: "guchi-apps/car-care", confidence: "high", candidates: [], reason: "車検は車の整備アプリの機能" }) }));
+    mocks.handleChatMessage.mockResolvedValue(investigated());
+    await handleMessageEvent(ctx, "T1", msg({ text: "愛車の車検の期限が分かりにくい" }));
+    expect(mocks.executeConfirmedCard).toHaveBeenCalledTimes(1);
+    expect(mocks.requestUpdate).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ selectedRepo: "guchi-apps/car-care", targetBasis: expect.stringContaining("AIが候補から判別") }) }));
+  });
+
+  it("AIが候補外のリポジトリを答えても採用せず、対象を聞く", async () => {
+    setTargetModelForTest(async () => ({ ok: true, text: JSON.stringify({ repo: "evil/other", confidence: "high", candidates: [], reason: "x" }) }));
+    await handleMessageEvent(ctx, "T1", msg({ text: "改善したい" }));
     expect(mocks.handleChatMessage).not.toHaveBeenCalled();
     expect(mocks.executeConfirmedCard).not.toHaveBeenCalled();
+    expect(postedTexts()[0]).toContain("絞れませんでした");
+  });
+
+  it("権限外・未接続のowner/repoが明示された依頼は、そのリポジトリでは起案しない", async () => {
+    await handleMessageEvent(ctx, "T1", msg({ text: "guchi-apps/secret-app に機能を足したい" }));
+    expect(mocks.handleChatMessage).not.toHaveBeenCalled();
+    expect(mocks.executeConfirmedCard).not.toHaveBeenCalled();
+    expect(postedTexts()[0]).toContain("起案できません");
   });
 
   it("同じ親投稿の再処理（一意制約違反）では何も投稿しない", async () => {
@@ -192,17 +235,50 @@ describe("ack前の受付と、ack後の処理の再開（#4488）", () => {
     expect(call).not.toHaveBeenCalled();
   });
 
-  it("ack後に依頼を進めると選択UIを出し、awaiting_repoへ進める", async () => {
-    mocks.requestFindUnique.mockResolvedValue({ ...baseRequest, status: "received", permalink: null, selectorTs: null });
+  it("対象を絞れない依頼だけ、同じスレッドで候補（名称とowner/repo）を聞いてawaiting_repoへ進める。ボタンは出さない", async () => {
+    setTargetModelForTest(ambiguousModel);
+    mocks.requestFindUnique.mockResolvedValue({ ...baseRequest, text: "改善したい", status: "received", permalink: null, selectorTs: null });
     await processPendingRequest(ctx, "req-1");
     expect(mocks.requestUpdateMany).toHaveBeenCalledWith(
       expect.objectContaining({ where: { id: "req-1", status: "received", updatedAt: baseRequest.updatedAt } }),
     );
     expect(mocks.requestUpdate).toHaveBeenCalledWith(expect.objectContaining({ data: { permalink: "https://slack.example/p100" } }));
     expect(mocks.requestUpdate).toHaveBeenCalledWith(
-      expect.objectContaining({ data: { status: "awaiting_repo", selectorTs: "200.1", selectedRepo: null } }),
+      expect.objectContaining({ data: { status: "awaiting_repo", selectorTs: "200.1", selectedRepo: null, targetBasis: expect.stringContaining("一意に決められなかった") } }),
     );
-    expect(postedTexts()).toHaveLength(1);
+    const texts = postedTexts();
+    expect(texts).toHaveLength(1);
+    expect(texts[0]).toContain("guchi-apps/car-care");
+    expect(texts[0]).toContain("guchi-apps/issue-deck");
+    expect((call.mock.calls.find(([m]) => m === "chat.postMessage")![1] as { blocks?: unknown }).blocks).toBeUndefined();
+    expect(mocks.executeConfirmedCard).not.toHaveBeenCalled();
+  });
+
+  it("対象確認への回答（名前だけ）で確定し、再度の承認なしで調査・起案まで進む。以前の調査結果は流用しない", async () => {
+    setTargetModelForTest(ambiguousModel);
+    mocks.requestFindUnique.mockResolvedValue({ ...baseRequest, text: "改善したい", status: "awaiting_repo", conversationId: "conv-old", proposal: { stale: true } });
+    const accepted = await acceptMessageEvent(config, "T1", "E-ans", msg({ ts: "101.1", thread_ts: "100.1", text: "car-careです" }));
+    expect(accepted).toEqual({ kind: "queued", requestId: "req-1" });
+    expect(mocks.requestUpdate).toHaveBeenCalledWith({
+      where: { id: "req-1" },
+      data: expect.objectContaining({ status: "resuming", selectedRepo: null, conversationId: null, text: "改善したい\n\n（補足）car-careです" }),
+    });
+    expect(call).not.toHaveBeenCalled();
+
+    mocks.requestFindUnique.mockResolvedValue({ ...baseRequest, text: "改善したい\n\n（補足）car-careです", status: "resuming", targetBasis: "AIが一意に決められなかった" });
+    mocks.handleChatMessage.mockResolvedValue(investigated());
+    await processPendingRequest(ctx, "req-1");
+    expect(mocks.executeConfirmedCard).toHaveBeenCalledTimes(1);
+    expect(mocks.requestUpdate).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ selectedRepo: "guchi-apps/car-care", targetBasis: expect.stringContaining("利用者の回答") }) }));
+    expect(postedTexts().some((t) => t.includes("起案しました"))).toBe(true);
+  });
+
+  it("回答で権限外の対象が指定されたら、そのリポジトリでは起案しない", async () => {
+    mocks.requestFindUnique.mockResolvedValue({ ...baseRequest, text: "改善したい\n\n（補足）guchi-apps/secret-app", status: "resuming", targetBasis: "x" });
+    await processPendingRequest(ctx, "req-1");
+    expect(mocks.handleChatMessage).not.toHaveBeenCalled();
+    expect(mocks.executeConfirmedCard).not.toHaveBeenCalled();
+    expect(postedTexts()[0]).toContain("起案できません");
   });
 
   it("他で処理中（処理権を取れない）・待ち状態でない・巡回時点でまだ新しい行は進めない", async () => {
@@ -216,12 +292,13 @@ describe("ack前の受付と、ack後の処理の再開（#4488）", () => {
     expect(call).not.toHaveBeenCalled();
   });
 
-  it("ack後にプロセスが止まって受付のまま残った依頼は、巡回が拾い直して選択UIを出す", async () => {
+  it("ack後にプロセスが止まって受付のまま残った依頼は、巡回が拾い直して対象を判別し直す", async () => {
+    setTargetModelForTest(ambiguousModel);
     const now = new Date("2026-10-12T01:00:00Z");
     mocks.requestFindMany.mockImplementation(async ({ where }: { where: { status: string } }) =>
       where.status === "received" ? [{ id: "req-1" }] : [],
     );
-    mocks.requestFindUnique.mockResolvedValue({ ...baseRequest, status: "received", updatedAt: new Date("2026-10-12T00:00:00Z") });
+    mocks.requestFindUnique.mockResolvedValue({ ...baseRequest, text: "改善したい", status: "received", updatedAt: new Date("2026-10-12T00:00:00Z") });
     expect(await resumeStalePendingRequests(ctx, now)).toBe(1);
     expect(mocks.requestFindMany).toHaveBeenCalledWith(
       expect.objectContaining({ where: { status: "received", updatedAt: { lt: new Date("2026-10-12T00:58:00Z") } } }),
@@ -229,19 +306,19 @@ describe("ack前の受付と、ack後の処理の再開（#4488）", () => {
     expect(mocks.requestFindMany).toHaveBeenCalledWith(
       expect.objectContaining({ where: { status: "resuming", updatedAt: { lt: new Date("2026-10-12T00:30:00Z") } } }),
     );
-    expect(postedTexts().some((t) => t.includes("対象リポジトリ"))).toBe(true);
+    expect(postedTexts().some((t) => t.includes("対象のリポジトリを一つに絞れません"))).toBe(true);
   });
 
-  it("調査中（investigating）のまま止まった依頼は、巡回が拾い直して調査をやり直す（Issueは作らない）", async () => {
+  it("調査中（investigating）のまま止まった依頼は、巡回が拾い直して調査をやり直し、承認なしで1件作る", async () => {
     mocks.requestFindMany.mockImplementation(async ({ where }: { where: { status: string } }) =>
       where.status === "investigating" ? [{ id: "req-1" }] : [],
     );
     mocks.requestFindUnique.mockResolvedValue({ ...baseRequest, status: "investigating", selectedRepo: "guchi-apps/car-care" });
-    mocks.handleChatMessage.mockResolvedValue({ text: "案です", cards: [issueCard], needsConfirm: true, nextContext: { repo: "guchi-apps/car-care", targets: [], actions: [] } });
+    mocks.handleChatMessage.mockResolvedValue(investigated());
     expect(await resumeStalePendingRequests(ctx, new Date("2026-10-12T01:00:00Z"))).toBe(1);
     expect(mocks.handleChatMessage).toHaveBeenCalledTimes(1);
-    expect(mocks.executeConfirmedCard).not.toHaveBeenCalled();
-    expect(mocks.requestUpdate).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ status: "awaiting_confirm", confirmState: "pending" }) }));
+    expect(mocks.executeConfirmedCard).toHaveBeenCalledTimes(1);
+    expect(mocks.requestUpdateMany).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ status: "confirming", confirmState: "queued", proposal: expect.objectContaining({ confirmationId: expect.any(String) }) }) }));
   });
 
   it("処理権を取れなかった行は再開した件数に数えない", async () => {
@@ -260,7 +337,7 @@ describe("ack前の受付と、ack後の処理の再開（#4488）", () => {
       if (method === "chat.postMessage") throw new Error("slack down");
       return {};
     });
-    await handleMessageEvent(ctx, "T1", msg());
+    await handleMessageEvent(ctx, "T1", msg({ text: "改善したい" }));
     expect(mocks.requestUpdate).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ status: "failed" }) }));
 
     // 再開: ack前に`resuming`へ書き、ack後に選択UIを出し直す
@@ -270,15 +347,16 @@ describe("ack前の受付と、ack後の処理の再開（#4488）", () => {
     const accepted = await acceptMessageEvent(config, "T1", "E-resume", msg({ ts: "101.1", thread_ts: "100.1", text: "再開" }));
     expect(accepted).toEqual({ kind: "queued", requestId: "req-1" });
     expect(mocks.requestUpdate).toHaveBeenCalledWith({ where: { id: "req-1" }, data: { status: "resuming", failure: null } });
-    mocks.requestFindUnique.mockResolvedValue({ ...baseRequest, status: "resuming" });
+    setTargetModelForTest(ambiguousModel);
+    mocks.requestFindUnique.mockResolvedValue({ ...baseRequest, text: "改善したい", status: "resuming" });
     await processPendingRequest(ctx, "req-1");
     expect(mocks.requestUpdate).toHaveBeenCalledWith(
-      expect.objectContaining({ data: { status: "awaiting_repo", selectorTs: "300.1", selectedRepo: null } }),
+      expect.objectContaining({ data: expect.objectContaining({ status: "awaiting_repo", selectorTs: "300.1", selectedRepo: null }) }),
     );
   });
 
-  it("起案前の補足はack前にDBへ足して終える", async () => {
-    mocks.requestFindUnique.mockResolvedValue({ ...baseRequest, status: "awaiting_repo" });
+  it("調査中の補足はack前にDBへ足して終える", async () => {
+    mocks.requestFindUnique.mockResolvedValue({ ...baseRequest, status: "investigating" });
     const accepted = await acceptMessageEvent(config, "T1", "E5", msg({ ts: "101.1", thread_ts: "100.1", text: "スマホでも" }));
     expect(accepted).toEqual({ kind: "handled" });
     expect(mocks.requestUpdate).toHaveBeenCalledWith({ where: { id: "req-1" }, data: { text: `${baseRequest.text}\n\n（補足）スマホでも` } });
@@ -310,23 +388,21 @@ describe("対象の確定と起案", () => {
     expect(postedTexts().some((t) => t.includes("起案できません"))).toBe(true);
   });
 
-  it("確定した対象で調査し、Issue案を確認ボタン付きで出す（まだ作らない）", async () => {
+  it("旧フローの対象選択ボタンも、確定後は承認なしで調査・起案まで進む", async () => {
     mocks.requestFindUnique.mockResolvedValue({ ...baseRequest });
     mocks.requestUpdateMany.mockResolvedValue({ count: 1 });
-    mocks.handleChatMessage.mockResolvedValue({ text: "案です", cards: [issueCard], needsConfirm: true, nextContext: { repo: "guchi-apps/car-care", targets: [], actions: [] } });
+    mocks.handleChatMessage.mockResolvedValue(investigated());
     await handleInteraction(ctx, confirmPayload());
     expect(mocks.findRepositoryByFullName).toHaveBeenCalledWith("user-1", "guchi-apps/car-care");
-    expect(mocks.executeConfirmedCard).not.toHaveBeenCalled();
-    const proposalPost = postedTexts().find((t) => t.includes("この案で起案する"));
-    expect(proposalPost?.startsWith("<@U1> ")).toBe(true);
-    expect(mocks.requestUpdate).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ status: "awaiting_confirm", confirmState: "pending" }) }));
+    expect(mocks.executeConfirmedCard).toHaveBeenCalledTimes(1);
+    expect(postedTexts().some((t) => t.startsWith("<@U1> ✅") && t.includes("起案しました"))).toBe(true);
+    expect(postedTexts().some((t) => t.includes("この案で起案する"))).toBe(false);
   });
 
-  it("AIが別リポジトリの案を返したら確認待ちへ保存せず、再調査を案内する", async () => {
+  it("AIが別リポジトリの案を返したら作成せず、再調査を案内する", async () => {
     mocks.requestFindUnique.mockResolvedValue({ ...baseRequest });
-    mocks.handleChatMessage.mockResolvedValue({ text: "案です", cards: [{ ...issueCard, repo: "guchi-apps/issue-deck" }], nextContext: {} });
+    mocks.handleChatMessage.mockResolvedValue(investigated({ ...issueCard, repo: "guchi-apps/issue-deck" }));
     await handleInteraction(ctx, confirmPayload());
-    expect(mocks.requestUpdate).not.toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ status: "awaiting_confirm" }) }));
     expect(mocks.requestUpdate).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ status: "failed" }) }));
     expect(mocks.executeConfirmedCard).not.toHaveBeenCalled();
     expect(postedTexts().some((t) => t.includes("起案先が一致しません") && t.includes("再開"))).toBe(true);
@@ -348,6 +424,111 @@ describe("対象の確定と起案", () => {
     expect(mocks.handleChatMessage).not.toHaveBeenCalled();
     expect(mocks.executeConfirmedCard).not.toHaveBeenCalled();
     expect(postedTexts().some((t) => t.includes("起案済み") && t.includes("212"))).toBe(true);
+  });
+});
+
+describe("調査が成立しないときは自動作成しない（#4527）", () => {
+  const investigating = { ...baseRequest, status: "investigating", selectedRepo: "guchi-apps/car-care" };
+  const run = async () => {
+    mocks.requestFindUnique.mockResolvedValue(investigating);
+    await processPendingRequest(ctx, "req-1");
+  };
+  const expectStopped = () => {
+    expect(mocks.executeConfirmedCard).not.toHaveBeenCalled();
+    expect(mocks.requestUpdateMany).not.toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ status: "confirming" }) }));
+    expect(mocks.requestUpdate).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ status: "failed" }) }));
+    const text = postedTexts().at(-1) ?? "";
+    expect(text).toContain("未調査の案は作成していません");
+    expect(text).toContain("再開");
+  };
+
+  it("AI停止（調査に入れなかった）では、理由と再開方法を返してIssueを作らない", async () => {
+    mocks.handleChatMessage.mockResolvedValue({ text: "回答できませんでした：AIの利用上限", cards: [], needsConfirm: false, nextContext: emptyContext, unavailable: true });
+    await run();
+    expectStopped();
+  });
+
+  it("調査が途中で止まった（stopReasonあり）案は作成しない", async () => {
+    mocks.handleChatMessage.mockResolvedValue(investigated(issueCard, { cards: [{ ...investigationCard, stopReason: "時間切れ" }, issueCard] }));
+    await run();
+    expectStopped();
+  });
+
+  it("定型フォールバックの案（調査していない案）は作成しない", async () => {
+    mocks.handleChatMessage.mockResolvedValue({ text: "会話から作った案", cards: [issueCard], needsConfirm: true, nextContext: emptyContext, draftFallback: true });
+    await run();
+    expectStopped();
+  });
+
+  it("実装・Issueを読んだ根拠が無い案は作成しない", async () => {
+    mocks.handleChatMessage.mockResolvedValue(investigated(issueCard, { cards: [{ ...investigationCard, evidence: [] }, issueCard] }));
+    await run();
+    expectStopped();
+  });
+
+  it("似た既存Issueがあるときは作らず、リンクと状態を返し、先頭を追記先として残す", async () => {
+    const duplicates = [{ number: 250, title: "車検の期限を出す", htmlUrl: "https://github.com/guchi-apps/car-care/issues/250", state: "OPEN" }];
+    mocks.handleChatMessage.mockResolvedValue(investigated({ ...issueCard, duplicates }));
+    await run();
+    expect(mocks.executeConfirmedCard).not.toHaveBeenCalled();
+    expect(mocks.requestUpdate).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ status: "done", issues: [expect.objectContaining({ number: 250, role: "reused" })] }) }));
+    const text = postedTexts().at(-1) ?? "";
+    expect(text).toContain("新しいIssueは作りませんでした");
+    expect(text).toContain("issues/250");
+  });
+
+  it("案にならなかった（既存の対応で足りる等）ときは作らず、調査の説明を返す", async () => {
+    mocks.handleChatMessage.mockResolvedValue({ text: "#180 で本番反映済みです", cards: [investigationCard], needsConfirm: false, nextContext: emptyContext });
+    await run();
+    expect(mocks.executeConfirmedCard).not.toHaveBeenCalled();
+    expect(postedTexts().at(-1)).toContain("#180 で本番反映済み");
+  });
+
+  it("作成直前に権限を失っていたら、GitHubを更新しない", async () => {
+    mocks.handleChatMessage.mockResolvedValue(investigated());
+    mocks.repoFindMany.mockResolvedValueOnce([{ fullName: "guchi-apps/car-care", name: "car-care" }]).mockResolvedValueOnce([]);
+    await run();
+    expect(mocks.executeConfirmedCard).not.toHaveBeenCalled();
+  });
+
+  it("並行実行で処理権を取れなかったら作成しない（二重作成の防止）", async () => {
+    mocks.handleChatMessage.mockResolvedValue(investigated());
+    mocks.requestUpdateMany.mockResolvedValueOnce({ count: 1 }).mockResolvedValueOnce({ count: 0 });
+    await run();
+    expect(mocks.executeConfirmedCard).not.toHaveBeenCalled();
+  });
+});
+
+describe("結果返信の失敗からの再開（#4527）", () => {
+  const confirming = {
+    ...baseRequest,
+    status: "confirming",
+    confirmState: "queued",
+    selectedRepo: "guchi-apps/car-care",
+    proposal: { card: issueCard, splitFrom: null, attachTo: null, confirmationId: "op-1" },
+  };
+
+  it("GitHub成功後にSlack返信が失敗しても、Issueは作成済みで返信待ち（reply_pending）に残り、再作成しない", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    call.mockImplementation(async (method: string) => {
+      if (method === "chat.postMessage") throw new Error("slack down");
+      return {};
+    });
+    mocks.requestFindUnique.mockResolvedValue(confirming);
+    await processPendingRequest(ctx, "req-1");
+    expect(mocks.executeConfirmedCard).toHaveBeenCalledTimes(1);
+    expect(mocks.requestUpdate).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ status: "done", confirmState: "reply_pending", issues: [expect.objectContaining({ number: 300 })] }) }));
+    expect(mocks.requestUpdate).not.toHaveBeenCalledWith(expect.objectContaining({ data: { confirmState: "done" } }));
+  });
+
+  it("巡回は返信だけを再送し、Issueを作り直さない", async () => {
+    const pending = { ...confirming, status: "done", confirmState: "reply_pending", issues: [{ repo: "guchi-apps/car-care", number: 300, role: "primary" }], updatedAt: new Date("2026-10-12T00:00:00Z") };
+    mocks.requestFindMany.mockImplementation(async ({ where }: { where: { status: string } }) => (where.status === "done" ? [pending] : []));
+    expect(await resumeStalePendingRequests(ctx, new Date("2026-10-12T01:00:00Z"))).toBe(1);
+    expect(mocks.executeConfirmedCard).not.toHaveBeenCalled();
+    expect(mocks.fetchIssuesForRepo).not.toHaveBeenCalled();
+    expect(postedTexts().some((t) => t.includes("起案しました") && t.includes("issues/300"))).toBe(true);
+    expect(mocks.requestUpdate).toHaveBeenCalledWith(expect.objectContaining({ data: { confirmState: "done" } }));
   });
 });
 
@@ -431,7 +612,7 @@ describe("Issueの作成・追記", () => {
     mocks.fetchIssuesForRepo.mockResolvedValue([{ number: 300, state: "closed", body: "<!-- slack-intake-confirm: req-1/op-1 -->" }]);
     expect(await resumeStalePendingRequests(ctx, new Date("2026-10-12T01:00:00Z"))).toBe(1);
     expect(mocks.executeConfirmedCard).not.toHaveBeenCalled();
-    expect(mocks.requestUpdate).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ status: "done", confirmState: "done", issues: [expect.objectContaining({ repo: "guchi-apps/car-care", number: 300 })] }) }));
+    expect(mocks.requestUpdate).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ status: "done", confirmState: "reply_pending", issues: [expect.objectContaining({ repo: "guchi-apps/car-care", number: 300 })] }) }));
   });
 
   it("承認後GitHub更新前に停止した依頼は、巡回が保存済み案を1回作成する", async () => {
@@ -440,7 +621,7 @@ describe("Issueの作成・追記", () => {
     await processPendingRequest(ctx, "req-1");
     expect(mocks.executeConfirmedCard).toHaveBeenCalledTimes(1);
     expect(mocks.executeConfirmedCard.mock.calls[0][2].body).toContain("<!-- slack-intake-confirm: req-1/op-1 -->");
-    expect(mocks.requestUpdate).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ status: "done", confirmState: "done" }) }));
+    expect(mocks.requestUpdate).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ status: "done", confirmState: "reply_pending" }) }));
   });
 
   it("再開時のGitHub一覧取得失敗は未作成と解釈せず、起案しない", async () => {
@@ -460,7 +641,7 @@ describe("Issueの作成・追記", () => {
     await processPendingRequest(ctx, "req-1");
     expect(mocks.createComment).not.toHaveBeenCalled();
     expect(mocks.executeConfirmedCard).not.toHaveBeenCalled();
-    expect(mocks.requestUpdate).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ status: "done", confirmState: "done", issues: [expect.objectContaining({ number: 300, role: "reused" })] }) }));
+    expect(mocks.requestUpdate).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ status: "done", confirmState: "reply_pending", issues: [expect.objectContaining({ number: 300, role: "reused" })] }) }));
   });
 
   it("「やめる」はIssueを作らない", async () => {
