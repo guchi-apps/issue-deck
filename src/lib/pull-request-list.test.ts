@@ -143,6 +143,16 @@ describe("extractLinkedIssueNumber", () => {
 });
 
 describe("extractLinkedIssueNumbers", () => {
+  it("他リポジトリへの参照（owner/repo#番号）は自リポジトリのIssueとして拾わない（#4529）", () => {
+    expect(
+      extractLinkedIssueNumbers({
+        headRef: "fix/x",
+        title: "guchi-apps/vps#124 の件",
+        body: "see guchi-apps/docs#5 and #7",
+      }),
+    ).toEqual([7]);
+  });
+
   it("参照をすべて確度の高い順に返す（ブランチ名→タイトル→本文）", () => {
     expect(
       extractLinkedIssueNumbers({

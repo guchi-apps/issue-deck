@@ -257,6 +257,89 @@ describe("buildBranchFlow", () => {
     expect(flow.repositories[0].orphanIssues).toEqual([]);
   });
 
+  describe("#番号の参照先がPRの場合（#4529）", () => {
+    const oldRelease = () =>
+      pullRequest({
+        number: 4517,
+        headRef: "release-main/v8.56.2",
+        baseRef: "main",
+        kind: "release",
+        state: "closed",
+        merged: false,
+        title: "旧リリース",
+      });
+
+    it("本番PRだけを参照する修正PRは、Issueではなく修正対象PRとして出す", () => {
+      const flow = build({
+        issues: [],
+        pullRequests: [
+          oldRelease(),
+          pullRequest({
+            number: 4518,
+            headRef: "fix/release-4517-watch",
+            linkedIssueNumber: 4517,
+            linkedIssueNumbers: [4517],
+          }),
+        ],
+        branchStatuses: [branchStatus()],
+      });
+      const lane = allLanes(flow.repositories[0]).find((l) => l.branchName === "fix/release-4517-watch");
+      expect(lane?.issue).toBeNull();
+      expect(lane?.relatedIssues).toEqual([]);
+      expect(lane?.referencedPullRequests.map((p) => p.number)).toEqual([4517]);
+    });
+
+    it("通常Issueが別にあればその対応を保持し、PR参照は修正対象へ分ける", () => {
+      const flow = build({
+        issues: [issue({ number: 4508, title: "通常Issue" })],
+        pullRequests: [
+          oldRelease(),
+          pullRequest({
+            number: 4512,
+            headRef: "issue-4508",
+            linkedIssueNumber: 4517,
+            linkedIssueNumbers: [4517, 4508],
+          }),
+        ],
+        branchStatuses: [branchStatus()],
+      });
+      const lane = allLanes(flow.repositories[0]).find((l) => l.branchName === "issue-4508");
+      expect(lane?.issue?.number).toBe(4508);
+      expect(lane?.referencedPullRequests.map((p) => p.number)).toEqual([4517]);
+    });
+
+    it("PR一覧にもIssueキャッシュにも無い番号は種別を断定せず番号だけのIssue参照のまま残す", () => {
+      const flow = build({
+        issues: [],
+        pullRequests: [
+          pullRequest({
+            number: 20,
+            headRef: "fix/x",
+            linkedIssueNumber: 999,
+            linkedIssueNumbers: [999],
+          }),
+        ],
+        branchStatuses: [branchStatus()],
+      });
+      const [lane] = allLanes(flow.repositories[0]);
+      expect(lane.issue).toEqual({ number: 999, title: null, progress: null, state: null });
+      expect(lane.referencedPullRequests).toEqual([]);
+    });
+
+    it("Issueキャッシュにある番号はPRと同番号でもIssueとして扱う", () => {
+      const flow = build({
+        issues: [issue({ number: 50, title: "Issue" })],
+        pullRequests: [
+          pullRequest({ number: 50, headRef: "fix/other" }),
+          pullRequest({ number: 51, headRef: "fix/y", linkedIssueNumber: 50, linkedIssueNumbers: [50] }),
+        ],
+        branchStatuses: [branchStatus()],
+      });
+      const lane = allLanes(flow.repositories[0]).find((l) => l.branchName === "fix/y");
+      expect(lane?.issue?.number).toBe(50);
+    });
+  });
+
   it("対応Issueを特定できないPRはissueがnullになる", () => {
     const flow = build({
       pullRequests: [
