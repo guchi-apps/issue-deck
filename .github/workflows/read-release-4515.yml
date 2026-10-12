@@ -38,3 +38,4 @@ jobs:
             })().catch(e => { console.error(e.message); process.exitCode = 1; }).finally(() => db.$disconnect());
             NODE
 # Refresh final verification observation
+# Observe final results after runner completion
