@@ -31,6 +31,7 @@ export function PullRequestReviewFindings({
   pullRequestUrl,
   reviewRunUrl,
   repair,
+  responseAnchorId,
   className,
 }: {
   /** 読み取れたレビュー。記録が無ければnull（下の「記録がありません」を出す） */
@@ -51,6 +52,11 @@ export function PullRequestReviewFindings({
     availability?: RepairWorkflowAvailability;
     runningKind?: RepairKind | null;
   };
+  /**
+   * 指摘への対応パネル（#4482）の位置。渡すと、自動修正の対象が無い（要確認など）ときにも
+   * 「対応を選ぶ」への導線を出す。ログへのリンクだけが残る状態にしない
+   */
+  responseAnchorId?: string;
   className?: string;
 }) {
   const [isOpen, setIsOpen] = useState(true);
@@ -120,7 +126,18 @@ export function PullRequestReviewFindings({
       )}
 
       <div className="flex flex-wrap items-center gap-2 border-t bg-muted/50 px-3 py-1.5">
-        {repair ? (
+        {responseAnchorId && (!repair || repair.kinds.length === 0) ? (
+          <a
+            href={`#${responseAnchorId}`}
+            onClick={(event) => {
+              event.preventDefault();
+              document.getElementById(responseAnchorId)?.scrollIntoView({ block: "start", behavior: "smooth" });
+            }}
+            className="min-w-0 flex-1 text-[11px] text-primary hover:underline"
+          >
+            この指摘への対応（AIへの修正依頼・マージへ進む）は、指摘タブ上部の対応パネルから選べます
+          </a>
+        ) : repair ? (
           <PullRequestRepairButtons
             repositoryFullName={repair.repositoryFullName}
             pullRequestNumber={pullRequestNumber}

@@ -2955,7 +2955,7 @@ model SlackIntakeRequest {
   text           String   @db.Text
   /// 選択UIで確定した`owner/repo`。**処理の正本**
   selectedRepo   String?  @db.VarChar(200)
-  /// `awaiting_repo` / `investigating` / `awaiting_confirm` / `done` / `failed`
+  /// `received`（受付・ack前に保存）/ `resuming`（「再開」受付）/ `awaiting_repo` / `investigating` / `awaiting_confirm` / `done` / `failed`
   status         String   @db.VarChar(24)
   /// 失敗した段階と理由（再開方法の案内用）
   failure        String?  @db.Text

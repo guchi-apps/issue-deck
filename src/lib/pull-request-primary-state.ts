@@ -111,7 +111,7 @@ export function derivePrimaryState(pullRequest: PullRequestSummary): PrimaryStat
   }
   const review = currentReviewKind(pullRequest);
   if (review === "changes-requested") {
-    return state("review-findings", "レビュー指摘", "bad", "自動レビューが要修正と判定しています", {
+    return state("review-findings", "レビュー指摘", "bad", "自動レビューが要修正と判定しています。指摘を同じPRで直してから進めます", {
       needsAction: true,
       repairKinds,
     });
@@ -128,7 +128,7 @@ export function derivePrimaryState(pullRequest: PullRequestSummary): PrimaryStat
     );
   }
   if (review === "needs-check") {
-    return state("review-findings", "レビュー要確認", "warn", "自動レビューが要確認と判定しています。内容を読んで判断します", {
+    return state("review-findings", "レビュー要確認", "warn", "自動レビューが判断の要る指摘を挙げています。指摘を読み、AIへの修正依頼かこのままマージするかを選びます", {
       needsAction: true,
       repairKinds,
     });

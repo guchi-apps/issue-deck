@@ -67,12 +67,13 @@ const fetchPullRequest = vi.fn();
 vi.mock("@/lib/github/actions-api", () => ({ fetchPullRequest: (...a: unknown[]) => fetchPullRequest(...a) }));
 const createComment = vi.fn(async () => ({}));
 const createIssue = vi.fn(async () => ({ number: 999 }));
+const fetchIssueStateOrThrow = vi.fn();
 vi.mock("@/lib/github/issues-api", () => ({
+  fetchIssueStateOrThrow: (...a: unknown[]) => fetchIssueStateOrThrow(...a),
   addIssueLabels: vi.fn(async () => []),
   createComment: (...a: unknown[]) => (createComment as (...x: unknown[]) => unknown)(...a),
   createIssue: (...a: unknown[]) => (createIssue as (...x: unknown[]) => unknown)(...a),
   fetchIssueState: vi.fn(async () => "open"),
-  fetchIssueStateOrThrow: vi.fn(async () => "open"),
   updateIssue: vi.fn(async () => ({})),
 }));
 vi.mock("@/lib/github/release-api", () => ({
@@ -151,6 +152,7 @@ beforeEach(() => {
   });
   loadSummary.mockResolvedValue({ integration: section("passed"), aiReview: section("needs_check", { findings: [finding] }) });
   enqueueDispatchJob.mockResolvedValue({ ok: true, job: { id: "j1" } });
+  fetchIssueStateOrThrow.mockResolvedValue("open");
 });
 
 describe("再検証の追加指摘", () => {
@@ -214,6 +216,27 @@ describe("再検証の追加指摘", () => {
     expect(state.rows).toHaveLength(1);
     expect(state.rows[0]).toMatchObject({ status: "stopped" });
     expect(String(state.rows[0].stopReason)).toContain("上限");
+  });
+
+  it("親Issueの状態取得に失敗したら（403・429・5xx・不正な応答）新しいIssueを作らず、次の巡回で再試行する（#4488）", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    fetchIssueStateOrThrow.mockRejectedValueOnce(new Error("GitHub API request failed: 503"));
+    await runReleaseFixSweep({ hostName: "subpc" });
+    expect(fetchIssueStateOrThrow).toHaveBeenCalledWith("o", "r", 100, "t");
+    expect(createIssue).not.toHaveBeenCalled();
+    expect(state.rows).toHaveLength(1);
+    expect(state.rows[0].status).toBe("reverifying");
+
+    await runReleaseFixSweep({ hostName: "subpc" });
+    expect(createIssue).not.toHaveBeenCalled();
+    expect(state.rows[1]).toMatchObject({ issueNumber: 100, generation: 2 });
+  });
+
+  it("親Issueが閉じている・存在しないときだけ新しいIssueを作る", async () => {
+    fetchIssueStateOrThrow.mockResolvedValueOnce("closed");
+    await runReleaseFixSweep({ hostName: "subpc" });
+    expect(createIssue).toHaveBeenCalledTimes(1);
+    expect(state.rows[1]).toMatchObject({ issueNumber: 999, generation: 2 });
   });
 
   it("ラベルの解消に失敗しても継続は止めない", async () => {

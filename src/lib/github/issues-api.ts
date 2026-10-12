@@ -331,7 +331,8 @@ export async function fetchIssueState(
 
 /**
  * `fetchIssueState`と違い、**「存在しない（404・410）」と「取得に失敗した」を区別する。**
- * 存在しなければ`null`、401を含むそれ以外の非成功応答（403・429・5xxなど）は`GithubApiError`を投げる（#4488）。
+ * 存在しなければ`null`、401を含むそれ以外の非成功応答（403・429・5xxなど）と、200でも本文が不正（JSONでない・
+ * stateがopen/closedでない）な応答は`GithubApiError`を投げる（#4488）。
  * 取得失敗を「存在しない」と読んで新しいIssueを作る、といった誤判定を避けたい呼び出し側が使う。
  */
 export async function fetchIssueStateOrThrow(
@@ -344,8 +345,11 @@ export async function fetchIssueStateOrThrow(
   const res = await githubFetch(url, token);
   if (res.status === 404 || res.status === 410) return null;
   if (!res.ok) throw new GithubApiError(res.status, `GitHub API request failed: ${res.status} ${url}`);
-  const issue: { state?: unknown } = await res.json().catch(() => ({}));
-  return issue.state === "closed" ? "closed" : issue.state === "open" ? "open" : null;
+  // 200でも本文が読めない・stateが想定外なら「存在しない」ではなく取得失敗として投げる（不存在と読むと新しいIssueを作る）
+  const issue: { state?: unknown } | null = await res.json().catch(() => null);
+  const state = issue && typeof issue === "object" ? issue.state : undefined;
+  if (state === "open" || state === "closed") return state;
+  throw new GithubApiError(res.status, `GitHub API returned an unreadable issue state: ${url}`);
 }
 
 /**
