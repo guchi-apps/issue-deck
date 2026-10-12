@@ -131,6 +131,13 @@ describe("requestRcFinalize", () => {
     expect(mocks.resCreate).not.toHaveBeenCalled();
   });
 
+  it("自予約がmainの前進で無効なら、従来どおりautoで渡す", async () => {
+    mocks.resFindMany.mockResolvedValue([{ id: "r1", version: "2.12.0", candidateId: "c1", status: "reserved" }]);
+    await requestRcFinalize({ ...input, bumpKind: null, requestKey: "reqkey0003" });
+    const sent = JSON.parse(mocks.dispatch.mock.calls[0][3] as string);
+    expect(sent).toMatchObject({ bumpKind: "auto", version: "2.12.0" });
+  });
+
   it("合格していない候補（契約が無い）ではバンプしない", async () => {
     mocks.loadRcOverview.mockResolvedValue(overview({ finalizeContract: null }));
     expect(await requestRcFinalize(input)).toEqual({ ok: false, error: "not_ready" });

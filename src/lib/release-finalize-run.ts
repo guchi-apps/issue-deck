@@ -335,7 +335,7 @@ export async function requestRcFinalize(
           preBaseSha: contract.baseSha,
           preHeadSha: contract.headSha,
           reservedVersion,
-          bumpKind: input.bumpKind,
+          bumpKind: effectiveBumpKind,
           bumpKindSource: input.bumpKind === null ? "auto" : "manual",
           status: "requested",
           requestKey: finalizationRequestKey,
