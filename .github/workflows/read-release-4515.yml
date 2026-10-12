@@ -28,8 +28,8 @@ jobs:
             (async () => {
               const rows = await db.releaseVerification.findMany({
                 where: {
-                  repositoryFullName: "guchi-apps/issue-deck",
-                  pullRequestNumber: 4515,
+                  repoFullName: "guchi-apps/issue-deck",
+                  prNumber: 4515,
                   baseSha: "b1e656c68e6d545e7136e935af7be472f3056418",
                   headSha: "757781a15f973d75167aabe808093a9193ab5e2d",
                 },
