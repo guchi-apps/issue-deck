@@ -24,6 +24,7 @@ import { PullRequestChecksStrip } from "@/components/dashboard/pull-request-chec
 import { PullRequestAiReviewJobs } from "@/components/dashboard/pull-request-ai-review-jobs";
 import { PullRequestFileList } from "@/components/dashboard/pull-request-file-list";
 import { PullRequestReviewRound } from "@/components/dashboard/pull-request-review-round";
+import { PullRequestReadyButton } from "@/components/dashboard/pull-request-ready-button";
 import { PullRequestMergeButton } from "@/components/dashboard/pull-request-merge-button";
 import { PullRequestMergeHoldNotice } from "@/components/dashboard/pull-request-merge-hold";
 import { PullRequestRepairButtons } from "@/components/dashboard/pull-request-repair-buttons";
@@ -386,6 +387,15 @@ export function PullRequestDetail({
                   availability={pullRequest.repairWorkflowAvailability}
                   runningKind={pullRequest.repairRun?.kind ?? null}
                 />
+                {pullRequest.draft && pullRequest.state === "open" && !pullRequest.merged && (
+                  <PullRequestReadyButton
+                    pullRequest={pullRequest}
+                    onChanged={() => {
+                      onRefresh();
+                      onUpdated?.();
+                    }}
+                  />
+                )}
                 {canMergeFromDeck(pullRequest) && (
                   <PullRequestMergeButton
                     pullRequest={pullRequest}
