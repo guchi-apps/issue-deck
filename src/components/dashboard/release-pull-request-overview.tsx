@@ -78,7 +78,7 @@ function ReleaseCandidateChecks({ pullRequest }: { pullRequest: PullRequestSumma
         ))}
       </div>
       {release.candidate && candidateIsSelf && (
-        <p className="mt-1 text-[11px] text-muted-foreground">共通結果の対象: {describeCandidateTarget(release.candidate)}</p>
+        <p className="mt-1 text-xs text-muted-foreground">共通結果の対象: {describeCandidateTarget(release.candidate)}</p>
       )}
       {open && <CheckDetail check={candidateIsSelf || !open.common ? open : unavailable(open)} />}
     </div>
@@ -109,8 +109,8 @@ function CheckButton({ check, expanded, onToggle }: { check: MergeCheckItem; exp
         expanded && "bg-muted",
       )}
     >
-      <span className="text-[11px] leading-4 text-muted-foreground">{check.shortLabel.replace("〔共通〕", "")}</span>
-      <span className={cn("text-[13px] leading-5 font-bold", TONE_TEXT[check.tone])}>
+      <span className="text-sm leading-5 text-muted-foreground">{check.shortLabel.replace("〔共通〕", "")}</span>
+      <span className={cn("text-sm leading-5 font-bold", TONE_TEXT[check.tone])}>
         <span aria-hidden="true">{check.mark}</span> {check.state}
       </span>
     </button>
