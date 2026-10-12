@@ -34,10 +34,18 @@ describe("evaluateRollout", () => {
   });
 
   it("前提不足は設定不足で、実走済みでも検証済みにしない", () => {
-    for (const repo of ["guchi-apps/asset-manager"]) {
+    const repo = "guchi-apps/gap-fixture";
+    (RELEASE_VERIFICATION_REPOS as Record<string, unknown>)[repo] = {
+      enforced: false,
+      integrationCommands: ["npm ci"],
+      setupGaps: ["テスト用の前提不足"],
+    };
+    try {
       const row = evaluateRollout({ fullName: repo, hosts: [host([repo])], latest: passedBoth });
       expect(row.status, repo).toBe("setup_missing");
       expect(row.reasons.length).toBeGreaterThan(0);
+    } finally {
+      delete (RELEASE_VERIFICATION_REPOS as Record<string, unknown>)[repo];
     }
   });
 
