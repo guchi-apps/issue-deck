@@ -8,12 +8,33 @@ jobs:
   status:
     runs-on: ubuntu-latest
     steps:
-      - name: Read current validation states
+      - name: Read stored validation results on the deployment host
+        uses: appleboy/ssh-action@v1
         env:
-          PROGRESS_REPORT_SECRET: ${{ secrets.PROGRESS_REPORT_SECRET }}
-        run: |
-          set -euo pipefail
-          printf 'Authorization: Bearer %s\n' "$PROGRESS_REPORT_SECRET" > "$RUNNER_TEMP/verify-auth"
-          chmod 600 "$RUNNER_TEMP/verify-auth"
-          curl --fail-with-body --silent --show-error --max-time 60 -H @"$RUNNER_TEMP/verify-auth" -H 'Content-Type: application/json' --data '{"action":"status","repository":"guchi-apps/issue-deck","pullRequest":4515,"baseSha":"b1e656c68e6d545e7136e935af7be472f3056418","headSha":"757781a15f973d75167aabe808093a9193ab5e2d"}' 'https://issuedeck.gucchii.com/api/dispatch/release-verify' | tee "$RUNNER_TEMP/status.json"
-          cat "$RUNNER_TEMP/status.json" >> "$GITHUB_STEP_SUMMARY"
+          TARGET_DIR: ${{ secrets.TARGET_DIR }}
+        with:
+          host: ${{ secrets.HOST }}
+          username: ${{ secrets.USERNAME }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: ${{ secrets.SSH_PORT }}
+          envs: TARGET_DIR
+          script: |
+            set -e
+            cd "$TARGET_DIR"
+            node <<'NODE'
+            require("dotenv").config({ path: ".env", quiet: true });
+            const { PrismaClient } = require("@prisma/client");
+            const db = new PrismaClient();
+            (async () => {
+              const rows = await db.releaseVerification.findMany({
+                where: {
+                  repositoryFullName: "guchi-apps/issue-deck",
+                  pullRequestNumber: 4515,
+                  baseSha: "b1e656c68e6d545e7136e935af7be472f3056418",
+                  headSha: "757781a15f973d75167aabe808093a9193ab5e2d",
+                },
+                select: { kind: true, state: true, summary: true, findings: true, unverifiedScope: true, message: true },
+              });
+              console.log("RELEASE_4515_RESULT=" + JSON.stringify(rows));
+            })().catch(e => { console.error(e.message); process.exitCode = 1; }).finally(() => db.$disconnect());
+            NODE
