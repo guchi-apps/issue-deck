@@ -709,7 +709,7 @@ Claude Codeは`Stop`を飛ばさないため、pollerが自動再開を上限ま
   `Stop`でラベルが外れるが、人がまだ続け方を指示していないことがある。外すのは人の操作に任せる
 - 境界は`scripts/session-notify-activity.test.mjs`と
   `src/lib/dispatch/session-escalation.test.ts`が固定している
-- **原因（`interrupt_reason`）は5つ（`question_asked`は#3447）**——`api_error`・`tool_call_stall`・`classifier_blocked`・
+- **原因（`interrupt_reason`）は6つ（`question_asked`は#3447、`plan_not_presented`は#4562）**——`api_error`・`tool_call_stall`・`classifier_blocked`・
   `turn_stall`（Codexのターンが閉じないまま止まった形。#3174）。`session-notify.sh`は値を
   そのまま通すだけで、受け入れる一覧を持つのは`SESSION_INTERRUPTED_REASONS`
   （`src/lib/dispatch/session-state.ts`）だけにしてある
@@ -855,6 +855,47 @@ guchi-apps/aide#253で実際に起きた。`gh pr create`が拒否され（11:55
 - 境界は`scripts/session-notify-activity.test.mjs`と
   `src/lib/dispatch/session-escalation.test.ts`が固定している
 
+### 計画ファイルを書いたまま、提示せずに応答を終えることがある（#4562）
+
+#4496では、計画ファイルを`Write`したあと「計画ファイルを書き終えました。次の応答で承認を依頼
+します。」という文章だけで応答を終えた（Claude Code 2.1.296・sonnet-5-5）。疑問符が無いので
+`question_asked`（#3447）にも掛からず、`Stop`は通常の応答終了として報告され、画面は「実行中・
+操作は不要です」「計画を作成中」のまま30分放置された（人が手で再開した）。
+
+**文章では判定しない。** `Stop`の時点で転記を読み、次がそろったときだけ「計画を提示していない」とみなす
+（`plan_not_presented_key`）。
+
+- 計画モード中——最後の`attachment.type == "plan_mode"`が最後の`plan_mode_exit`より後。
+  `permission_mode`が渡ってきて`plan`以外なら対象外
+- 最後の計画ファイル（`~/.claude/plans/`直下の`.md`）への`Write`/`Edit`が、最後の`ExitPlanMode`
+  の呼び出しより後（＝書き直した計画をまだ提示していない）
+- Codexのセッション・サブエージェントの行（`isSidechain`）は読まない。文章での問いかけで
+  終えた応答は`question_asked`を優先する
+
+**1回目は`Stop`フックの`{"decision":"block","reason":…}`で差し戻す。** Claude Codeが`reason`を
+指示として同じターンを続ける。`send-keys`は使わず、`ExitPlanMode`の差し戻し（#3136）と同じく
+フックの判定として返すので、[gates.md](gates.md)の例外は増えない。文面は固定で、提示
+（`ExitPlanMode`）だけを求め承認は促さない。提示されれば従来の`PreToolUse:ExitPlanMode`経路で
+計画がIssueと画面に載り、人が承認する。
+
+**差し戻しで続けたターン（`stop_hook_active`）でも提示しなかったら、`plan_not_presented`で
+引き上げる**（Issueコメント＋`00.check-user`＋`01.check-blocked`＋様子「入力待ち」＋停滞パネル）。
+コメントとパネルには「計画はまだ提示されておらず、承認できる状態ではない」と明記する。
+
+- 印は`~/.local/state/issue-deck/sessions/plan-not-presented/`に、セッションと「最後の計画書き込みの
+  tool_use id」ごとに1つ（`blocked`→`notified`）。同じ書き込みで差し戻すのも引き上げるのも1回だけ
+- 引き上げの送信に失敗したら`notified`にせず、次の`Stop`で送り直す
+- 人の指示のあとに計画を書き直して同じ形で止まった場合は、新しい書き込みとしてもう一度だけ差し戻す
+  （差し戻しの連鎖は`stop_hook_active`で止まる）
+- 境界は`scripts/session-notify-plan-unpresented.test.mjs`が固定している
+
+**適用範囲。** フックは呼ばれるたびに`session-notify.sh`を読み直す。本体チェックアウトから
+フックを走らせているセッション（2026-10時点のサブPCはこの形。#4496・#4562の転記で確認）は、
+チェックアウトの更新（画面の「更新して再起動」かサブPCの自動更新）のあと、**走っている
+セッションにも次の`Stop`から効く**。同期コピー（`~/.cache/issue-deck/launcher-scripts/<SHA>/`）で
+起動したセッションは起動時の版のままで、developへ入ったあとに起動したセッションから効く。
+issue-deck以外のリポジトリのセッションも同じスクリプトを使うため、共有ワークフローの配布は要らない。
+
 ### 停滞からの復旧は画面から送れる（#2886）
 
 **引き上げ（`supervisor:session-interrupted`）はIssueコメントと`00.check-user`にしか残って
@@ -887,7 +928,10 @@ guchi-apps/aide#253で実際に起きた。`gh pr create`が拒否され（11:55
   「更新して再起動」でサブPCのチェックアウトとpollerを更新する
 - **停滞かどうかは書き戻しではなく追い越しで判定する**（`describeSessionStall`）。
   `activityAt`・`stepSeenAt`が`interruptedAt`より新しくなればパネルは消える。解除の受け口を
-  作ると、それが飛ばなかったときに「復旧済みなのにパネルが出たまま」が残る
+  作ると、それが飛ばなかったときに「復旧済みなのにパネルが出たまま」が残る。**ただし許可のツールを
+  持たない「入力待ち」は追い越しに数えない**（#4562）。`Stop`起点の引き上げ（`question_asked`・
+  `classifier_blocked`・`plan_not_presented`）は直後に様子を入力待ちにするため、数えるとパネルが
+  一度も出ていなかった
 - **`classifier_blocked`だけは「これを送れば直る」文面が無い**（拒否そのものが妥当な挙動）。
   並べるのは人が選ぶ続け方（別の手段へ振る／人が代わりに実行すると伝える）の2つ
 - 境界は`src/lib/dispatch/session-stall.test.ts`と

@@ -88,7 +88,7 @@ import { findPlanRequestForIssue } from "@/lib/dispatch/session-plan-request";
 import { resolvePlanReviewListState } from "@/lib/dispatch/plan-review-list-state";
 import { PlanReviewStateBadge } from "@/components/dashboard/plan-review-state-badge";
 import { findQuestionRequestForIssue } from "@/lib/dispatch/session-question-request";
-import { resolveIssueAttention } from "@/lib/issue-attention-state";
+import { resolveIssueAttention, resolveSessionAttentionFlags } from "@/lib/issue-attention-state";
 import { shouldEmphasizeRemoteControl } from "@/lib/remote-control-attention";
 import type { DispatchSessionView } from "@/lib/dispatch/session-state";
 import { formatDateTime, formatTimeOfDay } from "@/lib/format-date-time";
@@ -1081,6 +1081,8 @@ export function IssueList({
       mergePending,
       planReviewState,
       dependencyWaitLabel: dependencyWait ? `#${dependencyWait.dependency.number}` : null,
+      // 応答を終えた・停滞したセッションを「実行中」と言わない（#4562）
+      ...resolveSessionAttentionFlags(issueSession),
       reserved: nightlyRunMark !== null,
       // 実行キューの待ちは進捗バー（`WorkflowStepBadge`・`QueueStepBadge`）が言うので、
       // 同じ行で2回言わせない。詳細は`queueLabel`を渡す
