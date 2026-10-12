@@ -1451,6 +1451,7 @@ function NextReleaseCard({
   unreleased,
   latestReleaseMergedAt,
   releaseButton,
+  deployButton,
   onMerged,
 }: {
   repository: BranchFlowRepository;
@@ -1459,7 +1460,10 @@ function NextReleaseCard({
   /** 次のリリースで反映されるPRの件数（developにあってmainに無いもの。画面上部の「未リリース」と同じ値） */
   unreleased: UnreleasedSummary;
   latestReleaseMergedAt: string | null;
+  /** 「次のバージョン」カードの中に置く「リリースする」（#4532） */
   releaseButton?: React.ReactNode;
+  /** 「本番稼働中」カードの中に置く「本番へ再デプロイ」（#4532）。出さない条件は呼び出し側が判定する */
+  deployButton?: React.ReactNode;
   onMerged: (pullRequest: PullRequestSummary) => void;
 }) {
   const refreshFlow = useContext(BranchFlowRefreshContext);
@@ -1487,6 +1491,7 @@ function NextReleaseCard({
           {latestReleaseMergedAt && (
             <dd className="text-muted-foreground">{formatMonthDayTime(latestReleaseMergedAt)} にリリース</dd>
           )}
+          {deployButton && <dd className="mt-1">{deployButton}</dd>}
         </div>
         <div className="min-w-0 rounded-md border px-2.5 py-1.5">
           <dt className="text-muted-foreground">次のバージョン</dt>
@@ -1504,17 +1509,23 @@ function NextReleaseCard({
               </GithubReferenceLink>
             ) : group?.bumpPullRequest ? (
               "バージョン更新のPRを処理中"
-            ) : group ? (
-              "リリースはまだ作成していません"
-            ) : (
+            ) : group ? null : (
               "次に公開する変更はありません"
             )}
           </dd>
+          {releaseButton && <dd className="mt-1">{releaseButton}</dd>}
         </div>
-        <div className="col-span-2 min-w-0 rounded-md border px-2.5 py-1.5">
-          <dt className="text-muted-foreground">次のリリースで反映されるPR</dt>
+        <div className="min-w-0 rounded-md border px-2.5 py-1.5">
+          <dt className="text-muted-foreground">反映待ちのPR</dt>
           <dd className="text-sm font-semibold">{`${unreleased.count}${unreleased.unit}`}</dd>
           <dd className="text-muted-foreground">mainへ未反映</dd>
+        </div>
+        <div className="min-w-0 rounded-md border px-2.5 py-1.5">
+          <dt className="text-muted-foreground">次のバージョンに登録済み</dt>
+          <dd className="text-sm font-semibold">{`${group?.version ? group.lanes.length : 0}件`}</dd>
+          <dd className="text-muted-foreground">
+            {group?.version ? "このバージョンに含まれる" : "バージョン作成後に表示"}
+          </dd>
         </div>
       </dl>
 
@@ -1533,9 +1544,7 @@ function NextReleaseCard({
                 label="本番公開へ進む"
                 className="shrink-0"
               />
-            ) : (
-              releaseButton
-            )}
+            ) : null}
             {manualSteps.map((step) => (
               <GithubReferenceLink
                 key={step.number}
@@ -1731,6 +1740,18 @@ function ReleaseFlowGraph({
           unreleased={unreleased}
           latestReleaseMergedAt={latestReleaseMergedAt}
           releaseButton={nextGroup ? releaseButtonFor(nextGroup) : undefined}
+          deployButton={
+            repository.canTriggerDeploy && !deployFailure ? (
+              <RepositoryDeployButton
+                repositoryFullName={repository.repositoryFullName}
+                currentVersion={repository.release.latestVersion}
+                deployedAt={latestReleaseMergedAt}
+                unreleased={unreleased}
+                isPending={deployTriggerPending}
+                onTriggered={onDeployTriggered}
+              />
+            ) : undefined
+          }
           onMerged={onMerged}
         />
       )}
@@ -1747,12 +1768,10 @@ function ReleaseFlowGraph({
         {unreleased.count > 0 && (
           <span>未リリース {formatUnreleasedSummary(unreleased)}</span>
         )}
-        {/* **リリースの束ではなくこの行に置く**（#2020）。束は畳まれたり本番反映済みで
-            隠れたりするため、束に付けると押したいときに画面から消える。ここなら
-            リポジトリを開いている間はつねに同じ位置にある。
-            **失敗しているあいだは、すぐ下の帯（#2236）が同じボタンを持つのでこちらは出さない**
-            ——同じ操作が同じ画面に2つ並ぶのを避ける */}
-        {repository.canTriggerDeploy && !deployFailure && (
+        {/* 「次のリリース」カードを出さないリポジトリ（Xcodeで実機へ反映するもの）だけは、
+            従来どおりこの行に置く。カードを出す場合は「本番稼働中」カードの中にある（#4532）。
+            失敗しているあいだは失敗の帯（#2236）が同じボタンを持つので出さない */}
+        {repository.deviceBuild && repository.canTriggerDeploy && !deployFailure && (
           <>
             <span className="flex-1" />
             <RepositoryDeployButton
