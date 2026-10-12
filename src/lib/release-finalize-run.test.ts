@@ -123,6 +123,14 @@ describe("requestRcFinalize", () => {
     expect(sent).toMatchObject({ baseHeadSha: PRE, bumpKind: "minor", version: "2.14.0", requestKey: "reqkey0001", sequence: 3 });
   });
 
+  it("自動判定の再試行でも、未消費の自予約があればその版・上げ幅へ固定する", async () => {
+    mocks.resFindMany.mockResolvedValue([{ id: "r1", version: "2.14.0", candidateId: "c1", status: "reserved" }]);
+    await requestRcFinalize({ ...input, bumpKind: null, requestKey: "reqkey0002" });
+    const sent = JSON.parse(mocks.dispatch.mock.calls[0][3] as string);
+    expect(sent).toMatchObject({ bumpKind: "minor", version: "2.14.0" });
+    expect(mocks.resCreate).not.toHaveBeenCalled();
+  });
+
   it("合格していない候補（契約が無い）ではバンプしない", async () => {
     mocks.loadRcOverview.mockResolvedValue(overview({ finalizeContract: null }));
     expect(await requestRcFinalize(input)).toEqual({ ok: false, error: "not_ready" });
