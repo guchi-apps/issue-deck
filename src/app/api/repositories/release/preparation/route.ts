@@ -7,6 +7,7 @@ import { getInstallationToken } from "@/lib/github/app-auth";
 import { dispatchReleaseWorkflow, fetchOpenPullRequestsForBase } from "@/lib/github/release-api";
 import { releaseWorkflowExists } from "@/lib/github/release-workflow-cache";
 import { previewModeGuard } from "@/lib/preview-mode";
+import { listReleasePrepRunningSeriesStatuses } from "@/lib/release-fix-series-run";
 import { releasePreparationNextAction } from "@/lib/release-preparation";
 import { findOpenReleasePreparationFailure } from "@/lib/release-preparation-run";
 import { requestSelectiveRebuild } from "@/lib/release-rebuild-selection-run";
@@ -15,7 +16,8 @@ import { isBumpKind } from "@/lib/semver-bump";
 /**
  * リリース準備の失敗（#4335）の表示と再開。
  *
- * - GET: 未解決の失敗（失敗した工程・エラー行・実行ログ・次の操作）。無ければ`failure: null`
+ * - GET: 未解決の失敗（失敗した工程・エラー行・実行ログ・次の操作）。無ければ`failure: null`。
+ *   あわせて準備が進行中の修正系列の状態（`activeFixSeriesStatuses`。#4421）
  * - POST: 失敗したときと同じ上げ幅でリリースworkflowを起動し直す。失敗の記録は、次のrunで
  *   準備が進んだ報告（`notify-prepared`）が届いた時点で解決になる（押しただけでは消さない）。
  *   PRを選んだ作り直し（#4335）の失敗なら、同じ元の候補・同じPRを**現在の状態で検証し直してから**起動する
@@ -43,8 +45,13 @@ export async function GET(request: NextRequest) {
   if (!(await findRepository(userId, owner, repo))) return NextResponse.json({ error: "not_found" }, { status: 404 });
 
   const failure = await findOpenReleasePreparationFailure(`${owner}/${repo}`);
+  // 作り直しの間は元のリリースPRが閉じられ、PR番号で引くfix-series APIでは見えない（#4421）
+  const activeFixSeriesStatuses = await listReleasePrepRunningSeriesStatuses(`${owner}/${repo}`);
   return NextResponse.json(
-    { failure: failure ? { ...failure, nextAction: releasePreparationNextAction(failure) } : null },
+    {
+      failure: failure ? { ...failure, nextAction: releasePreparationNextAction(failure) } : null,
+      activeFixSeriesStatuses,
+    },
     { headers: { "Cache-Control": "no-store" } },
   );
 }

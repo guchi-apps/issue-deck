@@ -65,6 +65,8 @@ import {
   IosDistributionIcon,
   useIosDistributionState,
 } from "@/components/dashboard/ios-distribution-icon";
+import { useReleasePreparation } from "@/hooks/use-release-preparation";
+import { applyReleasePrepState } from "@/lib/release-prep-state";
 import { ReleasePreparationAlert } from "@/components/dashboard/release-preparation-alert";
 import { ReleaseRebuildHistoryPanel } from "@/components/dashboard/release-rebuild-history-panel";
 import { ReleaseRebuildButton } from "@/components/dashboard/release-rebuild-button";
@@ -1637,6 +1639,9 @@ function ReleaseFlowGraph({
      **リリースPR・バンプPRが出ている間は出さない**——その行が「mainへマージ」
      （`ReleaseMergeButton`）を持っており、同じ場所に押せないボタンを足すと
      押せる操作の隣に押せない操作が並ぶだけになる */
+  // 修正を取り込んだリリースの準備中・準備の失敗は、PRが0件の間も押せないようにする（#4421）
+  const preparation = useReleasePreparation(repository.repositoryFullName, !repository.deviceBuild);
+  const releaseBlockedReason = applyReleasePrepState(repository.releaseBlockedReason, preparation.prepState);
   const releaseButtonFor = (group: BranchFlowReleaseGroup) =>
     !repository.deviceBuild &&
     group.mergedAt === null &&
@@ -1646,7 +1651,7 @@ function ReleaseFlowGraph({
         repositoryFullName={repository.repositoryFullName}
         currentVersion={repository.release.latestVersion}
         isPending={releaseTriggerPending}
-        blockedReason={repository.releaseBlockedReason}
+        blockedReason={releaseBlockedReason}
         onTriggered={onReleaseTriggered}
       />
     ) : undefined;
@@ -1672,6 +1677,7 @@ function ReleaseFlowGraph({
         <ReleasePreparationAlert
           repositoryFullName={repository.repositoryFullName}
           onResumed={onReleaseTriggered}
+          preparation={preparation}
           className="mb-2"
         />
       )}

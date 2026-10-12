@@ -82,7 +82,7 @@ export function ReleaseRebuildSelectionList({
                 </p>
                 {option.problemLabel && <p className="text-amber-700 dark:text-amber-400">{option.problemLabel}</p>}
                 {selectable && option.ciState === "failure" && (
-                  <p className="text-amber-700 dark:text-amber-400">developでのCIが失敗しています。足すと後継の候補でも失敗する可能性があります。</p>
+                  <p className="text-amber-700 dark:text-amber-400">developでのCIが失敗しています。足すと修正を取り込んだリリースでも失敗する可能性があります。</p>
                 )}
               </div>
             </li>

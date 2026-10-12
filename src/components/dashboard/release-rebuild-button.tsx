@@ -201,7 +201,7 @@ export function ReleaseRebuildButton({
                   {pullRequest.version} は欠番になり、次は v{pullRequest.version} より上の版になります）
                 </li>
                 <li>
-                  バンプPRがdevelopへ自動マージされると後継のリリースPRが作られ、そのあとで元の候補を閉じます。新しいSHAで統合検証と全体レビューをやり直します
+                  バンプPRがdevelopへ自動マージされると修正を取り込んだリリースPRが作られ、そのあとで元の候補を閉じます。新しいSHAで統合検証と全体レビューをやり直します
                 </li>
               </ol>
               {selection.inProgress ? (

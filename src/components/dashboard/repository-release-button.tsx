@@ -31,6 +31,14 @@ const BLOCKED_REASON_LABEL: Record<ReleaseBlockedReason, string> = {
   "release-in-progress": "リリース中",
   "nothing-to-release": "出す変更がありません",
   "deploy-failed": "本番デプロイ失敗中。修正を取り込んだ場合は手動で起動できます",
+  "release-preparing": "CIとバージョン更新が自動で実行されます。操作せずお待ちください",
+  "preparation-failed": "リリース準備に失敗しています。上の赤い帯で原因を確認し、「再開」してください",
+};
+
+/** 無効のボタンに書く文字。準備の状態は、押せない理由そのものをボタンに出す（#4421） */
+const BLOCKED_BUTTON_LABEL: Partial<Record<ReleaseBlockedReason, string>> = {
+  "release-preparing": "リリース準備中",
+  "preparation-failed": "準備に失敗",
 };
 
 type RepositoryReleaseButtonProps = {
@@ -111,7 +119,7 @@ export function RepositoryReleaseButton({
       <span className="flex items-center gap-1.5" title={BLOCKED_REASON_LABEL[blockedReason]}>
         <Button size="sm" variant="outline" className="h-6 gap-1 px-2 text-xs" disabled>
           <Rocket className="size-3" />
-          リリースする
+          {BLOCKED_BUTTON_LABEL[blockedReason] ?? "リリースする"}
         </Button>
         <span className="text-xs text-muted-foreground">{BLOCKED_REASON_LABEL[blockedReason]}</span>
       </span>

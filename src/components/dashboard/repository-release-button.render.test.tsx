@@ -34,3 +34,33 @@ describe("本番デプロイ失敗中の修正リリース", () => {
     expect(requestRelease).toHaveBeenCalledWith("guchi-apps/issue-deck", undefined, true);
   });
 });
+
+describe("リリース準備の状態（#4421）", () => {
+  it("準備中はボタンを無効にして「リリース準備中」と自動実行の案内を出す", () => {
+    render(
+      <RepositoryReleaseButton
+        repositoryFullName="o/r"
+        isPending={false}
+        blockedReason="release-preparing"
+        onTriggered={() => {}}
+      />,
+    );
+    const button = screen.getByRole("button", { name: "リリース準備中" });
+    expect(button.hasAttribute("disabled")).toBe(true);
+    expect(screen.getByText(/操作せずお待ちください/)).toBeTruthy();
+  });
+
+  it("準備失敗のときは待機中と案内せず、帯からの再開へ誘導する", () => {
+    render(
+      <RepositoryReleaseButton
+        repositoryFullName="o/r"
+        isPending={false}
+        blockedReason="preparation-failed"
+        onTriggered={() => {}}
+      />,
+    );
+    expect(screen.getByRole("button", { name: "準備に失敗" }).hasAttribute("disabled")).toBe(true);
+    expect(document.body.textContent).not.toContain("お待ちください");
+    expect(screen.getByText(/「再開」してください/)).toBeTruthy();
+  });
+});
