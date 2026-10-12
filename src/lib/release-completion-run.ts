@@ -48,6 +48,7 @@ import { createReleaseFixSeries, readReleaseFixStartState } from "@/lib/release-
 import { evaluateReleaseMergeGate, isReleasePullRequest } from "@/lib/release-merge-gate";
 import { listReleaseVerificationRecords } from "@/lib/release-verification";
 import { loadReleaseVerificationSummary } from "@/lib/release-verification-load";
+import { describeIntegrationSetupGap } from "@/lib/release-verification-config";
 import type { ReleaseVerificationSummary } from "@/lib/release-verification-summary";
 
 /**
@@ -434,10 +435,10 @@ async function observeCandidate(run: RunRow, ctx: Ctx): Promise<Observation> {
       headSha: candidate.headSha,
     }).catch(() => null);
   }
-  return { candidate, pull, series, checks: summary ? toCompletionChecks(summary) : null, summary };
+  return { candidate, pull, series, checks: summary ? toCompletionChecks(summary, run.repositoryFullName) : null, summary };
 }
 
-export function toCompletionChecks(summary: ReleaseVerificationSummary): CompletionChecks {
+export function toCompletionChecks(summary: ReleaseVerificationSummary, repositoryFullName: string): CompletionChecks {
   const fold = (state: string): CompletionCheckState => {
     switch (state) {
       case "passed":
@@ -461,7 +462,7 @@ export function toCompletionChecks(summary: ReleaseVerificationSummary): Complet
       summary.integration.state === "failed" || summary.integration.state === "needs_check"
         ? classifyIntegrationFailure([summary.integration.reason, summary.integration.summary].filter(Boolean).join("\n"))
         : null,
-    integrationSetupGap: false,
+    integrationSetupGap: describeIntegrationSetupGap(repositoryFullName) !== null,
   };
 }
 
@@ -640,6 +641,13 @@ async function evaluateAndMerge(run: RunRow, ctx: Ctx, now: Date, observation: O
   if (claimed.count !== 1) return null;
   let merged: { sha: string | null };
   try {
+    const current = await db.releaseCompletionRun.findUnique({
+      where: { id: run.id },
+      select: { status: true, stoppedAt: true, activeKey: true },
+    });
+    if (current?.status !== "merging" || current.stoppedAt !== null || current.activeKey === null) {
+      return { action: "stopped_before_merge" };
+    }
     merged = await mergePullRequest(ctx.owner, ctx.repo, run.candidatePrNumber, ctx.token, decision.expectedHeadSha);
   } catch (error) {
     return handOff({ ...run, status: "merging" }, ctx, "merge_failed", error instanceof Error ? error.message.slice(0, 200) : undefined);
