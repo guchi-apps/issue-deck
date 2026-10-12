@@ -1277,14 +1277,13 @@ export function IssueDetail({
             related={
               <>
                 {/* 子イシューの進捗（#1340）。畳んでいても完了率は見えるようにする */}
-                {/* 親Issueの自動実行（#4536）。計画（#4535）を持つ親だけに出る */}
-                {subIssueRelations.children.length > 0 && (
-                  <ParentRunSection
-                    repositoryFullName={issue.repositoryFullName}
-                    issueNumber={issue.number}
-                    hosts={dispatch.hosts}
-                  />
-                )}
+                {/* 親Issueの自動実行（#4536）。出すかどうかは計画（#4535）の有無で決まる（パネル自身が計画の無い親では何も描かない）。
+                    GitHubのサブIssue未紐付けは計画登録時の警告で、開始可否の条件にはしない */}
+                <ParentRunSection
+                  repositoryFullName={issue.repositoryFullName}
+                  issueNumber={issue.number}
+                  hosts={dispatch.hosts}
+                />
                 {hasSubIssueRelations && (
                   <IssueSubIssuesSection
                     relations={subIssueRelations}
