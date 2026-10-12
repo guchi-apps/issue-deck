@@ -56,3 +56,19 @@ describe("対象外と設定不足の区別", () => {
     expect(describeIntegrationSetupGap("guchi-apps/db-console")).toBeNull();
   });
 });
+
+
+describe("公開Piリポジトリのリリース検証", () => {
+  it("新側はPythonのオフライン検証対象で、旧側の対象外を引き継がない", () => {
+    const repo = "guchi-apps/pi0w";
+    expect(isRegisteredForReleaseVerification(repo)).toBe(true);
+    expect(describeIntegrationNotApplicable(repo)).toBeNull();
+    expect(describeIntegrationSetupGap(repo)).toBeNull();
+    const config = RELEASE_VERIFICATION_REPOS[repo];
+    expect(config.enforced).toBe(false);
+    expect(config.macBuildCheck).not.toBe(true);
+    expect(config.integrationCommands).toEqual([
+      "python3 -m venv .venv && . .venv/bin/activate && python -m pip install -r requirements-ci.txt && bash scripts/verify.sh",
+    ]);
+  });
+});
