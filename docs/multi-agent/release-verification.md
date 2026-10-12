@@ -177,6 +177,37 @@ PR詳細・PR一覧・ブランチ画面・本番マージ確認の一覧は、�
 - **画面**: 修正パネルの現在状態の下に「内部確認」欄（レビュー・テストの状態、未解決指摘、往復と経過時間の消費。`ReleaseFixInternalReview`）
 - **PR取り込み後**: 選択的取り込み・候補再構築・最終候補のSHAでの再検証・GitHub CI・本番マージを人が行う点は従来のまま
 
+## リリース完了まで進める：候補の失敗から本番稼働確認まで（#4480）
+
+リリース候補の失敗（全体レビューの指摘・統合検証の失敗）から、**一度の開始で修正・候補の作り直し・再チェック・
+（許可した範囲の）本番マージ・deploy・稼働確認までを同じ論理系列が続ける**。記録は`ReleaseCompletionRun`
+（世代ごとの`ReleaseFixSeries`を束ねる親）。判断は純関数`src/lib/release-completion.ts`、外部操作は
+`src/lib/release-completion-run.ts`、画面は`release-completion-panel.tsx`（修正パネルの要約帯に入る。PC・スマホ共通）。
+
+- **開始**（`POST /api/repositories/release/completion`）: 範囲は「チェック通過まで」（`until_ready`）か
+  「本番反映・稼働確認まで」（`until_production`）を**開始者が必ず選ぶ**（省略不可）。開始できるのは、現在のSHAの
+  検証に問題があるか修正系列の記録がある候補だけ（問題の無い候補は通常のリリース）。同じリポジトリで1本だけ
+  （`activeKey`）。期限は24時間で延ばさない。開始者・範囲・期限は行に残し、本番マージの権限はこの記録だけで判定する
+- **役割分担**: 世代の進行（修正PRの観測・候補の作り直し・再検証）は従来どおり`runReleaseFixSweep`が持つ。
+  完了系列の巡回（`runReleaseCompletionSweep`）は**`ReleaseFixSeries`の状態を書き換えず**、次だけを行う
+  - 修正Issueの起動（`enqueueDispatchJob`。同じ世代は1回だけ。起動から3時間修正PRが現れなければ止める）
+  - 再検証で指摘・失敗が残った停止から、次の世代を起案する（`createReleaseFixSeries`。同じ修正Issueへ戻す既存の流れ・上限3世代・同一指摘の再発拒否をそのまま使う）
+  - 修正系列が作り直した後継の候補へ追従する
+  - 全部合格したら、`until_ready`は本番承認待ち、`until_production`は`decideCompletionMerge`で本番マージ（`release.md`「リリース完了系列に限り…」）
+  - 本番反映後のdeploy追跡・稼働SHAの確認（#4007の`decideDeployRecoveryRelease`）。人がマージした場合も同じく追跡する
+  - deployが再実行も失敗したら、本番復旧系列（`DeployRecoverySeries`）へ引き継ぎ（範囲は`until_production`なら`fix_until_main`）、その完了で系列も完了にする
+- **区別**: 統合検証の失敗が実行障害（`classifyIntegrationFailure`）、全体レビューの失敗に指摘が無い（実行障害）ときは
+  修正Issueを作らず止める。設定不足（Mac検証の`needs_setup`など）も止める。#4452の経路（選んだ修正での作り直し・
+  履歴だけの差の反映）は修正系列がそのまま使い、「修正PRを足せない」停止は修正系列の再評価を待つ（理由を表示）
+- **排他・冪等**: 巡回は`lastSweepAt`の条件付き更新で実行権を取る。二重起案は`ReleaseFixSeries.activeKey`、二重起動は
+  `DispatchJob.activeKey`、二重マージは状態の条件付き更新とHEAD指定のマージが防ぐ。巡回は`hostName`を持つ
+  `POST /api/repositories/deploy-recovery-series/sweep`に相乗りする（pollerは変更なし）
+- **上限・停止**: 期限・費用上限（修正Issueのセッションの`SessionUsage.costUsd`合計。既定$30。API換算の目安）に
+  達したら新しい起動・起案・マージをせず止める。停止（`DELETE`）後は巡回の対象から外れ、引き継いだ本番復旧も止める。
+  止まったときは修正Issue（無ければ候補のPR）へ理由をコメントし、修正Issueに`00.check-user`＋`01.check-blocked`を付ける
+- **画面**: 6段階（原因を調査中／修正とレビュー中／修正後のチェック中／本番へ反映中／稼働確認中／完了）の現在位置、
+  世代・費用・許可範囲、原因・残り・操作の要否、詳細（修正Issue・修正PR・候補の変遷・対象SHA・承認）
+
 ## PRを選んだ作り直し（#4335）
 
 「修正を入れて作り直す」は、元の候補（`release-main/vX.Y.Z`のhead）へ**選んだPRのdevelopへのマージ差分だけ**を

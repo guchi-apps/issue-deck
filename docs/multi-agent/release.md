@@ -933,6 +933,26 @@ main起点の`deploy-recovery/*`ブランチへ取り込む。**`merges`APIは�
 復旧PRの不一致・HEAD変更・main前進・コンフリクト・差分が記録外・CI失敗・人の確認ラベル・別リリースによる置換済み。
 マージ後の稼働版の確認（`recovered`）は#4007で足す。
 
+## リリース完了系列に限り、リリース候補を本番へ自動マージする（#4480）
+
+リリース候補（`release-main/v*`→main）の全体レビューの指摘・統合検証の失敗から、画面の「リリース完了まで進める」で
+開始する系列（`ReleaseCompletionRun`）。開始者が「本番反映・稼働確認まで」（`scope=until_production`）を選んだ系列
+だけが、上の復旧PRと並ぶ**もう1つの限定例外**として、記録した候補1本を本番mainへマージする（ルールの全文は
+`CLAUDE.md`「自動マージ不可カテゴリ」）。「チェック通過まで」（`until_ready`）を選んだ系列・系列の外のリリースは
+従来どおり人がマージする。
+
+- **追う候補は系列が記録したものだけ。** 起点の候補と、修正系列（`ReleaseFixSeries`）が作り直した後継
+  （`successorPrNumber`・`successorHeadSha`）だけに追従する。系列の外で候補が作り直された・閉じられた・HEADが
+  動いたときは追わずに`needs_attention`で止める
+- **マージ直前に観測し直す。** 候補の現在のHEAD・base・mainの先端・CI・検証記録を取り直し、`decideCompletionMerge`で
+  判定する。全体レビュー・統合検証は**強制ありで**`evaluateReleaseMergeGate`を評価し、`ready`のときだけ通す
+  （要確認・未実施・旧SHAの結果は通さない。画面の明示確認で通せるのは人だけ）。Mac検証は合格か対象外（設定なし）だけ
+- **mainが進んだら止める。** 検証済みの前提（base）が変わっているので、無関係なリリースの先行も含めて自動では
+  進めない。候補の作り直しは人が行い、作り直した候補では検証をやり直す
+- マージは条件付き更新で実行権を取ってから、記録したHEADのSHAを添えて行う（GitHubがHEAD不一致を409で弾く）。
+  マージ後は`recordDeployLaunchWatch`で起動漏れを見張り、#4007と同じ`decideDeployRecoveryRelease`でdeployと
+  稼働SHAを確かめて完了にする
+
 ## リリース起動確認でPRごとのレビューを出す（#4245）
 
 リリースworkflowの起動確認（PC・スマホ共通の`ReleaseChangeList`）は、「今回反映する内容」の各PR行に、PR作成時に

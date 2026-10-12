@@ -2,9 +2,12 @@ import { createHmac } from "node:crypto";
 import type { NextRequest } from "next/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const claimEvent = vi.fn();
-const handleMessageEvent = vi.fn();
-vi.mock("@/lib/slack/intake", () => ({ claimEvent: (...a: unknown[]) => claimEvent(...a), handleMessageEvent: (...a: unknown[]) => handleMessageEvent(...a) }));
+const acceptMessageEvent = vi.fn();
+const processAcceptedEvent = vi.fn();
+vi.mock("@/lib/slack/intake", () => ({
+  acceptMessageEvent: (...a: unknown[]) => acceptMessageEvent(...a),
+  processAcceptedEvent: (...a: unknown[]) => processAcceptedEvent(...a),
+}));
 vi.mock("next/server", async (importOriginal) => ({
   ...(await importOriginal<typeof import("next/server")>()),
   after: (fn: () => void) => void fn(),
@@ -29,7 +32,8 @@ describe("POST /api/slack/events", () => {
     vi.clearAllMocks();
     vi.stubEnv("SLACK_SIGNING_SECRET", SECRET);
     vi.stubEnv("SLACK_BOT_TOKEN", "xoxb-test-token");
-    claimEvent.mockResolvedValue(true);
+    acceptMessageEvent.mockResolvedValue({ kind: "queued", requestId: "req-1" });
+    processAcceptedEvent.mockResolvedValue(undefined);
   });
   afterEach(() => vi.unstubAllEnvs());
 
@@ -43,8 +47,8 @@ describe("POST /api/slack/events", () => {
     const res = await POST(signed(body, { signature: "v0=bad" }));
     expect(res.status).toBe(401);
     expect(JSON.stringify(await res.json())).not.toContain("xoxb-test-token");
-    expect(claimEvent).not.toHaveBeenCalled();
-    expect(handleMessageEvent).not.toHaveBeenCalled();
+    expect(acceptMessageEvent).not.toHaveBeenCalled();
+    expect(processAcceptedEvent).not.toHaveBeenCalled();
   });
 
   it("古いタイムスタンプ（リプレイ）は401", async () => {
@@ -57,13 +61,32 @@ describe("POST /api/slack/events", () => {
     expect(await res.json()).toEqual({ challenge: "abc" });
   });
 
-  it("イベントを1回だけ処理し、再送（処理済み）は無視する", async () => {
+  it("受付（DBへの保存）を済ませてからackし、ack後に処理する。再送（処理済み）は無視する", async () => {
     const body = JSON.stringify({ type: "event_callback", team_id: "T1", event_id: "E1", event: { type: "message", ts: "1.0" } });
     expect((await POST(signed(body))).status).toBe(200);
-    expect(handleMessageEvent).toHaveBeenCalledTimes(1);
-    claimEvent.mockResolvedValue(false);
+    expect(acceptMessageEvent).toHaveBeenCalledWith(expect.anything(), "T1", "E1", { type: "message", ts: "1.0" });
+    expect(processAcceptedEvent).toHaveBeenCalledWith(expect.anything(), { kind: "queued", requestId: "req-1" });
+    acceptMessageEvent.mockResolvedValue({ kind: "duplicate" });
     const retry = await POST(signed(body));
     expect(await retry.json()).toEqual({ ok: true, duplicate: true });
-    expect(handleMessageEvent).toHaveBeenCalledTimes(1);
+    expect(processAcceptedEvent).toHaveBeenCalledTimes(1);
+  });
+
+  it("保存に失敗したら500を返してSlackに再送させ、ack後の処理も始めない（#4488）", async () => {
+    acceptMessageEvent.mockRejectedValueOnce(new Error("db down"));
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const body = JSON.stringify({ type: "event_callback", team_id: "T1", event_id: "E9", event: { type: "message", ts: "1.0" } });
+    const res = await POST(signed(body));
+    expect(res.status).toBe(500);
+    expect(JSON.stringify(await res.json())).not.toContain("db down");
+    expect(processAcceptedEvent).not.toHaveBeenCalled();
+  });
+
+  it("ack後の処理が失敗しても200のまま（依頼はDBに残っており、失敗状態・巡回から続ける）", async () => {
+    processAcceptedEvent.mockRejectedValueOnce(new Error("slack down"));
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const body = JSON.stringify({ type: "event_callback", team_id: "T1", event_id: "E10", event: { type: "message", ts: "1.0" } });
+    expect((await POST(signed(body))).status).toBe(200);
+    await vi.waitFor(() => expect(console.error).toHaveBeenCalled());
   });
 });

@@ -6,7 +6,14 @@ import { removeCheckUserWithReason } from "@/lib/dispatch/check-user-labels";
 import { enqueueDispatchJob } from "@/lib/dispatch/jobs";
 import { fetchPullRequest } from "@/lib/github/actions-api";
 import { getInstallationToken } from "@/lib/github/app-auth";
-import { addIssueLabels, createComment, createIssue, fetchIssueState, updateIssue } from "@/lib/github/issues-api";
+import {
+  addIssueLabels,
+  createComment,
+  createIssue,
+  fetchIssueState,
+  fetchIssueStateOrThrow,
+  updateIssue,
+} from "@/lib/github/issues-api";
 import {
   fetchOpenPullRequestsForBase,
   fetchPullRequestForRebuild,
@@ -339,7 +346,7 @@ export async function createReleaseFixSeries(input: CreateReleaseFixInput): Prom
   let reusedIssueNumber: number | null = null;
   if (parent) {
     // 取得に失敗したときは新しいIssueへ逃げず、再試行できる失敗として投げる（#4468）
-    const state = await fetchIssueState(owner, repo, parent.issueNumber, input.token);
+    const state = await fetchIssueStateOrThrow(owner, repo, parent.issueNumber, input.token);
     if (state === "open") {
       const note =
         `${draft.body}\n\n---\n\n**追加の修正（世代 ${generation}）。** 前の世代の修正PR${parent.fixPrNumber ? `（#${parent.fixPrNumber}）` : ""}はすでにdevelopへマージ済みで、そのPRには追加できないため、` +
@@ -882,8 +889,7 @@ async function startContinuation(ctx: SweepContext, series: ReleaseFixSeries, ho
   if (["already_queued", "session_alive", "agent_paused", "host_offline"].includes(enqueued.rejection)) return;
   const reason = `修正Issueの実装を自動で起動できませんでした（${enqueued.message}）。Issue詳細の「修正を開始」から起動してください`;
   if (series.stopReason === reason) return;
-  await db.releaseFixSeries.update({ where: { id: series.id }, data: { stopReason: reason } });
-  await notifyStop(ctx, [series], "stopped", reason);
+  await stopRows(ctx, [series.id], "stopped", reason);
 }
 
 /** 進行中の系列を1回分進める。poller（`scripts/subpc-dispatch-poller.sh`）が定期的に呼ぶ */

@@ -289,7 +289,8 @@ export async function sweepCompletedRebuildHistory(repositoryFullName: string): 
       _min: { originPrNumber: true },
     });
     const merged = await collectMergedReleasePrs((page) => fetchClosedPullRequestsForBasePage(owner, repo, "main", token, page), {
-      floor: Math.max(completedThrough ?? 0, oldest._min.originPrNumber ?? 0),
+      // floor「以下」は判定せず打ち切るので、最小の元候補PR自身も判定対象に残すよう1小さくする（#4488）
+      floor: Math.max(completedThrough ?? 0, (oldest._min.originPrNumber ?? 1) - 1),
       // iOS配布を待つリポジトリは直近のマージが未配布でありうるので、数件まで遡る
       enough: requiresIosDelivery ? 5 : 1,
     });
