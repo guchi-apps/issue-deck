@@ -1,0 +1,17 @@
+name: Stop duplicate release recovery
+on:
+  push:
+    branches: [ops/release-check-20261012-2216]
+    paths: [.github/workflows/ops-stop-duplicate.yml]
+permissions:
+  actions: write
+jobs:
+  stop:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Cancel only this session's recovery run
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api --method POST repos/guchi-apps/issue-deck/actions/runs/38255686332/cancel || true
