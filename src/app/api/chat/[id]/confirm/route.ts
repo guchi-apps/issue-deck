@@ -70,6 +70,7 @@ export async function POST(request: NextRequest, { params }: Params) {
       typeof item === "object" &&
       ((item as { type?: unknown }).type === "confirm_repair" ||
         (item as { type?: unknown }).type === "confirm_issue" ||
+        (item as { type?: unknown }).type === "confirm_epic" ||
         (item as { type?: unknown }).type === "confirm_fix_request"),
   );
   if (!card) {
@@ -80,6 +81,7 @@ export async function POST(request: NextRequest, { params }: Params) {
   const outcome = await executeConfirmedCard(user, card, {
     title: typeof body.title === "string" ? body.title : undefined,
     body: typeof body.body === "string" ? body.body : undefined,
+    requestKey: `chat-${message.id}`,
   });
   // 失敗したときは押し直せるよう`pending`へ戻す（成功した場合だけ`done`のまま残す）
   if (!outcome.ok) {

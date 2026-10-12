@@ -5,6 +5,7 @@ import {
   type ModelMessage,
   type RunSession,
 } from "@/lib/chat/investigation/agent";
+import { parseEpicDraft, validateEpicDraft } from "@/lib/epic-draft/decompose";
 import { callInvestigationModel } from "@/lib/chat/investigation/model";
 import {
   linkedIssueNumber,
@@ -316,6 +317,33 @@ export async function replyWithInvestigation(params: {
       text += duplicates.length
         ? `\n\nIssue案を作りました。似た既存Issueが${duplicates.length}件あります。重複でないか確認してから作成してください。`
         : "\n\nIssue案を作りました。既存Issueに重複は見つかりませんでした（同期済みの範囲）。内容を確認して作成してください。";
+    }
+  } else if (proposal.kind === "epic" && allowed.issue) {
+    // 親子Issue案（#4537）。読めない・権限外・循環・上限超過のときは作らず、理由を返す（定型のEpicは作らない）
+    const draft = parseEpicDraft(proposal.epic);
+    if (!draft) {
+      text += "\n\n親子Issueの案を読み取れなかったため、作りませんでした。もう一度依頼してください。";
+    } else {
+      const repos = [...new Set([draft.parent.repo, ...draft.children.map((c) => c.repo)].filter(Boolean))];
+      const found = new Map<string, Awaited<ReturnType<typeof findRepositoryByFullName>>>();
+      for (const repo of repos) found.set(repo, await findRepositoryByFullName(user.id, repo));
+      const errors = validateEpicDraft(draft, (repo) => !!found.get(repo));
+      if (errors.length > 0) {
+        text += `\n\n親子Issueの案を作れませんでした（作成していません）:\n${errors.map((e) => `- ${e}`).join("\n")}`;
+      } else {
+        const duplicates: Record<string, Awaited<ReturnType<typeof findDuplicates>>> = {};
+        for (const child of draft.children) {
+          if (child.existing) continue;
+          const repository = found.get(child.repo);
+          const dups = repository ? await findDuplicates(repository.id, child.title) : [];
+          if (dups.length) duplicates[child.key] = dups;
+        }
+        cards.push({ type: "confirm_epic", repo: draft.parent.repo, draft, duplicates });
+        needsConfirm = true;
+        text += Object.keys(duplicates).length
+          ? `\n\n親子Issueの案（親1件＋子${draft.children.length}件）を作りました。似た既存Issueがある子があります。重複でないか確認してから作成してください。`
+          : `\n\n親子Issueの案（親1件＋子${draft.children.length}件）を作りました。内容と実行順序を確認して作成してください。作成しても子の実装は始まりません。`;
+      }
     }
   } else if (proposal.kind === "fix_request" && allowed.fix) {
     const number = proposal.number ?? params.target?.number ?? null;

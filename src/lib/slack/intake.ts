@@ -17,6 +17,12 @@ import {
   ACTION_REPO_CONFIRM,
   ACTION_REPO_SELECT,
 } from "@/lib/slack/blocks";
+import { createEpic } from "@/lib/epic-draft/create";
+import { githubForUser } from "@/lib/epic-draft/github";
+import { getEpicPlanRegistrar } from "@/lib/epic-draft/plan";
+import { epicDoneText, epicFailureText } from "@/lib/epic-draft/report";
+import { computeEpicStages } from "@/lib/epic-draft/decompose";
+import type { EpicDraft, EpicOutcome } from "@/lib/epic-draft/types";
 import { filterCandidates, listRepoCandidates } from "@/lib/slack/candidates";
 import { classifyFollowUp } from "@/lib/slack/classify";
 import {
@@ -61,6 +67,7 @@ export type SlackMessageEvent = {
 };
 
 type IssueCard = Extract<ChatConfirmCard, { type: "confirm_issue" }>;
+type EpicCard = Extract<ChatConfirmCard, { type: "confirm_epic" }>;
 
 type StoredProposal = {
   card: IssueCard;
@@ -72,7 +79,15 @@ type StoredProposal = {
   confirmationId?: string;
 };
 
-type IssueRef = { repo: string; number: number; role: "primary" | "split" | "reused" };
+type IssueRef = { repo: string; number: number; role: "primary" | "split" | "reused" | "child"; /** 親子起案（#4537）の作成単位キー */ key?: string };
+
+/** 親子Issue案（#4537）の保存形。単一Issue案（`StoredProposal`）とは別経路で、`card`・`confirmationId`は使わない */
+type StoredEpic = {
+  epic: EpicDraft;
+  /** 作成単位の識別子（`<依頼ID>.<案ごとのUUID>`）。GitHub側の本文の照合に使う。案を作り直したら別の値になる */
+  requestKey: string;
+  planVersion?: number;
+};
 
 const MAX_REPLY_CHARS = 2800;
 const RESUME_WORDS = /^\s*(再開|再試行|retry)\s*$/i;
@@ -297,6 +312,11 @@ function issuesOf(request: SlackIntakeRequest): IssueRef[] {
   return Array.isArray(request.issues) ? (request.issues as IssueRef[]) : [];
 }
 
+function epicOf(request: SlackIntakeRequest): StoredEpic | null {
+  const raw = request.proposal as StoredEpic | null;
+  return raw && typeof raw === "object" && raw.epic?.parent && typeof raw.requestKey === "string" ? raw : null;
+}
+
 function proposalOf(request: SlackIntakeRequest): StoredProposal | null {
   const raw = request.proposal as StoredProposal | null;
   return raw && typeof raw === "object" && raw.card?.type === "confirm_issue" ? raw : null;
@@ -464,6 +484,12 @@ async function resumeRequest(ctx: IntakeContext, request: SlackIntakeRequest): P
     await decideTarget(ctx, request);
     return;
   }
+  // 親子起案が途中で止まっていたら、調査し直さず保存済みの案から不足分だけ続ける（案が変わって別の親子を作らないため）
+  if (epicOf(request) && request.confirmState !== "done") {
+    await db.slackIntakeRequest.update({ where: { id: request.id }, data: { status: "confirming", confirmState: "queued", failure: null } });
+    await runConfirmation(ctx, { ...request, status: "confirming", confirmState: "queued", failure: null });
+    return;
+  }
   await runProposal(ctx, request, request.text, null);
 }
 
@@ -624,6 +650,7 @@ const SLACK_PROPOSAL_INSTRUCTION = [
   "- 未解決の部分だけを、目的・背景・要件・対象範囲・観測可能な完了条件に整理し、根拠リンクと未確認事項を本文へ残す。依頼にない仕様を足さない",
   "- タイトルは元投稿の切り取りにせず、調査結果と依頼の目的から「何を直す／実現するか」が分かる簡潔な日本語にし、このリポジトリの既存Issueの命名慣例に合わせる",
   "- 添付は名称しか取得していない。画像などの内容を読んだ根拠にしない",
+  "- 依頼が独立して実装・検証できる単位を2件以上含み、依存関係（共通仕様→実行/画面→配布など）があるときだけ、親子Issue案（proposal_kind=\"epic\"）にする。小さな依頼や単一の成果は必ず通常のIssue案（\"issue\"）にし、Epic化しない。親は{repo}、子の対象は権限内のリポジトリから選び、決められない子があるときは作らず返信で聞く。子は最大5件",
 ].join("\n");
 
 /** 返信用に、案の本文から要点（見出し以外の先頭数行）を取り出す */
@@ -690,6 +717,15 @@ async function runProposal(ctx: IntakeContext, request: SlackIntakeRequest, text
       return;
     }
     const card = result.cards.find((c): c is IssueCard => c.type === "confirm_issue");
+    const epicCard = result.cards.find((c): c is EpicCard => c.type === "confirm_epic");
+    if (!card && epicCard) {
+      if (result.draftFallback || !investigation || investigation.evidence.length === 0) {
+        await stopInvestigation("調査", "実装・関連Issueを読んだ根拠を得られず、調査済みの案にできませんでした");
+        return;
+      }
+      await startEpic(ctx, request, epicCard);
+      return;
+    }
     if (!card) {
       // 案にならなかった。既存の対応で足りる・情報不足のどちらもあり得るので、調査の説明をそのまま返す
       await db.slackIntakeRequest.update({ where: { id: request.id }, data: { status: "done" } });
@@ -861,6 +897,8 @@ async function runConfirmation(ctx: IntakeContext, request: SlackIntakeRequest):
 }
 
 async function performConfirmation(ctx: IntakeContext, request: SlackIntakeRequest): Promise<void> {
+  const epic = epicOf(request);
+  if (epic) return performEpic(ctx, request, epic);
   const stored = proposalOf(request);
   const repo = request.selectedRepo;
   if (!stored || !repo || stored.card.repo !== repo) {
@@ -959,6 +997,8 @@ async function deliverResult(ctx: IntakeContext, request: SlackIntakeRequest): P
 
 /** 完了返信の本文。保存済みの案とIssue記録だけから組み立てるので、再送でも同じ内容になる */
 function resultText(request: SlackIntakeRequest): string {
+  const epic = epicOf(request);
+  if (epic) return epicDoneText(epic.epic, epicOutcomeFrom(request, epic));
   const ref = issuesOf(request).at(-1);
   const stored = proposalOf(request);
   if (!ref) return "✅ 完了しました。";
@@ -1003,4 +1043,122 @@ async function linkSplit(ctx: IntakeContext, request: SlackIntakeRequest, user: 
       body: `同じSlackスレッドの別成果を #${to} として分割しました（独立して実装・検証できるため）。\n${FOOTER_MARKER(request)}`,
     }),
   ).catch((error: unknown) => console.error("[slack-intake] 分割元へのリンクコメントに失敗しました", error));
+}
+
+/**
+ * 親子Issue案（#4537）の起案開始。**承認は挟まない**（#4527と同じ）が、作る前に次を確かめる。
+ * - 親は選択済みの対象リポジトリ。子は権限内（許可候補）のリポジトリだけ
+ * - `existing`でない子に似た既存のopen Issueがあれば、何も作らずリンクと状態を返す（単一Issueと同じ）
+ */
+async function startEpic(ctx: IntakeContext, request: SlackIntakeRequest, card: EpicCard): Promise<void> {
+  const repo = request.selectedRepo;
+  const candidates = await listRepoCandidates(ctx.config, request.userId);
+  const outside = [...new Set([card.draft.parent.repo, ...card.draft.children.map((c) => c.repo)])].filter(
+    (r) => !candidates.some((c) => c.fullName === r),
+  );
+  if (card.repo !== repo || outside.length > 0) {
+    await failRequest(ctx, request, "親子Issue案の対象確認", card.repo !== repo ? "選択したリポジトリと親Issue案の起案先が一致しません" : `権限内にないリポジトリがあります: ${outside.join("、")}`, {
+      retryable: card.repo !== repo,
+      unfinished: "親子Issueの作成（何も作成していません）",
+      resume: RESUME_HINT,
+    });
+    return;
+  }
+  const dups = Object.entries(card.duplicates ?? {}).filter(([, list]) => list.length > 0);
+  if (dups.length > 0) {
+    const lines = dups.map(([key, list]) => {
+      const child = card.draft.children.find((c) => c.key === key);
+      return `• ${child?.title ?? key}: ${list.map((d) => `<${d.htmlUrl}|${child?.repo}#${d.number} ${d.title}>（${d.state === "OPEN" ? "open" : d.state}）`).join("、")}`;
+    });
+    await db.slackIntakeRequest.update({ where: { id: request.id }, data: { status: "done" } });
+    await setReaction(ctx.client, { channel: request.channelId, ts: request.parentTs, add: "white_check_mark", remove: "eyes" });
+    await reply(
+      ctx,
+      request,
+      `✅ 同じ内容を扱っていそうな既存のIssueがあるため、親子Issueは作りませんでした。\n${lines.join("\n")}\n既存を再利用する場合や別の成果として分ける場合は、その旨をこのスレッドへ返信してください。`,
+    );
+    return;
+  }
+  if (previewModeGuard()) {
+    await failRequest(ctx, request, "Issueの作成", "この環境（プレビュー）では書き込みを止めています", { retryable: false, unfinished: "親子Issueの作成", resume: "本番の環境で投稿してください。" });
+    return;
+  }
+  const stored: StoredEpic = { epic: card.draft, requestKey: `${request.id}.${randomUUID()}` };
+  const proposal = JSON.parse(JSON.stringify(stored));
+  const claimed = await db.slackIntakeRequest.updateMany({
+    where: { id: request.id, status: { in: ["investigating", "resuming"] } },
+    data: { status: "confirming", confirmState: "queued", proposal, failure: null },
+  });
+  if (claimed.count !== 1) return;
+  await runConfirmation(ctx, { ...request, status: "confirming", confirmState: "queued", proposal });
+}
+
+/** 親子の実作成。何度呼んでも不足分だけ作る（照合は`createEpic`）。失敗しても作成済みの範囲を`issues`へ残す */
+async function performEpic(ctx: IntakeContext, request: SlackIntakeRequest, stored: StoredEpic): Promise<void> {
+  await db.slackIntakeRequest.update({ where: { id: request.id }, data: { confirmState: "processing" } });
+  const draft = stored.epic;
+  const user = await loadChatUser(request.userId);
+  const candidates = await listRepoCandidates(ctx.config, request.userId);
+  const repos = [...new Set([draft.parent.repo, ...draft.children.map((c) => c.repo)])];
+  let denied: string | null = null;
+  for (const r of repos) {
+    if (!user || !candidates.some((c) => c.fullName === r) || !(await findRepositoryByFullName(user.id, r))) {
+      denied = r;
+      break;
+    }
+  }
+  if (!user || denied || draft.parent.repo !== request.selectedRepo) {
+    await db.slackIntakeRequest.update({ where: { id: request.id }, data: { confirmState: "queued" } });
+    await failRequest(ctx, request, "対象リポジトリの権限確認", `${denied ?? request.selectedRepo ?? "対象"} にアクセスできません`, {
+      retryable: false,
+      unfinished: "親子Issueの作成",
+      resume: "権限を確認してから、このスレッドへ「再開」と返信してください。",
+    });
+    return;
+  }
+  const outcome = await createEpic(
+    {
+      requestKey: stored.requestKey,
+      draft,
+      footer: `Slackの元投稿: ${request.permalink ?? "（取得できませんでした）"}\n${FOOTER_MARKER(request)}`,
+    },
+    githubForUser(user),
+    getEpicPlanRegistrar(user.id),
+  );
+  const issues: IssueRef[] = [];
+  if (outcome.progress.parent) issues.push({ repo: outcome.progress.parent.repo, number: outcome.progress.parent.number, role: "primary" });
+  for (const c of draft.children) {
+    const r = outcome.progress.children[c.key];
+    if (r) issues.push({ repo: r.repo, number: r.number, role: r.reused ? "reused" : "child", key: c.key });
+  }
+  if (!outcome.ok) {
+    // 完了とは言わない。作成済みの範囲を残し、「再開」で保存済みの案から不足分だけ続ける
+    await db.slackIntakeRequest.update({
+      where: { id: request.id },
+      data: { status: "failed", confirmState: "queued", issues, failure: `親子Issueの起案: ${outcome.stage} ${outcome.message.slice(0, 300)}` },
+    });
+    await setReaction(ctx.client, { channel: request.channelId, ts: request.parentTs, add: "warning", remove: "eyes" });
+    await reply(ctx, request, epicFailureText(outcome));
+    return;
+  }
+  const finished = { ...request, proposal: { ...stored, planVersion: outcome.planVersion }, issues };
+  await db.slackIntakeRequest.update({
+    where: { id: request.id },
+    data: { status: "done", confirmState: "reply_pending", issues, proposal: JSON.parse(JSON.stringify(finished.proposal)), failure: null },
+  });
+  await deliverResult(ctx, finished);
+}
+
+/** 保存済みの案とIssue記録だけから完了報告用の結果を組み立てる（再送でも同じ内容になる） */
+function epicOutcomeFrom(request: SlackIntakeRequest, stored: StoredEpic): Extract<EpicOutcome, { ok: true }> {
+  const issues = issuesOf(request);
+  const parent = issues.find((i) => i.role === "primary");
+  const children: Extract<EpicOutcome, { ok: true }>["progress"]["children"] = {};
+  for (const i of issues) if (i.key) children[i.key] = { repo: i.repo, number: i.number, id: 0, reused: i.role === "reused" };
+  return {
+    ok: true,
+    progress: { parent: parent ? { repo: parent.repo, number: parent.number, id: 0 } : null, children },
+    stages: computeEpicStages(stored.epic.children) ?? [],
+    planVersion: stored.planVersion ?? 1,
+  };
 }

@@ -19,6 +19,8 @@ const mocks = vi.hoisted(() => ({
   createComment: vi.fn(),
   fetchIssuesForRepo: vi.fn(),
   fetchCommentsForIssue: vi.fn(),
+  githubForUser: vi.fn(),
+  registerPlan: vi.fn(),
 }));
 
 vi.mock("@/lib/db", () => {
@@ -41,6 +43,8 @@ vi.mock("@/lib/db", () => {
   db.$transaction = vi.fn(async (arg: unknown) => (typeof arg === "function" ? (arg as (tx: unknown) => unknown)(db) : []));
   return { db };
 });
+vi.mock("@/lib/epic-draft/github", () => ({ githubForUser: mocks.githubForUser }));
+vi.mock("@/lib/epic-draft/plan", () => ({ getEpicPlanRegistrar: () => mocks.registerPlan }));
 vi.mock("@/lib/chat/handlers", () => ({
   handleChatMessage: mocks.handleChatMessage,
   executeConfirmedCard: mocks.executeConfirmedCard,
@@ -51,6 +55,7 @@ vi.mock("@/lib/github/with-user-github-token", () => ({
   withUserGithubToken: async (_u: unknown, _c: string, fn: (t: string) => Promise<unknown>) => ({ value: await fn("gh-token") }),
 }));
 
+import { SlackApiError } from "@/lib/slack/client";
 import {
   acceptMessageEvent,
   acceptIssueConfirmation,
@@ -686,5 +691,131 @@ describe("スレッドの追加返信", () => {
     mocks.requestFindUnique.mockResolvedValue(done);
     await handleMessageEvent(ctx, "T1", { ...reply("補足です"), user: "U1x" });
     expect(mocks.createComment).not.toHaveBeenCalled();
+  });
+});
+
+describe("親子Issueの起案（#4537）", () => {
+  const epicDraft = {
+    parent: { repo: "guchi-apps/car-care", title: "車検の期限表示を整える", objective: "期限を一目で分かるようにする", completionCriteria: ["本番で期限が表示される"], scope: "ホームと詳細" },
+    children: [
+      { key: "c1", repo: "guchi-apps/car-care", title: "共通仕様", body: "要件1", dependsOn: [] },
+      { key: "c2", repo: "guchi-apps/issue-deck", title: "画面", body: "要件2", dependsOn: [{ key: "c1", conditions: ["merged"] }] },
+      { key: "c3", repo: "guchi-apps/car-care", title: "配布", body: "要件3", dependsOn: [{ key: "c2", conditions: ["verified"] }] },
+    ],
+  };
+  const epicCard = (over: object = {}) => ({ type: "confirm_epic", repo: "guchi-apps/car-care", draft: epicDraft, duplicates: {}, ...over });
+
+  /** GitHubのメモリ実装（本文の識別子照合まで本物の`createEpic`が通る） */
+  function fakeGithub() {
+    const repos = new Map<string, { number: number; id: number; state: "open"; body: string | null }[]>();
+    let id = 1;
+    return {
+      repos,
+      github: {
+        listIssues: async (repo: string) => (repos.get(repo) ?? []).map((i) => ({ ...i })),
+        createIssue: async (repo: string, input: { body: string }) => {
+          const list = repos.get(repo) ?? [];
+          const created = { number: 400 + list.length, id: id++, state: "open" as const, body: input.body };
+          list.push(created);
+          repos.set(repo, list);
+          return { number: created.number, id: created.id };
+        },
+        updateBody: async (repo: string, number: number, body: string) => {
+          repos.get(repo)!.find((i) => i.number === number)!.body = body;
+        },
+        listSubIssues: async () => [],
+        addSubIssue: async () => {},
+      },
+    };
+  }
+  const total = (f: ReturnType<typeof fakeGithub>) => [...f.repos.values()].flat().length;
+  const confirmingRequest = (proposal: unknown, over: object = {}) => ({ ...baseRequest, status: "investigating", selectedRepo: "guchi-apps/car-care", ...over, proposal });
+
+  async function runWith(card: object) {
+    mocks.handleChatMessage.mockResolvedValue(investigated(card));
+    await handleMessageEvent(ctx, "T1", msg({ text: "car-careで車検の期限表示を、共通仕様の後に実行と画面、最後に配布で整えたい" }));
+  }
+
+  it("分割すべき依頼は承認なしで親子を作り、リンク・実行順序・実行開始の案内を返す（子は開始しない）", async () => {
+    const f = fakeGithub();
+    mocks.githubForUser.mockReturnValue(f.github);
+    mocks.registerPlan.mockResolvedValue({ ok: true, version: 1 });
+    await runWith(epicCard());
+    expect(mocks.executeConfirmedCard).not.toHaveBeenCalled();
+    expect(total(f)).toBe(4);
+    const texts = postedTexts();
+    expect(texts).toHaveLength(1);
+    expect(texts[0]).toContain("親子Issueとして起案しました");
+    expect(texts[0]).toContain("guchi-apps/car-care/issues/400");
+    expect(texts[0]).toContain("guchi-apps/issue-deck/issues/400");
+    expect(texts[0]).toContain("進む条件");
+    expect(texts[0]).toContain("自動では実装を開始しません");
+    expect(mocks.registerPlan).toHaveBeenCalledWith(expect.objectContaining({ children: expect.arrayContaining([expect.objectContaining({ repo: "guchi-apps/issue-deck" })]) }));
+    expect(mocks.requestUpdate).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ status: "done", confirmState: "reply_pending" }) }));
+  });
+
+  it("計画登録に失敗したら完了とせず、再開で作成済みを作り直さず計画だけ登録する", async () => {
+    const f = fakeGithub();
+    mocks.githubForUser.mockReturnValue(f.github);
+    mocks.registerPlan.mockResolvedValueOnce({ ok: false, message: "計画の検証に失敗" });
+    await runWith(epicCard());
+    expect(postedTexts()[0]).toContain("完了していません");
+    expect(postedTexts()[0]).toContain("実行計画の登録");
+    expect(postedTexts()[0]).not.toContain("起案しました");
+    const created = total(f);
+    expect(created).toBe(4);
+    const claim = mocks.requestUpdateMany.mock.calls.find(([a]) => (a as { data: { proposal?: unknown } }).data.proposal)![0] as { data: { proposal: unknown } };
+    const failedIssues = (mocks.requestUpdate.mock.calls.map(([a]) => (a as { data: { issues?: unknown } }).data.issues).filter(Boolean).at(-1)) as unknown[];
+    expect(failedIssues).toHaveLength(4);
+    // 再開（保存済みの案から続け、調査し直さない）
+    call.mockClear();
+    mocks.handleChatMessage.mockClear();
+    mocks.registerPlan.mockResolvedValue({ ok: true, version: 1 });
+    mocks.requestFindUnique.mockResolvedValue(confirmingRequest(claim.data.proposal, { status: "resuming", issues: failedIssues }));
+    await processPendingRequest(ctx, "req-1");
+    expect(mocks.handleChatMessage).not.toHaveBeenCalled();
+    expect(total(f)).toBe(created);
+    expect(postedTexts()[0]).toContain("親子Issueとして起案しました");
+  });
+
+  it("似た既存のIssueがある子があれば、何も作らずリンクと状態を返す", async () => {
+    const f = fakeGithub();
+    mocks.githubForUser.mockReturnValue(f.github);
+    await runWith(epicCard({ duplicates: { c2: [{ number: 12, title: "画面を直す", htmlUrl: "https://github.com/guchi-apps/issue-deck/issues/12", state: "OPEN" }] } }));
+    expect(total(f)).toBe(0);
+    expect(postedTexts()[0]).toContain("親子Issueは作りませんでした");
+    expect(postedTexts()[0]).toContain("issues/12");
+  });
+
+  it("権限内にないリポジトリの子があれば、何も作らず理由を返す", async () => {
+    const f = fakeGithub();
+    mocks.githubForUser.mockReturnValue(f.github);
+    const draft = { ...epicDraft, children: [...epicDraft.children.slice(0, 2), { ...epicDraft.children[2], repo: "evil/other" }] };
+    await runWith(epicCard({ draft }));
+    expect(total(f)).toBe(0);
+    expect(postedTexts()[0]).toContain("権限内にないリポジトリ");
+  });
+
+  it("親のリポジトリが選択済みの対象と違えば作らない", async () => {
+    const f = fakeGithub();
+    mocks.githubForUser.mockReturnValue(f.github);
+    await runWith(epicCard({ repo: "guchi-apps/issue-deck" }));
+    expect(total(f)).toBe(0);
+    expect(postedTexts()[0]).toContain("起案先が一致しません");
+  });
+
+  it("Slackの返信に失敗しても作成済みで返信待ちに残り、親子を増やさない", async () => {
+    const f = fakeGithub();
+    mocks.githubForUser.mockReturnValue(f.github);
+    mocks.registerPlan.mockResolvedValue({ ok: true, version: 1 });
+    call.mockImplementation(async (method: string) => {
+      if (method === "chat.getPermalink") return { permalink: "https://slack.example/p100" };
+      if (method === "chat.postMessage") throw new SlackApiError("chat.postMessage", "ratelimited", true);
+      return { ts: "200.1" };
+    });
+    await runWith(epicCard());
+    expect(total(f)).toBe(4);
+    expect(mocks.requestUpdate).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ status: "done", confirmState: "reply_pending" }) }));
+    expect(mocks.requestUpdate).not.toHaveBeenCalledWith(expect.objectContaining({ data: { confirmState: "done" } }));
   });
 });
