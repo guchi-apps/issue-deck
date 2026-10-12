@@ -1,0 +1,19 @@
+name: Read release 4515 validation
+on:
+  push:
+    branches: [ops/verify-release-4515]
+    paths: [.github/workflows/read-release-4515.yml]
+permissions: {}
+jobs:
+  status:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Read current validation states
+        env:
+          PROGRESS_REPORT_SECRET: ${{ secrets.PROGRESS_REPORT_SECRET }}
+        run: |
+          set -euo pipefail
+          printf 'Authorization: Bearer %s\n' "$PROGRESS_REPORT_SECRET" > "$RUNNER_TEMP/verify-auth"
+          chmod 600 "$RUNNER_TEMP/verify-auth"
+          curl --fail-with-body --silent --show-error --max-time 60 -H @"$RUNNER_TEMP/verify-auth" -H 'Content-Type: application/json' --data '{"action":"status","repository":"guchi-apps/issue-deck","pullRequest":4515,"baseSha":"b1e656c68e6d545e7136e935af7be472f3056418","headSha":"757781a15f973d75167aabe808093a9193ab5e2d"}' 'https://issuedeck.gucchii.com/api/dispatch/release-verify' | tee "$RUNNER_TEMP/status.json"
+          cat "$RUNNER_TEMP/status.json" >> "$GITHUB_STEP_SUMMARY"
