@@ -1,9 +1,12 @@
 import type { ReleaseFixSeries } from "@prisma/client";
 
+import { parseClaudeLocalModel, parseCodexLocalModel, resolveAiExecutionAgent } from "@/lib/app-settings";
 import { db } from "@/lib/db";
+import { removeCheckUserWithReason } from "@/lib/dispatch/check-user-labels";
+import { enqueueDispatchJob } from "@/lib/dispatch/jobs";
 import { fetchPullRequest } from "@/lib/github/actions-api";
 import { getInstallationToken } from "@/lib/github/app-auth";
-import { addIssueLabels, createComment, createIssue, updateIssue } from "@/lib/github/issues-api";
+import { addIssueLabels, createComment, createIssue, fetchIssueState, updateIssue } from "@/lib/github/issues-api";
 import {
   fetchOpenPullRequestsForBase,
   fetchPullRequestForRebuild,
@@ -15,6 +18,8 @@ import {
 import { releaseWorkflowExists } from "@/lib/github/release-workflow-cache";
 import { RELEASE_PREP_RUNNING_SERIES_STATUSES } from "@/lib/release-prep-state";
 import { isUniqueConstraintError } from "@/lib/prisma-error";
+import { decideInternalHold } from "@/lib/release-fix-internal";
+import { evaluateInternalGateForSweep, loadInternalViewForUi, type InternalStatusView } from "@/lib/release-fix-internal-run";
 import {
   buildReleaseFixIssue,
   buildReleaseFixSourceKey,
@@ -22,7 +27,9 @@ import {
   classifyIntegrationFailure,
   decideReleaseFix,
   decideReverification,
+  decideReverificationFollowUp,
   defaultVerifyConditions,
+  isLegacyReverificationStopReason,
   isRebuildFailureReason,
   NOTHING_TO_ADD_REASON,
   isReleaseFixActive,
@@ -92,6 +99,10 @@ export type ReleaseFixSeriesView = {
   createdAt: string;
   /** 修正Issueの実行の状況（#4396）。一覧の取得時にだけ埋め、それ以外は`none` */
   startState: ReleaseFixStartState;
+  /** 内部確認（#4410）の状態。求めない系列・一覧以外ではnull */
+  internal: InternalStatusView | null;
+  /** 世代を進めた起案が、前の世代と同じ修正Issueへ戻した（追加PRの理由はIssueに記録）か */
+  continuedFromParent: boolean;
 };
 
 export function toReleaseFixSeriesView(row: ReleaseFixSeries): ReleaseFixSeriesView {
@@ -124,6 +135,8 @@ export function toReleaseFixSeriesView(row: ReleaseFixSeries): ReleaseFixSeriesV
     rebuildFailed: status === "stopped" && isRebuildFailureReason(row.stopReason),
     createdAt: row.createdAt.toISOString(),
     startState: "none",
+    internal: null,
+    continuedFromParent: false,
   };
 }
 
@@ -154,6 +167,14 @@ export async function listReleaseFixSeries(
     take: 30,
   });
   const views = rows.map(toReleaseFixSeriesView);
+  // 内部確認の状態（#4410）。記録だけを読む（GitHubは呼ばない）。世代を進めた系列は前の世代と同じIssueを使う
+  await Promise.all(
+    views.map(async (view, index) => {
+      const row = rows[index];
+      view.internal = await loadInternalViewForUi(row.repositoryFullName, row.issueNumber, row.internalReview, row.internalStopReason);
+      view.continuedFromParent = row.parentId !== null && rows.some((other) => other.id === row.parentId && other.issueNumber === row.issueNumber);
+    }),
+  );
   // 開始前（修正PRがまだ無い）の系列だけ、実行の状況を読む（#4396）
   const pending = views.filter((view) => view.status === "issue_created");
   if (pending.length === 0) return views;
@@ -307,14 +328,35 @@ export async function createReleaseFixSeries(input: CreateReleaseFixInput): Prom
       generation,
       relatedPullRequests: [...new Set(picked.items.flatMap((item) => item.pullRequests))],
       verifyConditions: defaultVerifyConditions(input.sourceKind),
+      internalReview: true,
+      continuation: parent !== null,
     },
     sourceKey,
   );
-  const issue = await createIssue(owner, repo, input.token, {
-    title: draft.title,
-    body: draft.body,
-    labels: input.causeClass === "decision" ? [PLAN_REQUIRED_LABEL] : [],
-  });
+  // 再検証で追加の修正が出たとき（世代を進めるとき）は、新しいIssueを起こさず**同じ修正Issue**へ戻す（#4410）。
+  // 元のPRはマージ済みなので足せず、追加PRが不可避になる。その理由と親Issueとの関係を、Issueのコメントに記録する。
+  // Issueが閉じている・見つからないときだけ、従来どおり新しいIssueにする
+  let reusedIssueNumber: number | null = null;
+  if (parent) {
+    // 取得に失敗したときは新しいIssueへ逃げず、再試行できる失敗として投げる（#4468）
+    const state = await fetchIssueState(owner, repo, parent.issueNumber, input.token);
+    if (state === "open") {
+      const note =
+        `${draft.body}\n\n---\n\n**追加の修正（世代 ${generation}）。** 前の世代の修正PR${parent.fixPrNumber ? `（#${parent.fixPrNumber}）` : ""}はすでにdevelopへマージ済みで、そのPRには追加できないため、` +
+        "同じ修正Issue・同じ`issue-" + parent.issueNumber + "`ブランチ・引き継いだ内部確認の記録（指摘ID・往復）のまま、追加のPRを1件作ります。新しい修正Issueは作りません。\n\n" +
+        STOP_COMMENT_MARKER;
+      // 継続理由のコメントは記録であって前提ではない。失敗しても同じIssueを継続対象にする
+      await createComment(owner, repo, parent.issueNumber, input.token, { body: note }).catch(() => undefined);
+      reusedIssueNumber = parent.issueNumber;
+    }
+  }
+  const issue = reusedIssueNumber
+    ? { number: reusedIssueNumber }
+    : await createIssue(owner, repo, input.token, {
+        title: draft.title,
+        body: draft.body,
+        labels: input.causeClass === "decision" ? [PLAN_REQUIRED_LABEL] : [],
+      });
 
   try {
     const row = await db.releaseFixSeries.create({
@@ -334,15 +376,18 @@ export async function createReleaseFixSeries(input: CreateReleaseFixInput): Prom
         parentId: parent?.id ?? null,
         generation,
         createdByUserId: input.userId,
+        internalReview: true,
       },
     });
     return { outcome: "created", series: toReleaseFixSeriesView(row) };
   } catch (error) {
     if (!isUniqueConstraintError(error)) throw error;
     // 同時の起案に負けた。今作ったIssueは閉じ、先に作られた系列を返す
-    await updateIssue(owner, repo, issue.number, input.token, { state: "closed", state_reason: "not_planned" }).catch(
-      () => undefined,
-    );
+    if (reusedIssueNumber === null) {
+      await updateIssue(owner, repo, issue.number, input.token, { state: "closed", state_reason: "not_planned" }).catch(
+        () => undefined,
+      );
+    }
     const winner = await db.releaseFixSeries.findUnique({ where: { activeKey } });
     if (!winner) throw error;
     return { outcome: "existing", series: toReleaseFixSeriesView(winner) };
@@ -432,11 +477,18 @@ function pendingFromReason(reason: string): number[] {
 async function observeFixPullRequests(
   ctx: { owner: string; repo: string; token: string },
   rows: ReleaseFixSeries[],
-): Promise<{ rows: ReleaseFixSeries[]; closedUnmerged: Set<string> }> {
+): Promise<{ rows: ReleaseFixSeries[]; closedUnmerged: Set<string>; prHeadShas: Map<string, string> }> {
   const result: ReleaseFixSeries[] = [];
   const closedUnmerged = new Set<string>();
+  const prHeadShas = new Map<string, string>();
   for (const row of rows) {
-    const prs = await fetchPullRequestsByHead(ctx.owner, ctx.repo, `issue-${row.issueNumber}`, "develop", ctx.token);
+    // 同じ修正Issueの前の世代が使ったPR（マージ済み）は、この世代の修正PRとして拾わない（#4410）
+    const used = new Set(
+      (await db.releaseFixSeries.findMany({ where: { repositoryFullName: row.repositoryFullName, issueNumber: row.issueNumber, id: { not: row.id } }, select: { fixPrNumber: true } }))
+        .map((other) => other.fixPrNumber)
+        .filter((n): n is number => n !== null),
+    );
+    const prs = (await fetchPullRequestsByHead(ctx.owner, ctx.repo, `issue-${row.issueNumber}`, "develop", ctx.token)).filter((pr) => !used.has(pr.number));
     const merged = prs.find((pr) => pr.merged_at !== null);
     const open = prs.find((pr) => pr.state === "open");
     const target = merged ?? open ?? prs[0] ?? null;
@@ -445,6 +497,7 @@ async function observeFixPullRequests(
       continue;
     }
     if (!merged && !open) closedUnmerged.add(row.id);
+    prHeadShas.set(row.id, target.head.sha);
     const mergedAt = merged?.merged_at ? new Date(merged.merged_at) : null;
     const nextStatus: ReleaseFixStatus | null =
       row.status === "issue_created" || row.status === "fix_in_progress"
@@ -468,7 +521,7 @@ async function observeFixPullRequests(
       }),
     );
   }
-  return { rows: result, closedUnmerged };
+  return { rows: result, closedUnmerged, prHeadShas };
 }
 
 async function sweepGroup(repositoryFullName: string, releasePrNumber: number, rows: ReleaseFixSeries[]): Promise<{ rebuilt: boolean; changed: number }> {
@@ -477,7 +530,15 @@ async function sweepGroup(repositoryFullName: string, releasePrNumber: number, r
   const ctx = access;
   const { owner, repo, token } = access;
 
-  const { rows: observed, closedUnmerged } = await observeFixPullRequests(ctx, rows);
+  const { rows: observed, closedUnmerged, prHeadShas } = await observeFixPullRequests(ctx, rows);
+  // 内部確認（#4410）。PRのhead SHAを確認した内容と照合し、未完了・不一致の修正は取り込まない
+  const internalHolds = new Map<string, string>();
+  for (const row of observed) {
+    if (!row.internalReview || row.fixPrNumber === null) continue;
+    const gate = await evaluateInternalGateForSweep(row, prHeadShas.get(row.id) ?? null);
+    const hold = decideInternalHold({ required: true, gate });
+    if (hold.hold) internalHolds.set(row.id, hold.reason);
+  }
 
   const frozen = await findOpenFrozenReleasePr(owner, repo, token);
   const origin = rows[0];
@@ -518,6 +579,7 @@ async function sweepGroup(repositoryFullName: string, releasePrNumber: number, r
       fixPrMerged: row.fixPrMergedAt !== null,
       fixPrClosedUnmerged: closedUnmerged.has(row.id),
       acceptedExtraPrs: Array.isArray(row.acceptedExtraPrs) ? (row.acceptedExtraPrs as number[]) : [],
+      internalHold: internalHolds.get(row.id) ?? null,
     })),
     candidate: {
       originStillOpen,
@@ -626,7 +688,7 @@ async function sweepGroup(repositoryFullName: string, releasePrNumber: number, r
 }
 
 /** 作り直し中・再検証中の系列を進める（後継候補の検出と、新しいSHAでの検証結果の判定） */
-async function sweepSuccessor(row: ReleaseFixSeries): Promise<number> {
+async function sweepSuccessor(row: ReleaseFixSeries, hostName: string | null): Promise<number> {
   const access = await repositoryToken(row.repositoryFullName);
   if (!access) return 0;
   const { owner, repo, token } = access;
@@ -662,8 +724,11 @@ async function sweepSuccessor(row: ReleaseFixSeries): Promise<number> {
     return 0;
   }
 
-  // reverifying
+  // reverifying（と、旧い巡回が再検証失敗で止めた`stopped`。#4478）
   if (row.successorPrNumber === null) return 0;
+  // すでに同じ修正Issueの次世代が起案されているなら、旧世代は後継追跡へ移すだけ（二重起案・二重起動しない）
+  const child = await db.releaseFixSeries.findFirst({ where: { parentId: row.id }, orderBy: { createdAt: "desc" } });
+  if (child) return supersedeByContinuation(access, row, child);
   const successor = (await fetchPullRequest(owner, repo, row.successorPrNumber, token)) as GithubApiPullRequest & {
     state?: string;
     merged?: boolean;
@@ -693,24 +758,145 @@ async function sweepSuccessor(row: ReleaseFixSeries): Promise<number> {
   if (verdict === "pending") return 0;
   if (verdict === "ready") {
     await db.releaseFixSeries.update({ where: { id: row.id }, data: { status: "ready", activeKey: null, stopReason: null } });
+    // 旧い巡回が止めていた系列が通った場合、その停止で付けた確認待ちを解く
+    if (row.status === "stopped") await resolveStopLabels(access, row.issueNumber);
     return 1;
   }
-  return stopRows(
-    access,
-    [row.id],
-    "stopped",
-    `修正を取り込んだリリース #${row.successorPrNumber} の再検証で指摘・失敗が残りました（世代 ${row.generation}）。そのリリースから修正Issueを起案すると、同じ系列として続きます`,
-  );
+  return continueAfterReverification(access, row, successor, summary, current, hostName);
+}
+
+type SweepContext = { owner: string; repo: string; token: string };
+
+/**
+ * 本系列が停止時に付けた`00.check-user`＋`01.check-blocked`を解く。
+ * 外してよい理由かどうかは既存のガード（`removeCheckUserWithReason`）が見るので、
+ * マージ待ち・計画承認待ちなど他理由の札は消さない。失敗しても継続は止めない。
+ */
+async function resolveStopLabels(ctx: SweepContext, issueNumber: number): Promise<void> {
+  await removeCheckUserWithReason(ctx.owner, ctx.repo, issueNumber, ctx.token).catch((error: unknown) => {
+    console.error("[release-fix-series] stop label cleanup failed", issueNumber, error);
+  });
+}
+
+/** 旧世代を、次世代（同じ論理作業）へ引き継いだものとして畳む。冪等 */
+async function supersedeByContinuation(ctx: SweepContext, row: ReleaseFixSeries, child: ReleaseFixSeries): Promise<number> {
+  const sameIssue = child.issueNumber === row.issueNumber;
+  const reason = sameIssue
+    ? `同じ修正Issue #${child.issueNumber} の世代 ${child.generation} へ引き継ぎました（再検証の追加指摘）`
+    : `修正Issue #${child.issueNumber} の世代 ${child.generation} へ引き継ぎました（再検証の追加指摘）`;
+  const moved = await db.releaseFixSeries.updateMany({
+    where: { id: row.id, status: { in: ["reverifying", "stopped", "awaiting_decision"] } },
+    data: { status: "superseded", activeKey: null, stopReason: reason },
+  });
+  if (moved.count === 0) return 0;
+  // 旧Issueに確認待ちが残らないようにする。別Issueへ移った場合は、現在の担当を旧Issueへ残す
+  if (row.status === "stopped" || row.status === "awaiting_decision") await resolveStopLabels(ctx, row.issueNumber);
+  if (!sameIssue) {
+    await createComment(ctx.owner, ctx.repo, row.issueNumber, ctx.token, {
+      body: `この修正は後継のIssue #${child.issueNumber}（世代 ${child.generation}）へ引き継がれました。このIssueでの対応は不要です。\n\n${STOP_COMMENT_MARKER}`,
+    }).catch(() => undefined);
+  }
+  return 1;
+}
+
+/**
+ * 再検証で修正が要ると判定されたあとの扱い（#4478）。失敗というだけで本人確認にせず、
+ * 通常の追加指摘は同じ修正Issueの次世代へ戻す。実行障害は起案せず待ち、本人判断・上限は理由つきで止める。
+ */
+async function continueAfterReverification(
+  ctx: SweepContext,
+  row: ReleaseFixSeries,
+  successor: GithubApiPullRequest,
+  summary: Awaited<ReturnType<typeof loadReleaseVerificationSummary>>,
+  current: { baseSha: string; headSha: string },
+  hostName: string | null,
+): Promise<number> {
+  const followUp = decideReverificationFollowUp({
+    integration: { state: summary.integration.state, reason: summary.integration.reason, summary: summary.integration.summary, findingCount: summary.integration.findings.length },
+    aiReview: { state: summary.aiReview.state, reason: summary.aiReview.reason, summary: summary.aiReview.summary, findingCount: summary.aiReview.findings.length },
+  });
+  // 実行障害はコードの不具合と断定せず、Issue・PRを作らない。確認待ちにもしない（再実行は既存の機構が行う）
+  if (followUp.action === "wait_rerun") return 0;
+  if (followUp.action === "human") return stopRows(ctx, [row.id], "stopped", followUp.reason);
+
+  const section = followUp.sourceKind === "review_finding" ? summary.aiReview : summary.integration;
+  const result = await createReleaseFixSeries({
+    userId: row.createdByUserId,
+    owner: ctx.owner,
+    repo: ctx.repo,
+    token: ctx.token,
+    releasePr: successor,
+    sourceKind: followUp.sourceKind,
+    findingIndexes: section.findings.map((_, index) => index),
+    causeClass: "code",
+    decisionQuestion: null,
+    acknowledgeExecutionFailure: false,
+    section,
+    baseSha: current.baseSha,
+    headSha: current.headSha,
+  });
+  if (result.outcome === "blocked") {
+    return stopRows(ctx, [row.id], "stopped", `${result.message}。リリース画面の修正系列から、原因を整理したうえで手動で修正Issueを起案できます`);
+  }
+  if (result.outcome === "execution_failure") return 0;
+  if (result.outcome === "no_items") {
+    return stopRows(ctx, [row.id], "stopped", "再検証の指摘から起案する項目を読み取れませんでした。リリース画面で結果を確認し、必要なら手動で修正Issueを起案してください");
+  }
+  const child = await db.releaseFixSeries.findUnique({ where: { id: result.series.id } });
+  if (!child) return 0;
+  const changed = await supersedeByContinuation(ctx, row, child);
+  await startContinuation(ctx, child, hostName);
+  return changed || 1;
+}
+
+/**
+ * 次世代の修正Issueの実装を、このホストで起動する（#4478）。二重起動しない:
+ * 受付済み・実行中、またはこの世代の作成後にすでに起動ジョブを積んだものは何もしない。
+ * 一時的な拒否（一時停止・ホストの不在）は積まずに次の巡回で再試行する。
+ */
+async function startContinuation(ctx: SweepContext, series: ReleaseFixSeries, hostName: string | null): Promise<void> {
+  if (!hostName || series.status !== "issue_created") return;
+  const repositoryFullName = series.repositoryFullName;
+  if ((await readReleaseFixStartState(repositoryFullName, series.issueNumber)) !== "none") return;
+  const prior = await db.dispatchJob.count({
+    where: { repositoryFullName, issueNumber: series.issueNumber, createdAt: { gte: series.createdAt } },
+  });
+  if (prior > 0) return;
+  const issueState = await fetchIssueState(ctx.owner, ctx.repo, series.issueNumber, ctx.token).catch(() => null);
+  if (issueState !== "open") return;
+  const setting = await db.appSetting.findUnique({
+    where: { id: 1 },
+    select: { defaultDispatchAgent: true, aiExecutionProvider: true, claudeLocalModel: true, codexModel: true },
+  });
+  const enqueued = await enqueueDispatchJob({
+    repositoryFullName,
+    issueNumber: series.issueNumber,
+    hostName,
+    agent: resolveAiExecutionAgent(setting?.defaultDispatchAgent, setting?.aiExecutionProvider),
+    claudeModel: parseClaudeLocalModel(setting?.claudeLocalModel),
+    codexModel: parseCodexLocalModel(setting?.codexModel),
+    requestedByUserId: series.createdByUserId,
+  });
+  if (enqueued.ok) return;
+  // 受付済み・動いているセッションがある、または一時的な拒否は、次の巡回で見直す。それ以外は人へ渡す
+  if (["already_queued", "session_alive", "agent_paused", "host_offline"].includes(enqueued.rejection)) return;
+  const reason = `修正Issueの実装を自動で起動できませんでした（${enqueued.message}）。Issue詳細の「修正を開始」から起動してください`;
+  if (series.stopReason === reason) return;
+  await db.releaseFixSeries.update({ where: { id: series.id }, data: { stopReason: reason } });
+  await notifyStop(ctx, [series], "stopped", reason);
 }
 
 /** 進行中の系列を1回分進める。poller（`scripts/subpc-dispatch-poller.sh`）が定期的に呼ぶ */
-export async function runReleaseFixSweep(): Promise<SweepResult> {
+export async function runReleaseFixSweep(options: { hostName?: string | null } = {}): Promise<SweepResult> {
+  const hostName = options.hostName ?? null;
   const active = await db.releaseFixSeries.findMany({
     where: {
       OR: [
         { status: { in: ["issue_created", "fix_in_progress", "fix_merged", "awaiting_decision", "rebuilding", "reverifying"] } },
         // 候補の取りこぼしで「足すものがない」と止まった系列は、修正後に同じ元候補で再評価する（#4422）
         { status: "stopped", stopReason: NOTHING_TO_ADD_REASON },
+        // 旧い巡回が再検証の失敗で一律に止めた系列は、再評価して同じ修正Issueの次世代へ戻す（#4478）
+        { status: "stopped", successorPrNumber: { not: null }, stopReason: { contains: "の再検証で指摘・失敗が残りました（世代" } },
       ],
     },
     orderBy: { createdAt: "asc" },
@@ -721,7 +907,7 @@ export async function runReleaseFixSweep(): Promise<SweepResult> {
   const groups = new Map<string, ReleaseFixSeries[]>();
   const successors: ReleaseFixSeries[] = [];
   for (const row of active) {
-    if (row.status === "rebuilding" || row.status === "reverifying") {
+    if (row.status === "rebuilding" || row.status === "reverifying" || (row.status === "stopped" && isLegacyReverificationStopReason(row.stopReason))) {
       successors.push(row);
       continue;
     }
@@ -740,9 +926,21 @@ export async function runReleaseFixSweep(): Promise<SweepResult> {
   }
   for (const row of successors) {
     try {
-      result.changed += await sweepSuccessor(row);
+      result.changed += await sweepSuccessor(row, hostName);
     } catch (error) {
       console.error("[release-fix-series] sweep successor failed", row.id, error);
+    }
+  }
+  // 次世代の起動が一時的な理由で見送られていたものを、次の巡回で起動し直す（#4478）
+  if (hostName) {
+    for (const row of active) {
+      if (row.status !== "issue_created" || row.parentId === null || !row.internalReview) continue;
+      try {
+        const access = await repositoryToken(row.repositoryFullName);
+        if (access) await startContinuation(access, row, hostName);
+      } catch (error) {
+        console.error("[release-fix-series] continuation start failed", row.id, error);
+      }
     }
   }
   return result;

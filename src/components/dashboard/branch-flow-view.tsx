@@ -108,6 +108,7 @@ import {
   isReleaseAutoProgressing,
   unreleasedSummary,
   type BranchFlow,
+  type UnreleasedSummary,
 } from "@/lib/branch-flow";
 import {
   isReleaseCandidateClear,
@@ -1394,7 +1395,7 @@ function ReleaseGroupNote({ lanes, released }: { lanes: BranchFlowLane[]; releas
 }
 
 /**
- * 開いたリポジトリの先頭に出す「次のリリース」（#4428）。**本番稼働中の版・次の候補・開発中の変更**を
+ * 開いたリポジトリの先頭に出す「次のリリース」（#4428）。**本番稼働中の版・次のバージョン・次のリリースで反映されるPR件数**を
  * 並べて識別し、その下に次の候補の状態・理由・主操作・現在の検証を置く。流れ図（上流→下流）の並びは
  * 崩さず、その上に要約を足す形にする。状態の判定は束の見出しと同じ`releaseGroupStateOf`を通し、
  * 主操作（mainへのマージ・リリース）はここへ集約して束の見出しからは外す（同じ操作を2か所に置かない）。
@@ -1403,7 +1404,7 @@ function ReleaseGroupNote({ lanes, released }: { lanes: BranchFlowLane[]; releas
 function NextReleaseCard({
   repository,
   group,
-  developingCount,
+  unreleased,
   latestReleaseMergedAt,
   releaseButton,
   onMerged,
@@ -1411,7 +1412,8 @@ function NextReleaseCard({
   repository: BranchFlowRepository;
   /** 次のリリースに乗る束。未リリースの変更が無ければnull */
   group: BranchFlowReleaseGroup | null;
-  developingCount: number;
+  /** 次のリリースで反映されるPRの件数（developにあってmainに無いもの。画面上部の「未リリース」と同じ値） */
+  unreleased: UnreleasedSummary;
   latestReleaseMergedAt: string | null;
   releaseButton?: React.ReactNode;
   onMerged: (pullRequest: PullRequestSummary) => void;
@@ -1431,7 +1433,7 @@ function NextReleaseCard({
       data-testid="next-release-card"
     >
       <p className="text-[11px] font-semibold tracking-wide text-primary">次のリリース</p>
-      <dl className="grid grid-cols-1 gap-2 @md:grid-cols-3">
+      <dl className="grid grid-cols-2 gap-2">
         <div className="min-w-0 rounded-md border px-2.5 py-1.5">
           <dt className="text-muted-foreground">本番稼働中</dt>
           <dd className="flex flex-wrap items-center gap-x-1.5 text-sm font-semibold">
@@ -1439,11 +1441,11 @@ function NextReleaseCard({
           </dd>
           {/* デプロイの成否は見出しの行・失敗の帯が出すので、ここではmainへ入った日だけを添える */}
           {latestReleaseMergedAt && (
-            <dd className="text-muted-foreground">mainへのマージ: {formatMonthDay(latestReleaseMergedAt)}</dd>
+            <dd className="text-muted-foreground">{formatMonthDayTime(latestReleaseMergedAt)} にリリース</dd>
           )}
         </div>
         <div className="min-w-0 rounded-md border px-2.5 py-1.5">
-          <dt className="text-muted-foreground">次の候補</dt>
+          <dt className="text-muted-foreground">次のバージョン</dt>
           <dd className="text-sm font-semibold">
             {group ? (group.version ? `v${group.version}` : "未作成") : "なし"}
           </dd>
@@ -1465,9 +1467,9 @@ function NextReleaseCard({
             )}
           </dd>
         </div>
-        <div className="min-w-0 rounded-md border px-2.5 py-1.5">
-          <dt className="text-muted-foreground">開発中の変更</dt>
-          <dd className="text-sm font-semibold">{developingCount}件</dd>
+        <div className="col-span-2 min-w-0 rounded-md border px-2.5 py-1.5">
+          <dt className="text-muted-foreground">次のリリースで反映されるPR</dt>
+          <dd className="text-sm font-semibold">{`${unreleased.count}${unreleased.unit}`}</dd>
           <dd className="text-muted-foreground">developへ未マージ</dd>
         </div>
       </dl>
@@ -1686,7 +1688,7 @@ function ReleaseFlowGraph({
         <NextReleaseCard
           repository={repository}
           group={nextGroup}
-          developingCount={activeLanes.length}
+          unreleased={unreleased}
           latestReleaseMergedAt={latestReleaseMergedAt}
           releaseButton={nextGroup ? releaseButtonFor(nextGroup) : undefined}
           onMerged={onMerged}

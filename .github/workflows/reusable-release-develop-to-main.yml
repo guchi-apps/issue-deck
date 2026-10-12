@@ -240,8 +240,52 @@ jobs:
                 mapfile -t CONFLICTS < <(git diff --name-only --diff-filter=U)
                 if [ "${#CONFLICTS[@]}" -eq 0 ] && [ -z "$(git status --porcelain --untracked-files=no)" ]; then
                   git cherry-pick --abort >/dev/null 2>&1 || git cherry-pick --skip >/dev/null 2>&1 || true
-                  echo "::error::#$N の変更は元の候補 #$ORIGIN_PR に既に含まれています（当てても差分が出ません）。選択から外してください"
-                  exit 1
+                  # **ファイルの内容が取り込み済みでも、競合の解消に要る祖先関係まで取り込み済みとは限らない**
+                  # （#4452）。mainの祖先を取り込むだけの修正（履歴のみ）は、ファイル差分が0件でも
+                  # 元の候補とmainの競合を解く。足すのは「origin/mainのうち候補に無く、この修正が祖先に持つ
+                  # コミット」だけ。修正のマージコミットは足さない（選んでいないdevelopの履歴まで祖先になり、
+                  # mainへのマージで未選択PRの変更が落ちるため）。
+                  HISTORY_CANDIDATES=""
+                  for MC in $(git rev-list origin/main "^$ORIGIN_HEAD"); do
+                    if git merge-base --is-ancestor "$MC" "$SHA"; then
+                      HISTORY_CANDIDATES="$HISTORY_CANDIDATES $MC"
+                    fi
+                  done
+                  # shellcheck disable=SC2086
+                  HISTORY_TIPS="$( [ -n "$HISTORY_CANDIDATES" ] && git merge-base --independent $HISTORY_CANDIDATES | tr '\n' ' ' | sed 's/ *$//' || true)"
+                  if [ -z "$HISTORY_TIPS" ]; then
+                    echo "::error::#$N は元の候補 #$ORIGIN_PR に内容も履歴も既に含まれています（当てても差分が出ず、足すべきmainの祖先もありません）。選択から外してください"
+                    exit 1
+                  fi
+                  # 足す履歴が運ぶmain側の変更ファイルを、この修正（SHA）と候補で同じ内容にしておく
+                  # （`-s ours`は候補の内容を保つため、内容が違えばmainの変更を黙って捨てる）
+                  HISTORY_FILES=()
+                  for TIP in $HISTORY_TIPS; do
+                    while IFS= read -r F; do
+                      [ -n "$F" ] && HISTORY_FILES+=("$F")
+                    done < <(git diff --name-only "$(git merge-base "$ORIGIN_HEAD" "$TIP")" "$TIP")
+                  done
+                  if [ "${#HISTORY_FILES[@]}" -gt 0 ] && ! git diff --quiet "$SHA" HEAD -- "${HISTORY_FILES[@]}"; then
+                    DIFFERENT="$(git diff --name-only "$SHA" HEAD -- "${HISTORY_FILES[@]}" | tr '\n' ' ')"
+                    echo "::error::#$N はmainの履歴を取り込むだけの修正ですが、その履歴が変更するファイルの内容が元の候補 #$ORIGIN_PR と食い違います（$DIFFERENT）。履歴だけを足すとmainの変更を捨てるため、作り直しを止めます。必要な差分を確認して判断してください"
+                    exit 1
+                  fi
+                  PRE_HISTORY_HEAD="$(git rev-parse HEAD)"
+                  # shellcheck disable=SC2086
+                  if ! git merge -s ours --no-ff -m "履歴修復: mainの祖先を取り込む（#$N・内容変更なし）" $HISTORY_TIPS >/tmp/rebuild-history-merge.log 2>&1; then
+                    git merge --abort >/dev/null 2>&1 || true
+                    echo "::error::#$N のmainの祖先を元の候補へ取り込めませんでした: $(tr '\n' ' ' < /tmp/rebuild-history-merge.log)"
+                    exit 1
+                  fi
+                  # 足したのはmainの履歴だけであること（developの祖先が増えていない）
+                  if [ "$(git rev-list "$PRE_HISTORY_HEAD..HEAD" --not origin/main | wc -l | tr -d ' ')" != "1" ] \
+                    || ! git diff --quiet "$PRE_HISTORY_HEAD" HEAD; then
+                    echo "::error::#$N の履歴修復で、mainの祖先以外が混ざりました。作り直しを止めます"
+                    exit 1
+                  fi
+                  echo "- #$N 履歴の取り込み（ファイル差分なし・mainの祖先 ${HISTORY_TIPS}）" >> /tmp/rebuild-selected-lines.txt
+                  echo "#$N はファイル差分が0件でしたが、競合の解消に要るmainの祖先（${HISTORY_TIPS}）を内容を変えずに取り込みました"
+                  continue
                 fi
                 DEPS=""
                 if [ "${#CONFLICTS[@]}" -gt 0 ]; then

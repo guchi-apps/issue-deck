@@ -2,7 +2,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { ReleaseFixOverviewPanel, ReleaseFixStartButton } from "@/components/dashboard/release-fix-panel";
+import { ReleaseFixInternalReview, ReleaseFixOverviewPanel, ReleaseFixStartButton } from "@/components/dashboard/release-fix-panel";
 import { ReleaseFixStartContext } from "@/components/dashboard/release-fix-start-context";
 import type { ReleaseVerificationSummary } from "@/lib/release-verification-summary";
 
@@ -160,5 +160,32 @@ describe("ReleaseFixStartButton", () => {
     );
     expect(screen.getByText("受付済み・起動待ち")).toBeTruthy();
     expect(screen.getByText("進捗を見る")).toBeTruthy();
+  });
+});
+
+describe("ReleaseFixInternalReview（#4410）", () => {
+  const internal = {
+    required: true,
+    gate: { complete: false, blocker: "open_findings", message: "未解決の指摘が残っています", targetSha: null },
+    rounds: [{ round: 2, reviewVerdict: "findings", reviewTargetSha: "7f3a9c1".padEnd(40, "0"), testState: null, testTargetSha: null, openFindingCount: 1 }],
+    findings: [
+      { key: "F-001", title: "認可の漏れ", detail: null, status: "resolved", reopenCount: 0, resolution: "確認" },
+      { key: "F-002", title: "旧pollerの互換", detail: null, status: "open", reopenCount: 1, resolution: null },
+    ],
+    limits: { round: 2, maxRounds: 5, elapsedMinutes: 38, maxMinutes: 120 },
+    stopReason: null,
+  };
+  it("レビュー・テストの状態、未解決の指摘、上限の消費を1つの修正作業として出す", () => {
+    render(<ReleaseFixInternalReview current={{ ...seriesRow, internal, continuedFromParent: false } as never} />);
+    const text = screen.getByTestId("release-fix-internal").textContent ?? "";
+    expect(text).toContain("独立レビュー: 指摘1件");
+    expect(text).toContain("テスト: 未実施");
+    expect(text).toContain("F-002");
+    expect(text).toContain("往復 2 / 5");
+    expect(text).toContain("経過 38分 / 120分");
+  });
+  it("内部確認を求めない系列には何も出さない", () => {
+    const { container } = render(<ReleaseFixInternalReview current={{ ...seriesRow, internal: null, continuedFromParent: false } as never} />);
+    expect(container.textContent).toBe("");
   });
 });

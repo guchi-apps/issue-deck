@@ -528,6 +528,11 @@ describe("PullRequestDetail", () => {
 
     renderDetail({ pullRequest: makePullRequest({ draft: true }) });
     expect(screen.queryByRole("button", { name: "マージする" })).toBeNull();
+    // ドラフトの主操作は「レビュー可能にする」（#4453）。通常のPRには出さない
+    expect(screen.getByRole("button", { name: "レビュー可能にする" })).toBeTruthy();
+    cleanup();
+    renderDetail();
+    expect(screen.queryByRole("button", { name: "レビュー可能にする" })).toBeNull();
   });
 
   it("取得に失敗したときはエラーを表示する", () => {
@@ -654,6 +659,8 @@ describe("PullRequestDetail", () => {
       renderDetail({ pullRequest: release() });
       expect(screen.getByText(/本番PR/)).toBeTruthy();
       expect(screen.getByRole("heading", { level: 1 }).textContent).toContain("v8.54.0をmainへリリースする");
+      // 正式タイトルは本文内で1回だけ（#4463）
+      expect(screen.getAllByText(/v8\.54\.0をmainへリリースする/)).toHaveLength(1);
       const overview = screen.getByTestId("release-overview-stub");
       const history = screen.getByText("詳細・履歴");
       expect(overview.compareDocumentPosition(history) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();

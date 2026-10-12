@@ -1647,8 +1647,11 @@ sweep_dependency_waits() {
 
 # リリース候補の修正系列（#4317）を進める。修正PRのdevelop取り込みの観測・候補の作り直し・
 # 新しいSHAでの再検証の判定はissue-deck側が持ち、ここは呼ぶだけにする。
+# 再検証の追加指摘で次世代の修正Issueへ戻したときは、実装をこのホストで起動するためホスト名を渡す（#4478）。
 sweep_release_fix_series() {
-  if ! api_call POST /api/repositories/release/fix-series/sweep '{}'; then
+  local payload
+  payload="$(jq -n --arg host "$HOST_NAME" '{host: $host}')"
+  if ! api_call POST /api/repositories/release/fix-series/sweep "$payload"; then
     case "$API_RESPONSE_STATUS" in
       404|000) return 0 ;;
       *) report_api_failure "リリース候補の修正系列の巡回に失敗しました" ;;
@@ -1689,6 +1692,15 @@ sweep_codex_pull_request_reviews() {
   local resumed
   resumed="$(printf '%s' "$API_RESPONSE_BODY" | jq -r '.resumed // 0' 2>/dev/null || echo 0)"
   [[ "${resumed:-0}" -gt 0 ]] && echo "PRレビューの完了を受けて、最終マージ判定を${resumed}件再開しました。"
+  return 0
+}
+
+# 完了したリリースの作り直し履歴を削除する（#4420）。失敗しても他の巡回を止めない
+sweep_rebuild_history() {
+  api_call POST /api/repositories/release/rebuild-history/sweep '{}' || return 0
+  local deleted
+  deleted="$(printf '%s' "$API_RESPONSE_BODY" | jq -r '.deleted // 0' 2>/dev/null || echo 0)"
+  [[ "${deleted:-0}" -gt 0 ]] && echo "完了したリリースの作り直し履歴を${deleted}件削除しました。"
   return 0
 }
 
@@ -4505,6 +4517,7 @@ run_once() {
     # Issueコメントという外向きの副作用があるため）。
     sweep_dependency_waits
     sweep_codex_pull_request_reviews
+    sweep_rebuild_history
     # iOS配布失敗の巡回検知（#3745）。**dry-runでは呼ばない**（Issueの起票という外向きの副作用があるため）。
     sweep_ios_distribution_failures
     # デプロイ起動漏れの巡回検知と起動し直し（#2703）。**dry-runでは呼ばない**

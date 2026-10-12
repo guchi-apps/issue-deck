@@ -85,7 +85,7 @@ function currentReviewKind(pullRequest: PullRequestSummary): "changes-requested"
 export function derivePrimaryState(pullRequest: PullRequestSummary): PrimaryState {
   if (pullRequest.merged) return state("merged", "マージ済み", "muted", "このPRはマージされています");
   if (pullRequest.state === "closed") return state("closed", "クローズ済み", "muted", "マージされずに閉じられています");
-  if (pullRequest.draft) return state("draft", "ドラフト", "muted", "ドラフトのためマージできません");
+  if (pullRequest.draft) return state("draft", "ドラフト", "muted", "ドラフトのためマージできません。詳細で「レビュー可能にする」を押すと、CI・コードレビューが始まります");
 
   const repairKinds = repairKindsFor(pullRequest, pullRequest.mergeable);
 

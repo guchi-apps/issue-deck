@@ -42,6 +42,15 @@ export type ChangelogEntry = {
  */
 export const APP_CHANGELOG: ChangelogEntry[] = [
   {
+    version: "8.55.2",
+    date: "2026-10-12",
+    changes: [
+      "Slackの「#アプリissue起案」チャンネルから、対象のリポジトリを選んでIssueを起案できるようになりました。起案結果はbotの名前で返信されます。",
+      "リリース修正が1回の作業の中で実装とレビューを繰り返して完結し、修正のPRが1件にまとまるようになりました。",
+      "リリース候補の作り直し履歴は、リリースを作成している間だけ表示されるようになりました。",
+    ],
+  },
+  {
     version: "8.54.0",
     date: "2026-10-12",
     changes: [

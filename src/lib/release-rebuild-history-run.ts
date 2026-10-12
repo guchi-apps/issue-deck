@@ -1,11 +1,25 @@
 import type { Prisma } from "@prisma/client";
 
 import { db } from "@/lib/db";
-import { fetchOpenPullRequestsForBase } from "@/lib/github/release-api";
+import { getInstallationToken } from "@/lib/github/app-auth";
+import {
+  CLOSED_PAGED_PER_PAGE,
+  fetchClosedPullRequestsForBasePage,
+  type GithubApiOpenPullRequest,
+} from "@/lib/github/pull-requests-api";
+import {
+  fetchOpenPullRequestsForBase,
+  fetchPullMergeInfo,
+  fetchTagRefs,
+} from "@/lib/github/release-api";
+import { IOS_TESTFLIGHT_TAG_PREFIX } from "@/lib/ios-testflight-status";
+import { getWebviewIosRepository } from "@/lib/webview-ios-repos";
 import { isUniqueConstraintError } from "@/lib/prisma-error";
 import { redactDiagnosticText } from "@/lib/release-review-diagnostic";
 import {
   buildRebuildEpisodes,
+  decideCompletedThroughPr,
+  isEpisodeCompleted,
   rebuildEventKey,
   REBUILD_EVENT_KINDS,
   REBUILD_EVENT_TRIGGERS,
@@ -97,6 +111,9 @@ function asTrigger(value: string): RebuildEventTrigger {
 /** 画面に出す履歴。DBだけを読む（PCのブランチ画面が追加のGitHub API取得をしない前提を守る） */
 export async function listRebuildEpisodes(repositoryFullName: string, limit = 5): Promise<RebuildEpisode[]> {
   const since = new Date(Date.now() - RECENT_DAYS * 24 * 60 * 60 * 1000);
+  // 完了したリリースの経過は出さない（#4420）。境界は巡回が進める
+  const cutoff = await db.releaseRebuildHistoryCutoff.findUnique({ where: { repositoryFullName } });
+  const completedThrough = cutoff?.completedThroughPrNumber ?? null;
   const rows = await db.releaseRebuildEvent.findMany({
     where: { repositoryFullName, createdAt: { gte: since } },
     orderBy: { createdAt: "desc" },
@@ -156,7 +173,7 @@ export async function listRebuildEpisodes(repositoryFullName: string, limit = 5)
   // 画面に出すのは直近の経過だけ（古い完了済みの履歴で盤面を埋めない）
   const shownSince = new Date(Date.now() - DISPLAY_DAYS * 24 * 60 * 60 * 1000).toISOString();
   return buildRebuildEpisodes(views)
-    .filter((episode) => episode.updatedAt >= shownSince)
+    .filter((episode) => episode.updatedAt >= shownSince && !isEpisodeCompleted(episode, completedThrough))
     .slice(0, limit);
 }
 
@@ -201,4 +218,129 @@ export async function observeRebuildSuccessor(input: {
     if (id) recorded += 1;
   }
   return recorded;
+}
+
+/** 完了済みの経過のイベントを削除する。後継候補が境界を超えている（作成中）経過は残す */
+export async function purgeCompletedRebuildEvents(repositoryFullName: string, completedThrough: number): Promise<number> {
+  const candidates = await db.releaseRebuildEvent.findMany({
+    where: { repositoryFullName, originPrNumber: { lte: completedThrough } },
+    select: { id: true, originPrNumber: true, originHeadSha: true, kind: true, payload: true },
+  });
+  const keepKeys = new Set<string>();
+  for (const event of candidates) {
+    if (event.kind !== "successor_created") continue;
+    const successor = (event.payload as RebuildEventPayload | null)?.successor;
+    if (successor && successor.number > completedThrough) keepKeys.add(`${event.originPrNumber}@${event.originHeadSha}`);
+  }
+  const ids = candidates.filter((e) => !keepKeys.has(`${e.originPrNumber}@${e.originHeadSha}`)).map((e) => e.id);
+  if (ids.length === 0) return 0;
+  const { count } = await db.releaseRebuildEvent.deleteMany({ where: { id: { in: ids } } });
+  return count;
+}
+
+/** 完了境界を探すときに遡るページ数の上限（1ページ100件） */
+const MAX_CLOSED_PAGES = 10;
+
+/**
+ * main向けのclosed PRを番号の降順にページを進め、マージ済みのリリースPRを新しい順に集める（#4474）。
+ *
+ * 作り直しのたびに閉じたリリース候補がmain向けのclosed PRに積もるため、直近の1ページだけでは
+ * 完了済みのリリースPRへ届かないことがある。`enough`件見つかるか、`floor`以下の番号に達するか
+ * （それより古いリリースはどの履歴も完了にできない）、ページが尽きるまで遡る。
+ */
+export async function collectMergedReleasePrs(
+  fetchPage: (page: number) => Promise<GithubApiOpenPullRequest[]>,
+  options: { floor: number; enough: number; maxPages?: number },
+): Promise<GithubApiOpenPullRequest[]> {
+  const found: GithubApiOpenPullRequest[] = [];
+  const maxPages = options.maxPages ?? MAX_CLOSED_PAGES;
+  for (let page = 1; page <= maxPages; page += 1) {
+    const prs = await fetchPage(page);
+    for (const pr of prs) {
+      if (pr.number <= options.floor) return found;
+      if (pr.merged_at !== null && pr.head.ref.startsWith(FROZEN_PREFIX)) {
+        found.push(pr);
+        if (found.length >= options.enough) return found;
+      }
+    }
+    if (prs.length < CLOSED_PAGED_PER_PAGE) break;
+  }
+  return found;
+}
+
+/**
+ * 1リポジトリの履歴の完了を判定し、境界を進めて完了済みの履歴を削除する（#4420）。
+ * 境界は後戻りさせない（一覧の取得範囲の都合で小さい番号が返っても、完了済みを復活させない）。
+ */
+export async function sweepCompletedRebuildHistory(repositoryFullName: string): Promise<{ completedThrough: number | null; deleted: number }> {
+  const repository = await db.repository.findFirst({
+    where: { fullName: repositoryFullName },
+    include: { installation: true },
+  });
+  const current = await db.releaseRebuildHistoryCutoff.findUnique({ where: { repositoryFullName } });
+  let completedThrough = current?.completedThroughPrNumber ?? null;
+  if (repository) {
+    const token = await getInstallationToken(repository.installation.installationId);
+    const { ownerLogin: owner, name: repo } = repository;
+    const requiresIosDelivery = getWebviewIosRepository(repositoryFullName) !== null;
+    // 残っている履歴の最小の元候補番号より古いリリースは、どの経過も完了にできない
+    const oldest = await db.releaseRebuildEvent.aggregate({
+      where: { repositoryFullName, ...(completedThrough === null ? {} : { originPrNumber: { gt: completedThrough } }) },
+      _min: { originPrNumber: true },
+    });
+    const merged = await collectMergedReleasePrs((page) => fetchClosedPullRequestsForBasePage(owner, repo, "main", token, page), {
+      floor: Math.max(completedThrough ?? 0, oldest._min.originPrNumber ?? 0),
+      // iOS配布を待つリポジトリは直近のマージが未配布でありうるので、数件まで遡る
+      enough: requiresIosDelivery ? 5 : 1,
+    });
+    let mergedReleasePrs: { number: number; mergeSha: string | null }[];
+    let deliveredShas = new Set<string>();
+    if (requiresIosDelivery) {
+      const tagRefs = await fetchTagRefs(owner, repo, token, IOS_TESTFLIGHT_TAG_PREFIX);
+      deliveredShas = new Set(tagRefs.map((ref) => ref.sha).filter(Boolean));
+      // マージコミットの取得は、境界より新しい直近の数件だけ（APIの消費を抑える）
+      const fresh = merged.filter((pr) => completedThrough === null || pr.number > completedThrough).slice(0, 5);
+      mergedReleasePrs = await Promise.all(
+        fresh.map(async (pr) => ({
+          number: pr.number,
+          mergeSha: (await fetchPullMergeInfo(owner, repo, token, pr.number))?.mergeCommitSha ?? null,
+        })),
+      );
+    } else {
+      mergedReleasePrs = merged.map((pr) => ({ number: pr.number, mergeSha: null }));
+    }
+    const decided = decideCompletedThroughPr({ mergedReleasePrs, requiresIosDelivery, deliveredShas });
+    if (decided !== null && (completedThrough === null || decided > completedThrough)) {
+      completedThrough = decided;
+      await db.releaseRebuildHistoryCutoff.upsert({
+        where: { repositoryFullName },
+        create: { repositoryFullName, completedThroughPrNumber: decided },
+        update: { completedThroughPrNumber: decided },
+      });
+    }
+  }
+  const deleted = completedThrough === null ? 0 : await purgeCompletedRebuildEvents(repositoryFullName, completedThrough);
+  return { completedThrough, deleted };
+}
+
+/** 履歴を持つ全リポジトリを巡回する。1リポジトリの失敗で他を止めない */
+export async function sweepAllCompletedRebuildHistory(): Promise<{ repositories: number; deleted: number }> {
+  const [eventRepos, seriesRepos] = await Promise.all([
+    db.releaseRebuildEvent.findMany({ distinct: ["repositoryFullName"], select: { repositoryFullName: true } }),
+    db.releaseFixSeries.findMany({
+      where: { OR: [{ successorPrNumber: { not: null } }, { status: "rebuilding" }] },
+      distinct: ["repositoryFullName"],
+      select: { repositoryFullName: true },
+    }),
+  ]);
+  const names = [...new Set([...eventRepos, ...seriesRepos].map((r) => r.repositoryFullName))];
+  let deleted = 0;
+  for (const name of names) {
+    try {
+      deleted += (await sweepCompletedRebuildHistory(name)).deleted;
+    } catch (error) {
+      console.error(`[release-rebuild-history] 完了済み履歴の掃除に失敗しました（${name}）`, error);
+    }
+  }
+  return { repositories: names.length, deleted };
 }

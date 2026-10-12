@@ -51,11 +51,12 @@ export const DEPLOY_RECOVERY_RELEASE_TIMEOUT_MS = 60 * 60 * 1000;
 /** 失敗したrunを`deploy-retry`が再実行するのを待つ時間。再実行は1回だけなので、過ぎたら失敗として扱う。 */
 export const DEPLOY_RECOVERY_RETRY_WAIT_MS = 15 * 60 * 1000;
 
-/** 終わった（巡回が進めない）状態。`awaiting_release`も第1段では人へ渡す終端。 */
+/**
+ * 終わった（巡回が進めない）状態。`awaiting_release`は開始者がdevelopまでしか許可していない系列が
+ * 人へ渡す終端。`releasing`・`verifying`は稼働版の確認まで巡回が進める進行中の状態（#4007・#4451）。
+ */
 export const DEPLOY_RECOVERY_TERMINAL_STATUSES: readonly DeployRecoveryStatus[] = [
   "awaiting_release",
-  // mainへマージした後。稼働版の確認（#4007）が入るまでは、人へ渡す終端として扱う。
-  "releasing",
   "recovered",
   "needs_attention",
   "stopped",
@@ -65,7 +66,15 @@ export function isDeployRecoveryActive(status: string): boolean {
   return !DEPLOY_RECOVERY_TERMINAL_STATUSES.includes(status as DeployRecoveryStatus);
 }
 
-export const DEPLOY_RECOVERY_CAUSES = ["code", "config", "database", "external", "unknown"] as const;
+/** 本番反映後のdeploy失敗を同じ系列へ戻せる回数（初回の反映を含めた試行の上限）。 */
+export const DEPLOY_RECOVERY_MAX_RELEASE_ATTEMPTS = 3;
+
+/**
+ * 原因の区分。`already_fixed`は「developに修正が入っていて、コードを変える必要が無い」で、
+ * 報告コメントに修正済みのPR番号（`issue-deck-deploy-recovery-fix-pr`）を添える。
+ * このとき新しい修正PRや空PRは作らず、そのPRを使って復旧PRの工程へ進む（#4451）。
+ */
+export const DEPLOY_RECOVERY_CAUSES = ["code", "already_fixed", "config", "database", "external", "unknown"] as const;
 export type DeployRecoveryCause = (typeof DEPLOY_RECOVERY_CAUSES)[number];
 
 export type DeployRecoveryStopReason =
@@ -82,11 +91,18 @@ export type DeployRecoveryStopReason =
   | "release_timed_out"
   | "max_rounds_reached"
   | "stopped_by_user"
+  | "fix_not_merged"
+  | "recovery_conflict"
+  | "release_stalled"
+  | "release_attempts_exhausted"
   | RecoveryMergeStopReason
   | "merge_failed";
 
 /** 実装セッションが原因の区分を報告するコメントのマーカー。修正Issueの本文で書き方を指示する。 */
 export const DEPLOY_RECOVERY_CAUSE_MARKER_PREFIX = "issue-deck-deploy-recovery-cause:";
+
+/** 修正済みのPR番号を報告するコメントのマーカー。`already_fixed`と一緒に書く。 */
+export const DEPLOY_RECOVERY_FIX_PR_MARKER_PREFIX = "issue-deck-deploy-recovery-fix-pr:";
 
 export function deployRecoverySeriesMarker(seriesId: string): string {
   return `<!-- issue-deck-deploy-recovery-series:${seriesId} -->`;
@@ -105,6 +121,17 @@ export function parseDeployRecoveryCause(bodies: readonly (string | null | undef
       const value = match[1];
       found = (DEPLOY_RECOVERY_CAUSES as readonly string[]).includes(value) ? (value as DeployRecoveryCause) : "unknown";
     }
+  }
+  return found;
+}
+
+/** コメント本文から修正済みPRの番号を読む。最後に報告されたものを正とする。 */
+export function parseDeployRecoveryFixPullRequest(bodies: readonly (string | null | undefined)[]): number | null {
+  let found: number | null = null;
+  const pattern = new RegExp(`<!--\\s*${DEPLOY_RECOVERY_FIX_PR_MARKER_PREFIX}(\\d+)\\s*-->`, "g");
+  for (const body of bodies) {
+    if (!body) continue;
+    for (const match of body.matchAll(pattern)) found = Number(match[1]);
   }
   return found;
 }
@@ -161,6 +188,19 @@ export function decideDeployRecovery(
       const waited = series.dispatchedAt ? observation.now.getTime() - series.dispatchedAt.getTime() : 0;
       return waited >= DEPLOY_RECOVERY_CAUSE_TIMEOUT_MS ? { action: "stop", reason: "cause_not_reported" } : { action: "wait" };
     }
+    if (cause === "already_fixed") {
+      // 修正はすでにdevelopにある。報告されたPRがマージ済みと確かめられたときだけ、修正の工程を飛ばして
+      // 復旧PRの工程へ進む。確かめられない間は待つ（期限は上で見ている）。
+      const fixed = observation.pullRequest;
+      if (fixed === null) return { action: "wait" };
+      if (!fixed.merged) return { action: "stop", reason: "fix_not_merged", detail: `#${fixed.number}` };
+      return {
+        action: "transition",
+        status: allowsMainMerge(series.scope) ? "awaiting_main_merge" : "awaiting_release",
+        cause,
+        pullRequestNumber: fixed.number,
+      };
+    }
     // コード以外（設定・Secrets・DB状態・外部障害・不明）はコード修正では直らない。PRが出ていても先へ進めない。
     if (cause !== "code") return { action: "stop", reason: "non_code_cause", detail: cause };
     return { action: "transition", status: "fixing", cause };
@@ -216,6 +256,10 @@ export type DeployRunObservation = {
 export type DeployRecoveryReleaseState = {
   releaseSha: string;
   releaseStartedAt: Date;
+  /** これまでに同じ系列へ戻した回数 */
+  releaseAttempts?: number;
+  /** 直近の失敗の署名 */
+  lastFailureKey?: string | null;
 };
 
 export type DeployRecoveryReleaseObservation = {
@@ -226,13 +270,22 @@ export type DeployRecoveryReleaseObservation = {
    * `deploy.yml`がSHA照合つきのヘルスチェックを持つ（旧版がHTTP 200を返すだけでは通らない）ときだけtrue。
    */
   versionVerified: boolean;
+  /** 最新のrunが失敗したときの署名（失敗したジョブ名）。読めなければnull */
+  failureKey?: string | null;
 };
 
 export type DeployRecoveryReleaseDecision =
   | { action: "wait" }
   | { action: "track"; status: "releasing" | "verifying"; run: DeployRunObservation }
   | { action: "recovered"; run: DeployRunObservation }
+  /** 再実行も失敗した。同じ系列を調査へ戻し、原因を調べ直す（#4451） */
+  | { action: "requeue"; run: DeployRunObservation; failureKey: string }
   | { action: "stop"; reason: DeployRecoveryStopReason; detail?: string };
+
+/** 失敗したdeployの署名。同じ署名が続いたら、直し方が効いていないと見て止める。 */
+export function deployFailureKey(conclusion: string | null, failedJobNames: readonly string[]): string {
+  return `${conclusion ?? "unknown"}:${[...failedJobNames].sort().join(",") || "-"}`;
+}
 
 /**
  * 本番へ出したあとの1巡ぶんの判断（#4007）。**起動漏れの回収は`deploy-launch`、失敗の1回再実行は
@@ -244,7 +297,9 @@ export type DeployRecoveryReleaseDecision =
  * - 成功: 稼働SHAの一致を確かめた証拠があれば`recovered`。無ければ`verifying`で待ち、上限で人へ渡す。
  *   **確かめられないことを復旧済みと見なさない**
  * - cancel: 再実行を待ち、上限を過ぎたら人へ渡す
- * - 失敗・timeout: 1回目の失敗は`deploy-retry`の再実行を待つ。再実行も失敗した（attempt 2以降）ら人へ渡す
+ * - 失敗・timeout: 1回目の失敗は`deploy-retry`の再実行を待つ。再実行も失敗した（attempt 2以降）ら、
+ *   試行の上限内で、前回と違う失敗なら同じ系列を調査へ戻す（`requeue`）。同じ署名の失敗が続く・
+ *   上限に達した・本番反映の上限時間を過ぎたときは人へ渡す
  */
 export function decideDeployRecoveryRelease(
   series: DeployRecoveryReleaseState,
@@ -273,11 +328,56 @@ export function decideDeployRecoveryRelease(
     default: {
       const finishedWaitingRetry = now.getTime() - new Date(latest.createdAt).getTime() >= DEPLOY_RECOVERY_RETRY_WAIT_MS;
       if (latest.attempt >= 2 || finishedWaitingRetry || timedOut) {
-        return { action: "stop", reason: "deploy_failed", detail: latest.htmlUrl };
+        const failureKey = observation.failureKey ?? deployFailureKey(latest.conclusion, []);
+        const attempts = (series.releaseAttempts ?? 0) + 1;
+        if (timedOut) return { action: "stop", reason: "deploy_failed", detail: latest.htmlUrl };
+        if (series.lastFailureKey && series.lastFailureKey === failureKey) {
+          return { action: "stop", reason: "release_stalled", detail: latest.htmlUrl };
+        }
+        if (attempts >= DEPLOY_RECOVERY_MAX_RELEASE_ATTEMPTS) {
+          return { action: "stop", reason: "release_attempts_exhausted", detail: latest.htmlUrl };
+        }
+        return { action: "requeue", run: latest, failureKey };
       }
       return { action: "wait" };
     }
   }
+}
+
+/** 画面に出す6段階（#4451）。`index`は進行の位置（0〜5）で、`done`は完了。 */
+export const DEPLOY_RECOVERY_STAGES = [
+  "原因を調査中",
+  "修正とレビュー中",
+  "修正後のチェック中",
+  "本番へ反映中",
+  "稼働確認中",
+  "完了",
+] as const;
+
+export function deployRecoveryStage(status: string): { index: number; label: (typeof DEPLOY_RECOVERY_STAGES)[number] } {
+  const index = (() => {
+    switch (status) {
+      case "starting":
+      case "preparing":
+      case "investigating":
+        return 0;
+      case "fixing":
+        return 1;
+      case "awaiting_checks":
+      case "awaiting_release":
+      case "awaiting_main_merge":
+        return 2;
+      case "releasing":
+        return 3;
+      case "verifying":
+        return 4;
+      case "recovered":
+        return 5;
+      default:
+        return -1;
+    }
+  })();
+  return { index, label: DEPLOY_RECOVERY_STAGES[Math.max(index, 0)] };
 }
 
 /** 画面に出す状態名。Issueの「合意したユーザー体験」の7つに寄せる。 */
@@ -334,6 +434,14 @@ export function deployRecoveryStopReasonLabel(reason: string | null, detail: str
       return `デプロイは成功しましたが、対象版が稼働していることを確かめられませんでした${detail ? `: ${detail}` : ""}。復旧済みとは扱いません。`;
     case "release_timed_out":
       return "本番反映から復旧確認までの上限時間を過ぎました。";
+    case "fix_not_merged":
+      return `報告された修正済みのPR${detail ? `（${detail}）` : ""}がdevelopへマージされていません。修正済みとは扱いません。PRを確かめてください。`;
+    case "recovery_conflict":
+      return `復旧PRを作る際に、選んだ修正がmainと競合しました${detail ? `: ${detail}` : ""}。競合を解消するか、履歴だけの差かを確かめてください。`;
+    case "release_stalled":
+      return `同じ内容のデプロイ失敗が続いたため止めました${detail ? `: ${detail}` : ""}。前回の直し方が効いていません。原因を確かめ直してください。`;
+    case "release_attempts_exhausted":
+      return `本番反映の試行の上限（${DEPLOY_RECOVERY_MAX_RELEASE_ATTEMPTS}回）に達しました${detail ? `: ${detail}` : ""}。`;
     case "max_rounds_reached":
       return `修復の上限（${DEPLOY_RECOVERY_MAX_REPAIR_ROUNDS}回）に達しました。`;
     case "stopped_by_user":

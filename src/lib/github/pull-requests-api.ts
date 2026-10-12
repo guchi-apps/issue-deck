@@ -100,6 +100,29 @@ export async function fetchClosedPullRequestsForBase(
 }
 
 /**
+ * 指定ブランチをbaseとするクローズ済みPull Requestを、**作成が新しい順（＝番号の降順）**に1ページ取得する（#4474）。
+ *
+ * `fetchClosedPullRequestsForBase`の30件では、作り直しで閉じたリリース候補が枠を埋めて
+ * 古い完了リリースへ届かないことがある。必要な所まで呼び出し側がページを進めるための版で、
+ * 番号の降順なので「ここより古い番号は要らない」所で打ち切れる。
+ */
+export async function fetchClosedPullRequestsForBasePage(
+  owner: string,
+  repo: string,
+  base: string,
+  token: string,
+  page: number,
+): Promise<GithubApiOpenPullRequest[]> {
+  return fetchPullRequestPage(
+    `${GITHUB_API}/repos/${owner}/${repo}/pulls?state=closed&base=${encodeURIComponent(base)}&sort=created&direction=desc&per_page=${CLOSED_PAGED_PER_PAGE}&page=${page}`,
+    token,
+  );
+}
+
+/** `fetchClosedPullRequestsForBasePage`の1ページの件数（APIの上限） */
+export const CLOSED_PAGED_PER_PAGE = 100;
+
+/**
  * PR一覧の1ページ分を取得する。**ETagによる条件付きGET**を通すため、変化が無い間は
  * レート制限を消費しない（#1531。PR画面の10秒ポーリングの前提）。
  */
@@ -124,6 +147,8 @@ async function fetchPullRequestPage(
  * これらが要らない一覧側で単体取得を回す必要はない（PR1件につき1回APIを消費するため）。
  */
 export type GithubApiPullRequestDetail = GithubApiOpenPullRequest & {
+  /** GraphQLのNode ID。ドラフト解除（`markPullRequestReadyForReview`）の対象指定に使う（#4453） */
+  node_id?: string;
   additions: number;
   deletions: number;
   changed_files: number;
