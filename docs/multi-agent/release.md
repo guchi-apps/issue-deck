@@ -1021,6 +1021,8 @@ main起点の`deploy-recovery/*`ブランチへ取り込む。**`merges`APIは�
 - `mode=import`: 候補ブランチの先端が要求の前提（直前revisionのhead）と一致するときだけ、選んだPRを当てて早送りでpushする。当てる処理は旧方式の選択的作り直しと**同じ関数`apply_selection`**（#4335の`cherry-pick -m 1`・範囲外ファイルの検査・#4452の履歴修復）で、取り込み用の別ループは作らない。force pushはしないので、途中で候補が動いていればpushが拒否される
 - 新方式の候補PRが開いている間は、schedule・push・手動起動の旧方式の処理（バンプPR・`release-main/v*`の作成）をしない。開いている旧方式の候補がある間は、issue-deckが新方式の候補を作らない。どちらか一方だけが進む
 
+**状態判定の`run`ブロックはActionsを回さずに確かめられる。** 再利用ワークフローは配布先のチェックアウトで動くため`.github/scripts/`の共通スクリプトを読めず、処理はinlineのbashに置いてある（同じ処理を2経路で使うときは、同じ`run`の中でbash関数に切り出す）。YAMLから`id: state`の`run`を取り出し、`gh`をPATH上のスタブに差し替えて、bareのoriginとcloneで作ったgitサンドボックスで実行すると、分岐ごとのpush先のSHAと`GITHUB_OUTPUT`を確認できる（#4495で作成・取り込み・古い前提の拒否・旧方式の回帰をこの方法で確かめた）
+
 ### 修正系列・完了系列との接続
 
 - 修正系列（#4317）は、候補が新方式なら作り直し（`requestSelectiveRebuild`）の代わりに`requestRcImport`で同じ候補へ修正PRを取り込む。要求キーは系列と前提headから決める（`rcFixSeriesRequestKey`）ので、巡回の重なり・再起動で二重に依頼しない。取り込みが適用されたら、そのrevisionのPR・SHAを「後継」として再検証へ進め、失敗・失効なら理由付きで止める（候補と元のrevisionは残る）
