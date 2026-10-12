@@ -292,6 +292,23 @@ export function getNavViewLabel(id: NavViewId): string {
   return getNavView(id).label;
 }
 
+/**
+ * PC左メニュー・PCの一覧見出しで使う表示名（#4543）。状態別の一覧は「対象：状態」の書式に
+ * 揃える。スマホのタブ・ホームは`label`を使い続けるので、ここで上書きしても名称は変わらない。
+ */
+const PC_LABELS: Partial<Record<NavViewId, string>> = {
+  all: "Issue一覧",
+  "check-user": "確認待ち",
+  "manual-step": "作業待ち",
+  "not-started": "Issue：未着手",
+  "in-progress": "Issue：実行中",
+  "release-pending": "Issue：本番反映待ち",
+};
+
+export function getNavViewPcLabel(id: NavViewId): string {
+  return PC_LABELS[id] ?? getNavViewLabel(id);
+}
+
 /** ビューごとの、stateクエリ未指定時に適用する状態フィルター */
 export function getNavViewDefaultState(id: NavViewId): IssueStateFilter {
   return getNavView(id).defaultState ?? "open";
