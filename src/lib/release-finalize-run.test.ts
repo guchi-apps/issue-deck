@@ -138,6 +138,23 @@ describe("requestRcFinalize", () => {
     expect(sent).toMatchObject({ bumpKind: "auto", version: "2.12.0" });
   });
 
+  it("段階を確保できなかった要求は、予約台帳を変更しない", async () => {
+    mocks.resFindMany.mockResolvedValue([{ id: "r1", version: "2.14.0", candidateId: "c1", status: "reserved" }]);
+    mocks.candUpdateMany.mockResolvedValueOnce({ count: 0 });
+    const r = await requestRcFinalize({ ...input, bumpKind: "major", requestKey: "reqkey0004" });
+    expect(r).toEqual({ ok: false, error: "wrong_phase" });
+    expect(mocks.resUpdateMany).not.toHaveBeenCalled();
+    expect(mocks.resCreate).not.toHaveBeenCalled();
+    expect(mocks.dispatch).not.toHaveBeenCalled();
+  });
+
+  it("予約を取れなければversion_conflictで、workflowを起動しない", async () => {
+    mocks.resCreate.mockRejectedValueOnce(Object.assign(new Error("unique"), { code: "P2002" }));
+    const r = await requestRcFinalize({ ...input, requestKey: "reqkey0005" });
+    expect(r).toMatchObject({ ok: false, error: "version_conflict" });
+    expect(mocks.dispatch).not.toHaveBeenCalled();
+  });
+
   it("合格していない候補（契約が無い）ではバンプしない", async () => {
     mocks.loadRcOverview.mockResolvedValue(overview({ finalizeContract: null }));
     expect(await requestRcFinalize(input)).toEqual({ ok: false, error: "not_ready" });
