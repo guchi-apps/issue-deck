@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { isLegacyReleaseCandidateHeadRef } from "@/lib/release-branch";
 
 import { Rocket } from "lucide-react";
 
@@ -9,6 +10,8 @@ import { GithubReferenceLink } from "@/components/dashboard/github-reference-lin
 import { ReleaseChangeList } from "@/components/dashboard/release-change-list";
 import { ReleaseProgress } from "@/components/dashboard/release-progress";
 import { ConnectedReleaseReviewSections } from "@/components/dashboard/release-review-sections";
+import { useReleasePreparation } from "@/hooks/use-release-preparation";
+import { PREP_OVERRIDE_CONFIRM_TEXT } from "@/lib/release-prep-state";
 import { ReleasePreparationAlert } from "@/components/dashboard/release-preparation-alert";
 import { ReleaseRebuildHistoryPanel } from "@/components/dashboard/release-rebuild-history-panel";
 import { ReleaseRebuildButton } from "@/components/dashboard/release-rebuild-button";
@@ -33,7 +36,6 @@ import {
   formatDevelopVersionDisplay,
   formatMainVersionDisplay,
 } from "@/lib/github/release-version-display";
-import { RELEASE_BRANCH_PREFIX } from "@/lib/pull-request-list";
 import { getWebviewIosRepository } from "@/lib/webview-ios-repos";
 import type { Issue } from "@/types/issue";
 import type { ConnectedRepository } from "@/types/repository";
@@ -63,6 +65,10 @@ export function MobileReleaseSheet({
 }: MobileReleaseSheetProps) {
   const [releaseConfirmOpen, setReleaseConfirmOpen] = useState(false);
   const [allowFailedDeploy, setAllowFailedDeploy] = useState(false);
+  // 準備中・準備失敗は灰色に見せるが、確認のうえ起動できる（#4421。PCの個別ボタンと同じ挙動）
+  const preparation = useReleasePreparation(repository.fullName, open);
+  const prepBlocked = preparation.prepState !== "idle";
+  const [allowPrepOverride, setAllowPrepOverride] = useState(false);
   const deployRun = releaseStatus?.available ? releaseStatus.deployWorkflowRun : null;
   const deployFailed = deployRun?.status === "completed" &&
     (deployRun.conclusion === "failure" || deployRun.conclusion === "timed_out");
@@ -124,7 +130,7 @@ export function MobileReleaseSheet({
                   )}
                 </span>
               </div>
-              <ReleasePreparationAlert repositoryFullName={repository.fullName} />
+              <ReleasePreparationAlert repositoryFullName={repository.fullName} preparation={preparation} />
               <ReleaseProgress
                 status={releaseStatus}
                 repoFullName={repository.fullName}
@@ -142,7 +148,7 @@ export function MobileReleaseSheet({
               {/* リリースPRを出した後の修正は、凍結ブランチへ足さずバンプから作り直す（#3014）。
                   状態はこのシートのポーリングが拾うので、押した後の再取得は要らない */}
               {releaseStatus.phase === "release_pr_open" &&
-                releaseStatus.releasePullRequest?.headRef?.startsWith(RELEASE_BRANCH_PREFIX) && (
+                isLegacyReleaseCandidateHeadRef(releaseStatus.releasePullRequest?.headRef ?? "") && (
                   <ReleaseRebuildButton
                     repositoryFullName={repository.fullName}
                     mainVersion={releaseStatus.mainVersion}
@@ -158,11 +164,23 @@ export function MobileReleaseSheet({
                   variant="outline"
                   disabled={isTriggeringRelease}
                   onClick={() => setReleaseConfirmOpen(true)}
-                  className="mt-1"
+                  className={prepBlocked ? "mt-1 bg-muted text-muted-foreground" : "mt-1"}
                 >
                   <Rocket className={isTriggeringRelease ? "animate-pulse" : undefined} />
-                  {isTriggeringRelease ? "起動中..." : "リリースworkflowを起動"}
+                  {isTriggeringRelease
+                    ? "起動中..."
+                    : preparation.prepState === "running"
+                      ? "リリース準備中"
+                      : preparation.prepState === "failed"
+                        ? "準備に失敗"
+                        : "リリースworkflowを起動"}
                 </Button>
+              )}
+              {!deviceBuild && preparation.prepState === "running" && (
+                <p className="text-xs text-muted-foreground">CIとバージョン更新が自動で実行されます。操作せずお待ちください</p>
+              )}
+              {!deviceBuild && preparation.prepState === "failed" && (
+                <p className="text-xs text-muted-foreground">リリース準備に失敗しています。上の赤い帯で原因を確認し、「再開」してください</p>
               )}
               {webviewIos && (
                 <IosTestflightStatus
@@ -180,7 +198,10 @@ export function MobileReleaseSheet({
 
       <AlertDialog open={releaseConfirmOpen} onOpenChange={(open) => {
         setReleaseConfirmOpen(open);
-        if (!open) setAllowFailedDeploy(false);
+        if (!open) {
+          setAllowFailedDeploy(false);
+          setAllowPrepOverride(false);
+        }
       }}>
         <AlertDialogContent className="flex flex-col gap-4 overflow-hidden">
           <AlertDialogHeader>
@@ -207,6 +228,16 @@ export function MobileReleaseSheet({
                 disabled={isTriggeringRelease}
               />
               <span>本番デプロイの失敗を確認しました。developに取り込んだ修正をリリースするため、失敗中の起動を許可します。</span>
+            </label>
+          )}
+          {prepBlocked && (
+            <label className="flex items-start gap-2 rounded-md border border-amber-500/40 p-3 text-sm">
+              <Checkbox
+                checked={allowPrepOverride}
+                onCheckedChange={(checked) => setAllowPrepOverride(checked === true)}
+                disabled={isTriggeringRelease}
+              />
+              <span>{PREP_OVERRIDE_CONFIRM_TEXT[preparation.prepState]}</span>
             </label>
           )}
           {otherPullRequestsWithIssue.length > 0 && (
@@ -243,7 +274,7 @@ export function MobileReleaseSheet({
             {/* 起動できたことは、閉じた先のこのシートの進捗（`ReleaseProgress`）で分かるため、
                 「リリースを起動しました」のダイアログは出さない（#1590） */}
             <AlertDialogAction
-              disabled={isTriggeringRelease || (deployFailed && !allowFailedDeploy)}
+              disabled={isTriggeringRelease || (deployFailed && !allowFailedDeploy) || (prepBlocked && !allowPrepOverride)}
               onClick={() => void triggerRelease(undefined, deployFailed && allowFailedDeploy)}
             >起動する</AlertDialogAction>
           </AlertDialogFooter>

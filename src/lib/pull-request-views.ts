@@ -13,6 +13,8 @@ export type PullRequestView = {
   description: string;
   /** 一覧が0件のときの文言。`title`からの機械的な生成だと日本語として不自然になるため個別に持つ */
   emptyMessage: string;
+  /** PC左メニューと一覧見出しの表示名（#4543）。「対象：状態」の書式。スマホは`label`を使う */
+  pcLabel: string;
 };
 
 /**
@@ -25,6 +27,7 @@ export const pullRequestViews: PullRequestView[] = [
   {
     id: "all",
     label: "すべてのPR",
+    pcLabel: "PR一覧",
     // マージ済み・クローズ済みを含めていたが、開いているPRだけに絞った（#1613）。左メニューは
     // 「いま動いているもの」を見る場所で、履歴の振り返りはGitHub側で足りるため。マージ済みPRは
     // Issueやブランチ画面のリンクから開けば今までどおり詳細を見られる（#1260）。
@@ -35,6 +38,7 @@ export const pullRequestViews: PullRequestView[] = [
   {
     id: "in-progress",
     label: "実行中",
+    pcLabel: "PR：検証中",
     title: "実行中のプルリクエスト",
     // CI通過後にClaudeのレビュー・自動マージ可否の判定が動いている間もここに入る（#2283）。
     // CI状態とは別の軸なので、「CIの結果待ち」だけだと「CI通過」と出ているPRがここにいる
@@ -48,6 +52,7 @@ export const pullRequestViews: PullRequestView[] = [
     // 「完了したPR」から改名した（#2120）。CIが確定しただけで何も完了しておらず、名前が
     // 「マージ済み」とも読めていた。ビューのidは`prview=completed`のURLを生かすため変えない。
     label: "マージ待ち",
+    pcLabel: "PR：マージ待ち",
     title: "マージ待ちのプルリクエスト",
     // CI失敗を含むことを明示する。「ユーザーの確認待ち」に並ぶPR（`requiresUserMerge`）とは
     // 母集団が別で、あちらはCIの結果を見ないため、CI実行中のリリースPRはここには出ない。

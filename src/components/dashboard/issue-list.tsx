@@ -149,6 +149,8 @@ type IssueListProps = {
   style?: CSSProperties;
   showSearch?: boolean;
   showHeader?: boolean;
+  /** ヘッダー直下へ差し込む枠。PCで選択中のラベル条件を出して解除させるのに使う（#4543） */
+  headerExtra?: ReactNode;
   /** 画面右下に浮くFAB（新規Issue作成ボタン）と最後の項目が重ならないよう下部に余白を確保する */
   fabSpacing?: boolean;
   /** スマホのボトムナビ（フッター）と最後の項目が重ならないよう、フッターと同じ高さの空白を末尾に追加する（#677） */
@@ -409,7 +411,7 @@ function QuestionStateBadge({
           : "回答が届いていますが、まだ開いていません"
       }
       className={cn(
-        "flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-medium ring-1 ring-inset",
+        "flex items-center gap-1 rounded-full px-1.5 py-0.5 text-xs font-medium ring-1 ring-inset",
         waiting
           ? "bg-blue-500/15 text-blue-700 ring-blue-500 dark:text-blue-400"
           : "bg-amber-500/15 text-amber-700 ring-amber-500 dark:text-amber-400",
@@ -476,6 +478,7 @@ export function IssueList({
   style,
   showSearch = true,
   showHeader = true,
+  headerExtra,
   fabSpacing = false,
   footerSpacing = false,
   scrollKey = null,
@@ -1275,7 +1278,7 @@ export function IssueList({
                   （#3159）。付いているものはIssue詳細で見る */}
               {/* レビューとレビューのあいだに入ったPRの件数（#3092）。リポジトリを選んだときだけ */}
               {codeReviewInterval && (
-                <span className="text-[10px] text-muted-foreground tabular-nums">
+                <span className="text-xs text-muted-foreground tabular-nums">
                   {codeReviewInterval}
                 </span>
               )}
@@ -1289,7 +1292,7 @@ export function IssueList({
                 selectKindLabels(issue.labels).map((label) => (
                   <span
                     key={label.name}
-                    className="whitespace-nowrap rounded-full px-1.5 py-0.5 text-[10px] ring-1 ring-inset ring-border"
+                    className="whitespace-nowrap rounded-full px-1.5 py-0.5 text-xs ring-1 ring-inset ring-border"
                     style={getLabelBadgeStyle(label.color)}
                   >
                     {label.name}
@@ -1416,7 +1419,7 @@ export function IssueList({
                   key={badge.kind}
                   title={badge.title}
                   className={cn(
-                    "rounded px-1.5 py-0.5 text-[11px] font-medium whitespace-nowrap ring-1 ring-inset",
+                    "rounded px-1.5 py-0.5 text-sm font-medium whitespace-nowrap ring-1 ring-inset",
                     badge.kind === "parent"
                       ? "bg-violet-500/10 text-violet-700 ring-violet-500/40 dark:text-violet-300"
                       : "text-muted-foreground ring-border",
@@ -1478,6 +1481,8 @@ export function IssueList({
           <Star className="size-4 shrink-0 text-muted-foreground" />
         </div>
       )}
+
+      {headerExtra}
 
       {/* 一覧から予約実行へまとめて積む入口（#3284）。手作業アシスタントの入口と同じく、ヘッダーではなく
           一覧の上に置くことで、ヘッダーを出さないスマホにも同じ位置で出る */}

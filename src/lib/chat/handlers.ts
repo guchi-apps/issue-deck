@@ -64,6 +64,10 @@ export type ChatReply = {
   /** 確認カードを含む返信か（含むときだけ`confirmState`を`pending`で保存する） */
   needsConfirm: boolean;
   nextContext: ChatContext;
+  /** AIが使えず調査に入れなかった返信（Slack起案は未調査の案を自動作成しないために見る。#4527） */
+  unavailable?: boolean;
+  /** AIの調査ではなく、会話の貼り付けから作った定型のIssue案（調査していない案。#4527） */
+  draftFallback?: boolean;
 };
 
 const MAX_ACTIONS = 20;
@@ -367,6 +371,7 @@ export async function handleChatMessage(params: {
         cards: [card],
         needsConfirm: true,
         nextContext: context,
+        draftFallback: true,
       };
     }
   }

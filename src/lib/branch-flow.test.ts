@@ -257,6 +257,89 @@ describe("buildBranchFlow", () => {
     expect(flow.repositories[0].orphanIssues).toEqual([]);
   });
 
+  describe("#番号の参照先がPRの場合（#4529）", () => {
+    const oldRelease = () =>
+      pullRequest({
+        number: 4517,
+        headRef: "release-main/v8.56.2",
+        baseRef: "main",
+        kind: "release",
+        state: "closed",
+        merged: false,
+        title: "旧リリース",
+      });
+
+    it("本番PRだけを参照する修正PRは、Issueではなく修正対象PRとして出す", () => {
+      const flow = build({
+        issues: [],
+        pullRequests: [
+          oldRelease(),
+          pullRequest({
+            number: 4518,
+            headRef: "fix/release-4517-watch",
+            linkedIssueNumber: 4517,
+            linkedIssueNumbers: [4517],
+          }),
+        ],
+        branchStatuses: [branchStatus()],
+      });
+      const lane = allLanes(flow.repositories[0]).find((l) => l.branchName === "fix/release-4517-watch");
+      expect(lane?.issue).toBeNull();
+      expect(lane?.relatedIssues).toEqual([]);
+      expect(lane?.referencedPullRequests.map((p) => p.number)).toEqual([4517]);
+    });
+
+    it("通常Issueが別にあればその対応を保持し、PR参照は修正対象へ分ける", () => {
+      const flow = build({
+        issues: [issue({ number: 4508, title: "通常Issue" })],
+        pullRequests: [
+          oldRelease(),
+          pullRequest({
+            number: 4512,
+            headRef: "issue-4508",
+            linkedIssueNumber: 4517,
+            linkedIssueNumbers: [4517, 4508],
+          }),
+        ],
+        branchStatuses: [branchStatus()],
+      });
+      const lane = allLanes(flow.repositories[0]).find((l) => l.branchName === "issue-4508");
+      expect(lane?.issue?.number).toBe(4508);
+      expect(lane?.referencedPullRequests.map((p) => p.number)).toEqual([4517]);
+    });
+
+    it("PR一覧にもIssueキャッシュにも無い番号は種別を断定せず番号だけのIssue参照のまま残す", () => {
+      const flow = build({
+        issues: [],
+        pullRequests: [
+          pullRequest({
+            number: 20,
+            headRef: "fix/x",
+            linkedIssueNumber: 999,
+            linkedIssueNumbers: [999],
+          }),
+        ],
+        branchStatuses: [branchStatus()],
+      });
+      const [lane] = allLanes(flow.repositories[0]);
+      expect(lane.issue).toEqual({ number: 999, title: null, progress: null, state: null });
+      expect(lane.referencedPullRequests).toEqual([]);
+    });
+
+    it("Issueキャッシュにある番号はPRと同番号でもIssueとして扱う", () => {
+      const flow = build({
+        issues: [issue({ number: 50, title: "Issue" })],
+        pullRequests: [
+          pullRequest({ number: 50, headRef: "fix/other" }),
+          pullRequest({ number: 51, headRef: "fix/y", linkedIssueNumber: 50, linkedIssueNumbers: [50] }),
+        ],
+        branchStatuses: [branchStatus()],
+      });
+      const lane = allLanes(flow.repositories[0]).find((l) => l.branchName === "fix/y");
+      expect(lane?.issue?.number).toBe(50);
+    });
+  });
+
   it("対応Issueを特定できないPRはissueがnullになる", () => {
     const flow = build({
       pullRequests: [
@@ -395,7 +478,6 @@ describe("buildBranchFlow", () => {
       pullRequestHealth: { counts: EMPTY_HEALTH_COUNTS, humanCount: 0, autoCount: 0 },
       activeLaneCount: 0,
       hasCiFailure: false,
-      needsUserMerge: false,
       openManualStepCount: 0,
       startedIssueCount: 0,
       readyIssueCount: 0,
@@ -1731,7 +1813,7 @@ describe("本番デプロイの状態（#1579）", () => {
 });
 
 describe("サマリー行の集計", () => {
-  it("CI失敗とユーザーのマージ待ちを拾う", () => {
+  it("通常PRのCI失敗は工程の集計に入らない", () => {
     const flow = build({
       pullRequests: [
         pullRequest({ number: 1, headRef: "issue-1", linkedIssueNumber: 1, ciState: "failure" }),
@@ -1747,14 +1829,10 @@ describe("サマリー行の集計", () => {
     });
 
     expect(flow.repositories[0].summary).toEqual({
-      pullRequestHealth: {
-        counts: { ...EMPTY_HEALTH_COUNTS, "ci-failed": 1 },
-        humanCount: 1,
-        autoCount: 0,
-      },
+      // 通常PRのCI失敗は本番リリース工程の集計に入らない（#4540）
+      pullRequestHealth: { counts: EMPTY_HEALTH_COUNTS, humanCount: 0, autoCount: 0 },
       activeLaneCount: 2,
       hasCiFailure: true,
-      needsUserMerge: true,
       openManualStepCount: 0,
       startedIssueCount: 0,
       readyIssueCount: 0,
@@ -1766,7 +1844,7 @@ describe("サマリー行の集計", () => {
     });
   });
 
-  it("通常PR・バンプPR・リリースPRを数え、マージ済みPRで水増ししない（#4015）", () => {
+  it("バンプPR・リリースPRだけを数え、通常PR・マージ済みPRで水増ししない（#4015・#4540）", () => {
     const flow = build({
       pullRequests: [
         pullRequest({ id: `${REPO}#1`, number: 1, headRef: "issue-1", linkedIssueNumber: 1, mergeable: false }),
@@ -1802,9 +1880,10 @@ describe("サマリー行の集計", () => {
     });
 
     const { pullRequestHealth } = flow.repositories[0].summary;
+    // 通常PR（#1）のコンフリクトは数えず、バンプPR・リリースPRの失敗だけを数える（#4540）
     expect(pullRequestHealth.counts["ci-failed"]).toBe(2);
-    expect(pullRequestHealth.counts.conflict).toBe(1);
-    expect(pullRequestHealth.humanCount).toBe(3);
+    expect(pullRequestHealth.counts.conflict).toBe(0);
+    expect(pullRequestHealth.humanCount).toBe(2);
   });
 
   it("未完了の手作業を数える。同じIssueが複数レーンにあっても1件（#1586）", () => {

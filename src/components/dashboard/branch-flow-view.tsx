@@ -12,6 +12,7 @@ import {
   type RefObject,
 } from "react";
 import { createPortal } from "react-dom";
+import { isReleaseCandidateHeadRef, isLegacyReleaseCandidateHeadRef } from "@/lib/release-branch";
 import {
   ArrowUpToLine,
   Check,
@@ -65,6 +66,8 @@ import {
   IosDistributionIcon,
   useIosDistributionState,
 } from "@/components/dashboard/ios-distribution-icon";
+import { useReleasePreparation } from "@/hooks/use-release-preparation";
+import { applyReleasePrepState } from "@/lib/release-prep-state";
 import { ReleasePreparationAlert } from "@/components/dashboard/release-preparation-alert";
 import { ReleaseRebuildHistoryPanel } from "@/components/dashboard/release-rebuild-history-panel";
 import { ReleaseRebuildButton } from "@/components/dashboard/release-rebuild-button";
@@ -119,7 +122,6 @@ import { getProgressStatusDef } from "@/lib/issue-progress";
 import {
   canMergeFromDeck,
   isMergeJudgementPending,
-  RELEASE_BRANCH_PREFIX,
   requiresUserMerge,
 } from "@/lib/pull-request-list";
 import { isTriggerPending, RELEASE_TRIGGER_PENDING_MS } from "@/lib/trigger-pending-guard";
@@ -131,6 +133,7 @@ import type {
   BranchFlowDeviceBuild,
   BranchFlowIssuePriority,
   BranchFlowIssueRef,
+  BranchFlowReferencedPullRequest,
   BranchFlowLane,
   BranchFlowLaneStatus,
   BranchFlowManualStep,
@@ -529,6 +532,47 @@ function IssueLine({
   );
 }
 
+/** 参照先のPRの実状態を表す語。本番PRはリリースPR（develop→main）を指す（#4529） */
+function describeReferencedPullRequest(pullRequest: BranchFlowReferencedPullRequest): string {
+  const target = pullRequest.kind === "release" ? "本番PR" : "PR";
+  if (pullRequest.merged) return `${target}（マージ済み）`;
+  return pullRequest.state === "open" ? `${target}（オープン）` : `${target}（クローズ済み・置換または取り下げ）`;
+}
+
+/**
+ * レーンのPRが`#番号`で参照している、PRだった番号（#4529）。Issueとは別の「修正対象」として出し、
+ * リンクもIssueでなくPRへ向ける。
+ */
+function ReferencedPullRequestsLine({
+  repositoryFullName,
+  pullRequests,
+}: {
+  repositoryFullName: string;
+  pullRequests: BranchFlowReferencedPullRequest[];
+}) {
+  if (pullRequests.length === 0) return null;
+
+  return (
+    <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+      <span className="shrink-0 text-xs text-muted-foreground">修正対象</span>
+      {pullRequests.map((pullRequest) => (
+        <span key={pullRequest.number} className="flex min-w-0 flex-wrap items-center gap-x-1">
+          <GithubReferenceLink
+            href={pullRequest.htmlUrl}
+            reference={{ repositoryFullName, number: pullRequest.number, kind: "pull" }}
+            className="min-w-0 max-w-full break-words text-xs text-primary hover:underline"
+          >
+            {pullRequest.kind === "release" ? "本番PR" : "PR"} #{pullRequest.number}
+          </GithubReferenceLink>
+          <span className="text-xs text-muted-foreground">
+            {describeReferencedPullRequest(pullRequest)}
+          </span>
+        </span>
+      ))}
+    </div>
+  );
+}
+
 /**
  * 1本のPRが複数のIssueを扱っている場合の2件目以降（#1455）。
  *
@@ -660,8 +704,15 @@ function RemainingManualSteps({
 function PullRequestLine({
   pullRequest,
   onMerged,
+  showStatus = false,
 }: {
   pullRequest: PullRequestSummary;
+  /**
+   * CI・レビュー・コンフリクト・判定などの結果を出すか（#4540）。**既定は出さない。**
+   * 通常PRの状態はPR一覧・PR詳細が持つので、ここでは番号・タイトルのリンクだけを置く。
+   * 本番リリース工程のPR（リリース候補PR）の行だけがtrueを渡す。
+   */
+  showStatus?: boolean;
   /**
    * マージできたとき。**渡さない行にはマージの導線（バッジもボタンも）を出さない。**
    * リリースの束の見出しはPRの行とは別にマージボタンを持っているため（`ReleaseMergeButton`）、
@@ -688,14 +739,16 @@ function PullRequestLine({
       >
         #{pullRequest.number} {pullRequest.title}
       </GithubReferenceLink>
-      {pullRequest.draft ? (
-        <PullRequestMetaBadge>ドラフト</PullRequestMetaBadge>
-      ) : (
-        // CI・レビュー・コンフリクト・自動修正を並べて出す（#4015）。互いを隠さない
-        <PullRequestHealthRow pullRequest={pullRequest} />
-      )}
+      {showStatus &&
+        (pullRequest.draft ? (
+          <PullRequestMetaBadge>ドラフト</PullRequestMetaBadge>
+        ) : (
+          // CI・レビュー・コンフリクト・自動修正を並べて出す（#4015）。互いを隠さない
+          <PullRequestHealthRow pullRequest={pullRequest} />
+        ))}
       {/* レビュー・CIの待ちは上の枠が言うので、それ以外の判定段階（リスク判定・自動マージ判定）だけ出す */}
-      {pullRequest.mergeJudgement.step !== "claude-review" &&
+      {showStatus &&
+        pullRequest.mergeJudgement.step !== "claude-review" &&
         pullRequest.mergeJudgement.step !== "wait-for-ci" && (
           <MergeJudgementBadge
             mergeJudgement={pullRequest.mergeJudgement}
@@ -720,8 +773,10 @@ function PullRequestLine({
       )}
     </div>
     {/* PR詳細・PR一覧と同じ6チェック（#4366）。共通結果は対象の候補PR・SHAを添えて出す */}
-    <PullRequestChecksStrip pullRequest={pullRequest} grouped={false} className="max-w-2xl px-0" />
-    {onMerged !== undefined && <PullRequestMergeHoldNotice pullRequest={pullRequest} className="max-w-2xl" />}
+    {showStatus && (
+      <PullRequestChecksStrip pullRequest={pullRequest} grouped={false} className="max-w-2xl px-0" />
+    )}
+    {showStatus && onMerged !== undefined && <PullRequestMergeHoldNotice pullRequest={pullRequest} className="max-w-2xl" />}
     </>
   );
 }
@@ -780,9 +835,13 @@ function LaneRow({
             issue={lane.issue}
             pullRequestTitle={headPullRequest?.title}
           />
-        ) : (
+        ) : lane.referencedPullRequests.length === 0 ? (
           <span className="text-xs text-muted-foreground">対応Issue不明</span>
-        )}
+        ) : null}
+        <ReferencedPullRequestsLine
+          repositoryFullName={repositoryFullName}
+          pullRequests={lane.referencedPullRequests}
+        />
         <RelatedIssuesLine
           repositoryFullName={repositoryFullName}
           issues={lane.relatedIssues}
@@ -1039,11 +1098,34 @@ function ReleaseCandidateVerificationPills({
 }
 
 /** 検証の理由を見出しの下へ1行で出す（#4390）。ホバーできないスマホでも読めるようにする */
-function ReleaseCandidateVerificationReason({ verification }: { verification: ReleaseCandidateVerification }) {
+function ReleaseCandidateVerificationReason({
+  verification,
+  pullRequest,
+}: {
+  verification: ReleaseCandidateVerification;
+  /** 工程を止めている候補PR。理由の対応先として詳細へのリンクを添える（#4540） */
+  pullRequest?: PullRequestSummary | null;
+}) {
   if (!verification.detail) return null;
   return (
-    <p className={cn("text-xs", verification.problem ? "text-destructive" : "text-muted-foreground")}>
+    <p className={cn("min-w-0 break-words text-xs", verification.problem ? "text-destructive" : "text-muted-foreground")}>
       {verification.detail}
+      {pullRequest && (
+        <>
+          {" "}
+          <GithubReferenceLink
+            href={pullRequest.htmlUrl}
+            reference={{
+              repositoryFullName: pullRequest.repositoryFullName,
+              number: pullRequest.number,
+              kind: "pull",
+            }}
+            className="whitespace-nowrap font-medium underline"
+          >
+            候補PR #{pullRequest.number}
+          </GithubReferenceLink>
+        </>
+      )}
     </p>
   );
 }
@@ -1289,7 +1371,9 @@ function ReleaseGroupHeader({
           )}
         </div>
 
-        {!summarizedInCard && verificationShown && <ReleaseCandidateVerificationReason verification={verificationShown} />}
+        {!summarizedInCard && verificationShown && (
+          <ReleaseCandidateVerificationReason verification={verificationShown} pullRequest={group.pullRequest} />
+        )}
 
         {/* デプロイのジョブ単位の内訳（#2777）。押したときだけ取得する */}
         {deployRunId !== null && (
@@ -1318,7 +1402,7 @@ function ReleaseGroupHeader({
         )}
 
         {/* マージ導線は見出し側（`ReleaseMergeButton`）が持つので、この行には渡さない */}
-        {group.pullRequest && <PullRequestLine pullRequest={group.pullRequest} />}
+        {group.pullRequest && <PullRequestLine pullRequest={group.pullRequest} showStatus />}
         {/* 全体レビュー・統合検証の進捗（#4357）。PRのCI・レビューとは別枠で、開いている
             リリース候補（凍結ブランチ）にだけ出す */}
         {!summarizedInCard &&
@@ -1326,7 +1410,7 @@ function ReleaseGroupHeader({
           !released &&
           group.pullRequest &&
           group.pullRequest.state === "open" &&
-          group.pullRequest.headRef.startsWith(RELEASE_BRANCH_PREFIX) && (
+          isReleaseCandidateHeadRef(group.pullRequest.headRef) && (
             <ReleaseVerificationBrief
               repositoryFullName={repositoryFullName}
               pullRequestNumber={group.pullRequest.number}
@@ -1405,6 +1489,7 @@ function NextReleaseCard({
   unreleased,
   latestReleaseMergedAt,
   releaseButton,
+  deployButton,
   onMerged,
 }: {
   repository: BranchFlowRepository;
@@ -1413,7 +1498,10 @@ function NextReleaseCard({
   /** 次のリリースで反映されるPRの件数（developにあってmainに無いもの。画面上部の「未リリース」と同じ値） */
   unreleased: UnreleasedSummary;
   latestReleaseMergedAt: string | null;
+  /** 「次のバージョン」カードの中に置く「リリースする」（#4532） */
   releaseButton?: React.ReactNode;
+  /** 「本番稼働中」カードの中に置く「本番へ再デプロイ」（#4532）。出さない条件は呼び出し側が判定する */
+  deployButton?: React.ReactNode;
   onMerged: (pullRequest: PullRequestSummary) => void;
 }) {
   const refreshFlow = useContext(BranchFlowRefreshContext);
@@ -1430,7 +1518,7 @@ function NextReleaseCard({
       className="@container mb-3 flex flex-col gap-2.5 rounded-[10px] border bg-card p-3 text-xs"
       data-testid="next-release-card"
     >
-      <p className="text-[11px] font-semibold tracking-wide text-primary">次のリリース</p>
+      <p className="text-xs font-semibold tracking-wide text-primary">次のリリース</p>
       <dl className="grid grid-cols-2 gap-2">
         <div className="min-w-0 rounded-md border px-2.5 py-1.5">
           <dt className="text-muted-foreground">本番稼働中</dt>
@@ -1441,6 +1529,7 @@ function NextReleaseCard({
           {latestReleaseMergedAt && (
             <dd className="text-muted-foreground">{formatMonthDayTime(latestReleaseMergedAt)} にリリース</dd>
           )}
+          {deployButton && <dd className="mt-1">{deployButton}</dd>}
         </div>
         <div className="min-w-0 rounded-md border px-2.5 py-1.5">
           <dt className="text-muted-foreground">次のバージョン</dt>
@@ -1458,17 +1547,23 @@ function NextReleaseCard({
               </GithubReferenceLink>
             ) : group?.bumpPullRequest ? (
               "バージョン更新のPRを処理中"
-            ) : group ? (
-              "リリースはまだ作成していません"
-            ) : (
+            ) : group ? null : (
               "次に公開する変更はありません"
             )}
           </dd>
+          {releaseButton && <dd className="mt-1">{releaseButton}</dd>}
         </div>
-        <div className="col-span-2 min-w-0 rounded-md border px-2.5 py-1.5">
-          <dt className="text-muted-foreground">次のリリースで反映されるPR</dt>
+        <div className="min-w-0 rounded-md border px-2.5 py-1.5">
+          <dt className="text-muted-foreground">反映待ちのPR</dt>
           <dd className="text-sm font-semibold">{`${unreleased.count}${unreleased.unit}`}</dd>
           <dd className="text-muted-foreground">mainへ未反映</dd>
+        </div>
+        <div className="min-w-0 rounded-md border px-2.5 py-1.5">
+          <dt className="text-muted-foreground">次のバージョンに登録済み</dt>
+          <dd className="text-sm font-semibold">{`${group?.version ? group.lanes.length : 0}件`}</dd>
+          <dd className="text-muted-foreground">
+            {group?.version ? "このバージョンに含まれる" : "バージョン作成後に表示"}
+          </dd>
         </div>
       </dl>
 
@@ -1477,7 +1572,7 @@ function NextReleaseCard({
           <div className="flex min-w-0 flex-wrap items-center gap-2">
             <ReleaseGroupStatePill group={group} deviceBuild={null} />
           </div>
-          {verificationShown && <ReleaseCandidateVerificationReason verification={verificationShown} />}
+          {verificationShown && <ReleaseCandidateVerificationReason verification={verificationShown} pullRequest={pullRequest} />}
           <div className="flex min-w-0 flex-wrap items-center gap-2">
             {pullRequest ? (
               <PullRequestMergeButton
@@ -1487,9 +1582,7 @@ function NextReleaseCard({
                 label="本番公開へ進む"
                 className="shrink-0"
               />
-            ) : (
-              releaseButton
-            )}
+            ) : null}
             {manualSteps.map((step) => (
               <GithubReferenceLink
                 key={step.number}
@@ -1502,7 +1595,7 @@ function NextReleaseCard({
               </GithubReferenceLink>
             ))}
           </div>
-          {pullRequest && pullRequest.headRef.startsWith(RELEASE_BRANCH_PREFIX) && (
+          {pullRequest && isReleaseCandidateHeadRef(pullRequest.headRef) && (
             <ReleaseVerificationBrief
               repositoryFullName={repository.repositoryFullName}
               pullRequestNumber={pullRequest.number}
@@ -1639,6 +1732,9 @@ function ReleaseFlowGraph({
      **リリースPR・バンプPRが出ている間は出さない**——その行が「mainへマージ」
      （`ReleaseMergeButton`）を持っており、同じ場所に押せないボタンを足すと
      押せる操作の隣に押せない操作が並ぶだけになる */
+  // 修正を取り込んだリリースの準備中・準備の失敗は、PRが0件の間も押せないようにする（#4421）
+  const preparation = useReleasePreparation(repository.repositoryFullName, !repository.deviceBuild);
+  const releaseBlockedReason = applyReleasePrepState(repository.releaseBlockedReason, preparation.prepState);
   const releaseButtonFor = (group: BranchFlowReleaseGroup) =>
     !repository.deviceBuild &&
     group.mergedAt === null &&
@@ -1648,7 +1744,7 @@ function ReleaseFlowGraph({
         repositoryFullName={repository.repositoryFullName}
         currentVersion={repository.release.latestVersion}
         isPending={releaseTriggerPending}
-        blockedReason={repository.releaseBlockedReason}
+        blockedReason={releaseBlockedReason}
         onTriggered={onReleaseTriggered}
       />
     ) : undefined;
@@ -1674,6 +1770,7 @@ function ReleaseFlowGraph({
         <ReleasePreparationAlert
           repositoryFullName={repository.repositoryFullName}
           onResumed={onReleaseTriggered}
+          preparation={preparation}
           className="mb-2"
         />
       )}
@@ -1685,6 +1782,18 @@ function ReleaseFlowGraph({
           unreleased={unreleased}
           latestReleaseMergedAt={latestReleaseMergedAt}
           releaseButton={nextGroup ? releaseButtonFor(nextGroup) : undefined}
+          deployButton={
+            repository.canTriggerDeploy && !deployFailure ? (
+              <RepositoryDeployButton
+                repositoryFullName={repository.repositoryFullName}
+                currentVersion={repository.release.latestVersion}
+                deployedAt={latestReleaseMergedAt}
+                unreleased={unreleased}
+                isPending={deployTriggerPending}
+                onTriggered={onDeployTriggered}
+              />
+            ) : undefined
+          }
           onMerged={onMerged}
         />
       )}
@@ -1701,12 +1810,10 @@ function ReleaseFlowGraph({
         {unreleased.count > 0 && (
           <span>未リリース {formatUnreleasedSummary(unreleased)}</span>
         )}
-        {/* **リリースの束ではなくこの行に置く**（#2020）。束は畳まれたり本番反映済みで
-            隠れたりするため、束に付けると押したいときに画面から消える。ここなら
-            リポジトリを開いている間はつねに同じ位置にある。
-            **失敗しているあいだは、すぐ下の帯（#2236）が同じボタンを持つのでこちらは出さない**
-            ——同じ操作が同じ画面に2つ並ぶのを避ける */}
-        {repository.canTriggerDeploy && !deployFailure && (
+        {/* 「次のリリース」カードを出さないリポジトリ（Xcodeで実機へ反映するもの）だけは、
+            従来どおりこの行に置く。カードを出す場合は「本番稼働中」カードの中にある（#4532）。
+            失敗しているあいだは失敗の帯（#2236）が同じボタンを持つので出さない */}
+        {repository.deviceBuild && repository.canTriggerDeploy && !deployFailure && (
           <>
             <span className="flex-1" />
             <RepositoryDeployButton
@@ -1768,7 +1875,7 @@ function ReleaseFlowGraph({
               group.mergedAt === null &&
               group.pullRequest !== null &&
               group.pullRequest.state === "open" &&
-              group.pullRequest.headRef.startsWith(RELEASE_BRANCH_PREFIX) &&
+              isLegacyReleaseCandidateHeadRef(group.pullRequest.headRef) &&
               hasChangesAfterReleaseFreeze(group) ? (
                 <ReleaseRebuildButton
                   repositoryFullName={repository.repositoryFullName}
@@ -2222,8 +2329,8 @@ function RepositorySummaryRow({
           {verification.detail}
         </span>
       )}
-      {/* **PRのマージ待ちは畳んだ行に出さない**（#2172）。マージの導線は開いたPR行と
-          PR一覧画面が持っている。ヘッダーの「手が要るもの◯件」には引き続き数える（`needsAttention`） */}
+      {/* **PRのマージ待ちは畳んだ行にもヘッダー件数にも出さない**（#2172・#4540）。通常PRの
+          マージの導線は開いたPR行とPR一覧画面が持っている */}
     </button>
   );
 }
@@ -2357,10 +2464,10 @@ function RepositorySection({
 function needsAttention(repository: BranchFlowRepository): boolean {
   const { summary } = repository;
   return (
+    // 数えるのは本番リリース工程（バンプPR・リリースPR・候補の検証・デプロイ）だけ（#4540）。
     // 自動修正が走っている問題は「待てば進むもの」側へ回る（`pullRequestHealth.autoCount`）。
     // 直している最中でない問題だけを手が要るものに数え、同じリポジトリを両方へ重ねない（#4015）
     summary.pullRequestHealth.humanCount > 0 ||
-    summary.needsUserMerge ||
     summary.releaseMergeTarget !== null ||
     // 検証の失敗・要確認・設定不足・取得不能は手が要る。実行中・待機中だけなら待てば進む（#4390）
     candidateVerificationOf(repository)?.problem != null ||

@@ -12,6 +12,7 @@ import { resolveReviewVerdictFreshness } from "@/lib/github/review-verdict-fresh
 import { isPromotionPullRequest } from "@/lib/knowledge-promotion-pr";
 import type { CiState } from "@/lib/github/release-api";
 import { findActiveSnooze, type SnoozeMap } from "@/lib/snooze";
+import { isRcReleaseCandidateHeadRef } from "@/lib/release-branch";
 import type {
   PullRequestKind,
   PullRequestSummary,
@@ -48,9 +49,12 @@ export function isVersionBumpHeadRef(headRef: string): boolean {
   return headRef.startsWith(VERSION_BUMP_BRANCH_PREFIX);
 }
 
-/** リリースPR（→`main`）のheadか。`develop`は`release-main/v`導入前の形式（#2117） */
+/**
+ * リリースPR（→`main`）のheadか。`develop`は`release-main/v`導入前の形式（#2117）、
+ * `release-rc/<番号>`は正式版を上げる前に固定した新方式の候補（#4495）
+ */
 export function isReleaseHeadRef(headRef: string): boolean {
-  return headRef === "develop" || headRef.startsWith(RELEASE_BRANCH_PREFIX);
+  return headRef === "develop" || headRef.startsWith(RELEASE_BRANCH_PREFIX) || isRcReleaseCandidateHeadRef(headRef);
 }
 
 /**
@@ -59,8 +63,11 @@ export function isReleaseHeadRef(headRef: string): boolean {
  */
 const MAIN_BRANCH = "main";
 
-/** タイトル・本文中の`#123`形式のIssue参照 */
-const ISSUE_REFERENCE_PATTERN_GLOBAL = /#(\d+)/g;
+/**
+ * タイトル・本文中の`#123`形式のIssue参照。`owner/repo#123`のような他リポジトリへの参照は、
+ * 同じ番号の自リポジトリのIssueと取り違えないよう拾わない（#4529）。
+ */
+const ISSUE_REFERENCE_PATTERN_GLOBAL = /(?<![\w/.-])#(\d+)/g;
 
 /**
  * PRのbase/headブランチから種別を判定する。

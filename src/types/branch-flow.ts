@@ -38,6 +38,18 @@ export type UnreleasedUnits = {
    * 「実際にまだ本番へ出ていない」という裏付けなので、レーンの振り分けはこちらを優先する。
    */
   mergedHeadRefs: string[];
+  /**
+   * developの幹に残っているが、実際にはmainへ入っているPR（#4528）。**件数・`mergedHeadRefs`には含めない。**
+   * 選んで作り直した候補（cherry-pick）や手作業の候補では元のマージコミットがmainの祖先にならないため、
+   * 祖先関係だけだと本番へ出た後も未リリースに残っていた。根拠は`cherry-pick`（mainの本流に同じPRの
+   * 取り込み痕跡）か`content`（PRの全変更ファイルがmainとdevelop先端で同一）。無ければ省略。
+   */
+  includedInMain?: { prNumber: number; headRef: string; evidence: "cherry-pick" | "content" }[];
+  /**
+   * mainへ入っているか確かめきれなかったPR（#4528）。件数には含める（反映済みと断定しない）。
+   * `partial`は一部のファイルだけ一致、`unknown`は取得上限・取得失敗で照合できなかったもの。
+   */
+  unverified?: { prNumber: number; headRef: string; state: "partial" | "unknown" }[];
 };
 
 /** `develop`が`main`よりどれだけ進んでいるか */
@@ -254,6 +266,20 @@ export type BranchFlowIssueRef = {
 export type BranchFlowIssuePriority = "high" | "low";
 
 /**
+ * レーンのPRが本文・タイトルで参照している、同じリポジトリの別PR（#4529）。
+ * リリース修正PRが「#4517の指摘に対応」と書いた参照先の旧リリースPRなど。
+ * 番号はIssueとPRで共通のため、PR一覧に実在する番号はIssueではなくPRとして扱う。
+ */
+export type BranchFlowReferencedPullRequest = {
+  number: number;
+  title: string;
+  htmlUrl: string;
+  state: "open" | "closed";
+  merged: boolean;
+  kind: PullRequestKind;
+};
+
+/**
  * 実行ボタンを押して動き出した、まだブランチが無いIssue（#1704・#2386）。
  *
  * ブランチ画面のレーンはPRのheadブランチと実在する作業ブランチの和集合で作るため、
@@ -303,6 +329,8 @@ export type BranchFlowLane = {
    * 扱った場合にここへ入る。**本文の`#番号`は単なる言及も混ざるため「関連」として出す。**
    */
   relatedIssues: BranchFlowIssueRef[];
+  /** `#番号`の参照先がPRだったもの（#4529）。Issueとしては出さず「修正対象PR」として出す */
+  referencedPullRequests: BranchFlowReferencedPullRequest[];
   status: BranchFlowLaneStatus;
   /**
    * 本番（main）へ届いているか。**マージ済みのレーンでのみ意味を持ち**、
@@ -370,19 +398,11 @@ export type BranchFlowRepositorySummary = {
   /** CIが失敗しているopenなPRがある */
   hasCiFailure: boolean;
   /**
-   * openなPR（通常・バージョンバンプ・リリース）のCI・レビュー・コンフリクト・自動修正の
-   * 件数（#4015）。**畳んだ行の件数チップと、「手が要るもの」「待てば進むもの」の分類の
-   * 共通の元**。マージ済み・クローズ済み・下書きは数えない。
+   * openなバージョンバンプPR・リリースPRのCI・レビュー・コンフリクト・自動修正の件数（#4015）。
+   * **通常PRは数えない**（#4540。通常PRの状態はPR一覧・PR詳細が持つ）。畳んだ行の件数チップと、
+   * 「手が要るもの」「待てば進むもの」の分類の共通の元。マージ済み・クローズ済み・下書きは数えない。
    */
   pullRequestHealth: PullRequestHealthSummary;
-  /**
-   * ユーザーがマージするしかないopenなPRがある（リリースPRを除く）。
-   *
-   * **畳んだ1行には出さず、ヘッダーの「手が要るもの◯件」だけに使う**（#2172）。ピルとして
-   * 出していたころは文言が長く、スマホ幅でその行だけが2段に折り返していた。マージの導線は
-   * 開いたPR行とPR一覧画面が持っている。
-   */
-  needsUserMerge: boolean;
   /**
    * このリポジトリに残っている未完了の手作業Issue（`71.manual-step`）の件数（#1586）。
    *
@@ -490,13 +510,17 @@ export type BranchFlowRelease = {
  * - `release-in-progress`: openなリリースPR・バンプPRがある（起こし直すと二重に走る）
  * - `nothing-to-release`: developの中身がmainに入りきっている（#2316・#2678・#2704）
  * - `deploy-failed`: 直近の本番デプロイが失敗している（#3897）
+ * - `release-preparing`: 修正を取り込んだリリースの準備が自動で進行中（#4421。PRはまだ無い）
+ * - `preparation-failed`: リリース準備が失敗している（#4421。再開は帯から）
  */
 export type ReleaseBlockedReason =
   | "branches-unloaded"
   | "no-workflow"
   | "release-in-progress"
   | "nothing-to-release"
-  | "deploy-failed";
+  | "deploy-failed"
+  | "release-preparing"
+  | "preparation-failed";
 
 /**
  * Xcodeで実機へ反映するリポジトリ（#3468。`lib/device-build-repos.ts`）の表示材料。

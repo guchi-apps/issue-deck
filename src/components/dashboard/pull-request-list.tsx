@@ -29,6 +29,8 @@ import type { PullRequestSummary, PullRequestViewId } from "@/types/pull-request
 type PullRequestListProps = {
   /** 表示中の状態別ビュー（#1312）。見出し・空状態の文言・並び順がこれで決まる */
   view: PullRequestViewId;
+  /** 見出しの差し替え（PCは左メニューと同じ「対象：状態」の語を出す。#4543）。未指定なら`title` */
+  heading?: string;
   pullRequests: PullRequestSummary[];
   failedRepositories: string[];
   fetchedAt: string | null;
@@ -193,6 +195,7 @@ function PullRequestCard({
  */
 export function PullRequestList({
   view,
+  heading,
   pullRequests,
   failedRepositories,
   fetchedAt,
@@ -239,7 +242,7 @@ export function PullRequestList({
         {headerLeading}
         <div className="min-w-0 flex-1">
           <h1 className="truncate text-sm font-semibold" title={description}>
-            {title}
+            {heading ?? title}
           </h1>
           <p className="truncate text-xs text-muted-foreground">
             <span>{pullRequests.length}件</span>

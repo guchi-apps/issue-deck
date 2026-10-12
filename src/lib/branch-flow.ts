@@ -1,4 +1,5 @@
 import { getDeviceBuildRepository } from "@/lib/device-build-repos";
+import { isReleaseCandidateHeadRef } from "@/lib/release-branch";
 import { MANUAL_STEP_LABEL } from "@/lib/github/approval-labels";
 import { isAskRepoQuestionIssue } from "@/lib/github/ask-claude";
 import { isCodeReviewIssue } from "@/lib/github/code-review";
@@ -8,8 +9,6 @@ import {
   classifyPullRequest,
   extractLinkedIssueNumber,
   isMergeJudgementPending,
-  RELEASE_BRANCH_PREFIX,
-  requiresUserMerge,
 } from "@/lib/pull-request-list";
 import { summarizePullRequestHealth } from "@/lib/pull-request-health";
 import {
@@ -513,6 +512,8 @@ function buildRepository({
   ]);
 
   const issueByNumber = new Map(issues.map((issue) => [issue.number, issue]));
+  // 番号はIssueとPRで共通。PR一覧に実在する番号は、Issueキャッシュに無い限りIssueとして扱わない（#4529）
+  const pullRequestByNumber = new Map(pullRequests.map((pullRequest) => [pullRequest.number, pullRequest]));
   const releases = collectReleases(pullRequests);
   const manualStepsByIssue = collectManualSteps(issues);
   // developとmainの差分から実際に確認できた「まだ本番へ出ていないブランチ」（#2661）。
@@ -525,6 +526,7 @@ function buildRepository({
       branchName: key,
       pullRequests: lanePullRequests.filter((pullRequest) => pullRequest.headRef === key),
       issueByNumber,
+      pullRequestByNumber,
       releases,
       manualStepsByIssue,
       unreleasedHeadRefs,
@@ -574,9 +576,9 @@ function buildRepository({
   const openLanePullRequests = lanePullRequests.filter(
     (pullRequest) => pullRequest.state === "open",
   );
-  // 通常PR・バージョンバンプPR・リリースPRを漏れなく数える（`hasCiFailure`と同じ母集団）
+  // 畳んだ行・ヘッダー件数の状態集計は本番リリース工程（バンプPR・リリースPR）だけを数える（#4540）。
+  // 通常PRのCI・レビュー・コンフリクト・修正状態はPR一覧・PR詳細が持つ。
   const summarizedPullRequests = [
-    ...openLanePullRequests,
     ...(releasePullRequest ? [releasePullRequest] : []),
     ...(bumpPullRequest ? [bumpPullRequest] : []),
   ];
@@ -590,7 +592,6 @@ function buildRepository({
       ...(releasePullRequest ? [releasePullRequest] : []),
       ...(bumpPullRequest ? [bumpPullRequest] : []),
     ].some((pullRequest) => pullRequest.ciState === "failure"),
-    needsUserMerge: openLanePullRequests.some(requiresUserMerge),
     // 既定で出す束を「次のリリースに乗る分」まで畳んだぶん（#1586）、畳んだ行で件数だけ出す。
     // 本番へ出た版に紐づいたまま残る手作業があるため、リポジトリ全体のレーンから数える。
     openManualStepCount: countOpenManualSteps([
@@ -815,7 +816,7 @@ export function releaseContentFrozenAt(release: {
   createdAt: string;
   mergedAt: string | null;
 }): string {
-  return release.headRef.startsWith(RELEASE_BRANCH_PREFIX)
+  return isReleaseCandidateHeadRef(release.headRef)
     ? release.createdAt
     : (release.mergedAt ?? release.createdAt);
 }
@@ -1100,7 +1101,7 @@ export function splitLanesByReleaseFreeze(
   group: Pick<BranchFlowReleaseGroup, "pullRequest" | "lanes" | "frozenAt">,
 ): { afterFreeze: BranchFlowLane[]; included: BranchFlowLane[] } {
   const release = group.pullRequest;
-  if (release === null || !release.headRef.startsWith(RELEASE_BRANCH_PREFIX)) {
+  if (release === null || !isReleaseCandidateHeadRef(release.headRef)) {
     return { afterFreeze: [], included: group.lanes };
   }
   const frozenAt = new Date(group.frozenAt ?? releaseContentFrozenAt(release)).getTime();
@@ -1291,6 +1292,7 @@ function buildLane({
   branchName,
   pullRequests,
   issueByNumber,
+  pullRequestByNumber,
   releases,
   manualStepsByIssue,
   unreleasedHeadRefs,
@@ -1299,6 +1301,8 @@ function buildLane({
   branchName: string;
   pullRequests: PullRequestSummary[];
   issueByNumber: Map<number, BranchFlowIssueSource>;
+  /** 同じリポジトリのPR（番号→PR）。参照先がPRかIssueかの判定に使う（#4529） */
+  pullRequestByNumber: Map<number, PullRequestSummary>;
   releases: MergedRelease[];
   manualStepsByIssue: Map<number, BranchFlowManualStep[]>;
   /** developとmainの差分から「まだ本番へ出ていない」と確認できたブランチ名（#2661） */
@@ -1313,18 +1317,44 @@ function buildLane({
     return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
   });
 
-  const issueNumber =
-    sorted.find((pullRequest) => pullRequest.linkedIssueNumber !== null)?.linkedIssueNumber ??
-    // PRが無い（＝タイトル・本文が無い）ブランチは、ブランチ名の規約からだけ引く。
-    extractLinkedIssueNumber({ headRef: branchName, title: "", body: null });
+  // 参照先がPRと確認できる番号（Issueキャッシュに無いもの）はIssueとして扱わない（#4529）。
+  // ブランチ名の`issue-<番号>`だけは作業Issueの宣言なので常にIssueとして扱う。
+  const branchIssueNumber = extractLinkedIssueNumber({ headRef: branchName, title: "", body: null });
+  const isPullRequestReference = (number: number) =>
+    number !== branchIssueNumber &&
+    !issueByNumber.has(number) &&
+    pullRequestByNumber.has(number);
+
+  const orderedNumbers = [
+    ...new Set(
+      sorted.flatMap((pullRequest) => [
+        ...(pullRequest.linkedIssueNumber === null ? [] : [pullRequest.linkedIssueNumber]),
+        ...pullRequest.linkedIssueNumbers,
+      ]),
+    ),
+  ];
+  const issueNumbers = orderedNumbers.filter((number) => !isPullRequestReference(number));
+  const ownNumbers = new Set(sorted.map((pullRequest) => pullRequest.number));
+  const referencedPullRequests = orderedNumbers
+    .filter((number) => isPullRequestReference(number) && !ownNumbers.has(number))
+    .map((number) => pullRequestByNumber.get(number) as PullRequestSummary)
+    .map((pullRequest) => ({
+      number: pullRequest.number,
+      title: pullRequest.title,
+      htmlUrl: pullRequest.htmlUrl,
+      state: pullRequest.state,
+      merged: pullRequest.merged,
+      kind: pullRequest.kind,
+    }));
+
+  // PRが無い（＝タイトル・本文が無い）ブランチは、ブランチ名の規約からだけ引く。
+  const issueNumber = issueNumbers[0] ?? branchIssueNumber;
 
   const issue = issueNumber === null ? null : issueByNumber.get(issueNumber) ?? null;
 
-  // 1本のPRが複数のIssueを扱っている場合の残り（#1455）。レーンにぶら下がる全PRから集め、
-  // 主のIssueを除く。順序はPRの並び（openが先）と参照の確度をそのまま引き継ぐ。
-  const relatedIssueNumbers = [
-    ...new Set(sorted.flatMap((pullRequest) => pullRequest.linkedIssueNumbers)),
-  ].filter((number) => number !== issueNumber);
+  // 1本のPRが複数のIssueを扱っている場合の残り（#1455）。順序はPRの並び（openが先）と
+  // 参照の確度をそのまま引き継ぐ。
+  const relatedIssueNumbers = issueNumbers.filter((number) => number !== issueNumber);
 
   // 版が意味を持つのは「マージされた変更」だけ。複数PRがぶら下がるレーンでは、
   // 実際にdevelopへ入ったマージ（最後にマージされたもの）を基準にする。
@@ -1345,6 +1375,7 @@ function buildLane({
     relatedIssues: relatedIssueNumbers.map((number) =>
       toIssueRefOrNumber(number, issueByNumber.get(number) ?? null),
     ),
+    referencedPullRequests,
     status: resolveLaneStatus(sorted),
     releaseState:
       mergedAt === undefined || mergedAt === null

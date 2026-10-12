@@ -1,0 +1,257 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const mocks = vi.hoisted(() => ({
+  candidateFindUnique: vi.fn(),
+  candidateFindFirst: vi.fn(),
+  candidateCreate: vi.fn(),
+  candidateUpdateMany: vi.fn(async () => ({ count: 1 })),
+  candidateUpdate: vi.fn(),
+  revisionFindUnique: vi.fn(),
+  revisionUpdateMany: vi.fn(async () => ({ count: 1 })),
+  revisionCreate: vi.fn(),
+  repositoryFindFirst: vi.fn(),
+  fixFindMany: vi.fn(async () => [] as { fixPrNumber: number | null; status: string }[]),
+  callerText: vi.fn(),
+  openPrs: vi.fn(),
+  branchHead: vi.fn(),
+  mainHead: vi.fn(),
+  rebuildCandidate: vi.fn(),
+  dispatch: vi.fn(),
+  prsByHead: vi.fn(),
+  prForRebuild: vi.fn(),
+  isAncestor: vi.fn(async () => true),
+  registerVerification: vi.fn(),
+  verifyJob: vi.fn(),
+  reviewJob: vi.fn(),
+}));
+
+vi.mock("@/lib/db", () => {
+  const db = {
+    releaseCandidate: {
+      findUnique: mocks.candidateFindUnique,
+      findFirst: mocks.candidateFindFirst,
+      create: mocks.candidateCreate,
+      updateMany: mocks.candidateUpdateMany,
+      update: mocks.candidateUpdate,
+    },
+    releaseCandidateRevision: {
+      findUnique: mocks.revisionFindUnique,
+      findFirst: vi.fn(),
+      updateMany: mocks.revisionUpdateMany,
+      create: mocks.revisionCreate,
+    },
+    releaseFixSeries: { findMany: mocks.fixFindMany },
+    releaseVerification: { findMany: vi.fn(async () => []) },
+    repository: { findFirst: mocks.repositoryFindFirst },
+    $transaction: async (fn: (tx: unknown) => unknown) => fn(db),
+  };
+  return { db };
+});
+vi.mock("@/lib/github/release-api", () => ({
+  dispatchReleaseCandidateWorkflow: mocks.dispatch,
+  fetchBranchHeadSha: mocks.branchHead,
+  fetchCommitSummary: vi.fn(),
+  fetchMainHeadSha: mocks.mainHead,
+  fetchOpenPullRequestsForBase: mocks.openPrs,
+  fetchPullRequestForRebuild: mocks.prForRebuild,
+  fetchPullRequestsByHead: mocks.prsByHead,
+  fetchReleaseCallerText: mocks.callerText,
+  fetchReleaseRebuildCandidate: mocks.rebuildCandidate,
+  isAncestorCommit: mocks.isAncestor,
+}));
+vi.mock("@/lib/github/app-auth", () => ({ getInstallationToken: vi.fn(async () => "t") }));
+vi.mock("@/lib/github/actions-api", () => ({ closePullRequest: vi.fn() }));
+vi.mock("@/lib/github/issues-api", () => ({ createComment: vi.fn() }));
+vi.mock("@/lib/release-verification", () => ({
+  registerReleaseVerification: mocks.registerVerification,
+  listReleaseVerificationRecords: vi.fn(async () => []),
+}));
+vi.mock("@/lib/dispatch/release-verify-jobs", () => ({ requestReleaseVerifyJob: mocks.verifyJob }));
+vi.mock("@/lib/dispatch/release-review-jobs", () => ({ requestReleaseReviewJob: mocks.reviewJob }));
+
+import { createReleaseRc, recordRcReport, requestRcImport } from "@/lib/release-rc-run";
+
+const CALLER = "    inputs:\n      candidate_request:\n        type: string\n    with:\n      candidate-request: x\n";
+const FROZEN = "f".repeat(40);
+const HEAD1 = "1".repeat(40);
+const HEAD2 = "2".repeat(40);
+const ctx = { owner: "o", repo: "r", token: "t" };
+
+function candidateRow(overrides: Record<string, unknown> = {}) {
+  return {
+    id: "c1",
+    repositoryFullName: "o/r",
+    sequence: 3,
+    phase: "review",
+    frozenDevelopSha: FROZEN,
+    frozenPrs: [{ number: 1, title: "a", mergeSha: "a".repeat(40) }],
+    approvedExtraPrs: [],
+    currentRevision: 1,
+    activeKey: "o/r",
+    migratedFromPrNumber: null,
+    revisions: [
+      {
+        id: "r1",
+        revision: 1,
+        reason: "initial",
+        status: "applied",
+        expectedHeadSha: null,
+        prNumber: 10,
+        baseSha: "b".repeat(40),
+        headSha: HEAD1,
+        importedPrs: [],
+        createdAt: new Date(),
+      },
+    ],
+    ...overrides,
+  };
+}
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  mocks.callerText.mockResolvedValue(CALLER);
+  mocks.candidateFindUnique.mockResolvedValue(null);
+  mocks.revisionFindUnique.mockResolvedValue(null);
+  mocks.candidateFindFirst.mockResolvedValue(null);
+  mocks.openPrs.mockResolvedValue([]);
+  mocks.branchHead.mockResolvedValue(FROZEN);
+  mocks.mainHead.mockResolvedValue("m".repeat(40));
+  mocks.rebuildCandidate.mockResolvedValue({ pullRequests: [{ number: 1, title: "a", mergeSha: "a".repeat(40) }] });
+  mocks.candidateCreate.mockResolvedValue({ id: "c1", sequence: 1 });
+  mocks.repositoryFindFirst.mockResolvedValue({ ownerLogin: "o", name: "r", installation: { installationId: 1 } });
+  mocks.isAncestor.mockResolvedValue(true);
+  mocks.dispatch.mockResolvedValue(undefined);
+  mocks.fixFindMany.mockResolvedValue([]);
+});
+
+describe("createReleaseRc", () => {
+  it("developの先端を固定し、正式版の指定なしでworkflowを起動する", async () => {
+    const result = await createReleaseRc({ ...ctx, userId: "u1", requestKey: "key-000001" });
+    expect(result).toEqual({ ok: true, candidateId: "c1", revision: 1, existing: false });
+    expect(mocks.rebuildCandidate).toHaveBeenCalledWith("o", "r", "m".repeat(40), "t", FROZEN);
+    const request = JSON.parse(mocks.dispatch.mock.calls[0][3]);
+    expect(request).toMatchObject({ mode: "create", revision: 1, baseHeadSha: FROZEN, prs: [] });
+    expect(mocks.candidateCreate.mock.calls[0][0].data).toMatchObject({ activeKey: "o/r", phase: "creating", frozenDevelopSha: FROZEN });
+  });
+
+  it("同じ要求キーの再送は既存を返し、二重に作らない", async () => {
+    mocks.candidateFindUnique.mockImplementation(async ({ where }: { where: { requestKey?: string } }) =>
+      where.requestKey ? { id: "c1" } : null,
+    );
+    const result = await createReleaseRc({ ...ctx, userId: "u1", requestKey: "key-000001" });
+    expect(result).toMatchObject({ ok: true, existing: true });
+    expect(mocks.candidateCreate).not.toHaveBeenCalled();
+    expect(mocks.dispatch).not.toHaveBeenCalled();
+  });
+
+  it("旧方式の候補が開いている間は作らない（閉じない・バンプを戻さない）", async () => {
+    mocks.openPrs.mockResolvedValue([{ number: 9, head: { ref: "release-main/v8.56.0", sha: HEAD1 } }]);
+    expect(await createReleaseRc({ ...ctx, userId: "u1", requestKey: "key-000001" })).toEqual({ ok: false, error: "legacy_open" });
+    expect(mocks.candidateCreate).not.toHaveBeenCalled();
+  });
+
+  it("callerが未対応なら理由付きで断る", async () => {
+    mocks.callerText.mockResolvedValue("      rebuild_selection:\n");
+    expect(await createReleaseRc({ ...ctx, userId: "u1", requestKey: "key-000001" })).toEqual({ ok: false, error: "caller_unsupported" });
+  });
+
+  it("起動に失敗したら失敗を記録し、候補を解放する（記録は残す）", async () => {
+    mocks.dispatch.mockRejectedValue(new Error("422"));
+    mocks.candidateFindUnique.mockImplementation(async ({ where }: { where: { id?: string } }) =>
+      where.id ? candidateRow({ phase: "creating", currentRevision: 0, revisions: [{ id: "r1", revision: 1, status: "requested" }] }) : null,
+    );
+    expect(await createReleaseRc({ ...ctx, userId: "u1", requestKey: "key-000001" })).toEqual({ ok: false, error: "dispatch_failed" });
+    expect(mocks.revisionUpdateMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: "r1", status: "requested" }, data: expect.objectContaining({ status: "failed", pendingKey: null }) }),
+    );
+    expect(mocks.candidateUpdateMany).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ phase: "cancelled", activeKey: null }) }),
+    );
+  });
+});
+
+describe("requestRcImport", () => {
+  const base = { ...ctx, userId: "u1", candidateId: "c1", approveExtra: [] as number[], requestKey: "key-000002", source: "manual" as const };
+
+  beforeEach(() => {
+    mocks.candidateFindUnique.mockImplementation(async ({ where }: { where: { id?: string } }) => (where.id ? candidateRow() : null));
+    mocks.prsByHead.mockResolvedValue([{ number: 10, state: "open", head: { sha: HEAD1, ref: "release-rc/3" }, base: { sha: "b".repeat(40) } }]);
+    mocks.isAncestor.mockResolvedValue(false);
+    mocks.prForRebuild.mockImplementation(async (_o: string, _r: string, n: number) => ({
+      number: n,
+      title: `PR${n}`,
+      merged_at: "2026-10-12T00:00:00Z",
+      merge_commit_sha: `${n}`.padEnd(40, "0"),
+      base: { ref: "develop" },
+      head: { ref: `issue-${n}` },
+    }));
+  });
+
+  it("画面で見ていたheadと違えば受け付けない", async () => {
+    const result = await requestRcImport({ ...base, expectedHeadSha: HEAD2, selected: [{ number: 21 }] });
+    expect(result).toEqual({ ok: false, error: "candidate_changed" });
+    expect(mocks.revisionCreate).not.toHaveBeenCalled();
+  });
+
+  it("関連修正でないPRは承認なしに取り込まない", async () => {
+    const result = await requestRcImport({ ...base, expectedHeadSha: HEAD1, selected: [{ number: 21 }] });
+    expect(result).toEqual({ ok: false, error: "approval_required", unapproved: [21] });
+    expect(mocks.dispatch).not.toHaveBeenCalled();
+  });
+
+  it("関連修正は取り込み、直前のheadから積むよう依頼する", async () => {
+    mocks.fixFindMany.mockResolvedValue([{ fixPrNumber: 21, status: "fix_merged" }]);
+    const result = await requestRcImport({ ...base, expectedHeadSha: HEAD1, selected: [{ number: 21 }] });
+    expect(result).toEqual({ ok: true, candidateId: "c1", revision: 2, existing: false });
+    expect(mocks.revisionCreate.mock.calls[0][0].data).toMatchObject({ revision: 2, expectedHeadSha: HEAD1, pendingKey: "c1", status: "requested" });
+    expect(JSON.parse(mocks.dispatch.mock.calls[0][3])).toMatchObject({ mode: "import", baseHeadSha: HEAD1, prs: [{ number: 21 }] });
+  });
+
+  it("更新中は2本目を受け付けない", async () => {
+    mocks.candidateFindUnique.mockImplementation(async ({ where }: { where: { id?: string } }) =>
+      where.id
+        ? candidateRow({ revisions: [...candidateRow().revisions, { id: "r2", revision: 2, status: "requested", createdAt: new Date() }] })
+        : null,
+    );
+    const result = await requestRcImport({ ...base, expectedHeadSha: HEAD1, selected: [{ number: 21 }] });
+    expect(result).toEqual({ ok: false, error: "revision_in_progress" });
+  });
+});
+
+describe("recordRcReport", () => {
+  it("適用済みの要求への再送・遅延報告は何も変えない", async () => {
+    mocks.revisionFindUnique.mockResolvedValue({ id: "r2", candidateId: "c1", status: "applied" });
+    mocks.candidateFindUnique.mockResolvedValue(candidateRow());
+    const result = await recordRcReport({ repositoryFullName: "o/r", requestKey: "key-000002", outcome: "applied", runId: 5, reason: null });
+    expect(result).toEqual({ ok: true, outcome: "ignored" });
+    expect(mocks.revisionUpdateMany).not.toHaveBeenCalled();
+  });
+
+  it("更新の失敗は記録するが、現在のrevisionと候補は残す", async () => {
+    mocks.revisionFindUnique.mockResolvedValue({ id: "r2", candidateId: "c1", status: "requested" });
+    mocks.candidateFindUnique.mockResolvedValue(candidateRow());
+    const result = await recordRcReport({ repositoryFullName: "o/r", requestKey: "key-000002", outcome: "failed", runId: 5, reason: "競合" });
+    expect(result).toEqual({ ok: true, outcome: "failed" });
+    expect(mocks.revisionUpdateMany).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ status: "failed", failureReason: "競合" }) }),
+    );
+    expect(mocks.candidateUpdateMany).not.toHaveBeenCalled();
+  });
+
+  it("適用の報告は候補ブランチを取り直して確かめ、新しいSHAで検証を依頼する", async () => {
+    const row = candidateRow({
+      revisions: [
+        ...candidateRow().revisions,
+        { id: "r2", revision: 2, reason: "fix_import", status: "requested", expectedHeadSha: HEAD1, importedPrs: [], createdAt: new Date() },
+      ],
+    });
+    mocks.revisionFindUnique.mockResolvedValue({ id: "r2", candidateId: "c1", status: "requested" });
+    mocks.candidateFindUnique.mockResolvedValue(row);
+    mocks.prsByHead.mockResolvedValue([{ number: 10, state: "open", head: { sha: HEAD2, ref: "release-rc/3" }, base: { sha: "b".repeat(40) } }]);
+    const result = await recordRcReport({ repositoryFullName: "o/r", requestKey: "key-000002", outcome: "applied", runId: 5, reason: null });
+    expect(result).toEqual({ ok: true, outcome: "applied" });
+    expect(mocks.isAncestor).toHaveBeenCalledWith("o", "r", HEAD1, HEAD2, "t");
+    expect(mocks.registerVerification).toHaveBeenCalledWith({ repoFullName: "o/r", prNumber: 10, baseSha: "b".repeat(40), headSha: HEAD2 });
+    expect(mocks.candidateUpdateMany).toHaveBeenCalledWith({ where: { id: "c1", currentRevision: { lt: 2 } }, data: { currentRevision: 2 } });
+  });
+});

@@ -1,0 +1,259 @@
+import { describe, expect, it } from "vitest";
+
+import {
+  isLegacyReleaseCandidateHeadRef,
+  isRcReleaseCandidateHeadRef,
+  isReleaseCandidateHeadRef,
+  legacyReleaseVersionOf,
+  rcSequenceOf,
+} from "@/lib/release-branch";
+import { classifyPullRequest } from "@/lib/pull-request-list";
+import { evaluateReleaseMergeGate, isReleasePullRequest, type ReleaseVerificationRecord } from "@/lib/release-merge-gate";
+import {
+  buildRcFinalizeContract,
+  canCancelRc,
+  canTransitionRcPhase,
+  decideLegacyMigration,
+  decideRcImport,
+  decideRcReport,
+  deriveRcStatus,
+  isRcRevisionPendingExpired,
+  parseRcCallerSupport,
+  parseRcRequestKey,
+  RC_REVISION_TTL_MS,
+  type RcStatusInput,
+} from "@/lib/release-rc";
+
+const BASE = "b".repeat(40);
+const HEAD1 = "1".repeat(40);
+const HEAD2 = "2".repeat(40);
+
+function gate(records: ReleaseVerificationRecord[], headSha = HEAD2) {
+  return evaluateReleaseMergeGate({ current: { baseSha: BASE, headSha }, records, enforced: true });
+}
+
+function input(overrides: Partial<RcStatusInput> = {}): RcStatusInput {
+  return {
+    phase: "review",
+    current: { revision: 2, headSha: HEAD2 },
+    pending: null,
+    pullRequest: { number: 10, state: "open", merged: false, baseSha: BASE, headSha: HEAD2 },
+    gate: gate([]),
+    fixInProgress: false,
+    ...overrides,
+  };
+}
+
+describe("候補ブランチの判定", () => {
+  it("旧方式・新方式を区別し、バンプPRとは重ならない", () => {
+    expect(isLegacyReleaseCandidateHeadRef("release-main/v8.56.0")).toBe(true);
+    expect(isRcReleaseCandidateHeadRef("release-rc/12")).toBe(true);
+    expect(isRcReleaseCandidateHeadRef("release-rc/12-x")).toBe(false);
+    expect(isReleaseCandidateHeadRef("release/v8.56.0")).toBe(false);
+    expect(isReleaseCandidateHeadRef("develop")).toBe(false);
+    expect(rcSequenceOf("release-rc/12")).toBe(12);
+    expect(legacyReleaseVersionOf("release-main/v8.56.0")).toBe("8.56.0");
+    expect(legacyReleaseVersionOf("release-rc/12")).toBeNull();
+  });
+
+  it("新方式の候補PRもリリースPRとして分類され、検証ゲートの対象になる", () => {
+    expect(classifyPullRequest({ baseRef: "main", headRef: "release-rc/3" })).toBe("release");
+    expect(isReleasePullRequest({ baseRef: "main", headRef: "release-rc/3" })).toBe(true);
+    expect(isReleasePullRequest({ baseRef: "develop", headRef: "release-rc/3" })).toBe(false);
+    expect(isReleasePullRequest({ baseRef: "main", headRef: "release-main/v1.2.3" })).toBe(true);
+  });
+});
+
+describe("deriveRcStatus", () => {
+  it("現在revisionのSHAに一致する合格だけで公開準備可能になる", () => {
+    const passed = gate([
+      { kind: "integration", state: "passed", baseSha: BASE, headSha: HEAD2 },
+      { kind: "ai_review", state: "passed", baseSha: BASE, headSha: HEAD2 },
+    ]);
+    expect(deriveRcStatus(input({ gate: passed })).status).toBe("ready_to_prepare");
+  });
+
+  it("旧revisionの合格や遅れて届いた結果は、現在の合格にならない", () => {
+    const stale = gate([
+      { kind: "integration", state: "passed", baseSha: BASE, headSha: HEAD1 },
+      { kind: "ai_review", state: "passed", baseSha: BASE, headSha: HEAD1 },
+    ]);
+    expect(deriveRcStatus(input({ gate: stale })).status).toBe("awaiting_verification");
+  });
+
+  it("失敗・要確認は要修正、修正系列の進行中は修正中", () => {
+    const failed = gate([
+      { kind: "integration", state: "failed", baseSha: BASE, headSha: HEAD2 },
+      { kind: "ai_review", state: "passed", baseSha: BASE, headSha: HEAD2 },
+    ]);
+    expect(deriveRcStatus(input({ gate: failed })).status).toBe("needs_fix");
+    expect(deriveRcStatus(input({ gate: failed, fixInProgress: true })).status).toBe("fixing");
+    const partial = gate([
+      { kind: "integration", state: "passed", baseSha: BASE, headSha: HEAD2 },
+      { kind: "ai_review", state: "passed", baseSha: BASE, headSha: HEAD2, unverifiedScope: "src/a.ts" },
+    ]);
+    expect(deriveRcStatus(input({ gate: partial })).status).toBe("needs_fix");
+  });
+
+  it("実行中は検証中", () => {
+    const running = gate([{ kind: "integration", state: "running", baseSha: BASE, headSha: HEAD2 }]);
+    expect(deriveRcStatus(input({ gate: running })).status).toBe("verifying");
+  });
+
+  it("更新要求が未完了の間は修正中（初回は作成中）で、旧結果を合格にしない", () => {
+    const passed = gate([
+      { kind: "integration", state: "passed", baseSha: BASE, headSha: HEAD2 },
+      { kind: "ai_review", state: "passed", baseSha: BASE, headSha: HEAD2 },
+    ]);
+    expect(deriveRcStatus(input({ gate: passed, pending: { revision: 3, reason: "fix_import" } })).status).toBe("fixing");
+    expect(deriveRcStatus(input({ phase: "creating", current: null, pending: { revision: 1, reason: "initial" } })).status).toBe("creating");
+  });
+
+  it("記録に無いpushでheadが変わったら合格にせず確認を求める", () => {
+    const passed = gate(
+      [
+        { kind: "integration", state: "passed", baseSha: BASE, headSha: HEAD1 },
+        { kind: "ai_review", state: "passed", baseSha: BASE, headSha: HEAD1 },
+      ],
+      HEAD1,
+    );
+    const result = deriveRcStatus(
+      input({ gate: passed, pullRequest: { number: 10, state: "open", merged: false, baseSha: BASE, headSha: HEAD1 } }),
+    );
+    expect(result.status).toBe("needs_fix");
+    expect(result.attention).not.toBeNull();
+  });
+
+  it("取得できないときは成功と推測しない", () => {
+    expect(deriveRcStatus(input({ gate: null })).status).toBe("awaiting_verification");
+    expect(deriveRcStatus(input({ pullRequest: null })).attention).not.toBeNull();
+  });
+
+  it("記録で持つ段階はそのまま出る", () => {
+    expect(deriveRcStatus(input({ phase: "cancelled" })).status).toBe("cancelled");
+    expect(deriveRcStatus(input({ phase: "preparing" })).status).toBe("preparing");
+  });
+});
+
+describe("段階の遷移", () => {
+  it("mainへの反映以降は取り消せない", () => {
+    expect(canCancelRc("review")).toBe(true);
+    expect(canCancelRc("awaiting_approval")).toBe(true);
+    expect(canCancelRc("deploying")).toBe(false);
+    expect(canCancelRc("completed")).toBe(false);
+  });
+
+  it("検証段階から稼働確認へ飛ばない", () => {
+    expect(canTransitionRcPhase("review", "preparing")).toBe(true);
+    expect(canTransitionRcPhase("review", "deploying")).toBe(false);
+    expect(canTransitionRcPhase("preparing", "review")).toBe(true);
+  });
+});
+
+describe("decideRcImport", () => {
+  const prs = [
+    { number: 21, mergeSha: "a".repeat(40), title: "修正" },
+    { number: 22, mergeSha: "c".repeat(40), title: "無関係" },
+  ];
+
+  it("関連修正は承認なしで取り込み、範囲外は承認を求める", () => {
+    expect(decideRcImport({ selected: prs, scope: { relatedFixPrs: [21], approvedExtraPrs: [] }, approveExtra: [] })).toEqual({
+      ok: false,
+      error: "approval_required",
+      unapproved: [22],
+    });
+  });
+
+  it("明示的に承認した範囲外PRは記録して取り込む", () => {
+    const result = decideRcImport({ selected: prs, scope: { relatedFixPrs: [21], approvedExtraPrs: [] }, approveExtra: [22] });
+    expect(result.ok && result.newlyApproved).toEqual([22]);
+    expect(result.ok && result.prs.map((p) => p.related)).toEqual([true, false]);
+  });
+
+  it("空の選択は拒否する", () => {
+    expect(decideRcImport({ selected: [], scope: { relatedFixPrs: [], approvedExtraPrs: [] }, approveExtra: [] }).ok).toBe(false);
+  });
+});
+
+describe("decideRcReport", () => {
+  const frozen = "f".repeat(40);
+  const pr = { number: 10, baseSha: BASE, headSha: frozen, headRef: "release-rc/3" };
+
+  it("初回は固定したdevelopのSHAそのものだけを受け付ける", () => {
+    const row = { status: "requested" as const, revision: 1, expectedHeadSha: null, reason: "initial" as const };
+    expect(decideRcReport({ row, frozenDevelopSha: frozen, observation: { pullRequest: pr, fastForward: true } }).action).toBe("apply");
+    expect(
+      decideRcReport({ row, frozenDevelopSha: frozen, observation: { pullRequest: { ...pr, headSha: HEAD1 }, fastForward: true } }).action,
+    ).toBe("fail");
+  });
+
+  it("更新は早送りのときだけ受け付け、未更新・書き換えは失敗にする", () => {
+    const row = { status: "requested" as const, revision: 2, expectedHeadSha: HEAD1, reason: "fix_import" as const };
+    const moved = { ...pr, headSha: HEAD2 };
+    expect(decideRcReport({ row, frozenDevelopSha: frozen, observation: { pullRequest: moved, fastForward: true } }).action).toBe("apply");
+    expect(decideRcReport({ row, frozenDevelopSha: frozen, observation: { pullRequest: moved, fastForward: false } }).action).toBe("fail");
+    expect(
+      decideRcReport({ row, frozenDevelopSha: frozen, observation: { pullRequest: { ...pr, headSha: HEAD1 }, fastForward: true } }).action,
+    ).toBe("fail");
+  });
+
+  it("再送・期限切れ後の報告では状態を戻さない", () => {
+    const applied = { status: "applied" as const, revision: 2, expectedHeadSha: HEAD1, reason: "fix_import" as const };
+    expect(decideRcReport({ row: applied, frozenDevelopSha: frozen, observation: { pullRequest: pr, fastForward: true } })).toEqual({
+      action: "ignore",
+      reason: "already_applied",
+    });
+    const expired = { ...applied, status: "expired" as const };
+    expect(decideRcReport({ row: expired, frozenDevelopSha: frozen, observation: { pullRequest: pr, fastForward: true } }).action).toBe(
+      "ignore",
+    );
+  });
+});
+
+describe("旧方式からの移行", () => {
+  it("先端が版上げのコミットなら、その親を固定点にする", () => {
+    expect(decideLegacyMigration({ message: "v8.57.0をリリースする。\n\n本文", parents: ["p".repeat(40)] })).toEqual({
+      ok: true,
+      freezeSha: "p".repeat(40),
+    });
+  });
+
+  it("作り直し・履歴修復で積まれた候補は移行しない", () => {
+    expect(decideLegacyMigration({ message: "履歴修復: mainの祖先を取り込む", parents: ["a", "b"] })).toEqual({ ok: false, reason: "merge_head" });
+    expect(decideLegacyMigration({ message: "fix: 何か", parents: ["a"] })).toEqual({ ok: false, reason: "not_bump_commit" });
+  });
+});
+
+describe("callerの対応", () => {
+  it("dispatch入力とreusableへの受け渡しの両方があるときだけ対応", () => {
+    const caller = `on:\n  workflow_dispatch:\n    inputs:\n      candidate_request:\n        type: string\njobs:\n  release:\n    with:\n      candidate-request: x\n`;
+    expect(parseRcCallerSupport(caller)).toEqual({ supported: true });
+    expect(parseRcCallerSupport("      rebuild_selection:\n")).toEqual({ supported: false, reason: "caller_without_input" });
+    expect(parseRcCallerSupport(null)).toEqual({ supported: false, reason: "caller_unreadable" });
+  });
+});
+
+describe("公開準備への契約", () => {
+  const candidate = { id: "c1", sequence: 3, frozenDevelopSha: "f".repeat(40), frozenPrNumbers: [1, 2] };
+  const current = { revision: 2, prNumber: 10, baseSha: BASE, headSha: HEAD2, importedPrNumbers: [5, 2] };
+
+  it("合格しているときだけ作れ、含めるPRを重複なく持つ", () => {
+    expect(buildRcFinalizeContract({ candidate, current, status: "ready_to_prepare" })?.includedPrs).toEqual([1, 2, 5]);
+    expect(buildRcFinalizeContract({ candidate, current, status: "needs_fix" })).toBeNull();
+  });
+});
+
+describe("要求キーと期限", () => {
+  it("要求キーの形式を検証する", () => {
+    expect(parseRcRequestKey("abcDEF12-_")).toBe("abcDEF12-_");
+    expect(parseRcRequestKey("short")).toBeNull();
+    expect(parseRcRequestKey("../etc")).toBeNull();
+  });
+
+  it("結果の無いまま期限を過ぎた要求は失効扱い", () => {
+    const createdAt = new Date("2026-10-12T00:00:00Z");
+    expect(isRcRevisionPendingExpired({ status: "requested", createdAt }, new Date(createdAt.getTime() + RC_REVISION_TTL_MS))).toBe(true);
+    expect(isRcRevisionPendingExpired({ status: "requested", createdAt }, new Date(createdAt.getTime() + 1000))).toBe(false);
+    expect(isRcRevisionPendingExpired({ status: "applied", createdAt }, new Date(createdAt.getTime() + RC_REVISION_TTL_MS))).toBe(false);
+  });
+});

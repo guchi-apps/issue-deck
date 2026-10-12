@@ -1,4 +1,6 @@
 import type { ReleaseFixSeries } from "@prisma/client";
+import { isRcReleaseCandidateHeadRef, isReleaseCandidateHeadRef, legacyReleaseVersionOf } from "@/lib/release-branch";
+import { findReviewableRcForPullRequest, observeRcRevisionAfter, rcFixSeriesRequestKey, requestRcImport } from "@/lib/release-rc-run";
 
 import { parseClaudeLocalModel, parseCodexLocalModel, resolveAiExecutionAgent } from "@/lib/app-settings";
 import { db } from "@/lib/db";
@@ -23,6 +25,7 @@ import {
   type GithubApiPullRequest,
 } from "@/lib/github/release-api";
 import { releaseWorkflowExists } from "@/lib/github/release-workflow-cache";
+import { RELEASE_PREP_RUNNING_SERIES_STATUSES } from "@/lib/release-prep-state";
 import { isUniqueConstraintError } from "@/lib/prisma-error";
 import { decideInternalHold } from "@/lib/release-fix-internal";
 import { evaluateInternalGateForSweep, loadInternalViewForUi, type InternalStatusView } from "@/lib/release-fix-internal-run";
@@ -74,7 +77,6 @@ import type { ReleaseVerificationSection } from "@/lib/release-verification-summ
  * （GitHubの保護を外して取り込まない）。
  */
 
-const FROZEN_PREFIX = "release-main/v";
 const CHECK_USER_LABELS = ["00.check-user", "01.check-blocked"];
 const PLAN_REQUIRED_LABEL = "21.plan-required";
 const REBUILD_TIMEOUT_MS = 30 * 60 * 1000;
@@ -147,6 +149,19 @@ export function toReleaseFixSeriesView(row: ReleaseFixSeries): ReleaseFixSeriesV
 }
 
 /** このリリースPRに関係する系列（起点がこのPR、または作り直しの後継がこのPR）を新しい順に返す */
+/**
+ * リポジトリ単位で、リリースへの反映準備が進行中の修正系列の状態を返す（#4421）。
+ * 作り直しの間は元のリリースPRが閉じられており、PR番号では引けないため。
+ */
+export async function listReleasePrepRunningSeriesStatuses(repositoryFullName: string): Promise<string[]> {
+  const rows = await db.releaseFixSeries.findMany({
+    where: { repositoryFullName, status: { in: [...RELEASE_PREP_RUNNING_SERIES_STATUSES] } },
+    select: { status: true },
+    take: 30,
+  });
+  return rows.map((row) => row.status);
+}
+
 export async function listReleaseFixSeries(
   repositoryFullName: string,
   releasePrNumber: number,
@@ -224,7 +239,7 @@ export type CreateReleaseFixResult =
   | { outcome: "blocked"; message: string };
 
 function releaseVersionOf(headRef: string): string | null {
-  return headRef.startsWith(FROZEN_PREFIX) ? headRef.slice(FROZEN_PREFIX.length) : null;
+  return legacyReleaseVersionOf(headRef);
 }
 
 function itemsFromSection(input: CreateReleaseFixInput): { items: ReleaseFixDraftItem[]; keys: string[] } | null {
@@ -418,7 +433,7 @@ async function notifyStop(
 
 async function findOpenFrozenReleasePr(owner: string, repo: string, token: string): Promise<GithubApiPullRequest | null> {
   const open = await fetchOpenPullRequestsForBase(owner, repo, "main", token);
-  return open.find((pr) => pr.head.ref.startsWith(FROZEN_PREFIX)) ?? null;
+  return open.find((pr) => isReleaseCandidateHeadRef(pr.head.ref)) ?? null;
 }
 
 type SweepResult = { checked: number; rebuilt: number; changed: number };
@@ -543,7 +558,9 @@ async function sweepGroup(repositoryFullName: string, releasePrNumber: number, r
   }
   const candidate = frozen && originStillOpen ? await fetchReleaseRebuildCandidate(owner, repo, frozen.head.sha, token) : null;
   // 選んだ作り直し（#4335）に対応していれば、修正PRだけを元の候補へ足す（無関係な変更で判断待ちにしない）
-  const selective = frozen && originStillOpen ? await releaseCallerSupportsSelection(owner, repo, token) : false;
+  // 新方式の候補（#4495）は、修正PRを同じ候補へ取り込んでrevisionを進める（候補を閉じて作り直さない）
+  const rcFrozen = frozen !== null && isRcReleaseCandidateHeadRef(frozen.head.ref);
+  const selective = frozen && originStillOpen ? rcFrozen || (await releaseCallerSupportsSelection(owner, repo, token)) : false;
   // 修正PRが候補の一覧に無くても、実際にdevelopへマージ済みで元の候補の祖先でなければ「足せるPR」として扱う（#4422）。
   // 手動の選択画面と同じ照合。取得に失敗したら断定せず次の巡回へ回す
   const developPullRequests = candidate?.pullRequests.map((pr) => pr.number) ?? [];
@@ -615,6 +632,32 @@ async function sweepGroup(repositoryFullName: string, releasePrNumber: number, r
     fixPrs: observed.map((row) => row.fixPrNumber).filter((n): n is number => n !== null),
     approvalEventId,
   };
+  if (rcFrozen) {
+    const rc = await findReviewableRcForPullRequest(repositoryFullName, frozen.number);
+    // 系列で利用者が「含めて反映」を承認したPRは、候補の承認範囲として記録して取り込む
+    const accepted = observed.flatMap((row) => (Array.isArray(row.acceptedExtraPrs) ? (row.acceptedExtraPrs as number[]) : []));
+    const result =
+      rc && decision.selectedPrs.length > 0
+        ? await requestRcImport({
+            owner,
+            repo,
+            token,
+            userId: null,
+            candidateId: rc.id,
+            expectedHeadSha: frozen.head.sha,
+            selected: decision.selectedPrs.map((number) => ({ number })),
+            approveExtra: accepted,
+            requestKey: rcFixSeriesRequestKey(decision.seriesIds[0], frozen.head.sha),
+            source: "fix_series",
+            fixSeriesId: decision.seriesIds[0],
+          }).catch((error: unknown) => {
+            console.error("[release-fix-series] rc import failed", error);
+            return { ok: false as const, error: "dispatch_failed" as const };
+          })
+        : ({ ok: false as const, error: "not_found" as const });
+    if (!result.ok) return { rebuilt: false, changed: await stopRows(ctx, decision.seriesIds, "stopped", REBUILD_FAILURE_REASONS.rc) };
+    return { rebuilt: true, changed: decision.seriesIds.length };
+  }
   if (decision.selectedPrs.length > 0) {
     const result = await requestSelectiveRebuild({
       owner,
@@ -687,6 +730,32 @@ async function sweepSuccessor(row: ReleaseFixSeries, hostName: string | null): P
   const { owner, repo, token } = access;
 
   if (row.status === "rebuilding") {
+    // 新方式の候補（#4495）は同じPRのrevisionが進む。取り込みのrevisionが適用されたら、その新しいSHAを後継として追う
+    if (row.rebuildClaimedAt) {
+      const rcRevision = await observeRcRevisionAfter({
+        repositoryFullName: row.repositoryFullName,
+        prNumber: row.releasePrNumber,
+        since: row.rebuildClaimedAt,
+      });
+      if (rcRevision) {
+        if (rcRevision.status === "applied" && rcRevision.prNumber !== null && rcRevision.baseSha && rcRevision.headSha) {
+          await db.releaseFixSeries.update({
+            where: { id: row.id },
+            data: {
+              status: "reverifying",
+              successorPrNumber: rcRevision.prNumber,
+              successorBaseSha: rcRevision.baseSha,
+              successorHeadSha: rcRevision.headSha,
+            },
+          });
+          return 1;
+        }
+        if (rcRevision.status === "failed" || rcRevision.status === "expired") {
+          return stopRows(access, [row.id], "stopped", REBUILD_FAILURE_REASONS.rc);
+        }
+        return 0;
+      }
+    }
     const frozen = await findOpenFrozenReleasePr(owner, repo, token);
     if (frozen && frozen.number !== row.releasePrNumber && frozen.base) {
       await db.releaseFixSeries.update({
@@ -712,7 +781,7 @@ async function sweepSuccessor(row: ReleaseFixSeries, hostName: string | null): P
       return 1;
     }
     if (row.rebuildClaimedAt && Date.now() - row.rebuildClaimedAt.getTime() > REBUILD_TIMEOUT_MS) {
-      return stopRows(access, [row.id], "stopped", "作り直しを起動しましたが、後継の候補が作られませんでした。リリースworkflowの実行を確認してください");
+      return stopRows(access, [row.id], "stopped", "作り直しを起動しましたが、修正を取り込んだリリースが作られませんでした。リリースworkflowの実行を確認してください");
     }
     return 0;
   }
@@ -732,15 +801,15 @@ async function sweepSuccessor(row: ReleaseFixSeries, hostName: string | null): P
       [row.id],
       "superseded",
       successor.merged
-        ? "後継の候補はすでに本番へマージされました"
-        : "後継の候補が取り消された、または別の候補へ置き換えられました。この系列の追跡を終了します",
+        ? "修正を取り込んだリリースはすでに本番へマージされました"
+        : "修正を取り込んだリリースが取り消された、または別の候補へ置き換えられました。この系列の追跡を終了します",
     );
   }
   if (!successor.base) return 0;
   const current = { baseSha: successor.base.sha, headSha: successor.head.sha };
   // 利用者が候補をさらに作り直した場合は、そのSHAへ追従せず系列を終える（旧SHAの結果を流用しない）
   if (current.headSha !== row.successorHeadSha) {
-    return stopRows(access, [row.id], "superseded", "後継の候補が更新されたため、この系列の追跡を終了します。新しい候補は検証をやり直しています");
+    return stopRows(access, [row.id], "superseded", "修正を取り込んだリリースが更新されたため、この系列の追跡を終了します。新しい候補は検証をやり直しています");
   }
   const summary = await loadReleaseVerificationSummary(row.repositoryFullName, row.successorPrNumber, current);
   const read = (state: string): "passed" | "failed" | "needs_check" | "pending" | "not_applicable" => {
