@@ -21,8 +21,7 @@ jobs:
           script: |
             set -e
             cd "$TARGET_DIR"
-            node <<'NODE'
-            require("dotenv").config({ path: ".env", quiet: true });
+            node --env-file=.env <<'NODE'
             const { PrismaClient } = require("@prisma/client");
             const db = new PrismaClient();
             (async () => {
