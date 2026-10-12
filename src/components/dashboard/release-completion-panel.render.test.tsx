@@ -91,6 +91,8 @@ describe("ReleaseCompletionPanel（#4480）", () => {
     const button = await screen.findByRole("button", { name: "リリース完了まで進める" });
     fireEvent.click(button);
     expect(await screen.findByTestId("release-completion-dialog")).toBeTruthy();
+    expect((screen.getByRole("button", { name: "開始する" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByLabelText(/本番反映・稼働確認まで/) as HTMLInputElement).checked).toBe(false);
     fireEvent.click(screen.getByLabelText(/チェック通過まで/));
     fireEvent.click(screen.getByRole("button", { name: "開始する" }));
     const isPost = (call: unknown) => ((call as unknown[])[1] as RequestInit | undefined)?.method === "POST";
