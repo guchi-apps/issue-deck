@@ -38,6 +38,18 @@ export type UnreleasedUnits = {
    * 「実際にまだ本番へ出ていない」という裏付けなので、レーンの振り分けはこちらを優先する。
    */
   mergedHeadRefs: string[];
+  /**
+   * developの幹に残っているが、実際にはmainへ入っているPR（#4528）。**件数・`mergedHeadRefs`には含めない。**
+   * 選んで作り直した候補（cherry-pick）や手作業の候補では元のマージコミットがmainの祖先にならないため、
+   * 祖先関係だけだと本番へ出た後も未リリースに残っていた。根拠は`cherry-pick`（mainの本流に同じPRの
+   * 取り込み痕跡）か`content`（PRの全変更ファイルがmainとdevelop先端で同一）。無ければ省略。
+   */
+  includedInMain?: { prNumber: number; headRef: string; evidence: "cherry-pick" | "content" }[];
+  /**
+   * mainへ入っているか確かめきれなかったPR（#4528）。件数には含める（反映済みと断定しない）。
+   * `partial`は一部のファイルだけ一致、`unknown`は取得上限・取得失敗で照合できなかったもの。
+   */
+  unverified?: { prNumber: number; headRef: string; state: "partial" | "unknown" }[];
 };
 
 /** `develop`が`main`よりどれだけ進んでいるか */
