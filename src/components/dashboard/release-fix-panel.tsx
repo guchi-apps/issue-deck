@@ -3,7 +3,8 @@
 import { ExternalLink } from "lucide-react";
 import { useCallback, useContext, useEffect, useState, type ReactNode } from "react";
 
-import { ReleaseCompletionPanel } from "@/components/dashboard/release-completion-panel";
+import { ReleaseCompletionPanel, useReleaseCompletionRun } from "@/components/dashboard/release-completion-panel";
+import type { ReleaseCompletionRunView } from "@/lib/release-completion-run";
 import { ReleaseFixStartContext } from "@/components/dashboard/release-fix-start-context";
 import { useReferenceNavigation } from "@/hooks/use-reference-navigation";
 import type { UseReleaseChangesResult } from "@/hooks/use-release-changes";
@@ -298,8 +299,14 @@ export function toOverviewChecks(verification: ReleaseVerificationSummary | null
   if (!verification) return null;
   const macState = verification.mac?.state;
   return {
-    aiReview: { state: verification.aiReview.state, findingCount: verification.aiReview.findings.length },
-    integration: { state: verification.integration.state },
+    aiReview: {
+      state: verification.aiReview.state,
+      findingCount: verification.aiReview.findings.length,
+      reason: verification.aiReview.reason,
+      reviewedFiles: verification.aiReview.reviewedFiles,
+      totalFiles: verification.aiReview.totalFiles,
+    },
+    integration: { state: verification.integration.state, reason: verification.integration.reason },
     mac:
       macState === "passed" || macState === "failed" || macState === "running"
         ? { state: macState }
@@ -319,6 +326,9 @@ export type ReleaseFixOverviewState = {
   /** 修正系列の一覧。取得前はnull */
   list: ReleaseFixSeriesView[] | null;
   error: string | null;
+  /** リリース完了系列（#4480）。要約帯とパネルで同じ取得結果を使う（#4498）。取得前はundefined */
+  completionRun: ReleaseCompletionRunView | null | undefined;
+  setCompletionRun: (run: ReleaseCompletionRunView | null) => void;
   contents: ReturnType<typeof classifyReleaseContents>;
   /** 表示中の検証結果が修正前のリリースのものか */
   previousResults: boolean;
@@ -396,6 +406,7 @@ export function useReleaseFixOverview({
     setTick((n) => n + 1);
   };
 
+  const { run: completionRun, setRun: setCompletionRun } = useReleaseCompletionRun(repositoryFullName, pullRequestNumber);
   const current = list?.find((s) => s.active) ?? list?.[0] ?? null;
   // 修正の記録を読み終えるまでは、修正前の指摘を現在状態として見せない
   const seriesPending = list === null && error === null;
@@ -408,6 +419,9 @@ export function useReleaseFixOverview({
         series: current,
         checks: toOverviewChecks(verification),
         checksError: verification === null && verificationError !== null,
+        completion: completionRun?.active
+          ? { status: completionRun.status, active: true, candidatePrNumber: completionRun.candidatePrNumber }
+          : null,
       });
   const episode = (episodes && episodes.key === key ? episodes.list : []).find(
     (e) => e.successor?.number === pullRequestNumber,
@@ -427,6 +441,8 @@ export function useReleaseFixOverview({
     current,
     list,
     error,
+    completionRun,
+    setCompletionRun,
     contents,
     previousResults,
     acceptExtra,
@@ -607,6 +623,7 @@ export function ReleaseFixSummary({
       {showPhases && current && current.status !== "superseded" && <ReleaseFixPhases current={current} className="mt-0.5" />}
       {current && current.status !== "superseded" && <ReleaseFixInternalReview current={current} />}
       <ReleaseCompletionPanel
+        runState={{ run: state.completionRun, setRun: state.setCompletionRun }}
         repositoryFullName={state.repositoryFullName}
         pullRequestNumber={state.pullRequestNumber}
         target={state.target}

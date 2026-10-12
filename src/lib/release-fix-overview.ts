@@ -42,13 +42,32 @@ export type OverviewSeries = {
   stopReason: string | null;
   /** 修正を反映したリリースの準備に失敗して止まっている */
   rebuildFailed?: boolean;
+  /** 修正PR。作成前はnull（実装中と修正PRの検証中を分ける。#4498） */
+  fixPrNumber?: number | null;
+};
+
+/**
+ * リリース完了系列（#4480）の現在の工程。進行中の系列があれば、見出しは修正前の指摘ではなくこの工程を使う（#4498）。
+ * 操作が要る・完了・停止の系列はここに渡さない（判断は既存の分岐に任せる）
+ */
+export type OverviewCompletion = {
+  status: string;
+  active: boolean;
+  candidatePrNumber: number;
 };
 
 type CheckState = "not_run" | "waiting" | "running" | "passed" | "failed" | "needs_check" | "not_applicable" | "invalidated";
 
 export type OverviewChecks = {
-  aiReview: { state: CheckState; findingCount: number };
-  integration: { state: CheckState };
+  aiReview: {
+    state: CheckState;
+    findingCount: number;
+    /** 状態の理由（未確認範囲など）。取得できていなければ省略 */
+    reason?: string | null;
+    reviewedFiles?: number | null;
+    totalFiles?: number | null;
+  };
+  integration: { state: CheckState; reason?: string | null };
   /** Mac検証。対象外・未設定なら省略 */
   mac?: { state: "passed" | "failed" | "running" | "other" } | null;
 };
@@ -93,7 +112,8 @@ function checkWord(state: CheckState, findingCount: number): string {
     case "failed":
       return findingCount > 0 ? `指摘${findingCount}件` : "失敗";
     case "needs_check":
-      return findingCount > 0 ? `要確認${findingCount}件` : "要確認";
+      // 指摘0件の要確認は、確認できていない範囲があるだけ（修正が必要な指摘ではない。#4498）
+      return findingCount > 0 ? `要確認${findingCount}件` : "指摘0件・範囲の確認待ち";
     case "running":
     case "waiting":
       return "チェック中";
@@ -109,7 +129,7 @@ function checkWord(state: CheckState, findingCount: number): string {
 export function summarizeChecks(checks: OverviewChecks | null): string | null {
   if (!checks) return null;
   const parts = [
-    `全体レビュー: ${checkWord(checks.aiReview.state, checks.aiReview.findingCount)}`,
+    `全体レビュー: ${checkWord(checks.aiReview.state, checks.aiReview.findingCount)}${isReviewCoverageGap(checks) && reviewCoverageText(checks.aiReview) ? `（${reviewCoverageText(checks.aiReview)}）` : ""}`,
     `統合検証: ${checkWord(checks.integration.state, 0)}`,
   ];
   if (checks.mac && checks.mac.state !== "other") {
@@ -122,6 +142,17 @@ const isDone = (s: CheckState) => s === "passed" || s === "not_applicable";
 const isBusy = (s: CheckState) => s === "running" || s === "waiting";
 const isProblem = (s: CheckState) => s === "failed" || s === "needs_check";
 
+/** 指摘0件で、確認範囲が足りないだけの全体レビュー。修正の対象にせず、成功にも変えない */
+export function isReviewCoverageGap(checks: OverviewChecks): boolean {
+  return checks.aiReview.state === "needs_check" && checks.aiReview.findingCount === 0;
+}
+
+/** 「65/71ファイルを確認」。件数が取れたときだけ返す */
+export function reviewCoverageText(review: OverviewChecks["aiReview"]): string | null {
+  const { reviewedFiles, totalFiles } = review;
+  return typeof reviewedFiles === "number" && typeof totalFiles === "number" ? `${reviewedFiles}/${totalFiles}ファイルを確認` : null;
+}
+
 export function describeFixOverview(input: {
   /** 表示する系列。進行中のものを優先して渡す。無ければnull */
   series: OverviewSeries | null;
@@ -129,13 +160,41 @@ export function describeFixOverview(input: {
   checks: OverviewChecks | null;
   /** 検証結果の取得に失敗した */
   checksError?: boolean;
+  /** 進行中のリリース完了系列（#4498）。無ければnull */
+  completion?: OverviewCompletion | null;
 }): FixOverview {
-  const { series, checks, checksError } = input;
+  const { series, checks, checksError, completion } = input;
   const checksLine = summarizeChecks(checks);
   const findings = checks ? checks.aiReview.findingCount : null;
   const base = { checksLine, remainingFindings: findings, autoProgress: false } as const;
   const none: OverviewAction = { kind: "none", label: "" };
   const act = (kind: Exclude<OverviewActionKind, "none">): OverviewAction => ({ kind, label: OVERVIEW_ACTION_LABEL[kind] });
+
+  // 修正前の指摘の説明。実行中の見出しの下に「修正対象」として添える（見出しにはしない。#4498）
+  const priorNote =
+    checks && checks.aiReview.findingCount > 0 ? `修正対象: 未解決の指摘${checks.aiReview.findingCount}件（修正前のレビュー結果）。` : null;
+  const viewProgress: OverviewAction = series ? act("view_progress") : none;
+
+  // 実際に進行中の完了系列を、修正前の指摘より先に見出しへ反映する。修正Issue作成は重ねて出さない
+  if (completion?.active) {
+    if (completion.status === "investigating") {
+      return { ...base, tone: "progress", pill: "原因調査中", headline: "失敗の原因を調べています", detail: priorNote, action: viewProgress, autoProgress: true };
+    }
+    if (completion.status === "fixing") {
+      return { ...base, tone: "progress", pill: "修正中", headline: "指摘への修正とレビューを進めています", detail: priorNote, action: viewProgress, autoProgress: true };
+    }
+    if (completion.status === "checking") {
+      return {
+        ...base,
+        tone: "progress",
+        pill: "修正後の再検証中",
+        headline: `修正を反映した候補 #${completion.candidatePrNumber} を検証しています`,
+        detail: "修正前のレビュー結果は履歴として扱い、現在の結果には使いません。",
+        action: viewProgress,
+        autoProgress: true,
+      };
+    }
+  }
 
   // 作り直し・再チェック中は、修正前の結果を現在状態に使わない
   if (series?.status === "rebuilding") {
@@ -159,7 +218,11 @@ export function describeFixOverview(input: {
     return { ...base, tone: "warn", pill: "あなたの操作が必要", headline: "修正Issueを作成しました。修正はまだ始まっていません", detail: null, action: act("start_fix") };
   }
   if (series?.status === "fix_in_progress") {
-    return { ...base, tone: "progress", pill: "修正中", headline: "指摘への修正内容を作成しています", detail: null, action: act("view_progress"), autoProgress: true };
+    // 修正PRが出ていれば、実装は済んでCI・レビューを待っている段階
+    if (series.fixPrNumber != null) {
+      return { ...base, tone: "progress", pill: "修正PRの検証中", headline: `修正PR #${series.fixPrNumber} のCI・レビューを待っています`, detail: priorNote, action: act("view_progress"), autoProgress: true };
+    }
+    return { ...base, tone: "progress", pill: "修正中", headline: `指摘への修正内容を実装しています（修正Issue #${series.issueNumber}）`, detail: priorNote, action: act("view_progress"), autoProgress: true };
   }
   if (series?.status === "fix_merged") {
     return { ...base, tone: "progress", pill: "修正取り込み準備中", headline: "修正をdevelopへ取り込みました。リリースへの反映を待っています", detail: null, action: act("view_progress"), autoProgress: true };
@@ -178,6 +241,22 @@ export function describeFixOverview(input: {
   }
   const reflected = series?.successorPrNumber != null;
   const problems = isProblem(checks.aiReview.state) || isProblem(checks.integration.state);
+  // 指摘0件でレビュー範囲だけ不足（例: 65/71ファイル）。修正Issueの作成を主操作にせず、成功にも変えない
+  if (isReviewCoverageGap(checks) && !isProblem(checks.integration.state)) {
+    const coverage = reviewCoverageText(checks.aiReview);
+    return {
+      ...base,
+      tone: "warn",
+      pill: "レビュー範囲の確認待ち",
+      headline: "指摘は0件ですが、レビューで確認できていない範囲があります",
+      detail: [coverage, checks.aiReview.reason ?? null, "修正は実行中ではありません。確認不足を修正指摘や成功には変換しません。"].filter(Boolean).join(" ／ "),
+      action: none,
+    };
+  }
+  // 全体レビューの実行失敗（指摘なし）は、コードの指摘ではない。修正Issueの作成を促さない
+  if (checks.aiReview.state === "failed" && checks.aiReview.findingCount === 0 && !isProblem(checks.integration.state)) {
+    return { ...base, tone: "bad", pill: "レビューの実行に失敗", headline: "全体レビューを完了できませんでした。問題なしとは扱いません", detail: checks.aiReview.reason ?? null, action: none };
+  }
   if (problems) {
     const n = checks.aiReview.findingCount;
     const left = n > 0 ? `${n}件の指摘` : "指摘";
