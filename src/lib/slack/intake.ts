@@ -87,16 +87,18 @@ function isUniqueViolation(error: unknown): boolean {
 }
 
 /**
- * ack後の処理を待っている依頼の状態。`received`は受付（選択UIの投稿）前、`resuming`は「再開」の返信を受けた後。
- * どちらもack前にDBへ書き、ack後の処理が終わるまで（`awaiting_repo`等へ進むまで）この値のまま残す。
+ * ack後の処理を待っている・処理中の依頼の状態。`received`は受付（選択UIの投稿）前、`resuming`は「再開」の返信を
+ * 受けた後、`investigating`は調査（AI）中。どれも処理が終わるまでこの値のまま残るので、処理していたプロセスが
+ * 止まった行は`resumeStalePendingRequests`が拾い直す（ack前に書くのは`received`・`resuming`だけ）。
  */
-const PENDING_STATUSES = ["received", "resuming"] as const;
+const PENDING_STATUSES = ["received", "resuming", "investigating"] as const;
 type PendingStatus = (typeof PENDING_STATUSES)[number];
-/** この時間より長く`updatedAt`が動いていない待ち行は、処理していたプロセスが止まったものとみなして拾い直す */
+/** この時間より長く`updatedAt`が動いていない行は、処理していたプロセスが止まったものとみなして拾い直す */
 const PENDING_STALE_MS: Record<PendingStatus, number> = {
   received: 2 * 60_000,
-  // 「再開」は調査（AI）まで同じ処理で走るため、処理中の行を二重に拾わないよう長めに待つ
+  // 「再開」と調査は調査（AI）まで同じ処理で走るため、処理中の行を二重に拾わないよう長めに待つ
   resuming: 30 * 60_000,
+  investigating: 30 * 60_000,
 };
 
 function isPendingStatus(status: string): status is PendingStatus {
@@ -106,7 +108,9 @@ function isPendingStatus(status: string): status is PendingStatus {
 /**
  * ack前の受付結果。
  * - `queued`: 依頼をDBへ書いた。ack後に`processPendingRequest`で続ける
- * - `followUp`: 起案済みの依頼への返信。ack後に処理する（依頼そのものはDBに残っている）
+ * - `followUp`: 起案済みの依頼への返信。ack後に処理する。**返信本文はDBへ残さない**ので、ack後にプロセスが止まると
+ *   その返信だけは拾い直せない（依頼とIssueは作成済みで失われない。利用者がもう一度返信すれば続く）。拾い直すには
+ *   返信本文を置く列が要り、スキーマ変更になるため見送った（#4488）
  * - `handled`: DBへの反映だけで完了した（起案前の補足）
  */
 export type AcceptedEvent =
@@ -188,7 +192,10 @@ export async function acceptMessageEvent(
 
 /** ack後の処理。受付で保存した依頼を進める */
 export async function processAcceptedEvent(ctx: IntakeContext, accepted: AcceptedEvent): Promise<void> {
-  if (accepted.kind === "queued") return processPendingRequest(ctx, accepted.requestId);
+  if (accepted.kind === "queued") {
+    await processPendingRequest(ctx, accepted.requestId);
+    return;
+  }
   if (accepted.kind !== "followUp") return;
   try {
     await handleFollowUp(ctx, accepted.request, accepted.text, accepted.messageTs);
@@ -215,16 +222,16 @@ export async function handleMessageEvent(
  * （他で処理中のもの）は触らない。読んだ時点の`updatedAt`を条件に更新して処理権を取るので、同じ行を2か所で
  * 同時に進めない。途中でプロセスが止まると待ち状態のまま残り、`resumeStalePendingRequests`が拾い直す。
  */
-export async function processPendingRequest(ctx: IntakeContext, requestId: string, staleBefore?: Date): Promise<void> {
+export async function processPendingRequest(ctx: IntakeContext, requestId: string, staleBefore?: Date): Promise<boolean> {
   const request = await db.slackIntakeRequest.findUnique({ where: { id: requestId } });
-  if (!request || !isPendingStatus(request.status)) return;
-  if (staleBefore && request.updatedAt > staleBefore) return;
+  if (!request || !isPendingStatus(request.status)) return false;
+  if (staleBefore && request.updatedAt > staleBefore) return false;
   const now = new Date();
   const claimed = await db.slackIntakeRequest.updateMany({
     where: { id: request.id, status: request.status, updatedAt: request.updatedAt },
     data: { updatedAt: now },
   });
-  if (claimed.count !== 1) return;
+  if (claimed.count !== 1) return false;
   const current = { ...request, updatedAt: now };
   try {
     if (current.status === "received") await startRequest(ctx, current);
@@ -237,6 +244,7 @@ export async function processPendingRequest(ctx: IntakeContext, requestId: strin
       resume: RESUME_HINT,
     });
   }
+  return true;
 }
 
 /** 処理が止まった待ち状態の依頼を拾い直す（起動時と定期実行。`src/instrumentation.ts`） */
@@ -252,8 +260,7 @@ export async function resumeStalePendingRequests(ctx: IntakeContext, now: Date =
     });
     for (const { id } of stale) {
       try {
-        await processPendingRequest(ctx, id, staleBefore);
-        resumed += 1;
+        if (await processPendingRequest(ctx, id, staleBefore)) resumed += 1;
       } catch (error) {
         console.error(`[slack-intake] 止まっていた依頼を再開できませんでした request=${id}`, error);
       }

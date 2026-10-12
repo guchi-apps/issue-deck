@@ -227,6 +227,28 @@ describe("ack前の受付と、ack後の処理の再開（#4488）", () => {
     expect(postedTexts().some((t) => t.includes("対象リポジトリ"))).toBe(true);
   });
 
+  it("調査中（investigating）のまま止まった依頼は、巡回が拾い直して調査をやり直す（Issueは作らない）", async () => {
+    mocks.requestFindMany.mockImplementation(async ({ where }: { where: { status: string } }) =>
+      where.status === "investigating" ? [{ id: "req-1" }] : [],
+    );
+    mocks.requestFindUnique.mockResolvedValue({ ...baseRequest, status: "investigating", selectedRepo: "guchi-apps/car-care" });
+    mocks.handleChatMessage.mockResolvedValue({ text: "案です", cards: [issueCard], needsConfirm: true, nextContext: { repo: "guchi-apps/car-care", targets: [], actions: [] } });
+    expect(await resumeStalePendingRequests(ctx, new Date("2026-10-12T01:00:00Z"))).toBe(1);
+    expect(mocks.handleChatMessage).toHaveBeenCalledTimes(1);
+    expect(mocks.executeConfirmedCard).not.toHaveBeenCalled();
+    expect(mocks.requestUpdate).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ status: "awaiting_confirm", confirmState: "pending" }) }));
+  });
+
+  it("処理権を取れなかった行は再開した件数に数えない", async () => {
+    mocks.requestFindMany.mockImplementation(async ({ where }: { where: { status: string } }) =>
+      where.status === "received" ? [{ id: "req-1" }] : [],
+    );
+    mocks.requestFindUnique.mockResolvedValue({ ...baseRequest, status: "received" });
+    mocks.requestUpdateMany.mockResolvedValueOnce({ count: 0 });
+    expect(await resumeStalePendingRequests(ctx, new Date("2026-10-12T01:00:00Z"))).toBe(0);
+    expect(call).not.toHaveBeenCalled();
+  });
+
   it("ack後の処理が失敗したら失敗状態で残し、「再開」の返信から続けられる", async () => {
     vi.spyOn(console, "error").mockImplementation(() => undefined);
     call.mockImplementation(async (method: string) => {
