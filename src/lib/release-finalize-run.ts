@@ -167,36 +167,46 @@ async function loadReservations(repositoryFullName: string): Promise<(VersionRes
 }
 
 /** 版を予約する。手放した版は取り直し、同時に取った側が負ければ`false`（ユニーク制約が競合を止める） */
-async function reserveVersion(input: { repositoryFullName: string; candidateId: string; version: string; release: string[] }): Promise<boolean> {
+type ReserveInput = { repositoryFullName: string; candidateId: string; version: string; release: string[] };
+type ReservationTx = Pick<typeof db, "releaseVersionReservation">;
+
+/** 版の予約の本体。**呼び出し側のトランザクション内で実行する**（取れなければ`version_not_available`を投げる） */
+async function reserveVersionIn(tx: ReservationTx, input: ReserveInput): Promise<void> {
   const now = new Date();
-  try {
-    await db.$transaction(async (tx) => {
-      if (input.release.length > 0) {
-        await tx.releaseVersionReservation.updateMany({
-          where: { repositoryFullName: input.repositoryFullName, candidateId: input.candidateId, version: { in: input.release }, status: "reserved" },
-          data: { status: "released", releasedAt: now },
-        });
-      }
-      const existing = await tx.releaseVersionReservation.findUnique({
-        where: { repositoryFullName_version: { repositoryFullName: input.repositoryFullName, version: input.version } },
-      });
-      if (!existing) {
-        await tx.releaseVersionReservation.create({
-          data: { repositoryFullName: input.repositoryFullName, version: input.version, candidateId: input.candidateId, status: "reserved" },
-        });
-        return;
-      }
-      if (existing.status === "reserved" && existing.candidateId === input.candidateId) return;
-      // 手放した版だけ取り直せる。消費済み・他の候補が保持中の版は取らない
-      const taken = await tx.releaseVersionReservation.updateMany({
-        where: { id: existing.id, status: "released" },
-        data: { status: "reserved", candidateId: input.candidateId, releasedAt: null },
-      });
-      if (taken.count !== 1) throw new Error("version_not_available");
+  if (input.release.length > 0) {
+    await tx.releaseVersionReservation.updateMany({
+      where: { repositoryFullName: input.repositoryFullName, candidateId: input.candidateId, version: { in: input.release }, status: "reserved" },
+      data: { status: "released", releasedAt: now },
     });
+  }
+  const existing = await tx.releaseVersionReservation.findUnique({
+    where: { repositoryFullName_version: { repositoryFullName: input.repositoryFullName, version: input.version } },
+  });
+  if (!existing) {
+    await tx.releaseVersionReservation.create({
+      data: { repositoryFullName: input.repositoryFullName, version: input.version, candidateId: input.candidateId, status: "reserved" },
+    });
+    return;
+  }
+  if (existing.status === "reserved" && existing.candidateId === input.candidateId) return;
+  // 手放した版だけ取り直せる。消費済み・他の候補が保持中の版は取らない
+  const taken = await tx.releaseVersionReservation.updateMany({
+    where: { id: existing.id, status: "released" },
+    data: { status: "reserved", candidateId: input.candidateId, releasedAt: null },
+  });
+  if (taken.count !== 1) throw new Error("version_not_available");
+}
+
+function isVersionUnavailable(error: unknown): boolean {
+  return isUniqueConstraintError(error) || (error instanceof Error && error.message === "version_not_available");
+}
+
+async function reserveVersion(input: ReserveInput): Promise<boolean> {
+  try {
+    await db.$transaction((tx) => reserveVersionIn(tx, input));
     return true;
   } catch (error) {
-    if (isUniqueConstraintError(error) || (error instanceof Error && error.message === "version_not_available")) return false;
+    if (isVersionUnavailable(error)) return false;
     throw error;
   }
 }
@@ -293,6 +303,7 @@ export async function requestRcFinalize(
   ]);
   const mainVersion = readVersionFromText(versionText, caller.versionQuery);
   let reservedVersion: string | null = null;
+  let pendingReserve: ReserveInput | null = null;
   // 自動判定のときも、この候補が既に予約している版があれば渡す（既にその版でバンプ済みなら、workflowは版を増やさない）
   const ownReserved = reservations.find((r) => r.status === "reserved" && r.candidateId === candidate.id)?.version ?? null;
   const unavailable = new Set<string>(tags.map((t) => t.replace(/^v/, "")));
@@ -313,10 +324,8 @@ export async function requestRcFinalize(
       return { ok: false, error: "version_conflict", message: reservation.reason === "reserved_by_other" ? `v${reservation.version}は他の候補が予約しています` : "mainの版を読めませんでした" };
     }
     reservedVersion = reservation.version;
-    if (reservation.action === "reserve") {
-      const reserved = await reserveVersion({ repositoryFullName, candidateId: candidate.id, version: reservation.version, release: reservation.release });
-      if (!reserved) return { ok: false, error: "version_conflict", message: `v${reservation.version}は予約できませんでした` };
-    }
+    // 予約の取得・既存予約の手放しは、段階の確保と同じトランザクションで行う（開始に失敗した要求が予約台帳を変えないため）
+    if (reservation.action === "reserve") pendingReserve = { repositoryFullName, candidateId: candidate.id, version: reservation.version, release: reservation.release };
   }
 
   const finalizationRequestKey = input.requestKey;
@@ -326,6 +335,13 @@ export async function requestRcFinalize(
       // 段階を`review`→`preparing`へ条件付きで進める。同時の操作・候補の更新があれば進めずに止める
       const moved = await tx.releaseCandidate.updateMany({ where: { id: candidate.id, phase: "review" }, data: { phase: "preparing" } });
       if (moved.count !== 1) throw new Error("phase_changed");
+      if (pendingReserve) {
+        // 予約の失敗は、同じ要求キーの重複（unique制約）と区別できるよう、専用のエラーへ寄せる
+        await reserveVersionIn(tx, pendingReserve).catch((error: unknown) => {
+          if (isVersionUnavailable(error)) throw new Error("version_not_available");
+          throw error;
+        });
+      }
       const row = await tx.releaseCandidateFinalization.create({
         data: {
           candidateId: candidate.id,
@@ -349,6 +365,9 @@ export async function requestRcFinalize(
     });
   } catch (error) {
     if (error instanceof Error && error.message === "phase_changed") return { ok: false, error: "wrong_phase" };
+    if (pendingReserve && error instanceof Error && error.message === "version_not_available") {
+      return { ok: false, error: "version_conflict", message: `v${pendingReserve.version}は予約できませんでした` };
+    }
     if (!isUniqueConstraintError(error)) throw error;
     return (await existingByRequestKey(finalizationRequestKey)) ?? { ok: false, error: "in_progress" };
   }
