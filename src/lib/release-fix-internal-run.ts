@@ -156,14 +156,15 @@ export async function readInternalStatus(
   const currentSha = await fetchBranchHeadSha(access.owner, access.repo, `issue-${issueNumber}`, access.token);
   const { rounds, findings } = await loadRecords(repositoryFullName, issueNumber);
   const startedAt = await internalStartedAt(repositoryFullName, issueNumber);
-  return { ok: true, status: buildStatus({ series, rounds, findings, currentSha, startedAt, now: new Date() }) };
+  const status = buildStatus({ series, rounds, findings, currentSha, startedAt, now: new Date() });
+  return { ok: true, status: await stopIfNeeded(series, access, status) };
 }
 
 async function stopIfNeeded(series: ReleaseFixSeries, access: Access, status: InternalStatusView): Promise<InternalStatusView> {
   if (series.internalStopReason !== null) return status;
   const { rounds, findings } = await loadRecords(series.repositoryFullName, series.issueNumber);
   const startedAt = await internalStartedAt(series.repositoryFullName, series.issueNumber);
-  const decision = decideInternalStop({ rounds: rounds.map(toRoundRecord), findings: findings.map(toFindingRecord), startedAt, now: new Date() });
+  const decision = decideInternalStop({ rounds: rounds.map(toRoundRecord), findings: findings.map(toFindingRecord), startedAt, now: new Date(), gateComplete: status.gate.complete });
   if (!decision.stop) return status;
   await stopInternal(series, access, decision.reason, decision.detail);
   return { ...status, stopReason: internalStopReasonMessage(decision.reason, decision.detail), gate: { ...status.gate, complete: false, blocker: "stopped", message: "内部確認が上限に達したため止まっています" } };
@@ -266,8 +267,12 @@ export async function recordInternalTest(input: {
 }): Promise<{ ok: true; round: number; status: InternalStatusView } | InternalReportError> {
   const prepared = await prepare(input.repositoryFullName, input.issueNumber);
   if ("error" in prepared) return prepared.error;
-  const { series, sha } = prepared;
+  const { series, access, sha } = prepared;
   if (series.internalStopReason !== null) return { ok: false, error: "stopped", message: series.internalStopReason };
+
+  // 記録する前に時間上限を評価する（上限を超えてからのテスト合格でゲートを完了させない）
+  const before = await stopIfNeeded(series, access, await currentStatus(series, sha));
+  if (before.stopReason !== null) return { ok: false, error: "stopped", message: before.stopReason };
 
   const { rounds } = await loadRecords(input.repositoryFullName, input.issueNumber);
   const latest = rounds[rounds.length - 1];
@@ -298,12 +303,22 @@ export async function evaluateInternalGateForSweep(
   prHeadSha: string | null,
 ): Promise<InternalGate> {
   const { rounds, findings } = await loadRecords(series.repositoryFullName, series.issueNumber);
-  return evaluateInternalGate({
+  const gate = evaluateInternalGate({
     rounds: rounds.map(toRoundRecord),
     findings: findings.map(toFindingRecord),
     currentSha: prHeadSha,
     stopped: series.internalStopReason !== null,
   });
+  if (gate.complete && series.internalStopReason === null) {
+    // ゲートが完了していても、完了の記録が上限を超えてからなら完了とみなさない
+    const startedAt = await internalStartedAt(series.repositoryFullName, series.issueNumber);
+    const limit = startedAt.getTime() + INTERNAL_MAX_MINUTES * 60_000;
+    const completedAt = Math.max(...rounds.flatMap((r) => [r.reviewedAt?.getTime() ?? 0, r.testedAt?.getTime() ?? 0]));
+    if (completedAt >= limit) {
+      return { complete: false, blocker: "stopped", targetSha: gate.targetSha, message: "内部確認が120分の上限を超えてから完了したため、完了とみなしません" } as InternalGate;
+    }
+  }
+  return gate;
 }
 
 /** 画面用。取得に必要なのは記録だけ（GitHubを呼ばない）。ゲートは最新の往復が示す確認対象で評価する */
