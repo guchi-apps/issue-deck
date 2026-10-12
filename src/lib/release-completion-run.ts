@@ -25,6 +25,8 @@ import { addIssueLabels, createComment } from "@/lib/github/issues-api";
 import { LOCAL_LABEL_NAME } from "@/lib/github/project-status-dispatch";
 import { fetchMainHeadSha, fetchPullRequestCiState, type GithubApiPullRequest } from "@/lib/github/release-api";
 import { isUniqueConstraintError } from "@/lib/prisma-error";
+import { loadFinalizationSnapshot, reconcileRcFinalization } from "@/lib/release-finalize-run";
+import { isRcReleaseCandidateHeadRef } from "@/lib/release-branch";
 import {
   decideCompletionMerge,
   decideReleaseCompletion,
@@ -37,6 +39,7 @@ import {
   releaseCompletionStatusLabel,
   releaseCompletionStopMessage,
   type CompletionCheckState,
+  type CompletionFinalizationSnapshot,
   type CompletionChecks,
   type CompletionSeriesSnapshot,
   type ReleaseCompletionDecision,
@@ -335,6 +338,8 @@ async function advanceRun(run: RunRow, hostName: string, now: Date): Promise<Act
   const [owner, repo] = splitFullName(run.repositoryFullName);
   const ctx: Ctx = { owner, repo, token: await getInstallationToken(repository.installation.installationId) };
 
+  // 新方式の候補（#4496）の公開準備・本番反映の段階を進める（人がマージした場合も同じ観測で追う）
+  await reconcileRcForRun(run, ctx);
   if (run.status === "releasing" || run.status === "verifying") return advanceRelease(run, ctx, now);
   if (run.status === "deploy_recovery") return advanceDeployRecovery(run, ctx);
 
@@ -359,9 +364,17 @@ async function advanceRun(run: RunRow, hostName: string, now: Date): Promise<Act
       costLimitUsd: current.costLimitUsd,
       costUsedUsd,
     },
-    { now, candidate: observation.candidate, series: observation.series, checks: observation.checks },
+    { now, candidate: observation.candidate, series: observation.series, checks: observation.checks, finalization: observation.finalization },
   );
   return applyDecision(current, decision, ctx, hostName, now, observation);
+}
+
+async function reconcileRcForRun(run: RunRow, ctx: Ctx): Promise<void> {
+  const snapshot = await loadFinalizationSnapshot(run.repositoryFullName, run.candidatePrNumber).catch(() => null);
+  if (!snapshot) return;
+  await reconcileRcFinalization(ctx, snapshot.candidateId).catch((error: unknown) =>
+    console.error("[release-completion] 公開準備の進行を確認できませんでした", run.id, error),
+  );
 }
 
 /** 修正Issueのセッションで使った額（API換算の目安）。系列の開始より後の分だけ数える */
@@ -390,6 +403,8 @@ type Observation = {
   series: CompletionSeriesSnapshot | null;
   checks: CompletionChecks | null;
   summary: ReleaseVerificationSummary | null;
+  /** 新方式の候補（#4496）の公開準備。旧方式はnull */
+  finalization: CompletionFinalizationSnapshot | null;
 };
 
 async function observeCandidate(run: RunRow, ctx: Ctx): Promise<Observation> {
@@ -435,7 +450,20 @@ async function observeCandidate(run: RunRow, ctx: Ctx): Promise<Observation> {
       headSha: candidate.headSha,
     }).catch(() => null);
   }
-  return { candidate, pull, series, checks: summary ? toCompletionChecks(summary, run.repositoryFullName) : null, summary };
+  // 新方式の候補は、正式バンプ（公開準備）と最終検証が済むまで公開へ進めない
+  const finalization =
+    pull && isRcReleaseCandidateHeadRef(pull.head.ref)
+      ? await loadFinalizationSnapshot(run.repositoryFullName, run.candidatePrNumber).catch(() => null)
+      : null;
+  return {
+    candidate,
+    pull,
+    series,
+    checks: summary ? toCompletionChecks(summary, run.repositoryFullName) : null,
+    summary,
+    // 新方式なのに記録が無い（取得できない）ときも「公開準備が済んでいない」として扱う（旧方式と見なして進めない）
+    finalization: pull && isRcReleaseCandidateHeadRef(pull.head.ref) ? (finalization ?? { phase: "review", applied: null }) : null,
+  };
 }
 
 export function toCompletionChecks(summary: ReleaseVerificationSummary, repositoryFullName: string): CompletionChecks {
@@ -615,6 +643,7 @@ async function evaluateAndMerge(run: RunRow, ctx: Ctx, now: Date, observation: O
   const mac = observation.checks?.mac;
   const decision = decideCompletionMerge({ ...run, status: run.status as ReleaseCompletionStatus }, {
     now,
+    finalization: observation.finalization,
     pullRequest:
       pull && pull.base
         ? {

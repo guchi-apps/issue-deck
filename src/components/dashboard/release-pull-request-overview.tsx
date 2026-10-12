@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { isRcReleaseCandidateHeadRef, isReleaseCandidateHeadRef } from "@/lib/release-branch";
 import { useReleaseRc } from "@/hooks/use-release-rc";
+import { ReleaseRcFinalizePanel } from "@/components/dashboard/release-rc-finalize";
 import { ReleaseRcIdentity, ReleaseRcLegacyNotice, ReleaseRcRevisionHistory } from "@/components/dashboard/release-rc-identity";
 
 import { PullRequestMergeButton } from "@/components/dashboard/pull-request-merge-button";
@@ -183,6 +184,9 @@ export function ReleasePullRequestOverview({
         <p className="break-words text-xs text-muted-foreground">
           {headRef} → {pullRequest.baseRef}
         </p>
+      )}
+      {rcCandidate && rc.overview?.finalization && (
+        <ReleaseRcFinalizePanel candidate={rcCandidate} finalization={rc.overview.finalization} repositoryFullName={repositoryFullName} onChanged={rc.reload} />
       )}
       {rc.overview && legacy && (
         <ReleaseRcLegacyNotice overview={rc.overview} legacy={legacy} repositoryFullName={repositoryFullName} onChanged={rc.reload} />

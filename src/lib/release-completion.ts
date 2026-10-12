@@ -136,8 +136,21 @@ export type ReleaseCompletionState = {
   costUsedUsd: number;
 };
 
+/**
+ * 公開準備（正式バンプ。#4496）の観測。新方式のリリース候補（`release-rc/<番号>`）のときだけ入る
+ * （旧方式の候補はnullで、従来どおり公開準備を要求しない）
+ */
+export type CompletionFinalizationSnapshot = {
+  /** 候補の段階（`awaiting_approval`＝公開準備が済み、最終検証に合格して本番承認待ち） */
+  phase: string;
+  /** 適用済みの最新の公開準備。バンプ前headからバンプ後headへの対応だけを持つ */
+  applied: { preHeadSha: string; finalHeadSha: string; finalBaseSha: string } | null;
+};
+
 export type ReleaseCompletionObservation = {
   now: Date;
+  /** 新方式の候補のときの公開準備。旧方式・取得できないときはnull */
+  finalization?: CompletionFinalizationSnapshot | null;
   /** 追っている候補の現在。取得できなければnull（判断せず待つ） */
   candidate: CompletionCandidateObservation | null;
   /** 候補に紐づく最新の修正系列（起点か後継がこの候補）。無ければnull */
@@ -176,6 +189,18 @@ export function decideReleaseCompletion(
   const candidate = observation.candidate;
   if (candidate === null) return { action: "wait" };
   if (candidate.number !== run.candidatePrNumber) return { action: "stop", reason: "candidate_changed" };
+
+  // 公開準備のバンプで候補のheadが進んだ（#4496）。**記録したバンプ前headからバンプ後headへの更新だけ**を後継として追う
+  // （修正系列の`successorHeadSha`と同形）。無関係なhead変更・別のバンプは従来どおり下で`candidate_changed`として止める
+  const finalized = observation.finalization?.applied ?? null;
+  if (
+    finalized &&
+    candidate.headSha !== run.candidateHeadSha &&
+    candidate.headSha === finalized.finalHeadSha &&
+    finalized.preHeadSha === run.candidateHeadSha
+  ) {
+    return { action: "follow_successor", prNumber: candidate.number, headSha: finalized.finalHeadSha, baseSha: finalized.finalBaseSha };
+  }
 
   // 人（または系列）がこの候補をマージした。記録した内容のままなら本番反映の追跡へ進む
   if (candidate.merged) {
@@ -267,14 +292,25 @@ export function decideReleaseCompletion(
     return { action: "wait", status: "checking" };
   }
 
-  // 現在のbase・headで全部合格した
+  // 現在のbase・headで全部合格した。**新方式の候補は、正式バンプ（公開準備）と最終検証が済むまで公開へ進めない**。
+  // 公開準備を始めるのは人の操作で、この系列は代わりに押さない（起案は本番公開の実行指示ではない）
+  if (observation.finalization && !isFinalizationReady(observation.finalization, candidate.headSha)) {
+    return { action: "wait", status: "awaiting_approval", note: "公開準備（正式バンプと最終検証）の完了を待っています" };
+  }
   if (run.scope !== RELEASE_COMPLETION_SCOPE_PRODUCTION) return { action: "wait", status: "awaiting_approval" };
   if (overBudget) return { action: "stop", reason: "cost_limit" };
   return { action: "evaluate_merge" };
 }
 
+/** 公開準備が済んだ候補か。バンプ後のheadと一致し、段階が本番承認待ち（最終検証に合格済み）のときだけ */
+export function isFinalizationReady(finalization: CompletionFinalizationSnapshot, headSha: string): boolean {
+  return finalization.phase === "awaiting_approval" && finalization.applied !== null && finalization.applied.finalHeadSha === headSha;
+}
+
 export type CompletionMergeObservation = {
   now: Date;
+  /** 新方式の候補のときの公開準備。旧方式はnull（公開準備を要求しない） */
+  finalization?: CompletionFinalizationSnapshot | null;
   /** マージ直前にGitHubから取り直した候補 */
   pullRequest: {
     number: number;
@@ -338,6 +374,11 @@ export function decideCompletionMerge(
   const blocking = pull.labels.filter((label) => (RELEASE_COMPLETION_BLOCKING_LABELS as readonly string[]).includes(label));
   if (blocking.length > 0) return { action: "stop", reason: "blocked_by_label", detail: blocking.join(", ") };
 
+  // 新方式の候補は、正式バンプ後のheadで最終検証に合格している（公開準備が済んでいる）ことが前提。
+  // バンプ差分だけで合格・ブランチ保護を迂回しない
+  if (observation.finalization && !isFinalizationReady(observation.finalization, pull.headSha)) {
+    return { action: "wait", reason: "finalization_not_ready" };
+  }
   if (observation.gateStatus !== "ready" || !observation.macOk) {
     return { action: "wait", reason: observation.gateReasons.join(" / ") || "verification" };
   }
