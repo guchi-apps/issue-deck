@@ -11,6 +11,7 @@
 - 無人実行フローの全体像: [multi-agent-workflow.md](multi-agent-workflow.md)・[multi-agent/](multi-agent/)
 - 会話型の操作入口（IssueDeck Chat。意図解釈・確認カード・共通サービスの切り出し）: [chat.md](chat.md)
 - Slackの`#アプリissue起案`からのIssue起案（Events受信・対象選択UI・Bot返信。`src/lib/slack/`・`src/app/api/slack/`）: [slack-intake.md](slack-intake.md)（#4454）
+- 親子Issueの実行計画（構造化計画の登録・検証・版管理。`src/lib/execution-plan/`・`src/app/api/execution-plans/`）: [execution-plan.md](execution-plan.md)（#4535）
 - IssueDeckのiOSアプリ（方式・認証・配布）: [ios-app.md](ios-app.md)。実装は`ios/`（SwiftUI＋WKWebView）、サーバー側の引き継ぎは`src/app/auth/native/`・`src/lib/native-auth/`（#3846）
 
 ## ディレクトリ

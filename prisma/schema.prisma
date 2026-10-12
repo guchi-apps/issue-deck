@@ -3059,3 +3059,41 @@ model SlackProcessedEvent {
   messageTs String?  @db.VarChar(32)
   createdAt DateTime @default(now())
 }
+
+// 親子Issueの実行計画（#4535）。
+//
+// **計画の正はここで、Issue本文は人向けの写し。** 版ごとの内容は`ExecutionPlanVersion`の
+// スナップショットが不変で持ち、`currentVersion`が最新、`boundVersion`が実行（#4536）の
+// 結びつく版。本文・子一覧の編集で稼働中の対象が黙って増減しないよう、実行は`boundVersion`だけを読む。
+// 計画を持たない本文のみのEpicは従来どおり（親子関係があるだけで自動実行へ移行しない）。
+model ExecutionPlan {
+  id               String   @id @default(cuid())
+  parentRepository String   @db.VarChar(191)
+  parentIssue      Int
+  currentVersion   Int
+  // 実行が結びつけた版。未開始は null
+  boundVersion     Int?
+  createdBy        String   @db.VarChar(191)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  versions ExecutionPlanVersion[]
+
+  @@unique([parentRepository, parentIssue])
+}
+
+model ExecutionPlanVersion {
+  id         String   @id @default(cuid())
+  planId     String
+  version    Int
+  // 検証済みの計画本体（JSON。`src/lib/execution-plan/types.ts`の`PlanSnapshot`）
+  snapshot   Json
+  // この版を作った理由（変更履歴）
+  changeNote String   @db.VarChar(300)
+  author     String   @db.VarChar(191)
+  createdAt  DateTime @default(now())
+
+  plan ExecutionPlan @relation(fields: [planId], references: [id], onDelete: Cascade)
+
+  @@unique([planId, version])
+}
