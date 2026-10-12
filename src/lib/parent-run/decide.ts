@@ -131,8 +131,10 @@ export function evaluateDependency(
             : { condition, satisfied: false, detail: "本番確認の記録はありますが、実装PRのmain反映を確認できていません" };
         }
         // 実装が終わる前は「待つ」だけ。終わってからはじめて人の確認（記録）が要る
+        // 記録できるのは実装PRのmain反映を確かめられた後だけ（記録の受け口と同じ条件。押せないボタンを出さない）
+        if (isChildReleased(obs)) return { condition, satisfied: null, detail: "実環境での確認が必要です（人が記録します）" };
         return isChildDone(obs)
-          ? { condition, satisfied: null, detail: "実環境での確認が必要です（人が記録します）" }
+          ? { condition, satisfied: false, detail: "実装PRのdevelopマージ・main反映を確認できていません（PRなしのクローズは本番確認の対象になりません。計画の見直しが必要です）" }
           : { condition, satisfied: false, detail: "実装がまだ完了していません" };
     }
   });

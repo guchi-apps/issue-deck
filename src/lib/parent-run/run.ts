@@ -453,6 +453,20 @@ export async function applyRunAction(parent: PlanIssueRef, action: RunAction, de
         }
         await db.parentRunChild.update({ where: { id: child.id }, data: { verifiedAt: now } });
       } else {
+        // 親全体の確認も、記録の前に全ての子を再観測する（未完了のまま記録させない）
+        const plan = await planSnapshotOf(parent, row.planVersion);
+        if (!plan) return fail(409, "plan_not_found", "結びつけた計画が見つからないため、本番確認を記録できません");
+        const childByKey = new Map(row.children.map((c) => [`${c.repository}#${c.number}`, c]));
+        const unreleased: string[] = [];
+        await Promise.all(
+          plan.children.map(async (c) => {
+            const obs = await observeRef(c, childByKey.get(refKey(c)), deps);
+            if (!isChildReleased(obs)) unreleased.push(refKey(c));
+          }),
+        );
+        if (unreleased.length > 0) {
+          return fail(409, "children_not_released", `実装PRのdevelopマージとmainへの反映を確認できない子があるため、本番確認を記録できません: ${unreleased.join(", ")}`);
+        }
         await db.parentRun.update({ where: { id: row.id }, data: { verifiedAt: now } });
       }
       if (active) await db.parentRun.update({ where: { id: row.id }, data: { lastSweepAt: null } });
