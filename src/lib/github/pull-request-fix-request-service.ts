@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 
 import { redactSecrets } from "@/lib/chat/investigation/redact";
 import { getInstallationToken } from "@/lib/github/app-auth";
-import { fetchCommentsForIssue, createComment } from "@/lib/github/issues-api";
+import { fetchCommentsForIssue, fetchIssueLabelNames, fetchIssueState, createComment } from "@/lib/github/issues-api";
 import { fetchActivePullRequestRepairRun } from "@/lib/github/pull-request-repair-run";
 import { fetchPullRequest } from "@/lib/github/pull-requests-api";
 import { withUserGithubToken } from "@/lib/github/with-user-github-token";
@@ -32,6 +32,35 @@ export const FIX_REQUEST_SCOPE_METADATA =
 
 export type FixScopeKind = "code" | "metadata";
 
+/**
+ * 依頼を組み立てた場所（#4482）。依頼文の1行目と「承認済み」の言い回しだけを変える。
+ * `chat`はIssueDeck Chatで調査・合意したもの、`pull-request-detail`はPR詳細の対応パネルで
+ * 利用者がレビュー指摘を読んで（任意で方針を書いて）送ったもの。
+ */
+export type FixRequestSource = "chat" | "pull-request-detail";
+
+/** 依頼先Issueに付いているとdispatchが反応しないラベル（ローカルセッションで対応中） */
+const LOCAL_SESSION_LABEL = "11.local";
+
+/** 現在のHEADに対して既に出ている修正依頼（#4482）。PR詳細が「依頼済み」を出すのに使う */
+export type CurrentFixRequest = { commentUrl: string | null; createdAt: string };
+
+/**
+ * Issueのコメントから、`headSha`に対する修正依頼（どの経路から出したものでも）を探す。
+ * 依頼コメントの末尾の印は`<!-- issue-deck-chat-fix-request:<key> sha=<HEAD> -->`。
+ * HEADが進めば前の依頼は「現在の依頼」ではない（新しいHEADのCI・再レビューの結果で判断する）。
+ */
+export function findCurrentFixRequest(
+  comments: { body?: string | null; html_url?: string | null; created_at?: string | null }[],
+  headSha: string,
+): CurrentFixRequest | null {
+  const pattern = new RegExp(`<!-- ${FIX_REQUEST_MARKER}:[0-9a-f]+ sha=${headSha} -->`);
+  const matched = comments.filter((comment) => comment.body && pattern.test(comment.body));
+  const latest = matched.at(-1);
+  if (!latest) return null;
+  return { commentUrl: latest.html_url ?? null, createdAt: latest.created_at ?? "" };
+}
+
 export function bodyHash(body: string | null | undefined): string {
   return createHash("sha256").update(body ?? "").digest("hex").slice(0, 16);
 }
@@ -45,6 +74,9 @@ export type FixRequestFailure = {
     | "head_moved"
     | "body_moved"
     | "repair_in_progress"
+    | "local_session"
+    | "issue_closed"
+    | "reauth_required"
     | "github_error";
   message: string;
 };
@@ -68,14 +100,20 @@ export function buildFixRequestBody(params: {
   instruction: string;
   key: string;
   scope?: FixScopeKind;
+  source?: FixRequestSource;
 }): string {
   const metadata = params.scope === "metadata";
+  const fromDetail = params.source === "pull-request-detail";
   return [
-    `@claude PR #${params.number}（HEAD ${params.headSha.slice(0, 7)}）の修正をお願いします。チャットでの調査と合意に基づく依頼です。`,
+    fromDetail
+      ? `@claude PR #${params.number}（HEAD ${params.headSha.slice(0, 7)}）の自動レビューの指摘への対応をお願いします。PR詳細の対応パネルから利用者が送った依頼です。`
+      : `@claude PR #${params.number}（HEAD ${params.headSha.slice(0, 7)}）の修正をお願いします。チャットでの調査と合意に基づく依頼です。`,
     "",
     redactSecrets(params.instruction.trim()),
     "",
-    "この依頼は、利用者がチャットで原因と方針を確認して承認したものです。上の方針は回答済みとして扱い、同じ方針の質問で停止しないでください。",
+    fromDetail
+      ? "この依頼は、利用者がレビュー指摘を読んだうえで送ったものです。上に方針が書かれていればそれは回答済みとして扱ってください。方針が書かれていない点で仕様の選択や実機での確認が要るものは、推測で直さずIssueコメントで質問してください。"
+      : "この依頼は、利用者がチャットで原因と方針を確認して承認したものです。上の方針は回答済みとして扱い、同じ方針の質問で停止しないでください。",
     "",
     metadata ? FIX_REQUEST_SCOPE_METADATA : FIX_REQUEST_SCOPE,
     metadata
@@ -101,6 +139,7 @@ export async function requestPullRequestFix(
     scope?: FixScopeKind;
     /** 調査時点のPR本文のハッシュ。`metadata`で本文が変わっていたら中断する */
     expectedBodyHash?: string;
+    source?: FixRequestSource;
   },
 ): Promise<FixRequestSent | FixRequestFailure> {
   const { owner, repo, number } = params;
@@ -141,6 +180,27 @@ export async function requestPullRequestFix(
     if (existing) {
       return { ok: true, duplicate: true, commentUrl: existing.html_url ?? null, issueNumber, headSha: pr.head.sha };
     }
+    // ローカルセッションで対応中のIssueへ`@claude`を書いても、dispatchは反応しない（#4482）。
+    // 投稿だけして「依頼済み」に見せると、誰も直さないまま止まる
+    const [labels, issueState] = await Promise.all([
+      fetchIssueLabelNames(owner, repo, issueNumber, token),
+      fetchIssueState(owner, repo, issueNumber, token),
+    ]);
+    // closedのIssueへの`@claude`もdispatchは黙ってskipする（`reusable-issue-dispatch.yml`の`ISSUE_CLOSED`）
+    if (issueState === "closed") {
+      return {
+        ok: false,
+        error: "issue_closed",
+        message: `Issue #${issueNumber} はクローズ済みのため、ここからの依頼は実行されません。Issueを再オープンするか、修正Issueを起案してください。`,
+      };
+    }
+    if (labels.includes(LOCAL_SESSION_LABEL)) {
+      return {
+        ok: false,
+        error: "local_session",
+        message: `Issue #${issueNumber} はローカルセッションで対応中（${LOCAL_SESSION_LABEL}）のため、ここからの依頼は実行されません。Issue詳細から実行中のセッションへ修正を依頼してください。`,
+      };
+    }
     const active = await fetchActivePullRequestRepairRun(fullName, number);
     if (active) {
       return {
@@ -149,12 +209,26 @@ export async function requestPullRequestFix(
         message: "このPRは現在自動修正中です。完了してから依頼してください。",
       };
     }
-    const body = buildFixRequestBody({ number, headSha: pr.head.sha, instruction: params.instruction, key, scope: params.scope });
+    const body = buildFixRequestBody({
+      number,
+      headSha: pr.head.sha,
+      instruction: params.instruction,
+      key,
+      scope: params.scope,
+      source: params.source,
+    });
     const posted = await withUserGithubToken(user, `chat fix-request ${fullName}#${number}`, (userToken) =>
       createComment(owner, repo, issueNumber, userToken, { body }),
     );
     if ("errorResponse" in posted) {
       const detail = await posted.errorResponse.json().catch(() => ({}));
+      if (detail?.error === "github_reauth_required") {
+        return {
+          ok: false,
+          error: "reauth_required",
+          message: "GitHubの連携が切れているため、あなたの名前で依頼を投稿できません。ログインし直してから送ってください。",
+        };
+      }
       return {
         ok: false,
         error: "github_error",
