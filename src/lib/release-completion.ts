@@ -186,12 +186,13 @@ export function decideReleaseCompletion(
 
   const series = observation.series;
   // 修正系列が作り直した後継へ進む。作り直しで元の候補は閉じられるので、取消の判定より先に見る
+  // 新方式の候補（#4495）は同じPRのrevisionが進むので、番号が同じでもheadが違えば後継として追う
   if (
     series &&
     series.successorPrNumber !== null &&
-    series.successorPrNumber !== run.candidatePrNumber &&
     series.successorHeadSha &&
-    series.successorBaseSha
+    series.successorBaseSha &&
+    (series.successorPrNumber !== run.candidatePrNumber || series.successorHeadSha !== run.candidateHeadSha)
   ) {
     return {
       action: "follow_successor",
@@ -205,6 +206,8 @@ export function decideReleaseCompletion(
     if (series && series.status === "rebuilding") return { action: "wait", status: "checking" };
     return { action: "stop", reason: "candidate_closed" };
   }
+  // 新方式の候補（#4495）は、修正系列の取り込みで同じPRのheadが進む。系列が新しいrevisionを後継として記録するまで待つ
+  if (candidate.headSha !== run.candidateHeadSha && series && series.status === "rebuilding") return { action: "wait", status: "checking" };
   // 系列の外で候補が作り直された（同じ番号でHEADが動いた）。承認した内容と違うので追わない
   if (candidate.headSha !== run.candidateHeadSha) {
     return { action: "stop", reason: "candidate_changed", detail: candidate.headSha.slice(0, 7) };

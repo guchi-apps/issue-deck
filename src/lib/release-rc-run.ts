@@ -355,6 +355,18 @@ async function findLegacyCandidate(ctx: Context): Promise<RcLegacyCandidate | nu
   return { prNumber: pr.number, version: legacyReleaseVersionOf(pr.head.ref), headSha: pr.head.sha, migratable };
 }
 
+/** 期限切れの失効と、未完了の更新の照合。状態が変わったらtrue */
+async function reconcilePending(ctx: Context, row: CandidateRow): Promise<boolean> {
+  const now = new Date();
+  let changed = await expireStalePending(row, now);
+  const pending = row.revisions.find((r) => r.status === "requested" && !isRcRevisionPendingExpired(r, now));
+  if (pending) {
+    const result = await reconcileRevision({ ctx, candidate: row, revisionId: pending.id }).catch(() => "waiting" as const);
+    changed = changed || result === "applied" || result === "failed";
+  }
+  return changed;
+}
+
 /**
  * リポジトリの候補の状況。`pullRequestNumber`を渡すとそのPRを持つ候補（過去のものも含む）、無ければ進行中の候補を返す。
  * 未完了の更新は、ここで実際の候補ブランチと照合して取り込む（報告が届かなかった場合の回復）
@@ -376,16 +388,7 @@ export async function loadRcOverview(input: Context & { pullRequestNumber?: numb
     row = await loadCandidateRow({ activeKey: repositoryFullName });
   }
 
-  if (row) {
-    const now = new Date();
-    let changed = await expireStalePending(row, now);
-    const pending = row.revisions.find((r) => r.status === "requested" && !isRcRevisionPendingExpired(r, now));
-    if (pending) {
-      const result = await reconcileRevision({ ctx, candidate: row, revisionId: pending.id }).catch(() => "waiting" as const);
-      changed = changed || result === "applied" || result === "failed";
-    }
-    if (changed) row = await loadCandidateRow({ id: row.id });
-  }
+  if (row && (await reconcilePending(ctx, row))) row = await loadCandidateRow({ id: row.id });
 
   return {
     caller,
@@ -778,4 +781,61 @@ export async function recordRcReport(input: {
   const token = await getInstallationToken(repository.installation.installationId);
   const ctx: Context = { owner: repository.ownerLogin, repo: repository.name, token };
   return { ok: true, outcome: await reconcileRevision({ ctx, candidate, revisionId: revision.id, runUrl }) };
+}
+
+/** 候補PR（新方式）に対応する、取り込みを受け付ける段階の候補。無ければnull（修正系列の接続用） */
+export async function findReviewableRcForPullRequest(
+  repositoryFullName: string,
+  prNumber: number,
+): Promise<{ id: string; sequence: number } | null> {
+  const revision = await db.releaseCandidateRevision.findFirst({
+    where: { prNumber, status: "applied", candidate: { repositoryFullName, phase: "review", activeKey: { not: null } } },
+    select: { candidate: { select: { id: true, sequence: true } } },
+  });
+  return revision?.candidate ?? null;
+}
+
+/**
+ * 修正系列（#4317）が作り直しを依頼した後の、候補PR（新方式）のrevision。同じ巡回でまとめて依頼した系列は
+ * 同じ時刻に作り直しを確保するので、その時刻以降に作られた取り込みのrevisionを見る。未完了なら照合して取り込む
+ * （workflowの報告が届かなかった場合の回復）。依頼が無ければnull
+ */
+export async function observeRcRevisionAfter(input: {
+  repositoryFullName: string;
+  prNumber: number;
+  since: Date;
+}): Promise<{ status: RcRevisionStatus; prNumber: number | null; baseSha: string | null; headSha: string | null } | null> {
+  const find = () =>
+    db.releaseCandidateRevision.findFirst({
+      where: {
+        reason: "fix_import",
+        createdAt: { gte: new Date(input.since.getTime() - 60_000) },
+        candidate: { repositoryFullName: input.repositoryFullName, revisions: { some: { prNumber: input.prNumber } } },
+      },
+      orderBy: { createdAt: "desc" },
+    });
+  let row = await find();
+  if (!row) return null;
+  if (row.status === "requested") {
+    await reconcileRcCandidate(input.repositoryFullName, row.candidateId).catch((error: unknown) => {
+      console.error("[release-rc] reconcile failed", input.repositoryFullName, error);
+    });
+    row = (await find()) ?? row;
+  }
+  return { status: row.status as RcRevisionStatus, prNumber: row.prNumber, baseSha: row.baseSha, headSha: row.headSha };
+}
+
+/** 未完了の更新要求の失効と照合だけを行う（巡回用）。画面の読み込み（`loadRcOverview`）と同じ処理 */
+export async function reconcileRcCandidate(repositoryFullName: string, candidateId: string): Promise<void> {
+  const repository = await db.repository.findFirst({ where: { fullName: repositoryFullName }, include: { installation: true } });
+  if (!repository) return;
+  const row = await loadCandidateRow({ id: candidateId });
+  if (!row) return;
+  const ctx: Context = { owner: repository.ownerLogin, repo: repository.name, token: await getInstallationToken(repository.installation.installationId) };
+  await reconcilePending(ctx, row);
+}
+
+/** 修正系列の自動取り込みの要求キー。同じ系列・同じ前提headの再試行（巡回の重なり・再起動）で同じキーになる */
+export function rcFixSeriesRequestKey(seriesId: string, headSha: string): string {
+  return `fs-${seriesId.replace(/[^A-Za-z0-9]/g, "").slice(0, 30)}-${headSha.slice(0, 12)}`;
 }

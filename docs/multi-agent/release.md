@@ -1013,13 +1013,29 @@ main起点の`deploy-recovery/*`ブランチへ取り込む。**`merges`APIは�
 
 `buildRcFinalizeContract`は現在revisionが公開準備可能のときだけ、候補ID・候補番号・revision・PR番号・base/head・固定したdevelopのSHA・含めるPR番号を返す。公開準備はこれを固定の入力として扱い、developの最新を取り込まない。
 
+### workflowの候補モード（`candidate-request`）
+
+`reusable-release-develop-to-main.yml`は`candidate-request`入力（手動起動のみ）を受け取ると、旧方式の処理（バンプ・`release-main/v*`）を一切行わず、次だけを行う。結果は最後のステップが要求キーと種別だけを`POST /api/dispatch/release-rc`へ報告する（旧方式の`notify-failure`は動かさない）。
+
+- `mode=create`: 固定SHA（developの祖先であること）をそのまま`release-rc/<番号>`としてpushし、main向けの**draft PR**を作る。既にブランチがあれば同じ内容のときだけ受け付け、書き換えない（再実行で同じ結果）
+- `mode=import`: 候補ブランチの先端が要求の前提（直前revisionのhead）と一致するときだけ、選んだPRを当てて早送りでpushする。当てる処理は旧方式の選択的作り直しと**同じ関数`apply_selection`**（#4335の`cherry-pick -m 1`・範囲外ファイルの検査・#4452の履歴修復）で、取り込み用の別ループは作らない。force pushはしないので、途中で候補が動いていればpushが拒否される
+- 新方式の候補PRが開いている間は、schedule・push・手動起動の旧方式の処理（バンプPR・`release-main/v*`の作成）をしない。開いている旧方式の候補がある間は、issue-deckが新方式の候補を作らない。どちらか一方だけが進む
+
+### 修正系列・完了系列との接続
+
+- 修正系列（#4317）は、候補が新方式なら作り直し（`requestSelectiveRebuild`）の代わりに`requestRcImport`で同じ候補へ修正PRを取り込む。要求キーは系列と前提headから決める（`rcFixSeriesRequestKey`）ので、巡回の重なり・再起動で二重に依頼しない。取り込みが適用されたら、そのrevisionのPR・SHAを「後継」として再検証へ進め、失敗・失効なら理由付きで止める（候補と元のrevisionは残る）
+- リリース完了系列（#4480）は、同じPR番号でもheadが進んだ後継を追い、取り込み中（`rebuilding`）にheadが動いても止めずに待つ。後継へ進む更新はheadも条件にして二重に進めない
+- 内部確認（#4410/#4478）・次世代の起案・本番マージ・deploy追跡は既存のまま使う。新しいレビュー・復旧のループは作っていない
+
 ### callerの対応世代と段階展開
 
 世代を表す専用の印は無いので、`rebuild_selection`（#4335）と同じく**developのcallerに`candidate_request`のinputと`candidate-request:`の受け渡しがあるか**で判定する（`parseRcCallerSupport`）。未対応・読めないときは理由付きで「旧方式で動作中」と出し、作成・移行の要求は`caller_unsupported`で断る。
 
-段階展開の手順:
+**callerの有効化は公開準備（#4496）が入ってから行う。** 新方式の候補が開いている間は旧方式のリリースが止まるため、版を確定して公開する経路が無いうちに有効化すると、移行した候補を公開できなくなる。reusable側の候補モードは任意入力なので、callerを変えない限り配布先・issue-deck自身の挙動は変わらない。
 
-1. issue-deck自身で候補モード（reusableの`candidate-request`入力）を先に使い、作成・取り込み・取消・旧方式の移行を確認する
+段階展開の手順（#4496の後）:
+
+1. issue-deck自身のcaller（`.github/workflows/release-develop-to-main.yml`）へ`candidate_request`のinputと`candidate-request:`の受け渡しを足し、作成・取り込み・取消・旧方式の移行・公開までを確認する
 2. `develop`→`main`のリリースを通し、画面の「新しいタグを切って配る」でタグを切る
 3. 対応させるリポジトリのcallerへ`candidate_request`のinputと受け渡しを足すPRを、リポジトリごとに出す（一括で配らない）
 4. 戻すとき（復帰）は、そのリポジトリのcallerから`candidate_request`を外す。判定が未対応へ戻り、以後は旧方式で動く。作成済みの候補の記録は残り、開いている候補PRは画面から取り消してから旧方式のリリースを起動する

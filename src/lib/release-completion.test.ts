@@ -100,6 +100,26 @@ describe("decideReleaseCompletion", () => {
     ).toMatchObject({ action: "stop", reason: "candidate_changed" });
   });
 
+  it("新方式の候補（#4495）は、同じPRで進んだrevisionを後継として追う", () => {
+    const decision = decideReleaseCompletion(run(), {
+      now,
+      candidate: { ...openCandidate, headSha: "head2" },
+      series: series({ status: "reverifying", successorPrNumber: 10, successorHeadSha: "head2", successorBaseSha: "base1" }),
+      checks: null,
+    });
+    expect(decision).toEqual({ action: "follow_successor", prNumber: 10, headSha: "head2", baseSha: "base1" });
+  });
+
+  it("新方式の候補で取り込み中にheadが進んでも、系列が記録するまで止めずに待つ", () => {
+    const decision = decideReleaseCompletion(run(), {
+      now,
+      candidate: { ...openCandidate, headSha: "head2" },
+      series: series({ status: "rebuilding" }),
+      checks: null,
+    });
+    expect(decision).toEqual({ action: "wait", status: "checking" });
+  });
+
   it("作り直しの最中（後継の作成待ち）は、閉じた候補でも待つ", () => {
     const decision = decideReleaseCompletion(run(), {
       now,

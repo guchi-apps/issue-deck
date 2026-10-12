@@ -491,7 +491,8 @@ async function applyDecision(
       return handOff(run, ctx, decision.reason, decision.detail);
     case "follow_successor": {
       const updated = await db.releaseCompletionRun.updateMany({
-        where: { id: run.id, status: run.status, candidatePrNumber: run.candidatePrNumber },
+        // 新方式の候補（#4495）は番号が変わらずheadが進むので、headも条件にして同時の巡回で二重に進めない
+        where: { id: run.id, status: run.status, candidatePrNumber: run.candidatePrNumber, candidateHeadSha: run.candidateHeadSha },
         data: {
           candidatePrNumber: decision.prNumber,
           candidateHeadSha: decision.headSha,
