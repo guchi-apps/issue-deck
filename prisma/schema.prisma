@@ -2896,7 +2896,9 @@ model ReleaseCandidate {
   createdAt            DateTime  @default(now())
   updatedAt            DateTime  @updatedAt
 
-  revisions ReleaseCandidateRevision[]
+  revisions     ReleaseCandidateRevision[]
+  finalizations ReleaseCandidateFinalization[]
+  reservations  ReleaseVersionReservation[]
 
   @@unique([repositoryFullName, sequence])
   @@index([repositoryFullName, phase])
@@ -2937,6 +2939,74 @@ model ReleaseCandidateRevision {
   candidate ReleaseCandidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
 
   @@unique([candidateId, revision])
+  @@index([candidateId, status])
+}
+
+// 公開準備（正式バンプ。#4496）1回の記録。**バンプ前（revisionのhead）とバンプ後の対象を別に持つ。**
+// 要求の時点で版を予約し、workflowの報告をサーバーがGitHubから取り直して`applied`/`failed`にする。
+// バンプ前の検証結果（`ReleaseVerification`の行）は書き換えない。引継ぎは`handoffEvidence`に
+// 元の結果のSHA・差分のファイル・引継ぎ条件を残し、画面側が派生の記録として表示する。
+model ReleaseCandidateFinalization {
+  id                 String    @id @default(cuid())
+  candidateId        String
+  repositoryFullName String    @db.VarChar(191)
+  // 前提にしたrevisionと、バンプ前の対象（PR番号・base・head）
+  revision           Int
+  prNumber           Int
+  preBaseSha         String    @db.VarChar(64)
+  preHeadSha         String    @db.VarChar(64)
+  // 予約した正式版（`ReleaseVersionReservation`）と上げ幅。`bumpKindSource`は`auto`（自動判定）か`manual`（手動指定）。
+  // 自動判定のときは、workflowが判定して報告するまで版・上げ幅はnull（検証中の版表示は予定値で、確定済みと区別する）
+  reservedVersion    String?   @db.VarChar(32)
+  bumpKind           String?   @db.VarChar(8)
+  bumpKindSource     String    @db.VarChar(8)
+  // `requested` / `applied` / `failed` / `expired` / `superseded`
+  status             String    @db.VarChar(16)
+  // 要求キー（再送・二重押しで公開準備を2本走らせない）
+  requestKey         String    @unique @db.VarChar(64)
+  // 未完了の間だけ`candidateId`を入れる。同じ候補へ公開準備を2本同時に走らせない
+  pendingKey         String?   @unique @db.VarChar(40)
+  // バンプ後の対象（サーバーがGitHubから取り直した値）。適用前はnull
+  finalBaseSha       String?   @db.VarChar(64)
+  finalHeadSha       String?   @db.VarChar(64)
+  // バンプで変わったファイル（JSON配列 `[{ path, category }]`）
+  diffFiles          Json
+  // 検証ごとの引継ぎ・再検証の判定と根拠（JSON配列。`InheritanceEvidence`）
+  handoffEvidence    Json
+  runUrl             String?   @db.VarChar(512)
+  failureReason      String?   @db.Text
+  requestedByUserId  String?   @db.VarChar(40)
+  appliedAt          DateTime?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  candidate ReleaseCandidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+
+  @@index([candidateId, status])
+  @@index([repositoryFullName, prNumber])
+}
+
+// 正式版の予約台帳（#4496）。**同じ版を2つの候補が採らず、公開した版を再利用しない**ための記録。
+// `reserved`＝未公開で保持中（再試行・失敗後も同じ版を保つ）、`released`＝公開せずに手放した（タグ・main上に
+// 無いことを確かめて再利用してよい）、`consumed`＝mainへ入った・タグが付いた（二度と再利用しない）。
+model ReleaseVersionReservation {
+  id                 String    @id @default(cuid())
+  repositoryFullName String    @db.VarChar(191)
+  version            String    @db.VarChar(32)
+  candidateId        String
+  // `reserved` / `released` / `consumed`
+  status             String    @db.VarChar(16)
+  // 消費したときのmainのマージコミットとタグ。何を公開した版かを残す
+  consumedMergeSha   String?   @db.VarChar(64)
+  consumedTag        String?   @db.VarChar(64)
+  consumedAt         DateTime?
+  releasedAt         DateTime?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  candidate ReleaseCandidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+
+  @@unique([repositoryFullName, version])
   @@index([candidateId, status])
 }
 

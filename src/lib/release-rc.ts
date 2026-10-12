@@ -97,13 +97,14 @@ export function canCancelRc(phase: RcPhase): boolean {
 
 /** revisionの記録状態 */
 export type RcRevisionStatus = "requested" | "applied" | "failed" | "expired";
-export type RcRevisionReason = "initial" | "fix_import" | "history_repair" | "migration";
+export type RcRevisionReason = "initial" | "fix_import" | "history_repair" | "migration" | "finalize_bump";
 
 export const RC_REVISION_REASON_LABEL: Record<RcRevisionReason, string> = {
   initial: "developから固定",
   fix_import: "関連修正の取り込み",
   history_repair: "履歴修復（mainの祖先のみ）",
   migration: "旧方式の候補から移行",
+  finalize_bump: "公開準備の正式バンプ",
 };
 
 /** 結果を受け取れないまま要求を残しておく時間。過ぎたら`expired`にしてやり直せるようにする */

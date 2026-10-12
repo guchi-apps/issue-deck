@@ -77,6 +77,17 @@ on:
         required: false
         type: string
         default: ""
+      finalize-request:
+        # 合格したリリース候補（#4495）の公開準備＝正式バンプ（#4496。workflow_dispatchのみ）。issue-deckのサーバーが組み立てるJSONで、
+        # `{"candidate":"<id>","sequence":<候補番号>,"revision":<revision>,"requestKey":"<要求キー>",
+        # "baseHeadSha":"<バンプ前の候補のhead>","bumpKind":"auto|major|minor|patch","version":"<予約済みの版。無ければnull>",
+        # "unavailableVersions":["<タグ・消費済み・他の候補が予約している版>"]}`。
+        # 指定があると`finalize`ジョブだけが動き（`release`ジョブは動かない）、`release-rc/<候補番号>`へ
+        # **版の書き換え・更新履歴だけの1コミットを早送りで積む**。最新developの変更は取り込まない
+        description: "リリース候補の公開準備（正式バンプ）の要求（issue-deckが作るJSON。空なら従来どおり）"
+        required: false
+        type: string
+        default: ""
       bump-command:
         description: >-
           バージョンを書き換えるコマンド。空なら
@@ -93,6 +104,8 @@ on:
 # 既存の reusable-issue-dispatch.yml・reusable-claude-ci-fix.yml も name / on / jobs だけを持つ。
 jobs:
   release:
+    # 公開準備（#4496）の要求のときは、旧方式・候補管理の処理を動かさず`finalize`ジョブだけが動く
+    if: inputs.finalize-request == ''
     runs-on: ubuntu-latest
     # 準備が進んだ（バンプPRかリリースPRを作れた）かどうか。`notify-prepared`が、過去の
     # 失敗の記録を解決にするために使う（#4335）。何もしなかったrun（schedule・対象なし）は報告しない
@@ -459,6 +472,11 @@ jobs:
                 NEED_BUMP=true
               fi
             fi
+          elif [ "$(printf '%s\n%s\n' "$MAIN_VERSION" "$DEV_VERSION" | sort -V | tail -n 1)" = "$MAIN_VERSION" ]; then
+            # **developの版がmainより古いのは「バンプ済み」ではない**（#4496）。新方式の候補は版をdevelopへ入れずに
+            # 公開するため、公開後はmainの版がdevelopより先に進む。差を「バンプ済み」と読むと、公開済みの内容で
+            # 古いリリースPRを作ってしまう。公開した版がdevelopへ同期されるまでは何もしない
+            echo "developのバージョン($DEV_VERSION)がmain($MAIN_VERSION)より古いため、バンプ済みとはみなしません。公開した版がdevelopへ同期されるまで待ちます"
           else
             echo "developのバージョン($DEV_VERSION)がmain($MAIN_VERSION)と異なるため、バンプ済みとみなします"
             # リリースPRのheadは固定ブランチ`release-main/vX.Y.Z`（#2117）。`--head`で絞ると
@@ -1873,3 +1891,295 @@ jobs:
             -H "Authorization: Bearer $PROGRESS_REPORT_SECRET" -H "Content-Type: application/json" \
             --data "$BODY" "$APP_BASE_URL/api/dispatch/release-preparation")" || CODE=000
           [ "$CODE" = "200" ] || echo "::warning::issue-deckへ報告できませんでした（HTTP $CODE）"
+
+  # **公開準備（正式バンプ。#4496）。** 合格した候補（`release-rc/<番号>`）の先端に、版の書き換え・更新履歴だけの
+  # 1コミットを早送りで積む。最新developの変更は取り込まず、force pushもしない。結果は要求キーと種別だけを
+  # issue-deckへ報告し、適用されたか（早送り・版ファイルの版・差分）はissue-deckがGitHubから取り直して決める。
+  # 既に予約した版でバンプ済みの候補（修正工程から戻った再試行）は新しいコミットを作らず、版も増やさない
+  finalize:
+    if: inputs.finalize-request != ''
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: read
+      id-token: write
+    steps:
+      - name: GitHub Appのインストールトークンを発行する
+        id: app-token
+        if: ${{ vars.WORKFLOW_APP_ID != '' }}
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ vars.WORKFLOW_APP_ID }}
+          private-key: ${{ secrets.WORKFLOW_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-workflows: write
+          permission-pull-requests: write
+          permission-issues: write
+
+      - name: Checkout develop
+        uses: actions/checkout@v4
+        with:
+          ref: develop
+          fetch-depth: 0
+          token: ${{ steps.app-token.outputs.token || secrets.WORKFLOW_PAT }}
+
+      - name: 要求を検証し、バンプ前の候補ブランチを取得する
+        id: request
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.WORKFLOW_PAT }}
+          GH_REPO: ${{ github.repository }}
+          EVENT_NAME: ${{ github.event_name }}
+          FINALIZE_REQUEST: ${{ inputs.finalize-request }}
+          VERSION_FILE: ${{ inputs.version-file }}
+          VERSION_QUERY: ${{ inputs.version-query }}
+        run: |
+          set -e
+          if [ "$EVENT_NAME" != "workflow_dispatch" ]; then
+            echo "::error::公開準備は手動起動でだけ受け付けます"
+            exit 1
+          fi
+          if ! printf '%s' "$FINALIZE_REQUEST" | jq -e '(.candidate | type == "string") and (.sequence | type == "number" and . > 0) and (.revision | type == "number" and . > 0) and (.requestKey | type == "string" and test("^[A-Za-z0-9_:-]{8,64}$")) and (.baseHeadSha | type == "string" and test("^[0-9a-f]{40}$")) and (.bumpKind == "auto" or .bumpKind == "major" or .bumpKind == "minor" or .bumpKind == "patch") and ((.version == null) or (.version | type == "string" and test("^[0-9]+\\.[0-9]+\\.[0-9]+$"))) and (.unavailableVersions | type == "array")' >/dev/null 2>&1; then
+            echo "::error::公開準備の要求（finalize-request）の形式が正しくありません"
+            exit 1
+          fi
+          RC_SEQ="$(printf '%s' "$FINALIZE_REQUEST" | jq -r '.sequence')"
+          RC_BASE="$(printf '%s' "$FINALIZE_REQUEST" | jq -r '.baseHeadSha')"
+          RC_BRANCH="release-rc/$RC_SEQ"
+          git fetch origin main:refs/remotes/origin/main --quiet --force
+          git fetch origin "+refs/heads/$RC_BRANCH:refs/remotes/origin/$RC_BRANCH" --quiet
+          REMOTE_HEAD="$(git rev-parse "refs/remotes/origin/$RC_BRANCH")"
+          if [ "$REMOTE_HEAD" != "$RC_BASE" ]; then
+            echo "::error::候補ブランチ $RC_BRANCH が更新されています（前提: $RC_BASE、現在: $REMOTE_HEAD）。書き換えずに止めます。画面で状態を確かめてください"
+            exit 1
+          fi
+          RC_PR="$(gh pr list --base main --head "$RC_BRANCH" --state open --json number --jq '.[0].number // empty')"
+          if [ -z "$RC_PR" ]; then
+            echo "::error::候補のPR（$RC_BRANCH → main）が開いていません"
+            exit 1
+          fi
+          MAIN_VERSION="$(git show "origin/main:$VERSION_FILE" | jq -r "$VERSION_QUERY")"
+          HEAD_VERSION="$(git show "$RC_BASE:$VERSION_FILE" | jq -r "$VERSION_QUERY")"
+          REQUEST_VERSION="$(printf '%s' "$FINALIZE_REQUEST" | jq -r '.version // empty')"
+          # 候補が既に予約した版でバンプ済み（修正工程から戻った再試行）なら、新しいコミットも版の増加もしない
+          ALREADY_BUMPED=false
+          if [ -n "$REQUEST_VERSION" ] && [ "$HEAD_VERSION" = "$REQUEST_VERSION" ] && [ "$HEAD_VERSION" != "$MAIN_VERSION" ]; then
+            ALREADY_BUMPED=true
+          fi
+          {
+            echo "rc_seq=$RC_SEQ"
+            echo "rc_base=$RC_BASE"
+            echo "rc_branch=$RC_BRANCH"
+            echo "main_version=$MAIN_VERSION"
+            echo "head_version=$HEAD_VERSION"
+            echo "already_bumped=$ALREADY_BUMPED"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: コード変更内容からバージョンの上げ幅と更新履歴を判定する
+        id: version-decision
+        # 判定の基準・changelog・usageの書き方は`release`ジョブの同名ステップと同じ（`src/lib/semver-bump.ts`の基準も同じ内容）。
+        # 差分は「main」と「バンプ前の候補」（最新developではない）
+        if: steps.request.outputs.already_bumped != 'true'
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github_token: ${{ steps.app-token.outputs.token || secrets.WORKFLOW_PAT }}
+          allowed_bots: "issue-deck[bot],claude[bot]"
+          claude_args: |
+            --allowedTools "Bash(git diff:*),Bash(git log:*),Bash(git show:*)"
+            --json-schema '{"type":"object","properties":{"bump_kind":{"type":"string","enum":["major","minor","patch"]},"reason":{"type":"string"},"changelog":{"type":"string"},"usage":{"type":"string"}},"required":["bump_kind","reason"]}'
+          prompt: |
+            ${{ github.repository }} リポジトリで、mainブランチとリリース候補（`${{ steps.request.outputs.rc_base }}`）の実際のコード差分の内容から、
+            セマンティックバージョニング（semver）に基づく適切なバージョンの上げ幅（major/minor/patch）を判定してください。
+            Issueのラベルは一切参照せず、差分の内容そのものだけから判断してください。
+
+            ## 確認すること
+            - `git diff origin/main ${{ steps.request.outputs.rc_base }}` で実際のコード変更内容を確認する
+            - `git log origin/main..${{ steps.request.outputs.rc_base }} --oneline` でコミット一覧も参考にする
+
+            ## 判定基準
+            - major: 既存の挙動・データ構造・公開APIに対する後方互換性のない変更（破壊的変更）が含まれる場合
+            - minor: 後方互換性を保ったまま新機能が追加されている場合
+            - patch: バグ修正・リファクタリング・ドキュメント更新など、上記のいずれにも該当しない変更のみの場合
+            - 複数種類の変更が混在する場合は、最も上げ幅が大きい判定を採用する
+
+            ## 出力
+            判定結果（bump_kind）と判断根拠（reason。日本語で3〜5行程度）を返してください。
+            あわせて、エンドユーザー向けの更新履歴（changelog。何ができるようになった/直ったかを平易な日本語で簡潔に。
+            実装の詳細やファイル名には触れない。端末のスクリプト・CLI・CI/CDからしか使えない変更や、画面に導線が
+            無い変更は書かない）と、利用者向けの使い方（usage。画面で辿れる操作だけを番号付きの箇条書き3〜5行で、
+            「どうなれば成功か」を1行入れる。画面で使える変化が無いリリースは空文字）も生成してください。
+
+      - name: バージョン判定結果を検証する
+        id: bump
+        if: always() && steps.request.outputs.already_bumped != 'true' && steps.request.outcome == 'success'
+        env:
+          STRUCTURED_OUTPUT: ${{ steps.version-decision.outputs.structured_output }}
+          FINALIZE_REQUEST: ${{ inputs.finalize-request }}
+        run: |
+          set -e
+          BUMP_KIND="$(echo "$STRUCTURED_OUTPUT" | jq -r '.bump_kind // empty' 2>/dev/null || true)"
+          REASON="$(echo "$STRUCTURED_OUTPUT" | jq -r '.reason // empty' 2>/dev/null || true)"
+          CHANGELOG="$(echo "$STRUCTURED_OUTPUT" | jq -r '.changelog // empty' 2>/dev/null || true)"
+          USAGE="$(echo "$STRUCTURED_OUTPUT" | jq -r '.usage // empty' 2>/dev/null || true)"
+          case "$BUMP_KIND" in
+            major|minor|patch) ;;
+            *)
+              echo "判定が失敗・不正だったため、patchにフォールバックします（判定結果: '$BUMP_KIND'）"
+              BUMP_KIND=patch
+              REASON="コード差分からのバージョン自動判定に失敗したため、安全側としてpatchにフォールバックしました。"
+              CHANGELOG=""
+              USAGE=""
+              ;;
+          esac
+          # 画面から上げ幅を指定した場合は、判定の結果をそれで上書きする（判定は判断根拠へ残す）
+          SPECIFIED="$(printf '%s' "$FINALIZE_REQUEST" | jq -r '.bumpKind')"
+          case "$SPECIFIED" in
+            major|minor|patch)
+              REASON="$(printf 'issue-deckの画面から%sを指定しました（コード差分からの自動判定は%s）。\n\n%s' "$SPECIFIED" "$BUMP_KIND" "$REASON")"
+              BUMP_KIND="$SPECIFIED"
+              ;;
+          esac
+          echo "bump_kind=$BUMP_KIND" >> "$GITHUB_OUTPUT"
+          { echo "reason<<REASON_EOF"; echo "$REASON"; echo "REASON_EOF"; } >> "$GITHUB_OUTPUT"
+          { echo "changelog<<CHANGELOG_EOF"; echo "$CHANGELOG"; echo "CHANGELOG_EOF"; } >> "$GITHUB_OUTPUT"
+          { echo "usage<<USAGE_EOF"; echo "$USAGE"; echo "USAGE_EOF"; } >> "$GITHUB_OUTPUT"
+
+      - name: 版を書き換えて候補ブランチへ早送りで積む
+        id: bump-rc
+        if: steps.request.outcome == 'success' && steps.request.outputs.already_bumped != 'true'
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.WORKFLOW_PAT }}
+          GH_REPO: ${{ github.repository }}
+          FINALIZE_REQUEST: ${{ inputs.finalize-request }}
+          RC_BASE: ${{ steps.request.outputs.rc_base }}
+          RC_BRANCH: ${{ steps.request.outputs.rc_branch }}
+          MAIN_VERSION: ${{ steps.request.outputs.main_version }}
+          VERSION_FILE: ${{ inputs.version-file }}
+          VERSION_QUERY: ${{ inputs.version-query }}
+          BUMP_COMMAND: ${{ inputs.bump-command }}
+          BUMP_KIND: ${{ steps.bump.outputs.bump_kind }}
+          REASON: ${{ steps.bump.outputs.reason }}
+          RELEASE_CHANGELOG: ${{ steps.bump.outputs.changelog }}
+          RELEASE_USAGE: ${{ steps.bump.outputs.usage }}
+        run: |
+          set -e
+          IFS='.' read -r MAJOR MINOR PATCH <<< "$MAIN_VERSION"
+          case "$BUMP_KIND" in
+            major) MAJOR=$((MAJOR + 1)); MINOR=0; PATCH=0 ;;
+            minor) MINOR=$((MINOR + 1)); PATCH=0 ;;
+            *) PATCH=$((PATCH + 1)) ;;
+          esac
+          NEW_VERSION="$MAJOR.$MINOR.$PATCH"
+
+          # タグが付いた版・消費済みの版・他の候補が予約している版は欠番にして、次のpatchへ進める（上書きしない）
+          UNAVAILABLE="$(printf '%s' "$FINALIZE_REQUEST" | jq -r '.unavailableVersions[]')"
+          for _ in $(seq 1 50); do
+            TAKEN=false
+            if printf '%s\n' "$UNAVAILABLE" | grep -qx "$NEW_VERSION"; then TAKEN=true; fi
+            if [ -n "$(git ls-remote --tags origin "refs/tags/v$NEW_VERSION")" ]; then TAKEN=true; fi
+            [ "$TAKEN" = "true" ] || break
+            IFS='.' read -r MAJOR MINOR PATCH <<< "$NEW_VERSION"
+            NEW_VERSION="$MAJOR.$MINOR.$((PATCH + 1))"
+            echo "v$MAJOR.$MINOR.$PATCH は使えないため欠番にし、v$NEW_VERSION にします"
+          done
+          REQUEST_VERSION="$(printf '%s' "$FINALIZE_REQUEST" | jq -r '.version // empty')"
+          SPECIFIED="$(printf '%s' "$FINALIZE_REQUEST" | jq -r '.bumpKind')"
+          if [ "$SPECIFIED" != "auto" ] && [ -n "$REQUEST_VERSION" ] && [ "$REQUEST_VERSION" != "$NEW_VERSION" ]; then
+            echo "::error::予約した版（$REQUEST_VERSION）と計算した版（$NEW_VERSION）が一致しません。issue-deckで予約を取り直してください"
+            exit 1
+          fi
+
+          git config user.name "Claude Code"
+          git config user.email "claude-code@example.com"
+          git checkout -q --detach "$RC_BASE"
+          # 版ファイルを公開済みのmainの内容へ戻してから書き換える。以前のバンプが残っていても、同じ手順で同じ結果になる
+          git checkout origin/main -- "$VERSION_FILE"
+          LOCK_PREFIX=""
+          [ "$(dirname "$VERSION_FILE")" = "." ] || LOCK_PREFIX="$(dirname "$VERSION_FILE")/"
+          for LOCK in package-lock.json npm-shrinkwrap.json; do
+            if git cat-file -e "origin/main:${LOCK_PREFIX}${LOCK}" 2>/dev/null; then git checkout origin/main -- "${LOCK_PREFIX}${LOCK}"; fi
+          done
+
+          if [ -n "$BUMP_COMMAND" ]; then
+            echo "bump-command を実行します: $BUMP_COMMAND"
+            export NEW_VERSION BUMP_KIND RELEASE_CHANGELOG RELEASE_USAGE
+            bash -c "$BUMP_COMMAND"
+          else
+            npm version "$NEW_VERSION" --no-git-tag-version
+          fi
+          APPLIED="$(jq -r "$VERSION_QUERY" "$VERSION_FILE")"
+          if [ "$APPLIED" != "$NEW_VERSION" ]; then
+            echo "::error::バージョンの書き換えに失敗しました（$VERSION_FILE は $APPLIED のまま。期待: $NEW_VERSION）"
+            exit 1
+          fi
+
+          if [ -n "$RELEASE_CHANGELOG" ] || [ -n "$RELEASE_USAGE" ]; then
+            mkdir -p .github
+            {
+              echo "<!-- リリースのたびに自動生成されます。手で編集しないでください（guchi-apps/issue-deck#2391） -->"
+              echo
+              echo "# v${NEW_VERSION}"
+              echo
+              if [ -n "$RELEASE_CHANGELOG" ]; then echo "$RELEASE_CHANGELOG"; echo; fi
+              if [ -n "$RELEASE_USAGE" ]; then echo "**使い方**"; echo; echo "$RELEASE_USAGE"; echo; fi
+            } > .github/release-notes.md
+          fi
+
+          git add -A
+          git commit -m "v${NEW_VERSION}をリリースする。"
+          # 候補ブランチが前提から動いていれば拒否される（早送りのみ。force pushしない）
+          git push origin "HEAD:refs/heads/$RC_BRANCH"
+          echo "new_version=$NEW_VERSION" >> "$GITHUB_OUTPUT"
+
+          RC_PR="$(gh pr list --base main --head "$RC_BRANCH" --state open --json number --jq '.[0].number // empty')"
+          if [ -n "$RC_PR" ]; then
+            {
+              echo "公開準備: 正式版を **v${NEW_VERSION}** に確定しました（\`$(git rev-parse --short=12 HEAD)\`）。"
+              echo
+              echo "## バージョンの判断根拠"
+              echo "コード差分の内容から${BUMP_KIND}バージョンと判定しました。"
+              echo
+              echo "$REASON"
+              echo
+              echo "バンプ前の検証結果は、バンプ後のheadの合否に使いません。引き継ぐ場合は、issue-deckが元の結果と差分の根拠を記録します。"
+            } > /tmp/rc-finalize-comment.md
+            gh pr comment "$RC_PR" --body-file /tmp/rc-finalize-comment.md || echo "::warning::候補PRへのコメントに失敗しました（バンプは済んでいます）"
+          fi
+
+      - name: 公開準備の結果をissue-deckへ報告する
+        # **送るのは要求キーと結果の種別・run番号だけ。** バンプが適用されたか（早送り・版ファイルの版・差分）は
+        # issue-deckがGitHubから取り直して決める。報告が届かなくても、画面の読み込みで同じ照合をして取り込む
+        if: always()
+        env:
+          GH_REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+          FINALIZE_REQUEST: ${{ inputs.finalize-request }}
+          REQUEST_OUTCOME: ${{ steps.request.outcome }}
+          BUMP_OUTCOME: ${{ steps.bump-rc.outcome }}
+          ALREADY_BUMPED: ${{ steps.request.outputs.already_bumped }}
+          APP_BASE_URL: ${{ vars.APP_BASE_URL }}
+          PROGRESS_REPORT_SECRET: ${{ secrets.PROGRESS_REPORT_SECRET }}
+        run: |
+          if [ -z "$APP_BASE_URL" ] || [ -z "$PROGRESS_REPORT_SECRET" ]; then
+            echo "::warning::APP_BASE_URL / PROGRESS_REPORT_SECRET が未設定のため、結果をissue-deckへ報告できません"
+            exit 0
+          fi
+          REQUEST_KEY="$(printf '%s' "$FINALIZE_REQUEST" | jq -r '.requestKey // empty' 2>/dev/null || true)"
+          if ! printf '%s' "$REQUEST_KEY" | grep -Eq '^[A-Za-z0-9_:-]{8,64}$'; then
+            echo "::warning::要求キーを読めないため、報告しません（issue-deckは期限後に失効させます）"
+            exit 0
+          fi
+          if [ "$REQUEST_OUTCOME" = "success" ] && { [ "$BUMP_OUTCOME" = "success" ] || [ "$ALREADY_BUMPED" = "true" ]; }; then
+            OUTCOME=applied
+            REASON=""
+          else
+            OUTCOME=failed
+            REASON="リリースworkflowが公開準備に失敗しました。理由は実行ログを確認してください"
+          fi
+          BODY="$(jq -nc --arg repo "$GH_REPO" --arg key "$REQUEST_KEY" --arg outcome "$OUTCOME" --arg run "$RUN_ID" --arg reason "$REASON" \
+            '{repository: $repo, requestKey: $key, outcome: $outcome, runId: ($run | tonumber)} + (if $reason == "" then {} else {reason: $reason} end)')"
+          CODE="$(curl -sS -m 60 -o /dev/null -w '%{http_code}' -X POST \
+            -H "Authorization: Bearer $PROGRESS_REPORT_SECRET" -H "Content-Type: application/json" \
+            --data "$BODY" "$APP_BASE_URL/api/dispatch/release-finalize")" || CODE=000
+          [ "$CODE" = "200" ] || echo "::warning::issue-deckへ報告できませんでした（HTTP $CODE）。issue-deckは画面の読み込みで候補ブランチを照合します"
