@@ -485,7 +485,7 @@ async function advanceRelease(
   return applyReleaseDecision(series, decision, token, now);
 }
 
-async function fetchDeployRunsForSha(
+export async function fetchDeployRunsForSha(
   owner: string,
   repo: string,
   sha: string,
@@ -512,7 +512,7 @@ async function fetchDeployRunsForSha(
  * - そのコミットの`deploy.yml`が、`/api/app-version`のSHAと突き合わせるヘルスチェックを持つ
  *   （`APP_COMMIT_SHA`で判定。無い版のdeployは旧版がHTTP 200を返すだけでも成功になるため証拠にしない）
  */
-async function hasVersionVerification(owner: string, repo: string, run: DeployRunObservation, token: string): Promise<boolean> {
+export async function hasVersionVerification(owner: string, repo: string, run: DeployRunObservation, token: string): Promise<boolean> {
   try {
     const jobs = await fetchWorkflowRunJobs(owner, repo, run.id, token);
     const deployJob = jobs.find((job) => job.name === "deploy");
