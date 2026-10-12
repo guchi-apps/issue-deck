@@ -168,6 +168,13 @@ pushすると、修正がmainにだけ残りdevelopから消え、次のリリ�
   リリース失敗の通知コメントを投稿している」「理由ラベルが`01.check-blocked`だけ」のときに限る。
   別の質問・承認で付け直されたもの、由来の分からないものは外さない
 - 配布先は参照タグを上げるまで旧`notify-failure`のまま（ラベルを付ける）
+- **解決は`notify-prepared`だけに依存しない**（#4450）。競合修復済みの候補など別経路で本番公開された場合に
+  古い失敗が残らないよう、`reconcileReleasePreparationFailures`が、**失敗の記録より後にmainへマージされた
+  `release-main/v*`のリリースPR**を証跡に`open`→`resolved`へ倒す（`resolvedRunUrl`にそのPR）。再照合は
+  リリース表示の`GET /api/repositories/release/preparation`と、pollerが叩く`rebuild-history/sweep`の2経路。
+  バージョン番号は使わない（同一バージョンの候補が複数あっても取り違えない）。作り直し由来の失敗は元候補以降の
+  番号のPRに限る。GitHubを取得できないときは解決しない。限界: 失敗後にそれと無関係な候補がマージされた場合も
+  解決になる（時刻が根拠のため）。記録は削除しない（保持・削除は従来方針で、#4420の履歴削除とは別）
 
 **作り直しの前提になる「自動修復のPRをdevelopへ入れる」は自動では進まない**（#2230）。
 `reusable-claude-review-develop.yml`の`identify-issue`は対応Issue番号をブランチ名

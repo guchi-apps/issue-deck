@@ -161,3 +161,28 @@ export function releasePreparationNextAction(failure: Pick<ReleasePreparationFai
   }
   return "エラーの内容を確認し、原因を取り除いてから「再開」してください。";
 }
+
+/** 失敗より後の成功を判定するための、マージ済みリリースPR（`release-main/v*`宛mainのもの）の最小情報 */
+export type MergedReleasePr = { number: number; mergedAt: string; htmlUrl: string };
+
+/**
+ * 未解決の失敗が、後続のリリース成功（本番PRのマージ）で解消されたかを判定する（#4450）。
+ *
+ * 根拠は**失敗の記録より後にマージされたリリースPRがあること**だけで、バージョン番号は使わない
+ * （#4445・#4449のように同一バージョンの候補が複数あっても取り違えないため）。
+ * 作り直し由来の失敗（`originPr`あり）は、元候補以降の番号のPRに限る（古い候補のマージで誤解決しない）。
+ * 該当が複数なら、最初にマージされたものを証跡にする。
+ */
+export function findSupersedingReleasePr(input: {
+  failureCreatedAt: string;
+  originPr: number | null;
+  mergedReleasePrs: readonly MergedReleasePr[];
+}): MergedReleasePr | null {
+  const failureAt = Date.parse(input.failureCreatedAt);
+  if (Number.isNaN(failureAt)) return null;
+  const candidates = input.mergedReleasePrs
+    .filter((pr) => Date.parse(pr.mergedAt) > failureAt)
+    .filter((pr) => input.originPr === null || pr.number >= input.originPr)
+    .sort((a, b) => Date.parse(a.mergedAt) - Date.parse(b.mergedAt));
+  return candidates[0] ?? null;
+}

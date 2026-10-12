@@ -8,7 +8,7 @@ import { dispatchReleaseWorkflow, fetchOpenPullRequestsForBase } from "@/lib/git
 import { releaseWorkflowExists } from "@/lib/github/release-workflow-cache";
 import { previewModeGuard } from "@/lib/preview-mode";
 import { releasePreparationNextAction } from "@/lib/release-preparation";
-import { findOpenReleasePreparationFailure } from "@/lib/release-preparation-run";
+import { findOpenReleasePreparationFailure, reconcileReleasePreparationFailures } from "@/lib/release-preparation-run";
 import { requestSelectiveRebuild } from "@/lib/release-rebuild-selection-run";
 import { isBumpKind } from "@/lib/semver-bump";
 
@@ -42,6 +42,8 @@ export async function GET(request: NextRequest) {
   if (!owner || !repo) return NextResponse.json({ error: "invalid_request" }, { status: 400 });
   if (!(await findRepository(userId, owner, repo))) return NextResponse.json({ error: "not_found" }, { status: 404 });
 
+  // 後続のリリース成功で解消済みの失敗は、表示の前に解決へ倒す（#4450）。取得できなければ従来どおり表示する
+  await reconcileReleasePreparationFailures(`${owner}/${repo}`);
   const failure = await findOpenReleasePreparationFailure(`${owner}/${repo}`);
   return NextResponse.json(
     { failure: failure ? { ...failure, nextAction: releasePreparationNextAction(failure) } : null },
