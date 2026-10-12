@@ -1,8 +1,8 @@
 name: Read release 4517 validation
 on:
   push:
-    branches: [ops/verify-release-4517]
-    paths: [.github/workflows/read-release-4517.yml]
+    branches: [ops/verify-release-4515]
+    paths: [.github/workflows/read-release-4515.yml]
 permissions: {}
 jobs:
   status:
