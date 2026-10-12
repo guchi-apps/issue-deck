@@ -185,6 +185,22 @@ pushすると、修正がmainにだけ残りdevelopから消え、次のリリ�
   番号のPRに限る。GitHubを取得できないときは解決しない。限界: 失敗後にそれと無関係な候補がマージされた場合も
   解決になる（時刻が根拠のため）。記録は削除しない（保持・削除は従来方針で、#4420の履歴削除とは別）
 
+### 準備中・準備失敗の間は「リリースする」を灰色にする（#4421）
+
+`canTriggerRelease`はopenなリリースPR・バンプPRの有無しか見ず、作り直し（元のリリースPRを閉じてから
+バンプPRが出るまで）のPRが0件の間も押せた。ブランチ画面は`GET /api/repositories/release/preparation`
+（DBのみ。失敗の帯と同じ取得を`useReleasePreparation`で共有）の`failure`・`activeFixSeriesStatuses`から
+`resolveReleasePrepState`（`src/lib/release-prep-state.ts`）で`idle`/`running`/`failed`を決め、
+**押せる状態のときだけ**`release-preparing`（「リリース準備中」＋自動実行の案内）・
+`preparation-failed`（帯の「再開」へ誘導。待機とは案内しない）を重ねる。
+
+- **完全には無効にしない。** 見た目は灰色だが押せ、確認ダイアログのチェック後に起動できる（判定が外れても
+  人が抜けられる。本番デプロイ失敗時の「修正リリース」と同じ作り）。個別ボタン・スマホのリリースシート・
+  一括リリース（確認ダイアログの行ごとに準備状況を取り、準備中・失敗の行を含むときだけチェックを要求）で共通
+- `running`は`ReleaseFixSeries`が`fix_merged`・`rebuilding`のとき。`fix-series` APIはリリースPR番号で引くため、
+  元PRが閉じられた区間では使えず、リポジトリ単位で引く
+- **本番マージ直後〜CI開始前の純粋な待機は記録が無く、`idle`になる。** 推測で「実行中」とは出さない（#4526）
+
 **作り直しの前提になる「自動修復のPRをdevelopへ入れる」は自動では進まない**（#2230）。
 `reusable-claude-review-develop.yml`の`identify-issue`は対応Issue番号をブランチ名
 `issue-<番号>`からしか特定せず、自動修復が作る`pr-repair/<対象PR番号>-<run_id>`では番号が

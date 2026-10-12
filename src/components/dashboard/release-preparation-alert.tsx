@@ -1,14 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useState } from "react";
 import { ExternalLink, Loader2, RotateCcw, TriangleAlert } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { useReleasePreparation, type ReleasePreparation } from "@/hooks/use-release-preparation";
 import { formatMonthDayTime } from "@/lib/format-date-time";
-import type { ReleasePreparationFailureView } from "@/lib/release-preparation";
 import { cn } from "@/lib/utils";
-
-type FailureWithAction = ReleasePreparationFailureView & { nextAction: string };
 
 /**
  * リリース準備（バンプPR・リリースPRの作成）が失敗したときの帯（#4335）。
@@ -24,34 +22,21 @@ export function ReleasePreparationAlert({
   repositoryFullName,
   onResumed,
   className,
+  preparation,
 }: {
   repositoryFullName: string;
+  /** 取得を呼び出し側と共有するとき（#4421） */
+  preparation?: ReleasePreparation;
   onResumed?: () => void;
   className?: string;
 }) {
   const [owner, repo] = repositoryFullName.split("/");
-  const [failure, setFailure] = useState<FailureWithAction | null>(null);
+  // 呼び出し側が同じ取得を持っているとき（ブランチ画面。ボタンの無効化と共有する）は二重に取らない
+  const own = useReleasePreparation(repositoryFullName, !preparation);
+  const { failure, reload: load } = preparation ?? own;
   const [resuming, setResuming] = useState(false);
   const [resumed, setResumed] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
-
-  const load = useCallback(async () => {
-    try {
-      const res = await fetch(`/api/repositories/release/preparation?owner=${encodeURIComponent(owner)}&repo=${encodeURIComponent(repo)}`);
-      if (!res.ok) return;
-      const data = await res.json().catch(() => null);
-      setFailure(data?.failure ?? null);
-    } catch {
-      // 取れなければ出さない（帯は補助で、取得失敗を失敗の表示と取り違えない）
-    }
-  }, [owner, repo]);
-
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- 取得結果の反映（同期的なsetStateではない）
-    void load();
-    const timer = setInterval(() => void load(), 60_000);
-    return () => clearInterval(timer);
-  }, [load]);
 
   if (!failure) return null;
 

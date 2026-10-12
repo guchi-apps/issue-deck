@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Rocket } from "lucide-react";
 
 import {
@@ -14,6 +14,9 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import { useReleasePreparation } from "@/hooks/use-release-preparation";
+import { PREP_OVERRIDE_CONFIRM_TEXT, type ReleasePrepState } from "@/lib/release-prep-state";
 import { requestReleaseBulk } from "@/lib/release-request";
 
 export type ReleaseBulkTarget = {
@@ -58,6 +61,11 @@ export function ReleaseBulkButton({
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [isTriggering, setIsTriggering] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // 準備中・準備失敗のリポジトリが含まれるときは、確認のうえ起動できる（#4421。個別ボタンと同じ挙動）
+  const [prepStates, setPrepStates] = useState<Record<string, ReleasePrepState>>({});
+  const [allowPrepOverride, setAllowPrepOverride] = useState(false);
+  const prepStateList = Object.values(prepStates);
+  const hasPrepBlocked = prepStateList.some((state) => state !== "idle");
 
   // 対象が無ければボタンごと出さない（#2770）。単一ボタンの「押せないときも消さない」
   // （#2711）とは異なり、こちらは0件のとき押す意味のある操作が1つも無いため。
@@ -98,7 +106,10 @@ export function ReleaseBulkButton({
       </Button>
       {error && <span className="text-xs text-destructive">{error}</span>}
 
-      <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+      <AlertDialog open={confirmOpen} onOpenChange={(open) => {
+        setConfirmOpen(open);
+        if (!open) setAllowPrepOverride(false);
+      }}>
         <AlertDialogContent className="flex flex-col gap-4 overflow-hidden">
           <AlertDialogHeader>
             <AlertDialogTitle>
@@ -122,23 +133,35 @@ export function ReleaseBulkButton({
           )}
           <div className="flex flex-col gap-1 rounded-md border p-2 text-xs">
             {targets.map((target) => (
-              <div
+              <BulkTargetRow
                 key={target.repositoryFullName}
-                className="flex items-center justify-between gap-2"
-              >
-                <span className="truncate">{target.repositoryFullName}</span>
-                <span className="shrink-0 text-muted-foreground tabular-nums">
-                  {target.unreleasedLabel}
-                </span>
-              </div>
+                target={target}
+                enabled={confirmOpen}
+                onPrepState={(state) =>
+                  setPrepStates((prev) => (prev[target.repositoryFullName] === state ? prev : { ...prev, [target.repositoryFullName]: state }))
+                }
+              />
             ))}
           </div>
+          {hasPrepBlocked && (
+            <label className="flex items-start gap-2 rounded-md border border-amber-500/40 p-3 text-sm">
+              <Checkbox
+                checked={allowPrepOverride}
+                onCheckedChange={(checked) => setAllowPrepOverride(checked === true)}
+                disabled={isTriggering}
+              />
+              <span>
+                {prepStateList.includes("failed") ? PREP_OVERRIDE_CONFIRM_TEXT.failed : PREP_OVERRIDE_CONFIRM_TEXT.running}
+                （「準備中」「準備失敗」と表示したリポジトリを含みます）
+              </span>
+            </label>
+          )}
           {error && <p className="text-xs text-destructive">{error}</p>}
           </div>
           <AlertDialogFooter>
             <AlertDialogCancel disabled={isTriggering}>キャンセル</AlertDialogCancel>
             <AlertDialogAction
-              disabled={isTriggering}
+              disabled={isTriggering || (hasPrepBlocked && !allowPrepOverride)}
               onClick={(event) => {
                 // 起動の結果を待たずに閉じないよう既定の閉じる動作を止める（#1548と同じ理由）。
                 event.preventDefault();
@@ -151,5 +174,34 @@ export function ReleaseBulkButton({
         </AlertDialogContent>
       </AlertDialog>
     </>
+  );
+}
+
+/** 確認ダイアログの1行。開いている間だけ準備の状態を取り、準備中・失敗を行に添えて親へ知らせる（#4421） */
+function BulkTargetRow({
+  target,
+  enabled,
+  onPrepState,
+}: {
+  target: ReleaseBulkTarget;
+  enabled: boolean;
+  onPrepState: (state: ReleasePrepState) => void;
+}) {
+  const { prepState } = useReleasePreparation(target.repositoryFullName, enabled);
+  useEffect(() => {
+    onPrepState(prepState);
+    // onPrepStateは親が毎回作り直すため依存に含めない（値が変わったときだけ知らせる）
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [prepState]);
+  return (
+    <div className="flex items-center justify-between gap-2">
+      <span className="truncate">{target.repositoryFullName}</span>
+      <span className="flex shrink-0 items-center gap-2 text-muted-foreground tabular-nums">
+        {prepState !== "idle" && (
+          <span className="rounded bg-muted px-1.5 text-[11px]">{prepState === "running" ? "準備中" : "準備失敗"}</span>
+        )}
+        {target.unreleasedLabel}
+      </span>
+    </div>
   );
 }

@@ -23,6 +23,7 @@ import {
   type GithubApiPullRequest,
 } from "@/lib/github/release-api";
 import { releaseWorkflowExists } from "@/lib/github/release-workflow-cache";
+import { RELEASE_PREP_RUNNING_SERIES_STATUSES } from "@/lib/release-prep-state";
 import { isUniqueConstraintError } from "@/lib/prisma-error";
 import { decideInternalHold } from "@/lib/release-fix-internal";
 import { evaluateInternalGateForSweep, loadInternalViewForUi, type InternalStatusView } from "@/lib/release-fix-internal-run";
@@ -147,6 +148,19 @@ export function toReleaseFixSeriesView(row: ReleaseFixSeries): ReleaseFixSeriesV
 }
 
 /** このリリースPRに関係する系列（起点がこのPR、または作り直しの後継がこのPR）を新しい順に返す */
+/**
+ * リポジトリ単位で、リリースへの反映準備が進行中の修正系列の状態を返す（#4421）。
+ * 作り直しの間は元のリリースPRが閉じられており、PR番号では引けないため。
+ */
+export async function listReleasePrepRunningSeriesStatuses(repositoryFullName: string): Promise<string[]> {
+  const rows = await db.releaseFixSeries.findMany({
+    where: { repositoryFullName, status: { in: [...RELEASE_PREP_RUNNING_SERIES_STATUSES] } },
+    select: { status: true },
+    take: 30,
+  });
+  return rows.map((row) => row.status);
+}
+
 export async function listReleaseFixSeries(
   repositoryFullName: string,
   releasePrNumber: number,
@@ -712,7 +726,7 @@ async function sweepSuccessor(row: ReleaseFixSeries, hostName: string | null): P
       return 1;
     }
     if (row.rebuildClaimedAt && Date.now() - row.rebuildClaimedAt.getTime() > REBUILD_TIMEOUT_MS) {
-      return stopRows(access, [row.id], "stopped", "作り直しを起動しましたが、後継の候補が作られませんでした。リリースworkflowの実行を確認してください");
+      return stopRows(access, [row.id], "stopped", "作り直しを起動しましたが、修正を取り込んだリリースが作られませんでした。リリースworkflowの実行を確認してください");
     }
     return 0;
   }
@@ -732,15 +746,15 @@ async function sweepSuccessor(row: ReleaseFixSeries, hostName: string | null): P
       [row.id],
       "superseded",
       successor.merged
-        ? "後継の候補はすでに本番へマージされました"
-        : "後継の候補が取り消された、または別の候補へ置き換えられました。この系列の追跡を終了します",
+        ? "修正を取り込んだリリースはすでに本番へマージされました"
+        : "修正を取り込んだリリースが取り消された、または別の候補へ置き換えられました。この系列の追跡を終了します",
     );
   }
   if (!successor.base) return 0;
   const current = { baseSha: successor.base.sha, headSha: successor.head.sha };
   // 利用者が候補をさらに作り直した場合は、そのSHAへ追従せず系列を終える（旧SHAの結果を流用しない）
   if (current.headSha !== row.successorHeadSha) {
-    return stopRows(access, [row.id], "superseded", "後継の候補が更新されたため、この系列の追跡を終了します。新しい候補は検証をやり直しています");
+    return stopRows(access, [row.id], "superseded", "修正を取り込んだリリースが更新されたため、この系列の追跡を終了します。新しい候補は検証をやり直しています");
   }
   const summary = await loadReleaseVerificationSummary(row.repositoryFullName, row.successorPrNumber, current);
   const read = (state: string): "passed" | "failed" | "needs_check" | "pending" | "not_applicable" => {

@@ -10,6 +10,10 @@ import type { PullRequestSummary } from "@/types/pull-request";
 
 // リリース準備の失敗の帯（#4335）は自分で取得するため、fetchの回数を数えるテストから外す
 vi.mock("@/components/dashboard/release-preparation-alert", () => ({ ReleasePreparationAlert: () => null }));
+// 準備状況の取得（#4421）もfetchの回数を数えるテストから外す
+vi.mock("@/hooks/use-release-preparation", () => ({
+  useReleasePreparation: () => ({ failure: null, prepState: "idle", reload: async () => {} }),
+}));
 // 作り直しの履歴（#4359）も自分で取得するため同様に外す
 vi.mock("@/components/dashboard/release-rebuild-history-panel", () => ({ ReleaseRebuildHistoryPanel: () => null }));
 

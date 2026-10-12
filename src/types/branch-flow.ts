@@ -510,13 +510,17 @@ export type BranchFlowRelease = {
  * - `release-in-progress`: openなリリースPR・バンプPRがある（起こし直すと二重に走る）
  * - `nothing-to-release`: developの中身がmainに入りきっている（#2316・#2678・#2704）
  * - `deploy-failed`: 直近の本番デプロイが失敗している（#3897）
+ * - `release-preparing`: 修正を取り込んだリリースの準備が自動で進行中（#4421。PRはまだ無い）
+ * - `preparation-failed`: リリース準備が失敗している（#4421。再開は帯から）
  */
 export type ReleaseBlockedReason =
   | "branches-unloaded"
   | "no-workflow"
   | "release-in-progress"
   | "nothing-to-release"
-  | "deploy-failed";
+  | "deploy-failed"
+  | "release-preparing"
+  | "preparation-failed";
 
 /**
  * Xcodeで実機へ反映するリポジトリ（#3468。`lib/device-build-repos.ts`）の表示材料。
