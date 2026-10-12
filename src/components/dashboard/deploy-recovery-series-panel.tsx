@@ -14,7 +14,11 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
-import { DEPLOY_RECOVERY_MAX_REPAIR_ROUNDS } from "@/lib/deploy-recovery-series";
+import {
+  DEPLOY_RECOVERY_MAX_REPAIR_ROUNDS,
+  DEPLOY_RECOVERY_MAX_RELEASE_ATTEMPTS,
+  DEPLOY_RECOVERY_STAGES,
+} from "@/lib/deploy-recovery-series";
 import type { DeployRecoverySeriesView } from "@/lib/deploy-recovery-series-run";
 import { cn } from "@/lib/utils";
 
@@ -30,9 +34,9 @@ type Props = {
 /**
  * デプロイ失敗の帯の主要操作「AIに修正を依頼」と、その復旧系列の状態（#3998）。
  *
- * 開始は1回だけで、以後の工程（修正Issue・実装・修正PRの修復）ごとの再承認は求めない。
- * 押す前に**どこまで自動で進めるか**をダイアログで示す。第1段は修正PRがdevelopへ入るまでで、
- * 本番（main）へは出さない。
+ * 開始は1回だけで、以後の工程（修正Issue・実装・修正PRの修復・復旧PR・本番反映・稼働確認）ごとの
+ * 再承認は求めない（#4451）。押す前に**どこまで自動で進めるか**をダイアログで示す。mainへ出すのは
+ * 開始者が選んだ系列だけで、外すとdevelopへ入った時点で止めて知らせる。
  */
 export function DeployRecoverySeriesPanel({ repositoryFullName, runId, block = false }: Props) {
   const [owner, repo] = repositoryFullName.split("/");
@@ -115,6 +119,7 @@ export function DeployRecoverySeriesPanel({ repositoryFullName, runId, block = f
   }
 
   const github = `https://github.com/${repositoryFullName}`;
+  const needsAction = shown ? isStopped(shown) : false;
   const canStart = runId !== null && !shown?.active && shown?.failedRunId !== runId;
 
   return (
@@ -134,13 +139,11 @@ export function DeployRecoverySeriesPanel({ repositoryFullName, runId, block = f
       {shown && (
         <div className="flex flex-col gap-1 rounded-md border bg-background/70 p-2 text-xs">
           <p className="flex flex-wrap items-center gap-x-2 gap-y-1">
-            <span className="font-semibold">AIによる修正:</span>
+            <span className="font-semibold">リリース完了まで進める:</span>
             <span
               className={cn(
                 "rounded-full border px-2 py-0.5",
-                shown.status === "needs_attention" || shown.status === "awaiting_release"
-                  ? "border-destructive text-destructive"
-                  : "text-foreground",
+                needsAction ? "border-destructive text-destructive" : shown.status === "recovered" ? "border-emerald-600 text-emerald-700" : "text-foreground",
               )}
             >
               {shown.statusLabel}
@@ -160,11 +163,37 @@ export function DeployRecoverySeriesPanel({ repositoryFullName, runId, block = f
               </button>
             )}
           </p>
+          <ol className="grid grid-cols-3 gap-1 sm:grid-cols-6" aria-label="復旧の進行状況">
+            {DEPLOY_RECOVERY_STAGES.map((label, index) => (
+              <li
+                key={label}
+                aria-current={index === shown.stageIndex ? "step" : undefined}
+                className={cn(
+                  "rounded-sm border-t-2 px-1.5 py-1 text-[11px] leading-tight",
+                  shown.stageIndex > index || shown.status === "recovered"
+                    ? "border-emerald-600"
+                    : index === shown.stageIndex
+                      ? needsAction
+                        ? "border-destructive bg-destructive/10 font-semibold"
+                        : "border-primary bg-primary/10 font-semibold"
+                      : "border-border text-muted-foreground",
+                )}
+              >
+                {label}
+              </li>
+            ))}
+          </ol>
+          <p className="leading-relaxed text-muted-foreground">{progressNote(shown)}</p>
           {shown.stopMessage && <p className="leading-relaxed">{shown.stopMessage}</p>}
           {shown.status === "awaiting_release" && (
             <p className="leading-relaxed">
               修正はdevelopへ入りました。<span className="font-medium">本番へはまだ出ていません。</span>
-              「既存の修正PRを選んで復旧」かリリースで反映してください。
+              「既存の修正PRを選んで復旧」で作った復旧PRをマージすると、このまま稼働確認まで追跡します。
+            </p>
+          )}
+          {shown.releaseAttempts > 0 && (
+            <p className="text-muted-foreground">
+              本番反映の失敗から調べ直した回数: {shown.releaseAttempts}/{DEPLOY_RECOVERY_MAX_RELEASE_ATTEMPTS - 1}回
             </p>
           )}
           <p className="flex flex-wrap gap-x-3 gap-y-1">
@@ -189,13 +218,13 @@ export function DeployRecoverySeriesPanel({ repositoryFullName, runId, block = f
       <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>AIに修正を依頼しますか</AlertDialogTitle>
+            <AlertDialogTitle>リリース完了まで進めますか</AlertDialogTitle>
             <AlertDialogDescription asChild>
               <div className="flex flex-col gap-2 text-sm">
                 <p>この失敗に限って、次の工程を確認なしで自動で進めます。</p>
                 <ol className="list-decimal pl-5">
-                  <li>原因を調べ、区分（コード・設定・DB・外部障害）を判定する</li>
-                  <li>コードの問題なら修正Issueと修正PRを作る</li>
+                  <li>原因を調べ、区分（コード・修正済み・設定・DB・外部障害）を判定する</li>
+                  <li>コードの問題なら修正PRを作る（すでにdevelopで修正済みなら、新しいPRは作らない）</li>
                   <li>CI・レビューで指摘があれば最大{DEPLOY_RECOVERY_MAX_REPAIR_ROUNDS}回まで直す</li>
                   <li>developへマージされる（修正PRの自動マージ）</li>
                   {throughMain && (
@@ -204,6 +233,7 @@ export function DeployRecoverySeriesPanel({ repositoryFullName, runId, block = f
                       （mainが進んだ・差分が修正の範囲を超えた・PRが変更されたときはマージせず止めます）
                     </li>
                   )}
+                  {throughMain && <li>デプロイの成功と、稼働中の版が対象のコミットと一致することを確かめて完了にする。失敗したときは同じ系列で原因を調べ直す（最大{DEPLOY_RECOVERY_MAX_RELEASE_ATTEMPTS - 1}回）</li>}
                 </ol>
                 <label className="flex items-start gap-2">
                   <input
@@ -216,7 +246,8 @@ export function DeployRecoverySeriesPanel({ repositoryFullName, runId, block = f
                 </label>
                 <p>
                   許可はこの失敗の復旧系列だけに有効で、通常のリリースには及びません。コード以外の原因・上限・24時間の期限に
-                  達したときは止めて知らせます。途中でいつでも停止できます。再デプロイの稼働版の確認は、いまは自動で行いません。
+                  達したとき、同じ失敗が続いたときは止めて知らせます。途中でいつでも停止できます。稼働中の版を確かめられない間は、
+                  完了にしません。
                 </p>
               </div>
             </AlertDialogDescription>
@@ -238,6 +269,27 @@ export function DeployRecoverySeriesPanel({ repositoryFullName, runId, block = f
       </AlertDialog>
     </div>
   );
+}
+
+function isStopped(series: DeployRecoverySeriesView): boolean {
+  return series.status === "needs_attention" || series.status === "awaiting_release" || series.status === "stopped";
+}
+
+/** 原因・残り・操作が要るかを1文で。詳しい経緯はIssue・PRで追える。 */
+function progressNote(series: DeployRecoverySeriesView): string {
+  const cause = series.cause === "already_fixed" ? "原因: developで修正済み（新しい修正は不要）。" : series.cause === "code" ? "原因: コードの不具合。" : "";
+  switch (series.status) {
+    case "needs_attention":
+      return `${cause}操作が必要です。下の理由を確かめてください。`;
+    case "awaiting_release":
+      return `${cause}操作が必要です。復旧PRをマージしてください。`;
+    case "stopped":
+      return "停止しました。新しい操作は行いません。";
+    case "recovered":
+      return `${cause}完了しました。稼働中の版が対象と一致しています。`;
+    default:
+      return `${cause}操作は不要です。自動で進みます。`;
+  }
 }
 
 /** 直近の系列を読む。取得に失敗したときはundefined（表示を変えない） */

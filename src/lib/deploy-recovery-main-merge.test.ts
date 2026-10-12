@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  decideManualRecoveryRelease,
   decideRecoveryMainMerge,
   parseDeployRecoveryScope,
   type RecoveryMergeObservation,
@@ -94,5 +95,63 @@ describe("decideRecoveryMainMerge", () => {
   it("範囲の文字列は定義済みのものだけを受け付ける", () => {
     expect(parseDeployRecoveryScope("fix_until_main")).toBe("fix_until_main");
     expect(parseDeployRecoveryScope("all")).toBeNull();
+  });
+});
+
+describe("decideManualRecoveryRelease（#4451）", () => {
+  const linked = {
+    status: "awaiting_release",
+    expiresAt: new Date(now.getTime() + 3600_000),
+    stoppedAt: null,
+    recoveryPullRequestNumber: 9,
+    recoveryHeadSha: "head1",
+    recoveryFiles: ["src/a.ts", "package.json"],
+  };
+  const merged = {
+    number: 9,
+    state: "closed" as const,
+    merged: true,
+    baseRef: "main",
+    headSha: "head1",
+    mergeCommitSha: "merge1",
+  };
+  const obs = (over: Partial<Parameters<typeof decideManualRecoveryRelease>[1]> = {}) => ({
+    now,
+    pullRequest: merged,
+    files: { names: ["src/a.ts"], truncated: false },
+    ...over,
+  });
+
+  it("記録した復旧PRが記録どおりにマージされたときだけ、そのマージSHAで反映の追跡へ進む", () => {
+    expect(decideManualRecoveryRelease(linked, obs())).toEqual({ action: "release", mergeSha: "merge1" });
+  });
+
+  it("未マージの間は待ち、閉じられたら紐付けを外す", () => {
+    expect(decideManualRecoveryRelease(linked, obs({ pullRequest: { ...merged, merged: false, state: "open" } }))).toMatchObject({ action: "wait" });
+    expect(decideManualRecoveryRelease(linked, obs({ pullRequest: { ...merged, merged: false } }))).toMatchObject({
+      action: "unlink",
+      reason: "recovery_pull_request_closed",
+    });
+  });
+
+  it("別のPR・main以外・HEADの変化・範囲外の差分は承認範囲外としてつながない", () => {
+    expect(decideManualRecoveryRelease(linked, obs({ pullRequest: { ...merged, number: 10 } }))).toMatchObject({ action: "unlink" });
+    expect(decideManualRecoveryRelease(linked, obs({ pullRequest: { ...merged, baseRef: "develop" } }))).toMatchObject({ action: "unlink" });
+    expect(decideManualRecoveryRelease(linked, obs({ pullRequest: { ...merged, headSha: "other" } }))).toMatchObject({
+      action: "unlink",
+      reason: "head_changed",
+    });
+    expect(decideManualRecoveryRelease(linked, obs({ files: { names: ["src/evil.ts"], truncated: false } }))).toMatchObject({
+      action: "unlink",
+      reason: "diff_out_of_scope",
+    });
+  });
+
+  it("観測できないものは待ち、停止・期限切れは紐付けを外す", () => {
+    expect(decideManualRecoveryRelease(linked, obs({ pullRequest: null }))).toMatchObject({ action: "wait" });
+    expect(decideManualRecoveryRelease(linked, obs({ files: null }))).toMatchObject({ action: "wait" });
+    expect(decideManualRecoveryRelease(linked, obs({ pullRequest: { ...merged, mergeCommitSha: null } }))).toMatchObject({ action: "wait" });
+    expect(decideManualRecoveryRelease({ ...linked, stoppedAt: now }, obs())).toMatchObject({ action: "unlink", reason: "stopped_by_user" });
+    expect(decideManualRecoveryRelease({ ...linked, expiresAt: now }, obs())).toMatchObject({ action: "unlink", reason: "timed_out" });
   });
 });

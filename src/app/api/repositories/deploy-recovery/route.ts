@@ -12,6 +12,7 @@ import {
 import { getInstallationToken } from "@/lib/github/app-auth";
 import { fetchLatestDeployWorkflowRun } from "@/lib/github/release-api";
 import { previewModeGuard } from "@/lib/preview-mode";
+import { linkManualRecoveryPullRequest } from "@/lib/deploy-recovery-series-run";
 
 async function findRepository(userId: string, owner: string, repo: string) {
   return db.repository.findFirst({
@@ -78,6 +79,13 @@ export async function POST(request: NextRequest) {
       token,
       selected,
     );
+    // 復旧の系列があれば、この復旧PRを紐付ける（マージされたら本番反映の追跡へ進む）。失敗しても復旧PRは作れている。
+    await linkManualRecoveryPullRequest({
+      repositoryFullName: `${repositoryRef.owner}/${repositoryRef.repo}`,
+      selectedNumbers: selected,
+      recoveryPullRequestUrl: result.url,
+      token,
+    }).catch((error: unknown) => console.error("[POST /api/repositories/deploy-recovery] 系列への紐付けに失敗しました", error));
     return NextResponse.json(result);
   } catch (error) {
     if (error instanceof RangeError && error.message === "candidate_changed") {
