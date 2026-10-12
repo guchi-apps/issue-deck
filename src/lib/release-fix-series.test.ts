@@ -8,6 +8,8 @@ import {
   classifyIntegrationFailure,
   decideReleaseFix,
   decideReverification,
+  decideReverificationFollowUp,
+  isLegacyReverificationStopReason,
   releaseFixStepIndex,
   RELEASE_FIX_MAX_GENERATION,
   type ReleaseFixSeriesSnapshot,
@@ -259,5 +261,42 @@ describe("修正Issue本文の内部確認の手順", () => {
   });
   it("指定しなければ従来の本文のまま", () => {
     expect(buildReleaseFixIssue(input, "k").body).not.toContain("## 内部確認");
+  });
+});
+
+describe("decideReverificationFollowUp（#4478）", () => {
+  const sec = (state: string, over: Partial<{ reason: string | null; summary: string | null; findingCount: number }> = {}) => ({
+    state,
+    reason: null,
+    summary: null,
+    findingCount: 0,
+    ...over,
+  });
+  it("全体レビューの指摘は全件を次世代へ戻す", () => {
+    expect(decideReverificationFollowUp({ integration: sec("passed"), aiReview: sec("needs_check", { findingCount: 2 }) })).toEqual({
+      action: "continue",
+      sourceKind: "review_finding",
+    });
+  });
+  it("コード由来の統合検証失敗は継続する", () => {
+    expect(decideReverificationFollowUp({ integration: sec("failed", { reason: "テストが failed" }), aiReview: sec("passed") })).toEqual({
+      action: "continue",
+      sourceKind: "integration_failure",
+    });
+  });
+  it("実行障害は起案せず待つ", () => {
+    expect(decideReverificationFollowUp({ integration: sec("passed"), aiReview: sec("failed") }).action).toBe("wait_rerun");
+  });
+  it("判別できない失敗・指摘が読めない確認要求は本人へ", () => {
+    expect(decideReverificationFollowUp({ integration: sec("failed"), aiReview: sec("passed") }).action).toBe("human");
+    expect(decideReverificationFollowUp({ integration: sec("passed"), aiReview: sec("needs_check") }).action).toBe("human");
+  });
+});
+
+describe("isLegacyReverificationStopReason", () => {
+  it("旧い停止理由だけを判別する", () => {
+    expect(isLegacyReverificationStopReason("後継候補 #11 の再検証で指摘・失敗が残りました（世代 2）。後継候補から")).toBe(true);
+    expect(isLegacyReverificationStopReason("修正の反復が上限に達しました")).toBe(false);
+    expect(isLegacyReverificationStopReason(null)).toBe(false);
   });
 });
