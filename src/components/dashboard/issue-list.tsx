@@ -149,6 +149,8 @@ type IssueListProps = {
   style?: CSSProperties;
   showSearch?: boolean;
   showHeader?: boolean;
+  /** ヘッダー直下へ差し込む枠。PCで選択中のラベル条件を出して解除させるのに使う（#4543） */
+  headerExtra?: ReactNode;
   /** 画面右下に浮くFAB（新規Issue作成ボタン）と最後の項目が重ならないよう下部に余白を確保する */
   fabSpacing?: boolean;
   /** スマホのボトムナビ（フッター）と最後の項目が重ならないよう、フッターと同じ高さの空白を末尾に追加する（#677） */
@@ -476,6 +478,7 @@ export function IssueList({
   style,
   showSearch = true,
   showHeader = true,
+  headerExtra,
   fabSpacing = false,
   footerSpacing = false,
   scrollKey = null,
@@ -1478,6 +1481,8 @@ export function IssueList({
           <Star className="size-4 shrink-0 text-muted-foreground" />
         </div>
       )}
+
+      {headerExtra}
 
       {/* 一覧から予約実行へまとめて積む入口（#3284）。手作業アシスタントの入口と同じく、ヘッダーではなく
           一覧の上に置くことで、ヘッダーを出さないスマホにも同じ位置で出る */}

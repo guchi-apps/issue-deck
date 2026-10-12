@@ -149,7 +149,6 @@ import { isPullRequestWaitingStatus } from "@/lib/issue-pull-request-progress";
 import type { NotificationTarget } from "@/lib/notifications";
 import {
   applyIssueFilters,
-  computeFilterLabelSummary,
   computeLabelSummary,
   computeNavCountsForFilters,
   detectNewlyCheckUserIssues,
@@ -164,7 +163,9 @@ import {
 } from "@/lib/issue-stats";
 import { resolveBottomNavTab } from "@/lib/mobile-nav-tab";
 import { extractSearchTokens, parseSearchQuery } from "@/lib/search-query";
-import { getNavViewLabel } from "@/lib/nav-views";
+import { getPullRequestView } from "@/lib/pull-request-views";
+import { getNavViewPcLabel, navViewIgnoresIssueFilters } from "@/lib/nav-views";
+import { ActiveLabelChips } from "@/components/dashboard/active-label-chips";
 import {
   computeIssuePrerequisiteReadiness,
   computeManualStepAttention,
@@ -1268,11 +1269,6 @@ export function IssueDeckShell({
   // スマホの絞り込みシートに出すラベルの選択肢。スマホはPC側の絞り込み（filters）とは別の
   // クエリ（mview/mlabels等）で動くため、絞り込み前の全Issueから求める。
   const labelSummary = useMemo(() => computeLabelSummary(issues), [issues]);
-  // 左メニュー「ラベル」に出す一覧と件数（#1441）。TopBarの絞り込みに追随させる。
-  const sidebarLabelSummary = useMemo(
-    () => computeFilterLabelSummary(issues, filtersWithAiSearch, labelSummary),
-    [issues, filtersWithAiSearch, labelSummary],
-  );
   const assigneeOptions = useMemo(() => getAssigneeOptions(issues), [issues]);
 
   // PC版Issue一覧のスクロール位置を保存・復元する単位（#773）。絞り込み条件が変われば
@@ -2467,7 +2463,10 @@ export function IssueDeckShell({
                 onSelectIosExtensions={selectIosExtensionsPane}
                 nightlyRunQueuedCount={nightlyRunQueuedCount}
                   ideasCount={ideasCount}
-                onLaunchNewApp={() => setNewAppDialogOpen(true)}
+                repoFilterApplies={
+                  filters.pane === "pull-requests" ||
+                  (filters.pane === "issues" && !navViewIgnoresIssueFilters(filters.view))
+                }
                 navCounts={navCounts}
                 checkUserPullRequestCount={checkUserPullRequestCount}
                 manualStepAttention={manualStepAttention}
@@ -2482,10 +2481,6 @@ export function IssueDeckShell({
                 onHideRepository={(repo) => handleSetRepositoryHidden(repo, true)}
                 onShowRepository={(repo) => handleSetRepositoryHidden(repo, false)}
                 onSetRepositoryFavorite={handleSetRepositoryFavorite}
-                labelSummary={sidebarLabelSummary}
-                selectedLabels={filters.labels}
-                onSelectLabel={(label) => toggleLabel(label.name)}
-                onClearLabels={() => setFilter("labels", [])}
                 className="hidden shrink-0 border-r md:flex"
                 style={{ width: sidebarWidth.width, maxWidth: "50vw" }}
               />
@@ -2509,7 +2504,7 @@ export function IssueDeckShell({
             </div>
           ) : filters.pane === "ideas" ? (
             <div className="hidden flex-1 overflow-y-auto p-4 md:block">
-              <div className="mx-auto max-w-5xl"><IdeasPanel onChanged={refreshIdeasCount} /></div>
+              <div className="mx-auto max-w-5xl"><IdeasPanel onChanged={refreshIdeasCount} onLaunchNewApp={() => setNewAppDialogOpen(true)} /></div>
             </div>
           ) : filters.pane === "usage" ? (
             /* PC: AI使用量（#2504）。「確認環境」と同じく中央〜右を1カラムで使う */
@@ -2616,6 +2611,7 @@ export function IssueDeckShell({
             <>
               <PullRequestList
                 view={filters.prview}
+                heading={getPullRequestView(filters.prview).pcLabel}
                 pullRequests={filteredPullRequests}
                 failedRepositories={openPullRequests.failedRepositories}
                 fetchedAt={openPullRequests.fetchedAt}
@@ -2655,7 +2651,16 @@ export function IssueDeckShell({
             <>
               {/* PC: 中央カラム（Issue一覧）。幅は手動で調整できる（#381） */}
               <IssueList
-                title={getNavViewLabel(filters.view)}
+                title={getNavViewPcLabel(filters.view)}
+                headerExtra={
+                  navViewIgnoresIssueFilters(filters.view) ? null : (
+                    <ActiveLabelChips
+                      labels={filters.labels}
+                      onRemove={toggleLabel}
+                      onClear={() => setFilter("labels", [])}
+                    />
+                  )
+                }
                 issues={filteredIssues}
                 selectedIssueId={selectedIssue?.id ?? null}
                 // Issueを開く操作も履歴に積み、戻る操作で1つ前のIssue・画面へ戻れるように

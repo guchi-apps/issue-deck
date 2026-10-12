@@ -6,6 +6,7 @@ import {
   Archive,
   CalendarClock,
   CircleSlash,
+  ChevronDown,
   Eye,
   EyeOff,
   FolderGit2,
@@ -19,7 +20,6 @@ import {
   Lock,
   MonitorPlay,
   Plus,
-  Rocket,
   Settings2,
   Star,
   X,
@@ -30,7 +30,6 @@ import { NavCount, type NavCountEmphasis } from "@/components/dashboard/nav-coun
 import { useNotificationState } from "@/components/dashboard/notification-state";
 import type { DashboardPane } from "@/hooks/use-issue-filters";
 import { getGithubAppInstallUrl } from "@/lib/github/install-url";
-import { getLabelDotStyle } from "@/lib/label-color";
 import type { ManualStepAttention } from "@/lib/manual-step-attention";
 import {
   describeMergePendingAttention,
@@ -39,22 +38,21 @@ import {
 } from "@/lib/merge-pending-attention";
 import { resolveQuestionNavSignals } from "@/lib/question-attention";
 import {
+  getNavViewPcLabel,
   navViewIcons,
   sidebarAttentionNavViews,
   sidebarCodeReviewNavViews,
-  sidebarIssueNavViews,
-  sidebarQuestionNavViews,
   PREVIEW_NAV_VISIBLE,
 } from "@/lib/nav-views";
 import type { PullRequestNavCounts } from "@/lib/pull-request-list";
-import { pullRequestViewIcons, sidebarPullRequestViews } from "@/lib/pull-request-views";
+import { getPullRequestView, pullRequestViewIcons } from "@/lib/pull-request-views";
 import { describeReleaseActivity, type ReleaseActivityCounts } from "@/lib/release-activity";
 import { getRepoColor } from "@/lib/repo-color";
 import {
   isRepositoryAutomationUnsupported,
   REPOSITORY_AUTOMATION_UNSUPPORTED_TITLE,
 } from "@/lib/repository-automation";
-import type { LabelSummary, NavViewId } from "@/types/issue";
+import type { NavViewId } from "@/types/issue";
 import type { PullRequestViewId } from "@/types/pull-request";
 import type { ConnectedRepository } from "@/types/repository";
 import { Separator } from "@/components/ui/separator";
@@ -95,10 +93,10 @@ type SidebarNavProps = {
   /** 構想の件数（#3639）。取得できていないときはnullで、何も出さない */
   ideasCount?: number | null;
   /**
-   * 新規アプリの立ち上げ（#2188）。**行は1つだけで、件数もバッジも持たない**——
-   * 使うのは年に数回で、状態を持たない入口のため。
+   * いま表示中の画面がリポジトリの絞り込みを適用するか（#4543）。質問・確認待ち・ブランチ等の
+   * 適用外の画面では、選択が残っていても効いていないことを注記する。
    */
-  onLaunchNewApp: () => void;
+  repoFilterApplies?: boolean;
   navCounts: Record<NavViewId, number>;
   /**
    * 「ユーザーの確認待ち」へ一緒に出す、ユーザーのマージ待ちPRの件数（#1613）。
@@ -142,10 +140,6 @@ type SidebarNavProps = {
   onHideRepository?: (repository: ConnectedRepository) => void;
   onShowRepository?: (repository: ConnectedRepository) => void;
   onSetRepositoryFavorite?: (repository: ConnectedRepository, favorite: boolean) => void;
-  labelSummary: LabelSummary[];
-  selectedLabels?: string[];
-  onSelectLabel?: (label: LabelSummary) => void;
-  onClearLabels?: () => void;
   className?: string;
   style?: CSSProperties;
 };
@@ -196,7 +190,7 @@ export function SidebarNavView({
   onSelectIosExtensions = () => {},
   nightlyRunQueuedCount = null,
   ideasCount = null,
-  onLaunchNewApp,
+  repoFilterApplies = true,
   navCounts,
   checkUserPullRequestCount,
   manualStepAttention,
@@ -213,16 +207,12 @@ export function SidebarNavView({
   onHideRepository,
   onShowRepository,
   onSetRepositoryFavorite,
-  labelSummary,
-  selectedLabels = [],
-  onSelectLabel,
-  onClearLabels,
   className,
   style,
 }: SidebarNavProps) {
   const [showHiddenRepos, setShowHiddenRepos] = useState(false);
   const [isEditingRepoVisibility, setIsEditingRepoVisibility] = useState(false);
-  const sortedLabelSummary = [...labelSummary].sort((a, b) => a.name.localeCompare(b.name));
+  const [isRepoFilterOpen, setIsRepoFilterOpen] = useState(false);
   const hiddenRepoCount = repositories.filter((repo) => repo.hidden).length;
   // 「すべて表示する（N）」のNは、いま実際に隠れている件数にする。選択中のリポジトリは
   // 非表示でも一覧に出すため、hiddenの総数のままだと押しても増えない件数を出してしまう。
@@ -246,6 +236,15 @@ export function SidebarNavView({
   const orderedRepositories = [...selectedRepositories, ...unselectedRepositories];
   const showSelectedRepoSeparator =
     selectedRepositories.length > 0 && unselectedRepositories.length > 0;
+
+  // 閉じている間も、何で絞っているかを読める1行（#4543）
+  const repoFilterSummary =
+    selectedRepoFullNames.length === 0
+      ? "すべてのリポジトリ"
+      : selectedRepoFullNames.length === 1
+        ? (repositories.find((repo) => repo.fullName === selectedRepoFullNames[0])?.name ??
+          selectedRepoFullNames[0])
+        : `${selectedRepoFullNames.length}件のリポジトリ`;
 
   // ユーザーの確認待ちには、対応Issueを持たないマージ待ちPR（develop→mainのリリースPRなど）も
   // 数に含める（#1613）。一覧側も同じ集合を先頭に出す。
@@ -305,277 +304,125 @@ export function SidebarNavView({
     );
   }
 
+  /** 状態別のIssueビューの行。表示名は「対象：状態」のPC用（#4543） */
+  function issueViewRow(id: NavViewId) {
+    return navRow({
+      key: id,
+      label: getNavViewPcLabel(id),
+      icon: navViewIcons[id],
+      active: activeView === id && activePane === "issues",
+      onClick: () => onSelectView(id),
+      count: navCounts[id],
+    });
+  }
+
+  /** PCの状態別PRビューの行。件数・強調・吹き出しは従来どおり */
+  function pullRequestRow(id: PullRequestViewId) {
+    const view = getPullRequestView(id);
+    return navRow({
+      key: `pr-${id}`,
+      label: view.pcLabel,
+      icon: pullRequestViewIcons[id],
+      active: activePane === "pull-requests" && activePullRequestView === id,
+      onClick: () => onSelectPullRequestView(id),
+      count: pullRequestNavCounts[id],
+      // 「マージ待ち」のうち人が手を動かすまで進まないものが残っているときだけオレンジの丸（#2334）
+      emphasis: isPullRequestViewAttention(id, mergePendingAttention) ? "attention" : "none",
+      title:
+        id === "completed"
+          ? describeMergePendingAttention(view.description, mergePendingAttention)
+          : view.description,
+    });
+  }
+
+  /** 質問・コードレビューの行。合図（丸・回るアイコン・吹き出し）は行ごとに決める（#2325） */
+  function questionSignalRow(id: NavViewId) {
+    const signals = resolveQuestionNavSignals(id, {
+      total: navCounts.question,
+      unconfirmed: unconfirmedQuestionCount,
+      waiting: waitingQuestionCount,
+    });
+    return navRow({
+      key: id,
+      label: getNavViewPcLabel(id),
+      icon: navViewIcons[id],
+      active: activeView === id && activePane === "issues",
+      onClick: () => onSelectView(id),
+      count: navCounts[id],
+      emphasis: signals.attention ? "attention" : "none",
+      busy: signals.busy,
+      title: signals.title,
+    });
+  }
+
   return (
-    <nav className={cn("flex flex-col gap-6 overflow-y-auto p-4", className)} style={style}>
-      {/* 人が動くまで進まないもの（#1613）。見出しを付けず最上段に固定し、上から順に
-          手を動かせば盤面が進む並びにする */}
+    <nav className={cn("flex flex-col gap-4 overflow-y-auto p-4", className)} style={style}>
+      {/* リポジトリで絞り込み（#4543）。4工程より上に置き、初期表示は閉じる。閉じていても
+          選択名・件数と解除を出し、効かない画面では全リポジトリ表示であることを示す */}
       <div className="flex flex-col gap-1">
-        <ul className="flex flex-col gap-0.5">
-          {sidebarAttentionNavViews.map((view) =>
-            navRow({
-              key: view.id,
-              label: view.label,
-              icon: navViewIcons[view.id],
-              active: activeView === view.id && activePane === "issues",
-              onClick: () => onSelectView(view.id),
-              // 手作業の件数は「いま実行できる数」（#1763。`computeNavCounts`で数え済み）。
-              // 内訳の吹き出しは付けない——数字がそのまま実行できる件数を指すため、
-              // 同じことを言い直すだけになる。前提待ちの件数は一覧のヘッダーで読む
-              count: view.id === "check-user" ? checkUserCount : navCounts[view.id],
-              // 確認待ちは残っている限り強調する（#742）。手作業はいま実行できるものが
-              // あるときだけで、前提待ちしか無い間は強調しない（#1613）。
-              emphasis:
-                (view.id === "check-user" ? checkUserCount > 0 : manualStepAttention.actionable > 0)
-                  ? "attention"
-                  : "none",
-            }),
-          )}
-        </ul>
-
-        <Separator className="my-1" />
-
-        <ul className="flex flex-col gap-0.5">
-          {sidebarQuestionNavViews.map((view) => {
-            // 合図（丸・回るアイコン・吹き出し）は行ごとに決める（#2325）。この枠には
-            // 「質問」と「コードレビュー」が並ぶだけで、質問の合図をまとめて渡すと
-            // 回答待ちのあいだ「コードレビュー」の行まで回る
-            const signals = resolveQuestionNavSignals(view.id, {
-              // 件数は一覧に並ぶ数（＝開いている質問の総数）に揃える（#2070）。#1910では
-              // 未確認（回答が届いていて未読）の数を出していたが、読み終えた質問しか
-              // 無いときに、質問が何件も開いたままでも`0`と出て「質問は無い」と読めていた
-              total: navCounts.question,
-              unconfirmed: unconfirmedQuestionCount,
-              waiting: waitingQuestionCount,
-            });
-            return navRow({
-              key: view.id,
-              label: view.label,
-              icon: navViewIcons[view.id],
-              active: activeView === view.id && activePane === "issues",
-              onClick: () => onSelectView(view.id),
-              count: navCounts[view.id],
-              // 「いま読める回答がある」という#1910の合図はオレンジの丸として残す
-              emphasis: signals.attention ? "attention" : "none",
-              // 回答を待っているあいだは回す（#2309）。**丸と併存する**——「返事待ちが
-              // ある」ことと「読める回答がある」ことは別で、片方だけを出すと他方を見落とす
-              busy: signals.busy,
-              // 数字（総数）と丸（未確認）で意味が違うため、行のラベル（「質問」）からは
-              // 何を数えているのか読めない。吹き出しで内訳を補う
-              title: signals.title,
-            });
-          })}
-          {navRow({
-            key: "flow",
-            label: "ブランチ",
-            icon: GitBranch,
-            active: activePane === "flow",
-            onClick: onSelectFlow,
-            // 数えるのは**リリース・デプロイが動いているプロジェクト（リポジトリ）の数**
-            // （#2167）。開いた先の画面がリポジトリ単位で並ぶので、そこと単位を揃える。
-            // **手作業（`71.manual-step`）は含めない**——上の「ユーザーの作業待ち」が
-            // 持つ別の項目で、両方に出すとどちらを押せば片付くのか分からなくなる
-            count: releaseActivity?.total ?? null,
-            // 人が操作するまで進まないもの（バンプPR・リリースPRのマージ待ち、
-            // リリース・デプロイの失敗）があるときだけオレンジの丸にする
-            emphasis: (releaseActivity?.actionRequired ?? 0) > 0 ? "attention" : "none",
-            // 数字（動いている数）と丸（操作待ち）で意味が違うため、内訳を吹き出しで補う
-            title: describeReleaseActivity(releaseActivity),
-          })}
-          {navRow({
-            key: "releases",
-            label: "リリース履歴",
-            icon: History,
-            active: activePane === "releases",
-            onClick: onSelectReleaseHistory,
-            // **#2726時点では数字も丸も出していなかった**（見るだけの画面で、放っておくと
-            // 困ることが無いため）。#2951で「確認を追う対象」に選んだリポジトリの未確認件数
-            // （`lib/release-check.ts`）を出すようにした。**未確認が無いあいだは0件のときも
-            // 含めて出さない**——`0`を出すと「対象が無い」と読めてしまい、他の行（質問・
-            // ブランチ）の「取得済みの在庫数」とは意味が違う（対象を選んでいなければ`null`）
-            count: releaseUncheckedCount && releaseUncheckedCount > 0 ? releaseUncheckedCount : null,
-            emphasis: (releaseUncheckedCount ?? 0) > 0 ? "attention" : "none",
-            title:
-              releaseUncheckedCount && releaseUncheckedCount > 0
-                ? `未確認のリリースが${releaseUncheckedCount}件あります`
-                : "全リポジトリのGitHub Releaseを時系列で見る",
-          })}
-          {navRow({
-            key: "nightly",
-            label: "予約実行",
-            icon: CalendarClock,
-            active: activePane === "nightly",
-            onClick: onSelectNightlyRun,
-            // 数えるのは**積んである予定の件数**（#2995）。結果に「確認が必要」があっても
-            // 丸は出さない——確認待ちそのものは上の「ユーザーの確認待ち」が数えており、
-            // 両方に出すとどちらを押せば片付くのか分からなくなる
-            count: nightlyRunQueuedCount,
-            title: "次の5時間枠の予定、直近の結果を見る",
-          })}
-          {navRow({
-            key: "chat",
-            label: "チャット",
-            icon: MessageSquareText,
-            active: activePane === "chat",
-            onClick: onSelectChat,
-            count: null,
-            title: "Issue・PRの状態確認や修復を会話で進める",
-          })}
-          {navRow({
-            key: "ideas",
-            label: "構想",
-            icon: Lightbulb,
-            active: activePane === "ideas",
-            onClick: onSelectIdeas,
-            count: ideasCount,
-            title: "新規アプリの構想を確認・整理する",
-          })}
-          {navRow({
-            key: "ios-extensions",
-            label: "iOS拡張",
-            icon: Smartphone,
-            active: activePane === "ios-extensions",
-            onClick: onSelectIosExtensions,
-            title: "ウィジェット・ロック画面・ライブアクティビティ・コントロールを一覧する",
-          })}
-          {navRow({
-            key: "usage",
-            label: "AI使用量",
-            icon: Gauge,
-            active: activePane === "usage",
-            onClick: onSelectUsage,
-            // **数字も丸も出さない。** 見るだけの画面で、放っておくと困ることが無い
-            // （枠が逼迫していることは設定→「状態」のメーターが受け持つ）
-            title: "サブPCのローカルセッションが使ったトークンを見る",
-          })}
-        </ul>
-      </div>
-
-      <div>
-        <h2 className="mb-2 px-2 text-xs font-semibold text-muted-foreground">Issue</h2>
-        <ul className="flex flex-col gap-0.5">
-          {sidebarIssueNavViews.map((view) =>
-            navRow({
-              key: view.id,
-              label: view.label,
-              icon: navViewIcons[view.id],
-              active: activeView === view.id && activePane === "issues",
-              onClick: () => onSelectView(view.id),
-              count: navCounts[view.id],
-            }),
-          )}
-        </ul>
-      </div>
-
-      <div>
-        <h2 className="mb-2 px-2 text-xs font-semibold text-muted-foreground">Pull Request</h2>
-        <ul className="flex flex-col gap-0.5">
-          {sidebarPullRequestViews.map((view) =>
-            navRow({
-              key: view.id,
-              label: view.label,
-              icon: pullRequestViewIcons[view.id],
-              active: activePane === "pull-requests" && activePullRequestView === view.id,
-              onClick: () => onSelectPullRequestView(view.id),
-              count: pullRequestNavCounts[view.id],
-              // 「マージ待ち」のうち**人が手を動かすまで進まないもの**が残っているときだけ
-              // オレンジの丸にする（#2334）。Auto-merge有効でCI成功のPRと自動修復中のPRは
-              // 放っておけば片付くので外す（ベルと同じ除外）。条件はスマホと共通
-              emphasis: isPullRequestViewAttention(view.id, mergePendingAttention)
-                ? "attention"
-                : "none",
-              // 数字（一覧に並ぶ総数）と丸（要操作）で意味が違うため、内訳を吹き出しで補う
-              title:
-                view.id === "completed"
-                  ? describeMergePendingAttention(view.description, mergePendingAttention)
-                  : view.description,
-            }),
-          )}
-        </ul>
-      </div>
-
-      {/*
-        「コードレビュー」「確認環境」（#2674）。Pull Requestの枠の下・リポジトリの枠の上に
-        置く。見出しは付けない——上のブロック（質問・ブランチ・AI使用量）と同じく、Issueの
-        絞り込みでもリポジトリの一覧でもない性質の行のため
-      */}
-      <div>
-        <ul className="flex flex-col gap-0.5">
-          {sidebarCodeReviewNavViews.map((view) => {
-            const signals = resolveQuestionNavSignals(view.id, {
-              total: navCounts.question,
-              unconfirmed: unconfirmedQuestionCount,
-              waiting: waitingQuestionCount,
-            });
-            return navRow({
-              key: view.id,
-              label: view.label,
-              icon: navViewIcons[view.id],
-              active: activeView === view.id && activePane === "issues",
-              onClick: () => onSelectView(view.id),
-              count: navCounts[view.id],
-              emphasis: signals.attention ? "attention" : "none",
-              busy: signals.busy,
-              title: signals.title,
-            });
-          })}
-          {PREVIEW_NAV_VISIBLE &&
-            navRow({
-            key: "preview",
-            label: "確認環境",
-            icon: MonitorPlay,
-            active: activePane === "preview",
-            onClick: onSelectPreview,
-            // **数字は出さない**（同時に動かせるのは1つなので、常に0か1にしかならない）。
-            // 動いていることは緑ではなくオレンジの丸で出す——押し忘れて置きっぱなしになって
-            // いるのは「放っておくと片付く」ものではなく、サブPCのメモリを占め続ける
-            emphasis: previewRunning ? "attention" : "none",
-            title: previewRunning
-              ? "確認環境が動いています"
-              : "developの最新をサブPCで動かして画面で確かめる",
-          })}
-        </ul>
-      </div>
-
-      <div>
-        <div className="mb-2 flex items-center justify-between px-2">
-          <h2 className="text-xs font-semibold text-muted-foreground">リポジトリ</h2>
-          <div className="flex items-center gap-1">
-            {selectedRepoFullNames.length > 0 && (
-              <button
-                type="button"
-                onClick={() => onClearRepository?.()}
-                className="text-muted-foreground hover:text-foreground"
-                title="リポジトリの選択を解除"
-              >
-                <X className="size-3.5" />
-              </button>
-            )}
+        <div className="flex items-center gap-1">
+          <button
+            type="button"
+            onClick={() => setIsRepoFilterOpen((prev) => !prev)}
+            aria-expanded={isRepoFilterOpen}
+            aria-controls="sidebar-repo-filter"
+            title="リポジトリで絞り込み"
+            aria-label={`リポジトリで絞り込み（${repoFilterSummary}）`}
+            className="flex min-w-0 flex-1 items-center justify-between gap-2 rounded-md border px-2 py-1.5 text-left text-sm hover:bg-accent"
+          >
+            <span className="flex min-w-0 items-center gap-2">
+              <FolderGit2 className="size-3.5 shrink-0 text-muted-foreground" />
+              <span className="truncate">{repoFilterSummary}</span>
+            </span>
+            <ChevronDown
+              className={cn("size-3.5 shrink-0 text-muted-foreground", isRepoFilterOpen && "rotate-180")}
+            />
+          </button>
+          {selectedRepoFullNames.length > 0 && (
             <button
               type="button"
-              onClick={() => setIsEditingRepoVisibility((prev) => !prev)}
-              title={
-                isEditingRepoVisibility
-                  ? "表示・非表示や設定の切り替えを終了"
-                  : "表示・非表示や設定を切り替える"
-              }
-              className={cn(
-                "rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-foreground",
-                isEditingRepoVisibility && "bg-accent text-foreground",
-              )}
+              onClick={() => onClearRepository?.()}
+              className="shrink-0 rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+              title="リポジトリの選択を解除"
+              aria-label="リポジトリの選択を解除"
             >
-              <Settings2 className="size-3.5" />
+              <X className="size-3.5" />
             </button>
-            <a
-              href={getGithubAppInstallUrl()}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-muted-foreground hover:text-foreground"
-              title="GitHub Appをインストールしてリポジトリを追加"
-            >
-              <Plus className="size-3.5" />
-            </a>
-          </div>
+          )}
         </div>
+        {selectedRepoFullNames.length > 0 && !repoFilterApplies && (
+          <p className="px-2 text-[11px] text-muted-foreground">
+            この画面は全リポジトリを表示中です（絞り込みは適用されません）
+          </p>
+        )}
+        {isRepoFilterOpen && (
+          <div id="sidebar-repo-filter" className="rounded-md border p-2">
+            <div className="mb-1 flex items-center justify-end gap-1">
+              <button
+                type="button"
+                onClick={() => setIsEditingRepoVisibility((prev) => !prev)}
+                title={
+                  isEditingRepoVisibility
+                    ? "表示・非表示や設定の切り替えを終了"
+                    : "表示・非表示や設定を切り替える"
+                }
+                className={cn(
+                  "rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-foreground",
+                  isEditingRepoVisibility && "bg-accent text-foreground",
+                )}
+              >
+                <Settings2 className="size-3.5" />
+              </button>
+              <a
+                href={getGithubAppInstallUrl()}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+                title="GitHub Appをインストールしてリポジトリを追加"
+              >
+                <Plus className="size-3.5" />
+              </a>
+            </div>
         {repositories.length === 0 ? (
           <div className="px-2 text-xs text-muted-foreground">
             まだリポジトリと連携していません。
@@ -687,67 +534,156 @@ export function SidebarNavView({
             )}
           </>
         )}
+          </div>
+        )}
       </div>
 
-      <div>
-        <div className="mb-2 flex items-center justify-between px-2">
-          <h2 className="text-xs font-semibold text-muted-foreground">ラベル</h2>
-          {selectedLabels.length > 0 && (
-            <button
-              type="button"
-              onClick={() => onClearLabels?.()}
-              className="text-muted-foreground hover:text-foreground"
-              title="ラベルの選択を解除"
-            >
-              <X className="size-3.5" />
-            </button>
-          )}
-        </div>
-        <ul className="flex flex-col gap-0.5">
-          {sortedLabelSummary.map((label) => (
-            <li key={label.name}>
-              <button
-                type="button"
-                onClick={() => onSelectLabel?.(label)}
-                className={cn(
-                  "flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-sm transition-colors hover:bg-accent",
-                  selectedLabels.includes(label.name) && "bg-accent font-medium",
-                )}
-              >
-                <span className="flex items-center gap-2">
-                  <span
-                    className="size-2 rounded-full ring-1 ring-inset ring-border"
-                    style={getLabelDotStyle(label.color)}
-                  />
-                  {label.name}
-                </span>
-                <span className="text-xs text-muted-foreground">{label.count}</span>
-              </button>
-            </li>
-          ))}
-        </ul>
-        <button type="button" className="mt-1 px-2 text-xs text-primary hover:underline">
-          すべてのラベルを見る
-        </button>
-      </div>
+      <Separator />
 
-      {/*
-        新規アプリの立ち上げ（#2188）。**最下部に1行だけ置く。** 使うのは年に数回なので、
-        上の常用の並びには混ぜない。スマホは同じ扱いでホーム画面のメニューの最後に置いている
-      */}
+      {/* 一覧（横断）。工程から独立させ、既存の全件ビューを開く */}
+      <ul className="flex flex-col gap-0.5">
+        {issueViewRow("all")}
+        {pullRequestRow("all")}
+      </ul>
+
+      {/* 要対応（横断）。確認待ち・作業待ちはIssue/PRや複数工程にまたがるため接頭辞を付けない */}
+      <ul className="flex flex-col gap-0.5">
+        {sidebarAttentionNavViews.map((view) =>
+          navRow({
+            key: view.id,
+            label: getNavViewPcLabel(view.id),
+            icon: navViewIcons[view.id],
+            active: activeView === view.id && activePane === "issues",
+            onClick: () => onSelectView(view.id),
+            // 手作業の件数は「いま実行できる数」（#1763）。前提待ちの件数は一覧のヘッダーで読む
+            count: view.id === "check-user" ? checkUserCount : navCounts[view.id],
+            // 確認待ちは残っている限り強調する（#742）。手作業はいま実行できるものがあるときだけ（#1613）
+            emphasis:
+              (view.id === "check-user" ? checkUserCount > 0 : manualStepAttention.actionable > 0)
+                ? "attention"
+                : "none",
+          }),
+        )}
+      </ul>
+
       <div>
+        <h2 className="mb-1 px-2 text-xs font-semibold text-muted-foreground">構想・相談</h2>
         <ul className="flex flex-col gap-0.5">
+          {questionSignalRow("question")}
           {navRow({
-            key: "new-app",
-            label: "新規アプリを立ち上げる",
-            icon: Rocket,
-            active: false,
-            onClick: onLaunchNewApp,
+            key: "chat",
+            label: "チャット",
+            icon: MessageSquareText,
+            active: activePane === "chat",
+            onClick: onSelectChat,
             count: null,
-            title: "リポジトリの作成と、残りの作業のIssue起票までを行う",
+            title: "Issue・PRの状態確認や修復を会話で進める",
+          })}
+          {navRow({
+            key: "ideas",
+            label: "構想",
+            icon: Lightbulb,
+            active: activePane === "ideas",
+            onClick: onSelectIdeas,
+            count: ideasCount,
+            title: "新規アプリの構想を確認・整理する",
+          })}
+          {navRow({
+            key: "ios-extensions",
+            label: "iOS拡張",
+            icon: Smartphone,
+            active: activePane === "ios-extensions",
+            onClick: onSelectIosExtensions,
+            title: "ウィジェット・ロック画面・ライブアクティビティ・コントロールを一覧する",
+          })}
+          {sidebarCodeReviewNavViews.map((view) => questionSignalRow(view.id))}
+        </ul>
+      </div>
+
+      <div>
+        <h2 className="mb-1 px-2 text-xs font-semibold text-muted-foreground">起案・準備</h2>
+        <ul className="flex flex-col gap-0.5">
+          {issueViewRow("not-started")}
+          {navRow({
+            key: "nightly",
+            label: "予約実行",
+            icon: CalendarClock,
+            active: activePane === "nightly",
+            onClick: onSelectNightlyRun,
+            // 数えるのは積んである予定の件数（#2995）。確認待ちそのものは「確認待ち」が数える
+            count: nightlyRunQueuedCount,
+            title: "次の5時間枠の予定、直近の結果を見る",
           })}
         </ul>
       </div>
+
+      <div>
+        <h2 className="mb-1 px-2 text-xs font-semibold text-muted-foreground">実行・反映待ち</h2>
+        <ul className="flex flex-col gap-0.5">
+          {issueViewRow("in-progress")}
+          {pullRequestRow("in-progress")}
+          {pullRequestRow("completed")}
+          {issueViewRow("release-pending")}
+          {navRow({
+            key: "flow",
+            label: "ブランチ",
+            icon: GitBranch,
+            active: activePane === "flow",
+            onClick: onSelectFlow,
+            // 数えるのはリリース・デプロイが動いているリポジトリの数（#2167）。手作業は含めない
+            count: releaseActivity?.total ?? null,
+            emphasis: (releaseActivity?.actionRequired ?? 0) > 0 ? "attention" : "none",
+            title: describeReleaseActivity(releaseActivity),
+          })}
+          {PREVIEW_NAV_VISIBLE &&
+            navRow({
+              key: "preview",
+              label: "確認環境",
+              icon: MonitorPlay,
+              active: activePane === "preview",
+              onClick: onSelectPreview,
+              emphasis: previewRunning ? "attention" : "none",
+              title: previewRunning
+                ? "確認環境が動いています"
+                : "developの最新をサブPCで動かして画面で確かめる",
+            })}
+        </ul>
+      </div>
+
+      <div>
+        <h2 className="mb-1 px-2 text-xs font-semibold text-muted-foreground">反映済み</h2>
+        <ul className="flex flex-col gap-0.5">
+          {navRow({
+            key: "releases",
+            label: "リリース履歴",
+            icon: History,
+            active: activePane === "releases",
+            onClick: onSelectReleaseHistory,
+            // 未確認が無いあいだは0件のときも含めて出さない（#2951）
+            count: releaseUncheckedCount && releaseUncheckedCount > 0 ? releaseUncheckedCount : null,
+            emphasis: (releaseUncheckedCount ?? 0) > 0 ? "attention" : "none",
+            title:
+              releaseUncheckedCount && releaseUncheckedCount > 0
+                ? `未確認のリリースが${releaseUncheckedCount}件あります`
+                : "全リポジトリのGitHub Releaseを時系列で見る",
+          })}
+        </ul>
+      </div>
+
+      <Separator />
+
+      {/* 補助メニュー。数字も丸も出さない（枠の逼迫は設定→「状態」のメーターが受け持つ） */}
+      <ul className="flex flex-col gap-0.5">
+        {navRow({
+          key: "usage",
+          label: "AI使用量",
+          icon: Gauge,
+          active: activePane === "usage",
+          onClick: onSelectUsage,
+          title: "サブPCのローカルセッションが使ったトークンを見る",
+        })}
+      </ul>
     </nav>
   );
 }
+
