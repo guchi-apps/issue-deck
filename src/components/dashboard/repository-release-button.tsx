@@ -33,6 +33,7 @@ const BLOCKED_REASON_LABEL: Record<ReleaseBlockedReason, string> = {
   "nothing-to-release": "出す変更がありません",
   "deploy-failed": "本番デプロイ失敗中。修正を取り込んだ場合は手動で起動できます",
   "release-preparing": "CIとバージョン更新が自動で実行されます。操作せずお待ちください",
+  "awaiting-automation": "CIとバージョン更新が自動で実行されます。操作せずお待ちください",
   "preparation-failed": "リリース準備に失敗しています。上の赤い帯で原因を確認し、「再開」してください",
   "preparation-unknown": "リリース準備の状態を確認しています",
 };
@@ -40,6 +41,7 @@ const BLOCKED_REASON_LABEL: Record<ReleaseBlockedReason, string> = {
 /** 無効のボタンに書く文字。準備の状態は、押せない理由そのものをボタンに出す（#4421） */
 const BLOCKED_BUTTON_LABEL: Partial<Record<ReleaseBlockedReason, string>> = {
   "release-preparing": "リリース準備中",
+  "awaiting-automation": "自動処理待ち",
   "preparation-failed": "準備に失敗",
   "preparation-unknown": "準備状態を確認中",
 };
