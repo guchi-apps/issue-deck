@@ -2,7 +2,11 @@ import type { Prisma } from "@prisma/client";
 
 import { db } from "@/lib/db";
 import { getInstallationToken } from "@/lib/github/app-auth";
-import { fetchClosedPullRequestsForBase } from "@/lib/github/pull-requests-api";
+import {
+  CLOSED_PAGED_PER_PAGE,
+  fetchClosedPullRequestsForBasePage,
+  type GithubApiOpenPullRequest,
+} from "@/lib/github/pull-requests-api";
 import {
   fetchOpenPullRequestsForBase,
   fetchPullMergeInfo,
@@ -234,6 +238,36 @@ export async function purgeCompletedRebuildEvents(repositoryFullName: string, co
   return count;
 }
 
+/** 完了境界を探すときに遡るページ数の上限（1ページ100件） */
+const MAX_CLOSED_PAGES = 10;
+
+/**
+ * main向けのclosed PRを番号の降順にページを進め、マージ済みのリリースPRを新しい順に集める（#4474）。
+ *
+ * 作り直しのたびに閉じたリリース候補がmain向けのclosed PRに積もるため、直近の1ページだけでは
+ * 完了済みのリリースPRへ届かないことがある。`enough`件見つかるか、`floor`以下の番号に達するか
+ * （それより古いリリースはどの履歴も完了にできない）、ページが尽きるまで遡る。
+ */
+export async function collectMergedReleasePrs(
+  fetchPage: (page: number) => Promise<GithubApiOpenPullRequest[]>,
+  options: { floor: number; enough: number; maxPages?: number },
+): Promise<GithubApiOpenPullRequest[]> {
+  const found: GithubApiOpenPullRequest[] = [];
+  const maxPages = options.maxPages ?? MAX_CLOSED_PAGES;
+  for (let page = 1; page <= maxPages; page += 1) {
+    const prs = await fetchPage(page);
+    for (const pr of prs) {
+      if (pr.number <= options.floor) return found;
+      if (pr.merged_at !== null && pr.head.ref.startsWith(FROZEN_PREFIX)) {
+        found.push(pr);
+        if (found.length >= options.enough) return found;
+      }
+    }
+    if (prs.length < CLOSED_PAGED_PER_PAGE) break;
+  }
+  return found;
+}
+
 /**
  * 1リポジトリの履歴の完了を判定し、境界を進めて完了済みの履歴を削除する（#4420）。
  * 境界は後戻りさせない（一覧の取得範囲の都合で小さい番号が返っても、完了済みを復活させない）。
@@ -248,11 +282,17 @@ export async function sweepCompletedRebuildHistory(repositoryFullName: string): 
   if (repository) {
     const token = await getInstallationToken(repository.installation.installationId);
     const { ownerLogin: owner, name: repo } = repository;
-    const closed = await fetchClosedPullRequestsForBase(owner, repo, "main", token);
-    const merged = closed
-      .filter((pr) => pr.merged_at !== null && pr.head.ref.startsWith(FROZEN_PREFIX))
-      .sort((a, b) => b.number - a.number);
     const requiresIosDelivery = getWebviewIosRepository(repositoryFullName) !== null;
+    // 残っている履歴の最小の元候補番号より古いリリースは、どの経過も完了にできない
+    const oldest = await db.releaseRebuildEvent.aggregate({
+      where: { repositoryFullName, ...(completedThrough === null ? {} : { originPrNumber: { gt: completedThrough } }) },
+      _min: { originPrNumber: true },
+    });
+    const merged = await collectMergedReleasePrs((page) => fetchClosedPullRequestsForBasePage(owner, repo, "main", token, page), {
+      floor: Math.max(completedThrough ?? 0, oldest._min.originPrNumber ?? 0),
+      // iOS配布を待つリポジトリは直近のマージが未配布でありうるので、数件まで遡る
+      enough: requiresIosDelivery ? 5 : 1,
+    });
     let mergedReleasePrs: { number: number; mergeSha: string | null }[];
     let deliveredShas = new Set<string>();
     if (requiresIosDelivery) {
