@@ -1,0 +1,41 @@
+name: Verify release 4515
+on:
+  push:
+    branches: [ops/verify-release-4515]
+    paths: [.github/workflows/verify-release-4515.yml]
+permissions: {}
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Request and observe existing release validation
+        env:
+          PROGRESS_REPORT_SECRET: ${{ secrets.PROGRESS_REPORT_SECRET }}
+        run: |
+          set -euo pipefail
+          endpoint='https://issuedeck.gucchii.com/api/dispatch/release-verify'
+          target='{"repository":"guchi-apps/issue-deck","pullRequest":4515,"baseSha":"b1e656c68e6d545e7136e935af7be472f3056418","headSha":"757781a15f973d75167aabe808093a9193ab5e2d"}'
+          test -n "$PROGRESS_REPORT_SECRET"
+          printf 'Authorization: Bearer %s\n' "$PROGRESS_REPORT_SECRET" > "$RUNNER_TEMP/verify-auth"
+          chmod 600 "$RUNNER_TEMP/verify-auth"
+          request="$(printf '%s' "$target" | jq -c '. + {action:"request"}')"
+          curl --fail-with-body --silent --show-error --max-time 60 -H @"$RUNNER_TEMP/verify-auth" -H 'Content-Type: application/json' --data "$request" "$endpoint" | tee "$RUNNER_TEMP/request.json"
+          printf '\n'
+          status="$(printf '%s' "$target" | jq -c '. + {action:"status"}')"
+          for attempt in $(seq 1 80); do
+            curl --fail-with-body --silent --show-error --max-time 60 -H @"$RUNNER_TEMP/verify-auth" -H 'Content-Type: application/json' --data "$status" "$endpoint" > "$RUNNER_TEMP/status.json"
+            jq -c '.views' "$RUNNER_TEMP/status.json"
+            if jq -e '[.views[] | select(.state != "passed" and .state != "not_applicable")] | length == 0' "$RUNNER_TEMP/status.json" >/dev/null; then
+              echo 'Full review and integration validation passed for release #4515.' >> "$GITHUB_STEP_SUMMARY"
+              cat "$RUNNER_TEMP/status.json" >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            if jq -e '[.views[] | select(.state == "failed" or .state == "needs_check" or .state == "invalidated")] | length > 0' "$RUNNER_TEMP/status.json" >/dev/null; then
+              cat "$RUNNER_TEMP/status.json" >> "$GITHUB_STEP_SUMMARY"
+              exit 1
+            fi
+            sleep 20
+          done
+          echo 'Validation timed out; no merge was performed.' >> "$GITHUB_STEP_SUMMARY"
+          exit 1
