@@ -78,6 +78,13 @@ export const REBUILD_FAILURE_REASONS = {
 export const NOTHING_TO_ADD_REASON =
   "修正PRが元の候補の後にdevelopへ入っていないため、足すものがありません。修正PRがすでに候補に含まれていないかを確認してください";
 
+/** 後継候補の再検証で指摘・失敗が残って止めたときの理由の目印。リリース完了系列（#4480）が次の世代を起案する合図に使う */
+export const REVERIFY_FAILED_MARKER = "の再検証で指摘・失敗が残りました";
+
+export function isReverifyFailureReason(reason: string | null | undefined): boolean {
+  return reason != null && reason.includes(REVERIFY_FAILED_MARKER);
+}
+
 export function isRebuildFailureReason(reason: string | null | undefined): boolean {
   return reason != null && (Object.values(REBUILD_FAILURE_REASONS) as string[]).includes(reason);
 }

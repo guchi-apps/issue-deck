@@ -34,6 +34,7 @@ import {
   reviewFindingKey,
   RELEASE_FIX_STATUS_LABEL,
   REBUILD_FAILURE_REASONS,
+  REVERIFY_FAILED_MARKER,
   type ReleaseFixCauseClass,
   type ReleaseFixDraftItem,
   type ReleaseFixSourceKind,
@@ -742,7 +743,7 @@ async function sweepSuccessor(row: ReleaseFixSeries): Promise<number> {
     access,
     [row.id],
     "stopped",
-    `後継候補 #${row.successorPrNumber} の再検証で指摘・失敗が残りました（世代 ${row.generation}）。後継候補から修正Issueを起案すると、同じ系列として続きます`,
+    `後継候補 #${row.successorPrNumber} ${REVERIFY_FAILED_MARKER}（世代 ${row.generation}）。後継候補から修正Issueを起案すると、同じ系列として続きます`,
   );
 }
 
