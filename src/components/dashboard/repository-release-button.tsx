@@ -17,6 +17,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import { isPrepBlockedReason, PREP_OVERRIDE_CONFIRM_TEXT } from "@/lib/release-prep-state";
 import { requestRelease } from "@/lib/release-request";
 import type { BumpKind } from "@/lib/semver-bump";
 import type { ReleaseBlockedReason } from "@/types/branch-flow";
@@ -92,12 +93,17 @@ export function RepositoryReleaseButton({
   // 既定は自動判定（null）。選ばなければ起動の挙動は今までと変わらない（#1548）
   const [bumpKind, setBumpKind] = useState<BumpKind | null>(null);
   const deployFailed = blockedReason === "deploy-failed";
+  // 準備中・準備失敗は灰色に見せるが、確認のうえ押せる（#4421。判定が外れても人が抜けられる）
+  const prepBlocked = isPrepBlockedReason(blockedReason);
+  const needsOverride = deployFailed || prepBlocked;
+  const [allowPrepOverride, setAllowPrepOverride] = useState(false);
 
   async function handleTrigger() {
     setIsTriggering(true);
     setError(null);
     try {
       await requestRelease(repositoryFullName, bumpKind ?? undefined, deployFailed && allowFailedDeploy);
+      setAllowPrepOverride(false);
       // 起動できたら確認ダイアログを閉じるだけにする（#1590）。以前は「リリースを起動しました」の
       // ダイアログを続けて出していたが、閉じた先のボタンが「リリース起動中…」へ変わることで
       // 起動できたことは分かるため、OKを押させるだけの一手間だった。
@@ -114,7 +120,7 @@ export function RepositoryReleaseButton({
   // 押せないときは、無効のボタンと理由だけを出す（#2711）。**ボタンごと消さない**——
   // 「次のリリース（本番未反映）」と出ている束から本番へ出す手段が画面から無くなり、
   // 押せないのか操作が存在しないのかを区別できなくなるため。
-  if (blockedReason && !deployFailed) {
+  if (blockedReason && !deployFailed && !prepBlocked) {
     return (
       <span className="flex items-center gap-1.5" title={BLOCKED_REASON_LABEL[blockedReason]}>
         <Button size="sm" variant="outline" className="h-6 gap-1 px-2 text-xs" disabled>
@@ -131,20 +137,23 @@ export function RepositoryReleaseButton({
       <Button
         size="sm"
         variant="outline"
-        className="h-6 gap-1 px-2 text-xs"
+        className={prepBlocked ? "h-6 gap-1 bg-muted px-2 text-xs text-muted-foreground" : "h-6 gap-1 px-2 text-xs"}
         disabled={isTriggering || isPending}
         onClick={() => setConfirmOpen(true)}
       >
         <Rocket className={isTriggering || isPending ? "size-3 animate-pulse" : "size-3"} />
-        {isTriggering ? "起動中..." : isPending ? "リリース起動中…" : deployFailed ? "修正リリース" : "リリースする"}
+        {isTriggering ? "起動中..." : isPending ? "リリース起動中…" : deployFailed ? "修正リリース" : prepBlocked ? BLOCKED_BUTTON_LABEL[blockedReason] : "リリースする"}
       </Button>
-      {deployFailed && <span className="text-xs text-muted-foreground">{BLOCKED_REASON_LABEL["deploy-failed"]}</span>}
+      {needsOverride && blockedReason && <span className="text-xs text-muted-foreground">{BLOCKED_REASON_LABEL[blockedReason]}</span>}
       {error && <span className="text-xs text-destructive">{error}</span>}
 
       {/* 誤タップでの起動を防ぐため確認を挟む。文面はヘッダーのロケットボタンと揃えている */}
       <AlertDialog open={confirmOpen} onOpenChange={(open) => {
         setConfirmOpen(open);
-        if (!open) setAllowFailedDeploy(false);
+        if (!open) {
+          setAllowFailedDeploy(false);
+          setAllowPrepOverride(false);
+        }
       }}>
         <AlertDialogContent className="flex flex-col gap-4 overflow-hidden">
           <AlertDialogHeader>
@@ -170,13 +179,23 @@ export function RepositoryReleaseButton({
               <span>本番デプロイの失敗を確認しました。developに取り込んだ修正をリリースするため、失敗中の起動を許可します。</span>
             </label>
           )}
+          {prepBlocked && (
+            <label className="flex items-start gap-2 rounded-md border border-amber-500/40 p-3 text-sm">
+              <Checkbox
+                checked={allowPrepOverride}
+                onCheckedChange={(checked) => setAllowPrepOverride(checked === true)}
+                disabled={isTriggering}
+              />
+              <span>{PREP_OVERRIDE_CONFIRM_TEXT[blockedReason === "preparation-failed" ? "failed" : "running"]}</span>
+            </label>
+          )}
           <ReleaseChangeList repositoryFullName={repositoryFullName} enabled={confirmOpen} />
           {error && <p className="text-xs text-destructive">{error}</p>}
           </div>
           <AlertDialogFooter>
             <AlertDialogCancel disabled={isTriggering}>キャンセル</AlertDialogCancel>
             <AlertDialogAction
-              disabled={isTriggering || (deployFailed && !allowFailedDeploy)}
+              disabled={isTriggering || (deployFailed && !allowFailedDeploy) || (prepBlocked && !allowPrepOverride)}
               onClick={(event) => {
                 // 起動の結果を待たずに閉じないよう既定の閉じる動作を止める。閉じてしまうと
                 // 連打で複数回dispatchできてしまい、失敗しても文言が出ない（#1548）。

@@ -42,3 +42,15 @@ export function applyReleasePrepState(
   if (state === "running") return "release-preparing";
   return null;
 }
+
+/** 準備の状態による押せない理由か（#4421）。灰色に見せるが、確認のうえ押せるものだけ */
+export function isPrepBlockedReason(reason: ReleaseBlockedReason | null | undefined): reason is "release-preparing" | "preparation-failed" {
+  return reason === "release-preparing" || reason === "preparation-failed";
+}
+
+/** 準備の状態を承知のうえで起動するときの確認文（個別・スマホ・一括で共通） */
+export const PREP_OVERRIDE_CONFIRM_TEXT: Record<ReleasePrepState, string> = {
+  idle: "",
+  running: "修正を取り込んだリリースの準備が自動で進行中です。いま起動すると二重に実行される可能性があります。それでも起動します。",
+  failed: "リリース準備が失敗しています。原因を確認のうえ、帯の「再開」ではなくここから起動します。",
+};
