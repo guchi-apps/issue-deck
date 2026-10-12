@@ -3,7 +3,7 @@ import { fetchWorkflowJobLogs, fetchWorkflowRun, fetchWorkflowRunJobs } from "@/
 import { getInstallationToken } from "@/lib/github/app-auth";
 import { fetchCommentsForIssue, fetchIssueLabelNames, removeIssueLabel } from "@/lib/github/issues-api";
 import { fetchAllPages } from "@/lib/github/pagination";
-import { fetchClosedPullRequestsForBase } from "@/lib/github/pull-requests-api";
+import { fetchClosedPullRequestsForBasePage } from "@/lib/github/pull-requests-api";
 import { queryIssuesByProgressStatus } from "@/lib/github/query-progress";
 import { GITHUB_API } from "@/lib/github/request";
 import {
@@ -15,7 +15,7 @@ import {
   type IssueLabelEvent,
   type ReleasePreparationFailureView,
 } from "@/lib/release-preparation";
-import { observeRebuildSuccessor } from "@/lib/release-rebuild-history-run";
+import { collectMergedReleasePrs, observeRebuildSuccessor } from "@/lib/release-rebuild-history-run";
 import { markRebuildRequestFailed } from "@/lib/release-rebuild-selection-run";
 import { parseRebuildSelection, serializeRebuildSelection } from "@/lib/release-rebuild-selection";
 import { isBumpKind } from "@/lib/semver-bump";
@@ -206,7 +206,11 @@ export async function reconcileReleasePreparationFailures(repositoryFullName: st
     if (open.length === 0) return 0;
     const context = await resolveRepository(repositoryFullName);
     if (!context) return 0;
-    const closed = await fetchClosedPullRequestsForBase(context.owner, context.repo, "main", context.token);
+    const origins = open.map((row) => parseRebuildSelection(row.rebuildSelection)?.origin.pr ?? 1);
+    const closed = await collectMergedReleasePrs(
+      (page) => fetchClosedPullRequestsForBasePage(context.owner, context.repo, "main", context.token, page),
+      { floor: Math.max(0, Math.min(...origins) - 1), enough: Number.MAX_SAFE_INTEGER },
+    );
     const mergedReleasePrs = closed
       .filter((pr) => pr.merged_at !== null && pr.head.ref.startsWith(FROZEN_RELEASE_PREFIX))
       .map((pr) => ({ number: pr.number, mergedAt: pr.merged_at as string, htmlUrl: pr.html_url }));

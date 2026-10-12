@@ -1468,7 +1468,7 @@ function NextReleaseCard({
         <div className="col-span-2 min-w-0 rounded-md border px-2.5 py-1.5">
           <dt className="text-muted-foreground">次のリリースで反映されるPR</dt>
           <dd className="text-sm font-semibold">{`${unreleased.count}${unreleased.unit}`}</dd>
-          <dd className="text-muted-foreground">developへ未マージ</dd>
+          <dd className="text-muted-foreground">mainへ未反映</dd>
         </div>
       </dl>
 
