@@ -65,7 +65,9 @@ export function ReleaseBulkButton({
   const [prepStates, setPrepStates] = useState<Record<string, ReleasePrepState>>({});
   const [allowPrepOverride, setAllowPrepOverride] = useState(false);
   const prepStateList = Object.values(prepStates);
-  const hasPrepBlocked = prepStateList.some((state) => state !== "idle");
+  const hasPrepBlocked = prepStateList.some((state) => state === "running" || state === "failed");
+  // 準備状態を取得できていない対象が1つでもあれば起動を確定させない（#4556。未報告の行もunknown扱い）
+  const prepUnknown = targets.some((target) => (prepStates[target.repositoryFullName] ?? "unknown") === "unknown");
 
   // 対象が無ければボタンごと出さない（#2770）。単一ボタンの「押せないときも消さない」
   // （#2711）とは異なり、こちらは0件のとき押す意味のある操作が1つも無いため。
@@ -108,7 +110,10 @@ export function ReleaseBulkButton({
 
       <AlertDialog open={confirmOpen} onOpenChange={(open) => {
         setConfirmOpen(open);
-        if (!open) setAllowPrepOverride(false);
+        if (!open) {
+          setAllowPrepOverride(false);
+          setPrepStates({});
+        }
       }}>
         <AlertDialogContent className="flex flex-col gap-4 overflow-hidden">
           <AlertDialogHeader>
@@ -161,7 +166,7 @@ export function ReleaseBulkButton({
           <AlertDialogFooter>
             <AlertDialogCancel disabled={isTriggering}>キャンセル</AlertDialogCancel>
             <AlertDialogAction
-              disabled={isTriggering || (hasPrepBlocked && !allowPrepOverride)}
+              disabled={isTriggering || prepUnknown || (hasPrepBlocked && !allowPrepOverride)}
               onClick={(event) => {
                 // 起動の結果を待たずに閉じないよう既定の閉じる動作を止める（#1548と同じ理由）。
                 event.preventDefault();
@@ -198,7 +203,9 @@ function BulkTargetRow({
       <span className="truncate">{target.repositoryFullName}</span>
       <span className="flex shrink-0 items-center gap-2 text-muted-foreground tabular-nums">
         {prepState !== "idle" && (
-          <span className="rounded bg-muted px-1.5 text-[11px]">{prepState === "running" ? "準備中" : "準備失敗"}</span>
+          <span className="rounded bg-muted px-1.5 text-[11px]">
+            {prepState === "unknown" ? "確認中" : prepState === "running" ? "準備中" : "準備失敗"}
+          </span>
         )}
         {target.unreleasedLabel}
       </span>
