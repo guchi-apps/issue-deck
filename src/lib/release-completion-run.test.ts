@@ -12,6 +12,7 @@ let runs: Row[] = [];
 let fixSeries: Row[] = [];
 let recoveries: Row[] = [];
 let nextId = 1;
+let afterUpdateMany: ((data: Record<string, unknown>) => Promise<void>) | null = null;
 
 function matches(row: Row, where: Record<string, unknown>): boolean {
   return Object.entries(where).every(([key, value]) => {
@@ -43,6 +44,7 @@ function table(store: () => Row[]) {
     updateMany: vi.fn(async ({ where, data }: { where: Record<string, unknown>; data: Record<string, unknown> }) => {
       const targets = store().filter((row) => matches(row, where));
       for (const row of targets) Object.assign(row, data);
+      await afterUpdateMany?.(data);
       return { count: targets.length };
     }),
   };
@@ -176,6 +178,7 @@ beforeEach(() => {
   fixSeries = [];
   recoveries = [];
   nextId = 1;
+  afterUpdateMany = null;
   vi.clearAllMocks();
   fetchPullRequest.mockResolvedValue(pull());
   loadReleaseVerificationSummary.mockResolvedValue(summary("failed", "passed", [{ title: "認可漏れ" }]));
@@ -291,6 +294,28 @@ describe("runReleaseCompletionSweep", () => {
     expect(result.scanned).toBe(0);
     expect(mergePullRequest).not.toHaveBeenCalled();
     expect(runs[0]).toMatchObject({ status: "stopped", stoppedByUserId: "u1" });
+  });
+
+  it("マージ実行権を取得した直後の停止でも本番マージを行わない", async () => {
+    await start();
+    loadReleaseVerificationSummary.mockResolvedValue(summary("passed", "passed"));
+    afterUpdateMany = async (data) => {
+      if (data.status !== "merging") return;
+      afterUpdateMany = null;
+      await stopReleaseCompletionRun({ repositoryFullName: "o/r", runId: runs[0].id, userId: "u1", token: "t", now });
+    };
+    await runReleaseCompletionSweep({ hostName: "subpc", now });
+    expect(mergePullRequest).not.toHaveBeenCalled();
+    expect(runs[0]).toMatchObject({ status: "stopped", activeKey: null });
+  });
+
+  it("未導入リポジトリの統合検証失敗は設定不足として止め、修正を起案しない", async () => {
+    await start();
+    loadReleaseVerificationSummary.mockResolvedValue(summary("passed", "failed"));
+    await runReleaseCompletionSweep({ hostName: "subpc", now });
+    expect(createReleaseFixSeries).not.toHaveBeenCalled();
+    expect(enqueueDispatchJob).not.toHaveBeenCalled();
+    expect(runs[0]).toMatchObject({ status: "needs_attention", stopReason: "setup_missing", activeKey: null });
   });
 
   it("deployの成功と稼働版の一致で完了。成功でも稼働版を確かめられなければ完了にしない", async () => {
