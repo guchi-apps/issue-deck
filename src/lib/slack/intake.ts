@@ -590,6 +590,14 @@ async function runProposal(ctx: IntakeContext, request: SlackIntakeRequest, text
       await reply(ctx, request, `⚠️ Issue案にはまとまりませんでした（Issueは作っていません）。\n${result.text}\n\n追加の情報をこのスレッドへ返信すると、続けてIssue案を作り直します。`);
       return;
     }
+    if (card.repo !== repo) {
+      await failRequest(ctx, request, "Issue案の起案先確認", "選択したリポジトリとIssue案の起案先が一致しません", {
+        retryable: true,
+        unfinished: "選択したリポジトリでのIssue案の作成",
+        resume: RESUME_HINT,
+      });
+      return;
+    }
     const stored: StoredProposal = { card, splitFrom };
     await db.slackIntakeRequest.update({
       where: { id: request.id },
@@ -667,6 +675,15 @@ async function confirmIssue(ctx: IntakeContext, request: SlackIntakeRequest, att
   const stored = proposalOf(request);
   const repo = request.selectedRepo;
   if (!stored || !repo) return;
+  // 保存済みの案も信用せず、確認ボタンからGitHubを更新する前に再検証する。
+  if (stored.card.repo !== repo) {
+    await failRequest(ctx, request, "Issue案の起案先確認", "選択したリポジトリと保存済みのIssue案の起案先が一致しません", {
+      retryable: true,
+      unfinished: "選択したリポジトリでのIssue案の作成",
+      resume: RESUME_HINT,
+    });
+    return;
+  }
   const claimed = await db.slackIntakeRequest.updateMany({
     where: { id: request.id, confirmState: "pending" },
     data: { confirmState: "done" },
