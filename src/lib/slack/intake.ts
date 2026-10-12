@@ -33,6 +33,9 @@ import { isAllowedLocation, resolveIssueDeckUser, type SlackConfig } from "@/lib
  * Slackの`#アプリissue起案`からのIssue起案（#4454）。
  *
  * - **依頼単位**は親投稿の`teamId + channelId + parentTs`（DBの一意制約）。処理済みイベントも記録して再送を無視する
+ * - **ack前に依頼をDBへ残す**（#4488）。親投稿は処理済み記録と同じトランザクションで`received`の行にし、保存に
+ *   失敗したら非2xxを返してSlackに再送させる。ack前にはSlack API・GitHub・AIを呼ばない（3秒制限）。
+ *   ack後の処理が途中で止まった行は`resumeStalePendingRequests`が拾い直す
  * - **対象リポジトリが確定するまでIssueは作らない。** 確定は利用者が選択UIで押した`owner/repo`だけが正本
  * - 調査・Issue案づくりは既存のIssueDeck Chat（`handleChatMessage`）を呼ぶだけ。**作成は人が押す「この案で起案する」**
  *   で初めて走り、`confirmState`の`pending`→`done`を取れた1回だけ`executeConfirmedCard`を呼ぶ
@@ -74,14 +77,189 @@ export async function claimEvent(key: string, messageTs: string | null): Promise
     await db.slackProcessedEvent.create({ data: { eventKey: key.slice(0, 160), messageTs } });
     return true;
   } catch (error) {
-    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") return false;
+    if (isUniqueViolation(error)) return false;
     throw error;
   }
 }
 
-/** 処理に失敗したイベントの処理済み記録を外す。再送が来たとき、`duplicate`で恒久的に捨てずに再処理できるようにする */
-export async function releaseEvent(key: string): Promise<void> {
-  await db.slackProcessedEvent.deleteMany({ where: { eventKey: key.slice(0, 160) } });
+function isUniqueViolation(error: unknown): boolean {
+  return error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002";
+}
+
+/**
+ * ack後の処理を待っている依頼の状態。`received`は受付（選択UIの投稿）前、`resuming`は「再開」の返信を受けた後。
+ * どちらもack前にDBへ書き、ack後の処理が終わるまで（`awaiting_repo`等へ進むまで）この値のまま残す。
+ */
+const PENDING_STATUSES = ["received", "resuming"] as const;
+type PendingStatus = (typeof PENDING_STATUSES)[number];
+/** この時間より長く`updatedAt`が動いていない待ち行は、処理していたプロセスが止まったものとみなして拾い直す */
+const PENDING_STALE_MS: Record<PendingStatus, number> = {
+  received: 2 * 60_000,
+  // 「再開」は調査（AI）まで同じ処理で走るため、処理中の行を二重に拾わないよう長めに待つ
+  resuming: 30 * 60_000,
+};
+
+function isPendingStatus(status: string): status is PendingStatus {
+  return (PENDING_STATUSES as readonly string[]).includes(status);
+}
+
+/**
+ * ack前の受付結果。
+ * - `queued`: 依頼をDBへ書いた。ack後に`processPendingRequest`で続ける
+ * - `followUp`: 起案済みの依頼への返信。ack後に処理する（依頼そのものはDBに残っている）
+ * - `handled`: DBへの反映だけで完了した（起案前の補足）
+ */
+export type AcceptedEvent =
+  | { kind: "duplicate" }
+  | { kind: "ignored" }
+  | { kind: "handled" }
+  | { kind: "queued"; requestId: string }
+  | { kind: "followUp"; request: SlackIntakeRequest; text: string; messageTs: string };
+
+function isIntakeMessage(event: SlackMessageEvent): boolean {
+  if (event.type !== "message") return false;
+  if (event.bot_id || event.app_id) return false;
+  if (event.subtype && event.subtype !== "file_share") return false;
+  return Boolean(event.user && event.ts && event.channel);
+}
+
+/**
+ * Slackへ応答する前に行う受付（#4488）。**DBの読み書きだけ**で、処理済み記録と依頼の保存を1つのトランザクションに
+ * まとめる。どちらかが失敗したら例外を投げる（受け口は非2xxを返し、Slackが同じイベントを再送する）。
+ */
+export async function acceptMessageEvent(
+  config: SlackConfig,
+  teamId: string,
+  eventId: string,
+  event: SlackMessageEvent,
+): Promise<AcceptedEvent> {
+  if (!isIntakeMessage(event) || !isAllowedLocation(config, teamId, event.channel!)) return { kind: "ignored" };
+  const channel = event.channel!;
+  const ts = event.ts!;
+  const slackUserId = event.user!;
+  const key = `event:${eventId}`.slice(0, 160);
+  const isReply = Boolean(event.thread_ts && event.thread_ts !== ts);
+
+  let userId: string | null = null;
+  let text = "";
+  if (isReply) {
+    text = (event.text ?? "").trim();
+  } else {
+    userId = resolveIssueDeckUser(config, slackUserId);
+    if (!userId) {
+      console.warn("[slack-intake] IssueDeckに対応付いていないSlackユーザーの投稿を無視しました");
+      return { kind: "ignored" };
+    }
+    const files = (event.files ?? []).map((f) => `添付: ${f.name ?? "名称不明"}（内容は未取得・未確認）`);
+    text = [(event.text ?? "").trim(), ...files].filter(Boolean).join("\n\n");
+  }
+  if (!text) return { kind: "ignored" };
+
+  try {
+    return await db.$transaction(async (tx): Promise<AcceptedEvent> => {
+      await tx.slackProcessedEvent.create({ data: { eventKey: key, messageTs: ts } });
+      if (!isReply) {
+        const created = await tx.slackIntakeRequest.create({
+          data: { teamId, channelId: channel, parentTs: ts, slackUserId, userId: userId!, text, status: "received", issues: [] },
+        });
+        return { kind: "queued", requestId: created.id };
+      }
+      const request = await tx.slackIntakeRequest.findUnique({
+        where: { teamId_channelId_parentTs: { teamId, channelId: channel, parentTs: event.thread_ts! } },
+      });
+      if (!request || request.slackUserId !== slackUserId) return { kind: "ignored" };
+      if (request.status === "failed" && RESUME_WORDS.test(text)) {
+        await tx.slackIntakeRequest.update({ where: { id: request.id }, data: { status: "resuming", failure: null } });
+        return { kind: "queued", requestId: request.id };
+      }
+      if (request.status !== "done") {
+        // 選択前・調査中・確認待ちの補足は、起案の材料へ足す（新しいIssueにはしない）
+        await tx.slackIntakeRequest.update({ where: { id: request.id }, data: { text: `${request.text}\n\n（補足）${text}` } });
+        return { kind: "handled" };
+      }
+      return { kind: "followUp", request, text, messageTs: ts };
+    });
+  } catch (error) {
+    // 同じイベントの再送、または同じ親投稿が別のイベントIDで届いた（どちらも依頼は既にある）
+    if (isUniqueViolation(error)) return { kind: "duplicate" };
+    throw error;
+  }
+}
+
+/** ack後の処理。受付で保存した依頼を進める */
+export async function processAcceptedEvent(ctx: IntakeContext, accepted: AcceptedEvent): Promise<void> {
+  if (accepted.kind === "queued") return processPendingRequest(ctx, accepted.requestId);
+  if (accepted.kind !== "followUp") return;
+  try {
+    await handleFollowUp(ctx, accepted.request, accepted.text, accepted.messageTs);
+  } catch (error) {
+    console.error("[slack-intake] 起案済みの依頼への返信を処理できませんでした", error);
+    await reply(ctx, accepted.request, "⚠️ この返信を処理できませんでした（Issueは変更していません）。もう一度返信してください。").catch(
+      () => undefined,
+    );
+  }
+}
+
+/** 受付→処理を続けて行う（テスト・同期処理用）。受け口はack前後に分けて呼ぶ */
+export async function handleMessageEvent(
+  ctx: IntakeContext,
+  teamId: string,
+  eventId: string,
+  event: SlackMessageEvent,
+): Promise<void> {
+  await processAcceptedEvent(ctx, await acceptMessageEvent(ctx.config, teamId, eventId, event));
+}
+
+/**
+ * 待ち状態（`received`・`resuming`）の依頼を1件進める。`staleBefore`を渡すと、それより後に更新された行
+ * （他で処理中のもの）は触らない。読んだ時点の`updatedAt`を条件に更新して処理権を取るので、同じ行を2か所で
+ * 同時に進めない。途中でプロセスが止まると待ち状態のまま残り、`resumeStalePendingRequests`が拾い直す。
+ */
+export async function processPendingRequest(ctx: IntakeContext, requestId: string, staleBefore?: Date): Promise<void> {
+  const request = await db.slackIntakeRequest.findUnique({ where: { id: requestId } });
+  if (!request || !isPendingStatus(request.status)) return;
+  if (staleBefore && request.updatedAt > staleBefore) return;
+  const now = new Date();
+  const claimed = await db.slackIntakeRequest.updateMany({
+    where: { id: request.id, status: request.status, updatedAt: request.updatedAt },
+    data: { updatedAt: now },
+  });
+  if (claimed.count !== 1) return;
+  const current = { ...request, updatedAt: now };
+  try {
+    if (current.status === "received") await startRequest(ctx, current);
+    else await resumeRequest(ctx, current);
+  } catch (error) {
+    // 失敗状態として残す（「再開」で続けられる）。ここも失敗したら待ち状態のまま残り、巡回が拾い直す
+    await failRequest(ctx, current, "受付", error instanceof SlackApiError ? error.code : "受付の処理に失敗しました", {
+      retryable: true,
+      unfinished: "対象リポジトリの選択",
+      resume: RESUME_HINT,
+    });
+  }
+}
+
+/** 処理が止まった待ち状態の依頼を拾い直す（起動時と定期実行。`src/instrumentation.ts`） */
+export async function resumeStalePendingRequests(ctx: IntakeContext, now: Date = new Date()): Promise<number> {
+  let resumed = 0;
+  for (const status of PENDING_STATUSES) {
+    const staleBefore = new Date(now.getTime() - PENDING_STALE_MS[status]);
+    const stale = await db.slackIntakeRequest.findMany({
+      where: { status, updatedAt: { lt: staleBefore } },
+      orderBy: { updatedAt: "asc" },
+      take: 10,
+      select: { id: true },
+    });
+    for (const { id } of stale) {
+      try {
+        await processPendingRequest(ctx, id, staleBefore);
+        resumed += 1;
+      } catch (error) {
+        console.error(`[slack-intake] 止まっていた依頼を再開できませんでした request=${id}`, error);
+      }
+    }
+  }
+  return resumed;
 }
 
 function issuesOf(request: SlackIntakeRequest): IssueRef[] {
@@ -137,50 +315,12 @@ export async function failRequest(
 
 const RESUME_HINT = "このスレッドへ「再開」と返信してください。";
 
-/** 新規の親投稿を受けて、受付→対象選択UIまでを出す */
-export async function handleNewRequest(ctx: IntakeContext, teamId: string, event: SlackMessageEvent): Promise<void> {
-  const { config, client } = ctx;
-  if (!event.channel || !event.ts || !event.user) return;
-  if (!isAllowedLocation(config, teamId, event.channel)) return;
-  const userId = resolveIssueDeckUser(config, event.user);
-  if (!userId) {
-    console.warn("[slack-intake] IssueDeckに対応付いていないSlackユーザーの投稿を無視しました");
-    return;
-  }
-  const files = (event.files ?? []).map((f) => `添付: ${f.name ?? "名称不明"}（内容は未取得・未確認）`);
-  const text = [(event.text ?? "").trim(), ...files].filter(Boolean).join("\n\n");
-  if (!text) return;
-
-  let request: SlackIntakeRequest;
-  try {
-    request = await db.slackIntakeRequest.create({
-      data: {
-        teamId,
-        channelId: event.channel,
-        parentTs: event.ts,
-        slackUserId: event.user,
-        userId,
-        text,
-        status: "awaiting_repo",
-        issues: [],
-        permalink: await fetchPermalink(client, event.channel, event.ts),
-      },
-    });
-  } catch (error) {
-    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") return;
-    throw error;
-  }
-  // 依頼の行を作ったあとの失敗は、握り潰さず失敗状態として残す（「再開」で続けられる）
-  try {
-    await setReaction(client, { channel: event.channel, ts: event.ts, add: "eyes" });
-    await postSelector(ctx, request);
-  } catch (error) {
-    await failRequest(ctx, request, "受付", error instanceof SlackApiError ? error.code : "受付の処理に失敗しました", {
-      retryable: true,
-      unfinished: "対象リポジトリの選択",
-      resume: RESUME_HINT,
-    });
-  }
+/** 受付済み（`received`）の依頼に👀と対象選択UIを出す。選択UIを出せた時点で`awaiting_repo`へ進む */
+async function startRequest(ctx: IntakeContext, request: SlackIntakeRequest): Promise<void> {
+  const permalink = request.permalink ?? (await fetchPermalink(ctx.client, request.channelId, request.parentTs));
+  const next = permalink === request.permalink ? request : await db.slackIntakeRequest.update({ where: { id: request.id }, data: { permalink } });
+  await setReaction(ctx.client, { channel: request.channelId, ts: request.parentTs, add: "eyes" });
+  await postSelector(ctx, next);
 }
 
 async function postSelector(ctx: IntakeContext, request: SlackIntakeRequest): Promise<void> {
@@ -201,7 +341,10 @@ async function postSelector(ctx: IntakeContext, request: SlackIntakeRequest): Pr
       "受け付けました。起案する*対象リポジトリ*を選んでください。選ぶまでIssueは作りません。",
       repoSelectorBlocks({ requestId: request.id, candidates, selected: guess, guessed: guess !== null }),
     );
-    await db.slackIntakeRequest.update({ where: { id: request.id }, data: { selectorTs: posted.ts, selectedRepo: null } });
+    await db.slackIntakeRequest.update({
+      where: { id: request.id },
+      data: { status: "awaiting_repo", selectorTs: posted.ts, selectedRepo: null },
+    });
   } catch (error) {
     await failRequest(ctx, request, "対象選択UIの投稿", error instanceof SlackApiError ? error.message : "予期しないエラー", {
       retryable: !(error instanceof SlackApiError) || error.retryable,
@@ -218,27 +361,8 @@ export async function searchRepoOptions(config: SlackConfig, slackUserId: string
   return filterCandidates(await listRepoCandidates(config, userId), query);
 }
 
-/** スレッド返信 */
-export async function handleThreadReply(ctx: IntakeContext, teamId: string, event: SlackMessageEvent): Promise<void> {
-  if (!event.channel || !event.ts || !event.thread_ts || !event.user) return;
-  if (!isAllowedLocation(ctx.config, teamId, event.channel)) return;
-  const request = await db.slackIntakeRequest.findUnique({
-    where: { teamId_channelId_parentTs: { teamId, channelId: event.channel, parentTs: event.thread_ts } },
-  });
-  if (!request || request.slackUserId !== event.user) return;
-  const text = (event.text ?? "").trim();
-  if (!text) return;
-
-  if (request.status === "failed" && RESUME_WORDS.test(text)) {
-    await resumeRequest(ctx, request);
-    return;
-  }
-  if (request.status !== "done") {
-    // 選択前・調査中・確認待ちの補足は、起案の材料へ足す（新しいIssueにはしない）
-    await db.slackIntakeRequest.update({ where: { id: request.id }, data: { text: `${request.text}\n\n（補足）${text}` } });
-    return;
-  }
-
+/** 起案済み（`done`）の依頼への返信。補足・質問・分割・お礼を振り分ける（受付は`acceptMessageEvent`） */
+async function handleFollowUp(ctx: IntakeContext, request: SlackIntakeRequest, text: string, messageTs: string): Promise<void> {
   const kind = classifyFollowUp(text);
   if (kind === "thanks") return;
   if (issuesOf(request).length === 0) {
@@ -253,18 +377,20 @@ export async function handleThreadReply(ctx: IntakeContext, teamId: string, even
     const primary = issuesOf(request)[0];
     return runProposal(ctx, request, text, primary ? primary.number : null);
   }
-  return attachSupplement(ctx, request, text, event.ts);
+  return attachSupplement(ctx, request, text, messageTs);
 }
 
+/**
+ * 「再開」（`resuming`）。状態は**処理が終わるまで`resuming`のまま**にする（途中で止まったら巡回が拾い直せるように）。
+ * 選択UIを出せば`awaiting_repo`、調査が終われば`awaiting_confirm`・`done`・`failed`へ進む
+ */
 async function resumeRequest(ctx: IntakeContext, request: SlackIntakeRequest): Promise<void> {
   await setReaction(ctx.client, { channel: request.channelId, ts: request.parentTs, add: "eyes", remove: "warning" });
   if (!request.selectedRepo) {
-    await db.slackIntakeRequest.update({ where: { id: request.id }, data: { status: "awaiting_repo", failure: null } });
     await postSelector(ctx, request);
     return;
   }
-  await db.slackIntakeRequest.update({ where: { id: request.id }, data: { status: "investigating", failure: null } });
-  await runProposal(ctx, { ...request, status: "investigating" }, request.text, null);
+  await runProposal(ctx, request, request.text, null);
 }
 
 async function answerQuestion(ctx: IntakeContext, request: SlackIntakeRequest, text: string): Promise<void> {
@@ -610,14 +736,4 @@ async function linkSplit(ctx: IntakeContext, request: SlackIntakeRequest, user: 
       body: `同じSlackスレッドの別成果を #${to} として分割しました（独立して実装・検証できるため）。\n${FOOTER_MARKER(request)}`,
     }),
   ).catch((error: unknown) => console.error("[slack-intake] 分割元へのリンクコメントに失敗しました", error));
-}
-
-/** スレッド返信・新規投稿のイベント振り分け（Botの投稿・編集・リンク展開は無視する） */
-export async function handleMessageEvent(ctx: IntakeContext, teamId: string, event: SlackMessageEvent): Promise<void> {
-  if (event.type !== "message") return;
-  if (event.bot_id || event.app_id) return;
-  if (event.subtype && event.subtype !== "file_share") return;
-  if (!event.user || !event.ts) return;
-  if (event.thread_ts && event.thread_ts !== event.ts) return handleThreadReply(ctx, teamId, event);
-  return handleNewRequest(ctx, teamId, event);
 }

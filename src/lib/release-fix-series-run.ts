@@ -6,7 +6,14 @@ import { removeCheckUserWithReason } from "@/lib/dispatch/check-user-labels";
 import { enqueueDispatchJob } from "@/lib/dispatch/jobs";
 import { fetchPullRequest } from "@/lib/github/actions-api";
 import { getInstallationToken } from "@/lib/github/app-auth";
-import { addIssueLabels, createComment, createIssue, fetchIssueStateOrThrow, updateIssue } from "@/lib/github/issues-api";
+import {
+  addIssueLabels,
+  createComment,
+  createIssue,
+  fetchIssueState,
+  fetchIssueStateOrThrow,
+  updateIssue,
+} from "@/lib/github/issues-api";
 import {
   fetchOpenPullRequestsForBase,
   fetchPullRequestForRebuild,
