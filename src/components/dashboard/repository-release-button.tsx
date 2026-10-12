@@ -136,7 +136,10 @@ export function RepositoryReleaseButton({
       {/* 誤タップでの起動を防ぐため確認を挟む。文面はヘッダーのロケットボタンと揃えている */}
       <AlertDialog open={confirmOpen} onOpenChange={(open) => {
         setConfirmOpen(open);
-        if (!open) setAllowFailedDeploy(false);
+        if (!open) {
+          setAllowFailedDeploy(false);
+          setBumpKind(null);
+        }
       }}>
         <AlertDialogContent className="flex flex-col gap-4 overflow-hidden">
           <AlertDialogHeader>

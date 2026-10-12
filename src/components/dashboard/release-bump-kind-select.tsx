@@ -1,5 +1,7 @@
 "use client";
 
+import { useState } from "react";
+
 import { BUMP_KINDS, nextVersion, type BumpKind } from "@/lib/semver-bump";
 import { cn } from "@/lib/utils";
 
@@ -23,7 +25,7 @@ type ReleaseBumpKindSelectProps = {
  * 選べるようにして、後から直す必要そのものを無くす。
  *
  * 既定は「自動判定」（`null`）で、選ばなければ起動の挙動は今までと変わらない。
- * major・minor・patchは横3列で並べ、基準の説明文は出さない（#4310）。
+ * 自動判定中は「手動で変える」だけを出し、押したときだけmajor・minor・patchを横3列で出す（#4465）。
  * スクロール領域の中でも上部に固定表示する。
  *
  * 起動の導線は2か所（ヘッダーのロケットボタンと「ブランチ」画面）あるため、
@@ -36,27 +38,43 @@ export function ReleaseBumpKindSelect({
   disabled = false,
 }: ReleaseBumpKindSelectProps) {
   const kinds = [...BUMP_KINDS].reverse();
-  const autoSelected = value === null;
+  // 手動で変えるを押した直後（まだ未選択）も開いたままにするため、選択値とは別に持つ。
+  // ダイアログを閉じると部品ごと破棄されるので、開き直せば自動判定の閉じた状態に戻る（#4465）
+  const [manualOpen, setManualOpen] = useState(false);
+  const expanded = manualOpen || value !== null;
 
   return (
     <div className="sticky top-0 z-10 flex flex-col gap-1.5 bg-popover pb-2">
-      <p className="text-xs font-medium text-muted-foreground">バージョンの上げ幅</p>
-      <div className="flex flex-col gap-1" role="radiogroup" aria-label="バージョンの上げ幅">
-        <button
-          type="button"
-          role="radio"
-          aria-checked={autoSelected}
-          disabled={disabled}
-          onClick={() => onChange(null)}
-          className={cn(
-            "flex items-center gap-2 rounded-md border px-2.5 py-1.5 text-left text-xs disabled:opacity-60",
-            autoSelected ? "border-primary bg-primary/10 font-semibold" : "border-border hover:bg-accent/50",
-          )}
-        >
-          <span>自動判定</span>
-          <span className="ml-auto text-muted-foreground">既定</span>
-        </button>
-        <div className="grid grid-cols-3 gap-1">
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-xs font-medium text-muted-foreground">
+          バージョンの上げ幅：{expanded ? "手動" : "自動判定"}
+        </p>
+        {expanded ? (
+          <button
+            type="button"
+            disabled={disabled}
+            onClick={() => {
+              onChange(null);
+              setManualOpen(false);
+            }}
+            className="text-xs text-primary hover:underline disabled:opacity-60"
+          >
+            自動判定に戻す
+          </button>
+        ) : (
+          <button
+            type="button"
+            aria-expanded={false}
+            disabled={disabled}
+            onClick={() => setManualOpen(true)}
+            className="rounded-md border border-border px-2 py-0.5 text-xs hover:bg-accent/50 disabled:opacity-60"
+          >
+            手動で変える
+          </button>
+        )}
+      </div>
+      {expanded && (
+        <div className="grid grid-cols-3 gap-1" role="radiogroup" aria-label="バージョンの上げ幅">
           {kinds.map((kind) => {
             const selected = kind === value;
             const hint = hintFor(currentVersion, kind);
@@ -83,7 +101,7 @@ export function ReleaseBumpKindSelect({
             );
           })}
         </div>
-      </div>
+      )}
     </div>
   );
 }

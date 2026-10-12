@@ -1154,17 +1154,17 @@ describe("BranchFlowView", () => {
       openRepository();
       fireEvent.click(screen.getByText("リリースする"));
 
-      expect(screen.getByText("バージョンの上げ幅")).toBeTruthy();
-      const options = screen.getAllByRole("radio");
-      expect(options.map((option) => option.textContent?.startsWith("自動判定"))).toContain(true);
-      // 既定は自動判定
-      expect(options[0].getAttribute("aria-checked")).toBe("true");
+      // 既定は自動判定で、手動の選択肢は閉じている
+      expect(screen.getByText("バージョンの上げ幅：自動判定")).toBeTruthy();
+      expect(screen.queryAllByRole("radio")).toHaveLength(0);
+
+      fireEvent.click(screen.getByText("手動で変える"));
+      expect(screen.getAllByRole("radio")).toHaveLength(3);
 
       fireEvent.click(screen.getByText("minor"));
       expect(screen.getByText("minor").closest("[role='radio']")?.getAttribute("aria-checked")).toBe(
         "true",
       );
-      expect(options[0].getAttribute("aria-checked")).toBe("false");
     });
 
     it("起動に成功したら、バンプPRが現れるまで押せないままにする（#1548）", async () => {
