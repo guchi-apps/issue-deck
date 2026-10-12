@@ -26,7 +26,7 @@ describe("PullRequestMergeChecks", () => {
     expect(html).toContain("リリース未作成");
     expect(html.match(/<button/g)).toHaveLength(6);
     // スマホは3項目ずつの2段、広い画面は1行（横スクロールにしない）
-    expect(html).toContain("grid-cols-3 sm:grid-cols-6");
+    expect(html).toContain("grid-cols-3 xl:grid-cols-6");
     expect(html).not.toContain("計画");
   });
 
