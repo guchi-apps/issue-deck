@@ -24,6 +24,7 @@ import {
 import { BulkReserveDock, BulkReserveEntryBar } from "@/components/dashboard/bulk-reserve-bar";
 import { useCodeReviewRecommendSettings } from "@/components/dashboard/use-code-review-recommend-settings";
 import { DependencyWaitBadge } from "@/components/dashboard/dependency-wait-panel";
+import { ParentRunBadge } from "@/components/dashboard/parent-run-section";
 import { CodeReviewRepoOverview } from "@/components/dashboard/code-review-repo-overview";
 import { CodeReviewResultBadges } from "@/components/dashboard/code-review-result-badges";
 import { IssueAttentionLine } from "@/components/dashboard/issue-attention-line";
@@ -978,6 +979,11 @@ export function IssueList({
           w.status !== "RESUMED" &&
           w.status !== "CANCELLED",
       ) ?? null;
+    // 親Issueの自動実行（#4536）。進行中・一時停止中・要対応を、親の行に1つの印で出す
+    const parentRun =
+      (dispatch.parentRuns ?? []).find(
+        (r) => r.repositoryFullName === issue.repositoryFullName && r.issueNumber === issue.number,
+      ) ?? null;
     // 実行中は一覧から保留にして処理を隠せないようにする（#2610）。GitHub Actionsと
     // ローカルエージェントの判定は、それぞれ既存の一覧用の状態をそのまま使う。
     const isRunning =
@@ -1269,6 +1275,7 @@ export function IssueList({
                 <IssueAgentBadge agent={resolveIssueImplementationAgent(issueSession)} />
               )}
               {dependencyWait && <DependencyWaitBadge wait={dependencyWait} />}
+              {parentRun && <ParentRunBadge run={parentRun} />}
               <QuestionStateBadge
                 state={resolveQuestionState(issue)}
                 waiting={isQaAnswerWaiting(issue) && !stepBadgeShowsQaAnswerPending}

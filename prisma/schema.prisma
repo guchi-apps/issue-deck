@@ -3167,3 +3167,61 @@ model ExecutionPlanVersion {
 
   @@unique([planId, version])
 }
+
+// 親Issueの自動実行（#4536）。#4535の`ExecutionPlan`を開始時の版へ結びつけ、計画内の子を依存順に起動する。
+// **対象の子は開始時に`ParentRunChild`として固定する**（計画・子一覧が後で変わっても黙って増減しない）。
+// 状態: RUNNING（進行中）/ PAUSED（新規起動を一時停止）/ STOPPED（未起動の子も停止）/ COMPLETED（全体の完了条件が揃った）
+model ParentRun {
+  id               String   @id @default(cuid())
+  parentRepository String   @db.VarChar(191)
+  parentIssue      Int
+  planVersion      Int
+  // 全ての子の起動に使う実行先（開始時に選ぶ）
+  hostName         String   @db.VarChar(191)
+  agent            String   @default("claude") @db.VarChar(16)
+  claudeModel      String?  @db.VarChar(32)
+  codexModel       String?  @db.VarChar(32)
+  // 同時に起動済み・未完了にしてよい子の上限
+  maxParallel      Int      @default(2)
+  status           String   @default("RUNNING") @db.VarChar(16)
+  startedByUserId  String   @db.VarChar(191)
+  // 親全体の本番確認（人が確認して記録する。自動では成立しない）
+  verifiedAt       DateTime?
+  // 稼働中の実行は親ごとに1件。終了（STOPPED・COMPLETED）でnullへ戻す
+  activeKey        String?  @unique @db.VarChar(255)
+  lastSweepAt      DateTime?
+  // 直近の巡回で見た計画版の食い違い・権限などの注意（画面に出す）
+  notice           String?  @db.VarChar(500)
+  // 直近の巡回の集計（件数・次の対象・完了条件の証拠）。画面はGitHubを呼ばずここを読む
+  summary          Json?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  children ParentRunChild[]
+
+  @@index([parentRepository, parentIssue])
+}
+
+// 子ごとの起動状態。`launchState`: PENDING（未起動）/ LAUNCHING（起動の受付中）/ LAUNCHED（ジョブを積んだ・既存の実行を再利用）/
+// LAUNCH_FAILED（起動できなかった。再試行で`attempt`が進む）/ SKIPPED（停止で起動しなかった）。
+// 起動の二重取得は`launchState`の条件付き更新（PENDING→LAUNCHING）で防ぎ、再試行は`attempt`を進めて取り直す。
+model ParentRunChild {
+  id           String    @id @default(cuid())
+  runId        String
+  repository   String    @db.VarChar(191)
+  number       Int
+  launchState  String    @default("PENDING") @db.VarChar(16)
+  attempt      Int       @default(1)
+  jobId        String?   @db.VarChar(191)
+  launchedAt   DateTime?
+  // 子の成果の本番確認（人が記録する。計画の`verified`条件の証拠）
+  verifiedAt   DateTime?
+  // 直近の巡回で評価した画面用の状態（`ChildDisplay`）。画面はGitHubを呼ばずここを読む
+  display      Json?
+  lastError    String?   @db.VarChar(500)
+  updatedAt    DateTime  @updatedAt
+
+  run ParentRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@unique([runId, repository, number])
+}

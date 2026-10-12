@@ -1645,6 +1645,22 @@ sweep_dependency_waits() {
   return 0
 }
 
+# 親Issueの自動実行（#4536）を定期評価する。着手条件の再評価・次の子の起動・取りこぼしの回収は
+# issue-deck側が持ち、ここは呼ぶだけにする。
+sweep_parent_runs() {
+  if ! api_call POST /api/dispatch/parent-run/sweep '{}'; then
+    case "$API_RESPONSE_STATUS" in
+      404|000) return 0 ;;
+      *) report_api_failure "親Issueの自動実行の巡回に失敗しました" ;;
+    esac
+    return 0
+  fi
+  printf '%s' "$API_RESPONSE_BODY" |
+    jq -r '.actions[]? | "親Issueの子を起動しました: \(.launched | join(", "))"' 2>/dev/null ||
+    true
+  return 0
+}
+
 # リリース候補の修正系列（#4317）を進める。修正PRのdevelop取り込みの観測・候補の作り直し・
 # 新しいSHAでの再検証の判定はissue-deck側が持ち、ここは呼ぶだけにする。
 # 再検証の追加指摘で次世代の修正Issueへ戻したときは、実装をこのホストで起動するためホスト名を渡す（#4478）。
@@ -4516,6 +4532,8 @@ run_once() {
     # 実装セッションの依存待ち（#4321）。**dry-runでは呼ばない**（セッションへの再開指示と
     # Issueコメントという外向きの副作用があるため）。
     sweep_dependency_waits
+    # 親Issueの自動実行（#4536）。**dry-runでは呼ばない**（子の実装セッションを起動する副作用があるため）。
+    sweep_parent_runs
     sweep_codex_pull_request_reviews
     sweep_rebuild_history
     # iOS配布失敗の巡回検知（#3745）。**dry-runでは呼ばない**（Issueの起票という外向きの副作用があるため）。
