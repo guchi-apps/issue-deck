@@ -107,7 +107,8 @@ vi.mock("@/lib/github/release-api", () => ({
   fetchMainHeadSha: (...args: unknown[]) => fetchMainHeadSha(...args),
   fetchPullRequestCiState: (...args: unknown[]) => fetchPullRequestCiState(...args),
 }));
-vi.mock("@/lib/github/deploy-launch-watch", () => ({ recordDeployLaunchWatch: vi.fn(async () => true) }));
+const recordDeployLaunchWatch = vi.fn(async () => true);
+vi.mock("@/lib/github/deploy-launch-watch", () => ({ recordDeployLaunchWatch: (...args: unknown[]) => recordDeployLaunchWatch(...(args as [])) }));
 const createComment = vi.fn(async () => ({}));
 const addIssueLabels = vi.fn(async () => []);
 vi.mock("@/lib/github/issues-api", () => ({
@@ -262,6 +263,20 @@ describe("runReleaseCompletionSweep", () => {
     expect(mergePullRequest).toHaveBeenCalledTimes(1);
     expect(mergePullRequest).toHaveBeenCalledWith("o", "r", 11, "token", "head2");
     expect(runs[0]).toMatchObject({ status: "releasing", mergeSha: "merge1", mergedByRun: true });
+  });
+
+  it("マージ応答にSHAが無くても次の巡回で確定したSHAの起動監視を登録する", async () => {
+    await start();
+    loadReleaseVerificationSummary.mockResolvedValue(summary("passed", "passed"));
+    mergePullRequest.mockResolvedValue({ sha: null });
+    await runReleaseCompletionSweep({ hostName: "subpc", now });
+    expect(runs[0]).toMatchObject({ status: "merging", mergeSha: null, mergedByRun: true });
+    recordDeployLaunchWatch.mockClear();
+    fetchPullRequest.mockResolvedValue(pull({ state: "closed", merged: true, merge_commit_sha: "recovered-sha" }));
+    await runReleaseCompletionSweep({ hostName: "subpc", now: later(1) });
+    expect(runs[0]).toMatchObject({ status: "releasing", mergeSha: "recovered-sha", mergedByRun: true });
+    expect(recordDeployLaunchWatch).toHaveBeenCalledWith({ owner: "o", repo: "r", pullRequestNumber: 10, mergeCommitSha: "recovered-sha", token: "token" });
+    expect(mergePullRequest).toHaveBeenCalledTimes(1);
   });
 
   it("チェック通過までの系列は本番へマージせず、人がマージしたら稼働確認まで追跡する", async () => {

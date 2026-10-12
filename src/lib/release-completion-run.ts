@@ -512,7 +512,17 @@ async function applyDecision(
         where: { id: run.id, status: run.status },
         data: { status: "releasing", mergeSha: decision.mergeSha, releaseStartedAt: now, note: null },
       });
-      return updated.count === 1 ? { action: "begin_release", detail: decision.mergeSha } : null;
+      if (updated.count !== 1) return null;
+      // マージ応答のSHAが欠けた場合も、PRから確定したSHAで起動監視を登録する。
+      // 既存の監視はupsertにより保持される。
+      await recordDeployLaunchWatch({
+        owner: ctx.owner,
+        repo: ctx.repo,
+        pullRequestNumber: run.candidatePrNumber,
+        mergeCommitSha: decision.mergeSha,
+        token: ctx.token,
+      }).catch((error: unknown) => console.error("[release-completion] デプロイの見張りを置けませんでした", run.id, error));
+      return { action: "begin_release", detail: decision.mergeSha };
     }
     case "evaluate_merge":
       return evaluateAndMerge(run, ctx, now, observation);
