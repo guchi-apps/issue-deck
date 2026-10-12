@@ -115,8 +115,9 @@ describe("ReleasePullRequestOverview（#4428）", () => {
     expect(screen.getByText("本番公開へ進む")).toBeTruthy();
     expect(screen.queryByTestId("release-fix-phases")).toBeNull();
     expect(screen.queryByTestId("release-fix-auto")).toBeNull();
-    // 正式タイトルは本文側に全文で出す
-    expect(screen.getByRole("heading", { name: "v4.41.1をmainへリリースする" })).toBeTruthy();
+    // 正式タイトルは共通詳細の見出しが持つので、要約側では出さず、ブランチ情報だけを出す（#4463）
+    expect(screen.queryByText("v4.41.1をmainへリリースする")).toBeNull();
+    expect(screen.getByText(/release-main\/v4\.41\.1 → /)).toBeTruthy();
     // 並び: 状態 → 検証 → 今回の変更
     const sections = screen.getAllByRole("region").map((el) => el.getAttribute("aria-label"));
     expect(sections.slice(0, 3)).toEqual(["現在の状態と次の操作", "現在候補の検証", "今回リリースする変更"]);
