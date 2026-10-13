@@ -180,6 +180,19 @@ on:
         required: false
         type: string
         default: ""
+      candidate_request:
+        # リリース候補の作成・更新の要求（guchi-apps/issue-deck#4495）。issue-deckのサーバーが
+        # 組み立てるJSONで、手で入力するものではない。画面の「候補を作成して検証」が使う
+        description: "リリース候補の作成・更新の要求（issue-deckが指定する）"
+        required: false
+        type: string
+        default: ""
+      finalize_request:
+        # 合格した候補の公開準備＝正式バンプの要求（guchi-apps/issue-deck#4496）。同上
+        description: "リリース候補の公開準備（正式バンプ）の要求（issue-deckが指定する）"
+        required: false
+        type: string
+        default: ""
   push:
     branches: [develop]
     paths:
@@ -201,6 +214,8 @@ jobs:
       # pushトリガー（バンプPRのマージ）で起動したときは\`inputs\`自体が無いため空文字を渡す。
       bump-kind: \${{ github.event_name == 'workflow_dispatch' && inputs.bump_kind || '' }}
       rebuild-selection: \${{ github.event_name == 'workflow_dispatch' && inputs.rebuild_selection || '' }}
+      candidate-request: \${{ github.event_name == 'workflow_dispatch' && inputs.candidate_request || '' }}
+      finalize-request: \${{ github.event_name == 'workflow_dispatch' && inputs.finalize_request || '' }}
     secrets: inherit
     # **呼ばれる側の権限はcallerの付与範囲を超えられない。** issues が write なのは、
     # 呼ばれる側の notify-failure ジョブがリリース対象issueへ失敗を通知するため。
