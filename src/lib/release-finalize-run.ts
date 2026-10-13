@@ -236,6 +236,17 @@ export async function settleReservationsOnCancel(ctx: Context, candidateId: stri
 // ---------------------------------------------------------------------------
 // 要求
 
+/**
+ * マージ済みの候補PRを取り消すとき、マージコミット（main）に入っている正式版を読む。
+ * 自動バンプでは取込前に予約が無いことがあるため、取消側が版を確定して消費済みとして残す（developへの同期の検出を失わない）。
+ * 版を読めなければ`null`（呼び出し側は取り消さない）
+ */
+export async function readVersionAtMergeSha(ctx: Context, mergeSha: string): Promise<string | null> {
+  const caller = parseFinalizeCallerSupport(await fetchReleaseCallerText(ctx.owner, ctx.repo, ctx.token).catch(() => null));
+  if (!caller.supported) return null;
+  return readVersionFromText(await fetchFileTextAtRef(ctx.owner, ctx.repo, caller.versionFile, mergeSha, ctx.token).catch(() => null), caller.versionQuery);
+}
+
 export type FinalizeMutationError =
   | keyof typeof FINALIZE_START_ERROR_LABEL
   | "not_found"

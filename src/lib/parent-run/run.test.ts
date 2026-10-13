@@ -115,7 +115,7 @@ function deps(): Deps {
       branchPrs: async (ref) => prs[ref.number] ?? { kind: "none" },
       subIssues: async () => [],
     },
-    observePr: async (ref) => ({ merged: merged.has(ref.number), inProduction: false }),
+    observePr: async (ref) => ({ merged: merged.has(ref.number), inProduction: false, integration: true }),
     enqueue: enqueue as unknown as Deps["enqueue"],
     now: () => new Date(),
   };
@@ -198,7 +198,7 @@ describe("親Issueの自動実行", () => {
     prs[1] = { kind: "one", number: 10 };
     merged.add(10);
     const d = deps();
-    d.observePr = async () => ({ merged: true, inProduction: true });
+    d.observePr = async () => ({ merged: true, inProduction: true, integration: true });
     const r = await applyRunAction(parent, { type: "verify", child: { repository: R, number: 1 } }, d);
     expect(r.ok).toBe(true);
     expect(store.tables.parentRunChild.find((c) => c.number === 1)?.verifiedAt).toBeTruthy();

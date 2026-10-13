@@ -16,6 +16,7 @@ import {
   fetchReleaseRebuildCandidate,
   isAncestorCommit,
 } from "@/lib/github/release-api";
+import { readVersionAtMergeSha } from "@/lib/release-finalize-run";
 import { isUniqueConstraintError } from "@/lib/prisma-error";
 import { isLegacyReleaseCandidateHeadRef, legacyReleaseVersionOf, rcBranchName } from "@/lib/release-branch";
 import { isReleaseFixActive } from "@/lib/release-fix-series";
@@ -708,6 +709,7 @@ export async function cancelReleaseRc(input: Context & { userId: string; candida
   // 人が終わらせる出口。**予約した版はマージで使われたので消費済みにしてから**取り消す（版を再利用させず、
   // developへの同期の検出〈`findUnsyncedPublish`〉も失わせない）。マージの有無を確かめられないときは取り消さない
   let mergedSha: string | null = null;
+  let mergedVersion: string | null = null;
   if (phase === "preparing" || phase === "awaiting_approval") {
     const prs = await fetchPullRequestsByHead(ctx.owner, ctx.repo, rcBranchName(row.sequence), "main", ctx.token).catch(() => null);
     if (prs === null) return { ok: false, error: "not_cancellable" };
@@ -715,6 +717,13 @@ export async function cancelReleaseRc(input: Context & { userId: string; candida
     if (merged) {
       if (!merged.merge_commit_sha) return { ok: false, error: "not_cancellable" };
       mergedSha = merged.merge_commit_sha;
+      // 自動バンプでは取込前に予約が無いことがある。予約が無ければ、マージ後のmainの版を確定して消費済みで残す。
+      // 確定できないときは、公開済み版の追跡を失うため取り消さない
+      const hasReservation = (await db.releaseVersionReservation.count({ where: { candidateId: row.id, status: { in: ["reserved", "consumed"] } } })) > 0;
+      if (!hasReservation) {
+        mergedVersion = await readVersionAtMergeSha(ctx, mergedSha).catch(() => null);
+        if (!mergedVersion) return { ok: false, error: "not_cancellable" };
+      }
     }
   }
   const now = new Date();
@@ -736,6 +745,22 @@ export async function cancelReleaseRc(input: Context & { userId: string; candida
         where: { candidateId: row.id, status: "reserved" },
         data: { status: "consumed", consumedAt: now, consumedMergeSha: mergedSha },
       });
+      if (mergedVersion) {
+        const fullName = fullNameOf(ctx);
+        const existing = await tx.releaseVersionReservation.findUnique({
+          where: { repositoryFullName_version: { repositoryFullName: fullName, version: mergedVersion } },
+        });
+        if (!existing) {
+          await tx.releaseVersionReservation.create({
+            data: { repositoryFullName: fullName, version: mergedVersion, candidateId: row.id, status: "consumed", consumedAt: now, consumedMergeSha: mergedSha },
+          });
+        } else if (existing.status !== "consumed" || existing.consumedMergeSha === null) {
+          await tx.releaseVersionReservation.update({
+            where: { id: existing.id },
+            data: { candidateId: row.id, status: "consumed", consumedAt: now, consumedMergeSha: mergedSha, releasedAt: null },
+          });
+        }
+      }
     }
     return true;
   });
