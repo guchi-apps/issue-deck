@@ -1522,7 +1522,7 @@ function NextReleaseCard({
       data-testid="next-release-card"
     >
       <p className="text-xs font-semibold tracking-wide text-primary">次のリリース</p>
-      <dl className="grid grid-cols-2 gap-2">
+      <dl className="grid grid-cols-1 gap-2 @sm:grid-cols-2">
         <div className="min-w-0 rounded-md border px-2.5 py-1.5">
           <dt className="text-muted-foreground">本番稼働中</dt>
           <dd className="flex flex-wrap items-center gap-x-1.5 text-sm font-semibold">
