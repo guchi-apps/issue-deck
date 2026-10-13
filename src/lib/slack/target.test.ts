@@ -2,6 +2,8 @@ import { describe, expect, it, vi } from "vitest";
 
 vi.mock("@/lib/db", () => ({ db: { issue: { findMany: vi.fn().mockResolvedValue([{ title: "車検の期限を出す", repository: { fullName: "guchi-apps/car-care" } }]) } } }));
 
+vi.mock("@/lib/chat/investigation/model", () => ({ resolveChatExecution: vi.fn().mockResolvedValue({ mode: "api" }) }));
+
 import { extractExplicitRepos, resolveTarget, type TargetModel } from "@/lib/slack/target";
 
 const candidates = [
@@ -44,5 +46,21 @@ describe("対象リポジトリの判別（#4527）", () => {
     expect((await resolveTarget("x", candidates, { callModel: model({ repo: "evil/x", confidence: "high", candidates: [], reason: "" }) })).kind).toBe("ambiguous");
     expect((await resolveTarget("x", candidates, { callModel: async () => ({ ok: false, reason: "HTTP 429" }) })).kind).toBe("ambiguous");
     expect((await resolveTarget("x", candidates, { callModel: async () => ({ ok: true, text: "not json" }) })).kind).toBe("ambiguous");
+  });
+
+  it("AI判別が失敗しても、語の一致で関連候補に絞る。一意に強く一致すれば確認なしで決める", async () => {
+    const decision = await resolveTarget("車検の期限が分かりにくい", candidates, { callModel: async () => ({ ok: false, reason: "HTTP 401" }) });
+    expect(decision).toMatchObject({ kind: "resolved", repo: "guchi-apps/car-care" });
+  });
+
+  it("手がかりが無いAI失敗では、先頭の候補を並べず空の候補と失敗理由を返す", async () => {
+    const decision = await resolveTarget("改善したい", candidates, { callModel: async () => ({ ok: false, reason: "HTTP 429" }) });
+    expect(decision).toMatchObject({ kind: "ambiguous", options: [], aiFailure: "HTTP 429" });
+  });
+
+  it("Codex設定でAI判別をスキップしたときは失敗扱いにせず、語の一致で絞る", async () => {
+    const decision = await resolveTarget("改善したい", candidates, { callModel: async () => ({ ok: false, reason: "Codexのため", skipped: true }) });
+    expect(decision).toMatchObject({ kind: "ambiguous", options: [] });
+    expect((decision as { aiFailure?: string }).aiFailure).toBeUndefined();
   });
 });

@@ -21,6 +21,10 @@ const mocks = vi.hoisted(() => ({
   fetchCommentsForIssue: vi.fn(),
   githubForUser: vi.fn(),
   registerPlan: vi.fn(),
+  resolveChatExecution: vi.fn(),
+  createCodexSession: vi.fn(),
+  runCreate: vi.fn(),
+  runUpdate: vi.fn(),
 }));
 
 vi.mock("@/lib/db", () => {
@@ -37,12 +41,28 @@ vi.mock("@/lib/db", () => {
     repository: { findMany: mocks.repoFindMany },
     issue: { findFirst: mocks.issueFindFirst },
     chatConversation: { create: mocks.convCreate, findUnique: mocks.convFind, update: vi.fn() },
-    chatMessage: { create: vi.fn() },
+    chatMessage: { create: vi.fn().mockResolvedValue({ id: "msg-user" }) },
+    chatRun: { create: mocks.runCreate, update: mocks.runUpdate },
   };
   // 対話型トランザクションは同じモックをtxとして渡す（配列形式は何もしない）
   db.$transaction = vi.fn(async (arg: unknown) => (typeof arg === "function" ? (arg as (tx: unknown) => unknown)(db) : []));
   return { db };
 });
+vi.mock("@/lib/chat/investigation/model", () => ({ resolveChatExecution: mocks.resolveChatExecution }));
+vi.mock("@/lib/chat/investigation/codex-model", () => ({
+  CODEX_CLI_PROVIDER: "codex-cli",
+  CODEX_INVESTIGATION_LIMITS: { maxDurationMs: 1, stepTimeoutMs: 1 },
+  createCodexSession: mocks.createCodexSession,
+}));
+vi.mock("@/lib/chat/investigation/reply", () => ({
+  describeUnavailable: (raw: string) => {
+    const codex = /Codex\((\w+)\)/.exec(raw)?.[1];
+    if (codex === "not_logged_in") return { kind: "codex_not_logged_in", label: "サブPCのCodex CLIが未ログインです", next: "サブPCで `codex login` を済ませてください。" };
+    if (/HTTP 401/.test(raw)) return { kind: "auth_rejected", label: "AIの認証が拒否されました", next: "認証情報を確認してください。" };
+    if (/時間切れ/.test(raw)) return { kind: "network", label: "AIとの通信に失敗しました", next: "少し待って再試行してください。" };
+    return { kind: "other", label: "AIの調査を始められませんでした", next: "再試行してください。" };
+  },
+}));
 vi.mock("@/lib/epic-draft/github", () => ({ githubForUser: mocks.githubForUser }));
 vi.mock("@/lib/epic-draft/plan", () => ({ getEpicPlanRegistrar: () => mocks.registerPlan }));
 vi.mock("@/lib/chat/handlers", () => ({
@@ -142,6 +162,9 @@ beforeEach(() => {
   mocks.fetchCommentsForIssue.mockResolvedValue([]);
   mocks.executeConfirmedCard.mockResolvedValue(createdOutcome());
   setTargetModelForTest(undefined);
+  mocks.resolveChatExecution.mockResolvedValue({ mode: "api" });
+  mocks.runCreate.mockResolvedValue({ id: "run-1" });
+  mocks.runUpdate.mockResolvedValue({});
 });
 
 const msg = (over: object = {}) => ({ type: "message", user: "U1", ts: "100.1", channel: "C1", text: "改善したい", ...over });
@@ -240,7 +263,7 @@ describe("ack前の受付と、ack後の処理の再開（#4488）", () => {
     expect(call).not.toHaveBeenCalled();
   });
 
-  it("対象を絞れない依頼だけ、同じスレッドで候補（名称とowner/repo）を聞いてawaiting_repoへ進める。ボタンは出さない", async () => {
+  it("対象を絞れない依頼だけ、関連候補の選択メニューと名称検索を出してawaiting_repoへ進める", async () => {
     setTargetModelForTest(ambiguousModel);
     mocks.requestFindUnique.mockResolvedValue({ ...baseRequest, text: "改善したい", status: "received", permalink: null, selectorTs: null });
     await processPendingRequest(ctx, "req-1");
@@ -255,7 +278,31 @@ describe("ack前の受付と、ack後の処理の再開（#4488）", () => {
     expect(texts).toHaveLength(1);
     expect(texts[0]).toContain("guchi-apps/car-care");
     expect(texts[0]).toContain("guchi-apps/issue-deck");
-    expect((call.mock.calls.find(([m]) => m === "chat.postMessage")![1] as { blocks?: unknown }).blocks).toBeUndefined();
+    const blocks = (call.mock.calls.find(([m]) => m === "chat.postMessage")![1] as { blocks: { block_id?: string }[] }).blocks;
+    expect(blocks.map((b) => b.block_id)).toEqual([undefined, "repo:req-1", "repo_search:req-1"]);
+    expect(mocks.executeConfirmedCard).not.toHaveBeenCalled();
+  });
+
+  it("AI判別が失敗しても無関係な先頭候補は並べず、失敗理由を示して名称検索を出す", async () => {
+    setTargetModelForTest(async () => ({ ok: false, reason: "HTTP 401" }));
+    mocks.requestFindUnique.mockResolvedValue({ ...baseRequest, text: "改善したい", status: "received", permalink: null, selectorTs: null });
+    await processPendingRequest(ctx, "req-1");
+    const text = postedTexts()[0];
+    expect(text).toContain("HTTP 401");
+    expect(text).not.toContain("guchi-apps/car-care");
+    const blocks = (call.mock.calls.find(([m]) => m === "chat.postMessage")![1] as { blocks: { block_id?: string }[] }).blocks;
+    expect(blocks.map((b) => b.block_id)).toEqual([undefined, "repo_search:req-1"]);
+  });
+
+  it("選択メニューを選ぶだけで確定し、承認なしで調査・起案へ進む。連打（取得済み）では進まない", async () => {
+    mocks.requestFindUnique.mockResolvedValue({ ...baseRequest, status: "awaiting_repo" });
+    mocks.handleChatMessage.mockResolvedValue(investigated());
+    const payload = { type: "block_actions", team: { id: "T1" }, user: { id: "U1" }, channel: { id: "C1" }, actions: [{ action_id: "slack_repo_search", selected_option: { value: "guchi-apps/car-care" } }], state: { values: { "repo_search:req-1": {} } } };
+    await handleInteraction(ctx, payload);
+    expect(mocks.executeConfirmedCard).toHaveBeenCalledTimes(1);
+    mocks.requestUpdateMany.mockResolvedValue({ count: 0 });
+    mocks.executeConfirmedCard.mockClear();
+    await handleInteraction(ctx, payload);
     expect(mocks.executeConfirmedCard).not.toHaveBeenCalled();
   });
 
@@ -451,6 +498,33 @@ describe("調査が成立しないときは自動作成しない（#4527）", ()
     mocks.handleChatMessage.mockResolvedValue({ text: "回答できませんでした：AIの利用上限", cards: [], needsConfirm: false, nextContext: emptyContext, unavailable: true });
     await run();
     expectStopped();
+  });
+
+  it("Codex設定では共通のCodexセッションで調査し、失敗理由（未ログイン）を根拠不足に置き換えず設定を直す案内を返す", async () => {
+    mocks.resolveChatExecution.mockResolvedValue({ mode: "codex", model: "gpt-5.5" });
+    const session = vi.fn().mockResolvedValue({ ok: false, reason: "Codex(not_logged_in) サブPCのCodex CLIがログインしていません" });
+    mocks.createCodexSession.mockReturnValue(session);
+    mocks.handleChatMessage.mockImplementation(async (params: { investigationDeps?: { session: (i: unknown) => Promise<unknown> } }) => {
+      await params.investigationDeps!.session({});
+      return { text: "回答できませんでした", cards: [], needsConfirm: false, nextContext: emptyContext, unavailable: true };
+    });
+    await run();
+    expect(mocks.createCodexSession).toHaveBeenCalledWith(expect.objectContaining({ runId: "run-1", model: "gpt-5.5" }));
+    expect(mocks.executeConfirmedCard).not.toHaveBeenCalled();
+    const text = postedTexts().at(-1) ?? "";
+    expect(text).toContain("未ログイン");
+    expect(text).toContain("待っても直らない");
+    expect(text).not.toContain("根拠を得られず");
+    expect(mocks.runUpdate).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ status: "failed", failureKind: "codex_not_logged_in" }) }));
+  });
+
+  it("Codex設定でセッションが成功すれば、Claudeと同じく起案まで進む", async () => {
+    mocks.resolveChatExecution.mockResolvedValue({ mode: "codex", model: "gpt-5.5" });
+    mocks.createCodexSession.mockReturnValue(vi.fn());
+    mocks.handleChatMessage.mockResolvedValue(investigated());
+    await run();
+    expect(mocks.executeConfirmedCard).toHaveBeenCalledTimes(1);
+    expect(mocks.runUpdate).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ status: "succeeded" }) }));
   });
 
   it("調査が途中で止まった（stopReasonあり）案は作成しない", async () => {
