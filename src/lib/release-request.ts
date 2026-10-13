@@ -11,6 +11,7 @@
 
 import type { ReleaseRebuildCandidate } from "@/lib/release-rebuild";
 import type { RebuildSelectionOptions } from "@/lib/release-rebuild-selection-run";
+import type { RcBlockSummary } from "@/lib/release-rc";
 import type { ReleaseStartMode } from "@/lib/release-start-mode";
 import type { BumpKind } from "@/lib/semver-bump";
 
@@ -108,6 +109,14 @@ export async function requestRelease(
   if (!res.ok) throw new Error(releaseErrorMessage(res.status, json.error, json.message));
 }
 
+/** 起動の直前に、表示後に作られた既存候補が見つかった（#4628）。文言だけでなく既存候補と次の操作を画面へ渡す */
+export class ReleaseBlockedError extends Error {
+  constructor(readonly block: RcBlockSummary) {
+    super(`${block.label}: ${block.reason}`);
+    this.name = "ReleaseBlockedError";
+  }
+}
+
 /** 候補作成（`POST /api/repositories/release/rc` action=create）の失敗コードを画面の文言へ直す（#4604） */
 export function releaseCandidateErrorMessage(errorCode: string | undefined, message: string | undefined): string {
   switch (errorCode) {
@@ -147,10 +156,10 @@ export async function requestReleaseCandidate(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ owner, repo, action: "create", requestKey }),
   });
-  const json: { ok?: boolean; error?: string; message?: string; candidateId?: string; existing?: boolean } = await res
-    .json()
-    .catch(() => ({}));
+  const json: { ok?: boolean; error?: string; message?: string; candidateId?: string; existing?: boolean; block?: RcBlockSummary } =
+    await res.json().catch(() => ({}));
   if (!res.ok || json.ok === false || !json.candidateId) {
+    if (json.error === "rc_active" && json.block) throw new ReleaseBlockedError(json.block);
     throw new Error(releaseCandidateErrorMessage(json.error, json.message));
   }
   return { candidateId: json.candidateId, existing: json.existing === true };
@@ -200,7 +209,26 @@ export async function requestReleaseStart(
   if (mode.mode === "candidate") {
     return { kind: "candidate", ...(await requestReleaseCandidate(repoFullName, options.requestKey)) };
   }
+  if (mode.mode === "blocked") throw new ReleaseBlockedError(mode.block);
   throw new Error(mode.label);
+}
+
+/**
+ * 既存候補の管理記録を終了する（`POST /api/repositories/release/rc` action=cancel。#4628）。
+ * `expectedPhase`は画面で見ていた段階で、変わっていればサーバーが取り消さない。履歴・公開済みコードは残る
+ */
+export async function requestReleaseCandidateCancel(repoFullName: string, block: RcBlockSummary, reason: string): Promise<void> {
+  const [owner, repo] = repoFullName.split("/");
+  const res = await fetch("/api/repositories/release/rc", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ owner, repo, action: "cancel", candidateId: block.candidateId, expectedPhase: block.phase, reason }),
+  });
+  const json: { ok?: boolean; error?: string; message?: string } = await res.json().catch(() => ({}));
+  if (res.ok && json.ok !== false) return;
+  if (json.error === "candidate_changed") throw new Error("候補の状態が変わっています。再確認してから操作してください。");
+  if (json.error === "not_cancellable") throw new Error(json.message ?? "この候補は終了できません。");
+  throw new Error(json.message ?? `終了できませんでした (${res.status})`);
 }
 
 export type ReleaseBulkResult = {

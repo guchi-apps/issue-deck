@@ -19,7 +19,9 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { isPrepBlockedReason, PREP_OVERRIDE_CONFIRM_TEXT } from "@/lib/release-prep-state";
 import { useReleaseStartMode } from "@/hooks/use-release-start-mode";
-import { newRequestKey, requestReleaseStart } from "@/lib/release-request";
+import { ReleaseBlockNotice } from "@/components/dashboard/release-block-notice";
+import type { RcBlockSummary } from "@/lib/release-rc";
+import { newRequestKey, ReleaseBlockedError, requestReleaseStart } from "@/lib/release-request";
 import type { BumpKind } from "@/lib/semver-bump";
 import type { ReleaseBlockedReason } from "@/types/branch-flow";
 
@@ -101,11 +103,18 @@ export function RepositoryReleaseButton({
   const needsOverride = deployFailed || prepBlocked;
   const [allowPrepOverride, setAllowPrepOverride] = useState(false);
   // 新方式（候補を作成して検証）か旧方式かはcallerの対応で決まる（#4604）。取得中は操作を無効にし、確認表示と実行方式を一致させる
-  const startMode = useReleaseStartMode(repositoryFullName, blockedReason === null || deployFailed || prepBlocked);
+  // 既存候補の確認・終了のあとに取り直す。起動の直前に見つかった既存候補は`blockOverride`に持つ（#4628）
+  const [startModeRefresh, setStartModeRefresh] = useState(0);
+  const [blockOverride, setBlockOverride] = useState<RcBlockSummary | null>(null);
+  const refreshStartMode = () => {
+    setBlockOverride(null);
+    setStartModeRefresh((n) => n + 1);
+  };
+  const startMode = useReleaseStartMode(repositoryFullName, blockedReason === null || deployFailed || prepBlocked, startModeRefresh);
   // 本番デプロイ失敗中の「修正リリース」だけは新方式の候補作成が扱えず、確認のうえ旧方式で起動する（#4623）
   const candidateMode = startMode?.mode === "candidate" && !deployFailed;
   // 未対応・判定不能は旧方式へ落とさず、通常開始を止めて理由と更新手順を出す（#4623）
-  const startUnknown = startMode !== null && startMode.mode !== "candidate" && !deployFailed;
+  const startUnknown = (startMode !== null && startMode.mode !== "candidate" && !deployFailed) || blockOverride !== null;
   const startLoading = startMode === null;
   // 要求キーはダイアログを開くたびに作り、失敗後の再送では使い回す（二重候補を作らない）
   const [requestKey, setRequestKey] = useState<string>(() => newRequestKey());
@@ -129,7 +138,13 @@ export function RepositoryReleaseButton({
       setAllowFailedDeploy(false);
       onTriggered();
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      if (err instanceof ReleaseBlockedError) {
+        // 表示後に別の候補が作られた。エラー文で終えず、既存候補と次の操作を出す
+        setBlockOverride(err.block);
+        setConfirmOpen(false);
+      } else {
+        setError(err instanceof Error ? err.message : String(err));
+      }
     } finally {
       setIsTriggering(false);
     }
@@ -157,14 +172,22 @@ export function RepositoryReleaseButton({
         variant="outline"
         className={prepBlocked ? "h-6 gap-1 bg-muted px-2 text-xs text-muted-foreground" : "h-6 gap-1 px-2 text-xs"}
         disabled={isTriggering || isPending || startUnknown || startLoading}
-        title={startUnknown ? startMode.label : undefined}
+        title={startUnknown && startMode && startMode.mode !== "candidate" ? startMode.label : undefined}
         onClick={() => setConfirmOpen(true)}
       >
         <Rocket className={isTriggering || isPending ? "size-3 animate-pulse" : "size-3"} />
-        {isTriggering ? "起動中..." : isPending ? "リリース起動中…" : startLoading ? "開始方式を確認中" : deployFailed ? "修正リリース" : prepBlocked ? BLOCKED_BUTTON_LABEL[blockedReason] : "候補を作成して検証"}
+        {isTriggering ? "起動中..." : isPending ? "リリース起動中…" : startLoading ? "開始方式を確認中" : startMode?.mode === "blocked" || blockOverride ? "開始できません" : deployFailed ? "修正リリース" : prepBlocked ? BLOCKED_BUTTON_LABEL[blockedReason] : "候補を作成して検証"}
       </Button>
       {needsOverride && blockedReason && <span className="text-xs text-muted-foreground">{BLOCKED_REASON_LABEL[blockedReason]}</span>}
-      {startUnknown && <span className="text-xs text-muted-foreground">{startMode.label}</span>}
+      {startUnknown && (
+        <ReleaseBlockNotice
+          repositoryFullName={repositoryFullName}
+          startMode={startMode}
+          blockOverride={blockOverride}
+          onChanged={refreshStartMode}
+          className="basis-full"
+        />
+      )}
       {error && <span className="text-xs text-destructive">{error}</span>}
 
       {/* 誤タップでの起動を防ぐため確認を挟む。文面はヘッダーのロケットボタンと揃えている */}

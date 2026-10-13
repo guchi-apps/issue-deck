@@ -412,3 +412,75 @@ export function parseRcRequestKey(value: unknown): string | null {
 export function rcLabel(sequence: number): string {
   return `RC-${sequence}`;
 }
+
+/** 新しい候補の開始を妨げる既存候補の区分（#4628） */
+export type RcBlockKind =
+  /** 通常の進行中。既存の候補を進める */
+  | "in_progress"
+  /** PRはmainへマージ済みなのに内部段階がレビューのまま、公開準備の記録がない等。実ジョブが無く、待っても進まない */
+  | "inconsistent";
+
+/** 開始前の画面に出す、既存候補の要約。画面・APIが同じ判定を使う */
+export type RcBlockSummary = {
+  candidateId: string;
+  label: string;
+  sequence: number;
+  prNumber: number | null;
+  phase: RcPhase;
+  statusLabel: string;
+  kind: RcBlockKind;
+  /** 開始できない理由（1〜2文） */
+  reason: string;
+  /** 確認した事実 */
+  facts: string[];
+  /** 確認できていないこと（合格・公開完了を推測しない） */
+  unconfirmed: string[];
+  /** 管理記録の終了（取消）を提示してよいか。mainへマージ後（deploying以降）は不可 */
+  cancellable: boolean;
+};
+
+/**
+ * 既存候補が新規開始を妨げる理由を分類する。**マージ済みだけで検証合格・公開完了とは扱わない。**
+ * 不整合は「内部段階がレビューのままなのに、候補のPRがmainへマージ済み」に限る
+ * （レビュー段階からマージへは公開準備を経由するので、実ジョブも公開準備の記録も無いまま届く経路が無い）
+ */
+export function classifyRcBlock(input: {
+  candidateId: string;
+  sequence: number;
+  prNumber: number | null;
+  phase: RcPhase;
+  status: RcStatus;
+  statusLabel: string;
+}): RcBlockSummary {
+  const label = `RC-${input.sequence}`;
+  const base = {
+    candidateId: input.candidateId,
+    label,
+    sequence: input.sequence,
+    prNumber: input.prNumber,
+    phase: input.phase,
+    statusLabel: input.statusLabel,
+    cancellable: canCancelRc(input.phase),
+  };
+  const prText = input.prNumber === null ? "候補のPR" : `PR #${input.prNumber}`;
+  if (input.phase === "review" && input.status === "deploying") {
+    return {
+      ...base,
+      kind: "inconsistent",
+      reason: "候補の管理記録が残っています。実際に進行している本番反映や検証はありません。",
+      facts: [`${prText}はmainへマージ済み`, "内部段階は「レビュー」のまま", "公開準備の記録なし・実行中のジョブなし"],
+      unconfirmed: ["本番の稼働版", "検証の合否（マージ済みだけでは合格・公開完了と扱いません）"],
+    };
+  }
+  return {
+    ...base,
+    kind: "in_progress",
+    reason: "進行中のリリース候補があります。新しい候補は作らず、この候補を進めてください。",
+    facts: [prNumberFact(input.prNumber), `現在の工程: ${input.statusLabel}`],
+    unconfirmed: [],
+  };
+}
+
+function prNumberFact(prNumber: number | null): string {
+  return prNumber === null ? "候補のPRはまだありません" : `関連PR: #${prNumber}`;
+}
