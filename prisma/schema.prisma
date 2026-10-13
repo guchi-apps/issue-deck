@@ -3048,6 +3048,8 @@ model SessionDependencyWait {
   activeKey          String?  @unique @db.VarChar(255)
   // 条件成立・失敗の通知を出し済みか（同じ待機理由で繰り返さない）
   notifiedKey        String?  @db.VarChar(64)
+  // 再開条件を見直した履歴（#4570。JSON配列。{ at, by, before, after, reason }）
+  conditionHistory   Json?
 
 
   createdAt DateTime @default(now())

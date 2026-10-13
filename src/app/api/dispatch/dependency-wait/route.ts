@@ -7,6 +7,7 @@ import {
   findLegacyHoldCandidate,
   recheckDependencyWait,
   registerDependencyWait,
+  reviseClosedWaitToMerged,
 } from "@/lib/dispatch/dependency-wait-run";
 import { parseDispatchTarget } from "@/lib/dispatch/dispatch-job";
 import { resolveInstallationToken } from "@/lib/dispatch/installation-token";
@@ -21,6 +22,8 @@ import { previewModeGuard } from "@/lib/preview-mode";
  * - `resume`: 「作業を再開」。人の確認が要る条件（実環境の検証など）を人が引き受ける操作で、
  *   **機械で判断できる未成立の条件が残っているときは再開しない**
  * - `cancel`: 待ちを解除する
+ * - `revise`: クローズだけを待つ既存の待ちを、developマージ待ち（`merged`）へ見直す（#4570）。
+ *   変更前後と理由は`conditionHistory`に残る
  * - `register`: 既存の保留（保留コメントと`11.local`だけが残るもの）を、人が依存先と条件を
  *   確定して登録する。自由文の推定だけでは登録しない
  *
@@ -43,8 +46,19 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ wait }, { headers: { "Cache-Control": "no-store" } });
     }
     const id = typeof payload?.id === "string" ? payload.id : "";
-    if (!id || (action !== "recheck" && action !== "resume" && action !== "cancel")) {
+    if (!id || (action !== "recheck" && action !== "resume" && action !== "cancel" && action !== "revise")) {
       return NextResponse.json({ error: "invalid_request" }, { status: 400 });
+    }
+    if (action === "revise") {
+      const revised = await reviseClosedWaitToMerged(id, userId);
+      if (revised === null) return NextResponse.json({ error: "not_found" }, { status: 404 });
+      if (revised === "not_candidate") {
+        return NextResponse.json(
+          { error: "not_candidate", message: "このクローズ待ちは見直しの対象ではありません（クローズだけを待つIssue依存のみ）" },
+          { status: 409 },
+        );
+      }
+      return NextResponse.json({ wait: revised }, { headers: { "Cache-Control": "no-store" } });
     }
     const wait =
       action === "cancel"
