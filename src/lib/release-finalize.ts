@@ -421,6 +421,22 @@ export function decideFinalizeReadiness(input: { checks: FinalChecks; pendingRev
   return { ready: true };
 }
 
+/**
+ * 公開準備中・本番承認待ちの候補PRがマージされていたときの扱い。**最終検証を経ていないマージを本番反映へ進めない**。
+ * 記録した最終headのままで、そのheadの最終CI・再検証が合格しているときだけ進める（早いマージでも保証を落とさない）。
+ * 検証が終わっていなければ待ち、失敗・別の内容のマージは要対応として止める（mainへ入った後は修正工程へ戻せない）
+ */
+export type MergedCandidateDecision = { action: "advance" } | { action: "wait" } | { action: "hold"; reason: string };
+
+export function decideMergedCandidate(input: { headMatches: boolean; readiness: FinalizeReadiness; reverifyFailed: boolean }): MergedCandidateDecision {
+  if (!input.headMatches) return { action: "hold", reason: "公開準備で記録した最終headと異なる内容がマージされたため、本番反映の追跡へ進めません" };
+  if (input.reverifyFailed || (!input.readiness.ready && input.readiness.reason === "ci_failed")) {
+    return { action: "hold", reason: "バンプ後の最終検証が失敗した内容がマージされたため、本番反映の追跡へ進めません" };
+  }
+  if (!input.readiness.ready) return { action: "wait" };
+  return { action: "advance" };
+}
+
 /** 公開前の最終検証が失敗したときの扱い。**版の予約は保つ**（再試行だけを理由に正式版を増やさない） */
 export type FinalizeFailureHandling = {
   /** 候補の段階を戻す先（同じ候補の修正工程） */

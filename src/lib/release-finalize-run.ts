@@ -30,6 +30,7 @@ import {
   decideFinalizeReport,
   decideFinalizeStart,
   decideInheritedVerification,
+  decideMergedCandidate,
   decideReservationRelease,
   decideVersionReservation,
   FINALIZE_READINESS_LABEL,
@@ -687,8 +688,23 @@ export async function reconcileRcFinalization(ctx: Context, candidateId: string)
 
   if (phase === "preparing" || phase === "awaiting_approval") {
     if (pull.merged) {
-      // 記録した最終headのままマージされたときだけ、本番反映の追跡へ進める
-      if (pull.head.sha !== current.finalHeadSha) return;
+      // 記録した最終headのまま、そのheadの最終CI・再検証が合格しているときだけ本番反映の追跡へ進める。
+      // 承認待ちへ届く前の早いマージでも、検証を経ずに版の消費・develop同期へ進めない
+      const headMatches = pull.head.sha === current.finalHeadSha;
+      const checks = headMatches ? await evaluateChecks(ctx, current, pull) : null;
+      const decision = decideMergedCandidate({
+        headMatches,
+        readiness: checks?.readiness ?? { ready: false, reason: "ci_unknown" },
+        reverifyFailed: checks !== null && checks.pendingReverify.length > 0 && (await reverifyFailed(ctx, current)),
+      });
+      if (decision.action === "wait") return;
+      if (decision.action === "hold") {
+        await db.releaseCandidateFinalization.updateMany({
+          where: { id: current.id, status: "applied", OR: [{ failureReason: null }, { failureReason: { not: decision.reason } }] },
+          data: { failureReason: decision.reason },
+        });
+        return;
+      }
       if (phase === "preparing") await setPhase(candidate.id, "preparing", "awaiting_approval");
       if (await setPhase(candidate.id, "awaiting_approval", "deploying")) {
         await consumeReservation(candidate.id, current.reservedVersion, (pull as { merge_commit_sha?: string | null }).merge_commit_sha ?? null, null);

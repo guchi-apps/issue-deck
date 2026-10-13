@@ -8,6 +8,7 @@ import {
   decideFinalizeReport,
   decideFinalizeStart,
   decideInheritedVerification,
+  decideMergedCandidate,
   decideReservationRelease,
   decideVersionReservation,
   deriveInheritedRecords,
@@ -298,6 +299,23 @@ describe("decideFinalizeReadiness", () => {
     expect(decideFinalizeReadiness({ checks: { ...checks, ciState: "failure" }, pendingReverify: [] })).toMatchObject({ ready: false, reason: "ci_failed" });
     expect(decideFinalizeReadiness({ checks: { ...checks, ciState: "unknown" }, pendingReverify: [] })).toMatchObject({ ready: false, reason: "ci_unknown" });
     expect(decideFinalizeReadiness({ checks, pendingReverify: ["ios"] })).toMatchObject({ ready: false, reason: "required_reverify" });
+  });
+});
+
+describe("decideMergedCandidate", () => {
+  const ready = { ready: true } as const;
+  it("最終headのまま、最終CI・再検証が合格していれば本番反映の追跡へ進める", () => {
+    expect(decideMergedCandidate({ headMatches: true, readiness: ready, reverifyFailed: false })).toEqual({ action: "advance" });
+  });
+  it("最終CI・再検証の完了前のマージは進めずに待つ（版の消費・develop同期をしない）", () => {
+    for (const reason of ["ci_pending", "ci_unknown", "required_reverify"] as const) {
+      expect(decideMergedCandidate({ headMatches: true, readiness: { ready: false, reason }, reverifyFailed: false })).toEqual({ action: "wait" });
+    }
+  });
+  it("最終検証が失敗した内容・最終headと違う内容のマージは要対応として止める", () => {
+    expect(decideMergedCandidate({ headMatches: true, readiness: { ready: false, reason: "ci_failed" }, reverifyFailed: false })).toMatchObject({ action: "hold" });
+    expect(decideMergedCandidate({ headMatches: true, readiness: { ready: false, reason: "required_reverify" }, reverifyFailed: true })).toMatchObject({ action: "hold" });
+    expect(decideMergedCandidate({ headMatches: false, readiness: ready, reverifyFailed: false })).toMatchObject({ action: "hold" });
   });
 });
 
