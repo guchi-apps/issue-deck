@@ -77,8 +77,6 @@ export function MobileReleaseSheet({
   const [allowPrepOverride, setAllowPrepOverride] = useState(false);
   // 新方式（候補を作成して検証）か旧方式かはcallerの対応で決まる（#4604。PCの個別ボタンと同じ判定）
   const startMode = useReleaseStartMode(repository.fullName, open);
-  const candidateMode = startMode?.mode === "candidate";
-  const startUnknown = startMode?.mode === "unknown";
   const startLoading = startMode === null;
   // リリース候補（#4495）の識別・公開準備。PCの本番PR詳細と同じ並びで出す（#4560）
   const releasePr = releaseStatus?.available && releaseStatus.phase === "release_pr_open" ? releaseStatus.releasePullRequest : null;
@@ -88,6 +86,9 @@ export function MobileReleaseSheet({
   const deployRun = releaseStatus?.available ? releaseStatus.deployWorkflowRun : null;
   const deployFailed = deployRun?.status === "completed" &&
     (deployRun.conclusion === "failure" || deployRun.conclusion === "timed_out");
+  // 本番デプロイ失敗中の「修正リリース」だけは確認のうえ旧方式で起動する。未対応・判定不能は止める（#4623）
+  const candidateMode = startMode?.mode === "candidate" && !deployFailed;
+  const startUnknown = startMode !== null && startMode.mode !== "candidate" && !deployFailed;
 
   // iOSアプリを持つリポジトリだけの「iOSへの反映」欄（#3579）。対象リポジトリの固定リストは
   // `lib/device-build-repos.ts`（Xcodeで実機ビルド。mainへのマージもMacのスクリプトが行う）と
@@ -208,12 +209,12 @@ export function MobileReleaseSheet({
                       ? "リリース準備中"
                       : preparation.prepState === "failed"
                         ? "準備に失敗"
-                        : candidateMode
-                          ? "候補を作成して検証"
-                          : "リリースworkflowを起動"}
+                        : deployFailed
+                          ? "修正リリース"
+                          : "候補を作成して検証"}
                 </Button>
               )}
-              {!deviceBuild && startMode && startMode.mode !== "candidate" && (
+              {!deviceBuild && startUnknown && startMode && (
                 <p className="text-xs text-muted-foreground">{startMode.label}</p>
               )}
               {!deviceBuild && preparation.prepState === "running" && (
@@ -245,11 +246,11 @@ export function MobileReleaseSheet({
       }}>
         <AlertDialogContent className="flex flex-col gap-4 overflow-hidden">
           <AlertDialogHeader>
-            <AlertDialogTitle>{candidateMode ? "リリース候補を作成して検証しますか？" : "リリースworkflowを起動しますか？"}</AlertDialogTitle>
+            <AlertDialogTitle>{candidateMode ? "リリース候補を作成して検証しますか？" : "修正リリースを起動しますか？"}</AlertDialogTitle>
             <AlertDialogDescription>
               {candidateMode
                 ? `${repository.fullName}のdevelopの先端を候補（release-rc/*）として固定し、全体レビュー・統合検証へ進めます。正式な版は合格後の「公開準備」で初めて上げます。`
-                : `${repository.fullName}のdevelopをmainへ反映するリリースworkflowを起動します。`}
+                : `${repository.fullName}のdevelopをmainへ反映する修正リリースを起動します（本番デプロイ失敗中の例外操作）。`}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto">

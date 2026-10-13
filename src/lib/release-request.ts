@@ -180,26 +180,27 @@ export async function fetchReleaseStartModes(repoFullNames: string[]): Promise<R
 export type ReleaseStartResult = { kind: "candidate"; candidateId: string; existing: boolean } | { kind: "legacy" };
 
 /**
- * 通常の開始操作の入口（#4604）。個別・スマホ・一括がすべてここを通り、**判定を揃える**。
+ * 通常の開始操作の入口（#4604・#4623）。個別・スマホ・一括がすべてここを通り、**判定を揃える**。
  * 開始方式は起動の直前にサーバーから取り直す（画面の表示が古くても未対応repoへ誤って起動しない）。
  *
  * - 新方式対応: 候補を作る
- * - 未対応: `allowLegacy`のときだけ旧方式で起動する（個別の操作。一括は常に拒否する）
- * - 判定不能: 起動しない
+ * - 未対応・判定不能: **旧方式へ落とさず**起動しない（原因と更新手順を例外の文言に含める）
+ * - 例外: `allowFailedDeploy`（本番デプロイ失敗中の修正リリース）は新方式の候補作成が扱えないため、
+ *   確認のうえ明示した場合に限り旧方式で起動する。回復手段を失わないための例外で、通常開始ではない
  */
 export async function requestReleaseStart(
   repoFullName: string,
-  options: { bumpKind?: BumpKind; allowFailedDeploy?: boolean; allowLegacy: boolean; requestKey?: string },
+  options: { bumpKind?: BumpKind; allowFailedDeploy?: boolean; requestKey?: string },
 ): Promise<ReleaseStartResult> {
+  if (options.allowFailedDeploy) {
+    await requestRelease(repoFullName, options.bumpKind, true);
+    return { kind: "legacy" };
+  }
   const mode = (await fetchReleaseStartModes([repoFullName]))[repoFullName];
   if (mode.mode === "candidate") {
     return { kind: "candidate", ...(await requestReleaseCandidate(repoFullName, options.requestKey)) };
   }
-  if (mode.mode === "legacy" && options.allowLegacy) {
-    await requestRelease(repoFullName, options.bumpKind, options.allowFailedDeploy ?? false);
-    return { kind: "legacy" };
-  }
-  throw new Error(mode.mode === "legacy" ? `${mode.label}（一括では旧方式を起動しません）` : mode.label);
+  throw new Error(mode.label);
 }
 
 export type ReleaseBulkResult = {
@@ -219,8 +220,8 @@ export type ReleaseBulkResult = {
  */
 export async function requestReleaseBulk(repoFullNames: string[]): Promise<ReleaseBulkResult> {
   const results = await Promise.allSettled(
-    // 一括では旧方式を黙って起動しない（#4604）。未対応・判定不能のrepoは理由つきで失敗に載せる
-    repoFullNames.map((repoFullName) => requestReleaseStart(repoFullName, { allowLegacy: false })),
+    // 旧方式を黙って起動しない（#4604・#4623）。未対応・判定不能のrepoは理由つきで失敗に載せる
+    repoFullNames.map((repoFullName) => requestReleaseStart(repoFullName, {})),
   );
   const succeeded: string[] = [];
   const failed: { repoFullName: string; message: string }[] = [];

@@ -42,6 +42,7 @@ describe("本番デプロイ失敗中の修正リリース", () => {
 
 describe("リリース準備の状態（#4421）", () => {
   it("準備中は灰色の「リリース準備中」で案内を出すが、確認チェック後は起動できる", () => {
+    startMode = { mode: "candidate" };
     render(
       <RepositoryReleaseButton
         repositoryFullName="o/r"
@@ -52,7 +53,7 @@ describe("リリース準備の状態（#4421）", () => {
     );
     expect(screen.getByText(/操作せずお待ちください/)).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "リリース準備中" }));
-    const action = screen.getByRole("button", { name: "起動する" });
+    const action = screen.getByRole("button", { name: "候補を作成する" });
     expect(action.hasAttribute("disabled")).toBe(true);
     fireEvent.click(screen.getByRole("checkbox"));
     fireEvent.click(action);
@@ -83,7 +84,7 @@ describe("開始方式（#4604）", () => {
     const button = screen.getByRole("button", { name: "開始方式を確認中" });
     expect((button as HTMLButtonElement).disabled).toBe(true);
     fireEvent.click(button);
-    expect(screen.queryByText("リリースworkflowを起動しますか？")).toBeNull();
+    expect(screen.queryByText("修正リリースを起動しますか？")).toBeNull();
     expect(requestRelease).not.toHaveBeenCalled();
     startMode = { mode: "candidate" };
     rerender(<RepositoryReleaseButton {...base} />);
@@ -102,7 +103,15 @@ describe("開始方式（#4604）", () => {
   it("判定できないrepoでは押せず、理由を出す", () => {
     startMode = { mode: "unknown", label: "判定できません" };
     render(<RepositoryReleaseButton {...base} />);
-    expect((screen.getByRole("button", { name: /リリースする/ }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: /候補を作成して検証/ }) as HTMLButtonElement).disabled).toBe(true);
     expect(screen.getByText("判定できません")).toBeTruthy();
+  });
+
+  it("未対応repoは旧方式へ落とさず、押せずに更新手順を出す（#4623）", () => {
+    startMode = { mode: "legacy", label: "callerを更新してください" };
+    render(<RepositoryReleaseButton {...base} />);
+    expect((screen.getByRole("button", { name: /候補を作成して検証/ }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByText("callerを更新してください")).toBeTruthy();
+    expect(requestRelease).not.toHaveBeenCalled();
   });
 });
