@@ -12,14 +12,10 @@ name: Release develop to main
 # PRを自動作成する。**develop→mainの実際のマージはCLAUDE.mdの自動マージ不可カテゴリに
 # 該当するため、これまでどおり人間が手動で行う。**
 #
-# 過去（#178/#179）は「バンプPRの作成が人間の確認なしに走ってしまう」ことを理由に、
-# developへのPRマージ・15分おきのscheduleといった自動トリガーを廃止し、workflow_dispatch
-# （画面の「リリースする」ボタン）だけにしていた。#3404は「リリース準備開始（バンプPR・
-# develop→mainのPR作成）自体は本番に影響せず、実際のマージは人間が確認する」ことを踏まえ、
-# 実装中issueが無いタイミングでの自動起動を改めて求めており、それに応じてscheduleを
-# 復活させる。schedule起動時だけ、reusable側の「スケジュール起動時、実装中のissueが
-# 無いことを確認する」ステップが実装中issueの有無を確認してから進む
-# （詳細はdocs/multi-agent/release.md「トリガー」）。
+# **新しいリリース準備（バンプPR・候補の作成）は利用者の明示操作（workflow_dispatch）だけで
+# 始める**（#178で手動に絞り、#3404・#3416で入れた15分おきのscheduleを#4599で廃止した）。
+# 本番マージ後の待機時間も無い。開始後の進行（バンプPRのマージによるpush起動でのdevelop→main
+# PR作成）はイベント駆動で続く。
 on:
   workflow_dispatch:
     inputs:
@@ -60,11 +56,6 @@ on:
         required: false
         type: string
         default: ""
-  schedule:
-    # 実装中issueが無いタイミングでの自動起動（#3404）。実際の実行間隔は画面の設定
-    # （#3416）で、cronは変えられないため15分おきに起動し、reusable側のgateが設定した
-    # 間隔の枠でない回を見送る。
-    - cron: "*/15 * * * *"
   # バンプPRがdevelopへ（auto-mergeで）マージされ、バージョンが変わったときに再起動して
   # develop→mainのPRを自動作成する。通常のフィーチャーpushではpackage.jsonが変わらないため
   # 起動しない。
@@ -84,9 +75,8 @@ jobs:
     # 定義しているため、バージョンの読み書きに関するinputsは既定値でよい
     # （version-file: package.json / version-query: .version / bump-command: 空）。
     with:
-      # push（バンプPRのマージ）・schedule起動時は`inputs`自体が無いため空文字を渡す。
-      # push起動はdevelop→mainのPR作成だけを行い、上げ幅を使わない（#1548）。schedule起動は
-      # 自動判定のみを使う。
+      # push（バンプPRのマージ）起動時は`inputs`自体が無いため空文字を渡す。
+      # push起動はdevelop→mainのPR作成だけを行い、上げ幅を使わない（#1548）。
       bump-kind: ${{ github.event_name == 'workflow_dispatch' && inputs.bump_kind || '' }}
       allow-failed-deploy: ${{ github.event_name == 'workflow_dispatch' && inputs.allow_failed_deploy == true }}
       rebuild-selection: ${{ github.event_name == 'workflow_dispatch' && inputs.rebuild_selection || '' }}

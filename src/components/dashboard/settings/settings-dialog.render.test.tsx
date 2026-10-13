@@ -205,7 +205,7 @@ describe("SettingsDialog", () => {
     expect(isShown(screen.getByLabelText("自動リトライ回数"))).toBe(false);
     expect(screen.queryAllByRole("button", { name: "保存" }).some((button) => isShown(button))).toBe(false);
     expect(screen.getByRole("button", { name: "担当AIはAIモデル設定で変更" })).toBeTruthy();
-    expect(screen.getByLabelText("リリース準備の自動実行間隔")).toBeTruthy();
+    expect(screen.queryByLabelText("リリース準備の自動実行間隔")).toBeNull();
   });
 
   it("フリートの各区画は畳んであり、開いた区画だけを読み込む（#2022）", () => {

@@ -1394,6 +1394,27 @@ describe("リリース起動の可否（canTriggerRelease）", () => {
     expect(buildRelease({}).canTriggerRelease).toBe(true);
   });
 
+  // #4599。本番マージから20分未満でも、時刻だけを理由に手動開始を止めない
+  it("直近のリリースPRのmainマージ直後でも、未リリースの変更があれば押せる", () => {
+    const mergedAt = new Date(Date.now() - 5 * 60 * 1000).toISOString();
+    const repository = buildRelease({
+      pullRequests: [
+        pullRequest({
+          number: 50,
+          baseRef: "main",
+          headRef: "develop",
+          kind: "release",
+          state: "closed",
+          merged: true,
+          mergedAt,
+          title: "Release v1.0.0",
+        }),
+      ],
+    });
+    expect(repository.canTriggerRelease).toBe(true);
+    expect(repository.releaseBlockedReason).toBeNull();
+  });
+
   it("リリース用workflowを持たないリポジトリでは押せない（#1538）", () => {
     const repository = buildRelease({ hasReleaseWorkflow: false });
     expect(repository.canRelease).toBe(false);
