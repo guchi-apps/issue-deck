@@ -30,6 +30,7 @@ import {
   decideFinalizeReport,
   decideFinalizeStart,
   decideInheritedVerification,
+  decideMergedCandidate,
   decideReservationRelease,
   decideVersionReservation,
   FINALIZE_READINESS_LABEL,
@@ -49,7 +50,7 @@ import {
   type VersionReservationRow,
   type VersionReservationStatus,
 } from "@/lib/release-finalize";
-import { evaluateReleaseMergeGate, RELEASE_VERIFICATION_KINDS, type ReleaseVerificationKind } from "@/lib/release-merge-gate";
+import { evaluateReleaseMergeGate, RELEASE_VERIFICATION_KINDS, type ReleaseVerificationKind, type ReleaseVerificationView } from "@/lib/release-merge-gate";
 import { listReleaseMacRows } from "@/lib/release-mac-verification";
 import {
   loadCandidateRow,
@@ -687,8 +688,26 @@ export async function reconcileRcFinalization(ctx: Context, candidateId: string)
 
   if (phase === "preparing" || phase === "awaiting_approval") {
     if (pull.merged) {
-      // 記録した最終headのままマージされたときだけ、本番反映の追跡へ進める
-      if (pull.head.sha !== current.finalHeadSha) return;
+      // 記録した最終headのまま、そのheadの最終CI・再検証が合格しているときだけ本番反映の追跡へ進める。
+      // 承認待ちへ届く前の早いマージでも、検証を経ずに版の消費・develop同期へ進めない
+      const headMatches = pull.head.sha === current.finalHeadSha;
+      const checks = headMatches ? await evaluateChecks(ctx, current, pull) : null;
+      const decision = decideMergedCandidate({
+        headMatches,
+        readiness: checks?.readiness ?? { ready: false, reason: "ci_unknown" },
+        reverifyStates: checks && checks.pendingReverify.length > 0 ? await pendingReverifyStates(ctx, current) : [],
+      });
+      if (decision.action !== "advance") {
+        await db.releaseCandidateFinalization.updateMany({
+          where: { id: current.id, status: "applied", OR: [{ failureReason: null }, { failureReason: { not: decision.reason } }] },
+          data: { failureReason: decision.reason },
+        });
+        return;
+      }
+      // 止めていた理由は、合格して進むときに消す（進んだ後も警告を出し続けない）
+      if (current.failureReason !== null) {
+        await db.releaseCandidateFinalization.updateMany({ where: { id: current.id, status: "applied" }, data: { failureReason: null } });
+      }
       if (phase === "preparing") await setPhase(candidate.id, "preparing", "awaiting_approval");
       if (await setPhase(candidate.id, "awaiting_approval", "deploying")) {
         await consumeReservation(candidate.id, current.reservedVersion, (pull as { merge_commit_sha?: string | null }).merge_commit_sha ?? null, null);
@@ -719,6 +738,13 @@ export async function reconcileRcFinalization(ctx: Context, candidateId: string)
   }
 
   if (phase === "deploying" || phase === "verifying_production") await advanceProduction(ctx, candidate, current, pull);
+}
+
+/** バンプ後のheadで合格していない検証の状態（マージ後の判定用。`evaluateChecks`と同じ固定した対象で評価する） */
+async function pendingReverifyStates(ctx: Context, row: FinalizationRow): Promise<ReleaseVerificationView["state"][]> {
+  const records = await listReleaseVerificationRecords(fullNameOf(ctx), row.prNumber);
+  const gate = evaluateReleaseMergeGate({ current: { baseSha: row.finalBaseSha ?? "", headSha: row.finalHeadSha ?? "" }, records, enforced: true });
+  return gate.views.filter((v) => v.state !== "passed" && v.state !== "not_applicable").map((v) => v.state);
 }
 
 async function reverifyFailed(ctx: Context, row: FinalizationRow): Promise<boolean> {

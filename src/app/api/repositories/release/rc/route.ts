@@ -5,7 +5,7 @@ import { db } from "@/lib/db";
 import { getInstallationToken } from "@/lib/github/app-auth";
 import { githubApiErrorMessage } from "@/lib/github/network-error";
 import { previewModeGuard } from "@/lib/preview-mode";
-import { findUnsyncedPublish, loadFinalizationOverview, reconcileRcFinalization, resolveRcCandidateId, settleReservationsOnCancel } from "@/lib/release-finalize-run";
+import { ensureDevelopSync, findUnsyncedPublish, loadFinalizationOverview, reconcileRcFinalization, resolveRcCandidateId, settleReservationsOnCancel } from "@/lib/release-finalize-run";
 import { parseRcRequestKey } from "@/lib/release-rc";
 import {
   cancelReleaseRc,
@@ -101,6 +101,8 @@ export async function POST(request: NextRequest) {
         // 公開した版がdevelopへ反映されるまで、次の候補は作らない（mainの版と衝突する）
         const unsynced = await findUnsyncedPublish(ctx);
         if (unsynced) {
+          // 同期PRは本番反映の追跡が作るが、そこへ届かずに終えた候補（マージ済みの取り消し）もあるので、ここでも用意する
+          await ensureDevelopSync(ctx, unsynced);
           return NextResponse.json(
             { ok: false, error: "develop_not_synced", message: `v${unsynced.version}の公開がdevelopへ反映されていません。同期のPRをマージしてから候補を作ってください` },
             { status: 409 },

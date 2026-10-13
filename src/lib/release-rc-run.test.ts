@@ -23,6 +23,7 @@ const mocks = vi.hoisted(() => ({
   registerVerification: vi.fn(),
   verifyJob: vi.fn(),
   reviewJob: vi.fn(),
+  reservationUpdateMany: vi.fn(async () => ({ count: 1 })),
 }));
 
 vi.mock("@/lib/db", () => {
@@ -41,6 +42,7 @@ vi.mock("@/lib/db", () => {
       create: mocks.revisionCreate,
     },
     releaseFixSeries: { findMany: mocks.fixFindMany },
+    releaseVersionReservation: { updateMany: mocks.reservationUpdateMany },
     releaseVerification: { findMany: vi.fn(async () => []) },
     repository: { findFirst: mocks.repositoryFindFirst },
     $transaction: async (fn: (tx: unknown) => unknown) => fn(db),
@@ -69,7 +71,7 @@ vi.mock("@/lib/release-verification", () => ({
 vi.mock("@/lib/dispatch/release-verify-jobs", () => ({ requestReleaseVerifyJob: mocks.verifyJob }));
 vi.mock("@/lib/dispatch/release-review-jobs", () => ({ requestReleaseReviewJob: mocks.reviewJob }));
 
-import { createReleaseRc, recordRcReport, requestRcImport } from "@/lib/release-rc-run";
+import { cancelReleaseRc, createReleaseRc, recordRcReport, requestRcImport } from "@/lib/release-rc-run";
 
 const CALLER = "    inputs:\n      candidate_request:\n        type: string\n    with:\n      candidate-request: x\n";
 const FROZEN = "f".repeat(40);
@@ -253,5 +255,40 @@ describe("recordRcReport", () => {
     expect(mocks.isAncestor).toHaveBeenCalledWith("o", "r", HEAD1, HEAD2, "t");
     expect(mocks.registerVerification).toHaveBeenCalledWith({ repoFullName: "o/r", prNumber: 10, baseSha: "b".repeat(40), headSha: HEAD2 });
     expect(mocks.candidateUpdateMany).toHaveBeenCalledWith({ where: { id: "c1", currentRevision: { lt: 2 } }, data: { currentRevision: 2 } });
+  });
+});
+
+describe("cancelReleaseRc", () => {
+  const cancel = () => cancelReleaseRc({ ...ctx, userId: "u1", candidateId: "c1", reason: null });
+
+  it("候補PRがmainへマージ済みなら、予約した版をマージのSHAで消費済みにしてから取り消す（版の再利用・develop同期の検出漏れを防ぐ）", async () => {
+    mocks.candidateFindUnique.mockResolvedValue(candidateRow({ phase: "preparing" }));
+    mocks.prsByHead.mockResolvedValue([{ number: 10, state: "closed", merged_at: "2026-10-12T00:00:00Z", merge_commit_sha: "9".repeat(40) }]);
+    expect(await cancel()).toMatchObject({ ok: true });
+    expect(mocks.reservationUpdateMany).toHaveBeenCalledWith({
+      where: { candidateId: "c1", status: "reserved" },
+      data: expect.objectContaining({ status: "consumed", consumedMergeSha: "9".repeat(40) }),
+    });
+  });
+
+  it("マージ済みでもマージのSHAが分からなければ取り消さない", async () => {
+    mocks.candidateFindUnique.mockResolvedValue(candidateRow({ phase: "awaiting_approval" }));
+    mocks.prsByHead.mockResolvedValue([{ number: 10, state: "closed", merged_at: "2026-10-12T00:00:00Z", merge_commit_sha: null }]);
+    expect(await cancel()).toEqual({ ok: false, error: "not_cancellable" });
+    expect(mocks.candidateUpdateMany).not.toHaveBeenCalled();
+  });
+
+  it("マージの有無を確かめられないときも取り消さない", async () => {
+    mocks.candidateFindUnique.mockResolvedValue(candidateRow({ phase: "awaiting_approval" }));
+    mocks.prsByHead.mockRejectedValue(new Error("boom"));
+    expect(await cancel()).toEqual({ ok: false, error: "not_cancellable" });
+    expect(mocks.candidateUpdateMany).not.toHaveBeenCalled();
+  });
+
+  it("未マージなら従来どおり取り消せる", async () => {
+    mocks.candidateFindUnique.mockResolvedValue(candidateRow({ phase: "preparing" }));
+    mocks.prsByHead.mockResolvedValue([{ number: 10, state: "open", merged_at: null }]);
+    expect(await cancel()).toMatchObject({ ok: true, existing: false });
+    expect(mocks.reservationUpdateMany).not.toHaveBeenCalled();
   });
 });

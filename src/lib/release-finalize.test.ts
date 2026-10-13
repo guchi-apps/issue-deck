@@ -8,6 +8,7 @@ import {
   decideFinalizeReport,
   decideFinalizeStart,
   decideInheritedVerification,
+  decideMergedCandidate,
   decideReservationRelease,
   decideVersionReservation,
   deriveInheritedRecords,
@@ -298,6 +299,29 @@ describe("decideFinalizeReadiness", () => {
     expect(decideFinalizeReadiness({ checks: { ...checks, ciState: "failure" }, pendingReverify: [] })).toMatchObject({ ready: false, reason: "ci_failed" });
     expect(decideFinalizeReadiness({ checks: { ...checks, ciState: "unknown" }, pendingReverify: [] })).toMatchObject({ ready: false, reason: "ci_unknown" });
     expect(decideFinalizeReadiness({ checks, pendingReverify: ["ios"] })).toMatchObject({ ready: false, reason: "required_reverify" });
+  });
+});
+
+describe("decideMergedCandidate", () => {
+  const ready = { ready: true } as const;
+  it("最終headのまま、最終CI・再検証が合格していれば本番反映の追跡へ進める", () => {
+    expect(decideMergedCandidate({ headMatches: true, readiness: ready, reverifyStates: [] })).toEqual({ action: "advance" });
+  });
+  it("実行中のCI・検証の完了前のマージは進めずに待ち、理由を残す", () => {
+    expect(decideMergedCandidate({ headMatches: true, readiness: { ready: false, reason: "ci_pending" }, reverifyStates: [] })).toMatchObject({ action: "wait", reason: expect.any(String) });
+    expect(decideMergedCandidate({ headMatches: true, readiness: { ready: false, reason: "required_reverify" }, reverifyStates: ["running", "waiting"] })).toMatchObject({ action: "wait" });
+    expect(decideMergedCandidate({ headMatches: true, readiness: { ready: false, reason: "ci_unknown" }, reverifyStates: [] })).toMatchObject({ action: "wait" });
+  });
+  it("最終検証の失敗・最終headと違う内容のマージは要対応として止める", () => {
+    expect(decideMergedCandidate({ headMatches: true, readiness: { ready: false, reason: "ci_failed" }, reverifyStates: [] })).toMatchObject({ action: "hold" });
+    expect(decideMergedCandidate({ headMatches: true, readiness: { ready: false, reason: "required_reverify" }, reverifyStates: ["failed"] })).toMatchObject({ action: "hold" });
+    expect(decideMergedCandidate({ headMatches: false, readiness: ready, reverifyStates: [] })).toMatchObject({ action: "hold" });
+  });
+  it("待っても解消しない状態（依頼の失敗・要確認・失効）は待たずに止める", () => {
+    for (const state of ["not_run", "needs_check", "invalidated"] as const) {
+      expect(decideMergedCandidate({ headMatches: true, readiness: { ready: false, reason: "required_reverify" }, reverifyStates: [state] })).toMatchObject({ action: "hold" });
+    }
+    expect(decideMergedCandidate({ headMatches: true, readiness: { ready: false, reason: "ci_pending" }, reverifyStates: ["not_run"] })).toMatchObject({ action: "hold" });
   });
 });
 
