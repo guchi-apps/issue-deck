@@ -289,6 +289,7 @@ jobs:
       retry_attempt: ${{ steps.state.outputs.retry_attempt }}
       issue_closed: ${{ steps.state.outputs.issue_closed }}
       branch_exists: ${{ steps.state.outputs.branch_exists }}
+      awaiting_confirm_at_triage: ${{ steps.state.outputs.awaiting_confirm_at_triage }}
       preview_required: ${{ steps.state.outputs.preview_required }}
       lane: ${{ steps.state.outputs.lane }}
     steps:
@@ -397,6 +398,8 @@ jobs:
           echo "$LABELS" | grep -qx "21.plan-required" && PLAN_REQUIRED=true
           AWAITING_CONFIRM=false
           echo "$LABELS" | grep -qx "00.check-user" && AWAITING_CONFIRM=true
+          # 受付時点の確認待ち有無。実行直前の陳腐化判定が「受付後に増えたか」を見分けるのに使う(#4639)
+          echo "awaiting_confirm_at_triage=$AWAITING_CONFIRM" >> "$GITHUB_OUTPUT"
 
           # 進捗はラベルではなくissue-deckのProject Statusから引く(#991 Phase 5・#1010)。
           # Phase 4までは実装中・developへマージ中を示す進捗ラベルの有無を見ていたが、廃止したため
@@ -931,6 +934,8 @@ jobs:
           RETRY_ATTEMPT: ${{ needs.triage.outputs.retry_attempt }}
           ISSUE_CLOSED: ${{ needs.triage.outputs.issue_closed }}
           BRANCH_EXISTS: ${{ needs.triage.outputs.branch_exists }}
+          AWAITING_CONFIRM_AT_TRIAGE: ${{ needs.triage.outputs.awaiting_confirm_at_triage }}
+          COMMENT_ID: ${{ github.event.comment.id }}
         run: |
           set -e
           echo "triageから引き継いだ判定: mode=$MODE branch=$BRANCH issue_number=$ISSUE_NUMBER"
@@ -942,12 +947,19 @@ jobs:
             NOW_LABELS="$(printf '%s' "$ISSUE_JSON" | jq -r '.labels[].name')"
             if [ "$NOW_STATE" = "CLOSED" ] && [ "$ISSUE_CLOSED" != "true" ]; then
               STALE_REASON="判定後にIssueがクローズされた"
-            elif echo "$NOW_LABELS" | grep -qx "00.check-user" && [ "$MODE" != "plan" ] && [ "$MODE" != "ask" ]; then
-              STALE_REASON="判定後に00.check-userが付与された"
+              STALE_CODE="issue_closed"
+            elif echo "$NOW_LABELS" | grep -qx "00.check-user" && [ "$MODE" != "plan" ] && [ "$MODE" != "ask" ] \
+              && { [ "$MODE" != "additional" ] || [ "$AWAITING_CONFIRM_AT_TRIAGE" != "true" ]; }; then
+              # mode=additional(openなPRへの明示依頼)は、受付の判定が確認待ちの有無を問わない設計(#98付近)。
+              # 受付時点からあった00.check-userでは止めず、受付後に新しく付いた場合だけ停止する(#4639)。
+              # triageの出力が空(不明)のときは従来どおり停止側に倒す
+              STALE_REASON="受付後に00.check-userが追加された"
+              STALE_CODE="check_user_added"
             elif echo "$NOW_LABELS" | grep -qx "11.local" && [ "$MODE" != "ask" ]; then
               # 順番待ちの間に人間がローカル対応へ切り替えた場合(#919)。triage側の判定と同じく
               # 読み取り専用のmode=askだけは通す。
               STALE_REASON="判定後に11.localが付与された"
+              STALE_CODE="local_added"
             fi
           else
             echo "Issueの再取得に失敗したため、陳腐化の確認はスキップします"
@@ -957,6 +969,11 @@ jobs:
             echo "$STALE_REASON ため、実装に入らず中止します（mode=$MODE -> skip）"
             BODY="⏹️ 順番待ちの間にIssueの状態が変わったため（$STALE_REASON）、今回の自動対応は実行せず中止しました。"
             BODY="$BODY"$'\n\n''必要であれば改めて `@claude` とコメントしてください。'
+            # どの依頼コメントが中止されたかを画面が突き合わせるための印(#4639)。
+            # トリガーコメントが無い起動(unlabeled・workflow_dispatch)は依頼と結び付けない
+            if [ -n "$COMMENT_ID" ]; then
+              BODY="$BODY"$'\n\n'"<!-- issue-deck-dispatch-result:aborted reason=${STALE_CODE:-stale} comment=$COMMENT_ID -->"
+            fi
             BODY="$BODY"$'\n\n<!-- issue-deck-source:claude-issue-dispatch -->'$'\n\n<!-- issue-deck-agent:guide -->'
             gh issue comment "$ISSUE_NUMBER" --body "$BODY" || true
             MODE=skip
@@ -1529,7 +1546,7 @@ jobs:
             FALLBACK_BODY="$FALLBACK_BODY"$'\n\n'"実行ログ全文（execution_file）: $ARTIFACT_URL"
           fi
 
-          FALLBACK_BODY="$FALLBACK_BODY"$'\n\n'"実行ログ: $RUN_URL"$'\n\n<!-- issue-deck-source:claude-issue-dispatch -->'$'\n\n<!-- issue-deck-fallback-notice -->'
+          FALLBACK_BODY="$FALLBACK_BODY"$'\n\n'"実行ログ: $RUN_URL"$'\n\n'"<!-- issue-deck-dispatch-result:failed reason=run_failed comment=${{ github.event.comment.id }} -->"$'\n\n<!-- issue-deck-source:claude-issue-dispatch -->'$'\n\n<!-- issue-deck-fallback-notice -->'
           gh issue comment "$ISSUE_NUMBER" --body "$FALLBACK_BODY"
           REASON_LABEL="01.check-blocked"
           # 展開先リポジトリにラベル自体が定義されていない場合でもこのステップを落とさないよう、
@@ -1932,7 +1949,7 @@ jobs:
           # **本文の最終行での一致**だけをフォールバック通知と認め、画面はこれをエラー通知ボット
           # （赤）として表示する。あわせて画面の「Claudeの回答待ち」表示もここで解除される。
           FALLBACK_BODY=$'⚠️ 質問への回答を投稿できませんでした。調査中に許可されていない操作が拒否される、または想定外のエラーが発生する等の理由で、回答コメントの投稿まで到達できなかったと考えられます。\n\nお手数ですが、Issue詳細のコメント欄の下にある「質問する」から質問し直してください。'
-          FALLBACK_BODY="$FALLBACK_BODY"$'\n\n'"実行ログ: $RUN_URL"$'\n\n<!-- issue-deck-source:claude-issue-dispatch -->'$'\n\n<!-- issue-deck-fallback-notice -->'
+          FALLBACK_BODY="$FALLBACK_BODY"$'\n\n'"実行ログ: $RUN_URL"$'\n\n'"<!-- issue-deck-dispatch-result:failed reason=run_failed comment=${{ github.event.comment.id }} -->"$'\n\n<!-- issue-deck-source:claude-issue-dispatch -->'$'\n\n<!-- issue-deck-fallback-notice -->'
           gh issue comment ${{ steps.state.outputs.issue_number }} --body "$FALLBACK_BODY"
 
       - name: 実装前のコメント数を記録する
@@ -2447,7 +2464,7 @@ jobs:
             FALLBACK_BODY="$FALLBACK_BODY"$'\n\n<details><summary>推定される失敗理由（自動抽出、参考情報）</summary>\n\n'"$REASON"$'\n\n</details>'
           fi
 
-          FALLBACK_BODY="$FALLBACK_BODY"$'\n\n<!-- issue-deck-source:claude-issue-dispatch -->'$'\n\n<!-- issue-deck-fallback-notice -->'
+          FALLBACK_BODY="$FALLBACK_BODY"$'\n\n'"<!-- issue-deck-dispatch-result:failed reason=run_failed comment=${{ github.event.comment.id }} -->"$'\n\n<!-- issue-deck-source:claude-issue-dispatch -->'$'\n\n<!-- issue-deck-fallback-notice -->'
           gh issue comment "$ISSUE_NUMBER" --body "$FALLBACK_BODY"
           REASON_LABEL="01.check-blocked"
           # 展開先リポジトリにラベル自体が定義されていない場合でもこのステップを落とさないよう、
@@ -2656,5 +2673,5 @@ jobs:
           BODY="$BODY"$'\n\n'"実行ログ: $RUN_URL"
           BODY="$BODY"$'\n\n''GitHub Actions側の障害が原因の場合があります。https://www.githubstatus.com で `Actions` の状態をご確認ください。'
           BODY="$BODY"$'\n\n''復旧後、このIssueに改めて `@claude` とコメントすると再開します。'
-          BODY="$BODY"$'\n\n<!-- issue-deck-source:claude-issue-dispatch -->'$'\n\n<!-- issue-deck-fallback-notice -->'
+          BODY="$BODY"$'\n\n'"<!-- issue-deck-dispatch-result:failed reason=run_failed comment=${{ github.event.comment.id }} -->"$'\n\n<!-- issue-deck-source:claude-issue-dispatch -->'$'\n\n<!-- issue-deck-fallback-notice -->'
           gh issue comment "$ISSUE_NUMBER" --body "$BODY"

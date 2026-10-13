@@ -2169,3 +2169,10 @@ Issue本文からClaude（`claude-haiku-4-5`）がタイトルとラベルを推
   - **一覧の取得に失敗したときは「経路なし」に倒す（fail-closed）。** 3回リトライしても取れなければ警告を出したうえでラベルを付ける。誤って付いた`00.check-user`は画面から外せるが、付かなかったPRは気付かれずに残り続けるため
   - 外れるタイミングは他の経路と同じで、`develop-pr-merged`・`main-pr-merged`・`main-direct-merged`とissue-deck側の巡回がマージ時に、`cleanup-on-close`がIssue close時に外す
 - **同一PRへの連続pushでのコメント重複防止**: 実装エージェントが追加修正等で同一PRに連続してpushすると、そのたびに`risk-check`ジョブが再実行される。ラベル自体はpushのたびに再付与して確認ゲートを確実に保つが、そのpush開始時点で対応Issueに既に`00.check-user`が付いていた場合はコメント投稿のみ省略する。**この「push開始時点で付いていたか」は`risk-check`が掴んで`already-check-user`出力で渡す**（#1406）。付与を行う`auto-merge`ジョブ側で読み直すと、`claude-review`が二次判定で付けたラベルを見て一次判定の理由コメントを取りこぼす。実装がまだ進行中の段階で同内容の「developへのマージ前にユーザーの確認が必要」コメントが繰り返し投稿され、作業中なのか確認待ちなのか紛らわしくなる問題を防ぐため（#594）。
+
+## openなPRへの明示修正依頼は、受付前からある確認待ちでは中止しない（#4639）
+
+`reusable-issue-dispatch.yml`は、openな既存PRへの`@claude`依頼を`mode=additional`として受け付け、`00.check-user`の有無を問わない。実行直前の陳腐化判定も同じ基準にそろえ、**受付時（triage）に既に付いていた`00.check-user`では止めない**（triageが`awaiting_confirm_at_triage`を出力する）。受付後に新しく付いた場合・Issueのクローズ・`11.local`の付与では、従来どおり中止する。
+
+- 中止・失敗コメントには`<!-- issue-deck-dispatch-result:aborted|failed reason=<コード> comment=<トリガーコメントid> -->`を付ける。PR詳細は依頼コメントのidと突き合わせ、中止された依頼を「実行前に中止されました（理由）」と表示して同じ画面から再送できるようにする（`findInterruptedFixRequest`）。コメントidが無い起動（`issues/unlabeled`・`workflow_dispatch`）は依頼と結び付けない。
+- 同じ依頼（PR・HEAD・方針）は、結果が未報告の間は重複として返し、中止・失敗の後は試行番号を進めて再送する。
