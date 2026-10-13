@@ -17,6 +17,19 @@ evidence_file() {
   printf '%s/%s-%s-%s-%s.json' "$root" "${full_name//\//_}" "$pr" "${base:0:12}" "${head:0:12}"
 }
 
+# evidence_fingerprint <owner/repo> <PR番号> <base SHA> <head SHA>: 対象に一致する証跡の「状態の指紋」を標準出力へ（#4632）
+# 結果の状態・終了時刻・実行済み工程数を並べた文字列。全体レビューが保存したバッチ結果を、証跡の更新（running→passedなど）の
+# あとに再利用してよいかの判定に使う。**対象のbase/headが一致する証跡が無い・読めないときは何も出さない**（空＝取得不能は
+# 呼び出し側が「再利用せず再評価する」側へ倒す）
+evidence_fingerprint() {
+  local file
+  file="$(evidence_file "$@")"
+  [[ -s "$file" ]] || return 0
+  jq -r --arg base "$3" --arg head "$4" \
+    'select(.baseSha == $base and .headSha == $head) | "\(.outcome.state // "")|\(.finishedAt // "")|\((.steps // []) | length)"' \
+    "$file" 2>/dev/null || true
+}
+
 # evidence_redact: 標準入力の機密を伏せて標準出力へ。失敗ログを証跡へ保存する前・AIのプロンプトへ渡す前に必ず通す（#4629）
 #
 # 既知の形式の列挙だけに頼らず、**構造**で伏せる:
