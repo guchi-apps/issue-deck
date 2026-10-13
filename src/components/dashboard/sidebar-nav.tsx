@@ -623,6 +623,7 @@ export function SidebarNavView({
           {issueViewRow("in-progress")}
           {pullRequestRow("in-progress")}
           {pullRequestRow("completed")}
+          {pullRequestRow("release")}
           {issueViewRow("release-pending")}
           {navRow({
             key: "flow",

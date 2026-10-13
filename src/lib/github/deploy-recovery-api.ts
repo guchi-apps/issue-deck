@@ -4,6 +4,7 @@ import {
   type DeployRecoveryCandidate,
   type DeployRecoveryCandidatesResult,
 } from "@/lib/deploy-recovery";
+import { DEPLOY_RECOVERY_BRANCH_PREFIX } from "@/lib/release-branch";
 import { GithubApiError } from "@/lib/github/github-api-error";
 import { GITHUB_API, githubFetch } from "@/lib/github/request";
 
@@ -115,7 +116,7 @@ function recoveryBranch(selected: DeployRecoveryCandidate[]): string {
   // GitHubのブランチ名の上限に候補数が依存しないよう、選択内容は短い安定ハッシュへ畳む。
   let hash = 5381;
   for (const character of selection) hash = (hash * 33) ^ character.charCodeAt(0);
-  return `deploy-recovery/${selected[0].number}-${selected.at(-1)?.number}-${(hash >>> 0).toString(36)}`;
+  return `${DEPLOY_RECOVERY_BRANCH_PREFIX}${selected[0].number}-${selected.at(-1)?.number}-${(hash >>> 0).toString(36)}`;
 }
 
 function marker(selected: DeployRecoveryCandidate[]): string {

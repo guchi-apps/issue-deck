@@ -11,6 +11,7 @@ const NAV_COUNTS: PullRequestNavCounts = {
   all: null,
   "in-progress": 2,
   completed: 3,
+  release: 0,
 };
 
 /** 「マージ待ち」3件のうち1件だけが要操作（残りはAuto-merge待ち・自動修復中） */

@@ -1,4 +1,4 @@
-import { GitMerge, GitPullRequest, LoaderCircle } from "lucide-react";
+import { GitMerge, GitPullRequest, LoaderCircle, Rocket } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
 import type { PullRequestViewId } from "@/types/pull-request";
@@ -61,6 +61,16 @@ export const pullRequestViews: PullRequestView[] = [
       "CIも自動マージ可否の判定も終わってマージを待っているPull Request（CI失敗は判定中でもここに出る。「ユーザーの確認待ち」とは母集団が別）",
     emptyMessage: "マージ待ちのPull Requestはありません。",
   },
+  {
+    id: "release",
+    // 本番のバージョンアップに関わるPR（リリース候補・バンプPR・本番復旧PR）を通常の3ビューから
+    // 隔離した入口（#4542）
+    label: "本番リリース",
+    pcLabel: "PR：本番リリース",
+    title: "本番リリースのプルリクエスト",
+    description: "リリース候補・バージョンバンプ・本番復旧など、本番のバージョンアップに関わるPull Request",
+    emptyMessage: "本番リリースに関わるPull Requestはありません。",
+  },
 ];
 
 /**
@@ -87,6 +97,7 @@ export const pullRequestViewIcons: Record<PullRequestViewId, LucideIcon> = {
   "in-progress": LoaderCircle,
   // チェックマーク（`CircleCheckBig`）だと「マージ済み」に読めるため、マージの記号にした（#2120）。
   completed: GitMerge,
+  release: Rocket,
 };
 
 export function isPullRequestViewId(value: string | null | undefined): value is PullRequestViewId {
