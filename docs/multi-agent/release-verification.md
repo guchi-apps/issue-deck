@@ -113,6 +113,17 @@ PC（リリースPR詳細）・スマホ（リリースシート）・**本番�
 - 診断は対象SHA付きで保存し、現在のSHAと一致するものだけを表示する（旧実行の原因を現在の結果に見せない）。機密は実行側（`scripts/run-release-review.sh`の`diag_redact`）とサーバー（`redactDiagnosticText`）の両方で伏せ、末尾30行・2000文字までしか持たない。生ログ全文は出さない
 - 再実行: `POST /api/repositories/release/review-rerun`。ガードは作り直しと同じ（`previewModeGuard`→`requireUserId`→リポジトリ所有確認）。対象はサーバーが今のリリースPRから解決し、クライアントのSHAは一致確認だけに使う。`activeKey`で実行中・待機中の二重起動を防ぎ、積めたときだけ`ai_review`を`waiting`へ戻して旧診断・指摘を消す
 
+### 検証証跡のAIレビューへの受け渡しと失敗種別の区別（#4616）
+
+全体レビューのAIは読み取り専用で、依存関係もテスト環境も持たない（`node_modules`が無くvitestを実行できず「要確認」を繰り返した）。**テストの実行をAIへ丸投げせず、統合検証ランナーが設定済みコマンド（`integrationCommands`。issue-deckは`pnpm install --frozen-lockfile`が先頭）を実行した結果を、AIの入力として渡す。**
+
+- 証跡: `scripts/lib/release-evidence.sh`。`run-release-verify.sh`が、リポジトリ・PR・base/head・統合対象・コマンド・成否・終了コード・日時・失敗時のログ末尾を、対象（base/head）ごとのJSONへ残す（`ISSUE_DECK_RELEASE_EVIDENCE_ROOT`、既定は`$TMPDIR/issue-deck-release-evidence`）
+- **head単体と統合状態を混ぜない。** 証跡は統合状態（main base＋release head）のものだと明記し、head単体は「未実施」と書く。合格で代用しない
+- 全体レビュー（`run-release-review.sh`）は、**base/headが完全に一致する証跡だけ**をプロンプトの「検証証跡」へ入れる。候補の更新・mainの前進でファイル名が変わるため旧証跡は再利用されない。無い・実行中の場合は「未実施」として渡し、**コードの不具合の根拠にしない**（実行結果が要る項目は`unconfirmed`＋`unverifiedScope`）。AIの権限（Codexはread-only、ClaudeはRead/Grep/Glob）は変えない
+- 失敗種別`failureKind`（統合検証の結果JSONに追加。旧サーバーは無視する）: `merge_conflict`（競合ファイルを併記・統合状態の検証は未実施）／`dependency_install_failed`（`pnpm install`・`npm ci`・`pip install`等の失敗）／`setup_missing`（終了コード126/127）／`timeout`（124/137）／`test_failed`（テスト・型検査・ビルドの不合格）／`duplicate_run`。**取得失敗・設定不足・時間切れを`test_failed`（コード不具合）に置き換えない**
+- 二重実行: 同じ候補（base/head）の証跡に隣接するロック（PID）で、進行中の統合検証がある間は2本目を開始せず`needs_check`（`duplicate_run`）で返す。PIDが生きていなければロックを引き継ぐ
+- **未対応（別Issueで扱う）**: サーバー側が`failureKind`を画面・復旧系列（#4451/#4480）へ接続すること、全体レビューを統合検証の完了まで待たせる順序制御。現状は証跡が無ければ「未実施」としてレビューへ渡すに留まる
+
 ### 進捗（#4277）
 
 結果（`ReleaseVerification`）とは別に、**現在の対象（base・head）の**最新ジョブ（`DispatchJob`）から進捗を作る
