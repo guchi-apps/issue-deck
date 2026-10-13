@@ -318,7 +318,8 @@ export function internalReviewSection(): string[] {
     `- 確認方針（最終候補の全体レビューと同じ基準。確認項目v${RELEASE_REVIEW_CHECKLIST_VERSION}）: 独立レビューには、修正を取り込んだ候補全体について次の観点を項目ごとに確認させ、確認済み／非該当／未確認と根拠を返させる（根拠の無い確認済みは未確認として扱う）。${RELEASE_REVIEW_CHECK_ITEMS.map((i) => i.label).join("／")}`,
     `- 指摘の区別: ${BLOCKING_POLICY_LINES.join(" ")}止めない提案だけで往復を続けない（別Issueで追跡する）`,
     "- 完了の条件: 独立レビューの実施・未解決指摘0件・必要テストの合格が、同じ内容に対してそろっていること。そろったら`scripts/create-release-fix-pr.sh`でPRを作る（通常の往復で追加Issue・PRは作らない。再実行してもPRは重複しない）",
-    "- 止まる場合: 往復の上限・時間の上限・同じ指摘の再発・進捗なしで、理由つきで止まり`00.check-user`が付く。判断が必要な仕様変更・権限不足・外部作業も同様にIssueコメントで相談する",
+    "- 担当: 作業の最初に`scripts/report-release-fix-round.sh claim <issue番号> <担当名>`で担当を取り、応答の`epoch`を以降の`review`・`test`へ環境変数`RELEASE_FIX_ASSIGNEE`・`RELEASE_FIX_EPOCH`で渡す（旧担当の遅延報告は記録されない）。別のエージェントから引き継ぐときも同じ記録（指摘・往復・稼働時間）から未完了の部分を続ける",
+    "- 一時停止: 往復の回数では止まらない。**進捗の根拠が無い停滞**（変更も解消も無いまま同じ指摘が再指摘される・未解決が減らず解消も無い）と**実行予算（稼働時間。待機・中断は含まない）の到達**で、記録を保持したまま一時停止し、必要な操作がIssueに残る。停止中は報告できず、画面から再開（予算の追加・方針の入力）する。実行環境の障害・判断や権限の不足は`scripts/report-release-fix-round.sh pause`で報告して止める",
     "",
   ];
 }

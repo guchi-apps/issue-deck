@@ -1,11 +1,15 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  accrueActiveSeconds,
+  appendAttempt,
+  classifyLegacyStopReason,
   decideInternalHold,
+  decideInternalResume,
   decideInternalStop,
   evaluateInternalGate,
-  INTERNAL_MAX_MINUTES,
-  INTERNAL_MAX_ROUNDS,
+  INTERNAL_ACTIVE_GAP_MINUTES,
+  INTERNAL_MAX_ATTEMPTS,
   isInternalHoldReason,
   nextFindingKey,
   validateReviewReport,
@@ -66,39 +70,72 @@ describe("evaluateInternalGate", () => {
   });
 });
 
-describe("decideInternalStop", () => {
-  const startedAt = new Date("2026-10-12T00:00:00Z");
-  const soon = new Date("2026-10-12T00:10:00Z");
+describe("decideInternalStop（#4587）", () => {
+  const base = { activeMinutes: 10, budgetMinutes: 120 };
   it("通常の指摘だけでは止めない", () => {
     const rounds = [round({ round: 1, reviewVerdict: "findings", openFindingCount: 2 }), round({ round: 2, reviewVerdict: "findings", openFindingCount: 1 })];
-    expect(decideInternalStop({ rounds, findings: [finding({ status: "open" })], startedAt, now: soon })).toEqual({ stop: false });
+    expect(decideInternalStop({ rounds, findings: [finding({ status: "open" })], ...base })).toEqual({ stop: false });
   });
-  it("往復の上限に達したら止める", () => {
-    const rounds = Array.from({ length: INTERNAL_MAX_ROUNDS }, (_, i) => round({ round: i + 1, reviewVerdict: "findings", openFindingCount: 5 - i }));
-    expect(decideInternalStop({ rounds, findings: [], startedAt, now: soon })).toMatchObject({ stop: true, reason: "max_rounds" });
+  it("5往復を超えても、件数が減っていれば回数だけでは止めない", () => {
+    const rounds = Array.from({ length: 8 }, (_, i) => round({ round: i + 1, reviewVerdict: "findings", openFindingCount: 8 - i }));
+    expect(decideInternalStop({ rounds, findings: [finding({ status: "open" })], ...base })).toEqual({ stop: false });
   });
-  it("最新が合格なら上限に達していても止めない", () => {
-    const rounds = Array.from({ length: INTERNAL_MAX_ROUNDS }, (_, i) => round({ round: i + 1, reviewVerdict: i === INTERNAL_MAX_ROUNDS - 1 ? "pass" : "findings", openFindingCount: 1 }));
-    expect(decideInternalStop({ rounds, findings: [], startedAt, now: soon }).stop).toBe(false);
+  it("稼働時間が予算に達したら一時停止する。待機の長さは関係しない", () => {
+    expect(decideInternalStop({ rounds: [round({ reviewVerdict: "findings", openFindingCount: 1 })], findings: [], activeMinutes: 120, budgetMinutes: 120 })).toMatchObject({ reason: "budget_reached" });
+    expect(decideInternalStop({ rounds: [round({ reviewVerdict: "findings", openFindingCount: 1 })], findings: [], activeMinutes: 119, budgetMinutes: 120 }).stop).toBe(false);
   });
-  it("経過時間の上限で止める", () => {
-    const later = new Date(startedAt.getTime() + INTERNAL_MAX_MINUTES * 60_000);
-    expect(decideInternalStop({ rounds: [round({ reviewVerdict: "findings", openFindingCount: 1 })], findings: [], startedAt, now: later })).toMatchObject({ reason: "timed_out" });
+  it("最新がpassでもゲート完了前に予算を超えたら止める。完了していれば止めない", () => {
+    const over = { activeMinutes: 130, budgetMinutes: 120 };
+    expect(decideInternalStop({ rounds: [round({ reviewVerdict: "pass" })], findings: [], ...over })).toMatchObject({ reason: "budget_reached" });
+    expect(decideInternalStop({ rounds: [round({ reviewVerdict: "pass" })], findings: [], ...over, gateComplete: true }).stop).toBe(false);
   });
-  it("最新がpassでもゲート完了前に時間上限を超えたら止める（#4468）", () => {
-    const later = new Date(startedAt.getTime() + INTERNAL_MAX_MINUTES * 60_000);
-    expect(decideInternalStop({ rounds: [round({ reviewVerdict: "pass" })], findings: [], startedAt, now: later })).toMatchObject({ reason: "timed_out" });
-    expect(decideInternalStop({ rounds: [round({ reviewVerdict: "pass" })], findings: [], startedAt, now: later, gateComplete: true }).stop).toBe(false);
+  it("同一指摘が変更も解消も無いまま再指摘されたら停滞として止める", () => {
+    const rounds = [1, 2].map((n) => round({ round: n, reviewVerdict: "findings", reviewTargetSha: "same", openFindingCount: 1 }));
+    expect(decideInternalStop({ rounds, findings: [finding({ status: "open", reopenCount: 2 })], ...base })).toMatchObject({ reason: "recurring_finding", detail: "F-001" });
   });
-  it("同一指摘の再発で止める", () => {
-    expect(decideInternalStop({ rounds: [round({ reviewVerdict: "findings", openFindingCount: 1 })], findings: [finding({ status: "open", reopenCount: 2 })], startedAt, now: soon })).toMatchObject({
-      reason: "recurring_finding",
-      detail: "F-001",
-    });
+  it("再指摘が続いても、対象が変わり件数が減っていれば停滞と断定しない", () => {
+    const rounds = [
+      round({ round: 1, reviewVerdict: "findings", reviewTargetSha: "a1", openFindingCount: 3 }),
+      round({ round: 2, reviewVerdict: "findings", reviewTargetSha: "a2", openFindingCount: 2 }),
+    ];
+    expect(decideInternalStop({ rounds, findings: [finding({ status: "open", reopenCount: 2 })], ...base }).stop).toBe(false);
   });
-  it("未解決の件数が減らない往復が続けば進捗なしで止める", () => {
+  it("未解決の件数が減らず解消の根拠も無い往復が続けば進捗なしで止める", () => {
     const rounds = [1, 2, 3].map((n) => round({ round: n, reviewVerdict: "findings", openFindingCount: 2 }));
-    expect(decideInternalStop({ rounds, findings: [], startedAt, now: soon })).toMatchObject({ reason: "no_progress" });
+    expect(decideInternalStop({ rounds, findings: [finding({ status: "open" })], ...base })).toMatchObject({ reason: "no_progress" });
+  });
+  it("件数が減らなくても、その間に別の指摘を解消していれば進捗とみなす", () => {
+    const rounds = [1, 2, 3].map((n) => round({ round: n, reviewVerdict: "findings", openFindingCount: 2 }));
+    const findings = [finding({ key: "F-001", status: "resolved", lastRound: 2 }), finding({ key: "F-002", status: "open" })];
+    expect(decideInternalStop({ rounds, findings, ...base }).stop).toBe(false);
+  });
+});
+
+describe("稼働時間・再開・履歴（#4587）", () => {
+  const t0 = new Date("2026-10-13T00:00:00Z");
+  it("前回の活動からの間隔は上限までしか算入しない（長い待機・中断は消費しない）", () => {
+    const soon = new Date(t0.getTime() + 3 * 60_000);
+    expect(accrueActiveSeconds({ activeSeconds: 60, lastActivityAt: t0, now: soon })).toBe(60 + 180);
+    const afterWait = new Date(t0.getTime() + 5 * 3600_000);
+    expect(accrueActiveSeconds({ activeSeconds: 60, lastActivityAt: t0, now: afterWait })).toBe(60 + INTERNAL_ACTIVE_GAP_MINUTES * 60);
+    expect(accrueActiveSeconds({ activeSeconds: 60, lastActivityAt: null, now: afterWait })).toBe(60);
+  });
+  it("予算到達は予算の追加、停滞は方針、実行障害は入力なしで再開できる", () => {
+    expect(decideInternalResume({ kind: "budget_reached", addMinutes: null, direction: null })).toMatchObject({ ok: false, error: "input_required" });
+    expect(decideInternalResume({ kind: "budget_reached", addMinutes: 60, direction: null })).toEqual({ ok: true, addMinutes: 60 });
+    expect(decideInternalResume({ kind: "no_progress", addMinutes: null, direction: " " })).toMatchObject({ ok: false });
+    expect(decideInternalResume({ kind: "recurring_finding", addMinutes: null, direction: "F-001は別方式で直す" })).toMatchObject({ ok: true });
+    expect(decideInternalResume({ kind: "environment", addMinutes: null, direction: null })).toEqual({ ok: true, addMinutes: 0 });
+  });
+  it("試行履歴には上限がある", () => {
+    let history: unknown = null;
+    for (let i = 0; i < INTERNAL_MAX_ATTEMPTS + 5; i += 1) history = appendAttempt(history, { at: String(i), kind: "claim", by: "a", detail: null, sha: null });
+    expect((history as unknown[]).length).toBe(INTERNAL_MAX_ATTEMPTS);
+  });
+  it("旧方式の停止理由を新方式の原因へ読み替える", () => {
+    expect(classifyLegacyStopReason("同じ指摘（F-001）が解消されないまま")).toBe("recurring_finding");
+    expect(classifyLegacyStopReason("未解決の指摘が2往復続けて減っていません")).toBe("no_progress");
+    expect(classifyLegacyStopReason("独立レビューの往復が上限（5回）に達しました")).toBe("budget_reached");
   });
 });
 

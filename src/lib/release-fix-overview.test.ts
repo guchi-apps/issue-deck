@@ -188,3 +188,18 @@ describe("修正の実行状態とレビュー範囲の確認待ち（#4498）",
     expect(o.detail).toContain("履歴");
   });
 });
+
+describe("describeFixOverview: 内部確認の一時停止（#4587）", () => {
+  const pause = { message: "実行予算に達したため一時停止しています", nextAction: "予算を追加して再開する", autoResumable: false };
+  it("修正中でも一時停止なら自動で進むとは言わず、原因と次の操作を出す", () => {
+    const o = describeFixOverview({ series: { ...series("fix_in_progress"), internalPause: pause }, checks: null });
+    expect(o.pill).toBe("一時停止");
+    expect(o.autoProgress).toBe(false);
+    expect(o.detail).toContain("次の操作: 予算を追加して再開する");
+  });
+  it("実行環境の障害を本人確認待ち（あなたの操作が必要）にはしない", () => {
+    const o = describeFixOverview({ series: { ...series("fix_in_progress"), internalPause: { ...pause, autoResumable: true } }, checks: null });
+    expect(o.pill).toBe("一時停止（再開可）");
+    expect(o.pill).not.toBe("あなたの操作が必要");
+  });
+});
