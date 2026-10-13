@@ -533,6 +533,14 @@ function ReleaseHistoryCard({
           {entry.deployState !== undefined ? "タグをGitHubで見る" : "GitHubで見る"}
         </a>
 
+        {entry.releaseCandidate && (
+          <CandidateLink
+            candidate={entry.releaseCandidate}
+            repoFullName={entry.repoFullName}
+            onOpenPullRequest={onOpenPullRequest}
+          />
+        )}
+
         {status.kind === "unchecked" && (
           <Button
             size="sm"
@@ -842,5 +850,32 @@ function CarriedReleaseSection({
         />
       )}
     </section>
+  );
+}
+
+/** この版を公開した候補（RC-n・revision）の物理PRを開く導線（#4597） */
+function CandidateLink({
+  candidate,
+  repoFullName,
+  onOpenPullRequest,
+}: {
+  candidate: NonNullable<ReleaseHistoryItem["releaseCandidate"]>;
+  repoFullName: string;
+  onOpenPullRequest?: (pullRequestId: string) => void;
+}) {
+  const label = `元の候補 RC-${candidate.sequence}（revision ${candidate.revision}）`;
+  if (candidate.prNumber === null || !onOpenPullRequest) {
+    return <span className="text-[11px] text-muted-foreground">{label}</span>;
+  }
+  const pullRequestId = `${repoFullName}#${candidate.prNumber}`;
+  return (
+    <button
+      type="button"
+      onClick={() => onOpenPullRequest(pullRequestId)}
+      className="inline-flex items-center gap-1 text-[11px] font-medium text-muted-foreground underline underline-offset-2 hover:text-foreground"
+      data-testid="release-history-candidate-link"
+    >
+      {label}を見る
+    </button>
   );
 }

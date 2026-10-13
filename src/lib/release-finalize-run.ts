@@ -53,6 +53,7 @@ import {
 import { evaluateReleaseMergeGate, RELEASE_VERIFICATION_KINDS, type ReleaseVerificationKind, type ReleaseVerificationView } from "@/lib/release-merge-gate";
 import { listReleaseMacRows } from "@/lib/release-mac-verification";
 import {
+  findCandidateIdByPullRequest,
   loadCandidateRow,
   loadRcOverview,
   observeCandidatePullRequest,
@@ -869,11 +870,7 @@ export async function loadFinalizationOverview(ctx: Context, candidateId: string
 /** 画面が見ている候補のID。PR番号があればそのPRを持つ候補（過去のものも含む）、無ければ進行中の候補（GitHubは呼ばない） */
 export async function resolveRcCandidateId(repositoryFullName: string, pullRequestNumber?: number): Promise<string | null> {
   if (pullRequestNumber !== undefined) {
-    const revision = await db.releaseCandidateRevision.findFirst({
-      where: { prNumber: pullRequestNumber, candidate: { repositoryFullName } },
-      select: { candidateId: true },
-    });
-    return revision?.candidateId ?? null;
+    return findCandidateIdByPullRequest(repositoryFullName, pullRequestNumber);
   }
   const row = await db.releaseCandidate.findUnique({ where: { activeKey: repositoryFullName }, select: { id: true } });
   return row?.id ?? null;
@@ -887,11 +884,10 @@ export async function loadFinalizationSnapshot(
   repositoryFullName: string,
   prNumber: number,
 ): Promise<{ candidateId: string; phase: string; applied: { preHeadSha: string; finalHeadSha: string; finalBaseSha: string } | null } | null> {
-  const revision = await db.releaseCandidateRevision.findFirst({
-    where: { prNumber, candidate: { repositoryFullName } },
-    select: { candidate: { select: { id: true, phase: true } } },
-  });
-  if (!revision) return null;
+  const resolvedId = await findCandidateIdByPullRequest(repositoryFullName, prNumber);
+  const resolved = resolvedId ? await db.releaseCandidate.findUnique({ where: { id: resolvedId }, select: { id: true, phase: true } }) : null;
+  if (!resolved) return null;
+  const revision = { candidate: resolved };
   // バンプ前→バンプ後の対応は、その後に最終検証が失敗して修正工程へ戻った公開準備でも事実として残る。
   // 完了系列が追いかけ損ねて止まらないよう、最終headが記録された最新の行を使う（公開できるかは段階で別に判定する）
   const latest = await db.releaseCandidateFinalization.findFirst({

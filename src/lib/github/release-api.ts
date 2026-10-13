@@ -175,6 +175,8 @@ export type ReleaseHistoryItem = {
   recoveredBy?: string;
   /** 前の失敗版から引き継いで本番へ届けた変更（#4003）。この版自身の変更は`body` */
   carriedOver?: CarriedRelease[];
+  /** この版を公開した候補（RC-n）。新方式で公開した版だけ入る（#4597）。`prNumber`は候補の物理PR（revisionをまたいで同じ） */
+  releaseCandidate?: { sequence: number; revision: number; prNumber: number | null };
 };
 
 /**
