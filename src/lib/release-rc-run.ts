@@ -368,6 +368,24 @@ async function reconcilePending(ctx: Context, row: CandidateRow): Promise<boolea
 }
 
 /**
+ * PR番号から候補を引く。revisionをまたぐ物理PR（バンプ前後・置換後）は`ReleaseCandidateRevision.prNumber`、
+ * 旧方式（`release-main/vX.Y.Z`）から移行した候補の元PRは`migratedFromPrNumber`で同じ候補へ解決する（#4597）
+ */
+export async function findCandidateIdByPullRequest(repositoryFullName: string, prNumber: number): Promise<string | null> {
+  const revision = await db.releaseCandidateRevision.findFirst({
+    where: { prNumber, candidate: { repositoryFullName } },
+    select: { candidateId: true },
+  });
+  if (revision) return revision.candidateId;
+  const migrated = await db.releaseCandidate.findFirst({
+    where: { repositoryFullName, migratedFromPrNumber: prNumber },
+    orderBy: { sequence: "desc" },
+    select: { id: true },
+  });
+  return migrated?.id ?? null;
+}
+
+/**
  * リポジトリの候補の状況。`pullRequestNumber`を渡すとそのPRを持つ候補（過去のものも含む）、無ければ進行中の候補を返す。
  * 未完了の更新は、ここで実際の候補ブランチと照合して取り込む（報告が届かなかった場合の回復）
  */
@@ -379,11 +397,8 @@ export async function loadRcOverview(input: Context & { pullRequestNumber?: numb
 
   let row: CandidateRow | null = null;
   if (input.pullRequestNumber !== undefined) {
-    const revision = await db.releaseCandidateRevision.findFirst({
-      where: { prNumber: input.pullRequestNumber, candidate: { repositoryFullName } },
-      select: { candidateId: true },
-    });
-    if (revision) row = await loadCandidateRow({ id: revision.candidateId });
+    const candidateId = await findCandidateIdByPullRequest(repositoryFullName, input.pullRequestNumber);
+    if (candidateId) row = await loadCandidateRow({ id: candidateId });
   } else {
     row = await loadCandidateRow({ activeKey: repositoryFullName });
   }

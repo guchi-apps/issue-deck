@@ -377,3 +377,21 @@ describe("ReleaseHistoryPanel のデプロイ失敗版と修正版（#4003）", 
     expect(screen.getByText("この版の変更は、まだ本番へ反映されていません。")).toBeTruthy();
   });
 });
+
+describe("ReleaseHistoryPanel の候補への導線（#4597）", () => {
+  it("候補を持つ版は、RC-nとrevisionを出して物理PRを開く", () => {
+    const onOpenPullRequest = vi.fn();
+    renderPanel({
+      entries: [entry({ releaseCandidate: { sequence: 3, revision: 2, prNumber: 4500 } })],
+      onOpenPullRequest,
+    });
+    fireEvent.click(screen.getByTestId("release-history-candidate-link"));
+    expect(screen.getByTestId("release-history-candidate-link").textContent).toContain("RC-3（revision 2）");
+    expect(onOpenPullRequest).toHaveBeenCalledWith("guchi-apps/issue-deck#4500");
+  });
+
+  it("候補を持たない版には導線を出さない", () => {
+    renderPanel();
+    expect(screen.queryByTestId("release-history-candidate-link")).toBeNull();
+  });
+});

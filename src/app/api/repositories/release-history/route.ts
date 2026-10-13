@@ -183,7 +183,7 @@ async function handleGET() {
     }),
   );
 
-  const entries = mergeReleaseHistory(perRepository);
+  const entries = await attachReleaseCandidates(mergeReleaseHistory(perRepository));
   return NextResponse.json({
     entries,
     checkRecords,
@@ -214,4 +214,39 @@ async function fetchIosTestflightRuns(owner: string, repo: string, token: string
       ? [{ id: run.id, headSha: run.head_sha, status: run.status, conclusion: run.conclusion ?? null }]
       : [],
   );
+}
+
+/** 新方式の候補が公開した版へ、元の候補（RC-n・revision・物理PR）を付ける（#4597）。取れなければ付けない */
+async function attachReleaseCandidates(entries: ReleaseHistoryItem[]): Promise<ReleaseHistoryItem[]> {
+  if (entries.length === 0) return entries;
+  try {
+    const rows = await db.releaseVersionReservation.findMany({
+      where: { repositoryFullName: { in: [...new Set(entries.map((entry) => entry.repoFullName))] }, status: "consumed" },
+      select: {
+        repositoryFullName: true,
+        version: true,
+        consumedTag: true,
+        candidate: {
+          select: {
+            sequence: true,
+            currentRevision: true,
+            revisions: { where: { prNumber: { not: null } }, orderBy: { revision: "desc" }, take: 1, select: { prNumber: true } },
+          },
+        },
+      },
+    });
+    const byTag = new Map<string, (typeof rows)[number]>();
+    for (const row of rows) byTag.set(`${row.repositoryFullName} ${row.consumedTag ?? `v${row.version}`}`, row);
+    return entries.map((entry) => {
+      const row = byTag.get(`${entry.repoFullName} ${entry.tagName}`);
+      if (!row) return entry;
+      return {
+        ...entry,
+        releaseCandidate: { sequence: row.candidate.sequence, revision: row.candidate.currentRevision, prNumber: row.candidate.revisions[0]?.prNumber ?? null },
+      };
+    });
+  } catch (error) {
+    console.error("[GET /api/repositories/release-history] candidate lookup failed", error);
+    return entries;
+  }
 }
