@@ -33,6 +33,7 @@ import {
   buildReleaseFixIssue,
   buildReleaseFixSourceKey,
   canStartNextGeneration,
+  isLegacyGenerationLimitStopReason,
   classifyIntegrationFailure,
   decideReleaseFix,
   decideReverification,
@@ -307,18 +308,21 @@ export async function createReleaseFixSeries(input: CreateReleaseFixInput): Prom
   const duplicate = await db.releaseFixSeries.findUnique({ where: { activeKey } });
   if (duplicate) return { outcome: "existing", series: toReleaseFixSeriesView(duplicate) };
 
-  // 後継候補での再検証失敗から続ける場合は、世代を進める（上限・同一問題の再発で止める）
+  // 後継候補での再検証失敗から続ける場合は、世代を進める（同一問題の再発だけで止める）
   const parent = await db.releaseFixSeries.findFirst({
     where: { repositoryFullName, successorPrNumber: releasePr.number },
     orderBy: { createdAt: "desc" },
   });
   const ancestorKeys: string[] = [];
-  for (let cursor: ReleaseFixSeries | null = parent, depth = 0; cursor && depth < 10; depth += 1) {
+  // 世代数では止めない（#4589）ので、系列を最初までさかのぼる。循環だけを防ぐ
+  const visited = new Set<string>();
+  for (let cursor: ReleaseFixSeries | null = parent; cursor && !visited.has(cursor.id); ) {
+    visited.add(cursor.id);
     ancestorKeys.push(cursor.sourceKey);
     cursor = cursor.parentId ? await db.releaseFixSeries.findUnique({ where: { id: cursor.parentId } }) : null;
   }
   const generation = parent ? parent.generation + 1 : 1;
-  const next = canStartNextGeneration({ generation, sourceKey, ancestorSourceKeys: ancestorKeys });
+  const next = canStartNextGeneration({ sourceKey, ancestorSourceKeys: ancestorKeys });
   if (!next.ok) return { outcome: "blocked", message: next.reason };
 
   const draft = buildReleaseFixIssue(
@@ -863,7 +867,7 @@ async function supersedeByContinuation(ctx: SweepContext, row: ReleaseFixSeries,
 
 /**
  * 再検証で修正が要ると判定されたあとの扱い（#4478）。失敗というだけで本人確認にせず、
- * 通常の追加指摘は同じ修正Issueの次世代へ戻す。実行障害は起案せず待ち、本人判断・上限は理由つきで止める。
+ * 通常の追加指摘は同じ修正Issueの次世代へ戻す。実行障害は起案せず待ち、本人判断は理由つきで止める。
  */
 async function continueAfterReverification(
   ctx: SweepContext,
@@ -958,6 +962,8 @@ export async function runReleaseFixSweep(options: { hostName?: string | null } =
         { status: "stopped", stopReason: NOTHING_TO_ADD_REASON },
         // 旧い巡回が再検証の失敗で一律に止めた系列は、再評価して同じ修正Issueの次世代へ戻す（#4478）
         { status: "stopped", successorPrNumber: { not: null }, stopReason: { contains: "の再検証で指摘・失敗が残りました（世代" } },
+        // 世代数の固定上限（3回）で止めた系列も、上限の撤廃後は同じ記録から再評価する（#4589）
+        { status: "stopped", successorPrNumber: { not: null }, stopReason: { contains: "修正の反復が上限（" } },
       ],
     },
     orderBy: { createdAt: "asc" },
@@ -968,7 +974,7 @@ export async function runReleaseFixSweep(options: { hostName?: string | null } =
   const groups = new Map<string, ReleaseFixSeries[]>();
   const successors: ReleaseFixSeries[] = [];
   for (const row of active) {
-    if (row.status === "rebuilding" || row.status === "reverifying" || (row.status === "stopped" && isLegacyReverificationStopReason(row.stopReason))) {
+    if (row.status === "rebuilding" || row.status === "reverifying" || (row.status === "stopped" && (isLegacyReverificationStopReason(row.stopReason) || isLegacyGenerationLimitStopReason(row.stopReason)))) {
       successors.push(row);
       continue;
     }

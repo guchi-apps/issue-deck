@@ -17,7 +17,7 @@ import {
   type OverviewChecks,
   type OverviewTone,
 } from "@/lib/release-fix-overview";
-import { RELEASE_FIX_STEPS, RELEASE_FIX_MAX_GENERATION, type ReleaseFixSourceKind, type ReleaseFixStartState } from "@/lib/release-fix-series";
+import { RELEASE_FIX_STEPS, type ReleaseFixSourceKind, type ReleaseFixStartState } from "@/lib/release-fix-series";
 import type { RebuildEpisode } from "@/lib/release-rebuild-history";
 import type { ReleaseVerificationSummary } from "@/lib/release-verification-summary";
 import type { ReleaseFixSeriesView } from "@/lib/release-fix-series-run";
@@ -826,7 +826,7 @@ export function ReleaseFixHistory({ state }: { state: ReleaseFixOverviewState })
             <li key={item.id} className="flex flex-col gap-1 rounded bg-muted/40 px-2 py-1.5">
               <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
                 <span className="text-muted-foreground">
-                  世代 {item.generation}/{RELEASE_FIX_MAX_GENERATION} · 元のリリースPR #{item.releasePrNumber}
+                  世代 {item.generation} · 元のリリースPR #{item.releasePrNumber}
                 </span>
                 <ExtLink href={issueUrl(repositoryFullName, item.issueNumber, "issues")}>修正Issue #{item.issueNumber}</ExtLink>
                 {item.fixPrNumber !== null && (
