@@ -2759,10 +2759,43 @@ model ReleaseFixFinding {
   firstRound         Int
   lastRound          Int
   reopenCount        Int      @default(0)
+  // 解消した後に再発した回数（未解消のままの再指摘`reopenCount`とは別に数える。#4587）
+  regressionCount    Int      @default(0)
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
 
   @@unique([repositoryFullName, issueNumber, key])
+}
+
+// 内部確認の再開可能な状態（#4587）。論理セッション（リポジトリ＋修正Issue番号）ごとに1行で、世代・担当をまたいで累積する。
+// 稼働時間（待機・中断を除く）・実行予算・一時停止の原因・担当（リース＋世代番号で旧担当の遅延報告を弾く）・試行履歴を持つ。
+model ReleaseFixInternalSession {
+  id                 String    @id @default(cuid())
+  repositoryFullName String    @db.VarChar(191)
+  issueNumber        Int
+  // 実際に作業した秒数の累積。引き継いでもゼロに戻さない
+  activeSeconds      Int       @default(0)
+  lastActivityAt     DateTime?
+  // 実行予算（稼働分）。再開時に追加できる
+  budgetMinutes      Int       @default(120)
+  // 一時停止の原因（`budget_reached`等）。動いている間はnull
+  pauseKind          String?   @db.VarChar(32)
+  pauseDetail        String?   @db.Text
+  pausedAt           DateTime?
+  pausedSha          String?   @db.VarChar(64)
+  // 再開した時点の往復番号。停滞の判定はこれより後の往復だけを見る（同じ停滞で即再停止しない）
+  resumeBaseRound    Int       @default(0)
+  nextAction         String?   @db.Text
+  // 担当。`assignmentEpoch`は担当が変わるたびに増える世代番号で、報告にこれが無い・古いものは弾く
+  assignee           String?   @db.VarChar(120)
+  assignmentEpoch    Int       @default(0)
+  leaseUntil         DateTime?
+  // 担当の取得・引き継ぎ・停止・再開の履歴（JSON配列。件数に上限あり）
+  attempts           Json?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  @@unique([repositoryFullName, issueNumber])
 }
 
 // リリース準備（`release-develop-to-main.yml`の`release`ジョブ）の失敗記録（#4335）。

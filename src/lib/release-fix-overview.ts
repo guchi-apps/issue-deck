@@ -34,6 +34,8 @@ export const OVERVIEW_ACTION_LABEL: Record<Exclude<OverviewActionKind, "none">, 
   retry_rebuild: "ブランチ画面の「修正を入れて作り直す」で再試行",
 };
 
+const isActiveFixStatus = (status: ReleaseFixStatus) => status === "issue_created" || status === "fix_in_progress";
+
 export type OverviewSeries = {
   status: ReleaseFixStatus;
   issueNumber: number;
@@ -44,6 +46,8 @@ export type OverviewSeries = {
   rebuildFailed?: boolean;
   /** 修正PR。作成前はnull（実装中と修正PRの検証中を分ける。#4498） */
   fixPrNumber?: number | null;
+  /** 内部確認の一時停止（#4587）。停止していなければnullまたは省略 */
+  internalPause?: { message: string; nextAction: string; autoResumable: boolean } | null;
 };
 
 /**
@@ -202,6 +206,18 @@ export function describeFixOverview(input: {
   }
   if (series?.status === "reverifying" || (series?.successorPrNumber != null && checks && (isBusy(checks.aiReview.state) || isBusy(checks.integration.state)))) {
     return { ...base, tone: "progress", pill: "チェック中", headline: "修正後のチェックを実行しています", detail: "結果が出ると、この表示が更新されます。", action: { kind: "view_progress", label: OVERVIEW_ACTION_LABEL.view_progress }, autoProgress: true };
+  }
+  // 内部確認が一時停止している（#4587）。作業は失われておらず、原因ごとの操作で再開できる。実行障害は本人確認待ちにしない
+  if (series && isActiveFixStatus(series.status) && series.internalPause) {
+    const pause = series.internalPause;
+    return {
+      ...base,
+      tone: "warn",
+      pill: pause.autoResumable ? "一時停止（再開可）" : "一時停止",
+      headline: "修正を一時停止しています。作業内容と指摘の記録は保持されています",
+      detail: `${pause.message}。次の操作: ${pause.nextAction}`,
+      action: act("view_progress"),
+    };
   }
   // 内部確認（#4410）が済まないまま修正PRが現れた。無関係な変更の確認（accept_extra）とは別なので、操作を出し分ける
   if (series?.status === "awaiting_decision" && isInternalHoldReason(series.stopReason)) {
