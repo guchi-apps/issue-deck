@@ -22,6 +22,8 @@ source "$SCRIPT_DIR/lib/review-usage.sh"
 source "$SCRIPT_DIR/lib/release-progress.sh"
 # shellcheck source=scripts/lib/agent-cli.sh
 source "$SCRIPT_DIR/lib/agent-cli.sh"
+# shellcheck source=scripts/lib/release-evidence.sh
+source "$SCRIPT_DIR/lib/release-evidence.sh"
 
 WORK_ROOT="${ISSUE_DECK_RELEASE_REVIEW_ROOT:-${TMPDIR:-/tmp}/issue-deck-release-review}"
 TIMEOUT_SECONDS="${ISSUE_DECK_RELEASE_REVIEW_TIMEOUT_SECONDS:-1800}"
@@ -357,6 +359,7 @@ else:
     blocking = ""
 repl = {
     "{{REPOSITORY}}": repo, "{{PR_NUMBER}}": pr, "{{BASE_SHA}}": base, "{{HEAD_SHA}}": head,
+    "{{VERIFICATION_EVIDENCE}}": part("evidence"),
     "{{COVERAGE}}": part("coverage"), "{{PULL_REQUESTS}}": part("prs"), "{{DIFF}}": part("diff"),
     "{{CHECKLIST_VERSION}}": version or "0",
     "{{CHECKLIST}}": checklist, "{{BLOCKING_POLICY}}": blocking, "{{REREVIEW}}": part("rereview"),
@@ -562,6 +565,8 @@ main() {
   rm -rf "$part_dir"
   mkdir -p "$part_dir"
   printf '%s' "$prs_text" >"$part_dir/prs"
+  # 統合検証の証跡（#4616）。AIは読み取り専用でテストを実行できないため、同じ対象の結果だけを渡す
+  evidence_prompt_text "$full_name" "$pr_number" "$base_sha" "$head_sha" >"$part_dir/evidence"
   if [[ -n "$checklist_version" ]]; then
     jq -r '.checklistPrompt // ""' <<<"$ctx_json" >"$part_dir/checklist"
     jq -r '.blockingPolicy // ""' <<<"$ctx_json" >"$part_dir/blocking"
