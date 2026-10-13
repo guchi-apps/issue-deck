@@ -223,12 +223,25 @@ describe("再検証の追加指摘", () => {
     expect(createIssue).not.toHaveBeenCalled();
   });
 
-  it("世代の上限に達したら、理由つきで止めて確認待ちにする", async () => {
+  it("世代が3を超えても止めず、同じ修正Issueの次世代へ進める（#4589）", async () => {
     state.rows[0].generation = 3;
     await runReleaseFixSweep({ hostName: "subpc" });
-    expect(state.rows).toHaveLength(1);
-    expect(state.rows[0]).toMatchObject({ status: "stopped" });
-    expect(String(state.rows[0].stopReason)).toContain("上限");
+    expect(state.rows).toHaveLength(2);
+    expect(state.rows[1]).toMatchObject({ generation: 4, issueNumber: 100 });
+    expect(createIssue).not.toHaveBeenCalled();
+  });
+
+  it("3世代上限で止まっていた系列（後継なし）は、再評価して次世代へ戻す（#4589）", async () => {
+    state.rows[0].status = "stopped";
+    state.rows[0].activeKey = null;
+    state.rows[0].generation = 3;
+    state.rows[0].stopReason = "修正の反復が上限（3回）に達しました。原因を人が整理してから進めてください。リリース画面の修正系列から、原因を整理したうえで手動で修正Issueを起案できます";
+    await runReleaseFixSweep({ hostName: "subpc" });
+    expect(state.rows).toHaveLength(2);
+    expect(state.rows[1]).toMatchObject({ generation: 4, issueNumber: 100 });
+    // 巡回が重なっても二重に起案しない
+    await runReleaseFixSweep({ hostName: "subpc" });
+    expect(state.rows).toHaveLength(2);
   });
 
   it("親Issueの状態取得に失敗したら（403・429・5xx・不正な応答）新しいIssueを作らず、次の巡回で再試行する（#4488）", async () => {

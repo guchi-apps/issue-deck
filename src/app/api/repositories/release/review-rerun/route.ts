@@ -16,7 +16,8 @@ import { registerReleaseVerification } from "@/lib/release-verification";
  *
  * **対象（base・head）はクライアントの値ではなく、サーバーが今のリリースPRから解決する。** クライアントが
  * 送ったSHAは「押したときに見ていた対象」との一致確認だけに使い、ずれていれば409で止める
- * （古い画面から別の対象を走らせない）。同じ対象に実行中・待機中のジョブがあれば積まない
+ * （古い画面から別の対象を走らせない）。統合検証が結果待ちなら409（`integration_pending`・#4632）で止め、
+ * 同じ対象に実行中・待機中のジョブがあれば積まない
  * （`already_queued`。重複防止は`requestReleaseReviewJob`の`activeKey`）。
  */
 export function POST(request: NextRequest) {
@@ -63,6 +64,21 @@ async function handlePOST(request: NextRequest) {
       return NextResponse.json({ error: "release_pr_changed" }, { status: 409 });
     }
     const target = { repoFullName: `${owner}/${repo}`, prNumber: pullRequestNumber, baseSha: pr.base.sha, headSha: pr.head.sha };
+    // 統合検証の結果待ちの間は積まない（#4632）。途中の証跡で同じレビューを繰り返さず、検証もここでは起動しない
+    const integration = await db.releaseVerification.findFirst({
+      where: { ...target, kind: "integration" },
+      select: { state: true },
+    });
+    if (integration && (integration.state === "waiting" || integration.state === "running")) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "integration_pending",
+          message: "統合検証の結果待ちです。検証が完了してから再実行してください（途中の証跡では再評価しません）。",
+        },
+        { status: 409 },
+      );
+    }
     await registerReleaseVerification(target);
     const result = await rerunReleaseReviewJob(target);
     if (!result.ok) {

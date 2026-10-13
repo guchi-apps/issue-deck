@@ -130,7 +130,7 @@ export async function POST(request: NextRequest) {
       case "cancel": {
         const candidateId = readString(payload?.candidateId);
         if (!candidateId) return NextResponse.json({ error: "invalid_request" }, { status: 400 });
-        const cancelled = await cancelReleaseRc({ ...ctx, candidateId, reason: readString(payload?.reason) });
+        const cancelled = await cancelReleaseRc({ ...ctx, candidateId, reason: readString(payload?.reason), expectedPhase: readString(payload?.expectedPhase) });
         // 公開前に中止した候補の版の予約は手放す（タグ・main上に版があれば消費済みにする）
         if (cancelled.ok && !cancelled.existing) await settleReservationsOnCancel(ctx, candidateId).catch((error: unknown) => console.error("[release-finalize] settle reservation failed", error));
         return respond(cancelled);

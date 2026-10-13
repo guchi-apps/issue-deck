@@ -140,6 +140,16 @@ describe("decideReleaseCompletion", () => {
     expect(decision).toEqual({ action: "create_fix", sourceKind: "review_finding" });
   });
 
+  it("旧3世代上限で止まった系列も、次の世代を起案する（#4589）", () => {
+    const decision = decideReleaseCompletion(run(), {
+      now,
+      candidate: openCandidate,
+      series: series({ status: "stopped", stopReason: "修正の反復が上限（3回）に達しました。原因を人が整理してから進めてください", successorPrNumber: 10 }),
+      checks: { ...passed, aiReview: "failed", findingCount: 2 },
+    });
+    expect(decision).toEqual({ action: "create_fix", sourceKind: "review_finding" });
+  });
+
   it("準備の失敗など、それ以外の停止は人へ渡す", () => {
     const decision = decideReleaseCompletion(run(), {
       now,

@@ -140,10 +140,15 @@ export async function POST(request: NextRequest) {
     // 非対応扱い**（配ると未知の種別として`failed`になり、PRのレビューが必ず失敗として残る）
     reviewFixCapable: typeof payload?.reviewFix === "boolean" ? payload.reviewFix : null,
     prReviewCapable: typeof payload?.prReview === "boolean" ? payload.prReview : null,
-    // リリースの統合検証（#4237）を実行できるpollerだけが送ってくる。未申告はnull＝非対応扱い
-    releaseVerifyCapable: typeof payload?.releaseVerify === "boolean" ? payload.releaseVerify : null,
-    // リリース全体のAIレビュー（#4238）。未申告はnull＝非対応扱い
-    releaseReviewCapable: typeof payload?.releaseReview === "boolean" ? payload.releaseReview : null,
+    // リリースの統合検証（#4237）を実行できるpollerだけが送ってくる。未申告はnull＝非対応扱い。
+    // **失敗ログの機密を伏せる処理（#4629）を持つ更新済みpollerだけが送る別名のキー**（`releaseVerifyRedact`）
+    // だけを読む。旧pollerは従来の`releaseVerify`を送るが読まないので、再申告のたびにnull＝非対応になり、
+    // 伏せ処理の無いランナーへ検証・レビューのジョブが配られない（列を足さずに配布条件を設けるため）
+    releaseVerifyCapable:
+      typeof payload?.releaseVerifyRedact === "boolean" ? payload.releaseVerifyRedact : null,
+    // リリース全体のAIレビュー（#4238）。未申告はnull＝非対応扱い。上と同じく`releaseReviewRedact`だけを読む
+    releaseReviewCapable:
+      typeof payload?.releaseReviewRedact === "boolean" ? payload.releaseReviewRedact : null,
     // チャット相談のCodex実行（#4109）に対応したpollerだけが送ってくる。**未申告はnull＝非対応扱い**
     chatCodexCapable: typeof payload?.chatCodex === "boolean" ? payload.chatCodex : null,
     selfUpdateCapable:

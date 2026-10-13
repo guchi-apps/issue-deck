@@ -152,6 +152,8 @@ export type GithubApiPullRequest = {
   base?: { sha: string; ref: string };
   /** 自動レビューの判定（`## 検証結果`）を読む材料（#4377）。GitHubは常に返すが、無いときはnull */
   body?: string | null;
+  /** ドラフトか。GitHubは常に返すが、無いときは推測せず未取得として扱う（#4635） */
+  draft?: boolean;
 };
 
 export async function fetchPullRequest(

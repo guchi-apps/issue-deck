@@ -365,3 +365,62 @@ describe("担当の取得・引き継ぎ・解放（#4587）", () => {
     expect(["agent-x", "agent-y"]).toContain(store.sessions[0].assignee);
   });
 });
+
+describe("外部エージェントの報告の結び付け（#4588）", () => {
+  const sha = "a".repeat(40);
+  it("検証したと申告するSHAがブランチのHEADと違えば記録せず、現在のHEADを返す（最新HEADへ付け替えない）", async () => {
+    const result = await recordInternalTest({ repositoryFullName: REPO, issueNumber: ISSUE, state: "passed", summary: null, expectedSha: "f".repeat(40) });
+    expect(result).toMatchObject({ ok: false, error: "stale_sha", currentSha: sha });
+    expect(store.rounds).toHaveLength(0);
+    const review = await recordInternalReview({ repositoryFullName: REPO, issueNumber: ISSUE, report: pass, summary: null, expectedSha: "f".repeat(40) });
+    expect(review).toMatchObject({ ok: false, error: "stale_sha" });
+    expect(store.rounds).toHaveLength(0);
+  });
+  it("SHAが一致すれば記録する。申告しない旧実行ホストの報告は従来どおり", async () => {
+    expect(await recordInternalTest({ repositoryFullName: REPO, issueNumber: ISSUE, state: "passed", summary: null, expectedSha: sha })).toMatchObject({ ok: true });
+    expect(await recordInternalReview({ repositoryFullName: REPO, issueNumber: ISSUE, report: pass, summary: null })).toMatchObject({ ok: true });
+  });
+  it("実装担当と同じ主体のレビューは独立レビューとして記録しない。別の主体は担当でなくても世代が合えば記録し、主体を残す", async () => {
+    const claimed = await claimInternalSession({ repositoryFullName: REPO, issueNumber: ISSUE, assignee: "ext:tokA:agentA" });
+    expect(claimed.ok).toBe(true);
+    if (!claimed.ok) return;
+    const self = await recordInternalReview({
+      repositoryFullName: REPO,
+      issueNumber: ISSUE,
+      report: pass,
+      summary: null,
+      expectedSha: sha,
+      actor: { assignee: "ext:tokA:agentA", epoch: claimed.epoch, reviewer: true },
+      reviewer: { kind: "external", ref: "ext:tokA:other", isSelf: (n) => n.startsWith("ext:tokA:") },
+    });
+    expect(self).toMatchObject({ ok: false, error: "self_review_not_independent" });
+    expect(store.rounds).toHaveLength(0);
+    const independent = await recordInternalReview({
+      repositoryFullName: REPO,
+      issueNumber: ISSUE,
+      report: pass,
+      summary: null,
+      expectedSha: sha,
+      actor: { epoch: claimed.epoch, reviewer: true },
+      reviewer: { kind: "external", ref: "ext:tokB:agentB", isSelf: (n) => n.startsWith("ext:tokB:") },
+    });
+    expect(independent).toMatchObject({ ok: true });
+    expect(store.rounds[0]).toMatchObject({ reviewerKind: "external", reviewerRef: "ext:tokB:agentB" });
+  });
+  it("独立レビューの報告も、担当の世代が変わった後の遅延報告は弾く", async () => {
+    const a = await claimInternalSession({ repositoryFullName: REPO, issueNumber: ISSUE, assignee: "ext:tokA:agentA" });
+    if (!a.ok) throw new Error("claim");
+    await claimInternalSession({ repositoryFullName: REPO, issueNumber: ISSUE, assignee: "ext:tokC:agentC", takeover: true });
+    const late = await recordInternalReview({
+      repositoryFullName: REPO,
+      issueNumber: ISSUE,
+      report: pass,
+      summary: null,
+      expectedSha: sha,
+      actor: { epoch: a.epoch, reviewer: true },
+      reviewer: { kind: "external", ref: "ext:tokB:agentB", isSelf: () => false },
+    });
+    expect(late).toMatchObject({ ok: false, error: "stale_assignee" });
+    expect(store.rounds).toHaveLength(0);
+  });
+});

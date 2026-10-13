@@ -10,6 +10,7 @@ import { FineGrainedTokensSection } from "@/components/dashboard/settings/fine-g
 import { LazyFleetPanel } from "@/components/dashboard/settings/lazy-fleet-panel";
 import type { ReviewGateIssueDraft } from "@/lib/review-gate-issue-draft";
 import { ReviewGateSection } from "@/components/dashboard/settings/review-gate-section";
+import { ReviewAgentTokensSection } from "@/components/dashboard/settings/review-agent-tokens-section";
 import { SharedTokensSection } from "@/components/dashboard/settings/shared-tokens-section";
 import { SupabaseRedirectUrlsSection } from "@/components/dashboard/settings/supabase-redirect-urls-section";
 import { WorkflowTagSummaryBadge } from "@/components/dashboard/settings/workflow-tag-summary-badge";
@@ -183,6 +184,14 @@ export function FleetOpsSection({
           error={sharedTokens.error}
           onChanged={sharedTokens.refetch}
         />
+      </LazyFleetPanel>
+
+      <LazyFleetPanel
+        icon={KeyRound}
+        title="外部エージェント用トークン（全体レビュー・修正のAPI／MCP）"
+        description="repositoryと操作範囲を絞って発行する。値は発行時の1回だけ表示"
+      >
+        <ReviewAgentTokensSection />
       </LazyFleetPanel>
 
       <LazyFleetPanel

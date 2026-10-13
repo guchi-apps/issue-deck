@@ -42,9 +42,6 @@ const ACTIVE_STATUSES: ReadonlySet<string> = new Set([
   "awaiting_decision",
 ]);
 
-/** 修正を重ねる上限（世代）。超えたら理由付きで止め、Issueや候補を無限に増やさない */
-export const RELEASE_FIX_MAX_GENERATION = 3;
-
 export function isReleaseFixActive(status: string): boolean {
   return ACTIVE_STATUSES.has(status);
 }
@@ -90,6 +87,16 @@ export function isReverifyFailureReason(reason: string | null | undefined): bool
 
 export function isRebuildFailureReason(reason: string | null | undefined): boolean {
   return reason != null && (Object.values(REBUILD_FAILURE_REASONS) as string[]).includes(reason);
+}
+
+/**
+ * 世代数の固定上限（3回）で止めていた旧い巡回の停止理由の目印（#4589で上限を撤廃）。
+ * この理由で止まった系列は、巡回が再評価して同じ修正Issueの次世代へ戻す。他の理由の停止は対象にしない。
+ */
+const LEGACY_GENERATION_LIMIT_MARKER = "修正の反復が上限（";
+
+export function isLegacyGenerationLimitStopReason(reason: string | null | undefined): boolean {
+  return reason != null && reason.includes(LEGACY_GENERATION_LIMIT_MARKER) && reason.includes("回）に達しました");
 }
 
 /** 画面の現在地ステップ（左から右へ進む）。`awaiting_decision`・`stopped`は進んだところで止まる */
@@ -268,7 +275,7 @@ export function buildReleaseFixIssue(input: ReleaseFixIssueInput, sourceKey: str
     `- base（main）: \`${input.baseSha}\``,
     `- head（凍結ブランチ）: \`${input.headSha}\``,
     `- 種別: ${RELEASE_FIX_SOURCE_LABEL[input.sourceKind]}`,
-    `- 世代: ${input.generation}（上限${RELEASE_FIX_MAX_GENERATION}）`,
+    `- 世代: ${input.generation}`,
     ...(input.previousIssueNumber ? [`- 前の修正Issue: #${input.previousIssueNumber}（再検証で別の問題が残った）`] : []),
     ...(input.relatedPullRequests.length > 0
       ? [`- 関連PR: ${input.relatedPullRequests.map((n) => `#${n}`).join("、")}`]
@@ -533,18 +540,14 @@ export function decideReverificationFollowUp(input: {
   };
 }
 
-/** 次の世代を起案できるか。上限・同一問題の再発で止める（無限にIssueや候補を増やさない） */
+/**
+ * 次の世代を起案できるか。世代数では止めない（#4589）。止めるのは**同じ候補・同じ指摘の再発**だけで、
+ * 進捗の無い停滞・実行予算・本人判断は内部確認の一時停止（#4587）が受け持つ。
+ */
 export function canStartNextGeneration(input: {
-  generation: number;
   sourceKey: string;
   ancestorSourceKeys: readonly string[];
 }): { ok: true } | { ok: false; reason: string } {
-  if (input.generation > RELEASE_FIX_MAX_GENERATION) {
-    return {
-      ok: false,
-      reason: `修正の反復が上限（${RELEASE_FIX_MAX_GENERATION}回）に達しました。原因を人が整理してから進めてください`,
-    };
-  }
   if (input.ancestorSourceKeys.includes(input.sourceKey)) {
     return { ok: false, reason: "前の世代と同じ指摘が再発しています。同じ修正を繰り返さず、原因を人が確認してください" };
   }

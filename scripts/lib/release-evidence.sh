@@ -17,16 +17,56 @@ evidence_file() {
   printf '%s/%s-%s-%s-%s.json' "$root" "${full_name//\//_}" "$pr" "${base:0:12}" "${head:0:12}"
 }
 
-# evidence_redact: 標準入力の機密（トークン・接続文字列・認証情報・環境変数の値）を伏せて標準出力へ。
-# 失敗ログを証跡へ保存する前・AIのプロンプトへ渡す前に必ず通す（#4629）
+# evidence_fingerprint <owner/repo> <PR番号> <base SHA> <head SHA>: 対象に一致する証跡の「状態の指紋」を標準出力へ（#4632）
+# 結果の状態・終了時刻・実行済み工程数を並べた文字列。全体レビューが保存したバッチ結果を、証跡の更新（running→passedなど）の
+# あとに再利用してよいかの判定に使う。**対象のbase/headが一致する証跡が無い・読めないときは何も出さない**（空＝取得不能は
+# 呼び出し側が「再利用せず再評価する」側へ倒す）
+evidence_fingerprint() {
+  local file
+  file="$(evidence_file "$@")"
+  [[ -s "$file" ]] || return 0
+  jq -r --arg base "$3" --arg head "$4" \
+    'select(.baseSha == $base and .headSha == $head) | "\(.outcome.state // "")|\(.finishedAt // "")|\((.steps // []) | length)"' \
+    "$file" 2>/dev/null || true
+}
+
+# evidence_redact: 標準入力の機密を伏せて標準出力へ。失敗ログを証跡へ保存する前・AIのプロンプトへ渡す前に必ず通す（#4629）
+#
+# 既知の形式の列挙だけに頼らず、**構造**で伏せる:
+#   - 名前に機密語（token・secret・password・key・auth・cred・cookie…）を含む「名前: 値」「名前=値」
+#     （ヘッダー・環境変数・JSON・YAML・URLクエリ・引用符つき・ハイフンつきの名前、空白を含む値を含む）
+#   - `X-*`ヘッダー（未知のベンダーの独自ヘッダーも）／`--password x`のようなCLI引数／12文字以上の値を持つ大文字の環境変数代入
+#   - 秘密鍵ブロック・Bearer/Basic・URLの認証部・DB接続文字列・既知のトークン接頭辞・`op://`参照
+# 伏せすぎる側に倒す（テスト出力の`key: …`なども伏せ得る）。冪等で、二重に通しても壊れない。
+# 配布条件のマーカー: evidence_redact_v2（サブPCのpollerはこの関数があるチェックアウトだけ統合検証・全体レビューを受ける）
 evidence_redact() {
+  local s='token|tkn|secret|passwor?d|passphrase|phrase|pwd|[_-]pass|pass[_-]|key|auth|cred|cookie|signature|dsn|bearer|jwt|otp|session[-_]?id|[_-]sid|sid[_-]|database[-_]?url|connection[-_]?string'
+  local q='("([^"\\]|\\.)*"|'"'"'([^'"'"'\\]|\\.)*'"'"')'
   sed -E \
+    -e '/-----BEGIN [A-Z ]*PRIVATE KEY-----/,/-----END [A-Z ]*PRIVATE KEY-----/c\[秘密鍵を除去]' \
+    -e 's#^-----END [A-Z ]*PRIVATE KEY-----$#[秘密鍵を除去]#' \
     -e 's/(Bearer|Basic)[[:space:]]+[A-Za-z0-9._~+\/=-]{8,}/\1 [除去]/Ig' \
     -e 's#op://[^[:space:]]+#op://[除去]#g' \
     -e 's#([A-Za-z][A-Za-z0-9+.-]*://)[^[:space:]/@:]+(:[^[:space:]/@]*)?@#\1[除去]@#Ig' \
     -e 's#((postgres(ql)?|mysql|mongodb(\+srv)?|redis|amqp)://)[^[:space:]]+#\1[除去]#Ig' \
-    -e 's/(gh[pousr]_|github_pat_|sk-ant-|sk-|xox[abprs]-|AKIA|AIza|eyJ)[A-Za-z0-9_.-]{8,}/[トークンを除去]/g' \
-    -e 's/([A-Za-z0-9_]*(TOKEN|SECRET|PASSWORD|PASSWD|API_?KEY|AUTHORIZATION|CREDENTIAL|DATABASE_URL|PRIVATE_KEY)[A-Za-z0-9_]*)[[:space:]]*[=:][[:space:]]*[^[:space:]]+/\1=[除去]/Ig'
+    -e 's/(^|[^A-Za-z0-9])(gh[pousr]_|github_pat_|sk-ant-|sk-|sk_live_|sk_test_|xox[abprs]-|AKIA|AIza|eyJ)[A-Za-z0-9_.-]{8,}/\1[トークンを除去]/g' \
+    -e "s/([\"']?)([A-Za-z0-9_-]*($s)[A-Za-z0-9_-]*)([\"']?)([[:space:]]*[:=][[:space:]]*)$q/\1\2\4\5\"[除去]\"/Ig" \
+    -e "s/([\"']?)([A-Za-z0-9_-]*($s)[A-Za-z0-9_-]*)([\"']?)([[:space:]]*:[[:space:]]*)[^\"'[:space:]].*/\1\2\4\5[除去]/Ig" \
+    -e "s/([\"']?)([A-Za-z0-9_-]*($s)[A-Za-z0-9_-]*)([\"']?)([[:space:]]*=[[:space:]]*)[^\"'[:space:]&][^&[:space:]]*/\1\2\4\5[除去]/Ig" \
+    -e "s/(^|[[:space:]\"'])(x-[A-Za-z0-9-]+)([[:space:]]*:[[:space:]]*)[^\"'[:space:]].*/\1\2\3[除去]/Ig" \
+    -e "s/(--?[A-Za-z0-9_-]*($s)[A-Za-z0-9_-]*)[[:space:]]+[^[:space:]=:[-][^[:space:]]*/\1 [除去]/Ig" \
+    -e 's/([A-Z][A-Z0-9_]{2,}=)[^[:space:]]{12,}/\1[除去]/g' |
+    evidence_redact_shape
+}
+
+# 名前に頼らない最後の砦: 大文字・小文字・数字をすべて含む32文字以上の不透明な値（API鍵・トークン）を伏せる。
+# 小文字だけの16進（コミットSHA）やパス（/ . を含む）は対象外。perlが無ければ素通し（上の構造ルールは効く）
+evidence_redact_shape() {
+  if command -v perl >/dev/null 2>&1; then
+    perl -pe 's/^(?=[A-Za-z0-9+\/]*[A-Z])(?=[A-Za-z0-9+\/]*[a-z])[A-Za-z0-9+\/]{40,}={0,2}$/[鍵本文を除去]/; s/(?<![A-Za-z0-9_\/.-])(?=[A-Za-z0-9_-]{32,}(?![A-Za-z0-9_\/.-]))(?=[A-Za-z0-9_-]*[A-Z])(?=[A-Za-z0-9_-]*[a-z])(?=[A-Za-z0-9_-]*\d)[A-Za-z0-9_-]+/[長い値を除去]/g'
+  else
+    cat
+  fi
 }
 
 # evidence_classify_step <コマンド> <終了コード>: 失敗の種別を標準出力へ

@@ -9,7 +9,7 @@ import type { ReleaseStartMode } from "@/lib/release-start-mode";
  * リポジトリのリリース開始方式（#4604）。`enabled`の間だけ1回取る。取得中は`null`
  * （呼び出し側は操作を無効にし、取得後に方式に合った確認表示を出す）
  */
-export function useReleaseStartMode(repositoryFullName: string, enabled: boolean): ReleaseStartMode | null {
+export function useReleaseStartMode(repositoryFullName: string, enabled: boolean, refreshKey = 0): ReleaseStartMode | null {
   const [loaded, setLoaded] = useState<{ repo: string; mode: ReleaseStartMode } | null>(null);
   useEffect(() => {
     if (!enabled) return;
@@ -20,6 +20,6 @@ export function useReleaseStartMode(repositoryFullName: string, enabled: boolean
     return () => {
       cancelled = true;
     };
-  }, [repositoryFullName, enabled]);
+  }, [repositoryFullName, enabled, refreshKey]);
   return loaded && loaded.repo === repositoryFullName ? loaded.mode : null;
 }
