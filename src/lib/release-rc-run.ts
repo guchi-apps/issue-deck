@@ -8,6 +8,7 @@ import {
   dispatchReleaseCandidateWorkflow,
   fetchBranchHeadSha,
   fetchCommitSummary,
+  fetchFileTextAtRef,
   fetchMainHeadSha,
   fetchOpenPullRequestsForBase,
   fetchPullRequestForRebuild,
@@ -16,7 +17,7 @@ import {
   fetchReleaseRebuildCandidate,
   isAncestorCommit,
 } from "@/lib/github/release-api";
-import { readVersionAtMergeSha } from "@/lib/release-finalize-run";
+import { parseFinalizeCallerSupport, readVersionFromText } from "@/lib/release-finalize";
 import { isUniqueConstraintError } from "@/lib/prisma-error";
 import { isLegacyReleaseCandidateHeadRef, legacyReleaseVersionOf, rcBranchName } from "@/lib/release-branch";
 import { isReleaseFixActive } from "@/lib/release-fix-series";
@@ -692,6 +693,17 @@ export async function requestRcImport(
     return { ok: false, error: "dispatch_failed" };
   }
   return { ok: true, candidateId, revision: nextRevision, existing: false };
+}
+
+/**
+ * マージ済みの候補PRを取り消すとき、マージコミット（main）に入っている正式版を読む。
+ * 自動バンプでは取込前に予約が無いことがあるため、取消側が版を確定して消費済みとして残す（developへの同期の検出を失わない）。
+ * 版を読めなければ`null`（呼び出し側は取り消さない）
+ */
+export async function readVersionAtMergeSha(ctx: Context, mergeSha: string): Promise<string | null> {
+  const caller = parseFinalizeCallerSupport(await fetchReleaseCallerText(ctx.owner, ctx.repo, ctx.token).catch(() => null));
+  if (!caller.supported) return null;
+  return readVersionFromText(await fetchFileTextAtRef(ctx.owner, ctx.repo, caller.versionFile, mergeSha, ctx.token).catch(() => null), caller.versionQuery);
 }
 
 /**

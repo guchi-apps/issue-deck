@@ -28,7 +28,7 @@ const mocks = vi.hoisted(() => ({
   reservationFindUnique: vi.fn(async () => null as unknown),
   reservationCreate: vi.fn(),
   reservationUpdate: vi.fn(),
-  versionAtMerge: vi.fn(async () => null as string | null),
+  versionAtMerge: vi.fn(() => null as string | null),
 }));
 
 vi.mock("@/lib/db", () => {
@@ -64,6 +64,7 @@ vi.mock("@/lib/github/release-api", () => ({
   dispatchReleaseCandidateWorkflow: mocks.dispatch,
   fetchBranchHeadSha: mocks.branchHead,
   fetchCommitSummary: vi.fn(),
+  fetchFileTextAtRef: vi.fn(async () => "x"),
   fetchMainHeadSha: mocks.mainHead,
   fetchOpenPullRequestsForBase: mocks.openPrs,
   fetchPullRequestForRebuild: mocks.prForRebuild,
@@ -75,7 +76,11 @@ vi.mock("@/lib/github/release-api", () => ({
 vi.mock("@/lib/github/app-auth", () => ({ getInstallationToken: vi.fn(async () => "t") }));
 vi.mock("@/lib/github/actions-api", () => ({ closePullRequest: vi.fn() }));
 vi.mock("@/lib/github/issues-api", () => ({ createComment: vi.fn() }));
-vi.mock("@/lib/release-finalize-run", () => ({ readVersionAtMergeSha: mocks.versionAtMerge }));
+vi.mock("@/lib/release-finalize", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/release-finalize")>()),
+  parseFinalizeCallerSupport: () => ({ supported: true, versionFile: "package.json", versionQuery: "version", bumpCommand: false }),
+  readVersionFromText: () => mocks.versionAtMerge(),
+}));
 vi.mock("@/lib/release-verification", () => ({
   registerReleaseVerification: mocks.registerVerification,
   listReleaseVerificationRecords: vi.fn(async () => []),
@@ -287,7 +292,7 @@ describe("cancelReleaseRc", () => {
     mocks.candidateFindUnique.mockResolvedValue(candidateRow({ phase: "preparing" }));
     mocks.prsByHead.mockResolvedValue([{ number: 10, state: "closed", merged_at: "2026-10-12T00:00:00Z", merge_commit_sha: "9".repeat(40) }]);
     mocks.reservationCount.mockResolvedValueOnce(0);
-    mocks.versionAtMerge.mockResolvedValueOnce("1.2.3");
+    mocks.versionAtMerge.mockReturnValueOnce("1.2.3");
     expect(await cancel()).toMatchObject({ ok: true });
     expect(mocks.reservationCreate).toHaveBeenCalledWith({
       data: expect.objectContaining({ version: "1.2.3", candidateId: "c1", status: "consumed", consumedMergeSha: "9".repeat(40) }),
@@ -298,7 +303,7 @@ describe("cancelReleaseRc", () => {
     mocks.candidateFindUnique.mockResolvedValue(candidateRow({ phase: "preparing" }));
     mocks.prsByHead.mockResolvedValue([{ number: 10, state: "closed", merged_at: "2026-10-12T00:00:00Z", merge_commit_sha: "9".repeat(40) }]);
     mocks.reservationCount.mockResolvedValueOnce(0);
-    mocks.versionAtMerge.mockResolvedValueOnce(null);
+    mocks.versionAtMerge.mockReturnValueOnce(null);
     expect(await cancel()).toEqual({ ok: false, error: "not_cancellable" });
     expect(mocks.candidateUpdateMany).not.toHaveBeenCalled();
     expect(mocks.reservationCreate).not.toHaveBeenCalled();
@@ -308,10 +313,19 @@ describe("cancelReleaseRc", () => {
     mocks.candidateFindUnique.mockResolvedValue(candidateRow({ phase: "preparing" }));
     mocks.prsByHead.mockResolvedValue([{ number: 10, state: "closed", merged_at: "2026-10-12T00:00:00Z", merge_commit_sha: "9".repeat(40) }]);
     mocks.reservationCount.mockResolvedValueOnce(0);
-    mocks.versionAtMerge.mockResolvedValueOnce("1.2.3");
+    mocks.versionAtMerge.mockReturnValueOnce("1.2.3");
     mocks.reservationFindUnique.mockResolvedValueOnce({ id: "r0", status: "consumed", candidateId: "old", consumedMergeSha: "1".repeat(40) });
     expect(await cancel()).toEqual({ ok: false, error: "not_cancellable" });
     expect(mocks.candidateUpdateMany).not.toHaveBeenCalled();
+  });
+
+  it("版の台帳への書き込みが競合したときは取消が戻り、candidate_changedになる", async () => {
+    mocks.candidateFindUnique.mockResolvedValue(candidateRow({ phase: "preparing" }));
+    mocks.prsByHead.mockResolvedValue([{ number: 10, state: "closed", merged_at: "2026-10-12T00:00:00Z", merge_commit_sha: "9".repeat(40) }]);
+    mocks.reservationCount.mockResolvedValueOnce(0);
+    mocks.versionAtMerge.mockReturnValueOnce("1.2.3");
+    mocks.reservationCreate.mockRejectedValueOnce({ code: "P2002" });
+    expect(await cancel()).toEqual({ ok: false, error: "candidate_changed" });
   });
 
   it("マージ済みでもマージのSHAが分からなければ取り消さない", async () => {
