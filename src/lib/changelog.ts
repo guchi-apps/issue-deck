@@ -42,6 +42,16 @@ export type ChangelogEntry = {
  */
 export const APP_CHANGELOG: ChangelogEntry[] = [
   {
+    version: "8.59.0",
+    date: "2026-10-13",
+    changes: [
+      "リリース候補の検証結果・関連修正・履歴の表示を整理しました。",
+      "リリース準備を手動開始に統一しました。",
+      "実装の依存条件をdevelopへのマージで判定するよう改善しました。",
+      "SlackでのIssue起案時の候補選択と調査の継続を改善しました。",
+    ],
+  },
+  {
     version: "8.58.4",
     date: "2026-10-13",
     changes: [
