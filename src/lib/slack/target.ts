@@ -1,4 +1,5 @@
 import { callClaudeMessages, getAppAiToken } from "@/lib/claude/request";
+import { resolveChatExecution } from "@/lib/chat/investigation/model";
 import { db } from "@/lib/db";
 import { guessRepo, type RepoCandidate } from "@/lib/slack/candidates";
 
@@ -14,15 +15,16 @@ import { guessRepo, type RepoCandidate } from "@/lib/slack/candidates";
  */
 export type TargetDecision =
   | { kind: "resolved"; repo: string; basis: string }
-  | { kind: "ambiguous"; options: RepoCandidate[]; basis: string }
+  | { kind: "ambiguous"; options: RepoCandidate[]; basis: string; aiFailure?: string }
   | { kind: "denied"; repo: string; basis: string };
 
-export type TargetModelResult = { ok: true; text: string } | { ok: false; reason: string };
+export type TargetModelResult = { ok: true; text: string } | { ok: false; reason: string; skipped?: boolean };
 export type TargetModel = (params: { system: string; prompt: string }) => Promise<TargetModelResult>;
 
 const MAX_OPTIONS = 5;
-/** AIが使えず絞れないときに質問へ並べる候補の上限 */
-const MAX_LISTED = 15;
+/** 語の一致で絞った結果が一意とみなせる最低点と、2位に対する倍率 */
+const MIN_SCORE = 3;
+const DOMINANCE = 2;
 const HINT_TITLES_PER_REPO = 6;
 
 const TARGET_SCHEMA = {
@@ -79,8 +81,66 @@ async function loadHints(candidates: RepoCandidate[]): Promise<Map<string, strin
   return hints;
 }
 
-/** 既定のモデル呼び出し。実行先がGPT系でもOpenAI APIへは送らずClaude系へ固定される（`callClaudeMessages`） */
+/**
+ * 依頼本文の語（英数字3文字以上・漢字かなの2文字組）を取り出す。リポジトリ名・最近のIssue題名との一致で、
+ * AIを使わずに関連候補を絞る手がかりにする。
+ */
+export function extractTerms(text: string): string[] {
+  const terms = new Set<string>();
+  for (const match of text.toLowerCase().matchAll(/[a-z0-9][a-z0-9_-]{2,}/g)) terms.add(match[0]);
+  for (const match of text.matchAll(/[\u3040-\u30ff\u3400-\u9fff]{2,}/g)) {
+    const run = match[0];
+    for (let i = 0; i + 2 <= run.length; i++) terms.add(run.slice(i, i + 2));
+  }
+  return [...terms];
+}
+
+/** 候補ごとの関連度。名称の一致は強く、最近のIssue題名の一致は弱く数える */
+export function scoreCandidates(
+  text: string,
+  candidates: RepoCandidate[],
+  hints: Map<string, string[]>,
+): { candidate: RepoCandidate; score: number }[] {
+  const terms = extractTerms(text);
+  return candidates
+    .map((candidate) => {
+      const name = `${candidate.name} ${candidate.fullName}`.toLowerCase();
+      const titles = (hints.get(candidate.fullName) ?? []).join(" ").toLowerCase();
+      let score = 0;
+      for (const term of terms) {
+        if (name.includes(term)) score += 3;
+        else if (titles.includes(term)) score += 1;
+      }
+      return { candidate, score };
+    })
+    .filter((row) => row.score > 0)
+    .sort((a, b) => b.score - a.score || a.candidate.fullName.localeCompare(b.candidate.fullName));
+}
+
+/** AI判別が使えない・曖昧なときの絞り込み。一意なら`resolved`、そうでなければ関連候補だけを返す */
+function narrowByTerms(
+  text: string,
+  candidates: RepoCandidate[],
+  hints: Map<string, string[]>,
+  basis: string,
+  aiFailure?: string,
+): TargetDecision {
+  const scored = scoreCandidates(text, candidates, hints);
+  const [top, second] = scored;
+  if (top && top.score >= MIN_SCORE && (!second || top.score >= second.score * DOMINANCE)) {
+    return { kind: "resolved", repo: top.candidate.fullName, basis: `${basis}。名称・最近のIssue題名の一致で ${top.candidate.fullName} に絞った（点数 ${top.score}）` };
+  }
+  return { kind: "ambiguous", options: scored.slice(0, MAX_OPTIONS).map((row) => row.candidate), basis, aiFailure };
+}
+
+/**
+ * 既定のモデル呼び出し。対象判別は常にClaude APIで行い、OpenAI APIへは送らない。
+ * 実行先がCodexのときはAPIを呼ばず（`skipped`）、呼び出し側が名称・Issue題名の一致だけで絞る（#4565）。
+ */
 export const callTargetModel: TargetModel = async ({ system, prompt }) => {
+  if ((await resolveChatExecution()).mode === "codex") {
+    return { ok: false, reason: "実行先がCodexのため、対象判別のAI呼び出しは使いません", skipped: true };
+  }
   const token = await getAppAiToken("chat_investigation");
   if (!token) return { ok: false, reason: "AIの認証情報が設定されていません" };
   try {
@@ -117,7 +177,7 @@ export async function resolveTarget(
   }
   if (explicit.found.length + explicit.denied.length > 1) {
     const options = candidates.filter((c) => explicit.found.includes(c.fullName)).slice(0, MAX_OPTIONS);
-    return { kind: "ambiguous", options: options.length ? options : candidates.slice(0, MAX_LISTED), basis: "投稿に複数のリポジトリが明示されていた" };
+    return { kind: "ambiguous", options, basis: "投稿に複数のリポジトリが明示されていた" };
   }
   const guessed = guessRepo(text, candidates);
   if (guessed) return { kind: "resolved", repo: guessed, basis: `投稿中のリポジトリ名の一致（${guessed}）` };
@@ -135,13 +195,16 @@ export async function resolveTarget(
   ].join("\n");
   const result = await (deps.callModel ?? callTargetModel)({ system: SYSTEM_PROMPT, prompt });
   if (!result.ok) {
-    return { kind: "ambiguous", options: candidates.slice(0, MAX_LISTED), basis: `AIによる判別ができなかった（${result.reason}）` };
+    // 失敗の原因は消さない。無関係な先頭の候補は並べず、語の一致で絞れた関連候補だけを返す
+    return result.skipped
+      ? narrowByTerms(text, candidates, hints, `AI判別は使わず語の一致で判別した（${result.reason}）`)
+      : narrowByTerms(text, candidates, hints, `AIによる判別ができなかった（${result.reason}）`, result.reason);
   }
   let parsed: { repo?: unknown; confidence?: unknown; candidates?: unknown; reason?: unknown };
   try {
     parsed = JSON.parse(result.text);
   } catch {
-    return { kind: "ambiguous", options: candidates.slice(0, MAX_LISTED), basis: "AIの判別結果を読み取れなかった" };
+    return narrowByTerms(text, candidates, hints, "AIの判別結果を読み取れなかった", "AIの判別結果を読み取れませんでした");
   }
   const reason = typeof parsed.reason === "string" ? parsed.reason.slice(0, 300) : "";
   const byName = new Map(candidates.map((c) => [c.fullName.toLowerCase(), c]));
@@ -153,6 +216,7 @@ export async function resolveTarget(
     .map((value) => (typeof value === "string" ? byName.get(value.trim().toLowerCase()) : undefined))
     .filter((c): c is RepoCandidate => Boolean(c));
   const unique = [...new Map(options.map((c) => [c.fullName, c])).values()].slice(0, MAX_OPTIONS);
-  const fallback = unique.length > 0 ? unique : picked ? [picked] : candidates.slice(0, MAX_LISTED);
+  const related = scoreCandidates(text, candidates, hints).slice(0, MAX_OPTIONS).map((row) => row.candidate);
+  const fallback = unique.length > 0 ? unique : picked ? [picked] : related;
   return { kind: "ambiguous", options: fallback, basis: `AIが一意に決められなかった: ${reason || "手がかり不足"}` };
 }
