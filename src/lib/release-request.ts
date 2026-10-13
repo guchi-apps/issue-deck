@@ -11,6 +11,7 @@
 
 import type { ReleaseRebuildCandidate } from "@/lib/release-rebuild";
 import type { RebuildSelectionOptions } from "@/lib/release-rebuild-selection-run";
+import type { DevelopSyncStatus } from "@/lib/release-develop-sync";
 import type { RcBlockSummary } from "@/lib/release-rc";
 import type { ReleaseStartMode } from "@/lib/release-start-mode";
 import type { BumpKind } from "@/lib/semver-bump";
@@ -130,6 +131,8 @@ export function releaseCandidateErrorMessage(errorCode: string | undefined, mess
       return message ?? "出す変更がありません。";
     case "develop_not_synced":
       return message ?? "前回の公開がdevelopへ反映されていません。同期のPRをマージしてから候補を作ってください。";
+    case "develop_sync_unknown":
+      return message ?? "前回の公開がdevelopへ反映されているか判定できないため、候補を作りませんでした。時間をおいて再確認してください。";
     case "dispatch_failed":
       return "候補の作成workflowを起動できませんでした。時間をおいて押し直してください。";
     case "github_reauth_required":
@@ -211,6 +214,22 @@ export async function requestReleaseStart(
   }
   if (mode.mode === "blocked") throw new ReleaseBlockedError(mode.block);
   throw new Error(mode.label);
+}
+
+/**
+ * 公開内容をdevelopへ戻す同期PRを用意する（`POST /api/repositories/release/rc` action=develop_sync。#4641）。
+ * 同期済み・同期PRが開いていればサーバーは何も作らず、今の状況を返す
+ */
+export async function requestDevelopSync(repoFullName: string): Promise<DevelopSyncStatus> {
+  const [owner, repo] = repoFullName.split("/");
+  const res = await fetch("/api/repositories/release/rc", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ owner, repo, action: "develop_sync" }),
+  });
+  const json: { ok?: boolean; developSync?: DevelopSyncStatus; message?: string } = await res.json().catch(() => ({}));
+  if (res.ok && json.developSync) return json.developSync;
+  throw new Error(json.message ?? `同期PRを用意できませんでした (${res.status})`);
 }
 
 /**

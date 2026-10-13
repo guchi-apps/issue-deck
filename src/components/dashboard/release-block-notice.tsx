@@ -12,6 +12,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { ReleaseDevelopSyncNotice } from "@/components/dashboard/release-develop-sync";
 import { Button } from "@/components/ui/button";
 import type { RcBlockSummary } from "@/lib/release-rc";
 import { requestReleaseCandidateCancel } from "@/lib/release-request";
@@ -49,6 +50,10 @@ export function ReleaseBlockNotice({
   className?: string;
 }) {
   const block = blockOverride ?? (startMode?.mode === "blocked" ? startMode.block : null);
+  if (!blockOverride && startMode?.mode === "develop_sync") {
+    // 前回の公開がdevelopへ戻るまで開始できない（#4641）。同期PRと次の操作をその場で出す
+    return <ReleaseDevelopSyncNotice repositoryFullName={repositoryFullName} sync={startMode.sync} onChanged={onChanged} showStartBlocked className={className} />;
+  }
 
   if (!block) {
     if (startMode === null) {

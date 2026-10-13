@@ -4,6 +4,7 @@ import { runDeployRecoverySweep } from "@/lib/deploy-recovery-series-run";
 import { authorizeDispatch } from "@/lib/dispatch/dispatch-auth";
 import { previewModeGuard } from "@/lib/preview-mode";
 import { runReleaseCompletionSweep } from "@/lib/release-completion-run";
+import { runDevelopSyncSweep } from "@/lib/release-develop-sync-run";
 
 /**
  * サブPCのpollerが本番復旧系列（#3998）を進めるための内部入口。`host`は呼んだpollerのホスト名で、
@@ -11,6 +12,7 @@ import { runReleaseCompletionSweep } from "@/lib/release-completion-run";
  *
  * リリース完了系列（#4480）の巡回もここに相乗りする（修正Issueの起動に`host`が要るため。pollerは変更しない）。
  * 世代の進行（作り直し・再検証）は従来どおり`release/fix-series/sweep`が持つ。
+ * 本番公開後のdevelop同期（#4641）の追跡も相乗りする（候補の完了・取消の後も、同期済みを確かめるまで追う）。
  */
 export async function POST(request: NextRequest) {
   const guard = previewModeGuard();
@@ -28,8 +30,12 @@ export async function POST(request: NextRequest) {
       console.error("[POST /api/repositories/deploy-recovery-series/sweep] release completion", error);
       return null;
     });
+    const developSync = await runDevelopSyncSweep().catch((error: unknown) => {
+      console.error("[POST /api/repositories/deploy-recovery-series/sweep] develop sync", error);
+      return null;
+    });
     return NextResponse.json(
-      { ok: true, ...recovery, releaseCompletion: completion },
+      { ok: true, ...recovery, releaseCompletion: completion, developSync },
       { headers: { "Cache-Control": "no-store" } },
     );
   } catch (error) {

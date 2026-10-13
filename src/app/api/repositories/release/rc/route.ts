@@ -5,7 +5,9 @@ import { db } from "@/lib/db";
 import { getInstallationToken } from "@/lib/github/app-auth";
 import { githubApiErrorMessage } from "@/lib/github/network-error";
 import { previewModeGuard } from "@/lib/preview-mode";
-import { ensureDevelopSync, findUnsyncedPublish, loadFinalizationOverview, reconcileRcFinalization, resolveRcCandidateId, settleReservationsOnCancel } from "@/lib/release-finalize-run";
+import { loadFinalizationOverview, reconcileRcFinalization, resolveRcCandidateId, settleReservationsOnCancel } from "@/lib/release-finalize-run";
+import { ensureDevelopSync, observeDevelopSync } from "@/lib/release-develop-sync-run";
+import { decideDevelopSync } from "@/lib/release-develop-sync";
 import { parseRcRequestKey } from "@/lib/release-rc";
 import {
   cancelReleaseRc,
@@ -24,6 +26,7 @@ import {
  * - POST `action=import`: 関連修正（と明示的に承認したPR）を取り込み、revisionを進める
  * - POST `action=cancel`: 候補を取り消す（記録は残す）
  * - POST `action=migrate`: 開いている旧方式の候補を新方式へ移す
+ * - POST `action=develop_sync`: 公開内容をdevelopへ戻す同期PRを用意する（#4641。同期済み・作成済みなら何もしない）
  *
  * **進めてよいかはサーバーが判定する。** 画面が送るのは要求キー・見ていたhead・選んだPRだけで、
  * 状態・SHA・承認範囲は`release-rc-run.ts`がGitHubと記録から取り直して確かめる。
@@ -71,7 +74,12 @@ export async function GET(request: NextRequest) {
     if (candidateId) await reconcileRcFinalization(ctx, candidateId).catch((error: unknown) => console.error("[release-finalize] reconcile failed", error));
     const overview = await loadRcOverview({ ...ctx, pullRequestNumber });
     const finalization = await loadFinalizationOverview(ctx, overview.candidate?.id ?? null, { reconcile: false });
-    return NextResponse.json({ ...overview, finalization }, { headers: { "Cache-Control": "no-store" } });
+    // 本番反映以降の候補には、公開結果とは別にdevelopへの同期の状況を添える（#4641。読むだけで同期PRは作らない）
+    const developSync =
+      overview.candidate && ["deploying", "verifying_production", "completed"].includes(overview.candidate.status.status)
+        ? decideDevelopSync(await observeDevelopSync(ctx))
+        : null;
+    return NextResponse.json({ ...overview, finalization, developSync }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     console.error(`[GET /api/repositories/release/rc] ${owner}/${repo}:`, error);
     return NextResponse.json({ error: "github_api_error", message: githubApiErrorMessage(error) }, { status: 502 });
@@ -98,17 +106,12 @@ export async function POST(request: NextRequest) {
       case "create": {
         const requestKey = parseRcRequestKey(payload?.requestKey);
         if (!requestKey) return NextResponse.json({ error: "invalid_request" }, { status: 400 });
-        // 公開した版がdevelopへ反映されるまで、次の候補は作らない（mainの版と衝突する）
-        const unsynced = await findUnsyncedPublish(ctx);
-        if (unsynced) {
-          // 同期PRは本番反映の追跡が作るが、そこへ届かずに終えた候補（マージ済みの取り消し）もあるので、ここでも用意する
-          await ensureDevelopSync(ctx, unsynced);
-          return NextResponse.json(
-            { ok: false, error: "develop_not_synced", message: `v${unsynced.version}の公開がdevelopへ反映されていません。同期のPRをマージしてから候補を作ってください` },
-            { status: 409 },
-          );
-        }
+        // 前回の公開がdevelopへ戻るまで作らない判定は`createReleaseRc`が持つ（#4641。未同期なら同期PRも用意する）
         return respond(await createReleaseRc({ ...ctx, requestKey }));
+      }
+      case "develop_sync": {
+        // 画面の「同期PRを作成」。同期済み・同期PRが開いていれば何も作らず、今の状況を返す（#4641）
+        return NextResponse.json({ ok: true, developSync: await ensureDevelopSync(ctx) });
       }
       case "import": {
         const requestKey = parseRcRequestKey(payload?.requestKey);

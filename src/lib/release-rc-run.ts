@@ -20,6 +20,8 @@ import {
 import { parseFinalizeCallerSupport, readVersionFromText } from "@/lib/release-finalize";
 import { isUniqueConstraintError } from "@/lib/prisma-error";
 import { isLegacyReleaseCandidateHeadRef, legacyReleaseVersionOf, rcBranchName } from "@/lib/release-branch";
+import { developSyncCreateError } from "@/lib/release-develop-sync";
+import { ensureDevelopSync } from "@/lib/release-develop-sync-run";
 import { isReleaseFixActive } from "@/lib/release-fix-series";
 import { evaluateReleaseMergeGate } from "@/lib/release-merge-gate";
 import {
@@ -455,7 +457,8 @@ export type RcMutationError =
   | "not_cancellable"
   | "not_migratable"
   | "legacy_changed"
-  | "develop_not_synced";
+  | "develop_not_synced"
+  | "develop_sync_unknown";
 
 export type RcMutationResult =
   | { ok: true; candidateId: string; revision: number; existing: boolean }
@@ -578,6 +581,10 @@ export async function createReleaseRc(input: Context & { userId: string; request
   }
   const open = await fetchOpenPullRequestsForBase(ctx.owner, ctx.repo, "main", ctx.token);
   if (open.some((pr) => isLegacyReleaseCandidateHeadRef(pr.head.ref))) return { ok: false, error: "legacy_open" };
+  // 前回の公開がdevelopへ戻っていることを実際のGit履歴で確かめるまで作らない（#4641）。未同期なら同期PRを用意したうえで断り、
+  // 判定できないときも同期済みとはみなさない。API以外の経路から呼ばれても、取消・外部マージの後でも同じ判定を通る
+  const syncError = developSyncCreateError(await ensureDevelopSync(ctx));
+  if (syncError) return { ok: false, ...syncError };
 
   const freezeSha = await fetchBranchHeadSha(ctx.owner, ctx.repo, "develop", ctx.token);
   const mainSha = await fetchMainHeadSha(ctx.owner, ctx.repo, ctx.token);
@@ -751,7 +758,7 @@ export async function cancelReleaseRc(
   if (input.expectedPhase && input.expectedPhase !== row.phase) return { ok: false, error: "candidate_changed" };
   // 公開準備中・承認待ち・レビュー中の候補PRがmainへマージ済み（最終検証を確認できず本番反映の追跡へ進めない候補）を、
   // 人が終わらせる出口。**予約した版はマージで使われたので消費済みにしてから**取り消す（版を再利用させず、
-  // developへの同期の検出〈`findUnsyncedPublish`〉も失わせない）。マージの有無を確かめられないときは取り消さない
+  // 版の追跡を失わせない。developへの同期はGit履歴から判定するので、取消でも迂回されない〈#4641〉）。マージの有無を確かめられないときは取り消さない
   let mergedSha: string | null = null;
   let mergedVersion: string | null = null;
   // （レビュー中のままマージ済みの候補〈管理記録だけが残った状態。#4628〉も同じ扱いで、版の追跡を失わせない）
