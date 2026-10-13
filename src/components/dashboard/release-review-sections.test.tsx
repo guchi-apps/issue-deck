@@ -26,6 +26,8 @@ function section(overrides: Partial<ReleaseVerificationSection> = {}): ReleaseVe
     agent: null,
     updatedAt: null,
     findings: [],
+    suggestions: [],
+    review: null,
     affectedPullRequests: [],
     affectedFiles: [],
     reviewedFiles: null,
@@ -264,6 +266,47 @@ describe("ReleaseReviewSections", () => {
     expect(within(ai).getByText("推奨対応: 呼び出し元を更新する")).toBeTruthy();
     expect(within(ai).getByText("a.ts:12")).toBeTruthy();
     expect(within(ai).getByText(/developへ入れてから作り直します/)).toBeTruthy();
+  });
+
+  it("再レビューの確認範囲・引き継ぎ・未確認項目・再発と新規・改善提案を既存の区分から読める（#4559）", () => {
+    renderSections(
+      summary({
+        aiReview: section({
+          state: "needs_check",
+          review: {
+            checklistVersion: 1,
+            legacy: false,
+            mode: "rereview",
+            fullReviewReason: null,
+            recheckScope: "修正差分6ファイルとその呼び出し元",
+            previous: { prNumber: 4500, baseSha: "b".repeat(40), headSha: "4d5e6f7".padEnd(40, "0") },
+            fixDiffFileCount: 6,
+            addedPullRequests: [],
+            checks: [
+              { id: "auth_boundary", status: "confirmed", evidence: "認可は前回から変更なし", source: "carried_over", carriedFromHeadSha: "4d5e6f7".padEnd(40, "0") },
+              { id: "host_compat", status: "unconfirmed", evidence: "pollerを読めていない", source: "current", carriedFromHeadSha: null },
+            ],
+            previousFindings: [{ id: "R-3f2a01", title: "旧pollerで受信できない", status: "resolved", evidence: "report/route.tsで確認" }],
+          },
+          findings: [
+            { severity: "high", title: "二重実行", detail: "", impact: null, evidence: null, recommendation: null, file: null, line: null, pullRequests: [], id: "R-b90400", status: "new", discovery: "fix_induced", blockingReason: "同じ候補が2回作り直される" },
+          ],
+          suggestions: [
+            { severity: "low", title: "文言を整えたい", detail: "", impact: null, evidence: null, recommendation: null, file: null, line: null, pullRequests: [] },
+          ],
+        }),
+      }),
+    );
+    const ai = row("全体レビュー");
+    expect(within(ai).getByText("再レビュー")).toBeTruthy();
+    expect(within(ai).getByText("確認項目 v1")).toBeTruthy();
+    expect(within(ai).getByText(/未確認の項目 1件・未解決の阻害指摘 1件/)).toBeTruthy();
+    expect(within(ai).getByText(/前回から引き継ぎ（4d5e6f7の結果）/)).toBeTruthy();
+    expect(within(ai).getByText("修正差分6ファイルとその呼び出し元")).toBeTruthy();
+    expect(within(ai).getByText(/R-b90400 · 新規・修正由来/)).toBeTruthy();
+    expect(within(ai).getByText("止める理由: 同じ候補が2回作り直される")).toBeTruthy();
+    expect(within(ai).getByText(/改善提案 1件（リリースは止めません/)).toBeTruthy();
+    expect(within(ai).getByText(/再レビューは合格の保証ではありません/)).toBeTruthy();
   });
 
   it("古い対象の結果は古い結果として出す", () => {

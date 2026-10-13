@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 
 import { redactDiagnosticText } from "@/lib/release-review-diagnostic";
+import { BLOCKING_POLICY_LINES, RELEASE_REVIEW_CHECK_ITEMS, RELEASE_REVIEW_CHECKLIST_VERSION } from "@/lib/release-review-checklist";
 import type { ReleaseReviewFinding } from "@/lib/release-review-result";
 
 /**
@@ -314,6 +315,8 @@ export function internalReviewSection(): string[] {
     "- 独立レビュー: `Agent`ツールで**読み取り専用の別エージェント**に依頼する（実装した本人は合否を決めない）。差分だけでなく、修正を取り込んだ候補全体との整合（認可・関連エンドポイント・スキーマ・設定と配布物・旧pollerなどの互換性）を確認させ、指摘と検証結果を返させる",
     "- 修正は実装担当が行う。指摘は`scripts/report-release-fix-round.sh review`で記録するとIDが付く（`F-001`〜）。解消は根拠つきで報告する。対象のSHAは`issue-<番号>`ブランチのHEADからサーバーが取り直すので、**報告の前にpushする**",
     "- テストは`scripts/report-release-fix-round.sh test`で結果を記録する。内容が変わったら、レビューもテストもやり直す（古い合格は使われない）",
+    `- 確認方針（最終候補の全体レビューと同じ基準。確認項目v${RELEASE_REVIEW_CHECKLIST_VERSION}）: 独立レビューには、修正を取り込んだ候補全体について次の観点を項目ごとに確認させ、確認済み／非該当／未確認と根拠を返させる（根拠の無い確認済みは未確認として扱う）。${RELEASE_REVIEW_CHECK_ITEMS.map((i) => i.label).join("／")}`,
+    `- 指摘の区別: ${BLOCKING_POLICY_LINES.join(" ")}止めない提案だけで往復を続けない（別Issueで追跡する）`,
     "- 完了の条件: 独立レビューの実施・未解決指摘0件・必要テストの合格が、同じ内容に対してそろっていること。そろったら`scripts/create-release-fix-pr.sh`でPRを作る（通常の往復で追加Issue・PRは作らない。再実行してもPRは重複しない）",
     "- 止まる場合: 往復の上限・時間の上限・同じ指摘の再発・進捗なしで、理由つきで止まり`00.check-user`が付く。判断が必要な仕様変更・権限不足・外部作業も同様にIssueコメントで相談する",
     "",

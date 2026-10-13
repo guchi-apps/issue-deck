@@ -14,6 +14,7 @@ import {
   type ReleaseReviewAssignee,
 } from "@/lib/release-review-assignee";
 import { normalizeReleaseReviewDiagnostic } from "@/lib/release-review-diagnostic";
+import { loadReleaseReviewContext } from "@/lib/release-review-context-load";
 import { normalizeReleaseReview } from "@/lib/release-review-result";
 import {
   recordReleaseVerificationResult,
@@ -177,7 +178,10 @@ export async function applyReleaseReviewReport(
     headSha: job.headSha,
   };
   const agent = `${job.agent ?? "claude"}:${job.agent === "codex" ? (job.codexModel ?? "") : (job.claudeModel ?? "")}`;
-  const normalized = status === "succeeded" ? normalizeReleaseReview(body) : null;
+  // 再レビューへ引き継げるかは、ランナーの申告ではなくサーバーが記録から取り直した文脈で決める（#4559）。
+  // 文脈を読めないときは履歴不明として全体確認の扱いにする（引き継ぎを認めない側へ倒す）
+  const context = status === "succeeded" ? await loadReleaseReviewContext(target).catch(() => null) : null;
+  const normalized = status === "succeeded" ? normalizeReleaseReview(body, context) : null;
   if (normalized) {
     const raw = (body ?? {}) as Record<string, unknown>;
     return recordReleaseVerificationResult(target, {
