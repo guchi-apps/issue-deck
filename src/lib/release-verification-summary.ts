@@ -12,7 +12,7 @@ import {
   type ReleaseMacSection,
 } from "@/lib/release-mac-verification";
 import { readReleaseReviewDiagnostic, type ReleaseReviewDiagnostic } from "@/lib/release-review-diagnostic";
-import type { ReleaseReviewFinding } from "@/lib/release-review-result";
+import type { ReleaseReviewFinding, ReleaseReviewMeta } from "@/lib/release-review-result";
 import type { ReleaseVerificationProgress } from "@/lib/release-verification-progress";
 
 /**
@@ -44,7 +44,12 @@ export type ReleaseVerificationSection = {
   /** 全体レビューの担当AI（`claude:opus`など）。統合検証ではnull */
   agent: string | null;
   updatedAt: string | null;
+  /** リリースを止める指摘（旧形式の指摘もここ） */
   findings: ReleaseReviewFinding[];
+  /** リリースを止めない改善提案（#4559） */
+  suggestions: ReleaseReviewFinding[];
+  /** 確認契約の記録（確認項目の版・初回／再レビュー・項目別の結果・前回指摘の解消）。無ければnull */
+  review: ReleaseReviewMeta | null;
   affectedPullRequests: number[];
   affectedFiles: string[];
   reviewedFiles: number | null;
@@ -83,6 +88,11 @@ function readDetail(findings: unknown) {
   const int = (v: unknown) => (typeof v === "number" && Number.isInteger(v) ? v : null);
   return {
     findings: list(raw.findings).filter((f): f is ReleaseReviewFinding => typeof f === "object" && f !== null),
+    suggestions: list(raw.suggestions).filter((f): f is ReleaseReviewFinding => typeof f === "object" && f !== null),
+    review:
+      typeof raw.review === "object" && raw.review !== null && !Array.isArray(raw.review)
+        ? (raw.review as ReleaseReviewMeta)
+        : null,
     affectedPullRequests: list(raw.affectedPullRequests).filter((n): n is number => typeof n === "number"),
     affectedFiles: list(raw.affectedFiles).filter((f): f is string => typeof f === "string"),
     reviewedFiles: int(raw.reviewedFiles),

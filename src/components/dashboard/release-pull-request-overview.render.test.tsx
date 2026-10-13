@@ -8,7 +8,7 @@ import type { ReleaseVerificationSummary } from "@/lib/release-verification-summ
 import type { PullRequestSummary } from "@/types/pull-request";
 
 const section = (state: string, findings: unknown[] = []) =>
-  ({ kind: "x", state, reason: null, summary: null, evidenceUrl: null, agent: null, updatedAt: null, findings, affectedPullRequests: [], affectedFiles: [], reviewedFiles: null, totalFiles: null, progress: null, diagnostic: null }) as never;
+  ({ kind: "x", state, reason: null, summary: null, evidenceUrl: null, agent: null, updatedAt: null, findings, suggestions: [], review: null, affectedPullRequests: [], affectedFiles: [], reviewedFiles: null, totalFiles: null, progress: null, diagnostic: null }) as never;
 
 function makeVerification(aiReview = section("passed"), integration = section("passed")): ReleaseVerificationSummary {
   return {

@@ -132,6 +132,40 @@ PC（リリースPR詳細）・スマホ（リリースシート）・**本番�
 作り直しで変わったbase/head SHAに対して統合検証・全体レビューをやり直す（古いSHAの結果は「古い結果」になり流用されない）。CI失敗・コンフリクトは従来どおり`reusable-claude-pr-repair`の修復ボタン。
 **手動で作り直す代わりに、画面から修正Issueを起案して作り直しまで自動で進める経路が次節の修正系列（#4317）。**
 
+## 全体レビューの確認契約と再レビューへの引き継ぎ（#4559）
+
+全体レビューが「何を確認すれば合格か」と「再レビューへ何を渡すか」を固定する。**個別PRレビュー・統合検証・候補管理・修正系列（#4317・#4410・#4478）は再実装せず、それらの記録を読む。**
+
+### 確認項目（`src/lib/release-review-checklist.ts`）
+
+- 6観点（PR間の整合・認証認可とデータ境界・実行ホストと共有ワークフローの新旧互換性・設定と移行の順序・候補固定と再試行時の状態整合・画面と実処理の一致）を版（`RELEASE_REVIEW_CHECKLIST_VERSION`）つきで持つ。**項目を変えたら版を上げる**。版が変わると前回の結果は引き継げず、全体確認へ戻る。
+- 項目ごとに「確認済み／非該当／未確認」と根拠を記録する（`ReleaseVerification.findings.review.checks`）。**根拠の無い確認済み・報告されなかった項目は未確認**。未確認の項目と差分の入力省略（`totalFiles`・`reviewedFiles`）は`unverifiedScope`に入り、既存の`viewReleaseVerifications`が`passed`を`needs_check`へ読み替える。**プロンプトへ載せたことは確認の証明ではない**。
+
+### 合格条件
+
+- 止める指摘（`findings`）が1件でもあれば`needs_check`。止めない改善提案（`suggestions`）だけでは止めない。区別は`blocking`の申告で、**`severity: high`は提案にできない**。旧形式（フラグなし）は止める指摘のまま。
+- 合格は「現対象の必須項目に未確認が無く、止める指摘が無く、前回の止める指摘がすべて根拠つきで解消と確認できた」ときだけ。統合検証・CI・独立レビュー・main反映の承認は従来どおり。
+
+### 再レビューの文脈（`release-review-context.ts`・`release-review-context-load.ts`）
+
+- 取得元（新しい台帳は作らない）: 前回の`ai_review`記録（同じ候補系列の旧PR・旧head）、`ReleaseFixSeries`（`releasePrNumber`・`successorPrNumber`で系列を辿る）の`items`・`fixPrNumber`、その修正Issueの`ReleaseFixFinding`（`resolution`が対応の検証根拠）。
+- **指摘IDは保存せず導出する**: `reviewFindingId`（既存の`reviewFindingKey`のハッシュ、`R-xxxxxx`）。系列`items`も同じ関数で導出して突き合わせる。再発は前回のIDを引き継ぎ（`previousId`）、`occurrences`が増える。
+- **全体確認へ戻す条件**（前回の結果を引き継がない）: 前回の記録が無い／前回が実行失敗／前回に項目別の記録が無い／確認項目の版が違う／base（main）が変わった／修正の履歴を辿れない／（ランナーが実測）前回の対象を取得できない・修正と無関係なPRが加わった。サーバーは記録時にも同じ文脈を取り直し、**ランナーの`carried_over`の申告は、前回に確認済み／非該当だった項目にだけ認める**。引き継いだ結果には旧headを残し、現SHAで実行した結果へ書き換えない。
+- 新規の指摘には発見理由（修正由来／初回の見落とし／対象追加／不明）、再発した指摘が解消されない場合は原因（未修正／修正が効いていない／検証不足／実行障害／不明）と次の対応を残す。継続の上限・停止は#4410/#4478の機構に従い、ここではリセットしない。
+- ランナーは`GET /api/dispatch/release-review-context?jobId=`（pollerの共有シークレット）で文脈を取り、修正差分（前回head→今回head）を載せる。
+
+### 旧poller・旧サーバーとのデプロイ順
+
+**サブPCのpoller更新（画面の「更新して再起動」）→サーバー**の順で出す。項目別の記録が無い旧ランナーの結果は、意図的に未確認範囲つきの`passed`（ゲートでは`needs_check`）になり、人の明示確認で通す。サーバーが先に出ると、更新前のpollerが出す結果はすべて人待ちになる。新ランナー→旧サーバーは追加項目が無視されるだけで、結果は旧形式として扱われる。
+
+### #4495/#4496との接続
+
+対象は従来どおり（PR・base・head）で扱う。候補revisionが導入されたときは、`loadReleaseReviewContext`の「前回の記録」を同じ候補系列の前revisionに差し替えるだけでよい（引き継ぎの可否判定は`decideReviewMode`に集約している）。バンプ後の引き継ぎ（`deriveInheritedRecords`）は元の結果を複写する別経路で、この判定とは独立している。
+
+### セッション内の独立レビュー
+
+修正Issue本文（`internalReviewSection`）に、同じ確認項目と止める／止めないの基準を載せる。
+
 ## PRの6チェック表示とMac検証の独立記録（#4366）
 
 PR詳細・PR一覧・ブランチ画面・本番マージ確認の一覧は、同じ6項目を同じ順で出す（`src/lib/pull-request-merge-checks.ts`・`src/components/dashboard/pull-request-merge-checks.tsx`）: **CI／コードレビュー／コンフリクト／全体レビュー／統合検証／Mac検証**。#4305の5項目にあった計画レビューはPRのチェックに含めない（Issue側の計画レビューは別機能として残る）。
