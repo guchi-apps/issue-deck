@@ -16,6 +16,16 @@ const fullChecks = (extra: Record<string, unknown> = {}) => ({
   ...extra,
 });
 
+const names = (n: number) => Array.from({ length: n }, (_, i) => `src/f${i}.ts`);
+/** n個の対象のうち、先頭`reviewed`個を根拠つきで確認した実績 */
+const coverageOf = (n: number, reviewed = n, extra: Record<string, unknown> = {}) => ({
+  totalFiles: n,
+  targetFiles: names(n),
+  inputFiles: n,
+  fileReviews: names(reviewed).map((file) => ({ file, status: "reviewed", evidence: "差分と呼び出し元を確認" })),
+  ...extra,
+});
+
 const PREV_FINDING = { id: reviewFindingId({ title: "設定漏れ", file: "a.ts", line: 3 }), title: "設定漏れ", file: "a.ts", line: 3, detail: "env", occurrences: 1 };
 const rereviewContext = (over: Partial<ReleaseReviewNormalizeContext> = {}): ReleaseReviewNormalizeContext => ({
   mode: "rereview",
@@ -33,12 +43,13 @@ const rereviewContext = (over: Partial<ReleaseReviewNormalizeContext> = {}): Rel
 
 describe("normalizeReleaseReview", () => {
   it("指摘も未確認範囲も無ければpassed", () => {
-    const r = normalizeReleaseReview({ ...fullChecks(), summary: "問題なし", reviewedFiles: 10, totalFiles: 10 });
+    const r = normalizeReleaseReview({ ...fullChecks(), summary: "問題なし", ...coverageOf(10) });
     expect(r).toMatchObject({ state: "passed", unverifiedScope: null });
+    expect(r?.detail.reviewedFiles).toBe(10);
   });
 
   it("旧ランナーの結果（項目別の記録なし）はpassedでも未確認範囲つきになり、ゲートで止まる", () => {
-    const r = normalizeReleaseReview({ state: "passed", summary: "問題なし", reviewedFiles: 10, totalFiles: 10 });
+    const r = normalizeReleaseReview({ state: "passed", summary: "問題なし", ...coverageOf(10) });
     expect(r?.state).toBe("passed");
     expect(r?.unverifiedScope).toContain("項目別の確認記録がありません");
     expect(r?.detail.review?.legacy).toBe(true);
@@ -54,9 +65,70 @@ describe("normalizeReleaseReview", () => {
   });
 
   it("確認できたファイルが差分より少なければ未確認範囲を付けてpassedのまま持つ", () => {
-    const r = normalizeReleaseReview({ state: "passed", reviewedFiles: 30, totalFiles: 80 });
+    const r = normalizeReleaseReview({ state: "passed", ...coverageOf(80, 30) });
     expect(r?.state).toBe("passed");
     expect(r?.unverifiedScope).toContain("80ファイルのうち30");
+    expect(r?.detail.coverage).toMatchObject({ reviewed: 30, unreviewed: 50, unreadable: 0 });
+  });
+
+  describe("確認実績（#4615）", () => {
+    it("入力へ載せた件数（reviewedFiles）を申告しても、確認実績にはならない（113/120の再発防止）", () => {
+      const r = normalizeReleaseReview(
+        fullChecks({ totalFiles: 120, reviewedFiles: 113, inputFiles: 113, targetFiles: names(120), fileReviews: [] }),
+      );
+      expect(r?.detail.reviewedFiles).toBe(0);
+      expect(r?.detail.coverage).toMatchObject({ inputFiles: 113, reviewed: 0, unreviewed: 120 });
+      expect(r?.unverifiedScope).toContain("120ファイルのうち0");
+    });
+
+    it("入力に含まれていても根拠の無い・未読の対象は未確認になる", () => {
+      const r = normalizeReleaseReview(
+        fullChecks({
+          ...coverageOf(3, 0),
+          fileReviews: [
+            { file: "src/f0.ts", status: "reviewed", evidence: "" },
+            { file: "src/f1.ts", status: "reviewed", evidence: "読んだ" },
+          ],
+        }),
+      );
+      expect(r?.detail.coverage).toMatchObject({ reviewed: 1, unreviewed: 2 });
+    });
+
+    it("別バッチで確認した省略分は実績に数え、120ファイル全てが確認済みなら未確認範囲が無い", () => {
+      const r = normalizeReleaseReview(fullChecks(coverageOf(120, 120, { inputFiles: 113, batches: 2 })));
+      expect(r?.unverifiedScope).toBeNull();
+      expect(r?.detail).toMatchObject({ reviewedFiles: 120, totalFiles: 120 });
+      expect(r?.detail.coverage).toMatchObject({ inputFiles: 113, batches: 2 });
+    });
+
+    it("取得不能は省略と区別し、確認済みの記録があっても確認済みにしない。対象外のファイルは数えない", () => {
+      const r = normalizeReleaseReview(
+        fullChecks({
+          ...coverageOf(4, 2),
+          fileReviews: [
+            { file: "src/f0.ts", status: "reviewed", evidence: "読んだ" },
+            { file: "src/f1.ts", status: "reviewed", evidence: "読んだ" },
+            { file: "src/f1.ts", status: "unreadable", evidence: "後半を取得できない" },
+            { file: "other.ts", status: "reviewed", evidence: "対象外" },
+          ],
+        }),
+      );
+      expect(r?.detail.coverage).toMatchObject({ reviewed: 1, unreadable: 1, unreviewed: 2 });
+      expect(r?.detail.coverage?.open.map((o) => o.kind)).toEqual(["unreadable", "unreviewed", "unreviewed"]);
+      expect(r?.unverifiedScope).toContain("取得不能1");
+    });
+
+    it("中断で残ったバッチ数を未確認範囲へ出す", () => {
+      const r = normalizeReleaseReview(fullChecks(coverageOf(10, 6, { pendingBatches: 2 })));
+      expect(r?.unverifiedScope).toContain("残り2バッチ");
+    });
+
+    it("ファイル別の実績を持たない旧結果は件数不明（reviewedFiles=null）として扱う", () => {
+      const r = normalizeReleaseReview(fullChecks({ reviewedFiles: 120, totalFiles: 120 }));
+      expect(r?.detail.reviewedFiles).toBeNull();
+      expect(r?.detail.coverage).toBeNull();
+      expect(r?.unverifiedScope).toContain("確認済みの件数は不明");
+    });
   });
 
   it("failedはそのまま、不正な状態・本文はnull", () => {
@@ -92,7 +164,7 @@ describe("normalizeReleaseReview", () => {
   });
 
   it("差分の入力省略があれば、項目が確認済みでも未確認範囲が付く", () => {
-    const r = normalizeReleaseReview(fullChecks({ reviewedFiles: 3, totalFiles: 9 }));
+    const r = normalizeReleaseReview(fullChecks(coverageOf(9, 3)));
     expect(r?.unverifiedScope).toContain("9ファイルのうち3");
   });
 

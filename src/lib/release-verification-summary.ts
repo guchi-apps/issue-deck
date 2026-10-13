@@ -12,7 +12,7 @@ import {
   type ReleaseMacSection,
 } from "@/lib/release-mac-verification";
 import { readReleaseReviewDiagnostic, type ReleaseReviewDiagnostic } from "@/lib/release-review-diagnostic";
-import type { ReleaseReviewFinding, ReleaseReviewMeta } from "@/lib/release-review-result";
+import type { ReleaseReviewCoverage, ReleaseReviewFinding, ReleaseReviewMeta } from "@/lib/release-review-result";
 import type { ReleaseVerificationProgress } from "@/lib/release-verification-progress";
 
 /**
@@ -54,6 +54,8 @@ export type ReleaseVerificationSection = {
   affectedFiles: string[];
   reviewedFiles: number | null;
   totalFiles: number | null;
+  /** ファイル別の確認実績。旧結果ではnull（実績不明） */
+  coverage: ReleaseReviewCoverage | null;
   /**
    * 現在の対象（base・head）を実行している、または最後に実行したジョブの進捗（#4277）。
    * 対象の違うジョブは渡さない（古い実行の工程を現在の進捗に見せない）。ジョブが無ければnull
@@ -97,6 +99,10 @@ function readDetail(findings: unknown) {
     affectedFiles: list(raw.affectedFiles).filter((f): f is string => typeof f === "string"),
     reviewedFiles: int(raw.reviewedFiles),
     totalFiles: int(raw.totalFiles),
+    coverage:
+      typeof raw.coverage === "object" && raw.coverage !== null && !Array.isArray(raw.coverage)
+        ? (raw.coverage as ReleaseReviewCoverage)
+        : null,
   };
 }
 
