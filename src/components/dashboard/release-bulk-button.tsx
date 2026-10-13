@@ -17,7 +17,7 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useReleasePreparation } from "@/hooks/use-release-preparation";
 import { PREP_OVERRIDE_CONFIRM_TEXT, type ReleasePrepState } from "@/lib/release-prep-state";
-import { requestReleaseBulk } from "@/lib/release-request";
+import { fetchReleaseStartModes, requestReleaseBulk, type ReleaseStartModes } from "@/lib/release-request";
 
 export type ReleaseBulkTarget = {
   repositoryFullName: string;
@@ -67,6 +67,20 @@ export function ReleaseBulkButton({
   const prepStateList = Object.values(prepStates);
   const hasPrepBlocked = prepStateList.some((state) => state === "running" || state === "failed");
   // 準備状態を取得できていない対象が1つでもあれば起動を確定させない（#4556。未報告の行もunknown扱い）
+  // リポジトリごとの開始方式（#4604）。ダイアログを開いたときに取り、候補を作れるrepoだけを起動する
+  const [startModes, setStartModes] = useState<ReleaseStartModes | null>(null);
+  const targetNamesKey = targets.map((target) => target.repositoryFullName).join(",");
+  useEffect(() => {
+    if (!confirmOpen || targetNamesKey === "") return;
+    let cancelled = false;
+    void fetchReleaseStartModes(targetNamesKey.split(",")).then((modes) => {
+      if (!cancelled) setStartModes(modes);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [confirmOpen, targetNamesKey]);
+  const startable = startModes ? targets.filter((target) => startModes[target.repositoryFullName]?.mode === "candidate") : [];
   const prepUnknown = targets.some((target) => (prepStates[target.repositoryFullName] ?? "unknown") === "unknown");
 
   // 対象が無ければボタンごと出さない（#2770）。単一ボタンの「押せないときも消さない」
@@ -77,7 +91,8 @@ export function ReleaseBulkButton({
     setIsTriggering(true);
     setError(null);
     try {
-      const result = await requestReleaseBulk(targets.map((target) => target.repositoryFullName));
+      // 旧方式・判定不能のrepoは起動しない（一括で旧方式を黙って起動しない。#4604）
+      const result = await requestReleaseBulk(startable.map((target) => target.repositoryFullName));
       setConfirmOpen(false);
       onTriggered(result.succeeded);
       if (result.failed.length > 0) {
@@ -113,18 +128,19 @@ export function ReleaseBulkButton({
         if (!open) {
           setAllowPrepOverride(false);
           setPrepStates({});
+          setStartModes(null);
         }
       }}>
         <AlertDialogContent className="flex flex-col gap-4 overflow-hidden">
           <AlertDialogHeader>
             <AlertDialogTitle>
-              {targets.length}件のリポジトリでリリースworkflowを起動しますか？
+              {startModes ? startable.length : targets.length}件のリポジトリでリリース候補を作成して検証しますか？
             </AlertDialogTitle>
             <AlertDialogDescription>
-              developの変更をmainへ反映するリリースworkflowを、対象の全リポジトリで起動します。
-              CI通過後は自動でdevelopへマージされ、develop→mainのPRが作られます。
-              <strong className="text-foreground">mainへの実際のマージは含まれません</strong>
-              （これまでどおり、各リポジトリで人が個別に行います）。
+              新方式に対応したリポジトリで、developの先端を候補（release-rc/*）として固定し、全体レビュー・統合検証へ進めます。
+              正式な版は、合格後の「公開準備」で初めて上げます。
+              <strong className="text-foreground">未対応・判定できないリポジトリは起動しません</strong>
+              （旧方式を一括で黙って起動することはありません。各リポジトリの個別の操作で起動してください）。
             </AlertDialogDescription>
           </AlertDialogHeader>
           <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto">
@@ -141,6 +157,7 @@ export function ReleaseBulkButton({
               <BulkTargetRow
                 key={target.repositoryFullName}
                 target={target}
+                startMode={startModes?.[target.repositoryFullName] ?? null}
                 enabled={confirmOpen}
                 onPrepState={(state) =>
                   setPrepStates((prev) => (prev[target.repositoryFullName] === state ? prev : { ...prev, [target.repositoryFullName]: state }))
@@ -166,7 +183,7 @@ export function ReleaseBulkButton({
           <AlertDialogFooter>
             <AlertDialogCancel disabled={isTriggering}>キャンセル</AlertDialogCancel>
             <AlertDialogAction
-              disabled={isTriggering || prepUnknown || (hasPrepBlocked && !allowPrepOverride)}
+              disabled={isTriggering || prepUnknown || startable.length === 0 || (hasPrepBlocked && !allowPrepOverride)}
               onClick={(event) => {
                 // 起動の結果を待たずに閉じないよう既定の閉じる動作を止める（#1548と同じ理由）。
                 event.preventDefault();
@@ -185,10 +202,12 @@ export function ReleaseBulkButton({
 /** 確認ダイアログの1行。開いている間だけ準備の状態を取り、準備中・失敗を行に添えて親へ知らせる（#4421） */
 function BulkTargetRow({
   target,
+  startMode,
   enabled,
   onPrepState,
 }: {
   target: ReleaseBulkTarget;
+  startMode: ReleaseStartModes[string] | null;
   enabled: boolean;
   onPrepState: (state: ReleasePrepState) => void;
 }) {
@@ -202,6 +221,15 @@ function BulkTargetRow({
     <div className="flex items-center justify-between gap-2">
       <span className="truncate">{target.repositoryFullName}</span>
       <span className="flex shrink-0 items-center gap-2 text-muted-foreground tabular-nums">
+        {startMode === null ? (
+          <span className="rounded bg-muted px-1.5 text-[11px]">対応確認中</span>
+        ) : startMode.mode === "candidate" ? (
+          <span className="rounded bg-muted px-1.5 text-[11px]">候補を作成</span>
+        ) : (
+          <span className="rounded bg-amber-500/15 px-1.5 text-[11px] text-amber-700" title={startMode.label}>
+            {startMode.mode === "legacy" ? "未対応（更新が必要）・起動しない" : "判定不能・起動しない"}
+          </span>
+        )}
         {prepState !== "idle" && (
           <span className="rounded bg-muted px-1.5 text-[11px]">
             {prepState === "unknown" ? "確認中" : prepState === "running" ? "準備中" : "準備失敗"}

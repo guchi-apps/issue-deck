@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { BranchFlowView } from "@/components/dashboard/branch-flow-view";
@@ -22,6 +22,25 @@ vi.mock("next/navigation", () => ({
   usePathname: () => "/dashboard",
   useSearchParams: () => new URLSearchParams(),
 }));
+
+/**
+ * `fetch`の差し替え。開始方式の取得（#4604。`/release/start-mode`）には全リポジトリ`mode`で答え、
+ * それ以外の呼び出しは`respond`（Responseそのもの、または関数）で答える
+ */
+function mockFetchWithMode(
+  mode: "candidate" | "legacy",
+  respond: Response | ((url: string, init?: RequestInit) => Promise<Response>),
+) {
+  return vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+    const url = String(input);
+    if (url.includes("/release/start-mode")) {
+      const repos = decodeURIComponent(url.split("repos=")[1] ?? "").split(",");
+      const modes = Object.fromEntries(repos.map((name) => [name, mode === "candidate" ? { mode } : { mode, label: "未対応" }]));
+      return new Response(JSON.stringify({ modes }), { status: 200 });
+    }
+    return typeof respond === "function" ? respond(url, init) : respond;
+  });
+}
 
 const REPO = "guchi-apps/issue-deck";
 /** サマリー行に出るリポジトリ名（`owner/`は落とす） */
@@ -1089,7 +1108,7 @@ describe("BranchFlowView", () => {
     });
 
     it("押すと今回反映する内容をPR単位で確認ダイアログに出す（#4201）", async () => {
-      vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      mockFetchWithMode("legacy", 
         new Response(
           JSON.stringify({
             pullRequests: [
@@ -1144,7 +1163,7 @@ describe("BranchFlowView", () => {
     });
 
     it("反映内容の取得に失敗したときは0件とせず失敗を出す（#4201）", async () => {
-      vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      mockFetchWithMode("legacy", 
         new Response(JSON.stringify({ error: "github_api_error", message: "boom" }), { status: 502 }),
       );
       renderFlow({ branchStatuses: [unreleased] });
@@ -1175,7 +1194,7 @@ describe("BranchFlowView", () => {
     });
 
     it("起動に成功したら、バンプPRが現れるまで押せないままにする（#1548）", async () => {
-      vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      mockFetchWithMode("legacy", 
         new Response(JSON.stringify({ ok: true }), { status: 200 }),
       );
 
@@ -1189,7 +1208,7 @@ describe("BranchFlowView", () => {
     });
 
     it("起動に成功しても完了のポップアップは出さない（#1590）", async () => {
-      vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      mockFetchWithMode("legacy", 
         new Response(JSON.stringify({ ok: true }), { status: 200 }),
       );
 
@@ -1206,7 +1225,7 @@ describe("BranchFlowView", () => {
 
     describe("畳んだ1行の「リリース起動中」（#1955）", () => {
       async function trigger() {
-        vi.spyOn(globalThis, "fetch").mockResolvedValue(
+        mockFetchWithMode("legacy", 
           new Response(JSON.stringify({ ok: true }), { status: 200 }),
         );
         fireEvent.click(screen.getByText("リリースする"));
@@ -2579,13 +2598,13 @@ describe("一括リリース（#2770）", () => {
     renderFlow(twoUnreleasedRepos());
     fireEvent.click(screen.getByText("未リリース2件をまとめてリリース"));
 
-    expect(screen.getByText("2件のリポジトリでリリースworkflowを起動しますか？")).toBeTruthy();
+    expect(screen.getByText("2件のリポジトリでリリース候補を作成して検証しますか？")).toBeTruthy();
     expect(screen.getByText(REPO)).toBeTruthy();
     expect(screen.getByText(REPO2)).toBeTruthy();
     expect(screen.getByText("3コミット")).toBeTruthy();
     expect(screen.getByText("1コミット")).toBeTruthy();
     // mainへの実マージは含まれないことを明記している
-    expect(screen.getByText(/mainへの実際のマージは含まれません/)).toBeTruthy();
+    expect(screen.getByText(/未対応・判定できないリポジトリは起動しません/)).toBeTruthy();
   });
 
   // 計画レビュー指摘3。ブランチ状況を取得できなかったリポジトリは対象からも件数からも
@@ -2602,42 +2621,56 @@ describe("一括リリース（#2770）", () => {
     expect(screen.queryByText(/ブランチ状況を取得できていない/)).toBeNull();
   });
 
-  it("起動すると対象ぶんPOSTし、成功した各リポジトリの個別ボタンも起動中表示になる", async () => {
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      new Response(JSON.stringify({ ok: true }), { status: 200 }),
+  it("起動すると対象ぶん候補を作り、成功した各リポジトリの個別ボタンも起動中表示になる", async () => {
+    mockFetchWithMode(
+      "candidate",
+      async () => new Response(JSON.stringify({ ok: true, candidateId: "c1", revision: 0, existing: false }), { status: 200 }),
     );
     renderFlow(twoUnreleasedRepos());
     fireEvent.click(screen.getByText(REPO_SHORT));
     fireEvent.click(screen.getByText(REPO2_SHORT));
 
     fireEvent.click(screen.getByText("未リリース2件をまとめてリリース"));
+    await screen.findAllByText("候補を作成");
     fireEvent.click(screen.getByText("起動する"));
 
-    await screen.findAllByText("リリース起動中…");
+    await waitFor(() => expect(screen.getAllByText("リリース起動中…").length).toBe(2));
     // 両方の個別ボタンが起動中へ切り替わる（畳んでいたリポジトリの節が持つmarkTriggeredを、
     // ヘッダーのボタンからも呼べていることの確認。計画レビュー指摘3への対応）
-    expect(screen.getAllByText("リリース起動中…").length).toBe(2);
-    expect(screen.queryByText("リリースする")).toBeNull();
+    expect(screen.queryByText("候補を作成して検証")).toBeNull();
 
-    expect(globalThis.fetch).toHaveBeenCalledTimes(2);
-    const bodies = (globalThis.fetch as unknown as ReturnType<typeof vi.fn>).mock.calls.map(
-      (call: unknown[]) => JSON.parse((call[1] as RequestInit).body as string),
-    );
+    const bodies = (globalThis.fetch as unknown as ReturnType<typeof vi.fn>).mock.calls
+      .filter((call: unknown[]) => call[0] === "/api/repositories/release/rc")
+      .map((call: unknown[]) => JSON.parse((call[1] as RequestInit).body as string));
+    expect(bodies).toHaveLength(2);
     expect(bodies).toEqual(
       expect.arrayContaining([
-        { owner: "guchi-apps", repo: "issue-deck" },
-        { owner: "guchi-apps", repo: "other-app" },
+        expect.objectContaining({ owner: "guchi-apps", repo: "issue-deck", action: "create" }),
+        expect.objectContaining({ owner: "guchi-apps", repo: "other-app", action: "create" }),
       ]),
     );
   });
 
+  it("新方式に未対応のリポジトリは、一括では旧方式を起動しない", async () => {
+    mockFetchWithMode("legacy", new Response(JSON.stringify({ ok: true }), { status: 200 }));
+    renderFlow(twoUnreleasedRepos());
+    fireEvent.click(screen.getByText("未リリース2件をまとめてリリース"));
+    await screen.findAllByText(/未対応（更新が必要）・起動しない/);
+    const action = screen.getByText("起動する").closest("button") as HTMLButtonElement;
+    expect(action.disabled).toBe(true);
+    const legacyCalls = (globalThis.fetch as unknown as ReturnType<typeof vi.fn>).mock.calls.filter(
+      (call: unknown[]) => call[0] === "/api/repositories/release",
+    );
+    expect(legacyCalls).toHaveLength(0);
+  });
+
   it("一部の起動が失敗しても、成功した分は起動中表示になりエラーを添える", async () => {
     let callCount = 0;
-    vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
+    mockFetchWithMode("candidate", async () => {
       callCount += 1;
-      if (callCount === 1) return new Response(JSON.stringify({ ok: true }), { status: 200 });
+      if (callCount === 1) return new Response(JSON.stringify({ ok: true, candidateId: "c1", revision: 0, existing: false }), { status: 200 });
       return new Response(
-        JSON.stringify({ error: "github_api_error", message: "起動できませんでした" }),
+        JSON.stringify({ error: "dispatch_failed", message: "起動できませんでした" }),
         { status: 502 },
       );
     });
@@ -2646,12 +2679,13 @@ describe("一括リリース（#2770）", () => {
     fireEvent.click(screen.getByText(REPO2_SHORT));
 
     fireEvent.click(screen.getByText("未リリース2件をまとめてリリース"));
+    await screen.findAllByText("候補を作成");
     fireEvent.click(screen.getByText("起動する"));
 
     await screen.findByText("リリース起動中…");
     // 成功した1件だけが起動中表示になり、失敗した側は「リリースする」のまま押し直せる
     expect(screen.getAllByText("リリース起動中…").length).toBe(1);
-    expect(screen.getByText("リリースする")).toBeTruthy();
+    expect(screen.getByText("候補を作成して検証")).toBeTruthy();
     expect(screen.getByText(/1件の起動に失敗しました/)).toBeTruthy();
   });
 });

@@ -6,7 +6,7 @@ import type { MergeJudgement } from "@/lib/github/check-rollup";
 import type { RepairWorkflowAvailability } from "@/lib/github/pull-request-repair";
 import type { PullRequestRepairRunSummary } from "@/lib/github/pull-request-repair-run";
 import type { ReleaseVerificationSummary } from "@/lib/release-verification-summary";
-import { releaseErrorMessage, requestRelease } from "@/lib/release-request";
+import { releaseErrorMessage, requestReleaseStart } from "@/lib/release-request";
 import type { BumpKind } from "@/lib/semver-bump";
 
 /** CIの集約状態。`unknown`は権限不足やチェック未検出で判定できないことを表す */
@@ -243,7 +243,8 @@ export function useReleaseStatus(
     setError(null);
     try {
       // 起動そのものは「ブランチ」画面のボタンと同じ関数を通す（#1510）
-      await requestRelease(repoFullName, bumpKind, allowFailedDeploy);
+      // 新方式対応repoは候補を作り、未対応は個別の操作として旧方式で起動する（#4604）
+      await requestReleaseStart(repoFullName, { bumpKind, allowFailedDeploy, allowLegacy: true });
       // 起動直後に状態を取り直して、実行中runやバンプPRの出現を素早く反映する。
       setReloadKey((k) => k + 1);
       return true;

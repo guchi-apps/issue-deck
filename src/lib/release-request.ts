@@ -11,6 +11,7 @@
 
 import type { ReleaseRebuildCandidate } from "@/lib/release-rebuild";
 import type { RebuildSelectionOptions } from "@/lib/release-rebuild-selection-run";
+import type { ReleaseStartMode } from "@/lib/release-start-mode";
 import type { BumpKind } from "@/lib/semver-bump";
 
 /** エラーコードを画面に出す文言へ直す。`useReleaseStatus`の取得側と同じ文面に揃えている */
@@ -101,6 +102,100 @@ export async function requestRelease(
   if (!res.ok) throw new Error(releaseErrorMessage(res.status, json.error, json.message));
 }
 
+/** 候補作成（`POST /api/repositories/release/rc` action=create）の失敗コードを画面の文言へ直す（#4604） */
+export function releaseCandidateErrorMessage(errorCode: string | undefined, message: string | undefined): string {
+  switch (errorCode) {
+    case "caller_unsupported":
+      return "このリポジトリのリリースworkflowは新方式（候補の作成）に未対応です。callerを更新してください。";
+    case "rc_active":
+      return "進行中のリリース候補があります。新しい候補は作らず、その候補の検証・修正・公開準備へ進んでください。";
+    case "legacy_open":
+      return "旧方式のリリース候補が開いています。旧方式のまま完了させるか、候補の画面で「新方式へ移行」を選んでください。";
+    case "nothing_to_release":
+      return message ?? "出す変更がありません。";
+    case "develop_not_synced":
+      return message ?? "前回の公開がdevelopへ反映されていません。同期のPRをマージしてから候補を作ってください。";
+    case "dispatch_failed":
+      return "候補の作成workflowを起動できませんでした。時間をおいて押し直してください。";
+    case "github_reauth_required":
+      return "GitHub連携が必要です。再ログインしてください。";
+    default:
+      return message ?? "リリース候補を作成できませんでした。";
+  }
+}
+
+/**
+ * 新方式の開始操作（#4604）。developの先端を固定した候補を作り、全体レビュー・統合検証へ進める。
+ * **正式バンプはここでは行わない**（合格後の公開準備で初めて行う）。
+ *
+ * `requestKey`は操作ごとに1つ作り、再送では同じ値を送る（サーバーが既存の候補を返し、二重候補を作らない）。
+ * 成功すると作られた（または既存の）候補のIDを返す
+ */
+export async function requestReleaseCandidate(
+  repoFullName: string,
+  requestKey: string = newRequestKey(),
+): Promise<{ candidateId: string; existing: boolean }> {
+  const [owner, repo] = repoFullName.split("/");
+  const res = await fetch("/api/repositories/release/rc", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ owner, repo, action: "create", requestKey }),
+  });
+  const json: { ok?: boolean; error?: string; message?: string; candidateId?: string; existing?: boolean } = await res
+    .json()
+    .catch(() => ({}));
+  if (!res.ok || json.ok === false || !json.candidateId) {
+    throw new Error(releaseCandidateErrorMessage(json.error, json.message));
+  }
+  return { candidateId: json.candidateId, existing: json.existing === true };
+}
+
+/** 要求キー（`/^[A-Za-z0-9_-]{8,48}$/`）。操作ごとに作り、再送では使い回す */
+export function newRequestKey(): string {
+  return `rc-${globalThis.crypto.randomUUID()}`;
+}
+
+export type ReleaseStartModes = Record<string, ReleaseStartMode>;
+
+/** `GET /api/repositories/release/start-mode`。取得できなければ全て`unknown`（旧方式を黙って起動しない） */
+export async function fetchReleaseStartModes(repoFullNames: string[]): Promise<ReleaseStartModes> {
+  const unknown: ReleaseStartMode = { mode: "unknown", label: "新方式に対応しているか取得できませんでした" };
+  const fallback = Object.fromEntries(repoFullNames.map((name) => [name, unknown]));
+  try {
+    const res = await fetch(`/api/repositories/release/start-mode?repos=${encodeURIComponent(repoFullNames.join(","))}`);
+    if (!res.ok) return fallback;
+    const json: { modes?: ReleaseStartModes } = await res.json();
+    return Object.fromEntries(repoFullNames.map((name) => [name, json.modes?.[name] ?? unknown]));
+  } catch {
+    return fallback;
+  }
+}
+
+export type ReleaseStartResult = { kind: "candidate"; candidateId: string; existing: boolean } | { kind: "legacy" };
+
+/**
+ * 通常の開始操作の入口（#4604）。個別・スマホ・一括がすべてここを通り、**判定を揃える**。
+ * 開始方式は起動の直前にサーバーから取り直す（画面の表示が古くても未対応repoへ誤って起動しない）。
+ *
+ * - 新方式対応: 候補を作る
+ * - 未対応: `allowLegacy`のときだけ旧方式で起動する（個別の操作。一括は常に拒否する）
+ * - 判定不能: 起動しない
+ */
+export async function requestReleaseStart(
+  repoFullName: string,
+  options: { bumpKind?: BumpKind; allowFailedDeploy?: boolean; allowLegacy: boolean; requestKey?: string },
+): Promise<ReleaseStartResult> {
+  const mode = (await fetchReleaseStartModes([repoFullName]))[repoFullName];
+  if (mode.mode === "candidate") {
+    return { kind: "candidate", ...(await requestReleaseCandidate(repoFullName, options.requestKey)) };
+  }
+  if (mode.mode === "legacy" && options.allowLegacy) {
+    await requestRelease(repoFullName, options.bumpKind, options.allowFailedDeploy ?? false);
+    return { kind: "legacy" };
+  }
+  throw new Error(mode.mode === "legacy" ? `${mode.label}（一括では旧方式を起動しません）` : mode.label);
+}
+
 export type ReleaseBulkResult = {
   /** 起動できたリポジトリのフル名 */
   succeeded: string[];
@@ -118,7 +213,8 @@ export type ReleaseBulkResult = {
  */
 export async function requestReleaseBulk(repoFullNames: string[]): Promise<ReleaseBulkResult> {
   const results = await Promise.allSettled(
-    repoFullNames.map((repoFullName) => requestRelease(repoFullName)),
+    // 一括では旧方式を黙って起動しない（#4604）。未対応・判定不能のrepoは理由つきで失敗に載せる
+    repoFullNames.map((repoFullName) => requestReleaseStart(repoFullName, { allowLegacy: false })),
   );
   const succeeded: string[] = [];
   const failed: { repoFullName: string; message: string }[] = [];
