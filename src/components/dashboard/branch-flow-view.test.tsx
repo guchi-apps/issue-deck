@@ -1039,10 +1039,11 @@ describe("BranchFlowView", () => {
       hasReleaseWorkflow: true,
     });
 
-    it("未リリースの変更があり、リリース用workflowを持つときだけ出す", () => {
+    it("未リリースの変更があり、リリース用workflowを持つときだけ出す", async () => {
+      mockFetchWithMode("legacy", new Response(JSON.stringify({ ok: true }), { status: 200 }));
       renderFlow({ branchStatuses: [unreleased] });
       openRepository();
-      expect(screen.getByText("リリースする")).toBeTruthy();
+      expect(await screen.findByText("リリースする")).toBeTruthy();
     });
 
     // #2711。押せない状態でもボタンは残し、理由を添える（消すと「次のリリース（本番未反映）」
@@ -1155,7 +1156,7 @@ describe("BranchFlowView", () => {
       renderFlow({ branchStatuses: [unreleased] });
 
       openRepository();
-      fireEvent.click(screen.getByText("リリースする"));
+      fireEvent.click(await screen.findByText("リリースする"));
 
       expect(screen.getByText("リリースworkflowを起動しますか？")).toBeTruthy();
       expect(await screen.findByText("#1460 本番へ出したい変更")).toBeTruthy();
@@ -1174,16 +1175,17 @@ describe("BranchFlowView", () => {
       renderFlow({ branchStatuses: [unreleased] });
 
       openRepository();
-      fireEvent.click(screen.getByText("リリースする"));
+      fireEvent.click(await screen.findByText("リリースする"));
 
       expect(await screen.findByText(/今回反映する内容を取得できませんでした/)).toBeTruthy();
       expect(screen.queryByText(/未反映のPRはありません/)).toBeNull();
     });
 
-    it("確認ダイアログで上げ幅を選べる（#1548）", () => {
+    it("確認ダイアログで上げ幅を選べる（#1548）", async () => {
+      mockFetchWithMode("legacy", new Response(JSON.stringify({ ok: true }), { status: 200 }));
       renderFlow({ branchStatuses: [unreleased] });
       openRepository();
-      fireEvent.click(screen.getByText("リリースする"));
+      fireEvent.click(await screen.findByText("リリースする"));
 
       // 既定は自動判定で、手動の選択肢は閉じている
       expect(screen.getByText("バージョンの上げ幅：自動判定")).toBeTruthy();
@@ -1205,7 +1207,7 @@ describe("BranchFlowView", () => {
 
       renderFlow({ branchStatuses: [unreleased] });
       openRepository();
-      fireEvent.click(screen.getByText("リリースする"));
+      fireEvent.click(await screen.findByText("リリースする"));
       fireEvent.click(screen.getByText("起動する"));
 
       await screen.findByText("リリース起動中…");
@@ -1219,7 +1221,7 @@ describe("BranchFlowView", () => {
 
       renderFlow({ branchStatuses: [unreleased] });
       openRepository();
-      fireEvent.click(screen.getByText("リリースする"));
+      fireEvent.click(await screen.findByText("リリースする"));
       fireEvent.click(screen.getByText("起動する"));
 
       // 確認ダイアログは閉じ、「リリースを起動しました」のダイアログは現れない
@@ -1233,12 +1235,13 @@ describe("BranchFlowView", () => {
         mockFetchWithMode("legacy", 
           new Response(JSON.stringify({ ok: true }), { status: 200 }),
         );
-        fireEvent.click(screen.getByText("リリースする"));
+        fireEvent.click(await screen.findByText("リリースする"));
         fireEvent.click(screen.getByText("起動する"));
         await screen.findByText("リリース起動中…");
       }
 
       it("起動すると、行を畳んでも「リリース起動中」が残る", async () => {
+        mockFetchWithMode("legacy", new Response(JSON.stringify({ ok: true }), { status: 200 }));
         renderFlow({ branchStatuses: [unreleased] });
         openRepository();
         await trigger();
@@ -1252,6 +1255,7 @@ describe("BranchFlowView", () => {
       });
 
       it("起動中は「未リリース ◯コミット」を出さない（リリース中と同じ扱い）", async () => {
+        mockFetchWithMode("legacy", new Response(JSON.stringify({ ok: true }), { status: 200 }));
         renderFlow({ branchStatuses: [unreleased] });
         openRepository();
         expect(screen.getAllByLabelText("未リリース 3コミット").length).toBeGreaterThan(0);
