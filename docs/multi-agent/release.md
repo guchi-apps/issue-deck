@@ -1118,3 +1118,12 @@ main起点の`deploy-recovery/*`ブランチへ取り込む。**`merges`APIは�
 ### 範囲外（別Issue）
 
 callerへの`finalize_request`の配線と実リポジトリでの通し確認（段階展開）、TestFlight配布結果の記録は含まない。
+
+## リリース画面の候補中心の並び（#4560）
+
+本番PR詳細（`release-pull-request-overview.tsx`）とスマホリリースシート（`mobile-release-sheet.tsx`）は、候補の識別（RC-n・revision・base/head）→ 状態と次の操作 → 候補共通検証 → 公開対象 → 履歴の順に並べる。
+
+- 候補共通検証の下に「検証の根拠」（`release-rc-evidence.tsx`）を置き、バンプ前（検証対象）とバンプ後（最終ビルド対象）のbase/headを分けて出す。引継ぎは元の結果と差分根拠を出し、バンプ後のSHAで実行したとは書かない
+- 候補の改訂履歴は新しい順
+- ブランチ一覧の束の見出しに「現在の本番版」「次のリリース候補」「旧方式で進行中」のバッジを出す（`branch-flow-view.tsx`）
+- 未対応: リリース履歴から候補への導線・旧リンク解決は別Issueで扱う

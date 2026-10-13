@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { isRcReleaseCandidateHeadRef, isReleaseCandidateHeadRef } from "@/lib/release-branch";
 import { useReleaseRc } from "@/hooks/use-release-rc";
+import { ReleaseRcVerificationEvidence } from "@/components/dashboard/release-rc-evidence";
 import { ReleaseRcFinalizePanel } from "@/components/dashboard/release-rc-finalize";
 import { ReleaseRcIdentity, ReleaseRcLegacyNotice, ReleaseRcRevisionHistory } from "@/components/dashboard/release-rc-identity";
 
@@ -228,13 +229,17 @@ export function ReleasePullRequestOverview({
           hideOverview
           previousResults={state.previousResults}
         />
+        {rcCandidate && (
+          <ReleaseRcVerificationEvidence candidate={rcCandidate} finalization={rc.overview?.finalization?.current ?? null} />
+        )}
       </section>
-
-      {rcCandidate && <ReleaseRcRevisionHistory candidate={rcCandidate} />}
 
       <section aria-label="今回リリースする変更" className="rounded-[10px] border bg-card p-3.5">
         <ReleaseContentsList state={state} />
       </section>
+
+      {/* 並びは 状態と次の操作 → 候補共通検証 → 公開対象 → 履歴（#4560） */}
+      {rcCandidate && <ReleaseRcRevisionHistory candidate={rcCandidate} />}
 
       {state.list && state.list.length > 0 && (
         <section aria-label="修正の履歴" className="overflow-hidden rounded-[10px] border bg-card">

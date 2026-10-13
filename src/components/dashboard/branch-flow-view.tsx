@@ -1322,6 +1322,23 @@ function ReleaseGroupHeader({
                   ? "リリース済み"
                   : "次のリリース"}
           </span>
+          {/* 候補中心の区別（#4560）: 現在の本番版・次のリリース候補・旧方式で進行中の候補 */}
+          {released && showIosDistribution && !mergedToMain && (
+            <span className="rounded-full bg-green-100 px-2 py-px text-[11px] font-semibold text-green-800 dark:bg-green-950 dark:text-green-300">
+              現在の本番版
+            </span>
+          )}
+          {!released && group.pullRequest && isReleaseCandidateHeadRef(group.pullRequest.headRef) && (
+            isLegacyReleaseCandidateHeadRef(group.pullRequest.headRef) ? (
+              <span className="rounded-full bg-violet-100 px-2 py-px text-[11px] font-semibold text-violet-800 dark:bg-violet-950 dark:text-violet-300">
+                旧方式で進行中
+              </span>
+            ) : (
+              <span className="rounded-full bg-blue-100 px-2 py-px text-[11px] font-semibold text-blue-800 dark:bg-blue-950 dark:text-blue-300">
+                次のリリース候補
+              </span>
+            )
+          )}
           {released ? (
             <>
               {!inProduction && (
