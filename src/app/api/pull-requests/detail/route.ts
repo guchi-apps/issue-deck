@@ -139,6 +139,7 @@ async function handleGET(request: NextRequest) {
           // 詳細は単体取得（`fetchPullRequest`）のレスポンスに`mergeable`を含むため、
           // 一覧のようにGraphQLで取り直す必要はない（#1742）。
           mergeable: pullRequest.mergeable,
+          mergeableState: pullRequest.mergeable_state,
           linkedIssueCheckUser: checkUserKey !== null && checkUserReasons.has(checkUserKey),
           linkedIssueCheckReason:
             checkUserKey === null ? null : (checkUserReasons.get(checkUserKey) ?? null),

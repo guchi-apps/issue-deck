@@ -162,6 +162,11 @@ export type PullRequestSummary = {
    */
   mergeable: boolean | null;
   /**
+   * GitHubの`mergeable_state`（`behind`＝マージ先の最新を取り込んでいない・`dirty`・`clean`等。#4626）。
+   * **詳細（`/api/pull-requests/detail`）だけが載せる**ので省略可能で、無ければ`behind`とは扱わない。
+   */
+  mergeableState?: string | null;
+  /**
    * 自動修復ワークフローが対象リポジトリに置かれているか（#1960）。修復ボタンを出す種類
    * （`repairKindsFor`の結果）ごとに持つ。
    *

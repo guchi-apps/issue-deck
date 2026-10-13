@@ -26,6 +26,8 @@ import { PullRequestAiReviewJobs } from "@/components/dashboard/pull-request-ai-
 import { PullRequestFileList } from "@/components/dashboard/pull-request-file-list";
 import { PullRequestReviewRound } from "@/components/dashboard/pull-request-review-round";
 import { PullRequestReadyButton } from "@/components/dashboard/pull-request-ready-button";
+import { PullRequestUpdateBranchButton } from "@/components/dashboard/pull-request-update-branch-button";
+import { PullRequestCiRerunButtons } from "@/components/dashboard/pull-request-ci-rerun-buttons";
 import { PullRequestMergeButton } from "@/components/dashboard/pull-request-merge-button";
 import { PullRequestMergeHoldNotice } from "@/components/dashboard/pull-request-merge-hold";
 import { PullRequestRepairButtons } from "@/components/dashboard/pull-request-repair-buttons";
@@ -316,6 +318,12 @@ export function PullRequestDetail({
   const activeTab: DetailTab = tabState?.pullRequestId === pullRequest.id ? tabState.tab : "overview";
   const selectTab = (tab: DetailTab) => setTabState({ pullRequestId: pullRequest.id, tab });
   const isDevelopOpen = pullRequest.baseRef === "develop" && pullRequest.state === "open" && !pullRequest.merged;
+  // 通常PR（リリースPR・バージョンバンプPRを除く）の開いたPRにだけ、最新baseの取り込みとCI再実行を出す（#4626）
+  const canUpdateBranch =
+    pullRequest.state === "open" &&
+    !pullRequest.merged &&
+    pullRequest.kind !== "release" &&
+    pullRequest.kind !== "version-bump";
   const findingsNeedAttention = primary.kind === "ci-failed" || primary.kind === "review-findings";
   // 上部の「指摘に対応する」。指摘タブを開いてレビュー本文も開き、対応パネルの位置まで移動する
   const openReviewResponse = () => {
@@ -428,6 +436,15 @@ export function PullRequestDetail({
                 )}
                 {pullRequest.draft && pullRequest.state === "open" && !pullRequest.merged && (
                   <PullRequestReadyButton
+                    pullRequest={pullRequest}
+                    onChanged={() => {
+                      onRefresh();
+                      onUpdated?.();
+                    }}
+                  />
+                )}
+                {canUpdateBranch && (
+                  <PullRequestUpdateBranchButton
                     pullRequest={pullRequest}
                     onChanged={() => {
                       onRefresh();
@@ -593,6 +610,16 @@ export function PullRequestDetail({
                 onClick={() => setReviewDetailPullRequestId(reviewDetailOpen ? null : pullRequest.id)}
               />
             </div>
+
+            {canUpdateBranch && !pullRequest.draft && (
+              <PullRequestCiRerunButtons
+                pullRequest={pullRequest}
+                onChanged={() => {
+                  onRefresh();
+                  onUpdated?.();
+                }}
+              />
+            )}
 
             {/* CIのジョブ単位の内訳（#2777）。押したときだけ取得する */}
             {ciDetailOpen && (

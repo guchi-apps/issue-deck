@@ -4660,6 +4660,7 @@ Webhookで取り込む。運用・移行・ロールバックは[backup-ci.md](b
 ### VPSメモリの自動計測（#4256）
 
 サブPCの`scripts/vps-memory-probe.mjs`（純粋な部分は`scripts/lib/vps-memory-probe-core.mjs`）がSSH経由でVPSの`/proc`を読み、`POST /api/integrations/vps-memory/samples`で`VpsMemorySample`へ保存する。AIDE向けの読み取りは`GET /api/integrations/vps-memory`。検証・区間分け・保存は`lib/vps-memory/`、認証は`lib/vps-memory/auth.ts`。設定・取得できる項目・保存期間は[vps-memory-probe.md](vps-memory-probe.md)。
+- **通常PRの詳細に「最新のbaseを取り込む」と「CIを再実行」がある（#4626）。** どちらもPC・スマホ共通の`PullRequestDetail`に置き、リリースPR・バージョンバンプPR・クローズ済みには出さない。`POST /api/pull-requests/update-branch`は操作の直前にPRを取り直し、`decideUpdateBranch`（[`lib/pull-request-update-branch.ts`](../src/lib/pull-request-update-branch.ts)）でopen・head SHA一致・フォーク・競合を確かめてから、`expected_head_sha`付きで`PUT /pulls/{n}/update-branch`（headへbaseをマージ。force pushなし）を呼ぶ。取り込みで生まれた新しいheadへ`synchronize`でCI・レビューが起動するので、自動マージ判定は既存のまま。`mergeable_state`の`behind`は詳細だけが`mergeableState`として載せ、待機理由を出す。`POST /api/pull-requests/ci-rerun`は`decideCiRerun`（[`lib/pull-request-ci-rerun.ts`](../src/lib/pull-request-ci-rerun.ts)）で、**現在のheadの`pull_request`イベントのCI runだけ**（AIレビュー・デプロイ・リリース系のworkflowと古いSHAのrunは除く）を、失敗分（`rerun-failed-jobs`）か全体（`rerun`）で再実行する。実行中・実行記録なし・head変更は409。headに実行記録が無いときの強制起動は行わず、取り込みで新headを作る案内を出す。`GET`は画面に対象workflow・状態・SHAを見せる。
 
 ## 全体レビュー・修正の外部エージェント向けAPI／MCP（#4588）
 
