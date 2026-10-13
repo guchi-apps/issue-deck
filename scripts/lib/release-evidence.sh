@@ -17,16 +17,30 @@ evidence_file() {
   printf '%s/%s-%s-%s-%s.json' "$root" "${full_name//\//_}" "$pr" "${base:0:12}" "${head:0:12}"
 }
 
-# evidence_redact: 標準入力の機密（トークン・接続文字列・認証情報・環境変数の値）を伏せて標準出力へ。
-# 失敗ログを証跡へ保存する前・AIのプロンプトへ渡す前に必ず通す（#4629）
+# evidence_redact: 標準入力の機密を伏せて標準出力へ。失敗ログを証跡へ保存する前・AIのプロンプトへ渡す前に必ず通す（#4629）
+#
+# 既知の形式の列挙だけに頼らず、**構造**で伏せる:
+#   - 名前に機密語（token・secret・password・key・auth・cred・cookie…）を含む「名前: 値」「名前=値」
+#     （ヘッダー・環境変数・JSON・YAML・URLクエリ・引用符つき・ハイフンつきの名前、空白を含む値を含む）
+#   - `X-*`ヘッダー（未知のベンダーの独自ヘッダーも）／`--password x`のようなCLI引数／12文字以上の値を持つ大文字の環境変数代入
+#   - 秘密鍵ブロック・Bearer/Basic・URLの認証部・DB接続文字列・既知のトークン接頭辞・`op://`参照
+# 伏せすぎる側に倒す（テスト出力の`key: …`なども伏せ得る）。冪等で、二重に通しても壊れない。
+# 配布条件のマーカー: evidence_redact_v2（サブPCのpollerはこの関数があるチェックアウトだけ統合検証・全体レビューを受ける）
 evidence_redact() {
+  local s='token|secret|passwor?d|pwd|key|auth|cred|cookie|signature|dsn|bearer|database[-_]?url|connection[-_]?string'
   sed -E \
+    -e '/-----BEGIN [A-Z ]*PRIVATE KEY-----/,/-----END [A-Z ]*PRIVATE KEY-----/c\[秘密鍵を除去]' \
+    -e 's#^[A-Za-z0-9+/=]{40,}$#[鍵本文を除去]#' \
     -e 's/(Bearer|Basic)[[:space:]]+[A-Za-z0-9._~+\/=-]{8,}/\1 [除去]/Ig' \
     -e 's#op://[^[:space:]]+#op://[除去]#g' \
     -e 's#([A-Za-z][A-Za-z0-9+.-]*://)[^[:space:]/@:]+(:[^[:space:]/@]*)?@#\1[除去]@#Ig' \
     -e 's#((postgres(ql)?|mysql|mongodb(\+srv)?|redis|amqp)://)[^[:space:]]+#\1[除去]#Ig' \
-    -e 's/(gh[pousr]_|github_pat_|sk-ant-|sk-|xox[abprs]-|AKIA|AIza|eyJ)[A-Za-z0-9_.-]{8,}/[トークンを除去]/g' \
-    -e 's/([A-Za-z0-9_]*(TOKEN|SECRET|PASSWORD|PASSWD|API_?KEY|AUTHORIZATION|CREDENTIAL|DATABASE_URL|PRIVATE_KEY)[A-Za-z0-9_]*)[[:space:]]*[=:][[:space:]]*[^[:space:]]+/\1=[除去]/Ig'
+    -e 's/(^|[^A-Za-z0-9])(gh[pousr]_|github_pat_|sk-ant-|sk-|sk_live_|sk_test_|npm_|xox[abprs]-|AKIA|AIza|eyJ)[A-Za-z0-9_.-]{8,}/\1[トークンを除去]/g' \
+    -e "s/([\"']?)([A-Za-z0-9_-]*($s)[A-Za-z0-9_-]*)([\"']?)([[:space:]]*[:=][[:space:]]*)(\"[^\"]*\"|'[^']*')/\1\2\4\5\"[除去]\"/Ig" \
+    -e "s/([\"']?)([A-Za-z0-9_-]*($s)[A-Za-z0-9_-]*)([\"']?)([[:space:]]*[:=][[:space:]]*)[^\"'[:space:]][^&,;}]*/\1\2\4\5[除去]/Ig" \
+    -e "s/(^|[[:space:]\"'])(x-[A-Za-z0-9-]+)([[:space:]]*:[[:space:]]*)[^\"'[:space:]][^,;}]*/\1\2\3[除去]/Ig" \
+    -e "s/(--?[A-Za-z0-9_-]*($s)[A-Za-z0-9_-]*)[[:space:]]+[^[:space:]=:[-][^[:space:]]*/\1 [除去]/Ig" \
+    -e 's/([A-Z][A-Z0-9_]{2,}=)[^[:space:]]{12,}/\1[除去]/g'
 }
 
 # evidence_classify_step <コマンド> <終了コード>: 失敗の種別を標準出力へ
