@@ -8,7 +8,7 @@ import { getInstallationToken } from "@/lib/github/app-auth";
 import { GithubApiError } from "@/lib/github/issues-api";
 import { fetchPullRequest } from "@/lib/github/pull-requests-api";
 import { previewModeGuard } from "@/lib/preview-mode";
-import { decideUpdateBranch } from "@/lib/pull-request-update-branch";
+import { classifyUpdateBranch422, decideUpdateBranch } from "@/lib/pull-request-update-branch";
 
 async function findRepository(userId: string, owner: string, repo: string) {
   return db.repository.findFirst({
@@ -89,11 +89,10 @@ async function handlePOST(request: NextRequest) {
       if (error.status === 404) return NextResponse.json({ error: "not_found" }, { status: 404 });
       if (error.status === 403) return NextResponse.json({ error: "permission_denied" }, { status: 403 });
       if (error.status === 422) {
-        // baseに新しいコミットが無い・競合・期待SHAの不一致のいずれか。文面で見分ける
-        const text = error.message.toLowerCase();
-        if (text.includes("merge conflict")) return NextResponse.json({ error: "conflict" }, { status: 409 });
-        if (text.includes("expected head")) return NextResponse.json({ error: "head_changed" }, { status: 409 });
-        return NextResponse.json({ error: "already_up_to_date" }, { status: 409 });
+        const code = classifyUpdateBranch422(error.message);
+        if (code) return NextResponse.json({ error: code }, { status: 409 });
+        // 分類できない422（ブランチ保護など）は「取り込み済み」にせず、失敗として応答の内容を返す
+        return NextResponse.json({ error: "github_api_error", message: error.message }, { status: 502 });
       }
     }
     console.error(`[POST /api/pull-requests/update-branch] ${owner}/${repo}#${number}:`, error);

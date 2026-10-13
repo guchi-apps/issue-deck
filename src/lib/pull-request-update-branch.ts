@@ -75,3 +75,18 @@ export function updateBranchErrorMessage(code: string | undefined, baseRef?: str
       return `最新の${base}の取り込みに失敗しました。少し待ってからもう一度押してください。`;
   }
 }
+
+/**
+ * update-branchが返す422の理由を、応答メッセージから見分ける。
+ * 取り込み済みと分かるものだけ`already_up_to_date`にし、**それ以外の422（ブランチ保護など）は
+ * `null`＝分類できない**として返す（呼び出し側が`github_api_error`にする）。
+ */
+export function classifyUpdateBranch422(message: string): "conflict" | "head_changed" | "already_up_to_date" | null {
+  const text = message.toLowerCase();
+  if (text.includes("merge conflict")) return "conflict";
+  if (text.includes("head branch was modified") || text.includes("expected head")) return "head_changed";
+  if (text.includes("no new commits") || text.includes("up to date") || text.includes("up-to-date")) {
+    return "already_up_to_date";
+  }
+  return null;
+}

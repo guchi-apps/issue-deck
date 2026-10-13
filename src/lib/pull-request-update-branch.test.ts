@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { decideUpdateBranch, updateBranchErrorMessage } from "@/lib/pull-request-update-branch";
+import { classifyUpdateBranch422, decideUpdateBranch, updateBranchErrorMessage } from "@/lib/pull-request-update-branch";
 
 const base = {
   state: "open",
@@ -33,5 +33,16 @@ describe("decideUpdateBranch", () => {
   });
   it("実際のbase名を文言に使う", () => {
     expect(updateBranchErrorMessage("conflict", "develop")).toContain("develop");
+  });
+});
+
+describe("classifyUpdateBranch422", () => {
+  it("競合・SHA不一致・取り込み済みを見分ける", () => {
+    expect(classifyUpdateBranch422("merge conflict between base and head")).toBe("conflict");
+    expect(classifyUpdateBranch422("Head branch was modified. Review and try the merge again.")).toBe("head_changed");
+    expect(classifyUpdateBranch422("There are no new commits on the base branch.")).toBe("already_up_to_date");
+  });
+  it("それ以外の422は分類しない（取り込み済みと誤表示しない）", () => {
+    expect(classifyUpdateBranch422("Protected branch update failed")).toBeNull();
   });
 });

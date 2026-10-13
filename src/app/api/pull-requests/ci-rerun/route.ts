@@ -109,10 +109,30 @@ async function handlePOST(request: NextRequest) {
     if (decision.action === "reject") {
       return NextResponse.json({ error: decision.code }, { status: 409 });
     }
+    // 1件ずつ結果を集める。途中で失敗しても、再実行済みのrunを「全部失敗」と見せない
+    const failedRuns: { id: number; name: string | null; status: number | null }[] = [];
+    let permissionDenied = false;
     for (const runId of decision.runIds) {
-      await rerunWorkflowRun(owner, repo, runId, decision.scope === "failed", token);
+      try {
+        await rerunWorkflowRun(owner, repo, runId, decision.scope === "failed", token);
+      } catch (error) {
+        const status = error instanceof GithubApiError ? error.status : null;
+        if (status === 403 && failedRuns.length === 0 && decision.runIds.indexOf(runId) === 0) {
+          // 権限不足は全件共通なので即エラー
+          permissionDenied = true;
+          break;
+        }
+        console.error(`[POST /api/pull-requests/ci-rerun] ${owner}/${repo}#${number} run ${runId}:`, error);
+        failedRuns.push({ id: runId, name: runs.find((r) => r.id === runId)?.name ?? null, status });
+      }
     }
-    return NextResponse.json({ ok: true, scope: decision.scope, rerunCount: decision.runIds.length });
+    if (permissionDenied) return NextResponse.json({ error: "permission_denied" }, { status: 403 });
+    const rerunCount = decision.runIds.length - failedRuns.length;
+    if (rerunCount === 0) {
+      return NextResponse.json({ error: "github_api_error", failedRuns }, { status: 502 });
+    }
+    // 一部だけ成功したときは`ok`のまま失敗したrunを添えて返し、画面が部分成功を伝える
+    return NextResponse.json({ ok: true, scope: decision.scope, rerunCount, failedRuns });
   } catch (error) {
     if (error instanceof GithubApiError && error.status === 404) {
       return NextResponse.json({ error: "not_found" }, { status: 404 });

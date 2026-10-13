@@ -64,6 +64,12 @@ export function PullRequestCiRerunButtons({
         setError(ciRerunErrorMessage(payload.error));
         return;
       }
+      const result: { failedRuns?: { name: string | null; id: number }[] } = await response.json().catch(() => ({}));
+      if (result.failedRuns && result.failedRuns.length > 0) {
+        setError(
+          `一部のCIは再実行できませんでした（${result.failedRuns.map((r) => r.name ?? `run ${r.id}`).join("、")}）。残りは再実行を依頼済みです。`,
+        );
+      }
       setRequested(true);
       void load();
       onChanged();
