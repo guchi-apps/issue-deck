@@ -672,6 +672,19 @@ export async function fetchLatestReleaseWorkflowRun(
 }
 
 /**
+ * リリースworkflowが今まさに動いている（受付済み・キュー待ち・実行中）かを、GitHubの実状態で返す（#4599）。
+ * 開始操作の二重起動を、画面ではなくAPIの手前で止めるための材料。**時刻からは推定しない。**
+ * 取得できないときは例外を投げる（呼び出し側が「状態不明」として扱う）。
+ */
+export async function fetchReleaseWorkflowActive(owner: string, repo: string, token: string): Promise<boolean> {
+  for (const status of ["queued", "in_progress"]) {
+    const run = await fetchLatestWorkflowRun(owner, repo, RELEASE_WORKFLOW_FILE, token, `status=${status}`);
+    if (run !== null) return true;
+  }
+  return false;
+}
+
+/**
  * mainブランチ上の`deploy.yml`（本番デプロイ）の最新の実行（run）を1件取得する。無ければnull。
  * mainへのマージ後にこのrunを追うことで、デプロイまで成功したかを見届けられるようにする(#392)。
  */

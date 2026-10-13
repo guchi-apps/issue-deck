@@ -10,8 +10,8 @@ import type { ReleaseBlockedReason } from "@/types/branch-flow";
  * - `failed`: 未解決のリリース準備失敗がある（`ReleasePreparationFailure`）
  * - `running`: 修正を取り込んだリリースの準備が進行中（`ReleaseFixSeries`が下の状態）
  * - `unknown`: 記録をまだ取得できていない（初回・リポジトリ切替・取得失敗。#4556）。**idleと同一視せず起動を塞ぐ**
- * - `idle`: 記録が無い。**本番マージ直後〜CI開始前の純粋な待機は記録が無いため、ここへ入る**
- *   （推測で「実行中」とは出さない）
+ * - `idle`: 記録が無い。**時刻からは「待機中」「実行中」を推定しない**（#4599。新しい準備は手動開始だけで、
+ *   本番マージ直後でも開始できる）
  */
 export type ReleasePrepState = "idle" | "running" | "failed" | "unknown";
 
@@ -28,26 +28,6 @@ export function resolveReleasePrepState(input: {
     (RELEASE_PREP_RUNNING_SERIES_STATUSES as readonly string[]).includes(status),
   );
   return running ? "running" : "idle";
-}
-
-/**
- * 本番(main)へのリリースPRをマージしてから、自動処理（CI→バンプPR作成）が動き出すまでの待機時間の上限（#4526）。
- * バンプPRはscheduleで作られ（最大15分粒度）、その間はPRもDBの記録も無い。記録が無いので
- * 「直近のリリースのマージ時刻＋未リリースの変更あり」から推定し、余裕を見て20分で打ち切る。
- */
-export const RELEASE_AUTOMATION_WAIT_MS = 20 * 60 * 1000;
-
-/** 直近のmainマージ直後で、バンプPRがまだ出ていない待機か（#4526）。PRが開いている間は別の理由が先に決まる */
-export function isAwaitingReleaseAutomation(input: {
-  latestReleaseMergedAt: string | null;
-  now: number;
-  unreleasedCommitCount: number;
-}): boolean {
-  if (input.latestReleaseMergedAt === null || input.unreleasedCommitCount <= 0) return false;
-  const mergedAt = Date.parse(input.latestReleaseMergedAt);
-  if (Number.isNaN(mergedAt)) return false;
-  const elapsed = input.now - mergedAt;
-  return elapsed >= 0 && elapsed < RELEASE_AUTOMATION_WAIT_MS;
 }
 
 /**

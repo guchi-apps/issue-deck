@@ -5,6 +5,7 @@ const findFirst = vi.fn();
 const getInstallationToken = vi.fn();
 const dispatchReleaseWorkflow = vi.fn();
 const fetchLatestDeployWorkflowRun = vi.fn();
+const fetchReleaseWorkflowActive = vi.fn();
 const releaseWorkflowExists = vi.fn();
 
 vi.mock("@/lib/auth-user", () => ({
@@ -39,6 +40,9 @@ vi.mock("@/lib/github/release-api", async (importOriginal) => {
     get fetchLatestDeployWorkflowRun() {
       return fetchLatestDeployWorkflowRun;
     },
+    get fetchReleaseWorkflowActive() {
+      return fetchReleaseWorkflowActive;
+    },
   };
 });
 
@@ -66,6 +70,7 @@ describe("POST /api/repositories/release", () => {
     dispatchReleaseWorkflow.mockReset().mockResolvedValue(undefined);
     fetchLatestDeployWorkflowRun.mockReset().mockResolvedValue(null);
     releaseWorkflowExists.mockReset().mockResolvedValue(true);
+    fetchReleaseWorkflowActive.mockReset().mockResolvedValue(false);
   });
 
   it("リリース用workflowがあれば起動する", async () => {
@@ -112,6 +117,26 @@ describe("POST /api/repositories/release", () => {
 
     expect(res.status).toBe(200);
     expect(dispatchReleaseWorkflow).toHaveBeenCalledWith("guchi-apps", "issue-deck", "token", undefined, true);
+  });
+
+  it("リリースworkflowが受付済み・実行中なら二重に起動せず409を返す（#4599）", async () => {
+    fetchReleaseWorkflowActive.mockResolvedValue(true);
+
+    const res = await POST(request({ owner: "guchi-apps", repo: "issue-deck" }));
+
+    expect(res.status).toBe(409);
+    await expect(res.json()).resolves.toEqual({ error: "release_already_running" });
+    expect(dispatchReleaseWorkflow).not.toHaveBeenCalled();
+  });
+
+  it("実行状況を取得できないときは起動せず、状態不明として503を返す（#4599）", async () => {
+    fetchReleaseWorkflowActive.mockRejectedValue(new Error("boom"));
+
+    const res = await POST(request({ owner: "guchi-apps", repo: "issue-deck" }));
+
+    expect(res.status).toBe(503);
+    await expect(res.json()).resolves.toEqual({ error: "release_state_unknown" });
+    expect(dispatchReleaseWorkflow).not.toHaveBeenCalled();
   });
 
   it("上書きはbooleanだけを受け付ける", async () => {

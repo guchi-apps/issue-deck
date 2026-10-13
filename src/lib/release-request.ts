@@ -30,6 +30,12 @@ export function releaseErrorMessage(
   if (errorCode === "deploy_failed") {
     return "本番デプロイが失敗しています。修正をdevelopへ取り込んだ場合は、確認画面で上書きを指定して起動してください。";
   }
+  if (errorCode === "release_already_running") {
+    return "リリース準備がすでに受け付けられているか、実行中です。完了するまでお待ちください（GitHub Actionsの実行状況で確認できます）。";
+  }
+  if (errorCode === "release_state_unknown") {
+    return "リリース準備の実行状況をGitHubから確認できませんでした。少し待って、もう一度押してください。";
+  }
   if (errorCode === "failed_deploy_override_unsupported") {
     return "このリポジトリのリリースworkflowは失敗中の手動上書きに未対応です。workflowを更新してください。";
   }

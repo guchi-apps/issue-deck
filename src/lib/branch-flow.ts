@@ -35,7 +35,6 @@ import type {
   RepositoryDeployStatus,
 } from "@/types/branch-flow";
 import type { PullRequestSummary } from "@/types/pull-request";
-import { isAwaitingReleaseAutomation } from "@/lib/release-prep-state";
 
 /** issue-deckのブランチ運用モデルの幹（docs/multi-agent/branching.md） */
 export const MAIN_BRANCH = "main";
@@ -452,31 +451,17 @@ export function resolveReleaseBlockedReason({
   releasePullRequest,
   bumpPullRequest,
   deployState,
-  latestReleaseMergedAt = null,
-  now = Date.now(),
 }: {
   branchStatus: RepositoryBranchStatus | null;
   releasePullRequest: PullRequestSummary | null;
   bumpPullRequest: PullRequestSummary | null;
   deployState: BranchFlowDeployState | null;
-  /** 直近のリリースPRがmainへ入った日時（#4526。本番マージ直後の自動処理待ちの推定に使う） */
-  latestReleaseMergedAt?: string | null;
-  now?: number;
 }): ReleaseBlockedReason | null {
   if (branchStatus === null) return "branches-unloaded";
   if (!branchStatus.hasReleaseWorkflow) return "no-workflow";
   if (releasePullRequest !== null || bumpPullRequest !== null) return "release-in-progress";
   if (unreleasedCommitCount(branchStatus.developVsMain) === 0) return "nothing-to-release";
   if (deployState?.kind === "failure") return "deploy-failed";
-  if (
-    isAwaitingReleaseAutomation({
-      latestReleaseMergedAt,
-      now,
-      unreleasedCommitCount: unreleasedCommitCount(branchStatus.developVsMain),
-    })
-  ) {
-    return "awaiting-automation";
-  }
   return null;
 }
 
@@ -661,13 +646,7 @@ function buildRepository({
       releasePullRequest === null &&
       bumpPullRequest === null &&
       deployState?.kind !== "failure" &&
-      unreleasedCommitCount(branchStatus?.developVsMain) > 0 &&
-      // 本番マージ直後の自動処理待ち（#4526）は、押すと自動のバンプと二重に走る
-      !isAwaitingReleaseAutomation({
-        latestReleaseMergedAt: releases.at(-1)?.pullRequest.mergedAt ?? null,
-        now,
-        unreleasedCommitCount: unreleasedCommitCount(branchStatus?.developVsMain),
-      }),
+      unreleasedCommitCount(branchStatus?.developVsMain) > 0,
     // 押せないときも「なぜ押せないか」を画面へ渡す（#2711）。ボタンごと消すと、
     // 「次のリリース（本番未反映）」の束から本番へ出す手段が画面のどこにも無くなる。
     releaseBlockedReason: resolveReleaseBlockedReason({
@@ -675,8 +654,6 @@ function buildRepository({
       releasePullRequest,
       bumpPullRequest,
       deployState,
-      latestReleaseMergedAt: releases.at(-1)?.pullRequest.mergedAt ?? null,
-      now,
     }),
     // 「本番へ再デプロイ」（#2020）。**リリースの可否とは条件が別物**——`main`をそのまま
     // 出し直すだけなので、未リリースの変更があってもなくても押してよい。
