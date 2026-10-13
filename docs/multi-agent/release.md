@@ -1090,7 +1090,7 @@ main起点の`deploy-recovery/*`ブランチへ取り込む。**`merges`APIは�
 | repo | 参照タグ | 版ファイル・bump | caller | 反映 | 通し確認 |
 | --- | --- | --- | --- | --- | --- |
 | issue-deck | ローカル | `package.json` | 配線済み（#4567） | 済 | 未（人が実施） |
-| kurashio | v51 | `frontend/package.json`・iOS差異あり | 未対応 | 未 | 未（代表ケース。別Issueで追跡） |
+| kurashio | v51 | `frontend/package.json`・iOS差異あり | 未対応 | 未（guchi-apps/kurashio#792） | 未（代表ケース） |
 | yoteiflow・asset-manager・portfolio・solitaire・car-care | v51 | 既定（`package.json`） | 未対応 | 未 | 未 |
 | stockly・work-relay・status-hub・morrow・db-console | v51 | 既定（`package.json`） | 未対応 | 未 | 未 |
 | meisai-lab・clip-hive | v51 | `--ignore-scripts`付きの個別bump | 未対応 | 未 | 未 |
