@@ -305,11 +305,15 @@ async function handlePOST(request: NextRequest) {
 
     // 同時に届いた要求が、GitHub上の実行中runを観測する前に両方dispatchへ進まないよう、リポジトリ単位の
     // 開始要求を永続的に確保する（#4599）。確保できなければ、他の要求が開始処理中として409を返す
-    if (!(await acquireReleaseStartLock(`${owner}/${repo}`))) {
+    // 対象はこの手動起動の経路。復旧（preparation）・作り直し（rebuild）は別の前提（PRのclose・ブランチ削除と一組、
+    // 独自の`activeKey`）を持つため、このロックには含めない
+    const lockedAt = await acquireReleaseStartLock(`${owner}/${repo}`);
+    if (!lockedAt) {
       return NextResponse.json({ error: "release_already_running" }, { status: 409 });
     }
     // dispatchまで進んだ要求の確保は、期限（短時間）まで保持して、dispatchからrunが見えるまでの空白を覆う。
-    // 開始しなかった要求（実行中の検出・取得不能・dispatch失敗）は手放す
+    // 開始しなかった要求（実行中の検出・取得不能・dispatch失敗）は手放す。dispatchの失敗は、受理の有無を
+    // 確かめられない場合も含めて手放す（押し直せなくなるより、GitHub側のconcurrencyが直列化する側を選ぶ）
     let dispatched = false;
     try {
       // 実際にリリースworkflowが受付済み・実行中なら、重ねて起動しない（#4599）。画面の連打・複数画面・
@@ -334,7 +338,7 @@ async function handlePOST(request: NextRequest) {
       );
       dispatched = true;
     } finally {
-      if (!dispatched) await releaseReleaseStartLock(`${owner}/${repo}`);
+      if (!dispatched) await releaseReleaseStartLock(`${owner}/${repo}`, lockedAt);
     }
     return NextResponse.json({ ok: true });
   } catch (error) {
