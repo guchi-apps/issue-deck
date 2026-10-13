@@ -59,7 +59,7 @@ describe("evaluateConditions と decideDependencyWait", () => {
     const results = evaluateConditions(
       ["merged", "released"],
       pr,
-      observed({ state: "closed", merged: true, baseRef: "develop", inProduction: false }),
+      observed({ state: "closed", merged: true, baseRef: "develop", inProduction: false, integrationBranch: "develop" }),
     );
     expect(results.map((r) => r.satisfied)).toEqual([true, false]);
     expect(decideDependencyWait(results)).toBe("wait");
@@ -187,5 +187,12 @@ describe("Issue依存の実装PR解決（#4570）", () => {
   it("PR参照のmergedも統合ブランチ以外へのマージは成立しない", () => {
     const r = evaluateConditions(["merged"], pr, observed({ merged: true, baseRef: "main", integrationBranch: "develop" }));
     expect(r[0].satisfied).toBe(false);
+  });
+  it("統合ブランチを確認できない観測では、mergedを成立にせず人の確認へ回す（Issue・PRとも）", () => {
+    const list = prs([{ number: 1, merged: true, baseRef: "main" }]);
+    expect(sat({ implementationPrs: list, integrationBranch: null })).toBeNull();
+    expect(sat({ implementationPrs: list, integrationBranch: undefined })).toBeNull();
+    const r = evaluateConditions(["merged"], pr, observed({ merged: true, baseRef: "main", integrationBranch: null }));
+    expect(r[0].satisfied).toBeNull();
   });
 });
