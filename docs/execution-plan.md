@@ -12,6 +12,7 @@
 ## 完了の語彙（二重定義しない）
 
 条件は#4321の`closed` / `merged` / `released` / `verified`（[dependency-wait.md](multi-agent/dependency-wait.md)）をそのまま使う。
+**通常の実装依存の既定は`merged`（依存先の実装PRが統合ブランチ`develop`へマージ済み）。** Issueのクローズ（本番反映まで待つ運用）を暗黙の条件にしない。`released`・`verified`は本番機能・実環境確認が要る依存だけ明示し、省略は従来どおり拒否する（#4570）。
 Issueのクローズ・PR作成・developへのマージ・本番反映・検証成功は別の条件で、前者が成立しても後者は満たさない。
 **子Issueは`merged`/`released`を直接判定できない**ため、実行側は`issue-<番号>`ブランチをheadとするPRへ解決してから評価する
 （`src/lib/execution-plan/register.ts`の`defaultVerifyDeps.branchPrs`）。PRが0件（着手前）は成立とせず、複数は登録時に拒否、

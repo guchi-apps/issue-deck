@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { PlanSnapshot } from "@/lib/execution-plan/types";
 import {
+  evaluateDependency,
   evaluateRun,
   type ChildInput,
   type PrResolution,
@@ -170,5 +171,23 @@ describe("evaluateRun", () => {
     const r = run({ 1: { issue: "missing" } });
     expect(phase(r, 1)).toBe("attention");
     expect(phase(r, 2)).toBe("blocked");
+  });
+});
+
+describe("mergedは統合ブランチへのマージだけで成立する（#4570）", () => {
+  const dep = { repository: "o/r", number: 1, conditions: ["merged" as const] };
+  const obs = (integration?: boolean) =>
+    ({
+      issue: "open",
+      pr: { kind: "one", number: 5, merged: true, inProduction: false, integration },
+      needsUser: false,
+      jobStatus: null,
+      sessionAlive: false,
+    }) as never;
+  it("developへのマージ済みなら成立（Issueはopenのまま）", () => {
+    expect(evaluateDependency(dep, obs(true), null)[0].satisfied).toBe(true);
+  });
+  it("mainなど別ブランチへのマージは成立しない", () => {
+    expect(evaluateDependency(dep, obs(false), null)[0].satisfied).toBe(false);
   });
 });

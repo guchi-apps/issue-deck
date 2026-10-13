@@ -182,7 +182,7 @@ export async function startParentRun(params: StartParentRunParams, deps: Deps = 
 
 export type Deps = {
   verify: VerifyDeps;
-  observePr: (ref: PlanIssueRef & { number: number }) => Promise<{ merged: boolean; inProduction: boolean | null }>;
+  observePr: (ref: PlanIssueRef & { number: number }) => Promise<{ merged: boolean; inProduction: boolean | null; integration?: boolean }>;
   enqueue: typeof enqueueDispatchJob;
   now: () => Date;
 };
@@ -191,7 +191,9 @@ export const defaultDeps: Deps = {
   verify: defaultVerifyDeps,
   observePr: async (ref) => {
     const o = await observeDependency({ repository: ref.repository, number: ref.number, kind: "pr" });
-    return { merged: o.merged === true, inProduction: o.inProduction };
+    // developへのマージとmainへのマージを取り違えない（#4570）。統合ブランチが不明なら検査しない
+    const integration = o.integrationBranch ? o.baseRef === o.integrationBranch : undefined;
+    return { merged: o.merged === true, inProduction: o.inProduction, integration };
   },
   enqueue: enqueueDispatchJob,
   now: () => new Date(),
@@ -217,7 +219,7 @@ export async function observeRef(ref: PlanIssueRef, child: ParentRunChild | unde
     const resolved = await deps.verify.branchPrs(ref, token);
     if (resolved.kind === "one") {
       const obs = await deps.observePr({ repository: ref.repository, number: resolved.number });
-      base.pr = { kind: "one", number: resolved.number, merged: obs.merged, inProduction: obs.inProduction };
+      base.pr = { kind: "one", number: resolved.number, merged: obs.merged, inProduction: obs.inProduction, integration: obs.integration };
     } else {
       base.pr = resolved;
     }

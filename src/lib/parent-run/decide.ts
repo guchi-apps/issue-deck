@@ -31,7 +31,7 @@ export function parseChildLaunchState(value: unknown): ChildLaunchState {
 /** 子の実装PR（`issue-<番号>`ブランチ）の解決結果。`error`は取得失敗で、成立とは解釈しない */
 export type PrResolution =
   | { kind: "none" }
-  | { kind: "one"; number: number; merged: boolean; inProduction: boolean | null }
+  | { kind: "one"; number: number; merged: boolean; inProduction: boolean | null; integration?: boolean }
   | { kind: "many"; numbers: number[] }
   | { kind: "error"; message: string };
 
@@ -117,7 +117,12 @@ export function evaluateDependency(
             : { condition, satisfied: false, detail: "実装PRがまだありません" };
         }
         if (!pr.merged) return { condition, satisfied: false, detail: `PR #${pr.number}がまだマージされていません` };
-        if (condition === "merged") return { condition, satisfied: true, detail: `PR #${pr.number}がマージ済み` };
+        if (condition === "merged") {
+          // mainなど統合ブランチ以外へのマージは、developへのマージとはみなさない（#4570）
+          return pr.integration === false
+            ? { condition, satisfied: false, detail: `PR #${pr.number}は統合ブランチ（develop）以外へのマージです` }
+            : { condition, satisfied: true, detail: `PR #${pr.number}がdevelopへマージ済み` };
+        }
         if (pr.inProduction === null) return { condition, satisfied: null, detail: "mainへの反映を確認できませんでした" };
         return pr.inProduction
           ? { condition, satisfied: true, detail: `PR #${pr.number}がmainへ反映済み` }

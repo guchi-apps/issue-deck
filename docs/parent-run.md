@@ -23,7 +23,7 @@
 | 条件 | 成立の証拠 |
 | --- | --- |
 | `closed` | 依存先Issueがクローズ |
-| `merged`／`released` | `issue-<番号>`ブランチのPR（`branchPrs`）を解決し、`observeDependency`でマージ／main反映を確認。PRなし＝未着手、複数・取得失敗は成立とせず待機理由に残す |
+| `merged`／`released` | `issue-<番号>`ブランチのPR（`branchPrs`）を解決し、`observeDependency`でマージ／main反映を確認。PRなし＝未着手、複数・取得失敗は成立とせず待機理由に残す。`merged`は**PRのbaseが統合ブランチ（develop）のときだけ**成立し、mainなど別ブランチへのマージは成立としない（#4570） |
 | `verified` | 子ごとの本番確認の記録（`ParentRunChild.verifiedAt`。画面の「本番確認を記録」）。自動では成立しない |
 
 - 子の状態: 完了／実行中（起動の受付中・起動待ち・実行中・マージ待ち）／待機（前提・実行先）／停止（前提の問題）／要対応（起動失敗・本人操作待ち・人の確認待ち・取得失敗・Issueが見つからない）

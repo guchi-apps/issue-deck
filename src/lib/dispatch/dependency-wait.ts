@@ -101,6 +101,20 @@ export function parseDependencyWaitInput(payload: unknown): {
   return { dependency, conditions, reason: reason.slice(0, REASON_MAX_LENGTH) };
 }
 
+/** 通常の実装依存の既定条件（#4570）。依存先の実装PRが統合ブランチ（develop）へマージ済み */
+export const DEFAULT_IMPLEMENTATION_CONDITIONS: readonly DependencyWaitCondition[] = ["merged"];
+
+/** 統合ブランチの既定名。`develop`が無いリポジトリは`observeDependency`がデフォルトブランチを渡す */
+export const DEFAULT_INTEGRATION_BRANCH = "develop";
+
+/** Issue参照から`issue-<番号>`ブランチで解決した実装PRの1件分の観測 */
+export type ImplementationPrObservation = {
+  number: number;
+  merged: boolean;
+  baseRef: string | null;
+  inProduction: boolean | null;
+};
+
 /** 依存先の観測結果。取得できなかった項目は`null` */
 export type DependencyObservation = {
   state: "open" | "closed";
@@ -109,6 +123,12 @@ export type DependencyObservation = {
   baseRef: string | null;
   /** マージ済みPRの内容が本番ブランチ（main）へ入っているか。PRでなければ`null` */
   inProduction: boolean | null;
+  /** 開発の統合ブランチ（既定`develop`）。`undefined`/`null`ならbaseを検査しない（旧い観測） */
+  integrationBranch?: string | null;
+  /** 依存先がIssueのとき、実装ブランチ（`issue-<番号>`）から解決したPR。未解決は`undefined`/`null` */
+  implementationPrs?: ImplementationPrObservation[] | null;
+  /** 実装PRの解決に失敗した理由。成立とは扱わない */
+  implementationError?: string | null;
 };
 
 export type ConditionResult = {
@@ -118,11 +138,61 @@ export type ConditionResult = {
   detail: string;
 };
 
+function prRef(n: number): string {
+  return `PR #${n}`;
+}
+
+/**
+ * 実装PR（1件以上）に対して`merged`/`released`を評価する。**全てのPRが条件を満たしたときだけ成立**
+ * （無関係な1件のマージで成立させない）。mainへのマージはdevelopへのマージとはみなさない。
+ */
+function evaluatePrSet(
+  condition: "merged" | "released",
+  prs: readonly ImplementationPrObservation[],
+  integrationBranch: string | null,
+): ConditionResult {
+  const pending = prs.filter((pr) => !pr.merged);
+  if (pending.length > 0) {
+    return {
+      condition,
+      satisfied: false,
+      detail: `${pending.map((pr) => prRef(pr.number)).join("、")}がまだマージされていません`,
+    };
+  }
+  if (condition === "merged") {
+    const wrongBase = integrationBranch ? prs.filter((pr) => pr.baseRef !== integrationBranch) : [];
+    if (wrongBase.length > 0) {
+      return {
+        condition,
+        satisfied: false,
+        detail: `${wrongBase.map((pr) => `${prRef(pr.number)}は${pr.baseRef ?? "不明"}`).join("、")}へのマージで、${integrationBranch}へはマージされていません`,
+      };
+    }
+    return {
+      condition,
+      satisfied: true,
+      detail: `${prs.map((pr) => prRef(pr.number)).join("、")}が${integrationBranch ?? prs[0].baseRef ?? "base"}へマージ済み`,
+    };
+  }
+  if (prs.some((pr) => pr.inProduction === null)) {
+    return { condition, satisfied: null, detail: "mainへの反映を確認できませんでした" };
+  }
+  const notYet = prs.filter((pr) => pr.inProduction !== true);
+  return notYet.length === 0
+    ? { condition, satisfied: true, detail: "mainへ反映済み" }
+    : {
+        condition,
+        satisfied: false,
+        detail: `${notYet.map((pr) => prRef(pr.number)).join("、")}は${prs[0].baseRef ?? "develop"}へマージ済みですが、mainへは未反映です`,
+      };
+}
+
 export function evaluateConditions(
   conditions: readonly DependencyWaitCondition[],
   dependency: DependencyRef,
   observation: DependencyObservation,
 ): ConditionResult[] {
+  const integration = observation.integrationBranch ?? null;
   return conditions.map((condition): ConditionResult => {
     switch (condition) {
       case "closed":
@@ -130,29 +200,40 @@ export function evaluateConditions(
           ? { condition, satisfied: true, detail: "クローズ済み" }
           : { condition, satisfied: false, detail: "まだオープン" };
       case "merged":
-        if (dependency.kind !== "pr") {
-          return { condition, satisfied: null, detail: "依存先がPRではないため、マージの成否を機械では判断できません" };
+      case "released": {
+        if (dependency.kind === "pr") {
+          if (!observation.merged) return { condition, satisfied: false, detail: "まだマージされていません" };
+          return evaluatePrSet(
+            condition,
+            [
+              {
+                number: dependency.number,
+                merged: true,
+                baseRef: observation.baseRef,
+                inProduction: observation.inProduction,
+              },
+            ],
+            integration,
+          );
         }
-        return observation.merged
-          ? { condition, satisfied: true, detail: `${observation.baseRef ?? "base"}へマージ済み` }
-          : { condition, satisfied: false, detail: "まだマージされていません" };
-      case "released":
-        if (dependency.kind !== "pr") {
-          return { condition, satisfied: null, detail: "依存先がPRではないため、本番反映を機械では判断できません" };
+        // 依存先がIssue: 実装ブランチのPRへ解決できたときだけ評価する。クローズ・PR作成・取得失敗は成立にしない
+        if (observation.implementationError) {
+          return { condition, satisfied: null, detail: `実装PRを確認できません（${observation.implementationError}）` };
         }
-        if (!observation.merged) {
-          return { condition, satisfied: false, detail: "まだマージされていません" };
+        if (observation.implementationPrs === undefined || observation.implementationPrs === null) {
+          return {
+            condition,
+            satisfied: null,
+            detail: "依存先がPRではなく、実装PRも解決できていないため、機械では判断できません",
+          };
         }
-        if (observation.inProduction === null) {
-          return { condition, satisfied: null, detail: "mainへの反映を確認できませんでした" };
+        if (observation.implementationPrs.length === 0) {
+          return observation.state === "closed"
+            ? { condition, satisfied: null, detail: "実装PRが無いままクローズされています。人の確認が必要です" }
+            : { condition, satisfied: false, detail: "実装PRがまだありません" };
         }
-        return observation.inProduction
-          ? { condition, satisfied: true, detail: "mainへ反映済み" }
-          : {
-              condition,
-              satisfied: false,
-              detail: `${observation.baseRef ?? "develop"}へマージ済みですが、mainへは未反映です`,
-            };
+        return evaluatePrSet(condition, observation.implementationPrs, integration);
+      }
       case "verified":
         return { condition, satisfied: null, detail: "実環境での検証は人の確認が必要です" };
     }
@@ -207,7 +288,43 @@ export type DependencyWaitView = {
   resumeRequestedAt: string | null;
   resumeSentAt: string | null;
   resumedAt: string | null;
+  /** 再開条件を見直した履歴（#4570）。見直していなければ空 */
+  conditionHistory?: DependencyConditionRevision[];
 };
+
+export type DependencyConditionRevision = {
+  at: string;
+  by: string | null;
+  before: DependencyWaitCondition[];
+  after: DependencyWaitCondition[];
+  reason: string;
+};
+
+const WAIT_TARGET_SUFFIX: Record<DependencyWaitCondition, string> = {
+  closed: "のクローズ待ち",
+  merged: "のdevelopマージ待ち",
+  released: "の本番反映待ち",
+  verified: "の検証待ち",
+};
+
+/** 「#Aのdevelopマージ待ち」のように、条件を区別して表す（PC・スマホ共通） */
+export function describeWaitTarget(ref: DependencyRef, condition: DependencyWaitCondition): string {
+  return `#${ref.number}${WAIT_TARGET_SUFFIX[condition]}`;
+}
+
+/**
+ * 既存の`closed`だけの待ちのうち、通常の実装の取り込み待ちとして`merged`へ見直せる候補か（#4570）。
+ * **`closed`単独のIssue依存だけ**。本番反映・検証を含む明示的な条件や、PR参照は対象にしない
+ * （意図不明のものを一括で書き換えない）。見直しは人が1件ずつ確認して行う。
+ */
+export function isClosedWaitReviewCandidate(view: Pick<DependencyWaitView, "conditions" | "dependency" | "status">): boolean {
+  return (
+    (view.status === "WAITING" || view.status === "NEEDS_CONFIRM") &&
+    view.dependency.kind === "issue" &&
+    view.conditions.length === 1 &&
+    view.conditions[0] === "closed"
+  );
+}
 
 export type DependencyWaitNotice = {
   /** 一覧のバッジ用の短い文言 */
@@ -222,7 +339,7 @@ export type DependencyWaitNotice = {
 export function describeDependencyWait(view: DependencyWaitView): DependencyWaitNotice {
   const remaining = view.results.filter((r) => r.satisfied !== true);
   const remainingText = remaining.length
-    ? remaining.map((r) => `${DEPENDENCY_WAIT_CONDITION_LABELS[r.condition]}（${r.detail}）`).join("、")
+    ? remaining.map((r) => `${describeWaitTarget(view.dependency, r.condition)}（${r.detail}）`).join("、")
     : null;
   switch (view.status) {
     case "WAITING":

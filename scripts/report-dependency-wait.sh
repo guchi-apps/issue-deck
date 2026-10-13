@@ -10,8 +10,8 @@
 #     <条件(カンマ区切り: closed,merged,released,verified)> "<保留理由（日本語・1行）>"
 #
 # 条件の意味:
-#   closed   依存先がクローズされる
-#   merged   依存先のPRがマージされる
+#   closed   依存先がクローズされる（クローズ自体が必要な根拠があるときだけ）
+#   merged   依存先の実装PRがdevelopへマージされる（通常の実装依存の既定。Issueのクローズは待たない。依存先Issueでも指定できる）
 #   released 依存先のPRの内容が本番（main）へ反映される
 #   verified 実環境での検証が済む（人の確認が必要。自動では成立しない）
 #
