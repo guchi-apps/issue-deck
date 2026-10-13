@@ -38,6 +38,9 @@ function mockFetchWithMode(
       const modes = Object.fromEntries(repos.map((name) => [name, mode === "candidate" ? { mode } : { mode, label: "未対応" }]));
       return new Response(JSON.stringify({ modes }), { status: 200 });
     }
+    if (url === "/api/repositories/release/rc" && init?.method === "POST" && typeof respond !== "function") {
+      return new Response(JSON.stringify({ ok: true, candidateId: "c1", revision: 0, existing: false }), { status: 200 });
+    }
     return typeof respond === "function" ? respond(url, init) : respond;
   });
 }
@@ -1040,10 +1043,10 @@ describe("BranchFlowView", () => {
     });
 
     it("未リリースの変更があり、リリース用workflowを持つときだけ出す", async () => {
-      mockFetchWithMode("legacy", new Response(JSON.stringify({ ok: true }), { status: 200 }));
+      mockFetchWithMode("candidate", new Response(JSON.stringify({ ok: true }), { status: 200 }));
       renderFlow({ branchStatuses: [unreleased] });
       openRepository();
-      expect(await screen.findByText("リリースする")).toBeTruthy();
+      expect(await screen.findByText("候補を作成して検証")).toBeTruthy();
     });
 
     // #2711。押せない状態でもボタンは残し、理由を添える（消すと「次のリリース（本番未反映）」
@@ -1114,7 +1117,7 @@ describe("BranchFlowView", () => {
     });
 
     it("押すと今回反映する内容をPR単位で確認ダイアログに出す（#4201）", async () => {
-      mockFetchWithMode("legacy", 
+      mockFetchWithMode("candidate", 
         new Response(
           JSON.stringify({
             pullRequests: [
@@ -1156,9 +1159,9 @@ describe("BranchFlowView", () => {
       renderFlow({ branchStatuses: [unreleased] });
 
       openRepository();
-      fireEvent.click(await screen.findByText("リリースする"));
+      fireEvent.click(await screen.findByText("候補を作成して検証"));
 
-      expect(screen.getByText("リリースworkflowを起動しますか？")).toBeTruthy();
+      expect(screen.getByText("リリース候補を作成して検証しますか？")).toBeTruthy();
       expect(await screen.findByText("#1460 本番へ出したい変更")).toBeTruthy();
       expect(screen.getByText(/今回反映する内容/)).toBeTruthy();
       expect(screen.getByText("関連Issue #1456")).toBeTruthy();
@@ -1169,79 +1172,71 @@ describe("BranchFlowView", () => {
     });
 
     it("反映内容の取得に失敗したときは0件とせず失敗を出す（#4201）", async () => {
-      mockFetchWithMode("legacy", 
+      mockFetchWithMode("candidate", 
         new Response(JSON.stringify({ error: "github_api_error", message: "boom" }), { status: 502 }),
       );
       renderFlow({ branchStatuses: [unreleased] });
 
       openRepository();
-      fireEvent.click(await screen.findByText("リリースする"));
+      fireEvent.click(await screen.findByText("候補を作成して検証"));
 
       expect(await screen.findByText(/今回反映する内容を取得できませんでした/)).toBeTruthy();
       expect(screen.queryByText(/未反映のPRはありません/)).toBeNull();
     });
 
-    it("確認ダイアログで上げ幅を選べる（#1548）", async () => {
-      mockFetchWithMode("legacy", new Response(JSON.stringify({ ok: true }), { status: 200 }));
+    it("新方式に未対応のrepoは旧方式へ落とさず、押せずに更新手順を出す（#4623）", async () => {
+      const spy = mockFetchWithMode("legacy", new Response(JSON.stringify({ ok: true }), { status: 200 }));
       renderFlow({ branchStatuses: [unreleased] });
       openRepository();
-      fireEvent.click(await screen.findByText("リリースする"));
 
-      // 既定は自動判定で、手動の選択肢は閉じている
-      expect(screen.getByText("バージョンの上げ幅：自動判定")).toBeTruthy();
-      expect(screen.queryAllByRole("radio")).toHaveLength(0);
-
-      fireEvent.click(screen.getByText("手動で変える"));
-      expect(screen.getAllByRole("radio")).toHaveLength(3);
-
-      fireEvent.click(screen.getByText("minor"));
-      expect(screen.getByText("minor").closest("[role='radio']")?.getAttribute("aria-checked")).toBe(
-        "true",
-      );
+      const button = (await screen.findByText("候補を作成して検証")).closest("button");
+      await waitFor(() => expect(screen.getByText("未対応")).toBeTruthy());
+      expect(button?.disabled).toBe(true);
+      expect(spy.mock.calls.some(([url]) => String(url) === "/api/repositories/release")).toBe(false);
     });
 
     it("起動に成功したら、バンプPRが現れるまで押せないままにする（#1548）", async () => {
-      mockFetchWithMode("legacy", 
+      mockFetchWithMode("candidate", 
         new Response(JSON.stringify({ ok: true }), { status: 200 }),
       );
 
       renderFlow({ branchStatuses: [unreleased] });
       openRepository();
-      fireEvent.click(await screen.findByText("リリースする"));
-      fireEvent.click(screen.getByText("起動する"));
+      fireEvent.click(await screen.findByText("候補を作成して検証"));
+      fireEvent.click(screen.getByText("候補を作成する"));
 
       await screen.findByText("リリース起動中…");
-      expect(screen.queryByText("リリースする")).toBeNull();
+      expect(screen.queryByText("候補を作成して検証")).toBeNull();
     });
 
     it("起動に成功しても完了のポップアップは出さない（#1590）", async () => {
-      mockFetchWithMode("legacy", 
+      mockFetchWithMode("candidate", 
         new Response(JSON.stringify({ ok: true }), { status: 200 }),
       );
 
       renderFlow({ branchStatuses: [unreleased] });
       openRepository();
-      fireEvent.click(await screen.findByText("リリースする"));
-      fireEvent.click(screen.getByText("起動する"));
+      fireEvent.click(await screen.findByText("候補を作成して検証"));
+      fireEvent.click(screen.getByText("候補を作成する"));
 
       // 確認ダイアログは閉じ、「リリースを起動しました」のダイアログは現れない
       await screen.findByText("リリース起動中…");
       expect(screen.queryByText("リリースを起動しました")).toBeNull();
-      expect(screen.queryByText("リリースworkflowを起動しますか？")).toBeNull();
+      expect(screen.queryByText("リリース候補を作成して検証しますか？")).toBeNull();
     });
 
     describe("畳んだ1行の「リリース起動中」（#1955）", () => {
       async function trigger() {
-        mockFetchWithMode("legacy", 
+        mockFetchWithMode("candidate", 
           new Response(JSON.stringify({ ok: true }), { status: 200 }),
         );
-        fireEvent.click(await screen.findByText("リリースする"));
-        fireEvent.click(screen.getByText("起動する"));
+        fireEvent.click(await screen.findByText("候補を作成して検証"));
+        fireEvent.click(screen.getByText("候補を作成する"));
         await screen.findByText("リリース起動中…");
       }
 
       it("起動すると、行を畳んでも「リリース起動中」が残る", async () => {
-        mockFetchWithMode("legacy", new Response(JSON.stringify({ ok: true }), { status: 200 }));
+        mockFetchWithMode("candidate", new Response(JSON.stringify({ ok: true }), { status: 200 }));
         renderFlow({ branchStatuses: [unreleased] });
         openRepository();
         await trigger();
@@ -1255,7 +1250,7 @@ describe("BranchFlowView", () => {
       });
 
       it("起動中は「未リリース ◯コミット」を出さない（リリース中と同じ扱い）", async () => {
-        mockFetchWithMode("legacy", new Response(JSON.stringify({ ok: true }), { status: 200 }));
+        mockFetchWithMode("candidate", new Response(JSON.stringify({ ok: true }), { status: 200 }));
         renderFlow({ branchStatuses: [unreleased] });
         openRepository();
         expect(screen.getAllByLabelText("未リリース 3コミット").length).toBeGreaterThan(0);

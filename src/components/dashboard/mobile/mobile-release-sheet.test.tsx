@@ -97,7 +97,7 @@ describe("MobileReleaseSheet iOSへの反映欄（#3579）", () => {
     expect(screen.getByText("リリース候補を作成して検証しますか？")).toBeTruthy();
   });
 
-  it("aide-iosではMacの手順を出し、リリースworkflow起動ボタンは出さない", () => {
+  it("aide-iosではMacの手順を出し、リリース開始ボタンは出さない", () => {
     render(
       <MobileReleaseSheet
         {...baseProps}
@@ -107,10 +107,10 @@ describe("MobileReleaseSheet iOSへの反映欄（#3579）", () => {
     );
 
     expect(screen.getByText("AIDE-iosを実機へ反映する手順")).not.toBeNull();
-    expect(screen.queryByText("リリースworkflowを起動")).toBeNull();
+    expect(screen.queryByText("候補を作成して検証")).toBeNull();
   });
 
-  it("myroomではWeb/iOS本体の2種類の手順を出し、リリースworkflow起動ボタンは通常どおり出す", () => {
+  it("myroomではWeb/iOS本体の2種類の手順を出し、リリース開始ボタンは通常どおり出す", () => {
     render(
       <MobileReleaseSheet
         {...baseProps}
@@ -123,7 +123,7 @@ describe("MobileReleaseSheet iOSへの反映欄（#3579）", () => {
     expect(
       screen.getByText("アプリ本体の入れ直し（ios/・アプリアイコンの変更）"),
     ).not.toBeNull();
-    expect(screen.getByText("リリースworkflowを起動")).not.toBeNull();
+    expect(screen.getByText("候補を作成して検証")).not.toBeNull();
   });
 
   it("iOSアプリを持たないリポジトリでは、どちらの案内も出さない（完了条件）", () => {
@@ -137,7 +137,7 @@ describe("MobileReleaseSheet iOSへの反映欄（#3579）", () => {
 
     expect(screen.queryByText("AIDE-iosを実機へ反映する手順")).toBeNull();
     expect(screen.queryByText(/Webだけ更新/)).toBeNull();
-    expect(screen.getByText("リリースworkflowを起動")).not.toBeNull();
+    expect(screen.getByText("候補を作成して検証")).not.toBeNull();
   });
 
   it("本番デプロイ失敗中は確認チェックを付けたときだけ手動上書きを渡す", () => {
@@ -158,7 +158,7 @@ describe("MobileReleaseSheet iOSへの反映欄（#3579）", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "リリースworkflowを起動" }));
+    fireEvent.click(screen.getByRole("button", { name: "修正リリース" }));
     const action = screen.getByRole("button", { name: "起動する" });
     expect(action.hasAttribute("disabled")).toBe(true);
     fireEvent.click(screen.getByRole("checkbox"));

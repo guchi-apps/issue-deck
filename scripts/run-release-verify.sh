@@ -20,6 +20,8 @@ source "$SCRIPT_DIR/lib/local-repo-resolve.sh"
 source "$SCRIPT_DIR/lib/review-usage.sh"
 # shellcheck source=scripts/lib/release-progress.sh
 source "$SCRIPT_DIR/lib/release-progress.sh"
+# shellcheck source=scripts/lib/release-evidence.sh
+source "$SCRIPT_DIR/lib/release-evidence.sh"
 
 WORK_ROOT="${ISSUE_DECK_RELEASE_VERIFY_ROOT:-${TMPDIR:-/tmp}/issue-deck-release-verify}"
 STEP_TIMEOUT="${ISSUE_DECK_RELEASE_VERIFY_STEP_TIMEOUT_SECONDS:-1500}"
@@ -94,6 +96,8 @@ finish() {
 
 WORKTREE=""
 LOCAL_PATH=""
+EVIDENCE_FILE=""
+LOCK_DIR=""
 cleanup() {
   local code=$?
   if ((code != 0)); then
@@ -102,16 +106,21 @@ cleanup() {
   if [[ -n "$WORKTREE" && -n "$LOCAL_PATH" ]]; then
     git -C "$LOCAL_PATH" worktree remove --force "$WORKTREE" >/dev/null 2>&1 || rm -rf "$WORKTREE"
   fi
+  # ロックは所有者（自分のPID）のときだけ削除する
+  [[ -n "$LOCK_DIR" && "$(cat "$LOCK_DIR/pid" 2>/dev/null || true)" == "$$" ]] && rm -rf "$LOCK_DIR"
   release_progress_cleanup
 }
 
 # 検証結果のJSON。state=passed|failed|needs_check|not_applicable
+# failureKind（#4616）: merge_conflict|dependency_install_failed|setup_missing|timeout|test_failed|duplicate_run。
+# 旧サーバーは未知のキーを無視する。未実施・取得失敗をコード不具合（test_failed）に置き換えないための区別
 result_json() {
-  local state="$1" summary="$2" unverified="${3:-}" evidence="${4:-}"
-  jq -nc --arg state "$state" --arg summary "$summary" --arg unverified "$unverified" --arg evidence "$evidence" \
+  local state="$1" summary="$2" unverified="${3:-}" evidence="${4:-}" kind="${5:-}"
+  jq -nc --arg state "$state" --arg summary "$summary" --arg unverified "$unverified" --arg evidence "$evidence" --arg kind "$kind" \
     '{state: $state, summary: $summary}
       + (if $unverified == "" then {} else {unverifiedScope: $unverified} end)
-      + (if $evidence == "" then {} else {evidenceUrl: $evidence} end)'
+      + (if $evidence == "" then {} else {evidenceUrl: $evidence} end)
+      + (if $kind == "" then {} else {failureKind: $kind} end)'
 }
 
 # Mac検証を統合検証とは別の記録として報告する（#4366）。統合検証の結果JSONへ`mac`を足す。
@@ -163,9 +172,7 @@ main() {
   heartbeat_start
   LOCAL_PATH="$(local_repo_resolve_path "$full_name")"
   mkdir -p "$WORK_ROOT"
-  WORKTREE="$WORK_ROOT/${repo}-${pr_number}-${head_sha:0:12}"
-  rm -rf "$WORKTREE"
-  git -C "$LOCAL_PATH" worktree prune >/dev/null 2>&1 || true
+  local worktree_path="$WORK_ROOT/${repo}-${pr_number}-${head_sha:0:12}"
   git -C "$LOCAL_PATH" fetch --quiet origin main "$head_sha" 2>/dev/null ||
     git -C "$LOCAL_PATH" fetch --quiet origin 2>/dev/null || true
   git -C "$LOCAL_PATH" cat-file -e "${base_sha}^{commit}" 2>/dev/null &&
@@ -174,14 +181,55 @@ main() {
     return 0
   }
 
+  # 同じ候補（base/head）の検証が進行中なら二重に準備・実行しない（#4616）。ロックは実行中のPIDで判定する
+  EVIDENCE_FILE="$(evidence_file "$full_name" "$pr_number" "$base_sha" "$head_sha")"
+  mkdir -p "$(dirname "$EVIDENCE_FILE")"
+  local lock="${EVIDENCE_FILE%.json}.lock" holder="" acquired=false attempt
+  # 取得は原子的な mkdir（既存なら失敗）。失敗したらPIDを確認し、持ち主が死んでいれば掃除して再取得する
+  for attempt in 1 2 3; do
+    if mkdir "$lock" 2>/dev/null; then
+      printf '%s' "$$" >"$lock/pid"
+      LOCK_DIR="$lock"
+      acquired=true
+      break
+    fi
+    holder=""
+    [[ -f "$lock/pid" ]] && holder="$(cat "$lock/pid" 2>/dev/null || true)"
+    if [[ -z "$holder" ]]; then
+      # 取得直後でPID未書き込みの可能性があるため少し待ってから再確認する
+      sleep 1
+      [[ -f "$lock/pid" ]] && holder="$(cat "$lock/pid" 2>/dev/null || true)"
+    fi
+    [[ -n "$holder" ]] && kill -0 "$holder" 2>/dev/null && break
+    # 持ち主が不在: 所有トークン（死んだPID）が今も同じときだけ、解体用に名前を変えて1プロセスだけが掃除する
+    if [[ "$(cat "$lock/pid" 2>/dev/null || true)" == "$holder" ]] && mv "$lock" "$lock.stale.$$" 2>/dev/null; then
+      rm -rf "$lock.stale.$$"
+    fi
+  done
+  if [[ "$acquired" != "true" ]]; then
+    EVIDENCE_FILE=""
+    finish succeeded "同じ候補の統合検証が進行中のため、開始しませんでした" \
+      "$(result_json needs_check "同じ候補（base ${base_sha:0:7} / head ${head_sha:0:7}）の統合検証が実行中です（PID ${holder:-不明}）。完了を待ちます" \
+        "進行中の統合検証の結果待ち" "" duplicate_run)"
+    return 0
+  fi
+  # worktreeはロック取得後にだけ作り直す（二重起動した側が、実行中の検証のworktreeを消さないため）
+  WORKTREE="$worktree_path"
+  rm -rf "$WORKTREE"
+  git -C "$LOCAL_PATH" worktree prune >/dev/null 2>&1 || true
+  evidence_init "$full_name" "$pr_number" "$base_sha" "$head_sha"
+
   # 統合状態: mainの先端（base）へリリースのheadをマージする。競合はそのまま失敗として返す
   release_progress_set merge 1 "mainの先端へリリースを統合しています"
   release_verify_report running ""
   git -C "$LOCAL_PATH" worktree add --detach "$WORKTREE" "$base_sha" >/dev/null 2>&1
   if ! git -C "$WORKTREE" -c user.name="Claude Code" -c user.email="claude-code@example.com" \
     merge --no-edit "$head_sha" >/dev/null 2>&1; then
+    local conflicts
+    conflicts="$(git -C "$WORKTREE" diff --name-only --diff-filter=U 2>/dev/null | head -n 20 | paste -sd, -)"
+    evidence_finish "$EVIDENCE_FILE" failed merge_conflict "競合ファイル: ${conflicts:-不明}"
     finish succeeded "mainとリリースのheadを統合できませんでした（競合）" \
-      "$(result_json failed "mainの先端（${base_sha:0:7}）とリリースhead（${head_sha:0:7}）の統合でコンフリクトしました")"
+      "$(result_json failed "mainの先端（${base_sha:0:7}）とリリースhead（${head_sha:0:7}）の統合でコンフリクトしました。競合ファイル: ${conflicts:-不明}。統合状態の検証（テスト・型検査・ビルド）は未実施です" "" "" merge_conflict)"
     return 0
   fi
   summary="統合対象: main ${base_sha:0:7} + release head ${head_sha:0:7}"$'\n'
@@ -211,11 +259,18 @@ main() {
     if [[ "$full_name" == "guchi-apps/issue-deck" && ( "$step" == "pnpm run build:ci" || "$step" == "pnpm build:ci" ) ]]; then
       step_command=(node "$SCRIPT_DIR/ci/run-required-checks.mjs" --group lint-and-build --check build)
     fi
-    if (cd "$WORKTREE" && timeout "$STEP_TIMEOUT" "${step_command[@]}") >"$output_file" 2>&1; then
+    local step_code=0 step_kind=""
+    (cd "$WORKTREE" && timeout "$STEP_TIMEOUT" "${step_command[@]}") >"$output_file" 2>&1 || step_code=$?
+    if ((step_code == 0)); then
       summary+="実施・成功: ${step}"$'\n'
+      evidence_add_step "$EVIDENCE_FILE" "$step" passed 0 "" ""
     else
-      summary+="実施・失敗: ${step}"$'\n'"$(tail -n 20 "$output_file")"$'\n'
-      finish succeeded "統合検証が失敗しました: ${step}" "$(result_json failed "$summary" "" "$evidence")"
+      # 取得失敗・設定不足・時間切れ・不合格を区別する（未実施をコード不具合に置き換えない）
+      step_kind="$(evidence_classify_step "$step" "$step_code")"
+      summary+="実施・失敗（${step_kind}・終了コード ${step_code}）: ${step}"$'\n'"$(tail -n 20 "$output_file" | tr -d '\000' | evidence_redact)"$'\n'
+      evidence_add_step "$EVIDENCE_FILE" "$step" failed "$step_code" "$step_kind" "$output_file"
+      evidence_finish "$EVIDENCE_FILE" failed "$step_kind" "失敗したコマンド: ${step}"
+      finish succeeded "統合検証が失敗しました（${step_kind}）: ${step}" "$(result_json failed "$summary" "" "$evidence" "$step_kind")"
       return 0
     fi
   done < <(jq -r '.[]' <<<"$commands_json")
@@ -241,14 +296,16 @@ main() {
         summary+="Mac検証: 実施・成功"$'\n'
         mac_result_set passed "Macでのビルド確認に成功しました"
       else
-        summary+="Mac検証: 実施・失敗"$'\n'"$(tail -n 20 "$WORK_ROOT/${repo}-${pr_number}-mac.out")"$'\n'
-        mac_result_set failed "$(tail -n 20 "$WORK_ROOT/${repo}-${pr_number}-mac.out")"
+        summary+="Mac検証: 実施・失敗"$'\n'"$(tail -n 20 "$WORK_ROOT/${repo}-${pr_number}-mac.out" | tr -d '\000' | evidence_redact)"$'\n'
+        mac_result_set failed "$(tail -n 20 "$WORK_ROOT/${repo}-${pr_number}-mac.out" | tr -d '\000' | evidence_redact)"
+        evidence_finish "$EVIDENCE_FILE" failed test_failed "Mac検証の失敗"
         finish succeeded "Mac検証が失敗しました" "$(with_mac "$(result_json failed "$summary" "" "$evidence")")"
         return 0
       fi
     fi
   fi
 
+  evidence_finish "$EVIDENCE_FILE" passed "" "$([[ -n "$unverified" ]] && echo "未確認: ${unverified}")"
   finish succeeded "統合検証を完了しました" "$(with_mac "$(result_json passed "$summary" "$unverified" "$evidence")")"
 }
 

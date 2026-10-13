@@ -42,6 +42,13 @@ export type ChangelogEntry = {
  */
 export const APP_CHANGELOG: ChangelogEntry[] = [
   {
+    version: "8.60.1",
+    date: "2026-10-14",
+    changes: [
+      "リリース前の全体レビューが、大きな差分でも分割して確認できるようになり、検証結果の扱いも正確になりました。通常のリリース開始時に旧方式へ自動で切り替わる動作を廃止し、リリース画面の表示を整えました。",
+    ],
+  },
+  {
     version: "8.60.0",
     date: "2026-10-13",
     changes: [
