@@ -2,7 +2,7 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { ReleaseReviewSections, ReleaseVerificationBrief } from "@/components/dashboard/release-review-sections";
+import { ReleaseReviewSections, ReleaseVerificationBrief, describeReviewCoverage } from "@/components/dashboard/release-review-sections";
 import type { UseReleaseChangesResult } from "@/hooks/use-release-changes";
 import type { ReleaseVerificationProgress } from "@/lib/release-verification-progress";
 import type { ReleaseVerificationSection, ReleaseVerificationSummary } from "@/lib/release-verification-summary";
@@ -32,6 +32,7 @@ function section(overrides: Partial<ReleaseVerificationSection> = {}): ReleaseVe
     affectedFiles: [],
     reviewedFiles: null,
     totalFiles: null,
+    coverage: null,
     progress: null,
     diagnostic: null,
     ...overrides,
@@ -399,5 +400,35 @@ describe("ReleaseVerificationBrief（ブランチ画面。#4357）", () => {
       <ReleaseVerificationBrief repositoryFullName="guchi-apps/issue-deck" pullRequestNumber={1} headRef="develop" />,
     );
     expect(container.innerHTML).toBe("");
+  });
+});
+
+describe("describeReviewCoverage（#4615）", () => {
+  const cov = (over: Record<string, number> = {}) => ({
+    inputFiles: 113,
+    reviewed: 120,
+    unreadable: 0,
+    unreviewed: 0,
+    open: [],
+    batches: 2,
+    pendingBatches: 0,
+    ...over,
+  });
+
+  it("確認実績の件数を出し、入力に載せた件数（113）とは混ぜない", () => {
+    expect(describeReviewCoverage({ coverage: cov(), reviewedFiles: 120, totalFiles: 120 })).toBe("確認済み 120 / 120 ファイル・2バッチ");
+  });
+
+  it("未確認・取得不能・残りバッチを区別して出す", () => {
+    const text = describeReviewCoverage({
+      coverage: cov({ reviewed: 100, unreviewed: 15, unreadable: 5, pendingBatches: 1 }),
+      reviewedFiles: 100,
+      totalFiles: 120,
+    });
+    expect(text).toBe("確認済み 100 / 120 ファイル（未確認 15・取得不能 5）・2バッチ・残り1バッチ");
+  });
+
+  it("実績の無い旧結果は件数を出さず実績不明にする", () => {
+    expect(describeReviewCoverage({ coverage: null, reviewedFiles: null, totalFiles: 120 })).toContain("実績不明");
   });
 });

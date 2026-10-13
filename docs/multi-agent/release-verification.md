@@ -74,8 +74,16 @@ AIレビューはテスト実行の代わりにしない。個別レビューの
 - **担当は`resolveReleaseReviewAssignee`（`src/lib/release-review-assignee.ts`）。** 設定の「アプリ内AI：原因診断・新規アプリ相談」（`appAiModelReasoning`）に従い、
   OpenAI系ならCodex、それ以外はClaude Code。AIモデル設定画面は同じ関数で実効担当を表示する。モデルは`DispatchJob.claudeModel`／`codexModel`に載り、結果の`agent`（`claude:opus`など）として記録される
 - サブPCのpoller（`DISPATCH_POLLER_VERSION=36`以降・`releaseReview`を申告→`DispatchHost.releaseReviewCapable`）が`scripts/run-release-review.sh`をtmuxで起動する。
-  `base...head`の差分を読み取り専用のAI（Claudeは`Read`・`Grep`・`Glob`のみ許可）へ渡す。**差分は予算（既定300KB）の範囲でファイル単位に詰め、載せられなかったファイルは確認できなかった範囲として報告する**
-  （`totalFiles`・`reviewedFiles`はスクリプトが確定し、AIの自己申告に任せない）
+  `base...head`の差分を読み取り専用のAI（Claudeは`Read`・`Grep`・`Glob`のみ許可）へ渡す。
+  **差分は1バッチ既定300,000文字（`ISSUE_DECK_RELEASE_REVIEW_DIFF_BUDGET_BYTES`）でバッチに分けて順に確認し、容量を超えた分も黙って除外せず次のバッチで確認する**（#4615）。
+  1ファイルが上限を超えるときは断片に分け、全断片の確認が揃って初めて確認済みになる。全バッチの後に、バッチをまたぐ相互作用（`pr_interaction`ほか）を別に確認し、
+  バッチごとの合格の単純集計で済ませない。確認項目は全バッチ＋相互作用の確認が根拠つきで確認済みのときだけ確認済みになる
+- **入力へ載せた数と確認した実績は別物。** ランナーは`inputFiles`（入力へ載せた数）・`targetFiles`・`fileReviews`（ファイルごとの`reviewed`＋根拠／`unreadable`＋理由）を報告し、
+  `reviewedFiles`は申告しない。**サーバー（`normalizeCoverage`）が、対象に含まれ根拠のある`reviewed`だけを確認済みと数える。** 入力に載っていても根拠の無いファイルは未確認、
+  差分を取得できないものは取得不能として別に数える。ファイル別の実績を持たない旧結果は件数不明（`reviewedFiles=null`・画面は「実績不明」）
+- **中断・再開**: バッチごとの結果はサブPCの作業ディレクトリ（`*.batches`、対象のbase・head・予算で一意）へ保存する。1起動の実行バッチ数の上限
+  （`ISSUE_DECK_RELEASE_REVIEW_MAX_BATCHES_PER_RUN`、既定8）か、バッチ・相互作用の確認の失敗で止まったときは残りを保存し、同じ対象の再実行が続きから確認する。
+  残りがある結果は`pendingBatches`が付き、確認項目は確認済みにならない。候補のSHAが変わると別の保存になり、旧SHAの結果は使わない（現在の結果へ書き換えない）
 - 結果の正規化（`src/lib/release-review-result.ts`）: **指摘が1件でもあれば`needs_check`、確認範囲が足りなければ未確認範囲つきの`passed`（判定側が理由付きの`needs_check`へ読み替える）。**
   AIが問題なしでも指摘・未確認が無い場合だけ`passed`。`failed`はレビューを完走できなかったときだけ。結果には対象SHA・担当AI・指摘・影響PR・影響ファイルを残す
 - **AIのLGTMだけで自動マージはしない。** マージは従来どおり人で、`needs_confirmation`は理由付きで既存の明示確認フローへ渡る

@@ -140,8 +140,29 @@ export type ReleaseReviewDetail = {
   review: ReleaseReviewMeta | null;
   affectedPullRequests: number[];
   affectedFiles: string[];
+  /** 根拠つきで確認済みと判断できたファイル数。入力へ載せた数ではない。実績を確かめられない旧結果ではnull */
   reviewedFiles: number | null;
   totalFiles: number | null;
+  /** ファイルごとの確認実績（#4615）。旧ランナーの結果ではnull（実績不明） */
+  coverage: ReleaseReviewCoverage | null;
+};
+
+/**
+ * 差分のファイルごとの確認実績（#4615）。**入力へ載せたこと（`inputFiles`）と確認したこと（`reviewed`）を分ける。**
+ * 未確認は「省略（`unreviewed`＝入力に載せていない、または載せても根拠が無い）」と「取得不能（`unreadable`）」を区別する。
+ */
+export type ReleaseReviewCoverage = {
+  /** 差分を確認用の入力へ載せたファイル数（確認実績ではない） */
+  inputFiles: number;
+  reviewed: number;
+  unreadable: number;
+  unreviewed: number;
+  /** 未確認・取得不能のファイル（最大50件）と理由 */
+  open: { file: string; kind: "unreviewed" | "unreadable"; reason: string }[];
+  /** 確認を行ったバッチ数（分割しなかったときは1） */
+  batches: number;
+  /** 実行の予算で今回は行わなかったバッチ数 */
+  pendingBatches: number;
 };
 
 export type NormalizedReleaseReview = {
@@ -194,6 +215,59 @@ function parseFinding(value: unknown): ParsedFinding | null {
 
 function pick<T extends string>(value: unknown, allowed: readonly T[], fallback: T): T {
   return typeof value === "string" && (allowed as readonly string[]).includes(value) ? (value as T) : fallback;
+}
+
+const MAX_COVERAGE_TARGETS = 5000;
+const MAX_OPEN_COVERAGE = 50;
+
+/**
+ * ランナーが報告したファイル別の実績（`targetFiles`・`fileReviews`・`inputFiles`）を、確認実績へ絞る。
+ * **確認済みと数えるのは、対象に含まれ、`reviewed`で根拠があるものだけ。** 実績が報告されていない旧結果はnull
+ */
+export function normalizeCoverage(raw: Record<string, unknown>, totalFiles: number | null): ReleaseReviewCoverage | null {
+  if (!Array.isArray(raw.targetFiles) || !Array.isArray(raw.fileReviews)) return null;
+  const targets = [...new Set(raw.targetFiles.map((f) => str(f, 300)).filter((f): f is string => f !== null))].slice(
+    0,
+    MAX_COVERAGE_TARGETS,
+  );
+  if (targets.length === 0 && totalFiles !== 0) return null;
+  const targetSet = new Set(targets);
+  const reviewed = new Set<string>();
+  const unreadable = new Map<string, string>();
+  for (const entry of raw.fileReviews) {
+    if (typeof entry !== "object" || entry === null) continue;
+    const rec = entry as Record<string, unknown>;
+    const file = str(rec.file, 300);
+    if (!file || !targetSet.has(file)) continue;
+    const evidence = str(rec.evidence, 500);
+    if (rec.status === "unreadable") {
+      unreadable.set(file, evidence ?? "取得できませんでした");
+    } else if (rec.status === "reviewed" && evidence) {
+      reviewed.add(file);
+    }
+  }
+  // 取得できなかったファイルは、確認済みの記録があっても確認済みにしない（一部だけ読めた巨大ファイルなど）
+  for (const file of unreadable.keys()) reviewed.delete(file);
+  const open: ReleaseReviewCoverage["open"] = [];
+  let unreviewed = 0;
+  for (const file of targets) {
+    if (reviewed.has(file)) continue;
+    if (unreadable.has(file)) {
+      if (open.length < MAX_OPEN_COVERAGE) open.push({ file, kind: "unreadable", reason: unreadable.get(file) ?? "" });
+    } else {
+      unreviewed += 1;
+      if (open.length < MAX_OPEN_COVERAGE) open.push({ file, kind: "unreviewed", reason: "確認した根拠が報告されていません" });
+    }
+  }
+  return {
+    inputFiles: Math.min(nonNegativeInt(raw.inputFiles) ?? 0, targets.length),
+    reviewed: reviewed.size,
+    unreadable: unreadable.size,
+    unreviewed,
+    open,
+    batches: nonNegativeInt(raw.batches) ?? 1,
+    pendingBatches: nonNegativeInt(raw.pendingBatches) ?? 0,
+  };
 }
 
 export function normalizeReleaseReview(
@@ -293,8 +367,10 @@ export function normalizeReleaseReview(
     resolutions.push({ id: prior.id, title: prior.title, status, evidence });
   }
 
-  const reviewedFiles = nonNegativeInt(raw.reviewedFiles);
   const totalFiles = nonNegativeInt(raw.totalFiles);
+  const coverage = normalizeCoverage(raw, totalFiles);
+  // 確認済みの件数は、根拠つきのファイル別実績だけから数える。ランナーの申告する`reviewedFiles`（入力へ載せた数）は使わない
+  const reviewedFiles = coverage ? coverage.reviewed : null;
   const affectedFiles = (Array.isArray(raw.affectedFiles) ? raw.affectedFiles : [])
     .map((f) => str(f, 300))
     .filter((f): f is string => f !== null)
@@ -317,8 +393,15 @@ export function normalizeReleaseReview(
   const unverified: string[] = [];
   const reported = str(raw.unverifiedScope, 2000);
   if (reported) unverified.push(reported);
-  if (reviewedFiles !== null && totalFiles !== null && reviewedFiles < totalFiles) {
-    unverified.push(`差分${totalFiles}ファイルのうち${reviewedFiles}ファイルしか確認できていません`);
+  if (coverage && totalFiles !== null && coverage.reviewed < totalFiles) {
+    const parts = [
+      coverage.unreviewed > 0 ? `未確認${coverage.unreviewed}` : null,
+      coverage.unreadable > 0 ? `取得不能${coverage.unreadable}` : null,
+    ].filter((v): v is string => v !== null);
+    const pending = coverage.pendingBatches > 0 ? `。残り${coverage.pendingBatches}バッチは再実行で続きから確認します` : "";
+    unverified.push(`差分${totalFiles}ファイルのうち${coverage.reviewed}ファイルを確認済み（${parts.join("・")}）${pending}`);
+  } else if (!coverage && totalFiles !== null) {
+    unverified.push("ファイル別の確認実績がありません（旧ランナーの結果。確認済みの件数は不明です）");
   }
   if (legacy) unverified.push("項目別の確認記録がありません（旧ランナーの結果。サブPCのpollerを更新して再実行してください）");
   else if (!versionOk) unverified.push(`確認項目の版が一致しません（結果v${reportedVersion}・現在v${RELEASE_REVIEW_CHECKLIST_VERSION}）`);
@@ -359,6 +442,7 @@ export function normalizeReleaseReview(
       affectedFiles,
       reviewedFiles,
       totalFiles,
+      coverage,
     },
     unverifiedScope,
   };

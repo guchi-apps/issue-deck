@@ -518,11 +518,25 @@ function AiReviewSection({
       {hasDetail ? (
         <>
           <dl className="grid grid-cols-[6.5rem_1fr] gap-x-2 gap-y-0.5 text-[11.5px]">
-            {section.totalFiles !== null && section.reviewedFiles !== null && (
+            {section.totalFiles !== null && (
               <>
                 <dt className="text-muted-foreground">確認した範囲</dt>
-                <dd>
-                  {section.reviewedFiles} / {section.totalFiles} ファイル（終了後の範囲）
+                <dd>{describeReviewCoverage(section)}</dd>
+              </>
+            )}
+            {section.coverage && section.coverage.open.length > 0 && (
+              <>
+                <dt className="text-muted-foreground">未確認の対象</dt>
+                <dd className="space-y-0.5">
+                  {section.coverage.open.slice(0, 10).map((o) => (
+                    <div key={o.file} className="break-all">
+                      <span className={o.kind === "unreadable" ? "text-red-600" : "text-amber-600"}>
+                        {o.kind === "unreadable" ? "取得不能" : "未確認"}
+                      </span>{" "}
+                      <code>{o.file}</code>
+                    </div>
+                  ))}
+                  {section.coverage.open.length > 10 && <div>ほか{section.coverage.open.length - 10}件</div>}
                 </dd>
               </>
             )}
@@ -1021,6 +1035,22 @@ const GATE_LABEL: Record<Exclude<ReleaseVerificationSummary["gateStatus"], "not_
   needs_confirmation: { tone: "warn", mark: "▲", text: "要確認があります。理由を読んで、問題なければ明示して進めます" },
   blocked: { tone: "bad", mark: "■", text: "未完了または失敗があるため、まだ進められません" },
 };
+
+/**
+ * 「確認した範囲」の文言。**入力へ載せた件数ではなく、根拠つきで確認した実績**を出す（#4615）。
+ * ファイル別の実績が無い旧結果は件数を出さず「実績不明」にする
+ */
+export function describeReviewCoverage(section: Pick<ReleaseVerificationSection, "coverage" | "reviewedFiles" | "totalFiles">): string {
+  const { coverage, reviewedFiles, totalFiles } = section;
+  if (!coverage || reviewedFiles === null || totalFiles === null) return "実績不明（旧形式の結果。再実行すると確認した件数が記録されます）";
+  const rest = [
+    coverage.unreviewed > 0 ? `未確認 ${coverage.unreviewed}` : null,
+    coverage.unreadable > 0 ? `取得不能 ${coverage.unreadable}` : null,
+  ].filter((v): v is string => v !== null);
+  const batches = coverage.batches > 1 ? `・${coverage.batches}バッチ` : "";
+  const pending = coverage.pendingBatches > 0 ? `・残り${coverage.pendingBatches}バッチ` : "";
+  return `確認済み ${reviewedFiles} / ${totalFiles} ファイル${rest.length > 0 ? `（${rest.join("・")}）` : ""}${batches}${pending}`;
+}
 
 export function ReleaseReviewSections({
   repositoryFullName,

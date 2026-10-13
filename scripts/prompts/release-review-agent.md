@@ -61,6 +61,9 @@
     { "id": "確認項目のID", "status": "confirmed|not_applicable|unconfirmed", "evidence": "根拠（未確認なら理由）"{{CHECK_SOURCE_HINT}} }
   ],
   "unverifiedScope": "確認できなかった範囲と次の対応（無ければ省略）",
+  "fileReviews": [
+    { "file": "パス", "status": "reviewed|unreadable", "evidence": "読んだ箇所・確認した内容（unreadableなら理由）" }
+  ],
   "findings": [
     { "blocking": true, "severity": "high|medium|low", "title": "短い見出し", "detail": "問題の概要", "impact": "利用者・本番への影響", "evidence": "根拠（再現手順・該当コード）", "blockingReason": "止めると判断した理由", "recommendation": "推奨する対応", "file": "パス", "line": 12, "pullRequests": [123]{{FINDING_HINT}} }
   ],
@@ -70,6 +73,7 @@
 ```
 
 - `checks`は確認項目すべてについて出力する
+- `fileReviews`は「確認できた範囲」で指示された対象ファイルについて出力する（指示が無ければ空配列）。根拠の無いものは確認済みにならない
 - `findings`には止める指摘と止めない提案の両方を入れ、提案は`"blocking": false`にする
 - 止める指摘が無ければ`state`は`passed`（止めない提案だけなら`passed`）
 - 止める指摘があれば`state`は`needs_check`（リリースを止めるかの最終判断は人が行う）
