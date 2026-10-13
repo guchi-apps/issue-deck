@@ -1,5 +1,5 @@
 import { compareVersions, nextVersion, type BumpKind } from "@/lib/semver-bump";
-import type { ReleaseVerificationKind, ReleaseVerificationRecord } from "@/lib/release-merge-gate";
+import type { ReleaseVerificationKind, ReleaseVerificationRecord, ReleaseVerificationView } from "@/lib/release-merge-gate";
 
 /**
  * 公開準備（#4496）の判断。**合格した候補（#4495）だけを、公開の直前に正式バンプする。**
@@ -419,6 +419,37 @@ export function decideFinalizeReadiness(input: { checks: FinalChecks; pendingRev
   if (input.checks.ciState === "unknown") return { ready: false, reason: "ci_unknown" };
   if (input.pendingReverify.length > 0) return { ready: false, reason: "required_reverify" };
   return { ready: true };
+}
+
+/**
+ * 公開準備中・本番承認待ちの候補PRがマージされていたときの扱い。**最終検証を経ていないマージを本番反映へ進めない**。
+ * 記録した最終headのままで、そのheadの最終CI・再検証が合格しているときだけ進める（早いマージでも保証を落とさない）。
+ * 進めないときは理由を画面へ残す（`wait`は実行中の検証を待つだけ、`hold`は人がやり直すか確かめるまで進まない）。
+ * どちらも毎巡回で評価し直すので、CI・検証をやり直して合格すればそこから進む（mainへ入った後は修正工程へ戻せない）。
+ * 合格を確かめようがない場合（別の内容のマージなど）は、人が候補を取り消して終える（`cancelReleaseRc`が版を消費済みにする）
+ */
+export type MergedCandidateDecision = { action: "advance" } | { action: "wait" | "hold"; reason: string };
+
+export function decideMergedCandidate(input: {
+  headMatches: boolean;
+  readiness: FinalizeReadiness;
+  /** バンプ後のheadで合格していない再検証の状態（`passed`・`not_applicable`以外） */
+  reverifyStates: readonly ReleaseVerificationView["state"][];
+}): MergedCandidateDecision {
+  const pre = "最終検証の完了前に候補PRがマージされました";
+  if (!input.headMatches) return { action: "hold", reason: "公開準備で記録した最終headと異なる内容がマージされたため、本番反映の追跡へ進めません" };
+  if (input.reverifyStates.includes("failed") || (!input.readiness.ready && input.readiness.reason === "ci_failed")) {
+    return { action: "hold", reason: "バンプ後の最終検証が失敗した内容がマージされたため、本番反映の追跡へ進めません。CI・検証をやり直して合格すれば進みます" };
+  }
+  // 実行中・順番待ちの検証と実行中のCIだけは、待てば結果が出る
+  const settling = input.reverifyStates.every((s) => s === "running" || s === "waiting");
+  if (!input.readiness.ready && input.readiness.reason === "ci_pending" && settling) return { action: "wait", reason: `${pre}。最終CIの結果を待っています` };
+  if (input.readiness.ready) return { action: "advance" };
+  // CI結果の取得失敗は一時的なことが多いので止めずに待つ（解消しなければ、人は候補の取り消しで終えられる）
+  if (input.readiness.reason === "ci_unknown" && settling) return { action: "wait", reason: `${pre}。最終CIの結果を取得できていません` };
+  if (input.readiness.reason === "required_reverify" && settling) return { action: "wait", reason: `${pre}。再検証の結果を待っています` };
+  // 依頼の失敗（not_run）・要確認・失効は、待っても解消しない
+  return { action: "hold", reason: `${pre}。最終CI・再検証の合格を確認できないため本番反映の追跡へ進めません。CI・検証をやり直して合格すれば進みます` };
 }
 
 /** 公開前の最終検証が失敗したときの扱い。**版の予約は保つ**（再試行だけを理由に正式版を増やさない） */

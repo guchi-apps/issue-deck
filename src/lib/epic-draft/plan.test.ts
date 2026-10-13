@@ -51,6 +51,21 @@ describe("親子起案の計画登録（#4535への接続）", () => {
     expect(mocks.savePlan).not.toHaveBeenCalled();
   });
 
+  it("子と依存が同じでも、目的・完了条件が違えば上書きせず失敗にする（親本文と計画を食い違わせない）", async () => {
+    for (const changed of [{ ...plan, objective: "別の目的" }, { ...plan, completionCriteria: ["別の完了条件"] }]) {
+      mocks.getPlanView.mockResolvedValue({ currentVersion: 1, plan: changed });
+      const out = await getEpicPlanRegistrar("u1")(input);
+      expect(out).toMatchObject({ ok: false, message: expect.stringContaining("再計画") });
+    }
+    expect(mocks.savePlan).not.toHaveBeenCalled();
+  });
+
+  it("目的・完了条件の前後の空白だけの違いは同じ内容として扱う（登録時のtrimに揃える）", async () => {
+    mocks.getPlanView.mockResolvedValue({ currentVersion: 1, plan });
+    const out = await getEpicPlanRegistrar("u1")({ ...input, objective: " 目的 ", completionCriteria: ["完了 "] });
+    expect(out).toMatchObject({ ok: true, version: 1 });
+  });
+
   it("検証エラーは具体的な理由つきの失敗にする（完了にならない）", async () => {
     mocks.getPlanView.mockResolvedValue(null);
     mocks.savePlan.mockResolvedValue({ ok: false, status: 422, errors: [{ path: "children[0]", message: "子Issue o/a#2は存在しません" }] });
