@@ -1,5 +1,13 @@
 "use client";
 
+import {
+  checkTone,
+  countOpenItems,
+  describeCheck,
+  describeReviewKind,
+  describeStall,
+  findingTags,
+} from "@/lib/release-review-contract-view";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { isReleaseCandidateHeadRef } from "@/lib/release-branch";
 import { ChevronRight, ExternalLink, RotateCcw } from "lucide-react";
@@ -477,6 +485,8 @@ function AiReviewSection({
   const hasDetail =
     Boolean(section.summary) ||
     section.findings.length > 0 ||
+    section.suggestions.length > 0 ||
+    section.review !== null ||
     section.totalFiles !== null ||
     needsFix ||
     section.progress !== null ||
@@ -580,6 +590,7 @@ function AiReviewSection({
               )}
             </div>
           )}
+          <ReviewContractPanel section={section} />
           {section.summary && <p className="whitespace-pre-wrap">{section.summary}</p>}
           {section.findings.length > 0 && (
             <ul className="flex flex-col gap-1">
@@ -594,7 +605,16 @@ function AiReviewSection({
                       {finding.line ? `:${finding.line}` : ""}
                     </span>
                   )}
+                  {findingTags(finding).length > 0 && (
+                    <span className="ml-2 text-[11px] text-muted-foreground">{findingTags(finding).join(" · ")}</span>
+                  )}
                   {finding.detail && <p className="whitespace-pre-wrap text-muted-foreground">{finding.detail}</p>}
+                  {finding.blockingReason && <p className="whitespace-pre-wrap">止める理由: {finding.blockingReason}</p>}
+                  {describeStall(finding) && (
+                    <p className="whitespace-pre-wrap">
+                      解消されない原因: {describeStall(finding)?.cause}。{describeStall(finding)?.next}
+                    </p>
+                  )}
                   {finding.impact && <p className="whitespace-pre-wrap">影響: {finding.impact}</p>}
                   {finding.evidence && <p className="whitespace-pre-wrap text-muted-foreground">根拠: {finding.evidence}</p>}
                   {finding.recommendation && <p className="whitespace-pre-wrap">推奨対応: {finding.recommendation}</p>}
@@ -604,6 +624,27 @@ function AiReviewSection({
                 </li>
               ))}
             </ul>
+          )}
+          {section.suggestions.length > 0 && (
+            <div className="flex flex-col gap-1">
+              <span className="text-muted-foreground">
+                改善提案 {section.suggestions.length}件（リリースは止めません。必要なら別Issueで追跡してください）
+              </span>
+              <ul className="flex flex-col gap-1">
+                {section.suggestions.map((s, index) => (
+                  <li key={`${s.title}-${index}`} className="rounded bg-muted/30 px-2 py-1">
+                    <span className="font-medium">{s.title}</span>
+                    {s.file && (
+                      <span className="ml-2 break-all text-muted-foreground">
+                        {s.file}
+                        {s.line ? `:${s.line}` : ""}
+                      </span>
+                    )}
+                    {s.detail && <p className="whitespace-pre-wrap text-muted-foreground">{s.detail}</p>}
+                  </li>
+                ))}
+              </ul>
+            </div>
           )}
           {section.affectedFiles.length > 0 && (
             <p className="break-all text-muted-foreground">
@@ -634,6 +675,93 @@ function AiReviewSection({
         </>
       ) : undefined}
     </SectionRow>
+  );
+}
+
+function ReviewContractPanel({ section }: { section: ReleaseVerificationSection }) {
+  const review = section.review;
+  if (!review) return null;
+  const kind = describeReviewKind(review);
+  const open = countOpenItems(review, section.findings);
+  return (
+    <div className="flex flex-col gap-1.5 rounded border px-2 py-1.5" data-testid="review-contract">
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+        <span className="font-medium">{kind.label}</span>
+        <span className="text-muted-foreground">{kind.version}</span>
+        {!review.legacy && (
+          <span className="text-muted-foreground">
+            未確認の項目 {open.unconfirmed}件・未解決の阻害指摘 {open.blocking}件
+          </span>
+        )}
+      </div>
+      {review.legacy && (
+        <p className="text-amber-700 dark:text-amber-400">
+          項目別の確認記録がありません（旧ランナーの結果）。サブPCのpollerを更新して再実行すると、確認項目ごとの結果が残ります。
+        </p>
+      )}
+      {review.fullReviewReason && <p className="text-muted-foreground">対象全体を確認: {review.fullReviewReason}</p>}
+      {review.mode === "rereview" && (
+        <dl className="grid grid-cols-[6.5rem_1fr] gap-x-2 gap-y-0.5">
+          {review.previous && (
+            <>
+              <dt className="text-muted-foreground">前回の対象</dt>
+              <dd className="font-mono">PR #{review.previous.prNumber} · {shortSha(review.previous.headSha)}</dd>
+            </>
+          )}
+          {review.fixDiffFileCount !== null && (
+            <>
+              <dt className="text-muted-foreground">修正差分</dt>
+              <dd>{review.fixDiffFileCount} ファイル</dd>
+            </>
+          )}
+          {review.recheckScope && (
+            <>
+              <dt className="text-muted-foreground">再確認した範囲</dt>
+              <dd className="whitespace-pre-wrap">{review.recheckScope}</dd>
+            </>
+          )}
+        </dl>
+      )}
+      {!review.legacy && (
+        <ul className="flex flex-col gap-0.5">
+          {review.checks.map((check) => {
+            const view = describeCheck(check, shortSha);
+            const tone = checkTone(check);
+            return (
+              <li key={check.id} className="flex flex-col">
+                <span>
+                  <span className={tone === "ok" ? "text-emerald-700 dark:text-emerald-400" : tone === "bad" ? "font-medium text-destructive" : "text-muted-foreground"}>
+                    [{view.status}]
+                  </span>{" "}
+                  {view.label}
+                  {view.source && <span className="ml-1 text-muted-foreground">（{view.source}）</span>}
+                </span>
+                {view.evidence && <span className="whitespace-pre-wrap break-words text-muted-foreground">{view.evidence}</span>}
+              </li>
+            );
+          })}
+        </ul>
+      )}
+      {review.previousFindings.length > 0 && (
+        <div className="flex flex-col gap-0.5">
+          <span className="text-muted-foreground">前回の指摘の解消</span>
+          <ul className="flex flex-col gap-0.5">
+            {review.previousFindings.map((p) => (
+              <li key={p.id}>
+                <span className={p.status === "resolved" ? "text-emerald-700 dark:text-emerald-400" : "font-medium text-destructive"}>
+                  [{p.status === "resolved" ? "解消" : p.status === "unresolved" ? "未解消" : "未確認"}]
+                </span>{" "}
+                <span className="font-mono">{p.id}</span> {p.title}
+                {p.evidence && <span className="block whitespace-pre-wrap break-words text-muted-foreground">{p.evidence}</span>}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      <p className="text-[10.5px] text-muted-foreground">
+        再レビューは合格の保証ではありません。現在の対象で必須の確認項目に未確認が無く、リリースを止める指摘が解消したときだけ先へ進めます。
+      </p>
+    </div>
   );
 }
 

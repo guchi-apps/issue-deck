@@ -1322,6 +1322,23 @@ function ReleaseGroupHeader({
                   ? "リリース済み"
                   : "次のリリース"}
           </span>
+          {/* 候補中心の区別（#4560）: 現在の本番版・次のリリース候補・旧方式で進行中の候補 */}
+          {released && showIosDistribution && !mergedToMain && (
+            <span className="rounded-full bg-green-100 px-2 py-px text-[11px] font-semibold text-green-800 dark:bg-green-950 dark:text-green-300">
+              現在の本番版
+            </span>
+          )}
+          {!released && group.pullRequest && isReleaseCandidateHeadRef(group.pullRequest.headRef) && (
+            isLegacyReleaseCandidateHeadRef(group.pullRequest.headRef) ? (
+              <span className="rounded-full bg-violet-100 px-2 py-px text-[11px] font-semibold text-violet-800 dark:bg-violet-950 dark:text-violet-300">
+                旧方式で進行中
+              </span>
+            ) : (
+              <span className="rounded-full bg-blue-100 px-2 py-px text-[11px] font-semibold text-blue-800 dark:bg-blue-950 dark:text-blue-300">
+                次のリリース候補
+              </span>
+            )
+          )}
           {released ? (
             <>
               {!inProduction && (
@@ -1487,6 +1504,7 @@ function NextReleaseCard({
   repository,
   group,
   unreleased,
+  inProgressCount,
   latestReleaseMergedAt,
   releaseButton,
   deployButton,
@@ -1497,6 +1515,8 @@ function NextReleaseCard({
   group: BranchFlowReleaseGroup | null;
   /** 次のリリースで反映されるPRの件数（developにあってmainに無いもの。画面上部の「未リリース」と同じ値） */
   unreleased: UnreleasedSummary;
+  /** 実装中（進行中）の件数。畳んだ行の「進行中N件」と同じ値（#4564） */
+  inProgressCount: number;
   latestReleaseMergedAt: string | null;
   /** 「次のバージョン」カードの中に置く「リリースする」（#4532） */
   releaseButton?: React.ReactNode;
@@ -1519,7 +1539,7 @@ function NextReleaseCard({
       data-testid="next-release-card"
     >
       <p className="text-xs font-semibold tracking-wide text-primary">次のリリース</p>
-      <dl className="grid grid-cols-2 gap-2">
+      <dl className="grid grid-cols-1 gap-2 @sm:grid-cols-2">
         <div className="min-w-0 rounded-md border px-2.5 py-1.5">
           <dt className="text-muted-foreground">本番稼働中</dt>
           <dd className="flex flex-wrap items-center gap-x-1.5 text-sm font-semibold">
@@ -1554,16 +1574,35 @@ function NextReleaseCard({
           {releaseButton && <dd className="mt-1">{releaseButton}</dd>}
         </div>
         <div className="min-w-0 rounded-md border px-2.5 py-1.5">
-          <dt className="text-muted-foreground">反映待ちのPR</dt>
-          <dd className="text-sm font-semibold">{`${unreleased.count}${unreleased.unit}`}</dd>
-          <dd className="text-muted-foreground">mainへ未反映</dd>
-        </div>
-        <div className="min-w-0 rounded-md border px-2.5 py-1.5">
-          <dt className="text-muted-foreground">次のバージョンに登録済み</dt>
+          <dt className="text-muted-foreground">次のリリースで反映</dt>
           <dd className="text-sm font-semibold">{`${group?.version ? group.lanes.length : 0}件`}</dd>
           <dd className="text-muted-foreground">
             {group?.version ? "このバージョンに含まれる" : "バージョン作成後に表示"}
           </dd>
+        </div>
+        {/* 実装中があるうちは本番へ出したくないので、実装中の件数と枠を警告色にする（#4564） */}
+        <div
+          className={cn(
+            "min-w-0 rounded-md border px-2.5 py-1.5",
+            inProgressCount > 0 && "border-amber-500 dark:border-amber-400",
+          )}
+          data-testid="next-release-pending-card"
+        >
+          <dt className="text-muted-foreground">反映待ち/実装中のPR</dt>
+          <dd className="text-sm font-semibold">
+            {`${unreleased.count}${unreleased.unit}`}
+            <span className="mx-1 font-normal text-muted-foreground">/</span>
+            <span
+              className={cn(
+                inProgressCount > 0 &&
+                  "rounded bg-amber-100 px-1.5 text-amber-800 dark:bg-amber-950 dark:text-amber-300",
+              )}
+              data-testid="next-release-in-progress"
+            >
+              {`${inProgressCount}件`}
+            </span>
+          </dd>
+          <dd className="text-muted-foreground">mainへ未反映</dd>
         </div>
       </dl>
 
@@ -1780,6 +1819,7 @@ function ReleaseFlowGraph({
           repository={repository}
           group={nextGroup}
           unreleased={unreleased}
+          inProgressCount={repository.summary.activeLaneCount}
           latestReleaseMergedAt={latestReleaseMergedAt}
           releaseButton={nextGroup ? releaseButtonFor(nextGroup) : undefined}
           deployButton={

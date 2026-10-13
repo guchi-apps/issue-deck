@@ -59,7 +59,7 @@ describe("evaluateConditions と decideDependencyWait", () => {
     const results = evaluateConditions(
       ["merged", "released"],
       pr,
-      observed({ state: "closed", merged: true, baseRef: "develop", inProduction: false }),
+      observed({ state: "closed", merged: true, baseRef: "develop", inProduction: false, integrationBranch: "develop" }),
     );
     expect(results.map((r) => r.satisfied)).toEqual([true, false]);
     expect(decideDependencyWait(results)).toBe("wait");
@@ -120,7 +120,7 @@ describe("describeDependencyWait", () => {
     expect(notice.shortLabel).toBe("依存待ち");
     expect(notice.tone).toBe("pending");
     expect(notice.nextStep).toContain("操作は不要");
-    expect(notice.nextStep).toContain("本番（main）");
+    expect(notice.nextStep).toContain("本番反映待ち");
   });
   it("再開の要求・送信済み・失敗を区別する", () => {
     const labels = (["RESUME_REQUESTED", "RESUME_SENT", "RESUMED", "RESUME_FAILED"] as const).map(
@@ -144,5 +144,62 @@ describe("detectLegacyHoldCandidate", () => {
   });
   it("保留の語が無ければ拾わない", () => {
     expect(detectLegacyHoldCandidate(["guchi-apps/aide#614 を参照した"])).toBeNull();
+  });
+});
+
+describe("Issue依存の実装PR解決（#4570）", () => {
+  const prs = (list: { number: number; merged: boolean; baseRef: string; inProduction?: boolean | null }[]) =>
+    list.map((p) => ({ inProduction: null, ...p }));
+  const sat = (o: Partial<DependencyObservation>, condition: "merged" | "released" = "merged") =>
+    evaluateConditions([condition], issue, observed({ integrationBranch: "develop", ...o }))[0].satisfied;
+
+  it("Aがopenのまま実装PRがdevelopへマージ済みなら、mergedが成立する", () => {
+    expect(sat({ implementationPrs: prs([{ number: 1, merged: true, baseRef: "develop" }]) })).toBe(true);
+  });
+  it("mainへのマージ・別ブランチへのマージはdevelopマージとみなさない", () => {
+    expect(sat({ implementationPrs: prs([{ number: 1, merged: true, baseRef: "main" }]) })).toBe(false);
+    expect(sat({ implementationPrs: prs([{ number: 1, merged: true, baseRef: "other" }]) })).toBe(false);
+  });
+  it("PR作成のみ（未マージ）では成立しない", () => {
+    expect(sat({ implementationPrs: prs([{ number: 1, merged: false, baseRef: "develop" }]) })).toBe(false);
+  });
+  it("複数PRは全件マージ済みのときだけ成立する", () => {
+    expect(
+      sat({
+        implementationPrs: prs([
+          { number: 1, merged: true, baseRef: "develop" },
+          { number: 2, merged: false, baseRef: "develop" },
+        ]),
+      }),
+    ).toBe(false);
+  });
+  it("PRなしのクローズ（not planned等）・取得失敗・未解決は成立にしない", () => {
+    expect(sat({ state: "closed", implementationPrs: [] })).toBeNull();
+    expect(sat({ state: "open", implementationPrs: [] })).toBe(false);
+    expect(sat({ implementationError: "HTTP 500" })).toBeNull();
+    expect(sat({})).toBeNull();
+  });
+  it("releasedはdevelopマージだけでは成立しない", () => {
+    const merged = prs([{ number: 1, merged: true, baseRef: "develop", inProduction: false }]);
+    expect(sat({ implementationPrs: merged }, "released")).toBe(false);
+    expect(sat({ implementationPrs: prs([{ number: 1, merged: true, baseRef: "develop", inProduction: true }]) }, "released")).toBe(true);
+  });
+  it("PR参照のmergedも統合ブランチ以外へのマージは成立しない", () => {
+    const r = evaluateConditions(["merged"], pr, observed({ merged: true, baseRef: "main", integrationBranch: "develop" }));
+    expect(r[0].satisfied).toBe(false);
+  });
+  it("統合ブランチを確認できない観測では、mergedを成立にせず人の確認へ回す（Issue・PRとも）", () => {
+    const list = prs([{ number: 1, merged: true, baseRef: "main" }]);
+    expect(sat({ implementationPrs: list, integrationBranch: null })).toBeNull();
+    expect(sat({ implementationPrs: list, integrationBranch: undefined })).toBeNull();
+    const r = evaluateConditions(["merged"], pr, observed({ merged: true, baseRef: "main", integrationBranch: null }));
+    expect(r[0].satisfied).toBeNull();
+  });
+  it("統合ブランチ不明でも未マージPRは待ち、mergedだけが残れば人の確認になる", () => {
+    const unmerged = prs([{ number: 1, merged: false, baseRef: "main" }]);
+    expect(sat({ implementationPrs: unmerged, integrationBranch: null })).toBe(false);
+    const merged = prs([{ number: 1, merged: true, baseRef: "main" }]);
+    const results = evaluateConditions(["merged"], issue, observed({ implementationPrs: merged, integrationBranch: null }));
+    expect(decideDependencyWait(results)).toBe("needs_confirm");
   });
 });

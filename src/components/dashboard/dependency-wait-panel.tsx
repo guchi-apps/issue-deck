@@ -18,6 +18,8 @@ import { Button } from "@/components/ui/button";
 import type { DispatchStateHandle } from "@/hooks/use-dispatch-state";
 import {
   describeDependencyWait,
+  describeWaitTarget,
+  isClosedWaitReviewCandidate,
   formatDependencyRef,
   type DependencyWaitNotice,
   type DependencyWaitView,
@@ -94,7 +96,10 @@ export function DependencyWaitPanel({
   const host = (dispatch.hosts ?? []).find((h) => h.name === session?.host);
   const stashRejection = resolveSessionControlRejection({ host, session, kind: "INSTRUCTION", stashInput: true, hasActiveControlJob: false });
 
-  async function run(action: "recheck" | "resume" | "cancel", options?: { stashInput?: boolean }) {
+  const canRevise = isClosedWaitReviewCandidate(wait);
+  const history = wait.conditionHistory ?? [];
+
+  async function run(action: "recheck" | "resume" | "cancel" | "revise", options?: { stashInput?: boolean }) {
     setMessage(null);
     const result = await dispatch.controlDependencyWait({ id: wait.id, action, ...options });
     if (!result.ok) setMessage(result.message);
@@ -134,8 +139,8 @@ export function DependencyWaitPanel({
             <li key={r.condition} className="flex items-start gap-1.5">
               <span aria-hidden>{r.satisfied === true ? "✅" : r.satisfied === false ? "⏳" : "❓"}</span>
               <span>
-                {r.detail}
-                <span className="text-muted-foreground">（{r.condition}）</span>
+                <span className="font-medium">{describeWaitTarget(wait.dependency, r.condition)}</span>
+                <span className="text-muted-foreground">: {r.detail}</span>
               </span>
             </li>
           ))}
@@ -194,6 +199,18 @@ export function DependencyWaitPanel({
               未送信の入力を退避して、再開指示を送信
             </Button>
           )}
+          {canRevise && (
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              disabled={dispatch.isSubmitting}
+              title="通常の実装の取り込み待ちなら、本番マージを待たずdevelopマージで再開できます"
+              onClick={() => void run("revise")}
+            >
+              developマージ待ちへ見直す
+            </Button>
+          )}
           <Button
             type="button"
             size="sm"
@@ -207,6 +224,15 @@ export function DependencyWaitPanel({
         </div>
       )}
       {message && <p className="text-xs text-destructive">{message}</p>}
+      {history.length > 0 && (
+        <ul className="flex flex-col gap-0.5 text-xs text-muted-foreground" data-testid="dependency-wait-history">
+          {history.map((h) => (
+            <li key={h.at}>
+              条件を見直しました（{h.before.join("+")} → {h.after.join("+")}）: {h.reason}
+            </li>
+          ))}
+        </ul>
+      )}
 
       <InputStashList
         repositoryFullName={wait.repositoryFullName}

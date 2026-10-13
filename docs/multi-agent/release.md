@@ -222,14 +222,14 @@ pushすると、修正がmainにだけ残りdevelopから消え、次のリリ�
 設計は[../code-map.md](../code-map.md)の「本番へのマージ待ちもPush通知で届く」。
 
 
-### 本番マージ直後〜バンプPRが出るまでは「自動処理待ち」にする（#4526）
+### 本番マージ直後でも、時刻を理由に開始を止めない（#4599）
 
-本番(main)へのリリースPRをマージした直後は、バンプPR（`release/vX.Y.Z`）が出るまでscheduleを待つ（最大15分粒度）。
-この間はPRもDBの記録も無いため、`isAwaitingReleaseAutomation`（`src/lib/release-prep-state.ts`）が
-**直近のリリースPRのmainマージ時刻から20分以内で、未リリースの変更がある**ことから推定し、
-`resolveReleaseBlockedReason`が`awaiting-automation`（「自動処理待ち」＋「CIとバージョン更新が自動で実行されます。
-操作せずお待ちください」）を返す。`deploy.yml`は変えない（自動マージ不可カテゴリを避けるため、記録ではなく時刻での推定）。
-`release-preparing`と違い**押せない**（`canTriggerRelease`もfalse。自動のバンプと二重に走るため）。20分を過ぎれば自然に押せる。
+新しいリリース準備は**利用者の明示操作（`workflow_dispatch`）だけで始める**。本番(main)へのリリースPRを
+マージした直後でも、未リリースの変更があり、openなPR・準備の失敗記録・進行中の修正系列が無ければ開始できる。
+時刻（直近のmainマージからの経過）から「自動処理待ち」「実行中」を推定しない。かつて#4526で入れた
+`awaiting-automation`・`isAwaitingReleaseAutomation`は、scheduleが次のバンプPRを出すまでの空白を埋める
+推定だったため、scheduleの廃止とあわせて撤廃した。押せない理由は`release-preparing`（修正系列の記録）・
+`preparation-failed`（失敗の記録）・`preparation-unknown`（記録を取得できていない）など、実状態のものだけ。
 
 ### ブランチ名を変えるときに揃える場所
 
@@ -622,8 +622,9 @@ workflowの`allow-failed-deploy`へ渡る。入力を持たない古いcallerは
 
 ## トリガー
 
-`workflow_dispatch`（手動実行）、**`package.json`の変更を伴う`develop`へのpush**、
-**15分おきに起動する`schedule`**（#3404・#3416）の3つ。
+`workflow_dispatch`（手動実行）と**`package.json`の変更を伴う`develop`へのpush**の2つ。
+**定期の`schedule`は持たない**（#4599で廃止。reusable側も`schedule`起動は何もせず終了するため、
+タグ配布前の旧callerにscheduleが残っていても自動開始しない）。
 
 ```yaml
 on:
@@ -640,8 +641,6 @@ on:
         required: false
         type: boolean
         default: false
-  schedule:
-    - cron: "*/15 * * * *"
   push:
     branches: [develop]
     paths:
@@ -654,43 +653,18 @@ on:
 
 同時実行による二重作成を避けるため、`concurrency`グループで直列化している。
 
-### schedule起動の実行間隔は画面の設定で変える（#3416）
+### 定期起動（schedule）と実行間隔の設定は廃止した（#4599）
 
-GitHub Actionsのcronは実行時に変えられないため、**cronは15分おきに固定し、実際の間隔は
-gateステップが決める。** issue-deckの設定＞実行設定「リリース準備の自動実行間隔」
-（`AppSetting.releasePrepIntervalMinutes`。0=自動実行しない・15/30/60/120/360/720/1440分、
-未設定は60分）を`GET /api/release-prep/schedule`（`PROGRESS_REPORT_SECRET`認証）で取得し、
-UTCの15分枠の通し番号が「間隔÷15」で割り切れる回だけ進む。前回実行時刻は記録しない
-（ステートレス）。したがって1440分の実行時刻はUTC 0:00（日本時間9:00）になる。
+#3404・#3416で入れた15分おきのscheduleと、設定＞実行設定の「リリース準備の自動実行間隔」
+（`/api/settings/release-prep-interval`・`/api/release-prep/schedule`）は廃止した。利用者が
+「20分より短い間隔で手動実行したい」「自動処理は不要」と決めたため（過去の#178の方針に戻る）。
+`AppSetting.releasePrepIntervalMinutes`の列は旧値保持のため残すが、どこからも読まない。
+**開始後の進行（CI・レビュー・版更新・PR作成、バンプPRマージ後のpush起動によるdevelop→main PR作成）は
+イベント駆動のまま維持する。**
 
-- 間隔を取得できないとき（issue-deck停止・未デプロイ）は従来どおり60分として判定する
-- cronの遅延が15分を超えると、その枠の実行は落ちる。リリース準備は冪等なので次の枠で拾う
-- 手動の「リリースする」（`workflow_dispatch`）はこの判定を経由しない
-
-### schedule起動は実装中issueが無いことを確認してから走る（#3404）
-
-**過去（#178/#179）は「バンプPRの作成が人間の確認なしに走ってしまう」ことを理由に、
-developへのPRマージ・15分おきのscheduleを廃止し、`workflow_dispatch`だけに絞っていた。**
-#3404は「リリース準備開始（バンプPR・develop→mainのPR作成）自体は本番に影響せず、実際の
-マージは人間が確認する」ことを踏まえ、実装中issueが無いタイミングでの自動起動を改めて
-求めており、それに応じてscheduleを復活させている。**develop→mainの実際のマージは変わらず
-人間が手動で行う。**
-
-schedule起動時は、「リリース状態を判定する」ステップで`need_bump=true`になった場合でも、
-続く「スケジュール起動時、実装中のissueが無いことを確認する」ステップ（id: `gate`）が
-`GET /api/progress?repository=...&status=planning,implementation,develop-pr`でこのリポジトリの
-実装中issueの有無を確認し、1件でもあれば`ready=false`としてその回は見送る。issue-deckへ
-問い合わせできなかった場合も安全側に倒して見送る。バージョン判定・バンプPR作成の各ステップの
-`if`条件は`github.event_name == 'workflow_dispatch' || steps.gate.outputs.ready == 'true'`で、
-`workflow_dispatch`（画面の「リリースする」ボタン）はこの確認を経由せず常に実行される。
-
-判定はこのリポジトリ自身の進捗のみを見る。フリート横断（他リポジトリの実装中issue）は見ない。
-他リポジトリへ展開する場合は、配布はタグを上げるまで効かないとしても、リポジトリごとに
-判断が要る変更のため別Issueとして起票する。
-
-**pushトリガーからバンプPRが誤作成されることはない。** `need_bump`系のステップは
-`workflow_dispatch`または上記ゲート通過でしかtrueにならず、push起点の実行はdevelop→mainのPR作成
-だけを行う（pushイベントでは`gate`ステップ自体がskipされ、`ready`は空文字のまま）。
+他リポジトリのcallerの`schedule`定義は各リポジトリ側にあるため、共有タグを上げただけでは消えない。
+reusableが`schedule`起動を即終了するので自動開始はしないが、callerからの`schedule`削除は
+既存のタグ配布（画面の「新しいタグを切って配る」）と別Issueで追跡する。
 
 ### pushトリガーで起動したときは、ワークフローファイルもdevelop側のものが使われる
 
@@ -1118,3 +1092,12 @@ main起点の`deploy-recovery/*`ブランチへ取り込む。**`merges`APIは�
 ### 範囲外（別Issue）
 
 callerへの`finalize_request`の配線と実リポジトリでの通し確認（段階展開）、TestFlight配布結果の記録は含まない。
+
+## リリース画面の候補中心の並び（#4560）
+
+本番PR詳細（`release-pull-request-overview.tsx`）とスマホリリースシート（`mobile-release-sheet.tsx`）は、候補の識別（RC-n・revision・base/head）→ 状態と次の操作 → 候補共通検証 → 公開対象 → 履歴の順に並べる。
+
+- 候補共通検証の下に「検証の根拠」（`release-rc-evidence.tsx`）を置き、バンプ前（検証対象）とバンプ後（最終ビルド対象）のbase/headを分けて出す。引継ぎは元の結果と差分根拠を出し、バンプ後のSHAで実行したとは書かない
+- 候補の改訂履歴は新しい順
+- ブランチ一覧の束の見出しに「現在の本番版」「次のリリース候補」「旧方式で進行中」のバッジを出す（`branch-flow-view.tsx`）
+- 未対応: リリース履歴から候補への導線・旧リンク解決は別Issueで扱う

@@ -2,6 +2,7 @@ import type { RepoCandidate } from "@/lib/slack/candidates";
 import type { SlackBlock } from "@/lib/slack/client";
 
 export const ACTION_REPO_SELECT = "slack_repo_select";
+export const ACTION_REPO_SEARCH = "slack_repo_search";
 export const ACTION_REPO_CONFIRM = "slack_repo_confirm";
 export const ACTION_ISSUE_CONFIRM = "slack_issue_confirm";
 export const ACTION_ISSUE_CANCEL = "slack_issue_cancel";
@@ -59,6 +60,41 @@ export function repoSelectorBlocks(params: {
       ],
     },
   ];
+}
+
+/**
+ * 対象を絞れないときの選択UI（#4565）。関連候補を少数のメニューで出し、メニューを選ぶだけで調査へ進む
+ * （確定ボタンは挟まない）。候補外の許可済みリポジトリは、名称検索のメニューから選べる。
+ */
+export function targetChoiceBlocks(params: { requestId: string; options: RepoCandidate[] }): SlackBlock[] {
+  const blocks: SlackBlock[] = [];
+  if (params.options.length > 0) {
+    blocks.push({
+      type: "actions",
+      block_id: `repo:${params.requestId}`,
+      elements: [
+        {
+          type: "static_select",
+          action_id: ACTION_REPO_SELECT,
+          placeholder: { type: "plain_text", text: "関連しそうな候補から選ぶ" },
+          options: params.options.map(option),
+        },
+      ],
+    });
+  }
+  blocks.push({
+    type: "actions",
+    block_id: `repo_search:${params.requestId}`,
+    elements: [
+      {
+        type: "external_select",
+        action_id: ACTION_REPO_SEARCH,
+        placeholder: { type: "plain_text", text: "他のリポジトリを名前で探す" },
+        min_query_length: 0,
+      },
+    ],
+  });
+  return blocks;
 }
 
 export function proposalBlocks(params: {

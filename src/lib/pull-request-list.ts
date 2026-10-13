@@ -12,7 +12,7 @@ import { resolveReviewVerdictFreshness } from "@/lib/github/review-verdict-fresh
 import { isPromotionPullRequest } from "@/lib/knowledge-promotion-pr";
 import type { CiState } from "@/lib/github/release-api";
 import { findActiveSnooze, type SnoozeMap } from "@/lib/snooze";
-import { isRcReleaseCandidateHeadRef } from "@/lib/release-branch";
+import { isDeployRecoveryHeadRef, isRcReleaseCandidateHeadRef } from "@/lib/release-branch";
 import type {
   PullRequestKind,
   PullRequestSummary,
@@ -62,6 +62,20 @@ export function isReleaseHeadRef(headRef: string): boolean {
  * こちらをimportしているため定数の向きを逆にできず、ここでも持つ。
  */
 const MAIN_BRANCH = "main";
+
+/**
+ * 本番のバージョンアップに関わるPRか（#4542）。リリースPR（→`main`。候補を含む）・バンプPR・
+ * 本番復旧PR（`deploy-recovery/*`→`main`）。復旧PRは`kind`が`other`になるためheadとbaseで見る。
+ * PR一覧の「PR：本番リリース」ビューだけに出し、通常の3ビューからは外す。
+ */
+export function isProductionReleasePullRequest(pullRequest: {
+  baseRef: string;
+  headRef: string;
+  kind: PullRequestKind;
+}): boolean {
+  if (pullRequest.kind === "release" || pullRequest.kind === "version-bump") return true;
+  return pullRequest.baseRef === MAIN_BRANCH && isDeployRecoveryHeadRef(pullRequest.headRef);
+}
 
 /**
  * タイトル・本文中の`#123`形式のIssue参照。`owner/repo#123`のような他リポジトリへの参照は、
@@ -200,17 +214,37 @@ export function filterPullRequestsByView(
 ): PullRequestSummary[] {
   return pullRequests.filter((pullRequest) => {
     if (pullRequest.state !== "open") return false;
+    // 本番リリースに関わるPRは専用ビューだけに出し、通常の3ビューからは外す（#4542）
+    if (view === "release") return isProductionReleasePullRequest(pullRequest);
+    if (isProductionReleasePullRequest(pullRequest)) return false;
     if (view === "all") return true;
     // 共通知識の反映PRは専用メニュー「共通知識」の件数で扱う（#3082）。実行中・マージ待ちの
     // 一覧・件数・丸・ベルはここを通るため、ここで外せば全部から消える
     if (isPromotionPullRequest(pullRequest)) return false;
-    const completed =
-      !pullRequest.draft &&
-      (pullRequest.ciState === "failure" ||
-        (pullRequest.ciState === "success" &&
-          !isMergeJudgementPending(pullRequest.mergeJudgement)));
+    const completed = isMergeCompleted(pullRequest);
     return view === "completed" ? completed : !completed;
   });
+}
+
+function isMergeCompleted(pullRequest: PullRequestSummary): boolean {
+  return (
+    !pullRequest.draft &&
+    (pullRequest.ciState === "failure" ||
+      (pullRequest.ciState === "success" && !isMergeJudgementPending(pullRequest.mergeJudgement)))
+  );
+}
+
+/**
+ * 「マージ待ち」の母集団に、本番リリースPRのマージ待ち分も足したもの（#4542）。ベルの通知用。
+ * 通常のマージ待ちビューからは本番リリースPRを外したが、人がマージするまで進まないため通知は拾い続ける。
+ */
+export function filterMergePendingIncludingRelease(
+  pullRequests: PullRequestSummary[],
+): PullRequestSummary[] {
+  return [
+    ...filterPullRequestsByView(pullRequests, "completed"),
+    ...filterPullRequestsByView(pullRequests, "release").filter(isMergeCompleted),
+  ];
 }
 
 
@@ -235,8 +269,9 @@ export function computePullRequestNavCounts(
   pullRequests: PullRequestSummary[],
   loaded: boolean,
 ): PullRequestNavCounts {
-  if (!loaded) return { all: null, "in-progress": null, completed: null };
+  if (!loaded) return { all: null, "in-progress": null, completed: null, release: null };
   return {
+    release: filterPullRequestsByView(pullRequests, "release").length,
     all: filterPullRequestsByView(pullRequests, "all").length,
     "in-progress": filterPullRequestsByView(pullRequests, "in-progress").length,
     completed: filterPullRequestsByView(pullRequests, "completed").length,
@@ -248,7 +283,7 @@ export function sortPullRequestsForView(
   pullRequests: PullRequestSummary[],
   view: PullRequestViewId,
 ): PullRequestSummary[] {
-  return view === "all"
+  return view === "all" || view === "release"
     ? sortPullRequestsByUpdated(pullRequests)
     : sortOpenPullRequests(pullRequests);
 }

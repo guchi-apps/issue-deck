@@ -374,7 +374,7 @@ describe("computePullRequestNavCounts", () => {
       true,
     );
 
-    expect(counts).toEqual({ all: 4, "in-progress": 2, completed: 2 });
+    expect(counts).toEqual({ all: 4, "in-progress": 2, completed: 2, release: 0 });
   });
 
   it("マージ可否の判定中のPRは実行中側に数える（#2283）", () => {
@@ -395,7 +395,7 @@ describe("computePullRequestNavCounts", () => {
       true,
     );
 
-    expect(counts).toEqual({ all: 2, "in-progress": 1, completed: 1 });
+    expect(counts).toEqual({ all: 2, "in-progress": 1, completed: 1, release: 0 });
   });
 
   it("未取得のときはどのビューも件数を出さない", () => {
@@ -403,6 +403,7 @@ describe("computePullRequestNavCounts", () => {
       all: null,
       "in-progress": null,
       completed: null,
+      release: null,
     });
   });
 
@@ -411,6 +412,21 @@ describe("computePullRequestNavCounts", () => {
       all: 0,
       "in-progress": 0,
       completed: 0,
+      release: 0,
+    });
+  });
+
+  it("本番リリースPRは通常の3ビューから外し、本番リリースだけに数える（#4542）", () => {
+    const prs = [
+      pullRequest({ number: 1, ciState: "success" }),
+      releasePullRequest({ number: 2, ciState: "success" }),
+      pullRequest({ number: 3, headRef: "deploy-recovery/1-2-abc", baseRef: "main", kind: "other" }),
+    ];
+    expect(computePullRequestNavCounts(prs, true)).toEqual({
+      all: 1,
+      "in-progress": 0,
+      completed: 1,
+      release: 2,
     });
   });
 

@@ -455,7 +455,10 @@ export function buildDevelopmentSummary(input: SummaryInput): DevelopmentSummary
   const prFailedRepos = new Set(input.failedPullRequestRepositories);
   if (pullRequests !== null) {
     const open = pullRequests.filter((pr) => pr.state === "open");
-    const reviewWaiting = filterPullRequestsByView(open, "in-progress").filter((pr) => !pr.draft);
+    const reviewWaiting = [
+      ...filterPullRequestsByView(open, "in-progress"),
+      ...filterPullRequestsByView(open, "release").filter((pr) => !pr.draft && pr.ciState !== "success" && pr.ciState !== "failure"),
+    ].filter((pr) => !pr.draft);
     const mergeWaiting = pullRequestsAwaitingUserMerge(open);
     const awaitingSet = new Set(mergeWaiting.map((pr) => pr.id));
     for (const pr of open) {

@@ -34,7 +34,7 @@ const NAV_COUNTS = Object.fromEntries(NAV_VIEW_IDS.map((id) => [id, 0])) as Reco
   number
 >;
 
-const PR_NAV_COUNTS: PullRequestNavCounts = { all: 0, "in-progress": 0, completed: null };
+const PR_NAV_COUNTS: PullRequestNavCounts = { all: 0, "in-progress": 0, completed: null, release: 0 };
 
 const NO_MANUAL_STEP: ManualStepAttention = { total: 0, actionable: 0, waitingForPrerequisites: 0 };
 
@@ -172,6 +172,7 @@ describe("MobileHomeScreen（#1690）", () => {
       "チャット",
       "構想",
       "iOS拡張",
+      "本番リリース",
     ]);
     // 最下部の1行（#2188）は年に数回なのでタイルには混ぜない
     expect(screen.getByRole("button", { name: /新規アプリを立ち上げる/ })).toBeTruthy();
@@ -209,7 +210,7 @@ describe("MobileHomeScreen（#1690）", () => {
   it("「ユーザーの確認待ち」の件数にマージ待ちPRを足さない", () => {
     renderHome({
       navCounts: { ...NAV_COUNTS, "check-user": 2 },
-      pullRequestNavCounts: { all: 3, "in-progress": 0, completed: 3 },
+      pullRequestNavCounts: { all: 3, "in-progress": 0, completed: 3, release: 0 },
     });
 
     expect(screen.getByRole("button", { name: /ユーザーの確認待ち/ }).textContent).toBe(
@@ -221,7 +222,7 @@ describe("MobileHomeScreen（#1690）", () => {
   // PCの左メニューと同じ判定（`isPullRequestViewAttention`）を使う（#2334）
   it("要操作のマージ待ちPRがあれば件数をオレンジの丸で出す", () => {
     renderHome({
-      pullRequestNavCounts: { all: 3, "in-progress": 1, completed: 2 },
+      pullRequestNavCounts: { all: 3, "in-progress": 1, completed: 2, release: 0 },
       mergePendingAttention: { total: 2, autoMerging: 1, repairing: 0, actionRequired: 1 },
     });
 
@@ -231,7 +232,7 @@ describe("MobileHomeScreen（#1690）", () => {
 
   it("マージ待ちが自動で進むものだけなら丸にしない", () => {
     renderHome({
-      pullRequestNavCounts: { all: 3, "in-progress": 1, completed: 2 },
+      pullRequestNavCounts: { all: 3, "in-progress": 1, completed: 2, release: 0 },
       mergePendingAttention: { total: 2, autoMerging: 2, repairing: 0, actionRequired: 0 },
     });
 

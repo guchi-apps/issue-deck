@@ -90,6 +90,13 @@ const TURN_STALL_BODY =
   "直前のターンが完了しないまま中断しています。中断したところから作業を続けてください。";
 
 /**
+ * 計画ファイルを書いたまま提示せずに止まったときの復旧文面（#4562）。引き上げコメント
+ * （`buildSessionInterruptedCommentBody`）のコードブロックと同じ1行。提示だけを求め、承認は促さない。
+ */
+const PLAN_NOT_PRESENTED_BODY =
+  "書き終えた計画をExitPlanModeで提示してください。ほかのツールを並べず、文章だけで応答を終えないでください。";
+
+/**
  * 原因ごとの文面（#2886）。**ここだけが文面の正**で、画面もAPIもここから引く。
  *
  * `classifier_blocked`に「これを送れば直る」文面が無いのは、拒否そのものが妥当な挙動だから
@@ -147,6 +154,20 @@ const STALL_NOTICES: Record<SessionInterruptedReason, SessionStallNotice> = {
       },
     ],
   },
+  plan_not_presented: {
+    reason: "plan_not_presented",
+    title: "計画を提示しないまま応答を終えています",
+    detail: [
+      "計画ファイルを書いたあと、`ExitPlanMode`を呼ばずに文章だけで応答を終えました（#4562）。計画はまだ提示されておらず、承認できる状態ではありません。",
+      "フックが固定文面で1回差し戻しましたが、提示されませんでした。下のボタンで送ると、計画が通常の経路で提示され、この画面で読んで承認・修正できるようになります（承認は自動では行いません）。",
+    ],
+    presets: [
+      {
+        label: "ExitPlanModeで計画を提示するよう送る",
+        body: PLAN_NOT_PRESENTED_BODY,
+      },
+    ],
+  },
   classifier_blocked: {
     reason: "classifier_blocked",
     title: "コマンドが拒否されたまま応答を終えています",
@@ -190,7 +211,13 @@ export function describeSessionStall(session: DispatchSessionView): SessionStall
   const interruptedAt = Date.parse(session.interruptedAt);
   if (Number.isNaN(interruptedAt)) return null;
 
-  const movedAt = [session.activityAt, session.stepSeenAt]
+  // **引き上げと同時に送る「入力待ち」（許可のツールを持たない`WAITING_INPUT`）は「動き出した」に
+  // 数えない**（#4562）。`session-notify.sh`は`Stop`起点の引き上げ（`question_asked`・
+  // `classifier_blocked`・`plan_not_presented`）のあとに様子を入力待ちにするため、数えると
+  // `activityAt`が`interruptedAt`を必ず追い越し、パネルが一度も出なかった
+  const activityMoved =
+    session.activity === "WAITING_INPUT" && session.waitingTool === null ? null : session.activityAt;
+  const movedAt = [activityMoved, session.stepSeenAt]
     .map((value) => (value === null ? Number.NaN : Date.parse(value)))
     .filter((value) => !Number.isNaN(value));
   if (movedAt.some((value) => value > interruptedAt)) return null;

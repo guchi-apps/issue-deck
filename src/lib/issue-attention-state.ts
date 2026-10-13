@@ -1,4 +1,6 @@
 import { describeSessionPermission } from "@/lib/dispatch/issue-session";
+import type { DispatchSessionView } from "@/lib/dispatch/session-state";
+import { describeSessionStall } from "@/lib/dispatch/session-stall";
 import type { PlanReviewListState } from "@/lib/dispatch/plan-review-list-state";
 
 /**
@@ -18,6 +20,8 @@ export type IssueAttentionKind =
   | "merge"
   | "plan-review-creating"
   | "error"
+  | "stalled"
+  | "responded"
   | "dependency"
   | "reserved"
   | "running"
@@ -38,6 +42,16 @@ export type IssueAttentionInput = {
   failed?: boolean;
   /** 依存先の完了待ち。依存先の表示名（`#4375`など） */
   dependencyWaitLabel?: string | null;
+  /**
+   * セッションが停滞の引き上げ（`describeSessionStall`）を受けたまま動いていない（#4562）。
+   * 計画を提示せずに止まった・文章で問いかけて止まった、など。人が続け方を送るまで進まない
+   */
+  stalled?: boolean;
+  /**
+   * セッションは生きているが応答を終えている（`activity === "RESPONDED"`。#4562）。
+   * 作業完了か次の指示待ちで、**「実装を進めています」とは言えない**
+   */
+  responded?: boolean;
   /** 予約実行に積まれている */
   reserved: boolean;
   /** 実行キューでの待ち（「順番待ち 2番目」「起動中」） */
@@ -112,6 +126,16 @@ export function resolveIssueAttention(input: IssueAttentionInput): IssueAttentio
       openButtonLabel: "PRを確認",
     };
   }
+  if (input.stalled) {
+    return {
+      kind: "stalled",
+      tone: "blocked",
+      label: "停止中・要確認",
+      nextAction: "セッションが止まっています。詳細の「セッションが停滞しています」で理由を確認し、続け方を送ってください",
+      needsUser: true,
+      openButtonLabel: "詳細を確認",
+    };
+  }
   if (input.planReviewState === "creating" || input.planReviewState === "queued") {
     return {
       kind: "plan-review-creating",
@@ -128,6 +152,18 @@ export function resolveIssueAttention(input: IssueAttentionInput): IssueAttentio
       tone: "idle",
       label: "依存待ち",
       nextAction: `操作は不要です（${input.dependencyWaitLabel}の完了を待っています）`,
+      needsUser: false,
+      openButtonLabel: null,
+    };
+  }
+  // 応答を終えたセッションに「実装を進めています・操作不要」を出し続けない（#4562）。
+  // 正常完了・PR作成後もこの形になるため、要対応（`needsUser`）にはしない
+  if (input.responded) {
+    return {
+      kind: "responded",
+      tone: "idle",
+      label: "応答終了",
+      nextAction: "セッションは応答を終えています（作業完了か次の指示待ち）。続ける場合は追加指示を送ってください",
       needsUser: false,
       openButtonLabel: null,
     };
@@ -189,6 +225,9 @@ export function resolveIssueDetailAttention(params: {
   /** 計画レビューを作成中か（`isPlanReviewAttentionHeld`の結果。一覧の`creating`と同じ集合） */
   planReviewCreating: boolean;
   dependencyWaitLabel?: string | null;
+  /** `resolveSessionAttentionFlags`の結果（#4562） */
+  stalled?: boolean;
+  responded?: boolean;
   reserved: boolean;
   queueLabel?: string | null;
 }): IssueAttention | null {
@@ -201,6 +240,8 @@ export function resolveIssueDetailAttention(params: {
     planReviewState: planReviewCreating ? "creating" : null,
     failed: params.session?.state === "FAILED",
     dependencyWaitLabel: params.dependencyWaitLabel ?? null,
+    stalled: params.stalled ?? false,
+    responded: params.responded ?? false,
     reserved: params.reserved,
     queueLabel: params.queueLabel ?? null,
     running: params.session?.state === "ALIVE",
@@ -238,8 +279,21 @@ export function resolveIssueDetailAttentionFromState(params: {
       params.issue.repositoryFullName,
       params.issue.number,
     ),
+    ...resolveSessionAttentionFlags(params.session),
     reserved: params.reserved,
   });
+}
+
+/**
+ * セッションが「停滞の引き上げを受けたまま」か「応答を終えている」かを、一覧と詳細で同じ材料から
+ * 引く（#4562）。生きていないセッション・作業中・入力待ちはどちらも偽。
+ */
+export function resolveSessionAttentionFlags(
+  session: DispatchSessionView | null,
+): { stalled: boolean; responded: boolean } {
+  if (!session || session.state !== "ALIVE") return { stalled: false, responded: false };
+  const stalled = describeSessionStall(session) !== null;
+  return { stalled, responded: !stalled && session.activity === "RESPONDED" };
 }
 
 /** 実装セッションの依存待ち（#4321）のうち、いま待っているものの表示名（`#4375`など）。無ければnull */

@@ -357,7 +357,7 @@ export type PullRequestListScope = "open" | "all";
  *
  * `in-progress`と`completed`でopenなPRを過不足なく二分する。
  */
-export type PullRequestViewId = "all" | "in-progress" | "completed";
+export type PullRequestViewId = "all" | "in-progress" | "completed" | "release";
 
 export type PullRequestListResponse = {
   pullRequests: PullRequestSummary[];

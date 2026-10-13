@@ -1,7 +1,11 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { isLegacyReleaseCandidateHeadRef } from "@/lib/release-branch";
+import { isLegacyReleaseCandidateHeadRef, isRcReleaseCandidateHeadRef } from "@/lib/release-branch";
+import { useReleaseRc } from "@/hooks/use-release-rc";
+import { ReleaseRcFinalizePanel } from "@/components/dashboard/release-rc-finalize";
+import { ReleaseRcVerificationEvidence } from "@/components/dashboard/release-rc-evidence";
+import { ReleaseRcIdentity, ReleaseRcLegacyNotice } from "@/components/dashboard/release-rc-identity";
 
 import { Rocket } from "lucide-react";
 
@@ -70,6 +74,11 @@ export function MobileReleaseSheet({
   const prepUnknown = preparation.prepState === "unknown";
   const prepBlocked = preparation.prepState === "running" || preparation.prepState === "failed";
   const [allowPrepOverride, setAllowPrepOverride] = useState(false);
+  // リリース候補（#4495）の識別・公開準備。PCの本番PR詳細と同じ並びで出す（#4560）
+  const releasePr = releaseStatus?.available && releaseStatus.phase === "release_pr_open" ? releaseStatus.releasePullRequest : null;
+  const rc = useReleaseRc(repository.fullName, releasePr?.number ?? 0, open && releasePr !== null);
+  const rcCandidate = releasePr && isRcReleaseCandidateHeadRef(releasePr.headRef ?? "") ? (rc.overview?.candidate ?? null) : null;
+  const rcLegacy = releasePr && rc.overview?.legacy?.prNumber === releasePr.number ? rc.overview.legacy : null;
   const deployRun = releaseStatus?.available ? releaseStatus.deployWorkflowRun : null;
   const deployFailed = deployRun?.status === "completed" &&
     (deployRun.conclusion === "failure" || deployRun.conclusion === "timed_out");
@@ -132,6 +141,18 @@ export function MobileReleaseSheet({
                 </span>
               </div>
               <ReleasePreparationAlert repositoryFullName={repository.fullName} preparation={preparation} />
+              {rcCandidate && <ReleaseRcIdentity candidate={rcCandidate} />}
+              {rcCandidate && rc.overview?.finalization && (
+                <ReleaseRcFinalizePanel
+                  candidate={rcCandidate}
+                  finalization={rc.overview.finalization}
+                  repositoryFullName={repository.fullName}
+                  onChanged={rc.reload}
+                />
+              )}
+              {rc.overview && rcLegacy && (
+                <ReleaseRcLegacyNotice overview={rc.overview} legacy={rcLegacy} repositoryFullName={repository.fullName} onChanged={rc.reload} />
+              )}
               <ReleaseProgress
                 status={releaseStatus}
                 repoFullName={repository.fullName}
@@ -145,6 +166,9 @@ export function MobileReleaseSheet({
                   pullRequestNumber={releaseStatus.releasePullRequest.number}
                   headRef={releaseStatus.releasePullRequest.headRef}
                 />
+              )}
+              {rcCandidate && (
+                <ReleaseRcVerificationEvidence candidate={rcCandidate} finalization={rc.overview?.finalization?.current ?? null} />
               )}
               {/* リリースPRを出した後の修正は、凍結ブランチへ足さずバンプから作り直す（#3014）。
                   状態はこのシートのポーリングが拾うので、押した後の再取得は要らない */}

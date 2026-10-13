@@ -15,7 +15,6 @@ import {
 import { PlanReviewSettingsBlock } from "@/components/dashboard/settings/plan-review-settings-block";
 import { PlanReviewAutoReflectField } from "@/components/dashboard/settings/plan-review-auto-reflect-field";
 import { CodeReviewRecommendField } from "@/components/dashboard/settings/code-review-recommend-field";
-import { ReleasePrepIntervalField } from "@/components/dashboard/settings/release-prep-interval-field";
 import { ExecutionFlowOverview } from "@/components/dashboard/settings/execution-flow-overview";
 import { InfoHint } from "@/components/dashboard/settings/info-hint";
 import { useAppSettingsMutations } from "@/hooks/use-app-settings-mutations";
@@ -877,8 +876,6 @@ export function ExecutionSettingsSection({
 
       {(mode === "automation" || mode === "all") && <>
       {mode === "all" && <><h3 className="border-b pb-1 text-xs font-semibold tracking-wide text-muted-foreground">自動化</h3><p className="-mt-2 text-xs text-muted-foreground">各項目の変更はその場で保存されます。</p></>}
-
-      <ReleasePrepIntervalField />
 
       <CodeReviewRecommendField />
 

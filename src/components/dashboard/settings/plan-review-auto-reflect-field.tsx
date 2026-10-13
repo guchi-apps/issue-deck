@@ -15,7 +15,7 @@ type Values = { enabled: boolean; maxRounds: number };
 
 /**
  * 計画レビューの指摘を、Jevが判断して自動で反映する設定（#3648）。
- * `ReleasePrepIntervalField`と同じく、変えた時点で保存する（値の取得・保存とも専用APIで完結する）。
+ * 変えた時点で保存する（値の取得・保存とも専用APIで完結する）。
  */
 export function PlanReviewAutoReflectField() {
   const [values, setValues] = useState<Values | null>(null);

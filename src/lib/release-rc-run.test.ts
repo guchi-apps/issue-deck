@@ -24,6 +24,11 @@ const mocks = vi.hoisted(() => ({
   verifyJob: vi.fn(),
   reviewJob: vi.fn(),
   reservationUpdateMany: vi.fn(async () => ({ count: 1 })),
+  reservationCount: vi.fn(async () => 1),
+  reservationFindUnique: vi.fn(async () => null as unknown),
+  reservationCreate: vi.fn(),
+  reservationUpdate: vi.fn(),
+  versionAtMerge: vi.fn(() => null as string | null),
 }));
 
 vi.mock("@/lib/db", () => {
@@ -42,7 +47,13 @@ vi.mock("@/lib/db", () => {
       create: mocks.revisionCreate,
     },
     releaseFixSeries: { findMany: mocks.fixFindMany },
-    releaseVersionReservation: { updateMany: mocks.reservationUpdateMany },
+    releaseVersionReservation: {
+      updateMany: mocks.reservationUpdateMany,
+      count: mocks.reservationCount,
+      findUnique: mocks.reservationFindUnique,
+      create: mocks.reservationCreate,
+      update: mocks.reservationUpdate,
+    },
     releaseVerification: { findMany: vi.fn(async () => []) },
     repository: { findFirst: mocks.repositoryFindFirst },
     $transaction: async (fn: (tx: unknown) => unknown) => fn(db),
@@ -53,6 +64,7 @@ vi.mock("@/lib/github/release-api", () => ({
   dispatchReleaseCandidateWorkflow: mocks.dispatch,
   fetchBranchHeadSha: mocks.branchHead,
   fetchCommitSummary: vi.fn(),
+  fetchFileTextAtRef: vi.fn(async () => "x"),
   fetchMainHeadSha: mocks.mainHead,
   fetchOpenPullRequestsForBase: mocks.openPrs,
   fetchPullRequestForRebuild: mocks.prForRebuild,
@@ -64,6 +76,11 @@ vi.mock("@/lib/github/release-api", () => ({
 vi.mock("@/lib/github/app-auth", () => ({ getInstallationToken: vi.fn(async () => "t") }));
 vi.mock("@/lib/github/actions-api", () => ({ closePullRequest: vi.fn() }));
 vi.mock("@/lib/github/issues-api", () => ({ createComment: vi.fn() }));
+vi.mock("@/lib/release-finalize", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/release-finalize")>()),
+  parseFinalizeCallerSupport: () => ({ supported: true, versionFile: "package.json", versionQuery: "version", bumpCommand: false }),
+  readVersionFromText: () => mocks.versionAtMerge(),
+}));
 vi.mock("@/lib/release-verification", () => ({
   registerReleaseVerification: mocks.registerVerification,
   listReleaseVerificationRecords: vi.fn(async () => []),
@@ -269,6 +286,46 @@ describe("cancelReleaseRc", () => {
       where: { candidateId: "c1", status: "reserved" },
       data: expect.objectContaining({ status: "consumed", consumedMergeSha: "9".repeat(40) }),
     });
+  });
+
+  it("自動バンプで予約が無いままマージ済みなら、mainの版を確定して消費済みの予約を作ってから取り消す", async () => {
+    mocks.candidateFindUnique.mockResolvedValue(candidateRow({ phase: "preparing" }));
+    mocks.prsByHead.mockResolvedValue([{ number: 10, state: "closed", merged_at: "2026-10-12T00:00:00Z", merge_commit_sha: "9".repeat(40) }]);
+    mocks.reservationCount.mockResolvedValueOnce(0);
+    mocks.versionAtMerge.mockReturnValueOnce("1.2.3");
+    expect(await cancel()).toMatchObject({ ok: true });
+    expect(mocks.reservationCreate).toHaveBeenCalledWith({
+      data: expect.objectContaining({ version: "1.2.3", candidateId: "c1", status: "consumed", consumedMergeSha: "9".repeat(40) }),
+    });
+  });
+
+  it("予約が無く、マージ後の版を確定できなければ取り消さない", async () => {
+    mocks.candidateFindUnique.mockResolvedValue(candidateRow({ phase: "preparing" }));
+    mocks.prsByHead.mockResolvedValue([{ number: 10, state: "closed", merged_at: "2026-10-12T00:00:00Z", merge_commit_sha: "9".repeat(40) }]);
+    mocks.reservationCount.mockResolvedValueOnce(0);
+    mocks.versionAtMerge.mockReturnValueOnce(null);
+    expect(await cancel()).toEqual({ ok: false, error: "not_cancellable" });
+    expect(mocks.candidateUpdateMany).not.toHaveBeenCalled();
+    expect(mocks.reservationCreate).not.toHaveBeenCalled();
+  });
+
+  it("確定した版が台帳に既にあるときは（今回のマージで上がった版と限らないため）取り消さない", async () => {
+    mocks.candidateFindUnique.mockResolvedValue(candidateRow({ phase: "preparing" }));
+    mocks.prsByHead.mockResolvedValue([{ number: 10, state: "closed", merged_at: "2026-10-12T00:00:00Z", merge_commit_sha: "9".repeat(40) }]);
+    mocks.reservationCount.mockResolvedValueOnce(0);
+    mocks.versionAtMerge.mockReturnValueOnce("1.2.3");
+    mocks.reservationFindUnique.mockResolvedValueOnce({ id: "r0", status: "consumed", candidateId: "old", consumedMergeSha: "1".repeat(40) });
+    expect(await cancel()).toEqual({ ok: false, error: "not_cancellable" });
+    expect(mocks.candidateUpdateMany).not.toHaveBeenCalled();
+  });
+
+  it("版の台帳への書き込みが競合したときは取消が戻り、candidate_changedになる", async () => {
+    mocks.candidateFindUnique.mockResolvedValue(candidateRow({ phase: "preparing" }));
+    mocks.prsByHead.mockResolvedValue([{ number: 10, state: "closed", merged_at: "2026-10-12T00:00:00Z", merge_commit_sha: "9".repeat(40) }]);
+    mocks.reservationCount.mockResolvedValueOnce(0);
+    mocks.versionAtMerge.mockReturnValueOnce("1.2.3");
+    mocks.reservationCreate.mockRejectedValueOnce({ code: "P2002" });
+    expect(await cancel()).toEqual({ ok: false, error: "candidate_changed" });
   });
 
   it("マージ済みでもマージのSHAが分からなければ取り消さない", async () => {

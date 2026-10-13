@@ -1041,7 +1041,7 @@ export function useDispatchState(enabled: boolean) {
   const controlDependencyWait = useCallback(
     async (params: {
       id: string;
-      action: "recheck" | "resume" | "cancel";
+      action: "recheck" | "resume" | "cancel" | "revise";
       /** 未送信入力を退避してから再開指示を送る（#4383）。確認ダイアログを通した再開だけが立てる */
       stashInput?: boolean;
     }): Promise<{ ok: true; wait: DependencyWaitView } | { ok: false; message: string }> => {

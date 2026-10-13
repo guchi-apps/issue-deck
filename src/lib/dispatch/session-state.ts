@@ -283,6 +283,11 @@ export const SESSION_INTERRUPTED_REASONS = [
   /** `AskUserQuestion`を使わず、文章での問いかけで応答を終えた（#3447） */
   "question_asked",
   /**
+   * 計画ファイルを書いたまま`ExitPlanMode`で提示せずに応答を終え、Stopフックの差し戻し（1回）でも
+   * 提示しなかった（#4562）。**計画はまだ提示されておらず、承認できる状態ではない**
+   */
+  "plan_not_presented",
+  /**
    * Codexのターンが開始（`task_started`）したまま閉じず、転記の更新が止まった（#3174）。
    * **Codexのセッションでしか付かない**（Claude Codeの転記にこのマーカーは無い）
    */

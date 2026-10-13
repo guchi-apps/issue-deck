@@ -20,6 +20,7 @@ import { extractLinkedIssueNumbers } from "@/lib/github/release-pr-issue-link";
 import {
   dispatchReleaseWorkflow,
   fetchLatestDeployWorkflowRun,
+  fetchReleaseWorkflowActive,
   fetchLatestReleaseWorkflowRun,
   fetchOpenPullRequestsForBase,
   fetchPackageVersion,
@@ -299,6 +300,19 @@ async function handlePOST(request: NextRequest) {
       (latestDeploy.conclusion === "failure" || latestDeploy.conclusion === "timed_out")
     ) {
       return NextResponse.json({ error: "deploy_failed" }, { status: 409 });
+    }
+
+    // 実際にリリースworkflowが受付済み・実行中なら、重ねて起動しない（#4599）。画面の連打・複数画面・
+    // API直接起動のいずれでも、開始の受付から実行開始までの空白で二重に走らないようにする。
+    // 取得できないときは「実行中」とも「開始できる」とも決めつけず、確認できない旨を返す。
+    let active: boolean;
+    try {
+      active = await fetchReleaseWorkflowActive(owner, repo, token);
+    } catch {
+      return NextResponse.json({ error: "release_state_unknown" }, { status: 503 });
+    }
+    if (active) {
+      return NextResponse.json({ error: "release_already_running" }, { status: 409 });
     }
 
     await dispatchReleaseWorkflow(

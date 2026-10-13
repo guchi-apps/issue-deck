@@ -4,6 +4,9 @@ import { db } from "@/lib/db";
 import {
   buildDependencyResumeInstruction,
   buildDependencyUrl,
+  DEFAULT_IMPLEMENTATION_CONDITIONS,
+  DEFAULT_INTEGRATION_BRANCH,
+  isClosedWaitReviewCandidate,
   decideDependencyWait,
   detectLegacyHoldCandidate,
   evaluateConditions,
@@ -13,7 +16,9 @@ import {
   parseDependencyWaitStatus,
   DEPENDENCY_WAIT_CONDITIONS,
   type ConditionResult,
+  type DependencyConditionRevision,
   type DependencyObservation,
+  type ImplementationPrObservation,
   type DependencyRef,
   type DependencyWaitCondition,
   type DependencyWaitStatus,
@@ -24,6 +29,8 @@ import { describeInstructionJobFailure } from "@/lib/dispatch/input-stash";
 import { resolveInstallationToken } from "@/lib/dispatch/installation-token";
 import { enqueueSessionControlJob } from "@/lib/dispatch/jobs";
 import { findDispatchSessionForIssue } from "@/lib/dispatch/sessions";
+import { defaultVerifyDeps } from "@/lib/execution-plan/register";
+import { fetchBranchHeadSha } from "@/lib/github/branches-api";
 import { GithubApiError } from "@/lib/github/github-api-error";
 import { createComment, fetchIssueState } from "@/lib/github/issues-api";
 import { fetchPullRequest } from "@/lib/github/pull-requests-api";
@@ -79,7 +86,16 @@ export function toDependencyWaitView(row: SessionDependencyWait): DependencyWait
     resumeRequestedAt: row.resumeRequestedAt?.toISOString() ?? null,
     resumeSentAt: row.resumeSentAt?.toISOString() ?? null,
     resumedAt: row.resumedAt?.toISOString() ?? null,
+    conditionHistory: parseConditionHistory(row.conditionHistory),
   };
+}
+
+function parseConditionHistory(value: unknown): DependencyConditionRevision[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter(
+    (r): r is DependencyConditionRevision =>
+      !!r && typeof r === "object" && typeof (r as DependencyConditionRevision).at === "string",
+  );
 }
 
 /** 画面用: 待ち中のものと、直近に終わったもの（再開済み・失敗を数日は見せる） */
@@ -93,9 +109,45 @@ export async function listDependencyWaitViews(now: Date = new Date()): Promise<D
   return rows.map(toDependencyWaitView);
 }
 
+/** マージ済みPRのマージコミットがmainの祖先か。取得できなければ`null`（401だけは投げる） */
+async function fetchInProduction(
+  parsed: { owner: string; repo: string },
+  pr: { merged?: boolean; merge_commit_sha?: string | null },
+  token: string,
+): Promise<boolean | null> {
+  if (pr.merged !== true) return null;
+  const sha = pr.merge_commit_sha ?? null;
+  if (!sha) return null;
+  const res = await githubFetch(`${GITHUB_API}/repos/${parsed.owner}/${parsed.repo}/compare/${sha}...main`, token);
+  if (res.ok) {
+    const compare: { status?: string } = await res.json().catch(() => ({}));
+    return compare.status === "ahead" || compare.status === "identical";
+  }
+  if (res.status === 401) throw new GithubApiError(401, "GitHub API request failed: 401");
+  return null;
+}
+
+/**
+ * 開発の統合ブランチ（#4570）。`develop`があればそれ、無ければリポジトリのデフォルトブランチ。
+ * **mainへのマージをdevelopへのマージと取り違えないため**、評価側がPRのbaseと突き合わせる。
+ */
+export async function resolveIntegrationBranch(
+  repositoryFullName: string,
+  parsed: { owner: string; repo: string },
+  token: string,
+): Promise<string> {
+  const develop = await fetchBranchHeadSha(parsed.owner, parsed.repo, DEFAULT_INTEGRATION_BRANCH, token);
+  if (develop) return DEFAULT_INTEGRATION_BRANCH;
+  const row = await db.repository.findFirst({ where: { fullName: repositoryFullName }, select: { defaultBranch: true } });
+  return row?.defaultBranch || "main";
+}
+
 /**
  * 依存先の現在の状態を読む。本番（main）への反映は、マージ済みPRのマージコミットがmainの
  * 祖先かどうかで確かめる（`compare/{sha}...main`が`ahead`か`identical`なら入っている）。
+ *
+ * 依存先がIssueのときは、`issue-<番号>`ブランチをheadとするPRへ解決して実装PRの状態も返す（#4570）。
+ * マージされず閉じたPRは実装の証拠にしない。解決に失敗したら`implementationError`に残し、成立にしない。
  */
 export async function observeDependency(ref: DependencyRef): Promise<DependencyObservation> {
   const parsed = parseRepositoryFullName(ref.repository);
@@ -103,35 +155,47 @@ export async function observeDependency(ref: DependencyRef): Promise<DependencyO
   const token = await resolveInstallationToken(ref.repository);
   if (!token) throw new Error(`${ref.repository}はIssueDeckに接続されておらず、状態を読めません`);
 
+  const integrationBranch = await resolveIntegrationBranch(ref.repository, parsed, token).catch((error) => {
+    if (error instanceof GithubApiError && error.status === 401) throw error;
+    // 統合ブランチ不明の観測は`merged`を成立にしない（人の確認待ち）。原因を追えるよう残す
+    console.warn("[dependency-wait] 統合ブランチを取得できません", ref.repository, error);
+    return null;
+  });
+
   if (ref.kind === "issue") {
     const state = await fetchIssueState(parsed.owner, parsed.repo, ref.number, token);
     if (!state) throw new Error(`${formatDependencyRef(ref)}の状態を取得できませんでした`);
-    return { state, merged: null, baseRef: null, inProduction: null };
+    const base: DependencyObservation = { state, merged: null, baseRef: null, inProduction: null, integrationBranch };
+    try {
+      const resolved = await defaultVerifyDeps.branchPrs({ repository: ref.repository, number: ref.number }, token);
+      const numbers =
+        resolved.kind === "none" ? [] : resolved.kind === "one" ? [resolved.number] : resolved.numbers;
+      const prs: ImplementationPrObservation[] = [];
+      for (const number of numbers) {
+        const pr = await fetchPullRequest(parsed.owner, parsed.repo, number, token);
+        prs.push({
+          number,
+          merged: pr.merged === true,
+          baseRef: pr.base?.ref ?? null,
+          inProduction: await fetchInProduction(parsed, pr as never, token),
+        });
+      }
+      return { ...base, implementationPrs: prs };
+    } catch (error) {
+      if (error instanceof GithubApiError && error.status === 401) throw error;
+      return { ...base, implementationError: error instanceof Error ? error.message : "不明" };
+    }
   }
 
   const pr = await fetchPullRequest(parsed.owner, parsed.repo, ref.number, token);
   const merged = pr.merged === true;
-  let inProduction: boolean | null = null;
-  if (merged) {
-    const sha = (pr as { merge_commit_sha?: string | null }).merge_commit_sha ?? null;
-    if (sha) {
-      const res = await githubFetch(
-        `${GITHUB_API}/repos/${parsed.owner}/${parsed.repo}/compare/${sha}...main`,
-        token,
-      );
-      if (res.ok) {
-        const compare: { status?: string } = await res.json().catch(() => ({}));
-        inProduction = compare.status === "ahead" || compare.status === "identical";
-      } else if (res.status === 401) {
-        throw new GithubApiError(401, "GitHub API request failed: 401");
-      }
-    }
-  }
+  const inProduction = await fetchInProduction(parsed, pr as never, token);
   return {
     state: pr.state === "closed" ? "closed" : "open",
     merged,
     baseRef: pr.base?.ref ?? null,
     inProduction,
+    integrationBranch,
   };
 }
 
@@ -229,6 +293,44 @@ export async function registerDependencyWait(
       });
   const advanced = await advanceDependencyWait(row.id, { manual: false }, deps);
   return advanced ?? toDependencyWaitView(row);
+}
+
+/**
+ * 既存の`closed`待ちを、実装の取り込み待ち（`merged`）へ見直す（#4570）。
+ * **人が1件ずつ確認して押す操作**で、対象は`isClosedWaitReviewCandidate`だけ。変更前後・理由・操作者を
+ * `conditionHistory`へ残し、見直した直後に条件を評価し直す（成立済みなら再開まで進む）。
+ * 再開の追跡中・終了済みの待ちは変えない（二重起動を起こさない）。
+ */
+export async function reviseClosedWaitToMerged(
+  id: string,
+  userId: string | null,
+  deps: Deps = defaultDeps,
+): Promise<DependencyWaitView | null | "not_candidate"> {
+  const row = await db.sessionDependencyWait.findUnique({ where: { id } });
+  if (!row) return null;
+  const view = toDependencyWaitView(row);
+  if (!isClosedWaitReviewCandidate(view)) return "not_candidate";
+  const after: DependencyWaitCondition[] = [...DEFAULT_IMPLEMENTATION_CONDITIONS];
+  const revision: DependencyConditionRevision = {
+    at: deps.now().toISOString(),
+    by: userId,
+    before: view.conditions,
+    after,
+    reason: "通常の実装の取り込み待ちとして、クローズ待ちをdevelopマージ待ちへ見直した",
+  };
+  // 状態が候補のままのときだけ更新する（巡回・再開と重なっても1回しか書き換えない）
+  const claimed = await db.sessionDependencyWait.updateMany({
+    where: { id, status: row.status, conditions: { equals: row.conditions as never } },
+    data: {
+      conditions: after,
+      conditionHistory: [...(view.conditionHistory ?? []), revision],
+      lastObservation: undefined,
+      status: "WAITING",
+      notifiedKey: null,
+    },
+  });
+  if (claimed.count !== 1) return "not_candidate";
+  return advanceDependencyWait(id, { manual: false }, deps);
 }
 
 export async function cancelDependencyWait(id: string): Promise<DependencyWaitView | null> {

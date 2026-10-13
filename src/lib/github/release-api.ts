@@ -175,6 +175,8 @@ export type ReleaseHistoryItem = {
   recoveredBy?: string;
   /** 前の失敗版から引き継いで本番へ届けた変更（#4003）。この版自身の変更は`body` */
   carriedOver?: CarriedRelease[];
+  /** この版を公開した候補（RC-n）。新方式で公開した版だけ入る（#4597）。`prNumber`は候補の物理PR（revisionをまたいで同じ） */
+  releaseCandidate?: { sequence: number; revision: number; prNumber: number | null };
 };
 
 /**
@@ -669,6 +671,19 @@ export async function fetchLatestReleaseWorkflowRun(
   token: string,
 ): Promise<ReleaseWorkflowRun | null> {
   return fetchLatestWorkflowRun(owner, repo, RELEASE_WORKFLOW_FILE, token);
+}
+
+/**
+ * リリースworkflowが今まさに動いている（受付済み・キュー待ち・実行中）かを、GitHubの実状態で返す（#4599）。
+ * 開始操作の二重起動を、画面ではなくAPIの手前で止めるための材料。**時刻からは推定しない。**
+ * 取得できないときは例外を投げる（呼び出し側が「状態不明」として扱う）。
+ */
+export async function fetchReleaseWorkflowActive(owner: string, repo: string, token: string): Promise<boolean> {
+  for (const status of ["queued", "in_progress"]) {
+    const run = await fetchLatestWorkflowRun(owner, repo, RELEASE_WORKFLOW_FILE, token, `status=${status}`);
+    if (run !== null) return true;
+  }
+  return false;
 }
 
 /**

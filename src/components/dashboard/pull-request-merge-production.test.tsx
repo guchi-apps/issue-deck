@@ -309,7 +309,7 @@ describe("PullRequestMergeProduction", () => {
         if (url.startsWith("/api/repositories/release/verification")) {
           const section = (kind: string, state: string) => ({
             kind, state, reason: null, summary: null, evidenceUrl: null, agent: null, updatedAt: null,
-            findings: [], affectedPullRequests: [], affectedFiles: [], reviewedFiles: null, totalFiles: null, progress: null,
+            findings: [], suggestions: [], review: null, affectedPullRequests: [], affectedFiles: [], reviewedFiles: null, totalFiles: null, progress: null,
           });
           return {
             ok: true,

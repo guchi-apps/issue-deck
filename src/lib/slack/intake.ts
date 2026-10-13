@@ -3,6 +3,10 @@ import { randomUUID } from "node:crypto";
 import { Prisma, type SlackIntakeRequest } from "@prisma/client";
 
 import { executeConfirmedCard, handleChatMessage, type ChatUser } from "@/lib/chat/handlers";
+import { CODEX_CLI_PROVIDER, CODEX_INVESTIGATION_LIMITS, createCodexSession } from "@/lib/chat/investigation/codex-model";
+import { resolveChatExecution } from "@/lib/chat/investigation/model";
+import { describeUnavailable } from "@/lib/chat/investigation/reply";
+import type { RunSession } from "@/lib/chat/investigation/agent";
 import { parseChatContext } from "@/lib/chat/store";
 import type { ChatConfirmCard, ChatContext, ChatInvestigationCard } from "@/lib/chat/types";
 import { db } from "@/lib/db";
@@ -15,7 +19,9 @@ import {
   ACTION_ISSUE_CANCEL,
   ACTION_ISSUE_CONFIRM,
   ACTION_REPO_CONFIRM,
+  ACTION_REPO_SEARCH,
   ACTION_REPO_SELECT,
+  targetChoiceBlocks,
 } from "@/lib/slack/blocks";
 import { createEpic } from "@/lib/epic-draft/create";
 import { githubForUser } from "@/lib/epic-draft/github";
@@ -421,11 +427,14 @@ async function decideTarget(ctx: IntakeContext, request: SlackIntakeRequest): Pr
     }
     if (decision.kind === "ambiguous") {
       const list = decision.options.map((c) => `• ${c.name === c.fullName ? c.fullName : `${c.name}（${c.fullName}）`}`).join("\n");
-      const posted = await reply(
-        ctx,
-        request,
-        `対象のリポジトリを一つに絞れませんでした。どれの依頼か、このスレッドへ返信してください（名前かowner/repoだけで構いません。答えがそろえば、そのまま調査して起案します）。\n${list}`,
-      );
+      const lead = decision.aiFailure
+        ? `AIによる対象の判別ができなかったため（${decision.aiFailure}）、名称とIssue題名の一致で絞り込みました。`
+        : "対象のリポジトリを一つに絞れませんでした。";
+      const body =
+        decision.options.length > 0
+          ? `${lead}関連しそうな候補です。下のメニューから選ぶと、そのまま調査して起案します。\n${list}`
+          : `${lead}関連しそうな候補を見つけられませんでした。下のメニューで名前を探して選んでください（名前かowner/repoをスレッドへ返信しても構いません）。`;
+      const posted = await reply(ctx, request, body, targetChoiceBlocks({ requestId: request.id, options: decision.options }));
       await db.slackIntakeRequest.update({
         where: { id: request.id },
         data: { status: "awaiting_repo", selectorTs: posted.ts, selectedRepo: null, targetBasis: decision.basis },
@@ -589,9 +598,10 @@ export async function handleInteraction(ctx: IntakeContext, payload: SlackIntera
   if (!request || request.channelId !== channelId || request.teamId !== teamId || request.slackUserId !== slackUserId) return;
 
   const id = action.action_id;
-  if (id === ACTION_REPO_SELECT) {
+  if (id === ACTION_REPO_SELECT || id === ACTION_REPO_SEARCH) {
+    // メニューを選ぶだけで確定して調査へ進む（#4565）。連打・旧UIの再操作は`awaiting_repo`の取得で1回に絞る
     const value = action.selected_option?.value;
-    if (value) await db.slackIntakeRequest.updateMany({ where: { id: request.id, status: "awaiting_repo" }, data: { selectedRepo: value } });
+    if (value) await chooseRepo(ctx, request, value);
     return;
   }
   if (id === ACTION_REPO_CONFIRM) return confirmRepo(ctx, request, payload);
@@ -615,6 +625,10 @@ async function confirmRepo(ctx: IntakeContext, request: SlackIntakeRequest, payl
     await reply(ctx, request, "⚠️ 対象のリポジトリがまだ選ばれていません。選択メニューで選んでから、もう一度押してください。");
     return;
   }
+  await chooseRepo(ctx, request, chosen);
+}
+
+async function chooseRepo(ctx: IntakeContext, request: SlackIntakeRequest, chosen: string): Promise<void> {
   // 権限のあるリポジトリだけを受ける（選択肢の改ざん・権限喪失への備え）
   const candidates = await listRepoCandidates(ctx.config, request.userId);
   if (!candidates.some((c) => c.fullName === chosen)) {
@@ -695,32 +709,42 @@ async function runProposal(ctx: IntakeContext, request: SlackIntakeRequest, text
       return;
     }
   }
-  const stopInvestigation = async (stage: string, reason: string) =>
-    failRequest(ctx, request, stage, reason, {
-      retryable: true,
+  // 失敗の原因（認証・利用枠・実行ホスト・時間切れなど）を消さず、段階・具体的な理由・必要な操作を返す（#4565）
+  const stopInvestigation = async (stage: string, raw: string, options: { generic?: boolean } = {}) => {
+    const failure = describeUnavailable(raw);
+    const shown = raw.replace(/Codex\(\w+\)\s*/g, "").slice(0, 200);
+    const needsFix = NEEDS_FIX_KINDS.has(failure.kind);
+    const reason = failure.kind === "other" || options.generic ? shown : `${failure.label}（${shown}）`;
+    await failRequest(ctx, request, stage, reason, {
+      retryable: !needsFix,
       unfinished: "調査とIssueの作成（未調査の案は作成していません）",
-      resume: "時間をおいて、このスレッドへ「再開」と返信してください（補足を返信すると、その内容を加えて調べ直します）。",
+      resume:
+        failure.kind === "other" || options.generic
+          ? "補足を返信すると、その内容を加えて調べ直します。同じ内容で調べ直すときは「再開」と返信してください（依頼・選択済みの対象は保持されます）。"
+          : needsFix
+            ? `${failure.next}待っても直らないため、直してから、このスレッドへ「再開」と返信してください（依頼・選択済みの対象は保持され、不足した工程から続けます）。`
+            : `${failure.next}このスレッドへ「再開」と返信すると、依頼・選択済みの対象を保ったまま続けます。`,
     });
+  };
   try {
     const conversation = await ensureConversation(request, repo);
     const context = parseChatContext(conversation.context);
     const prompt = `${text}\n\n${SLACK_PROPOSAL_INSTRUCTION.replace("{repo}", repo)}`;
-    const result = await handleChatMessage({ user, context, text: prompt, recentUserTexts: [text], history: [] });
-    await saveTurn(conversation.id, text, result.text, result.cards, result.nextContext);
+    const { result, lastFailure } = await investigate(user, conversation.id, context, text, prompt);
     if (result.unavailable) {
-      await stopInvestigation("調査", `AIが使えず調査できませんでした: ${result.text.slice(0, 200)}`);
+      await stopInvestigation("調査", lastFailure ?? result.text);
       return;
     }
     const investigation = result.cards.find((c): c is ChatInvestigationCard => c.type === "investigation");
     if (investigation && investigation.stopReason) {
-      await stopInvestigation("調査", `調査が途中で止まりました: ${investigation.stopReason.slice(0, 200)}`);
+      await stopInvestigation("調査", investigation.stopReason);
       return;
     }
     const card = result.cards.find((c): c is IssueCard => c.type === "confirm_issue");
     const epicCard = result.cards.find((c): c is EpicCard => c.type === "confirm_epic");
     if (!card && epicCard) {
       if (result.draftFallback || !investigation || investigation.evidence.length === 0) {
-        await stopInvestigation("調査", "実装・関連Issueを読んだ根拠を得られず、調査済みの案にできませんでした");
+        await stopInvestigation("調査", "調査は終わりましたが、実装・関連Issue／PRを読んだ根拠（取得結果）が得られず、調査済みの案にできませんでした。GitHubの取得に失敗したか、読む対象が見つからなかった可能性があります", { generic: true });
         return;
       }
       await startEpic(ctx, request, epicCard);
@@ -734,7 +758,7 @@ async function runProposal(ctx: IntakeContext, request: SlackIntakeRequest, text
       return;
     }
     if (result.draftFallback || !investigation || investigation.evidence.length === 0) {
-      await stopInvestigation("調査", "実装・関連Issueを読んだ根拠を得られず、調査済みの案にできませんでした");
+      await stopInvestigation("調査", "調査は終わりましたが、実装・関連Issue／PRを読んだ根拠（取得結果）が得られず、調査済みの案にできませんでした。GitHubの取得に失敗したか、読む対象が見つからなかった可能性があります", { generic: true });
       return;
     }
     if (card.repo !== repo) {
@@ -786,6 +810,62 @@ async function runProposal(ctx: IntakeContext, request: SlackIntakeRequest, text
   }
 }
 
+/** 設定を直さない限り待っても回復しない失敗の種別 */
+const NEEDS_FIX_KINDS = new Set([
+  "auth_missing",
+  "auth_rejected",
+  "api_credit_exhausted",
+  "codex_unsupported",
+  "codex_not_logged_in",
+  "codex_api_key_auth",
+  "codex_unsupported_model",
+]);
+
+/**
+ * 調査の実行。設定済みのAI実行先に従う（#4565）。Codex設定ならChatと同じ`createCodexSession`（サブPCのログイン済み
+ * Codex CLI・`ChatRun`）で動かし、OpenAI APIへは逃がさない。Claude設定は従来どおり共通のAPI経路。
+ * Codexの失敗理由（`Codex(<種別>)`付き）は`lastFailure`で呼び出し側へ返し、原因を消さない。
+ */
+async function investigate(user: ChatUser, conversationId: string, context: ChatContext, text: string, prompt: string) {
+  const execution = await resolveChatExecution();
+  if (execution.mode !== "codex") {
+    const result = await handleChatMessage({ user, context, text: prompt, recentUserTexts: [text], history: [] });
+    await saveTurn(conversationId, text, result.text, result.cards, result.nextContext);
+    return { result, lastFailure: null as string | null };
+  }
+  const userMessage = await db.chatMessage.create({ data: { conversationId, role: "user", text: text.slice(0, 2000) } });
+  const run = await db.chatRun.create({
+    data: { conversationId, userMessageId: userMessage.id, status: "running", phase: "サブPCへ送信しています", provider: CODEX_CLI_PROVIDER, model: execution.model },
+  });
+  let lastFailure: string | null = null;
+  const codexSession = createCodexSession({ runId: run.id, model: execution.model, requestedByUserId: user.id });
+  const session: RunSession = async (input) => {
+    const outcome = await codexSession(input);
+    lastFailure = outcome.ok ? null : outcome.reason;
+    return outcome;
+  };
+  try {
+    const result = await handleChatMessage({
+      user,
+      context,
+      text: prompt,
+      recentUserTexts: [text],
+      history: [],
+      investigationDeps: { session, limits: CODEX_INVESTIGATION_LIMITS },
+    });
+    await saveTurn(conversationId, text, result.text, result.cards, result.nextContext, userMessage.id);
+    const failed = Boolean(lastFailure && result.unavailable);
+    await db.chatRun.update({
+      where: { id: run.id },
+      data: { status: failed ? "failed" : "succeeded", failureKind: lastFailure ? describeUnavailable(lastFailure).kind.slice(0, 32) : null, phase: "", stepRequest: Prisma.DbNull },
+    });
+    return { result, lastFailure };
+  } catch (error) {
+    await db.chatRun.update({ where: { id: run.id }, data: { status: "failed", failureKind: "codex_error", phase: "", stepRequest: Prisma.DbNull } }).catch(() => undefined);
+    throw error;
+  }
+}
+
 async function ensureConversation(request: SlackIntakeRequest, repo: string) {
   if (request.conversationId) {
     const existing = await db.chatConversation.findUnique({ where: { id: request.conversationId } });
@@ -805,9 +885,17 @@ async function ensureConversation(request: SlackIntakeRequest, repo: string) {
   return created;
 }
 
-async function saveTurn(conversationId: string, userText: string, replyText: string, cards: unknown[], context: ChatContext) {
+async function saveTurn(
+  conversationId: string,
+  userText: string,
+  replyText: string,
+  cards: unknown[],
+  context: ChatContext,
+  /** 実行前に利用者発言を保存済みのとき（Codexの`ChatRun`が参照する）。二重に保存しない */
+  savedUserMessageId?: string,
+) {
   await db.$transaction([
-    db.chatMessage.create({ data: { conversationId, role: "user", text: userText.slice(0, 2000) } }),
+    ...(savedUserMessageId ? [] : [db.chatMessage.create({ data: { conversationId, role: "user", text: userText.slice(0, 2000) } })]),
     db.chatMessage.create({
       data: { conversationId, role: "assistant", text: replyText, cards: JSON.parse(JSON.stringify(cards)) },
     }),

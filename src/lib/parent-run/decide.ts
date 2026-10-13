@@ -31,7 +31,7 @@ export function parseChildLaunchState(value: unknown): ChildLaunchState {
 /** 子の実装PR（`issue-<番号>`ブランチ）の解決結果。`error`は取得失敗で、成立とは解釈しない */
 export type PrResolution =
   | { kind: "none" }
-  | { kind: "one"; number: number; merged: boolean; inProduction: boolean | null }
+  | { kind: "one"; number: number; merged: boolean; inProduction: boolean | null; integration?: boolean }
   | { kind: "many"; numbers: number[] }
   | { kind: "error"; message: string };
 
@@ -87,9 +87,12 @@ export function isChildReleased(obs: RefObservation): boolean {
   return obs.pr.kind === "one" && obs.pr.merged && obs.pr.inProduction === true;
 }
 
-/** 子のdevelopマージが実装PRで確かめられている。Issueのクローズだけでは成立としない（親の完了条件に使う） */
+/**
+ * 子のdevelopマージが実装PRで確かめられている。Issueのクローズだけでは成立としない（親の完了条件に使う）。
+ * **統合ブランチへのマージと確かめられた場合だけ**（mainへの直接マージ・統合ブランチを確認できない場合は成立にしない）
+ */
 export function isChildMerged(obs: RefObservation): boolean {
-  return obs.pr.kind === "one" && obs.pr.merged;
+  return obs.pr.kind === "one" && obs.pr.merged && obs.pr.integration === true;
 }
 
 /** 依存先1件の条件を評価する。**取得失敗・曖昧は`null`（成立とも未成立とも言わない）** */
@@ -117,7 +120,13 @@ export function evaluateDependency(
             : { condition, satisfied: false, detail: "実装PRがまだありません" };
         }
         if (!pr.merged) return { condition, satisfied: false, detail: `PR #${pr.number}がまだマージされていません` };
-        if (condition === "merged") return { condition, satisfied: true, detail: `PR #${pr.number}がマージ済み` };
+        if (condition === "merged") {
+          // mainなど統合ブランチ以外へのマージは、developへのマージとはみなさない（#4570）
+          if (pr.integration === undefined) return { condition, satisfied: null, detail: `PR #${pr.number}のマージ先が統合ブランチか確認できません` };
+          return pr.integration
+            ? { condition, satisfied: true, detail: `PR #${pr.number}がdevelopへマージ済み` }
+            : { condition, satisfied: false, detail: `PR #${pr.number}は統合ブランチ（develop）以外へのマージです` };
+        }
         if (pr.inProduction === null) return { condition, satisfied: null, detail: "mainへの反映を確認できませんでした" };
         return pr.inProduction
           ? { condition, satisfied: true, detail: `PR #${pr.number}がmainへ反映済み` }
@@ -192,7 +201,17 @@ export function evaluateRun(input: RunEvaluationInput): RunEvaluation {
       const via = obs.pr.kind === "one" ? `PR #${obs.pr.number}` : "クローズ";
       return mk("done", "完了", `${via}で完了済み。成果を再利用します`);
     }
-    if (obs.pr.kind === "one" && obs.pr.merged) return mk("done", "完了", `PR #${obs.pr.number}がdevelopへマージ済み`);
+    if (obs.pr.kind === "one" && obs.pr.merged) {
+      if (obs.pr.integration === true) return mk("done", "完了", `PR #${obs.pr.number}がdevelopへマージ済み`);
+      return mk(
+        "attention",
+        "要確認",
+        obs.pr.integration === false
+          ? `PR #${obs.pr.number}は統合ブランチ（develop）以外へマージされています。developに成果がないため完了とは扱いません`
+          : `PR #${obs.pr.number}のマージ先が統合ブランチか確認できません。完了とは扱いません`,
+        "user",
+      );
+    }
 
     if (ci.launchState === "LAUNCH_FAILED") {
       return mk("attention", "起動失敗", ci.lastError ?? "起動できませんでした", "retry");

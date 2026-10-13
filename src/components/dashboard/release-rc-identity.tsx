@@ -80,9 +80,9 @@ export function ReleaseRcRevisionHistory({ candidate }: { candidate: RcCandidate
   return (
     <section aria-label="候補の改訂履歴" className="flex flex-col gap-1 rounded-[10px] border bg-card p-3.5">
       <h3 className="text-sm font-semibold">候補の改訂履歴</h3>
-      <p className="text-[11.5px] text-muted-foreground">過去のrevisionの結果は記録として残し、現在の合否には使いません。</p>
+      <p className="text-[11.5px] text-muted-foreground">新しい順。過去のrevisionの結果は記録として残し、現在の合否には使いません。</p>
       <ol className="flex flex-col">
-        {candidate.revisions.map((revision) => {
+        {[...candidate.revisions].reverse().map((revision) => {
           const tone = REVISION_STATUS[revision.status];
           const isCurrent = revision.revision === candidate.currentRevision && revision.status === "applied";
           return (

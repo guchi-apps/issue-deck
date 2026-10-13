@@ -104,8 +104,11 @@ on:
 # 既存の reusable-issue-dispatch.yml・reusable-claude-ci-fix.yml も name / on / jobs だけを持つ。
 jobs:
   release:
-    # 公開準備（#4496）の要求のときは、旧方式・候補管理の処理を動かさず`finalize`ジョブだけが動く
-    if: inputs.finalize-request == ''
+    # 公開準備（#4496）の要求のときは、旧方式・候補管理の処理を動かさず`finalize`ジョブだけが動く。
+    # **`schedule`起動では何もしない**（#4599）。新しいリリース準備は利用者の明示操作
+    # （workflow_dispatch）だけで始め、定期起動では始めない。タグ配布前の旧callerに`schedule`が
+    # 残っていても、ここで止めて自動開始させない（状態判定・復旧処理も動かさない）
+    if: inputs.finalize-request == '' && github.event_name != 'schedule'
     runs-on: ubuntu-latest
     # 準備が進んだ（バンプPRかリリースPRを作れた）かどうか。`notify-prepared`が、過去の
     # 失敗の記録を解決にするために使う（#4335）。何もしなかったrun（schedule・対象なし）は報告しない
@@ -833,65 +836,9 @@ jobs:
           echo "対象issue:"
           cat /tmp/release-issue-lines.txt
 
-      - name: スケジュール起動時、実装中のissueが無いことを確認する
-        # 一定間隔の`schedule`起動時だけ、このリポジトリに実装中（Planning/Implementation/
-        # Develop PR）のissueが無いことを確認してからバンプPRを作る（#3404）。過去
-        # （#178/#179）は「バンプPRの作成が人間の確認なしに走ってしまう」ことを理由に
-        # 自動トリガーを廃止した経緯があるが、実装中issueが無いタイミングに限ることで、
-        # 作業中の変更を巻き込まずにリリース準備だけを進められるようにする。
-        # `workflow_dispatch`（画面の「リリースする」ボタン）はこの確認を経由せず、
-        # これまでどおり常に実行する。フリート横断（他リポジトリの実装中issue）は見ない。
-        id: gate
-        if: steps.deploy-gate.outputs.ready == 'true' && steps.state.outputs.need_bump == 'true' && github.event_name == 'schedule'
-        env:
-          GH_REPO: ${{ github.repository }}
-          APP_BASE_URL: ${{ vars.APP_BASE_URL }}
-          PROGRESS_REPORT_SECRET: ${{ secrets.PROGRESS_REPORT_SECRET }}
-        run: |
-          set -e
-
-          READY=false
-          if [ -z "$APP_BASE_URL" ] || [ -z "$PROGRESS_REPORT_SECRET" ]; then
-            echo "APP_BASE_URL / PROGRESS_REPORT_SECRET が未設定のため、今回のスケジュール起動は見送ります"
-          elif ! INTERVAL="$(curl -sSf -m 20 \
-              -H "Authorization: Bearer $PROGRESS_REPORT_SECRET" \
-              "$APP_BASE_URL/api/release-prep/schedule" | jq -er '.intervalMinutes | select(type == "number")')"; then
-            # 間隔を取得できない（未デプロイ・停止中）場合は従来どおりの1時間おきに倒す
-            echo "自動実行間隔を取得できなかったため、既定の60分として判定します"
-            INTERVAL=60
-          fi
-          # cronは15分おきに起動する（#3416）。間隔の倍数にあたる15分枠の回だけ進む。
-          # 0は自動実行しない。間隔は15の倍数のみ（src/lib/app-settings.ts）。
-          SLOT=$(( $(date -u +%s) / 900 ))
-          if [ -n "${INTERVAL:-}" ] && [ "$INTERVAL" -le 0 ]; then
-            echo "リリース準備の自動実行が無効（間隔0）のため、今回のスケジュール起動は見送ります"
-          elif [ -n "${INTERVAL:-}" ] && [ $(( SLOT % (INTERVAL / 15) )) -ne 0 ]; then
-            echo "設定した間隔（${INTERVAL}分）の実行枠ではないため、今回のスケジュール起動は見送ります"
-          elif [ -z "$APP_BASE_URL" ] || [ -z "$PROGRESS_REPORT_SECRET" ]; then
-            :
-          else
-            BODY_FILE="${RUNNER_TEMP:-/tmp}/release-gate-progress.json"
-            CODE="$(curl -sS -m 20 -o "$BODY_FILE" -w '%{http_code}' \
-              -H "Authorization: Bearer $PROGRESS_REPORT_SECRET" \
-              "$APP_BASE_URL/api/progress?repository=$GH_REPO&status=planning,implementation,develop-pr")" || CODE=000
-            if [ "$CODE" != "200" ]; then
-              echo "issue-deckへ問い合わせできなかったため（HTTP $CODE）、今回のスケジュール起動は見送ります"
-            elif [ "$(jq -r '.available // false' "$BODY_FILE" 2>/dev/null || echo false)" != "true" ]; then
-              echo "issue-deckが進捗を返せなかったため、今回のスケジュール起動は見送ります"
-            else
-              COUNT="$(jq '.issues | length' "$BODY_FILE" 2>/dev/null || echo -1)"
-              if [ "$COUNT" = "0" ]; then
-                READY=true
-              else
-                echo "実装中(Planning/Implementation/Develop PR)のissueが${COUNT}件あるため、今回のスケジュール起動は見送ります"
-              fi
-            fi
-          fi
-          echo "ready=$READY" >> "$GITHUB_OUTPUT"
-
       - name: コード変更内容からバージョンの上げ幅を判定する
         id: version-decision
-        if: steps.deploy-gate.outputs.ready == 'true' && steps.state.outputs.need_bump == 'true' && (github.event_name == 'workflow_dispatch' || steps.gate.outputs.ready == 'true')
+        if: steps.deploy-gate.outputs.ready == 'true' && steps.state.outputs.need_bump == 'true'
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
@@ -991,7 +938,7 @@ jobs:
         id: bump
         # version-decisionステップ自体が失敗した場合でもpatchへフォールバックできるよう、
         # 前ステップの成否によらず実行する
-        if: always() && steps.deploy-gate.outputs.ready == 'true' && steps.state.outputs.need_bump == 'true' && (github.event_name == 'workflow_dispatch' || steps.gate.outputs.ready == 'true')
+        if: always() && steps.deploy-gate.outputs.ready == 'true' && steps.state.outputs.need_bump == 'true'
         env:
           # structured_outputはClaude Codeの判定結果（信頼できないテキストを含みうる）のため、
           # run:本文に直接展開せずenv経由でのみ参照する
@@ -1063,7 +1010,7 @@ jobs:
 
       - name: バージョンをbumpしてdevelop向けPRを作成する
         id: bump-pr
-        if: always() && steps.deploy-gate.outputs.ready == 'true' && steps.state.outputs.need_bump == 'true' && (github.event_name == 'workflow_dispatch' || steps.gate.outputs.ready == 'true')
+        if: always() && steps.deploy-gate.outputs.ready == 'true' && steps.state.outputs.need_bump == 'true'
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.WORKFLOW_PAT }}
           GH_REPO: ${{ github.repository }}

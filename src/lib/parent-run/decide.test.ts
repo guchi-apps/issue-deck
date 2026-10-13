@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 
 import type { PlanSnapshot } from "@/lib/execution-plan/types";
 import {
+  evaluateDependency,
   evaluateRun,
+  isChildMerged,
   type ChildInput,
   type PrResolution,
   type RefObservation,
@@ -33,7 +35,7 @@ const obs = (o: Partial<RefObservation> = {}): RefObservation => ({
   sessionAlive: false,
   ...o,
 });
-const merged = (n: number, inProduction: boolean | null = false): PrResolution => ({ kind: "one", number: n, merged: true, inProduction });
+const merged = (n: number, inProduction: boolean | null = false): PrResolution => ({ kind: "one", number: n, merged: true, inProduction, integration: true });
 const open = (n: number): PrResolution => ({ kind: "one", number: n, merged: false, inProduction: null });
 
 function run(
@@ -171,4 +173,48 @@ describe("evaluateRun", () => {
     expect(phase(r, 1)).toBe("attention");
     expect(phase(r, 2)).toBe("blocked");
   });
+});
+
+describe("mergedは統合ブランチへのマージだけで成立する（#4570）", () => {
+  const dep = { repository: "o/r", number: 1, conditions: ["merged" as const] };
+  const obs = (integration?: boolean) =>
+    ({
+      issue: "open",
+      pr: { kind: "one", number: 5, merged: true, inProduction: false, integration },
+      needsUser: false,
+      jobStatus: null,
+      sessionAlive: false,
+    }) as never;
+  it("developへのマージ済みなら成立（Issueはopenのまま）", () => {
+    expect(evaluateDependency(dep, obs(true), null)[0].satisfied).toBe(true);
+  });
+  it("mainなど別ブランチへのマージは成立しない", () => {
+    expect(evaluateDependency(dep, obs(false), null)[0].satisfied).toBe(false);
+  });
+  it("統合ブランチを確認できない（integration未確定）ときは成立にせず人の確認へ回す", () => {
+    expect(evaluateDependency(dep, obs(undefined), null)[0].satisfied).toBeNull();
+  });
+});
+
+describe("mainへ直接マージされた子で親は完了しない", () => {
+  it("integration:false・inProduction:trueの子は完了扱いにならず要確認", () => {
+    const direct: PrResolution = { kind: "one", number: 9, merged: true, inProduction: true, integration: false };
+    const r = run({ 1: { pr: direct }, 2: { pr: merged(2, true) }, 3: { pr: merged(3, true) }, 4: { pr: merged(4, true) } }, {}, { parentVerifiedAt: new Date() });
+    expect(phase(r, 1)).toBe("attention");
+    expect(r.completion.complete).toBe(false);
+  });
+});
+
+describe("子のdevelopマージは統合ブランチへのマージだけで成立する", () => {
+  const mk = (integration?: boolean) =>
+    ({
+      issue: "open",
+      pr: { kind: "one", number: 5, merged: true, inProduction: true, integration },
+      needsUser: false,
+      jobStatus: null,
+      sessionAlive: false,
+    }) as never;
+  it("統合ブランチへのマージなら成立", () => expect(isChildMerged(mk(true))).toBe(true));
+  it("mainへの直接マージは成立しない", () => expect(isChildMerged(mk(false))).toBe(false));
+  it("統合ブランチを確認できないときも成立しない", () => expect(isChildMerged(mk(undefined))).toBe(false));
 });

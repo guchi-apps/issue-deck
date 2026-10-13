@@ -748,6 +748,9 @@ export NOTIFY_PLAN_RETRY_DIR="${ISSUE_DECK_SESSION_STATE_DIR:-$HOME/.local/state
 # `AskUserQuestion`を差し戻した印の置き場（#3569）。セッションごとに1つ置き、時刻で「直前に
 # 差し戻したか」を見る（消えても差し戻しが1回増えるだけ）
 export NOTIFY_QUESTION_RETRY_DIR="${ISSUE_DECK_SESSION_STATE_DIR:-$HOME/.local/state/issue-deck/sessions}/question-retry"
+# 計画を提示せずに終えた応答の差し戻し・引き上げの印（#4562）。セッションと計画の書き込みごとに
+# 1つ置き、中身は`blocked`（差し戻し済み）か`notified`（引き上げ済み）。消えても差し戻しが1回増えるだけ
+export NOTIFY_PLAN_NOT_PRESENTED_DIR="${ISSUE_DECK_SESSION_STATE_DIR:-$HOME/.local/state/issue-deck/sessions}/plan-not-presented"
 
 result="$(python3 - <<'PY' 2>/dev/null || true
 import glob
@@ -900,6 +903,101 @@ def question_asked_at_end(message):
             if any(word in lowered for word in QUESTION_ASK_WORDS):
                 return True
     return False
+
+
+# 計画ファイルを書いたまま提示せずに止まったときの差し戻し文面（#4562）。**固定文字列**で、
+# 状況を読んで組み立てない。承認は促さず、提示（`ExitPlanMode`）だけを求める。
+PLAN_NOT_PRESENTED_BLOCK_REASON = (
+    "計画ファイルは書き終えていますが、まだExitPlanModeで計画を提示していません。"
+    "ほかのツールを並べず、ExitPlanModeだけを呼んで計画を提示してください。"
+    "承認はユーザーが行います。文章だけで応答を終えないでください。"
+)
+
+
+def plan_not_presented_key():
+    """計画ファイルを書いたまま`ExitPlanMode`を呼ばずに応答を終えたか（#4562）。
+
+    真なら、最後に計画ファイルを書いた`Write`/`Edit`のtool_use idを返す（差し戻し・引き上げの
+    印のキー）。偽なら空文字。#4496では「計画ファイルを書き終えました。次の応答で承認を依頼
+    します。」で応答を終え、疑問符が無いため`question_asked_at_end`にも掛からず、通常の応答
+    終了として「実行中」のまま30分放置された。
+
+    文章では判定しない。転記（Claude Code固有の形）で次をすべて満たすときだけ真にする。
+
+      - 計画モード中: 最後の`attachment.type == "plan_mode"`が最後の`plan_mode_exit`より後
+        （`permission_mode`が渡ってきて`plan`以外なら、その時点で偽）
+      - 最後の計画ファイル（`~/.claude/plans/`直下の`.md`）への`Write`/`Edit`が、最後の
+        `ExitPlanMode`の呼び出しより後（＝書き直した計画をまだ提示していない）
+
+    **Codexでは偽**（転記の形が違い、計画モードも無い。計画レビューG1の指摘）。サブエージェントの
+    行（`isSidechain`）は本人の計画ではないので読まない。読めなければ偽（＝これまでどおり応答終了）。
+    """
+    if os.environ.get("ISSUE_DECK_AGENT", "claude") == "codex":
+        return ""
+    mode = hook.get("permission_mode")
+    if isinstance(mode, str) and mode and mode != "plan":
+        return ""
+    transcript = hook.get("transcript_path") or ""
+    if not transcript:
+        return ""
+    plans_dir = os.path.join(os.path.expanduser("~"), ".claude", "plans")
+    try:
+        size = os.path.getsize(transcript)
+        with open(transcript, "rb") as f:
+            if size > TRANSCRIPT_TAIL_BYTES:
+                f.seek(size - TRANSCRIPT_TAIL_BYTES)
+                f.readline()
+            lines = f.read().decode("utf-8", "replace").splitlines()
+    except Exception:
+        return ""
+
+    plan_enter = plan_exit = last_exit_call = last_write = -1
+    write_id = ""
+    for index, line in enumerate(lines):
+        if "plan" not in line and "ExitPlanMode" not in line:
+            continue
+        try:
+            entry = json.loads(line)
+        except Exception:
+            continue
+        if not isinstance(entry, dict) or entry.get("isSidechain"):
+            continue
+        attachment = entry.get("attachment")
+        if isinstance(attachment, dict):
+            if attachment.get("type") == "plan_mode":
+                plan_enter = index
+            elif attachment.get("type") == "plan_mode_exit":
+                plan_exit = index
+            continue
+        message = entry.get("message")
+        content = message.get("content") if isinstance(message, dict) else None
+        if entry.get("type") != "assistant" or not isinstance(content, list):
+            continue
+        for block in content:
+            if not isinstance(block, dict) or block.get("type") != "tool_use":
+                continue
+            name = block.get("name")
+            if name == "ExitPlanMode":
+                last_exit_call = index
+            elif name in ("Write", "Edit"):
+                path = (block.get("input") or {}).get("file_path")
+                if isinstance(path, str) and path.endswith(".md") and os.path.dirname(path) == plans_dir:
+                    last_write = index
+                    write_id = str(block.get("id") or index)
+    if last_write < 0 or plan_enter < 0 or plan_enter < plan_exit:
+        return ""
+    if last_write < last_exit_call or last_write < plan_exit:
+        return ""
+    return write_id
+
+
+def plan_not_presented_marker(key):
+    """差し戻し・引き上げの印のパス（#4562）。セッションと計画の書き込みごとに1つ"""
+    marker_dir = os.environ.get("NOTIFY_PLAN_NOT_PRESENTED_DIR", "")
+    if not marker_dir or not key:
+        return ""
+    digest = hashlib.sha256(json.dumps([hook.get("session_id", ""), key]).encode("utf-8")).hexdigest()[:32]
+    return os.path.join(marker_dir, digest)
 
 
 def resolve_plan_text(tool_input):
@@ -1399,6 +1497,48 @@ if event == "Stop":
             "remoteControlUrl": resolve_remote_url() or None,
         }))
         sys.exit(0)
+    # **計画ファイルを書いたまま提示せずに終えた応答は、まず1回だけ差し戻す**（#4562）。
+    # Stopフックの`decision: block`で、Claude Code自身に同じターンを続けさせる（`send-keys`は
+    # 使わない。`ExitPlanMode`の差し戻し〈#3136〉と同じ、フックの判定として返す形）。提示は
+    # 既存の`PreToolUse:ExitPlanMode`経路を通るので、承認は従来どおり人が行う。
+    #
+    # 差し戻しても同じ形で止まった（`stop_hook_active`＝この差し戻しで続けたターン）・印が
+    # 既に差し戻し済みなら、問いかけと同じ形（Issueコメント＋`00.check-user`＋`01.check-blocked`）
+    # で引き上げる。引き上げ済みの印があれば何もせず通常の応答終了として報告する。
+    # 文章での問いかけは上の`question_asked`を優先する（印が立っていてもここで差し戻さない）。
+    plan_key = "" if question_asked_at_end(hook.get("last_assistant_message")) else plan_not_presented_key()
+    marker = plan_not_presented_marker(plan_key)
+    if marker:
+        try:
+            with open(marker, encoding="utf-8") as f:
+                marker_state = f.read().strip()
+        except Exception:
+            marker_state = ""
+        if marker_state != "notified":
+            if marker_state == "" and not hook.get("stop_hook_active"):
+                try:
+                    os.makedirs(os.path.dirname(marker), exist_ok=True)
+                    with open(marker, "w", encoding="utf-8") as f:
+                        f.write("blocked\n")
+                    print("plan-unpresented-block")
+                    print(json.dumps({"decision": "block", "reason": PLAN_NOT_PRESENTED_BLOCK_REASON}, ensure_ascii=False))
+                    sys.exit(0)
+                except OSError:
+                    # 印を残せないなら差し戻さない（繰り返しを止められない）。引き上げへ進む
+                    pass
+            if repo_slug and issue_number.isdigit() and tmux_session:
+                print("interrupted", "plan_not_presented")
+                print(json.dumps({
+                    "repository": repo_slug,
+                    "issue": int(issue_number),
+                    "hostName": host_name,
+                    "tmuxSessionName": tmux_session,
+                    "detail": "計画ファイルを書いたまま、ExitPlanModeで計画を提示せずに応答を終えました（自動の差し戻し後も提示されていません）。計画はまだ提示されておらず、承認できる状態ではありません。",
+                    "reason": "plan_not_presented",
+                    "remoteControlUrl": resolve_remote_url() or None,
+                }))
+                print(marker)
+                sys.exit(0)
     state_event = "Stop"
     activity = "responded"
 elif event == "Notification" and notification_type == "permission_prompt":
@@ -1828,7 +1968,8 @@ mark_check_user_pending() {
 
 decision_line="$(printf '%s' "$result" | head -1)"
 # 形式: `report <状態イベント> <activity> [URL または "-"]` / `interrupted` /
-#       `plan <URL または "-">` / `plan-retry` / `question <URL または "-">` / `question-retry` / `skip`
+#       `plan <URL または "-">` / `plan-retry` / `plan-unpresented-block` / `question <URL または "-">` /
+#       `question-retry` / `skip`
 decision="${decision_line%% *}"
 
 if [[ "$decision" == "question-retry" ]]; then
@@ -1844,6 +1985,14 @@ if [[ "$decision" == "plan-retry" ]]; then
   # そのまま次の指示になる**ので、何をすればよいかを書く。承認プロンプトはまだ出していない
   # （＝人は何も見ていない）ため、入力待ちの記録も`00.check-user`も付けない
   plan_decision_output deny "計画ファイルの書き込みと同じ応答でExitPlanModeが呼ばれたため、計画本文を承認画面へ渡せませんでした。計画ファイルを書き終えてから、ほかのツールを並べず、ExitPlanModeだけを次の応答で呼び直してください。"
+  exit 0
+fi
+
+if [[ "$decision" == "plan-unpresented-block" ]]; then
+  # 計画ファイルを書いたまま提示せずに終えた応答を、1回だけ差し戻す（#4562）。2行目がStopフックの
+  # `{"decision":"block","reason":…}`で、Claude Codeが`reason`を指示として同じターンを続ける。
+  # セッションは止まっていないので、状態の記録も様子の報告もしない
+  printf '%s\n' "$result" | sed -n '2p'
   exit 0
 fi
 
@@ -1942,6 +2091,21 @@ if [[ "$decision" == "interrupted" ]]; then
         session_state_mark_classifier_block_notified "$NOTIFY_TMUX_SESSION" ||
           echo "session-notify: 引き上げ済みの印を残せませんでした（実装は続行します）" >&2
       fi
+    fi
+    report_classifier_block_activity "$(printf '%s' "$result" | sed -n '2p')"
+  fi
+  # 計画を提示せずに終えた応答の引き上げ（#4562）。後始末は上と同じ（状態・様子）で、引き上げ済みの
+  # 印は3行目のパスへ書く（送れたときだけ。送れなければ次の`Stop`でもう一度引き上げを試みる）
+  if [[ "$decision_line" == "interrupted plan_not_presented" ]]; then
+    plan_marker="$(printf '%s' "$result" | sed -n '3p')"
+    if [[ -n "$plan_marker" ]]; then
+      mkdir -p "$(dirname "$plan_marker")" 2>/dev/null || true
+      printf 'notified\n' >"$plan_marker" 2>/dev/null ||
+        echo "session-notify: 引き上げ済みの印を残せませんでした（実装は続行します）" >&2
+    fi
+    if [[ -n "$NOTIFY_TMUX_SESSION" ]] && declare -F session_state_record_event >/dev/null 2>&1; then
+      session_state_record_event "$NOTIFY_TMUX_SESSION" permission_prompt ||
+        echo "session-notify: セッションの状態を記録できませんでした（実装は続行します）" >&2
     fi
     report_classifier_block_activity "$(printf '%s' "$result" | sed -n '2p')"
   fi
