@@ -22,7 +22,7 @@ const git = (...args) => execFileSync("git", args, { cwd: path.join(dir, "repo")
 
 const FAKE_CLAUDE = `#!/usr/bin/env bash
 p="$(cat)"
-checks() { jq -nc --arg e "$1" '[${JSON.stringify(CHECK_IDS)}[] | {id: ., status: "confirmed", evidence: $e}]'; }
+checks() { jq -nc --arg e "$1" --arg s "\${UNCONF:+unconfirmed}" '[${JSON.stringify(CHECK_IDS)}[] | {id: ., status: (if $s == "" then "confirmed" else "unconfirmed" end), evidence: $e}]'; }
 if grep -q "バッチをまたぐ相互作用の確認" <<<"$p"; then
   [[ -n "\${FAIL_INT:-}" ]] && exit 3
   echo '\`\`\`json'
@@ -30,6 +30,7 @@ if grep -q "バッチをまたぐ相互作用の確認" <<<"$p"; then
   echo '\`\`\`'
   exit 0
 fi
+[[ -n "\${CALL_LOG:-}" ]] && echo call >>"$CALL_LOG"
 files="$(sed -n '/次のファイルの差分をこのバッチへ載せました/,/^$/p' <<<"$p" | grep -E '^- ' | sed -E 's/^- //; s/（分割.*//')"
 echo '\`\`\`json'
 jq -nc --argjson c "$(checks バッチで確認)" --argjson f "$(printf '%s\\n' $files | jq -Rsc 'split("\\n") | map(select(. != ""))')" \\
@@ -142,5 +143,60 @@ describe("run-release-review.sh（#4615）", () => {
     expect(batchDirs()).toHaveLength(2);
     expect(existsSync(path.join(dir, "work", oldDir, "r1.json"))).toBe(true);
     expect(batchDirs().some((n) => n !== oldDir && n.includes(head.slice(0, 12)))).toBe(true);
+  });
+
+  it("証跡が更新されたら、証跡に依存する保存済みの結果だけ再評価し、同じ状態の証跡では再利用する（#4632）", () => {
+    const evidenceRoot = path.join(dir, "evidence");
+    mkdirSync(evidenceRoot);
+    const writeEvidence = (state, finishedAt) =>
+      writeFileSync(
+        path.join(evidenceRoot, `o_r-7-${base.slice(0, 12)}-${head.slice(0, 12)}.json`),
+        JSON.stringify({ repository: "o/r", prNumber: 7, baseSha: base, headSha: head, steps: [], outcome: { state }, ...(finishedAt ? { finishedAt } : {}) }),
+      );
+    const calls = path.join(dir, "calls");
+    const env = { ISSUE_DECK_RELEASE_EVIDENCE_ROOT: evidenceRoot, CALL_LOG: calls };
+    const countCalls = () => (existsSync(calls) ? readFileSync(calls, "utf8").trim().split("\n").filter(Boolean).length : 0);
+
+    // 統合検証の実行中に確認し、証跡に依存する「未確認」の結果が保存される（相互作用の確認の失敗で保存を残す）
+    writeEvidence("running");
+    const first = runReview({ ...env, UNCONF: "1", FAIL_INT: "1" });
+    expect(first.status).toBe("failed");
+    const batches = countCalls();
+    expect(batches).toBeGreaterThan(2);
+
+    // 証跡が同じ状態のままなら、保存済みの結果を使い回し、AIを呼ばない
+    runReview({ ...env, FAIL_INT: "1" });
+    expect(countCalls()).toBe(batches);
+
+    // 証跡がpassedへ更新されたら、未確認のバッチを新しい証跡で再評価する
+    writeEvidence("passed", "2026-10-13T10:51:00Z");
+    const rerun = runReview(env);
+    expect(rerun.status).toBe("succeeded");
+    expect(countCalls()).toBeGreaterThanOrEqual(batches * 2);
+    expect(rerun.result.checks.every((c) => c.status === "confirmed")).toBe(true);
+  });
+
+  it("証跡を取得できないときは、証跡に依存する保存済みの結果を再利用せず再評価する（#4632）", () => {
+    const calls = path.join(dir, "calls");
+    const env = { ISSUE_DECK_RELEASE_EVIDENCE_ROOT: path.join(dir, "no-evidence"), CALL_LOG: calls };
+    runReview({ ...env, UNCONF: "1", FAIL_INT: "1" });
+    const before = readFileSync(calls, "utf8").trim().split("\n").length;
+    runReview({ ...env, FAIL_INT: "1" });
+    expect(readFileSync(calls, "utf8").trim().split("\n").length).toBeGreaterThanOrEqual(before * 2);
+  });
+
+  it("確認済みだけの保存済みの結果は、証跡が更新されても再利用する（#4632）", () => {
+    const evidenceRoot = path.join(dir, "evidence");
+    mkdirSync(evidenceRoot);
+    const calls = path.join(dir, "calls");
+    const env = { ISSUE_DECK_RELEASE_EVIDENCE_ROOT: evidenceRoot, CALL_LOG: calls };
+    runReview({ ...env, FAIL_INT: "1" });
+    const before = readFileSync(calls, "utf8").trim().split("\n").length;
+    writeFileSync(
+      path.join(evidenceRoot, `o_r-7-${base.slice(0, 12)}-${head.slice(0, 12)}.json`),
+      JSON.stringify({ baseSha: base, headSha: head, steps: [], outcome: { state: "passed" }, finishedAt: "x" }),
+    );
+    runReview(env);
+    expect(readFileSync(calls, "utf8").trim().split("\n").length).toBe(before);
   });
 });

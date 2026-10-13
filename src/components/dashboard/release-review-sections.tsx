@@ -8,7 +8,7 @@ import {
   describeStall,
   findingTags,
 } from "@/lib/release-review-contract-view";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
 import { isReleaseCandidateHeadRef } from "@/lib/release-branch";
 import { ChevronRight, ExternalLink, RotateCcw } from "lucide-react";
 
@@ -22,6 +22,7 @@ import type { ReviewVerdictKind } from "@/lib/github/release-verification";
 import { toJstParts } from "@/lib/format-date-time";
 import { tallyReleaseReviews } from "@/lib/release-changes";
 import { describeReleaseReviewDiagnostic } from "@/lib/release-review-diagnostic";
+import { describeReviewRerun, type ReviewRerunView } from "@/lib/release-review-rerun-view";
 import {
   formatReleaseElapsed,
   formatReleaseReviewAgent,
@@ -124,6 +125,7 @@ function SectionRow({
   steps,
   reason,
   reasonTone = "muted",
+  actions,
   children,
 }: {
   title: string;
@@ -132,6 +134,8 @@ function SectionRow({
   steps?: ReactNode;
   reason?: string | null;
   reasonTone?: Tone;
+  /** 詳細を開かなくても見える次の操作（再実行など）。`<summary>`の外に置く（押しても開閉しない） */
+  actions?: ReactNode;
   children?: ReactNode;
 }) {
   const head = (
@@ -156,16 +160,24 @@ function SectionRow({
     return (
       <section className="flex flex-col gap-1 border-b px-3 py-2 text-xs last:border-b-0" data-testid={testId}>
         {head}
+        {actions}
       </section>
     );
   }
-  return (
-    <details className="group border-b text-xs last:border-b-0" data-testid={testId}>
+  const details = (
+    <details className="group text-xs" data-testid={testId}>
       <summary className="flex cursor-pointer list-none flex-col gap-1 px-3 py-2 focus-visible:bg-muted/50 focus-visible:outline-none [&::-webkit-details-marker]:hidden">
         {head}
       </summary>
       <div className="flex flex-col gap-1.5 px-3 pb-2.5">{children}</div>
     </details>
+  );
+  if (!actions) return <div className="border-b last:border-b-0">{details}</div>;
+  return (
+    <div className="border-b text-xs last:border-b-0">
+      {details}
+      <div className="px-3 pb-2.5">{actions}</div>
+    </div>
   );
 }
 
@@ -370,17 +382,24 @@ function ReviewRerunButton({
   pullRequestNumber,
   baseSha,
   headSha,
+  label = "全体レビューを再実行",
+  disabled = false,
   onDone,
 }: {
   repositoryFullName: string;
   pullRequestNumber: number;
   baseSha: string;
   headSha: string;
+  label?: string;
+  /** 統合検証の結果待ちなど、今は押せないとき */
+  disabled?: boolean;
   onDone?: () => void;
 }) {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const run = async () => {
+    // 連打で二重に依頼しない（サーバーも同じ対象の実行中・待機中は積まない）
+    if (busy) return;
     setBusy(true);
     setMessage(null);
     try {
@@ -393,14 +412,22 @@ function ReviewRerunButton({
       const body: { outcome?: string; error?: string; message?: string } = await res.json().catch(() => ({}));
       if (res.status === 409 && body.error === "release_pr_changed") {
         setMessage("リリースPRが更新されています。「更新」で最新の状態を読み込んでください。");
+      } else if (res.status === 401 || res.status === 403) {
+        setMessage("再実行する権限がありません。ログインし直してください。");
+      } else if (res.status === 404) {
+        setMessage("対象のリリースPRが見つかりません。「更新」で最新の状態を読み込んでください。");
       } else if (!res.ok) {
-        setMessage(body.message ?? `再実行を依頼できませんでした (${res.status})`);
+        setMessage(body.message ?? `再実行を依頼できませんでした (${res.status})。時間をおいて、もう一度お試しください。`);
       } else {
-        setMessage(body.outcome === "already_queued" ? "すでに実行中または待機中です。" : "再実行を依頼しました。");
+        setMessage(
+          body.outcome === "already_queued"
+            ? "すでに実行中または待機中です。新しい依頼は積んでいません。結果が出るまでお待ちください。"
+            : "再実行を受け付けました。これはレビューの合格ではありません。待機中→実行中→完了の順に表示が変わります。",
+        );
         onDone?.();
       }
     } catch {
-      setMessage("再実行を依頼できませんでした（通信に失敗しました）。");
+      setMessage("再実行を依頼できませんでした（通信に失敗しました）。通信を確かめて、もう一度お試しください。");
     } finally {
       setBusy(false);
     }
@@ -410,19 +437,78 @@ function ReviewRerunButton({
       <button
         type="button"
         onClick={run}
-        disabled={busy}
-        className="inline-flex items-center gap-1 rounded border px-2 py-0.5 text-[11.5px] font-medium text-foreground hover:bg-muted disabled:opacity-50"
+        disabled={busy || disabled}
+        className="inline-flex min-h-8 items-center gap-1 rounded border px-2 py-0.5 text-[11.5px] font-medium text-foreground hover:bg-muted disabled:opacity-50"
       >
         <RotateCcw aria-hidden className="size-3" />
-        {busy ? "依頼中…" : "全体レビューを再実行"}
+        {busy ? "依頼中…" : label}
       </button>
       {message && <span role="status">{message}</span>}
     </span>
   );
 }
 
+/**
+ * 全体レビュー欄の「次の操作」（#4632）。詳細を開かなくても、前提（統合検証の状態・未確認の項目）と
+ * 再実行の可否が見える。**運用証跡（poller更新・再起動）の不足は再実行では直らない**ので、その旨と確認を別に出す
+ */
+function ReviewRerunPanel({
+  view,
+  repositoryFullName,
+  pullRequestNumber,
+  target,
+  onDone,
+}: {
+  view: Exclude<ReviewRerunView, { kind: "none" }>;
+  repositoryFullName: string;
+  pullRequestNumber: number;
+  target: { baseSha: string; headSha: string };
+  onDone?: () => void;
+}) {
+  const waiting = view.kind === "wait";
+  return (
+    <div
+      className={cn(
+        "flex flex-col gap-1.5 rounded border px-2 py-1.5 text-[11.5px]",
+        waiting
+          ? "border-sky-300 bg-sky-50/60 dark:border-sky-800 dark:bg-sky-950/20"
+          : "border-amber-300 bg-amber-50/60 dark:border-amber-800 dark:bg-amber-950/20",
+      )}
+      data-testid="review-rerun-panel"
+    >
+      <p className="font-medium">{view.lead}</p>
+      <dl className="grid grid-cols-[6.5rem_1fr] gap-x-2 gap-y-0.5">
+        <dt className="text-muted-foreground">対象</dt>
+        <dd className="font-mono">
+          main {shortSha(target.baseSha)} ← release {shortSha(target.headSha)}
+        </dd>
+        {view.prerequisites.map((p) => (
+          <Fragment key={p.label}>
+            <dt className="text-muted-foreground">{p.label}</dt>
+            <dd className="min-w-0 break-words">
+              <span aria-hidden>{p.status === "ok" ? "✓ " : p.status === "pending" ? "◔ " : "△ "}</span>
+              {p.text}
+            </dd>
+          </Fragment>
+        ))}
+      </dl>
+      {view.opsEvidence && <p data-testid="review-rerun-ops">{view.opsEvidence}</p>}
+      <ReviewRerunButton
+        repositoryFullName={repositoryFullName}
+        pullRequestNumber={pullRequestNumber}
+        baseSha={target.baseSha}
+        headSha={target.headSha}
+        label={view.buttonLabel}
+        disabled={waiting}
+        onDone={onDone}
+      />
+    </div>
+  );
+}
+
 function AiReviewSection({
   section,
+  integration,
   assignee,
   repositoryFullName,
   pullRequestNumber,
@@ -435,6 +521,8 @@ function AiReviewSection({
   /** ブランチ画面は作り直しを追加PR群の直下に1つだけ置く（#4357）ので、ここでは出さない */
   hideRebuild?: boolean;
   section: ReleaseVerificationSection;
+  /** 統合検証の区分。再実行の前提（結果待ちか・証跡が更新されたか）の判定に使う（#4632） */
+  integration?: ReleaseVerificationSection;
   assignee: string;
   repositoryFullName: string;
   pullRequestNumber?: number;
@@ -447,6 +535,7 @@ function AiReviewSection({
   // 実行障害（レビューを最後まで行えなかった）は、コードへの指摘とは別の見た目にする（#4300）。
   // 「失敗」「不合格」と読ませず、レビュー未完了であることと工程・原因・次の操作を出す
   const executionFailed = section.state === "failed";
+  const rerunView = integration ? describeReviewRerun(section, integration) : ({ kind: "none" } as const);
   const diagnosticView = executionFailed ? describeReleaseReviewDiagnostic(section.diagnostic) : null;
   const head: SectionHead =
     executionFailed && diagnosticView
@@ -514,6 +603,17 @@ function AiReviewSection({
       }
       reason={reason}
       reasonTone={reasonTone}
+      actions={
+        rerunView.kind !== "none" && pullRequestNumber !== undefined && target ? (
+          <ReviewRerunPanel
+            view={rerunView}
+            repositoryFullName={repositoryFullName}
+            pullRequestNumber={pullRequestNumber}
+            target={target}
+            onDone={onReload}
+          />
+        ) : undefined
+      }
     >
       {hasDetail ? (
         <>
@@ -593,16 +693,13 @@ function AiReviewSection({
                   </pre>
                 </details>
               )}
-              {pullRequestNumber !== undefined && target && (
-                <ReviewRerunButton
-                  repositoryFullName={repositoryFullName}
-                  pullRequestNumber={pullRequestNumber}
-                  baseSha={target.baseSha}
-                  headSha={target.headSha}
-                  onDone={onReload}
-                />
-              )}
             </div>
+          )}
+          {section.previousRun && (
+            <p className="text-muted-foreground" data-testid="review-previous-run">
+              前回の結果（履歴・現在の結果ではありません）: {clock(section.previousRun.at)}・
+              {section.previousRun.unverifiedScope ? `未確認範囲あり（${section.previousRun.unverifiedScope}）` : section.previousRun.state}
+            </p>
           )}
           <ReviewContractPanel section={section} />
           {section.summary && <p className="whitespace-pre-wrap">{section.summary}</p>}
@@ -1155,6 +1252,7 @@ export function ReleaseReviewSections({
             <div className="mt-1 opacity-80">
               <AiReviewSection
                 section={verification.aiReview}
+                integration={verification.integration}
                 hideRebuild
                 assignee={verification.aiReviewAssignee}
                 repositoryFullName={repositoryFullName}
@@ -1173,6 +1271,7 @@ export function ReleaseReviewSections({
           <>
             <AiReviewSection
               section={verification.aiReview}
+              integration={verification.integration}
               assignee={verification.aiReviewAssignee}
               repositoryFullName={repositoryFullName}
               pullRequestNumber={pullRequestNumber}
@@ -1403,6 +1502,7 @@ export function ReleaseVerificationBrief({
         <>
           <AiReviewSection
             section={verification.aiReview}
+            integration={verification.integration}
             assignee={verification.aiReviewAssignee}
             repositoryFullName={repositoryFullName}
             pullRequestNumber={pullRequestNumber}

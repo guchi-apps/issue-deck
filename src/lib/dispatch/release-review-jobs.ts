@@ -64,11 +64,31 @@ export async function rerunReleaseReviewJob(
   target: ReleaseVerificationTarget,
   now: Date = new Date(),
 ): Promise<RequestReleaseReviewResult> {
+  const before = await db.releaseVerification.findFirst({
+    where: { ...target, kind: "ai_review" },
+    select: { state: true, summary: true, unverifiedScope: true, updatedAt: true },
+  });
   const result = await requestReleaseReviewJob(target, now);
   if (result.ok && result.outcome === "queued") {
+    // 旧結果は新テーブルを作らず、既存の`findings`JSONへ直前1件だけ残す（#4632）。履歴と現在の結果は`previousRun`の有無で分かれる
+    const previousRun =
+      before && before.state !== "waiting" && before.state !== "not_run"
+        ? {
+            state: before.state,
+            at: before.updatedAt.toISOString(),
+            unverifiedScope: before.unverifiedScope?.slice(0, 1000) ?? null,
+            summary: before.summary?.slice(0, 600) ?? null,
+          }
+        : null;
     await db.releaseVerification.updateMany({
       where: { ...target, kind: "ai_review" },
-      data: { state: "waiting", findings: Prisma.DbNull, message: null, summary: null, unverifiedScope: null },
+      data: {
+        state: "waiting",
+        findings: previousRun ? { previousRun } : Prisma.DbNull,
+        message: null,
+        summary: null,
+        unverifiedScope: null,
+      },
     });
   }
   return result;
@@ -151,6 +171,19 @@ export async function requestReleaseReviewJob(
   }
 }
 
+/** 再実行で退避した直前の結果（`findings.previousRun`）。新しい結果を記録するときに引き継ぎ、完了後も履歴として読めるようにする（#4632） */
+async function loadPreviousRun(target: ReleaseVerificationTarget): Promise<Record<string, unknown> | null> {
+  const row = await db.releaseVerification
+    .findFirst({ where: { ...target, kind: "ai_review" }, select: { findings: true } })
+    .catch(() => null);
+  const findings = row?.findings;
+  if (typeof findings !== "object" || findings === null || Array.isArray(findings)) return null;
+  const previous = (findings as Record<string, unknown>).previousRun;
+  return typeof previous === "object" && previous !== null && !Array.isArray(previous)
+    ? (previous as Record<string, unknown>)
+    : null;
+}
+
 /**
  * 全体レビューの終了報告を`ReleaseVerification`へ反映する。**記録先はジョブ自身の対象（PR・base・head）で、
  * 報告の本文からは決めない。** 完走しても結果が無い・形が不正なときは`failed`にし、「結果の無い成功」で
@@ -182,6 +215,8 @@ export async function applyReleaseReviewReport(
   // 文脈を読めないときは履歴不明として全体確認の扱いにする（引き継ぎを認めない側へ倒す）
   const context = status === "succeeded" ? await loadReleaseReviewContext(target).catch(() => null) : null;
   const normalized = status === "succeeded" ? normalizeReleaseReview(body, context) : null;
+  const previousRun = await loadPreviousRun(target);
+  const keepPrevious = previousRun ? { previousRun } : {};
   if (normalized) {
     const raw = (body ?? {}) as Record<string, unknown>;
     return recordReleaseVerificationResult(target, {
@@ -189,7 +224,7 @@ export async function applyReleaseReviewReport(
       state: normalized.state,
       agent,
       summary: normalized.summary,
-      findings: { ...normalized.detail, targetBaseSha: target.baseSha, targetHeadSha: target.headSha },
+      findings: { ...normalized.detail, targetBaseSha: target.baseSha, targetHeadSha: target.headSha, ...keepPrevious },
       unverifiedScope: normalized.unverifiedScope,
       message: typeof raw.message === "string" ? raw.message.slice(0, 5000) : message,
     });
@@ -204,7 +239,7 @@ export async function applyReleaseReviewReport(
     kind: "ai_review",
     state: "failed",
     agent,
-    findings: diagnostic ? { diagnostic } : Prisma.DbNull,
+    findings: diagnostic || previousRun ? { ...(diagnostic ? { diagnostic } : {}), ...keepPrevious } : Prisma.DbNull,
     summary: null,
     message:
       status === "failed"
