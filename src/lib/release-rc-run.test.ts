@@ -304,7 +304,7 @@ describe("cancelReleaseRc", () => {
     mocks.prsByHead.mockResolvedValue([{ number: 10, state: "closed", merged_at: "2026-10-12T00:00:00Z", merge_commit_sha: "9".repeat(40) }]);
     mocks.reservationCount.mockResolvedValueOnce(0);
     mocks.versionAtMerge.mockReturnValueOnce(null);
-    expect(await cancel()).toEqual({ ok: false, error: "not_cancellable" });
+    expect(await cancel()).toMatchObject({ ok: false, error: "not_cancellable" });
     expect(mocks.candidateUpdateMany).not.toHaveBeenCalled();
     expect(mocks.reservationCreate).not.toHaveBeenCalled();
   });
@@ -315,7 +315,7 @@ describe("cancelReleaseRc", () => {
     mocks.reservationCount.mockResolvedValueOnce(0);
     mocks.versionAtMerge.mockReturnValueOnce("1.2.3");
     mocks.reservationFindUnique.mockResolvedValueOnce({ id: "r0", status: "consumed", candidateId: "old", consumedMergeSha: "1".repeat(40) });
-    expect(await cancel()).toEqual({ ok: false, error: "not_cancellable" });
+    expect(await cancel()).toMatchObject({ ok: false, error: "not_cancellable" });
     expect(mocks.candidateUpdateMany).not.toHaveBeenCalled();
   });
 
@@ -331,14 +331,14 @@ describe("cancelReleaseRc", () => {
   it("マージ済みでもマージのSHAが分からなければ取り消さない", async () => {
     mocks.candidateFindUnique.mockResolvedValue(candidateRow({ phase: "awaiting_approval" }));
     mocks.prsByHead.mockResolvedValue([{ number: 10, state: "closed", merged_at: "2026-10-12T00:00:00Z", merge_commit_sha: null }]);
-    expect(await cancel()).toEqual({ ok: false, error: "not_cancellable" });
+    expect(await cancel()).toMatchObject({ ok: false, error: "not_cancellable" });
     expect(mocks.candidateUpdateMany).not.toHaveBeenCalled();
   });
 
   it("マージの有無を確かめられないときも取り消さない", async () => {
     mocks.candidateFindUnique.mockResolvedValue(candidateRow({ phase: "awaiting_approval" }));
     mocks.prsByHead.mockRejectedValue(new Error("boom"));
-    expect(await cancel()).toEqual({ ok: false, error: "not_cancellable" });
+    expect(await cancel()).toMatchObject({ ok: false, error: "not_cancellable" });
     expect(mocks.candidateUpdateMany).not.toHaveBeenCalled();
   });
 
@@ -347,5 +347,35 @@ describe("cancelReleaseRc", () => {
     mocks.prsByHead.mockResolvedValue([{ number: 10, state: "open", merged_at: null }]);
     expect(await cancel()).toMatchObject({ ok: true, existing: false });
     expect(mocks.reservationUpdateMany).not.toHaveBeenCalled();
+  });
+
+  it("レビュー中のままPRがマージ済みの候補（管理記録だけが残った状態。#4628）も、版を消費済みにしてから取り消す", async () => {
+    mocks.candidateFindUnique.mockResolvedValue(candidateRow({ phase: "review" }));
+    mocks.prsByHead.mockResolvedValue([{ number: 10, state: "closed", merged_at: "2026-10-12T00:00:00Z", merge_commit_sha: "9".repeat(40) }]);
+    mocks.reservationCount.mockResolvedValueOnce(0);
+    mocks.versionAtMerge.mockReturnValueOnce("8.59.0");
+    expect(await cancel()).toMatchObject({ ok: true });
+    expect(mocks.reservationCreate).toHaveBeenCalledWith({
+      data: expect.objectContaining({ version: "8.59.0", status: "consumed", consumedMergeSha: "9".repeat(40) }),
+    });
+  });
+
+  it("レビュー中のマージ済み候補で、マージ時点の版が台帳に既にあれば理由つきで取り消さない", async () => {
+    mocks.candidateFindUnique.mockResolvedValue(candidateRow({ phase: "review" }));
+    mocks.prsByHead.mockResolvedValue([{ number: 10, state: "closed", merged_at: "2026-10-12T00:00:00Z", merge_commit_sha: "9".repeat(40) }]);
+    mocks.reservationCount.mockResolvedValueOnce(0);
+    mocks.versionAtMerge.mockReturnValueOnce("8.59.0");
+    mocks.reservationFindUnique.mockResolvedValueOnce({ id: "r0", status: "consumed", candidateId: "old", consumedMergeSha: "1".repeat(40) });
+    expect(await cancel()).toMatchObject({ ok: false, error: "not_cancellable", message: expect.stringContaining("8.59.0") });
+    expect(mocks.candidateUpdateMany).not.toHaveBeenCalled();
+  });
+
+  it("画面で見ていた段階と違うときは、古い表示からの取消を受け付けない", async () => {
+    mocks.candidateFindUnique.mockResolvedValue(candidateRow({ phase: "preparing" }));
+    expect(await cancelReleaseRc({ ...ctx, userId: "u1", candidateId: "c1", reason: null, expectedPhase: "review" })).toEqual({
+      ok: false,
+      error: "candidate_changed",
+    });
+    expect(mocks.candidateUpdateMany).not.toHaveBeenCalled();
   });
 });
