@@ -5,13 +5,13 @@ import {
   buildReleaseFixIssue,
   buildReleaseFixSourceKey,
   canStartNextGeneration,
+  isLegacyGenerationLimitStopReason,
   classifyIntegrationFailure,
   decideReleaseFix,
   decideReverification,
   decideReverificationFollowUp,
   isLegacyReverificationStopReason,
   releaseFixStepIndex,
-  RELEASE_FIX_MAX_GENERATION,
   type ReleaseFixSeriesSnapshot,
 } from "@/lib/release-fix-series";
 
@@ -148,16 +148,20 @@ describe("decideReverification", () => {
 });
 
 describe("canStartNextGeneration", () => {
-  it("上限を超えたら止める", () => {
-    expect(
-      canStartNextGeneration({ generation: RELEASE_FIX_MAX_GENERATION + 1, sourceKey: "k", ancestorSourceKeys: [] }),
-    ).toMatchObject({ ok: false });
+  it("世代数が多くても、同一指摘の再発でなければ続ける（#4589）", () => {
+    const ancestors = Array.from({ length: 20 }, (_, i) => `a${i}`);
+    expect(canStartNextGeneration({ sourceKey: "new", ancestorSourceKeys: ancestors })).toEqual({ ok: true });
+  });
+  it("旧い上限停止の理由を判別する", () => {
+    expect(isLegacyGenerationLimitStopReason("修正の反復が上限（3回）に達しました。原因を人が整理してから進めてください。リリース画面の…")).toBe(true);
+    expect(isLegacyGenerationLimitStopReason("修正PRがマージされずに閉じられました")).toBe(false);
+    expect(isLegacyGenerationLimitStopReason(null)).toBe(false);
   });
   it("同一の指摘が再発したら止める", () => {
-    expect(canStartNextGeneration({ generation: 2, sourceKey: "k", ancestorSourceKeys: ["k"] })).toMatchObject({
+    expect(canStartNextGeneration({ sourceKey: "k", ancestorSourceKeys: ["k"] })).toMatchObject({
       ok: false,
     });
-    expect(canStartNextGeneration({ generation: 2, sourceKey: "k2", ancestorSourceKeys: ["k"] })).toEqual({ ok: true });
+    expect(canStartNextGeneration({ sourceKey: "k2", ancestorSourceKeys: ["k"] })).toEqual({ ok: true });
   });
 });
 

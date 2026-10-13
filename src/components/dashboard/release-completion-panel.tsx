@@ -22,7 +22,6 @@ import {
   type ReleaseCompletionScope,
 } from "@/lib/release-completion";
 import type { ReleaseCompletionRunView } from "@/lib/release-completion-run";
-import { RELEASE_FIX_MAX_GENERATION } from "@/lib/release-fix-series";
 import { formatMonthDayTime } from "@/lib/format-date-time";
 import { cn } from "@/lib/utils";
 
@@ -160,8 +159,7 @@ export function ReleaseCompletionPanel({ runState, repositoryFullName, pullReque
                   <li>修正Issueを作り、修正を自動で開始する（内部のレビュー往復は修正セッションの中で行う）</li>
                   <li>修正PRがdevelopへ入ったら、その修正だけを候補へ足して作り直す（履歴だけの差もこの経路で反映する）</li>
                   <li>
-                    作り直した候補で全体レビュー・統合検証・Mac検証をやり直す。指摘が残れば同じ修正Issueで続ける（最大
-                    {RELEASE_FIX_MAX_GENERATION}世代）
+                    作り直した候補で全体レビュー・統合検証・Mac検証をやり直す。指摘が残れば同じ修正Issueで続ける（世代の回数では止めず、停滞・予算到達・本人判断のときだけ理由つきで一時停止）
                   </li>
                 </ol>
                 <ScopeOption
@@ -244,7 +242,7 @@ function RunCard({ run, busy, onStop }: { run: ReleaseCompletionRunView; busy: "
           {run.needsAction && run.status !== "awaiting_approval" ? "操作が必要" : run.statusLabel}
         </span>
         <span className="text-muted-foreground tabular-nums">
-          {generation > 0 ? `世代 ${generation}/${RELEASE_FIX_MAX_GENERATION} ・ ` : ""}費用 ${run.costUsedUsd.toFixed(2)} / ${run.costLimitUsd} ・{" "}
+          {generation > 0 ? `世代 ${generation} ・ ` : ""}費用 ${run.costUsedUsd.toFixed(2)} / ${run.costLimitUsd} ・{" "}
           {run.scope === RELEASE_COMPLETION_SCOPE_PRODUCTION ? "本番反映・稼働確認まで許可" : "チェック通過まで許可"}
         </span>
         {run.active && (
