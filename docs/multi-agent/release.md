@@ -1143,3 +1143,14 @@ callerへの`finalize_request`の配線と実リポジトリでの通し確認�
 - 候補の改訂履歴は新しい順
 - ブランチ一覧の束の見出しに「現在の本番版」「次のリリース候補」「旧方式で進行中」のバッジを出す（`branch-flow-view.tsx`）
 - 未対応: リリース履歴から候補への導線・旧リンク解決は別Issueで扱う
+
+## 現在の候補と次の操作を最上部に集約する（#4635）
+
+#4560の並びを、ブランチ画面の「次のリリース」・本番PR詳細・スマホリリースシートで揃えた。**現在のリリース候補（RC名・状態・停止理由）と主操作 → 候補の検証結果 → 今回公開する変更 → 現在の本番版・履歴**の順で、本番版（本番稼働中・再デプロイ）は補足として後方に置く。
+
+- **工程と操作の判定は純関数`release-rc-action.ts`が1か所で持つ。** `decideRcPublish`（公開してよいか）を画面（`release-publish-action.tsx`）とマージAPI（`POST /api/issues/pull-request-merge`）が共用し、`describeRcPrimaryAction`が工程ごとの主操作を決める。「本番公開へ進む」を出す・通すのは、段階が`awaiting_approval`・ドラフトでない・PRのheadが公開準備の最終headと一致するときだけ。
+- **サーバーの拒否（409）**: `rc_record_missing`・`rc_not_prepared`（公開準備前。次は検証→公開準備）・`rc_preparing`・`rc_draft`・`rc_pull_request_unobserved`・`rc_head_mismatch`・`rc_already_published`・`rc_cancelled`。応答に`next`と日本語の`message`を含め、GitHubのmerge APIの405（ドラフト）を利用者に見せない。ドラフト解除だけでは公開準備を飛ばせない。記録が引けない・ドラフト状態が未取得のときは推測で通さず拒否する。
+- **検査対象は新方式（`release-rc/<番号>`）だけ。** 旧方式（`release-main/*`）はRC記録が無いため従来のゲートのみ（`rcSequenceOf(head.ref)`がnullなら検査しない）。
+- 合格後・公開準備前の見出しは「公開準備へ進めます」（`describeFixOverview`の`publishBlock`）。公開準備中は「公開準備を進めています」。全体レビューの実行失敗中は「操作は不要です。自動で進みます。」を出さず、再実行へ案内する。
+- **最新SHAの結果は現在結果。** `isPreviousVerificationResult`が、系列の状態でなく**表示中の検証結果の対象head**で修正前かを判定する。RCは同じPRのheadが進むため、最新headの失敗・合格を「修正前の履歴」へ隠さない。対象が未取得の間は現在の結果として見せない。
+- 新方式で候補があるとき、正式版が決まる前は「未作成」でなく「正式版は未確定」と出す。

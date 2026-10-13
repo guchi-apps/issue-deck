@@ -19,6 +19,7 @@ import {
 } from "@/lib/release-fix-overview";
 import { RELEASE_FIX_STEPS, RELEASE_FIX_MAX_GENERATION, type ReleaseFixSourceKind, type ReleaseFixStartState } from "@/lib/release-fix-series";
 import type { RebuildEpisode } from "@/lib/release-rebuild-history";
+import { isPreviousVerificationResult, type RcPublishNext } from "@/lib/release-rc-action";
 import type { ReleaseVerificationSummary } from "@/lib/release-verification-summary";
 import type { ReleaseFixSeriesView } from "@/lib/release-fix-series-run";
 import type { ReleaseReviewFinding } from "@/lib/release-review-result";
@@ -347,6 +348,7 @@ export function useReleaseFixOverview({
   verificationError,
   changes,
   reloadToken,
+  publishBlock,
 }: {
   repositoryFullName: string;
   pullRequestNumber: number;
@@ -354,6 +356,8 @@ export function useReleaseFixOverview({
   verificationError: string | null;
   changes: UseReleaseChangesResult;
   reloadToken?: number;
+  /** 新方式の候補が公開へ進めない理由（#4635）。旧方式・進めるときはnullか省略 */
+  publishBlock?: { next: RcPublishNext; message: string } | null;
 }): ReleaseFixOverviewState {
   const [series, setSeries] = useState<{ key: string; list: ReleaseFixSeriesView[] } | null>(null);
   const [episodes, setEpisodes] = useState<{ key: string; list: RebuildEpisode[] } | null>(null);
@@ -412,14 +416,20 @@ export function useReleaseFixOverview({
   // 修正の記録を読み終えるまでは、修正前の指摘を現在状態として見せない
   const seriesPending = list === null && error === null;
   // 作り直し・修正後のチェック中に、作り直し前のリリースPRを見ている間、その検証結果は修正前のもの
-  const previousResults =
-    current !== null && (current.status === "rebuilding" || current.status === "reverifying") && current.releasePrNumber === pullRequestNumber;
+  // 候補（RC）は同じPRのheadが進むだけなので、PR番号でなく表示中の結果の対象SHAで判定する（#4635）
+  const previousResults = isPreviousVerificationResult({
+    series: current,
+    pullRequestNumber,
+    targetHeadSha: verification?.target.headSha ?? null,
+  });
   const overview = seriesPending
     ? describeFixOverview({ series: null, checks: null })
     : describeFixOverview({
         series: current ? { ...current, internalPause: current.internal?.pause ?? null } : null,
         checks: toOverviewChecks(verification),
         checksError: verification === null && verificationError !== null,
+        previousResults,
+        publishBlock,
         completion: completionRun?.active
           ? { status: completionRun.status, active: true, candidatePrNumber: completionRun.candidatePrNumber }
           : null,
