@@ -34,6 +34,10 @@ import {
   decideReservationRelease,
   decideVersionReservation,
   FINALIZE_READINESS_LABEL,
+  decideReverifyPhase,
+  describeReverifyItems,
+  type ReverifyItem,
+  type ReverifyPhase,
   FINALIZE_START_ERROR_LABEL,
   FINALIZE_STATUS_LABEL,
   isFinalizePendingExpired,
@@ -117,6 +121,9 @@ export type RcFinalizationChecks = {
   draft: boolean;
   /** 再実行が必要で、まだ合格していない検証 */
   pendingReverify: FinalizeVerificationKind[];
+  /** バンプ後の対象に対する検証ごとの状態と理由（#4640） */
+  reverify: ReverifyItem[];
+  reverifyPhase: ReverifyPhase;
   readiness: FinalizeReadiness;
   readinessLabel: string | null;
 };
@@ -639,10 +646,13 @@ async function evaluateChecks(ctx: Context, row: FinalizationRow, pull: PullDeta
   const pendingReverify = gate.views.filter((v) => v.state !== "passed" && v.state !== "not_applicable").map((v) => v.kind as FinalizeVerificationKind);
   const ciState = ci?.ciState ?? "unknown";
   const readiness = decideFinalizeReadiness({ checks: { ciState, draft: pull.draft }, pendingReverify });
+  const reverify = describeReverifyItems(gate.views);
   return {
     ciState,
     draft: pull.draft,
     pendingReverify,
+    reverify,
+    reverifyPhase: decideReverifyPhase(reverify),
     readiness,
     readinessLabel: readiness.ready ? null : FINALIZE_READINESS_LABEL[readiness.reason],
   };

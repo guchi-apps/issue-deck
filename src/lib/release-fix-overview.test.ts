@@ -239,3 +239,19 @@ describe("describeFixOverview 現在の結果と公開工程（#4635）", () => 
     expect(describeFixOverview({ series: null, checks: checks() }).pill).toBe("公開操作待ち");
   });
 });
+
+describe("統合検証の結果待ち時点の要確認（#4640）", () => {
+  const checks = (integrationState: "passed" | "running") => ({
+    aiReview: { state: "needs_check" as const, findingCount: 1, reason: "統合検証が実行中のため未確認", updatedAt: "2026-10-14T01:06:00Z" },
+    integration: { state: integrationState, updatedAt: "2026-10-14T01:09:00Z" },
+  });
+  it("統合検証が終了していれば、前回レビュー時点の理由として再レビューを主操作にする", () => {
+    const o = describeFixOverview({ series: null, checks: checks("passed"), previousResults: false });
+    expect(o.action.kind).toBe("rerun_review");
+    expect(o.detail).toContain("前回レビュー時点");
+    expect(o.detail).toContain("指摘1件");
+  });
+  it("統合検証が実行中なら再レビューを主操作にしない", () => {
+    expect(describeFixOverview({ series: null, checks: checks("running"), previousResults: false }).action.kind).not.toBe("rerun_review");
+  });
+});
