@@ -7,6 +7,8 @@ const dispatchReleaseWorkflow = vi.fn();
 const fetchLatestDeployWorkflowRun = vi.fn();
 const fetchReleaseWorkflowActive = vi.fn();
 const releaseWorkflowExists = vi.fn();
+const acquireLock = vi.fn();
+const releaseLock = vi.fn();
 
 vi.mock("@/lib/auth-user", () => ({
   get requireUserId() {
@@ -52,6 +54,15 @@ vi.mock("@/lib/github/release-workflow-cache", () => ({
   },
 }));
 
+vi.mock("@/lib/release-start-lock", () => ({
+  get acquireReleaseStartLock() {
+    return acquireLock;
+  },
+  get releaseReleaseStartLock() {
+    return releaseLock;
+  },
+}));
+
 import type { NextRequest } from "next/server";
 
 import { POST } from "@/app/api/repositories/release/route";
@@ -71,6 +82,8 @@ describe("POST /api/repositories/release", () => {
     fetchLatestDeployWorkflowRun.mockReset().mockResolvedValue(null);
     releaseWorkflowExists.mockReset().mockResolvedValue(true);
     fetchReleaseWorkflowActive.mockReset().mockResolvedValue(false);
+    acquireLock.mockReset().mockResolvedValue(true);
+    releaseLock.mockReset().mockResolvedValue(undefined);
   });
 
   it("リリース用workflowがあれば起動する", async () => {
@@ -127,6 +140,46 @@ describe("POST /api/repositories/release", () => {
     expect(res.status).toBe(409);
     await expect(res.json()).resolves.toEqual({ error: "release_already_running" });
     expect(dispatchReleaseWorkflow).not.toHaveBeenCalled();
+  });
+
+  it("開始要求を確保できなければ（同時の別要求が処理中）、実行状況も見ずdispatchせず409を返す（#4599）", async () => {
+    acquireLock.mockResolvedValue(false);
+
+    const res = await POST(request({ owner: "guchi-apps", repo: "issue-deck" }));
+
+    expect(res.status).toBe(409);
+    await expect(res.json()).resolves.toEqual({ error: "release_already_running" });
+    expect(acquireLock).toHaveBeenCalledWith("guchi-apps/issue-deck");
+    expect(fetchReleaseWorkflowActive).not.toHaveBeenCalled();
+    expect(dispatchReleaseWorkflow).not.toHaveBeenCalled();
+    expect(releaseLock).not.toHaveBeenCalled();
+  });
+
+  it("同時の2要求のうちdispatchへ進むのは1件だけ（#4599）", async () => {
+    let held = false;
+    acquireLock.mockImplementation(async () => (held ? false : (held = true)));
+
+    const [a, b] = await Promise.all([
+      POST(request({ owner: "guchi-apps", repo: "issue-deck" })),
+      POST(request({ owner: "guchi-apps", repo: "issue-deck" })),
+    ]);
+
+    expect([a.status, b.status].sort()).toEqual([200, 409]);
+    expect(dispatchReleaseWorkflow).toHaveBeenCalledTimes(1);
+  });
+
+  it("dispatchした要求の確保は保持し、開始しなかった要求は手放す（#4599）", async () => {
+    await POST(request({ owner: "guchi-apps", repo: "issue-deck" }));
+    expect(releaseLock).not.toHaveBeenCalled();
+
+    fetchReleaseWorkflowActive.mockResolvedValue(true);
+    await POST(request({ owner: "guchi-apps", repo: "issue-deck" }));
+    expect(releaseLock).toHaveBeenCalledTimes(1);
+
+    fetchReleaseWorkflowActive.mockResolvedValue(false);
+    dispatchReleaseWorkflow.mockRejectedValue(new Error("boom"));
+    await POST(request({ owner: "guchi-apps", repo: "issue-deck" }));
+    expect(releaseLock).toHaveBeenCalledTimes(2);
   });
 
   it("実行状況を取得できないときは起動せず、状態不明として503を返す（#4599）", async () => {

@@ -3226,3 +3226,12 @@ model ParentRunChild {
 
   @@unique([runId, repository, number])
 }
+
+// 手動リリースの開始要求の短期ロック（リポジトリ単位）。同時に届いた2つのPOSTが、GitHub上の実行中runを
+// 観測する前に両方dispatchへ進むのを防ぐ。主キーの一意性で確保し（期限切れの行は取り直す）、
+// dispatch後も短時間は保持して「dispatchからrunが見えるまで」の空白を覆う。
+model ReleaseStartLock {
+  repositoryFullName String   @id @db.VarChar(191)
+  acquiredAt         DateTime
+  expiresAt          DateTime
+}

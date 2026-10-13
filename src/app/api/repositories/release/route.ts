@@ -31,6 +31,7 @@ import { releaseWorkflowExists } from "@/lib/github/release-workflow-cache";
 import { fetchRepairWorkflowAvailability } from "@/lib/github/repair-workflow-cache";
 import { previewModeGuard } from "@/lib/preview-mode";
 import { isReleaseHeadRef } from "@/lib/pull-request-list";
+import { acquireReleaseStartLock, releaseReleaseStartLock } from "@/lib/release-start-lock";
 import { loadReleaseVerificationSummary } from "@/lib/release-verification-load";
 import type { ReleaseVerificationSummary } from "@/lib/release-verification-summary";
 import { isBumpKind } from "@/lib/semver-bump";
@@ -302,26 +303,39 @@ async function handlePOST(request: NextRequest) {
       return NextResponse.json({ error: "deploy_failed" }, { status: 409 });
     }
 
-    // 実際にリリースworkflowが受付済み・実行中なら、重ねて起動しない（#4599）。画面の連打・複数画面・
-    // API直接起動のいずれでも、開始の受付から実行開始までの空白で二重に走らないようにする。
-    // 取得できないときは「実行中」とも「開始できる」とも決めつけず、確認できない旨を返す。
-    let active: boolean;
-    try {
-      active = await fetchReleaseWorkflowActive(owner, repo, token);
-    } catch {
-      return NextResponse.json({ error: "release_state_unknown" }, { status: 503 });
-    }
-    if (active) {
+    // 同時に届いた要求が、GitHub上の実行中runを観測する前に両方dispatchへ進まないよう、リポジトリ単位の
+    // 開始要求を永続的に確保する（#4599）。確保できなければ、他の要求が開始処理中として409を返す
+    if (!(await acquireReleaseStartLock(`${owner}/${repo}`))) {
       return NextResponse.json({ error: "release_already_running" }, { status: 409 });
     }
+    // dispatchまで進んだ要求の確保は、期限（短時間）まで保持して、dispatchからrunが見えるまでの空白を覆う。
+    // 開始しなかった要求（実行中の検出・取得不能・dispatch失敗）は手放す
+    let dispatched = false;
+    try {
+      // 実際にリリースworkflowが受付済み・実行中なら、重ねて起動しない（#4599）。画面の連打・複数画面・
+      // API直接起動のいずれでも、開始の受付から実行開始までの空白で二重に走らないようにする。
+      // 取得できないときは「実行中」とも「開始できる」とも決めつけず、確認できない旨を返す。
+      let active: boolean;
+      try {
+        active = await fetchReleaseWorkflowActive(owner, repo, token);
+      } catch {
+        return NextResponse.json({ error: "release_state_unknown" }, { status: 503 });
+      }
+      if (active) {
+        return NextResponse.json({ error: "release_already_running" }, { status: 409 });
+      }
 
-    await dispatchReleaseWorkflow(
-      owner,
-      repo,
-      token,
-      isBumpKind(bumpKind) ? bumpKind : undefined,
-      allowFailedDeploy,
-    );
+      await dispatchReleaseWorkflow(
+        owner,
+        repo,
+        token,
+        isBumpKind(bumpKind) ? bumpKind : undefined,
+        allowFailedDeploy,
+      );
+      dispatched = true;
+    } finally {
+      if (!dispatched) await releaseReleaseStartLock(`${owner}/${repo}`);
+    }
     return NextResponse.json({ ok: true });
   } catch (error) {
     // 上げ幅を指定したのに、workflowがそのinputを持たないリポジトリ（#1548）。GitHubは
