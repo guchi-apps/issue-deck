@@ -304,6 +304,16 @@ describe("cancelReleaseRc", () => {
     expect(mocks.reservationCreate).not.toHaveBeenCalled();
   });
 
+  it("確定した版が台帳に既にあるときは（今回のマージで上がった版と限らないため）取り消さない", async () => {
+    mocks.candidateFindUnique.mockResolvedValue(candidateRow({ phase: "preparing" }));
+    mocks.prsByHead.mockResolvedValue([{ number: 10, state: "closed", merged_at: "2026-10-12T00:00:00Z", merge_commit_sha: "9".repeat(40) }]);
+    mocks.reservationCount.mockResolvedValueOnce(0);
+    mocks.versionAtMerge.mockResolvedValueOnce("1.2.3");
+    mocks.reservationFindUnique.mockResolvedValueOnce({ id: "r0", status: "consumed", candidateId: "old", consumedMergeSha: "1".repeat(40) });
+    expect(await cancel()).toEqual({ ok: false, error: "not_cancellable" });
+    expect(mocks.candidateUpdateMany).not.toHaveBeenCalled();
+  });
+
   it("マージ済みでもマージのSHAが分からなければ取り消さない", async () => {
     mocks.candidateFindUnique.mockResolvedValue(candidateRow({ phase: "awaiting_approval" }));
     mocks.prsByHead.mockResolvedValue([{ number: 10, state: "closed", merged_at: "2026-10-12T00:00:00Z", merge_commit_sha: null }]);

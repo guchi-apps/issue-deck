@@ -723,6 +723,11 @@ export async function cancelReleaseRc(input: Context & { userId: string; candida
       if (!hasReservation) {
         mergedVersion = await readVersionAtMergeSha(ctx, mergedSha).catch(() => null);
         if (!mergedVersion) return { ok: false, error: "not_cancellable" };
+        // 既に台帳にある版は、今回のマージで上がった版とは限らない（版上げ前のマージ・他候補の予約）。取り込めないので取り消さない
+        const taken = await db.releaseVersionReservation.findUnique({
+          where: { repositoryFullName_version: { repositoryFullName: fullNameOf(ctx), version: mergedVersion } },
+        });
+        if (taken) return { ok: false, error: "not_cancellable" };
       }
     }
   }
@@ -746,23 +751,16 @@ export async function cancelReleaseRc(input: Context & { userId: string; candida
         data: { status: "consumed", consumedAt: now, consumedMergeSha: mergedSha },
       });
       if (mergedVersion) {
-        const fullName = fullNameOf(ctx);
-        const existing = await tx.releaseVersionReservation.findUnique({
-          where: { repositoryFullName_version: { repositoryFullName: fullName, version: mergedVersion } },
+        await tx.releaseVersionReservation.create({
+          data: { repositoryFullName: fullNameOf(ctx), version: mergedVersion, candidateId: row.id, status: "consumed", consumedAt: now, consumedMergeSha: mergedSha },
         });
-        if (!existing) {
-          await tx.releaseVersionReservation.create({
-            data: { repositoryFullName: fullName, version: mergedVersion, candidateId: row.id, status: "consumed", consumedAt: now, consumedMergeSha: mergedSha },
-          });
-        } else if (existing.status !== "consumed" || existing.consumedMergeSha === null) {
-          await tx.releaseVersionReservation.update({
-            where: { id: existing.id },
-            data: { candidateId: row.id, status: "consumed", consumedAt: now, consumedMergeSha: mergedSha, releasedAt: null },
-          });
-        }
       }
     }
     return true;
+  }).catch((error: unknown) => {
+    // 版の台帳への同時書き込みで負けた場合は、取り消しごと戻る
+    if (isUniqueConstraintError(error)) return false;
+    throw error;
   });
   if (!cancelled) return { ok: false, error: "candidate_changed" };
   await db.releaseCandidateRevision.updateMany({
