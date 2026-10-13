@@ -27,20 +27,33 @@ evidence_file() {
 # 伏せすぎる側に倒す（テスト出力の`key: …`なども伏せ得る）。冪等で、二重に通しても壊れない。
 # 配布条件のマーカー: evidence_redact_v2（サブPCのpollerはこの関数があるチェックアウトだけ統合検証・全体レビューを受ける）
 evidence_redact() {
-  local s='token|secret|passwor?d|pwd|key|auth|cred|cookie|signature|dsn|bearer|database[-_]?url|connection[-_]?string'
+  local s='token|tkn|secret|passwor?d|passphrase|phrase|pwd|[_-]pass|pass[_-]|key|auth|cred|cookie|signature|dsn|bearer|jwt|otp|session[-_]?id|[_-]sid|sid[_-]|database[-_]?url|connection[-_]?string'
+  local q='("([^"\\]|\\.)*"|'"'"'([^'"'"'\\]|\\.)*'"'"')'
   sed -E \
     -e '/-----BEGIN [A-Z ]*PRIVATE KEY-----/,/-----END [A-Z ]*PRIVATE KEY-----/c\[秘密鍵を除去]' \
-    -e 's#^[A-Za-z0-9+/=]{40,}$#[鍵本文を除去]#' \
+    -e 's#^-----END [A-Z ]*PRIVATE KEY-----$#[秘密鍵を除去]#' \
     -e 's/(Bearer|Basic)[[:space:]]+[A-Za-z0-9._~+\/=-]{8,}/\1 [除去]/Ig' \
     -e 's#op://[^[:space:]]+#op://[除去]#g' \
     -e 's#([A-Za-z][A-Za-z0-9+.-]*://)[^[:space:]/@:]+(:[^[:space:]/@]*)?@#\1[除去]@#Ig' \
     -e 's#((postgres(ql)?|mysql|mongodb(\+srv)?|redis|amqp)://)[^[:space:]]+#\1[除去]#Ig' \
-    -e 's/(^|[^A-Za-z0-9])(gh[pousr]_|github_pat_|sk-ant-|sk-|sk_live_|sk_test_|npm_|xox[abprs]-|AKIA|AIza|eyJ)[A-Za-z0-9_.-]{8,}/\1[トークンを除去]/g' \
-    -e "s/([\"']?)([A-Za-z0-9_-]*($s)[A-Za-z0-9_-]*)([\"']?)([[:space:]]*[:=][[:space:]]*)(\"[^\"]*\"|'[^']*')/\1\2\4\5\"[除去]\"/Ig" \
-    -e "s/([\"']?)([A-Za-z0-9_-]*($s)[A-Za-z0-9_-]*)([\"']?)([[:space:]]*[:=][[:space:]]*)[^\"'[:space:]][^&,;}]*/\1\2\4\5[除去]/Ig" \
-    -e "s/(^|[[:space:]\"'])(x-[A-Za-z0-9-]+)([[:space:]]*:[[:space:]]*)[^\"'[:space:]][^,;}]*/\1\2\3[除去]/Ig" \
+    -e 's/(^|[^A-Za-z0-9])(gh[pousr]_|github_pat_|sk-ant-|sk-|sk_live_|sk_test_|xox[abprs]-|AKIA|AIza|eyJ)[A-Za-z0-9_.-]{8,}/\1[トークンを除去]/g' \
+    -e "s/([\"']?)([A-Za-z0-9_-]*($s)[A-Za-z0-9_-]*)([\"']?)([[:space:]]*[:=][[:space:]]*)$q/\1\2\4\5\"[除去]\"/Ig" \
+    -e "s/([\"']?)([A-Za-z0-9_-]*($s)[A-Za-z0-9_-]*)([\"']?)([[:space:]]*:[[:space:]]*)[^\"'[:space:]].*/\1\2\4\5[除去]/Ig" \
+    -e "s/([\"']?)([A-Za-z0-9_-]*($s)[A-Za-z0-9_-]*)([\"']?)([[:space:]]*=[[:space:]]*)[^\"'[:space:]&][^&[:space:]]*/\1\2\4\5[除去]/Ig" \
+    -e "s/(^|[[:space:]\"'])(x-[A-Za-z0-9-]+)([[:space:]]*:[[:space:]]*)[^\"'[:space:]].*/\1\2\3[除去]/Ig" \
     -e "s/(--?[A-Za-z0-9_-]*($s)[A-Za-z0-9_-]*)[[:space:]]+[^[:space:]=:[-][^[:space:]]*/\1 [除去]/Ig" \
-    -e 's/([A-Z][A-Z0-9_]{2,}=)[^[:space:]]{12,}/\1[除去]/g'
+    -e 's/([A-Z][A-Z0-9_]{2,}=)[^[:space:]]{12,}/\1[除去]/g' |
+    evidence_redact_shape
+}
+
+# 名前に頼らない最後の砦: 大文字・小文字・数字をすべて含む32文字以上の不透明な値（API鍵・トークン）を伏せる。
+# 小文字だけの16進（コミットSHA）やパス（/ . を含む）は対象外。perlが無ければ素通し（上の構造ルールは効く）
+evidence_redact_shape() {
+  if command -v perl >/dev/null 2>&1; then
+    perl -pe 's/^(?=[A-Za-z0-9+\/]*[A-Z])(?=[A-Za-z0-9+\/]*[a-z])[A-Za-z0-9+\/]{40,}={0,2}$/[鍵本文を除去]/; s/(?<![A-Za-z0-9_\/.-])(?=[A-Za-z0-9_-]{32,}(?![A-Za-z0-9_\/.-]))(?=[A-Za-z0-9_-]*[A-Z])(?=[A-Za-z0-9_-]*[a-z])(?=[A-Za-z0-9_-]*\d)[A-Za-z0-9_-]+/[長い値を除去]/g'
+  else
+    cat
+  fi
 }
 
 # evidence_classify_step <コマンド> <終了コード>: 失敗の種別を標準出力へ
