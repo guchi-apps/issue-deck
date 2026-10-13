@@ -4660,3 +4660,14 @@ Webhookで取り込む。運用・移行・ロールバックは[backup-ci.md](b
 ### VPSメモリの自動計測（#4256）
 
 サブPCの`scripts/vps-memory-probe.mjs`（純粋な部分は`scripts/lib/vps-memory-probe-core.mjs`）がSSH経由でVPSの`/proc`を読み、`POST /api/integrations/vps-memory/samples`で`VpsMemorySample`へ保存する。AIDE向けの読み取りは`GET /api/integrations/vps-memory`。検証・区間分け・保存は`lib/vps-memory/`、認証は`lib/vps-memory/auth.ts`。設定・取得できる項目・保存期間は[vps-memory-probe.md](vps-memory-probe.md)。
+
+## 全体レビュー・修正の外部エージェント向けAPI／MCP（#4588）
+
+詳細・接続手順・異常系は[docs/review-agent-api.md](review-agent-api.md)。
+
+- `src/lib/review-agent/auth.ts` … 専用トークン（`ReviewAgentToken`。SHA-256のみ保存・期限・失効・repository許可・read/write/resume）の発行・検証と監査（`ReviewAgentAuditLog`）
+- `src/lib/review-agent/service.ts` … ツール定義と`callReviewAgentTool`（RESTとMCPの共通の入口）。取得は既存台帳の読み取りのみ、更新は`release-fix-internal-run.ts`へ委譲し、冪等性（`ReviewAgentIdempotency`）・SHA照合・独立レビュー判定を持つ
+- `src/lib/review-agent/mcp.ts` … JSON-RPC（initialize・tools/list・tools/call・ping）
+- `GET /api/review-agent/tools`・`POST /api/review-agent/tools/<name>` … REST。`POST /api/mcp/review-agent` … MCP（Streamable HTTP・POSTのみ）。認証は`Authorization: Bearer ida_…`
+- `GET/POST/DELETE /api/settings/review-agent-tokens` … トークンの一覧・発行・失効（ログイン済みの本人のみ。UIは設定＞フリート運用）
+- `release-fix-internal-run.ts`は、報告に省略可の`expectedSha`（外部向けは必須。HEADと違えば`stale_sha`）と`reviewer`（担当と別主体のレビューを独立レビューとして記録。`ReleaseFixInternalRound.reviewerKind/reviewerRef`）を受ける。旧実行ホストの経路は挙動不変

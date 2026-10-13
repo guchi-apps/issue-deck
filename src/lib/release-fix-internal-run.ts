@@ -61,7 +61,11 @@ export type InternalReportError =
   /** 一時停止していない（二重の再開を含む） */
   | { ok: false; error: "not_paused"; message: string }
   /** 完了・置換・本番反映済みなど、再開してはいけない対象 */
-  | { ok: false; error: "not_resumable"; message: string };
+  | { ok: false; error: "not_resumable"; message: string }
+  /** 報告が検証したと申告するSHAが、いまのブランチのHEADと違う（旧SHAの結果を最新HEADへ付け替えない。#4588） */
+  | { ok: false; error: "stale_sha"; message: string; currentSha: string }
+  /** 実装担当と同じ主体のレビューは、独立レビューとして数えない（#4588） */
+  | { ok: false; error: "self_review_not_independent"; message: string };
 
 export type InternalFindingView = {
   key: string;
@@ -352,11 +356,25 @@ async function pauseInternal(ctx: Mutable, kind: InternalStopReason, detail: str
 }
 
 /** 担当の照合。担当がいるなら担当と世代番号の一致を求め、解放・引き継ぎの後の遅延報告を弾く */
-export type Actor = { assignee?: string | null; epoch?: number | null };
+export type Actor = {
+  assignee?: string | null;
+  epoch?: number | null;
+  /** 独立レビューの報告者（担当ではない）。担当名の照合をせず、世代番号だけで遅延報告を弾く（#4588） */
+  reviewer?: boolean;
+};
+
+/** 報告が検証したと申告するSHA（外部向けは必須）。省略時は従来どおりサーバーが取り直したHEADを使う */
+type ExpectedSha = { expectedSha?: string | null };
 
 function checkActor(session: ReleaseFixInternalSession, actor: Actor): InternalReportError | null {
   const epoch = actor.epoch ?? null;
   const assignee = actor.assignee ?? null;
+  if (actor.reviewer) {
+    if (epoch === null || epoch !== session.assignmentEpoch) {
+      return { ok: false, error: "stale_assignee", message: "担当の世代が変わっているため、この報告は記録しません。最新の状態を読み直し、レビュー対象を確かめてから報告してください" };
+    }
+    return null;
+  }
   if (epoch !== null && epoch !== session.assignmentEpoch) {
     return { ok: false, error: "stale_assignee", message: "担当が変わっているため、この報告は記録しません。最新の状態を読み直し、担当を取得してから続けてください" };
   }
@@ -368,7 +386,7 @@ function checkActor(session: ReleaseFixInternalSession, actor: Actor): InternalR
 
 type Prepared = { error: InternalReportError } | (Mutable & { sha: string });
 
-async function prepare(repositoryFullName: string, issueNumber: number, actor: Actor, opts: { allowPaused?: boolean } = {}): Promise<Prepared> {
+async function prepare(repositoryFullName: string, issueNumber: number, actor: Actor, opts: { allowPaused?: boolean; expectedSha?: string | null } = {}): Promise<Prepared> {
   const series = await findActiveSeries(repositoryFullName, issueNumber);
   if (!series) return { error: { ok: false, error: "series_not_found", message: "この修正Issueに結び付いた、進行中の内部確認つきの修正系列がありません" } };
   const access = await repositoryAccess(repositoryFullName);
@@ -378,6 +396,9 @@ async function prepare(repositoryFullName: string, issueNumber: number, actor: A
   const session = await ensureSession(series);
   const stale = checkActor(session, actor);
   if (stale) return { error: stale };
+  if (opts.expectedSha && opts.expectedSha !== sha) {
+    return { error: { ok: false, error: "stale_sha", currentSha: sha, message: `報告が検証したSHA（${opts.expectedSha.slice(0, 7)}）はブランチの現在のHEAD（${sha.slice(0, 7)}）ではありません。最新の内容を取得して検証し直してから報告してください` } };
+  }
   if (session.pauseKind !== null && !opts.allowPaused) {
     return { error: { ok: false, error: "paused", message: `${session.pauseDetail ?? internalStopReasonMessage(session.pauseKind as InternalStopReason)}。再開してから報告してください` } };
   }
@@ -397,11 +418,19 @@ export async function recordInternalReview(input: {
   report: ReviewReport;
   summary: string | null;
   actor?: Actor;
-}): Promise<{ ok: true; round: number; status: InternalStatusView } | InternalReportError> {
+  /** 外部エージェントの報告主体。渡すと担当と別の主体であることを確かめ、往復へ記録する（#4588） */
+  reviewer?: { kind: "external"; ref: string; /** 担当名（claimで記録した名前）がこの報告主体のものか。現担当と、過去に担当を取った主体の両方を見る */ isSelf: (assigneeName: string) => boolean } | null;
+} & ExpectedSha): Promise<{ ok: true; round: number; status: InternalStatusView } | InternalReportError> {
   const actor = input.actor ?? {};
-  const prepared = await prepare(input.repositoryFullName, input.issueNumber, actor);
+  const prepared = await prepare(input.repositoryFullName, input.issueNumber, actor, { expectedSha: input.expectedSha });
   if ("error" in prepared) return prepared.error;
   const { series, access, sha } = prepared;
+  if (input.reviewer) {
+    const claimed = [prepared.session.assignee, ...(Array.isArray(prepared.session.attempts) ? (prepared.session.attempts as InternalAttempt[]) : []).filter((a) => a.kind === "claim" || a.kind === "handover").map((a) => a.by)];
+    if (claimed.some((name) => typeof name === "string" && input.reviewer!.isSelf(name))) {
+      return { ok: false, error: "self_review_not_independent", message: "実装を担当している主体と同じ主体のレビューは、独立レビューとして記録しません。別のトークン・別のエージェントでレビューしてください" };
+    }
+  }
   const now = new Date();
   let session = await renewLease(await accrue(prepared.session, now), actor, now);
 
@@ -453,6 +482,7 @@ export async function recordInternalReview(input: {
     reviewSummary: input.summary ? input.summary.slice(0, 8000) : null,
     reviewedAt: now,
     openFindingCount: openCount,
+    ...(input.reviewer ? { reviewerKind: input.reviewer.kind, reviewerRef: input.reviewer.ref.slice(0, 120) } : {}),
   };
   if (reuse) {
     await db.releaseFixInternalRound.update({ where: { id: reuse.id }, data });
@@ -483,9 +513,9 @@ export async function recordInternalTest(input: {
   state: InternalTestState;
   summary: string | null;
   actor?: Actor;
-}): Promise<{ ok: true; round: number; status: InternalStatusView } | InternalReportError> {
+} & ExpectedSha): Promise<{ ok: true; round: number; status: InternalStatusView } | InternalReportError> {
   const actor = input.actor ?? {};
-  const prepared = await prepare(input.repositoryFullName, input.issueNumber, actor);
+  const prepared = await prepare(input.repositoryFullName, input.issueNumber, actor, { expectedSha: input.expectedSha });
   if ("error" in prepared) return prepared.error;
   const { series, access, sha } = prepared;
   const now = new Date();

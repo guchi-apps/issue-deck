@@ -2738,6 +2738,9 @@ model ReleaseFixInternalRound {
   testedAt           DateTime?
   // この往復のレビューで未解決だった指摘の件数（進捗なしの判定に使う）
   openFindingCount   Int       @default(0)
+  // 独立レビューの報告主体（#4588）。`external`（外部エージェントのトークン）。旧実行ホストの報告はnull
+  reviewerKind       String?   @db.VarChar(16)
+  reviewerRef        String?   @db.VarChar(120)
   createdAt          DateTime  @default(now())
 
   @@unique([repositoryFullName, issueNumber, round])
@@ -3258,4 +3261,58 @@ model ParentRunChild {
   run ParentRun @relation(fields: [runId], references: [id], onDelete: Cascade)
 
   @@unique([runId, repository, number])
+}
+
+// 外部エージェント向けの全体レビュー・修正API／MCPの専用トークン（#4588）。実行ホスト用の共有シークレットは使わない。
+// 値そのものは保存せずSHA-256のハッシュだけを持つ。利用者・アクセスできるrepository・操作範囲（read／write／resume）を持ち、
+// 期限と失効で止められる。repositoryは発行した利用者が連携しているものに限り、使うたびに再確認する。
+model ReviewAgentToken {
+  id           String    @id @default(cuid())
+  userId       String    @db.VarChar(40)
+  name         String    @db.VarChar(120)
+  tokenHash    String    @unique @db.VarChar(64)
+  // 表示用の先頭数文字（値の復元はできない）
+  tokenPrefix  String    @db.VarChar(16)
+  // カンマ区切り: `read` / `write` / `resume`
+  scopes       String    @db.VarChar(64)
+  // アクセスできるrepositoryのfullName（JSON配列）。空配列は何にも届かない
+  repositories Json
+  expiresAt    DateTime
+  revokedAt    DateTime?
+  lastUsedAt   DateTime?
+  createdAt    DateTime  @default(now())
+
+  @@index([userId])
+}
+
+// 外部エージェントのAPI/MCP操作の監査（#4588）。主体（トークン・利用者）・対象・時刻・結果を残す。更新と拒否を記録し、
+// 読み取りの成功は記録しない（読み取りは副作用なしを保つ）。レビュー本文・値は入れない。
+model ReviewAgentAuditLog {
+  id                 String   @id @default(cuid())
+  tokenId            String?  @db.VarChar(40)
+  userId             String?  @db.VarChar(40)
+  tool               String   @db.VarChar(64)
+  repositoryFullName String?  @db.VarChar(191)
+  issueNumber        Int?
+  // `ok` / `rejected` / `denied`
+  outcome            String   @db.VarChar(16)
+  errorCode          String?  @db.VarChar(64)
+  createdAt          DateTime @default(now())
+
+  @@index([tokenId, createdAt])
+  @@index([repositoryFullName, createdAt])
+}
+
+// 外部エージェントの更新操作の冪等性（#4588）。同じトークン・同じキーの再送は、保存した結果をそのまま返し二重に実行しない。
+model ReviewAgentIdempotency {
+  id          String   @id @default(cuid())
+  tokenId     String   @db.VarChar(40)
+  idemKey     String   @db.VarChar(120)
+  tool        String   @db.VarChar(64)
+  requestHash String   @db.VarChar(64)
+  // 実行が終わるまでnull（実行中の再送は`in_progress`）
+  response    Json?
+  createdAt   DateTime @default(now())
+
+  @@unique([tokenId, idemKey])
 }
