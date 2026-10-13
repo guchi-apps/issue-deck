@@ -1,5 +1,6 @@
 "use client";
 
+import type { ParentRunBadge } from "@/lib/parent-run/run";
 import { useCallback, useEffect, useState } from "react";
 
 import { fetchWithTimeout } from "@/lib/fetch-with-timeout";
@@ -60,6 +61,8 @@ export type DispatchState = {
    * 無ければ「待ちは無い」として読む。
    */
   dependencyWaits?: DependencyWaitView[];
+  /** 親Issueの自動実行（#4536）の稼働中の印。古い応答では欠けうる */
+  parentRuns?: ParentRunBadge[];
   concurrency: number;
   /** エージェント別の新規実行の一時停止状態（#2994） */
   agentPause: DispatchAgentPauseState;
@@ -1081,6 +1084,7 @@ export function useDispatchState(enabled: boolean) {
     planRequests: state?.planRequests ?? [],
     questionRequests: state?.questionRequests ?? [],
     dependencyWaits: state?.dependencyWaits ?? [],
+    parentRuns: state?.parentRuns ?? [],
     controlDependencyWait,
     concurrency: state?.concurrency ?? null,
     agentPause: state?.agentPause ?? { claude: null, codex: null },

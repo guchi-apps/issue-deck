@@ -1,5 +1,6 @@
 "use client";
 
+import { computeEpicStages } from "@/lib/epic-draft/decompose";
 import { ExternalLink } from "lucide-react";
 import { useState } from "react";
 
@@ -195,6 +196,8 @@ export function ChatCardView({
           </div>
         </div>
       );
+    case "confirm_epic":
+      return <EpicDraftCard card={card} state={confirmState} busy={busy} onConfirm={onConfirm} />;
     case "confirm_issue":
       return <IssueDraft card={card} state={confirmState} busy={busy} onConfirm={onConfirm} />;
     case "result":
@@ -317,6 +320,87 @@ function IssueDraft({
         <div className="flex flex-wrap gap-2 border-t px-3 py-2.5">
           <Button size="sm" disabled={busy || !title.trim()} onClick={() => onConfirm("execute", { title, body })}>
             Issueを作成
+          </Button>
+          <Button variant="outline" size="sm" disabled={busy} onClick={() => onConfirm("cancel")}>やめる</Button>
+        </div>
+      )}
+    </ConfirmFrame>
+  );
+}
+
+function EpicDraftCard({
+  card,
+  state,
+  busy,
+  onConfirm,
+}: {
+  card: Extract<ChatCard, { type: "confirm_epic" }>;
+  state: ChatConfirmState | null;
+  busy: boolean;
+  onConfirm: (action: "execute" | "cancel") => void;
+}) {
+  const { draft } = card;
+  const stages = computeEpicStages(draft.children) ?? [];
+  const editable = state === "pending";
+  return (
+    <ConfirmFrame title="親子Issue案（確認してから作成します）" state={state}>
+      <div className="flex flex-col gap-2 px-3 py-2.5 text-sm">
+        <div>
+          <p className="font-semibold">親 {draft.parent.title}</p>
+          <p className="text-xs text-muted-foreground">{draft.parent.repo}</p>
+          <p className="mt-1 text-xs">{draft.parent.objective}</p>
+          <ul className="mt-1 list-disc pl-5 text-xs text-muted-foreground">
+            {draft.parent.completionCriteria.map((c) => (
+              <li key={c}>{c}</li>
+            ))}
+          </ul>
+        </div>
+        <ol className="flex flex-col gap-2">
+          {stages.map((keys, index) => (
+            <li key={keys.join(",")} className="rounded-lg border px-2.5 py-2">
+              <p className="text-xs text-muted-foreground">
+                段{index + 1}
+                {keys.length > 1 ? "（並行可）" : ""}
+              </p>
+              <ul className="mt-1 flex flex-col gap-1">
+                {keys.map((key) => {
+                  const child = draft.children.find((c) => c.key === key)!;
+                  const dups = card.duplicates?.[key];
+                  return (
+                    <li key={key} className="text-xs">
+                      <span className="font-medium">{child.title}</span>{" "}
+                      <span className="text-muted-foreground">
+                        {child.repo}
+                        {child.existing ? `#${child.existing}（既存を再利用）` : "（新規）"}
+                      </span>
+                      {child.dependsOn.length > 0 && (
+                        <span className="block text-muted-foreground">
+                          進む条件: {child.dependsOn.map((d) => `${d.key}が${d.conditions.join("・")}`).join("、")}
+                        </span>
+                      )}
+                      {dups && dups.length > 0 && (
+                        <span className="block text-amber-600">
+                          似た既存Issue:{" "}
+                          {dups.map((d) => (
+                            <a key={d.number} className="underline" href={d.htmlUrl} target="_blank" rel="noreferrer">
+                              #{d.number}{" "}
+                            </a>
+                          ))}
+                        </span>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+            </li>
+          ))}
+        </ol>
+        <p className="text-xs text-muted-foreground">作成しても子の実装は始まりません。実行は親から開始します。</p>
+      </div>
+      {editable && (
+        <div className="flex flex-wrap gap-2 border-t px-3 py-2.5">
+          <Button size="sm" disabled={busy} onClick={() => onConfirm("execute")}>
+            親子Issueを作成
           </Button>
           <Button variant="outline" size="sm" disabled={busy} onClick={() => onConfirm("cancel")}>やめる</Button>
         </div>

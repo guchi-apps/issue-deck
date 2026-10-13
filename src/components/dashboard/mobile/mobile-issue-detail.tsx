@@ -170,6 +170,7 @@ import {
   type SnoozeTarget,
 } from "@/lib/snooze";
 import { useIssueMutations } from "@/hooks/use-issue-mutations";
+import { ParentRunSection } from "@/components/dashboard/parent-run-section";
 import { useIssueSubIssues } from "@/hooks/use-issue-sub-issues";
 import { useIssueTaskList } from "@/hooks/use-issue-task-list";
 import { useManualStepPrerequisites } from "@/hooks/use-manual-step-prerequisites";
@@ -1245,6 +1246,13 @@ export function MobileIssueDetail({
           related={
             <>
               {/* 子イシューの進捗（#1340）。畳んでいても完了率は行に残す（#1646） */}
+              {/* 親Issueの自動実行（#4536）。出すかどうかは計画（#4535）の有無で決まる（パネル自身が計画の無い親では何も描かない） */}
+              <ParentRunSection
+                repositoryFullName={issue.repositoryFullName}
+                issueNumber={issue.number}
+                hosts={dispatch.hosts}
+                idPrefix="m-"
+              />
               {hasSubIssueRelations && (
                 <IssueSubIssuesSection
                   relations={subIssueRelations}

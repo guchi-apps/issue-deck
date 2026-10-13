@@ -1,4 +1,5 @@
 import { db } from "@/lib/db";
+import { deriveInheritedRecords, parseInheritanceEvidence, type FinalizeStatus } from "@/lib/release-finalize";
 import type { ReleaseVerificationDetailRow } from "@/lib/release-verification-summary";
 import {
   RELEASE_VERIFICATION_KINDS,
@@ -25,9 +26,11 @@ export type ReleaseVerificationTarget = {
 /** 依頼を受けたとき、種別ごとの行を`waiting`で作る（冪等。既にある行は触らない） */
 export async function registerReleaseVerification(
   target: ReleaseVerificationTarget,
+  /** 依頼する種別。公開準備（#4496）では、引き継がなかった種別だけを再実行する */
+  kinds: readonly ReleaseVerificationKind[] = RELEASE_VERIFICATION_KINDS,
 ): Promise<{ created: ReleaseVerificationKind[] }> {
   const created: ReleaseVerificationKind[] = [];
-  for (const kind of RELEASE_VERIFICATION_KINDS) {
+  for (const kind of kinds) {
     const where = { ...target, kind };
     const existing = await db.releaseVerification.findFirst({ where, select: { id: true } });
     if (existing) continue;
@@ -75,12 +78,33 @@ export async function listReleaseVerificationRecords(
     where: { repoFullName, prNumber },
     orderBy: { updatedAt: "desc" },
   });
-  return rows.flatMap((row) => {
+  const records = rows.flatMap((row) => {
     const kind = parseReleaseVerificationKind(row.kind);
     const state = parseReleaseVerificationState(row.state);
     if (!kind || !state) return [];
     return [{ kind, state, baseSha: row.baseSha, headSha: row.headSha, unverifiedScope: row.unverifiedScope }];
   });
+  return [...records, ...(await loadInheritedRecords(repoFullName, prNumber, records))];
+}
+
+/**
+ * 公開準備（#4496）で、バンプ前の合格をバンプ後のheadへ引き継いだ検証の**派生記録**。DBの検証行は書き換えず、
+ * 引継ぎの証跡（元のSHA・差分・条件）が残っていて元の結果が今も合格のときだけ、バンプ後の対象に対する記録として足す。
+ * バンプ後のSHAで実行した結果とは区別できるよう`inheritedFromHeadSha`を持つ
+ */
+async function loadInheritedRecords<R extends ReleaseVerificationRecord>(
+  repoFullName: string,
+  prNumber: number,
+  originals: readonly R[],
+): Promise<(R & { inheritedFromHeadSha: string })[]> {
+  const finalizations = await db.releaseCandidateFinalization.findMany({
+    // 引継ぎの判定は適用した時点の事実で、その後に最終検証が失敗して修正工程へ戻っても変わらない
+    where: { repositoryFullName: repoFullName, prNumber, finalHeadSha: { not: null } },
+    select: { status: true, handoffEvidence: true },
+  });
+  return finalizations.flatMap((f) =>
+    deriveInheritedRecords({ finalization: { status: f.status as FinalizeStatus, evidence: parseInheritanceEvidence(f.handoffEvidence) }, originals }),
+  );
 }
 
 /** 画面向けに、要約・指摘・担当を含む行を返す（#4238）。古いSHAの行も含め、判定側が無効にする */
@@ -92,7 +116,7 @@ export async function listReleaseVerificationDetails(
     where: { repoFullName, prNumber },
     orderBy: { updatedAt: "desc" },
   });
-  return rows.flatMap((row) => {
+  const details = rows.flatMap((row) => {
     const kind = parseReleaseVerificationKind(row.kind);
     const state = parseReleaseVerificationState(row.state);
     if (!kind || !state) return [];
@@ -112,4 +136,10 @@ export async function listReleaseVerificationDetails(
       },
     ];
   });
+  // 引継ぎは元の結果を複写し、画面に引継ぎであることと元のheadが読めるよう理由を添える
+  const inherited = (await loadInheritedRecords(repoFullName, prNumber, details)).map((row) => ({
+    ...row,
+    message: `バンプ前（${row.inheritedFromHeadSha.slice(0, 7)}）の合格を引き継いでいます。バンプ後のheadで実行した結果ではありません`,
+  }));
+  return [...details, ...inherited];
 }

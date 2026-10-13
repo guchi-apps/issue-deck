@@ -58,7 +58,7 @@ import { listReleaseVerificationRecords, registerReleaseVerification } from "@/l
  * - 旧方式（`release-main/v*`）の候補は閉じず、バンプも取り消さない。移行は明示的な操作だけで行う
  */
 
-type Context = { owner: string; repo: string; token: string };
+export type Context = { owner: string; repo: string; token: string };
 
 const fullNameOf = (ctx: Context) => `${ctx.owner}/${ctx.repo}`;
 
@@ -122,9 +122,9 @@ export type RcOverview = {
   legacy: RcLegacyCandidate | null;
 };
 
-type CandidateRow = NonNullable<Awaited<ReturnType<typeof loadCandidateRow>>>;
+export type CandidateRow = NonNullable<Awaited<ReturnType<typeof loadCandidateRow>>>;
 
-async function loadCandidateRow(where: { id: string } | { activeKey: string }) {
+export async function loadCandidateRow(where: { id: string } | { activeKey: string }) {
   return db.releaseCandidate.findUnique({ where, include: { revisions: { orderBy: { revision: "asc" } } } });
 }
 
@@ -147,12 +147,12 @@ function toRevisionView(row: CandidateRow["revisions"][number]): RcRevisionView 
   };
 }
 
-async function callerSupport(ctx: Context): Promise<RcCallerSupport> {
+export async function callerSupport(ctx: Context): Promise<RcCallerSupport> {
   return parseRcCallerSupport(await fetchReleaseCallerText(ctx.owner, ctx.repo, ctx.token).catch(() => null));
 }
 
 /** 候補ブランチをheadとするmain向けのPR（新しい順の先頭）。PRを作り直していても同じブランチなら追える */
-async function observeCandidatePullRequest(ctx: Context, sequence: number) {
+export async function observeCandidatePullRequest(ctx: Context, sequence: number) {
   const prs = await fetchPullRequestsByHead(ctx.owner, ctx.repo, rcBranchName(sequence), "main", ctx.token);
   return prs.find((pr) => pr.state === "open") ?? prs[0] ?? null;
 }
@@ -412,7 +412,8 @@ export type RcMutationError =
   | "empty_selection"
   | "not_cancellable"
   | "not_migratable"
-  | "legacy_changed";
+  | "legacy_changed"
+  | "develop_not_synced";
 
 export type RcMutationResult =
   | { ok: true; candidateId: string; revision: number; existing: boolean }
@@ -688,18 +689,42 @@ export async function cancelReleaseRc(input: Context & { userId: string; candida
   const phase = parseRcPhase(row.phase);
   if (phase === "cancelled") return { ok: true, candidateId: row.id, revision: row.currentRevision, existing: true };
   if (phase === null || !canCancelRc(phase)) return { ok: false, error: "not_cancellable" };
+  // 公開準備中・承認待ちの候補PRがmainへマージ済み（最終検証を確認できず本番反映の追跡へ進めない候補）を、
+  // 人が終わらせる出口。**予約した版はマージで使われたので消費済みにしてから**取り消す（版を再利用させず、
+  // developへの同期の検出〈`findUnsyncedPublish`〉も失わせない）。マージの有無を確かめられないときは取り消さない
+  let mergedSha: string | null = null;
+  if (phase === "preparing" || phase === "awaiting_approval") {
+    const prs = await fetchPullRequestsByHead(ctx.owner, ctx.repo, rcBranchName(row.sequence), "main", ctx.token).catch(() => null);
+    if (prs === null) return { ok: false, error: "not_cancellable" };
+    const merged = prs.find((pr) => pr.merged_at !== null);
+    if (merged) {
+      if (!merged.merge_commit_sha) return { ok: false, error: "not_cancellable" };
+      mergedSha = merged.merge_commit_sha;
+    }
+  }
   const now = new Date();
-  const updated = await db.releaseCandidate.updateMany({
-    where: { id: row.id, phase: row.phase },
-    data: {
-      phase: "cancelled",
-      activeKey: null,
-      cancelReason: input.reason?.slice(0, 2000) ?? null,
-      cancelledByUserId: input.userId,
-      cancelledAt: now,
-    },
+  // 取り消しと版の消費は同時に行う（片方だけ残ると、版の再利用やdevelop同期の検出漏れになる）
+  const cancelled = await db.$transaction(async (tx) => {
+    const updated = await tx.releaseCandidate.updateMany({
+      where: { id: row.id, phase: row.phase },
+      data: {
+        phase: "cancelled",
+        activeKey: null,
+        cancelReason: input.reason?.slice(0, 2000) ?? null,
+        cancelledByUserId: input.userId,
+        cancelledAt: now,
+      },
+    });
+    if (updated.count === 0) return false;
+    if (mergedSha) {
+      await tx.releaseVersionReservation.updateMany({
+        where: { candidateId: row.id, status: "reserved" },
+        data: { status: "consumed", consumedAt: now, consumedMergeSha: mergedSha },
+      });
+    }
+    return true;
   });
-  if (updated.count === 0) return { ok: false, error: "candidate_changed" };
+  if (!cancelled) return { ok: false, error: "candidate_changed" };
   await db.releaseCandidateRevision.updateMany({
     where: { candidateId: row.id, status: "requested" },
     data: { status: "expired", pendingKey: null, failureReason: "候補を取り消したため適用しません" },

@@ -80,3 +80,8 @@ poller v39から対応を明示申告します。v38には退避処理があり�
 未申告・falseの場合は画面とAPIで退避指示を拒否し、配布時も `stashInput=false` のジョブだけを渡します。
 通常の追加指示と停止操作は従来の対応申告で利用できます。
 DBのnullable列追加を先に適用してください。旧pollerの申告は対応状態をnullへ戻すため、旧版へ戻した後も退避指示を配布しません。
+
+## 親子Issueの実行計画との関係（#4535）
+
+計画の依存条件は上の4条件を再利用する（[../execution-plan.md](../execution-plan.md)）。子Issueへの`merged`/`released`は
+`issue-<番号>`ブランチのPRへ解決してから評価する。

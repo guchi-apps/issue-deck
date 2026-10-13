@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { applyReleasePrepState, resolveReleasePrepState } from "@/lib/release-prep-state";
+import { applyReleasePrepState, isAwaitingReleaseAutomation, resolveReleasePrepState } from "@/lib/release-prep-state";
 
 describe("resolveReleasePrepState", () => {
   it("記録が無ければidle（本番マージ直後の待機も推測しない）", () => {
@@ -21,7 +21,25 @@ describe("applyReleasePrepState", () => {
     expect(applyReleasePrepState(null, "running")).toBe("release-preparing");
     expect(applyReleasePrepState(null, "failed")).toBe("preparation-failed");
     expect(applyReleasePrepState(null, "idle")).toBeNull();
+    expect(applyReleasePrepState(null, "unknown")).toBe("preparation-unknown");
+    expect(applyReleasePrepState("deploy-failed", "unknown")).toBe("preparation-unknown");
+    expect(applyReleasePrepState("release-in-progress", "unknown")).toBe("release-in-progress");
     expect(applyReleasePrepState("deploy-failed", "running")).toBe("deploy-failed");
     expect(applyReleasePrepState("release-in-progress", "failed")).toBe("release-in-progress");
+  });
+});
+
+describe("isAwaitingReleaseAutomation（#4526）", () => {
+  const now = Date.parse("2026-10-12T10:00:00Z");
+  const base = { now, unreleasedCommitCount: 1 };
+  it("本番マージ直後で未リリースの変更があれば待機", () => {
+    expect(isAwaitingReleaseAutomation({ ...base, latestReleaseMergedAt: "2026-10-12T09:50:00Z" })).toBe(true);
+  });
+  it("待機時間を過ぎれば待機ではない", () => {
+    expect(isAwaitingReleaseAutomation({ ...base, latestReleaseMergedAt: "2026-10-12T09:30:00Z" })).toBe(false);
+  });
+  it("未リリースの変更が無い・マージ時刻が無いなら待機ではない", () => {
+    expect(isAwaitingReleaseAutomation({ ...base, unreleasedCommitCount: 0, latestReleaseMergedAt: "2026-10-12T09:55:00Z" })).toBe(false);
+    expect(isAwaitingReleaseAutomation({ ...base, latestReleaseMergedAt: null })).toBe(false);
   });
 });

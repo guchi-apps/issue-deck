@@ -106,6 +106,7 @@ import { useIssueArtifacts } from "@/hooks/use-issue-artifacts";
 import { useIssueComments } from "@/hooks/use-issue-comments";
 import { useNow } from "@/hooks/use-now";
 import { useIssueMutations } from "@/hooks/use-issue-mutations";
+import { ParentRunSection } from "@/components/dashboard/parent-run-section";
 import { useIssueSubIssues } from "@/hooks/use-issue-sub-issues";
 import { useIssueTaskList } from "@/hooks/use-issue-task-list";
 import { useManualStepPrerequisites } from "@/hooks/use-manual-step-prerequisites";
@@ -1276,6 +1277,13 @@ export function IssueDetail({
             related={
               <>
                 {/* 子イシューの進捗（#1340）。畳んでいても完了率は見えるようにする */}
+                {/* 親Issueの自動実行（#4536）。出すかどうかは計画（#4535）の有無で決まる（パネル自身が計画の無い親では何も描かない）。
+                    GitHubのサブIssue未紐付けは計画登録時の警告で、開始可否の条件にはしない */}
+                <ParentRunSection
+                  repositoryFullName={issue.repositoryFullName}
+                  issueNumber={issue.number}
+                  hosts={dispatch.hosts}
+                />
                 {hasSubIssueRelations && (
                   <IssueSubIssuesSection
                     relations={subIssueRelations}

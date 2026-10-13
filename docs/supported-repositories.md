@@ -1390,3 +1390,17 @@ done
   こちらも使われているかどうかを確認して要否を判断する
 - `claude-ci-fix.yml`: pnpm/Prisma/Next.js前提のセットアップとビルド用プレースホルダー環境変数を
   削除し、検証コマンドを`npm run check`とmanifestのJSON検証へ置換（guchi-apps/shopping-list#62で導入）
+
+## pi0w_260719（Pi Zero W、#26導入中）
+
+- 対象: `guchi-apps/pi0w_260719`（private、Python/shell、developデフォルト）。
+- 導入PR: https://github.com/guchi-apps/pi0w_260719/pull/27
+- 共有caller: `workflows/v48`、`prompts-ref`も同じタグ、`runtime-setup: minimal`。
+- 計画/実装、レビュー、CI/レビュー修正、コンフリクト、PR修復、進捗、リリース・タグ確認を導入。
+- CI: Python 3.7/3.11、ハードウェアなし。実機のARMv6/BlueZ/GPIO/I2Cは別確認。
+- version.jsonとvX.Y.Z。mainへのマージは配布完了とは扱わず、ソース成果物/draft Releaseを準備。
+- 実装・検証はサブPC。BLE取得はPiに残す。サブPC登録はsubpc側の連携PR。
+- **状態: 導入中、代表Issueの一連動作は未検証。** App/Secrets/盤面同期・サブPC実機/信頼・保護を確認後に更新する。
+- 全体レビュー・統合検証は共有ディスパッチの対象設定と横展開状況を確認し、個別レビューで代用しない。Mac/Xcodeは非該当。
+- 自動デプロイは https://github.com/guchi-apps/pi0w_260719/issues/25 に依存。未実施を成功扱いにしない。
+- 手順: https://github.com/guchi-apps/pi0w_260719/blob/issue-26/docs/issuedeck.md

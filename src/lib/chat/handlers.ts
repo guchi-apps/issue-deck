@@ -32,6 +32,10 @@ import {
   findRepositoryByFullName,
 } from "@/lib/github/issue-create-service";
 import { repairKindsFor } from "@/lib/github/pull-request-repair";
+import { createEpic } from "@/lib/epic-draft/create";
+import { validateEpicDraft } from "@/lib/epic-draft/decompose";
+import { githubForUser } from "@/lib/epic-draft/github";
+import { getEpicPlanRegistrar } from "@/lib/epic-draft/plan";
 import {
   planPullRequestRepair,
   startPullRequestRepair,
@@ -389,7 +393,12 @@ function mergeSummary(card: ChatStatusCard | undefined): string {
   return `#${card.number} はまだ確認が必要です（${blockers.map((row) => `${row.label}: ${row.value}`).join("、")}）。`;
 }
 
-export type ConfirmOverrides = { title?: string; body?: string };
+export type ConfirmOverrides = {
+  title?: string;
+  body?: string;
+  /** 親子Issue案（`confirm_epic`）の作成単位の識別子。同じカードの押し直しで同じ値になること */
+  requestKey?: string;
+};
 
 export type ConfirmOutcome = {
   ok: boolean;
@@ -472,6 +481,8 @@ export async function executeConfirmedCard(
     };
   }
 
+  if (card.type === "confirm_epic") return executeEpic(user, card, overrides, at);
+
   const repository = await findRepositoryByFullName(user.id, card.repo);
   const title = (overrides.title ?? card.title).trim();
   if (!repository) return failure("create_issue", card.repo, null, "リポジトリにアクセスできません。", at);
@@ -516,6 +527,51 @@ export async function executeConfirmedCard(
     text: message,
     card: { type: "result", ok: true, title: message, detail: issue.title, htmlUrl: issue.htmlUrl ?? null },
     action: { type: "create_issue", status: "created", repo: card.repo, number: issue.number, at, message },
+  };
+}
+
+/** 親子Issue案の実行（#4537）。Slackの承認なし起案と同じ共通サービスを使う */
+async function executeEpic(
+  user: ChatUser,
+  card: Extract<ChatConfirmCard, { type: "confirm_epic" }>,
+  overrides: ConfirmOverrides,
+  at: string,
+): Promise<ConfirmOutcome> {
+  const repos = [...new Set([card.draft.parent.repo, ...card.draft.children.map((c) => c.repo)])];
+  const usable = new Set<string>();
+  for (const repo of repos) if (await findRepositoryByFullName(user.id, repo)) usable.add(repo);
+  const errors = validateEpicDraft(card.draft, (repo) => usable.has(repo));
+  if (errors.length > 0) return failure("create_issue", card.repo, null, `親子Issueを作成できません: ${errors.join(" / ")}`, at);
+  if (!overrides.requestKey) return failure("create_issue", card.repo, null, "作成の識別子がありません。", at);
+  const outcome = await createEpic(
+    { requestKey: overrides.requestKey, draft: card.draft },
+    githubForUser(user),
+    getEpicPlanRegistrar(user.id),
+  );
+  if (!outcome.ok) {
+    // 作成済みのIssueは作り直さない。押し直すと不足分だけ続く
+    const made = outcome.progress.parent ? `（親 ${outcome.progress.parent.repo}#${outcome.progress.parent.number} は作成済み）` : "";
+    return failure(
+      "create_issue",
+      card.repo,
+      outcome.progress.parent?.number ?? null,
+      `親子Issueの作成は完了していません。止まった段階: ${outcome.stage}（${outcome.message.slice(0, 200)}）${made}。もう一度「実行する」を押すと不足分だけ続けます。`,
+      at,
+    );
+  }
+  const parent = outcome.progress.parent!;
+  const message = `親子Issueを作成しました（親 #${parent.number}・子${card.draft.children.length}件・実行計画 v${outcome.planVersion}）。子の実装は始まっていません。実行は親から開始してください。`;
+  return {
+    ok: true,
+    text: message,
+    card: {
+      type: "result",
+      ok: true,
+      title: "親子Issueを作成しました",
+      detail: message,
+      htmlUrl: `https://github.com/${parent.repo}/issues/${parent.number}`,
+    },
+    action: { type: "create_issue", status: "created", repo: parent.repo, number: parent.number, at, message },
   };
 }
 

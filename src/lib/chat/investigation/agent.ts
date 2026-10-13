@@ -32,7 +32,7 @@ export const INVESTIGATION_LIMITS = {
   recoveryTimeoutMs: 30_000,
 } as const;
 
-export type ProposalKind = "none" | "issue" | "fix_request";
+export type ProposalKind = "none" | "issue" | "fix_request" | "epic";
 
 export type InvestigationOutput = {
   reply: string;
@@ -49,6 +49,8 @@ export type InvestigationOutput = {
     body: string;
     /** 修正依頼の種類。`metadata`はPR本文・Issue本文の追跡情報だけを直す（pushしない。#4153） */
     scope: "code" | "metadata";
+    /** `epic`提案の親子案（JSON文字列。形は`src/lib/epic-draft/types.ts`の`EpicDraft`）。読めるかは呼び出し側が検証する */
+    epic: string;
   };
 };
 
@@ -104,12 +106,13 @@ export const STEP_SCHEMA = {
     unconfirmed: { type: "array", items: { type: "string" } },
     agreements: { type: "array", items: { type: "string" } },
     open_questions: { type: "array", items: { type: "string" } },
-    proposal_kind: { type: "string", enum: ["none", "issue", "fix_request"] },
+    proposal_kind: { type: "string", enum: ["none", "issue", "fix_request", "epic"] },
     proposal_repo: { type: "string" },
     proposal_number: { type: "integer" },
     proposal_title: { type: "string" },
     proposal_body: { type: "string" },
     proposal_scope: { type: "string", enum: ["code", "metadata"] },
+    proposal_epic: { type: "string" },
   },
   required: [
     "action",
@@ -127,6 +130,7 @@ export const STEP_SCHEMA = {
     "proposal_title",
     "proposal_body",
     "proposal_scope",
+    "proposal_epic",
   ],
   additionalProperties: false,
 } as const;
@@ -169,6 +173,7 @@ ${tools}
 - agreements: この会話で利用者と合意した方針・条件（利用者の発言にあるものだけ。勝手に作らない）
 - open_questions: 利用者の判断が要る事項。認証方式や外部環境の変更など、合意の範囲を超える判断は選択肢と影響を書いて待つ
 - 提案: 利用者が「Issueにして」と言ったときだけ proposal_kind="issue"（proposal_repo・proposal_title・proposal_body を、調査と合意を目的／要件／完了条件へ整理して書く。発言の貼り付けにしない）。「直して」と明示したときだけ proposal_kind="fix_request"（proposal_repo・proposal_number=PR番号・proposal_body=修正の依頼内容: 合意した方針・未解消の指摘・検証条件）。調べるだけの依頼では必ず "none"
+- 親子Issue（proposal_kind="epic"）: 依頼が「独立して実装・検証できる単位」を2件以上含むときだけ使う。小さな依頼・単一の成果は必ず "issue"（Epic化しない）。proposal_epic に次のJSON文字列を入れる: {"parent":{"repo","title","objective","completionCriteria":[全体完了条件],"scope"},"children":[{"key":"c1"...,"repo":権限内のowner/repo,"title","body":独立した要件と観測可能な完了条件,"existing":同じ成果の既存Issue番号（無ければ省略）,"dependsOn":[{"key":依存先のkey,"conditions":["closed"|"merged"|"released"|"verified"]}]}]}。子は最大5件。共通仕様→実行/画面→配布のように、依存先がどうなれば進めてよいか（マージ・本番反映・検証など）と並行できる範囲を dependsOn で示す。同じ成果のIssue・PRを調査で見つけたら新規子にせず existing に番号を入れ、既存の担当範囲を広げず差分だけを新規子にする。対象リポジトリを決められない子は作らず open_questions で聞く。proposal_kind が epic 以外のとき proposal_epic は空文字
 - 提案は実行ではなく確認カードになる。実行したと書かない
 - 「直して」「修正して」は、自動修正の再起動ではなく原因の調査から始める。PR・レビュー・CI・親Issueの要件とコメント・直近の自動修正と停止理由（同じ方針待ちで繰り返し止まっていないか）を必要な範囲で読み、コード修正／管理情報（PR本文の役割・親Issue本文の残作業追跡）の修正／判断待ち／実行中／修正済みを区別して説明する
 - 指摘の根本がコードでなく管理情報の不整合（PRの役割と要件追跡の矛盾など）なら proposal_scope="metadata"（コード修正なら "code"）。既存要件を維持する可逆的な整合修正は推奨理由を添えて proposal_kind="fix_request" で提案する。要件の削除・完了条件の縮小・運用変更が要るなら提案せず、選択肢・影響・推奨案を reply に示して open_questions に残し、利用者の「それで」「途中PRで」といった回答を agreements に記録して次のターンで提案する
@@ -199,7 +204,7 @@ export function parseStep(text: string): ModelStep | null {
     return { action: "tool", tool: s(r.tool, 60), argsJson: s(r.args_json, 1000), final: null };
   }
   if (r.action !== "final") return null;
-  const kind = r.proposal_kind === "issue" || r.proposal_kind === "fix_request" ? r.proposal_kind : "none";
+  const kind = r.proposal_kind === "issue" || r.proposal_kind === "fix_request" || r.proposal_kind === "epic" ? r.proposal_kind : "none";
   const number = typeof r.proposal_number === "number" && Number.isInteger(r.proposal_number) && r.proposal_number > 0 ? r.proposal_number : null;
   return {
     action: "final",
@@ -219,6 +224,7 @@ export function parseStep(text: string): ModelStep | null {
         title: s(r.proposal_title, 200),
         body: s(r.proposal_body, 6000),
         scope: r.proposal_scope === "metadata" ? "metadata" : "code",
+        epic: s(r.proposal_epic, 20000),
       },
     },
   };
@@ -322,7 +328,7 @@ export async function runInvestigation(params: {
     unconfirmed: partial?.unconfirmed ?? [],
     agreements: partial?.agreements ?? [],
     openQuestions: partial?.openQuestions ?? [],
-    proposal: partial?.proposal ?? { kind: "none", repo: "", number: null, title: "", body: "", scope: "code" },
+    proposal: partial?.proposal ?? { kind: "none", repo: "", number: null, title: "", body: "", scope: "code", epic: "" },
     evidence: dedupeEvidence(evidence),
     stopReason: reason,
     steps: toolCalls.length,
@@ -433,7 +439,7 @@ function emptyOutput(): InvestigationOutput {
     unconfirmed: [],
     agreements: [],
     openQuestions: [],
-    proposal: { kind: "none", repo: "", number: null, title: "", body: "", scope: "code" },
+    proposal: { kind: "none", repo: "", number: null, title: "", body: "", scope: "code", epic: "" },
   };
 }
 

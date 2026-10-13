@@ -125,3 +125,66 @@ describe("内部確認の保留（#4410）", () => {
     expect(overview.action.kind).toBe("accept_extra");
   });
 });
+
+describe("修正の実行状態とレビュー範囲の確認待ち（#4498）", () => {
+  const gap = checks({ aiReview: { state: "needs_check", findingCount: 0, reviewedFiles: 65, totalFiles: 71, reason: "未確認範囲があります" } });
+
+  it("指摘0件で確認が65/71件: レビュー範囲の確認待ち。修正Issue作成を主操作にしない", () => {
+    const o = describeFixOverview({ series: series("stopped", 745), checks: gap });
+    expect(o.pill).toBe("レビュー範囲の確認待ち");
+    expect(o.action.kind).toBe("none");
+    expect(o.autoProgress).toBe(false);
+    expect(o.detail).toContain("65/71ファイルを確認");
+    expect(o.checksLine).toContain("指摘0件・範囲の確認待ち（65/71ファイルを確認）");
+  });
+
+  it("件数が取れなくても、needs_checkで指摘0件なら範囲の確認待ちにする", () => {
+    const o = describeFixOverview({ series: null, checks: checks({ aiReview: { state: "needs_check", findingCount: 0, reason: "未確認範囲があります: x" } }) });
+    expect(o.pill).toBe("レビュー範囲の確認待ち");
+  });
+
+  it("実際の指摘がある場合は従来どおり修正が必要", () => {
+    const o = describeFixOverview({ series: null, checks: checks({ aiReview: { state: "needs_check", findingCount: 2 } }) });
+    expect(o.pill).toBe("修正が必要");
+    expect(o.action.kind).toBe("create_issue");
+  });
+
+  it("レビューの実行失敗（指摘なし）は修正指摘にしない", () => {
+    const o = describeFixOverview({ series: null, checks: checks({ aiReview: { state: "failed", findingCount: 0, reason: "タイムアウト" } }) });
+    expect(o.pill).toBe("レビューの実行に失敗");
+    expect(o.action.kind).toBe("none");
+  });
+
+  it("修正の実装中と修正PRの検証中を分ける", () => {
+    const failing = checks({ aiReview: { state: "needs_check", findingCount: 3 } });
+    const implementing = describeFixOverview({ series: { ...series("fix_in_progress"), fixPrNumber: null }, checks: failing });
+    expect(implementing.pill).toBe("修正中");
+    expect(implementing.detail).toContain("未解決の指摘3件");
+    expect(implementing.autoProgress).toBe(true);
+    const verifying = describeFixOverview({ series: { ...series("fix_in_progress"), fixPrNumber: 740 }, checks: failing });
+    expect(verifying.pill).toBe("修正PRの検証中");
+    expect(verifying.headline).toContain("#740");
+  });
+
+  it("未開始・停止は自動進行中と表示しない", () => {
+    expect(describeFixOverview({ series: series("issue_created"), checks: null }).autoProgress).toBe(false);
+    expect(describeFixOverview({ series: series("stopped"), checks: checks() }).autoProgress).toBe(false);
+  });
+
+  it("進行中の完了系列を主見出しにし、未解決指摘は説明として添える。修正Issue作成は出さない", () => {
+    const failing = checks({ aiReview: { state: "needs_check", findingCount: 3 } });
+    const o = describeFixOverview({ series: null, checks: failing, completion: { status: "fixing", active: true, candidatePrNumber: 4555 } });
+    expect(o.pill).toBe("修正中");
+    expect(o.detail).toContain("未解決の指摘3件");
+    expect(o.action.kind).toBe("none");
+    expect(o.autoProgress).toBe(true);
+  });
+
+  it("取り込み後の候補検証中は修正前の結果を現在値にしない", () => {
+    const old = checks({ aiReview: { state: "needs_check", findingCount: 3 } });
+    const o = describeFixOverview({ series: null, checks: old, completion: { status: "checking", active: true, candidatePrNumber: 4560 } });
+    expect(o.pill).toBe("修正後の再検証中");
+    expect(o.headline).toContain("#4560");
+    expect(o.detail).toContain("履歴");
+  });
+});

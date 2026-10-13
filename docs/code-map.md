@@ -11,6 +11,8 @@
 - 無人実行フローの全体像: [multi-agent-workflow.md](multi-agent-workflow.md)・[multi-agent/](multi-agent/)
 - 会話型の操作入口（IssueDeck Chat。意図解釈・確認カード・共通サービスの切り出し）: [chat.md](chat.md)
 - Slackの`#アプリissue起案`からのIssue起案（Events受信・対象選択UI・Bot返信。`src/lib/slack/`・`src/app/api/slack/`）: [slack-intake.md](slack-intake.md)（#4454）
+- 親子Issue・依存関係・実行計画をまとめて起案する共通サービス（Slack・Chat共通。`src/lib/epic-draft/`）: [epic-draft.md](epic-draft.md)（#4537）
+- 親子Issueの実行計画（構造化計画の登録・検証・版管理。`src/lib/execution-plan/`・`src/app/api/execution-plans/`）: [execution-plan.md](execution-plan.md)（#4535）
 - IssueDeckのiOSアプリ（方式・認証・配布）: [ios-app.md](ios-app.md)。実装は`ios/`（SwiftUI＋WKWebView）、サーバー側の引き継ぎは`src/app/auth/native/`・`src/lib/native-auth/`（#3846）
 
 ## ディレクトリ
@@ -262,6 +264,10 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   **選べるかの判定は`nightly-run.ts`の`resolveBulkReserveRejection`**で、行の状態を読める
   `issue-list.tsx`が材料を渡す。積む口は「実装を開始」と同じ`POST /api/nightly-run`
   （[docs/multi-agent/subpc-dispatch.md](multi-agent/subpc-dispatch.md)「次枠実行」）。
+- **親Issueの自動実行**（#4536）は[`lib/parent-run/`](../src/lib/parent-run/)。判定の純関数が`decide.ts`、DB・起動・巡回・操作が`run.ts`、
+  受け口が`app/api/parent-runs/`（画面）と`app/api/dispatch/parent-run/sweep/`（poller）、画面が
+  [`components/dashboard/parent-run-section.tsx`](../src/components/dashboard/parent-run-section.tsx)。仕様は[parent-run.md](parent-run.md)
+
 - **Issueの代表状態と次の行動は`lib/issue-attention-state.ts`の`resolveIssueAttention`が1か所で決め**
   （#4425）、Issue一覧の行・PC詳細・スマホ詳細は`issue-attention-line.tsx`で同じ結果を描く。
   一覧のボタンは詳細を開くだけなので「計画を確認」「PRを確認」「質問を確認」と呼び、承認・マージとは

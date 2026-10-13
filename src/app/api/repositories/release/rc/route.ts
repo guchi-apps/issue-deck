@@ -5,6 +5,7 @@ import { db } from "@/lib/db";
 import { getInstallationToken } from "@/lib/github/app-auth";
 import { githubApiErrorMessage } from "@/lib/github/network-error";
 import { previewModeGuard } from "@/lib/preview-mode";
+import { ensureDevelopSync, findUnsyncedPublish, loadFinalizationOverview, reconcileRcFinalization, resolveRcCandidateId, settleReservationsOnCancel } from "@/lib/release-finalize-run";
 import { parseRcRequestKey } from "@/lib/release-rc";
 import {
   cancelReleaseRc,
@@ -64,8 +65,13 @@ export async function GET(request: NextRequest) {
   if (!repository) return NextResponse.json({ error: "not_found" }, { status: 404 });
   try {
     const token = await getInstallationToken(repository.installation.installationId);
-    const overview = await loadRcOverview({ owner, repo, token, pullRequestNumber });
-    return NextResponse.json(overview, { headers: { "Cache-Control": "no-store" } });
+    const ctx = { owner, repo, token };
+    // 公開準備・本番反映の進行を先に1巡進め、候補の状態（段階）を最新にしてから読む
+    const candidateId = await resolveRcCandidateId(repository.fullName, pullRequestNumber);
+    if (candidateId) await reconcileRcFinalization(ctx, candidateId).catch((error: unknown) => console.error("[release-finalize] reconcile failed", error));
+    const overview = await loadRcOverview({ ...ctx, pullRequestNumber });
+    const finalization = await loadFinalizationOverview(ctx, overview.candidate?.id ?? null, { reconcile: false });
+    return NextResponse.json({ ...overview, finalization }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     console.error(`[GET /api/repositories/release/rc] ${owner}/${repo}:`, error);
     return NextResponse.json({ error: "github_api_error", message: githubApiErrorMessage(error) }, { status: 502 });
@@ -92,6 +98,16 @@ export async function POST(request: NextRequest) {
       case "create": {
         const requestKey = parseRcRequestKey(payload?.requestKey);
         if (!requestKey) return NextResponse.json({ error: "invalid_request" }, { status: 400 });
+        // 公開した版がdevelopへ反映されるまで、次の候補は作らない（mainの版と衝突する）
+        const unsynced = await findUnsyncedPublish(ctx);
+        if (unsynced) {
+          // 同期PRは本番反映の追跡が作るが、そこへ届かずに終えた候補（マージ済みの取り消し）もあるので、ここでも用意する
+          await ensureDevelopSync(ctx, unsynced);
+          return NextResponse.json(
+            { ok: false, error: "develop_not_synced", message: `v${unsynced.version}の公開がdevelopへ反映されていません。同期のPRをマージしてから候補を作ってください` },
+            { status: 409 },
+          );
+        }
         return respond(await createReleaseRc({ ...ctx, requestKey }));
       }
       case "import": {
@@ -114,7 +130,10 @@ export async function POST(request: NextRequest) {
       case "cancel": {
         const candidateId = readString(payload?.candidateId);
         if (!candidateId) return NextResponse.json({ error: "invalid_request" }, { status: 400 });
-        return respond(await cancelReleaseRc({ ...ctx, candidateId, reason: readString(payload?.reason) }));
+        const cancelled = await cancelReleaseRc({ ...ctx, candidateId, reason: readString(payload?.reason) });
+        // 公開前に中止した候補の版の予約は手放す（タグ・main上に版があれば消費済みにする）
+        if (cancelled.ok && !cancelled.existing) await settleReservationsOnCancel(ctx, candidateId).catch((error: unknown) => console.error("[release-finalize] settle reservation failed", error));
+        return respond(cancelled);
       }
       case "migrate": {
         const requestKey = parseRcRequestKey(payload?.requestKey);
