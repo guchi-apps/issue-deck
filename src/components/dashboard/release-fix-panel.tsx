@@ -305,8 +305,9 @@ export function toOverviewChecks(verification: ReleaseVerificationSummary | null
       reason: verification.aiReview.reason,
       reviewedFiles: verification.aiReview.reviewedFiles,
       totalFiles: verification.aiReview.totalFiles,
+      updatedAt: verification.aiReview.updatedAt,
     },
-    integration: { state: verification.integration.state, reason: verification.integration.reason },
+    integration: { state: verification.integration.state, reason: verification.integration.reason, updatedAt: verification.integration.updatedAt },
     mac:
       macState === "passed" || macState === "failed" || macState === "running"
         ? { state: macState }
@@ -499,6 +500,15 @@ export function ReleaseFixPrimaryAction({ state }: { state: ReleaseFixOverviewSt
         <button
           type="button"
           onClick={() => document.getElementById("release-fix-create")?.scrollIntoView({ block: "center" })}
+          className="rounded border border-primary bg-primary px-3 py-1 text-[12px] font-semibold text-primary-foreground"
+        >
+          {action.label}
+        </button>
+      )}
+      {action.kind === "rerun_review" && (
+        <button
+          type="button"
+          onClick={() => document.querySelector('[data-testid="review-rerun-panel"]')?.scrollIntoView({ block: "center" })}
           className="rounded border border-primary bg-primary px-3 py-1 text-[12px] font-semibold text-primary-foreground"
         >
           {action.label}

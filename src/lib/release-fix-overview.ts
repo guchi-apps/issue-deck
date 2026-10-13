@@ -23,6 +23,8 @@ export type OverviewActionKind =
   | "accept_extra"
   /** 準備の失敗。修正Issueは作成済みなので作らず、ブランチ画面の「修正を入れて作り直す」から再試行する */
   | "retry_rebuild"
+  /** 全体レビューを最新の証跡で再実行する（#4632の導線。検証欄の再実行へ誘導する。#4640） */
+  | "rerun_review"
   | "none";
 
 export type OverviewAction = { kind: OverviewActionKind; label: string };
@@ -33,6 +35,7 @@ export const OVERVIEW_ACTION_LABEL: Record<Exclude<OverviewActionKind, "none">, 
   view_progress: "進捗を見る",
   accept_extra: "無関係な変更も含めて修正をリリースに反映",
   retry_rebuild: "ブランチ画面の「修正を入れて作り直す」で再試行",
+  rerun_review: "最新の証跡で全体レビューを再実行",
 };
 
 const isActiveFixStatus = (status: ReleaseFixStatus) => status === "issue_created" || status === "fix_in_progress";
@@ -71,8 +74,10 @@ export type OverviewChecks = {
     reason?: string | null;
     reviewedFiles?: number | null;
     totalFiles?: number | null;
+    /** 結果の記録時刻（ISO）。統合検証より古いかの判定に使う（#4640） */
+    updatedAt?: string | null;
   };
-  integration: { state: CheckState; reason?: string | null };
+  integration: { state: CheckState; reason?: string | null; updatedAt?: string | null };
   /** Mac検証。対象外・未設定なら省略 */
   mac?: { state: "passed" | "failed" | "running" | "other" } | null;
 };
@@ -156,6 +161,22 @@ export function isReviewCoverageGap(checks: OverviewChecks): boolean {
 export function reviewCoverageText(review: OverviewChecks["aiReview"]): string | null {
   const { reviewedFiles, totalFiles } = review;
   return typeof reviewedFiles === "number" && typeof totalFiles === "number" ? `${reviewedFiles}/${totalFiles}ファイルを確認` : null;
+}
+
+/** 実行中・待機の統合検証を待っていたことを示す未確認理由か */
+const WAITING_REASON = /実行中|待機|完了していません|結果待ち|判定が出ていません/;
+
+/**
+ * 全体レビューの要確認が、統合検証の結果待ちだった時点の理由を保持しているか（#4640）。
+ * 統合検証が今は終了しており、レビューより新しい（または理由が実行中・待機を指す）ときだけtrue。
+ * 統合検証が実行中・失敗・未取得のときは、現在も待つ理由なのでfalse
+ */
+export function isStaleReviewWait(checks: OverviewChecks): boolean {
+  if (checks.aiReview.state !== "needs_check" || !isDone(checks.integration.state)) return false;
+  const r = checks.aiReview.updatedAt;
+  const i = checks.integration.updatedAt;
+  const newer = !!r && !!i && Date.parse(i) > Date.parse(r);
+  return newer || WAITING_REASON.test(checks.aiReview.reason ?? "");
 }
 
 export function describeFixOverview(input: {
@@ -289,6 +310,23 @@ export function describeFixOverview(input: {
   // 全体レビューの実行失敗（指摘なし）は、コードの指摘ではない。修正Issueの作成を促さない
   if (checks.aiReview.state === "failed" && checks.aiReview.findingCount === 0 && !isProblem(checks.integration.state)) {
     return { ...base, tone: "bad", pill: "レビューの実行に失敗", headline: "全体レビューを完了できませんでした。問題なしとは扱いません", detail: [checks.aiReview.reason ?? null, "再実行は、下の検証結果の「全体レビュー」から行えます。"].filter(Boolean).join(" ／ "), action: none };
+  }
+  // 全体レビューが統合検証の結果待ち時点の未確認理由を保持している。統合検証は今は終了しているので、
+  // 「前回レビュー時点」の理由として分け、最新の証跡での再レビューを主操作にする。指摘は消さず併記する
+  if (isStaleReviewWait(checks) && checks.aiReview.state === "needs_check") {
+    const n = checks.aiReview.findingCount;
+    return {
+      ...base,
+      tone: "warn",
+      pill: "要確認で終了",
+      headline: "全体レビューは終了しています。統合検証の結果を反映して再レビューできます",
+      detail: [
+        `前回レビュー時点の理由: ${checks.aiReview.reason ?? "統合検証の結果待ち"}`,
+        "統合検証は現在、結果が出ています（実行中のジョブはありません）。",
+        n > 0 ? `未解決の指摘${n}件は再レビューでも消えません。再レビュー後に残れば修正Issueを作成します。` : null,
+      ].filter(Boolean).join(" "),
+      action: act("rerun_review"),
+    };
   }
   if (problems) {
     const n = checks.aiReview.findingCount;

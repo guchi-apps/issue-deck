@@ -3,7 +3,7 @@
 import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
-import { FINALIZE_STATUS_LABEL, FINALIZE_START_ERROR_LABEL } from "@/lib/release-finalize";
+import { FINALIZE_STATUS_LABEL, FINALIZE_START_ERROR_LABEL, REVERIFY_PHASE_LABEL, type ReverifyPhase } from "@/lib/release-finalize";
 import type { RcFinalizationOverview, RcFinalizationView } from "@/lib/release-finalize-run";
 import type { RcCandidateView } from "@/lib/release-rc-run";
 import { cn } from "@/lib/utils";
@@ -42,6 +42,32 @@ const FINALIZE_ERROR: Record<string, string> = {
   dispatch_failed: "リリースworkflowを起動できませんでした",
 };
 
+const CI_DETAIL: Record<string, string> = {
+  none: "バンプ後のheadで実行します（未実施・失敗では公開できません）",
+  pending: "バンプ後のheadで実行中です",
+  failure: "バンプ後のheadで失敗しています",
+  unknown: "バンプ後の最終CI・ビルドの結果を取得できません",
+};
+
+const PHASE_TONE: Record<ReverifyPhase, Tone> = { done: "ok", running: "run", waiting: "run", failed: "bad", needs_check: "warn", not_run: "warn", invalidated: "warn" };
+
+/** 「バンプ後の再検証・引継ぎ」の工程。**「再検証中」は実行中のジョブがあるときだけ**で、終了済みの未完了は工程と理由を併記する */
+function reverifyStep(input: { afterBump: boolean; bumped: boolean; current: RcFinalizationView | null; checks: RcFinalizationOverview["checks"] }): Step {
+  const { afterBump, bumped, current, checks } = input;
+  const label = "バンプ後の再検証・引継ぎ";
+  if (afterBump) return { label, detail: current && current.evidence.length > 0 ? "引き継いだ検証と再実行した検証は下の表で確認できます" : "引継ぎの判定はバンプ後に記録されます", tone: "ok", badge: "完了" };
+  if (!bumped) return { label, detail: "引継ぎの判定はバンプ後に記録されます", tone: "mute", badge: "待機" };
+  if (!checks) return { label, detail: "再検証の状態を取得できません。状態を取り直してください", tone: "warn", badge: "取得不能" };
+  const open = checks.reverify.filter((i) => i.reason !== null);
+  if (open.length === 0) return { label, detail: "再実行が必要な検証は全て合格しています", tone: "ok", badge: "完了" };
+  return {
+    label,
+    detail: open.map((i) => `${i.label}: ${i.reason}`).join(" ／ "),
+    tone: PHASE_TONE[checks.reverifyPhase],
+    badge: REVERIFY_PHASE_LABEL[checks.reverifyPhase],
+  };
+}
+
 type Step = { label: string; detail: string; tone: Tone; badge: string };
 
 /** 公開までの流れ。段階（候補の`phase`）と公開準備・最終検証の観測から、各工程の状態を導く */
@@ -61,16 +87,11 @@ export function buildFinalizeSteps(input: { phase: string; current: RcFinalizati
     },
     {
       label: "バンプ後の最終CI・ビルド",
-      detail: afterBump ? "バンプ後のheadで成功しています" : checks?.readinessLabel ?? "バンプ後のheadで実行します（未実施・失敗では公開できません）",
+      detail: afterBump || ci === "success" ? "バンプ後のheadで成功しています" : CI_DETAIL[ci ?? "none"] ?? CI_DETAIL.none,
       tone: afterBump || ci === "success" ? "ok" : ci === "failure" ? "bad" : bumped ? "run" : "mute",
       badge: afterBump || ci === "success" ? "成功" : ci === "failure" ? "失敗" : bumped ? "実行中" : "待機",
     },
-    {
-      label: "バンプ後の再検証・引継ぎ",
-      detail: current && current.evidence.length > 0 ? "引き継いだ検証と再実行した検証は下の表で確認できます" : "引継ぎの判定はバンプ後に記録されます",
-      tone: afterBump ? "ok" : checks && checks.pendingReverify.length > 0 ? "run" : bumped ? "run" : "mute",
-      badge: afterBump ? "完了" : checks && checks.pendingReverify.length > 0 ? "再検証中" : bumped ? "確認中" : "待機",
-    },
+    reverifyStep({ afterBump, bumped, current, checks }),
     { label: "本番承認", detail: "mainへのマージは既存の承認・保護を通ります", tone: phase === "awaiting_approval" ? "warn" : released ? "ok" : "mute", badge: phase === "awaiting_approval" ? "承認待ち" : released ? "済" : "待機" },
     {
       label: "mainマージ・タグ・本番反映",
@@ -116,12 +137,24 @@ function VersionBox({ finalization, plannedKind, mainVersion }: { finalization: 
   );
 }
 
-function EvidenceTable({ finalization }: { finalization: RcFinalizationView }) {
-  if (finalization.evidence.length === 0) return null;
+function EvidenceTable({ finalization, checks }: { finalization: RcFinalizationView; checks: RcFinalizationOverview["checks"] }) {
+  const rows = finalization.evidence
+    .filter((e) => e.kind !== "ios")
+    .map((e) => {
+      const live = checks?.reverify.find((i) => i.kind === e.kind);
+      const after =
+        e.action === "inherit"
+          ? { tone: EVIDENCE_TONE(e.action), text: "引継ぎ" }
+          : live && live.reason !== null
+            ? { tone: PHASE_TONE[stateToPhase(live.state)], text: REVERIFY_PHASE_LABEL[stateToPhase(live.state)] }
+            : { tone: "ok" as Tone, text: live ? "成功" : "再検証" };
+      return { e, after, reason: live && live.reason !== null ? `${e.reason}。現在: ${live.reason}` : e.reason };
+    });
+  if (rows.length === 0) return null;
   return (
-    <div className="rounded-lg border">
+    <div className="rounded-lg border" data-testid="release-rc-evidence-table">
       <h4 className="border-b px-3 py-2 text-[12.5px] font-semibold">検証の対象と引継ぎ</h4>
-      <div className="overflow-x-auto">
+      <div className="hidden overflow-x-auto sm:block">
         <table className="w-full min-w-[420px] text-[12px]">
           <thead>
             <tr className="text-left text-[11px] text-muted-foreground">
@@ -132,29 +165,46 @@ function EvidenceTable({ finalization }: { finalization: RcFinalizationView }) {
             </tr>
           </thead>
           <tbody>
-            {finalization.evidence
-              .filter((e) => e.kind !== "ios")
-              .map((e) => (
-                <tr key={e.kind} className="border-t align-top">
-                  <td className="px-3 py-1.5">{KIND_LABEL[e.kind] ?? e.kind}</td>
-                  <td className="px-3 py-1.5">
-                    <StateChip tone="ok">合格</StateChip>
-                  </td>
-                  <td className="px-3 py-1.5">
-                    <StateChip tone={EVIDENCE_TONE(e.action)}>{e.action === "inherit" ? "引継ぎ" : "再検証"}</StateChip>
-                  </td>
-                  <td className="px-3 py-1.5">{e.reason}</td>
-                </tr>
-              ))}
+            {rows.map(({ e, after, reason }) => (
+              <tr key={e.kind} className="border-t align-top">
+                <td className="px-3 py-1.5">{KIND_LABEL[e.kind] ?? e.kind}</td>
+                <td className="px-3 py-1.5">
+                  <StateChip tone="ok">合格</StateChip>
+                </td>
+                <td className="px-3 py-1.5">
+                  <StateChip tone={after.tone}>{after.text}</StateChip>
+                </td>
+                <td className="px-3 py-1.5">{reason}</td>
+              </tr>
+            ))}
           </tbody>
         </table>
       </div>
+      <ul className="flex flex-col gap-2 p-3 sm:hidden" aria-label="検証の対象と引継ぎ（カード表示）">
+        {rows.map(({ e, after, reason }) => (
+          <li key={e.kind} className="rounded-md border p-2.5 text-[12px]">
+            <p className="font-semibold">{KIND_LABEL[e.kind] ?? e.kind}</p>
+            <dl className="mt-1 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1">
+              <dt className="text-muted-foreground">バンプ前 {short(finalization.preHeadSha)}</dt>
+              <dd><StateChip tone="ok">合格</StateChip></dd>
+              <dt className="text-muted-foreground">バンプ後 {short(finalization.finalHeadSha)}</dt>
+              <dd><StateChip tone={after.tone}>{after.text}</StateChip></dd>
+              <dt className="text-muted-foreground">理由</dt>
+              <dd className="min-w-0 break-words">{reason}</dd>
+            </dl>
+          </li>
+        ))}
+      </ul>
       <p className="border-t px-3 py-2 text-[11.5px] text-muted-foreground">
         引継ぎは元の結果と差分の根拠を残します。バンプ後のheadで実行した結果としては扱いません。変わったファイル:{" "}
         {finalization.files.length > 0 ? finalization.files.map((f) => f.path).join("、") : "なし（既にバンプ済みのheadをそのまま使用）"}
       </p>
     </div>
   );
+}
+
+function stateToPhase(state: string): ReverifyPhase {
+  return state === "running" || state === "waiting" || state === "failed" || state === "needs_check" || state === "not_run" || state === "invalidated" ? state : "done";
 }
 
 export function ReleaseRcFinalizePanel({
@@ -212,7 +262,7 @@ export function ReleaseRcFinalizePanel({
   const steps = buildFinalizeSteps({ phase: candidate.phase, current, checks: finalization.checks });
   const plannedKind = bumpKind === "auto" ? null : bumpKind;
   return (
-    <section aria-label="公開準備" className="flex flex-col gap-3 rounded-[10px] border bg-card p-3.5" data-testid="release-rc-finalize">
+    <section aria-label="公開準備" className="flex flex-col gap-3 rounded-[10px] border bg-card p-3.5 pb-20 sm:pb-3.5" data-testid="release-rc-finalize">
       <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
         <h3 className="text-sm font-semibold">公開準備</h3>
         {current && <StateChip tone={current.status === "failed" || current.status === "expired" ? "bad" : current.status === "applied" ? "ok" : "run"}>{current.statusLabel}</StateChip>}
@@ -296,7 +346,7 @@ export function ReleaseRcFinalizePanel({
         ))}
       </ol>
 
-      {current && current.status === "applied" && <EvidenceTable finalization={current} />}
+      {current && current.status === "applied" && <EvidenceTable finalization={current} checks={finalization.checks} />}
 
       <div className="rounded-lg border">
         <h4 className="border-b px-3 py-2 text-[12.5px] font-semibold">公開結果（Webと配布は別）</h4>
