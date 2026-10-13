@@ -10,7 +10,7 @@ describe("getAdjacentPullRequestViewId（#1691）", () => {
 
   it("端のビューではそれ以上進めずnullを返す", () => {
     expect(getAdjacentPullRequestViewId("all", "prev")).toBeNull();
-    expect(getAdjacentPullRequestViewId("completed", "next")).toBeNull();
+    expect(getAdjacentPullRequestViewId("release", "next")).toBeNull();
   });
 
   it("先頭・末尾の判定は`pullRequestViews`の並びに従う", () => {

@@ -117,7 +117,7 @@ function renderSidebarWithRepositories(
       manualStepAttention={NO_MANUAL_STEP}
       unconfirmedQuestionCount={0}
       waitingQuestionCount={0}
-      pullRequestNavCounts={{ all: 0, "in-progress": 0, completed: 0 }}
+      pullRequestNavCounts={{ all: 0, "in-progress": 0, completed: 0, release: 0 }}
       mergePendingAttention={NO_MERGE_PENDING}
       repositories={repositories}
       selectedRepoFullNames={selectedRepoFullNames}
@@ -170,27 +170,27 @@ describe("SidebarNav 構想の件数（#3639）", () => {
 
 describe("SidebarNav", () => {
   it("実行中のPRは件数を出す", () => {
-    renderSidebar({ all: 4, "in-progress": 3, completed: 1 });
+    renderSidebar({ all: 4, "in-progress": 3, completed: 1, release: 0 });
 
     expect(pullRequestNavItem("in-progress").textContent).toContain("3");
   });
 
   it("0件でも件数を出す（Issue側の項目と揃える）", () => {
-    renderSidebar({ all: 0, "in-progress": 0, completed: 0 });
+    renderSidebar({ all: 0, "in-progress": 0, completed: 0, release: 0 });
 
     expect(pullRequestNavItem("in-progress").textContent).toContain("0");
   });
 
   // openなPRだけを出すビューになり、母集団がscopeに依存しなくなったため（#1613）。
   it("すべてのPRにも件数を出す", () => {
-    renderSidebar({ all: 4, "in-progress": 3, completed: 1 });
+    renderSidebar({ all: 4, "in-progress": 3, completed: 1, release: 0 });
 
     expect(pullRequestNavItem("all").textContent).toContain("4");
   });
 
   // #1613で左メニューから外していたが、「マージ待ち」と改名して戻した（#2120）。
   it("マージ待ちにも件数を出す", () => {
-    renderSidebar({ all: 4, "in-progress": 3, completed: 1 });
+    renderSidebar({ all: 4, "in-progress": 3, completed: 1, release: 0 });
 
     expect(pullRequestNavItem("completed").textContent).toContain("マージ待ち");
     expect(pullRequestNavItem("completed").textContent).toContain("1");
@@ -198,7 +198,7 @@ describe("SidebarNav", () => {
 
   // マージ待ちのうち、人がマージするかCI失敗を直すかしかないPRが残っているときだけ（#2334）
   it("要操作のマージ待ちPRがあれば件数をオレンジの丸で出す", () => {
-    renderSidebar({ all: 4, "in-progress": 2, completed: 2 }, NAV_COUNTS, {
+    renderSidebar({ all: 4, "in-progress": 2, completed: 2, release: 0 }, NAV_COUNTS, {
       mergePendingAttention: { total: 2, autoMerging: 1, repairing: 0, actionRequired: 1 },
     });
 
@@ -209,7 +209,7 @@ describe("SidebarNav", () => {
 
   // Auto-merge有効でCI成功のPR・自動修復中のPRは放っておけば片付く（ベルと同じ除外）
   it("マージ待ちが自動で進むものだけなら丸にしない", () => {
-    renderSidebar({ all: 4, "in-progress": 2, completed: 2 }, NAV_COUNTS, {
+    renderSidebar({ all: 4, "in-progress": 2, completed: 2, release: 0 }, NAV_COUNTS, {
       mergePendingAttention: { total: 2, autoMerging: 1, repairing: 1, actionRequired: 0 },
     });
 
@@ -219,7 +219,7 @@ describe("SidebarNav", () => {
   });
 
   it("マージ待ちが0件なら丸にしない（手を動かせるものが無い）", () => {
-    renderSidebar({ all: 2, "in-progress": 2, completed: 0 });
+    renderSidebar({ all: 2, "in-progress": 2, completed: 0, release: 0 });
 
     expect(
       pullRequestNavItem("completed").querySelector("span:last-child")?.className,
@@ -228,7 +228,7 @@ describe("SidebarNav", () => {
 
   // 「すべてのPR」は実行中を含む在庫の数、「実行中」は人が何もしなくても進むもの（#2334）
   it("すべてのPR・実行中は件数があっても丸にしない", () => {
-    renderSidebar({ all: 4, "in-progress": 2, completed: 2 }, NAV_COUNTS, {
+    renderSidebar({ all: 4, "in-progress": 2, completed: 2, release: 0 }, NAV_COUNTS, {
       mergePendingAttention: { total: 2, autoMerging: 0, repairing: 0, actionRequired: 2 },
     });
 
@@ -241,7 +241,7 @@ describe("SidebarNav", () => {
 
   // 数字（一覧に並ぶ総数）と丸（要操作）で意味が違うため、内訳を吹き出しで補う（#2334）
   it("マージ待ちの行の吹き出しに内訳を添える", () => {
-    renderSidebar({ all: 4, "in-progress": 2, completed: 2 }, NAV_COUNTS, {
+    renderSidebar({ all: 4, "in-progress": 2, completed: 2, release: 0 }, NAV_COUNTS, {
       mergePendingAttention: { total: 2, autoMerging: 1, repairing: 0, actionRequired: 1 },
     });
 
@@ -251,7 +251,7 @@ describe("SidebarNav", () => {
 
   // 行全体をamberで塗ると選択中の行と紛らわしく、ラベル文字の色も他のビューと揃わない（#1443）。
   it("確認待ちが残っていても強調するのは件数バッジだけにする", () => {
-    renderSidebar({ all: 0, "in-progress": 0, completed: 0 }, { ...NAV_COUNTS, "check-user": 2 });
+    renderSidebar({ all: 0, "in-progress": 0, completed: 0, release: 0 }, { ...NAV_COUNTS, "check-user": 2 });
 
     const button = screen.getByRole("button", { name: /確認待ち/ });
     expect(button.className).not.toContain("amber");
@@ -262,7 +262,7 @@ describe("SidebarNav", () => {
   // 対応Issueを持たないリリースPRもユーザーがマージするしかないため（#1613）。
   it("ユーザーのマージ待ちPRを確認待ちの件数に足す", () => {
     renderSidebar(
-      { all: 1, "in-progress": 0, completed: 1 },
+      { all: 1, "in-progress": 0, completed: 1, release: 0 },
       { ...NAV_COUNTS, "check-user": 2 },
       { checkUserPullRequestCount: 1 },
     );
@@ -271,7 +271,7 @@ describe("SidebarNav", () => {
   });
 
   it("Issueが0件でもマージ待ちPRがあれば確認待ちを強調する", () => {
-    renderSidebar({ all: 1, "in-progress": 0, completed: 1 }, NAV_COUNTS, {
+    renderSidebar({ all: 1, "in-progress": 0, completed: 1, release: 0 }, NAV_COUNTS, {
       checkUserPullRequestCount: 1,
     });
 
@@ -282,7 +282,7 @@ describe("SidebarNav", () => {
   // 数週間先まで実行できない手作業で橙色が点きっぱなしになると、合図として読めなくなる（#1613）。
   it("手作業はいま実行できるものがあるときだけ強調する", () => {
     renderSidebar(
-      { all: 0, "in-progress": 0, completed: 0 },
+      { all: 0, "in-progress": 0, completed: 0, release: 0 },
       { ...NAV_COUNTS, "manual-step": 3 },
       { manualStepAttention: { total: 3, actionable: 0, waitingForPrerequisites: 3 } },
     );
@@ -292,7 +292,7 @@ describe("SidebarNav", () => {
 
   it("実行できる手作業が1件でもあれば強調する", () => {
     renderSidebar(
-      { all: 0, "in-progress": 0, completed: 0 },
+      { all: 0, "in-progress": 0, completed: 0, release: 0 },
       { ...NAV_COUNTS, "manual-step": 3 },
       { manualStepAttention: { total: 3, actionable: 1, waitingForPrerequisites: 2 } },
     );
@@ -304,7 +304,7 @@ describe("SidebarNav", () => {
   // 同じことを言い直すだけになる（#1763）。前提待ちの件数は一覧のヘッダーで読む
   it("手作業の行に内訳の吹き出しを付けない", () => {
     renderSidebar(
-      { all: 0, "in-progress": 0, completed: 0 },
+      { all: 0, "in-progress": 0, completed: 0, release: 0 },
       { ...NAV_COUNTS, "manual-step": 1 },
       { manualStepAttention: { total: 3, actionable: 1, waitingForPrerequisites: 2 } },
     );
@@ -318,7 +318,7 @@ describe("SidebarNav", () => {
   // 未確認の数を数字に出すと、読み終えた質問しか無いときに「質問は無い」と読めてしまう
   it("未確認の質問があれば一覧の件数をオレンジの丸で出す", () => {
     renderSidebar(
-      { all: 0, "in-progress": 0, completed: 0 },
+      { all: 0, "in-progress": 0, completed: 0, release: 0 },
       { ...NAV_COUNTS, question: 3 },
       { unconfirmedQuestionCount: 1 },
     );
@@ -334,7 +334,7 @@ describe("SidebarNav", () => {
   // 回答待ちのあいだは回るアイコンを出す（#2309）。丸（未確認）とは別の合図で、併存する
   it("回答待ちの質問があれば回るアイコンを出し、内訳を吹き出しへ添える", () => {
     renderSidebar(
-      { all: 0, "in-progress": 0, completed: 0 },
+      { all: 0, "in-progress": 0, completed: 0, release: 0 },
       { ...NAV_COUNTS, question: 3 },
       { unconfirmedQuestionCount: 1, waitingQuestionCount: 2 },
     );
@@ -347,7 +347,7 @@ describe("SidebarNav", () => {
 
   it("回答待ちの質問が無ければ回るアイコンを出さない", () => {
     renderSidebar(
-      { all: 0, "in-progress": 0, completed: 0 },
+      { all: 0, "in-progress": 0, completed: 0, release: 0 },
       { ...NAV_COUNTS, question: 3 },
       { unconfirmedQuestionCount: 1, waitingQuestionCount: 0 },
     );
@@ -361,7 +361,7 @@ describe("SidebarNav", () => {
   // 回っているのは質問の回答待ち——押した先にレビューは1件も走っていない
   it("回答待ちの質問があってもコードレビューの行は回さない", () => {
     renderSidebar(
-      { all: 0, "in-progress": 0, completed: 0 },
+      { all: 0, "in-progress": 0, completed: 0, release: 0 },
       { ...NAV_COUNTS, question: 3 },
       { unconfirmedQuestionCount: 1, waitingQuestionCount: 2 },
     );
@@ -375,7 +375,7 @@ describe("SidebarNav", () => {
 
   it("未確認の質問が無ければ強調しないが、件数は出す", () => {
     renderSidebar(
-      { all: 0, "in-progress": 0, completed: 0 },
+      { all: 0, "in-progress": 0, completed: 0, release: 0 },
       { ...NAV_COUNTS, question: 3 },
       { unconfirmedQuestionCount: 0 },
     );
@@ -388,7 +388,7 @@ describe("SidebarNav", () => {
 
   // 取得前に0を出すと「PRが無い」と読めてしまうため。
   it("未取得のときはどのPRビューにも件数を出さない", () => {
-    renderSidebar({ all: null, "in-progress": null, completed: null });
+    renderSidebar({ all: null, "in-progress": null, completed: null, release: 0 });
 
     for (const view of ["all", "in-progress"] as const) {
       expect(pullRequestNavItem(view).textContent).toBe(getPullRequestView(view).pcLabel);
@@ -398,7 +398,7 @@ describe("SidebarNav", () => {
   // 4工程（構想・相談→起案・準備→実行・反映待ち→反映済み）の順に並べる（#4543）。
   // 一覧と要対応は工程から独立して先頭に置き、リポジトリ絞り込みはさらに上、AI使用量は最下部
   it("リポジトリ絞り込み・一覧・要対応・4工程・補助メニューの順に並べる", () => {
-    renderSidebar({ all: 0, "in-progress": 0, completed: 0 });
+    renderSidebar({ all: 0, "in-progress": 0, completed: 0, release: 0 });
 
     const labels = Array.from(document.querySelectorAll("nav button")).map((button) =>
       button.textContent?.replace(/\d+$/, "").trim(),
@@ -419,6 +419,7 @@ describe("SidebarNav", () => {
       "Issue：実行中",
       "PR：検証中",
       "PR：マージ待ち",
+      "PR：本番リリース",
       "Issue：本番反映待ち",
       "ブランチ",
       "リリース履歴",
@@ -433,7 +434,7 @@ describe("SidebarNav", () => {
   });
 
   it("ラベル一覧と新規アプリの行を出さない", () => {
-    renderSidebar({ all: 0, "in-progress": 0, completed: 0 });
+    renderSidebar({ all: 0, "in-progress": 0, completed: 0, release: 0 });
 
     expect(screen.queryByText("すべてのラベルを見る")).toBeNull();
     expect(screen.queryByText("新規アプリを立ち上げる")).toBeNull();
@@ -499,7 +500,7 @@ describe("SidebarNav", () => {
 });
 
 describe("SidebarNavの「ブランチ」行（#2167）", () => {
-  const NO_PR_COUNTS: PullRequestNavCounts = { all: 0, "in-progress": 0, completed: 0 };
+  const NO_PR_COUNTS: PullRequestNavCounts = { all: 0, "in-progress": 0, completed: 0, release: 0 };
 
   /** 内訳のうち指定したものだけを立てた件数（`total`・`actionRequired`は合計で埋める） */
   function activity({
@@ -605,7 +606,7 @@ describe("SidebarNavの「ブランチ」行（#2167）", () => {
 });
 
 describe("SidebarNavの「リリース履歴」行（#2951）", () => {
-  const NO_PR_COUNTS: PullRequestNavCounts = { all: 0, "in-progress": 0, completed: 0 };
+  const NO_PR_COUNTS: PullRequestNavCounts = { all: 0, "in-progress": 0, completed: 0, release: 0 };
 
   function releaseHistoryNavItem() {
     return screen.getByRole("button", { name: /リリース履歴/ });

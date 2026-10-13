@@ -13,7 +13,7 @@ import { REPAIR_KIND_RUNNING_SHORT_LABEL } from "@/lib/github/pull-request-repai
 import { buildPullRequestId } from "@/lib/github-reference";
 import { computeManualStepReadiness } from "@/lib/manual-step-attention";
 import { isAutoMergingPullRequest } from "@/lib/merge-pending-attention";
-import { filterPullRequestsByView } from "@/lib/pull-request-list";
+import { filterMergePendingIncludingRelease } from "@/lib/pull-request-list";
 import { findActiveIssueSnooze, findActiveSnooze, type SnoozeMap } from "@/lib/snooze";
 import type { Issue } from "@/types/issue";
 import type { PullRequestSummary } from "@/types/pull-request";
@@ -335,7 +335,7 @@ function buildPullRequestNotifications(
   pullRequests: PullRequestSummary[],
   excludedIds: Set<string>,
 ): NotificationItem[] {
-  return filterPullRequestsByView(pullRequests, "completed")
+  return filterMergePendingIncludingRelease(pullRequests)
     .filter((pullRequest) => !excludedIds.has(pullRequest.id))
     .filter((pullRequest) => !isAutoMergingPullRequest(pullRequest))
     .map((pullRequest) => {

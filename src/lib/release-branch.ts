@@ -15,6 +15,14 @@
 /** 新方式の候補ブランチの接頭辞。`release/v`（バンプPR）・`release-main/v`（旧方式）と重ならない */
 export const RELEASE_RC_BRANCH_PREFIX = "release-rc/";
 
+/** 本番復旧PR（`deploy-recovery/*`→`main`）のheadブランチの接頭辞。`deploy-recovery-api.ts`が作る名前と共用する（#4542） */
+export const DEPLOY_RECOVERY_BRANCH_PREFIX = "deploy-recovery/";
+
+/** 本番復旧PRのheadか */
+export function isDeployRecoveryHeadRef(headRef: string): boolean {
+  return headRef.startsWith(DEPLOY_RECOVERY_BRANCH_PREFIX);
+}
+
 /** 旧方式（`release-main/vX.Y.Z`）のリリース候補か */
 export function isLegacyReleaseCandidateHeadRef(headRef: string): boolean {
   return /^release-main\/v\d/.test(headRef);
