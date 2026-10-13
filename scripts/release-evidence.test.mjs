@@ -78,3 +78,83 @@ test("失敗ログの機密は証跡にもプロンプトにも出ない（#4629
   }
   expect(out).toContain("plain failure line");
 });
+
+test("構造で伏せる: X-API-Key・JSON・引用符/空白つき値・未知ベンダー・CLI引数・秘密鍵（#4629）", () => {
+  const root = mkdtempSync(path.join(tmpdir(), "evidence-"));
+  const input = path.join(root, "in.txt");
+  writeFileSync(
+    input,
+    [
+      "X-API-Key: abcdefghijklmnop",
+      "x-acme-thing: vendorsecret0001",
+      '{"password":"hunter2 with space","next":1}',
+      '{"apiKey": "my secret pw", "ok": true}',
+      "acme_api-key = Zq9xPlainValue",
+      "--password cliSecret99 --verbose",
+      "Authorization: Basic dXNlcjpwYXNz",
+      "curl https://x/y?token=qs123456&id=5",
+      "SOMEVENDOR_CREDS=abcdefghijklmnopqrst",
+      "-----BEGIN RSA PRIVATE KEY-----",
+      "MIIEowIBAAKCAQEAxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "-----END RSA PRIVATE KEY-----",
+      '{"tokens":["arrAAA1","arrBBB2"]}',
+      "Cookie: sid=cook1e1; other=cook2e2",
+      "Set-Cookie: sid=cook3e3; Path=/",
+      "DB_PASS=dbpass99x",
+      "PASSPHRASE=phrase77",
+      "session_id: sess5555",
+      '{"password":"esc\\"aped tail"}',
+      "Zk3Fq9Lm2Xa8Pw7Vb4Nc6Rt1Yh5Ud0Se9Jg",
+      "at src/lib/auth.test.ts:12:5",
+      "Tests: 3 passed, 1 failed",
+      "0123456789abcdef0123456789abcdef01234567",
+    ].join("\n"),
+  );
+  const out = sh(`evidence_redact < '${input}'`, root);
+  for (const secret of [
+    "abcdefghijklmnop",
+    "vendorsecret0001",
+    "hunter2",
+    "my secret pw",
+    "Zq9xPlainValue",
+    "cliSecret99",
+    "dXNlcjpwYXNz",
+    "qs123456",
+    "MIIEow",
+    "arrBBB2",
+    "cook2e2",
+    "cook3e3",
+    "dbpass99x",
+    "phrase77",
+    "sess5555",
+    "aped tail",
+    "Zk3Fq9Lm2Xa8",
+  ]) {
+    expect(out).not.toContain(secret);
+  }
+  // 診断に要る情報は残る
+  expect(out).toContain("auth.test.ts:12:5");
+  expect(out).toContain("3 passed, 1 failed");
+  expect(out).toContain("0123456789abcdef0123456789abcdef01234567"); // コミットSHAは残す
+  // 二重に通しても同じ
+  expect(sh(`evidence_redact < '${input}' | evidence_redact`, root)).toBe(out);
+});
+
+test("pollerは伏せ処理を持たない古いチェックアウトへ統合検証・全体レビューを配らない（#4629）", async () => {
+  const { readFileSync } = await import("node:fs");
+  const poller = readFileSync(path.resolve(import.meta.dirname, "subpc-dispatch-poller.sh"), "utf8");
+  expect(poller).toMatch(/release_verify_capable\(\) \{\s+[^}]*release_evidence_redacts/);
+  expect(poller).toMatch(/release_review_capable\(\) \{\s+[^}]*release_evidence_redacts/);
+  expect(readFileSync(lib, "utf8")).toContain("evidence_redact_v2");
+  // サーバーは別名のキーだけを読む。旧pollerが送る`releaseVerify`・`releaseReview`は読まない（再申告でnull＝非対応になる）
+  expect(poller).toContain("releaseVerifyRedact: $releaseVerify");
+  expect(poller).not.toMatch(/\breleaseVerify: \$releaseVerify/);
+  const route = readFileSync(
+    path.resolve(import.meta.dirname, "../src/app/api/dispatch/hosts/route.ts"),
+    "utf8",
+  );
+  expect(route).toContain("payload?.releaseVerifyRedact");
+  expect(route).toContain("payload?.releaseReviewRedact");
+  expect(route).not.toMatch(/payload\?\.releaseVerify[^R]/);
+  expect(route).not.toMatch(/payload\?\.releaseReview[^R]/);
+});
