@@ -5,6 +5,7 @@ import { isLegacyReleaseCandidateHeadRef, isRcReleaseCandidateHeadRef } from "@/
 import { useReleaseRc } from "@/hooks/use-release-rc";
 import { ReleaseBlockNotice } from "@/components/dashboard/release-block-notice";
 import { useReleaseStartMode } from "@/hooks/use-release-start-mode";
+import { ReleaseRcNextStep } from "@/components/dashboard/release-rc-next-step";
 import { ReleaseRcFinalizePanel } from "@/components/dashboard/release-rc-finalize";
 import { ReleaseRcVerificationEvidence } from "@/components/dashboard/release-rc-evidence";
 import { ReleaseRcIdentity, ReleaseRcLegacyNotice } from "@/components/dashboard/release-rc-identity";
@@ -131,28 +132,8 @@ export function MobileReleaseSheet({
           )}
           {releaseStatus?.available && (
             <div className="flex flex-col gap-3">
-              <div className="flex items-center justify-between text-sm">
-                <span className="text-muted-foreground">main</span>
-                <span>
-                  {formatMainVersionDisplay(
-                    releaseStatus.mainVersion,
-                    releaseStatus.developVersion,
-                    releaseStatus.phase,
-                  )}
-                </span>
-              </div>
-              <div className="flex items-center justify-between text-sm">
-                <span className="text-muted-foreground">develop</span>
-                <span>
-                  {formatDevelopVersionDisplay(
-                    releaseStatus.developVersion,
-                    releaseStatus.bumpPullRequest?.version ?? null,
-                    releaseStatus.phase,
-                  )}
-                </span>
-              </div>
-              <ReleasePreparationAlert repositoryFullName={repository.fullName} preparation={preparation} />
               {rcCandidate && <ReleaseRcIdentity candidate={rcCandidate} />}
+              {rcCandidate && <ReleaseRcNextStep candidate={rcCandidate} />}
               {rcCandidate && rc.overview?.finalization && (
                 <ReleaseRcFinalizePanel
                   candidate={rcCandidate}
@@ -161,6 +142,7 @@ export function MobileReleaseSheet({
                   onChanged={rc.reload}
                 />
               )}
+              <ReleasePreparationAlert repositoryFullName={repository.fullName} preparation={preparation} />
               {rc.overview && rcLegacy && (
                 <ReleaseRcLegacyNotice overview={rc.overview} legacy={rcLegacy} repositoryFullName={repository.fullName} onChanged={rc.reload} />
               )}
@@ -238,6 +220,27 @@ export function MobileReleaseSheet({
                 />
               )}
               {webviewIos && <WebviewIosInstructions repo={webviewIos} />}
+              {/* 現在の本番版・developの版は補足として後方へ置く（#4635） */}
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-muted-foreground">main</span>
+                <span>
+                  {formatMainVersionDisplay(
+                    releaseStatus.mainVersion,
+                    releaseStatus.developVersion,
+                    releaseStatus.phase,
+                  )}
+                </span>
+              </div>
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-muted-foreground">develop</span>
+                <span>
+                  {formatDevelopVersionDisplay(
+                    releaseStatus.developVersion,
+                    releaseStatus.bumpPullRequest?.version ?? null,
+                    releaseStatus.phase,
+                  )}
+                </span>
+              </div>
               {/* 作り直しの履歴（#4359）は、現在の検証と操作の後ろに置く（#4428） */}
               <ReleaseRebuildHistoryPanel repositoryFullName={repository.fullName} />
             </div>

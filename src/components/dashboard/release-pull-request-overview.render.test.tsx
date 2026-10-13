@@ -85,7 +85,7 @@ function makePullRequest(): PullRequestSummary {
 
 const seriesRow = {
   id: "s1", status: "rebuilding", statusLabel: "修正を反映中", active: true, stepIndex: 4, sourceKind: "review_finding", causeClass: "code",
-  itemTitles: ["指摘A"], releasePrNumber: 768, originBaseSha: "c".repeat(40), originHeadSha: "d".repeat(40), issueNumber: 764,
+  itemTitles: ["指摘A"], releasePrNumber: 768, originBaseSha: "c".repeat(40), originHeadSha: "b".repeat(40), issueNumber: 764,
   fixPrNumber: 765, successorPrNumber: null, successorBaseSha: null, successorHeadSha: null, generation: 1, parentId: null,
   stopReason: null, rebuildFailed: false, startState: "none", createdAt: "2026-10-11T00:00:00.000Z",
 };

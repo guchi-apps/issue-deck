@@ -203,3 +203,39 @@ describe("describeFixOverview: 内部確認の一時停止（#4587）", () => {
     expect(o.pill).not.toBe("あなたの操作が必要");
   });
 });
+
+describe("describeFixOverview 現在の結果と公開工程（#4635）", () => {
+  it("再チェック中の系列でも、最新SHAの失敗は「チェック中・操作不要」に隠さない", () => {
+    const o = describeFixOverview({
+      series: series("reverifying"),
+      checks: checks({ aiReview: { state: "failed", findingCount: 0 } }),
+      previousResults: false,
+    });
+    expect(o.autoProgress).toBe(false);
+    expect(o.pill).toBe("レビューの実行に失敗");
+    expect(o.detail).toContain("再実行");
+  });
+  it("対象が修正前の結果（previousResults=true）なら従来どおりチェック中", () => {
+    const o = describeFixOverview({
+      series: series("reverifying"),
+      checks: checks({ aiReview: { state: "failed", findingCount: 0 } }),
+      previousResults: true,
+    });
+    expect(o.pill).toBe("チェック中");
+    expect(o.autoProgress).toBe(true);
+  });
+  it("合格後でも公開準備前は「公開操作待ち」でなく公開準備へ案内する", () => {
+    const o = describeFixOverview({ series: null, checks: checks(), publishBlock: { next: "verify", message: "公開準備がまだです" } });
+    expect(o.pill).toBe("検証に合格");
+    expect(o.headline).toContain("公開準備へ進めます");
+    expect(o.autoProgress).toBe(false);
+  });
+  it("公開準備中は待機（自動で進む）", () => {
+    const o = describeFixOverview({ series: null, checks: checks(), publishBlock: { next: "wait", message: "公開準備中" } });
+    expect(o.pill).toBe("公開準備中");
+    expect(o.autoProgress).toBe(true);
+  });
+  it("公開できる工程（publishBlockなし）は従来どおり公開操作待ち", () => {
+    expect(describeFixOverview({ series: null, checks: checks() }).pill).toBe("公開操作待ち");
+  });
+});

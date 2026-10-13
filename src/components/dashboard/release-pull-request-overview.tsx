@@ -7,7 +7,7 @@ import { ReleaseRcVerificationEvidence } from "@/components/dashboard/release-rc
 import { ReleaseRcFinalizePanel } from "@/components/dashboard/release-rc-finalize";
 import { ReleaseRcIdentity, ReleaseRcLegacyNotice, ReleaseRcRevisionHistory } from "@/components/dashboard/release-rc-identity";
 
-import { PullRequestMergeButton } from "@/components/dashboard/pull-request-merge-button";
+import { decidePublishForPullRequest, ReleasePublishAction } from "@/components/dashboard/release-publish-action";
 import {
   ReleaseContentsList,
   ReleaseFixHistory,
@@ -21,7 +21,6 @@ import { useReleaseCandidates } from "@/hooks/use-release-candidates";
 import { useReleaseChanges } from "@/hooks/use-release-changes";
 import { useReleaseVerification } from "@/hooks/use-release-verification";
 import { buildMergeChecks, cellsFromSummary, type MergeCheckItem, type MergeCheckTone } from "@/lib/pull-request-merge-checks";
-import { canMergeFromDeck } from "@/lib/pull-request-list";
 import { buildReleaseCheckCells, describeCandidateTarget } from "@/lib/release-candidate-checks";
 import { cn } from "@/lib/utils";
 import type { PullRequestSummary } from "@/types/pull-request";
@@ -161,6 +160,13 @@ export function ReleasePullRequestOverview({
   const { repositoryFullName, number, headRef } = pullRequest;
   const { verification, error } = useReleaseVerification(repositoryFullName, number, true, reloadToken);
   const changes = useReleaseChanges(repositoryFullName, true, number, reloadToken, false);
+  // リリース候補（#4495）。新方式は候補ID・revision、旧方式は識別と移行の導線を出す
+  const rc = useReleaseRc(repositoryFullName, number, true, reloadToken);
+  const rcCandidate = isRcReleaseCandidateHeadRef(headRef) ? (rc.overview?.candidate ?? null) : null;
+  const legacy = rc.overview?.legacy?.prNumber === number ? rc.overview.legacy : null;
+  // 公開できる工程か（#4635）。サーバーのマージAPIと同じ判定。旧方式はundefined、取得前はnull（推測で公開可にしない）
+  const publishDecision = decidePublishForPullRequest(pullRequest, rc.overview);
+  const publishBlock = publishDecision && !publishDecision.ok ? { next: publishDecision.next, message: publishDecision.message } : null;
   const state = useReleaseFixOverview({
     repositoryFullName,
     pullRequestNumber: number,
@@ -168,13 +174,10 @@ export function ReleasePullRequestOverview({
     verificationError: error,
     changes,
     reloadToken,
+    publishBlock,
   });
   const { openPullRequest } = useReferenceNavigation();
   const reload = () => setReloadToken((n) => n + 1);
-  // リリース候補（#4495）。新方式は候補ID・revision、旧方式は識別と移行の導線を出す
-  const rc = useReleaseRc(repositoryFullName, number, true, reloadToken);
-  const rcCandidate = isRcReleaseCandidateHeadRef(headRef) ? (rc.overview?.candidate ?? null) : null;
-  const legacy = rc.overview?.legacy?.prNumber === number ? rc.overview.legacy : null;
 
   return (
     <div className="flex flex-col gap-3 border-b px-4 py-4 text-xs" data-testid="release-pull-request-overview">
@@ -186,9 +189,6 @@ export function ReleasePullRequestOverview({
           {headRef} → {pullRequest.baseRef}
         </p>
       )}
-      {rcCandidate && rc.overview?.finalization && (
-        <ReleaseRcFinalizePanel candidate={rcCandidate} finalization={rc.overview.finalization} repositoryFullName={repositoryFullName} onChanged={rc.reload} />
-      )}
       {rc.overview && legacy && (
         <ReleaseRcLegacyNotice overview={rc.overview} legacy={legacy} repositoryFullName={repositoryFullName} onChanged={rc.reload} />
       )}
@@ -198,14 +198,17 @@ export function ReleasePullRequestOverview({
           state={state}
           showPhases
           extraAction={
-            canMergeFromDeck(pullRequest) ? (
-              <div className="pt-1">
-                <PullRequestMergeButton pullRequest={pullRequest} onMerged={onMerged} variant="default" label="本番公開へ進む" />
-              </div>
-            ) : null
+            <div className="pt-1">
+              <ReleasePublishAction pullRequest={pullRequest} decision={publishDecision} onMerged={onMerged} />
+            </div>
           }
         />
       </section>
+
+      {/* 公開準備は状態と主操作の直後に置く（合格後の主操作は「公開準備へ進む」。#4635） */}
+      {rcCandidate && rc.overview?.finalization && (
+        <ReleaseRcFinalizePanel candidate={rcCandidate} finalization={rc.overview.finalization} repositoryFullName={repositoryFullName} onChanged={rc.reload} />
+      )}
 
       <section aria-label="現在候補の検証" className="flex flex-col gap-2 rounded-[10px] border bg-card p-3.5">
         <h3 className="text-sm font-semibold">現在候補の検証</h3>

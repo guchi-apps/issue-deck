@@ -23,7 +23,8 @@ function errorMessageForResponse(
   errorCode: string | undefined,
   message: string | undefined,
 ): string {
-  if (errorCode === "github_api_error" && message) {
+  // 新方式の候補の工程検査（#4635）。不足している工程と次の操作をそのまま見せる
+  if ((errorCode === "github_api_error" || errorCode?.startsWith("rc_")) && message) {
     return message;
   }
   return `リクエストに失敗しました (${status})`;

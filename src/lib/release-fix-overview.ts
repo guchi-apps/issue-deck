@@ -1,5 +1,6 @@
 import { isInternalHoldReason } from "@/lib/release-fix-internal";
 import type { ReleaseFixStatus } from "@/lib/release-fix-series";
+import type { RcPublishNext } from "@/lib/release-rc-action";
 
 /**
  * リリースの検証・修正画面の上部に出す「現在の状態・検証の要約・主操作」（#4398）。**純関数だけ**を置く。
@@ -166,6 +167,16 @@ export function describeFixOverview(input: {
   checksError?: boolean;
   /** 進行中のリリース完了系列（#4498）。無ければnull */
   completion?: OverviewCompletion | null;
+  /**
+   * 渡した検証結果が修正前（旧SHA）のものか（#4635）。falseなら最新SHAの結果として扱う。
+   * 省略時は従来どおり、再チェック中の系列があれば修正前の結果とみなす
+   */
+  previousResults?: boolean;
+  /**
+   * 新方式の候補が、いま本番公開へ進めない理由（#4635）。合格後の「公開操作待ち」の代わりに、
+   * 工程に合う見出し（公開準備へ進む・公開準備中など）を出す。進める・旧方式・未取得ならnullか省略
+   */
+  publishBlock?: { next: RcPublishNext; message: string } | null;
 }): FixOverview {
   const { series, checks, checksError, completion } = input;
   const checksLine = summarizeChecks(checks);
@@ -204,7 +215,13 @@ export function describeFixOverview(input: {
   if (series?.status === "rebuilding") {
     return { ...base, tone: "progress", pill: "修正取り込み準備中", headline: "修正を反映したリリース候補を準備しています", detail: "完了すると、修正後のチェックが始まります。", action: { kind: "view_progress", label: OVERVIEW_ACTION_LABEL.view_progress }, autoProgress: true };
   }
-  if (series?.status === "reverifying" || (series?.successorPrNumber != null && checks && (isBusy(checks.aiReview.state) || isBusy(checks.integration.state)))) {
+  // 最新SHAの結果が出ている（成否が確定した）なら、系列が再チェック中でも「チェック中・操作不要」に固定しない（#4635）。
+  // 失敗・要確認は理由と操作を、合格は公開操作待ちを、現在の結果として見せる
+  const currentResultsSettled =
+    input.previousResults === false &&
+    checks !== null &&
+    (isProblem(checks.aiReview.state) || isProblem(checks.integration.state) || (isDone(checks.aiReview.state) && isDone(checks.integration.state)));
+  if ((series?.status === "reverifying" && !currentResultsSettled) || (series?.successorPrNumber != null && checks && (isBusy(checks.aiReview.state) || isBusy(checks.integration.state)))) {
     return { ...base, tone: "progress", pill: "チェック中", headline: "修正後のチェックを実行しています", detail: "結果が出ると、この表示が更新されます。", action: { kind: "view_progress", label: OVERVIEW_ACTION_LABEL.view_progress }, autoProgress: true };
   }
   // 内部確認が一時停止している（#4587）。作業は失われておらず、原因ごとの操作で再開できる。実行障害は本人確認待ちにしない
@@ -271,7 +288,7 @@ export function describeFixOverview(input: {
   }
   // 全体レビューの実行失敗（指摘なし）は、コードの指摘ではない。修正Issueの作成を促さない
   if (checks.aiReview.state === "failed" && checks.aiReview.findingCount === 0 && !isProblem(checks.integration.state)) {
-    return { ...base, tone: "bad", pill: "レビューの実行に失敗", headline: "全体レビューを完了できませんでした。問題なしとは扱いません", detail: checks.aiReview.reason ?? null, action: none };
+    return { ...base, tone: "bad", pill: "レビューの実行に失敗", headline: "全体レビューを完了できませんでした。問題なしとは扱いません", detail: [checks.aiReview.reason ?? null, "再実行は、下の検証結果の「全体レビュー」から行えます。"].filter(Boolean).join(" ／ "), action: none };
   }
   if (problems) {
     const n = checks.aiReview.findingCount;
@@ -287,6 +304,20 @@ export function describeFixOverview(input: {
   }
   if (isBusy(checks.aiReview.state) || isBusy(checks.integration.state)) {
     return { ...base, tone: "progress", pill: "チェック中", headline: "チェックを実行しています", detail: "結果が出ると、この表示が更新されます。", action: none, autoProgress: true };
+  }
+  if (isDone(checks.aiReview.state) && isDone(checks.integration.state) && input.publishBlock && input.publishBlock.next !== "none") {
+    // 合格しても、公開準備（正式バンプ・最終検証）が済むまでは公開操作待ちにしない（#4635）
+    const next = input.publishBlock.next;
+    const waiting = next === "wait";
+    return {
+      ...base,
+      tone: next === "recheck" ? "muted" : "ok",
+      pill: waiting ? "公開準備中" : next === "recheck" ? "状態を確認中" : "検証に合格",
+      headline: waiting ? "公開準備を進めています" : next === "recheck" ? "候補の状態を確認しています" : "チェックを通過しました。公開準備へ進めます",
+      detail: input.publishBlock.message,
+      action: none,
+      autoProgress: waiting,
+    };
   }
   if (isDone(checks.aiReview.state) && isDone(checks.integration.state)) {
     return { ...base, tone: "ok", pill: "公開操作待ち", headline: reflected ? "修正を反映し、チェックを通過しました" : "チェックを通過しました", detail: "本番へのマージは、確認画面で対象を確かめてから人が行います。マージ後、デプロイが完了するまでは本番に反映されていません。", action: none };
