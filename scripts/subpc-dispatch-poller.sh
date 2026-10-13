@@ -875,10 +875,16 @@ pr_review_capable() {
   fi
 }
 
+# 証跡のマスキング（evidence_redact_v2・#4629）が入った更新済みのチェックアウトか
+release_evidence_redacts() {
+  grep -q 'evidence_redact_v2' "$SCRIPT_DIR/lib/release-evidence.sh" 2>/dev/null
+}
+
 # リリースPRの統合検証（`RELEASE_VERIFY`・#4237）を実行できるか。ランナーと`git`・`gh`・`jq`が
 # 手元にあるかで判定する（申告しないpollerへは配られない）。
 release_verify_capable() {
-  if [[ -f "$RELEASE_VERIFY_RUNNER" ]] && command -v git >/dev/null 2>&1 &&
+  # 失敗ログの機密を伏せる処理（evidence_redact_v2・#4629）を持たない古いチェックアウトへは配らない
+  if [[ -f "$RELEASE_VERIFY_RUNNER" ]] && release_evidence_redacts && command -v git >/dev/null 2>&1 &&
     command -v gh >/dev/null 2>&1 && command -v jq >/dev/null 2>&1; then
     printf 'true'
   else
@@ -889,7 +895,7 @@ release_verify_capable() {
 # リリースPRの全体AIレビュー（`RELEASE_REVIEW`・#4238）を実行できるか。ランナーと`git`・`jq`・`claude`が
 # 手元にあるかで判定する（担当がCodexのときはサーバー側が`codexCapable`も見て振り分ける）。
 release_review_capable() {
-  if [[ -f "$RELEASE_REVIEW_RUNNER" ]] && command -v git >/dev/null 2>&1 &&
+  if [[ -f "$RELEASE_REVIEW_RUNNER" ]] && release_evidence_redacts && command -v git >/dev/null 2>&1 &&
     command -v jq >/dev/null 2>&1 && command -v claude >/dev/null 2>&1; then
     printf 'true'
   else
@@ -1424,7 +1430,7 @@ announce() {
     --argjson launchHold "${LAUNCH_HOLD_JSON:-null}" \
     --argjson checkout "${checkout:-null}" \
     --argjson planReviewSessions "$plan_review_sessions" \
-    '{host: $host, repositories: $repositories, contractVersion: $contractVersion, agentVersion: $agentVersion, sessionControl: true, instruction: true, stashInput: true, crossRepoQuestion: $crossRepoQuestion, manualStep: $manualStep, manualStepAbort: $manualStepAbort, manualStepValues: $manualStepValues, manualStepVps: $manualStepVps, manualStepSession: $manualStepSession, planReview: $planReview, planReviewAgent: $planReviewAgent, codeReview: $codeReview, prReview: $prReview, releaseVerify: $releaseVerify, releaseReview: $releaseReview, chatCodex: $chatCodex, reviewFix: $reviewFix, codex: $codex, codexRemoteControl: $codexRemoteControl, selfUpdate: $selfUpdate, reboot: $reboot, rebootState: $rebootState, preview: $preview, previewState: $previewState, previewRepositories: $previewRepositories, maxSessions: $maxSessions, liveSessions: $liveSessions, metrics: $metrics, launchHold: $launchHold, checkout: $checkout, planReviewSessions: $planReviewSessions}')"
+    '{host: $host, repositories: $repositories, contractVersion: $contractVersion, agentVersion: $agentVersion, sessionControl: true, instruction: true, stashInput: true, crossRepoQuestion: $crossRepoQuestion, manualStep: $manualStep, manualStepAbort: $manualStepAbort, manualStepValues: $manualStepValues, manualStepVps: $manualStepVps, manualStepSession: $manualStepSession, planReview: $planReview, planReviewAgent: $planReviewAgent, codeReview: $codeReview, prReview: $prReview, releaseVerifyRedact: $releaseVerify, releaseReviewRedact: $releaseReview, chatCodex: $chatCodex, reviewFix: $reviewFix, codex: $codex, codexRemoteControl: $codexRemoteControl, selfUpdate: $selfUpdate, reboot: $reboot, rebootState: $rebootState, preview: $preview, previewState: $previewState, previewRepositories: $previewRepositories, maxSessions: $maxSessions, liveSessions: $liveSessions, metrics: $metrics, launchHold: $launchHold, checkout: $checkout, planReviewSessions: $planReviewSessions}')"
 
   if ! api_call POST /api/dispatch/hosts "$payload"; then
     report_api_failure "ホストの申告に失敗しました"
