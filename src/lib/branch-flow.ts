@@ -10,7 +10,8 @@ import {
   extractLinkedIssueNumber,
   isMergeJudgementPending,
 } from "@/lib/pull-request-list";
-import { summarizePullRequestHealth } from "@/lib/pull-request-health";
+import { resolveReleaseStageBadges } from "@/lib/release-stage-badges";
+import { summarizePullRequestHealth, type PullRequestHealthSummary } from "@/lib/pull-request-health";
 import {
   isReleaseCandidateClear,
   resolvePullRequestReleaseVerification,
@@ -583,7 +584,9 @@ function buildRepository({
     ...(bumpPullRequest ? [bumpPullRequest] : []),
   ];
   const summary: BranchFlowRepositorySummary = {
-    pullRequestHealth: summarizePullRequestHealth(summarizedPullRequests),
+    // 実行中のCI・レビュー（判定）は工程バッジ（`releaseStages`）が工程名つきで出すので、
+    // 件数チップとして二重に出さない（#4602）。失敗・要修正などの問題の件数は残す
+    pullRequestHealth: withoutRunningCounts(summarizePullRequestHealth(summarizedPullRequests)),
     activeLaneCount: activeLanes.filter((lane) => !isClosedLane(lane)).length,
     // バンプPRもレーンから外したぶんここで数える（#1548）。CIが落ちたバンプPRは
     // auto-mergeが効かず止まっている状態そのもので、畳んだ行から気づけないと困る。
@@ -612,6 +615,10 @@ function buildRepository({
     releaseVerification: releasePullRequest
       ? resolvePullRequestReleaseVerification(releasePullRequest)
       : null,
+    releaseStages: resolveReleaseStageBadges({
+      bumpPullRequest,
+      candidatePullRequest: releasePullRequest,
+    }),
     // 畳んだ1行にアイコンと数字だけで出す（#1704・#1886）。手が要るものではないので、
     // 「手が要るもの◯件」の判定（`needsAttention`）には入れない。
     startedIssueCount: startedIssues.length,
@@ -1432,4 +1439,9 @@ function toIssueRef(issue: BranchFlowIssueSource): BranchFlowIssueRef {
     progress: resolveProgressStatus(issue),
     state: issue.state,
   };
+}
+
+/** 実行中のCI・レビューの件数を0にした集計。工程バッジが同じ実行を表示するときに二重表示を避ける（#4602） */
+function withoutRunningCounts(summary: PullRequestHealthSummary): PullRequestHealthSummary {
+  return { ...summary, counts: { ...summary.counts, "ci-running": 0, "review-running": 0 } };
 }

@@ -1045,6 +1045,34 @@ main起点の`deploy-recovery/*`ブランチへ取り込む。**`merges`APIは�
 3. 対応させるリポジトリのcallerへ`candidate_request`のinputと受け渡しを足すPRを、リポジトリごとに出す（一括で配らない）
 4. 戻すとき（復帰）は、そのリポジトリのcallerから`candidate_request`を外す。判定が未対応へ戻り、以後は旧方式で動く。作成済みの候補の記録は残り、開いている候補PRは画面から取り消してから旧方式のリリースを起動する
 
+### 通常の開始操作の接続と、リポジトリごとの展開状況（#4604）
+
+ブランチ画面・スマホのリリースシート・一括の開始操作は、**起動の直前にサーバーで開始方式を取り直し**（`GET /api/repositories/release/start-mode`、判定は`src/lib/release-start-mode.ts`）、次のように振り分ける（入口は`requestReleaseStart`〈`src/lib/release-request.ts`〉に1本化）。
+
+| 開始方式 | 条件 | 個別・スマホ | 一括 |
+| --- | --- | --- | --- |
+| 新方式（`candidate`） | callerが`candidate_request`と`finalize_request`の**両方**に対応 | 「候補を作成して検証」＝`POST /release/rc` create（版は上げない） | 候補を作成 |
+| 旧方式（`legacy`） | どちらかに未対応 | 旧方式で起動（ダイアログに「未対応・callerの更新が要る」を表示） | **起動しない**（理由を表示） |
+| 判定不能（`unknown`） | callerを読めない・取得失敗 | 押せない（理由を表示） | 起動しない |
+
+- 候補作成だけ対応で公開準備が未対応のrepoは新方式にしない（候補を作っても公開できなくなるため）
+- 要求キー（`requestKey`）は操作ごとに作り、失敗後の再送では同じ値を送る。進行中の候補（`rc_active`）・旧方式の候補（`legacy_open`）はサーバーが拒否し、画面は既存候補の検証・修正・公開準備か「新方式へ移行」へ案内する。定期処理からは候補を作らない（#4599）
+- 新規repoの雛形（`src/lib/new-app/scaffold-workflows.ts`）のcallerは、`candidate_request`・`finalize_request`の両方を持つ
+
+**展開状況**（2026-10-13時点。caller更新はリポジトリごとのIssue・PRで行い、一括で配らない。「反映」は配布先のdevelopへのマージ、「通し確認」は実リリースでの確認で、両者は別）:
+
+| repo | 参照タグ | 版ファイル・bump | caller | 反映 | 通し確認 |
+| --- | --- | --- | --- | --- | --- |
+| issue-deck | ローカル | `package.json` | 配線済み（#4567） | 済 | 未（人が実施） |
+| kurashio | v51 | `frontend/package.json`・iOS差異あり | 未対応 | 未（guchi-apps/kurashio#792） | 未（代表ケース） |
+| yoteiflow・asset-manager・portfolio・solitaire・car-care | v51 | 既定（`package.json`） | 未対応 | 未 | 未 |
+| stockly・work-relay・status-hub・morrow・db-console | v51 | 既定（`package.json`） | 未対応 | 未 | 未 |
+| meisai-lab・clip-hive | v51 | `--ignore-scripts`付きの個別bump | 未対応 | 未 | 未 |
+| signaly・pi0w・pi0w_260719 | v51 | `version.json`＋`bump_version.py` | 未対応 | 未 | 未 |
+| aide | v51 | `package.json`＋iOSのXcode版同期 | 未対応 | 未 | 未 |
+
+対象外: アーカイブ済み、およびリリースworkflowを持たないrepo（docs・subpc・vps・ideas・claude-config等）。未対応を「対応済み」と表示しない（画面は`legacy`と理由を出す）。
+
 ## 公開準備（正式バンプ。#4496）
 
 合格した候補（#4495）だけを、公開の直前に正式バンプする。レビュー・修正の間は版を上げない。

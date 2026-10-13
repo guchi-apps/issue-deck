@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { isLegacyReleaseCandidateHeadRef, isRcReleaseCandidateHeadRef } from "@/lib/release-branch";
 import { useReleaseRc } from "@/hooks/use-release-rc";
+import { useReleaseStartMode } from "@/hooks/use-release-start-mode";
 import { ReleaseRcFinalizePanel } from "@/components/dashboard/release-rc-finalize";
 import { ReleaseRcVerificationEvidence } from "@/components/dashboard/release-rc-evidence";
 import { ReleaseRcIdentity, ReleaseRcLegacyNotice } from "@/components/dashboard/release-rc-identity";
@@ -74,6 +75,11 @@ export function MobileReleaseSheet({
   const prepUnknown = preparation.prepState === "unknown";
   const prepBlocked = preparation.prepState === "running" || preparation.prepState === "failed";
   const [allowPrepOverride, setAllowPrepOverride] = useState(false);
+  // 新方式（候補を作成して検証）か旧方式かはcallerの対応で決まる（#4604。PCの個別ボタンと同じ判定）
+  const startMode = useReleaseStartMode(repository.fullName, open);
+  const candidateMode = startMode?.mode === "candidate";
+  const startUnknown = startMode?.mode === "unknown";
+  const startLoading = startMode === null;
   // リリース候補（#4495）の識別・公開準備。PCの本番PR詳細と同じ並びで出す（#4560）
   const releasePr = releaseStatus?.available && releaseStatus.phase === "release_pr_open" ? releaseStatus.releasePullRequest : null;
   const rc = useReleaseRc(repository.fullName, releasePr?.number ?? 0, open && releasePr !== null);
@@ -187,7 +193,7 @@ export function MobileReleaseSheet({
               ) : (
                 <Button
                   variant="outline"
-                  disabled={isTriggeringRelease || prepUnknown}
+                  disabled={isTriggeringRelease || prepUnknown || startUnknown || startLoading}
                   onClick={() => setReleaseConfirmOpen(true)}
                   className={prepBlocked || prepUnknown ? "mt-1 bg-muted text-muted-foreground" : "mt-1"}
                 >
@@ -196,12 +202,19 @@ export function MobileReleaseSheet({
                     ? "起動中..."
                     : prepUnknown
                       ? "準備状態を確認中"
+                    : startLoading
+                      ? "開始方式を確認中"
                       : preparation.prepState === "running"
                       ? "リリース準備中"
                       : preparation.prepState === "failed"
                         ? "準備に失敗"
-                        : "リリースworkflowを起動"}
+                        : candidateMode
+                          ? "候補を作成して検証"
+                          : "リリースworkflowを起動"}
                 </Button>
+              )}
+              {!deviceBuild && startMode && startMode.mode !== "candidate" && (
+                <p className="text-xs text-muted-foreground">{startMode.label}</p>
               )}
               {!deviceBuild && preparation.prepState === "running" && (
                 <p className="text-xs text-muted-foreground">CIとバージョン更新が自動で実行されます。操作せずお待ちください</p>
@@ -232,9 +245,11 @@ export function MobileReleaseSheet({
       }}>
         <AlertDialogContent className="flex flex-col gap-4 overflow-hidden">
           <AlertDialogHeader>
-            <AlertDialogTitle>リリースworkflowを起動しますか？</AlertDialogTitle>
+            <AlertDialogTitle>{candidateMode ? "リリース候補を作成して検証しますか？" : "リリースworkflowを起動しますか？"}</AlertDialogTitle>
             <AlertDialogDescription>
-              {repository.fullName}のdevelopをmainへ反映するリリースworkflowを起動します。
+              {candidateMode
+                ? `${repository.fullName}のdevelopの先端を候補（release-rc/*）として固定し、全体レビュー・統合検証へ進めます。正式な版は合格後の「公開準備」で初めて上げます。`
+                : `${repository.fullName}のdevelopをmainへ反映するリリースworkflowを起動します。`}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto">
@@ -301,9 +316,9 @@ export function MobileReleaseSheet({
             {/* 起動できたことは、閉じた先のこのシートの進捗（`ReleaseProgress`）で分かるため、
                 「リリースを起動しました」のダイアログは出さない（#1590） */}
             <AlertDialogAction
-              disabled={isTriggeringRelease || prepUnknown || (deployFailed && !allowFailedDeploy) || (prepBlocked && !allowPrepOverride)}
+              disabled={isTriggeringRelease || prepUnknown || startLoading || startUnknown || (deployFailed && !allowFailedDeploy) || (prepBlocked && !allowPrepOverride)}
               onClick={() => void triggerRelease(undefined, deployFailed && allowFailedDeploy)}
-            >起動する</AlertDialogAction>
+            >{candidateMode ? "候補を作成する" : "起動する"}</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

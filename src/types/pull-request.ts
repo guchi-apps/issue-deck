@@ -217,6 +217,13 @@ export type PullRequestSummary = {
    * GitHub APIの消費は増えない。
    */
   releaseChecks?: PullRequestReleaseChecks | null;
+  /**
+   * iOS事前検証（#4138）の結果と検証したSHA（#4602）。**開いているリリース候補PRだけ**に、
+   * ブランチ画面の「iOS検証中」表示のために追加で引く（通常PRは引かない。接続のノード数が
+   * PR件数×コミット窓になり、10秒間隔の一覧の消費を押し上げるため）。引いていない・対象外・
+   * 取得失敗は未定義かnullで、その場合は「iOS検証中」を出さない（推測しない）
+   */
+  iosPrecheck?: IosPrecheckSummary | null;
   createdAt: string;
   updatedAt: string;
 };

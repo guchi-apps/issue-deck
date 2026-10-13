@@ -18,7 +18,8 @@ import {
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { isPrepBlockedReason, PREP_OVERRIDE_CONFIRM_TEXT } from "@/lib/release-prep-state";
-import { requestRelease } from "@/lib/release-request";
+import { useReleaseStartMode } from "@/hooks/use-release-start-mode";
+import { newRequestKey, requestReleaseStart } from "@/lib/release-request";
 import type { BumpKind } from "@/lib/semver-bump";
 import type { ReleaseBlockedReason } from "@/types/branch-flow";
 
@@ -99,12 +100,26 @@ export function RepositoryReleaseButton({
   const prepBlocked = isPrepBlockedReason(blockedReason);
   const needsOverride = deployFailed || prepBlocked;
   const [allowPrepOverride, setAllowPrepOverride] = useState(false);
+  // 新方式（候補を作成して検証）か旧方式かはcallerの対応で決まる（#4604）。取得中は操作を無効にし、確認表示と実行方式を一致させる
+  const startMode = useReleaseStartMode(repositoryFullName, blockedReason === null || deployFailed || prepBlocked);
+  const candidateMode = startMode?.mode === "candidate";
+  const startUnknown = startMode?.mode === "unknown";
+  const startLoading = startMode === null;
+  // 要求キーはダイアログを開くたびに作り、失敗後の再送では使い回す（二重候補を作らない）
+  const [requestKey, setRequestKey] = useState<string>(() => newRequestKey());
 
   async function handleTrigger() {
     setIsTriggering(true);
     setError(null);
     try {
-      await requestRelease(repositoryFullName, bumpKind ?? undefined, deployFailed && allowFailedDeploy);
+      // 判定は起動の直前にサーバーで取り直す。新方式なら候補を作り、旧方式は個別の操作として許可する
+      await requestReleaseStart(repositoryFullName, {
+        bumpKind: bumpKind ?? undefined,
+        allowFailedDeploy: deployFailed && allowFailedDeploy,
+        allowLegacy: true,
+        requestKey,
+      });
+      setRequestKey(newRequestKey());
       setAllowPrepOverride(false);
       // 起動できたら確認ダイアログを閉じるだけにする（#1590）。以前は「リリースを起動しました」の
       // ダイアログを続けて出していたが、閉じた先のボタンが「リリース起動中…」へ変わることで
@@ -140,13 +155,15 @@ export function RepositoryReleaseButton({
         size="sm"
         variant="outline"
         className={prepBlocked ? "h-6 gap-1 bg-muted px-2 text-xs text-muted-foreground" : "h-6 gap-1 px-2 text-xs"}
-        disabled={isTriggering || isPending}
+        disabled={isTriggering || isPending || startUnknown || startLoading}
+        title={startUnknown ? startMode.label : undefined}
         onClick={() => setConfirmOpen(true)}
       >
         <Rocket className={isTriggering || isPending ? "size-3 animate-pulse" : "size-3"} />
-        {isTriggering ? "起動中..." : isPending ? "リリース起動中…" : deployFailed ? "修正リリース" : prepBlocked ? BLOCKED_BUTTON_LABEL[blockedReason] : "リリースする"}
+        {isTriggering ? "起動中..." : isPending ? "リリース起動中…" : startLoading ? "開始方式を確認中" : deployFailed ? "修正リリース" : prepBlocked ? BLOCKED_BUTTON_LABEL[blockedReason] : candidateMode ? "候補を作成して検証" : "リリースする"}
       </Button>
       {needsOverride && blockedReason && <span className="text-xs text-muted-foreground">{BLOCKED_REASON_LABEL[blockedReason]}</span>}
+      {startUnknown && <span className="text-xs text-muted-foreground">{startMode.label}</span>}
       {error && <span className="text-xs text-destructive">{error}</span>}
 
       {/* 誤タップでの起動を防ぐため確認を挟む。文面はヘッダーのロケットボタンと揃えている */}
@@ -160,18 +177,23 @@ export function RepositoryReleaseButton({
       }}>
         <AlertDialogContent className="flex flex-col gap-4 overflow-hidden">
           <AlertDialogHeader>
-            <AlertDialogTitle>リリースworkflowを起動しますか？</AlertDialogTitle>
+            <AlertDialogTitle>{candidateMode ? "リリース候補を作成して検証しますか？" : "リリースworkflowを起動しますか？"}</AlertDialogTitle>
             <AlertDialogDescription>
-              {repositoryFullName}のdevelopをmainへ反映するリリースworkflowを起動します。
+              {candidateMode
+                ? `${repositoryFullName}のdevelopの先端を候補（release-rc/*）として固定し、全体レビュー・統合検証へ進めます。正式な版は、合格後の「公開準備」で初めて上げます。`
+                : `${repositoryFullName}のdevelopをmainへ反映するリリースworkflowを起動します。`}
             </AlertDialogDescription>
+            {startMode?.mode === "legacy" && <p className="text-xs text-amber-600">{startMode.label}</p>}
           </AlertDialogHeader>
           <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto">
+          {!candidateMode && (
           <ReleaseBumpKindSelect
             value={bumpKind}
             onChange={setBumpKind}
             currentVersion={currentVersion}
             disabled={isTriggering}
           />
+          )}
           {deployFailed && (
             <label className="flex items-start gap-2 rounded-md border border-destructive/40 p-3 text-sm">
               <Checkbox
@@ -198,7 +220,7 @@ export function RepositoryReleaseButton({
           <AlertDialogFooter>
             <AlertDialogCancel disabled={isTriggering}>キャンセル</AlertDialogCancel>
             <AlertDialogAction
-              disabled={isTriggering || (deployFailed && !allowFailedDeploy) || (prepBlocked && !allowPrepOverride)}
+              disabled={isTriggering || startLoading || startUnknown || (deployFailed && !allowFailedDeploy) || (prepBlocked && !allowPrepOverride)}
               onClick={(event) => {
                 // 起動の結果を待たずに閉じないよう既定の閉じる動作を止める。閉じてしまうと
                 // 連打で複数回dispatchできてしまい、失敗しても文言が出ない（#1548）。
@@ -206,7 +228,7 @@ export function RepositoryReleaseButton({
                 void handleTrigger();
               }}
             >
-              {isTriggering ? "起動中..." : "起動する"}
+              {isTriggering ? "起動中..." : candidateMode ? "候補を作成する" : "起動する"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

@@ -169,10 +169,14 @@ describe("ReleaseFixInternalReview（#4410）", () => {
     gate: { complete: false, blocker: "open_findings", message: "未解決の指摘が残っています", targetSha: null },
     rounds: [{ round: 2, reviewVerdict: "findings", reviewTargetSha: "7f3a9c1".padEnd(40, "0"), testState: null, testTargetSha: null, openFindingCount: 1 }],
     findings: [
-      { key: "F-001", title: "認可の漏れ", detail: null, status: "resolved", reopenCount: 0, resolution: "確認" },
-      { key: "F-002", title: "旧pollerの互換", detail: null, status: "open", reopenCount: 1, resolution: null },
+      { key: "F-001", title: "認可の漏れ", detail: null, status: "resolved", reopenCount: 0, regressionCount: 0, resolution: "確認" },
+      { key: "F-002", title: "旧pollerの互換", detail: null, status: "open", reopenCount: 1, regressionCount: 0, resolution: null },
     ],
-    limits: { round: 2, maxRounds: 5, elapsedMinutes: 38, maxMinutes: 120 },
+    limits: { round: 2, activeMinutes: 38, budgetMinutes: 120 },
+    pause: null,
+    pendingPause: null,
+    assignee: { name: null, epoch: 0, leaseActive: false, leaseUntil: null },
+    attempts: [],
     stopReason: null,
   };
   it("レビュー・テストの状態、未解決の指摘、上限の消費を1つの修正作業として出す", () => {
@@ -181,8 +185,29 @@ describe("ReleaseFixInternalReview（#4410）", () => {
     expect(text).toContain("独立レビュー: 指摘1件");
     expect(text).toContain("テスト: 未実施");
     expect(text).toContain("F-002");
-    expect(text).toContain("往復 2 / 5");
-    expect(text).toContain("経過 38分 / 120分");
+    expect(text).toContain("独立レビュー 2回");
+    expect(text).toContain("稼働 38分 / 予算 120分");
+  });
+  it("一時停止では原因・次の操作・担当と、原因に合う入力欄つきの再開の主操作を出す（PC・スマホ共通の部品）", () => {
+    const paused = {
+      ...internal,
+      pause: { kind: "budget_reached", message: "実行予算に達したため一時停止しています", nextAction: "実行予算を追加して再開する", resumeNeed: "budget", pausedAt: null, pausedSha: null, autoResumable: false },
+      assignee: { name: "agent-a", epoch: 2, leaseActive: false, leaseUntil: null },
+      stopReason: "実行予算に達したため一時停止しています",
+    };
+    render(<ReleaseFixInternalReview current={{ ...seriesRow, internal: paused, continuedFromParent: false } as never} repositoryFullName="o/r" />);
+    const text = screen.getByTestId("release-fix-internal").textContent ?? "";
+    expect(text).toContain("一時停止");
+    expect(text).toContain("次の操作: 実行予算を追加して再開する");
+    expect(text).toContain("担当: agent-a（応答なし）");
+    expect(screen.getByTestId("release-fix-internal-resume").textContent).toBe("予算を追加して再開");
+    expect(screen.getByTestId("release-fix-internal-handover")).toBeTruthy();
+  });
+  it("実行環境の障害は入力欄を出さず、そのまま再開できる", () => {
+    const env = { ...internal, pause: { kind: "environment", message: "障害", nextAction: "再開する", resumeNeed: "none", pausedAt: null, pausedSha: null, autoResumable: true }, stopReason: "障害" };
+    render(<ReleaseFixInternalReview current={{ ...seriesRow, internal: env, continuedFromParent: false } as never} repositoryFullName="o/r" />);
+    expect(screen.getByTestId("release-fix-internal-resume").textContent).toBe("再開する");
+    expect(screen.queryByRole("textbox")).toBeNull();
   });
   it("内部確認を求めない系列には何も出さない", () => {
     const { container } = render(<ReleaseFixInternalReview current={{ ...seriesRow, internal: null, continuedFromParent: false } as never} />);

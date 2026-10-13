@@ -485,6 +485,7 @@ describe("buildBranchFlow", () => {
       releaseAutoProgressing: false,
       releaseMergeTarget: null,
       releaseVerification: null,
+      releaseStages: [],
       deploy: null,
     });
   });
@@ -1861,6 +1862,7 @@ describe("サマリー行の集計", () => {
       releaseAutoProgressing: false,
       releaseMergeTarget: null,
       releaseVerification: null,
+      releaseStages: [],
       deploy: null,
     });
   });

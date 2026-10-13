@@ -23,6 +23,7 @@ import {
   listReleaseFixSeries,
   readReleaseFixStartState,
 } from "@/lib/release-fix-series-run";
+import { releaseInternalSession, resumeInternal } from "@/lib/release-fix-internal-run";
 import { isReleasePullRequest } from "@/lib/release-merge-gate";
 import { loadReleaseVerificationSummary } from "@/lib/release-verification-load";
 
@@ -33,6 +34,7 @@ import { loadReleaseVerificationSummary } from "@/lib/release-verification-load"
  * - GET `startCheck=<系列ID>`: 「修正を開始」の前にサーバーが対象を確かめ、起動ダイアログへ渡すIssueを返す（#4396）
  * - POST `action=create`: 全体レビューの指摘・統合検証の失敗から修正Issueを起案する。**対象は現在のSHAの結果だけ**
  *   （サーバーが記録から読み直し、クライアントの内容を信用しない）。同じ対象は既存の系列を返す
+ * - POST `action=resume_internal` / `handover_internal`: 内部確認の一時停止を再開する（予算の追加・方針の入力）／担当を解放して別のエージェントへ引き継げる状態にする（#4587）
  * - POST `action=accept_extra`: 修正と無関係なdevelopの変更を含めて作り直すことを確認する
  */
 
@@ -122,6 +124,30 @@ async function handlePOST(request: NextRequest) {
       console.error("[POST /api/repositories/release/fix-series accept_extra]", error);
       return NextResponse.json({ error: "github_api_error", message: githubApiErrorMessage(error) }, { status: 502 });
     }
+  }
+
+  // 内部確認の再開・引き継ぎ（#4587）。状態の取得とは別の操作で、画面の主操作が呼ぶ
+  if (payload.action === "resume_internal" || payload.action === "handover_internal") {
+    const issueNumber = payload.issueNumber;
+    if (!Number.isInteger(issueNumber) || issueNumber <= 0) return NextResponse.json({ error: "invalid_request" }, { status: 400 });
+    const repositoryFullName = `${owner}/${repo}`;
+    const text = (v: unknown, max: number) => (typeof v === "string" && v.trim() !== "" ? v.slice(0, max) : null);
+    const result =
+      payload.action === "resume_internal"
+        ? await resumeInternal({
+            repositoryFullName,
+            issueNumber,
+            addMinutes: typeof payload.addMinutes === "number" ? payload.addMinutes : null,
+            direction: text(payload.direction, 2000),
+            assignee: text(payload.assignee, 120),
+            by: `user:${userId}`,
+          })
+        : await releaseInternalSession({ repositoryFullName, issueNumber, actor: {}, force: true });
+    if (!result.ok) {
+      const notFound = result.error === "series_not_found" || result.error === "repository_not_found" || result.error === "branch_not_found";
+      return NextResponse.json({ error: result.error, message: result.message }, { status: notFound ? 404 : 409 });
+    }
+    return NextResponse.json({ ok: true, internal: result.status });
   }
 
   if (payload.action !== "create") return NextResponse.json({ error: "invalid_request" }, { status: 400 });

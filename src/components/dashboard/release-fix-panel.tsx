@@ -21,7 +21,6 @@ import { RELEASE_FIX_STEPS, RELEASE_FIX_MAX_GENERATION, type ReleaseFixSourceKin
 import type { RebuildEpisode } from "@/lib/release-rebuild-history";
 import type { ReleaseVerificationSummary } from "@/lib/release-verification-summary";
 import type { ReleaseFixSeriesView } from "@/lib/release-fix-series-run";
-import { INTERNAL_MAX_REOPEN } from "@/lib/release-fix-internal";
 import type { ReleaseReviewFinding } from "@/lib/release-review-result";
 import { cn } from "@/lib/utils";
 import type { Issue } from "@/types/issue";
@@ -333,6 +332,8 @@ export type ReleaseFixOverviewState = {
   /** 表示中の検証結果が修正前のリリースのものか */
   previousResults: boolean;
   acceptExtra: (seriesId: string) => Promise<void>;
+  /** 修正系列の記録を取り直す（再開・引き継ぎの後） */
+  reload: () => void;
 };
 
 /**
@@ -416,7 +417,7 @@ export function useReleaseFixOverview({
   const overview = seriesPending
     ? describeFixOverview({ series: null, checks: null })
     : describeFixOverview({
-        series: current,
+        series: current ? { ...current, internalPause: current.internal?.pause ?? null } : null,
         checks: toOverviewChecks(verification),
         checksError: verification === null && verificationError !== null,
         completion: completionRun?.active
@@ -446,6 +447,7 @@ export function useReleaseFixOverview({
     contents,
     previousResults,
     acceptExtra,
+    reload: () => setTick((n) => n + 1),
   };
 }
 
@@ -523,12 +525,98 @@ export function ReleaseFixPrimaryAction({ state }: { state: ReleaseFixOverviewSt
   );
 }
 
+/** 一時停止の再開と担当の引き継ぎ（#4587）。主操作は原因ごとに必要な入力だけを求める。PC・スマホで同じ部品を使う */
+function InternalControls({
+  repositoryFullName,
+  issueNumber,
+  internal,
+  onChanged,
+}: {
+  repositoryFullName: string;
+  issueNumber: number;
+  internal: NonNullable<ReleaseFixSeriesView["internal"]>;
+  onChanged?: () => void;
+}) {
+  const { pause } = internal;
+  const [addMinutes, setAddMinutes] = useState("60");
+  const [direction, setDirection] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+  const send = async (action: "resume_internal" | "handover_internal") => {
+    const [owner, repo] = repositoryFullName.split("/");
+    setBusy(true);
+    setMessage(null);
+    try {
+      const res = await fetch("/api/repositories/release/fix-series", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action,
+          owner,
+          repo,
+          issueNumber,
+          ...(action === "resume_internal" ? { addMinutes: pause?.resumeNeed === "budget" ? Number(addMinutes) : undefined, direction: direction || undefined } : {}),
+        }),
+      });
+      const body = await res.json().catch(() => null);
+      if (!res.ok) setMessage(body?.message ?? "操作できませんでした");
+      else {
+        setMessage(action === "resume_internal" ? "再開しました" : "担当を解放しました。別のエージェントが引き継げます");
+        onChanged?.();
+      }
+    } catch {
+      setMessage("通信に失敗しました");
+    } finally {
+      setBusy(false);
+    }
+  };
+  const inputClass = "min-h-9 w-full rounded border bg-background px-2 text-[13px]";
+  return (
+    <div className="flex flex-col gap-1.5" data-testid="release-fix-internal-controls">
+      {pause && pause.resumeNeed === "budget" && (
+        <label className="flex flex-col gap-0.5 text-[11px]">
+          追加する稼働時間（分）
+          <input className={inputClass} inputMode="numeric" value={addMinutes} onChange={(e) => setAddMinutes(e.target.value)} />
+        </label>
+      )}
+      {pause && pause.resumeNeed === "direction" && (
+        <label className="flex flex-col gap-0.5 text-[11px]">
+          進め方の方針
+          <textarea className={cn(inputClass, "min-h-16 py-1")} value={direction} onChange={(e) => setDirection(e.target.value)} />
+        </label>
+      )}
+      <div className="flex flex-wrap gap-1.5">
+        {pause && (
+          <button type="button" disabled={busy} onClick={() => void send("resume_internal")} className="min-h-9 rounded bg-primary px-3 text-[13px] font-semibold text-primary-foreground disabled:opacity-60" data-testid="release-fix-internal-resume">
+            {pause.autoResumable ? "再開する" : pause.resumeNeed === "budget" ? "予算を追加して再開" : "方針を入力して再開"}
+          </button>
+        )}
+        {internal.assignee.name && (
+          <button type="button" disabled={busy} onClick={() => void send("handover_internal")} className="min-h-9 rounded border px-3 text-[13px] disabled:opacity-60" data-testid="release-fix-internal-handover">
+            担当を解放（引き継ぎ）
+          </button>
+        )}
+      </div>
+      {message && <p className="break-words text-muted-foreground">{message}</p>}
+    </div>
+  );
+}
+
 /**
  * 内部確認（#4410）。実装・独立レビュー・テストの状態と未解決の指摘、上限の消費を1つの修正作業として出す。
  * 求めない系列（旧い系列）には何も出さない。レビュー・テストの結果は確認した内容に紐付いており、
  * ここに出る状態は最後に報告された内容のもの。
  */
-export function ReleaseFixInternalReview({ current }: { current: ReleaseFixSeriesView }) {
+export function ReleaseFixInternalReview({
+  current,
+  repositoryFullName,
+  onChanged,
+}: {
+  current: ReleaseFixSeriesView;
+  /** 再開・引き継ぎの操作を出すときに渡す。省くと表示だけ */
+  repositoryFullName?: string;
+  onChanged?: () => void;
+}) {
   const internal = current.internal;
   if (!internal || !internal.required) return null;
   const latest = internal.rounds[internal.rounds.length - 1] ?? null;
@@ -536,7 +624,7 @@ export function ReleaseFixInternalReview({ current }: { current: ReleaseFixSerie
   const resolved = internal.findings.filter((f) => f.status === "resolved");
   const reviewWord = !latest || latest.reviewVerdict === null ? "未実施" : latest.reviewVerdict === "pass" ? "指摘なし" : `指摘${open.length}件`;
   const testWord = !latest || latest.testState === null ? "未実施" : latest.testState === "passed" ? "合格" : "失敗";
-  const { limits } = internal;
+  const { limits, pause } = internal;
   return (
     <div className="flex flex-col gap-1 rounded border bg-muted/30 px-2 py-1.5" data-testid="release-fix-internal">
       <p className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
@@ -544,14 +632,16 @@ export function ReleaseFixInternalReview({ current }: { current: ReleaseFixSerie
         <span
           className={cn(
             "rounded px-1.5 py-0.5 text-[10.5px] font-bold",
-            internal.stopReason
+            pause
+              ? "bg-amber-100 text-amber-900 dark:bg-amber-950 dark:text-amber-300"
+              : internal.stopReason
               ? "bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-300"
               : internal.gate.complete
                 ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300"
                 : "bg-sky-100 text-sky-900 dark:bg-sky-950 dark:text-sky-300",
           )}
         >
-          {internal.stopReason ? "要判断" : internal.gate.complete ? "完了（PR作成可）" : "確認中"}
+          {pause ? (pause.autoResumable ? "一時停止（再開可）" : "一時停止") : internal.stopReason ? "要判断" : internal.gate.complete ? "完了（PR作成可）" : "確認中"}
         </span>
         <span className="text-muted-foreground">
           修正Issue #{current.issueNumber}
@@ -568,7 +658,17 @@ export function ReleaseFixInternalReview({ current }: { current: ReleaseFixSerie
         )}
       </p>
       {!internal.gate.complete && !internal.stopReason && <p className="break-words text-muted-foreground">{internal.gate.message}</p>}
-      {internal.stopReason && <p className="break-words text-destructive">{internal.stopReason}</p>}
+      {pause && (
+        <div className="flex flex-col gap-0.5" data-testid="release-fix-internal-pause">
+          <p className="break-words text-amber-900 dark:text-amber-300">{pause.message}</p>
+          <p className="break-words">
+            <span className="font-semibold">次の操作: </span>
+            {pause.nextAction}
+          </p>
+        </div>
+      )}
+      {!pause && internal.pendingPause && <p className="break-words text-amber-900 dark:text-amber-300">次の報告で一時停止する見込み: {internal.pendingPause.message}</p>}
+      {!pause && internal.stopReason && <p className="break-words text-destructive">{internal.stopReason}</p>}
       {internal.findings.length > 0 && (
         <ul className="flex flex-col gap-0.5" data-testid="release-fix-internal-findings">
           {[...open, ...resolved].map((f) => (
@@ -579,15 +679,22 @@ export function ReleaseFixInternalReview({ current }: { current: ReleaseFixSerie
               </span>
               <span className="min-w-0 break-words">
                 {f.title}
-                {f.status === "open" && f.reopenCount > 0 ? `（再発${f.reopenCount}/${INTERNAL_MAX_REOPEN}）` : ""}
+                {f.status === "open" && f.reopenCount > 0 ? `（未解消のまま再指摘${f.reopenCount}回）` : ""}
+                {f.regressionCount > 0 ? `（解消後の再発${f.regressionCount}回）` : ""}
               </span>
             </li>
           ))}
         </ul>
       )}
       <p className="text-[10.5px] tabular-nums text-muted-foreground">
-        往復 {limits.round} / {limits.maxRounds} ・ 経過 {limits.elapsedMinutes}分 / {limits.maxMinutes}分
+        独立レビュー {limits.round}回 ・ 稼働 {limits.activeMinutes}分 / 予算 {limits.budgetMinutes}分（待機・中断は含みません）
       </p>
+      <p className="break-words text-[10.5px] text-muted-foreground" data-testid="release-fix-internal-assignee">
+        担当: {internal.assignee.name ? `${internal.assignee.name}${internal.assignee.leaseActive ? "" : "（応答なし）"}` : "なし"}
+      </p>
+      {repositoryFullName && (pause || internal.assignee.name) && (
+        <InternalControls repositoryFullName={repositoryFullName} issueNumber={current.issueNumber} internal={internal} onChanged={onChanged} />
+      )}
     </div>
   );
 }
@@ -621,7 +728,7 @@ export function ReleaseFixSummary({
       {overview.autoProgress && <p className="text-muted-foreground" data-testid="release-fix-auto">操作は不要です。自動で進みます。</p>}
       {overview.checksLine && <p className="break-words text-muted-foreground">{overview.checksLine}</p>}
       {showPhases && current && current.status !== "superseded" && <ReleaseFixPhases current={current} className="mt-0.5" />}
-      {current && current.status !== "superseded" && <ReleaseFixInternalReview current={current} />}
+      {current && current.status !== "superseded" && <ReleaseFixInternalReview current={current} repositoryFullName={state.repositoryFullName} onChanged={state.reload} />}
       <ReleaseCompletionPanel
         runState={{ run: state.completionRun, setRun: state.setCompletionRun }}
         repositoryFullName={state.repositoryFullName}
