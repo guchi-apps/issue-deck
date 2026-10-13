@@ -195,4 +195,11 @@ describe("Issue依存の実装PR解決（#4570）", () => {
     const r = evaluateConditions(["merged"], pr, observed({ merged: true, baseRef: "main", integrationBranch: null }));
     expect(r[0].satisfied).toBeNull();
   });
+  it("統合ブランチ不明でも未マージPRは待ち、mergedだけが残れば人の確認になる", () => {
+    const unmerged = prs([{ number: 1, merged: false, baseRef: "main" }]);
+    expect(sat({ implementationPrs: unmerged, integrationBranch: null })).toBe(false);
+    const merged = prs([{ number: 1, merged: true, baseRef: "main" }]);
+    const results = evaluateConditions(["merged"], issue, observed({ implementationPrs: merged, integrationBranch: null }));
+    expect(decideDependencyWait(results)).toBe("needs_confirm");
+  });
 });
