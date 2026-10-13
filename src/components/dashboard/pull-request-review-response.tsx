@@ -24,6 +24,13 @@ type SendState =
   | { status: "error"; message: string };
 
 /** サーバーが文言を返さなかった失敗の言い換え。権限不足・取得失敗を「失敗しました」に潰さない */
+const INTERRUPT_REASON_LABEL: Record<string, string> = {
+  check_user_added: "受付後に確認待ちが追加されました",
+  issue_closed: "Issueがクローズされました",
+  local_added: "ローカルセッションの対応に切り替わりました",
+  run_failed: "実行が完了しませんでした",
+};
+
 const FALLBACK_ERROR_MESSAGE: Record<number, string> = {
   401: "ログインが切れています。ページを開き直してから送ってください。",
   403: "この操作を行う権限がありません。",
@@ -240,6 +247,23 @@ export function PullRequestReviewResponse({
                 </span>
               )}
             </div>
+            {action.interrupted && (
+              <p role="status" className="text-xs text-amber-800 dark:text-amber-300">
+                直前の依頼は{action.interrupted.kind === "aborted" ? "実行前に中止されました" : "実行に失敗しました"}
+                （{INTERRUPT_REASON_LABEL[action.interrupted.reason] ?? "理由は結果コメントを確認してください"}）。
+                「AIに修正を依頼」を押すと同じ依頼を再送します。
+                {action.interrupted.resultUrl && (
+                  <a
+                    href={action.interrupted.resultUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="ml-1 underline-offset-2 hover:underline"
+                  >
+                    結果コメントを開く
+                  </a>
+                )}
+              </p>
+            )}
             {action.requestLookupFailed && (
               <p className="text-[11px] text-muted-foreground">
                 依頼済みかを確かめられませんでした。同じ内容を送り直しても、二重には依頼されません。

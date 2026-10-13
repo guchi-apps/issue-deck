@@ -457,6 +457,13 @@ export type PullRequestReviewResponseContext = {
   linkedIssueClosed?: boolean;
   /** 現在のHEADに対して既に出ている修正依頼。無ければnull */
   currentFixRequest: { commentUrl: string | null; createdAt: string } | null;
+  /** 現在のHEADへの依頼が実行前に中止された・失敗した場合（#4639）。画面から同じ依頼を再送できる */
+  interruptedFixRequest?: {
+    kind: "aborted" | "failed";
+    reason: string;
+    requestUrl: string | null;
+    resultUrl: string | null;
+  } | null;
   /** Issueのコメントを読めず、依頼済みかを確かめられなかった */
   fetchFailed: boolean;
 };

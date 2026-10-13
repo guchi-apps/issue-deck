@@ -9,7 +9,7 @@ import { mapComment } from "@/lib/github/issue-mapper";
 import { fetchCommentsForIssue } from "@/lib/github/issues-api";
 import { githubApiErrorMessage } from "@/lib/github/network-error";
 import { buildPullRequestEvents } from "@/lib/github/pull-request-events";
-import { findCurrentFixRequest } from "@/lib/github/pull-request-fix-request-service";
+import { findCurrentFixRequest, findInterruptedFixRequest } from "@/lib/github/pull-request-fix-request-service";
 import { repairKindsFor } from "@/lib/github/pull-request-repair";
 import {
   fetchActivePullRequestRepairRun,
@@ -232,6 +232,7 @@ async function resolveReviewResponseContext(params: {
       linkedIssueLocal: local,
       linkedIssueClosed: closed,
       currentFixRequest: findCurrentFixRequest(comments, params.headSha),
+      interruptedFixRequest: findInterruptedFixRequest(comments, params.headSha),
       fetchFailed: false,
     };
   } catch (error) {
@@ -241,6 +242,7 @@ async function resolveReviewResponseContext(params: {
       linkedIssueLocal: local,
       linkedIssueClosed: closed,
       currentFixRequest: null,
+      interruptedFixRequest: null,
       fetchFailed: true,
     };
   }

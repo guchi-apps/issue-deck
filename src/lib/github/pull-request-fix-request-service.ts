@@ -50,15 +50,52 @@ export type CurrentFixRequest = { commentUrl: string | null; createdAt: string }
  * 依頼コメントの末尾の印は`<!-- issue-deck-chat-fix-request:<key> sha=<HEAD> -->`。
  * HEADが進めば前の依頼は「現在の依頼」ではない（新しいHEADのCI・再レビューの結果で判断する）。
  */
-export function findCurrentFixRequest(
-  comments: { body?: string | null; html_url?: string | null; created_at?: string | null }[],
-  headSha: string,
-): CurrentFixRequest | null {
-  const pattern = new RegExp(`<!-- ${FIX_REQUEST_MARKER}:[0-9a-f]+ sha=${headSha} -->`);
-  const matched = comments.filter((comment) => comment.body && pattern.test(comment.body));
-  const latest = matched.at(-1);
-  if (!latest) return null;
+export function findCurrentFixRequest(comments: FixRequestComment[], headSha: string): CurrentFixRequest | null {
+  const latest = latestRequestFor(comments, headSha);
+  if (!latest || findDispatchResult(comments, latest)) return null;
   return { commentUrl: latest.html_url ?? null, createdAt: latest.created_at ?? "" };
+}
+
+/** 中止・失敗した現在の依頼（#4639）。画面が理由を出し、同じ依頼の再送を勧めるのに使う */
+export type InterruptedFixRequest = {
+  kind: "aborted" | "failed";
+  reason: string;
+  requestUrl: string | null;
+  resultUrl: string | null;
+};
+
+export function findInterruptedFixRequest(comments: FixRequestComment[], headSha: string): InterruptedFixRequest | null {
+  const latest = latestRequestFor(comments, headSha);
+  if (!latest) return null;
+  const result = findDispatchResult(comments, latest);
+  if (!result) return null;
+  return { ...result.parsed, requestUrl: latest.html_url ?? null, resultUrl: result.comment.html_url ?? null };
+}
+
+export type FixRequestComment = { id?: number; body?: string | null; html_url?: string | null; created_at?: string | null };
+
+function latestRequestFor(comments: FixRequestComment[], headSha: string): FixRequestComment | undefined {
+  const pattern = new RegExp(`<!-- ${FIX_REQUEST_MARKER}:[0-9a-f]+ sha=${headSha} -->`);
+  return comments.filter((comment) => comment.body && pattern.test(comment.body)).at(-1);
+}
+
+const DISPATCH_RESULT_PATTERN = /<!-- issue-deck-dispatch-result:(aborted|failed) reason=([a-z_]*) comment=(\d+) -->/;
+
+/**
+ * 依頼コメントのidを指す中止・失敗の結果コメントを探す。時刻の前後ではなく、workflowが結果コメントに
+ * 書いたトリガーコメントidで結び付ける（他の`@claude`コメントの中止を取り違えない）。
+ */
+function findDispatchResult(
+  comments: FixRequestComment[],
+  request: FixRequestComment,
+): { comment: FixRequestComment; parsed: { kind: "aborted" | "failed"; reason: string } } | null {
+  if (request.id === undefined) return null;
+  for (const comment of comments) {
+    const match = comment.body ? DISPATCH_RESULT_PATTERN.exec(comment.body) : null;
+    if (!match || Number(match[3]) !== request.id) continue;
+    return { comment, parsed: { kind: match[1] as "aborted" | "failed", reason: match[2] } };
+  }
+  return null;
 }
 
 export function bodyHash(body: string | null | undefined): string {
@@ -101,6 +138,8 @@ export function buildFixRequestBody(params: {
   key: string;
   scope?: FixScopeKind;
   source?: FixRequestSource;
+  /** 2以上は、中止・失敗した同じ依頼の再送（#4639） */
+  attempt?: number;
 }): string {
   const metadata = params.scope === "metadata";
   const fromDetail = params.source === "pull-request-detail";
@@ -111,6 +150,9 @@ export function buildFixRequestBody(params: {
     "",
     redactSecrets(params.instruction.trim()),
     "",
+    ...(params.attempt && params.attempt > 1
+      ? [`これは中止・失敗した同じ依頼の再送（${params.attempt}回目）です。前回の結果コメントを確かめたうえで続きから対応してください。`, ""]
+      : []),
     fromDetail
       ? "この依頼は、利用者がレビュー指摘を読んだうえで送ったものです。上に方針が書かれていればそれは回答済みとして扱ってください。方針が書かれていない点で仕様の選択や実機での確認が要るものは、推測で直さずIssueコメントで質問してください。"
       : "この依頼は、利用者がチャットで原因と方針を確認して承認したものです。上の方針は回答済みとして扱い、同じ方針の質問で停止しないでください。",
@@ -174,10 +216,13 @@ export async function requestPullRequestFix(
       };
     }
     const key = fixRequestKey(fullName, number, pr.head.sha, `${params.scope ?? "code"}:${params.instruction}`);
-    const existing = (await fetchCommentsForIssue(owner, repo, issueNumber, token)).find((c) =>
-      c.body?.includes(`${FIX_REQUEST_MARKER}:${key}`),
-    );
-    if (existing) {
+    const issueComments = await fetchCommentsForIssue(owner, repo, issueNumber, token);
+    const sameRequests = issueComments.filter((c) => c.body?.includes(`${FIX_REQUEST_MARKER}:${key} sha=${pr.head.sha}`));
+    const existing = sameRequests.at(-1);
+    // 中止・失敗した同じ依頼は成功済みと扱わず、試行番号を進めて再送できるようにする（#4639）。
+    // 結果が未報告（実行中・待機中）の間は従来どおり重複として返し、二重起動しない
+    const attempt = existing && findDispatchResult(issueComments, existing) ? sameRequests.length + 1 : 1;
+    if (existing && attempt === 1) {
       return { ok: true, duplicate: true, commentUrl: existing.html_url ?? null, issueNumber, headSha: pr.head.sha };
     }
     // ローカルセッションで対応中のIssueへ`@claude`を書いても、dispatchは反応しない（#4482）。
@@ -216,6 +261,7 @@ export async function requestPullRequestFix(
       key,
       scope: params.scope,
       source: params.source,
+      attempt,
     });
     const posted = await withUserGithubToken(user, `chat fix-request ${fullName}#${number}`, (userToken) =>
       createComment(owner, repo, issueNumber, userToken, { body }),
