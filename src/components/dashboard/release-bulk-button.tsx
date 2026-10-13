@@ -232,7 +232,11 @@ function BulkTargetRow({
               ? "未対応（更新が必要）・起動しない"
               : startMode.mode === "blocked"
                 ? (releaseBlockShortLabel(startMode) ?? "既存候補あり・起動しない")
-                : "判定不能・起動しない"}
+                : startMode.mode === "develop_sync"
+                  ? startMode.sync.state === "unknown"
+                    ? "develop同期を判定できず・起動しない"
+                    : "developへ未同期・起動しない"
+                  : "判定不能・起動しない"}
           </span>
         )}
         {prepState !== "idle" && (

@@ -1124,7 +1124,16 @@ main起点の`deploy-recovery/*`ブランチへ取り込む。**`merges`APIは�
 
 ### 公開後のdevelop整合
 
-- 新方式のバンプはdevelopへ入らない。公開後に、mainをdevelopへ同期するPR（`ensureDevelopSync`）を作る。同期されるまで、次の候補は作らない（`develop_not_synced`）
+- 新方式のバンプ・候補上の修正・競合解消はdevelopへ入らないまま公開される。公開後に、mainの内容をdevelopへ戻す同期PRを作り、同期されるまで次の候補は作らない（#4641。判定は`src/lib/release-develop-sync.ts`、観測・作成・巡回は`release-develop-sync-run.ts`）
+- **判定の正は実際のGit履歴で、DBの記録（版の予約・公開準備）は見ない。** 記録の無い手動公開・取消・外部マージ・hotfixのmain直接マージでも、mainにだけある変更が残っていれば未同期になる。同期済みとみなすのは次のどれかだけ
+  1. mainの先端がdevelopの祖先（`develop...main`の`aheadBy`が0）
+  2. 祖先でなくても`develop...main`の3点比較で変更ファイルが0（旧方式のマージコミットだけ）
+  3. マージ済みの同期PR（本文の`<!-- issue-deck-develop-sync:main=<SHA> -->`）があり、そのSHA以降mainに変更ファイルが無い。**squash・rebaseでマージするとmerge-baseが進まず1・2では同期済みにならない**ための救済で、同期PRは本来マージコミットでマージする
+- GitHubから取得できないときは**判定不能**（`develop_sync_unknown`）で、同期済みと推定して候補を作らない
+- 同期PRのheadは`main`ではなく、mainの先端から切った`release-sync/main-<SHA12>`。競合したらこのブランチへdevelopを取り込んで解消する（mainへpushしない・developを上書きしない）。ブランチ名がmainのSHAで決まり、開いている同期PR（以前のhead=mainのものも含む）があれば作らないので、巡回が重なっても1本にしかならない。同期PRの作成後にmainが進んだときは、そのマージ後に残りの同期PRを作る
+- 同期PRは通常のdevelop向けPRとして既存のCI・レビュー・マージ保護を通る（`issue-<番号>`ブランチではないため自動マージの対象外で、人がマージする）
+- 追跡は公開処理の段階から独立している。呼び出し元は本番反映の追跡（`advanceProduction`）・pollerの巡回（`deploy-recovery-series/sweep`へ相乗りする`runDevelopSyncSweep`。候補を使ったことのあるリポジトリを5分おき）・候補作成（`createReleaseRc`の中で判定するのでAPI以外の経路からも迂回できない）・画面の「同期PRを作成」の4つ。作成の失敗理由はプロセス内にだけ持ち、巡回が再試行する
+- 画面は開始前の案内（`start-mode`の`develop_sync`。PCの個別ボタン・スマホのシート・一括）と、本番反映以降の候補の本番PR詳細に「developへの同期」欄を出す。**公開結果とは別の欄**で、同期できていないことを本番公開の失敗とは表示しない。承認・全体レビューの記録は作らない
 - 共有workflowの状態判定は、**developの版がmainより古い**ときを「バンプ済み」とみなさない（古いリリースPRを作らない）
 
 ### 二重実行しない

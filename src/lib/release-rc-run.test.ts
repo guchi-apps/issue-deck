@@ -29,6 +29,7 @@ const mocks = vi.hoisted(() => ({
   reservationCreate: vi.fn(),
   reservationUpdate: vi.fn(),
   versionAtMerge: vi.fn(() => null as string | null),
+  ensureSync: vi.fn(),
 }));
 
 vi.mock("@/lib/db", () => {
@@ -73,6 +74,7 @@ vi.mock("@/lib/github/release-api", () => ({
   fetchReleaseRebuildCandidate: mocks.rebuildCandidate,
   isAncestorCommit: mocks.isAncestor,
 }));
+vi.mock("@/lib/release-develop-sync-run", () => ({ ensureDevelopSync: mocks.ensureSync }));
 vi.mock("@/lib/github/app-auth", () => ({ getInstallationToken: vi.fn(async () => "t") }));
 vi.mock("@/lib/github/actions-api", () => ({ closePullRequest: vi.fn() }));
 vi.mock("@/lib/github/issues-api", () => ({ createComment: vi.fn() }));
@@ -144,6 +146,39 @@ beforeEach(() => {
 });
 
 describe("createReleaseRc", () => {
+  const syncStatus = (state: "synced" | "unsynced" | "unknown") => ({
+    state,
+    detail: state === "synced" ? "ancestor" : state === "unsynced" ? "awaiting_merge" : "unreadable",
+    label: "l",
+    reason: state === "unknown" ? "developの先端を取得できませんでした" : "mainにだけある変更が2ファイルあります",
+    nextAction: state === "synced" ? null : "同期PR #50 をマージしてください",
+    canCreate: false,
+    mainSha: null,
+    developSha: null,
+    mainOnlyFiles: [],
+    pullRequest: null,
+  });
+  beforeEach(() => {
+    mocks.ensureSync.mockResolvedValue(syncStatus("synced"));
+  });
+
+  it("前回の公開がdevelopへ戻っていない間は作らない（同期PRを用意したうえで断る。#4641）", async () => {
+    mocks.ensureSync.mockResolvedValue(syncStatus("unsynced"));
+    const result = await createReleaseRc({ ...ctx, userId: "u1", requestKey: "key-000001" });
+    expect(result).toMatchObject({ ok: false, error: "develop_not_synced" });
+    expect((result as { message: string }).message).toContain("同期PR #50");
+    expect(mocks.ensureSync).toHaveBeenCalledWith(expect.objectContaining({ owner: "o", repo: "r" }));
+    expect(mocks.candidateCreate).not.toHaveBeenCalled();
+    expect(mocks.dispatch).not.toHaveBeenCalled();
+  });
+
+  it("同期を判定できないときも同期済みとはみなさず作らない（#4641）", async () => {
+    mocks.ensureSync.mockResolvedValue(syncStatus("unknown"));
+    const result = await createReleaseRc({ ...ctx, userId: "u1", requestKey: "key-000001" });
+    expect(result).toMatchObject({ ok: false, error: "develop_sync_unknown" });
+    expect(mocks.candidateCreate).not.toHaveBeenCalled();
+  });
+
   it("developの先端を固定し、正式版の指定なしでworkflowを起動する", async () => {
     const result = await createReleaseRc({ ...ctx, userId: "u1", requestKey: "key-000001" });
     expect(result).toEqual({ ok: true, candidateId: "c1", revision: 1, existing: false });

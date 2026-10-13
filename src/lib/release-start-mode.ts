@@ -7,6 +7,7 @@
  * 判定の材料はdevelopにあるcallerの本文だけで、読めなければ`unknown`（起動しない）。
  */
 
+import type { DevelopSyncStatus } from "@/lib/release-develop-sync";
 import { parseFinalizeCallerSupport } from "@/lib/release-finalize";
 import { parseRcCallerSupport, type RcBlockSummary } from "@/lib/release-rc";
 
@@ -18,7 +19,9 @@ export type ReleaseStartMode =
   /** callerを読めず判定できない。起動しない（旧方式を黙って起動しない） */
   | { mode: "unknown"; label: string }
   /** 新方式に対応しているが、新規開始を妨げる既存候補がある（#4628）。起動しない */
-  | { mode: "blocked"; label: string; block: RcBlockSummary };
+  | { mode: "blocked"; label: string; block: RcBlockSummary }
+  /** 前回の公開がdevelopへ戻っていない、または戻っているか判定できない（#4641）。起動しない */
+  | { mode: "develop_sync"; label: string; sync: DevelopSyncStatus };
 
 export const START_MODE_LEGACY_LABEL =
   "新方式（候補の作成・検証）に未対応です。caller（.github/workflows/release-develop-to-main.yml）へ`candidate_request`・`finalize_request`のinputと受け渡しを足し、共有ワークフローの参照タグを最新へ更新してください。更新するまで通常開始は止まります（旧方式では起動しません）";

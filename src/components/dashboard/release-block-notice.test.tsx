@@ -3,6 +3,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ReleaseBlockNotice, releaseBlockShortLabel } from "@/components/dashboard/release-block-notice";
+import { decideDevelopSync } from "@/lib/release-develop-sync";
 import { classifyRcBlock } from "@/lib/release-rc";
 import type { ReleaseStartMode } from "@/lib/release-start-mode";
 
@@ -66,5 +67,41 @@ describe("ReleaseBlockNotice（#4628）", () => {
     expect(releaseBlockShortLabel(blocked(inconsistent))).toBe("RC-1 状態不整合・開始できません");
     expect(releaseBlockShortLabel(blocked(inProgress))).toBe("RC-2 進行中・開始できません");
     expect(releaseBlockShortLabel({ mode: "candidate" })).toBeNull();
+  });
+
+  describe("developへの同期（#4641）", () => {
+    const MAIN = "a".repeat(40);
+    const base = { kind: "observed" as const, mainSha: MAIN, developSha: "b".repeat(40), mainInDevelop: false, mainOnlyFiles: ["package.json"], squashCoveredBy: null, createFailure: null };
+    const syncMode = (sync: ReturnType<typeof decideDevelopSync>): ReleaseStartMode => ({ mode: "develop_sync", label: sync.label, sync });
+
+    it("未同期は同期PR・理由・次の操作を出し、公開の失敗とは表示しない", () => {
+      const sync = decideDevelopSync({
+        ...base,
+        openPullRequest: { number: 70, url: "https://github.com/o/r/pull/70", headRef: "release-sync/main-aaaaaaaaaaaa", mainSha: MAIN, ciState: "success", mergeable: false },
+      });
+      render(<ReleaseBlockNotice repositoryFullName="o/r" startMode={syncMode(sync)} onChanged={() => {}} />);
+      expect(screen.getByTestId("release-develop-sync").getAttribute("data-detail")).toBe("conflict");
+      expect(screen.getByText("新規開始できません")).toBeTruthy();
+      expect(screen.getByRole("link", { name: "同期PR #70 を開く" }).getAttribute("href")).toBe("https://github.com/o/r/pull/70");
+      expect(screen.getByText(/本番公開の結果とは別の状態です/)).toBeTruthy();
+      expect(screen.queryByRole("button", { name: "同期PRを作成" })).toBeNull();
+    });
+
+    it("同期PRが無ければ作成を押せ、押したあとに状況を取り直す", async () => {
+      const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ ok: true, developSync: decideDevelopSync({ ...base, openPullRequest: null }) }) });
+      vi.stubGlobal("fetch", fetchMock);
+      const onChanged = vi.fn();
+      render(<ReleaseBlockNotice repositoryFullName="o/r" startMode={syncMode(decideDevelopSync({ ...base, openPullRequest: null }))} onChanged={onChanged} />);
+      fireEvent.click(screen.getByRole("button", { name: "同期PRを作成" }));
+      await waitFor(() => expect(onChanged).toHaveBeenCalled());
+      expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toMatchObject({ owner: "o", repo: "r", action: "develop_sync" });
+    });
+
+    it("判定不能は同期済みと扱わず、再確認を出す", () => {
+      const sync = decideDevelopSync({ kind: "unreadable", reason: "developの先端を取得できませんでした" });
+      render(<ReleaseBlockNotice repositoryFullName="o/r" startMode={syncMode(sync)} onChanged={() => {}} />);
+      expect(screen.getByText("同期状態を判定できません")).toBeTruthy();
+      expect(screen.getByRole("button", { name: "再確認" })).toBeTruthy();
+    });
   });
 });

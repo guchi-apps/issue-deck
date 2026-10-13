@@ -5,6 +5,7 @@ import { isRcReleaseCandidateHeadRef, isReleaseCandidateHeadRef } from "@/lib/re
 import { useReleaseRc } from "@/hooks/use-release-rc";
 import { ReleaseRcVerificationEvidence } from "@/components/dashboard/release-rc-evidence";
 import { ReleaseRcFinalizePanel } from "@/components/dashboard/release-rc-finalize";
+import { ReleaseDevelopSyncNotice } from "@/components/dashboard/release-develop-sync";
 import { ReleaseRcIdentity, ReleaseRcLegacyNotice, ReleaseRcRevisionHistory } from "@/components/dashboard/release-rc-identity";
 
 import { decidePublishForPullRequest, ReleasePublishAction } from "@/components/dashboard/release-publish-action";
@@ -208,6 +209,11 @@ export function ReleasePullRequestOverview({
       {/* 公開準備は状態と主操作の直後に置く（合格後の主操作は「公開準備へ進む」。#4635） */}
       {rcCandidate && rc.overview?.finalization && (
         <ReleaseRcFinalizePanel candidate={rcCandidate} finalization={rc.overview.finalization} repositoryFullName={repositoryFullName} onChanged={rc.reload} />
+      )}
+
+      {/* 公開後のdevelop同期は、本番公開の結果とは別の欄として出す（#4641） */}
+      {rcCandidate && rc.overview?.developSync && (
+        <ReleaseDevelopSyncNotice repositoryFullName={repositoryFullName} sync={rc.overview.developSync} onChanged={rc.reload} />
       )}
 
       <section aria-label="現在候補の検証" className="flex flex-col gap-2 rounded-[10px] border bg-card p-3.5">

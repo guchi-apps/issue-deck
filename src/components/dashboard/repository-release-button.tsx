@@ -176,7 +176,7 @@ export function RepositoryReleaseButton({
         onClick={() => setConfirmOpen(true)}
       >
         <Rocket className={isTriggering || isPending ? "size-3 animate-pulse" : "size-3"} />
-        {isTriggering ? "起動中..." : isPending ? "リリース起動中…" : startLoading ? "開始方式を確認中" : startMode?.mode === "blocked" || blockOverride ? "開始できません" : deployFailed ? "修正リリース" : prepBlocked ? BLOCKED_BUTTON_LABEL[blockedReason] : "候補を作成して検証"}
+        {isTriggering ? "起動中..." : isPending ? "リリース起動中…" : startLoading ? "開始方式を確認中" : startMode?.mode === "blocked" || startMode?.mode === "develop_sync" || blockOverride ? "開始できません" : deployFailed ? "修正リリース" : prepBlocked ? BLOCKED_BUTTON_LABEL[blockedReason] : "候補を作成して検証"}
       </Button>
       {needsOverride && blockedReason && <span className="text-xs text-muted-foreground">{BLOCKED_REASON_LABEL[blockedReason]}</span>}
       {startUnknown && (

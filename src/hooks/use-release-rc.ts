@@ -2,11 +2,15 @@
 
 import { useCallback, useEffect, useState } from "react";
 
+import type { DevelopSyncStatus } from "@/lib/release-develop-sync";
 import type { RcFinalizationOverview } from "@/lib/release-finalize-run";
 import type { RcOverview } from "@/lib/release-rc-run";
 
-/** 候補の状況に、公開準備（#4496）の状況を足したもの。公開準備の無い応答（旧い応答）でも読める */
-export type RcOverviewWithFinalization = RcOverview & { finalization?: RcFinalizationOverview | null };
+/**
+ * 候補の状況に、公開準備（#4496）の状況と、本番反映以降のdevelop同期（#4641）の状況を足したもの。
+ * どちらも無い応答（旧い応答）でも読める
+ */
+export type RcOverviewWithFinalization = RcOverview & { finalization?: RcFinalizationOverview | null; developSync?: DevelopSyncStatus | null };
 
 const ACTIVE_POLL_MS = 10_000;
 const RETRY_POLL_MS = 30_000;
