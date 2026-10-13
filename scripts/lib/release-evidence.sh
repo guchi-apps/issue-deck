@@ -17,6 +17,18 @@ evidence_file() {
   printf '%s/%s-%s-%s-%s.json' "$root" "${full_name//\//_}" "$pr" "${base:0:12}" "${head:0:12}"
 }
 
+# evidence_redact: 標準入力の機密（トークン・接続文字列・認証情報・環境変数の値）を伏せて標準出力へ。
+# 失敗ログを証跡へ保存する前・AIのプロンプトへ渡す前に必ず通す（#4629）
+evidence_redact() {
+  sed -E \
+    -e 's/(Bearer|Basic)[[:space:]]+[A-Za-z0-9._~+\/=-]{8,}/\1 [除去]/Ig' \
+    -e 's#op://[^[:space:]]+#op://[除去]#g' \
+    -e 's#([A-Za-z][A-Za-z0-9+.-]*://)[^[:space:]/@:]+(:[^[:space:]/@]*)?@#\1[除去]@#Ig' \
+    -e 's#((postgres(ql)?|mysql|mongodb(\+srv)?|redis|amqp)://)[^[:space:]]+#\1[除去]#Ig' \
+    -e 's/(gh[pousr]_|github_pat_|sk-ant-|sk-|xox[abprs]-|AKIA|AIza|eyJ)[A-Za-z0-9_.-]{8,}/[トークンを除去]/g' \
+    -e 's/([A-Za-z0-9_]*(TOKEN|SECRET|PASSWORD|PASSWD|API_?KEY|AUTHORIZATION|CREDENTIAL|DATABASE_URL|PRIVATE_KEY)[A-Za-z0-9_]*)[[:space:]]*[=:][[:space:]]*[^[:space:]]+/\1=[除去]/Ig'
+}
+
 # evidence_classify_step <コマンド> <終了コード>: 失敗の種別を標準出力へ
 #   dependency_install_failed / setup_missing / timeout / test_failed
 evidence_classify_step() {
@@ -50,7 +62,7 @@ evidence_init() {
 evidence_add_step() {
   local file="$1" command="$2" status="$3" code="$4" kind="$5" log_file="${6:-}" tail_text="" tmp
   [[ -f "$file" ]] || return 0
-  [[ "$status" == "failed" && -s "$log_file" ]] && tail_text="$(tail -n 20 "$log_file" | tr -d '\000' | tail -c 2000)"
+  [[ "$status" == "failed" && -s "$log_file" ]] && tail_text="$(tail -n 20 "$log_file" | tr -d '\000' | evidence_redact | tail -c 2000)"
   tmp="$(mktemp)"
   jq -c --arg command "$command" --arg status "$status" --argjson code "$code" --arg kind "$kind" \
     --arg tail "$tail_text" --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
@@ -88,6 +100,6 @@ evidence_prompt_text() {
     "",
     "### 実行したコマンド",
     (if (.steps | length) == 0 then "（まだ実行したコマンドはありません）" else (.steps[] | "- `\(.command)` → \(.status)（終了コード \(.exitCode)・\(.finishedAt)）\(if .failureKind then "［\(.failureKind)］" else "" end)\(if .logTail then "\n```\n\(.logTail)\n```" else "" end)") end)
-  ' "$file"
+  ' "$file" | evidence_redact
   printf '\n種別の意味: `merge_conflict`＝統合時の競合／`dependency_install_failed`＝依存関係の取得失敗／`setup_missing`＝コマンドや設定が無い／`timeout`＝時間切れ／`test_failed`＝テスト・型検査・ビルドの不合格。**取得失敗・設定不足・時間切れは、コードの不具合の根拠にしません。** `running`は検証がまだ終わっていないことを表し、合格とは扱いません。\n'
 }

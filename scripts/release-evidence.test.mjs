@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { expect, test } from "vitest";
@@ -52,4 +52,29 @@ test("一致する証跡はコマンド・種別・統合状態つきで渡す",
   expect(out).toMatch(/`pnpm test` → failed.*test_failed/);
   expect(out).toMatch(/head単体: 未実施/);
   expect(out).toMatch(/結果: \*\*failed\*\*（種別: test_failed）/);
+});
+
+test("失敗ログの機密は証跡にもプロンプトにも出ない（#4629）", () => {
+  const root = mkdtempSync(path.join(tmpdir(), "evidence-"));
+  const log = path.join(root, "fail.log");
+  writeFileSync(
+    log,
+    [
+      "DATABASE_URL=postgres://user:pw123@db.example.com/app",
+      "Authorization: Bearer abcdefghijklmnop1234",
+      "token ghp_abcdefghijklmnopqrstuvwx",
+      "FOO_SECRET=hunter2hunter2",
+      "plain failure line",
+    ].join("\n"),
+  );
+  const out = sh(
+    `evidence_init o/r 1 ${BASE} ${HEAD}; f="$(evidence_file o/r 1 ${BASE} ${HEAD})";
+     evidence_add_step "$f" 'pnpm test' failed 1 test_failed '${log}';
+     cat "$f"; evidence_prompt_text o/r 1 ${BASE} ${HEAD}`,
+    root,
+  );
+  for (const secret of ["pw123", "abcdefghijklmnop1234", "ghp_abcdefgh", "hunter2hunter2"]) {
+    expect(out).not.toContain(secret);
+  }
+  expect(out).toContain("plain failure line");
 });
