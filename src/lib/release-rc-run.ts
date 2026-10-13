@@ -703,23 +703,28 @@ export async function cancelReleaseRc(input: Context & { userId: string; candida
     }
   }
   const now = new Date();
-  const updated = await db.releaseCandidate.updateMany({
-    where: { id: row.id, phase: row.phase },
-    data: {
-      phase: "cancelled",
-      activeKey: null,
-      cancelReason: input.reason?.slice(0, 2000) ?? null,
-      cancelledByUserId: input.userId,
-      cancelledAt: now,
-    },
-  });
-  if (updated.count === 0) return { ok: false, error: "candidate_changed" };
-  if (mergedSha) {
-    await db.releaseVersionReservation.updateMany({
-      where: { candidateId: row.id, status: "reserved" },
-      data: { status: "consumed", consumedAt: now, consumedMergeSha: mergedSha },
+  // 取り消しと版の消費は同時に行う（片方だけ残ると、版の再利用やdevelop同期の検出漏れになる）
+  const cancelled = await db.$transaction(async (tx) => {
+    const updated = await tx.releaseCandidate.updateMany({
+      where: { id: row.id, phase: row.phase },
+      data: {
+        phase: "cancelled",
+        activeKey: null,
+        cancelReason: input.reason?.slice(0, 2000) ?? null,
+        cancelledByUserId: input.userId,
+        cancelledAt: now,
+      },
     });
-  }
+    if (updated.count === 0) return false;
+    if (mergedSha) {
+      await tx.releaseVersionReservation.updateMany({
+        where: { candidateId: row.id, status: "reserved" },
+        data: { status: "consumed", consumedAt: now, consumedMergeSha: mergedSha },
+      });
+    }
+    return true;
+  });
+  if (!cancelled) return { ok: false, error: "candidate_changed" };
   await db.releaseCandidateRevision.updateMany({
     where: { candidateId: row.id, status: "requested" },
     data: { status: "expired", pendingKey: null, failureReason: "候補を取り消したため適用しません" },
