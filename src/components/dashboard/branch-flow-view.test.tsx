@@ -46,6 +46,11 @@ const REPO = "guchi-apps/issue-deck";
 /** サマリー行に出るリポジトリ名（`owner/`は落とす） */
 const REPO_SHORT = "issue-deck";
 
+/** 実行中のチェックが1つある状態（工程バッジの「CI実行中」は根拠のcheck-runから決まる。#4602） */
+const RUNNING_CI_CHECKS: PullRequestSummary["ciChecks"] = [
+  { name: "ci", status: "in_progress", conclusion: null, startedAt: null, completedAt: null, htmlUrl: null, runId: null },
+];
+
 function makePullRequest(overrides: Partial<PullRequestSummary> = {}): PullRequestSummary {
   const number = overrides.number ?? 1;
   return {
@@ -1260,7 +1265,7 @@ describe("BranchFlowView", () => {
         expect(screen.queryByText("リリース起動中")).toBeNull();
       });
 
-      it("バンプPRが現れたら「リリース中」へ引き継ぐ", () => {
+      it("バンプPRが現れたら工程バッジへ引き継ぐ", () => {
         // 起動の記録は端末に残ったまま、バンプPRが画面に現れた状態
         window.localStorage.setItem(
           `issue-deck:release-triggered-at:${REPO}`,
@@ -1275,12 +1280,13 @@ describe("BranchFlowView", () => {
               kind: "version-bump",
               state: "open",
               ciState: "pending",
+              ciChecks: RUNNING_CI_CHECKS,
             }),
           ],
           branchStatuses: [unreleased],
         });
 
-        expect(screen.getByText("リリース中")).toBeTruthy();
+        expect(screen.getByText("バージョンバンプのCI実行中")).toBeTruthy();
         expect(screen.queryByText("リリース起動中")).toBeNull();
       });
     });
@@ -1486,6 +1492,7 @@ describe("BranchFlowView", () => {
         state: "open",
         autoMergeEnabled: true,
         ciState: "pending",
+        ciChecks: RUNNING_CI_CHECKS,
         ...overrides,
       });
     }
@@ -1514,7 +1521,7 @@ describe("BranchFlowView", () => {
       // レーンとしてのブランチ名は出さず、幹の1行として版を出す
       expect(screen.queryByText("release/v3.21.0")).toBeNull();
       expect(screen.getByText("バージョンバンプ v3.21.0")).toBeTruthy();
-      expect(screen.getByText("バージョンバンプ中")).toBeTruthy();
+      expect(screen.getAllByText("バージョンバンプのCI実行中").length).toBeGreaterThan(0);
       expect(screen.getByText(/#1547 v3.21.0をリリースする/)).toBeTruthy();
       // バンプPRが拾っていた無関係なIssueは出さない
       expect(screen.queryByText(/Issue #1503/)).toBeNull();
@@ -1790,7 +1797,7 @@ describe("BranchFlowView", () => {
       expect(screen.queryByText("リリース中")).toBeNull();
     });
 
-    it("CI実行中はまだマージできないので「リリース中」のままにする", () => {
+    it("CI実行中はまだマージできないので工程バッジのままにする", () => {
       renderFlow({
         pullRequests: [
           makeReleasePullRequest({
@@ -1798,6 +1805,7 @@ describe("BranchFlowView", () => {
             title: "v3.23.0をmainへリリースする",
             state: "open",
             ciState: "pending",
+            ciChecks: RUNNING_CI_CHECKS,
           }),
         ],
         branchStatuses: [branchStatus({ developVsMain: { aheadBy: 3, behindBy: 0, sameContent: false, units: null } })],
@@ -1806,11 +1814,11 @@ describe("BranchFlowView", () => {
       ensureRepositoryOpen();
       expect(screen.queryByText("mainへマージ待ち")).toBeNull();
       // 畳んだ1行と束の見出しの2か所に出る
-      expect(screen.getAllByText("リリース中").length).toBeGreaterThan(1);
+      expect(screen.getAllByText("リリース候補のCI実行中").length).toBeGreaterThan(1);
     });
 
     // 自動で進んでいるのか、人がマージする番なのかを行を開かずに見分けられるようにする（#1931）
-    it("CI実行中の「リリース中」にはローディングを添える", () => {
+    it("CI実行中の工程バッジにはローディングを添える", () => {
       renderFlow({
         pullRequests: [
           makeReleasePullRequest({
@@ -1818,6 +1826,7 @@ describe("BranchFlowView", () => {
             title: "v3.23.0をmainへリリースする",
             state: "open",
             ciState: "pending",
+            ciChecks: RUNNING_CI_CHECKS,
           }),
         ],
         branchStatuses: [branchStatus({ developVsMain: { aheadBy: 3, behindBy: 0, sameContent: false, units: null } })],
@@ -1825,7 +1834,7 @@ describe("BranchFlowView", () => {
 
       ensureRepositoryOpen();
       // 畳んだ1行と束の見出しの両方に付く
-      const pills = screen.getAllByLabelText("リリース中（チェック・判定の実行中）");
+      const pills = screen.getAllByLabelText("リリース候補のCI実行中（実行中のチェックがあります）");
       expect(pills).toHaveLength(2);
       // 「デプロイ中」と同じ回るアイコン。止まったアイコンを添えても状態は伝わらない
       pills.forEach((pill) => expect(pill.querySelector(".animate-spin")).toBeTruthy());
@@ -1837,7 +1846,7 @@ describe("BranchFlowView", () => {
      * 「mainへマージ待ち」が出ていた。そのあいだ隣のマージボタンは「判定中」で無効（#1968）で、
      * 押せる操作は無い。
      */
-    it("Claudeがレビュー中の間は「mainへマージ待ち」を出さず「リリース中」を回す（#2326）", () => {
+    it("Claudeがレビュー中の間は「mainへマージ待ち」を出さず「マージ判定中」を回す（#2326）", () => {
       renderFlow({
         pullRequests: [
           makeReleasePullRequest({
@@ -1858,8 +1867,8 @@ describe("BranchFlowView", () => {
 
       ensureRepositoryOpen();
       expect(screen.queryByText("mainへマージ待ち")).toBeNull();
-      // 畳んだ1行と束の見出しの両方が、回るアイコン付きの「リリース中」に戻る
-      const pills = screen.getAllByLabelText("リリース中（チェック・判定の実行中）");
+      // 畳んだ1行と束の見出しの両方が、回るアイコン付きの「マージ判定中」に戻る
+      const pills = screen.getAllByLabelText("リリース候補のマージ判定中（自動マージ可否の判定を実行しています）");
       expect(pills).toHaveLength(2);
       pills.forEach((pill) => expect(pill.querySelector(".animate-spin")).toBeTruthy());
     });
@@ -1879,7 +1888,7 @@ describe("BranchFlowView", () => {
 
       ensureRepositoryOpen();
       // CIが終わった時点で「リリース中」ではなくなる（#2038）。止まっている状態を回さない
-      expect(screen.queryByLabelText("リリース中（チェック・判定の実行中）")).toBeNull();
+      expect(screen.queryByLabelText(/^リリース候補の(CI実行中|マージ判定中)/)).toBeNull();
       expect(screen.queryByText("リリース中")).toBeNull();
     });
   });
@@ -1906,6 +1915,7 @@ describe("BranchFlowView", () => {
             title: "v3.23.0をmainへリリースする",
             state: "open",
             ciState,
+            ciChecks: ciState === "pending" ? RUNNING_CI_CHECKS : [],
           }),
         ],
         branchStatuses: [unreleased],
@@ -1921,17 +1931,17 @@ describe("BranchFlowView", () => {
       expect(screen.queryByText(/待てば進むもの/)).toBeNull();
     });
 
-    it("CI実行中は「リリース中」のままで、件数も「待てば進むもの」に入れる", () => {
+    it("CI実行中は工程バッジのままで、件数も「待てば進むもの」に入れる", () => {
       renderRelease("pending");
 
-      expect(screen.getByText("リリース中")).toBeTruthy();
+      expect(screen.getByText("リリース候補のCI実行中")).toBeTruthy();
       expect(screen.queryByText("mainへマージ待ち")).toBeNull();
       expect(screen.getByText(/待てば進むもの1件/)).toBeTruthy();
       expect(screen.queryByText(/手が要るもの/)).toBeNull();
     });
 
     // CI通過後の自動マージ可否の判定中も、押せる操作は無い＝人の番ではない（#2326）
-    it("Claudeがレビュー中は「リリース中」のままで、件数も「待てば進むもの」に入れる（#2326）", () => {
+    it("Claudeがレビュー中は「マージ判定中」のままで、件数も「待てば進むもの」に入れる（#2326）", () => {
       renderFlow({
         pullRequests: [
           makeReleasePullRequest({
@@ -1950,7 +1960,7 @@ describe("BranchFlowView", () => {
         branchStatuses: [unreleased],
       });
 
-      expect(screen.getByText("リリース中")).toBeTruthy();
+      expect(screen.getByText("リリース候補のマージ判定中")).toBeTruthy();
       expect(screen.queryByText("mainへマージ待ち")).toBeNull();
       expect(screen.getByText(/待てば進むもの1件/)).toBeTruthy();
       expect(screen.queryByText(/手が要るもの/)).toBeNull();
@@ -1973,7 +1983,7 @@ describe("BranchFlowView", () => {
       });
     }
 
-    it("全体レビューの実行中は「リリース検証中」で、マージ待ちを出さず「待てば進むもの」に数える（#4390）", () => {
+    it("全体レビューの実行中は「全体レビュー中」で、マージ待ちを出さず「待てば進むもの」に数える（#4390）", () => {
       renderCandidate({
         aiReview: "running",
         integration: "not_applicable",
@@ -1981,11 +1991,51 @@ describe("BranchFlowView", () => {
         started: { aiReview: true, integration: false, mac: false },
       });
 
-      expect(screen.getByText("リリース検証中")).toBeTruthy();
+      expect(screen.getByText("全体レビュー中")).toBeTruthy();
       expect(screen.queryByText("mainへマージ待ち")).toBeNull();
       expect(screen.queryByText("リリース中")).toBeNull();
       expect(screen.getByText(/待てば進むもの1件/)).toBeTruthy();
       expect(screen.queryByText(/手が要るもの/)).toBeNull();
+    });
+
+    it("全体レビューと統合検証が並行しているとき、両方の工程が回り、汎用の「リリース中」「CI実行中」は出さない（#4602）", () => {
+      renderCandidate({
+        aiReview: "running",
+        integration: "running",
+        enforced: true,
+        started: { aiReview: true, integration: true, mac: false },
+      });
+
+      expect(screen.getByText("全体レビュー中")).toBeTruthy();
+      expect(screen.getByText("統合検証中")).toBeTruthy();
+      expect(screen.queryByText("リリース中")).toBeNull();
+      expect(screen.queryByText(/CI実行中/)).toBeNull();
+    });
+
+    it("CI実行中の件数チップを出さず、同じ実行を工程バッジだけで表示する（#4602）", () => {
+      renderRelease("pending");
+
+      expect(screen.queryByText("CI実行中")).toBeNull();
+      expect(screen.getAllByText("リリース候補のCI実行中").length).toBeGreaterThan(0);
+    });
+
+    it("根拠が無いCI未完了は回さず、実行中とも言わない（#4602）", () => {
+      renderFlow({
+        pullRequests: [
+          makeReleasePullRequest({
+            number: 1600,
+            title: "v3.23.0をmainへリリースする",
+            state: "open",
+            ciState: "pending",
+            ciChecks: [],
+          }),
+        ],
+        branchStatuses: [unreleased],
+      });
+
+      const pill = screen.getAllByText("リリース候補のCI未完了")[0];
+      expect(pill.closest("span")?.querySelector(".animate-spin")).toBeNull();
+      expect(screen.queryByText(/CI実行中/)).toBeNull();
     });
 
     it("検証の失敗は理由付きの「検証失敗」で、マージ待ちではなく「手が要るもの」に数える（#4390）", () => {
@@ -2001,7 +2051,7 @@ describe("BranchFlowView", () => {
       renderCandidate({ aiReview: "passed", integration: "passed", enforced: true });
 
       expect(screen.getByText("mainへマージ待ち")).toBeTruthy();
-      expect(screen.queryByText("リリース検証中")).toBeNull();
+      expect(screen.queryByText("全体レビュー中")).toBeNull();
     });
 
     // 赤の「CI失敗」と重ねない（直すのかマージするのかを取り違えさせない。#1059）

@@ -121,7 +121,7 @@ const COLUMN_LABEL: Record<PullRequestHealthSlotKey, string> = {
 };
 
 /** check-runのstatusのうち、まだ始まっていないもの */
-const QUEUED_CHECK_STATUSES = new Set(["queued", "waiting", "pending", "requested"]);
+export const QUEUED_CHECK_STATUSES = new Set(["queued", "waiting", "pending", "requested"]);
 
 const TONE_SEVERITY: Record<PullRequestHealthTone, number> = { ok: 0, idle: 1, run: 2, wait: 3, bad: 4 };
 
