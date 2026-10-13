@@ -689,6 +689,12 @@ export async function cancelReleaseRc(input: Context & { userId: string; candida
   const phase = parseRcPhase(row.phase);
   if (phase === "cancelled") return { ok: true, candidateId: row.id, revision: row.currentRevision, existing: true };
   if (phase === null || !canCancelRc(phase)) return { ok: false, error: "not_cancellable" };
+  // 公開準備中・承認待ちでも、候補PRがmainへマージ済みなら取り消せない（版の消費・developへの同期を失わせない）。
+  // マージの有無を確かめられないときも取り消さない
+  if (phase === "preparing" || phase === "awaiting_approval") {
+    const prs = await fetchPullRequestsByHead(ctx.owner, ctx.repo, rcBranchName(row.sequence), "main", ctx.token).catch(() => null);
+    if (prs === null || prs.some((pr) => pr.merged_at !== null)) return { ok: false, error: "not_cancellable" };
+  }
   const now = new Date();
   const updated = await db.releaseCandidate.updateMany({
     where: { id: row.id, phase: row.phase },

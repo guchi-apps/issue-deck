@@ -305,17 +305,23 @@ describe("decideFinalizeReadiness", () => {
 describe("decideMergedCandidate", () => {
   const ready = { ready: true } as const;
   it("最終headのまま、最終CI・再検証が合格していれば本番反映の追跡へ進める", () => {
-    expect(decideMergedCandidate({ headMatches: true, readiness: ready, reverifyFailed: false })).toEqual({ action: "advance" });
+    expect(decideMergedCandidate({ headMatches: true, readiness: ready, reverifyStates: [] })).toEqual({ action: "advance" });
   });
-  it("最終CI・再検証の完了前のマージは進めずに待つ（版の消費・develop同期をしない）", () => {
-    for (const reason of ["ci_pending", "ci_unknown", "required_reverify"] as const) {
-      expect(decideMergedCandidate({ headMatches: true, readiness: { ready: false, reason }, reverifyFailed: false })).toEqual({ action: "wait" });
+  it("実行中のCI・検証の完了前のマージは進めずに待ち、理由を残す", () => {
+    expect(decideMergedCandidate({ headMatches: true, readiness: { ready: false, reason: "ci_pending" }, reverifyStates: [] })).toMatchObject({ action: "wait", reason: expect.any(String) });
+    expect(decideMergedCandidate({ headMatches: true, readiness: { ready: false, reason: "required_reverify" }, reverifyStates: ["running", "waiting"] })).toMatchObject({ action: "wait" });
+  });
+  it("最終検証の失敗・最終headと違う内容のマージは要対応として止める", () => {
+    expect(decideMergedCandidate({ headMatches: true, readiness: { ready: false, reason: "ci_failed" }, reverifyStates: [] })).toMatchObject({ action: "hold" });
+    expect(decideMergedCandidate({ headMatches: true, readiness: { ready: false, reason: "required_reverify" }, reverifyStates: ["failed"] })).toMatchObject({ action: "hold" });
+    expect(decideMergedCandidate({ headMatches: false, readiness: ready, reverifyStates: [] })).toMatchObject({ action: "hold" });
+  });
+  it("待っても解消しない状態（依頼の失敗・要確認・失効・CI結果の取得不能）は待たずに止める", () => {
+    for (const state of ["not_run", "needs_check", "invalidated"] as const) {
+      expect(decideMergedCandidate({ headMatches: true, readiness: { ready: false, reason: "required_reverify" }, reverifyStates: [state] })).toMatchObject({ action: "hold" });
     }
-  });
-  it("最終検証が失敗した内容・最終headと違う内容のマージは要対応として止める", () => {
-    expect(decideMergedCandidate({ headMatches: true, readiness: { ready: false, reason: "ci_failed" }, reverifyFailed: false })).toMatchObject({ action: "hold" });
-    expect(decideMergedCandidate({ headMatches: true, readiness: { ready: false, reason: "required_reverify" }, reverifyFailed: true })).toMatchObject({ action: "hold" });
-    expect(decideMergedCandidate({ headMatches: false, readiness: ready, reverifyFailed: false })).toMatchObject({ action: "hold" });
+    expect(decideMergedCandidate({ headMatches: true, readiness: { ready: false, reason: "ci_unknown" }, reverifyStates: [] })).toMatchObject({ action: "hold" });
+    expect(decideMergedCandidate({ headMatches: true, readiness: { ready: false, reason: "ci_pending" }, reverifyStates: ["not_run"] })).toMatchObject({ action: "hold" });
   });
 });
 

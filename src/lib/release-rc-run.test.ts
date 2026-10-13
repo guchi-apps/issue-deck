@@ -69,7 +69,7 @@ vi.mock("@/lib/release-verification", () => ({
 vi.mock("@/lib/dispatch/release-verify-jobs", () => ({ requestReleaseVerifyJob: mocks.verifyJob }));
 vi.mock("@/lib/dispatch/release-review-jobs", () => ({ requestReleaseReviewJob: mocks.reviewJob }));
 
-import { createReleaseRc, recordRcReport, requestRcImport } from "@/lib/release-rc-run";
+import { cancelReleaseRc, createReleaseRc, recordRcReport, requestRcImport } from "@/lib/release-rc-run";
 
 const CALLER = "    inputs:\n      candidate_request:\n        type: string\n    with:\n      candidate-request: x\n";
 const FROZEN = "f".repeat(40);
@@ -253,5 +253,29 @@ describe("recordRcReport", () => {
     expect(mocks.isAncestor).toHaveBeenCalledWith("o", "r", HEAD1, HEAD2, "t");
     expect(mocks.registerVerification).toHaveBeenCalledWith({ repoFullName: "o/r", prNumber: 10, baseSha: "b".repeat(40), headSha: HEAD2 });
     expect(mocks.candidateUpdateMany).toHaveBeenCalledWith({ where: { id: "c1", currentRevision: { lt: 2 } }, data: { currentRevision: 2 } });
+  });
+});
+
+describe("cancelReleaseRc", () => {
+  const cancel = () => cancelReleaseRc({ ...ctx, userId: "u1", candidateId: "c1", reason: null });
+
+  it("公開準備中でも、候補PRがmainへマージ済みなら取り消さない（版の消費・develop同期を失わせない）", async () => {
+    mocks.candidateFindUnique.mockResolvedValue(candidateRow({ phase: "preparing" }));
+    mocks.prsByHead.mockResolvedValue([{ number: 10, state: "closed", merged_at: "2026-10-12T00:00:00Z" }]);
+    expect(await cancel()).toEqual({ ok: false, error: "not_cancellable" });
+    expect(mocks.candidateUpdateMany).not.toHaveBeenCalled();
+  });
+
+  it("マージの有無を確かめられないときも取り消さない", async () => {
+    mocks.candidateFindUnique.mockResolvedValue(candidateRow({ phase: "awaiting_approval" }));
+    mocks.prsByHead.mockRejectedValue(new Error("boom"));
+    expect(await cancel()).toEqual({ ok: false, error: "not_cancellable" });
+    expect(mocks.candidateUpdateMany).not.toHaveBeenCalled();
+  });
+
+  it("未マージなら従来どおり取り消せる", async () => {
+    mocks.candidateFindUnique.mockResolvedValue(candidateRow({ phase: "preparing" }));
+    mocks.prsByHead.mockResolvedValue([{ number: 10, state: "open", merged_at: null }]);
+    expect(await cancel()).toMatchObject({ ok: true, existing: false });
   });
 });
