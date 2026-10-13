@@ -8,6 +8,7 @@ import {
   dispatchReleaseCandidateWorkflow,
   fetchBranchHeadSha,
   fetchCommitSummary,
+  fetchFileTextAtRef,
   fetchMainHeadSha,
   fetchOpenPullRequestsForBase,
   fetchPullRequestForRebuild,
@@ -16,6 +17,7 @@ import {
   fetchReleaseRebuildCandidate,
   isAncestorCommit,
 } from "@/lib/github/release-api";
+import { parseFinalizeCallerSupport, readVersionFromText } from "@/lib/release-finalize";
 import { isUniqueConstraintError } from "@/lib/prisma-error";
 import { isLegacyReleaseCandidateHeadRef, legacyReleaseVersionOf, rcBranchName } from "@/lib/release-branch";
 import { isReleaseFixActive } from "@/lib/release-fix-series";
@@ -694,6 +696,17 @@ export async function requestRcImport(
 }
 
 /**
+ * マージ済みの候補PRを取り消すとき、マージコミット（main）に入っている正式版を読む。
+ * 自動バンプでは取込前に予約が無いことがあるため、取消側が版を確定して消費済みとして残す（developへの同期の検出を失わない）。
+ * 版を読めなければ`null`（呼び出し側は取り消さない）
+ */
+export async function readVersionAtMergeSha(ctx: Context, mergeSha: string): Promise<string | null> {
+  const caller = parseFinalizeCallerSupport(await fetchReleaseCallerText(ctx.owner, ctx.repo, ctx.token).catch(() => null));
+  if (!caller.supported) return null;
+  return readVersionFromText(await fetchFileTextAtRef(ctx.owner, ctx.repo, caller.versionFile, mergeSha, ctx.token).catch(() => null), caller.versionQuery);
+}
+
+/**
  * 候補を取り消す。**記録・過去の結果は消さない。** 候補PRは理由のコメントを残して閉じ、ブランチは消さない。
  * mainへのマージ以降は取り消せない
  */
@@ -708,6 +721,7 @@ export async function cancelReleaseRc(input: Context & { userId: string; candida
   // 人が終わらせる出口。**予約した版はマージで使われたので消費済みにしてから**取り消す（版を再利用させず、
   // developへの同期の検出〈`findUnsyncedPublish`〉も失わせない）。マージの有無を確かめられないときは取り消さない
   let mergedSha: string | null = null;
+  let mergedVersion: string | null = null;
   if (phase === "preparing" || phase === "awaiting_approval") {
     const prs = await fetchPullRequestsByHead(ctx.owner, ctx.repo, rcBranchName(row.sequence), "main", ctx.token).catch(() => null);
     if (prs === null) return { ok: false, error: "not_cancellable" };
@@ -715,6 +729,18 @@ export async function cancelReleaseRc(input: Context & { userId: string; candida
     if (merged) {
       if (!merged.merge_commit_sha) return { ok: false, error: "not_cancellable" };
       mergedSha = merged.merge_commit_sha;
+      // 自動バンプでは取込前に予約が無いことがある。予約が無ければ、マージ後のmainの版を確定して消費済みで残す。
+      // 確定できないときは、公開済み版の追跡を失うため取り消さない
+      const hasReservation = (await db.releaseVersionReservation.count({ where: { candidateId: row.id, status: { in: ["reserved", "consumed"] } } })) > 0;
+      if (!hasReservation) {
+        mergedVersion = await readVersionAtMergeSha(ctx, mergedSha).catch(() => null);
+        if (!mergedVersion) return { ok: false, error: "not_cancellable" };
+        // 既に台帳にある版は、今回のマージで上がった版とは限らない（版上げ前のマージ・他候補の予約）。取り込めないので取り消さない
+        const taken = await db.releaseVersionReservation.findUnique({
+          where: { repositoryFullName_version: { repositoryFullName: fullNameOf(ctx), version: mergedVersion } },
+        });
+        if (taken) return { ok: false, error: "not_cancellable" };
+      }
     }
   }
   const now = new Date();
@@ -736,8 +762,17 @@ export async function cancelReleaseRc(input: Context & { userId: string; candida
         where: { candidateId: row.id, status: "reserved" },
         data: { status: "consumed", consumedAt: now, consumedMergeSha: mergedSha },
       });
+      if (mergedVersion) {
+        await tx.releaseVersionReservation.create({
+          data: { repositoryFullName: fullNameOf(ctx), version: mergedVersion, candidateId: row.id, status: "consumed", consumedAt: now, consumedMergeSha: mergedSha },
+        });
+      }
     }
     return true;
+  }).catch((error: unknown) => {
+    // 版の台帳への同時書き込みで負けた場合は、取り消しごと戻る
+    if (isUniqueConstraintError(error)) return false;
+    throw error;
   });
   if (!cancelled) return { ok: false, error: "candidate_changed" };
   await db.releaseCandidateRevision.updateMany({
