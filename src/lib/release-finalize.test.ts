@@ -310,17 +310,17 @@ describe("decideMergedCandidate", () => {
   it("実行中のCI・検証の完了前のマージは進めずに待ち、理由を残す", () => {
     expect(decideMergedCandidate({ headMatches: true, readiness: { ready: false, reason: "ci_pending" }, reverifyStates: [] })).toMatchObject({ action: "wait", reason: expect.any(String) });
     expect(decideMergedCandidate({ headMatches: true, readiness: { ready: false, reason: "required_reverify" }, reverifyStates: ["running", "waiting"] })).toMatchObject({ action: "wait" });
+    expect(decideMergedCandidate({ headMatches: true, readiness: { ready: false, reason: "ci_unknown" }, reverifyStates: [] })).toMatchObject({ action: "wait" });
   });
   it("最終検証の失敗・最終headと違う内容のマージは要対応として止める", () => {
     expect(decideMergedCandidate({ headMatches: true, readiness: { ready: false, reason: "ci_failed" }, reverifyStates: [] })).toMatchObject({ action: "hold" });
     expect(decideMergedCandidate({ headMatches: true, readiness: { ready: false, reason: "required_reverify" }, reverifyStates: ["failed"] })).toMatchObject({ action: "hold" });
     expect(decideMergedCandidate({ headMatches: false, readiness: ready, reverifyStates: [] })).toMatchObject({ action: "hold" });
   });
-  it("待っても解消しない状態（依頼の失敗・要確認・失効・CI結果の取得不能）は待たずに止める", () => {
+  it("待っても解消しない状態（依頼の失敗・要確認・失効）は待たずに止める", () => {
     for (const state of ["not_run", "needs_check", "invalidated"] as const) {
       expect(decideMergedCandidate({ headMatches: true, readiness: { ready: false, reason: "required_reverify" }, reverifyStates: [state] })).toMatchObject({ action: "hold" });
     }
-    expect(decideMergedCandidate({ headMatches: true, readiness: { ready: false, reason: "ci_unknown" }, reverifyStates: [] })).toMatchObject({ action: "hold" });
     expect(decideMergedCandidate({ headMatches: true, readiness: { ready: false, reason: "ci_pending" }, reverifyStates: ["not_run"] })).toMatchObject({ action: "hold" });
   });
 });

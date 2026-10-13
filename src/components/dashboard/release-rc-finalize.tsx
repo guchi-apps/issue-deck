@@ -228,7 +228,7 @@ export function ReleaseRcFinalizePanel({
       )}
       {current && current.status === "applied" && current.failureReason && (
         <p className="rounded-md border border-destructive/50 bg-destructive/10 px-3 py-2 text-[12px] text-destructive" role="alert">
-          {current.failureReason}。版の消費・developへの同期・本番反映の追跡は、最終検証の合格を確認してから進めます。
+          {current.failureReason}。版の消費・developへの同期・本番反映の追跡は、最終検証の合格を確認してから進めます。合格を確かめようがない場合は、候補を取り消すと予約した版を消費済みにして終えられます。
         </p>
       )}
       {current && current.status === "superseded" && current.failureReason && (

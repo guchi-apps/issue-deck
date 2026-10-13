@@ -539,6 +539,7 @@ export async function isAncestorCommit(
 export type GithubApiPullRequestByHead = GithubApiPullRequest & {
   state: "open" | "closed";
   merged_at: string | null;
+  merge_commit_sha?: string | null;
   base: { ref: string; sha: string };
 };
 

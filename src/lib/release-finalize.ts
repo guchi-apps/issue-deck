@@ -425,7 +425,8 @@ export function decideFinalizeReadiness(input: { checks: FinalChecks; pendingRev
  * 公開準備中・本番承認待ちの候補PRがマージされていたときの扱い。**最終検証を経ていないマージを本番反映へ進めない**。
  * 記録した最終headのままで、そのheadの最終CI・再検証が合格しているときだけ進める（早いマージでも保証を落とさない）。
  * 進めないときは理由を画面へ残す（`wait`は実行中の検証を待つだけ、`hold`は人がやり直すか確かめるまで進まない）。
- * どちらも毎巡回で評価し直すので、CI・検証をやり直して合格すればそこから進む（mainへ入った後は修正工程へ戻せない）
+ * どちらも毎巡回で評価し直すので、CI・検証をやり直して合格すればそこから進む（mainへ入った後は修正工程へ戻せない）。
+ * 合格を確かめようがない場合（別の内容のマージなど）は、人が候補を取り消して終える（`cancelReleaseRc`が版を消費済みにする）
  */
 export type MergedCandidateDecision = { action: "advance" } | { action: "wait" | "hold"; reason: string };
 
@@ -444,8 +445,10 @@ export function decideMergedCandidate(input: {
   const settling = input.reverifyStates.every((s) => s === "running" || s === "waiting");
   if (!input.readiness.ready && input.readiness.reason === "ci_pending" && settling) return { action: "wait", reason: `${pre}。最終CIの結果を待っています` };
   if (input.readiness.ready) return { action: "advance" };
+  // CI結果の取得失敗は一時的なことが多いので止めずに待つ（解消しなければ、人は候補の取り消しで終えられる）
+  if (input.readiness.reason === "ci_unknown" && settling) return { action: "wait", reason: `${pre}。最終CIの結果を取得できていません` };
   if (input.readiness.reason === "required_reverify" && settling) return { action: "wait", reason: `${pre}。再検証の結果を待っています` };
-  // 依頼の失敗（not_run）・要確認・失効・CI結果の取得不能は、待っても解消しない
+  // 依頼の失敗（not_run）・要確認・失効は、待っても解消しない
   return { action: "hold", reason: `${pre}。最終CI・再検証の合格を確認できないため本番反映の追跡へ進めません。CI・検証をやり直して合格すれば進みます` };
 }
 

@@ -689,11 +689,18 @@ export async function cancelReleaseRc(input: Context & { userId: string; candida
   const phase = parseRcPhase(row.phase);
   if (phase === "cancelled") return { ok: true, candidateId: row.id, revision: row.currentRevision, existing: true };
   if (phase === null || !canCancelRc(phase)) return { ok: false, error: "not_cancellable" };
-  // 公開準備中・承認待ちでも、候補PRがmainへマージ済みなら取り消せない（版の消費・developへの同期を失わせない）。
-  // マージの有無を確かめられないときも取り消さない
+  // 公開準備中・承認待ちの候補PRがmainへマージ済み（最終検証を確認できず本番反映の追跡へ進めない候補）を、
+  // 人が終わらせる出口。**予約した版はマージで使われたので消費済みにしてから**取り消す（版を再利用させず、
+  // developへの同期の検出〈`findUnsyncedPublish`〉も失わせない）。マージの有無を確かめられないときは取り消さない
+  let mergedSha: string | null = null;
   if (phase === "preparing" || phase === "awaiting_approval") {
     const prs = await fetchPullRequestsByHead(ctx.owner, ctx.repo, rcBranchName(row.sequence), "main", ctx.token).catch(() => null);
-    if (prs === null || prs.some((pr) => pr.merged_at !== null)) return { ok: false, error: "not_cancellable" };
+    if (prs === null) return { ok: false, error: "not_cancellable" };
+    const merged = prs.find((pr) => pr.merged_at !== null);
+    if (merged) {
+      if (!merged.merge_commit_sha) return { ok: false, error: "not_cancellable" };
+      mergedSha = merged.merge_commit_sha;
+    }
   }
   const now = new Date();
   const updated = await db.releaseCandidate.updateMany({
@@ -707,6 +714,12 @@ export async function cancelReleaseRc(input: Context & { userId: string; candida
     },
   });
   if (updated.count === 0) return { ok: false, error: "candidate_changed" };
+  if (mergedSha) {
+    await db.releaseVersionReservation.updateMany({
+      where: { candidateId: row.id, status: "reserved" },
+      data: { status: "consumed", consumedAt: now, consumedMergeSha: mergedSha },
+    });
+  }
   await db.releaseCandidateRevision.updateMany({
     where: { candidateId: row.id, status: "requested" },
     data: { status: "expired", pendingKey: null, failureReason: "候補を取り消したため適用しません" },

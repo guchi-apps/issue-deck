@@ -23,6 +23,7 @@ const mocks = vi.hoisted(() => ({
   registerVerification: vi.fn(),
   verifyJob: vi.fn(),
   reviewJob: vi.fn(),
+  reservationUpdateMany: vi.fn(async () => ({ count: 1 })),
 }));
 
 vi.mock("@/lib/db", () => {
@@ -41,6 +42,7 @@ vi.mock("@/lib/db", () => {
       create: mocks.revisionCreate,
     },
     releaseFixSeries: { findMany: mocks.fixFindMany },
+    releaseVersionReservation: { updateMany: mocks.reservationUpdateMany },
     releaseVerification: { findMany: vi.fn(async () => []) },
     repository: { findFirst: mocks.repositoryFindFirst },
     $transaction: async (fn: (tx: unknown) => unknown) => fn(db),
@@ -259,9 +261,19 @@ describe("recordRcReport", () => {
 describe("cancelReleaseRc", () => {
   const cancel = () => cancelReleaseRc({ ...ctx, userId: "u1", candidateId: "c1", reason: null });
 
-  it("公開準備中でも、候補PRがmainへマージ済みなら取り消さない（版の消費・develop同期を失わせない）", async () => {
+  it("候補PRがmainへマージ済みなら、予約した版をマージのSHAで消費済みにしてから取り消す（版の再利用・develop同期の検出漏れを防ぐ）", async () => {
     mocks.candidateFindUnique.mockResolvedValue(candidateRow({ phase: "preparing" }));
-    mocks.prsByHead.mockResolvedValue([{ number: 10, state: "closed", merged_at: "2026-10-12T00:00:00Z" }]);
+    mocks.prsByHead.mockResolvedValue([{ number: 10, state: "closed", merged_at: "2026-10-12T00:00:00Z", merge_commit_sha: "9".repeat(40) }]);
+    expect(await cancel()).toMatchObject({ ok: true });
+    expect(mocks.reservationUpdateMany).toHaveBeenCalledWith({
+      where: { candidateId: "c1", status: "reserved" },
+      data: expect.objectContaining({ status: "consumed", consumedMergeSha: "9".repeat(40) }),
+    });
+  });
+
+  it("マージ済みでもマージのSHAが分からなければ取り消さない", async () => {
+    mocks.candidateFindUnique.mockResolvedValue(candidateRow({ phase: "awaiting_approval" }));
+    mocks.prsByHead.mockResolvedValue([{ number: 10, state: "closed", merged_at: "2026-10-12T00:00:00Z", merge_commit_sha: null }]);
     expect(await cancel()).toEqual({ ok: false, error: "not_cancellable" });
     expect(mocks.candidateUpdateMany).not.toHaveBeenCalled();
   });
@@ -277,5 +289,6 @@ describe("cancelReleaseRc", () => {
     mocks.candidateFindUnique.mockResolvedValue(candidateRow({ phase: "preparing" }));
     mocks.prsByHead.mockResolvedValue([{ number: 10, state: "open", merged_at: null }]);
     expect(await cancel()).toMatchObject({ ok: true, existing: false });
+    expect(mocks.reservationUpdateMany).not.toHaveBeenCalled();
   });
 });
