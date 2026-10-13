@@ -96,6 +96,7 @@ import {
   type AutoRefreshIntervalMs,
 } from "@/lib/auto-refresh";
 import { readTriggeredAt, useTriggerPending } from "@/hooks/use-trigger-pending";
+import { resolveReleaseStageBadges, type ReleaseStageBadge } from "@/lib/release-stage-badges";
 import { resolvePullRequestHealth, type PullRequestHealthDisposition } from "@/lib/pull-request-health";
 import {
   DEVELOP_BRANCH,
@@ -106,7 +107,6 @@ import {
   hasChangesAfterReleaseFreeze,
   splitLanesByReleaseFreeze,
   isClosedLane,
-  isReleaseAutoProgressing,
   unreleasedSummary,
   type BranchFlow,
   type UnreleasedSummary,
@@ -1029,19 +1029,49 @@ function ReleaseProgressPill({
   note,
 }: {
   label: string;
-  /** 自動で進んでいる最中か。trueのときだけ回るアイコンを出す */
+  /**
+   * 実行中か。trueのときだけ文字の左で円が回り、紫で出す。**起動待ち・キュー待ち・取得できていない状態は
+   * 回さず**、点線の円と灰色で区別する（#4602）。動きを抑える設定では回転せず、工程名で読める
+   */
   spinning: boolean;
-  /** 回っている理由。読み上げに`${label}（${note}）`の形で足す */
+  /** 補足。読み上げに`${label}（${note}）`の形で足す */
   note?: string;
 }) {
   return (
     <span
-      className="inline-flex shrink-0 items-center gap-1 rounded-full bg-purple-500/15 px-2 py-0.5 text-xs text-purple-700 ring-1 ring-inset ring-purple-500 dark:text-purple-300"
-      aria-label={spinning && note ? `${label}（${note}）` : undefined}
+      className={cn(
+        "inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-xs ring-1 ring-inset",
+        spinning
+          ? "bg-purple-500/15 text-purple-700 ring-purple-500 dark:text-purple-300"
+          : "bg-muted/40 text-muted-foreground ring-border",
+      )}
+      title={note}
+      aria-label={note ? `${label}（${note}）` : undefined}
     >
-      {spinning && <Loader2 className="size-3 shrink-0 animate-spin" aria-hidden="true" />}
+      {spinning ? (
+        <Loader2 className="size-3 shrink-0 animate-spin motion-reduce:animate-none" aria-hidden="true" />
+      ) : (
+        <span className="size-3 shrink-0 rounded-full border-2 border-dotted border-current" aria-hidden="true" />
+      )}
       {label}
     </span>
+  );
+}
+
+/**
+ * 本番リリース工程の実行中バッジを工程ごとに並べる（#4602）。畳んだ行・束の見出しで同じものを使う。
+ * 工程を1つも特定できないときだけ`fallback`が真なら「工程を確認できません」を出す（推測しない）
+ */
+function ReleaseStagePills({ stages, fallback }: { stages: ReleaseStageBadge[]; fallback: boolean }) {
+  if (stages.length === 0) {
+    return fallback ? <ReleaseProgressPill label="工程を確認できません" spinning={false} /> : null;
+  }
+  return (
+    <>
+      {stages.map((stage) => (
+        <ReleaseProgressPill key={stage.key} label={stage.label} spinning={stage.running} note={stage.title} />
+      ))}
+    </>
   );
 }
 
@@ -1059,41 +1089,20 @@ const BranchFlowRefreshContext = createContext<(() => void) | null>(null);
  * 「待てば進む」か「直す必要がある」かを取り違える。問題が無く進行も無いときは呼ばれない。
  * 理由は`title`と読み上げに入れ、スマホでも読めるよう見出しでは本文の1行（`ReleaseCandidateVerificationReason`）にも出す。
  */
-function ReleaseCandidateVerificationPills({
-  verification,
-  autoProgressing,
-}: {
-  verification: ReleaseCandidateVerification;
-  /** CI・自動マージ判定も含めて自動で進んでいる最中か（進行のピルを回す） */
-  autoProgressing: boolean;
-}) {
-  const { problem, progress } = verification;
+function ReleaseCandidateVerificationPills({ verification }: { verification: ReleaseCandidateVerification }) {
+  const { problem } = verification;
+  if (!problem) return null;
   return (
-    <>
-      {problem && (
-        <span
-          className="inline-flex shrink-0 items-center gap-1 rounded-full bg-red-500/10 px-2 py-0.5 text-xs font-medium text-destructive ring-1 ring-inset ring-red-500/60"
-          title={problem.reasons.join("\n")}
-          aria-label={`${problem.label}: ${problem.reasons.join("。")}`}
-        >
-          <span aria-hidden="true" className="text-[10px] leading-none">
-            ■
-          </span>
-          {problem.label}
-        </span>
-      )}
-      {progress && (
-        <span title={verification.detail ?? undefined}>
-          <ReleaseProgressPill
-            label={progress.label}
-            spinning={autoProgressing}
-            note={progress.checks
-              .map((check) => `${check.name}${check.started ? "実行中" : "開始待ち"}`)
-              .join("・")}
-          />
-        </span>
-      )}
-    </>
+    <span
+      className="inline-flex shrink-0 items-center gap-1 rounded-full bg-red-500/10 px-2 py-0.5 text-xs font-medium text-destructive ring-1 ring-inset ring-red-500/60"
+      title={problem.reasons.join("\n")}
+      aria-label={`${problem.label}: ${problem.reasons.join("。")}`}
+    >
+      <span aria-hidden="true" className="text-[10px] leading-none">
+        ■
+      </span>
+      {problem.label}
+    </span>
   );
 }
 
@@ -1195,21 +1204,19 @@ function ReleaseGroupStatePill({
     return <AttentionPill>{releaseMergeTargetLabel("main")}</AttentionPill>;
   }
   if (deviceBuild) return <AttentionPill>{deviceBuild.pendingLabel}</AttentionPill>;
-  if (verificationShown) {
-    return (
-      <ReleaseCandidateVerificationPills
-        verification={verificationShown}
-        autoProgressing={isReleaseAutoProgressing(group.pullRequest, group.bumpPullRequest)}
-      />
-    );
+  if (!group.pullRequest && !group.bumpPullRequest) {
+    // まだPRが無い状態なので、そもそもCIも判定も走っていない
+    return <ReleaseProgressPill label="本番未反映" spinning={false} />;
   }
+  const stages = resolveReleaseStageBadges({
+    bumpPullRequest: group.bumpPullRequest,
+    candidatePullRequest: group.pullRequest,
+  });
   return (
-    <ReleaseProgressPill
-      label={group.pullRequest ? "リリース中" : group.bumpPullRequest ? "バージョンバンプ中" : "本番未反映"}
-      // 「本番未反映」はまだPRが無い状態なので、そもそもCIも判定も走っていない
-      spinning={isReleaseAutoProgressing(group.pullRequest, group.bumpPullRequest)}
-      note="チェック・判定の実行中"
-    />
+    <>
+      {verificationShown && <ReleaseCandidateVerificationPills verification={verificationShown} />}
+      <ReleaseStagePills stages={stages} fallback={!verificationShown?.problem} />
+    </>
   );
 }
 
@@ -2333,24 +2340,18 @@ function RepositorySummaryRow({
           <AttentionPill>{repository.deviceBuild.pendingLabel}</AttentionPill>
         ) : summary.releaseMergeTarget ? (
           <AttentionPill>{releaseMergeTargetLabel(summary.releaseMergeTarget)}</AttentionPill>
-        ) : verification ? (
-          // 検証中・検証待ち・検証の問題を「mainへマージ待ち」と併記しない（#4390）
-          <ReleaseCandidateVerificationPills
-            verification={verification}
-            autoProgressing={summary.releaseAutoProgressing}
-          />
         ) : (
-          <ReleaseProgressPill
-            label="リリース中"
-            spinning={summary.releaseAutoProgressing}
-            note="チェック・判定の実行中"
-          />
+          <>
+            {/* 検証の問題は工程バッジと併記する（#4390・#4602） */}
+            {verification && <ReleaseCandidateVerificationPills verification={verification} />}
+            <ReleaseStagePills stages={summary.releaseStages} fallback={!verification?.problem} />
+          </>
         )
       ) : (
         // 起動からバンプPRが現れるまでは、開いたときのボタン（「リリース起動中…」）にしか
         // 出ていなかった（#1955）。バンプPRが現れれば上の「リリース中」へ引き継がれる
         releaseLaunching && (
-          <ReleaseProgressPill label="リリース起動中" spinning note="workflowの起動待ち" />
+          <ReleaseProgressPill label="リリース起動中" spinning={false} note="workflowの起動待ち" />
         )
       )}
       {/* マージ後もデプロイが終わるまでは本番へ出ていない。開かなくても分かるようにする（#1579） */}

@@ -26,6 +26,8 @@ import {
   UNKNOWN_PULL_REQUEST_CI_STATE,
   type PullRequestCiState,
 } from "@/lib/github/release-api";
+import type { IosPrecheckSummary } from "@/lib/github/ios-precheck";
+import { isReleasePullRequest } from "@/lib/release-merge-gate";
 import { fetchRepairWorkflowAvailability } from "@/lib/github/repair-workflow-cache";
 import { fetchReleaseChecks, releaseChecksKey } from "@/lib/pull-request-release-checks";
 import { checkUserIssueKey, fetchCheckUserIssueReasons } from "@/lib/pull-request-check-user";
@@ -247,6 +249,19 @@ export async function fetchPullRequestListForUser(
       releaseChecks.get(releaseChecksKey(pullRequest.repositoryFullName, pullRequest.number)) ?? null;
   }
 
+  // リリース候補PRのiOS事前検証（#4602）。通常PRには引かず、候補（リポジトリごとに高々1本）だけ
+  const iosPrechecks = await fetchReleaseCandidateIosPrechecks(fetched, tokenFor);
+  for (const pullRequest of allPullRequests) {
+    const iosPrecheck = iosPrechecks.get(
+      pullRequestRollupKey(
+        pullRequest.repositoryFullName.split("/")[0],
+        pullRequest.repositoryFullName.split("/")[1],
+        pullRequest.number,
+      ),
+    );
+    if (iosPrecheck !== undefined) pullRequest.iosPrecheck = iosPrecheck;
+  }
+
   const response: PullRequestListResponse = {
     pullRequests: allPullRequests,
     fetchedAt: new Date().toISOString(),
@@ -332,6 +347,42 @@ async function fetchCiStates(
     }),
   );
   return ciStates;
+}
+
+/**
+ * 開いているリリース候補PR（base=main・head=`release-main/*`。draftを除く）のiOS事前検証を引く（#4602）。
+ * 失敗しても一覧は返す（取れなかった候補はMapに現れず、「iOS検証中」を出さない）。
+ */
+async function fetchReleaseCandidateIosPrechecks(
+  repositories: FetchedRepository[],
+  tokenFor: (installationId: number) => Promise<string>,
+): Promise<Map<string, IosPrecheckSummary | null>> {
+  const targetsByInstallation = new Map<number, PullRequestRollupTarget[]>();
+  for (const repository of repositories) {
+    for (const pullRequest of repository.openPullRequests) {
+      if (pullRequest.draft) continue;
+      if (!isReleasePullRequest({ baseRef: pullRequest.base.ref, headRef: pullRequest.head.ref })) continue;
+      const { installationId, ownerLogin, name } = repository.context;
+      const targets = targetsByInstallation.get(installationId) ?? [];
+      targets.push({ owner: ownerLogin, repo: name, number: pullRequest.number });
+      targetsByInstallation.set(installationId, targets);
+    }
+  }
+
+  const result = new Map<string, IosPrecheckSummary | null>();
+  await Promise.all(
+    [...targetsByInstallation].map(async ([installationId, targets]) => {
+      try {
+        const token = await tokenFor(installationId);
+        for (const [key, state] of await fetchPullRequestCiStates(targets, token, { includeIosPrecheck: true })) {
+          result.set(key, state.iosPrecheck ?? null);
+        }
+      } catch (error) {
+        console.error(`[GET /api/pull-requests] installation ${installationId} のiOS事前検証:`, error);
+      }
+    }),
+  );
+  return result;
 }
 
 function toOpenPullRequest(

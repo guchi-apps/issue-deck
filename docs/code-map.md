@@ -2551,6 +2551,13 @@ export function POST(request: NextRequest) {
   （`PullRequestLine`の`showStatus`。リリース候補PRの行だけが渡す）。工程を止めている理由には
   候補PRへのリンクを添える（`ReleaseCandidateVerificationReason`）。**件数は
   カテゴリごとのPR数で、同じPRが複数に数えられるため合計はPR数ではない。**
+  **実行中の工程は工程名つきのバッジで出す**（#4602。`lib/release-stage-badges.ts`の
+  `resolveReleaseStageBadges`。畳んだ行・展開見出しが同じ結果を読む）。実行中だけ円が回り、
+  開始待ち・キュー待ち・取得できていない状態は点線の円で回さない。「バージョンバンプのCI実行中」
+  「リリース候補のCI実行中」「マージ判定中」「全体レビュー中」「統合検証中」「iOS検証中」を並べ、
+  工程を特定できないときは「工程を確認できません」。汎用の「リリース中」と件数チップの
+  「CI実行中」「レビュー中」は出さない（同じ実行の二重表示を避ける）。iOS事前検証は統合検証とは別系統で、
+  開いているリリース候補PRだけ`pull-request-list-fetch.ts`が追加で引く。
   根拠が無い状態は成功・完了に見せない（CIの待機/実行は`ciChecks[].status`が分かるときだけ区別、
   ジョブ終了でも判定が読めなければ「判定未記録」、旧HEADの判定は「再検証待ち」、
   `mergeable`未取得は「判定中」）。**「手が要るもの」（`humanCount`）と「待てば進むもの」
