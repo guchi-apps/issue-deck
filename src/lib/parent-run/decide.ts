@@ -122,9 +122,10 @@ export function evaluateDependency(
         if (!pr.merged) return { condition, satisfied: false, detail: `PR #${pr.number}がまだマージされていません` };
         if (condition === "merged") {
           // mainなど統合ブランチ以外へのマージは、developへのマージとはみなさない（#4570）
-          return pr.integration === false
-            ? { condition, satisfied: false, detail: `PR #${pr.number}は統合ブランチ（develop）以外へのマージです` }
-            : { condition, satisfied: true, detail: `PR #${pr.number}がdevelopへマージ済み` };
+          if (pr.integration === undefined) return { condition, satisfied: null, detail: `PR #${pr.number}のマージ先が統合ブランチか確認できません` };
+          return pr.integration
+            ? { condition, satisfied: true, detail: `PR #${pr.number}がdevelopへマージ済み` }
+            : { condition, satisfied: false, detail: `PR #${pr.number}は統合ブランチ（develop）以外へのマージです` };
         }
         if (pr.inProduction === null) return { condition, satisfied: null, detail: "mainへの反映を確認できませんでした" };
         return pr.inProduction
