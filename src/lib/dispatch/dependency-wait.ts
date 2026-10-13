@@ -123,7 +123,7 @@ export type DependencyObservation = {
   baseRef: string | null;
   /** マージ済みPRの内容が本番ブランチ（main）へ入っているか。PRでなければ`null` */
   inProduction: boolean | null;
-  /** 開発の統合ブランチ（既定`develop`）。`undefined`/`null`ならbaseを検査しない（旧い観測） */
+  /** 開発の統合ブランチ（既定`develop`）。`undefined`/`null`は統合ブランチを確認できなかった観測で、`merged`は成立にしない（人の確認待ち） */
   integrationBranch?: string | null;
   /** 依存先がIssueのとき、実装ブランチ（`issue-<番号>`）から解決したPR。未解決は`undefined`/`null` */
   implementationPrs?: ImplementationPrObservation[] | null;
@@ -160,7 +160,11 @@ function evaluatePrSet(
     };
   }
   if (condition === "merged") {
-    const wrongBase = integrationBranch ? prs.filter((pr) => pr.baseRef !== integrationBranch) : [];
+    // 統合ブランチを確定できない観測では、developへ取り込まれた証拠が無い。成立とも未成立とも言わない
+    if (!integrationBranch) {
+      return { condition, satisfied: null, detail: "統合ブランチを確認できないため、developへのマージを判断できません" };
+    }
+    const wrongBase = prs.filter((pr) => pr.baseRef !== integrationBranch);
     if (wrongBase.length > 0) {
       return {
         condition,
@@ -171,7 +175,7 @@ function evaluatePrSet(
     return {
       condition,
       satisfied: true,
-      detail: `${prs.map((pr) => prRef(pr.number)).join("、")}が${integrationBranch ?? prs[0].baseRef ?? "base"}へマージ済み`,
+      detail: `${prs.map((pr) => prRef(pr.number)).join("、")}が${integrationBranch}へマージ済み`,
     };
   }
   if (prs.some((pr) => pr.inProduction === null)) {

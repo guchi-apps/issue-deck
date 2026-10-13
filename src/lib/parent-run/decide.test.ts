@@ -191,6 +191,9 @@ describe("mergedは統合ブランチへのマージだけで成立する（#457
   it("mainなど別ブランチへのマージは成立しない", () => {
     expect(evaluateDependency(dep, obs(false), null)[0].satisfied).toBe(false);
   });
+  it("統合ブランチを確認できない（integration未確定）ときは成立にせず人の確認へ回す", () => {
+    expect(evaluateDependency(dep, obs(undefined), null)[0].satisfied).toBeNull();
+  });
 });
 
 describe("mainへ直接マージされた子で親は完了しない", () => {

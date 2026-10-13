@@ -157,6 +157,8 @@ export async function observeDependency(ref: DependencyRef): Promise<DependencyO
 
   const integrationBranch = await resolveIntegrationBranch(ref.repository, parsed, token).catch((error) => {
     if (error instanceof GithubApiError && error.status === 401) throw error;
+    // 統合ブランチ不明の観測は`merged`を成立にしない（人の確認待ち）。原因を追えるよう残す
+    console.warn("[dependency-wait] 統合ブランチを取得できません", ref.repository, error);
     return null;
   });
 
