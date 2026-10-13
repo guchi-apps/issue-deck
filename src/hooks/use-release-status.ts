@@ -243,8 +243,8 @@ export function useReleaseStatus(
     setError(null);
     try {
       // 起動そのものは「ブランチ」画面のボタンと同じ関数を通す（#1510）
-      // 新方式対応repoは候補を作り、未対応は個別の操作として旧方式で起動する（#4604）
-      await requestReleaseStart(repoFullName, { bumpKind, allowFailedDeploy, allowLegacy: true });
+      // 新方式対応repoは候補を作り、未対応は起動せず理由を返す（#4604・#4623）
+      await requestReleaseStart(repoFullName, { bumpKind, allowFailedDeploy });
       // 起動直後に状態を取り直して、実行中runやバンプPRの出現を素早く反映する。
       setReloadKey((k) => k + 1);
       return true;

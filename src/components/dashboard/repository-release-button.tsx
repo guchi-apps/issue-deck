@@ -102,8 +102,10 @@ export function RepositoryReleaseButton({
   const [allowPrepOverride, setAllowPrepOverride] = useState(false);
   // 新方式（候補を作成して検証）か旧方式かはcallerの対応で決まる（#4604）。取得中は操作を無効にし、確認表示と実行方式を一致させる
   const startMode = useReleaseStartMode(repositoryFullName, blockedReason === null || deployFailed || prepBlocked);
-  const candidateMode = startMode?.mode === "candidate";
-  const startUnknown = startMode?.mode === "unknown";
+  // 本番デプロイ失敗中の「修正リリース」だけは新方式の候補作成が扱えず、確認のうえ旧方式で起動する（#4623）
+  const candidateMode = startMode?.mode === "candidate" && !deployFailed;
+  // 未対応・判定不能は旧方式へ落とさず、通常開始を止めて理由と更新手順を出す（#4623）
+  const startUnknown = startMode !== null && startMode.mode !== "candidate" && !deployFailed;
   const startLoading = startMode === null;
   // 要求キーはダイアログを開くたびに作り、失敗後の再送では使い回す（二重候補を作らない）
   const [requestKey, setRequestKey] = useState<string>(() => newRequestKey());
@@ -112,11 +114,10 @@ export function RepositoryReleaseButton({
     setIsTriggering(true);
     setError(null);
     try {
-      // 判定は起動の直前にサーバーで取り直す。新方式なら候補を作り、旧方式は個別の操作として許可する
+      // 判定は起動の直前にサーバーで取り直す。新方式なら候補を作り、未対応は起動しない
       await requestReleaseStart(repositoryFullName, {
         bumpKind: bumpKind ?? undefined,
         allowFailedDeploy: deployFailed && allowFailedDeploy,
-        allowLegacy: true,
         requestKey,
       });
       setRequestKey(newRequestKey());
@@ -160,7 +161,7 @@ export function RepositoryReleaseButton({
         onClick={() => setConfirmOpen(true)}
       >
         <Rocket className={isTriggering || isPending ? "size-3 animate-pulse" : "size-3"} />
-        {isTriggering ? "起動中..." : isPending ? "リリース起動中…" : startLoading ? "開始方式を確認中" : deployFailed ? "修正リリース" : prepBlocked ? BLOCKED_BUTTON_LABEL[blockedReason] : candidateMode ? "候補を作成して検証" : "リリースする"}
+        {isTriggering ? "起動中..." : isPending ? "リリース起動中…" : startLoading ? "開始方式を確認中" : deployFailed ? "修正リリース" : prepBlocked ? BLOCKED_BUTTON_LABEL[blockedReason] : "候補を作成して検証"}
       </Button>
       {needsOverride && blockedReason && <span className="text-xs text-muted-foreground">{BLOCKED_REASON_LABEL[blockedReason]}</span>}
       {startUnknown && <span className="text-xs text-muted-foreground">{startMode.label}</span>}
@@ -177,13 +178,12 @@ export function RepositoryReleaseButton({
       }}>
         <AlertDialogContent className="flex flex-col gap-4 overflow-hidden">
           <AlertDialogHeader>
-            <AlertDialogTitle>{candidateMode ? "リリース候補を作成して検証しますか？" : "リリースworkflowを起動しますか？"}</AlertDialogTitle>
+            <AlertDialogTitle>{candidateMode ? "リリース候補を作成して検証しますか？" : "修正リリースを起動しますか？"}</AlertDialogTitle>
             <AlertDialogDescription>
               {candidateMode
                 ? `${repositoryFullName}のdevelopの先端を候補（release-rc/*）として固定し、全体レビュー・統合検証へ進めます。正式な版は、合格後の「公開準備」で初めて上げます。`
-                : `${repositoryFullName}のdevelopをmainへ反映するリリースworkflowを起動します。`}
+                : `${repositoryFullName}のdevelopをmainへ反映する修正リリースを起動します（本番デプロイ失敗中の例外操作）。`}
             </AlertDialogDescription>
-            {startMode?.mode === "legacy" && <p className="text-xs text-amber-600">{startMode.label}</p>}
           </AlertDialogHeader>
           <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto">
           {!candidateMode && (

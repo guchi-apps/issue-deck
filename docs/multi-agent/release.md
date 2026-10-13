@@ -1052,26 +1052,40 @@ main起点の`deploy-recovery/*`ブランチへ取り込む。**`merges`APIは�
 | 開始方式 | 条件 | 個別・スマホ | 一括 |
 | --- | --- | --- | --- |
 | 新方式（`candidate`） | callerが`candidate_request`と`finalize_request`の**両方**に対応 | 「候補を作成して検証」＝`POST /release/rc` create（版は上げない） | 候補を作成 |
-| 旧方式（`legacy`） | どちらかに未対応 | 旧方式で起動（ダイアログに「未対応・callerの更新が要る」を表示） | **起動しない**（理由を表示） |
+| 未対応（`legacy`） | どちらかに未対応 | **起動しない**（更新が要るcallerと参照タグを表示） | 起動しない（理由を表示） |
 | 判定不能（`unknown`） | callerを読めない・取得失敗 | 押せない（理由を表示） | 起動しない |
+
+**通常開始は新方式を既定とし、旧方式へは落とさない**（#4623）。唯一の例外は本番デプロイ失敗中の「修正リリース」（`allowFailedDeploy`）で、新方式の候補作成が失敗中デプロイを扱えないため、確認チェックを付けた明示操作に限り旧方式で起動する（`requestReleaseStart`の分岐）。**旧方式の進行中候補は保持**し、画面の「新方式へ移行」で明示移行するか旧方式のまま完了させる（自動削除・二重作成はしない）。
 
 - 候補作成だけ対応で公開準備が未対応のrepoは新方式にしない（候補を作っても公開できなくなるため）
 - 要求キー（`requestKey`）は操作ごとに作り、失敗後の再送では同じ値を送る。進行中の候補（`rc_active`）・旧方式の候補（`legacy_open`）はサーバーが拒否し、画面は既存候補の検証・修正・公開準備か「新方式へ移行」へ案内する。定期処理からは候補を作らない（#4599）
 - 新規repoの雛形（`src/lib/new-app/scaffold-workflows.ts`）のcallerは、`candidate_request`・`finalize_request`の両方を持つ
 
-**展開状況**（2026-10-13時点。caller更新はリポジトリごとのIssue・PRで行い、一括で配らない。「反映」は配布先のdevelopへのマージ、「通し確認」は実リリースでの確認で、両者は別）:
+**展開状況**（2026-10-13・#4623の棚卸し。caller更新はリポジトリごとのIssue・PRで行い、一括で配らない。「反映」は配布先のdevelopへのマージ、「通し確認」は実リリースでの確認で、両者は別）:
 
-| repo | 参照タグ | 版ファイル・bump | caller | 反映 | 通し確認 |
-| --- | --- | --- | --- | --- | --- |
-| issue-deck | ローカル | `package.json` | 配線済み（#4567） | 済 | 未（人が実施） |
-| kurashio | v51 | `frontend/package.json`・iOS差異あり | 未対応 | 未（guchi-apps/kurashio#792） | 未（代表ケース） |
-| yoteiflow・asset-manager・portfolio・solitaire・car-care | v51 | 既定（`package.json`） | 未対応 | 未 | 未 |
-| stockly・work-relay・status-hub・morrow・db-console | v51 | 既定（`package.json`） | 未対応 | 未 | 未 |
-| meisai-lab・clip-hive | v51 | `--ignore-scripts`付きの個別bump | 未対応 | 未 | 未 |
-| signaly・pi0w・pi0w_260719 | v51 | `version.json`＋`bump_version.py` | 未対応 | 未 | 未 |
-| aide | v51 | `package.json`＋iOSのXcode版同期 | 未対応 | 未 | 未 |
+| repo | 参照タグ | 版ファイル・bump | caller | 展開Issue・PR | 反映 | 通し確認 |
+| --- | --- | --- | --- | --- | --- | --- |
+| issue-deck | ローカル | `package.json` | 配線済み（#4567） | — | 済 | 未（人が実施） |
+| kurashio | v51 | `frontend/package.json`・iOS差異あり | 配線済み | guchi-apps/kurashio#792・PR#793 | 済 | 未（代表ケース） |
+| yoteiflow | v51 | 既定（`package.json`） | 未対応 | guchi-apps/yoteiflow#1241 | 未 | 未 |
+| asset-manager | v51 | 既定 | 未対応 | guchi-apps/asset-manager#748 | 未 | 未 |
+| portfolio | v51 | 既定 | 未対応 | guchi-apps/portfolio#197 | 未 | 未 |
+| solitaire | v51 | 既定 | 未対応 | guchi-apps/solitaire#183 | 未 | 未 |
+| car-care | v51 | 既定 | 未対応 | guchi-apps/car-care#251 | 未 | 未 |
+| stockly | v51 | 既定 | 未対応 | guchi-apps/stockly#145 | 未 | 未 |
+| work-relay | v51 | 既定 | 未対応 | guchi-apps/work-relay#296 | 未 | 未 |
+| status-hub | v51 | 既定 | 未対応 | guchi-apps/status-hub#601 | 未 | 未 |
+| morrow | v51 | 既定 | 未対応 | guchi-apps/morrow#561 | 未 | 未 |
+| db-console | v51 | 既定 | 未対応 | guchi-apps/db-console#214 | 未 | 未 |
+| meisai-lab | v51 | `--ignore-scripts`付きの個別bump | 未対応 | guchi-apps/meisai-lab#293 | 未 | 未 |
+| clip-hive | v51 | `--ignore-scripts`付きの個別bump | 未対応 | guchi-apps/clip-hive#201 | 未 | 未 |
+| signaly | v51 | `version.json`＋`bump_version.py` | 未対応 | guchi-apps/signaly#342 | 未 | 未 |
+| pi0w | v51 | `version.json`＋`bump_version.py` | 未対応 | guchi-apps/pi0w#29 | 未 | 未 |
+| aide | v51 | `package.json`＋iOSのXcode版同期 | 未対応 | guchi-apps/aide#650 | 未 | 未 |
 
-対象外: アーカイブ済み、およびリリースworkflowを持たないrepo（docs・subpc・vps・ideas・claude-config等）。未対応を「対応済み」と表示しない（画面は`legacy`と理由を出す）。
+`pi0w_260719`はアーカイブ済みのため対象外。この表は反映状況の記録で、**各repoの反映・通し確認が残る間は、issue-deck側のPRのマージだけで全展開完了にしない**（本番承認待ち・反映済み・未検証を区別して報告する）。
+
+対象外（理由付き）: アーカイブ済み（pi0w_260719）、およびdevelopにリリースworkflowのcallerを持たず本番リリースが無いrepo（docs・subpc・vps・ideas・claude-config・question・gucchii-os・uptime-kuma・sensor_260531・sensor_260218・wifi-speed。2026-10-13時点）。未対応を「対応済み」と表示しない（画面は`legacy`と理由を出す）。
 
 ## 公開準備（正式バンプ。#4496）
 

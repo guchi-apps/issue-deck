@@ -26,25 +26,30 @@ describe("requestReleaseStart", () => {
       if (url.includes("/start-mode")) return { body: { modes: { "o/a": { mode: "candidate" } } } };
       return { body: { ok: true, candidateId: "c1", revision: 0, existing: false } };
     });
-    const result = await requestReleaseStart("o/a", { allowLegacy: true, requestKey: "rc-key-12345" });
+    const result = await requestReleaseStart("o/a", { requestKey: "rc-key-12345" });
     expect(result).toEqual({ kind: "candidate", candidateId: "c1", existing: false });
     const post = calls.find((c) => c.url === "/api/repositories/release/rc");
     expect(JSON.parse(String(post?.init?.body))).toMatchObject({ action: "create", requestKey: "rc-key-12345" });
     expect(calls.some((c) => c.url === "/api/repositories/release")).toBe(false);
   });
 
-  it("未対応repoは、個別操作（allowLegacy）のときだけ旧方式で起動する", async () => {
+  it("未対応repoは旧方式へ落とさず、理由つきで起動しない", async () => {
     const calls = mockFetch((url) =>
       url.includes("/start-mode") ? { body: { modes: { "o/a": { mode: "legacy", label: "未対応" } } } } : { body: {} },
     );
-    await expect(requestReleaseStart("o/a", { allowLegacy: false })).rejects.toThrow("未対応");
+    await expect(requestReleaseStart("o/a", {})).rejects.toThrow("未対応");
     expect(calls.some((c) => c.url === "/api/repositories/release")).toBe(false);
-    await expect(requestReleaseStart("o/a", { allowLegacy: true })).resolves.toEqual({ kind: "legacy" });
+  });
+
+  it("本番デプロイ失敗中の修正リリース（allowFailedDeploy）だけは旧方式で起動する", async () => {
+    const calls = mockFetch(() => ({ body: {} }));
+    await expect(requestReleaseStart("o/a", { allowFailedDeploy: true })).resolves.toEqual({ kind: "legacy" });
+    expect(calls.some((c) => c.url === "/api/repositories/release")).toBe(true);
   });
 
   it("取得に失敗したら判定不能として起動しない", async () => {
     const calls = mockFetch((url) => (url.includes("/start-mode") ? { status: 500, body: {} } : { body: {} }));
-    await expect(requestReleaseStart("o/a", { allowLegacy: true })).rejects.toThrow();
+    await expect(requestReleaseStart("o/a", {})).rejects.toThrow();
     expect(calls.every((c) => c.url.includes("/start-mode"))).toBe(true);
   });
 
@@ -54,7 +59,7 @@ describe("requestReleaseStart", () => {
         ? { body: { modes: { "o/a": { mode: "candidate" } } } }
         : { status: 409, body: { ok: false, error: "rc_active" } },
     );
-    await expect(requestReleaseStart("o/a", { allowLegacy: true })).rejects.toThrow("進行中のリリース候補");
+    await expect(requestReleaseStart("o/a", {})).rejects.toThrow("進行中のリリース候補");
   });
 });
 
