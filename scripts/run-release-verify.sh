@@ -172,9 +172,7 @@ main() {
   heartbeat_start
   LOCAL_PATH="$(local_repo_resolve_path "$full_name")"
   mkdir -p "$WORK_ROOT"
-  WORKTREE="$WORK_ROOT/${repo}-${pr_number}-${head_sha:0:12}"
-  rm -rf "$WORKTREE"
-  git -C "$LOCAL_PATH" worktree prune >/dev/null 2>&1 || true
+  local worktree_path="$WORK_ROOT/${repo}-${pr_number}-${head_sha:0:12}"
   git -C "$LOCAL_PATH" fetch --quiet origin main "$head_sha" 2>/dev/null ||
     git -C "$LOCAL_PATH" fetch --quiet origin 2>/dev/null || true
   git -C "$LOCAL_PATH" cat-file -e "${base_sha}^{commit}" 2>/dev/null &&
@@ -215,6 +213,10 @@ main() {
         "進行中の統合検証の結果待ち" "" duplicate_run)"
     return 0
   fi
+  # worktreeはロック取得後にだけ作り直す（二重起動した側が、実行中の検証のworktreeを消さないため）
+  WORKTREE="$worktree_path"
+  rm -rf "$WORKTREE"
+  git -C "$LOCAL_PATH" worktree prune >/dev/null 2>&1 || true
   evidence_init "$full_name" "$pr_number" "$base_sha" "$head_sha"
 
   # 統合状態: mainの先端（base）へリリースのheadをマージする。競合はそのまま失敗として返す
@@ -294,8 +296,8 @@ main() {
         summary+="Mac検証: 実施・成功"$'\n'
         mac_result_set passed "Macでのビルド確認に成功しました"
       else
-        summary+="Mac検証: 実施・失敗"$'\n'"$(tail -n 20 "$WORK_ROOT/${repo}-${pr_number}-mac.out")"$'\n'
-        mac_result_set failed "$(tail -n 20 "$WORK_ROOT/${repo}-${pr_number}-mac.out")"
+        summary+="Mac検証: 実施・失敗"$'\n'"$(tail -n 20 "$WORK_ROOT/${repo}-${pr_number}-mac.out" | tr -d '\000' | evidence_redact)"$'\n'
+        mac_result_set failed "$(tail -n 20 "$WORK_ROOT/${repo}-${pr_number}-mac.out" | tr -d '\000' | evidence_redact)"
         evidence_finish "$EVIDENCE_FILE" failed test_failed "Mac検証の失敗"
         finish succeeded "Mac検証が失敗しました" "$(with_mac "$(result_json failed "$summary" "" "$evidence")")"
         return 0
