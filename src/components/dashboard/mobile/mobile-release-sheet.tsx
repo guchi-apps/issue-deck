@@ -79,6 +79,7 @@ export function MobileReleaseSheet({
   const startMode = useReleaseStartMode(repository.fullName, open);
   const candidateMode = startMode?.mode === "candidate";
   const startUnknown = startMode?.mode === "unknown";
+  const startLoading = startMode === null;
   // リリース候補（#4495）の識別・公開準備。PCの本番PR詳細と同じ並びで出す（#4560）
   const releasePr = releaseStatus?.available && releaseStatus.phase === "release_pr_open" ? releaseStatus.releasePullRequest : null;
   const rc = useReleaseRc(repository.fullName, releasePr?.number ?? 0, open && releasePr !== null);
@@ -192,7 +193,7 @@ export function MobileReleaseSheet({
               ) : (
                 <Button
                   variant="outline"
-                  disabled={isTriggeringRelease || prepUnknown || startUnknown}
+                  disabled={isTriggeringRelease || prepUnknown || startUnknown || startLoading}
                   onClick={() => setReleaseConfirmOpen(true)}
                   className={prepBlocked || prepUnknown ? "mt-1 bg-muted text-muted-foreground" : "mt-1"}
                 >
@@ -201,6 +202,8 @@ export function MobileReleaseSheet({
                     ? "起動中..."
                     : prepUnknown
                       ? "準備状態を確認中"
+                    : startLoading
+                      ? "開始方式を確認中"
                       : preparation.prepState === "running"
                       ? "リリース準備中"
                       : preparation.prepState === "failed"
@@ -313,7 +316,7 @@ export function MobileReleaseSheet({
             {/* 起動できたことは、閉じた先のこのシートの進捗（`ReleaseProgress`）で分かるため、
                 「リリースを起動しました」のダイアログは出さない（#1590） */}
             <AlertDialogAction
-              disabled={isTriggeringRelease || prepUnknown || (deployFailed && !allowFailedDeploy) || (prepBlocked && !allowPrepOverride)}
+              disabled={isTriggeringRelease || prepUnknown || startLoading || startUnknown || (deployFailed && !allowFailedDeploy) || (prepBlocked && !allowPrepOverride)}
               onClick={() => void triggerRelease(undefined, deployFailed && allowFailedDeploy)}
             >{candidateMode ? "候補を作成する" : "起動する"}</AlertDialogAction>
           </AlertDialogFooter>

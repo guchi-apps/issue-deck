@@ -100,10 +100,11 @@ export function RepositoryReleaseButton({
   const prepBlocked = isPrepBlockedReason(blockedReason);
   const needsOverride = deployFailed || prepBlocked;
   const [allowPrepOverride, setAllowPrepOverride] = useState(false);
-  // 新方式（候補を作成して検証）か旧方式かはcallerの対応で決まる（#4604）。取得できるまでは旧来の表示
+  // 新方式（候補を作成して検証）か旧方式かはcallerの対応で決まる（#4604）。取得中は操作を無効にし、確認表示と実行方式を一致させる
   const startMode = useReleaseStartMode(repositoryFullName, blockedReason === null || deployFailed || prepBlocked);
   const candidateMode = startMode?.mode === "candidate";
   const startUnknown = startMode?.mode === "unknown";
+  const startLoading = startMode === null;
   // 要求キーはダイアログを開くたびに作り、失敗後の再送では使い回す（二重候補を作らない）
   const [requestKey, setRequestKey] = useState<string>(() => newRequestKey());
 
@@ -154,12 +155,12 @@ export function RepositoryReleaseButton({
         size="sm"
         variant="outline"
         className={prepBlocked ? "h-6 gap-1 bg-muted px-2 text-xs text-muted-foreground" : "h-6 gap-1 px-2 text-xs"}
-        disabled={isTriggering || isPending || startUnknown}
+        disabled={isTriggering || isPending || startUnknown || startLoading}
         title={startUnknown ? startMode.label : undefined}
         onClick={() => setConfirmOpen(true)}
       >
         <Rocket className={isTriggering || isPending ? "size-3 animate-pulse" : "size-3"} />
-        {isTriggering ? "起動中..." : isPending ? "リリース起動中…" : deployFailed ? "修正リリース" : prepBlocked ? BLOCKED_BUTTON_LABEL[blockedReason] : candidateMode ? "候補を作成して検証" : "リリースする"}
+        {isTriggering ? "起動中..." : isPending ? "リリース起動中…" : startLoading ? "開始方式を確認中" : deployFailed ? "修正リリース" : prepBlocked ? BLOCKED_BUTTON_LABEL[blockedReason] : candidateMode ? "候補を作成して検証" : "リリースする"}
       </Button>
       {needsOverride && blockedReason && <span className="text-xs text-muted-foreground">{BLOCKED_REASON_LABEL[blockedReason]}</span>}
       {startUnknown && <span className="text-xs text-muted-foreground">{startMode.label}</span>}
@@ -219,7 +220,7 @@ export function RepositoryReleaseButton({
           <AlertDialogFooter>
             <AlertDialogCancel disabled={isTriggering}>キャンセル</AlertDialogCancel>
             <AlertDialogAction
-              disabled={isTriggering || (deployFailed && !allowFailedDeploy) || (prepBlocked && !allowPrepOverride)}
+              disabled={isTriggering || startLoading || startUnknown || (deployFailed && !allowFailedDeploy) || (prepBlocked && !allowPrepOverride)}
               onClick={(event) => {
                 // 起動の結果を待たずに閉じないよう既定の閉じる動作を止める。閉じてしまうと
                 // 連打で複数回dispatchできてしまい、失敗しても文言が出ない（#1548）。

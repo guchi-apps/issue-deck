@@ -11,6 +11,9 @@ vi.mock("@/hooks/use-release-preparation", () => ({
   useReleasePreparation: () => ({ failure: null, prepState: preparationState.prepState, reload: async () => {} }),
 }));
 
+const modeState = vi.hoisted(() => ({ mode: { mode: "legacy", label: "未対応" } as { mode: string; label: string } | null }));
+vi.mock("@/hooks/use-release-start-mode", () => ({ useReleaseStartMode: () => modeState.mode }));
+
 type AvailableReleaseStatus = Extract<ReleaseStatus, { available: true }>;
 
 function makeStatus(overrides: Partial<AvailableReleaseStatus> = {}): AvailableReleaseStatus {
@@ -59,6 +62,7 @@ describe("MobileReleaseSheet iOSへの反映欄（#3579）", () => {
   afterEach(() => {
     cleanup();
     preparationState.prepState = "idle";
+    modeState.mode = { mode: "legacy", label: "未対応" };
   });
 
   it("準備状態の取得前（unknown）は起動ボタンを無効にし、確認も開けない（#4556）", () => {
@@ -77,6 +81,20 @@ describe("MobileReleaseSheet iOSへの反映欄（#3579）", () => {
     fireEvent.click(button);
     expect(screen.queryByRole("button", { name: "起動する" })).toBeNull();
     expect(triggerRelease).not.toHaveBeenCalled();
+  });
+
+  it("開始方式の取得中は確認を開けず、取得後は候補作成の説明になる", () => {
+    modeState.mode = null;
+    const props = { ...baseProps, repository: makeRepository("guchi-apps/issue-deck"), releaseStatus: makeStatus() };
+    const { rerender } = render(<MobileReleaseSheet {...props} />);
+    const button = screen.getByRole("button", { name: "開始方式を確認中" });
+    expect((button as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(button);
+    expect(screen.queryByRole("button", { name: "起動する" })).toBeNull();
+    modeState.mode = { mode: "candidate", label: "候補" };
+    rerender(<MobileReleaseSheet {...props} />);
+    fireEvent.click(screen.getByRole("button", { name: "候補を作成して検証" }));
+    expect(screen.getByText("リリース候補を作成して検証しますか？")).toBeTruthy();
   });
 
   it("aide-iosではMacの手順を出し、リリースworkflow起動ボタンは出さない", () => {

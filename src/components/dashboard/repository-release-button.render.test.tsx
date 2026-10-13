@@ -77,6 +77,20 @@ describe("リリース準備の状態（#4421）", () => {
 describe("開始方式（#4604）", () => {
   const base = { repositoryFullName: "o/r", isPending: false, onTriggered: () => {} };
 
+  it("取得中は操作できず、取得後に新方式の説明で確認する", () => {
+    startMode = null;
+    const { rerender } = render(<RepositoryReleaseButton {...base} />);
+    const button = screen.getByRole("button", { name: "開始方式を確認中" });
+    expect((button as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(button);
+    expect(screen.queryByText("リリースworkflowを起動しますか？")).toBeNull();
+    expect(requestRelease).not.toHaveBeenCalled();
+    startMode = { mode: "candidate" };
+    rerender(<RepositoryReleaseButton {...base} />);
+    fireEvent.click(screen.getByRole("button", { name: "候補を作成して検証" }));
+    expect(screen.getByText("リリース候補を作成して検証しますか？")).toBeTruthy();
+  });
+
   it("新方式に対応したrepoでは「候補を作成して検証」と出し、上げ幅の選択を出さない", () => {
     startMode = { mode: "candidate" };
     render(<RepositoryReleaseButton {...base} />);
