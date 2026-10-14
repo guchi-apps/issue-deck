@@ -1132,6 +1132,7 @@ main起点の`deploy-recovery/*`ブランチへ取り込む。**`merges`APIは�
 - GitHubから取得できないときは**判定不能**（`develop_sync_unknown`）で、同期済みと推定して候補を作らない
 - 同期PRのheadは`main`ではなく、mainの先端から切った`release-sync/main-<SHA12>`。競合したらこのブランチへdevelopを取り込んで解消する（mainへpushしない・developを上書きしない）。ブランチ名がmainのSHAで決まり、開いている同期PR（以前のhead=mainのものも含む）があれば作らないので、巡回が重なっても1本にしかならない。同期PRの作成後にmainが進んだときは、そのマージ後に残りの同期PRを作る
 - 同期PRは通常のdevelop向けPRとして既存のCI・レビュー・マージ保護を通る（`issue-<番号>`ブランチではないため自動マージの対象外で、人がマージする）
+- 同期PRの版更新による`push`は次のリリース開始の承認ではない（#4650）。mainとdevelopが同じ版ならコード差分が残っていても新規バンプを開始せず、旧方式の版判定・patchフォールバック・バンプPR作成の3ステップも`workflow_dispatch`に限定する。既存の旧方式バンプ後（developの版がmainより新しい）のリリースPR作成は維持する。この共通workflowの修正は公開した配布タグの参照更新まで各repoへ反映されないため、callerの入力追加だけで完了としない（全展開の追跡: #4651）。
 - 追跡は公開処理の段階から独立している。呼び出し元は本番反映の追跡（`advanceProduction`）・pollerの巡回（`deploy-recovery-series/sweep`へ相乗りする`runDevelopSyncSweep`。候補を使ったことのあるリポジトリを5分おき）・候補作成（`createReleaseRc`の中で判定するのでAPI以外の経路からも迂回できない）・画面の「同期PRを作成」の4つ。作成の失敗理由はプロセス内にだけ持ち、巡回が再試行する
 - 画面は開始前の案内（`start-mode`の`develop_sync`。PCの個別ボタン・スマホのシート・一括）と、本番反映以降の候補の本番PR詳細に「developへの同期」欄を出す。**公開結果とは別の欄**で、同期できていないことを本番公開の失敗とは表示しない。承認・全体レビューの記録は作らない
 - 共有workflowの状態判定は、**developの版がmainより古い**ときを「バンプ済み」とみなさない（古いリリースPRを作らない）

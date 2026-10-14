@@ -188,6 +188,31 @@ function runBump({ bumpKind, rebuildFrom, devVersion, bumpCommand }) {
 }
 
 describe("リリース状態を判定する（作り直し #3014）", () => {
+  it("mainをdevelopへ同期したpushでは未公開差分があっても新規バンプを作らない（#4650）", () => {
+    git("branch", "main");
+    mergePullRequest("issue-unpublished", 40);
+    git("checkout", "-q", "main");
+    writeVersion("1.0.1");
+    git("add", "package.json");
+    git("commit", "-q", "-m", "公開済み版");
+    git("update-ref", "refs/remotes/origin/main", "HEAD");
+    git("checkout", "-q", "develop");
+    git("merge", "-q", "--no-ff", "main", "-m", "Merge pull request #4648 from guchi-apps/release-sync/main-test");
+
+    const outputs = runState("push");
+    expect(outputs.need_bump).toBe("false");
+    expect(outputs.need_main_pr).toBe("false");
+    // 同じ差分を利用者が明示的に開始した場合は、旧方式の手動開始を維持する。
+    expect(runState("workflow_dispatch").need_bump).toBe("true");
+  });
+
+  it("通常の同版pushからも新規バンプを作らない（#4650）", () => {
+    mergePullRequest("issue-version-metadata", 41);
+    const outputs = runState("push");
+    expect(outputs.need_bump).toBe("false");
+    expect(outputs.need_main_pr).toBe("false");
+  });
+
   it("バンプ後にdevelopへ変更が入っていれば、手動起動でバンプから作り直す", () => {
     mergePullRequest("issue-5", 10);
     const bumpMerge = mergeBump("1.1.0", 11);
