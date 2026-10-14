@@ -23,6 +23,7 @@ const mocks = vi.hoisted(() => ({
   dispatch: vi.fn(),
   compareFiles: vi.fn(),
   isAncestor: vi.fn(async () => true),
+  ensureSync: vi.fn(async () => ({ state: "synced" })),
   fetchPr: vi.fn(),
   records: vi.fn(async () => [] as unknown[]),
   register: vi.fn(),
@@ -69,6 +70,7 @@ vi.mock("@/lib/github/release-api", () => ({
   fetchTagRefs: mocks.tagRefs,
   isAncestorCommit: mocks.isAncestor,
 }));
+vi.mock("@/lib/release-develop-sync-run", () => ({ ensureDevelopSync: mocks.ensureSync }));
 vi.mock("@/lib/github/pull-requests-api", () => ({ fetchPullRequest: mocks.fetchPr }));
 vi.mock("@/lib/github/actions-api", () => ({ markPullRequestReadyForReview: vi.fn() }));
 vi.mock("@/lib/github/app-auth", () => ({ getInstallationToken: vi.fn(async () => "t") }));
@@ -81,7 +83,7 @@ vi.mock("@/lib/release-mac-verification", () => ({ listReleaseMacRows: mocks.mac
 vi.mock("@/lib/dispatch/release-verify-jobs", () => ({ requestReleaseVerifyJob: mocks.verifyJob }));
 vi.mock("@/lib/dispatch/release-review-jobs", () => ({ requestReleaseReviewJob: mocks.reviewJob }));
 
-import { ensureDevelopSync, findUnsyncedPublish, recordFinalizeReport, requestRcFinalize } from "@/lib/release-finalize-run";
+import { recordFinalizeReport, requestRcFinalize } from "@/lib/release-finalize-run";
 
 const CALLER = "    inputs:\n      finalize_request:\n    with:\n      finalize-request: x\n";
 const BASE = "b".repeat(40);
@@ -282,47 +284,5 @@ describe("recordFinalizeReport", () => {
     mocks.repositoryFindFirst.mockResolvedValue({ ownerLogin: "o", name: "r", installation: { installationId: 1 } });
     mocks.finFindUnique.mockResolvedValue(null);
     expect(await recordFinalizeReport({ repositoryFullName: "o/r", requestKey: "nokey00001", outcome: "applied", runId: null, reason: null })).toEqual({ ok: false, reason: "unknown_request" });
-  });
-});
-
-describe("公開後のdevelop整合", () => {
-  const MERGE = "9".repeat(40);
-  const DEV = "8".repeat(40);
-
-  beforeEach(() => {
-    mocks.developHead.mockResolvedValue(DEV);
-    mocks.openPrs.mockResolvedValue([]);
-    mocks.createPr.mockResolvedValue({ number: 99, html_url: "u" });
-  });
-
-  it("公開した版がdevelopに無ければ、mainをdevelopへ同期するPRを作る", async () => {
-    mocks.isAncestor.mockResolvedValueOnce(false);
-    expect(await ensureDevelopSync(ctx, { version: "2.14.0", mergeSha: MERGE })).toBe("created");
-    expect(mocks.createPr).toHaveBeenCalledWith("o", "r", "t", expect.objectContaining({ head: "main", base: "develop", title: "v2.14.0の公開をdevelopへ同期する" }));
-  });
-
-  it("反映済み・同期PRが開いている間は作らない（二重に作らない）", async () => {
-    mocks.isAncestor.mockResolvedValueOnce(true);
-    expect(await ensureDevelopSync(ctx, { version: "2.14.0", mergeSha: MERGE })).toBe("synced");
-    mocks.isAncestor.mockResolvedValueOnce(false);
-    mocks.openPrs.mockResolvedValue([{ head: { ref: "main" } }]);
-    expect(await ensureDevelopSync(ctx, { version: "2.14.0", mergeSha: MERGE })).toBe("pending");
-    expect(mocks.createPr).not.toHaveBeenCalled();
-  });
-
-  it("作成に失敗しても例外にせず失敗として返す（本番反映の追跡を止めない）", async () => {
-    mocks.isAncestor.mockResolvedValueOnce(false);
-    mocks.createPr.mockRejectedValueOnce(new Error("422"));
-    expect(await ensureDevelopSync(ctx, { version: "2.14.0", mergeSha: MERGE })).toBe("failed");
-  });
-
-  it("公開した版がdevelopへ反映されるまで、次の候補の作成を止める", async () => {
-    mocks.resFindMany.mockResolvedValue([{ version: "2.14.0", consumedMergeSha: MERGE }]);
-    mocks.isAncestor.mockResolvedValueOnce(false);
-    expect(await findUnsyncedPublish(ctx)).toEqual({ version: "2.14.0", mergeSha: MERGE });
-    mocks.isAncestor.mockResolvedValueOnce(true);
-    expect(await findUnsyncedPublish(ctx)).toBeNull();
-    mocks.resFindMany.mockResolvedValue([]);
-    expect(await findUnsyncedPublish(ctx)).toBeNull();
   });
 });

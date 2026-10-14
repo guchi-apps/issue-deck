@@ -4,6 +4,9 @@ import { requireUserId } from "@/lib/auth-user";
 import { db } from "@/lib/db";
 import { getInstallationToken } from "@/lib/github/app-auth";
 import { fetchReleaseCallerText } from "@/lib/github/release-api";
+import { decideDevelopSync } from "@/lib/release-develop-sync";
+import { observeDevelopSync } from "@/lib/release-develop-sync-run";
+import { loadRcBlock } from "@/lib/release-rc-run";
 import { decideReleaseStartMode, type ReleaseStartMode } from "@/lib/release-start-mode";
 
 /**
@@ -35,7 +38,20 @@ export async function GET(request: NextRequest) {
       const [owner, repo] = fullName.split("/");
       try {
         const token = await getInstallationToken(row.installation.installationId);
-        return [fullName, decideReleaseStartMode(await fetchReleaseCallerText(owner, repo, token))];
+        const mode = decideReleaseStartMode(await fetchReleaseCallerText(owner, repo, token));
+        if (mode.mode !== "candidate") return [fullName, mode];
+        // 新規開始を妨げる既存候補を起動前に返す（#4628）。確認できなければ「候補なし」とは扱わない
+        try {
+          const block = await loadRcBlock({ owner, repo, token });
+          if (block) return [fullName, { mode: "blocked", label: `${block.label}: ${block.reason}`, block }];
+        } catch (error) {
+          console.error(`[GET /api/repositories/release/start-mode] candidate lookup ${fullName}:`, error);
+          return [fullName, { mode: "unknown", label: "既存のリリース候補の有無を確認できませんでした。再取得してください" }];
+        }
+        // 前回の公開がdevelopへ戻っているかを、候補作成と同じ判定で起動前に返す（#4641。読むだけで同期PRは作らない）
+        const sync = decideDevelopSync(await observeDevelopSync({ owner, repo, token }));
+        if (sync.state !== "synced") return [fullName, { mode: "develop_sync", label: `${sync.label}: ${sync.reason}`, sync }];
+        return [fullName, mode];
       } catch (error) {
         console.error(`[GET /api/repositories/release/start-mode] ${fullName}:`, error);
         return [fullName, unreadable];

@@ -20,6 +20,8 @@ import {
 import { parseFinalizeCallerSupport, readVersionFromText } from "@/lib/release-finalize";
 import { isUniqueConstraintError } from "@/lib/prisma-error";
 import { isLegacyReleaseCandidateHeadRef, legacyReleaseVersionOf, rcBranchName } from "@/lib/release-branch";
+import { developSyncCreateError } from "@/lib/release-develop-sync";
+import { ensureDevelopSync } from "@/lib/release-develop-sync-run";
 import { isReleaseFixActive } from "@/lib/release-fix-series";
 import { evaluateReleaseMergeGate } from "@/lib/release-merge-gate";
 import {
@@ -31,12 +33,14 @@ import {
   deriveRcStatus,
   isRcRevisionPendingExpired,
   LEGACY_MIGRATION_PROBLEM_LABEL,
+  classifyRcBlock,
   parseRcCallerSupport,
   parseRcPhase,
   RC_CALLER_REASON_LABEL,
   RC_REVISION_REASON_LABEL,
   rcLabel,
   serializeRcWorkflowRequest,
+  type RcBlockSummary,
   type RcCallerSupport,
   type RcFinalizeContract,
   type RcPullRequestObservation,
@@ -414,6 +418,29 @@ export async function loadRcOverview(input: Context & { pullRequestNumber?: numb
   };
 }
 
+/**
+ * 新しい候補の開始を妨げる既存候補（無ければnull）。開始前の画面と開始直前の判定が同じ結果を使う（#4628）。
+ * 未完了の更新は`loadRcOverview`と同じく実際の候補ブランチと照合してから読む
+ */
+export async function loadRcBlock(ctx: Context): Promise<RcBlockSummary | null> {
+  let row = await loadCandidateRow({ activeKey: fullNameOf(ctx) });
+  if (!row) return null;
+  if (await reconcilePending(ctx, row)) {
+    row = await loadCandidateRow({ id: row.id });
+    if (!row) return null;
+  }
+  const candidate = await buildCandidateView(ctx, row);
+  const phase = parseRcPhase(row.phase) ?? "review";
+  return classifyRcBlock({
+    candidateId: row.id,
+    sequence: row.sequence,
+    prNumber: candidate.prNumber,
+    phase,
+    status: candidate.status.status,
+    statusLabel: candidate.status.label,
+  });
+}
+
 export type RcMutationError =
   | "caller_unsupported"
   | "rc_active"
@@ -430,11 +457,12 @@ export type RcMutationError =
   | "not_cancellable"
   | "not_migratable"
   | "legacy_changed"
-  | "develop_not_synced";
+  | "develop_not_synced"
+  | "develop_sync_unknown";
 
 export type RcMutationResult =
   | { ok: true; candidateId: string; revision: number; existing: boolean }
-  | { ok: false; error: RcMutationError; message?: string; unapproved?: number[]; problems?: { number: number; problem: RebuildPullRequestProblem; label: string }[] };
+  | { ok: false; error: RcMutationError; message?: string; block?: RcBlockSummary; unapproved?: number[]; problems?: { number: number; problem: RebuildPullRequestProblem; label: string }[] };
 
 async function existingByRequestKey(requestKey: string): Promise<RcMutationResult | null> {
   const revision = await db.releaseCandidateRevision.findUnique({ where: { requestKey } });
@@ -546,10 +574,17 @@ export async function createReleaseRc(input: Context & { userId: string; request
   const active = await loadCandidateRow({ activeKey: repositoryFullName });
   if (active) {
     await expireStalePending(active, new Date());
-    if (await db.releaseCandidate.findUnique({ where: { activeKey: repositoryFullName } })) return { ok: false, error: "rc_active" };
+    if (await db.releaseCandidate.findUnique({ where: { activeKey: repositoryFullName } })) {
+      // 表示後に別の候補ができた場合に、エラー文だけで終えず既存候補と次の操作を返す（#4628）
+      return { ok: false, error: "rc_active", block: (await loadRcBlock(ctx).catch(() => null)) ?? undefined };
+    }
   }
   const open = await fetchOpenPullRequestsForBase(ctx.owner, ctx.repo, "main", ctx.token);
   if (open.some((pr) => isLegacyReleaseCandidateHeadRef(pr.head.ref))) return { ok: false, error: "legacy_open" };
+  // 前回の公開がdevelopへ戻っていることを実際のGit履歴で確かめるまで作らない（#4641）。未同期なら同期PRを用意したうえで断り、
+  // 判定できないときも同期済みとはみなさない。API以外の経路から呼ばれても、取消・外部マージの後でも同じ判定を通る
+  const syncError = developSyncCreateError(await ensureDevelopSync(ctx));
+  if (syncError) return { ok: false, ...syncError };
 
   const freezeSha = await fetchBranchHeadSha(ctx.owner, ctx.repo, "develop", ctx.token);
   const mainSha = await fetchMainHeadSha(ctx.owner, ctx.repo, ctx.token);
@@ -710,36 +745,41 @@ export async function readVersionAtMergeSha(ctx: Context, mergeSha: string): Pro
  * 候補を取り消す。**記録・過去の結果は消さない。** 候補PRは理由のコメントを残して閉じ、ブランチは消さない。
  * mainへのマージ以降は取り消せない
  */
-export async function cancelReleaseRc(input: Context & { userId: string; candidateId: string; reason: string | null }): Promise<RcMutationResult> {
+export async function cancelReleaseRc(
+  input: Context & { userId: string; candidateId: string; reason: string | null; expectedPhase?: string | null },
+): Promise<RcMutationResult> {
   const ctx: Context = input;
   const row = await loadCandidateRow({ id: input.candidateId });
   if (!row || row.repositoryFullName !== fullNameOf(ctx)) return { ok: false, error: "not_found" };
   const phase = parseRcPhase(row.phase);
   if (phase === "cancelled") return { ok: true, candidateId: row.id, revision: row.currentRevision, existing: true };
   if (phase === null || !canCancelRc(phase)) return { ok: false, error: "not_cancellable" };
-  // 公開準備中・承認待ちの候補PRがmainへマージ済み（最終検証を確認できず本番反映の追跡へ進めない候補）を、
+  // 画面で見ていた段階と違う（別の操作で進んだ）ときは、古い表示からの取消を受け付けない（#4628）
+  if (input.expectedPhase && input.expectedPhase !== row.phase) return { ok: false, error: "candidate_changed" };
+  // 公開準備中・承認待ち・レビュー中の候補PRがmainへマージ済み（最終検証を確認できず本番反映の追跡へ進めない候補）を、
   // 人が終わらせる出口。**予約した版はマージで使われたので消費済みにしてから**取り消す（版を再利用させず、
-  // developへの同期の検出〈`findUnsyncedPublish`〉も失わせない）。マージの有無を確かめられないときは取り消さない
+  // 版の追跡を失わせない。developへの同期はGit履歴から判定するので、取消でも迂回されない〈#4641〉）。マージの有無を確かめられないときは取り消さない
   let mergedSha: string | null = null;
   let mergedVersion: string | null = null;
-  if (phase === "preparing" || phase === "awaiting_approval") {
+  // （レビュー中のままマージ済みの候補〈管理記録だけが残った状態。#4628〉も同じ扱いで、版の追跡を失わせない）
+  if (phase === "review" || phase === "preparing" || phase === "awaiting_approval") {
     const prs = await fetchPullRequestsByHead(ctx.owner, ctx.repo, rcBranchName(row.sequence), "main", ctx.token).catch(() => null);
-    if (prs === null) return { ok: false, error: "not_cancellable" };
+    if (prs === null) return { ok: false, error: "not_cancellable", message: "候補のPRの状態をGitHubから確認できませんでした。時間をおいて再確認してください" };
     const merged = prs.find((pr) => pr.merged_at !== null);
     if (merged) {
-      if (!merged.merge_commit_sha) return { ok: false, error: "not_cancellable" };
+      if (!merged.merge_commit_sha) return { ok: false, error: "not_cancellable", message: "マージ済みPRのマージコミットを確認できないため、版の追跡を残せず終了できません" };
       mergedSha = merged.merge_commit_sha;
       // 自動バンプでは取込前に予約が無いことがある。予約が無ければ、マージ後のmainの版を確定して消費済みで残す。
       // 確定できないときは、公開済み版の追跡を失うため取り消さない
       const hasReservation = (await db.releaseVersionReservation.count({ where: { candidateId: row.id, status: { in: ["reserved", "consumed"] } } })) > 0;
       if (!hasReservation) {
         mergedVersion = await readVersionAtMergeSha(ctx, mergedSha).catch(() => null);
-        if (!mergedVersion) return { ok: false, error: "not_cancellable" };
+        if (!mergedVersion) return { ok: false, error: "not_cancellable", message: "マージ時点の版を確認できないため、版の追跡を残せず終了できません" };
         // 既に台帳にある版は、今回のマージで上がった版とは限らない（版上げ前のマージ・他候補の予約）。取り込めないので取り消さない
         const taken = await db.releaseVersionReservation.findUnique({
           where: { repositoryFullName_version: { repositoryFullName: fullNameOf(ctx), version: mergedVersion } },
         });
-        if (taken) return { ok: false, error: "not_cancellable" };
+        if (taken) return { ok: false, error: "not_cancellable", message: `マージ時点の版 v${mergedVersion} は別の記録に既にあり、自動では終了できません。版の追跡を残すため、手動で確認してください` };
       }
     }
   }

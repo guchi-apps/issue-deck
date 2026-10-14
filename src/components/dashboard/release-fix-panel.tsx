@@ -17,8 +17,9 @@ import {
   type OverviewChecks,
   type OverviewTone,
 } from "@/lib/release-fix-overview";
-import { RELEASE_FIX_STEPS, RELEASE_FIX_MAX_GENERATION, type ReleaseFixSourceKind, type ReleaseFixStartState } from "@/lib/release-fix-series";
+import { RELEASE_FIX_STEPS, type ReleaseFixSourceKind, type ReleaseFixStartState } from "@/lib/release-fix-series";
 import type { RebuildEpisode } from "@/lib/release-rebuild-history";
+import { isPreviousVerificationResult, type RcPublishNext } from "@/lib/release-rc-action";
 import type { ReleaseVerificationSummary } from "@/lib/release-verification-summary";
 import type { ReleaseFixSeriesView } from "@/lib/release-fix-series-run";
 import type { ReleaseReviewFinding } from "@/lib/release-review-result";
@@ -304,8 +305,9 @@ export function toOverviewChecks(verification: ReleaseVerificationSummary | null
       reason: verification.aiReview.reason,
       reviewedFiles: verification.aiReview.reviewedFiles,
       totalFiles: verification.aiReview.totalFiles,
+      updatedAt: verification.aiReview.updatedAt,
     },
-    integration: { state: verification.integration.state, reason: verification.integration.reason },
+    integration: { state: verification.integration.state, reason: verification.integration.reason, updatedAt: verification.integration.updatedAt },
     mac:
       macState === "passed" || macState === "failed" || macState === "running"
         ? { state: macState }
@@ -347,6 +349,7 @@ export function useReleaseFixOverview({
   verificationError,
   changes,
   reloadToken,
+  publishBlock,
 }: {
   repositoryFullName: string;
   pullRequestNumber: number;
@@ -354,6 +357,8 @@ export function useReleaseFixOverview({
   verificationError: string | null;
   changes: UseReleaseChangesResult;
   reloadToken?: number;
+  /** 新方式の候補が公開へ進めない理由（#4635）。旧方式・進めるときはnullか省略 */
+  publishBlock?: { next: RcPublishNext; message: string } | null;
 }): ReleaseFixOverviewState {
   const [series, setSeries] = useState<{ key: string; list: ReleaseFixSeriesView[] } | null>(null);
   const [episodes, setEpisodes] = useState<{ key: string; list: RebuildEpisode[] } | null>(null);
@@ -412,14 +417,20 @@ export function useReleaseFixOverview({
   // 修正の記録を読み終えるまでは、修正前の指摘を現在状態として見せない
   const seriesPending = list === null && error === null;
   // 作り直し・修正後のチェック中に、作り直し前のリリースPRを見ている間、その検証結果は修正前のもの
-  const previousResults =
-    current !== null && (current.status === "rebuilding" || current.status === "reverifying") && current.releasePrNumber === pullRequestNumber;
+  // 候補（RC）は同じPRのheadが進むだけなので、PR番号でなく表示中の結果の対象SHAで判定する（#4635）
+  const previousResults = isPreviousVerificationResult({
+    series: current,
+    pullRequestNumber,
+    targetHeadSha: verification?.target.headSha ?? null,
+  });
   const overview = seriesPending
     ? describeFixOverview({ series: null, checks: null })
     : describeFixOverview({
         series: current ? { ...current, internalPause: current.internal?.pause ?? null } : null,
         checks: toOverviewChecks(verification),
         checksError: verification === null && verificationError !== null,
+        previousResults,
+        publishBlock,
         completion: completionRun?.active
           ? { status: completionRun.status, active: true, candidatePrNumber: completionRun.candidatePrNumber }
           : null,
@@ -489,6 +500,15 @@ export function ReleaseFixPrimaryAction({ state }: { state: ReleaseFixOverviewSt
         <button
           type="button"
           onClick={() => document.getElementById("release-fix-create")?.scrollIntoView({ block: "center" })}
+          className="rounded border border-primary bg-primary px-3 py-1 text-[12px] font-semibold text-primary-foreground"
+        >
+          {action.label}
+        </button>
+      )}
+      {action.kind === "rerun_review" && (
+        <button
+          type="button"
+          onClick={() => document.querySelector('[data-testid="review-rerun-panel"]')?.scrollIntoView({ block: "center" })}
           className="rounded border border-primary bg-primary px-3 py-1 text-[12px] font-semibold text-primary-foreground"
         >
           {action.label}
@@ -826,7 +846,7 @@ export function ReleaseFixHistory({ state }: { state: ReleaseFixOverviewState })
             <li key={item.id} className="flex flex-col gap-1 rounded bg-muted/40 px-2 py-1.5">
               <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
                 <span className="text-muted-foreground">
-                  世代 {item.generation}/{RELEASE_FIX_MAX_GENERATION} · 元のリリースPR #{item.releasePrNumber}
+                  世代 {item.generation} · 元のリリースPR #{item.releasePrNumber}
                 </span>
                 <ExtLink href={issueUrl(repositoryFullName, item.issueNumber, "issues")}>修正Issue #{item.issueNumber}</ExtLink>
                 {item.fixPrNumber !== null && (

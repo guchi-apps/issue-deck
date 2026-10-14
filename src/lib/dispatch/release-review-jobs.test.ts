@@ -9,13 +9,14 @@ const jobFindFirst = vi.fn();
 const jobCreate = vi.fn();
 const jobUpdateMany = vi.fn();
 const verificationUpdateMany = vi.fn();
+const verificationFindFirst = vi.fn();
 const settingFindUnique = vi.fn();
 
 vi.mock("@/lib/db", () => ({
   db: {
     dispatchHost: { findMany: hostFindMany },
     dispatchJob: { findFirst: jobFindFirst, create: jobCreate, updateMany: jobUpdateMany },
-    releaseVerification: { updateMany: verificationUpdateMany },
+    releaseVerification: { updateMany: verificationUpdateMany, findFirst: verificationFindFirst },
     appSetting: { findUnique: settingFindUnique },
   },
 }));
@@ -39,6 +40,7 @@ const host = (overrides = {}) => ({
 beforeEach(() => {
   vi.clearAllMocks();
   verificationUpdateMany.mockResolvedValue({ count: 1 });
+  verificationFindFirst.mockResolvedValue(null);
   jobFindFirst.mockResolvedValue(null);
   jobUpdateMany.mockResolvedValue({ count: 0 });
   settingFindUnique.mockResolvedValue({ appAiModelReasoning: "claude-opus-5-5", aiExecutionProvider: "claude" });
@@ -117,6 +119,13 @@ describe("applyReleaseReviewReport", () => {
     expect(JSON.stringify(data.findings)).not.toContain("targetHeadSha");
   });
 
+  it("結果を記録するとき、再実行で退避したpreviousRunを引き継ぐ（#4632）", async () => {
+    const previousRun = { state: "needs_check", at: "2026-10-13T09:00:00.000Z", unverifiedScope: "x", summary: null };
+    verificationFindFirst.mockResolvedValue({ findings: { previousRun } });
+    await applyReleaseReviewReport(job, "failed", "失敗", { diagnostic: { cause: "unknown" } });
+    expect(verificationUpdateMany.mock.calls[0][0].data.findings).toMatchObject({ previousRun });
+  });
+
   it("skippedは何も書かない", async () => {
     expect(await applyReleaseReviewReport(job, "skipped", null, null)).toBe(false);
   });
@@ -131,6 +140,26 @@ describe("rerunReleaseReviewJob", () => {
     const arg = verificationUpdateMany.mock.calls[0][0];
     expect(arg.where).toMatchObject({ ...target, kind: "ai_review" });
     expect(arg.data).toMatchObject({ state: "waiting", message: null, summary: null, unverifiedScope: null });
+  });
+
+  it("旧結果は新テーブルを作らず、findingsのpreviousRunへ直前1件だけ退避する（#4632）", async () => {
+    hostFindMany.mockResolvedValue([host()]);
+    jobCreate.mockResolvedValue({ id: "j2", targetHost: "subpc" });
+    verificationFindFirst.mockResolvedValue({
+      state: "needs_check",
+      summary: "旧要約",
+      unverifiedScope: "統合検証の結果待ち",
+      updatedAt: new Date("2026-10-13T09:00:00Z"),
+    });
+    await rerunReleaseReviewJob(target, NOW);
+    expect(verificationUpdateMany.mock.calls[0][0].data.findings).toEqual({
+      previousRun: {
+        state: "needs_check",
+        at: "2026-10-13T09:00:00.000Z",
+        unverifiedScope: "統合検証の結果待ち",
+        summary: "旧要約",
+      },
+    });
   });
 
   it("実行中・待機中のジョブがあれば二重に積まず、記録も戻さない", async () => {

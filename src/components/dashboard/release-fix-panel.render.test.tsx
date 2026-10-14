@@ -79,8 +79,10 @@ describe("ReleaseFixOverviewPanel", () => {
   it("作り直し中に作り直し前のPRを見ているときは、検証結果を修正前として退避させる", async () => {
     stub({ ...seriesRow, status: "rebuilding", active: true, successorPrNumber: null, stopReason: null });
     const onPrevious = vi.fn();
+    // 作り直し前のPRの結果は、対象が修正前のhead（起点）になっている
+    const oldTarget = { ...verification, target: { baseSha: "c".repeat(40), headSha: "d".repeat(40) } };
     render(
-      <ReleaseFixOverviewPanel repositoryFullName="o/r" pullRequestNumber={4394} verification={verification} verificationError={null}
+      <ReleaseFixOverviewPanel repositoryFullName="o/r" pullRequestNumber={4394} verification={oldTarget} verificationError={null}
         changes={noChanges} onPreviousResultsChange={onPrevious} />,
     );
     await waitFor(() => expect(onPrevious).toHaveBeenLastCalledWith(true));
@@ -94,7 +96,11 @@ describe("ReleaseFixOverviewPanel", () => {
       <ReleaseFixOverviewPanel repositoryFullName="o/r" pullRequestNumber={4400} verification={verification} verificationError={null}
         changes={noChanges} onPreviousResultsChange={onPrevious} />,
     );
-    await waitFor(() => expect(screen.getByTestId("release-fix-headline").textContent).toBe("修正後のチェックを実行しています"));
+    // 最新SHAの結果は現在の結果。再チェック中の系列でも、失敗を「チェック中・操作不要」に隠さない（#4635）
+    await waitFor(() =>
+      expect(screen.getByTestId("release-fix-headline").textContent).toBe("修正を反映しましたが、チェックで2件の指摘が残っています"),
+    );
+    expect(screen.queryByTestId("release-fix-auto")).toBeNull();
     expect(onPrevious).not.toHaveBeenCalledWith(true);
   });
 

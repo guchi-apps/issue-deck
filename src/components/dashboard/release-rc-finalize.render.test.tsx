@@ -79,14 +79,14 @@ describe("buildFinalizeSteps", () => {
     const pending = buildFinalizeSteps({
       phase: "preparing",
       current: view(),
-      checks: { ciState: "pending", draft: false, pendingReverify: [], readiness: { ready: false, reason: "ci_pending" }, readinessLabel: "バンプ後の最終CI・ビルドを実行中です" },
+      checks: { ciState: "pending", draft: false, pendingReverify: [], reverify: [], reverifyPhase: "done", readiness: { ready: false, reason: "ci_pending" }, readinessLabel: "バンプ後の最終CI・ビルドを実行中です" },
     });
     expect(pending[2]).toMatchObject({ tone: "run", badge: "実行中" });
     expect(pending[4].badge).toBe("待機");
     const failed = buildFinalizeSteps({
       phase: "preparing",
       current: view(),
-      checks: { ciState: "failure", draft: false, pendingReverify: [], readiness: { ready: false, reason: "ci_failed" }, readinessLabel: "バンプ後の最終CI・ビルドが失敗しています" },
+      checks: { ciState: "failure", draft: false, pendingReverify: [], reverify: [], reverifyPhase: "done", readiness: { ready: false, reason: "ci_failed" }, readinessLabel: "バンプ後の最終CI・ビルドが失敗しています" },
     });
     expect(failed[2]).toMatchObject({ tone: "bad", badge: "失敗" });
   });
@@ -134,10 +134,10 @@ describe("ReleaseRcFinalizePanel", () => {
     );
     expect(screen.getByText("v2.14.0", { selector: "p" })).toBeTruthy();
     expect(screen.getByText("予約済み")).toBeTruthy();
-    expect(screen.getByText("引継ぎ")).toBeTruthy();
-    expect(screen.getByText("再検証")).toBeTruthy();
-    expect(screen.getByText(/バンプ前 aaaaaaa/)).toBeTruthy();
-    expect(screen.getByText(/バンプ後 ccccccc/)).toBeTruthy();
+    expect(screen.getAllByText("引継ぎ").length).toBe(2);
+    expect(screen.getAllByText("再検証").length).toBe(2);
+    expect(screen.getAllByText(/バンプ前 aaaaaaa/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/バンプ後 ccccccc/).length).toBeGreaterThan(0);
     expect(screen.queryByText("公開準備へ進む")).toBeNull();
   });
 

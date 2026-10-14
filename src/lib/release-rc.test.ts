@@ -12,6 +12,7 @@ import { evaluateReleaseMergeGate, isReleasePullRequest, type ReleaseVerificatio
 import {
   buildRcFinalizeContract,
   canCancelRc,
+  classifyRcBlock,
   canTransitionRcPhase,
   decideLegacyMigration,
   decideRcImport,
@@ -255,5 +256,31 @@ describe("要求キーと期限", () => {
     expect(isRcRevisionPendingExpired({ status: "requested", createdAt }, new Date(createdAt.getTime() + RC_REVISION_TTL_MS))).toBe(true);
     expect(isRcRevisionPendingExpired({ status: "requested", createdAt }, new Date(createdAt.getTime() + 1000))).toBe(false);
     expect(isRcRevisionPendingExpired({ status: "applied", createdAt }, new Date(createdAt.getTime() + RC_REVISION_TTL_MS))).toBe(false);
+  });
+});
+
+describe("classifyRcBlock（#4628）", () => {
+  const base = { candidateId: "c1", sequence: 1, prNumber: 4610 };
+
+  it("PRがマージ済みなのに内部段階がレビューのままなら状態不整合とし、検証合格・公開完了を推測しない", () => {
+    const block = classifyRcBlock({ ...base, phase: "review", status: "deploying", statusLabel: "本番反映中" });
+    expect(block.kind).toBe("inconsistent");
+    expect(block.label).toBe("RC-1");
+    expect(block.cancellable).toBe(true);
+    expect(block.reason).not.toContain("本番反映中");
+    expect(block.facts.join(" ")).toContain("#4610");
+    expect(block.unconfirmed.join(" ")).toContain("検証の合否");
+  });
+
+  it("通常の進行中の候補は不整合にせず、現在の工程と関連PRを示す", () => {
+    const block = classifyRcBlock({ ...base, sequence: 2, prNumber: 4701, phase: "review", status: "verifying", statusLabel: "検証中" });
+    expect(block.kind).toBe("in_progress");
+    expect(block.facts).toEqual(["関連PR: #4701", "現在の工程: 検証中"]);
+  });
+
+  it("実際に本番反映中の候補（phase=deploying）は不整合にせず、取り消せない", () => {
+    const block = classifyRcBlock({ ...base, phase: "deploying", status: "deploying", statusLabel: "本番反映中" });
+    expect(block.kind).toBe("in_progress");
+    expect(block.cancellable).toBe(false);
   });
 });

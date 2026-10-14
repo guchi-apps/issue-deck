@@ -152,6 +152,8 @@ export type GithubApiPullRequest = {
   base?: { sha: string; ref: string };
   /** 自動レビューの判定（`## 検証結果`）を読む材料（#4377）。GitHubは常に返すが、無いときはnull */
   body?: string | null;
+  /** ドラフトか。GitHubは常に返すが、無いときは推測せず未取得として扱う（#4635） */
+  draft?: boolean;
 };
 
 export async function fetchPullRequest(
@@ -312,5 +314,71 @@ export async function markPullRequestReadyForReview(nodeId: string, token: strin
   });
   if (data.markPullRequestReadyForReview?.pullRequest.isDraft !== false) {
     throw new GithubApiError(502, "markPullRequestReadyForReview did not clear draft state");
+  }
+}
+
+/**
+ * PRのheadブランチへ、最新のbaseを取り込む（`PUT /pulls/{n}/update-branch`。#4626）。
+ *
+ * headへbaseをマージするコミットが積まれ（force pushはしない）、新しいheadに対してCI・レビューが
+ * `synchronize`で起動する。`expectedHeadSha`が現在のheadと違えばGitHubが422で断る。
+ * 成功は202（非同期に更新される）。
+ */
+export async function updatePullRequestBranch(
+  owner: string,
+  repo: string,
+  number: number,
+  expectedHeadSha: string,
+  token: string,
+): Promise<void> {
+  const url = `${GITHUB_API}/repos/${owner}/${repo}/pulls/${number}/update-branch`;
+  const res = await githubFetch(url, token, { method: "PUT", body: { expected_head_sha: expectedHeadSha } });
+  if (!res.ok) {
+    const detail = await res.text().catch(() => "");
+    throw new GithubApiError(res.status, `GitHub API request failed: ${res.status} ${url} ${detail}`);
+  }
+}
+
+export type GithubApiHeadWorkflowRun = {
+  id: number;
+  name: string | null;
+  path: string | null;
+  status: string | null;
+  conclusion: string | null;
+  head_sha: string;
+  event: string;
+  html_url: string | null;
+};
+
+/** 指定したheadコミットのworkflow runを取る（#4626）。古いSHAのrunが混ざらないようSHAで絞る */
+export async function fetchWorkflowRunsForHead(
+  owner: string,
+  repo: string,
+  headSha: string,
+  token: string,
+): Promise<GithubApiHeadWorkflowRun[]> {
+  const url = `${GITHUB_API}/repos/${owner}/${repo}/actions/runs?head_sha=${encodeURIComponent(headSha)}&per_page=50`;
+  const res = await githubFetch(url, token);
+  if (!res.ok) {
+    const detail = await res.text().catch(() => "");
+    throw new GithubApiError(res.status, `GitHub API request failed: ${res.status} ${url} ${detail}`);
+  }
+  const data: { workflow_runs?: GithubApiHeadWorkflowRun[] } = await res.json();
+  return data.workflow_runs ?? [];
+}
+
+/** runを再実行する。`failedOnly`なら失敗したジョブだけ（#4626）。**完了していないrunは403で断られる** */
+export async function rerunWorkflowRun(
+  owner: string,
+  repo: string,
+  runId: number,
+  failedOnly: boolean,
+  token: string,
+): Promise<void> {
+  const url = `${GITHUB_API}/repos/${owner}/${repo}/actions/runs/${runId}/${failedOnly ? "rerun-failed-jobs" : "rerun"}`;
+  const res = await githubFetch(url, token, { method: "POST" });
+  if (!res.ok) {
+    const detail = await res.text().catch(() => "");
+    throw new GithubApiError(res.status, `GitHub API request failed: ${res.status} ${url} ${detail}`);
   }
 }

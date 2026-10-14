@@ -17,6 +17,7 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useReleasePreparation } from "@/hooks/use-release-preparation";
 import { PREP_OVERRIDE_CONFIRM_TEXT, type ReleasePrepState } from "@/lib/release-prep-state";
+import { releaseBlockShortLabel } from "@/components/dashboard/release-block-notice";
 import { fetchReleaseStartModes, requestReleaseBulk, type ReleaseStartModes } from "@/lib/release-request";
 
 export type ReleaseBulkTarget = {
@@ -227,7 +228,15 @@ function BulkTargetRow({
           <span className="rounded bg-muted px-1.5 text-[11px]">候補を作成</span>
         ) : (
           <span className="rounded bg-amber-500/15 px-1.5 text-[11px] text-amber-700" title={startMode.label}>
-            {startMode.mode === "legacy" ? "未対応（更新が必要）・起動しない" : "判定不能・起動しない"}
+            {startMode.mode === "legacy"
+              ? "未対応（更新が必要）・起動しない"
+              : startMode.mode === "blocked"
+                ? (releaseBlockShortLabel(startMode) ?? "既存候補あり・起動しない")
+                : startMode.mode === "develop_sync"
+                  ? startMode.sync.state === "unknown"
+                    ? "develop同期を判定できず・起動しない"
+                    : "developへ未同期・起動しない"
+                  : "判定不能・起動しない"}
           </span>
         )}
         {prepState !== "idle" && (

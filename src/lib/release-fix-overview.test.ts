@@ -203,3 +203,55 @@ describe("describeFixOverview: 内部確認の一時停止（#4587）", () => {
     expect(o.pill).not.toBe("あなたの操作が必要");
   });
 });
+
+describe("describeFixOverview 現在の結果と公開工程（#4635）", () => {
+  it("再チェック中の系列でも、最新SHAの失敗は「チェック中・操作不要」に隠さない", () => {
+    const o = describeFixOverview({
+      series: series("reverifying"),
+      checks: checks({ aiReview: { state: "failed", findingCount: 0 } }),
+      previousResults: false,
+    });
+    expect(o.autoProgress).toBe(false);
+    expect(o.pill).toBe("レビューの実行に失敗");
+    expect(o.detail).toContain("再実行");
+  });
+  it("対象が修正前の結果（previousResults=true）なら従来どおりチェック中", () => {
+    const o = describeFixOverview({
+      series: series("reverifying"),
+      checks: checks({ aiReview: { state: "failed", findingCount: 0 } }),
+      previousResults: true,
+    });
+    expect(o.pill).toBe("チェック中");
+    expect(o.autoProgress).toBe(true);
+  });
+  it("合格後でも公開準備前は「公開操作待ち」でなく公開準備へ案内する", () => {
+    const o = describeFixOverview({ series: null, checks: checks(), publishBlock: { next: "verify", message: "公開準備がまだです" } });
+    expect(o.pill).toBe("検証に合格");
+    expect(o.headline).toContain("公開準備へ進めます");
+    expect(o.autoProgress).toBe(false);
+  });
+  it("公開準備中は待機（自動で進む）", () => {
+    const o = describeFixOverview({ series: null, checks: checks(), publishBlock: { next: "wait", message: "公開準備中" } });
+    expect(o.pill).toBe("公開準備中");
+    expect(o.autoProgress).toBe(true);
+  });
+  it("公開できる工程（publishBlockなし）は従来どおり公開操作待ち", () => {
+    expect(describeFixOverview({ series: null, checks: checks() }).pill).toBe("公開操作待ち");
+  });
+});
+
+describe("統合検証の結果待ち時点の要確認（#4640）", () => {
+  const checks = (integrationState: "passed" | "running") => ({
+    aiReview: { state: "needs_check" as const, findingCount: 1, reason: "統合検証が実行中のため未確認", updatedAt: "2026-10-14T01:06:00Z" },
+    integration: { state: integrationState, updatedAt: "2026-10-14T01:09:00Z" },
+  });
+  it("統合検証が終了していれば、前回レビュー時点の理由として再レビューを主操作にする", () => {
+    const o = describeFixOverview({ series: null, checks: checks("passed"), previousResults: false });
+    expect(o.action.kind).toBe("rerun_review");
+    expect(o.detail).toContain("前回レビュー時点");
+    expect(o.detail).toContain("指摘1件");
+  });
+  it("統合検証が実行中なら再レビューを主操作にしない", () => {
+    expect(describeFixOverview({ series: null, checks: checks("running"), previousResults: false }).action.kind).not.toBe("rerun_review");
+  });
+});

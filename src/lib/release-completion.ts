@@ -15,7 +15,7 @@
  * ラベル・PR本文・PRの作者は権限にしない（公開リポジトリでは誰でも書けるため）。
  */
 
-import { isReverifyFailureReason, NOTHING_TO_ADD_REASON } from "@/lib/release-fix-series";
+import { isLegacyGenerationLimitStopReason, isReverifyFailureReason, NOTHING_TO_ADD_REASON } from "@/lib/release-fix-series";
 import { isReleaseCandidateHeadRef } from "@/lib/release-branch";
 
 export const RELEASE_COMPLETION_SCOPE_READY = "until_ready";
@@ -264,7 +264,7 @@ export function decideReleaseCompletion(
       // 修正PRが候補に足せない（すでに含まれている可能性）。修正系列が再評価を続けるので、理由を示して待つ（#4422・#4452）
       return { action: "wait", status: "awaiting_decision", note: series.stopReason };
     }
-    if (!isReverifyFailureReason(series.stopReason)) {
+    if (!isReverifyFailureReason(series.stopReason) && !isLegacyGenerationLimitStopReason(series.stopReason)) {
       return { action: "stop", reason: "fix_stopped", detail: series.stopReason };
     }
   }

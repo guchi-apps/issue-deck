@@ -66,6 +66,8 @@ export function toPullRequestSummary(
     ciChecks?: PullRequestCiCheck[];
     /** コンフリクト有無。取得していない経路（draft・closed）では省略＝`null` */
     mergeable?: boolean | null;
+    /** GitHubの`mergeable_state`（#4626）。詳細だけが渡す。省略＝載せない */
+    mergeableState?: string | null;
     /** 自動マージ可否の判定の進み具合（#1968）。取得していない経路では省略＝`unknown` */
     mergeJudgement?: MergeJudgement;
     linkedIssueCheckUser?: boolean;
@@ -113,6 +115,7 @@ export function toPullRequestSummary(
     ciChecks: options.ciChecks ?? [],
     mergeJudgement: options.mergeJudgement ?? MERGE_JUDGEMENT_UNKNOWN,
     mergeable: options.mergeable ?? null,
+    ...(options.mergeableState === undefined ? {} : { mergeableState: options.mergeableState }),
     repairWorkflowAvailability: options.repairWorkflowAvailability ?? {},
     repairRun: options.repairRun ?? null,
     // 自動レビューの判定はPR本文に文字として残っている（#2843）。本文はこの層まで来ているので、

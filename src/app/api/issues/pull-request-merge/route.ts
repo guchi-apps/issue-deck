@@ -14,6 +14,10 @@ import {
   evaluateReleaseVerificationWait,
   isReleasePullRequest,
 } from "@/lib/release-merge-gate";
+import { rcSequenceOf } from "@/lib/release-branch";
+import { loadFinalizationSnapshot } from "@/lib/release-finalize-run";
+import { decideRcPublish } from "@/lib/release-rc-action";
+import { parseRcPhase } from "@/lib/release-rc";
 import { listReleaseVerificationRecords } from "@/lib/release-verification";
 import { getReleaseVerificationConfig } from "@/lib/release-verification-config";
 
@@ -63,6 +67,19 @@ async function handlePOST(request: NextRequest) {
     const pr = await fetchPullRequest(owner, repo, Number(number), token);
     if (pr.base && pr.head.ref && isReleasePullRequest({ baseRef: pr.base.ref, headRef: pr.head.ref })) {
       expectedHeadSha = pr.head.sha;
+      // 新方式の候補（`release-rc/<番号>`）は、公開準備が済み（ドラフト解除・バンプ後のheadと一致）るまで公開させない（#4635）。
+      // 旧方式（`release-main/*`）にはRC記録が無いので、この検査を掛けず従来のゲートだけで進める
+      if (rcSequenceOf(pr.head.ref) !== null) {
+        const snapshot = await loadFinalizationSnapshot(`${owner}/${repo}`, Number(number));
+        const decision = decideRcPublish({
+          phase: snapshot ? parseRcPhase(snapshot.phase) : null,
+          draft: pr.draft,
+          headMatchesFinalization: snapshot?.applied?.finalHeadSha === pr.head.sha,
+        });
+        if (!decision.ok) {
+          return NextResponse.json({ error: decision.error, next: decision.next, message: decision.message }, { status: 409 });
+        }
+      }
       const records = await listReleaseVerificationRecords(`${owner}/${repo}`, Number(number));
       const gate = evaluateReleaseMergeGate({
         current: { baseSha: pr.base.sha, headSha: pr.head.sha },

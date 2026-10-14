@@ -162,6 +162,11 @@ export type PullRequestSummary = {
    */
   mergeable: boolean | null;
   /**
+   * GitHubの`mergeable_state`（`behind`＝マージ先の最新を取り込んでいない・`dirty`・`clean`等。#4626）。
+   * **詳細（`/api/pull-requests/detail`）だけが載せる**ので省略可能で、無ければ`behind`とは扱わない。
+   */
+  mergeableState?: string | null;
+  /**
    * 自動修復ワークフローが対象リポジトリに置かれているか（#1960）。修復ボタンを出す種類
    * （`repairKindsFor`の結果）ごとに持つ。
    *
@@ -457,6 +462,13 @@ export type PullRequestReviewResponseContext = {
   linkedIssueClosed?: boolean;
   /** 現在のHEADに対して既に出ている修正依頼。無ければnull */
   currentFixRequest: { commentUrl: string | null; createdAt: string } | null;
+  /** 現在のHEADへの依頼が実行前に中止された・失敗した場合（#4639）。画面から同じ依頼を再送できる */
+  interruptedFixRequest?: {
+    kind: "aborted" | "failed";
+    reason: string;
+    requestUrl: string | null;
+    resultUrl: string | null;
+  } | null;
   /** Issueのコメントを読めず、依頼済みかを確かめられなかった */
   fetchFailed: boolean;
 };

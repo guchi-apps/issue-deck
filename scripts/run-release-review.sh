@@ -385,6 +385,40 @@ run_agent() {
   fi
 }
 
+# result_depends_on_evidence <結果JSON>: その結果が統合検証の証跡（結果待ち・未確認）に左右されているか（#4632）
+# 未確認の確認項目、または未確認範囲を持つ結果は、証跡が更新されたら判定が変わり得る。確認済みだけの結果は変わらない
+result_depends_on_evidence() {
+  jq -e '(([.checks[]? | select(.status == "unconfirmed")] | length) > 0) or ((.unverifiedScope // "") != "")' "$1" >/dev/null 2>&1
+}
+
+# invalidate_stale_batches <現在の証跡の指紋>: 保存済みの結果のうち、証跡に依存し、かつ保存時と指紋が違うものを捨てる（#4632）。
+# 確認済みの結果は再利用する。指紋が取れない（現在・保存時のどちらか）依存結果は再利用せず再評価する。
+# 相互作用の確認はバッチの結果に基づくので、バッチを1つでも捨てたら一緒に捨てる。
+# 結果は`reuse_note`へ（画面のメッセージ用）。`batch_dir`は呼び出し元（main）のローカル変数を参照する
+invalidate_stale_batches() {
+  local cur_fp="$1" f stem saved dropped=0 reused=0
+  reuse_note=""
+  for f in "$batch_dir"/r*.json; do
+    [[ -e "$f" ]] || continue
+    stem="${f%.json}"
+    if ! result_depends_on_evidence "$f"; then
+      reused=$((reused + 1))
+      continue
+    fi
+    saved="$(cat "$stem.fp" 2>/dev/null || true)"
+    if [[ -n "$cur_fp" && -n "$saved" && "$saved" == "$cur_fp" ]]; then
+      reused=$((reused + 1))
+      continue
+    fi
+    rm -f "$f" "$stem.fp"
+    dropped=$((dropped + 1))
+  done
+  if ((dropped > 0)); then
+    rm -f "$batch_dir/rint.json" "$batch_dir/rint.fp"
+    reuse_note="（検証証跡が更新されたため、証跡に依存する${dropped}件を再評価します。確認済みの${reused}件は再利用）"
+  fi
+}
+
 # merge_batch_results <未実施のバッチ数>: 保存済みのバッチ結果（と相互作用の確認）を1つの結果へまとめる。
 # 確認項目は、**全バッチ（と相互作用の確認）が確認済み・非該当と根拠を報告した項目だけ**を確認済みにする。
 # ファイルは、含まれる全バッチ（巨大ファイルは全断片）で根拠つきの`reviewed`が揃ったものだけを確認済みとして出す
@@ -461,7 +495,7 @@ main() {
   local -a files=() fix_files=() added_prs=() unrelated_prs=()
   local ctx_json="" ctx_mode="initial" effective_mode="initial" deny_reason="" prev_head="" fix_prs_json="[]"
   local checklist_version="" fix_diff_count=0
-  local batch_dir="" batch_count=0 input_files=0 codex_command=""
+  local batch_dir="" batch_count=0 input_files=0 codex_command="" evidence_fp="" reuse_note=""
 
   trap cleanup EXIT
   # 想定外の失敗でstderrの末尾を診断へ載せるため、写しを取る（端末への出力はそのまま残る）
@@ -515,6 +549,10 @@ main() {
   batch_dir="$WORK_ROOT/${repo}-${pr_number}-${base_sha:0:12}-${head_sha:0:12}-${DIFF_BUDGET_BYTES}.batches"
   mkdir -p "$batch_dir"
   plan_batches
+  # 保存済みの結果は、証跡が更新されていれば証跡に依存するものだけ再評価する（#4632）。
+  # 同じSHAでも、前回が統合検証の実行中に作った「未確認」を新しい証跡の下で使い続けない
+  evidence_fp="$(evidence_fingerprint "$full_name" "$pr_number" "$base_sha" "$head_sha")"
+  invalidate_stale_batches "$evidence_fp"
   prs_text="$(git -C "$WORKTREE" log --format='- %s' "$base_sha..$head_sha" | head -n 200)"
 
   # 再レビューの文脈（#4559）。引き継げるかは、サーバーの判定（base・版・履歴）に、ここで実測した事実
@@ -603,7 +641,7 @@ main() {
       remaining=$((remaining + 1))
       continue
     fi
-    RUNNING_MESSAGE="全体レビュー（${mode_label}）を実行中です（${agent}・${claude_model:-$codex_model}・バッチ${idx}/${batch_count}・全${total_files}ファイル）"
+    RUNNING_MESSAGE="全体レビュー（${mode_label}）を実行中です（${agent}・${claude_model:-$codex_model}・バッチ${idx}/${batch_count}・全${total_files}ファイル）${reuse_note}"
     release_progress_set review 2 "$RUNNING_MESSAGE" "" "$total_files"
     review_report running "$RUNNING_MESSAGE"
     batch_coverage_text "$idx" >"$part_dir/coverage"
@@ -628,6 +666,7 @@ main() {
       return 0
     fi
     mv "$result_file.tmp" "$result_file"
+    printf '%s' "$evidence_fp" >"${result_file%.json}.fp"
     executed=$((executed + 1))
   done
 
@@ -635,7 +674,7 @@ main() {
   local need_integration=0 int_file="$batch_dir/rint.json"
   ((batch_count > 1)) && need_integration=1
   if ((need_integration == 1 && remaining == 0)) && ! { [[ -s "$int_file" ]] && jq -e 'type == "object"' "$int_file" >/dev/null 2>&1; }; then
-    RUNNING_MESSAGE="全体レビュー（${mode_label}）を実行中です（${agent}・${claude_model:-$codex_model}・バッチ間の相互作用を確認・全${total_files}ファイル）"
+    RUNNING_MESSAGE="全体レビュー（${mode_label}）を実行中です（${agent}・${claude_model:-$codex_model}・バッチ間の相互作用を確認・全${total_files}ファイル）${reuse_note}"
     release_progress_set review 2 "$RUNNING_MESSAGE" "" "$total_files"
     review_report running "$RUNNING_MESSAGE"
     integration_coverage_text >"$part_dir/coverage"
@@ -660,6 +699,7 @@ main() {
       return 0
     fi
     mv "$int_file.tmp" "$int_file"
+    printf '%s' "$evidence_fp" >"${int_file%.json}.fp"
   fi
 
   release_progress_set finalize 3 "全体レビューの結果を整理しています" "" "$total_files"

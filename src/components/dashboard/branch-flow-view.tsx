@@ -12,7 +12,9 @@ import {
   type RefObject,
 } from "react";
 import { createPortal } from "react-dom";
-import { isReleaseCandidateHeadRef, isLegacyReleaseCandidateHeadRef } from "@/lib/release-branch";
+import { isReleaseCandidateHeadRef, isLegacyReleaseCandidateHeadRef, rcSequenceOf } from "@/lib/release-branch";
+import { decidePublishForPullRequest, ReleasePublishAction } from "@/components/dashboard/release-publish-action";
+import { useReleaseRc } from "@/hooks/use-release-rc";
 import {
   ArrowUpToLine,
   Check,
@@ -1539,6 +1541,19 @@ function NextReleaseCard({
     .flatMap((lane) => lane.manualSteps.filter((step) => step.state === "open"))
     .filter((step, index, all) => all.findIndex((other) => other.number === step.number) === index);
 
+  // 新方式の候補（`release-rc/<番号>`）。工程（公開準備・ドラフト）は候補の記録から読み、推測しない（#4635）
+  const rcSequence = pullRequest ? rcSequenceOf(pullRequest.headRef) : null;
+  const rc = useReleaseRc(repository.repositoryFullName, pullRequest?.number ?? 0, rcSequence !== null);
+  const publishDecision = pullRequest ? decidePublishForPullRequest(pullRequest, rc.overview) : undefined;
+
+  const versionText = group
+    ? group.version
+      ? `v${group.version}`
+      : rcSequence !== null
+        ? "正式版は未確定"
+        : "未作成"
+    : "なし";
+
   return (
     <section
       aria-label="次のリリース"
@@ -1546,40 +1561,68 @@ function NextReleaseCard({
       data-testid="next-release-card"
     >
       <p className="text-xs font-semibold tracking-wide text-primary">次のリリース</p>
-      <dl className="grid grid-cols-1 gap-2 @sm:grid-cols-2">
-        <div className="min-w-0 rounded-md border px-2.5 py-1.5">
-          <dt className="text-muted-foreground">本番稼働中</dt>
-          <dd className="flex flex-wrap items-center gap-x-1.5 text-sm font-semibold">
-            {repository.release.latestVersion ? `v${repository.release.latestVersion}` : "リリース済みの版なし"}
-          </dd>
-          {/* デプロイの成否は見出しの行・失敗の帯が出すので、ここではmainへ入った日だけを添える */}
-          {latestReleaseMergedAt && (
-            <dd className="text-muted-foreground">{formatMonthDayTime(latestReleaseMergedAt)} にリリース</dd>
+
+      {/* 1. 現在のリリース候補・状態・次の操作（#4635）。本番版・履歴より先に出す */}
+      <div className="flex flex-col gap-1.5 rounded-md border-2 border-primary/60 px-2.5 py-2" data-testid="next-release-candidate">
+        <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+          <span className="text-sm font-semibold">
+            {rcSequence !== null ? `RC-${rcSequence}` : group ? "現在のリリース候補" : "リリース候補"}
+          </span>
+          <span className="font-semibold">{versionText}</span>
+          {group && <ReleaseGroupStatePill group={group} deviceBuild={null} />}
+        </div>
+        <p className="min-w-0 break-words text-muted-foreground">
+          {pullRequest ? (
+            <GithubReferenceLink
+              href={pullRequest.htmlUrl}
+              reference={{ repositoryFullName: pullRequest.repositoryFullName, number: pullRequest.number, kind: "pull" }}
+              className="text-primary hover:underline"
+            >
+              本番PR #{pullRequest.number} の詳細
+            </GithubReferenceLink>
+          ) : group?.bumpPullRequest ? (
+            "バージョン更新のPRを処理中"
+          ) : group ? null : (
+            "次に公開する変更はありません"
           )}
-          {deployButton && <dd className="mt-1">{deployButton}</dd>}
+        </p>
+        {verificationShown && <ReleaseCandidateVerificationReason verification={verificationShown} pullRequest={pullRequest} />}
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
+          {pullRequest ? (
+            <ReleasePublishAction
+              pullRequest={pullRequest}
+              decision={publishDecision}
+              onMerged={() => onMerged(pullRequest)}
+              className="shrink-0"
+            />
+          ) : null}
+          {releaseButton}
+          {manualSteps.map((step) => (
+            <GithubReferenceLink
+              key={step.number}
+              href={`https://github.com/${repository.repositoryFullName}/issues/${step.number}`}
+              reference={{ repositoryFullName: repository.repositoryFullName, number: step.number, kind: "issue" }}
+              className="inline-flex items-center gap-1 text-amber-700 hover:underline dark:text-amber-400"
+            >
+              <Wrench className="size-3" aria-hidden="true" />
+              手作業 #{step.number}
+            </GithubReferenceLink>
+          ))}
         </div>
-        <div className="min-w-0 rounded-md border px-2.5 py-1.5">
-          <dt className="text-muted-foreground">次のバージョン</dt>
-          <dd className="text-sm font-semibold">
-            {group ? (group.version ? `v${group.version}` : "未作成") : "なし"}
-          </dd>
-          <dd className="min-w-0 break-words text-muted-foreground">
-            {pullRequest ? (
-              <GithubReferenceLink
-                href={pullRequest.htmlUrl}
-                reference={{ repositoryFullName: pullRequest.repositoryFullName, number: pullRequest.number, kind: "pull" }}
-                className="text-primary hover:underline"
-              >
-                本番PR #{pullRequest.number} の詳細
-              </GithubReferenceLink>
-            ) : group?.bumpPullRequest ? (
-              "バージョン更新のPRを処理中"
-            ) : group ? null : (
-              "次に公開する変更はありません"
-            )}
-          </dd>
-          {releaseButton && <dd className="mt-1">{releaseButton}</dd>}
-        </div>
+      </div>
+
+      {/* 2. 候補の検証結果 */}
+      {pullRequest && isReleaseCandidateHeadRef(pullRequest.headRef) && (
+        <ReleaseVerificationBrief
+          repositoryFullName={repository.repositoryFullName}
+          pullRequestNumber={pullRequest.number}
+          headRef={pullRequest.headRef}
+          onStatusChanged={refreshFlow ?? undefined}
+        />
+      )}
+
+      {/* 3. 今回公開する変更 4. 現在の本番版（補足） */}
+      <dl className="grid grid-cols-1 gap-2 @sm:grid-cols-2">
         <div className="min-w-0 rounded-md border px-2.5 py-1.5">
           <dt className="text-muted-foreground">次のリリースで反映</dt>
           <dd className="text-sm font-semibold">{`${group?.version ? group.lanes.length : 0}件`}</dd>
@@ -1611,46 +1654,18 @@ function NextReleaseCard({
           </dd>
           <dd className="text-muted-foreground">mainへ未反映</dd>
         </div>
-      </dl>
-
-      {group && (
-        <div className="flex flex-col gap-1.5">
-          <div className="flex min-w-0 flex-wrap items-center gap-2">
-            <ReleaseGroupStatePill group={group} deviceBuild={null} />
-          </div>
-          {verificationShown && <ReleaseCandidateVerificationReason verification={verificationShown} pullRequest={pullRequest} />}
-          <div className="flex min-w-0 flex-wrap items-center gap-2">
-            {pullRequest ? (
-              <PullRequestMergeButton
-                pullRequest={pullRequest}
-                onMerged={() => onMerged(pullRequest)}
-                variant="default"
-                label="本番公開へ進む"
-                className="shrink-0"
-              />
-            ) : null}
-            {manualSteps.map((step) => (
-              <GithubReferenceLink
-                key={step.number}
-                href={`https://github.com/${repository.repositoryFullName}/issues/${step.number}`}
-                reference={{ repositoryFullName: repository.repositoryFullName, number: step.number, kind: "issue" }}
-                className="inline-flex items-center gap-1 text-amber-700 hover:underline dark:text-amber-400"
-              >
-                <Wrench className="size-3" aria-hidden="true" />
-                手作業 #{step.number}
-              </GithubReferenceLink>
-            ))}
-          </div>
-          {pullRequest && isReleaseCandidateHeadRef(pullRequest.headRef) && (
-            <ReleaseVerificationBrief
-              repositoryFullName={repository.repositoryFullName}
-              pullRequestNumber={pullRequest.number}
-              headRef={pullRequest.headRef}
-              onStatusChanged={refreshFlow ?? undefined}
-            />
+        <div className="min-w-0 rounded-md border px-2.5 py-1.5 @sm:col-span-2">
+          <dt className="text-muted-foreground">本番稼働中</dt>
+          <dd className="flex flex-wrap items-center gap-x-1.5 text-sm font-semibold">
+            {repository.release.latestVersion ? `v${repository.release.latestVersion}` : "リリース済みの版なし"}
+          </dd>
+          {/* デプロイの成否は見出しの行・失敗の帯が出すので、ここではmainへ入った日だけを添える */}
+          {latestReleaseMergedAt && (
+            <dd className="text-muted-foreground">{formatMonthDayTime(latestReleaseMergedAt)} にリリース</dd>
           )}
+          {deployButton && <dd className="mt-1">{deployButton}</dd>}
         </div>
-      )}
+      </dl>
     </section>
   );
 }
