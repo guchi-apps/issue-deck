@@ -32,7 +32,8 @@ export type RcPublishDecision =
         | "rc_preparing"
         | "rc_draft"
         | "rc_pull_request_unobserved"
-        | "rc_head_mismatch";
+        | "rc_head_mismatch"
+        | "rc_auto_publishing";
       next: RcPublishNext;
       /** 利用者に見せる短い理由と、次にできる操作 */
       message: string;
@@ -45,6 +46,11 @@ export type RcPublishInput = {
   draft: boolean | undefined;
   /** 現在のPRのheadが、公開準備の最終head（バンプ後）と一致するか。記録が無ければfalse */
   headMatchesFinalization: boolean;
+  /**
+   * 有効な公開承認（#4666）があるか。承認済みの候補は自動公開の系列だけがマージする（手動のマージ操作を並べない）。
+   * 省略時はfalse
+   */
+  publishApproved?: boolean;
 };
 
 export function decideRcPublish(input: RcPublishInput): RcPublishDecision {
@@ -63,7 +69,15 @@ export function decideRcPublish(input: RcPublishInput): RcPublishDecision {
       ok: false,
       error: "rc_not_prepared",
       next: "verify",
-      message: "公開準備（正式バンプと最終検証）がまだです。全体レビュー・統合検証に合格したら「公開準備へ進む」を押してください",
+      message: "公開準備（正式バンプと最終検証）がまだです。全体レビュー・統合検証に合格したら「本番公開へ進む（公開承認）」を押してください",
+    };
+  }
+  if (input.publishApproved && (phase === "preparing" || phase === "awaiting_approval")) {
+    return {
+      ok: false,
+      error: "rc_auto_publishing",
+      next: "wait",
+      message: "公開承認済みです。最終検証に合格したら自動で本番公開します（承認し直しは不要です）。手動で公開する場合は、先に自動公開を取り消してください",
     };
   }
   if (phase === "preparing") {
@@ -87,7 +101,7 @@ export type RcPrimaryAction =
   | { kind: "wait"; label: null }
   | { kind: "rerun_review"; label: "全体レビューを再実行" }
   | { kind: "fix"; label: "修正を取り込む" }
-  | { kind: "prepare"; label: "公開準備へ進む" }
+  | { kind: "prepare"; label: "本番公開へ進む（公開承認）" }
   | { kind: "publish"; label: "本番公開へ進む" }
   | { kind: "none"; label: null };
 
@@ -111,7 +125,7 @@ export function describeRcPrimaryAction(input: {
     case "needs_fix":
       return input.reviewRunFailed ? { kind: "rerun_review", label: "全体レビューを再実行" } : { kind: "fix", label: "修正を取り込む" };
     case "ready_to_prepare":
-      return { kind: "prepare", label: "公開準備へ進む" };
+      return { kind: "prepare", label: "本番公開へ進む（公開承認）" };
     case "awaiting_approval":
       return input.publishable ? { kind: "publish", label: "本番公開へ進む" } : { kind: "wait", label: null };
     case "completed":

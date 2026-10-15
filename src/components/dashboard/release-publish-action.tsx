@@ -24,6 +24,7 @@ export function decidePublishForPullRequest(
     phase: candidate ? parseRcPhase(candidate.phase) : null,
     draft: pullRequest.draft,
     headMatchesFinalization: final !== null && final.status === "applied" && final.finalHeadSha === pullRequest.headSha,
+    publishApproved: overview.finalization?.approval?.status === "active" || overview.finalization?.approval?.status === "merging",
   });
 }
 

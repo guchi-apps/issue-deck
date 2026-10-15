@@ -134,6 +134,11 @@ export type RcStatusInput = {
   gate: ReleaseMergeGate | null;
   /** 修正系列（#4317）が進行中か（指摘を直している途中） */
   fixInProgress: boolean;
+  /**
+   * 有効な公開承認（#4666）があるか。承認済みの候補は最終検証の合格後に自動で本番公開するので、
+   * 「本番承認待ち」ではなく「自動公開待ち」と出す。省略時はfalse（承認の記録が無い既存の候補）
+   */
+  publishApproved?: boolean;
 };
 
 export type RcStatusView = {
@@ -145,8 +150,8 @@ export type RcStatusView = {
   attention: string | null;
 };
 
-function view(status: RcStatus, reason: string, attention: string | null = null): RcStatusView {
-  return { status, label: RC_STATUS_LABEL[status], reason, attention };
+function view(status: RcStatus, reason: string, attention: string | null = null, label: string = RC_STATUS_LABEL[status]): RcStatusView {
+  return { status, label, reason, attention };
 }
 
 /**
@@ -160,8 +165,16 @@ export function deriveRcStatus(input: RcStatusInput): RcStatusView {
   if (phase === "completed") return view("completed", "本番へ反映し、稼働を確認しました");
   if (phase === "deploying") return view("deploying", "mainへ反映しました。本番デプロイの完了を待っています");
   if (phase === "verifying_production") return view("verifying_production", "本番の稼働版を確認しています");
-  if (phase === "awaiting_approval") return view("awaiting_approval", "公開準備が済み、本番への承認を待っています");
-  if (phase === "preparing") return view("preparing", "正式版を確定し、最終検証をしています");
+  if (phase === "awaiting_approval") {
+    return input.publishApproved
+      ? view("awaiting_approval", "公開承認済み。最終検証に合格したため、mainへのマージの条件を確かめて自動で本番公開します", null, "自動公開待ち")
+      : view("awaiting_approval", "公開準備が済みました。この候補には公開承認の記録が無いため、内容を確かめて1回だけ承認してください", null, "公開承認待ち");
+  }
+  if (phase === "preparing") {
+    return input.publishApproved
+      ? view("preparing", "公開承認済み。正式版を確定し、最終検証をしています（合格後は自動で本番公開します）", null, "最終検証中")
+      : view("preparing", "正式版を確定し、最終検証をしています");
+  }
 
   if (input.pending) {
     if (input.pending.reason === "initial" || input.pending.reason === "migration" || input.current === null) {

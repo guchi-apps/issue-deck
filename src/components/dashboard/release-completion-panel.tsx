@@ -227,7 +227,7 @@ function RunCard({ run, busy, onStop }: { run: ReleaseCompletionRunView; busy: "
   return (
     <div className="flex flex-col gap-1 rounded-md border bg-background/70 p-2" data-testid="release-completion-run">
       <p className="flex flex-wrap items-center gap-x-2 gap-y-1">
-        <span className="font-semibold">リリース完了まで進める:</span>
+        <span className="font-semibold">{run.fromPublishApproval ? "自動公開（公開承認済み）:" : "リリース完了まで進める:"}</span>
         <span
           className={cn(
             "rounded-full border px-2 py-0.5",
@@ -243,7 +243,7 @@ function RunCard({ run, busy, onStop }: { run: ReleaseCompletionRunView; busy: "
         </span>
         <span className="text-muted-foreground tabular-nums">
           {generation > 0 ? `世代 ${generation} ・ ` : ""}費用 ${run.costUsedUsd.toFixed(2)} / ${run.costLimitUsd} ・{" "}
-          {run.scope === RELEASE_COMPLETION_SCOPE_PRODUCTION ? "本番反映・稼働確認まで許可" : "チェック通過まで許可"}
+          {run.fromPublishApproval ? "公開承認から本番反映・稼働確認まで" : run.scope === RELEASE_COMPLETION_SCOPE_PRODUCTION ? "本番反映・稼働確認まで許可" : "チェック通過まで許可"}
         </span>
         {run.active && (
           <button

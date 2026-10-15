@@ -34,6 +34,7 @@ const base: ReleaseCompletionRunView = {
   stopReason: null,
   stopMessage: null,
   deployRecovery: null,
+  fromPublishApproval: false,
   startedByUserId: "u1",
   expiresAt: "2026-10-13T05:02:00Z",
   createdAt: "2026-10-12T05:02:00Z",

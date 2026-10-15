@@ -33,6 +33,9 @@ const mocks = vi.hoisted(() => ({
   developHead: vi.fn(),
   openPrs: vi.fn(),
   createPr: vi.fn(),
+  prepareApproval: vi.fn(),
+  commitApproval: vi.fn(async () => "pa1"),
+  ensureRun: vi.fn(async () => ({ ok: true, runId: "run1", created: true })),
 }));
 
 vi.mock("@/lib/db", () => {
@@ -82,8 +85,16 @@ vi.mock("@/lib/release-verification", () => ({
 vi.mock("@/lib/release-mac-verification", () => ({ listReleaseMacRows: mocks.macRows }));
 vi.mock("@/lib/dispatch/release-verify-jobs", () => ({ requestReleaseVerifyJob: mocks.verifyJob }));
 vi.mock("@/lib/dispatch/release-review-jobs", () => ({ requestReleaseReviewJob: mocks.reviewJob }));
+vi.mock("@/lib/release-publish-approval-run", () => ({
+  preparePublishApproval: mocks.prepareApproval,
+  commitPublishApproval: mocks.commitApproval,
+  ensurePublishApprovalRun: mocks.ensureRun,
+  loadPublishApprovalView: vi.fn(async () => null),
+  revokePublishApproval: vi.fn(),
+}));
 
-import { recordFinalizeReport, requestRcFinalize } from "@/lib/release-finalize-run";
+import * as releaseApi from "@/lib/github/release-api";
+import { reconcileRcFinalization, recordFinalizeReport, requestRcFinalize } from "@/lib/release-finalize-run";
 
 const CALLER = "    inputs:\n      finalize_request:\n    with:\n      finalize-request: x\n";
 const BASE = "b".repeat(40);
@@ -94,7 +105,7 @@ const ctx = { owner: "o", repo: "r", token: "t" };
 const contract = { candidateId: "c1", sequence: 3, revision: 2, prNumber: 10, baseSha: BASE, headSha: PRE, frozenDevelopSha: "f".repeat(40), includedPrs: [1] };
 
 function overview(over: Record<string, unknown> = {}) {
-  return { candidate: { id: "c1", sequence: 3, phase: "review", finalizeContract: contract, ...over } };
+  return { candidate: { id: "c1", sequence: 3, phase: "review", finalizeContract: contract, frozenPrs: [{ number: 1, title: "t", mergeSha: "m" }], ...over } };
 }
 
 beforeEach(() => {
@@ -111,14 +122,60 @@ beforeEach(() => {
   mocks.mainHead.mockResolvedValue(BASE);
   mocks.fileText.mockResolvedValue('{"version":"2.13.4"}');
   mocks.tagRefs.mockResolvedValue([]);
+  mocks.prepareApproval.mockResolvedValue({ kind: "create", data: {} });
+  mocks.commitApproval.mockResolvedValue("pa1");
+  mocks.ensureRun.mockResolvedValue({ ok: true, runId: "run1", created: true });
+});
+
+describe("requestRcFinalize の公開承認（#4666）", () => {
+  const input = { ...ctx, userId: "u1", candidateId: "c1", expectedHeadSha: PRE, bumpKind: "minor" as const, requestKey: "reqkey0101", approvePublish: true };
+
+  it("承認の明示が無い要求（古い画面）は、版の予約・段階の変更・workflowの起動をしない", async () => {
+    const result = await requestRcFinalize({ ...input, approvePublish: false });
+    expect(result).toMatchObject({ ok: false, error: "approval_required" });
+    expect(mocks.candUpdateMany).not.toHaveBeenCalled();
+    expect(mocks.dispatch).not.toHaveBeenCalled();
+    expect(mocks.prepareApproval).not.toHaveBeenCalled();
+  });
+
+  it("承認者・押した時点の候補（revision・base/head）・公開内容・版指定方針を承認として渡し、同じ処理の中で確定する", async () => {
+    await requestRcFinalize(input);
+    expect(mocks.prepareApproval).toHaveBeenCalledWith(
+      expect.objectContaining({
+        candidateId: "c1",
+        userId: "u1",
+        bumpPolicy: "minor",
+        contract: expect.objectContaining({ revision: 2, prNumber: 10, baseSha: BASE, headSha: PRE }),
+        contents: [{ number: 1, title: "t" }],
+      }),
+    );
+    expect(mocks.commitApproval).toHaveBeenCalledTimes(1);
+    expect(mocks.ensureRun).toHaveBeenCalledWith(expect.objectContaining({ owner: "o" }), "pa1");
+  });
+
+  it("別の候補の完了系列が進行中なら、公開準備を始めない", async () => {
+    mocks.prepareApproval.mockResolvedValue({ kind: "conflict", error: "run_active", message: "進行中" });
+    const result = await requestRcFinalize(input);
+    expect(result).toEqual({ ok: false, error: "run_active", message: "進行中" });
+    expect(mocks.candUpdateMany).not.toHaveBeenCalled();
+    expect(mocks.dispatch).not.toHaveBeenCalled();
+  });
+
+  it("workflowを起動できなければ、自動公開の系列を始めない（承認は残し、再試行で使い回す）", async () => {
+    mocks.dispatch.mockRejectedValueOnce(new Error("boom"));
+    mocks.finFindUnique.mockResolvedValueOnce(null).mockResolvedValueOnce({ id: "f1", candidateId: "c1" });
+    const result = await requestRcFinalize(input);
+    expect(result).toMatchObject({ ok: false, error: "dispatch_failed" });
+    expect(mocks.ensureRun).not.toHaveBeenCalled();
+  });
 });
 
 describe("requestRcFinalize", () => {
-  const input = { ...ctx, userId: "u1", candidateId: "c1", expectedHeadSha: PRE, bumpKind: "minor" as const, requestKey: "reqkey0001" };
+  const input = { ...ctx, userId: "u1", candidateId: "c1", expectedHeadSha: PRE, bumpKind: "minor" as const, requestKey: "reqkey0001", approvePublish: true };
 
   it("合格した候補だけ、版を予約してから段階を進め、workflowへ固定した前提を渡す", async () => {
     const result = await requestRcFinalize(input);
-    expect(result).toEqual({ ok: true, finalizationId: "f1", existing: false });
+    expect(result).toEqual({ ok: true, finalizationId: "f1", existing: false, approvalId: "pa1" });
     expect(mocks.resCreate).toHaveBeenCalledWith({ data: expect.objectContaining({ version: "2.14.0", status: "reserved", candidateId: "c1" }) });
     expect(mocks.candUpdateMany).toHaveBeenCalledWith({ where: { id: "c1", phase: "review" }, data: { phase: "preparing" } });
     const sent = JSON.parse(mocks.dispatch.mock.calls[0][3] as string);
@@ -284,5 +341,30 @@ describe("recordFinalizeReport", () => {
     mocks.repositoryFindFirst.mockResolvedValue({ ownerLogin: "o", name: "r", installation: { installationId: 1 } });
     mocks.finFindUnique.mockResolvedValue(null);
     expect(await recordFinalizeReport({ repositoryFullName: "o/r", requestKey: "nokey00001", outcome: "applied", runId: null, reason: null })).toEqual({ ok: false, reason: "unknown_request" });
+  });
+});
+
+describe("reconcileRcFinalization（系列がマージした後。#4666）", () => {
+  it("自動公開の系列がマージした候補は、公開準備側が1回だけ本番反映へ進め、版の予約を1回だけ消費する", async () => {
+    mocks.loadCandidateRow.mockResolvedValue({ id: "c1", sequence: 3, phase: "awaiting_approval", revisions: [{ revision: 3 }] });
+    mocks.finFindMany.mockResolvedValue([
+      { id: "f1", candidateId: "c1", status: "applied", prNumber: 10, preBaseSha: BASE, preHeadSha: PRE, finalBaseSha: BASE, finalHeadSha: POST, reservedVersion: "2.14.0", failureReason: null, createdAt: new Date() },
+    ]);
+    mocks.observePr.mockResolvedValue({ number: 10, state: "closed", head: { sha: POST }, base: { sha: BASE } });
+    mocks.fetchPr.mockResolvedValue({ number: 10, merged: true, merged_at: null, merge_commit_sha: "m1", draft: false, head: { sha: POST }, base: { sha: BASE } });
+    vi.mocked(releaseApi.fetchPullRequestCiState).mockResolvedValue({ ciState: "success" } as never);
+    mocks.records.mockResolvedValue([
+      { kind: "integration", state: "passed", baseSha: BASE, headSha: POST },
+      { kind: "ai_review", state: "passed", baseSha: BASE, headSha: POST },
+    ]);
+    // 1回目の巡回だけが段階の条件付き更新を取れる（同時の巡回・重複した呼び出しは0件）
+    mocks.candUpdateMany.mockResolvedValueOnce({ count: 1 }).mockResolvedValue({ count: 0 });
+
+    await reconcileRcFinalization(ctx, "c1");
+    await reconcileRcFinalization(ctx, "c1");
+
+    expect(mocks.candUpdateMany).toHaveBeenCalledWith({ where: { id: "c1", phase: "awaiting_approval" }, data: { phase: "deploying" } });
+    const consumed = mocks.resUpdateMany.mock.calls.filter((call) => (call as unknown as [{ data: { status?: string } }])[0].data.status === "consumed");
+    expect(consumed).toHaveLength(1);
   });
 });

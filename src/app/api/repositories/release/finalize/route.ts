@@ -6,7 +6,7 @@ import { getInstallationToken } from "@/lib/github/app-auth";
 import { githubApiErrorMessage } from "@/lib/github/network-error";
 import { previewModeGuard } from "@/lib/preview-mode";
 import { FINALIZE_START_ERROR_LABEL } from "@/lib/release-finalize";
-import { requestRcFinalize, type FinalizeMutationResult } from "@/lib/release-finalize-run";
+import { approveRcPublish, requestRcFinalize, revokeRcPublish, type FinalizeMutationResult } from "@/lib/release-finalize-run";
 import { parseRcRequestKey } from "@/lib/release-rc";
 import { isBumpKind } from "@/lib/semver-bump";
 
@@ -14,11 +14,13 @@ import { isBumpKind } from "@/lib/semver-bump";
  * 公開準備（正式バンプ。#4496）。
  *
  * - POST `action=start`: 合格した候補を正式バンプする。上げ幅（`bumpKind`）は`major|minor|patch`の手動指定か、
- *   空・`auto`なら自動判定
+ *   空・`auto`なら自動判定。**これが唯一の公開承認（#4666）**で、`approvePublish: true`の要求だけを受け付ける。
+ *   最終検証に合格したら、承認者を開始者としたリリース完了系列がmainマージ・本番反映・稼働確認まで進める
+ * - POST `action=approve`: 承認の記録が無い既存の公開準備済み候補を1回だけ承認する／停止した自動公開を再開する
+ * - POST `action=revoke`: 本番マージを確保する前の自動公開を取り消す
  *
  * **進めてよいかはサーバーが判定する。** 画面が送るのは要求キー・見ていた候補のhead・上げ幅だけで、合格の有無・
- * mainの先端・版の予約・段階は`release-finalize-run.ts`が記録とGitHubから取り直して確かめる。
- * 起案は本番公開の実行ではない（公開はmainへのマージと既存の承認を通る）
+ * mainの先端・版の予約・段階・承認の範囲は記録とGitHubから取り直して確かめる。マージはmainの保護・必須チェックを迂回しない
  */
 
 async function findRepository(userId: string, owner: string, repo: string) {
@@ -32,7 +34,9 @@ function readString(value: unknown): string | null {
   return typeof value === "string" && value.length > 0 ? value : null;
 }
 
-const STATUS_BY_ERROR: Record<string, number> = { not_found: 404, invalid_bump_kind: 400, dispatch_failed: 502 };
+const STATUS_BY_ERROR: Record<string, number> = { not_found: 404, invalid_bump_kind: 400, dispatch_failed: 502, pull_request_unobserved: 502 };
+
+const ACTIONS = new Set(["start", "approve", "revoke"]);
 
 function respond(result: FinalizeMutationResult) {
   if (result.ok) return NextResponse.json(result);
@@ -49,12 +53,14 @@ export async function POST(request: NextRequest) {
   const owner = readString(payload?.owner);
   const repo = readString(payload?.repo);
   const action = readString(payload?.action);
-  if (!owner || !repo || action !== "start") return NextResponse.json({ error: "invalid_request" }, { status: 400 });
+  if (!owner || !repo || !action || !ACTIONS.has(action)) return NextResponse.json({ error: "invalid_request" }, { status: 400 });
   const requestKey = parseRcRequestKey(payload?.requestKey);
   const candidateId = readString(payload?.candidateId);
   const expectedHeadSha = readString(payload?.expectedHeadSha);
   const rawKind = readString(payload?.bumpKind);
-  if (!requestKey || !candidateId || !expectedHeadSha || (rawKind !== null && rawKind !== "auto" && !isBumpKind(rawKind))) {
+  if (!candidateId) return NextResponse.json({ error: "invalid_request" }, { status: 400 });
+  if (action !== "revoke" && (!requestKey || !expectedHeadSha)) return NextResponse.json({ error: "invalid_request" }, { status: 400 });
+  if (action === "start" && rawKind !== null && rawKind !== "auto" && !isBumpKind(rawKind)) {
     return NextResponse.json({ error: "invalid_request" }, { status: 400 });
   }
   const repository = await findRepository(userId, owner, repo);
@@ -62,6 +68,10 @@ export async function POST(request: NextRequest) {
 
   try {
     const token = await getInstallationToken(repository.installation.installationId);
+    if (action === "revoke") return respond(await revokeRcPublish({ owner, repo, token, userId, candidateId }));
+    if (action === "approve") {
+      return respond(await approveRcPublish({ owner, repo, token, userId, candidateId, expectedHeadSha: expectedHeadSha!, requestKey: requestKey! }));
+    }
     return respond(
       await requestRcFinalize({
         owner,
@@ -69,9 +79,10 @@ export async function POST(request: NextRequest) {
         token,
         userId,
         candidateId,
-        expectedHeadSha,
+        expectedHeadSha: expectedHeadSha!,
         bumpKind: rawKind === null || rawKind === "auto" ? null : (rawKind as "major" | "minor" | "patch"),
-        requestKey,
+        requestKey: requestKey!,
+        approvePublish: payload?.approvePublish === true,
       }),
     );
   } catch (error) {
