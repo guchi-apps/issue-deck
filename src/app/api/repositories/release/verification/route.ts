@@ -45,7 +45,7 @@ async function handleGET(request: NextRequest) {
     const verification = await loadReleaseVerificationSummary(`${owner}/${repo}`, number, {
       baseSha: pr.base.sha,
       headSha: pr.head.sha,
-    });
+    }, { token });
     return NextResponse.json({ verification, headRef: pr.head.ref }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     console.error(`[GET /api/repositories/release/verification] ${owner}/${repo}#${number}:`, error);

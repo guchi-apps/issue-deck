@@ -24,6 +24,7 @@ import type { ReviewVerdictKind } from "@/lib/github/release-verification";
 import { toJstParts } from "@/lib/format-date-time";
 import { tallyReleaseReviews } from "@/lib/release-changes";
 import { describeReleaseReviewDiagnostic } from "@/lib/release-review-diagnostic";
+import { POLLER_EXPLANATION, type ReleaseOpsAssessment } from "@/lib/release-review-ops-evidence";
 import { describeReviewRerun, type ReviewRerunView } from "@/lib/release-review-rerun-view";
 import { describeReviewStageLabel, REVIEW_OPEN_ITEM_LABEL } from "@/lib/release-review-reevaluation";
 import {
@@ -451,9 +452,75 @@ function ReviewRerunButton({
   );
 }
 
+const OPS_STATUS_LABEL: Record<ReleaseOpsAssessment["status"], string> = {
+  not_needed: "更新不要",
+  updated: "更新済み",
+  needed: "更新が必要",
+  unknown: "状態を確認できない",
+};
+
 /**
- * 全体レビュー欄の「次の操作」（#4632）。詳細を開かなくても、前提（統合検証の状態・未確認の項目）と
- * 再実行の可否が見える。**運用証跡（poller更新・再起動）の不足は再実行では直らない**ので、その旨と確認を別に出す
+ * レビューがpollerの更新・再起動に触れたときの案内（#4665）。結論・pollerの説明・理由・対象ホスト・
+ * 確認できた事実・次の操作を出す。判定は`release-review-ops-evidence.ts`が持つ
+ */
+function ReviewOpsNotice({ ops, repositoryFullName }: { ops: ReleaseOpsAssessment; repositoryFullName: string }) {
+  return (
+    <div className="flex min-w-0 flex-col gap-0.5 rounded border border-dashed px-2 py-1" data-testid="review-rerun-ops">
+      <p className="break-words font-medium">
+        運用状態（{OPS_STATUS_LABEL[ops.status]}）: {ops.headline}
+      </p>
+      <p className="break-words text-muted-foreground">{POLLER_EXPLANATION}</p>
+      <dl className="grid grid-cols-[5.5rem_1fr] gap-x-2 gap-y-0.5">
+        <dt className="text-muted-foreground">レビューの記述</dt>
+        <dd className="min-w-0 break-words">{ops.reason}</dd>
+        {ops.hosts.length > 0 && (
+          <>
+            <dt className="text-muted-foreground">対象ホスト</dt>
+            <dd className="min-w-0 break-words">{ops.hosts.join("、")}</dd>
+          </>
+        )}
+        {ops.facts.length > 0 && (
+          <>
+            <dt className="text-muted-foreground">確認できた事実</dt>
+            <dd className="min-w-0">
+              <ul className="flex flex-col gap-0.5">
+                {ops.facts.map((fact) => (
+                  <li key={fact} className="break-words">
+                    {fact}
+                  </li>
+                ))}
+              </ul>
+            </dd>
+          </>
+        )}
+        {ops.relatedIssues.length > 0 && (
+          <>
+            <dt className="text-muted-foreground">関連Issue</dt>
+            <dd className="flex flex-wrap gap-x-2">
+              {ops.relatedIssues.map((n) => (
+                <a
+                  key={n}
+                  href={`https://github.com/${repositoryFullName}/issues/${n}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="underline"
+                >
+                  #{n}
+                </a>
+              ))}
+            </dd>
+          </>
+        )}
+        <dt className="text-muted-foreground">次の操作</dt>
+        <dd className="min-w-0 break-words">{ops.nextAction}</dd>
+      </dl>
+    </div>
+  );
+}
+
+/**
+ * 全体レビュー欄の「次の操作」（#4632）。詳細を開かなくても、前提（コードの読み残し・統合検証・運用状態）と
+ * 再実行の可否が見える。運用状態はレビューがpollerの更新に触れたときだけ、稼働情報と照らした結果を出す（#4665）
  */
 function ReviewRerunPanel({
   view,
@@ -495,7 +562,7 @@ function ReviewRerunPanel({
           </Fragment>
         ))}
       </dl>
-      {view.opsEvidence && <p data-testid="review-rerun-ops">{view.opsEvidence}</p>}
+      {view.ops && <ReviewOpsNotice ops={view.ops} repositoryFullName={repositoryFullName} />}
       <ReviewRerunButton
         repositoryFullName={repositoryFullName}
         pullRequestNumber={pullRequestNumber}

@@ -209,7 +209,7 @@ describe("describeReviewEvidenceStage", () => {
         findingsCount: 1,
         updatedAt: t("05:28").toISOString(),
         autoReevaluation: marker,
-        checks: [{ status: "unconfirmed", evidence: "サブPCのpoller更新・再起動の証跡がありません" }],
+        checks: [{ status: "unconfirmed", evidence: "サブPCのpollerを更新・再起動する必要があります" }],
         openFiles: 2,
       }),
       { state: "passed", updatedAt: t("05:25").toISOString() },

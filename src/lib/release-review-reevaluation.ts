@@ -1,4 +1,4 @@
-import { mentionsOpsEvidence } from "@/lib/release-review-rerun-view";
+import { findOpsRequest } from "@/lib/release-review-ops-evidence";
 
 /**
  * 統合検証の完了後に、全体レビューの「証跡に依存する未確認」を自動で再評価する判定（#4664）と、
@@ -253,7 +253,7 @@ export function describeReviewEvidenceStage(
   const items: ReviewOpenItemKind[] = [];
   if (review.findingsCount > 0) items.push("findings");
   const unconfirmedTexts = (review.checks ?? []).filter((c) => c.status === "unconfirmed").map((c) => c.evidence ?? null);
-  if (mentionsOpsEvidence([review.unverifiedScope, ...unconfirmedTexts])) items.push("ops");
+  if (findOpsRequest([review.reason, review.unverifiedScope, ...unconfirmedTexts])) items.push("ops");
   if (dependsOnEvidence) {
     if (integration.state === "failed" || integration.state === "needs_check") items.push("evidence_failed");
     else if (integrationPending) items.push("evidence_waiting");
