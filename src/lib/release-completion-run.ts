@@ -34,6 +34,7 @@ import {
   RELEASE_COMPLETION_COST_LIMIT_USD,
   RELEASE_COMPLETION_SCOPE_PRODUCTION,
   RELEASE_COMPLETION_TTL_MS,
+  isGateClearedByReviewDecisions,
   releaseCompletionNeedsAction,
   releaseCompletionStageIndex,
   releaseCompletionStatusLabel,
@@ -228,7 +229,9 @@ export async function startReleaseCompletionRun(params: {
   }
 
   const summary = await loadReleaseVerificationSummary(repositoryFullName, pr.number, { baseSha: pr.base.sha, headSha: pr.head.sha });
-  const hasProblem = [summary.aiReview.state, summary.integration.state].some((s) => s === "failed" || s === "needs_check");
+  // 止める指摘の全件をユーザーが修正しないと判断した全体レビューは、復旧すべき問題に数えない（#4657）
+  const aiCleared = summary.aiReview.state === "needs_check" && summary.aiReview.decisions?.cleared === true;
+  const hasProblem = [aiCleared ? "passed" : summary.aiReview.state, summary.integration.state].some((s) => s === "failed" || s === "needs_check");
   const series = await db.releaseFixSeries.findFirst({
     where: { repositoryFullName, OR: [{ releasePrNumber: pr.number }, { successorPrNumber: pr.number }] },
     select: { id: true },
@@ -491,6 +494,7 @@ export function toCompletionChecks(summary: ReleaseVerificationSummary, reposito
         ? classifyIntegrationFailure([summary.integration.reason, summary.integration.summary].filter(Boolean).join("\n"))
         : null,
     integrationSetupGap: describeIntegrationSetupGap(repositoryFullName) !== null,
+    aiReviewClearedByDecision: summary.aiReview.decisions?.cleared === true,
   };
 }
 
@@ -661,6 +665,17 @@ async function evaluateAndMerge(run: RunRow, ctx: Ctx, now: Date, observation: O
     mainSha,
     gateStatus: gate && gate.status !== "not_enforced" ? gate.status : "blocked",
     gateReasons: gate?.blockers.map((b) => b.reason) ?? [],
+    // 判断の要約は、いまマージしようとしている対象（base・head）について読んだものだけを使う
+    gateClearedByDecision:
+      gate !== null &&
+      Boolean(pull?.base?.sha) &&
+      observation.summary?.target?.baseSha === pull?.base?.sha &&
+      observation.summary?.target?.headSha === pull?.head.sha &&
+      isGateClearedByReviewDecisions({
+        gateStatus: gate.status,
+        blockers: gate.blockers,
+        aiReviewCleared: observation.summary?.aiReview.decisions?.cleared === true,
+      }),
     macOk: mac === "passed" || mac === "not_applicable",
     ciState: ci?.ciState ?? "unknown",
   });

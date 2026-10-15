@@ -38,7 +38,23 @@ export type ReleaseFixHistory = {
   findings: { key: string; title: string; status: string; resolution: string | null; reopenCount: number }[];
 };
 
+/** ユーザーの判断（#4657）。再レビューのAIへ渡し、判断済みの指摘を根拠なく蒸し返させない */
+export type ReleaseReviewContextDecision = {
+  id: string;
+  title: string;
+  decision: "fix_now" | "post_release" | "defer" | "reject";
+  reason: string;
+  impact: string | null;
+  scope: string | null;
+  timing: string | null;
+  followUp: string | null;
+  /** 判断したときからbaseが変わった（前提の確認し直しが要る） */
+  stale: boolean;
+};
+
 export type ReleaseReviewPromptContext = ReleaseReviewNormalizeContext & {
+  /** ユーザーの判断（撤回されていない最新のもの） */
+  decisions: ReleaseReviewContextDecision[];
   checklistVersion: number;
   fixPrNumbers: number[];
   fixHistory: ReleaseFixHistory[];
@@ -80,8 +96,12 @@ export function buildReviewPromptContext(input: {
   current: { baseSha: string; headSha: string };
   previous: PreviousReviewRecord | null;
   histories: readonly ReleaseFixHistory[];
+  decisions?: readonly ReleaseReviewContextDecision[];
 }): ReleaseReviewPromptContext {
   const { previous, histories } = input;
+  const decisions = [...(input.decisions ?? [])];
+  // 有効な非修正の判断が付いた指摘は、前回の指摘の解消確認・未解消の再注入から外す（#4657）
+  const decidedFindingIds = decisions.filter((d) => !d.stale && d.decision !== "fix_now").map((d) => d.id);
   const decision = decideReviewMode(input);
   const fixIssueByFinding: Record<string, number> = {};
   for (const history of histories) {
@@ -99,7 +119,9 @@ export function buildReviewPromptContext(input: {
           runFailed: previous.state === "failed",
         }
       : null,
-    previousFindings: previous?.findings ?? [],
+    previousFindings: (previous?.findings ?? []).filter((f) => !decidedFindingIds.includes(f.id)),
+    decidedFindingIds,
+    decisions,
     checklistVersion: RELEASE_REVIEW_CHECKLIST_VERSION,
     fixPrNumbers: [...new Set(histories.flatMap((h) => (h.fixPrNumber ? [h.fixPrNumber] : [])))],
     fixHistory: [...histories],

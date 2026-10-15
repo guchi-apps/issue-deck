@@ -281,3 +281,39 @@ describe("normalizeReleaseReview", () => {
     expect(r?.detail.findings).toEqual([]);
   });
 });
+
+describe("ユーザー判断の引き継ぎ（#4657）", () => {
+  const decidedCtx = () => rereviewContext({ previousFindings: [], decidedFindingIds: [PREV_FINDING.id] });
+
+  it("判断済みの指摘を言い換えて出し直しても、previousIdで同じIDへ戻す（判断が外れない）", () => {
+    const r = normalizeReleaseReview(
+      fullChecks({
+        findings: [{ severity: "high", title: "フリート未配布（言い換え）", file: "x.ts", previousId: PREV_FINDING.id, impact: "i", evidence: "e" }],
+      }),
+      decidedCtx(),
+    );
+    expect(r?.detail.findings[0]).toMatchObject({ id: PREV_FINDING.id, status: "recurring" });
+    expect(r?.detail.findings[0].premiseChanged ?? null).toBeNull();
+  });
+
+  it("前提の変化は判断済みの指摘にだけ付けられる", () => {
+    const r = normalizeReleaseReview(
+      fullChecks({
+        findings: [
+          { severity: "high", title: "設定漏れ", file: "a.ts", line: 3, premiseChanged: "配布手順が変わった", impact: "i", evidence: "e" },
+          { severity: "high", title: "別の指摘", file: "b.ts", premiseChanged: "勝手な申告", impact: "i", evidence: "e" },
+        ],
+      }),
+      decidedCtx(),
+    );
+    expect(r?.detail.findings[0]).toMatchObject({ id: PREV_FINDING.id, premiseChanged: "配布手順が変わった" });
+    expect(r?.detail.findings[1].premiseChanged).toBeUndefined();
+  });
+
+  it("判断済みの指摘は、前回の指摘の解消確認・未解消の再注入の対象にならない", () => {
+    const r = normalizeReleaseReview(fullChecks({ previousFindings: [{ id: PREV_FINDING.id, status: "unresolved", evidence: "残" }] }), decidedCtx());
+    expect(r?.detail.findings).toHaveLength(0);
+    expect(r?.unverifiedScope ?? "").not.toContain(PREV_FINDING.id);
+    expect(r?.state).toBe("passed");
+  });
+});

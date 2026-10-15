@@ -110,7 +110,29 @@ export type CompletionChecks = {
   integrationFailureKind: "execution" | "code" | "unknown" | null;
   /** 統合検証の失敗が設定不足か */
   integrationSetupGap: boolean;
+  /**
+   * 全体レビューの要確認が、止める指摘だけを原因とし、その全件にユーザーの有効な非修正の判断がある（#4657）。
+   * このときは全体レビューを「直すべき問題」として扱わない（新たな修正を起案しない）。省略時はfalse
+   */
+  aiReviewClearedByDecision?: boolean;
 };
+
+/**
+ * マージゲートの要確認が、ユーザーの判断で解除できるものだけか（#4657）。**全体レビューの要確認（止める指摘）だけ**が
+ * 対象で、統合検証の要確認・未確認範囲・実行中・失敗・古い結果は判断では解除しない。ゲート自体の状態は書き換えない
+ */
+export function isGateClearedByReviewDecisions(input: {
+  gateStatus: "ready" | "needs_confirmation" | "blocked" | "not_enforced";
+  blockers: readonly { kind: string; state: string }[];
+  aiReviewCleared: boolean;
+}): boolean {
+  return (
+    input.gateStatus === "needs_confirmation" &&
+    input.aiReviewCleared &&
+    input.blockers.length > 0 &&
+    input.blockers.every((b) => b.kind === "ai_review" && b.state === "needs_check")
+  );
+}
 
 export type CompletionCandidateObservation = {
   number: number;
@@ -273,14 +295,16 @@ export function decideReleaseCompletion(
   if (checks === null) return { action: "wait", status: "checking" };
   const states = [checks.aiReview, checks.integration];
   const problem = (s: CompletionCheckState) => s === "failed" || s === "needs_check";
-  if (problem(checks.aiReview) || problem(checks.integration)) {
+  // 止める指摘の全件をユーザーが修正しないと判断した全体レビューは、直す対象として扱わない（#4657）
+  const aiProblem = problem(checks.aiReview) && !(checks.aiReview === "needs_check" && checks.aiReviewClearedByDecision === true);
+  if (aiProblem || problem(checks.integration)) {
     if (problem(checks.integration) && checks.integrationSetupGap) return { action: "stop", reason: "setup_missing" };
-    if (problem(checks.integration) && !problem(checks.aiReview) && checks.integrationFailureKind === "execution") {
+    if (problem(checks.integration) && !aiProblem && checks.integrationFailureKind === "execution") {
       return { action: "stop", reason: "execution_failure" };
     }
     if (overBudget) return { action: "stop", reason: "cost_limit" };
     // 全体レビューの指摘があればそれを、無ければ統合検証の失敗を起案する
-    const sourceKind = problem(checks.aiReview) && checks.findingCount > 0 ? "review_finding" : "integration_failure";
+    const sourceKind = aiProblem && checks.findingCount > 0 ? "review_finding" : "integration_failure";
     if (sourceKind === "integration_failure" && !problem(checks.integration)) {
       // 全体レビューが失敗だが指摘が無い（実行障害）。コードの指摘ではないので起案しない
       return { action: "stop", reason: "execution_failure" };
@@ -327,6 +351,8 @@ export type CompletionMergeObservation = {
   /** `evaluateReleaseMergeGate`を強制ありで評価した結果 */
   gateStatus: "ready" | "needs_confirmation" | "blocked";
   gateReasons: readonly string[];
+  /** 要確認がユーザーの判断で解除できるものだけか（`isGateClearedByReviewDecisions`）。省略時はfalse */
+  gateClearedByDecision?: boolean;
   /** Mac検証が合格（または対象外）か */
   macOk: boolean;
   ciState: "pending" | "success" | "failure" | "unknown";
@@ -345,6 +371,8 @@ export type CompletionMergeDecision =
  * どれか1つでも外れれば`merge`を返さない。`wait`はまだ判定できないだけで、権限は与えない。
  *
  * 要確認（`needs_confirmation`）も通さない。画面の明示確認で通せるのは人だけで、自動では検査を省かない。
+ * 唯一の例外は、要確認が全体レビューの止める指摘だけで、その全件をユーザーが修正しないと判断した場合（#4657）。
+ * 判断はユーザーの明示操作で、開始者が本番まで進めると選んだ系列にだけ効く。統合検証・Mac・CIの条件は変えない。
  */
 export function decideCompletionMerge(
   run: Pick<
@@ -379,7 +407,8 @@ export function decideCompletionMerge(
   if (observation.finalization && !isFinalizationReady(observation.finalization, pull.headSha)) {
     return { action: "wait", reason: "finalization_not_ready" };
   }
-  if (observation.gateStatus !== "ready" || !observation.macOk) {
+  const gateOk = observation.gateStatus === "ready" || (observation.gateStatus === "needs_confirmation" && observation.gateClearedByDecision === true);
+  if (!gateOk || !observation.macOk) {
     return { action: "wait", reason: observation.gateReasons.join(" / ") || "verification" };
   }
   if (observation.ciState === "failure") return { action: "stop", reason: "ci_failed" };

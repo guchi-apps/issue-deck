@@ -2613,6 +2613,44 @@ model ShareToken {
   @@index([expiresAt])
 }
 
+// 全体レビューの指摘1件に対するユーザーの判断（#4657）。**追記のみで、変更・撤回も新しい行として残す**（履歴）。
+//
+// AIの原判定（`ReleaseVerification.findings`）は書き換えず、ここに別に持つ。判断の範囲は候補系列（`scopeKey`＝
+// リポジトリ＋修正系列で辿った最初のリリースPR番号）と指摘ID（`R-xxxxxx`）で、他の候補・他repoへは流用しない。
+// 同じ指摘への同時判断は`sequence`の一意制約で止める（黙った上書きをしない）。
+model ReleaseReviewDecision {
+  id           String  @id @default(cuid())
+  scopeKey     String  @db.VarChar(191)
+  repoFullName String  @db.VarChar(191)
+  findingId    String  @db.VarChar(32)
+  // 同じ指摘への判断の通し番号（1から）。直前の判断を見ずに保存した操作は一意制約で失敗する
+  sequence     Int
+  // `fix_now` / `post_release` / `defer` / `reject` / `withdrawn`（撤回＝未判断へ戻す）
+  decision     String  @db.VarChar(32)
+  reason       String  @db.Text
+  // 見送り: 残る影響と対象範囲
+  impact       String? @db.Text
+  scope        String? @db.Text
+  // 公開後に対応: 関連Issueと実施時期
+  followUpRepo   String? @db.VarChar(191)
+  followUpNumber Int?
+  timing         String? @db.VarChar(500)
+  // 判断したときの対象と、AIの原判定の写し（前提が変わったかの判定に使う）
+  prNumber     Int
+  headRef      String  @db.VarChar(191)
+  baseSha      String  @db.VarChar(64)
+  headSha      String  @db.VarChar(64)
+  severity     String  @db.VarChar(16)
+  blocking     Boolean
+  findingTitle String  @db.VarChar(300)
+  decidedByUserId String @db.VarChar(40)
+
+  createdAt DateTime @default(now())
+
+  @@unique([scopeKey, findingId, sequence], map: "ReleaseReviewDecision_sequence_key")
+  @@index([scopeKey])
+}
+
 // リリース候補の修正系列（#4317）。全体レビューの指摘・統合検証の失敗から起案した修正Issue1件につき1行。
 // 修正PRのdevelop取り込み→候補の作り直し→新SHAでの再検証を追跡する。
 // **権限や判断の根拠はこの記録（SHA・PR番号・状態）で持ち、ラベルやPR本文は使わない。**

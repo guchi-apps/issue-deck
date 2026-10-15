@@ -48,6 +48,11 @@ export type ReleaseReviewFinding = {
   occurrences?: number;
   /** 再発した指摘が解消されない原因の区分と、次の対応 */
   stallCause?: ReleaseReviewStallCause | null;
+  /**
+   * ユーザーが判断済みの指摘について、AIが判断の前提（対象差分・影響）が変わったと報告した理由（#4657）。
+   * あれば判断は「再確認が必要」になる。前提の変化を示せない再提示ではこの値を付けない
+   */
+  premiseChanged?: string | null;
 };
 
 export const RELEASE_REVIEW_DISCOVERIES = ["fix_induced", "initial_miss", "scope_added", "unknown"] as const;
@@ -115,6 +120,11 @@ export type ReleaseReviewNormalizeContext = {
     runFailed: boolean;
   } | null;
   previousFindings: ReleaseReviewContextFinding[];
+  /**
+   * ユーザーが修正しないと判断した（公開後対応・見送り・不採用）、今のbaseで有効な指摘ID（#4657）。
+   * 前回の指摘の解消確認・未解消の自動再注入の対象から外し、AIが前提の変化（`premiseChanged`）を申告できるのはこのIDだけ
+   */
+  decidedFindingIds?: string[];
 };
 
 export type ReleaseReviewContextFinding = {
@@ -287,6 +297,7 @@ export function normalizeReleaseReview(
   const fullReviewReason = reuse ? null : (runnerDenied ?? context?.fullReviewReason ?? (previous ? null : "前回の記録が無いため、対象全体を確認しました"));
   const previousFindings = context?.previousFindings ?? [];
   const previousById = new Map(previousFindings.map((f) => [f.id, f]));
+  const decidedIds = new Set(context?.decidedFindingIds ?? []);
 
   const parsed = (Array.isArray(raw.findings) ? raw.findings : [])
     .map(parseFinding)
@@ -300,15 +311,19 @@ export function normalizeReleaseReview(
   const toFinding = ({ finding, blocking, previousId, raw: r }: ParsedFinding): ReleaseReviewFinding => {
     const derived = reviewFindingId(finding);
     const matched = previousId && previousById.has(previousId) ? previousId : previousById.has(derived) ? derived : null;
-    const id = matched ?? derived;
+    // ユーザーが判断済みの指摘は、言い換えても`previousId`で同じIDへ戻す（判断が外れて未判断として蒸し返さない。#4657）
+    const decided = !matched && previousId && decidedIds.has(previousId) ? previousId : decidedIds.has(derived) ? derived : null;
+    const id = matched ?? decided ?? derived;
     const prior = matched ? previousById.get(matched) : undefined;
     const base: ReleaseReviewFinding = {
       ...finding,
       id,
-      status: prior ? "recurring" : "new",
+      status: prior || decided ? "recurring" : "new",
       occurrences: prior ? prior.occurrences + 1 : 1,
       blockingReason: blocking ? str(r.blockingReason, 500) : null,
     };
+    if (decidedIds.has(id)) base.premiseChanged = str(r.premiseChanged, 500);
+    if (decided) return base;
     if (!prior) {
       base.discovery = previous ? pick(r.discovery, RELEASE_REVIEW_DISCOVERIES, "unknown") : null;
       return base;
