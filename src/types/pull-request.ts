@@ -1,4 +1,5 @@
 import type { MergeCheckReasons } from "@/lib/merge-check-reasons";
+import type { ReviewEvidenceStage } from "@/lib/release-review-reevaluation";
 import type { CheckUserReason } from "@/lib/github/approval-labels";
 import type { MergeJudgement, RollupCiCheck } from "@/lib/github/check-rollup";
 import type { IosPrecheckSummary } from "@/lib/github/ios-precheck";
@@ -61,6 +62,11 @@ export type PullRequestReleaseChecks = {
   integrationSetupGap?: string | null;
   /** 検証の記録を読めなかった。状態は推測せず、マージ待ちにもしない（#4390） */
   unavailable?: boolean;
+  /**
+   * 統合検証の証跡から見た全体レビューの共通の段階（#4664。`release-review-reevaluation.ts`）。
+   * 「コード確認済み・統合検証待ち」「検証結果を確認中」を要確認と取り違えないために使う。旧応答では省略
+   */
+  aiReviewStage?: ReviewEvidenceStage;
 };
 
 export type PullRequestSummary = {

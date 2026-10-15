@@ -74,6 +74,32 @@ describe("resolveReleaseStageBadges", () => {
     ]);
   });
 
+  it("完了した統合検証を「統合検証中」と出さず、全体レビューの段階を出す（#4664 #4663 5:25）", () => {
+    const badges = resolveReleaseStageBadges({
+      bumpPullRequest: null,
+      candidatePullRequest: candidate({
+        releaseChecks: { ...PASSED, aiReview: "needs_check", integration: "passed", aiReviewStage: { kind: "reevaluating" } },
+      }),
+    });
+    expect(badges.map((b) => [b.label, b.running])).toEqual([["検証結果を確認中", true]]);
+  });
+
+  it("コード確認が先に終わったら「コード確認済み・統合検証待ち」と「統合検証中」を並べる（#4664）", () => {
+    const badges = resolveReleaseStageBadges({
+      bumpPullRequest: null,
+      candidatePullRequest: candidate({
+        releaseChecks: {
+          ...PASSED,
+          aiReview: "needs_check",
+          integration: "running",
+          started: { aiReview: false, integration: true, mac: false },
+          aiReviewStage: { kind: "integration_waiting" },
+        },
+      }),
+    });
+    expect(badges.map((b) => b.label)).toEqual(["コード確認済み・統合検証待ち", "統合検証中"]);
+  });
+
   it("開始待ちの検証は回さない", () => {
     const badges = resolveReleaseStageBadges({
       bumpPullRequest: null,

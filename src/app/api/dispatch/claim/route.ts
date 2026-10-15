@@ -7,6 +7,7 @@ import { keepClaudeWindowOpen } from "@/lib/claude-window-keepalive-run";
 import { authorizeDispatch } from "@/lib/dispatch/dispatch-auth";
 import { parseDispatchHostName } from "@/lib/dispatch/dispatch-job";
 import { claimDispatchJobs, sweepAgentUsageLimitPause } from "@/lib/dispatch/jobs";
+import { sweepReleaseReviewReevaluation } from "@/lib/dispatch/release-review-reevaluate";
 import { launchNextWindowRunEntries } from "@/lib/next-window-run-launch";
 import {
   cancelManuallyStartedScheduledRuns,
@@ -173,6 +174,13 @@ export async function POST(request: NextRequest) {
       await sweepBackupCiMerges();
     } catch (error) {
       console.error("[POST /api/dispatch/claim] バックアップCI合格後のマージ判定に失敗しました:", error);
+    }
+    // 全体レビューの自動再評価（#4664）の再照合。報告の反映に失敗した・再起動で判定が抜けた対象を拾う。
+    // 積んだ`RELEASE_REVIEW`は、下の`claimDispatchJobs`で同じ回に受け取られうる
+    try {
+      await sweepReleaseReviewReevaluation();
+    } catch (error) {
+      console.error("[POST /api/dispatch/claim] 全体レビューの自動再評価の再照合に失敗しました:", error);
     }
   }
 

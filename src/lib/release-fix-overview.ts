@@ -1,6 +1,7 @@
 import { isInternalHoldReason } from "@/lib/release-fix-internal";
 import type { ReleaseFixStatus } from "@/lib/release-fix-series";
 import type { RcPublishNext } from "@/lib/release-rc-action";
+import { describeReviewStageLabel, type ReviewEvidenceStage } from "@/lib/release-review-reevaluation";
 
 /**
  * リリースの検証・修正画面の上部に出す「現在の状態・検証の要約・主操作」（#4398）。**純関数だけ**を置く。
@@ -76,6 +77,8 @@ export type OverviewChecks = {
     totalFiles?: number | null;
     /** 結果の記録時刻（ISO）。統合検証より古いかの判定に使う（#4640） */
     updatedAt?: string | null;
+    /** 統合検証の証跡から見た共通の段階（#4664）。旧応答では省略 */
+    stage?: ReviewEvidenceStage;
   };
   integration: { state: CheckState; reason?: string | null; updatedAt?: string | null };
   /** Mac検証。対象外・未設定なら省略 */
@@ -295,6 +298,25 @@ export function describeFixOverview(input: {
   }
   const reflected = series?.successorPrNumber != null;
   const problems = isProblem(checks.aiReview.state) || isProblem(checks.integration.state);
+  // 全体レビューのコード確認は済み、統合検証の証跡を待っている／その証跡で再評価している（#4664）。
+  // どちらも待てば進む段階で、修正Issueの作成や手動の再実行を主操作にしない（統合検証の失敗は下の分岐が先に拾う）
+  const stage = checks.aiReview.stage;
+  if (stage && (stage.kind === "integration_waiting" || stage.kind === "reevaluating") && !isProblem(checks.integration.state)) {
+    const waiting = stage.kind === "integration_waiting";
+    return {
+      ...base,
+      tone: "progress",
+      pill: describeReviewStageLabel(stage),
+      headline: waiting
+        ? "全体レビューのコード確認は済みました。統合検証の結果を待っています"
+        : "統合検証の結果で、全体レビューの未確認項目を自動で再評価しています",
+      detail: waiting
+        ? "統合検証が終わると、その結果に依存する項目だけを自動で再評価します。全体レビューはまだ完了していません。"
+        : "確認済みの範囲・指摘と採否は引き継ぎます。修正Issue・PR・候補は増えません。",
+      action: none,
+      autoProgress: true,
+    };
+  }
   // 指摘0件でレビュー範囲だけ不足（例: 65/71ファイル）。修正Issueの作成を主操作にせず、成功にも変えない
   if (isReviewCoverageGap(checks) && !isProblem(checks.integration.state)) {
     const coverage = reviewCoverageText(checks.aiReview);
