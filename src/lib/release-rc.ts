@@ -14,6 +14,7 @@
  */
 
 import type { ReleaseMergeGate } from "@/lib/release-merge-gate";
+import type { ReviewEvidenceStage } from "@/lib/release-review-reevaluation";
 
 /** 候補の状態（画面・APIに出す12種）。`phase`と検証結果から`deriveRcStatus`が決める */
 export const RC_STATUSES = [
@@ -134,6 +135,8 @@ export type RcStatusInput = {
   gate: ReleaseMergeGate | null;
   /** 修正系列（#4317）が進行中か（指摘を直している途中） */
   fixInProgress: boolean;
+  /** 全体レビューの共通の段階（#4664）。証跡待ち・確認中を「修正が必要」と取り違えないために使う。無ければ従来どおり */
+  reviewStage?: ReviewEvidenceStage | null;
   /**
    * 有効な公開承認（#4666）があるか。承認済みの候補は最終検証の合格後に自動で本番公開するので、
    * 「本番承認待ち」ではなく「自動公開待ち」と出す。省略時はfalse（承認の記録が無い既存の候補）
@@ -203,6 +206,21 @@ export function deriveRcStatus(input: RcStatusInput): RcStatusView {
   const gate = input.gate;
   if (gate === null) return view("awaiting_verification", "検証結果を取得できません。結果を推測しません");
   const states = gate.views.map((v) => v.state);
+  // 全体レビューのコード確認は済み、統合検証の証跡を待つ／その証跡で再評価している（#4664）。待てば進む段階で、
+  // 統合検証側に失敗・要確認が無い限り「修正が必要」にしない（レビュー側の指摘があれば段階は要確認になる）
+  const stage = input.reviewStage;
+  if (
+    stage &&
+    (stage.kind === "integration_waiting" || stage.kind === "reevaluating") &&
+    !gate.views.some((v) => v.kind === "integration" && (v.state === "failed" || v.state === "needs_check"))
+  ) {
+    return view(
+      "verifying",
+      stage.kind === "integration_waiting"
+        ? `revision ${input.current.revision}: 全体レビューのコード確認は済み、統合検証の結果を待っています`
+        : `revision ${input.current.revision}: 統合検証の結果で全体レビューの未確認項目を再評価しています`,
+    );
+  }
   if (states.some((s) => s === "failed") || gate.blockers.some((b) => b.state === "needs_check")) {
     return input.fixInProgress
       ? view("fixing", "指摘・失敗を直しています。修正を取り込むと新しいrevisionで検証し直します")

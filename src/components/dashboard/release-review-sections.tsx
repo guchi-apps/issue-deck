@@ -26,6 +26,7 @@ import { tallyReleaseReviews } from "@/lib/release-changes";
 import { describeReleaseReviewDiagnostic } from "@/lib/release-review-diagnostic";
 import { POLLER_EXPLANATION, type ReleaseOpsAssessment } from "@/lib/release-review-ops-evidence";
 import { describeReviewRerun, type ReviewRerunView } from "@/lib/release-review-rerun-view";
+import { describeReviewStageLabel, REVIEW_OPEN_ITEM_LABEL } from "@/lib/release-review-reevaluation";
 import {
   formatReleaseElapsed,
   formatReleaseReviewAgent,
@@ -606,8 +607,30 @@ function AiReviewSection({
   const executionFailed = section.state === "failed";
   const rerunView = integration ? describeReviewRerun(section, integration) : ({ kind: "none" } as const);
   const diagnosticView = executionFailed ? describeReleaseReviewDiagnostic(section.diagnostic) : null;
-  const head: SectionHead =
-    executionFailed && diagnosticView
+  // 統合検証の証跡から見た共通の段階（#4664）。上部バッジ・本番確認と同じ名前を見出しに出す
+  const stage = section.stage;
+  const stageHead: SectionHead | null =
+    stage && (stage.kind === "integration_waiting" || stage.kind === "reevaluating")
+      ? {
+          ...baseHead,
+          tone: "run",
+          mark: "◌",
+          label: describeReviewStageLabel(stage),
+          detail:
+            stage.kind === "integration_waiting"
+              ? "全体レビューの最終確認は未完了です"
+              : "統合検証の結果に依存する項目だけを自動で再評価しています",
+        }
+      : stage?.kind === "needs_check" && stage.autoReevaluated
+        ? {
+            ...baseHead,
+            label: describeReviewStageLabel(stage),
+            detail: stage.items.map((item) => REVIEW_OPEN_ITEM_LABEL[item]).join("・") || baseHead.detail,
+          }
+        : null;
+  const head: SectionHead = stageHead
+    ? stageHead
+    : executionFailed && diagnosticView
       ? {
           ...baseHead,
           tone: "warn",
@@ -1549,6 +1572,8 @@ export function ReleaseVerificationBrief({
         verification.aiReview.state,
         verification.integration.state,
         verification.mac.state,
+        // 自動再評価の段階（#4664）。区分の状態が同じでも、見出しの「統合検証待ち」「確認中」を揃える
+        verification.aiReview.stage?.kind ?? "",
         verification.target.baseSha,
         verification.target.headSha,
       ].join("|")

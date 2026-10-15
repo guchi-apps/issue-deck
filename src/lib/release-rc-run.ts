@@ -50,7 +50,12 @@ import {
   type RcStatusView,
 } from "@/lib/release-rc";
 import { checkRebuildPullRequest, orderSelection, REBUILD_PR_PROBLEM_LABEL, type RebuildPullRequestProblem } from "@/lib/release-rebuild-selection";
-import { listReleaseVerificationRecords, registerReleaseVerification } from "@/lib/release-verification";
+import {
+  listReleaseVerificationDetails,
+  listReleaseVerificationRecords,
+  registerReleaseVerification,
+} from "@/lib/release-verification";
+import { summarizeReleaseVerification } from "@/lib/release-verification-summary";
 
 /**
  * 正式版を上げる前に固定したリリース候補（#4495）の外部操作。判断は`release-rc.ts`の純関数が持つ。
@@ -301,6 +306,7 @@ async function buildCandidateView(ctx: Context, row: CandidateRow): Promise<RcCa
 
   let pullRequest: RcPullRequestObservation | null = null;
   let gate = null;
+  let reviewStage = null;
   if (current?.prNumber != null) {
     const pr = await observeCandidatePullRequest(ctx, row.sequence).catch(() => null);
     if (pr) {
@@ -308,6 +314,16 @@ async function buildCandidateView(ctx: Context, row: CandidateRow): Promise<RcCa
       const records = await listReleaseVerificationRecords(fullNameOf(ctx), pr.number);
       // 状態の判定は常に強制ありで評価する（未合格を合格と見せない）。マージの強制はマージゲート側が持つ
       gate = evaluateReleaseMergeGate({ current: { baseSha: pr.base.sha, headSha: pr.head.sha }, records, enforced: true });
+      // 全体レビューの共通の段階（#4664）。画面の要約と同じ関数で出す
+      const details = await listReleaseVerificationDetails(fullNameOf(ctx), pr.number).catch(() => null);
+      reviewStage = details
+        ? (summarizeReleaseVerification({
+            current: { baseSha: pr.base.sha, headSha: pr.head.sha },
+            rows: details,
+            enforced: true,
+            aiReviewAssignee: "",
+          }).aiReview.stage ?? null)
+        : null;
     }
   }
   const fix = await relatedFixPrNumbers(fullNameOf(ctx), prNumbers);
@@ -320,6 +336,7 @@ async function buildCandidateView(ctx: Context, row: CandidateRow): Promise<RcCa
     pullRequest,
     gate,
     fixInProgress: fix.active,
+    reviewStage,
   });
   const frozenPrs = jsonArray<FrozenPr>(row.frozenPrs);
   const imported = applied.flatMap((r) => jsonArray<ImportedPr>(r.importedPrs).map((p) => p.number));

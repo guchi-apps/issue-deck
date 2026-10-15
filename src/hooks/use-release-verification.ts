@@ -44,7 +44,15 @@ export function useReleaseVerification(
         setLoaded({ key, verification: body.verification });
         setFailure(null);
         const states = [body.verification.integration.state, body.verification.aiReview.state];
-        if (states.some((state) => state === "waiting" || state === "running")) delay = ACTIVE_POLL_MS;
+        // 統合検証の完了から自動再評価が積まれるまで（#4664）は両区分とも完了に見える。段階で追い続ける
+        const stage = body.verification.aiReview.stage?.kind;
+        if (
+          states.some((state) => state === "waiting" || state === "running") ||
+          stage === "reevaluating" ||
+          stage === "integration_waiting"
+        ) {
+          delay = ACTIVE_POLL_MS;
+        }
       } catch (err) {
         if (err instanceof DOMException && err.name === "AbortError") return;
         setFailure({ key, message: err instanceof Error ? err.message : String(err) });

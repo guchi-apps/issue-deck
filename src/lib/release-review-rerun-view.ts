@@ -106,18 +106,35 @@ export function describeReviewRerun(
     });
   }
 
+  // 自動再評価（#4664）。統合検証が完了すると、証跡に依存する項目だけをサーバーが自動で再評価する
+  const stage = aiReview.stage;
+  if (stage?.kind === "reevaluating") {
+    return {
+      kind: "wait",
+      lead: "統合検証が完了したため、その結果に依存する項目を自動で再評価しています（開始待ちを含む）。手動の操作は不要です。",
+      buttonLabel: "全体レビューを再実行（自動再評価中）",
+      prerequisites,
+      ops,
+    };
+  }
   if (integrationPending) {
     return {
       kind: "wait",
-      lead: "統合検証の完了を待っています。途中の証跡では再評価しません。完了すると再実行できます。",
+      lead:
+        stage?.kind === "integration_waiting"
+          ? "コード確認は済んでいます。統合検証が完了すると、その結果に依存する項目を自動で再評価します（手動の操作は不要です）。"
+          : "統合検証の完了を待っています。途中の証跡では再評価しません。完了すると自動で再評価します。",
       buttonLabel: "全体レビューを再実行（検証完了後）",
       prerequisites,
       ops,
     };
   }
+  const autoReevaluated = stage?.kind === "needs_check" && stage.autoReevaluated;
   return {
     kind: "ready",
-    lead: evidenceNewer
+    lead: autoReevaluated
+      ? "最新の統合検証の結果で自動再評価済みです。残っている項目は対応・判断が必要です。再実行は回復用で、同じ証跡では結果が変わらないことがあります。"
+      : evidenceNewer
       ? "統合検証が完了しています。更新された証跡で未確認の項目を再評価します。確認済みの結果は再利用し、修正Issue・PR・候補は増えません。"
       : aiReview.state === "failed"
         ? "レビューを最後まで行えていません。同じ対象でやり直します。修正Issue・PR・候補は増えません。"

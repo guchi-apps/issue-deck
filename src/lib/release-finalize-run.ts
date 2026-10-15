@@ -71,7 +71,13 @@ import {
   type Context,
 } from "@/lib/release-rc-run";
 import { canTransitionRcPhase, parseRcPhase, type RcPhase } from "@/lib/release-rc";
-import { listReleaseVerificationRecords, registerReleaseVerification, type ReleaseVerificationTarget } from "@/lib/release-verification";
+import {
+  listReleaseVerificationDetails,
+  listReleaseVerificationRecords,
+  registerReleaseVerification,
+  type ReleaseVerificationTarget,
+} from "@/lib/release-verification";
+import { summarizeReleaseVerification } from "@/lib/release-verification-summary";
 import { getReleaseVerificationConfig } from "@/lib/release-verification-config";
 import { BUMP_KINDS, type BumpKind } from "@/lib/semver-bump";
 
@@ -761,15 +767,22 @@ export async function recordFinalizeReport(input: {
 /** 最終検証の状態。バンプ後のheadでCIが成功し、再実行が必要な検証が全て合格したときだけ完了 */
 async function evaluateChecks(ctx: Context, row: FinalizationRow, pull: PullDetail): Promise<RcFinalizationChecks> {
   const repositoryFullName = fullNameOf(ctx);
-  const [ci, records] = await Promise.all([
+  const [ci, records, details] = await Promise.all([
     fetchPullRequestCiState(ctx.owner, ctx.repo, pull.number, ctx.token).catch(() => null),
     listReleaseVerificationRecords(repositoryFullName, row.prNumber),
+    listReleaseVerificationDetails(repositoryFullName, row.prNumber).catch(() => null),
   ]);
-  const gate = evaluateReleaseMergeGate({ current: { baseSha: row.finalBaseSha ?? "", headSha: row.finalHeadSha ?? "" }, records, enforced: true });
+  const finalTarget = { baseSha: row.finalBaseSha ?? "", headSha: row.finalHeadSha ?? "" };
+  const gate = evaluateReleaseMergeGate({ current: finalTarget, records, enforced: true });
+  // バンプ後の全体レビューの共通の段階（#4664）。統合検証の証跡待ち・再評価中を「要確認で終了」と見せない
+  const reviewStage = details
+    ? (summarizeReleaseVerification({ current: finalTarget, rows: details, enforced: true, aiReviewAssignee: "" }).aiReview
+        .stage ?? null)
+    : null;
   const pendingReverify = gate.views.filter((v) => v.state !== "passed" && v.state !== "not_applicable").map((v) => v.kind as FinalizeVerificationKind);
   const ciState = ci?.ciState ?? "unknown";
   const readiness = decideFinalizeReadiness({ checks: { ciState, draft: pull.draft }, pendingReverify });
-  const reverify = describeReverifyItems(gate.views);
+  const reverify = describeReverifyItems(gate.views, reviewStage);
   return {
     ciState,
     draft: pull.draft,

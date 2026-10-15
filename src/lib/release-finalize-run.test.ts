@@ -81,6 +81,9 @@ vi.mock("@/lib/deploy-recovery-series-run", () => ({ fetchDeployRunsForSha: vi.f
 vi.mock("@/lib/release-verification", () => ({
   listReleaseVerificationRecords: mocks.records,
   registerReleaseVerification: mocks.register,
+  listReleaseVerificationDetails: vi.fn(async () => {
+    throw new Error("not mocked");
+  }),
 }));
 vi.mock("@/lib/release-mac-verification", () => ({ listReleaseMacRows: mocks.macRows }));
 vi.mock("@/lib/dispatch/release-verify-jobs", () => ({ requestReleaseVerifyJob: mocks.verifyJob }));

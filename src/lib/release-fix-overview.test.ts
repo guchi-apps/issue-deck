@@ -22,6 +22,29 @@ const series = (status: ReleaseFixStatus, successor: number | null = null) => ({
   rebuildFailed: false,
 });
 
+describe("全体レビューの共通の段階（#4664）", () => {
+  it("統合検証待ち・再評価中は進行中として出し、手動の再実行や修正起案を主操作にしない", () => {
+    const waiting = describeFixOverview({
+      series: null,
+      checks: checks({ aiReview: { state: "needs_check", findingCount: 0, stage: { kind: "integration_waiting" } }, integration: { state: "running" } }),
+    });
+    expect(waiting).toMatchObject({ tone: "progress", pill: "コード確認済み・統合検証待ち", action: { kind: "none" } });
+    const reevaluating = describeFixOverview({
+      series: null,
+      checks: checks({ aiReview: { state: "needs_check", findingCount: 0, stage: { kind: "reevaluating" } } }),
+    });
+    expect(reevaluating).toMatchObject({ tone: "progress", pill: "検証結果を確認中", action: { kind: "none" } });
+  });
+
+  it("統合検証が失敗していれば、段階より失敗を優先する", () => {
+    const o = describeFixOverview({
+      series: null,
+      checks: checks({ aiReview: { state: "needs_check", findingCount: 0, stage: { kind: "reevaluating" } }, integration: { state: "failed" } }),
+    });
+    expect(o.pill).not.toBe("検証結果を確認中");
+  });
+});
+
 describe("describeFixOverview", () => {
   it("修正を反映したが指摘が残る（#4394相当）: 残件数と「修正Issueを作成」を最初に出す", () => {
     const o = describeFixOverview({

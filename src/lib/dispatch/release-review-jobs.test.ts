@@ -76,6 +76,22 @@ describe("requestReleaseReviewJob", () => {
     expect(verificationUpdateMany.mock.calls[0][0].where).toMatchObject({ kind: "ai_review" });
   });
 
+  it("自動再評価（#4664）: 指定したホストにだけ積む", async () => {
+    hostFindMany.mockResolvedValue([host({ name: "a-host" }), host({ name: "verify-host" })]);
+    jobCreate.mockImplementation(({ data }) => Promise.resolve({ id: "j1", ...data }));
+    const result = await requestReleaseReviewJob(target, NOW, { requiredHost: "verify-host", recordNoHost: false });
+    expect(result).toMatchObject({ ok: true, outcome: "queued" });
+    expect(jobCreate.mock.calls[0][0].data.targetHost).toBe("verify-host");
+  });
+
+  it("自動再評価（#4664）: 指定ホストが不適格なら、有効な結果を失敗で上書きせずに見送る", async () => {
+    hostFindMany.mockResolvedValue([host({ name: "a-host" }), host({ name: "verify-host", releaseReviewCapable: false })]);
+    const result = await requestReleaseReviewJob(target, NOW, { requiredHost: "verify-host", recordNoHost: false });
+    expect(result).toMatchObject({ ok: false, rejection: "no_host" });
+    expect(jobCreate).not.toHaveBeenCalled();
+    expect(verificationUpdateMany).not.toHaveBeenCalled();
+  });
+
   it("同じ対象の未完了ジョブがあれば積まない", async () => {
     jobFindFirst.mockResolvedValue({ id: "j0" });
     expect(await requestReleaseReviewJob(target, NOW)).toMatchObject({ outcome: "already_queued" });
@@ -126,6 +142,13 @@ describe("applyReleaseReviewReport", () => {
     expect(verificationUpdateMany.mock.calls[0][0].data.findings).toMatchObject({ previousRun });
   });
 
+  it("自動再評価の印（#4664）も結果へ引き継ぎ、同じ証跡で繰り返さない", async () => {
+    const autoReevaluation = { integrationAt: "2026-10-16T05:25:00.000Z", requestedAt: "2026-10-16T05:25:10.000Z" };
+    verificationFindFirst.mockResolvedValue({ findings: { autoReevaluation } });
+    await applyReleaseReviewReport(job, "succeeded", null, { state: "passed", findings: [] });
+    expect(verificationUpdateMany.mock.calls[0][0].data.findings).toMatchObject({ autoReevaluation });
+  });
+
   it("skippedは何も書かない", async () => {
     expect(await applyReleaseReviewReport(job, "skipped", null, null)).toBe(false);
   });
@@ -160,6 +183,14 @@ describe("rerunReleaseReviewJob", () => {
         summary: "旧要約",
       },
     });
+  });
+
+  it("自動再評価（#4664）は印を残して積む", async () => {
+    hostFindMany.mockResolvedValue([host()]);
+    jobCreate.mockResolvedValue({ id: "j2", targetHost: "subpc" });
+    const autoReevaluation = { integrationAt: "2026-10-16T05:25:00.000Z", requestedAt: "2026-10-16T05:25:10.000Z" };
+    await rerunReleaseReviewJob(target, NOW, { requiredHost: "subpc", recordNoHost: false, autoReevaluation });
+    expect(verificationUpdateMany.mock.calls[0][0].data.findings).toEqual({ autoReevaluation });
   });
 
   it("実行中・待機中のジョブがあれば二重に積まず、記録も戻さない", async () => {

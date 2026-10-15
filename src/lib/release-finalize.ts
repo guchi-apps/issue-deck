@@ -1,5 +1,10 @@
 import { compareVersions, nextVersion, type BumpKind } from "@/lib/semver-bump";
 import type { ReleaseVerificationKind, ReleaseVerificationRecord, ReleaseVerificationView } from "@/lib/release-merge-gate";
+import {
+  describeReviewStageLabel,
+  REVIEW_OPEN_ITEM_LABEL,
+  type ReviewEvidenceStage,
+} from "@/lib/release-review-reevaluation";
 
 /**
  * 公開準備（#4496）の判断。**合格した候補（#4495）だけを、公開の直前に正式バンプする。**
@@ -478,10 +483,31 @@ export const REVERIFY_PHASE_LABEL: Record<ReverifyPhase, string> = {
   invalidated: "対象が変わりました",
 };
 
-/** バンプ後の対象に対する検証の記録（`evaluateReleaseMergeGate`のviews）を、検証ごとの理由付きの項目へ直す */
-export function describeReverifyItems(views: readonly ReleaseVerificationView[]): ReverifyItem[] {
+/**
+ * バンプ後の対象に対する検証の記録（`evaluateReleaseMergeGate`のviews）を、検証ごとの理由付きの項目へ直す。
+ * `reviewStage`（#4664）を渡すと、全体レビューが統合検証の証跡を待つ・その証跡で再評価している間は
+ * 「再検証中」（待てば進む）として扱い、要確認で終了とは見せない。自動再評価済みの要確認には残件を添える
+ */
+export function describeReverifyItems(
+  views: readonly ReleaseVerificationView[],
+  reviewStage?: ReviewEvidenceStage | null,
+): ReverifyItem[] {
   return views.map((view) => {
     const label = REVERIFY_KIND_LABEL[view.kind];
+    if (view.kind === "ai_review" && reviewStage) {
+      if (reviewStage.kind === "integration_waiting" || reviewStage.kind === "reevaluating") {
+        return { kind: view.kind, label, state: "running", reason: `${label}: ${describeReviewStageLabel(reviewStage)}` };
+      }
+      if (reviewStage.kind === "needs_check" && reviewStage.autoReevaluated && view.state === "needs_check") {
+        const items = reviewStage.items.map((item) => REVIEW_OPEN_ITEM_LABEL[item]).join("・");
+        return {
+          kind: view.kind,
+          label,
+          state: view.state,
+          reason: `${label}: 自動再評価済み・対応／判断が必要${items ? `（${items}）` : ""}`,
+        };
+      }
+    }
     const reason = (() => {
       switch (view.state) {
         case "passed":

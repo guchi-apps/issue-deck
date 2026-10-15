@@ -24,6 +24,26 @@ function resolve(overrides: Partial<PullRequestReleaseChecks>) {
 }
 
 describe("resolveReleaseCandidateVerification", () => {
+  it("コード確認済み・統合検証待ち／検証結果を確認中は、要確認でなく待てば進むものとして出す（#4664）", () => {
+    const waiting = resolve({ aiReview: "needs_check", integration: "running", aiReviewStage: { kind: "integration_waiting" } });
+    expect(waiting.problem).toBeNull();
+    expect(waiting.progress?.checks[0]).toMatchObject({ name: "全体レビュー", stageLabel: "コード確認済み・統合検証待ち" });
+    const reevaluating = resolve({ aiReview: "needs_check", aiReviewStage: { kind: "reevaluating" } });
+    expect(reevaluating.problem).toBeNull();
+    expect(reevaluating.progress?.checks).toEqual([{ name: "全体レビュー", started: true, stageLabel: "検証結果を確認中" }]);
+    expect(describeReleaseVerificationWait(reevaluating)).toBe("全体レビュー（検証結果を確認中）の判定が出るまでマージできません");
+  });
+
+  it("自動再評価後も残る要確認は、残件の種類を添えた要確認にする（#4664）", () => {
+    const v = resolve({
+      aiReview: "needs_check",
+      aiReviewStage: { kind: "needs_check", autoReevaluated: true, items: ["findings", "ops"] },
+    });
+    expect(v.problem?.reasons[0]).toBe(
+      "全体レビュー: 自動再評価済み・対応／判断が必要（対応・判断が必要な指摘・運用作業（poller更新・再起動）の証跡待ち）",
+    );
+  });
+
   it("両方合格（または対象外）ならclearで、mainへマージ待ちを出してよい", () => {
     expect(isReleaseCandidateClear(resolve({}))).toBe(true);
     expect(isReleaseCandidateClear(resolve({ integration: "not_applicable" }))).toBe(true);
