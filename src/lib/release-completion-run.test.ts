@@ -11,6 +11,8 @@ type Row = Record<string, unknown> & { id: string };
 let runs: Row[] = [];
 let fixSeries: Row[] = [];
 let recoveries: Row[] = [];
+let approvals: Row[] = [];
+let candidates: Row[] = [];
 let nextId = 1;
 let afterUpdateMany: ((data: Record<string, unknown>) => Promise<void>) | null = null;
 
@@ -22,6 +24,7 @@ function matches(row: Row, where: Record<string, unknown>): boolean {
       if ("in" in condition) return (condition.in ?? []).includes(row[key]);
       if ("not" in condition) return row[key] !== condition.not && !(condition.not !== null && row[key] === null);
       if ("lt" in condition) return row[key] instanceof Date && (row[key] as Date) < (condition.lt as Date);
+      if ("gt" in condition) return row[key] instanceof Date && (row[key] as Date) > ((condition as { gt: Date }).gt as Date);
     }
     return row[key] === value;
   });
@@ -87,6 +90,9 @@ vi.mock("@/lib/db", () => ({
     },
     releaseFixSeries: table(() => fixSeries),
     deployRecoverySeries: table(() => recoveries),
+    releasePublishApproval: table(() => approvals),
+    releaseCandidate: table(() => candidates),
+    releaseCandidateFinalization: { findMany: vi.fn(async () => []), findFirst: vi.fn(async () => null) },
     sessionUsage: { aggregate: vi.fn(async () => ({ _sum: { costUsd: 0 } })) },
     repository: { findFirst: vi.fn(async () => ({ installation: { installationId: 1 } })) },
     appSetting: { findUnique: vi.fn(async () => null) },
@@ -178,6 +184,8 @@ beforeEach(() => {
   runs = [];
   fixSeries = [];
   recoveries = [];
+  approvals = [];
+  candidates = [];
   nextId = 1;
   afterUpdateMany = null;
   vi.clearAllMocks();
@@ -363,5 +371,118 @@ describe("runReleaseCompletionSweep", () => {
     Object.assign(recoveries[0], { status: "recovered", recoveredAt: later(30), releaseRunUrl: "u7" });
     await runReleaseCompletionSweep({ hostName: "subpc", now: later(31) });
     expect(runs[0]).toMatchObject({ status: "completed", activeKey: null });
+  });
+});
+
+describe("公開承認（#4666）から始めた系列", () => {
+  function seedApprovalRun(approvalOverrides: Record<string, unknown> = {}) {
+    candidates.push({ id: "c1", phase: "awaiting_approval" });
+    approvals.push({
+      id: "pa1",
+      candidateId: "c1",
+      repositoryFullName: "o/r",
+      status: "active",
+      activeKey: "c1",
+      baseSha: "base1",
+      headSha: "head1",
+      expiresAt: later(600),
+      completionRunId: "r1",
+      ...approvalOverrides,
+    });
+    runs.push({
+      id: "r1",
+      repositoryFullName: "o/r",
+      originPrNumber: 10,
+      originHeadSha: "head1",
+      scope: "until_production",
+      startedByUserId: "u1",
+      expiresAt: later(600),
+      status: "checking",
+      activeKey: "o/r",
+      candidatePrNumber: 10,
+      candidateHeadSha: "head1",
+      candidateBaseSha: "base1",
+      candidatePrNumbers: [10],
+      dispatchedSeriesId: null,
+      dispatchedAt: null,
+      costLimitUsd: 30,
+      costUsedUsd: 0,
+      mergeSha: null,
+      mergedByRun: false,
+      releaseStartedAt: null,
+      releaseRunId: null,
+      releaseRunUrl: null,
+      deployRecoverySeriesId: null,
+      publishApprovalId: "pa1",
+      note: null,
+      stopReason: null,
+      stopDetail: null,
+      stoppedAt: null,
+      lastSweepAt: null,
+      completedAt: null,
+      createdAt: now,
+      updatedAt: now,
+    });
+    loadReleaseVerificationSummary.mockResolvedValue(summary("passed", "passed"));
+  }
+
+  it("最終検証に合格したら、追加の承認なしで1回だけマージし、承認を消費済みにする", async () => {
+    seedApprovalRun();
+    await runReleaseCompletionSweep({ hostName: "subpc", now });
+    expect(mergePullRequest).toHaveBeenCalledWith("o", "r", 10, "token", "head1");
+    expect(approvals[0]).toMatchObject({ status: "consumed", activeKey: null, mergeSha: "merge1" });
+    expect(runs[0]).toMatchObject({ status: "releasing", mergeSha: "merge1", mergedByRun: true });
+    // 次の巡回は本番反映の追跡だけで、マージを重ねない
+    await runReleaseCompletionSweep({ hostName: "subpc", now: later(1) });
+    expect(mergePullRequest).toHaveBeenCalledTimes(1);
+    // 修正Issueの起案はしない
+    expect(createReleaseFixSeries).not.toHaveBeenCalled();
+  });
+
+  it("取り消した承認からは、遅れて届いた巡回でもマージしない", async () => {
+    seedApprovalRun({ status: "revoked", activeKey: null });
+    await runReleaseCompletionSweep({ hostName: "subpc", now });
+    expect(mergePullRequest).not.toHaveBeenCalled();
+    expect(runs[0]).toMatchObject({ status: "needs_attention", stopReason: "approval_revoked", activeKey: null });
+  });
+
+  it("マージの直前に取消と競合したら（承認を確保できなければ）マージしない", async () => {
+    seedApprovalRun();
+    // 系列が`merging`を確保した直後に、利用者が取り消した
+    afterUpdateMany = async (data) => {
+      if (data.status === "merging" && !("mergeSha" in data)) {
+        const approval = approvals[0];
+        if (approval.status === "active") Object.assign(approval, { status: "revoked", activeKey: null });
+      }
+    };
+    await runReleaseCompletionSweep({ hostName: "subpc", now });
+    expect(mergePullRequest).not.toHaveBeenCalled();
+    expect(runs[0]).toMatchObject({ status: "needs_attention", stopReason: "approval_invalidated" });
+  });
+
+  it("承認した後にmainが進んだら、失効理由を残して止め、マージしない", async () => {
+    seedApprovalRun();
+    fetchMainHeadSha.mockResolvedValue("base2");
+    await runReleaseCompletionSweep({ hostName: "subpc", now });
+    expect(mergePullRequest).not.toHaveBeenCalled();
+    expect(approvals[0]).toMatchObject({ status: "invalidated", invalidReason: "main_advanced", activeKey: null });
+    expect(runs[0]).toMatchObject({ status: "needs_attention", stopReason: "approval_invalidated" });
+    expect(String(runs[0].stopDetail)).toContain("mainが進みました");
+  });
+
+  it("マージに失敗しても承認は保ち（同じ承認で再開できる）、二重にマージしない", async () => {
+    seedApprovalRun();
+    mergePullRequest.mockRejectedValueOnce(new Error("Required status check is expected"));
+    await runReleaseCompletionSweep({ hostName: "subpc", now });
+    expect(approvals[0]).toMatchObject({ status: "active" });
+    expect(runs[0]).toMatchObject({ status: "needs_attention", stopReason: "merge_failed" });
+    await runReleaseCompletionSweep({ hostName: "subpc", now: later(1) });
+    expect(mergePullRequest).toHaveBeenCalledTimes(1);
+  });
+
+  it("系列を止めたら、紐づく承認も取り消す", async () => {
+    seedApprovalRun();
+    await stopReleaseCompletionRun({ repositoryFullName: "o/r", runId: "r1", userId: "u1", token: "t", now });
+    expect(approvals[0]).toMatchObject({ status: "revoked", activeKey: null });
   });
 });

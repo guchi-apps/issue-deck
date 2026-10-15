@@ -1,4 +1,5 @@
 import { db } from "@/lib/db";
+import { mergePullRequest } from "@/lib/github/actions-api";
 import { getInstallationToken } from "@/lib/github/app-auth";
 import { compareBranches } from "@/lib/github/branches-api";
 import {
@@ -14,6 +15,7 @@ import {
 } from "@/lib/github/release-api";
 import {
   decideDevelopSync,
+  decideDevelopSyncAutoMerge,
   developSyncBranchName,
   developSyncMarker,
   isDevelopSyncHeadRef,
@@ -51,7 +53,13 @@ async function findOpenSyncPullRequest(ctx: Context): Promise<DevelopSyncPullReq
   const pr = open.find((p) => p.head.ref !== "main" && isDevelopSyncHeadRef(p.head.ref)) ?? open.find((p) => p.head.ref === "main") ?? null;
   if (!pr) return null;
   const ci = await fetchPullRequestCiState(ctx.owner, ctx.repo, pr.number, ctx.token).catch(() => null);
+  const judgement = ci?.mergeJudgement;
   return {
+    headSha: pr.head.sha,
+    body: pr.body ?? null,
+    labels: ((pr as { labels?: { name?: string }[] }).labels ?? []).map((l) => l.name ?? ""),
+    // 判定が出揃い（settled）、Claudeのレビューが実行済み・または不要（skipped）のときだけ
+    reviewSettled: judgement?.state === "settled" && (judgement.aiReview.state === "passed" || judgement.aiReview.state === "skipped"),
     number: pr.number,
     url: pr.html_url,
     headRef: pr.head.ref,
@@ -153,15 +161,38 @@ async function createSyncPullRequest(ctx: Context, mainSha: string, files: strin
 }
 
 /**
+ * 条件を満たす同期PRをマージコミットでマージする（#4669）。マージしたときだけtrue。**例外を投げない**。
+ * 条件の判定は純関数`decideDevelopSyncAutoMerge`。HEADのSHAを渡すので、判定後の追いコミットは巻き込まない
+ */
+async function autoMergeSyncPullRequest(ctx: Context, pr: DevelopSyncPullRequest, main: { sha: string; files: string[] }): Promise<boolean> {
+  const decision = decideDevelopSyncAutoMerge(pr, main);
+  if (!decision.ok) return false;
+  try {
+    await mergePullRequest(ctx.owner, ctx.repo, pr.number, ctx.token, decision.headSha);
+    console.info("[release-develop-sync] 同期PRを自動マージしました", fullNameOf(ctx), pr.number);
+    return true;
+  } catch (error) {
+    console.error("[release-develop-sync] 同期PRを自動マージできませんでした", fullNameOf(ctx), pr.number, error);
+    return false;
+  }
+}
+
+/**
  * 同期を確かめ、未同期で同期PRが無ければ作る。**例外を投げない**（呼び出し元の公開処理・巡回を止めない）。
  * 同じmainへの同期PRはブランチ名が同じなので、巡回が重なっても1本にしかならない
  */
-export async function ensureDevelopSync(ctx: Context): Promise<DevelopSyncStatus> {
+export async function ensureDevelopSync(ctx: Context, options: { autoMerge?: boolean } = {}): Promise<DevelopSyncStatus> {
   const fullName = fullNameOf(ctx);
   try {
     const observation = await observeDevelopSync(ctx);
     const status = decideDevelopSync(observation);
-    if (observation.kind !== "observed" || status.state !== "unsynced" || observation.openPullRequest !== null) return status;
+    if (observation.kind !== "observed" || status.state !== "unsynced") return status;
+    if (observation.openPullRequest !== null) {
+      if (options.autoMerge && (await autoMergeSyncPullRequest(ctx, observation.openPullRequest, { sha: observation.mainSha, files: observation.mainOnlyFiles }))) {
+        return decideDevelopSync(await observeDevelopSync(ctx));
+      }
+      return status;
+    }
     try {
       await createSyncPullRequest(ctx, observation.mainSha, observation.mainOnlyFiles);
       createFailures.delete(fullName);
@@ -195,7 +226,7 @@ export async function runDevelopSyncSweep(now = Date.now()): Promise<{ checked: 
     if (!repository) continue;
     try {
       const token = await getInstallationToken(repository.installation.installationId);
-      const status = await ensureDevelopSync({ owner: repository.ownerLogin, repo: repository.name, token });
+      const status = await ensureDevelopSync({ owner: repository.ownerLogin, repo: repository.name, token }, { autoMerge: true });
       result.checked += 1;
       if (status.state === "unsynced") result.unsynced.push(repositoryFullName);
       if (status.state === "unknown") result.unknown.push(repositoryFullName);

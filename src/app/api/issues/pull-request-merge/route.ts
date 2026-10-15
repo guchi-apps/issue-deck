@@ -17,6 +17,7 @@ import {
 import { rcSequenceOf } from "@/lib/release-branch";
 import { loadFinalizationSnapshot } from "@/lib/release-finalize-run";
 import { decideRcPublish } from "@/lib/release-rc-action";
+import { hasActivePublishApproval } from "@/lib/release-publish-approval-run";
 import { parseRcPhase } from "@/lib/release-rc";
 import { listReleaseVerificationRecords } from "@/lib/release-verification";
 import { getReleaseVerificationConfig } from "@/lib/release-verification-config";
@@ -75,6 +76,8 @@ async function handlePOST(request: NextRequest) {
           phase: snapshot ? parseRcPhase(snapshot.phase) : null,
           draft: pr.draft,
           headMatchesFinalization: snapshot?.applied?.finalHeadSha === pr.head.sha,
+          // 公開承認済みの候補は自動公開の系列だけがマージする（手動マージと並べて二重に進めない。#4666）
+          publishApproved: snapshot ? await hasActivePublishApproval(snapshot.candidateId).catch(() => false) : false,
         });
         if (!decision.ok) {
           return NextResponse.json({ error: decision.error, next: decision.next, message: decision.message }, { status: 409 });

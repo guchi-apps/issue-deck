@@ -2742,6 +2742,9 @@ model ReleaseCompletionRun {
   completedAt            DateTime?
   // deployが再実行も失敗したときに引き継いだ本番復旧系列（#4451）
   deployRecoverySeriesId String?   @db.VarChar(40)
+  // RCの公開承認（#4666）から始めた系列のとき、その承認（`ReleasePublishApproval.id`）。
+  // 承認由来の系列は修正Issueを起案せず、問題があれば理由を示して止まる
+  publishApprovalId      String?   @db.VarChar(40)
   // 表示用の補足（原因の区分・判断待ちの理由など）
   note                   String?   @db.Text
   stopReason             String?   @db.VarChar(64)
@@ -2969,9 +2972,10 @@ model ReleaseCandidate {
   createdAt            DateTime  @default(now())
   updatedAt            DateTime  @updatedAt
 
-  revisions     ReleaseCandidateRevision[]
-  finalizations ReleaseCandidateFinalization[]
-  reservations  ReleaseVersionReservation[]
+  revisions        ReleaseCandidateRevision[]
+  finalizations    ReleaseCandidateFinalization[]
+  reservations     ReleaseVersionReservation[]
+  publishApprovals ReleasePublishApproval[]
 
   @@unique([repositoryFullName, sequence])
   @@index([repositoryFullName, phase])
@@ -3057,6 +3061,53 @@ model ReleaseCandidateFinalization {
 
   @@index([candidateId, status])
   @@index([repositoryFullName, prNumber])
+}
+
+// RCから本番公開へ進む「公開承認」（#4666）。**「公開準備へ進む」を押した1回だけが承認で、二度目の本番承認を求めない。**
+// 承認の範囲は、押した時点の候補（revision・base/head）と想定した正式バンプ（版ファイル・更新履歴のみ）まで。
+// 範囲を外れた変化（それ以外の差分・候補の更新/置換・mainの前進・取消・期限切れ）は失効理由と差分を残して再承認へ戻す。
+// 承認の根拠はこの記録だけで、既存候補の「公開準備済み」から推定しない
+model ReleasePublishApproval {
+  id                 String    @id @default(cuid())
+  repositoryFullName String    @db.VarChar(191)
+  candidateId        String
+  // 承認した対象（押した時点の候補のrevision・PR・base/head）
+  revision           Int
+  prNumber           Int
+  baseSha            String    @db.VarChar(64)
+  headSha            String    @db.VarChar(64)
+  // 版指定の方針（`auto`＝最終公開差分から自動判定 / `patch` / `minor` / `major`）
+  bumpPolicy         String    @db.VarChar(8)
+  // 承認の範囲に含めた変更の分類（JSON配列。既定`["version","changelog"]`）と、承認時に見せた公開内容（JSON配列 `[{ number, title }]`）
+  allowedChanges     Json
+  contents           Json
+  // `active` / `merging`（本番マージを確保した） / `consumed`（mainへ入った） / `revoked`（取消） / `invalidated`（失効）
+  status             String    @db.VarChar(16)
+  // 有効（active・merging）の間だけ`candidateId`を入れる。同じ候補に承認を2本持たない
+  activeKey          String?   @unique @db.VarChar(40)
+  // 画面の操作ごとの要求キー（再送・二重押しで承認を重複させない）
+  requestKey         String    @unique @db.VarChar(64)
+  approvedByUserId   String    @db.VarChar(40)
+  approvedAt         DateTime  @default(now())
+  expiresAt          DateTime
+  // 自動公開を進めるリリース完了系列（最新のもの）
+  completionRunId    String?   @db.VarChar(40)
+  // 失効・取消の理由と、失効の原因になった差分（JSON配列。ファイルパス）
+  invalidReason      String?   @db.VarChar(64)
+  invalidDetail      String?   @db.Text
+  invalidDiff        Json?
+  invalidatedAt      DateTime?
+  revokedByUserId    String?   @db.VarChar(40)
+  revokedAt          DateTime?
+  mergeSha           String?   @db.VarChar(64)
+  consumedAt         DateTime?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  candidate ReleaseCandidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+
+  @@index([candidateId, status])
+  @@index([repositoryFullName])
 }
 
 // 正式版の予約台帳（#4496）。**同じ版を2つの候補が採らず、公開した版を再利用しない**ための記録。
