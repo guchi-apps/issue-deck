@@ -3,6 +3,8 @@ import { DISPATCH_HEARTBEAT_TIMEOUT_MS, isDispatchHostOnline } from "@/lib/dispa
 import type { ReleaseVerificationKind } from "@/lib/release-merge-gate";
 import { describeReleaseReviewAssignee, resolveReleaseReviewAssignee } from "@/lib/release-review-assignee";
 import { listReleaseMacRows } from "@/lib/release-mac-verification";
+import { loadReleaseReviewDecisionSummary } from "@/lib/release-review-decision-store";
+import { reviewFindingId, type ReleaseReviewFinding } from "@/lib/release-review-result";
 import { listReleaseVerificationDetails } from "@/lib/release-verification";
 import { getReleaseVerificationConfig } from "@/lib/release-verification-config";
 import {
@@ -28,7 +30,7 @@ export async function loadReleaseVerificationSummary(
     where: { id: 1 },
     select: { appAiModelReasoning: true, aiExecutionProvider: true },
   });
-  return summarizeReleaseVerification({
+  const summary = summarizeReleaseVerification({
     current,
     rows: await listReleaseVerificationDetails(repoFullName, prNumber),
     macRows: await listReleaseMacRows(repoFullName, prNumber),
@@ -37,6 +39,40 @@ export async function loadReleaseVerificationSummary(
     aiReviewAssignee: describeReleaseReviewAssignee(resolveReleaseReviewAssignee(setting)),
     progress: await loadReleaseVerificationProgress(repoFullName, prNumber, current),
   });
+  return attachReleaseReviewDecisions(repoFullName, prNumber, current, summary);
+}
+
+/**
+ * 全体レビューの指摘に、ユーザーの判断（#4657）を添える。旧形式の指摘にはIDが無いので、判断・修正系列と
+ * 同じ導出（`reviewFindingId`）で補う。判断はAIの`state`・`findings`を書き換えない
+ */
+async function attachReleaseReviewDecisions(
+  repoFullName: string,
+  prNumber: number,
+  current: { baseSha: string; headSha: string },
+  summary: ReleaseVerificationSummary,
+): Promise<ReleaseVerificationSummary> {
+  const withId = (f: ReleaseReviewFinding): ReleaseReviewFinding => (f.id ? f : { ...f, id: reviewFindingId(f) });
+  const aiReview = { ...summary.aiReview, findings: summary.aiReview.findings.map(withId), suggestions: summary.aiReview.suggestions.map(withId) };
+  const target = (blocking: boolean) => (f: ReleaseReviewFinding) => ({
+    id: f.id as string,
+    title: f.title,
+    severity: f.severity,
+    blocking,
+    premiseChanged: f.premiseChanged ?? null,
+  });
+  if (aiReview.state === "needs_check" || aiReview.state === "passed") {
+    aiReview.decisions = await loadReleaseReviewDecisionSummary({
+      repoFullName,
+      prNumber,
+      current,
+      findings: aiReview.findings.map(target(true)),
+      suggestions: aiReview.suggestions.map(target(false)),
+      state: aiReview.state,
+      unverifiedScope: aiReview.unverifiedScope ?? null,
+    });
+  }
+  return { ...summary, aiReview };
 }
 
 const JOB_KIND_TO_SECTION = { RELEASE_VERIFY: "integration", RELEASE_REVIEW: "ai_review" } as const;

@@ -12,6 +12,7 @@ import {
   type ReleaseMacSection,
 } from "@/lib/release-mac-verification";
 import { readReleaseReviewDiagnostic, type ReleaseReviewDiagnostic } from "@/lib/release-review-diagnostic";
+import type { ReleaseReviewDecisionSummary } from "@/lib/release-review-decision";
 import type { ReleaseReviewCoverage, ReleaseReviewFinding, ReleaseReviewMeta } from "@/lib/release-review-result";
 import type { ReleaseVerificationProgress } from "@/lib/release-verification-progress";
 
@@ -68,6 +69,13 @@ export type ReleaseVerificationSection = {
   diagnostic: ReleaseReviewDiagnostic | null;
   /** 再実行で置き換わる前の直前の結果（#4632）。現在の結果ではなく履歴。無ければnull */
   previousRun: ReleaseVerificationPreviousRun | null;
+  /**
+   * 指摘ごとのユーザー判断（#4657。全体レビューだけ）。AIの原判定（`findings`・`state`）とは別に持ち、
+   * 判断で`state`を書き換えない。読み出していない・読めなかったときはnull
+   */
+  decisions?: ReleaseReviewDecisionSummary | null;
+  /** 記録された未確認範囲そのもの（判断で解除してよいかの判定に使う）。無ければnull */
+  unverifiedScope?: string | null;
 };
 
 export type ReleaseVerificationPreviousRun = {
@@ -177,6 +185,8 @@ export function summarizeReleaseVerification(input: {
       progress,
       diagnostic: state === "failed" ? readReleaseReviewDiagnostic(row?.findings, current) : null,
       previousRun: readPreviousRun(row?.findings),
+      decisions: null,
+      unverifiedScope: row?.unverifiedScope ?? null,
     };
   };
 

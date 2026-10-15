@@ -7,6 +7,7 @@ import {
   findingIdOfSeriesItem,
   type PreviousReviewRecord,
   type ReleaseFixHistory,
+  type ReleaseReviewContextDecision,
 } from "./release-review-context";
 import { reviewFindingId } from "./release-review-result";
 
@@ -69,5 +70,37 @@ describe("buildReviewPromptContext", () => {
     const ctx = buildReviewPromptContext({ current, previous: previous({ state: "failed" }), histories: [history] });
     expect(ctx.mode).toBe("initial");
     expect(ctx.previous?.runFailed).toBe(true);
+  });
+});
+
+describe("ユーザー判断を文脈へ渡す（#4657）", () => {
+  const id = findingIdOfSeriesItem({ title: "設定漏れ", file: "a.ts:3" });
+  const decision = (over: Partial<ReleaseReviewContextDecision> = {}): ReleaseReviewContextDecision => ({
+    id,
+    title: "設定漏れ",
+    decision: "post_release",
+    reason: "公開後に配布",
+    impact: null,
+    scope: null,
+    timing: "公開直後",
+    followUp: "o/r#4651",
+    stale: false,
+    ...over,
+  });
+  const prev = () => previous({ findings: [{ id, title: "設定漏れ", file: "a.ts", line: 3, detail: "d", occurrences: 1 }] });
+
+  it("有効な非修正の判断は前回の指摘から外し、判断として渡す", () => {
+    const ctx = buildReviewPromptContext({ current, previous: prev(), histories: [history], decisions: [decision()] });
+    expect(ctx.previousFindings).toHaveLength(0);
+    expect(ctx.decidedFindingIds).toEqual([id]);
+    expect(ctx.decisions[0]).toMatchObject({ id, decision: "post_release" });
+  });
+
+  it("「今回直す」・前提が変わった判断は、従来どおり前回の指摘として解消を確認する", () => {
+    for (const d of [decision({ decision: "fix_now" }), decision({ stale: true })]) {
+      const ctx = buildReviewPromptContext({ current, previous: prev(), histories: [history], decisions: [d] });
+      expect(ctx.previousFindings.map((f) => f.id)).toEqual([id]);
+      expect(ctx.decidedFindingIds).toEqual([]);
+    }
   });
 });

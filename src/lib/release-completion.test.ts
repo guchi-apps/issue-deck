@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   decideCompletionMerge,
   decideReleaseCompletion,
+  isGateClearedByReviewDecisions,
   RELEASE_COMPLETION_FIX_START_TIMEOUT_MS,
   releaseCompletionStageIndex,
   type CompletionChecks,
@@ -283,6 +284,16 @@ describe("decideCompletionMerge", () => {
     expect(decideCompletionMerge(merging, { ...base, ciState: "failure" })).toEqual({ action: "stop", reason: "ci_failed" });
   });
 
+  it("要確認がユーザーの判断で解除できるものだけなら、他の条件が揃えばマージする（#4657）", () => {
+    const decided = { ...base, gateStatus: "needs_confirmation" as const, gateReasons: ["要確認"], gateClearedByDecision: true };
+    expect(decideCompletionMerge(merging, decided)).toEqual({ action: "merge", expectedHeadSha: "head1" });
+    // 判断で解除しても、Mac・CI・本番まで許可した範囲の条件は変わらない
+    expect(decideCompletionMerge(merging, { ...decided, macOk: false }).action).toBe("wait");
+    expect(decideCompletionMerge(merging, { ...decided, ciState: "pending" }).action).toBe("wait");
+    expect(decideCompletionMerge(run({ scope: "until_ready" }), decided)).toEqual({ action: "stop", reason: "scope_not_allowed" });
+    expect(decideCompletionMerge(merging, { ...base, gateStatus: "blocked", gateClearedByDecision: true }).action).toBe("wait");
+  });
+
   it("人の確認を求めるラベル・コンフリクトでは止める", () => {
     expect(decideCompletionMerge(merging, { ...base, pullRequest: { ...base.pullRequest!, labels: ["22.merge-confirm-required"] } })).toMatchObject({
       action: "stop",
@@ -377,5 +388,40 @@ describe("releaseCompletionStageIndex", () => {
     expect(releaseCompletionStageIndex("deploy_recovery", 0)).toBe(3);
     expect(releaseCompletionStageIndex("deploy_recovery", 4)).toBe(4);
     expect(releaseCompletionStageIndex("needs_attention")).toBe(-1);
+  });
+});
+
+describe("指摘ごとのユーザー判断（#4657）", () => {
+  const decided: CompletionChecks = { ...passed, aiReview: "needs_check", findingCount: 2 };
+
+  it("止める指摘の全件が修正しない判断なら、新たな修正を起案しない", () => {
+    const observe = (checks: CompletionChecks) => decideReleaseCompletion(run(), { now, candidate: openCandidate, series: null, checks });
+    expect(observe(decided)).toEqual({ action: "create_fix", sourceKind: "review_finding" });
+    expect(observe({ ...decided, aiReviewClearedByDecision: true }).action).not.toBe("create_fix");
+  });
+
+  it("判断済みでも統合検証の失敗は従来どおり起案する", () => {
+    const decision = decideReleaseCompletion(run(), {
+      now,
+      candidate: openCandidate,
+      series: null,
+      checks: { ...decided, aiReviewClearedByDecision: true, integration: "failed", integrationFailureKind: "code" },
+    });
+    expect(decision).toEqual({ action: "create_fix", sourceKind: "integration_failure" });
+  });
+
+  it("判断で解除できるのは全体レビューの要確認だけ", () => {
+    const aiOnly = [{ kind: "ai_review", state: "needs_check" }];
+    expect(isGateClearedByReviewDecisions({ gateStatus: "needs_confirmation", blockers: aiOnly, aiReviewCleared: true })).toBe(true);
+    expect(isGateClearedByReviewDecisions({ gateStatus: "needs_confirmation", blockers: aiOnly, aiReviewCleared: false })).toBe(false);
+    expect(
+      isGateClearedByReviewDecisions({
+        gateStatus: "needs_confirmation",
+        blockers: [...aiOnly, { kind: "integration", state: "needs_check" }],
+        aiReviewCleared: true,
+      }),
+    ).toBe(false);
+    // 実行中・失敗・古い結果（blocked）は判断では解除しない
+    expect(isGateClearedByReviewDecisions({ gateStatus: "blocked", blockers: [{ kind: "integration", state: "running" }], aiReviewCleared: true })).toBe(false);
   });
 });

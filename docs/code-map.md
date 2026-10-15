@@ -645,7 +645,7 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   - **リリース全体のAIレビューは`DispatchJob`（`kind=RELEASE_REVIEW`）**（#4238）。積む処理は
     [`lib/dispatch/release-review-jobs.ts`](../src/lib/dispatch/release-review-jobs.ts)（`release-verify`の`request`が統合検証と並べて呼ぶ）、
     担当は[`lib/release-review-assignee.ts`](../src/lib/release-review-assignee.ts)（`appAiModelReasoning`に従い、画面とジョブで同じ関数）、
-    結果の正規化は[`lib/release-review-result.ts`](../src/lib/release-review-result.ts)、確認項目は[`lib/release-review-checklist.ts`](../src/lib/release-review-checklist.ts)、再レビューの文脈は[`lib/release-review-context.ts`](../src/lib/release-review-context.ts)・[`-load.ts`](../src/lib/release-review-context-load.ts)（#4559）、実行はサブPCの`scripts/run-release-review.sh`。
+    結果の正規化は[`lib/release-review-result.ts`](../src/lib/release-review-result.ts)、確認項目は[`lib/release-review-checklist.ts`](../src/lib/release-review-checklist.ts)、再レビューの文脈は[`lib/release-review-context.ts`](../src/lib/release-review-context.ts)・[`-load.ts`](../src/lib/release-review-context-load.ts)（#4559）、指摘ごとのユーザー判断は[`lib/release-review-decision.ts`](../src/lib/release-review-decision.ts)（純関数）・[`-store.ts`](../src/lib/release-review-decision-store.ts)・`POST /api/repositories/release/review-decisions`と画面の[`release-review-decision.tsx`](../src/components/dashboard/release-review-decision.tsx)（#4657）、実行はサブPCの`scripts/run-release-review.sh`。
     画面の3区分は[`components/dashboard/release-review-sections.tsx`](../src/components/dashboard/release-review-sections.tsx)
     （PC・スマホ・本番マージの確認ダイアログで共通。`GET /api/repositories/release/verification`を部品自身が取る）。
     進捗（待機理由・工程・経過）は[`lib/release-verification-progress.ts`](../src/lib/release-verification-progress.ts)が

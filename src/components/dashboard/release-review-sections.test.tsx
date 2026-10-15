@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ReleaseReviewSections, ReleaseVerificationBrief, describeReviewCoverage } from "@/components/dashboard/release-review-sections";
 import type { UseReleaseChangesResult } from "@/hooks/use-release-changes";
+import { summarizeReleaseReviewDecisions } from "@/lib/release-review-decision";
 import type { ReleaseVerificationProgress } from "@/lib/release-verification-progress";
 import type { ReleaseVerificationSection, ReleaseVerificationSummary } from "@/lib/release-verification-summary";
 import type { ReleaseChangePullRequest } from "@/types/pull-request";
@@ -486,5 +487,72 @@ describe("describeReviewCoverage（#4615）", () => {
 
   it("実績の無い旧結果は件数を出さず実績不明にする", () => {
     expect(describeReviewCoverage({ coverage: null, reviewedFiles: null, totalFiles: 120 })).toContain("実績不明");
+  });
+
+  it("AIの指摘とユーザー判断を分けて出し、公開後作業を配布済みとは扱わない（#4657）", () => {
+    const base = "3f2a91c".padEnd(40, "0");
+    const finding = {
+      id: "R-0000aa",
+      severity: "high" as const,
+      title: "共通workflowの修正がフリートへ未配布",
+      detail: "配布が必要",
+      impact: "利用repoが旧版のまま",
+      evidence: "タグ未公開",
+      recommendation: null,
+      file: null,
+      line: null,
+      pullRequests: [],
+      blockingReason: "必須の配布の欠落",
+    };
+    const second = { ...finding, id: "R-0000bb", title: "別の指摘" };
+    const decisions = summarizeReleaseReviewDecisions({
+      records: [
+        {
+          id: "d1",
+          findingId: "R-0000aa",
+          sequence: 1,
+          decision: "post_release",
+          reason: "配布は本体の公開後にしかできない",
+          impact: null,
+          scope: null,
+          followUp: { repo: "guchi-apps/issue-deck", number: 4651 },
+          timing: "本番公開の直後",
+          prNumber: 4656,
+          headRef: HEAD,
+          baseSha: base,
+          headSha: "9b07e4d".padEnd(40, "0"),
+          severity: "high",
+          blocking: true,
+          findingTitle: finding.title,
+          decidedBy: "m-guchi",
+          decidedAt: "2026-10-15T01:00:00.000Z",
+        },
+      ],
+      findings: [finding, second].map((f) => ({ id: f.id, title: f.title, severity: f.severity, blocking: true })),
+      suggestions: [],
+      current: { baseSha: base },
+      state: "needs_check",
+      unverifiedScope: null,
+    });
+    render(
+      <ReleaseReviewSections
+        repositoryFullName="guchi-apps/issue-deck"
+        headRef={HEAD}
+        pullRequestNumber={4656}
+        verification={summary({ aiReview: section({ state: "needs_check", findings: [finding, second], decisions }) })}
+        verificationError={null}
+        changes={loadedChanges([])}
+      />,
+    );
+    const ai = row("全体レビュー");
+    // AIの原判定はそのまま残る
+    expect(within(ai).getAllByText("止める理由: 必須の配布の欠落")).toHaveLength(2);
+    expect(within(ai).getByText("ユーザー判断: 公開後に対応する")).toBeTruthy();
+    expect(within(ai).getByText(/guchi-apps\/issue-deck#4651/, { selector: "p" })).toBeTruthy();
+    expect(within(ai).getAllByText(/未実施/).length).toBeGreaterThan(0);
+    expect(within(ai).queryByText(/配布済み(?!とは)/)).toBeNull();
+    // 判断していない指摘は未判断として残り、次の操作が案内される
+    expect(within(ai).getByText("ユーザー判断: 未判断")).toBeTruthy();
+    expect(within(screen.getByTestId("review-decision-summary")).getByText(/未判断の止める指摘が1件あります/)).toBeTruthy();
   });
 });
