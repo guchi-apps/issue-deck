@@ -231,6 +231,22 @@ RULES
   fi
 }
 
+# review_decisions_text <context JSON>
+# ユーザーが指摘ごとに付けた判断（#4657）の節を標準出力へ。判断が無ければ何も出さない（旧サーバーも同じ）
+review_decisions_text() {
+  local ctx="$1"
+  jq -e '(.decisions // []) | length > 0' <<<"$ctx" >/dev/null 2>&1 || return 0
+  printf '\n## ユーザーの判断（指摘ごとの採否・対応時期）\n\n'
+  printf '次の指摘は、影響と根拠を見たうえでユーザーが採否・対応時期を決めています。**判断済みの指摘を、言い換えや重大度の付け直しだけで新しい指摘として出し直さないでください。**\n\n'
+  jq -r '.decisions[] | "- `\(.id)` \(.title) — **\({"fix_now":"今回直す","post_release":"公開後に対応する","defer":"今回は見送る","reject":"指摘を採用しない"}[.decision])**（理由: \(.reason[0:300])\(if .impact then "／残る影響: \(.impact[0:200])" else "" end)\(if .scope then "／対象範囲: \(.scope[0:200])" else "" end)\(if .timing then "／実施時期: \(.timing[0:100])" else "" end)\(if .followUp then "／関連Issue: \(.followUp)" else "" end)）\(if .stale then "［判断後にmainが進んだため、前提の確認が必要］" else "" end)"' <<<"$ctx"
+  cat <<'RULES'
+
+- 同じ問題が今回も残っていれば、`findings`へ**`previousId`に上の指摘IDを付けて**入れてください（IDが変わると判断が外れ、ユーザーが同じ判断をやり直すことになります）
+- 判断の前提（対象差分・影響の範囲・判断の根拠になった事実）が今回の差分で変わった場合だけ、その指摘に`premiseChanged`として**何が変わったか**を書いてください。前提が変わっていなければ`premiseChanged`を付けません
+- 「公開後に対応する」と判断された作業（例: 本番公開後の共有タグ配布）を、同じ本体の公開前の完了条件として求め直さないでください
+RULES
+}
+
 # plan_batches: `files`の差分を、`DIFF_BUDGET_BYTES`ごとのバッチ（`$batch_dir/b<N>.diff|.files`）へ詰める。
 # 1ファイルが上限を超えるときは断片に分け、断片ごとに別バッチへ置く（黙って除外しない）。
 # 差分を取得できなかったファイルは`runner.json`へ取得不能として残す。`batch_count`・`input_files`を設定する
@@ -351,6 +367,7 @@ text = open(template, encoding="utf-8").read()
 version = part("version").strip()
 mode = part("mode").strip()
 has_prev = part("hasprev").strip() == "yes"
+has_decisions = part("hasdecisions").strip() == "yes"
 if version:
     checklist, blocking = part("checklist"), part("blocking")
 else:
@@ -364,7 +381,7 @@ repl = {
     "{{CHECKLIST_VERSION}}": version or "0",
     "{{CHECKLIST}}": checklist, "{{BLOCKING_POLICY}}": blocking, "{{REREVIEW}}": part("rereview"),
     "{{CHECK_SOURCE_HINT}}": ', "source": "current|carried_over"' if mode == "rereview" else "",
-    "{{FINDING_HINT}}": ', "previousId": "前回の指摘ID（同じ指摘の再発のとき）", "discovery": "fix_induced|initial_miss|scope_added|unknown（新規のとき）", "stallCause": "unfixed|fix_ineffective|verification_insufficient|execution_failure|unknown（再発のとき）"' if has_prev else "",
+    "{{FINDING_HINT}}": ', "previousId": "前回の指摘ID（同じ指摘の再発のとき）", "discovery": "fix_induced|initial_miss|scope_added|unknown（新規のとき）", "stallCause": "unfixed|fix_ineffective|verification_insufficient|execution_failure|unknown（再発のとき）"' + (', "premiseChanged": "判断済みの指摘で、判断の前提が変わったときだけ何が変わったか"' if has_decisions else "") if has_prev else ', "previousId": "ユーザーが判断済みの指摘ID（同じ指摘のとき）", "premiseChanged": "判断済みの指摘で、判断の前提が変わったときだけ何が変わったか"' if has_decisions else "",
     "{{REREVIEW_FIELDS}}": ',\n  "previousFindings": [ { "id": "前回の指摘ID", "status": "resolved|unresolved", "evidence": "解消または未解消の根拠" } ],\n  "recheckScope": "再確認した範囲と選んだ理由"' if has_prev else "",
 }
 for key, value in repl.items():
@@ -612,9 +629,11 @@ main() {
   local ctx_safe="${ctx_json:-}"
   [[ -n "$ctx_safe" ]] || ctx_safe='{}'
   review_context_text "$ctx_safe" "$effective_mode" "$deny_reason" "$fix_files_file" "$fix_diff_file" >"$part_dir/rereview"
+  review_decisions_text "$ctx_safe" >>"$part_dir/rereview"
   printf '%s' "${checklist_version:-}" >"$part_dir/version"
   printf '%s' "$effective_mode" >"$part_dir/mode"
   printf '%s' "$(jq -e '.previous != null' <<<"$ctx_safe" >/dev/null 2>&1 && echo yes || echo no)" >"$part_dir/hasprev"
+  printf '%s' "$(jq -e '(.decisions // []) | length > 0' <<<"$ctx_safe" >/dev/null 2>&1 && echo yes || echo no)" >"$part_dir/hasdecisions"
 
   if [[ "$agent" == "codex" ]]; then
     codex_command="$(agent_cli_codex_command)"

@@ -67,6 +67,9 @@ import { rebuildReleaseCandidate } from "@/lib/release-rebuild-run";
 import { requestSelectiveRebuild } from "@/lib/release-rebuild-selection-run";
 import { releaseCallerSupportsSelection } from "@/lib/github/release-api";
 import { loadReleaseVerificationSummary } from "@/lib/release-verification-load";
+import { nonFixFindingIds, selectAutoFixIndexes } from "@/lib/release-review-decision";
+import { loadNonFixFindingIds } from "@/lib/release-review-decision-store";
+import { findingIdOfSeriesItem } from "@/lib/release-review-context";
 import type { ReleaseVerificationSection } from "@/lib/release-verification-summary";
 
 /**
@@ -245,9 +248,11 @@ function releaseVersionOf(headRef: string): string | null {
 
 function itemsFromSection(input: CreateReleaseFixInput): { items: ReleaseFixDraftItem[]; keys: string[] } | null {
   if (input.sourceKind === "review_finding") {
+    // ユーザーが修正しないと判断した指摘（公開後対応・見送り・不採用。#4657）は、選ばれても起案しない
+    const nonFix = nonFixFindingIds(input.section.decisions ?? null);
     const chosen = [...new Set(input.findingIndexes)]
       .map((index) => input.section.findings[index])
-      .filter((finding) => finding !== undefined);
+      .filter((finding) => finding !== undefined && !(finding.id && nonFix.has(finding.id)));
     if (chosen.length === 0) return null;
     return { items: chosen.map(itemFromFinding), keys: chosen.map(reviewFindingKey) };
   }
@@ -293,7 +298,15 @@ export async function createReleaseFixSeries(input: CreateReleaseFixInput): Prom
   }
 
   const picked = itemsFromSection(input);
-  if (!picked) return { outcome: "no_items", message: "起案する指摘が選ばれていません" };
+  if (!picked) {
+    return {
+      outcome: "no_items",
+      message:
+        input.sourceKind === "review_finding" && input.findingIndexes.length > 0
+          ? "選んだ指摘はすべて、修正しない判断（公開後対応・見送り・不採用）が付いています。直す場合は判断を「今回直す」へ変えてください"
+          : "起案する指摘が選ばれていません",
+    };
+  }
 
   const sourceKey = buildReleaseFixSourceKey({
     repositoryFullName,
@@ -536,11 +549,46 @@ async function observeFixPullRequests(
   return { rows: result, closedUnmerged, prHeadShas };
 }
 
+/** ユーザーの判断で系列を止めるときの理由。実行中の処理・取り込み済みの変更がどうなるかも書く */
+const DECIDED_NON_FIX_REASON =
+  "残る指摘はすべて、ユーザーが修正しないと判断しました（公開後対応・見送り・不採用。#4657）。以降の修正の起案・取り込み・候補の更新は行いません。" +
+  "実行中のセッションは止まらず、developへ取り込み済みの修正PRはそのまま残ります。不要なら修正Issueを閉じてください。判断を「今回直す」へ戻すと、リリース画面から改めて起案できます";
+
+/** 作り直し前の系列のうち、写した指摘がすべて有効な非修正の判断になったものを止める（#4657） */
+async function stopSeriesDecidedNonFix(
+  ctx: SweepContext,
+  repositoryFullName: string,
+  releasePrNumber: number,
+  rows: ReleaseFixSeries[],
+): Promise<{ ids: Set<string>; changed: number }> {
+  const candidates = rows.filter(
+    (row) => row.sourceKind === "review_finding" && ["issue_created", "fix_in_progress", "fix_merged", "awaiting_decision"].includes(row.status),
+  );
+  if (candidates.length === 0) return { ids: new Set(), changed: 0 };
+  const nonFix = await loadNonFixFindingIds(repositoryFullName, releasePrNumber, candidates[0].originBaseSha);
+  if (nonFix.size === 0) return { ids: new Set(), changed: 0 };
+  const ids = new Set<string>();
+  for (const row of candidates) {
+    const items = (Array.isArray(row.items) ? row.items : []).flatMap((i) => {
+      const rec = i as Record<string, unknown>;
+      return typeof rec?.title === "string" ? [{ title: rec.title, file: typeof rec.file === "string" ? rec.file : null }] : [];
+    });
+    if (items.length > 0 && items.every((item) => nonFix.has(findingIdOfSeriesItem(item)))) ids.add(row.id);
+  }
+  if (ids.size === 0) return { ids, changed: 0 };
+  return { ids, changed: await stopRows(ctx, [...ids], "stopped", DECIDED_NON_FIX_REASON) };
+}
+
 async function sweepGroup(repositoryFullName: string, releasePrNumber: number, rows: ReleaseFixSeries[]): Promise<{ rebuilt: boolean; changed: number }> {
   const access = await repositoryToken(repositoryFullName);
   if (!access) return { rebuilt: false, changed: 0 };
   const ctx = access;
   const { owner, repo, token } = access;
+
+  // ユーザーが系列の指摘をすべて修正しないと判断した（#4657）系列は、以降の取り込み・候補更新を止める
+  const decided = await stopSeriesDecidedNonFix(ctx, repositoryFullName, releasePrNumber, rows);
+  rows = rows.filter((row) => !decided.ids.has(row.id));
+  if (rows.length === 0) return { rebuilt: false, changed: decided.changed };
 
   const { rows: observed, closedUnmerged, prHeadShas } = await observeFixPullRequests(ctx, rows);
   // 内部確認（#4410）。PRのhead SHAを確認した内容と照合し、未完了・不一致の修正は取り込まない
@@ -820,7 +868,10 @@ async function sweepSuccessor(row: ReleaseFixSeries, hostName: string | null): P
     if (state === "passed" || state === "failed" || state === "needs_check" || state === "not_applicable") return state;
     return "pending";
   };
-  const verdict = decideReverification({ integration: read(summary.integration.state), aiReview: read(summary.aiReview.state) });
+  // 全体レビューの要確認が、ユーザーが全件を修正しないと判断した止める指摘だけなら、系列として直すものは残っていない（#4657）。
+  // ゲートの`needs_check`は書き換えない（本番マージは従来どおり人の確認・完了系列の判定を通る）
+  const aiReview = summary.aiReview.decisions?.cleared ? "passed" : read(summary.aiReview.state);
+  const verdict = decideReverification({ integration: read(summary.integration.state), aiReview });
   if (verdict === "pending") return 0;
   if (verdict === "ready") {
     await db.releaseFixSeries.update({ where: { id: row.id }, data: { status: "ready", activeKey: null, stopReason: null } });
@@ -879,13 +930,22 @@ async function continueAfterReverification(
 ): Promise<number> {
   const followUp = decideReverificationFollowUp({
     integration: { state: summary.integration.state, reason: summary.integration.reason, summary: summary.integration.summary, findingCount: summary.integration.findings.length },
-    aiReview: { state: summary.aiReview.state, reason: summary.aiReview.reason, summary: summary.aiReview.summary, findingCount: summary.aiReview.findings.length },
+    // 止める指摘がすべて修正しない判断なら、全体レビュー側に直すものは無い（統合検証の失敗があればそちらを起案する。#4657）
+    aiReview: summary.aiReview.decisions?.cleared
+      ? { state: "passed", reason: null, summary: summary.aiReview.summary, findingCount: 0 }
+      : { state: summary.aiReview.state, reason: summary.aiReview.reason, summary: summary.aiReview.summary, findingCount: summary.aiReview.findings.length },
   });
   // 実行障害はコードの不具合と断定せず、Issue・PRを作らない。確認待ちにもしない（再実行は既存の機構が行う）
   if (followUp.action === "wait_rerun") return 0;
   if (followUp.action === "human") return stopRows(ctx, [row.id], "stopped", followUp.reason);
 
   const section = followUp.sourceKind === "review_finding" ? summary.aiReview : summary.integration;
+  // 次世代で自動に直すのは「今回直す」と未判断の指摘だけ（見送り・不採用・公開後対応を再び採用しない。#4657）
+  const findingIndexes =
+    followUp.sourceKind === "review_finding" ? selectAutoFixIndexes(section.findings, section.decisions ?? null) : section.findings.map((_, index) => index);
+  if (followUp.sourceKind === "review_finding" && findingIndexes.length === 0) {
+    return stopRows(ctx, [row.id], "stopped", DECIDED_NON_FIX_REASON);
+  }
   const result = await createReleaseFixSeries({
     userId: row.createdByUserId,
     owner: ctx.owner,
@@ -893,7 +953,7 @@ async function continueAfterReverification(
     token: ctx.token,
     releasePr: successor,
     sourceKind: followUp.sourceKind,
-    findingIndexes: section.findings.map((_, index) => index),
+    findingIndexes,
     causeClass: "code",
     decisionQuestion: null,
     acknowledgeExecutionFailure: false,

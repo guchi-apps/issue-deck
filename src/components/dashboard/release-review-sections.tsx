@@ -15,6 +15,8 @@ import { ChevronRight, ExternalLink, RotateCcw } from "lucide-react";
 import { ReleaseFixCreate, ReleaseFixOverviewPanel } from "@/components/dashboard/release-fix-panel";
 import { REVIEW_MARK, REVIEW_TONE } from "@/components/dashboard/review-verdict";
 import { ReleaseRebuildButton } from "@/components/dashboard/release-rebuild-button";
+import { FindingDecisionControl, ReviewDecisionSummaryPanel } from "@/components/dashboard/release-review-decision";
+import { nonFixFindingIds } from "@/lib/release-review-decision";
 import { useReleaseChanges, type UseReleaseChangesResult } from "@/hooks/use-release-changes";
 import { useReferenceNavigation } from "@/hooks/use-reference-navigation";
 import { useReleaseVerification } from "@/hooks/use-release-verification";
@@ -556,9 +558,20 @@ function AiReviewSection({
   const finished = ["passed", "failed", "needs_check"].includes(section.state);
   const counts = { high: 0, medium: 0, low: 0 };
   for (const finding of section.findings) counts[finding.severity in counts ? finding.severity : "medium"] += 1;
+  const decisions = section.decisions ?? null;
+  // 判断済み（修正しない）の指摘は、修正Issueの起案から外す（#4657）
+  const nonFixIds = [...nonFixFindingIds(decisions)];
+  const fixable = section.findings.filter((f) => !(f.id && nonFixIds.includes(f.id)));
+  const decisionText = decisions
+    ? decisions.cleared
+      ? "・すべて判断済み（修正しない）"
+      : decisions.counts.undecidedBlocking > 0
+        ? `・未判断 ${decisions.counts.undecidedBlocking}件`
+        : ""
+    : "";
   const findingsText = finished
     ? section.findings.length > 0
-      ? `指摘 ${section.findings.length}件（重大 ${counts.high}・中 ${counts.medium}・軽微 ${counts.low}）`
+      ? `指摘 ${section.findings.length}件（重大 ${counts.high}・中 ${counts.medium}・軽微 ${counts.low}）${decisionText}`
       : section.state === "failed"
         ? null
         : "指摘なし"
@@ -570,7 +583,7 @@ function AiReviewSection({
     head.reason ?? (top ? `${SEVERITY_LABEL[top.severity] ?? "中"}: ${top.title}` : null);
   const reasonTone: Tone = head.reason ? head.reasonTone : top?.severity === "high" ? "bad" : top ? "warn" : "muted";
   // 実行障害にはコード修正→作り直しを勧めない（直すものが無い）。再実行が主導線
-  const needsFix = section.findings.length > 0 || section.state === "invalidated";
+  const needsFix = fixable.length > 0 || section.state === "invalidated";
   const hasDetail =
     Boolean(section.summary) ||
     section.findings.length > 0 ||
@@ -703,6 +716,9 @@ function AiReviewSection({
           )}
           <ReviewContractPanel section={section} />
           {section.summary && <p className="whitespace-pre-wrap">{section.summary}</p>}
+          {decisions && (section.findings.length > 0 || section.suggestions.length > 0 || decisions.detached.length > 0) && (
+            <ReviewDecisionSummaryPanel decisions={decisions} />
+          )}
           {section.findings.length > 0 && (
             <ul className="flex flex-col gap-1">
               {section.findings.map((finding, index) => (
@@ -732,6 +748,19 @@ function AiReviewSection({
                   {finding.pullRequests?.length > 0 && (
                     <p className="text-muted-foreground">影響PR: {finding.pullRequests.map((n) => `#${n}`).join(" ")}</p>
                   )}
+                  {finding.premiseChanged && (
+                    <p className="whitespace-pre-wrap text-amber-700 dark:text-amber-400">AIが報告した前提の変化: {finding.premiseChanged}</p>
+                  )}
+                  {decisions && finding.id && pullRequestNumber !== undefined && target && (
+                    <FindingDecisionControl
+                      repositoryFullName={repositoryFullName}
+                      pullRequestNumber={pullRequestNumber}
+                      target={target}
+                      findingId={finding.id}
+                      view={decisions.byFinding[finding.id]}
+                      onSaved={onReload}
+                    />
+                  )}
                 </li>
               ))}
             </ul>
@@ -752,6 +781,16 @@ function AiReviewSection({
                       </span>
                     )}
                     {s.detail && <p className="whitespace-pre-wrap text-muted-foreground">{s.detail}</p>}
+                    {decisions && s.id && pullRequestNumber !== undefined && target && (
+                      <FindingDecisionControl
+                        repositoryFullName={repositoryFullName}
+                        pullRequestNumber={pullRequestNumber}
+                        target={target}
+                        findingId={s.id}
+                        view={decisions.byFinding[s.id]}
+                        onSaved={onReload}
+                      />
+                    )}
                   </li>
                 ))}
               </ul>
@@ -773,13 +812,14 @@ function AiReviewSection({
               <ReleaseRebuildButton repositoryFullName={repositoryFullName} />
             </div>
           )}
-          {section.findings.length > 0 && !executionFailed && pullRequestNumber !== undefined && target && (
+          {fixable.length > 0 && !executionFailed && pullRequestNumber !== undefined && target && (
             <ReleaseFixCreate
               repositoryFullName={repositoryFullName}
               pullRequestNumber={pullRequestNumber}
               target={target}
               sourceKind="review_finding"
               findings={section.findings}
+              excludedFindingIds={nonFixIds}
               onDone={onFixCreated}
             />
           )}

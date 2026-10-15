@@ -7,6 +7,12 @@ import {
   type ReleaseReviewPromptContext,
 } from "@/lib/release-review-context";
 import { reviewFindingId } from "@/lib/release-review-result";
+import {
+  listReleaseReviewDecisions,
+  releaseDecisionScopeKey,
+  resolveReleaseDecisionChain,
+} from "@/lib/release-review-decision-store";
+import type { ReleaseReviewContextDecision } from "@/lib/release-review-context";
 import type { ReleaseVerificationTarget } from "@/lib/release-verification";
 
 /**
@@ -117,5 +123,38 @@ export async function loadReleaseReviewContext(target: ReleaseVerificationTarget
       });
     }
   }
-  return buildReviewPromptContext({ current: target, previous, histories });
+  return buildReviewPromptContext({ current: target, previous, histories, decisions: await loadContextDecisions(target) });
+}
+
+/** 候補系列のユーザー判断（#4657）。撤回されていない最新の判断だけ。読めなければ空（判断なしと同じ） */
+async function loadContextDecisions(target: ReleaseVerificationTarget): Promise<ReleaseReviewContextDecision[]> {
+  try {
+    const chain = await resolveReleaseDecisionChain(target.repoFullName, target.prNumber);
+    const records = await listReleaseReviewDecisions(releaseDecisionScopeKey(target.repoFullName, chain));
+    const latest = new Map<string, (typeof records)[number]>();
+    for (const r of records) {
+      const prev = latest.get(r.findingId);
+      if (!prev || r.sequence > prev.sequence) latest.set(r.findingId, r);
+    }
+    return [...latest.values()].flatMap((r) =>
+      r.decision === "withdrawn"
+        ? []
+        : [
+            {
+              id: r.findingId,
+              title: r.findingTitle,
+              decision: r.decision,
+              reason: r.reason,
+              impact: r.impact,
+              scope: r.scope,
+              timing: r.timing,
+              followUp: r.followUp ? `${r.followUp.repo}#${r.followUp.number}` : null,
+              stale: r.baseSha !== target.baseSha,
+            },
+          ],
+    );
+  } catch (error) {
+    console.error("[release-review-context] decisions load failed", target.repoFullName, target.prNumber, error);
+    return [];
+  }
 }

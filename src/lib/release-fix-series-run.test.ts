@@ -8,7 +8,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 type Row = Record<string, unknown> & { id: string };
 
 const { state, seriesDb } = vi.hoisted(() => {
-  const state = { rows: [] as Row[], jobCount: 0 };
+  const state = { rows: [] as Row[], jobCount: 0, decisions: [] as Record<string, unknown>[] };
   const matches = (row: Row, where: Record<string, unknown> | undefined): boolean => {
     if (!where) return true;
     return Object.entries(where).every(([key, cond]) => {
@@ -60,6 +60,7 @@ vi.mock("@/lib/db", () => ({
     dispatchJob: { findUnique: async () => null, count: async () => state.jobCount },
     issue: { findFirst: async () => null },
     appSetting: { findUnique: async () => null },
+    releaseReviewDecision: { findMany: async () => state.decisions },
   },
 }));
 vi.mock("@/lib/github/app-auth", () => ({ getInstallationToken: vi.fn(async () => "t") }));
@@ -97,6 +98,8 @@ const enqueueDispatchJob = vi.fn();
 vi.mock("@/lib/dispatch/jobs", () => ({ enqueueDispatchJob: (...a: unknown[]) => enqueueDispatchJob(...a) }));
 
 import { runReleaseFixSweep } from "@/lib/release-fix-series-run";
+import { summarizeReleaseReviewDecisions } from "@/lib/release-review-decision";
+import { reviewFindingId } from "@/lib/release-review-result";
 
 const section = (state: string, extra: Partial<{ reason: string | null; findings: unknown[] }> = {}) => ({
   state,
@@ -143,6 +146,7 @@ function baseRow(over: Partial<Row> = {}): Row {
 beforeEach(() => {
   state.rows = [baseRow()];
   state.jobCount = 0;
+  state.decisions = [];
   vi.clearAllMocks();
   fetchPullRequest.mockResolvedValue({
     number: 11,
@@ -272,5 +276,79 @@ describe("再検証の追加指摘", () => {
     state.rows[0].stopReason = "後継候補 #11 の再検証で指摘・失敗が残りました（世代 1）。後継候補から修正Issueを起案すると、同じ系列として続きます";
     await runReleaseFixSweep({ hostName: "subpc" });
     expect(state.rows).toHaveLength(2);
+  });
+});
+
+describe("指摘ごとのユーザー判断（#4657）", () => {
+  const findingB = { ...finding, title: "指摘B", file: "b.ts", line: 2 };
+  const idA = reviewFindingId(finding);
+  const idB = reviewFindingId(findingB);
+  const deferA = {
+    id: "d1",
+    findingId: idA,
+    sequence: 1,
+    decision: "defer" as const,
+    reason: "今回は見送る",
+    impact: "影響",
+    scope: "範囲",
+    followUp: null,
+    timing: null,
+    prNumber: 11,
+    headRef: "release-main/v1.0.1",
+    baseSha: "b1",
+    headSha: "h1",
+    severity: "high" as const,
+    blocking: true,
+    findingTitle: "指摘A",
+    decidedBy: "user",
+    decidedAt: "2026-10-15T00:00:00.000Z",
+  };
+  const withDecisions = (findings: (typeof finding)[], records: (typeof deferA)[]) => ({
+    ...section("needs_check", { findings: findings.map((f) => ({ ...f, id: reviewFindingId(f) })) }),
+    decisions: summarizeReleaseReviewDecisions({
+      records,
+      findings: findings.map((f) => ({ id: reviewFindingId(f), title: f.title, severity: "high" as const, blocking: true })),
+      suggestions: [],
+      current: { baseSha: "b1" },
+      state: "needs_check",
+      unverifiedScope: null,
+    }),
+  });
+
+  it("次世代は「見送り」と判断した指摘を再び起案しない", async () => {
+    loadSummary.mockResolvedValue({ integration: section("passed"), aiReview: withDecisions([finding, findingB], [deferA]) });
+    await runReleaseFixSweep({ hostName: "subpc" });
+    expect(state.rows).toHaveLength(2);
+    const items = state.rows[1].items as { title: string }[];
+    expect(items.map((i) => i.title)).toEqual(["指摘B"]);
+    expect(idB).not.toBe(idA);
+  });
+
+  it("残る止める指摘がすべて修正しない判断なら、次世代を作らず系列を終える", async () => {
+    loadSummary.mockResolvedValue({ integration: section("passed"), aiReview: withDecisions([finding], [deferA]) });
+    await runReleaseFixSweep({ hostName: "subpc" });
+    expect(state.rows).toHaveLength(1);
+    expect(state.rows[0]).toMatchObject({ status: "ready", activeKey: null });
+    expect(enqueueDispatchJob).not.toHaveBeenCalled();
+  });
+
+  it("取り込み前の系列は、写した指摘がすべて修正しない判断になったら取り込み・候補更新を止める", async () => {
+    state.rows = [
+      baseRow({
+        status: "issue_created",
+        successorPrNumber: null,
+        successorBaseSha: null,
+        successorHeadSha: null,
+        rebuildClaimedAt: null,
+        fixPrNumber: null,
+        fixPrMergedAt: null,
+        originBaseSha: "b1",
+        items: [{ title: "指摘A", file: "a.ts:1", detail: "d" }],
+      }),
+    ];
+    state.decisions = [{ findingId: idA, decision: "defer", baseSha: "b1", sequence: 1 }];
+    await runReleaseFixSweep({});
+    expect(state.rows[0]).toMatchObject({ status: "stopped", activeKey: null });
+    expect(String(state.rows[0].stopReason)).toContain("実行中のセッションは止まらず");
   });
 });

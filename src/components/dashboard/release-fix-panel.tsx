@@ -120,6 +120,7 @@ export function ReleaseFixCreate({
   target,
   sourceKind,
   findings,
+  excludedFindingIds,
   onDone,
 }: {
   repositoryFullName: string;
@@ -127,9 +128,14 @@ export function ReleaseFixCreate({
   target: { baseSha: string; headSha: string };
   sourceKind: ReleaseFixSourceKind;
   findings?: ReleaseReviewFinding[];
+  /** ユーザーが修正しないと判断した指摘ID（#4657）。選べず、既定でも選ばない（サーバーも起案しない） */
+  excludedFindingIds?: readonly string[];
   onDone?: () => void;
 }) {
-  const [selected, setSelected] = useState<number[]>(() => (findings ?? []).map((_, i) => i));
+  const excluded = (finding: ReleaseReviewFinding) => Boolean(finding.id && excludedFindingIds?.includes(finding.id));
+  const [selected, setSelected] = useState<number[]>(() =>
+    (findings ?? []).flatMap((finding, i) => (excluded(finding) ? [] : [i])),
+  );
   const [needsDecision, setNeedsDecision] = useState(false);
   const [question, setQuestion] = useState("");
   const [busy, setBusy] = useState(false);
@@ -198,6 +204,7 @@ export function ReleaseFixCreate({
                 <input
                   type="checkbox"
                   checked={selected.includes(index)}
+                  disabled={excluded(finding)}
                   onChange={(event) =>
                     setSelected((current) =>
                       event.target.checked ? [...current, index] : current.filter((n) => n !== index),
@@ -207,6 +214,7 @@ export function ReleaseFixCreate({
                 />
                 <span className="min-w-0 break-words">
                   [{SEVERITY_LABEL[finding.severity] ?? "中"}] {finding.title}
+                  {excluded(finding) && <span className="text-muted-foreground">（修正しない判断済み）</span>}
                 </span>
               </label>
             </li>
