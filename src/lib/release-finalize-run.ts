@@ -55,6 +55,14 @@ import {
 import { evaluateReleaseMergeGate, RELEASE_VERIFICATION_KINDS, type ReleaseVerificationKind, type ReleaseVerificationView } from "@/lib/release-merge-gate";
 import { listReleaseMacRows } from "@/lib/release-mac-verification";
 import {
+  commitPublishApproval,
+  ensurePublishApprovalRun,
+  loadPublishApprovalView,
+  preparePublishApproval,
+  revokePublishApproval,
+  type PublishApprovalView,
+} from "@/lib/release-publish-approval-run";
+import {
   findCandidateIdByPullRequest,
   loadCandidateRow,
   loadRcOverview,
@@ -135,6 +143,8 @@ export type RcFinalizationOverview = {
   checks: RcFinalizationChecks | null;
   /** 過去の公開準備（失敗・置き換え済み）。記録として残す */
   history: RcFinalizationView[];
+  /** 最新の公開承認（#4666）。記録の無い候補（既存の候補を含む）はnull */
+  approval?: PublishApprovalView | null;
 };
 
 function toView(row: FinalizationRow, reservation: { status: string } | null): RcFinalizationView {
@@ -247,10 +257,15 @@ export type FinalizeMutationError =
   | "caller_unsupported"
   | "invalid_bump_kind"
   | "version_conflict"
-  | "dispatch_failed";
+  | "dispatch_failed"
+  | "approval_required"
+  | "run_active"
+  | "already_publishing"
+  | "approval_invalid"
+  | "pull_request_unobserved";
 
 export type FinalizeMutationResult =
-  | { ok: true; finalizationId: string; existing: boolean }
+  | { ok: true; finalizationId: string; existing: boolean; approvalId?: string }
   | { ok: false; error: FinalizeMutationError; message?: string };
 
 async function existingByRequestKey(requestKey: string): Promise<FinalizeMutationResult | null> {
@@ -271,7 +286,18 @@ async function expireStale(candidateId: string, now: Date): Promise<void> {
  * workflowが判定してバンプしたあと、サーバーが版を取り直して予約する
  */
 export async function requestRcFinalize(
-  input: Context & { userId: string | null; candidateId: string; expectedHeadSha: string; bumpKind: BumpKind | null; requestKey: string },
+  input: Context & {
+    userId: string;
+    candidateId: string;
+    expectedHeadSha: string;
+    bumpKind: BumpKind | null;
+    requestKey: string;
+    /**
+     * 公開承認（#4666）の明示。**公開準備の開始が唯一の公開承認**なので、確認画面で「合格後は自動で本番公開する」
+     * ことを示したうえで押された要求だけを受け付ける（古い画面からの要求を承認として扱わない）
+     */
+    approvePublish: boolean;
+  },
 ): Promise<FinalizeMutationResult> {
   const ctx: Context = input;
   const existing = await existingByRequestKey(input.requestKey);
@@ -301,6 +327,21 @@ export async function requestRcFinalize(
   });
   if (!decision.ok) return { ok: false, error: decision.error };
   const contract = decision.contract;
+  if (!input.approvePublish) {
+    return { ok: false, error: "approval_required", message: "画面が古いため受け付けませんでした。再読み込みして、公開承認の内容を確かめてから押してください" };
+  }
+  // 公開承認。同じ対象の再試行なら既存の承認を使い回す（再承認を増やさない）
+  const approval = await preparePublishApproval({
+    repositoryFullName,
+    candidateId: candidate.id,
+    contract,
+    bumpPolicy: input.bumpKind ?? "auto",
+    contents: candidate.frozenPrs.map((p) => ({ number: p.number, title: p.title })),
+    userId: input.userId,
+    requestKey: input.requestKey,
+    now: new Date(),
+  });
+  if (approval.kind === "conflict") return { ok: false, error: approval.error, message: approval.message };
 
   // 版の予約。起点は常にmainの版（developの版は見ない）
   const [tags, reservations, versionText] = await Promise.all([
@@ -337,6 +378,8 @@ export async function requestRcFinalize(
 
   const finalizationRequestKey = input.requestKey;
   let createdId: string;
+  // トランザクション内で確定した承認ID（コールバック内の代入は型の絞り込みに乗らないため入れ物で受ける）
+  const committed: { approvalId: string | null } = { approvalId: null };
   try {
     createdId = await db.$transaction(async (tx) => {
       // 段階を`review`→`preparing`へ条件付きで進める。同時の操作・候補の更新があれば進めずに止める
@@ -368,6 +411,7 @@ export async function requestRcFinalize(
           requestedByUserId: input.userId,
         },
       });
+      committed.approvalId = await commitPublishApproval(tx, approval);
       return row.id;
     });
   } catch (error) {
@@ -401,7 +445,88 @@ export async function requestRcFinalize(
     if (row) await failFinalization(row, "リリースworkflowを起動できませんでした", null, "failed");
     return { ok: false, error: "dispatch_failed" };
   }
-  return { ok: true, finalizationId: createdId, existing: false };
+  // 合格後の自動公開を進める系列を用意する。失敗しても公開準備は進め、画面の「自動公開を再開」から用意し直せる
+  const approvalId = committed.approvalId;
+  if (approvalId) {
+    await ensurePublishApprovalRun(ctx, approvalId).catch((error: unknown) => console.error("[release-finalize] 自動公開の系列を開始できませんでした", repositoryFullName, error));
+  }
+  return { ok: true, finalizationId: createdId, existing: false, approvalId: approvalId ?? undefined };
+}
+
+/**
+ * 公開を承認する・自動公開を再開する（#4666）。
+ *
+ * - 有効な承認があれば、承認し直さずに自動公開の系列を用意し直す（停止後の再開）
+ * - 承認の記録が無い既存の公開準備済み候補（`preparing`・`awaiting_approval`）は、ここで**1回だけ明示の承認**を受ける。
+ *   「公開準備済み」だけから承認を推定しない。承認の対象はバンプ後のheadと、そのbase
+ */
+export async function approveRcPublish(
+  input: Context & { userId: string; candidateId: string; expectedHeadSha: string; requestKey: string },
+): Promise<FinalizeMutationResult> {
+  const ctx: Context = input;
+  const candidate = await loadCandidateRow({ id: input.candidateId });
+  if (!candidate || candidate.repositoryFullName !== fullNameOf(ctx)) return { ok: false, error: "not_found" };
+  const rows = await loadFinalizationRows(candidate.id);
+  const latest = [...rows].reverse().find((r) => r.status === "applied") ?? null;
+  const active = await db.releasePublishApproval.findUnique({ where: { activeKey: candidate.id } });
+  if (active && active.status === "merging") return { ok: false, error: "already_publishing" };
+  if (active) {
+    const ensured = await ensurePublishApprovalRun(ctx, active.id);
+    if (!ensured.ok) return { ok: false, error: ensured.error === "approval_not_active" ? "approval_invalid" : ensured.error, message: ensured.message };
+    return { ok: true, finalizationId: latest?.id ?? "", existing: true, approvalId: active.id };
+  }
+  if (candidate.phase !== "preparing" && candidate.phase !== "awaiting_approval") return { ok: false, error: "wrong_phase" };
+  if (!latest || latest.finalHeadSha === null || latest.finalBaseSha === null || latest.finalHeadSha !== input.expectedHeadSha) {
+    return { ok: false, error: "candidate_changed" };
+  }
+  const [found, mainSha] = await Promise.all([
+    observeCandidatePullRequest(ctx, candidate.sequence).catch(() => null),
+    fetchMainHeadSha(ctx.owner, ctx.repo, ctx.token).catch(() => null),
+  ]);
+  if (!found || !mainSha) return { ok: false, error: "pull_request_unobserved", message: "候補のPR・mainの状態を取得できませんでした" };
+  if (found.head.sha !== latest.finalHeadSha) return { ok: false, error: "candidate_changed" };
+  if (mainSha !== latest.finalBaseSha) return { ok: false, error: "main_advanced" };
+
+  const prepared = await preparePublishApproval({
+    repositoryFullName: fullNameOf(ctx),
+    candidateId: candidate.id,
+    contract: { revision: candidate.currentRevision, prNumber: latest.prNumber, baseSha: latest.finalBaseSha, headSha: latest.finalHeadSha },
+    bumpPolicy: latest.bumpKind ?? "auto",
+    contents: jsonFrozenPrs(candidate.frozenPrs),
+    userId: input.userId,
+    requestKey: input.requestKey,
+    now: new Date(),
+  });
+  if (prepared.kind === "conflict") return { ok: false, error: prepared.error, message: prepared.message };
+  let approvalId: string;
+  try {
+    approvalId = await db.$transaction((tx) => commitPublishApproval(tx, prepared));
+  } catch (error) {
+    if (!isUniqueConstraintError(error)) throw error;
+    // 同じ要求の再送・同時の承認。既にある承認をそのまま使う
+    const raced = await db.releasePublishApproval.findUnique({ where: { activeKey: candidate.id } });
+    if (!raced) return { ok: false, error: "in_progress" };
+    approvalId = raced.id;
+  }
+  const ensured = await ensurePublishApprovalRun(ctx, approvalId);
+  if (!ensured.ok) return { ok: false, error: ensured.error === "approval_not_active" ? "approval_invalid" : ensured.error, message: ensured.message };
+  return { ok: true, finalizationId: latest.id, existing: false, approvalId };
+}
+
+/** 自動公開の取消（#4666）。本番マージの確保より前だけ取り消せる */
+export async function revokeRcPublish(input: Context & { userId: string; candidateId: string }): Promise<FinalizeMutationResult> {
+  const result = await revokePublishApproval({ repositoryFullName: fullNameOf(input), candidateId: input.candidateId, userId: input.userId });
+  if (result.ok) return { ok: true, finalizationId: "", existing: true };
+  if (result.error === "already_publishing") return { ok: false, error: "already_publishing" };
+  return { ok: false, error: "not_found", message: "取り消せる公開承認がありません" };
+}
+
+function jsonFrozenPrs(value: unknown): { number: number; title: string }[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((v) => {
+    const item = v as { number?: unknown; title?: unknown } | null;
+    return item && typeof item.number === "number" ? [{ number: item.number, title: typeof item.title === "string" ? item.title : "" }] : [];
+  });
 }
 
 /** 公開準備の失敗。**候補を同じ工程（review）へ戻し、版の予約は保つ**（公開前の再試行だけで版を増やさない） */
@@ -822,7 +947,8 @@ export async function loadFinalizationOverview(ctx: Context, candidateId: string
     const found = await observeCandidatePullRequest(ctx, candidate.sequence).catch(() => null);
     if (found) checks = await evaluateChecks(ctx, latest, await fetchPullRequest(ctx.owner, ctx.repo, found.number, ctx.token)).catch(() => null);
   }
-  return { caller, mainVersion, current: latest ? viewOf(latest) : null, checks, history: rows.slice(0, -1).reverse().map(viewOf) };
+  const approval = candidate ? await loadPublishApprovalView(candidateId, candidate.phase).catch(() => null) : null;
+  return { caller, mainVersion, current: latest ? viewOf(latest) : null, checks, history: rows.slice(0, -1).reverse().map(viewOf), approval };
 }
 
 /** 画面が見ている候補のID。PR番号があればそのPRを持つ候補（過去のものも含む）、無ければ進行中の候補（GitHubは呼ばない） */
@@ -841,7 +967,12 @@ export async function resolveRcCandidateId(repositoryFullName: string, pullReque
 export async function loadFinalizationSnapshot(
   repositoryFullName: string,
   prNumber: number,
-): Promise<{ candidateId: string; phase: string; applied: { preHeadSha: string; finalHeadSha: string; finalBaseSha: string } | null } | null> {
+): Promise<{
+  candidateId: string;
+  phase: string;
+  applied: { preHeadSha: string; finalHeadSha: string; finalBaseSha: string } | null;
+  latest: { status: string; failureReason: string | null } | null;
+} | null> {
   const resolvedId = await findCandidateIdByPullRequest(repositoryFullName, prNumber);
   const resolved = resolvedId ? await db.releaseCandidate.findUnique({ where: { id: resolvedId }, select: { id: true, phase: true } }) : null;
   if (!resolved) return null;
@@ -852,8 +983,10 @@ export async function loadFinalizationSnapshot(
     where: { candidateId: revision.candidate.id, finalHeadSha: { not: null } },
     orderBy: { createdAt: "desc" },
   });
+  const newest = await db.releaseCandidateFinalization.findFirst({ where: { candidateId: revision.candidate.id }, orderBy: { createdAt: "desc" } });
   return {
     candidateId: revision.candidate.id,
+    latest: newest ? { status: newest.status, failureReason: newest.failureReason } : null,
     phase: revision.candidate.phase,
     applied:
       latest && latest.finalHeadSha && latest.finalBaseSha

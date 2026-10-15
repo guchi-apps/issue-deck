@@ -22,6 +22,7 @@ import { isUniqueConstraintError } from "@/lib/prisma-error";
 import { isLegacyReleaseCandidateHeadRef, legacyReleaseVersionOf, rcBranchName } from "@/lib/release-branch";
 import { developSyncCreateError } from "@/lib/release-develop-sync";
 import { ensureDevelopSync } from "@/lib/release-develop-sync-run";
+import { hasActivePublishApproval } from "@/lib/release-publish-approval-run";
 import { isReleaseFixActive } from "@/lib/release-fix-series";
 import { evaluateReleaseMergeGate } from "@/lib/release-merge-gate";
 import {
@@ -310,7 +311,9 @@ async function buildCandidateView(ctx: Context, row: CandidateRow): Promise<RcCa
     }
   }
   const fix = await relatedFixPrNumbers(fullNameOf(ctx), prNumbers);
+  const publishApproved = phase === "preparing" || phase === "awaiting_approval" ? await hasActivePublishApproval(row.id).catch(() => false) : false;
   const status = deriveRcStatus({
+    publishApproved,
     phase,
     current: current ? { revision: current.revision, headSha: current.headSha } : null,
     pending: pending ? { revision: pending.revision, reason: pending.reason as RcRevisionReason } : null,

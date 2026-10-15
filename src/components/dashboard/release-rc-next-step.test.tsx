@@ -23,7 +23,7 @@ describe("ReleaseRcNextStep（#4635）", () => {
   });
   it("合格後は公開準備へ", () => {
     render(<ReleaseRcNextStep candidate={candidate("ready_to_prepare")} />);
-    expect(text()).toContain("公開準備へ進む");
+    expect(text()).toContain("本番公開へ進む（公開承認）");
   });
   it("記録との食い違いがあるときは自動で進むと言わない", () => {
     render(<ReleaseRcNextStep candidate={candidate("awaiting_verification", "候補のPRを取得できませんでした")} />);

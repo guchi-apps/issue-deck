@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { buildFinalizeSteps, ReleaseRcFinalizePanel } from "@/components/dashboard/release-rc-finalize";
 import type { RcFinalizationOverview, RcFinalizationView } from "@/lib/release-finalize-run";
+import type { PublishApprovalView } from "@/lib/release-publish-approval-run";
 import type { RcCandidateView } from "@/lib/release-rc-run";
 
 const PRE = "a".repeat(40);
@@ -72,6 +73,33 @@ function overview(over: Partial<RcFinalizationOverview> = {}): RcFinalizationOve
   };
 }
 
+function approval(over: Partial<PublishApprovalView> = {}): PublishApprovalView {
+  return {
+    id: "pa1",
+    status: "active",
+    statusLabel: "公開承認済み",
+    approvedByUserId: "u1",
+    approvedAt: "2026-10-12T00:00:00Z",
+    expiresAt: "2026-10-13T00:00:00Z",
+    revision: 3,
+    prNumber: 12,
+    baseSha: BASE,
+    headSha: PRE,
+    bumpPolicy: "auto",
+    allowedChanges: ["version", "changelog"],
+    contents: [],
+    invalidReason: null,
+    invalidMessage: null,
+    invalidDiff: [],
+    revokedAt: null,
+    mergeSha: null,
+    run: { id: "run1", status: "checking", statusLabel: "最終検証中", active: true, note: null, stopReason: null, stopMessage: null },
+    progress: "final_checks",
+    progressLabel: "最終検証中",
+    ...over,
+  };
+}
+
 afterEach(cleanup);
 
 describe("buildFinalizeSteps", () => {
@@ -82,7 +110,8 @@ describe("buildFinalizeSteps", () => {
       checks: { ciState: "pending", draft: false, pendingReverify: [], reverify: [], reverifyPhase: "done", readiness: { ready: false, reason: "ci_pending" }, readinessLabel: "バンプ後の最終CI・ビルドを実行中です" },
     });
     expect(pending[2]).toMatchObject({ tone: "run", badge: "実行中" });
-    expect(pending[4].badge).toBe("待機");
+    // 承認の記録が無い既存の候補は、推定で承認済みにしない
+    expect(pending[4].badge).toBe("承認が必要");
     const failed = buildFinalizeSteps({
       phase: "preparing",
       current: view(),
@@ -91,8 +120,26 @@ describe("buildFinalizeSteps", () => {
     expect(failed[2]).toMatchObject({ tone: "bad", badge: "失敗" });
   });
 
+  it("公開承認済みの候補は、最終検証の後に二度目の承認を求めない", () => {
+    const steps = buildFinalizeSteps({ phase: "awaiting_approval", current: view(), checks: null, approval: approval() });
+    expect(steps[4]).toMatchObject({ label: "公開承認", badge: "承認済み", tone: "ok" });
+    expect(steps.map((s) => s.badge)).not.toContain("承認待ち");
+    expect(steps[5].detail).toContain("自動でマージ");
+  });
+
+  it("失効した承認は理由を出す", () => {
+    const steps = buildFinalizeSteps({
+      phase: "awaiting_approval",
+      current: view(),
+      checks: null,
+      approval: approval({ status: "invalidated", invalidMessage: "承認した後にmainが進みました（bbbbbbb → ddddddd）" }),
+    });
+    expect(steps[4]).toMatchObject({ badge: "失効", tone: "bad" });
+    expect(steps[4].detail).toContain("mainが進みました");
+  });
+
   it("承認待ち・本番反映・完了の段階を分けて出す", () => {
-    expect(buildFinalizeSteps({ phase: "awaiting_approval", current: view(), checks: null })[4].badge).toBe("承認待ち");
+    expect(buildFinalizeSteps({ phase: "awaiting_approval", current: view(), checks: null })[4].badge).toBe("承認が必要");
     expect(buildFinalizeSteps({ phase: "verifying_production", current: view(), checks: null })[5].badge).toBe("稼働確認中");
     expect(buildFinalizeSteps({ phase: "completed", current: view(), checks: null })[5].badge).toBe("完了");
   });
@@ -114,11 +161,18 @@ describe("ReleaseRcFinalizePanel", () => {
     vi.stubGlobal("fetch", fetchMock);
     const onChanged = vi.fn();
     render(<ReleaseRcFinalizePanel candidate={candidate()} finalization={overview()} repositoryFullName="o/r" onChanged={onChanged} />);
-    fireEvent.click(screen.getByText("公開準備へ進む"));
-    fireEvent.click(screen.getByText("公開準備を始める"));
+    fireEvent.click(screen.getByText("本番公開へ進む（公開承認）"));
+    // 承認する前に、自動で本番公開することと承認の範囲を全部見せる
+    const confirm = screen.getByTestId("release-rc-approval-confirm").textContent ?? "";
+    expect(confirm).toContain("合格したら自動で本番公開します");
+    expect(confirm).toContain("o/r");
+    expect(confirm).toContain("RC-12 · revision 3");
+    expect(confirm).toContain("最終公開差分から自動判定");
+    expect(confirm).toContain("版ファイル・更新履歴だけ");
+    fireEvent.click(screen.getByText("公開を承認して進める"));
     await waitFor(() => expect(onChanged).toHaveBeenCalled());
     const body = JSON.parse(fetchMock.mock.calls[0][1].body as string);
-    expect(body).toMatchObject({ action: "start", candidateId: "c1", expectedHeadSha: PRE, bumpKind: "auto" });
+    expect(body).toMatchObject({ action: "start", candidateId: "c1", expectedHeadSha: PRE, bumpKind: "auto", approvePublish: true });
     expect(body.requestKey).toMatch(/^[A-Za-z0-9]{8,48}$/);
     vi.unstubAllGlobals();
   });
@@ -138,7 +192,62 @@ describe("ReleaseRcFinalizePanel", () => {
     expect(screen.getAllByText("再検証").length).toBe(2);
     expect(screen.getAllByText(/バンプ前 aaaaaaa/).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/バンプ後 ccccccc/).length).toBeGreaterThan(0);
-    expect(screen.queryByText("公開準備へ進む")).toBeNull();
+    expect(screen.queryByText("本番公開へ進む（公開承認）")).toBeNull();
+  });
+
+  it("承認の記録が無い公開準備済みの候補には、1回だけの承認を出す", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ ok: true }) });
+    vi.stubGlobal("fetch", fetchMock);
+    const onChanged = vi.fn();
+    render(
+      <ReleaseRcFinalizePanel
+        candidate={candidate({ phase: "awaiting_approval", finalizeContract: null })}
+        finalization={overview({ current: view() })}
+        repositoryFullName="o/r"
+        onChanged={onChanged}
+      />,
+    );
+    expect(screen.getByTestId("release-rc-legacy-approval").textContent).toContain("公開承認の記録がありません");
+    fireEvent.click(screen.getByText("公開の承認内容を確認する"));
+    fireEvent.click(screen.getByText("公開を承認する"));
+    await waitFor(() => expect(onChanged).toHaveBeenCalled());
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body as string)).toMatchObject({ action: "approve", expectedHeadSha: POST });
+    vi.unstubAllGlobals();
+  });
+
+  it("承認済みの候補は承認の内容・取消を出し、承認を求め直さない", () => {
+    render(
+      <ReleaseRcFinalizePanel
+        candidate={candidate({ phase: "preparing", finalizeContract: null })}
+        finalization={overview({ current: view(), approval: approval() })}
+        repositoryFullName="o/r"
+        onChanged={vi.fn()}
+      />,
+    );
+    expect(screen.getByTestId("release-rc-approval").textContent).toContain("最終検証中");
+    expect(screen.getByText("自動公開を取り消す")).toBeTruthy();
+    expect(screen.queryByTestId("release-rc-legacy-approval")).toBeNull();
+    expect(screen.queryByText("自動公開を再開")).toBeNull();
+  });
+
+  it("自動公開が止まったら理由と再開を出す", () => {
+    render(
+      <ReleaseRcFinalizePanel
+        candidate={candidate({ phase: "awaiting_approval", finalizeContract: null })}
+        finalization={overview({
+          current: view(),
+          approval: approval({
+            progress: "stopped",
+            progressLabel: "自動公開が停止",
+            run: { id: "run1", status: "needs_attention", statusLabel: "操作が必要", active: false, note: null, stopReason: "ci_failed", stopMessage: "リリース候補の現在のHEADでCIが失敗しました。本番へはマージしません。" },
+          }),
+        })}
+        repositoryFullName="o/r"
+        onChanged={vi.fn()}
+      />,
+    );
+    expect(screen.getByTestId("release-rc-approval-stop").textContent).toContain("CIが失敗しました");
+    expect(screen.getByText("自動公開を再開")).toBeTruthy();
   });
 
   it("公開前の失敗は修正工程へ戻し、版は増やさないと伝える", () => {

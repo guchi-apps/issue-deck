@@ -425,3 +425,84 @@ describe("指摘ごとのユーザー判断（#4657）", () => {
     expect(isGateClearedByReviewDecisions({ gateStatus: "blocked", blockers: [{ kind: "integration", state: "running" }], aiReviewCleared: true })).toBe(false);
   });
 });
+
+describe("公開承認（#4666）から始めた系列", () => {
+  const approvalRun = (overrides: Partial<ReleaseCompletionState> = {}) => run({ status: "checking", fromPublishApproval: true, ...overrides });
+  const preparing = { phase: "preparing", applied: null, latest: { status: "requested", failureReason: null } };
+
+  it("正式バンプと最終検証の間は、承認待ちにせず最終検証中として待つ", () => {
+    const decision = decideReleaseCompletion(approvalRun(), { now, candidate: openCandidate, series: null, checks: passed, finalization: preparing });
+    expect(decision).toMatchObject({ action: "wait", status: "checking" });
+  });
+
+  it("最終検証に合格したら、追加の承認なしでマージの判定へ進む", () => {
+    const decision = decideReleaseCompletion(approvalRun({ candidateHeadSha: "head2" }), {
+      now,
+      candidate: { ...openCandidate, headSha: "head2" },
+      series: null,
+      checks: passed,
+      finalization: { phase: "awaiting_approval", applied: { preHeadSha: "head1", finalHeadSha: "head2", finalBaseSha: "base1" } },
+    });
+    expect(decision).toEqual({ action: "evaluate_merge" });
+  });
+
+  it("検証の失敗では修正Issueを起案せず、理由を示して止める", () => {
+    const decision = decideReleaseCompletion(approvalRun(), {
+      now,
+      candidate: openCandidate,
+      series: null,
+      checks: { ...passed, integration: "failed", integrationFailureKind: "code" },
+      finalization: preparing,
+    });
+    expect(decision).toEqual({ action: "stop", reason: "approval_checks_failed", detail: "統合検証" });
+  });
+
+  it("未判断の止める指摘は判断待ちとして止め、#4657の判断があれば止めない", () => {
+    const undecided = { ...passed, aiReview: "needs_check" as const, findingCount: 2 };
+    expect(decideReleaseCompletion(approvalRun(), { now, candidate: openCandidate, series: null, checks: undecided, finalization: preparing })).toEqual({
+      action: "stop",
+      reason: "approval_review_undecided",
+      detail: "2件",
+    });
+    expect(
+      decideReleaseCompletion(approvalRun(), { now, candidate: openCandidate, series: null, checks: { ...undecided, aiReviewClearedByDecision: true }, finalization: preparing }),
+    ).toMatchObject({ action: "wait", status: "checking" });
+  });
+
+  it("公開準備が失敗して修正工程へ戻ったら、理由を示して止める", () => {
+    const decision = decideReleaseCompletion(approvalRun(), {
+      now,
+      candidate: openCandidate,
+      series: null,
+      checks: passed,
+      finalization: { phase: "review", applied: null, latest: { status: "failed", failureReason: "リリースworkflowを起動できませんでした" } },
+    });
+    expect(decision).toEqual({ action: "stop", reason: "finalize_failed", detail: "リリースworkflowを起動できませんでした" });
+  });
+
+  it("修正Issueを起動しない", () => {
+    const decision = decideReleaseCompletion(approvalRun(), { now, candidate: openCandidate, series: series(), checks: null, finalization: preparing });
+    expect(decision).toEqual({ action: "wait", status: "fixing", note: null });
+  });
+
+  it("承認が有効でなければマージしない", () => {
+    const observation: CompletionMergeObservation = {
+      now,
+      finalization: { phase: "awaiting_approval", applied: { preHeadSha: "head0", finalHeadSha: "head1", finalBaseSha: "base1" } },
+      pullRequest: { number: 10, state: "open", merged: false, baseRef: "main", headRef: "release-rc/3", headSha: "head1", baseSha: "base1", mergeable: true, labels: [] },
+      mainSha: "base1",
+      gateStatus: "ready",
+      gateReasons: [],
+      macOk: true,
+      ciState: "success",
+    };
+    const merging = run({ status: "merging", fromPublishApproval: true });
+    expect(decideCompletionMerge(merging, { ...observation, publishApprovalValid: true })).toEqual({ action: "merge", expectedHeadSha: "head1" });
+    expect(decideCompletionMerge(merging, { ...observation, publishApprovalValid: false })).toEqual({ action: "stop", reason: "approval_invalidated" });
+    // 保護・必須チェック・人の確認ラベルは承認があっても迂回しない
+    expect(decideCompletionMerge(merging, { ...observation, publishApprovalValid: true, ciState: "pending" })).toMatchObject({ action: "wait" });
+    expect(
+      decideCompletionMerge(merging, { ...observation, publishApprovalValid: true, pullRequest: { ...observation.pullRequest!, labels: ["22.merge-confirm-required"] } }),
+    ).toMatchObject({ action: "stop", reason: "blocked_by_label" });
+  });
+});
