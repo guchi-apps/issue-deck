@@ -66,6 +66,13 @@ describe("候補ブランチの判定", () => {
 });
 
 describe("deriveRcStatus", () => {
+  it.each(["preparing", "awaiting_approval", "review"] as const)("マージ済みなら内部%sでも再承認を案内しない（#4673）", (phase) => {
+    const result = deriveRcStatus(input({ phase, pullRequest: { number: 10, state: "closed", merged: true, baseSha: BASE, headSha: HEAD2 } }));
+    expect(result.status).toBe("deploying");
+    expect(result.reason).toContain("マージ済み");
+    expect(result.reason).not.toContain("合格");
+  });
+
   it("全体レビューが統合検証の証跡待ち・再評価中なら、要修正でなく検証中にする（#4664）", () => {
     const g = gate([
       { kind: "integration", state: "passed", baseSha: BASE, headSha: HEAD2 },

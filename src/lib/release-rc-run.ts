@@ -444,10 +444,10 @@ export async function loadRcOverview(input: Context & { pullRequestNumber?: numb
  */
 export async function loadRcBlock(ctx: Context): Promise<RcBlockSummary | null> {
   let row = await loadCandidateRow({ activeKey: fullNameOf(ctx) });
-  if (!row) return null;
+  if (!row || row.activeKey !== fullNameOf(ctx)) return null;
   if (await reconcilePending(ctx, row)) {
     row = await loadCandidateRow({ id: row.id });
-    if (!row) return null;
+    if (!row || row.activeKey !== fullNameOf(ctx)) return null;
   }
   const candidate = await buildCandidateView(ctx, row);
   const phase = parseRcPhase(row.phase) ?? "review";
