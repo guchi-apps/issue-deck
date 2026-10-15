@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   ciState: vi.fn(),
   createRef: vi.fn(),
   createPr: vi.fn(),
+  merge: vi.fn(),
   callerText: vi.fn(async () => null as string | null),
   fileText: vi.fn(async () => null as string | null),
   candidateFindMany: vi.fn(),
@@ -22,6 +23,7 @@ vi.mock("@/lib/db", () => ({
   },
 }));
 vi.mock("@/lib/github/app-auth", () => ({ getInstallationToken: vi.fn(async () => "t") }));
+vi.mock("@/lib/github/actions-api", () => ({ mergePullRequest: mocks.merge }));
 vi.mock("@/lib/github/branches-api", () => ({ compareBranches: mocks.compare }));
 vi.mock("@/lib/github/release-api", () => ({
   createBranchRef: mocks.createRef,
@@ -43,7 +45,7 @@ const MAIN = "a".repeat(40);
 const DEV = "b".repeat(40);
 const OLD_MAIN = "c".repeat(40);
 const files = (names: string[]) => names.map((filename) => ({ filename, status: "modified", sha: "x", previousFilename: null }));
-const diverged = { aheadBy: 5, behindBy: 15, changedFiles: 2, lastCommitAt: null, files: files(["package.json", "src/a.ts"]) };
+const diverged = { aheadBy: 5, behindBy: 15, changedFiles: 2, lastCommitAt: null, files: files(["package.json", "src/lib/changelog.ts"]) };
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -56,6 +58,7 @@ beforeEach(() => {
   mocks.ciState.mockResolvedValue({ ciState: "success", mergeable: true });
   mocks.createRef.mockResolvedValue("created");
   mocks.createPr.mockResolvedValue({ number: 70, html_url: "u" });
+  mocks.merge.mockResolvedValue({ sha: "m" });
 });
 
 describe("observeDevelopSync", () => {
@@ -137,6 +140,60 @@ describe("ensureDevelopSync", () => {
     await ensureDevelopSync(ctx);
     expect(mocks.createPr).toHaveBeenCalledTimes(2);
     expect(await observeDevelopSync(ctx)).toMatchObject({ createFailure: null });
+  });
+});
+
+describe("同期PRの自動マージ（#4669）", () => {
+  const settled = { state: "settled", step: null, runUrl: null, aiReview: { state: "passed", runUrl: null } };
+  const openSync = () =>
+    mocks.openPrs.mockResolvedValue([{ number: 70, head: { ref: "release-sync/main-aaaaaaaaaaaa", sha: MAIN }, body: developSyncMarker(MAIN), labels: [], html_url: "u70" }]);
+
+  it("競合なし・CI成功・自動レビュー完了なら、HEADを指定してマージする（巡回だけ）", async () => {
+    openSync();
+    mocks.ciState.mockResolvedValue({ ciState: "success", mergeable: true, mergeJudgement: settled });
+    await ensureDevelopSync(ctx);
+    expect(mocks.merge).not.toHaveBeenCalled();
+    await ensureDevelopSync(ctx, { autoMerge: true });
+    expect(mocks.merge).toHaveBeenCalledWith("o", "r", 70, "t", MAIN);
+  });
+
+  it.each([
+    ["レビュー判定が未完了", { ciState: "success", mergeable: true, mergeJudgement: { ...settled, state: "pending" } }],
+    ["判定が取れない", { ciState: "success", mergeable: true }],
+    ["CI実行中", { ciState: "pending", mergeable: true, mergeJudgement: settled }],
+    ["競合", { ciState: "success", mergeable: false, mergeJudgement: settled }],
+    ["マージ可否未確定", { ciState: "success", mergeable: null, mergeJudgement: settled }],
+  ])("%sならマージしない", async (_name, ci) => {
+    openSync();
+    mocks.ciState.mockResolvedValue(ci);
+    await ensureDevelopSync(ctx, { autoMerge: true });
+    expect(mocks.merge).not.toHaveBeenCalled();
+  });
+
+  it("追いコミット済み・mainが進んだ・既知外のファイル（ワークフロー等）を含む同期PRは人へ回す", async () => {
+    mocks.ciState.mockResolvedValue({ ciState: "success", mergeable: true, mergeJudgement: settled });
+    mocks.openPrs.mockResolvedValue([{ number: 70, head: { ref: "release-sync/main-aaaaaaaaaaaa", sha: "h".repeat(40) }, body: developSyncMarker(MAIN), labels: [], html_url: "u" }]);
+    await ensureDevelopSync(ctx, { autoMerge: true });
+    mocks.openPrs.mockResolvedValue([{ number: 70, head: { ref: "release-sync/main-cccccccccccc", sha: OLD_MAIN }, body: developSyncMarker(OLD_MAIN), labels: [], html_url: "u" }]);
+    await ensureDevelopSync(ctx, { autoMerge: true });
+    openSync();
+    mocks.compare.mockResolvedValue({ ...diverged, files: files(["package.json", ".github/workflows/ci.yml"]) });
+    await ensureDevelopSync(ctx, { autoMerge: true });
+    expect(mocks.merge).not.toHaveBeenCalled();
+  });
+
+  it("人の確認ラベルがある・旧head=mainの同期PRはマージしない。マージ失敗でも例外にしない", async () => {
+    mocks.ciState.mockResolvedValue({ ciState: "success", mergeable: true, mergeJudgement: settled });
+    mocks.openPrs.mockResolvedValue([
+      { number: 70, head: { ref: "release-sync/main-aaaaaaaaaaaa", sha: "h" }, body: null, labels: [{ name: "00.check-user" }], html_url: "u" },
+    ]);
+    await ensureDevelopSync(ctx, { autoMerge: true });
+    mocks.openPrs.mockResolvedValue([{ number: 41, head: { ref: "main", sha: MAIN }, body: null, labels: [], html_url: "u" }]);
+    await ensureDevelopSync(ctx, { autoMerge: true });
+    expect(mocks.merge).not.toHaveBeenCalled();
+    openSync();
+    mocks.merge.mockRejectedValueOnce(new Error("405"));
+    expect(await ensureDevelopSync(ctx, { autoMerge: true })).toMatchObject({ state: "unsynced", detail: "awaiting_merge" });
   });
 });
 

@@ -14,6 +14,8 @@
  * 取得できなかったものは**同期済みと推定しない**（判定不能として次の候補の作成を止める）。
  */
 
+import { evaluateReviewMergeGuard } from "@/lib/github/review-merge-guard";
+
 export const DEVELOP_SYNC_BRANCH_PREFIX = "release-sync/";
 
 /** 同期PRのhead。mainの先端から切る専用ブランチで、名前がmainのSHAで決まるので同じ同期を二重に作らない */
@@ -45,7 +47,50 @@ export type DevelopSyncPullRequest = {
   ciState: "pending" | "success" | "failure" | "unknown";
   /** GitHubの計算前はnull。falseのときだけ競合として扱う */
   mergeable: boolean | null;
+  /** 自動マージの判定に使う観測（#4669）。取れなかったものは未設定のままにして、マージしない側へ倒す */
+  headSha?: string;
+  /** PR本文。自動レビューの判定（`## 検証結果`）を読む */
+  body?: string | null;
+  labels?: string[];
+  /** 自動レビュー（`claude-review-develop.yml`）の判定が出揃い、レビューが実行済み・または不要で終わっているか */
+  reviewSettled?: boolean;
 };
+
+/** 自動マージを止める人の確認ラベル（`22.merge-confirm-required`・`00.check-user`） */
+const HOLD_LABELS = ["00.check-user", "22.merge-confirm-required"];
+
+/**
+ * 同期PRを自動でマージしてよいか（#4669）。**止める側へ倒す**: 次のすべてを満たすときだけ`ok`。
+ * - head が専用ブランチ（`release-sync/*`）。#4641以前のhead=mainの同期PRは対象外
+ * - 競合が無く（mergeable=true）、CIが成功
+ * - 自動レビューが終わっていて、要修正・要確認の判定が現在のHEADに残っていない
+ * - 人の確認ラベルが付いていない
+ * マージ操作は呼び出し側がこのHEADのSHAを渡して行う（追いコミットを巻き込まない）
+ */
+/** 自動マージしてよい変更ファイル。リリースの正式バンプ・更新履歴・iOSの版情報だけ（コード・ワークフロー・設定は人へ回す） */
+const AUTO_MERGE_FILE_PATTERNS = [/^package\.json$/, /^src\/lib\/changelog\.ts$/, /^\.github\/release-notes\.md$/, /^ios\/[^/]+\.xcodeproj\/project\.pbxproj$/];
+
+export function decideDevelopSyncAutoMerge(
+  pr: DevelopSyncPullRequest,
+  /** 今のmainの先端と、mainにだけある変更ファイル（同期PRの中身の範囲確認に使う） */
+  main: { sha: string; files: string[] },
+): { ok: true; headSha: string } | { ok: false; reason: string } {
+  if (!pr.headRef.startsWith(DEVELOP_SYNC_BRANCH_PREFIX)) return { ok: false, reason: "専用ブランチの同期PRではありません" };
+  if (!pr.headSha) return { ok: false, reason: "PRのHEADを取得できていません" };
+  // PRのHEADが元のmainそのもの（追いコミット・競合解消が無い）で、今のmainに追いついている場合だけ。
+  // 中身は`main.files`と一致するので、その範囲が上の既知のファイルに収まるかで人へ回すかを決める
+  if (pr.mainSha !== main.sha || pr.headSha !== pr.mainSha) return { ok: false, reason: "PRのHEADがmainの先端と一致しません（追いコミットか、mainが進んでいます）" };
+  const outside = main.files.find((f) => !AUTO_MERGE_FILE_PATTERNS.some((re) => re.test(f)));
+  if (outside || main.files.length === 0) return { ok: false, reason: `リリース由来の既知のファイル以外を含みます（${outside ?? "差分なし"}）` };
+  if (pr.mergeable !== true) return { ok: false, reason: "マージ可否が確定していないか競合しています" };
+  if (pr.ciState !== "success") return { ok: false, reason: "CIが成功していません" };
+  if (pr.reviewSettled !== true) return { ok: false, reason: "自動レビューの判定が終わっていません" };
+  const held = (pr.labels ?? []).find((l) => HOLD_LABELS.includes(l));
+  if (held) return { ok: false, reason: `人の確認ラベル（${held}）が付いています` };
+  const guard = evaluateReviewMergeGuard({ body: pr.body, headSha: pr.headSha, acknowledgeReviewSha: undefined });
+  if (guard.status !== "ok") return { ok: false, reason: `自動レビューが${guard.reviewLabel}と判定しています` };
+  return { ok: true, headSha: pr.headSha };
+}
 
 export type DevelopSyncObservation =
   | { kind: "unreadable"; reason: string }
@@ -182,7 +227,7 @@ export function decideDevelopSync(observation: DevelopSyncObservation): DevelopS
     "awaiting_merge",
     "同期PRのマージ待ちです",
     `${files}。${prLabel} がマージされるのを待っています${stale}`,
-    `${prLabel} をマージコミットでマージしてください（レビュー・CIの保護はそのまま通ります）`,
+    `巡回が条件（CI成功・競合なし・自動レビュー完了）を確かめて自動でマージします。マージされないときは ${prLabel} をマージコミットでマージしてください`,
   );
 }
 
