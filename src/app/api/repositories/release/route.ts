@@ -169,7 +169,7 @@ async function handleGET(request: NextRequest) {
         verification = await loadReleaseVerificationSummary(`${owner}/${repo}`, releasePr.number, {
           baseSha: releasePr.base.sha,
           headSha: releasePr.head.sha,
-        });
+        }, { token });
       } catch (error) {
         console.error(`[GET /api/repositories/release] 検証記録を読めませんでした ${owner}/${repo}:`, error);
       }

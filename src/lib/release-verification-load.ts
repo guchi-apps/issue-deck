@@ -1,9 +1,21 @@
 import { db } from "@/lib/db";
-import { DISPATCH_HEARTBEAT_TIMEOUT_MS, isDispatchHostOnline } from "@/lib/dispatch/dispatch-job";
+import {
+  DISPATCH_HEARTBEAT_TIMEOUT_MS,
+  isDispatchHostOnline,
+  parseDispatchHostRepositories,
+} from "@/lib/dispatch/dispatch-job";
+import { compareBranches } from "@/lib/github/branches-api";
 import type { ReleaseVerificationKind } from "@/lib/release-merge-gate";
 import { describeReleaseReviewAssignee, resolveReleaseReviewAssignee } from "@/lib/release-review-assignee";
 import { listReleaseMacRows } from "@/lib/release-mac-verification";
 import { loadReleaseReviewDecisionSummary } from "@/lib/release-review-decision-store";
+import {
+  POLLER_REPOSITORY,
+  findOpsRequest,
+  opsRequestTexts,
+  type ReleaseOpsContext,
+  type ReleaseOpsHostFact,
+} from "@/lib/release-review-ops-evidence";
 import { reviewFindingId, type ReleaseReviewFinding } from "@/lib/release-review-result";
 import { listReleaseVerificationDetails } from "@/lib/release-verification";
 import { getReleaseVerificationConfig } from "@/lib/release-verification-config";
@@ -25,6 +37,8 @@ export async function loadReleaseVerificationSummary(
   repoFullName: string,
   prNumber: number,
   current: { baseSha: string; headSha: string },
+  /** GitHubのトークン。渡されたときだけ、運用状態の照合（候補の変更ファイル・稼働コミット）を行う（#4665） */
+  options: { token?: string } = {},
 ): Promise<ReleaseVerificationSummary> {
   const setting = await db.appSetting.findUnique({
     where: { id: 1 },
@@ -39,7 +53,94 @@ export async function loadReleaseVerificationSummary(
     aiReviewAssignee: describeReleaseReviewAssignee(resolveReleaseReviewAssignee(setting)),
     progress: await loadReleaseVerificationProgress(repoFullName, prNumber, current),
   });
-  return attachReleaseReviewDecisions(repoFullName, prNumber, current, summary);
+  const decided = await attachReleaseReviewDecisions(repoFullName, prNumber, current, summary);
+  return attachReleaseOpsContext(repoFullName, current, decided, options.token);
+}
+
+/**
+ * 全体レビューがpollerの更新・再起動を**要求したときだけ**、照合に使う稼働情報を添える（#4665）。
+ * 要求が無ければ何も読まない（GitHub APIを5秒ごとのポーリングで叩かない）。読めなかった事実は`null`のまま渡し、
+ * 画面側で「確認できない」にする
+ */
+async function attachReleaseOpsContext(
+  repoFullName: string,
+  current: { baseSha: string; headSha: string },
+  summary: ReleaseVerificationSummary,
+  token: string | undefined,
+): Promise<ReleaseVerificationSummary> {
+  const aiReview = summary.aiReview;
+  if (aiReview.state !== "needs_check" || !findOpsRequest(opsRequestTexts(aiReview))) return summary;
+  let opsContext: ReleaseOpsContext | null = null;
+  try {
+    opsContext = await loadReleaseOpsContext(repoFullName, current, token);
+  } catch (error) {
+    console.error(`[release-verification] 運用状態を読めませんでした ${repoFullName}:`, error);
+  }
+  return { ...summary, aiReview: { ...aiReview, opsContext } };
+}
+
+/** compareは最大300ファイルまでしか返さない。上限に達したら一覧は不完全なので使わない */
+const COMPARE_FILE_LIMIT = 300;
+
+async function loadReleaseOpsContext(
+  repoFullName: string,
+  current: { baseSha: string; headSha: string },
+  token: string | undefined,
+  now = new Date(),
+): Promise<ReleaseOpsContext> {
+  const rows = await db.dispatchHost.findMany({
+    select: {
+      name: true,
+      lastSeenAt: true,
+      repositories: true,
+      checkoutCommit: true,
+      checkoutStartedCommit: true,
+      releaseVerifyCapable: true,
+      releaseReviewCapable: true,
+    },
+  });
+  const declared = rows.filter((row) => parseDispatchHostRepositories(row.repositories).includes(repoFullName));
+  const updates = declared.length
+    ? await db.dispatchJob.findMany({
+        where: { kind: "SELF_UPDATE", status: "SUCCEEDED", targetHost: { in: declared.map((row) => row.name) } },
+        orderBy: { finishedAt: "desc" },
+        select: { targetHost: true, finishedAt: true },
+      })
+    : [];
+  const lastUpdate = new Map<string, string>();
+  for (const job of updates) {
+    if (job.finishedAt && !lastUpdate.has(job.targetHost)) lastUpdate.set(job.targetHost, job.finishedAt.toISOString());
+  }
+
+  const [owner, repo] = repoFullName.split("/");
+  const isPollerRepo = repoFullName === POLLER_REPOSITORY;
+  let changedFiles: string[] | null = null;
+  if (isPollerRepo && token) {
+    const compare = await compareBranches(owner, repo, current.baseSha, current.headSha, token);
+    if (compare?.files && compare.files.length < COMPARE_FILE_LIMIT) changedFiles = compare.files.map((file) => file.filename);
+  }
+
+  const hosts: ReleaseOpsHostFact[] = [];
+  for (const row of declared) {
+    const online = isDispatchHostOnline(row.lastSeenAt, now);
+    let includesCandidate: boolean | null = null;
+    // 起動時コミット（いま走っているコード）が候補headを含むか。headから見て進んでいるか同じなら含む
+    if (isPollerRepo && token && online && row.checkoutStartedCommit) {
+      const compare = await compareBranches(owner, repo, current.headSha, row.checkoutStartedCommit, token);
+      if (compare) includesCandidate = compare.behindBy === 0;
+    }
+    hosts.push({
+      name: row.name,
+      online,
+      startedCommit: row.checkoutStartedCommit,
+      commit: row.checkoutCommit,
+      releaseVerifyCapable: row.releaseVerifyCapable === true,
+      releaseReviewCapable: row.releaseReviewCapable === true,
+      lastSelfUpdateAt: lastUpdate.get(row.name) ?? null,
+      includesCandidate,
+    });
+  }
+  return { repositoryFullName: repoFullName, changedFiles, hosts };
 }
 
 /**

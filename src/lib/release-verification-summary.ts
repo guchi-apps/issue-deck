@@ -13,6 +13,7 @@ import {
 } from "@/lib/release-mac-verification";
 import { readReleaseReviewDiagnostic, type ReleaseReviewDiagnostic } from "@/lib/release-review-diagnostic";
 import type { ReleaseReviewDecisionSummary } from "@/lib/release-review-decision";
+import type { ReleaseOpsContext } from "@/lib/release-review-ops-evidence";
 import type { ReleaseReviewCoverage, ReleaseReviewFinding, ReleaseReviewMeta } from "@/lib/release-review-result";
 import type { ReleaseVerificationProgress } from "@/lib/release-verification-progress";
 
@@ -76,6 +77,11 @@ export type ReleaseVerificationSection = {
   decisions?: ReleaseReviewDecisionSummary | null;
   /** 記録された未確認範囲そのもの（判断で解除してよいかの判定に使う）。無ければnull */
   unverifiedScope?: string | null;
+  /**
+   * レビューがpollerの更新・再起動を要求したときだけ集める稼働情報（#4665。全体レビューだけ）。
+   * 要求が無い・読み出していないときはnull（画面は「確認できない」と区別して扱う）
+   */
+  opsContext?: ReleaseOpsContext | null;
 };
 
 export type ReleaseVerificationPreviousRun = {
