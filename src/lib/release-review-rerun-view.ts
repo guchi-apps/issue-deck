@@ -1,3 +1,9 @@
+import {
+  assessReleaseOps,
+  findOpsRequest,
+  opsRequestTexts,
+  type ReleaseOpsAssessment,
+} from "@/lib/release-review-ops-evidence";
 import type { ReleaseVerificationSection } from "@/lib/release-verification-summary";
 
 /**
@@ -7,8 +13,9 @@ import type { ReleaseVerificationSection } from "@/lib/release-verification-summ
  * - 実行失敗（`failed`）・確認範囲不足や検証結果待ち（`needs_check`）のときだけ再実行を出す
  * - 統合検証が実行中・結果待ちの間は、途中の証跡で同じレビューを繰り返させない（押せない・理由を出す）。
  *   再実行のために統合検証を起動することもしない
- * - poller更新・再起動のような運用証跡の不足は、コードへの指摘でもレビューCLIの認証失敗でもない。
- *   再実行では解決しない旨と、必要なホスト確認を出す。**確認できない事実を確認済みにしない**
+ * - 前提は「コードの確認（読み残し）」「統合検証」「運用状態の確認」に分ける（#4665）。運用状態は、レビューが
+ *   pollerの更新・再起動を**要求したときだけ**、稼働情報と照らして「不要／更新済み／更新が必要／確認できない」を出す
+ *   （`release-review-ops-evidence.ts`）。単語の一致だけで更新を要求しない。**確認できない事実を確認済みにしない**
  */
 
 export type ReviewRerunPrerequisite = { label: string; status: "ok" | "pending" | "missing"; text: string };
@@ -21,14 +28,9 @@ export type ReviewRerunView =
       lead: string;
       buttonLabel: string;
       prerequisites: ReviewRerunPrerequisite[];
-      /** 運用証跡（poller更新・再起動など）が不足していそうなとき、再実行だけでは直らない旨と次の確認 */
-      opsEvidence: string | null;
+      /** レビューがpollerの更新・再起動を要求したときの照合結果。要求が無ければnull */
+      ops: ReleaseOpsAssessment | null;
     };
-
-/** 未確認の理由が運用証跡（poller更新・再起動）の不足を指しているか */
-export function mentionsOpsEvidence(texts: readonly (string | null | undefined)[]): boolean {
-  return texts.some((t) => typeof t === "string" && /poller|ポーラー|再起動/i.test(t));
-}
 
 const INTEGRATION_TEXT: Record<string, string> = {
   passed: "完了・問題なし",
@@ -55,34 +57,52 @@ export function describeReviewRerun(
     integration.updatedAt !== null &&
     (aiReview.updatedAt === null || Date.parse(integration.updatedAt) > Date.parse(aiReview.updatedAt));
 
+  // 運用（poller）の要求だけを根拠にした未確認の項目は、コードの読み残しに数えない
+  const unconfirmed = aiReview.review?.checks.filter((c) => c.status === "unconfirmed") ?? [];
+  const codeUnconfirmed = unconfirmed.filter((c) => !findOpsRequest([c.evidence])).length;
   const openCount = aiReview.coverage?.open.length ?? 0;
-  const unconfirmedChecks = aiReview.review?.checks.filter((c) => c.status === "unconfirmed").length ?? 0;
-  const opsText = mentionsOpsEvidence([
-    aiReview.reason,
-    aiReview.summary,
-    ...(aiReview.review?.checks.filter((c) => c.status === "unconfirmed").map((c) => c.evidence) ?? []),
-  ]);
-  // 実行失敗の診断（CLI認証など）は運用証跡の不足とは別。診断があるものは混ぜない
-  const opsEvidence =
-    opsText && aiReview.state === "needs_check"
-      ? "サブPCのpoller更新・再起動の証跡が確認できていません。再実行だけでは解決しません。サブPCで「更新して再起動」を実行し、その結果を確認してから再実行してください。確認できるまで、この項目は未確認のまま残ります。"
-      : null;
+  // 実行失敗の診断（CLI認証など）は運用状態とは別。診断があるものは混ぜない
+  const ops = aiReview.state === "needs_check" ? assessReleaseOps(findOpsRequest(opsRequestTexts(aiReview)), aiReview.opsContext) : null;
 
-  const prerequisites: ReviewRerunPrerequisite[] = [
-    {
-      label: "統合検証",
-      status: integrationPending ? "pending" : integration.state === "passed" ? "ok" : "missing",
-      text: INTEGRATION_TEXT[integration.state] ?? integration.state,
-    },
-  ];
+  const prerequisites: ReviewRerunPrerequisite[] = [];
   if (aiReview.state === "needs_check") {
+    const codeCount = openCount + codeUnconfirmed;
     prerequisites.push({
-      label: "未確認の項目",
-      status: openCount + unconfirmedChecks > 0 ? "missing" : "pending",
+      label: "コードの確認",
+      status: codeCount > 0 ? "missing" : ops ? "ok" : "pending",
       text:
-        openCount + unconfirmedChecks > 0
-          ? `未確認の対象${openCount}件・未確認の確認項目${unconfirmedChecks}件`
-          : (aiReview.reason ?? "未確認の範囲があります"),
+        codeCount > 0
+          ? `読み残し: 未確認の対象${openCount}件・未確認の確認項目${codeUnconfirmed}件`
+          : ops
+            ? "読み残しはありません"
+            : (aiReview.reason ?? "未確認の範囲があります"),
+    });
+  }
+  prerequisites.push({
+    label: "統合検証",
+    status: integrationPending ? "pending" : integration.state === "passed" ? "ok" : "missing",
+    text: INTEGRATION_TEXT[integration.state] ?? integration.state,
+  });
+  if (ops) {
+    // 統合検証の成功では運用状態を確認済みにしない。照合で分かったことだけで決める
+    prerequisites.push({
+      label: "運用状態の確認",
+      status:
+        ops.status === "not_needed" || ops.status === "updated"
+          ? "ok"
+          : ops.status === "needed" && ops.timing === "before_release"
+            ? "missing"
+            : "pending",
+      text:
+        ops.status === "not_needed"
+          ? "サブPCの更新は不要"
+          : ops.status === "updated"
+            ? "サブPCは更新済み"
+            : ops.status === "needed"
+              ? ops.timing === "before_release"
+                ? "サブPCの更新が必要（公開前）"
+                : "サブPCの更新が必要（公開後でよい）"
+              : "状態を確認できません",
     });
   }
 
@@ -92,7 +112,7 @@ export function describeReviewRerun(
       lead: "統合検証の完了を待っています。途中の証跡では再評価しません。完了すると再実行できます。",
       buttonLabel: "全体レビューを再実行（検証完了後）",
       prerequisites,
-      opsEvidence,
+      ops,
     };
   }
   return {
@@ -104,6 +124,6 @@ export function describeReviewRerun(
         : "同じ対象で未確認の項目を再評価します。確認済みの結果は再利用し、修正Issue・PR・候補は増えません。",
     buttonLabel: evidenceNewer ? "全体レビューを再実行（証跡を更新）" : "全体レビューを再実行",
     prerequisites,
-    opsEvidence,
+    ops,
   };
 }

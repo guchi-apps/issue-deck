@@ -402,6 +402,30 @@ run_agent() {
   fi
 }
 
+# runner_host_prompt_text <owner/repo> <head SHA>: 実行ホスト（このランナーを起動したサブPCのpoller）の稼働情報の節（#4665）
+# 「pollerの更新・再起動の証跡が無い」だけで項目を未確認にし、同じ更新要求が再レビューで繰り返されていたため、
+# 確認できる事実（いま走っているpollerの版・候補を含むか）を渡す。**確認できないものは「確認できない」と書く**
+runner_host_prompt_text() {
+  local full_name="$1" head="$2" root started current includes="確認できない"
+  root="$(cd "$SCRIPT_DIR/.." && pwd)"
+  started="${POLLER_STARTED_COMMIT:-}"
+  current="$(git -C "$root" rev-parse --short HEAD 2>/dev/null || true)"
+  if [[ "$full_name" == "guchi-apps/issue-deck" && -n "$started" ]]; then
+    if git -C "$root" merge-base --is-ancestor "$head" "$started" 2>/dev/null; then
+      includes="含む（候補の変更はこのpollerで既に動いている）"
+    elif git -C "$root" cat-file -e "${head}^{commit}" 2>/dev/null; then
+      includes="含まない（pollerは候補より古い版で動いている）"
+    fi
+  elif [[ "$full_name" != "guchi-apps/issue-deck" ]]; then
+    includes="対象外（pollerのコードはguchi-apps/issue-deckにあり、この候補はpollerを変えない）"
+  fi
+  printf '\n## 実行ホストの稼働情報（このレビューを起動したサブPCのpoller）\n\n'
+  printf -- '- いま走っているpollerの版（起動時のコミット）: %s\n' "${started:-確認できない（申告の無い旧poller）}"
+  printf -- '- チェックアウトの現在のHEAD: %s\n' "${current:-確認できない}"
+  printf -- '- 起動時のコミットが候補headを含むか: %s\n\n' "$includes"
+  printf '`host_compat`では、**コードの互換性**（旧pollerと新サーバー、新pollerと旧サーバーで動くか）と**実機の更新**（サブPCのpollerを更新・再起動する必要があるか）を分けて書きます。実機の更新が要ると書くのは、この候補にサブPCへ届く変更（`scripts/`など）があり、上の稼働情報で候補を含まないと分かる場合か、旧版のpollerでは動かない（非互換）と根拠を示せる場合だけです。サーバーへのデプロイだけで有効になる変更・互換性を確認できた変更に、更新・再起動を求めません。上の稼働情報で「含む」と分かっていれば、更新済みとして扱います。実機の更新が必要なときは、公開（mainへのマージ）の前に必要か公開後でよいかと、その理由を書きます。\n'
+}
+
 # result_depends_on_evidence <結果JSON>: その結果が統合検証の証跡（結果待ち・未確認）に左右されているか（#4632）
 # 未確認の確認項目、または未確認範囲を持つ結果は、証跡が更新されたら判定が変わり得る。確認済みだけの結果は変わらない
 result_depends_on_evidence() {
@@ -622,6 +646,7 @@ main() {
   printf '%s' "$prs_text" >"$part_dir/prs"
   # 統合検証の証跡（#4616）。AIは読み取り専用でテストを実行できないため、同じ対象の結果だけを渡す
   evidence_prompt_text "$full_name" "$pr_number" "$base_sha" "$head_sha" >"$part_dir/evidence"
+  runner_host_prompt_text "$full_name" "$head_sha" >>"$part_dir/evidence"
   if [[ -n "$checklist_version" ]]; then
     jq -r '.checklistPrompt // ""' <<<"$ctx_json" >"$part_dir/checklist"
     jq -r '.blockingPolicy // ""' <<<"$ctx_json" >"$part_dir/blocking"
