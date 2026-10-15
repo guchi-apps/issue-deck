@@ -62,7 +62,8 @@ describe("ReleaseCompletionPanel（#4480）", () => {
     await waitFor(() => expect(screen.getByTestId("release-completion-run")).toBeTruthy());
     const current = screen.getByText("修正後のチェック中", { selector: "li" });
     expect(current.getAttribute("aria-current")).toBe("step");
-    expect(screen.getByText(/世代 2\/3/)).toBeTruthy();
+    expect(screen.getByText(/世代 2 ・/)).toBeTruthy();
+    expect(screen.queryByText(/世代 2\/3/)).toBeNull();
     expect(screen.getByText(/費用 \$8\.40 \/ \$30/)).toBeTruthy();
     expect(screen.getByTestId("release-completion-note").textContent).toContain("操作は不要です");
     expect(screen.getByRole("button", { name: "停止" })).toBeTruthy();

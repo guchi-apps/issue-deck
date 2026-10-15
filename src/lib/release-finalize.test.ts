@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  decideReverifyPhase,
+  describeReverifyItems,
   buildInheritanceEvidence,
   categorizeChangedFile,
   decideFinalizeFailureHandling,
@@ -339,5 +341,23 @@ describe("finalizeRequestKey", () => {
     expect(finalizeRequestKey("cabc-123", PRE)).toBe(finalizeRequestKey("cabc-123", PRE));
     expect(finalizeRequestKey("cabc-123", PRE)).not.toBe(finalizeRequestKey("cabc-123", POST));
     expect(finalizeRequestKey("cabc-123", PRE)).toMatch(/^fin-[A-Za-z0-9]+-[0-9a-f]{12}$/);
+  });
+});
+
+describe("バンプ後の再検証の状態分類（#4640）", () => {
+  const view = (kind: "integration" | "ai_review", state: string, reason?: string) => ({ kind, state, ...(reason ? { reason } : {}) }) as never;
+
+  it("実行中のジョブが無く要確認で終わっていれば、再検証中にしない", () => {
+    const items = describeReverifyItems([view("integration", "passed"), view("ai_review", "needs_check", "未確認範囲があります")]);
+    expect(decideReverifyPhase(items)).toBe("needs_check");
+    expect(items[1].reason).toContain("未確認範囲");
+  });
+  it("実行中・待機があるときだけ再検証中・実行待ちになる", () => {
+    expect(decideReverifyPhase(describeReverifyItems([view("integration", "running"), view("ai_review", "passed")]))).toBe("running");
+    expect(decideReverifyPhase(describeReverifyItems([view("integration", "waiting"), view("ai_review", "passed")]))).toBe("waiting");
+  });
+  it("失敗は待機より優先し、全て合格なら完了", () => {
+    expect(decideReverifyPhase(describeReverifyItems([view("integration", "failed"), view("ai_review", "running")]))).toBe("failed");
+    expect(decideReverifyPhase(describeReverifyItems([view("integration", "passed"), view("ai_review", "not_applicable")]))).toBe("done");
   });
 });

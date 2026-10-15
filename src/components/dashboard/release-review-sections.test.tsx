@@ -35,6 +35,7 @@ function section(overrides: Partial<ReleaseVerificationSection> = {}): ReleaseVe
     coverage: null,
     progress: null,
     diagnostic: null,
+    previousRun: null,
     ...overrides,
   };
 }
@@ -231,6 +232,61 @@ describe("ReleaseReviewSections", () => {
     expect(within(ai).getByText("claude: Permission denied")).toBeTruthy();
     // 直すコードは無いので、作り直しの案内は出さない
     expect(within(ai).queryByText(/developへ入れてから作り直します/)).toBeNull();
+  });
+
+  it("未確認範囲が残る結果から、詳細を開かずに再実行できる。統合検証の結果待ちの間は押せない（#4632）", () => {
+    const aiReview = section({
+      state: "needs_check",
+      reason: "未確認範囲があります: 統合検証の結果待ち",
+      updatedAt: "2026-10-13T09:00:00.000Z",
+      coverage: { open: [{ file: "src/a.ts", kind: "unconfirmed" }] } as never,
+    });
+    const view = (integration: ReleaseVerificationSection) =>
+      render(
+        <ReleaseReviewSections
+          repositoryFullName="guchi-apps/issue-deck"
+          headRef={HEAD}
+          pullRequestNumber={4627}
+          verification={summary({ aiReview, integration })}
+          verificationError={null}
+          changes={loadedChanges([])}
+        />,
+      );
+    const waiting = view(section({ kind: "integration", state: "running" }));
+    const waitingButton = within(screen.getByTestId("review-rerun-panel")).getByRole("button") as HTMLButtonElement;
+    expect(waitingButton.disabled).toBe(true);
+    expect(screen.getByText(/統合検証の完了を待っています/)).toBeTruthy();
+    waiting.unmount();
+
+    view(section({ kind: "integration", state: "passed", updatedAt: "2026-10-13T10:51:00.000Z" }));
+    const readyButton = within(screen.getByTestId("review-rerun-panel")).getByRole("button") as HTMLButtonElement;
+    expect(readyButton.disabled).toBe(false);
+    expect(readyButton.textContent).toContain("証跡を更新");
+  });
+
+  it("再実行の受付は合格ではないと示し、連打しても1回しか依頼しない（#4632）", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => ({ ok: true, outcome: "queued" }) });
+    vi.stubGlobal("fetch", fetchMock);
+    render(
+      <ReleaseReviewSections
+        repositoryFullName="guchi-apps/issue-deck"
+        headRef={HEAD}
+        pullRequestNumber={4627}
+        verification={summary({
+          aiReview: section({ state: "needs_check", updatedAt: "2026-10-13T09:00:00.000Z" }),
+          integration: section({ kind: "integration", state: "passed", updatedAt: "2026-10-13T10:51:00.000Z" }),
+        })}
+        verificationError={null}
+        changes={loadedChanges([])}
+      />,
+    );
+    const button = within(screen.getByTestId("review-rerun-panel")).getByRole("button");
+    fireEvent.click(button);
+    fireEvent.click(button);
+    await waitFor(() => expect(screen.getByText(/これはレビューの合格ではありません/)).toBeTruthy());
+    const rerunCalls = fetchMock.mock.calls.filter(([url]) => String(url).includes("review-rerun"));
+    expect(rerunCalls).toHaveLength(1);
+    vi.unstubAllGlobals();
   });
 
   it("診断が無い失敗は原因未特定として出し、権限などを断定しない", () => {

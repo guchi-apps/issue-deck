@@ -10,10 +10,7 @@ import { markPullRequestReadyForReview } from "@/lib/github/actions-api";
 import { getInstallationToken } from "@/lib/github/app-auth";
 import { fetchPullRequest } from "@/lib/github/pull-requests-api";
 import {
-  createPullRequest,
   dispatchReleaseFinalizeWorkflow,
-  fetchBranchHeadSha,
-  fetchOpenPullRequestsForBase,
   fetchCompareChangedFiles,
   fetchFileTextAtRef,
   fetchMainHeadSha,
@@ -23,6 +20,7 @@ import {
   isAncestorCommit,
 } from "@/lib/github/release-api";
 import { isUniqueConstraintError } from "@/lib/prisma-error";
+import { ensureDevelopSync } from "@/lib/release-develop-sync-run";
 import {
   buildInheritanceEvidence,
   decideFinalizeFailureHandling,
@@ -34,6 +32,10 @@ import {
   decideReservationRelease,
   decideVersionReservation,
   FINALIZE_READINESS_LABEL,
+  decideReverifyPhase,
+  describeReverifyItems,
+  type ReverifyItem,
+  type ReverifyPhase,
   FINALIZE_START_ERROR_LABEL,
   FINALIZE_STATUS_LABEL,
   isFinalizePendingExpired,
@@ -117,6 +119,9 @@ export type RcFinalizationChecks = {
   draft: boolean;
   /** 再実行が必要で、まだ合格していない検証 */
   pendingReverify: FinalizeVerificationKind[];
+  /** バンプ後の対象に対する検証ごとの状態と理由（#4640） */
+  reverify: ReverifyItem[];
+  reverifyPhase: ReverifyPhase;
   readiness: FinalizeReadiness;
   readinessLabel: string | null;
 };
@@ -639,10 +644,13 @@ async function evaluateChecks(ctx: Context, row: FinalizationRow, pull: PullDeta
   const pendingReverify = gate.views.filter((v) => v.state !== "passed" && v.state !== "not_applicable").map((v) => v.kind as FinalizeVerificationKind);
   const ciState = ci?.ciState ?? "unknown";
   const readiness = decideFinalizeReadiness({ checks: { ciState, draft: pull.draft }, pendingReverify });
+  const reverify = describeReverifyItems(gate.views);
   return {
     ciState,
     draft: pull.draft,
     pendingReverify,
+    reverify,
+    reverifyPhase: decideReverifyPhase(reverify),
     readiness,
     readinessLabel: readiness.ready ? null : FINALIZE_READINESS_LABEL[readiness.reason],
   };
@@ -761,8 +769,9 @@ async function reverifyFailed(ctx: Context, row: FinalizationRow): Promise<boole
 async function advanceProduction(ctx: Context, candidate: CandidateRow, row: FinalizationRow, pull: PullDetail): Promise<void> {
   const mergeSha = (pull as { merge_commit_sha?: string | null }).merge_commit_sha ?? null;
   if (!pull.merged || !mergeSha || !pull.merged_at || row.reservedVersion === null) return;
-  // 公開した版をdevelopへ同期する（新方式のバンプはdevelopへ入らないため。完了とは独立に再試行する）
-  await ensureDevelopSync(ctx, { version: row.reservedVersion, mergeSha });
+  // 公開した内容をdevelopへ同期する（新方式のバンプはdevelopへ入らないため）。同期の成否は本番反映の判定に使わず、
+  // 完了・取消の後も巡回（`runDevelopSyncSweep`）が同期済みを確かめるまで追う（#4641）
+  await ensureDevelopSync(ctx);
   const runs = await fetchDeployRunsForSha(ctx.owner, ctx.repo, mergeSha, ctx.token);
   const latest = [...runs].sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.id - a.id)[0];
   const versionVerified = latest?.status === "completed" && latest.conclusion === "success" ? await hasVersionVerification(ctx.owner, ctx.repo, latest, ctx.token) : false;
@@ -782,57 +791,6 @@ async function advanceProduction(ctx: Context, candidate: CandidateRow, row: Fin
       await db.releaseVersionReservation.updateMany({ where: { candidateId: candidate.id, version: row.reservedVersion, status: "consumed", consumedTag: null }, data: { consumedTag: tag } });
     }
   }
-}
-
-// ---------------------------------------------------------------------------
-// 公開後のdevelopとの整合
-
-/**
- * 公開した版（mainのバンプ）をdevelopへ同期する。**新方式ではバンプがdevelopへ入らないまま公開される**ので、
- * 同期しないと次の候補のバンプがmainの版と衝突し、developの古い版を「バンプ済み」と誤判定する原因になる。
- * mainをdevelopへマージするPRを作る（develop向けの通常のPRとして、既存のCI・レビュー・自動マージを通る）。
- * 既に反映済み・同期PRが開いていれば何もしない。失敗しても本番反映の追跡は止めない（次の巡回で再試行する）
- */
-export async function ensureDevelopSync(ctx: Context, input: { version: string; mergeSha: string }): Promise<"synced" | "pending" | "created" | "failed"> {
-  try {
-    const developSha = await fetchBranchHeadSha(ctx.owner, ctx.repo, "develop", ctx.token);
-    if (!developSha) return "failed";
-    if (await isAncestorCommit(ctx.owner, ctx.repo, input.mergeSha, developSha, ctx.token)) return "synced";
-    const open = await fetchOpenPullRequestsForBase(ctx.owner, ctx.repo, "develop", ctx.token);
-    if (open.some((pr) => pr.head.ref === "main")) return "pending";
-    await createPullRequest(ctx.owner, ctx.repo, ctx.token, {
-      title: `v${input.version}の公開をdevelopへ同期する`,
-      base: "develop",
-      head: "main",
-      body: [
-        `v${input.version} をmainへ公開したため、バージョンと更新履歴の変更をdevelopへ取り込みます（#4496）。`,
-        "",
-        "- 新方式のリリース候補は、公開準備で候補ブランチにだけバンプを積み、developへは入れません。同期しないと、次の候補のバンプがmainの版と衝突します",
-        "- このPRのマージ後に、次のリリース候補を作れます（それまでは作成を断ります）",
-        "",
-        `<!-- issue-deck-develop-sync:v${input.version} -->`,
-      ].join("\n"),
-    });
-    return "created";
-  } catch (error) {
-    console.error("[release-finalize] develop sync failed", fullNameOf(ctx), error);
-    return "failed";
-  }
-}
-
-/** 公開した版がdevelopへ反映されていない間は、次の候補を作らない（古い版のdevelopから作ると、mainの版と衝突する） */
-export async function findUnsyncedPublish(ctx: Context): Promise<{ version: string; mergeSha: string } | null> {
-  const consumed = await db.releaseVersionReservation.findMany({
-    where: { repositoryFullName: fullNameOf(ctx), status: "consumed", consumedMergeSha: { not: null } },
-    orderBy: { consumedAt: "desc" },
-    take: 1,
-  });
-  const latest = consumed[0];
-  if (!latest?.consumedMergeSha) return null;
-  const developSha = await fetchBranchHeadSha(ctx.owner, ctx.repo, "develop", ctx.token).catch(() => null);
-  if (!developSha) return null;
-  const synced = await isAncestorCommit(ctx.owner, ctx.repo, latest.consumedMergeSha, developSha, ctx.token).catch(() => true);
-  return synced ? null : { version: latest.version, mergeSha: latest.consumedMergeSha };
 }
 
 // ---------------------------------------------------------------------------

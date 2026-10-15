@@ -3,7 +3,9 @@
 import { useMemo, useState } from "react";
 import { isLegacyReleaseCandidateHeadRef, isRcReleaseCandidateHeadRef } from "@/lib/release-branch";
 import { useReleaseRc } from "@/hooks/use-release-rc";
+import { ReleaseBlockNotice } from "@/components/dashboard/release-block-notice";
 import { useReleaseStartMode } from "@/hooks/use-release-start-mode";
+import { ReleaseRcNextStep } from "@/components/dashboard/release-rc-next-step";
 import { ReleaseRcFinalizePanel } from "@/components/dashboard/release-rc-finalize";
 import { ReleaseRcVerificationEvidence } from "@/components/dashboard/release-rc-evidence";
 import { ReleaseRcIdentity, ReleaseRcLegacyNotice } from "@/components/dashboard/release-rc-identity";
@@ -76,7 +78,10 @@ export function MobileReleaseSheet({
   const prepBlocked = preparation.prepState === "running" || preparation.prepState === "failed";
   const [allowPrepOverride, setAllowPrepOverride] = useState(false);
   // 新方式（候補を作成して検証）か旧方式かはcallerの対応で決まる（#4604。PCの個別ボタンと同じ判定）
-  const startMode = useReleaseStartMode(repository.fullName, open);
+  // 既存候補の確認・終了のあとに取り直す（#4628）
+  const [startModeRefresh, setStartModeRefresh] = useState(0);
+  const refreshStartMode = () => setStartModeRefresh((n) => n + 1);
+  const startMode = useReleaseStartMode(repository.fullName, open, startModeRefresh);
   const startLoading = startMode === null;
   // リリース候補（#4495）の識別・公開準備。PCの本番PR詳細と同じ並びで出す（#4560）
   const releasePr = releaseStatus?.available && releaseStatus.phase === "release_pr_open" ? releaseStatus.releasePullRequest : null;
@@ -88,7 +93,7 @@ export function MobileReleaseSheet({
     (deployRun.conclusion === "failure" || deployRun.conclusion === "timed_out");
   // 本番デプロイ失敗中の「修正リリース」だけは確認のうえ旧方式で起動する。未対応・判定不能は止める（#4623）
   const candidateMode = startMode?.mode === "candidate" && !deployFailed;
-  const startUnknown = startMode !== null && startMode.mode !== "candidate" && !deployFailed;
+  const startUnknown = (startMode !== null && startMode.mode !== "candidate" && !deployFailed);
 
   // iOSアプリを持つリポジトリだけの「iOSへの反映」欄（#3579）。対象リポジトリの固定リストは
   // `lib/device-build-repos.ts`（Xcodeで実機ビルド。mainへのマージもMacのスクリプトが行う）と
@@ -127,28 +132,8 @@ export function MobileReleaseSheet({
           )}
           {releaseStatus?.available && (
             <div className="flex flex-col gap-3">
-              <div className="flex items-center justify-between text-sm">
-                <span className="text-muted-foreground">main</span>
-                <span>
-                  {formatMainVersionDisplay(
-                    releaseStatus.mainVersion,
-                    releaseStatus.developVersion,
-                    releaseStatus.phase,
-                  )}
-                </span>
-              </div>
-              <div className="flex items-center justify-between text-sm">
-                <span className="text-muted-foreground">develop</span>
-                <span>
-                  {formatDevelopVersionDisplay(
-                    releaseStatus.developVersion,
-                    releaseStatus.bumpPullRequest?.version ?? null,
-                    releaseStatus.phase,
-                  )}
-                </span>
-              </div>
-              <ReleasePreparationAlert repositoryFullName={repository.fullName} preparation={preparation} />
               {rcCandidate && <ReleaseRcIdentity candidate={rcCandidate} />}
+              {rcCandidate && <ReleaseRcNextStep candidate={rcCandidate} />}
               {rcCandidate && rc.overview?.finalization && (
                 <ReleaseRcFinalizePanel
                   candidate={rcCandidate}
@@ -157,6 +142,7 @@ export function MobileReleaseSheet({
                   onChanged={rc.reload}
                 />
               )}
+              <ReleasePreparationAlert repositoryFullName={repository.fullName} preparation={preparation} />
               {rc.overview && rcLegacy && (
                 <ReleaseRcLegacyNotice overview={rc.overview} legacy={rcLegacy} repositoryFullName={repository.fullName} onChanged={rc.reload} />
               )}
@@ -214,8 +200,12 @@ export function MobileReleaseSheet({
                           : "候補を作成して検証"}
                 </Button>
               )}
-              {!deviceBuild && startUnknown && startMode && (
-                <p className="text-xs text-muted-foreground">{startMode.label}</p>
+              {!deviceBuild && startUnknown && (
+                <ReleaseBlockNotice
+                  repositoryFullName={repository.fullName}
+                  startMode={startMode}
+                  onChanged={refreshStartMode}
+                />
               )}
               {!deviceBuild && preparation.prepState === "running" && (
                 <p className="text-xs text-muted-foreground">CIとバージョン更新が自動で実行されます。操作せずお待ちください</p>
@@ -230,6 +220,27 @@ export function MobileReleaseSheet({
                 />
               )}
               {webviewIos && <WebviewIosInstructions repo={webviewIos} />}
+              {/* 現在の本番版・developの版は補足として後方へ置く（#4635） */}
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-muted-foreground">main</span>
+                <span>
+                  {formatMainVersionDisplay(
+                    releaseStatus.mainVersion,
+                    releaseStatus.developVersion,
+                    releaseStatus.phase,
+                  )}
+                </span>
+              </div>
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-muted-foreground">develop</span>
+                <span>
+                  {formatDevelopVersionDisplay(
+                    releaseStatus.developVersion,
+                    releaseStatus.bumpPullRequest?.version ?? null,
+                    releaseStatus.phase,
+                  )}
+                </span>
+              </div>
               {/* 作り直しの履歴（#4359）は、現在の検証と操作の後ろに置く（#4428） */}
               <ReleaseRebuildHistoryPanel repositoryFullName={repository.fullName} />
             </div>
@@ -318,7 +329,12 @@ export function MobileReleaseSheet({
                 「リリースを起動しました」のダイアログは出さない（#1590） */}
             <AlertDialogAction
               disabled={isTriggeringRelease || prepUnknown || startLoading || startUnknown || (deployFailed && !allowFailedDeploy) || (prepBlocked && !allowPrepOverride)}
-              onClick={() => void triggerRelease(undefined, deployFailed && allowFailedDeploy)}
+              onClick={() =>
+                // 起動できなかったときは、表示後に作られた既存候補などを取り直して理由と次の操作を出す（#4628）
+                void triggerRelease(undefined, deployFailed && allowFailedDeploy).then((ok) => {
+                  if (!ok) refreshStartMode();
+                })
+              }
             >{candidateMode ? "候補を作成する" : "起動する"}</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

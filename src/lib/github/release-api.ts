@@ -419,6 +419,35 @@ export async function fetchOpenPullRequestsForBase(
   return res.json();
 }
 
+/** 指定ブランチをbaseとする閉じたPull Requestを、更新の新しい順に最大30件（#4641。マージ済みの同期PRを探す） */
+export async function fetchRecentClosedPullRequestsForBase(
+  owner: string,
+  repo: string,
+  base: string,
+  token: string,
+): Promise<(GithubApiPullRequest & { merged_at: string | null })[]> {
+  const url = `${GITHUB_API}/repos/${owner}/${repo}/pulls?base=${encodeURIComponent(base)}&state=closed&sort=updated&direction=desc&per_page=30`;
+  const res = await githubFetch(url, token);
+  if (!res.ok) {
+    const detail = await res.text().catch(() => "");
+    throw new GithubApiError(res.status, `GitHub API request failed: ${res.status} ${url} ${detail}`);
+  }
+  return res.json();
+}
+
+/**
+ * ブランチを作る（#4641。mainの先端から切る同期PRのhead）。書き方は本番復旧PRのブランチ作成
+ * （`deploy-recovery-api.ts`）に揃える。**同名のブランチが既にあれば作らず`exists`を返す**（巡回の重複で増やさない）
+ */
+export async function createBranchRef(owner: string, repo: string, branch: string, sha: string, token: string): Promise<"created" | "exists"> {
+  const url = `${GITHUB_API}/repos/${owner}/${repo}/git/refs`;
+  const res = await githubFetch(url, token, { method: "POST", body: { ref: `refs/heads/${branch}`, sha } });
+  if (res.ok) return "created";
+  const detail = await res.text().catch(() => "");
+  if (res.status === 422 && /already exists/i.test(detail)) return "exists";
+  throw new GithubApiError(res.status, `GitHub API request failed: ${res.status} ${url} ${detail}`);
+}
+
 /**
  * リリースworkflowのcallerが、PRを選んだ作り直し（`rebuild_selection` input。#4335）を受け付けるか。
  * **developにあるcallerの定義を読んで決める。** 配布先は参照タグとcallerを更新するまで受け付けず、
@@ -1187,7 +1216,7 @@ export async function fetchFileTextAtRef(
   return Buffer.from(data.content, data.encoding === "base64" ? "base64" : "utf-8").toString("utf-8");
 }
 
-/** PRを作る（#4496。公開後にmainをdevelopへ同期するPR）。同じhead→baseのPRが既にあるときは422になる */
+/** PRを作る（#4496・#4641。公開後にmainの内容をdevelopへ同期するPR）。同じhead→baseのPRが既にあるときは422になる */
 export async function createPullRequest(
   owner: string,
   repo: string,

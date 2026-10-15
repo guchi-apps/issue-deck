@@ -9,7 +9,7 @@ import { mapComment } from "@/lib/github/issue-mapper";
 import { fetchCommentsForIssue } from "@/lib/github/issues-api";
 import { githubApiErrorMessage } from "@/lib/github/network-error";
 import { buildPullRequestEvents } from "@/lib/github/pull-request-events";
-import { findCurrentFixRequest } from "@/lib/github/pull-request-fix-request-service";
+import { findCurrentFixRequest, findInterruptedFixRequest } from "@/lib/github/pull-request-fix-request-service";
 import { repairKindsFor } from "@/lib/github/pull-request-repair";
 import {
   fetchActivePullRequestRepairRun,
@@ -139,6 +139,7 @@ async function handleGET(request: NextRequest) {
           // 詳細は単体取得（`fetchPullRequest`）のレスポンスに`mergeable`を含むため、
           // 一覧のようにGraphQLで取り直す必要はない（#1742）。
           mergeable: pullRequest.mergeable,
+          mergeableState: pullRequest.mergeable_state,
           linkedIssueCheckUser: checkUserKey !== null && checkUserReasons.has(checkUserKey),
           linkedIssueCheckReason:
             checkUserKey === null ? null : (checkUserReasons.get(checkUserKey) ?? null),
@@ -232,6 +233,7 @@ async function resolveReviewResponseContext(params: {
       linkedIssueLocal: local,
       linkedIssueClosed: closed,
       currentFixRequest: findCurrentFixRequest(comments, params.headSha),
+      interruptedFixRequest: findInterruptedFixRequest(comments, params.headSha),
       fetchFailed: false,
     };
   } catch (error) {
@@ -241,6 +243,7 @@ async function resolveReviewResponseContext(params: {
       linkedIssueLocal: local,
       linkedIssueClosed: closed,
       currentFixRequest: null,
+      interruptedFixRequest: null,
       fetchFailed: true,
     };
   }

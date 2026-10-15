@@ -66,6 +66,15 @@ export type ReleaseVerificationSection = {
    * コードへの指摘（`findings`）とは別で、`state`が`failed`のときだけ入る
    */
   diagnostic: ReleaseReviewDiagnostic | null;
+  /** 再実行で置き換わる前の直前の結果（#4632）。現在の結果ではなく履歴。無ければnull */
+  previousRun: ReleaseVerificationPreviousRun | null;
+};
+
+export type ReleaseVerificationPreviousRun = {
+  state: string;
+  at: string;
+  unverifiedScope: string | null;
+  summary: string | null;
 };
 
 export type ReleaseVerificationSummary = {
@@ -83,6 +92,19 @@ export type ReleaseVerificationSummary = {
   /** 判定の対象（GitHubから取った現在のbase・head）。画面は「どのSHAの結果か」を出すのに使う */
   target: { baseSha: string; headSha: string };
 };
+
+function readPreviousRun(findings: unknown): ReleaseVerificationPreviousRun | null {
+  const raw = typeof findings === "object" && findings !== null ? (findings as Record<string, unknown>).previousRun : null;
+  if (typeof raw !== "object" || raw === null) return null;
+  const r = raw as Record<string, unknown>;
+  if (typeof r.state !== "string" || typeof r.at !== "string") return null;
+  return {
+    state: r.state,
+    at: r.at,
+    unverifiedScope: typeof r.unverifiedScope === "string" ? r.unverifiedScope : null,
+    summary: typeof r.summary === "string" ? r.summary : null,
+  };
+}
 
 function readDetail(findings: unknown) {
   const raw = (typeof findings === "object" && findings !== null ? findings : {}) as Record<string, unknown>;
@@ -154,6 +176,7 @@ export function summarizeReleaseVerification(input: {
       ...detail,
       progress,
       diagnostic: state === "failed" ? readReleaseReviewDiagnostic(row?.findings, current) : null,
+      previousRun: readPreviousRun(row?.findings),
     };
   };
 

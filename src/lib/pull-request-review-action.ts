@@ -41,6 +41,8 @@ export type ReviewAction =
       request: ReviewFixRequestAvailability;
       /** 依頼済みかを確かめられなかった（送信側の重複判定に任せる） */
       requestLookupFailed: boolean;
+      /** 直前の依頼が中止・失敗した（#4639）。同じ画面から再送できる */
+      interrupted: PullRequestReviewResponseContext["interruptedFixRequest"];
     };
 
 export type ReviewAttentionKind = "changes-requested" | "needs-check";
@@ -118,6 +120,7 @@ export function deriveReviewAction(params: {
       : null,
     request: resolveRequestAvailability(pullRequest, context),
     requestLookupFailed: context?.fetchFailed ?? false,
+    interrupted: context?.interruptedFixRequest ?? null,
   };
 }
 

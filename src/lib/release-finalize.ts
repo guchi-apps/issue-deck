@@ -452,6 +452,71 @@ export function decideMergedCandidate(input: {
   return { action: "hold", reason: `${pre}。最終CI・再検証の合格を確認できないため本番反映の追跡へ進めません。CI・検証をやり直して合格すれば進みます` };
 }
 
+// ---------------------------------------------------------------------------
+// バンプ後の再検証の状態分類（#4640）
+
+/** 画面が見出し・badge・主操作を決めるための、再検証の現在状態。**「再検証中」は実行中・待機のジョブがあるときだけ** */
+export type ReverifyPhase = "done" | "running" | "waiting" | "failed" | "needs_check" | "not_run" | "invalidated";
+
+export type ReverifyItem = {
+  kind: ReleaseVerificationKind;
+  label: string;
+  state: ReleaseVerificationView["state"];
+  /** 画面に出す理由（未完了・要確認・失敗のときだけ） */
+  reason: string | null;
+};
+
+const REVERIFY_KIND_LABEL: Record<ReleaseVerificationKind, string> = { integration: "統合検証", ai_review: "全体レビュー" };
+
+export const REVERIFY_PHASE_LABEL: Record<ReverifyPhase, string> = {
+  done: "完了",
+  running: "再検証中",
+  waiting: "実行待ち",
+  failed: "失敗",
+  needs_check: "要確認で終了",
+  not_run: "未実施",
+  invalidated: "対象が変わりました",
+};
+
+/** バンプ後の対象に対する検証の記録（`evaluateReleaseMergeGate`のviews）を、検証ごとの理由付きの項目へ直す */
+export function describeReverifyItems(views: readonly ReleaseVerificationView[]): ReverifyItem[] {
+  return views.map((view) => {
+    const label = REVERIFY_KIND_LABEL[view.kind];
+    const reason = (() => {
+      switch (view.state) {
+        case "passed":
+        case "not_applicable":
+          return null;
+        case "running":
+          return `${label}を実行中です`;
+        case "waiting":
+          return `${label}の実行を待っています`;
+        case "not_run":
+          return `${label}がまだ依頼されていません`;
+        case "failed":
+          return `${label}が失敗しています`;
+        case "needs_check":
+          return ("reason" in view && view.reason) || `${label}が要確認で終了しています（実行中のジョブはありません）`;
+        case "invalidated":
+          return "reason" in view ? view.reason : `${label}の対象が変わりました`;
+      }
+    })();
+    return { kind: view.kind, label, state: view.state, reason };
+  });
+}
+
+/** 検証全体の現在状態。失敗は待たずに伝え、次に実行中・待機（待てば結果が出る）、その後に終了済みの未完了を返す */
+export function decideReverifyPhase(items: readonly ReverifyItem[]): ReverifyPhase {
+  const states = items.map((i) => i.state);
+  if (states.includes("failed")) return "failed";
+  if (states.includes("running")) return "running";
+  if (states.includes("waiting")) return "waiting";
+  if (states.includes("needs_check")) return "needs_check";
+  if (states.includes("not_run")) return "not_run";
+  if (states.includes("invalidated")) return "invalidated";
+  return "done";
+}
+
 /** 公開前の最終検証が失敗したときの扱い。**版の予約は保つ**（再試行だけを理由に正式版を増やさない） */
 export type FinalizeFailureHandling = {
   /** 候補の段階を戻す先（同じ候補の修正工程） */

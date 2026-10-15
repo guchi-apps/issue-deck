@@ -1124,7 +1124,17 @@ main起点の`deploy-recovery/*`ブランチへ取り込む。**`merges`APIは�
 
 ### 公開後のdevelop整合
 
-- 新方式のバンプはdevelopへ入らない。公開後に、mainをdevelopへ同期するPR（`ensureDevelopSync`）を作る。同期されるまで、次の候補は作らない（`develop_not_synced`）
+- 新方式のバンプ・候補上の修正・競合解消はdevelopへ入らないまま公開される。公開後に、mainの内容をdevelopへ戻す同期PRを作り、同期されるまで次の候補は作らない（#4641。判定は`src/lib/release-develop-sync.ts`、観測・作成・巡回は`release-develop-sync-run.ts`）
+- **判定の正は実際のGit履歴で、DBの記録（版の予約・公開準備）は見ない。** 記録の無い手動公開・取消・外部マージ・hotfixのmain直接マージでも、mainにだけある変更が残っていれば未同期になる。同期済みとみなすのは次のどれかだけ
+  1. mainの先端がdevelopの祖先（`develop...main`の`aheadBy`が0）
+  2. 祖先でなくても`develop...main`の3点比較で変更ファイルが0（旧方式のマージコミットだけ）
+  3. マージ済みの同期PR（本文の`<!-- issue-deck-develop-sync:main=<SHA> -->`）があり、そのSHA以降mainに変更ファイルが無い。**squash・rebaseでマージするとmerge-baseが進まず1・2では同期済みにならない**ための救済で、同期PRは本来マージコミットでマージする
+- GitHubから取得できないときは**判定不能**（`develop_sync_unknown`）で、同期済みと推定して候補を作らない
+- 同期PRのheadは`main`ではなく、mainの先端から切った`release-sync/main-<SHA12>`。競合したらこのブランチへdevelopを取り込んで解消する（mainへpushしない・developを上書きしない）。ブランチ名がmainのSHAで決まり、開いている同期PR（以前のhead=mainのものも含む）があれば作らないので、巡回が重なっても1本にしかならない。同期PRの作成後にmainが進んだときは、そのマージ後に残りの同期PRを作る
+- 同期PRは通常のdevelop向けPRとして既存のCI・レビュー・マージ保護を通る（`issue-<番号>`ブランチではないため自動マージの対象外で、人がマージする）
+- 同期PRの版更新による`push`は次のリリース開始の承認ではない（#4650）。mainとdevelopが同じ版ならコード差分が残っていても新規バンプを開始せず、旧方式の版判定・patchフォールバック・バンプPR作成の3ステップも`workflow_dispatch`に限定する。既存の旧方式バンプ後（developの版がmainより新しい）のリリースPR作成は維持する。この共通workflowの修正は公開した配布タグの参照更新まで各repoへ反映されないため、callerの入力追加だけで完了としない（全展開の追跡: #4651）。
+- 追跡は公開処理の段階から独立している。呼び出し元は本番反映の追跡（`advanceProduction`）・pollerの巡回（`deploy-recovery-series/sweep`へ相乗りする`runDevelopSyncSweep`。候補を使ったことのあるリポジトリを5分おき）・候補作成（`createReleaseRc`の中で判定するのでAPI以外の経路からも迂回できない）・画面の「同期PRを作成」の4つ。作成の失敗理由はプロセス内にだけ持ち、巡回が再試行する
+- 画面は開始前の案内（`start-mode`の`develop_sync`。PCの個別ボタン・スマホのシート・一括）と、本番反映以降の候補の本番PR詳細に「developへの同期」欄を出す。**公開結果とは別の欄**で、同期できていないことを本番公開の失敗とは表示しない。承認・全体レビューの記録は作らない
 - 共有workflowの状態判定は、**developの版がmainより古い**ときを「バンプ済み」とみなさない（古いリリースPRを作らない）
 
 ### 二重実行しない
@@ -1143,3 +1153,20 @@ callerへの`finalize_request`の配線と実リポジトリでの通し確認�
 - 候補の改訂履歴は新しい順
 - ブランチ一覧の束の見出しに「現在の本番版」「次のリリース候補」「旧方式で進行中」のバッジを出す（`branch-flow-view.tsx`）
 - 未対応: リリース履歴から候補への導線・旧リンク解決は別Issueで扱う
+
+## 現在の候補と次の操作を最上部に集約する（#4635）
+
+#4560の並びを、ブランチ画面の「次のリリース」・本番PR詳細・スマホリリースシートで揃えた。**現在のリリース候補（RC名・状態・停止理由）と主操作 → 候補の検証結果 → 今回公開する変更 → 現在の本番版・履歴**の順で、本番版（本番稼働中・再デプロイ）は補足として後方に置く。
+
+- **工程と操作の判定は純関数`release-rc-action.ts`が1か所で持つ。** `decideRcPublish`（公開してよいか）を画面（`release-publish-action.tsx`）とマージAPI（`POST /api/issues/pull-request-merge`）が共用し、`describeRcPrimaryAction`が工程ごとの主操作を決める。「本番公開へ進む」を出す・通すのは、段階が`awaiting_approval`・ドラフトでない・PRのheadが公開準備の最終headと一致するときだけ。
+- **サーバーの拒否（409）**: `rc_record_missing`・`rc_not_prepared`（公開準備前。次は検証→公開準備）・`rc_preparing`・`rc_draft`・`rc_pull_request_unobserved`・`rc_head_mismatch`・`rc_already_published`・`rc_cancelled`。応答に`next`と日本語の`message`を含め、GitHubのmerge APIの405（ドラフト）を利用者に見せない。ドラフト解除だけでは公開準備を飛ばせない。記録が引けない・ドラフト状態が未取得のときは推測で通さず拒否する。
+- **検査対象は新方式（`release-rc/<番号>`）だけ。** 旧方式（`release-main/*`）はRC記録が無いため従来のゲートのみ（`rcSequenceOf(head.ref)`がnullなら検査しない）。
+- 合格後・公開準備前の見出しは「公開準備へ進めます」（`describeFixOverview`の`publishBlock`）。公開準備中は「公開準備を進めています」。全体レビューの実行失敗中は「操作は不要です。自動で進みます。」を出さず、再実行へ案内する。
+- **最新SHAの結果は現在結果。** `isPreviousVerificationResult`が、系列の状態でなく**表示中の検証結果の対象head**で修正前かを判定する。RCは同じPRのheadが進むため、最新headの失敗・合格を「修正前の履歴」へ隠さない。対象が未取得の間は現在の結果として見せない。
+- 新方式で候補があるとき、正式版が決まる前は「未作成」でなく「正式版は未確定」と出す。
+
+## バンプ後の再検証の表示は検証ごとの状態から決める（#4640）
+
+公開準備の「バンプ後の再検証・引継ぎ」は、`describeReverifyItems`／`decideReverifyPhase`（`src/lib/release-finalize.ts`）が検証ごとの状態から決める。**「再検証中」は実行中のジョブがあるときだけ**で、待機は「実行待ち」、終了済みの要確認は「要確認で終了」、失敗・未実施・対象変更はそれぞれ別の表示にする。最終CIの欄にはCI自体の状態だけを書き、未完了の検証は再検証の工程に検証名と理由を併記する。
+
+全体レビューの要確認が統合検証の結果待ち時点の理由を保持し、統合検証が今は終了している場合（`isStaleReviewWait`）は、「前回レビュー時点の理由」として分け、冒頭の主操作を「最新の証跡で全体レビューを再実行」（#4632の再実行導線へ誘導）にする。指摘は消さず併記する。
