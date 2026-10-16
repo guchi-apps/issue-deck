@@ -9,7 +9,7 @@
 # **失うものが無いときだけ捨てて続ける。** 変更のある追跡済みファイルが、`fetch`した後の
 # 取り込み先（`@{u}`）と**すべて同じ内容**なら、その変更は取り込めば同じものが入るので
 # 捨ててよい（手で当てた修正が、別経路で同じ形のままdevelopへ入った場合）。未追跡の
-# ファイルがあるとき・取り込み先と1つでも違うときは捨てない。
+# ファイルは保持し、取り込み先と衝突するときだけ止める。独自の変更は捨てない。
 #
 # このファイル自体は実行せず、source して使う。
 
@@ -38,6 +38,9 @@ self_update_summarize_files() {
 # 捨てたときは、何を捨てたかをstderrへ書く（pollerのログに残す）。
 self_update_prepare_worktree() {
   local dir="$1" porcelain dirty_summary
+  # ファイル名をGitのpathspec（ワイルドカード等）として解釈させない。
+  local GIT_LITERAL_PATHSPECS=1
+  export GIT_LITERAL_PATHSPECS
 
   porcelain="$(git -C "$dir" status --porcelain 2>/dev/null)" || {
     printf '作業ツリーの状態を取得できませんでした。手元で確認してください。'
@@ -60,30 +63,46 @@ self_update_prepare_worktree() {
   # 変更（例: docs/の追記）が残っているだけで毎回「更新して再起動」が止まっていた。変更を
   # 捨てず、`pull --ff-only`にも触れ合うファイルが無いので、巻き込んで消すことはない。
   # 触れ合う場合・未追跡ファイルが取り込みと同じパスの場合は、`pull`自身が拒否して失敗として返る。
-  local -a incoming=()
+  # NUL区切りで取得する。statusの引用表示をパスとして再利用しない。
+  local -a incoming=() untracked=() files=()
   local file
-  while IFS= read -r file; do
+  while IFS= read -r -d '' file; do
     [[ -n "$file" ]] && incoming+=("$file")
-  done < <(git -C "$dir" diff --name-only HEAD '@{u}' --)
+  done < <(git -C "$dir" diff --no-renames --name-only -z HEAD '@{u}' --)
+  while IFS= read -r -d '' file; do
+    untracked+=("$file")
+  done < <(git -C "$dir" ls-files --others --exclude-standard -z)
+  # HEADと作業ツリーが同じでも、indexだけに変更がある場合を拾う。
+  while IFS= read -r -d '' file; do
+    files+=("$file")
+  done < <(git -C "$dir" diff --no-renames --name-only -z HEAD --; git -C "$dir" diff --cached --no-renames --name-only -z --)
   local overlap=0 dirty_path
-  while IFS= read -r dirty_path; do
-    [[ -z "$dirty_path" ]] && continue
+  for dirty_path in ${untracked[@]+"${untracked[@]}"}; do
     for file in ${incoming[@]+"${incoming[@]}"}; do
-      [[ "$file" == "$dirty_path" ]] && overlap=1
+      # 同じパスに加え、ファイルとディレクトリの衝突も更新前に止める。
+      if [[ "$file" == "$dirty_path" || "$file" == "$dirty_path/"* || "$dirty_path" == "$file/"* ]]; then
+        printf '%s' "$stop_message"
+        return 1
+      fi
     done
-  done < <(printf '%s\n' "$porcelain" | cut -c4- | sed 's/.* -> //')
-
-  if printf '%s\n' "$porcelain" | grep -q '^??'; then
-    ((overlap == 0)) || { printf '%s' "$stop_message"; return 1; }
-    echo "未追跡のファイルを残したまま更新します: ${dirty_summary}" >&2
+  done
+  for dirty_path in ${files[@]+"${files[@]}"}; do
+    for file in ${incoming[@]+"${incoming[@]}"}; do
+      [[ "$file" == "$dirty_path" || "$file" == "$dirty_path/"* || "$dirty_path" == "$file/"* ]] && overlap=1
+    done
+  done
+  if ((${#files[@]} == 0)); then
     return 0
   fi
-
-  local -a files=()
-  while IFS= read -r file; do
-    [[ -n "$file" ]] && files+=("$file")
-  done < <(git -C "$dir" diff --name-only HEAD --)
-  if ((${#files[@]} == 0)) || ! git -C "$dir" diff --quiet '@{u}' -- "${files[@]}"; then
+  # indexにだけ残る独自変更も保護する。全ファイルを確かめてからrestoreする。
+  local index_safe=1
+  for file in "${files[@]}"; do
+    if ! git -C "$dir" diff --cached --quiet HEAD -- "$file" \
+      && ! git -C "$dir" diff --cached --quiet '@{u}' -- "$file"; then
+      index_safe=0
+    fi
+  done
+  if ((index_safe == 0)) || ! git -C "$dir" diff --quiet '@{u}' -- "${files[@]}"; then
     if ((overlap == 0)); then
       echo "取り込みと重ならない未コミットの変更を残したまま更新します: ${dirty_summary}" >&2
       return 0
@@ -92,8 +111,14 @@ self_update_prepare_worktree() {
     return 1
   fi
 
+  # ffできない状態では、同内容でも手元を変更しない。
+  if ! git -C "$dir" merge-base --is-ancestor HEAD '@{u}'; then
+    printf '%s' "$stop_message"
+    return 1
+  fi
   if ! git -C "$dir" restore --source=HEAD --staged --worktree -- "${files[@]}" >/dev/null 2>&1 \
-    || [[ -n "$(git -C "$dir" status --porcelain 2>/dev/null)" ]]; then
+    || ! git -C "$dir" diff --quiet HEAD -- "${files[@]}" \
+    || ! git -C "$dir" diff --cached --quiet HEAD -- "${files[@]}"; then
     printf '%s' "$stop_message"
     return 1
   fi
@@ -157,3 +182,4 @@ self_update_in_backoff() {
   now="$(date +%s)"
   ((now - last < retry_minutes * 60))
 }
+
