@@ -16,7 +16,6 @@ import type { AppSettingsValues } from "@/components/dashboard/settings/executio
 import { SettingsDialog } from "@/components/dashboard/settings/settings-dialog";
 import { EditIssueDialog } from "@/components/dashboard/edit-issue-dialog";
 import { StartImplementationDialog } from "@/components/dashboard/start-implementation-dialog";
-import { startImplementationDisabledReason } from "@/lib/github/start-implementation";
 import { buildLocalSessionCommand, canStartLocalSession } from "@/lib/local-session";
 import { ReleaseFixStartContext } from "@/components/dashboard/release-fix-start-context";
 import { DeployFailureFixIssueContext } from "@/components/dashboard/deploy-failure-alert";
@@ -2921,7 +2920,6 @@ export function IssueDeckShell({
             onCommentCreated={() => {}}
             onNightlyRunQueued={nightlyRun.refresh}
             includeDispatchTargets
-            actionsDisabledReason={startImplementationDisabledReason(releaseFixStartRepository?.hasClaudeWorkflow)}
             localSessionCommand={
               canStartLocalSession(releaseFixStartRepository?.hasLocalStartScript)
                 ? buildLocalSessionCommand(releaseFixStartIssue.repositoryFullName, releaseFixStartIssue.number)

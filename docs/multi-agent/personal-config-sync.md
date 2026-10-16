@@ -1,3 +1,5 @@
+> IssueのActions実装は#4680で廃止しました。旧無人実行についての記載は履歴です。現行方針は[廃止方針](../actions-implementation-retirement.md)を参照してください。
+
 # 個人設定（グローバルルール・個人skill）の同期
 
 メインPC（WSL）とサブPC（`subpc`）で、Claude Codeの`~/.claude/CLAUDE.md`と個人skillを
@@ -100,7 +102,7 @@ Claude Codeは動き続けるし（skillの執筆自体がメインPCのObsidian
 
 昇格は実装エージェントの自己申告で、機械的な強制力は持たせていない。
 [`docs/multi-agent/implementation-agent-reference.md`](implementation-agent-reference.md)（issue-deck自身のローカル実行。プロンプトの索引から読む。#3021）、
-[`docs/multi-agent/unattended-implementation-reference.md`](unattended-implementation-reference.md)（無人実行。同じく索引から読む。#3024）と
+`unattended-implementation-reference.md`（#4680で廃止）（無人実行。同じく索引から読む。#3024）と
 [`scripts/prompts/generic-implementation-agent-reference.md`](../../scripts/prompts/generic-implementation-agent-reference.md)（汎用ランチャー。同じく索引から読む。#3023）の
 「実装中に得た知見の記録」で促すに留め、投稿されたかどうかの検証はしない。共有知識と同じく
 **量より汚染防止を優先する**ため、取りこぼしは許容する。

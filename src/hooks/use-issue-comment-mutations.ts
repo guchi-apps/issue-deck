@@ -10,6 +10,8 @@ export type CreateCommentInput = {
   repo: string;
   number: number;
   body: string;
+  /** 明示的な質問操作のみ既存ホストへ配送する。 */
+  askQuestion?: boolean;
 };
 
 export type UpdateCommentInput = {
@@ -33,7 +35,7 @@ function errorMessageForResponse(
   if (errorCode === "github_reauth_required") {
     return GITHUB_REAUTH_REQUIRED_MESSAGE;
   }
-  if (errorCode === "github_api_error" && message) {
+  if (message) {
     return message;
   }
   return `リクエストに失敗しました (${status})`;
@@ -43,7 +45,7 @@ async function postJson(
   url: string,
   method: "POST" | "PATCH",
   input: unknown,
-): Promise<IssueComment> {
+): Promise<{ comment: IssueComment; warning?: string }> {
   const res = await fetch(url, {
     method,
     headers: { "Content-Type": "application/json" },
@@ -53,19 +55,21 @@ async function postJson(
     const data: { error?: string; message?: string } = await res.json().catch(() => ({}));
     throw new Error(errorMessageForResponse(res.status, data.error, data.message));
   }
-  const data: { comment: IssueComment } = await res.json();
-  return data.comment;
+  const data: { comment: IssueComment; warning?: string } = await res.json();
+  return data;
 }
 
 export function useIssueCommentMutations() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  async function createComment(input: CreateCommentInput): Promise<IssueComment | null> {
+  async function createComment(input: CreateCommentInput): Promise<(IssueComment & { deliveryWarning?: string }) | null> {
     setIsSubmitting(true);
     setError(null);
     try {
-      return await postJson("/api/issues/comments", "POST", input);
+      const result = await postJson("/api/issues/comments", "POST", input);
+      if (result.warning) setError(result.warning);
+      return { ...result.comment, ...(result.warning ? { deliveryWarning: result.warning } : {}) };
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
       return null;
@@ -78,7 +82,7 @@ export function useIssueCommentMutations() {
     setIsSubmitting(true);
     setError(null);
     try {
-      return await postJson("/api/issues/comments", "PATCH", input);
+      return (await postJson("/api/issues/comments", "PATCH", input)).comment;
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
       return null;

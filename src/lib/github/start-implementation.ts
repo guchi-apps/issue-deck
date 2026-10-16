@@ -3,15 +3,6 @@ import { getWorkflowStepIndex } from "@/lib/github/workflow-status";
 import { isProgressLabel } from "@/lib/issue-status";
 import type { Issue, IssueLabel } from "@/types/issue";
 
-/**
- * 「実装を開始」ボタン押下時に投稿する定型コメント本文（claude-issue-dispatch.ymlの@claudeトリガーに反応する）。
- * 「計画を立案」選択時は実際には計画提示までしか行われないため、文言を「実装を開始」ではなく
- * 「計画を立案」にする（approveCommentBodyのisPlanApprovalPendingと同じ出し分けパターン）。
- */
-export function startImplementationCommentBody(planRequired: boolean): string {
-  return planRequired ? "@claude 計画を立案してください" : "@claude 実装を開始してください";
-}
-
 /** 実装前にPlan modeでの計画提示・承認を必須にするラベル */
 export const PREVIEW_REQUIRED_LABEL = "23.preview-required";
 
@@ -133,30 +124,6 @@ export function artifactRequiredDefaultForLabels({
   return issueLabelNames.some((name) => ARTIFACT_REQUIRED_DEFAULT_TYPE_LABELS.includes(name));
 }
 
-/**
- * 実行先に応じて、ダイアログに出すオプションを絞る（#1317）。
- *
- * **アーティファクトは、GitHub Actions（無人実行）のときだけ隠す**（#1473）。
- * アーティファクトの公開はローカルセッションのツールで、無人実行からは作れない。
- *
- * **既にチェックが入っている場合は実行先によらず出す。** 隠すと、付いてしまったラベルを
- * このダイアログから外せなくなる。
- */
-export function visibleStartImplementationOptions({
-  isActionsTarget,
-  options,
-}: {
-  isActionsTarget: boolean;
-  options: StartImplementationOptions;
-}): typeof START_IMPLEMENTATION_OPTIONS {
-  return START_IMPLEMENTATION_OPTIONS.filter((option) => {
-    if (option.key === "artifactRequired") {
-      return !isActionsTarget || options.artifactRequired;
-    }
-    return true;
-  });
-}
-
 /** 実装オプション用チェックボックスと表示が重複しないよう、ラベル選択欄から除外するラベル名 */
 const START_IMPLEMENTATION_OPTION_LABEL_NAMES = new Set(
   START_IMPLEMENTATION_OPTIONS.map((option) => option.githubLabel),
@@ -263,23 +230,4 @@ export function canStartImplementation(
     !isApprovalPending(issue.labels) &&
     !isManualStepIssue(issue.labels)
   );
-}
-
-/**
- * リポジトリにissue-deckの自動化ワークフロー（claude-issue-dispatch.yml）が見つからない場合、
- * 「実装を開始」ボタンを押しても`@claude`コメントに反応するワークフローが存在せず何も起動しない。
- * ボタン自体は非表示にせず、押せない理由を示した上で無効化する（#976）。
- * `hasClaudeWorkflow`が明示的にfalseの場合のみ無効化し、リポジトリ情報が見つからない等でundefinedの
- * 場合は誤って無効化しないよう理由を返さない。
- * **リポジトリ一覧の印（`lib/repository-automation.ts`）とは判定が違う**（#1888）。あちらは
- * 「issue-deckで実装を回せるか」なので、サブPCのローカルセッションで起動できるリポジトリには
- * 印を出さない。ここはダイアログの中のActionsの選択肢だけを落とすためのもので、軸は
- * GitHub Actions単独に限られる（#1262）。揃えると、サブPCで起動できるリポジトリで
- * Actionsを選べてしまう。
- */
-export function startImplementationDisabledReason(hasClaudeWorkflow: boolean | undefined): string | null {
-  if (hasClaudeWorkflow === false) {
-    return "issue-deckの自動化workflow（claude-issue-dispatch.yml）が見つかりません（対応可否の近似判定です）。実装を開始しても起動しません。";
-  }
-  return null;
 }

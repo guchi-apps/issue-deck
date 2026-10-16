@@ -156,10 +156,10 @@ describe("buildParentIssueBody", () => {
     expect(body).toContain("standards/tech-stack.md");
   });
 
-  it("初期化は盤面から無人実行で始められると書く（#2247）", () => {
+  it("初期化前にホスト準備が必要だと書く", () => {
     const body = buildParentIssueBody(spec());
-    expect(body).toContain("盤面から無人実行で始められます");
-    expect(body).toContain("初期化Issueは待ちません");
+    expect(body).toContain("ホスト");
+    expect(body).toContain("準備");
   });
 
   it("ポート帯はマージだけでは効かないことを書く（#2225）", () => {
@@ -177,7 +177,7 @@ describe("buildInitIssueBody", () => {
       ".github/scripts/signaly-notify.sh",
       ".github/secrets-manifest.tsv",
       ".github/workflows/ci.yml",
-      ".github/workflows/claude-issue-dispatch.yml",
+      ".github/workflows/issue-labels.yml",
       ".github/workflows/deploy.yml",
       "deploy/ecosystem.config.js",
       "prisma.config.ts",
@@ -186,13 +186,14 @@ describe("buildInitIssueBody", () => {
     workflowTag: "workflows/v25",
   };
 
-  it("雛形が置けていれば、盤面から無人実行で回せると書く（#2247）", () => {
+  it("雛形が置けていても、ホスト準備を前提にする", () => {
     const body = buildInitIssueBody(spec(), REFS, SCAFFOLD);
     expect(body).toContain("## 前提条件");
-    expect(body).toContain("先に完了している必要があるIssue・PR: なし");
-    expect(body).toContain("無人実行で実装できます");
+    expect(body).toContain("先に完了している必要があるIssue・PR:");
+    expect(body).toContain("ホスト");
     expect(body).toContain("## すでに置かれているもの");
-    expect(body).toContain("`.github/workflows/claude-issue-dispatch.yml`");
+    expect(body).not.toContain("claude-issue-dispatch.yml");
+    expect(body).toContain(REFS.subpc!);
     expect(body).toContain("workflows/v25");
     // 置いてあるものを作り直させない
     expect(body).not.toContain("`.github/workflows/ci.yml` を作る");
@@ -200,22 +201,22 @@ describe("buildInitIssueBody", () => {
     expect(body).not.toContain("`.github/secrets-manifest.tsv` を作る");
   });
 
-  it("callerだけ置けなかったときは、その理由を書いてローカルセッション前提に切り替える", () => {
+  it("一部の雛形だけでもローカルセッションで実装する", () => {
     const body = buildInitIssueBody(spec(), REFS, {
       paths: [".github/workflows/ci.yml", "CLAUDE.md"],
       workflowTag: null,
     });
-    expect(body).toContain("無人実行のcaller（`claude-issue-dispatch.yml`）を置けなかったため");
+    expect(body).toContain("ホスト");
     expect(body).toContain("## すでに置かれているもの");
     expect(body).not.toContain("`.github/workflows/ci.yml` を作る");
   });
 
-  it("マルチエージェント運用に対応させないときは、そのことを理由として書く", () => {
+  it("マルチエージェント運用を使わなくてもホスト実行を案内する", () => {
     const body = buildInitIssueBody(spec({ multiAgent: false }), REFS, {
       paths: [".github/workflows/ci.yml"],
       workflowTag: null,
     });
-    expect(body).toContain("マルチエージェント運用に対応させない選択のため");
+    expect(body).toContain("ホスト");
   });
 
   it("雛形を置けなかったときは、従来どおりサブPCのローカルセッション前提で書く", () => {
@@ -223,8 +224,8 @@ describe("buildInitIssueBody", () => {
     expect(body).toContain("## 前提条件");
     expect(body).toContain(REFS.subpc!);
     expect(body).toContain(REFS.portBandPullRequest!);
-    expect(body).toContain("local-repos.conf");
-    expect(body).toContain("盤面にも載りません");
+    expect(body).toContain("ホスト");
+    expect(body).not.toContain("無人実行で実装できます");
     expect(body).toContain("`.github/workflows/ci.yml` を作る");
     expect(body).not.toContain("## すでに置かれているもの");
   });
@@ -444,8 +445,8 @@ describe("buildSubpcManualIssueBody", () => {
     expect(body).toContain("guchi-apps/kakei-report /home/guchi/apps/kakei-report");
   });
 
-  it("無人実行の妨げにはならないこと、同期がこの時点で終わることを書く（#2247）", () => {
-    expect(body).toContain("無人実行は雛形のcallerで動くため");
+  it("ホスト準備が初期化の前提で、同期もこの時点で終わることを書く", () => {
+    expect(body).toContain("初期化Issueもホスト準備の完了を待ちます");
     expect(body).toContain("GitHubのsecretへの同期もこの時点で終わります");
     expect(body).not.toContain("初期化Issueでこのマニフェストを作ってマージした後");
   });

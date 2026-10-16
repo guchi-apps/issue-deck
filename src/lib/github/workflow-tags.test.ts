@@ -54,7 +54,7 @@ function repo(fullName: string, installationId = 42) {
 
 const CALLER = `jobs:
   dispatch:
-    uses: guchi-apps/issue-deck/.github/workflows/reusable-issue-dispatch.yml@workflows/v11
+    uses: guchi-apps/issue-deck/.github/workflows/reusable-ci-fix.yml@workflows/v11
     with:
       prompts-ref: workflows/v11
 `;
@@ -681,7 +681,7 @@ describe("dispatchPropagation", () => {
   it("uses と prompts-ref が不一致のリポジトリも対象にする", async () => {
     const mismatched = `jobs:
   dispatch:
-    uses: guchi-apps/issue-deck/.github/workflows/reusable-issue-dispatch.yml@workflows/v12
+    uses: guchi-apps/issue-deck/.github/workflows/reusable-ci-fix.yml@workflows/v12
     with:
       prompts-ref: workflows/v11
 `;

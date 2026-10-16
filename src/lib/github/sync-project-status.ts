@@ -1,3 +1,4 @@
+import { listDispatchRunnableRepositories } from "@/lib/dispatch/runnable-repositories";
 import { db } from "@/lib/db";
 import { getInstallationToken } from "@/lib/github/app-auth";
 import { getProjectLocation } from "@/lib/github/project-location";
@@ -125,7 +126,7 @@ export async function addMissingProjectItems(
 
   const repositories = await db.repository.findMany({
     where: {
-      hasClaudeWorkflow: true,
+      fullName: { in: [...await listDispatchRunnableRepositories()] },
       archived: false,
       installation: { installationId },
     },

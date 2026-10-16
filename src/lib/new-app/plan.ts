@@ -15,12 +15,8 @@
  *   コマンドブロックがちょうど1つ・対話が要るコマンドを含まない・`<…>`のプレースホルダを
  *   含まない、のすべてを満たしたときだけ画面から流せる
  *   （`lib/dispatch/dispatch-job.ts`の`manualStepExecutionRejection`）。
- * - **新しいリポジトリのIssueは、作った直後から盤面に載る**（#2247）。載る条件は
- *   `claude-issue-dispatch.yml`がデフォルトブランチにあることで、以前はそれを作るのが
- *   初期化Issue自身だった。いまはリポジトリを作った直後にissue-deckが雛形一式をコミット
- *   する（`lib/new-app/scaffold.ts`）ので、初期化Issueも最初から無人実行で回せる。
- *   **サブPCの手作業Issueは残るが、初期化Issueの前提ではなくなった**——あちらの目的は
- *   1Passwordへの値の投入（#2249）で、cloneはローカルセッションを使いたいときのため。
+ * - **初期化Issueはホスト準備の完了を待つ。** 雛形の配置と、clone・対応表への登録を
+ *   分けて管理する。ActionsのIssue実装callerは配らない（#4680）。
  * - **人が空振りする手順を書かない**（#2248・#2246）。2つの再同期は立ち上げ自身が実行し
  *   （`lib/new-app/resync.ts`）、GitHub Appのインストール対象への追加は
  *   `repository_selection`が`selected`のときだけ出す（`lib/new-app/installation-scope.ts`）。
@@ -224,7 +220,7 @@ export function buildNewAppPlan(
       title: "プロジェクトを初期化する",
       target: repo,
       description: spec.multiAgent
-        ? "アプリ本体の雛形とpackage.jsonの整備。ワークフローは作成時にコミット済みで、盤面から無人実行で回せる"
+        ? "アプリ本体の雛形とpackage.jsonの整備。ホストへのリポジトリ登録後、ローカルセッションで実行する"
         : "アプリ本体の雛形とpackage.jsonの整備。CI・デプロイの雛形は作成時にコミット済み",
     },
     {
@@ -402,8 +398,8 @@ export function buildParentIssueBody(
     ...(options.githubAppNeedsRepositoryAdd
       ? [`ブラウザでissue-deckのGitHub Appのインストール対象へ \`${repo}\` を追加する`]
       : []),
-    "サブPCで1Passwordへ値を投入する（初回デプロイまでに済んでいればよく、初期化Issueは待ちません）",
-    `\`${repo}\` の初期化と、developへのマージ（**盤面から無人実行で始められます**。\n   リポジトリの作成時に \`claude-issue-dispatch.yml\` までコミット済みのため、cloneは要りません）`,
+    "サブPCでclone・対応表への登録・1Passwordへの値投入を済ませる（初期化Issueの前提）",
+    `\`${repo}\` の初期化と、developへのマージ（ホストの準備後にIssueDeckから開始します）`,
     `\`${NEW_APP_VPS_REPOSITORY}\` のVirtualHostを develop → main まで進めて実機へ反映`,
     vpsProvisionable(spec)
       ? `サブPCから \`${NEW_APP_VPS_REPOSITORY}\` のプロビジョニングを流し（置き場・DB・vhostの有効化・PM2・TLS）、初回デプロイ`
@@ -561,28 +557,11 @@ export function buildInitIssueBody(
   const isNext = spec.kind === "next" || spec.kind === "next-db";
   const scaffolded = scaffold !== null && scaffold.paths.length > 0;
   const has = (path: string) => scaffolded && scaffold.paths.includes(path);
-  // **無人実行で回せるかどうかは、雛形が置けたかではなくcallerが置けたかで決まる。**
-  // 参照タグを読めなかった回はcallerだけが欠け、他のファイルは置かれている
-  const dispatchReady = has(".github/workflows/claude-issue-dispatch.yml");
+  const prerequisites = `- 先に完了している必要があるIssue・PR: ${[refs.subpc ?? "（サブPCの手作業Issue）", refs.portBandPullRequest ?? "（ローカルセッションのポート帯を足すPull Request）"].join("・")}
 
-  const prerequisites = dispatchReady
-    ? `- 先に完了している必要があるIssue・PR: なし
-
-**このIssueはissue-deckの盤面から無人実行で実装できます。** リポジトリの作成時に
-\`.github/workflows/claude-issue-dispatch.yml\` までコミット済みで（下記「すでに置かれているもの」）、
-盤面へ載る条件を満たしています。サブPCのローカルセッションで実装しても構いません。`
-    : `- 先に完了している必要があるIssue・PR: ${[refs.subpc ?? "（サブPCの手作業Issue）", refs.portBandPullRequest ?? "（ローカルセッションのポート帯を足すPull Request）"].join("・")}
-
-**${
-        !spec.multiAgent
-          ? "マルチエージェント運用に対応させない選択のため"
-          : scaffolded
-            ? "無人実行のcaller（`claude-issue-dispatch.yml`）を置けなかったため"
-            : "雛形のコミットに失敗したため"
-      }、このIssueはサブPCのローカルセッションで実装します。**
-\`claude-issue-dispatch.yml\` が無いあいだは無人実行では動かず、issue-deckの盤面にも載りません。
-ローカルセッションを起こせる条件は \`~/.config/issue-deck/local-repos.conf\` への記載で、
-それを行うのが上の手作業Issueです。`;
+**このIssueはサブPC・Macのローカルセッションで実装します。**
+GitHub Actions経由の計画・実装は廃止しました。ホストへリポジトリを登録してから
+IssueDeckの「実装を開始」で実行先を選んでください。`;
 
   const alreadyThere = scaffolded
     ? `
@@ -714,15 +693,14 @@ ${scaffold.workflowTag ? `共有ワークフローの参照タグは \`${scaffol
   const appearance = `\n${appearanceSteps(spec, refs, { pwaAndChangelogScaffolded })}`;
 
   const multiAgent =
-    spec.multiAgent && !dispatchReady
+    spec.multiAgent && !has(".github/workflows/issue-labels.yml")
       ? `
 ## マルチエージェント運用の導入
 
 手順の正はissue-deckの \`docs/cross-repo-setup-guide.md\` です。ここに複製しません。
 
 - [ ] \`.github/workflows/issue-labels.yml\`（\`reusable-issue-labels.yml\` のcaller）を置く
-- [ ] \`.github/workflows/claude-issue-dispatch.yml\` を置く。\`runtime-setup: ${profile.runtimeSetup}\`・\`package-manager: ${profile.packageManager}\`・\`prompts-ref\` は \`uses:\` と同じタグ
-- [ ] \`CLAUDE.md\` に運用ルールを書く（GitHub Actions上の無人実行はグローバル設定を読まない）
+- [ ] \`CLAUDE.md\` に運用ルールを書く（各ホストから参照する共通ルール）
 - [ ] \`.gitignore\` に \`.shared-context/\` を足す
 - [ ] \`develop\` にもBranch protection（CI必須）を設定する
 `
@@ -1108,8 +1086,8 @@ export function buildSubpcManualIssueBody(spec: NewAppSpec, refs: NewAppIssueRef
   const path = `/home/guchi/apps/${spec.repositoryName}`;
   return manualStepBody({
     benefit: `1Passwordに \`${spec.repositoryName}\` の値（配置先${spec.databaseName ? "・DB名" : ""}${spec.auth === "none" ? "" : "・許可メール"}）が入り、GitHubのsecretへ同期される。あわせてサブPCでフォルダ信頼確認に止まらず、\`${spec.repositoryName}\` のローカルセッションを起こせるようになる`,
-    blocked: `シークレットが未登録のままで、初回の本番デプロイが値の不足で失敗する（\`guchi-apps/aide-bot#4\`）。\`${repo}\` のIssueをローカルセッションで実装することもできない（**無人実行は雛形のcallerで動くため、こちらは止まりません**）`,
-    urgency: "初回の本番デプロイまで（初期化Issueは待ちません）",
+    blocked: `シークレットが未登録のままで、初回の本番デプロイが値の不足で失敗する（\`guchi-apps/aide-bot#4\`）。\`${repo}\` のIssueをローカルセッションで実装することもできない（初期化Issueもホスト準備の完了を待ちます）`,
+    urgency: "初期化Issueを開始する前",
     device: "**サブPC**（メインPCからなら `ssh subpc`）",
     cwd: "`/home/guchi/apps`",
     branch: "不要",

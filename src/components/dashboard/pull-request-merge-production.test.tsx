@@ -321,6 +321,7 @@ describe("PullRequestMergeProduction", () => {
                 blockers: [],
                 integration: section("integration", "passed"),
                 aiReview: section("ai_review", "not_run"),
+                mac: { state: "not_applicable", reason: null, summary: null, evidenceUrl: null, updatedAt: null },
                 aiReviewAssignee: "Codex · gpt-6-sol",
                 target: { baseSha: "b".repeat(40), headSha: "a".repeat(40) },
               },
@@ -366,7 +367,7 @@ describe("PullRequestMergeProduction", () => {
     expect(await screen.findByText("リリースの検証")).toBeTruthy();
     expect(await screen.findByText("要修正 1")).toBeTruthy();
     const titles = screen.getAllByRole("heading", { level: 3 }).map((h) => h.textContent);
-    expect(titles).toEqual(["全体レビュー", "統合検証", "個別PRレビュー", "CI・コンフリクト"]);
+    expect(titles).toEqual(["今必要な対応", "全体レビュー", "統合検証", "個別PRレビュー", "CI・コンフリクト"]);
     // 実際の担当が決まる前は「担当予定」。未実施を問題なしにしない
     expect(screen.getByText("担当予定: Codex · gpt-6-sol")).toBeTruthy();
     // 全体レビュー区分と、各PR行の「全体〔共通〕」の両方が同じ「未実施」を出す（#4305）

@@ -1,3 +1,4 @@
+import { repairWorkflowRequirementAlternatives } from "@/lib/workflow-tags";
 import {
   resolveRepairDispatch,
   type RepairKind,
@@ -55,7 +56,11 @@ async function resolveMissingState(
   const requires = REPAIR_WORKFLOW_SPECS.find((spec) => spec.file === workflowFile)?.requires;
   if (!requires) return "missing";
   for (const required of requires) {
-    if (!(await workflowExists(owner, repo, required, token))) return "unsupported";
+    let available = false;
+    for (const candidate of repairWorkflowRequirementAlternatives(required)) {
+      if (await workflowExists(owner, repo, candidate, token)) { available = true; break; }
+    }
+    if (!available) return "unsupported";
   }
   return "missing";
 }

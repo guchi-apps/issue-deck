@@ -141,6 +141,16 @@ async function handlePOST(request: NextRequest) {
     return NextResponse.json({ error: "not_found" }, { status: 404 });
   }
 
+  // 起動依頼はコメント本文の語ではなく、画面の明示的な質問操作で受け付ける。
+  const question = payload.askQuestion === true
+    ? await (await import("@/lib/dispatch/issue-question")).prepareIssueQuestion({
+        repositoryFullName: repository.fullName, issueNumber: number, requestedByUserId: user.id,
+      })
+    : null;
+  if (question && "error" in question) {
+    return NextResponse.json({ error: "question_host_unavailable", message: question.error }, { status: 409 });
+  }
+
   const result = await withUserGithubToken(
     user,
     `POST /api/issues/comments ${owner}/${repo}#${number}`,
@@ -149,7 +159,16 @@ async function handlePOST(request: NextRequest) {
   if ("errorResponse" in result) {
     return result.errorResponse;
   }
-  return NextResponse.json({ comment: mapComment(result.value) });
+  let warning: string | undefined;
+  if (question && "send" in question) {
+    try {
+      const failure = await question.send();
+      if (failure) warning = `質問は保存しましたが、回答の起動に失敗しました: ${failure}`;
+    } catch {
+      warning = "質問は保存しましたが、回答の起動を確認できません。実行状況を確認してください。";
+    }
+  }
+  return NextResponse.json({ comment: mapComment(result.value), ...(warning ? { warning } : {}) });
 }
 
 export function PATCH(request: NextRequest) {

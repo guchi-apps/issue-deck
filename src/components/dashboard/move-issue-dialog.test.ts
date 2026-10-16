@@ -22,12 +22,12 @@ function makeRepo(overrides: Partial<ConnectedRepository>): ConnectedRepository 
 }
 
 describe("moveDestinationRepositories", () => {
-  it("claude-issue-dispatch.yml未導入のリポジトリを移動先の候補から除く", () => {
+  it("旧Actionsの有無に関係なく移動できる", () => {
     const configured = makeRepo({ fullName: "owner/configured", hasClaudeWorkflow: true });
     const notConfigured = makeRepo({ fullName: "owner/not-configured", hasClaudeWorkflow: false });
 
     expect(moveDestinationRepositories([configured, notConfigured], "owner/current")).toEqual([
-      configured,
+      configured, notConfigured,
     ]);
   });
 
@@ -45,10 +45,10 @@ describe("moveDestinationRepositories", () => {
     expect(moveDestinationRepositories([second, first], "owner/current")).toEqual([second, first]);
   });
 
-  it("対応リポジトリが移動元しか無い場合は空になる", () => {
+  it("移動元以外は旧Actions未導入でも候補になる", () => {
     const current = makeRepo({ fullName: "owner/current", hasClaudeWorkflow: true });
     const notConfigured = makeRepo({ fullName: "owner/not-configured", hasClaudeWorkflow: false });
 
-    expect(moveDestinationRepositories([current, notConfigured], "owner/current")).toEqual([]);
+    expect(moveDestinationRepositories([current, notConfigured], "owner/current")).toEqual([notConfigured]);
   });
 });

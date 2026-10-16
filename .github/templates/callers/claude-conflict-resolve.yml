@@ -6,7 +6,7 @@ name: Claude Conflict Resolve
 #
 # **このファイルはissue-deckの画面（設定＞フリート運用）から配布された雛形である**
 # （guchi-apps/issue-deck#1948）。`with:`の値は同じリポジトリの
-# claude-issue-dispatch.yml から写している。検証コマンド（verify-commands）や
+# 既存の修復caller（旧Issue callerが残る場合はそちら）から写している。検証コマンド（verify-commands）や
 # ビルド用の環境変数（build-env）はリポジトリごとに違うため入っていない。
 # 自動解消の精度を上げたい場合は、issue-deck本体のcallerを参考に後から足す。
 #
