@@ -24,7 +24,10 @@ def prepare(worktree, source, output):
     for file in (worktree / ".github/workflows").glob("*"):
         if file.suffix in (".yml", ".yaml") and file.is_file() and not file.is_symlink():
             refs.update(re.findall(
-                r"guchi-apps/issue-deck/\.github/workflows/[^\s@'\"]+@([^\s'\"#]+)",
+                # コメントや説明文の例ではなく、usesの値だけを対象にする（#4698）。
+                r"(?m)^[ \t]*(?:-[ \t]+)?['\"]?uses['\"]?:[ \t]*['\"]?"
+                r"guchi-apps/issue-deck/\.github/workflows/[^\s@'\"]+@([^\s'\"#]+)"
+                r"['\"]?[ \t]*(?:#.*)?$",
                 file.read_text(encoding="utf-8"),
             ))
     output.mkdir(parents=True, exist_ok=True)

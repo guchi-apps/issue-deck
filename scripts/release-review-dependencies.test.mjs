@@ -49,3 +49,19 @@ it("可変ブランチは取得済みにせず、理由を残す", () => {
   expect(record.error).toContain("自動取得対象外");
   expect(record.sha).toBeUndefined();
 });
+it("コメントのuses例とバッククォート付き説明文は依存参照にしない", () => {
+  writeFileSync(path.join(candidate, ".github/workflows/examples.yml"), [
+    "# uses: guchi-apps/issue-deck/.github/workflows/release.yml@workflows/vN",
+    "  # `uses: guchi-apps/issue-deck/.github/workflows/release.yml@workflows/vN`",
+    'description: "guchi-apps/issue-deck/.github/workflows/release.yml@workflows/vN"',
+    "jobs:", "  release:",
+    '    uses: "guchi-apps/issue-deck/.github/workflows/release.yml@workflows/v52" # fixed',
+    "  other:",
+    "    uses: 'guchi-apps/issue-deck/.github/workflows/release.yml@workflows/v52'",
+    "",
+  ].join("\n"));
+  const records = run("workflows/v52");
+  expect(records).toHaveLength(1);
+  expect(records[0].ref).toBe("workflows/v52");
+  expect(records[0].error).toBeUndefined();
+});
