@@ -217,7 +217,7 @@ describe("describeReviewEvidenceStage", () => {
     expect(stage).toEqual({
       kind: "needs_check",
       autoReevaluated: true,
-      items: ["findings", "ops", "evidence_unavailable", "code_unread"],
+      items: ["findings", "ops", "review_unconfirmed", "code_unread"],
     });
     expect(describeReviewStageLabel(stage)).toBe("自動再評価済み・対応／判断が必要");
   });
