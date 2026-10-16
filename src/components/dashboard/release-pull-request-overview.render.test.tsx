@@ -118,9 +118,10 @@ describe("ReleasePullRequestOverview（#4428）", () => {
     // 正式タイトルは共通詳細の見出しが持つので、要約側では出さず、ブランチ情報だけを出す（#4463）
     expect(screen.queryByText("v4.41.1をmainへリリースする")).toBeNull();
     expect(screen.getByText(/release-main\/v4\.41\.1 → /)).toBeTruthy();
-    // 並び: 状態 → 検証 → 今回の変更
+    // 並び: 状態 → 検証（その中に今必要な対応） → 今回の変更
     const sections = screen.getAllByRole("region").map((el) => el.getAttribute("aria-label"));
-    expect(sections.slice(0, 3)).toEqual(["現在の状態と次の操作", "現在候補の検証", "今回リリースする変更"]);
+    expect(sections.slice(0, 3)).toEqual(["現在の状態と次の操作", "現在候補の検証", "今必要な対応"]);
+    expect(sections.indexOf("今回リリースする変更")).toBeGreaterThan(sections.indexOf("今必要な対応"));
     // 6チェックはこのPR自身を候補として読む
     expect(screen.getByTestId("release-candidate-checks").textContent).toContain("候補PR #768");
   });
