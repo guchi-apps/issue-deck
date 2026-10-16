@@ -9,10 +9,10 @@ describe("isRepositoryAutomationUnsupported", () => {
     ).toBe(true);
   });
 
-  it("GitHub Actionsの無人実行に対応していれば印を出さない", () => {
+  it("旧Actionsだけがあってもホスト未登録なら印を出す", () => {
     expect(
       isRepositoryAutomationUnsupported({ hasClaudeWorkflow: true, dispatchRunnable: false }),
-    ).toBe(false);
+    ).toBe(true);
   });
 
   it("無人実行が無くてもサブPCで起動できると申告されていれば印を出さない（#1888。vps・subpc・docs）", () => {

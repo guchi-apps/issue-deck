@@ -41,7 +41,7 @@ export function moveDestinationRepositories(
   currentRepositoryFullName: string,
 ): ConnectedRepository[] {
   return repositories.filter(
-    (repo) => repo.hasClaudeWorkflow && repo.fullName !== currentRepositoryFullName,
+    (repo) => repo.fullName !== currentRepositoryFullName,
   );
 }
 

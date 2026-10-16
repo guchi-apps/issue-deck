@@ -25,10 +25,6 @@ describe("レビュー系プロンプトの添付画像の案内", () => {
     expect(body).toContain("401");
   });
 
-  it("無人実行の計画レビューは事前取得済みの保存先を案内する", () => {
-    const body = read(".github/prompts/plan-review.md");
-    expect(body).toContain("/tmp/issue-images/");
-  });
 
   it("汎用テンプレートの{{ISSUE_DECK_SCRIPTS_DIR}}は生のまま渡らない", () => {
     const out = execFileSync(

@@ -1,3 +1,5 @@
+> IssueのActions実装は#4680で廃止しました。旧無人実行についての記載は履歴です。現行方針は[廃止方針](../actions-implementation-retirement.md)を参照してください。
+
 # プロンプトの配置・使用モデル・使用量の可視化
 
 プロンプトをどこに置くか、どのステップでどのモデルを使うか、1 runあたりの使用量をどう見るか。
@@ -218,7 +220,7 @@ auto modeのハーネスは「Bashでできることは`cat`・`sed -n`・`grep`
 
 **#3021以降、issue-deck版は4つの規則だけを本文の「進め方」に置き、実測値と経緯（この節の内容）は
 [implementation-agent-reference.md](implementation-agent-reference.md)へ移した。** 無人実行版も#3024で同じ形にし、
-実測値は[unattended-implementation-reference.md](unattended-implementation-reference.md)へ移している。
+実測値は`unattended-implementation-reference.md`（#4680で廃止）へ移している。
 汎用版も#3023で同じ形にし、実測値は[generic-implementation-agent-reference.md](../../scripts/prompts/generic-implementation-agent-reference.md)へ移している。
 揃える対象は規則の中身で、文面の一致ではない。
 
@@ -260,7 +262,7 @@ auto modeのハーネスは「Bashでできることは`cat`・`sed -n`・`grep`
 
 `.github/prompts/implement.md`（無人実行の実装ステップ）も、一時は約52KBあり、どの実行でも全節が載っていた。
 #3021のローカル実装プロンプトと同じ整理で、毎回載る本文（約26KB）と、必要になったときに読む参照文書
-[unattended-implementation-reference.md](unattended-implementation-reference.md)（約30KB）に分けた。
+`unattended-implementation-reference.md`（#4680で廃止）（約30KB）に分けた。
 
 | 置き場所 | 載せるもの |
 |---|---|

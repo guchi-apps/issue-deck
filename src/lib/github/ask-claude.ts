@@ -1,48 +1,13 @@
 import { isFallbackNoticeComment } from "@/lib/github/fallback-notice";
 import type { Issue, IssueComment } from "@/types/issue";
 
-/**
- * 質問コメントに付けるマーカー（#1294）。**「質問である」ことの唯一の目印**で、回答側の
- * `QA_ANSWER_MARKER`と対になる。
- *
- * 従来はActionsの起動トリガーそのもの（`@claude 質問: `プレフィックス）で質問かどうかを
- * 判定していたが、それだと**同じコメントをサブPCにも処理させた時点で必ず二重に回答する**
- * （#1290）。「Issueに残す質問コメント」と「Actionsを起こすトリガー」を別の軸にするため、
- * 識別はこのマーカーへ移し、トリガーは本文の先頭に`@claude`を置くかどうかで決める。
- */
+/** 新しい質問はこのマーカーで識別し、起動先はコメントAPIが決める。 */
 export const QUESTION_COMMENT_MARKER = "<!-- issue-deck-question -->";
-
-/**
- * 質問コメントのうち、**GitHub Actions（claude-issue-dispatch.yml）を起こす形**の先頭に置く
- * プレフィックス。reusable-issue-dispatch.ymlのmode=ask判定に使う。
- *
- * **この文字列を変えたり外したりしてはいけない。** 他リポジトリは
- * reusable-issue-dispatch.ymlをタグ固定（`@workflows/vX`）で参照しており、古いタグの
- * `IS_ASK`はこのプレフィックスしか見ない。issue-deckが投稿する本文の形を変えると、
- * 古いタグのリポジトリでは質問がmode=askに落ちず**実装モードとして走る**。
- */
+/** 過去に投稿されたActions向け質問を読むためだけに残す。 */
 export const ASK_CLAUDE_COMMENT_PREFIX = "@claude 質問: ";
 
-/**
- * 質問コメントの投稿先（＝誰に答えさせるか）。
- *
- * - `actions` … 従来どおりGitHub Actionsに答えさせる（現状の唯一の経路）
- * - `none` … どこも起こさない。**サブPC側で実行する場合に使う**（#1294のStep 3で開ける）。
- *   本文に`@claude`を含めないため、Actionsのトリガー条件
- *   （`startsWith(github.event.comment.body, '@claude')`）に掛からない
- */
-export type QuestionCommentTrigger = "actions" | "none";
-
-/**
- * 質問コメントの本文を組み立てる。**識別のマーカーは常に付き、トリガーの有無だけが変わる。**
- */
-export function askClaudeCommentBody(
-  question: string,
-  options?: { trigger?: QuestionCommentTrigger },
-): string {
-  const trigger = options?.trigger ?? "actions";
-  const prefix = trigger === "actions" ? ASK_CLAUDE_COMMENT_PREFIX : "";
-  return `${prefix}${question.trim()}\n\n${QUESTION_COMMENT_MARKER}`;
+export function askClaudeCommentBody(question: string): string {
+  return `${question.trim()}\n\n${QUESTION_COMMENT_MARKER}`;
 }
 
 /**
@@ -113,7 +78,7 @@ export const CROSS_REPO_QUESTION_MARKER = "<!-- issue-deck-cross-repo-question -
  * 横断質問のマーカーを足したもの。
  */
 export function crossRepoQuestionCommentBody(question: string): string {
-  return `${askClaudeCommentBody(question, { trigger: "none" })}\n${CROSS_REPO_QUESTION_MARKER}`;
+  return `${askClaudeCommentBody(question)}\n${CROSS_REPO_QUESTION_MARKER}`;
 }
 
 /** 指定したコメントが横断質問（#1454）かどうかを判定する */

@@ -16,7 +16,6 @@ import { ImageExtractButton } from "@/components/dashboard/image-extract-button"
 import { getRepoIssueSuggestions, MentionTextarea } from "@/components/dashboard/mention-textarea";
 import { StartImplementationDialog } from "@/components/dashboard/start-implementation-dialog";
 import type { ClaudeLocalModelSetting, CodexModelSetting, DefaultDispatchAgent } from "@/lib/app-settings";
-import { startImplementationDisabledReason } from "@/lib/github/start-implementation";
 import { buildLocalSessionCommand, canStartLocalSession } from "@/lib/local-session";
 import type { Issue } from "@/types/issue";
 import type { ConnectedRepository } from "@/types/repository";
@@ -118,7 +117,6 @@ export function IosExtensionIssueDialog({
           onCommentCreated={() => {}}
           onNightlyRunQueued={start.onNightlyRunQueued}
           includeDispatchTargets
-          actionsDisabledReason={startImplementationDisabledReason(startRepository?.hasClaudeWorkflow)}
           localSessionCommand={
             canStartLocalSession(startRepository?.hasLocalStartScript)
               ? buildLocalSessionCommand(startTarget.repositoryFullName, startTarget.number)

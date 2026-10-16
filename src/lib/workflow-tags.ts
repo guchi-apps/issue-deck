@@ -52,6 +52,7 @@ export function latestWorkflowTag(tags: string[]): string | null {
  * 対象にする。
  */
 export function extractWorkflowTagRef(file: string, source: string): WorkflowTagRef | null {
+  if (/^\s*uses:.*\/reusable-issue-dispatch\.yml@/m.test(source)) return null;
   const uses = /^\s*uses:\s*\S+@(workflows\/v\d+)\s*$/m.exec(source);
   if (!uses) return null;
 
@@ -385,7 +386,15 @@ export type RepairWorkflowSpec = {
  * `vps`・`subpc`まで対象を広げたので、入れておかないと画面には不足として出るのに押すと
  * 必ず失敗する**——あの2つは`release-develop-to-main.yml`・`deploy.yml`を持つ。
  */
+// 旧callerは既存配布先の互換用。削除後は残っている修復callerから設定を引き継ぐ。
 export const REPAIR_WORKFLOW_SOURCE = "claude-issue-dispatch.yml";
+export const REPAIR_WORKFLOW_SOURCES = [
+  REPAIR_WORKFLOW_SOURCE, "claude-ci-fix.yml", "claude-conflict-resolve.yml", "claude-pr-repair.yml", "claude-review-fix.yml",
+] as const;
+
+export function repairWorkflowRequirementAlternatives(required: string): readonly string[] {
+  return required === REPAIR_WORKFLOW_SOURCE ? REPAIR_WORKFLOW_SOURCES : [required];
+}
 
 export const REPAIR_WORKFLOW_SPECS: readonly RepairWorkflowSpec[] = [
   {
@@ -440,7 +449,7 @@ export function repairWorkflowLabel(file: string): string {
 export function missingRepairWorkflows(files: string[]): string[] {
   const present = new Set(files);
   return REPAIR_WORKFLOW_SPECS.filter(
-    (spec) => spec.requires.every((required) => present.has(required)) && !present.has(spec.file),
+    (spec) => spec.requires.every((required) => repairWorkflowRequirementAlternatives(required).some((file) => present.has(file))) && !present.has(spec.file),
   ).map((spec) => spec.file);
 }
 

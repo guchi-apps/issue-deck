@@ -218,8 +218,8 @@ describe("MobileReposScreen の実行経路の印（#1888）", () => {
     expect(screen.queryByTitle(REPOSITORY_AUTOMATION_UNSUPPORTED_TITLE)).toBeNull();
   });
 
-  it("無人実行に対応しているリポジトリには印を出さない", () => {
-    renderWith([repository({ hasClaudeWorkflow: true, dispatchRunnable: false })]);
+  it("ホスト実行に対応しているリポジトリには印を出さない", () => {
+    renderWith([repository({ hasClaudeWorkflow: true, dispatchRunnable: true })]);
 
     expect(screen.queryByTitle(REPOSITORY_AUTOMATION_UNSUPPORTED_TITLE)).toBeNull();
   });

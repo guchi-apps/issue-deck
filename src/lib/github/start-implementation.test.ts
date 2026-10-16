@@ -10,23 +10,10 @@ import {
   planRequiredDefaultForLabels,
   START_IMPLEMENTATION_DEFAULT_OPTIONS,
   START_IMPLEMENTATION_OPTIONS,
-  startImplementationCommentBody,
-  startImplementationDisabledReason,
   startImplementationLabelsToAdd,
   startImplementationLabelsToRemove,
   startImplementationOptionsFromLabels,
-  visibleStartImplementationOptions,
 } from "@/lib/github/start-implementation";
-
-describe("startImplementationCommentBody", () => {
-  it("計画が必要でない場合、実装開始の定型文を返す", () => {
-    expect(startImplementationCommentBody(false)).toBe("@claude 実装を開始してください");
-  });
-
-  it("計画が必要な場合、計画立案の定型文を返す", () => {
-    expect(startImplementationCommentBody(true)).toBe("@claude 計画を立案してください");
-  });
-});
 
 describe("startImplementationLabelsToAdd", () => {
   // 進捗（Planning/Implementation）はProject Statusで表すため、ここが返すのは
@@ -215,44 +202,6 @@ describe("startImplementationOptionsFromLabels", () => {
       ...START_IMPLEMENTATION_DEFAULT_OPTIONS,
       artifactRequired: true,
     });
-  });
-});
-
-describe("visibleStartImplementationOptions", () => {
-  // アーティファクトの公開はローカルセッションのツールで、無人実行からは作れない（#1473）
-  describe("アーティファクト", () => {
-    function artifactKeysFor(isActionsTarget: boolean, artifactRequired: boolean) {
-      return visibleStartImplementationOptions({
-        isActionsTarget,
-        options: { ...START_IMPLEMENTATION_DEFAULT_OPTIONS, artifactRequired },
-      }).map((option) => option.key);
-    }
-
-    it("GitHub Actionsを選んでいる場合、アーティファクトのオプションを出さない", () => {
-      expect(artifactKeysFor(true, false)).not.toContain("artifactRequired");
-    });
-
-    it("GitHub Actions以外を選んでいる場合はアーティファクトのオプションを出す", () => {
-      expect(artifactKeysFor(false, false)).toContain("artifactRequired");
-    });
-
-    it("既にチェックが入っている場合は実行先によらず出す", () => {
-      expect(artifactKeysFor(true, true)).toContain("artifactRequired");
-    });
-  });
-});
-
-describe("startImplementationDisabledReason", () => {
-  it("hasClaudeWorkflowがfalseの場合、無効化理由を返す（#976）", () => {
-    expect(startImplementationDisabledReason(false)).not.toBeNull();
-  });
-
-  it("hasClaudeWorkflowがtrueの場合、nullを返す", () => {
-    expect(startImplementationDisabledReason(true)).toBeNull();
-  });
-
-  it("hasClaudeWorkflowがundefined（リポジトリ情報が見つからない等）の場合、誤って無効化しないようnullを返す", () => {
-    expect(startImplementationDisabledReason(undefined)).toBeNull();
   });
 });
 

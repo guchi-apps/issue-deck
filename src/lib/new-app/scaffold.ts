@@ -1,11 +1,7 @@
 /**
  * 立ち上げで作るリポジトリへ、作成直後にコミットする雛形一式（#2247）。
  *
- * **なぜ雛形を先にコミットするのか。** 盤面へ載る条件は`claude-issue-dispatch.yml`が
- * デフォルトブランチにあることなのに、それを作るのが初期化Issue自身だった。そのため
- * 初期化IssueだけはサブPCのローカルセッションでしか実装できず、その前提としてcloneと
- * `local-repos.conf`への追記（手作業Issue）が要った。リポジトリを作った時点でcallerを
- * 置いてしまえば、初期化Issueも最初から無人実行で回せる。
+ * CI・デプロイと残す共有callerを先に配置する。Issueの実装はホスト登録後に開始する。
  *
  * **雛形の正はissue-deck内に置く。**`uses:`のタグ（`workflows/vN`）と`prompts-ref`を
  * 揃え続ける必要があり、タグを切るのも配るのもissue-deck側だから。ただし
@@ -22,7 +18,6 @@
 
 import {
   ciWorkflow,
-  claudeIssueDispatchCaller,
   deployWorkflow,
   issueLabelsCaller,
   releaseDevelopToMainCaller,
@@ -134,10 +129,7 @@ export function buildScaffoldFiles(spec: NewAppSpec, options: ScaffoldOptions): 
 
   if (spec.multiAgent && tag) {
     files.push({ path: ".github/workflows/issue-labels.yml", content: issueLabelsCaller(spec, tag) });
-    files.push({
-      path: ".github/workflows/claude-issue-dispatch.yml",
-      content: claudeIssueDispatchCaller(spec, tag),
-    });
+
   }
   // **リリース衛生の2枚はマルチエージェント運用と関係がない**（#2378）。`version-tag-check.yml`が
   // 無いと、初回の`main`マージが作った`vX.Y.Z`タグと同じバージョンのまま2回目のリリースを出した
@@ -629,8 +621,7 @@ pnpm 10系は依存のビルドスクリプトを既定で実行せず、警告�
     ...(spec.multiAgent
       ? [
           "- `issue-labels.yml` … 進捗の状態遷移をイベント駆動で報告する",
-          `- \`claude-issue-dispatch.yml\` … Issue起点の無人実行。**このファイルがデフォルトブランチに
-  あることがissue-deckの盤面へ載る条件**なので消さない`,
+
         ]
       : []),
     ...(spec.multiAgent || isNextKind(spec)

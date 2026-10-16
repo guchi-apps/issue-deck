@@ -1,3 +1,4 @@
+vi.mock("@/lib/dispatch/runnable-repositories", () => ({ listDispatchRunnableRepositories: vi.fn(async () => new Set(["guchi-apps/dayspan"])) }));
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const repositoryFindMany = vi.fn();
@@ -165,7 +166,7 @@ describe("addMissingProjectItems", () => {
 
     expect(repositoryFindMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: expect.objectContaining({ hasClaudeWorkflow: true, archived: false }),
+        where: expect.objectContaining({ fullName: { in: ["guchi-apps/dayspan"] }, archived: false }),
       }),
     );
   });

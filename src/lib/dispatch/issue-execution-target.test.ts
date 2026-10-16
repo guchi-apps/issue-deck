@@ -79,9 +79,9 @@ function job(overrides: Partial<DispatchJobView> = {}): DispatchJobView {
 }
 
 describe("resolveIssueExecutionTarget", () => {
-  it("材料が何も無ければActionsの実行を期待する（従来どおりの表示に戻す）", () => {
+  it("ホストが未登録でも廃止済みActionsの実行を期待しない", () => {
     expect(resolveIssueExecutionTarget({ repositoryFullName: REPO, issueNumber: 1, labels: [] })).toEqual(
-      { host: null, expectsActionsRun: true },
+      { host: null, expectsActionsRun: false },
     );
   });
 
@@ -126,7 +126,7 @@ describe("resolveIssueExecutionTarget", () => {
         sessions: [session({ issueNumber: 2 }), session({ repositoryFullName: "guchi-apps/other" })],
         jobs: [job({ issueNumber: 2 })],
       }),
-    ).toEqual({ host: null, expectsActionsRun: true });
+    ).toEqual({ host: null, expectsActionsRun: false });
   });
 
   it("終わったセッションより生きているセッションのホストを優先する", () => {
@@ -184,8 +184,8 @@ describe("describeIssueExecutionTarget", () => {
     expect(describeIssueExecutionTarget({ host: null, expectsActionsRun: false })).toBe("ローカル");
   });
 
-  it("何も分からなければ「Actions」", () => {
-    expect(describeIssueExecutionTarget({ host: null, expectsActionsRun: true })).toBe("Actions");
+  it("ホスト名が不明でも「Actions」へは戻さない", () => {
+    expect(describeIssueExecutionTarget({ host: null, expectsActionsRun: false })).toBe("ローカル");
   });
 });
 

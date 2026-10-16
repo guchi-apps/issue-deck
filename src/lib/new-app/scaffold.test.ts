@@ -40,8 +40,8 @@ function content(target: NewAppSpec, path: string, workflowTag: string | null = 
 }
 
 describe("buildScaffoldFiles", () => {
-  it("盤面へ載る条件（claude-issue-dispatch.yml）を最初のコミットに含める", () => {
-    expect(filesOf(spec()).has(".github/workflows/claude-issue-dispatch.yml")).toBe(true);
+  it("廃止したActions実装callerを生成しない", () => {
+    expect(filesOf(spec()).has(".github/workflows/claude-issue-dispatch.yml")).toBe(false);
   });
 
   it("参照タグを決められなければcallerを1枚も置かない（存在しないタグを指すと全イベントが失敗する）", () => {
@@ -129,14 +129,12 @@ describe("buildScaffoldFiles", () => {
       .map(([path, file]) => extractWorkflowTagRef(path, file.content))
       .filter((ref) => ref !== null);
     // ci.yml・deploy.yml は共有ワークフローを参照しないので出てこない
-    expect(refs.length).toBe(5);
+    expect(refs.length).toBe(4);
     for (const ref of refs) {
       expect(ref!.uses).toBe(TAG);
       if (ref!.promptsRef !== null) expect(ref!.promptsRef).toBe(TAG);
     }
-    expect(
-      refs.find((ref) => ref!.file === ".github/workflows/claude-issue-dispatch.yml")!.promptsRef,
-    ).toBe(TAG);
+
   });
 
   it("テンプレートリテラルの補間が文字列として漏れない", () => {
