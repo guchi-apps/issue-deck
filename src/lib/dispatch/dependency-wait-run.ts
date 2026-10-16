@@ -1,4 +1,4 @@
-import type { SessionDependencyWait } from "@prisma/client";
+import type { Prisma, SessionDependencyWait } from "@prisma/client";
 
 import { db } from "@/lib/db";
 import {
@@ -343,12 +343,32 @@ export async function cancelDependencyWait(id: string): Promise<DependencyWaitVi
   return toDependencyWaitView(updated);
 }
 
-async function failResume(row: SessionDependencyWait, reason: string): Promise<SessionDependencyWait> {
-  const updated = await db.sessionDependencyWait.update({
-    where: { id: row.id },
-    data: { status: "RESUME_FAILED", failureReason: reason.slice(0, 300) },
+/** 観測中に解除・再試行された待ちを、古い処理の結果で上書きしない。 */
+async function updateObservedWait(
+  row: SessionDependencyWait,
+  data: Prisma.SessionDependencyWaitUpdateManyMutationInput,
+): Promise<{ applied: boolean; row: SessionDependencyWait }> {
+  const result = await db.sessionDependencyWait.updateMany({
+    where: {
+      id: row.id,
+      status: row.status,
+      activeKey: row.activeKey,
+      resumeJobId: row.resumeJobId,
+      resumeRequestedAt: row.resumeRequestedAt,
+    },
+    data,
   });
-  await notifyOnce(row, `failed:${reason.slice(0, 40)}`, async () => {
+  return {
+    applied: result.count === 1,
+    row: (await db.sessionDependencyWait.findUnique({ where: { id: row.id } })) ?? row,
+  };
+}
+
+async function failResume(row: SessionDependencyWait, reason: string): Promise<SessionDependencyWait> {
+  const result = await updateObservedWait(row, { status: "RESUME_FAILED", failureReason: reason.slice(0, 300) });
+  if (!result.applied || result.row.status !== "RESUME_FAILED") return result.row;
+  const updated = result.row;
+  await notifyOnce(updated, `failed:${reason.slice(0, 40)}`, async () => {
     await postIssueComment(
       row.repositoryFullName,
       row.issueNumber,
@@ -366,19 +386,21 @@ async function failResume(row: SessionDependencyWait, reason: string): Promise<S
 async function requestResume(
   row: SessionDependencyWait,
   userId: string | null,
+  now: Date,
   stashInput = false,
 ): Promise<SessionDependencyWait> {
-  const claimed = await db.sessionDependencyWait.updateMany({
-    where: { id: row.id, status: { in: ["WAITING", "NEEDS_CONFIRM", "RESUME_FAILED"] } },
-    data: {
-      status: "RESUME_REQUESTED",
-      resumeRequestedAt: new Date(),
-      failureReason: null,
-      satisfiedAt: row.satisfiedAt ?? new Date(),
-    },
+  if (!row.activeKey || !["WAITING", "NEEDS_CONFIRM", "RESUME_FAILED"].includes(row.status)) return row;
+  const claimed = await updateObservedWait(row, {
+    status: "RESUME_REQUESTED",
+    resumeRequestedAt: now,
+    resumeJobId: null,
+    resumeSentAt: null,
+    resumedAt: null,
+    failureReason: null,
+    satisfiedAt: row.satisfiedAt ?? now,
   });
-  const current = (await db.sessionDependencyWait.findUnique({ where: { id: row.id } })) ?? row;
-  if (claimed.count !== 1) return current;
+  const current = claimed.row;
+  if (!claimed.applied || current.status !== "RESUME_REQUESTED" || current.resumeJobId !== null) return current;
 
   const session = await findDispatchSessionForIssue({
     repositoryFullName: row.repositoryFullName,
@@ -408,10 +430,7 @@ async function requestResume(
     requestedByUserId: userId,
   });
   if (!result.ok) return failResume(current, result.message);
-  return db.sessionDependencyWait.update({
-    where: { id: row.id },
-    data: { resumeJobId: result.job.id },
-  });
+  return (await updateObservedWait(current, { resumeJobId: result.job.id })).row;
 }
 
 /**
@@ -445,10 +464,7 @@ export async function advanceDependencyWait(
   } catch (error) {
     // 取得失敗は理由付きで残し、待機は維持する（次の巡回・手動の再確認で取り直す）
     const message = error instanceof Error ? error.message : "依存先の状態を取得できませんでした";
-    row = await db.sessionDependencyWait.update({
-      where: { id },
-      data: { lastCheckedAt: now, lastError: message.slice(0, 300) },
-    });
+    row = (await updateObservedWait(row, { lastCheckedAt: now, lastError: message.slice(0, 300) })).row;
     return toDependencyWaitView(row);
   }
 
@@ -456,15 +472,15 @@ export async function advanceDependencyWait(
   // 手動の「作業を再開」は、人の確認を要する条件（検証など）を人が引き受ける操作。
   // ただし**機械で判断できる未成立の条件が残っているときは再開しない**
   const manualOverride = options.manual && decision === "needs_confirm";
-  row = await db.sessionDependencyWait.update({
-    where: { id },
-    data: {
-      lastCheckedAt: now,
-      lastError: null,
-      lastObservation: results,
-      ...(status === "RESUME_FAILED" ? {} : { status: decision === "needs_confirm" ? "NEEDS_CONFIRM" : "WAITING" }),
-    },
+  const observed = await updateObservedWait(row, {
+    lastCheckedAt: now,
+    lastError: null,
+    lastObservation: results,
+    ...(status === "RESUME_FAILED" ? {} : { status: decision === "needs_confirm" ? "NEEDS_CONFIRM" : "WAITING" }),
   });
+  row = observed.row;
+  const expectedStatus = status === "RESUME_FAILED" ? status : decision === "needs_confirm" ? "NEEDS_CONFIRM" : "WAITING";
+  if (!observed.applied || row.status !== expectedStatus) return toDependencyWaitView(row);
 
   if (decision === "needs_confirm" && !manualOverride) {
     await notifyOnce(row, "needs_confirm", async () => {
@@ -480,14 +496,14 @@ export async function advanceDependencyWait(
   if (decision === "wait") {
     if (options.manual && status === "RESUME_FAILED") {
       // 失敗後の再確認で条件が崩れていたら待機へ戻す
-      row = await db.sessionDependencyWait.update({ where: { id }, data: { status: "WAITING", failureReason: null } });
+      row = (await updateObservedWait(row, { status: "WAITING", failureReason: null })).row;
     }
     return toDependencyWaitView(row);
   }
 
   // 自動で再開してよいのは、全条件が機械で成立したとき（resume）か、人が押したとき
   if (decision === "resume" || manualOverride) {
-    const requested = await requestResume(row, options.userId ?? null, options.manual && options.stashInput === true);
+    const requested = await requestResume(row, options.userId ?? null, now, options.manual && options.stashInput === true);
     return toDependencyWaitView(requested);
   }
   return toDependencyWaitView(row);
@@ -504,14 +520,15 @@ async function trackRequested(row: SessionDependencyWait, now: Date): Promise<Se
   }
   const job = await db.dispatchJob.findUnique({
     where: { id: row.resumeJobId },
-    select: { status: true, message: true },
+    select: { status: true, message: true, finishedAt: true },
   });
   if (!job) return failResume(row, "再開の指示ジョブが見つかりません");
   if (job.status === "SUCCEEDED") {
-    return db.sessionDependencyWait.update({
-      where: { id: row.id },
-      data: { status: "RESUME_SENT", resumeSentAt: now },
-    });
+    // 巡回時刻で上書きすると、送信から巡回までに走ったツール・応答を見落とす。
+    return (await updateObservedWait(row, {
+      status: "RESUME_SENT",
+      resumeSentAt: job.finishedAt ?? now,
+    })).row;
   }
   if (job.status === "FAILED" || job.status === "TIMEOUT" || job.status === "CANCELED" || job.status === "SKIPPED") {
     // ジョブの具体的な理由を失敗理由へ載せる（#4383。「SKIPPED」だけで終えない）
@@ -526,30 +543,43 @@ async function trackRequested(row: SessionDependencyWait, now: Date): Promise<Se
 }
 
 async function trackSent(row: SessionDependencyWait, now: Date): Promise<SessionDependencyWait> {
+  const job = row.resumeJobId
+    ? await db.dispatchJob.findUnique({
+        where: { id: row.resumeJobId },
+        select: { status: true, claimedAt: true, finishedAt: true, targetHost: true, tmuxSessionName: true },
+      })
+    : null;
   const session = await findDispatchSessionForIssue({
     repositoryFullName: row.repositoryFullName,
     issueNumber: row.issueNumber,
   });
   const sentAt = row.resumeSentAt ?? now;
+  // INSTRUCTIONはRUNNINGを経由しない。成功報告のHTTPより先に活動が届く場合もあるため、
+  // 成功済みジョブのclaim以降を照合する。要求・キュー登録時刻は使わない。
+  const activityAfter = job?.claimedAt ?? job?.finishedAt ?? sentAt;
+  const activityTimes = session
+    ? [
+        session.stepSeenAt,
+        session.activity === "WORKING" || session.activity === "RESPONDED" ? session.activityAt : null,
+      ]
+    : [];
   if (
-    session &&
-    session.state === "ALIVE" &&
-    session.activity === "WORKING" &&
-    session.activityAt &&
-    new Date(session.activityAt).getTime() >= sentAt.getTime()
+    job?.status === "SUCCEEDED" &&
+    session?.state === "ALIVE" &&
+    session.host === job.targetHost &&
+    (!job.tmuxSessionName || session.tmuxSessionName === job.tmuxSessionName) &&
+    activityTimes.some((value) => value != null && Date.parse(value) > activityAfter.getTime())
   ) {
-    const updated = await db.sessionDependencyWait.update({
-      where: { id: row.id },
-      data: { status: "RESUMED", resumedAt: now, activeKey: null },
-    });
-    await notifyOnce(row, "resumed", () =>
+    const result = await updateObservedWait(row, { status: "RESUMED", resumedAt: now, activeKey: null });
+    if (!result.applied || result.row.status !== "RESUMED") return result.row;
+    await notifyOnce(result.row, "resumed", () =>
       postIssueComment(
         row.repositoryFullName,
         row.issueNumber,
         `依存先 ${row.depRepository}#${row.depNumber} の再開条件が成立したため、実装を再開しました。`,
       ),
     );
-    return updated;
+    return result.row;
   }
   if (now.getTime() - sentAt.getTime() > DEPENDENCY_WAIT_RESUME_CONFIRM_TIMEOUT_MS) {
     return failResume(row, "再開の指示を送りましたが、セッションが動き出したことを確認できませんでした");
