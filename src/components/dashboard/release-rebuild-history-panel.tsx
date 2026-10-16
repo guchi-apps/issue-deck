@@ -53,18 +53,18 @@ export function ReleaseRebuildHistoryPanel({
 
   if (episodes.length === 0) return null;
   return (
-    <section
+    <details
       aria-label="修正をリリースに反映した履歴"
       className={cn("flex min-w-0 flex-col gap-1.5 rounded-lg border bg-muted/20 p-2.5 text-xs", className)}
       data-testid="release-rebuild-history"
     >
-      <p className="font-semibold">修正をリリースに反映した履歴</p>
+      <summary className="cursor-pointer font-semibold">リリース候補の作り直し履歴</summary>
       <ul className="flex flex-col gap-1.5">
         {episodes.map((episode, index) => (
           <EpisodeItem key={episode.key} episode={episode} repositoryFullName={repositoryFullName} defaultOpen={index === 0} />
         ))}
       </ul>
-    </section>
+    </details>
   );
 }
 
