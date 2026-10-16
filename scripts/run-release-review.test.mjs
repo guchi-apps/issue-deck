@@ -91,7 +91,9 @@ afterEach(() => {
   rmSync(dir, { recursive: true, force: true });
 });
 
-describe("run-release-review.sh（#4615）", () => {
+// git・bash・Python・jqを複数回起動する結合テスト。並行検証中のホストでも
+// プロセス起動の待ち時間を許容する。アサーションと本番の制限は変更しない（#4693）。
+describe("run-release-review.sh（#4615）", { timeout: 30_000 }, () => {
   it("入力上限を超える差分は複数バッチと相互作用の確認へ分け、巨大ファイルも含めて全ファイルの実績を報告する", () => {
     const { status, result } = runReview();
     expect(status).toBe("succeeded");
