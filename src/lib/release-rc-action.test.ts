@@ -44,7 +44,7 @@ describe("describeRcPrimaryAction（#4635）", () => {
   });
   it("コード要修正は修正へ、合格後は公開準備へ", () => {
     expect(describeRcPrimaryAction({ status: "needs_fix", publishable: false }).kind).toBe("fix");
-    expect(describeRcPrimaryAction({ status: "ready_to_prepare", publishable: false })).toEqual({ kind: "prepare", label: "公開準備へ進む" });
+    expect(describeRcPrimaryAction({ status: "ready_to_prepare", publishable: false })).toEqual({ kind: "prepare", label: "本番公開へ進む（公開承認）" });
   });
   it("本番公開は承認待ちで公開可能なときだけ", () => {
     expect(describeRcPrimaryAction({ status: "awaiting_approval", publishable: true }).kind).toBe("publish");

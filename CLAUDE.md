@@ -300,9 +300,9 @@ Issueコメントとして投稿し、「なぜエージェントが実行でき
 **`develop`→`main`は人がマージする原則の限定例外は、ユーザーが開始した2種類の系列が記録した1本のPRに限る**（#4006・#3998・#4480）。系列の外のリリースPR・人が作った復旧PR・他の系列のPRには及ばない。
 
 - **本番復旧系列のmain向け復旧PR**: デプロイ失敗の帯の「リリース完了まで進める」（旧「AIに修正を依頼」）で開始者が「mainへのマージまで自動で進める」を選んだ系列に限り、issue-deckの巡回が、その系列が作った復旧PR（`deploy-recovery/*`）を自動マージする
-- **リリース完了系列のリリース候補**（#4480）: リリース候補の失敗から「リリース完了まで進める」を開始し、開始者が「本番反映・稼働確認まで」を選んだ系列（`ReleaseCompletionRun.scope=until_production`）に限り、巡回が、その系列が記録した候補（起点の候補か、修正系列が作り直した後継）1本を本番mainへマージする。**現在のmain・候補先端に対する全体レビューと統合検証が合格**（要確認も不可。`evaluateReleaseMergeGate`を強制ありで評価）、Mac検証が合格か対象外、候補のCIが成功、候補のHEAD・baseが記録と一致しmainが進んでいない、人の確認ラベルが無い、期限・費用上限内のときだけで、判定は純関数`decideCompletionMerge`（`src/lib/release-completion.ts`）が持つ。「チェック通過まで」の系列は従来どおり人がマージする
+- **リリース完了系列のリリース候補**（#4480・#4666）: リリース候補の失敗から「リリース完了まで進める」を開始し、開始者が「本番反映・稼働確認まで」を選んだ系列（`ReleaseCompletionRun.scope=until_production`）か、新方式RCの「本番公開へ進む（公開承認）」で利用者が公開を承認した系列（`publishApprovalId`付き。承認の範囲・失効・取消は`ReleasePublishApproval`が持ち、マージ直前に承認を`merging`へ確保できたときだけ。[docs/multi-agent/release.md](docs/multi-agent/release.md)「公開承認」）に限り、巡回が、その系列が記録した候補（起点の候補か、修正系列が作り直した後継）1本を本番mainへマージする。**現在のmain・候補先端に対する全体レビューと統合検証が合格**（要確認も不可。`evaluateReleaseMergeGate`を強制ありで評価）、Mac検証が合格か対象外、候補のCIが成功、候補のHEAD・baseが記録と一致しmainが進んでいない、人の確認ラベルが無い、期限・費用上限内のときだけで、判定は純関数`decideCompletionMerge`（`src/lib/release-completion.ts`）が持つ。「チェック通過まで」の系列は従来どおり人がマージする
 
-- **権限の根拠はサーバー側の系列記録だけ**（`DeployRecoverySeries`の開始者・許可範囲`scope`・期限・停止・復旧PRの番号／ブランチ／HEAD／base／差分。リリース完了系列は`ReleaseCompletionRun`の開始者・`scope`・期限・停止・候補の番号／HEAD／base）。ラベル・PR本文のマーカー・PRの作者は権限にしない
+- **権限の根拠はサーバー側の系列記録だけ**（`DeployRecoverySeries`の開始者・許可範囲`scope`・期限・停止・復旧PRの番号／ブランチ／HEAD／base／差分。リリース完了系列は`ReleaseCompletionRun`の開始者・`scope`・期限・停止・候補の番号／HEAD／base、公開承認の系列はそれに加えて`ReleasePublishApproval`の承認者・対象・状態）。ラベル・PR本文のマーカー・PRの作者は権限にしない
 - 判定は純関数`src/lib/deploy-recovery-main-merge.ts`の`decideRecoveryMainMerge`が1か所で持ち、画面（開始ダイアログの範囲選択）・API（`POST /api/repositories/deploy-recovery-series`が範囲を検証）・巡回（`runDeployRecoverySweep`）はこれに揃える。ワークフローはmainへのマージを持たない
 - **マージ直前に、復旧PRの現在のHEADとmainの現在の先端に対して観測し直す。** CIは復旧PRの現在のHEADのものを見て、develop上の合格は流用しない。PRの現在の差分が復旧PR作成時に記録した範囲（選んだ修正＋`package.json`）に収まることも確かめ、マージAPIにも記録したHEADのSHAを渡す
 - mainが進んだ・HEADが変わった・差分が範囲を超えた・コンフリクトした・CIが失敗した・`22.merge-confirm-required`が付いた場合はマージせず`needs_attention`で止め、修正が別のリリースで既にmainへ入っていれば置換済みとして止める

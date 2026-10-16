@@ -15,6 +15,7 @@ import {
 } from "@/lib/release-review-assignee";
 import { normalizeReleaseReviewDiagnostic } from "@/lib/release-review-diagnostic";
 import { loadReleaseReviewContext } from "@/lib/release-review-context-load";
+import { readAutoReevaluation, type ReviewAutoReevaluation } from "@/lib/release-review-reevaluation";
 import { normalizeReleaseReview } from "@/lib/release-review-result";
 import {
   recordReleaseVerificationResult,
@@ -35,10 +36,22 @@ export type RequestReleaseReviewResult =
   | { ok: true; outcome: "queued" | "already_queued"; job: DispatchJob; assignee: ReleaseReviewAssignee }
   | { ok: false; rejection: "no_host"; message: string };
 
+/** 積み方の指定。自動再評価（#4664）だけが使い、画面・依頼APIの経路は従来どおり */
+export type ReleaseReviewRequestOptions = {
+  /**
+   * このホストにだけ積む。統合検証の証跡はそれを実行したホストのローカルファイルなので、自動再評価は
+   * 検証したホストへ向ける（別ホストでは証跡を読めず、未確認のまま戻るだけになる）。不適格なら積まない
+   */
+  requiredHost?: string;
+  /** 積めるホストが無いとき`ai_review`へ失敗を記録するか（既定true）。自動経路は有効な結果を上書きしないためfalse */
+  recordNoHost?: boolean;
+};
+
 async function pickReleaseReviewHost(
   repositoryFullName: string,
   assignee: ReleaseReviewAssignee,
   now: Date,
+  requiredHost?: string,
 ): Promise<string | null> {
   const hosts = await db.dispatchHost.findMany({
     where: { lastSeenAt: { gte: new Date(now.getTime() - DISPATCH_HOST_ONLINE_WINDOW_MS) } },
@@ -51,6 +64,7 @@ async function pickReleaseReviewHost(
       (assignee.agent !== "codex" || host.codexCapable === true) &&
       parseDispatchHostRepositories(host.repositories).includes(repositoryFullName),
   );
+  if (requiredHost !== undefined) return capable.some((host) => host.name === requiredHost) ? requiredHost : null;
   return capable[0]?.name ?? null;
 }
 
@@ -63,12 +77,14 @@ async function pickReleaseReviewHost(
 export async function rerunReleaseReviewJob(
   target: ReleaseVerificationTarget,
   now: Date = new Date(),
+  /** 自動再評価（#4664）のとき、その印と積み方。印は結果の記録にも引き継ぎ、同じ証跡で繰り返さない */
+  options: ReleaseReviewRequestOptions & { autoReevaluation?: ReviewAutoReevaluation } = {},
 ): Promise<RequestReleaseReviewResult> {
   const before = await db.releaseVerification.findFirst({
     where: { ...target, kind: "ai_review" },
     select: { state: true, summary: true, unverifiedScope: true, updatedAt: true },
   });
-  const result = await requestReleaseReviewJob(target, now);
+  const result = await requestReleaseReviewJob(target, now, options);
   if (result.ok && result.outcome === "queued") {
     // 旧結果は新テーブルを作らず、既存の`findings`JSONへ直前1件だけ残す（#4632）。履歴と現在の結果は`previousRun`の有無で分かれる
     const previousRun =
@@ -84,7 +100,13 @@ export async function rerunReleaseReviewJob(
       where: { ...target, kind: "ai_review" },
       data: {
         state: "waiting",
-        findings: previousRun ? { previousRun } : Prisma.DbNull,
+        findings:
+          previousRun || options.autoReevaluation
+            ? {
+                ...(previousRun ? { previousRun } : {}),
+                ...(options.autoReevaluation ? { autoReevaluation: options.autoReevaluation } : {}),
+              }
+            : Prisma.DbNull,
         message: null,
         summary: null,
         unverifiedScope: null,
@@ -102,6 +124,7 @@ export async function rerunReleaseReviewJob(
 export async function requestReleaseReviewJob(
   target: ReleaseVerificationTarget,
   now: Date = new Date(),
+  options: ReleaseReviewRequestOptions = {},
 ): Promise<RequestReleaseReviewResult> {
   const setting = await db.appSetting.findUnique({
     where: { id: 1 },
@@ -114,8 +137,11 @@ export async function requestReleaseReviewJob(
   const existing = await db.dispatchJob.findFirst({ where: { activeKey } });
   if (existing) return { ok: true, outcome: "already_queued", job: existing, assignee };
 
-  const hostName = await pickReleaseReviewHost(target.repoFullName, assignee, now);
+  const hostName = await pickReleaseReviewHost(target.repoFullName, assignee, now, options.requiredHost);
   if (hostName === null) {
+    if (options.recordNoHost === false) {
+      return { ok: false, rejection: "no_host", message: "全体レビューを積めるサブPCがないため見送りました" };
+    }
     const message = `${target.repoFullName}の全体レビュー（${describeReleaseReviewAssignee(assignee)}）を実行できるサブPCがありません（オフライン・pollerが未対応・リポジトリ未登録・Codex未対応のいずれか）。`;
     await recordReleaseVerificationResult(target, {
       kind: "ai_review",
@@ -171,17 +197,22 @@ export async function requestReleaseReviewJob(
   }
 }
 
-/** 再実行で退避した直前の結果（`findings.previousRun`）。新しい結果を記録するときに引き継ぎ、完了後も履歴として読めるようにする（#4632） */
-async function loadPreviousRun(target: ReleaseVerificationTarget): Promise<Record<string, unknown> | null> {
+/**
+ * 再実行で退避した直前の結果（`findings.previousRun`）と自動再評価の印（`autoReevaluation`・#4664）。
+ * 新しい結果を記録するときに引き継ぐ。前者は完了後も履歴として読むため、後者は同じ証跡で再評価を繰り返さないため（#4632）
+ */
+async function loadCarriedFindings(target: ReleaseVerificationTarget): Promise<Record<string, unknown>> {
   const row = await db.releaseVerification
     .findFirst({ where: { ...target, kind: "ai_review" }, select: { findings: true } })
     .catch(() => null);
   const findings = row?.findings;
-  if (typeof findings !== "object" || findings === null || Array.isArray(findings)) return null;
+  if (typeof findings !== "object" || findings === null || Array.isArray(findings)) return {};
   const previous = (findings as Record<string, unknown>).previousRun;
-  return typeof previous === "object" && previous !== null && !Array.isArray(previous)
-    ? (previous as Record<string, unknown>)
-    : null;
+  const marker = readAutoReevaluation(findings);
+  return {
+    ...(typeof previous === "object" && previous !== null && !Array.isArray(previous) ? { previousRun: previous } : {}),
+    ...(marker ? { autoReevaluation: marker } : {}),
+  };
 }
 
 /**
@@ -215,8 +246,7 @@ export async function applyReleaseReviewReport(
   // 文脈を読めないときは履歴不明として全体確認の扱いにする（引き継ぎを認めない側へ倒す）
   const context = status === "succeeded" ? await loadReleaseReviewContext(target).catch(() => null) : null;
   const normalized = status === "succeeded" ? normalizeReleaseReview(body, context) : null;
-  const previousRun = await loadPreviousRun(target);
-  const keepPrevious = previousRun ? { previousRun } : {};
+  const keepPrevious = await loadCarriedFindings(target);
   if (normalized) {
     const raw = (body ?? {}) as Record<string, unknown>;
     return recordReleaseVerificationResult(target, {
@@ -239,7 +269,10 @@ export async function applyReleaseReviewReport(
     kind: "ai_review",
     state: "failed",
     agent,
-    findings: diagnostic || previousRun ? { ...(diagnostic ? { diagnostic } : {}), ...keepPrevious } : Prisma.DbNull,
+    findings:
+      diagnostic || Object.keys(keepPrevious).length > 0
+        ? { ...(diagnostic ? { diagnostic } : {}), ...keepPrevious }
+        : Prisma.DbNull,
     summary: null,
     message:
       status === "failed"

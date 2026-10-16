@@ -66,6 +66,28 @@ describe("候補ブランチの判定", () => {
 });
 
 describe("deriveRcStatus", () => {
+  it.each(["preparing", "awaiting_approval", "review"] as const)("マージ済みなら内部%sでも再承認を案内しない（#4673）", (phase) => {
+    const result = deriveRcStatus(input({ phase, pullRequest: { number: 10, state: "closed", merged: true, baseSha: BASE, headSha: HEAD2 } }));
+    expect(result.status).toBe("deploying");
+    expect(result.reason).toContain("マージ済み");
+    expect(result.reason).not.toContain("合格");
+  });
+
+  it("全体レビューが統合検証の証跡待ち・再評価中なら、要修正でなく検証中にする（#4664）", () => {
+    const g = gate([
+      { kind: "integration", state: "passed", baseSha: BASE, headSha: HEAD2 },
+      { kind: "ai_review", state: "passed", baseSha: BASE, headSha: HEAD2, unverifiedScope: "検証ランナーはrunning" },
+    ]);
+    expect(deriveRcStatus(input({ gate: g })).status).toBe("needs_fix");
+    expect(deriveRcStatus(input({ gate: g, reviewStage: { kind: "reevaluating" } })).status).toBe("verifying");
+    // 統合検証が失敗していれば、段階より失敗を優先する（誤合格・待てば進むと見せない）
+    const failed = gate([
+      { kind: "integration", state: "failed", baseSha: BASE, headSha: HEAD2 },
+      { kind: "ai_review", state: "passed", baseSha: BASE, headSha: HEAD2, unverifiedScope: "x" },
+    ]);
+    expect(deriveRcStatus(input({ gate: failed, reviewStage: { kind: "reevaluating" } })).status).toBe("needs_fix");
+  });
+
   it("現在revisionのSHAに一致する合格だけで公開準備可能になる", () => {
     const passed = gate([
       { kind: "integration", state: "passed", baseSha: BASE, headSha: HEAD2 },

@@ -10,16 +10,16 @@ import type { ReleaseStartMode } from "@/lib/release-start-mode";
  * （呼び出し側は操作を無効にし、取得後に方式に合った確認表示を出す）
  */
 export function useReleaseStartMode(repositoryFullName: string, enabled: boolean, refreshKey = 0): ReleaseStartMode | null {
-  const [loaded, setLoaded] = useState<{ repo: string; mode: ReleaseStartMode } | null>(null);
+  const [loaded, setLoaded] = useState<{ repo: string; refreshKey: number; mode: ReleaseStartMode } | null>(null);
   useEffect(() => {
     if (!enabled) return;
     let cancelled = false;
     void fetchReleaseStartModes([repositoryFullName]).then((modes) => {
-      if (!cancelled) setLoaded({ repo: repositoryFullName, mode: modes[repositoryFullName] });
+      if (!cancelled) setLoaded({ repo: repositoryFullName, refreshKey, mode: modes[repositoryFullName] });
     });
     return () => {
       cancelled = true;
     };
   }, [repositoryFullName, enabled, refreshKey]);
-  return loaded && loaded.repo === repositoryFullName ? loaded.mode : null;
+  return loaded && loaded.repo === repositoryFullName && loaded.refreshKey === refreshKey ? loaded.mode : null;
 }

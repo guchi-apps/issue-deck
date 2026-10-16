@@ -49,6 +49,13 @@ import {
   type ReleaseCompletionStopReason,
 } from "@/lib/release-completion";
 import { classifyIntegrationFailure, isReleaseFixActive } from "@/lib/release-fix-series";
+import {
+  checkPublishApprovalForRun,
+  claimPublishApprovalForMerge,
+  revokeApprovalForStoppedRun,
+  settlePublishApprovalMerge,
+  settlePublishApprovalOnStop,
+} from "@/lib/release-publish-approval-run";
 import { createReleaseFixSeries, readReleaseFixStartState } from "@/lib/release-fix-series-run";
 import { evaluateReleaseMergeGate, isReleasePullRequest } from "@/lib/release-merge-gate";
 import { listReleaseVerificationRecords } from "@/lib/release-verification";
@@ -101,6 +108,8 @@ export type ReleaseCompletionRunView = {
   stopMessage: string | null;
   deployRecovery: { id: string; statusLabel: string; issueNumber: number | null; stopMessage: string | null } | null;
   startedByUserId: string;
+  /** RCの公開承認（#4666）から始めた系列か */
+  fromPublishApproval: boolean;
   expiresAt: string;
   createdAt: string;
   updatedAt: string;
@@ -138,7 +147,7 @@ export async function toReleaseCompletionRunView(row: RunRow): Promise<ReleaseCo
     id: row.id,
     repositoryFullName: row.repositoryFullName,
     status: row.status,
-    statusLabel: releaseCompletionStatusLabel(row.status),
+    statusLabel: releaseCompletionStatusLabel(row.status, Boolean(row.publishApprovalId)),
     stageIndex: releaseCompletionStageIndex(row.status, recoveryView ? deployRecoveryStage(recoveryView.status).index : null),
     active: isReleaseCompletionActive(row.status),
     needsAction: releaseCompletionNeedsAction(row.status),
@@ -163,6 +172,7 @@ export async function toReleaseCompletionRunView(row: RunRow): Promise<ReleaseCo
       ? { id: recoveryView.id, statusLabel: recoveryView.statusLabel, issueNumber: recoveryView.issueNumber, stopMessage: recoveryView.stopMessage }
       : null,
     startedByUserId: row.startedByUserId,
+    fromPublishApproval: Boolean(row.publishApprovalId),
     expiresAt: row.expiresAt.toISOString(),
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
@@ -284,6 +294,8 @@ export async function stopReleaseCompletionRun(params: {
     where: { id: row.id, status: row.status },
     data: { status: "stopped", activeKey: null, stopReason: "stopped_by_user", stoppedByUserId: params.userId, stoppedAt: now },
   });
+  // 公開承認から始めた系列を止めたら、その承認も取り消す（止めた後に古い承認から公開しない。#4666）
+  if (row.publishApprovalId) await revokeApprovalForStoppedRun(row.publishApprovalId, params.userId, now);
   if (row.deployRecoverySeriesId) {
     await stopDeployRecoverySeries({
       repositoryFullName: row.repositoryFullName,
@@ -352,6 +364,12 @@ async function advanceRun(run: RunRow, hostName: string, now: Date): Promise<Act
   }
   const current: RunRow = { ...run, costUsedUsd };
   const observation = await observeCandidate(current, ctx);
+  // 公開承認（#4666）の系列は、承認が今も範囲内か（候補の更新・置換・mainの前進・取消・期限）を毎巡回確かめる。
+  // 候補がマージ済みなら本番反映の追跡へ進むだけなので見ない
+  if (current.publishApprovalId && observation.candidate && !observation.candidate.merged) {
+    const approval = await checkPublishApprovalForRun(ctx, current, observation.candidate.state === "open" ? { headSha: observation.candidate.headSha } : null, now);
+    if (approval?.state === "invalid") return handOff(current, ctx, approval.reason, approval.detail || undefined);
+  }
   const decision = decideReleaseCompletion(
     {
       status: current.status as ReleaseCompletionStatus,
@@ -366,6 +384,7 @@ async function advanceRun(run: RunRow, hostName: string, now: Date): Promise<Act
       dispatchedAt: current.dispatchedAt,
       costLimitUsd: current.costLimitUsd,
       costUsedUsd,
+      fromPublishApproval: Boolean(current.publishApprovalId),
     },
     { now, candidate: observation.candidate, series: observation.series, checks: observation.checks, finalization: observation.finalization },
   );
@@ -465,7 +484,7 @@ async function observeCandidate(run: RunRow, ctx: Ctx): Promise<Observation> {
     checks: summary ? toCompletionChecks(summary, run.repositoryFullName) : null,
     summary,
     // 新方式なのに記録が無い（取得できない）ときも「公開準備が済んでいない」として扱う（旧方式と見なして進めない）
-    finalization: pull && isRcReleaseCandidateHeadRef(pull.head.ref) ? (finalization ?? { phase: "review", applied: null }) : null,
+    finalization: pull && isRcReleaseCandidateHeadRef(pull.head.ref) ? (finalization ?? { phase: "review", applied: null, latest: null }) : null,
   };
 }
 
@@ -678,6 +697,8 @@ async function evaluateAndMerge(run: RunRow, ctx: Ctx, now: Date, observation: O
       }),
     macOk: mac === "passed" || mac === "not_applicable",
     ciState: ci?.ciState ?? "unknown",
+    // 承認の範囲はこの巡回の先頭（`checkPublishApprovalForRun`）で確かめ済み。確保はマージの直前に取り直す
+    publishApprovalValid: run.publishApprovalId ? true : undefined,
   });
   if (decision.action === "wait") {
     if (run.status !== "merging") {
@@ -703,10 +724,16 @@ async function evaluateAndMerge(run: RunRow, ctx: Ctx, now: Date, observation: O
     if (current?.status !== "merging" || current.stoppedAt !== null || current.activeKey === null) {
       return { action: "stopped_before_merge" };
     }
+    // 公開承認の系列は、承認を`merging`へ確保できたときだけマージする（取消・失効・期限切れと競合したら進めない）
+    if (run.publishApprovalId && !(await claimPublishApprovalForMerge(run.publishApprovalId, now))) {
+      return handOff({ ...run, status: "merging" }, ctx, "approval_invalidated", "本番マージの直前に公開承認が取り消された、または失効しました");
+    }
     merged = await mergePullRequest(ctx.owner, ctx.repo, run.candidatePrNumber, ctx.token, decision.expectedHeadSha);
   } catch (error) {
+    if (run.publishApprovalId) await settlePublishApprovalMerge(run.publishApprovalId, { merged: false }, now);
     return handOff({ ...run, status: "merging" }, ctx, "merge_failed", error instanceof Error ? error.message.slice(0, 200) : undefined);
   }
+  if (run.publishApprovalId) await settlePublishApprovalMerge(run.publishApprovalId, { merged: true, mergeSha: merged.sha }, now);
   await db.releaseCompletionRun.updateMany({
     where: { id: run.id, status: "merging" },
     data: merged.sha
@@ -834,7 +861,8 @@ async function handOff(run: RunRow, ctx: Ctx, reason: ReleaseCompletionStopReaso
     data: { status: "needs_attention", activeKey: null, stopReason: reason, stopDetail: detail ?? null },
   });
   if (updated.count !== 1) return null;
-  await notify(run, ctx, `リリース完了系列を止めました。${releaseCompletionStopMessage(reason, detail ?? null) ?? ""}`, true);
+  if (run.publishApprovalId) await settlePublishApprovalOnStop(run.publishApprovalId, reason, new Date());
+  await notify(run, ctx, `${run.publishApprovalId ? "自動公開" : "リリース完了系列"}を止めました。${releaseCompletionStopMessage(reason, detail ?? null) ?? ""}`, true);
   return { action: `stop:${reason}`, detail };
 }
 

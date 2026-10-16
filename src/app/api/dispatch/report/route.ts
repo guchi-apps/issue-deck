@@ -11,6 +11,7 @@ import { reportDispatchJob } from "@/lib/dispatch/jobs";
 import { parsePrReviewVerdict } from "@/lib/dispatch/pr-review";
 import { applyReleaseReviewReport } from "@/lib/dispatch/release-review-jobs";
 import { applyReleaseVerifyReport } from "@/lib/dispatch/release-verify-jobs";
+import { reevaluateReleaseReviewSafely } from "@/lib/dispatch/release-review-reevaluate";
 import { resumePrReviewMerge } from "@/lib/dispatch/pr-review-jobs";
 import { resolveFixedInstructionCheckUser } from "@/lib/dispatch/session-escalation";
 import { MANUAL_STEP_OUTPUT_MAX_LENGTH } from "@/lib/manual-step-command";
@@ -134,6 +135,19 @@ export async function POST(request: NextRequest) {
     } catch (error) {
       console.error(`[POST /api/dispatch/report] 統合検証の結果を記録できませんでした ${jobId}:`, error);
     }
+    // 統合検証・全体レビューのどちらが先に終わっても、証跡待ちの項目を自動で再評価する（#4664）。
+    // 判定は記録とジョブから取り直すので、重複報告・同時完了でも1回しか積まない
+    if (result.job.prNumber != null && result.job.baseSha && result.job.headSha) {
+      await reevaluateReleaseReviewSafely(
+        {
+          repoFullName: result.job.repositoryFullName,
+          prNumber: result.job.prNumber,
+          baseSha: result.job.baseSha,
+          headSha: result.job.headSha,
+        },
+        "verify-report",
+      );
+    }
   }
 
   // リリース全体のAIレビュー（#4238）の結果を、ジョブの対象（PR・base・head）の記録へ反映する
@@ -142,6 +156,17 @@ export async function POST(request: NextRequest) {
       await applyReleaseReviewReport(result.job, status, message, payload?.releaseReview);
     } catch (error) {
       console.error(`[POST /api/dispatch/report] 全体レビューの結果を記録できませんでした ${jobId}:`, error);
+    }
+    if (result.job.prNumber != null && result.job.baseSha && result.job.headSha) {
+      await reevaluateReleaseReviewSafely(
+        {
+          repoFullName: result.job.repositoryFullName,
+          prNumber: result.job.prNumber,
+          baseSha: result.job.baseSha,
+          headSha: result.job.headSha,
+        },
+        "review-report",
+      );
     }
   }
 

@@ -13,8 +13,15 @@ import {
 } from "@/lib/release-mac-verification";
 import { readReleaseReviewDiagnostic, type ReleaseReviewDiagnostic } from "@/lib/release-review-diagnostic";
 import type { ReleaseReviewDecisionSummary } from "@/lib/release-review-decision";
+import type { ReleaseOpsContext } from "@/lib/release-review-ops-evidence";
 import type { ReleaseReviewCoverage, ReleaseReviewFinding, ReleaseReviewMeta } from "@/lib/release-review-result";
 import type { ReleaseVerificationProgress } from "@/lib/release-verification-progress";
+import {
+  describeReviewEvidenceStage,
+  readAutoReevaluation,
+  type ReviewAutoReevaluation,
+  type ReviewEvidenceStage,
+} from "@/lib/release-review-reevaluation";
 
 /**
  * リリース画面の「統合検証」「全体レビュー」2区分（#4238）の表示用の要約。画面（`GET /api/repositories/release`）が
@@ -76,6 +83,18 @@ export type ReleaseVerificationSection = {
   decisions?: ReleaseReviewDecisionSummary | null;
   /** 記録された未確認範囲そのもの（判断で解除してよいかの判定に使う）。無ければnull */
   unverifiedScope?: string | null;
+  /** 自動再評価の印（#4664。全体レビューだけ）。無ければnull */
+  autoReevaluation?: ReviewAutoReevaluation | null;
+  /**
+   * 統合検証の証跡から見た全体レビューの共通の段階（#4664。全体レビューだけ）。バッジ・説明・詳細・本番確認が
+   * 同じ値を出す。統合検証の区分では省略
+   */
+  stage?: ReviewEvidenceStage;
+  /**
+   * レビューがpollerの更新・再起動を要求したときだけ集める稼働情報（#4665。全体レビューだけ）。
+   * 要求が無い・読み出していないときはnull（画面は「確認できない」と区別して扱う）
+   */
+  opsContext?: ReleaseOpsContext | null;
 };
 
 export type ReleaseVerificationPreviousRun = {
@@ -142,6 +161,28 @@ function isRunningMacStep(progress: ReleaseVerificationProgress | null): boolean
   return progress.steps[progress.currentIndex]?.key === "mac";
 }
 
+/** 要約の2区分から全体レビューの共通の段階を出す（#4664）。画面側で要約を組み直したときにも使う */
+export function reviewStageOf(
+  aiReview: ReleaseVerificationSection,
+  integration: Pick<ReleaseVerificationSection, "state" | "updatedAt">,
+): ReviewEvidenceStage {
+  return describeReviewEvidenceStage(
+    {
+      state: aiReview.state,
+      updatedAt: aiReview.updatedAt,
+      findingsCount: aiReview.findings.length,
+      checks: aiReview.review?.checks ?? null,
+      openFiles: aiReview.coverage?.open.length ?? 0,
+      unverifiedScope: aiReview.unverifiedScope ?? null,
+      reason: aiReview.reason,
+      summary: aiReview.summary,
+      autoReevaluation: aiReview.autoReevaluation ?? null,
+      executionFailed: aiReview.diagnostic !== null,
+    },
+    { state: integration.state, updatedAt: integration.updatedAt },
+  );
+}
+
 export function summarizeReleaseVerification(input: {
   current: { baseSha: string; headSha: string };
   rows: readonly ReleaseVerificationDetailRow[];
@@ -187,15 +228,20 @@ export function summarizeReleaseVerification(input: {
       previousRun: readPreviousRun(row?.findings),
       decisions: null,
       unverifiedScope: row?.unverifiedScope ?? null,
+      autoReevaluation: kind === "ai_review" ? readAutoReevaluation(row?.findings) : null,
     };
   };
+
+  const integration = section("integration");
+  const aiReview = section("ai_review");
+  aiReview.stage = reviewStageOf(aiReview, integration);
 
   return {
     enforced: input.enforced,
     gateStatus: gate.status,
     blockers: gate.blockers,
-    integration: section("integration"),
-    aiReview: section("ai_review"),
+    integration,
+    aiReview,
     mac: describeReleaseMac({
       current,
       rows: input.macRows ?? [],

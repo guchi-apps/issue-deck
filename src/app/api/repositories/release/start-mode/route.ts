@@ -6,12 +6,13 @@ import { getInstallationToken } from "@/lib/github/app-auth";
 import { fetchReleaseCallerText } from "@/lib/github/release-api";
 import { decideDevelopSync } from "@/lib/release-develop-sync";
 import { observeDevelopSync } from "@/lib/release-develop-sync-run";
+import { reconcileActiveRcPublication } from "@/lib/release-rc-reconcile";
 import { loadRcBlock } from "@/lib/release-rc-run";
 import { decideReleaseStartMode, type ReleaseStartMode } from "@/lib/release-start-mode";
 
 /**
  * リポジトリごとのリリース開始方式（#4604）。ブランチ画面・スマホ・一括の開始操作が、
- * 新方式（候補を作成して検証）か旧方式か、起動できないかを**同じ判定**で決めるための読み取り専用の取得。
+ * 新方式（候補を作成して検証）か旧方式か、起動できないかを**同じ判定**で決めるための状態照合を含む取得。
  *
  * `?repos=owner/a,owner/b`。権限の無いリポジトリ・取得に失敗したリポジトリは`unknown`にする
  * （応答全体を失敗にせず、旧方式を黙って起動させない）。**何も起動しない。**
@@ -42,6 +43,7 @@ export async function GET(request: NextRequest) {
         if (mode.mode !== "candidate") return [fullName, mode];
         // 新規開始を妨げる既存候補を起動前に返す（#4628）。確認できなければ「候補なし」とは扱わない
         try {
+          await reconcileActiveRcPublication({ owner, repo, token });
           const block = await loadRcBlock({ owner, repo, token });
           if (block) return [fullName, { mode: "blocked", label: `${block.label}: ${block.reason}`, block }];
         } catch (error) {

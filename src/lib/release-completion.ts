@@ -80,7 +80,30 @@ export type ReleaseCompletionStopReason =
   | "version_unverified"
   | "release_timed_out"
   | "deploy_recovery_busy"
-  | "deploy_recovery_failed";
+  | "deploy_recovery_failed"
+  // 公開承認（#4666）から始めた系列だけの停止理由
+  | "approval_invalidated"
+  | "approval_revoked"
+  | "approval_checks_failed"
+  | "approval_review_undecided"
+  | "finalize_failed";
+
+/**
+ * 公開承認から始めた系列で、停止しても**承認を失効させない**理由（同じ処理の再試行で再承認を増やさない。#4666）。
+ * 対象の変化（候補の更新・置換・mainの前進・取消・期限切れ）と利用者の取消は、承認ごと終える
+ */
+export const APPROVAL_RETRYABLE_STOP_REASONS: ReadonlySet<ReleaseCompletionStopReason> = new Set<ReleaseCompletionStopReason>([
+  "checks_unavailable",
+  "execution_failure",
+  "setup_missing",
+  "ci_failed",
+  "blocked_by_label",
+  "merge_failed",
+  "approval_checks_failed",
+  "approval_review_undecided",
+  "finalize_failed",
+  "cost_limit",
+]);
 
 /** 修正系列の1世代（候補に紐づく最新のもの）を、判断に要る範囲だけ写したもの */
 export type CompletionSeriesSnapshot = {
@@ -156,6 +179,11 @@ export type ReleaseCompletionState = {
   dispatchedAt: Date | null;
   costLimitUsd: number;
   costUsedUsd: number;
+  /**
+   * 公開承認（#4666）から始めた系列か。承認由来の系列は修正Issueを起動・起案せず、検証の失敗・未判断の指摘は
+   * 理由を示して止まる（公開承認は修正の実行指示ではない）。省略時はfalse
+   */
+  fromPublishApproval?: boolean;
 };
 
 /**
@@ -167,6 +195,8 @@ export type CompletionFinalizationSnapshot = {
   phase: string;
   /** 適用済みの最新の公開準備。バンプ前headからバンプ後headへの対応だけを持つ */
   applied: { preHeadSha: string; finalHeadSha: string; finalBaseSha: string } | null;
+  /** 最新の公開準備の状態と失敗理由（公開承認の系列が「公開準備が失敗した」を止める理由として出す）。無ければnull */
+  latest?: { status: string; failureReason: string | null } | null;
 };
 
 export type ReleaseCompletionObservation = {
@@ -262,9 +292,11 @@ export function decideReleaseCompletion(
 
   // 費用の上限は、新しい作業（起動・起案・マージ）を始める前に効かせる
   const overBudget = run.costUsedUsd >= run.costLimitUsd;
+  const approvalRun = run.fromPublishApproval === true;
 
   if (series && FIX_WORKING.has(series.status)) {
-    if (series.status === "issue_created" && series.startState === "none") {
+    // 公開承認の系列は修正Issueを起動しない（修正で候補が変われば承認は失効する）
+    if (series.status === "issue_created" && series.startState === "none" && !approvalRun) {
       if (run.dispatchedSeriesId !== series.id) {
         if (overBudget) return { action: "stop", reason: "cost_limit" };
         return { action: "dispatch_fix", seriesId: series.id, issueNumber: series.issueNumber };
@@ -299,6 +331,14 @@ export function decideReleaseCompletion(
   const aiProblem = problem(checks.aiReview) && !(checks.aiReview === "needs_check" && checks.aiReviewClearedByDecision === true);
   if (aiProblem || problem(checks.integration)) {
     if (problem(checks.integration) && checks.integrationSetupGap) return { action: "stop", reason: "setup_missing" };
+    if (approvalRun) {
+      // 公開承認は修正の実行指示ではない。失敗・未判断の指摘は理由を示して止め、採否は#4657の判断で解除する
+      if (!problem(checks.integration) && checks.aiReview === "needs_check" && checks.findingCount > 0) {
+        return { action: "stop", reason: "approval_review_undecided", detail: `${checks.findingCount}件` };
+      }
+      const failed = [aiProblem ? "全体レビュー" : null, problem(checks.integration) ? "統合検証" : null].filter(Boolean).join("・");
+      return { action: "stop", reason: "approval_checks_failed", detail: failed };
+    }
     if (problem(checks.integration) && !aiProblem && checks.integrationFailureKind === "execution") {
       return { action: "stop", reason: "execution_failure" };
     }
@@ -319,6 +359,14 @@ export function decideReleaseCompletion(
   // 現在のbase・headで全部合格した。**新方式の候補は、正式バンプ（公開準備）と最終検証が済むまで公開へ進めない**。
   // 公開準備を始めるのは人の操作で、この系列は代わりに押さない（起案は本番公開の実行指示ではない）
   if (observation.finalization && !isFinalizationReady(observation.finalization, candidate.headSha)) {
+    if (approvalRun) {
+      // 公開準備が失敗して修正工程へ戻った（期限切れ・workflowの失敗・最終検証の失敗）。理由を示して止める
+      const latest = observation.finalization.latest ?? null;
+      if (observation.finalization.phase === "review" && latest && (latest.status === "failed" || latest.status === "expired" || latest.status === "superseded")) {
+        return { action: "stop", reason: "finalize_failed", detail: latest.failureReason ?? undefined };
+      }
+      return { action: "wait", status: "checking", note: "公開承認済み。正式バンプと最終検証（バンプ後のCI・再検証）を待っています" };
+    }
     return { action: "wait", status: "awaiting_approval", note: "公開準備（正式バンプと最終検証）の完了を待っています" };
   }
   if (run.scope !== RELEASE_COMPLETION_SCOPE_PRODUCTION) return { action: "wait", status: "awaiting_approval" };
@@ -356,6 +404,11 @@ export type CompletionMergeObservation = {
   /** Mac検証が合格（または対象外）か */
   macOk: boolean;
   ciState: "pending" | "success" | "failure" | "unknown";
+  /**
+   * 公開承認から始めた系列のとき、その承認が今も有効（`active`かつ範囲内）か（#4666）。承認由来でない系列は省略する。
+   * 承認が失効・取消されていればマージしない
+   */
+  publishApprovalValid?: boolean;
 };
 
 /** 自動マージしないラベル（人がマージ前に見るための既存の合図） */
@@ -385,6 +438,7 @@ export function decideCompletionMerge(
   if (!run.startedByUserId || run.scope !== RELEASE_COMPLETION_SCOPE_PRODUCTION) return { action: "stop", reason: "scope_not_allowed" };
   if (observation.now.getTime() >= run.expiresAt.getTime()) return { action: "stop", reason: "timed_out" };
   if (run.costUsedUsd >= run.costLimitUsd) return { action: "stop", reason: "cost_limit" };
+  if (observation.publishApprovalValid === false) return { action: "stop", reason: "approval_invalidated" };
 
   const pull = observation.pullRequest;
   if (pull === null) return { action: "wait", reason: "pull_request_unobserved" };
@@ -453,7 +507,10 @@ export function releaseCompletionStageIndex(status: string, deployRecoveryStageI
   }
 }
 
-export function releaseCompletionStatusLabel(status: string): string {
+export function releaseCompletionStatusLabel(status: string, fromPublishApproval = false): string {
+  // 公開承認の系列のチェックは、正式バンプ後の最終検証（修正後のチェックではない）
+  if (fromPublishApproval && status === "checking") return "最終検証中";
+  if (fromPublishApproval && status === "merging") return "自動公開待ち";
   switch (status) {
     case "investigating":
       return "原因を調査中";
@@ -540,6 +597,16 @@ export function releaseCompletionStopMessage(reason: string | null, detail: stri
       return "デプロイの失敗を引き継ごうとしましたが、このリポジトリでは別の本番復旧が進行中です。";
     case "deploy_recovery_failed":
       return `デプロイの失敗から引き継いだ本番復旧が止まりました${suffix}。`;
+    case "approval_invalidated":
+      return `公開承認が失効したため、自動公開を止めました${suffix}。承認した内容から変わっています。内容を確かめて、改めて公開を承認してください。`;
+    case "approval_revoked":
+      return "自動公開を取り消しました。本番へはマージしません。";
+    case "approval_checks_failed":
+      return `最終検証で失敗・指摘が出たため、自動公開を止めました${suffix}。公開承認は修正の実行指示ではないため、修正Issueは作りません。修正するか再実行して合格したら、「自動公開を再開」で続けられます。`;
+    case "approval_review_undecided":
+      return `全体レビューに未判断の止める指摘が残っているため、自動公開を止めました${suffix}。指摘ごとに採否を判断するか修正してから、「自動公開を再開」で続けられます（公開承認は指摘の採否の判断として扱いません）。`;
+    case "finalize_failed":
+      return `公開準備（正式バンプ・最終検証）が失敗したため、自動公開を止めました${suffix}。同じ内容で公開準備をやり直すと、承認し直さずに続きます。`;
     default:
       return reason;
   }

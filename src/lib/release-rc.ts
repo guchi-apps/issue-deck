@@ -14,6 +14,7 @@
  */
 
 import type { ReleaseMergeGate } from "@/lib/release-merge-gate";
+import type { ReviewEvidenceStage } from "@/lib/release-review-reevaluation";
 
 /** 候補の状態（画面・APIに出す12種）。`phase`と検証結果から`deriveRcStatus`が決める */
 export const RC_STATUSES = [
@@ -134,6 +135,13 @@ export type RcStatusInput = {
   gate: ReleaseMergeGate | null;
   /** 修正系列（#4317）が進行中か（指摘を直している途中） */
   fixInProgress: boolean;
+  /** 全体レビューの共通の段階（#4664）。証跡待ち・確認中を「修正が必要」と取り違えないために使う。無ければ従来どおり */
+  reviewStage?: ReviewEvidenceStage | null;
+  /**
+   * 有効な公開承認（#4666）があるか。承認済みの候補は最終検証の合格後に自動で本番公開するので、
+   * 「本番承認待ち」ではなく「自動公開待ち」と出す。省略時はfalse（承認の記録が無い既存の候補）
+   */
+  publishApproved?: boolean;
 };
 
 export type RcStatusView = {
@@ -145,8 +153,8 @@ export type RcStatusView = {
   attention: string | null;
 };
 
-function view(status: RcStatus, reason: string, attention: string | null = null): RcStatusView {
-  return { status, label: RC_STATUS_LABEL[status], reason, attention };
+function view(status: RcStatus, reason: string, attention: string | null = null, label: string = RC_STATUS_LABEL[status]): RcStatusView {
+  return { status, label, reason, attention };
 }
 
 /**
@@ -160,8 +168,18 @@ export function deriveRcStatus(input: RcStatusInput): RcStatusView {
   if (phase === "completed") return view("completed", "本番へ反映し、稼働を確認しました");
   if (phase === "deploying") return view("deploying", "mainへ反映しました。本番デプロイの完了を待っています");
   if (phase === "verifying_production") return view("verifying_production", "本番の稼働版を確認しています");
-  if (phase === "awaiting_approval") return view("awaiting_approval", "公開準備が済み、本番への承認を待っています");
-  if (phase === "preparing") return view("preparing", "正式版を確定し、最終検証をしています");
+  // DBの段階よりGitHubのマージ事実を優先する。検証合格・稼働確認の代用にはしない（#4673）。
+  if (input.pullRequest?.merged) return view("deploying", "候補のPRはmainへマージ済みです。本番反映の追跡状態を照合しています");
+  if (phase === "awaiting_approval") {
+    return input.publishApproved
+      ? view("awaiting_approval", "公開承認済み。最終検証に合格したため、mainへのマージの条件を確かめて自動で本番公開します", null, "自動公開待ち")
+      : view("awaiting_approval", "公開準備が済みました。この候補には公開承認の記録が無いため、内容を確かめて1回だけ承認してください", null, "公開承認待ち");
+  }
+  if (phase === "preparing") {
+    return input.publishApproved
+      ? view("preparing", "公開承認済み。正式版を確定し、最終検証をしています（合格後は自動で本番公開します）", null, "最終検証中")
+      : view("preparing", "正式版を確定し、最終検証をしています");
+  }
 
   if (input.pending) {
     if (input.pending.reason === "initial" || input.pending.reason === "migration" || input.current === null) {
@@ -190,6 +208,21 @@ export function deriveRcStatus(input: RcStatusInput): RcStatusView {
   const gate = input.gate;
   if (gate === null) return view("awaiting_verification", "検証結果を取得できません。結果を推測しません");
   const states = gate.views.map((v) => v.state);
+  // 全体レビューのコード確認は済み、統合検証の証跡を待つ／その証跡で再評価している（#4664）。待てば進む段階で、
+  // 統合検証側に失敗・要確認が無い限り「修正が必要」にしない（レビュー側の指摘があれば段階は要確認になる）
+  const stage = input.reviewStage;
+  if (
+    stage &&
+    (stage.kind === "integration_waiting" || stage.kind === "reevaluating") &&
+    !gate.views.some((v) => v.kind === "integration" && (v.state === "failed" || v.state === "needs_check"))
+  ) {
+    return view(
+      "verifying",
+      stage.kind === "integration_waiting"
+        ? `revision ${input.current.revision}: 全体レビューのコード確認は済み、統合検証の結果を待っています`
+        : `revision ${input.current.revision}: 統合検証の結果で全体レビューの未確認項目を再評価しています`,
+    );
+  }
   if (states.some((s) => s === "failed") || gate.blockers.some((b) => b.state === "needs_check")) {
     return input.fixInProgress
       ? view("fixing", "指摘・失敗を直しています。修正を取り込むと新しいrevisionで検証し直します")

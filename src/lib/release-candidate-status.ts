@@ -1,4 +1,9 @@
 import { isReleasePullRequest } from "@/lib/release-merge-gate";
+import {
+  describeReviewStageLabel,
+  REVIEW_OPEN_ITEM_LABEL,
+  type ReviewEvidenceStage,
+} from "@/lib/release-review-reevaluation";
 import type { ReleaseVerificationSummary } from "@/lib/release-verification-summary";
 import type { PullRequestReleaseCheckState, PullRequestReleaseChecks } from "@/types/pull-request";
 
@@ -31,6 +36,11 @@ export type ReleaseCandidatePendingCheck = {
   name: string;
   /** 実行側が動き出しているか。falseは順番待ち */
   started: boolean;
+  /**
+   * 「◯◯中／開始待ち」の代わりに出す段階の名前（#4664）。全体レビューが「コード確認済み・統合検証待ち」
+   * 「検証結果を確認中」のときに入る。無ければ従来どおり
+   */
+  stageLabel?: string;
 };
 
 export type ReleaseCandidateVerification = {
@@ -105,7 +115,13 @@ export function resolveReleaseCandidateVerification(
 
   const pending: ReleaseCandidatePendingCheck[] = [];
   const problems: { kind: ReleaseCandidateProblemKind; reason: string }[] = [];
+  const stage = checks.aiReviewStage;
   for (const section of sections) {
+    // 全体レビューの共通の段階（#4664）。証跡を待つ・確認中のレビューは「要確認」でなく待てば進むものとして出す
+    if (!section.integration && stage && (stage.kind === "integration_waiting" || stage.kind === "reevaluating")) {
+      pending.push({ name: section.name, started: stage.kind === "reevaluating", stageLabel: describeReviewStageLabel(stage) });
+      continue;
+    }
     switch (section.state) {
       case "running":
         pending.push({ name: section.name, started: section.started });
@@ -118,7 +134,10 @@ export function resolveReleaseCandidateVerification(
         }
         break;
       case "needs_check":
-        problems.push({ kind: "needs_check", reason: `${section.name}に要確認の結果があります` });
+        problems.push({
+          kind: "needs_check",
+          reason: !section.integration && stage ? describeStageProblem(stage) : `${section.name}に要確認の結果があります`,
+        });
         break;
       case "invalidated":
         problems.push({
@@ -151,9 +170,19 @@ export function resolveReleaseCandidateVerification(
 
   const detail = [
     ...(problem?.reasons ?? []),
-    ...pending.map((check) => `${check.name}の${check.started ? "実行中" : "開始待ち"}です`),
+    ...pending.map((check) =>
+      check.stageLabel ? `${check.name}: ${check.stageLabel}` : `${check.name}の${check.started ? "実行中" : "開始待ち"}です`,
+    ),
   ].join("。");
   return { progress, problem, detail };
+}
+
+/** 要確認の全体レビューの理由。自動再評価済みかと残件の種類を出す（運用作業待ち・実行結果待ち・未読を区別する） */
+function describeStageProblem(stage: ReviewEvidenceStage): string {
+  if (stage.kind !== "needs_check") return "全体レビューに要確認の結果があります";
+  const items = stage.items.map((item) => REVIEW_OPEN_ITEM_LABEL[item]);
+  const head = stage.autoReevaluated ? "全体レビュー: 自動再評価済み・対応／判断が必要" : "全体レビューに要確認の結果があります";
+  return items.length > 0 ? `${head}（${items.join("・")}）` : head;
 }
 
 /** 「mainへマージ待ち」を出してよいか（検証の面で）。進行中・問題のどちらも無いとき */
@@ -168,7 +197,7 @@ export function isReleaseCandidateClear(verification: ReleaseCandidateVerificati
 export function describeReleaseVerificationWait(verification: ReleaseCandidateVerification): string | null {
   if (!verification.progress) return null;
   return `${verification.progress.checks
-    .map((check) => `${check.name}（${check.started ? "実行中" : "開始待ち"}）`)
+    .map((check) => `${check.name}（${check.stageLabel ?? (check.started ? "実行中" : "開始待ち")}）`)
     .join("・")}の判定が出るまでマージできません`;
 }
 
@@ -233,5 +262,6 @@ export function releaseChecksFromSummary(
       mac: summary.mac.state === "running",
     },
     integrationSetupGap,
+    aiReviewStage: summary.aiReview.stage,
   };
 }

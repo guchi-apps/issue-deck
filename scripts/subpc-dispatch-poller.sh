@@ -1193,6 +1193,8 @@ CHECKOUT_FETCH_TIMEOUT_SECONDS=60
 # **毎巡取り直さない。** 取り直すと必ずHEADと一致し、「走っているのは古い版」という事実が消える。
 # `SELF_UPDATE`は`exec`で新しいスクリプトへ入れ替わる（#1927）ので、そこを通れば取り直される。
 POLLER_STARTED_COMMIT="$(git -C "$CHECKOUT_DIR" rev-parse --short HEAD 2>/dev/null || true)"
+# 子プロセス（全体レビューのランナー）が「いま走っているpollerの版」をプロンプトへ渡せるように公開する（#4665）
+export POLLER_STARTED_COMMIT
 
 # 最後にoriginを見た時刻（epoch秒）。**`.git/FETCH_HEAD`のmtimeで見る。**
 # gitがfetch・pullのたびに書き直すファイルなので、pollerが打ったfetchも人が手で打ったpullも

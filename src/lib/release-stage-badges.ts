@@ -86,9 +86,12 @@ export function resolveReleaseStageBadges({
       const base = review ? "全体レビュー" : "統合検証";
       push({
         key: review ? "ai-review" : "integration",
-        label: check.started ? `${base}中` : `${base}開始待ち`,
+        // 段階（#4664）があればそれを出す。完了した統合検証を待つレビューを「全体レビュー中」と言わない
+        label: check.stageLabel ?? (check.started ? `${base}中` : `${base}開始待ち`),
         running: check.started,
-        title: `${check.name}の${check.started ? "実行中" : "開始待ち"}です`,
+        title: check.stageLabel
+          ? `${check.name}: ${check.stageLabel}`
+          : `${check.name}の${check.started ? "実行中" : "開始待ち"}です`,
       });
     }
     const ios = candidatePullRequest.iosPrecheck?.head;

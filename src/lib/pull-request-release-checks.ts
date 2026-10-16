@@ -1,6 +1,8 @@
 import { db } from "@/lib/db";
 import { describeIntegrationSetupGap, getReleaseVerificationConfig } from "@/lib/release-verification-config";
 import { parseReleaseProgress } from "@/lib/release-verification-progress";
+import type { ReviewEvidenceStage } from "@/lib/release-review-reevaluation";
+import { summarizeReleaseVerification } from "@/lib/release-verification-summary";
 import {
   isReleasePullRequest,
   parseReleaseVerificationKind,
@@ -50,6 +52,15 @@ type Target = {
 /** リリースPRのキー。`<repo>#<number>` */
 export function releaseChecksKey(repositoryFullName: string, number: number): string {
   return `${repositoryFullName}#${number}`;
+}
+
+function stageOrUndefined(compute: () => ReviewEvidenceStage | undefined): ReviewEvidenceStage | undefined {
+  try {
+    return compute();
+  } catch (error) {
+    console.error("[fetchReleaseChecks] 全体レビューの段階を出せませんでした:", error);
+    return undefined;
+  }
 }
 
 const UNAVAILABLE: PullRequestReleaseChecks = {
@@ -118,8 +129,23 @@ export async function fetchReleaseChecks(
         records.some(
           (r) => r.kind === kind && r.state === "running" && r.baseSha === current.baseSha && r.headSha === current.headSha,
         );
+      // 全体レビューの段階（#4664）。リリース画面の要約と同じ関数で出し、一覧と詳細で食い違わせない。
+      // 補助の情報なので、出せなくても検証の状態そのもの（取得不能にはしない）は返す
+      const aiReviewStage = stageOrUndefined(() => {
+        const detailRows = rows.flatMap((row) => {
+          const kind = parseReleaseVerificationKind(row.kind);
+          const state = parseReleaseVerificationState(row.state);
+          if (!kind || !state || row.repoFullName !== target.repositoryFullName || row.prNumber !== target.number) {
+            return [];
+          }
+          return [{ ...row, kind, state }];
+        });
+        return summarizeReleaseVerification({ current, rows: detailRows, enforced: true, aiReviewAssignee: "" }).aiReview
+          .stage;
+      });
       result.set(releaseChecksKey(target.repositoryFullName, target.number), {
         ...summarizeReleaseChecks(current, records),
+        aiReviewStage,
         enforced: getReleaseVerificationConfig(target.repositoryFullName).enforced,
         started: {
           aiReview: jobs.some((job) => job.kind === "RELEASE_REVIEW") || recordedRunning("ai_review"),

@@ -314,6 +314,7 @@ export function toOverviewChecks(verification: ReleaseVerificationSummary | null
       reviewedFiles: verification.aiReview.reviewedFiles,
       totalFiles: verification.aiReview.totalFiles,
       updatedAt: verification.aiReview.updatedAt,
+      stage: verification.aiReview.stage,
     },
     integration: { state: verification.integration.state, reason: verification.integration.reason, updatedAt: verification.integration.updatedAt },
     mac:

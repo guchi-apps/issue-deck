@@ -3,8 +3,10 @@
 import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
+import { formatDateTime, formatMonthDayTime } from "@/lib/format-date-time";
 import { FINALIZE_STATUS_LABEL, FINALIZE_START_ERROR_LABEL, REVERIFY_PHASE_LABEL, type ReverifyPhase } from "@/lib/release-finalize";
 import type { RcFinalizationOverview, RcFinalizationView } from "@/lib/release-finalize-run";
+import type { PublishApprovalView } from "@/lib/release-publish-approval-run";
 import type { RcCandidateView } from "@/lib/release-rc-run";
 import { cn } from "@/lib/utils";
 import { BUMP_KIND_CRITERIA, nextVersion, type BumpKind } from "@/lib/semver-bump";
@@ -16,6 +18,8 @@ import { BUMP_KIND_CRITERIA, nextVersion, type BumpKind } from "@/lib/semver-bum
  * - バンプ前の検証結果は書き換えない。引継ぎは元の結果のhead・差分のファイル・理由を並べ、
  *   バンプ後のheadで実行した結果とは区別する
  * - Web本番とTestFlight配布は別の行にし、build番号と正式版を混ぜない
+ * - **公開準備の開始が唯一の公開承認（#4666）。** 確認画面で「合格後は自動で本番公開する」ことと承認の範囲を示し、
+ *   最終検証の後に二度目の「本番承認」を出さない。承認の記録が無い既存の候補だけ、1回だけ承認を求める
  */
 
 const CHIP = "inline-flex items-center whitespace-nowrap rounded-full px-2 py-px text-[11px] font-semibold";
@@ -40,7 +44,26 @@ const FINALIZE_ERROR: Record<string, string> = {
   invalid_bump_kind: "上げ幅の指定が正しくありません",
   version_conflict: "版を予約できませんでした",
   dispatch_failed: "リリースworkflowを起動できませんでした",
+  approval_required: "画面が古いため受け付けませんでした。再読み込みしてからやり直してください",
+  run_active: "このリポジトリでは別の完了系列が進行中です",
+  already_publishing: "本番マージの処理に入っているため、取り消せません",
+  approval_invalid: "公開承認が失効しています。内容を確かめて、改めて承認してください",
+  pull_request_unobserved: "候補のPR・mainの状態を取得できませんでした",
 };
+
+const APPROVAL_TONE: Record<string, Tone> = {
+  needs_approval: "warn",
+  final_checks: "run",
+  auto_publish: "run",
+  stopped: "bad",
+  deploying: "run",
+  verifying_production: "run",
+  completed: "ok",
+  invalidated: "bad",
+  revoked: "mute",
+};
+
+const BUMP_POLICY_LABEL: Record<string, string> = { auto: "最終公開差分から自動判定", patch: "patch", minor: "minor", major: "major" };
 
 const CI_DETAIL: Record<string, string> = {
   none: "バンプ後のheadで実行します（未実施・失敗では公開できません）",
@@ -71,8 +94,14 @@ function reverifyStep(input: { afterBump: boolean; bumped: boolean; current: RcF
 type Step = { label: string; detail: string; tone: Tone; badge: string };
 
 /** 公開までの流れ。段階（候補の`phase`）と公開準備・最終検証の観測から、各工程の状態を導く */
-export function buildFinalizeSteps(input: { phase: string; current: RcFinalizationView | null; checks: RcFinalizationOverview["checks"] }): Step[] {
+export function buildFinalizeSteps(input: {
+  phase: string;
+  current: RcFinalizationView | null;
+  checks: RcFinalizationOverview["checks"];
+  approval?: PublishApprovalView | null;
+}): Step[] {
   const { phase, current, checks } = input;
+  const approval = input.approval ?? null;
   const bumped = current?.status === "applied";
   const afterBump = ["awaiting_approval", "deploying", "verifying_production", "completed"].includes(phase);
   const released = ["deploying", "verifying_production", "completed"].includes(phase);
@@ -92,14 +121,33 @@ export function buildFinalizeSteps(input: { phase: string; current: RcFinalizati
       badge: afterBump || ci === "success" ? "成功" : ci === "failure" ? "失敗" : bumped ? "実行中" : "待機",
     },
     reverifyStep({ afterBump, bumped, current, checks }),
-    { label: "本番承認", detail: "mainへのマージは既存の承認・保護を通ります", tone: phase === "awaiting_approval" ? "warn" : released ? "ok" : "mute", badge: phase === "awaiting_approval" ? "承認待ち" : released ? "済" : "待機" },
+    approvalStep({ phase, approval, released }),
     {
       label: "mainマージ・タグ・本番反映",
-      detail: "デプロイ成功と稼働中の版・SHAの一致を確かめるまで完了にしません",
+      detail: approval && (approval.status === "active" || approval.status === "merging" || approval.status === "consumed")
+        ? "最終検証の合格後、mainの保護・必須チェックを通して自動でマージします。デプロイ成功と稼働中の版・SHAの一致を確かめるまで完了にしません"
+        : "デプロイ成功と稼働中の版・SHAの一致を確かめるまで完了にしません",
       tone: phase === "completed" ? "ok" : released ? "run" : "mute",
       badge: phase === "completed" ? "完了" : phase === "verifying_production" ? "稼働確認中" : phase === "deploying" ? "反映中" : "待機",
     },
   ];
+}
+
+/** 「公開承認」の工程。承認は公開準備の開始の1回だけで、最終検証の後に二度目の承認を求めない */
+function approvalStep(input: { phase: string; approval: PublishApprovalView | null; released: boolean }): Step {
+  const { phase, approval, released } = input;
+  const label = "公開承認";
+  if (approval === null) {
+    if (released) return { label, detail: "承認の記録が無い候補として公開されました", tone: "mute", badge: "記録なし" };
+    if (phase === "preparing" || phase === "awaiting_approval") {
+      return { label, detail: "この候補には公開承認の記録がありません。内容を確かめて1回だけ承認してください", tone: "warn", badge: "承認が必要" };
+    }
+    return { label, detail: "「本番公開へ進む（公開承認）」を押した1回が承認です。最終検証の後に承認し直す必要はありません", tone: "mute", badge: "待機" };
+  }
+  const when = formatMonthDayTime(approval.approvedAt);
+  if (approval.status === "invalidated") return { label, detail: approval.invalidMessage ?? "公開承認が失効しました", tone: "bad", badge: "失効" };
+  if (approval.status === "revoked") return { label, detail: "自動公開を取り消しました", tone: "mute", badge: "取り消し" };
+  return { label, detail: `${when}に承認（revision ${approval.revision} · ${short(approval.headSha)}）。想定した正式バンプの変更までが範囲です`, tone: "ok", badge: "承認済み" };
 }
 
 function StateChip({ tone, children }: { tone: Tone; children: React.ReactNode }) {
@@ -207,6 +255,106 @@ function stateToPhase(state: string): ReverifyPhase {
   return state === "running" || state === "waiting" || state === "failed" || state === "needs_check" || state === "not_run" || state === "invalidated" ? state : "done";
 }
 
+/** 公開承認の確認内容。**承認する前に、自動で本番公開することと承認の範囲を全部見せる** */
+function ApprovalConfirm({
+  repositoryFullName,
+  candidate,
+  target,
+  bumpPolicy,
+  reusing,
+}: {
+  repositoryFullName: string;
+  candidate: RcCandidateView;
+  target: { revision: number; baseSha: string; headSha: string };
+  bumpPolicy: string;
+  reusing: boolean;
+}) {
+  return (
+    <div className="flex flex-col gap-1.5 rounded-md border border-primary/50 bg-primary/5 p-2.5 text-[12px]" data-testid="release-rc-approval-confirm">
+      <p className="font-semibold">
+        {reusing
+          ? "公開承認済みの内容で、公開準備をやり直します（承認し直しは不要です）"
+          : "これは本番公開の承認です。正式バンプと必要な最終検証を行い、合格したら自動で本番公開します"}
+      </p>
+      <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5">
+        <dt className="text-muted-foreground">対象</dt>
+        <dd className="min-w-0 break-words">{repositoryFullName}</dd>
+        <dt className="text-muted-foreground">候補</dt>
+        <dd className="min-w-0 break-words">
+          {candidate.label} · revision {target.revision} · main {short(target.baseSha)} ← {short(target.headSha)}
+        </dd>
+        <dt className="text-muted-foreground">公開内容</dt>
+        <dd className="min-w-0 break-words">
+          {candidate.frozenPrs.length > 0 ? candidate.frozenPrs.map((p) => `#${p.number} ${p.title}`).join("、") : "（候補に固定した内容）"}
+        </dd>
+        <dt className="text-muted-foreground">版の指定</dt>
+        <dd>{BUMP_POLICY_LABEL[bumpPolicy] ?? bumpPolicy}</dd>
+        <dt className="text-muted-foreground">承認の範囲</dt>
+        <dd className="min-w-0 break-words">
+          この候補と、正式バンプで版ファイル・更新履歴だけが変わることまで。それ以外のコード変更・候補の置換・mainの前進・取消があれば承認は失効し、もう一度確認します
+        </dd>
+        <dt className="text-muted-foreground">合格後</dt>
+        <dd className="min-w-0 break-words">mainへのマージ・タグ・デプロイ・稼働中の版の確認まで自動で進めます。画面を開いておく必要はありません。公開の直前までは取り消せます</dd>
+      </dl>
+    </div>
+  );
+}
+
+/** 公開承認と自動公開の状況。承認者・日時・対象・失効の理由と差分・止まった理由を出す */
+function ApprovalBox({
+  approval,
+  busy,
+  canResume,
+  onRevoke,
+  onResume,
+}: {
+  approval: PublishApprovalView;
+  busy: boolean;
+  canResume: boolean;
+  onRevoke: () => void;
+  onResume: () => void;
+}) {
+  const reason = approval.run && !approval.run.active ? approval.run.stopMessage : null;
+  const note = approval.run?.active ? approval.run.note : null;
+  return (
+    <div className="flex flex-col gap-1.5 rounded-lg border p-3 text-[12px]" data-testid="release-rc-approval">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="font-semibold">公開承認</span>
+        <StateChip tone={APPROVAL_TONE[approval.progress] ?? "mute"}>{approval.progressLabel}</StateChip>
+      </div>
+      <p className="break-words text-muted-foreground">
+        {formatDateTime(approval.approvedAt)}に承認 · revision {approval.revision} · main {short(approval.baseSha)} ← {short(approval.headSha)} · 版の指定:{" "}
+        {BUMP_POLICY_LABEL[approval.bumpPolicy] ?? approval.bumpPolicy} · 有効期限 {formatDateTime(approval.expiresAt)}
+      </p>
+      {note && <p className="break-words">{note}</p>}
+      {approval.status === "invalidated" && (
+        <p className="break-words text-destructive" role="alert">
+          {approval.invalidMessage}
+          {approval.invalidDiff.length > 0 && <> 変わったファイル: {approval.invalidDiff.join("、")}</>}。古い承認では公開しません。内容を確かめて、改めて承認してください。
+        </p>
+      )}
+      {reason && approval.status === "active" && (
+        <p className="break-words text-destructive" role="alert" data-testid="release-rc-approval-stop">
+          {reason}
+        </p>
+      )}
+      {approval.status === "active" && (
+        <div className="flex flex-wrap gap-2">
+          {canResume && (
+            <Button size="sm" onClick={onResume} disabled={busy}>
+              自動公開を再開
+            </Button>
+          )}
+          <Button size="sm" variant="outline" onClick={onRevoke} disabled={busy}>
+            自動公開を取り消す
+          </Button>
+        </div>
+      )}
+      {approval.status === "merging" && <p className="text-muted-foreground">本番マージの処理に入ったため、取り消せません。</p>}
+    </div>
+  );
+}
+
 export function ReleaseRcFinalizePanel({
   candidate,
   finalization,
@@ -225,15 +373,20 @@ export function ReleaseRcFinalizePanel({
   const [message, setMessage] = useState<string | null>(null);
 
   const current = finalization.current;
+  const approval = finalization.approval ?? null;
+  const approvalLive = approval !== null && (approval.status === "active" || approval.status === "merging");
   const contract = candidate.finalizeContract;
   const canStart = contract !== null && candidate.phase === "review" && finalization.caller.supported;
+  // 承認の記録が無い既存の公開準備済み候補（推定で承認扱いしない）
+  const needsLegacyApproval =
+    !approvalLive && ["preparing", "awaiting_approval"].includes(candidate.phase) && current?.status === "applied" && current.finalHeadSha !== null;
+  const canResume = approval?.status === "active" && ["preparing", "awaiting_approval"].includes(candidate.phase) && approval.run?.active !== true;
   // 公開準備に関係する段階・記録が無い候補は、パネルを出さない
   if (!canStart && !current && !["preparing", "awaiting_approval", "deploying", "verifying_production", "completed"].includes(candidate.phase)) {
     return null;
   }
 
-  const start = async () => {
-    if (!contract) return;
+  const post = async (body: Record<string, unknown>, failure: string): Promise<boolean> => {
     setBusy(true);
     setMessage(null);
     const [owner, repo] = repositoryFullName.split("/");
@@ -241,26 +394,46 @@ export function ReleaseRcFinalizePanel({
       const res = await fetch("/api/repositories/release/finalize", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ owner, repo, action: "start", candidateId: candidate.id, expectedHeadSha: contract.headSha, bumpKind, requestKey }),
+        body: JSON.stringify({ owner, repo, candidateId: candidate.id, ...body }),
       });
-      const body: { ok?: boolean; error?: string; message?: string } = await res.json().catch(() => ({}));
-      if (!res.ok || !body.ok) {
-        setMessage(body.message ?? FINALIZE_ERROR[body.error ?? ""] ?? `公開準備を始められませんでした (${res.status})`);
+      const result: { ok?: boolean; error?: string; message?: string } = await res.json().catch(() => ({}));
+      if (!res.ok || !result.ok) {
+        setMessage(result.message ?? FINALIZE_ERROR[result.error ?? ""] ?? `${failure} (${res.status})`);
         // 状態が変わった・拒否された要求は同じキーで送り直さない
         setRequestKey(newRequestKey());
-      } else {
-        setConfirming(false);
-        onChanged();
+        return false;
       }
+      setConfirming(false);
+      onChanged();
+      return true;
     } catch {
       setMessage("通信に失敗しました。もう一度押すと同じ要求として送り直します");
+      return false;
     } finally {
       setBusy(false);
     }
   };
 
-  const steps = buildFinalizeSteps({ phase: candidate.phase, current, checks: finalization.checks });
+  const start = async () => {
+    if (!contract) return;
+    await post({ action: "start", expectedHeadSha: contract.headSha, bumpKind, requestKey, approvePublish: true }, "公開準備を始められませんでした");
+  };
+  const approveLegacy = async () => {
+    if (!current?.finalHeadSha) return;
+    await post({ action: "approve", expectedHeadSha: current.finalHeadSha, requestKey }, "公開を承認できませんでした");
+  };
+  const resume = async () => {
+    if (!current?.finalHeadSha && !approval) return;
+    await post({ action: "approve", expectedHeadSha: current?.finalHeadSha ?? approval!.headSha, requestKey }, "自動公開を再開できませんでした");
+  };
+  const revoke = async () => {
+    if (!window.confirm("自動公開を取り消しますか？本番へはマージしません。続けるには、改めて公開を承認します。")) return;
+    await post({ action: "revoke" }, "自動公開を取り消せませんでした");
+  };
+
+  const steps = buildFinalizeSteps({ phase: candidate.phase, current, checks: finalization.checks, approval });
   const plannedKind = bumpKind === "auto" ? null : bumpKind;
+  const reusing = approval?.status === "active";
   return (
     <section aria-label="公開準備" className="flex flex-col gap-3 rounded-[10px] border bg-card p-3.5 pb-20 sm:pb-3.5" data-testid="release-rc-finalize">
       <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
@@ -270,6 +443,8 @@ export function ReleaseRcFinalizePanel({
       </div>
 
       <VersionBox finalization={current && current.status !== "superseded" ? current : null} plannedKind={plannedKind} mainVersion={finalization.mainVersion} />
+
+      {approval && <ApprovalBox approval={approval} busy={busy} canResume={canResume} onRevoke={revoke} onResume={resume} />}
 
       {current && current.status === "failed" && current.failureReason && (
         <p className="rounded-md border border-destructive/50 bg-destructive/10 px-3 py-2 text-[12px] text-destructive" role="alert">
@@ -288,8 +463,8 @@ export function ReleaseRcFinalizePanel({
       {canStart && (
         <div className="flex flex-col gap-2 rounded-lg border p-3">
           <p className="text-[12px]">
-            revision {contract!.revision} が全体レビュー・統合検証に合格しています。公開準備を始めると、版ファイルと更新履歴だけを変更するコミットを候補へ積みます。
-            これは本番公開の実行ではなく、mainへのマージは既存の承認を通ります。
+            revision {contract!.revision} が全体レビュー・統合検証に合格しています。「本番公開へ進む（公開承認）」を押すと、版ファイルと更新履歴だけを変更するコミットを候補へ積み、
+            最終検証に合格したら自動で本番公開します。最終検証の後に承認し直す必要はありません。
           </p>
           <label className="flex flex-wrap items-center gap-2 text-[12px]" htmlFor="finalize-bump-kind">
             <span className="font-semibold">上げ幅</span>
@@ -308,18 +483,55 @@ export function ReleaseRcFinalizePanel({
             {bumpKind !== "auto" && <span className="text-muted-foreground">{BUMP_KIND_CRITERIA[bumpKind]}</span>}
           </label>
           {confirming ? (
-            <div className="flex flex-wrap gap-2">
-              <Button size="sm" onClick={start} disabled={busy}>
-                {busy ? "公開準備を始めています…" : "公開準備を始める"}
-              </Button>
-              <Button size="sm" variant="outline" onClick={() => setConfirming(false)} disabled={busy}>
-                やめる
-              </Button>
-            </div>
+            <>
+              <ApprovalConfirm repositoryFullName={repositoryFullName} candidate={candidate} target={contract!} bumpPolicy={bumpKind} reusing={reusing} />
+              <div className="flex flex-wrap gap-2">
+                <Button size="sm" onClick={start} disabled={busy}>
+                  {busy ? "公開準備を始めています…" : reusing ? "公開準備をやり直す" : "公開を承認して進める"}
+                </Button>
+                <Button size="sm" variant="outline" onClick={() => setConfirming(false)} disabled={busy}>
+                  やめる
+                </Button>
+              </div>
+            </>
           ) : (
             <div>
               <Button size="sm" onClick={() => setConfirming(true)}>
-                公開準備へ進む
+                {reusing ? "公開準備をやり直す（承認済み）" : "本番公開へ進む（公開承認）"}
+              </Button>
+            </div>
+          )}
+        </div>
+      )}
+      {needsLegacyApproval && current && (
+        <div className="flex flex-col gap-2 rounded-lg border border-amber-500/60 p-3" data-testid="release-rc-legacy-approval">
+          <p className="text-[12px]">
+            {approval
+              ? "前の公開承認は使えません（失効・取り消し）。現在の内容を確かめて承認し直すと、最終検証の合格後に自動で本番公開します。"
+              : "この候補は公開準備が済んでいますが、公開承認の記録がありません（以前の画面で公開準備を始めた候補です）。内容を確かめて1回だけ承認すると、最終検証の合格後に自動で本番公開します。"}
+          </p>
+          {confirming ? (
+            <>
+              <ApprovalConfirm
+                repositoryFullName={repositoryFullName}
+                candidate={candidate}
+                target={{ revision: candidate.currentRevision, baseSha: current.finalBaseSha ?? "", headSha: current.finalHeadSha ?? "" }}
+                bumpPolicy={current.bumpKind ?? "auto"}
+                reusing={false}
+              />
+              <div className="flex flex-wrap gap-2">
+                <Button size="sm" onClick={approveLegacy} disabled={busy}>
+                  {busy ? "承認しています…" : "公開を承認する"}
+                </Button>
+                <Button size="sm" variant="outline" onClick={() => setConfirming(false)} disabled={busy}>
+                  やめる
+                </Button>
+              </div>
+            </>
+          ) : (
+            <div>
+              <Button size="sm" onClick={() => setConfirming(true)}>
+                公開の承認内容を確認する
               </Button>
             </div>
           )}

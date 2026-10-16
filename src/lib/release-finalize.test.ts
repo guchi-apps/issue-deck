@@ -352,6 +352,16 @@ describe("バンプ後の再検証の状態分類（#4640）", () => {
     expect(decideReverifyPhase(items)).toBe("needs_check");
     expect(items[1].reason).toContain("未確認範囲");
   });
+  it("バンプ後も、全体レビューが統合検証の証跡で再評価中なら再検証中にする（#4664 674140c 5:38→5:39）", () => {
+    const views = [view("integration", "passed"), view("ai_review", "needs_check", "未確認範囲があります: running")];
+    const items = describeReverifyItems(views, { kind: "reevaluating" });
+    expect(decideReverifyPhase(items)).toBe("running");
+    expect(items[1].reason).toBe("全体レビュー: 検証結果を確認中");
+    // 自動再評価後も実装指摘が残る場合は、繰り返さず残件を出して要確認で終わる
+    const left = describeReverifyItems(views, { kind: "needs_check", autoReevaluated: true, items: ["findings"] });
+    expect(decideReverifyPhase(left)).toBe("needs_check");
+    expect(left[1].reason).toBe("全体レビュー: 自動再評価済み・対応／判断が必要（対応・判断が必要な指摘）");
+  });
   it("実行中・待機があるときだけ再検証中・実行待ちになる", () => {
     expect(decideReverifyPhase(describeReverifyItems([view("integration", "running"), view("ai_review", "passed")]))).toBe("running");
     expect(decideReverifyPhase(describeReverifyItems([view("integration", "waiting"), view("ai_review", "passed")]))).toBe("waiting");
