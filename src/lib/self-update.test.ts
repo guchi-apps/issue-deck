@@ -1,5 +1,5 @@
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -85,6 +85,77 @@ describe("self_update_prepare_worktree", () => {
     git(upstream, "push", "-q", "origin", "develop");
   }
 
+  it("反映済み修正と未追跡バックアップが共存しても、バックアップを残して更新できる", () => {
+    pushUpstream("ports.conf", "new\n");
+    writeFileSync(path.join(clone, "ports.conf"), "new\n");
+    writeFileSync(path.join(clone, "ports.conf.backup-123"), "backup\n");
+    expect(prepare(clone).status).toBe(0);
+    git(clone, "pull", "-q", "--ff-only");
+    expect(readFileSync(path.join(clone, "ports.conf"), "utf-8")).toBe("new\n");
+    expect(readFileSync(path.join(clone, "ports.conf.backup-123"), "utf-8")).toBe("backup\n");
+  });
+
+  it("バックアップがあっても未反映の独自変更は退避・削除しない", () => {
+    pushUpstream("ports.conf", "upstream\n");
+    writeFileSync(path.join(clone, "ports.conf"), "local\n");
+    writeFileSync(path.join(clone, "ports.conf.backup-123"), "backup\n");
+    expect(prepare(clone).status).toBe(1);
+    expect(readFileSync(path.join(clone, "ports.conf"), "utf-8")).toBe("local\n");
+    expect(readFileSync(path.join(clone, "ports.conf.backup-123"), "utf-8")).toBe("backup\n");
+  });
+
+  it("作業ツリーが取り込み先と同じでもindexだけの独自変更を失わない", () => {
+    pushUpstream("ports.conf", "upstream\n");
+    writeFileSync(path.join(clone, "ports.conf"), "staged\n");
+    git(clone, "add", "ports.conf");
+    writeFileSync(path.join(clone, "ports.conf"), "upstream\n");
+    expect(prepare(clone).status).toBe(1);
+    expect(git(clone, "show", ":ports.conf")).toBe("staged\n");
+    expect(readFileSync(path.join(clone, "ports.conf"), "utf-8")).toBe("upstream\n");
+  });
+
+  it("ステージ済みの反映済み変更もバックアップを残して更新できる", () => {
+    pushUpstream("ports.conf", "new\n");
+    writeFileSync(path.join(clone, "ports.conf"), "new\n");
+    git(clone, "add", "ports.conf");
+    writeFileSync(path.join(clone, "backup"), "keep\n");
+    expect(prepare(clone).status).toBe(0);
+    git(clone, "pull", "-q", "--ff-only");
+    expect(readFileSync(path.join(clone, "backup"), "utf-8")).toBe("keep\n");
+  });
+
+  it("日本語・空白・改行・pathspec文字を含むファイル名をそのまま比較する", () => {
+    const file = "日本語 [test]\nfile.txt";
+    pushUpstream(file, "base\n");
+    git(clone, "pull", "-q", "--ff-only");
+    pushUpstream(file, "new\n");
+    writeFileSync(path.join(clone, file), "new\n");
+    writeFileSync(path.join(clone, "backup"), "keep\n");
+    expect(prepare(clone).status).toBe(0);
+    git(clone, "pull", "-q", "--ff-only");
+    expect(readFileSync(path.join(clone, file), "utf-8")).toBe("new\n");
+  });
+
+  it("未追跡ディレクトリと取り込み先ファイルの衝突時は、反映済み変更にも触れない", () => {
+    pushUpstream("ports.conf", "new\n");
+    pushUpstream("memo", "incoming\n");
+    writeFileSync(path.join(clone, "ports.conf"), "new\n");
+    mkdirSync(path.join(clone, "memo"));
+    writeFileSync(path.join(clone, "memo", "keep"), "keep\n");
+    expect(prepare(clone).status).toBe(1);
+    expect(readFileSync(path.join(clone, "ports.conf"), "utf-8")).toBe("new\n");
+    expect(readFileSync(path.join(clone, "memo", "keep"), "utf-8")).toBe("keep\n");
+  });
+
+  it("ff不可の場合は反映済み変更でも手元を変更しない", () => {
+    writeFileSync(path.join(clone, "other.txt"), "local commit\n");
+    git(clone, "commit", "-q", "-am", "local");
+    pushUpstream("ports.conf", "new\n");
+    writeFileSync(path.join(clone, "ports.conf"), "new\n");
+    expect(prepare(clone).status).toBe(1);
+    expect(readFileSync(path.join(clone, "ports.conf"), "utf-8")).toBe("new\n");
+  });
+
   it("取り込みと重ならない変更は残したまま続ける（#4297）", () => {
     pushUpstream("other.txt", "new\n");
     writeFileSync(path.join(clone, "ports.conf"), "guchi-apps/kurashio 13000\n");
@@ -139,3 +210,4 @@ describe("self_update_prepare_worktree", () => {
     );
   });
 });
+
