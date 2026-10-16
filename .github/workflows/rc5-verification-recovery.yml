@@ -1,0 +1,34 @@
+name: RC-5 verification recovery
+on:
+  push:
+    branches: [issue-4695]
+    paths: [.github/workflows/rc5-verification-recovery.yml]
+permissions:
+  contents: read
+  pull-requests: read
+concurrency:
+  group: rc5-verification-recovery
+  cancel-in-progress: false
+jobs:
+  request:
+    if: github.repository == 'guchi-apps/issue-deck'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Request actual verification for the current candidate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          APP_BASE_URL: ${{ vars.APP_BASE_URL }}
+          PROGRESS_REPORT_SECRET: ${{ secrets.PROGRESS_REPORT_SECRET }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$PROGRESS_REPORT_SECRET"
+          test "$APP_BASE_URL" = "https://issuedeck.gucchii.com"
+          pr="$(gh api repos/guchi-apps/issue-deck/pulls/4692)"
+          printf '%s' "$pr" | jq -e '.state == "open" and .base.ref == "main" and .head.ref == "release-rc/5" and .head.sha == "e338671355f03a26cfacb69dc024879f9a52cb30"' >/dev/null
+          body="$(printf '%s' "$pr" | jq -c '{action:"request",repository:"guchi-apps/issue-deck",pullRequest:.number,baseSha:.base.sha,headSha:.head.sha}')"
+          curl --fail-with-body --silent --show-error --max-time 30 \
+            -X POST "$APP_BASE_URL/api/dispatch/release-verify" \
+            -H "Authorization: Bearer $PROGRESS_REPORT_SECRET" \
+            -H "Content-Type: application/json" --data "$body" \
+            | jq '{ok,created,integration,aiReview}'
