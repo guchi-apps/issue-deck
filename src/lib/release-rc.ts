@@ -168,6 +168,8 @@ export function deriveRcStatus(input: RcStatusInput): RcStatusView {
   if (phase === "completed") return view("completed", "本番へ反映し、稼働を確認しました");
   if (phase === "deploying") return view("deploying", "mainへ反映しました。本番デプロイの完了を待っています");
   if (phase === "verifying_production") return view("verifying_production", "本番の稼働版を確認しています");
+  // DBの段階よりGitHubのマージ事実を優先する。検証合格・稼働確認の代用にはしない（#4673）。
+  if (input.pullRequest?.merged) return view("deploying", "候補のPRはmainへマージ済みです。本番反映の追跡状態を照合しています");
   if (phase === "awaiting_approval") {
     return input.publishApproved
       ? view("awaiting_approval", "公開承認済み。最終検証に合格したため、mainへのマージの条件を確かめて自動で本番公開します", null, "自動公開待ち")
