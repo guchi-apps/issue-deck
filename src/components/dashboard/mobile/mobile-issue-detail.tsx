@@ -131,7 +131,6 @@ import {
 } from "@/lib/github/code-review";
 import {
   canStartImplementation,
-  startImplementationDisabledReason,
 } from "@/lib/github/start-implementation";
 import { canCreateFollowupFromComment } from "@/lib/github/workflow-status";
 import {
@@ -318,9 +317,6 @@ export function MobileIssueDetail({
     : null;
   // **▶ごと無効化しない**（#1262）。実行先の選択がダイアログの中にあるため、押せないと
   // サブPCでの起動まで塞がる。理由はダイアログへ渡してActionsの選択肢だけを落とす
-  const actionsDisabledReason = startImplementationDisabledReason(
-    repositories.find((repo) => repo.fullName === issue.repositoryFullName)?.hasClaudeWorkflow,
-  );
   // ディスパッチ状態はこの画面で1回だけ取得し、起動ボタン・実行先の表示へ配る（#1262）
   const dispatch = useDispatchState(true);
   // コードレビューIssue（#698）の実行の状態（#4116）。一覧のバッジと同じ関数で決める
@@ -633,9 +629,9 @@ export function MobileIssueDetail({
   }
 
   /** コメントを1件投稿し、一覧と件数へ反映する（PCのIssue詳細と同じ扱い） */
-  async function postComment(body: string): Promise<boolean> {
+  async function postComment(body: string, askQuestion = false): Promise<boolean> {
     const [owner, repo] = issue.repositoryFullName.split("/");
-    const created = await createComment({ owner, repo, number: issue.number, body });
+    const created = await createComment({ owner, repo, number: issue.number, body, askQuestion });
     if (!created) return false;
     setComments((prev) => [...prev, created]);
     onIssueUpdated({ ...issue, commentCount: issue.commentCount + 1 });
@@ -649,7 +645,7 @@ export function MobileIssueDetail({
 
   async function handleAskClaudeFromComposer() {
     if (!newCommentBody.trim()) return;
-    if (await postComment(askClaudeCommentBody(newCommentBody))) setNewCommentBody("");
+    if (await postComment(askClaudeCommentBody(newCommentBody), true)) setNewCommentBody("");
   }
 
   /** `Ctrl`+`Enter`の宛先（#2345。PCのIssue詳細と同じ。クローズには割り当てない） */
@@ -664,7 +660,7 @@ export function MobileIssueDetail({
   }
 
   async function handleApprovalAskClaude(question: string) {
-    await postComment(askClaudeCommentBody(question));
+    await postComment(askClaudeCommentBody(question), true);
   }
 
   async function handleDismissCheckUser(text?: string) {
@@ -1062,7 +1058,6 @@ export function MobileIssueDetail({
                 onNightlyRunQueued={onNightlyRunQueued}
                 includeDispatchTargets
                 dispatch={dispatch}
-                actionsDisabledReason={actionsDisabledReason}
                 comments={comments}
                 subIssueRelations={subIssueRelations}
                 claudeLocalModel={claudeLocalModel}

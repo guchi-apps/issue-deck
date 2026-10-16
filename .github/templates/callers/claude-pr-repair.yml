@@ -6,7 +6,7 @@ name: Claude PR Repair
 #
 # **このファイルはissue-deckの画面（設定＞フリート運用）から配布された雛形である**
 # （guchi-apps/issue-deck#1948）。`with:`の値は同じリポジトリの
-# claude-issue-dispatch.yml から写している。
+# 既存の修復caller（旧Issue callerが残る場合はそちら）から写している。
 #
 # **workflow_dispatchのみ**で、自動検知のトリガーは持たない。CI失敗・コンフリクトを検知して
 # 自動で走る経路は claude-ci-fix.yml・claude-conflict-resolve.yml が持っており、そちらと

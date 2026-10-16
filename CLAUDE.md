@@ -2,13 +2,13 @@
 
 このリポジトリで作業するClaude Codeエージェント向けのルールを記載する。
 
-ローカル実行ではユーザー個人環境のグローバルルール（`~/.claude/CLAUDE.md`）と個人環境のスキルもあわせて読み込まれるが、GitHub Actions上での実行（`.github/workflows/claude-issue-dispatch.yml`など）はリポジトリをチェックアウトしたワークツリーしか参照できないため、それらは読み込まれない。したがってActions実行でも守られる必要があるルールは、このファイルか各ワークフローのプロンプトに明文化しておく必要がある。両方が読み込まれる環境で内容が矛盾する場合は、このファイルを優先する。
+ローカル実行ではユーザー個人環境のグローバルルール（`~/.claude/CLAUDE.md`）と個人環境のスキルもあわせて読み込まれるが、GitHub Actions上での実行（`.github/workflows/claude-ci-fix.yml`など）はリポジトリをチェックアウトしたワークツリーしか参照できないため、それらは読み込まれない。したがってActions実行でも守られる必要があるルールは、このファイルか各ワークフローのプロンプトに明文化しておく必要がある。両方が読み込まれる環境で内容が矛盾する場合は、このファイルを優先する。
 
 コードの構成（ディレクトリ規約・データの流れ・`src/proxy.ts`など、どこに何があるか）は [docs/code-map.md](docs/code-map.md) を参照する。
 
 ## 共通ルール（ローカル実行・GitHub Actions実行の両方に適用）
 
-コミットメッセージ・PRタイトル・PR本文・issueコメントを日本語で書くこと、コミットのAuthorを`Claude Code <claude-code@example.com>`にすること、ラベルの付け替え手順といった作業手順レベルの規約は、各ワークフローのプロンプト（`.github/workflows/claude-issue-dispatch.yml`・`.github/workflows/claude-review-develop.yml`）とローカルセッション用のプロンプト（`scripts/prompts/`）に記載している。ここには、それらに含まれていない横断的な判断基準のみを記載する。
+コミットメッセージ・PRタイトル・PR本文・issueコメントを日本語で書くこと、コミットのAuthorを`Claude Code <claude-code@example.com>`にすること、ラベルの付け替え手順といった作業手順レベルの規約は、各ワークフローのプロンプト（`.github/workflows/claude-ci-fix.yml`・`.github/workflows/claude-review-develop.yml`）とローカルセッション用のプロンプト（`scripts/prompts/`）に記載している。ここには、それらに含まれていない横断的な判断基準のみを記載する。
 
 ### 出力言語
 
@@ -199,6 +199,8 @@ Statusを進めるのはissue-deckだけで、各ワークフロー・ローカ�
 
 `00.check-user`（ユーザーのチェックが必要）は上記のどの段階でも他のラベルと併用して付与する。**誰がいつ付け、いつ外すのかの一覧は[docs/multi-agent/labels.md](docs/multi-agent/labels.md)「`00.check-user`が付く・外れるタイミング」を参照**（無人実行・ローカル実行・画面操作の3経路に分かれているため、ここを正とする）。**付けるときは、その理由を表す`01.check-*`ラベル（`01.check-plan`・`01.check-input`・`01.check-merge`・`01.check-blocked`・`01.check-answered`）も1枚あわせて付ける**（#1490。同じ節を参照）。理由ラベルは`00.check-user`とのANDでしか読まれず、**そのリポジトリに定義が無ければ付けなくてよい**。
 
+IssueのActions実装は#4680で廃止した。現行の入口・残すワークフロー・既存配布先の扱いは[廃止方針](docs/actions-implementation-retirement.md)を参照。以下の旧callerへの言及は旧タグで動く配布先向けの互換説明である。
+
 `11.local`（ローカルで対応中）も同様にどの段階でも併用でき、付いている間は`claude-issue-dispatch.yml`（無人実行）がそのIssueに対して計画・実装・分割・追加対応を一切行わない（読み取り専用の質問応答のみ例外）。VSCode等のローカルClaude Codeセッションで対応するIssueに付けることで、ローカルと無人実行がラベル操作をきっかけに二重起動するのを防ぐ（詳細は[docs/multi-agent/branching.md](docs/multi-agent/branching.md)「ローカル実行と無人実行の二重起動を防ぐ」参照）。優先度ラベルは`11.local`と番号帯が重ならないよう`80.Priority: High`・`85.Priority: Medium`・`89.Priority: Low`としている。
 
 **共通GitHubラベルの名前・説明・色の正本は`.github/labels.json`で、全リポジトリへは`scripts/sync-labels.sh`で配る**（#3237。体系・旧名との対応・手順は[docs/label-scheme.md](docs/label-scheme.md)）。ラベルを足す・改名するときは正本を先に直し、個別のリポジトリだけでは直さない。
@@ -246,7 +248,7 @@ Issueコメントとして投稿し、「なぜエージェントが実行でき
 新しい個人アプリの立ち上げ（#2188）は、画面から相談 → 設定 → 確認と進めると、GitHubリポジトリの作成と残りの作業のIssue一式（初期化・`guchi-apps/vps`のVirtualHost・手作業3件）までを起票する。**手順の正は共有知識（`guchi-apps/docs`の`guides/new-app-checklist.md`）で、issue-deck側に手順を複製しない。**
 
 - **ポートとホスト名は`guchi-apps/vps`の実物から決める。** READMEの2つの表（アプリ一覧・予約済みポート）と、vhostの`ServerName`／`ServerAlias`を読む。**READMEの散文の「空きは〜」とvhostのファイル名は読まない**（どちらも実態とずれる）
-- **リポジトリを作った直後に雛形一式（ワークフローのcaller・CI・デプロイ・`CLAUDE.md`など）をコミットする**（#2247）。盤面へ載る条件は`claude-issue-dispatch.yml`がデフォルトブランチにあることで、以前はそれを作るのが初期化Issue自身だったため、初期化IssueだけがサブPCのローカルセッション専用になっていた。雛形の宣言は[`src/lib/new-app/scaffold.ts`](src/lib/new-app/scaffold.ts)にあり、**issue-deck自身が実物を持つファイル（`signaly-notify.sh`など）は写しを作らず`main`からそのまま配る**
+- **リポジトリを作った直後に雛形一式（ワークフローのcaller・CI・デプロイ・`CLAUDE.md`など）をコミットする**（#2247）。初期化Issueの実行にはホストへのリポジトリ登録が必要。IssueのActions実装callerは配らない。雛形の宣言は[`src/lib/new-app/scaffold.ts`](src/lib/new-app/scaffold.ts)にあり、**issue-deck自身が実物を持つファイル（`signaly-notify.sh`など）は写しを作らず`main`からそのまま配る**
 - **自動化できないものは自動化したように見せない。** DNSのAレコードはVPS管理画面にAPIが無く、VPS実機の操作（`/apps/<name>/`・DB作成・PM2・certbot）は`guchi-apps/vps`の`deploy.yml`が配る受け口ではないため、どちらも手作業Issueとして残す
 - 生成する手作業Issueの書式・失敗したときの扱い・盤面へ載るまでの順序は[docs/new-app-launch.md](docs/new-app-launch.md)を参照する
 

@@ -43,7 +43,7 @@ on:
 
 jobs:
   dispatch:
-    uses: guchi-apps/issue-deck/.github/workflows/reusable-issue-dispatch.yml@workflows/v12
+    uses: guchi-apps/issue-deck/.github/workflows/reusable-ci-fix.yml@workflows/v12
     with:
       runtime-setup: node-db
       prompts-ref: workflows/v12
@@ -875,4 +875,13 @@ describe("sharedFileLabel", () => {
   it("未知のパスはそのまま返す", () => {
     expect(sharedFileLabel(".github/scripts/unknown.sh")).toBe(".github/scripts/unknown.sh");
   });
+});
+
+it("廃止したIssue実装callerを新しいタグへ上げない", () => { expect(extractWorkflowTagRef("claude-issue-dispatch.yml", CALLER.replace("reusable-ci-fix.yml", "reusable-issue-dispatch.yml"))).toBeNull(); });
+
+it("Issue実装callerの削除後も残る修復callerから不足分を配れる", () => {
+  const missing = missingRepairWorkflows(["claude-ci-fix.yml", "release-develop-to-main.yml"]);
+  expect(missing).toContain("claude-conflict-resolve.yml");
+  expect(missing).toContain("claude-pr-repair.yml");
+  expect(missing).not.toContain("claude-ci-fix.yml");
 });

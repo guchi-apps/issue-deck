@@ -3,7 +3,6 @@
 import {
   Asterisk,
   ClipboardCopy,
-  Cloud,
   Hourglass,
   Server,
   Sparkles,
@@ -12,6 +11,8 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { type ReactNode, useEffect, useRef, useState } from "react";
+
+import { useProgressStatusMutation } from "@/hooks/use-progress-status-mutation";
 
 import {
   CLAUDE_MODEL_FIT_LABELS,
@@ -55,11 +56,9 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { useDispatchState, type DispatchStateHandle } from "@/hooks/use-dispatch-state";
 import { useIssueRepoMeta } from "@/hooks/use-issue-repo-meta";
-import { useIssueCommentMutations } from "@/hooks/use-issue-comment-mutations";
 import { useIssueMutations } from "@/hooks/use-issue-mutations";
 import { useModelPick } from "@/hooks/use-model-pick";
 import { useNightlyRunSettings } from "@/hooks/use-nightly-run";
-import { useProgressStatusMutation } from "@/hooks/use-progress-status-mutation";
 import { useClaudeUsage } from "@/hooks/use-claude-usage";
 import { useCodexUsage } from "@/hooks/use-codex-usage";
 import {
@@ -89,11 +88,10 @@ import {
   ARTIFACT_REQUIRED_LABEL,
   artifactRequiredDefaultForLabels,
   START_IMPLEMENTATION_DEFAULT_OPTIONS,
-  startImplementationCommentBody,
   startImplementationLabelsToAdd,
   startImplementationLabelsToRemove,
   startImplementationOptionsFromLabels,
-  visibleStartImplementationOptions,
+  START_IMPLEMENTATION_OPTIONS,
   type StartImplementationOptionKey,
 } from "@/lib/github/start-implementation";
 import { cn } from "@/lib/utils";
@@ -108,7 +106,6 @@ import type { Issue, IssueComment, SubIssueRelations } from "@/types/issue";
  */
 export type StartTarget =
   | { kind: "host"; host: string }
-  | { kind: "actions" }
   | { kind: "copy-prompt" }
   | { kind: "copy-command" }
   /** 次の5時間枠（#2995）。いまは起動せず、`host`で起動する予定に積む。起動はClaudeのプラン枠の終わり際 */
@@ -255,30 +252,13 @@ type StartImplementationDialogProps = {
   /** 呼び出し側で開閉状態を制御したい場合に指定する（Issue作成画面での利用を想定） */
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
-  /**
-   * 実行先（GitHub Actions / サブPC）も選ばせるか（#1248・既定は選ばせない）。
-   *
-   * **スマホのIssue詳細で`true`にする。** PCではツールバーに「実装を開始」と
-   * 「ローカルで開始」が並んでいるので選択の必要が無いが、スマホのヘッダーには
-   * このボタン（▶）しか置けず、サブPCで起動したい場合に本文の奥までスクロールして
-   * 別のボタンを探すことになっていた。
-   *
-   * **申告しているホストが無ければ、`true`でも選択欄自体を出さない**（選択肢が
-   * GitHub Actionsだけになるため）。
-   */
+  /** ホスト・次枠・コピーの実行先を選ぶ欄を表示する（既定true）。 */
   includeDispatchTargets?: boolean;
   /**
    * 親が既に取得しているディスパッチ状態（#1262）。渡すとこのダイアログは自前で取得しない。
    * **同じ画面に取得口を増やさないため**、Issue詳細では親で1回だけ取得して配る。
    */
   dispatch?: DispatchStateHandle;
-  /**
-   * GitHub Actionsを実行先として選べない理由（`claude-issue-dispatch.yml`が無い等・#976）。
-   *
-   * **トリガーボタンごと無効化してはいけない**（#1262）。実行先の選択がこのダイアログの中に
-   * ある以上、押せないとサブPCでの起動まで塞がる。ここへ渡してActionsの選択肢だけを落とす。
-   */
-  actionsDisabledReason?: string | null;
   /** 「実装プロンプトをコピー」に載せるコメント。省略時はコメントなしとして組み立てる */
   comments?: readonly IssueComment[];
   /**
@@ -310,41 +290,16 @@ type StartImplementationDialogProps = {
   dispatchFailoverThresholdPercent?: number;
 };
 
-/**
- * 「実装を開始」ボタン押下時に、計画・マージ前確認・開発環境起動・スクリーンショットの要否を
- * 選択させるダイアログ。選択されたオプションに対応するラベルを付与したうえで、
- * 実装エージェントを起動する。
- *
- * オプションは実行先で出し分ける（#1317・`visibleStartImplementationOptions`）。撮影は
- * GitHub Actionsを選んだときだけ出る。「計画を立案」の初期状態はIssueの種別ラベルから決まる。
- *
- * `renderTrigger`を渡すと自前のトリガーボタンから開閉する（Issue詳細画面）。
- * `open`/`onOpenChange`を渡すと呼び出し側が開閉状態を制御できる（Issue作成画面の
- * 「作成+実装開始」が、作成直後にこのダイアログを開く用途・#1323）。**オプションを選ばせるのは
- * どの経路でもこのダイアログだけ**で、作成画面には出さない（#1580）。
- *
- * `includeDispatchTargets`を渡すと**実行先も選べる**（#1248）。起動のさせ方は経路で違う。
- *
- * | 実行先 | 起動のさせ方 | 進捗（Project Status） |
- * |---|---|---|
- * | GitHub Actions | `@claude`の定型コメントを投稿する | このダイアログが報告する |
- * | サブPC | ジョブをキューに積む（`11.local`も付ける） | 起動したランチャーが報告する（#1236） |
- *
- * **サブPCを選んだときは`@claude`コメントを投稿しない。** 無人実行と同じ入口を踏ませると、
- * `11.local`が付くまでの隙間で二重起動になりうるうえ、Issueに「実装を開始してください」と
- * 残るのに動くのはサブPC、という食い違いが生まれる。
- */
+/** ホストへの起動依頼、次枠の予約、手元で使うプロンプト・コマンドのコピーを選ぶ。 */
 export function StartImplementationDialog({
   issue,
   onIssueUpdated,
-  onCommentCreated,
   onNightlyRunQueued,
   renderTrigger,
   open: openProp,
   onOpenChange: onOpenChangeProp,
-  includeDispatchTargets,
+  includeDispatchTargets = true,
   dispatch: injectedDispatch,
-  actionsDisabledReason = null,
   comments = [],
   localSessionCommand = null,
   subIssueRelations,
@@ -415,13 +370,8 @@ export function StartImplementationDialog({
   const { reset: resetCodexModelPick, pick: pickCodexModel } = codexModelPick;
   /** コピーした直後だけ文言を変え、押したことが分かるようにする */
   const [copied, setCopied] = useState(false);
-  const { updateIssue, isSubmitting: isUpdatingIssue, error: labelMutationError } = useIssueMutations();
-  const {
-    createComment,
-    isSubmitting: isCreatingComment,
-    error: commentMutationError,
-  } = useIssueCommentMutations();
   const { setProgressStatus } = useProgressStatusMutation();
+  const { updateIssue, isSubmitting: isUpdatingIssue, error: labelMutationError } = useIssueMutations();
   // 既定側の使用量でだけ、Codex対応ホストの初期選択を切り替える。
   // ダイアログを閉じている間や、ローカル実行を選べない経路では探りリクエストを送らない。
   const claudeUsage = useClaudeUsage(open && includeDispatchTargets === true);
@@ -444,8 +394,8 @@ export function StartImplementationDialog({
   const repositoryLabelNames = repositoryLabels.map((label) => label.name);
   const hasArtifactLabelDefinition = repositoryLabelNames.includes(ARTIFACT_REQUIRED_LABEL);
   const isSubmitting =
-    isUpdatingIssue || isCreatingComment || dispatch.isSubmitting || isQueuingNightly;
-  const error = labelMutationError ?? commentMutationError ?? dispatch.error ?? nightlyError;
+    isUpdatingIssue || dispatch.isSubmitting || isQueuingNightly;
+  const error = labelMutationError ?? dispatch.error ?? nightlyError;
   // 開いている間にissue（ポーリングによる更新等）が差し替わっても選択中のオプションを
   // 巻き戻さないよう、下のuseEffectの依存配列には含めずrefで最新値だけ参照する。
   const issueLabelsRef = useRef(issue.labels);
@@ -524,20 +474,8 @@ export function StartImplementationDialog({
     repositoryFullName: issue.repositoryFullName,
     issueNumber: issue.number,
   });
-  // 「このPC」を廃止して手元の出口がコピーになったため（#1263）、申告しているホストが無くても
-  // 選択欄を出す。選択肢がGitHub Actions1つだけになることはもう無い
   const showTargets = includeDispatchTargets === true;
-  /**
-   * 実行先がまだ確定していないか（#1666）。**確定するまで選択肢を1つも出さない。**
-   *
-   * ホストの一覧は`GET /api/dispatch`が返るまで空で、そのまま組み立てると「サブPCが無い
-   * 選択欄（既定はGitHub Actions）」を先に描いてから、届いた時点でサブPCを足して既定も
-   * 移すことになる。実行先で出るオプションまで変わる（撮影⇄アーティファクト）ため、
-   * 押そうとしていたものが指の下で別物に入れ替わる。
-   *
-   * 一覧が空のまま確定した場合（申告しているサブPCが無い・取得に失敗した）は通常どおり出す。
-   * 待たせるのは「まだ分からない」間だけで、「無いと分かった」後ではない。
-   */
+  /** ホスト一覧の取得中は、押そうとした実行先が入れ替わらないよう待つ。 */
   const isTargetPending = showTargets && !dispatch.isLoaded;
   /**
    * 未完了ジョブを理由に選択肢を塞ぐか（#1318）。**このダイアログから積んだ直後は塞がない。**
@@ -547,7 +485,7 @@ export function StartImplementationDialog({
    */
   const blocksByActiveJob = hasActiveJob && startedTarget === null;
   /**
-   * 既定の実行先（#1262）。**サブPCが既定で、GitHub Actionsはフォールバック。**
+   * 既定の実行先（#1262）。**ホストが既定で、不在時は実装プロンプトをコピーする。**
    * 選べないホスト（応答していない・そのリポジトリを実行できない・未完了ジョブがある・
    * 既にセッションが動いている）は飛ばす。
    */
@@ -561,7 +499,7 @@ export function StartImplementationDialog({
     : null;
   const defaultTarget: StartTarget = defaultTargetHost
     ? { kind: "host", host: defaultTargetHost }
-    : { kind: "actions" };
+    : { kind: "copy-prompt" };
   // 押した実行先を最優先にする。ホストの一覧が遅れて届いても、積んだジョブで既定が動いても、
   // 押した後の表示が別の実行先へ移らない（#1318）
   const effectiveTarget = startedTarget ?? target ?? defaultTarget;
@@ -625,7 +563,6 @@ export function StartImplementationDialog({
       : null;
   // GitHub Actionsを選んでいて、そもそも起動しないリポジトリの場合（#976）。
   // **トリガーではなくここで止める**（#1262）
-  const blockedReason = effectiveTarget.kind === "actions" ? actionsDisabledReason : null;
   /**
    * エージェントを選ばせるか（#2505）。**サブPCを選んでいて、そのホストが対応を申告して
    * いるときだけ。** 申告していないホスト（`codex`が未導入・pollerが古い）で選ばせると、
@@ -694,11 +631,7 @@ export function StartImplementationDialog({
       : modelChoice;
   /** 「おまかせ」を選んだのに、まだ何で立つか決まっていない状態 */
   const isPickPending = showModels && modelChoice === AUTO_PICK && pickedModel === null;
-  // 実行先で出し分けたオプション（#1317）。撮影はGitHub Actionsのときだけ出す
-  const visibleOptions = visibleStartImplementationOptions({
-    isActionsTarget: effectiveTarget.kind === "actions",
-    options,
-  });
+  const visibleOptions = START_IMPLEMENTATION_OPTIONS;
 
   /**
    * 実行先のタイル（#1623）。**選べない理由の判定と文言は従来どおりAPI側と同じものを使う。**
@@ -745,15 +678,6 @@ export function StartImplementationDialog({
           shortName: "次枠",
           description: describeNextWindowTarget(nightlySettings, nightlyHost),
           rejection: nightlyRejection,
-        },
-        {
-          key: "actions",
-          target: { kind: "actions" },
-          icon: Cloud,
-          name: "GitHub Actions",
-          shortName: "Actions",
-          description: "無人実行のワークフローを起動します（サブPCが使えないときのフォールバック）",
-          rejection: actionsDisabledReason,
         },
         // 手元で作業する場合の出口。「このPC」（issuedeck://）の置き換え（#1263）
         {
@@ -908,31 +832,6 @@ export function StartImplementationDialog({
     if (!updated) return null;
     onIssueUpdated(updated);
     return updated;
-  }
-
-  /** GitHub Actionsの無人実行を起動する（従来の経路） */
-  async function startOnActions(currentIssue: Issue) {
-    // カンバンを即座に追従させる（#991 Phase 3）。オプションラベル→Statusの順に書くのは、
-    // 万一この書き込みがWebhook起動の判定に届いた場合でも「計画を立案」の選択が先に反映される
-    // ようにするため（通常はissue-deck自身の書き込みとして無視される）。失敗しても続行する。
-    await setProgressStatus({
-      repositoryFullName: issue.repositoryFullName,
-      number: issue.number,
-      status: options.planRequired ? "planning" : "implementation",
-    });
-
-    const [owner, repo] = issue.repositoryFullName.split("/");
-    const created = await createComment({
-      owner,
-      repo,
-      number: issue.number,
-      body: startImplementationCommentBody(options.planRequired),
-    });
-    if (!created) return;
-
-    onCommentCreated(created);
-    onIssueUpdated({ ...currentIssue, commentCount: currentIssue.commentCount + 1 });
-    handleOpenChange(false);
   }
 
   /**
@@ -1092,7 +991,6 @@ export function StartImplementationDialog({
       await copyForLocalSession(currentIssue, effectiveTarget.kind);
       return;
     }
-    await startOnActions(currentIssue);
   }
 
   return (
@@ -1272,9 +1170,7 @@ export function StartImplementationDialog({
           <ApiErrorMessage message={error} />
           {/* 実行先の一覧を出しているときは、理由はGitHub Actionsの選択肢の説明として既に見えている。
               一覧を出さない呼び出し（Issue作成直後の自動オープン等）でだけ、ここに出す */}
-          {blockedReason && !showTargets && (
-            <p className="text-sm text-destructive">{blockedReason}</p>
-          )}
+
         </div>
         {/* スマホでも縦に積まず横並びにする（#3119。積むとフッターだけで約110px取られる）。
             幅が足りる`sm`以上は従来どおり右寄せで、ボタンは内容の幅 */}
@@ -1296,7 +1192,6 @@ export function StartImplementationDialog({
               // 選んだつもりのないモデルで立つ
               isPickPending ||
               selectedRejection !== null ||
-              blockedReason !== null ||
               // 予約実行に積めない理由があるうちは押させない（#2995）
               (isScheduledTarget && (nightlyRejection !== null || nightlyOptionRejection !== null))
             }

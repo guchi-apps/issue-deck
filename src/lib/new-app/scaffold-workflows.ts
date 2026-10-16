@@ -41,7 +41,7 @@ export function issueLabelsCaller(spec: NewAppSpec, tag: string): string {
 #
 # **このファイルはissue-deckの画面の「新規アプリを立ち上げる」が置いた雛形である**
 # （guchi-apps/issue-deck#2247）。参照はタグ固定で、上げるときは
-# claude-issue-dispatch.ymlの\`uses:\`・\`prompts-ref\`もあわせて確認する。
+# 残るcallerの参照タグもあわせて確認する。
 #
 # 対象issueの番号はブランチ名 issue-<番号> から特定するため、この命名規約に従わない
 # ブランチ・PRは全て対象外になる。
@@ -74,76 +74,6 @@ jobs:
     # 呼ばれる側へ渡る秘密を最小限に保つ。未設定でも報告ステップがスキップされるだけ。
     secrets:
       PROGRESS_REPORT_SECRET: \${{ secrets.PROGRESS_REPORT_SECRET }}
-`;
-}
-
-/** `.github/workflows/claude-issue-dispatch.yml` */
-export function claudeIssueDispatchCaller(spec: NewAppSpec, tag: string): string {
-  const profile = newAppKindProfile(spec.kind);
-  const database = spec.databaseName
-    ? `      database-name: ${spec.databaseName}\n`
-    : "";
-  const nodeVersion =
-    profile.runtimeSetup === "minimal"
-      ? ""
-      : `      # 実装ステップのNodeをCI（.github/workflows/ci.yml）と揃え、ビルドの結果が
-      # CIと食い違わないようにする。
-      node-version: "${SCAFFOLD_NODE_VERSION}"\n`;
-
-  return `name: Claude Issue Dispatch
-
-# Issueへの\`@claude\`コメントを起点に、計画提示・実装・develop向けPR作成までをGitHub Actions上で
-# 無人実行するワークフローの、${spec.repositoryName}側のトリガー定義。
-#
-# ジョブ本体はguchi-apps/issue-deckのreusable-issue-dispatch.ymlにあり、ここでは\`uses:\`で参照する
-# だけにしている。技術スタックの差は\`with:\`のinputsで吸収する。
-#
-# **このファイルはissue-deckの画面の「新規アプリを立ち上げる」が置いた雛形である**
-# （guchi-apps/issue-deck#2247）。**このファイルがデフォルトブランチにあることが、
-# issue-deckの盤面へ載る条件**なので、消さないこと。
-#
-# \`uses:\`のタグと\`prompts-ref\`は必ず同じ値にする。\`uses:\`だけ上げるとプロンプト
-# （.github/prompts/配下）が古いタグのまま参照され、新しいワークフローで古いプロンプトが動く。
-# なお\`prompts-ref\`を空にすると呼び出し元（このリポジトリ）の.github/prompts/を読みに行き、
-# ${spec.repositoryName}はそれを持たないため最初のClaudeステップで落ちる。
-#
-# 動作の詳細（21.plan-requiredの二段階トリガー、mode=ask/plan/split/implement/additionalの
-# 判定、11.localによる二重起動防止など）は、issue-deckのdocs/multi-agent/dispatch.mdを参照する。
-on:
-  issues:
-    types: [unlabeled]
-  issue_comment:
-    types: [created]
-  # 計画/実装のフォールバック検証ステップ専用の自己リトライ起動経路。
-  workflow_dispatch:
-    inputs:
-      issue_number:
-        description: "対象issue番号"
-        required: true
-        type: string
-      retry_attempt:
-        description: "これまでの自動リトライ回数（0始まり。指定した回数の次の試行として実行する）"
-        required: false
-        type: string
-        default: "0"
-
-jobs:
-  dispatch:
-    uses: ${reusable("reusable-issue-dispatch.yml", tag)}
-    with:
-      # 種別（${profile.label}）に対応するランタイムの用意。
-      runtime-setup: ${profile.runtimeSetup}
-      package-manager: ${profile.packageManager}
-${database}${nodeVersion}      # uses: のタグと必ず同じ値にする。
-      prompts-ref: ${tag}
-    # CLAUDE_CODE_OAUTH_TOKEN・WORKFLOW_PATを呼ばれる側へ渡す。
-    secrets: inherit
-    permissions:
-      contents: write
-      pull-requests: write
-      issues: write
-      actions: read
-      id-token: write
 `;
 }
 

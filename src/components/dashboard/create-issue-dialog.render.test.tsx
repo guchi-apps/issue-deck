@@ -90,7 +90,7 @@ function makeRepository(): ConnectedRepository {
     archived: false,
     hasClaudeWorkflow: true,
     hasLocalStartScript: true,
-    dispatchRunnable: false,
+    dispatchRunnable: true,
     hidden: false,
     favorite: false,
     excludedFromIssueCreation: false,
@@ -540,7 +540,7 @@ describe("CreateIssueDialog の種別「質問」", () => {
     expect(screen.getByText("[質問] 認証の流れを教えて")).not.toBeNull();
   });
 
-  it("Issueを作成したうえで、Actionsを起こす質問コメントを投稿する", async () => {
+  it("Issueを作成したうえで、質問コメントとホストへの起動依頼を送る", async () => {
     const onCreated = vi.fn();
     render(<Harness onCreated={onCreated} />);
     selectQuestion();
@@ -555,7 +555,8 @@ describe("CreateIssueDialog の種別「質問」", () => {
       expect.objectContaining({ title: "[質問] 認証の流れを教えて", assignee: null }),
     );
     await waitFor(() => expect(commentMutations.createComment).toHaveBeenCalledTimes(1));
-    expect(commentMutations.createComment.mock.calls[0][0].body).toContain("@claude 質問: ");
+    expect(commentMutations.createComment.mock.calls[0][0].body).not.toContain("@claude");
+    expect(commentMutations.createComment.mock.calls[0][0].askQuestion).toBe(true);
     // 投稿したコメントぶんを数えたIssueを呼び出し側へ渡す（一覧のコメント数がずれない）
     await waitFor(() =>
       expect(onCreated).toHaveBeenCalledWith(expect.objectContaining({ commentCount: 1 })),
@@ -724,6 +725,7 @@ describe("CreateIssueDialog の1画面フォーム", () => {
     const notConfigured: ConnectedRepository = {
       ...makeOtherRepository(),
       hasClaudeWorkflow: false,
+      dispatchRunnable: false,
     };
     render(
       <Harness
@@ -1040,6 +1042,7 @@ describe("CreateIssueDialog の質問への切り替え提案", () => {
     const notConfigured: ConnectedRepository = {
       ...makeOtherRepository(),
       hasClaudeWorkflow: false,
+      dispatchRunnable: false,
     };
     suggestGenerate.mockResolvedValue({ kind: "question", title: "タイトル案", labels: [] });
     render(

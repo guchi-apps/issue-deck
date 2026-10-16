@@ -70,9 +70,9 @@ describe("mergeSuggestedLabels", () => {
 });
 
 describe("groupRepositoriesByWorkflowStatus", () => {
-  it("claude-issue-dispatch.yml導入済みのリポジトリを先頭グループ、未導入を後続グループに分ける", () => {
-    const notConfigured = makeRepo({ fullName: "owner/not-configured", hasClaudeWorkflow: false });
-    const configured = makeRepo({ fullName: "owner/configured", hasClaudeWorkflow: true });
+  it("ホスト対応のリポジトリを先頭グループ、未導入を後続グループに分ける", () => {
+    const notConfigured = makeRepo({ fullName: "owner/not-configured", dispatchRunnable: false });
+    const configured = makeRepo({ fullName: "owner/configured", dispatchRunnable: true });
 
     expect(groupRepositoriesByWorkflowStatus([notConfigured, configured])).toEqual({
       registered: [configured],
@@ -81,8 +81,8 @@ describe("groupRepositoriesByWorkflowStatus", () => {
   });
 
   it("各グループ内では元の順序を維持する", () => {
-    const first = makeRepo({ fullName: "owner/first", hasClaudeWorkflow: true });
-    const second = makeRepo({ fullName: "owner/second", hasClaudeWorkflow: true });
+    const first = makeRepo({ fullName: "owner/first", dispatchRunnable: true });
+    const second = makeRepo({ fullName: "owner/second", dispatchRunnable: true });
 
     expect(groupRepositoriesByWorkflowStatus([second, first])).toEqual({
       registered: [second, first],
@@ -96,8 +96,8 @@ describe("groupRepositoriesByWorkflowStatus", () => {
  * 導入済みのリポジトリでしか成立しない。
  */
 describe("resolveKindRepository", () => {
-  const configured = makeRepo({ fullName: "owner/configured", hasClaudeWorkflow: true });
-  const notConfigured = makeRepo({ fullName: "owner/not-configured", hasClaudeWorkflow: false });
+  const configured = makeRepo({ fullName: "owner/configured", dispatchRunnable: true });
+  const notConfigured = makeRepo({ fullName: "owner/not-configured", dispatchRunnable: false });
 
   it("Issueでは選択中のリポジトリをそのまま残す", () => {
     expect(
@@ -109,7 +109,7 @@ describe("resolveKindRepository", () => {
    * #1884。リポジトリを人が決める形にした以上、種別を押しただけで選んでいないリポジトリが
    * 入る経路は残さない（以前は導入済みの先頭1件を入れていた）。
    */
-  it("質問へ切り替えたとき、ワークフロー未導入のリポジトリを選んでいたら未選択へ戻す", () => {
+  it("質問へ切り替えたとき、ホスト未登録のリポジトリを選んでいたら未選択へ戻す", () => {
     expect(
       resolveKindRepository("question", [notConfigured, configured], "owner/not-configured"),
     ).toBe("");

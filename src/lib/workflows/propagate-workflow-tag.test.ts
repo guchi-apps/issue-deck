@@ -25,14 +25,9 @@ function setup(files: Record<string, string>): string {
 
 /** スクリプト本体から書き換え部分だけを取り出して実行する */
 function rewrite(dir: string, tag: string): void {
-  execFileSync(
-    "bash",
-    [
-      "-c",
-      `cd "${dir}" && for FILE in .github/workflows/*.yml; do grep -q '@workflows/v' "$FILE" || continue; sed -i -e "s|@workflows/v[0-9]\\+|@${tag}|g" -e "s|prompts-ref: workflows/v[0-9]\\+|prompts-ref: ${tag}|g" "$FILE"; done`,
-    ],
-    { encoding: "utf8" },
-  );
+  const loop = readFileSync(SCRIPT, "utf8").match(/^for FILE in \.github\/workflows\/\*\.yml; do\n[\s\S]*?^done$/m)?.[0];
+  if (!loop) throw new Error("タグ更新処理が見つかりません");
+  execFileSync("bash", ["-c", loop], { cwd: dir, env: { ...process.env, TAG: tag }, encoding: "utf8" });
 }
 
 /** 「既に目的のタグか」の判定。真なら更新が必要 */
@@ -50,7 +45,7 @@ function needsUpdate(dir: string, tag: string): boolean {
 
 const DISPATCH = `jobs:
   dispatch:
-    uses: guchi-apps/issue-deck/.github/workflows/reusable-issue-dispatch.yml@workflows/v11
+    uses: guchi-apps/issue-deck/.github/workflows/reusable-ci-fix.yml@workflows/v11
     with:
       prompts-ref: workflows/v11
 `;
@@ -127,8 +122,8 @@ describe("propagate-workflow-tag.sh の書き換え", () => {
     // 最新タグと同じでも、prompts-ref がずれていれば配り直す必要がある
     const dir = setup({
       "claude-issue-dispatch.yml": DISPATCH.replace(
-        "reusable-issue-dispatch.yml@workflows/v11",
-        "reusable-issue-dispatch.yml@workflows/v12",
+        "reusable-ci-fix.yml@workflows/v11",
+        "reusable-ci-fix.yml@workflows/v12",
       ),
     });
 
@@ -234,4 +229,12 @@ describe("propagate-workflow-tag.sh の自動マージ", () => {
     const warningBlock = source.slice(source.indexOf("gh pr merge"));
     expect(warningBlock).not.toContain("fail ");
   });
+});
+
+it("廃止済みcallerだけは旧タグを保ち、他のcallerは更新する", () => {
+  const legacy = DISPATCH.replace("reusable-ci-fix.yml", "reusable-issue-dispatch.yml");
+  const dir = setup({ "claude-issue-dispatch.yml": legacy, "issue-labels.yml": LABELS });
+  rewrite(dir, "workflows/v99");
+  expect(readFileSync(join(dir, ".github/workflows/claude-issue-dispatch.yml"), "utf8")).toBe(legacy);
+  expect(readFileSync(join(dir, ".github/workflows/issue-labels.yml"), "utf8")).toContain("@workflows/v99");
 });

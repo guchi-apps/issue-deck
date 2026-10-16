@@ -54,6 +54,8 @@ BEFORE="$(grep -rhoE '@workflows/v[0-9]+' .github/workflows/ | sort -u | tr '\n'
 # 古いプロンプトが使われる（#1158 で ${PACKAGE_MANAGER} を足した際に実際に問題になる形）。
 for FILE in .github/workflows/*.yml; do
   grep -q '@workflows/v' "$FILE" || continue
+  # 廃止済みの実装callerは旧タグのまま残す。撤去は各リポジトリの変更で行う。
+  grep -q 'reusable-issue-dispatch.yml' "$FILE" && continue
   sed -i \
     -e "s|@workflows/v[0-9]\+|@$TAG|g" \
     -e "s|prompts-ref: workflows/v[0-9]\+|prompts-ref: $TAG|g" \

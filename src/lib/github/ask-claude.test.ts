@@ -25,14 +25,14 @@ import {
 import { FALLBACK_NOTICE_MARKER } from "@/lib/github/fallback-notice";
 
 describe("askClaudeCommentBody", () => {
-  it("質問文の前後の空白を除去し、プレフィックスとマーカーを付与する", () => {
+  it("質問文の前後の空白を除去し、マーカーだけを付与する", () => {
     expect(askClaudeCommentBody("  これは質問です  ")).toBe(
-      `${ASK_CLAUDE_COMMENT_PREFIX}これは質問です\n\n${QUESTION_COMMENT_MARKER}`,
+      `これは質問です\n\n${QUESTION_COMMENT_MARKER}`,
     );
   });
 
-  it("trigger: none ではActionsのトリガー（@claude）を含めず、マーカーだけを付与する", () => {
-    const body = askClaudeCommentBody("これは質問です", { trigger: "none" });
+  it("新しい質問ではActionsのトリガー（@claude）を含めず、マーカーだけを付与する", () => {
+    const body = askClaudeCommentBody("これは質問です");
     expect(body).toBe(`これは質問です\n\n${QUESTION_COMMENT_MARKER}`);
     // Actionsのトリガー条件は本文が`@claude`で始まることなので、含まないことが要（#1294）
     expect(body.includes("@claude")).toBe(false);
@@ -56,7 +56,7 @@ describe("isAskClaudeQuestionComment", () => {
 
   it("Actionsを起こさない形（@claudeを含まない）でもtrueと判定する", () => {
     expect(
-      isAskClaudeQuestionComment({ body: askClaudeCommentBody("質問内容", { trigger: "none" }) }),
+      isAskClaudeQuestionComment({ body: askClaudeCommentBody("質問内容") }),
     ).toBe(true);
   });
 

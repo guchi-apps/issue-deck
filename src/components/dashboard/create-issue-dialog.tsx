@@ -55,7 +55,6 @@ import { askClaudeCommentBody, buildAskRepoQuestionTitle } from "@/lib/github/as
 import { composeIssueBody } from "@/lib/github/followup-issue";
 import {
   isSelectableLabelName,
-  startImplementationDisabledReason,
 } from "@/lib/github/start-implementation";
 import { openIssueCreateWindow, type IssueCreateHandoff } from "@/lib/issue-create-window";
 import { isAutoAssignableLabelName } from "@/lib/issue-status";
@@ -78,8 +77,8 @@ export function groupRepositoriesByWorkflowStatus(
   repositories: ConnectedRepository[],
 ): { registered: ConnectedRepository[]; unregistered: ConnectedRepository[] } {
   return {
-    registered: repositories.filter((repo) => repo.hasClaudeWorkflow),
-    unregistered: repositories.filter((repo) => !repo.hasClaudeWorkflow),
+    registered: repositories.filter((repo) => repo.dispatchRunnable),
+    unregistered: repositories.filter((repo) => !repo.dispatchRunnable),
   };
 }
 
@@ -114,7 +113,7 @@ export function resolveKindRepository(
   current: string,
 ): string {
   if (kind === "issue" || current === "") return current;
-  const askable = repositories.filter((repo) => repo.hasClaudeWorkflow);
+  const askable = repositories.filter((repo) => repo.dispatchRunnable);
   return askable.some((repo) => repo.fullName === current) ? current : "";
 }
 
@@ -368,6 +367,7 @@ export function CreateIssueDialog({
     setError: setCommentError,
   } = useIssueCommentMutations();
 
+  const pendingQuestionIssue = useRef<Issue | null>(null);
   const [kind, setKind] = useState<IssueDraftKind>("issue");
   /**
    * 画面に出ている値のうち、Claudeが入れたまま人が触っていないもの（#1605）。
@@ -513,6 +513,7 @@ export function CreateIssueDialog({
           defaultTitle,
           defaultBody,
         }));
+    pendingQuestionIssue.current = null;
     setKind(draft.kind);
     // 移してきた値は「人が書いたもの」として扱う。`自動`の出どころは移す前の画面に残っており、
     // ここで復元すると、直したはずの項目まで自動と書かれかねない
@@ -673,6 +674,7 @@ export function CreateIssueDialog({
   }
 
   function resetForm() {
+    pendingQuestionIssue.current = null;
     setKind("issue");
     setAutoFilled({ title: false, labels: false });
     setLabelSuggestionMissed(false);
@@ -842,7 +844,8 @@ export function CreateIssueDialog({
    */
   async function handleAskQuestion() {
     if (!repositoryFullName || !body.trim()) return;
-    const issue = await createIssue({
+    const pending = pendingQuestionIssue.current?.repositoryFullName === repositoryFullName ? pendingQuestionIssue.current : null;
+    const issue = pending ?? await createIssue({
       repositoryFullName,
       title: buildAskRepoQuestionTitle(body),
       body: composeIssueBody(effectiveBodyPrefix, body),
@@ -851,13 +854,19 @@ export function CreateIssueDialog({
     });
     if (!issue) return;
 
-    const [owner, repo] = repositoryFullName.split("/");
+    pendingQuestionIssue.current = issue;
+    const [owner, repo] = issue.repositoryFullName.split("/");
     const comment = await createComment({
       owner,
       repo,
       number: issue.number,
       body: askClaudeCommentBody(body),
+      askQuestion: true,
     });
+    if (!comment || comment.deliveryWarning) {
+      setCommentError(comment?.deliveryWarning ?? `質問Issue #${issue.number} は作成済みですが、質問を送信できませんでした。ホストの状態を確認して再送してください。`);
+      return;
+    }
 
     resetForm();
     clearIssueDraft();
@@ -1370,9 +1379,6 @@ export function CreateIssueDialog({
           onCommentCreated={() => {}}
           onNightlyRunQueued={onNightlyRunQueued}
           includeDispatchTargets
-          actionsDisabledReason={startImplementationDisabledReason(
-            startTargetRepository?.hasClaudeWorkflow,
-          )}
           localSessionCommand={
             canStartLocalSession(startTargetRepository?.hasLocalStartScript)
               ? buildLocalSessionCommand(

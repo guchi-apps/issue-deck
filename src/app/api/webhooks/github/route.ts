@@ -5,15 +5,7 @@ import { handleWorkflowRunEventForCiGate } from "@/lib/backup-ci/gate-service";
 import { db } from "@/lib/db";
 import { withGithubApiFeature } from "@/lib/github/api-usage";
 import { getInstallationToken } from "@/lib/github/app-auth";
-import { labelsAfterApproval, PLAN_REQUIRED_LABEL } from "@/lib/github/approval-labels";
-import { createComment, updateIssue, type GithubApiIssue } from "@/lib/github/issues-api";
-import {
-  dispatchCommentBody,
-  isOwnAppSender,
-  LOCAL_LABEL_NAME,
-  resolveDispatchMode,
-  type DispatchMode,
-} from "@/lib/github/project-status-dispatch";
+import { type GithubApiIssue } from "@/lib/github/issues-api";
 import { fetchProjectItem } from "@/lib/github/projects-api";
 import { reportProgressStatus } from "@/lib/github/report-progress";
 import { isTrustedGithubAuthor } from "@/lib/github/trusted-author";
@@ -30,7 +22,7 @@ import { markPlanReviewPosted } from "@/lib/dispatch/plan-review-posted";
 import { sweepCheckUserPushNotifications } from "@/lib/notifications/check-user-push";
 import { recordRepositoryRename } from "@/lib/repository-alias";
 import { fetchClaudeWorkflowExists } from "@/lib/github/workflow-support";
-import type { AccountType, IssueState } from "@prisma/client";
+import type { AccountType } from "@prisma/client";
 
 type InstallationRepoPayload = {
   id: number;
@@ -468,112 +460,7 @@ async function handleProjectsV2ItemEvent(payload: {
   });
   if (updated.count === 0) return;
 
-  await maybeDispatchFromProjectStatus({
-    repository,
-    installationId: installation.installationId,
-    issueNumber: item.issueNumber,
-    issueState: issue?.state,
-    issueLabels: issue?.labels.map((label) => label.name) ?? [],
-    from: previousStatus,
-    to: item.status,
-    senderLogin: payload.sender?.login,
-  });
-}
-
-/**
- * 起動コメントを投稿する前に整えるラベル一覧。変更不要ならnull。
- *
- * **ラベル操作はissue-deckのGitHub Appトークンで行う。** そのため`issues.unlabeled`イベントの
- * senderがAppになり、ワークフローの自己ループ防止で無視される（マーカーによる操作者の復元は
- * `issue_comment`にしか効かない）。つまり**起動の引き金になるのは後続のコメントだけ**であり、
- * 「計画を承認」ボタンが付ける`<!-- issue-deck:no-trigger -->`マーカー（#566。ボタンは個人の
- * OAuthトークンでラベルを外すためラベル除去イベント側が正規の引き金になる）は、こちらでは
- * 付けてはいけない。付けるとどちらの経路でも起動しなくなる。
- */
-function resolveLabelsBeforeDispatch(mode: DispatchMode, current: string[]): string[] | null {
-  if (mode === "plan") {
-    return current.includes(PLAN_REQUIRED_LABEL) ? null : [...current, PLAN_REQUIRED_LABEL];
-  }
-  if (mode === "approve-plan") {
-    return labelsAfterApproval(current.map((name) => ({ name, color: "", description: null })));
-  }
-  return null;
-}
-
-/**
- * カンバンでStatusを動かした操作を実行の起動につなげる（#991 Phase 3）。
- *
- * 起動するかどうかの判定は`resolveDispatchMode`に集約しており、issue-deckの
- * 「実装を開始」ボタン（`POST /api/issues/progress-status`）も同じ関数を通る。
- * ここが担うのは**カンバンのドラッグ起点の経路だけ**で、ボタン経由の書き込みは
- * `isOwnAppSender`で弾かれる（ボタンは自分でコメントを投稿するため取りこぼさない）。
- *
- * 失敗してもWebhook全体は失敗させない。Statusの取り込み自体は済んでおり、
- * 起動しなかったことは画面上「起動待ち」として見えるため。
- */
-async function maybeDispatchFromProjectStatus(params: {
-  repository: { id: string; ownerLogin: string; name: string };
-  installationId: number;
-  issueNumber: number;
-  issueState: IssueState | undefined;
-  issueLabels: string[];
-  from: string | null;
-  to: string | null;
-  senderLogin: string | undefined;
-}) {
-  // issue-deck自身の書き込み（報告APIやボタン）で自分が起動するのを防ぐ
-  if (isOwnAppSender(params.senderLogin) || !params.senderLogin) return;
-  // closedなIssueは全モードで再始動しない（reusable-issue-dispatch.ymlのissue_closedガードと同じ方針）
-  if (params.issueState === "CLOSED") return;
-  // ローカルのClaude Codeセッションで対応中のIssueは無人実行を起動しない（#919と同じ方針）。
-  // ワークフロー側でもskipされるが、意味の無いコメントをIssueに残さないためここでも止める
-  if (params.issueLabels.includes(LOCAL_LABEL_NAME)) return;
-
-  const mode = resolveDispatchMode({
-    from: params.from,
-    to: params.to,
-    labels: params.issueLabels,
-  });
-  if (!mode) return;
-
-  try {
-    const token = await getInstallationToken(params.installationId);
-
-    // **ワークフローのmodeはコメント本文ではなくラベルで決まる**
-    // （reusable-issue-dispatch.ymlの「実行モードを決める」ステップ）。そのため、意図した
-    // 実行を通すにはコメントより先にラベルを整える必要がある。
-    //
-    // - `plan`: `21.plan-required`が無いと実装が始まってしまう
-    // - `approve-plan`: `00.check-user`・`21.plan-required`が残っていると計画がやり直される。
-    //   両方外れた状態が、ワークフローにとっての「承認済み」を意味する
-    const nextLabels = resolveLabelsBeforeDispatch(mode, params.issueLabels);
-    if (nextLabels) {
-      await updateIssue(params.repository.ownerLogin, params.repository.name, params.issueNumber, token, {
-        labels: nextLabels,
-      });
-    }
-
-    await createComment(
-      params.repository.ownerLogin,
-      params.repository.name,
-      params.issueNumber,
-      token,
-      {
-        body: dispatchCommentBody({
-          mode,
-          senderLogin: params.senderLogin,
-          toStatus: params.to ?? "",
-        }),
-      },
-    );
-  } catch (error) {
-    console.error(
-      "[webhooks/github] failed to dispatch from project status",
-      params.repository.id,
-      params.issueNumber,
-      error,
-    );
-  }
+  // GitHub上のStatus変更は状態の同期のみ。実装はIssueDeckのホスト選択から開始する。
 }
 
 export function POST(request: NextRequest) {

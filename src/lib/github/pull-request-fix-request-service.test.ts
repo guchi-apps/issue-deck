@@ -5,7 +5,7 @@ vi.mock("@/lib/db", () => ({ db: {} }));
 
 import {
   FIX_REQUEST_MARKER,
-  buildFixRequestBody,
+  requestPullRequestFix,
   findCurrentFixRequest,
   findInterruptedFixRequest,
 } from "@/lib/github/pull-request-fix-request-service";
@@ -58,22 +58,11 @@ describe("中止・失敗した依頼（#4639）", () => {
   });
 });
 
-describe("buildFixRequestBody", () => {
-  it("PR詳細からの依頼は、方針の無い判断を推測で直さず質問させる", () => {
-    const body = buildFixRequestBody({ number: 4459, headSha: HEAD, instruction: "指摘を直す", key: "k", source: "pull-request-detail" });
-    expect(body).toContain("PR詳細の対応パネルから");
-    expect(body).toContain("推測で直さずIssueコメントで質問");
-    expect(body).not.toContain("チャットでの調査と合意");
-    expect(body).toContain(`<!-- ${FIX_REQUEST_MARKER}:k sha=${HEAD} -->`);
-  });
-
-  it("再送には試行回数を書く", () => {
-    const body = buildFixRequestBody({ number: 1, headSha: HEAD, instruction: "x", key: "k", attempt: 2 });
-    expect(body).toContain("2回目");
-  });
-
-  it("依頼元を指定しなければ従来のチャットの文面のまま", () => {
-    const body = buildFixRequestBody({ number: 1, headSha: HEAD, instruction: "x", key: "k" });
-    expect(body).toContain("チャットでの調査と合意に基づく依頼です");
-  });
+it("廃止したIssue実装へ投稿せず、ホスト実行を案内する", async () => {
+  const result = await requestPullRequestFix(
+    { id: "user", githubAccessToken: null, githubRefreshToken: null },
+    { installation: { installationId: 1 } },
+    { owner: "guchi-apps", repo: "issue-deck", number: 1, expectedHeadSha: HEAD, instruction: "直して" },
+  );
+  expect(result).toMatchObject({ ok: false, error: "local_session", message: expect.stringContaining("ホストセッション") });
 });

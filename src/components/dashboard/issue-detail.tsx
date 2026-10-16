@@ -148,7 +148,6 @@ import {
 } from "@/lib/github/code-review";
 import {
   canStartImplementation,
-  startImplementationDisabledReason,
 } from "@/lib/github/start-implementation";
 import { buildLocalSessionCommand, canStartLocalSession } from "@/lib/local-session";
 import { canCreateFollowupFromComment } from "@/lib/github/workflow-status";
@@ -420,10 +419,10 @@ export function IssueDetail({
   }
 
   /** コメントを1件投稿し、一覧と件数へ反映する（投稿元の入力欄はそれぞれの呼び出し側が畳む） */
-  async function postComment(body: string): Promise<boolean> {
+  async function postComment(body: string, askQuestion = false): Promise<boolean> {
     if (!issue) return false;
     const [owner, repo] = issue.repositoryFullName.split("/");
-    const created = await createComment({ owner, repo, number: issue.number, body });
+    const created = await createComment({ owner, repo, number: issue.number, body, askQuestion });
     if (!created) return false;
     setComments((prev) => [...prev, created]);
     onIssueUpdated({ ...issue, commentCount: issue.commentCount + 1 });
@@ -437,7 +436,7 @@ export function IssueDetail({
 
   async function handleAskClaudeFromComposer() {
     if (!issue || !newCommentBody.trim()) return;
-    if (await postComment(askClaudeCommentBody(newCommentBody))) setNewCommentBody("");
+    if (await postComment(askClaudeCommentBody(newCommentBody), true)) setNewCommentBody("");
   }
 
   /**
@@ -462,7 +461,7 @@ export function IssueDetail({
   }
 
   async function handleApprovalAskClaude(question: string) {
-    await postComment(askClaudeCommentBody(question));
+    await postComment(askClaudeCommentBody(question), true);
   }
 
   async function handleDismissCheckUser(text?: string) {
@@ -645,9 +644,6 @@ export function IssueDetail({
     : null;
   // **トリガーボタンは無効化しない**（#1262）。実行先の選択がダイアログの中にある以上、
   // 押せないとサブPCでの起動まで塞がる。理由はダイアログへ渡し、Actionsの選択肢だけを落とす
-  const actionsDisabledReason = startImplementationDisabledReason(
-    currentRepository?.hasClaudeWorkflow,
-  );
   // 押す前に実行先が分かるよう、ボタンの文言を既定の実行先そのものにする（#1262）。
   // 既定の決め方はダイアログ側と同じ関数を使う
   const dispatchJob = findDispatchJobForIssue(
@@ -875,7 +871,6 @@ export function IssueDetail({
                   onNightlyRunQueued={onNightlyRunQueued}
                   includeDispatchTargets
                   dispatch={dispatch}
-                  actionsDisabledReason={actionsDisabledReason}
                   comments={comments}
                   localSessionCommand={localSessionCommand}
                   subIssueRelations={subIssueRelations}

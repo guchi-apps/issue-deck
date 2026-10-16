@@ -218,7 +218,6 @@ function renderDialog(
       open
       onOpenChange={onOpenChange}
       includeDispatchTargets={props.includeDispatchTargets}
-      actionsDisabledReason={props.actionsDisabledReason ?? null}
       localSessionCommand={props.localSessionCommand ?? null}
       claudeLocalModel={props.claudeLocalModel ?? "sonnet"}
       codexModel={props.codexModel ?? "gpt-5.6-terra"}
@@ -234,7 +233,7 @@ function renderDialog(
 }
 
 function clickStart() {
-  fireEvent.click(screen.getByRole("button", { name: "開始する" }));
+  fireEvent.click(screen.getByRole("button", { name: /^(開始する|コピーする)$/ }));
 }
 
 describe("StartImplementationDialog", () => {
@@ -259,6 +258,7 @@ describe("StartImplementationDialog", () => {
       json: async () => ({ model: "opus", reason: "調査から始まるためです。", source: "ai" }),
     });
     vi.stubGlobal("fetch", modelPickFetch);
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: vi.fn().mockResolvedValue(undefined) } });
   });
 
   afterEach(() => {
@@ -270,22 +270,13 @@ describe("StartImplementationDialog", () => {
     enqueue.mockReset();
   });
 
-  it("実行先を選ばせない場合は選択欄を出さず、従来どおり@claudeコメントを投稿する", async () => {
-    renderDialog();
 
-    expect(screen.queryByText("実行先")).toBeNull();
-    clickStart();
-
-    await waitFor(() => expect(createComment).toHaveBeenCalledTimes(1));
-    expect(createComment.mock.calls[0][0].body).toBe("@claude 実装を開始してください");
-    expect(enqueue).not.toHaveBeenCalled();
-  });
 
   it("申告しているホストが無くても、手元へ貼る出口があるので選択欄は出す（#1263）", () => {
     renderDialog({ includeDispatchTargets: true });
 
     expect(screen.queryByText("実行先")).not.toBeNull();
-    expect(screen.getByRole("radio", { name: /GitHub Actions/ }).getAttribute("aria-checked")).toBe(
+    expect(screen.getByRole("radio", { name: /実装プロンプトをコピー/ }).getAttribute("aria-checked")).toBe(
       "true",
     );
     expect(screen.getByRole("radio", { name: /実装プロンプトをコピー/ })).not.toBeNull();
@@ -296,16 +287,16 @@ describe("StartImplementationDialog", () => {
     renderDialog({ includeDispatchTargets: true });
 
     expect(screen.getByRole("radio", { name: /^サブPC/ }).getAttribute("aria-checked")).toBe("true");
-    expect(screen.getByRole("radio", { name: /GitHub Actions/ }).getAttribute("aria-checked")).toBe(
+    expect(screen.getByRole("radio", { name: /実装プロンプトをコピー/ }).getAttribute("aria-checked")).toBe(
       "false",
     );
   });
 
-  it("選べるホストが無ければ既定はGitHub Actionsへ落ちる（#1262）", () => {
+  it("選べるホストが無ければ既定は実装プロンプトのコピーへ切り替わる（#1262）", () => {
     dispatchState.hosts = [makeHost({ online: false })];
     renderDialog({ includeDispatchTargets: true });
 
-    expect(screen.getByRole("radio", { name: /GitHub Actions/ }).getAttribute("aria-checked")).toBe(
+    expect(screen.getByRole("radio", { name: /実装プロンプトをコピー/ }).getAttribute("aria-checked")).toBe(
       "true",
     );
   });
@@ -317,26 +308,14 @@ describe("StartImplementationDialog", () => {
       actionsDisabledReason: "issue-deckの自動化workflowが見つかりません",
     });
 
-    // Actionsの選択肢だけが落ち、既定のサブPCでそのまま開始できる
-    expect((screen.getByRole("radio", { name: /GitHub Actions/ }) as HTMLButtonElement).disabled).toBe(
-      true,
-    );
+    expect(screen.queryByRole("radio", { name: /GitHub Actions/ })).toBeNull();
     clickStart();
 
     await waitFor(() => expect(enqueue).toHaveBeenCalledTimes(1));
     expect(createComment).not.toHaveBeenCalled();
   });
 
-  it("Actionsを選んでいて使えない場合は開始できず、理由を出す（#1262）", () => {
-    renderDialog({
-      includeDispatchTargets: true,
-      actionsDisabledReason: "issue-deckの自動化workflowが見つかりません",
-    });
 
-    // 理由は選択肢のグリッドの下に出る（#1623。タイルには収まらないため）
-    expect(screen.getByText(/issue-deckの自動化workflowが見つかりません/)).not.toBeNull();
-    expect((screen.getByRole("button", { name: "開始する" }) as HTMLButtonElement).disabled).toBe(true);
-  });
 
   describe("手元へ貼る出口（#1263）", () => {
     const writeText = vi.fn();
@@ -581,17 +560,17 @@ describe("StartImplementationDialog", () => {
       expect(enqueue.mock.calls[0][0].agent).toBe("codex");
     });
 
-    it("実行先をGitHub Actionsへ移すと既定へ戻る（選択が付いていかない）", async () => {
+    it("実行先をコピーへ移すと既定へ戻る（選択が付いていかない）", async () => {
       dispatchState.hosts = [makeHost({ codexCapable: true })];
       renderDialog({ includeDispatchTargets: true });
 
       fireEvent.click(screen.getByRole("radio", { name: /^サブPC/ }));
       fireEvent.click(screen.getByRole("radio", { name: "Codex CLI" }));
-      fireEvent.click(screen.getByRole("radio", { name: "GitHub Actions" }));
+      fireEvent.click(screen.getByRole("radio", { name: "実装プロンプトをコピー" }));
 
       expect(screen.queryByRole("radiogroup", { name: "エージェント" })).toBeNull();
       clickStart();
-      await waitFor(() => expect(createComment).toHaveBeenCalledTimes(1));
+      await waitFor(() => expect(setProgressStatus).toHaveBeenCalledTimes(1));
       expect(enqueue).not.toHaveBeenCalled();
     });
   });
@@ -664,7 +643,7 @@ describe("StartImplementationDialog", () => {
 
         fireEvent.click(screen.getByRole("radio", { name: /^サブPC/ }));
         await waitFor(() =>
-          expect(screen.getByRole("button", { name: "開始する" }).hasAttribute("disabled")).toBe(
+          expect(screen.getByRole("button", { name: /^(開始する|コピーする)$/ }).hasAttribute("disabled")).toBe(
             true,
           ),
         );
@@ -686,7 +665,7 @@ describe("StartImplementationDialog", () => {
         fireEvent.click(screen.getByRole("radio", { name: /^サブPC/ }));
         await waitFor(() => expect(modelPickFetch).toHaveBeenCalledTimes(1));
 
-        fireEvent.click(screen.getByRole("radio", { name: "GitHub Actions" }));
+        fireEvent.click(screen.getByRole("radio", { name: "実装プロンプトをコピー" }));
         fireEvent.click(screen.getByRole("radio", { name: /^サブPC/ }));
         await waitFor(() => expect(screen.getByText(/調査から始まるためです/)).toBeTruthy());
         expect(modelPickFetch).toHaveBeenCalledTimes(1);
@@ -712,11 +691,11 @@ describe("StartImplementationDialog", () => {
       expect(modelPickFetch).not.toHaveBeenCalled();
     });
 
-    it("GitHub Actionsでは選択欄を出さない（設定の既定でしか起動しないため）", () => {
+    it("コピーでは選択欄を出さない（設定の既定でしか起動しないため）", () => {
       dispatchState.hosts = [makeHost()];
       renderDialog({ includeDispatchTargets: true });
 
-      fireEvent.click(screen.getByRole("radio", { name: "GitHub Actions" }));
+      fireEvent.click(screen.getByRole("radio", { name: "実装プロンプトをコピー" }));
       expect(screen.queryByRole("radiogroup", { name: "モデル" })).toBeNull();
     });
 
@@ -810,7 +789,7 @@ describe("StartImplementationDialog", () => {
         openCodex({ codexModel: "pick" });
 
         await waitFor(() =>
-          expect(screen.getByRole("button", { name: "開始する" }).hasAttribute("disabled")).toBe(
+          expect(screen.getByRole("button", { name: /^(開始する|コピーする)$/ }).hasAttribute("disabled")).toBe(
             true,
           ),
         );
@@ -955,7 +934,7 @@ describe("StartImplementationDialog", () => {
       fireEvent.click(screen.getByRole("radio", { name: /^サブPC/ }));
       fireEvent.click(screen.getByRole("radio", { name: /^おまかせ/ }));
       await waitFor(() =>
-        expect(screen.getByRole("button", { name: "開始する" }).hasAttribute("disabled")).toBe(
+        expect(screen.getByRole("button", { name: /^(開始する|コピーする)$/ }).hasAttribute("disabled")).toBe(
           true,
         ),
       );
@@ -966,7 +945,7 @@ describe("StartImplementationDialog", () => {
         json: async () => ({ model: "sonnet", reason: "定型的な追記のためです。", source: "ai" }),
       });
       await waitFor(() =>
-        expect(screen.getByRole("button", { name: "開始する" }).hasAttribute("disabled")).toBe(
+        expect(screen.getByRole("button", { name: /^(開始する|コピーする)$/ }).hasAttribute("disabled")).toBe(
           false,
         ),
       );
@@ -986,16 +965,16 @@ describe("StartImplementationDialog", () => {
       await waitFor(() => expect(screen.getByText(/ラベルと分量から選びました/)).toBeTruthy());
     });
 
-    it("実行先をGitHub Actionsへ移すと選択が付いていかない", async () => {
+    it("実行先をコピーへ移すと選択が付いていかない", async () => {
       dispatchState.hosts = [makeHost()];
       renderDialog({ includeDispatchTargets: true });
 
       fireEvent.click(screen.getByRole("radio", { name: /^サブPC/ }));
       fireEvent.click(screen.getByRole("radio", { name: /^Fable/ }));
-      fireEvent.click(screen.getByRole("radio", { name: "GitHub Actions" }));
+      fireEvent.click(screen.getByRole("radio", { name: "実装プロンプトをコピー" }));
       clickStart();
 
-      await waitFor(() => expect(createComment).toHaveBeenCalledTimes(1));
+      await waitFor(() => expect(setProgressStatus).toHaveBeenCalledTimes(1));
       expect(enqueue).not.toHaveBeenCalled();
     });
   });
@@ -1047,10 +1026,9 @@ describe("StartImplementationDialog", () => {
       clickStart();
 
       // 「計画を立案」は既にラベルとして付いている。文面と進捗はそれに従う
-      await waitFor(() => expect(createComment).toHaveBeenCalledTimes(1));
-      expect(createComment.mock.calls[0][0].body).toBe("@claude 計画を立案してください");
+      await waitFor(() => expect(setProgressStatus).toHaveBeenCalledTimes(1));
       expect(setProgressStatus.mock.calls[0][0].status).toBe("planning");
-      expect(updateIssue).not.toHaveBeenCalled();
+      expect(updateIssue.mock.calls[0][0].labels).toEqual([PLAN_REQUIRED_LABEL, LOCAL_LABEL_NAME]);
     });
   });
 
@@ -1241,7 +1219,7 @@ describe("StartImplementationDialog", () => {
         "プロンプト",
       );
       expect(screen.getByRole("radio", { name: "起動コマンドをコピー" }).textContent).toBe("コマンド");
-      expect(screen.getByRole("radio", { name: "GitHub Actions" }).textContent).toBe("Actions");
+      expect(screen.getByRole("radio", { name: "実装プロンプトをコピー" }).textContent).toBe("プロンプト");
     });
 
     it("選択中の実行先の説明をグリッドの下に出す", () => {
@@ -1250,10 +1228,10 @@ describe("StartImplementationDialog", () => {
 
       expect(screen.getByText(/サブPCが取りに来た時点で起動します/)).not.toBeNull();
 
-      fireEvent.click(screen.getByRole("radio", { name: "GitHub Actions" }));
+      fireEvent.click(screen.getByRole("radio", { name: "実装プロンプトをコピー" }));
 
       expect(screen.queryByText(/サブPCが取りに来た時点で起動します/)).toBeNull();
-      expect(screen.getByText(/無人実行のワークフローを起動します/)).not.toBeNull();
+      expect(screen.getByText(/プロンプト/)).not.toBeNull();
     });
 
     it("オプションの説明欄は出さず（#3046）、押すとラベルが付く", async () => {
@@ -1335,7 +1313,7 @@ describe("StartImplementationDialog", () => {
       const subpc = screen.getByRole("radio", { name: /^サブPC/ });
       expect(subpc.getAttribute("aria-checked")).toBe("true");
       expect(subpc.hasAttribute("disabled")).toBe(false);
-      expect(screen.getByRole("radio", { name: /GitHub Actions/ }).getAttribute("aria-checked")).toBe(
+      expect(screen.getByRole("radio", { name: /実装プロンプトをコピー/ }).getAttribute("aria-checked")).toBe(
         "false",
       );
     });
@@ -1376,7 +1354,7 @@ describe("StartImplementationDialog", () => {
       expect(screen.queryByText("実行先")).not.toBeNull();
       expect(screen.queryAllByRole("radio")).toHaveLength(0);
       expect(screen.queryAllByRole("checkbox")).toHaveLength(0);
-      expect((screen.getByRole("button", { name: "開始する" }) as HTMLButtonElement).disabled).toBe(
+      expect((screen.getByRole("button", { name: /^(開始する|コピーする)$/ }) as HTMLButtonElement).disabled).toBe(
         true,
       );
     });
@@ -1390,7 +1368,7 @@ describe("StartImplementationDialog", () => {
       rerenderSame();
 
       expect(screen.getByRole("radio", { name: /^サブPC/ }).getAttribute("aria-checked")).toBe("true");
-      expect((screen.getByRole("button", { name: "開始する" }) as HTMLButtonElement).disabled).toBe(
+      expect((screen.getByRole("button", { name: /^(開始する|コピーする)$/ }) as HTMLButtonElement).disabled).toBe(
         false,
       );
     });
@@ -1399,10 +1377,10 @@ describe("StartImplementationDialog", () => {
     it("申告しているホストが無いと確定した場合は待たせない", () => {
       renderDialog({ includeDispatchTargets: true });
 
-      expect(screen.getByRole("radio", { name: /GitHub Actions/ }).getAttribute("aria-checked")).toBe(
+      expect(screen.getByRole("radio", { name: /実装プロンプトをコピー/ }).getAttribute("aria-checked")).toBe(
         "true",
       );
-      expect((screen.getByRole("button", { name: "開始する" }) as HTMLButtonElement).disabled).toBe(
+      expect((screen.getByRole("button", { name: /^(開始する|コピーする)$/ }) as HTMLButtonElement).disabled).toBe(
         false,
       );
     });
@@ -1410,10 +1388,10 @@ describe("StartImplementationDialog", () => {
     // 実行先を選ばせない呼び出し（Issue作成直後の自動オープン等）は、待つ相手がいない
     it("実行先を選ばせない場合はオプションをそのまま出す", () => {
       dispatchState.isLoaded = false;
-      renderDialog();
+      renderDialog({ includeDispatchTargets: false });
 
       expect(screen.queryByRole("checkbox", { name: /計画を立案/ })).not.toBeNull();
-      expect((screen.getByRole("button", { name: "開始する" }) as HTMLButtonElement).disabled).toBe(
+      expect((screen.getByRole("button", { name: /^(開始する|コピーする)$/ }) as HTMLButtonElement).disabled).toBe(
         false,
       );
     });

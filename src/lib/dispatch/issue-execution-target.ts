@@ -3,34 +3,7 @@ import { formatDispatchHostName } from "@/lib/dispatch/host-label";
 import type { DispatchSessionView } from "@/lib/dispatch/session-state";
 import { isLocalSessionIssue } from "@/lib/github/project-status-dispatch";
 
-/**
- * あるIssueの実装が**どこで走っているか**の解決（#1262）。
- *
- * 実行先が画面のどこにも出ていなかったため、次の2つが起きていた。
- *
- * 1. サブPC実行のIssueが、実装中ずっと「起動待ち」と表示される。判定
- *    （`workflow-status-steps.tsx`の`awaitingDispatch`）が「Statusは進んでいるのにGitHub Actionsの
- *    実行が紐づいていない」を異常とみなすが、**サブPC実行ではActionsの実行が最初から存在しない**
- * 2. そのIssueをActions実行だと思って20秒ごとにGitHub APIへ問い合わせ続ける
- *    （`use-issues-workflow-running.ts`）
- *
- * どちらも「Actionsの実行を期待してよいか」が分かれば消える。**新しいテーブルは増やさない。**
- * 判断材料は既にあるものだけで足りる。
- *
- * | 材料 | 分かること | 寿命 |
- * |---|---|---|
- * | `DispatchSession`（#1217） | どのホストで走っているか | 24時間（`GONE`も含む） |
- * | `DispatchJob`（#1179） | どのホストへ積んだか | 24時間（終了済みぶん） |
- * | `11.local`ラベル | **Actionsが動かないこと**（無人実行の停止フラグ） | セッションが外すまで |
- *
- * **`11.local`を併用するのが要点。** ジョブ・セッションの記録は24時間で落ちるため、それだけに
- * 頼ると「3日前にサブPCで着手してまだ実装中」のIssueで誤表示が戻ってくる。`11.local`は
- * `claude-issue-dispatch.yml`がそのIssueに対して何もしないことを意味するので、**付いている限り
- * Actionsの実行は存在しない**と言い切れる。
- *
- * Prismaに触れないため、クライアントコンポーネントからimportできる（`dispatch-job.ts`と同じ扱い。
- * `jobs.ts`・`sessions.ts`はできない）。
- */
+/** Issue実装はホスト実行のみ。ホスト名はセッション優先、次にジョブから解決する。 */
 export type IssueExecutionTarget = {
   /**
    * 走っている（走らせた）サブPCのホスト名。**`null`は「ホスト名までは分からない」**であって、
@@ -94,14 +67,13 @@ export function resolveIssueExecutionTarget(params: {
   jobs?: readonly DispatchJobView[];
   sessions?: readonly DispatchSessionView[];
 }): IssueExecutionTarget {
-  const { repositoryFullName, issueNumber, labels, jobs = [], sessions = [] } = params;
+  const { repositoryFullName, issueNumber, jobs = [], sessions = [] } = params;
 
   const session = newestSessionForIssue(sessions, repositoryFullName, issueNumber);
   const job = session ? null : newestJobForIssue(jobs, repositoryFullName, issueNumber);
   const host = session?.host ?? job?.targetHost ?? null;
-  const isLocal = isLocalSessionIssue(labels);
 
-  return { host, expectsActionsRun: host === null && !isLocal };
+  return { host, expectsActionsRun: false };
 }
 
 /**
