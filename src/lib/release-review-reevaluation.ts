@@ -149,6 +149,8 @@ export type ReviewOpenItemKind =
   | "evidence_unavailable"
   /** 実行結果の証跡を待っている */
   | "evidence_waiting"
+  /** 統合検証は成功したが、レビューで確認できない項目が残る */
+  | "review_unconfirmed"
   /** コードの未読範囲が残っている */
   | "code_unread";
 
@@ -182,6 +184,7 @@ export const REVIEW_OPEN_ITEM_LABEL: Record<ReviewOpenItemKind, string> = {
   evidence_failed: "統合検証の失敗・要確認の結果",
   evidence_unavailable: "統合検証の結果を取得できない・未実施",
   evidence_waiting: "実行結果の証跡待ち",
+  review_unconfirmed: "レビューの未確認事項（統合検証は成功）",
   code_unread: "コードの未確認範囲",
 };
 
@@ -258,8 +261,8 @@ export function describeReviewEvidenceStage(
     if (integration.state === "failed" || integration.state === "needs_check") items.push("evidence_failed");
     else if (integrationPending) items.push("evidence_waiting");
     else if (integration.state !== "passed") items.push("evidence_unavailable");
-    // 統合検証が合格でも依存項目が残る＝新しい証跡でも確認できなかった（取得不能を合格にしない）
-    else items.push("evidence_unavailable");
+    // 未確認項目が残ることと、成功済みの統合検証が未実施であることは異なる。
+    else items.push("review_unconfirmed");
   }
   if (review.openFiles > 0) items.push("code_unread");
   return { kind: "needs_check", autoReevaluated: markerCurrent, items };
