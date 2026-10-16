@@ -13,6 +13,8 @@ import {
   type ReleaseReviewDecisionRecord,
   type ReleaseReviewDecisionSummary,
 } from "@/lib/release-review-decision";
+import { prepareFixReason } from "@/lib/release-review-guidance";
+import type { ReleaseReviewFinding } from "@/lib/release-review-result";
 import { cn } from "@/lib/utils";
 
 /**
@@ -103,6 +105,8 @@ export function FindingDecisionControl({
   pullRequestNumber,
   target,
   findingId,
+  finding,
+  blocking = true,
   view,
   onSaved,
 }: {
@@ -110,6 +114,8 @@ export function FindingDecisionControl({
   pullRequestNumber: number;
   target: Target;
   findingId: string;
+  finding?: ReleaseReviewFinding;
+  blocking?: boolean;
   view: FindingDecisionView | undefined;
   onSaved?: () => void;
 }) {
@@ -140,7 +146,7 @@ export function FindingDecisionControl({
           {view?.stale && <p className="font-medium text-amber-700 dark:text-amber-400">再確認が必要: {view.stale}</p>}
         </div>
       ) : (
-        <p className="text-amber-700 dark:text-amber-400">ユーザー判断: 未判断</p>
+        <p className={blocking ? "text-amber-700 dark:text-amber-400" : "text-muted-foreground"}>{blocking ? "ユーザー判断: 未判断" : "対応は任意です（公開を止めない改善提案）"}</p>
       )}
       {view && view.history.length > 1 && (
         <details>
@@ -156,6 +162,8 @@ export function FindingDecisionControl({
       )}
       {editing ? (
         <DecisionForm
+          key={`${target.baseSha}:${target.headSha}:${findingId}:${latestId}`}
+          preparedReason={prepareFixReason(finding, blocking)}
           repositoryFullName={repositoryFullName}
           pullRequestNumber={pullRequestNumber}
           target={target}
@@ -176,7 +184,7 @@ export function FindingDecisionControl({
           onClick={() => setEditing(true)}
           className="self-start rounded border px-2 py-0.5 text-[11.5px] hover:bg-muted"
         >
-          {current ? "判断を変更・撤回" : "判断する"}
+          {current ? "判断を変更・撤回" : blocking ? "対応案を確認して判断" : "対応を記録する（任意）"}
         </button>
       )}
       {note && <p className="text-[11.5px] text-sky-700 dark:text-sky-400">{note}</p>}
@@ -185,6 +193,7 @@ export function FindingDecisionControl({
 }
 
 function DecisionForm({
+  preparedReason,
   repositoryFullName,
   pullRequestNumber,
   target,
@@ -201,12 +210,19 @@ function DecisionForm({
   findingId: string;
   expectedDecisionId: string | null;
   canWithdraw: boolean;
+  preparedReason: string | null;
   initial: ReleaseReviewDecisionKind | "withdrawn" | null;
   onCancel: () => void;
   onSaved: (note: string | null) => void;
 }) {
-  const [decision, setDecision] = useState<ReleaseReviewDecisionAction | null>(initial === "withdrawn" ? null : initial);
-  const [reason, setReason] = useState("");
+  const [decision, setDecision] = useState<ReleaseReviewDecisionAction | null>(initial === "withdrawn" ? null : initial ?? (preparedReason ? "fix_now" : null));
+  const [reason, setReason] = useState((!initial || initial === "fix_now") ? preparedReason ?? "" : "");
+  const [reasonDrafts, setReasonDrafts] = useState<Partial<Record<ReleaseReviewDecisionAction, string>>>({});
+  const choose = (next: ReleaseReviewDecisionAction) => {
+    if (decision) setReasonDrafts((drafts) => ({ ...drafts, [decision]: reason }));
+    setDecision(next);
+    setReason(reasonDrafts[next] ?? (next === "fix_now" ? preparedReason ?? "" : ""));
+  };
   const [impact, setImpact] = useState("");
   const [scope, setScope] = useState("");
   const [timing, setTiming] = useState("");
@@ -268,11 +284,12 @@ function DecisionForm({
   const field = "w-full rounded border bg-background px-1.5 py-1 text-[12px]";
   return (
     <div className="flex flex-col gap-1.5 rounded border px-2 py-1.5" data-testid="finding-decision-form">
-      <fieldset className="flex flex-col gap-0.5">
+      {preparedReason && <p className="text-xs text-muted-foreground">AIレビューに記録された影響・根拠から「今回直す」の理由を用意しました。内容を確認し、そのまま保存するか編集してください。採否の確定はあなたが行います。</p>}
+      <fieldset disabled={busy} className="flex flex-col gap-0.5">
         <legend className="text-[11px] text-muted-foreground">判断</legend>
         {RELEASE_REVIEW_DECISION_KINDS.map((kind) => (
           <label key={kind} className="flex items-start gap-1.5">
-            <input type="radio" name={`decision-${findingId}`} checked={decision === kind} onChange={() => setDecision(kind)} className="mt-0.5" />
+            <input type="radio" name={`decision-${findingId}`} checked={decision === kind} onChange={() => choose(kind)} className="mt-0.5" />
             <span>
               {RELEASE_REVIEW_DECISION_LABEL[kind]}
               <span className="block text-[11px] text-muted-foreground">{RELEASE_REVIEW_DECISION_HINT[kind]}</span>
@@ -281,7 +298,7 @@ function DecisionForm({
         ))}
         {canWithdraw && (
           <label className="flex items-start gap-1.5">
-            <input type="radio" name={`decision-${findingId}`} checked={decision === "withdrawn"} onChange={() => setDecision("withdrawn")} className="mt-0.5" />
+            <input type="radio" name={`decision-${findingId}`} checked={decision === "withdrawn"} onChange={() => choose("withdrawn")} className="mt-0.5" />
             <span>
               判断を撤回（未判断へ戻す）
             </span>
@@ -289,7 +306,7 @@ function DecisionForm({
         )}
       </fieldset>
       <label className="flex flex-col gap-0.5">
-        <span className="text-[11px] text-muted-foreground">理由（必須）{decision === "reject" && "：誤認・対象外・過剰な要求など"}</span>
+        <span className="text-[11px] text-muted-foreground">判断の理由（入力済みなら手入力不要）{decision === "reject" && "：誤認・対象外・過剰な要求など"}</span>
         <textarea value={reason} onChange={(e) => setReason(e.target.value)} rows={2} className={field} maxLength={2000} />
       </label>
       {decision === "defer" && (
@@ -337,12 +354,12 @@ function DecisionForm({
         <button
           type="button"
           onClick={submit}
-          disabled={busy || !decision}
+          disabled={busy || !decision || !reason.trim()}
           className="rounded bg-foreground px-2.5 py-1 text-[12px] text-background disabled:opacity-50"
         >
           {busy ? "保存中…" : "判断を保存"}
         </button>
-        <button type="button" onClick={onCancel} className="rounded border px-2.5 py-1 text-[12px]">
+        <button type="button" disabled={busy} onClick={onCancel} className="rounded border px-2.5 py-1 text-[12px]">
           やめる
         </button>
         <span className="text-[10.5px] text-muted-foreground">保存しても本番へはマージしません</span>

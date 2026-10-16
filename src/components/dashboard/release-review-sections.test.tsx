@@ -129,7 +129,7 @@ describe("ReleaseReviewSections", () => {
   it("全体レビュー → 統合検証 → 個別PRレビューの順に並べる", () => {
     renderSections(summary());
     const titles = screen.getAllByRole("heading", { level: 3 }).map((h) => h.textContent);
-    expect(titles).toEqual(["全体レビュー", "統合検証", "個別PRレビュー"]);
+    expect(titles).toEqual(["今必要な対応", "全体レビュー", "統合検証", "個別PRレビュー"]);
   });
 
   it("未実施を問題なしと出さず、担当予定を出す。表示のみのリポジトリはその旨を出す", () => {
