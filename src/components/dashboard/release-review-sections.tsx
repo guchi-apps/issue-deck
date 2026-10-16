@@ -16,6 +16,7 @@ import { ReleaseFixCreate, ReleaseFixOverviewPanel } from "@/components/dashboar
 import { REVIEW_MARK, REVIEW_TONE } from "@/components/dashboard/review-verdict";
 import { ReleaseRebuildButton } from "@/components/dashboard/release-rebuild-button";
 import { FindingDecisionControl, ReviewDecisionSummaryPanel } from "@/components/dashboard/release-review-decision";
+import { ReleaseGuidancePanel } from "@/components/dashboard/release-guidance-panel";
 import { nonFixFindingIds } from "@/lib/release-review-decision";
 import { useReleaseChanges, type UseReleaseChangesResult } from "@/hooks/use-release-changes";
 import { useReferenceNavigation } from "@/hooks/use-reference-navigation";
@@ -847,6 +848,8 @@ function AiReviewSection({
                       pullRequestNumber={pullRequestNumber}
                       target={target}
                       findingId={finding.id}
+                      finding={finding}
+                      blocking={true}
                       view={decisions.byFinding[finding.id]}
                       onSaved={onReload}
                     />
@@ -877,6 +880,8 @@ function AiReviewSection({
                         pullRequestNumber={pullRequestNumber}
                         target={target}
                         findingId={s.id}
+                        finding={s}
+                        blocking={false}
                         view={decisions.byFinding[s.id]}
                         onSaved={onReload}
                       />
@@ -892,7 +897,7 @@ function AiReviewSection({
             </p>
           )}
           <p className="text-[10.5px] text-muted-foreground">
-            AIが問題なしと判断しても、自動で本番へマージはしません。マージは人が行います。
+            AIの判定だけでは本番公開しません。公開承認済みの候補は、必要な条件が揃ったら自動で公開へ進みます。
           </p>
           {needsFix && !hideRebuild && (
             <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t pt-1.5 text-muted-foreground">
@@ -1323,6 +1328,14 @@ export function ReleaseReviewSections({
     );
   const nowMs = useNow(active);
   const [fixTick, setFixTick] = useState(0);
+  const sectionsRef = useRef<HTMLDivElement>(null);
+  const openSection = (title: string) => {
+    const detail = sectionsRef.current?.querySelector<HTMLDetailsElement>(`details[data-testid="release-section-${title}"]`);
+    if (!detail) return;
+    detail.open = true;
+    detail.querySelector("summary")?.focus();
+    detail.scrollIntoView?.({ block: "nearest" });
+  };
   // 作り直し・修正後のチェック中は、作り直し前のリリースの結果を現在の結果として見せず、履歴へ移す（#4398）
   const [previousResultsState, setPreviousResults] = useState(false);
   const previousResults = hideOverview ? (previousResultsProp ?? false) : previousResultsState;
@@ -1337,7 +1350,7 @@ export function ReleaseReviewSections({
     : null;
 
   return (
-    <div className={cn("overflow-hidden rounded-lg border text-left", className)} data-testid="release-review-sections">
+    <div ref={sectionsRef} className={cn("overflow-hidden rounded-lg border text-left", className)} data-testid="release-review-sections">
       <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 border-b bg-muted/50 px-3 py-1.5">
         <span className="text-xs font-semibold">リリースの検証</span>
         {verification && (
@@ -1367,6 +1380,7 @@ export function ReleaseReviewSections({
           onPreviousResultsChange={setPreviousResults}
         />
       )}
+      {verification && !verificationError && !previousResults && <ReleaseGuidancePanel verification={verification} onOpenReview={() => openSection("全体レビュー")} onOpenIntegration={() => openSection("統合検証")} />}
       {gate && !previousResults && (
         <p className={cn("flex items-center gap-1.5 border-b px-3 py-1.5 text-xs font-bold", TONE_CLASS[gate.tone])}>
           <span aria-hidden="true" className="text-[10px]">
