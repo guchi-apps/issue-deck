@@ -2644,10 +2644,49 @@ model ReleaseReviewDecision {
   blocking     Boolean
   findingTitle String  @db.VarChar(300)
   decidedByUserId String @db.VarChar(40)
+  // 判断時に表示していたAIの推奨（#4676）の写し。推奨の行が消えても、何を勧められてどう決めたかを残す
+  recommendationId    String? @db.VarChar(40)
+  recommendedDecision String? @db.VarChar(32)
+  recommendedReason   String? @db.Text
+  // 理由の出どころ: `ai`（AIの理由案のまま）/ `ai_edited`（理由案を編集）/ `manual`（手入力）。#4676より前の行はnull
+  reasonSource        String? @db.VarChar(16)
 
   createdAt DateTime @default(now())
 
   @@unique([scopeKey, findingId, sequence], map: "ReleaseReviewDecision_sequence_key")
+  @@index([scopeKey])
+}
+
+// 全体レビューの指摘ごとのAIの推奨判断と理由案（#4676）。**推奨は判断ではない。** ユーザーが確定するまで
+// `ReleaseReviewDecision`へは何も書かない。対象（base・head）ごとに1行で、対象が変わった推奨は新しい対象へ使わない。
+// 取得に失敗した指摘も`status=failed`で残し、画面を開くたびにAIを呼び直さない（再取得はユーザーの操作だけ）
+model ReleaseReviewRecommendation {
+  id           String  @id @default(cuid())
+  scopeKey     String  @db.VarChar(191)
+  repoFullName String  @db.VarChar(191)
+  prNumber     Int
+  baseSha      String  @db.VarChar(64)
+  headSha      String  @db.VarChar(64)
+  findingId    String  @db.VarChar(32)
+  // 推奨を作ったときのAIの原判定。変わっていれば推奨を作り直す
+  severity     String  @db.VarChar(16)
+  blocking     Boolean
+  // `ready` / `failed`
+  status       String  @db.VarChar(16)
+  // `fix_now` / `post_release` / `defer` / `reject`
+  recommended  String? @db.VarChar(32)
+  rationale    String? @db.Text
+  // 判断の種類ごとの理由案 `{ [kind]: { reason, impact, scope, timing, followUpTitle } }`
+  drafts       Json?
+  // 判断材料の不足（確認できていない事項）
+  missing      Json?
+  error        String? @db.VarChar(500)
+  model        String? @db.VarChar(100)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([scopeKey, baseSha, headSha, findingId], map: "ReleaseReviewRecommendation_target_key")
   @@index([scopeKey])
 }
 
