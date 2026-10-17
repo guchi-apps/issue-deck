@@ -14,22 +14,17 @@ jobs:
     if: github.repository == 'guchi-apps/issue-deck'
     runs-on: ubuntu-latest
     steps:
-      - name: Use existing installation with read-only permission
-        id: app-token
-        uses: actions/create-github-app-token@v3
-        with:
-          app-id: ${{ vars.WORKFLOW_APP_ID }}
-          private-key: ${{ secrets.WORKFLOW_APP_PRIVATE_KEY }}
-          permission-contents: read
-      - name: Read remaining quota and reset time only
+      - name: Read application quota through existing operations API
         env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
-          INSTALLATION_ID: ${{ steps.app-token.outputs.installation-id }}
+          OPS_API_TOKEN: ${{ secrets.OPS_API_TOKEN }}
         shell: bash
         run: |
           set -euo pipefail
-          gh api rate_limit --jq '.resources.core | {limit,remaining,used,reset}'
-          printf 'installation_id=%s\n' "$INSTALLATION_ID"
+          test -n "$OPS_API_TOKEN"
+          curl --fail --silent --show-error --max-time 30 \
+            -H "Authorization: Bearer $OPS_API_TOKEN" \
+            https://issuedeck.gucchii.com/api/github/rate-limit/apps \
+            | jq '{installations}'
   request:
     if: github.repository == 'guchi-apps/issue-deck'
     runs-on: ubuntu-latest
