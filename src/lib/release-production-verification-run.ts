@@ -5,6 +5,7 @@ import type { DeployRunObservation } from "@/lib/deploy-recovery-series";
 import { fetchDeployRunsForSha, fetchWorkflowRunsForSha, hasVersionVerification } from "@/lib/deploy-recovery-series-run";
 import { fetchFileTextAtRef } from "@/lib/github/release-api";
 import { GITHUB_API, githubFetch } from "@/lib/github/request";
+import { fetchPublicHttps } from "@/lib/public-http-fetch";
 import {
   canAttestProduction,
   classifyProductionTarget,
@@ -52,12 +53,10 @@ function latestRun(runs: DeployRunObservation[]): DeployRunObservation | null {
 
 const succeeded = (run: DeployRunObservation | null) => run?.status === "completed" && run.conclusion === "success";
 
-/** 公開URLを取りに行く。リダイレクトは追わない（登録したURLの外へ到達させない） */
+/** 公開URLを取りに行く。リダイレクトは追わず、公開アドレスへ解決される場合だけ接続する（内部ネットワークへ到達させない。#4719） */
 async function fetchVersionEndpoint(url: string): Promise<{ httpStatus: number | null; body: string | null }> {
   try {
-    const res = await fetch(url, { redirect: "error", cache: "no-store", headers: { accept: "application/json" }, signal: AbortSignal.timeout(PROBE_TIMEOUT_MS) });
-    const body = (await res.text()).slice(0, PROBE_BODY_LIMIT);
-    return { httpStatus: res.status, body };
+    return await fetchPublicHttps(url, { timeoutMs: PROBE_TIMEOUT_MS, bodyLimit: PROBE_BODY_LIMIT });
   } catch {
     return { httpStatus: null, body: null };
   }
