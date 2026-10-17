@@ -41,3 +41,8 @@ it("検証中・合格候補には取消操作を出さない", () => {
   render(<ReleaseRcCancel candidate={{ ...candidate, status: { ...candidate.status, status: "ready_to_prepare" } }} repositoryFullName="o/r" onChanged={() => {}} />);
   expect(screen.queryByRole("button")).toBeNull();
 });
+
+it("修正系列が残るreview候補にも正規の取消操作を出す", () => {
+  render(<ReleaseRcCancel candidate={{ ...candidate, status: { ...candidate.status, status: "fixing" } }} repositoryFullName="o/r" onChanged={() => {}} />);
+  expect(screen.getByRole("button", { name: "候補を取り消して作り直す" })).toBeTruthy();
+});
