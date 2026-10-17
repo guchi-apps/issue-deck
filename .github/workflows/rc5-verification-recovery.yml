@@ -10,6 +10,26 @@ concurrency:
   group: rc5-verification-recovery
   cancel-in-progress: false
 jobs:
+  quota:
+    if: github.repository == 'guchi-apps/issue-deck'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Use existing installation with read-only permission
+        id: app-token
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ vars.WORKFLOW_APP_ID }}
+          private-key: ${{ secrets.WORKFLOW_APP_PRIVATE_KEY }}
+          permission-contents: read
+      - name: Read remaining quota and reset time only
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          INSTALLATION_ID: ${{ steps.app-token.outputs.installation-id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api rate_limit --jq '.resources.core | {limit,remaining,used,reset}'
+          printf 'installation_id=%s\n' "$INSTALLATION_ID"
   request:
     if: github.repository == 'guchi-apps/issue-deck'
     runs-on: ubuntu-latest
