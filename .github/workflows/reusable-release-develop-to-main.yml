@@ -2044,20 +2044,14 @@ jobs:
           git config user.name "Claude Code"
           git config user.email "claude-code@example.com"
           git checkout -q --detach "$RC_BASE"
-          # 版ファイルを公開済みのmainの内容へ戻してから書き換える。以前のバンプが残っていても、同じ手順で同じ結果になる
-          git checkout origin/main -- "$VERSION_FILE"
-          LOCK_PREFIX=""
-          [ "$(dirname "$VERSION_FILE")" = "." ] || LOCK_PREFIX="$(dirname "$VERSION_FILE")/"
-          for LOCK in package-lock.json npm-shrinkwrap.json; do
-            if git cat-file -e "origin/main:${LOCK_PREFIX}${LOCK}" 2>/dev/null; then git checkout origin/main -- "${LOCK_PREFIX}${LOCK}"; fi
-          done
+          # 候補の設定・依存・lockfileを保持する。mainのファイル全体へ戻すと検証済みの修正まで消える（#4706）。
 
           if [ -n "$BUMP_COMMAND" ]; then
             echo "bump-command を実行します: $BUMP_COMMAND"
             export NEW_VERSION BUMP_KIND RELEASE_CHANGELOG RELEASE_USAGE
             bash -c "$BUMP_COMMAND"
           else
-            npm version "$NEW_VERSION" --no-git-tag-version
+            npm version "$NEW_VERSION" --no-git-tag-version --allow-same-version
           fi
           APPLIED="$(jq -r "$VERSION_QUERY" "$VERSION_FILE")"
           if [ "$APPLIED" != "$NEW_VERSION" ]; then
