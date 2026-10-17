@@ -1,0 +1,75 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["state", "summary", "checklistVersion", "checks", "unverifiedScope", "fileReviews", "findings", "affectedPullRequests", "affectedFiles", "previousFindings", "recheckScope"],
+  "properties": {
+    "state": {"type": "string", "enum": ["passed", "needs_check", "failed"]},
+    "summary": {"type": "string"},
+    "checklistVersion": {"type": "integer"},
+    "unverifiedScope": {"type": ["string", "null"]},
+    "recheckScope": {"type": ["string", "null"]},
+    "affectedPullRequests": {"type": "array", "items": {"type": "integer"}},
+    "affectedFiles": {"type": "array", "items": {"type": "string"}},
+    "checks": {
+      "type": "array",
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["id", "status", "evidence", "source"],
+        "properties": {
+          "id": {"type": "string"},
+          "status": {"type": "string", "enum": ["confirmed", "not_applicable", "unconfirmed"]},
+          "evidence": {"type": "string"},
+          "source": {"type": "string", "enum": ["current", "carried_over"]}
+        }
+      }
+    },
+    "fileReviews": {
+      "type": "array",
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["file", "status", "evidence"],
+        "properties": {
+          "file": {"type": "string"},
+          "status": {"type": "string", "enum": ["reviewed", "unreadable"]},
+          "evidence": {"type": "string"}
+        }
+      }
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["blocking", "severity", "title", "detail", "impact", "evidence", "blockingReason", "recommendation", "file", "line", "pullRequests", "previousId", "discovery", "stallCause", "premiseChanged"],
+        "properties": {
+          "blocking": {"type": "boolean"},
+          "severity": {"type": "string", "enum": ["high", "medium", "low"]},
+          "title": {"type": "string"},
+          "detail": {"type": "string"},
+          "impact": {"type": "string"},
+          "evidence": {"type": "string"},
+          "blockingReason": {"type": "string"},
+          "recommendation": {"type": "string"},
+          "file": {"type": ["string", "null"]},
+          "line": {"type": ["integer", "null"]},
+          "pullRequests": {"type": "array", "items": {"type": "integer"}},
+          "previousId": {"type": ["string", "null"]},
+          "discovery": {"type": ["string", "null"], "enum": ["fix_induced", "initial_miss", "scope_added", "unknown", null]},
+          "stallCause": {"type": ["string", "null"], "enum": ["unfixed", "fix_ineffective", "verification_insufficient", "execution_failure", "unknown", null]},
+          "premiseChanged": {"type": ["string", "null"]}
+        }
+      }
+    },
+    "previousFindings": {
+      "type": "array",
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["id", "status", "evidence"],
+        "properties": {
+          "id": {"type": "string"},
+          "status": {"type": "string", "enum": ["resolved", "unresolved"]},
+          "evidence": {"type": "string"}
+        }
+      }
+    }
+  }
+}

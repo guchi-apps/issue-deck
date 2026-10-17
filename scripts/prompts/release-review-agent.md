@@ -52,6 +52,8 @@
 
 回答の**最後に、次の形のJSONを1つだけ**```json のコードブロックで出力してください。ほかの説明は前に書いて構いません。
 
+CLIから出力schemaが指定されている場合はコードブロックや前置きなしで、そのschemaに従うJSONオブジェクトだけを返してください。初回のchecks.sourceはcurrent、再レビュー用の情報が無い場合はpreviousFindingsを空配列、recheckScopeと任意の追加情報はnullとします。未確認範囲が無い場合のunverifiedScopeもnullです。schemaは出力形式の指定だけで、確認や合格条件を省略するものではありません。
+
 ```json
 {
   "state": "passed または needs_check または failed",
