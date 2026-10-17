@@ -1061,31 +1061,67 @@ main起点の`deploy-recovery/*`ブランチへ取り込む。**`merges`APIは�
 - 要求キー（`requestKey`）は操作ごとに作り、失敗後の再送では同じ値を送る。進行中の候補（`rc_active`）・旧方式の候補（`legacy_open`）はサーバーが拒否し、画面は既存候補の検証・修正・公開準備か「新方式へ移行」へ案内する。定期処理からは候補を作らない（#4599）
 - 新規repoの雛形（`src/lib/new-app/scaffold-workflows.ts`）のcallerは、`candidate_request`・`finalize_request`の両方を持つ
 
-**展開状況**（2026-10-13・#4623の棚卸し。caller更新はリポジトリごとのIssue・PRで行い、一括で配らない。「反映」は配布先のdevelopへのマージ、「通し確認」は実リリースでの確認で、両者は別）:
+**展開状況**（2026-10-17の実測。追跡は#4651。caller更新はリポジトリごとのIssue・PRで行い、一括では配らない）:
 
-| repo | 参照タグ | 版ファイル・bump | caller | 展開Issue・PR | 反映 | 通し確認 |
-| --- | --- | --- | --- | --- | --- | --- |
-| issue-deck | ローカル | `package.json` | 配線済み（#4567） | — | 済 | 未（人が実施） |
-| kurashio | v51 | `frontend/package.json`・iOS差異あり | 配線済み | guchi-apps/kurashio#792・PR#793 | 済 | 未（代表ケース） |
-| yoteiflow | v51 | 既定（`package.json`） | 未対応 | guchi-apps/yoteiflow#1241 | 未 | 未 |
-| asset-manager | v51 | 既定 | 未対応 | guchi-apps/asset-manager#748 | 未 | 未 |
-| portfolio | v51 | 既定 | 未対応 | guchi-apps/portfolio#197 | 未 | 未 |
-| solitaire | v51 | 既定 | 未対応 | guchi-apps/solitaire#183 | 未 | 未 |
-| car-care | v51 | 既定 | 未対応 | guchi-apps/car-care#251 | 未 | 未 |
-| stockly | v51 | 既定 | 未対応 | guchi-apps/stockly#145 | 未 | 未 |
-| work-relay | v51 | 既定 | 未対応 | guchi-apps/work-relay#296 | 未 | 未 |
-| status-hub | v51 | 既定 | 未対応 | guchi-apps/status-hub#601 | 未 | 未 |
-| morrow | v51 | 既定 | 未対応 | guchi-apps/morrow#561 | 未 | 未 |
-| db-console | v51 | 既定 | 未対応 | guchi-apps/db-console#214 | 未 | 未 |
-| meisai-lab | v51 | `--ignore-scripts`付きの個別bump | 未対応 | guchi-apps/meisai-lab#293 | 未 | 未 |
-| clip-hive | v51 | `--ignore-scripts`付きの個別bump | 未対応 | guchi-apps/clip-hive#201 | 未 | 未 |
-| signaly | v51 | `version.json`＋`bump_version.py` | 未対応 | guchi-apps/signaly#342 | 未 | 未 |
-| pi0w | v51 | `version.json`＋`bump_version.py` | 未対応 | guchi-apps/pi0w#29 | 未 | 未 |
-| aide | v51 | `package.json`＋iOSのXcode版同期 | 未対応 | guchi-apps/aide#650 | 未 | 未 |
+証跡は次の段階に分けて記録し、前の段階が済んでいても後の段階を済とは書かない。
 
-`pi0w_260719`はアーカイブ済みのため対象外。この表は反映状況の記録で、**各repoの反映・通し確認が残る間は、issue-deck側のPRのマージだけで全展開完了にしない**（本番承認待ち・反映済み・未検証を区別して報告する）。
+- **develop反映**: developのリリースcallerに`candidate-request:`・`finalize-request:`の受け渡しがあり、修正を含む配布タグを参照している
+- **公開**: 候補→検証→公開準備→最終検証→公開承認→mainマージ→公開workflowの成功→正式Release。**この欄はworkflowの成功の証拠で、稼働SHAを直接確かめた証拠ではない**
+- **同期**: 同期PR（`release-sync/*`）のマージ後、`develop...main`でmainにだけある変更が0
+- **同期push**: 修正を含むタグ（v53）を参照した状態で、同期PRのマージによるpushが新規バンプを始めないこと（#4650）
+- **候補完了・次の候補**: 候補が`completed`になり、版予約が消費され、次の候補を開始できる
 
-対象外（理由付き）: アーカイブ済み（pi0w_260719）、およびdevelopにリリースworkflowのcallerを持たず本番リリースが無いrepo（docs・subpc・vps・ideas・claude-config・question・gucchii-os・uptime-kuma・sensor_260531・sensor_260218・wifi-speed。2026-10-13時点）。未対応を「対応済み」と表示しない（画面は`legacy`と理由を出す）。
+| repo | 参照タグ（develop / main） | caller | 展開Issue | 公開版 | 同期PR | 同期push（#4650） | 候補完了・次の候補 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| issue-deck | ローカル / ローカル | 配線済み（#4567） | — | v8.65.0（#4710） | #4711 | 未確認 | 未確認 |
+| kurashio | v53 / v52 | 配線済み | kurashio#792（closed） | v4.43.1 | #796 | 未確認 | 未完了（前の候補が進行中） |
+| yoteiflow | v53 / v52 | 配線済み | yoteiflow#1241（closed） | v4.19.0 | #1253 | 未確認 | 未完了（前の候補が進行中） |
+| asset-manager | v53 / v52 | 配線済み | asset-manager#748（closed） | v7.15.6 | #752 | 未確認 | 未完了（前の候補が進行中） |
+| solitaire | v53 / v53 | 配線済み | solitaire#183（closed） | v1.6.25（#191） | #192 | 済（run 39023769006。判定だけ実行してバンプせず） | 未確認（画面は未確認。下の共通原因により完了できない見込み） |
+| car-care | v53 / v52 | 配線済み | car-care#251（closed） | v4.0.22 | #255 | 未確認 | 未完了（前の候補が進行中） |
+| stockly | v53 / v52 | 配線済み | stockly#145（closed） | v1.2.16 | #149 | 未確認 | 未完了（前の候補が進行中） |
+| work-relay | v53 / v52 | 配線済み | work-relay#296（closed） | v1.17.12 | #300 | 未確認 | 未完了（前の候補が進行中） |
+| status-hub | v53 / v52 | 配線済み | status-hub#601（closed） | v0.55.3 | #605 | 未確認 | 未完了（前の候補が進行中） |
+| morrow | v53 / v52 | 配線済み | morrow#561（closed） | v3.15.7 | #565 | 未確認 | 未完了（前の候補が進行中） |
+| db-console | v53 / v52 | 配線済み | db-console#214（closed） | v2.1.3 | #218 | 未確認 | 未完了（前の候補が進行中） |
+| meisai-lab | v53 / v52 | 配線済み（`--ignore-scripts`付きの個別bump） | meisai-lab#293（closed） | v1.8.7 | #297 | 未確認 | 未完了（前の候補が進行中） |
+| clip-hive | v53 / v52 | 配線済み（`--ignore-scripts`付きの個別bump） | clip-hive#201（closed） | v1.1.2 | #205 | 未確認 | 未完了（前の候補が進行中） |
+| signaly | v53 / v52 | 配線済み（`version.json`＋`bump_version.py`） | signaly#342（closed） | v3.2.3 | #346 | 未確認 | 未完了（前の候補が進行中） |
+| aide | v53 / v52 | 配線済み（iOSのXcode版同期あり） | aide#650（closed） | v4.7.0（#659） | #660 | 未確認 | 未完了（前の候補が進行中） |
+| pi0w | v53 / v52 | 配線済み（`version.json`＋`bump_version.py`） | pi0w#29（closed） | v0.2.0（#35。ソース配布物まで） | #37 | 未確認 | 判定不能（deploy.ymlが無く、`release-artifacts.yml`で配布する） |
+| portfolio | v53 / v34 | **未配線** | portfolio#197（open） | v4.0.0（旧方式） | — | 対象外（新方式でない） | 新方式は未導入 |
+
+「未完了（前の候補が進行中）」と「判定不能」は、#4651の2026-10-17 22:10 JSTのコメントにある画面での確認結果。「未確認」は、該当する事象（v53を参照した状態での同期push、画面での確認）をまだ観測していないことを表す。
+
+**配布タグの対応表**（版番号ではなく中身で選ぶ。「v51以上」では最新の修正が入っているとは言えない）:
+
+| タグ | 公開元（mainのSHA） | 公開日 | 新方式で必要な修正 |
+| --- | --- | --- | --- |
+| `workflows/v51` | `8c766c03`（v8.58.4） | 2026-10-13 | 候補モード・公開準備の入力（`candidate-request`・`finalize-request`） |
+| `workflows/v52` | `5cf7981a`（v8.61.1・#4656） | 2026-10-15 | ＋手動開始への統一（#4599） |
+| `workflows/v53` | `e78e31e3`（v8.65.0・#4710） | 2026-10-17 | ＋同期pushから新規バンプを始めない（#4650）・正式バンプで候補の設定と依存を保持（#4706） |
+
+新方式を使うrepoの採用タグは`workflows/v53`。各repoのmainがv52のままなのは、v53への参照更新がdevelopにだけ入っていて、次の公開でmainへ入るため。developで動く処理（候補作成・公開準備・同期push）はv53で動いている（`push`も`workflow_dispatch`もdevelopのworkflowファイルを使う）。v53の配布run 39022919298がfailureになったのは、アーカイブ済みの`pi0w_260719`へのpushが403になったためで、対象repoには反映されている。
+
+**残件と阻害要因**:
+
+- **候補を完了できない共通原因**（#4713）: `hasVersionVerification`（`src/lib/deploy-recovery-series-run.ts`）は、mainのdeploy.ymlに`APP_COMMIT_SHA`と`/api/app-version`の両方があることを要求している。issue-deck以外の15repoは、2026-10-17時点でどれも両方を持っていない。`advanceProduction`（`release-finalize-run.ts`）はこれが通るまで`activeKey`を外さないので、公開済みでも次の候補を開始できない。修正は#4713で行い、**#4007・#4673の稼働確認要件（HTTP 200やマージだけで完了にしない）は維持する**
+- portfolio#197: callerが未配線。mainとdevelopの乖離も大きく（2026-10-17時点で、developにだけあるコミットが20、mainにだけあるコミットが43）、`repair-workflows`のPR#185も開いたまま。新方式の対象からは外さない
+- pi0w#9: 公開はソース配布物まで。実機への配備は未確認
+- aide#652: 任意のMCP連携トークンが未登録。本体の公開とは分けて追う
+- 同期PRの競合解消・取り込みは自動化されていない。競合したら`release-sync/*`ブランチ上で人が解消する
+
+**初回導入の移行手順**（旧callerのrepoを新方式へ移す）:
+
+1. developのcallerへ`candidate_request`・`finalize_request`のinputと受け渡しを足し、参照タグを採用タグへ上げるPRをdevelopへ入れる。候補作成と公開準備はdevelopのworkflowで起動する（`src/lib/github/release-api.ts`の`ref: "develop"`）ので、**mainのcallerが旧世代のままでも初回の候補作成は止まらない**。mainのcallerは初回の公開で入れ替わる
+2. 画面の開始方式が「候補を作成して検証」になったことを確かめる（`release-start-mode.ts`はdevelopのcallerを読む）
+3. 旧方式の進行中の候補が残っていれば、「新方式へ移行」で移すか、旧方式のまま完了させる
+4. 候補を作成→検証→公開準備まで進め、本番公開は公開承認（#4666）を押したときだけ行う。未承認の候補は公開しない
+5. 公開後は同期PRのマージと、上の表の「同期push」「候補完了・次の候補」が済むことを確かめる
+
+この表は反映状況の記録で、**各repoの通し確認が残っている間は、issue-deck側のPRのマージだけで全展開の完了にしない**（本番承認待ち・反映済み・未検証を区別して報告する）。
+
+対象外（理由付き）: アーカイブ済みのrepo（pi0w_260719）と、developにリリースworkflowのcallerを持たず本番リリースも無いrepo（docs・subpc・vps・ideas・claude-config・question・gucchii-os・uptime-kuma・sensor_260531・sensor_260218・wifi-speed。2026-10-13時点）。未対応のrepoを「対応済み」とは表示しない（画面は`legacy`と理由を出す）。
 
 ## 公開準備（正式バンプ。#4496）
 
