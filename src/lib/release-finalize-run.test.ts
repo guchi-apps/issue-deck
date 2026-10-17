@@ -36,6 +36,8 @@ const mocks = vi.hoisted(() => ({
   prepareApproval: vi.fn(),
   commitApproval: vi.fn(async () => "pa1"),
   ensureRun: vi.fn(async () => ({ ok: true, runId: "run1", created: true })),
+  observeProduction: vi.fn(),
+  recordVerified: vi.fn(async () => undefined),
 }));
 
 vi.mock("@/lib/db", () => {
@@ -77,7 +79,11 @@ vi.mock("@/lib/release-develop-sync-run", () => ({ ensureDevelopSync: mocks.ensu
 vi.mock("@/lib/github/pull-requests-api", () => ({ fetchPullRequest: mocks.fetchPr }));
 vi.mock("@/lib/github/actions-api", () => ({ markPullRequestReadyForReview: vi.fn() }));
 vi.mock("@/lib/github/app-auth", () => ({ getInstallationToken: vi.fn(async () => "t") }));
-vi.mock("@/lib/deploy-recovery-series-run", () => ({ fetchDeployRunsForSha: vi.fn(async () => []), hasVersionVerification: vi.fn(async () => false) }));
+vi.mock("@/lib/release-production-verification-run", () => ({
+  observeProduction: mocks.observeProduction,
+  recordProductionVerified: mocks.recordVerified,
+  loadProductionView: vi.fn(async () => null),
+}));
 vi.mock("@/lib/release-verification", () => ({
   listReleaseVerificationRecords: mocks.records,
   registerReleaseVerification: mocks.register,
@@ -369,5 +375,71 @@ describe("reconcileRcFinalization（系列がマージした後。#4666）", () 
     expect(mocks.candUpdateMany).toHaveBeenCalledWith({ where: { id: "c1", phase: "awaiting_approval" }, data: { phase: "deploying" } });
     const consumed = mocks.resUpdateMany.mock.calls.filter((call) => (call as unknown as [{ data: { status?: string } }])[0].data.status === "consumed");
     expect(consumed).toHaveLength(1);
+  });
+});
+
+describe("reconcileRcFinalization（mainへ出した後の稼働版の確認。#4713）", () => {
+  const MERGE = "d".repeat(40);
+  const succeededRun = { id: 1, htmlUrl: "https://github.com/o/r/actions/runs/1", createdAt: "2026-10-17T00:00:00Z", headSha: MERGE, status: "completed", conclusion: "success", attempt: 1 };
+
+  beforeEach(() => {
+    mocks.loadCandidateRow.mockResolvedValue({ id: "c1", sequence: 3, phase: "verifying_production", revisions: [{ revision: 3 }] });
+    mocks.finFindMany.mockResolvedValue([
+      { id: "f1", candidateId: "c1", status: "applied", prNumber: 10, preBaseSha: BASE, preHeadSha: PRE, finalBaseSha: BASE, finalHeadSha: POST, reservedVersion: "2.14.0", failureReason: null, createdAt: new Date() },
+    ]);
+    mocks.observePr.mockResolvedValue({ number: 10, state: "closed", head: { sha: POST }, base: { sha: BASE } });
+    mocks.fetchPr.mockResolvedValue({ number: 10, merged: true, merged_at: new Date().toISOString(), merge_commit_sha: MERGE, draft: false, head: { sha: POST }, base: { sha: BASE } });
+    mocks.tagRefs.mockResolvedValue([{ ref: "refs/tags/v2.14.0", sha: MERGE }]);
+    // 前のdescribeが積んだ戻り値（clearAllMocksでは消えない）を戻す
+    mocks.candUpdateMany.mockReset().mockResolvedValue({ count: 1 });
+  });
+
+  const completedCalls = () =>
+    mocks.candUpdateMany.mock.calls.filter((call) => (call as unknown as [{ data: { phase?: string } }])[0].data.phase === "completed");
+
+  it("公開URLのSHAが一致したら、候補を完了にして進行中の印を外し、方式と証拠を残す", async () => {
+    mocks.observeProduction.mockResolvedValue({
+      kind: "deploy_without_version_check",
+      runs: [succeededRun],
+      decision: { verified: true, method: "public_version_url" },
+      evidence: { mergeSha: MERGE, probe: { status: "match" } },
+    });
+
+    await reconcileRcFinalization(ctx, "c1");
+
+    expect(mocks.observeProduction).toHaveBeenCalledWith(ctx, { candidateId: "c1", mergeSha: MERGE, version: "2.14.0" });
+    expect(mocks.candUpdateMany).toHaveBeenCalledWith({ where: { id: "c1", phase: "verifying_production" }, data: { phase: "completed", activeKey: null } });
+    expect(mocks.recordVerified).toHaveBeenCalledWith("c1", "public_version_url", expect.objectContaining({ mergeSha: MERGE, tag: "v2.14.0" }));
+    expect(mocks.resUpdateMany).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ candidateId: "c1", version: "2.14.0" }) }));
+  });
+
+  it.each([
+    ["旧版が応答した", "version_mismatch"],
+    ["公開URLを取得できない", "probe_unreadable"],
+    ["証拠が無い（deployのHTTP 200だけ）", "no_evidence"],
+  ])("%s間は完了にせず、進行中の印も外さない", async (_label, reason) => {
+    mocks.observeProduction.mockResolvedValue({ kind: "deploy_without_version_check", runs: [succeededRun], decision: { verified: false, reason }, evidence: {} });
+
+    await reconcileRcFinalization(ctx, "c1");
+
+    expect(completedCalls()).toHaveLength(0);
+    expect(mocks.recordVerified).not.toHaveBeenCalled();
+  });
+
+  it("ソース配布のrepoは、deploy runが無くてもソース公開の証拠で完了にする", async () => {
+    mocks.observeProduction.mockResolvedValue({ kind: "source_publish_only", runs: [], decision: { verified: true, method: "source_publish" }, evidence: { deviceDeployment: "out_of_scope" } });
+
+    await reconcileRcFinalization(ctx, "c1");
+
+    expect(completedCalls()).toHaveLength(1);
+    expect(mocks.recordVerified).toHaveBeenCalledWith("c1", "source_publish", expect.objectContaining({ deviceDeployment: "out_of_scope" }));
+  });
+
+  it("ソース公開を確認できない間は完了にしない", async () => {
+    mocks.observeProduction.mockResolvedValue({ kind: "source_publish_only", runs: [], decision: { verified: false, reason: "source_not_published" }, evidence: {} });
+
+    await reconcileRcFinalization(ctx, "c1");
+
+    expect(completedCalls()).toHaveLength(0);
   });
 });

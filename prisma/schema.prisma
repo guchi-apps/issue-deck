@@ -3015,6 +3015,7 @@ model ReleaseCandidate {
   finalizations    ReleaseCandidateFinalization[]
   reservations     ReleaseVersionReservation[]
   publishApprovals ReleasePublishApproval[]
+  productionCheck  ReleaseProductionCheck?
 
   @@unique([repositoryFullName, sequence])
   @@index([repositoryFullName, phase])
@@ -3171,6 +3172,51 @@ model ReleaseVersionReservation {
 
   @@unique([repositoryFullName, version])
   @@index([candidateId, status])
+}
+
+// 新方式の候補をmainへ出したあとの稼働版の確認（#4713）。候補1件に1行で、本番反映の巡回が観測のたびに更新する。
+// **候補を完了にした根拠（`method`・`evidence`）と、人の確認（`attested*`）はこの記録だけが持つ。**
+// 判定は`src/lib/release-production-verification.ts`の`decideProductionEvidence`
+model ReleaseProductionCheck {
+  id                 String    @id @default(cuid())
+  candidateId        String    @unique
+  repositoryFullName String    @db.VarChar(191)
+  // 対象（候補PRのマージコミット）
+  mergeSha           String    @db.VarChar(64)
+  // repoの種類（`ProductionTargetKind`）と、対象コミットのdeploy run
+  targetKind         String    @db.VarChar(32)
+  deploySucceeded    Boolean   @default(false)
+  deployRunUrl       String?   @db.VarChar(512)
+  // 直近の公開URLの照合（`VersionProbeResult`にURLを足したもの）。URL未登録ならnull
+  lastProbe          Json?
+  // 証拠が揃っていない理由（`ProductionWaitReason`）。完了したらnull
+  waitingReason      String?   @db.VarChar(32)
+  lastObservedAt     DateTime?
+  // 人の確認。何で確かめたかの記述・確認した人・時刻。旧版の応答を観測している間は、これがあっても完了にしない
+  attestedByUserId   String?   @db.VarChar(40)
+  attestationNote    String?   @db.Text
+  attestedAt         DateTime?
+  // 完了にした方式（`ProductionVerificationMethod`）と証拠（run URL・照合した応答・Release URLなど）
+  method             String?   @db.VarChar(32)
+  evidence           Json?
+  verifiedAt         DateTime?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  candidate ReleaseCandidate @relation(fields: [candidateId], references: [id], onDelete: Cascade)
+
+  @@index([repositoryFullName])
+}
+
+// repoごとの稼働版を返す公開URL（#4713）。deploy.ymlが稼働SHAを照合しないrepoでも、issue-deckが外から照合できるようにする。
+// 応答は`{"sha":"<コミット>"}`か`{"version":"<版>"}`のJSON。登録・変更はadmin/maintain権限を持つ利用者だけ
+model ReleaseVersionEndpoint {
+  id                 String   @id @default(cuid())
+  repositoryFullName String   @unique @db.VarChar(191)
+  url                String   @db.VarChar(512)
+  updatedByUserId    String   @db.VarChar(40)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
 }
 
 // 実装セッションの依存待ち（#4321）。

@@ -491,8 +491,19 @@ export async function fetchDeployRunsForSha(
   sha: string,
   token: string,
 ): Promise<DeployRunObservation[]> {
+  return fetchWorkflowRunsForSha(owner, repo, "deploy.yml", sha, token);
+}
+
+/** 指定したworkflowファイルの、そのコミットのrun（#4713でソース配布の`release-artifacts.yml`にも使う） */
+export async function fetchWorkflowRunsForSha(
+  owner: string,
+  repo: string,
+  workflowFile: string,
+  sha: string,
+  token: string,
+): Promise<DeployRunObservation[]> {
   const data = await requestJson<{ workflow_runs?: Array<GithubWorkflowRun & { created_at?: string }> }>(
-    `${GITHUB_API}/repos/${owner}/${repo}/actions/workflows/deploy.yml/runs?head_sha=${encodeURIComponent(sha)}&per_page=20`,
+    `${GITHUB_API}/repos/${owner}/${repo}/actions/workflows/${encodeURIComponent(workflowFile)}/runs?head_sha=${encodeURIComponent(sha)}&per_page=20`,
     token,
   );
   return (data.workflow_runs ?? []).map((run) => ({
