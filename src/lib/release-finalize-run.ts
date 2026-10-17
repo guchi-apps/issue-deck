@@ -5,7 +5,6 @@ import {
   decideDeployRecoveryRelease,
   type DeployRecoveryReleaseDecision,
 } from "@/lib/deploy-recovery-series";
-import { fetchDeployRunsForSha, hasVersionVerification } from "@/lib/deploy-recovery-series-run";
 import { markPullRequestReadyForReview } from "@/lib/github/actions-api";
 import { getInstallationToken } from "@/lib/github/app-auth";
 import { fetchPullRequest } from "@/lib/github/pull-requests-api";
@@ -70,6 +69,7 @@ import {
   type CandidateRow,
   type Context,
 } from "@/lib/release-rc-run";
+import { loadProductionView, observeProduction, recordProductionVerified, type RcProductionView } from "@/lib/release-production-verification-run";
 import { canTransitionRcPhase, parseRcPhase, type RcPhase } from "@/lib/release-rc";
 import {
   listReleaseVerificationDetails,
@@ -151,6 +151,8 @@ export type RcFinalizationOverview = {
   history: RcFinalizationView[];
   /** 最新の公開承認（#4666）。記録の無い候補（既存の候補を含む）はnull */
   approval?: PublishApprovalView | null;
+  /** mainへ出した後の稼働版の確認（#4713）。まだ観測していない候補はnull */
+  production?: RcProductionView | null;
 };
 
 function toView(row: FinalizationRow, reservation: { status: string } | null): RcFinalizationView {
@@ -910,24 +912,36 @@ async function advanceProduction(ctx: Context, candidate: CandidateRow, row: Fin
   // 公開した内容をdevelopへ同期する（新方式のバンプはdevelopへ入らないため）。同期の成否は本番反映の判定に使わず、
   // 完了・取消の後も巡回（`runDevelopSyncSweep`）が同期済みを確かめるまで追う（#4641）
   await ensureDevelopSync(ctx);
-  const runs = await fetchDeployRunsForSha(ctx.owner, ctx.repo, mergeSha, ctx.token);
-  const latest = [...runs].sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.id - a.id)[0];
-  const versionVerified = latest?.status === "completed" && latest.conclusion === "success" ? await hasVersionVerification(ctx.owner, ctx.repo, latest, ctx.token) : false;
-  const decision: DeployRecoveryReleaseDecision = decideDeployRecoveryRelease(
-    { releaseSha: mergeSha, releaseStartedAt: new Date(pull.merged_at), releaseAttempts: 0, lastFailureKey: null },
-    { now: new Date(), runs, versionVerified },
-  );
-  if (decision.action === "track" && decision.status === "verifying") {
-    await setPhase(candidate.id, "deploying", "verifying_production");
-    return;
-  }
-  if (decision.action === "recovered") {
+  // 稼働版の証拠はrepoの種類ごとに方式が違う（#4713）。deploy.ymlが稼働SHAを照合しないrepoも、公開URLの照合・人の確認・
+  // ソース公開で完了にできる。どの方式でも、マージ済み・HTTP 200だけでは完了にしない
+  const observed = await observeProduction(ctx, { candidateId: candidate.id, mergeSha, version: row.reservedVersion });
+  const complete = async () => {
+    if (!observed.decision.verified) return;
     await setPhase(candidate.id, "deploying", "verifying_production");
     const tag = (await repoTags(ctx)).find((t) => t === `v${row.reservedVersion}`) ?? null;
     if (await setPhase(candidate.id, "verifying_production", "completed", { activeKey: null })) {
-      await consumeReservation(candidate.id, row.reservedVersion, mergeSha, tag);
-      await db.releaseVersionReservation.updateMany({ where: { candidateId: candidate.id, version: row.reservedVersion, status: "consumed", consumedTag: null }, data: { consumedTag: tag } });
+      await recordProductionVerified(candidate.id, observed.decision.method, { ...observed.evidence, tag });
+      await consumeReservation(candidate.id, row.reservedVersion!, mergeSha, tag);
+      await db.releaseVersionReservation.updateMany({ where: { candidateId: candidate.id, version: row.reservedVersion!, status: "consumed", consumedTag: null }, data: { consumedTag: tag } });
     }
+  };
+  // deployを持たないrepo（ソース配布・判定不能）は、deploy runの追跡を通さず証拠だけで決める
+  if (observed.kind === "source_publish_only" || observed.kind === "unknown") {
+    if (observed.decision.verified) await complete();
+    else await setPhase(candidate.id, "deploying", "verifying_production");
+    return;
+  }
+  const decision: DeployRecoveryReleaseDecision = decideDeployRecoveryRelease(
+    { releaseSha: mergeSha, releaseStartedAt: new Date(pull.merged_at), releaseAttempts: 0, lastFailureKey: null },
+    { now: new Date(), runs: observed.runs, versionVerified: observed.decision.verified },
+  );
+  if (decision.action === "recovered") {
+    await complete();
+    return;
+  }
+  // deployが成功した後は、期限を過ぎても稼働確認中のまま証拠（公開URL・人の確認）を待つ
+  if ((decision.action === "track" && decision.status === "verifying") || (decision.action === "stop" && decision.reason === "version_unverified")) {
+    await setPhase(candidate.id, "deploying", "verifying_production");
   }
 }
 
@@ -961,7 +975,8 @@ export async function loadFinalizationOverview(ctx: Context, candidateId: string
     if (found) checks = await evaluateChecks(ctx, latest, await fetchPullRequest(ctx.owner, ctx.repo, found.number, ctx.token)).catch(() => null);
   }
   const approval = candidate ? await loadPublishApprovalView(candidateId, candidate.phase).catch(() => null) : null;
-  return { caller, mainVersion, current: latest ? viewOf(latest) : null, checks, history: rows.slice(0, -1).reverse().map(viewOf), approval };
+  const production = candidate ? await loadProductionView(fullNameOf(ctx), candidateId, candidate.phase).catch(() => null) : null;
+  return { caller, mainVersion, current: latest ? viewOf(latest) : null, checks, history: rows.slice(0, -1).reverse().map(viewOf), approval, production };
 }
 
 /** 画面が見ている候補のID。PR番号があればそのPRを持つ候補（過去のものも含む）、無ければ進行中の候補（GitHubは呼ばない） */

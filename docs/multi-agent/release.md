@@ -1105,7 +1105,7 @@ main起点の`deploy-recovery/*`ブランチへ取り込む。**`merges`APIは�
 
 **残件と阻害要因**:
 
-- **候補を完了できない共通原因**（#4713）: `hasVersionVerification`（`src/lib/deploy-recovery-series-run.ts`）は、mainのdeploy.ymlに`APP_COMMIT_SHA`と`/api/app-version`の両方があることを要求している。issue-deck以外の15repoは、2026-10-17時点でどれも両方を持っていない。`advanceProduction`（`release-finalize-run.ts`）はこれが通るまで`activeKey`を外さないので、公開済みでも次の候補を開始できない。修正は#4713で行い、**#4007・#4673の稼働確認要件（HTTP 200やマージだけで完了にしない）は維持する**
+- **候補を完了できない共通原因**（#4713）: `hasVersionVerification`（`src/lib/deploy-recovery-series-run.ts`）は、mainのdeploy.ymlに`APP_COMMIT_SHA`と`/api/app-version`の両方があることを要求している。issue-deck以外の15repoは、2026-10-17時点でどれも両方を持っていない。`advanceProduction`（`release-finalize-run.ts`）はこれが通るまで`activeKey`を外さないので、公開済みでも次の候補を開始できない。#4713で、repoの種類ごとの方式（公開URLの照合・人の確認・ソース公開）を足して解消した（「稼働版の確認はrepoの種類ごとに方式を持つ」）。**#4007・#4673の稼働確認要件（HTTP 200やマージだけで完了にしない）は維持している**
 - portfolio#197: callerが未配線。mainとdevelopの乖離も大きく（2026-10-17時点で、developにだけあるコミットが20、mainにだけあるコミットが43）、`repair-workflows`のPR#185も開いたまま。新方式の対象からは外さない
 - pi0w#9: 公開はソース配布物まで。実機への配備は未確認
 - aide#652: 任意のMCP連携トークンが未登録。本体の公開とは分けて追う
@@ -1186,6 +1186,25 @@ RCから本番公開へ進む確認は**公開準備の開始の1回だけ**に�
 - 追跡は公開処理の段階から独立している。呼び出し元は本番反映の追跡（`advanceProduction`）・pollerの巡回（`deploy-recovery-series/sweep`へ相乗りする`runDevelopSyncSweep`。候補を使ったことのあるリポジトリを5分おき）・候補作成（`createReleaseRc`の中で判定するのでAPI以外の経路からも迂回できない）・画面の「同期PRを作成」の4つ。作成の失敗理由はプロセス内にだけ持ち、巡回が再試行する
 - 画面は開始前の案内（`start-mode`の`develop_sync`。PCの個別ボタン・スマホのシート・一括）と、本番反映以降の候補の本番PR詳細に「developへの同期」欄を出す。**公開結果とは別の欄**で、同期できていないことを本番公開の失敗とは表示しない。承認・全体レビューの記録は作らない
 - 共有workflowの状態判定は、**developの版がmainより古い**ときを「バンプ済み」とみなさない（古いリリースPRを作らない）
+
+### 稼働版の確認はrepoの種類ごとに方式を持つ（#4713）
+
+mainへ出した候補は、稼働版の証拠が揃うまで「稼働確認中」に留まり`activeKey`を外さない（次の候補を作らない）。以前はdeploy.ymlに`APP_COMMIT_SHA`と`/api/app-version`の両方があるrepo（issue-deckだけ）しか完了にできず、配布先repoは公開済みでも次の候補を始められなかった。判定は純関数`decideProductionEvidence`（`src/lib/release-production-verification.ts`）、観測と記録は`release-production-verification-run.ts`、記録は`ReleaseProductionCheck`（候補1件に1行）。
+
+| repoの種類（対象コミット時点のファイルで判定） | 完了にできる証拠 |
+| --- | --- |
+| deploy.ymlが稼働SHAを照合する（`APP_COMMIT_SHA`と`/api/app-version`を含む） | deployジョブの成功（従来どおり） |
+| deploy.ymlはあるが稼働SHAを照合しない（HTTP 200・目印の文字列だけ） | deploy成功を前提に、**公開URLの照合**か**人の確認** |
+| deploy.ymlが無く`release-artifacts.yml`でソースを配る（pi0w） | workflowの成功と、`v<版>`のReleaseが公開済みでタグが対象コミットを指すこと。**ソース公開までを完了とし、実機配備（pi0w#9）は扱わない**。画面にも「実機配備は別管理」と出す |
+| どちらも無い（判定不能） | 人の確認のみ |
+
+- **公開URLの照合**: 画面（本番PR詳細の公開準備パネル「稼働版の確認」）でrepoごとに登録したURL（`ReleaseVersionEndpoint`）を巡回のたびにissue-deckが取りに行く。応答は`{"sha":"…"}`か`{"version":"…"}`のJSONで、`sha`（`commitSha`・`commit`）があればSHAだけで判定し（7文字以上の前方一致可）、無いときだけ予約した版と比べる。`https`の公開ホスト名だけを受け付け、リダイレクトは追わない（サーバーから内部へ到達させないため）
+- **人の確認**: 公開済みで止まっている候補へ後から検証を付ける正規の経路。何で確かめたかを10文字以上で書いて記録する。**記録しただけでは完了にせず**、公開URLが別の版を返している間は完了にならない（機械の観測を人の申告より優先する）。deployするrepoでは対象コミットのdeploy成功が前提
+- 登録・確認はどちらも、対象repoの**admin/maintain権限**を持つ利用者だけ（`POST /api/repositories/release/production-verification`。`role_name`で見分ける）。受け付けた後に本番反映の進行を1巡回し、証拠が揃えばその場で完了→版のタグ記録→`activeKey`の解除まで進む
+- **取得できない・SHAが一致しない・旧版が応答した・deployが成功していない**ときは完了にしない。deploy成功後は期限を過ぎても稼働確認中のまま証拠を待つ
+- 完了にした方式と証拠（run URL・照合した応答・Release URL・確認内容）は`ReleaseProductionCheck.method`・`evidence`に残し、書き換えない
+- 恒久的には、各repoのdeploy.ymlへ稼働SHAの照合を足せば従来の方式で自動的に完了する。その改修はrepoごとのIssueで行う（このIssueでは他repoを触らない）
+- リリース完了系列（#4480）・本番復旧系列（#4007）の追跡は従来の`hasVersionVerification`のままで、上の経路で候補が完了しても系列側は`version_unverified`で人へ渡ることがある
 
 ### 二重実行しない
 

@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 
+import { ProductionVerificationBox } from "@/components/dashboard/release-rc-production";
 import { Button } from "@/components/ui/button";
 import { formatDateTime, formatMonthDayTime } from "@/lib/format-date-time";
 import { FINALIZE_STATUS_LABEL, FINALIZE_START_ERROR_LABEL, REVERIFY_PHASE_LABEL, type ReverifyPhase } from "@/lib/release-finalize";
@@ -560,6 +561,16 @@ export function ReleaseRcFinalizePanel({
 
       {current && current.status === "applied" && <EvidenceTable finalization={current} checks={finalization.checks} />}
 
+      {finalization.production && (
+        <ProductionVerificationBox
+          production={finalization.production}
+          phase={candidate.phase}
+          repositoryFullName={repositoryFullName}
+          candidateId={candidate.id}
+          onChanged={onChanged}
+        />
+      )}
+
       <div className="rounded-lg border">
         <h4 className="border-b px-3 py-2 text-[12.5px] font-semibold">公開結果（Webと配布は別）</h4>
         <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 px-3 py-2 text-[12px]">
@@ -567,7 +578,7 @@ export function ReleaseRcFinalizePanel({
           <dd>
             <span className="font-mono">{current?.version ? `v${current.version}` : "—"}</span>{" "}
             <StateChip tone={candidate.phase === "completed" ? "ok" : ["deploying", "verifying_production"].includes(candidate.phase) ? "run" : "mute"}>
-              {candidate.phase === "completed" ? "稼働を確認済み" : ["deploying", "verifying_production"].includes(candidate.phase) ? "反映中" : "未反映"}
+              {candidate.phase === "completed" ? (finalization.production?.method === "source_publish" ? "ソース公開済み（実機配備は別管理）" : "稼働を確認済み") : ["deploying", "verifying_production"].includes(candidate.phase) ? "反映中" : "未反映"}
             </StateChip>
           </dd>
           <dt className="text-muted-foreground">TestFlight</dt>
