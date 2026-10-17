@@ -19,6 +19,8 @@ import {
   resolveReleaseDecisionChain,
   saveReleaseReviewDecision,
 } from "@/lib/release-review-decision-store";
+import { classifyReasonSource } from "@/lib/release-review-recommendation";
+import { findUsableRecommendation } from "@/lib/release-review-recommendation-store";
 import { loadReleaseVerificationSummary } from "@/lib/release-verification-load";
 
 /**
@@ -31,6 +33,8 @@ import { loadReleaseVerificationSummary } from "@/lib/release-verification-load"
  * - 同時判断は`expectedDecisionId`（画面が見ていた最新の判断）で止め、黙って上書きしない（409 `decision_conflict`）
  * - 公開後対応の関連Issueは、既存の番号（存在を確認）か、この操作で明示的に作るものだけ。見送りには作らない
  * - 外部エージェント用のAPI（review-agent）にはこの書き込み口を作らない。採否はユーザーが決める
+ * - AIの推奨（#4676）を見て判断したときは`recommendationId`を受け取り、推奨の写しと理由の出どころを判断と一緒に残す。
+ *   推奨は今の対象（base・head）・同じ指摘のものだけを受け付け、別の対象の推奨なら409で止める
  */
 export function POST(request: NextRequest) {
   const guard = previewModeGuard();
@@ -55,6 +59,12 @@ async function handlePOST(request: NextRequest) {
   const decision = parseReleaseReviewDecisionAction(payload?.decision);
   const expectedDecisionId =
     payload?.expectedDecisionId === null ? null : typeof payload?.expectedDecisionId === "string" ? payload.expectedDecisionId : undefined;
+  const recommendationId =
+    payload?.recommendationId === undefined || payload?.recommendationId === null
+      ? null
+      : typeof payload.recommendationId === "string" && /^[a-z0-9]{1,40}$/.test(payload.recommendationId)
+        ? payload.recommendationId
+        : undefined;
   if (
     typeof owner !== "string" ||
     typeof repo !== "string" ||
@@ -64,7 +74,8 @@ async function handlePOST(request: NextRequest) {
     !expectedHead ||
     !findingId ||
     !decision ||
-    expectedDecisionId === undefined
+    expectedDecisionId === undefined ||
+    recommendationId === undefined
   ) {
     return NextResponse.json({ error: "invalid_request" }, { status: 400 });
   }
@@ -122,6 +133,19 @@ async function handlePOST(request: NextRequest) {
         { status: 409 },
       );
     }
+    const chain = await resolveReleaseDecisionChain(repoFullName, pullRequestNumber);
+    const scopeKey = releaseDecisionScopeKey(repoFullName, chain);
+    // 判断の根拠にした推奨。今の対象・同じ指摘のものでなければ、古い推奨で保存しない（Issueを作る前に確かめる）
+    const recommendation = recommendationId
+      ? await findUsableRecommendation(recommendationId, { scopeKey, findingId, ...current })
+      : null;
+    if (recommendationId && !recommendation) {
+      return NextResponse.json(
+        { error: "recommendation_stale", message: "AIの推奨が今の対象のものではありません。画面を更新して推奨を確認し直してください" },
+        { status: 409 },
+      );
+    }
+
     // 公開後対応の関連Issue。既存の番号は存在を確かめ、新規作成はユーザーが明示したときだけ
     let followUp: { repo: string; number: number } | null = null;
     if (input.followUp?.kind === "existing") {
@@ -147,9 +171,8 @@ async function handlePOST(request: NextRequest) {
       followUp = { repo: repoFullName, number: created.number };
     }
 
-    const chain = await resolveReleaseDecisionChain(repoFullName, pullRequestNumber);
     const saved = await saveReleaseReviewDecision({
-      scopeKey: releaseDecisionScopeKey(repoFullName, chain),
+      scopeKey,
       repoFullName,
       findingId,
       expectedDecisionId,
@@ -167,6 +190,10 @@ async function handlePOST(request: NextRequest) {
       blocking: Boolean(blockingFinding),
       findingTitle: finding.title,
       userId,
+      recommendation: recommendation
+        ? { id: recommendation.id, decision: recommendation.recommended, reason: recommendation.drafts[recommendation.recommended].reason }
+        : null,
+      reasonSource: classifyReasonSource(recommendation, decision, input.reason),
     });
     if (!saved.ok) {
       return NextResponse.json(

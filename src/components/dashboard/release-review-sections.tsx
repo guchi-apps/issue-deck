@@ -15,7 +15,11 @@ import { ChevronRight, ExternalLink, RotateCcw } from "lucide-react";
 import { ReleaseFixCreate, ReleaseFixOverviewPanel } from "@/components/dashboard/release-fix-panel";
 import { REVIEW_MARK, REVIEW_TONE } from "@/components/dashboard/review-verdict";
 import { ReleaseRebuildButton } from "@/components/dashboard/release-rebuild-button";
-import { FindingDecisionControl, ReviewDecisionSummaryPanel } from "@/components/dashboard/release-review-decision";
+import {
+  FindingDecisionControl,
+  ReviewDecisionSummaryPanel,
+  useReleaseReviewRecommendations,
+} from "@/components/dashboard/release-review-decision";
 import { ReleaseGuidancePanel } from "@/components/dashboard/release-guidance-panel";
 import { nonFixFindingIds } from "@/lib/release-review-decision";
 import { useReleaseChanges, type UseReleaseChangesResult } from "@/hooks/use-release-changes";
@@ -650,6 +654,20 @@ function AiReviewSection({
   const counts = { high: 0, medium: 0, low: 0 };
   for (const finding of section.findings) counts[finding.severity in counts ? finding.severity : "medium"] += 1;
   const decisions = section.decisions ?? null;
+  // 未判断・前提が変わった判断の指摘に、AIの推奨判断と理由案を出す（#4676）。対象ごとに1回作って保存し、以後は保存済みを返す
+  const recommendations = useReleaseReviewRecommendations({
+    repositoryFullName,
+    pullRequestNumber,
+    target,
+    decisions,
+    findingIds: [...section.findings, ...section.suggestions].flatMap((f) => (f.id ? [f.id] : [])),
+  });
+  const recommendationProps = (id: string) => ({
+    recommendation: recommendations.view?.byFinding[id] ?? null,
+    recommendationFailure: recommendations.view?.failures[id] ?? recommendations.error,
+    recommendationLoading: recommendations.loading,
+    onRetryRecommendation: recommendations.retry,
+  });
   // 判断済み（修正しない）の指摘は、修正Issueの起案から外す（#4657）
   const nonFixIds = [...nonFixFindingIds(decisions)];
   const fixable = section.findings.filter((f) => !(f.id && nonFixIds.includes(f.id)));
@@ -852,6 +870,7 @@ function AiReviewSection({
                       blocking={true}
                       view={decisions.byFinding[finding.id]}
                       onSaved={onReload}
+                      {...recommendationProps(finding.id)}
                     />
                   )}
                 </li>
@@ -884,6 +903,7 @@ function AiReviewSection({
                         blocking={false}
                         view={decisions.byFinding[s.id]}
                         onSaved={onReload}
+                        {...recommendationProps(s.id)}
                       />
                     )}
                   </li>

@@ -18,6 +18,7 @@ export const CLAUDE_API_FEATURES = [
   { key: "manual_step_fix", label: "手作業の修正提案" },
   { key: "manual_step_normalize", label: "手作業の雛形整形" },
   { key: "deploy_failure_analysis", label: "デプロイ失敗の原因分析" },
+  { key: "release_review_recommend", label: "全体レビューの判断の推奨" },
   { key: "model_pick", label: "モデルの自動選択" },
   { key: "plan_review_pick", label: "計画レビューの採否判定" },
   { key: "new_app_consult", label: "新規アプリの相談" },
