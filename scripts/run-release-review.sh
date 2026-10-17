@@ -394,7 +394,7 @@ PY
 run_agent() {
   local prompt="$1" out="$2" log="$3"
   if [[ "$agent" == "codex" ]]; then
-    local -a codex_args=(exec --sandbox read-only --ephemeral -m "$codex_model" --output-last-message "$out" -C "$WORKTREE")
+    local -a codex_args=(exec --sandbox read-only --ephemeral -m "$codex_model" --output-schema "$SCRIPT_DIR/prompts/release-review-result.schema.json" --output-last-message "$out" -C "$WORKTREE")
     (cd "$WORKTREE" && timeout -k 60 "$TIMEOUT_SECONDS" "$codex_command" "${codex_args[@]}" <"$prompt" >"$log" 2>&1)
   else
     local -a claude_args=(-p --model "$claude_model" --allowedTools Read Grep Glob)
