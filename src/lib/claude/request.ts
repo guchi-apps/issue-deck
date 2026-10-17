@@ -83,6 +83,8 @@ const REASONING_FEATURES = new Set<ClaudeApiFeature>([
   "manual_step_fix",
   "new_app_consult",
   "chat_investigation",
+  // 全体レビューの採否の推奨（#4676）。公開前の判断を支えるため推論側。対象ごとに1回しか呼ばない
+  "release_review_recommend",
 ]);
 
 async function getAppAiModel(feature: ClaudeApiFeature): Promise<AppAiModel> {

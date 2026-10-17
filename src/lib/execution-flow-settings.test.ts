@@ -67,7 +67,7 @@ describe("原因診断の実行基盤表示（#4143）", () => {
     expect(find(flows, "原因診断（チャット調査）")).toEqual(
       expect.objectContaining({ location: "サブPC", agent: "Codex CLI（ChatGPTサブスク）" }),
     );
-    expect(find(flows, "新規アプリ相談・手作業の修正提案")).toEqual(
+    expect(find(flows, "新規アプリ相談・手作業の修正提案・全体レビューの判断の推奨")).toEqual(
       expect.objectContaining({ location: "IssueDeckサーバー", agent: "Anthropic API（Claude固定）" }),
     );
   });
@@ -75,7 +75,7 @@ describe("原因診断の実行基盤表示（#4143）", () => {
   it("Claude系はどちらもAnthropic API", () => {
     const flows = resolveExecutionFlows({ ...settings, appAiModelReasoning: "claude-sonnet-5-5" });
     expect(find(flows, "原因診断（チャット調査）").agent).toBe("Anthropic API");
-    expect(find(flows, "新規アプリ相談・手作業の修正提案").agent).toBe("Anthropic API");
+    expect(find(flows, "新規アプリ相談・手作業の修正提案・全体レビューの判断の推奨").agent).toBe("Anthropic API");
   });
 });
 

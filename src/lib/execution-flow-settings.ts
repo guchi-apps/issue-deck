@@ -196,7 +196,7 @@ export function resolveExecutionFlows(settings: ExecutionFlowSettings): Executio
       note: appAiProvider(settings.appAiModelReasoning) === "openai" ? "GPT系はOpenAI APIを使わず、サブPCのCodex CLI（ChatGPTサブスク枠）で実行します。" : undefined,
     },
     {
-      group: "アプリ内AI", name: "新規アプリ相談・手作業の修正提案", location: "IssueDeckサーバー",
+      group: "アプリ内AI", name: "新規アプリ相談・手作業の修正提案・全体レビューの判断の推奨", location: "IssueDeckサーバー",
       agent: appAiAgent(settings.appAiModelReasoning), model: appAiClaudeFixedModelLabel(settings.appAiModelReasoning, true), source: "アプリ内AI（推論）設定", sourceId: "app-ai-settings",
       note: appAiProvider(settings.appAiModelReasoning) === "openai" ? CLAUDE_FIXED_NOTE : undefined,
     },
@@ -396,7 +396,7 @@ export function resolveProviderFlowRows(
       entries: [
         entry(find("要約・検索・文章整理・手作業アシスタント"), overrides.appAiModel ? "override" : "provider", "要約・検索・文章整理"),
         entry(find("原因診断（チャット調査）"), overrides.appAiModelReasoning ? "override" : "provider", "原因診断（チャット）"),
-        entry(find("新規アプリ相談・手作業の修正提案"), overrides.appAiModelReasoning ? "override" : "provider", "新規アプリ相談・修正提案"),
+        entry(find("新規アプリ相談・手作業の修正提案・全体レビューの判断の推奨"), overrides.appAiModelReasoning ? "override" : "provider", "新規アプリ相談・修正提案・判断の推奨"),
       ],
       sourceId: "app-ai-settings",
       editsWorkflowModels: false,
