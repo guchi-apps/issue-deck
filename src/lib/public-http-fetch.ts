@@ -34,6 +34,8 @@ const NON_PUBLIC_IPV4: ReadonlyArray<readonly [string, number]> = [
   ["192.0.0.0", 24], // IETFプロトコル割り当て
   ["192.0.2.0", 24], // 文書用
   ["192.88.99.0", 24], // 6to4リレー（廃止）
+  ["192.31.196.0", 24], // AS112
+  ["192.52.193.0", 24], // AMT
   ["192.168.0.0", 16], // private
   ["198.18.0.0", 15], // ベンチマーク
   ["198.51.100.0", 24], // 文書用
@@ -92,7 +94,7 @@ function isNonPublicIpv6(ip: string): boolean {
   if ((g[0] & 0xffc0) === 0xfe80) return true; // link-local
   if ((g[0] & 0xffc0) === 0xfec0) return true; // site-local（廃止）
   if ((g[0] & 0xff00) === 0xff00) return true; // multicast
-  if (g[0] === 0x2001 && g[1] === 0x0db8) return true; // 文書用
+  if (g[0] === 0x2001 && (g[1] === 0x0db8 || g[1] === 0)) return true; // 文書用・Teredo（IPv4を埋め込むトンネル）
   if (g[0] === 0x0100 && g[1] === 0 && g[2] === 0 && g[3] === 0) return true; // discard
   return false;
 }
@@ -153,7 +155,7 @@ export function fetchPublicHttps(url: string, options: { timeoutMs: number; body
     const lookup = options.lookup ?? publicOnlyLookup;
     const req = https.request(
       parsed,
-      { method: "GET", headers: { accept: "application/json" }, lookup: (h, o, cb) => lookup(h, o as { all?: boolean; family?: number }, cb as LookupCallback), timeout: options.timeoutMs },
+      { method: "GET", agent: false, headers: { accept: "application/json" }, lookup: (h, o, cb) => lookup(h, o as { all?: boolean; family?: number }, cb as LookupCallback), timeout: options.timeoutMs },
       (res) => {
         const chunks: Buffer[] = [];
         let size = 0;
@@ -171,6 +173,9 @@ export function fetchPublicHttps(url: string, options: { timeoutMs: number; body
         res.on("error", reject);
       },
     );
+    // 無通信のtimeoutに加え、少しずつ送り続ける相手に備えて全体の上限も置く。agent: falseは環境変数のプロキシ（名前解決が検査の外になる）と接続の共有を避ける
+    const overall = setTimeout(() => req.destroy(new Error("タイムアウト")), options.timeoutMs);
+    req.on("close", () => clearTimeout(overall));
     req.on("timeout", () => req.destroy(new Error("タイムアウト")));
     req.on("error", reject);
     req.end();
