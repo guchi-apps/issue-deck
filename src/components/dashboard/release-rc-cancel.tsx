@@ -14,7 +14,7 @@ export function ReleaseRcCancel({ candidate, repositoryFullName, onChanged }: {
 }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  if (candidate.phase !== "review" || candidate.status.status !== "needs_fix") return null;
+  if (candidate.phase !== "review" || !["needs_fix", "fixing"].includes(candidate.status.status)) return null;
 
   const cancel = async () => {
     if (!window.confirm(`${repositoryFullName}の${candidate.label}を取り消しますか？履歴・検証結果は残り、公開はしません。取り消した後、ブランチ画面から修正を含む新しい候補を作成してください。`)) return;
