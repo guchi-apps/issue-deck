@@ -1,4 +1,4 @@
-import { reconcileRcFinalization } from "@/lib/release-finalize-run";
+import { reconcileRcFinalization, reconcileSuccessorWaiting } from "@/lib/release-finalize-run";
 import { loadCandidateRow } from "@/lib/release-rc-run";
 
 /**
@@ -8,6 +8,8 @@ import { loadCandidateRow } from "@/lib/release-rc-run";
  */
 export async function reconcileActiveRcPublication(ctx: { owner: string; repo: string; token: string }): Promise<void> {
   const activeKey = `${ctx.owner}/${ctx.repo}`;
+  // 後続の確認を待つ候補（#4712）も、mainの今の稼働版で確かめ直す（候補の枠を持たないので下の照合では読まれない）
+  await reconcileSuccessorWaiting(ctx);
   const candidate = await loadCandidateRow({ activeKey });
   if (!candidate) return;
   let row = candidate;

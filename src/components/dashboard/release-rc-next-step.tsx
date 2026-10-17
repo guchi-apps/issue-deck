@@ -13,7 +13,10 @@ export function ReleaseRcNextStep({ candidate }: { candidate: RcCandidateView })
   const action = describeRcPrimaryAction({ status: status.status, publishable: false });
   const stuck = status.attention !== null;
   let next: string;
-  if (stuck) {
+  if (action.kind === "recheck_production") {
+    // 稼働確認の停止（#4712）。自動では進まないので「操作不要」と言わず、原因を直す操作を出す
+    next = `${status.reason}（公開準備パネルの「稼働確認をやり直す」で確かめ直せます）`;
+  } else if (stuck) {
     next = "状態を確認してください。記録と実際の候補が食い違っているため、先へは進めません。";
   } else if (action.kind === "prepare") {
     next = "全体レビュー・統合検証に合格しました。「本番公開へ進む（公開承認）」を押すと、正式バンプと最終検証のあと自動で本番公開します。";

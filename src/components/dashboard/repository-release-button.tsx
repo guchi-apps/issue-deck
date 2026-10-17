@@ -21,6 +21,7 @@ import { isPrepBlockedReason, PREP_OVERRIDE_CONFIRM_TEXT } from "@/lib/release-p
 import { useReleaseStartMode } from "@/hooks/use-release-start-mode";
 import { ReleaseBlockNotice } from "@/components/dashboard/release-block-notice";
 import type { RcBlockSummary } from "@/lib/release-rc";
+import { productionKindNotice } from "@/lib/release-production-stop";
 import { newRequestKey, ReleaseBlockedError, requestReleaseStart } from "@/lib/release-request";
 import type { BumpKind } from "@/lib/semver-bump";
 import type { ReleaseBlockedReason } from "@/types/branch-flow";
@@ -179,7 +180,7 @@ export function RepositoryReleaseButton({
         {isTriggering ? "起動中..." : isPending ? "リリース起動中…" : startLoading ? "開始方式を確認中" : startMode?.mode === "blocked" || startMode?.mode === "develop_sync" || blockOverride ? "開始できません" : deployFailed ? "修正リリース" : prepBlocked ? BLOCKED_BUTTON_LABEL[blockedReason] : "候補を作成して検証"}
       </Button>
       {needsOverride && blockedReason && <span className="text-xs text-muted-foreground">{BLOCKED_REASON_LABEL[blockedReason]}</span>}
-      {startUnknown && (
+      {(startUnknown || (startMode?.mode === "candidate" && (startMode.successorOf || productionKindNotice(startMode.productionKind)))) && (
         <ReleaseBlockNotice
           repositoryFullName={repositoryFullName}
           startMode={startMode}

@@ -250,6 +250,23 @@ export async function requestReleaseCandidateCancel(repoFullName: string, block:
   throw new Error(json.message ?? `終了できませんでした (${res.status})`);
 }
 
+/**
+ * 稼働確認が止まった公開済み候補を確かめ直す（#4712）。サーバーは待ち時間を今から取り直して1巡確かめるだけで、
+ * 証拠を代わりに書かない（確かめられなければまた理由付きで止まる）
+ */
+export async function requestRcProductionRecheck(repoFullName: string, candidateId: string): Promise<void> {
+  const [owner, repo] = repoFullName.split("/");
+  const res = await fetch("/api/repositories/release/rc", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ owner, repo, action: "recheck_production", candidateId }),
+  });
+  const json: { ok?: boolean; error?: string } = await res.json().catch(() => ({}));
+  if (res.ok && json.ok !== false) return;
+  if (json.error === "not_stopped") throw new Error("稼働確認は止まっていません。状態を取り直してください。");
+  throw new Error(`稼働確認をやり直せませんでした (${res.status})`);
+}
+
 export type ReleaseBulkResult = {
   /** 起動できたリポジトリのフル名 */
   succeeded: string[];

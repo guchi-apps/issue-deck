@@ -9,11 +9,23 @@
 
 import type { DevelopSyncStatus } from "@/lib/release-develop-sync";
 import { parseFinalizeCallerSupport } from "@/lib/release-finalize";
+import type { ProductionTargetKind } from "@/lib/release-production-verification";
 import { parseRcCallerSupport, type RcBlockSummary } from "@/lib/release-rc";
 
 export type ReleaseStartMode =
-  /** 候補作成・公開準備の両方に対応。通常の開始操作は候補を作る */
-  | { mode: "candidate" }
+  /**
+   * 候補作成・公開準備の両方に対応。通常の開始操作は候補を作る。`successorOf`は、証拠未設定で稼働確認が止まった
+   * 既存候補（#4712）。開始するとその候補は後続の確認待ちへ移り、新しい候補の稼働確認で完了する
+   */
+  | {
+      mode: "candidate";
+      successorOf?: RcBlockSummary;
+      /**
+       * developの配布workflowの方式（#4713の判定）。照合が無いまま公開すると公開URLの照合か人の確認が要り、
+       * 無ければ稼働確認で止まるので、開始前に知らせる（#4712）。読めなければnull、未取得なら省略
+       */
+      productionKind?: ProductionTargetKind | null;
+    }
   /** どちらか（または両方）に未対応。caller・参照タグの更新が要る。通常開始は止まる（旧方式へ落とさない） */
   | { mode: "legacy"; reason: "caller_without_input" | "finalize_without_input"; label: string }
   /** callerを読めず判定できない。起動しない（旧方式を黙って起動しない） */

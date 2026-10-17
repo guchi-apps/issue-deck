@@ -3008,6 +3008,15 @@ model ReleaseCandidate {
   cancelReason         String?   @db.Text
   cancelledByUserId    String?   @db.VarChar(40)
   cancelledAt          DateTime?
+  // 本番の稼働確認が止まった理由（#4712。`ProductionStopReason`）と詳細。確認中・完了ではnull。
+  // 証拠そのもの・完了の方式は#4713の`ReleaseProductionCheck`が持つ
+  productionStopReason String?   @db.VarChar(40)
+  productionStopDetail String?   @db.Text
+  // 稼働確認の待ち時間の起点。nullならマージ時刻。画面の「稼働確認をやり直す」で取り直す
+  productionCheckStartedAt DateTime?
+  // 証拠未設定の候補を、照合付きの後続の版の稼働で完了させるための枠（#4712）。`activeKey`の代わりに
+  // リポジトリ名を入れ、同じリポジトリで同時に1本だけ持つ。完了したらnullへ戻す
+  successorProofKey    String?   @unique @db.VarChar(191)
   createdAt            DateTime  @default(now())
   updatedAt            DateTime  @updatedAt
 

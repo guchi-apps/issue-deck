@@ -105,3 +105,42 @@ describe("ReleaseBlockNotice（#4628）", () => {
     });
   });
 });
+
+describe("ReleaseBlockNotice — 稼働確認の停止（#4712）", () => {
+  const stopped = {
+    ...classifyRcBlock({
+      candidateId: "c9",
+      sequence: 1,
+      prNumber: 254,
+      phase: "verifying_production",
+      status: "production_stopped",
+      statusLabel: "稼働確認が停止（証拠未設定）",
+      productionStopReason: "contract_missing",
+      statusReason: "照合を入れてから次の候補を開始できます",
+    }),
+    successorStart: { allowed: false as const, reason: "developのdeploy.ymlにまだ稼働版の照合がありません" },
+  };
+
+  it("スピナー（進行中）ではなく停止として、原因・次の操作・始められない理由と再確認を出す", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({ ok: true }), { status: 200 }));
+    const onChanged = vi.fn();
+    render(<ReleaseBlockNotice repositoryFullName="guchi-apps/car-care" startMode={blocked(stopped)} onChanged={onChanged} />);
+    expect(screen.getByTestId("release-block-notice").getAttribute("data-kind")).toBe("production_stopped");
+    expect(screen.getByText("稼働確認が停止（証拠未設定）")).toBeTruthy();
+    expect(screen.getByText(/次の操作: 照合を入れてから/)).toBeTruthy();
+    expect(screen.getByText(/まだ稼働版の照合がありません/)).toBeTruthy();
+    expect(screen.queryByText("管理記録を終了する…")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "稼働確認をやり直す" }));
+    await waitFor(() => expect(onChanged).toHaveBeenCalled());
+    const bodies = fetchMock.mock.calls.map((call) => JSON.parse(String(call[1]?.body ?? "{}")));
+    expect(bodies).toContainEqual(expect.objectContaining({ owner: "guchi-apps", repo: "car-care", action: "recheck_production", candidateId: "c9" }));
+    expect(releaseBlockShortLabel(blocked(stopped))).toBe("RC-1 稼働確認が停止・開始できません");
+  });
+
+  it("developに照合が入っていれば開始できると出し、旧い候補が後続の確認待ちへ移ることを先に伝える", () => {
+    const successorOf = { ...stopped, successorStart: { allowed: true as const } };
+    render(<ReleaseBlockNotice repositoryFullName="guchi-apps/car-care" startMode={{ mode: "candidate", successorOf }} onChanged={() => {}} />);
+    expect(screen.getByTestId("release-block-successor")).toBeTruthy();
+    expect(screen.getByText(/後続の稼働確認待ち/)).toBeTruthy();
+  });
+});

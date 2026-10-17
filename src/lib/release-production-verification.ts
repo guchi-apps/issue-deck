@@ -8,6 +8,7 @@
  * - `public_version_url`: 画面で登録した公開URLの版情報を、issue-deckが外から照合する（`sha`か`version`）
  * - `manual_attestation`: 人が確かめた内容を書いて確定する。外部照合が**旧版を返している間は確定できない**
  * - `source_publish`: deploy.ymlを持たずソースをReleaseで配るrepo（pi0w）。**ソース公開までを完了とし、実機配備は扱わない**
+ * - `successor`: 照合の無い版の候補を、照合付きで稼働を確かめた後続の版（この候補を祖先に持つ）で確かめた（#4712）
  *
  * **HTTP 200・マージ済みだけでは完了にしない**（#4007・#4673）。deployするrepoでは、どの方式でも
  * 対象コミットのdeployが成功していることを前提にする。
@@ -23,7 +24,7 @@ export const PRODUCTION_TARGET_LABEL: Record<ProductionTargetKind, string> = {
   unknown: "本番反映の方式を判定できない",
 };
 
-export const PRODUCTION_VERIFICATION_METHODS = ["deploy_version_check", "public_version_url", "manual_attestation", "source_publish"] as const;
+export const PRODUCTION_VERIFICATION_METHODS = ["deploy_version_check", "public_version_url", "manual_attestation", "source_publish", "successor"] as const;
 export type ProductionVerificationMethod = (typeof PRODUCTION_VERIFICATION_METHODS)[number];
 
 export const PRODUCTION_METHOD_LABEL: Record<ProductionVerificationMethod, string> = {
@@ -31,6 +32,7 @@ export const PRODUCTION_METHOD_LABEL: Record<ProductionVerificationMethod, strin
   public_version_url: "公開URLの版情報の照合",
   manual_attestation: "人による確認",
   source_publish: "ソース公開（Release資産）",
+  successor: "後続の版の稼働SHA照合",
 };
 
 export const PRODUCTION_WAIT_REASONS = [
