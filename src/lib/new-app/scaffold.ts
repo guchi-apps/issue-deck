@@ -158,6 +158,7 @@ export function buildScaffoldFiles(spec: NewAppSpec, options: ScaffoldOptions): 
     files.push({ path: "pnpm-workspace.yaml", content: pnpmWorkspace(spec) });
     files.push({ path: "src/lib/changelog.ts", content: changelogModule() });
     files.push({ path: "src/app/manifest.ts", content: manifestModule(spec) });
+    files.push({ path: "src/app/api/app-version/route.ts", content: appVersionRoute() });
     files.push({ path: "public/icon.svg", content: placeholderIcon(spec) });
   }
 
@@ -512,6 +513,30 @@ function changelogModule(): string {
  * 新しい順に並べる。
  */
 export const APP_CHANGELOG: ChangelogEntry[] = [];
+`;
+}
+
+/**
+ * `src/app/api/app-version/route.ts`。稼働中のコミットを返す（guchi-apps/issue-deck#4712）。
+ * リリース候補の稼働確認は「`deploy`ジョブがこの`sha`を今回のコミットと突き合わせた」ことを証拠にする。
+ * **突き合わせはVPSのgate側（guchi-apps/vps の app-deploy-gate）が持つ**ので、雛形の`deploy.yml`は
+ * `APP_COMMIT_SHA`を渡すだけで、照合をしていると名乗らない（照合の無いdeployを稼働確認の証拠にしない）。
+ */
+function appVersionRoute(): string {
+  return `import { NextResponse } from "next/server";
+
+import packageJson from "../../../../package.json";
+
+// 稼働中の版の確認に使う。キャッシュされると旧版を返し続けるため常に無効化する。
+export const dynamic = "force-dynamic";
+
+/** 稼働しているコミットのSHA。\`deploy.yml\`がVPSの\`.env\`へ渡す\`APP_COMMIT_SHA\`を返す（未設定ならnull）。 */
+export async function GET() {
+  return NextResponse.json(
+    { version: packageJson.version, sha: process.env.APP_COMMIT_SHA || null },
+    { headers: { "Cache-Control": "no-store" } },
+  );
+}
 `;
 }
 

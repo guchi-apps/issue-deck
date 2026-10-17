@@ -1201,10 +1201,30 @@ mainへ出した候補は、稼働版の証拠が揃うまで「稼働確認中�
 - **公開URLの照合**: 画面（本番PR詳細の公開準備パネル「稼働版の確認」）でrepoごとに登録したURL（`ReleaseVersionEndpoint`）を巡回のたびにissue-deckが取りに行く。応答は`{"sha":"…"}`か`{"version":"…"}`のJSONで、`sha`（`commitSha`・`commit`）があればSHAだけで判定し（7文字以上の前方一致可）、無いときだけ予約した版と比べる。`https`の公開ホスト名だけを受け付け、リダイレクトは追わない（サーバーから内部へ到達させないため）
 - **人の確認**: 公開済みで止まっている候補へ後から検証を付ける正規の経路。何で確かめたかを10文字以上で書いて記録する。**記録しただけでは完了にせず**、公開URLが別の版を返している間は完了にならない（機械の観測を人の申告より優先する）。deployするrepoでは対象コミットのdeploy成功が前提
 - 登録・確認はどちらも、対象repoの**admin/maintain権限**を持つ利用者だけ（`POST /api/repositories/release/production-verification`。`role_name`で見分ける）。受け付けた後に本番反映の進行を1巡回し、証拠が揃えばその場で完了→版のタグ記録→`activeKey`の解除まで進む
-- **取得できない・SHAが一致しない・旧版が応答した・deployが成功していない**ときは完了にしない。deploy成功後は期限を過ぎても稼働確認中のまま証拠を待つ
+- **取得できない・SHAが一致しない・旧版が応答した・deployが成功していない**ときは完了にしない。deploy成功後は期限を過ぎても証拠を待つが、待っても進まない状態は「稼働確認が停止（理由）」として出す（#4712。次節）
 - 完了にした方式と証拠（run URL・照合した応答・Release URL・確認内容）は`ReleaseProductionCheck.method`・`evidence`に残し、書き換えない
 - 恒久的には、各repoのdeploy.ymlへ稼働SHAの照合を足せば従来の方式で自動的に完了する。その改修はrepoごとのIssueで行う（このIssueでは他repoを触らない）
 - リリース完了系列（#4480）・本番復旧系列（#4007）の追跡は従来の`hasVersionVerification`のままで、上の経路で候補が完了しても系列側は`version_unverified`で人へ渡ることがある
+
+### 稼働確認が止まったときの表示と、次の候補による確認（#4712）
+
+#4713の判定が完了でないとき、**待てば進む（スピナー）のか、待っても進まない（原因と操作を出す）のか**を純関数`decideProductionStop`（`src/lib/release-production-stop.ts`）が決め、止まった理由を`ReleaseCandidate.productionStopReason`（詳細は`productionStopDetail`）へ記録する。候補の状態は「稼働確認中」ではなく`production_stopped`（「稼働確認が停止（理由）」）になり、PCの公開準備パネル・スマホの「次の操作」・開始判定（`classifyRcBlock`の`production_stopped`）が同じ文面`PRODUCTION_STOP_TEXT`で原因と操作を出す。
+
+| 理由 | 表示 | 判定の元 |
+| --- | --- | --- |
+| `contract_missing` | 証拠未設定 | deploy成功後に証拠が無い（照合の無いrepo）・配布workflowが無い |
+| `version_mismatch` | 旧版が応答 | 公開URLが別の版を返す |
+| `evidence_unreadable` | 取得不能 | 公開URLを読めない |
+| `version_unverified` | 照合未完了 | 照合付きのrepoで照合ジョブの成功を確かめられない |
+| `deploy_not_started` / `deploy_failed` / `deploy_cancelled` | デプロイ未起動・失敗・取消 | 対象コミットの**最新の**deploy run（1回目の失敗は15分だけ再実行を待つ） |
+| `source_unpublished` | 公開未確認 | ソース公開を期限（60分）までに確認できない |
+
+- **記録は確定ではない。** 次の巡回で証拠が揃えばそのまま完了し、再実行が始まれば記録を消して進行中へ戻す
+- 「稼働確認をやり直す」（`POST /api/repositories/release/rc` `action=recheck_production`）は待ち時間の起点（`productionCheckStartedAt`）を今に取り直して1巡確かめるだけで、**証拠を代わりに書かない**
+- **証拠未設定の候補は、照合付きの次の候補で確かめられる（循環の回避）。** 照合を入れるにも次の候補を公開するしかないので、停止理由が`contract_missing`で、developの`deploy.yml`が照合を持ち、後続の確認を待つ候補が他に無いときだけ（`decideSuccessorStart`）、開始判定は`blocked`ではなく`candidate`に`successorOf`を添えて返す。開始すると旧い候補は`activeKey`から`successorProofKey`（repoごとに1本・一意制約）へ移る。**完了・取消にはしない**（段階・版の予約・履歴・developへの同期の追跡はそのまま）
+- 後続の確認を待つ候補は、mainの**最新の**deployが成功し、そのコミットの`deploy.yml`が照合を持ち、照合ジョブが成功し、旧い候補のマージコミットを祖先に持つと確かめた時点で（`observeSuccessorProof`）、方式`successor`（後続の版の稼働SHA照合）で完了する。照合付きの候補が完了した巡回で、待っている候補を確かめ直す
+- 開始判定は、developの方式が照合付きでなければ「公開後は公開URLの照合か人の確認が要る」ことを開始前に出す（`productionKindNotice`。開始自体は止めない）
+- 新規アプリの雛形は`src/app/api/app-version/route.ts`と、gateへの`APP_COMMIT_SHA`の受け渡しを持つ。**照合はVPSのgate側（guchi-apps/vps#298）の対応待ち**なので、雛形の`deploy.yml`は照合を名乗らない（照合していないのに照合付きと判定されないよう`scaffold.test.ts`で固定している）。**共有workflowの参照タグを上げても、各repoの`deploy.yml`やAPIは配られない**ので、repoごとにIssueを立てて直す（car-careはguchi-apps/car-care#257）
 
 ### 二重実行しない
 

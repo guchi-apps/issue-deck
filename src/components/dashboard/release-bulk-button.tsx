@@ -225,7 +225,9 @@ function BulkTargetRow({
         {startMode === null ? (
           <span className="rounded bg-muted px-1.5 text-[11px]">対応確認中</span>
         ) : startMode.mode === "candidate" ? (
-          <span className="rounded bg-muted px-1.5 text-[11px]">候補を作成</span>
+          <span className="rounded bg-muted px-1.5 text-[11px]" title={startMode.successorOf?.reason}>
+            {startMode.successorOf ? `候補を作成（${startMode.successorOf.label}は後続で確認）` : "候補を作成"}
+          </span>
         ) : (
           <span className="rounded bg-amber-500/15 px-1.5 text-[11px] text-amber-700" title={startMode.label}>
             {startMode.mode === "legacy"

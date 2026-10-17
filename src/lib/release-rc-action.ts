@@ -103,6 +103,8 @@ export type RcPrimaryAction =
   | { kind: "fix"; label: "修正を取り込む" }
   | { kind: "prepare"; label: "本番公開へ進む（公開承認）" }
   | { kind: "publish"; label: "本番公開へ進む" }
+  /** 稼働確認が止まった（#4712）。原因を直したあとに確かめ直す */
+  | { kind: "recheck_production"; label: "稼働確認をやり直す" }
   | { kind: "none"; label: null };
 
 export function describeRcPrimaryAction(input: {
@@ -128,6 +130,8 @@ export function describeRcPrimaryAction(input: {
       return { kind: "prepare", label: "本番公開へ進む（公開承認）" };
     case "awaiting_approval":
       return input.publishable ? { kind: "publish", label: "本番公開へ進む" } : { kind: "wait", label: null };
+    case "production_stopped":
+      return { kind: "recheck_production", label: "稼働確認をやり直す" };
     case "completed":
     case "cancelled":
       return { kind: "none", label: null };

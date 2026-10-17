@@ -19,6 +19,7 @@ import { ReleaseProgress } from "@/components/dashboard/release-progress";
 import { ConnectedReleaseReviewSections } from "@/components/dashboard/release-review-sections";
 import { useReleasePreparation } from "@/hooks/use-release-preparation";
 import { PREP_OVERRIDE_CONFIRM_TEXT } from "@/lib/release-prep-state";
+import { productionKindNotice } from "@/lib/release-production-stop";
 import { ReleasePreparationAlert } from "@/components/dashboard/release-preparation-alert";
 import { ReleaseRebuildHistoryPanel } from "@/components/dashboard/release-rebuild-history-panel";
 import { ReleaseRebuildButton } from "@/components/dashboard/release-rebuild-button";
@@ -200,7 +201,7 @@ export function MobileReleaseSheet({
                           : "候補を作成して検証"}
                 </Button>
               )}
-              {!deviceBuild && startUnknown && (
+              {!deviceBuild && (startUnknown || (startMode?.mode === "candidate" && (startMode.successorOf || productionKindNotice(startMode.productionKind)))) && (
                 <ReleaseBlockNotice
                   repositoryFullName={repository.fullName}
                   startMode={startMode}
