@@ -2827,3 +2827,25 @@ describe("iOS自動配布の印（#3759）", () => {
     expect(marks[0].textContent).toBe("");
   });
 });
+
+describe("ブランチ画面の情報配置 (#4683)", () => {
+  afterEach(() => { cleanup(); vi.restoreAllMocks(); window.localStorage.clear(); });
+  it("文章を重ねず短い操作ラベルで詳細を開き、閉じる操作へ切り替える", () => {
+    renderFlow({ branchStatuses: [branchStatus()], pullRequests: [makePullRequest()] });
+    expect(screen.getByText("作業・PRを見る")).toBeTruthy();
+    openRepository();
+    expect(screen.getByText("閉じる")).toBeTruthy();
+    const section = screen.getByText("開発中の作業・PR").closest("details");
+    expect(section?.open).toBe(true);
+    expect(section?.textContent).toContain("PRのタイトル");
+
+  });
+
+  it("取得不能では公開を促さず取得状況の確認へ誘導する", () => {
+    renderFlow({ failedRepositories: [REPO] });
+    expect(screen.getByText("取得状況を確認")).toBeTruthy();
+    expect(screen.queryByText("公開する変更を見る")).toBeNull();
+    openRepository();
+    expect(screen.getByText("ブランチ状況を取得後に、公開する変更を確認できます")).toBeTruthy();
+  });
+});

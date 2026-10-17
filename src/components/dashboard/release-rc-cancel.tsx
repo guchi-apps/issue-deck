@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
-import { classifyRcBlock } from "@/lib/release-rc";
+import { canCancelRc, classifyRcBlock, parseRcPhase } from "@/lib/release-rc";
 import { requestReleaseCandidateCancel } from "@/lib/release-request";
 import type { RcCandidateView } from "@/lib/release-rc-run";
 
@@ -14,7 +14,10 @@ export function ReleaseRcCancel({ candidate, repositoryFullName, onChanged }: {
 }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  if (candidate.phase !== "review" || !["needs_fix", "fixing"].includes(candidate.status.status)) return null;
+  const phase = parseRcPhase(candidate.phase);
+  const reviewNeedsRestart = phase === "review" && ["needs_fix", "fixing"].includes(candidate.status.status);
+  const beforePublication = phase === "preparing" || phase === "awaiting_approval";
+  if (!phase || !canCancelRc(phase) || (!reviewNeedsRestart && !beforePublication)) return null;
 
   const cancel = async () => {
     if (!window.confirm(`${repositoryFullName}の${candidate.label}を取り消しますか？履歴・検証結果は残り、公開はしません。取り消した後、ブランチ画面から修正を含む新しい候補を作成してください。`)) return;
@@ -22,7 +25,7 @@ export function ReleaseRcCancel({ candidate, repositoryFullName, onChanged }: {
     setError(null);
     try {
       const block = classifyRcBlock({ candidateId: candidate.id, sequence: candidate.sequence, prNumber: candidate.prNumber,
-        phase: "review", status: candidate.status.status, statusLabel: candidate.status.label });
+        phase, status: candidate.status.status, statusLabel: candidate.status.label });
       await requestReleaseCandidateCancel(repositoryFullName, block, "修正を含む新しい候補で検証し直すため、PR詳細から取消");
       onChanged();
     } catch (cause) {

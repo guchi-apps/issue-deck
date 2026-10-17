@@ -394,7 +394,7 @@ PY
 run_agent() {
   local prompt="$1" out="$2" log="$3"
   if [[ "$agent" == "codex" ]]; then
-    local -a codex_args=(exec --sandbox read-only --ephemeral -m "$codex_model" --output-last-message "$out" -C "$WORKTREE")
+    local -a codex_args=(exec --sandbox read-only --ephemeral -m "$codex_model" --output-schema "$SCRIPT_DIR/prompts/release-review-result.schema.json" --output-last-message "$out" -C "$WORKTREE")
     (cd "$WORKTREE" && timeout -k 60 "$TIMEOUT_SECONDS" "$codex_command" "${codex_args[@]}" <"$prompt" >"$log" 2>&1)
   else
     local -a claude_args=(-p --model "$claude_model" --allowedTools Read Grep Glob)
@@ -575,6 +575,11 @@ main() {
   }
   git -C "$LOCAL_PATH" worktree add --detach "$WORKTREE" "$head_sha" >/dev/null 2>&1
 
+  # AIのネットワーク権限を増やさず、候補が参照する固定タグの共有コードを先に用意する（#4690）。
+  local dependency_dir
+  dependency_dir="$(mktemp -d "$WORKTREE/.release-review-dependencies.XXXXXX")"
+  python3 "$SCRIPT_DIR/release-review-dependencies.py" "$WORKTREE" "$SCRIPT_DIR/.." "$dependency_dir" >"$dependency_dir/prompt"
+
   # 差分の材料。ファイルごとの差分を、予算の範囲でバッチへ詰める（#4615）。
   # **入力へ載せることは確認の実績ではない。** 容量を超えた分は次のバッチで確認し、省略・黙った除外はしない
   release_progress_set diff 1 "リリースの差分を取得しています"
@@ -593,6 +598,9 @@ main() {
   # 保存済みの結果は、証跡が更新されていれば証跡に依存するものだけ再評価する（#4632）。
   # 同じSHAでも、前回が統合検証の実行中に作った「未確認」を新しい証跡の下で使い続けない
   evidence_fp="$(evidence_fingerprint "$full_name" "$pr_number" "$base_sha" "$head_sha")"
+  if [[ -n "$evidence_fp" ]]; then
+    evidence_fp="${evidence_fp}:shared-$(cat "$dependency_dir/fingerprint")"
+  fi
   invalidate_stale_batches "$evidence_fp"
   prs_text="$(git -C "$WORKTREE" log --format='- %s' "$base_sha..$head_sha" | head -n 200)"
 
@@ -647,6 +655,7 @@ main() {
   # 統合検証の証跡（#4616）。AIは読み取り専用でテストを実行できないため、同じ対象の結果だけを渡す
   evidence_prompt_text "$full_name" "$pr_number" "$base_sha" "$head_sha" >"$part_dir/evidence"
   runner_host_prompt_text "$full_name" "$head_sha" >>"$part_dir/evidence"
+  cat "$dependency_dir/prompt" >>"$part_dir/evidence"
   if [[ -n "$checklist_version" ]]; then
     jq -r '.checklistPrompt // ""' <<<"$ctx_json" >"$part_dir/checklist"
     jq -r '.blockingPolicy // ""' <<<"$ctx_json" >"$part_dir/blocking"

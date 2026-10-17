@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 type Row = Record<string, unknown> & { id: string };
 const rows: Row[] = [];
-const jobs = new Map<string, { status: string; message?: string | null }>();
+const jobs = new Map<string, { status: string; message?: string | null; finishedAt?: Date | null; claimedAt?: Date | null; targetHost?: string; tmuxSessionName?: string | null }>();
 let seq = 0;
 
 function copy(row: Row | null): Row | null {
@@ -19,6 +19,7 @@ function matches(row: Row, where: Record<string, unknown>): boolean {
       if ("not" in c) return c.not === null ? value != null : value !== c.not;
       if ("lt" in c) return value != null && (value as Date) < (c.lt as Date);
     }
+    if (cond instanceof Date) return value instanceof Date && value.getTime() === cond.getTime();
     return value === (cond ?? null) || (cond === null && value == null);
   });
 }
@@ -62,6 +63,7 @@ vi.mock("@/lib/dispatch/check-user-labels", () => ({ addCheckUserWithReason: vi.
 
 import {
   advanceDependencyWait,
+  cancelDependencyWait,
   registerDependencyWait,
   runDependencyWaitSweep,
 } from "@/lib/dispatch/dependency-wait-run";
@@ -135,7 +137,7 @@ describe("再開の追跡", () => {
   it("送信しただけでは再開済みにせず、動き出しを確認して初めてRESUMEDにする", async () => {
     await register(["closed"], closed);
     const id = rows[0].id;
-    jobs.set("job1", { status: "SUCCEEDED" });
+    jobs.set("job1", { status: "SUCCEEDED", targetHost: "subpc", claimedAt: new Date("2026-10-10T12:00:00Z"), finishedAt: new Date("2026-10-10T12:00:05Z") });
     const sent = await advanceDependencyWait(id, { manual: false }, depsWith(closed));
     expect(sent?.status).toBe("RESUME_SENT");
 
@@ -156,7 +158,7 @@ describe("再開の追跡", () => {
 
   it("送信後に動き出さなければ失敗として理由付きで残す", async () => {
     await register(["closed"], closed);
-    jobs.set("job1", { status: "SUCCEEDED" });
+    jobs.set("job1", { status: "SUCCEEDED", targetHost: "subpc", claimedAt: new Date("2026-10-10T12:00:00Z"), finishedAt: new Date("2026-10-10T12:00:05Z") });
     const id = rows[0].id;
     await advanceDependencyWait(id, { manual: false }, depsWith(closed));
     const failed = await advanceDependencyWait(id, { manual: false }, depsWith(closed, new Date("2026-10-10T13:00:00Z")));
@@ -272,5 +274,123 @@ describe("runDependencyWaitSweep", () => {
     findSession.mockResolvedValue({ host: "subpc", state: "ALIVE", activity: null, activityAt: null });
     await runDependencyWaitSweep(depsWith(closed, new Date("2026-10-10T14:00:00Z")));
     expect(enqueue).not.toHaveBeenCalled();
+  });
+});
+
+
+describe("依存再開の活動照合の回帰", () => {
+  const sentAt = new Date("2026-10-10T12:00:05Z");
+  const checkedAt = new Date("2026-10-10T12:05:00Z");
+  async function send() {
+    await register(["closed"], closed);
+    jobs.set("job1", {
+      status: "SUCCEEDED", targetHost: "subpc", tmuxSessionName: "asset-manager-issue-687",
+      claimedAt: new Date("2026-10-10T12:00:00Z"), finishedAt: sentAt,
+    });
+    return rows[0].id;
+  }
+  function session(overrides: Record<string, unknown> = {}) {
+    return { host: "subpc", tmuxSessionName: "asset-manager-issue-687", state: "ALIVE",
+      activity: "RESPONDED", activityAt: "2026-10-10T11:59:00Z", stepSeenAt: null, ...overrides };
+  }
+
+  it.each([
+    { stepSeenAt: "2026-10-10T12:00:30Z" },
+    { activity: "RESPONDED", activityAt: "2026-10-10T12:00:30Z" },
+    // 送信成功のHTTP報告が届く前にツールが走るケースも拾う
+    { stepSeenAt: "2026-10-10T12:00:03Z" },
+  ])("巡回前の活動を再開の証拠として扱う: %j", async (activity) => {
+    const id = await send();
+    findSession.mockResolvedValue(session(activity));
+    await advanceDependencyWait(id, { manual: false }, depsWith(closed, checkedAt));
+    const view = await advanceDependencyWait(id, { manual: false }, depsWith(closed, checkedAt));
+    expect(view?.resumeSentAt).toBe(sentAt.toISOString());
+    expect(view?.status).toBe("RESUMED");
+    expect(enqueue).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    { stepSeenAt: "2026-10-10T11:59:30Z" },
+    { stepSeenAt: "invalid", activityAt: "invalid" },
+    { activity: "WAITING_INPUT", activityAt: "2026-10-10T12:01:00Z" },
+    { host: "otherpc", stepSeenAt: "2026-10-10T12:01:00Z" },
+    { tmuxSessionName: "other-session", stepSeenAt: "2026-10-10T12:01:00Z" },
+  ])("再開の証拠ではない活動を採用しない: %j", async (activity) => {
+    const id = await send();
+    findSession.mockResolvedValue(session(activity));
+    await advanceDependencyWait(id, { manual: false }, depsWith(closed, checkedAt));
+    const view = await advanceDependencyWait(id, { manual: false }, depsWith(closed, checkedAt));
+    expect(view?.status).toBe("RESUME_SENT");
+  });
+
+  it("古いジョブIDを消してから再試行し、積み込み中に前の成功を採用しない", async () => {
+    const id = await send();
+    await advanceDependencyWait(id, { manual: false }, depsWith(closed, checkedAt));
+    await advanceDependencyWait(id, { manual: false }, depsWith(closed, new Date("2026-10-10T13:00:00Z")));
+    enqueue.mockImplementationOnce(async () => {
+      expect(rows[0].resumeJobId).toBeNull();
+      expect(rows[0].resumeSentAt).toBeNull();
+      const pending = await advanceDependencyWait(id, { manual: false }, depsWith(closed, new Date("2026-10-10T13:00:01Z")));
+      expect(pending?.status).toBe("RESUME_REQUESTED");
+      return { ok: true, job: { id: "job2" } };
+    });
+    const view = await advanceDependencyWait(id, { manual: true }, depsWith(closed, new Date("2026-10-10T13:00:00Z")));
+    expect(view?.status).toBe("RESUME_REQUESTED");
+    expect(rows[0].resumeJobId).toBe("job2");
+  });
+
+  it("活動の取得中に待機が解除されても再開済みへ戻さない", async () => {
+    const id = await send();
+    await advanceDependencyWait(id, { manual: false }, depsWith(closed, checkedAt));
+    findSession.mockImplementationOnce(async () => {
+      await cancelDependencyWait(id);
+      return session({ activity: "WORKING", activityAt: "2026-10-10T12:06:00Z" });
+    });
+    const view = await advanceDependencyWait(id, { manual: false }, depsWith(closed, checkedAt));
+    expect(view?.status).toBe("CANCELLED");
+    expect(rows[0].status).toBe("CANCELLED");
+  });
+});
+
+
+describe("依存条件の取得中の競合", () => {
+  it("古い観測結果で送信済みの試行を待機へ巻き戻さない", async () => {
+    await register(["closed"], open);
+    const id = rows[0].id;
+    const delayed = {
+      ...depsWith(closed),
+      observe: async () => {
+        await advanceDependencyWait(id, { manual: false }, depsWith(closed));
+        return closed;
+      },
+    };
+    const view = await advanceDependencyWait(id, { manual: false }, delayed);
+    expect(view?.status).toBe("RESUME_REQUESTED");
+    expect(enqueue).toHaveBeenCalledTimes(1);
+    expect(rows[0].resumeJobId).toBe("job1");
+  });
+
+  it("依存条件の取得中に解除されたら指示を積まない", async () => {
+    await register(["closed"], open);
+    const id = rows[0].id;
+    const cancelled = {
+      ...depsWith(closed),
+      observe: async () => { await cancelDependencyWait(id); return closed; },
+    };
+    const view = await advanceDependencyWait(id, { manual: false }, cancelled);
+    expect(view?.status).toBe("CANCELLED");
+    expect(enqueue).not.toHaveBeenCalled();
+  });
+
+  it("活動取得中に解除されたらタイムアウト失敗にも戻さない", async () => {
+    await register(["closed"], closed);
+    const id = rows[0].id;
+    jobs.set("job1", { status: "SUCCEEDED", targetHost: "subpc", finishedAt: new Date("2026-10-10T12:00:00Z") });
+    await advanceDependencyWait(id, { manual: false }, depsWith(closed));
+    createComment.mockClear();
+    findSession.mockImplementationOnce(async () => { await cancelDependencyWait(id); return null; });
+    const view = await advanceDependencyWait(id, { manual: false }, depsWith(closed, new Date("2026-10-10T13:00:00Z")));
+    expect(view?.status).toBe("CANCELLED");
+    expect(createComment).not.toHaveBeenCalled();
   });
 });

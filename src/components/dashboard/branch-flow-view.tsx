@@ -97,6 +97,7 @@ import {
   describeRefreshButtonHint,
   type AutoRefreshIntervalMs,
 } from "@/lib/auto-refresh";
+import { describeBranchFlow } from "@/lib/branch-flow-guidance";
 import { readTriggeredAt, useTriggerPending } from "@/hooks/use-trigger-pending";
 import { resolveReleaseStageBadges, type ReleaseStageBadge } from "@/lib/release-stage-badges";
 import { resolvePullRequestHealth, type PullRequestHealthDisposition } from "@/lib/pull-request-health";
@@ -1583,7 +1584,7 @@ function NextReleaseCard({
           ) : group?.bumpPullRequest ? (
             "バージョン更新のPRを処理中"
           ) : group ? null : (
-            "次に公開する変更はありません"
+            repository.branchesLoaded && repository.release.comparison ? "次に公開する変更はありません" : "ブランチ状況を取得後に、公開する変更を確認できます"
           )}
         </p>
         {verificationShown && <ReleaseCandidateVerificationReason verification={verificationShown} pullRequest={pullRequest} />}
@@ -1655,9 +1656,9 @@ function NextReleaseCard({
           <dd className="text-muted-foreground">mainへ未反映</dd>
         </div>
         <div className="min-w-0 rounded-md border px-2.5 py-1.5 @sm:col-span-2">
-          <dt className="text-muted-foreground">本番稼働中</dt>
+          <dt className="text-muted-foreground">mainへ反映済みの版</dt>
           <dd className="flex flex-wrap items-center gap-x-1.5 text-sm font-semibold">
-            {repository.release.latestVersion ? `v${repository.release.latestVersion}` : "リリース済みの版なし"}
+            {repository.release.latestVersion ? `v${repository.release.latestVersion}` : "版情報なし"}
           </dd>
           {/* デプロイの成否は見出しの行・失敗の帯が出すので、ここではmainへ入った日だけを添える */}
           {latestReleaseMergedAt && (
@@ -1893,16 +1894,15 @@ function ReleaseFlowGraph({
       {repository.deviceBuild && <DeviceBuildInstalledBand deviceBuild={repository.deviceBuild} />}
 
       <ul className="relative">
-        {/* 2本のレール。行の高さによらず端まで伸ばす */}
-        <span
-          aria-hidden="true"
-          className="absolute inset-y-0 left-[0.5rem] w-0.5 rounded bg-purple-500/50 max-sm:left-[0.4rem]"
-        />
-        <span
-          aria-hidden="true"
-          className="absolute inset-y-0 left-[2.25rem] w-0.5 rounded bg-primary/40 max-sm:left-[1.75rem]"
-        />
-
+        <li className="relative mb-3 rounded-md border bg-card">
+          <details open>
+            <summary className="cursor-pointer px-3 py-2 text-sm font-semibold">
+              開発中の作業・PR
+              <span className="ml-2 text-xs font-normal text-muted-foreground">{activeLanes.length + repository.startedIssues.length}件</span>
+            </summary>
+            <ul className="relative">
+              <li role="presentation" aria-hidden="true" className="absolute inset-y-0 left-[0.5rem] w-0.5 rounded bg-purple-500/50 max-sm:left-[0.4rem]" />
+              <li role="presentation" aria-hidden="true" className="absolute inset-y-0 left-[2.25rem] w-0.5 rounded bg-primary/40 max-sm:left-[1.75rem]" />
         {/* 上流（まだブランチが無いIssue）から下流（リリース済み）へ、上から下に並べる（#1704） */}
         <StartedIssues
           repositoryFullName={repository.repositoryFullName}
@@ -1918,6 +1918,12 @@ function ReleaseFlowGraph({
           />
         ))}
 
+              {activeLanes.length === 0 && repository.startedIssues.length === 0 && (
+                <li className="px-3 pb-3 text-xs text-muted-foreground">開発中の作業はありません。</li>
+              )}
+            </ul>
+          </details>
+        </li>
         {visibleGroups.map((group) => (
           <ReleaseGroupHeaderWithLanes
             key={group.key}
@@ -2067,7 +2073,15 @@ function ReleaseGroupHeaderWithLanes({
   // リリースPRの凍結後にdevelopへ入った作業は、その版に含まれないので見出しの上へ出す（#3664）
   const { afterFreeze, included } = splitLanesByReleaseFreeze(group);
   return (
-    <>
+    <li className="relative mb-3 rounded-md border bg-card">
+      <details open>
+        <summary className="cursor-pointer px-3 py-2 text-sm font-semibold">
+          {group.mergedAt !== null ? "リリース済みの変更" : summarizedInCard ? "今回公開する変更" : "公開前の変更"}
+          <span className="ml-2 text-xs font-normal text-muted-foreground">{group.version ? `v${group.version} · ` : ""}{included.length}件</span>
+        </summary>
+        <ul className="relative">
+              <li role="presentation" aria-hidden="true" className="absolute inset-y-0 left-[0.5rem] w-0.5 rounded bg-purple-500/50 max-sm:left-[0.4rem]" />
+              <li role="presentation" aria-hidden="true" className="absolute inset-y-0 left-[2.25rem] w-0.5 rounded bg-primary/40 max-sm:left-[1.75rem]" />
       {afterFreeze.length > 0 && (
         <>
           <li className="pt-3 pb-0.5 pl-[3.35rem] text-xs text-amber-700 max-sm:pl-[2.6rem] dark:text-amber-400">
@@ -2116,7 +2130,9 @@ function ReleaseGroupHeaderWithLanes({
           onMerged={onMerged}
         />
       ))}
-    </>
+        </ul>
+      </details>
+    </li>
   );
 }
 
@@ -2222,6 +2238,10 @@ function RepositorySummaryRow({
     summary.openManualStepCount > 0 ||
     summary.startedIssueCount > 0 ||
     repository.orphanIssues.length > 0;
+
+  const guidance = describeBranchFlow(repository, {
+    branchesFailed, releaseLaunching, verification, unreleasedCount: unreleased.count,
+  });
 
   return (
     <button
@@ -2373,16 +2393,19 @@ function RepositorySummaryRow({
       {/* TestFlightへの配布が走っている間だけ（#3806）。Webのデプロイとは別の行為なので別のピルにする */}
       {iosDistribution.running && <IosDistributingBadge />}
       <DeployStateBadge deploy={deploy} compact linkToRun={false} />
+      <span className={cn("ml-auto inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium", guidance.attention ? "bg-amber-500/10 text-amber-700 dark:text-amber-400" : "text-primary")}>
+        {guidance.attention && <CircleAlert className="size-3.5" aria-hidden="true" />}
+        {isOpen ? (showSelectionMarker ? "表示中" : "閉じる") : guidance.next}<ChevronRight className={cn("size-3", isOpen && !showSelectionMarker && "rotate-90")} aria-hidden="true" />
+      </span>
       </span>
       )}
-      {/* 状態の理由を1行で（#4428）。開かなくても、待てば進むのか直す必要があるのかが分かる。
-          ボタンの中なので<p>ではなく<span>にする。全文は開いた先の「次のリリース」で読める */}
-      {summary.releaseInProgress && !summary.releaseMergeTarget && verification?.detail && (
-        <span
-          className={cn("block w-full truncate text-xs", verification.problem ? "text-destructive" : "text-muted-foreground")}
-          title={verification.detail}
-        >
-          {verification.detail}
+      {!hasBadges && (
+        <span className="flex w-full flex-wrap items-center justify-between gap-2 text-xs">
+          <span className="text-muted-foreground">{guidance.state}</span>
+          <span className={cn("inline-flex items-center gap-1 rounded-md px-2 py-1 font-medium", guidance.attention ? "bg-amber-500/10 text-amber-700 dark:text-amber-400" : "text-primary")}>
+            {guidance.attention && <CircleAlert className="size-3.5" aria-hidden="true" />}
+            {isOpen ? (showSelectionMarker ? "表示中" : "閉じる") : guidance.next}<ChevronRight className={cn("size-3", isOpen && !showSelectionMarker && "rotate-90")} aria-hidden="true" />
+          </span>
         </span>
       )}
       {/* **PRのマージ待ちは畳んだ行にもヘッダー件数にも出さない**（#2172・#4540）。通常PRの
