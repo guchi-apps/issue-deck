@@ -1,11 +1,7 @@
 import { db } from "@/lib/db";
 import { requestReleaseReviewJob } from "@/lib/dispatch/release-review-jobs";
 import { requestReleaseVerifyJob } from "@/lib/dispatch/release-verify-jobs";
-import {
-  decideDeployRecoveryRelease,
-  type DeployRecoveryReleaseDecision,
-} from "@/lib/deploy-recovery-series";
-import { fetchDeployRunsForSha, hasVersionVerification } from "@/lib/deploy-recovery-series-run";
+import { decideDeployRecoveryRelease } from "@/lib/deploy-recovery-series";
 import { markPullRequestReadyForReview } from "@/lib/github/actions-api";
 import { getInstallationToken } from "@/lib/github/app-auth";
 import { fetchPullRequest } from "@/lib/github/pull-requests-api";
@@ -70,6 +66,10 @@ import {
   type CandidateRow,
   type Context,
 } from "@/lib/release-rc-run";
+import { loadProductionView, observeProduction, recordProductionVerified, type RcProductionView } from "@/lib/release-production-verification-run";
+import type { ProductionVerificationMethod } from "@/lib/release-production-verification";
+import { decideProductionStop } from "@/lib/release-production-stop";
+import { observeSuccessorProof } from "@/lib/release-production-stop-run";
 import { canTransitionRcPhase, parseRcPhase, type RcPhase } from "@/lib/release-rc";
 import {
   listReleaseVerificationDetails,
@@ -151,6 +151,8 @@ export type RcFinalizationOverview = {
   history: RcFinalizationView[];
   /** 最新の公開承認（#4666）。記録の無い候補（既存の候補を含む）はnull */
   approval?: PublishApprovalView | null;
+  /** mainへ出した後の稼働版の確認（#4713）。まだ観測していない候補はnull */
+  production?: RcProductionView | null;
 };
 
 function toView(row: FinalizationRow, reservation: { status: string } | null): RcFinalizationView {
@@ -901,8 +903,13 @@ async function reverifyFailed(ctx: Context, row: FinalizationRow): Promise<boole
 }
 
 /**
- * マージ後の追跡。deployの成功**と稼働中の版の一致**を確かめるまで完了にしない（マージだけで完了にしない）。
- * 失敗・不一致は段階を進めず、既存の本番復旧（#4451）が同じ系列として追う
+ * マージ後の追跡。deployの成功**と稼働中の版の証拠**を確かめるまで完了にしない（マージだけで完了にしない）。
+ * 証拠の判定は#4713の`decideProductionEvidence`、止まっているかの判定は#4712の`decideProductionStop`が持つ。
+ *
+ * - 待っても進まない（証拠未設定・旧版の応答・取得不能・デプロイ失敗など）ときは理由を候補へ記録し、画面は
+ *   「稼働確認中」のスピナーをやめて原因と操作を出す。記録は確定ではなく、次の観測で証拠が揃えばそのまま完了する
+ * - 証拠未設定の候補は、照合付きの後続の版が稼働していると確かめた時点でも完了する（`observeSuccessorProof`）
+ * - 失敗は段階を進めず、既存の本番復旧（#4451）が同じ系列として追う
  */
 async function advanceProduction(ctx: Context, candidate: CandidateRow, row: FinalizationRow, pull: PullDetail): Promise<void> {
   const mergeSha = (pull as { merge_commit_sha?: string | null }).merge_commit_sha ?? null;
@@ -910,25 +917,90 @@ async function advanceProduction(ctx: Context, candidate: CandidateRow, row: Fin
   // 公開した内容をdevelopへ同期する（新方式のバンプはdevelopへ入らないため）。同期の成否は本番反映の判定に使わず、
   // 完了・取消の後も巡回（`runDevelopSyncSweep`）が同期済みを確かめるまで追う（#4641）
   await ensureDevelopSync(ctx);
-  const runs = await fetchDeployRunsForSha(ctx.owner, ctx.repo, mergeSha, ctx.token);
-  const latest = [...runs].sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.id - a.id)[0];
-  const versionVerified = latest?.status === "completed" && latest.conclusion === "success" ? await hasVersionVerification(ctx.owner, ctx.repo, latest, ctx.token) : false;
-  const decision: DeployRecoveryReleaseDecision = decideDeployRecoveryRelease(
-    { releaseSha: mergeSha, releaseStartedAt: new Date(pull.merged_at), releaseAttempts: 0, lastFailureKey: null },
-    { now: new Date(), runs, versionVerified },
-  );
-  if (decision.action === "track" && decision.status === "verifying") {
-    await setPhase(candidate.id, "deploying", "verifying_production");
-    return;
-  }
-  if (decision.action === "recovered") {
+  // 稼働版の証拠はrepoの種類ごとに方式が違う（#4713）。deploy.ymlが稼働SHAを照合しないrepoも、公開URLの照合・人の確認・
+  // ソース公開で完了にできる。どの方式でも、マージ済み・HTTP 200だけでは完了にしない
+  const observed = await observeProduction(ctx, { candidateId: candidate.id, mergeSha, version: row.reservedVersion });
+  const complete = async (method: ProductionVerificationMethod, evidence: Record<string, unknown>) => {
     await setPhase(candidate.id, "deploying", "verifying_production");
     const tag = (await repoTags(ctx)).find((t) => t === `v${row.reservedVersion}`) ?? null;
-    if (await setPhase(candidate.id, "verifying_production", "completed", { activeKey: null })) {
-      await consumeReservation(candidate.id, row.reservedVersion, mergeSha, tag);
-      await db.releaseVersionReservation.updateMany({ where: { candidateId: candidate.id, version: row.reservedVersion, status: "consumed", consumedTag: null }, data: { consumedTag: tag } });
+    const done = await setPhase(candidate.id, "verifying_production", "completed", {
+      activeKey: null,
+      successorProofKey: null,
+      productionStopReason: null,
+      productionStopDetail: null,
+    });
+    if (!done) return;
+    await recordProductionVerified(candidate.id, method, { ...evidence, tag });
+    await consumeReservation(candidate.id, row.reservedVersion!, mergeSha, tag);
+    await db.releaseVersionReservation.updateMany({ where: { candidateId: candidate.id, version: row.reservedVersion!, status: "consumed", consumedTag: null }, data: { consumedTag: tag } });
+    // 後続の確認を待っていた候補（証拠未設定）を、この版の稼働で確かめ直す
+    if (method !== "successor") await reconcileSuccessorWaiting(ctx, candidate.id);
+  };
+  if (observed.decision.verified) {
+    // deployするrepoでは、対象コミットの最新のdeployが成功していることも確かめる（従来の本番反映の判定）
+    const release = observed.kind === "source_publish_only" || observed.kind === "unknown"
+      ? null
+      : decideDeployRecoveryRelease(
+          { releaseSha: mergeSha, releaseStartedAt: new Date(pull.merged_at), releaseAttempts: 0, lastFailureKey: null },
+          { now: new Date(), runs: observed.runs, versionVerified: true },
+        );
+    if (release === null || release.action === "recovered") {
+      await complete(observed.decision.method, observed.evidence);
+      return;
     }
   }
+
+  const stop = observed.decision.verified
+    ? { stop: null, stage: "deploying" as const }
+    : decideProductionStop({
+        now: new Date(),
+        startedAt: candidate.productionCheckStartedAt ?? new Date(pull.merged_at),
+        mergeSha,
+        kind: observed.kind,
+        waitingReason: observed.decision.reason,
+        runs: observed.runs,
+      });
+  // 証拠未設定の候補は、照合付きの後続の版の稼働で確かめられる（#4712。循環を避ける経路）
+  if (stop.stop === "contract_missing") {
+    const proof = await observeSuccessorProof(ctx, mergeSha).catch(() => ({ ok: false as const }));
+    if (proof.ok) {
+      await complete("successor", { mergeSha, ...proof.evidence });
+      return;
+    }
+  }
+  if (stop.stage === "verifying") await setPhase(candidate.id, "deploying", "verifying_production");
+  const reason = stop.stop;
+  const detail = stop.stop === null ? null : stop.detail;
+  if (candidate.productionStopReason !== reason || candidate.productionStopDetail !== detail) {
+    await db.releaseCandidate.updateMany({
+      where: { id: candidate.id, phase: { in: ["deploying", "verifying_production"] } },
+      data: { productionStopReason: reason, productionStopDetail: detail },
+    });
+  }
+}
+
+/** 後続の確認を待っている候補を1巡進める（同じリポジトリで1本まで） */
+export async function reconcileSuccessorWaiting(ctx: Context, exceptCandidateId?: string): Promise<void> {
+  const waiting = await db.releaseCandidate.findUnique({ where: { successorProofKey: fullNameOf(ctx) }, select: { id: true } });
+  if (!waiting || waiting.id === exceptCandidateId) return;
+  await reconcileRcFinalization(ctx, waiting.id).catch((error: unknown) => console.error("[release-finalize] successor reconcile failed", fullNameOf(ctx), error));
+}
+
+/**
+ * 画面の「稼働確認をやり直す」（#4712）。止まった候補の待ち時間を今から取り直し、その場で1巡確かめる。
+ * **証拠を代わりに書かない。** 確かめた結果が完了でなければ、また理由を記録して止まる
+ */
+export async function recheckRcProduction(ctx: Context, candidateId: string): Promise<{ ok: true } | { ok: false; error: "not_found" | "not_stopped" }> {
+  const updated = await db.releaseCandidate.updateMany({
+    where: { id: candidateId, repositoryFullName: fullNameOf(ctx), phase: { in: ["deploying", "verifying_production"] }, productionStopReason: { not: null } },
+    data: { productionCheckStartedAt: new Date(), productionStopReason: null, productionStopDetail: null },
+  });
+  if (updated.count !== 1) {
+    const exists = await db.releaseCandidate.findFirst({ where: { id: candidateId, repositoryFullName: fullNameOf(ctx) }, select: { id: true } });
+    return { ok: false, error: exists ? "not_stopped" : "not_found" };
+  }
+  await reconcileRcFinalization(ctx, candidateId);
+  return { ok: true };
 }
 
 // ---------------------------------------------------------------------------
@@ -961,7 +1033,8 @@ export async function loadFinalizationOverview(ctx: Context, candidateId: string
     if (found) checks = await evaluateChecks(ctx, latest, await fetchPullRequest(ctx.owner, ctx.repo, found.number, ctx.token)).catch(() => null);
   }
   const approval = candidate ? await loadPublishApprovalView(candidateId, candidate.phase).catch(() => null) : null;
-  return { caller, mainVersion, current: latest ? viewOf(latest) : null, checks, history: rows.slice(0, -1).reverse().map(viewOf), approval };
+  const production = candidate ? await loadProductionView(fullNameOf(ctx), candidateId, candidate.phase).catch(() => null) : null;
+  return { caller, mainVersion, current: latest ? viewOf(latest) : null, checks, history: rows.slice(0, -1).reverse().map(viewOf), approval, production };
 }
 
 /** 画面が見ている候補のID。PR番号があればそのPRを持つ候補（過去のものも含む）、無ければ進行中の候補（GitHubは呼ばない） */

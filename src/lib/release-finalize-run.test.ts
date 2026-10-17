@@ -36,6 +36,11 @@ const mocks = vi.hoisted(() => ({
   prepareApproval: vi.fn(),
   commitApproval: vi.fn(async () => "pa1"),
   ensureRun: vi.fn(async () => ({ ok: true, runId: "run1", created: true })),
+  observeProduction: vi.fn(),
+  recordVerified: vi.fn(async () => undefined),
+  candFindUnique: vi.fn(async () => null as unknown),
+  candFindFirst: vi.fn(async () => null as unknown),
+  observeSuccessor: vi.fn(async () => ({ ok: false }) as unknown),
 }));
 
 vi.mock("@/lib/db", () => {
@@ -48,7 +53,7 @@ vi.mock("@/lib/db", () => {
       updateMany: mocks.finUpdateMany,
     },
     releaseVersionReservation: { findMany: mocks.resFindMany, findUnique: mocks.resFindUnique, create: mocks.resCreate, updateMany: mocks.resUpdateMany },
-    releaseCandidate: { updateMany: mocks.candUpdateMany },
+    releaseCandidate: { updateMany: mocks.candUpdateMany, findUnique: mocks.candFindUnique, findFirst: mocks.candFindFirst },
     releaseCandidateRevision: { create: mocks.revCreate, findFirst: vi.fn() },
     repository: { findFirst: mocks.repositoryFindFirst },
     $transaction: async (fn: (tx: unknown) => unknown) => fn(db),
@@ -77,7 +82,12 @@ vi.mock("@/lib/release-develop-sync-run", () => ({ ensureDevelopSync: mocks.ensu
 vi.mock("@/lib/github/pull-requests-api", () => ({ fetchPullRequest: mocks.fetchPr }));
 vi.mock("@/lib/github/actions-api", () => ({ markPullRequestReadyForReview: vi.fn() }));
 vi.mock("@/lib/github/app-auth", () => ({ getInstallationToken: vi.fn(async () => "t") }));
-vi.mock("@/lib/deploy-recovery-series-run", () => ({ fetchDeployRunsForSha: vi.fn(async () => []), hasVersionVerification: vi.fn(async () => false) }));
+vi.mock("@/lib/release-production-verification-run", () => ({
+  observeProduction: mocks.observeProduction,
+  recordProductionVerified: mocks.recordVerified,
+  loadProductionView: vi.fn(async () => null),
+}));
+vi.mock("@/lib/release-production-stop-run", () => ({ observeSuccessorProof: mocks.observeSuccessor }));
 vi.mock("@/lib/release-verification", () => ({
   listReleaseVerificationRecords: mocks.records,
   registerReleaseVerification: mocks.register,
@@ -97,7 +107,7 @@ vi.mock("@/lib/release-publish-approval-run", () => ({
 }));
 
 import * as releaseApi from "@/lib/github/release-api";
-import { reconcileRcFinalization, recordFinalizeReport, requestRcFinalize } from "@/lib/release-finalize-run";
+import { recheckRcProduction, reconcileRcFinalization, recordFinalizeReport, requestRcFinalize } from "@/lib/release-finalize-run";
 
 const CALLER = "    inputs:\n      finalize_request:\n    with:\n      finalize-request: x\n";
 const BASE = "b".repeat(40);
@@ -369,5 +379,188 @@ describe("reconcileRcFinalization（系列がマージした後。#4666）", () 
     expect(mocks.candUpdateMany).toHaveBeenCalledWith({ where: { id: "c1", phase: "awaiting_approval" }, data: { phase: "deploying" } });
     const consumed = mocks.resUpdateMany.mock.calls.filter((call) => (call as unknown as [{ data: { status?: string } }])[0].data.status === "consumed");
     expect(consumed).toHaveLength(1);
+  });
+});
+
+describe("reconcileRcFinalization（mainへ出した後の稼働版の確認。#4713）", () => {
+  const MERGE = "d".repeat(40);
+  const succeededRun = { id: 1, htmlUrl: "https://github.com/o/r/actions/runs/1", createdAt: "2026-10-17T00:00:00Z", headSha: MERGE, status: "completed", conclusion: "success", attempt: 1 };
+
+  beforeEach(() => {
+    mocks.loadCandidateRow.mockResolvedValue({ id: "c1", sequence: 3, phase: "verifying_production", revisions: [{ revision: 3 }] });
+    mocks.finFindMany.mockResolvedValue([
+      { id: "f1", candidateId: "c1", status: "applied", prNumber: 10, preBaseSha: BASE, preHeadSha: PRE, finalBaseSha: BASE, finalHeadSha: POST, reservedVersion: "2.14.0", failureReason: null, createdAt: new Date() },
+    ]);
+    mocks.observePr.mockResolvedValue({ number: 10, state: "closed", head: { sha: POST }, base: { sha: BASE } });
+    mocks.fetchPr.mockResolvedValue({ number: 10, merged: true, merged_at: new Date().toISOString(), merge_commit_sha: MERGE, draft: false, head: { sha: POST }, base: { sha: BASE } });
+    mocks.tagRefs.mockResolvedValue([{ ref: "refs/tags/v2.14.0", sha: MERGE }]);
+    // 前のdescribeが積んだ戻り値（clearAllMocksでは消えない）を戻す
+    mocks.candUpdateMany.mockReset().mockResolvedValue({ count: 1 });
+  });
+
+  const completedCalls = () =>
+    mocks.candUpdateMany.mock.calls.filter((call) => (call as unknown as [{ data: { phase?: string } }])[0].data.phase === "completed");
+
+  it("公開URLのSHAが一致したら、候補を完了にして進行中の印を外し、方式と証拠を残す", async () => {
+    mocks.observeProduction.mockResolvedValue({
+      kind: "deploy_without_version_check",
+      runs: [succeededRun],
+      decision: { verified: true, method: "public_version_url" },
+      evidence: { mergeSha: MERGE, probe: { status: "match" } },
+    });
+
+    await reconcileRcFinalization(ctx, "c1");
+
+    expect(mocks.observeProduction).toHaveBeenCalledWith(ctx, { candidateId: "c1", mergeSha: MERGE, version: "2.14.0" });
+    expect(mocks.candUpdateMany).toHaveBeenCalledWith({
+      where: { id: "c1", phase: "verifying_production" },
+      data: { phase: "completed", activeKey: null, successorProofKey: null, productionStopReason: null, productionStopDetail: null },
+    });
+    expect(mocks.recordVerified).toHaveBeenCalledWith("c1", "public_version_url", expect.objectContaining({ mergeSha: MERGE, tag: "v2.14.0" }));
+    expect(mocks.resUpdateMany).toHaveBeenCalledWith(expect.objectContaining({ where: expect.objectContaining({ candidateId: "c1", version: "2.14.0" }) }));
+  });
+
+  it.each([
+    ["旧版が応答した", "version_mismatch"],
+    ["公開URLを取得できない", "probe_unreadable"],
+    ["証拠が無い（deployのHTTP 200だけ）", "no_evidence"],
+  ])("%s間は完了にせず、進行中の印も外さない", async (_label, reason) => {
+    mocks.observeProduction.mockResolvedValue({ kind: "deploy_without_version_check", runs: [succeededRun], decision: { verified: false, reason }, evidence: {} });
+
+    await reconcileRcFinalization(ctx, "c1");
+
+    expect(completedCalls()).toHaveLength(0);
+    expect(mocks.recordVerified).not.toHaveBeenCalled();
+  });
+
+  it("ソース配布のrepoは、deploy runが無くてもソース公開の証拠で完了にする", async () => {
+    mocks.observeProduction.mockResolvedValue({ kind: "source_publish_only", runs: [], decision: { verified: true, method: "source_publish" }, evidence: { deviceDeployment: "out_of_scope" } });
+
+    await reconcileRcFinalization(ctx, "c1");
+
+    expect(completedCalls()).toHaveLength(1);
+    expect(mocks.recordVerified).toHaveBeenCalledWith("c1", "source_publish", expect.objectContaining({ deviceDeployment: "out_of_scope" }));
+  });
+
+  it("ソース公開を確認できない間は完了にしない", async () => {
+    mocks.observeProduction.mockResolvedValue({ kind: "source_publish_only", runs: [], decision: { verified: false, reason: "source_not_published" }, evidence: {} });
+
+    await reconcileRcFinalization(ctx, "c1");
+
+    expect(completedCalls()).toHaveLength(0);
+  });
+});
+
+describe("reconcileRcFinalization（稼働確認の停止と後続の版による確認。#4712）", () => {
+  const MERGE = "d".repeat(40);
+  const NEXT = "e".repeat(40);
+  const MERGED_AT = "2026-10-16T22:46:02Z";
+  const succeededRun = { id: 1, htmlUrl: "https://github.com/o/r/actions/runs/38977690006", createdAt: MERGED_AT, headSha: MERGE, status: "completed", conclusion: "success", attempt: 1 };
+  const candidate = (over: Record<string, unknown> = {}) => ({
+    id: "c1",
+    sequence: 1,
+    phase: "verifying_production",
+    activeKey: "o/r",
+    successorProofKey: null,
+    productionStopReason: null,
+    productionStopDetail: null,
+    productionCheckStartedAt: null,
+    revisions: [],
+    ...over,
+  });
+  const noEvidence = { kind: "deploy_without_version_check", runs: [succeededRun], decision: { verified: false, reason: "no_evidence" }, evidence: {} };
+  const stopUpdates = () =>
+    mocks.candUpdateMany.mock.calls
+      .map((call) => (call as unknown as [{ data: Record<string, unknown> }])[0].data)
+      .filter((data) => "productionStopReason" in data && !("phase" in data));
+  const completion = () =>
+    mocks.candUpdateMany.mock.calls
+      .map((call) => (call as unknown as [{ where: Record<string, unknown>; data: Record<string, unknown> }])[0])
+      .find((call) => call.data.phase === "completed");
+
+  beforeEach(() => {
+    mocks.finFindMany.mockResolvedValue([
+      { id: "f1", candidateId: "c1", status: "applied", prNumber: 10, preBaseSha: BASE, preHeadSha: PRE, finalBaseSha: BASE, finalHeadSha: POST, reservedVersion: "1.4.0", failureReason: null, createdAt: new Date() },
+    ]);
+    mocks.observePr.mockResolvedValue({ number: 10, state: "closed", head: { sha: POST }, base: { sha: BASE } });
+    mocks.fetchPr.mockResolvedValue({ number: 254, merged: true, merged_at: MERGED_AT, merge_commit_sha: MERGE, draft: false, head: { sha: POST }, base: { sha: BASE } });
+    mocks.candUpdateMany.mockReset().mockResolvedValue({ count: 1 });
+    mocks.resUpdateMany.mockReset().mockResolvedValue({ count: 1 });
+    mocks.candFindUnique.mockReset().mockResolvedValue(null);
+    mocks.observeSuccessor.mockReset().mockResolvedValue({ ok: false });
+  });
+
+  it("証拠未設定（car-care RC-1）は完了・解放せず、理由を記録して「稼働確認中」を出し続けない", async () => {
+    mocks.loadCandidateRow.mockResolvedValue(candidate());
+    mocks.observeProduction.mockResolvedValue(noEvidence);
+    await reconcileRcFinalization(ctx, "c1");
+    expect(stopUpdates()).toEqual([{ productionStopReason: "contract_missing", productionStopDetail: succeededRun.htmlUrl }]);
+    expect(completion()).toBeUndefined();
+    expect(mocks.recordVerified).not.toHaveBeenCalled();
+    expect(mocks.resUpdateMany).not.toHaveBeenCalled();
+  });
+
+  it("同じ理由で止まったままなら書き直さない（巡回のたびにDBへ書かない）", async () => {
+    mocks.loadCandidateRow.mockResolvedValue(candidate({ productionStopReason: "contract_missing", productionStopDetail: succeededRun.htmlUrl }));
+    mocks.observeProduction.mockResolvedValue(noEvidence);
+    await reconcileRcFinalization(ctx, "c1");
+    expect(stopUpdates()).toEqual([]);
+  });
+
+  it("旧版の応答は「旧版が応答」として記録し、後続の版で代用しない", async () => {
+    mocks.loadCandidateRow.mockResolvedValue(candidate());
+    mocks.observeProduction.mockResolvedValue({ ...noEvidence, decision: { verified: false, reason: "version_mismatch" } });
+    mocks.observeSuccessor.mockResolvedValue({ ok: true, evidence: { coveredSha: MERGE, successorSha: NEXT, deployRunUrl: "u2" } });
+    await reconcileRcFinalization(ctx, "c1");
+    expect(stopUpdates()).toEqual([{ productionStopReason: "version_mismatch", productionStopDetail: succeededRun.htmlUrl }]);
+    expect(mocks.observeSuccessor).not.toHaveBeenCalled();
+    expect(completion()).toBeUndefined();
+  });
+
+  it("止まった後に再実行が始まれば、停止の記録を消してデプロイの進行へ戻す", async () => {
+    mocks.loadCandidateRow.mockResolvedValue(candidate({ phase: "deploying", productionStopReason: "deploy_failed", productionStopDetail: "u" }));
+    mocks.observeProduction.mockResolvedValue({ ...noEvidence, runs: [{ ...succeededRun, id: 2, status: "in_progress", conclusion: null, attempt: 2 }], decision: { verified: false, reason: "deploy_not_succeeded" } });
+    await reconcileRcFinalization(ctx, "c1");
+    expect(stopUpdates()).toEqual([{ productionStopReason: null, productionStopDetail: null }]);
+    expect(completion()).toBeUndefined();
+  });
+
+  it("証拠未設定の候補は、照合付きの後続の版の稼働を確かめた時点で「後続の版」として完了する", async () => {
+    mocks.loadCandidateRow.mockResolvedValue(candidate({ activeKey: null, successorProofKey: "o/r", productionStopReason: "contract_missing" }));
+    mocks.observeProduction.mockResolvedValue(noEvidence);
+    mocks.observeSuccessor.mockResolvedValue({ ok: true, evidence: { coveredSha: MERGE, successorSha: NEXT, deployRunUrl: "u2" } });
+    await reconcileRcFinalization(ctx, "c1");
+    expect(mocks.observeSuccessor).toHaveBeenCalledWith(ctx, MERGE);
+    expect(completion()?.data).toMatchObject({ phase: "completed", activeKey: null, successorProofKey: null, productionStopReason: null });
+    expect(mocks.recordVerified).toHaveBeenCalledWith("c1", "successor", expect.objectContaining({ coveredSha: MERGE, successorSha: NEXT }));
+  });
+
+  it("証拠を確かめて完了した候補は、後続の確認を待つ候補を同じ巡回で確かめ直す", async () => {
+    mocks.loadCandidateRow.mockResolvedValue(candidate());
+    mocks.observeProduction.mockResolvedValue({ kind: "deploy_version_check", runs: [succeededRun], decision: { verified: true, method: "deploy_version_check" }, evidence: { mergeSha: MERGE } });
+    mocks.candFindUnique.mockResolvedValueOnce({ id: "c0" }).mockResolvedValue(null);
+    await reconcileRcFinalization(ctx, "c1");
+    expect(completion()).toBeDefined();
+    expect(mocks.candFindUnique).toHaveBeenCalledWith({ where: { successorProofKey: "o/r" }, select: { id: true } });
+    expect(mocks.loadCandidateRow).toHaveBeenCalledWith({ id: "c0" });
+  });
+
+  it("「稼働確認をやり直す」の時刻があれば、待ち時間をそこから数える（期限切れの停止を取り直す）", async () => {
+    mocks.loadCandidateRow.mockResolvedValue(candidate({ phase: "deploying", productionCheckStartedAt: new Date() }));
+    mocks.observeProduction.mockResolvedValue({ ...noEvidence, runs: [], decision: { verified: false, reason: "deploy_not_succeeded" } });
+    await reconcileRcFinalization(ctx, "c1");
+    // マージ時刻からは60分を過ぎているが、やり直した時刻からは過ぎていないので止めない
+    expect(stopUpdates()).toEqual([]);
+  });
+
+  it("recheckRcProduction: 止まっていない候補は確かめ直さない（証拠を代わりに書かない）", async () => {
+    mocks.candUpdateMany.mockResolvedValue({ count: 0 });
+    mocks.candFindFirst.mockResolvedValue({ id: "c1" });
+    mocks.observeProduction.mockClear();
+    expect(await recheckRcProduction(ctx, "c1")).toEqual({ ok: false, error: "not_stopped" });
+    expect(mocks.observeProduction).not.toHaveBeenCalled();
+    const call = (mocks.candUpdateMany.mock.calls[0] as unknown as [{ where: Record<string, unknown>; data: Record<string, unknown> }])[0];
+    expect(call.where).toMatchObject({ productionStopReason: { not: null } });
+    expect(Object.keys(call.data).sort()).toEqual(["productionCheckStartedAt", "productionStopDetail", "productionStopReason"]);
   });
 });

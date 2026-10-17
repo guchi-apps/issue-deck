@@ -56,6 +56,9 @@ import {
   registerReleaseVerification,
 } from "@/lib/release-verification";
 import { summarizeReleaseVerification } from "@/lib/release-verification-summary";
+import { decideSuccessorStart, parseProductionStopReason, type ProductionStopReason } from "@/lib/release-production-stop";
+import { readProductionTargetKind } from "@/lib/release-production-stop-run";
+import { PRODUCTION_VERIFICATION_METHODS, type ProductionVerificationMethod } from "@/lib/release-production-verification";
 
 /**
  * 正式版を上げる前に固定したリリース候補（#4495）の外部操作。判断は`release-rc.ts`の純関数が持つ。
@@ -118,6 +121,13 @@ export type RcCandidateView = {
   createdAt: string;
   /** 公開準備（#4496）へ渡す契約。現在revisionが合格しているときだけ */
   finalizeContract: RcFinalizeContract | null;
+  /** 本番の稼働確認（#4712）。止まった理由・詳細（実行のURLなど）・完了の方式（#4713）・後続の確認待ちか */
+  production?: {
+    stopReason: ProductionStopReason | null;
+    stopDetail: string | null;
+    method: ProductionVerificationMethod | null;
+    awaitingSuccessor: boolean;
+  };
 };
 
 export type RcLegacyCandidate = {
@@ -328,7 +338,15 @@ async function buildCandidateView(ctx: Context, row: CandidateRow): Promise<RcCa
   }
   const fix = await relatedFixPrNumbers(fullNameOf(ctx), prNumbers);
   const publishApproved = phase === "preparing" || phase === "awaiting_approval" ? await hasActivePublishApproval(row.id).catch(() => false) : false;
+  const method = phase === "completed" ? await completedMethod(row.id) : null;
+  const production = {
+    stopReason: parseProductionStopReason(row.productionStopReason),
+    stopDetail: row.productionStopDetail,
+    method,
+    awaitingSuccessor: row.successorProofKey !== null,
+  };
   const status = deriveRcStatus({
+    production: { stopReason: production.stopReason, method, awaitingSuccessor: production.awaitingSuccessor },
     publishApproved,
     phase,
     current: current ? { revision: current.revision, headSha: current.headSha } : null,
@@ -357,6 +375,7 @@ async function buildCandidateView(ctx: Context, row: CandidateRow): Promise<RcCa
     cancelReason: row.cancelReason,
     cancelledAt: row.cancelledAt?.toISOString() ?? null,
     createdAt: row.createdAt.toISOString(),
+    production,
     finalizeContract: buildRcFinalizeContract({
       candidate: { id: row.id, sequence: row.sequence, frozenDevelopSha: row.frozenDevelopSha, frozenPrNumbers: frozenPrs.map((p) => p.number) },
       current: current
@@ -451,14 +470,35 @@ export async function loadRcBlock(ctx: Context): Promise<RcBlockSummary | null> 
   }
   const candidate = await buildCandidateView(ctx, row);
   const phase = parseRcPhase(row.phase) ?? "review";
-  return classifyRcBlock({
+  const block = classifyRcBlock({
     candidateId: row.id,
     sequence: row.sequence,
     prNumber: candidate.prNumber,
     phase,
     status: candidate.status.status,
     statusLabel: candidate.status.label,
+    productionStopReason: candidate.production?.stopReason ?? null,
+    statusReason: candidate.status.reason,
   });
+  if (block.kind !== "production_stopped") return block;
+  return { ...block, successorStart: await successorStartFor(ctx, block.productionStopReason ?? null) };
+}
+
+/**
+ * 稼働確認が止まった候補を残したまま、次の候補を始められるか（#4712）。証拠未設定の候補だけが対象で、
+ * developの`deploy.yml`が稼働版の照合を持つ（次の候補で証拠を取れる）ときに限る
+ */
+async function successorStartFor(ctx: Context, stopReason: ProductionStopReason | null) {
+  if (stopReason !== "contract_missing") return decideSuccessorStart({ stopReason, developKind: null, slotTaken: false });
+  const slotTaken = (await db.releaseCandidate.findUnique({ where: { successorProofKey: fullNameOf(ctx) }, select: { id: true } })) !== null;
+  return decideSuccessorStart({ stopReason, developKind: slotTaken ? null : await readProductionTargetKind(ctx, "develop"), slotTaken });
+}
+
+/** 完了した候補の方式（#4713の確認の記録）。記録が無い・読めない既存の候補はnull */
+async function completedMethod(candidateId: string): Promise<ProductionVerificationMethod | null> {
+  const check = await db.releaseProductionCheck.findUnique({ where: { candidateId }, select: { method: true } }).catch(() => null);
+  const value = check?.method ?? null;
+  return value !== null && (PRODUCTION_VERIFICATION_METHODS as readonly string[]).includes(value) ? (value as ProductionVerificationMethod) : null;
 }
 
 export type RcMutationError =
@@ -592,11 +632,15 @@ export async function createReleaseRc(input: Context & { userId: string; request
   const repositoryFullName = fullNameOf(ctx);
   if (!(await callerSupport(ctx)).supported) return { ok: false, error: "caller_unsupported" };
   const active = await loadCandidateRow({ activeKey: repositoryFullName });
+  // 証拠未設定で稼働確認が止まった候補は、次の候補の稼働確認で確かめる（#4712）。その候補を後続の確認待ちへ移して始める
+  let successorOf: { id: string } | null = null;
   if (active) {
     await expireStalePending(active, new Date());
     if (await db.releaseCandidate.findUnique({ where: { activeKey: repositoryFullName } })) {
       // 表示後に別の候補ができた場合に、エラー文だけで終えず既存候補と次の操作を返す（#4628）
-      return { ok: false, error: "rc_active", block: (await loadRcBlock(ctx).catch(() => null)) ?? undefined };
+      const block = (await loadRcBlock(ctx).catch(() => null)) ?? undefined;
+      if (!block?.successorStart?.allowed) return { ok: false, error: "rc_active", block };
+      successorOf = { id: block.candidateId };
     }
   }
   const open = await fetchOpenPullRequestsForBase(ctx.owner, ctx.repo, "main", ctx.token);
@@ -611,7 +655,28 @@ export async function createReleaseRc(input: Context & { userId: string; request
   if (!freezeSha || !mainSha) return { ok: false, error: "nothing_to_release", message: "developまたはmainの先端を取得できませんでした" };
   const frozenPrs = await frozenPullRequests(ctx, mainSha, freezeSha);
   if (frozenPrs.length === 0) return { ok: false, error: "nothing_to_release" };
+  if (successorOf && !(await moveToSuccessorProof(repositoryFullName, successorOf.id))) {
+    return { ok: false, error: "rc_active", block: (await loadRcBlock(ctx).catch(() => null)) ?? undefined };
+  }
   return createCandidate({ ctx, userId: input.userId, requestKey: input.requestKey, freezeSha, frozenPrs, reason: "initial" });
+}
+
+/**
+ * 証拠未設定の候補を、候補の枠（`activeKey`）から後続の確認待ちの枠（`successorProofKey`）へ移す（#4712）。
+ * **完了・取消にはしない。** 段階・版の予約・履歴はそのままで、後続の版の稼働を確かめた時点で完了する。
+ * 停止理由が今も証拠未設定である候補だけを条件付きで移し、待ちの枠が埋まっていれば移さない（一意制約）
+ */
+async function moveToSuccessorProof(repositoryFullName: string, candidateId: string): Promise<boolean> {
+  try {
+    const moved = await db.releaseCandidate.updateMany({
+      where: { id: candidateId, activeKey: repositoryFullName, phase: "verifying_production", productionStopReason: "contract_missing" },
+      data: { activeKey: null, successorProofKey: repositoryFullName },
+    });
+    return moved.count === 1;
+  } catch (error) {
+    if (isUniqueConstraintError(error)) return false;
+    throw error;
+  }
 }
 
 /**

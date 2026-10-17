@@ -306,3 +306,48 @@ describe("classifyRcBlock（#4628）", () => {
     expect(block.cancellable).toBe(false);
   });
 });
+
+describe("本番の稼働確認の停止（#4712）", () => {
+  it("止まった公開済み候補は「稼働確認中」ではなく停止として、原因と次の操作を出す", () => {
+    const view = deriveRcStatus(input({ phase: "verifying_production", production: { stopReason: "contract_missing", method: null, awaitingSuccessor: false } }));
+    expect(view.status).toBe("production_stopped");
+    expect(view.label).toBe("稼働確認が停止（証拠未設定）");
+    expect(view.reason).toContain("APP_COMMIT_SHA");
+    expect(view.reason).toContain("次の候補");
+    expect(view.attention).not.toBeNull();
+  });
+
+  it("デプロイ失敗はデプロイ中の段階でも停止として出す", () => {
+    expect(deriveRcStatus(input({ phase: "deploying", production: { stopReason: "deploy_failed", method: null, awaitingSuccessor: false } })).status).toBe("production_stopped");
+  });
+
+  it("後続の確認待ちへ移った候補は、次の候補で完了することを出す", () => {
+    const view = deriveRcStatus(input({ phase: "verifying_production", production: { stopReason: "contract_missing", method: null, awaitingSuccessor: true } }));
+    expect(view.reason).toContain("次の候補を開始済み");
+  });
+
+  it("止まっていなければ従来どおり稼働確認中", () => {
+    expect(deriveRcStatus(input({ phase: "verifying_production", production: { stopReason: null, method: null, awaitingSuccessor: false } })).status).toBe("verifying_production");
+  });
+
+  it("ソース公開の完了は、実機配備を確かめていないことを出す（pi0w）", () => {
+    const view = deriveRcStatus(input({ phase: "completed", production: { stopReason: null, method: "source_publish", awaitingSuccessor: false } }));
+    expect(view).toMatchObject({ status: "completed", label: "ソース公開済み" });
+    expect(view.reason).toContain("実機への配備はこの確認の対象外");
+  });
+
+  it("開始判定は停止を「進行中」と区別し、理由・次の操作・取消不可を返す", () => {
+    const block = classifyRcBlock({
+      candidateId: "c1",
+      sequence: 1,
+      prNumber: 254,
+      phase: "verifying_production",
+      status: "production_stopped",
+      statusLabel: "稼働確認が停止（証拠未設定）",
+      productionStopReason: "contract_missing",
+      statusReason: "理由と操作",
+    });
+    expect(block).toMatchObject({ kind: "production_stopped", label: "RC-1", cancellable: false, productionStopReason: "contract_missing", action: "理由と操作" });
+    expect(block.reason).toContain("PR #254");
+  });
+});

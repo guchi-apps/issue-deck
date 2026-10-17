@@ -476,6 +476,7 @@ export function deployWorkflow(spec: NewAppSpec): string {
     .join("\n");
   const gatePrintf = [
     `printf '%s\\n' "NODE_ENV=production" "PORT=${port}"`,
+    `printf '%s\\n' "APP_COMMIT_SHA=\${APP_COMMIT_SHA}"`,
     ...gateEnvEntries.map((name) => `printf '%s\\n' "${name}=\${${name}}"`),
   ]
     .map((line) => `            ${line}`)
@@ -665,6 +666,9 @@ ${constructDbStep}
           HOST: \${{ env.HOST }}
           USERNAME: \${{ env.USERNAME }}
           SSH_PORT: \${{ env.SSH_PORT }}
+          # 稼働中の版の確認に使う（guchi-apps/issue-deck#4712）。稼働版との照合はgate側が持つ（このファイルは
+          # 照合をしていないので、照合の手順をここに書かない）。コミットのSHAは公開情報なのでそのまま渡してよい
+          APP_COMMIT_SHA: \${{ github.sha }}
 ${gateEnvBlock}
         run: |
           {

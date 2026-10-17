@@ -12,6 +12,7 @@ import {
   type ScaffoldFile,
 } from "@/lib/new-app/scaffold";
 import { emptyNewAppSpec, type NewAppSpec } from "@/lib/new-app/spec";
+import { classifyProductionTarget } from "@/lib/release-production-verification";
 
 function spec(overrides: Partial<NewAppSpec> = {}): NewAppSpec {
   return {
@@ -167,7 +168,7 @@ describe("deploy.yml（#2247。aide-botで踏んだ2件を雛形の側で潰す�
   it("gateへ渡す変数は、env: で宣言した名前と printf で送る名前がそろっている", () => {
     const deploy = content(spec(), ".github/workflows/deploy.yml");
     const block = /- name: Send environment variables\n([\s\S]*?)\n\n/.exec(deploy)?.[1] ?? "";
-    const declared = [...block.matchAll(/^ {10}([A-Z_]+): \$\{\{ env\./gm)].map((m) => m[1]).filter((name) => !["HOST", "USERNAME", "SSH_PORT"].includes(name));
+    const declared = [...block.matchAll(/^ {10}([A-Z_]+): \$\{\{ (?:env\.|github\.sha)/gm)].map((m) => m[1]).filter((name) => !["HOST", "USERNAME", "SSH_PORT"].includes(name));
     const sent = [...block.matchAll(/"([A-Z_]+)=\$\{/g)].map((m) => m[1]);
     expect(sent.sort()).toEqual(declared.sort());
     expect(sent).toContain("DATABASE_URL");
@@ -380,5 +381,17 @@ describe("生成したワークフローが「Invalid workflow file」になら�
         encoding: "utf-8",
       }),
     ).not.toThrow();
+  });
+});
+
+describe("稼働確認の契約（#4712）", () => {
+  it("雛形は稼働中のコミットを返す /api/app-version と、gateへのAPP_COMMIT_SHAの受け渡しを持つ", () => {
+    expect(content(spec(), "src/app/api/app-version/route.ts")).toContain("process.env.APP_COMMIT_SHA");
+    expect(content(spec(), ".github/workflows/deploy.yml")).toContain("APP_COMMIT_SHA: ${{ github.sha }}");
+  });
+
+  it("照合はgate側の対応待ちなので、雛形のdeploy.ymlは照合付き（稼働確認の証拠）と判定されない", () => {
+    const deploy = content(spec(), ".github/workflows/deploy.yml");
+    expect(classifyProductionTarget({ deployWorkflowText: deploy, releaseArtifactsWorkflowText: null })).toBe("deploy_without_version_check");
   });
 });

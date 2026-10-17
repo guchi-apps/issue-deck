@@ -834,7 +834,7 @@ export function ExecutionSettingsSection({
           <Label htmlFor="app-ai-model-reasoning">アプリ内AI：原因診断・新規アプリ相談</Label>
           <InfoHint label="アプリ内AI：原因診断・新規アプリ相談">
             手作業が失敗した原因の診断と、新規アプリの構成相談に使います。判断力が必要なため、
-            通常はSonnetが適しています。原因診断（チャット調査）はGPTを選ぶとサブPCのCodex CLI（サブスク枠）で実行します。新規アプリ相談・手作業の修正提案はGPTを選んでもClaude（Sonnet）で実行し、OpenAI API（従量課金）は使いません。
+            通常はSonnetが適しています。原因診断（チャット調査）はGPTを選ぶとサブPCのCodex CLI（サブスク枠）で実行します。新規アプリ相談・手作業の修正提案・全体レビューの判断の推奨はGPTを選んでもClaude（Sonnet）で実行し、OpenAI API（従量課金）は使いません。
           </InfoHint>
         </div>
         <Select

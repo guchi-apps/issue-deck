@@ -11,6 +11,7 @@ import {
   type ReleaseReviewDecisionRecord,
   type ReleaseReviewDecisionSummary,
 } from "@/lib/release-review-decision";
+import { parseReasonSource, type ReasonSource } from "@/lib/release-review-recommendation";
 
 /**
  * 全体レビューの指摘ごとの判断（#4657）の読み書き。判定は`release-review-decision.ts`の純関数に委ねる。
@@ -44,6 +45,12 @@ export function releaseDecisionScopeKey(repoFullName: string, chain: readonly nu
 
 type DecisionRow = Prisma.ReleaseReviewDecisionGetPayload<object>;
 
+function parseRecommendationSnapshot(r: DecisionRow): ReleaseReviewDecisionRecord["recommendation"] {
+  const decision = parseReleaseReviewDecisionAction(r.recommendedDecision);
+  if (!decision || decision === "withdrawn") return null;
+  return { decision, reason: r.recommendedReason ?? "" };
+}
+
 async function toRecords(rows: readonly DecisionRow[]): Promise<ReleaseReviewDecisionRecord[]> {
   const userIds = [...new Set(rows.map((r) => r.decidedByUserId))];
   const users = userIds.length
@@ -74,6 +81,8 @@ async function toRecords(rows: readonly DecisionRow[]): Promise<ReleaseReviewDec
         findingTitle: r.findingTitle,
         decidedBy: names.get(r.decidedByUserId) ?? "不明なユーザー",
         decidedAt: r.createdAt.toISOString(),
+        recommendation: parseRecommendationSnapshot(r),
+        reasonSource: parseReasonSource(r.reasonSource),
       },
     ];
   });
@@ -150,6 +159,9 @@ export type SaveDecisionInput = {
   blocking: boolean;
   findingTitle: string;
   userId: string;
+  /** 判断時に表示していたAIの推奨（#4676）。推奨を見ずに判断したときはnull */
+  recommendation?: { id: string; decision: string; reason: string } | null;
+  reasonSource?: ReasonSource;
 };
 
 export type SaveDecisionResult =
@@ -196,6 +208,10 @@ export async function saveReleaseReviewDecision(input: SaveDecisionInput): Promi
         blocking: input.blocking,
         findingTitle: input.findingTitle.slice(0, 300),
         decidedByUserId: input.userId,
+        recommendationId: input.recommendation?.id.slice(0, 40) ?? null,
+        recommendedDecision: input.recommendation?.decision.slice(0, 32) ?? null,
+        recommendedReason: input.recommendation?.reason.slice(0, 2000) ?? null,
+        reasonSource: input.reasonSource ?? null,
       },
     });
     return { ok: true, record: (await toRecords([row]))[0] };

@@ -79,3 +79,24 @@ export async function fetchUserCanWriteRepo(
   const json: { permission?: string } = await res.json().catch(() => ({}));
   return { ok: true, canWrite: ["admin", "maintain", "write"].includes(json.permission ?? "") };
 }
+
+/**
+ * ユーザーが対象リポジトリのadminかmaintainの権限を持つかを確かめる（#4713）。稼働版を人の確認で確定する・
+ * 照合先URLを登録するといった、本番の完了判定を左右する操作の前に使う。
+ * 旧来の`permission`はmaintainを`write`に丸めるため、`role_name`で見分ける
+ */
+export async function fetchUserCanMaintainRepo(
+  owner: string,
+  repo: string,
+  login: string,
+  token: string,
+): Promise<{ ok: true; canMaintain: boolean } | { ok: false; reason: "github_error"; status: number }> {
+  const res = await githubFetch(
+    `${GITHUB_API}/repos/${owner}/${repo}/collaborators/${encodeURIComponent(login)}/permission`,
+    token,
+  );
+  if (res.status === 404 || res.status === 403) return { ok: true, canMaintain: false };
+  if (!res.ok) return { ok: false, reason: "github_error", status: res.status };
+  const json: { permission?: string; role_name?: string } = await res.json().catch(() => ({}));
+  return { ok: true, canMaintain: json.permission === "admin" || ["admin", "maintain"].includes(json.role_name ?? "") };
+}
