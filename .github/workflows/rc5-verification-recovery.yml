@@ -1,4 +1,4 @@
-name: RC-5 verification recovery
+name: Candidate verification recovery
 on:
   push:
     branches: [issue-4695]
@@ -14,7 +14,7 @@ jobs:
     if: github.repository == 'guchi-apps/issue-deck'
     runs-on: ubuntu-latest
     steps:
-      - name: Request actual verification for the current candidate
+      - name: Request actual verification for the interrupted AIDE candidate
         env:
           GH_TOKEN: ${{ github.token }}
           APP_BASE_URL: ${{ vars.APP_BASE_URL }}
@@ -24,10 +24,10 @@ jobs:
           set -euo pipefail
           test -n "$PROGRESS_REPORT_SECRET"
           test "$APP_BASE_URL" = "https://issuedeck.gucchii.com"
-          pr="$(gh api repos/guchi-apps/issue-deck/pulls/4692)"
-          printf '%s' "$pr" | jq -e '.state == "open" and .base.ref == "main" and .head.ref == "release-rc/5" and .head.sha == "e338671355f03a26cfacb69dc024879f9a52cb30"' >/dev/null
-          body="$(printf '%s' "$pr" | jq -c '{action:"request",repository:"guchi-apps/issue-deck",pullRequest:.number,baseSha:.base.sha,headSha:.head.sha}')"
-          curl --fail-with-body --silent --show-error --max-time 30 \
+          pr="$(gh api repos/guchi-apps/aide/pulls/659)"
+          printf '%s' "$pr" | jq -e '.state == "open" and .base.ref == "main" and .head.ref == "release-rc/2" and .head.sha == "6cb63dc5aca4c6149ffcc78d1e54c81a2d521424"' >/dev/null
+          body="$(printf '%s' "$pr" | jq -c '{action:"request",repository:"guchi-apps/aide",pullRequest:.number,baseSha:.base.sha,headSha:.head.sha}')"
+          curl --fail --silent --show-error --max-time 30 \
             -X POST "$APP_BASE_URL/api/dispatch/release-verify" \
             -H "Authorization: Bearer $PROGRESS_REPORT_SECRET" \
             -H "Content-Type: application/json" --data "$body" \
