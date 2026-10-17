@@ -5,6 +5,7 @@ import { isRcReleaseCandidateHeadRef, isReleaseCandidateHeadRef } from "@/lib/re
 import { useReleaseRc } from "@/hooks/use-release-rc";
 import { ReleaseRcVerificationEvidence } from "@/components/dashboard/release-rc-evidence";
 import { ReleaseRcFinalizePanel } from "@/components/dashboard/release-rc-finalize";
+import { ReleaseRcCancel } from "@/components/dashboard/release-rc-cancel";
 import { ReleaseDevelopSyncNotice } from "@/components/dashboard/release-develop-sync";
 import { ReleaseRcIdentity, ReleaseRcLegacyNotice, ReleaseRcRevisionHistory } from "@/components/dashboard/release-rc-identity";
 
@@ -212,6 +213,7 @@ export function ReleasePullRequestOverview({
       )}
 
       {/* 公開後のdevelop同期は、本番公開の結果とは別の欄として出す（#4641） */}
+      {rcCandidate && <ReleaseRcCancel candidate={rcCandidate} repositoryFullName={repositoryFullName} onChanged={rc.reload} />}
       {rcCandidate && rc.overview?.developSync && (
         <ReleaseDevelopSyncNotice repositoryFullName={repositoryFullName} sync={rc.overview.developSync} onChanged={rc.reload} />
       )}
