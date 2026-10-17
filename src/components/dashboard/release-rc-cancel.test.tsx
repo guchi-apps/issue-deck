@@ -32,9 +32,20 @@ it("競合・取消失敗を完了とせず理由を表示する", async () => {
   expect(changed).not.toHaveBeenCalled();
 });
 
-it.each(["preparing", "awaiting_approval", "deploying", "completed", "cancelled"])("%sでは取消操作を出さない", (phase) => {
+it.each(["deploying", "verifying_production", "completed", "cancelled"])("%sでは取消操作を出さない", (phase) => {
   render(<ReleaseRcCancel candidate={{ ...candidate, phase }} repositoryFullName="o/r" onChanged={() => {}} />);
   expect(screen.queryByRole("button")).toBeNull();
+});
+
+it.each(["preparing", "awaiting_approval"])("%sでは確認後にその段階を前提として取消を依頼する", async (phase) => {
+  const fetch = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ ok: true }) });
+  vi.stubGlobal("fetch", fetch);
+  vi.spyOn(window, "confirm").mockReturnValue(true);
+  const changed = vi.fn();
+  render(<ReleaseRcCancel candidate={{ ...candidate, phase }} repositoryFullName="o/r" onChanged={changed} />);
+  fireEvent.click(screen.getByRole("button"));
+  await waitFor(() => expect(changed).toHaveBeenCalledOnce());
+  expect(JSON.parse(fetch.mock.calls[0][1].body).expectedPhase).toBe(phase);
 });
 
 it("検証中・合格候補には取消操作を出さない", () => {
