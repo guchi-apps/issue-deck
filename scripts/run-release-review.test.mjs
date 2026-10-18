@@ -408,10 +408,10 @@ describe("run-release-review.sh（#4615）", { timeout: 30_000 }, () => {
 
     it("1本が失敗したら新しいバッチは起動せず、実行中の結果は保存して失敗を報告し、再実行は失敗したバッチから続ける", () => {
       const calls = path.join(dir, "calls");
-      const failed = runReview({ FAIL_BATCH: "2", CALL_LOG: calls, ISSUE_DECK_RELEASE_REVIEW_PARALLEL: "3" });
+      const failed = runReview({ FAIL_BATCH: "2", SLOW: "1", CALL_LOG: calls, ISSUE_DECK_RELEASE_REVIEW_PARALLEL: "3" });
       expect(failed.status).toBe("failed");
       expect(failed.result.diagnostic).toMatchObject({ cause: "unknown", exitCode: 3, stage: "review" });
-      // 同時に起動したバッチ1・3は保存し、4以降は起動しない
+      // 同時に起動したバッチ1・3は保存し、4以降は起動しない（SLOWで1・3の終了を遅らせ、2の失敗が先に観測される順序にする）
       expect(savedResults().sort()).toEqual(["r1.json", "r3.json"]);
       const before = lines(calls).length;
 
@@ -423,7 +423,7 @@ describe("run-release-review.sh（#4615）", { timeout: 30_000 }, () => {
     });
 
     it("未実施のバッチの理由は、実際のバッチ番号で示す（途中のバッチが欠けても番号がずれない）", () => {
-      runReview({ FAIL_BATCH: "2", ISSUE_DECK_RELEASE_REVIEW_PARALLEL: "3" });
+      runReview({ FAIL_BATCH: "2", SLOW: "1", ISSUE_DECK_RELEASE_REVIEW_PARALLEL: "3" });
       const { result } = runReview({ ISSUE_DECK_RELEASE_REVIEW_MAX_BATCHES_PER_RUN: "0" });
       expect(result.pendingBatches).toBe(result.batches - 2);
       const evidence = result.checks[0].evidence;
