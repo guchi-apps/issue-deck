@@ -200,7 +200,16 @@ export type ReviewEvidenceStage =
   /** 統合検証の完了を受けて、証跡に依存する項目を再評価している（開始待ちを含む） */
   | { kind: "reevaluating" }
   | { kind: "complete" }
-  | { kind: "needs_check"; autoReevaluated: boolean; items: ReviewOpenItemKind[] }
+  | {
+      kind: "needs_check";
+      autoReevaluated: boolean;
+      items: ReviewOpenItemKind[];
+      /**
+       * 残件が止める指摘だけで、その全件に有効な非修正の判断（公開後対応・見送り・不採用）がある（#4814）。
+       * 合否（`needs_check`）は変えず、画面が赤の「対応／判断が必要」を出さないための印
+       */
+      cleared?: boolean;
+    }
   /** レビューの実行失敗（コードの結果ではない） */
   | { kind: "failed" };
 
@@ -226,7 +235,11 @@ export const REVIEW_OPEN_ITEM_LABEL: Record<ReviewOpenItemKind, string> = {
   code_unread: "コードの未確認範囲",
 };
 
+/** 判断済み（#4814）の段階の名前 */
+export const REVIEW_DECIDED_LABEL = "判断済み（公開後対応）";
+
 export function describeReviewStageLabel(stage: ReviewEvidenceStage): string {
+  if (stage.kind === "needs_check" && stage.cleared) return REVIEW_DECIDED_LABEL;
   if (stage.kind === "needs_check" && stage.autoReevaluated) return "自動再評価済み・対応／判断が必要";
   return REVIEW_STAGE_LABEL[stage.kind];
 }
@@ -313,4 +326,17 @@ export function describeReviewEvidenceStage(
   }
   if (review.openFiles > 0) items.push("code_unread");
   return { kind: "needs_check", autoReevaluated: markerCurrent, items };
+}
+
+/**
+ * 判断の要約（`ReleaseReviewDecisionSummary.cleared`）を段階へ反映する（#4814）。残件が止める指摘だけのときに限り
+ * `cleared`を付ける——運用作業・未読範囲・証跡の未確認は、指摘への判断では解消しないので従来どおり要確認のまま
+ */
+export function applyReviewDecisionsToStage(
+  stage: ReviewEvidenceStage | undefined,
+  decisions: { cleared: boolean } | null | undefined,
+): ReviewEvidenceStage | undefined {
+  if (!stage || stage.kind !== "needs_check" || !decisions?.cleared) return stage;
+  if (!stage.items.every((item) => item === "findings")) return stage;
+  return { ...stage, cleared: true };
 }

@@ -1,8 +1,8 @@
 import { db } from "@/lib/db";
 import { describeIntegrationSetupGap, getReleaseVerificationConfig } from "@/lib/release-verification-config";
 import { parseReleaseProgress } from "@/lib/release-verification-progress";
-import type { ReviewEvidenceStage } from "@/lib/release-review-reevaluation";
-import { summarizeReleaseVerification } from "@/lib/release-verification-summary";
+import { attachReleaseReviewDecisions } from "@/lib/release-verification-load";
+import { summarizeReleaseVerification, type ReleaseVerificationSummary } from "@/lib/release-verification-summary";
 import {
   isReleasePullRequest,
   parseReleaseVerificationKind,
@@ -16,7 +16,8 @@ import type { PullRequestReleaseCheckState, PullRequestReleaseChecks } from "@/t
  * PR一覧のリリースPRに出す、統合検証・全体レビューの状態（#4349）。
  *
  * **判定は`release-merge-gate.ts`の`viewReleaseVerifications`に委ねる**（リリース画面・マージAPIと
- * 食い違わせない）。ここは一覧向けに状態を畳み、DBを1クエリ引くだけで、GitHub APIは使わない。
+ * 食い違わせない）。ここは一覧向けに状態を畳み、DBを1クエリ引くだけで、GitHub APIは原則使わない（要確認の全体レビューの
+ * 判断を読むときだけ、判断の有効性の確認でmainの比較を引くことがある。#4814）。
  */
 function toListState(view: ReleaseVerificationView): PullRequestReleaseCheckState {
   switch (view.state) {
@@ -54,7 +55,7 @@ export function releaseChecksKey(repositoryFullName: string, number: number): st
   return `${repositoryFullName}#${number}`;
 }
 
-function stageOrUndefined(compute: () => ReviewEvidenceStage | undefined): ReviewEvidenceStage | undefined {
+function stageOrUndefined(compute: () => ReleaseVerificationSummary): ReleaseVerificationSummary | undefined {
   try {
     return compute();
   } catch (error) {
@@ -131,7 +132,7 @@ export async function fetchReleaseChecks(
         );
       // 全体レビューの段階（#4664）。リリース画面の要約と同じ関数で出し、一覧と詳細で食い違わせない。
       // 補助の情報なので、出せなくても検証の状態そのもの（取得不能にはしない）は返す
-      const aiReviewStage = stageOrUndefined(() => {
+      const reviewSummary = stageOrUndefined(() => {
         const detailRows = rows.flatMap((row) => {
           const kind = parseReleaseVerificationKind(row.kind);
           const state = parseReleaseVerificationState(row.state);
@@ -140,9 +141,15 @@ export async function fetchReleaseChecks(
           }
           return [{ ...row, kind, state }];
         });
-        return summarizeReleaseVerification({ current, rows: detailRows, enforced: true, aiReviewAssignee: "" }).aiReview
-          .stage;
+        return summarizeReleaseVerification({ current, rows: detailRows, enforced: true, aiReviewAssignee: "" });
       });
+      // 要確認の全体レビューだけ、指摘への判断を読んで段階へ反映する（#4814）。止める指摘がすべて非修正の判断済みなら
+      // 一覧でも赤の「検証要確認」にしない。読めなければ判断なしと同じ（従来どおり要確認）
+      const aiReviewStage =
+        reviewSummary?.aiReview.stage?.kind === "needs_check"
+          ? (await attachReleaseReviewDecisions(target.repositoryFullName, target.number, current, reviewSummary)).aiReview
+              .stage
+          : reviewSummary?.aiReview.stage;
       result.set(releaseChecksKey(target.repositoryFullName, target.number), {
         ...summarizeReleaseChecks(current, records),
         aiReviewStage,

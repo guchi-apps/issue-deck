@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  applyReviewDecisionsToStage,
   decideReviewReevaluation,
   describeReviewEvidenceStage,
   describeReviewStageLabel,
@@ -302,5 +303,21 @@ describe("describeReviewEvidenceStage", () => {
       describeReviewEvidenceStage(review({ state: "failed", executionFailed: true }), { state: "passed", updatedAt: null }).kind,
     ).toBe("failed");
     expect(describeReviewEvidenceStage(review({ state: "not_run" }), { state: "passed", updatedAt: null }).kind).toBe("none");
+  });
+});
+
+describe("applyReviewDecisionsToStage（#4814）", () => {
+  const stage = { kind: "needs_check" as const, autoReevaluated: true, items: ["findings" as const] };
+  it("残件が止める指摘だけで全件判断済みなら、判断済みの段階にする", () => {
+    const applied = applyReviewDecisionsToStage(stage, { cleared: true });
+    expect(applied).toEqual({ ...stage, cleared: true });
+    expect(describeReviewStageLabel(applied!)).toBe("判断済み（公開後対応）");
+  });
+  it("未判断・他の残件があるときは変えない", () => {
+    expect(applyReviewDecisionsToStage(stage, { cleared: false })).toBe(stage);
+    expect(applyReviewDecisionsToStage(stage, null)).toBe(stage);
+    const withOps = { ...stage, items: ["findings" as const, "ops" as const] };
+    expect(applyReviewDecisionsToStage(withOps, { cleared: true })).toBe(withOps);
+    expect(applyReviewDecisionsToStage({ kind: "complete" }, { cleared: true })).toEqual({ kind: "complete" });
   });
 });

@@ -16,6 +16,7 @@ import {
   type ReleaseOpsContext,
   type ReleaseOpsHostFact,
 } from "@/lib/release-review-ops-evidence";
+import { applyReviewDecisionsToStage } from "@/lib/release-review-reevaluation";
 import { reviewFindingId, reviewFindingIdAliases, type ReleaseReviewFinding } from "@/lib/release-review-result";
 import { listReleaseVerificationDetails } from "@/lib/release-verification";
 import { getReleaseVerificationConfig } from "@/lib/release-verification-config";
@@ -147,7 +148,7 @@ async function loadReleaseOpsContext(
  * 全体レビューの指摘に、ユーザーの判断（#4657）を添える。旧形式の指摘にはIDが無いので、判断・修正系列と
  * 同じ導出（`reviewFindingId`）で補う。判断はAIの`state`・`findings`を書き換えない
  */
-async function attachReleaseReviewDecisions(
+export async function attachReleaseReviewDecisions(
   repoFullName: string,
   prNumber: number,
   current: { baseSha: string; headSha: string },
@@ -175,6 +176,8 @@ async function attachReleaseReviewDecisions(
       state: aiReview.state,
       unverifiedScope: aiReview.unverifiedScope ?? null,
     });
+    // 止める指摘がすべて非修正の判断済みなら、段階にも反映する（#4814。合否は変えない）
+    aiReview.stage = applyReviewDecisionsToStage(aiReview.stage, aiReview.decisions);
   }
   return { ...summary, aiReview };
 }

@@ -58,6 +58,8 @@ export type PublishApprovalRunView = {
   waitMessage?: string | null;
   /** 同じ理由で長く待っているか */
   waitStalled?: boolean;
+  /** 系列がmainへマージした時刻（ISO。#4814）。マージ直後に記録する`releaseStartedAt`を使う。未マージならnull */
+  mergedAt?: string | null;
 };
 
 export type PublishApprovalView = {
@@ -109,6 +111,7 @@ function toRunView(run: ReleaseCompletionRun | null): PublishApprovalRunView | n
     stopMessage: releaseCompletionStopMessage(run.stopReason, run.stopDetail),
     waitMessage: run.status === "merging" ? describeMergeWait(run.waitReason) : null,
     waitStalled: run.status === "merging" && isLongMergeWait(run.waitSince, new Date()),
+    mergedAt: run.mergeSha ? (run.releaseStartedAt?.toISOString() ?? null) : null,
   };
 }
 
