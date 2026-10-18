@@ -24,6 +24,10 @@ function probe(env = {}) {
   );
 }
 
+// 実測プローブはgh・ssh・ヘッドレス起動・npxを順に試すため、各5秒の上限でも既定の5秒では収まらない。
+// 全プローブが上限まで待たされる最悪ケース（20秒）×最大2回に余裕を足した値にする。
+const PROBE_TEST_TIMEOUT_MS = 60_000;
+
 describe("session-capabilities.sh（#4522）", () => {
   it("状態はok/missing/unverifiedのどれかで、詳細を伴う", () => {
     const rows = probe();
@@ -31,14 +35,14 @@ describe("session-capabilities.sh（#4522）", () => {
       expect(["ok", "missing", "unverified"]).toContain(rows[name].state);
       expect(rows[name].detail.length).toBeGreaterThan(0);
     }
-  });
+  }, PROBE_TEST_TIMEOUT_MS);
 
   it("接続先が未設定ならVPSのSSHを確認済みにしない", () => {
     expect(probe({ MANUAL_STEP_VPS_SSH_TARGET: "" })["vps-ssh"].state).toBe("missing");
-  });
+  }, PROBE_TEST_TIMEOUT_MS);
 
   it("プロファイルが無ければログインを確認済みにせず、あっても未確認止まり", () => {
     expect(probe({ ISSUE_DECK_BROWSER_PROFILE_DIR: "/nonexistent/profile" })["browser-login"].state).toBe("missing");
     expect(probe({ ISSUE_DECK_BROWSER_PROFILE_DIR: "/tmp" })["browser-login"].state).toBe("unverified");
-  });
+  }, PROBE_TEST_TIMEOUT_MS);
 });
