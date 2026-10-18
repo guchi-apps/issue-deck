@@ -60,27 +60,27 @@ describe("parseModelPick", () => {
 describe("pickModelByRule", () => {
   // #4106。ラベル・本文の長さ・コメント数だけでは昇格しない
   it("bug・investigation・plan-requiredのラベルだけでは昇格しない", () => {
-    expect(pickModelByRule(input({ labels: ["30.bug"] })).model).toBe("sonnet");
-    expect(pickModelByRule(input({ labels: ["40.investigation"] })).model).toBe("sonnet");
-    expect(pickModelByRule(input({ labels: ["21.plan-required"] })).model).toBe("sonnet");
+    expect(pickModelByRule(input({ labels: ["30.bug"] })).model).toBe("opus");
+    expect(pickModelByRule(input({ labels: ["40.investigation"] })).model).toBe("opus");
+    expect(pickModelByRule(input({ labels: ["21.plan-required"] })).model).toBe("opus");
   });
 
   it("長い本文・多数のコメントだけでは昇格しない", () => {
-    expect(pickModelByRule(input({ body: "あ".repeat(2000) })).model).toBe("sonnet");
-    expect(pickModelByRule(input({ commentCount: 30 })).model).toBe("sonnet");
+    expect(pickModelByRule(input({ body: "あ".repeat(2000) })).model).toBe("opus");
+    expect(pickModelByRule(input({ commentCount: 30 })).model).toBe("opus");
   });
 
-  it("修正方法が明確な不具合・仕様が決まった新規画面は軽量", () => {
+  it("修正方法が明確な不具合・仕様が決まった新規画面は通常の実装（Opus）", () => {
     expect(
       pickModelByRule(
         input({ labels: ["30.bug"], body: "保存ボタンのonClickでidを渡し忘れている。引数を足して直す。" }),
       ).model,
-    ).toBe("sonnet");
+    ).toBe("opus");
     expect(
       pickModelByRule(
         input({ title: "設定画面を新規追加", labels: ["50.design"], body: "左メニュー配下に一覧と編集フォームを置く。レイアウトは添付のとおり。" }),
       ).model,
-    ).toBe("sonnet");
+    ).toBe("opus");
   });
 
   it("本文に未解決の判断（原因の切り分け・案の比較）があれば中級", () => {
@@ -90,14 +90,24 @@ describe("pickModelByRule", () => {
     );
   });
 
-  // 以前はHaikuへ倒していたが、auto mode（--permission-mode auto）で動作しないため
-  // 候補から外し、Sonnetへ倒すようにした（#2756・https://github.com/anthropics/claude-code/issues/43235）
-  it("短く書かれた改善もSonnet", () => {
-    expect(pickModelByRule(input()).model).toBe("sonnet");
+  // Haikuはauto mode（--permission-mode auto）で動作しないため候補から外している
+  // （#2756・https://github.com/anthropics/claude-code/issues/43235）。既定はOpus（#4812）
+  it("短く書かれた改善もOpus", () => {
+    expect(pickModelByRule(input()).model).toBe("opus");
   });
 
-  it("判断が付かなければSonnet", () => {
-    expect(pickModelByRule(input({ labels: [], body: "a".repeat(400) })).model).toBe("sonnet");
+  it("判断が付かなければOpus", () => {
+    expect(pickModelByRule(input({ labels: [], body: "a".repeat(400) })).model).toBe("opus");
+  });
+
+  // #4812。本当に簡単な作業だけSonnet
+  it("文書だけの短い更新はSonnet", () => {
+    expect(
+      pickModelByRule(input({ labels: ["60.documentation"], body: "READMEの誤字を直す。" })).model,
+    ).toBe("sonnet");
+    expect(
+      pickModelByRule(input({ labels: ["60.documentation"], body: "あ".repeat(500) })).model,
+    ).toBe("opus");
   });
 
   // AIが落ちている間ずっと一番高いモデルで走らないよう、ここでFableは選ばない
@@ -157,7 +167,9 @@ describe("buildModelPickPrompt", () => {
   it("名称ではなく未解決の判断で選ぶ基準として書く", () => {
     const prompt = buildModelPickPrompt(input());
     expect(prompt).toContain("未解決の判断とリスク");
-    expect(prompt).toMatch(/`sonnet`:.*仕様が決まった新規画面/);
+    expect(prompt).toMatch(/`opus`:.*仕様が決まった新規画面/);
+    expect(prompt).toMatch(/`sonnet`:.*本当に簡単な作業/);
+    expect(prompt).toContain("迷ったら`opus`にしてください");
     expect(prompt).not.toMatch(/`opus`:.*新しい画面・UIを設計/);
     expect(prompt).toContain("解決済みの設計課題を難しさへ加算せず");
   });
@@ -273,13 +285,15 @@ describe("buildModelPickState / buildModelPickQuestions", () => {
     ]);
   });
 
-  it("Jevの基準でも仕様が決まった新規画面は軽量、未確定の比較判断は中級として書く（#4106）", () => {
+  it("Jevの基準でも通常の実装はOpus、本当に簡単な作業だけSonnetとして書く（#4106・#4812）", () => {
     const { criteria, instructions } = buildModelPickQuestions().model as {
       criteria: Record<string, string>;
       instructions: string;
     };
-    expect(criteria.sonnet).toContain("仕様が決まった新規画面");
+    expect(criteria.sonnet).toContain("本当に簡単");
+    expect(criteria.opus).toContain("仕様が決まった新規画面");
     expect(criteria.opus).toContain("未確定のUI/UXの比較判断");
+    expect(instructions).toContain("迷ったらopusにしてください");
     expect(criteria.opus).not.toContain("新しい画面・UIを設計");
     expect(instructions).toContain("未解決の判断とリスク");
     expect(instructions).toContain("解決済みの設計課題を難しさへ加算せず");
