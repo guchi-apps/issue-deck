@@ -168,7 +168,7 @@ describe("手作業Issueの前提条件アイコン（#1763）", () => {
     renderList({ prerequisiteReadiness: readiness });
 
     expect(rowOf(1).contains(screen.getByLabelText("前提条件がそろっている"))).toBe(true);
-    expect(rowOf(2).contains(screen.getByLabelText("前提条件の完了待ち"))).toBe(true);
+    expect(rowOf(2).contains(screen.getByLabelText("依存先を待っている・操作不要"))).toBe(true);
   });
 
   // 判定に載らないIssue（手作業でない・closed）へ印を付けない
@@ -176,7 +176,7 @@ describe("手作業Issueの前提条件アイコン（#1763）", () => {
     renderList({ prerequisiteReadiness: readiness });
 
     expect(rowOf(3).querySelector("[aria-label='前提条件がそろっている']")).toBeNull();
-    expect(rowOf(3).querySelector("[aria-label='前提条件の完了待ち']")).toBeNull();
+    expect(rowOf(3).querySelector("[aria-label='依存先を待っている・操作不要']")).toBeNull();
   });
 
   it("待っている相手はホバーで読めるようにする", () => {

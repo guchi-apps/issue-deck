@@ -335,8 +335,11 @@ function IssueStateIcon({ issue }: { issue: Issue }) {
 
 /**
  * 前提条件がそろっているか（#1763。#2003で手作業Issue以外にも出すようにした）。
- * Issue詳細の「前提条件の状況」（#1705）と同じ判定・同じ配色（emerald／amber）で、
+ * Issue詳細の「前提条件の状況」（#1705）と同じ判定・同じ配色（emerald／sky）で、
  * 一覧のまま「どれをいま進められるか」が分かるようにする。
+ *
+ * **待ちは青（依存先を待っている・操作不要）。** amberは「あなたの操作待ち」（`00.check-user`）の色で、
+ * 詳細の作業サマリーと同じ語彙にそろえている（#4524）。
  *
  * **前提を書いていないIssueには何も出ない**（`computeIssuePrerequisiteReadiness`が載せない）。
  * 全行にアイコンが並ぶと、前提待ちの橙が埋もれる。
@@ -374,9 +377,9 @@ function ManualStepReadinessIcon({ readiness }: { readiness: ManualStepReadiness
           "size-3.5",
           readiness.ready
             ? "text-emerald-600 dark:text-emerald-400"
-            : "text-amber-600 dark:text-amber-400",
+            : "text-sky-600 dark:text-sky-400",
         )}
-        aria-label={readiness.ready ? "前提条件がそろっている" : "前提条件の完了待ち"}
+        aria-label={readiness.ready ? "前提条件がそろっている" : "依存先を待っている・操作不要"}
       />
     </span>
   );

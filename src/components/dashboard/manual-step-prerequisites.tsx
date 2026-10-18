@@ -60,7 +60,7 @@ export function ManualStepPrerequisites({
           "mt-2 flex items-start gap-1.5 rounded-sm px-2 py-1.5 text-xs",
           ready
             ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
-            : "bg-amber-500/10 text-amber-700 dark:text-amber-300",
+            : "bg-sky-500/10 text-sky-700 dark:text-sky-300",
         )}
       >
         {ready ? (
@@ -125,7 +125,7 @@ function PrerequisiteMark({ prerequisite }: { prerequisite: ManualStepPrerequisi
     return <Wrench className="mt-0.5 size-3.5 shrink-0 text-amber-600 dark:text-amber-400" />;
   }
   if (prerequisite.stage === "develop") {
-    return <Clock className="mt-0.5 size-3.5 shrink-0 text-amber-600 dark:text-amber-400" />;
+    return <Clock className="mt-0.5 size-3.5 shrink-0 text-sky-600 dark:text-sky-400" />;
   }
   return <Dot className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />;
 }
@@ -191,7 +191,7 @@ function PrerequisiteSteps({ prerequisite }: { prerequisite: ManualStepPrerequis
             className={cn(
               "size-1.5 rounded-full",
               index < current && "bg-emerald-500/70",
-              index === current && (prerequisite.satisfied ? "bg-emerald-500" : "bg-amber-500"),
+              index === current && (prerequisite.satisfied ? "bg-emerald-500" : "bg-sky-500"),
               index > current && "bg-border",
             )}
           />
@@ -208,7 +208,7 @@ function stageBadgeClassName(prerequisite: ManualStepPrerequisite): string {
     return "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300";
   }
   if (prerequisite.stage === "develop" || prerequisite.stage === "manual-pending") {
-    return "bg-amber-500/10 text-amber-700 dark:text-amber-300";
+    return "bg-sky-500/10 text-sky-700 dark:text-sky-300";
   }
   return "bg-muted text-muted-foreground";
 }

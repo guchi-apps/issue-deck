@@ -1552,6 +1552,14 @@ export function POST(request: NextRequest) {
     `PushMutedKind`＝**行があればOFF・ユーザー単位**）。各送信は宛先に`notMutedWhere(kind)`を足す。
     席を先に取る確認待ち・本番マージ待ちは、**OFFのせいで宛先が空になったときも席を取らない**
     （保留と同じ理由。ONに戻したあとに鳴らせなくなる）。
+- **作業サマリー（#4524）。通常Issueも旧手作業Issueも、詳細の先頭は「現在地・目的・完了条件・次の操作」だけ。**
+  通常Issueの簡素な詳細を基準にし、実施記録・根拠・前提がそろった依存は閉じた「補足」に畳む。
+  本文の読み取りと現在地の判定は[`lib/issue-work-summary.ts`](../src/lib/issue-work-summary.ts)
+  （目的は`## 目的`／`## この作業でできるようになること`、完了条件は`## 完了条件`、無ければ旧手作業の
+  `## 完了の確認方法`。達成数は本文のチェック状態か、#4426の完了検証がすべて成功したときだけ。記載が無ければ
+  「記載なし」で、条件は作らない）、表示は[`issue-work-summary.tsx`](../src/components/dashboard/issue-work-summary.tsx)。
+  **依存待ちは青（操作不要）、amberは本人の操作待ちだけ。** 一覧の前提待ちアイコンも青にそろえた。
+  親実行の詳細は、mainへ反映済みでも本番確認などが残る間「リリース済みですが、機能全体は未完了」と出す。
 - **【#4315で撤去】手順ウィザード「手作業アシスタント」（`manual-step-guide-dialog.tsx`・一覧の
   「順番に進める」バー・`use-manual-step-guide.ts`・`manual-step-{run,autorun,fix,trouble}-panel.tsx`・
   `manual-step-placeholder-fill.tsx`・自己申告の完了ボタン）は無い。** 手作業Issueは手作業セッション
