@@ -306,13 +306,13 @@ worktreeでは聞かれない。
 セッションでだけ置く。**
 
 置くときも`op inject -i .env.tpl -o .env.local`を機械的に叩かないこと。**`.env.tpl`の位置づけは
-リポジトリごとに違う。** `portfolio`のものはデプロイ／CI用の束で、そのまま流し込むとローカル開発が
+リポジトリごとに違う。** `.env.tpl`がデプロイ／CI用の束になっているリポジトリでは、そのまま流し込むとローカル開発が
 本番を向く。
 
 ```text
 NEXT_PUBLIC_SUPABASE_URL=op://apps/Supabase/project-url      # 本番（開発用は dev-project-url）
 SSH_PRIVATE_KEY=op://apps/githubaction-sshkey/private_key     # デプロイ用
-DEPLOY_PATH=op://apps/portfolio/deploy-path                   # デプロイ用
+DEPLOY_PATH=op://apps/<アプリ名>/deploy-path                  # デプロイ用
 ```
 
 READMEに「1Passwordは本番デプロイ・CIにのみ使用します」と明記されているのはこのため。
