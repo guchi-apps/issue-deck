@@ -23,6 +23,7 @@ import { resolvePlanReviewJobPhase, type DispatchJobView } from "@/lib/dispatch/
 import { formatDispatchHostName } from "@/lib/dispatch/host-label";
 import {
   PLAN_ARTIFACT_REQUEST_TEXT,
+  PLAN_ARTIFACT_REVISE_REQUEST_TEXT,
   SESSION_PLAN_REVISION_MAX_ATTACHMENTS,
   SESSION_PLAN_REVISION_MAX_LENGTH,
 } from "@/lib/dispatch/session-plan-request";
@@ -65,6 +66,7 @@ export function PlanApprovalPanel({
   dispatch,
   onCheckUserResolved,
   artifactsMissing = false,
+  artifactsPresent = false,
   planReview = null,
   planReviewNotice = null,
   planReviewJob = null,
@@ -86,6 +88,11 @@ export function PlanApprovalPanel({
    * 読み込み中・取得失敗は`false`にして、無いと決めつけない。
    */
   artifactsMissing?: boolean;
+  /**
+   * このIssueに見た目のアーティファクトが1件以上あると確かめられているとき`true`（#4745）。
+   * `artifactsMissing`と同じく、読み込み中・取得失敗は`false`にする。
+   */
+  artifactsPresent?: boolean;
   /**
    * 計画の後に届いていて未反映の計画レビュー（#3521・#3554）。無ければ`null`。
    * 指摘ごとのカードにして、承認・修正のボタンより上に出す
@@ -388,6 +395,17 @@ export function PlanApprovalPanel({
               >
                 <LayoutTemplate />
                 アーティファクトの作成を依頼
+              </Button>
+            )}
+            {artifactsPresent && (
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={!canSend || dispatch.isSubmitting}
+                onClick={() => void send("revise", PLAN_ARTIFACT_REVISE_REQUEST_TEXT)}
+              >
+                <LayoutTemplate />
+                アーティファクトの修正を依頼
               </Button>
             )}
             <Button
