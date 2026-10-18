@@ -21,7 +21,7 @@ import { enqueueDispatchJob } from "@/lib/dispatch/jobs";
 import { fetchPullRequest, fetchWorkflowRunJobs, mergePullRequest } from "@/lib/github/actions-api";
 import { getInstallationToken } from "@/lib/github/app-auth";
 import { recordDeployLaunchWatch } from "@/lib/github/deploy-launch-watch";
-import { addIssueLabels, createComment } from "@/lib/github/issues-api";
+import { addIssueLabels, createComment, removeIssueLabel } from "@/lib/github/issues-api";
 import { LOCAL_LABEL_NAME } from "@/lib/github/project-status-dispatch";
 import { fetchMainHeadSha, fetchPullRequestCiState, type GithubApiPullRequest } from "@/lib/github/release-api";
 import { isUniqueConstraintError } from "@/lib/prisma-error";
@@ -815,6 +815,7 @@ async function advanceRelease(run: RunRow, ctx: Ctx, now: Date): Promise<ActionR
       });
       if (updated.count === 1) {
         await notify(run, ctx, `リリースが完了しました。デプロイが成功し、稼働中の版が \`${run.mergeSha.slice(0, 7)}\` と一致しています。\n\n- デプロイ: ${decision.run.htmlUrl}`, false);
+        await clearStopLabels(run, ctx);
       }
       return updated.count === 1 ? { action: "completed", detail: decision.run.htmlUrl } : null;
     }
@@ -873,6 +874,7 @@ async function advanceDeployRecovery(run: RunRow, ctx: Ctx): Promise<ActionResul
       where: { id: run.id, status: run.status },
       data: { status: "completed", activeKey: null, completedAt: series.recoveredAt ?? new Date(), releaseRunUrl: series.releaseRunUrl },
     });
+    if (updated.count === 1) await clearStopLabels(run, ctx);
     return updated.count === 1 ? { action: "completed" } : null;
   }
   if (series.status === "needs_attention" || series.status === "stopped" || series.status === "awaiting_release") {
@@ -892,6 +894,33 @@ async function handOff(run: RunRow, ctx: Ctx, reason: ReleaseCompletionStopReaso
   if (run.publishApprovalId) await settlePublishApprovalOnStop(run.publishApprovalId, reason, new Date());
   await notify(run, ctx, `${run.publishApprovalId ? "自動公開" : "リリース完了系列"}を止めました。${releaseCompletionStopMessage(reason, detail ?? null) ?? ""}`, true);
   return { action: `stop:${reason}`, detail };
+}
+
+/**
+ * 完了したとき、この候補の系列が過去に止めて付けた確認待ちラベルを修正Issueから外す。人が再開した時点で
+ * 確認待ちは解消しているため。外すのは、同じ候補で系列が止まった記録（stopReason）があるときだけ
+ * （止まらず完了した場合や、人が別の理由で付けた札には触れない）。
+ */
+async function clearStopLabels(run: RunRow, ctx: Ctx): Promise<void> {
+  try {
+    const stopped = run.stopReason
+      ? 1
+      : await db.releaseCompletionRun.count({
+          where: { repositoryFullName: run.repositoryFullName, candidatePrNumber: run.candidatePrNumber, stopReason: { not: null }, id: { not: run.id } },
+        });
+    if (!stopped) return;
+    const latest = await db.releaseFixSeries.findFirst({
+      where: { repositoryFullName: run.repositoryFullName, releasePrNumber: { in: numbers(run.candidatePrNumbers) } },
+      orderBy: { createdAt: "desc" },
+      select: { issueNumber: true },
+    });
+    if (!latest) return;
+    for (const label of CHECK_USER_LABELS) {
+      await removeIssueLabel(ctx.owner, ctx.repo, latest.issueNumber, ctx.token, label);
+    }
+  } catch (error) {
+    console.error("[release-completion] 確認待ちラベルの除去に失敗しました", run.id, error);
+  }
 }
 
 async function notify(run: RunRow, ctx: Ctx, message: string, needsUser: boolean): Promise<void> {
