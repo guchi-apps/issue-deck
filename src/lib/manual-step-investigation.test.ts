@@ -73,3 +73,25 @@ describe("parseManualStepVerification", () => {
     expect(findLatestManualStepVerification([comment(ng), comment(ok)])?.passed).toBe(true);
   });
 });
+
+describe("実行能力と完了条件ごとの記録（#4522）", () => {
+  it("「実行能力」の節を読む", () => {
+    const body = `${MANUAL_STEP_INVESTIGATION_MARKER}\n### 目的\nx\n### 実行能力\n- browser-binary: ok（subpc・2026-10-18 10:00）\n- browser-login: missing（認証済みプロファイル無し）\n`;
+    expect(parseManualStepInvestigation(body)?.capabilities).toEqual([
+      "browser-binary: ok（subpc・2026-10-18 10:00）",
+      "browser-login: missing（認証済みプロファイル無し）",
+    ]);
+  });
+
+  it("終了コード0でも、条件が未達なら完了にしない", () => {
+    const body = `${MANUAL_STEP_VERIFICATION_MARKER}\n- 終了コード0: \`true\`\n- 条件: 画面に設定が出る / 結果: 未達 / 確認: 10:05 / 根拠: スクリーンショットで確認\n`;
+    const parsed = parseManualStepVerification(body);
+    expect(parsed?.conditions).toHaveLength(1);
+    expect(parsed?.passed).toBe(false);
+  });
+
+  it("全条件が達成なら完了", () => {
+    const body = `${MANUAL_STEP_VERIFICATION_MARKER}\n- 終了コード0: \`true\`\n- 条件: 画面に設定が出る / 結果: 達成 / 確認: 10:05 / 根拠: DOMを確認\n`;
+    expect(parseManualStepVerification(body)?.passed).toBe(true);
+  });
+});

@@ -1557,7 +1557,7 @@ export function POST(request: NextRequest) {
   `manual-step-placeholder-fill.tsx`・自己申告の完了ボタン）は無い。** 手作業Issueは手作業セッション
   （AI主導。`manual-step-session-panel.tsx`・`scripts/prompts/manual-step-agent.md`）が調査・実行・検証を
   進め、詳細は`ManualStepPanel`の「作業の状況」（`lib/manual-step-investigation.ts`が読む事前調査と
-  完了検証のコメント。代表状態は`lib/manual-step-phase.ts`。#4426）を出す。完了は検証コマンドがすべて終了コード0のときだけセッションがcloseする。
+  完了検証のコメント。代表状態は`lib/manual-step-phase.ts`。#4426）を出す。実行手段の判断とホスト能力の実測は[docs/multi-agent/manual-step-capabilities.md](multi-agent/manual-step-capabilities.md)（#4522）。完了は検証コマンドがすべて終了コード0のときだけセッションがcloseする。
   **以下の箇条書きは撤去前の設計の記録で、サーバー側の代行実行（`/api/manual-steps/*`・`lib/manual-step-*.ts`）
   は残っている。** 画面側のファイル名・番号表示・ボタンの記述は現行のコードに存在しない。
 - **（撤去前の記録）溜まった手作業は「手作業アシスタント」が1手順ずつ順番に案内する**（#1826）。

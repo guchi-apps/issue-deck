@@ -67,6 +67,8 @@ source "$SCRIPT_DIR/lib/local-repo-resolve.sh"
 source "$SCRIPT_DIR/lib/personal-config-sync.sh"
 # shellcheck source=scripts/lib/launcher-scripts-sync.sh
 source "$SCRIPT_DIR/lib/launcher-scripts-sync.sh"
+# shellcheck source=scripts/lib/session-capabilities.sh
+source "$SCRIPT_DIR/lib/session-capabilities.sh"
 
 usage() {
   echo "Usage: scripts/start-manual-step-session.sh [--prepare-only] <owner> <repo> <issue番号>" >&2
@@ -173,11 +175,16 @@ if [[ ! -f "$PROMPT_TEMPLATE" ]]; then
 fi
 
 echo "#$ISSUE_NUMBER: 起動用プロンプトを生成しています..."
+# このホストの実行能力を実測してプロンプトへ埋め込む（#4522）。測れなくても起動は止めない
+HOST_CAPABILITIES="$(format_session_capabilities 2>/dev/null)" ||
+  HOST_CAPABILITIES="（能力の実測に失敗しました。使える前提にせず、自分で確かめてください）"
+export HOST_CAPABILITIES
 ISSUE_JSON_FILE="$(mktemp)"
 printf '%s' "$ISSUE_JSON" >"$ISSUE_JSON_FILE"
 python3 - "$ISSUE_JSON_FILE" "$PROMPT_TEMPLATE" "$FULL_NAME" "$SESSION_DIR" "$REPO_DIR" "$(hostname)" "$LAUNCHER_SCRIPTS_DIR/submit-question.sh" \
   >"$PROMPT_FILE" <<'PY'
 import json
+import os
 import sys
 
 issue_json_path, template_path, repository, session_dir, repo_dir, host_name, question_submit_command = sys.argv[1:8]
@@ -209,6 +216,7 @@ replacements = {
     "{{REPO_DIR}}": f"`{repo_dir}`" if repo_dir else "(このホストにcloneがありません)",
     "{{HOST_NAME}}": host_name,
     "{{QUESTION_SUBMIT_COMMAND}}": question_submit_command,
+    "{{HOST_CAPABILITIES}}": os.environ.get("HOST_CAPABILITIES", ""),
 }
 result = template
 for placeholder, value in replacements.items():
