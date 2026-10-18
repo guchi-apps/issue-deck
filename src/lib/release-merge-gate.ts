@@ -68,6 +68,11 @@ export type ReleaseMergeGateInput = {
    * **`enforced`とは独立に効く**（検証結果の強制を導入していないリポジトリでも、環境設定の未完了で公開させない）
    */
   prerequisites?: readonly ReleasePrerequisiteBlocker[];
+  /**
+   * 人が「全体レビューの結果を承知で公開へ進む」と明示した公開準備の対象か（#4807）。trueなら全体レビューの
+   * 結果（指摘・失敗・未完了）では止めない。統合検証・前提は従来どおり。画面の表示（`views`）は変えない
+   */
+  aiReviewWaived?: boolean;
 };
 
 export type ReleaseMergeGateBlocker = {
@@ -133,6 +138,7 @@ function evaluateVerificationGate(input: ReleaseMergeGateInput): ReleaseMergeGat
   const hard: ReleaseMergeGateBlocker[] = [];
   const soft: ReleaseMergeGateBlocker[] = [];
   for (const view of views) {
+    if (input.aiReviewWaived && view.kind === "ai_review") continue;
     const label = KIND_LABEL[view.kind];
     switch (view.state) {
       case "passed":
@@ -165,7 +171,19 @@ function evaluateVerificationGate(input: ReleaseMergeGateInput): ReleaseMergeGat
   return { status: "ready", views, blockers: [] };
 }
 
-export type ReleaseVerificationPending = { kind: ReleaseVerificationKind; state: "waiting" | "running"; reason: string };
+/**
+ * 公開を止めているのが全体レビューだけか（#4807）。統合検証が合格（または対象外）で、全体レビューが合格以外
+ * （指摘・失敗・未完了・未実施・古い結果のいずれも）のときtrue。**全体レビューは公開の必須条件ではなく、
+ * 人が結果を承知で明示すれば外せる**（統合検証は外せない）。外すかどうかは人の操作で決め、ここは可否だけを返す
+ */
+export function isOnlyAiReviewBlocking(views: readonly ReleaseVerificationView[]): boolean {
+  const ok = (state: ReleaseVerificationView["state"]) => state === "passed" || state === "not_applicable";
+  const integration = views.find((v) => v.kind === "integration");
+  const aiReview = views.find((v) => v.kind === "ai_review");
+  return integration !== undefined && ok(integration.state) && aiReview !== undefined && !ok(aiReview.state);
+}
+
+export type ReleaseVerificationPending ={ kind: ReleaseVerificationKind; state: "waiting" | "running"; reason: string };
 
 /**
  * 統合検証・全体レビューの判定が出るまでのマージ待ち（#4354）。

@@ -12,8 +12,10 @@ import { previewModeGuard } from "@/lib/preview-mode";
 import {
   evaluateReleaseMergeGate,
   evaluateReleaseVerificationWait,
+  isOnlyAiReviewBlocking,
   isReleasePullRequest,
 } from "@/lib/release-merge-gate";
+import { isAiReviewWaivedFor } from "@/lib/release-completion";
 import { loadReleasePrerequisiteBlockers } from "@/lib/release-prerequisites-run";
 import { rcSequenceOf } from "@/lib/release-branch";
 import { loadFinalizationSnapshot } from "@/lib/release-finalize-run";
@@ -66,6 +68,8 @@ async function handlePOST(request: NextRequest) {
     // **表示だけに頼らず、マージ直前にbase/headを取り直して記録のSHAと突き合わせる。**
     // develop向けPR・知見昇格PRなど他のPRは従来どおり。
     let expectedHeadSha: string | undefined;
+    // 新方式の候補で、人が全体レビューの結果を承知で公開準備へ進めたか（#4807）
+    let aiReviewWaived = false;
     const pr = await fetchPullRequest(owner, repo, Number(number), token);
     if (pr.base && pr.head.ref && isReleasePullRequest({ baseRef: pr.base.ref, headRef: pr.head.ref })) {
       expectedHeadSha = pr.head.sha;
@@ -83,6 +87,7 @@ async function handlePOST(request: NextRequest) {
         if (!decision.ok) {
           return NextResponse.json({ error: decision.error, next: decision.next, message: decision.message }, { status: 409 });
         }
+        aiReviewWaived = isAiReviewWaivedFor(snapshot, pr.head.sha);
       }
       const records = await listReleaseVerificationRecords(`${owner}/${repo}`, Number(number));
       const gate = evaluateReleaseMergeGate({
@@ -91,6 +96,7 @@ async function handlePOST(request: NextRequest) {
         enforced: getReleaseVerificationConfig(`${owner}/${repo}`).enforced,
         // 公開前に終わっていない環境設定などの前提（#4523）。検証の強制とは独立に、手動マージも止める
         prerequisites: await loadReleasePrerequisiteBlockers(`${owner}/${repo}`, Number(number)),
+        aiReviewWaived,
       });
       // 統合検証・全体レビューの判定が出るまで待たせる（#4354）。結果では止めず、`enforced`にも依らない。
       // 報告が来ず待ちのまま止まった場合に備え、明示確認（acknowledgeVerification）で上書きできる
@@ -108,9 +114,12 @@ async function handlePOST(request: NextRequest) {
             .join(" / ")}`,
         );
       }
-      // 失敗・未実施・古い結果は確認済みにできない。要確認だけが明示確認（acknowledgeVerification）で通れる
-      const overridable = gate.status === "needs_confirmation" && body.acknowledgeVerification === true;
-      if (gate.status === "blocked" || (gate.status === "needs_confirmation" && !overridable)) {
+      // 統合検証の失敗・未実施・古い結果は確認済みにできない。要確認と、止めているのが全体レビューだけの場合
+      // （#4807。全体レビューは公開の必須条件ではない）だけが明示確認（acknowledgeVerification）で通れる
+      const aiReviewOnly = gate.prerequisites.length === 0 && isOnlyAiReviewBlocking(gate.views);
+      const overridable =
+        (gate.status === "needs_confirmation" || (gate.status === "blocked" && aiReviewOnly)) && body.acknowledgeVerification === true;
+      if ((gate.status === "blocked" || gate.status === "needs_confirmation") && !overridable) {
         return NextResponse.json(
           { error: "release_verification_required", gate },
           { status: 409 },

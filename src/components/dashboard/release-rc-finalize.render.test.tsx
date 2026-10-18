@@ -18,7 +18,7 @@ function candidate(over: Partial<RcCandidateView> = {}): RcCandidateView {
     label: "RC-12",
     branch: "release-rc/12",
     phase: "review",
-    status: { status: "ready_to_prepare", label: "公開準備可能", reason: "", attention: null },
+    status: { status: "ready_to_prepare", label: "公開準備可能", reason: "", attention: null, aiReviewWaivable: false },
     frozenDevelopSha: PRE,
     frozenPrs: [],
     approvedExtraPrs: [],
@@ -29,7 +29,7 @@ function candidate(over: Partial<RcCandidateView> = {}): RcCandidateView {
     cancelReason: null,
     cancelledAt: null,
     createdAt: "2026-10-12T00:00:00Z",
-    finalizeContract: { candidateId: "c1", sequence: 12, revision: 3, prNumber: 12, baseSha: BASE, headSha: PRE, frozenDevelopSha: PRE, includedPrs: [] },
+    finalizeContract: { candidateId: "c1", sequence: 12, revision: 3, prNumber: 12, baseSha: BASE, headSha: PRE, frozenDevelopSha: PRE, includedPrs: [], requiresAiReviewWaiver: false },
     ...over,
   };
 }
@@ -107,7 +107,7 @@ describe("buildFinalizeSteps", () => {
     const pending = buildFinalizeSteps({
       phase: "preparing",
       current: view(),
-      checks: { ciState: "pending", draft: false, pendingReverify: [], reverify: [], reverifyPhase: "done", readiness: { ready: false, reason: "ci_pending" }, readinessLabel: "バンプ後の最終CI・ビルドを実行中です" },
+      checks: { ciState: "pending", draft: false, pendingReverify: [], reverify: [], reverifyPhase: "done", readiness: { ready: false, reason: "ci_pending" }, readinessLabel: "バンプ後の最終CI・ビルドを実行中です", aiReviewWaived: false },
     });
     expect(pending[2]).toMatchObject({ tone: "run", badge: "実行中" });
     // 承認の記録が無い既存の候補は、推定で承認済みにしない
@@ -115,7 +115,7 @@ describe("buildFinalizeSteps", () => {
     const failed = buildFinalizeSteps({
       phase: "preparing",
       current: view(),
-      checks: { ciState: "failure", draft: false, pendingReverify: [], reverify: [], reverifyPhase: "done", readiness: { ready: false, reason: "ci_failed" }, readinessLabel: "バンプ後の最終CI・ビルドが失敗しています" },
+      checks: { ciState: "failure", draft: false, pendingReverify: [], reverify: [], reverifyPhase: "done", readiness: { ready: false, reason: "ci_failed" }, readinessLabel: "バンプ後の最終CI・ビルドが失敗しています", aiReviewWaived: false },
     });
     expect(failed[2]).toMatchObject({ tone: "bad", badge: "失敗" });
   });
@@ -146,6 +146,29 @@ describe("buildFinalizeSteps", () => {
 });
 
 describe("ReleaseRcFinalizePanel", () => {
+  it("全体レビューだけが合格していない候補は、結果を承知で進む明示が無いと公開準備を始めない（#4807）", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ ok: true }) });
+    vi.stubGlobal("fetch", fetchMock);
+    const onChanged = vi.fn();
+    const base = candidate();
+    const waivable = candidate({
+      status: { status: "needs_fix", label: "修正が必要", reason: "検証で指摘・失敗が出ています", attention: null, aiReviewWaivable: true },
+      finalizeContract: { ...base.finalizeContract!, requiresAiReviewWaiver: true },
+    });
+    render(<ReleaseRcFinalizePanel candidate={waivable} finalization={overview()} repositoryFullName="o/r" onChanged={onChanged} />);
+    expect(screen.getByTestId("release-rc-ai-review-waiver-note").textContent).toContain("全体レビューは公開の必須条件ではない");
+    fireEvent.click(screen.getByText("全体レビューの結果を承知で本番公開へ進む（公開承認）"));
+    const submit = screen.getByText("公開を承認して進める").closest("button")!;
+    expect(submit.disabled).toBe(true);
+    fireEvent.click(screen.getByTestId("release-rc-ai-review-waiver"));
+    expect(submit.disabled).toBe(false);
+    fireEvent.click(submit);
+    await waitFor(() => expect(onChanged).toHaveBeenCalled());
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body as string);
+    expect(body).toMatchObject({ action: "start", approvePublish: true, waiveAiReview: true });
+    vi.unstubAllGlobals();
+  });
+
   it("合格した候補では、予定の版を確定済みとして出さずに公開準備を始められる", () => {
     render(<ReleaseRcFinalizePanel candidate={candidate()} finalization={overview()} repositoryFullName="o/r" onChanged={vi.fn()} />);
     expect(screen.getByText("未確定")).toBeTruthy();

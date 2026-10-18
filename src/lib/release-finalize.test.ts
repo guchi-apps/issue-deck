@@ -236,8 +236,15 @@ describe("decideFinalizeStart", () => {
     expectedHeadSha: PRE,
   };
   it("合格した候補だけ始められる", () => {
-    expect(decideFinalizeStart(input)).toEqual({ ok: true, contract });
+    expect(decideFinalizeStart(input)).toEqual({ ok: true, contract, aiReviewWaived: false });
     expect(decideFinalizeStart({ ...input, contract: null })).toEqual({ ok: false, error: "not_ready" });
+  });
+  it("全体レビューだけが合格していない候補は、承知で進む明示があるときだけ始める（#4807）", () => {
+    const waiver = { ...contract, requiresAiReviewWaiver: true };
+    expect(decideFinalizeStart({ ...input, contract: waiver })).toEqual({ ok: false, error: "ai_review_waiver_required" });
+    expect(decideFinalizeStart({ ...input, contract: waiver, waiveAiReview: true })).toEqual({ ok: true, contract: waiver, aiReviewWaived: true });
+    // 合格した候補では明示があっても免除を記録しない
+    expect(decideFinalizeStart({ ...input, waiveAiReview: true })).toEqual({ ok: true, contract, aiReviewWaived: false });
   });
   it("レビュー段階以外・進行中は始めない", () => {
     expect(decideFinalizeStart({ ...input, phase: "preparing" })).toEqual({ ok: false, error: "wrong_phase" });
