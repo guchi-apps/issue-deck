@@ -431,6 +431,8 @@ export function IssueDeckShell({
   const [crossQuestionDialogOpen, setCrossQuestionDialogOpen] = useState(false);
   /** 新規アプリの立ち上げ（#2188）。入口はPCの左メニューとスマホのホームの最下部の1行だけ */
   const [newAppDialogOpen, setNewAppDialogOpen] = useState(false);
+  // 右下ボタンから開くリモートセッションのモーダル（#4835）。左メニューの入口は従来どおり全画面ペイン
+  const [remoteSessionModalOpen, setRemoteSessionModalOpen] = useState(false);
   const [crossQuestionDialogRepo, setCrossQuestionDialogRepo] = useState<string | null>(null);
   const [codeReviewDialogOpen, setCodeReviewDialogOpen] = useState(false);
   const [codeReviewDialogRepo, setCodeReviewDialogRepo] = useState<string | null>(null);
@@ -2413,12 +2415,23 @@ export function IssueDeckShell({
                 <MobileScreenFab
                   raised={mobileFabRaised}
                   onCreateIssue={() => openCreateDialog(mobileFabRepositoryFullName)}
-                  onOpenRemoteSessions={selectRemoteSessions}
+                  onOpenRemoteSessions={() => setRemoteSessionModalOpen(true)}
                   onAskCrossRepoQuestion={() =>
                     openCrossRepoQuestionDialog(mobileFabRepositoryFullName)
                   }
                 />
               )}
+
+              <Dialog open={remoteSessionModalOpen} onOpenChange={setRemoteSessionModalOpen}>
+                <DialogContent className="flex h-[min(46rem,calc(100%-2rem))] max-w-[calc(100%-2rem)] flex-col gap-3 p-4 sm:max-w-5xl">
+                  <DialogTitle className="sr-only">リモートセッション</DialogTitle>
+                  <RemoteSessionView
+                    repositories={remoteSessionRepositories}
+                    active={remoteSessionModalOpen}
+                    hideHeader
+                  />
+                </DialogContent>
+              </Dialog>
             </div>
 
             {/* PWAのアプリアイコンのバッジ（#3433）。フッター3タブの合計で、ホームとブランチに共通するPRは1件 */}
