@@ -42,6 +42,13 @@ export type ChangelogEntry = {
  */
 export const APP_CHANGELOG: ChangelogEntry[] = [
   {
+    version: "8.67.1",
+    date: "2026-10-19",
+    changes: [
+      "Claudeのモデルを「おまかせ」で選んだとき、通常はより高性能なOpusが使われ、簡単な作業のときだけSonnetが選ばれるようになりました。",
+    ],
+  },
+  {
     version: "8.67.0",
     date: "2026-10-19",
     changes: [
