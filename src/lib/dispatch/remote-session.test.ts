@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const db = vi.hoisted(() => ({
   remoteSession: { findFirst: vi.fn(), findMany: vi.fn(), updateMany: vi.fn(), groupBy: vi.fn() },
   dispatchHost: { findMany: vi.fn(), findUnique: vi.fn() },
-  repository: { findMany: vi.fn() },
+  repository: { findMany: vi.fn(), findFirst: vi.fn() },
   dispatchJob: { findMany: vi.fn(), create: vi.fn() },
 }));
 vi.mock("@/lib/db", () => ({ db }));
@@ -26,6 +26,28 @@ describe("リモートセッションの利用者境界", () => {
     // 1回目は settleStartingSessions、2回目が一覧
     const listCall = db.remoteSession.findMany.mock.calls.find((c) => c[0]?.orderBy);
     expect(listCall?.[0].where.requestedByUserId).toBe("u1");
+  });
+
+  it("一覧は現在連携しているリポジトリのセッションだけに絞る（連携解除後は返さない）", async () => {
+    db.repository.findMany.mockResolvedValue([{ fullName: "me/app" }]);
+    await listRemoteSessions("u1");
+    const listCall = db.remoteSession.findMany.mock.calls.find((c) => c[0]?.orderBy);
+    expect(listCall?.[0].where.repositoryFullName).toEqual({ in: ["me/app"] });
+  });
+
+  it("連携解除後の終了はnot_foundでジョブを積まない", async () => {
+    db.remoteSession.findFirst.mockResolvedValue({
+      id: "s1", repositoryFullName: "me/app", status: "running", host: "h", tmuxSessionName: "t",
+    });
+    db.repository.findFirst.mockResolvedValue(null);
+    const result = await enqueueRemoteSessionKill({ id: "s1", requestedByUserId: "u1" });
+    expect(result).toMatchObject({ ok: false, reason: "not_found" });
+    expect(db.repository.findFirst).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { fullName: "me/app", installation: { userInstallations: { some: { userId: "u1" } } } },
+      }),
+    );
+    expect(db.dispatchJob.create).not.toHaveBeenCalled();
   });
 
   it("ホストの登録リポジトリは要求者の連携分だけに絞る", async () => {
