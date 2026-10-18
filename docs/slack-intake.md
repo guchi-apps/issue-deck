@@ -66,6 +66,7 @@ Slackの`#アプリissue起案`への投稿から、**AIが対象リポジトリ
 | `SLACK_USER_MAP` | `{"<SlackユーザーID>":"<IssueDeckのユーザーID>"}`。載っていないSlackユーザーは無視する |
 | `SLACK_ALLOWED_TEAM_IDS` / `SLACK_ALLOWED_CHANNEL_IDS` | 既定は`T0C8GTB3CP6` / `C0C873R7JTV` |
 | `SLACK_ALLOWED_REPO_OWNERS` | 候補にするOrganization／ユーザー。未設定なら制限しない |
+| `SLACK_RELEASE_CHANNEL_ID` | リリース完了カードの投稿先（#4791）。既定は`C0CA52U82HY`（#4826）。起案の許可チャンネルとは独立 |
 
 必須の2つが無ければ連携は無効（受け口は503）。`.github/secrets-manifest.tsv`には**まだ足していない**（デプロイ値検査に未登録の行を持ち込まないため。サーバーの`.env`へ直接置く）。デプロイの`update_env`は自分が管理するキーだけを書き換えるので、直接置いた`SLACK_*`はデプロイで消えない。**このためリリースをデプロイしただけでは連携は無効のまま（503）で、ChatGPT側の処理がそのまま動き続ける。** 有効化（App作成→旧Webhook停止→`.env`設定・再起動→実投稿確認）は手作業Issue #4461で追跡する。
 
@@ -79,6 +80,7 @@ Slackの`#アプリissue起案`への投稿から、**AIが対象リポジトリ
 4. **Interactivity & Shortcuts**: Request URLに`https://<IssueDeckのホスト>/api/slack/interactions`、Select Menus の Options Load URLに`https://<IssueDeckのホスト>/api/slack/options`（Slackの設定画面には完全なHTTPS URLを指定する）
 5. Signing SecretとBot Tokenをサーバーの`.env`へ置き、アプリを再起動する。`SLACK_USER_MAP`に依頼者を登録する
 6. `#アプリissue起案`で`/invite @IssueDeck`してBotをチャンネルへ参加させる
+7. リリース完了カードの投稿先（既定`C0CA52U82HY`）でも`/invite @IssueDeck`する（未参加だと`not_in_channel`で投稿できない）
 
 ## 現行ChatGPT処理からの切替・ロールバック
 

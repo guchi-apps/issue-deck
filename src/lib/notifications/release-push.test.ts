@@ -237,9 +237,11 @@ describe("loadReleaseSlackTarget", () => {
     });
   });
 
-  it("チャンネル未設定なら許可チャンネルの先頭、それも無ければ既定", () => {
-    expect(loadReleaseSlackTarget({ SLACK_BOT_TOKEN: "t", SLACK_ALLOWED_CHANNEL_IDS: "C1,C2" })?.channel).toBe("C1");
-    expect(loadReleaseSlackTarget({ SLACK_BOT_TOKEN: "t" })?.channel).toBe("C0C873R7JTV");
+  it("チャンネル未設定ならリリース通知用の既定で、起案の許可チャンネルには引きずられない", () => {
+    expect(loadReleaseSlackTarget({ SLACK_BOT_TOKEN: "t", SLACK_ALLOWED_CHANNEL_IDS: "C1,C2" })?.channel).toBe(
+      "C0CA52U82HY",
+    );
+    expect(loadReleaseSlackTarget({ SLACK_BOT_TOKEN: "t", SLACK_RELEASE_CHANNEL_ID: " " })?.channel).toBe("C0CA52U82HY");
   });
 });
 
@@ -259,7 +261,7 @@ describe("runReleasePushSweep", () => {
     // **送る前に席を取る**（タグが変わっていることを条件にした更新が席になる）
     expect(updateMany).toHaveBeenCalled();
     expect(postChannelMessage).toHaveBeenCalledOnce();
-    expect(vi.mocked(postChannelMessage).mock.calls[0][1].channel).toBe("C0C873R7JTV");
+    expect(vi.mocked(postChannelMessage).mock.calls[0][1].channel).toBe("C0CA52U82HY");
   });
 
   it("初めて見るリポジトリは鳴らさずタグだけ記録する", async () => {
