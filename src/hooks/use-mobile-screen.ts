@@ -65,8 +65,8 @@ export type MobileScreen =
   // 予約実行（#2995）。確認環境と同じくホームのメニューからのドリルダウンだけで開く
   | { kind: "nightly-run" }
   | { kind: "ideas" }
-  // チャット（#3975）。構想と同じくホームのメニューからのドリルダウンだけで開く
-  | { kind: "chat" }
+  // リモートセッション（#4743。アプリ内チャットを置き換えた）。構想と同じくホームのメニューからのドリルダウンだけで開く
+  | { kind: "remote-sessions" }
   // iOS拡張（#3708）。構想と同じくホームのメニューからのドリルダウンだけで開く
   | { kind: "ios-extensions" }
   | {
@@ -219,7 +219,8 @@ export function useMobileScreen(issues: Issue[], repositories: ConnectedReposito
     }
 
     if (screenParam === "ideas") return { kind: "ideas" };
-    if (screenParam === "chat") return { kind: "chat" };
+    // 旧チャット（#3975）のURL（`mscreen=chat`）もリモートセッションへ寄せる
+    if (screenParam === "remote-sessions" || screenParam === "chat") return { kind: "remote-sessions" };
     if (screenParam === "ios-extensions") return { kind: "ios-extensions" };
 
     return { kind: "home" };
@@ -247,7 +248,7 @@ export function useMobileScreen(issues: Issue[], repositories: ConnectedReposito
           | "preview"
           | "nightly-run"
           | "ideas"
-          | "chat"
+          | "remote-sessions"
           | "ios-extensions";
         repo?: string | null;
         issue?: string | null;
@@ -412,7 +413,7 @@ export function useMobileScreen(issues: Issue[], repositories: ConnectedReposito
 
   // ホームのメニューから共通知識の画面へ遷移する（#2912）。確認環境と同じ形
   const selectIdeas = useCallback(() => navigate({ screen: "ideas" }), [navigate]);
-  const selectChat = useCallback(() => navigate({ screen: "chat" }), [navigate]);
+  const selectRemoteSessions = useCallback(() => navigate({ screen: "remote-sessions" }), [navigate]);
   const selectIosExtensions = useCallback(() => navigate({ screen: "ios-extensions" }), [navigate]);
 
   const selectRepository = useCallback(
@@ -591,7 +592,7 @@ export function useMobileScreen(issues: Issue[], repositories: ConnectedReposito
     selectPreview,
     selectNightlyRun,
     selectIdeas,
-    selectChat,
+    selectRemoteSessions,
     selectIosExtensions,
     selectRepository,
     selectRepositoryByFullName,

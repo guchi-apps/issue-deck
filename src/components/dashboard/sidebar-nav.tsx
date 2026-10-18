@@ -14,7 +14,6 @@ import {
   GitBranch,
   History,
   Lightbulb,
-  MessageSquareText,
   Smartphone,
   Loader2,
   Lock,
@@ -22,6 +21,7 @@ import {
   Plus,
   Settings2,
   Star,
+  TerminalSquare,
   X,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
@@ -84,8 +84,8 @@ type SidebarNavProps = {
   onSelectNightlyRun: () => void;
   /** 新規アプリの構想一覧を開く */
   onSelectIdeas?: () => void;
-  /** チャット（#3975）の画面を開く */
-  onSelectChat?: () => void;
+  /** リモートセッション（#4743）の画面を開く */
+  onSelectRemoteSessions?: () => void;
   /** iOS拡張（#3708）の画面を開く */
   onSelectIosExtensions?: () => void;
   /** 次の5時間枠に積んであるIssueの数（#2995）。行に出す。nullなら出さない */
@@ -186,7 +186,7 @@ export function SidebarNavView({
   onSelectReleaseHistory,
   onSelectNightlyRun,
   onSelectIdeas = () => {},
-  onSelectChat = () => {},
+  onSelectRemoteSessions = () => {},
   onSelectIosExtensions = () => {},
   nightlyRunQueuedCount = null,
   ideasCount = null,
@@ -571,13 +571,13 @@ export function SidebarNavView({
         <ul className="flex flex-col gap-0.5">
           {questionSignalRow("question")}
           {navRow({
-            key: "chat",
-            label: "チャット",
-            icon: MessageSquareText,
-            active: activePane === "chat",
-            onClick: onSelectChat,
+            key: "remote-sessions",
+            label: "リモートセッション",
+            icon: TerminalSquare,
+            active: activePane === "remote-sessions",
+            onClick: onSelectRemoteSessions,
             count: null,
-            title: "Issue・PRの状態確認や修復を会話で進める",
+            title: "リポジトリを選んでClaude Codeのセッションを立ち上げる",
           })}
           {navRow({
             key: "ideas",
