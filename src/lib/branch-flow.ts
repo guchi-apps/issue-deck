@@ -1132,6 +1132,22 @@ export function splitLanesByReleaseFreeze(
   return { afterFreeze, included };
 }
 
+/**
+ * 束のレーンを「今回公開する変更」（`included`）と「リリース待ちのPR」（`waiting`）に分ける（#4787）。
+ *
+ * - リリース済みの束: 全て`included`（従来どおり）
+ * - 未リリースでリリースPRが無い（リリース候補を作っていない）束: 全て`waiting`
+ * - 未リリースでリリースPRがある束: 凍結の前後で分ける（`splitLanesByReleaseFreeze`。凍結後のレーンが`waiting`）
+ */
+export function splitLanesByReleaseCandidate(
+  group: Pick<BranchFlowReleaseGroup, "pullRequest" | "lanes" | "frozenAt" | "mergedAt">,
+): { included: BranchFlowLane[]; waiting: BranchFlowLane[] } {
+  if (group.mergedAt !== null) return { included: group.lanes, waiting: [] };
+  if (group.pullRequest === null) return { included: [], waiting: group.lanes };
+  const { afterFreeze, included } = splitLanesByReleaseFreeze(group);
+  return { included, waiting: afterFreeze };
+}
+
 /** リリースPRの版に対応する、マージ済みバンプPR（`release/v<版>`）の作成時刻。無ければundefined */
 function mergedBumpPullRequestCreatedAt(
   pullRequests: PullRequestSummary[],

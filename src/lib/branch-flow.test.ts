@@ -8,6 +8,7 @@ import {
   formatUnreleasedSummary,
   hasChangesAfterReleaseFreeze,
   splitLanesByReleaseFreeze,
+  splitLanesByReleaseCandidate,
   isClosedLane,
   isDevelopContentInMain,
   latestReleaseMergedAtByRepository,
@@ -2530,6 +2531,23 @@ describe("リリースPR凍結後の変更の有無（hasChangesAfterReleaseFree
     );
     expect(afterFreeze).toEqual([]);
     expect(included).toHaveLength(1);
+  });
+
+  it("splitLanesByReleaseCandidate: 候補ありは凍結後をwaitingへ、候補なしは全てwaitingへ（#4787）", () => {
+    const withRc = splitLanesByReleaseCandidate(
+      unreleasedGroup(["2026-08-15T01:00:00Z", "2026-08-15T03:00:00Z"]),
+    );
+    expect(withRc.included.map((lane) => lane.branchName)).toEqual(["issue-200"]);
+    expect(withRc.waiting.map((lane) => lane.branchName)).toEqual(["issue-201"]);
+
+    const group = unreleasedGroup(["2026-08-15T01:00:00Z", "2026-08-15T03:00:00Z"]);
+    const noRc = splitLanesByReleaseCandidate({ ...group, pullRequest: null });
+    expect(noRc.included).toEqual([]);
+    expect(noRc.waiting).toHaveLength(2);
+
+    const released = splitLanesByReleaseCandidate({ ...group, mergedAt: "2026-08-16T00:00:00Z" });
+    expect(released.waiting).toEqual([]);
+    expect(released.included).toHaveLength(2);
   });
 });
 
