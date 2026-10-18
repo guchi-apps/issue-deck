@@ -777,9 +777,47 @@ manual_step_session_capable() {
 # **`claude`が`--remote-control`に対応しているかまで確かめて申告する**（#4811）。`command -v`だけだと
 # 非対応の古いClaude Codeでも対応hostとして申告してしまい、起動ジョブを配られてから`failed`になる
 # （ランチャーも起動時に同じ確認をして理由を付けて`failed`で返すが、それは最後の砦）
+#
+# `claude --help`はNodeの起動を伴い最大10秒かかるため、**`claude`の実体（パスと更新時刻）が変わった
+# ときだけ**実行し直し、それ以外は前回の結果を申告する（#4816）。
+REMOTE_SESSION_CAPABLE="false"
+REMOTE_SESSION_CLAUDE_KEY=""
+
+# 判定を（必要なら）取り直して`REMOTE_SESSION_CAPABLE`へ入れる。
+#
+# **コマンド置換（`$(...)`）から呼ばない。** サブシェルで走ると記録が親へ戻らず、毎巡
+# `claude --help`を実行することになる（`refresh_manual_step_vps_capable`と同じ。申告の前に素で呼ぶ）。
+refresh_remote_session_capable() {
+  local claude_path key help_out rc
+  claude_path="$(command -v claude 2>/dev/null || true)"
+  if [[ ! -f "$REMOTE_SESSION_LAUNCHER" || -z "$claude_path" ]]; then
+    # 無くなったときは記録を使わず即座に落とす
+    REMOTE_SESSION_CAPABLE="false"
+    REMOTE_SESSION_CLAUDE_KEY=""
+    return 0
+  fi
+  key="${claude_path}:$(stat -L -c %Y "$claude_path" 2>/dev/null || true)"
+  if [[ "$key" == "$REMOTE_SESSION_CLAUDE_KEY" ]]; then
+    return 0
+  fi
+  help_out="$(timeout 10 claude --help 2>/dev/null </dev/null)" && rc=0 || rc=$?
+  if (( rc == 124 )); then
+    # 打ち切られたときは判定できていないので、記録せず次の申告で取り直す
+    REMOTE_SESSION_CAPABLE="false"
+    REMOTE_SESSION_CLAUDE_KEY=""
+    return 0
+  fi
+  REMOTE_SESSION_CLAUDE_KEY="$key"
+  if grep -q -- "--remote-control" <<<"$help_out"; then
+    REMOTE_SESSION_CAPABLE="true"
+  else
+    REMOTE_SESSION_CAPABLE="false"
+  fi
+}
+
 remote_session_capable() {
-  if [[ -f "$REMOTE_SESSION_LAUNCHER" ]] && command -v claude >/dev/null 2>&1 \
-    && timeout 10 claude --help 2>/dev/null | grep -q -- "--remote-control"; then
+  if [[ "$REMOTE_SESSION_CAPABLE" == "true" && -f "$REMOTE_SESSION_LAUNCHER" ]] \
+    && command -v claude >/dev/null 2>&1; then
     printf 'true'
   else
     printf 'false'
@@ -1438,6 +1476,7 @@ announce() {
   # 再起動されていない状態は、HEADとorigin/developの比較だけでは見えない。
   # **申告を組み立てる前に取り直す**（コマンド置換の中で呼ぶとキャッシュが効かない）
   refresh_manual_step_vps_capable
+  refresh_remote_session_capable
 
   payload="$(jq -n \
     --arg host "$HOST_NAME" \
