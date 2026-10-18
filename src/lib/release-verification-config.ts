@@ -42,6 +42,7 @@ export const RELEASE_VERIFICATION_EXCLUSIONS: Readonly<Record<string, string>> =
   "guchi-apps/subscription-lists": "アーカイブ済み（運用終了）",
   "guchi-apps/trainroute": "アーカイブ済み（運用終了）",
   "guchi-apps/shopping-list": "アーカイブ済み（運用終了）",
+  "guchi-apps/portfolio": "アーカイブ済み（運用終了）",
   "guchi-apps/docs": "共有知識リポジトリ。main直接運用でdevelop→mainの本番リリースが無い",
   "guchi-apps/question": "メモ用リポジトリ。ビルド・本番リリースが無い",
   "guchi-apps/ideas": "メモ用リポジトリ。ビルド・本番リリースが無い",
@@ -191,11 +192,6 @@ export const RELEASE_VERIFICATION_REPOS: Readonly<Record<string, ReleaseVerifica
     enforced: false,
     stack: "Node（npm・lockfileなし）",
     integrationCommands: ["npm test", "npm run build"],
-  },
-  "guchi-apps/portfolio": {
-    enforced: false,
-    stack: "Node（npm）",
-    integrationCommands: [NPM_CI, "npm run lint", "npm run build"],
   },
 };
 
