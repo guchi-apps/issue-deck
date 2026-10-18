@@ -1,7 +1,7 @@
 import type { BranchFlowRepository } from "@/types/branch-flow";
 import type { ReleaseCandidateVerification } from "@/lib/release-candidate-status";
 
-export type BranchFlowGuidance = { state: string; next: string; attention: boolean };
+export type BranchFlowGuidance = { state: string; next: string; attention: boolean; loading?: boolean };
 
 /** 表示専用。承認・マージ可否は既存のサーバー側判定を使う。 */
 export function describeBranchFlow(
@@ -19,8 +19,12 @@ export function describeBranchFlow(
   if (summary.deploy?.kind === "failure") {
     return result("デプロイ失敗", "復旧方法を確認", true);
   }
-  if (options.branchesFailed || !repository.branchesLoaded) {
+  if (options.branchesFailed) {
     return result("状態未取得", "取得状況を確認", true);
+  }
+  // まだ取得できていないだけで、失敗ではない。警告色にせず取得中として見せる（#4788）
+  if (!repository.branchesLoaded) {
+    return { ...result("状態未取得", "取得状況を確認"), loading: true };
   }
   if (options.verification?.problem) {
     return result(options.verification.problem.label, "必要な対応を確認", true);
