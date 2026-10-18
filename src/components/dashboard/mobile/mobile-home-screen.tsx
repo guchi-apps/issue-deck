@@ -427,7 +427,7 @@ const HOME_TILE_GROUPS: { id: HomeTileGroupId; label: string }[] = [
  */
 const HOME_TILE_LAYOUT: Record<HomeTileGroupId, string[]> = {
   attention: ["check-user", "manual-step", "pr:completed", "question"],
-  progress: ["not-started", "nightly-run", "in-progress", "pr:in-progress", "release-pending"],
+  progress: ["not-started", "nightly-run", "in-progress", "pr:in-progress", "release-pending", "pr:release"],
   list: ["all", "pr:all", "repos", "code-review", "chat", "ideas", "ios-extensions", "preview"],
 };
 
