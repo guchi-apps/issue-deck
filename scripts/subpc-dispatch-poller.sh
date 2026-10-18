@@ -774,9 +774,12 @@ manual_step_session_capable() {
 }
 
 # リモートセッション（#4743）を起こせるか。ランチャーと`claude`が揃っているときだけ申告する
-# （`--remote-control`への対応はランチャーが起動時に確かめ、理由を付けて`failed`で返す）
+# **`claude`が`--remote-control`に対応しているかまで確かめて申告する**（#4811）。`command -v`だけだと
+# 非対応の古いClaude Codeでも対応hostとして申告してしまい、起動ジョブを配られてから`failed`になる
+# （ランチャーも起動時に同じ確認をして理由を付けて`failed`で返すが、それは最後の砦）
 remote_session_capable() {
-  if [[ -f "$REMOTE_SESSION_LAUNCHER" ]] && command -v claude >/dev/null 2>&1; then
+  if [[ -f "$REMOTE_SESSION_LAUNCHER" ]] && command -v claude >/dev/null 2>&1 \
+    && timeout 10 claude --help 2>/dev/null | grep -q -- "--remote-control"; then
     printf 'true'
   else
     printf 'false'
