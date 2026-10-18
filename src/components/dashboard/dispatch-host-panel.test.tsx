@@ -7,6 +7,7 @@ import {
   DispatchHostPanel,
 } from "@/components/dashboard/dispatch-host-panel";
 import type { DispatchHostView, DispatchJobView } from "@/lib/dispatch/dispatch-job";
+import type { RemoteSessionView } from "@/lib/dispatch/remote-session-rules";
 import type { DispatchSessionView } from "@/lib/dispatch/session-state";
 
 const NOW = new Date("2026-08-15T12:00:00.000Z");
@@ -974,5 +975,67 @@ describe("DispatchHostPanel", () => {
 
       expect(screen.queryByText(/起動を見送っています/)).toBeNull();
     });
+  });
+});
+
+describe("リモートセッション（#4836）", () => {
+  function makeRemote(overrides: Partial<RemoteSessionView> = {}): RemoteSessionView {
+    return {
+      id: "remote-1",
+      repositoryFullName: "guchi-apps/myroom",
+      host: "subpc",
+      tmuxSessionName: "myroom-remote-abcdefgh",
+      status: "running",
+      remoteControlUrl: "https://claude.ai/code/session_x",
+      failureMessage: null,
+      stopping: false,
+      createdAt: new Date(NOW.getTime() - 35 * 60_000).toISOString(),
+      lastSeenAt: NOW.toISOString(),
+      ...overrides,
+    };
+  }
+
+  it("ホストカードの最下段に、本数と上限・状態・開く導線を出す", () => {
+    const onOpen = vi.fn();
+    render(
+      <DispatchHostPanel
+        hosts={[makeHost()]}
+        sessions={[]}
+        remoteSessions={[
+          makeRemote(),
+          makeRemote({ id: "remote-2", repositoryFullName: "guchi-apps/car-care", status: "starting", remoteControlUrl: null }),
+          makeRemote({ id: "remote-3", status: "ended" }),
+        ]}
+        onOpenRemoteSessions={onOpen}
+      />,
+    );
+    expect(screen.getByText("リモートセッション 2/3")).toBeTruthy();
+    expect(screen.getByText("myroom")).toBeTruthy();
+    expect(screen.getByText(/^稼働中・/)).toBeTruthy();
+    expect(screen.getByText(/^起動中・/)).toBeTruthy();
+    // URLが届いているものだけにClaude Codeアプリへの出口を出す
+    expect(screen.getAllByLabelText(/Claude Codeアプリで開く$/)).toHaveLength(1);
+    act(() => screen.getByRole("button", { name: "画面を開く" }).click());
+    expect(onOpen).toHaveBeenCalledTimes(1);
+  });
+
+  it("終了ジョブを待っている間は「終了中」と出す", () => {
+    render(<DispatchHostPanel hosts={[makeHost()]} sessions={[]} remoteSessions={[makeRemote({ stopping: true })]} />);
+    expect(screen.getByText(/^終了中・/)).toBeTruthy();
+    // 導線を渡さなければボタンは出さない
+    expect(screen.queryByRole("button", { name: "画面を開く" })).toBeNull();
+  });
+
+  it("別のホストのもの・動いているものが無いときは小見出しごと出さない", () => {
+    render(
+      <DispatchHostPanel hosts={[makeHost()]} sessions={[]} remoteSessions={[makeRemote({ host: "mainpc" })]} />,
+    );
+    expect(screen.queryByText(/^リモートセッション/)).toBeNull();
+  });
+
+  it("縮めた版の見出しに本数だけを出す", () => {
+    render(<DispatchHostPanel hosts={[makeHost()]} sessions={[]} remoteSessions={[makeRemote()]} compact />);
+    expect(screen.getByText("リモート 1")).toBeTruthy();
+    expect(screen.queryByText("myroom")).toBeNull();
   });
 });

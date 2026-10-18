@@ -64,5 +64,19 @@ export function useReferenceNavigation() {
     [pushParams],
   );
 
-  return { openIssue, openPullRequest };
+  /**
+   * リモートセッション画面を開く（#4836）。実行状況のホストカードから、並んでいるセッションを
+   * 終了・起動しに行く導線。PCは左メニューと同じ`pane`、スマホは`mscreen`へ切り替える
+   */
+  const openRemoteSessions = useCallback(() => {
+    pushParams((params) => {
+      // 左メニューの遷移（`selectRemoteSessionsPane`）と同じく、PRの選択状態だけを落とす
+      params.delete("pr");
+      params.delete("prmodal");
+      params.set("pane", "remote-sessions");
+      params.set("mscreen", "remote-sessions");
+    });
+  }, [pushParams]);
+
+  return { openIssue, openPullRequest, openRemoteSessions };
 }

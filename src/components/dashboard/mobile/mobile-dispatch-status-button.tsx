@@ -116,7 +116,7 @@ function SheetBody({
   dispatch: DispatchStateHandle;
   onClose: () => void;
 }) {
-  const { openIssue } = useReferenceNavigation();
+  const { openIssue, openRemoteSessions } = useReferenceNavigation();
 
   return (
     <DispatchQueueContent
@@ -126,6 +126,10 @@ function SheetBody({
       onOpenIssue={(issueId) => {
         onClose();
         openIssue(issueId);
+      }}
+      onOpenRemoteSessions={() => {
+        onClose();
+        openRemoteSessions();
       }}
     />
   );

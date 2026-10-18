@@ -331,6 +331,7 @@ export function MobileHomeScreenView({
                   <DispatchHostPanel
                     hosts={dispatch.hosts}
                     sessions={dispatch.sessions}
+                    remoteSessions={dispatch.remoteSessions}
                     compact
                     onOpenDetail={() => setDispatchStatusOpen(true)}
                   />
