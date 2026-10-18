@@ -39,9 +39,10 @@
       "type": "array",
       "items": {
         "type": "object", "additionalProperties": false,
-        "required": ["blocking", "severity", "title", "detail", "impact", "evidence", "blockingReason", "recommendation", "file", "line", "pullRequests", "previousId", "discovery", "stallCause", "premiseChanged"],
+        "required": ["blocking", "checkId", "severity", "title", "detail", "impact", "evidence", "blockingReason", "recommendation", "file", "line", "pullRequests", "previousId", "discovery", "stallCause", "premiseChanged"],
         "properties": {
           "blocking": {"type": "boolean"},
+          "checkId": {"type": ["string", "null"], "enum": ["pr_interaction", "auth_boundary", "host_compat", "config_migration", "state_consistency", "ui_truthfulness", null]},
           "severity": {"type": "string", "enum": ["high", "medium", "low"]},
           "title": {"type": "string"},
           "detail": {"type": "string"},
