@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { runDeployRecoverySweep, startDeployRecoverySeries } from "@/lib/deploy-recovery-series-run";
+import { fetchDeployRunsForSha, runDeployRecoverySweep, startDeployRecoverySeries } from "@/lib/deploy-recovery-series-run";
 
 /**
  * 本番復旧系列（#3998）の外部操作の確認。**重複させないこと**（同じ失敗の押し直し・記録失敗後の
@@ -374,5 +374,17 @@ describe("修正済みの報告（#4451）", () => {
     ]);
     await runDeployRecoverySweep({ hostName: "subpc" });
     expect(rows[0]).toMatchObject({ status: "needs_attention", stopReason: "fix_not_merged" });
+  });
+});
+
+describe("deploy.ymlを持たないrepo（#4728）", () => {
+  it("404は例外にせず、runが無いものとして返す", async () => {
+    githubFetch.mockResolvedValue({ ok: false, status: 404 });
+    await expect(fetchDeployRunsForSha("o", "r", "abc", "t")).resolves.toEqual([]);
+  });
+
+  it("404以外のエラーは握りつぶさない", async () => {
+    githubFetch.mockResolvedValue({ ok: false, status: 500 });
+    await expect(fetchDeployRunsForSha("o", "r", "abc", "t")).rejects.toThrow("500");
   });
 });

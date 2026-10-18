@@ -502,10 +502,18 @@ export async function fetchWorkflowRunsForSha(
   sha: string,
   token: string,
 ): Promise<DeployRunObservation[]> {
-  const data = await requestJson<{ workflow_runs?: Array<GithubWorkflowRun & { created_at?: string }> }>(
-    `${GITHUB_API}/repos/${owner}/${repo}/actions/workflows/${encodeURIComponent(workflowFile)}/runs?head_sha=${encodeURIComponent(sha)}&per_page=20`,
-    token,
-  );
+  let data: { workflow_runs?: Array<GithubWorkflowRun & { created_at?: string }> };
+  try {
+    data = await requestJson(
+      `${GITHUB_API}/repos/${owner}/${repo}/actions/workflows/${encodeURIComponent(workflowFile)}/runs?head_sha=${encodeURIComponent(sha)}&per_page=20`,
+      token,
+    );
+  } catch (error) {
+    // workflowファイルが無いrepo（deploy.ymlを持たないrepoなど）は404になる。例外にせず「runが無い」として返し、
+    // 判定側が待機→期限切れの`needs_attention`で人へ渡せるようにする（#4728）
+    if (error instanceof GithubApiError && error.status === 404) return [];
+    throw error;
+  }
   return (data.workflow_runs ?? []).map((run) => ({
     id: run.id,
     htmlUrl: run.html_url,
