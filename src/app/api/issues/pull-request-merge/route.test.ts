@@ -20,6 +20,7 @@ vi.mock("@/lib/github/deploy-launch-watch", () => ({ recordDeployLaunchWatch: vi
 vi.mock("@/lib/preview-mode", () => ({ previewModeGuard: () => null }));
 vi.mock("@/lib/release-finalize-run", () => ({ loadFinalizationSnapshot: (...a: unknown[]) => loadFinalizationSnapshot(...a) }));
 vi.mock("@/lib/release-verification", () => ({ listReleaseVerificationRecords: (...a: unknown[]) => listReleaseVerificationRecords(...a) }));
+vi.mock("@/lib/release-prerequisites-run", () => ({ loadReleasePrerequisiteBlockers: async () => [] }));
 vi.mock("@/lib/release-verification-config", () => ({ getReleaseVerificationConfig: () => ({ enforced: false }) }));
 
 import { POST } from "./route";

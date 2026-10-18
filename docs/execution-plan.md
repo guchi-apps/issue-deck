@@ -72,6 +72,22 @@ Issueのクローズ・PR作成・developへのマージ・本番反映・検証
 `renderPlanBody`が親本文へ入れる節（`<!-- issue-deck:execution-plan:start vN -->`〜`end`）を作る。
 `detectBodyMismatch`は節の有無・版・子一覧の食い違いを検出する。本文を手で直しても実行は変わらない。
 
+## リリース前後の区分とゲート（#4523）
+
+子には任意で`timing`（`pre-release`／`post-release`／`independent`）を付けられる。省略した旧計画は従来どおり動く。
+
+| 区分 | 意味 | 候補の公開 | 親の完了 |
+| --- | --- | --- | --- |
+| `pre-release` | 公開より前に終わっている必要がある（環境設定など）。`gate`（`merge`＝既定／`deploy`）で止める工程を表示上区別する。どちらもmainへのマージ前に判定する（マージがデプロイを起こすため） | 未完了なら止める | 必須 |
+| `post-release` | 公開後の作業（本番確認など） | 止めない | 必須 |
+| `independent` | この機能のリリースと無関係 | 混ぜない | 「本番反映」の数え方から外す |
+
+- **成立の条件**: 実装PRを持つ作業は統合ブランチ（develop）へのマージ。**PRを持たない作業（環境設定・確認）は、Issueのクローズに加えて作業の検証結果（`ParentRunChild.verifiedAt`）の記録**が要る。クローズだけ・再オープンされた後の古い記録・取得失敗・PRが複数は成立としない
+- **候補との対応**: 候補（`ReleaseCandidate`の`frozenPrs`・承認済み追加PR・取り込み済みPR）に実装PRが含まれる子を持つ計画だけが対象。前提そのものは他リポジトリのIssueでもよい。旧方式（`release-main/*`）の候補は機能を引けないため前提を返さない
+- **合流点**: `evaluateReleaseMergeGate`の`prerequisites`。検証の強制（`enforced`）とは独立に`blocked`にし、手動マージ（`POST /api/issues/pull-request-merge`）・自動の完了マージ（`release-completion-run.ts`）に効く。完了マージは`wait`として理由と次の実行を保ち、条件が成立すれば次の巡回で進む（ユーザー確認待ちへは送らない）。IO側は`release-prerequisites-run.ts`
+- **循環**: リリース前に必須の作業（とその依存先）が`released`/`verified`を待つ計画は登録時に拒否し、経路・根拠・直すべき依存（`merged`へ改める／`post-release`にする）を返す（`findReleaseCycles`）
+- 親の完了は、PRのマージ・リリース成功に加えて`pre-release`／`post-release`の作業の検証が揃い、親の本番確認が記録されたときだけ（[parent-run.md](parent-run.md)）
+
 ## 今後（このIssueの範囲外）
 
 子の自動起動と全体進捗は#4536（[parent-run.md](parent-run.md)）、Slack・共通起案での作成は#4537。#4520系列で作業の種別が増えたら条件の列挙を拡張する。

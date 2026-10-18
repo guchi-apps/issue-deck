@@ -58,6 +58,7 @@ import {
 } from "@/lib/release-publish-approval-run";
 import { createReleaseFixSeries, readReleaseFixStartState } from "@/lib/release-fix-series-run";
 import { evaluateReleaseMergeGate, isReleasePullRequest } from "@/lib/release-merge-gate";
+import { loadReleasePrerequisiteBlockers } from "@/lib/release-prerequisites-run";
 import { isProductionVerifiedForMergeSha } from "@/lib/release-production-verification-run";
 import { listReleaseVerificationRecords } from "@/lib/release-verification";
 import { loadReleaseVerificationSummary } from "@/lib/release-verification-load";
@@ -661,8 +662,9 @@ async function evaluateAndMerge(run: RunRow, ctx: Ctx, now: Date, observation: O
     fetchPullRequestCiState(ctx.owner, ctx.repo, run.candidatePrNumber, ctx.token).catch(() => null),
     listReleaseVerificationRecords(run.repositoryFullName, run.candidatePrNumber),
   ]);
+  const prerequisites = pull?.base ? await loadReleasePrerequisiteBlockers(run.repositoryFullName, run.candidatePrNumber) : [];
   const gate = pull?.base
-    ? evaluateReleaseMergeGate({ current: { baseSha: pull.base.sha, headSha: pull.head.sha }, records, enforced: true })
+    ? evaluateReleaseMergeGate({ current: { baseSha: pull.base.sha, headSha: pull.head.sha }, records, enforced: true, prerequisites })
     : null;
   const mac = observation.checks?.mac;
   const decision = decideCompletionMerge({ ...run, status: run.status as ReleaseCompletionStatus }, {
@@ -684,7 +686,7 @@ async function evaluateAndMerge(run: RunRow, ctx: Ctx, now: Date, observation: O
         : null,
     mainSha,
     gateStatus: gate && gate.status !== "not_enforced" ? gate.status : "blocked",
-    gateReasons: gate?.blockers.map((b) => b.reason) ?? [],
+    gateReasons: [...(gate?.blockers.map((b) => b.reason) ?? []), ...(gate?.prerequisites.map((b) => `${b.reason}（次: ${b.next}）`) ?? [])],
     // 判断の要約は、いまマージしようとしている対象（base・head）について読んだものだけを使う
     gateClearedByDecision:
       gate !== null &&

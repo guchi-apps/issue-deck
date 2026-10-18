@@ -8,6 +8,7 @@
  * リリース単位の統合検証・全体レビューとは責務が別。
  */
 
+import type { ReleasePrerequisiteBlocker } from "@/lib/execution-plan/release-link";
 import { isReleaseCandidateHeadRef } from "@/lib/release-branch";
 
 /** 固定リリースに対する検証の種別 */
@@ -62,6 +63,11 @@ export type ReleaseMergeGateInput = {
    * **実行中・待機中の完了待ち（`evaluateReleaseVerificationWait`）はこのフラグの対象外**で、常に有効
    */
   enforced: boolean;
+  /**
+   * 公開前に終わっていないpre-releaseの前提（#4523。`evaluateReleasePrerequisites`の結果）。
+   * **`enforced`とは独立に効く**（検証結果の強制を導入していないリポジトリでも、環境設定の未完了で公開させない）
+   */
+  prerequisites?: readonly ReleasePrerequisiteBlocker[];
 };
 
 export type ReleaseMergeGateBlocker = {
@@ -70,7 +76,9 @@ export type ReleaseMergeGateBlocker = {
   reason: string;
 };
 
-export type ReleaseMergeGate =
+export type ReleaseMergeGate = ReleaseMergeGateBase & { prerequisites: ReleasePrerequisiteBlocker[] };
+
+type ReleaseMergeGateBase =
   | { status: "not_enforced"; views: ReleaseVerificationView[]; blockers: [] }
   /** 通常のマージへ進める */
   | { status: "ready"; views: ReleaseVerificationView[]; blockers: [] }
@@ -111,6 +119,14 @@ export function viewReleaseVerifications(
 }
 
 export function evaluateReleaseMergeGate(input: ReleaseMergeGateInput): ReleaseMergeGate {
+  const prerequisites = [...(input.prerequisites ?? [])];
+  const gate = evaluateVerificationGate(input);
+  if (prerequisites.length === 0) return { ...gate, prerequisites };
+  // 前提が未完了なら、検証が通っていても通常のマージへ進めない。検証側の指摘は残して返す
+  return { status: "blocked", views: gate.views, blockers: gate.blockers, prerequisites };
+}
+
+function evaluateVerificationGate(input: ReleaseMergeGateInput): ReleaseMergeGateBase {
   const views = viewReleaseVerifications(input.current, input.records);
   if (!input.enforced) return { status: "not_enforced", views, blockers: [] };
 

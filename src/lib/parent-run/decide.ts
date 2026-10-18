@@ -1,6 +1,7 @@
 import { decideDependencyWait, type ConditionResult, type DependencyWaitCondition } from "@/lib/dispatch/dependency-wait";
 import type { PlanChild, PlanDependency, PlanSnapshot } from "@/lib/execution-plan/types";
 import { formatRef, refKey } from "@/lib/execution-plan/types";
+import { isNonCodeWorkVerified, isTimedNonCodeWork } from "@/lib/execution-plan/release-link";
 
 /**
  * 親Issueの自動実行（#4536）の判断。副作用を持たない純関数だけを置く。
@@ -100,9 +101,21 @@ export function evaluateDependency(
   dep: PlanDependency,
   obs: RefObservation,
   verifiedAt: Date | null,
+  /** 依存先の子の区分（#4523）。PRを持たない作業（環境設定・確認）は、クローズ＋検証結果の記録で本番確認が成立する */
+  target?: PlanChild,
 ): ConditionResult[] {
   return dep.conditions.map((condition: DependencyWaitCondition): ConditionResult => {
     const unknownIssue = obs.issue === "error" || obs.issue === "missing";
+    // PRを持たない作業（#4523）: PRのマージ・main反映は存在しない。完了は「クローズ＋検証結果の記録」
+    if (target && isTimedNonCodeWork(target, obs) && (condition === "released" || condition === "verified")) {
+      if (unknownIssue) return { condition, satisfied: null, detail: obs.issue === "missing" ? "Issueが見つかりません" : `取得できません（${obs.error ?? "不明"}）` };
+      if (obs.issue === "open") {
+        return { condition, satisfied: false, detail: verifiedAt ? "検証結果は記録されていますが、Issueが再オープンされています（古い証跡は使いません）" : "作業が完了していません" };
+      }
+      return isNonCodeWorkVerified(obs, verifiedAt)
+        ? { condition, satisfied: true, detail: "作業が完了し、検証結果が記録されています" }
+        : { condition, satisfied: false, detail: "クローズ済みですが、作業の検証結果が記録されていません（クローズだけでは成立としません）" };
+    }
     switch (condition) {
       case "closed":
         if (unknownIssue) return { condition, satisfied: null, detail: obs.issue === "missing" ? "Issueが見つかりません" : `取得できません（${obs.error ?? "不明"}）` };
@@ -240,7 +253,7 @@ export function evaluateRun(input: RunEvaluationInput): RunEvaluation {
       const depKey = refKey(dep);
       const depChild = byKey.get(depKey);
       const depEval = depChild ? evaluate(depKey, trail) : null;
-      const results = evaluateDependency(dep, obsOf(depKey), depChild?.verifiedAt ?? null);
+      const results = evaluateDependency(dep, obsOf(depKey), depChild?.verifiedAt ?? null, depChild?.child);
       dependencies.push({ ref: depKey, conditions: results });
       const decision = decideDependencyWait(results);
       if (decision === "resume") continue;
@@ -280,15 +293,35 @@ export function evaluateRun(input: RunEvaluationInput): RunEvaluation {
   const next = nextCandidate ? refKey(nextCandidate.child) : null;
 
   const evidence: CompletionEvidence[] = [];
+  // リリースと無関係な子（independent）と、PRを持たない環境設定・確認の作業（#4523）は、
+  // 「PRのdevelopマージ／main反映」では数えない。後者は別項目（作業の検証）で確かめる
+  const isCodeWork = (e: ChildEvaluation) => e.child.timing !== "independent" && !isTimedNonCodeWork(e.child, obsOf(refKey(e.child)));
+  const codeChildren = ordered.filter(isCodeWork);
+  const nonCodeChildren = ordered.filter((e) => e.child.timing !== "independent" && isTimedNonCodeWork(e.child, obsOf(refKey(e.child))));
   // 完了条件はIssueのクローズで代用しない。実装PRのdevelopマージを確かめられた子だけを数える
-  const allDone = ordered.length > 0 && ordered.every((e) => e.display.phase === "done" && isChildMerged(obsOf(refKey(e.child))));
+  const allDone =
+    ordered.length > 0 &&
+    ordered.every((e) => e.display.phase === "done") &&
+    codeChildren.every((e) => isChildMerged(obsOf(refKey(e.child))));
   evidence.push({ label: "子のdevelopマージ", ok: allDone, detail: `${counts.done}/${counts.total}` });
-  const unreleased = ordered.filter((e) => !isChildReleased(obsOf(refKey(e.child))));
+  const unreleased = codeChildren.filter((e) => !isChildReleased(obsOf(refKey(e.child))));
   evidence.push({
     label: "本番（main）への反映",
     ok: allDone && unreleased.length === 0,
     detail: unreleased.length === 0 ? "全て反映済み" : `未反映: ${unreleased.map((e) => formatRef(e.child)).join(", ")}`,
   });
+  if (nonCodeChildren.length > 0) {
+    // マージ・リリースに成功しても、環境設定・本番確認などの作業が残れば親は完了にしない
+    const unverified = nonCodeChildren.filter((e) => !isNonCodeWorkVerified(obsOf(refKey(e.child)), e.verifiedAt));
+    evidence.push({
+      label: "リリース前後の作業の検証",
+      ok: unverified.length === 0,
+      detail:
+        unverified.length === 0
+          ? "全て検証済み"
+          : `残り: ${unverified.map((e) => `${formatRef(e.child)}（${e.child.timing === "pre-release" ? "リリース前" : "リリース後"}）`).join(", ")}`,
+    });
+  }
   evidence.push({
     label: "本番確認",
     ok: input.parentVerifiedAt !== null,
