@@ -219,6 +219,14 @@ export function ParentRunSection({
           </ul>
         )}
 
+        {summary && !summary.complete && summary.evidence.some((e) => e.label === "本番（main）への反映" && e.ok) && (
+          // リリース済みと機能全体の完了は別（#4524）。本番確認などが残る間は未完了と言う
+          <p className="rounded-md border border-red-500/40 bg-red-500/10 px-3 py-2 text-xs" data-testid="parent-run-released-incomplete">
+            <b>リリース済みですが、機能全体は未完了です。</b>
+            残り: {summary.evidence.filter((e) => !e.ok).map((e) => e.label).join("、")}
+          </p>
+        )}
+
         {summary && (
           <ul className="border-t border-dashed pt-2 text-xs" data-testid="parent-run-evidence">
             {summary.evidence.map((e) => (

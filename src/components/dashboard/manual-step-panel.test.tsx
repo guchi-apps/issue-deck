@@ -164,7 +164,7 @@ describe("ManualStepPanel", () => {
       );
 
       expect(screen.getByText("完了検証がすべて成功")).toBeTruthy();
-      expect(screen.getByText("手作業は完了しています")).toBeTruthy();
+      expect(screen.getByText("作業は完了しています")).toBeTruthy();
     });
 
     const USER_ACTION_BODY = [
@@ -193,7 +193,7 @@ describe("ManualStepPanel", () => {
       );
 
       expect(screen.getByText("あなたの操作を待っています")).toBeTruthy();
-      expect(screen.getByText("あなたの作業（1件）")).toBeTruthy();
+      expect(screen.getByText("次の操作（1件）")).toBeTruthy();
       expect(screen.getByText("VPS")).toBeTruthy();
       expect(screen.getByText(/完了後：/)).toBeTruthy();
       expect(screen.getByText("sudo -u app bash -lc 'cd /apps/x && pm2 restart x'")).toBeTruthy();
@@ -225,7 +225,7 @@ describe("ManualStepPanel", () => {
 
       fireEvent.click(screen.getByRole("button", { name: "操作したのでAIに確認を依頼" }));
       expect(onShowQuestion).toHaveBeenCalledTimes(1);
-      expect(screen.queryByText("手作業は完了しています")).toBeNull();
+      expect(screen.queryByText("作業は完了しています")).toBeNull();
       expect(screen.queryByRole("button", { name: /クローズ/ })).toBeNull();
     });
 
@@ -252,6 +252,45 @@ describe("ManualStepPanel", () => {
       const card = document.querySelector("[data-phase]")!;
       const summary = summarizeManualStepPrerequisites(prerequisites, REPO);
       expect(card.textContent).toContain(summary.message);
+    });
+
+    // #4524: 依存待ちは操作不要の別状態で、本人操作待ち（amber）と取り違えない
+    it("前提待ちは「依存先を待っています・操作不要」で、ボタンや本人の操作は出さない", () => {
+      const prerequisites = [prerequisite()];
+      render(
+        <ManualStepPanel
+          isSubmitting={false}
+          sessionIssue={ISSUE as never}
+          comments={[]}
+          prerequisites={prerequisites}
+          prerequisiteSummary={summarizeManualStepPrerequisites(prerequisites, REPO)}
+          repositoryFullName={REPO}
+        />,
+      );
+
+      expect(screen.getByText("依存先を待っています・操作不要")).toBeTruthy();
+      expect(document.querySelector("[data-work-status]")!.getAttribute("data-work-status")).toBe("dependency_wait");
+      expect(screen.queryByText("あなたの操作を待っています")).toBeNull();
+      expect(screen.queryByText(/操作したのでAIに確認を依頼/)).toBeNull();
+    });
+
+    it("本文の目的と完了条件（確認方法のフォールバック）を状態カードの中に出す", () => {
+      const issue = {
+        ...ISSUE,
+        body: "## この作業でできるようになること\nメールが届く\n\n## 完了の確認方法\n```bash\ncurl -sf https://example.com\n```\n",
+      };
+      render(<ManualStepPanel isSubmitting={false} sessionIssue={issue as never} comments={[]} />);
+
+      const card = document.querySelector("[data-phase]")!;
+      expect(card.textContent).toContain("メールが届く");
+      expect(card.textContent).toContain("完了条件（0/1）");
+    });
+
+    it("AIだけで進む状態には、本人の操作の枠を出さない", () => {
+      render(<ManualStepPanel isSubmitting={false} sessionIssue={ISSUE as never} comments={[]} />);
+
+      expect(screen.queryByText(/次の操作/)).toBeNull();
+      expect(screen.queryByText(/手作業/)).toBeNull();
     });
   });
 

@@ -69,6 +69,7 @@ import {
   LocalSessionWaitingInputNotice,
 } from "@/components/dashboard/local-session-notice";
 import { IssueOrderSection } from "@/components/dashboard/issue-order-section";
+import { IssueWorkSummary } from "@/components/dashboard/issue-work-summary";
 import { CodeReviewPanel } from "@/components/dashboard/code-review-panel";
 import { ManualStepPanel } from "@/components/dashboard/manual-step-panel";
 import {
@@ -172,6 +173,7 @@ import { useIssueMutations } from "@/hooks/use-issue-mutations";
 import { ParentRunSection } from "@/components/dashboard/parent-run-section";
 import { useIssueSubIssues } from "@/hooks/use-issue-sub-issues";
 import { useIssueTaskList } from "@/hooks/use-issue-task-list";
+import { resolveWorkStatus } from "@/lib/issue-work-summary";
 import { useManualStepPrerequisites } from "@/hooks/use-manual-step-prerequisites";
 import { useIssueWorkflowRun } from "@/hooks/use-issue-workflow-run";
 import { useIssuePullRequests } from "@/hooks/use-issue-pull-requests";
@@ -1017,6 +1019,23 @@ export function MobileIssueDetail({
               pullRequestProgress={pullRequestProgress}
               planReviewCreating={planReviewCreating}
             />
+
+            {/* 通常Issueの作業サマリー（#4524）。目的・完了条件が本文にあるときだけ出す。
+                手作業Issueは`ManualStepPanel`が同じ部品を状態カードの中に持つ */}
+            {!canCompleteManualStep(issue) && (
+              <IssueWorkSummary
+                body={issue.body}
+                status={resolveWorkStatus({
+                  phase: null,
+                  blockingCount: manualStepPrerequisites.summary?.blocking.length ?? 0,
+                  sessionRunning: false,
+                  questionPending: false,
+                  isOpen: issue.state !== "closed",
+                })}
+                blockingMessage={manualStepPrerequisites.summary?.message}
+                idPrefix="work-mobile"
+              />
+            )}
 
             {/* 手作業Issueの状態と、あなたの作業・主操作（#1280・#4426）。**状態カードの直後・質問パネルの
                 直前**に置く——いま必要な行動を最初に見せ、確認の依頼はすぐ下の質問パネルで答える */}
