@@ -287,12 +287,16 @@ HEAD以外のコミットに存在すれば失敗させる。バージョンが�
    `/`無しではマッチしない。この検査が走るのはチェックアウト直後でビルド前なので、片方だけだと
    ビルド生成物をそのまま誤検知する（**ローカルのworktreeには開発サーバーが作った`.next`が
    実在するため、手元で試すと再現しない**。#2135で実際に踏んだ）。
+   **`tar -C <dir>`（`--directory`）の後ろの入力は`<dir>`からの相対パスとして探す**（#4829）。
+   `cp -a dist bundle/public`のあと`tar -C bundle -czf deploy.tar.gz public`のように、起点を同じ
+   `run:`の中で作る形（`guchi-apps/solitaire#202`）では直下に`public`が無くても落ちない。起点が
+   チェックアウトに無いときは中身を静的に確かめられないので、検査しなかったことをログに残して通す。
 3. **`packageManager`のpnpmメジャー。** pnpm 11はNode 22.13以上を要求し、VPSのNode 20では
    依存インストールが`ERR_UNKNOWN_BUILTIN_MODULE: node:sqlite`で落ちる（上限は`pnpm-major-max`で
    変えられる。既定は10）。
 
 **判定できない形は黙って通す。** `deploy.yml`の書き方はリポジトリごとに違うため、`cd`を挟む
-`run:`やGitHubの式・変数を含む`tar`の引数は検査せず、理由をログに残すだけにしてある。誤検知で
+`run:`やGitHubの式・変数を含む`tar`の引数、チェックアウトに無い`tar -C`の起点は検査せず、理由をログに残すだけにしてある。誤検知で
 main宛PRを止める方が、見逃すより高くつく。検査本体（Python）は再利用可能ワークフローのYAMLへ
 直接書いてある——他リポジトリから呼ばれたときcheckoutされるのは**呼び出し元**のリポジトリで、
 issue-deck側の隣のファイルは読めないため。テスト（`scripts/reusable-version-tag-check.test.mjs`）は
