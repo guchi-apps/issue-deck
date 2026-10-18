@@ -97,6 +97,7 @@ vi.mock("@/lib/dispatch/check-user-labels", () => ({ removeCheckUserWithReason: 
 const enqueueDispatchJob = vi.fn();
 vi.mock("@/lib/dispatch/jobs", () => ({ enqueueDispatchJob: (...a: unknown[]) => enqueueDispatchJob(...a) }));
 
+import { buildReleaseFixSourceKey, reviewFindingKey } from "@/lib/release-fix-series";
 import { runReleaseFixSweep } from "@/lib/release-fix-series-run";
 import { summarizeReleaseReviewDecisions } from "@/lib/release-review-decision";
 import { reviewFindingId } from "@/lib/release-review-result";
@@ -217,6 +218,32 @@ describe("再検証の追加指摘", () => {
     expect(state.rows[1]).toMatchObject({ issueNumber: 100, generation: 2 });
     expect(state.rows[0].status).toBe("superseded");
     expect(removeLabels).toHaveBeenCalledTimes(1);
+  });
+
+  describe("同じ指摘の再発は後継候補でも止める（#4766）", () => {
+    const keyOf = (f: { title: string; file: string }) =>
+      buildReleaseFixSourceKey({ repositoryFullName: "o/r", baseSha: "b1", sourceKind: "review_finding", itemKeys: [reviewFindingKey(f)] });
+
+    it("新方式（同じPRのrevision）: 行がずれた同じ指摘が残れば、親自身を既存扱いにせず止める", async () => {
+      const key = keyOf(finding);
+      state.rows = [baseRow({ originBaseSha: "b1", sourceKey: key, activeKey: `o/r#10:${key}`, successorPrNumber: 10 })];
+      fetchPullRequest.mockResolvedValue({ number: 10, state: "open", base: { sha: "b1", ref: "main" }, head: { sha: "h1", ref: "release-rc/1" } });
+      loadSummary.mockResolvedValue({ integration: section("passed"), aiReview: section("needs_check", { findings: [{ ...finding, line: 40 }] }) });
+      await runReleaseFixSweep({ hostName: "subpc" });
+      expect(state.rows).toHaveLength(1);
+      expect(state.rows[0].status).toBe("stopped");
+      expect(String(state.rows[0].stopReason)).toContain("同じ指摘が再発しています");
+      expect(enqueueDispatchJob).not.toHaveBeenCalled();
+    });
+
+    it("旧方式（後継は別のPR番号）でも、headと番号に依らず再発として止める", async () => {
+      const key = keyOf(finding);
+      state.rows = [baseRow({ originBaseSha: "b1", sourceKey: key, activeKey: `o/r#10:${key}` })];
+      await runReleaseFixSweep({ hostName: "subpc" });
+      expect(state.rows).toHaveLength(1);
+      expect(state.rows[0].status).toBe("stopped");
+      expect(String(state.rows[0].stopReason)).toContain("同じ指摘が再発しています");
+    });
   });
 
   it("実行障害は起案せず、確認待ちにもしない", async () => {

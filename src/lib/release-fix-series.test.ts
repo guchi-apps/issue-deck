@@ -5,6 +5,9 @@ import {
   buildReleaseFixIssue,
   buildReleaseFixSourceKey,
   canStartNextGeneration,
+  legacyReviewFindingKey,
+  normalizeFindingTitle,
+  reviewFindingKey,
   isLegacyGenerationLimitStopReason,
   classifyIntegrationFailure,
   decideReleaseFix,
@@ -30,9 +33,7 @@ const open = { originStillOpen: true, originMerged: false, developPullRequests: 
 describe("buildReleaseFixSourceKey", () => {
   const base = {
     repositoryFullName: "o/r",
-    releasePrNumber: 5,
     baseSha: "a",
-    headSha: "b",
     sourceKind: "review_finding" as const,
   };
   it("指摘の並び順や重複に依らず同じ鍵になる", () => {
@@ -40,10 +41,31 @@ describe("buildReleaseFixSourceKey", () => {
       buildReleaseFixSourceKey({ ...base, itemKeys: ["y", "x", "x"] }),
     );
   });
-  it("SHAが変われば別の鍵になる（旧SHAの起案を新しい対象へ流用しない）", () => {
+  it("baseが変われば別の鍵になる（mainが進んだ後の再発は前提の違う別の対象）", () => {
     expect(buildReleaseFixSourceKey({ ...base, itemKeys: ["x"] })).not.toBe(
-      buildReleaseFixSourceKey({ ...base, headSha: "c", itemKeys: ["x"] }),
+      buildReleaseFixSourceKey({ ...base, baseSha: "c", itemKeys: ["x"] }),
     );
+  });
+  it("後継候補（headもPR番号も変わる）で同じ指摘が再発すると、祖先の鍵と一致して止まる（#4766）", () => {
+    const parentKey = buildReleaseFixSourceKey({ ...base, itemKeys: [reviewFindingKey({ title: "設定漏れ", file: "a.ts" })] });
+    const successorKey = buildReleaseFixSourceKey({ ...base, itemKeys: [reviewFindingKey({ title: "設定漏れ。", file: "a.ts" })] });
+    expect(canStartNextGeneration({ sourceKey: successorKey, ancestorSourceKeys: [parentKey] })).toMatchObject({ ok: false });
+  });
+});
+
+describe("reviewFindingKey（#4766）", () => {
+  it("行番号に依存しない", () => {
+    expect(reviewFindingKey({ title: "設定漏れ", file: "a.ts", line: 3 })).toBe(reviewFindingKey({ title: "設定漏れ", file: "a.ts", line: 40 }));
+  });
+  it("空白・句読点・記号・大小・全角半角の揺れを除く", () => {
+    expect(normalizeFindingTitle(" `Env`の 設定漏れ、！ ")).toBe(normalizeFindingTitle("ｅｎｖの設定漏れ"));
+    expect(reviewFindingKey({ title: "API key missing.", file: "a.ts" })).toBe(reviewFindingKey({ title: "api-key missing", file: "a.ts" }));
+  });
+  it("ファイルが違えば別の指摘", () => {
+    expect(reviewFindingKey({ title: "設定漏れ", file: "a.ts" })).not.toBe(reviewFindingKey({ title: "設定漏れ", file: "b.ts" }));
+  });
+  it("旧キーは題・ファイル・行のまま（旧IDの照合用）", () => {
+    expect(legacyReviewFindingKey({ title: " 設定漏れ ", file: "a.ts", line: 3 })).toBe("設定漏れ|a.ts|3");
   });
 });
 

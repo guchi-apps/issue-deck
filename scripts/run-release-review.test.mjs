@@ -54,12 +54,18 @@ if grep -q "ファイル別の確認実績の補完です" <<<"$p"; then
   exit 0
 fi
 [[ -n "\${CALL_LOG:-}" ]] && echo call >>"$CALL_LOG"
+# FAKE_FINDINGS（JSONの配列の配列）が与えられたら、呼ばれた順にバッチごとの指摘として返す
+findings='[]'
+if [[ -n "\${FAKE_FINDINGS:-}" ]]; then
+  n=$(( $(cat "$FAKE_FINDINGS_COUNTER" 2>/dev/null || echo 0) + 1 )); echo "$n" >"$FAKE_FINDINGS_COUNTER"
+  findings="$(jq -c --argjson n "$n" '.[($n - 1) % length]' <<<"$FAKE_FINDINGS")"
+fi
 files="$(sed -n '/次のファイルの差分をこのバッチへ載せました/,/^$/p' <<<"$p" | grep -E '^- ' | sed -E 's/^- //; s/（分割.*//')"
 # OMIT_FILE: そのファイルの実績を報告しない／EMPTY_EV_FILE: 根拠を空で報告する／DOT_PATHS: パスを「./」付きで報告する
 echo '\`\`\`json'
 jq -nc --argjson c "$(checks バッチで確認 "$files")" --argjson f "$(printf '%s\\n' $files | jq -Rsc 'split("\\n") | map(select(. != ""))')" \\
-  --arg omit "\${OMIT_FILE:-}" --arg empty "\${EMPTY_EV_FILE:-}" --arg dot "\${DOT_PATHS:-}" \\
-  '{state: "passed", summary: "batch", checklistVersion: 1, checks: $c,
+  --arg omit "\${OMIT_FILE:-}" --arg empty "\${EMPTY_EV_FILE:-}" --arg dot "\${DOT_PATHS:-}" --argjson fd "$findings" \\
+  '{state: "passed", summary: "batch", checklistVersion: 1, checks: $c, findings: $fd,
     fileReviews: ($f | map(select(. != $omit) | {file: ((if $dot == "" then "" else "./" end) + .), status: "reviewed", evidence: (if . == $empty then "" else "読んだ" end)}))}'
 echo '\`\`\`'
 `;
@@ -139,6 +145,18 @@ describe("run-release-review.sh（#4615）", { timeout: 30_000 }, () => {
     expect(result.reusedBatches).toBe(0);
     expect(result.rerunBatches).toBe(result.batches);
     expect(result.integrationReused).toBe(false);
+  });
+
+  it("バッチ間の同じ指摘は、題の表記揺れ・行の違いに依らず1件にまとめ、止める指摘を残す（#4766）", () => {
+    const fakeFindings = [
+      [{ severity: "medium", title: "設定漏れ", file: "a.ts", line: 3, blocking: false }],
+      [{ severity: "high", title: "設定 漏れ。", file: "a.ts", line: 9 }],
+      [{ severity: "high", title: "設定漏れ", file: "b.ts", line: 3 }],
+    ];
+    const { result } = runReview({ FAKE_FINDINGS: JSON.stringify(fakeFindings), FAKE_FINDINGS_COUNTER: path.join(dir, "findings-n") });
+    expect(result.findings).toHaveLength(2);
+    expect(result.findings.find((f) => f.file === "a.ts")).toMatchObject({ line: 9 });
+    expect(result.findings.find((f) => f.file === "a.ts").blocking).not.toBe(false);
   });
 
   it("実行予算で残ったバッチは保存し、再実行が続きから確認する。残りがある間は項目を確認済みにしない", () => {
