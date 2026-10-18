@@ -43,7 +43,11 @@ EVIDENCE_TEXT_PATTERN='統合検証|検証結果|検証証跡|証跡|実行結�
 PARALLEL="${ISSUE_DECK_RELEASE_REVIEW_PARALLEL:-3}"
 # AI 1回の呼び出しのターン数の上限（claudeの`--max-turns`。#4769）。0で上限なし。上限に達すると診断は`turn_limit`になる。
 # Codex CLIの`exec`にはターン数を指定する引数が無いため、Codexは従来どおり時間（`TIMEOUT_SECONDS`）だけで止める
-MAX_TURNS="${ISSUE_DECK_RELEASE_REVIEW_MAX_TURNS:-150}"
+MAX_TURNS="${ISSUE_DECK_RELEASE_REVIEW_MAX_TURNS:-300}"
+# `turn_limit`で失敗したバッチだけを1回やり直すときの、ターン数と時間の上限（#4785）。ターン数だけ上げても
+# 時間（`TIMEOUT_SECONDS`）に先に当たると`timeout`へ置き換わるだけなので、時間も合わせて引き上げる
+RETRY_MAX_TURNS="${ISSUE_DECK_RELEASE_REVIEW_RETRY_MAX_TURNS:-500}"
+RETRY_TIMEOUT_SECONDS="${ISSUE_DECK_RELEASE_REVIEW_RETRY_TIMEOUT_SECONDS:-3000}"
 # ファイル別の実績の取りこぼし（報告なし・根拠が空）を補う質問（#4768）。1回の起動で1回まで、対象のファイル数と時間に上限を置く
 SUPPLEMENT_MAX_FILES="${ISSUE_DECK_RELEASE_REVIEW_SUPPLEMENT_MAX_FILES:-40}"
 SUPPLEMENT_TIMEOUT_SECONDS="${ISSUE_DECK_RELEASE_REVIEW_SUPPLEMENT_TIMEOUT_SECONDS:-600}"
@@ -99,7 +103,9 @@ diag_payload() {
 }
 
 # diag_ai_cause <終了コード> <ログ> [最終応答]: AI CLIが非0で終わったときの原因。事実が無ければ unknown。
-# ターン数の上限（#4769）は、claudeが最終応答（標準出力）へ`Error: Reached max turns (N)`と書いて1で終わる
+# ターン数の上限（#4769）は、claudeが最終応答（標準出力）へ`Error: Reached max turns (N)`と書いて1で終わる。
+# **claude CLI自身の出力の形（最後の非空行が行頭からこの1行）だけで判定する**（#4785）。レビュー本文に引用された
+# 文字列では判定しない（本文の途中・末尾20行のどこかに当たるだけでは`turn_limit`にしない）
 diag_ai_cause() {
   local code="$1" log="$2" out="${3:-}" f
   case "$code" in
@@ -107,7 +113,7 @@ diag_ai_cause() {
     126 | 127) printf 'launch_failed'; return ;;
   esac
   for f in "$log" "$out"; do
-    if [[ -n "$f" && -s "$f" ]] && tail -n 20 "$f" | grep -qiE 'reached max(imum)? turns'; then
+    if [[ -n "$f" && -s "$f" ]] && [[ "$(grep -v '^[[:space:]]*$' "$f" | tail -n 1)" =~ ^Error:\ Reached\ max\ turns(\ \([0-9]+\))?\.?[[:space:]]*$ ]]; then
       printf 'turn_limit'
       return
     fi
@@ -485,15 +491,15 @@ open(out, "w", encoding="utf-8").write(text)
 PY
 }
 
-# run_agent <プロンプト> <出力> <ログ> [制限秒]: AI CLIを読み取り専用で1回実行する。終了コードを返す
+# run_agent <プロンプト> <出力> <ログ> [制限秒] [ターン数の上限]: AI CLIを読み取り専用で1回実行する。終了コードを返す
 run_agent() {
-  local prompt="$1" out="$2" log="$3" limit="${4:-$TIMEOUT_SECONDS}"
+  local prompt="$1" out="$2" log="$3" limit="${4:-$TIMEOUT_SECONDS}" max_turns="${5:-$MAX_TURNS}"
   if [[ "$agent" == "codex" ]]; then
     local -a codex_args=(exec --sandbox read-only --ephemeral -m "$codex_model" --output-schema "$SCRIPT_DIR/prompts/release-review-result.schema.json" --output-last-message "$out" -C "$WORKTREE")
     (cd "$WORKTREE" && timeout -k 60 "$limit" "$codex_command" "${codex_args[@]}" <"$prompt" >"$log" 2>&1)
   else
     local -a claude_args=(-p --model "$claude_model" --allowedTools Read Grep Glob)
-    [[ "$MAX_TURNS" =~ ^[1-9][0-9]*$ ]] && claude_args+=(--max-turns "$MAX_TURNS")
+    [[ "$max_turns" =~ ^[1-9][0-9]*$ ]] && claude_args+=(--max-turns "$max_turns")
     (cd "$WORKTREE" && timeout -k 60 "$limit" claude "${claude_args[@]}" <"$prompt" >"$out" 2>"$log")
   fi
 }
@@ -701,11 +707,30 @@ batch_running_label() {
   fi
 }
 
+# batch_progress_message <モード> <agent> <モデル> <実施済み> <再利用> <失敗数> <全ファイル数> <実行中のバッチ番号…>:
+# 進捗の文面。分母は全バッチ数（`batch_count`）に揃え、完了は再利用を含めて数える（「完了2/5（再利用1）」。#4785）。
+# 失敗したバッチがあるときは、新しいバッチを起動せず実行中のものの完了を待っているので、その旨を出す
+batch_progress_message() {
+  local mode="$1" ag="$2" model="$3" executed="$4" reused="$5" failed="$6" total="$7"
+  shift 7
+  local done_count=$((executed + reused)) note=""
+  ((reused > 0)) && note="（再利用${reused}）"
+  if ((failed > 0)); then
+    printf '全体レビュー（%s）: 失敗したバッチがあり、実行中の%s本の完了を待っています（%s・%s・%s・完了%s/%s%s・全%sファイル）' \
+      "$mode" "$#" "$ag" "$model" "$(batch_running_label "$@")" "$done_count" "$batch_count" "$note" "$total"
+  else
+    printf '全体レビュー（%s）を実行中です（%s・%s・%s・完了%s/%s%s・全%sファイル）' \
+      "$mode" "$ag" "$model" "$(batch_running_label "$@")" "$done_count" "$batch_count" "$note" "$total"
+  fi
+}
+
 # run_batch_job <バッチ番号> <作業ディレクトリ>: 1バッチを確認し、結果を`r<N>.json`へ保存する（#4769）。
 # 並列に起動されるため、親の状態（変数・`finish`・共通の出力ファイル）には触れない。成否は作業ディレクトリの
 # `rc`（0＝保存済み）と、失敗時の`message`・`diag`へ書き、報告は親がまとめて行う
 run_batch_job() {
   local idx="$1" jd="$2" result_file="$batch_dir/r${idx}.json" rc=0 cause excerpt
+  # どこで終わっても`rc`を残す（親は`rc`の有無で終了を判定する。#4785）
+  trap '[[ -e "$jd/rc" ]] || printf 1 >"$jd/rc"' EXIT
   local prompt="$jd/prompt" out="$jd/out" log="$jd/log"
   find "$part_dir" -maxdepth 1 -type f -exec cp {} "$jd/" \;
   batch_coverage_text "$idx" >"$jd/coverage"
@@ -717,13 +742,29 @@ run_batch_job() {
     return 0
   fi
   run_agent "$prompt" "$out" "$log" || rc=$?
+  local retried=0 used_turns="$MAX_TURNS"
+  if ((rc != 0)) && [[ "$agent" == "claude" && "$(diag_ai_cause "$rc" "$log" "$out")" == turn_limit ]] && [[ "$RETRY_MAX_TURNS" =~ ^[1-9][0-9]*$ ]]; then
+    # ターン数の上限で止まったバッチだけを、上限（ターン数・時間）を上げて1回だけやり直す（#4785）。
+    # claude CLIの`-p`出力には実際に使ったターン数が出ないため、やり直したことと適用した上限だけを残す
+    echo "バッチ${idx}がターン数の上限 ${MAX_TURNS} に達したため、上限 ${RETRY_MAX_TURNS}・${RETRY_TIMEOUT_SECONDS}秒でやり直します" >&2
+    retried=1
+    used_turns="$RETRY_MAX_TURNS"
+    rc=0
+    run_agent "$prompt" "$out" "$log" "$RETRY_TIMEOUT_SECONDS" "$RETRY_MAX_TURNS" || rc=$?
+  fi
   if ((rc != 0)); then
     cause="$(diag_ai_cause "$rc" "$log" "$out")"
     excerpt="$log"
     [[ -s "$log" ]] || excerpt="$out"
     printf '全体レビューを完走できませんでした（バッチ%s/%s・終了コード %s%s）' "$idx" "$batch_count" "$rc" \
-      "$([[ "$cause" == turn_limit ]] && printf '・ターン数の上限 %s に到達' "$MAX_TURNS")" >"$jd/message"
+      "$([[ "$cause" == turn_limit ]] && printf '・ターン数の上限 %s に到達%s' "$used_turns" "$([[ $retried == 1 ]] && printf '（上限を上げてやり直しても同じ）')")" >"$jd/message"
     diag_payload "$cause" "$rc" "$excerpt" review >"$jd/diag"
+    if [[ "$cause" == turn_limit ]]; then
+      local diag_tmp
+      diag_tmp="$(jq -c --argjson retried "$([[ $retried == 1 ]] && echo true || echo false)" --argjson turns "$used_turns" \
+        '.diagnostic += {turnLimitRetried: $retried, maxTurns: $turns}' "$jd/diag" 2>/dev/null || true)"
+      [[ -n "$diag_tmp" ]] && printf '%s' "$diag_tmp" >"$jd/diag"
+    fi
     printf '%s' "$rc" >"$jd/rc"
     return 0
   fi
@@ -900,7 +941,7 @@ main() {
   # 確認するバッチは上限（`PARALLEL`）まで同時に起動する（#4769）。起動は番号順なので、実行予算で残るのは後ろのバッチ
   local mode_label executed=0 reused_batches=0 idx result_file rc remaining=0 parallel="$PARALLEL"
   local -a todo=() run_idxs=() run_pids=() failed_idxs=() keep_idxs=() keep_pids=()
-  local next=0 k jd changed=1 fail_message="" fail_diag=""
+  local next=0 k jd changed=1 fail_message="" fail_diag="" done_pid="" known pid
   [[ "$parallel" =~ ^[1-9][0-9]*$ ]] || parallel=3
   mode_label="$([[ "$effective_mode" == "rereview" ]] && echo 再レビュー || echo 全体確認)"
   for ((idx = 1; idx <= batch_count; idx++)); do
@@ -930,16 +971,41 @@ main() {
       changed=1
     done
     if ((changed == 1)); then
-      RUNNING_MESSAGE="全体レビュー（${mode_label}）を実行中です（${agent}・${claude_model:-$codex_model}・$(batch_running_label "${run_idxs[@]}")・完了${executed}/${#todo[@]}・全${total_files}ファイル）${reuse_note}"
+      RUNNING_MESSAGE="$(batch_progress_message "$mode_label" "$agent" "${claude_model:-$codex_model}" "$executed" "$reused_batches" "${#failed_idxs[@]}" "$total_files" "${run_idxs[@]}")${reuse_note}"
       release_progress_set review 2 "$RUNNING_MESSAGE" "" "$total_files"
       review_report running "$RUNNING_MESSAGE"
       changed=0
     fi
-    sleep 0.5
     keep_idxs=()
     keep_pids=()
+    done_pid=""
+    # 終了の判定は、各バッチが最後に書く`rc`ファイル（想定外の終了でもEXITトラップが書く）を先に見る。
+    # 終わっているものが無いときだけ待つ。bash 5.1以上は`wait -n -p`が返す終了したジョブのPIDを使うので、
+    # `kill -0`でPIDを見直すときのPID再利用の影響を受けない（#4785）。複数が同時に終わると`wait -n`は
+    # 取りこぼすことがあるため、先に`rc`を見てから待つ
+    finished_any=0
     for ((k = 0; k < ${#run_pids[@]}; k++)); do
-      if kill -0 "${run_pids[k]}" 2>/dev/null; then
+      [[ -e "$part_dir/b${run_idxs[k]}/rc" ]] && finished_any=1
+    done
+    if ((finished_any == 0)); then
+      if ((BASH_VERSINFO[0] > 5 || (BASH_VERSINFO[0] == 5 && BASH_VERSINFO[1] >= 1))); then
+        # heartbeatも同じシェルの子ジョブなので、バッチ以外のPIDが返ったら無視して待ち直す（成否は`$jd/rc`で判定する）
+        wait -n -p done_pid 2>/dev/null || true
+        if [[ -n "$done_pid" ]]; then
+          known=0
+          for pid in "${run_pids[@]}"; do [[ "$pid" == "$done_pid" ]] && known=1; done
+          ((known == 1)) || continue
+        fi
+      else
+        sleep 0.5
+      fi
+    fi
+    for ((k = 0; k < ${#run_pids[@]}; k++)); do
+      if [[ -e "$part_dir/b${run_idxs[k]}/rc" || "${run_pids[k]}" == "$done_pid" ]]; then
+        :
+      elif ((finished_any == 0)) && ! ((BASH_VERSINFO[0] > 5 || (BASH_VERSINFO[0] == 5 && BASH_VERSINFO[1] >= 1))) && ! kill -0 "${run_pids[k]}" 2>/dev/null; then
+        :
+      else
         keep_idxs+=("${run_idxs[k]}")
         keep_pids+=("${run_pids[k]}")
         continue
