@@ -1,13 +1,20 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { db } from "@/lib/db";
-import { fetchLatestRelease, fetchReleaseNotesFile } from "@/lib/github/release-api";
-import { isPushConfigured, sendPushNotification } from "@/lib/notifications/push";
 import {
-  buildReleasePushPayload,
+  fetchLatestRelease,
+  fetchReleaseNotesFile,
+  fetchRepositoryHomepage,
+} from "@/lib/github/release-api";
+import { postChannelMessage } from "@/lib/slack/client";
+import { loadReleaseSlackTarget } from "@/lib/slack/config";
+import {
+  buildReleaseSlackBlocks,
+  buildReleaseSlackText,
   decideReleasePush,
   parseReleaseNotes,
   RELEASE_PUSH_EMPTY_BODY,
+  releaseBranchScreenUrl,
   releasePushMaxAgeHours,
   releasePushSweepIntervalMinutes,
   resetReleasePushSweepIntervalForTest,
@@ -15,14 +22,15 @@ import {
 } from "@/lib/notifications/release-push";
 
 vi.mock("@/lib/db", () => ({ db: {} }));
-vi.mock("@/lib/notifications/push", () => ({
-  isPushConfigured: vi.fn(() => true),
-  sendPushNotification: vi.fn(async () => ({ sent: 1, removed: 0, failed: 0 })),
+vi.mock("@/lib/slack/client", () => ({
+  createSlackClient: vi.fn(() => ({ call: vi.fn() })),
+  postChannelMessage: vi.fn(async () => ({ ts: "1.0" })),
 }));
 vi.mock("@/lib/github/app-auth", () => ({ getInstallationToken: vi.fn(async () => "token") }));
 vi.mock("@/lib/github/release-api", () => ({
   fetchLatestRelease: vi.fn(async () => null),
   fetchReleaseNotesFile: vi.fn(async () => null),
+  fetchRepositoryHomepage: vi.fn(async () => null),
 }));
 
 const NOW = new Date("2026-09-02T09:00:00.000Z");
@@ -48,7 +56,7 @@ const NOTES = [
   "",
   "# v4.75.0",
   "",
-  "- リリースの完了がPush通知で届くようになりました",
+  "- リリースの完了がSlackへ届くようになりました",
   "",
   "**使い方**",
   "",
@@ -57,7 +65,6 @@ const NOTES = [
 
 /** 巡回が触るDBのメソッドだけをその場で生やす。戻り値は個々のテストで差し替える */
 function stubDb(overrides: {
-  subscriptionCount?: number;
   repositories?: unknown[];
   /** 前回記録したタグ。undefinedなら「記録が無い」（＝`create`が通る） */
   recordedTagName?: string;
@@ -74,10 +81,6 @@ function stubDb(overrides: {
     overrides.recordedTagName === undefined ? null : { tagName: overrides.recordedTagName },
   );
   Object.assign(db, {
-    pushSubscription: {
-      count: vi.fn(async () => overrides.subscriptionCount ?? 1),
-      findMany: vi.fn(async () => [{ id: "s1", endpoint: "e", p256dh: "p", auth: "a" }]),
-    },
     repository: { findMany: vi.fn(async () => overrides.repositories ?? []) },
     releasePushNotice: { create, updateMany, findUnique },
   });
@@ -87,7 +90,10 @@ function stubDb(overrides: {
 beforeEach(() => {
   vi.clearAllMocks();
   resetReleasePushSweepIntervalForTest();
-  vi.mocked(isPushConfigured).mockReturnValue(true);
+  process.env.SLACK_BOT_TOKEN = "xoxb-test";
+  delete process.env.SLACK_RELEASE_CHANNEL_ID;
+  delete process.env.SLACK_ALLOWED_CHANNEL_IDS;
+  vi.mocked(fetchRepositoryHomepage).mockResolvedValue("https://app.example.test");
   vi.mocked(fetchLatestRelease).mockResolvedValue(LATEST);
   vi.mocked(fetchReleaseNotesFile).mockResolvedValue(NOTES);
 });
@@ -151,7 +157,7 @@ describe("decideReleasePush", () => {
 describe("parseReleaseNotes", () => {
   it("見出しがバージョンと一致したときだけ本文を返す", () => {
     expect(parseReleaseNotes(NOTES, "v4.75.0")).toBe(
-      "- リリースの完了がPush通知で届くようになりました",
+      "- リリースの完了がSlackへ届くようになりました",
     );
   });
 
@@ -180,33 +186,65 @@ describe("parseReleaseNotes", () => {
   });
 });
 
-describe("buildReleasePushPayload", () => {
-  it("1行目にリポジトリとバージョン、タップ先はブランチ画面", () => {
-    const payload = buildReleasePushPayload({
-      repositoryFullName: "guchi-apps/issue-deck",
-      tagName: "v4.75.0",
-      notes: "- 直しました",
-    });
-    expect(payload.title).toBe("issue-deck ・ リリース v4.75.0");
-    expect(payload.body).toBe("- 直しました");
-    // PCの`pane`とスマホの`mscreen`で現在地の持ち方が違うので両方載せる
-    expect(payload.url).toBe("/dashboard?pane=flow&mscreen=flow");
-    // リリースごとに別の出来事なので、`tag`はバージョンまで含めて一意にする
-    expect(payload.tag).toBe("release:guchi-apps/issue-deck@v4.75.0");
+describe("buildReleaseSlackBlocks", () => {
+  const release = { repositoryFullName: "guchi-apps/issue-deck", tagName: "v4.75.0", notes: "- 直しました" };
+  const extras = {
+    publishedAt: new Date("2026-09-02T08:55:00.000Z"),
+    appUrl: "https://app.example.test",
+    releaseUrl: LATEST.htmlUrl,
+  };
+
+  it("見出し・リポジトリとバージョン・更新内容・ボタン・公開時刻の順に組む", () => {
+    const blocks = buildReleaseSlackBlocks(release, extras, "https://deck.example.test/dashboard?pane=flow");
+    expect(blocks.map((b) => b.type)).toEqual(["header", "section", "section", "actions", "context"]);
+    expect(JSON.stringify(blocks[2])).toContain("- 直しました");
+    expect(JSON.stringify(blocks[4])).toContain("2026-09-02 17:55");
+    const buttons = (blocks[3] as { elements: { url: string }[] }).elements;
+    expect(buttons.map((b) => b.url)).toEqual([
+      "https://deck.example.test/dashboard?pane=flow",
+      "https://app.example.test",
+    ]);
   });
 
-  it("更新内容が無くても本文を空にしない（#2683と同じ文面）", () => {
-    const payload = buildReleasePushPayload({
-      repositoryFullName: "guchi-apps/issue-deck",
-      tagName: "v4.75.0",
-      notes: "",
+  it("アプリのURLが無ければボタンを出さない", () => {
+    const blocks = buildReleaseSlackBlocks(release, { ...extras, appUrl: null });
+    expect((blocks[3] as { elements: unknown[] }).elements).toHaveLength(1);
+  });
+
+  it("更新内容が無くても本文を空にしない", () => {
+    const blocks = buildReleaseSlackBlocks({ ...release, notes: "" }, extras);
+    expect(JSON.stringify(blocks[2])).toContain(RELEASE_PUSH_EMPTY_BODY);
+  });
+
+  it("textにリポジトリとバージョンを入れる", () => {
+    expect(buildReleaseSlackText(release)).toBe("リリースしました: guchi-apps/issue-deck v4.75.0");
+  });
+});
+
+describe("releaseBranchScreenUrl", () => {
+  it("既定は本番、環境変数で上書きでき、末尾のスラッシュは畳む", () => {
+    expect(releaseBranchScreenUrl("")).toBe("https://issuedeck.gucchii.com/dashboard?pane=flow&mscreen=flow");
+    expect(releaseBranchScreenUrl("https://x.test//")).toBe("https://x.test/dashboard?pane=flow&mscreen=flow");
+  });
+});
+
+describe("loadReleaseSlackTarget", () => {
+  it("Botトークンだけで決まる。無ければnull", () => {
+    expect(loadReleaseSlackTarget({})).toBeNull();
+    expect(loadReleaseSlackTarget({ SLACK_BOT_TOKEN: "t", SLACK_RELEASE_CHANNEL_ID: "CREL" })).toEqual({
+      botToken: "t",
+      channel: "CREL",
     });
-    expect(payload.body).toBe(RELEASE_PUSH_EMPTY_BODY);
+  });
+
+  it("チャンネル未設定なら許可チャンネルの先頭、それも無ければ既定", () => {
+    expect(loadReleaseSlackTarget({ SLACK_BOT_TOKEN: "t", SLACK_ALLOWED_CHANNEL_IDS: "C1,C2" })?.channel).toBe("C1");
+    expect(loadReleaseSlackTarget({ SLACK_BOT_TOKEN: "t" })?.channel).toBe("C0C873R7JTV");
   });
 });
 
 describe("runReleasePushSweep", () => {
-  it("新しいリリースを見つけたら鳴らす", async () => {
+  it("新しいリリースを見つけたらSlackへ投稿する", async () => {
     const { updateMany } = stubDb({ repositories: [REPOSITORY], recordedTagName: "v4.74.0" });
 
     const result = await runReleasePushSweep({ now: NOW });
@@ -215,12 +253,13 @@ describe("runReleasePushSweep", () => {
       {
         repositoryFullName: "guchi-apps/issue-deck",
         tagName: "v4.75.0",
-        notes: "- リリースの完了がPush通知で届くようになりました",
+        notes: "- リリースの完了がSlackへ届くようになりました",
       },
     ]);
     // **送る前に席を取る**（タグが変わっていることを条件にした更新が席になる）
     expect(updateMany).toHaveBeenCalled();
-    expect(sendPushNotification).toHaveBeenCalledOnce();
+    expect(postChannelMessage).toHaveBeenCalledOnce();
+    expect(vi.mocked(postChannelMessage).mock.calls[0][1].channel).toBe("C0C873R7JTV");
   });
 
   it("初めて見るリポジトリは鳴らさずタグだけ記録する", async () => {
@@ -238,7 +277,7 @@ describe("runReleasePushSweep", () => {
         notifiedAt: null,
       },
     });
-    expect(sendPushNotification).not.toHaveBeenCalled();
+    expect(postChannelMessage).not.toHaveBeenCalled();
   });
 
   it("記録済みのタグと同じなら更新内容も読みに行かない", async () => {
@@ -254,7 +293,7 @@ describe("runReleasePushSweep", () => {
     stubDb({ repositories: [REPOSITORY], recordedTagName: "v4.74.0", reserveCount: 0 });
 
     expect((await runReleasePushSweep({ now: NOW })).notified).toHaveLength(0);
-    expect(sendPushNotification).not.toHaveBeenCalled();
+    expect(postChannelMessage).not.toHaveBeenCalled();
   });
 
   it("リリースを1度も出していないリポジトリは数にも入れない", async () => {
@@ -275,7 +314,7 @@ describe("runReleasePushSweep", () => {
     const result = await runReleasePushSweep({ now: NOW });
 
     expect(result.notified[0]?.notes).toBe("");
-    expect(sendPushNotification).toHaveBeenCalledOnce();
+    expect(postChannelMessage).toHaveBeenCalledOnce();
     errorSpy.mockRestore();
   });
 
@@ -290,13 +329,15 @@ describe("runReleasePushSweep", () => {
     expect(fetchLatestRelease).not.toHaveBeenCalled();
   });
 
-  it("購読が1件も無ければGitHubを叩かない", async () => {
-    stubDb({ subscriptionCount: 0, repositories: [REPOSITORY] });
+  it("Botトークンが無ければGitHubを叩かず、記録もしない", async () => {
+    delete process.env.SLACK_BOT_TOKEN;
+    const { create } = stubDb({ repositories: [REPOSITORY] });
 
     const result = await runReleasePushSweep({ now: NOW });
 
     expect(result.swept).toBe(true);
     expect(fetchLatestRelease).not.toHaveBeenCalled();
+    expect(create).not.toHaveBeenCalled();
   });
 
   it("1リポジトリの取得失敗で他リポジトリの通知を止めない", async () => {

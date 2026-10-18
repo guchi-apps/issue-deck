@@ -68,3 +68,17 @@ export function isAllowedRepoOwner(config: SlackConfig, fullName: string): boole
   const owner = fullName.split("/")[0]?.toLowerCase();
   return config.repoOwners.some((allowed) => allowed.toLowerCase() === owner);
 }
+
+/**
+ * リリース完了通知の投稿先（#4791）。発信専用なので`SLACK_SIGNING_SECRET`は要らず、Botトークンだけで決まる。
+ * チャンネルは`SLACK_RELEASE_CHANNEL_ID`、未設定なら起案連携と同じ許可チャンネルの先頭。
+ */
+export function loadReleaseSlackTarget(
+  env: Record<string, string | undefined> = process.env,
+): { botToken: string; channel: string } | null {
+  const botToken = env.SLACK_BOT_TOKEN?.trim();
+  if (!botToken) return null;
+  const channel =
+    env.SLACK_RELEASE_CHANNEL_ID?.trim() || list(env.SLACK_ALLOWED_CHANNEL_IDS, DEFAULT_CHANNEL_IDS)[0];
+  return channel ? { botToken, channel } : null;
+}

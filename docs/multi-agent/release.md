@@ -564,13 +564,18 @@ lifecycleスクリプト（`scripts/version-changelog.mjs`）が`src/lib/changel
 載る**（[auto-repair.md](auto-repair.md)「リリースだけ宛先と見た目を変える」）。最新
 リリースぶんだけを持ち毎回上書きするので、履歴の置き場は従来どおり各アプリの更新履歴ファイル。
 
-### リリースの完了はissue-deckのPush通知でも届く（#2725）
+### リリースの完了はSlackのチャンネルへカードで届く（#2725・#4791）
 
 リリース通知の宛先はSignalyだけだった（`deploy.yml`の`notify-release`が
 `.github/scripts/signaly-notify.sh`を呼ぶ）。**フリート全体のリリースを画面で扱っている
-issue-deck自身のPWAには届かない**ため、サブPCのpollerが叩く巡回
-（`POST /api/repositories/release-push-sweep`）が新しいリリースを見つけてPush通知を出す。
-**Signalyへの通知はそのまま残す**（宛先が1つ増えるだけ）。
+issue-deck自身には届かない**ため、サブPCのpollerが叩く巡回
+（`POST /api/repositories/release-push-sweep`）が新しいリリースを見つけて通知を出す。
+当初（#2725）はPush通知だったが、**#4791からはプッシュ通知をせず、SlackのチャンネルへBlock Kitの
+カード（見出し・リポジトリ・バージョン・更新内容・「ブランチ画面を開く」「アプリを開く」ボタン・公開時刻）
+を投稿する。** 投稿は`SLACK_BOT_TOKEN`（署名シークレットは不要）、チャンネルは
+`SLACK_RELEASE_CHANNEL_ID`（未設定なら`SLACK_ALLOWED_CHANNEL_IDS`の先頭）。「アプリを開く」は
+GitHubリポジトリの`homepage`があるときだけ出す。**Signalyへの通知はそのまま残す。**
+チャンネル宛のため、ユーザーごとのリポジトリ非表示・ミュート設定は効かない。
 
 - 見ているのは各リポジトリの`releases/latest`（draftとprereleaseを除く）で、**記録した
   タグと違うものが返ったときだけ鳴らす**。記録の無いリポジトリは鳴らさずタグだけ入れる

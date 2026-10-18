@@ -3,14 +3,11 @@ import { getInstallationToken } from "@/lib/github/app-auth";
 import {
   fetchLatestRelease,
   fetchReleaseNotesFile,
+  fetchRepositoryHomepage,
   type LatestRelease,
 } from "@/lib/github/release-api";
-import { notMutedWhere } from "@/lib/notifications/push-kinds";
-import {
-  isPushConfigured,
-  sendPushNotification,
-  type PushNotificationPayload,
-} from "@/lib/notifications/push";
+import { createSlackClient, postChannelMessage, type SlackBlock } from "@/lib/slack/client";
+import { loadReleaseSlackTarget } from "@/lib/slack/config";
 
 /**
  * リリース（本番反映）の完了のPush通知（#2725）。
@@ -18,13 +15,15 @@ import {
  * **これまでリリース通知はSignalyへのwebhookにしか流れていなかった**
  * （`.github/scripts/signaly-notify.sh`を`deploy.yml`の`notify-release`が呼ぶ）。
  * issue-deckはフリート全体のリリースを画面で扱っているのに、**出たことだけは別のアプリで
- * 受け取る**という形になっており、スマホに入れているPWAには届かない。ここで4種類目の
- * Push通知として、確認待ち（#838）・本番マージ待ち（#2376）・デプロイ起動漏れ（#2703）と
- * 同じ経路に載せる。**Signalyへの通知はそのまま残す**（宛先が1つ増えるだけ）。
+ * 受け取る**という形になっていたため、#2725でPush通知を足した。
+ *
+ * **#4791からは宛先がPushではなくSlackのチャンネルになった**（プッシュ通知はしない）。
+ * Block Kitのカードを`chat.postMessage`で投稿する。検知・重複防止・巡回の仕組みは
+ * そのままで、送り先だけが違う。**Signalyへの通知はそのまま残す**。
  *
  * ## 既存3種と違い、これは「報せるだけ」の通知
  *
- * 他の3種はどれも「人が動かないと止まるもの」で、鳴らし直し（`RENOTIFY`）を持つ。
+ * Pushだった確認待ち（#838）・本番マージ待ち（#2376）・デプロイ起動漏れ（#2703）はどれも「人が動かないと止まるもの」で、鳴らし直し（`RENOTIFY`）を持つ。
  * リリースは済んだことの報告なので**1回鳴らして終わり**にし、代わりに
  * `RELEASE_PUSH_SWEEP_INTERVAL_MINUTES=0`で丸ごと止められるようにしてある。
  *
@@ -57,6 +56,9 @@ const DEFAULT_MAX_AGE_HOURS = 24;
 
 /** 1回の巡回で見るリポジトリ数の上限。取りこぼしても次の巡回で拾える */
 const SWEEP_REPOSITORY_LIMIT = 60;
+
+/** issue-deck自身の公開URL。ブランチ画面へのリンクに使う。`ISSUE_DECK_BASE_URL`で上書きできる */
+const DEFAULT_ISSUE_DECK_BASE_URL = "https://issuedeck.gucchii.com";
 
 /**
  * 通知本文の最大文字数。
@@ -167,25 +169,76 @@ export type PublishedRelease = {
   notes: string;
 };
 
+/** Slackカードに足す情報。取れなかったものは省く */
+export type ReleaseCardExtras = {
+  /** リリースの公開時刻。取れなければnull */
+  publishedAt: Date | null;
+  /** アプリ本体のURL（GitHubリポジトリの`homepage`）。未設定ならnull */
+  appUrl: string | null;
+  /** GitHubのリリースページ */
+  releaseUrl: string;
+};
+
+/** ブランチ画面のURL。PC（`pane`）とスマホ（`mscreen`）で現在地の持ち方が違うので両方を載せる */
+export function releaseBranchScreenUrl(
+  base: string | undefined = process.env.ISSUE_DECK_BASE_URL,
+): string {
+  const origin = (base?.trim() || DEFAULT_ISSUE_DECK_BASE_URL).replace(/\/+$/, "");
+  return `${origin}/dashboard?pane=flow&mscreen=flow`;
+}
+
+/** Slackの`text`（通知のプレビュー・カードを描画できない場面の代替）。 */
+export function buildReleaseSlackText(release: PublishedRelease): string {
+  return `リリースしました: ${release.repositoryFullName} ${release.tagName}`;
+}
+
 /**
- * 通知の中身。1行目にリポジトリとバージョン、2行目に更新内容を置く。
- *
- * **タップ先はブランチ画面**（`pane=flow`）。リリースの状況・本番へ出ている版・次に乗る
- * Issueがそこに揃っている。PC（`pane`）とスマホ（`mscreen`）で現在地の持ち方が違うので
- * 両方を載せる（他の3種と同じ）。
- *
- * `tag`はリポジトリ＋バージョンで一意にする。**同じ`tag`にすると前のリリースの通知を
- * 置き換えてしまう**——マージ待ちと違い、こちらは1件ずつが別の出来事のため。
+ * リリース完了のSlackカード（Block Kit）。見出し・リポジトリとバージョン・更新内容・
+ * リンクのボタン・公開時刻の順。**アプリのリンクは`homepage`がある場合だけ出す。**
  */
-export function buildReleasePushPayload(release: PublishedRelease): PushNotificationPayload {
-  const repositoryName =
-    release.repositoryFullName.split("/")[1] ?? release.repositoryFullName;
-  return {
-    title: `${repositoryName} ・ リリース ${release.tagName}`,
-    body: release.notes || RELEASE_PUSH_EMPTY_BODY,
-    url: "/dashboard?pane=flow&mscreen=flow",
-    tag: `release:${release.repositoryFullName}@${release.tagName}`,
-  };
+export function buildReleaseSlackBlocks(
+  release: PublishedRelease,
+  extras: ReleaseCardExtras,
+  branchScreenUrl: string = releaseBranchScreenUrl(),
+): SlackBlock[] {
+  const buttons: SlackBlock[] = [
+    {
+      type: "button",
+      text: { type: "plain_text", text: "ブランチ画面を開く" },
+      url: branchScreenUrl,
+      style: "primary",
+      action_id: "release_open_branch_screen",
+    },
+  ];
+  if (extras.appUrl) {
+    buttons.push({
+      type: "button",
+      text: { type: "plain_text", text: "アプリを開く" },
+      url: extras.appUrl,
+      action_id: "release_open_app",
+    });
+  }
+  const published = extras.publishedAt
+    ? `公開 ${formatJst(extras.publishedAt)} ・ <${extras.releaseUrl}|リリースノート>`
+    : `<${extras.releaseUrl}|リリースノート>`;
+  return [
+    { type: "header", text: { type: "plain_text", text: "リリースしました" } },
+    {
+      type: "section",
+      fields: [
+        { type: "mrkdwn", text: `*リポジトリ*\n${release.repositoryFullName}` },
+        { type: "mrkdwn", text: `*バージョン*\n\`${release.tagName}\`` },
+      ],
+    },
+    { type: "section", text: { type: "mrkdwn", text: release.notes || RELEASE_PUSH_EMPTY_BODY } },
+    { type: "actions", elements: buttons },
+    { type: "context", elements: [{ type: "mrkdwn", text: published }] },
+  ];
+}
+
+function formatJst(date: Date): string {
+  const jst = new Date(date.getTime() + 9 * 60 * 60_000);
+  return jst.toISOString().slice(0, 16).replace("T", " ");
 }
 
 export type ReleasePushResult = {
@@ -228,11 +281,11 @@ export function resetReleasePushSweepIntervalForTest(): void {
 }
 
 /**
- * 新しく出たリリースを巡回し、見つけたらPush通知する。
+ * 新しく出たリリースを巡回し、見つけたらSlackのチャンネルへカードを投稿する。
  *
  * **連携済みリポジトリ全部を1回の巡回で見る。** 呼ぶのはログインセッションを持たない
  * サブPCのpollerなので、ユーザー単位の絞り込みは母集団では行わない（他の巡回と同じ方針）。
- * 絞り込むのは宛先の側で、**そのリポジトリを非表示にしているユーザーへは送らない**（#2279）。
+ * 宛先はSlackのチャンネル1つ（#4791）で、ユーザーごとの非表示・ミュートは効かない。
  *
  * ## GitHub APIの消費
  *
@@ -252,11 +305,12 @@ export async function runReleasePushSweep(
   }
   lastSweptAt = now.getTime();
 
-  // **購読が1件も無ければGitHubを叩かない**（マージ待ちの巡回と同じ）。送り先の無い巡回で
-  // レート制限を使わない。ただし種まきもしないので、購読が増えた直後の1巡は全リポジトリが
-  // 「記録が無い」状態から始まり、そこで初めてタグが入る（＝そのときも鳴らない）。
-  if (!isPushConfigured()) return emptyResult({ swept: true });
-  if ((await db.pushSubscription.count()) === 0) return emptyResult({ swept: true });
+  // **投稿先（Botトークン）が無ければGitHubを叩かない。** 送り先の無い巡回でレート制限を使わない。
+  // 種まきもしないので、設定した直後の1巡は全リポジトリが「記録が無い」状態から始まり、
+  // そこで初めてタグが入る（＝そのときも鳴らない）。
+  const target = loadReleaseSlackTarget();
+  if (!target) return emptyResult({ swept: true });
+  const slack = createSlackClient(target.botToken);
 
   const repositories = await db.repository.findMany({
     where: { archived: false },
@@ -318,18 +372,6 @@ export async function runReleasePushSweep(
         continue;
       }
 
-      const targets = await db.pushSubscription.findMany({
-        where: {
-          user: {
-            userInstallations: { some: { installationId: repository.installationId } },
-            hiddenRepositories: { none: { repositoryId: repository.id } },
-            ...notMutedWhere("release"),
-          },
-        },
-        select: { id: true, endpoint: true, p256dh: true, auth: true },
-      });
-      if (targets.length === 0) continue;
-
       const published: PublishedRelease = {
         repositoryFullName: repository.fullName,
         tagName: latest.tagName,
@@ -339,7 +381,15 @@ export async function runReleasePushSweep(
           latest.tagName,
         ),
       };
-      await sendPushNotification(targets, buildReleasePushPayload(published));
+      await postChannelMessage(slack, {
+        channel: target.channel,
+        text: buildReleaseSlackText(published),
+        blocks: buildReleaseSlackBlocks(published, {
+          publishedAt,
+          appUrl: await fetchAppUrl(repository.ownerLogin, repository.name, token),
+          releaseUrl: latest.htmlUrl,
+        }),
+      });
       result.notified.push(published);
     } catch (error) {
       // 1リポジトリの取得失敗で他リポジトリの通知まで巻き込まない（他の巡回と同じ）。
@@ -355,6 +405,16 @@ function parsePublishedAt(latest: LatestRelease): Date | null {
   if (!latest.publishedAt) return null;
   const value = new Date(latest.publishedAt);
   return Number.isNaN(value.getTime()) ? null : value;
+}
+
+/** アプリ本体のURL。取れなくてもカードは出す（ボタンを省くだけ） */
+async function fetchAppUrl(owner: string, repo: string, token: string): Promise<string | null> {
+  try {
+    return await fetchRepositoryHomepage(owner, repo, token);
+  } catch (error) {
+    console.error(`[runReleasePushSweep] ${owner}/${repo} のhomepageを読めませんでした:`, error);
+    return null;
+  }
 }
 
 /** 更新内容の取得に失敗しても通知を止めない。載せられるものが無いだけとして扱う */

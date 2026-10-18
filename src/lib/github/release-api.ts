@@ -140,6 +140,20 @@ export async function fetchLatestRelease(
   };
 }
 
+/**
+ * リポジトリの`homepage`（アプリ本体のURL）。未設定・http(s)以外はnull。
+ * リリースカードの「アプリを開く」ボタン用（#4791）。
+ */
+export async function fetchRepositoryHomepage(owner: string, repo: string, token: string): Promise<string | null> {
+  const url = `${GITHUB_API}/repos/${owner}/${repo}`;
+  const result = await githubFetchJsonWithEtag<{ homepage?: string | null }>(url, token);
+  if (!result.ok) {
+    throw new GithubApiError(result.status, `GitHub API request failed: ${result.status} ${url} ${result.detail}`);
+  }
+  const homepage = result.data.homepage?.trim();
+  return homepage && /^https?:\/\//.test(homepage) ? homepage : null;
+}
+
 /** リリース履歴（#2726）の1件ぶん */
 export type ReleaseHistoryItem = {
   repoFullName: string;
