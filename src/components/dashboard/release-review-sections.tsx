@@ -1306,7 +1306,12 @@ export function describeReviewCoverage(section: Pick<ReleaseVerificationSection,
   ].filter((v): v is string => v !== null);
   const batches = coverage.batches > 1 ? `・${coverage.batches}バッチ` : "";
   const pending = coverage.pendingBatches > 0 ? `・残り${coverage.pendingBatches}バッチ` : "";
-  return `確認済み ${reviewedFiles} / ${totalFiles} ファイル${rest.length > 0 ? `（${rest.join("・")}）` : ""}${batches}${pending}`;
+  // 同じ対象の保存済みの結果を使い回した数（#4767）。「確認済みは再利用」の説明と実際を揃える
+  const reused =
+    (coverage.reusedBatches ?? 0) > 0
+      ? `・再利用${coverage.reusedBatches}／再確認${coverage.rerunBatches ?? 0}バッチ${coverage.integrationReused ? "（相互作用の確認も再利用）" : ""}`
+      : "";
+  return `確認済み ${reviewedFiles} / ${totalFiles} ファイル${rest.length > 0 ? `（${rest.join("・")}）` : ""}${batches}${pending}${reused}`;
 }
 
 export function ReleaseReviewSections({

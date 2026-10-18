@@ -42,6 +42,19 @@ describe("reviewDependsOnEvidence", () => {
     expect(reviewDependsOnEvidence({ checks: [], unverifiedScope: "検証ランナーのテスト・型検査・ビルドはrunning" })).toBe(true);
     expect(reviewDependsOnEvidence({ checks: [], unverifiedScope: "差分71ファイルのうち65ファイルを確認済み（未確認6）" })).toBe(false);
   });
+  it("証跡を指さない未確認（運用作業・観点の読み残し）は依存に数えない（#4767）", () => {
+    expect(
+      reviewDependsOnEvidence({
+        checks: [{ status: "unconfirmed", evidence: "サブPCのpollerを更新・再起動する必要があります" }],
+        unverifiedScope: null,
+      }),
+    ).toBe(false);
+    expect(
+      reviewDependsOnEvidence({ checks: [{ status: "unconfirmed", evidence: "テスト結果待ち" }], unverifiedScope: null }),
+    ).toBe(true);
+    // 根拠の無い未確認は何に依存するか分からないので、依存側へ倒す
+    expect(reviewDependsOnEvidence({ checks: [{ status: "unconfirmed", evidence: "" }], unverifiedScope: null })).toBe(true);
+  });
 });
 
 describe("decideReviewReevaluation", () => {
@@ -249,6 +262,14 @@ describe("describeReviewEvidenceStage", () => {
       items: ["findings", "ops", "review_unconfirmed", "code_unread"],
     });
     expect(describeReviewStageLabel(stage)).toBe("自動再評価済み・対応／判断が必要");
+  });
+
+  it("証跡に依存しない未確認は、統合検証を待たせず別の内訳として出す（#4767）", () => {
+    const stage = describeReviewEvidenceStage(
+      review({ checks: [{ status: "unconfirmed", evidence: "移行手順の記載を読み切れませんでした" }], unverifiedScope: null }),
+      { state: "running", updatedAt: null },
+    );
+    expect(stage).toEqual({ kind: "needs_check", autoReevaluated: false, items: ["check_unconfirmed"] });
   });
 
   it("統合検証の失敗はその結果の確認として出し、合格にしない", () => {
