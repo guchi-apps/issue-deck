@@ -520,7 +520,8 @@ export const APP_CHANGELOG: ChangelogEntry[] = [];
  * `src/app/api/app-version/route.ts`。稼働中のコミットを返す（guchi-apps/issue-deck#4712）。
  * リリース候補の稼働確認は「`deploy`ジョブがこの`sha`を今回のコミットと突き合わせた」ことを証拠にする。
  * **突き合わせはVPSのgate側（guchi-apps/vps の app-deploy-gate）が持つ**ので、雛形の`deploy.yml`は
- * `APP_COMMIT_SHA`を渡すだけで、照合をしていると名乗らない（照合の無いdeployを稼働確認の証拠にしない）。
+ * `APP_COMMIT_SHA`を`env`で渡して`deploy`を呼ぶだけでよい。この「gateへ委譲する形」は、gateが照合を実装した版
+ * （`guchi-apps/vps`の`a25fa44`・vps#298以降。`src/lib/deploy-version-check.ts`）を前提に「照合付き」と判定される。
  */
 function appVersionRoute(): string {
   return `import { NextResponse } from "next/server";

@@ -1193,8 +1193,9 @@ mainへ出した候補は、稼働版の証拠が揃うまで「稼働確認中�
 
 | repoの種類（対象コミット時点のファイルで判定） | 完了にできる証拠 |
 | --- | --- |
-| deploy.ymlが稼働SHAを照合する（`APP_COMMIT_SHA`と`/api/app-version`を含む） | deployジョブの成功（従来どおり） |
-| deploy.ymlはあるが稼働SHAを照合しない（HTTP 200・目印の文字列だけ） | deploy成功を前提に、**公開URLの照合**か**人の確認** |
+| deploy.yml自身が稼働SHAを照合する（コメントを除いた実行行で`/api/app-version`を引き、`sha`を比較し、不一致ならジョブを失敗させる。issue-deck自身） | deployジョブの成功（従来どおり） |
+| deploy.ymlがgateへ照合を委譲する（`APP_COMMIT_SHA`を`ssh … env`で渡し`ssh … deploy`を呼ぶ。新規アプリ雛形）。照合はVPSのgateが行い、実装した版は`guchi-apps/vps`の`a25fa44`（vps#298・#299）以降 | deployジョブの成功（gateが不一致なら`deploy`が失敗する） |
+| deploy.ymlはあるが稼働SHAを照合しない（HTTP 200・目印の文字列だけ。コメントやechoに`APP_COMMIT_SHA`・`/api/app-version`と書いても照合とは見なさない。#4757） | deploy成功を前提に、**公開URLの照合**か**人の確認** |
 | deploy.ymlが無く`release-artifacts.yml`でソースを配る（pi0w） | workflowの成功と、`v<版>`のReleaseが公開済みでタグが対象コミットを指すこと。**ソース公開までを完了とし、実機配備（pi0w#9）は扱わない**。画面にも「実機配備は別管理」と出す |
 | どちらも無い（判定不能） | 人の確認のみ |
 
