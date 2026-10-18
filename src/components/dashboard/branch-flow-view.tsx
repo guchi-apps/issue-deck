@@ -2492,8 +2492,9 @@ function RepositorySummaryRow({
       {/* TestFlightへの配布が走っている間だけ（#3806）。Webのデプロイとは別の行為なので別のピルにする */}
       {iosDistribution.running && <IosDistributingBadge />}
       <DeployStateBadge deploy={deploy} compact linkToRun={false} />
-      <span className={cn("ml-auto inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium", guidance.attention ? "bg-amber-500/10 text-amber-700 dark:text-amber-400" : "text-primary")}>
+      <span className={cn("ml-auto inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium", guidance.attention ? "bg-amber-500/10 text-amber-700 dark:text-amber-400" : guidance.loading ? "bg-muted text-muted-foreground" : "text-primary")}>
         {guidance.attention && <CircleAlert className="size-3.5" aria-hidden="true" />}
+{guidance.loading && <Loader2 className="size-3.5 animate-spin motion-reduce:animate-none" aria-hidden="true" />}
         {isOpen ? (showSelectionMarker ? "表示中" : "閉じる") : guidance.next}<ChevronRight className={cn("size-3", isOpen && !showSelectionMarker && "rotate-90")} aria-hidden="true" />
       </span>
       </span>
@@ -2501,8 +2502,9 @@ function RepositorySummaryRow({
       {!hasBadges && (
         <span className="flex w-full flex-wrap items-center justify-between gap-2 text-xs">
           <span className="text-muted-foreground">{guidance.state}</span>
-          <span className={cn("inline-flex items-center gap-1 rounded-md px-2 py-1 font-medium", guidance.attention ? "bg-amber-500/10 text-amber-700 dark:text-amber-400" : "text-primary")}>
+          <span className={cn("inline-flex items-center gap-1 rounded-md px-2 py-1 font-medium", guidance.attention ? "bg-amber-500/10 text-amber-700 dark:text-amber-400" : guidance.loading ? "bg-muted text-muted-foreground" : "text-primary")}>
             {guidance.attention && <CircleAlert className="size-3.5" aria-hidden="true" />}
+{guidance.loading && <Loader2 className="size-3.5 animate-spin motion-reduce:animate-none" aria-hidden="true" />}
             {isOpen ? (showSelectionMarker ? "表示中" : "閉じる") : guidance.next}<ChevronRight className={cn("size-3", isOpen && !showSelectionMarker && "rotate-90")} aria-hidden="true" />
           </span>
         </span>

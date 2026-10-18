@@ -2519,13 +2519,13 @@ describe("BranchFlowView の自動更新（#1767）", () => {
     // 更新ボタンは押せるまま（自動更新のたびに無効化しない）
     const refreshButton = screen.getByRole("button", { name: "更新" });
     expect(refreshButton.hasAttribute("disabled")).toBe(false);
-    expect(container.querySelectorAll(".animate-spin").length).toBe(1);
+    expect(refreshButton.querySelectorAll(".animate-spin").length).toBe(1);
   });
 
   it("取得していない間は更新アイコンを回さない", () => {
-    const { container } = renderFlow({ isRefreshing: false });
+    renderFlow({ isRefreshing: false });
 
-    expect(container.querySelectorAll(".animate-spin").length).toBe(0);
+    expect(screen.getByRole("button", { name: "更新" }).querySelectorAll(".animate-spin").length).toBe(0);
   });
 
   it("間隔を変える導線は、いまの間隔をラベルに出す", () => {
