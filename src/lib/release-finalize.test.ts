@@ -18,6 +18,7 @@ import {
   isBumpedToReservation,
   parseFinalizeCallerSupport,
   readVersionFromText,
+  isIosVersionLinesOnlyPatch,
   summarizeBumpDiff,
 } from "@/lib/release-finalize";
 
@@ -369,5 +370,29 @@ describe("バンプ後の再検証の状態分類（#4640）", () => {
   it("失敗は待機より優先し、全て合格なら完了", () => {
     expect(decideReverifyPhase(describeReverifyItems([view("integration", "failed"), view("ai_review", "running")]))).toBe("failed");
     expect(decideReverifyPhase(describeReverifyItems([view("integration", "passed"), view("ai_review", "not_applicable")]))).toBe("done");
+  });
+});
+
+describe("isIosVersionLinesOnlyPatch", () => {
+  const line = (sign: "+" | "-" | " ", v: string) => `${sign}\t\t\t\tMARKETING_VERSION = ${v};`;
+  const patch = (extra: string[] = []) =>
+    ["@@ -10,4 +10,4 @@", " \t\t\t\tFOO = bar;", line("-", "8.66.0"), line("+", "8.67.0"), ...extra, "@@ -50,3 +50,3 @@", line("-", "8.66.0"), line("+", "8.67.0")].join("\n");
+
+  it("予約済みの版へのMARKETING_VERSIONの書き換えだけなら真（#4744と同じ差分）", () => {
+    expect(isIosVersionLinesOnlyPatch(patch(), "8.67.0")).toBe(true);
+  });
+  it("別の版への書き換えは偽", () => {
+    expect(isIosVersionLinesOnlyPatch(patch(), "8.68.0")).toBe(false);
+  });
+  it("他の行も変わっていれば偽", () => {
+    expect(isIosVersionLinesOnlyPatch(patch(["-\t\t\t\tFOO = bar;", "+\t\t\t\tFOO = baz;"]), "8.67.0")).toBe(false);
+  });
+  it("patchが無ければ偽", () => {
+    expect(isIosVersionLinesOnlyPatch(undefined, "8.67.0")).toBe(false);
+  });
+  it("summarizeBumpDiffは版番号だけと確かめたiOSファイルにだけ印を付ける", () => {
+    const diff = summarizeBumpDiff(["package.json", "ios/A.xcodeproj/project.pbxproj", "ios/Info.plist"], RULES, new Set(["ios/A.xcodeproj/project.pbxproj"]));
+    expect(diff.files.find((f) => f.path.endsWith("project.pbxproj"))?.versionLinesOnly).toBe(true);
+    expect(diff.files.find((f) => f.path.endsWith("Info.plist"))?.versionLinesOnly).toBeUndefined();
   });
 });

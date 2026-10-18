@@ -164,7 +164,7 @@ async function loadFinalizations(candidateId: string): Promise<PublishApprovalFi
     preHeadSha: r.preHeadSha,
     finalBaseSha: r.finalBaseSha,
     finalHeadSha: r.finalHeadSha,
-    files: Array.isArray(r.diffFiles) ? (r.diffFiles as { path: string; category: string }[]) : [],
+    files: Array.isArray(r.diffFiles) ? (r.diffFiles as { path: string; category: string; versionLinesOnly?: boolean }[]) : [],
   }));
 }
 

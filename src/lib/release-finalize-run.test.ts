@@ -71,6 +71,7 @@ vi.mock("@/lib/github/release-api", () => ({
   fetchOpenPullRequestsForBase: mocks.openPrs,
   dispatchReleaseFinalizeWorkflow: mocks.dispatch,
   fetchCompareChangedFiles: mocks.compareFiles,
+  fetchComparePatches: vi.fn().mockResolvedValue({}),
   fetchFileTextAtRef: mocks.fileText,
   fetchMainHeadSha: mocks.mainHead,
   fetchPullRequestCiState: vi.fn(async () => ({ ciState: "pending" })),
