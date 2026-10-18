@@ -1178,6 +1178,7 @@ export function IssueDetail({
                       isArtifactsLoaded && !isArtifactsFailed &&
                       artifacts.length === 0
                     }
+                    artifactsPresent={isArtifactsLoaded && !isArtifactsFailed && artifacts.length > 0}
                   />
                 </div>
               )}
