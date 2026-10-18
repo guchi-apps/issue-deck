@@ -36,13 +36,18 @@ export type RequestReleaseReviewResult =
   | { ok: true; outcome: "queued" | "already_queued"; job: DispatchJob; assignee: ReleaseReviewAssignee }
   | { ok: false; rejection: "no_host"; message: string };
 
-/** 積み方の指定。自動再評価（#4664）だけが使い、画面・依頼APIの経路は従来どおり */
+/** 積み方の指定。自動再評価（#4664）と統合検証の完了後の開始（#4763）が使い、画面の再実行は従来どおり */
 export type ReleaseReviewRequestOptions = {
   /**
    * このホストにだけ積む。統合検証の証跡はそれを実行したホストのローカルファイルなので、自動再評価は
    * 検証したホストへ向ける（別ホストでは証跡を読めず、未確認のまま戻るだけになる）。不適格なら積まない
    */
   requiredHost?: string;
+  /**
+   * 適格ならこのホストを優先する（#4763）。統合検証の完了後に開始する全体レビューは、証跡のある統合検証の実行ホストへ向ける。
+   * 不適格なら従来どおり名前順の先頭へフォールバックする（`requiredHost`と違い、積むこと自体はやめない）
+   */
+  preferredHost?: string | null;
   /** 積めるホストが無いとき`ai_review`へ失敗を記録するか（既定true）。自動経路は有効な結果を上書きしないためfalse */
   recordNoHost?: boolean;
 };
@@ -52,6 +57,7 @@ async function pickReleaseReviewHost(
   assignee: ReleaseReviewAssignee,
   now: Date,
   requiredHost?: string,
+  preferredHost?: string | null,
 ): Promise<string | null> {
   const hosts = await db.dispatchHost.findMany({
     where: { lastSeenAt: { gte: new Date(now.getTime() - DISPATCH_HOST_ONLINE_WINDOW_MS) } },
@@ -65,6 +71,7 @@ async function pickReleaseReviewHost(
       parseDispatchHostRepositories(host.repositories).includes(repositoryFullName),
   );
   if (requiredHost !== undefined) return capable.some((host) => host.name === requiredHost) ? requiredHost : null;
+  if (preferredHost && capable.some((host) => host.name === preferredHost)) return preferredHost;
   return capable[0]?.name ?? null;
 }
 
@@ -137,7 +144,13 @@ export async function requestReleaseReviewJob(
   const existing = await db.dispatchJob.findFirst({ where: { activeKey } });
   if (existing) return { ok: true, outcome: "already_queued", job: existing, assignee };
 
-  const hostName = await pickReleaseReviewHost(target.repoFullName, assignee, now, options.requiredHost);
+  const hostName = await pickReleaseReviewHost(
+    target.repoFullName,
+    assignee,
+    now,
+    options.requiredHost,
+    options.preferredHost,
+  );
   if (hostName === null) {
     if (options.recordNoHost === false) {
       return { ok: false, rejection: "no_host", message: "全体レビューを積めるサブPCがないため見送りました" };

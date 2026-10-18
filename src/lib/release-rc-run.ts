@@ -1,5 +1,5 @@
 import { db } from "@/lib/db";
-import { requestReleaseReviewJob } from "@/lib/dispatch/release-review-jobs";
+import { requestReleaseReviewAfterIntegration } from "@/lib/dispatch/release-review-start";
 import { requestReleaseVerifyJob } from "@/lib/dispatch/release-verify-jobs";
 import { closePullRequest } from "@/lib/github/actions-api";
 import { getInstallationToken } from "@/lib/github/app-auth";
@@ -249,12 +249,13 @@ async function reconcileRevision(input: {
   });
   if (!applied) return "ignored";
 
-  // 新しいrevisionのSHAで全体レビュー・統合検証を依頼する（既存の仕組み。同じ対象は重複しない）
+  // 新しいrevisionのSHAで全体レビュー・統合検証を依頼する（既存の仕組み。同じ対象は重複しない）。
+  // 全体レビューは統合検証の完了後に、統合検証を実行したホストで開始する（#4763）
   const target = { repoFullName: fullNameOf(ctx), prNumber: decision.prNumber, baseSha: decision.baseSha, headSha: decision.headSha };
   try {
     await registerReleaseVerification(target);
     await requestReleaseVerifyJob(target);
-    await requestReleaseReviewJob(target);
+    await requestReleaseReviewAfterIntegration(target);
   } catch (error) {
     // 依頼に失敗しても適用の記録は戻さない（画面は「未実施」として出し、再実行で依頼できる）
     console.error("[release-rc] verification request failed", fullNameOf(ctx), error);

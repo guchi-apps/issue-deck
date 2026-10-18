@@ -8,6 +8,7 @@ import { authorizeDispatch } from "@/lib/dispatch/dispatch-auth";
 import { parseDispatchHostName } from "@/lib/dispatch/dispatch-job";
 import { claimDispatchJobs, sweepAgentUsageLimitPause } from "@/lib/dispatch/jobs";
 import { sweepReleaseReviewReevaluation } from "@/lib/dispatch/release-review-reevaluate";
+import { sweepDeferredReleaseReviews } from "@/lib/dispatch/release-review-start";
 import { launchNextWindowRunEntries } from "@/lib/next-window-run-launch";
 import {
   cancelManuallyStartedScheduledRuns,
@@ -174,6 +175,13 @@ export async function POST(request: NextRequest) {
       await sweepBackupCiMerges();
     } catch (error) {
       console.error("[POST /api/dispatch/claim] バックアップCI合格後のマージ判定に失敗しました:", error);
+    }
+    // 統合検証の完了まで待たせた全体レビュー（#4763）の開始の再照合。報告の反映に失敗した・統合検証を積めなかった対象を拾う。
+    // 積んだ`RELEASE_REVIEW`は、下の`claimDispatchJobs`で同じ回に受け取られうる
+    try {
+      await sweepDeferredReleaseReviews();
+    } catch (error) {
+      console.error("[POST /api/dispatch/claim] 待機中の全体レビューの開始判定に失敗しました:", error);
     }
     // 全体レビューの自動再評価（#4664）の再照合。報告の反映に失敗した・再起動で判定が抜けた対象を拾う。
     // 積んだ`RELEASE_REVIEW`は、下の`claimDispatchJobs`で同じ回に受け取られうる
