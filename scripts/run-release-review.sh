@@ -220,8 +220,8 @@ review_context_text() {
 
 ### 再レビューの進め方
 
-1. **前回の止める指摘ごとに**、解消したか（`resolved`・根拠必須）／未解消か（`unresolved`）を確認し、`previousFindings`へ出力する。未解消のものは`findings`にも`previousId`つきで入れる
-2. 修正差分と、それが影響する呼び出し元・関連機能を再確認する。**修正で新しく生じた問題があれば新規の指摘として出す**。新規の指摘には`discovery`を付ける（修正の結果生じた＝`fix_induced`、前回も見えたはずの見落とし＝`initial_miss`、今回の対象に追加された変更＝`scope_added`、判断できない＝`unknown`）
+1. **前回の止める指摘ごとに**、解消したか（`resolved`・根拠必須）／未解消か（`unresolved`）を確認し、`previousFindings`へ出力する。未解消のものは`findings`にも`previousId`つきで入れる（止める条件を満たしていれば`"blocking": true`と根拠を付ける）
+2. 修正差分と、それが影響する呼び出し元・関連機能を再確認する。**修正で新しく生じた問題があれば新規の指摘として出す**。新規の指摘には`discovery`を付ける（修正の結果生じた＝`fix_induced`、前回も見えたはずの見落とし＝`initial_miss`、今回の対象に追加された変更＝`scope_added`、判断できない＝`unknown`）。**修正差分に関係しない`initial_miss`は止めない提案（`"blocking": false`）にする**（認証・認可・データ境界・機密の露出〈`checkId`が`auth_boundary`〉は除く。修正差分のファイルを指していない・根拠で挙げていない`initial_miss`は、サーバー側でも提案へ降格する）
 3. 修正差分の影響を受けない確認項目は、前回の結果を引き継いでよい（`"source": "carried_over"`）。**根拠には「なぜ今回の対象にも当てはまるか」を書く**。影響を受ける項目、前回に`unconfirmed`だった項目は今回確認する（`"source": "current"`）
 4. 再確認した範囲と、その範囲を選んだ理由を`recheckScope`に書く
 5. **前回に無かった重大な問題でも、見つけたら必ず報告する。** 前回未指摘であることを理由に無視しない
@@ -496,7 +496,7 @@ merge_batch_results() {
     . as $rs
     | def uniq_by_key: group_by([.title, .file, .line]) | map(.[0]);
     {
-      state: (if any($rs[]; .state == "needs_check") or any($rs[]; (.findings // []) | any(.blocking != false)) then "needs_check" else "passed" end),
+      state: (if any($rs[]; .state == "needs_check") or any($rs[]; (.findings // []) | any(.blocking == true)) then "needs_check" else "passed" end),
       summary: ([ $rs | to_entries[] | . as $e | ($e.value.summary // "") | select(. != "") | "[\(if $e.key < $batches then "バッチ\($e.key + 1)" else "相互作用の確認" end)] \(.[0:1500])" ] | join("\n") | .[0:19000]),
       checklistVersion: ([ $rs[] | .checklistVersion // empty ] | first),
       checks: (
