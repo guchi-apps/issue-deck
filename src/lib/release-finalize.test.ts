@@ -145,6 +145,36 @@ describe("decideInheritedVerification", () => {
     });
     expect(decideInheritedVerification({ kind: "ai_review", before: passed, currentBaseSha: BASE, diff: onlyVersion, requireFreshIos: true })).toMatchObject({ action: "inherit" });
   });
+  it("iOS設定の版番号行だけの書き換え（#4744と同じ差分）なら、全体レビュー・統合検証は引き継ぎ、iOS検証は再実行する（#4764）", () => {
+    const pbxproj = "ios/IssueDeck.xcodeproj/project.pbxproj";
+    const marketing = (sign: "+" | "-", v: string) => `${sign}\t\t\t\tMARKETING_VERSION = ${v};`;
+    // #4744: MARKETING_VERSIONの4か所だけ
+    const patch = [1, 2, 3, 4].flatMap((n) => [`@@ -${n * 10},3 +${n * 10},3 @@`, marketing("-", "8.66.0"), marketing("+", "8.67.0")]).join("\n");
+    expect(isIosVersionLinesOnlyPatch(patch, "8.67.0")).toBe(true);
+    const linesOnly = new Set([pbxproj]);
+    const diff = summarizeBumpDiff(["package.json", ".github/release-notes.md", pbxproj], RULES, linesOnly);
+    expect(decideInheritedVerification({ kind: "ai_review", before: passed, currentBaseSha: BASE, diff })).toMatchObject({ action: "inherit", reason: expect.stringContaining("版番号行") });
+    expect(decideInheritedVerification({ kind: "integration", before: passed, currentBaseSha: BASE, diff })).toMatchObject({ action: "inherit" });
+    expect(decideInheritedVerification({ kind: "ios", before: passed, currentBaseSha: BASE, diff })).toMatchObject({ action: "rerun", reason: expect.stringContaining("iOS") });
+    // iOS（Mac）検証が必要なリポジトリでは、統合検証は従来どおりバンプ後のheadで再実行する
+    expect(decideInheritedVerification({ kind: "integration", before: passed, currentBaseSha: BASE, diff, requireFreshIos: true })).toMatchObject({ action: "rerun" });
+    expect(decideInheritedVerification({ kind: "ai_review", before: passed, currentBaseSha: BASE, diff, requireFreshIos: true })).toMatchObject({ action: "inherit" });
+  });
+  it("iOS設定の版番号行以外も変わったら、全体レビュー・統合検証を再実行する（#4764）", () => {
+    const pbxproj = "ios/IssueDeck.xcodeproj/project.pbxproj";
+    const patch = ["@@ -10,4 +10,4 @@", "-\t\t\t\tMARKETING_VERSION = 8.66.0;", "+\t\t\t\tMARKETING_VERSION = 8.67.0;", "-\t\t\t\tFOO = bar;", "+\t\t\t\tFOO = baz;"].join("\n");
+    expect(isIosVersionLinesOnlyPatch(patch, "8.67.0")).toBe(false);
+    const diff = summarizeBumpDiff(["package.json", pbxproj], RULES, new Set());
+    expect(decideInheritedVerification({ kind: "ai_review", before: passed, currentBaseSha: BASE, diff })).toMatchObject({ action: "rerun" });
+    expect(decideInheritedVerification({ kind: "integration", before: passed, currentBaseSha: BASE, diff })).toMatchObject({ action: "rerun" });
+  });
+  it("版番号行だけのiOS設定と一緒に依存関係・その他が変われば再実行する（#4764）", () => {
+    const pbxproj = "ios/IssueDeck.xcodeproj/project.pbxproj";
+    for (const extra of ["pnpm-lock.yaml", "src/generated/version.ts", "ios/App/Info.plist"]) {
+      const diff = summarizeBumpDiff(["package.json", pbxproj, extra], RULES, new Set([pbxproj]));
+      expect(decideInheritedVerification({ kind: "ai_review", before: passed, currentBaseSha: BASE, diff })).toMatchObject({ action: "rerun" });
+    }
+  });
   it("iOS設定・依存関係が変わればiOS検証を再実行する", () => {
     const diff = summarizeBumpDiff(["package.json", "ios/App/Info.plist"], RULES);
     expect(decideInheritedVerification({ kind: "ios", before: passed, currentBaseSha: BASE, diff })).toMatchObject({ action: "rerun", reason: expect.stringContaining("iOS") });

@@ -1141,6 +1141,7 @@ main起点の`deploy-recovery/*`ブランチへ取り込む。**`merges`APIは�
 
 - 検証行（`ReleaseVerification`）はPR・base・head・種別が対象のキーで、**バンプ前のheadの行は書き換えない**
 - 引継ぎの判定は`decideInheritedVerification`。引き継ぐのは**バンプ前が合格（未確認範囲なし）で、mainが進んでおらず、バンプの差分が版ファイル（と同じ階層のロック）・更新履歴だけ**のときに限る。iOSの設定・依存関係・その他のコード・設定が変わった場合は再検証する。iOS（Mac）検証が必要なリポジトリ（`macBuildCheck`）は、統合検証をバンプ後のheadで必ず再実行する。判定できなければ再検証する
+- **iOS設定の版番号行だけの書き換えは、全体レビュー・統合検証では版と同じ扱いにする**（#4764）。`ios_version`に分類されたファイルのうち、差分が`MARKETING_VERSION`・`CURRENT_PROJECT_VERSION`の行だけで、書き換え後の`MARKETING_VERSION`が予約済みの正式版と一致するもの（`isIosVersionLinesOnlyPatch`が真＝`diffFiles`の`versionLinesOnly`。公開承認の失効〈#4753〉と同じ判定を共有する）は、`ai_review`・`integration`の引継ぎを止めない（理由「版・更新履歴とiOS設定の版番号行だけ」）。それ以外の行が変わった`ios_version`・patchが取れない巨大差分・`dependency`・`other`は従来どおり再実行する。**iOS検証の再実行（`ios_files_changed`）と、Mac検証が必要なリポジトリでの統合検証の再実行（`ios_final_required`）は変えない**。以前は`project.pbxproj`の版番号行だけでも`beyond_version`になり、iOSを含むissue-deckでは正式バンプのたびに全体レビューが最初からやり直しになっていた（RC-8 #4744）
 - 判定と根拠（元のbase/head・バンプ後のbase/head・変更ファイル・理由）は`ReleaseCandidateFinalization.handoffEvidence`へ残す。検証の読み取り（`listReleaseVerificationRecords`・`listReleaseVerificationDetails`）が、証跡と元の結果が今も合格であることを確かめたうえで**バンプ後の対象に対する派生の記録**として足し、`inheritedFromHeadSha`と「バンプ後のheadで実行した結果ではありません」の注記で区別する。**旧SHAの結果を新SHAの実行結果へ書き換えない**
 - 再検証が必要な種別だけを、バンプ後のheadで依頼する（引き継いだ種別の行は作らない）
 
