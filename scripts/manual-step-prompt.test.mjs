@@ -6,6 +6,10 @@ import { describe, expect, it } from "vitest";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const prompt = readFileSync(path.join(repoRoot, "scripts/prompts/manual-step-agent.md"), "utf8");
+const genericPrompt = readFileSync(
+  path.join(repoRoot, "scripts/prompts/generic-implementation-agent.md"),
+  "utf8",
+);
 
 describe("手作業セッションの自律実行プロンプト（#3870）", () => {
   it("本文に無い安全な作業も、目的達成のために自動で進める", () => {
@@ -32,5 +36,30 @@ describe("手作業セッションの自律実行プロンプト（#3870）", ()
     expect(prompt).toContain("対象サービス・ファイルの所有者と実行環境を先に確認します");
     expect(prompt).toContain("`cd … && …`から始めます");
     expect(prompt).toContain("別ユーザーのPM2を誤って起動しない");
+  });
+});
+
+describe("実行手段の選択と本人操作の依頼（#4522）", () => {
+  // 手作業・汎用の両プロンプトが同じ判断規約を持つ（Claude/Codex双方で共通）
+  const rules = [
+    "「ブラウザ操作だから本人」と一律に止めない",
+    "能力は実測で確かめる",
+    "能力不足を具体的に報告する",
+    "本人認証（ログイン・MFA・CAPTCHA）・物理操作・不足権限・未承認の重要判断",
+    "「本人操作待ち」「未対応ツール」「権限不足」「実行失敗」「依存待ち」「外部反映待ち」",
+    "同じ変更を二重に実行しない",
+    "終了コード0だけで、ブラウザでの設定成立・実データ移行・目的達成を断定しない",
+    "秘密値・ブラウザの認証情報",
+  ];
+
+  it.each(rules)("両プロンプトに規約が入っている: %s", (rule) => {
+    expect(prompt).toContain(rule);
+    expect(genericPrompt).toContain(rule);
+  });
+
+  it("手作業プロンプトはホスト能力の実測表と完了条件ごとの記録書式を持つ", () => {
+    expect(prompt).toContain("{{HOST_CAPABILITIES}}");
+    expect(prompt).toContain("### 実行能力");
+    expect(prompt).toContain("条件: <内容> / 結果: <達成|未達> / 確認: <時刻> / 根拠:");
   });
 });
