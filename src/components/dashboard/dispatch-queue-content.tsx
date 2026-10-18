@@ -77,10 +77,13 @@ import { cn } from "@/lib/utils";
 export function DispatchQueueContent({
   dispatch,
   onOpenIssue,
+  onOpenRemoteSessions,
   pinTop = false,
 }: {
   dispatch: DispatchStateHandle;
   onOpenIssue?: (issueId: string) => void;
+  /** ホストカードのリモートセッションから、その画面を開く（#4836）。渡さなければ導線を出さない */
+  onOpenRemoteSessions?: () => void;
   /**
    * 更新インジケーターとエージェントの一括操作を上に固定し、それより下だけをスクロールさせる
    * （#3818）。親が高さの決まった縦flex（`flex min-h-0 flex-1 flex-col`）のときだけ渡す。
@@ -131,8 +134,10 @@ export function DispatchQueueContent({
       <DispatchHostPanel
         hosts={dispatch.hosts}
         sessions={dispatch.sessions}
+        remoteSessions={dispatch.remoteSessions}
         jobs={dispatch.jobs}
         onOpenIssue={onOpenIssue}
+        onOpenRemoteSessions={onOpenRemoteSessions}
         onRequestSelfUpdate={dispatch.requestSelfUpdate}
         onRequestReboot={dispatch.requestReboot}
       />

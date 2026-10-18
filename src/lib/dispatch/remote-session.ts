@@ -162,6 +162,42 @@ export async function listRemoteSessions(
   };
 }
 
+/**
+ * 実行状況のホストカードに並べる、要求者の稼働中のリモートセッション（#4836）。
+ *
+ * **`GET /api/dispatch`のポーリング（5〜20秒ごと）から呼ぶので、読み取りだけにする。**
+ * `listRemoteSessions`は`starting`の畳み込み（書き込み）とホスト一覧の読み込みを伴うため使わない。
+ * 絞り方（要求者・現在の連携）は`listRemoteSessions`と揃える。
+ */
+export async function listActiveRemoteSessionViews(
+  requestedByUserId: string,
+): Promise<RemoteSessionView[]> {
+  const ownRepositories = await db.repository.findMany({
+    where: { installation: { userInstallations: { some: { userId: requestedByUserId } } } },
+    select: { fullName: true },
+  });
+  const sessions = await db.remoteSession.findMany({
+    where: {
+      requestedByUserId,
+      repositoryFullName: { in: ownRepositories.map((row) => row.fullName) },
+      status: { in: ACTIVE_STATUSES },
+    },
+    orderBy: { createdAt: "asc" },
+    take: 20,
+  });
+  if (sessions.length === 0) return [];
+  const stoppingJobs = await db.dispatchJob.findMany({
+    where: {
+      kind: "REMOTE_SESSION_KILL",
+      status: { in: ["QUEUED", "CLAIMED", "RUNNING"] },
+      tmuxSessionName: { in: sessions.map((session) => session.tmuxSessionName) },
+    },
+    select: { tmuxSessionName: true },
+  });
+  const stopping = new Set(stoppingJobs.map((job) => job.tmuxSessionName));
+  return sessions.map((session) => toView(session, stopping.has(session.tmuxSessionName)));
+}
+
 export type EnqueueRemoteSessionResult =
   | { ok: true; session: RemoteSessionView }
   | { ok: false; rejection: RemoteSessionRejection; message: string };

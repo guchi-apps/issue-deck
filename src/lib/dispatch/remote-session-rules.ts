@@ -142,6 +142,21 @@ export type RemoteSessionView = {
   lastSeenAt: string | null;
 };
 
+/**
+ * 実行状況のホストカード（#4836）に並べる、そのホストのリモートセッション。
+ * 終わったもの（`ended`・`failed`）は除き、起動の古い順に並べる。
+ */
+export function selectHostRemoteSessions(
+  sessions: readonly RemoteSessionView[],
+  hostName: string,
+): RemoteSessionView[] {
+  return sessions
+    .filter(
+      (session) => session.host === hostName && ACTIVE_REMOTE_SESSION_STATUSES.includes(session.status),
+    )
+    .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+}
+
 /** `GET /api/remote-sessions`の応答 */
 export type RemoteSessionState = {
   sessions: RemoteSessionView[];

@@ -8,7 +8,9 @@ import {
   parseReportedRemoteSessions,
   pickRemoteSessionHost,
   resolveRemoteSessionRejection,
+  selectHostRemoteSessions,
   type RemoteSessionHostInfo,
+  type RemoteSessionView,
 } from "@/lib/dispatch/remote-session-rules";
 
 const host = (overrides: Partial<RemoteSessionHostInfo> = {}): RemoteSessionHostInfo => ({
@@ -82,5 +84,35 @@ describe("parseReportedRemoteSessions", () => {
       { tmuxSessionName: "issue-deck-remote-abcd1234", remoteControlUrl: "https://claude.ai/code/session_x" },
       { tmuxSessionName: "vps-remote-zzzz9999", remoteControlUrl: null },
     ]);
+  });
+});
+
+describe("selectHostRemoteSessions（#4836）", () => {
+  const session = (overrides: Partial<RemoteSessionView>): RemoteSessionView => ({
+    id: "s",
+    repositoryFullName: "guchi-apps/issue-deck",
+    host: "subpc",
+    tmuxSessionName: "issue-deck-remote-abcdefgh",
+    status: "running",
+    remoteControlUrl: null,
+    failureMessage: null,
+    stopping: false,
+    createdAt: "2026-10-18T00:00:00.000Z",
+    lastSeenAt: null,
+    ...overrides,
+  });
+
+  it("そのホストの終わっていないものだけを、起動の古い順に返す", () => {
+    const result = selectHostRemoteSessions(
+      [
+        session({ id: "late", createdAt: "2026-10-18T02:00:00.000Z" }),
+        session({ id: "other-host", host: "mainpc" }),
+        session({ id: "ended", status: "ended" }),
+        session({ id: "failed", status: "failed" }),
+        session({ id: "early", status: "starting", createdAt: "2026-10-18T01:00:00.000Z" }),
+      ],
+      "subpc",
+    );
+    expect(result.map((item) => item.id)).toEqual(["early", "late"]);
   });
 });

@@ -4,6 +4,7 @@ import { parseClaudeLocalModel, parseCodexLocalModel } from "@/lib/app-settings"
 import { requireUserId } from "@/lib/auth-user";
 import { listDependencyWaitViews } from "@/lib/dispatch/dependency-wait-run";
 import { listParentRunBadges } from "@/lib/parent-run/run";
+import { listActiveRemoteSessionViews } from "@/lib/dispatch/remote-session";
 import {
   DEFAULT_DISPATCH_AGENT,
   isSessionControlJobKind,
@@ -76,7 +77,7 @@ export async function GET() {
   // 逆向きの参照を足すと相互参照になる
   // 実装セッションの依存待ち（#4321）も同じ応答に載せる（取得口を増やさない）。
   // **取得に失敗しても状態の取得は続ける**（表示が欠けるだけで、実行状況の画面は止めない）
-  const [state, manualStepRuns, dependencyWaits, parentRuns] = await Promise.all([
+  const [state, manualStepRuns, dependencyWaits, parentRuns, remoteSessions] = await Promise.all([
     listDispatchState(),
     listManualStepRunViews(),
     listDependencyWaitViews().catch((error) => {
@@ -88,9 +89,16 @@ export async function GET() {
       console.error("[GET /api/dispatch] 親の自動実行を取得できませんでした:", error);
       return [];
     }),
+    // ホストカードに並べるリモートセッション（#4836）。要求者自身のものだけを返す
+    // （Remote Control URLを他の利用者へ見せない。`listRemoteSessions`と同じ線）。
+    // 取得に失敗しても状態の取得は続ける
+    listActiveRemoteSessionViews(userId).catch((error) => {
+      console.error("[GET /api/dispatch] リモートセッションを取得できませんでした:", error);
+      return [];
+    }),
   ]);
   return NextResponse.json(
-    { ...state, manualStepRuns, dependencyWaits, parentRuns },
+    { ...state, manualStepRuns, dependencyWaits, parentRuns, remoteSessions },
     { headers: { "Cache-Control": "no-store" } },
   );
 }

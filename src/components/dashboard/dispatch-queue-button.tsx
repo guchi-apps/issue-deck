@@ -10,6 +10,7 @@ import {
 } from "@/components/dashboard/dispatch-queue-content";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { useDispatchState, type DispatchStateHandle } from "@/hooks/use-dispatch-state";
+import { useReferenceNavigation } from "@/hooks/use-reference-navigation";
 import { describeDispatchQueueLoad, summarizeDispatchQueue } from "@/lib/dispatch/queue-summary";
 
 /**
@@ -81,9 +82,36 @@ export function DispatchQueueButton({
         </div>
 
         <div className="mt-2">
-          <DispatchQueueContent dispatch={dispatch} onOpenIssue={openIssue} />
+          <PopoverBody dispatch={dispatch} onOpenIssue={openIssue} onClose={() => setOpen(false)} />
         </div>
       </PopoverContent>
     </Popover>
+  );
+}
+
+/**
+ * ポップオーバーの中身。**開いている間しか描かれない**ので、ここでルーターを要求するフック
+ * （`useReferenceNavigation`）を呼ぶ（スマホの`SheetBody`と同じ形）。リモートセッション画面への
+ * 導線（#4836）はIssueと違って呼び出し側から受け取らず、ここでURLを進める。
+ */
+function PopoverBody({
+  dispatch,
+  onOpenIssue,
+  onClose,
+}: {
+  dispatch: DispatchStateHandle;
+  onOpenIssue?: (issueId: string) => void;
+  onClose: () => void;
+}) {
+  const { openRemoteSessions } = useReferenceNavigation();
+  return (
+    <DispatchQueueContent
+      dispatch={dispatch}
+      onOpenIssue={onOpenIssue}
+      onOpenRemoteSessions={() => {
+        onClose();
+        openRemoteSessions();
+      }}
+    />
   );
 }
