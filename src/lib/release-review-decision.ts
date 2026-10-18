@@ -176,9 +176,12 @@ export function summarizeReleaseReviewDecisions(input: {
 }): ReleaseReviewDecisionSummary {
   const all = [...input.findings, ...input.suggestions];
   const findingById = new Map(all.map((f) => [f.id, f]));
-  // 旧IDで保存された判断を、今の指摘のIDへ読み替える（#4766）。今の指摘のIDそのものとの一致を優先する
+  // 旧IDで保存された判断を、今の指摘のIDへ読み替える（#4766）。今の指摘のIDそのものとの一致を優先し、
+  // 複数の指摘に当たる別名（題・ファイルが同じで行だけ違う指摘の現行の導出など）は使わない（別の指摘の判断で覆わない）
   const canonical = new Map<string, string>(all.map((f) => [f.id, f.id]));
-  for (const f of all) for (const alias of f.aliasIds ?? []) if (!canonical.has(alias)) canonical.set(alias, f.id);
+  const aliasHits = new Map<string, number>();
+  for (const f of all) for (const alias of new Set(f.aliasIds ?? [])) aliasHits.set(alias, (aliasHits.get(alias) ?? 0) + 1);
+  for (const f of all) for (const alias of f.aliasIds ?? []) if (!canonical.has(alias) && aliasHits.get(alias) === 1) canonical.set(alias, f.id);
   const grouped = new Map<string, ReleaseReviewDecisionRecord[]>();
   for (const r of input.records) {
     const key = canonical.get(r.findingId) ?? r.findingId;

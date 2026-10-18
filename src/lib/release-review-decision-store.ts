@@ -99,8 +99,11 @@ export async function listReleaseReviewDecisions(scopeKey: string): Promise<Rele
 
 /** 一度に照合する判断時のbaseの上限。超えた分は確かめられないものとして判断を無効にする */
 const MAX_BASE_COMPARES = 5;
-/** 2つのSHAの間の変更は変わらないので、取得できた結果だけを覚えておく（画面の再読み込みのたびにGitHubを引かない） */
-const baseChangesCache = new Map<string, readonly string[]>();
+/**
+ * 2つのSHAの間の変更は変わらないので、比較できた結果を覚えておく（画面の再読み込みのたびにGitHubを引かない）。
+ * 書き換え・上限超過で確かめられない結果（null）も同じSHAの組では変わらないので覚える。取得の失敗（例外）は覚えない
+ */
+const baseChangesCache = new Map<string, readonly string[] | null>();
 const BASE_CHANGES_CACHE_LIMIT = 200;
 
 /**
@@ -120,9 +123,8 @@ export async function loadDecisionBaseChanges(
   let fetched = 0;
   for (const from of bases) {
     const cacheKey = `${repoFullName}:${from}...${currentBaseSha}`;
-    const cached = baseChangesCache.get(cacheKey);
-    if (cached) {
-      result[from] = cached;
+    if (baseChangesCache.has(cacheKey)) {
+      result[from] = baseChangesCache.get(cacheKey) ?? null;
       continue;
     }
     if (fetched >= MAX_BASE_COMPARES) {
@@ -132,12 +134,14 @@ export async function loadDecisionBaseChanges(
     fetched += 1;
     try {
       token ??= await resolveInstallationToken(repoFullName);
-      const files = token ? await fetchBaseAdvanceChangedFiles(owner, repo, from, currentBaseSha, token) : null;
-      result[from] = files;
-      if (files) {
-        if (baseChangesCache.size >= BASE_CHANGES_CACHE_LIMIT) baseChangesCache.delete(baseChangesCache.keys().next().value as string);
-        baseChangesCache.set(cacheKey, files);
+      if (!token) {
+        result[from] = null;
+        continue;
       }
+      const files = await fetchBaseAdvanceChangedFiles(owner, repo, from, currentBaseSha, token);
+      result[from] = files;
+      if (baseChangesCache.size >= BASE_CHANGES_CACHE_LIMIT) baseChangesCache.delete(baseChangesCache.keys().next().value as string);
+      baseChangesCache.set(cacheKey, files);
     } catch (error) {
       console.error("[release-review-decision] base compare failed", repoFullName, from, currentBaseSha, error);
       result[from] = null;

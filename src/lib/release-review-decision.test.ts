@@ -177,6 +177,17 @@ describe("旧IDの判断の引き継ぎ（#4766）", () => {
     expect([...nonFixFindingIds(s)].sort()).toEqual(["R-legacy", "R-new"]);
   });
 
+  it("複数の指摘に当たる別名では読み替えない（別の指摘の判断で覆わない）", () => {
+    const s = summarize(
+      [record({ findingId: "R-new" })],
+      [finding("R-legacyA", { aliasIds: ["R-new"] }), finding("R-legacyB", { aliasIds: ["R-new"] })],
+    );
+    expect(s.byFinding["R-legacyA"]).toBeUndefined();
+    expect(s.byFinding["R-legacyB"]).toBeUndefined();
+    expect(s.counts.undecidedBlocking).toBe(2);
+    expect(s.cleared).toBe(false);
+  });
+
   it("旧IDと新IDの判断が両方あるときは、判断時刻の新しいほうが今の判断", () => {
     const s = summarize(
       [

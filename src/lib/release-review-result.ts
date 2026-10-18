@@ -166,6 +166,29 @@ export function reviewFindingIdAliases(finding: Pick<ReleaseReviewFinding, "titl
   return [...new Set([finding.id ?? null, reviewFindingId(finding), legacyReviewFindingId(finding)].filter((id): id is string => Boolean(id)))];
 }
 
+/**
+ * 指摘の一覧をIDで引ける索引にする（#4766）。**完全一致（保存済みのID・旧導出＝題・ファイル・行）を優先**し、
+ * 現行の導出（正規化した題・ファイル）は**一覧の中で1件にしか当たらないときだけ**別名として使う。
+ * 題・ファイルが同じで行だけ違う指摘が複数あると現行の導出が衝突し、先着の指摘の判断・IDが別の指摘を覆うため
+ */
+export function buildFindingIdIndex<T extends Pick<ReleaseReviewFinding, "title" | "file" | "line"> & { id?: string | null }>(
+  items: readonly T[],
+): Map<string, T> {
+  const index = new Map<string, T>();
+  for (const f of items) if (f.id && !index.has(f.id)) index.set(f.id, f);
+  for (const f of items) {
+    const legacy = legacyReviewFindingId(f);
+    if (!index.has(legacy)) index.set(legacy, f);
+  }
+  const derived = new Map<string, T[]>();
+  for (const f of items) {
+    const id = reviewFindingId(f);
+    derived.set(id, [...(derived.get(id) ?? []), f]);
+  }
+  for (const [id, hits] of derived) if (hits.length === 1 && !index.has(id)) index.set(id, hits[0]);
+  return index;
+}
+
 export type ReleaseReviewDetail = {
   /** リリースを止める指摘（旧形式の指摘もここ）。1件でもあれば`needs_check` */
   findings: ReleaseReviewFinding[];
@@ -399,10 +422,9 @@ export function normalizeReleaseReview(
   const mode: "initial" | "rereview" = reuse ? "rereview" : "initial";
   const fullReviewReason = reuse ? null : (runnerDenied ?? context?.fullReviewReason ?? (previous ? null : "前回の記録が無いため、対象全体を確認しました"));
   const previousFindings = context?.previousFindings ?? [];
-  // 前回の指摘は保存済みのIDに加え、現行・旧導出のIDでも引く（旧IDで記録された前回の指摘を、行がずれても見失わない。#4766）
-  const previousById = new Map<string, ReleaseReviewContextFinding>();
-  for (const f of previousFindings) previousById.set(f.id, f);
-  for (const f of previousFindings) for (const alias of reviewFindingIdAliases(f)) if (!previousById.has(alias)) previousById.set(alias, f);
+  // 前回の指摘は保存済みのIDに加え、旧導出・現行の導出（衝突しないものだけ）でも引く（旧IDで記録された前回の指摘を、
+  // 行がずれても見失わない。#4766）
+  const previousById = buildFindingIdIndex(previousFindings);
   const decidedIds = new Set(context?.decidedFindingIds ?? []);
 
   // 確認項目の版を報告しない結果は旧ランナー。止める指摘の判定も従来どおりにする
@@ -424,8 +446,8 @@ export function normalizeReleaseReview(
   const prevRunFailed = previous?.runFailed === true;
   const toFinding = ({ finding, previousId, raw: r }: ParsedFinding): { finding: ReleaseReviewFinding; blocking: boolean } => {
     const derived = reviewFindingId(finding);
-    // 照合の候補: AIが付けた`previousId`→現行の導出→旧導出（旧IDで残る記録との互換。#4766）
-    const candidates = [...new Set([previousId, derived, legacyReviewFindingId(finding)].filter((v): v is string => Boolean(v)))];
+    // 照合の候補: AIが付けた`previousId`→旧導出（完全一致）→現行の導出（旧IDで残る記録との互換。#4766）
+    const candidates = [...new Set([previousId, legacyReviewFindingId(finding), derived].filter((v): v is string => Boolean(v)))];
     const prior = candidates.map((c) => previousById.get(c)).find((p) => p !== undefined);
     // 再発は前回の指摘のIDを引き継ぐ（保存済みの判断・修正系列と同じIDのまま）
     const matched = prior?.id ?? null;

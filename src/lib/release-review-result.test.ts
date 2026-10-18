@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { RELEASE_REVIEW_CHECKLIST_VERSION, RELEASE_REVIEW_CHECK_ITEMS } from "./release-review-checklist";
 import {
   decideFindingBlocking,
+  buildFindingIdIndex,
   legacyReviewFindingId,
   normalizeReleaseReview,
   reviewFindingId,
@@ -484,5 +485,42 @@ describe("止める指摘の判定（#4765）", () => {
     expect(r?.detail.findings).toHaveLength(0);
     expect(r?.detail.suggestions[0]).toMatchObject({ id: PREV_FINDING.id, status: "recurring" });
     expect(r?.detail.review?.previousFindings[0].status).toBe("unresolved");
+  });
+});
+
+describe("移行期の照合は完全一致を優先する（#4766）", () => {
+  const prior = (line: number) => ({
+    id: legacyReviewFindingId({ title: "設定漏れ", file: "a.ts", line }),
+    title: "設定漏れ",
+    file: "a.ts",
+    line,
+    detail: "d",
+    occurrences: 1,
+  });
+
+  it("題・ファイルが同じで行だけ違う前回の指摘A・Bがあると、Bは自分の旧IDに当たり、Aを引き継がない", () => {
+    const [a, b] = [prior(3), prior(9)];
+    const index = buildFindingIdIndex([a, b]);
+    expect(index.get(reviewFindingId(a))).toBeUndefined();
+    const r = normalizeReleaseReview(
+      fullChecks({ findings: [{ blocking: true, blockingReason: "r", severity: "high", title: "設定漏れ", file: "a.ts", line: 9, impact: "i", evidence: "e" }] }),
+      rereviewContext({ previousFindings: [a, b] }),
+    );
+    expect(r?.detail.findings[0].id).toBe(b.id);
+  });
+
+  it("Aにだけ判断があっても、Bの再発はAの判断へ結び付かない", () => {
+    const [a, b] = [prior(3), prior(9)];
+    const r = normalizeReleaseReview(
+      fullChecks({ findings: [{ blocking: true, blockingReason: "r", severity: "high", title: "設定漏れ", file: "a.ts", line: 9, impact: "i", evidence: "e" }] }),
+      rereviewContext({ previousFindings: [a, b], decidedFindingIds: [a.id] }),
+    );
+    expect(r?.detail.findings[0].id).toBe(b.id);
+    expect(r?.detail.findings[0].id).not.toBe(a.id);
+  });
+
+  it("衝突が無ければ、行がずれても現行の導出で前回の指摘を引き継ぐ", () => {
+    const a = prior(3);
+    expect(buildFindingIdIndex([a]).get(reviewFindingId(a))).toBe(a);
   });
 });

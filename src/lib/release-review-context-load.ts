@@ -6,7 +6,7 @@ import {
   type ReleaseFixHistory,
   type ReleaseReviewPromptContext,
 } from "@/lib/release-review-context";
-import { reviewFindingId, reviewFindingIdAliases, type ReleaseReviewContextFinding } from "@/lib/release-review-result";
+import { buildFindingIdIndex, reviewFindingId, type ReleaseReviewContextFinding } from "@/lib/release-review-result";
 import { assessDecisionBase } from "@/lib/release-review-decision";
 import {
   listReleaseReviewDecisions,
@@ -145,8 +145,7 @@ async function loadContextDecisions(
     const chain = await resolveReleaseDecisionChain(target.repoFullName, target.prNumber);
     const records = await listReleaseReviewDecisions(releaseDecisionScopeKey(target.repoFullName, chain));
     const current = await loadDecisionBaseContext(target.repoFullName, records, target.baseSha);
-    const fileById = new Map<string, string | null>();
-    for (const f of previousFindings) for (const id of reviewFindingIdAliases(f)) if (!fileById.has(id)) fileById.set(id, f.file);
+    const previousIndex = buildFindingIdIndex(previousFindings);
     const latest = new Map<string, (typeof records)[number]>();
     for (const r of records) {
       const prev = latest.get(r.findingId);
@@ -165,7 +164,7 @@ async function loadContextDecisions(
               scope: r.scope,
               timing: r.timing,
               followUp: r.followUp ? `${r.followUp.repo}#${r.followUp.number}` : null,
-              stale: assessDecisionBase(r.baseSha, fileById.get(r.findingId) ?? null, current) !== null,
+              stale: assessDecisionBase(r.baseSha, previousIndex.get(r.findingId)?.file ?? null, current) !== null,
             },
           ],
     );

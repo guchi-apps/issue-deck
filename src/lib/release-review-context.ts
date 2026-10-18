@@ -2,7 +2,7 @@ import { RELEASE_REVIEW_CHECKLIST_VERSION, type ReleaseReviewCheckStatus } from 
 import {
   legacyReviewFindingId,
   reviewFindingId,
-  reviewFindingIdAliases,
+  buildFindingIdIndex,
   type ReleaseReviewContextFinding,
   type ReleaseReviewNormalizeContext,
 } from "@/lib/release-review-result";
@@ -115,6 +115,9 @@ export function buildReviewPromptContext(input: {
   const decisions = [...(input.decisions ?? [])];
   // 有効な非修正の判断が付いた指摘は、前回の指摘の解消確認・未解消の再注入から外す（#4657）
   const decidedFindingIds = decisions.filter((d) => !d.stale && d.decision !== "fix_now").map((d) => d.id);
+  // 判断を前回の指摘へ結び付ける。完全一致を優先し、衝突する現行の導出では結び付けない（#4766）
+  const previousIndex = buildFindingIdIndex(previous?.findings ?? []);
+  const decidedPrevious = new Set(decidedFindingIds.flatMap((id) => previousIndex.get(id) ?? []));
   const decision = decideReviewMode(input);
   const fixIssueByFinding: Record<string, number> = {};
   for (const history of histories) {
@@ -132,7 +135,7 @@ export function buildReviewPromptContext(input: {
           runFailed: previous.state === "failed",
         }
       : null,
-    previousFindings: (previous?.findings ?? []).filter((f) => !reviewFindingIdAliases(f).some((id) => decidedFindingIds.includes(id))),
+    previousFindings: (previous?.findings ?? []).filter((f) => !decidedPrevious.has(f)),
     decidedFindingIds,
     decisions,
     checklistVersion: RELEASE_REVIEW_CHECKLIST_VERSION,
