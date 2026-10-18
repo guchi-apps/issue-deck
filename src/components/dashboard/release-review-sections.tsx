@@ -893,6 +893,9 @@ function AiReviewSection({
                       </span>
                     )}
                     {s.detail && <p className="whitespace-pre-wrap text-muted-foreground">{s.detail}</p>}
+                    {s.demotedReason && (
+                      <p className="whitespace-pre-wrap text-muted-foreground">提案へ降格: {s.demotedReason}</p>
+                    )}
                     {decisions && s.id && pullRequestNumber !== undefined && target && (
                       <FindingDecisionControl
                         repositoryFullName={repositoryFullName}

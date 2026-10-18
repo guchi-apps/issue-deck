@@ -208,12 +208,23 @@ export const INHERITANCE_REASON_LABEL = {
   ios_files_changed: "iOSの設定・依存関係が変わったため、iOS検証を再実行します",
   ios_final_required: "このリポジトリはiOS（Mac）検証が必要なため、バンプ後のheadで最終検証を再実行します",
   version_and_changelog_only: "バンプで変わったのは版と更新履歴だけのため、バンプ前の合格を引き継ぎます",
+  version_lines_only: "バンプで変わったのは版・更新履歴とiOS設定の版番号行だけのため、バンプ前の合格を引き継ぎます",
 } as const;
+
+/**
+ * 全体レビュー・統合検証にとって「版の書き換えだけ」と見なせるファイルか（#4764）。
+ * `ios_version`は、版番号の行だけが予約済みの正式版へ書き換わったと確かめたもの（`versionLinesOnly`）に限る
+ */
+function isVersionOnlyForReview(file: BumpDiffSummary["files"][number]): boolean {
+  return file.category === "version" || file.category === "changelog" || (file.category === "ios_version" && file.versionLinesOnly === true);
+}
 
 /**
  * バンプ前の合格を、バンプ後のheadへ引き継げるか。**安全だと判定できなければ再検証する。**
  * 引き継ぐのは「版ファイル（と同じ階層のロック）・更新履歴だけが変わった」場合に限り、lifecycleがコード・設定を
- * 変えたとき（iOS設定・依存関係・その他）は影響する検証を再実行する
+ * 変えたとき（iOS設定・依存関係・その他）は影響する検証を再実行する。
+ * 全体レビュー・統合検証に限り、iOS設定の版番号行だけの書き換え（`versionLinesOnly`）も版と同じ扱いにする（#4764）。
+ * iOS検証はiOS設定が変われば従来どおり再実行する
  */
 export function decideInheritedVerification(input: {
   kind: FinalizeVerificationKind;
@@ -235,6 +246,9 @@ export function decideInheritedVerification(input: {
   if (before.baseSha !== input.currentBaseSha) return rerun("main_advanced");
   if (input.requireFreshIos && (kind === "integration" || kind === "ios")) return rerun("ios_final_required");
   if (diff.touchesBeyondVersion) {
+    if (kind !== "ios" && diff.files.every(isVersionOnlyForReview)) {
+      return { kind, action: "inherit", reason: INHERITANCE_REASON_LABEL.version_lines_only };
+    }
     const iosOnlyAffected = diff.files.every((f) => f.category === "version" || f.category === "changelog" || f.category === "ios_version" || f.category === "dependency");
     if (kind === "ios" && iosOnlyAffected) return rerun("ios_files_changed");
     return rerun("beyond_version");
