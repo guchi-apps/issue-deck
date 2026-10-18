@@ -34,6 +34,12 @@ describe("hasBlockingFindings", () => {
     expect(hasBlockingFindings(templateBody(), "guchi-apps/x")).toBe(false);
     expect(hasBlockingFindings(messy, "guchi-apps/x")).toBe(true);
   });
+
+  // 事前記載の不足（#4521）はwarningなので、本文の自動書き換えを起動しない
+  it("前提条件のデバイス行が無いだけの本文は書き換え対象にしない", () => {
+    const body = templateBody().replace(/- 実行するデバイス: .*\n/, "");
+    expect(hasBlockingFindings(body, "guchi-apps/x")).toBe(false);
+  });
 });
 
 describe("isSafeNormalization", () => {

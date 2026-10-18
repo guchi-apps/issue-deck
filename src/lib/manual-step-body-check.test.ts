@@ -47,11 +47,21 @@ describe("checkManualStepBody", () => {
 });
 
 describe("見出し", () => {
-  it("足りない見出しを挙げる", () => {
+  it("完了条件にあたる見出し（完了の確認方法）が無ければerrorで挙げる", () => {
+    const body = templateBody().replace("## 完了の確認方法", "## 補足");
+    const finding = checkManualStepBody(body).find((entry) => entry.rule === "missing-heading");
+    expect(finding?.severity).toBe("error");
+    expect(finding?.message).toContain("完了の確認方法");
+  });
+
+  // 手順・担当・前提の事前記載は実行開始の条件にしない（#4521）
+  it("手順や担当の見出しが無いだけならwarningに留め、起票検証を止めない", () => {
     const body = templateBody().replace("## なぜエージェントが実施しないか", "## 補足");
     const findings = checkManualStepBody(body);
-    expect(findings.map((finding) => finding.rule)).toContain("missing-heading");
-    expect(findings[0].message).toContain("なぜエージェントが実施しないか");
+    const finding = findings.find((entry) => entry.rule === "missing-optional-heading");
+    expect(finding?.severity).toBe("warning");
+    expect(finding?.message).toContain("なぜエージェントが実施しないか");
+    expect(findings.some((entry) => entry.severity === "error")).toBe(false);
   });
 
   it("順が入れ替わっていれば指摘する（節そのものは読めるのでwarning）", () => {
@@ -66,7 +76,7 @@ describe("見出し", () => {
 });
 
 describe("前提条件", () => {
-  it("デバイスの行が無ければerrorで指摘する", () => {
+  it("デバイスの行が無くてもwarningに留める（実行時に判断できる）", () => {
     const body = templateBody().replace(
       /- 実行するデバイス: .*\n/,
       "",
@@ -74,7 +84,7 @@ describe("前提条件", () => {
     const finding = checkManualStepBody(body).find(
       (entry) => entry.rule === "missing-prerequisite",
     );
-    expect(finding?.severity).toBe("error");
+    expect(finding?.severity).toBe("warning");
     expect(finding?.message).toContain("実行するデバイス");
   });
 
