@@ -157,6 +157,14 @@ describe("同期PRの自動マージ（#4669）", () => {
     expect(mocks.merge).toHaveBeenCalledWith("o", "r", 70, "t", MAIN);
   });
 
+  it("コードを含む同期PR（#4730のようなRC上の修正）もマージする", async () => {
+    openSync();
+    mocks.ciState.mockResolvedValue({ ciState: "success", mergeable: true, mergeJudgement: settled });
+    mocks.compare.mockResolvedValue({ ...diverged, files: files(["package.json", "src/lib/public-http-fetch.ts"]) });
+    await ensureDevelopSync(ctx, { autoMerge: true });
+    expect(mocks.merge).toHaveBeenCalledWith("o", "r", 70, "t", MAIN);
+  });
+
   it.each([
     ["レビュー判定が未完了", { ciState: "success", mergeable: true, mergeJudgement: { ...settled, state: "pending" } }],
     ["判定が取れない", { ciState: "success", mergeable: true }],

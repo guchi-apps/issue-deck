@@ -7,6 +7,7 @@ import type { DispatchStateHandle } from "@/hooks/use-dispatch-state";
 import type { DispatchJobView } from "@/lib/dispatch/dispatch-job";
 import {
   PLAN_ARTIFACT_REQUEST_TEXT,
+  PLAN_ARTIFACT_REVISE_REQUEST_TEXT,
   PLAN_REVIEW_REFLECT_REQUEST_TEXT,
   type SessionPlanRequestView,
 } from "@/lib/dispatch/session-plan-request";
@@ -328,6 +329,31 @@ describe("PlanApprovalPanel", () => {
         id: "req-1",
         decision: "revise",
         text: PLAN_ARTIFACT_REQUEST_TEXT,
+      }),
+    );
+  });
+
+  it("アーティファクトがあるときだけ修正依頼を出し、固定文を修正として送る（#4745）", async () => {
+    const decidePlan = vi.fn().mockResolvedValue({ ok: true });
+    const { rerender } = render(
+      <PlanApprovalPanel request={request()} session={session()} dispatch={dispatchHandle(decidePlan)} />,
+    );
+    expect(screen.queryByRole("button", { name: /アーティファクトの修正を依頼/ })).toBeNull();
+
+    rerender(
+      <PlanApprovalPanel
+        request={request()}
+        session={session()}
+        dispatch={dispatchHandle(decidePlan)}
+        artifactsPresent
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /アーティファクトの修正を依頼/ }));
+    await waitFor(() =>
+      expect(decidePlan).toHaveBeenCalledWith({
+        id: "req-1",
+        decision: "revise",
+        text: PLAN_ARTIFACT_REVISE_REQUEST_TEXT,
       }),
     );
   });

@@ -14,6 +14,7 @@ import {
 import { createPortal } from "react-dom";
 import { isReleaseCandidateHeadRef, isLegacyReleaseCandidateHeadRef, rcSequenceOf } from "@/lib/release-branch";
 import { decidePublishForPullRequest, ReleasePublishAction } from "@/components/dashboard/release-publish-action";
+import { describePublishSteps, type PublishStep, type PublishStepsView } from "@/lib/release-publish-steps";
 import { useReleaseRc } from "@/hooks/use-release-rc";
 import {
   ArrowUpToLine,
@@ -36,6 +37,7 @@ import {
 
 import { DeviceBuildInstructions, shortOid } from "@/components/dashboard/device-build-instructions";
 import { GithubReferenceLink } from "@/components/dashboard/github-reference-link";
+import { useGithubReferenceNavigation } from "@/components/dashboard/github-reference-navigation";
 import { PullRequestChecksStrip } from "@/components/dashboard/pull-request-checks-strip";
 import {
   PullRequestHealthRow,
@@ -71,7 +73,6 @@ import {
 import { useReleasePreparation } from "@/hooks/use-release-preparation";
 import { applyReleasePrepState } from "@/lib/release-prep-state";
 import { ReleasePreparationAlert } from "@/components/dashboard/release-preparation-alert";
-import { ReleaseRebuildHistoryPanel } from "@/components/dashboard/release-rebuild-history-panel";
 import { ReleaseRebuildButton } from "@/components/dashboard/release-rebuild-button";
 import {
   ReleaseVerificationBrief,
@@ -108,6 +109,7 @@ import {
   formatUnreleasedSummary,
   countOpenManualSteps,
   hasChangesAfterReleaseFreeze,
+  splitLanesByReleaseCandidate,
   splitLanesByReleaseFreeze,
   isClosedLane,
   unreleasedSummary,
@@ -125,6 +127,7 @@ import { getProgressStatusDef } from "@/lib/issue-progress";
 import {
   canMergeFromDeck,
   isMergeJudgementPending,
+  isMergeWaitingForChecks,
   requiresUserMerge,
 } from "@/lib/pull-request-list";
 import { isTriggerPending, RELEASE_TRIGGER_PENDING_MS } from "@/lib/trigger-pending-guard";
@@ -136,6 +139,7 @@ import type {
   BranchFlowDeviceBuild,
   BranchFlowIssuePriority,
   BranchFlowIssueRef,
+  BranchFlowIssueTracking,
   BranchFlowReferencedPullRequest,
   BranchFlowLane,
   BranchFlowLaneStatus,
@@ -503,6 +507,50 @@ function RunDetailToggle({ expanded, onToggle }: { expanded: boolean; onToggle: 
   );
 }
 
+/**
+ * Issue行の追跡情報（#4748）。現在地（依存待ち=青・操作不要／本人の操作待ち=橙）、リリース前／後、
+ * 待っている前提を出す。色の意味はIssue詳細・一覧（`issue-work-summary.tsx`）と同じ。
+ */
+function IssueTrackingBadges({ tracking }: { tracking?: BranchFlowIssueTracking | null }) {
+  if (!tracking) return null;
+  return (
+    <>
+      {tracking.waitKind === "dependency_wait" && (
+        <span className="shrink-0 rounded-full bg-blue-500/10 px-2 py-0.5 text-[11px] text-blue-700 dark:text-blue-400">
+          依存待ち
+        </span>
+      )}
+      {tracking.waitKind === "user_action" && (
+        <span className="shrink-0 rounded-full bg-amber-500/10 px-2 py-0.5 text-[11px] text-amber-700 dark:text-amber-400">
+          本人の操作待ち
+        </span>
+      )}
+      {tracking.timing === "pre-release" && (
+        <span className="shrink-0 rounded-full bg-emerald-500/10 px-2 py-0.5 text-[11px] text-emerald-700 dark:text-emerald-400">
+          リリース前必須
+        </span>
+      )}
+      {tracking.timing === "post-release" && (
+        <span className="shrink-0 rounded-full border border-dashed px-2 py-0.5 text-[11px] text-muted-foreground">
+          リリース後
+        </span>
+      )}
+    </>
+  );
+}
+
+/** 待っている前提の1行。待つだけで操作は要らない（#4748） */
+function IssueBlockingLine({ tracking }: { tracking?: BranchFlowIssueTracking | null }) {
+  if (!tracking || tracking.blocking.length === 0) return null;
+  const head = tracking.blocking[0];
+  const rest = tracking.blocking.length > 1 ? `（ほか${tracking.blocking.length - 1}件）` : "";
+  return (
+    <p className="min-w-0 break-words text-xs text-muted-foreground">
+      前提が{tracking.blocking.length}件残っています: {head.reference}（{head.label}）{rest}
+    </p>
+  );
+}
+
 function IssueLine({
   repositoryFullName,
   issue,
@@ -531,6 +579,7 @@ function IssueLine({
       )}
       {issue.state === null && <span className="text-xs text-muted-foreground">一覧に無い</span>}
       {issue.state === "closed" && <span className="text-xs text-muted-foreground">クローズ済み</span>}
+      <IssueTrackingBadges tracking={issue.tracking} />
     </div>
   );
 }
@@ -595,15 +644,17 @@ function RelatedIssuesLine({
     <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
       <span className="shrink-0 text-xs text-muted-foreground">関連</span>
       {issues.map((issue) => (
-        <GithubReferenceLink
-          key={issue.number}
-          href={`https://github.com/${repositoryFullName}/issues/${issue.number}`}
-          reference={{ repositoryFullName, number: issue.number, kind: "issue" }}
-          className="min-w-0 max-w-full break-words text-xs text-primary hover:underline"
-        >
-          #{issue.number}
-          {issue.title ? ` ${issue.title}` : ""}
-        </GithubReferenceLink>
+        <span key={issue.number} className="inline-flex min-w-0 max-w-full flex-wrap items-center gap-x-1.5 gap-y-1">
+          <GithubReferenceLink
+            href={`https://github.com/${repositoryFullName}/issues/${issue.number}`}
+            reference={{ repositoryFullName, number: issue.number, kind: "issue" }}
+            className="min-w-0 max-w-full break-words text-xs text-primary hover:underline"
+          >
+            #{issue.number}
+            {issue.title ? ` ${issue.title}` : ""}
+          </GithubReferenceLink>
+          <IssueTrackingBadges tracking={issue.tracking} />
+        </span>
       ))}
     </div>
   );
@@ -644,6 +695,7 @@ function ManualStepLine({
         手作業 #{manualStep.number} {manualStep.title}
       </GithubReferenceLink>
       <span className="shrink-0 text-xs text-muted-foreground">{isOpen ? "未完了" : "完了"}</span>
+      <IssueTrackingBadges tracking={manualStep.tracking} />
       {branchName && (
         <>
           <span className="shrink-0 text-xs text-muted-foreground">起点</span>
@@ -725,7 +777,8 @@ function PullRequestLine({
 }) {
   const kindLabel = pullRequestKindLabel(pullRequest.kind);
   const userMerge = onMerged !== undefined && requiresUserMerge(pullRequest);
-  const canMerge = userMerge && canMergeFromDeck(pullRequest);
+  // CI・レビュー・判定の完了待ちのあいだはボタンを出さない（#4783。マージ操作はPR詳細で行う）
+  const canMerge = userMerge && canMergeFromDeck(pullRequest) && !isMergeWaitingForChecks(pullRequest);
 
   return (
     <>
@@ -841,6 +894,7 @@ function LaneRow({
         ) : lane.referencedPullRequests.length === 0 ? (
           <span className="text-xs text-muted-foreground">対応Issue不明</span>
         ) : null}
+        <IssueBlockingLine tracking={lane.issue?.tracking} />
         <ReferencedPullRequestsLine
           repositoryFullName={repositoryFullName}
           pullRequests={lane.referencedPullRequests}
@@ -856,6 +910,16 @@ function LaneRow({
             manualStep={manualStep}
           />
         ))}
+        {lane.featureIncomplete.length > 0 && (
+          // リリース済みと機能全体の完了は別（#4524・#4748）。本番確認や手作業が残る間は未完了と言う
+          <p
+            className="min-w-0 break-words rounded-md bg-red-500/10 px-2 py-1 text-xs text-red-700 dark:text-red-400"
+            data-testid="lane-feature-incomplete"
+          >
+            <b>リリース済みですが、機能全体は未完了です。</b>
+            残り: {lane.featureIncomplete.join("、")}
+          </p>
+        )}
       </div>
     </li>
   );
@@ -1503,12 +1567,68 @@ function ReleaseGroupNote({ lanes, released }: { lanes: BranchFlowLane[]; releas
   );
 }
 
+/** 公開承認のある候補の段階ピル（#4814）。進行中は紫で回し、完了は緑、人の操作が要る停止・失効は赤 */
+function PublishStepsPill({ pill }: { pill: PublishStepsView["pill"] }) {
+  if (pill.tone === "run") return <ReleaseProgressPill label={pill.label} spinning />;
+  return (
+    <span
+      className={cn(
+        "inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset",
+        pill.tone === "ok"
+          ? "bg-green-500/10 text-green-700 ring-green-500/60 dark:text-green-400"
+          : "bg-red-500/10 text-destructive ring-red-500/60",
+      )}
+      data-testid="next-release-publish-pill"
+    >
+      <span aria-hidden="true" className="text-[10px] leading-none">
+        {pill.tone === "ok" ? "✓" : "■"}
+      </span>
+      {pill.label}
+    </span>
+  );
+}
+
+/** 承認→バンプ→mainへのマージ→本番反映→稼働確認→完了のどこにいるか（#4814）。mainへのマージは時刻を添える */
+function PublishStepsLine({ steps }: { steps: PublishStep[] }) {
+  return (
+    <ol className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[11.5px] text-muted-foreground" data-testid="next-release-publish-steps">
+      {steps.map((step, index) => (
+        <li key={step.key} className="inline-flex items-center gap-1.5 whitespace-nowrap">
+          {index > 0 && (
+            <span aria-hidden="true" className="text-border">
+              ›
+            </span>
+          )}
+          <span
+            className={cn(
+              "inline-flex items-center gap-1",
+              step.state === "done" && "text-foreground",
+              step.state === "current" && "font-semibold text-purple-700 dark:text-purple-300",
+              step.state === "stopped" && "font-semibold text-destructive",
+            )}
+            aria-current={step.state === "current" || step.state === "stopped" ? "step" : undefined}
+          >
+            {step.state === "done" && (
+              <span aria-hidden="true" className="text-green-600 dark:text-green-400">
+                ✓
+              </span>
+            )}
+            {(step.state === "current" || step.state === "stopped") && <span aria-hidden="true">●</span>}
+            {step.label}
+            {step.at && <span className="font-normal tabular-nums text-muted-foreground">{formatMonthDayTime(step.at)}</span>}
+          </span>
+        </li>
+      ))}
+    </ol>
+  );
+}
+
 /**
  * 開いたリポジトリの先頭に出す「次のリリース」（#4428）。**本番稼働中の版・次のバージョン・次のリリースで反映されるPR件数**を
  * 並べて識別し、その下に次の候補の状態・理由・主操作・現在の検証を置く。流れ図（上流→下流）の並びは
  * 崩さず、その上に要約を足す形にする。状態の判定は束の見出しと同じ`releaseGroupStateOf`を通し、
  * 主操作（mainへのマージ・リリース）はここへ集約して束の見出しからは外す（同じ操作を2か所に置かない）。
- * 作り直し履歴は流れ図の下へ置き、現在の検証と主操作より前に長い履歴を出さない。
+ * 作り直し履歴はこの画面には出さない（#4721）。
  */
 function NextReleaseCard({
   repository,
@@ -1535,7 +1655,20 @@ function NextReleaseCard({
   onMerged: (pullRequest: PullRequestSummary) => void;
 }) {
   const refreshFlow = useContext(BranchFlowRefreshContext);
+  const navigation = useGithubReferenceNavigation();
   const pullRequest = group?.pullRequest && group.pullRequest.state === "open" ? group.pullRequest : null;
+
+  // カード全体を押すと本番PRへ移動する（#4721）。内側の操作（公開ボタン・リンク・検証の開閉）や
+  // 修飾キー付き・テキスト選択中のクリックは、カードの遷移にしない
+  function openPullRequestFromCard(event: React.MouseEvent<HTMLDivElement>) {
+    if (!pullRequest || event.defaultPrevented) return;
+    if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey || event.button !== 0) return;
+    if ((event.target as HTMLElement).closest("a,button,summary,input,[role]")) return;
+    if (window.getSelection()?.toString()) return;
+    const reference = { repositoryFullName: pullRequest.repositoryFullName, number: pullRequest.number, kind: "pull" as const };
+    if (navigation) navigation.openReference(reference);
+    else window.open(pullRequest.htmlUrl, "_blank", "noopener,noreferrer");
+  }
   const { verificationShown } = group ? releaseGroupStateOf(group, null) : { verificationShown: null };
   // この版に乗る変更に残っている手作業。実データのレーンにぶら下がっているものだけを出す
   const manualSteps = (group?.lanes ?? [])
@@ -1546,6 +1679,16 @@ function NextReleaseCard({
   const rcSequence = pullRequest ? rcSequenceOf(pullRequest.headRef) : null;
   const rc = useReleaseRc(repository.repositoryFullName, pullRequest?.number ?? 0, rcSequence !== null);
   const publishDecision = pullRequest ? decidePublishForPullRequest(pullRequest, rc.overview) : undefined;
+  // 公開承認のある候補は、承認の記録から段階を出す（#4814）。検証の要確認（判断済みを含む）を失敗に見せない
+  const publishSteps =
+    rcSequence !== null
+      ? describePublishSteps({
+          approval: rc.overview?.finalization?.approval ?? null,
+          finalization: rc.overview?.finalization?.current ?? null,
+        })
+      : null;
+  // 承認がある間も、本当に人の手が要る検証の問題（未判断の指摘・失敗）は従来どおり赤で出す
+  const verificationReasonShown = publishSteps ? (verificationShown?.problem ? verificationShown : null) : verificationShown;
 
   const versionText = group
     ? group.version
@@ -1564,14 +1707,29 @@ function NextReleaseCard({
       <p className="text-xs font-semibold tracking-wide text-primary">次のリリース</p>
 
       {/* 1. 現在のリリース候補・状態・次の操作（#4635）。本番版・履歴より先に出す */}
-      <div className="flex flex-col gap-1.5 rounded-md border-2 border-primary/60 px-2.5 py-2" data-testid="next-release-candidate">
+      <div
+        className={cn(
+          "flex flex-col gap-1.5 rounded-md border-2 border-primary/60 px-2.5 py-2",
+          pullRequest && "cursor-pointer hover:bg-muted/40",
+        )}
+        data-testid="next-release-candidate"
+        onClick={openPullRequestFromCard}
+      >
         <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
           <span className="text-sm font-semibold">
             {rcSequence !== null ? `RC-${rcSequence}` : group ? "現在のリリース候補" : "リリース候補"}
           </span>
           <span className="font-semibold">{versionText}</span>
-          {group && <ReleaseGroupStatePill group={group} deviceBuild={null} />}
+          {publishSteps ? (
+            <>
+              <PublishStepsPill pill={publishSteps.pill} />
+              {verificationShown?.problem && <ReleaseCandidateVerificationPills verification={verificationShown} />}
+            </>
+          ) : (
+            group && <ReleaseGroupStatePill group={group} deviceBuild={null} />
+          )}
         </div>
+        {publishSteps && <PublishStepsLine steps={publishSteps.steps} />}
         <p className="min-w-0 break-words text-muted-foreground">
           {pullRequest ? (
             <GithubReferenceLink
@@ -1587,9 +1745,20 @@ function NextReleaseCard({
             repository.branchesLoaded && repository.release.comparison ? "次に公開する変更はありません" : "ブランチ状況を取得後に、公開する変更を確認できます"
           )}
         </p>
-        {verificationShown && <ReleaseCandidateVerificationReason verification={verificationShown} pullRequest={pullRequest} />}
+        {publishSteps?.note && (
+          <p
+            className={cn("min-w-0 break-words text-xs", publishSteps.pill.tone === "bad" ? "text-destructive" : "text-muted-foreground")}
+            data-testid="next-release-publish-note"
+          >
+            {publishSteps.note}
+          </p>
+        )}
+        {verificationReasonShown && (
+          <ReleaseCandidateVerificationReason verification={verificationReasonShown} pullRequest={pullRequest} />
+        )}
         <div className="flex min-w-0 flex-wrap items-center gap-2">
-          {pullRequest ? (
+          {/* 自動公開が進んでいる間は、公開操作の代わりに上の段階と補足を出す。止まった・失効したときは従来の操作へ戻す */}
+          {pullRequest && publishSteps?.pill.tone !== "run" && publishSteps?.pill.tone !== "ok" ? (
             <ReleasePublishAction
               pullRequest={pullRequest}
               decision={publishDecision}
@@ -1693,24 +1862,20 @@ function NextReleaseCard({
 function ReleaseFlowGraph({
   repository,
   showClosed,
-  showAllVersions,
   mergedPullRequestsLoaded,
   releaseTriggerPending,
   deployTriggerPending,
-  onShowAllVersions,
   onReleaseTriggered,
   onDeployTriggered,
   onMerged,
 }: {
   repository: BranchFlowRepository;
   showClosed: boolean;
-  showAllVersions: boolean;
   mergedPullRequestsLoaded: boolean;
   /** すでに起動済みで、バンプPRが現れるのを待っている最中か（#1955） */
   releaseTriggerPending: boolean;
   /** すでに起動済みで、デプロイの実行が現れるのを待っている最中か（#2020） */
   deployTriggerPending: boolean;
-  onShowAllVersions: () => void;
   /** リリースworkflowを起こせた後（起動中の記録と、バンプPRを出すための取り直し） */
   onReleaseTriggered: () => void;
   /** 本番デプロイworkflowを起こせた後（起動中の記録と、実行を出すための取り直し。#2020） */
@@ -1718,38 +1883,38 @@ function ReleaseFlowGraph({
   /** PRをこの画面からマージできたとき（#1756） */
   onMerged: (pullRequest: PullRequestSummary) => void;
 }) {
+  // 「リリース済みのバージョン」アコーディオンの開閉。既定は閉じる（#4721）
+  const [releasedOpen, setReleasedOpen] = useState(false);
   const activeLanes = showClosed
     ? repository.activeLanes
     : repository.activeLanes.filter((lane) => !isClosedLane(lane));
   const hiddenClosedCount = repository.activeLanes.length - activeLanes.length;
 
   // 既定で出すのは**次のリリースに乗る分まで**（#1586）。本番へ出た版の束と、どの版で出たか
-  // 特定できないレーンは、すでに済んだ変更なのでボタンで開くまで出さない。
+  // 特定できないレーンは、すでに済んだ変更なので「リリース済みのバージョン」アコーディオンへ
+  // 畳み、開くまで見せない（#4721。以前は「表示」ボタンで一度だけ開く作りだった）。
   //
   // **その「次のリリースに乗る分」が無いときは、いちばん新しい版の束を代わりに出す**（#1711）。
   // 未リリースの束は先頭にしか来ないので、どちらの場合も出すのは配列の先頭からの連続した並び。
   const pendingGroups = repository.releaseGroups.filter((group) => group.mergedAt === null);
-  const visibleGroups = showAllVersions
-    ? repository.releaseGroups
-    : pendingGroups.length > 0
-      ? pendingGroups
-      : repository.releaseGroups.slice(0, 1);
+  const visibleGroups =
+    pendingGroups.length > 0 ? pendingGroups : repository.releaseGroups.slice(0, 1);
   const hiddenGroups = repository.releaseGroups.slice(visibleGroups.length);
   // iOS配布のパネルは最新のマージ済みの束にだけ出す（#3808。見出しのアイコンと同じ基準）
   const latestMergedGroupKey = repository.releaseGroups.find(
     (group) => group.mergedAt !== null && group.pullRequest?.merged,
   )?.key;
-  const unassignedLanes = showAllVersions ? repository.unassignedLanes : [];
-  // 版を特定できないレーンもボタンの向こうにいる（#1711）。**畳んだ束が無いときでもボタンを出す
-  // 理由**で、ここを見ずに`hiddenGroups`だけで判断すると、開く手段が画面のどこにも無くなる。
-  const hiddenUnassignedCount = showAllVersions ? 0 : repository.unassignedLanes.length;
+  const unassignedLanes = repository.unassignedLanes;
+  // 版を特定できないレーンもアコーディオンの中にいる（#1711）。**畳んだ束が無いときでも
+  // アコーディオンを出す**理由で、ここを見ずに`hiddenGroups`だけで判断すると、開く手段が
+  // 画面のどこにも無くなる。件数は開閉に依存させない。
+  const hasReleasedAccordion = hiddenGroups.length > 0 || unassignedLanes.length > 0;
 
-  // 畳んだぶんに残っている手作業だけは別枠で出す（#1586）。束を開いているときは
+  // 畳んでいるあいだに残っている手作業だけは別枠で出す（#1586）。開いているときは
   // レーンにぶら下がって出るので、ここでは出さない（二重に出さないため）
-  const hiddenLanes = [
-    ...hiddenGroups.flatMap((group) => group.lanes),
-    ...(showAllVersions ? [] : repository.unassignedLanes),
-  ];
+  const hiddenLanes = releasedOpen
+    ? []
+    : [...hiddenGroups.flatMap((group) => group.lanes), ...unassignedLanes];
   const remainingManualSteps = hiddenLanes
     .flatMap((lane) =>
       lane.manualSteps
@@ -1810,6 +1975,38 @@ function ReleaseFlowGraph({
         onTriggered={onReleaseTriggered}
       />
     ) : undefined;
+
+  const renderGroup = (group: BranchFlowReleaseGroup) => (
+    <ReleaseGroupHeaderWithLanes
+      key={group.key}
+      repositoryFullName={repository.repositoryFullName}
+      group={group}
+      onMerged={onMerged}
+      deviceBuild={repository.deviceBuild}
+      showIosDistribution={group.key === latestMergedGroupKey}
+      releaseButton={releaseButtonFor(group)}
+      summarizedInCard={group === nextGroup}
+      rebuildButton={
+        /* リリースPRを出した後の修正は、凍結ブランチへ足さずバンプから作り直す（#3014）。
+           headが凍結ブランチでない旧世代のリリースPR（head=develop）は作り直す必要が無く、
+           ブランチを消すとdevelopが消えるため出さない。凍結後にdevelopへ入った変更が
+           無いときも、作り直しても中身が変わらないので出さない（#3601） */
+        !repository.deviceBuild &&
+        group.mergedAt === null &&
+        group.pullRequest !== null &&
+        group.pullRequest.state === "open" &&
+        isLegacyReleaseCandidateHeadRef(group.pullRequest.headRef) &&
+        hasChangesAfterReleaseFreeze(group) ? (
+          <ReleaseRebuildButton
+            repositoryFullName={repository.repositoryFullName}
+            mainVersion={repository.release.latestVersion}
+            hasChanges
+            onTriggered={onReleaseTriggered}
+          />
+        ) : undefined
+      }
+    />
+  );
 
   return (
     <div className="relative px-4 py-3">
@@ -1924,83 +2121,55 @@ function ReleaseFlowGraph({
             </ul>
           </details>
         </li>
-        {visibleGroups.map((group) => (
-          <ReleaseGroupHeaderWithLanes
-            key={group.key}
-            repositoryFullName={repository.repositoryFullName}
-            group={group}
-            onMerged={onMerged}
-            deviceBuild={repository.deviceBuild}
-            showIosDistribution={group.key === latestMergedGroupKey}
-            releaseButton={releaseButtonFor(group)}
-            summarizedInCard={group === nextGroup}
-            rebuildButton={
-              /* リリースPRを出した後の修正は、凍結ブランチへ足さずバンプから作り直す（#3014）。
-                 headが凍結ブランチでない旧世代のリリースPR（head=develop）は作り直す必要が無く、
-                 ブランチを消すとdevelopが消えるため出さない。凍結後にdevelopへ入った変更が
-                 無いときも、作り直しても中身が変わらないので出さない（#3601） */
-              !repository.deviceBuild &&
-              group.mergedAt === null &&
-              group.pullRequest !== null &&
-              group.pullRequest.state === "open" &&
-              isLegacyReleaseCandidateHeadRef(group.pullRequest.headRef) &&
-              hasChangesAfterReleaseFreeze(group) ? (
-                <ReleaseRebuildButton
-                  repositoryFullName={repository.repositoryFullName}
-                  mainVersion={repository.release.latestVersion}
-                  hasChanges
-                  onTriggered={onReleaseTriggered}
-                />
-              ) : undefined
-            }
-          />
-        ))}
-
-        {unassignedLanes.length > 0 && (
-          <>
-            <li className="pt-3 pb-0.5 pl-[3.35rem] text-xs text-muted-foreground max-sm:pl-[2.6rem]">
-              どの版で本番へ出たか特定できない変更 {unassignedLanes.length}件
-              （取得したPRの範囲より古いもの）
-            </li>
-            {unassignedLanes.map((lane) => (
-              <LaneRow
-                key={lane.key}
-                repositoryFullName={repository.repositoryFullName}
-                lane={lane}
-                onMerged={onMerged}
-              />
-            ))}
-          </>
-        )}
+        {visibleGroups.map(renderGroup)}
 
         {/* **マージ済みのPRが揃うまでは、リリース済みについて何も言い切らない**（#1711）。
             この段階で「リリース済みのバージョンは無い」「作業はありません」と描くと、
-            本番デプロイ直後（＝進行中の作業も無い）に画面が空になり、開くボタンも消える */}
+            本番デプロイ直後（＝進行中の作業も無い）に画面が空になり、開く場所も消える */}
         {!mergedPullRequestsLoaded ? (
           <li className="py-2 pl-[3.35rem] text-xs text-muted-foreground max-sm:pl-[2.6rem]">
             リリース済みのバージョンを読み込み中...
           </li>
         ) : (
           <>
-            {(hiddenGroups.length > 0 || hiddenUnassignedCount > 0 || hiddenClosedCount > 0) && (
-              <li className="pt-2 pl-[3.35rem] max-sm:pl-[2.6rem]">
-                {(hiddenGroups.length > 0 || hiddenUnassignedCount > 0) && (
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="h-6 px-2 text-xs"
-                    onClick={onShowAllVersions}
-                  >
-                    {hiddenGroups.length > 0
-                      ? `リリース済みのバージョンを表示（${hiddenGroups.length}件）`
-                      : `本番へ出た変更を表示（${hiddenUnassignedCount}件）`}
-                  </Button>
-                )}
-                {hiddenClosedCount > 0 && (
-                  <span className="ml-2 text-xs text-muted-foreground">
-                    クローズ（未マージ）{hiddenClosedCount}件は隠しています
-                  </span>
-                )}
+            {/* 本番へ出た版は「今回公開する変更」と同じ見出し＋三角のアコーディオンに畳む（#4721） */}
+            {hasReleasedAccordion && (
+              <li className="relative mb-3 rounded-md border bg-card" data-testid="released-versions">
+                <details open={releasedOpen} onToggle={(event) => setReleasedOpen(event.currentTarget.open)}>
+                  <summary className="cursor-pointer px-3 py-2 text-sm font-semibold">
+                    {hiddenGroups.length > 0 ? "リリース済みのバージョン" : "本番へ出た変更"}
+                    <span className="ml-2 text-xs font-normal text-muted-foreground">
+                      {hiddenGroups.length > 0
+                        ? `${hiddenGroups.length}件`
+                        : `${unassignedLanes.length}件`}
+                    </span>
+                  </summary>
+                  <ul className="relative">
+                    {hiddenGroups.map(renderGroup)}
+                    {unassignedLanes.length > 0 && (
+                      <>
+                        <li className="pt-3 pb-0.5 pl-[3.35rem] text-xs text-muted-foreground max-sm:pl-[2.6rem]">
+                          どの版で本番へ出たか特定できない変更 {unassignedLanes.length}件
+                          （取得したPRの範囲より古いもの）
+                        </li>
+                        {unassignedLanes.map((lane) => (
+                          <LaneRow
+                            key={lane.key}
+                            repositoryFullName={repository.repositoryFullName}
+                            lane={lane}
+                            onMerged={onMerged}
+                          />
+                        ))}
+                      </>
+                    )}
+                  </ul>
+                </details>
+              </li>
+            )}
+
+            {hiddenClosedCount > 0 && (
+              <li className="pt-2 pl-[3.35rem] text-xs text-muted-foreground max-sm:pl-[2.6rem]">
+                クローズ（未マージ）{hiddenClosedCount}件は隠しています
               </li>
             )}
 
@@ -2014,12 +2183,6 @@ function ReleaseFlowGraph({
           </>
         )}
       </ul>
-
-      {/* 作り直しの履歴（#4359）。後継候補が出るまでの元候補・承認範囲・含めないPRをここで読める。
-          現在の検証と主操作（上の「次のリリース」）より前に長い履歴を置かない（#4428） */}
-      {!repository.deviceBuild && (
-        <ReleaseRebuildHistoryPanel repositoryFullName={repository.repositoryFullName} className="mt-3" />
-      )}
 
       {remainingManualSteps.length > 0 && (
         <RemainingManualSteps
@@ -2070,69 +2233,91 @@ function ReleaseGroupHeaderWithLanes({
   showIosDistribution?: boolean;
   onMerged: (pullRequest: PullRequestSummary) => void;
 }) {
-  // リリースPRの凍結後にdevelopへ入った作業は、その版に含まれないので見出しの上へ出す（#3664）
-  const { afterFreeze, included } = splitLanesByReleaseFreeze(group);
+  // 「今回公開する変更」に出すのはリリース候補に入ったレーンだけ。候補に入っていない作業
+  // （凍結後にdevelopへ入った分・候補をまだ作っていないときの全て）は「リリース待ちのPR」へ出す（#4787）。
+  // Xcodeで実機へ反映するリポジトリ（#3468）は従来どおり凍結の前後だけで分ける
+  const { afterFreeze, included: frozenIncluded } = splitLanesByReleaseFreeze(group);
+  const { included, waiting } = deviceBuild
+    ? { included: frozenIncluded, waiting: afterFreeze }
+    : splitLanesByReleaseCandidate(group);
+  const released = group.mergedAt !== null;
+  const hasCandidate = released || group.pullRequest !== null || !!deviceBuild;
+
+  const header = (
+    <ReleaseGroupHeader
+      repositoryFullName={repositoryFullName}
+      group={group}
+      releaseButton={releaseButton}
+      summarizedInCard={summarizedInCard}
+      deviceBuild={deviceBuild}
+      showIosDistribution={showIosDistribution}
+      onMerged={onMerged}
+    />
+  );
+  const rails = (
+    <>
+      <li role="presentation" aria-hidden="true" className="absolute inset-y-0 left-[0.5rem] w-0.5 rounded bg-purple-500/50 max-sm:left-[0.4rem]" />
+      <li role="presentation" aria-hidden="true" className="absolute inset-y-0 left-[2.25rem] w-0.5 rounded bg-primary/40 max-sm:left-[1.75rem]" />
+    </>
+  );
+
   return (
-    <li className="relative mb-3 rounded-md border bg-card">
-      <details open>
-        <summary className="cursor-pointer px-3 py-2 text-sm font-semibold">
-          {group.mergedAt !== null ? "リリース済みの変更" : summarizedInCard ? "今回公開する変更" : "公開前の変更"}
-          <span className="ml-2 text-xs font-normal text-muted-foreground">{group.version ? `v${group.version} · ` : ""}{included.length}件</span>
-        </summary>
-        <ul className="relative">
-              <li role="presentation" aria-hidden="true" className="absolute inset-y-0 left-[0.5rem] w-0.5 rounded bg-purple-500/50 max-sm:left-[0.4rem]" />
-              <li role="presentation" aria-hidden="true" className="absolute inset-y-0 left-[2.25rem] w-0.5 rounded bg-primary/40 max-sm:left-[1.75rem]" />
-      {afterFreeze.length > 0 && (
-        <>
-          <li className="pt-3 pb-0.5 pl-[3.35rem] text-xs text-amber-700 max-sm:pl-[2.6rem] dark:text-amber-400">
-            {group.version ? `v${group.version}` : "このリリース"}の作成後にdevelopへ入った変更{" "}
-            {afterFreeze.length}件（次のリリースへ回ります）
-          </li>
-          {afterFreeze.map((lane) => (
-            <LaneRow
-              key={lane.key}
-              repositoryFullName={repositoryFullName}
-              lane={lane}
-              onMerged={onMerged}
-            />
-          ))}
-        </>
-      )}
-      {/* 凍結後の追加PR群を取り込んで候補を作り直す操作（#4357）。追加PRの直下・バージョン見出しと
-          バンプPRより上に1つだけ置き、見出しの「マージする」の近くには出さない */}
-      {rebuildButton && (
-        <li className="pt-2 pb-0.5 pl-[3.35rem] max-sm:pl-[2.6rem]">
-          <div className="flex min-w-0 max-w-2xl flex-col gap-1.5 rounded-md border border-dashed border-amber-500/60 px-3 py-2 text-xs">
-            <span className="text-muted-foreground">
-              上の追加PRを取り込んで、リリース候補を作り直します（現在の候補は閉じられます）。
-            </span>
-            <div>{rebuildButton}</div>
-          </div>
+    <>
+      <li className="relative mb-3 rounded-md border bg-card">
+        {hasCandidate ? (
+          <details open>
+            <summary className="cursor-pointer px-3 py-2 text-sm font-semibold">
+              {released ? "リリース済みの変更" : summarizedInCard ? "今回公開する変更" : "公開前の変更"}
+              <span className="ml-2 text-xs font-normal text-muted-foreground">{group.version ? `v${group.version} · ` : ""}{included.length}件</span>
+            </summary>
+            <ul className="relative">
+              {rails}
+              {header}
+              {included.length > 0 && <ReleaseGroupNote lanes={included} released={released} />}
+              {included.map((lane) => (
+                <LaneRow key={lane.key} repositoryFullName={repositoryFullName} lane={lane} onMerged={onMerged} />
+              ))}
+            </ul>
+          </details>
+        ) : (
+          /* リリース候補が無い間は「今回公開する変更」と言えないので、見出しと操作だけを出す */
+          <ul className="relative">
+            {rails}
+            {header}
+          </ul>
+        )}
+      </li>
+      {waiting.length > 0 && (
+        <li className="relative mb-3 rounded-md border bg-card" data-testid="release-waiting-prs">
+          <details>
+            <summary className="cursor-pointer px-3 py-2 text-sm font-semibold">
+              リリース待ちのPR
+              <span className="ml-2 text-xs font-normal text-muted-foreground">
+                {waiting.length}件{hasCandidate ? "（次のリリースへ回ります）" : ""}
+              </span>
+            </summary>
+            <ul className="relative">
+              {rails}
+              {waiting.map((lane) => (
+                <LaneRow key={lane.key} repositoryFullName={repositoryFullName} lane={lane} onMerged={onMerged} />
+              ))}
+              {/* 凍結後の追加PR群を取り込んで候補を作り直す操作（#4357）。畳んだ一覧の中に置き、
+                  ボタンだけが孤立して見えないようにする */}
+              {rebuildButton && (
+                <li className="pt-2 pb-2 pl-[3.35rem] max-sm:pl-[2.6rem]">
+                  <div className="flex min-w-0 max-w-2xl flex-col gap-1.5 rounded-md border border-dashed border-amber-500/60 px-3 py-2 text-xs">
+                    <span className="text-muted-foreground">
+                      このリリース待ちのPRを取り込んで、リリース候補を作り直します（現在の候補は閉じられます）。
+                    </span>
+                    <div>{rebuildButton}</div>
+                  </div>
+                </li>
+              )}
+            </ul>
+          </details>
         </li>
       )}
-      <ReleaseGroupHeader
-        repositoryFullName={repositoryFullName}
-        group={group}
-        releaseButton={releaseButton}
-        summarizedInCard={summarizedInCard}
-        deviceBuild={deviceBuild}
-        showIosDistribution={showIosDistribution}
-        onMerged={onMerged}
-      />
-      {included.length > 0 && (
-        <ReleaseGroupNote lanes={included} released={group.mergedAt !== null} />
-      )}
-      {included.map((lane) => (
-        <LaneRow
-          key={lane.key}
-          repositoryFullName={repositoryFullName}
-          lane={lane}
-          onMerged={onMerged}
-        />
-      ))}
-        </ul>
-      </details>
-    </li>
+    </>
   );
 }
 
@@ -2393,8 +2578,9 @@ function RepositorySummaryRow({
       {/* TestFlightへの配布が走っている間だけ（#3806）。Webのデプロイとは別の行為なので別のピルにする */}
       {iosDistribution.running && <IosDistributingBadge />}
       <DeployStateBadge deploy={deploy} compact linkToRun={false} />
-      <span className={cn("ml-auto inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium", guidance.attention ? "bg-amber-500/10 text-amber-700 dark:text-amber-400" : "text-primary")}>
+      <span className={cn("ml-auto inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium", guidance.attention ? "bg-amber-500/10 text-amber-700 dark:text-amber-400" : guidance.loading ? "bg-muted text-muted-foreground" : "text-primary")}>
         {guidance.attention && <CircleAlert className="size-3.5" aria-hidden="true" />}
+{guidance.loading && <Loader2 className="size-3.5 animate-spin motion-reduce:animate-none" aria-hidden="true" />}
         {isOpen ? (showSelectionMarker ? "表示中" : "閉じる") : guidance.next}<ChevronRight className={cn("size-3", isOpen && !showSelectionMarker && "rotate-90")} aria-hidden="true" />
       </span>
       </span>
@@ -2402,8 +2588,9 @@ function RepositorySummaryRow({
       {!hasBadges && (
         <span className="flex w-full flex-wrap items-center justify-between gap-2 text-xs">
           <span className="text-muted-foreground">{guidance.state}</span>
-          <span className={cn("inline-flex items-center gap-1 rounded-md px-2 py-1 font-medium", guidance.attention ? "bg-amber-500/10 text-amber-700 dark:text-amber-400" : "text-primary")}>
+          <span className={cn("inline-flex items-center gap-1 rounded-md px-2 py-1 font-medium", guidance.attention ? "bg-amber-500/10 text-amber-700 dark:text-amber-400" : guidance.loading ? "bg-muted text-muted-foreground" : "text-primary")}>
             {guidance.attention && <CircleAlert className="size-3.5" aria-hidden="true" />}
+{guidance.loading && <Loader2 className="size-3.5 animate-spin motion-reduce:animate-none" aria-hidden="true" />}
             {isOpen ? (showSelectionMarker ? "表示中" : "閉じる") : guidance.next}<ChevronRight className={cn("size-3", isOpen && !showSelectionMarker && "rotate-90")} aria-hidden="true" />
           </span>
         </span>
@@ -2426,12 +2613,10 @@ function RepositorySection({
   branchesFailed,
   mergedPullRequestsLoaded,
   showClosed,
-  showAllVersions,
   isOpen,
   selectionMode = false,
   detailHost = null,
   onToggle,
-  onShowAllVersions,
   onRefresh,
   onMerged,
   releaseMarkTriggeredRegistry,
@@ -2440,7 +2625,6 @@ function RepositorySection({
   branchesFailed: boolean;
   mergedPullRequestsLoaded: boolean;
   showClosed: boolean;
-  showAllVersions: boolean;
   isOpen: boolean;
   /** 2ペイン表示か（#2157）。行の見た目（選択の縦棒）と中身の行き先が変わる */
   selectionMode?: boolean;
@@ -2454,7 +2638,6 @@ function RepositorySection({
    */
   detailHost?: HTMLElement | null;
   onToggle: () => void;
-  onShowAllVersions: () => void;
   /** リリースworkflowを起こした後の取り直し */
   onRefresh: () => void;
   onMerged: (pullRequest: PullRequestSummary) => void;
@@ -2485,11 +2668,9 @@ function RepositorySection({
     <ReleaseFlowGraph
       repository={repository}
       showClosed={showClosed}
-      showAllVersions={showAllVersions}
       mergedPullRequestsLoaded={mergedPullRequestsLoaded}
       releaseTriggerPending={isPending}
       deployTriggerPending={deployTrigger.isPending}
-      onShowAllVersions={onShowAllVersions}
       onReleaseTriggered={() => {
         markTriggered();
         onRefresh();
@@ -2701,7 +2882,6 @@ export function BranchFlowView({
 
   const [openRepositories, setOpenRepositories] = useState<Set<string>>(new Set());
   const [showClosed, setShowClosed] = useState(false);
-  const [allVersionsRepositories, setAllVersionsRepositories] = useState<Set<string>>(new Set());
   const attentionRepositories = flow.repositories.filter(needsAttention);
   // 一括リリース（#2770）の対象。個別の「リリースする」ボタンと同じ判定（`canTriggerRelease`）を
   // 通ったものだけで、この画面が既に持っているデータから絞り込む——新規のGitHub API問い合わせは
@@ -3014,17 +3194,11 @@ export function BranchFlowView({
               branchesFailed={failedRepositories.includes(repository.repositoryFullName)}
               mergedPullRequestsLoaded={releasesLoaded}
               showClosed={showClosed}
-              showAllVersions={allVersionsRepositories.has(repository.repositoryFullName)}
               isOpen={isRepositoryOpen(repository.repositoryFullName)}
               selectionMode={isSplit}
               detailHost={detailHost}
               releaseMarkTriggeredRegistry={releaseMarkTriggeredRegistry}
               onToggle={() => handleRowClick(repository.repositoryFullName)}
-              onShowAllVersions={() =>
-                setAllVersionsRepositories(
-                  (prev) => new Set([...prev, repository.repositoryFullName]),
-                )
-              }
               onRefresh={onRefresh}
               onMerged={handleMerged}
             />

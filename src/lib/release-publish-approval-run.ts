@@ -10,6 +10,8 @@ import {
   RELEASE_COMPLETION_COST_LIMIT_USD,
   RELEASE_COMPLETION_SCOPE_PRODUCTION,
   releaseCompletionStatusLabel,
+  describeMergeWait,
+  isLongMergeWait,
   releaseCompletionStopMessage,
   type ReleaseCompletionStopReason,
 } from "@/lib/release-completion";
@@ -52,6 +54,12 @@ export type PublishApprovalRunView = {
   note: string | null;
   stopReason: string | null;
   stopMessage: string | null;
+  /** 本番マージの条件を待っている理由（#4725）。`merging`で待つ間だけ入る */
+  waitMessage?: string | null;
+  /** 同じ理由で長く待っているか */
+  waitStalled?: boolean;
+  /** 系列がmainへマージした時刻（ISO。#4814）。マージ直後に記録する`releaseStartedAt`を使う。未マージならnull */
+  mergedAt?: string | null;
 };
 
 export type PublishApprovalView = {
@@ -101,6 +109,9 @@ function toRunView(run: ReleaseCompletionRun | null): PublishApprovalRunView | n
     note: run.note,
     stopReason: run.stopReason,
     stopMessage: releaseCompletionStopMessage(run.stopReason, run.stopDetail),
+    waitMessage: run.status === "merging" ? describeMergeWait(run.waitReason) : null,
+    waitStalled: run.status === "merging" && isLongMergeWait(run.waitSince, new Date()),
+    mergedAt: run.mergeSha ? (run.releaseStartedAt?.toISOString() ?? null) : null,
   };
 }
 
@@ -156,7 +167,7 @@ async function loadFinalizations(candidateId: string): Promise<PublishApprovalFi
     preHeadSha: r.preHeadSha,
     finalBaseSha: r.finalBaseSha,
     finalHeadSha: r.finalHeadSha,
-    files: Array.isArray(r.diffFiles) ? (r.diffFiles as { path: string; category: string }[]) : [],
+    files: Array.isArray(r.diffFiles) ? (r.diffFiles as { path: string; category: string; versionLinesOnly?: boolean }[]) : [],
   }));
 }
 

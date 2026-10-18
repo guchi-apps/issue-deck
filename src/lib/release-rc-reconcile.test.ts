@@ -22,7 +22,12 @@ it("GitHub取得失敗は上位のunknownへ伝え、候補なしとは扱わな
   mocks.reconcile.mockRejectedValue(new Error("GitHub unavailable"));
   await expect(reconcileActiveRcPublication(ctx)).rejects.toThrow("GitHub unavailable");
 });
-it.each(["review", "completed", "cancelled"])("%sでは公開処理を進めない", async (phase) => {
+it("レビュー段階も照合へ渡し、マージ済みの候補の復旧（#4805）で段階が進めば続けて追う", async () => {
+  mocks.load.mockResolvedValueOnce(row("review")).mockResolvedValueOnce(row("deploying")).mockResolvedValueOnce(row("deploying"));
+  await reconcileActiveRcPublication(ctx);
+  expect(mocks.reconcile).toHaveBeenCalledTimes(2);
+});
+it.each(["completed", "cancelled"])("%sでは公開処理を進めない", async (phase) => {
   mocks.load.mockResolvedValue(row(phase));
   await reconcileActiveRcPublication(ctx);
   expect(mocks.reconcile).not.toHaveBeenCalled();

@@ -1,5 +1,5 @@
 import { db } from "@/lib/db";
-import { requestReleaseReviewJob } from "@/lib/dispatch/release-review-jobs";
+import { requestReleaseReviewAfterIntegration } from "@/lib/dispatch/release-review-start";
 import { requestReleaseVerifyJob } from "@/lib/dispatch/release-verify-jobs";
 import { closePullRequest } from "@/lib/github/actions-api";
 import { getInstallationToken } from "@/lib/github/app-auth";
@@ -249,12 +249,13 @@ async function reconcileRevision(input: {
   });
   if (!applied) return "ignored";
 
-  // 新しいrevisionのSHAで全体レビュー・統合検証を依頼する（既存の仕組み。同じ対象は重複しない）
+  // 新しいrevisionのSHAで全体レビュー・統合検証を依頼する（既存の仕組み。同じ対象は重複しない）。
+  // 全体レビューは統合検証の完了後に、統合検証を実行したホストで開始する（#4763）
   const target = { repoFullName: fullNameOf(ctx), prNumber: decision.prNumber, baseSha: decision.baseSha, headSha: decision.headSha };
   try {
     await registerReleaseVerification(target);
     await requestReleaseVerifyJob(target);
-    await requestReleaseReviewJob(target);
+    await requestReleaseReviewAfterIntegration(target);
   } catch (error) {
     // 依頼に失敗しても適用の記録は戻さない（画面は「未実施」として出し、再実行で依頼できる）
     console.error("[release-rc] verification request failed", fullNameOf(ctx), error);
@@ -382,6 +383,7 @@ async function buildCandidateView(ctx: Context, row: CandidateRow): Promise<RcCa
         ? { revision: current.revision, prNumber: current.prNumber, baseSha: current.baseSha, headSha: current.headSha, importedPrNumbers: imported }
         : null,
       status: status.status,
+      aiReviewWaivable: status.aiReviewWaivable,
     }),
   };
 }
@@ -915,6 +917,15 @@ export async function cancelReleaseRc(
       // 取り消しの記録は戻さない。PRが開いたままでも新しい候補の作成は妨げない
       console.error("[release-rc] closing candidate pull request failed", fullNameOf(ctx), error);
     }
+  }
+  // 候補に紐づく修正系列を畳み、止まった系列の確認待ちが残らないようにする（#4800）。取り消し自体は戻さない
+  try {
+    const revisions = await db.releaseCandidateRevision.findMany({ where: { candidateId: row.id }, select: { prNumber: true } });
+    const prNumbers = [...revisions.map((r) => r.prNumber), pr?.number ?? null].filter((n): n is number => typeof n === "number");
+    const { closeFixSeriesForCancelledCandidate } = await import("@/lib/release-fix-series-run");
+    await closeFixSeriesForCancelledCandidate({ repositoryFullName: fullNameOf(ctx), prNumbers, candidateLabel: rcLabel(row.sequence) });
+  } catch (error) {
+    console.error("[release-rc] closing fix series after cancel failed", fullNameOf(ctx), error);
   }
   return { ok: true, candidateId: row.id, revision: row.currentRevision, existing: false };
 }

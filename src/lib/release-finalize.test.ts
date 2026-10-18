@@ -18,6 +18,7 @@ import {
   isBumpedToReservation,
   parseFinalizeCallerSupport,
   readVersionFromText,
+  isIosVersionLinesOnlyPatch,
   summarizeBumpDiff,
 } from "@/lib/release-finalize";
 
@@ -144,6 +145,36 @@ describe("decideInheritedVerification", () => {
     });
     expect(decideInheritedVerification({ kind: "ai_review", before: passed, currentBaseSha: BASE, diff: onlyVersion, requireFreshIos: true })).toMatchObject({ action: "inherit" });
   });
+  it("iOS設定の版番号行だけの書き換え（#4744と同じ差分）なら、全体レビュー・統合検証は引き継ぎ、iOS検証は再実行する（#4764）", () => {
+    const pbxproj = "ios/IssueDeck.xcodeproj/project.pbxproj";
+    const marketing = (sign: "+" | "-", v: string) => `${sign}\t\t\t\tMARKETING_VERSION = ${v};`;
+    // #4744: MARKETING_VERSIONの4か所だけ
+    const patch = [1, 2, 3, 4].flatMap((n) => [`@@ -${n * 10},3 +${n * 10},3 @@`, marketing("-", "8.66.0"), marketing("+", "8.67.0")]).join("\n");
+    expect(isIosVersionLinesOnlyPatch(patch, "8.67.0")).toBe(true);
+    const linesOnly = new Set([pbxproj]);
+    const diff = summarizeBumpDiff(["package.json", ".github/release-notes.md", pbxproj], RULES, linesOnly);
+    expect(decideInheritedVerification({ kind: "ai_review", before: passed, currentBaseSha: BASE, diff })).toMatchObject({ action: "inherit", reason: expect.stringContaining("版番号行") });
+    expect(decideInheritedVerification({ kind: "integration", before: passed, currentBaseSha: BASE, diff })).toMatchObject({ action: "inherit" });
+    expect(decideInheritedVerification({ kind: "ios", before: passed, currentBaseSha: BASE, diff })).toMatchObject({ action: "rerun", reason: expect.stringContaining("iOS") });
+    // iOS（Mac）検証が必要なリポジトリでは、統合検証は従来どおりバンプ後のheadで再実行する
+    expect(decideInheritedVerification({ kind: "integration", before: passed, currentBaseSha: BASE, diff, requireFreshIos: true })).toMatchObject({ action: "rerun" });
+    expect(decideInheritedVerification({ kind: "ai_review", before: passed, currentBaseSha: BASE, diff, requireFreshIos: true })).toMatchObject({ action: "inherit" });
+  });
+  it("iOS設定の版番号行以外も変わったら、全体レビュー・統合検証を再実行する（#4764）", () => {
+    const pbxproj = "ios/IssueDeck.xcodeproj/project.pbxproj";
+    const patch = ["@@ -10,4 +10,4 @@", "-\t\t\t\tMARKETING_VERSION = 8.66.0;", "+\t\t\t\tMARKETING_VERSION = 8.67.0;", "-\t\t\t\tFOO = bar;", "+\t\t\t\tFOO = baz;"].join("\n");
+    expect(isIosVersionLinesOnlyPatch(patch, "8.67.0")).toBe(false);
+    const diff = summarizeBumpDiff(["package.json", pbxproj], RULES, new Set());
+    expect(decideInheritedVerification({ kind: "ai_review", before: passed, currentBaseSha: BASE, diff })).toMatchObject({ action: "rerun" });
+    expect(decideInheritedVerification({ kind: "integration", before: passed, currentBaseSha: BASE, diff })).toMatchObject({ action: "rerun" });
+  });
+  it("版番号行だけのiOS設定と一緒に依存関係・その他が変われば再実行する（#4764）", () => {
+    const pbxproj = "ios/IssueDeck.xcodeproj/project.pbxproj";
+    for (const extra of ["pnpm-lock.yaml", "src/generated/version.ts", "ios/App/Info.plist"]) {
+      const diff = summarizeBumpDiff(["package.json", pbxproj, extra], RULES, new Set([pbxproj]));
+      expect(decideInheritedVerification({ kind: "ai_review", before: passed, currentBaseSha: BASE, diff })).toMatchObject({ action: "rerun" });
+    }
+  });
   it("iOS設定・依存関係が変わればiOS検証を再実行する", () => {
     const diff = summarizeBumpDiff(["package.json", "ios/App/Info.plist"], RULES);
     expect(decideInheritedVerification({ kind: "ios", before: passed, currentBaseSha: BASE, diff })).toMatchObject({ action: "rerun", reason: expect.stringContaining("iOS") });
@@ -205,8 +236,15 @@ describe("decideFinalizeStart", () => {
     expectedHeadSha: PRE,
   };
   it("合格した候補だけ始められる", () => {
-    expect(decideFinalizeStart(input)).toEqual({ ok: true, contract });
+    expect(decideFinalizeStart(input)).toEqual({ ok: true, contract, aiReviewWaived: false });
     expect(decideFinalizeStart({ ...input, contract: null })).toEqual({ ok: false, error: "not_ready" });
+  });
+  it("全体レビューだけが合格していない候補は、承知で進む明示があるときだけ始める（#4807）", () => {
+    const waiver = { ...contract, requiresAiReviewWaiver: true };
+    expect(decideFinalizeStart({ ...input, contract: waiver })).toEqual({ ok: false, error: "ai_review_waiver_required" });
+    expect(decideFinalizeStart({ ...input, contract: waiver, waiveAiReview: true })).toEqual({ ok: true, contract: waiver, aiReviewWaived: true });
+    // 合格した候補では明示があっても免除を記録しない
+    expect(decideFinalizeStart({ ...input, waiveAiReview: true })).toEqual({ ok: true, contract, aiReviewWaived: false });
   });
   it("レビュー段階以外・進行中は始めない", () => {
     expect(decideFinalizeStart({ ...input, phase: "preparing" })).toEqual({ ok: false, error: "wrong_phase" });
@@ -247,9 +285,16 @@ describe("decideFinalizeReport", () => {
   });
   it("版が確定できない・版ファイルが変わっていない・確定した版と違う版は失敗にする", () => {
     expect(run({ expectedVersion: null })).toMatchObject({ action: "fail" });
-    expect(run({}, { changedFiles: [".github/release-notes.md"] })).toMatchObject({ action: "fail" });
+    expect(run({}, { changedFiles: [".github/release-notes.md"], headVersion: "2.13.4" })).toEqual({ action: "fail", reason: "版ファイルが書き換わっていません" });
     expect(run({}, { headVersion: "2.15.0" })).toMatchObject({ action: "fail" });
     expect(run({}, { headVersion: "2.13.4" })).toMatchObject({ action: "fail" });
+  });
+  it("元のdevelopが既に予約どおりの版へ上がっていて、版以外だけが変わったコミットでも確定する（#4798）", () => {
+    const notesOnly = { changedFiles: [".github/release-notes.md"] };
+    expect(run({}, notesOnly)).toMatchObject({ action: "apply", headSha: POST, version: "2.14.0" });
+    // 版がmainと同じ・古い・違う版のままなら従来どおり失敗
+    expect(run({}, { ...notesOnly, headVersion: "2.13.4" })).toMatchObject({ action: "fail" });
+    expect(run({}, { ...notesOnly, headVersion: "2.15.0" })).toMatchObject({ action: "fail" });
   });
   it("再送・適用済みでは何もしない", () => {
     expect(run({ row: { ...row, status: "applied" } })).toEqual({ action: "ignore", reason: "already_applied" });
@@ -369,5 +414,29 @@ describe("バンプ後の再検証の状態分類（#4640）", () => {
   it("失敗は待機より優先し、全て合格なら完了", () => {
     expect(decideReverifyPhase(describeReverifyItems([view("integration", "failed"), view("ai_review", "running")]))).toBe("failed");
     expect(decideReverifyPhase(describeReverifyItems([view("integration", "passed"), view("ai_review", "not_applicable")]))).toBe("done");
+  });
+});
+
+describe("isIosVersionLinesOnlyPatch", () => {
+  const line = (sign: "+" | "-" | " ", v: string) => `${sign}\t\t\t\tMARKETING_VERSION = ${v};`;
+  const patch = (extra: string[] = []) =>
+    ["@@ -10,4 +10,4 @@", " \t\t\t\tFOO = bar;", line("-", "8.66.0"), line("+", "8.67.0"), ...extra, "@@ -50,3 +50,3 @@", line("-", "8.66.0"), line("+", "8.67.0")].join("\n");
+
+  it("予約済みの版へのMARKETING_VERSIONの書き換えだけなら真（#4744と同じ差分）", () => {
+    expect(isIosVersionLinesOnlyPatch(patch(), "8.67.0")).toBe(true);
+  });
+  it("別の版への書き換えは偽", () => {
+    expect(isIosVersionLinesOnlyPatch(patch(), "8.68.0")).toBe(false);
+  });
+  it("他の行も変わっていれば偽", () => {
+    expect(isIosVersionLinesOnlyPatch(patch(["-\t\t\t\tFOO = bar;", "+\t\t\t\tFOO = baz;"]), "8.67.0")).toBe(false);
+  });
+  it("patchが無ければ偽", () => {
+    expect(isIosVersionLinesOnlyPatch(undefined, "8.67.0")).toBe(false);
+  });
+  it("summarizeBumpDiffは版番号だけと確かめたiOSファイルにだけ印を付ける", () => {
+    const diff = summarizeBumpDiff(["package.json", "ios/A.xcodeproj/project.pbxproj", "ios/Info.plist"], RULES, new Set(["ios/A.xcodeproj/project.pbxproj"]));
+    expect(diff.files.find((f) => f.path.endsWith("project.pbxproj"))?.versionLinesOnly).toBe(true);
+    expect(diff.files.find((f) => f.path.endsWith("Info.plist"))?.versionLinesOnly).toBeUndefined();
   });
 });

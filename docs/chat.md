@@ -1,6 +1,16 @@
 # IssueDeck Chat（会話型の操作入口）
 
-#3975。左メニュー・スマホホームの「チャット」（`?pane=chat`／`?mscreen=chat`）から、自然言語でIssue・PRの状態確認、PR自動修正、Issue起案、AIによる調査・修正依頼を行う。**チャットは新しい実行基盤ではなく、既存のService/APIを呼ぶ会話型の入口**で、一覧・Issue/PR詳細は変わらず併存する（回答のカードから「PR詳細を開く」「GitHubで開く」で移れる）。
+> **アプリ内のチャット画面は#4743で廃止した。** 左メニュー・スマホホームの「チャット」は
+> 「リモートセッション」（[docs/remote-session.md](remote-session.md)）に置き換わり、会話は
+> Claude Codeアプリ側で行う。旧URL（`?pane=chat`／`?mscreen=chat`）はリモートセッションの画面へ寄せる。
+>
+> **処理部分（`src/lib/chat/`・`ChatConversation`／`ChatMessage`／`ChatRun`・`CHAT_TURN`）は残している。**
+> Slack起案（[docs/slack-intake.md](slack-intake.md)）が同じ意図解釈・調査・確認カードを使っているため。
+> 画面専用だったもの（`src/app/api/chat/`・`ChatView`ほかのコンポーネント・`use-chat`・
+> `src/lib/chat/{access,codex-run,resume}.ts`）は削除した。以下の節のうち、画面・`/api/chat`・
+> 会話セッションの管理（#4047）に関する記述は、廃止前の設計の記録として残している。
+
+#3975。自然言語でIssue・PRの状態確認、PR自動修正、Issue起案、AIによる調査・修正依頼を行う。**チャットは新しい実行基盤ではなく、既存のService/APIを呼ぶ会話型の入口**で、一覧・Issue/PR詳細は変わらず併存する。
 
 ## 構成
 
@@ -10,7 +20,7 @@
 | カード | `src/lib/chat/status-card.ts` | 既存の判定値（CI・レビュー判定・mergeable・修復run）を言葉と色に写すだけ。判定ロジックは持たない |
 | 処理 | `src/lib/chat/handlers.ts` | 状態取得は既存関数、修復・Issue作成は下の共通サービスを呼ぶ |
 | 共通サービス | `src/lib/github/pull-request-repair-service.ts`・`issue-create-service.ts` | 画面のボタン（`POST /api/pull-requests/repair`・`POST /api/issues`）とChatが**同じ関数**を呼ぶ。HTTPへの写し方だけが各ルートに残る |
-| API | `src/app/api/chat/` | 会話一覧・作成、発言（`[id]`）、確認カードの実行（`[id]/confirm`） |
+| API | （#4743で削除）`src/app/api/chat/` | 会話一覧・作成、発言（`[id]`）、確認カードの実行（`[id]/confirm`）。現在の入口はSlack起案だけ |
 | 保存 | `ChatConversation`・`ChatMessage`（Prisma） | 会話コンテキスト（直前の対象・実行した操作）と発言・カード・確認状態 |
 
 ## 書き込み操作の確認ルール
@@ -61,7 +71,7 @@
 | ツール | `src/lib/chat/investigation/tools.ts` | 読み取りだけ（PR状態・レビュー／コメント・変更ファイル・CI失敗ログ・Issue・Issue検索・リポジトリのファイル・自動修正の記録）。書き込み・実行・シェルは持たない |
 | 返信 | `src/lib/chat/investigation/reply.ts` | 結果を本文・根拠カード・提案カード・次のコンテキストへ組み立てる |
 | モデル | `src/lib/chat/investigation/model.ts` | 実行先を決める（`resolveChatExecution`）。**調査用モデル（`appAiModelReasoning`）の最終解決モデルの系列で決める**（#4143）。Claude系なら`callClaudeMessages`（アプリ内AIの共通入口）で同期に呼び、GPT系なら下の「実行先がCodexのとき」の経路 |
-| Codex | `src/lib/chat/investigation/codex-model.ts`・`src/lib/chat/codex-run.ts` | サブPCのCodex CLIへ**1発言1ジョブ・1回の起動**で調査から回答まで任せ、回答待ち（`ChatRun`）を非同期に進める（#4109・#4199） |
+| Codex | `src/lib/chat/investigation/codex-model.ts`（画面用の`src/lib/chat/codex-run.ts`は#4743で削除） | サブPCのCodex CLIへ**1発言1ジョブ・1回の起動**で調査から回答まで任せ、回答待ち（`ChatRun`）を非同期に進める（#4109・#4199） |
 | 機密 | `src/lib/chat/investigation/redact.ts` | 取得直後にトークン等を伏せる。回答・保存ログへ値を出さない |
 
 - **上限**: モデル呼び出し最大7回／全体90秒／同じツール＋引数の再要求は再実行せず既存結果を返して別の調査か回答へ切り替えさせる（2回まで。それでも続けば停止）／取得失敗が3回連続で停止。最後の1回はツールを使わせず、見られなかった範囲を「未確認」へ書かせる。停止（上限・時間・進展なし・失敗）しても、取得済みの材料から回答を作らせる回復を**1回・30秒まで**行い（#4198）、それも得られなければ確認済みの事実・未確認・停止理由を返す。次の行動は停止理由ごとに変え、取得失敗が0回なら権限・接続の確認は案内しない

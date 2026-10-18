@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Trash2 } from "lucide-react";
+import { Pencil, Trash2 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -21,6 +21,43 @@ type TokenRow = {
   lastUsedAt: string | null;
 };
 
+const MAX_REPOSITORIES = 50;
+
+/**
+ * 許可repositoryの選択部品（発行と編集で共用 #4739）。選べるのはissue-deckが管理しているrepositoryだけ。
+ * 選択済みなのに一覧に無いもの（アーカイブ・連携解除済み）は残したまま表示し、外せるようにする。
+ */
+function RepositoryPicker({ options, selected, onChange, original }: { options: string[]; selected: string[]; onChange: (next: string[]) => void; original?: string[] }) {
+  const [filter, setFilter] = useState("");
+  const stale = selected.filter((r) => !options.includes(r)).concat((original ?? []).filter((r) => !options.includes(r) && !selected.includes(r)));
+  const rows = [...new Set([...stale, ...options])].filter((r) => r.toLowerCase().includes(filter.trim().toLowerCase()));
+  const added = original ? selected.filter((r) => !original.includes(r)).length : 0;
+  const removed = original ? original.filter((r) => !selected.includes(r)).length : 0;
+  return (
+    <div className="flex flex-col gap-2">
+      <Input value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="repositoryを絞り込み" aria-label="repositoryを絞り込み" />
+      <div className="grid max-h-48 grid-cols-1 gap-x-3 gap-y-0.5 overflow-y-auto rounded-md border p-2 sm:grid-cols-2">
+        {rows.length === 0 && <p className="text-xs text-muted-foreground">該当するrepositoryがありません</p>}
+        {rows.map((repo) => (
+          <label key={repo} className="flex min-w-0 items-center gap-1.5 text-xs">
+            <input
+              type="checkbox"
+              checked={selected.includes(repo)}
+              onChange={(e) => onChange(e.target.checked ? [...selected, repo] : selected.filter((r) => r !== repo))}
+            />
+            <span className="truncate">{repo}</span>
+            {!options.includes(repo) && <span className="shrink-0 text-amber-600">連携解除/アーカイブ済み</span>}
+          </label>
+        ))}
+      </div>
+      <p className="text-xs text-muted-foreground">
+        選択 {selected.length}件（最大{MAX_REPOSITORIES}件）
+        {original ? `（追加 +${added} ／ 削除 −${removed}）` : ""}
+      </p>
+    </div>
+  );
+}
+
 const SCOPES: Array<{ key: string; label: string }> = [
   { key: "read", label: "取得" },
   { key: "write", label: "更新・報告" },
@@ -37,7 +74,10 @@ export function ReviewAgentTokensSection() {
   const [tokens, setTokens] = useState<TokenRow[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [name, setName] = useState("");
-  const [repositories, setRepositories] = useState("");
+  const [repositories, setRepositories] = useState<string[]>([]);
+  const [available, setAvailable] = useState<string[]>([]);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [draft, setDraft] = useState<string[]>([]);
   const [scopes, setScopes] = useState<string[]>(["read"]);
   const [days, setDays] = useState("30");
   const [issued, setIssued] = useState<{ name: string; token: string } | null>(null);
@@ -49,7 +89,9 @@ export function ReviewAgentTokensSection() {
       setError("トークンの一覧を取得できませんでした");
       return;
     }
-    setTokens(((await res.json()) as { tokens: TokenRow[] }).tokens);
+    const data = (await res.json()) as { tokens: TokenRow[]; availableRepositories: string[] };
+    setTokens(data.tokens);
+    setAvailable(data.availableRepositories ?? []);
     setError(null);
   }, []);
 
@@ -68,7 +110,7 @@ export function ReviewAgentTokensSection() {
       body: JSON.stringify({
         name,
         scopes,
-        repositories: repositories.split(/[\s,]+/).filter(Boolean),
+        repositories,
         expiresInDays: Number(days),
       }),
     }).catch(() => null);
@@ -80,7 +122,25 @@ export function ReviewAgentTokensSection() {
     }
     setIssued({ name, token: body.token });
     setName("");
-    setRepositories("");
+    setRepositories([]);
+    await load();
+  }
+
+  async function saveRepositories(id: string) {
+    setBusy(true);
+    setError(null);
+    const res = await fetch("/api/settings/review-agent-tokens", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id, repositories: draft }),
+    }).catch(() => null);
+    const body = (await res?.json().catch(() => null)) as { message?: string } | null;
+    setBusy(false);
+    if (!res?.ok) {
+      setError(body?.message ?? "許可repositoryを保存できませんでした");
+      return;
+    }
+    setEditingId(null);
     await load();
   }
 
@@ -113,6 +173,22 @@ export function ReviewAgentTokensSection() {
                   </p>
                   <div className="flex shrink-0 items-center gap-1">
                     {inactive && <Badge variant="outline">{token.revokedAt ? "失効" : "期限切れ"}</Badge>}
+                    {!inactive && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-7 text-xs"
+                        disabled={busy}
+                        aria-label={`${token.name}の許可repositoryを編集`}
+                        onClick={() => {
+                          setEditingId(editingId === token.id ? null : token.id);
+                          setDraft(token.repositories);
+                        }}
+                      >
+                        <Pencil className="mr-1 size-3" />
+                        許可repositoryを編集
+                      </Button>
+                    )}
                     {!token.revokedAt && (
                       <Button variant="ghost" size="icon" className="size-7" disabled={busy} aria-label={`${token.name}を失効`} onClick={() => void revoke(token.id)}>
                         <Trash2 className="size-4" />
@@ -124,6 +200,20 @@ export function ReviewAgentTokensSection() {
                   {token.scopes.join("・")} ／ {token.repositories.join(", ")} ／ 期限 {formatDateTimeFull(token.expiresAt)}
                   {token.lastUsedAt ? ` ／ 最終更新操作 ${formatDateTimeFull(token.lastUsedAt)}` : ""}
                 </p>
+                {editingId === token.id && (
+                  <div className="mt-1 flex flex-col gap-2 rounded-md border border-primary/50 p-2">
+                    <RepositoryPicker options={available} selected={draft} original={token.repositories} onChange={setDraft} />
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Button size="sm" disabled={busy || draft.length === 0 || draft.length > MAX_REPOSITORIES} onClick={() => void saveRepositories(token.id)}>
+                        保存
+                      </Button>
+                      <Button size="sm" variant="outline" disabled={busy} onClick={() => setEditingId(null)}>
+                        キャンセル
+                      </Button>
+                      <span className="text-xs text-muted-foreground">保存後すぐ有効。トークンの値は変わりません</span>
+                    </div>
+                  </div>
+                )}
               </li>
             );
           })}
@@ -132,8 +222,8 @@ export function ReviewAgentTokensSection() {
       <div className="flex flex-col gap-2 rounded-lg border p-3">
         <Label className="text-xs">名前（用途）</Label>
         <Input value={name} onChange={(e) => setName(e.target.value)} maxLength={120} placeholder="例: 外部エージェントA" />
-        <Label className="text-xs">アクセスさせるrepository（owner/name。空白かカンマ区切り。全許可はできません）</Label>
-        <Input value={repositories} onChange={(e) => setRepositories(e.target.value)} placeholder="guchi-apps/issue-deck" />
+        <Label className="text-xs">アクセスさせるrepository（issue-deckが管理しているものから選択。全許可はできません）</Label>
+        <RepositoryPicker options={available} selected={repositories} onChange={setRepositories} />
         <div className="flex flex-wrap items-center gap-3 text-xs">
           {SCOPES.map((scope) => (
             <label key={scope.key} className="flex items-center gap-1">
@@ -150,7 +240,7 @@ export function ReviewAgentTokensSection() {
             <Input className="h-7 w-16" inputMode="numeric" value={days} onChange={(e) => setDays(e.target.value)} />日
           </label>
         </div>
-        <Button size="sm" disabled={busy || !name.trim() || !repositories.trim() || scopes.length === 0} onClick={() => void issue()}>
+        <Button size="sm" disabled={busy || !name.trim() || repositories.length === 0 || repositories.length > MAX_REPOSITORIES || scopes.length === 0} onClick={() => void issue()}>
           トークンを発行
         </Button>
       </div>

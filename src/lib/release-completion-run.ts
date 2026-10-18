@@ -18,10 +18,11 @@ import {
   toDeployRecoverySeriesView,
 } from "@/lib/deploy-recovery-series-run";
 import { enqueueDispatchJob } from "@/lib/dispatch/jobs";
+import { reevaluateReleaseReviewIfReady } from "@/lib/dispatch/release-review-reevaluate";
 import { fetchPullRequest, fetchWorkflowRunJobs, mergePullRequest } from "@/lib/github/actions-api";
 import { getInstallationToken } from "@/lib/github/app-auth";
 import { recordDeployLaunchWatch } from "@/lib/github/deploy-launch-watch";
-import { addIssueLabels, createComment } from "@/lib/github/issues-api";
+import { addIssueLabels, createComment, removeIssueLabel } from "@/lib/github/issues-api";
 import { LOCAL_LABEL_NAME } from "@/lib/github/project-status-dispatch";
 import { fetchMainHeadSha, fetchPullRequestCiState, type GithubApiPullRequest } from "@/lib/github/release-api";
 import { isUniqueConstraintError } from "@/lib/prisma-error";
@@ -34,11 +35,19 @@ import {
   RELEASE_COMPLETION_COST_LIMIT_USD,
   RELEASE_COMPLETION_SCOPE_PRODUCTION,
   RELEASE_COMPLETION_TTL_MS,
+  isAiReviewWaivedFor,
   isGateClearedByReviewDecisions,
+  waiveAiReviewCheck,
+  describeMergeWait,
+  isLongMergeWait,
+  nextMergeWait,
   releaseCompletionNeedsAction,
   releaseCompletionStageIndex,
   releaseCompletionStatusLabel,
   releaseCompletionStopMessage,
+  describeUnverifiedReview,
+  reevaluationKeepsWaiting,
+  UNVERIFIED_REEVALUATING_NOTE,
   type CompletionCheckState,
   type CompletionFinalizationSnapshot,
   type CompletionChecks,
@@ -58,6 +67,7 @@ import {
 } from "@/lib/release-publish-approval-run";
 import { createReleaseFixSeries, readReleaseFixStartState } from "@/lib/release-fix-series-run";
 import { evaluateReleaseMergeGate, isReleasePullRequest } from "@/lib/release-merge-gate";
+import { loadReleasePrerequisiteBlockers } from "@/lib/release-prerequisites-run";
 import { isProductionVerifiedForMergeSha } from "@/lib/release-production-verification-run";
 import { listReleaseVerificationRecords } from "@/lib/release-verification";
 import { loadReleaseVerificationSummary } from "@/lib/release-verification-load";
@@ -83,6 +93,11 @@ type RunRow = ReleaseCompletionRun;
 
 export type ReleaseCompletionRunView = {
   id: string;
+  /** 本番マージの条件を待っている理由（日本語1行）。`merging`で待っているときだけ入る（#4725） */
+  waitMessage: string | null;
+  /** 同じ理由で長く待っていて、人が見るべきか */
+  waitStalled: boolean;
+  waitSince: string | null;
   repositoryFullName: string;
   status: string;
   statusLabel: string;
@@ -144,8 +159,12 @@ export async function toReleaseCompletionRunView(row: RunRow): Promise<ReleaseCo
     ? await db.deployRecoverySeries.findUnique({ where: { id: row.deployRecoverySeriesId } })
     : null;
   const recoveryView = recovery ? toDeployRecoverySeriesView(recovery) : null;
+  const waiting = row.status === "merging";
   return {
     id: row.id,
+    waitMessage: waiting ? describeMergeWait(row.waitReason) : null,
+    waitStalled: waiting && isLongMergeWait(row.waitSince, new Date()),
+    waitSince: waiting ? (row.waitSince?.toISOString() ?? null) : null,
     repositoryFullName: row.repositoryFullName,
     status: row.status,
     statusLabel: releaseCompletionStatusLabel(row.status, Boolean(row.publishApprovalId)),
@@ -482,7 +501,9 @@ async function observeCandidate(run: RunRow, ctx: Ctx): Promise<Observation> {
     candidate,
     pull,
     series,
-    checks: summary ? toCompletionChecks(summary, run.repositoryFullName) : null,
+    checks: summary
+      ? waiveAiReviewCheck(toCompletionChecks(summary, run.repositoryFullName), isAiReviewWaivedFor(finalization, candidate?.headSha ?? ""))
+      : null,
     summary,
     // 新方式なのに記録が無い（取得できない）ときも「公開準備が済んでいない」として扱う（旧方式と見なして進めない）
     finalization: pull && isRcReleaseCandidateHeadRef(pull.head.ref) ? (finalization ?? { phase: "review", applied: null, latest: null }) : null,
@@ -515,6 +536,12 @@ export function toCompletionChecks(summary: ReleaseVerificationSummary, reposito
         : null,
     integrationSetupGap: describeIntegrationSetupGap(repositoryFullName) !== null,
     aiReviewClearedByDecision: summary.aiReview.decisions?.cleared === true,
+    aiReviewUnverified: describeUnverifiedReview({
+      state: summary.aiReview.state,
+      findingCount: summary.aiReview.findings.length,
+      stage: summary.aiReview.stage,
+      unverifiedScope: summary.aiReview.unverifiedScope ?? null,
+    }),
   };
 }
 
@@ -556,6 +583,8 @@ async function applyDecision(
       });
       return updated.count === 1 ? { action: "follow_successor", detail: `#${decision.prNumber}` } : null;
     }
+    case "reevaluate_review":
+      return reevaluateUnverifiedReview(run, ctx, observation);
     case "dispatch_fix":
       return dispatchFix(run, decision.seriesId, decision.issueNumber, ctx, hostName, now);
     case "create_fix":
@@ -661,8 +690,15 @@ async function evaluateAndMerge(run: RunRow, ctx: Ctx, now: Date, observation: O
     fetchPullRequestCiState(ctx.owner, ctx.repo, run.candidatePrNumber, ctx.token).catch(() => null),
     listReleaseVerificationRecords(run.repositoryFullName, run.candidatePrNumber),
   ]);
+  const prerequisites = pull?.base ? await loadReleasePrerequisiteBlockers(run.repositoryFullName, run.candidatePrNumber) : [];
   const gate = pull?.base
-    ? evaluateReleaseMergeGate({ current: { baseSha: pull.base.sha, headSha: pull.head.sha }, records, enforced: true })
+    ? evaluateReleaseMergeGate({
+        current: { baseSha: pull.base.sha, headSha: pull.head.sha },
+        records,
+        enforced: true,
+        prerequisites,
+        aiReviewWaived: isAiReviewWaivedFor(observation.finalization, pull.head.sha),
+      })
     : null;
   const mac = observation.checks?.mac;
   const decision = decideCompletionMerge({ ...run, status: run.status as ReleaseCompletionStatus }, {
@@ -684,7 +720,7 @@ async function evaluateAndMerge(run: RunRow, ctx: Ctx, now: Date, observation: O
         : null,
     mainSha,
     gateStatus: gate && gate.status !== "not_enforced" ? gate.status : "blocked",
-    gateReasons: gate?.blockers.map((b) => b.reason) ?? [],
+    gateReasons: [...(gate?.blockers.map((b) => b.reason) ?? []), ...(gate?.prerequisites.map((b) => `${b.reason}（次: ${b.next}）`) ?? [])],
     // 判断の要約は、いまマージしようとしている対象（base・head）について読んだものだけを使う
     gateClearedByDecision:
       gate !== null &&
@@ -703,10 +739,20 @@ async function evaluateAndMerge(run: RunRow, ctx: Ctx, now: Date, observation: O
   });
   if (decision.action === "wait") {
     if (run.status !== "merging") {
-      await db.releaseCompletionRun.updateMany({ where: { id: run.id, status: run.status }, data: { status: "merging", note: null } });
+      // 別の期間の古い待ち理由を引き継がないよう、入り直しでは待ち始めを取り直す
+      await db.releaseCompletionRun.updateMany({
+        where: { id: run.id, status: run.status },
+        data: { status: "merging", note: null, waitReason: decision.reason, waitSince: now },
+      });
       return { action: "transition:merging", detail: decision.reason };
     }
-    return null;
+    const next = nextMergeWait({ reason: run.waitReason, since: run.waitSince }, decision.reason, now);
+    if (!next) return null;
+    await db.releaseCompletionRun.updateMany({
+      where: { id: run.id, status: "merging" },
+      data: { waitReason: next.reason, waitSince: next.since },
+    });
+    return { action: "wait_reason_changed", detail: decision.reason };
   }
   if (decision.action === "stop") return handOff(run, ctx, decision.reason, decision.detail);
 
@@ -791,6 +837,7 @@ async function advanceRelease(run: RunRow, ctx: Ctx, now: Date): Promise<ActionR
       });
       if (updated.count === 1) {
         await notify(run, ctx, `リリースが完了しました。デプロイが成功し、稼働中の版が \`${run.mergeSha.slice(0, 7)}\` と一致しています。\n\n- デプロイ: ${decision.run.htmlUrl}`, false);
+        await clearStopLabels(run, ctx);
       }
       return updated.count === 1 ? { action: "completed", detail: decision.run.htmlUrl } : null;
     }
@@ -849,6 +896,7 @@ async function advanceDeployRecovery(run: RunRow, ctx: Ctx): Promise<ActionResul
       where: { id: run.id, status: run.status },
       data: { status: "completed", activeKey: null, completedAt: series.recoveredAt ?? new Date(), releaseRunUrl: series.releaseRunUrl },
     });
+    if (updated.count === 1) await clearStopLabels(run, ctx);
     return updated.count === 1 ? { action: "completed" } : null;
   }
   if (series.status === "needs_attention" || series.status === "stopped" || series.status === "awaiting_release") {
@@ -856,6 +904,35 @@ async function advanceDeployRecovery(run: RunRow, ctx: Ctx): Promise<ActionResul
     return handOff(run, ctx, "deploy_recovery_failed", view.stopMessage ?? view.statusLabel);
   }
   return null;
+}
+
+/**
+ * 指摘0件で未確認範囲だけが残った全体レビューを、統合検証の結果で再評価する（#4768）。積むのは既存の自動再評価
+ * （`reevaluateReleaseReviewIfReady`。重複は記録の印とジョブが止める）で、積めた・実行中なら待つ。
+ * 待っても変わらない（再評価の対象外など）ときは、理由を示して止める
+ */
+async function reevaluateUnverifiedReview(run: RunRow, ctx: Ctx, observation: Observation): Promise<ActionResult> {
+  const candidate = observation.candidate;
+  if (!candidate) return null;
+  const outcome = await reevaluateReleaseReviewIfReady({
+    repoFullName: run.repositoryFullName,
+    prNumber: candidate.number,
+    baseSha: candidate.baseSha,
+    headSha: candidate.headSha,
+  }).catch((error: unknown) => {
+    console.error("[release-completion] 全体レビューの再評価を積めませんでした", run.id, error);
+    return { action: "skipped" as const, reason: "no_host" as const };
+  });
+  if (!reevaluationKeepsWaiting(outcome)) {
+    return handOff(run, ctx, "review_unverified", observation.checks?.aiReviewUnverified?.detail ?? undefined);
+  }
+  if (run.status !== "checking" || run.note !== UNVERIFIED_REEVALUATING_NOTE) {
+    await db.releaseCompletionRun.updateMany({
+      where: { id: run.id, status: run.status },
+      data: { status: "checking", note: UNVERIFIED_REEVALUATING_NOTE },
+    });
+  }
+  return outcome.action === "rerun" ? { action: "reevaluate_review" } : null;
 }
 
 /** 止めて人へ渡す。系列を終端にし、理由を修正Issue（無ければ候補のPR）へ残す */
@@ -868,6 +945,33 @@ async function handOff(run: RunRow, ctx: Ctx, reason: ReleaseCompletionStopReaso
   if (run.publishApprovalId) await settlePublishApprovalOnStop(run.publishApprovalId, reason, new Date());
   await notify(run, ctx, `${run.publishApprovalId ? "自動公開" : "リリース完了系列"}を止めました。${releaseCompletionStopMessage(reason, detail ?? null) ?? ""}`, true);
   return { action: `stop:${reason}`, detail };
+}
+
+/**
+ * 完了したとき、この候補の系列が過去に止めて付けた確認待ちラベルを修正Issueから外す。人が再開した時点で
+ * 確認待ちは解消しているため。外すのは、同じ候補で系列が止まった記録（stopReason）があるときだけ
+ * （止まらず完了した場合や、人が別の理由で付けた札には触れない）。
+ */
+async function clearStopLabels(run: RunRow, ctx: Ctx): Promise<void> {
+  try {
+    const stopped = run.stopReason
+      ? 1
+      : await db.releaseCompletionRun.count({
+          where: { repositoryFullName: run.repositoryFullName, candidatePrNumber: run.candidatePrNumber, stopReason: { not: null }, id: { not: run.id } },
+        });
+    if (!stopped) return;
+    const latest = await db.releaseFixSeries.findFirst({
+      where: { repositoryFullName: run.repositoryFullName, releasePrNumber: { in: numbers(run.candidatePrNumbers) } },
+      orderBy: { createdAt: "desc" },
+      select: { issueNumber: true },
+    });
+    if (!latest) return;
+    for (const label of CHECK_USER_LABELS) {
+      await removeIssueLabel(ctx.owner, ctx.repo, latest.issueNumber, ctx.token, label);
+    }
+  } catch (error) {
+    console.error("[release-completion] 確認待ちラベルの除去に失敗しました", run.id, error);
+  }
 }
 
 async function notify(run: RunRow, ctx: Ctx, message: string, needsUser: boolean): Promise<void> {

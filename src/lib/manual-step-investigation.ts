@@ -22,6 +22,8 @@ export type ManualStepInvestigation = {
   auto: string[];
   /** ユーザー本人の操作と、必要な理由 */
   user: ManualStepUserAction[];
+  /** 実行能力の実測結果（手段・ホスト・結果・確認時刻。#4522）。節が無ければ空 */
+  capabilities?: string[];
 };
 
 export type ManualStepUserAction = {
@@ -36,6 +38,7 @@ const SECTION_ALIASES: Record<string, keyof ManualStepInvestigation> = {
   AI実施済み: "done",
   自動実行できる: "auto",
   あなたの操作: "user",
+  実行能力: "capabilities",
 };
 
 function trusted(comment: IssueComment): boolean {
@@ -50,7 +53,7 @@ function bulletText(line: string): string | null {
 export function parseManualStepInvestigation(body: string): ManualStepInvestigation | null {
   if (!body.includes(MANUAL_STEP_INVESTIGATION_MARKER)) return null;
 
-  const result: ManualStepInvestigation = { purpose: "", done: [], auto: [], user: [] };
+  const result: ManualStepInvestigation = { purpose: "", done: [], auto: [], user: [], capabilities: [] };
   let section: keyof ManualStepInvestigation | null = null;
   let fence: string[] | null = null;
   let found = false;
@@ -85,7 +88,7 @@ export function parseManualStepInvestigation(body: string): ManualStepInvestigat
     } else if (section === "user") {
       result.user.push({ text, command: null });
     } else {
-      result[section].push(text);
+      (result[section] ??= []).push(text);
     }
   }
   return found ? result : null;
@@ -108,6 +111,17 @@ export type ManualStepVerificationRecord = {
   entries: { command: string; exitCode: number }[];
   /** すべて終了コード0のときだけtrue。1件も無い報告は完了とみなさない */
   passed: boolean;
+  /** 完了条件ごとの結果・確認時刻・根拠（#4522）。終了コードとは別に記録する */
+  conditions?: ManualStepConditionRecord[];
+};
+
+export type ManualStepConditionRecord = {
+  condition: string;
+  /** 「達成」だけが達成。それ以外（未達・未確認など）は達成と扱わない */
+  achieved: boolean;
+  result: string;
+  checkedAt: string;
+  basis: string;
 };
 
 /**
@@ -117,13 +131,30 @@ export type ManualStepVerificationRecord = {
 export function parseManualStepVerification(body: string): ManualStepVerificationRecord | null {
   if (!body.includes(MANUAL_STEP_VERIFICATION_MARKER)) return null;
   const entries: ManualStepVerificationRecord["entries"] = [];
+  const conditions: ManualStepConditionRecord[] = [];
   for (const line of body.split("\n")) {
+    const c = /^\s*[-*]\s+条件[:：]\s*(.+?)\s*\/\s*結果[:：]\s*(.+?)\s*\/\s*確認[:：]\s*(.+?)\s*\/\s*根拠[:：]\s*(.+?)\s*$/.exec(line);
+    if (c) {
+      conditions.push({
+        condition: c[1],
+        result: c[2],
+        achieved: c[2] === "達成",
+        checkedAt: c[3],
+        basis: c[4],
+      });
+      continue;
+    }
     const m = /^\s*[-*]\s+終了コード(\d+)[:：]\s*`(.+)`\s*$/.exec(line);
     if (m) entries.push({ exitCode: Number(m[1]), command: m[2] });
   }
   return {
     entries,
-    passed: entries.length > 0 && entries.every((entry) => entry.exitCode === 0),
+    // 条件ごとの記録がある場合は、終了コード0だけで完了とせず、全条件の「達成」も要る
+    passed:
+      entries.length > 0 &&
+      entries.every((entry) => entry.exitCode === 0) &&
+      conditions.every((condition) => condition.achieved),
+    conditions,
   };
 }
 

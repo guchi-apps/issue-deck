@@ -94,7 +94,7 @@ function reverifyStep(input: { afterBump: boolean; bumped: boolean; current: RcF
   };
 }
 
-type Step = { label: string; detail: string; tone: Tone; badge: string };
+type Step = { label: string; detail: string; tone: Tone; badge: string; wait?: { message: string; stalled: boolean } };
 
 /** 公開までの流れ。段階（候補の`phase`）と公開準備・最終検証の観測から、各工程の状態を導く */
 export function buildFinalizeSteps(input: {
@@ -155,6 +155,8 @@ function productionStep(input: {
       : "デプロイ成功と稼働中の版・SHAの一致を確かめるまで完了にしません",
     tone: phase === "completed" ? "ok" : released ? "run" : "mute",
     badge: phase === "completed" ? "完了" : phase === "verifying_production" ? "稼働確認中" : phase === "deploying" ? "反映中" : "待機",
+    // 自動公開が条件待ちのとき、いま何を待っているかを出す（#4725）
+    wait: approval?.run?.active && approval.run.waitMessage ? { message: approval.run.waitMessage, stalled: approval.run.waitStalled === true } : undefined,
   };
 }
 
@@ -393,6 +395,8 @@ export function ReleaseRcFinalizePanel({
 }) {
   const [bumpKind, setBumpKind] = useState<BumpKind | "auto">("auto");
   const [confirming, setConfirming] = useState(false);
+  // 全体レビューが合格していない候補で、結果を承知で進むと明示したか（#4807）
+  const [waiveAiReview, setWaiveAiReview] = useState(false);
   const [requestKey, setRequestKey] = useState(newRequestKey);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -441,7 +445,11 @@ export function ReleaseRcFinalizePanel({
 
   const start = async () => {
     if (!contract) return;
-    await post({ action: "start", expectedHeadSha: contract.headSha, bumpKind, requestKey, approvePublish: true }, "公開準備を始められませんでした");
+    if (contract.requiresAiReviewWaiver && !waiveAiReview) return;
+    await post(
+      { action: "start", expectedHeadSha: contract.headSha, bumpKind, requestKey, approvePublish: true, waiveAiReview: contract.requiresAiReviewWaiver && waiveAiReview },
+      "公開準備を始められませんでした",
+    );
   };
   const approveLegacy = async () => {
     if (!current?.finalHeadSha) return;
@@ -520,12 +528,26 @@ export function ReleaseRcFinalizePanel({
         <p className="rounded-md border px-3 py-2 text-[12px] text-muted-foreground">{current.failureReason}。予約した版は保っています。</p>
       )}
 
+      {finalization.checks?.aiReviewWaived && (
+        <p className="rounded-md border border-amber-500/60 bg-amber-500/10 px-3 py-2 text-[12px]" data-testid="release-rc-ai-review-waived">
+          この公開準備は、全体レビューの結果を承知で進めています。全体レビューは実行・表示しますが、結果では公開を止めません（統合検証・CIは必須です）。
+        </p>
+      )}
+
       {canStart && (
-        <div className="flex flex-col gap-2 rounded-lg border p-3">
-          <p className="text-[12px]">
-            revision {contract!.revision} が全体レビュー・統合検証に合格しています。「本番公開へ進む（公開承認）」を押すと、版ファイルと更新履歴だけを変更するコミットを候補へ積み、
-            最終検証に合格したら自動で本番公開します。最終検証の後に承認し直す必要はありません。
-          </p>
+        <div className={cn("flex flex-col gap-2 rounded-lg border p-3", contract!.requiresAiReviewWaiver && "border-amber-500/60")}>
+          {contract!.requiresAiReviewWaiver ? (
+            <p className="text-[12px]" data-testid="release-rc-ai-review-waiver-note">
+              revision {contract!.revision} は統合検証に合格していますが、全体レビューが合格していません（{candidate.status.reason}）。
+              全体レビューは公開の必須条件ではないため、結果を確かめたうえで承知して進めれば公開できます。進めると、全体レビューの指摘・失敗・未完了では止まらず、
+              最終検証（バンプ後のCI・統合検証）に合格したら自動で本番公開します。
+            </p>
+          ) : (
+            <p className="text-[12px]">
+              revision {contract!.revision} が全体レビュー・統合検証に合格しています。「本番公開へ進む（公開承認）」を押すと、版ファイルと更新履歴だけを変更するコミットを候補へ積み、
+              最終検証に合格したら自動で本番公開します。最終検証の後に承認し直す必要はありません。
+            </p>
+          )}
           <label className="flex flex-wrap items-center gap-2 text-[12px]" htmlFor="finalize-bump-kind">
             <span className="font-semibold">上げ幅</span>
             <select
@@ -545,8 +567,21 @@ export function ReleaseRcFinalizePanel({
           {confirming ? (
             <>
               <ApprovalConfirm repositoryFullName={repositoryFullName} candidate={candidate} target={contract!} bumpPolicy={bumpKind} reusing={reusing} />
+              {contract!.requiresAiReviewWaiver && (
+                <label className="flex items-start gap-2 text-[12px]">
+                  <input
+                    type="checkbox"
+                    className="mt-0.5"
+                    checked={waiveAiReview}
+                    onChange={(e) => setWaiveAiReview(e.target.checked)}
+                    disabled={busy}
+                    data-testid="release-rc-ai-review-waiver"
+                  />
+                  <span>全体レビューの結果（指摘・失敗・未完了）を確認し、承知のうえで本番公開へ進めます</span>
+                </label>
+              )}
               <div className="flex flex-wrap gap-2">
-                <Button size="sm" onClick={start} disabled={busy}>
+                <Button size="sm" onClick={start} disabled={busy || (contract!.requiresAiReviewWaiver && !waiveAiReview)}>
                   {busy ? "公開準備を始めています…" : reusing ? "公開準備をやり直す" : "公開を承認して進める"}
                 </Button>
                 <Button size="sm" variant="outline" onClick={() => setConfirming(false)} disabled={busy}>
@@ -556,8 +591,12 @@ export function ReleaseRcFinalizePanel({
             </>
           ) : (
             <div>
-              <Button size="sm" onClick={() => setConfirming(true)}>
-                {reusing ? "公開準備をやり直す（承認済み）" : "本番公開へ進む（公開承認）"}
+              <Button size="sm" variant={contract!.requiresAiReviewWaiver ? "outline" : "default"} onClick={() => setConfirming(true)}>
+                {reusing
+                  ? "公開準備をやり直す（承認済み）"
+                  : contract!.requiresAiReviewWaiver
+                    ? "全体レビューの結果を承知で本番公開へ進む（公開承認）"
+                    : "本番公開へ進む（公開承認）"}
               </Button>
             </div>
           )}
@@ -612,6 +651,15 @@ export function ReleaseRcFinalizePanel({
             <div className="min-w-0">
               <p className="text-[12.5px] font-semibold">{step.label}</p>
               <p className="break-words text-[11.5px] text-muted-foreground">{step.detail}</p>
+              {step.wait && (
+                <p
+                  className={cn("break-words text-[11.5px]", step.wait.stalled ? "font-medium text-amber-700 dark:text-amber-400" : "text-primary")}
+                  data-testid="release-rc-wait-reason"
+                >
+                  {step.wait.stalled ? "長時間進んでいません: " : "いま待っているもの: "}
+                  {step.wait.message}
+                </p>
+              )}
             </div>
             <StateChip tone={step.tone}>{step.badge}</StateChip>
           </li>

@@ -173,6 +173,11 @@ function ensureRepositoryOpen() {
   if (row?.getAttribute("aria-expanded") !== "true") openRepository();
 }
 
+/** 「リリース済みのバージョン」アコーディオン（#4721）。閉じている間も中身はDOMに残る */
+function releasedAccordion() {
+  return screen.getByTestId("released-versions").querySelector("details") as HTMLDetailsElement;
+}
+
 function branchStatus(overrides: Partial<RepositoryBranchStatus> = {}): RepositoryBranchStatus {
   return {
     repositoryFullName: REPO,
@@ -647,11 +652,12 @@ describe("BranchFlowView", () => {
 
       openRepository();
       expect(screen.getByText("本番未反映")).toBeTruthy();
-      expect(screen.getByText("issue-1456")).toBeTruthy();
-      expect(screen.getByText("このバージョンに乗る変更 1件")).toBeTruthy();
+      // リリース候補が無いので「今回公開する変更」は出さず、レーンは「リリース待ちのPR」へ入る（#4787）
+      expect(screen.queryByText("今回公開する変更")).toBeNull();
+      expect(screen.getByTestId("release-waiting-prs").textContent).toContain("issue-1456");
     });
 
-    it("既定は次のリリースの束だけを出し、リリース済みはボタンで開く（#1586）", () => {
+    it("既定は次のリリースの束だけを出し、リリース済みはアコーディオンで開く（#1586）", () => {
       renderFlow({
         pullRequests: [
           makeReleasePullRequest({
@@ -702,12 +708,13 @@ describe("BranchFlowView", () => {
       });
 
       openRepository();
-      // 本番へ出た版はひとつ前（v3.17.0）も含めて畳む
-      expect(screen.queryByText("issue-915")).toBeNull();
-      expect(screen.queryByText("issue-905")).toBeNull();
-      expect(screen.queryByText("issue-800")).toBeNull();
+      // 本番へ出た版はひとつ前（v3.17.0）も含めてアコーディオンに畳む（閉じている間は中身が開かない）
+      expect(releasedAccordion().open).toBe(false);
+      expect(screen.getByText("リリース済みのバージョン").parentElement?.textContent).toContain("3件");
 
-      fireEvent.click(screen.getByText("リリース済みのバージョンを表示（3件）"));
+      fireEvent.click(screen.getByText("リリース済みのバージョン"));
+      expect(releasedAccordion().open).toBe(true);
+      expect(screen.getByText("リリース済みのバージョン").parentElement?.textContent).toContain("3件");
       expect(screen.getByText("issue-915")).toBeTruthy();
       expect(screen.getByText("issue-905")).toBeTruthy();
       expect(screen.getByText("issue-800")).toBeTruthy();
@@ -746,8 +753,10 @@ describe("BranchFlowView", () => {
       ensureRepositoryOpen();
       expect(screen.getByText("本番未反映")).toBeTruthy();
       expect(screen.getByText("issue-930")).toBeTruthy();
-      expect(screen.queryByText("issue-905")).toBeNull();
-      expect(screen.getByText("リリース済みのバージョンを表示（1件）")).toBeTruthy();
+      // 本番へ出た版はアコーディオンの中にあり、閉じている
+      expect(releasedAccordion().open).toBe(false);
+      expect(releasedAccordion().textContent).toContain("issue-905");
+      expect(screen.getByText("リリース済みのバージョン").parentElement?.textContent).toContain("1件");
     });
 
     it("PRと同じ題のIssueはタイトルを繰り返さない", () => {
@@ -959,13 +968,12 @@ describe("BranchFlowView", () => {
       renderReleasedLaneWithManualStep("open");
 
       openRepository();
-      // 束もレーンも畳まれている（レーンのPRは出ない）
-      expect(screen.queryByText(/#1461/)).toBeNull();
+      // 束もレーンもアコーディオンに畳まれている
+      expect(releasedAccordion().open).toBe(false);
       // 手作業だけは別枠に出て、由来のブランチ名が添う
       expect(screen.getByText("リリース済みの変更に残っている手作業")).toBeTruthy();
-      expect(screen.getByText(/手作業 #184/)).toBeTruthy();
+      expect(screen.getAllByText(/手作業 #184/).length).toBeGreaterThan(0);
       expect(screen.getByText("起点")).toBeTruthy();
-      expect(screen.getByText("issue-1454")).toBeTruthy();
       // 畳んだ行にも件数を出す（アイコン＋数字なので読み上げの語で引く。#2243）
       const count = screen.getByLabelText("手作業 1件");
       expect(count.textContent).toBe("1");
@@ -977,18 +985,20 @@ describe("BranchFlowView", () => {
 
       openRepository();
       expect(screen.queryByText("リリース済みの変更に残っている手作業")).toBeNull();
-      expect(screen.queryByText(/手作業 #184/)).toBeNull();
       expect(screen.queryByLabelText("手作業 1件")).toBeNull();
     });
 
-    it("束を開いたら別枠は出さず、レーンにぶら下げる（#1586）", () => {
+    it("束を開いたら別枠は出さず、レーンにぶら下げる（#1586）", async () => {
       renderReleasedLaneWithManualStep("open");
 
       openRepository();
-      fireEvent.click(screen.getByText("リリース済みのバージョンを表示（1件）"));
-      expect(screen.queryByText("リリース済みの変更に残っている手作業")).toBeNull();
+      fireEvent.click(screen.getByText("リリース済みのバージョン"));
+      await waitFor(() => expect(screen.queryByText("リリース済みの変更に残っている手作業")).toBeNull());
       expect(screen.getByText("issue-1454")).toBeTruthy();
-      expect(screen.getByText(/手作業 #184/)).toBeTruthy();
+      // 手作業のリンクに加え、リリース済みでも機能全体は未完了の注記にも出る（#4748）
+      expect(screen.getAllByText(/手作業 #184/)).toHaveLength(2);
+      expect(screen.getByTestId("lane-feature-incomplete").textContent).toContain("機能全体は未完了です");
+      expect(screen.getByText("リリース後")).toBeTruthy();
     });
   });
 
@@ -1410,6 +1420,14 @@ describe("BranchFlowView", () => {
       expect(screen.queryByText("マージする")).toBeNull();
     });
 
+    it("CI実行中のPRにはボタンを出さない（バッジは出す）", () => {
+      renderFlow({ pullRequests: [userMergePullRequest({ ciState: "pending" })] });
+
+      ensureRepositoryOpen();
+      expect(screen.getByText("ユーザーのマージが必要です")).toBeTruthy();
+      expect(screen.queryByText("マージする")).toBeNull();
+    });
+
     it("CIが通っていればダイアログを挟まずマージし、onMergedへ対象のPRを渡す", async () => {
       // この describe の afterEach が拾えるよう、stubGlobalではなくspyOnで差し替える
       const fetchMock = vi
@@ -1475,6 +1493,27 @@ describe("BranchFlowView", () => {
       ensureRepositoryOpen();
       expect(screen.getAllByText("本番公開へ進む")).toHaveLength(1);
       expect(screen.queryByText("マージする")).toBeNull();
+    });
+
+    it("RCカード全体を押すと本番PRへ移動し、内側のボタンでは移動しない（#4721）", () => {
+      const open = vi.spyOn(window, "open").mockImplementation(() => null);
+      renderFlow({
+        pullRequests: [
+          makeReleasePullRequest({ number: 1550, title: "v3.22.0をmainへリリースする", state: "open" }),
+        ],
+        branchStatuses: [
+          branchStatus({ developVsMain: { aheadBy: 3, behindBy: 0, sameContent: false, units: null }, hasReleaseWorkflow: true }),
+        ],
+      });
+
+      ensureRepositoryOpen();
+      fireEvent.click(screen.getByText("本番公開へ進む"));
+      expect(open).not.toHaveBeenCalled();
+
+      fireEvent.click(screen.getByTestId("next-release-candidate"));
+      expect(open).toHaveBeenCalledTimes(1);
+      expect(String(open.mock.calls[0][0])).toContain("1550");
+      open.mockRestore();
     });
   });
 
@@ -2135,10 +2174,10 @@ describe("BranchFlowView", () => {
 
       ensureRepositoryOpen();
       expect(screen.getByText("issue-915")).toBeTruthy();
-      expect(screen.getByText("このバージョンに乗った変更 1件")).toBeTruthy();
-      // ひとつ前の版は従来どおり畳んだまま
-      expect(screen.queryByText("issue-905")).toBeNull();
-      expect(screen.getByText("リリース済みのバージョンを表示（1件）")).toBeTruthy();
+      expect(screen.getAllByText("このバージョンに乗った変更 1件").length).toBeGreaterThan(0);
+      // ひとつ前の版はアコーディオンに畳んだまま
+      expect(releasedAccordion().open).toBe(false);
+      expect(screen.getByText("リリース済みのバージョン").parentElement?.textContent).toContain("1件");
       expect(screen.queryByText("developへ向かっている作業はありません。")).toBeNull();
     });
 
@@ -2214,7 +2253,7 @@ describe("BranchFlowView", () => {
       );
     });
 
-    it("どの版で出たか特定できない変更しか無いときもボタンを出す（#1711）", () => {
+    it("どの版で出たか特定できない変更しか無いときもアコーディオンを出す（#1711）", () => {
       renderFlow({
         // リリースPRを1件も取得できていない＝版を決められないマージ済みレーン
         pullRequests: [
@@ -2230,8 +2269,9 @@ describe("BranchFlowView", () => {
       });
 
       openRepository();
-      expect(screen.queryByText("issue-915")).toBeNull();
-      fireEvent.click(screen.getByText("本番へ出た変更を表示（1件）"));
+      expect(releasedAccordion().open).toBe(false);
+      fireEvent.click(screen.getByText("本番へ出た変更"));
+      expect(releasedAccordion().open).toBe(true);
       expect(screen.getByText("issue-915")).toBeTruthy();
     });
   });
@@ -2479,13 +2519,13 @@ describe("BranchFlowView の自動更新（#1767）", () => {
     // 更新ボタンは押せるまま（自動更新のたびに無効化しない）
     const refreshButton = screen.getByRole("button", { name: "更新" });
     expect(refreshButton.hasAttribute("disabled")).toBe(false);
-    expect(container.querySelectorAll(".animate-spin").length).toBe(1);
+    expect(refreshButton.querySelectorAll(".animate-spin").length).toBe(1);
   });
 
   it("取得していない間は更新アイコンを回さない", () => {
-    const { container } = renderFlow({ isRefreshing: false });
+    renderFlow({ isRefreshing: false });
 
-    expect(container.querySelectorAll(".animate-spin").length).toBe(0);
+    expect(screen.getByRole("button", { name: "更新" }).querySelectorAll(".animate-spin").length).toBe(0);
   });
 
   it("間隔を変える導線は、いまの間隔をラベルに出す", () => {

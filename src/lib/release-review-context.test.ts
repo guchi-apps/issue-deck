@@ -5,11 +5,12 @@ import {
   buildReviewPromptContext,
   decideReviewMode,
   findingIdOfSeriesItem,
+  findingIdsOfSeriesItem,
   type PreviousReviewRecord,
   type ReleaseFixHistory,
   type ReleaseReviewContextDecision,
 } from "./release-review-context";
-import { reviewFindingId } from "./release-review-result";
+import { legacyReviewFindingId, reviewFindingId } from "./release-review-result";
 
 const current = { baseSha: "base1", headSha: "head2" };
 const previous = (over: Partial<PreviousReviewRecord> = {}): PreviousReviewRecord => ({
@@ -102,5 +103,40 @@ describe("ユーザー判断を文脈へ渡す（#4657）", () => {
       expect(ctx.previousFindings.map((f) => f.id)).toEqual([id]);
       expect(ctx.decidedFindingIds).toEqual([]);
     }
+  });
+});
+
+describe("旧IDとの照合（#4766）", () => {
+  it("修正系列の項目は、現行と旧導出の両方のIDで前回の指摘へ突き合わせる", () => {
+    const item = { title: "設定漏れ", file: "a.ts:3" };
+    expect(findingIdsOfSeriesItem(item)).toEqual([
+      reviewFindingId({ title: "設定漏れ", file: "a.ts" }),
+      legacyReviewFindingId({ title: "設定漏れ", file: "a.ts", line: 3 }),
+    ]);
+    const ctx = buildReviewPromptContext({ current, previous: previous(), histories: [history] });
+    for (const id of findingIdsOfSeriesItem(item)) expect(ctx.fixIssueByFinding[id]).toBe(50);
+  });
+
+  it("旧IDで記録された前回の指摘も、新IDで保存した判断があれば前回の指摘から外す", () => {
+    const legacyId = legacyReviewFindingId({ title: "設定漏れ", file: "a.ts", line: 3 });
+    const ctx = buildReviewPromptContext({
+      current,
+      previous: previous({ findings: [{ id: legacyId, title: "設定漏れ", file: "a.ts", line: 3, detail: "d", occurrences: 1 }] }),
+      histories: [history],
+      decisions: [
+        {
+          id: reviewFindingId({ title: "設定漏れ", file: "a.ts" }),
+          title: "設定漏れ",
+          decision: "reject",
+          reason: "誤認",
+          impact: null,
+          scope: null,
+          timing: null,
+          followUp: null,
+          stale: false,
+        },
+      ],
+    });
+    expect(ctx.previousFindings).toHaveLength(0);
   });
 });

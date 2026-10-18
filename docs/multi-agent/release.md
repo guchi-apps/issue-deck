@@ -564,13 +564,18 @@ lifecycleスクリプト（`scripts/version-changelog.mjs`）が`src/lib/changel
 載る**（[auto-repair.md](auto-repair.md)「リリースだけ宛先と見た目を変える」）。最新
 リリースぶんだけを持ち毎回上書きするので、履歴の置き場は従来どおり各アプリの更新履歴ファイル。
 
-### リリースの完了はissue-deckのPush通知でも届く（#2725）
+### リリースの完了はSlackのチャンネルへカードで届く（#2725・#4791）
 
 リリース通知の宛先はSignalyだけだった（`deploy.yml`の`notify-release`が
 `.github/scripts/signaly-notify.sh`を呼ぶ）。**フリート全体のリリースを画面で扱っている
-issue-deck自身のPWAには届かない**ため、サブPCのpollerが叩く巡回
-（`POST /api/repositories/release-push-sweep`）が新しいリリースを見つけてPush通知を出す。
-**Signalyへの通知はそのまま残す**（宛先が1つ増えるだけ）。
+issue-deck自身には届かない**ため、サブPCのpollerが叩く巡回
+（`POST /api/repositories/release-push-sweep`）が新しいリリースを見つけて通知を出す。
+当初（#2725）はPush通知だったが、**#4791からはプッシュ通知をせず、SlackのチャンネルへBlock Kitの
+カード（見出し・リポジトリ・バージョン・更新内容・「ブランチ画面を開く」「アプリを開く」ボタン・公開時刻）
+を投稿する。** 投稿は`SLACK_BOT_TOKEN`（署名シークレットは不要）、チャンネルは
+`SLACK_RELEASE_CHANNEL_ID`（未設定なら`SLACK_ALLOWED_CHANNEL_IDS`の先頭）。「アプリを開く」は
+GitHubリポジトリの`homepage`があるときだけ出す。**Signalyへの通知はそのまま残す。**
+チャンネル宛のため、ユーザーごとのリポジトリ非表示・ミュート設定は効かない。
 
 - 見ているのは各リポジトリの`releases/latest`（draftとprereleaseを除く）で、**記録した
   タグと違うものが返ったときだけ鳴らす**。記録の無いリポジトリは鳴らさずタグだけ入れる
@@ -1141,6 +1146,7 @@ main起点の`deploy-recovery/*`ブランチへ取り込む。**`merges`APIは�
 
 - 検証行（`ReleaseVerification`）はPR・base・head・種別が対象のキーで、**バンプ前のheadの行は書き換えない**
 - 引継ぎの判定は`decideInheritedVerification`。引き継ぐのは**バンプ前が合格（未確認範囲なし）で、mainが進んでおらず、バンプの差分が版ファイル（と同じ階層のロック）・更新履歴だけ**のときに限る。iOSの設定・依存関係・その他のコード・設定が変わった場合は再検証する。iOS（Mac）検証が必要なリポジトリ（`macBuildCheck`）は、統合検証をバンプ後のheadで必ず再実行する。判定できなければ再検証する
+- **iOS設定の版番号行だけの書き換えは、全体レビュー・統合検証では版と同じ扱いにする**（#4764）。`ios_version`に分類されたファイルのうち、差分が`MARKETING_VERSION`・`CURRENT_PROJECT_VERSION`の行だけで、書き換え後の`MARKETING_VERSION`が予約済みの正式版と一致するもの（`isIosVersionLinesOnlyPatch`が真＝`diffFiles`の`versionLinesOnly`。公開承認の失効〈#4753〉と同じ判定を共有する）は、`ai_review`・`integration`の引継ぎを止めない（理由「版・更新履歴とiOS設定の版番号行だけ」）。それ以外の行が変わった`ios_version`・patchが取れない巨大差分・`dependency`・`other`は従来どおり再実行する。**iOS検証の再実行（`ios_files_changed`）と、Mac検証が必要なリポジトリでの統合検証の再実行（`ios_final_required`）は変えない**。以前は`project.pbxproj`の版番号行だけでも`beyond_version`になり、iOSを含むissue-deckでは正式バンプのたびに全体レビューが最初からやり直しになっていた（RC-8 #4744）
 - 判定と根拠（元のbase/head・バンプ後のbase/head・変更ファイル・理由）は`ReleaseCandidateFinalization.handoffEvidence`へ残す。検証の読み取り（`listReleaseVerificationRecords`・`listReleaseVerificationDetails`）が、証跡と元の結果が今も合格であることを確かめたうえで**バンプ後の対象に対する派生の記録**として足し、`inheritedFromHeadSha`と「バンプ後のheadで実行した結果ではありません」の注記で区別する。**旧SHAの結果を新SHAの実行結果へ書き換えない**
 - 再検証が必要な種別だけを、バンプ後のheadで依頼する（引き継いだ種別の行は作らない）
 
@@ -1155,6 +1161,8 @@ main起点の`deploy-recovery/*`ブランチへ取り込む。**`merges`APIは�
 
 - バンプ後の最終CI・再検証が失敗したとき、公開準備の記録が失敗として残り、候補は同じ`review`へ戻る（修正工程）。予約は保つ
 - バンプ後に候補のheadが動いた・mainが進んだときは、公開準備を`superseded`にして`review`へ戻し、検証と承認を取り直す
+  - **戻す直前に候補PRを取り直す**（#4805）。完了系列のマージで「PRは未マージ・mainは前進済み」と読める窓があり、最初に読んだPRだけで判定するとマージ済みの候補を`review`へ戻し、誰も本番反映を追わなくなる（画面は「状態不整合」で新規開始もできない）。取り直してマージ済みなら、通常のマージ後の判定（`decideMergedCandidate`）へ回す
+  - それでも`review`へ戻ってしまった候補は、照合が復旧する（`repairMergedAfterReturn`）。直前の公開準備が適用済みから`superseded`・`failed`になった行で、その最終headがそのままマージされているときだけ、行を`applied`へ、段階を`awaiting_approval`へ戻してからマージ後の判定に掛ける。**検証の合否は改めて判定する。** 開始方式の再確認（`reconcileActiveRcPublication`）も`review`の候補を照合へ渡すので、ブランチ画面を開くだけで直る
 - 完了系列（#4480）は、**記録したバンプ前→バンプ後のheadの更新だけ**を後継として追う（`decideReleaseCompletion`の`finalization`。修正系列の`successorHeadSha`と同形）。それ以外のhead変更は従来どおり`candidate_changed`で止まる。新方式の候補は、段階が`awaiting_approval`（公開準備と最終検証が済み）でバンプ後のheadと一致するときだけマージの評価へ進む（`isFinalizationReady`）。公開準備を始める（＝公開承認）のは人の操作で、系列は代わりに押さない
 - マージ後は、deployの成功**と稼働中の版の一致**（`decideDeployRecoveryRelease`）を確かめるまで`completed`にしない。失敗・不一致は段階を進めず、既存の本番復旧（#4451）が追う。Web本番とTestFlight配布は別の結果で、build番号は正式版と混ぜない
 
@@ -1164,13 +1172,23 @@ RCから本番公開へ進む確認は**公開準備の開始の1回だけ**に�
 
 - **承認の範囲**: 押した時点の候補（revision・PR・base/head）・版指定方針・公開内容と、想定した正式バンプ（版ファイル・更新履歴だけの変更。`allowedChanges`）まで。確認画面にこの範囲と「合格後は自動で本番公開する」ことを全部出してから押させる。古い画面からの`start`（`approvePublish`なし）は`approval_required`で拒否し、承認として扱わない
 - **自動継続**: 承認と同時に、承認者を開始者とした`until_production`の完了系列を承認専用の入口（`ensurePublishApprovalRun`。初期状態`checking`・`publishApprovalId`付き）で作る。復旧用の`startReleaseCompletionRun`（問題の無い候補は`nothing_to_recover`）とは混ぜない。同じ候補の復旧系列が進行中ならそれへ紐付け、別の候補の系列が進行中なら承認を受け付けない。巡回はpoller（`runReleaseCompletionSweep`）が回すので、画面を開いておく必要はない
-- **承認由来の系列は修正Issueを起動・起案しない。** 検証の失敗は`approval_checks_failed`、未判断の止める指摘は`approval_review_undecided`（#4657の判断で解除されれば止めない。公開承認を指摘の採否と混同しない）、公開準備の失敗は`finalize_failed`で理由を示して止める。CI・`22.merge-confirm-required`・mainの保護は既存どおり止める
+- **承認由来の系列は修正Issueを起動・起案しない。** 検証の失敗は`approval_checks_failed`、未判断の止める指摘は`approval_review_undecided`（#4657の判断で解除されれば止めない。公開承認を指摘の採否と混同しない）、公開準備の失敗は`finalize_failed`、指摘0件で未確認範囲だけが再評価でも残った全体レビューは`review_unverified`（#4768。統合検証の完了と再評価を待ってから。承認は失効させない）で理由を示して止める。CI・`22.merge-confirm-required`・mainの保護は既存どおり止める
 - **失効**: 巡回ごとに`decidePublishApprovalValidity`で照合し、バンプの差分が範囲外（差分のファイルを残す）・範囲外のhead（候補の更新・置換）・mainの前進・候補の取消・期限（24時間。系列の期限と揃える）なら承認を`invalidated`にして系列を止める。範囲内のバンプ後headでは失効させない
 - **再試行**: 検証の失敗・取得不能・マージの失敗など、同じ処理をやり直せば済む停止（`APPROVAL_RETRYABLE_STOP_REASONS`）では承認を保つ。公開準備のやり直し（同じpre head/base、または範囲内のバンプ後head）は同じ承認を使い回し（`isWithinApprovalTarget`）、停止した系列は「自動公開を再開」（`action=approve`）で承認し直さずに作り直す。対象が変わった停止・取消では承認ごと終える（計画レビューG1の「停止したら承認も失効」は、再試行で再承認を増やさない要件に合わせてこの区別へ改めた）
 - **取消と二重実行**: マージ直前に承認を`active`→`merging`へ条件付きで確保できたときだけマージし、成功で`consumed`、失敗で`active`へ戻す。取消（`action=revoke`）は`active`→`revoked`の条件付き更新で、確保と競合したらどちらか一方だけが進む。系列を「停止」したときも承認を取り消す。承認済みの候補は手動のマージ（`decideRcPublish`の`rc_auto_publishing`）を並べない
 - **既存候補の移行**: 承認の記録が無い公開準備済みの候補は「公開準備済み」から承認を推定せず、パネルで1回だけ承認を求める（`action=approve`。対象はバンプ後のheadとそのbase）
 - **表示**: パネルの工程は「公開承認」（承認済み・失効・承認が必要）、承認欄は`describePublishProgress`の「最終検証中／自動公開待ち／自動公開が停止（理由）／本番反映中／稼働確認中」。承認済みの候補の段階表示は「本番承認待ち」ではなく「自動公開待ち」（`deriveRcStatus`の`publishApproved`）
 - 共有workflowの配布・callerの変更は不要（`finalize_request`の受け渡しは既存のまま）
+
+### 全体レビューは公開の必須条件ではない（#4807）
+
+**公開に必須なのはCI・統合検証（とMac検証・pre-releaseの前提・人の確認ラベル）で、全体レビュー（`ai_review`）は人が結果を承知で明示すれば外せる。** AIの全体レビューは指摘の取りこぼしを補う安全網で、指摘・実行失敗・未完了（バッチの途中・未確認範囲）が残るたびに公開を止め続けると、レビュー自体を100%完了させない限り本番へ出せなくなっていた。逆に、承知の明示なしに自動で外すと重大な指摘も素通りするため、**外すのは人の操作だけ**にする。
+
+- **外せる条件**: 統合検証が合格（または対象外）で、止めているのが全体レビューだけ（`isOnlyAiReviewBlocking`。指摘・失敗・未実施・実行中・古い結果のいずれも）。新方式の候補はさらに、現在revisionのheadとPRのheadが一致し、修正・更新が進んでいないこと（`decideAiReviewWaivable`→`RcStatusView.aiReviewWaivable`）
+- **新方式の候補**: このとき`buildRcFinalizeContract`は`requiresAiReviewWaiver: true`の契約を作り、パネルに「全体レビューの結果を承知で本番公開へ進む（公開承認）」が出る。確認画面でチェックを入れた要求（`waiveAiReview: true`）だけを`decideFinalizeStart`が受け付け（無ければ`ai_review_waiver_required`）、公開準備の行（`ReleaseCandidateFinalization.aiReviewWaived`。誰が＝`requestedByUserId`）へ記録する。合格した候補では明示があっても記録しない
+- **外した後**: 最終検証（`evaluateChecks`・`decideMergedCandidate`）、自動公開の系列（`isAiReviewWaivedFor`→`waiveAiReviewCheck`で`ai_review`を`not_applicable`扱い。起案・`approval_review_undecided`で止めない）、自動マージ・手動マージのゲート（`evaluateReleaseMergeGate`の`aiReviewWaived`）で全体レビューを止める条件にしない。バンプ後の全体レビューは従来どおり実行・表示する。外すのは記録した公開準備のバンプ前後のheadだけで、失敗・期限切れで修正工程へ戻った公開準備や、修正で変わった候補には引き継がない（次の公開準備で明示し直す）
+- **旧方式のリリースPR**（`release-main/v*`）: 止めているのが全体レビューだけなら、手動マージの既存の明示確認（`acknowledgeVerification`）で通せる（以前は要確認だけで、実行失敗・未実施は通せなかった）
+- 指摘ごとの非修正の判断（#4657）は残す。指摘を個別に採否するときはそちら、レビュー全体を待たずに出すときはこちら
 
 ### 公開後のdevelop整合
 
@@ -1181,7 +1199,7 @@ RCから本番公開へ進む確認は**公開準備の開始の1回だけ**に�
   3. マージ済みの同期PR（本文の`<!-- issue-deck-develop-sync:main=<SHA> -->`）があり、そのSHA以降mainに変更ファイルが無い。**squash・rebaseでマージするとmerge-baseが進まず1・2では同期済みにならない**ための救済で、同期PRは本来マージコミットでマージする
 - GitHubから取得できないときは**判定不能**（`develop_sync_unknown`）で、同期済みと推定して候補を作らない
 - 同期PRのheadは`main`ではなく、mainの先端から切った`release-sync/main-<SHA12>`。競合したらこのブランチへdevelopを取り込んで解消する（mainへpushしない・developを上書きしない）。ブランチ名がmainのSHAで決まり、開いている同期PR（以前のhead=mainのものも含む）があれば作らないので、巡回が重なっても1本にしかならない。同期PRの作成後にmainが進んだときは、そのマージ後に残りの同期PRを作る
-- 同期PRは通常のdevelop向けPRとして既存のCI・レビュー・マージ保護を通る（`issue-<番号>`ブランチではないため`claude-review-develop.yml`の自動マージの対象外）。**マージは`runDevelopSyncSweep`が自動で行う**（#4669）。条件は専用ブランチ（`release-sync/*`。旧head=mainは対象外）・PRのHEADが今のmainの先端と一致（追いコミット・競合解消なし）・変更が`package.json`・`src/lib/changelog.ts`・`.github/release-notes.md`・iOSの`project.pbxproj`だけ（ワークフロー・コード等を含むときは人）・競合なし・CI成功・自動レビューの判定（`passed`か`skipped`）が出揃い要修正/要確認が現HEADに無い・`00.check-user`/`22.merge-confirm-required`が無い、のすべて（判定は純関数`decideDevelopSyncAutoMerge`）。HEADのSHAを指定してマージコミットでマージし、満たさないものは従来どおり人がマージする（失敗しても例外にせず次の巡回で再判定）
+- 同期PRは通常のdevelop向けPRとして既存のCI・レビュー・マージ保護を通る（`issue-<番号>`ブランチではないため`claude-review-develop.yml`の自動マージの対象外）。**マージは`runDevelopSyncSweep`が自動で行う**（#4669）。条件は専用ブランチ（`release-sync/*`。旧head=mainは対象外）・PRのHEADが今のmainの先端と一致（追いコミット・競合解消なし）・変更に`.github/workflows/`のファイルを含まない（コード・版ファイルは含んでよい。HEADがmainの先端そのもので中身は公開済みのため。#4731。ワークフローを含むときは人）・競合なし・CI成功・自動レビューの判定（`passed`か`skipped`）が出揃い要修正/要確認が現HEADに無い・`00.check-user`/`22.merge-confirm-required`が無い、のすべて（判定は純関数`decideDevelopSyncAutoMerge`）。HEADのSHAを指定してマージコミットでマージし、満たさないものは従来どおり人がマージする（失敗しても例外にせず次の巡回で再判定）
 - 同期PRの版更新による`push`は次のリリース開始の承認ではない（#4650）。mainとdevelopが同じ版ならコード差分が残っていても新規バンプを開始せず、旧方式の版判定・patchフォールバック・バンプPR作成の3ステップも`workflow_dispatch`に限定する。既存の旧方式バンプ後（developの版がmainより新しい）のリリースPR作成は維持する。この共通workflowの修正は公開した配布タグの参照更新まで各repoへ反映されないため、callerの入力追加だけで完了としない（全展開の追跡: #4651）。
 - 追跡は公開処理の段階から独立している。呼び出し元は本番反映の追跡（`advanceProduction`）・pollerの巡回（`deploy-recovery-series/sweep`へ相乗りする`runDevelopSyncSweep`。候補を使ったことのあるリポジトリを5分おき）・候補作成（`createReleaseRc`の中で判定するのでAPI以外の経路からも迂回できない）・画面の「同期PRを作成」の4つ。作成の失敗理由はプロセス内にだけ持ち、巡回が再試行する
 - 画面は開始前の案内（`start-mode`の`develop_sync`。PCの個別ボタン・スマホのシート・一括）と、本番反映以降の候補の本番PR詳細に「developへの同期」欄を出す。**公開結果とは別の欄**で、同期できていないことを本番公開の失敗とは表示しない。承認・全体レビューの記録は作らない
@@ -1193,8 +1211,9 @@ mainへ出した候補は、稼働版の証拠が揃うまで「稼働確認中�
 
 | repoの種類（対象コミット時点のファイルで判定） | 完了にできる証拠 |
 | --- | --- |
-| deploy.ymlが稼働SHAを照合する（`APP_COMMIT_SHA`と`/api/app-version`を含む） | deployジョブの成功（従来どおり） |
-| deploy.ymlはあるが稼働SHAを照合しない（HTTP 200・目印の文字列だけ） | deploy成功を前提に、**公開URLの照合**か**人の確認** |
+| deploy.yml自身が稼働SHAを照合する（コメントを除いた実行行で`/api/app-version`を引き、`sha`を比較し、不一致ならジョブを失敗させる。issue-deck自身） | deployジョブの成功（従来どおり） |
+| deploy.ymlがgateへ照合を委譲する（`APP_COMMIT_SHA`を`ssh … env`で渡し`ssh … deploy`を呼ぶ。新規アプリ雛形）。照合はVPSのgateが行い、実装した版は`guchi-apps/vps`の`a25fa44`（vps#298・#299）以降 | deployジョブの成功（gateが不一致なら`deploy`が失敗する） |
+| deploy.ymlはあるが稼働SHAを照合しない（HTTP 200・目印の文字列だけ。コメントやechoに`APP_COMMIT_SHA`・`/api/app-version`と書いても照合とは見なさない。#4757） | deploy成功を前提に、**公開URLの照合**か**人の確認** |
 | deploy.ymlが無く`release-artifacts.yml`でソースを配る（pi0w） | workflowの成功と、`v<版>`のReleaseが公開済みでタグが対象コミットを指すこと。**ソース公開までを完了とし、実機配備（pi0w#9）は扱わない**。画面にも「実機配備は別管理」と出す |
 | どちらも無い（判定不能） | 人の確認のみ |
 
@@ -1247,6 +1266,7 @@ callerへの`finalize_request`の配線と実リポジトリでの通し確認�
 
 #4560の並びを、ブランチ画面の「次のリリース」・本番PR詳細・スマホリリースシートで揃えた。**現在のリリース候補（RC名・状態・停止理由）と主操作 → 候補の検証結果 → 今回公開する変更 → 現在の本番版・履歴**の順で、本番版（本番稼働中・再デプロイ）は補足として後方に置く。
 
+- **「今回公開する変更」に出すのはリリース候補に入ったPRだけ**（#4787）。候補を作っていない未リリースの束は全レーンを、候補作成後にdevelopへ入ったレーンも、閉じたアコーディオン「リリース待ちのPR」へ出す。分け方は純関数`splitLanesByReleaseCandidate`（`src/lib/branch-flow.ts`）が持ち、凍結後レーンの「作り直し」ボタンもそのアコーディオンの中に置く。Xcodeで実機へ反映するリポジトリは従来どおり凍結の前後だけで分ける。
 - **工程と操作の判定は純関数`release-rc-action.ts`が1か所で持つ。** `decideRcPublish`（公開してよいか）を画面（`release-publish-action.tsx`）とマージAPI（`POST /api/issues/pull-request-merge`）が共用し、`describeRcPrimaryAction`が工程ごとの主操作を決める。「本番公開へ進む」を出す・通すのは、段階が`awaiting_approval`・ドラフトでない・PRのheadが公開準備の最終headと一致するときだけ。
 - **サーバーの拒否（409）**: `rc_record_missing`・`rc_not_prepared`（公開準備前。次は検証→公開準備）・`rc_preparing`・`rc_draft`・`rc_pull_request_unobserved`・`rc_head_mismatch`・`rc_already_published`・`rc_cancelled`。応答に`next`と日本語の`message`を含め、GitHubのmerge APIの405（ドラフト）を利用者に見せない。ドラフト解除だけでは公開準備を飛ばせない。記録が引けない・ドラフト状態が未取得のときは推測で通さず拒否する。
 - **検査対象は新方式（`release-rc/<番号>`）だけ。** 旧方式（`release-main/*`）はRC記録が無いため従来のゲートのみ（`rcSequenceOf(head.ref)`がnullなら検査しない）。

@@ -48,6 +48,32 @@ describe("normalizeReleaseReviewDiagnostic", () => {
     expect(d).toMatchObject({ cause: "timeout", stage: "review", exitCode: 124, targetHeadSha: target.headSha });
   });
 
+  it("ターン数の上限（#4769）は時間切れと区別して残す", () => {
+    const d = normalizeReleaseReviewDiagnostic({ cause: "turn_limit", stage: "review", exitCode: 1 }, target);
+    expect(d).toMatchObject({ cause: "turn_limit", exitCode: 1 });
+    const v = describeReleaseReviewDiagnostic(d);
+    expect(v.causeLabel).toContain("ターン数の上限");
+    expect(v.action).toContain("ISSUE_DECK_RELEASE_REVIEW_MAX_TURNS");
+    expect(v.unidentified).toBe(false);
+  });
+
+  it("上限を上げてやり直しても同じだったターン数の上限は、再実行ではなく原因と次の操作を案内する（#4785）", () => {
+    const d = normalizeReleaseReviewDiagnostic(
+      { cause: "turn_limit", stage: "review", exitCode: 1, turnLimitRetried: true, maxTurns: 500 },
+      target,
+    );
+    expect(d).toMatchObject({ turnLimitRetried: true, maxTurns: 500 });
+    const v = describeReleaseReviewDiagnostic(d);
+    expect(v.action).toContain("同じ結果になりやすい");
+    expect(v.action).toContain("ISSUE_DECK_RELEASE_REVIEW_DIFF_BUDGET_BYTES");
+    expect(v.action).not.toContain("まず再実行");
+    // turn_limit以外には持ち越さない
+    expect(normalizeReleaseReviewDiagnostic({ cause: "timeout", turnLimitRetried: true, maxTurns: 5 }, target)).toMatchObject({
+      turnLimitRetried: false,
+      maxTurns: null,
+    });
+  });
+
   it("知らない原因・工程は原因未特定・工程なしに落とす", () => {
     expect(normalizeReleaseReviewDiagnostic({ cause: "weird", stage: "x" }, target)).toMatchObject({
       cause: "unknown",

@@ -268,7 +268,10 @@
   1. `ssh-keygen -t ed25519 -N "" -C "deploy-<アプリ名>" -f "$(mktemp -u)"`で鍵を作り、秘密鍵を1Passwordの`op://apps/<リポジトリ名>/deploy-ssh-key`へ、公開鍵をVPSでの登録に使う
   2. VPSで`sudo scripts/setup-app-keys.sh add --app <アプリ名> --pubkey <公開鍵ファイル>`（`guchi-apps/vps`。`sudo`を含むため代行実行の対象外）
   3. `scripts/sync-github-secrets.sh`で`SSH_PRIVATE_KEY`をGitHubのrepository secretへ同期する
-- **既存アプリの鍵移行はこの雛形の対象外**（organization共通鍵のままのアプリは別途）
+- **既存アプリも、同じ形へ移している**（#4759。repoごとのサブIssueで進める。organization共通鍵のままのアプリは移行が済むまで従来の`deploy.yml`で動く）。雛形と違って次の点に注意する
+  - **gateでのアプリ名は、リポジトリ名ではなく既存の置き場とpm2のプロセス名に合わせる。** gateは`/home/github-user/apps/<アプリ名>`を置き場にし、同じ名前で`pm2 delete`する（`guchi-apps/vps`の`scripts/app-deploy-gate.sh`）。表示名・リポジトリ名を変えたアプリ（yoteiflowは置き場もプロセス名も`dayspan`）は旧名で登録する。置き場とプロセス名が食い違うアプリ・`deploy/ecosystem.config.js`以外の場所にecosystemを置くアプリ・Prisma CLIがdevDependenciesにあるアプリは、gate側の対応（guchi-apps/vps#300）を待つ
+  - **gateの`env`は1行1変数で受けるため、改行を含む値を送れない。** PEMのまま1Passwordにある鍵（APNsの`.p8`など）は、ワークフローでbase64の1行へ直して送り、アプリ側でbase64も読めることを確かめる（guchi-apps/yoteiflow#1257）
+  - 鍵の発行・登録・同期は**`develop`→`main`のリリースPRをマージする前に**済ませる。`deploy`ジョブが動くのは`main`へのpushなので、`develop`へのマージだけでは本番は変わらない。マニフェストの`SSH_PRIVATE_KEY`を`repo`項目へ変えると、`ci.yml`の`secrets-check`が同期まで落ちる
 
 ### 1Passwordのアイテムは、コマンドで投入する（#2249）
 

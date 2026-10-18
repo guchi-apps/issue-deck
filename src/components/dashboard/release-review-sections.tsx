@@ -581,6 +581,13 @@ function ReviewRerunPanel({
   );
 }
 
+/** 非修正の判断ごとの、閉じた行での呼び方（#4814） */
+const DECIDED_FINDING_LABEL: Record<string, string> = {
+  post_release: "判断済み（公開後対応）",
+  defer: "判断済み（見送り）",
+  reject: "判断済み（不採用）",
+};
+
 function AiReviewSection({
   section,
   integration,
@@ -615,18 +622,29 @@ function AiReviewSection({
   // 統合検証の証跡から見た共通の段階（#4664）。上部バッジ・本番確認と同じ名前を見出しに出す
   const stage = section.stage;
   const stageHead: SectionHead | null =
-    stage && (stage.kind === "integration_waiting" || stage.kind === "reevaluating")
+    stage && (stage.kind === "integration_waiting" || stage.kind === "reevaluating" || stage.kind === "awaiting_integration")
       ? {
           ...baseHead,
           tone: "run",
           mark: "◌",
           label: describeReviewStageLabel(stage),
           detail:
-            stage.kind === "integration_waiting"
-              ? "全体レビューの最終確認は未完了です"
-              : "統合検証の結果に依存する項目だけを自動で再評価しています",
+            stage.kind === "awaiting_integration"
+              ? "統合検証が終わると、その証跡を持つサブPCで全体レビューを開始します"
+              : stage.kind === "integration_waiting"
+                ? "全体レビューの最終確認は未完了です"
+                : "統合検証の結果に依存する項目だけを自動で再評価しています",
         }
-      : stage?.kind === "needs_check" && stage.autoReevaluated
+      : stage?.kind === "needs_check" && stage.cleared
+        ? {
+            // 止める指摘がすべて非修正の判断済み（#4814）。人の判断は済んでいるので赤の「対応／判断が必要」にしない
+            ...baseHead,
+            tone: "ok",
+            mark: "✓",
+            label: describeReviewStageLabel(stage),
+            detail: "止める指摘はすべて判断済み（修正しない）",
+          }
+        : stage?.kind === "needs_check" && stage.autoReevaluated
         ? {
             ...baseHead,
             label: describeReviewStageLabel(stage),
@@ -685,12 +703,29 @@ function AiReviewSection({
         ? null
         : "指摘なし"
     : null;
-  // 閉じた状態でも、いちばん重い指摘の題だけは読めるようにする
-  const top =
-    section.findings.find((f) => f.severity === "high") ?? section.findings.find((f) => f.severity === "medium") ?? section.findings[0];
+  // 閉じた状態でも、いちばん重い指摘の題だけは読めるようにする。未判断の指摘を先に選び、判断済み（修正しない）の
+  // 指摘しか無ければ「判断済み（公開後対応）」として控えめに出す（#4814。赤字の「重大: …」にしない）
+  const pickTop = (list: typeof section.findings) =>
+    list.find((f) => f.severity === "high") ?? list.find((f) => f.severity === "medium") ?? list[0];
+  const top = pickTop(fixable) ?? pickTop(section.findings);
+  const topDecided = top !== undefined && !fixable.includes(top);
+  const topDecision = topDecided && top.id ? decisions?.byFinding[top.id]?.current?.decision : undefined;
   const reason =
-    head.reason ?? (top ? `${SEVERITY_LABEL[top.severity] ?? "中"}: ${top.title}` : null);
-  const reasonTone: Tone = head.reason ? head.reasonTone : top?.severity === "high" ? "bad" : top ? "warn" : "muted";
+    head.reason ??
+    (top
+      ? topDecided
+        ? `${DECIDED_FINDING_LABEL[topDecision ?? ""] ?? "判断済み（修正しない）"}: ${top.title}`
+        : `${SEVERITY_LABEL[top.severity] ?? "中"}: ${top.title}`
+      : null);
+  const reasonTone: Tone = head.reason
+    ? head.reasonTone
+    : topDecided
+      ? "muted"
+      : top?.severity === "high"
+        ? "bad"
+        : top
+          ? "warn"
+          : "muted";
   // 実行障害にはコード修正→作り直しを勧めない（直すものが無い）。再実行が主導線
   const needsFix = fixable.length > 0 || section.state === "invalidated";
   const hasDetail =
@@ -893,6 +928,9 @@ function AiReviewSection({
                       </span>
                     )}
                     {s.detail && <p className="whitespace-pre-wrap text-muted-foreground">{s.detail}</p>}
+                    {s.demotedReason && (
+                      <p className="whitespace-pre-wrap text-muted-foreground">提案へ降格: {s.demotedReason}</p>
+                    )}
                     {decisions && s.id && pullRequestNumber !== undefined && target && (
                       <FindingDecisionControl
                         repositoryFullName={repositoryFullName}
@@ -1301,7 +1339,12 @@ export function describeReviewCoverage(section: Pick<ReleaseVerificationSection,
   ].filter((v): v is string => v !== null);
   const batches = coverage.batches > 1 ? `・${coverage.batches}バッチ` : "";
   const pending = coverage.pendingBatches > 0 ? `・残り${coverage.pendingBatches}バッチ` : "";
-  return `確認済み ${reviewedFiles} / ${totalFiles} ファイル${rest.length > 0 ? `（${rest.join("・")}）` : ""}${batches}${pending}`;
+  // 同じ対象の保存済みの結果を使い回した数（#4767）。「確認済みは再利用」の説明と実際を揃える
+  const reused =
+    (coverage.reusedBatches ?? 0) > 0
+      ? `・再利用${coverage.reusedBatches}／再確認${coverage.rerunBatches ?? 0}バッチ${coverage.integrationReused ? "（相互作用の確認も再利用）" : ""}`
+      : "";
+  return `確認済み ${reviewedFiles} / ${totalFiles} ファイル${rest.length > 0 ? `（${rest.join("・")}）` : ""}${batches}${pending}${reused}`;
 }
 
 export function ReleaseReviewSections({

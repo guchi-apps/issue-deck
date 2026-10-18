@@ -15,7 +15,8 @@ import { isBumpKind } from "@/lib/semver-bump";
  *
  * - POST `action=start`: 合格した候補を正式バンプする。上げ幅（`bumpKind`）は`major|minor|patch`の手動指定か、
  *   空・`auto`なら自動判定。**これが唯一の公開承認（#4666）**で、`approvePublish: true`の要求だけを受け付ける。
- *   最終検証に合格したら、承認者を開始者としたリリース完了系列がmainマージ・本番反映・稼働確認まで進める
+ *   最終検証に合格したら、承認者を開始者としたリリース完了系列がmainマージ・本番反映・稼働確認まで進める。
+ *   止めているのが全体レビューだけの候補は、`waiveAiReview: true`（結果を承知で進む明示）があるときだけ始める（#4807）
  * - POST `action=approve`: 承認の記録が無い既存の公開準備済み候補を1回だけ承認する／停止した自動公開を再開する
  * - POST `action=revoke`: 本番マージを確保する前の自動公開を取り消す
  *
@@ -83,6 +84,7 @@ export async function POST(request: NextRequest) {
         bumpKind: rawKind === null || rawKind === "auto" ? null : (rawKind as "major" | "minor" | "patch"),
         requestKey: requestKey!,
         approvePublish: payload?.approvePublish === true,
+        waiveAiReview: payload?.waiveAiReview === true,
       }),
     );
   } catch (error) {

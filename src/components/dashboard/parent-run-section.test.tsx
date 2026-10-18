@@ -71,6 +71,33 @@ describe("ParentRunSection", () => {
     expect(screen.getByTestId("parent-run-evidence").textContent).toContain("本番確認: 未確認");
   });
 
+  it("main反映済みでも本番確認が残る間は「リリース済みですが、機能全体は未完了」と出す（#4524）", async () => {
+    const released: ParentRunView = {
+      ...run,
+      summary: {
+        ...run.summary!,
+        evidence: [
+          { label: "子のdevelopマージ", ok: true, detail: "6/6" },
+          { label: "本番（main）への反映", ok: true, detail: "全て反映済み" },
+          { label: "本番確認", ok: false, detail: "未確認（人が記録します）" },
+        ],
+        complete: false,
+      },
+    };
+    vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, json: async () => ({ run: released, plan: null }) })));
+    render(<ParentRunSection repositoryFullName={R} issueNumber={100} hosts={[]} />);
+    const banner = await waitFor(() => screen.getByTestId("parent-run-released-incomplete"));
+    expect(banner.textContent).toContain("リリース済みですが、機能全体は未完了です");
+    expect(banner.textContent).toContain("本番確認");
+  });
+
+  it("main未反映の間は「リリース済み」とは言わない", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, json: async () => ({ run, plan: null }) })));
+    render(<ParentRunSection repositoryFullName={R} issueNumber={100} hosts={[]} />);
+    await waitFor(() => expect(screen.getByTestId("parent-run-section")).toBeTruthy());
+    expect(screen.queryByTestId("parent-run-released-incomplete")).toBeNull();
+  });
+
   it("計画も実行も無い親（本文のみのEpic）には何も出さない", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => ({ ok: true, json: async () => ({ run: null, plan: null }) })));
     const { container } = render(<ParentRunSection repositoryFullName={R} issueNumber={100} hosts={[]} />);

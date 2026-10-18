@@ -290,6 +290,7 @@ function toHostView(host: DispatchHost, now: Date): DispatchHostView {
     releaseVerifyCapable: host.releaseVerifyCapable,
     releaseReviewCapable: host.releaseReviewCapable,
     chatCodexCapable: host.chatCodexCapable,
+    remoteSessionCapable: host.remoteSessionCapable,
     selfUpdateCapable: host.selfUpdateCapable,
     maxSessions: host.maxSessions,
     liveSessions: host.liveSessions,
@@ -2535,8 +2536,9 @@ export async function listDispatchState(
           // ここで落ちるのは終了済みのものだけ（`dismissDispatchJob`）
           dismissedAt: null,
           // チャット相談のモデル呼び出し（#4109）は実行状況・Issueのジョブ表示に出さない。
-          // 発言1回で数件積まれ、状態はチャット側（`ChatRun`）が持つ
-          kind: { not: "CHAT_TURN" },
+          // 発言1回で数件積まれ、状態はチャット側（`ChatRun`）が持つ。リモートセッション（#4743）も
+          // Issueに紐づかず、状態は`RemoteSession`とその画面が持つため同じく出さない
+          kind: { notIn: ["CHAT_TURN", "REMOTE_SESSION", "REMOTE_SESSION_KILL"] },
           OR: [
             { status: { in: [...ACTIVE_DISPATCH_JOB_STATUSES] } },
             { finishedAt: { gte: new Date(now.getTime() - FINISHED_JOB_RETENTION_MS) } },
@@ -2653,6 +2655,7 @@ export async function announceDispatchHost(params: {
   releaseVerifyCapable?: boolean | null;
   releaseReviewCapable?: boolean | null;
   chatCodexCapable?: boolean | null;
+  remoteSessionCapable?: boolean | null;
   selfUpdateCapable: boolean | null;
   /**
    * セッション本数の上限と、申告した時点で生きていた本数（#1394）。**画面へ出すための写しで、
@@ -2730,6 +2733,7 @@ export async function announceDispatchHost(params: {
     releaseVerifyCapable: params.releaseVerifyCapable ?? null,
     releaseReviewCapable: params.releaseReviewCapable ?? null,
     chatCodexCapable: params.chatCodexCapable ?? null,
+    remoteSessionCapable: params.remoteSessionCapable ?? null,
     selfUpdateCapable: params.selfUpdateCapable,
     maxSessions: params.maxSessions,
     liveSessions: params.liveSessions,

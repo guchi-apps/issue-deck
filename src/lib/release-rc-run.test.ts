@@ -8,6 +8,8 @@ const mocks = vi.hoisted(() => ({
   candidateUpdate: vi.fn(),
   revisionFindUnique: vi.fn(),
   revisionUpdateMany: vi.fn(async () => ({ count: 1 })),
+  revisionFindMany: vi.fn(async () => [] as { prNumber: number | null }[]),
+  closeSeries: vi.fn(async () => 0),
   revisionCreate: vi.fn(),
   repositoryFindFirst: vi.fn(),
   fixFindMany: vi.fn(async () => [] as { fixPrNumber: number | null; status: string }[]),
@@ -44,6 +46,7 @@ vi.mock("@/lib/db", () => {
     releaseCandidateRevision: {
       findUnique: mocks.revisionFindUnique,
       findFirst: vi.fn(),
+      findMany: mocks.revisionFindMany,
       updateMany: mocks.revisionUpdateMany,
       create: mocks.revisionCreate,
     },
@@ -88,8 +91,9 @@ vi.mock("@/lib/release-verification", () => ({
   listReleaseVerificationRecords: vi.fn(async () => []),
 }));
 vi.mock("@/lib/dispatch/release-verify-jobs", () => ({ requestReleaseVerifyJob: mocks.verifyJob }));
-vi.mock("@/lib/dispatch/release-review-jobs", () => ({ requestReleaseReviewJob: mocks.reviewJob }));
+vi.mock("@/lib/dispatch/release-review-start", () => ({ requestReleaseReviewAfterIntegration: mocks.reviewJob }));
 
+vi.mock("@/lib/release-fix-series-run", () => ({ closeFixSeriesForCancelledCandidate: (...a: unknown[]) => (mocks.closeSeries as (...x: unknown[]) => unknown)(...a) }));
 import { cancelReleaseRc, createReleaseRc, recordRcReport, requestRcImport } from "@/lib/release-rc-run";
 
 const CALLER = "    inputs:\n      candidate_request:\n        type: string\n    with:\n      candidate-request: x\n";
@@ -321,6 +325,14 @@ describe("cancelReleaseRc", () => {
       where: { candidateId: "c1", status: "reserved" },
       data: expect.objectContaining({ status: "consumed", consumedMergeSha: "9".repeat(40) }),
     });
+  });
+
+  it("取り消した候補のPR（revisionのPR）に紐づく修正系列を畳む（#4800）", async () => {
+    mocks.candidateFindUnique.mockResolvedValue(candidateRow({ phase: "review" }));
+    mocks.prsByHead.mockResolvedValue([]);
+    mocks.revisionFindMany.mockResolvedValueOnce([{ prNumber: 10 }, { prNumber: null }, { prNumber: 12 }]);
+    expect(await cancel()).toMatchObject({ ok: true });
+    expect(mocks.closeSeries).toHaveBeenCalledWith(expect.objectContaining({ repositoryFullName: "o/r", prNumbers: expect.arrayContaining([10, 12]) }));
   });
 
   it("自動バンプで予約が無いままマージ済みなら、mainの版を確定して消費済みの予約を作ってから取り消す", async () => {

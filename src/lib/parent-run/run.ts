@@ -6,6 +6,7 @@ import { observeDependency } from "@/lib/dispatch/dependency-wait-run";
 import type { DispatchAgent } from "@/lib/dispatch/dispatch-job";
 import { enqueueDispatchJob } from "@/lib/dispatch/jobs";
 import { defaultVerifyDeps, getPlanView, type VerifyDeps } from "@/lib/execution-plan/register";
+import { isNonCodeWorkVerified, isTimedNonCodeWork } from "@/lib/execution-plan/release-link";
 import { refKey, type PlanIssueRef, type PlanSnapshot } from "@/lib/execution-plan/types";
 import {
   collectObservedRefs,
@@ -450,7 +451,11 @@ export async function applyRunAction(parent: PlanIssueRef, action: RunAction, de
         if (!child) return fail(404, "child_not_found", "この実行の対象に含まれない子です");
         // 記録の前に、実装PRのdevelopマージ・main反映をサーバー側で観測し直す（未完了の子へ記録させない）
         const obs = await observeRef({ repository: child.repository, number: child.number }, child, deps);
-        if (!isChildReleased(obs)) {
+        // PRを持たない環境設定・確認の作業（#4523）は、クローズ済みであれば検証を記録できる
+        const plan = await planSnapshotOf(parent, row.planVersion);
+        const planChild = plan?.children.find((c) => refKey(c) === refKey(child));
+        const nonCode = planChild ? isTimedNonCodeWork(planChild, obs) : false;
+        if (nonCode ? obs.issue !== "closed" : !isChildReleased(obs)) {
           return fail(409, "child_not_released", "実装PRのdevelopマージとmainへの反映を確認できないため、本番確認を記録できません");
         }
         await db.parentRunChild.update({ where: { id: child.id }, data: { verifiedAt: now } });
@@ -463,7 +468,10 @@ export async function applyRunAction(parent: PlanIssueRef, action: RunAction, de
         await Promise.all(
           plan.children.map(async (c) => {
             const obs = await observeRef(c, childByKey.get(refKey(c)), deps);
-            if (!isChildReleased(obs)) unreleased.push(refKey(c));
+            if (c.timing === "independent") return;
+            if (isTimedNonCodeWork(c, obs) ? !isNonCodeWorkVerified(obs, childByKey.get(refKey(c))?.verifiedAt ?? null) : !isChildReleased(obs)) {
+              unreleased.push(refKey(c));
+            }
           }),
         );
         if (unreleased.length > 0) {

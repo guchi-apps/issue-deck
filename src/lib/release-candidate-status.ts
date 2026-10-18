@@ -117,8 +117,13 @@ export function resolveReleaseCandidateVerification(
   const problems: { kind: ReleaseCandidateProblemKind; reason: string }[] = [];
   const stage = checks.aiReviewStage;
   for (const section of sections) {
-    // 全体レビューの共通の段階（#4664）。証跡を待つ・確認中のレビューは「要確認」でなく待てば進むものとして出す
-    if (!section.integration && stage && (stage.kind === "integration_waiting" || stage.kind === "reevaluating")) {
+    // 全体レビューの共通の段階（#4664）。証跡を待つ・確認中のレビューは「要確認」でなく待てば進むものとして出す。
+    // 統合検証の完了まで開始を待たせている全体レビュー（#4763）も、開始前の待ちとして同じ扱いにする
+    if (
+      !section.integration &&
+      stage &&
+      (stage.kind === "integration_waiting" || stage.kind === "reevaluating" || stage.kind === "awaiting_integration")
+    ) {
       pending.push({ name: section.name, started: stage.kind === "reevaluating", stageLabel: describeReviewStageLabel(stage) });
       continue;
     }
@@ -134,6 +139,9 @@ export function resolveReleaseCandidateVerification(
         }
         break;
       case "needs_check":
+        // 止める指摘がすべて非修正の判断済み（#4814）。合否は要確認のままだが、人の判断はもう済んでいるので
+        // 赤の「検証要確認」にしない（公開を止めるかは既存のゲートと公開承認が決める）
+        if (!section.integration && stage?.kind === "needs_check" && stage.cleared) break;
         problems.push({
           kind: "needs_check",
           reason: !section.integration && stage ? describeStageProblem(stage) : `${section.name}に要確認の結果があります`,

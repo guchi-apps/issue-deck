@@ -13,7 +13,12 @@ const options = { branchesFailed: false, releaseLaunching: false, verification: 
 describe("ブランチの現在地と次の操作", () => {
   it("未取得を変更なしと案内しない", () => {
     const repo = fixture(); repo.branchesLoaded = false;
-    expect(describeBranchFlow(repo, options)).toMatchObject({ state: "状態未取得", attention: true });
+    expect(describeBranchFlow(repo, options)).toMatchObject({ state: "状態未取得", attention: false, loading: true });
+  });
+  it("取得失敗は取得中と区別して警告のままにする", () => {
+    const repo = fixture(); repo.branchesLoaded = false;
+    expect(describeBranchFlow(repo, { ...options, branchesFailed: true })).toMatchObject({ attention: true });
+    expect(describeBranchFlow(repo, { ...options, branchesFailed: true }).loading).toBeFalsy();
   });
   it("再取得失敗時は古い変更数で公開を案内しない", () => {
     expect(describeBranchFlow(fixture(), { ...options, branchesFailed: true, unreleasedCount: 3 }).next).toBe("取得状況を確認");

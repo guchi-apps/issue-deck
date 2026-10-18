@@ -390,8 +390,8 @@ describe("稼働確認の契約（#4712）", () => {
     expect(content(spec(), ".github/workflows/deploy.yml")).toContain("APP_COMMIT_SHA: ${{ github.sha }}");
   });
 
-  it("照合はgate側の対応待ちなので、雛形のdeploy.ymlは照合付き（稼働確認の証拠）と判定されない", () => {
+  it("gateが稼働版SHAを照合する（vps#298）ので、雛形のdeploy.ymlは照合付き（稼働確認の証拠）と判定される", () => {
     const deploy = content(spec(), ".github/workflows/deploy.yml");
-    expect(classifyProductionTarget({ deployWorkflowText: deploy, releaseArtifactsWorkflowText: null })).toBe("deploy_without_version_check");
+    expect(classifyProductionTarget({ deployWorkflowText: deploy, releaseArtifactsWorkflowText: null })).toBe("deploy_version_check");
   });
 });

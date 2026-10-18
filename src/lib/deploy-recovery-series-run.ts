@@ -1,3 +1,4 @@
+import { hasVersionCheck } from "@/lib/deploy-version-check";
 import type { DeployRecoverySeries } from "@prisma/client";
 
 import { parseClaudeLocalModel, parseCodexLocalModel, resolveAiExecutionAgent } from "@/lib/app-settings";
@@ -502,10 +503,18 @@ export async function fetchWorkflowRunsForSha(
   sha: string,
   token: string,
 ): Promise<DeployRunObservation[]> {
-  const data = await requestJson<{ workflow_runs?: Array<GithubWorkflowRun & { created_at?: string }> }>(
-    `${GITHUB_API}/repos/${owner}/${repo}/actions/workflows/${encodeURIComponent(workflowFile)}/runs?head_sha=${encodeURIComponent(sha)}&per_page=20`,
-    token,
-  );
+  let data: { workflow_runs?: Array<GithubWorkflowRun & { created_at?: string }> };
+  try {
+    data = await requestJson(
+      `${GITHUB_API}/repos/${owner}/${repo}/actions/workflows/${encodeURIComponent(workflowFile)}/runs?head_sha=${encodeURIComponent(sha)}&per_page=20`,
+      token,
+    );
+  } catch (error) {
+    // workflowファイルが無いrepo（deploy.ymlを持たないrepoなど）は404になる。例外にせず「runが無い」として返し、
+    // 判定側が待機→期限切れの`needs_attention`で人へ渡せるようにする（#4728）
+    if (error instanceof GithubApiError && error.status === 404) return [];
+    throw error;
+  }
   return (data.workflow_runs ?? []).map((run) => ({
     id: run.id,
     htmlUrl: run.html_url,
@@ -521,7 +530,7 @@ export async function fetchWorkflowRunsForSha(
  * 稼働SHAの一致を確かめた証拠があるか。次の2つが揃うときだけtrue。
  * - そのrunの`deploy`ジョブが成功している
  * - そのコミットの`deploy.yml`が、`/api/app-version`のSHAと突き合わせるヘルスチェックを持つ
- *   （`APP_COMMIT_SHA`で判定。無い版のdeployは旧版がHTTP 200を返すだけでも成功になるため証拠にしない）
+ *   （コメントを除いた実行行で、deploy.yml自身の照合かgateへの委譲かを判定する。`deploy-version-check.ts`。無い版のdeployは旧版がHTTP 200を返すだけでも成功になるため証拠にしない）
  */
 export async function hasVersionVerification(owner: string, repo: string, run: DeployRunObservation, token: string): Promise<boolean> {
   try {
@@ -535,7 +544,7 @@ export async function hasVersionVerification(owner: string, repo: string, run: D
     if (!response.ok) return false;
     const file: { content?: string; encoding?: string } = await response.json();
     const text = Buffer.from(file.content ?? "", file.encoding === "base64" ? "base64" : "utf-8").toString("utf-8");
-    return text.includes("APP_COMMIT_SHA") && text.includes("/api/app-version");
+    return hasVersionCheck(text);
   } catch (error) {
     // 読めなかったことは「確かめられた」ではない。次の巡回でやり直す（上限で人へ渡る）。
     console.error("[deploy-recovery] 稼働版の確認材料を読めませんでした", run.id, error);

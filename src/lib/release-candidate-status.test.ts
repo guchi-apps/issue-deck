@@ -34,6 +34,33 @@ describe("resolveReleaseCandidateVerification", () => {
     expect(describeReleaseVerificationWait(reevaluating)).toBe("全体レビュー（検証結果を確認中）の判定が出るまでマージできません");
   });
 
+  it("統合検証の完了まで開始を待たせている全体レビューは、開始待ちとして段階名を出す（#4763）", () => {
+    const v = resolve({ aiReview: "running", integration: "running", aiReviewStage: { kind: "awaiting_integration" } });
+    expect(v.problem).toBeNull();
+    expect(v.progress?.checks[0]).toEqual({ name: "全体レビュー", started: false, stageLabel: "統合検証の完了待ち" });
+  });
+
+  it("止める指摘がすべて非修正の判断済みなら、赤の要確認にしない。未判断なら従来どおり要確認（#4814）", () => {
+    const cleared = resolve({
+      aiReview: "needs_check",
+      aiReviewStage: { kind: "needs_check", autoReevaluated: true, items: ["findings"], cleared: true },
+    });
+    expect(cleared.problem).toBeNull();
+    expect(isReleaseCandidateClear(cleared)).toBe(true);
+    const undecided = resolve({
+      aiReview: "needs_check",
+      aiReviewStage: { kind: "needs_check", autoReevaluated: true, items: ["findings"] },
+    });
+    expect(undecided.problem?.label).toBe("検証要確認");
+    // 統合検証の失敗は、全体レビューの判断では消さない
+    const failed = resolve({
+      aiReview: "needs_check",
+      integration: "failed",
+      aiReviewStage: { kind: "needs_check", autoReevaluated: true, items: ["findings"], cleared: true },
+    });
+    expect(failed.problem?.label).toBe("検証失敗");
+  });
+
   it("自動再評価後も残る要確認は、残件の種類を添えた要確認にする（#4664）", () => {
     const v = resolve({
       aiReview: "needs_check",

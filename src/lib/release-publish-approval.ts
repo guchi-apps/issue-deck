@@ -60,7 +60,7 @@ export type PublishApprovalFinalization = {
   preHeadSha: string;
   finalBaseSha: string | null;
   finalHeadSha: string | null;
-  files: readonly { path: string; category: string }[];
+  files: readonly { path: string; category: string; versionLinesOnly?: boolean }[];
 };
 
 export type PublishApprovalValidity =
@@ -68,8 +68,12 @@ export type PublishApprovalValidity =
   | { valid: false; reason: PublishApprovalInvalidReason; detail: string | null; diff: string[] };
 
 /** 承認範囲の外のファイル（想定バンプに含まれないもの） */
-export function filesBeyondApproval(files: readonly { path: string; category: string }[]): string[] {
-  return files.filter((f) => !(PUBLISH_APPROVAL_ALLOWED_CATEGORIES as readonly string[]).includes(f.category)).map((f) => f.path);
+export function filesBeyondApproval(files: readonly { path: string; category: string; versionLinesOnly?: boolean }[]): string[] {
+  return files
+    .filter((f) => !(PUBLISH_APPROVAL_ALLOWED_CATEGORIES as readonly string[]).includes(f.category))
+    // iOS設定は、差分が版番号の行の書き換えだけと確かめたものに限り範囲内（#4753）。分類だけでは許可しない
+    .filter((f) => !(f.category === "ios_version" && f.versionLinesOnly === true))
+    .map((f) => f.path);
 }
 
 /**

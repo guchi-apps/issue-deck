@@ -3,12 +3,13 @@ import { createHash } from "node:crypto";
 import type { ReleaseVerificationState } from "@/lib/release-merge-gate";
 import {
   RELEASE_REVIEW_CHECKLIST_VERSION,
+  RELEASE_REVIEW_CHECK_ITEM_IDS,
   describeUnconfirmedChecks,
   normalizeCheckResults,
   type ReleaseReviewCheckResult,
   type ReleaseReviewCheckStatus,
 } from "@/lib/release-review-checklist";
-import { reviewFindingKey } from "@/lib/release-fix-series";
+import { legacyReviewFindingKey, reviewFindingKey } from "@/lib/release-fix-series";
 
 /**
  * リリース全体のAIレビュー（#4238）の結果の正規化。ランナーが報告した生の値を、記録できる形へ絞る。
@@ -34,8 +35,8 @@ export type ReleaseReviewFinding = {
   /** 影響するPR番号 */
   pullRequests: number[];
   /**
-   * 指摘の安定ID（`R-xxxxxx`・#4559）。保存した台帳は持たず、題・ファイル・行から都度導出する
-   * （再発は前回のIDを引き継ぐ）。修正系列の項目（`ReleaseFixSeries.items`）も同じ関数で導出して突き合わせる
+   * 指摘の安定ID（`R-xxxxxx`・#4559）。保存した台帳は持たず、正規化した題・ファイルから都度導出する
+   * （行番号は使わない。#4766。再発は前回のIDを引き継ぐ）。修正系列の項目（`ReleaseFixSeries.items`）も同じ関数で導出して突き合わせる
    */
   id?: string;
   /** 前回の指摘と同じものの再発か、新規か。前回の記録が無いレビューでは`new` */
@@ -53,6 +54,10 @@ export type ReleaseReviewFinding = {
    * あれば判断は「再確認が必要」になる。前提の変化を示せない再提示ではこの値を付けない
    */
   premiseChanged?: string | null;
+  /** AIが申告した、指摘が属する確認項目のID（`auth_boundary`はセキュリティ相当として止める指摘に固定する。#4765） */
+  checkId?: string | null;
+  /** 止める指摘の申告をサーバーが提案へ降格した理由（#4765）。降格していなければ付けない */
+  demotedReason?: string | null;
 };
 
 export const RELEASE_REVIEW_DISCOVERIES = ["fix_induced", "initial_miss", "scope_added", "unknown"] as const;
@@ -136,9 +141,52 @@ export type ReleaseReviewContextFinding = {
   occurrences: number;
 };
 
-/** 指摘の安定ID。既存の指摘キー（題・ファイル・行）のハッシュで、保存せず導出する */
-export function reviewFindingId(finding: Pick<ReleaseReviewFinding, "title" | "file" | "line">): string {
-  return `R-${createHash("sha1").update(reviewFindingKey(finding)).digest("hex").slice(0, 6)}`;
+function findingIdOfKey(key: string): string {
+  return `R-${createHash("sha1").update(key).digest("hex").slice(0, 6)}`;
+}
+
+/**
+ * 指摘の安定ID。正規化した題とファイル（`reviewFindingKey`）のハッシュで、保存せず導出する。
+ * **行番号に依存しない**（#4766）——行のずれ・題の表記揺れで別の指摘にならない
+ */
+export function reviewFindingId(finding: Pick<ReleaseReviewFinding, "title" | "file"> & { line?: number | null }): string {
+  return findingIdOfKey(reviewFindingKey(finding));
+}
+
+/** #4766より前のID（題・ファイル・行のハッシュ）。旧IDで保存した判断・結果を引き継ぐ照合にだけ使う */
+export function legacyReviewFindingId(finding: Pick<ReleaseReviewFinding, "title" | "file" | "line">): string {
+  return findingIdOfKey(legacyReviewFindingKey(finding));
+}
+
+/**
+ * 同じ指摘を指しうるIDの一覧（保存済みのID・現行の導出・旧導出の順、重複なし）。保存済みの結果・判断は
+ * 旧IDのまま残っているので、照合はこの一覧のどれかが一致すれば同じ指摘とみなす（#4766）
+ */
+export function reviewFindingIdAliases(finding: Pick<ReleaseReviewFinding, "title" | "file" | "line"> & { id?: string | null }): string[] {
+  return [...new Set([finding.id ?? null, reviewFindingId(finding), legacyReviewFindingId(finding)].filter((id): id is string => Boolean(id)))];
+}
+
+/**
+ * 指摘の一覧をIDで引ける索引にする（#4766）。**完全一致（保存済みのID・旧導出＝題・ファイル・行）を優先**し、
+ * 現行の導出（正規化した題・ファイル）は**一覧の中で1件にしか当たらないときだけ**別名として使う。
+ * 題・ファイルが同じで行だけ違う指摘が複数あると現行の導出が衝突し、先着の指摘の判断・IDが別の指摘を覆うため
+ */
+export function buildFindingIdIndex<T extends Pick<ReleaseReviewFinding, "title" | "file" | "line"> & { id?: string | null }>(
+  items: readonly T[],
+): Map<string, T> {
+  const index = new Map<string, T>();
+  for (const f of items) if (f.id && !index.has(f.id)) index.set(f.id, f);
+  for (const f of items) {
+    const legacy = legacyReviewFindingId(f);
+    if (!index.has(legacy)) index.set(legacy, f);
+  }
+  const derived = new Map<string, T[]>();
+  for (const f of items) {
+    const id = reviewFindingId(f);
+    derived.set(id, [...(derived.get(id) ?? []), f]);
+  }
+  for (const [id, hits] of derived) if (hits.length === 1 && !index.has(id)) index.set(id, hits[0]);
+  return index;
 }
 
 export type ReleaseReviewDetail = {
@@ -173,6 +221,16 @@ export type ReleaseReviewCoverage = {
   batches: number;
   /** 実行の予算で今回は行わなかったバッチ数 */
   pendingBatches: number;
+  /**
+   * 同じ対象の保存済みの結果を、AIを呼ばずに再利用したバッチ数（#4767）。今回確認し直したのは`rerunBatches`。
+   * 旧ランナーの結果は両方0（再利用の記録なし）。保存済みの旧記録には無いので任意にしてある
+   */
+  reusedBatches?: number;
+  rerunBatches?: number;
+  /** バッチをまたぐ相互作用の確認を再利用したか。分割しなかった・旧ランナーはnull */
+  integrationReused?: boolean | null;
+  /** 実績の取りこぼしを補う質問で確認済みになったファイル数（#4768）。旧ランナー・保存済みの旧記録には無い */
+  supplementedFiles?: number;
 };
 
 export type NormalizedReleaseReview = {
@@ -198,7 +256,74 @@ function prNumbers(value: unknown): number[] {
   return [...new Set(numbers)].slice(0, 100);
 }
 
-type ParsedFinding = { finding: ReleaseReviewFinding; blocking: boolean; previousId: string | null; raw: Record<string, unknown> };
+type ParsedFinding = { finding: ReleaseReviewFinding; previousId: string | null; raw: Record<string, unknown> };
+
+/** セキュリティ相当（認証・認可・データ境界・機密の露出）の確認項目。この項目の指摘は止める指摘に固定する */
+export const RELEASE_REVIEW_SECURITY_CHECK_ID = "auth_boundary";
+
+export type FindingBlockingInput = {
+  /** AIの申告（`raw.blocking`）。真偽値以外は「申告なし」 */
+  requested: unknown;
+  severity: ReleaseReviewFinding["severity"];
+  /** 確認項目の版を報告しない旧ランナーの結果か */
+  legacy: boolean;
+  /** セキュリティ相当の指摘か（`checkId`が`auth_boundary`） */
+  security: boolean;
+  file: string | null;
+  impact: string | null;
+  evidence: string | null;
+  blockingReason: string | null;
+  /** ランナーが実測した今回の対象ファイル。報告されていなければnull（差分内かの確認を行わない） */
+  targetFiles: ReadonlySet<string> | null;
+  /** 再レビューで見つかった新規の`initial_miss`が、修正差分に関係しないか */
+  unrelatedInitialMiss: boolean;
+};
+
+export type FindingBlockingDecision = { blocking: boolean; demotedReason: string | null };
+
+/** 根拠（`evidence`）が、集合のどれかのファイルパスを挙げているか */
+function mentionsAny(text: string | null, files: ReadonlySet<string>): boolean {
+  if (!text) return false;
+  for (const file of files) if (text.includes(file)) return true;
+  return false;
+}
+
+/**
+ * 指摘を止める指摘にするか（#4765）。**止めるのは、今回の差分に起因し、具体的な実害と根拠がそろったものだけ。**
+ *
+ * - 旧ランナー（版なし）は従来どおり: 明示の`blocking: false`かつhigh以外だけが提案、フラグ無しは止める
+ * - セキュリティ相当（`auth_boundary`）は申告や根拠の有無にかかわらず止める指摘に固定する
+ * - それ以外は`blocking: true`の申告が必要で、次のどれかに当たれば提案へ降格し、理由を残す:
+ *   申告が無い／再レビューの修正差分に関係しない初回の見落とし／`impact`・`evidence`・`blockingReason`の欠落／
+ *   指摘のファイルが今回の対象外で、根拠が差分内のファイルを挙げていない
+ */
+export function decideFindingBlocking(input: FindingBlockingInput): FindingBlockingDecision {
+  if (input.legacy) return { blocking: !(input.requested === false && input.severity !== "high"), demotedReason: null };
+  if (input.security) return { blocking: true, demotedReason: null };
+  if (input.requested === false) return { blocking: false, demotedReason: null };
+  if (input.requested !== true) {
+    return { blocking: false, demotedReason: "止める指摘かどうかの申告（blocking）が無いため、提案として扱いました" };
+  }
+  const reasons: string[] = [];
+  if (input.unrelatedInitialMiss) {
+    reasons.push("再レビューで見つかった初回の見落としで、修正差分に関係しません");
+  }
+  const missing = [
+    input.impact ? null : "impact",
+    input.evidence ? null : "evidence",
+    input.blockingReason ? null : "blockingReason",
+  ].filter((v): v is string => v !== null);
+  if (missing.length > 0) reasons.push(`止める根拠（${missing.join("・")}）がそろっていません`);
+  const targets = input.targetFiles;
+  if (targets && targets.size > 0 && !(input.file && targets.has(input.file)) && !mentionsAny(input.evidence, targets)) {
+    reasons.push(
+      input.file
+        ? `指摘のファイル（${input.file}）が今回の差分に含まれず、根拠で差分内の変更が原因だと示されていません`
+        : "指摘のファイルが無く、根拠で差分内の変更が原因だと示されていません",
+    );
+  }
+  return reasons.length > 0 ? { blocking: false, demotedReason: reasons.join("／") } : { blocking: true, demotedReason: null };
+}
 
 function parseFinding(value: unknown): ParsedFinding | null {
   if (typeof value !== "object" || value === null) return null;
@@ -217,10 +342,10 @@ function parseFinding(value: unknown): ParsedFinding | null {
     recommendation: str(raw.recommendation, 1000),
     pullRequests: prNumbers(raw.pullRequests),
   };
-  // 止めない提案にできるのは明示（`blocking: false`）されたものだけ。**severityがhighのものは提案にしない**
-  // （実害のある問題を「軽微」として回避させない）。旧形式（フラグ無し）は従来どおり止める指摘
-  const blocking = !(raw.blocking === false && severity !== "high");
-  return { finding, blocking, previousId: str(raw.previousId, 32), raw };
+  const checkId = str(raw.checkId, 64);
+  if (checkId && RELEASE_REVIEW_CHECK_ITEM_IDS.includes(checkId)) finding.checkId = checkId;
+  // 止めるかどうかは、確認項目の版・前回の記録・対象ファイルを見て`decideFindingBlocking`で決める（#4765）
+  return { finding, previousId: str(raw.previousId, 32), raw };
 }
 
 function pick<T extends string>(value: unknown, allowed: readonly T[], fallback: T): T {
@@ -231,12 +356,34 @@ const MAX_COVERAGE_TARGETS = 5000;
 const MAX_OPEN_COVERAGE = 50;
 
 /**
+ * AIが報告したファイルパスを、差分のパス（リポジトリ相対・`/`区切り）へ揃える（#4768）。
+ * 区切りを`/`へ統一し、`/./`・連続した`/`を詰め、先頭の`./`・`/`を除く。
+ * ランナー（`scripts/run-release-review.sh`の`JQ_NPATH`）と同じ規則で、変えるときは両方を揃える
+ */
+export function normalizeReviewPath(path: string): string {
+  return path
+    .trim()
+    .replace(/\\/g, "/")
+    .replace(/\/(?:\.\/)+/g, "/")
+    .replace(/\/+/g, "/")
+    .replace(/^(?:\.\/|\/)+/, "");
+}
+
+function reviewPath(value: unknown): string | null {
+  const raw = str(value, 300);
+  if (!raw) return null;
+  const normalized = normalizeReviewPath(raw);
+  return normalized === "" ? null : normalized;
+}
+
+/**
  * ランナーが報告したファイル別の実績（`targetFiles`・`fileReviews`・`inputFiles`）を、確認実績へ絞る。
  * **確認済みと数えるのは、対象に含まれ、`reviewed`で根拠があるものだけ。** 実績が報告されていない旧結果はnull
  */
 export function normalizeCoverage(raw: Record<string, unknown>, totalFiles: number | null): ReleaseReviewCoverage | null {
   if (!Array.isArray(raw.targetFiles) || !Array.isArray(raw.fileReviews)) return null;
-  const targets = [...new Set(raw.targetFiles.map((f) => str(f, 300)).filter((f): f is string => f !== null))].slice(
+  // パスは照合の前に揃える（`./`付き・先頭の`/`・区切りの揺れだけで未確認にしない。#4768）
+  const targets = [...new Set(raw.targetFiles.map(reviewPath).filter((f): f is string => f !== null))].slice(
     0,
     MAX_COVERAGE_TARGETS,
   );
@@ -247,7 +394,7 @@ export function normalizeCoverage(raw: Record<string, unknown>, totalFiles: numb
   for (const entry of raw.fileReviews) {
     if (typeof entry !== "object" || entry === null) continue;
     const rec = entry as Record<string, unknown>;
-    const file = str(rec.file, 300);
+    const file = reviewPath(rec.file);
     if (!file || !targetSet.has(file)) continue;
     const evidence = str(rec.evidence, 500);
     if (rec.status === "unreadable") {
@@ -277,6 +424,10 @@ export function normalizeCoverage(raw: Record<string, unknown>, totalFiles: numb
     open,
     batches: nonNegativeInt(raw.batches) ?? 1,
     pendingBatches: nonNegativeInt(raw.pendingBatches) ?? 0,
+    reusedBatches: nonNegativeInt(raw.reusedBatches) ?? 0,
+    rerunBatches: nonNegativeInt(raw.rerunBatches) ?? 0,
+    integrationReused: typeof raw.integrationReused === "boolean" ? raw.integrationReused : null,
+    supplementedFiles: Math.min(nonNegativeInt(raw.supplementedFiles) ?? 0, reviewed.size),
   };
 }
 
@@ -296,8 +447,18 @@ export function normalizeReleaseReview(
   const mode: "initial" | "rereview" = reuse ? "rereview" : "initial";
   const fullReviewReason = reuse ? null : (runnerDenied ?? context?.fullReviewReason ?? (previous ? null : "前回の記録が無いため、対象全体を確認しました"));
   const previousFindings = context?.previousFindings ?? [];
-  const previousById = new Map(previousFindings.map((f) => [f.id, f]));
+  // 前回の指摘は保存済みのIDに加え、旧導出・現行の導出（衝突しないものだけ）でも引く（旧IDで記録された前回の指摘を、
+  // 行がずれても見失わない。#4766）
+  const previousById = buildFindingIdIndex(previousFindings);
   const decidedIds = new Set(context?.decidedFindingIds ?? []);
+
+  // 確認項目の版を報告しない結果は旧ランナー。止める指摘の判定も従来どおりにする
+  const reportedVersion = nonNegativeInt(raw.checklistVersion);
+  const legacy = reportedVersion === null;
+  const targetList = Array.isArray(raw.targetFiles)
+    ? raw.targetFiles.map((f) => str(f, 300)).filter((f): f is string => f !== null)
+    : [];
+  const targetFiles = targetList.length > 0 ? new Set(targetList) : null;
 
   const parsed = (Array.isArray(raw.findings) ? raw.findings : [])
     .map(parseFinding)
@@ -308,25 +469,45 @@ export function normalizeReleaseReview(
     (Array.isArray(raw.fixDiffFiles) ? raw.fixDiffFiles : []).filter((f): f is string => typeof f === "string"),
   );
   const prevRunFailed = previous?.runFailed === true;
-  const toFinding = ({ finding, blocking, previousId, raw: r }: ParsedFinding): ReleaseReviewFinding => {
+  const toFinding = ({ finding, previousId, raw: r }: ParsedFinding): { finding: ReleaseReviewFinding; blocking: boolean } => {
     const derived = reviewFindingId(finding);
-    const matched = previousId && previousById.has(previousId) ? previousId : previousById.has(derived) ? derived : null;
+    // 照合の候補: AIが付けた`previousId`→旧導出（完全一致）→現行の導出（旧IDで残る記録との互換。#4766）
+    const candidates = [...new Set([previousId, legacyReviewFindingId(finding), derived].filter((v): v is string => Boolean(v)))];
+    const prior = candidates.map((c) => previousById.get(c)).find((p) => p !== undefined);
+    // 再発は前回の指摘のIDを引き継ぐ（保存済みの判断・修正系列と同じIDのまま）
+    const matched = prior?.id ?? null;
     // ユーザーが判断済みの指摘は、言い換えても`previousId`で同じIDへ戻す（判断が外れて未判断として蒸し返さない。#4657）
-    const decided = !matched && previousId && decidedIds.has(previousId) ? previousId : decidedIds.has(derived) ? derived : null;
+    const decided = [...candidates, ...(matched ? [matched] : [])].find((c) => decidedIds.has(c)) ?? null;
     const id = matched ?? decided ?? derived;
-    const prior = matched ? previousById.get(matched) : undefined;
+    const discovery = !prior && !decided && previous ? pick(r.discovery, RELEASE_REVIEW_DISCOVERIES, "unknown") : null;
+    const reportedReason = str(r.blockingReason, 500);
+    const { blocking, demotedReason } = decideFindingBlocking({
+      requested: r.blocking,
+      severity: finding.severity,
+      legacy,
+      security: finding.checkId === RELEASE_REVIEW_SECURITY_CHECK_ID,
+      file: finding.file,
+      impact: finding.impact,
+      evidence: finding.evidence,
+      blockingReason: reportedReason,
+      targetFiles,
+      // 修正差分のファイルを指していない・根拠で挙げていない初回の見落としは、修正と無関係
+      unrelatedInitialMiss:
+        discovery === "initial_miss" && !(finding.file && fixTouched.has(finding.file)) && !mentionsAny(finding.evidence, fixTouched),
+    });
     const base: ReleaseReviewFinding = {
       ...finding,
       id,
       status: prior || decided ? "recurring" : "new",
       occurrences: prior ? prior.occurrences + 1 : 1,
-      blockingReason: blocking ? str(r.blockingReason, 500) : null,
+      blockingReason: blocking ? reportedReason : null,
     };
+    if (demotedReason) base.demotedReason = demotedReason;
     if (decidedIds.has(id)) base.premiseChanged = str(r.premiseChanged, 500);
-    if (decided) return base;
+    if (decided) return { finding: base, blocking };
     if (!prior) {
-      base.discovery = previous ? pick(r.discovery, RELEASE_REVIEW_DISCOVERIES, "unknown") : null;
-      return base;
+      base.discovery = discovery;
+      return { finding: base, blocking };
     }
     const file = finding.file ?? prior.file;
     const reported = pick(r.stallCause, RELEASE_REVIEW_STALL_CAUSES, "unknown");
@@ -339,13 +520,24 @@ export function normalizeReleaseReview(
           : fixTouched.size > 0
             ? "fix_ineffective"
             : "unknown";
-    return base;
+    return { finding: base, blocking };
   };
-  const blockingFindings = parsed.filter((p) => p.blocking).map(toFinding);
-  const suggestions = parsed.filter((p) => !p.blocking).map(toFinding);
+  // 同じIDの指摘は1件にまとめる（バッチ間で言い回し・行だけ違う重複。#4766）。止める指摘を優先し、提案側の重複は落とす
+  const decidedFindings = parsed.map(toFinding);
+  const seenIds = new Set<string>();
+  const uniqueById = (list: { finding: ReleaseReviewFinding }[]) =>
+    list
+      .filter((d) => {
+        if (seenIds.has(d.finding.id as string)) return false;
+        seenIds.add(d.finding.id as string);
+        return true;
+      })
+      .map((d) => d.finding);
+  const blockingFindings = uniqueById(decidedFindings.filter((d) => d.blocking));
+  const suggestions = uniqueById(decidedFindings.filter((d) => !d.blocking));
 
   // 前回の止める指摘ごとの解消。**根拠の無い「解消」は未確認**、未解消と報告されたのに指摘へ載っていないものは
-  // 指摘へ戻す（報告の取りこぼしで指摘が消えない）
+  // 指摘へ戻す（報告の取りこぼしで指摘が消えない）。提案として載っているもの（降格を含む）は戻さない（#4765）
   const resolutions: PreviousFindingResolution[] = [];
   const reportedResolutions = new Map<string, Record<string, unknown>>();
   for (const entry of Array.isArray(raw.previousFindings) ? raw.previousFindings : []) {
@@ -358,10 +550,11 @@ export function normalizeReleaseReview(
     const entry = reportedResolutions.get(prior.id);
     const evidence = str(entry?.evidence, 1500);
     const stillListed = blockingFindings.some((f) => f.id === prior.id);
+    const listedAsSuggestion = suggestions.some((f) => f.id === prior.id);
     let status: PreviousFindingResolution["status"] = "not_checked";
-    if (stillListed || entry?.status === "unresolved") status = "unresolved";
+    if (stillListed || listedAsSuggestion || entry?.status === "unresolved") status = "unresolved";
     else if (entry?.status === "resolved" && evidence) status = "resolved";
-    if (status === "unresolved" && !stillListed && blockingFindings.length < MAX_FINDINGS) {
+    if (status === "unresolved" && !stillListed && !listedAsSuggestion && blockingFindings.length < MAX_FINDINGS) {
       blockingFindings.push({
         severity: "medium",
         title: prior.title,
@@ -392,8 +585,6 @@ export function normalizeReleaseReview(
     .slice(0, 200);
 
   // 確認項目。版が違う・項目別の記録が無い（旧ランナー）結果は、全項目を未確認として扱う
-  const reportedVersion = nonNegativeInt(raw.checklistVersion);
-  const legacy = reportedVersion === null;
   const versionOk = reportedVersion === RELEASE_REVIEW_CHECKLIST_VERSION;
   const checks = normalizeCheckResults({
     raw: versionOk ? raw.checks : [],

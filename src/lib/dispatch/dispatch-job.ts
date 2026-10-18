@@ -94,6 +94,10 @@ export type DispatchJobStatus =
  *   サブPCがmainとリリースheadの統合状態でビルド・テストし、結果は`ReleaseVerification`へ記録する
  * - `RELEASE_REVIEW` … リリースPRの差分全体のAIレビュー（#4238）。`activeKey`は`release_review:repo#PR@base:head`。
  *   担当（claude／codex）とモデルは`resolveReleaseReviewAssignee`で決めて`agent`列と表示へ載せる。結果は`ReleaseVerification`（`ai_review`）へ記録する
+ * - `REMOTE_SESSION` … Issueに紐づかないリモートセッションを立てる（#4743）。リポジトリの既定ブランチから
+ *   作ったworktreeで`claude --remote-control`を起こし、Remote ControlのURLを報告する。tmux名は
+ *   `<repo>-remote-<8文字>`で`tmuxSessionName`列に載せて渡す。`issueNumber`は埋め草の0
+ * - `REMOTE_SESSION_KILL` … そのリモートセッションを畳み、worktreeを片付ける（#4743）
  */
 export type DispatchJobKind =
   | "LAUNCH"
@@ -115,7 +119,9 @@ export type DispatchJobKind =
   | "REVIEW_FIX"
   | "CHAT_TURN"
   | "RELEASE_VERIFY"
-  | "RELEASE_REVIEW";
+  | "RELEASE_REVIEW"
+  | "REMOTE_SESSION"
+  | "REMOTE_SESSION_KILL";
 
 /**
  * 既に立っているセッションを操作するジョブ（起動しないジョブ）。
@@ -206,6 +212,8 @@ export function parseDispatchJobKind(value: unknown): DispatchJobKind | null {
   if (value === "pr_review") return "PR_REVIEW";
   if (value === "release_verify") return "RELEASE_VERIFY";
   if (value === "release_review") return "RELEASE_REVIEW";
+  if (value === "remote_session") return "REMOTE_SESSION";
+  if (value === "remote_session_kill") return "REMOTE_SESSION_KILL";
   return null;
 }
 
@@ -393,6 +401,10 @@ export const OUT_OF_BAND_JOB_KINDS = [
   "REBOOT",
   "CODEX_PAIRING",
   "CHAT_TURN",
+  // リモートセッション（#4743）はtmuxセッションを立てるが、Issueの実装枠とは別に数える
+  // （上限はpoller側の`REMOTE_SESSION_MAX`）。待たせて意味のある起動でもないので枠外で配る
+  "REMOTE_SESSION",
+  "REMOTE_SESSION_KILL",
 ] as const;
 
 export function isOutOfBandJobKind(kind: DispatchJobKind): boolean {
@@ -403,7 +415,7 @@ export type OutOfBandJobKind = (typeof OUT_OF_BAND_JOB_KINDS)[number];
 
 /** ホストの申告のうち、`boolean | null`で「できる／できない」を表すフィールドの名前 */
 type DispatchHostCapabilityField = {
-  [K in keyof DispatchHostView]-?: DispatchHostView[K] extends boolean | null ? K : never;
+  [K in keyof DispatchHostView]-?: Exclude<DispatchHostView[K], undefined> extends boolean | null ? K : never;
 }[keyof DispatchHostView];
 
 /**
@@ -428,6 +440,8 @@ export const OUT_OF_BAND_JOB_KIND_CAPABILITY = {
   REBOOT: "rebootCapable",
   CODEX_PAIRING: "codexRemoteControlCapable",
   CHAT_TURN: "chatCodexCapable",
+  REMOTE_SESSION: "remoteSessionCapable",
+  REMOTE_SESSION_KILL: "remoteSessionCapable",
 } as const satisfies Record<OutOfBandJobKind, DispatchHostCapabilityField>;
 
 /**
@@ -791,6 +805,8 @@ export type DispatchHostView = {
    * **`null`は「できない」**（古いpollerへ配ると未知の種別として`failed`になり、回答が必ず失敗する）
    */
   chatCodexCapable: boolean | null;
+  /** Issueに紐づかないリモートセッション（#4743）を起こせるか。**`null`は「できない」** */
+  remoteSessionCapable?: boolean | null;
 
   /**
    * チェックアウトの更新と自己再起動ができるか（#1875）。**`null`（未申告）は「できない」として
@@ -1226,6 +1242,10 @@ export function describeDispatchJobKind(kind: DispatchJobKind): string {
       return "リリース全体レビュー";
     case "CHAT_TURN":
       return "チャットの回答";
+    case "REMOTE_SESSION":
+      return "リモートセッション";
+    case "REMOTE_SESSION_KILL":
+      return "リモートセッションの終了";
     case "INTERRUPT":
     case "KILL":
     case "INSTRUCTION":

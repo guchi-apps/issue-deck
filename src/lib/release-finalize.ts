@@ -144,16 +144,46 @@ export function categorizeChangedFile(path: string, rules: FinalizePathRules): C
   return "other";
 }
 
+const IOS_VERSION_LINE = /^\s*(MARKETING_VERSION|CURRENT_PROJECT_VERSION)\s*=\s*"?([^";\s]+)"?\s*;?\s*$/;
+
+/**
+ * iOS設定ファイルのpatchが、版番号の行（`MARKETING_VERSION`・`CURRENT_PROJECT_VERSION`）の書き換えだけか（#4753）。
+ * 削除行と追加行が同じキーの並びで対になり、追加後の`MARKETING_VERSION`が予約済みの正式版と一致するときだけtrue。
+ * patchが無い（巨大差分）・他の行が変わる場合はfalse
+ */
+export function isIosVersionLinesOnlyPatch(patch: string | null | undefined, expectedVersion: string): boolean {
+  if (!patch) return false;
+  const removed: [string, string][] = [];
+  const added: [string, string][] = [];
+  for (const line of patch.split("\n")) {
+    if (line.startsWith("@@") || line.startsWith("\\") || line === "") continue;
+    const sign = line[0];
+    if (sign !== "+" && sign !== "-") continue;
+    const m = IOS_VERSION_LINE.exec(line.slice(1));
+    if (!m) return false;
+    (sign === "-" ? removed : added).push([m[1], m[2]]);
+  }
+  if (removed.length === 0 || removed.length !== added.length) return false;
+  return added.every(([key, value], i) => {
+    if (removed[i][0] !== key) return false;
+    return key === "MARKETING_VERSION" ? value === expectedVersion : /^\d+$/.test(value);
+  });
+}
+
 export type BumpDiffSummary = {
-  files: { path: string; category: ChangedFileCategory }[];
+  /** `versionLinesOnly`: `ios_version`のファイルで、差分が版番号の行の書き換えだけ（公開承認の範囲内。#4753） */
+  files: { path: string; category: ChangedFileCategory; versionLinesOnly?: boolean }[];
   /** 版ファイルが実際に変わっているか（効いていないバンプを適用済みにしない） */
   versionFileChanged: boolean;
   /** 版・更新履歴以外（iOS設定・依存関係・その他）に触れているか。`true`なら引継ぎの前提が変わる */
   touchesBeyondVersion: boolean;
 };
 
-export function summarizeBumpDiff(paths: readonly string[], rules: FinalizePathRules): BumpDiffSummary {
-  const files = [...new Set(paths)].sort().map((path) => ({ path, category: categorizeChangedFile(path, rules) }));
+export function summarizeBumpDiff(paths: readonly string[], rules: FinalizePathRules, versionLinesOnlyPaths: ReadonlySet<string> = new Set()): BumpDiffSummary {
+  const files = [...new Set(paths)].sort().map((path) => {
+    const category = categorizeChangedFile(path, rules);
+    return category === "ios_version" && versionLinesOnlyPaths.has(path) ? { path, category, versionLinesOnly: true } : { path, category };
+  });
   return {
     files,
     versionFileChanged: files.some((f) => f.path === rules.versionFile),
@@ -178,12 +208,23 @@ export const INHERITANCE_REASON_LABEL = {
   ios_files_changed: "iOSの設定・依存関係が変わったため、iOS検証を再実行します",
   ios_final_required: "このリポジトリはiOS（Mac）検証が必要なため、バンプ後のheadで最終検証を再実行します",
   version_and_changelog_only: "バンプで変わったのは版と更新履歴だけのため、バンプ前の合格を引き継ぎます",
+  version_lines_only: "バンプで変わったのは版・更新履歴とiOS設定の版番号行だけのため、バンプ前の合格を引き継ぎます",
 } as const;
+
+/**
+ * 全体レビュー・統合検証にとって「版の書き換えだけ」と見なせるファイルか（#4764）。
+ * `ios_version`は、版番号の行だけが予約済みの正式版へ書き換わったと確かめたもの（`versionLinesOnly`）に限る
+ */
+function isVersionOnlyForReview(file: BumpDiffSummary["files"][number]): boolean {
+  return file.category === "version" || file.category === "changelog" || (file.category === "ios_version" && file.versionLinesOnly === true);
+}
 
 /**
  * バンプ前の合格を、バンプ後のheadへ引き継げるか。**安全だと判定できなければ再検証する。**
  * 引き継ぐのは「版ファイル（と同じ階層のロック）・更新履歴だけが変わった」場合に限り、lifecycleがコード・設定を
- * 変えたとき（iOS設定・依存関係・その他）は影響する検証を再実行する
+ * 変えたとき（iOS設定・依存関係・その他）は影響する検証を再実行する。
+ * 全体レビュー・統合検証に限り、iOS設定の版番号行だけの書き換え（`versionLinesOnly`）も版と同じ扱いにする（#4764）。
+ * iOS検証はiOS設定が変われば従来どおり再実行する
  */
 export function decideInheritedVerification(input: {
   kind: FinalizeVerificationKind;
@@ -205,6 +246,9 @@ export function decideInheritedVerification(input: {
   if (before.baseSha !== input.currentBaseSha) return rerun("main_advanced");
   if (input.requireFreshIos && (kind === "integration" || kind === "ios")) return rerun("ios_final_required");
   if (diff.touchesBeyondVersion) {
+    if (kind !== "ios" && diff.files.every(isVersionOnlyForReview)) {
+      return { kind, action: "inherit", reason: INHERITANCE_REASON_LABEL.version_lines_only };
+    }
     const iosOnlyAffected = diff.files.every((f) => f.category === "version" || f.category === "changelog" || f.category === "ios_version" || f.category === "dependency");
     if (kind === "ios" && iosOnlyAffected) return rerun("ios_files_changed");
     return rerun("beyond_version");
@@ -288,7 +332,7 @@ export function parseInheritanceEvidence(value: unknown): InheritanceEvidence[] 
 
 export type FinalizeStartInput = {
   /** `buildRcFinalizeContract`の結果。公開準備可能でなければnull */
-  contract: { candidateId: string; revision: number; prNumber: number; baseSha: string; headSha: string } | null;
+  contract: { candidateId: string; revision: number; prNumber: number; baseSha: string; headSha: string; requiresAiReviewWaiver?: boolean } | null;
   phase: string;
   /** 候補の先端・mainの先端（GitHubから取り直した現在） */
   observed: { prHeadSha: string; prBaseSha: string; mainSha: string | null } | null;
@@ -296,11 +340,21 @@ export type FinalizeStartInput = {
   hasPending: boolean;
   /** 画面で見ていた候補のhead（押した時点の先端） */
   expectedHeadSha: string;
+  /** 全体レビューの結果を承知で公開へ進むと、人が確認画面で明示したか（#4807）。省略時はfalse */
+  waiveAiReview?: boolean;
 };
 
 export type FinalizeStartDecision =
-  | { ok: true; contract: NonNullable<FinalizeStartInput["contract"]> }
-  | { ok: false; error: "not_ready" | "wrong_phase" | "candidate_changed" | "main_advanced" | "in_progress" | "unobserved" };
+  | {
+      ok: true;
+      contract: NonNullable<FinalizeStartInput["contract"]>;
+      /** 全体レビューを止める条件から外して公開準備を始めるか（合格していない全体レビューを、人が承知で外した） */
+      aiReviewWaived: boolean;
+    }
+  | {
+      ok: false;
+      error: "not_ready" | "wrong_phase" | "candidate_changed" | "main_advanced" | "in_progress" | "unobserved" | "ai_review_waiver_required";
+    };
 
 export const FINALIZE_START_ERROR_LABEL: Record<Exclude<FinalizeStartDecision, { ok: true }>["error"], string> = {
   not_ready: "全体レビュー・統合検証に合格していないため、公開準備を始められません",
@@ -309,10 +363,12 @@ export const FINALIZE_START_ERROR_LABEL: Record<Exclude<FinalizeStartDecision, {
   main_advanced: "mainが進んでいるため、検証を取り直すまで公開準備を始められません",
   in_progress: "公開準備が進行中です",
   unobserved: "候補の現在の状態を取得できませんでした",
+  ai_review_waiver_required: "全体レビューが合格していません。結果を確かめ、承知で進むことを明示してから押してください",
 };
 
 /**
- * 公開準備（正式バンプ）を始めてよいか。**レビュー・修正中は始めない**（契約が作れるのは合格のときだけ）。
+ * 公開準備（正式バンプ）を始めてよいか。**レビュー・修正中は始めない**（契約が作れるのは合格のときと、
+ * 止めているのが全体レビューだけのとき）。後者は人の明示（`waiveAiReview`）が無ければ受け付けない（#4807）。
  * 押した時点の候補の先端（`expectedHeadSha`）・現在のGitHubの先端・検証したbaseの3つが一致しなければ受け付けない
  */
 export function decideFinalizeStart(input: FinalizeStartInput): FinalizeStartDecision {
@@ -326,7 +382,9 @@ export function decideFinalizeStart(input: FinalizeStartInput): FinalizeStartDec
   if (input.observed.prBaseSha !== input.contract.baseSha || input.observed.mainSha !== input.contract.baseSha) {
     return { ok: false, error: "main_advanced" };
   }
-  return { ok: true, contract: input.contract };
+  const aiReviewWaived = input.contract.requiresAiReviewWaiver === true;
+  if (aiReviewWaived && input.waiveAiReview !== true) return { ok: false, error: "ai_review_waiver_required" };
+  return { ok: true, contract: input.contract, aiReviewWaived };
 }
 
 // ---------------------------------------------------------------------------
@@ -339,6 +397,8 @@ export type FinalizeReportObservation = {
   fastForward: boolean;
   /** バンプ前headから現在のheadまでの変更ファイル */
   changedFiles: readonly string[];
+  /** 変更ファイルごとのpatch（取れなかった・巨大なものは含まない。#4753） */
+  patches?: Readonly<Record<string, string>>;
   /** 現在のheadの版（版ファイルを`version-query`で読んだもの。読めなければnull） */
   headVersion: string | null;
   mainVersion: string | null;
@@ -382,9 +442,15 @@ export function decideFinalizeReport(input: {
     return { action: "fail", reason: "候補ブランチがバンプ前のheadから早送りになっていません（履歴の書き換え・巻き戻し）" };
   }
   if (input.expectedVersion === null) return { action: "fail", reason: "版を確定できませんでした（上げ幅の報告がありません）" };
-  const diff = summarizeBumpDiff(observation.changedFiles, input.rules);
-  if (!diff.versionFileChanged) return { action: "fail", reason: "版ファイルが書き換わっていません" };
-  if (!isBumpedToReservation({ headVersion: observation.headVersion, mainVersion: observation.mainVersion, reservedVersion: input.expectedVersion })) {
+  const versionLinesOnly = new Set(
+    observation.changedFiles.filter((path) => categorizeChangedFile(path, input.rules) === "ios_version" && isIosVersionLinesOnlyPatch(observation.patches?.[path], input.expectedVersion!)),
+  );
+  const diff = summarizeBumpDiff(observation.changedFiles, input.rules, versionLinesOnly);
+  const bumped = isBumpedToReservation({ headVersion: observation.headVersion, mainVersion: observation.mainVersion, reservedVersion: input.expectedVersion });
+  // 候補の元のdevelopが既に正式版へ上がっていた場合（自動判定の結果と一致）は、版ファイルが変わらなくてよい（#4798）。
+  // リリースノートなど版以外だけが変わったコミットでも、headの版がmainより新しく予約どおりなら確定する
+  if (!diff.versionFileChanged && !bumped) return { action: "fail", reason: "版ファイルが書き換わっていません" };
+  if (!bumped) {
     return {
       action: "fail",
       reason: `候補の版（${observation.headVersion ?? "不明"}）が確定する版（${input.expectedVersion}）と一致しないか、mainの版（${observation.mainVersion ?? "不明"}）より新しくありません`,
@@ -495,7 +561,11 @@ export function describeReverifyItems(
   return views.map((view) => {
     const label = REVERIFY_KIND_LABEL[view.kind];
     if (view.kind === "ai_review" && reviewStage) {
-      if (reviewStage.kind === "integration_waiting" || reviewStage.kind === "reevaluating") {
+      if (
+        reviewStage.kind === "integration_waiting" ||
+        reviewStage.kind === "reevaluating" ||
+        reviewStage.kind === "awaiting_integration"
+      ) {
         return { kind: view.kind, label, state: "running", reason: `${label}: ${describeReviewStageLabel(reviewStage)}` };
       }
       if (reviewStage.kind === "needs_check" && reviewStage.autoReevaluated && view.state === "needs_check") {

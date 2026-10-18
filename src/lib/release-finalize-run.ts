@@ -1,5 +1,5 @@
 import { db } from "@/lib/db";
-import { requestReleaseReviewJob } from "@/lib/dispatch/release-review-jobs";
+import { requestReleaseReviewAfterIntegration } from "@/lib/dispatch/release-review-start";
 import { requestReleaseVerifyJob } from "@/lib/dispatch/release-verify-jobs";
 import { decideDeployRecoveryRelease } from "@/lib/deploy-recovery-series";
 import { markPullRequestReadyForReview } from "@/lib/github/actions-api";
@@ -8,6 +8,7 @@ import { fetchPullRequest } from "@/lib/github/pull-requests-api";
 import {
   dispatchReleaseFinalizeWorkflow,
   fetchCompareChangedFiles,
+  fetchComparePatches,
   fetchFileTextAtRef,
   fetchMainHeadSha,
   fetchPullRequestCiState,
@@ -138,6 +139,8 @@ export type RcFinalizationChecks = {
   reverifyPhase: ReverifyPhase;
   readiness: FinalizeReadiness;
   readinessLabel: string | null;
+  /** 全体レビューの結果を承知で進めた公開準備か（#4807）。trueなら全体レビューは表示のみで、完了の条件にしない */
+  aiReviewWaived: boolean;
 };
 
 export type RcFinalizationOverview = {
@@ -305,6 +308,8 @@ export async function requestRcFinalize(
      * ことを示したうえで押された要求だけを受け付ける（古い画面からの要求を承認として扱わない）
      */
     approvePublish: boolean;
+    /** 全体レビューの結果を承知で公開へ進む明示（#4807）。全体レビューが合格していない候補だけで要る */
+    waiveAiReview?: boolean;
   },
 ): Promise<FinalizeMutationResult> {
   const ctx: Context = input;
@@ -332,6 +337,7 @@ export async function requestRcFinalize(
     observed: pr && pr.base ? { prHeadSha: pr.head.sha, prBaseSha: pr.base.sha, mainSha } : null,
     hasPending: pending !== null,
     expectedHeadSha: input.expectedHeadSha,
+    waiveAiReview: input.waiveAiReview === true,
   });
   if (!decision.ok) return { ok: false, error: decision.error };
   const contract = decision.contract;
@@ -417,6 +423,7 @@ export async function requestRcFinalize(
           diffFiles: [],
           handoffEvidence: [],
           requestedByUserId: input.userId,
+          aiReviewWaived: decision.aiReviewWaived,
         },
       });
       committed.approvalId = await commitPublishApproval(tx, approval);
@@ -563,6 +570,7 @@ type Observed = {
   mainVersion: string | null;
   headVersion: string | null;
   changedFiles: string[];
+  patches: Record<string, string>;
   fastForward: boolean;
 };
 
@@ -575,9 +583,10 @@ async function observeForReport(ctx: Context, candidate: CandidateRow, row: Fina
   ]);
   if (!mainSha) return null;
   const head = pull.head.sha;
-  const [fastForward, changedFiles, headText, mainText] = await Promise.all([
+  const [fastForward, changedFiles, patches, headText, mainText] = await Promise.all([
     head === row.preHeadSha ? true : isAncestorCommit(ctx.owner, ctx.repo, row.preHeadSha, head, ctx.token),
     head === row.preHeadSha ? Promise.resolve([] as string[]) : fetchCompareChangedFiles(ctx.owner, ctx.repo, row.preHeadSha, head, ctx.token),
+    head === row.preHeadSha ? Promise.resolve({} as Record<string, string>) : fetchComparePatches(ctx.owner, ctx.repo, row.preHeadSha, head, ctx.token).catch(() => ({}) as Record<string, string>),
     fetchFileTextAtRef(ctx.owner, ctx.repo, caller.versionFile, head, ctx.token).catch(() => null),
     fetchFileTextAtRef(ctx.owner, ctx.repo, caller.versionFile, mainSha, ctx.token).catch(() => null),
   ]);
@@ -586,6 +595,7 @@ async function observeForReport(ctx: Context, candidate: CandidateRow, row: Fina
     mainSha,
     fastForward,
     changedFiles,
+    patches,
     headVersion: readVersionFromText(headText, caller.versionQuery),
     mainVersion: readVersionFromText(mainText, caller.versionQuery),
   };
@@ -631,6 +641,7 @@ async function reconcileRequested(ctx: Context, candidate: CandidateRow, row: Fi
       pullRequest: { number: observed.pull.number, baseSha: observed.pull.base.sha ?? "", headSha: observed.pull.head.sha, draft: observed.pull.draft },
       fastForward: observed.fastForward,
       changedFiles: observed.changedFiles,
+      patches: observed.patches,
       headVersion: observed.headVersion,
       mainVersion: observed.mainVersion,
     },
@@ -718,14 +729,15 @@ async function reconcileRequested(ctx: Context, candidate: CandidateRow, row: Fi
   });
   if (!applied) return "ignored";
 
-  // 引き継がなかった種別だけを、バンプ後のheadで再実行する（引き継いだ種別の行は作らない）
+  // 引き継がなかった種別だけを、バンプ後のheadで再実行する（引き継いだ種別の行は作らない）。
+  // 全体レビューは統合検証の完了後に開始し、統合検証を引き継いだときは待たない（#4763）
   const rerun = evidence.filter((e) => e.action === "rerun" && e.kind !== "ios").map((e) => e.kind as ReleaseVerificationKind);
   if (rerun.length > 0 && decision.headSha !== row.preHeadSha) {
     const target: ReleaseVerificationTarget = { repoFullName: repositoryFullName, prNumber: decision.prNumber, baseSha: finalBase, headSha: decision.headSha };
     try {
       await registerReleaseVerification(target, rerun);
       if (rerun.includes("integration")) await requestReleaseVerifyJob(target);
-      if (rerun.includes("ai_review")) await requestReleaseReviewJob(target);
+      if (rerun.includes("ai_review")) await requestReleaseReviewAfterIntegration(target);
     } catch (error) {
       // 依頼に失敗しても適用の記録は戻さない（画面は「未実施」として出し、再実行で依頼できる）
       console.error("[release-finalize] verification request failed", repositoryFullName, error);
@@ -775,13 +787,16 @@ async function evaluateChecks(ctx: Context, row: FinalizationRow, pull: PullDeta
     listReleaseVerificationDetails(repositoryFullName, row.prNumber).catch(() => null),
   ]);
   const finalTarget = { baseSha: row.finalBaseSha ?? "", headSha: row.finalHeadSha ?? "" };
-  const gate = evaluateReleaseMergeGate({ current: finalTarget, records, enforced: true });
+  const aiReviewWaived = row.aiReviewWaived;
+  const gate = evaluateReleaseMergeGate({ current: finalTarget, records, enforced: true, aiReviewWaived });
   // バンプ後の全体レビューの共通の段階（#4664）。統合検証の証跡待ち・再評価中を「要確認で終了」と見せない
   const reviewStage = details
     ? (summarizeReleaseVerification({ current: finalTarget, rows: details, enforced: true, aiReviewAssignee: "" }).aiReview
         .stage ?? null)
     : null;
-  const pendingReverify = gate.views.filter((v) => v.state !== "passed" && v.state !== "not_applicable").map((v) => v.kind as FinalizeVerificationKind);
+  const pendingReverify = gate.views
+    .filter((v) => !isWaivedView(v, aiReviewWaived) && v.state !== "passed" && v.state !== "not_applicable")
+    .map((v) => v.kind as FinalizeVerificationKind);
   const ciState = ci?.ciState ?? "unknown";
   const readiness = decideFinalizeReadiness({ checks: { ciState, draft: pull.draft }, pendingReverify });
   const reverify = describeReverifyItems(gate.views, reviewStage);
@@ -790,10 +805,17 @@ async function evaluateChecks(ctx: Context, row: FinalizationRow, pull: PullDeta
     draft: pull.draft,
     pendingReverify,
     reverify,
-    reverifyPhase: decideReverifyPhase(reverify),
+    // 外した全体レビューは表示に残すが、段階（完了待ち・要確認）の判定には入れない
+    reverifyPhase: decideReverifyPhase(reverify.filter((item) => !(aiReviewWaived && item.kind === "ai_review"))),
     readiness,
     readinessLabel: readiness.ready ? null : FINALIZE_READINESS_LABEL[readiness.reason],
+    aiReviewWaived,
   };
+}
+
+/** 人が結果を承知で外した全体レビューの表示か（#4807）。外した検証は最終検証の完了・失敗の条件にしない */
+function isWaivedView(view: ReleaseVerificationView, aiReviewWaived: boolean): boolean {
+  return aiReviewWaived && view.kind === "ai_review";
 }
 
 async function setPhase(candidateId: string, from: RcPhase, to: RcPhase, extra: Record<string, unknown> = {}): Promise<boolean> {
@@ -826,7 +848,11 @@ export async function reconcileRcFinalization(ctx: Context, candidateId: string)
     else await reconcileRequested(ctx, candidate, requested, null).catch((error: unknown) => console.error("[release-finalize] reconcile failed", error));
     return;
   }
-  // 修正工程（review）・完了・取消では、公開準備の進行は無い（GitHubへ問い合わせない）
+  if (phase === "review") {
+    await repairMergedAfterReturn(ctx, candidate, rows);
+    return;
+  }
+  // 完了・取消では、公開準備の進行は無い（GitHubへ問い合わせない）
   if (!["preparing", "awaiting_approval", "deploying", "verifying_production"].includes(phase)) return;
   const current = [...rows].reverse().find((r) => r.status === "applied");
   if (!current || current.finalHeadSha === null || current.finalBaseSha === null || current.reservedVersion === null) return;
@@ -837,40 +863,24 @@ export async function reconcileRcFinalization(ctx: Context, candidateId: string)
 
   if (phase === "preparing" || phase === "awaiting_approval") {
     if (pull.merged) {
-      // 記録した最終headのまま、そのheadの最終CI・再検証が合格しているときだけ本番反映の追跡へ進める。
-      // 承認待ちへ届く前の早いマージでも、検証を経ずに版の消費・develop同期へ進めない
-      const headMatches = pull.head.sha === current.finalHeadSha;
-      const checks = headMatches ? await evaluateChecks(ctx, current, pull) : null;
-      const decision = decideMergedCandidate({
-        headMatches,
-        readiness: checks?.readiness ?? { ready: false, reason: "ci_unknown" },
-        reverifyStates: checks && checks.pendingReverify.length > 0 ? await pendingReverifyStates(ctx, current) : [],
-      });
-      if (decision.action !== "advance") {
-        await db.releaseCandidateFinalization.updateMany({
-          where: { id: current.id, status: "applied", OR: [{ failureReason: null }, { failureReason: { not: decision.reason } }] },
-          data: { failureReason: decision.reason },
-        });
-        return;
-      }
-      // 止めていた理由は、合格して進むときに消す（進んだ後も警告を出し続けない）
-      if (current.failureReason !== null) {
-        await db.releaseCandidateFinalization.updateMany({ where: { id: current.id, status: "applied" }, data: { failureReason: null } });
-      }
-      if (phase === "preparing") await setPhase(candidate.id, "preparing", "awaiting_approval");
-      if (await setPhase(candidate.id, "awaiting_approval", "deploying")) {
-        await consumeReservation(candidate.id, current.reservedVersion, (pull as { merge_commit_sha?: string | null }).merge_commit_sha ?? null, null);
-      }
+      await advanceMergedCandidate(ctx, candidate.id, phase, current, pull);
       return;
     }
+    // 戻す前にPRを取り直す。PRを読んだ直後に完了系列がマージするとmainも進むため、最初の取得だけで判定すると
+    // マージ済みの候補を修正工程へ戻し、本番反映の追跡が途切れる（#4805）
+    const returnToReview = async (reason: string, status: "failed" | "superseded") => {
+      const fresh = await fetchPullRequest(ctx.owner, ctx.repo, found.number, ctx.token);
+      if (fresh.merged) await advanceMergedCandidate(ctx, candidate.id, phase, current, fresh);
+      else await failFinalization(current, reason, null, status);
+    };
     // 候補の更新・mainの前進があれば、バンプ後の検証と承認の鮮度は失効する。同じ候補の修正工程へ戻す（予約は保つ）
     if (pull.head.sha !== current.finalHeadSha) {
-      await failFinalization(current, "公開準備の後に候補が更新されたため、最終検証をやり直します", null, "superseded");
+      await returnToReview("公開準備の後に候補が更新されたため、最終検証をやり直します", "superseded");
       return;
     }
     const mainSha = await fetchMainHeadSha(ctx.owner, ctx.repo, ctx.token).catch(() => null);
     if (mainSha && mainSha !== current.finalBaseSha) {
-      await failFinalization(current, "公開準備の後にmainが進んだため、検証と承認を取り直します", null, "superseded");
+      await returnToReview("公開準備の後にmainが進んだため、検証と承認を取り直します", "superseded");
       return;
     }
     if (pull.draft) {
@@ -879,7 +889,7 @@ export async function reconcileRcFinalization(ctx: Context, candidateId: string)
     }
     const checks = await evaluateChecks(ctx, current, pull);
     if (checks.ciState === "failure" || checks.pendingReverify.length > 0 && (await reverifyFailed(ctx, current))) {
-      await failFinalization(current, "バンプ後の最終検証が失敗したため、同じ候補の修正工程へ戻します", null, "failed");
+      await returnToReview("バンプ後の最終検証が失敗したため、同じ候補の修正工程へ戻します", "failed");
       return;
     }
     if (phase === "preparing" && checks.readiness.ready) await setPhase(candidate.id, "preparing", "awaiting_approval");
@@ -889,17 +899,81 @@ export async function reconcileRcFinalization(ctx: Context, candidateId: string)
   if (phase === "deploying" || phase === "verifying_production") await advanceProduction(ctx, candidate, current, pull);
 }
 
+/**
+ * マージ済みの候補を本番反映の追跡へ進める。記録した最終headのまま、そのheadの最終CI・再検証が合格しているときだけ進める。
+ * 承認待ちへ届く前の早いマージでも、検証を経ずに版の消費・develop同期へ進めない
+ */
+async function advanceMergedCandidate(ctx: Context, candidateId: string, phase: "preparing" | "awaiting_approval", current: FinalizationRow, pull: PullDetail): Promise<void> {
+  const headMatches = pull.head.sha === current.finalHeadSha;
+  const checks = headMatches ? await evaluateChecks(ctx, current, pull) : null;
+  const decision = decideMergedCandidate({
+    headMatches,
+    readiness: checks?.readiness ?? { ready: false, reason: "ci_unknown" },
+    reverifyStates: checks && checks.pendingReverify.length > 0 ? await pendingReverifyStates(ctx, current) : [],
+  });
+  if (decision.action !== "advance") {
+    await db.releaseCandidateFinalization.updateMany({
+      where: { id: current.id, status: "applied", OR: [{ failureReason: null }, { failureReason: { not: decision.reason } }] },
+      data: { failureReason: decision.reason },
+    });
+    return;
+  }
+  // 止めていた理由は、合格して進むときに消す（進んだ後も警告を出し続けない）
+  if (current.failureReason !== null) {
+    await db.releaseCandidateFinalization.updateMany({ where: { id: current.id, status: "applied" }, data: { failureReason: null } });
+  }
+  if (phase === "preparing") await setPhase(candidateId, "preparing", "awaiting_approval");
+  if (await setPhase(candidateId, "awaiting_approval", "deploying")) {
+    await consumeReservation(candidateId, current.reservedVersion!, (pull as { merge_commit_sha?: string | null }).merge_commit_sha ?? null, null);
+  }
+}
+
+/**
+ * 修正工程（review）へ戻した後にマージ済みと分かった候補の復旧（#4805）。PRを読んだ直後にマージされると、適用済みの
+ * 公開準備を失効させて`review`へ戻してしまい、以後は誰も本番反映を追わない（画面は「状態不整合」で新規開始もできない）。
+ *
+ * 直前の公開準備が適用済みから失効（superseded・failed）した行で、その最終headがそのままマージされているときだけ、
+ * 行を適用済みへ戻し、段階を承認待ちへ戻してから通常のマージ後の判定（`advanceMergedCandidate`）に掛ける。
+ * **検証の合否は改めて判定する**ので、検証を経ずに本番反映へ進めることはない。条件に合わない`review`の候補は
+ * GitHubへ問い合わせない
+ */
+async function repairMergedAfterReturn(ctx: Context, candidate: CandidateRow, rows: FinalizationRow[]): Promise<void> {
+  const latest = rows[rows.length - 1];
+  if (!latest || (latest.status !== "superseded" && latest.status !== "failed")) return;
+  if (latest.finalHeadSha === null || latest.finalBaseSha === null || latest.reservedVersion === null) return;
+  const found = await observeCandidatePullRequest(ctx, candidate.sequence).catch(() => null);
+  if (!found) return;
+  const pull = await fetchPullRequest(ctx.owner, ctx.repo, found.number, ctx.token);
+  if (!pull.merged || pull.head.sha !== latest.finalHeadSha) return;
+  // 遷移表に`review`→`awaiting_approval`は無い（通常の工程では公開準備を経由する）。この復旧だけが条件付き更新で戻す
+  const revived = await db.$transaction(async (tx) => {
+    const moved = await tx.releaseCandidate.updateMany({ where: { id: candidate.id, phase: "review" }, data: { phase: "awaiting_approval" } });
+    if (moved.count === 0) return false;
+    const restored = await tx.releaseCandidateFinalization.updateMany({ where: { id: latest.id, status: latest.status }, data: { status: "applied", failureReason: null } });
+    if (restored.count === 0) throw new RepairRaceError();
+    return true;
+  }).catch((error: unknown) => {
+    if (error instanceof RepairRaceError) return false;
+    throw error;
+  });
+  if (!revived) return;
+  console.info("[release-finalize] マージ済みの候補を修正工程から本番反映の追跡へ戻しました", fullNameOf(ctx), candidate.id);
+  await advanceMergedCandidate(ctx, candidate.id, "awaiting_approval", { ...latest, status: "applied", failureReason: null }, pull);
+}
+
+class RepairRaceError extends Error {}
+
 /** バンプ後のheadで合格していない検証の状態（マージ後の判定用。`evaluateChecks`と同じ固定した対象で評価する） */
 async function pendingReverifyStates(ctx: Context, row: FinalizationRow): Promise<ReleaseVerificationView["state"][]> {
   const records = await listReleaseVerificationRecords(fullNameOf(ctx), row.prNumber);
   const gate = evaluateReleaseMergeGate({ current: { baseSha: row.finalBaseSha ?? "", headSha: row.finalHeadSha ?? "" }, records, enforced: true });
-  return gate.views.filter((v) => v.state !== "passed" && v.state !== "not_applicable").map((v) => v.state);
+  return gate.views.filter((v) => !isWaivedView(v, row.aiReviewWaived) && v.state !== "passed" && v.state !== "not_applicable").map((v) => v.state);
 }
 
 async function reverifyFailed(ctx: Context, row: FinalizationRow): Promise<boolean> {
   const records = await listReleaseVerificationRecords(fullNameOf(ctx), row.prNumber);
   const gate = evaluateReleaseMergeGate({ current: { baseSha: row.finalBaseSha ?? "", headSha: row.finalHeadSha ?? "" }, records, enforced: true });
-  return gate.views.some((v) => v.state === "failed");
+  return gate.views.some((v) => !isWaivedView(v, row.aiReviewWaived) && v.state === "failed");
 }
 
 /**
@@ -1058,6 +1132,7 @@ export async function loadFinalizationSnapshot(
   phase: string;
   applied: { preHeadSha: string; finalHeadSha: string; finalBaseSha: string } | null;
   latest: { status: string; failureReason: string | null } | null;
+  aiReviewWaiver: { preHeadSha: string; finalHeadSha: string | null } | null;
 } | null> {
   const resolvedId = await findCandidateIdByPullRequest(repositoryFullName, prNumber);
   const resolved = resolvedId ? await db.releaseCandidate.findUnique({ where: { id: resolvedId }, select: { id: true, phase: true } }) : null;
@@ -1073,6 +1148,11 @@ export async function loadFinalizationSnapshot(
   return {
     candidateId: revision.candidate.id,
     latest: newest ? { status: newest.status, failureReason: newest.failureReason } : null,
+    // 全体レビューを外した公開準備（#4807）。失敗・期限切れで修正工程へ戻ったものは、次の公開準備で明示し直す
+    aiReviewWaiver:
+      newest && newest.aiReviewWaived && (newest.status === "requested" || newest.status === "applied")
+        ? { preHeadSha: newest.preHeadSha, finalHeadSha: newest.finalHeadSha }
+        : null,
     phase: revision.candidate.phase,
     applied:
       latest && latest.finalHeadSha && latest.finalBaseSha

@@ -17,6 +17,7 @@
 
 import { isLegacyGenerationLimitStopReason, isReverifyFailureReason, NOTHING_TO_ADD_REASON } from "@/lib/release-fix-series";
 import { isReleaseCandidateHeadRef } from "@/lib/release-branch";
+import { REVIEW_OPEN_ITEM_LABEL, type ReviewEvidenceStage } from "@/lib/release-review-reevaluation";
 
 export const RELEASE_COMPLETION_SCOPE_READY = "until_ready";
 export const RELEASE_COMPLETION_SCOPE_PRODUCTION = "until_production";
@@ -86,7 +87,9 @@ export type ReleaseCompletionStopReason =
   | "approval_revoked"
   | "approval_checks_failed"
   | "approval_review_undecided"
-  | "finalize_failed";
+  | "finalize_failed"
+  // 指摘0件で未確認範囲だけが残り、統合検証を踏まえた再評価でも解消しなかった（#4768。実行障害ではない）
+  | "review_unverified";
 
 /**
  * 公開承認から始めた系列で、停止しても**承認を失効させない**理由（同じ処理の再試行で再承認を増やさない。#4666）。
@@ -103,6 +106,7 @@ export const APPROVAL_RETRYABLE_STOP_REASONS: ReadonlySet<ReleaseCompletionStopR
   "approval_review_undecided",
   "finalize_failed",
   "cost_limit",
+  "review_unverified",
 ]);
 
 /** 修正系列の1世代（候補に紐づく最新のもの）を、判断に要る範囲だけ写したもの */
@@ -138,6 +142,13 @@ export type CompletionChecks = {
    * このときは全体レビューを「直すべき問題」として扱わない（新たな修正を起案しない）。省略時はfalse
    */
   aiReviewClearedByDecision?: boolean;
+  /**
+   * 指摘0件で未確認範囲だけが残った全体レビュー（`needs_check`）の段階（#4768。`toCompletionChecks`が
+   * `describeReviewEvidenceStage`から作る）。`reevaluating`は統合検証の完了を受けた再評価がまだ済んでいない、
+   * `settled`は再評価済み・または再評価しても変わらない（証跡に依存しない未確認）。`detail`は止めるときに示す内容。
+   * 省略時は`settled`として扱う
+   */
+  aiReviewUnverified?: { stage: "reevaluating" | "settled"; detail: string | null } | null;
 };
 
 /**
@@ -197,7 +208,27 @@ export type CompletionFinalizationSnapshot = {
   applied: { preHeadSha: string; finalHeadSha: string; finalBaseSha: string } | null;
   /** 最新の公開準備の状態と失敗理由（公開承認の系列が「公開準備が失敗した」を止める理由として出す）。無ければnull */
   latest?: { status: string; failureReason: string | null } | null;
+  /**
+   * 人が全体レビューの結果を承知で進めた公開準備（#4807）の、バンプ前後のhead。無ければnull。
+   * このheadの全体レビューは、自動公開の判定で止める条件にしない（統合検証・CI・Macは必須のまま）
+   */
+  aiReviewWaiver?: { preHeadSha: string; finalHeadSha: string | null } | null;
 };
+
+/**
+ * 人が結果を承知で外した全体レビュー（#4807）を、系列の判断では「対象外」として扱う。指摘の起案・停止・待ちに
+ * 回さない（承認した公開準備のheadに限る。修正で候補が変われば外れる）
+ */
+export function waiveAiReviewCheck(checks: CompletionChecks, waived: boolean): CompletionChecks {
+  return waived ? { ...checks, aiReview: "not_applicable", aiReviewUnverified: null } : checks;
+}
+
+/** `headSha`の全体レビューを、人の明示で止める条件から外しているか（#4807） */
+export function isAiReviewWaivedFor(finalization: CompletionFinalizationSnapshot | null | undefined, headSha: string): boolean {
+  const waiver = finalization?.aiReviewWaiver;
+  if (!waiver || !headSha) return false;
+  return waiver.preHeadSha === headSha || waiver.finalHeadSha === headSha;
+}
 
 export type ReleaseCompletionObservation = {
   now: Date;
@@ -217,6 +248,8 @@ export type ReleaseCompletionDecision =
   | { action: "create_fix"; sourceKind: "review_finding" | "integration_failure" }
   | { action: "follow_successor"; prNumber: number; headSha: string; baseSha: string }
   | { action: "evaluate_merge" }
+  /** 全体レビューの未確認範囲を、統合検証の結果で再評価する（#4768。積むのは`reevaluateReleaseReviewIfReady`） */
+  | { action: "reevaluate_review" }
   | { action: "begin_release"; mergeSha: string }
   | { action: "stop"; reason: ReleaseCompletionStopReason; detail?: string };
 
@@ -262,10 +295,19 @@ export function decideReleaseCompletion(
   }
 
   const series = observation.series;
+  // 修正系列の後継が、その後の公開準備のバンプで置き換わり、系列はもうバンプ後のheadを追っている（#4729）。
+  // 系列の記録はバンプ前のrevisionのまま残るので、これを後継として戻すと上の分岐と巡回ごとに往復する
+  const successorBumped =
+    finalized !== null &&
+    series !== null &&
+    series.successorPrNumber === run.candidatePrNumber &&
+    series.successorHeadSha === finalized.preHeadSha &&
+    run.candidateHeadSha === finalized.finalHeadSha;
   // 修正系列が作り直した後継へ進む。作り直しで元の候補は閉じられるので、取消の判定より先に見る
   // 新方式の候補（#4495）は同じPRのrevisionが進むので、番号が同じでもheadが違えば後継として追う
   if (
     series &&
+    !successorBumped &&
     series.successorPrNumber !== null &&
     series.successorHeadSha &&
     series.successorBaseSha &&
@@ -327,8 +369,12 @@ export function decideReleaseCompletion(
   if (checks === null) return { action: "wait", status: "checking" };
   const states = [checks.aiReview, checks.integration];
   const problem = (s: CompletionCheckState) => s === "failed" || s === "needs_check";
+  const clearedByDecision = checks.aiReview === "needs_check" && checks.aiReviewClearedByDecision === true;
+  // 指摘0件で未確認範囲だけの要確認（#4768）。コードの指摘でも実行障害でもないので、修正の起案・「実行障害」の停止に
+  // 回さず、統合検証の完了と再評価を待ってから判断する（下の`unverifiedOnly`の分岐）
+  const unverifiedOnly = checks.aiReview === "needs_check" && checks.findingCount === 0 && !clearedByDecision;
   // 止める指摘の全件をユーザーが修正しないと判断した全体レビューは、直す対象として扱わない（#4657）
-  const aiProblem = problem(checks.aiReview) && !(checks.aiReview === "needs_check" && checks.aiReviewClearedByDecision === true);
+  const aiProblem = problem(checks.aiReview) && !clearedByDecision && !unverifiedOnly;
   if (aiProblem || problem(checks.integration)) {
     if (problem(checks.integration) && checks.integrationSetupGap) return { action: "stop", reason: "setup_missing" };
     if (approvalRun) {
@@ -352,6 +398,15 @@ export function decideReleaseCompletion(
     return { action: "create_fix", sourceKind };
   }
   if (checks.mac === "failed" || checks.mac === "needs_setup") return { action: "stop", reason: "setup_missing", detail: "Mac検証" };
+  if (unverifiedOnly) {
+    // 統合検証が終わっていなければ待つ（終われば証跡に依存する未確認は再評価で解消し得る）
+    if (checks.integration === "pending" || checks.integration === "not_run" || checks.integration === "invalidated") {
+      return { action: "wait", status: "checking", note: UNVERIFIED_WAIT_INTEGRATION_NOTE };
+    }
+    if (checks.aiReviewUnverified?.stage === "reevaluating") return { action: "reevaluate_review" };
+    // 再評価でも残った（または再評価で変わらない）。理由を示して止める（実行障害ではない）
+    return { action: "stop", reason: "review_unverified", detail: checks.aiReviewUnverified?.detail ?? undefined };
+  }
   if (states.some((s) => s === "pending" || s === "not_run" || s === "invalidated") || !["passed", "not_applicable"].includes(checks.mac)) {
     return { action: "wait", status: "checking" };
   }
@@ -372,6 +427,44 @@ export function decideReleaseCompletion(
   if (run.scope !== RELEASE_COMPLETION_SCOPE_PRODUCTION) return { action: "wait", status: "awaiting_approval" };
   if (overBudget) return { action: "stop", reason: "cost_limit" };
   return { action: "evaluate_merge" };
+}
+
+/**
+ * 全体レビューが指摘0件で未確認範囲だけの要確認か、その段階と止めるときに示す内容（#4768）。
+ * 該当しなければnull。段階は`describeReviewEvidenceStage`（画面のバッジと同じ規則）から読む
+ */
+export function describeUnverifiedReview(input: {
+  /** 表示上の状態（未確認範囲つきの`passed`は`needs_check`へ読み替え済み） */
+  state: string;
+  findingCount: number;
+  stage: ReviewEvidenceStage | null | undefined;
+  unverifiedScope: string | null | undefined;
+}): CompletionChecks["aiReviewUnverified"] {
+  if (input.state !== "needs_check" || input.findingCount > 0) return null;
+  const kind = input.stage?.kind;
+  const items = input.stage?.kind === "needs_check" ? input.stage.items.map((k) => REVIEW_OPEN_ITEM_LABEL[k]) : [];
+  const scope = (input.unverifiedScope ?? "").trim();
+  const parts = [items.length > 0 ? items.join("・") : null, scope ? (scope.length > 200 ? `${scope.slice(0, 200)}…` : scope) : null].filter(
+    (v): v is string => v !== null,
+  );
+  return {
+    stage: kind === "reevaluating" || kind === "integration_waiting" ? "reevaluating" : "settled",
+    detail: parts.length > 0 ? parts.join("：") : null,
+  };
+}
+
+export const UNVERIFIED_WAIT_INTEGRATION_NOTE = "統合検証の完了を待って、全体レビューの未確認範囲を再評価します";
+export const UNVERIFIED_REEVALUATING_NOTE = "統合検証の結果で、全体レビューの未確認範囲を再評価しています";
+
+/**
+ * 再評価を積もうとした結果（`reevaluateReleaseReviewIfReady`）で、待ち続けてよいか（#4768）。積めた・実行中・
+ * 実行ホストが空いていない（一時的）なら待つ。それ以外（再評価の対象外・積める状態でない）は、待っても変わらないので止める
+ */
+export function reevaluationKeepsWaiting(outcome: { action: string; reason?: string }): boolean {
+  if (outcome.action === "rerun") return true;
+  if (outcome.action === "none") return outcome.reason === "review_active" || outcome.reason === "review_in_progress";
+  if (outcome.action === "skipped") return outcome.reason === "no_host";
+  return false;
 }
 
 /** 公開準備が済んだ候補か。バンプ後のheadと一致し、段階が本番承認待ち（最終検証に合格済み）のときだけ */
@@ -607,7 +700,52 @@ export function releaseCompletionStopMessage(reason: string | null, detail: stri
       return `全体レビューに未判断の止める指摘が残っているため、自動公開を止めました${suffix}。指摘ごとに採否を判断するか修正してから、「自動公開を再開」で続けられます（公開承認は指摘の採否の判断として扱いません）。`;
     case "finalize_failed":
       return `公開準備（正式バンプ・最終検証）が失敗したため、自動公開を止めました${suffix}。同じ内容で公開準備をやり直すと、承認し直さずに続きます。`;
+    case "review_unverified":
+      return `全体レビューに止める指摘はありませんが、確認できなかった範囲が残ったため止めました${suffix}。統合検証の結果を踏まえた再評価でも解消していません。未確認の内容を確かめ、全体レビューを再実行するか、明示確認で進めてください。`;
     default:
       return reason;
   }
+}
+
+/** 同じ理由で本番マージを待ち続けて、画面に「長時間進んでいません」と出すまでの時間（#4725） */
+export const RELEASE_COMPLETION_LONG_WAIT_MS = 15 * 60 * 1000;
+
+/** `decideCompletionMerge`の`wait`の理由を、画面に出す日本語1行にする。未知の理由（検証ゲートの文言）はそのまま添える */
+export function describeMergeWait(reason: string | null): string | null {
+  if (!reason) return null;
+  switch (reason) {
+    case "pull_request_unobserved":
+      return "リリース候補のPRをGitHubから取得できていません";
+    case "main_unobserved":
+      return "本番mainの先端をGitHubから取得できていません";
+    case "already_merged":
+      return "マージ済みのPRを確認しています（本番反映の追跡へ進みます）";
+    case "finalization_not_ready":
+      return "公開準備（正式バンプと最終検証）がまだ完了していません";
+    case "verification":
+      return "検証（全体レビュー・統合検証・Mac検証）の条件がまだ満たされていません";
+    case "ci_pending":
+      return "CIの完了を待っています";
+    case "ci_unknown":
+      return "CIの結果を取得できていません";
+    case "mergeable_unknown":
+      return "GitHubのマージ可否を判定中";
+    default:
+      return `検証の条件を待っています: ${reason}`;
+  }
+}
+
+/** 待ち理由の記録。理由が変わったとき（または初回）だけ待ち始めを更新し、同じ理由なら何も書かない */
+export function nextMergeWait(
+  prev: { reason: string | null; since: Date | null },
+  reason: string,
+  now: Date,
+): { reason: string; since: Date } | null {
+  if (prev.reason === reason && prev.since !== null) return null;
+  return { reason, since: now };
+}
+
+/** 同じ理由で`RELEASE_COMPLETION_LONG_WAIT_MS`以上待っているか（境界を含む） */
+export function isLongMergeWait(since: Date | null, now: Date): boolean {
+  return since !== null && now.getTime() - since.getTime() >= RELEASE_COMPLETION_LONG_WAIT_MS;
 }

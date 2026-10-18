@@ -11,7 +11,8 @@
 - GitHub上の操作が誰の名義になるか: [attribution.md](attribution.md)
 - Actions側のトークンと自己ループ防止: [actions-token-model.md](actions-token-model.md)
 - 無人実行フローの全体像: [multi-agent-workflow.md](multi-agent-workflow.md)・[multi-agent/](multi-agent/)
-- 会話型の操作入口（IssueDeck Chat。意図解釈・確認カード・共通サービスの切り出し）: [chat.md](chat.md)
+- 会話型の操作入口（IssueDeck Chat。意図解釈・確認カード・共通サービスの切り出し）: [chat.md](chat.md)。**アプリ内の画面は#4743で廃止**し、処理部分はSlack起案が使う
+- リポジトリだけを指定してサブPCにClaude Codeのセッションを立て、Claude Codeアプリへ移動する「リモートセッション」（`src/lib/dispatch/remote-session*.ts`・`src/app/api/remote-sessions/`・`scripts/start-remote-session.sh`）: [remote-session.md](remote-session.md)（#4743）
 - Slackの`#アプリissue起案`からのIssue起案（Events受信・対象選択UI・Bot返信。`src/lib/slack/`・`src/app/api/slack/`）: [slack-intake.md](slack-intake.md)（#4454）
 - 親子Issue・依存関係・実行計画をまとめて起案する共通サービス（Slack・Chat共通。`src/lib/epic-draft/`）: [epic-draft.md](epic-draft.md)（#4537）
 - 親子Issueの実行計画（構造化計画の登録・検証・版管理。`src/lib/execution-plan/`・`src/app/api/execution-plans/`）: [execution-plan.md](execution-plan.md)（#4535）
@@ -645,9 +646,9 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
     導入状態は[`lib/release-rollout.ts`](../src/lib/release-rollout.ts)が導出し、設定＞フリート運用で一覧できる。
     設計は[multi-agent/release-verification.md](multi-agent/release-verification.md)
   - **リリース全体のAIレビューは`DispatchJob`（`kind=RELEASE_REVIEW`）**（#4238）。積む処理は
-    [`lib/dispatch/release-review-jobs.ts`](../src/lib/dispatch/release-review-jobs.ts)（`release-verify`の`request`が統合検証と並べて呼ぶ）、
+    [`lib/dispatch/release-review-jobs.ts`](../src/lib/dispatch/release-review-jobs.ts)、自動経路が統合検証の完了後に開始する判定は[`lib/release-review-start.ts`](../src/lib/release-review-start.ts)（純関数）・[`lib/dispatch/release-review-start.ts`](../src/lib/dispatch/release-review-start.ts)（#4763）、
     担当は[`lib/release-review-assignee.ts`](../src/lib/release-review-assignee.ts)（`appAiModelReasoning`に従い、画面とジョブで同じ関数）、
-    結果の正規化は[`lib/release-review-result.ts`](../src/lib/release-review-result.ts)、確認項目は[`lib/release-review-checklist.ts`](../src/lib/release-review-checklist.ts)、再レビューの文脈は[`lib/release-review-context.ts`](../src/lib/release-review-context.ts)・[`-load.ts`](../src/lib/release-review-context-load.ts)（#4559）、指摘ごとのユーザー判断は[`lib/release-review-decision.ts`](../src/lib/release-review-decision.ts)（純関数）・[`-store.ts`](../src/lib/release-review-decision-store.ts)・`POST /api/repositories/release/review-decisions`と画面の[`release-review-decision.tsx`](../src/components/dashboard/release-review-decision.tsx)（#4657）、AIの推奨判断と理由案は[`lib/release-review-recommendation.ts`](../src/lib/release-review-recommendation.ts)（純関数）・[`-store.ts`](../src/lib/release-review-recommendation-store.ts)・[`lib/claude/release-review-recommend.ts`](../src/lib/claude/release-review-recommend.ts)・`POST /api/repositories/release/review-recommendations`（#4676）、実行はサブPCの`scripts/run-release-review.sh`。
+    結果の正規化は[`lib/release-review-result.ts`](../src/lib/release-review-result.ts)（止める指摘か提案かの判定・降格は同じファイルの純関数`decideFindingBlocking`。#4765。ファイルパスの照合前の正規化は`normalizeReviewPath`で、ランナーの`JQ_NPATH`と揃える。#4768）、確認項目は[`lib/release-review-checklist.ts`](../src/lib/release-review-checklist.ts)、再レビューの文脈は[`lib/release-review-context.ts`](../src/lib/release-review-context.ts)・[`-load.ts`](../src/lib/release-review-context-load.ts)（#4559）、指摘ごとのユーザー判断は[`lib/release-review-decision.ts`](../src/lib/release-review-decision.ts)（純関数）・[`-store.ts`](../src/lib/release-review-decision-store.ts)・`POST /api/repositories/release/review-decisions`と画面の[`release-review-decision.tsx`](../src/components/dashboard/release-review-decision.tsx)（#4657）、AIの推奨判断と理由案は[`lib/release-review-recommendation.ts`](../src/lib/release-review-recommendation.ts)（純関数）・[`-store.ts`](../src/lib/release-review-recommendation-store.ts)・[`lib/claude/release-review-recommend.ts`](../src/lib/claude/release-review-recommend.ts)・`POST /api/repositories/release/review-recommendations`（#4676）、実行はサブPCの`scripts/run-release-review.sh`。
     画面の3区分は[`components/dashboard/release-review-sections.tsx`](../src/components/dashboard/release-review-sections.tsx)
     （PC・スマホ・本番マージの確認ダイアログで共通。`GET /api/repositories/release/verification`を部品自身が取る）。
     進捗（待機理由・工程・経過）は[`lib/release-verification-progress.ts`](../src/lib/release-verification-progress.ts)が
@@ -1552,12 +1553,24 @@ export function POST(request: NextRequest) {
     `PushMutedKind`＝**行があればOFF・ユーザー単位**）。各送信は宛先に`notMutedWhere(kind)`を足す。
     席を先に取る確認待ち・本番マージ待ちは、**OFFのせいで宛先が空になったときも席を取らない**
     （保留と同じ理由。ONに戻したあとに鳴らせなくなる）。
+- **作業サマリー（#4524）。通常Issueも旧手作業Issueも、詳細の先頭は「現在地・目的・完了条件・次の操作」だけ。**
+  通常Issueの簡素な詳細を基準にし、実施記録・根拠・前提がそろった依存は閉じた「補足」に畳む。
+  本文の読み取りと現在地の判定は[`lib/issue-work-summary.ts`](../src/lib/issue-work-summary.ts)
+  （目的は`## 目的`／`## この作業でできるようになること`、完了条件は`## 完了条件`、無ければ旧手作業の
+  `## 完了の確認方法`。達成数は本文のチェック状態か、#4426の完了検証がすべて成功したときだけ。記載が無ければ
+  「記載なし」で、条件は作らない）、表示は[`issue-work-summary.tsx`](../src/components/dashboard/issue-work-summary.tsx)。
+  **依存待ちは青（操作不要）、amberは本人の操作待ちだけ。** 一覧の前提待ちアイコンも青にそろえた。
+  親実行の詳細は、mainへ反映済みでも本番確認などが残る間「リリース済みですが、機能全体は未完了」と出す。
+- **リリース画面（ブランチ・リリース画面のレーン）のIssue行も同じ語彙で追う（#4748）。** 判定は
+  [`resolveIssueTracking`](../src/lib/branch-flow.ts)（本人の操作待ち＞依存待ち。前提の結果はshellの
+  `prerequisiteReadiness`を`buildBranchFlow`へ渡す）。手作業Issue=リリース後、未マージ／develop止まりのレーン=
+  リリース前必須。本番へ届いたレーンで対応Issueがopen・手作業が未完了なら`lane.featureIncomplete`が「機能全体は未完了」の注記になる。
 - **【#4315で撤去】手順ウィザード「手作業アシスタント」（`manual-step-guide-dialog.tsx`・一覧の
   「順番に進める」バー・`use-manual-step-guide.ts`・`manual-step-{run,autorun,fix,trouble}-panel.tsx`・
   `manual-step-placeholder-fill.tsx`・自己申告の完了ボタン）は無い。** 手作業Issueは手作業セッション
   （AI主導。`manual-step-session-panel.tsx`・`scripts/prompts/manual-step-agent.md`）が調査・実行・検証を
   進め、詳細は`ManualStepPanel`の「作業の状況」（`lib/manual-step-investigation.ts`が読む事前調査と
-  完了検証のコメント。代表状態は`lib/manual-step-phase.ts`。#4426）を出す。完了は検証コマンドがすべて終了コード0のときだけセッションがcloseする。
+  完了検証のコメント。代表状態は`lib/manual-step-phase.ts`。#4426）を出す。実行手段の判断とホスト能力の実測は[docs/multi-agent/manual-step-capabilities.md](multi-agent/manual-step-capabilities.md)（#4522）。完了は検証コマンドがすべて終了コード0のときだけセッションがcloseする。
   **以下の箇条書きは撤去前の設計の記録で、サーバー側の代行実行（`/api/manual-steps/*`・`lib/manual-step-*.ts`）
   は残っている。** 画面側のファイル名・番号表示・ボタンの記述は現行のコードに存在しない。
 - **（撤去前の記録）溜まった手作業は「手作業アシスタント」が1手順ずつ順番に案内する**（#1826）。
@@ -2652,7 +2665,7 @@ export function POST(request: NextRequest) {
   2本の縦レールに対し、**横線1本がリリース（develop→mainのマージ）**で、その下にぶら下がる枝が
   その版に乗った変更になる（`BranchFlowReleaseGroup`）。既定で出すのは**次のリリースに乗る分まで**
   （未リリースの束＋まだdevelopへ向かっているレーン）で、本番へ出た版の束と「どの版で出たか
-  特定できないレーン」は「リリース済みのバージョンを表示」で開く（#1586。#1510当初は
+  特定できないレーン」は「リリース済みのバージョン」アコーディオン（初期は閉じる。#4721）で開く（#1586。#1510当初は
   ひとつ前の版まで出していたが、済んだ変更が「次に何が出るか」を押し下げていた）。
   **畳んだぶんに残る未完了の手作業（`71.manual-step`）だけは束の外へ出して常に見せる**——
   版が出た後も残る作業で、畳んだ束と一緒に隠すと画面のどこにも現れなくなるため。
@@ -3317,7 +3330,7 @@ export function POST(request: NextRequest) {
     リリースPRがあるときだけCI状態のGraphQLが1回増える。
   - 種別ごとのON/OFFは**持たない**（設定は購読の有無だけ）。通知する2種類はどちらも
     「人が動かないと止まるもの」で、片方だけ止めたい理由が出ていないため。
-- **リリース（本番反映）の完了もPush通知で届く**（#2725。
+- **リリース（本番反映）の完了はSlackのチャンネルへカードで届く**（#2725でPush通知として導入し、#4791でプッシュ通知をやめてSlack投稿へ替えた。投稿は`lib/slack/client.ts`の`postChannelMessage`、投稿先は`lib/slack/config.ts`の`loadReleaseSlackTarget`。以下のPush・購読・ミュートに関する記述は#4791より前の経緯で、送り先以外の検知・記録の仕組みは今も同じ。
   [`lib/notifications/release-push.ts`](../src/lib/notifications/release-push.ts)）。
   リリース通知はSignalyへのwebhook（`deploy.yml`の`notify-release`が
   `.github/scripts/signaly-notify.sh`を呼ぶ）にしか流れておらず、**フリート全体のリリースを
@@ -4020,9 +4033,9 @@ INSERTかUPDATEを選ぶため、同じキーへ同時に2本届くと**どち�
 - **サムネイルは原本をそのまま縮めて出している**（配信APIに縮小版を作る経路が無く、1枚10MBまで
   受け付ける）。一覧は`loading="lazy"`＋表示件数24枚ずつの「さらに表示」で区切ってあり、
   一覧API自体は全件返す（区切りを画面側に置いているので、古い画像が消せなくなることはない）。
-- `uploads/` は`.gitignore`済みで配布物にも含まれず、`deploy.yml` のクリーンアップ対象にも
-  入っていないため本番で永続する。**`deploy.yml` の `rm -rf` の行に `uploads` を足すと
-  ユーザーがアップロードした画像が消える。**
+- `uploads/` は`.gitignore`済みで配布物にも含まれず、デプロイ（VPSの`app-deploy-gate`。#4804）の
+  クリーンアップ対象（前回の配布物に入っていたファイルと固定の一覧）にも入っていないため本番で永続する。
+  **配布物（`deploy.yml`の`Create archive`）に `uploads` を入れると、次回のデプロイでユーザーがアップロードした画像が消える。**
 
 ### 「使っていない画像」は参照の索引で判定する（#2475）
 
@@ -4606,7 +4619,8 @@ Claude Code・Codex CLIそれぞれの新規実行の一時停止（`AppSetting.
 #2417で実際に起きた）。判定関数を直接呼ぶテストで確かめるほうが確実。
 
 追加するときはローカルの`.env.local.example`だけでなく、1Password・`.github/secrets-manifest.tsv`・
-`deploy.yml` の `env:` と `envs:`・サーバー側`.env`を書く`update_env`行まで更新する。
+`deploy.yml` の `Send environment variables` ステップ（`env:`・改行チェックの`for name in`・`printf`の行）まで更新する
+（#4804。VPSの`app-deploy-gate`が受け取った`KEY=VALUE`だけを`.env`へ書く。改行を含む値は送れない）。
 マニフェストへ追記したら`scripts/sync-github-secrets.sh`でGitHub側へ同期する（#1302）。詳細は共有知識の
 [knowledge/deployment.md](https://github.com/guchi-apps/docs/blob/main/knowledge/deployment.md) を参照。
 

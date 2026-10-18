@@ -117,7 +117,7 @@ export async function createReviewAgentToken(input: CreateTokenInput, now = new 
     return { ok: false, code: "invalid_request", message: `有効期間は1〜${MAX_TOKEN_DAYS}日で指定してください` };
   }
   const owned = await db.repository.findMany({
-    where: { fullName: { in: repositories }, installation: { userInstallations: { some: { userId: input.userId } } } },
+    where: { fullName: { in: repositories }, archived: false, installation: { userInstallations: { some: { userId: input.userId } } } },
     select: { fullName: true },
   });
   const missing = repositories.filter((r) => !owned.some((o) => o.fullName === r));
@@ -137,6 +137,57 @@ export async function createReviewAgentToken(input: CreateTokenInput, now = new 
     },
   });
   return { ok: true, token, id: row.id, tokenPrefix: row.tokenPrefix, expiresAt };
+}
+
+export type UpdateRepositoriesResult =
+  | { ok: true; repositories: string[]; added: string[]; removed: string[] }
+  | { ok: false; code: "invalid_request" | "repository_not_found" | "not_found"; message: string };
+
+/**
+ * 発行済みトークンの許可repositoryを差し替える（#4739）。トークンの値・操作範囲・期限は変えない。
+ * 連携の確認は今回**新たに加える**repositoryだけに行う（既存のまま残すものは、アーカイブ・連携解除されていても保存を妨げない）。
+ * 失効・期限切れとの競合を避けるため、条件付きの`updateMany`の`count`で成否を判定する。変更したrepositoryごとに監査へ1行残す。
+ */
+export async function updateReviewAgentTokenRepositories(userId: string, id: string, input: string[], now = new Date()): Promise<UpdateRepositoriesResult> {
+  const repositories = [...new Set(input)];
+  if (repositories.length === 0 || repositories.length > 50 || repositories.some((r) => !REPOSITORY_PATTERN.test(r))) {
+    return { ok: false, code: "invalid_request", message: "許可するrepositoryを1〜50件選んでください（全許可はできません）" };
+  }
+  const row = await db.reviewAgentToken.findFirst({ where: { id, userId, revokedAt: null, expiresAt: { gt: now } } });
+  if (!row) return { ok: false, code: "not_found", message: "有効なトークンが見つかりません（失効・期限切れは編集できません）" };
+  const current = parseRepositories(row.repositories);
+  const added = repositories.filter((r) => !current.includes(r));
+  const removed = current.filter((r) => !repositories.includes(r));
+  if (added.length > 0) {
+    const owned = await db.repository.findMany({
+      where: { fullName: { in: added }, archived: false, installation: { userInstallations: { some: { userId } } } },
+      select: { fullName: true },
+    });
+    const missing = added.filter((r) => !owned.some((o) => o.fullName === r));
+    if (missing.length > 0) return { ok: false, code: "repository_not_found", message: `連携していないrepositoryがあります: ${missing.join(", ")}` };
+  }
+  const result = await db.reviewAgentToken.updateMany({ where: { id, userId, revokedAt: null, expiresAt: { gt: now } }, data: { repositories } });
+  if (result.count === 0) return { ok: false, code: "not_found", message: "有効なトークンが見つかりません（失効・期限切れは編集できません）" };
+  const entries = [
+    ...added.map((repositoryFullName) => ({ tool: "token_repo_add", repositoryFullName })),
+    ...removed.map((repositoryFullName) => ({ tool: "token_repo_remove", repositoryFullName })),
+  ];
+  if (entries.length > 0) {
+    await db.reviewAgentAuditLog
+      .createMany({ data: entries.map((e) => ({ ...e, tokenId: id, userId, outcome: "ok" })) })
+      .catch((error) => console.error("[review-agent] 監査の記録に失敗しました", error));
+  }
+  return { ok: true, repositories, added, removed };
+}
+
+/** 選択肢に出すrepository。利用者が連携していて、アーカイブされていないものだけ */
+export async function listSelectableRepositories(userId: string): Promise<string[]> {
+  const rows = await db.repository.findMany({
+    where: { archived: false, installation: { userInstallations: { some: { userId } } } },
+    select: { fullName: true },
+    orderBy: { fullName: "asc" },
+  });
+  return rows.map((r) => r.fullName);
 }
 
 export async function revokeReviewAgentToken(userId: string, id: string, now = new Date()): Promise<boolean> {

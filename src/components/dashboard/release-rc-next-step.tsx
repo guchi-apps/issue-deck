@@ -20,6 +20,10 @@ export function ReleaseRcNextStep({ candidate }: { candidate: RcCandidateView })
     next = "状態を確認してください。記録と実際の候補が食い違っているため、先へは進めません。";
   } else if (action.kind === "prepare") {
     next = "全体レビュー・統合検証に合格しました。「本番公開へ進む（公開承認）」を押すと、正式バンプと最終検証のあと自動で本番公開します。";
+  } else if (status.aiReviewWaivable) {
+    // 止めているのが全体レビューだけ（#4807）。全体レビューは公開の必須条件ではないので、承知で進む道も示す
+    next =
+      "統合検証は合格し、全体レビューだけが合格していません。結果を確認して再実行・修正するか、公開準備パネルの「全体レビューの結果を承知で本番公開へ進む（公開承認）」で進められます。";
   } else if (action.kind === "fix" || action.kind === "rerun_review") {
     next = "検証の失敗・指摘が出ています。下の結果を確認し、再実行するか修正を取り込んでください。";
   } else if (status.status === "awaiting_approval" && status.label === "自動公開待ち") {

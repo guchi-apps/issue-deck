@@ -140,6 +140,20 @@ export async function fetchLatestRelease(
   };
 }
 
+/**
+ * リポジトリの`homepage`（アプリ本体のURL）。未設定・http(s)以外はnull。
+ * リリースカードの「アプリを開く」ボタン用（#4791）。
+ */
+export async function fetchRepositoryHomepage(owner: string, repo: string, token: string): Promise<string | null> {
+  const url = `${GITHUB_API}/repos/${owner}/${repo}`;
+  const result = await githubFetchJsonWithEtag<{ homepage?: string | null }>(url, token);
+  if (!result.ok) {
+    throw new GithubApiError(result.status, `GitHub API request failed: ${result.status} ${url} ${result.detail}`);
+  }
+  const homepage = result.data.homepage?.trim();
+  return homepage && /^https?:\/\//.test(homepage) ? homepage : null;
+}
+
 /** リリース履歴（#2726）の1件ぶん */
 export type ReleaseHistoryItem = {
   repoFullName: string;
@@ -1194,6 +1208,57 @@ export async function fetchCompareChangedFiles(
     if (files.length < 100) break;
   }
   return paths;
+}
+
+/** compareが返すファイル一覧の上限（比較全体で300件・1ページ目だけ）。これ以上は切れている可能性がある */
+const COMPARE_FILES_LIMIT = 300;
+
+/**
+ * mainが`from`から`to`へ進んだ間に変わったファイル（改名前のパスを含む。#4766。採否判断の有効性に使う）。
+ * compareのファイル一覧は**1ページ目にだけ、比較全体で最大300件**返る（`page`はコミットのページ送りにしか効かない）。
+ * `to`が`from`の子孫でない（mainの書き換え）・一覧が上限に達したなど、**全件を確かめられないときはnull**
+ */
+export async function fetchBaseAdvanceChangedFiles(
+  owner: string,
+  repo: string,
+  from: string,
+  to: string,
+  token: string,
+): Promise<string[] | null> {
+  const url = `${GITHUB_API}/repos/${owner}/${repo}/compare/${from}...${to}?per_page=1`;
+  const res = await githubFetch(url, token);
+  if (!res.ok) {
+    const detail = await res.text().catch(() => "");
+    throw new GithubApiError(res.status, `GitHub API request failed: ${res.status} ${url} ${detail}`);
+  }
+  const data: { status?: string; files?: { filename: string; previous_filename?: string }[] } = await res.json();
+  if (data.status !== "ahead" && data.status !== "identical") return null;
+  const files = data.files ?? [];
+  if (files.length >= COMPARE_FILES_LIMIT) return null;
+  const paths = new Set<string>();
+  for (const f of files) {
+    paths.add(f.filename);
+    if (f.previous_filename) paths.add(f.previous_filename);
+  }
+  return [...paths];
+}
+
+/** 2つのコミットの間で変わったファイルのpatch（#4753）。patchが無い（巨大・バイナリ）ファイルは含めない */
+export async function fetchComparePatches(owner: string, repo: string, base: string, head: string, token: string): Promise<Record<string, string>> {
+  const patches: Record<string, string> = {};
+  for (let page = 1; page <= 30; page++) {
+    const url = `${GITHUB_API}/repos/${owner}/${repo}/compare/${base}...${head}?per_page=100&page=${page}`;
+    const res = await githubFetch(url, token);
+    if (!res.ok) {
+      const detail = await res.text().catch(() => "");
+      throw new GithubApiError(res.status, `GitHub API request failed: ${res.status} ${url} ${detail}`);
+    }
+    const data: { files?: { filename: string; patch?: string }[] } = await res.json();
+    const files = data.files ?? [];
+    for (const f of files) if (typeof f.patch === "string") patches[f.filename] = f.patch;
+    if (files.length < 100) break;
+  }
+  return patches;
 }
 
 /** 指定したref時点のファイルをテキストで読む。無ければnull（#4496。版ファイルの内容の照合に使う） */

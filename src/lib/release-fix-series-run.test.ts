@@ -97,7 +97,8 @@ vi.mock("@/lib/dispatch/check-user-labels", () => ({ removeCheckUserWithReason: 
 const enqueueDispatchJob = vi.fn();
 vi.mock("@/lib/dispatch/jobs", () => ({ enqueueDispatchJob: (...a: unknown[]) => enqueueDispatchJob(...a) }));
 
-import { runReleaseFixSweep } from "@/lib/release-fix-series-run";
+import { buildReleaseFixSourceKey, reviewFindingKey } from "@/lib/release-fix-series";
+import { closeFixSeriesForCancelledCandidate, runReleaseFixSweep } from "@/lib/release-fix-series-run";
 import { summarizeReleaseReviewDecisions } from "@/lib/release-review-decision";
 import { reviewFindingId } from "@/lib/release-review-result";
 
@@ -217,6 +218,32 @@ describe("再検証の追加指摘", () => {
     expect(state.rows[1]).toMatchObject({ issueNumber: 100, generation: 2 });
     expect(state.rows[0].status).toBe("superseded");
     expect(removeLabels).toHaveBeenCalledTimes(1);
+  });
+
+  describe("同じ指摘の再発は後継候補でも止める（#4766）", () => {
+    const keyOf = (f: { title: string; file: string }) =>
+      buildReleaseFixSourceKey({ repositoryFullName: "o/r", baseSha: "b1", sourceKind: "review_finding", itemKeys: [reviewFindingKey(f)] });
+
+    it("新方式（同じPRのrevision）: 行がずれた同じ指摘が残れば、親自身を既存扱いにせず止める", async () => {
+      const key = keyOf(finding);
+      state.rows = [baseRow({ originBaseSha: "b1", sourceKey: key, activeKey: `o/r#10:${key}`, successorPrNumber: 10 })];
+      fetchPullRequest.mockResolvedValue({ number: 10, state: "open", base: { sha: "b1", ref: "main" }, head: { sha: "h1", ref: "release-rc/1" } });
+      loadSummary.mockResolvedValue({ integration: section("passed"), aiReview: section("needs_check", { findings: [{ ...finding, line: 40 }] }) });
+      await runReleaseFixSweep({ hostName: "subpc" });
+      expect(state.rows).toHaveLength(1);
+      expect(state.rows[0].status).toBe("stopped");
+      expect(String(state.rows[0].stopReason)).toContain("同じ指摘が再発しています");
+      expect(enqueueDispatchJob).not.toHaveBeenCalled();
+    });
+
+    it("旧方式（後継は別のPR番号）でも、headと番号に依らず再発として止める", async () => {
+      const key = keyOf(finding);
+      state.rows = [baseRow({ originBaseSha: "b1", sourceKey: key, activeKey: `o/r#10:${key}` })];
+      await runReleaseFixSweep({ hostName: "subpc" });
+      expect(state.rows).toHaveLength(1);
+      expect(state.rows[0].status).toBe("stopped");
+      expect(String(state.rows[0].stopReason)).toContain("同じ指摘が再発しています");
+    });
   });
 
   it("実行障害は起案せず、確認待ちにもしない", async () => {
@@ -350,5 +377,32 @@ describe("指摘ごとのユーザー判断（#4657）", () => {
     await runReleaseFixSweep({});
     expect(state.rows[0]).toMatchObject({ status: "stopped", activeKey: null });
     expect(String(state.rows[0].stopReason)).toContain("実行中のセッションは止まらず");
+  });
+});
+
+describe("候補の取り消しで修正系列を畳む（#4800）", () => {
+  const close = (prNumbers: number[]) => closeFixSeriesForCancelledCandidate({ repositoryFullName: "o/r", prNumbers, candidateLabel: "RC-9" });
+
+  it("止まった系列を終端にし、確認待ちの札を外してコメントを残す。巡回しても復活しない", async () => {
+    state.rows = [baseRow({ status: "stopped", activeKey: null, stopReason: "起案できる指摘が読み取れません", successorPrNumber: 11 })];
+    expect(await close([11])).toBe(1);
+    expect(state.rows[0]).toMatchObject({ status: "superseded", activeKey: null });
+    expect(String(state.rows[0].stopReason)).toContain("RC-9");
+    expect(removeLabels).toHaveBeenCalledWith("o", "r", 100, "t");
+    expect(String((createComment.mock.calls.at(-1) as unknown[])[4] && ((createComment.mock.calls.at(-1) as unknown[])[4] as { body: string }).body)).toContain("取り消したため");
+    await runReleaseFixSweep({ hostName: "subpc" });
+    expect(state.rows).toHaveLength(1);
+    expect(state.rows[0].status).toBe("superseded");
+  });
+
+  it("進行中の系列も畳むが、札は止まった系列だけ外す。別の候補の系列・終端の系列には触れない", async () => {
+    state.rows = [
+      baseRow({ id: "a", status: "reverifying" }),
+      baseRow({ id: "b", releasePrNumber: 50, successorPrNumber: null, status: "stopped" }),
+      baseRow({ id: "c", status: "ready" }),
+    ];
+    expect(await close([10])).toBe(1);
+    expect(state.rows.map((r) => r.status)).toEqual(["superseded", "stopped", "ready"]);
+    expect(removeLabels).not.toHaveBeenCalled();
   });
 });

@@ -88,3 +88,4 @@ issue-deckは共有トークンの保存先なので、自分が使うアプリ�
 | `OPS_API_TOKEN` | `OPS_API_TOKEN` | `ai-usage-export.ts`・`typesafe/usage-auth.ts`・`dispatch/ops-dashboard-codex-usage.ts` |
 | `ISSUE_DECK_IMAGE_UPLOAD_SECRET` | `IMAGE_UPLOAD_SECRET` | `images/image-upload-auth.ts` |
 | `ISSUE_DECK_DEVELOPMENT_SUMMARY_TOKEN` | `AIDE_SUMMARY_SECRET` | `aide-summary-auth.ts`（AIDE向け開発状況サマリAPI。#3999） |
+| `ISSUE_DECK_VPS_MEMORY_TOKEN` | `VPS_MEMORY_READ_SECRET` | `vps-memory/auth.ts`（AIDEのMCPがVPSのメモリ状況を読む。#4779） |

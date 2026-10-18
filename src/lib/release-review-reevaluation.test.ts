@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  applyReviewDecisionsToStage,
   decideReviewReevaluation,
   describeReviewEvidenceStage,
   describeReviewStageLabel,
   reviewDependsOnEvidence,
+  reviewDependsOnHost,
   type ReviewReevaluationInput,
   type ReviewStageInput,
 } from "./release-review-reevaluation";
@@ -42,9 +44,43 @@ describe("reviewDependsOnEvidence", () => {
     expect(reviewDependsOnEvidence({ checks: [], unverifiedScope: "検証ランナーのテスト・型検査・ビルドはrunning" })).toBe(true);
     expect(reviewDependsOnEvidence({ checks: [], unverifiedScope: "差分71ファイルのうち65ファイルを確認済み（未確認6）" })).toBe(false);
   });
+  it("証跡を指さない未確認（運用作業・観点の読み残し）は依存に数えない（#4767）", () => {
+    expect(
+      reviewDependsOnEvidence({
+        checks: [{ status: "unconfirmed", evidence: "サブPCのpollerを更新・再起動する必要があります" }],
+        unverifiedScope: null,
+      }),
+    ).toBe(false);
+    expect(
+      reviewDependsOnEvidence({ checks: [{ status: "unconfirmed", evidence: "テスト結果待ち" }], unverifiedScope: null }),
+    ).toBe(true);
+    // 根拠の無い未確認は何に依存するか分からないので、依存側へ倒す
+    expect(reviewDependsOnEvidence({ checks: [{ status: "unconfirmed", evidence: "" }], unverifiedScope: null })).toBe(true);
+  });
+});
+
+describe("reviewDependsOnHost（#4799）", () => {
+  it("pollerの更新・再起動を指す未確認だけを依存に数える", () => {
+    const u = (evidence: string) => ({ checks: [{ status: "unconfirmed", evidence }], unverifiedScope: null });
+    expect(reviewDependsOnHost(u("実機pollerの起動時コミットが候補headを含むか確認できない"))).toBe(true);
+    expect(reviewDependsOnHost({ checks: [], unverifiedScope: "サブPCの再起動の証跡待ち" })).toBe(true);
+    expect(reviewDependsOnHost(u("コードを読めていない"))).toBe(false);
+    expect(reviewDependsOnHost({ checks: [{ status: "confirmed", evidence: "pollerを確認" }], unverifiedScope: null })).toBe(false);
+  });
 });
 
 describe("decideReviewReevaluation", () => {
+  it("通常経路（#4763）: 統合検証の完了後に開始したレビューは、未確認が残っても再評価しない", () => {
+    const decision = decideReviewReevaluation(
+      input({
+        review: { updatedAt: t("05:40") },
+        integration: { state: "passed", updatedAt: t("05:25") },
+        lastReviewJob: { status: "SUCCEEDED", createdAt: t("05:25"), startedAt: t("05:26"), finishedAt: t("05:40") },
+      }),
+    );
+    expect(decision).toEqual({ action: "none", reason: "used_latest_evidence" });
+  });
+
   it("レビュー先行: 統合検証の完了報告で、古い証跡のレビューを再評価する（#4663 5:24→5:25）", () => {
     expect(decideReviewReevaluation(input())).toEqual({ action: "rerun", integrationAt: t("05:25").toISOString() });
   });
@@ -174,6 +210,24 @@ function review(overrides: Partial<ReviewStageInput> = {}): ReviewStageInput {
 }
 
 describe("describeReviewEvidenceStage", () => {
+  it("統合検証の完了まで開始を待たせている間は「統合検証の完了待ち」（#4763）", () => {
+    const awaiting = review({ state: "waiting", checks: null, unverifiedScope: null, awaitingIntegration: true });
+    const stage = describeReviewEvidenceStage(awaiting, { state: "running", updatedAt: null });
+    expect(stage).toEqual({ kind: "awaiting_integration" });
+    expect(describeReviewStageLabel(stage)).toBe("統合検証の完了待ち");
+    // 統合検証が終わった後は、開始されるまで「全体レビュー中」（完了待ちとは出さない）
+    expect(describeReviewEvidenceStage(awaiting, { state: "passed", updatedAt: t("05:25").toISOString() }).kind).toBe(
+      "reviewing",
+    );
+    // 印の無い待機中は従来どおり
+    expect(
+      describeReviewEvidenceStage(review({ state: "waiting", checks: null, unverifiedScope: null }), {
+        state: "running",
+        updatedAt: null,
+      }).kind,
+    ).toBe("reviewing");
+  });
+
   it("コード確認が先に終わったら「コード確認済み・統合検証待ち」（最終確認は未完了）", () => {
     const stage = describeReviewEvidenceStage(review(), { state: "running", updatedAt: t("05:20").toISOString() });
     expect(stage).toEqual({ kind: "integration_waiting" });
@@ -222,6 +276,14 @@ describe("describeReviewEvidenceStage", () => {
     expect(describeReviewStageLabel(stage)).toBe("自動再評価済み・対応／判断が必要");
   });
 
+  it("証跡に依存しない未確認は、統合検証を待たせず別の内訳として出す（#4767）", () => {
+    const stage = describeReviewEvidenceStage(
+      review({ checks: [{ status: "unconfirmed", evidence: "移行手順の記載を読み切れませんでした" }], unverifiedScope: null }),
+      { state: "running", updatedAt: null },
+    );
+    expect(stage).toEqual({ kind: "needs_check", autoReevaluated: false, items: ["check_unconfirmed"] });
+  });
+
   it("統合検証の失敗はその結果の確認として出し、合格にしない", () => {
     const marker = { integrationAt: t("05:25").toISOString(), requestedAt: t("05:25").toISOString() };
     const stage = describeReviewEvidenceStage(review({ updatedAt: t("05:28").toISOString(), autoReevaluation: marker }), {
@@ -241,5 +303,21 @@ describe("describeReviewEvidenceStage", () => {
       describeReviewEvidenceStage(review({ state: "failed", executionFailed: true }), { state: "passed", updatedAt: null }).kind,
     ).toBe("failed");
     expect(describeReviewEvidenceStage(review({ state: "not_run" }), { state: "passed", updatedAt: null }).kind).toBe("none");
+  });
+});
+
+describe("applyReviewDecisionsToStage（#4814）", () => {
+  const stage = { kind: "needs_check" as const, autoReevaluated: true, items: ["findings" as const] };
+  it("残件が止める指摘だけで全件判断済みなら、判断済みの段階にする", () => {
+    const applied = applyReviewDecisionsToStage(stage, { cleared: true });
+    expect(applied).toEqual({ ...stage, cleared: true });
+    expect(describeReviewStageLabel(applied!)).toBe("判断済み（公開後対応）");
+  });
+  it("未判断・他の残件があるときは変えない", () => {
+    expect(applyReviewDecisionsToStage(stage, { cleared: false })).toBe(stage);
+    expect(applyReviewDecisionsToStage(stage, null)).toBe(stage);
+    const withOps = { ...stage, items: ["findings" as const, "ops" as const] };
+    expect(applyReviewDecisionsToStage(withOps, { cleared: true })).toBe(withOps);
+    expect(applyReviewDecisionsToStage({ kind: "complete" }, { cleared: true })).toEqual({ kind: "complete" });
   });
 });
