@@ -182,7 +182,7 @@ export function ReleasePullRequestOverview({
   const reload = () => setReloadToken((n) => n + 1);
 
   return (
-    <div className="flex flex-col gap-3 border-b px-4 py-4 text-xs" data-testid="release-pull-request-overview">
+    <div className="-mx-4 flex flex-col gap-3 border-b px-4 py-4 text-xs" data-testid="release-pull-request-overview">
       {/* 正式タイトルとリポジトリ名は共通詳細の見出しが持つ（#4463）。ここはブランチ情報だけを出す */}
       {rcCandidate ? (
         <ReleaseRcIdentity candidate={rcCandidate} />
