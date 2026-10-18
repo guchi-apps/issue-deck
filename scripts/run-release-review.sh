@@ -381,6 +381,8 @@ integration_coverage_text() {
 作業ディレクトリ（対象のhead）の該当ファイルを`Read`・`Grep`・`Glob`で実際に読み、確認した箇所を`checks`の根拠へ書きます。
 `checks`は確認項目すべてについて、リリース全体の観点で出力します。`fileReviews`は空配列で構いません（ファイル別の実績はバッチごとに記録済み）。
 バッチごとの指摘はこちらで集約するため、ここでは**バッチをまたぐ新しい指摘だけ**を`findings`へ出します。
+`unverifiedScope`は**リリース全体として最後に残る未確認範囲だけ**を書きます（無ければ`null`）。この値がバッチごとの「未確認範囲」に置き換わります。
+バッチの時点で書かれた「他のバッチ・相互作用は未確認」は、全バッチとこの確認が済んだので書き写しません。バッチの未確認範囲のうち、他のバッチ・この確認・実行ホストの稼働情報で解消したものも落とし、解消できなかったものだけを理由とともに残します。
 RULES
 }
 
@@ -394,7 +396,8 @@ integration_digest_text() {
       "指摘:",
       ((.findings // []) | if length == 0 then "- （なし）" else .[:20][] | "- \(.title // "-")（\(.file // "-")）: \((.detail // "")[0:200])" end),
       "確認項目:",
-      ((.checks // []) | .[] | "- `\(.id)` \(.status): \((.evidence // "")[0:200])")' "$batch_dir/r${idx}.json"
+      ((.checks // []) | .[] | "- `\(.id)` \(.status): \((.evidence // "")[0:200])"),
+      "未確認範囲: \((.unverifiedScope // "なし") | tostring | .[0:600])"' "$batch_dir/r${idx}.json"
     printf '\n'
   done
 }
@@ -713,7 +716,10 @@ merge_batch_results() {
                    source: (if all($per[]; .source == "carried_over") then "carried_over" else "current" end)}
                 end
             end)),
-      unverifiedScope: ([ $rs[] | .unverifiedScope // empty ] | join(" / ") | if . == "" then null else .[0:1900] end),
+      # 相互作用の確認があれば、その未確認範囲を全体の値にする（#4799）。全バッチの後にバッチの未確認範囲を読んで
+      # 解消・残存を判断したもので、バッチの時点の「他のバッチは未確認」を持ち越さない
+      unverifiedScope: ((if ($ir | length) > 0 then [ $ir[] | .unverifiedScope // empty ] else [ $rs[] | .unverifiedScope // empty ] end)
+        | map(tostring | select(test("\\S"))) | join(" / ") | if . == "" then null else .[0:1900] end),
       findings: ([ ($rs[] | (.findings // [])[]), $supFindings[] ] | uniq_by_key | .[0:50]),
       affectedPullRequests: ([ $rs[] | (.affectedPullRequests // [])[] ] | unique),
       affectedFiles: ([ $rs[] | (.affectedFiles // [])[] ] | unique | .[0:200]),

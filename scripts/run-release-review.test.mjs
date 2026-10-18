@@ -34,12 +34,14 @@ checks() {
 if grep -q "バッチをまたぐ相互作用の確認" <<<"$p"; then
   [[ -n "\${FAIL_INT:-}" ]] && exit 3
   [[ -n "\${INT_LOG:-}" ]] && echo call >>"$INT_LOG"
+  [[ -n "\${INT_PROMPT:-}" ]] && printf '%s' "$p" >"$INT_PROMPT"
   c="$(checks 統合で確認 "$p")"
   # INT_OMIT: 相互作用の確認が確認項目を報告しない／INT_CONFIRM: バッチの結果にかかわらず確認済みと報告する
   [[ -n "\${INT_OMIT:-}" ]] && c='[]'
   [[ -n "\${INT_CONFIRM:-}" ]] && c="$(UNCONF= UNCONF_FILE= checks 統合で確認)"
   echo '\`\`\`json'
-  jq -nc --argjson c "$c" '{state: "passed", summary: "統合", checklistVersion: 1, checks: $c, fileReviews: []}'
+  # INT_SCOPE: 相互作用の確認が報告する未確認範囲（#4799）
+  jq -nc --argjson c "$c" --arg u "\${INT_SCOPE:-}" '{state: "passed", summary: "統合", checklistVersion: 1, checks: $c, fileReviews: []} + (if $u == "" then {} else {unverifiedScope: $u} end)'
   echo '\`\`\`'
   exit 0
 fi
@@ -78,8 +80,10 @@ files="$(sed -n '/次のファイルの差分をこのバッチへ載せまし�
 echo '\`\`\`json'
 jq -nc --argjson c "$(checks バッチで確認 "$files")" --argjson f "$(printf '%s\\n' $files | jq -Rsc 'split("\\n") | map(select(. != ""))')" \\
   --arg omit "\${OMIT_FILE:-}" --arg empty "\${EMPTY_EV_FILE:-}" --arg dot "\${DOT_PATHS:-}" --argjson fd "$findings" \\
+  --arg scope "\${BATCH_SCOPE:-}" \\
   '{state: "passed", summary: "batch", checklistVersion: 1, checks: $c, findings: $fd,
-    fileReviews: ($f | map(select(. != $omit) | {file: ((if $dot == "" then "" else "./" end) + .), status: "reviewed", evidence: (if . == $empty then "" else "読んだ" end)}))}'
+    fileReviews: ($f | map(select(. != $omit) | {file: ((if $dot == "" then "" else "./" end) + .), status: "reviewed", evidence: (if . == $empty then "" else "読んだ" end)}))}
+    + (if $scope == "" then {} else {unverifiedScope: $scope} end)'
 echo '\`\`\`'
 `;
 
@@ -556,6 +560,24 @@ batch_progress_message 全体確認 claude opus 1 0 1 13 4 5; echo`,
       const rerun = runReview(env);
       expect(lines(calls)).toBe(batches);
       expect(rerun.result.reusedBatches).toBe(batches);
+    });
+
+    it("全体の未確認範囲は相互作用の確認の値にし、バッチの時点の未確認範囲を持ち越さない（#4799）", () => {
+      const { env } = setup();
+      writeEvidence("passed", "2026-10-18T10:00:00Z");
+      const prompt = path.join(dir, "int-prompt");
+      const cleared = runReview({ ...env, BATCH_SCOPE: "バッチ2/3・3/3の差分は未確認", INT_PROMPT: prompt });
+      expect(cleared.status).toBe("succeeded");
+      expect(cleared.result.unverifiedScope).toBeUndefined();
+      // 相互作用の確認は、バッチの未確認範囲を読んだうえで判断する
+      expect(readFileSync(prompt, "utf8")).toContain("未確認範囲: バッチ2/3・3/3の差分は未確認");
+    });
+
+    it("相互作用の確認が残した未確認範囲は、そのまま全体の値になる（#4799）", () => {
+      const { env } = setup();
+      writeEvidence("passed", "2026-10-18T10:00:00Z");
+      const kept = runReview({ ...env, BATCH_SCOPE: "バッチ1の未確認", INT_SCOPE: "外部APIの実応答は未確認" });
+      expect(kept.result.unverifiedScope).toBe("外部APIの実応答は未確認");
     });
 
     it("保存は件数の上限を超えた古いものから消す", () => {
