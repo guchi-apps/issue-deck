@@ -1,9 +1,13 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  APPROVAL_RETRYABLE_STOP_REASONS,
   decideCompletionMerge,
   decideReleaseCompletion,
   describeMergeWait,
+  describeUnverifiedReview,
+  reevaluationKeepsWaiting,
+  releaseCompletionStopMessage,
   isLongMergeWait,
   nextMergeWait,
   RELEASE_COMPLETION_LONG_WAIT_MS,
@@ -577,5 +581,87 @@ describe("本番マージの待ち理由（#4725）", () => {
     expect(isLongMergeWait(null, t0)).toBe(false);
     expect(isLongMergeWait(t0, new Date(t0.getTime() + RELEASE_COMPLETION_LONG_WAIT_MS - 1))).toBe(false);
     expect(isLongMergeWait(t0, new Date(t0.getTime() + RELEASE_COMPLETION_LONG_WAIT_MS))).toBe(true);
+  });
+});
+
+describe("指摘0件で未確認範囲だけの全体レビュー（#4768）", () => {
+  const unverified = (stage: "reevaluating" | "settled", detail: string | null = "コードの未確認範囲"): CompletionChecks => ({
+    ...passed,
+    aiReview: "needs_check",
+    findingCount: 0,
+    aiReviewUnverified: { stage, detail },
+  });
+  const decide = (checks: CompletionChecks, overrides: Partial<ReleaseCompletionState> = {}) =>
+    decideReleaseCompletion(run({ status: "checking", ...overrides }), { now, candidate: openCandidate, series: null, checks });
+
+  it("統合検証が終わっていなければ、実行障害にせず待つ", () => {
+    for (const integration of ["pending", "not_run", "invalidated"] as const) {
+      expect(decide({ ...unverified("reevaluating"), integration })).toMatchObject({ action: "wait", status: "checking" });
+      expect(decide({ ...unverified("settled"), integration })).toMatchObject({ action: "wait", status: "checking" });
+    }
+  });
+
+  it("統合検証が終わっていて再評価がまだなら、再評価を積む", () => {
+    expect(decide(unverified("reevaluating"))).toEqual({ action: "reevaluate_review" });
+  });
+
+  it("再評価でも残った（再評価で変わらない）ときは、理由を示して止める。「実行障害」とはしない", () => {
+    const decision = decide(unverified("settled", "証跡に依存しない未確認の確認項目"));
+    expect(decision).toEqual({ action: "stop", reason: "review_unverified", detail: "証跡に依存しない未確認の確認項目" });
+    const message = releaseCompletionStopMessage("review_unverified", "証跡に依存しない未確認の確認項目") ?? "";
+    expect(message).toContain("確認できなかった範囲が残った");
+    expect(message).not.toContain("実行障害");
+    // 段階が分からない旧い観測も、再評価済みとして同じ理由で止める（修正Issueは起案しない）
+    expect(decide({ ...passed, aiReview: "needs_check", findingCount: 0 })).toMatchObject({ action: "stop", reason: "review_unverified" });
+  });
+
+  it("公開承認の系列も同じ扱いで、承認を失効させない理由で止める", () => {
+    expect(decide(unverified("reevaluating"), { fromPublishApproval: true })).toEqual({ action: "reevaluate_review" });
+    expect(decide(unverified("settled"), { fromPublishApproval: true })).toMatchObject({ action: "stop", reason: "review_unverified" });
+    expect(APPROVAL_RETRYABLE_STOP_REASONS.has("review_unverified")).toBe(true);
+  });
+
+  it("統合検証の失敗が同時にあれば、従来どおり統合検証の失敗として扱う", () => {
+    expect(decide({ ...unverified("settled"), integration: "failed", integrationFailureKind: "code" })).toEqual({
+      action: "create_fix",
+      sourceKind: "integration_failure",
+    });
+    expect(decide({ ...unverified("settled"), integration: "failed", integrationFailureKind: "execution" })).toEqual({
+      action: "stop",
+      reason: "execution_failure",
+    });
+  });
+
+  it("指摘のある要確認・指摘の無い失敗は従来どおり", () => {
+    expect(decide({ ...passed, aiReview: "needs_check", findingCount: 1 })).toEqual({ action: "create_fix", sourceKind: "review_finding" });
+    expect(decide({ ...passed, aiReview: "failed", findingCount: 0 })).toEqual({ action: "stop", reason: "execution_failure" });
+  });
+
+  it("段階は画面と同じ規則から読み、止めるときの内容に未確認の種類と範囲を添える", () => {
+    expect(describeUnverifiedReview({ state: "needs_check", findingCount: 0, stage: { kind: "reevaluating" }, unverifiedScope: "x" })).toEqual({
+      stage: "reevaluating",
+      detail: "x",
+    });
+    expect(
+      describeUnverifiedReview({
+        state: "needs_check",
+        findingCount: 0,
+        stage: { kind: "needs_check", autoReevaluated: true, items: ["code_unread"] },
+        unverifiedScope: "差分3ファイルのうち2ファイルを確認済み（未確認1）",
+      }),
+    ).toEqual({ stage: "settled", detail: "コードの未確認範囲：差分3ファイルのうち2ファイルを確認済み（未確認1）" });
+    expect(describeUnverifiedReview({ state: "needs_check", findingCount: 2, stage: null, unverifiedScope: null })).toBeNull();
+    expect(describeUnverifiedReview({ state: "passed", findingCount: 0, stage: null, unverifiedScope: null })).toBeNull();
+  });
+
+  it("再評価を積めた・実行中・ホスト待ちなら待ち、積めない理由なら止める", () => {
+    expect(reevaluationKeepsWaiting({ action: "rerun" })).toBe(true);
+    expect(reevaluationKeepsWaiting({ action: "none", reason: "review_active" })).toBe(true);
+    expect(reevaluationKeepsWaiting({ action: "none", reason: "review_in_progress" })).toBe(true);
+    expect(reevaluationKeepsWaiting({ action: "skipped", reason: "no_host" })).toBe(true);
+    expect(reevaluationKeepsWaiting({ action: "none", reason: "no_evidence_dependency" })).toBe(false);
+    expect(reevaluationKeepsWaiting({ action: "none", reason: "already_reevaluated" })).toBe(false);
+    expect(reevaluationKeepsWaiting({ action: "skipped", reason: "no_verify_host" })).toBe(false);
+    expect(reevaluationKeepsWaiting({ action: "fail_stalled" })).toBe(false);
   });
 });

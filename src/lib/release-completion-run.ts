@@ -18,6 +18,7 @@ import {
   toDeployRecoverySeriesView,
 } from "@/lib/deploy-recovery-series-run";
 import { enqueueDispatchJob } from "@/lib/dispatch/jobs";
+import { reevaluateReleaseReviewIfReady } from "@/lib/dispatch/release-review-reevaluate";
 import { fetchPullRequest, fetchWorkflowRunJobs, mergePullRequest } from "@/lib/github/actions-api";
 import { getInstallationToken } from "@/lib/github/app-auth";
 import { recordDeployLaunchWatch } from "@/lib/github/deploy-launch-watch";
@@ -42,6 +43,9 @@ import {
   releaseCompletionStageIndex,
   releaseCompletionStatusLabel,
   releaseCompletionStopMessage,
+  describeUnverifiedReview,
+  reevaluationKeepsWaiting,
+  UNVERIFIED_REEVALUATING_NOTE,
   type CompletionCheckState,
   type CompletionFinalizationSnapshot,
   type CompletionChecks,
@@ -528,6 +532,12 @@ export function toCompletionChecks(summary: ReleaseVerificationSummary, reposito
         : null,
     integrationSetupGap: describeIntegrationSetupGap(repositoryFullName) !== null,
     aiReviewClearedByDecision: summary.aiReview.decisions?.cleared === true,
+    aiReviewUnverified: describeUnverifiedReview({
+      state: summary.aiReview.state,
+      findingCount: summary.aiReview.findings.length,
+      stage: summary.aiReview.stage,
+      unverifiedScope: summary.aiReview.unverifiedScope ?? null,
+    }),
   };
 }
 
@@ -569,6 +579,8 @@ async function applyDecision(
       });
       return updated.count === 1 ? { action: "follow_successor", detail: `#${decision.prNumber}` } : null;
     }
+    case "reevaluate_review":
+      return reevaluateUnverifiedReview(run, ctx, observation);
     case "dispatch_fix":
       return dispatchFix(run, decision.seriesId, decision.issueNumber, ctx, hostName, now);
     case "create_fix":
@@ -882,6 +894,35 @@ async function advanceDeployRecovery(run: RunRow, ctx: Ctx): Promise<ActionResul
     return handOff(run, ctx, "deploy_recovery_failed", view.stopMessage ?? view.statusLabel);
   }
   return null;
+}
+
+/**
+ * 指摘0件で未確認範囲だけが残った全体レビューを、統合検証の結果で再評価する（#4768）。積むのは既存の自動再評価
+ * （`reevaluateReleaseReviewIfReady`。重複は記録の印とジョブが止める）で、積めた・実行中なら待つ。
+ * 待っても変わらない（再評価の対象外など）ときは、理由を示して止める
+ */
+async function reevaluateUnverifiedReview(run: RunRow, ctx: Ctx, observation: Observation): Promise<ActionResult> {
+  const candidate = observation.candidate;
+  if (!candidate) return null;
+  const outcome = await reevaluateReleaseReviewIfReady({
+    repoFullName: run.repositoryFullName,
+    prNumber: candidate.number,
+    baseSha: candidate.baseSha,
+    headSha: candidate.headSha,
+  }).catch((error: unknown) => {
+    console.error("[release-completion] 全体レビューの再評価を積めませんでした", run.id, error);
+    return { action: "skipped" as const, reason: "no_host" as const };
+  });
+  if (!reevaluationKeepsWaiting(outcome)) {
+    return handOff(run, ctx, "review_unverified", observation.checks?.aiReviewUnverified?.detail ?? undefined);
+  }
+  if (run.status !== "checking" || run.note !== UNVERIFIED_REEVALUATING_NOTE) {
+    await db.releaseCompletionRun.updateMany({
+      where: { id: run.id, status: run.status },
+      data: { status: "checking", note: UNVERIFIED_REEVALUATING_NOTE },
+    });
+  }
+  return outcome.action === "rerun" ? { action: "reevaluate_review" } : null;
 }
 
 /** 止めて人へ渡す。系列を終端にし、理由を修正Issue（無ければ候補のPR）へ残す */

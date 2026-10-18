@@ -229,6 +229,8 @@ export type ReleaseReviewCoverage = {
   rerunBatches?: number;
   /** バッチをまたぐ相互作用の確認を再利用したか。分割しなかった・旧ランナーはnull */
   integrationReused?: boolean | null;
+  /** 実績の取りこぼしを補う質問で確認済みになったファイル数（#4768）。旧ランナー・保存済みの旧記録には無い */
+  supplementedFiles?: number;
 };
 
 export type NormalizedReleaseReview = {
@@ -354,12 +356,34 @@ const MAX_COVERAGE_TARGETS = 5000;
 const MAX_OPEN_COVERAGE = 50;
 
 /**
+ * AIが報告したファイルパスを、差分のパス（リポジトリ相対・`/`区切り）へ揃える（#4768）。
+ * 区切りを`/`へ統一し、`/./`・連続した`/`を詰め、先頭の`./`・`/`を除く。
+ * ランナー（`scripts/run-release-review.sh`の`JQ_NPATH`）と同じ規則で、変えるときは両方を揃える
+ */
+export function normalizeReviewPath(path: string): string {
+  return path
+    .trim()
+    .replace(/\\/g, "/")
+    .replace(/\/(?:\.\/)+/g, "/")
+    .replace(/\/+/g, "/")
+    .replace(/^(?:\.\/|\/)+/, "");
+}
+
+function reviewPath(value: unknown): string | null {
+  const raw = str(value, 300);
+  if (!raw) return null;
+  const normalized = normalizeReviewPath(raw);
+  return normalized === "" ? null : normalized;
+}
+
+/**
  * ランナーが報告したファイル別の実績（`targetFiles`・`fileReviews`・`inputFiles`）を、確認実績へ絞る。
  * **確認済みと数えるのは、対象に含まれ、`reviewed`で根拠があるものだけ。** 実績が報告されていない旧結果はnull
  */
 export function normalizeCoverage(raw: Record<string, unknown>, totalFiles: number | null): ReleaseReviewCoverage | null {
   if (!Array.isArray(raw.targetFiles) || !Array.isArray(raw.fileReviews)) return null;
-  const targets = [...new Set(raw.targetFiles.map((f) => str(f, 300)).filter((f): f is string => f !== null))].slice(
+  // パスは照合の前に揃える（`./`付き・先頭の`/`・区切りの揺れだけで未確認にしない。#4768）
+  const targets = [...new Set(raw.targetFiles.map(reviewPath).filter((f): f is string => f !== null))].slice(
     0,
     MAX_COVERAGE_TARGETS,
   );
@@ -370,7 +394,7 @@ export function normalizeCoverage(raw: Record<string, unknown>, totalFiles: numb
   for (const entry of raw.fileReviews) {
     if (typeof entry !== "object" || entry === null) continue;
     const rec = entry as Record<string, unknown>;
-    const file = str(rec.file, 300);
+    const file = reviewPath(rec.file);
     if (!file || !targetSet.has(file)) continue;
     const evidence = str(rec.evidence, 500);
     if (rec.status === "unreadable") {
@@ -403,6 +427,7 @@ export function normalizeCoverage(raw: Record<string, unknown>, totalFiles: numb
     reusedBatches: nonNegativeInt(raw.reusedBatches) ?? 0,
     rerunBatches: nonNegativeInt(raw.rerunBatches) ?? 0,
     integrationReused: typeof raw.integrationReused === "boolean" ? raw.integrationReused : null,
+    supplementedFiles: Math.min(nonNegativeInt(raw.supplementedFiles) ?? 0, reviewed.size),
   };
 }
 

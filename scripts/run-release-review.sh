@@ -37,6 +37,12 @@ MAX_BATCHES_PER_RUN="${ISSUE_DECK_RELEASE_REVIEW_MAX_BATCHES_PER_RUN:-8}"
 KEEP_BATCH_DIRS="${ISSUE_DECK_RELEASE_REVIEW_KEEP_BATCH_DIRS:-20}"
 # 実行結果（テスト・型検査・ビルド）の証跡を指す文言。`src/lib/release-review-reevaluation.ts`の`EVIDENCE_TEXT`と揃える
 EVIDENCE_TEXT_PATTERN='統合検証|検証結果|検証証跡|証跡|実行結果|テスト|型検査|ビルド|running'
+# ファイル別の実績の取りこぼし（報告なし・根拠が空）を補う質問（#4768）。1回の起動で1回まで、対象のファイル数と時間に上限を置く
+SUPPLEMENT_MAX_FILES="${ISSUE_DECK_RELEASE_REVIEW_SUPPLEMENT_MAX_FILES:-40}"
+SUPPLEMENT_TIMEOUT_SECONDS="${ISSUE_DECK_RELEASE_REVIEW_SUPPLEMENT_TIMEOUT_SECONDS:-600}"
+# AIが報告したパスを差分のパスへ揃える（#4768）。区切りを`/`へ、作業ディレクトリの絶対パス・先頭の`./`・`/`を除く。
+# `src/lib/release-review-result.ts`の`normalizeReviewPath`と同じ規則（作業ディレクトリの除去はランナーだけ）
+JQ_NPATH='def npath($wt): tostring | gsub("\\\\"; "/") | (if $wt != "" and startswith($wt + "/") then .[($wt | length) + 1:] else . end) | gsub("/(\\./)+"; "/") | gsub("/+"; "/") | sub("^(\\./|/)+"; "");'
 
 JOB_ID=""
 JOB_REPORTED=0
@@ -356,6 +362,61 @@ integration_digest_text() {
   done
 }
 
+# missing_file_pairs: 保存済みのバッチ結果のうち、載せたファイルの実績が無い・根拠が空のものを
+# `$batch_dir/sup.pairs`（ファイル<TAB>バッチ番号）へ書く（#4768）。取得不能（unreadable）と報告されたものは補完しない
+missing_file_pairs() {
+  local idx
+  : >"$batch_dir/sup.pairs"
+  for ((idx = 1; idx <= batch_count; idx++)); do
+    [[ -s "$batch_dir/r${idx}.json" ]] || continue
+    jq -r --arg wt "$WORKTREE" --arg idx "$idx" --rawfile files "$batch_dir/b${idx}.files" "$JQ_NPATH"'
+      [ (.fileReviews // [])[] | select(type == "object")
+        | {p: ((.file // "") | npath($wt)), s: .status, e: ((.evidence // "") | tostring)} ] as $rv
+      | $files | split("\n") | map(select(. != "") | split("\t")[0]) | unique[]
+      | . as $f
+      | select(all($rv[]; .p != $f or (.s != "unreadable" and ((.s == "reviewed" and (.e | test("\\S"))) | not))))
+      | "\($f)\t\($idx)"' "$batch_dir/r${idx}.json" >>"$batch_dir/sup.pairs" 2>/dev/null || true
+  done
+}
+
+# plan_supplement: 補完の対象（`sup.files`）と差分（`sup.diff`）を作る。ファイル数は`SUPPLEMENT_MAX_FILES`、差分は
+# `DIFF_BUDGET_BYTES`まで。分割したファイルは取りこぼした断片だけを載せる。入らなかったファイルは補完せず未確認に残す
+plan_supplement() {
+  local file idx part text used=0 n=0
+  : >"$batch_dir/sup.files"
+  : >"$batch_dir/sup.diff"
+  while IFS= read -r file; do
+    [[ -n "$file" ]] || continue
+    ((n < SUPPLEMENT_MAX_FILES)) || break
+    text=""
+    while IFS= read -r idx; do
+      part="$(awk -F'\t' -v f="$file" '$1 == f {print $2; exit}' "$batch_dir/b${idx}.files")"
+      if [[ -n "$part" ]]; then
+        text+="$(cat "$batch_dir/b${idx}.diff")"$'\n'
+      else
+        text+="$(git -C "$WORKTREE" diff "$base_sha...$head_sha" -- "$file" 2>/dev/null || true)"$'\n'
+      fi
+    done < <(awk -F'\t' -v f="$file" '$1 == f {print $2}' "$batch_dir/sup.pairs")
+    ((used + ${#text} <= DIFF_BUDGET_BYTES)) || continue
+    printf '%s' "$text" >>"$batch_dir/sup.diff"
+    printf '%s\n' "$file" >>"$batch_dir/sup.files"
+    used=$((used + ${#text}))
+    n=$((n + 1))
+  done < <(cut -f1 "$batch_dir/sup.pairs" | awk '!seen[$0]++')
+}
+
+# supplement_coverage_text: 取りこぼしたファイルだけを聞き直す指示（#4768）
+supplement_coverage_text() {
+  printf '**これはファイル別の確認実績の補完です。** バッチごとの確認で、次のファイルの確認実績（`fileReviews`）が報告されなかったか、根拠が空でした。下の差分には、このファイルの分だけを載せています（分割したファイルは取りこぼした断片だけ）:\n%s\n\n' \
+    "$(sed 's/^/- /' "$batch_dir/sup.files")"
+  cat <<'RULES'
+上のファイルそれぞれについて、差分を読み、必要なら周辺コードも確認したうえで、`fileReviews`へ
+`{"file": "上に書いたとおりのパス", "status": "reviewed", "evidence": "読んだ箇所・確認した内容"}`を出します。
+読めなかった・確認しきれなかったファイルは`"status": "unreadable"`にし、理由を`evidence`へ書きます。根拠の無い`reviewed`は確認済みとして数えません。
+確認項目（`checks`）はバッチごとに記録済みなので、**空配列にしてください**。新たに見つけた問題があれば`findings`へ入れます（無ければ空配列）。
+RULES
+}
+
 # build_prompt <出力先>: `$part_dir`の部品（coverage・diff・prs・checklist…）からプロンプトを組み立てる
 build_prompt() {
   local out="$1"
@@ -395,15 +456,15 @@ open(out, "w", encoding="utf-8").write(text)
 PY
 }
 
-# run_agent <プロンプト> <出力> <ログ>: AI CLIを読み取り専用で1回実行する。終了コードを返す
+# run_agent <プロンプト> <出力> <ログ> [制限秒]: AI CLIを読み取り専用で1回実行する。終了コードを返す
 run_agent() {
-  local prompt="$1" out="$2" log="$3"
+  local prompt="$1" out="$2" log="$3" limit="${4:-$TIMEOUT_SECONDS}"
   if [[ "$agent" == "codex" ]]; then
     local -a codex_args=(exec --sandbox read-only --ephemeral -m "$codex_model" --output-schema "$SCRIPT_DIR/prompts/release-review-result.schema.json" --output-last-message "$out" -C "$WORKTREE")
-    (cd "$WORKTREE" && timeout -k 60 "$TIMEOUT_SECONDS" "$codex_command" "${codex_args[@]}" <"$prompt" >"$log" 2>&1)
+    (cd "$WORKTREE" && timeout -k 60 "$limit" "$codex_command" "${codex_args[@]}" <"$prompt" >"$log" 2>&1)
   else
     local -a claude_args=(-p --model "$claude_model" --allowedTools Read Grep Glob)
-    (cd "$WORKTREE" && timeout -k 60 "$TIMEOUT_SECONDS" claude "${claude_args[@]}" <"$prompt" >"$out" 2>"$log")
+    (cd "$WORKTREE" && timeout -k 60 "$limit" claude "${claude_args[@]}" <"$prompt" >"$out" 2>"$log")
   fi
 }
 
@@ -442,8 +503,8 @@ result_depends_on_evidence() {
 
 # invalidate_stale_batches <現在の証跡の指紋> [現在の確認項目の版]: 保存済みの結果のうち、やり直すものを捨てる（#4632・#4767）。
 # やり直すのは「証跡に依存し、かつ保存時と指紋が違う（どちらかが取れない）」結果と、確認項目の版が今と違う結果だけ。
-# それ以外（確認済み・証跡に依存しない未確認）は再利用する。相互作用の確認（`rint`）も同じ規則で捨てるほか、
-# バッチを1つでもやり直すときは実行後に必ずやり直す（main側で捨てる）。
+# それ以外（確認済み・証跡に依存しない未確認）は再利用する。相互作用の確認（`rint`）・実績の補完（`rsup`。#4768）も
+# 同じ規則で捨てるほか、バッチを1つでもやり直すときは実行後に必ずやり直す（main側で捨てる）。
 # 結果は`reuse_note`へ（画面のメッセージ用）。`batch_dir`は呼び出し元（main）のローカル変数を参照する
 invalidate_stale_batches() {
   local cur_fp="$1" cur_ver="${2:-}" f stem saved dropped=0 reused=0
@@ -453,23 +514,23 @@ invalidate_stale_batches() {
     stem="${f%.json}"
     if [[ -n "$cur_ver" ]] && ! jq -e --arg v "$cur_ver" '(.checklistVersion // "" | tostring) == $v' "$f" >/dev/null 2>&1; then
       rm -f "$f" "$stem.fp"
-      [[ "$f" == */rint.json ]] || dropped=$((dropped + 1))
+      [[ "$f" == */rint.json || "$f" == */rsup.json ]] || dropped=$((dropped + 1))
       continue
     fi
     if ! result_depends_on_evidence "$f"; then
-      [[ "$f" == */rint.json ]] || reused=$((reused + 1))
+      [[ "$f" == */rint.json || "$f" == */rsup.json ]] || reused=$((reused + 1))
       continue
     fi
     saved="$(cat "$stem.fp" 2>/dev/null || true)"
     if [[ -n "$cur_fp" && -n "$saved" && "$saved" == "$cur_fp" ]]; then
-      [[ "$f" == */rint.json ]] || reused=$((reused + 1))
+      [[ "$f" == */rint.json || "$f" == */rsup.json ]] || reused=$((reused + 1))
       continue
     fi
     rm -f "$f" "$stem.fp"
-    [[ "$f" == */rint.json ]] || dropped=$((dropped + 1))
+    [[ "$f" == */rint.json || "$f" == */rsup.json ]] || dropped=$((dropped + 1))
   done
   if ((dropped > 0)); then
-    rm -f "$batch_dir/rint.json" "$batch_dir/rint.fp"
+    rm -f "$batch_dir/rint.json" "$batch_dir/rint.fp" "$batch_dir/rsup.json" "$batch_dir/rsup.fp"
     reuse_note="（検証証跡が更新されたため、証跡に依存する${dropped}件を再評価します。確認済みの${reused}件は再利用）"
   fi
 }
@@ -487,60 +548,94 @@ prune_batch_dirs() {
   done < <(ls -1dt "$WORK_ROOT"/*.batches 2>/dev/null || true)
 }
 
-# merge_batch_results <未実施のバッチ数>: 保存済みのバッチ結果（と相互作用の確認）を1つの結果へまとめる。
-# 確認項目は、**全バッチ（と相互作用の確認）が確認済み・非該当と根拠を報告した項目だけ**を確認済みにする。
-# ファイルは、含まれる全バッチ（巨大ファイルは全断片）で根拠つきの`reviewed`が揃ったものだけを確認済みとして出す
+# merge_batch_results <未実施のバッチ数>: 保存済みのバッチ結果（と相互作用の確認・実績の補完）を1つの結果へまとめる。
+# 確認項目は、**相互作用の確認が根拠つきで報告した結果を優先する**（バッチをまたいでリリース全体として判断したもの。#4768）。
+# 相互作用の確認が無い・報告していない項目は、全バッチが根拠つきの確認済み・非該当を報告したときだけ確認済みにする
+# （確認済みと非該当が混ざれば確認済み）。報告の無いバッチ・未確認と報告したバッチが残れば、その理由を添えて未確認にする。
+# ファイルは、含まれる全バッチ（巨大ファイルは全断片）で根拠つきの`reviewed`が揃ったもの、または補完で根拠つきの
+# `reviewed`が報告されたものだけを確認済みとして出す。AIが報告したパスは`npath`で差分のパスへ揃えてから照合する
 merge_batch_results() {
   local pending="$1" reused="${2:-0}" rerun="${3:-0}" int_reused="${4:-false}" idx
-  local -a batch_results=() all_results=()
+  local -a batch_results=() all_results=() batch_idxs=()
   for ((idx = 1; idx <= batch_count; idx++)); do
-    [[ -s "$batch_dir/r${idx}.json" ]] && batch_results+=("$batch_dir/r${idx}.json")
+    if [[ -s "$batch_dir/r${idx}.json" ]]; then
+      batch_results+=("$batch_dir/r${idx}.json")
+      batch_idxs+=("$idx")
+    fi
   done
   all_results=("${batch_results[@]}")
   [[ -s "$batch_dir/rint.json" ]] && all_results+=("$batch_dir/rint.json")
-  local expected_results=$batch_count targets_json expected_json runner_json
-  ((batch_count > 1)) && expected_results=$((batch_count + 1))
+  local targets_json expected_json runner_json idxs_json sup_json='{}' sup_findings='[]'
   targets_json="$(printf '%s\n' "${files[@]}" | jq -Rsc 'split("\n") | map(select(. != ""))')"
   expected_json="$(cut -f1 "$batch_dir"/b*.files 2>/dev/null | jq -Rsc 'split("\n") | map(select(. != "")) | group_by(.) | map({key: .[0], value: length}) | from_entries')"
   runner_json="$(jq -sc '.' "$batch_dir/runner.entries" 2>/dev/null || printf '[]')"
+  idxs_json="$(printf '%s\n' "${batch_idxs[@]:-}" | jq -Rsc 'split("\n") | map(select(. != "") | tonumber)')"
   [[ ${#all_results[@]} -gt 0 ]] || { printf '{"state":"passed","targetFiles":%s,"fileReviews":%s,"inputFiles":0,"batches":%d,"pendingBatches":%d,"reusedBatches":0,"rerunBatches":0}' "$targets_json" "$runner_json" "$batch_count" "$pending"; return 0; }
+  # 補完の結果は、聞き直したファイルの分だけを使う
+  if [[ -s "$batch_dir/rsup.json" && -s "$batch_dir/rsup.asked" ]]; then
+    sup_json="$(jq -c --arg wt "$WORKTREE" --rawfile asked "$batch_dir/rsup.asked" "$JQ_NPATH"'
+      ($asked | split("\n") | map(select(. != ""))) as $a
+      | [ (.fileReviews // [])[] | select(type == "object")
+          | {file: ((.file // "") | npath($wt)), status, evidence: ((.evidence // "") | tostring)}
+          | select(.file as $f | any($a[]; . == $f)) ]
+      | group_by(.file) | map({key: .[0].file, value: .}) | from_entries' "$batch_dir/rsup.json" 2>/dev/null || printf '{}')"
+    sup_findings="$(jq -c '[(.findings // [])[] | select(type == "object")]' "$batch_dir/rsup.json" 2>/dev/null || printf '[]')"
+  fi
 
   local file_reviews
-  file_reviews="$( ((${#batch_results[@]} > 0)) && jq -sc --argjson expected "$expected_json" --argjson runner "$runner_json" '
+  file_reviews="$( ((${#batch_results[@]} > 0)) && jq -sc --argjson expected "$expected_json" --argjson runner "$runner_json" \
+    --argjson sup "$sup_json" --arg wt "$WORKTREE" "$JQ_NPATH"'
+      def has_ev: (.evidence // "") | tostring | test("\\S");
       . as $rs
       | ($expected | to_entries | map(
           .key as $f | .value as $n
-          | [ $rs[] | (.fileReviews // []) | map(select(.file == $f)) ] as $per
+          | [ $rs[] | (.fileReviews // []) | map(select(type == "object" and ((.file // "") | npath($wt)) == $f)) ] as $per
           | [ $per[][] | select(.status == "unreadable") ] as $bad
-          | [ $per[] | map(select(.status == "reviewed" and ((.evidence // "") | tostring | length) > 0)) | select(length > 0) | .[0] ] as $ok
+          | [ $per[] | map(select(.status == "reviewed" and has_ev)) | select(length > 0) | .[0] ] as $ok
+          | ($sup[$f] // []) as $s
+          | [ $s[] | select(.status == "reviewed" and has_ev) ] as $sok
           | if ($bad | length) > 0 then {file: $f, status: "unreadable", evidence: (($bad[0].evidence // "確認できませんでした") | tostring | .[0:300])}
             elif ($ok | length) >= $n then {file: $f, status: "reviewed", evidence: ($ok | map(.evidence | tostring) | join(" / ") | .[0:480])}
+            elif ($sok | length) > 0 then {file: $f, status: "reviewed", evidence: ("補完で確認: " + $sok[0].evidence | .[0:480]), supplemented: true}
+            elif ([ $s[] | select(.status == "unreadable") ] | length) > 0 then {file: $f, status: "unreadable", evidence: ((first($s[] | select(.status == "unreadable")).evidence // "確認できませんでした") | .[0:300])}
             else empty end
         )) + $runner' "${batch_results[@]}" || printf '%s' "$runner_json")"
 
-  jq -sc --argjson expected_results "$expected_results" --argjson pending "$pending" --argjson targets "$targets_json" \
+  jq -sc --argjson pending "$pending" --argjson targets "$targets_json" \
     --argjson fileReviews "$file_reviews" --argjson inputFiles "$input_files" --argjson batches "$batch_count" \
-    --argjson reused "$reused" --argjson rerun "$rerun" --argjson intReused "$int_reused" '
+    --argjson reused "$reused" --argjson rerun "$rerun" --argjson intReused "$int_reused" \
+    --argjson nb "${#batch_results[@]}" --argjson idxs "$idxs_json" --argjson supFindings "$sup_findings" '
     . as $rs
     | def uniq_by_key: group_by([((.title // "") | ascii_downcase | gsub("[\\s\\p{P}\\p{S}]"; "")), .file]) | map(sort_by(if .blocking == false then 1 else 0 end) | .[0]);
-    {
-      state: (if any($rs[]; .state == "needs_check") or any($rs[]; (.findings // []) | any(.blocking == true)) then "needs_check" else "passed" end),
-      summary: ([ $rs | to_entries[] | . as $e | ($e.value.summary // "") | select(. != "") | "[\(if $e.key < $batches then "バッチ\($e.key + 1)" else "相互作用の確認" end)] \(.[0:1500])" ] | join("\n") | .[0:19000]),
+      def has_ev: (.evidence // "") | tostring | test("\\S");
+      def settled: (.status == "confirmed" or .status == "not_applicable") and has_ev;
+    ($rs[:$nb]) as $br
+    | ($rs[$nb:]) as $ir
+    | {
+      state: (if any($rs[]; .state == "needs_check") or any($rs[], {findings: $supFindings}; (.findings // []) | any(.blocking == true)) then "needs_check" else "passed" end),
+      summary: ([ $rs | to_entries[] | . as $e | ($e.value.summary // "") | select(. != "") | "[\(if $e.key < $nb then "バッチ\($idxs[$e.key])" else "相互作用の確認" end)] \(.[0:1500])" ] | join("\n") | .[0:19000]),
       checklistVersion: ([ $rs[] | .checklistVersion // empty ] | first),
       checks: (
-        [ $rs[] | (.checks // [])[] ] | group_by(.id) | map(
-          .[0].id as $id | . as $e
-          | if ($e | length) < $expected_results then
-              {id: $id, status: "unconfirmed", evidence: "未実施または報告の無いバッチがあります（\($e | length)/\($expected_results)件）"}
-            elif any($e[]; (.status != "confirmed" and .status != "not_applicable") or ((.evidence // "") | tostring | length) == 0) then
-              {id: $id, status: "unconfirmed", evidence: ([ $e[] | select(.status == "unconfirmed" or ((.evidence // "") | tostring | length) == 0) | (.evidence // "根拠が報告されていません") | tostring ] | join(" / ") | .[0:1400])}
+        [ $rs[] | (.checks // [])[] | select(type == "object") | .id ] | unique | map(
+          . as $id
+          | ([ $ir[] | (.checks // [])[] | select(type == "object" and .id == $id) ] | first) as $ic
+          | [ $br[] | ([ (.checks // [])[] | select(type == "object" and .id == $id) ] | first) ] as $per
+          | if $ic != null and ($ic.status == "confirmed" or $ic.status == "not_applicable" or $ic.status == "unconfirmed") and ($ic | has_ev) then
+              {id: $id, status: $ic.status, evidence: ("[相互作用の確認] \($ic.evidence)" | .[0:1400]), source: ($ic.source // "current")}
             else
-              {id: $id, status: (if any($e[]; .status == "confirmed") then "confirmed" else "not_applicable" end),
-               evidence: ($e | map(.evidence | tostring) | join(" / ") | .[0:1400]),
-               source: (if all($e[]; .source == "carried_over") then "carried_over" else "current" end)}
+              [ range(0; $batches) as $i | ($per[$i] // null) as $c
+                | select($c == null or ($c | settled | not))
+                | "\(if $batches > 1 then "バッチ\(if $i < $nb then $idxs[$i] else $i + 1 end): " else "" end)\(if $c == null then "報告がありません（未実施または報告の無いバッチ）" else ($c.evidence // "根拠が報告されていません" | tostring | if test("\\S") then .[0:300] else "根拠が報告されていません" end) end)" ] as $open
+              | if ($open | length) > 0 then
+                  {id: $id, status: "unconfirmed", evidence: ($open | join(" / ") | .[0:1400])}
+                else
+                  {id: $id, status: (if any($per[]; .status == "confirmed") then "confirmed" else "not_applicable" end),
+                   evidence: ($per | map(.evidence | tostring) | join(" / ") | .[0:1400]),
+                   source: (if all($per[]; .source == "carried_over") then "carried_over" else "current" end)}
+                end
             end)),
       unverifiedScope: ([ $rs[] | .unverifiedScope // empty ] | join(" / ") | if . == "" then null else .[0:1900] end),
-      findings: ([ $rs[] | (.findings // [])[] ] | uniq_by_key | .[0:50]),
+      findings: ([ ($rs[] | (.findings // [])[]), $supFindings[] ] | uniq_by_key | .[0:50]),
       affectedPullRequests: ([ $rs[] | (.affectedPullRequests // [])[] ] | unique),
       affectedFiles: ([ $rs[] | (.affectedFiles // [])[] ] | unique | .[0:200]),
       previousFindings: ([ $rs[] | (.previousFindings // [])[] ] | group_by(.id) | map(
@@ -548,6 +643,7 @@ merge_batch_results() {
       recheckScope: ([ $rs[] | .recheckScope // empty ] | join(" / ") | if . == "" then null else .[0:1400] end),
       targetFiles: $targets,
       fileReviews: $fileReviews,
+      supplementedFiles: ([ $fileReviews[] | select(.supplemented == true) ] | length),
       inputFiles: $inputFiles,
       batches: $batches,
       pendingBatches: $pending,
@@ -755,6 +851,37 @@ main() {
     printf '%s' "$evidence_fp" >"${result_file%.json}.fp"
     executed=$((executed + 1))
   done
+
+  # ファイル別の実績の取りこぼし（報告なし・根拠が空）を、そのファイルだけを対象に1回だけ聞き直す（#4768）。
+  # 補完に失敗しても全体レビューは止めない（残ったファイルは未確認として報告する）。バッチをやり直したら補完もやり直す
+  local sup_file="$batch_dir/rsup.json"
+  ((executed > 0)) && rm -f "$sup_file" "${sup_file%.json}.fp" "$batch_dir/rsup.asked"
+  if ((remaining == 0)) && [[ ! -s "$sup_file" ]]; then
+    missing_file_pairs
+    [[ -s "$batch_dir/sup.pairs" ]] && plan_supplement
+    if [[ -s "$batch_dir/sup.pairs" && -s "$batch_dir/sup.files" ]]; then
+      RUNNING_MESSAGE="全体レビュー（${mode_label}）を実行中です（${agent}・${claude_model:-$codex_model}・確認実績の補完 $(wc -l <"$batch_dir/sup.files" | tr -d ' ')ファイル・全${total_files}ファイル）${reuse_note}"
+      release_progress_set review 2 "$RUNNING_MESSAGE" "" "$total_files"
+      review_report running "$RUNNING_MESSAGE"
+      supplement_coverage_text >"$part_dir/coverage"
+      cp "$batch_dir/sup.diff" "$part_dir/diff"
+      rc=0
+      if build_prompt "$prompt_file"; then
+        rm -f "$output_file" "$log_file"
+        run_agent "$prompt_file" "$output_file" "$log_file" "$SUPPLEMENT_TIMEOUT_SECONDS" || rc=$?
+      else
+        rc=1
+      fi
+      if ((rc == 0)) && extract_result_json "$output_file" >"$sup_file.tmp" && [[ -s "$sup_file.tmp" ]]; then
+        mv "$sup_file.tmp" "$sup_file"
+        cp "$batch_dir/sup.files" "$batch_dir/rsup.asked"
+        printf '%s' "$evidence_fp" >"${sup_file%.json}.fp"
+      else
+        rm -f "$sup_file.tmp"
+        echo "確認実績の補完を完了できませんでした（終了コード ${rc}）。取りこぼしたファイルは未確認として報告します" >&2
+      fi
+    fi
+  fi
 
   # 全バッチが済んだら、バッチをまたぐ相互作用を別に確認する（バッチごとの合格の単純集計で済ませない）
   local need_integration=0 int_file="$batch_dir/rint.json" int_reused=false
