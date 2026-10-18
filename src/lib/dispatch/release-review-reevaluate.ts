@@ -26,10 +26,11 @@ export type ReevaluateOutcome =
 
 /**
  * 対象が今も現在の候補か。**GitHub APIは呼ばずDBだけで決める**（報告の経路は利用者の権限を持たない）。
+ * 統合検証の完了後の開始（#4763・`release-review-start.ts`）も同じ判定を使う。
  * - 同じPRに、より新しく依頼された別のSHAの記録があれば古い対象（候補の更新・mainの前進・バンプ後へ移った）
  * - 新方式の候補（`ReleaseCandidate`）に属するなら、候補が進行中（取消・完了していない）であること
  */
-async function isCurrentTarget(target: ReleaseVerificationTarget): Promise<boolean> {
+export async function isCurrentReleaseReviewTarget(target: ReleaseVerificationTarget): Promise<boolean> {
   const own = await db.releaseVerification.findFirst({
     where: { ...target, kind: "ai_review" },
     select: { createdAt: true },
@@ -105,7 +106,7 @@ export async function reevaluateReleaseReviewIfReady(
     return decision;
   }
   if (decision.action !== "rerun") return decision;
-  if (!(await isCurrentTarget(target))) return { action: "skipped", reason: "not_current" };
+  if (!(await isCurrentReleaseReviewTarget(target))) return { action: "skipped", reason: "not_current" };
 
   // 証跡は統合検証を実行したホストのローカルファイル。そのホストにだけ積む
   const verifyJob = await db.dispatchJob.findFirst({

@@ -530,7 +530,11 @@ export function describeReverifyItems(
   return views.map((view) => {
     const label = REVERIFY_KIND_LABEL[view.kind];
     if (view.kind === "ai_review" && reviewStage) {
-      if (reviewStage.kind === "integration_waiting" || reviewStage.kind === "reevaluating") {
+      if (
+        reviewStage.kind === "integration_waiting" ||
+        reviewStage.kind === "reevaluating" ||
+        reviewStage.kind === "awaiting_integration"
+      ) {
         return { kind: view.kind, label, state: "running", reason: `${label}: ${describeReviewStageLabel(reviewStage)}` };
       }
       if (reviewStage.kind === "needs_check" && reviewStage.autoReevaluated && view.state === "needs_check") {

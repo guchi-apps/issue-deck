@@ -98,7 +98,7 @@ vi.mock("@/lib/release-verification", () => ({
 }));
 vi.mock("@/lib/release-mac-verification", () => ({ listReleaseMacRows: mocks.macRows }));
 vi.mock("@/lib/dispatch/release-verify-jobs", () => ({ requestReleaseVerifyJob: mocks.verifyJob }));
-vi.mock("@/lib/dispatch/release-review-jobs", () => ({ requestReleaseReviewJob: mocks.reviewJob }));
+vi.mock("@/lib/dispatch/release-review-start", () => ({ requestReleaseReviewAfterIntegration: mocks.reviewJob }));
 vi.mock("@/lib/release-publish-approval-run", () => ({
   preparePublishApproval: mocks.prepareApproval,
   commitPublishApproval: mocks.commitApproval,

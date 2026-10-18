@@ -51,7 +51,7 @@ AIレビューはテスト実行の代わりにしない。個別レビューの
 
 ## API（`POST /api/dispatch/release-verify`）
 
-認証は`POST /api/progress`と同じ共有シークレット。`action`は`request`（行を作り、統合検証のジョブも積む。#4237）・`report`（結果を記録。依頼の無い対象には書かない）・`status`（現在のSHAでのゲート判定）。
+認証は`POST /api/progress`と同じ共有シークレット。`action`は`request`（行を作り、統合検証のジョブも積む。#4237。全体レビューは統合検証の完了後に開始し、検証中は応答の`aiReview`が`deferred`になる。#4763）・`report`（結果を記録。依頼の無い対象には書かない）・`status`（現在のSHAでのゲート判定）。
 
 ## 統合検証の実行（#4237・PR2）
 
@@ -69,7 +69,7 @@ AIレビューはテスト実行の代わりにしない。個別レビューの
 
 ## 全体AIレビューの実行（#4238・PR3）
 
-- `request`は統合検証と並べて`requestReleaseReviewJob`（`src/lib/dispatch/release-review-jobs.ts`）も呼び、`DispatchJob`（`RELEASE_REVIEW`）を積む。
+- `request`は統合検証の後に`requestReleaseReviewAfterIntegration`（`src/lib/dispatch/release-review-start.ts`）を呼び、統合検証が終わっていれば`DispatchJob`（`RELEASE_REVIEW`）を積む（検証中は待たせる。下の「統合検証の完了後に全体レビューを開始する（#4763）」）。
   `activeKey`は`release_review:owner/repo#PR@base:head`。積めない理由（能力ホスト無し・Codex未対応）は**`ai_review`を`failed`（理由付き）で記録**する
 - **担当は`resolveReleaseReviewAssignee`（`src/lib/release-review-assignee.ts`）。** 設定の「アプリ内AI：原因診断・新規アプリ相談」（`appAiModelReasoning`）に従い、
   OpenAI系ならCodex、それ以外はClaude Code。AIモデル設定画面は同じ関数で実効担当を表示する。モデルは`DispatchJob.claudeModel`／`codexModel`に載り、結果の`agent`（`claude:opus`など）として記録される
@@ -130,9 +130,23 @@ PC（リリースPR詳細）・スマホ（リリースシート）・**本番�
   - ランナー（`run-release-review.sh`）はpollerが公開する`POLLER_STARTED_COMMIT`から「いま走っているpollerの版」と「候補headを含むか」を検証証跡の節へ書き、`host_compat`で互換性と実機の更新を書き分けるよう指示する（同じ更新要求を再レビューで繰り返させない）。この部分はpollerの更新後に有効
 - **証跡の更新に伴う再評価（#4632）**: `run-release-review.sh`は保存した各バッチ結果と、そのときの統合検証の証跡の指紋（`evidence_fingerprint`＝結果状態・終了時刻・工程数）を`r<N>.fp`へ残す。再実行時、**未確認の項目・未確認範囲を持つ（証跡に依存する）結果だけ**、指紋が変わった・取れなかったときに捨てて再評価し（相互作用の確認も一緒に捨てる）、確認済みだけの結果は再利用する。保存時の指紋が無い旧い保存も依存結果は再評価する。この変更はpollerの更新後に有効
 
+### 統合検証の完了後に全体レビューを開始する（#4763）
+
+以前は統合検証と全体レビューを同時に積んでいたため、1回目のレビューは証跡の無い状態で走って確認項目を`unconfirmed`にし、統合検証の完了後に同じSHAで全体レビューがもう1回走っていた（下の#4664の自動再評価）。**自動で全体レビューを積む経路は、同じ対象（PR・base・head）の統合検証が終わってから開始する。**
+
+- **対象の経路は4つで、すべて`requestReleaseReviewAfterIntegration`（`src/lib/dispatch/release-review-start.ts`）を通る。** 候補作成・revision更新（`release-rc-run.ts`）、正式バンプ後の再検証（`release-finalize-run.ts`）、`release-verify`の`request`。どれも統合検証を先に依頼してから呼ぶ。画面の手動再実行（#4632）は従来どおり`rerunReleaseReviewJob`を直接呼び、統合検証の待機中は受け付けない
+- **判定は純関数`decideReleaseReviewStart`（`src/lib/release-review-start.ts`）だけが持つ。** 待つのは次の2つのときだけで、それ以外は開始する（永久に待たない）。
+  - 同じ対象の統合検証ジョブが動いている（`QUEUED`・`CLAIMED`・`RUNNING`）
+  - 統合検証の記録は`waiting`だがジョブがまだ無く、依頼から猶予（10分）以内（依頼の直後。過ぎたら積めなかったとみなす）
+  - 開始する例: 統合検証の記録が終わった（`passed`・`failed`・`needs_check`。失敗でも開始し、その結果をレビューに評価させる）／記録が無い（正式バンプで統合検証を引き継いだ・未依頼）／`not_applicable`／ジョブが報告なしで終わった（期限切れ・取り消し）／積めなかった（ホスト無し・設定不足は`failed`が記録される）
+- **待つ間は、全体レビューの記録を`waiting`のまま`findings.awaitingIntegration`（`since`）の印を付ける。** 画面の段階は`awaiting_integration`（「統合検証の完了待ち」）で、候補の状態（`release-candidate-status.ts`）は開始待ちとして段階名を出す。マージの完了待ち（`evaluateReleaseVerificationWait`・#4354）は従来どおり`waiting`の全体レビューを待ちとして返すので、新しい状態と矛盾しない。統合検証の完了後に開始されるまでの短い間は「全体レビュー中」と出す
+- **開始の契機は2つ。** 統合検証の完了報告（`/api/dispatch/report`の`RELEASE_VERIFY`。#4664の再評価判定より先に呼ぶ）と、pollerの`claim`ごとの巡回（`sweepDeferredReleaseReviews`。1分に1回まで・直近3日・50件まで。報告の反映失敗・再起動・猶予切れを拾う）。印の無い記録・結果の出た記録には触れず、古い対象（`isCurrentReleaseReviewTarget`。#4664と共用）は開始しない——積むと同じPRの新しい対象の待機中ジョブを取り消してしまうため
+- **ホストは統合検証を実行したホスト（そのジョブの`targetHost`）を優先する**（`requestReleaseReviewJob`の`preferredHost`）。不適格（オフライン・未対応・Codex未対応）なら従来の選び方（名前順の先頭）へフォールバックし、それも無ければ従来どおり`ai_review`へ失敗（`no_host`）を記録する。#4664の再評価が使う`requiredHost`（不適格なら積まない）とは別の指定
+- **#4664の自動再評価は残す。** 通常経路ではレビューのジョブ開始が統合検証の完了より後になるので、`decideReviewReevaluation`は`used_latest_evidence`を返して発火しない。統合検証をやり直した（新しい完了が来た）・旧サーバーで並列に積まれた対象のときだけ働く
+
 ### 統合検証の完了後の自動再評価と共通の段階（#4664）
 
-統合検証と全体レビューは並列で積まれる。レビューが統合検証の実行中の証跡（`running`）を読んで終わると、#4632までは「全体レビューを再実行（証跡を更新）」を手で押す必要があった。**再評価を「いつ積むか」はサーバーが決め、手動の再実行は回復用に残す。**
+統合検証と全体レビューは、#4763までは並列で積まれていた（現在は上の節のとおり、統合検証の完了後に開始する）。レビューが統合検証の実行中の証跡（`running`）を読んで終わると、#4632までは「全体レビューを再実行（証跡を更新）」を手で押す必要があった。**再評価を「いつ積むか」はサーバーが決め、手動の再実行は回復用に残す。**
 
 - **判定は純関数`decideReviewReevaluation`（`src/lib/release-review-reevaluation.ts`）だけが持つ。** 積むのは次の3つがすべて揃ったとき。
   - 統合検証が終わった（`passed`・`failed`・`needs_check`）。`failed`・`needs_check`はその結果をレビューに評価させるために積み、`passed`へ読み替えない。`not_applicable`・未依頼・結果待ちでは積まない。
@@ -170,7 +184,7 @@ PC（リリースPR詳細）・スマホ（リリースシート）・**本番�
 - 全体レビュー（`run-release-review.sh`）は、**base/headが完全に一致する証跡だけ**をプロンプトの「検証証跡」へ入れる。候補の更新・mainの前進でファイル名が変わるため旧証跡は再利用されない。無い・実行中の場合は「未実施」として渡し、**コードの不具合の根拠にしない**（実行結果が要る項目は`unconfirmed`＋`unverifiedScope`）。AIの権限（Codexはread-only、ClaudeはRead/Grep/Glob）は変えない
 - 失敗種別`failureKind`（統合検証の結果JSONに追加。旧サーバーは無視する）: `merge_conflict`（競合ファイルを併記・統合状態の検証は未実施）／`dependency_install_failed`（`pnpm install`・`npm ci`・`pip install`等の失敗）／`setup_missing`（終了コード126/127）／`timeout`（124/137）／`test_failed`（テスト・型検査・ビルドの不合格）／`duplicate_run`。**取得失敗・設定不足・時間切れを`test_failed`（コード不具合）に置き換えない**
 - 二重実行: 同じ候補（base/head）の証跡に隣接するロック（PID）で、進行中の統合検証がある間は2本目を開始せず`needs_check`（`duplicate_run`）で返す。PIDが生きていなければロックを引き継ぐ
-- **未対応（別Issueで扱う）**: サーバー側が`failureKind`を画面・復旧系列（#4451/#4480）へ接続すること、全体レビューを統合検証の完了まで待たせる順序制御。現状は証跡が無ければ「未実施」としてレビューへ渡すに留まる
+- **未対応（別Issueで扱う）**: サーバー側が`failureKind`を画面・復旧系列（#4451/#4480）へ接続すること。全体レビューを統合検証の完了まで待たせる順序制御は#4763で実装した（上の「統合検証の完了後に全体レビューを開始する」）。証跡が無い場合（統合検証を引き継いだ・積めなかった）は従来どおり「未実施」としてレビューへ渡す
 
 ### 進捗（#4277）
 
