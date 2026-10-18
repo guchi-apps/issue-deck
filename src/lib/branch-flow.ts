@@ -1133,7 +1133,7 @@ export function splitLanesByReleaseFreeze(
 }
 
 /**
- * 束のレーンを「今回公開する変更」（`included`）と「リリース待ちのPR」（`waiting`）に分ける（#4787）。
+ * 束のレーンを「リリース候補のPR」（`included`）と「完了したPR」（`waiting`）に分ける（#4787・#4830）。
  *
  * - リリース済みの束: 全て`included`（従来どおり）
  * - 未リリースでリリースPRが無い（リリース候補を作っていない）束: 全て`waiting`
