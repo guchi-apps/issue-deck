@@ -39,6 +39,8 @@ MAX_BATCHES_PER_RUN="${ISSUE_DECK_RELEASE_REVIEW_MAX_BATCHES_PER_RUN:-8}"
 KEEP_BATCH_DIRS="${ISSUE_DECK_RELEASE_REVIEW_KEEP_BATCH_DIRS:-20}"
 # 実行結果（テスト・型検査・ビルド）の証跡を指す文言。`src/lib/release-review-reevaluation.ts`の`EVIDENCE_TEXT`と揃える
 EVIDENCE_TEXT_PATTERN='統合検証|検証結果|検証証跡|証跡|実行結果|テスト|型検査|ビルド|running'
+# 実行ホスト（サブPCのpoller）の稼働状態を指す文言（#4799）。`src/lib/release-review-reevaluation.ts`の`HOST_TEXT`と揃える
+HOST_TEXT_PATTERN='poller|ポーラー|サブPC|再起動|実機|起動時|実行ホスト|稼働コミット|host_compat'
 # 同時に確認するバッチ数の上限（#4769）。1で従来どおり1本ずつ。相互作用の確認・実績の補完は全バッチの後に1本だけ走る
 PARALLEL="${ISSUE_DECK_RELEASE_REVIEW_PARALLEL:-3}"
 # AI 1回の呼び出しのターン数の上限（claudeの`--max-turns`。#4769）。0で上限なし。上限に達すると診断は`turn_limit`になる。
@@ -507,11 +509,10 @@ run_agent() {
 # runner_host_prompt_text <owner/repo> <head SHA>: 実行ホスト（このランナーを起動したサブPCのpoller）の稼働情報の節（#4665）
 # 「pollerの更新・再起動の証跡が無い」だけで項目を未確認にし、同じ更新要求が再レビューで繰り返されていたため、
 # 確認できる事実（いま走っているpollerの版・候補を含むか）を渡す。**確認できないものは「確認できない」と書く**
-runner_host_prompt_text() {
-  local full_name="$1" head="$2" root started current includes="確認できない"
+runner_host_includes() {
+  local full_name="$1" head="$2" root started includes="確認できない"
   root="$(cd "$SCRIPT_DIR/.." && pwd)"
   started="${POLLER_STARTED_COMMIT:-}"
-  current="$(git -C "$root" rev-parse --short HEAD 2>/dev/null || true)"
   if [[ "$full_name" == "guchi-apps/issue-deck" && -n "$started" ]]; then
     if git -C "$root" merge-base --is-ancestor "$head" "$started" 2>/dev/null; then
       includes="含む（候補の変更はこのpollerで既に動いている）"
@@ -521,6 +522,21 @@ runner_host_prompt_text() {
   elif [[ "$full_name" != "guchi-apps/issue-deck" ]]; then
     includes="対象外（pollerのコードはguchi-apps/issue-deckにあり、この候補はpollerを変えない）"
   fi
+  printf '%s' "$includes"
+}
+
+# runner_host_fingerprint <owner/repo> <head SHA>: ホストの事実（起動時のコミット・候補を含むか）の指紋（#4799）。
+# チェックアウトの現在のHEADは含めない（無関係なコミットで保存済みの結果が古くならないように）
+runner_host_fingerprint() {
+  printf '%s|%s' "${POLLER_STARTED_COMMIT:-}" "$(runner_host_includes "$1" "$2")"
+}
+
+runner_host_prompt_text() {
+  local full_name="$1" head="$2" root started current includes
+  root="$(cd "$SCRIPT_DIR/.." && pwd)"
+  started="${POLLER_STARTED_COMMIT:-}"
+  current="$(git -C "$root" rev-parse --short HEAD 2>/dev/null || true)"
+  includes="$(runner_host_includes "$full_name" "$head")"
   printf '\n## 実行ホストの稼働情報（このレビューを起動したサブPCのpoller）\n\n'
   printf -- '- いま走っているpollerの版（起動時のコミット）: %s\n' "${started:-確認できない（申告の無い旧poller）}"
   printf -- '- チェックアウトの現在のHEAD: %s\n' "${current:-確認できない}"
@@ -537,37 +553,58 @@ result_depends_on_evidence() {
     or ((.unverifiedScope // "") | tostring | test($re; "i"))' "$1" >/dev/null 2>&1
 }
 
+# result_depends_on_host <結果JSON>: その結果が実行ホストの運用状態（pollerの更新・再起動）の未確認を持つか（#4799）
+# 未確認の項目の根拠・未確認範囲が`HOST_TEXT_PATTERN`に当たるものだけ（`reviewDependsOnHost`と同じ規則）
+result_depends_on_host() {
+  jq -e --arg re "$HOST_TEXT_PATTERN" '
+    any(.checks[]?; .status == "unconfirmed" and ((.evidence // "") | tostring | test($re; "i")))
+    or ((.unverifiedScope // "") | tostring | test($re; "i"))' "$1" >/dev/null 2>&1
+}
+
 # invalidate_stale_batches <現在の証跡の指紋> [現在の確認項目の版]: 保存済みの結果のうち、やり直すものを捨てる（#4632・#4767）。
 # やり直すのは「証跡に依存し、かつ保存時と指紋が違う（どちらかが取れない）」結果と、確認項目の版が今と違う結果だけ。
 # それ以外（確認済み・証跡に依存しない未確認）は再利用する。相互作用の確認（`rint`）・実績の補完（`rsup`。#4768）も
 # 同じ規則で捨てるほか、バッチを1つでもやり直すときは実行後に必ずやり直す（main側で捨てる）。
 # 結果は`reuse_note`へ（画面のメッセージ用）。`batch_dir`は呼び出し元（main）のローカル変数を参照する
 invalidate_stale_batches() {
-  local cur_fp="$1" cur_ver="${2:-}" f stem saved dropped=0 reused=0
+  local cur_fp="$1" cur_ver="${2:-}" cur_hfp="${3:-}" f stem saved dropped=0 reused=0 dep_ev dep_host stale
   reuse_note=""
   for f in "$batch_dir"/r*.json; do
     [[ -e "$f" ]] || continue
     stem="${f%.json}"
     if [[ -n "$cur_ver" ]] && ! jq -e --arg v "$cur_ver" '(.checklistVersion // "" | tostring) == $v' "$f" >/dev/null 2>&1; then
-      rm -f "$f" "$stem.fp"
+      rm -f "$f" "$stem.fp" "$stem.hfp"
       [[ "$f" == */rint.json || "$f" == */rsup.json ]] || dropped=$((dropped + 1))
       continue
     fi
-    if ! result_depends_on_evidence "$f"; then
+    dep_ev=0
+    dep_host=0
+    result_depends_on_evidence "$f" && dep_ev=1
+    # 運用の未確認は、ホストの事実（起動時コミット・候補を含むか）が保存時と変わったら見直す（#4799）
+    [[ -n "$cur_hfp" ]] && result_depends_on_host "$f" && dep_host=1
+    if ((dep_ev == 0 && dep_host == 0)); then
       [[ "$f" == */rint.json || "$f" == */rsup.json ]] || reused=$((reused + 1))
       continue
     fi
-    saved="$(cat "$stem.fp" 2>/dev/null || true)"
-    if [[ -n "$cur_fp" && -n "$saved" && "$saved" == "$cur_fp" ]]; then
+    stale=0
+    if ((dep_ev == 1)); then
+      saved="$(cat "$stem.fp" 2>/dev/null || true)"
+      [[ -n "$cur_fp" && -n "$saved" && "$saved" == "$cur_fp" ]] || stale=1
+    fi
+    if ((dep_host == 1)); then
+      saved="$(cat "$stem.hfp" 2>/dev/null || true)"
+      [[ -n "$saved" && "$saved" == "$cur_hfp" ]] || stale=1
+    fi
+    if ((stale == 0)); then
       [[ "$f" == */rint.json || "$f" == */rsup.json ]] || reused=$((reused + 1))
       continue
     fi
-    rm -f "$f" "$stem.fp"
+    rm -f "$f" "$stem.fp" "$stem.hfp"
     [[ "$f" == */rint.json || "$f" == */rsup.json ]] || dropped=$((dropped + 1))
   done
   if ((dropped > 0)); then
-    rm -f "$batch_dir/rint.json" "$batch_dir/rint.fp" "$batch_dir/rsup.json" "$batch_dir/rsup.fp"
-    reuse_note="（検証証跡が更新されたため、証跡に依存する${dropped}件を再評価します。確認済みの${reused}件は再利用）"
+    rm -f "$batch_dir/rint.json" "$batch_dir/rint.fp" "$batch_dir/rint.hfp" "$batch_dir/rsup.json" "$batch_dir/rsup.fp" "$batch_dir/rsup.hfp"
+    reuse_note="（検証証跡・実行ホストの状態が更新されたため、それに依存する${dropped}件を再評価します。確認済みの${reused}件は再利用）"
   fi
 }
 
@@ -777,6 +814,7 @@ run_batch_job() {
   fi
   # 指紋を先に書く（結果だけが残り指紋の無い状態は、証跡に依存する結果なら再評価に倒れる）
   printf '%s' "$evidence_fp" >"${result_file%.json}.fp"
+  printf '%s' "$host_fp" >"${result_file%.json}.hfp"
   mv "$result_file.tmp" "$result_file"
   printf '0' >"$jd/rc"
 }
@@ -790,7 +828,7 @@ main() {
   local -a files=() fix_files=() added_prs=() unrelated_prs=()
   local ctx_json="" ctx_mode="initial" effective_mode="initial" deny_reason="" prev_head="" fix_prs_json="[]"
   local checklist_version="" fix_diff_count=0
-  local batch_dir="" batch_count=0 input_files=0 codex_command="" evidence_fp="" reuse_note=""
+  local batch_dir="" batch_count=0 input_files=0 codex_command="" evidence_fp="" host_fp="" reuse_note=""
 
   trap cleanup EXIT
   # 想定外の失敗でstderrの末尾を診断へ載せるため、写しを取る（端末への出力はそのまま残る）
@@ -869,7 +907,8 @@ main() {
     checklist_version="$(jq -r '.checklistVersion // empty' <<<"$ctx_json")"
     fix_prs_json="$(jq -c '.fixPrNumbers // []' <<<"$ctx_json")"
   fi
-  invalidate_stale_batches "$evidence_fp" "$checklist_version"
+  host_fp="$(runner_host_fingerprint "$full_name" "$head_sha")"
+  invalidate_stale_batches "$evidence_fp" "$checklist_version" "$host_fp"
   mkdir -p "$WORK_ROOT"
   local fix_files_file="$WORK_ROOT/${repo}-${pr_number}-${head_sha:0:12}.fixfiles"
   local fix_diff_file="$WORK_ROOT/${repo}-${pr_number}-${head_sha:0:12}.fixdiff"
@@ -1040,7 +1079,7 @@ main() {
   # ファイル別の実績の取りこぼし（報告なし・根拠が空）を、そのファイルだけを対象に1回だけ聞き直す（#4768）。
   # 補完に失敗しても全体レビューは止めない（残ったファイルは未確認として報告する）。バッチをやり直したら補完もやり直す
   local sup_file="$batch_dir/rsup.json"
-  ((executed > 0)) && rm -f "$sup_file" "${sup_file%.json}.fp" "$batch_dir/rsup.asked"
+  ((executed > 0)) && rm -f "$sup_file" "${sup_file%.json}.fp" "${sup_file%.json}.hfp" "$batch_dir/rsup.asked"
   if ((remaining == 0)) && [[ ! -s "$sup_file" ]]; then
     missing_file_pairs
     [[ -s "$batch_dir/sup.pairs" ]] && plan_supplement
@@ -1061,6 +1100,7 @@ main() {
         mv "$sup_file.tmp" "$sup_file"
         cp "$batch_dir/sup.files" "$batch_dir/rsup.asked"
         printf '%s' "$evidence_fp" >"${sup_file%.json}.fp"
+        printf '%s' "$host_fp" >"${sup_file%.json}.hfp"
       else
         rm -f "$sup_file.tmp"
         echo "確認実績の補完を完了できませんでした（終了コード ${rc}）。取りこぼしたファイルは未確認として報告します" >&2
@@ -1072,7 +1112,7 @@ main() {
   local need_integration=0 int_file="$batch_dir/rint.json" int_reused=false
   ((batch_count > 1)) && need_integration=1
   # バッチを1つでも今回確認したら、相互作用の確認もやり直す（保存済みの相互作用は古いバッチ結果に基づく）
-  ((executed > 0)) && rm -f "$int_file" "${int_file%.json}.fp"
+  ((executed > 0)) && rm -f "$int_file" "${int_file%.json}.fp" "${int_file%.json}.hfp"
   if ((need_integration == 1)) && [[ -s "$int_file" ]] && jq -e 'type == "object"' "$int_file" >/dev/null 2>&1; then
     int_reused=true
   fi
@@ -1103,6 +1143,7 @@ main() {
     fi
     mv "$int_file.tmp" "$int_file"
     printf '%s' "$evidence_fp" >"${int_file%.json}.fp"
+    printf '%s' "$host_fp" >"${int_file%.json}.hfp"
   fi
 
   release_progress_set finalize 3 "全体レビューの結果を整理しています" "" "$total_files"
