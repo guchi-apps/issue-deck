@@ -67,8 +67,11 @@ const HOLD_LABELS = ["00.check-user", "22.merge-confirm-required"];
  * - 人の確認ラベルが付いていない
  * マージ操作は呼び出し側がこのHEADのSHAを渡して行う（追いコミットを巻き込まない）
  */
-/** 自動マージしてよい変更ファイル。リリースの正式バンプ・更新履歴・iOSの版情報だけ（コード・ワークフロー・設定は人へ回す） */
-const AUTO_MERGE_FILE_PATTERNS = [/^package\.json$/, /^src\/lib\/changelog\.ts$/, /^\.github\/release-notes\.md$/, /^ios\/[^/]+\.xcodeproj\/project\.pbxproj$/];
+/**
+ * 自動マージを止める変更ファイル。ワークフローだけは人へ回す（Claudeの自動レビューが走らないため）。
+ * 同期PRはHEADがmainの先端そのもので中身は公開済みなので、コード・版ファイル（リポジトリごとに違う）は止めない（#4731）
+ */
+const HOLD_FILE_PATTERNS = [/^\.github\/workflows\//];
 
 export function decideDevelopSyncAutoMerge(
   pr: DevelopSyncPullRequest,
@@ -78,10 +81,11 @@ export function decideDevelopSyncAutoMerge(
   if (!pr.headRef.startsWith(DEVELOP_SYNC_BRANCH_PREFIX)) return { ok: false, reason: "専用ブランチの同期PRではありません" };
   if (!pr.headSha) return { ok: false, reason: "PRのHEADを取得できていません" };
   // PRのHEADが元のmainそのもの（追いコミット・競合解消が無い）で、今のmainに追いついている場合だけ。
-  // 中身は`main.files`と一致するので、その範囲が上の既知のファイルに収まるかで人へ回すかを決める
+  // 中身は`main.files`と一致するので、人へ回すファイル（ワークフロー）を含むかを見る
   if (pr.mainSha !== main.sha || pr.headSha !== pr.mainSha) return { ok: false, reason: "PRのHEADがmainの先端と一致しません（追いコミットか、mainが進んでいます）" };
-  const outside = main.files.find((f) => !AUTO_MERGE_FILE_PATTERNS.some((re) => re.test(f)));
-  if (outside || main.files.length === 0) return { ok: false, reason: `リリース由来の既知のファイル以外を含みます（${outside ?? "差分なし"}）` };
+  const heldFile = main.files.find((f) => HOLD_FILE_PATTERNS.some((re) => re.test(f)));
+  if (heldFile) return { ok: false, reason: `人の確認が要るファイルを含みます（${heldFile}）` };
+  if (main.files.length === 0) return { ok: false, reason: "差分がありません" };
   if (pr.mergeable !== true) return { ok: false, reason: "マージ可否が確定していないか競合しています" };
   if (pr.ciState !== "success") return { ok: false, reason: "CIが成功していません" };
   if (pr.reviewSettled !== true) return { ok: false, reason: "自動レビューの判定が終わっていません" };
