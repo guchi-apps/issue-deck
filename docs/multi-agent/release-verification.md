@@ -221,6 +221,8 @@ PC（リリースPR詳細）・スマホ（リリースシート）・**本番�
 
 対象は従来どおり（PR・base・head）で扱う。候補revisionが導入されたときは、`loadReleaseReviewContext`の「前回の記録」を同じ候補系列の前revisionに差し替えるだけでよい（引き継ぎの可否判定は`decideReviewMode`に集約している）。バンプ後の引き継ぎ（`deriveInheritedRecords`）は元の結果を複写する別経路で、この判定とは独立している。
 
+正式バンプ（#4496）で変わったのが版ファイル・更新履歴と、iOS設定の版番号行だけ（`versionLinesOnly`。書き換え後の`MARKETING_VERSION`が予約済みの正式版と一致することまで確かめる）なら、全体レビュー・統合検証はバンプ前の合格を引き継ぎ、全体レビューを最初からやり直さない（#4764。判定は`decideInheritedVerification`）。iOS設定の他の行・依存関係・その他が変わった場合と、iOS検証・Mac検証が必要なリポジトリの統合検証は従来どおり再実行する。詳細は[release.md](release.md)「検証対象の分離と引継ぎ」。
+
 ### セッション内の独立レビュー
 
 修正Issue本文（`internalReviewSection`）に、同じ確認項目と止める／止めないの基準を載せる。
