@@ -7,6 +7,9 @@ import type { ReleaseCompletionRunView } from "@/lib/release-completion-run";
 
 const base: ReleaseCompletionRunView = {
   id: "r1",
+  waitMessage: null,
+  waitStalled: false,
+  waitSince: null,
   repositoryFullName: "guchi-apps/issue-deck",
   status: "checking",
   statusLabel: "修正後のチェック中",
@@ -56,6 +59,18 @@ const props = {
 describe("ReleaseCompletionPanel（#4480）", () => {
   beforeEach(() => vi.unstubAllGlobals());
   afterEach(() => cleanup());
+
+  it("本番マージの条件待ちでは待ち理由を出し、長時間待ちは警告に変える（#4725）", async () => {
+    mockRun({ status: "merging", waitMessage: "GitHubのマージ可否を判定中" });
+    render(<ReleaseCompletionPanel {...props} canStart />);
+    await waitFor(() => expect(screen.getByTestId("release-completion-wait")).toBeTruthy());
+    expect(screen.getByTestId("release-completion-wait").textContent).toBe("いま待っているもの: GitHubのマージ可否を判定中");
+    cleanup();
+    mockRun({ status: "merging", waitMessage: "GitHubのマージ可否を判定中", waitStalled: true });
+    render(<ReleaseCompletionPanel {...props} canStart />);
+    await waitFor(() => expect(screen.getByTestId("release-completion-wait")).toBeTruthy());
+    expect(screen.getByTestId("release-completion-wait").textContent).toContain("長時間進んでいません");
+  });
 
   it("進行中は6段階の現在位置・世代・費用・残りを出し、停止を押せる", async () => {
     mockRun({});

@@ -3,6 +3,10 @@ import { describe, expect, it } from "vitest";
 import {
   decideCompletionMerge,
   decideReleaseCompletion,
+  describeMergeWait,
+  isLongMergeWait,
+  nextMergeWait,
+  RELEASE_COMPLETION_LONG_WAIT_MS,
   isGateClearedByReviewDecisions,
   RELEASE_COMPLETION_FIX_START_TIMEOUT_MS,
   releaseCompletionStageIndex,
@@ -504,5 +508,30 @@ describe("公開承認（#4666）から始めた系列", () => {
     expect(
       decideCompletionMerge(merging, { ...observation, publishApprovalValid: true, pullRequest: { ...observation.pullRequest!, labels: ["22.merge-confirm-required"] } }),
     ).toMatchObject({ action: "stop", reason: "blocked_by_label" });
+  });
+});
+
+describe("本番マージの待ち理由（#4725）", () => {
+  const t0 = new Date("2026-10-18T03:00:00Z");
+
+  it("理由コードを日本語1行にし、未知の理由（検証ゲートの文言）は添えて出す", () => {
+    expect(describeMergeWait(null)).toBeNull();
+    expect(describeMergeWait("mergeable_unknown")).toBe("GitHubのマージ可否を判定中");
+    expect(describeMergeWait("ci_pending")).toBe("CIの完了を待っています");
+    expect(describeMergeWait("finalization_not_ready")).toContain("公開準備");
+    expect(describeMergeWait("統合検証: 対象が変わったため古い結果は使えません")).toBe("検証の条件を待っています: 統合検証: 対象が変わったため古い結果は使えません");
+  });
+
+  it("理由が変わったとき（初回を含む）だけ待ち始めを更新する", () => {
+    expect(nextMergeWait({ reason: null, since: null }, "ci_pending", t0)).toEqual({ reason: "ci_pending", since: t0 });
+    expect(nextMergeWait({ reason: "ci_pending", since: t0 }, "ci_pending", new Date(t0.getTime() + 60_000))).toBeNull();
+    const later = new Date(t0.getTime() + 60_000);
+    expect(nextMergeWait({ reason: "ci_pending", since: t0 }, "mergeable_unknown", later)).toEqual({ reason: "mergeable_unknown", since: later });
+  });
+
+  it("同じ理由で15分以上待つと長時間待ち（境界を含む）", () => {
+    expect(isLongMergeWait(null, t0)).toBe(false);
+    expect(isLongMergeWait(t0, new Date(t0.getTime() + RELEASE_COMPLETION_LONG_WAIT_MS - 1))).toBe(false);
+    expect(isLongMergeWait(t0, new Date(t0.getTime() + RELEASE_COMPLETION_LONG_WAIT_MS))).toBe(true);
   });
 });
