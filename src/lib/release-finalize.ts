@@ -432,8 +432,11 @@ export function decideFinalizeReport(input: {
     observation.changedFiles.filter((path) => categorizeChangedFile(path, input.rules) === "ios_version" && isIosVersionLinesOnlyPatch(observation.patches?.[path], input.expectedVersion!)),
   );
   const diff = summarizeBumpDiff(observation.changedFiles, input.rules, versionLinesOnly);
-  if (!diff.versionFileChanged) return { action: "fail", reason: "版ファイルが書き換わっていません" };
-  if (!isBumpedToReservation({ headVersion: observation.headVersion, mainVersion: observation.mainVersion, reservedVersion: input.expectedVersion })) {
+  const bumped = isBumpedToReservation({ headVersion: observation.headVersion, mainVersion: observation.mainVersion, reservedVersion: input.expectedVersion });
+  // 候補の元のdevelopが既に正式版へ上がっていた場合（自動判定の結果と一致）は、版ファイルが変わらなくてよい（#4798）。
+  // リリースノートなど版以外だけが変わったコミットでも、headの版がmainより新しく予約どおりなら確定する
+  if (!diff.versionFileChanged && !bumped) return { action: "fail", reason: "版ファイルが書き換わっていません" };
+  if (!bumped) {
     return {
       action: "fail",
       reason: `候補の版（${observation.headVersion ?? "不明"}）が確定する版（${input.expectedVersion}）と一致しないか、mainの版（${observation.mainVersion ?? "不明"}）より新しくありません`,

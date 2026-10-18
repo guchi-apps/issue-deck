@@ -924,6 +924,45 @@ async function supersedeByContinuation(ctx: SweepContext, row: ReleaseFixSeries,
 }
 
 /**
+ * 取り消した候補のPRに紐づく修正系列を、理由つきで畳む（#4800）。
+ * 候補が無くなると巡回も再検証も通らず、止まった系列の確認待ちが取り残されるため、取り消し側から呼ぶ。
+ * `superseded`は巡回の対象外なので復活しない。冪等（終端の系列には触れない）
+ */
+export async function closeFixSeriesForCancelledCandidate(input: {
+  repositoryFullName: string;
+  prNumbers: number[];
+  candidateLabel: string;
+}): Promise<number> {
+  const prNumbers = [...new Set(input.prNumbers)];
+  if (prNumbers.length === 0) return 0;
+  const rows = await db.releaseFixSeries.findMany({
+    where: {
+      repositoryFullName: input.repositoryFullName,
+      status: { in: ["issue_created", "fix_in_progress", "fix_merged", "awaiting_decision", "rebuilding", "reverifying", "stopped"] },
+      OR: [{ releasePrNumber: { in: prNumbers } }, { successorPrNumber: { in: prNumbers } }],
+    },
+  });
+  if (rows.length === 0) return 0;
+  const access = await repositoryToken(input.repositoryFullName);
+  const reason = `リリース候補 ${input.candidateLabel} を取り消したため、この修正系列を終了しました`;
+  let closed = 0;
+  for (const row of rows) {
+    const moved = await db.releaseFixSeries.updateMany({
+      where: { id: row.id, status: row.status },
+      data: { status: "superseded", activeKey: null, stopReason: reason },
+    });
+    if (moved.count === 0) continue;
+    closed += 1;
+    if (!access) continue;
+    if (row.status === "stopped" || row.status === "awaiting_decision") await resolveStopLabels(access, row.issueNumber);
+    await createComment(access.owner, access.repo, row.issueNumber, access.token, {
+      body: `リリース候補 ${input.candidateLabel} を取り消したため、この修正系列は終了しました。このIssueでの対応は不要です。\n\n${STOP_COMMENT_MARKER}`,
+    }).catch(() => undefined);
+  }
+  return closed;
+}
+
+/**
  * 再検証で修正が要ると判定されたあとの扱い（#4478）。失敗というだけで本人確認にせず、
  * 通常の追加指摘は同じ修正Issueの次世代へ戻す。実行障害は起案せず待ち、本人判断は理由つきで止める。
  */

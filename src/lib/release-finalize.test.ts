@@ -278,9 +278,16 @@ describe("decideFinalizeReport", () => {
   });
   it("版が確定できない・版ファイルが変わっていない・確定した版と違う版は失敗にする", () => {
     expect(run({ expectedVersion: null })).toMatchObject({ action: "fail" });
-    expect(run({}, { changedFiles: [".github/release-notes.md"] })).toMatchObject({ action: "fail" });
+    expect(run({}, { changedFiles: [".github/release-notes.md"], headVersion: "2.13.4" })).toEqual({ action: "fail", reason: "版ファイルが書き換わっていません" });
     expect(run({}, { headVersion: "2.15.0" })).toMatchObject({ action: "fail" });
     expect(run({}, { headVersion: "2.13.4" })).toMatchObject({ action: "fail" });
+  });
+  it("元のdevelopが既に予約どおりの版へ上がっていて、版以外だけが変わったコミットでも確定する（#4798）", () => {
+    const notesOnly = { changedFiles: [".github/release-notes.md"] };
+    expect(run({}, notesOnly)).toMatchObject({ action: "apply", headSha: POST, version: "2.14.0" });
+    // 版がmainと同じ・古い・違う版のままなら従来どおり失敗
+    expect(run({}, { ...notesOnly, headVersion: "2.13.4" })).toMatchObject({ action: "fail" });
+    expect(run({}, { ...notesOnly, headVersion: "2.15.0" })).toMatchObject({ action: "fail" });
   });
   it("再送・適用済みでは何もしない", () => {
     expect(run({ row: { ...row, status: "applied" } })).toEqual({ action: "ignore", reason: "already_applied" });

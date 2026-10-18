@@ -34,6 +34,27 @@ export function readAutoReevaluation(findings: unknown): ReviewAutoReevaluation 
  */
 const EVIDENCE_TEXT = /統合検証|検証結果|検証証跡|証跡|実行結果|テスト|型検査|ビルド|running/i;
 
+/**
+ * 実行ホスト（サブPCのpoller）の更新・再起動を指す未確認の文言（#4799）。
+ * **ランナー（`scripts/run-release-review.sh`の`HOST_TEXT_PATTERN`）と同じ語を持つ**（変えるときは両方を揃える）
+ */
+const HOST_TEXT = /poller|ポーラー|サブPC|再起動|実機|起動時|実行ホスト|稼働コミット|host_compat/i;
+
+/**
+ * レビュー結果が実行ホストの運用状態に左右されているか（#4799）。ランナーの`result_depends_on_host`と同じ規則。
+ * 該当する結果は、ホストの事実（起動時コミット・候補を含むか）が変わると、再実行でランナーが保存済みの結果を捨てて見直す。
+ * 統合検証の完了では変わらないので、自動再評価（`reviewDependsOnEvidence`）の契機には数えない
+ */
+export function reviewDependsOnHost(input: {
+  checks: readonly { status: string; evidence?: string | null }[] | null | undefined;
+  unverifiedScope: string | null | undefined;
+}): boolean {
+  const hit = (input.checks ?? []).some(
+    (c) => c.status === "unconfirmed" && typeof c.evidence === "string" && HOST_TEXT.test(c.evidence),
+  );
+  return hit || (typeof input.unverifiedScope === "string" && HOST_TEXT.test(input.unverifiedScope));
+}
+
 /** 未確認の確認項目が証跡に依存するか。根拠の文言が無いものは、何に依存するか分からないので依存側へ倒す */
 export function checkDependsOnEvidence(check: { status: string; evidence?: string | null }): boolean {
   if (check.status !== "unconfirmed") return false;
@@ -43,7 +64,7 @@ export function checkDependsOnEvidence(check: { status: string; evidence?: strin
 
 /**
  * レビュー結果が統合検証の証跡に左右されているか（#4632・#4767）。ランナーの`result_depends_on_evidence`と同じ規則で、
- * **証跡を指す文言の未確認項目・未確認範囲だけ**を依存に数える。poller更新のような運用の未確認やコードの未読は、
+ * **証跡を指す文言の未確認項目・未確認範囲だけ**を依存に数える。poller更新のような運用の未確認（`reviewDependsOnHost`）やコードの未読は、
  * 統合検証が終わっても変わらないので積まない
  */
 export function reviewDependsOnEvidence(input: {
