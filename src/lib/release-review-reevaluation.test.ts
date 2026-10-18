@@ -5,6 +5,7 @@ import {
   describeReviewEvidenceStage,
   describeReviewStageLabel,
   reviewDependsOnEvidence,
+  reviewDependsOnHost,
   type ReviewReevaluationInput,
   type ReviewStageInput,
 } from "./release-review-reevaluation";
@@ -54,6 +55,16 @@ describe("reviewDependsOnEvidence", () => {
     ).toBe(true);
     // 根拠の無い未確認は何に依存するか分からないので、依存側へ倒す
     expect(reviewDependsOnEvidence({ checks: [{ status: "unconfirmed", evidence: "" }], unverifiedScope: null })).toBe(true);
+  });
+});
+
+describe("reviewDependsOnHost（#4799）", () => {
+  it("pollerの更新・再起動を指す未確認だけを依存に数える", () => {
+    const u = (evidence: string) => ({ checks: [{ status: "unconfirmed", evidence }], unverifiedScope: null });
+    expect(reviewDependsOnHost(u("実機pollerの起動時コミットが候補headを含むか確認できない"))).toBe(true);
+    expect(reviewDependsOnHost({ checks: [], unverifiedScope: "サブPCの再起動の証跡待ち" })).toBe(true);
+    expect(reviewDependsOnHost(u("コードを読めていない"))).toBe(false);
+    expect(reviewDependsOnHost({ checks: [{ status: "confirmed", evidence: "pollerを確認" }], unverifiedScope: null })).toBe(false);
   });
 });
 

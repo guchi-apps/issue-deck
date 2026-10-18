@@ -240,6 +240,26 @@ describe("run-release-review.sh（#4615）", { timeout: 30_000 }, () => {
     expect(rerun.result.checks.every((c) => c.status === "confirmed")).toBe(true);
   });
 
+  it("運用（poller更新）の未確認は、ホストの事実が変わったら再利用せず、変わらなければ再利用する（#4799）", () => {
+    const calls = path.join(dir, "calls");
+    const env = {
+      CALL_LOG: calls,
+      ISSUE_DECK_RELEASE_EVIDENCE_ROOT: path.join(dir, "no-evidence"),
+      UNCONF: "1",
+      UNCONF_TEXT: "実機pollerの起動時コミットが候補headを含むか確認できない",
+      FAIL_INT: "1",
+    };
+    const count = () => readFileSync(calls, "utf8").trim().split("\n").length;
+    runReview({ ...env, POLLER_STARTED_COMMIT: "aaaaaaa" });
+    const before = count();
+    // ホストの事実が同じなら保存済みの結果を使い回す
+    runReview({ ...env, POLLER_STARTED_COMMIT: "aaaaaaa" });
+    expect(count()).toBe(before);
+    // pollerの起動時コミットが変わったら、運用の未確認はもう一度AIで見直す
+    runReview({ ...env, POLLER_STARTED_COMMIT: "bbbbbbb" });
+    expect(count()).toBeGreaterThanOrEqual(before * 2);
+  });
+
   it("証跡を取得できないときは、証跡に依存する保存済みの結果を再利用せず再評価する（#4632）", () => {
     const calls = path.join(dir, "calls");
     const env = { ISSUE_DECK_RELEASE_EVIDENCE_ROOT: path.join(dir, "no-evidence"), CALL_LOG: calls };
