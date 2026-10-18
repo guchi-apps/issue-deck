@@ -383,6 +383,89 @@ describe("reconcileRcFinalization（系列がマージした後。#4666）", () 
   });
 });
 
+describe("reconcileRcFinalization（PRを読んだ直後のマージ。#4805）", () => {
+  const applied = { id: "f1", candidateId: "c1", status: "applied", prNumber: 10, preBaseSha: BASE, preHeadSha: PRE, finalBaseSha: BASE, finalHeadSha: POST, reservedVersion: "2.14.0", failureReason: null, createdAt: new Date() };
+  const unmerged = { number: 10, merged: false, merged_at: null, merge_commit_sha: null, draft: false, head: { sha: POST }, base: { sha: BASE } };
+  const merged = { ...unmerged, merged: true, merged_at: new Date().toISOString(), merge_commit_sha: "m1" };
+  const consumedCalls = () => mocks.resUpdateMany.mock.calls.filter((call) => (call as unknown as [{ data: { status?: string } }])[0].data.status === "consumed");
+  const supersededCalls = () => mocks.finUpdateMany.mock.calls.filter((call) => (call as unknown as [{ data: { status?: string } }])[0].data.status === "superseded");
+
+  beforeEach(() => {
+    mocks.observePr.mockResolvedValue({ number: 10, state: "open", head: { sha: POST }, base: { sha: BASE } });
+    vi.mocked(releaseApi.fetchPullRequestCiState).mockResolvedValue({ ciState: "success" } as never);
+    mocks.records.mockResolvedValue([
+      { kind: "integration", state: "passed", baseSha: BASE, headSha: POST },
+      { kind: "ai_review", state: "passed", baseSha: BASE, headSha: POST },
+    ]);
+    mocks.candUpdateMany.mockReset().mockResolvedValue({ count: 1 });
+  });
+
+  it("PR取得時は未マージ・main取得時は前進済みなら、取り直したPRがマージ済みなので修正工程へ戻さず本番反映へ進める", async () => {
+    mocks.loadCandidateRow.mockResolvedValue({ id: "c1", sequence: 3, phase: "awaiting_approval", revisions: [{ revision: 3 }] });
+    mocks.finFindMany.mockResolvedValue([applied]);
+    mocks.fetchPr.mockResolvedValueOnce(unmerged).mockResolvedValue(merged);
+    mocks.mainHead.mockResolvedValue("m1".padEnd(40, "0"));
+
+    await reconcileRcFinalization(ctx, "c1");
+
+    expect(supersededCalls()).toHaveLength(0);
+    expect(mocks.candUpdateMany).not.toHaveBeenCalledWith(expect.objectContaining({ data: { phase: "review" } }));
+    expect(mocks.candUpdateMany).toHaveBeenCalledWith({ where: { id: "c1", phase: "awaiting_approval" }, data: { phase: "deploying" } });
+    expect(consumedCalls()).toHaveLength(1);
+  });
+
+  it("取り直してもマージされていなければ、従来どおり失効させて修正工程へ戻す", async () => {
+    mocks.loadCandidateRow.mockResolvedValue({ id: "c1", sequence: 3, phase: "awaiting_approval", revisions: [{ revision: 3 }] });
+    mocks.finFindMany.mockResolvedValue([applied]);
+    mocks.fetchPr.mockResolvedValue(unmerged);
+    mocks.mainHead.mockResolvedValue("d".repeat(40));
+
+    await reconcileRcFinalization(ctx, "c1");
+
+    expect(supersededCalls()).toHaveLength(1);
+    expect(mocks.candUpdateMany).toHaveBeenCalledWith({ where: { id: "c1", phase: "awaiting_approval" }, data: { phase: "review" } });
+    expect(consumedCalls()).toHaveLength(0);
+  });
+
+  it("既に修正工程へ戻ったマージ済みの候補は、失効した行を適用済みへ戻して本番反映へ進め、版の予約を消費する", async () => {
+    mocks.loadCandidateRow.mockResolvedValue({ id: "c1", sequence: 3, phase: "review", revisions: [{ revision: 3 }] });
+    mocks.finFindMany.mockResolvedValue([{ ...applied, status: "superseded", failureReason: "公開準備の後にmainが進んだため、検証と承認を取り直します" }]);
+    mocks.observePr.mockResolvedValue({ number: 10, state: "closed", head: { sha: POST }, base: { sha: BASE } });
+    mocks.fetchPr.mockResolvedValue(merged);
+
+    await reconcileRcFinalization(ctx, "c1");
+
+    expect(mocks.candUpdateMany).toHaveBeenCalledWith({ where: { id: "c1", phase: "review" }, data: { phase: "awaiting_approval" } });
+    expect(mocks.finUpdateMany).toHaveBeenCalledWith({ where: { id: "f1", status: "superseded" }, data: { status: "applied", failureReason: null } });
+    expect(mocks.candUpdateMany).toHaveBeenCalledWith({ where: { id: "c1", phase: "awaiting_approval" }, data: { phase: "deploying" } });
+    expect(consumedCalls()).toHaveLength(1);
+  });
+
+  it.each([
+    ["PRが未マージ", { ...unmerged }],
+    ["記録した最終headと違う内容がマージされた", { ...merged, head: { sha: "e".repeat(40) } }],
+  ])("修正工程の候補でも%sなら復旧しない", async (_label, pull) => {
+    mocks.loadCandidateRow.mockResolvedValue({ id: "c1", sequence: 3, phase: "review", revisions: [{ revision: 3 }] });
+    mocks.finFindMany.mockResolvedValue([{ ...applied, status: "superseded" }]);
+    mocks.fetchPr.mockResolvedValue(pull);
+
+    await reconcileRcFinalization(ctx, "c1");
+
+    expect(mocks.candUpdateMany).not.toHaveBeenCalled();
+    expect(consumedCalls()).toHaveLength(0);
+  });
+
+  it("修正工程の候補で、直前の公開準備が適用前に失敗した行ならGitHubへ問い合わせない", async () => {
+    mocks.loadCandidateRow.mockResolvedValue({ id: "c1", sequence: 3, phase: "review", revisions: [{ revision: 3 }] });
+    mocks.finFindMany.mockResolvedValue([{ ...applied, status: "failed", finalHeadSha: null, finalBaseSha: null }]);
+
+    await reconcileRcFinalization(ctx, "c1");
+
+    expect(mocks.fetchPr).not.toHaveBeenCalled();
+    expect(mocks.candUpdateMany).not.toHaveBeenCalled();
+  });
+});
+
 describe("reconcileRcFinalization（mainへ出した後の稼働版の確認。#4713）", () => {
   const MERGE = "d".repeat(40);
   const succeededRun = { id: 1, htmlUrl: "https://github.com/o/r/actions/runs/1", createdAt: "2026-10-17T00:00:00Z", headSha: MERGE, status: "completed", conclusion: "success", attempt: 1 };

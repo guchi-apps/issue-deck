@@ -548,7 +548,7 @@ export function classifyRcBlock(input: {
       ...base,
       kind: "inconsistent",
       reason: "候補の管理記録が残っています。実際に進行している本番反映や検証はありません。",
-      facts: [`${prText}はmainへマージ済み`, "内部段階は「レビュー」のまま", "公開準備の記録なし・実行中のジョブなし"],
+      facts: [`${prText}はmainへマージ済み`, "内部段階は「レビュー」のまま", "本番反映を追跡している工程なし"],
       unconfirmed: ["本番の稼働版", "検証の合否（マージ済みだけでは合格・公開完了と扱いません）"],
     };
   }

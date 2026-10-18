@@ -1161,6 +1161,8 @@ main起点の`deploy-recovery/*`ブランチへ取り込む。**`merges`APIは�
 
 - バンプ後の最終CI・再検証が失敗したとき、公開準備の記録が失敗として残り、候補は同じ`review`へ戻る（修正工程）。予約は保つ
 - バンプ後に候補のheadが動いた・mainが進んだときは、公開準備を`superseded`にして`review`へ戻し、検証と承認を取り直す
+  - **戻す直前に候補PRを取り直す**（#4805）。完了系列のマージで「PRは未マージ・mainは前進済み」と読める窓があり、最初に読んだPRだけで判定するとマージ済みの候補を`review`へ戻し、誰も本番反映を追わなくなる（画面は「状態不整合」で新規開始もできない）。取り直してマージ済みなら、通常のマージ後の判定（`decideMergedCandidate`）へ回す
+  - それでも`review`へ戻ってしまった候補は、照合が復旧する（`repairMergedAfterReturn`）。直前の公開準備が適用済みから`superseded`・`failed`になった行で、その最終headがそのままマージされているときだけ、行を`applied`へ、段階を`awaiting_approval`へ戻してからマージ後の判定に掛ける。**検証の合否は改めて判定する。** 開始方式の再確認（`reconcileActiveRcPublication`）も`review`の候補を照合へ渡すので、ブランチ画面を開くだけで直る
 - 完了系列（#4480）は、**記録したバンプ前→バンプ後のheadの更新だけ**を後継として追う（`decideReleaseCompletion`の`finalization`。修正系列の`successorHeadSha`と同形）。それ以外のhead変更は従来どおり`candidate_changed`で止まる。新方式の候補は、段階が`awaiting_approval`（公開準備と最終検証が済み）でバンプ後のheadと一致するときだけマージの評価へ進む（`isFinalizationReady`）。公開準備を始める（＝公開承認）のは人の操作で、系列は代わりに押さない
 - マージ後は、deployの成功**と稼働中の版の一致**（`decideDeployRecoveryRelease`）を確かめるまで`completed`にしない。失敗・不一致は段階を進めず、既存の本番復旧（#4451）が追う。Web本番とTestFlight配布は別の結果で、build番号は正式版と混ぜない
 

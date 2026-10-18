@@ -832,7 +832,11 @@ export async function reconcileRcFinalization(ctx: Context, candidateId: string)
     else await reconcileRequested(ctx, candidate, requested, null).catch((error: unknown) => console.error("[release-finalize] reconcile failed", error));
     return;
   }
-  // 修正工程（review）・完了・取消では、公開準備の進行は無い（GitHubへ問い合わせない）
+  if (phase === "review") {
+    await repairMergedAfterReturn(ctx, candidate, rows);
+    return;
+  }
+  // 完了・取消では、公開準備の進行は無い（GitHubへ問い合わせない）
   if (!["preparing", "awaiting_approval", "deploying", "verifying_production"].includes(phase)) return;
   const current = [...rows].reverse().find((r) => r.status === "applied");
   if (!current || current.finalHeadSha === null || current.finalBaseSha === null || current.reservedVersion === null) return;
@@ -843,40 +847,24 @@ export async function reconcileRcFinalization(ctx: Context, candidateId: string)
 
   if (phase === "preparing" || phase === "awaiting_approval") {
     if (pull.merged) {
-      // 記録した最終headのまま、そのheadの最終CI・再検証が合格しているときだけ本番反映の追跡へ進める。
-      // 承認待ちへ届く前の早いマージでも、検証を経ずに版の消費・develop同期へ進めない
-      const headMatches = pull.head.sha === current.finalHeadSha;
-      const checks = headMatches ? await evaluateChecks(ctx, current, pull) : null;
-      const decision = decideMergedCandidate({
-        headMatches,
-        readiness: checks?.readiness ?? { ready: false, reason: "ci_unknown" },
-        reverifyStates: checks && checks.pendingReverify.length > 0 ? await pendingReverifyStates(ctx, current) : [],
-      });
-      if (decision.action !== "advance") {
-        await db.releaseCandidateFinalization.updateMany({
-          where: { id: current.id, status: "applied", OR: [{ failureReason: null }, { failureReason: { not: decision.reason } }] },
-          data: { failureReason: decision.reason },
-        });
-        return;
-      }
-      // 止めていた理由は、合格して進むときに消す（進んだ後も警告を出し続けない）
-      if (current.failureReason !== null) {
-        await db.releaseCandidateFinalization.updateMany({ where: { id: current.id, status: "applied" }, data: { failureReason: null } });
-      }
-      if (phase === "preparing") await setPhase(candidate.id, "preparing", "awaiting_approval");
-      if (await setPhase(candidate.id, "awaiting_approval", "deploying")) {
-        await consumeReservation(candidate.id, current.reservedVersion, (pull as { merge_commit_sha?: string | null }).merge_commit_sha ?? null, null);
-      }
+      await advanceMergedCandidate(ctx, candidate.id, phase, current, pull);
       return;
     }
+    // 戻す前にPRを取り直す。PRを読んだ直後に完了系列がマージするとmainも進むため、最初の取得だけで判定すると
+    // マージ済みの候補を修正工程へ戻し、本番反映の追跡が途切れる（#4805）
+    const returnToReview = async (reason: string, status: "failed" | "superseded") => {
+      const fresh = await fetchPullRequest(ctx.owner, ctx.repo, found.number, ctx.token);
+      if (fresh.merged) await advanceMergedCandidate(ctx, candidate.id, phase, current, fresh);
+      else await failFinalization(current, reason, null, status);
+    };
     // 候補の更新・mainの前進があれば、バンプ後の検証と承認の鮮度は失効する。同じ候補の修正工程へ戻す（予約は保つ）
     if (pull.head.sha !== current.finalHeadSha) {
-      await failFinalization(current, "公開準備の後に候補が更新されたため、最終検証をやり直します", null, "superseded");
+      await returnToReview("公開準備の後に候補が更新されたため、最終検証をやり直します", "superseded");
       return;
     }
     const mainSha = await fetchMainHeadSha(ctx.owner, ctx.repo, ctx.token).catch(() => null);
     if (mainSha && mainSha !== current.finalBaseSha) {
-      await failFinalization(current, "公開準備の後にmainが進んだため、検証と承認を取り直します", null, "superseded");
+      await returnToReview("公開準備の後にmainが進んだため、検証と承認を取り直します", "superseded");
       return;
     }
     if (pull.draft) {
@@ -885,7 +873,7 @@ export async function reconcileRcFinalization(ctx: Context, candidateId: string)
     }
     const checks = await evaluateChecks(ctx, current, pull);
     if (checks.ciState === "failure" || checks.pendingReverify.length > 0 && (await reverifyFailed(ctx, current))) {
-      await failFinalization(current, "バンプ後の最終検証が失敗したため、同じ候補の修正工程へ戻します", null, "failed");
+      await returnToReview("バンプ後の最終検証が失敗したため、同じ候補の修正工程へ戻します", "failed");
       return;
     }
     if (phase === "preparing" && checks.readiness.ready) await setPhase(candidate.id, "preparing", "awaiting_approval");
@@ -894,6 +882,70 @@ export async function reconcileRcFinalization(ctx: Context, candidateId: string)
 
   if (phase === "deploying" || phase === "verifying_production") await advanceProduction(ctx, candidate, current, pull);
 }
+
+/**
+ * マージ済みの候補を本番反映の追跡へ進める。記録した最終headのまま、そのheadの最終CI・再検証が合格しているときだけ進める。
+ * 承認待ちへ届く前の早いマージでも、検証を経ずに版の消費・develop同期へ進めない
+ */
+async function advanceMergedCandidate(ctx: Context, candidateId: string, phase: "preparing" | "awaiting_approval", current: FinalizationRow, pull: PullDetail): Promise<void> {
+  const headMatches = pull.head.sha === current.finalHeadSha;
+  const checks = headMatches ? await evaluateChecks(ctx, current, pull) : null;
+  const decision = decideMergedCandidate({
+    headMatches,
+    readiness: checks?.readiness ?? { ready: false, reason: "ci_unknown" },
+    reverifyStates: checks && checks.pendingReverify.length > 0 ? await pendingReverifyStates(ctx, current) : [],
+  });
+  if (decision.action !== "advance") {
+    await db.releaseCandidateFinalization.updateMany({
+      where: { id: current.id, status: "applied", OR: [{ failureReason: null }, { failureReason: { not: decision.reason } }] },
+      data: { failureReason: decision.reason },
+    });
+    return;
+  }
+  // 止めていた理由は、合格して進むときに消す（進んだ後も警告を出し続けない）
+  if (current.failureReason !== null) {
+    await db.releaseCandidateFinalization.updateMany({ where: { id: current.id, status: "applied" }, data: { failureReason: null } });
+  }
+  if (phase === "preparing") await setPhase(candidateId, "preparing", "awaiting_approval");
+  if (await setPhase(candidateId, "awaiting_approval", "deploying")) {
+    await consumeReservation(candidateId, current.reservedVersion!, (pull as { merge_commit_sha?: string | null }).merge_commit_sha ?? null, null);
+  }
+}
+
+/**
+ * 修正工程（review）へ戻した後にマージ済みと分かった候補の復旧（#4805）。PRを読んだ直後にマージされると、適用済みの
+ * 公開準備を失効させて`review`へ戻してしまい、以後は誰も本番反映を追わない（画面は「状態不整合」で新規開始もできない）。
+ *
+ * 直前の公開準備が適用済みから失効（superseded・failed）した行で、その最終headがそのままマージされているときだけ、
+ * 行を適用済みへ戻し、段階を承認待ちへ戻してから通常のマージ後の判定（`advanceMergedCandidate`）に掛ける。
+ * **検証の合否は改めて判定する**ので、検証を経ずに本番反映へ進めることはない。条件に合わない`review`の候補は
+ * GitHubへ問い合わせない
+ */
+async function repairMergedAfterReturn(ctx: Context, candidate: CandidateRow, rows: FinalizationRow[]): Promise<void> {
+  const latest = rows[rows.length - 1];
+  if (!latest || (latest.status !== "superseded" && latest.status !== "failed")) return;
+  if (latest.finalHeadSha === null || latest.finalBaseSha === null || latest.reservedVersion === null) return;
+  const found = await observeCandidatePullRequest(ctx, candidate.sequence).catch(() => null);
+  if (!found) return;
+  const pull = await fetchPullRequest(ctx.owner, ctx.repo, found.number, ctx.token);
+  if (!pull.merged || pull.head.sha !== latest.finalHeadSha) return;
+  // 遷移表に`review`→`awaiting_approval`は無い（通常の工程では公開準備を経由する）。この復旧だけが条件付き更新で戻す
+  const revived = await db.$transaction(async (tx) => {
+    const moved = await tx.releaseCandidate.updateMany({ where: { id: candidate.id, phase: "review" }, data: { phase: "awaiting_approval" } });
+    if (moved.count === 0) return false;
+    const restored = await tx.releaseCandidateFinalization.updateMany({ where: { id: latest.id, status: latest.status }, data: { status: "applied", failureReason: null } });
+    if (restored.count === 0) throw new RepairRaceError();
+    return true;
+  }).catch((error: unknown) => {
+    if (error instanceof RepairRaceError) return false;
+    throw error;
+  });
+  if (!revived) return;
+  console.info("[release-finalize] マージ済みの候補を修正工程から本番反映の追跡へ戻しました", fullNameOf(ctx), candidate.id);
+  await advanceMergedCandidate(ctx, candidate.id, "awaiting_approval", { ...latest, status: "applied", failureReason: null }, pull);
+}
+
+class RepairRaceError extends Error {}
 
 /** バンプ後のheadで合格していない検証の状態（マージ後の判定用。`evaluateChecks`と同じ固定した対象で評価する） */
 async function pendingReverifyStates(ctx: Context, row: FinalizationRow): Promise<ReleaseVerificationView["state"][]> {
