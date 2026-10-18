@@ -6,6 +6,7 @@
  * **根拠のない原因を断定しない。** 原因は実行側が観測できた事実（時間切れの終了コード124・ログ中の
  * 認証エラー表示・結果JSONが読めなかった等）から決め、決められなければ`unknown`（原因未特定）にする。
  * 終了コード126・127は「AI CLIを実行できなかった」までしか言えず、権限・パス・実行形式のどれかは特定しない。
+ * `turn_limit`は、AI CLIが「ターン数の上限に達した」と出力して終わったとき（claudeの`--max-turns`。#4769）。
  */
 
 export const REVIEW_DIAGNOSTIC_STAGES = ["prepare", "diff", "review", "finalize"] as const;
@@ -17,6 +18,7 @@ export const REVIEW_DIAGNOSTIC_CAUSES = [
   "launch_failed",
   "auth_failed",
   "timeout",
+  "turn_limit",
   "parse_failed",
   "unknown",
 ] as const;
@@ -111,6 +113,7 @@ const CAUSE_LABEL: Record<ReviewDiagnosticCause, string> = {
   launch_failed: "AI CLIを起動できませんでした",
   auth_failed: "AIの認証に失敗しました",
   timeout: "時間切れで完走できませんでした",
+  turn_limit: "AIの呼び出しがターン数の上限に達しました",
   parse_failed: "AIの結果を読み取れませんでした",
   unknown: "原因を特定できていません",
 };
@@ -122,6 +125,8 @@ const CAUSE_ACTION: Record<ReviewDiagnosticCause, string> = {
     "サブPCでAI CLI（claude／codex）が実行できる状態か（インストール・実行権限・PATH）を確認してから、再実行してください。",
   auth_failed: "サブPCのAI CLIのログイン状態を確認し、再ログインしてから再実行してください。",
   timeout: "差分が大きいか、AIの応答が遅れています。時間をおいて再実行してください。繰り返す場合は差分を分けることを検討してください。",
+  turn_limit:
+    "AIが確認を終える前に、1回の呼び出しのターン数の上限に達しました。完了したバッチは保存済みなので、まず再実行してください。繰り返す場合はサブPCの`ISSUE_DECK_RELEASE_REVIEW_MAX_TURNS`を上げるか、`ISSUE_DECK_RELEASE_REVIEW_DIFF_BUDGET_BYTES`を下げてバッチを小さくしてください。",
   parse_failed: "AIの応答がJSONになっていませんでした。一時的なことが多いので、まず再実行してください。",
   unknown:
     "コードへの指摘ではありません。サブPCの環境（AI CLI・ログイン・ディスク）を確認したうえで、再実行してください。",
