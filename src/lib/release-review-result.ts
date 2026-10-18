@@ -178,6 +178,14 @@ export type ReleaseReviewCoverage = {
   batches: number;
   /** 実行の予算で今回は行わなかったバッチ数 */
   pendingBatches: number;
+  /**
+   * 同じ対象の保存済みの結果を、AIを呼ばずに再利用したバッチ数（#4767）。今回確認し直したのは`rerunBatches`。
+   * 旧ランナーの結果は両方0（再利用の記録なし）。保存済みの旧記録には無いので任意にしてある
+   */
+  reusedBatches?: number;
+  rerunBatches?: number;
+  /** バッチをまたぐ相互作用の確認を再利用したか。分割しなかった・旧ランナーはnull */
+  integrationReused?: boolean | null;
 };
 
 export type NormalizedReleaseReview = {
@@ -349,6 +357,9 @@ export function normalizeCoverage(raw: Record<string, unknown>, totalFiles: numb
     open,
     batches: nonNegativeInt(raw.batches) ?? 1,
     pendingBatches: nonNegativeInt(raw.pendingBatches) ?? 0,
+    reusedBatches: nonNegativeInt(raw.reusedBatches) ?? 0,
+    rerunBatches: nonNegativeInt(raw.rerunBatches) ?? 0,
+    integrationReused: typeof raw.integrationReused === "boolean" ? raw.integrationReused : null,
   };
 }
 
