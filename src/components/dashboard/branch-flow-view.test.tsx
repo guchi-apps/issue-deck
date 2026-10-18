@@ -652,8 +652,9 @@ describe("BranchFlowView", () => {
 
       openRepository();
       expect(screen.getByText("本番未反映")).toBeTruthy();
-      expect(screen.getByText("issue-1456")).toBeTruthy();
-      expect(screen.getByText("このバージョンに乗る変更 1件")).toBeTruthy();
+      // リリース候補が無いので「今回公開する変更」は出さず、レーンは「リリース待ちのPR」へ入る（#4787）
+      expect(screen.queryByText("今回公開する変更")).toBeNull();
+      expect(screen.getByTestId("release-waiting-prs").textContent).toContain("issue-1456");
     });
 
     it("既定は次のリリースの束だけを出し、リリース済みはアコーディオンで開く（#1586）", () => {

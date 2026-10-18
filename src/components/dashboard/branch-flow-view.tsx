@@ -108,6 +108,7 @@ import {
   formatUnreleasedSummary,
   countOpenManualSteps,
   hasChangesAfterReleaseFreeze,
+  splitLanesByReleaseCandidate,
   splitLanesByReleaseFreeze,
   isClosedLane,
   unreleasedSummary,
@@ -2144,69 +2145,91 @@ function ReleaseGroupHeaderWithLanes({
   showIosDistribution?: boolean;
   onMerged: (pullRequest: PullRequestSummary) => void;
 }) {
-  // リリースPRの凍結後にdevelopへ入った作業は、その版に含まれないので見出しの上へ出す（#3664）
-  const { afterFreeze, included } = splitLanesByReleaseFreeze(group);
+  // 「今回公開する変更」に出すのはリリース候補に入ったレーンだけ。候補に入っていない作業
+  // （凍結後にdevelopへ入った分・候補をまだ作っていないときの全て）は「リリース待ちのPR」へ出す（#4787）。
+  // Xcodeで実機へ反映するリポジトリ（#3468）は従来どおり凍結の前後だけで分ける
+  const { afterFreeze, included: frozenIncluded } = splitLanesByReleaseFreeze(group);
+  const { included, waiting } = deviceBuild
+    ? { included: frozenIncluded, waiting: afterFreeze }
+    : splitLanesByReleaseCandidate(group);
+  const released = group.mergedAt !== null;
+  const hasCandidate = released || group.pullRequest !== null || !!deviceBuild;
+
+  const header = (
+    <ReleaseGroupHeader
+      repositoryFullName={repositoryFullName}
+      group={group}
+      releaseButton={releaseButton}
+      summarizedInCard={summarizedInCard}
+      deviceBuild={deviceBuild}
+      showIosDistribution={showIosDistribution}
+      onMerged={onMerged}
+    />
+  );
+  const rails = (
+    <>
+      <li role="presentation" aria-hidden="true" className="absolute inset-y-0 left-[0.5rem] w-0.5 rounded bg-purple-500/50 max-sm:left-[0.4rem]" />
+      <li role="presentation" aria-hidden="true" className="absolute inset-y-0 left-[2.25rem] w-0.5 rounded bg-primary/40 max-sm:left-[1.75rem]" />
+    </>
+  );
+
   return (
-    <li className="relative mb-3 rounded-md border bg-card">
-      <details open>
-        <summary className="cursor-pointer px-3 py-2 text-sm font-semibold">
-          {group.mergedAt !== null ? "リリース済みの変更" : summarizedInCard ? "今回公開する変更" : "公開前の変更"}
-          <span className="ml-2 text-xs font-normal text-muted-foreground">{group.version ? `v${group.version} · ` : ""}{included.length}件</span>
-        </summary>
-        <ul className="relative">
-              <li role="presentation" aria-hidden="true" className="absolute inset-y-0 left-[0.5rem] w-0.5 rounded bg-purple-500/50 max-sm:left-[0.4rem]" />
-              <li role="presentation" aria-hidden="true" className="absolute inset-y-0 left-[2.25rem] w-0.5 rounded bg-primary/40 max-sm:left-[1.75rem]" />
-      {afterFreeze.length > 0 && (
-        <>
-          <li className="pt-3 pb-0.5 pl-[3.35rem] text-xs text-amber-700 max-sm:pl-[2.6rem] dark:text-amber-400">
-            {group.version ? `v${group.version}` : "このリリース"}の作成後にdevelopへ入った変更{" "}
-            {afterFreeze.length}件（次のリリースへ回ります）
-          </li>
-          {afterFreeze.map((lane) => (
-            <LaneRow
-              key={lane.key}
-              repositoryFullName={repositoryFullName}
-              lane={lane}
-              onMerged={onMerged}
-            />
-          ))}
-        </>
-      )}
-      {/* 凍結後の追加PR群を取り込んで候補を作り直す操作（#4357）。追加PRの直下・バージョン見出しと
-          バンプPRより上に1つだけ置き、見出しの「マージする」の近くには出さない */}
-      {rebuildButton && (
-        <li className="pt-2 pb-0.5 pl-[3.35rem] max-sm:pl-[2.6rem]">
-          <div className="flex min-w-0 max-w-2xl flex-col gap-1.5 rounded-md border border-dashed border-amber-500/60 px-3 py-2 text-xs">
-            <span className="text-muted-foreground">
-              上の追加PRを取り込んで、リリース候補を作り直します（現在の候補は閉じられます）。
-            </span>
-            <div>{rebuildButton}</div>
-          </div>
+    <>
+      <li className="relative mb-3 rounded-md border bg-card">
+        {hasCandidate ? (
+          <details open>
+            <summary className="cursor-pointer px-3 py-2 text-sm font-semibold">
+              {released ? "リリース済みの変更" : summarizedInCard ? "今回公開する変更" : "公開前の変更"}
+              <span className="ml-2 text-xs font-normal text-muted-foreground">{group.version ? `v${group.version} · ` : ""}{included.length}件</span>
+            </summary>
+            <ul className="relative">
+              {rails}
+              {header}
+              {included.length > 0 && <ReleaseGroupNote lanes={included} released={released} />}
+              {included.map((lane) => (
+                <LaneRow key={lane.key} repositoryFullName={repositoryFullName} lane={lane} onMerged={onMerged} />
+              ))}
+            </ul>
+          </details>
+        ) : (
+          /* リリース候補が無い間は「今回公開する変更」と言えないので、見出しと操作だけを出す */
+          <ul className="relative">
+            {rails}
+            {header}
+          </ul>
+        )}
+      </li>
+      {waiting.length > 0 && (
+        <li className="relative mb-3 rounded-md border bg-card" data-testid="release-waiting-prs">
+          <details>
+            <summary className="cursor-pointer px-3 py-2 text-sm font-semibold">
+              リリース待ちのPR
+              <span className="ml-2 text-xs font-normal text-muted-foreground">
+                {waiting.length}件{hasCandidate ? "（次のリリースへ回ります）" : ""}
+              </span>
+            </summary>
+            <ul className="relative">
+              {rails}
+              {waiting.map((lane) => (
+                <LaneRow key={lane.key} repositoryFullName={repositoryFullName} lane={lane} onMerged={onMerged} />
+              ))}
+              {/* 凍結後の追加PR群を取り込んで候補を作り直す操作（#4357）。畳んだ一覧の中に置き、
+                  ボタンだけが孤立して見えないようにする */}
+              {rebuildButton && (
+                <li className="pt-2 pb-2 pl-[3.35rem] max-sm:pl-[2.6rem]">
+                  <div className="flex min-w-0 max-w-2xl flex-col gap-1.5 rounded-md border border-dashed border-amber-500/60 px-3 py-2 text-xs">
+                    <span className="text-muted-foreground">
+                      このリリース待ちのPRを取り込んで、リリース候補を作り直します（現在の候補は閉じられます）。
+                    </span>
+                    <div>{rebuildButton}</div>
+                  </div>
+                </li>
+              )}
+            </ul>
+          </details>
         </li>
       )}
-      <ReleaseGroupHeader
-        repositoryFullName={repositoryFullName}
-        group={group}
-        releaseButton={releaseButton}
-        summarizedInCard={summarizedInCard}
-        deviceBuild={deviceBuild}
-        showIosDistribution={showIosDistribution}
-        onMerged={onMerged}
-      />
-      {included.length > 0 && (
-        <ReleaseGroupNote lanes={included} released={group.mergedAt !== null} />
-      )}
-      {included.map((lane) => (
-        <LaneRow
-          key={lane.key}
-          repositoryFullName={repositoryFullName}
-          lane={lane}
-          onMerged={onMerged}
-        />
-      ))}
-        </ul>
-      </details>
-    </li>
+    </>
   );
 }
 
