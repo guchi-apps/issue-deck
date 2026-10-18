@@ -1561,6 +1561,10 @@ export function POST(request: NextRequest) {
   「記載なし」で、条件は作らない）、表示は[`issue-work-summary.tsx`](../src/components/dashboard/issue-work-summary.tsx)。
   **依存待ちは青（操作不要）、amberは本人の操作待ちだけ。** 一覧の前提待ちアイコンも青にそろえた。
   親実行の詳細は、mainへ反映済みでも本番確認などが残る間「リリース済みですが、機能全体は未完了」と出す。
+- **リリース画面（ブランチ・リリース画面のレーン）のIssue行も同じ語彙で追う（#4748）。** 判定は
+  [`resolveIssueTracking`](../src/lib/branch-flow.ts)（本人の操作待ち＞依存待ち。前提の結果はshellの
+  `prerequisiteReadiness`を`buildBranchFlow`へ渡す）。手作業Issue=リリース後、未マージ／develop止まりのレーン=
+  リリース前必須。本番へ届いたレーンで対応Issueがopen・手作業が未完了なら`lane.featureIncomplete`が「機能全体は未完了」の注記になる。
 - **【#4315で撤去】手順ウィザード「手作業アシスタント」（`manual-step-guide-dialog.tsx`・一覧の
   「順番に進める」バー・`use-manual-step-guide.ts`・`manual-step-{run,autorun,fix,trouble}-panel.tsx`・
   `manual-step-placeholder-fill.tsx`・自己申告の完了ボタン）は無い。** 手作業Issueは手作業セッション
