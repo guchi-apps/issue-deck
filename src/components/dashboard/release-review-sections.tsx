@@ -615,16 +615,18 @@ function AiReviewSection({
   // 統合検証の証跡から見た共通の段階（#4664）。上部バッジ・本番確認と同じ名前を見出しに出す
   const stage = section.stage;
   const stageHead: SectionHead | null =
-    stage && (stage.kind === "integration_waiting" || stage.kind === "reevaluating")
+    stage && (stage.kind === "integration_waiting" || stage.kind === "reevaluating" || stage.kind === "awaiting_integration")
       ? {
           ...baseHead,
           tone: "run",
           mark: "◌",
           label: describeReviewStageLabel(stage),
           detail:
-            stage.kind === "integration_waiting"
-              ? "全体レビューの最終確認は未完了です"
-              : "統合検証の結果に依存する項目だけを自動で再評価しています",
+            stage.kind === "awaiting_integration"
+              ? "統合検証が終わると、その証跡を持つサブPCで全体レビューを開始します"
+              : stage.kind === "integration_waiting"
+                ? "全体レビューの最終確認は未完了です"
+                : "統合検証の結果に依存する項目だけを自動で再評価しています",
         }
       : stage?.kind === "needs_check" && stage.autoReevaluated
         ? {

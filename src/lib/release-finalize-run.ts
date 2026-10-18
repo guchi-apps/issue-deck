@@ -1,5 +1,5 @@
 import { db } from "@/lib/db";
-import { requestReleaseReviewJob } from "@/lib/dispatch/release-review-jobs";
+import { requestReleaseReviewAfterIntegration } from "@/lib/dispatch/release-review-start";
 import { requestReleaseVerifyJob } from "@/lib/dispatch/release-verify-jobs";
 import { decideDeployRecoveryRelease } from "@/lib/deploy-recovery-series";
 import { markPullRequestReadyForReview } from "@/lib/github/actions-api";
@@ -723,14 +723,15 @@ async function reconcileRequested(ctx: Context, candidate: CandidateRow, row: Fi
   });
   if (!applied) return "ignored";
 
-  // 引き継がなかった種別だけを、バンプ後のheadで再実行する（引き継いだ種別の行は作らない）
+  // 引き継がなかった種別だけを、バンプ後のheadで再実行する（引き継いだ種別の行は作らない）。
+  // 全体レビューは統合検証の完了後に開始し、統合検証を引き継いだときは待たない（#4763）
   const rerun = evidence.filter((e) => e.action === "rerun" && e.kind !== "ios").map((e) => e.kind as ReleaseVerificationKind);
   if (rerun.length > 0 && decision.headSha !== row.preHeadSha) {
     const target: ReleaseVerificationTarget = { repoFullName: repositoryFullName, prNumber: decision.prNumber, baseSha: finalBase, headSha: decision.headSha };
     try {
       await registerReleaseVerification(target, rerun);
       if (rerun.includes("integration")) await requestReleaseVerifyJob(target);
-      if (rerun.includes("ai_review")) await requestReleaseReviewJob(target);
+      if (rerun.includes("ai_review")) await requestReleaseReviewAfterIntegration(target);
     } catch (error) {
       // 依頼に失敗しても適用の記録は戻さない（画面は「未実施」として出し、再実行で依頼できる）
       console.error("[release-finalize] verification request failed", repositoryFullName, error);

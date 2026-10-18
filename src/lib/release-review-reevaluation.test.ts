@@ -45,6 +45,17 @@ describe("reviewDependsOnEvidence", () => {
 });
 
 describe("decideReviewReevaluation", () => {
+  it("通常経路（#4763）: 統合検証の完了後に開始したレビューは、未確認が残っても再評価しない", () => {
+    const decision = decideReviewReevaluation(
+      input({
+        review: { updatedAt: t("05:40") },
+        integration: { state: "passed", updatedAt: t("05:25") },
+        lastReviewJob: { status: "SUCCEEDED", createdAt: t("05:25"), startedAt: t("05:26"), finishedAt: t("05:40") },
+      }),
+    );
+    expect(decision).toEqual({ action: "none", reason: "used_latest_evidence" });
+  });
+
   it("レビュー先行: 統合検証の完了報告で、古い証跡のレビューを再評価する（#4663 5:24→5:25）", () => {
     expect(decideReviewReevaluation(input())).toEqual({ action: "rerun", integrationAt: t("05:25").toISOString() });
   });
@@ -174,6 +185,24 @@ function review(overrides: Partial<ReviewStageInput> = {}): ReviewStageInput {
 }
 
 describe("describeReviewEvidenceStage", () => {
+  it("統合検証の完了まで開始を待たせている間は「統合検証の完了待ち」（#4763）", () => {
+    const awaiting = review({ state: "waiting", checks: null, unverifiedScope: null, awaitingIntegration: true });
+    const stage = describeReviewEvidenceStage(awaiting, { state: "running", updatedAt: null });
+    expect(stage).toEqual({ kind: "awaiting_integration" });
+    expect(describeReviewStageLabel(stage)).toBe("統合検証の完了待ち");
+    // 統合検証が終わった後は、開始されるまで「全体レビュー中」（完了待ちとは出さない）
+    expect(describeReviewEvidenceStage(awaiting, { state: "passed", updatedAt: t("05:25").toISOString() }).kind).toBe(
+      "reviewing",
+    );
+    // 印の無い待機中は従来どおり
+    expect(
+      describeReviewEvidenceStage(review({ state: "waiting", checks: null, unverifiedScope: null }), {
+        state: "running",
+        updatedAt: null,
+      }).kind,
+    ).toBe("reviewing");
+  });
+
   it("コード確認が先に終わったら「コード確認済み・統合検証待ち」（最終確認は未完了）", () => {
     const stage = describeReviewEvidenceStage(review(), { state: "running", updatedAt: t("05:20").toISOString() });
     expect(stage).toEqual({ kind: "integration_waiting" });

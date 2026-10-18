@@ -157,6 +157,8 @@ export type ReviewOpenItemKind =
 export type ReviewEvidenceStage =
   /** レビュー自体が未実施・対象外・無効。段階は出さない */
   | { kind: "none" }
+  /** 統合検証の完了まで開始を待たせている（#4763。レビューはまだ始まっていない） */
+  | { kind: "awaiting_integration" }
   /** レビューの実行中（自動再評価ではない） */
   | { kind: "reviewing" }
   /** コード確認は済み、実行結果の証跡（統合検証）を待っている */
@@ -170,6 +172,7 @@ export type ReviewEvidenceStage =
 
 export const REVIEW_STAGE_LABEL: Record<ReviewEvidenceStage["kind"], string> = {
   none: "",
+  awaiting_integration: "統合検証の完了待ち",
   reviewing: "全体レビュー中",
   integration_waiting: "コード確認済み・統合検証待ち",
   reevaluating: "検証結果を確認中",
@@ -206,6 +209,8 @@ export type ReviewStageInput = {
   autoReevaluation: ReviewAutoReevaluation | null;
   /** 実行失敗の診断がある（レビューを完走できていない） */
   executionFailed: boolean;
+  /** 統合検証の完了まで開始を待たせている印がある（#4763。`findings.awaitingIntegration`） */
+  awaitingIntegration?: boolean;
 };
 
 /**
@@ -225,6 +230,8 @@ export function describeReviewEvidenceStage(
     integration.updatedAt !== null &&
     Date.parse(marker.integrationAt) >= Date.parse(integration.updatedAt);
 
+  // 統合検証の完了まで開始を待たせている（#4763）。統合検証が終わった後は、開始されるまで「全体レビュー中」として出す
+  if (review.state === "waiting" && review.awaitingIntegration && integrationPending) return { kind: "awaiting_integration" };
   if (review.state === "waiting" || review.state === "running") {
     return marker !== null && integrationFinished ? { kind: "reevaluating" } : { kind: "reviewing" };
   }

@@ -34,6 +34,12 @@ describe("resolveReleaseCandidateVerification", () => {
     expect(describeReleaseVerificationWait(reevaluating)).toBe("全体レビュー（検証結果を確認中）の判定が出るまでマージできません");
   });
 
+  it("統合検証の完了まで開始を待たせている全体レビューは、開始待ちとして段階名を出す（#4763）", () => {
+    const v = resolve({ aiReview: "running", integration: "running", aiReviewStage: { kind: "awaiting_integration" } });
+    expect(v.problem).toBeNull();
+    expect(v.progress?.checks[0]).toEqual({ name: "全体レビュー", started: false, stageLabel: "統合検証の完了待ち" });
+  });
+
   it("自動再評価後も残る要確認は、残件の種類を添えた要確認にする（#4664）", () => {
     const v = resolve({
       aiReview: "needs_check",

@@ -15,6 +15,7 @@ import { readReleaseReviewDiagnostic, type ReleaseReviewDiagnostic } from "@/lib
 import type { ReleaseReviewDecisionSummary } from "@/lib/release-review-decision";
 import type { ReleaseOpsContext } from "@/lib/release-review-ops-evidence";
 import type { ReleaseReviewCoverage, ReleaseReviewFinding, ReleaseReviewMeta } from "@/lib/release-review-result";
+import { readAwaitingIntegration } from "@/lib/release-review-start";
 import type { ReleaseVerificationProgress } from "@/lib/release-verification-progress";
 import {
   describeReviewEvidenceStage,
@@ -85,6 +86,8 @@ export type ReleaseVerificationSection = {
   unverifiedScope?: string | null;
   /** 自動再評価の印（#4664。全体レビューだけ）。無ければnull */
   autoReevaluation?: ReviewAutoReevaluation | null;
+  /** 統合検証の完了まで開始を待たせているか（#4763。全体レビューだけ） */
+  awaitingIntegration?: boolean;
   /**
    * 統合検証の証跡から見た全体レビューの共通の段階（#4664。全体レビューだけ）。バッジ・説明・詳細・本番確認が
    * 同じ値を出す。統合検証の区分では省略
@@ -178,6 +181,7 @@ export function reviewStageOf(
       summary: aiReview.summary,
       autoReevaluation: aiReview.autoReevaluation ?? null,
       executionFailed: aiReview.diagnostic !== null,
+      awaitingIntegration: aiReview.awaitingIntegration ?? false,
     },
     { state: integration.state, updatedAt: integration.updatedAt },
   );
@@ -229,6 +233,7 @@ export function summarizeReleaseVerification(input: {
       decisions: null,
       unverifiedScope: row?.unverifiedScope ?? null,
       autoReevaluation: kind === "ai_review" ? readAutoReevaluation(row?.findings) : null,
+      awaitingIntegration: kind === "ai_review" && state === "waiting" && readAwaitingIntegration(row?.findings) !== null,
     };
   };
 

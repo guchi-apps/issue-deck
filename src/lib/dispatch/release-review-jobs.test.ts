@@ -92,6 +92,17 @@ describe("requestReleaseReviewJob", () => {
     expect(verificationUpdateMany).not.toHaveBeenCalled();
   });
 
+  it("統合検証の完了後の開始（#4763）: 優先ホストが適格ならそこへ、不適格なら名前順の先頭へ積む", async () => {
+    hostFindMany.mockResolvedValue([host({ name: "a-host" }), host({ name: "verify-host" })]);
+    jobCreate.mockImplementation(({ data }) => Promise.resolve({ id: "j1", ...data }));
+    await requestReleaseReviewJob(target, NOW, { preferredHost: "verify-host" });
+    expect(jobCreate.mock.calls[0][0].data.targetHost).toBe("verify-host");
+
+    hostFindMany.mockResolvedValue([host({ name: "a-host" }), host({ name: "verify-host", releaseReviewCapable: false })]);
+    await requestReleaseReviewJob(target, NOW, { preferredHost: "verify-host" });
+    expect(jobCreate.mock.calls[1][0].data.targetHost).toBe("a-host");
+  });
+
   it("同じ対象の未完了ジョブがあれば積まない", async () => {
     jobFindFirst.mockResolvedValue({ id: "j0" });
     expect(await requestReleaseReviewJob(target, NOW)).toMatchObject({ outcome: "already_queued" });

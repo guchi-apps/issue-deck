@@ -88,7 +88,7 @@ vi.mock("@/lib/release-verification", () => ({
   listReleaseVerificationRecords: vi.fn(async () => []),
 }));
 vi.mock("@/lib/dispatch/release-verify-jobs", () => ({ requestReleaseVerifyJob: mocks.verifyJob }));
-vi.mock("@/lib/dispatch/release-review-jobs", () => ({ requestReleaseReviewJob: mocks.reviewJob }));
+vi.mock("@/lib/dispatch/release-review-start", () => ({ requestReleaseReviewAfterIntegration: mocks.reviewJob }));
 
 import { cancelReleaseRc, createReleaseRc, recordRcReport, requestRcImport } from "@/lib/release-rc-run";
 

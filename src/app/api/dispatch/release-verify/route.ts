@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 
-import { requestReleaseReviewJob } from "@/lib/dispatch/release-review-jobs";
+import { requestReleaseReviewAfterIntegration } from "@/lib/dispatch/release-review-start";
 import { requestReleaseVerifyJob } from "@/lib/dispatch/release-verify-jobs";
 import { parsePrReviewSha } from "@/lib/dispatch/pr-review";
 import { authorizeProgressReport } from "@/lib/progress-report-auth";
@@ -20,7 +20,8 @@ import { getReleaseVerificationConfig } from "@/lib/release-verification-config"
  * 固定リリースの検証記録（#4212）の依頼・結果の記録・状態の取得。
  *
  * 認証は`POST /api/progress`と同じ共有シークレット。
- * - `request` … 対象（リポジトリ・PR・base/head SHA）の行を作り、統合検証（#4237）と全体AIレビュー（#4238）のジョブを積む。冪等で、同じ対象は重複しない
+ * - `request` … 対象（リポジトリ・PR・base/head SHA）の行を作り、統合検証（#4237）のジョブを積む。全体AIレビュー（#4238）は
+ *   統合検証の完了後に開始する（#4763。検証中は`aiReview: "deferred"`）。冪等で、同じ対象は重複しない
  * - `report` … 種別ごとの結果を記録する。依頼の無い対象・種別には書かない
  * - `status` … 現在のSHAに対する検証区分のゲート判定を返す
  *
@@ -52,8 +53,9 @@ export async function POST(request: NextRequest) {
     const { created } = await registerReleaseVerification(target);
     // 実行を依頼する（#4237）。積めなくても記録の行は残し、`integration`は失敗として記録される
     const queued = await requestReleaseVerifyJob(target);
-    // 全体AIレビュー（#4238）も並べて積む。積めない理由は`ai_review`の失敗として記録される
-    const reviewed = await requestReleaseReviewJob(target);
+    // 全体AIレビュー（#4238）は統合検証の完了後に開始する（#4763）。検証中なら`deferred`で待たせ、完了報告・巡回が積む。
+    // 積めない理由は`ai_review`の失敗として記録される
+    const reviewed = await requestReleaseReviewAfterIntegration(target);
     return NextResponse.json(
       {
         ok: true,
