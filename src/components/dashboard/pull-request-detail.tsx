@@ -53,7 +53,7 @@ import { formatRelativeDate } from "@/lib/format-relative-date";
 import { selectPullRequestReviewComment } from "@/lib/github/pull-request-review-comment";
 import { repairKindsFor } from "@/lib/github/pull-request-repair";
 import { parseReleaseVerification, type ReleaseVerificationRow } from "@/lib/github/release-verification";
-import { canMergeFromDeck, requiresUserMerge } from "@/lib/pull-request-list";
+import { canMergeFromDeck, isMergeWaitingForChecks, requiresUserMerge } from "@/lib/pull-request-list";
 import { derivePrimaryState, type PrimaryStateTone } from "@/lib/pull-request-primary-state";
 import { applyReviewAction, deriveReviewAction } from "@/lib/pull-request-review-action";
 import { cn } from "@/lib/utils";
@@ -456,7 +456,8 @@ export function PullRequestDetail({
                   <PullRequestMergeButton
                     pullRequest={pullRequest}
                     onMerged={onMerged}
-                    variant={repairKinds.length === 0 && !reviewUnresolved ? "default" : "outline"}
+                    // CI・レビュー・判定の完了待ちのあいだは押してよい状態に見せないため強調しない（#4783）
+                    variant={repairKinds.length === 0 && !reviewUnresolved && !isMergeWaitingForChecks(pullRequest) ? "default" : "outline"}
                   />
                 )}
                 {onDraftFixIssue && showsPullRequestFixIssueButton(pullRequest) && (
