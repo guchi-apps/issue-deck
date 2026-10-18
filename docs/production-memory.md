@@ -11,7 +11,7 @@ VPS側のリポジトリ（`guchi-apps/vps`）の`scripts/pm2-monitor.sh`がcron
 増えていればSignalyへ「⚠️ PM2再起動検知: issue-deck」を送る。つまり通知が5分おきに届く状態は、
 **issue-deckのプロセスが5分に1回以上落ちて再起動している**ことを意味する。
 
-デプロイ（`.github/workflows/deploy.yml`）は`pm2 delete` → `pm2 start`で入れ替えるため
+デプロイ（`.github/workflows/deploy.yml`→VPSの`app-deploy-gate`。#4804）は`pm2 delete` → `pm2 start`で入れ替えるため
 `restart_time`が0に戻る。デプロイ自体でこの通知が出ることはない。
 
 ## 経緯
@@ -209,8 +209,8 @@ grep -E "VmRSS|VmHWM|Threads" /proc/<pid>/status
 ## 変更したときの反映
 
 `ecosystem.config.js`の変更は`pm2 restart`では反映されず、`pm2 start <file> --env production`での
-読み込み直しが必要。issue-deckのデプロイ（`.github/workflows/deploy.yml`）は毎回
-`pm2 delete issue-deck` → `pm2 start deploy/ecosystem.config.js --env production`を実行するため、
+読み込み直しが必要。issue-deckのデプロイ（`.github/workflows/deploy.yml`から呼ぶVPSの`app-deploy-gate`。#4804）は毎回
+`pm2 delete deploy/ecosystem.config.js`・`pm2 delete issue-deck` → `pm2 start deploy/ecosystem.config.js --env production`を実行するため、
 **mainへマージしてデプロイが通れば自動で反映される**。VPS上での手作業は要らない。
 
 ## 再発したときに見るもの

@@ -16,9 +16,26 @@ const GATE = `
         run: ssh -p "\${SSH_PORT}" "\${USERNAME}@\${HOST}" deploy
 `;
 
+// gateへ移す前（#4804より前）のissue-deck自身のヘルスチェックの形
+const SELF = `
+          script: |
+            for i in $(seq 1 30); do
+              body="$(curl -fsS "http://127.0.0.1:\${PORT}/api/app-version" 2>/dev/null || true)"
+              if [ -n "$body" ] && printf '%s' "$body" | grep -qF "\\"sha\\":\\"\${APP_COMMIT_SHA}\\""; then
+                exit 0
+              fi
+              sleep 2
+            done
+            exit 1
+`;
+
 describe("classifyDeployVersionCheck（#4757）", () => {
-  it("issue-deck自身のdeploy.ymlは自身の照合（self）", () => {
-    expect(classifyDeployVersionCheck(readFileSync(".github/workflows/deploy.yml", "utf-8"))).toBe("self");
+  it("issue-deck自身のdeploy.ymlはgateへ委譲する（gate。#4804）", () => {
+    expect(classifyDeployVersionCheck(readFileSync(".github/workflows/deploy.yml", "utf-8"))).toBe("gate");
+  });
+
+  it("deploy.yml自身が/api/app-versionを引いてshaを比べ、不一致で失敗させる形はself", () => {
+    expect(classifyDeployVersionCheck(SELF)).toBe("self");
   });
 
   it("gateへAPP_COMMIT_SHAをenvで渡してdeployを呼ぶ形はgate", () => {

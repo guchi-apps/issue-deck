@@ -144,11 +144,9 @@ jobs:
             .next \
             prisma \
             deploy \
-            scripts/construct-database-url.sh \
             scripts/repair-failed-codex-weekly-floor.mjs \
             scripts/repair-failed-dispatch-session-codex-thread-id.mjs \
             scripts/repair-failed-pull-request-auto-repair-loop.mjs \
-            scripts/update-env-file.sh \
             next.config.mjs
 
       - name: Upload artifact
@@ -196,17 +194,25 @@ jobs:
           HOST: ${{ secrets.HOST }}
           SSH_PORT: ${{ secrets.SSH_PORT }}
 
+      # **VPSのgate（/usr/local/sbin/app-deploy-gate。guchi-apps/vps#275・#301）へ渡す**（#4804）。
+      # 鍵はこのアプリ専用（SSH_PRIVATE_KEY。正は op://apps/issue-deck/deploy-ssh-key）で、VPSの
+      # authorized_keys の command= がgateのアプリ名（issue-deck。置き場の /home/github-user/apps/issue-deck と
+      # pm2のプロセス名に一致する）を固定する。任意のシェルコマンドは実行できず、upload・env・deployの
+      # 3語だけが通る。旧配布物の削除・展開・.env更新・pnpm install --prod・deploy/pre-migrate.sh
+      # （マイグレーションの補修スクリプト3本）・prisma migrate deploy（MIGRATE_DATABASE_URLは.envへ書かず
+      # ここだけで使う）・pm2の再起動（deploy/ecosystem.config.js）・稼働版の照合はgate側が行う。
       - name: Upload archive
-        run: scp -P "${SSH_PORT}" deploy.tar.gz "${USERNAME}@${HOST}:${TARGET_DIR}/deploy.tar.gz"
+        run: ssh -p "${SSH_PORT}" "${USERNAME}@${HOST}" upload < deploy.tar.gz
         env:
           HOST: ${{ secrets.HOST }}
           USERNAME: ${{ secrets.USERNAME }}
           SSH_PORT: ${{ secrets.SSH_PORT }}
-          TARGET_DIR: ${{ secrets.TARGET_DIR }}
 
-      - name: Deploy and restart
-        uses: appleboy/ssh-action@v1
+      - name: Send environment variables
         env:
+          HOST: ${{ secrets.HOST }}
+          USERNAME: ${{ secrets.USERNAME }}
+          SSH_PORT: ${{ secrets.SSH_PORT }}
           DATABASE_URL: ${{ env.DATABASE_URL }}
           MIGRATE_DATABASE_URL: ${{ env.MIGRATE_DATABASE_URL }}
           DB_USER: ${{ secrets.DB_USER }}
@@ -260,118 +266,79 @@ jobs:
           VAPID_PUBLIC_KEY: ${{ secrets.VAPID_PUBLIC_KEY }}
           VAPID_PRIVATE_KEY: ${{ secrets.VAPID_PRIVATE_KEY }}
           VAPID_SUBJECT: ${{ secrets.VAPID_SUBJECT }}
-          TARGET_DIR: ${{ secrets.TARGET_DIR }}
-          # 稼働している版の照合に使う（#4007）。ヘルスチェックが`/api/app-version`の`sha`と突き合わせる。
-          # コミットのSHAは公開情報なのでそのまま渡してよい
+          # 稼働している版の照合に使う（#4007・#4804）。gateが.envのAPP_COMMIT_SHAと
+          # 稼働中の/api/app-versionのshaを照合する（guchi-apps/vps#298）。コミットのSHAは公開情報
           APP_COMMIT_SHA: ${{ github.sha }}
-        with:
-          host: ${{ secrets.HOST }}
-          username: ${{ secrets.USERNAME }}
-          key: ${{ secrets.SSH_PRIVATE_KEY }}
-          port: ${{ secrets.SSH_PORT }}
-          envs: APP_COMMIT_SHA,AIDE_SUMMARY_USER_LOGIN,DATABASE_URL,MIGRATE_DATABASE_URL,DB_USER,DB_PASSWORD,DB_HOST,DB_PORT,DB_NAME,NEXT_PUBLIC_SUPABASE_URL,NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY,SUPABASE_SERVICE_ROLE_KEY,SUPABASE_MANAGEMENT_API_TOKEN,GITHUB_APP_ID,GITHUB_APP_PRIVATE_KEY_BASE64,NEXT_PUBLIC_GITHUB_APP_SLUG,GITHUB_WEBHOOK_SECRET,GITHUB_USER_TOKEN_ENCRYPTION_KEY,SHARED_TOKEN_API_SECRET,SHARED_TOKEN_WRITE_SECRET,GITHUB_OAUTH_CLIENT_ID,GITHUB_OAUTH_CLIENT_SECRET,CLAUDE_CODE_OAUTH_TOKEN,OPENAI_API_KEY,TYPESAFE_API_KEY,OPS_API_TOKEN,CIRCLECI_API_TOKEN,CIRCLECI_WEBHOOK_SECRET,PROJECT_V2_OWNER,PROJECT_V2_NUMBER,PROGRESS_REPORT_SECRET,DISPATCH_SECRET,IMAGE_UPLOAD_SECRET,VAPID_PUBLIC_KEY,VAPID_PRIVATE_KEY,VAPID_SUBJECT,TARGET_DIR
-          script: |
-            set -euo pipefail
-            cd "${TARGET_DIR}"
-
-            # 待受ポートはシークレットではなく設定値として平文で持つ
-            # （guchi-apps/docs の standards/ports.md「ポート番号は 1Password で管理しない」。#1849）。
-            PORT=3111
-
-            echo "Cleaning up old release files..."
-            rm -rf .next public package.json pnpm-lock.yaml prisma deploy next.config.ts next.config.mjs
-
-            echo "Extracting archive..."
-            tar -xzf deploy.tar.gz
-            rm deploy.tar.gz
-
-            update_env() {
-              bash scripts/update-env-file.sh .env "$1" "$2"
-            }
-
-            echo "Updating .env..."
-            update_env NODE_ENV production
-            update_env PORT "$PORT"
-            update_env APP_COMMIT_SHA "$APP_COMMIT_SHA"
-            update_env DATABASE_URL "$DATABASE_URL"
-            update_env DB_USER "$DB_USER"
-            update_env DB_PASSWORD "$DB_PASSWORD"
-            update_env DB_HOST "$DB_HOST"
-            update_env DB_PORT "$DB_PORT"
-            update_env DB_NAME "$DB_NAME"
-            update_env NEXT_PUBLIC_SUPABASE_URL "$NEXT_PUBLIC_SUPABASE_URL"
-            update_env NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY "$NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY"
-            update_env SUPABASE_SERVICE_ROLE_KEY "$SUPABASE_SERVICE_ROLE_KEY"
-            update_env SUPABASE_MANAGEMENT_API_TOKEN "$SUPABASE_MANAGEMENT_API_TOKEN"
-            update_env GITHUB_APP_ID "$GITHUB_APP_ID"
-            update_env GITHUB_APP_PRIVATE_KEY_BASE64 "$GITHUB_APP_PRIVATE_KEY_BASE64"
-            update_env NEXT_PUBLIC_GITHUB_APP_SLUG "$NEXT_PUBLIC_GITHUB_APP_SLUG"
-            update_env GITHUB_WEBHOOK_SECRET "$GITHUB_WEBHOOK_SECRET"
-            update_env PROJECT_V2_OWNER "${PROJECT_V2_OWNER:-}"
-            update_env PROJECT_V2_NUMBER "${PROJECT_V2_NUMBER:-}"
-            update_env PROGRESS_REPORT_SECRET "${PROGRESS_REPORT_SECRET:-}"
-            update_env DISPATCH_SECRET "${DISPATCH_SECRET:-}"
-            update_env IMAGE_UPLOAD_SECRET "${IMAGE_UPLOAD_SECRET:-}"
-            update_env VAPID_PUBLIC_KEY "${VAPID_PUBLIC_KEY:-}"
-            update_env VAPID_PRIVATE_KEY "${VAPID_PRIVATE_KEY:-}"
-            update_env VAPID_SUBJECT "${VAPID_SUBJECT:-}"
-            update_env GITHUB_USER_TOKEN_ENCRYPTION_KEY "$GITHUB_USER_TOKEN_ENCRYPTION_KEY"
-            update_env SHARED_TOKEN_API_SECRET "${SHARED_TOKEN_API_SECRET:-}"
-            update_env SHARED_TOKEN_WRITE_SECRET "${SHARED_TOKEN_WRITE_SECRET:-}"
-            update_env GITHUB_OAUTH_CLIENT_ID "$GITHUB_OAUTH_CLIENT_ID"
-            update_env GITHUB_OAUTH_CLIENT_SECRET "$GITHUB_OAUTH_CLIENT_SECRET"
-            update_env CLAUDE_CODE_OAUTH_TOKEN "$CLAUDE_CODE_OAUTH_TOKEN"
-            update_env OPENAI_API_KEY "${OPENAI_API_KEY:-}"
-            update_env TYPESAFE_API_KEY "${TYPESAFE_API_KEY:-}"
-            update_env AIDE_SUMMARY_USER_LOGIN "${AIDE_SUMMARY_USER_LOGIN:-}"
+        run: |
+          set -euo pipefail
+          # マイグレーション専用ユーザー（MIGRATE_DB_*）が未設定なら、通常ユーザーの接続先で流す。
+          # gateはMIGRATE_DATABASE_URLが渡らないとマイグレーション自体を飛ばすため、必ず送る。
+          MIGRATE_DATABASE_URL="${MIGRATE_DATABASE_URL:-$DATABASE_URL}"
+          # gateは標準入力を1行1変数（KEY=VALUE）で受けるため、改行を含む値は送れない
+          # （GITHUB_APP_PRIVATE_KEY_BASE64はbase64の1行で登録してある前提）。
+          for name in DATABASE_URL DB_USER DB_PASSWORD DB_HOST DB_PORT DB_NAME NEXT_PUBLIC_SUPABASE_URL \
+            NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY SUPABASE_SERVICE_ROLE_KEY \
+            SUPABASE_MANAGEMENT_API_TOKEN GITHUB_APP_ID GITHUB_APP_PRIVATE_KEY_BASE64 \
+            NEXT_PUBLIC_GITHUB_APP_SLUG GITHUB_WEBHOOK_SECRET PROJECT_V2_OWNER PROJECT_V2_NUMBER \
+            PROGRESS_REPORT_SECRET DISPATCH_SECRET IMAGE_UPLOAD_SECRET VAPID_PUBLIC_KEY \
+            VAPID_PRIVATE_KEY VAPID_SUBJECT GITHUB_USER_TOKEN_ENCRYPTION_KEY SHARED_TOKEN_API_SECRET \
+            SHARED_TOKEN_WRITE_SECRET GITHUB_OAUTH_CLIENT_ID GITHUB_OAUTH_CLIENT_SECRET \
+            CLAUDE_CODE_OAUTH_TOKEN OPENAI_API_KEY TYPESAFE_API_KEY AIDE_SUMMARY_USER_LOGIN \
+            OPS_API_TOKEN CIRCLECI_API_TOKEN CIRCLECI_WEBHOOK_SECRET MIGRATE_DATABASE_URL; do
+            case "${!name:-}" in
+              *$'\n'*) echo "::error::${name} が改行を含むためgateへ送れません"; exit 1 ;;
+            esac
+          done
+          # 待受ポートはシークレットではなく設定値として平文で持つ
+          # （guchi-apps/docs の standards/ports.md「ポート番号は 1Password で管理しない」。#1849）。
+          {
+            printf '%s\n' "NODE_ENV=production" "PORT=3111"
+            printf '%s\n' "APP_COMMIT_SHA=${APP_COMMIT_SHA}"
+            printf '%s\n' "MIGRATE_DATABASE_URL=${MIGRATE_DATABASE_URL}"
+            printf '%s\n' "DATABASE_URL=${DATABASE_URL}"
+            printf '%s\n' "DB_USER=${DB_USER}"
+            printf '%s\n' "DB_PASSWORD=${DB_PASSWORD}"
+            printf '%s\n' "DB_HOST=${DB_HOST}"
+            printf '%s\n' "DB_PORT=${DB_PORT}"
+            printf '%s\n' "DB_NAME=${DB_NAME}"
+            printf '%s\n' "NEXT_PUBLIC_SUPABASE_URL=${NEXT_PUBLIC_SUPABASE_URL}"
+            printf '%s\n' "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=${NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY}"
+            printf '%s\n' "SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY}"
+            printf '%s\n' "SUPABASE_MANAGEMENT_API_TOKEN=${SUPABASE_MANAGEMENT_API_TOKEN}"
+            printf '%s\n' "GITHUB_APP_ID=${GITHUB_APP_ID}"
+            printf '%s\n' "GITHUB_APP_PRIVATE_KEY_BASE64=${GITHUB_APP_PRIVATE_KEY_BASE64}"
+            printf '%s\n' "NEXT_PUBLIC_GITHUB_APP_SLUG=${NEXT_PUBLIC_GITHUB_APP_SLUG}"
+            printf '%s\n' "GITHUB_WEBHOOK_SECRET=${GITHUB_WEBHOOK_SECRET}"
+            printf '%s\n' "PROJECT_V2_OWNER=${PROJECT_V2_OWNER}"
+            printf '%s\n' "PROJECT_V2_NUMBER=${PROJECT_V2_NUMBER}"
+            printf '%s\n' "PROGRESS_REPORT_SECRET=${PROGRESS_REPORT_SECRET}"
+            printf '%s\n' "DISPATCH_SECRET=${DISPATCH_SECRET}"
+            printf '%s\n' "IMAGE_UPLOAD_SECRET=${IMAGE_UPLOAD_SECRET}"
+            printf '%s\n' "VAPID_PUBLIC_KEY=${VAPID_PUBLIC_KEY}"
+            printf '%s\n' "VAPID_PRIVATE_KEY=${VAPID_PRIVATE_KEY}"
+            printf '%s\n' "VAPID_SUBJECT=${VAPID_SUBJECT}"
+            printf '%s\n' "GITHUB_USER_TOKEN_ENCRYPTION_KEY=${GITHUB_USER_TOKEN_ENCRYPTION_KEY}"
+            printf '%s\n' "SHARED_TOKEN_API_SECRET=${SHARED_TOKEN_API_SECRET}"
+            printf '%s\n' "SHARED_TOKEN_WRITE_SECRET=${SHARED_TOKEN_WRITE_SECRET}"
+            printf '%s\n' "GITHUB_OAUTH_CLIENT_ID=${GITHUB_OAUTH_CLIENT_ID}"
+            printf '%s\n' "GITHUB_OAUTH_CLIENT_SECRET=${GITHUB_OAUTH_CLIENT_SECRET}"
+            printf '%s\n' "CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN}"
+            printf '%s\n' "OPENAI_API_KEY=${OPENAI_API_KEY}"
+            printf '%s\n' "TYPESAFE_API_KEY=${TYPESAFE_API_KEY}"
+            printf '%s\n' "AIDE_SUMMARY_USER_LOGIN=${AIDE_SUMMARY_USER_LOGIN}"
+            printf '%s\n' "OPS_API_TOKEN=${OPS_API_TOKEN}"
+            printf '%s\n' "CIRCLECI_API_TOKEN=${CIRCLECI_API_TOKEN}"
+            printf '%s\n' "CIRCLECI_WEBHOOK_SECRET=${CIRCLECI_WEBHOOK_SECRET}"
             # ops-dashboardは同じVPSで待ち受けている。ポートは設定値として平文で持つ（#1849・#3037）
-            update_env OPS_DASHBOARD_URL "http://127.0.0.1:3110"
-            update_env OPS_API_TOKEN "${OPS_API_TOKEN:-}"
-            update_env CIRCLECI_API_TOKEN "${CIRCLECI_API_TOKEN:-}"
-            update_env CIRCLECI_WEBHOOK_SECRET "${CIRCLECI_WEBHOOK_SECRET:-}"
+            printf '%s\n' "OPS_DASHBOARD_URL=http://127.0.0.1:3110"
+          } | ssh -p "${SSH_PORT}" "${USERNAME}@${HOST}" env
 
-            echo "Installing production dependencies..."
-            corepack enable pnpm >/dev/null 2>&1 || true
-            pnpm install --prod --frozen-lockfile
-
-            echo "Applying database migrations..."
-            DATABASE_URL="$MIGRATE_DATABASE_URL" node scripts/repair-failed-codex-weekly-floor.mjs
-            DATABASE_URL="$MIGRATE_DATABASE_URL" node scripts/repair-failed-dispatch-session-codex-thread-id.mjs
-            DATABASE_URL="$MIGRATE_DATABASE_URL" node scripts/repair-failed-pull-request-auto-repair-loop.mjs
-            DATABASE_URL="$MIGRATE_DATABASE_URL" pnpm exec prisma migrate deploy
-
-            echo "Restarting PM2..."
-            if command -v pm2 >/dev/null 2>&1; then
-              pm2 delete issue-deck 2>/dev/null || true
-              PORT="$PORT" pm2 start deploy/ecosystem.config.js --env production
-              pm2 save
-            else
-              echo "pm2 is required on the server. Install: npm install -g pm2"
-              exit 1
-            fi
-
-            echo "Health check..."
-            # Next.js は起動完了までに数秒かかる。1回だけの curl では起動を待ちきれず、
-            # アプリが正常に立ち上がっていても deploy ジョブが失敗する。失敗すると後続の
-            # release / notify-release がスキップされ、タグはあるのに GitHub Release が
-            # 作られない状態になる（複数アプリを同時にデプロイした際に実際に発生した）。
-            #
-            # HTTP 200だけでは成功にしない（#4007）。再起動に失敗して旧版のプロセスが残っていても
-            # 200は返るため、`/api/app-version`が返す`sha`が今回デプロイしたコミットと一致するまで待つ。
-            for i in $(seq 1 30); do
-              body="$(curl -fsS "http://127.0.0.1:${PORT}/api/app-version" 2>/dev/null || true)"
-              if [ -n "$body" ] && printf '%s' "$body" | grep -qF "\"sha\":\"${APP_COMMIT_SHA}\""; then
-                echo "Deployment successful. (sha=${APP_COMMIT_SHA})"
-                exit 0
-              fi
-              sleep 2
-            done
-
-            echo "Health check failed after 60s: /api/app-version did not report sha=${APP_COMMIT_SHA}."
-            echo "last response: ${body:-<none>}"
-            pm2 describe issue-deck || true
-            pm2 logs issue-deck --lines 50 --nostream || true
-            exit 1
+      - name: Deploy and restart
+        run: ssh -p "${SSH_PORT}" "${USERNAME}@${HOST}" deploy
+        env:
+          HOST: ${{ secrets.HOST }}
+          USERNAME: ${{ secrets.USERNAME }}
+          SSH_PORT: ${{ secrets.SSH_PORT }}
 
   notify:
     runs-on: ubuntu-latest
