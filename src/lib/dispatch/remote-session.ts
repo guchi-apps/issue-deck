@@ -115,12 +115,19 @@ async function settleStartingSessions(now: Date): Promise<void> {
   }
 }
 
-/** 画面が読む状態一式（セッション・ホスト・上限） */
-export async function listRemoteSessions(now: Date = new Date()): Promise<RemoteSessionState> {
+/**
+ * 画面が読む状態一式（セッション・ホスト・上限）。
+ * セッションは要求した利用者（`requestedByUserId`）のものだけを返す（Remote Control URLを他の利用者へ見せない）。
+ */
+export async function listRemoteSessions(
+  requestedByUserId: string,
+  now: Date = new Date(),
+): Promise<RemoteSessionState> {
   await settleStartingSessions(now);
-  const [sessions, hosts, stoppingJobs] = await Promise.all([
+  const [sessions, allHosts, stoppingJobs, ownRepositories] = await Promise.all([
     db.remoteSession.findMany({
       where: {
+        requestedByUserId,
         OR: [
           { status: { in: ACTIVE_STATUSES } },
           { updatedAt: { gte: new Date(now.getTime() - ENDED_RETENTION_MS) } },
@@ -134,7 +141,17 @@ export async function listRemoteSessions(now: Date = new Date()): Promise<Remote
       where: { kind: "REMOTE_SESSION_KILL", status: { in: ["QUEUED", "CLAIMED", "RUNNING"] } },
       select: { tmuxSessionName: true },
     }),
+    db.repository.findMany({
+      where: { installation: { userInstallations: { some: { userId: requestedByUserId } } } },
+      select: { fullName: true },
+    }),
   ]);
+  // ホストの登録リポジトリは、要求者が連携しているものだけ見せる（他の利用者のリポジトリ名を出さない）
+  const own = new Set(ownRepositories.map((row) => row.fullName));
+  const hosts = allHosts.map((host) => ({
+    ...host,
+    repositories: host.repositories.filter((name) => own.has(name)),
+  }));
   const stopping = new Set(stoppingJobs.map((job) => job.tmuxSessionName));
   return {
     sessions: sessions.map((session) => toView(session, stopping.has(session.tmuxSessionName))),
@@ -206,7 +223,10 @@ export async function enqueueRemoteSessionKill(params: {
   now?: Date;
 }): Promise<EnqueueRemoteSessionKillResult> {
   const now = params.now ?? new Date();
-  const session = await db.remoteSession.findUnique({ where: { id: params.id } });
+  // 要求者のセッションだけを対象にする（他の利用者のIDは存在しないものとして扱う）
+  const session = await db.remoteSession.findFirst({
+    where: { id: params.id, requestedByUserId: params.requestedByUserId ?? "" },
+  });
   if (!session) return { ok: false, reason: "not_found", message: "セッションが見つかりません。" };
   if (session.status === "ended" || session.status === "failed") {
     return { ok: false, reason: "already_ended", message: "このセッションは既に終了しています。" };
