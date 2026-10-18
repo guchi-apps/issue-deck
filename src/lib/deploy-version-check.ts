@@ -7,7 +7,7 @@
  * どこで行われるかを次の2つに分けて判定する。
  *
  * - `self`: `deploy.yml`自身が照合する。`/api/app-version`を引き（curl等）、`sha`を比較し、不一致ならジョブを失敗させる
- *   （issue-deck自身の`.github/workflows/deploy.yml`のヘルスチェック）
+ *   （gateへ移す前のissue-deck自身の`.github/workflows/deploy.yml`のヘルスチェック。#4804でgateへ移した）
  * - `gate`: VPSのgate（`/usr/local/sbin/app-deploy-gate`）へ`APP_COMMIT_SHA`を`env`で渡し、`deploy`を呼ぶ。
  *   照合はgateが行う。gateの照合は{@link APP_DEPLOY_GATE_VERIFIES_SINCE}以降の版が実装している
  */

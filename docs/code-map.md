@@ -4033,9 +4033,9 @@ INSERTかUPDATEを選ぶため、同じキーへ同時に2本届くと**どち�
 - **サムネイルは原本をそのまま縮めて出している**（配信APIに縮小版を作る経路が無く、1枚10MBまで
   受け付ける）。一覧は`loading="lazy"`＋表示件数24枚ずつの「さらに表示」で区切ってあり、
   一覧API自体は全件返す（区切りを画面側に置いているので、古い画像が消せなくなることはない）。
-- `uploads/` は`.gitignore`済みで配布物にも含まれず、`deploy.yml` のクリーンアップ対象にも
-  入っていないため本番で永続する。**`deploy.yml` の `rm -rf` の行に `uploads` を足すと
-  ユーザーがアップロードした画像が消える。**
+- `uploads/` は`.gitignore`済みで配布物にも含まれず、デプロイ（VPSの`app-deploy-gate`。#4804）の
+  クリーンアップ対象（前回の配布物に入っていたファイルと固定の一覧）にも入っていないため本番で永続する。
+  **配布物（`deploy.yml`の`Create archive`）に `uploads` を入れると、次回のデプロイでユーザーがアップロードした画像が消える。**
 
 ### 「使っていない画像」は参照の索引で判定する（#2475）
 
@@ -4619,7 +4619,8 @@ Claude Code・Codex CLIそれぞれの新規実行の一時停止（`AppSetting.
 #2417で実際に起きた）。判定関数を直接呼ぶテストで確かめるほうが確実。
 
 追加するときはローカルの`.env.local.example`だけでなく、1Password・`.github/secrets-manifest.tsv`・
-`deploy.yml` の `env:` と `envs:`・サーバー側`.env`を書く`update_env`行まで更新する。
+`deploy.yml` の `Send environment variables` ステップ（`env:`・改行チェックの`for name in`・`printf`の行）まで更新する
+（#4804。VPSの`app-deploy-gate`が受け取った`KEY=VALUE`だけを`.env`へ書く。改行を含む値は送れない）。
 マニフェストへ追記したら`scripts/sync-github-secrets.sh`でGitHub側へ同期する（#1302）。詳細は共有知識の
 [knowledge/deployment.md](https://github.com/guchi-apps/docs/blob/main/knowledge/deployment.md) を参照。
 
