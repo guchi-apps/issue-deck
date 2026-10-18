@@ -124,7 +124,7 @@ export async function listRemoteSessions(
   now: Date = new Date(),
 ): Promise<RemoteSessionState> {
   await settleStartingSessions(now);
-  const [sessions, hosts, stoppingJobs] = await Promise.all([
+  const [sessions, allHosts, stoppingJobs, ownRepositories] = await Promise.all([
     db.remoteSession.findMany({
       where: {
         requestedByUserId,
@@ -141,7 +141,17 @@ export async function listRemoteSessions(
       where: { kind: "REMOTE_SESSION_KILL", status: { in: ["QUEUED", "CLAIMED", "RUNNING"] } },
       select: { tmuxSessionName: true },
     }),
+    db.repository.findMany({
+      where: { installation: { userInstallations: { some: { userId: requestedByUserId } } } },
+      select: { fullName: true },
+    }),
   ]);
+  // ホストの登録リポジトリは、要求者が連携しているものだけ見せる（他の利用者のリポジトリ名を出さない）
+  const own = new Set(ownRepositories.map((row) => row.fullName));
+  const hosts = allHosts.map((host) => ({
+    ...host,
+    repositories: host.repositories.filter((name) => own.has(name)),
+  }));
   const stopping = new Set(stoppingJobs.map((job) => job.tmuxSessionName));
   return {
     sessions: sessions.map((session) => toView(session, stopping.has(session.tmuxSessionName))),

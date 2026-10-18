@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const db = vi.hoisted(() => ({
   remoteSession: { findFirst: vi.fn(), findMany: vi.fn(), updateMany: vi.fn(), groupBy: vi.fn() },
   dispatchHost: { findMany: vi.fn(), findUnique: vi.fn() },
+  repository: { findMany: vi.fn() },
   dispatchJob: { findMany: vi.fn(), create: vi.fn() },
 }));
 vi.mock("@/lib/db", () => ({ db }));
@@ -17,6 +18,7 @@ describe("リモートセッションの利用者境界", () => {
     db.remoteSession.groupBy.mockResolvedValue([]);
     db.dispatchHost.findMany.mockResolvedValue([]);
     db.dispatchJob.findMany.mockResolvedValue([]);
+    db.repository.findMany.mockResolvedValue([]);
   });
 
   it("一覧は要求者のセッションだけをwhereで絞る", async () => {
@@ -24,6 +26,15 @@ describe("リモートセッションの利用者境界", () => {
     // 1回目は settleStartingSessions、2回目が一覧
     const listCall = db.remoteSession.findMany.mock.calls.find((c) => c[0]?.orderBy);
     expect(listCall?.[0].where.requestedByUserId).toBe("u1");
+  });
+
+  it("ホストの登録リポジトリは要求者の連携分だけに絞る", async () => {
+    db.dispatchHost.findMany.mockResolvedValue([
+      { name: "h", lastSeenAt: new Date(), remoteSessionCapable: true, repositories: JSON.stringify(["me/app", "other/secret"]) },
+    ]);
+    db.repository.findMany.mockResolvedValue([{ fullName: "me/app" }]);
+    const state = await listRemoteSessions("u1");
+    expect(state.hosts[0].repositories).toEqual(["me/app"]);
   });
 
   it("終了は要求者のセッションに限り、他人のIDはnot_foundでジョブを積まない", async () => {

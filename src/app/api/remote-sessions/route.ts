@@ -45,7 +45,7 @@ export async function POST(request: NextRequest) {
   const fullName = `${repository.owner}/${repository.repo}`;
   // 利用者がインストール連携しているリポジトリだけを起動できる
   if (!(await findRepositoryByFullName(userId, fullName))) {
-    return NextResponse.json({ error: "forbidden" }, { status: 403, headers: NO_STORE });
+    return NextResponse.json({ error: "forbidden", message: "このリポジトリはリモートセッションを起動できません。" }, { status: 403, headers: NO_STORE });
   }
 
   const result = await enqueueRemoteSession({
