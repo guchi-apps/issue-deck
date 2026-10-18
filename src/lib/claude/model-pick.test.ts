@@ -168,10 +168,19 @@ describe("buildModelPickPrompt", () => {
     const prompt = buildModelPickPrompt(input());
     expect(prompt).toContain("未解決の判断とリスク");
     expect(prompt).toMatch(/`opus`:.*仕様が決まった新規画面/);
-    expect(prompt).toMatch(/`sonnet`:.*本当に簡単な作業/);
+    expect(prompt).toMatch(/`sonnet`:.*変更点が読み違えようのない作業/);
     expect(prompt).toContain("迷ったら`opus`にしてください");
     expect(prompt).not.toMatch(/`opus`:.*新しい画面・UIを設計/);
     expect(prompt).toContain("解決済みの設計課題を難しさへ加算せず");
+  });
+
+  // #4831。見た目だけの変更・計画で変更点が決まった作業はSonnet、大きなデザイン変更はOpus
+  it("ロジックに関わらない見た目の変更と詳細な計画のある作業をSonnetへ振る基準として書く", () => {
+    const prompt = buildModelPickPrompt(input());
+    expect(prompt).toMatch(/`sonnet`:.*ロジックに関わらないデザイン・見た目の変更/);
+    expect(prompt).toMatch(/`sonnet`:.*計画に変更点が具体的に書かれた作業/);
+    expect(prompt).toMatch(/`opus`:.*大きなデザイン変更/);
+    expect(prompt).toContain("画面全体の見た目・デザインシステム・全体のレイアウトに関わる");
   });
 
   // 本文が無いIssueでも判定は走る（タイトルとラベルだけで選ぶ）
@@ -285,12 +294,16 @@ describe("buildModelPickState / buildModelPickQuestions", () => {
     ]);
   });
 
-  it("Jevの基準でも通常の実装はOpus、本当に簡単な作業だけSonnetとして書く（#4106・#4812）", () => {
+  it("Jevの基準でも通常の実装はOpus、変更点の明確な作業はSonnetとして書く（#4106・#4812・#4831）", () => {
     const { criteria, instructions } = buildModelPickQuestions().model as {
       criteria: Record<string, string>;
       instructions: string;
     };
-    expect(criteria.sonnet).toContain("本当に簡単");
+    expect(criteria.sonnet).toContain("変更点が読み違えようのない作業");
+    expect(criteria.sonnet).toContain("ロジックに関わらないデザイン・見た目の変更");
+    expect(criteria.sonnet).toContain("変更点が具体的に書かれた作業");
+    expect(criteria.opus).toContain("大きなデザイン変更");
+    expect(instructions).toContain("ロジックに関わらないデザイン・見た目の変更");
     expect(criteria.opus).toContain("仕様が決まった新規画面");
     expect(criteria.opus).toContain("未確定のUI/UXの比較判断");
     expect(instructions).toContain("迷ったらopusにしてください");
