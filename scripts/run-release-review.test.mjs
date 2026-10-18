@@ -59,7 +59,11 @@ fi
 batch="$(sed -nE 's/.*これはバッチ([0-9]+)\\/.*/\\1/p' <<<"$p" | head -n 1)"
 # FAIL_BATCH: そのバッチだけ失敗する／TURN_LIMIT_BATCH: そのバッチだけターン数の上限で終わる（claudeと同じく標準出力へ書いて1で終わる）
 [[ -n "\${FAIL_BATCH:-}" && "$batch" == "$FAIL_BATCH" ]] && exit 3
-if [[ -n "\${TURN_LIMIT_BATCH:-}" && "$batch" == "$TURN_LIMIT_BATCH" ]]; then echo "Error: Reached max turns (150)"; exit 1; fi
+# TURN_LIMIT_ONCE: 初回の呼び出しだけ上限に達する（上限を上げたやり直しでは成功する）。QUOTED_TURNS: 本文に文字列を引用して別の理由で1で終わる
+if [[ -n "\${QUOTED_TURNS:-}" && "$batch" == "$QUOTED_TURNS" ]]; then printf 'docsには "Error: Reached max turns (150)" と書かれている\\nその後の説明\\n'; exit 1; fi
+if [[ -n "\${TURN_LIMIT_BATCH:-}" && "$batch" == "$TURN_LIMIT_BATCH" ]]; then
+  if [[ -n "\${TURN_LIMIT_ONCE:-}" && "$*" == *"--max-turns 500"* ]]; then :; else echo "Error: Reached max turns (150)"; exit 1; fi
+fi
 # CONC_LOG: 起動と終了を記録し、同時に走った本数を数えられるようにする（SLOWの秒数だけ待つ）
 [[ -n "\${CONC_LOG:-}" ]] && echo "start $batch" >>"$CONC_LOG"
 [[ -n "\${SLOW:-}" ]] && sleep "$SLOW"
@@ -411,11 +415,55 @@ describe("run-release-review.sh（#4615）", { timeout: 30_000 }, () => {
       expect(status).toBe("failed");
       expect(result.diagnostic).toMatchObject({ cause: "turn_limit", exitCode: 1 });
       expect(result.diagnostic.excerpt).toContain("Reached max turns");
-      expect(lines(args).every((l) => l.includes("--max-turns 150"))).toBe(true);
+      expect(lines(args).every((l) => l.includes("--max-turns 300") || l.includes("--max-turns 500"))).toBe(true);
 
       rmSync(args);
       runReview({ ARGS_LOG: args, ISSUE_DECK_RELEASE_REVIEW_MAX_TURNS: "0" });
       expect(lines(args).some((l) => l.includes("--max-turns"))).toBe(false);
+    });
+
+    it("ターン数の上限で失敗したバッチだけ、上限（ターン数・時間）を上げて1回やり直す（#4785）", () => {
+      const args = path.join(dir, "args");
+      const { status, result } = runReview({ TURN_LIMIT_BATCH: "1", TURN_LIMIT_ONCE: "1", ARGS_LOG: args });
+      expect(status).toBe("succeeded");
+      const l = lines(args);
+      expect(l.filter((x) => x.includes("--max-turns 500"))).toHaveLength(1);
+      expect(l.filter((x) => x.includes("--max-turns 300")).length).toBeGreaterThan(1);
+      expect(result.pendingBatches).toBe(0);
+    });
+
+    it("やり直しても上限に達したら失敗として報告し、診断に再試行済みと適用した上限を残す（#4785）", () => {
+      const args = path.join(dir, "args");
+      const { status, result } = runReview({ TURN_LIMIT_BATCH: "1", ARGS_LOG: args });
+      expect(status).toBe("failed");
+      expect(result.diagnostic).toMatchObject({ cause: "turn_limit", turnLimitRetried: true, maxTurns: 500 });
+      expect(lines(args).filter((x) => x.includes("--max-turns 500"))).toHaveLength(1);
+    });
+
+    it("本文に引用された「Reached max turns」では turn_limit にせず、やり直しもしない（#4785）", () => {
+      const args = path.join(dir, "args");
+      const { status, result } = runReview({ QUOTED_TURNS: "1", ARGS_LOG: args });
+      expect(status).toBe("failed");
+      expect(result.diagnostic.cause).toBe("unknown");
+      expect(lines(args).some((x) => x.includes("--max-turns 500"))).toBe(false);
+    });
+
+    it("進捗の分母は全バッチ数に揃え、失敗後は実行中の完了を待っている旨を出す（#4785）", () => {
+      const out = execFileSync(
+        "bash",
+        [
+          "-c",
+          `source "${repoRoot}/scripts/run-release-review.sh"; batch_count=5
+batch_progress_message 全体確認 claude opus 1 1 0 13 3 4; echo
+batch_progress_message 全体確認 claude opus 1 0 1 13 4 5; echo`,
+        ],
+        { encoding: "utf8" },
+      );
+      const [running, waiting] = out.trim().split("\n");
+      expect(running).toContain("バッチ3・4/5を並列で確認中");
+      expect(running).toContain("完了2/5（再利用1）");
+      expect(waiting).toContain("失敗したバッチがあり、実行中の2本の完了を待っています");
+      expect(waiting).toContain("完了1/5");
     });
 
     it("進捗の文面は、実行中のバッチが複数なら並べて示す", () => {
