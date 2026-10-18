@@ -998,7 +998,7 @@ callerの`with:`も変えていないため、**参照タグ（`@workflows/vN`�
 
 `deploy-config-check`は`appleboy/ssh-action`を使わないリポジトリ（`myroom`・`signaly`は`rsync`、
 `solitaire`は`easingthemes/ssh-deploy`）ではその検査をスキップする。判定できない形（`cd`を挟む
-`run:`、GitHubの式や変数を含む`tar`の引数）も黙って通し、理由をログに残す——**誤検知でmain宛PRを
+`run:`、GitHubの式や変数を含む`tar`の引数、同じ`run:`の中で作る`tar -C`の起点。#4829）も黙って通し、理由をログに残す——**誤検知でmain宛PRを
 止める方が、見逃すより高くつく**ため。配布前に14リポジトリすべての`deploy.yml`へ通して、
 誤検知が出ないことを確かめてある。
 
