@@ -127,6 +127,15 @@ describe("normalizeReleaseReview", () => {
       expect(r?.unverifiedScope).toContain("残り2バッチ");
     });
 
+    it("保存済みの結果の再利用（再利用・再確認のバッチ数）を記録として残す（#4767）", () => {
+      const r = normalizeReleaseReview(
+        fullChecks(coverageOf(10, 10, { batches: 3, reusedBatches: 2, rerunBatches: 1, integrationReused: false })),
+      );
+      expect(r?.detail.coverage).toMatchObject({ reusedBatches: 2, rerunBatches: 1, integrationReused: false });
+      const legacy = normalizeReleaseReview(fullChecks(coverageOf(10, 10)));
+      expect(legacy?.detail.coverage).toMatchObject({ reusedBatches: 0, rerunBatches: 0, integrationReused: null });
+    });
+
     it("ファイル別の実績を持たない旧結果は件数不明（reviewedFiles=null）として扱う", () => {
       const r = normalizeReleaseReview(fullChecks({ reviewedFiles: 120, totalFiles: 120 }));
       expect(r?.detail.reviewedFiles).toBeNull();

@@ -10,7 +10,8 @@
 # **差分が大きいときはバッチに分けて順に確認し、最後にバッチをまたぐ相互作用を確認する**（#4615）。
 # 入力へ載せた数（`inputFiles`）と、根拠つきで確認した実績（`fileReviews`）は別に報告する。
 # サーバーは実績から確認済みの件数を数え、足りなければ「未確認範囲あり」として準備完了にしない。
-# 中断・実行予算で残ったバッチは`*.batches`へ保存し、同じbase・headの再実行が続きから確認する。
+# バッチの結果は`*.batches`へ保存し、完走後も残す（#4767）。同じbase・headの再実行は、中断・実行予算で残ったバッチを
+# 続きから確認し、証跡に依存する結果だけを証跡の更新後にやり直す（確認済みのバッチは再利用する）。
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -32,6 +33,10 @@ HEARTBEAT_SECONDS="${ISSUE_DECK_RELEASE_REVIEW_HEARTBEAT_SECONDS:-60}"
 # 1回の起動で実行するバッチ数の上限（実行予算）。残りは保存して、再実行が続きから確認する（#4615）
 DIFF_BUDGET_BYTES="${ISSUE_DECK_RELEASE_REVIEW_DIFF_BUDGET_BYTES:-300000}"
 MAX_BATCHES_PER_RUN="${ISSUE_DECK_RELEASE_REVIEW_MAX_BATCHES_PER_RUN:-8}"
+# 保存（`*.batches`）の掃除。3日より古いものに加え、新しい順にこの件数を超えた分を消す（ディスクを使い切らない。#4767）
+KEEP_BATCH_DIRS="${ISSUE_DECK_RELEASE_REVIEW_KEEP_BATCH_DIRS:-20}"
+# 実行結果（テスト・型検査・ビルド）の証跡を指す文言。`src/lib/release-review-reevaluation.ts`の`EVIDENCE_TEXT`と揃える
+EVIDENCE_TEXT_PATTERN='統合検証|検証結果|検証証跡|証跡|実行結果|テスト|型検査|ビルド|running'
 
 JOB_ID=""
 JOB_REPORTED=0
@@ -426,33 +431,42 @@ runner_host_prompt_text() {
   printf '`host_compat`では、**コードの互換性**（旧pollerと新サーバー、新pollerと旧サーバーで動くか）と**実機の更新**（サブPCのpollerを更新・再起動する必要があるか）を分けて書きます。実機の更新が要ると書くのは、この候補にサブPCへ届く変更（`scripts/`など）があり、上の稼働情報で候補を含まないと分かる場合か、旧版のpollerでは動かない（非互換）と根拠を示せる場合だけです。サーバーへのデプロイだけで有効になる変更・互換性を確認できた変更に、更新・再起動を求めません。上の稼働情報で「含む」と分かっていれば、更新済みとして扱います。実機の更新が必要なときは、公開（mainへのマージ）の前に必要か公開後でよいかと、その理由を書きます。\n'
 }
 
-# result_depends_on_evidence <結果JSON>: その結果が統合検証の証跡（結果待ち・未確認）に左右されているか（#4632）
-# 未確認の確認項目、または未確認範囲を持つ結果は、証跡が更新されたら判定が変わり得る。確認済みだけの結果は変わらない
+# result_depends_on_evidence <結果JSON>: その結果が統合検証の証跡（結果待ち・未確認）に左右されているか（#4632・#4767）
+# **証跡を指す文言の未確認だけを依存に数える**（`reviewDependsOnEvidence`と同じ規則）。根拠の無い未確認は、何に
+# 依存するか分からないので依存側へ倒す。poller更新のような運用の未確認・コードの未読は、証跡が更新されても変わらない
 result_depends_on_evidence() {
-  jq -e '(([.checks[]? | select(.status == "unconfirmed")] | length) > 0) or ((.unverifiedScope // "") != "")' "$1" >/dev/null 2>&1
+  jq -e --arg re "$EVIDENCE_TEXT_PATTERN" '
+    any(.checks[]?; .status == "unconfirmed" and (((.evidence // "") | tostring) as $e | $e == "" or ($e | test($re; "i"))))
+    or ((.unverifiedScope // "") | tostring | test($re; "i"))' "$1" >/dev/null 2>&1
 }
 
-# invalidate_stale_batches <現在の証跡の指紋>: 保存済みの結果のうち、証跡に依存し、かつ保存時と指紋が違うものを捨てる（#4632）。
-# 確認済みの結果は再利用する。指紋が取れない（現在・保存時のどちらか）依存結果は再利用せず再評価する。
-# 相互作用の確認はバッチの結果に基づくので、バッチを1つでも捨てたら一緒に捨てる。
+# invalidate_stale_batches <現在の証跡の指紋> [現在の確認項目の版]: 保存済みの結果のうち、やり直すものを捨てる（#4632・#4767）。
+# やり直すのは「証跡に依存し、かつ保存時と指紋が違う（どちらかが取れない）」結果と、確認項目の版が今と違う結果だけ。
+# それ以外（確認済み・証跡に依存しない未確認）は再利用する。相互作用の確認（`rint`）も同じ規則で捨てるほか、
+# バッチを1つでもやり直すときは実行後に必ずやり直す（main側で捨てる）。
 # 結果は`reuse_note`へ（画面のメッセージ用）。`batch_dir`は呼び出し元（main）のローカル変数を参照する
 invalidate_stale_batches() {
-  local cur_fp="$1" f stem saved dropped=0 reused=0
+  local cur_fp="$1" cur_ver="${2:-}" f stem saved dropped=0 reused=0
   reuse_note=""
   for f in "$batch_dir"/r*.json; do
     [[ -e "$f" ]] || continue
     stem="${f%.json}"
+    if [[ -n "$cur_ver" ]] && ! jq -e --arg v "$cur_ver" '(.checklistVersion // "" | tostring) == $v' "$f" >/dev/null 2>&1; then
+      rm -f "$f" "$stem.fp"
+      [[ "$f" == */rint.json ]] || dropped=$((dropped + 1))
+      continue
+    fi
     if ! result_depends_on_evidence "$f"; then
-      reused=$((reused + 1))
+      [[ "$f" == */rint.json ]] || reused=$((reused + 1))
       continue
     fi
     saved="$(cat "$stem.fp" 2>/dev/null || true)"
     if [[ -n "$cur_fp" && -n "$saved" && "$saved" == "$cur_fp" ]]; then
-      reused=$((reused + 1))
+      [[ "$f" == */rint.json ]] || reused=$((reused + 1))
       continue
     fi
     rm -f "$f" "$stem.fp"
-    dropped=$((dropped + 1))
+    [[ "$f" == */rint.json ]] || dropped=$((dropped + 1))
   done
   if ((dropped > 0)); then
     rm -f "$batch_dir/rint.json" "$batch_dir/rint.fp"
@@ -460,11 +474,24 @@ invalidate_stale_batches() {
   fi
 }
 
+# prune_batch_dirs: 古い保存（`*.batches`）を消す。3日より古いものと、新しい順に`KEEP_BATCH_DIRS`件を超えた分（#4767）。
+# 使用中の保存は直前に`touch`して最新にしてから呼ぶ
+prune_batch_dirs() {
+  local keep="$KEEP_BATCH_DIRS" d n=0
+  find "$WORK_ROOT" -maxdepth 1 -name '*.batches' -mtime +3 -exec rm -rf {} + 2>/dev/null || true
+  [[ "$keep" =~ ^[0-9]+$ ]] && ((keep >= 1)) || keep=1
+  while IFS= read -r d; do
+    [[ -n "$d" ]] || continue
+    n=$((n + 1))
+    if ((n > keep)); then rm -rf "$d"; fi
+  done < <(ls -1dt "$WORK_ROOT"/*.batches 2>/dev/null || true)
+}
+
 # merge_batch_results <未実施のバッチ数>: 保存済みのバッチ結果（と相互作用の確認）を1つの結果へまとめる。
 # 確認項目は、**全バッチ（と相互作用の確認）が確認済み・非該当と根拠を報告した項目だけ**を確認済みにする。
 # ファイルは、含まれる全バッチ（巨大ファイルは全断片）で根拠つきの`reviewed`が揃ったものだけを確認済みとして出す
 merge_batch_results() {
-  local pending="$1" idx
+  local pending="$1" reused="${2:-0}" rerun="${3:-0}" int_reused="${4:-false}" idx
   local -a batch_results=() all_results=()
   for ((idx = 1; idx <= batch_count; idx++)); do
     [[ -s "$batch_dir/r${idx}.json" ]] && batch_results+=("$batch_dir/r${idx}.json")
@@ -476,7 +503,7 @@ merge_batch_results() {
   targets_json="$(printf '%s\n' "${files[@]}" | jq -Rsc 'split("\n") | map(select(. != ""))')"
   expected_json="$(cut -f1 "$batch_dir"/b*.files 2>/dev/null | jq -Rsc 'split("\n") | map(select(. != "")) | group_by(.) | map({key: .[0], value: length}) | from_entries')"
   runner_json="$(jq -sc '.' "$batch_dir/runner.entries" 2>/dev/null || printf '[]')"
-  [[ ${#all_results[@]} -gt 0 ]] || { printf '{"state":"passed","targetFiles":%s,"fileReviews":%s,"inputFiles":0,"batches":%d,"pendingBatches":%d}' "$targets_json" "$runner_json" "$batch_count" "$pending"; return 0; }
+  [[ ${#all_results[@]} -gt 0 ]] || { printf '{"state":"passed","targetFiles":%s,"fileReviews":%s,"inputFiles":0,"batches":%d,"pendingBatches":%d,"reusedBatches":0,"rerunBatches":0}' "$targets_json" "$runner_json" "$batch_count" "$pending"; return 0; }
 
   local file_reviews
   file_reviews="$( ((${#batch_results[@]} > 0)) && jq -sc --argjson expected "$expected_json" --argjson runner "$runner_json" '
@@ -492,7 +519,8 @@ merge_batch_results() {
         )) + $runner' "${batch_results[@]}" || printf '%s' "$runner_json")"
 
   jq -sc --argjson expected_results "$expected_results" --argjson pending "$pending" --argjson targets "$targets_json" \
-    --argjson fileReviews "$file_reviews" --argjson inputFiles "$input_files" --argjson batches "$batch_count" '
+    --argjson fileReviews "$file_reviews" --argjson inputFiles "$input_files" --argjson batches "$batch_count" \
+    --argjson reused "$reused" --argjson rerun "$rerun" --argjson intReused "$int_reused" '
     . as $rs
     | def uniq_by_key: group_by([((.title // "") | ascii_downcase | gsub("[\\s\\p{P}\\p{S}]"; "")), .file]) | map(sort_by(if .blocking == false then 1 else 0 end) | .[0]);
     {
@@ -522,7 +550,10 @@ merge_batch_results() {
       fileReviews: $fileReviews,
       inputFiles: $inputFiles,
       batches: $batches,
-      pendingBatches: $pending
+      pendingBatches: $pending,
+      reusedBatches: $reused,
+      rerunBatches: $rerun,
+      integrationReused: (if $batches > 1 then $intReused else null end)
     }
     | with_entries(select(.value != null))' "${all_results[@]}"
 }
@@ -591,9 +622,10 @@ main() {
       "$(jq -nc '{state: "passed", summary: "mainとの差分がありません", findings: [], totalFiles: 0, reviewedFiles: 0, targetFiles: [], fileReviews: [], inputFiles: 0}')"
     return 0
   fi
-  find "$WORK_ROOT" -maxdepth 1 -name '*.batches' -mtime +3 -exec rm -rf {} + 2>/dev/null || true
   batch_dir="$WORK_ROOT/${repo}-${pr_number}-${base_sha:0:12}-${head_sha:0:12}-${DIFF_BUDGET_BYTES}.batches"
   mkdir -p "$batch_dir"
+  touch "$batch_dir"
+  prune_batch_dirs
   plan_batches
   # 保存済みの結果は、証跡が更新されていれば証跡に依存するものだけ再評価する（#4632）。
   # 同じSHAでも、前回が統合検証の実行中に作った「未確認」を新しい証跡の下で使い続けない
@@ -601,7 +633,6 @@ main() {
   if [[ -n "$evidence_fp" ]]; then
     evidence_fp="${evidence_fp}:shared-$(cat "$dependency_dir/fingerprint")"
   fi
-  invalidate_stale_batches "$evidence_fp"
   prs_text="$(git -C "$WORKTREE" log --format='- %s' "$base_sha..$head_sha" | head -n 200)"
 
   # 再レビューの文脈（#4559）。引き継げるかは、サーバーの判定（base・版・履歴）に、ここで実測した事実
@@ -615,6 +646,7 @@ main() {
     checklist_version="$(jq -r '.checklistVersion // empty' <<<"$ctx_json")"
     fix_prs_json="$(jq -c '.fixPrNumbers // []' <<<"$ctx_json")"
   fi
+  invalidate_stale_batches "$evidence_fp" "$checklist_version"
   mkdir -p "$WORK_ROOT"
   local fix_files_file="$WORK_ROOT/${repo}-${pr_number}-${head_sha:0:12}.fixfiles"
   local fix_diff_file="$WORK_ROOT/${repo}-${pr_number}-${head_sha:0:12}.fixdiff"
@@ -683,11 +715,12 @@ main() {
   fi
 
   # バッチごとに確認する。保存済みの結果（同じbase・head・予算）は再利用して続きから再開する
-  local mode_label executed=0 idx result_file rc remaining=0
+  local mode_label executed=0 reused_batches=0 idx result_file rc remaining=0
   mode_label="$([[ "$effective_mode" == "rereview" ]] && echo 再レビュー || echo 全体確認)"
   for ((idx = 1; idx <= batch_count; idx++)); do
     result_file="$batch_dir/r${idx}.json"
     if [[ -s "$result_file" ]] && jq -e 'type == "object"' "$result_file" >/dev/null 2>&1; then
+      reused_batches=$((reused_batches + 1))
       continue
     fi
     if ((executed >= MAX_BATCHES_PER_RUN)); then
@@ -724,8 +757,13 @@ main() {
   done
 
   # 全バッチが済んだら、バッチをまたぐ相互作用を別に確認する（バッチごとの合格の単純集計で済ませない）
-  local need_integration=0 int_file="$batch_dir/rint.json"
+  local need_integration=0 int_file="$batch_dir/rint.json" int_reused=false
   ((batch_count > 1)) && need_integration=1
+  # バッチを1つでも今回確認したら、相互作用の確認もやり直す（保存済みの相互作用は古いバッチ結果に基づく）
+  ((executed > 0)) && rm -f "$int_file" "${int_file%.json}.fp"
+  if ((need_integration == 1)) && [[ -s "$int_file" ]] && jq -e 'type == "object"' "$int_file" >/dev/null 2>&1; then
+    int_reused=true
+  fi
   if ((need_integration == 1 && remaining == 0)) && ! { [[ -s "$int_file" ]] && jq -e 'type == "object"' "$int_file" >/dev/null 2>&1; }; then
     RUNNING_MESSAGE="全体レビュー（${mode_label}）を実行中です（${agent}・${claude_model:-$codex_model}・バッチ間の相互作用を確認・全${total_files}ファイル）${reuse_note}"
     release_progress_set review 2 "$RUNNING_MESSAGE" "" "$total_files"
@@ -762,7 +800,7 @@ main() {
   local fix_files_json added_json merged_json
   fix_files_json="$(jq -Rsc 'split("\n") | map(select(. != "")) | .[0:300]' <"$fix_files_file" 2>/dev/null || printf '[]')"
   added_json="$(printf '%s\n' "${added_prs[@]:-}" | jq -Rsc 'split("\n") | map(select(. != "") | tonumber)' 2>/dev/null || printf '[]')"
-  merged_json="$(merge_batch_results "$remaining")" ||
+  merged_json="$(merge_batch_results "$remaining" "$reused_batches" "$executed" "$int_reused")" ||
     { finish failed "全体レビューの結果を整形できませんでした" "$(diag_payload parse_failed "" "" finalize)"; return 0; }
   ai_json="$(jq -c --argjson total "$total_files" \
     --argjson fixFiles "$fix_files_json" --argjson fixCount "$fix_diff_count" --argjson added "$added_json" \
@@ -771,8 +809,8 @@ main() {
       + (if $deny == "" then {} else {fullReviewReason: $deny} end)' <<<"$merged_json")" ||
     { finish failed "全体レビューの結果を整形できませんでした" "$(diag_payload parse_failed "" "" finalize)"; return 0; }
   rm -rf "$part_dir"
-  # 最後まで確認できたときだけ保存を消す。残りがあるときは、再実行が続きから確認できるよう残す
-  ((remaining == 0)) && rm -rf "$batch_dir"
+  # 保存は完走後も残す（#4767）。同じ対象の再評価・再実行が、確認済みのバッチを再利用できるようにする。
+  # 掃除は次の起動の`prune_batch_dirs`（期限・件数）が行う
   finish succeeded "全体レビューを完了しました" "$ai_json"
 }
 

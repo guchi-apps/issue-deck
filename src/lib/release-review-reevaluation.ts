@@ -28,18 +28,29 @@ export function readAutoReevaluation(findings: unknown): ReviewAutoReevaluation 
   return { integrationAt: r.integrationAt, requestedAt: r.requestedAt };
 }
 
-/** 実行結果（テスト・型検査・ビルド）の証跡を指す未確認の文言 */
+/**
+ * 実行結果（テスト・型検査・ビルド）の証跡を指す未確認の文言。
+ * **ランナー（`scripts/run-release-review.sh`の`EVIDENCE_TEXT_PATTERN`）と同じ語を持つ**（変えるときは両方を揃える）
+ */
 const EVIDENCE_TEXT = /統合検証|検証結果|検証証跡|証跡|実行結果|テスト|型検査|ビルド|running/i;
 
+/** 未確認の確認項目が証跡に依存するか。根拠の文言が無いものは、何に依存するか分からないので依存側へ倒す */
+export function checkDependsOnEvidence(check: { status: string; evidence?: string | null }): boolean {
+  if (check.status !== "unconfirmed") return false;
+  const evidence = typeof check.evidence === "string" ? check.evidence.trim() : "";
+  return evidence === "" || EVIDENCE_TEXT.test(evidence);
+}
+
 /**
- * レビュー結果が統合検証の証跡に左右されているか。ランナーの`result_depends_on_evidence`と同じく、未確認の確認項目が
- * あれば依存とみなす。未確認範囲の文言は、実行結果の証跡を指すものだけを依存に数える（コードの未読だけなら積まない）
+ * レビュー結果が統合検証の証跡に左右されているか（#4632・#4767）。ランナーの`result_depends_on_evidence`と同じ規則で、
+ * **証跡を指す文言の未確認項目・未確認範囲だけ**を依存に数える。poller更新のような運用の未確認やコードの未読は、
+ * 統合検証が終わっても変わらないので積まない
  */
 export function reviewDependsOnEvidence(input: {
-  checks: readonly { status: string }[] | null | undefined;
+  checks: readonly { status: string; evidence?: string | null }[] | null | undefined;
   unverifiedScope: string | null | undefined;
 }): boolean {
-  if ((input.checks ?? []).some((c) => c.status === "unconfirmed")) return true;
+  if ((input.checks ?? []).some(checkDependsOnEvidence)) return true;
   return typeof input.unverifiedScope === "string" && EVIDENCE_TEXT.test(input.unverifiedScope);
 }
 
@@ -151,12 +162,16 @@ export type ReviewOpenItemKind =
   | "evidence_waiting"
   /** 統合検証は成功したが、レビューで確認できない項目が残る */
   | "review_unconfirmed"
+  /** 証跡に依存しない未確認の確認項目（統合検証を待っても変わらない。#4767） */
+  | "check_unconfirmed"
   /** コードの未読範囲が残っている */
   | "code_unread";
 
 export type ReviewEvidenceStage =
   /** レビュー自体が未実施・対象外・無効。段階は出さない */
   | { kind: "none" }
+  /** 統合検証の完了まで開始を待たせている（#4763。レビューはまだ始まっていない） */
+  | { kind: "awaiting_integration" }
   /** レビューの実行中（自動再評価ではない） */
   | { kind: "reviewing" }
   /** コード確認は済み、実行結果の証跡（統合検証）を待っている */
@@ -170,6 +185,7 @@ export type ReviewEvidenceStage =
 
 export const REVIEW_STAGE_LABEL: Record<ReviewEvidenceStage["kind"], string> = {
   none: "",
+  awaiting_integration: "統合検証の完了待ち",
   reviewing: "全体レビュー中",
   integration_waiting: "コード確認済み・統合検証待ち",
   reevaluating: "検証結果を確認中",
@@ -185,6 +201,7 @@ export const REVIEW_OPEN_ITEM_LABEL: Record<ReviewOpenItemKind, string> = {
   evidence_unavailable: "統合検証の結果を取得できない・未実施",
   evidence_waiting: "実行結果の証跡待ち",
   review_unconfirmed: "レビューの未確認事項（統合検証は成功）",
+  check_unconfirmed: "証跡に依存しない未確認の確認項目",
   code_unread: "コードの未確認範囲",
 };
 
@@ -206,6 +223,8 @@ export type ReviewStageInput = {
   autoReevaluation: ReviewAutoReevaluation | null;
   /** 実行失敗の診断がある（レビューを完走できていない） */
   executionFailed: boolean;
+  /** 統合検証の完了まで開始を待たせている印がある（#4763。`findings.awaitingIntegration`） */
+  awaitingIntegration?: boolean;
 };
 
 /**
@@ -225,6 +244,8 @@ export function describeReviewEvidenceStage(
     integration.updatedAt !== null &&
     Date.parse(marker.integrationAt) >= Date.parse(integration.updatedAt);
 
+  // 統合検証の完了まで開始を待たせている（#4763）。統合検証が終わった後は、開始されるまで「全体レビュー中」として出す
+  if (review.state === "waiting" && review.awaitingIntegration && integrationPending) return { kind: "awaiting_integration" };
   if (review.state === "waiting" || review.state === "running") {
     return marker !== null && integrationFinished ? { kind: "reevaluating" } : { kind: "reviewing" };
   }
@@ -255,7 +276,8 @@ export function describeReviewEvidenceStage(
 
   const items: ReviewOpenItemKind[] = [];
   if (review.findingsCount > 0) items.push("findings");
-  const unconfirmedTexts = (review.checks ?? []).filter((c) => c.status === "unconfirmed").map((c) => c.evidence ?? null);
+  const unconfirmed = (review.checks ?? []).filter((c) => c.status === "unconfirmed");
+  const unconfirmedTexts = unconfirmed.map((c) => c.evidence ?? null);
   if (findOpsRequest([review.reason, review.unverifiedScope, ...unconfirmedTexts])) items.push("ops");
   if (dependsOnEvidence) {
     if (integration.state === "failed" || integration.state === "needs_check") items.push("evidence_failed");
@@ -263,6 +285,10 @@ export function describeReviewEvidenceStage(
     else if (integration.state !== "passed") items.push("evidence_unavailable");
     // 未確認項目が残ることと、成功済みの統合検証が未実施であることは異なる。
     else items.push("review_unconfirmed");
+  }
+  // 証跡にも運用作業にも当たらない未確認（読み切れなかった観点など）。再評価では変わらないので別に出す
+  if (unconfirmed.some((c) => !checkDependsOnEvidence(c) && !findOpsRequest([c.evidence ?? null]))) {
+    items.push("check_unconfirmed");
   }
   if (review.openFiles > 0) items.push("code_unread");
   return { kind: "needs_check", autoReevaluated: markerCurrent, items };

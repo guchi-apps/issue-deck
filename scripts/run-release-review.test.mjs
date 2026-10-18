@@ -22,9 +22,15 @@ const git = (...args) => execFileSync("git", args, { cwd: path.join(dir, "repo")
 
 const FAKE_CLAUDE = `#!/usr/bin/env bash
 p="$(cat)"
-checks() { jq -nc --arg e "$1" --arg s "\${UNCONF:+unconfirmed}" '[${JSON.stringify(CHECK_IDS)}[] | {id: ., status: (if $s == "" then "confirmed" else "unconfirmed" end), evidence: $e}]'; }
+# UNCONF: 全バッチを未確認にする／UNCONF_FILE: そのファイルを含むバッチだけを未確認にする。根拠はUNCONF_TEXT（既定は証跡待ち）
+checks() {
+  local s="\${UNCONF:+unconfirmed}"
+  [[ -n "\${UNCONF_FILE:-}" && "$2" == *"\${UNCONF_FILE}"* ]] && s=unconfirmed
+  jq -nc --arg e "$1" --arg s "$s" --arg u "\${UNCONF_TEXT:-統合検証の結果待ち}" '[${JSON.stringify(CHECK_IDS)}[] | {id: ., status: (if $s == "" then "confirmed" else "unconfirmed" end), evidence: (if $s == "" then $e else $u end)}]'
+}
 if grep -q "バッチをまたぐ相互作用の確認" <<<"$p"; then
   [[ -n "\${FAIL_INT:-}" ]] && exit 3
+  [[ -n "\${INT_LOG:-}" ]] && echo call >>"$INT_LOG"
   echo '\`\`\`json'
   jq -nc --argjson c "$(checks 統合で確認)" '{state: "passed", summary: "統合", checklistVersion: 1, checks: $c, fileReviews: []}'
   echo '\`\`\`'
@@ -39,7 +45,7 @@ if [[ -n "\${FAKE_FINDINGS:-}" ]]; then
 fi
 files="$(sed -n '/次のファイルの差分をこのバッチへ載せました/,/^$/p' <<<"$p" | grep -E '^- ' | sed -E 's/^- //; s/（分割.*//')"
 echo '\`\`\`json'
-jq -nc --argjson c "$(checks バッチで確認)" --argjson f "$(printf '%s\\n' $files | jq -Rsc 'split("\\n") | map(select(. != ""))')" \\
+jq -nc --argjson c "$(checks バッチで確認 "$files")" --argjson f "$(printf '%s\\n' $files | jq -Rsc 'split("\\n") | map(select(. != ""))')" \\
 --argjson fd "$findings" \\
   '{state: "passed", summary: "batch", checklistVersion: 1, checks: $c, findings: $fd, fileReviews: ($f | map({file: ., status: "reviewed", evidence: "読んだ"}))}'
 echo '\`\`\`'
@@ -115,7 +121,11 @@ describe("run-release-review.sh（#4615）", { timeout: 30_000 }, () => {
     expect(result).not.toHaveProperty("reviewedFiles");
     expect(result.checks.every((c) => c.status === "confirmed")).toBe(true);
     expect(result.checks[0].evidence).toContain("統合で確認");
-    expect(batchDirs()).toEqual([]);
+    // 完走後も保存を残す（#4767）
+    expect(batchDirs()).toHaveLength(1);
+    expect(result.reusedBatches).toBe(0);
+    expect(result.rerunBatches).toBe(result.batches);
+    expect(result.integrationReused).toBe(false);
   });
 
   it("バッチ間の同じ指摘は、題の表記揺れ・行の違いに依らず1件にまとめ、止める指摘を残す（#4766）", () => {
@@ -141,7 +151,8 @@ describe("run-release-review.sh（#4615）", { timeout: 30_000 }, () => {
     const second = runReview();
     expect(second.result.pendingBatches).toBe(0);
     expect(second.result.fileReviews.filter((r) => r.status === "reviewed")).toHaveLength(13);
-    expect(batchDirs()).toEqual([]);
+    expect(second.result.reusedBatches).toBe(2);
+    expect(batchDirs()).toHaveLength(1);
   });
 
   it("相互作用の確認が失敗したら失敗として報告し、バッチごとの結果は残して再実行で続きから確認する", () => {
@@ -219,5 +230,77 @@ describe("run-release-review.sh（#4615）", { timeout: 30_000 }, () => {
     );
     runReview(env);
     expect(readFileSync(calls, "utf8").trim().split("\n").length).toBe(before);
+  });
+  describe("完走後の再利用（#4767）", () => {
+    const evidenceFile = () => path.join(dir, "evidence", `o_r-7-${base.slice(0, 12)}-${head.slice(0, 12)}.json`);
+    const writeEvidence = (state, finishedAt) =>
+      writeFileSync(
+        evidenceFile(),
+        JSON.stringify({ repository: "o/r", prNumber: 7, baseSha: base, headSha: head, steps: [], outcome: { state }, ...(finishedAt ? { finishedAt } : {}) }),
+      );
+    const lines = (file) => (existsSync(file) ? readFileSync(file, "utf8").trim().split("\n").filter(Boolean).length : 0);
+    const setup = () => {
+      mkdirSync(path.join(dir, "evidence"));
+      const calls = path.join(dir, "calls");
+      const ints = path.join(dir, "ints");
+      return { calls, ints, env: { ISSUE_DECK_RELEASE_EVIDENCE_ROOT: path.join(dir, "evidence"), CALL_LOG: calls, INT_LOG: ints } };
+    };
+
+    it("同じSHA・同じ証跡で再実行したら、バッチも相互作用の確認もAIを呼ばずに再利用する", () => {
+      const { calls, ints, env } = setup();
+      writeEvidence("passed", "2026-10-18T10:00:00Z");
+      const first = runReview(env);
+      expect(first.status).toBe("succeeded");
+      const batches = lines(calls);
+      expect(batches).toBe(first.result.batches);
+      expect(lines(ints)).toBe(1);
+
+      const rerun = runReview(env);
+      expect(rerun.status).toBe("succeeded");
+      expect(lines(calls)).toBe(batches);
+      expect(lines(ints)).toBe(1);
+      expect(rerun.result).toMatchObject({ reusedBatches: batches, rerunBatches: 0, integrationReused: true });
+      expect(rerun.result.checks.every((c) => c.status === "confirmed")).toBe(true);
+    });
+
+    it("証跡が更新されたら、証跡に依存して未確認になったバッチと相互作用の確認だけをやり直す", () => {
+      const { calls, ints, env } = setup();
+      writeEvidence("running");
+      const first = runReview({ ...env, UNCONF_FILE: "file5.txt" });
+      expect(first.status).toBe("succeeded");
+      const batches = lines(calls);
+      expect(batches).toBeGreaterThan(2);
+      expect(first.result.checks.every((c) => c.status === "unconfirmed")).toBe(true);
+
+      writeEvidence("passed", "2026-10-18T10:00:00Z");
+      const rerun = runReview(env);
+      expect(rerun.status).toBe("succeeded");
+      // file5.txtを含む1バッチだけをやり直し、残りは再利用する。相互作用の確認はやり直す
+      expect(lines(calls)).toBe(batches + 1);
+      expect(lines(ints)).toBe(2);
+      expect(rerun.result).toMatchObject({ reusedBatches: batches - 1, rerunBatches: 1, integrationReused: false });
+      expect(rerun.result.checks.every((c) => c.status === "confirmed")).toBe(true);
+    });
+
+    it("証跡を指さない未確認（運用作業など）は、証跡が更新されても再利用する", () => {
+      const { calls, env } = setup();
+      writeEvidence("running");
+      runReview({ ...env, UNCONF_FILE: "file5.txt", UNCONF_TEXT: "サブPCのpollerを更新・再起動する必要があります" });
+      const batches = lines(calls);
+      writeEvidence("passed", "2026-10-18T10:00:00Z");
+      const rerun = runReview(env);
+      expect(lines(calls)).toBe(batches);
+      expect(rerun.result.reusedBatches).toBe(batches);
+    });
+
+    it("保存は件数の上限を超えた古いものから消す", () => {
+      runReview();
+      writeFileSync(path.join(dir, "repo", "file1.txt"), "changed\n");
+      git("commit", "-qam", "next");
+      head = git("rev-parse", "HEAD");
+      runReview({ ISSUE_DECK_RELEASE_REVIEW_KEEP_BATCH_DIRS: "1" });
+      expect(batchDirs()).toHaveLength(1);
+      expect(batchDirs()[0]).toContain(head.slice(0, 12));
+    });
   });
 });

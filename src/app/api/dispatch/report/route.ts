@@ -14,6 +14,7 @@ import { applyReleaseVerifyReport } from "@/lib/dispatch/release-verify-jobs";
 import { applyRemoteSessionJobReport } from "@/lib/dispatch/remote-session";
 import { parseRemoteControlUrl } from "@/lib/dispatch/session-state";
 import { reevaluateReleaseReviewSafely } from "@/lib/dispatch/release-review-reevaluate";
+import { startDeferredReleaseReviewSafely } from "@/lib/dispatch/release-review-start";
 import { resumePrReviewMerge } from "@/lib/dispatch/pr-review-jobs";
 import { resolveFixedInstructionCheckUser } from "@/lib/dispatch/session-escalation";
 import { MANUAL_STEP_OUTPUT_MAX_LENGTH } from "@/lib/manual-step-command";
@@ -152,18 +153,18 @@ export async function POST(request: NextRequest) {
     } catch (error) {
       console.error(`[POST /api/dispatch/report] 統合検証の結果を記録できませんでした ${jobId}:`, error);
     }
-    // 統合検証・全体レビューのどちらが先に終わっても、証跡待ちの項目を自動で再評価する（#4664）。
-    // 判定は記録とジョブから取り直すので、重複報告・同時完了でも1回しか積まない
     if (result.job.prNumber != null && result.job.baseSha && result.job.headSha) {
-      await reevaluateReleaseReviewSafely(
-        {
-          repoFullName: result.job.repositoryFullName,
-          prNumber: result.job.prNumber,
-          baseSha: result.job.baseSha,
-          headSha: result.job.headSha,
-        },
-        "verify-report",
-      );
+      const target = {
+        repoFullName: result.job.repositoryFullName,
+        prNumber: result.job.prNumber,
+        baseSha: result.job.baseSha,
+        headSha: result.job.headSha,
+      };
+      // 統合検証の完了まで待たせていた全体レビューを、このジョブのホストを優先して開始する（#4763）
+      await startDeferredReleaseReviewSafely(target, "verify-report");
+      // 統合検証・全体レビューのどちらが先に終わっても、証跡待ちの項目を自動で再評価する（#4664）。
+      // 判定は記録とジョブから取り直すので、重複報告・同時完了でも1回しか積まない。上で開始したレビューは実行中なので積まない
+      await reevaluateReleaseReviewSafely(target, "verify-report");
     }
   }
 

@@ -485,6 +485,15 @@ describe("describeReviewCoverage（#4615）", () => {
     expect(text).toBe("確認済み 100 / 120 ファイル（未確認 15・取得不能 5）・2バッチ・残り1バッチ");
   });
 
+  it("保存済みの結果を再利用したバッチ数を出す（#4767）", () => {
+    const text = describeReviewCoverage({
+      coverage: { ...cov({ batches: 3 }), reusedBatches: 2, rerunBatches: 1, integrationReused: false },
+      reviewedFiles: 120,
+      totalFiles: 120,
+    });
+    expect(text).toBe("確認済み 120 / 120 ファイル・3バッチ・再利用2／再確認1バッチ");
+  });
+
   it("実績の無い旧結果は件数を出さず実績不明にする", () => {
     expect(describeReviewCoverage({ coverage: null, reviewedFiles: null, totalFiles: 120 })).toContain("実績不明");
   });
