@@ -14,6 +14,9 @@ import {
   parseDispatchHostMetrics,
 } from "@/lib/dispatch/host-metrics";
 import { announceDispatchHost } from "@/lib/dispatch/jobs";
+import { syncRemoteSessionsFromHost } from "@/lib/dispatch/remote-session";
+import { parseReportedRemoteSessions } from "@/lib/dispatch/remote-session-rules";
+import { parseRemoteControlUrl } from "@/lib/dispatch/session-state";
 
 function parsePositiveInt(value: unknown): number | null {
   return typeof value === "number" && Number.isInteger(value) && value > 0 ? value : null;
@@ -151,6 +154,9 @@ export async function POST(request: NextRequest) {
       typeof payload?.releaseReviewRedact === "boolean" ? payload.releaseReviewRedact : null,
     // チャット相談のCodex実行（#4109）に対応したpollerだけが送ってくる。**未申告はnull＝非対応扱い**
     chatCodexCapable: typeof payload?.chatCodex === "boolean" ? payload.chatCodex : null,
+    // リモートセッション（#4743）を起こせるpollerだけが送ってくる。**未申告はnull＝非対応扱い**
+    remoteSessionCapable:
+      typeof payload?.remoteSession === "boolean" ? payload.remoteSession : null,
     selfUpdateCapable:
       typeof payload?.selfUpdate === "boolean" ? payload.selfUpdate : null,
     // セッション本数の上限と、申告した時点の本数（#1394）。**上限に達している間、pollerは
@@ -191,6 +197,17 @@ export async function POST(request: NextRequest) {
     // 使わない**（押せる条件に効くのはセッション本数だけ）。`required`が読めなければ全体をnull
     reboot: parseDispatchHostReboot(payload?.rebootState),
   });
+
+  // 生きているリモートセッション（#4743）で`RemoteSession`の生存を突き合わせる。**未申告（古い
+  // poller）はnull**で何もしない。失敗しても申告そのものは受け付ける（起動の割り当てに効くのはこちら）
+  try {
+    await syncRemoteSessionsFromHost({
+      hostName,
+      reported: parseReportedRemoteSessions(payload?.remoteSessions, parseRemoteControlUrl),
+    });
+  } catch (error) {
+    console.error("[POST /api/dispatch/hosts] リモートセッションを突き合わせられませんでした:", error);
+  }
 
   return NextResponse.json({ ok: true, host }, { headers: { "Cache-Control": "no-store" } });
 }

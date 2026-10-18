@@ -11,7 +11,8 @@
 - GitHub上の操作が誰の名義になるか: [attribution.md](attribution.md)
 - Actions側のトークンと自己ループ防止: [actions-token-model.md](actions-token-model.md)
 - 無人実行フローの全体像: [multi-agent-workflow.md](multi-agent-workflow.md)・[multi-agent/](multi-agent/)
-- 会話型の操作入口（IssueDeck Chat。意図解釈・確認カード・共通サービスの切り出し）: [chat.md](chat.md)
+- 会話型の操作入口（IssueDeck Chat。意図解釈・確認カード・共通サービスの切り出し）: [chat.md](chat.md)。**アプリ内の画面は#4743で廃止**し、処理部分はSlack起案が使う
+- リポジトリだけを指定してサブPCにClaude Codeのセッションを立て、Claude Codeアプリへ移動する「リモートセッション」（`src/lib/dispatch/remote-session*.ts`・`src/app/api/remote-sessions/`・`scripts/start-remote-session.sh`）: [remote-session.md](remote-session.md)（#4743）
 - Slackの`#アプリissue起案`からのIssue起案（Events受信・対象選択UI・Bot返信。`src/lib/slack/`・`src/app/api/slack/`）: [slack-intake.md](slack-intake.md)（#4454）
 - 親子Issue・依存関係・実行計画をまとめて起案する共通サービス（Slack・Chat共通。`src/lib/epic-draft/`）: [epic-draft.md](epic-draft.md)（#4537）
 - 親子Issueの実行計画（構造化計画の登録・検証・版管理。`src/lib/execution-plan/`・`src/app/api/execution-plans/`）: [execution-plan.md](execution-plan.md)（#4535）

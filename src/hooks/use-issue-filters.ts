@@ -42,7 +42,7 @@ export type DashboardPane =
   | "releases"
   | "nightly"
   | "ideas"
-  | "chat"
+  | "remote-sessions"
   | "ios-extensions";
 
 function parsePane(value: string | null): DashboardPane {
@@ -54,11 +54,13 @@ function parsePane(value: string | null): DashboardPane {
     value === "releases" ||
     value === "nightly" ||
     value === "ideas" ||
-    value === "chat" ||
+    value === "remote-sessions" ||
     value === "ios-extensions"
   ) {
     return value;
   }
+  // 旧チャット（#3975）のURL（`pane=chat`）はリモートセッション（#4743）へ寄せる
+  if (value === "chat") return "remote-sessions";
   return "issues";
 }
 
@@ -288,9 +290,9 @@ export function useIssueFilters() {
     setFilters({ pane: "ideas", pr: null, prmodal: null });
   }, [setFilters]);
 
-  // 左メニューの「チャット」画面への遷移（#3975）。上と同じくPRの選択状態を持たない。
-  const selectChatPane = useCallback(() => {
-    setFilters({ pane: "chat", pr: null, prmodal: null });
+  // 左メニューの「リモートセッション」画面への遷移（#4743）。上と同じくPRの選択状態を持たない。
+  const selectRemoteSessionsPane = useCallback(() => {
+    setFilters({ pane: "remote-sessions", pr: null, prmodal: null });
   }, [setFilters]);
 
   // 左メニューの「iOS拡張」画面への遷移（#3708）。上と同じくPRの選択状態を持たない。
@@ -349,7 +351,7 @@ export function useIssueFilters() {
     selectReleaseHistoryPane,
     selectNightlyRunPane,
     selectIdeasPane,
-    selectChatPane,
+    selectRemoteSessionsPane,
     selectIosExtensionsPane,
     selectPullRequest,
     selectPullRequestModal,

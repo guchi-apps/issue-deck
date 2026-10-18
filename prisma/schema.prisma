@@ -842,6 +842,8 @@ enum DispatchJobKind {
   CHAT_TURN
   RELEASE_VERIFY
   RELEASE_REVIEW
+  REMOTE_SESSION
+  REMOTE_SESSION_KILL
 }
 
 // issue-deckの画面から積み、サブPCのpollerがポーリングで取りに来るジョブ（#1179）。
@@ -1216,6 +1218,9 @@ model DispatchHost {
   // チャット相談のモデル呼び出し（`CHAT_TURN`・#4109）をCodex CLIで実行できるか。ランチャーと
   // Codex CLIが揃っているpollerだけが申告する。`null`（未申告）は「できない」
   chatCodexCapable          Boolean?
+  // Issueに紐づかないリモートセッション（`REMOTE_SESSION`・#4743）を起こせるか。
+  // `null`（未申告＝古いpoller）は「できない」
+  remoteSessionCapable      Boolean?
 
   // チェックアウトの更新と自己再起動ができるか（#1875）。`git pull --ff-only`のうえ
   // **自分で終了してsystemdの`Restart=always`に再起動させる**pollerだけが申告する。
@@ -3502,4 +3507,33 @@ model ReviewAgentIdempotency {
   createdAt   DateTime @default(now())
 
   @@unique([tokenId, idemKey])
+}
+
+// --- リモートセッション（#4743） ---
+/// リポジトリだけを指定してサブPCに立てたClaude Codeのセッション（Remote Control付き）。
+///
+/// **`DispatchSession`には混ぜない。** あちらは`<repo>-issue-<番号>`の規約でIssueに紐づき、
+/// 引き上げ・停滞検知・自動再開の対象になる。こちらは人がClaude Codeアプリから対話する
+/// セッションで、tmux名は`<repo>-remote-<8文字>`。生存はホストの申告（`remoteSessions`）で毎巡
+/// 突き合わせる。
+model RemoteSession {
+  id                 String    @id @default(cuid())
+  repositoryFullName String
+  host               String
+  tmuxSessionName    String    @unique
+  /// `starting`（起動ジョブ待ち）→`running`→`ended`、または`failed`
+  status             String    @db.VarChar(16)
+  remoteControlUrl   String?   @db.VarChar(255)
+  /// 起動ジョブ（`REMOTE_SESSION`）のid
+  launchJobId        String?   @unique
+  failureMessage     String?   @db.Text
+  requestedByUserId  String?
+  lastSeenAt         DateTime?
+  endedAt            DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([repositoryFullName, status])
+  @@index([host, status])
 }

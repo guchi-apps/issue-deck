@@ -11,6 +11,8 @@ import { reportDispatchJob } from "@/lib/dispatch/jobs";
 import { parsePrReviewVerdict } from "@/lib/dispatch/pr-review";
 import { applyReleaseReviewReport } from "@/lib/dispatch/release-review-jobs";
 import { applyReleaseVerifyReport } from "@/lib/dispatch/release-verify-jobs";
+import { applyRemoteSessionJobReport } from "@/lib/dispatch/remote-session";
+import { parseRemoteControlUrl } from "@/lib/dispatch/session-state";
 import { reevaluateReleaseReviewSafely } from "@/lib/dispatch/release-review-reevaluate";
 import { resumePrReviewMerge } from "@/lib/dispatch/pr-review-jobs";
 import { resolveFixedInstructionCheckUser } from "@/lib/dispatch/session-escalation";
@@ -125,6 +127,21 @@ export async function POST(request: NextRequest) {
       await resumePrReviewMerge(result.job.id);
     } catch (error) {
       console.error(`[POST /api/dispatch/report] 最終マージ判定を再開できませんでした ${jobId}:`, error);
+    }
+  }
+
+  // リモートセッション（#4743）の起動・終了の結果を`RemoteSession`へ写す。URLはbest-effortで、
+  // 取れなかった巡はホスト申告（`remoteSessions`）が後から拾う
+  if (result.job.kind === "REMOTE_SESSION" || result.job.kind === "REMOTE_SESSION_KILL") {
+    try {
+      await applyRemoteSessionJobReport({
+        job: result.job,
+        status,
+        message,
+        remoteControlUrl: parseRemoteControlUrl(payload?.remoteControlUrl),
+      });
+    } catch (error) {
+      console.error(`[POST /api/dispatch/report] リモートセッションの状態を記録できませんでした ${jobId}:`, error);
     }
   }
 

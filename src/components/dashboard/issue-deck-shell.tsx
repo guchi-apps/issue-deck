@@ -51,7 +51,7 @@ import { MobileNightlyRunScreen } from "@/components/dashboard/mobile/mobile-nig
 import { MobileReleaseHistoryScreen } from "@/components/dashboard/mobile/mobile-release-history-screen";
 import { PreviewPanel } from "@/components/dashboard/preview-panel";
 import { NightlyRunPanel } from "@/components/dashboard/nightly-run-panel";
-import { ChatView } from "@/components/dashboard/chat-view";
+import { RemoteSessionView } from "@/components/dashboard/remote-session-view";
 import { IdeasPanel } from "@/components/dashboard/ideas-panel";
 import { IosExtensionsPanel } from "@/components/dashboard/ios-extensions-panel";
 import type { IosFixIssueOrigin } from "@/components/dashboard/ios-release-group-panel";
@@ -263,7 +263,7 @@ export function IssueDeckShell({
     selectReleaseHistoryPane,
     selectNightlyRunPane,
     selectIdeasPane,
-    selectChatPane,
+    selectRemoteSessionsPane,
     selectIosExtensionsPane,
     selectPullRequest,
     selectPullRequestModal,
@@ -395,7 +395,7 @@ export function IssueDeckShell({
     selectPreview,
     selectNightlyRun,
     selectIdeas,
-    selectChat,
+    selectRemoteSessions,
     selectIosExtensions,
     selectRepository,
     selectRepositoryByFullName,
@@ -1554,15 +1554,10 @@ export function IssueDeckShell({
   };
   // 左メニュー「構想」の件数（#3639）
   const { count: ideasCount, refresh: refreshIdeasCount } = useIdeasCount();
-  // チャット（#3975）。会話に紐づける候補は見えているリポジトリ。番号だけの発言はこの既定を補う
-  const chatRepositoryNames = useMemo(
-    () => repositories.filter((repo) => !repo.hidden && !repo.archived).map((repo) => repo.fullName),
+  // リモートセッション（#4743）で起動先に並べるリポジトリ。一覧と同じく見えているものだけ
+  const remoteSessionRepositories = useMemo(
+    () => repositories.filter((repo) => !repo.hidden && !repo.archived),
     [repositories],
-  );
-  const chatDefaultRepo = filters.repos[0] ?? chatRepositoryNames[0] ?? null;
-  const openChatPullRequest = useCallback(
-    (repo: string, number: number) => openPullRequestUrl(buildPullRequestId(repo, number)),
-    [openPullRequestUrl],
   );
   /** 左メニューの件数。次の5時間枠に積んである予定の総数 */
   const nightlyRunQueuedCount = nightlyRun.state ? nightlyRun.state.nextWindow.queued.length : null;
@@ -2081,7 +2076,7 @@ export function IssueDeckShell({
                   previewRunning={previewRunning}
                   onSelectNightlyRun={selectNightlyRun}
                   onSelectIdeas={selectIdeas}
-                  onSelectChat={selectChat}
+                  onSelectRemoteSessions={selectRemoteSessions}
                   onSelectIosExtensions={selectIosExtensions}
                   nightlyRunQueuedCount={nightlyRunQueuedCount}
                   ideasCount={ideasCount}
@@ -2124,14 +2119,9 @@ export function IssueDeckShell({
                 />
               )}
 
-              {mobileScreen.kind === "chat" && (
+              {mobileScreen.kind === "remote-sessions" && (
                 <div className="h-full p-3">
-                  <ChatView
-                    onBack={goBack}
-                    repositories={chatRepositoryNames}
-                    defaultRepo={chatDefaultRepo}
-                    onOpenPullRequest={openChatPullRequest}
-                  />
+                  <RemoteSessionView onBack={goBack} repositories={remoteSessionRepositories} />
                 </div>
               )}
 
@@ -2415,12 +2405,12 @@ export function IssueDeckShell({
                 />
               )}
 
-              {/* チャット画面は下端に入力欄と送信ボタンがあり、右下のボタンが覆って押せなくなるため出さない（#4030） */}
-              {mobileScreen.kind !== "settings" && mobileScreen.kind !== "chat" && (
+              {/* リモートセッション画面は起動ボタンを下端のシートに出し、右下のボタンが覆うため出さない（#4030・#4743） */}
+              {mobileScreen.kind !== "settings" && mobileScreen.kind !== "remote-sessions" && (
                 <MobileScreenFab
                   raised={mobileFabRaised}
                   onCreateIssue={() => openCreateDialog(mobileFabRepositoryFullName)}
-                  onOpenChat={selectChat}
+                  onOpenRemoteSessions={selectRemoteSessions}
                   onAskCrossRepoQuestion={() =>
                     openCrossRepoQuestionDialog(mobileFabRepositoryFullName)
                   }
@@ -2458,7 +2448,7 @@ export function IssueDeckShell({
                 onSelectReleaseHistory={selectReleaseHistoryPane}
                 onSelectNightlyRun={selectNightlyRunPane}
                 onSelectIdeas={selectIdeasPane}
-                onSelectChat={selectChatPane}
+                onSelectRemoteSessions={selectRemoteSessionsPane}
                 onSelectIosExtensions={selectIosExtensionsPane}
                 nightlyRunQueuedCount={nightlyRunQueuedCount}
                   ideasCount={ideasCount}
@@ -2487,14 +2477,10 @@ export function IssueDeckShell({
             </>
           )}
 
-          {filters.pane === "chat" ? (
+          {filters.pane === "remote-sessions" ? (
             <div className="hidden flex-1 overflow-hidden p-4 md:block">
               <div className="mx-auto h-full max-w-6xl">
-                <ChatView
-                  repositories={chatRepositoryNames}
-                  defaultRepo={chatDefaultRepo}
-                  onOpenPullRequest={openChatPullRequest}
-                />
+                <RemoteSessionView repositories={remoteSessionRepositories} active={filters.pane === "remote-sessions"} />
               </div>
             </div>
           ) : filters.pane === "ios-extensions" ? (
