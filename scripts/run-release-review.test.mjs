@@ -22,25 +22,45 @@ const git = (...args) => execFileSync("git", args, { cwd: path.join(dir, "repo")
 
 const FAKE_CLAUDE = `#!/usr/bin/env bash
 p="$(cat)"
-# UNCONF: 全バッチを未確認にする／UNCONF_FILE: そのファイルを含むバッチだけを未確認にする。根拠はUNCONF_TEXT（既定は証跡待ち）
+# UNCONF: 全バッチを未確認にする／UNCONF_FILE: そのファイルを含むバッチ（と全ファイルを並べる相互作用の確認）だけを未確認にする。
+# 根拠はUNCONF_TEXT（既定は証跡待ち）。NA_FILE: そのファイルを含むバッチは非該当と報告する（#4768）
 checks() {
   local s="\${UNCONF:+unconfirmed}"
   [[ -n "\${UNCONF_FILE:-}" && "$2" == *"\${UNCONF_FILE}"* ]] && s=unconfirmed
-  jq -nc --arg e "$1" --arg s "$s" --arg u "\${UNCONF_TEXT:-統合検証の結果待ち}" '[${JSON.stringify(CHECK_IDS)}[] | {id: ., status: (if $s == "" then "confirmed" else "unconfirmed" end), evidence: (if $s == "" then $e else $u end)}]'
+  [[ -z "$s" && -n "\${NA_FILE:-}" && "$2" == *"\${NA_FILE}"* ]] && s=not_applicable
+  jq -nc --arg e "$1" --arg s "$s" --arg u "\${UNCONF_TEXT:-統合検証の結果待ち}" '[${JSON.stringify(CHECK_IDS)}[] | {id: ., status: (if $s == "" then "confirmed" else $s end), evidence: (if $s == "unconfirmed" then $u else $e end)}]'
 }
 if grep -q "バッチをまたぐ相互作用の確認" <<<"$p"; then
   [[ -n "\${FAIL_INT:-}" ]] && exit 3
   [[ -n "\${INT_LOG:-}" ]] && echo call >>"$INT_LOG"
+  c="$(checks 統合で確認 "$p")"
+  # INT_OMIT: 相互作用の確認が確認項目を報告しない／INT_CONFIRM: バッチの結果にかかわらず確認済みと報告する
+  [[ -n "\${INT_OMIT:-}" ]] && c='[]'
+  [[ -n "\${INT_CONFIRM:-}" ]] && c="$(UNCONF= UNCONF_FILE= checks 統合で確認)"
   echo '\`\`\`json'
-  jq -nc --argjson c "$(checks 統合で確認)" '{state: "passed", summary: "統合", checklistVersion: 1, checks: $c, fileReviews: []}'
+  jq -nc --argjson c "$c" '{state: "passed", summary: "統合", checklistVersion: 1, checks: $c, fileReviews: []}'
+  echo '\`\`\`'
+  exit 0
+fi
+# 実績の補完（#4768）。聞き直されたファイルを根拠つきで確認済みと報告する（SUP_FAILなら失敗）
+if grep -q "ファイル別の確認実績の補完です" <<<"$p"; then
+  [[ -n "\${SUP_LOG:-}" ]] && echo call >>"$SUP_LOG"
+  [[ -n "\${SUP_FAIL:-}" ]] && exit 3
+  files="$(sed -n '/取りこぼした断片だけ）:/,/^$/p' <<<"$p" | grep -E '^- ' | sed -E 's/^- //')"
+  echo '\`\`\`json'
+  jq -nc --argjson f "$(printf '%s\\n' $files | jq -Rsc 'split("\\n") | map(select(. != ""))')" \\
+    '{state: "passed", summary: "補完", checklistVersion: 1, checks: [], fileReviews: ($f | map({file: ("/" + .), status: "reviewed", evidence: "補完で読んだ"})), findings: []}'
   echo '\`\`\`'
   exit 0
 fi
 [[ -n "\${CALL_LOG:-}" ]] && echo call >>"$CALL_LOG"
 files="$(sed -n '/次のファイルの差分をこのバッチへ載せました/,/^$/p' <<<"$p" | grep -E '^- ' | sed -E 's/^- //; s/（分割.*//')"
+# OMIT_FILE: そのファイルの実績を報告しない／EMPTY_EV_FILE: 根拠を空で報告する／DOT_PATHS: パスを「./」付きで報告する
 echo '\`\`\`json'
 jq -nc --argjson c "$(checks バッチで確認 "$files")" --argjson f "$(printf '%s\\n' $files | jq -Rsc 'split("\\n") | map(select(. != ""))')" \\
-  '{state: "passed", summary: "batch", checklistVersion: 1, checks: $c, fileReviews: ($f | map({file: ., status: "reviewed", evidence: "読んだ"}))}'
+  --arg omit "\${OMIT_FILE:-}" --arg empty "\${EMPTY_EV_FILE:-}" --arg dot "\${DOT_PATHS:-}" \\
+  '{state: "passed", summary: "batch", checklistVersion: 1, checks: $c,
+    fileReviews: ($f | map(select(. != $omit) | {file: ((if $dot == "" then "" else "./" end) + .), status: "reviewed", evidence: (if . == $empty then "" else "読んだ" end)}))}'
 echo '\`\`\`'
 `;
 
@@ -212,6 +232,75 @@ describe("run-release-review.sh（#4615）", { timeout: 30_000 }, () => {
     runReview(env);
     expect(readFileSync(calls, "utf8").trim().split("\n").length).toBe(before);
   });
+  describe("実績の取りこぼしの補完と項目の集計（#4768）", () => {
+    const lines = (file) => (existsSync(file) ? readFileSync(file, "utf8").trim().split("\n").filter(Boolean).length : 0);
+    const reviewed = (result) => result.fileReviews.filter((r) => r.status === "reviewed").map((r) => r.file);
+
+    it("「./」付きのパスで報告されても、差分のパスへ揃えて確認済みに数える（補完は呼ばない）", () => {
+      const sup = path.join(dir, "sup");
+      const { status, result } = runReview({ DOT_PATHS: "1", SUP_LOG: sup });
+      expect(status).toBe("succeeded");
+      expect(reviewed(result)).toHaveLength(13);
+      expect(lines(sup)).toBe(0);
+      expect(result.supplementedFiles).toBe(0);
+    });
+
+    it("報告の無いファイル・根拠が空のファイルだけを1回だけ聞き直し、補完で確認済みにする。同じ対象の再実行では聞き直さない", () => {
+      const sup = path.join(dir, "sup");
+      const env = { OMIT_FILE: "file3.txt", EMPTY_EV_FILE: "file4.txt", SUP_LOG: sup };
+      const first = runReview(env);
+      expect(first.status).toBe("succeeded");
+      expect(lines(sup)).toBe(1);
+      expect(reviewed(first.result)).toHaveLength(13);
+      expect(first.result.fileReviews.find((r) => r.file === "file3.txt").evidence).toContain("補完で確認");
+      expect(first.result.supplementedFiles).toBe(2);
+
+      const rerun = runReview(env);
+      expect(lines(sup)).toBe(1);
+      expect(reviewed(rerun.result)).toHaveLength(13);
+    });
+
+    it("補完が失敗しても全体レビューは完走し、取りこぼしたファイルだけを未確認に残す", () => {
+      const sup = path.join(dir, "sup");
+      const { status, result } = runReview({ OMIT_FILE: "file3.txt", SUP_FAIL: "1", SUP_LOG: sup });
+      expect(status).toBe("succeeded");
+      expect(lines(sup)).toBe(1);
+      expect(reviewed(result)).toHaveLength(12);
+      expect(reviewed(result)).not.toContain("file3.txt");
+    });
+
+    it("差分の上限・件数の上限に入らないファイルは聞き直さず、未確認に残す", () => {
+      const sup = path.join(dir, "sup");
+      // 巨大ファイルの全断片は1回の補完の上限（差分の予算）を超える
+      const huge = runReview({ OMIT_FILE: "huge.txt", SUP_LOG: sup });
+      expect(lines(sup)).toBe(0);
+      expect(reviewed(huge.result)).not.toContain("huge.txt");
+      rmSync(path.join(dir, "work"), { recursive: true, force: true });
+      mkdirSync(path.join(dir, "work"));
+      const capped = runReview({ OMIT_FILE: "file3.txt", SUP_LOG: sup, ISSUE_DECK_RELEASE_REVIEW_SUPPLEMENT_MAX_FILES: "0" });
+      expect(lines(sup)).toBe(0);
+      expect(reviewed(capped.result)).not.toContain("file3.txt");
+    });
+
+    it("相互作用の確認が根拠つきで報告した項目は、バッチの未確認より優先する", () => {
+      const { result } = runReview({ UNCONF_FILE: "file5.txt", INT_CONFIRM: "1" });
+      expect(result.checks.every((c) => c.status === "confirmed")).toBe(true);
+      expect(result.checks[0].evidence).toContain("[相互作用の確認]");
+    });
+
+    it("相互作用の確認が報告しない項目は、バッチごとの非該当と確認済みの混在を確認済みとして扱う", () => {
+      const { result } = runReview({ NA_FILE: "file5.txt", INT_OMIT: "1" });
+      expect(result.checks).toHaveLength(6);
+      expect(result.checks.every((c) => c.status === "confirmed")).toBe(true);
+    });
+
+    it("相互作用の確認が報告せず、未確認と報告したバッチがあれば、そのバッチを示して未確認にする", () => {
+      const { result } = runReview({ UNCONF_FILE: "file5.txt", INT_OMIT: "1" });
+      expect(result.checks.every((c) => c.status === "unconfirmed")).toBe(true);
+      expect(result.checks[0].evidence).toMatch(/^バッチ\d+: 統合検証の結果待ち$/);
+    });
+  });
+
   describe("完走後の再利用（#4767）", () => {
     const evidenceFile = () => path.join(dir, "evidence", `o_r-7-${base.slice(0, 12)}-${head.slice(0, 12)}.json`);
     const writeEvidence = (state, finishedAt) =>

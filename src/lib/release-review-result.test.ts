@@ -4,6 +4,7 @@ import { RELEASE_REVIEW_CHECKLIST_VERSION, RELEASE_REVIEW_CHECK_ITEMS } from "./
 import {
   decideFindingBlocking,
   normalizeReleaseReview,
+  normalizeReviewPath,
   reviewFindingId,
   type FindingBlockingInput,
   type ReleaseReviewNormalizeContext,
@@ -74,6 +75,28 @@ describe("normalizeReleaseReview", () => {
   });
 
   describe("確認実績（#4615）", () => {
+    it("パスは揃えてから照合する（「./」・先頭の「/」・区切りの揺れだけで未確認にしない。#4768）", () => {
+      expect(normalizeReviewPath("./src/a.ts")).toBe("src/a.ts");
+      expect(normalizeReviewPath("/src/a.ts")).toBe("src/a.ts");
+      expect(normalizeReviewPath("src\\lib\\a.ts")).toBe("src/lib/a.ts");
+      expect(normalizeReviewPath(" src//lib/./a.ts ")).toBe("src/lib/a.ts");
+      const r = normalizeReleaseReview(
+        fullChecks({
+          totalFiles: 3,
+          targetFiles: ["./src/f0.ts", "src/f1.ts", "src/f2.ts"],
+          inputFiles: 3,
+          fileReviews: [
+            { file: "src/f0.ts", status: "reviewed", evidence: "読んだ" },
+            { file: "./src/f1.ts", status: "reviewed", evidence: "読んだ" },
+            { file: "/src\\f2.ts", status: "reviewed", evidence: "読んだ" },
+          ],
+          supplementedFiles: 1,
+        }),
+      );
+      expect(r?.detail.coverage).toMatchObject({ reviewed: 3, unreviewed: 0, supplementedFiles: 1 });
+      expect(r?.unverifiedScope).toBeNull();
+    });
+
     it("入力へ載せた件数（reviewedFiles）を申告しても、確認実績にはならない（113/120の再発防止）", () => {
       const r = normalizeReleaseReview(
         fullChecks({ totalFiles: 120, reviewedFiles: 113, inputFiles: 113, targetFiles: names(120), fileReviews: [] }),
