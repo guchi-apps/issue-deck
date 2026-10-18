@@ -38,6 +38,7 @@ function table(store: () => Row[]) {
       return found[found.length - 1] ?? null;
     }),
     findMany: vi.fn(async ({ where }: { where: Record<string, unknown> }) => store().filter((row) => matches(row, where)).map((row) => ({ ...row }))),
+    count: vi.fn(async ({ where }: { where: Record<string, unknown> }) => store().filter((row) => matches(row, where)).length),
     update: vi.fn(async ({ where, data }: { where: Record<string, unknown>; data: Record<string, unknown> }) => {
       const row = store().find((item) => matches(item, where));
       if (!row) throw new Error("row not found");
@@ -119,9 +120,11 @@ const recordDeployLaunchWatch = vi.fn(async () => true);
 vi.mock("@/lib/github/deploy-launch-watch", () => ({ recordDeployLaunchWatch: (...args: unknown[]) => recordDeployLaunchWatch(...(args as [])) }));
 const createComment = vi.fn(async () => ({}));
 const addIssueLabels = vi.fn(async () => []);
+const removeIssueLabel = vi.fn(async () => []);
 vi.mock("@/lib/github/issues-api", () => ({
   createComment: (...args: unknown[]) => createComment(...(args as [])),
   addIssueLabels: (...args: unknown[]) => addIssueLabels(...(args as [])),
+  removeIssueLabel: (...args: unknown[]) => removeIssueLabel(...(args as [])),
 }));
 const enqueueDispatchJob = vi.fn();
 vi.mock("@/lib/dispatch/jobs", () => ({ enqueueDispatchJob: (...args: unknown[]) => enqueueDispatchJob(...args) }));
@@ -372,6 +375,35 @@ describe("runReleaseCompletionSweep", () => {
     hasVersionVerification.mockResolvedValue(true);
     await runReleaseCompletionSweep({ hostName: "subpc", now: later(2) });
     expect(runs[0]).toMatchObject({ status: "completed", activeKey: null });
+  });
+
+  describe("完了時の確認待ちラベルの除去（#4747）", () => {
+    const success = { id: 5, htmlUrl: "u5", createdAt: now.toISOString(), headSha: "merge1", status: "completed", conclusion: "success", attempt: 1 };
+    function seedReleasing() {
+      fixSeries.push({ id: "s1", repositoryFullName: "o/r", releasePrNumber: 10, successorPrNumber: null, status: "issue_created", issueNumber: 100, createdAt: now });
+      Object.assign(runs[0], { status: "releasing", mergeSha: "merge1", releaseStartedAt: now });
+      fetchDeployRunsForSha.mockResolvedValue([success]);
+      hasVersionVerification.mockResolvedValue(true);
+    }
+
+    it("同じ候補で以前に止まった系列があれば、完了時に修正Issueから2つのラベルを外す", async () => {
+      await start();
+      seedReleasing();
+      runs.push({ ...runs[0], id: "old", status: "needs_attention", activeKey: null, stopReason: "approval_invalidated" });
+      await runReleaseCompletionSweep({ hostName: "subpc", now: later(1) });
+      expect(runs[0].status).toBe("completed");
+      expect(removeIssueLabel).toHaveBeenCalledTimes(2);
+      expect(removeIssueLabel).toHaveBeenCalledWith("o", "r", 100, "token", "00.check-user");
+      expect(removeIssueLabel).toHaveBeenCalledWith("o", "r", 100, "token", "01.check-blocked");
+    });
+
+    it("止まらずに完了した系列はラベルに触れない", async () => {
+      await start();
+      seedReleasing();
+      await runReleaseCompletionSweep({ hostName: "subpc", now: later(1) });
+      expect(runs[0].status).toBe("completed");
+      expect(removeIssueLabel).not.toHaveBeenCalled();
+    });
   });
 
   it("deployが再実行も失敗したら、同じ系列のまま本番復旧へ引き継ぎ、その復旧で完了する", async () => {
