@@ -98,7 +98,7 @@ const enqueueDispatchJob = vi.fn();
 vi.mock("@/lib/dispatch/jobs", () => ({ enqueueDispatchJob: (...a: unknown[]) => enqueueDispatchJob(...a) }));
 
 import { buildReleaseFixSourceKey, reviewFindingKey } from "@/lib/release-fix-series";
-import { runReleaseFixSweep } from "@/lib/release-fix-series-run";
+import { closeFixSeriesForCancelledCandidate, runReleaseFixSweep } from "@/lib/release-fix-series-run";
 import { summarizeReleaseReviewDecisions } from "@/lib/release-review-decision";
 import { reviewFindingId } from "@/lib/release-review-result";
 
@@ -377,5 +377,32 @@ describe("指摘ごとのユーザー判断（#4657）", () => {
     await runReleaseFixSweep({});
     expect(state.rows[0]).toMatchObject({ status: "stopped", activeKey: null });
     expect(String(state.rows[0].stopReason)).toContain("実行中のセッションは止まらず");
+  });
+});
+
+describe("候補の取り消しで修正系列を畳む（#4800）", () => {
+  const close = (prNumbers: number[]) => closeFixSeriesForCancelledCandidate({ repositoryFullName: "o/r", prNumbers, candidateLabel: "RC-9" });
+
+  it("止まった系列を終端にし、確認待ちの札を外してコメントを残す。巡回しても復活しない", async () => {
+    state.rows = [baseRow({ status: "stopped", activeKey: null, stopReason: "起案できる指摘が読み取れません", successorPrNumber: 11 })];
+    expect(await close([11])).toBe(1);
+    expect(state.rows[0]).toMatchObject({ status: "superseded", activeKey: null });
+    expect(String(state.rows[0].stopReason)).toContain("RC-9");
+    expect(removeLabels).toHaveBeenCalledWith("o", "r", 100, "t");
+    expect(String((createComment.mock.calls.at(-1) as unknown[])[4] && ((createComment.mock.calls.at(-1) as unknown[])[4] as { body: string }).body)).toContain("取り消したため");
+    await runReleaseFixSweep({ hostName: "subpc" });
+    expect(state.rows).toHaveLength(1);
+    expect(state.rows[0].status).toBe("superseded");
+  });
+
+  it("進行中の系列も畳むが、札は止まった系列だけ外す。別の候補の系列・終端の系列には触れない", async () => {
+    state.rows = [
+      baseRow({ id: "a", status: "reverifying" }),
+      baseRow({ id: "b", releasePrNumber: 50, successorPrNumber: null, status: "stopped" }),
+      baseRow({ id: "c", status: "ready" }),
+    ];
+    expect(await close([10])).toBe(1);
+    expect(state.rows.map((r) => r.status)).toEqual(["superseded", "stopped", "ready"]);
+    expect(removeLabels).not.toHaveBeenCalled();
   });
 });
