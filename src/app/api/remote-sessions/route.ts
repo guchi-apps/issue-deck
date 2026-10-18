@@ -6,6 +6,7 @@ import {
   enqueueRemoteSessionKill,
   listRemoteSessions,
 } from "@/lib/dispatch/remote-session";
+import { findRepositoryByFullName } from "@/lib/github/issue-create-service";
 import { parseRepositoryFullName } from "@/lib/local-session";
 import { previewModeGuard } from "@/lib/preview-mode";
 
@@ -23,7 +24,7 @@ const NO_STORE = { "Cache-Control": "no-store" };
 export async function GET() {
   const userId = await requireUserId();
   if (!userId) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-  const state = await listRemoteSessions();
+  const state = await listRemoteSessions(userId);
   return NextResponse.json(state, { headers: NO_STORE });
 }
 
@@ -41,8 +42,14 @@ export async function POST(request: NextRequest) {
       : null;
   if (!repository) return NextResponse.json({ error: "invalid_request" }, { status: 400 });
 
+  const fullName = `${repository.owner}/${repository.repo}`;
+  // 利用者がインストール連携しているリポジトリだけを起動できる
+  if (!(await findRepositoryByFullName(userId, fullName))) {
+    return NextResponse.json({ error: "forbidden" }, { status: 403, headers: NO_STORE });
+  }
+
   const result = await enqueueRemoteSession({
-    repositoryFullName: `${repository.owner}/${repository.repo}`,
+    repositoryFullName: fullName,
     requestedByUserId: userId,
   });
   if (!result.ok) {
