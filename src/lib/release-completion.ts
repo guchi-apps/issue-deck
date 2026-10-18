@@ -262,10 +262,19 @@ export function decideReleaseCompletion(
   }
 
   const series = observation.series;
+  // 修正系列の後継が、その後の公開準備のバンプで置き換わり、系列はもうバンプ後のheadを追っている（#4729）。
+  // 系列の記録はバンプ前のrevisionのまま残るので、これを後継として戻すと上の分岐と巡回ごとに往復する
+  const successorBumped =
+    finalized !== null &&
+    series !== null &&
+    series.successorPrNumber === run.candidatePrNumber &&
+    series.successorHeadSha === finalized.preHeadSha &&
+    run.candidateHeadSha === finalized.finalHeadSha;
   // 修正系列が作り直した後継へ進む。作り直しで元の候補は閉じられるので、取消の判定より先に見る
   // 新方式の候補（#4495）は同じPRのrevisionが進むので、番号が同じでもheadが違えば後継として追う
   if (
     series &&
+    !successorBumped &&
     series.successorPrNumber !== null &&
     series.successorHeadSha &&
     series.successorBaseSha &&
