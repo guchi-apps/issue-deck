@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import type { ManualStepReadinessMap } from "@/lib/manual-step-attention";
 import { EMPTY_HEALTH_COUNTS } from "@/lib/pull-request-health";
 import {
   buildBranchFlow,
@@ -11,6 +12,7 @@ import {
   isDevelopContentInMain,
   latestReleaseMergedAtByRepository,
   orderRepositoriesBySelection,
+  resolveIssueTracking,
   unreleasedSummary,
   type BranchFlowIssueSource,
 } from "@/lib/branch-flow";
@@ -109,6 +111,7 @@ function build(input: {
   issues?: BranchFlowIssueSource[];
   branchStatuses?: RepositoryBranchStatus[];
   deployStatuses?: RepositoryDeployStatus[];
+  prerequisiteReadiness?: ManualStepReadinessMap;
   now?: number;
 }) {
   return buildBranchFlow({
@@ -117,6 +120,7 @@ function build(input: {
     issues: input.issues ?? [],
     branchStatuses: input.branchStatuses ?? [],
     deployStatuses: input.deployStatuses,
+    prerequisiteReadiness: input.prerequisiteReadiness,
     now: input.now,
   });
 }
@@ -1145,7 +1149,12 @@ describe("手作業Issueの紐づけ", () => {
     const [lane] = allLanes(repository);
     expect(lane.issue?.number).toBe(137);
     expect(lane.manualSteps).toEqual([
-      { number: 184, title: "[手作業] VPS: リダイレクトを外す", state: "open" },
+      {
+        number: 184,
+        title: "[手作業] VPS: リダイレクトを外す",
+        state: "open",
+        tracking: { waitKind: null, blocking: [], timing: "post-release" },
+      },
     ]);
   });
 
@@ -2521,5 +2530,80 @@ describe("リリースPR凍結後の変更の有無（hasChangesAfterReleaseFree
     );
     expect(afterFreeze).toEqual([]);
     expect(included).toHaveLength(1);
+  });
+});
+
+describe("リリース画面の追跡情報（#4748）", () => {
+  const blocking = [
+    {
+      repositoryFullName: REPO,
+      number: 4748,
+      origin: false,
+      explicit: true,
+      kind: "issue" as const,
+      title: null,
+      htmlUrl: null,
+      stage: "in-progress" as const,
+      label: "実装中",
+      satisfied: false,
+      stepIndex: 0 as const,
+      manualStep: false,
+    },
+  ];
+  const readiness = (ids: string[]): ManualStepReadinessMap =>
+    new Map(ids.map((id) => [id, { ready: false, blocking, message: "" }]));
+
+  it("前提が残っていれば依存待ち、00.check-userが付けば本人の操作待ちを優先する", () => {
+    const waiting = issue({ id: "a" });
+    expect(
+      resolveIssueTracking({ issue: waiting, readiness: readiness(["a"]), releaseState: null }),
+    ).toEqual({
+      waitKind: "dependency_wait",
+      blocking: [{ reference: "#4748", label: "実装中" }],
+      timing: "pre-release",
+    });
+    const user = issue({ id: "a", labels: ["00.check-user"] });
+    expect(
+      resolveIssueTracking({ issue: user, readiness: readiness(["a"]), releaseState: null })?.waitKind,
+    ).toBe("user_action");
+  });
+
+  it("手作業はリリース後、本番へ届いた作業はリリース前と言わない", () => {
+    expect(
+      resolveIssueTracking({ issue: issue({ labels: ["71.manual-step"] }), releaseState: { kind: "pending" } })
+        ?.timing,
+    ).toBe("post-release");
+    expect(
+      resolveIssueTracking({
+        issue: issue(),
+        releaseState: { kind: "released", version: "1.0.0", pullRequestNumber: 9 },
+      }),
+    ).toBeNull();
+  });
+
+  it("closedのIssueは何も言わない", () => {
+    expect(
+      resolveIssueTracking({ issue: issue({ id: "a", state: "closed" }), readiness: readiness(["a"]), releaseState: null }),
+    ).toBeNull();
+  });
+
+  it("main反映済みでも対応Issueがopenなら、レーンに未完了の残りを持つ", () => {
+    const flow = build({
+      issues: [issue({ number: 100 })],
+      pullRequests: [
+        pullRequest({
+          number: 5,
+          headRef: "issue-100",
+          linkedIssueNumber: 100,
+          state: "closed",
+          merged: true,
+          mergedAt: "2026-08-15T00:30:00Z",
+          baseRef: "main",
+        }),
+      ],
+      branchStatuses: [branchStatus()],
+    });
+    const [lane] = allLanes(flow.repositories[0]);
+    expect(lane.featureIncomplete).toEqual(["Issue #100（本番での確認などが残っています）"]);
   });
 });

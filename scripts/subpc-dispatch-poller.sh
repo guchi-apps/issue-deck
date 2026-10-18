@@ -181,7 +181,9 @@ set -euo pipefail
 # 38: 追加指示の`stashInput`を読み、入力欄の未送信入力を完全に取得・保存できたときだけ消して
 #     今回の指示を送る（#4383）。37以前は未送信入力があれば従来どおり見送る。
 # 39: 未送信入力の退避対応をstashInputとして明示申告する（#4408）。
-DISPATCH_POLLER_VERSION="39"
+# 40: Issueに紐づかないリモートセッション（`REMOTE_SESSION`・`REMOTE_SESSION_KILL`）を受け取り、
+#     `start-remote-session.sh`で起動・終了する。生きているものはホスト申告の`remoteSessions`で送る（#4743）。
+DISPATCH_POLLER_VERSION="40"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -267,6 +269,13 @@ QUESTION_LAUNCHER="$SCRIPT_DIR/start-cross-repo-question.sh"
 # 手作業Issueを対話しながら実施するセッション（#2771）。**代行実行（`MANUAL_STEP`）とは別**で、
 # worktreeを作らずにtmuxセッションを1本立て、本文の手順を止まるところまで流す（#2830）。
 MANUAL_STEP_SESSION_LAUNCHER="$SCRIPT_DIR/start-manual-step-session.sh"
+# リモートセッション（#4743）。Issueに紐づかず、リポジトリだけで`claude --remote-control`を立てる
+REMOTE_SESSION_LAUNCHER="$SCRIPT_DIR/start-remote-session.sh"
+# 1ホストで同時に動かせるリモートセッションの本数。issue-deckの`REMOTE_SESSION_MAX_PER_HOST`と揃える。
+# Issueの実装枠（`DISPATCH_MAX_SESSIONS`）とは別に数える（セッション名が`-issue-`の規約から外れるため）
+REMOTE_SESSION_MAX="${ISSUE_DECK_REMOTE_SESSION_MAX:-3}"
+# 起動してからRemote ControlのURLが`~/.claude/sessions/<pid>.json`に出るまで待つ秒数
+REMOTE_SESSION_URL_WAIT_SECONDS="${ISSUE_DECK_REMOTE_SESSION_URL_WAIT:-90}"
 # 手作業の代行実行（#1828）。**pollerとは別のcgroupで走らせる**（poller自身を再起動する手順が
 # あるため。理由はスクリプト冒頭のコメントを参照）。
 MANUAL_STEP_RUNNER="$SCRIPT_DIR/run-manual-step.sh"
@@ -762,6 +771,34 @@ manual_step_session_capable() {
   else
     printf 'false'
   fi
+}
+
+# リモートセッション（#4743）を起こせるか。ランチャーと`claude`が揃っているときだけ申告する
+# （`--remote-control`への対応はランチャーが起動時に確かめ、理由を付けて`failed`で返す）
+remote_session_capable() {
+  if [[ -f "$REMOTE_SESSION_LAUNCHER" ]] && command -v claude >/dev/null 2>&1; then
+    printf 'true'
+  else
+    printf 'false'
+  fi
+}
+
+# 生きているリモートセッションの一覧（#4743）。ホスト申告の`remoteSessions`に載せ、issue-deckが
+# `RemoteSession`の生存とURLを突き合わせる。**死んだペインだけのセッションは数えない**
+remote_session_list_json() {
+  local name dead url entries=()
+  while IFS=$'\t' read -r name dead; do
+    [[ "$name" =~ ^[A-Za-z0-9_-]+-remote-[a-z0-9]{8}$ ]] || continue
+    [[ "$dead" == "1" ]] && continue
+    url="$(session_transcript_remote_control_url "$name" 2>/dev/null || true)"
+    entries+=("$(jq -cn --arg n "$name" --arg u "$url" \
+      '{tmuxSessionName: $n} + (if $u == "" then {} else {remoteControlUrl: $u} end)')")
+  done < <(tmux list-panes -a -F $'#{session_name}\t#{pane_dead}' 2>/dev/null || true)
+  printf '%s\n' "${entries[@]+"${entries[@]}"}" | jq -cs 'unique_by(.tmuxSessionName)'
+}
+
+count_remote_sessions() {
+  remote_session_list_json | jq 'length'
 }
 
 # 手作業の代行実行（#1828）を実行できるか。**実行スクリプトと、実行前の照合に使う`gh`が
@@ -1412,6 +1449,8 @@ announce() {
     --argjson manualStepValues "$(manual_step_values_capable)" \
     --argjson manualStepVps "$MANUAL_STEP_VPS_CAPABLE" \
     --argjson manualStepSession "$(manual_step_session_capable)" \
+    --argjson remoteSession "$(remote_session_capable)" \
+    --argjson remoteSessions "$(remote_session_list_json)" \
     --argjson planReview "$(plan_review_capable)" \
     --argjson planReviewAgent true \
     --argjson codeReview "$(code_review_capable)" \
@@ -1432,7 +1471,7 @@ announce() {
     --argjson launchHold "${LAUNCH_HOLD_JSON:-null}" \
     --argjson checkout "${checkout:-null}" \
     --argjson planReviewSessions "$plan_review_sessions" \
-    '{host: $host, repositories: $repositories, contractVersion: $contractVersion, agentVersion: $agentVersion, sessionControl: true, instruction: true, stashInput: true, crossRepoQuestion: $crossRepoQuestion, manualStep: $manualStep, manualStepAbort: $manualStepAbort, manualStepValues: $manualStepValues, manualStepVps: $manualStepVps, manualStepSession: $manualStepSession, planReview: $planReview, planReviewAgent: $planReviewAgent, codeReview: $codeReview, prReview: $prReview, releaseVerifyRedact: $releaseVerify, releaseReviewRedact: $releaseReview, chatCodex: $chatCodex, reviewFix: $reviewFix, codex: $codex, codexRemoteControl: $codexRemoteControl, selfUpdate: $selfUpdate, reboot: $reboot, rebootState: $rebootState, preview: $preview, previewState: $previewState, previewRepositories: $previewRepositories, maxSessions: $maxSessions, liveSessions: $liveSessions, metrics: $metrics, launchHold: $launchHold, checkout: $checkout, planReviewSessions: $planReviewSessions}')"
+    '{host: $host, repositories: $repositories, contractVersion: $contractVersion, agentVersion: $agentVersion, sessionControl: true, instruction: true, stashInput: true, crossRepoQuestion: $crossRepoQuestion, manualStep: $manualStep, manualStepAbort: $manualStepAbort, manualStepValues: $manualStepValues, manualStepVps: $manualStepVps, manualStepSession: $manualStepSession, planReview: $planReview, planReviewAgent: $planReviewAgent, codeReview: $codeReview, prReview: $prReview, releaseVerifyRedact: $releaseVerify, releaseReviewRedact: $releaseReview, chatCodex: $chatCodex, reviewFix: $reviewFix, codex: $codex, codexRemoteControl: $codexRemoteControl, selfUpdate: $selfUpdate, reboot: $reboot, rebootState: $rebootState, preview: $preview, previewState: $previewState, previewRepositories: $previewRepositories, maxSessions: $maxSessions, liveSessions: $liveSessions, metrics: $metrics, launchHold: $launchHold, checkout: $checkout, planReviewSessions: $planReviewSessions, remoteSession: $remoteSession, remoteSessions: $remoteSessions}')"
 
   if ! api_call POST /api/dispatch/hosts "$payload"; then
     report_api_failure "ホストの申告に失敗しました"
@@ -4094,6 +4133,14 @@ run_job() {
     return 0
   fi
 
+  # リモートセッション（#4743）。**Issueに紐づかない**（issueNumberは埋め草の0）ため、
+  # `local_session_validate_target`より手前に置く。tmux名はissue-deckが決めて`tmuxSessionName`で渡す
+  if [[ "$kind" == "REMOTE_SESSION" || "$kind" == "REMOTE_SESSION_KILL" ]]; then
+    run_remote_session_job "$job_id" "$kind" "$owner" "$repo" \
+      "$(printf '%s' "$job_json" | jq -r '.tmuxSessionName // ""')" "$claude_local_model"
+    return 0
+  fi
+
   # Codexのペアリングコード（#2524）。**`REBOOT`と同じくIssueに紐づかない**ため、
   # `local_session_validate_target`（Issue番号に`^[1-9][0-9]*$`を求める）より手前に置く。
   if [[ "$kind" == "CODEX_PAIRING" ]]; then
@@ -4415,6 +4462,82 @@ prepare_handoff_launch() {
 #
 #   $1 ジョブID / $2 期待するtmuxセッション名 / $3 `running`として画面へ出す文言
 #   $4以降 実行するコマンド
+# リモートセッション（#4743）の起動・終了。**起動はURLが取れるまで待ってから成功を返す**
+# （画面はURLが届いた時点でClaude Codeアプリへ移動する）。取れなくても起動自体は成功として返し、
+# URLは次巡以降のホスト申告（`remoteSessions`）で届ける。
+run_remote_session_job() {
+  local job_id="$1" kind="$2" owner="$3" repo="$4" session="$5" model="$6"
+
+  if [[ ! -f "$REMOTE_SESSION_LAUNCHER" ]]; then
+    report_job "$job_id" failed "リモートセッションのランチャーがありません（$REMOTE_SESSION_LAUNCHER）。"
+    return 0
+  fi
+  if [[ ! "$session" =~ ^[A-Za-z0-9_-]+-remote-[a-z0-9]{8}$ ]] || ! local_session_validate_target "$owner" "$repo" 1 2>/dev/null; then
+    report_job "$job_id" failed "受け取ったリポジトリ・セッション名が不正です: $owner/$repo $session"
+    return 0
+  fi
+  if [[ "$DRY_RUN" -eq 1 ]]; then
+    echo "  --dry-run のため実行しません（$kind $session）"
+    return 0
+  fi
+
+  local output status
+  if [[ "$kind" == "REMOTE_SESSION_KILL" ]]; then
+    report_job "$job_id" running "リモートセッションを終了しています"
+    set +e
+    output="$(timeout 120 bash "$REMOTE_SESSION_LAUNCHER" --kill "$owner" "$repo" "$session" </dev/null 2>&1)"
+    status=$?
+    set -e
+    if [[ "$status" -eq 0 ]]; then
+      report_job "$job_id" succeeded "$(printf '%s' "$output" | tail -c 1500)" "$session"
+    else
+      report_job "$job_id" failed "終了できませんでした（終了コード $status）: $(printf '%s' "$output" | tail -c 1500)" "$session"
+    fi
+    return 0
+  fi
+
+  if (( $(count_remote_sessions) >= REMOTE_SESSION_MAX )); then
+    report_job "$job_id" failed "同時に動かせるリモートセッションは${REMOTE_SESSION_MAX}本までです。使っていないセッションを終了してください。"
+    return 0
+  fi
+
+  ensure_tmux_server_scope
+  report_job "$job_id" running "リモートセッションを起動しています"
+  local -a launch_env=(env)
+  if [[ -n "$model" && "$model" != "auto" ]]; then
+    launch_env+=("ISSUE_DECK_CLAUDE_MODEL=$model")
+  fi
+  set +e
+  output="$("${launch_env[@]}" timeout "$LAUNCH_TIMEOUT" bash "$REMOTE_SESSION_LAUNCHER" "$owner" "$repo" "$session" </dev/null 2>&1)"
+  status=$?
+  set -e
+  if [[ "$status" -ne 0 ]] || ! tmux has-session -t "=$session" 2>/dev/null; then
+    report_job "$job_id" failed "起動できませんでした（終了コード $status）: $(printf '%s' "$output" | tail -c 1500)"
+    return 0
+  fi
+
+  local url="" waited=0
+  while (( waited < REMOTE_SESSION_URL_WAIT_SECONDS )); do
+    url="$(session_transcript_remote_control_url "$session" 2>/dev/null || true)"
+    [[ -n "$url" ]] && break
+    # 起動直後にClaude Codeが落ちた（未ログイン・設定の誤りなど）。最後の出力を理由として返す
+    if ! tmux has-session -t "=$session" 2>/dev/null; then
+      report_job "$job_id" failed "Claude Codeが起動直後に終了しました。サブPCで claude を一度起動して状態を確認してください。"
+      return 0
+    fi
+    sleep 3
+    waited=$((waited + 3))
+  done
+
+  local extra=""
+  if [[ -n "$url" ]]; then
+    extra="$(jq -cn --arg u "$url" '{remoteControlUrl: $u}')"
+    report_job "$job_id" succeeded "リモートセッション $session を起動しました" "$session" "$extra"
+  else
+    report_job "$job_id" succeeded "リモートセッション $session を起動しました（URLはまだ取れていません）" "$session"
+  fi
+}
+
 launch_and_report() {
   local job_id="$1" expected_session="$2" running_message="$3"
   shift 3
@@ -4513,6 +4636,12 @@ run_once() {
   # セッションのworktreeを、同じ巡でそのまま消せる（セッションが動いている間は消えない）。
   # 毎巡ではなく WORKTREE_CLEANUP_INTERVAL_MINUTES の間隔でだけ実際に走る。
   reap_worktrees
+
+  # リモートセッション（#4743）のうち、tmuxが無くなったもののworktreeを片付ける。作業が残って
+  # いるものは消さない（判定はランチャー）。数本しか無いので毎巡でよい
+  if [[ -f "$REMOTE_SESSION_LAUNCHER" && "$DRY_RUN" -ne 1 ]]; then
+    timeout 120 bash "$REMOTE_SESSION_LAUNCHER" --sweep </dev/null || true
+  fi
 
   # 掃除で消えなかったworktreeの`node_modules`をハードリンクへまとめる（#2124）。
   # **掃除の後に行う。** 消えるworktreeを走査しても無駄になる。既定は1日1回で、

@@ -14,7 +14,7 @@ describe("MobileScreenFab", () => {
       <MobileScreenFab
         onCreateIssue={onCreateIssue}
         onAskCrossRepoQuestion={onAskCrossRepoQuestion}
-        onOpenChat={() => {}}
+        onOpenRemoteSessions={() => {}}
       />,
     );
 
@@ -25,20 +25,20 @@ describe("MobileScreenFab", () => {
     expect(onAskCrossRepoQuestion).toHaveBeenCalledTimes(1);
   });
 
-  it("チャットを開くボタンから画面遷移を呼ぶ（#4091）", () => {
-    const onOpenChat = vi.fn();
+  it("リモートセッションを開くボタンから画面遷移を呼ぶ（#4091・#4743）", () => {
+    const onOpenRemoteSessions = vi.fn();
     render(
-      <MobileScreenFab onCreateIssue={() => {}} onAskCrossRepoQuestion={() => {}} onOpenChat={onOpenChat} />,
+      <MobileScreenFab onCreateIssue={() => {}} onAskCrossRepoQuestion={() => {}} onOpenRemoteSessions={onOpenRemoteSessions} />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "チャットを開く" }));
+    fireEvent.click(screen.getByRole("button", { name: "リモートセッションを開く" }));
 
-    expect(onOpenChat).toHaveBeenCalledTimes(1);
+    expect(onOpenRemoteSessions).toHaveBeenCalledTimes(1);
   });
 
   // #1945: 一覧の行が内側の重なり順にz-indexを使うため、指定が無いと丸ボタンが行の後ろへ回る
   it("丸ボタンを一覧より手前の層に置く", () => {
-    render(<MobileScreenFab onCreateIssue={() => {}} onAskCrossRepoQuestion={() => {}} onOpenChat={() => {}} />);
+    render(<MobileScreenFab onCreateIssue={() => {}} onAskCrossRepoQuestion={() => {}} onOpenRemoteSessions={() => {}} />);
 
     const fabs = screen.getByRole("button", { name: "新しいIssueを作成" }).parentElement!;
     expect(fabs.className).toContain("z-20");
@@ -47,7 +47,7 @@ describe("MobileScreenFab", () => {
   // #1645: 絞り込み行など下端の固定帯がある画面では、それを避けて上げる
   it("raisedを渡すと下端の帯を避けた位置に上がる", () => {
     render(
-      <MobileScreenFab raised onCreateIssue={() => {}} onAskCrossRepoQuestion={() => {}} onOpenChat={() => {}} />,
+      <MobileScreenFab raised onCreateIssue={() => {}} onAskCrossRepoQuestion={() => {}} onOpenRemoteSessions={() => {}} />,
     );
 
     const fabs = screen.getByRole("button", { name: "新しいIssueを作成" }).parentElement!;
@@ -56,7 +56,7 @@ describe("MobileScreenFab", () => {
   });
 
   it("raisedを渡さないと画面下端に接する位置になる", () => {
-    render(<MobileScreenFab onCreateIssue={() => {}} onAskCrossRepoQuestion={() => {}} onOpenChat={() => {}} />);
+    render(<MobileScreenFab onCreateIssue={() => {}} onAskCrossRepoQuestion={() => {}} onOpenRemoteSessions={() => {}} />);
 
     const fabs = screen.getByRole("button", { name: "新しいIssueを作成" }).parentElement!;
     expect(fabs.className).toContain("bottom-4");

@@ -11,7 +11,8 @@
 - GitHub上の操作が誰の名義になるか: [attribution.md](attribution.md)
 - Actions側のトークンと自己ループ防止: [actions-token-model.md](actions-token-model.md)
 - 無人実行フローの全体像: [multi-agent-workflow.md](multi-agent-workflow.md)・[multi-agent/](multi-agent/)
-- 会話型の操作入口（IssueDeck Chat。意図解釈・確認カード・共通サービスの切り出し）: [chat.md](chat.md)
+- 会話型の操作入口（IssueDeck Chat。意図解釈・確認カード・共通サービスの切り出し）: [chat.md](chat.md)。**アプリ内の画面は#4743で廃止**し、処理部分はSlack起案が使う
+- リポジトリだけを指定してサブPCにClaude Codeのセッションを立て、Claude Codeアプリへ移動する「リモートセッション」（`src/lib/dispatch/remote-session*.ts`・`src/app/api/remote-sessions/`・`scripts/start-remote-session.sh`）: [remote-session.md](remote-session.md)（#4743）
 - Slackの`#アプリissue起案`からのIssue起案（Events受信・対象選択UI・Bot返信。`src/lib/slack/`・`src/app/api/slack/`）: [slack-intake.md](slack-intake.md)（#4454）
 - 親子Issue・依存関係・実行計画をまとめて起案する共通サービス（Slack・Chat共通。`src/lib/epic-draft/`）: [epic-draft.md](epic-draft.md)（#4537）
 - 親子Issueの実行計画（構造化計画の登録・検証・版管理。`src/lib/execution-plan/`・`src/app/api/execution-plans/`）: [execution-plan.md](execution-plan.md)（#4535）
@@ -1560,6 +1561,10 @@ export function POST(request: NextRequest) {
   「記載なし」で、条件は作らない）、表示は[`issue-work-summary.tsx`](../src/components/dashboard/issue-work-summary.tsx)。
   **依存待ちは青（操作不要）、amberは本人の操作待ちだけ。** 一覧の前提待ちアイコンも青にそろえた。
   親実行の詳細は、mainへ反映済みでも本番確認などが残る間「リリース済みですが、機能全体は未完了」と出す。
+- **リリース画面（ブランチ・リリース画面のレーン）のIssue行も同じ語彙で追う（#4748）。** 判定は
+  [`resolveIssueTracking`](../src/lib/branch-flow.ts)（本人の操作待ち＞依存待ち。前提の結果はshellの
+  `prerequisiteReadiness`を`buildBranchFlow`へ渡す）。手作業Issue=リリース後、未マージ／develop止まりのレーン=
+  リリース前必須。本番へ届いたレーンで対応Issueがopen・手作業が未完了なら`lane.featureIncomplete`が「機能全体は未完了」の注記になる。
 - **【#4315で撤去】手順ウィザード「手作業アシスタント」（`manual-step-guide-dialog.tsx`・一覧の
   「順番に進める」バー・`use-manual-step-guide.ts`・`manual-step-{run,autorun,fix,trouble}-panel.tsx`・
   `manual-step-placeholder-fill.tsx`・自己申告の完了ボタン）は無い。** 手作業Issueは手作業セッション

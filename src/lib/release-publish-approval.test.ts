@@ -50,6 +50,28 @@ describe("decidePublishApprovalValidity", () => {
     expect(result).toMatchObject({ valid: false, reason: "unexpected_changes", diff: ["src/app.ts"] });
   });
 
+  it("iOSの設定が版番号の行だけの書き換えなら失効させない（#4744と同じ差分）", () => {
+    const result = decidePublishApprovalValidity({
+      approval,
+      now,
+      candidatePhase: "awaiting_approval",
+      finalizations: [bump({ files: [{ path: "package.json", category: "version" }, { path: "ios/IssueDeck.xcodeproj/project.pbxproj", category: "ios_version", versionLinesOnly: true }] })],
+      observed: { headSha: POST, mainSha: BASE },
+    });
+    expect(result).toMatchObject({ valid: true });
+  });
+
+  it("iOSの設定で版番号以外の行も変わった（または判定できない）なら失効", () => {
+    const result = decidePublishApprovalValidity({
+      approval,
+      now,
+      candidatePhase: "awaiting_approval",
+      finalizations: [bump({ files: [{ path: "ios/IssueDeck.xcodeproj/project.pbxproj", category: "ios_version" }] })],
+      observed: { headSha: POST, mainSha: BASE },
+    });
+    expect(result).toMatchObject({ valid: false, reason: "unexpected_changes", diff: ["ios/IssueDeck.xcodeproj/project.pbxproj"] });
+  });
+
   it("承認した後の候補の更新・置換（範囲外のhead）は失効", () => {
     const result = decidePublishApprovalValidity({ approval, now, candidatePhase: "review", finalizations: [bump()], observed: { headSha: "d".repeat(40), mainSha: BASE } });
     expect(result).toMatchObject({ valid: false, reason: "candidate_changed" });

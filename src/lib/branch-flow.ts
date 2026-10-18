@@ -1,6 +1,8 @@
 import { getDeviceBuildRepository } from "@/lib/device-build-repos";
 import { isReleaseCandidateHeadRef } from "@/lib/release-branch";
-import { MANUAL_STEP_LABEL } from "@/lib/github/approval-labels";
+import { CHECK_USER_LABEL, MANUAL_STEP_LABEL } from "@/lib/github/approval-labels";
+import type { ManualStepReadinessMap } from "@/lib/manual-step-attention";
+import { formatManualStepReference } from "@/lib/manual-step-prerequisites";
 import { isAskRepoQuestionIssue } from "@/lib/github/ask-claude";
 import { isCodeReviewIssue } from "@/lib/github/code-review";
 import type { ReleaseMergeTarget } from "@/lib/github/release-button-status";
@@ -23,6 +25,7 @@ import type {
   BranchFlowDeployState,
   BranchFlowIssuePriority,
   BranchFlowIssueRef,
+  BranchFlowIssueTracking,
   BranchFlowLane,
   BranchFlowLaneStatus,
   BranchFlowManualStep,
@@ -342,6 +345,8 @@ function laneOrder(lane: BranchFlowLane): number {
 
 /** 進捗の判定に必要な最小限のIssue。表示用の`Issue`型からそのまま渡せる */
 export type BranchFlowIssueSource = {
+  /** 前提条件の判定（`prerequisiteReadiness`）を引くキー。無ければ追跡情報は付かない（#4748） */
+  id?: string;
   number: number;
   title: string;
   repositoryFullName: string;
@@ -369,6 +374,8 @@ export type BuildBranchFlowInput = {
    * （＝マージ済みの束は従来どおり「◯/◯に本番反映」のまま）。
    */
   deployStatuses?: RepositoryDeployStatus[];
+  /** Issueのid → 前提がそろっているか（`computeIssuePrerequisiteReadiness`）。無ければ依存待ちは出さない（#4748） */
+  prerequisiteReadiness?: ManualStepReadinessMap;
   /** 現在時刻（ミリ秒）。デプロイ待ちの打ち切り判定に使う。テストから注入する */
   now?: number;
 };
@@ -412,6 +419,7 @@ export function buildBranchFlow(input: BuildBranchFlowInput): BranchFlow {
       issues: input.issues.filter((issue) => issue.repositoryFullName === repository.fullName),
       branchStatus: branchStatusByRepo.get(repository.fullName) ?? null,
       deployRun: deployRunByRepo.get(repository.fullName) ?? null,
+      prerequisiteReadiness: input.prerequisiteReadiness,
       now,
     }),
   );
@@ -472,6 +480,7 @@ function buildRepository({
   issues,
   branchStatus,
   deployRun,
+  prerequisiteReadiness,
   now,
 }: {
   repository: { fullName: string; private: boolean };
@@ -479,6 +488,7 @@ function buildRepository({
   issues: BranchFlowIssueSource[];
   branchStatus: RepositoryBranchStatus | null;
   deployRun: BranchFlowDeployRun | null;
+  prerequisiteReadiness?: ManualStepReadinessMap;
   now: number;
 }): BranchFlowRepository {
   // リリースPR（develop→main）はレーンではなく幹の一部なので、作業レーンからは外す。
@@ -532,6 +542,7 @@ function buildRepository({
       manualStepsByIssue,
       unreleasedHeadRefs,
       developContentInMain,
+      prerequisiteReadiness,
     }),
   );
 
@@ -1304,6 +1315,7 @@ function buildLane({
   manualStepsByIssue,
   unreleasedHeadRefs,
   developContentInMain,
+  prerequisiteReadiness,
 }: {
   branchName: string;
   pullRequests: PullRequestSummary[];
@@ -1316,6 +1328,8 @@ function buildLane({
   unreleasedHeadRefs: ReadonlySet<string>;
   /** developの中身がmainに入りきっているか（#2704。`isDevelopContentInMain`） */
   developContentInMain: boolean;
+  /** Issueのid → 前提の判定（#4748） */
+  prerequisiteReadiness?: ManualStepReadinessMap;
 }): BranchFlowLane {
   // openなPRを先頭に、あとは更新が新しい順。1本のブランチで作り直した2本目のPRがある場合に、
   // 「今生きているPR」が先に来るようにする。
@@ -1372,33 +1386,117 @@ function buildLane({
     .sort((a, b) => (a.mergedAt as string).localeCompare(b.mergedAt as string))
     .at(-1);
   const mergedAt = lastMerged?.mergedAt ?? undefined;
+  const releaseState =
+    mergedAt === undefined || mergedAt === null
+      ? null
+      : resolveLaneReleaseState({
+          branchName,
+          mergedAt,
+          mergedBaseRef: lastMerged?.baseRef ?? null,
+          releases,
+          unreleasedHeadRefs,
+          developContentInMain,
+        });
+  const trackIssue = (source: BranchFlowIssueSource | null | undefined, ref: BranchFlowIssueRef) =>
+    source
+      ? { ...ref, tracking: resolveIssueTracking({ issue: source, readiness: prerequisiteReadiness, releaseState }) }
+      : ref;
+  const mainRef = issueNumber === null ? null : toIssueRefOrNumber(issueNumber, issue);
+  const manualSteps = (issueNumber === null ? [] : (manualStepsByIssue.get(issueNumber) ?? [])).map(
+    (manualStep) => ({
+      ...manualStep,
+      tracking: resolveIssueTracking({
+        issue: issueByNumber.get(manualStep.number) ?? null,
+        readiness: prerequisiteReadiness,
+        releaseState,
+        manualStep: true,
+      }),
+    }),
+  );
 
   return {
     key: branchName,
     branchName,
     kind: sorted[0]?.kind ?? classifyPullRequest({ baseRef: DEVELOP_BRANCH, headRef: branchName }),
     pullRequests: sorted,
-    issue: issueNumber === null ? null : toIssueRefOrNumber(issueNumber, issue),
-    relatedIssues: relatedIssueNumbers.map((number) =>
-      toIssueRefOrNumber(number, issueByNumber.get(number) ?? null),
-    ),
+    issue: mainRef === null ? null : trackIssue(issue, mainRef),
+    relatedIssues: relatedIssueNumbers.map((number) => {
+      const related = issueByNumber.get(number) ?? null;
+      return trackIssue(related, toIssueRefOrNumber(number, related));
+    }),
     referencedPullRequests,
     status: resolveLaneStatus(sorted),
-    releaseState:
-      mergedAt === undefined || mergedAt === null
-        ? null
-        : resolveLaneReleaseState({
-            branchName,
-            mergedAt,
-            mergedBaseRef: lastMerged?.baseRef ?? null,
-            releases,
-            unreleasedHeadRefs,
-            developContentInMain,
-          }),
+    releaseState,
     // 手作業は「対応Issueから生まれたもの」なので、関連Issueぶんまでは拾わない
-    manualSteps: issueNumber === null ? [] : (manualStepsByIssue.get(issueNumber) ?? []),
+    manualSteps,
+    featureIncomplete: resolveFeatureIncomplete({
+      releaseState,
+      issue: issue && issueNumber !== null ? { number: issueNumber, state: issue.state } : null,
+      manualSteps,
+    }),
     updatedAt: sorted[0]?.updatedAt ?? null,
   };
+}
+
+/**
+ * Issue1件の現在地・前提・リリース前後（#4748）。Issue詳細・一覧（`resolveWorkStatus`）と同じく、
+ * 本人の操作待ちを依存待ちより優先する。openでないIssueは何も言わない（完了済みを待ち扱いしない）。
+ *
+ * リリース前後の規則: 手作業Issueは版が出た後に残る作業＝`post-release`。それ以外は、レーンが
+ * まだ本番へ届いていない（未マージ・developまで）間だけ`pre-release`。本番へ届いた後は言わない。
+ */
+export function resolveIssueTracking({
+  issue,
+  readiness,
+  releaseState,
+  manualStep = false,
+}: {
+  issue: BranchFlowIssueSource | null;
+  readiness?: ManualStepReadinessMap;
+  releaseState: BranchFlowReleaseState | null;
+  manualStep?: boolean;
+}): BranchFlowIssueTracking | null {
+  if (!issue || issue.state !== "open") return null;
+  const blocking = (issue.id ? readiness?.get(issue.id)?.blocking : undefined) ?? [];
+  const waitKind = (issue.labels ?? []).includes(CHECK_USER_LABEL)
+    ? "user_action"
+    : blocking.length > 0
+      ? "dependency_wait"
+      : null;
+  const timing =
+    manualStep || isManualStepIssue(issue)
+      ? "post-release"
+      : releaseState === null || releaseState.kind === "pending"
+        ? "pre-release"
+        : null;
+  if (waitKind === null && timing === null) return null;
+  return {
+    waitKind,
+    blocking: blocking.map((item) => ({
+      reference: formatManualStepReference(item, issue.repositoryFullName),
+      label: item.label,
+    })),
+    timing,
+  };
+}
+
+/** 本番へ届いたのに残っている作業を文にする。届いていないレーンは空（#4748） */
+function resolveFeatureIncomplete({
+  releaseState,
+  issue,
+  manualSteps,
+}: {
+  releaseState: BranchFlowReleaseState | null;
+  issue: { number: number; state: "open" | "closed" } | null;
+  manualSteps: BranchFlowManualStep[];
+}): string[] {
+  if (releaseState?.kind !== "released" && releaseState?.kind !== "merged-to-main") return [];
+  return [
+    ...(issue?.state === "open" ? [`Issue #${issue.number}（本番での確認などが残っています）`] : []),
+    ...manualSteps
+      .filter((manualStep) => manualStep.state === "open")
+      .map((manualStep) => `手作業 #${manualStep.number}`),
+  ];
 }
 
 /**

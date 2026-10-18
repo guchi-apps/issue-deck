@@ -8,6 +8,7 @@ import { fetchPullRequest } from "@/lib/github/pull-requests-api";
 import {
   dispatchReleaseFinalizeWorkflow,
   fetchCompareChangedFiles,
+  fetchComparePatches,
   fetchFileTextAtRef,
   fetchMainHeadSha,
   fetchPullRequestCiState,
@@ -563,6 +564,7 @@ type Observed = {
   mainVersion: string | null;
   headVersion: string | null;
   changedFiles: string[];
+  patches: Record<string, string>;
   fastForward: boolean;
 };
 
@@ -575,9 +577,10 @@ async function observeForReport(ctx: Context, candidate: CandidateRow, row: Fina
   ]);
   if (!mainSha) return null;
   const head = pull.head.sha;
-  const [fastForward, changedFiles, headText, mainText] = await Promise.all([
+  const [fastForward, changedFiles, patches, headText, mainText] = await Promise.all([
     head === row.preHeadSha ? true : isAncestorCommit(ctx.owner, ctx.repo, row.preHeadSha, head, ctx.token),
     head === row.preHeadSha ? Promise.resolve([] as string[]) : fetchCompareChangedFiles(ctx.owner, ctx.repo, row.preHeadSha, head, ctx.token),
+    head === row.preHeadSha ? Promise.resolve({} as Record<string, string>) : fetchComparePatches(ctx.owner, ctx.repo, row.preHeadSha, head, ctx.token).catch(() => ({}) as Record<string, string>),
     fetchFileTextAtRef(ctx.owner, ctx.repo, caller.versionFile, head, ctx.token).catch(() => null),
     fetchFileTextAtRef(ctx.owner, ctx.repo, caller.versionFile, mainSha, ctx.token).catch(() => null),
   ]);
@@ -586,6 +589,7 @@ async function observeForReport(ctx: Context, candidate: CandidateRow, row: Fina
     mainSha,
     fastForward,
     changedFiles,
+    patches,
     headVersion: readVersionFromText(headText, caller.versionQuery),
     mainVersion: readVersionFromText(mainText, caller.versionQuery),
   };
@@ -631,6 +635,7 @@ async function reconcileRequested(ctx: Context, candidate: CandidateRow, row: Fi
       pullRequest: { number: observed.pull.number, baseSha: observed.pull.base.sha ?? "", headSha: observed.pull.head.sha, draft: observed.pull.draft },
       fastForward: observed.fastForward,
       changedFiles: observed.changedFiles,
+      patches: observed.patches,
       headVersion: observed.headVersion,
       mainVersion: observed.mainVersion,
     },

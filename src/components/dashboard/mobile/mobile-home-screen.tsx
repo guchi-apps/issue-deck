@@ -5,11 +5,11 @@ import {
   FolderGit2,
   Loader2,
   Lightbulb,
-  MessageSquareText,
   Smartphone,
   MonitorPlay,
   Rocket,
   Settings,
+  TerminalSquare,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { useRef, useState } from "react";
@@ -91,7 +91,7 @@ type MobileHomeScreenProps = {
   ideasCount?: number | null;
   /** 新規アプリの構想一覧を開く */
   onSelectIdeas?: () => void;
-  onSelectChat?: () => void;
+  onSelectRemoteSessions?: () => void;
   /** iOS拡張（#3708）の画面を開く */
   onSelectIosExtensions?: () => void;
   /**
@@ -180,7 +180,7 @@ export function MobileHomeScreenView({
   nightlyRunQueuedCount,
   ideasCount = null,
   onSelectIdeas = () => {},
-  onSelectChat = () => {},
+  onSelectRemoteSessions = () => {},
   onSelectIosExtensions = () => {},
   onSelectRepos,
   repositoryCount,
@@ -221,7 +221,7 @@ export function MobileHomeScreenView({
     onSelectPreview,
     onSelectNightlyRun,
     onSelectIdeas,
-    onSelectChat,
+    onSelectRemoteSessions,
     onSelectIosExtensions,
     onSelectRepos,
   });
@@ -428,7 +428,7 @@ const HOME_TILE_GROUPS: { id: HomeTileGroupId; label: string }[] = [
 const HOME_TILE_LAYOUT: Record<HomeTileGroupId, string[]> = {
   attention: ["check-user", "manual-step", "pr:completed", "question"],
   progress: ["not-started", "nightly-run", "in-progress", "pr:in-progress", "release-pending", "pr:release"],
-  list: ["all", "pr:all", "repos", "code-review", "chat", "ideas", "ios-extensions", "preview"],
+  list: ["all", "pr:all", "repos", "code-review", "remote-sessions", "ideas", "ios-extensions", "preview"],
 };
 
 type HomeTile = {
@@ -468,7 +468,7 @@ type BuildHomeTilesInput = {
   onSelectPreview: () => void;
   onSelectNightlyRun: () => void;
   onSelectIdeas: () => void;
-  onSelectChat: () => void;
+  onSelectRemoteSessions: () => void;
   onSelectIosExtensions: () => void;
   onSelectRepos: () => void;
 };
@@ -603,14 +603,14 @@ function buildHomeTiles(input: BuildHomeTilesInput): HomeTile[] {
       onClick: input.onSelectIdeas,
     },
     {
-      key: "chat",
-      label: "チャット",
-      icon: MessageSquareText,
+      key: "remote-sessions",
+      label: "リモートセッション",
+      icon: TerminalSquare,
       count: null,
       emphasis: "none",
       busy: false,
-      title: "Issue・PRの状態確認や修復を会話で進める",
-      onClick: input.onSelectChat,
+      title: "リポジトリを選んでClaude Codeのセッションを立ち上げる",
+      onClick: input.onSelectRemoteSessions,
     },
     {
       key: "ios-extensions",
