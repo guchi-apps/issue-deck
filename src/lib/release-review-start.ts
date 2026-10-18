@@ -16,8 +16,6 @@ export const REVIEW_START_INTEGRATION_GRACE_MS = 10 * 60_000;
 
 const FINISHED_INTEGRATION = ["passed", "failed", "needs_check"];
 const ACTIVE_JOB = ["QUEUED", "CLAIMED", "RUNNING"];
-/** 統合検証を実際に動かしたとみなせるジョブの状態（その`targetHost`に証跡がある） */
-const RAN_JOB = ["CLAIMED", "RUNNING", "SUCCEEDED", "FAILED", "TIMEOUT"];
 
 export type ReviewStartReason =
   /** 統合検証が終わった（`passed`・`failed`・`needs_check`） */
@@ -38,8 +36,11 @@ export type ReviewStartDecision =
 export type ReviewStartInput = {
   /** 同じ対象の統合検証の記録。無ければnull */
   integration: { state: string; createdAt: Date } | null;
-  /** 同じ対象の最新の統合検証ジョブ。無ければnull */
-  lastVerifyJob: { status: string; targetHost: string } | null;
+  /**
+   * 同じ対象の最新の統合検証ジョブ。無ければnull。`claimedAt`はホストがジョブを取得した時刻で、
+   * 入っているものだけを「統合検証を実際に動かした（その`targetHost`に証跡がある）」とみなす（#4775）
+   */
+  lastVerifyJob: { status: string; targetHost: string; claimedAt: Date | null } | null;
   now: Date;
 };
 
@@ -49,7 +50,8 @@ export type ReviewStartInput = {
  */
 export function decideReleaseReviewStart(input: ReviewStartInput): ReviewStartDecision {
   const { integration, lastVerifyJob, now } = input;
-  const ranHost = lastVerifyJob && RAN_JOB.includes(lastVerifyJob.status) ? lastVerifyJob.targetHost : null;
+  // 状態では判定しない。`TIMEOUT`は`QUEUED`のまま期限切れになった（一度も動いていない）ジョブも含むため（#4775）
+  const ranHost = lastVerifyJob?.claimedAt ? lastVerifyJob.targetHost : null;
   const start = (reason: ReviewStartReason): ReviewStartDecision => ({ action: "start", reason, preferredHost: ranHost });
 
   if (integration === null) return start("no_integration");

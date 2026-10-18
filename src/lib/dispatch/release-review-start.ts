@@ -35,7 +35,7 @@ async function loadStartInput(target: ReleaseVerificationTarget) {
         headSha: target.headSha,
       },
       orderBy: { createdAt: "desc" },
-      select: { status: true, targetHost: true },
+      select: { status: true, targetHost: true, claimedAt: true },
     }),
   ]);
   return { integration, lastVerifyJob };
@@ -110,8 +110,11 @@ export async function startDeferredReleaseReview(
   return { action: "started", outcome: result.outcome };
 }
 
-/** 呼び出し元の失敗で報告そのものを落とさないための包み */
-export async function startDeferredReleaseReviewSafely(target: ReleaseVerificationTarget, origin: string): Promise<void> {
+/** 呼び出し元の失敗で報告そのものを落とさないための包み。失敗したときはnullを返す */
+export async function startDeferredReleaseReviewSafely(
+  target: ReleaseVerificationTarget,
+  origin: string,
+): Promise<StartDeferredOutcome | null> {
   try {
     const outcome = await startDeferredReleaseReview(target);
     if (outcome.action === "started") {
@@ -119,35 +122,60 @@ export async function startDeferredReleaseReviewSafely(target: ReleaseVerificati
         `[release-review-start] ${origin}: ${target.repoFullName}#${target.prNumber}@${target.headSha.slice(0, 7)} → ${outcome.outcome}`,
       );
     }
+    return outcome;
   } catch (error) {
     console.error(`[release-review-start] ${origin}: 全体レビューの開始判定に失敗しました`, error);
+    return null;
   }
 }
 
 const SWEEP_INTERVAL_MS = 60_000;
 const SWEEP_WINDOW_MS = 3 * 24 * 60 * 60_000;
+/** 1回の巡回で扱う「待たせている・currentな対象」の上限 */
 const SWEEP_LIMIT = 50;
+const SWEEP_PAGE_SIZE = 100;
+/** 1回の巡回で読む待機中の記録の上限（印の無い記録を含む）。暴走しないための安全弁 */
+const SWEEP_SCAN_MAX = 2_000;
 let lastSweepAt = 0;
 
 /**
+ * 直近の待機中の全体レビューのうち、待機の印が付いた記録を新しい順に集める。印の無い記録（候補の更新で取り残された古いSHAの
+ * 記録など）は上限に数えないよう、ページを読み進めて絞り込む（#4775）。開始すると記録の`updatedAt`が変わり並びがずれるため、
+ * 開始する前に集め切る
+ */
+async function findAwaitingReviewTargets(now: Date): Promise<ReleaseVerificationTarget[]> {
+  const targets: ReleaseVerificationTarget[] = [];
+  for (let skip = 0; skip < SWEEP_SCAN_MAX; skip += SWEEP_PAGE_SIZE) {
+    const rows = await db.releaseVerification.findMany({
+      where: { kind: "ai_review", state: "waiting", updatedAt: { gte: new Date(now.getTime() - SWEEP_WINDOW_MS) } },
+      orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
+      skip,
+      take: SWEEP_PAGE_SIZE,
+      select: { repoFullName: true, prNumber: true, baseSha: true, headSha: true, findings: true },
+    });
+    for (const row of rows) {
+      if (!readAwaitingIntegration(row.findings)) continue;
+      targets.push({ repoFullName: row.repoFullName, prNumber: row.prNumber, baseSha: row.baseSha, headSha: row.headSha });
+    }
+    if (rows.length < SWEEP_PAGE_SIZE) break;
+  }
+  return targets;
+}
+
+/**
  * 巡回での再照合（pollerの`claim`ごと。1分に1回まで）。統合検証の完了報告の反映に失敗した・issue-deckが再起動した・
- * 統合検証を積めずに猶予を過ぎた対象を拾って開始する。待機中の全体レビューの記録だけを見る
+ * 統合検証を積めずに猶予を過ぎた対象を拾って開始する。待機の印が付いた全体レビューの記録だけを見て、上限には
+ * 印付きでcurrentな対象だけを数える（古い対象・既に開始された対象で上限が埋まり、待っている対象を拾えなくならないように。#4775）
  */
 export async function sweepDeferredReleaseReviews(now: Date = new Date()): Promise<void> {
   if (now.getTime() - lastSweepAt < SWEEP_INTERVAL_MS) return;
   lastSweepAt = now.getTime();
-  const rows = await db.releaseVerification.findMany({
-    where: { kind: "ai_review", state: "waiting", updatedAt: { gte: new Date(now.getTime() - SWEEP_WINDOW_MS) } },
-    orderBy: { updatedAt: "desc" },
-    take: SWEEP_LIMIT,
-    select: { repoFullName: true, prNumber: true, baseSha: true, headSha: true, findings: true },
-  });
-  for (const row of rows) {
-    if (!readAwaitingIntegration(row.findings)) continue;
-    await startDeferredReleaseReviewSafely(
-      { repoFullName: row.repoFullName, prNumber: row.prNumber, baseSha: row.baseSha, headSha: row.headSha },
-      "sweep",
-    );
+  let handled = 0;
+  for (const target of await findAwaitingReviewTargets(now)) {
+    if (handled >= SWEEP_LIMIT) break;
+    const outcome = await startDeferredReleaseReviewSafely(target, "sweep");
+    if (outcome?.action === "skipped" && (outcome.reason === "not_current" || outcome.reason === "not_deferred")) continue;
+    handled += 1;
   }
 }
 
