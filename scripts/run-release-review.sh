@@ -12,6 +12,8 @@
 # サーバーは実績から確認済みの件数を数え、足りなければ「未確認範囲あり」として準備完了にしない。
 # バッチの結果は`*.batches`へ保存し、完走後も残す（#4767）。同じbase・headの再実行は、中断・実行予算で残ったバッチを
 # 続きから確認し、証跡に依存する結果だけを証跡の更新後にやり直す（確認済みのバッチは再利用する）。
+# **バッチは上限つきで並列に確認する**（#4769）。1本でも失敗したら新しいバッチは起動せず、実行中のものの完了を待って
+# 結果を保存してから失敗を報告する（再実行は失敗したバッチから続ける）。
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -37,6 +39,11 @@ MAX_BATCHES_PER_RUN="${ISSUE_DECK_RELEASE_REVIEW_MAX_BATCHES_PER_RUN:-8}"
 KEEP_BATCH_DIRS="${ISSUE_DECK_RELEASE_REVIEW_KEEP_BATCH_DIRS:-20}"
 # 実行結果（テスト・型検査・ビルド）の証跡を指す文言。`src/lib/release-review-reevaluation.ts`の`EVIDENCE_TEXT`と揃える
 EVIDENCE_TEXT_PATTERN='統合検証|検証結果|検証証跡|証跡|実行結果|テスト|型検査|ビルド|running'
+# 同時に確認するバッチ数の上限（#4769）。1で従来どおり1本ずつ。相互作用の確認・実績の補完は全バッチの後に1本だけ走る
+PARALLEL="${ISSUE_DECK_RELEASE_REVIEW_PARALLEL:-3}"
+# AI 1回の呼び出しのターン数の上限（claudeの`--max-turns`。#4769）。0で上限なし。上限に達すると診断は`turn_limit`になる。
+# Codex CLIの`exec`にはターン数を指定する引数が無いため、Codexは従来どおり時間（`TIMEOUT_SECONDS`）だけで止める
+MAX_TURNS="${ISSUE_DECK_RELEASE_REVIEW_MAX_TURNS:-150}"
 # ファイル別の実績の取りこぼし（報告なし・根拠が空）を補う質問（#4768）。1回の起動で1回まで、対象のファイル数と時間に上限を置く
 SUPPLEMENT_MAX_FILES="${ISSUE_DECK_RELEASE_REVIEW_SUPPLEMENT_MAX_FILES:-40}"
 SUPPLEMENT_TIMEOUT_SECONDS="${ISSUE_DECK_RELEASE_REVIEW_SUPPLEMENT_TIMEOUT_SECONDS:-600}"
@@ -52,6 +59,8 @@ WORKTREE=""
 LOCAL_PATH=""
 ERR_FILE=""
 part_dir=""
+# 並列に起動したバッチのプロセス（#4769）。想定外の終了で`cleanup`が止める
+BATCH_PIDS=()
 
 # 実行失敗の診断（#4300）。**コードへの指摘ではなく「レビューを最後まで行えなかった理由」**で、
 # 画面に出す。原因は観測できた事実だけで決め、決められなければ unknown（原因未特定）にする。
@@ -89,13 +98,20 @@ diag_payload() {
       + (if $excerpt == "" then {} else {excerpt: $excerpt} end))}' 2>/dev/null || true
 }
 
-# diag_ai_cause <終了コード> <ログ>: AI CLIが非0で終わったときの原因。事実が無ければ unknown
+# diag_ai_cause <終了コード> <ログ> [最終応答]: AI CLIが非0で終わったときの原因。事実が無ければ unknown。
+# ターン数の上限（#4769）は、claudeが最終応答（標準出力）へ`Error: Reached max turns (N)`と書いて1で終わる
 diag_ai_cause() {
-  local code="$1" log="$2"
+  local code="$1" log="$2" out="${3:-}" f
   case "$code" in
     124 | 137) printf 'timeout'; return ;;
     126 | 127) printf 'launch_failed'; return ;;
   esac
+  for f in "$log" "$out"; do
+    if [[ -n "$f" && -s "$f" ]] && tail -n 20 "$f" | grep -qiE 'reached max(imum)? turns'; then
+      printf 'turn_limit'
+      return
+    fi
+  done
   if [[ -s "$log" ]] && tail -n 60 "$log" | grep -qiE 'not logged in|please (log ?in|run .*login)|unauthorized|authentication (failed|error)|invalid (api key|token)|\b401\b|expired (token|session)'; then
     printf 'auth_failed'
     return
@@ -155,6 +171,15 @@ heartbeat_stop() {
   HEARTBEAT_PID=""
 }
 
+# kill_tree <PID>: プロセスとその子孫を止める（並列のバッチの`timeout`・AI CLIを残さない。#4769）
+kill_tree() {
+  local pid="$1" child
+  for child in $(pgrep -P "$pid" 2>/dev/null || true); do
+    kill_tree "$child"
+  done
+  kill "$pid" 2>/dev/null || true
+}
+
 # どの経路で終わっても終了を1回だけ報告する
 finish() {
   local status="$1" message="$2" result="${3:-}"
@@ -171,6 +196,10 @@ cleanup() {
     finish failed "全体レビューの実行中に失敗しました（終了コード ${code}）。" \
       "$(diag_payload unknown "$code" "$ERR_FILE")"
   fi
+  local pid
+  for pid in "${BATCH_PIDS[@]}"; do
+    kill_tree "$pid"
+  done
   [[ -n "$ERR_FILE" ]] && rm -f "$ERR_FILE"
   [[ -n "${part_dir:-}" ]] && rm -rf "$part_dir"
   if [[ -n "$WORKTREE" && -n "$LOCAL_PATH" ]]; then
@@ -417,11 +446,11 @@ supplement_coverage_text() {
 RULES
 }
 
-# build_prompt <出力先>: `$part_dir`の部品（coverage・diff・prs・checklist…）からプロンプトを組み立てる
+# build_prompt <出力先> [部品のディレクトリ]: 部品（coverage・diff・prs・checklist…。既定は`$part_dir`）からプロンプトを組み立てる
 build_prompt() {
-  local out="$1"
+  local out="$1" parts="${2:-$part_dir}"
   python3 - "$SCRIPT_DIR/prompts/release-review-agent.md" "$out" "$full_name" "$pr_number" "$base_sha" "$head_sha" \
-    "$part_dir" <<'PY'
+    "$parts" <<'PY'
 import sys
 template, out, repo, pr, base, head, parts = sys.argv[1:8]
 def part(name):
@@ -464,6 +493,7 @@ run_agent() {
     (cd "$WORKTREE" && timeout -k 60 "$limit" "$codex_command" "${codex_args[@]}" <"$prompt" >"$log" 2>&1)
   else
     local -a claude_args=(-p --model "$claude_model" --allowedTools Read Grep Glob)
+    [[ "$MAX_TURNS" =~ ^[1-9][0-9]*$ ]] && claude_args+=(--max-turns "$MAX_TURNS")
     (cd "$WORKTREE" && timeout -k 60 "$limit" claude "${claude_args[@]}" <"$prompt" >"$out" 2>"$log")
   fi
 }
@@ -620,13 +650,19 @@ merge_batch_results() {
           . as $id
           | ([ $ir[] | (.checks // [])[] | select(type == "object" and .id == $id) ] | first) as $ic
           | [ $br[] | ([ (.checks // [])[] | select(type == "object" and .id == $id) ] | first) ] as $per
+          # 実際のバッチ番号で引く（`$per`は保存済みの結果の並びで、結果の無いバッチを詰めている）
+          | ($per | to_entries | map({key: ($idxs[.key] | tostring), value: .value}) | from_entries) as $pm
+          | [ range(1; $batches + 1) as $b | ($pm[$b | tostring] // null) as $c
+              | select($c == null or ($c | settled | not))
+              | "\(if $batches > 1 then "バッチ\($b): " else "" end)\(if $c == null then "報告がありません（未実施または報告の無いバッチ）" else ($c.evidence // "根拠が報告されていません" | tostring | if test("\\S") then .[0:300] else "根拠が報告されていません" end) end)" ] as $open
           | if $ic != null and ($ic.status == "confirmed" or $ic.status == "not_applicable" or $ic.status == "unconfirmed") and ($ic | has_ev) then
-              {id: $id, status: $ic.status, evidence: ("[相互作用の確認] \($ic.evidence)" | .[0:1400]), source: ($ic.source // "current")}
+              # バッチ側の未確認を上書きしたときは、その根拠も併記する（何を相互作用の確認で解消とみなしたかを追えるように）
+              {id: $id, status: $ic.status,
+               evidence: ("[相互作用の確認] \($ic.evidence)"
+                 + (if $ic.status != "unconfirmed" and ($open | length) > 0 then "／バッチ側の未確認: \($open | join(" / "))" else "" end) | .[0:1400]),
+               source: ($ic.source // "current")}
             else
-              [ range(0; $batches) as $i | ($per[$i] // null) as $c
-                | select($c == null or ($c | settled | not))
-                | "\(if $batches > 1 then "バッチ\(if $i < $nb then $idxs[$i] else $i + 1 end): " else "" end)\(if $c == null then "報告がありません（未実施または報告の無いバッチ）" else ($c.evidence // "根拠が報告されていません" | tostring | if test("\\S") then .[0:300] else "根拠が報告されていません" end) end)" ] as $open
-              | if ($open | length) > 0 then
+              if ($open | length) > 0 then
                   {id: $id, status: "unconfirmed", evidence: ($open | join(" / ") | .[0:1400])}
                 else
                   {id: $id, status: (if any($per[]; .status == "confirmed") then "confirmed" else "not_applicable" end),
@@ -652,6 +688,56 @@ merge_batch_results() {
       integrationReused: (if $batches > 1 then $intReused else null end)
     }
     | with_entries(select(.value != null))' "${all_results[@]}"
+}
+
+# batch_running_label <実行中のバッチ番号…>: 進捗の文面の「バッチ2/5」「バッチ2・3/5を並列で確認中」の部分（#4769）
+batch_running_label() {
+  if (($# <= 1)); then
+    printf 'バッチ%s/%s' "${1:-?}" "$batch_count"
+  else
+    local joined="$1" i
+    for i in "${@:2}"; do joined+="・$i"; done
+    printf 'バッチ%s/%sを並列で確認中' "$joined" "$batch_count"
+  fi
+}
+
+# run_batch_job <バッチ番号> <作業ディレクトリ>: 1バッチを確認し、結果を`r<N>.json`へ保存する（#4769）。
+# 並列に起動されるため、親の状態（変数・`finish`・共通の出力ファイル）には触れない。成否は作業ディレクトリの
+# `rc`（0＝保存済み）と、失敗時の`message`・`diag`へ書き、報告は親がまとめて行う
+run_batch_job() {
+  local idx="$1" jd="$2" result_file="$batch_dir/r${idx}.json" rc=0 cause excerpt
+  local prompt="$jd/prompt" out="$jd/out" log="$jd/log"
+  find "$part_dir" -maxdepth 1 -type f -exec cp {} "$jd/" \;
+  batch_coverage_text "$idx" >"$jd/coverage"
+  cp "$batch_dir/b${idx}.diff" "$jd/diff"
+  if ! build_prompt "$prompt" "$jd"; then
+    printf 'レビュー用のプロンプトを準備できませんでした（バッチ%s/%s・AI CLIは起動していません）' "$idx" "$batch_count" >"$jd/message"
+    diag_payload unknown "" "$ERR_FILE" prepare >"$jd/diag"
+    printf '1' >"$jd/rc"
+    return 0
+  fi
+  run_agent "$prompt" "$out" "$log" || rc=$?
+  if ((rc != 0)); then
+    cause="$(diag_ai_cause "$rc" "$log" "$out")"
+    excerpt="$log"
+    [[ -s "$log" ]] || excerpt="$out"
+    printf '全体レビューを完走できませんでした（バッチ%s/%s・終了コード %s%s）' "$idx" "$batch_count" "$rc" \
+      "$([[ "$cause" == turn_limit ]] && printf '・ターン数の上限 %s に到達' "$MAX_TURNS")" >"$jd/message"
+    diag_payload "$cause" "$rc" "$excerpt" review >"$jd/diag"
+    printf '%s' "$rc" >"$jd/rc"
+    return 0
+  fi
+  if ! extract_result_json "$out" >"$result_file.tmp" || [[ ! -s "$result_file.tmp" ]]; then
+    rm -f "$result_file.tmp"
+    printf '全体レビューの結果（バッチ%s/%s）をJSONとして読めませんでした' "$idx" "$batch_count" >"$jd/message"
+    diag_payload parse_failed "" "$out" finalize >"$jd/diag"
+    printf '1' >"$jd/rc"
+    return 0
+  fi
+  # 指紋を先に書く（結果だけが残り指紋の無い状態は、証跡に依存する結果なら再評価に倒れる）
+  printf '%s' "$evidence_fp" >"${result_file%.json}.fp"
+  mv "$result_file.tmp" "$result_file"
+  printf '0' >"$jd/rc"
 }
 
 main() {
@@ -810,8 +896,12 @@ main() {
     }
   fi
 
-  # バッチごとに確認する。保存済みの結果（同じbase・head・予算）は再利用して続きから再開する
-  local mode_label executed=0 reused_batches=0 idx result_file rc remaining=0
+  # バッチごとに確認する。保存済みの結果（同じbase・head・予算）は再利用して続きから再開する。
+  # 確認するバッチは上限（`PARALLEL`）まで同時に起動する（#4769）。起動は番号順なので、実行予算で残るのは後ろのバッチ
+  local mode_label executed=0 reused_batches=0 idx result_file rc remaining=0 parallel="$PARALLEL"
+  local -a todo=() run_idxs=() run_pids=() failed_idxs=() keep_idxs=() keep_pids=()
+  local next=0 k jd changed=1 fail_message="" fail_diag=""
+  [[ "$parallel" =~ ^[1-9][0-9]*$ ]] || parallel=3
   mode_label="$([[ "$effective_mode" == "rereview" ]] && echo 再レビュー || echo 全体確認)"
   for ((idx = 1; idx <= batch_count; idx++)); do
     result_file="$batch_dir/r${idx}.json"
@@ -819,38 +909,67 @@ main() {
       reused_batches=$((reused_batches + 1))
       continue
     fi
-    if ((executed >= MAX_BATCHES_PER_RUN)); then
+    if ((${#todo[@]} >= MAX_BATCHES_PER_RUN)); then
       remaining=$((remaining + 1))
       continue
     fi
-    RUNNING_MESSAGE="全体レビュー（${mode_label}）を実行中です（${agent}・${claude_model:-$codex_model}・バッチ${idx}/${batch_count}・全${total_files}ファイル）${reuse_note}"
-    release_progress_set review 2 "$RUNNING_MESSAGE" "" "$total_files"
-    review_report running "$RUNNING_MESSAGE"
-    batch_coverage_text "$idx" >"$part_dir/coverage"
-    cp "$batch_dir/b${idx}.diff" "$part_dir/diff"
-    build_prompt "$prompt_file" || {
-      finish failed "レビュー用のプロンプトを準備できませんでした（AI CLIは起動していません）" \
-        "$(diag_payload unknown "" "$ERR_FILE" prepare)"
-      return 0
-    }
-    rm -f "$output_file" "$log_file"
-    rc=0
-    run_agent "$prompt_file" "$output_file" "$log_file" || rc=$?
-    if ((rc != 0)); then
-      finish failed "全体レビューを完走できませんでした（バッチ${idx}/${batch_count}・終了コード ${rc}）。完了済みのバッチは保存済みで、再実行すると続きから確認します" \
-        "$(diag_payload "$(diag_ai_cause "$rc" "$log_file")" "$rc" "$log_file" review)"
-      return 0
-    fi
-    if ! extract_result_json "$output_file" >"$result_file.tmp" || [[ ! -s "$result_file.tmp" ]]; then
-      rm -f "$result_file.tmp"
-      finish failed "全体レビューの結果（バッチ${idx}/${batch_count}）をJSONとして読めませんでした" \
-        "$(diag_payload parse_failed "" "$output_file" finalize)"
-      return 0
-    fi
-    mv "$result_file.tmp" "$result_file"
-    printf '%s' "$evidence_fp" >"${result_file%.json}.fp"
-    executed=$((executed + 1))
+    todo+=("$idx")
   done
+  while ((next < ${#todo[@]} && ${#failed_idxs[@]} == 0)) || ((${#run_idxs[@]} > 0)); do
+    # 空きがあれば起動する。1本でも失敗したら新しいバッチは起動しない（実行中のものは完了を待って保存する）
+    while ((next < ${#todo[@]} && ${#failed_idxs[@]} == 0 && ${#run_idxs[@]} < parallel)); do
+      idx="${todo[next]}"
+      next=$((next + 1))
+      jd="$part_dir/b${idx}"
+      rm -rf "$jd"
+      mkdir -p "$jd"
+      run_batch_job "$idx" "$jd" </dev/null &
+      run_idxs+=("$idx")
+      run_pids+=("$!")
+      BATCH_PIDS=("${run_pids[@]}")
+      changed=1
+    done
+    if ((changed == 1)); then
+      RUNNING_MESSAGE="全体レビュー（${mode_label}）を実行中です（${agent}・${claude_model:-$codex_model}・$(batch_running_label "${run_idxs[@]}")・完了${executed}/${#todo[@]}・全${total_files}ファイル）${reuse_note}"
+      release_progress_set review 2 "$RUNNING_MESSAGE" "" "$total_files"
+      review_report running "$RUNNING_MESSAGE"
+      changed=0
+    fi
+    sleep 0.5
+    keep_idxs=()
+    keep_pids=()
+    for ((k = 0; k < ${#run_pids[@]}; k++)); do
+      if kill -0 "${run_pids[k]}" 2>/dev/null; then
+        keep_idxs+=("${run_idxs[k]}")
+        keep_pids+=("${run_pids[k]}")
+        continue
+      fi
+      wait "${run_pids[k]}" 2>/dev/null || true
+      idx="${run_idxs[k]}"
+      jd="$part_dir/b${idx}"
+      changed=1
+      if [[ "$(cat "$jd/rc" 2>/dev/null || true)" == "0" ]]; then
+        executed=$((executed + 1))
+        continue
+      fi
+      failed_idxs+=("$idx")
+    done
+    run_idxs=("${keep_idxs[@]}")
+    run_pids=("${keep_pids[@]}")
+    BATCH_PIDS=("${run_pids[@]}")
+  done
+  if ((${#failed_idxs[@]} > 0)); then
+    # 報告する失敗は番号の最も小さいバッチ。他のバッチの成否は文面に添える
+    idx="$(printf '%s\n' "${failed_idxs[@]}" | sort -n | head -n 1)"
+    jd="$part_dir/b${idx}"
+    fail_message="$(cat "$jd/message" 2>/dev/null || true)"
+    [[ -n "$fail_message" ]] || fail_message="全体レビューを完走できませんでした（バッチ${idx}/${batch_count}が異常終了しました）"
+    fail_diag="$(cat "$jd/diag" 2>/dev/null || true)"
+    [[ -n "$fail_diag" ]] || fail_diag="$(diag_payload unknown "" "$ERR_FILE" review)"
+    ((${#failed_idxs[@]} > 1)) && fail_message+="（ほか$((${#failed_idxs[@]} - 1))本も失敗）"
+    finish failed "${fail_message}。完了したバッチ（今回${executed}本・再利用${reused_batches}本）は保存済みで、再実行すると失敗したバッチから続けて確認します" "$fail_diag"
+    return 0
+  fi
 
   # ファイル別の実績の取りこぼし（報告なし・根拠が空）を、そのファイルだけを対象に1回だけ聞き直す（#4768）。
   # 補完に失敗しても全体レビューは止めない（残ったファイルは未確認として報告する）。バッチをやり直したら補完もやり直す
@@ -907,7 +1026,7 @@ main() {
     run_agent "$prompt_file" "$output_file" "$log_file" || rc=$?
     if ((rc != 0)); then
       finish failed "全体レビューを完走できませんでした（バッチ間の相互作用の確認・終了コード ${rc}）。バッチごとの結果は保存済みで、再実行すると続きから確認します" \
-        "$(diag_payload "$(diag_ai_cause "$rc" "$log_file")" "$rc" "$log_file" review)"
+        "$(diag_payload "$(diag_ai_cause "$rc" "$log_file" "$output_file")" "$rc" "$([[ -s "$log_file" ]] && echo "$log_file" || echo "$output_file")" review)"
       return 0
     fi
     if ! extract_result_json "$output_file" >"$int_file.tmp" || [[ ! -s "$int_file.tmp" ]]; then

@@ -22,6 +22,7 @@ const git = (...args) => execFileSync("git", args, { cwd: path.join(dir, "repo")
 
 const FAKE_CLAUDE = `#!/usr/bin/env bash
 p="$(cat)"
+[[ -n "\${ARGS_LOG:-}" ]] && echo "$*" >>"$ARGS_LOG"
 # UNCONF: 全バッチを未確認にする／UNCONF_FILE: そのファイルを含むバッチ（と全ファイルを並べる相互作用の確認）だけを未確認にする。
 # 根拠はUNCONF_TEXT（既定は証跡待ち）。NA_FILE: そのファイルを含むバッチは非該当と報告する（#4768）
 checks() {
@@ -47,18 +48,26 @@ if grep -q "ファイル別の確認実績の補完です" <<<"$p"; then
   [[ -n "\${SUP_LOG:-}" ]] && echo call >>"$SUP_LOG"
   [[ -n "\${SUP_FAIL:-}" ]] && exit 3
   files="$(sed -n '/取りこぼした断片だけ）:/,/^$/p' <<<"$p" | grep -E '^- ' | sed -E 's/^- //')"
+  # SUP_EXTRA: 聞き直されていないファイルも確認済みと報告する／SUP_EMPTY_EV: 根拠を空で報告する
   echo '\`\`\`json'
-  jq -nc --argjson f "$(printf '%s\\n' $files | jq -Rsc 'split("\\n") | map(select(. != ""))')" \\
-    '{state: "passed", summary: "補完", checklistVersion: 1, checks: [], fileReviews: ($f | map({file: ("/" + .), status: "reviewed", evidence: "補完で読んだ"})), findings: []}'
+  jq -nc --argjson f "$(printf '%s\\n' $files \${SUP_EXTRA:-} | jq -Rsc 'split("\\n") | map(select(. != ""))')" --arg ev "\${SUP_EMPTY_EV:+ }" \\
+    '{state: "passed", summary: "補完", checklistVersion: 1, checks: [], fileReviews: ($f | map({file: ("/" + .), status: "reviewed", evidence: (if $ev == "" then "補完で読んだ" else "" end)})), findings: []}'
   echo '\`\`\`'
   exit 0
 fi
 [[ -n "\${CALL_LOG:-}" ]] && echo call >>"$CALL_LOG"
-# FAKE_FINDINGS（JSONの配列の配列）が与えられたら、呼ばれた順にバッチごとの指摘として返す
+batch="$(sed -nE 's/.*これはバッチ([0-9]+)\\/.*/\\1/p' <<<"$p" | head -n 1)"
+# FAIL_BATCH: そのバッチだけ失敗する／TURN_LIMIT_BATCH: そのバッチだけターン数の上限で終わる（claudeと同じく標準出力へ書いて1で終わる）
+[[ -n "\${FAIL_BATCH:-}" && "$batch" == "$FAIL_BATCH" ]] && exit 3
+if [[ -n "\${TURN_LIMIT_BATCH:-}" && "$batch" == "$TURN_LIMIT_BATCH" ]]; then echo "Error: Reached max turns (150)"; exit 1; fi
+# CONC_LOG: 起動と終了を記録し、同時に走った本数を数えられるようにする（SLOWの秒数だけ待つ）
+[[ -n "\${CONC_LOG:-}" ]] && echo "start $batch" >>"$CONC_LOG"
+[[ -n "\${SLOW:-}" ]] && sleep "$SLOW"
+[[ -n "\${CONC_LOG:-}" ]] && echo "end $batch" >>"$CONC_LOG"
+# FAKE_FINDINGS（JSONの配列の配列）が与えられたら、バッチ番号の順にバッチごとの指摘として返す（並列でも決まる）
 findings='[]'
 if [[ -n "\${FAKE_FINDINGS:-}" ]]; then
-  n=$(( $(cat "$FAKE_FINDINGS_COUNTER" 2>/dev/null || echo 0) + 1 )); echo "$n" >"$FAKE_FINDINGS_COUNTER"
-  findings="$(jq -c --argjson n "$n" '.[($n - 1) % length]' <<<"$FAKE_FINDINGS")"
+  findings="$(jq -c --argjson n "$batch" '.[($n - 1) % length]' <<<"$FAKE_FINDINGS")"
 fi
 files="$(sed -n '/次のファイルの差分をこのバッチへ載せました/,/^$/p' <<<"$p" | grep -E '^- ' | sed -E 's/^- //; s/（分割.*//')"
 # OMIT_FILE: そのファイルの実績を報告しない／EMPTY_EV_FILE: 根拠を空で報告する／DOT_PATHS: パスを「./」付きで報告する
@@ -153,7 +162,7 @@ describe("run-release-review.sh（#4615）", { timeout: 30_000 }, () => {
       [{ severity: "high", title: "設定 漏れ。", file: "a.ts", line: 9 }],
       [{ severity: "high", title: "設定漏れ", file: "b.ts", line: 3 }],
     ];
-    const { result } = runReview({ FAKE_FINDINGS: JSON.stringify(fakeFindings), FAKE_FINDINGS_COUNTER: path.join(dir, "findings-n") });
+    const { result } = runReview({ FAKE_FINDINGS: JSON.stringify(fakeFindings) });
     expect(result.findings).toHaveLength(2);
     expect(result.findings.find((f) => f.file === "a.ts")).toMatchObject({ line: 9 });
     expect(result.findings.find((f) => f.file === "a.ts").blocking).not.toBe(false);
@@ -287,6 +296,24 @@ describe("run-release-review.sh（#4615）", { timeout: 30_000 }, () => {
       expect(reviewed(result)).not.toContain("file3.txt");
     });
 
+    it("補完が聞き直していないファイル・根拠の空な確認済みを返しても、確認済みに数えない（#4769）", () => {
+      // file3.txtとfile4.txtが取りこぼし、補完は件数の上限で先頭の1ファイルだけを聞き直す。応答は聞いていないfile4.txtも確認済みと返す
+      const extra = runReview({
+        OMIT_FILE: "file3.txt",
+        EMPTY_EV_FILE: "file4.txt",
+        SUP_EXTRA: "file4.txt",
+        ISSUE_DECK_RELEASE_REVIEW_SUPPLEMENT_MAX_FILES: "1",
+      });
+      expect(reviewed(extra.result)).toContain("file3.txt");
+      expect(reviewed(extra.result)).not.toContain("file4.txt");
+      expect(extra.result.supplementedFiles).toBe(1);
+      rmSync(path.join(dir, "work"), { recursive: true, force: true });
+      mkdirSync(path.join(dir, "work"));
+      const empty = runReview({ OMIT_FILE: "file3.txt", SUP_EMPTY_EV: "1" });
+      expect(reviewed(empty.result)).not.toContain("file3.txt");
+      expect(empty.result.supplementedFiles).toBe(0);
+    });
+
     it("差分の上限・件数の上限に入らないファイルは聞き直さず、未確認に残す", () => {
       const sup = path.join(dir, "sup");
       // 巨大ファイルの全断片は1回の補完の上限（差分の予算）を超える
@@ -304,6 +331,8 @@ describe("run-release-review.sh（#4615）", { timeout: 30_000 }, () => {
       const { result } = runReview({ UNCONF_FILE: "file5.txt", INT_CONFIRM: "1" });
       expect(result.checks.every((c) => c.status === "confirmed")).toBe(true);
       expect(result.checks[0].evidence).toContain("[相互作用の確認]");
+      // 上書きしたバッチ側の未確認の根拠も併記する（#4769）
+      expect(result.checks[0].evidence).toMatch(/／バッチ側の未確認: バッチ\d+: 統合検証の結果待ち/);
     });
 
     it("相互作用の確認が報告しない項目は、バッチごとの非該当と確認済みの混在を確認済みとして扱う", () => {
@@ -316,6 +345,86 @@ describe("run-release-review.sh（#4615）", { timeout: 30_000 }, () => {
       const { result } = runReview({ UNCONF_FILE: "file5.txt", INT_OMIT: "1" });
       expect(result.checks.every((c) => c.status === "unconfirmed")).toBe(true);
       expect(result.checks[0].evidence).toMatch(/^バッチ\d+: 統合検証の結果待ち$/);
+    });
+  });
+
+  describe("バッチの並列実行とターン数の上限（#4769）", () => {
+    const lines = (file) => (existsSync(file) ? readFileSync(file, "utf8").trim().split("\n").filter(Boolean) : []);
+    // 起動・終了の記録から、同時に走っていた本数の最大を数える
+    const maxConcurrency = (file) => {
+      let cur = 0;
+      let max = 0;
+      for (const l of lines(file)) {
+        cur += l.startsWith("start") ? 1 : -1;
+        max = Math.max(max, cur);
+      }
+      return max;
+    };
+    const savedResults = () => readdirSync(path.join(dir, "work", batchDirs()[0])).filter((n) => /^r\d+\.json$/.test(n));
+
+    it("上限の本数まで同時に確認し、結果は1本ずつのときと同じに組み立てる", () => {
+      const conc = path.join(dir, "conc");
+      const { status, result } = runReview({ SLOW: "1", CONC_LOG: conc, ISSUE_DECK_RELEASE_REVIEW_PARALLEL: "3" });
+      expect(status).toBe("succeeded");
+      expect(maxConcurrency(conc)).toBe(3);
+      expect(result.fileReviews.filter((r) => r.status === "reviewed")).toHaveLength(13);
+      expect(result.rerunBatches).toBe(result.batches);
+      expect(result.checks.every((c) => c.status === "confirmed")).toBe(true);
+
+      rmSync(path.join(dir, "work"), { recursive: true, force: true });
+      mkdirSync(path.join(dir, "work"));
+      rmSync(conc);
+      runReview({ CONC_LOG: conc, ISSUE_DECK_RELEASE_REVIEW_PARALLEL: "1" });
+      expect(maxConcurrency(conc)).toBe(1);
+    });
+
+    it("1本が失敗したら新しいバッチは起動せず、実行中の結果は保存して失敗を報告し、再実行は失敗したバッチから続ける", () => {
+      const calls = path.join(dir, "calls");
+      const failed = runReview({ FAIL_BATCH: "2", CALL_LOG: calls, ISSUE_DECK_RELEASE_REVIEW_PARALLEL: "3" });
+      expect(failed.status).toBe("failed");
+      expect(failed.result.diagnostic).toMatchObject({ cause: "unknown", exitCode: 3, stage: "review" });
+      // 同時に起動したバッチ1・3は保存し、4以降は起動しない
+      expect(savedResults().sort()).toEqual(["r1.json", "r3.json"]);
+      const before = lines(calls).length;
+
+      const rerun = runReview({ CALL_LOG: calls });
+      expect(rerun.status).toBe("succeeded");
+      expect(rerun.result.reusedBatches).toBe(2);
+      expect(rerun.result.rerunBatches).toBe(rerun.result.batches - 2);
+      expect(lines(calls).length - before).toBe(rerun.result.batches - 2);
+    });
+
+    it("未実施のバッチの理由は、実際のバッチ番号で示す（途中のバッチが欠けても番号がずれない）", () => {
+      runReview({ FAIL_BATCH: "2", ISSUE_DECK_RELEASE_REVIEW_PARALLEL: "3" });
+      const { result } = runReview({ ISSUE_DECK_RELEASE_REVIEW_MAX_BATCHES_PER_RUN: "0" });
+      expect(result.pendingBatches).toBe(result.batches - 2);
+      const evidence = result.checks[0].evidence;
+      expect(evidence).toContain("バッチ2: 報告がありません");
+      expect(evidence).not.toContain("バッチ1:");
+      expect(evidence).not.toContain("バッチ3:");
+      expect(evidence).toContain(`バッチ${result.batches}: 報告がありません`);
+    });
+
+    it("claudeへターン数の上限を渡し、上限に達した失敗を診断で区別する", () => {
+      const args = path.join(dir, "args");
+      const { status, result } = runReview({ TURN_LIMIT_BATCH: "1", ARGS_LOG: args });
+      expect(status).toBe("failed");
+      expect(result.diagnostic).toMatchObject({ cause: "turn_limit", exitCode: 1 });
+      expect(result.diagnostic.excerpt).toContain("Reached max turns");
+      expect(lines(args).every((l) => l.includes("--max-turns 150"))).toBe(true);
+
+      rmSync(args);
+      runReview({ ARGS_LOG: args, ISSUE_DECK_RELEASE_REVIEW_MAX_TURNS: "0" });
+      expect(lines(args).some((l) => l.includes("--max-turns"))).toBe(false);
+    });
+
+    it("進捗の文面は、実行中のバッチが複数なら並べて示す", () => {
+      const out = execFileSync(
+        "bash",
+        ["-c", `source "${repoRoot}/scripts/run-release-review.sh"; batch_count=5; batch_running_label 2; echo; batch_running_label 2 3 4`],
+        { encoding: "utf8" },
+      );
+      expect(out.split("\n")).toEqual(["バッチ2/5", "バッチ2・3・4/5を並列で確認中"]);
     });
   });
 

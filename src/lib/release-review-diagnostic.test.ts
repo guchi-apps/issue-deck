@@ -48,6 +48,15 @@ describe("normalizeReleaseReviewDiagnostic", () => {
     expect(d).toMatchObject({ cause: "timeout", stage: "review", exitCode: 124, targetHeadSha: target.headSha });
   });
 
+  it("ターン数の上限（#4769）は時間切れと区別して残す", () => {
+    const d = normalizeReleaseReviewDiagnostic({ cause: "turn_limit", stage: "review", exitCode: 1 }, target);
+    expect(d).toMatchObject({ cause: "turn_limit", exitCode: 1 });
+    const v = describeReleaseReviewDiagnostic(d);
+    expect(v.causeLabel).toContain("ターン数の上限");
+    expect(v.action).toContain("ISSUE_DECK_RELEASE_REVIEW_MAX_TURNS");
+    expect(v.unidentified).toBe(false);
+  });
+
   it("知らない原因・工程は原因未特定・工程なしに落とす", () => {
     expect(normalizeReleaseReviewDiagnostic({ cause: "weird", stage: "x" }, target)).toMatchObject({
       cause: "unknown",
