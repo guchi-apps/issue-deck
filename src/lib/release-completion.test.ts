@@ -352,6 +352,50 @@ describe("公開準備（正式バンプ。#4496）との接続", () => {
     expect(decideReleaseCompletion(run(), { now, candidate: openCandidate, series: null, checks: passed, finalization: ready })).toEqual({ action: "evaluate_merge" });
   });
 
+  describe("修正系列→正式バンプ→公開承認（#4729）", () => {
+    // 修正系列がrevision 2（rev2）を作り、その後の公開準備でrevision 3（rev3）へバンプした
+    const bumped = { phase: "awaiting_approval", applied: { preHeadSha: "rev2", finalHeadSha: "rev3", finalBaseSha: "base1" } };
+    const fixed = series({ status: "ready", successorPrNumber: 10, successorHeadSha: "rev2", successorBaseSha: "base1" });
+    const bumpedCandidate = { ...openCandidate, headSha: "rev3" };
+
+    /** 巡回を繰り返し、`follow_successor`は系列の記録へ反映する（`applyDecision`と同じ） */
+    function sweep(start: ReleaseCompletionState, rounds: number) {
+      let state = start;
+      const decisions = [];
+      for (let i = 0; i < rounds; i++) {
+        const decision = decideReleaseCompletion(state, { now, candidate: bumpedCandidate, series: fixed, checks: passed, finalization: bumped });
+        decisions.push(decision);
+        if (decision.action === "follow_successor") {
+          state = { ...state, candidatePrNumber: decision.prNumber, candidateHeadSha: decision.headSha, candidateBaseSha: decision.baseSha };
+        }
+      }
+      return { state, decisions };
+    }
+
+    it("バンプ前のheadを記録した系列は、バンプ後へ1回進んだあと往復せずマージ評価へ届く", () => {
+      const { state, decisions } = sweep(run({ candidateHeadSha: "rev2", fromPublishApproval: true }), 3);
+      expect(decisions.map((d) => d.action)).toEqual(["follow_successor", "evaluate_merge", "evaluate_merge"]);
+      expect(state.candidateHeadSha).toBe("rev3");
+    });
+
+    it("バンプ後のheadを記録済みの系列は、バンプ前の後継へ戻らない", () => {
+      const { state, decisions } = sweep(run({ candidateHeadSha: "rev3", fromPublishApproval: true }), 2);
+      expect(decisions.map((d) => d.action)).toEqual(["evaluate_merge", "evaluate_merge"]);
+      expect(state.candidateHeadSha).toBe("rev3");
+    });
+
+    it("バンプ後に修正系列が新しいrevisionを作ったら、従来どおり後継として追う", () => {
+      const decision = decideReleaseCompletion(run({ candidateHeadSha: "rev3" }), {
+        now,
+        candidate: { ...openCandidate, headSha: "rev4" },
+        series: { ...fixed, successorHeadSha: "rev4" },
+        checks: passed,
+        finalization: bumped,
+      });
+      expect(decision).toEqual({ action: "follow_successor", prNumber: 10, headSha: "rev4", baseSha: "base1" });
+    });
+  });
+
   it("旧方式の候補（公開準備なし）は従来どおり評価へ進む", () => {
     expect(decideReleaseCompletion(run(), { now, candidate: openCandidate, series: null, checks: passed })).toEqual({ action: "evaluate_merge" });
   });
