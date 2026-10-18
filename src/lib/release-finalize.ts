@@ -144,16 +144,46 @@ export function categorizeChangedFile(path: string, rules: FinalizePathRules): C
   return "other";
 }
 
+const IOS_VERSION_LINE = /^\s*(MARKETING_VERSION|CURRENT_PROJECT_VERSION)\s*=\s*"?([^";\s]+)"?\s*;?\s*$/;
+
+/**
+ * iOS設定ファイルのpatchが、版番号の行（`MARKETING_VERSION`・`CURRENT_PROJECT_VERSION`）の書き換えだけか（#4753）。
+ * 削除行と追加行が同じキーの並びで対になり、追加後の`MARKETING_VERSION`が予約済みの正式版と一致するときだけtrue。
+ * patchが無い（巨大差分）・他の行が変わる場合はfalse
+ */
+export function isIosVersionLinesOnlyPatch(patch: string | null | undefined, expectedVersion: string): boolean {
+  if (!patch) return false;
+  const removed: [string, string][] = [];
+  const added: [string, string][] = [];
+  for (const line of patch.split("\n")) {
+    if (line.startsWith("@@") || line.startsWith("\\") || line === "") continue;
+    const sign = line[0];
+    if (sign !== "+" && sign !== "-") continue;
+    const m = IOS_VERSION_LINE.exec(line.slice(1));
+    if (!m) return false;
+    (sign === "-" ? removed : added).push([m[1], m[2]]);
+  }
+  if (removed.length === 0 || removed.length !== added.length) return false;
+  return added.every(([key, value], i) => {
+    if (removed[i][0] !== key) return false;
+    return key === "MARKETING_VERSION" ? value === expectedVersion : /^\d+$/.test(value);
+  });
+}
+
 export type BumpDiffSummary = {
-  files: { path: string; category: ChangedFileCategory }[];
+  /** `versionLinesOnly`: `ios_version`のファイルで、差分が版番号の行の書き換えだけ（公開承認の範囲内。#4753） */
+  files: { path: string; category: ChangedFileCategory; versionLinesOnly?: boolean }[];
   /** 版ファイルが実際に変わっているか（効いていないバンプを適用済みにしない） */
   versionFileChanged: boolean;
   /** 版・更新履歴以外（iOS設定・依存関係・その他）に触れているか。`true`なら引継ぎの前提が変わる */
   touchesBeyondVersion: boolean;
 };
 
-export function summarizeBumpDiff(paths: readonly string[], rules: FinalizePathRules): BumpDiffSummary {
-  const files = [...new Set(paths)].sort().map((path) => ({ path, category: categorizeChangedFile(path, rules) }));
+export function summarizeBumpDiff(paths: readonly string[], rules: FinalizePathRules, versionLinesOnlyPaths: ReadonlySet<string> = new Set()): BumpDiffSummary {
+  const files = [...new Set(paths)].sort().map((path) => {
+    const category = categorizeChangedFile(path, rules);
+    return category === "ios_version" && versionLinesOnlyPaths.has(path) ? { path, category, versionLinesOnly: true } : { path, category };
+  });
   return {
     files,
     versionFileChanged: files.some((f) => f.path === rules.versionFile),
@@ -339,6 +369,8 @@ export type FinalizeReportObservation = {
   fastForward: boolean;
   /** バンプ前headから現在のheadまでの変更ファイル */
   changedFiles: readonly string[];
+  /** 変更ファイルごとのpatch（取れなかった・巨大なものは含まない。#4753） */
+  patches?: Readonly<Record<string, string>>;
   /** 現在のheadの版（版ファイルを`version-query`で読んだもの。読めなければnull） */
   headVersion: string | null;
   mainVersion: string | null;
@@ -382,7 +414,10 @@ export function decideFinalizeReport(input: {
     return { action: "fail", reason: "候補ブランチがバンプ前のheadから早送りになっていません（履歴の書き換え・巻き戻し）" };
   }
   if (input.expectedVersion === null) return { action: "fail", reason: "版を確定できませんでした（上げ幅の報告がありません）" };
-  const diff = summarizeBumpDiff(observation.changedFiles, input.rules);
+  const versionLinesOnly = new Set(
+    observation.changedFiles.filter((path) => categorizeChangedFile(path, input.rules) === "ios_version" && isIosVersionLinesOnlyPatch(observation.patches?.[path], input.expectedVersion!)),
+  );
+  const diff = summarizeBumpDiff(observation.changedFiles, input.rules, versionLinesOnly);
   if (!diff.versionFileChanged) return { action: "fail", reason: "版ファイルが書き換わっていません" };
   if (!isBumpedToReservation({ headVersion: observation.headVersion, mainVersion: observation.mainVersion, reservedVersion: input.expectedVersion })) {
     return {
