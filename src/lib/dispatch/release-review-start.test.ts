@@ -33,7 +33,7 @@ const MARKER = { awaitingIntegration: { since: "2026-10-18T00:30:00.000Z" } };
 type Rows = {
   review?: { state: string; findings: unknown } | null;
   integration?: { state: string; createdAt: Date } | null;
-  verifyJob?: { status: string; targetHost: string } | null;
+  verifyJob?: { status: string; targetHost: string; claimedAt: Date | null } | null;
 };
 
 function setup(rows: Rows) {
@@ -56,7 +56,7 @@ describe("requestReleaseReviewAfterIntegration", () => {
     setup({
       review: { state: "waiting", findings: null },
       integration: { state: "waiting", createdAt: NOW },
-      verifyJob: { status: "QUEUED", targetHost: "subpc" },
+      verifyJob: { status: "QUEUED", targetHost: "subpc", claimedAt: null },
     });
     expect(await requestReleaseReviewAfterIntegration(target, NOW)).toEqual({ ok: true, outcome: "deferred" });
     expect(requestJob).not.toHaveBeenCalled();
@@ -70,7 +70,7 @@ describe("requestReleaseReviewAfterIntegration", () => {
     setup({
       review: { state: "needs_check", findings: { findings: [] } },
       integration: { state: "running", createdAt: NOW },
-      verifyJob: { status: "RUNNING", targetHost: "subpc" },
+      verifyJob: { status: "RUNNING", targetHost: "subpc", claimedAt: NOW },
     });
     expect(await requestReleaseReviewAfterIntegration(target, NOW)).toEqual({ ok: true, outcome: "deferred" });
     expect(verificationUpdateMany).not.toHaveBeenCalled();
@@ -80,7 +80,7 @@ describe("requestReleaseReviewAfterIntegration", () => {
     setup({
       review: { state: "waiting", findings: { ...MARKER, previousRun: { state: "failed", at: "x" } } },
       integration: { state: "passed", createdAt: NOW },
-      verifyJob: { status: "SUCCEEDED", targetHost: "verify-host" },
+      verifyJob: { status: "SUCCEEDED", targetHost: "verify-host", claimedAt: NOW },
     });
     expect(await requestReleaseReviewAfterIntegration(target, NOW)).toMatchObject({ ok: true, outcome: "queued" });
     expect(requestJob).toHaveBeenCalledWith(target, NOW, { preferredHost: "verify-host" });
@@ -88,6 +88,16 @@ describe("requestReleaseReviewAfterIntegration", () => {
       where: { ...target, kind: "ai_review", state: "waiting" },
       data: { findings: { previousRun: { state: "failed", at: "x" } } },
     });
+  });
+
+  it("一度も取得されずに期限切れになった統合検証のジョブのホストは優先しない（#4775）", async () => {
+    setup({
+      review: { state: "waiting", findings: MARKER },
+      integration: { state: "waiting", createdAt: NOW },
+      verifyJob: { status: "TIMEOUT", targetHost: "verify-host", claimedAt: null },
+    });
+    expect(await requestReleaseReviewAfterIntegration(target, NOW)).toMatchObject({ outcome: "queued" });
+    expect(requestJob).toHaveBeenCalledWith(target, NOW, { preferredHost: null });
   });
 
   it("統合検証の記録が無ければ（引き継いだ・未依頼）待たずに積む", async () => {
@@ -110,7 +120,7 @@ describe("startDeferredReleaseReview", () => {
     setup({
       review: { state: "waiting", findings: MARKER },
       integration: { state: "failed", createdAt: NOW },
-      verifyJob: { status: "FAILED", targetHost: "verify-host" },
+      verifyJob: { status: "FAILED", targetHost: "verify-host", claimedAt: NOW },
     });
     expect(await startDeferredReleaseReview(target, NOW)).toEqual({ action: "started", outcome: "queued" });
     expect(requestJob).toHaveBeenCalledWith(target, NOW, { preferredHost: "verify-host" });
@@ -127,7 +137,7 @@ describe("startDeferredReleaseReview", () => {
     setup({
       review: { state: "waiting", findings: MARKER },
       integration: { state: "waiting", createdAt: NOW },
-      verifyJob: { status: "RUNNING", targetHost: "verify-host" },
+      verifyJob: { status: "RUNNING", targetHost: "verify-host", claimedAt: NOW },
     });
     expect(await startDeferredReleaseReview(target, NOW)).toEqual({ action: "skipped", reason: "still_waiting" });
   });
@@ -151,5 +161,39 @@ describe("sweepDeferredReleaseReviews", () => {
     expect(requestJob.mock.calls[0][0]).toEqual(target);
     await sweepDeferredReleaseReviews(new Date(NOW.getTime() + 30_000));
     expect(verificationFindMany).toHaveBeenCalledTimes(1);
+  });
+
+  /** `skip`・`take`どおりに切り出して返す（実際のページングを模す） */
+  function serveRows(rows: Array<Record<string, unknown>>) {
+    verificationFindMany.mockImplementation(({ skip, take }: { skip: number; take: number }) =>
+      Promise.resolve(rows.slice(skip, skip + take)),
+    );
+  }
+
+  it("印の無い古い待機行が多数あっても、印付きの対象を拾う（印の無い行は上限に数えない。#4775）", async () => {
+    const stale = Array.from({ length: 250 }, (_, i) => ({ ...target, prNumber: 10_000 + i, findings: null }));
+    serveRows([...stale, { ...target, findings: MARKER }]);
+    setup({ review: { state: "waiting", findings: MARKER }, integration: { state: "passed", createdAt: NOW } });
+    await sweepDeferredReleaseReviews(NOW);
+    expect(requestJob).toHaveBeenCalledTimes(1);
+    expect(requestJob.mock.calls[0][0]).toEqual(target);
+    expect(verificationFindMany).toHaveBeenCalledTimes(3);
+  });
+
+  it("currentでない印付きの行は上限に数えず、その後ろの待機中の対象を拾う（#4775）", async () => {
+    const old = Array.from({ length: 80 }, (_, i) => ({ ...target, prNumber: 20_000 + i, findings: MARKER }));
+    serveRows([...old, { ...target, findings: MARKER }]);
+    isCurrent.mockImplementation((t: { prNumber: number }) => Promise.resolve(t.prNumber === target.prNumber));
+    setup({ review: { state: "waiting", findings: MARKER }, integration: { state: "passed", createdAt: NOW } });
+    await sweepDeferredReleaseReviews(NOW);
+    expect(requestJob).toHaveBeenCalledTimes(1);
+    expect(requestJob.mock.calls[0][0]).toEqual(target);
+  });
+
+  it("印付きでcurrentな対象は1回の巡回で50件までにする", async () => {
+    serveRows(Array.from({ length: 70 }, (_, i) => ({ ...target, prNumber: 30_000 + i, findings: MARKER })));
+    setup({ review: { state: "waiting", findings: MARKER }, integration: { state: "passed", createdAt: NOW } });
+    await sweepDeferredReleaseReviews(NOW);
+    expect(requestJob).toHaveBeenCalledTimes(50);
   });
 });

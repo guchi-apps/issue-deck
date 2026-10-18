@@ -14,22 +14,22 @@ describe("decideReleaseReviewStart", () => {
   it("統合検証のジョブが動いている間は待つ", () => {
     for (const status of ["QUEUED", "CLAIMED", "RUNNING"]) {
       expect(
-        decideReleaseReviewStart({ integration: integration("waiting"), lastVerifyJob: { status, targetHost: "subpc" }, now }),
+        decideReleaseReviewStart({ integration: integration("waiting"), lastVerifyJob: { status, targetHost: "subpc", claimedAt: ago(30_000) }, now }),
       ).toEqual({ action: "wait" });
     }
     expect(
-      decideReleaseReviewStart({ integration: integration("running"), lastVerifyJob: { status: "RUNNING", targetHost: "subpc" }, now }),
+      decideReleaseReviewStart({ integration: integration("running"), lastVerifyJob: { status: "RUNNING", targetHost: "subpc", claimedAt: ago(30_000) }, now }),
     ).toEqual({ action: "wait" });
   });
 
   it("統合検証が終わったら、合否に依らず統合検証を実行したホストを優先して開始する", () => {
     for (const state of ["passed", "failed", "needs_check"]) {
       expect(
-        decideReleaseReviewStart({ integration: integration(state), lastVerifyJob: { status: "SUCCEEDED", targetHost: "subpc-2" }, now }),
+        decideReleaseReviewStart({ integration: integration(state), lastVerifyJob: { status: "SUCCEEDED", targetHost: "subpc-2", claimedAt: ago(30_000) }, now }),
       ).toEqual({ action: "start", reason: "integration_finished", preferredHost: "subpc-2" });
     }
     expect(
-      decideReleaseReviewStart({ integration: integration("failed"), lastVerifyJob: { status: "FAILED", targetHost: "subpc" }, now }),
+      decideReleaseReviewStart({ integration: integration("failed"), lastVerifyJob: { status: "FAILED", targetHost: "subpc", claimedAt: ago(30_000) }, now }),
     ).toMatchObject({ action: "start", preferredHost: "subpc" });
   });
 
@@ -54,13 +54,22 @@ describe("decideReleaseReviewStart", () => {
     });
   });
 
-  it("記録が待機中でも、ジョブが報告なしで終わっていれば開始する（取り消し・期限切れは優先先なし）", () => {
+  it("記録が待機中でも、ジョブが報告なしで終わっていれば開始する（取得されずに終わったジョブは優先先なし）", () => {
     expect(
-      decideReleaseReviewStart({ integration: integration("waiting"), lastVerifyJob: { status: "TIMEOUT", targetHost: "subpc" }, now }),
+      decideReleaseReviewStart({ integration: integration("waiting"), lastVerifyJob: { status: "TIMEOUT", targetHost: "subpc", claimedAt: ago(30_000) }, now }),
     ).toEqual({ action: "start", reason: "integration_job_ended", preferredHost: "subpc" });
     expect(
-      decideReleaseReviewStart({ integration: integration("waiting"), lastVerifyJob: { status: "CANCELED", targetHost: "subpc" }, now }),
+      decideReleaseReviewStart({ integration: integration("waiting"), lastVerifyJob: { status: "CANCELED", targetHost: "subpc", claimedAt: null }, now }),
     ).toEqual({ action: "start", reason: "integration_job_ended", preferredHost: null });
+  });
+
+  it("QUEUEDのまま期限切れになったTIMEOUT（一度も取得されていない）のホストは優先しない（#4775）", () => {
+    expect(
+      decideReleaseReviewStart({ integration: integration("waiting"), lastVerifyJob: { status: "TIMEOUT", targetHost: "subpc", claimedAt: null }, now }),
+    ).toEqual({ action: "start", reason: "integration_job_ended", preferredHost: null });
+    expect(
+      decideReleaseReviewStart({ integration: integration("failed"), lastVerifyJob: { status: "TIMEOUT", targetHost: "subpc", claimedAt: null }, now }),
+    ).toEqual({ action: "start", reason: "integration_finished", preferredHost: null });
   });
 
   it("記録が待機中でジョブがまだ無いときは、猶予の間だけ待ち、過ぎたら開始する", () => {
