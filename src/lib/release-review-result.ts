@@ -8,7 +8,7 @@ import {
   type ReleaseReviewCheckResult,
   type ReleaseReviewCheckStatus,
 } from "@/lib/release-review-checklist";
-import { reviewFindingKey } from "@/lib/release-fix-series";
+import { legacyReviewFindingKey, reviewFindingKey } from "@/lib/release-fix-series";
 
 /**
  * リリース全体のAIレビュー（#4238）の結果の正規化。ランナーが報告した生の値を、記録できる形へ絞る。
@@ -34,8 +34,8 @@ export type ReleaseReviewFinding = {
   /** 影響するPR番号 */
   pullRequests: number[];
   /**
-   * 指摘の安定ID（`R-xxxxxx`・#4559）。保存した台帳は持たず、題・ファイル・行から都度導出する
-   * （再発は前回のIDを引き継ぐ）。修正系列の項目（`ReleaseFixSeries.items`）も同じ関数で導出して突き合わせる
+   * 指摘の安定ID（`R-xxxxxx`・#4559）。保存した台帳は持たず、正規化した題・ファイルから都度導出する
+   * （行番号は使わない。#4766。再発は前回のIDを引き継ぐ）。修正系列の項目（`ReleaseFixSeries.items`）も同じ関数で導出して突き合わせる
    */
   id?: string;
   /** 前回の指摘と同じものの再発か、新規か。前回の記録が無いレビューでは`new` */
@@ -136,9 +136,29 @@ export type ReleaseReviewContextFinding = {
   occurrences: number;
 };
 
-/** 指摘の安定ID。既存の指摘キー（題・ファイル・行）のハッシュで、保存せず導出する */
-export function reviewFindingId(finding: Pick<ReleaseReviewFinding, "title" | "file" | "line">): string {
-  return `R-${createHash("sha1").update(reviewFindingKey(finding)).digest("hex").slice(0, 6)}`;
+function findingIdOfKey(key: string): string {
+  return `R-${createHash("sha1").update(key).digest("hex").slice(0, 6)}`;
+}
+
+/**
+ * 指摘の安定ID。正規化した題とファイル（`reviewFindingKey`）のハッシュで、保存せず導出する。
+ * **行番号に依存しない**（#4766）——行のずれ・題の表記揺れで別の指摘にならない
+ */
+export function reviewFindingId(finding: Pick<ReleaseReviewFinding, "title" | "file"> & { line?: number | null }): string {
+  return findingIdOfKey(reviewFindingKey(finding));
+}
+
+/** #4766より前のID（題・ファイル・行のハッシュ）。旧IDで保存した判断・結果を引き継ぐ照合にだけ使う */
+export function legacyReviewFindingId(finding: Pick<ReleaseReviewFinding, "title" | "file" | "line">): string {
+  return findingIdOfKey(legacyReviewFindingKey(finding));
+}
+
+/**
+ * 同じ指摘を指しうるIDの一覧（保存済みのID・現行の導出・旧導出の順、重複なし）。保存済みの結果・判断は
+ * 旧IDのまま残っているので、照合はこの一覧のどれかが一致すれば同じ指摘とみなす（#4766）
+ */
+export function reviewFindingIdAliases(finding: Pick<ReleaseReviewFinding, "title" | "file" | "line"> & { id?: string | null }): string[] {
+  return [...new Set([finding.id ?? null, reviewFindingId(finding), legacyReviewFindingId(finding)].filter((id): id is string => Boolean(id)))];
 }
 
 export type ReleaseReviewDetail = {
@@ -296,7 +316,10 @@ export function normalizeReleaseReview(
   const mode: "initial" | "rereview" = reuse ? "rereview" : "initial";
   const fullReviewReason = reuse ? null : (runnerDenied ?? context?.fullReviewReason ?? (previous ? null : "前回の記録が無いため、対象全体を確認しました"));
   const previousFindings = context?.previousFindings ?? [];
-  const previousById = new Map(previousFindings.map((f) => [f.id, f]));
+  // 前回の指摘は保存済みのIDに加え、現行・旧導出のIDでも引く（旧IDで記録された前回の指摘を、行がずれても見失わない。#4766）
+  const previousById = new Map<string, ReleaseReviewContextFinding>();
+  for (const f of previousFindings) previousById.set(f.id, f);
+  for (const f of previousFindings) for (const alias of reviewFindingIdAliases(f)) if (!previousById.has(alias)) previousById.set(alias, f);
   const decidedIds = new Set(context?.decidedFindingIds ?? []);
 
   const parsed = (Array.isArray(raw.findings) ? raw.findings : [])
@@ -310,11 +333,14 @@ export function normalizeReleaseReview(
   const prevRunFailed = previous?.runFailed === true;
   const toFinding = ({ finding, blocking, previousId, raw: r }: ParsedFinding): ReleaseReviewFinding => {
     const derived = reviewFindingId(finding);
-    const matched = previousId && previousById.has(previousId) ? previousId : previousById.has(derived) ? derived : null;
+    // 照合の候補: AIが付けた`previousId`→現行の導出→旧導出（旧IDで残る記録との互換。#4766）
+    const candidates = [...new Set([previousId, derived, legacyReviewFindingId(finding)].filter((v): v is string => Boolean(v)))];
+    const prior = candidates.map((c) => previousById.get(c)).find((p) => p !== undefined);
+    // 再発は前回の指摘のIDを引き継ぐ（保存済みの判断・修正系列と同じIDのまま）
+    const matched = prior?.id ?? null;
     // ユーザーが判断済みの指摘は、言い換えても`previousId`で同じIDへ戻す（判断が外れて未判断として蒸し返さない。#4657）
-    const decided = !matched && previousId && decidedIds.has(previousId) ? previousId : decidedIds.has(derived) ? derived : null;
+    const decided = [...candidates, ...(matched ? [matched] : [])].find((c) => decidedIds.has(c)) ?? null;
     const id = matched ?? decided ?? derived;
-    const prior = matched ? previousById.get(matched) : undefined;
     const base: ReleaseReviewFinding = {
       ...finding,
       id,
@@ -341,8 +367,16 @@ export function normalizeReleaseReview(
             : "unknown";
     return base;
   };
-  const blockingFindings = parsed.filter((p) => p.blocking).map(toFinding);
-  const suggestions = parsed.filter((p) => !p.blocking).map(toFinding);
+  // 同じIDの指摘は1件にまとめる（バッチ間で言い回し・行だけ違う重複。#4766）。止める指摘を優先し、提案側の重複は落とす
+  const seenIds = new Set<string>();
+  const uniqueById = (list: ReleaseReviewFinding[]) =>
+    list.filter((f) => {
+      if (seenIds.has(f.id as string)) return false;
+      seenIds.add(f.id as string);
+      return true;
+    });
+  const blockingFindings = uniqueById(parsed.filter((p) => p.blocking).map(toFinding));
+  const suggestions = uniqueById(parsed.filter((p) => !p.blocking).map(toFinding));
 
   // 前回の止める指摘ごとの解消。**根拠の無い「解消」は未確認**、未解消と報告されたのに指摘へ載っていないものは
   // 指摘へ戻す（報告の取りこぼしで指摘が消えない）

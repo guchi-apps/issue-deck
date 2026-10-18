@@ -1,11 +1,15 @@
 import type { Prisma } from "@prisma/client";
 
 import { db } from "@/lib/db";
+import { resolveInstallationToken } from "@/lib/dispatch/installation-token";
+import { fetchBaseAdvanceChangedFiles } from "@/lib/github/release-api";
 import { isUniqueConstraintError } from "@/lib/prisma-error";
 import {
+  assessDecisionBase,
   isNonFixDecision,
   parseReleaseReviewDecisionAction,
   summarizeReleaseReviewDecisions,
+  type DecisionBaseContext,
   type DecisionTargetFinding,
   type ReleaseReviewDecisionAction,
   type ReleaseReviewDecisionRecord,
@@ -93,6 +97,74 @@ export async function listReleaseReviewDecisions(scopeKey: string): Promise<Rele
   return toRecords(rows);
 }
 
+/** 一度に照合する判断時のbaseの上限。超えた分は確かめられないものとして判断を無効にする */
+const MAX_BASE_COMPARES = 5;
+/** 2つのSHAの間の変更は変わらないので、取得できた結果だけを覚えておく（画面の再読み込みのたびにGitHubを引かない） */
+const baseChangesCache = new Map<string, readonly string[]>();
+const BASE_CHANGES_CACHE_LIMIT = 200;
+
+/**
+ * 判断時のbaseごとに、現在のbaseまでに変わったファイルを取る（#4766）。取れなかったbaseはnull
+ * （トークンが無い・比較に失敗した・mainが書き換えられた）で、判定側は判断を無効にする
+ */
+export async function loadDecisionBaseChanges(
+  repoFullName: string,
+  recordBaseShas: readonly string[],
+  currentBaseSha: string,
+): Promise<Record<string, readonly string[] | null>> {
+  const bases = [...new Set(recordBaseShas)].filter((sha) => sha !== currentBaseSha);
+  const result: Record<string, readonly string[] | null> = {};
+  if (bases.length === 0) return result;
+  const [owner, repo] = repoFullName.split("/");
+  let token: string | null | undefined;
+  let fetched = 0;
+  for (const from of bases) {
+    const cacheKey = `${repoFullName}:${from}...${currentBaseSha}`;
+    const cached = baseChangesCache.get(cacheKey);
+    if (cached) {
+      result[from] = cached;
+      continue;
+    }
+    if (fetched >= MAX_BASE_COMPARES) {
+      result[from] = null;
+      continue;
+    }
+    fetched += 1;
+    try {
+      token ??= await resolveInstallationToken(repoFullName);
+      const files = token ? await fetchBaseAdvanceChangedFiles(owner, repo, from, currentBaseSha, token) : null;
+      result[from] = files;
+      if (files) {
+        if (baseChangesCache.size >= BASE_CHANGES_CACHE_LIMIT) baseChangesCache.delete(baseChangesCache.keys().next().value as string);
+        baseChangesCache.set(cacheKey, files);
+      }
+    } catch (error) {
+      console.error("[release-review-decision] base compare failed", repoFullName, from, currentBaseSha, error);
+      result[from] = null;
+    }
+  }
+  return result;
+}
+
+/** 撤回されていない最新の判断の、判断時のbase（照合が要るものだけを取るため） */
+function latestDecisionBases(records: readonly { findingId: string; sequence: number; decision: string; baseSha: string }[]): string[] {
+  const latest = new Map<string, (typeof records)[number]>();
+  for (const r of records) {
+    const prev = latest.get(r.findingId);
+    if (!prev || r.sequence > prev.sequence) latest.set(r.findingId, r);
+  }
+  return [...latest.values()].filter((r) => r.decision !== "withdrawn").map((r) => r.baseSha);
+}
+
+/** 判断の有効性を決める現在の対象を、保存済みの判断から組み立てる（#4766） */
+export async function loadDecisionBaseContext(
+  repoFullName: string,
+  records: readonly { findingId: string; sequence: number; decision: string; baseSha: string }[],
+  baseSha: string,
+): Promise<DecisionBaseContext> {
+  return { baseSha, baseChanges: await loadDecisionBaseChanges(repoFullName, latestDecisionBases(records), baseSha) };
+}
+
 /** リリースPRの現在の結果に対する判断の要約。DBの表が無い・読めないときはnull（判断なしと同じ扱い） */
 export async function loadReleaseReviewDecisionSummary(input: {
   repoFullName: string;
@@ -106,7 +178,8 @@ export async function loadReleaseReviewDecisionSummary(input: {
   try {
     const chain = await resolveReleaseDecisionChain(input.repoFullName, input.prNumber);
     const records = await listReleaseReviewDecisions(releaseDecisionScopeKey(input.repoFullName, chain));
-    return summarizeReleaseReviewDecisions({ ...input, records });
+    const current = await loadDecisionBaseContext(input.repoFullName, records, input.current.baseSha);
+    return summarizeReleaseReviewDecisions({ ...input, current, records });
   } catch (error) {
     console.error("[release-review-decision] load failed", input.repoFullName, input.prNumber, error);
     return null;
@@ -115,22 +188,29 @@ export async function loadReleaseReviewDecisionSummary(input: {
 
 /**
  * 修正系列の巡回用。指摘の本文を読まずに、**今のbaseで有効な**非修正の判断（公開後対応・見送り・不採用）が付いた指摘IDを返す。
+ * `files`は指摘ID（旧IDを含む）→対象ファイル。判断時からmainが進んでいれば、そのファイルが変わっていないときだけ有効（#4766）。
  * 重大度の上昇・前提変化の報告は結果を読む経路（`loadReleaseReviewDecisionSummary`）が判定する。読めなければ空（判断なしと同じ）
  */
-export async function loadNonFixFindingIds(repoFullName: string, prNumber: number, baseSha: string): Promise<Set<string>> {
+export async function loadNonFixFindingIds(
+  repoFullName: string,
+  prNumber: number,
+  target: { baseSha: string; files: Readonly<Record<string, string | null>> },
+): Promise<Set<string>> {
   try {
     const chain = await resolveReleaseDecisionChain(repoFullName, prNumber);
     const rows = await db.releaseReviewDecision.findMany({
       where: { scopeKey: releaseDecisionScopeKey(repoFullName, chain) },
       orderBy: { sequence: "asc" },
-      select: { findingId: true, decision: true, baseSha: true },
+      select: { findingId: true, decision: true, baseSha: true, sequence: true },
       take: 2000,
     });
+    const current = await loadDecisionBaseContext(repoFullName, rows, target.baseSha);
     const latest = new Map<string, { decision: string; baseSha: string }>();
     for (const row of rows) latest.set(row.findingId, row);
     const ids = new Set<string>();
     for (const [id, row] of latest) {
-      if (row.baseSha === baseSha && isNonFixDecision(parseReleaseReviewDecisionAction(row.decision))) ids.add(id);
+      if (!isNonFixDecision(parseReleaseReviewDecisionAction(row.decision))) continue;
+      if (assessDecisionBase(row.baseSha, target.files[id] ?? null, current) === null) ids.add(id);
     }
     return ids;
   } catch (error) {
@@ -143,6 +223,8 @@ export type SaveDecisionInput = {
   scopeKey: string;
   repoFullName: string;
   findingId: string;
+  /** 同じ指摘の判断として読んでいる別のID（旧IDで保存された判断。#4766）。最新の判断の確認に含める */
+  aliasIds?: readonly string[];
   /** 画面が見ていた最新の判断ID（未判断ならnull）。今の最新と違えば保存しない */
   expectedDecisionId: string | null;
   decision: ReleaseReviewDecisionAction;
@@ -177,15 +259,22 @@ export async function saveReleaseReviewDecision(input: SaveDecisionInput): Promi
     where: { scopeKey: input.scopeKey, findingId: input.findingId },
     orderBy: { sequence: "desc" },
   });
+  // 旧IDで保存された判断も同じ指摘の判断として読むので、最新の確認はそれらを含めた判断時刻で行う（#4766）
+  const ids = [...new Set([input.findingId, ...(input.aliasIds ?? [])])];
+  const latestAny = async () =>
+    ids.length === 1
+      ? db.releaseReviewDecision.findFirst({ where: { scopeKey: input.scopeKey, findingId: input.findingId }, orderBy: { sequence: "desc" } })
+      : db.releaseReviewDecision.findFirst({
+          where: { scopeKey: input.scopeKey, findingId: { in: ids } },
+          orderBy: [{ createdAt: "desc" }, { sequence: "desc" }],
+        });
+  const currentLatest = ids.length === 1 ? latestRow : await latestAny();
   const conflict = async () => {
-    const row = await db.releaseReviewDecision.findFirst({
-      where: { scopeKey: input.scopeKey, findingId: input.findingId },
-      orderBy: { sequence: "desc" },
-    });
+    const row = await latestAny();
     return { ok: false as const, error: "decision_conflict" as const, latest: row ? ((await toRecords([row]))[0] ?? null) : null };
   };
-  if ((latestRow?.id ?? null) !== input.expectedDecisionId) return conflict();
-  if (input.decision === "withdrawn" && (!latestRow || latestRow.decision === "withdrawn")) return conflict();
+  if ((currentLatest?.id ?? null) !== input.expectedDecisionId) return conflict();
+  if (input.decision === "withdrawn" && (!currentLatest || currentLatest.decision === "withdrawn")) return conflict();
   try {
     const row = await db.releaseReviewDecision.create({
       data: {

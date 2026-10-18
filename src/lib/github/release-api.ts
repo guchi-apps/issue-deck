@@ -1196,6 +1196,37 @@ export async function fetchCompareChangedFiles(
   return paths;
 }
 
+/**
+ * mainが`from`から`to`へ進んだ間に変わったファイル（改名前のパスを含む。#4766。採否判断の有効性に使う）。
+ * `to`が`from`の子孫でない（mainの書き換え）・ファイル一覧が上限で切れたなど、**全件を確かめられないときはnull**
+ */
+export async function fetchBaseAdvanceChangedFiles(
+  owner: string,
+  repo: string,
+  from: string,
+  to: string,
+  token: string,
+): Promise<string[] | null> {
+  const paths = new Set<string>();
+  for (let page = 1; page <= 30; page++) {
+    const url = `${GITHUB_API}/repos/${owner}/${repo}/compare/${from}...${to}?per_page=100&page=${page}`;
+    const res = await githubFetch(url, token);
+    if (!res.ok) {
+      const detail = await res.text().catch(() => "");
+      throw new GithubApiError(res.status, `GitHub API request failed: ${res.status} ${url} ${detail}`);
+    }
+    const data: { status?: string; files?: { filename: string; previous_filename?: string }[] } = await res.json();
+    if (page === 1 && data.status !== "ahead" && data.status !== "identical") return null;
+    const files = data.files ?? [];
+    for (const f of files) {
+      paths.add(f.filename);
+      if (f.previous_filename) paths.add(f.previous_filename);
+    }
+    if (files.length < 100) return [...paths];
+  }
+  return null;
+}
+
 /** 2つのコミットの間で変わったファイルのpatch（#4753）。patchが無い（巨大・バイナリ）ファイルは含めない */
 export async function fetchComparePatches(owner: string, repo: string, base: string, head: string, token: string): Promise<Record<string, string>> {
   const patches: Record<string, string> = {};

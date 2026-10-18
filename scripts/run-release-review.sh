@@ -494,7 +494,7 @@ merge_batch_results() {
   jq -sc --argjson expected_results "$expected_results" --argjson pending "$pending" --argjson targets "$targets_json" \
     --argjson fileReviews "$file_reviews" --argjson inputFiles "$input_files" --argjson batches "$batch_count" '
     . as $rs
-    | def uniq_by_key: group_by([.title, .file, .line]) | map(.[0]);
+    | def uniq_by_key: group_by([((.title // "") | ascii_downcase | gsub("[\\s\\p{P}\\p{S}]"; "")), .file]) | map(sort_by(if .blocking == false then 1 else 0 end) | .[0]);
     {
       state: (if any($rs[]; .state == "needs_check") or any($rs[]; (.findings // []) | any(.blocking != false)) then "needs_check" else "passed" end),
       summary: ([ $rs | to_entries[] | . as $e | ($e.value.summary // "") | select(. != "") | "[\(if $e.key < $batches then "バッチ\($e.key + 1)" else "相互作用の確認" end)] \(.[0:1500])" ] | join("\n") | .[0:19000]),

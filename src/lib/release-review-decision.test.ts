@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   assessDecision,
+  assessDecisionBase,
   nonFixFindingIds,
   selectAutoFixIndexes,
   summarizeReleaseReviewDecisions,
@@ -121,6 +122,71 @@ describe("assessDecision", () => {
     expect(assessDecision(record({ severity: "high", blocking: false }), finding("R-000001"), { baseSha: BASE })).toContain("止める指摘");
     // 文言の違いだけ（重大度・前提が同じ）なら有効なまま
     expect(assessDecision(record(), finding("R-000001", { title: "言い換えた題" }), { baseSha: BASE })).toBeNull();
+  });
+});
+
+describe("判断の無効化はファイル単位（#4766）", () => {
+  const NEW_BASE = "c".repeat(40);
+  const target = finding("R-000001", { file: "src/a.ts" });
+
+  it("mainが無関係に進んでも、対象ファイルが変わっていなければ判断は残る", () => {
+    const current = { baseSha: NEW_BASE, baseChanges: { [BASE]: ["src/other.ts", "docs/x.md"] } };
+    expect(assessDecision(record(), target, current)).toBeNull();
+    const s = summarizeReleaseReviewDecisions({ records: [record()], findings: [target], suggestions: [], current, state: "needs_check", unverifiedScope: null });
+    expect(s.counts.stale).toBe(0);
+    expect(s.counts.undecidedBlocking).toBe(0);
+    expect(s.cleared).toBe(true);
+  });
+
+  it("対象ファイルが変われば無効になる（改名前のパスでも）", () => {
+    expect(assessDecision(record(), target, { baseSha: NEW_BASE, baseChanges: { [BASE]: ["src/a.ts"] } })).toContain("src/a.ts");
+    const s = summarizeReleaseReviewDecisions({
+      records: [record()],
+      findings: [target],
+      suggestions: [],
+      current: { baseSha: NEW_BASE, baseChanges: { [BASE]: ["src/a.ts"] } },
+      state: "needs_check",
+      unverifiedScope: null,
+    });
+    expect(s.counts.stale).toBe(1);
+    expect(s.counts.undecidedBlocking).toBe(1);
+  });
+
+  it("変更を確かめられない・ファイルが分からないときは従来どおり無効", () => {
+    expect(assessDecisionBase(BASE, "src/a.ts", { baseSha: NEW_BASE })).toContain("確かめられない");
+    expect(assessDecisionBase(BASE, "src/a.ts", { baseSha: NEW_BASE, baseChanges: { [BASE]: null } })).toContain("確かめられない");
+    expect(assessDecisionBase(BASE, null, { baseSha: NEW_BASE, baseChanges: { [BASE]: [] } })).toContain("ファイルが分からない");
+    expect(assessDecisionBase(BASE, null, { baseSha: BASE })).toBeNull();
+  });
+
+  it("重大度の上昇・前提変化の報告による無効化は残る", () => {
+    const current = { baseSha: NEW_BASE, baseChanges: { [BASE]: [] } };
+    expect(assessDecision(record({ severity: "low" }), target, current)).toContain("重大度が上がりました");
+    expect(assessDecision(record({ blocking: false }), target, current)).toContain("止める指摘");
+    expect(assessDecision(record(), { ...target, premiseChanged: "対象が広がった" }, current)).toContain("前提の変化");
+  });
+});
+
+describe("旧IDの判断の引き継ぎ（#4766）", () => {
+  it("旧IDで保存した判断を、別名に旧IDを持つ今の指摘の判断として読む", () => {
+    const s = summarize([record({ findingId: "R-legacy" })], [finding("R-new", { aliasIds: ["R-legacy"] })]);
+    expect(s.byFinding["R-new"].current?.findingId).toBe("R-legacy");
+    expect(s.byFinding["R-new"].aliasIds).toEqual(["R-legacy"]);
+    expect(s.detached).toEqual([]);
+    expect(s.cleared).toBe(true);
+    expect([...nonFixFindingIds(s)].sort()).toEqual(["R-legacy", "R-new"]);
+  });
+
+  it("旧IDと新IDの判断が両方あるときは、判断時刻の新しいほうが今の判断", () => {
+    const s = summarize(
+      [
+        record({ id: "old", findingId: "R-legacy", sequence: 2, decidedAt: "2026-10-15T00:00:00.000Z" }),
+        record({ id: "new", findingId: "R-new", sequence: 1, decision: "fix_now", followUp: null, decidedAt: "2026-10-16T00:00:00.000Z" }),
+      ],
+      [finding("R-new", { aliasIds: ["R-legacy"] })],
+    );
+    expect(s.byFinding["R-new"].current?.id).toBe("new");
+    expect(s.byFinding["R-new"].history.map((r) => r.id)).toEqual(["old", "new"]);
   });
 });
 

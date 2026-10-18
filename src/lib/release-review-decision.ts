@@ -77,6 +77,20 @@ export type DecisionTargetFinding = {
   blocking: boolean;
   /** 判断を出した後に、AIが判断の前提が変わったと報告した理由（再レビューの`premiseChanged`） */
   premiseChanged?: string | null;
+  /** 指摘の対象ファイル。mainが進んだときに、このファイルが変わったかで判断の有効性を決める（#4766） */
+  file?: string | null;
+  /** 同じ指摘を指しうる別のID（旧導出のIDなど。#4766）。この値で保存された判断も、この指摘の判断として読む */
+  aliasIds?: readonly string[];
+};
+
+/**
+ * 判断の有効性を決める現在の対象（#4766）。`baseChanges`は「判断時のbase → 現在のbase」で変わったファイル
+ * （改名前のパスを含む）を判断時のbaseごとに持つ。取得できなかったbaseはnull、キーが無いbaseは未取得で、
+ * **どちらも確かめられないものとして判断を無効にする**（従来の「mainが進んだら無効」と同じ側へ倒す）
+ */
+export type DecisionBaseContext = {
+  baseSha: string;
+  baseChanges?: Readonly<Record<string, readonly string[] | null>>;
 };
 
 export type FindingDecisionView = {
@@ -87,6 +101,8 @@ export type FindingDecisionView = {
   stale: string | null;
   /** 古い順の履歴（撤回を含む） */
   history: ReleaseReviewDecisionRecord[];
+  /** この指摘の判断として読んだ別のID（旧IDで保存された判断。#4766）。保存時の競合確認でも見る */
+  aliasIds?: string[];
 };
 
 export type ReleaseReviewDecisionSummary = {
@@ -113,15 +129,29 @@ export type ReleaseReviewDecisionSummary = {
 
 const SEVERITY_RANK = { low: 0, medium: 1, high: 2 } as const;
 
+/**
+ * mainが進んだあとも判断を使えるか（#4766）。**判断した指摘のファイルが、判断時のbaseから現在のbaseまでの間に
+ * 変わったときだけ**無効にする（無関係なmainの前進では判断を残す）。ファイルが分からない・変更を確かめられない
+ * ときは、従来どおり無効にする。使えなければ再確認が必要な理由
+ */
+export function assessDecisionBase(recordBaseSha: string, file: string | null | undefined, current: DecisionBaseContext): string | null {
+  if (recordBaseSha === current.baseSha) return null;
+  const moved = `判断したときからmainが進みました（判断時 ${recordBaseSha.slice(0, 7)} → 現在 ${current.baseSha.slice(0, 7)}）`;
+  if (!file) return `${moved}。指摘の対象ファイルが分からないため、前提を確認し直してください`;
+  const changed = current.baseChanges?.[recordBaseSha];
+  if (!changed) return `${moved}。対象ファイルが変わったかを確かめられないため、前提を確認し直してください`;
+  if (changed.includes(file)) return `${moved}。判断した指摘のファイル（${file}）がその間に変わったため、前提を確認し直してください`;
+  return null;
+}
+
 /** 判断が今の対象に使えるか。使えなければ再確認が必要な理由 */
 export function assessDecision(
   record: ReleaseReviewDecisionRecord,
   finding: DecisionTargetFinding | null,
-  current: { baseSha: string },
+  current: DecisionBaseContext,
 ): string | null {
-  if (record.baseSha !== current.baseSha) {
-    return `判断したときからmainが進みました（判断時 ${record.baseSha.slice(0, 7)} → 現在 ${current.baseSha.slice(0, 7)}）。前提を確認し直してください`;
-  }
+  const base = assessDecisionBase(record.baseSha, finding?.file, current);
+  if (base) return base;
   if (!finding) return null;
   if (SEVERITY_RANK[finding.severity] > SEVERITY_RANK[record.severity]) {
     return `重大度が上がりました（判断時 ${record.severity} → 現在 ${finding.severity}）`;
@@ -138,21 +168,28 @@ export function summarizeReleaseReviewDecisions(input: {
   findings: readonly DecisionTargetFinding[];
   /** 止めない改善提案 */
   suggestions: readonly DecisionTargetFinding[];
-  current: { baseSha: string };
+  current: DecisionBaseContext;
   /** 全体レビューの状態（`needs_check`以外では`cleared`にしない） */
   state: string;
   /** 未確認範囲。あれば判断では解除しない */
   unverifiedScope: string | null;
 }): ReleaseReviewDecisionSummary {
-  const grouped = new Map<string, ReleaseReviewDecisionRecord[]>();
-  for (const r of input.records) grouped.set(r.findingId, [...(grouped.get(r.findingId) ?? []), r]);
   const all = [...input.findings, ...input.suggestions];
   const findingById = new Map(all.map((f) => [f.id, f]));
+  // 旧IDで保存された判断を、今の指摘のIDへ読み替える（#4766）。今の指摘のIDそのものとの一致を優先する
+  const canonical = new Map<string, string>(all.map((f) => [f.id, f.id]));
+  for (const f of all) for (const alias of f.aliasIds ?? []) if (!canonical.has(alias)) canonical.set(alias, f.id);
+  const grouped = new Map<string, ReleaseReviewDecisionRecord[]>();
+  for (const r of input.records) {
+    const key = canonical.get(r.findingId) ?? r.findingId;
+    grouped.set(key, [...(grouped.get(key) ?? []), r]);
+  }
 
   const byFinding: Record<string, FindingDecisionView> = {};
   const detached: FindingDecisionView[] = [];
   for (const [findingId, list] of grouped) {
-    const history = [...list].sort((a, b) => a.sequence - b.sequence);
+    // 通し番号はIDごとなので、旧IDと新IDの判断が混ざるときは判断時刻で並べる
+    const history = [...list].sort((a, b) => (a.decidedAt === b.decidedAt ? a.sequence - b.sequence : a.decidedAt < b.decidedAt ? -1 : 1));
     const latest = history[history.length - 1];
     const current = latest && latest.decision !== "withdrawn" ? latest : null;
     const finding = findingById.get(findingId) ?? null;
@@ -162,6 +199,8 @@ export function summarizeReleaseReviewDecisions(input: {
       stale: current ? assessDecision(current, finding, input.current) : null,
       history,
     };
+    const aliasIds = [...new Set(list.map((r) => r.findingId).filter((id) => id !== findingId))];
+    if (aliasIds.length > 0) view.aliasIds = aliasIds;
     if (finding) byFinding[findingId] = view;
     else if (current) detached.push(view);
   }
@@ -227,10 +266,14 @@ export function selectAutoFixIndexes(
   return findings.flatMap((f, index) => (f.id && decisions && isEffectivelyNonFix(decisions.byFinding[f.id]) ? [] : [index]));
 }
 
-/** 指摘IDのうち、有効な非修正の判断が付いているもの */
+/** 指摘IDのうち、有効な非修正の判断が付いているもの（読み替えた旧IDを含む） */
 export function nonFixFindingIds(decisions: ReleaseReviewDecisionSummary | null): Set<string> {
   const ids = new Set<string>();
-  for (const view of Object.values(decisions?.byFinding ?? {})) if (isEffectivelyNonFix(view)) ids.add(view.findingId);
+  for (const view of Object.values(decisions?.byFinding ?? {})) {
+    if (!isEffectivelyNonFix(view)) continue;
+    ids.add(view.findingId);
+    for (const alias of view.aliasIds ?? []) ids.add(alias);
+  }
   return ids;
 }
 

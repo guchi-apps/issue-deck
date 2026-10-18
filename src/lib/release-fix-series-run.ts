@@ -69,7 +69,7 @@ import { releaseCallerSupportsSelection } from "@/lib/github/release-api";
 import { loadReleaseVerificationSummary } from "@/lib/release-verification-load";
 import { nonFixFindingIds, selectAutoFixIndexes } from "@/lib/release-review-decision";
 import { loadNonFixFindingIds } from "@/lib/release-review-decision-store";
-import { findingIdOfSeriesItem } from "@/lib/release-review-context";
+import { findingIdsOfSeriesItem, splitSeriesItemFile } from "@/lib/release-review-context";
 import type { ReleaseVerificationSection } from "@/lib/release-verification-summary";
 
 /**
@@ -310,18 +310,15 @@ export async function createReleaseFixSeries(input: CreateReleaseFixInput): Prom
 
   const sourceKey = buildReleaseFixSourceKey({
     repositoryFullName,
-    releasePrNumber: releasePr.number,
     baseSha: input.baseSha,
-    headSha: input.headSha,
     sourceKind: input.sourceKind,
     itemKeys: picked.keys,
   });
   const activeKey = releaseFixActiveKey(repositoryFullName, releasePr.number, sourceKey);
 
-  const duplicate = await db.releaseFixSeries.findUnique({ where: { activeKey } });
-  if (duplicate) return { outcome: "existing", series: toReleaseFixSeriesView(duplicate) };
-
-  // 後継候補での再検証失敗から続ける場合は、世代を進める（同一問題の再発だけで止める）
+  // 後継候補での再検証失敗から続ける場合は、世代を進める（同一問題の再発だけで止める）。
+  // **再発の判定を二重起案の確認より先に行う**（#4766）。鍵にheadを入れなくなったので、新方式（同じPRのrevision）では
+  // 再検証中の親系列が同じ`activeKey`を持ったままで、先に二重起案を見ると親自身を「既存」として返してしまう
   const parent = await db.releaseFixSeries.findFirst({
     where: { repositoryFullName, successorPrNumber: releasePr.number },
     orderBy: { createdAt: "desc" },
@@ -337,6 +334,9 @@ export async function createReleaseFixSeries(input: CreateReleaseFixInput): Prom
   const generation = parent ? parent.generation + 1 : 1;
   const next = canStartNextGeneration({ sourceKey, ancestorSourceKeys: ancestorKeys });
   if (!next.ok) return { outcome: "blocked", message: next.reason };
+
+  const duplicate = await db.releaseFixSeries.findUnique({ where: { activeKey } });
+  if (duplicate) return { outcome: "existing", series: toReleaseFixSeriesView(duplicate) };
 
   const draft = buildReleaseFixIssue(
     {
@@ -565,15 +565,22 @@ async function stopSeriesDecidedNonFix(
     (row) => row.sourceKind === "review_finding" && ["issue_created", "fix_in_progress", "fix_merged", "awaiting_decision"].includes(row.status),
   );
   if (candidates.length === 0) return { ids: new Set(), changed: 0 };
-  const nonFix = await loadNonFixFindingIds(repositoryFullName, releasePrNumber, candidates[0].originBaseSha);
-  if (nonFix.size === 0) return { ids: new Set(), changed: 0 };
-  const ids = new Set<string>();
-  for (const row of candidates) {
-    const items = (Array.isArray(row.items) ? row.items : []).flatMap((i) => {
+  const itemsOf = (row: ReleaseFixSeries) =>
+    (Array.isArray(row.items) ? row.items : []).flatMap((i) => {
       const rec = i as Record<string, unknown>;
       return typeof rec?.title === "string" ? [{ title: rec.title, file: typeof rec.file === "string" ? rec.file : null }] : [];
     });
-    if (items.length > 0 && items.every((item) => nonFix.has(findingIdOfSeriesItem(item)))) ids.add(row.id);
+  // 判断時からmainが進んでいても、指摘のファイルが変わっていなければ判断は有効（#4766）。旧IDの判断も引く
+  const files: Record<string, string | null> = {};
+  for (const row of candidates) {
+    for (const item of itemsOf(row)) for (const id of findingIdsOfSeriesItem(item)) files[id] ??= splitSeriesItemFile(item.file).file;
+  }
+  const nonFix = await loadNonFixFindingIds(repositoryFullName, releasePrNumber, { baseSha: candidates[0].originBaseSha, files });
+  if (nonFix.size === 0) return { ids: new Set(), changed: 0 };
+  const ids = new Set<string>();
+  for (const row of candidates) {
+    const items = itemsOf(row);
+    if (items.length > 0 && items.every((item) => findingIdsOfSeriesItem(item).some((id) => nonFix.has(id)))) ids.add(row.id);
   }
   if (ids.size === 0) return { ids, changed: 0 };
   return { ids, changed: await stopRows(ctx, [...ids], "stopped", DECIDED_NON_FIX_REASON) };
