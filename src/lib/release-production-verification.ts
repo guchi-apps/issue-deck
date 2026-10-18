@@ -14,6 +14,8 @@
  * 対象コミットのdeployが成功していることを前提にする。
  */
 
+import { hasVersionCheck } from "@/lib/deploy-version-check";
+
 export const PRODUCTION_TARGET_KINDS = ["deploy_version_check", "deploy_without_version_check", "source_publish_only", "unknown"] as const;
 export type ProductionTargetKind = (typeof PRODUCTION_TARGET_KINDS)[number];
 
@@ -58,7 +60,7 @@ export const PRODUCTION_WAIT_LABEL: Record<ProductionWaitReason, string> = {
 export function classifyProductionTarget(input: { deployWorkflowText: string | null; releaseArtifactsWorkflowText: string | null }): ProductionTargetKind {
   const deploy = input.deployWorkflowText;
   if (deploy !== null) {
-    return deploy.includes("APP_COMMIT_SHA") && deploy.includes("/api/app-version") ? "deploy_version_check" : "deploy_without_version_check";
+    return hasVersionCheck(deploy) ? "deploy_version_check" : "deploy_without_version_check";
   }
   return input.releaseArtifactsWorkflowText !== null ? "source_publish_only" : "unknown";
 }

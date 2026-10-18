@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -14,8 +15,12 @@ const SHA = "0123456789abcdef0123456789abcdef01234567";
 const OLD = "fedcba9876543210fedcba9876543210fedcba98";
 
 describe("classifyProductionTarget", () => {
+  it("2語をコメントやechoに書いただけでは照合付きにならない", () => {
+    expect(classifyProductionTarget({ deployWorkflowText: "# APP_COMMIT_SHA /api/app-version\n- run: echo APP_COMMIT_SHA /api/app-version", releaseArtifactsWorkflowText: null })).toBe("deploy_without_version_check");
+  });
+
   it("deploy.ymlに稼働SHAの照合があれば従来の方式、無ければHTTP応答のみの方式", () => {
-    expect(classifyProductionTarget({ deployWorkflowText: "APP_COMMIT_SHA ... /api/app-version", releaseArtifactsWorkflowText: null })).toBe("deploy_version_check");
+    expect(classifyProductionTarget({ deployWorkflowText: readFileSync(".github/workflows/deploy.yml", "utf-8"), releaseArtifactsWorkflowText: null })).toBe("deploy_version_check");
     expect(classifyProductionTarget({ deployWorkflowText: "curl -fsS http://127.0.0.1/login", releaseArtifactsWorkflowText: null })).toBe("deploy_without_version_check");
   });
 
