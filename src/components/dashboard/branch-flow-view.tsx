@@ -14,6 +14,7 @@ import {
 import { createPortal } from "react-dom";
 import { isReleaseCandidateHeadRef, isLegacyReleaseCandidateHeadRef, rcSequenceOf } from "@/lib/release-branch";
 import { decidePublishForPullRequest, ReleasePublishAction } from "@/components/dashboard/release-publish-action";
+import { describePublishSteps, type PublishStep, type PublishStepsView } from "@/lib/release-publish-steps";
 import { useReleaseRc } from "@/hooks/use-release-rc";
 import {
   ArrowUpToLine,
@@ -1566,6 +1567,62 @@ function ReleaseGroupNote({ lanes, released }: { lanes: BranchFlowLane[]; releas
   );
 }
 
+/** 公開承認のある候補の段階ピル（#4814）。進行中は紫で回し、完了は緑、人の操作が要る停止・失効は赤 */
+function PublishStepsPill({ pill }: { pill: PublishStepsView["pill"] }) {
+  if (pill.tone === "run") return <ReleaseProgressPill label={pill.label} spinning />;
+  return (
+    <span
+      className={cn(
+        "inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset",
+        pill.tone === "ok"
+          ? "bg-green-500/10 text-green-700 ring-green-500/60 dark:text-green-400"
+          : "bg-red-500/10 text-destructive ring-red-500/60",
+      )}
+      data-testid="next-release-publish-pill"
+    >
+      <span aria-hidden="true" className="text-[10px] leading-none">
+        {pill.tone === "ok" ? "✓" : "■"}
+      </span>
+      {pill.label}
+    </span>
+  );
+}
+
+/** 承認→バンプ→mainへのマージ→本番反映→稼働確認→完了のどこにいるか（#4814）。mainへのマージは時刻を添える */
+function PublishStepsLine({ steps }: { steps: PublishStep[] }) {
+  return (
+    <ol className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[11.5px] text-muted-foreground" data-testid="next-release-publish-steps">
+      {steps.map((step, index) => (
+        <li key={step.key} className="inline-flex items-center gap-1.5 whitespace-nowrap">
+          {index > 0 && (
+            <span aria-hidden="true" className="text-border">
+              ›
+            </span>
+          )}
+          <span
+            className={cn(
+              "inline-flex items-center gap-1",
+              step.state === "done" && "text-foreground",
+              step.state === "current" && "font-semibold text-purple-700 dark:text-purple-300",
+              step.state === "stopped" && "font-semibold text-destructive",
+            )}
+            aria-current={step.state === "current" || step.state === "stopped" ? "step" : undefined}
+          >
+            {step.state === "done" && (
+              <span aria-hidden="true" className="text-green-600 dark:text-green-400">
+                ✓
+              </span>
+            )}
+            {(step.state === "current" || step.state === "stopped") && <span aria-hidden="true">●</span>}
+            {step.label}
+            {step.at && <span className="font-normal tabular-nums text-muted-foreground">{formatMonthDayTime(step.at)}</span>}
+          </span>
+        </li>
+      ))}
+    </ol>
+  );
+}
+
 /**
  * 開いたリポジトリの先頭に出す「次のリリース」（#4428）。**本番稼働中の版・次のバージョン・次のリリースで反映されるPR件数**を
  * 並べて識別し、その下に次の候補の状態・理由・主操作・現在の検証を置く。流れ図（上流→下流）の並びは
@@ -1622,6 +1679,16 @@ function NextReleaseCard({
   const rcSequence = pullRequest ? rcSequenceOf(pullRequest.headRef) : null;
   const rc = useReleaseRc(repository.repositoryFullName, pullRequest?.number ?? 0, rcSequence !== null);
   const publishDecision = pullRequest ? decidePublishForPullRequest(pullRequest, rc.overview) : undefined;
+  // 公開承認のある候補は、承認の記録から段階を出す（#4814）。検証の要確認（判断済みを含む）を失敗に見せない
+  const publishSteps =
+    rcSequence !== null
+      ? describePublishSteps({
+          approval: rc.overview?.finalization?.approval ?? null,
+          finalization: rc.overview?.finalization?.current ?? null,
+        })
+      : null;
+  // 承認がある間も、本当に人の手が要る検証の問題（未判断の指摘・失敗）は従来どおり赤で出す
+  const verificationReasonShown = publishSteps ? (verificationShown?.problem ? verificationShown : null) : verificationShown;
 
   const versionText = group
     ? group.version
@@ -1653,8 +1720,16 @@ function NextReleaseCard({
             {rcSequence !== null ? `RC-${rcSequence}` : group ? "現在のリリース候補" : "リリース候補"}
           </span>
           <span className="font-semibold">{versionText}</span>
-          {group && <ReleaseGroupStatePill group={group} deviceBuild={null} />}
+          {publishSteps ? (
+            <>
+              <PublishStepsPill pill={publishSteps.pill} />
+              {verificationShown?.problem && <ReleaseCandidateVerificationPills verification={verificationShown} />}
+            </>
+          ) : (
+            group && <ReleaseGroupStatePill group={group} deviceBuild={null} />
+          )}
         </div>
+        {publishSteps && <PublishStepsLine steps={publishSteps.steps} />}
         <p className="min-w-0 break-words text-muted-foreground">
           {pullRequest ? (
             <GithubReferenceLink
@@ -1670,9 +1745,20 @@ function NextReleaseCard({
             repository.branchesLoaded && repository.release.comparison ? "次に公開する変更はありません" : "ブランチ状況を取得後に、公開する変更を確認できます"
           )}
         </p>
-        {verificationShown && <ReleaseCandidateVerificationReason verification={verificationShown} pullRequest={pullRequest} />}
+        {publishSteps?.note && (
+          <p
+            className={cn("min-w-0 break-words text-xs", publishSteps.pill.tone === "bad" ? "text-destructive" : "text-muted-foreground")}
+            data-testid="next-release-publish-note"
+          >
+            {publishSteps.note}
+          </p>
+        )}
+        {verificationReasonShown && (
+          <ReleaseCandidateVerificationReason verification={verificationReasonShown} pullRequest={pullRequest} />
+        )}
         <div className="flex min-w-0 flex-wrap items-center gap-2">
-          {pullRequest ? (
+          {/* 自動公開が進んでいる間は、公開操作の代わりに上の段階と補足を出す。止まった・失効したときは従来の操作へ戻す */}
+          {pullRequest && publishSteps?.pill.tone !== "run" && publishSteps?.pill.tone !== "ok" ? (
             <ReleasePublishAction
               pullRequest={pullRequest}
               decision={publishDecision}

@@ -139,6 +139,9 @@ export function resolveReleaseCandidateVerification(
         }
         break;
       case "needs_check":
+        // 止める指摘がすべて非修正の判断済み（#4814）。合否は要確認のままだが、人の判断はもう済んでいるので
+        // 赤の「検証要確認」にしない（公開を止めるかは既存のゲートと公開承認が決める）
+        if (!section.integration && stage?.kind === "needs_check" && stage.cleared) break;
         problems.push({
           kind: "needs_check",
           reason: !section.integration && stage ? describeStageProblem(stage) : `${section.name}に要確認の結果があります`,
