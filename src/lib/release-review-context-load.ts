@@ -6,9 +6,11 @@ import {
   type ReleaseFixHistory,
   type ReleaseReviewPromptContext,
 } from "@/lib/release-review-context";
-import { reviewFindingId } from "@/lib/release-review-result";
+import { buildFindingIdIndex, reviewFindingId, type ReleaseReviewContextFinding } from "@/lib/release-review-result";
+import { assessDecisionBase } from "@/lib/release-review-decision";
 import {
   listReleaseReviewDecisions,
+  loadDecisionBaseContext,
   releaseDecisionScopeKey,
   resolveReleaseDecisionChain,
 } from "@/lib/release-review-decision-store";
@@ -123,14 +125,27 @@ export async function loadReleaseReviewContext(target: ReleaseVerificationTarget
       });
     }
   }
-  return buildReviewPromptContext({ current: target, previous, histories, decisions: await loadContextDecisions(target) });
+  return buildReviewPromptContext({
+    current: target,
+    previous,
+    histories,
+    decisions: await loadContextDecisions(target, previous?.findings ?? []),
+  });
 }
 
-/** 候補系列のユーザー判断（#4657）。撤回されていない最新の判断だけ。読めなければ空（判断なしと同じ） */
-async function loadContextDecisions(target: ReleaseVerificationTarget): Promise<ReleaseReviewContextDecision[]> {
+/**
+ * 候補系列のユーザー判断（#4657）。撤回されていない最新の判断だけ。読めなければ空（判断なしと同じ）。
+ * mainが進んだ判断は、前回の指摘から引いた対象ファイルがその間に変わったときだけ前提の確認し直しにする（#4766）
+ */
+async function loadContextDecisions(
+  target: ReleaseVerificationTarget,
+  previousFindings: readonly ReleaseReviewContextFinding[],
+): Promise<ReleaseReviewContextDecision[]> {
   try {
     const chain = await resolveReleaseDecisionChain(target.repoFullName, target.prNumber);
     const records = await listReleaseReviewDecisions(releaseDecisionScopeKey(target.repoFullName, chain));
+    const current = await loadDecisionBaseContext(target.repoFullName, records, target.baseSha);
+    const previousIndex = buildFindingIdIndex(previousFindings);
     const latest = new Map<string, (typeof records)[number]>();
     for (const r of records) {
       const prev = latest.get(r.findingId);
@@ -149,7 +164,7 @@ async function loadContextDecisions(target: ReleaseVerificationTarget): Promise<
               scope: r.scope,
               timing: r.timing,
               followUp: r.followUp ? `${r.followUp.repo}#${r.followUp.number}` : null,
-              stale: r.baseSha !== target.baseSha,
+              stale: assessDecisionBase(r.baseSha, previousIndex.get(r.findingId)?.file ?? null, current) !== null,
             },
           ],
     );

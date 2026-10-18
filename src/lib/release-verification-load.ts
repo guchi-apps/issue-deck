@@ -16,7 +16,7 @@ import {
   type ReleaseOpsContext,
   type ReleaseOpsHostFact,
 } from "@/lib/release-review-ops-evidence";
-import { reviewFindingId, type ReleaseReviewFinding } from "@/lib/release-review-result";
+import { reviewFindingId, reviewFindingIdAliases, type ReleaseReviewFinding } from "@/lib/release-review-result";
 import { listReleaseVerificationDetails } from "@/lib/release-verification";
 import { getReleaseVerificationConfig } from "@/lib/release-verification-config";
 import {
@@ -161,6 +161,9 @@ async function attachReleaseReviewDecisions(
     severity: f.severity,
     blocking,
     premiseChanged: f.premiseChanged ?? null,
+    file: f.file,
+    // 保存済みの結果・判断に残る旧ID（題・ファイル・行の導出）でも同じ指摘として読む（#4766）
+    aliasIds: reviewFindingIdAliases(f).filter((id) => id !== f.id),
   });
   if (aiReview.state === "needs_check" || aiReview.state === "passed") {
     aiReview.decisions = await loadReleaseReviewDecisionSummary({
