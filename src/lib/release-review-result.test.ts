@@ -2,10 +2,12 @@ import { describe, expect, it } from "vitest";
 
 import { RELEASE_REVIEW_CHECKLIST_VERSION, RELEASE_REVIEW_CHECK_ITEMS } from "./release-review-checklist";
 import {
+  decideFindingBlocking,
   legacyReviewFindingId,
   normalizeReleaseReview,
   reviewFindingId,
   reviewFindingIdAliases,
+  type FindingBlockingInput,
   type ReleaseReviewNormalizeContext,
 } from "./release-review-result";
 
@@ -57,7 +59,7 @@ describe("normalizeReleaseReview", () => {
     expect(r?.detail.review?.legacy).toBe(true);
   });
 
-  it("指摘が1件でもあればneeds_check（AIのLGTMだけで通さない）", () => {
+  it("旧ランナー（版なし）の指摘はフラグが無くても従来どおり止める指摘（needs_check）", () => {
     const r = normalizeReleaseReview({
       state: "passed",
       findings: [{ severity: "high", title: "設定漏れ", detail: "env", file: "a.ts", pullRequests: [3, 3, 4] }],
@@ -139,17 +141,19 @@ describe("normalizeReleaseReview", () => {
     expect(normalizeReleaseReview(null)).toBeNull();
   });
 
-  it("止めない提案だけならpassed（リリースを止めない）。highは提案にできない", () => {
+  it("止めない提案だけならpassed（リリースを止めない）。highでも提案にできるが、セキュリティ相当は止める", () => {
     const r = normalizeReleaseReview(
       fullChecks({
         findings: [
           { blocking: false, severity: "low", title: "文言を直したい" },
-          { blocking: false, severity: "high", title: "認可の抜け", impact: "他リポジトリのデータが読める" },
+          { blocking: false, severity: "high", title: "念のための再試行確認" },
+          { blocking: false, severity: "high", title: "認可の抜け", checkId: "auth_boundary", impact: "他リポジトリのデータが読める" },
         ],
       }),
     );
-    expect(r?.detail.suggestions.map((f) => f.title)).toEqual(["文言を直したい"]);
+    expect(r?.detail.suggestions.map((f) => f.title)).toEqual(["文言を直したい", "念のための再試行確認"]);
     expect(r?.detail.findings.map((f) => f.title)).toEqual(["認可の抜け"]);
+    expect(r?.detail.findings[0].checkId).toBe("auth_boundary");
     expect(r?.state).toBe("needs_check");
     const onlySuggestion = normalizeReleaseReview(fullChecks({ findings: [{ blocking: false, severity: "low", title: "提案" }] }));
     expect(onlySuggestion?.state).toBe("passed");
@@ -229,8 +233,8 @@ describe("normalizeReleaseReview", () => {
         fullChecks({
           fixDiffFiles: ["a.ts"],
           findings: [
-            { severity: "high", title: "設定漏れ（言い換え）", file: "a.ts", line: 3, previousId: PREV_FINDING.id, impact: "i", evidence: "e" },
-            { severity: "high", title: "再試行で二重実行", file: "b.ts", discovery: "fix_induced", impact: "i", evidence: "e" },
+            { blocking: true, blockingReason: "r", severity: "high", title: "設定漏れ（言い換え）", file: "a.ts", line: 3, previousId: PREV_FINDING.id, impact: "i", evidence: "e" },
+            { blocking: true, blockingReason: "r", severity: "high", title: "再試行で二重実行", file: "b.ts", discovery: "fix_induced", impact: "i", evidence: "e" },
           ],
           previousFindings: [{ id: PREV_FINDING.id, status: "unresolved", evidence: "まだ残っている" }],
         }),
@@ -243,7 +247,7 @@ describe("normalizeReleaseReview", () => {
     });
 
     it("修正差分が指摘のファイルへ届いていなければ未修正、前回の実行が失敗していれば実行障害", () => {
-      const finding = { severity: "high", title: "設定漏れ", file: "a.ts", line: 3, impact: "i", evidence: "e" };
+      const finding = { blocking: true, blockingReason: "r", severity: "high", title: "設定漏れ", file: "a.ts", line: 3, impact: "i", evidence: "e" };
       const unfixed = normalizeReleaseReview(
         fullChecks({ fixDiffFiles: ["z.ts"], findings: [finding], previousFindings: [{ id: PREV_FINDING.id, status: "unresolved", evidence: "残" }] }),
         rereviewContext(),
@@ -290,7 +294,7 @@ describe("ユーザー判断の引き継ぎ（#4657）", () => {
   it("判断済みの指摘を言い換えて出し直しても、previousIdで同じIDへ戻す（判断が外れない）", () => {
     const r = normalizeReleaseReview(
       fullChecks({
-        findings: [{ severity: "high", title: "フリート未配布（言い換え）", file: "x.ts", previousId: PREV_FINDING.id, impact: "i", evidence: "e" }],
+        findings: [{ blocking: true, blockingReason: "r", severity: "high", title: "フリート未配布（言い換え）", file: "x.ts", previousId: PREV_FINDING.id, impact: "i", evidence: "e" }],
       }),
       decidedCtx(),
     );
@@ -302,8 +306,8 @@ describe("ユーザー判断の引き継ぎ（#4657）", () => {
     const r = normalizeReleaseReview(
       fullChecks({
         findings: [
-          { severity: "high", title: "設定漏れ", file: "a.ts", line: 3, premiseChanged: "配布手順が変わった", impact: "i", evidence: "e" },
-          { severity: "high", title: "別の指摘", file: "b.ts", premiseChanged: "勝手な申告", impact: "i", evidence: "e" },
+          { blocking: true, blockingReason: "r", severity: "high", title: "設定漏れ", file: "a.ts", line: 3, premiseChanged: "配布手順が変わった", impact: "i", evidence: "e" },
+          { blocking: true, blockingReason: "r", severity: "high", title: "別の指摘", file: "b.ts", premiseChanged: "勝手な申告", impact: "i", evidence: "e" },
         ],
       }),
       decidedCtx(),
@@ -336,7 +340,7 @@ describe("指摘IDの導出（#4766）", () => {
   it("旧IDで記録された前回の指摘は、行がずれて再発しても旧IDのまま引き継ぐ", () => {
     const legacyPrev = { ...PREV_FINDING, id: legacyReviewFindingId(PREV_FINDING) };
     const r = normalizeReleaseReview(
-      fullChecks({ findings: [{ severity: "high", title: "設定漏れ", file: "a.ts", line: 9, impact: "i", evidence: "e" }] }),
+      fullChecks({ findings: [{ blocking: true, blockingReason: "r", severity: "high", title: "設定漏れ", file: "a.ts", line: 9, impact: "i", evidence: "e" }] }),
       rereviewContext({ previousFindings: [legacyPrev] }),
     );
     expect(r?.detail.findings[0]).toMatchObject({ id: legacyPrev.id, status: "recurring", occurrences: 2 });
@@ -345,7 +349,7 @@ describe("指摘IDの導出（#4766）", () => {
   it("旧IDで保存した判断は、同じ題・ファイル・行の指摘へ引き継がれる", () => {
     const legacyId = legacyReviewFindingId(PREV_FINDING);
     const r = normalizeReleaseReview(
-      fullChecks({ findings: [{ severity: "high", title: "設定漏れ", file: "a.ts", line: 3, impact: "i", evidence: "e" }] }),
+      fullChecks({ findings: [{ blocking: true, blockingReason: "r", severity: "high", title: "設定漏れ", file: "a.ts", line: 3, impact: "i", evidence: "e" }] }),
       rereviewContext({ previousFindings: [], decidedFindingIds: [legacyId] }),
     );
     expect(r?.detail.findings[0]).toMatchObject({ id: legacyId, status: "recurring" });
@@ -356,13 +360,120 @@ describe("指摘IDの導出（#4766）", () => {
       fullChecks({
         findings: [
           { severity: "medium", title: "設定漏れ", file: "a.ts", line: 3, blocking: false },
-          { severity: "high", title: "設定漏れ。", file: "a.ts", line: 8, impact: "i", evidence: "e" },
-          { severity: "high", title: "設定 漏れ", file: "a.ts", line: 12, impact: "i", evidence: "e" },
+          { blocking: true, blockingReason: "r", severity: "high", title: "設定漏れ。", file: "a.ts", line: 8, impact: "i", evidence: "e" },
+          { blocking: true, blockingReason: "r", severity: "high", title: "設定 漏れ", file: "a.ts", line: 12, impact: "i", evidence: "e" },
         ],
       }),
     );
     expect(r?.detail.findings).toHaveLength(1);
     expect(r?.detail.findings[0].line).toBe(8);
     expect(r?.detail.suggestions).toHaveLength(0);
+  });
+});
+
+describe("止める指摘の判定（#4765）", () => {
+  const input = (over: Partial<FindingBlockingInput> = {}): FindingBlockingInput => ({
+    requested: true,
+    severity: "medium",
+    legacy: false,
+    security: false,
+    file: "src/a.ts",
+    impact: "利用者の設定が消える",
+    evidence: "src/a.ts:10 で上書きしている",
+    blockingReason: "データ破損",
+    targetFiles: new Set(["src/a.ts", "src/b.ts"]),
+    unrelatedInitialMiss: false,
+    ...over,
+  });
+
+  it("差分内・根拠がそろった止める申告は維持する", () => {
+    expect(decideFindingBlocking(input())).toEqual({ blocking: true, demotedReason: null });
+  });
+
+  it("申告が無い指摘は提案として扱い、理由を残す。明示の提案は理由を付けない", () => {
+    expect(decideFindingBlocking(input({ requested: undefined }))).toMatchObject({ blocking: false, demotedReason: expect.stringContaining("申告") });
+    expect(decideFindingBlocking(input({ requested: false, severity: "high" }))).toEqual({ blocking: false, demotedReason: null });
+  });
+
+  it("impact・evidence・blockingReasonの欠落は降格する", () => {
+    const d = decideFindingBlocking(input({ impact: null, blockingReason: null }));
+    expect(d.blocking).toBe(false);
+    expect(d.demotedReason).toContain("impact・blockingReason");
+  });
+
+  it("差分外のファイルは、根拠が差分内のファイルを挙げていなければ降格し、挙げていれば維持する", () => {
+    const outside = decideFindingBlocking(input({ file: "src/old.ts", evidence: "古い処理が残っている" }));
+    expect(outside.blocking).toBe(false);
+    expect(outside.demotedReason).toContain("src/old.ts");
+    expect(decideFindingBlocking(input({ file: "src/old.ts", evidence: "src/b.ts の変更で呼び出し引数が変わった" })).blocking).toBe(true);
+    // 対象ファイルが報告されていない結果では差分内かを確かめない
+    expect(decideFindingBlocking(input({ file: "src/old.ts", targetFiles: null })).blocking).toBe(true);
+  });
+
+  it("修正差分に関係しない初回の見落としは降格する", () => {
+    const d = decideFindingBlocking(input({ unrelatedInitialMiss: true }));
+    expect(d).toMatchObject({ blocking: false, demotedReason: expect.stringContaining("初回の見落とし") });
+  });
+
+  it("セキュリティ相当は、申告・根拠・差分の有無にかかわらず止める指摘に固定する", () => {
+    expect(
+      decideFindingBlocking(
+        input({ security: true, requested: false, impact: null, file: "src/old.ts", evidence: null, unrelatedInitialMiss: true }),
+      ),
+    ).toEqual({ blocking: true, demotedReason: null });
+  });
+
+  it("旧ランナー（版なし）は従来どおり: フラグ無しは止める、highは提案にできない", () => {
+    expect(decideFindingBlocking(input({ legacy: true, requested: undefined, impact: null }))).toEqual({ blocking: true, demotedReason: null });
+    expect(decideFindingBlocking(input({ legacy: true, requested: false, severity: "high" })).blocking).toBe(true);
+    expect(decideFindingBlocking(input({ legacy: true, requested: false, severity: "low" })).blocking).toBe(false);
+  });
+
+  it("正規化では対象ファイル外の指摘を提案へ降格し、降格理由を記録する", () => {
+    const r = normalizeReleaseReview(
+      fullChecks({
+        ...coverageOf(2),
+        findings: [
+          { blocking: true, severity: "high", title: "既存コードの問題", file: "src/legacy.ts", impact: "i", evidence: "既存の処理", blockingReason: "r" },
+          { blocking: true, severity: "medium", title: "差分内の問題", file: "src/f0.ts", impact: "i", evidence: "e", blockingReason: "r" },
+        ],
+      }),
+    );
+    expect(r?.detail.findings.map((f) => f.title)).toEqual(["差分内の問題"]);
+    expect(r?.detail.suggestions[0]).toMatchObject({ title: "既存コードの問題", blockingReason: null });
+    expect(r?.detail.suggestions[0].demotedReason).toContain("src/legacy.ts");
+    expect(r?.state).toBe("needs_check");
+  });
+
+  it("再レビューで修正差分に関係しないinitial_missは提案、修正差分のファイルなら維持、セキュリティ相当は止める", () => {
+    const base = { blocking: true, severity: "high", impact: "i", evidence: "e", blockingReason: "r", discovery: "initial_miss" };
+    const r = normalizeReleaseReview(
+      fullChecks({
+        fixDiffFiles: ["a.ts"],
+        findings: [
+          { ...base, title: "無関係な見落とし", file: "z.ts" },
+          { ...base, title: "修正箇所の見落とし", file: "a.ts" },
+          { ...base, title: "認可の見落とし", file: "z.ts", checkId: "auth_boundary" },
+        ],
+        previousFindings: [{ id: PREV_FINDING.id, status: "resolved", evidence: "直った" }],
+      }),
+      rereviewContext(),
+    );
+    expect(r?.detail.findings.map((f) => f.title)).toEqual(["修正箇所の見落とし", "認可の見落とし"]);
+    expect(r?.detail.suggestions.map((f) => f.title)).toEqual(["無関係な見落とし"]);
+    expect(r?.detail.suggestions[0].demotedReason).toContain("初回の見落とし");
+  });
+
+  it("前回の指摘が提案として載っていれば、止める指摘として再注入しない", () => {
+    const r = normalizeReleaseReview(
+      fullChecks({
+        findings: [{ severity: "high", title: "設定漏れ", file: "a.ts", line: 3, previousId: PREV_FINDING.id }],
+        previousFindings: [{ id: PREV_FINDING.id, status: "unresolved", evidence: "残" }],
+      }),
+      rereviewContext(),
+    );
+    expect(r?.detail.findings).toHaveLength(0);
+    expect(r?.detail.suggestions[0]).toMatchObject({ id: PREV_FINDING.id, status: "recurring" });
+    expect(r?.detail.review?.previousFindings[0].status).toBe("unresolved");
   });
 });
