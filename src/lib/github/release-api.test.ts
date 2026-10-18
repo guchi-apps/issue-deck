@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { clearConditionalRequestCache } from "@/lib/github/conditional-request";
 import {
+  fetchBaseAdvanceChangedFiles,
   fetchReleasesBackTo,
   fetchRefCiState,
   resolveCiStateFromCheckRuns,
@@ -231,5 +232,31 @@ describe("fetchReleasesBackTo（#2951で`api/repositories/release-history`から
 
     expect(result).toHaveLength(100);
     expect(fetchMock).toHaveBeenCalledTimes(5);
+  });
+});
+
+describe("fetchBaseAdvanceChangedFiles（#4766）", () => {
+  afterEach(() => vi.unstubAllGlobals());
+  const files = (n: number) => Array.from({ length: n }, (_, i) => ({ filename: `f${i}.ts` }));
+
+  it("mainの前進で変わったファイルを、改名前のパスも含めて1回の取得で返す", async () => {
+    const fetchMock = vi.fn(async () =>
+      jsonResponse(200, { status: "ahead", files: [{ filename: "a.ts" }, { filename: "new.ts", previous_filename: "old.ts" }] }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    expect(await fetchBaseAdvanceChangedFiles("o", "r", "b0", "b1", "t")).toEqual(["a.ts", "new.ts", "old.ts"]);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("一覧が上限（300件）に達したら切れている可能性があるのでnull", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse(200, { status: "ahead", files: files(300) })));
+    expect(await fetchBaseAdvanceChangedFiles("o", "r", "b0", "b1", "t")).toBeNull();
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse(200, { status: "ahead", files: files(299) })));
+    expect(await fetchBaseAdvanceChangedFiles("o", "r", "b0", "b1", "t")).toHaveLength(299);
+  });
+
+  it("mainが書き換えられた（判断時のbaseが祖先でない）ときはnull", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse(200, { status: "diverged", files: [{ filename: "a.ts" }] })));
+    expect(await fetchBaseAdvanceChangedFiles("o", "r", "b0", "b1", "t")).toBeNull();
   });
 });

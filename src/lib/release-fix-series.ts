@@ -136,23 +136,20 @@ export function releaseFixStepIndex(input: {
   }
 }
 
-/** 二重起案を止める鍵。同じリリースPR・SHA・種別・指摘の組なら同じ値になる（指摘の並び順に依らない） */
+/**
+ * 二重起案と再発を見分ける鍵。同じbase・種別・指摘の組なら同じ値になる（指摘の並び順に依らない）。
+ *
+ * **リリースPRの番号とheadは入れない**（#4766）。後継候補はheadが必ず変わり、旧方式では番号も変わるため、
+ * 入れると`canStartNextGeneration`の「同じ指摘の再発」が後継候補で一度も一致しなかった。同じPRでの二重起案は
+ * `releaseFixActiveKey`がPR番号を前置して止める。baseは残す（mainが進んだ後の再発は、前提の違う別の対象として扱う）
+ */
 export function buildReleaseFixSourceKey(input: {
   repositoryFullName: string;
-  releasePrNumber: number;
   baseSha: string;
-  headSha: string;
   sourceKind: ReleaseFixSourceKind;
   itemKeys: string[];
 }): string {
-  const material = [
-    input.repositoryFullName,
-    String(input.releasePrNumber),
-    input.baseSha,
-    input.headSha,
-    input.sourceKind,
-    ...[...new Set(input.itemKeys)].sort(),
-  ].join("\n");
+  const material = [input.repositoryFullName, input.baseSha, input.sourceKind, ...[...new Set(input.itemKeys)].sort()].join("\n");
   return createHash("sha256").update(material).digest("hex").slice(0, 40);
 }
 
@@ -161,8 +158,25 @@ export function releaseFixActiveKey(repositoryFullName: string, releasePrNumber:
   return `${repositoryFullName}#${releasePrNumber}:${sourceKey}`;
 }
 
-/** 指摘1件の識別子。題・ファイル・行から決め、機密や長文には依存しない */
-export function reviewFindingKey(finding: Pick<ReleaseReviewFinding, "title" | "file" | "line">): string {
+/**
+ * 指摘の題の正規化（#4766）。全角・半角（NFKC）・大小・空白・句読点・記号の揺れを除き、言い回しの細部が
+ * 違うだけの同じ指摘を同じ題として扱う。`scripts/run-release-review.sh`のバッチ間の重複除去も同じ規則
+ * （jqはNFKCを持たないので大小・空白・句読点・記号だけ）で揃える
+ */
+export function normalizeFindingTitle(title: string): string {
+  return title.normalize("NFKC").toLowerCase().replace(/[\s\p{P}\p{S}]/gu, "");
+}
+
+/**
+ * 指摘1件の識別子（#4766）。正規化した題とファイルから決め、**行番号は入れない**（行がずれても同じ指摘）。
+ * 機密や長文には依存しない
+ */
+export function reviewFindingKey(finding: Pick<ReleaseReviewFinding, "title" | "file"> & { line?: number | null }): string {
+  return `${normalizeFindingTitle(finding.title)}|${finding.file ?? ""}`;
+}
+
+/** #4766より前の指摘の識別子（題・ファイル・行）。旧IDで保存した判断・結果との照合にだけ使う */
+export function legacyReviewFindingKey(finding: Pick<ReleaseReviewFinding, "title" | "file" | "line">): string {
   return `${finding.title.trim()}|${finding.file ?? ""}|${finding.line ?? ""}`;
 }
 

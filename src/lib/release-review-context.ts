@@ -1,6 +1,8 @@
 import { RELEASE_REVIEW_CHECKLIST_VERSION, type ReleaseReviewCheckStatus } from "@/lib/release-review-checklist";
 import {
+  legacyReviewFindingId,
   reviewFindingId,
+  buildFindingIdIndex,
   type ReleaseReviewContextFinding,
   type ReleaseReviewNormalizeContext,
 } from "@/lib/release-review-result";
@@ -86,10 +88,21 @@ export function decideReviewMode(input: {
   return { mode: "rereview", reason: null };
 }
 
+/** 修正系列の項目の`path:line`を、ファイルと行へ分ける */
+export function splitSeriesItemFile(file: string | null): { file: string | null; line: number | null } {
+  const m = file?.match(/^(.*):(\d+)$/);
+  return { file: m ? m[1] : (file ?? null), line: m ? Number(m[2]) : null };
+}
+
 /** 修正系列の項目（題・`path:line`のファイル）から、全体レビューの指摘IDを導出する */
 export function findingIdOfSeriesItem(item: { title: string; file: string | null }): string {
-  const m = item.file?.match(/^(.*):(\d+)$/);
-  return reviewFindingId({ title: item.title, file: m ? m[1] : (item.file ?? null), line: m ? Number(m[2]) : null });
+  return reviewFindingId({ title: item.title, ...splitSeriesItemFile(item.file) });
+}
+
+/** 修正系列の項目が指しうる指摘ID（現行の導出と、#4766より前の旧導出）。旧IDで残る判断・結果との照合に使う */
+export function findingIdsOfSeriesItem(item: { title: string; file: string | null }): string[] {
+  const parts = { title: item.title, ...splitSeriesItemFile(item.file) };
+  return [...new Set([reviewFindingId(parts), legacyReviewFindingId(parts)])];
 }
 
 export function buildReviewPromptContext(input: {
@@ -102,10 +115,13 @@ export function buildReviewPromptContext(input: {
   const decisions = [...(input.decisions ?? [])];
   // 有効な非修正の判断が付いた指摘は、前回の指摘の解消確認・未解消の再注入から外す（#4657）
   const decidedFindingIds = decisions.filter((d) => !d.stale && d.decision !== "fix_now").map((d) => d.id);
+  // 判断を前回の指摘へ結び付ける。完全一致を優先し、衝突する現行の導出では結び付けない（#4766）
+  const previousIndex = buildFindingIdIndex(previous?.findings ?? []);
+  const decidedPrevious = new Set(decidedFindingIds.flatMap((id) => previousIndex.get(id) ?? []));
   const decision = decideReviewMode(input);
   const fixIssueByFinding: Record<string, number> = {};
   for (const history of histories) {
-    for (const item of history.items) fixIssueByFinding[findingIdOfSeriesItem(item)] ??= history.issueNumber;
+    for (const item of history.items) for (const id of findingIdsOfSeriesItem(item)) fixIssueByFinding[id] ??= history.issueNumber;
   }
   return {
     mode: decision.mode,
@@ -119,7 +135,7 @@ export function buildReviewPromptContext(input: {
           runFailed: previous.state === "failed",
         }
       : null,
-    previousFindings: (previous?.findings ?? []).filter((f) => !decidedFindingIds.includes(f.id)),
+    previousFindings: (previous?.findings ?? []).filter((f) => !decidedPrevious.has(f)),
     decidedFindingIds,
     decisions,
     checklistVersion: RELEASE_REVIEW_CHECKLIST_VERSION,

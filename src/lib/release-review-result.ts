@@ -9,7 +9,7 @@ import {
   type ReleaseReviewCheckResult,
   type ReleaseReviewCheckStatus,
 } from "@/lib/release-review-checklist";
-import { reviewFindingKey } from "@/lib/release-fix-series";
+import { legacyReviewFindingKey, reviewFindingKey } from "@/lib/release-fix-series";
 
 /**
  * リリース全体のAIレビュー（#4238）の結果の正規化。ランナーが報告した生の値を、記録できる形へ絞る。
@@ -35,8 +35,8 @@ export type ReleaseReviewFinding = {
   /** 影響するPR番号 */
   pullRequests: number[];
   /**
-   * 指摘の安定ID（`R-xxxxxx`・#4559）。保存した台帳は持たず、題・ファイル・行から都度導出する
-   * （再発は前回のIDを引き継ぐ）。修正系列の項目（`ReleaseFixSeries.items`）も同じ関数で導出して突き合わせる
+   * 指摘の安定ID（`R-xxxxxx`・#4559）。保存した台帳は持たず、正規化した題・ファイルから都度導出する
+   * （行番号は使わない。#4766。再発は前回のIDを引き継ぐ）。修正系列の項目（`ReleaseFixSeries.items`）も同じ関数で導出して突き合わせる
    */
   id?: string;
   /** 前回の指摘と同じものの再発か、新規か。前回の記録が無いレビューでは`new` */
@@ -141,9 +141,52 @@ export type ReleaseReviewContextFinding = {
   occurrences: number;
 };
 
-/** 指摘の安定ID。既存の指摘キー（題・ファイル・行）のハッシュで、保存せず導出する */
-export function reviewFindingId(finding: Pick<ReleaseReviewFinding, "title" | "file" | "line">): string {
-  return `R-${createHash("sha1").update(reviewFindingKey(finding)).digest("hex").slice(0, 6)}`;
+function findingIdOfKey(key: string): string {
+  return `R-${createHash("sha1").update(key).digest("hex").slice(0, 6)}`;
+}
+
+/**
+ * 指摘の安定ID。正規化した題とファイル（`reviewFindingKey`）のハッシュで、保存せず導出する。
+ * **行番号に依存しない**（#4766）——行のずれ・題の表記揺れで別の指摘にならない
+ */
+export function reviewFindingId(finding: Pick<ReleaseReviewFinding, "title" | "file"> & { line?: number | null }): string {
+  return findingIdOfKey(reviewFindingKey(finding));
+}
+
+/** #4766より前のID（題・ファイル・行のハッシュ）。旧IDで保存した判断・結果を引き継ぐ照合にだけ使う */
+export function legacyReviewFindingId(finding: Pick<ReleaseReviewFinding, "title" | "file" | "line">): string {
+  return findingIdOfKey(legacyReviewFindingKey(finding));
+}
+
+/**
+ * 同じ指摘を指しうるIDの一覧（保存済みのID・現行の導出・旧導出の順、重複なし）。保存済みの結果・判断は
+ * 旧IDのまま残っているので、照合はこの一覧のどれかが一致すれば同じ指摘とみなす（#4766）
+ */
+export function reviewFindingIdAliases(finding: Pick<ReleaseReviewFinding, "title" | "file" | "line"> & { id?: string | null }): string[] {
+  return [...new Set([finding.id ?? null, reviewFindingId(finding), legacyReviewFindingId(finding)].filter((id): id is string => Boolean(id)))];
+}
+
+/**
+ * 指摘の一覧をIDで引ける索引にする（#4766）。**完全一致（保存済みのID・旧導出＝題・ファイル・行）を優先**し、
+ * 現行の導出（正規化した題・ファイル）は**一覧の中で1件にしか当たらないときだけ**別名として使う。
+ * 題・ファイルが同じで行だけ違う指摘が複数あると現行の導出が衝突し、先着の指摘の判断・IDが別の指摘を覆うため
+ */
+export function buildFindingIdIndex<T extends Pick<ReleaseReviewFinding, "title" | "file" | "line"> & { id?: string | null }>(
+  items: readonly T[],
+): Map<string, T> {
+  const index = new Map<string, T>();
+  for (const f of items) if (f.id && !index.has(f.id)) index.set(f.id, f);
+  for (const f of items) {
+    const legacy = legacyReviewFindingId(f);
+    if (!index.has(legacy)) index.set(legacy, f);
+  }
+  const derived = new Map<string, T[]>();
+  for (const f of items) {
+    const id = reviewFindingId(f);
+    derived.set(id, [...(derived.get(id) ?? []), f]);
+  }
+  for (const [id, hits] of derived) if (hits.length === 1 && !index.has(id)) index.set(id, hits[0]);
+  return index;
 }
 
 export type ReleaseReviewDetail = {
@@ -404,7 +447,9 @@ export function normalizeReleaseReview(
   const mode: "initial" | "rereview" = reuse ? "rereview" : "initial";
   const fullReviewReason = reuse ? null : (runnerDenied ?? context?.fullReviewReason ?? (previous ? null : "前回の記録が無いため、対象全体を確認しました"));
   const previousFindings = context?.previousFindings ?? [];
-  const previousById = new Map(previousFindings.map((f) => [f.id, f]));
+  // 前回の指摘は保存済みのIDに加え、旧導出・現行の導出（衝突しないものだけ）でも引く（旧IDで記録された前回の指摘を、
+  // 行がずれても見失わない。#4766）
+  const previousById = buildFindingIdIndex(previousFindings);
   const decidedIds = new Set(context?.decidedFindingIds ?? []);
 
   // 確認項目の版を報告しない結果は旧ランナー。止める指摘の判定も従来どおりにする
@@ -426,11 +471,14 @@ export function normalizeReleaseReview(
   const prevRunFailed = previous?.runFailed === true;
   const toFinding = ({ finding, previousId, raw: r }: ParsedFinding): { finding: ReleaseReviewFinding; blocking: boolean } => {
     const derived = reviewFindingId(finding);
-    const matched = previousId && previousById.has(previousId) ? previousId : previousById.has(derived) ? derived : null;
+    // 照合の候補: AIが付けた`previousId`→旧導出（完全一致）→現行の導出（旧IDで残る記録との互換。#4766）
+    const candidates = [...new Set([previousId, legacyReviewFindingId(finding), derived].filter((v): v is string => Boolean(v)))];
+    const prior = candidates.map((c) => previousById.get(c)).find((p) => p !== undefined);
+    // 再発は前回の指摘のIDを引き継ぐ（保存済みの判断・修正系列と同じIDのまま）
+    const matched = prior?.id ?? null;
     // ユーザーが判断済みの指摘は、言い換えても`previousId`で同じIDへ戻す（判断が外れて未判断として蒸し返さない。#4657）
-    const decided = !matched && previousId && decidedIds.has(previousId) ? previousId : decidedIds.has(derived) ? derived : null;
+    const decided = [...candidates, ...(matched ? [matched] : [])].find((c) => decidedIds.has(c)) ?? null;
     const id = matched ?? decided ?? derived;
-    const prior = matched ? previousById.get(matched) : undefined;
     const discovery = !prior && !decided && previous ? pick(r.discovery, RELEASE_REVIEW_DISCOVERIES, "unknown") : null;
     const reportedReason = str(r.blockingReason, 500);
     const { blocking, demotedReason } = decideFindingBlocking({
@@ -474,9 +522,19 @@ export function normalizeReleaseReview(
             : "unknown";
     return { finding: base, blocking };
   };
+  // 同じIDの指摘は1件にまとめる（バッチ間で言い回し・行だけ違う重複。#4766）。止める指摘を優先し、提案側の重複は落とす
   const decidedFindings = parsed.map(toFinding);
-  const blockingFindings = decidedFindings.filter((d) => d.blocking).map((d) => d.finding);
-  const suggestions = decidedFindings.filter((d) => !d.blocking).map((d) => d.finding);
+  const seenIds = new Set<string>();
+  const uniqueById = (list: { finding: ReleaseReviewFinding }[]) =>
+    list
+      .filter((d) => {
+        if (seenIds.has(d.finding.id as string)) return false;
+        seenIds.add(d.finding.id as string);
+        return true;
+      })
+      .map((d) => d.finding);
+  const blockingFindings = uniqueById(decidedFindings.filter((d) => d.blocking));
+  const suggestions = uniqueById(decidedFindings.filter((d) => !d.blocking));
 
   // 前回の止める指摘ごとの解消。**根拠の無い「解消」は未確認**、未解消と報告されたのに指摘へ載っていないものは
   // 指摘へ戻す（報告の取りこぼしで指摘が消えない）。提案として載っているもの（降格を含む）は戻さない（#4765）

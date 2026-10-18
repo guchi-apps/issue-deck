@@ -126,7 +126,8 @@ async function handlePOST(request: NextRequest) {
     }
 
     // 競合を先に確かめる。公開後対応のIssueを作ってから競合で保存できない、という順を避ける
-    const latest = section.decisions?.byFinding[findingId]?.history.at(-1) ?? null;
+    const view = section.decisions?.byFinding[findingId];
+    const latest = view?.history.at(-1) ?? null;
     if ((latest?.id ?? null) !== expectedDecisionId) {
       return NextResponse.json(
         { error: "decision_conflict", message: "ほかの操作でこの指摘の判断が更新されました。最新の判断を確認してから保存してください", latest },
@@ -175,6 +176,7 @@ async function handlePOST(request: NextRequest) {
       scopeKey,
       repoFullName,
       findingId,
+      aliasIds: view?.aliasIds ?? [],
       expectedDecisionId,
       decision,
       reason: input.reason,

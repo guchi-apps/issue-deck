@@ -606,7 +606,7 @@ merge_batch_results() {
     --argjson reused "$reused" --argjson rerun "$rerun" --argjson intReused "$int_reused" \
     --argjson nb "${#batch_results[@]}" --argjson idxs "$idxs_json" --argjson supFindings "$sup_findings" '
     . as $rs
-    | def uniq_by_key: group_by([.title, .file, .line]) | map(.[0]);
+    | def uniq_by_key: group_by([((.title // "") | ascii_downcase | gsub("[\\s\\p{P}\\p{S}]"; "")), .file]) | map(sort_by(if .blocking == false then 1 else 0 end) | .[0]);
       def has_ev: (.evidence // "") | tostring | test("\\S");
       def settled: (.status == "confirmed" or .status == "not_applicable") and has_ev;
     ($rs[:$nb]) as $br
