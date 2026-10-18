@@ -1178,6 +1178,16 @@ RCから本番公開へ進む確認は**公開準備の開始の1回だけ**に�
 - **表示**: パネルの工程は「公開承認」（承認済み・失効・承認が必要）、承認欄は`describePublishProgress`の「最終検証中／自動公開待ち／自動公開が停止（理由）／本番反映中／稼働確認中」。承認済みの候補の段階表示は「本番承認待ち」ではなく「自動公開待ち」（`deriveRcStatus`の`publishApproved`）
 - 共有workflowの配布・callerの変更は不要（`finalize_request`の受け渡しは既存のまま）
 
+### 全体レビューは公開の必須条件ではない（#4807）
+
+**公開に必須なのはCI・統合検証（とMac検証・pre-releaseの前提・人の確認ラベル）で、全体レビュー（`ai_review`）は人が結果を承知で明示すれば外せる。** AIの全体レビューは指摘の取りこぼしを補う安全網で、指摘・実行失敗・未完了（バッチの途中・未確認範囲）が残るたびに公開を止め続けると、レビュー自体を100%完了させない限り本番へ出せなくなっていた。逆に、承知の明示なしに自動で外すと重大な指摘も素通りするため、**外すのは人の操作だけ**にする。
+
+- **外せる条件**: 統合検証が合格（または対象外）で、止めているのが全体レビューだけ（`isOnlyAiReviewBlocking`。指摘・失敗・未実施・実行中・古い結果のいずれも）。新方式の候補はさらに、現在revisionのheadとPRのheadが一致し、修正・更新が進んでいないこと（`decideAiReviewWaivable`→`RcStatusView.aiReviewWaivable`）
+- **新方式の候補**: このとき`buildRcFinalizeContract`は`requiresAiReviewWaiver: true`の契約を作り、パネルに「全体レビューの結果を承知で本番公開へ進む（公開承認）」が出る。確認画面でチェックを入れた要求（`waiveAiReview: true`）だけを`decideFinalizeStart`が受け付け（無ければ`ai_review_waiver_required`）、公開準備の行（`ReleaseCandidateFinalization.aiReviewWaived`。誰が＝`requestedByUserId`）へ記録する。合格した候補では明示があっても記録しない
+- **外した後**: 最終検証（`evaluateChecks`・`decideMergedCandidate`）、自動公開の系列（`isAiReviewWaivedFor`→`waiveAiReviewCheck`で`ai_review`を`not_applicable`扱い。起案・`approval_review_undecided`で止めない）、自動マージ・手動マージのゲート（`evaluateReleaseMergeGate`の`aiReviewWaived`）で全体レビューを止める条件にしない。バンプ後の全体レビューは従来どおり実行・表示する。外すのは記録した公開準備のバンプ前後のheadだけで、失敗・期限切れで修正工程へ戻った公開準備や、修正で変わった候補には引き継がない（次の公開準備で明示し直す）
+- **旧方式のリリースPR**（`release-main/v*`）: 止めているのが全体レビューだけなら、手動マージの既存の明示確認（`acknowledgeVerification`）で通せる（以前は要確認だけで、実行失敗・未実施は通せなかった）
+- 指摘ごとの非修正の判断（#4657）は残す。指摘を個別に採否するときはそちら、レビュー全体を待たずに出すときはこちら
+
 ### 公開後のdevelop整合
 
 - 新方式のバンプ・候補上の修正・競合解消はdevelopへ入らないまま公開される。公開後に、mainの内容をdevelopへ戻す同期PRを作り、同期されるまで次の候補は作らない（#4641。判定は`src/lib/release-develop-sync.ts`、観測・作成・巡回は`release-develop-sync-run.ts`）

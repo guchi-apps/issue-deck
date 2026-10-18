@@ -11,7 +11,9 @@ import {
   isLongMergeWait,
   nextMergeWait,
   RELEASE_COMPLETION_LONG_WAIT_MS,
+  isAiReviewWaivedFor,
   isGateClearedByReviewDecisions,
+  waiveAiReviewCheck,
   RELEASE_COMPLETION_FIX_START_TIMEOUT_MS,
   releaseCompletionStageIndex,
   type CompletionChecks,
@@ -519,6 +521,29 @@ describe("公開承認（#4666）から始めた系列", () => {
     expect(
       decideReleaseCompletion(approvalRun(), { now, candidate: openCandidate, series: null, checks: { ...undecided, aiReviewClearedByDecision: true }, finalization: preparing }),
     ).toMatchObject({ action: "wait", status: "checking" });
+  });
+
+  it("全体レビューを承知で外した公開準備では、指摘・失敗で止めず公開準備の完了を待つ（#4807）", () => {
+    const waiver = { ...preparing, aiReviewWaiver: { preHeadSha: "head1", finalHeadSha: null } };
+    expect(isAiReviewWaivedFor(waiver, "head1")).toBe(true);
+    expect(isAiReviewWaivedFor(waiver, "other")).toBe(false);
+    expect(isAiReviewWaivedFor(preparing, "head1")).toBe(false);
+    const failedReview = { ...passed, aiReview: "failed" as const };
+    expect(decideReleaseCompletion(approvalRun(), { now, candidate: openCandidate, series: null, checks: failedReview, finalization: waiver })).toMatchObject({
+      action: "stop",
+    });
+    const checks = waiveAiReviewCheck(failedReview, isAiReviewWaivedFor(waiver, openCandidate.headSha));
+    expect(decideReleaseCompletion(approvalRun(), { now, candidate: openCandidate, series: null, checks, finalization: waiver })).toMatchObject({
+      action: "wait",
+      status: "checking",
+    });
+    // 統合検証の失敗は外さない
+    const integrationFailed = waiveAiReviewCheck({ ...failedReview, integration: "failed", integrationFailureKind: "code" }, true);
+    expect(decideReleaseCompletion(approvalRun(), { now, candidate: openCandidate, series: null, checks: integrationFailed, finalization: waiver })).toEqual({
+      action: "stop",
+      reason: "approval_checks_failed",
+      detail: "統合検証",
+    });
   });
 
   it("公開準備が失敗して修正工程へ戻ったら、理由を示して止める", () => {

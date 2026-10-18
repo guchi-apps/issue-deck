@@ -13,7 +13,7 @@
  * - 次工程へ進めるか・revisionを更新できるかはサーバーがここで判定する（画面の表示だけで制御しない）
  */
 
-import type { ReleaseMergeGate } from "@/lib/release-merge-gate";
+import { isOnlyAiReviewBlocking, type ReleaseMergeGate } from "@/lib/release-merge-gate";
 import { PRODUCTION_COMPLETION_TEXT, PRODUCTION_STOP_TEXT, type ProductionStopReason } from "@/lib/release-production-stop";
 import type { ProductionVerificationMethod } from "@/lib/release-production-verification";
 import type { ReviewEvidenceStage } from "@/lib/release-review-reevaluation";
@@ -159,10 +159,15 @@ export type RcStatusView = {
   reason: string;
   /** 記録と実データが食い違っている（記録に無いpushなど）。人の確認が要る */
   attention: string | null;
+  /**
+   * 止めているのが全体レビューだけで、人が「結果を承知で公開へ進む」を選べるか（#4807。`decideAiReviewWaivable`）。
+   * 全体レビューは公開の必須条件ではない（統合検証・CIは必須のまま）
+   */
+  aiReviewWaivable: boolean;
 };
 
 function view(status: RcStatus, reason: string, attention: string | null = null, label: string = RC_STATUS_LABEL[status]): RcStatusView {
-  return { status, label, reason, attention };
+  return { status, label, reason, attention, aiReviewWaivable: false };
 }
 
 /**
@@ -171,6 +176,28 @@ function view(status: RcStatus, reason: string, attention: string | null = null,
  * - PRのheadが記録した現在revisionのheadと違う（記録に無いpush）なら、合格にせず`attention`を立てる
  */
 export function deriveRcStatus(input: RcStatusInput): RcStatusView {
+  const base = deriveRcStatusBase(input);
+  return { ...base, aiReviewWaivable: decideAiReviewWaivable(input, base.status) };
+}
+
+/** 全体レビューを外して公開準備へ進める状態（検証待ち・検証中・修正が必要）。修正中・作成中は候補が変わるので外す */
+const AI_REVIEW_WAIVABLE_STATUSES: readonly RcStatus[] = ["awaiting_verification", "verifying", "needs_fix"];
+
+/**
+ * 全体レビューの結果を承知で公開準備へ進めてよいか（#4807）。**統合検証の合格は外さない。** 現在revisionのheadと
+ * PRのheadが一致し、修正・更新が進んでおらず、止めているのが全体レビューだけのときに限る
+ */
+export function decideAiReviewWaivable(input: RcStatusInput, status: RcStatus): boolean {
+  if (!AI_REVIEW_WAIVABLE_STATUSES.includes(status)) return false;
+  if (input.pending || input.fixInProgress || input.current === null || input.current.headSha === null) return false;
+  const pr = input.pullRequest;
+  if (pr === null || pr.merged || pr.state !== "open" || pr.headSha !== input.current.headSha) return false;
+  const gate = input.gate;
+  if (gate === null || gate.status === "not_enforced" || gate.prerequisites.length > 0) return false;
+  return isOnlyAiReviewBlocking(gate.views);
+}
+
+function deriveRcStatusBase(input: RcStatusInput): RcStatusView {
   const { phase } = input;
   if (phase === "cancelled") return view("cancelled", "候補は取り消されました。記録と過去の結果は残っています");
   const production = input.production;
@@ -434,15 +461,23 @@ export type RcFinalizeContract = {
   frozenDevelopSha: string;
   /** 固定時のPRと、取り込んだPR（関連修正・承認済み）の番号 */
   includedPrs: number[];
+  /**
+   * 全体レビューが合格していない（止めているのが全体レビューだけ）。公開準備の開始には、人が結果を承知で
+   * 進むと明示した要求（`waiveAiReview: true`）が要る（#4807）
+   */
+  requiresAiReviewWaiver: boolean;
 };
 
 export function buildRcFinalizeContract(input: {
   candidate: { id: string; sequence: number; frozenDevelopSha: string; frozenPrNumbers: readonly number[] };
   current: { revision: number; prNumber: number | null; baseSha: string | null; headSha: string | null; importedPrNumbers: readonly number[] } | null;
   status: RcStatus;
+  /** `RcStatusView.aiReviewWaivable`。省略時はfalse */
+  aiReviewWaivable?: boolean;
 }): RcFinalizeContract | null {
   const { current } = input;
-  if (input.status !== "ready_to_prepare" || current === null) return null;
+  const requiresAiReviewWaiver = input.status !== "ready_to_prepare";
+  if ((requiresAiReviewWaiver && input.aiReviewWaivable !== true) || current === null) return null;
   if (current.prNumber === null || current.baseSha === null || current.headSha === null) return null;
   return {
     candidateId: input.candidate.id,
@@ -453,6 +488,7 @@ export function buildRcFinalizeContract(input: {
     headSha: current.headSha,
     frozenDevelopSha: input.candidate.frozenDevelopSha,
     includedPrs: [...new Set([...input.candidate.frozenPrNumbers, ...current.importedPrNumbers])],
+    requiresAiReviewWaiver,
   };
 }
 

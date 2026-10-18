@@ -383,6 +383,7 @@ async function buildCandidateView(ctx: Context, row: CandidateRow): Promise<RcCa
         ? { revision: current.revision, prNumber: current.prNumber, baseSha: current.baseSha, headSha: current.headSha, importedPrNumbers: imported }
         : null,
       status: status.status,
+      aiReviewWaivable: status.aiReviewWaivable,
     }),
   };
 }

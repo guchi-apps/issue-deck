@@ -35,7 +35,9 @@ import {
   RELEASE_COMPLETION_COST_LIMIT_USD,
   RELEASE_COMPLETION_SCOPE_PRODUCTION,
   RELEASE_COMPLETION_TTL_MS,
+  isAiReviewWaivedFor,
   isGateClearedByReviewDecisions,
+  waiveAiReviewCheck,
   describeMergeWait,
   isLongMergeWait,
   nextMergeWait,
@@ -499,7 +501,9 @@ async function observeCandidate(run: RunRow, ctx: Ctx): Promise<Observation> {
     candidate,
     pull,
     series,
-    checks: summary ? toCompletionChecks(summary, run.repositoryFullName) : null,
+    checks: summary
+      ? waiveAiReviewCheck(toCompletionChecks(summary, run.repositoryFullName), isAiReviewWaivedFor(finalization, candidate?.headSha ?? ""))
+      : null,
     summary,
     // 新方式なのに記録が無い（取得できない）ときも「公開準備が済んでいない」として扱う（旧方式と見なして進めない）
     finalization: pull && isRcReleaseCandidateHeadRef(pull.head.ref) ? (finalization ?? { phase: "review", applied: null, latest: null }) : null,
@@ -688,7 +692,13 @@ async function evaluateAndMerge(run: RunRow, ctx: Ctx, now: Date, observation: O
   ]);
   const prerequisites = pull?.base ? await loadReleasePrerequisiteBlockers(run.repositoryFullName, run.candidatePrNumber) : [];
   const gate = pull?.base
-    ? evaluateReleaseMergeGate({ current: { baseSha: pull.base.sha, headSha: pull.head.sha }, records, enforced: true, prerequisites })
+    ? evaluateReleaseMergeGate({
+        current: { baseSha: pull.base.sha, headSha: pull.head.sha },
+        records,
+        enforced: true,
+        prerequisites,
+        aiReviewWaived: isAiReviewWaivedFor(observation.finalization, pull.head.sha),
+      })
     : null;
   const mac = observation.checks?.mac;
   const decision = decideCompletionMerge({ ...run, status: run.status as ReleaseCompletionStatus }, {

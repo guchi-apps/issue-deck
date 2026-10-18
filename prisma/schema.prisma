@@ -3111,6 +3111,9 @@ model ReleaseCandidateFinalization {
   runUrl             String?   @db.VarChar(512)
   failureReason      String?   @db.Text
   requestedByUserId  String?   @db.VarChar(40)
+  // 要求した人が全体レビューの結果を承知で公開へ進むと明示したか（#4807）。trueの公開準備では、最終検証・
+  // 自動公開の判定で全体レビューを止める条件にしない（統合検証・CIは必須のまま）。誰がはrequestedByUserId
+  aiReviewWaived     Boolean   @default(false)
   appliedAt          DateTime?
   createdAt          DateTime  @default(now())
   updatedAt          DateTime  @updatedAt

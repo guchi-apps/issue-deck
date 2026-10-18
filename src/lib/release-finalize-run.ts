@@ -139,6 +139,8 @@ export type RcFinalizationChecks = {
   reverifyPhase: ReverifyPhase;
   readiness: FinalizeReadiness;
   readinessLabel: string | null;
+  /** 全体レビューの結果を承知で進めた公開準備か（#4807）。trueなら全体レビューは表示のみで、完了の条件にしない */
+  aiReviewWaived: boolean;
 };
 
 export type RcFinalizationOverview = {
@@ -306,6 +308,8 @@ export async function requestRcFinalize(
      * ことを示したうえで押された要求だけを受け付ける（古い画面からの要求を承認として扱わない）
      */
     approvePublish: boolean;
+    /** 全体レビューの結果を承知で公開へ進む明示（#4807）。全体レビューが合格していない候補だけで要る */
+    waiveAiReview?: boolean;
   },
 ): Promise<FinalizeMutationResult> {
   const ctx: Context = input;
@@ -333,6 +337,7 @@ export async function requestRcFinalize(
     observed: pr && pr.base ? { prHeadSha: pr.head.sha, prBaseSha: pr.base.sha, mainSha } : null,
     hasPending: pending !== null,
     expectedHeadSha: input.expectedHeadSha,
+    waiveAiReview: input.waiveAiReview === true,
   });
   if (!decision.ok) return { ok: false, error: decision.error };
   const contract = decision.contract;
@@ -418,6 +423,7 @@ export async function requestRcFinalize(
           diffFiles: [],
           handoffEvidence: [],
           requestedByUserId: input.userId,
+          aiReviewWaived: decision.aiReviewWaived,
         },
       });
       committed.approvalId = await commitPublishApproval(tx, approval);
@@ -781,13 +787,16 @@ async function evaluateChecks(ctx: Context, row: FinalizationRow, pull: PullDeta
     listReleaseVerificationDetails(repositoryFullName, row.prNumber).catch(() => null),
   ]);
   const finalTarget = { baseSha: row.finalBaseSha ?? "", headSha: row.finalHeadSha ?? "" };
-  const gate = evaluateReleaseMergeGate({ current: finalTarget, records, enforced: true });
+  const aiReviewWaived = row.aiReviewWaived;
+  const gate = evaluateReleaseMergeGate({ current: finalTarget, records, enforced: true, aiReviewWaived });
   // バンプ後の全体レビューの共通の段階（#4664）。統合検証の証跡待ち・再評価中を「要確認で終了」と見せない
   const reviewStage = details
     ? (summarizeReleaseVerification({ current: finalTarget, rows: details, enforced: true, aiReviewAssignee: "" }).aiReview
         .stage ?? null)
     : null;
-  const pendingReverify = gate.views.filter((v) => v.state !== "passed" && v.state !== "not_applicable").map((v) => v.kind as FinalizeVerificationKind);
+  const pendingReverify = gate.views
+    .filter((v) => !isWaivedView(v, aiReviewWaived) && v.state !== "passed" && v.state !== "not_applicable")
+    .map((v) => v.kind as FinalizeVerificationKind);
   const ciState = ci?.ciState ?? "unknown";
   const readiness = decideFinalizeReadiness({ checks: { ciState, draft: pull.draft }, pendingReverify });
   const reverify = describeReverifyItems(gate.views, reviewStage);
@@ -796,10 +805,17 @@ async function evaluateChecks(ctx: Context, row: FinalizationRow, pull: PullDeta
     draft: pull.draft,
     pendingReverify,
     reverify,
-    reverifyPhase: decideReverifyPhase(reverify),
+    // 外した全体レビューは表示に残すが、段階（完了待ち・要確認）の判定には入れない
+    reverifyPhase: decideReverifyPhase(reverify.filter((item) => !(aiReviewWaived && item.kind === "ai_review"))),
     readiness,
     readinessLabel: readiness.ready ? null : FINALIZE_READINESS_LABEL[readiness.reason],
+    aiReviewWaived,
   };
+}
+
+/** 人が結果を承知で外した全体レビューの表示か（#4807）。外した検証は最終検証の完了・失敗の条件にしない */
+function isWaivedView(view: ReleaseVerificationView, aiReviewWaived: boolean): boolean {
+  return aiReviewWaived && view.kind === "ai_review";
 }
 
 async function setPhase(candidateId: string, from: RcPhase, to: RcPhase, extra: Record<string, unknown> = {}): Promise<boolean> {
@@ -899,13 +915,13 @@ export async function reconcileRcFinalization(ctx: Context, candidateId: string)
 async function pendingReverifyStates(ctx: Context, row: FinalizationRow): Promise<ReleaseVerificationView["state"][]> {
   const records = await listReleaseVerificationRecords(fullNameOf(ctx), row.prNumber);
   const gate = evaluateReleaseMergeGate({ current: { baseSha: row.finalBaseSha ?? "", headSha: row.finalHeadSha ?? "" }, records, enforced: true });
-  return gate.views.filter((v) => v.state !== "passed" && v.state !== "not_applicable").map((v) => v.state);
+  return gate.views.filter((v) => !isWaivedView(v, row.aiReviewWaived) && v.state !== "passed" && v.state !== "not_applicable").map((v) => v.state);
 }
 
 async function reverifyFailed(ctx: Context, row: FinalizationRow): Promise<boolean> {
   const records = await listReleaseVerificationRecords(fullNameOf(ctx), row.prNumber);
   const gate = evaluateReleaseMergeGate({ current: { baseSha: row.finalBaseSha ?? "", headSha: row.finalHeadSha ?? "" }, records, enforced: true });
-  return gate.views.some((v) => v.state === "failed");
+  return gate.views.some((v) => !isWaivedView(v, row.aiReviewWaived) && v.state === "failed");
 }
 
 /**
@@ -1064,6 +1080,7 @@ export async function loadFinalizationSnapshot(
   phase: string;
   applied: { preHeadSha: string; finalHeadSha: string; finalBaseSha: string } | null;
   latest: { status: string; failureReason: string | null } | null;
+  aiReviewWaiver: { preHeadSha: string; finalHeadSha: string | null } | null;
 } | null> {
   const resolvedId = await findCandidateIdByPullRequest(repositoryFullName, prNumber);
   const resolved = resolvedId ? await db.releaseCandidate.findUnique({ where: { id: resolvedId }, select: { id: true, phase: true } }) : null;
@@ -1079,6 +1096,11 @@ export async function loadFinalizationSnapshot(
   return {
     candidateId: revision.candidate.id,
     latest: newest ? { status: newest.status, failureReason: newest.failureReason } : null,
+    // 全体レビューを外した公開準備（#4807）。失敗・期限切れで修正工程へ戻ったものは、次の公開準備で明示し直す
+    aiReviewWaiver:
+      newest && newest.aiReviewWaived && (newest.status === "requested" || newest.status === "applied")
+        ? { preHeadSha: newest.preHeadSha, finalHeadSha: newest.finalHeadSha }
+        : null,
     phase: revision.candidate.phase,
     applied:
       latest && latest.finalHeadSha && latest.finalBaseSha

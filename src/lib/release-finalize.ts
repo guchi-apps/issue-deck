@@ -332,7 +332,7 @@ export function parseInheritanceEvidence(value: unknown): InheritanceEvidence[] 
 
 export type FinalizeStartInput = {
   /** `buildRcFinalizeContract`の結果。公開準備可能でなければnull */
-  contract: { candidateId: string; revision: number; prNumber: number; baseSha: string; headSha: string } | null;
+  contract: { candidateId: string; revision: number; prNumber: number; baseSha: string; headSha: string; requiresAiReviewWaiver?: boolean } | null;
   phase: string;
   /** 候補の先端・mainの先端（GitHubから取り直した現在） */
   observed: { prHeadSha: string; prBaseSha: string; mainSha: string | null } | null;
@@ -340,11 +340,21 @@ export type FinalizeStartInput = {
   hasPending: boolean;
   /** 画面で見ていた候補のhead（押した時点の先端） */
   expectedHeadSha: string;
+  /** 全体レビューの結果を承知で公開へ進むと、人が確認画面で明示したか（#4807）。省略時はfalse */
+  waiveAiReview?: boolean;
 };
 
 export type FinalizeStartDecision =
-  | { ok: true; contract: NonNullable<FinalizeStartInput["contract"]> }
-  | { ok: false; error: "not_ready" | "wrong_phase" | "candidate_changed" | "main_advanced" | "in_progress" | "unobserved" };
+  | {
+      ok: true;
+      contract: NonNullable<FinalizeStartInput["contract"]>;
+      /** 全体レビューを止める条件から外して公開準備を始めるか（合格していない全体レビューを、人が承知で外した） */
+      aiReviewWaived: boolean;
+    }
+  | {
+      ok: false;
+      error: "not_ready" | "wrong_phase" | "candidate_changed" | "main_advanced" | "in_progress" | "unobserved" | "ai_review_waiver_required";
+    };
 
 export const FINALIZE_START_ERROR_LABEL: Record<Exclude<FinalizeStartDecision, { ok: true }>["error"], string> = {
   not_ready: "全体レビュー・統合検証に合格していないため、公開準備を始められません",
@@ -353,10 +363,12 @@ export const FINALIZE_START_ERROR_LABEL: Record<Exclude<FinalizeStartDecision, {
   main_advanced: "mainが進んでいるため、検証を取り直すまで公開準備を始められません",
   in_progress: "公開準備が進行中です",
   unobserved: "候補の現在の状態を取得できませんでした",
+  ai_review_waiver_required: "全体レビューが合格していません。結果を確かめ、承知で進むことを明示してから押してください",
 };
 
 /**
- * 公開準備（正式バンプ）を始めてよいか。**レビュー・修正中は始めない**（契約が作れるのは合格のときだけ）。
+ * 公開準備（正式バンプ）を始めてよいか。**レビュー・修正中は始めない**（契約が作れるのは合格のときと、
+ * 止めているのが全体レビューだけのとき）。後者は人の明示（`waiveAiReview`）が無ければ受け付けない（#4807）。
  * 押した時点の候補の先端（`expectedHeadSha`）・現在のGitHubの先端・検証したbaseの3つが一致しなければ受け付けない
  */
 export function decideFinalizeStart(input: FinalizeStartInput): FinalizeStartDecision {
@@ -370,7 +382,9 @@ export function decideFinalizeStart(input: FinalizeStartInput): FinalizeStartDec
   if (input.observed.prBaseSha !== input.contract.baseSha || input.observed.mainSha !== input.contract.baseSha) {
     return { ok: false, error: "main_advanced" };
   }
-  return { ok: true, contract: input.contract };
+  const aiReviewWaived = input.contract.requiresAiReviewWaiver === true;
+  if (aiReviewWaived && input.waiveAiReview !== true) return { ok: false, error: "ai_review_waiver_required" };
+  return { ok: true, contract: input.contract, aiReviewWaived };
 }
 
 // ---------------------------------------------------------------------------

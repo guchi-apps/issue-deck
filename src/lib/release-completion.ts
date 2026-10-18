@@ -208,7 +208,27 @@ export type CompletionFinalizationSnapshot = {
   applied: { preHeadSha: string; finalHeadSha: string; finalBaseSha: string } | null;
   /** 最新の公開準備の状態と失敗理由（公開承認の系列が「公開準備が失敗した」を止める理由として出す）。無ければnull */
   latest?: { status: string; failureReason: string | null } | null;
+  /**
+   * 人が全体レビューの結果を承知で進めた公開準備（#4807）の、バンプ前後のhead。無ければnull。
+   * このheadの全体レビューは、自動公開の判定で止める条件にしない（統合検証・CI・Macは必須のまま）
+   */
+  aiReviewWaiver?: { preHeadSha: string; finalHeadSha: string | null } | null;
 };
+
+/**
+ * 人が結果を承知で外した全体レビュー（#4807）を、系列の判断では「対象外」として扱う。指摘の起案・停止・待ちに
+ * 回さない（承認した公開準備のheadに限る。修正で候補が変われば外れる）
+ */
+export function waiveAiReviewCheck(checks: CompletionChecks, waived: boolean): CompletionChecks {
+  return waived ? { ...checks, aiReview: "not_applicable", aiReviewUnverified: null } : checks;
+}
+
+/** `headSha`の全体レビューを、人の明示で止める条件から外しているか（#4807） */
+export function isAiReviewWaivedFor(finalization: CompletionFinalizationSnapshot | null | undefined, headSha: string): boolean {
+  const waiver = finalization?.aiReviewWaiver;
+  if (!waiver || !headSha) return false;
+  return waiver.preHeadSha === headSha || waiver.finalHeadSha === headSha;
+}
 
 export type ReleaseCompletionObservation = {
   now: Date;

@@ -3,7 +3,9 @@ import { describe, expect, it } from "vitest";
 import {
   evaluateReleaseMergeGate,
   evaluateReleaseVerificationWait,
+  isOnlyAiReviewBlocking,
   isReleasePullRequest,
+  viewReleaseVerifications,
   type ReleaseVerificationRecord,
 } from "./release-merge-gate";
 
@@ -99,5 +101,31 @@ describe("evaluateReleaseVerificationWait", () => {
   it("記録が無い・古い結果は待たない", () => {
     expect(wait([])).toEqual([]);
     expect(wait([rec({ headSha: "old", state: "running" })])).toEqual([]);
+  });
+});
+
+describe("全体レビューを公開の必須条件から外す（#4807）", () => {
+  it("止めているのが全体レビューだけのときだけ外せる", () => {
+    for (const state of ["failed", "needs_check", "running", "waiting"] as const) {
+      expect(isOnlyAiReviewBlocking(viewReleaseVerifications(current, [rec({}), rec({ kind: "ai_review", state })]))).toBe(true);
+    }
+    // 未実施・古い結果も外せる
+    expect(isOnlyAiReviewBlocking(viewReleaseVerifications(current, [rec({})]))).toBe(true);
+    expect(isOnlyAiReviewBlocking(viewReleaseVerifications(current, [rec({}), rec({ kind: "ai_review", headSha: "old" })]))).toBe(true);
+    // 合格済み・統合検証が未合格なら外さない
+    expect(isOnlyAiReviewBlocking(viewReleaseVerifications(current, both))).toBe(false);
+    expect(isOnlyAiReviewBlocking(viewReleaseVerifications(current, [rec({ state: "failed" }), rec({ kind: "ai_review", state: "failed" })]))).toBe(false);
+    expect(isOnlyAiReviewBlocking(viewReleaseVerifications(current, [rec({ state: "running" }), rec({ kind: "ai_review", state: "failed" })]))).toBe(false);
+  });
+
+  it("外した対象では全体レビューの結果で止めず、統合検証と前提は従来どおり止める", () => {
+    const failedReview = [rec({}), rec({ kind: "ai_review", state: "failed" })];
+    expect(evaluateReleaseMergeGate({ current, records: failedReview, enforced: true }).status).toBe("blocked");
+    const waived = evaluateReleaseMergeGate({ current, records: failedReview, enforced: true, aiReviewWaived: true });
+    expect(waived.status).toBe("ready");
+    // 表示は変えない
+    expect(waived.views.find((v) => v.kind === "ai_review")?.state).toBe("failed");
+    const integrationFailed = [rec({ state: "failed" }), rec({ kind: "ai_review", state: "failed" })];
+    expect(evaluateReleaseMergeGate({ current, records: integrationFailed, enforced: true, aiReviewWaived: true }).status).toBe("blocked");
   });
 });

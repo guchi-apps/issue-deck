@@ -88,6 +88,31 @@ describe("deriveRcStatus", () => {
     expect(deriveRcStatus(input({ gate: failed, reviewStage: { kind: "reevaluating" } })).status).toBe("needs_fix");
   });
 
+  it("止めているのが全体レビューだけなら、承知で進む道を開く（#4807）", () => {
+    const reviewFailed = gate([
+      { kind: "integration", state: "passed", baseSha: BASE, headSha: HEAD2 },
+      { kind: "ai_review", state: "needs_check", baseSha: BASE, headSha: HEAD2 },
+    ]);
+    const status = deriveRcStatus(input({ gate: reviewFailed }));
+    expect(status).toMatchObject({ status: "needs_fix", aiReviewWaivable: true });
+    // 全体レビューが未完了（実行中）でも外せる
+    const running = gate([
+      { kind: "integration", state: "passed", baseSha: BASE, headSha: HEAD2 },
+      { kind: "ai_review", state: "running", baseSha: BASE, headSha: HEAD2 },
+    ]);
+    expect(deriveRcStatus(input({ gate: running }))).toMatchObject({ status: "verifying", aiReviewWaivable: true });
+    // 修正中・記録に無いpush・統合検証が未合格なら外さない
+    expect(deriveRcStatus(input({ gate: reviewFailed, fixInProgress: true })).aiReviewWaivable).toBe(false);
+    expect(
+      deriveRcStatus(input({ gate: reviewFailed, pullRequest: { number: 10, state: "open", merged: false, baseSha: BASE, headSha: HEAD1 } })).aiReviewWaivable,
+    ).toBe(false);
+    const integrationRunning = gate([
+      { kind: "integration", state: "running", baseSha: BASE, headSha: HEAD2 },
+      { kind: "ai_review", state: "failed", baseSha: BASE, headSha: HEAD2 },
+    ]);
+    expect(deriveRcStatus(input({ gate: integrationRunning })).aiReviewWaivable).toBe(false);
+  });
+
   it("現在revisionのSHAに一致する合格だけで公開準備可能になる", () => {
     const passed = gate([
       { kind: "integration", state: "passed", baseSha: BASE, headSha: HEAD2 },
@@ -263,6 +288,9 @@ describe("公開準備への契約", () => {
   it("合格しているときだけ作れ、含めるPRを重複なく持つ", () => {
     expect(buildRcFinalizeContract({ candidate, current, status: "ready_to_prepare" })?.includedPrs).toEqual([1, 2, 5]);
     expect(buildRcFinalizeContract({ candidate, current, status: "needs_fix" })).toBeNull();
+    expect(buildRcFinalizeContract({ candidate, current, status: "ready_to_prepare" })?.requiresAiReviewWaiver).toBe(false);
+    // 止めているのが全体レビューだけなら、承知で進む明示を要する契約を作る（#4807）
+    expect(buildRcFinalizeContract({ candidate, current, status: "needs_fix", aiReviewWaivable: true })?.requiresAiReviewWaiver).toBe(true);
   });
 });
 
