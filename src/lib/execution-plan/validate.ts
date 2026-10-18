@@ -1,5 +1,10 @@
 import { DEPENDENCY_WAIT_CONDITIONS, type DependencyWaitCondition } from "@/lib/dispatch/dependency-wait";
+import { findReleaseCycles } from "@/lib/execution-plan/release-link";
 import {
+  RELEASE_GATES,
+  RELEASE_TIMINGS,
+  type ReleaseGate,
+  type ReleaseTiming,
   formatRef,
   refKey,
   type PlanChild,
@@ -165,8 +170,28 @@ export function parsePlanInput(payload: unknown, parent: PlanIssueRef): ParseRes
         depKeys.add(depKey);
         dependsOn.push(dep);
       }
+      let timing: ReleaseTiming | undefined;
+      if (r.timing !== undefined) {
+        if (typeof r.timing !== "string" || !(RELEASE_TIMINGS as readonly string[]).includes(r.timing)) {
+          errors.push({ path: `${path}.timing`, message: `不正なリリース区分です（${RELEASE_TIMINGS.join(" / ")}）` });
+          continue;
+        }
+        timing = r.timing as ReleaseTiming;
+      }
+      let gate: ReleaseGate | undefined;
+      if (r.gate !== undefined) {
+        if (timing !== "pre-release") {
+          errors.push({ path: `${path}.gate`, message: "止める工程（gate）は区分が`pre-release`のときだけ指定できます" });
+          continue;
+        }
+        if (typeof r.gate !== "string" || !(RELEASE_GATES as readonly string[]).includes(r.gate)) {
+          errors.push({ path: `${path}.gate`, message: `不正な工程です（${RELEASE_GATES.join(" / ")}）` });
+          continue;
+        }
+        gate = r.gate as ReleaseGate;
+      }
       const title = typeof r.title === "string" && r.title.trim() ? r.title.trim().slice(0, 200) : undefined;
-      children.push({ ...ref, ...(title ? { title } : {}), dependsOn });
+      children.push({ ...ref, ...(title ? { title } : {}), ...(timing ? { timing } : {}), ...(gate ? { gate } : {}), dependsOn });
     }
   }
 
@@ -176,6 +201,14 @@ export function parsePlanInput(payload: unknown, parent: PlanIssueRef): ParseRes
       errors.push({
         path: "children",
         message: `依存が循環しています: ${cycle.join(" → ")}。どれかの依存を外してください`,
+      });
+    }
+  }
+  if (errors.length === 0) {
+    for (const cycle of findReleaseCycles(children)) {
+      errors.push({
+        path: "children",
+        message: `リリース前に必須の作業が、リリース後にしか成立しない条件を待っています: ${cycle.path.join(" → ")}。${cycle.fix}`,
       });
     }
   }

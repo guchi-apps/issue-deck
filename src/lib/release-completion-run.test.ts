@@ -131,6 +131,7 @@ vi.mock("@/lib/release-verification-load", () => ({
   loadReleaseVerificationSummary: (...args: unknown[]) => loadReleaseVerificationSummary(...args),
 }));
 const listReleaseVerificationRecords = vi.fn();
+vi.mock("@/lib/release-prerequisites-run", () => ({ loadReleasePrerequisiteBlockers: async () => [] }));
 vi.mock("@/lib/release-verification", () => ({
   listReleaseVerificationRecords: (...args: unknown[]) => listReleaseVerificationRecords(...args),
 }));

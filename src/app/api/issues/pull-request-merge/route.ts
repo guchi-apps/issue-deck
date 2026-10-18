@@ -14,6 +14,7 @@ import {
   evaluateReleaseVerificationWait,
   isReleasePullRequest,
 } from "@/lib/release-merge-gate";
+import { loadReleasePrerequisiteBlockers } from "@/lib/release-prerequisites-run";
 import { rcSequenceOf } from "@/lib/release-branch";
 import { loadFinalizationSnapshot } from "@/lib/release-finalize-run";
 import { decideRcPublish } from "@/lib/release-rc-action";
@@ -88,6 +89,8 @@ async function handlePOST(request: NextRequest) {
         current: { baseSha: pr.base.sha, headSha: pr.head.sha },
         records,
         enforced: getReleaseVerificationConfig(`${owner}/${repo}`).enforced,
+        // 公開前に終わっていない環境設定などの前提（#4523）。検証の強制とは独立に、手動マージも止める
+        prerequisites: await loadReleasePrerequisiteBlockers(`${owner}/${repo}`, Number(number)),
       });
       // 統合検証・全体レビューの判定が出るまで待たせる（#4354）。結果では止めず、`enforced`にも依らない。
       // 報告が来ず待ちのまま止まった場合に備え、明示確認（acknowledgeVerification）で上書きできる
