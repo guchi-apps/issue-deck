@@ -45,26 +45,31 @@ export type ManualStepBodyFinding = {
  *
  * 照合は`parseManualStepGuide`の`SECTION_MATCHERS`と同じく**部分一致**にする
  * （`## やること（サブPC）`のように補足が付く書き方が実際にあるため）。
+ *
+ * 目的と観測可能な完了条件にあたる「できるようになること」「完了の確認方法」だけを
+ * `required`（欠ければ`error`）にする。手順・担当・前提の事前記載は既知なら書く参考情報で、
+ * 実行開始の条件にしないため、欠けても`warning`に留める（#4521）。
  */
 const REQUIRED_HEADINGS = [
-  { label: "## この作業でできるようになること", needles: ["できるようになること"] },
-  { label: "## 前提条件", needles: ["前提条件"] },
-  { label: "## やること", needles: ["やること", "手順"] },
-  { label: "## 完了の確認方法", needles: ["完了の確認方法", "確認方法"] },
-  { label: "## なぜエージェントが実施しないか", needles: ["エージェントが実施しない"] },
-  { label: "## 関連", needles: ["関連"] },
+  { label: "## この作業でできるようになること", needles: ["できるようになること"], required: true },
+  { label: "## 前提条件", needles: ["前提条件"], required: false },
+  { label: "## やること", needles: ["やること", "手順"], required: false },
+  { label: "## 完了の確認方法", needles: ["完了の確認方法", "確認方法"], required: true },
+  { label: "## なぜエージェントが実施しないか", needles: ["エージェントが実施しない"], required: false },
+  { label: "## 関連", needles: ["関連"], required: false },
 ] as const;
 
 /**
  * `## 前提条件`に要る項目。`needles`は`parseManualStepWhere`の`label.includes(...)`と揃える。
  *
- * デバイス・ディレクトリ・ブランチは画面のチップと代行実行の可否に直結するので`error`、
- * 残り2つは欠けても画面は動くので`warning`にしている。
+ * どれも欠けても画面は動き、実行時に判断できるので`warning`にしている（#4521。以前は
+ * デバイス・ディレクトリ・ブランチを`error`にしていた）。複数端末で曖昧になる場合だけ
+ * `multiple-devices`が`error`になる。
  */
 const REQUIRED_PREREQUISITES = [
-  { label: "実行するデバイス", needles: ["デバイス"], severity: "error" },
-  { label: "カレントディレクトリ", needles: ["ディレクトリ"], severity: "error" },
-  { label: "Gitブランチ", needles: ["ブランチ"], severity: "error" },
+  { label: "実行するデバイス", needles: ["デバイス"], severity: "warning" },
+  { label: "カレントディレクトリ", needles: ["ディレクトリ"], severity: "warning" },
+  { label: "Gitブランチ", needles: ["ブランチ"], severity: "warning" },
   { label: "先に完了している必要があるIssue・PR", needles: ["先に完了", "必要があるissue"], severity: "warning" },
   { label: "その他の前提", needles: ["その他"], severity: "warning" },
 ] as const satisfies readonly {
@@ -123,6 +128,7 @@ function checkHeadings(sections: ReturnType<typeof splitManualStepSections>): Ma
     .map(normalize);
 
   const missing: string[] = [];
+  const missingOptional: string[] = [];
   // 文書に現れる順で貪欲に消し込む。残ったものが「不足」、消せたが順番が前後したものが「順序違い」
   let cursor = 0;
   let outOfOrder = false;
@@ -130,7 +136,7 @@ function checkHeadings(sections: ReturnType<typeof splitManualStepSections>): Ma
     const matches = (heading: string) => required.needles.some((needle) => heading.includes(needle));
     const at = headings.findIndex(matches);
     if (at === -1) {
-      missing.push(required.label);
+      (required.required ? missing : missingOptional).push(required.label);
       continue;
     }
     if (at < cursor) outOfOrder = true;
@@ -143,6 +149,13 @@ function checkHeadings(sections: ReturnType<typeof splitManualStepSections>): Ma
       rule: "missing-heading",
       severity: "error",
       message: `見出しが足りません: ${missing.join("・")}。画面はこの見出しで本文を節に割るため、無い節はそのまま欠けます。`,
+    });
+  }
+  if (missingOptional.length > 0) {
+    findings.push({
+      rule: "missing-optional-heading",
+      severity: "warning",
+      message: `見出しがありません: ${missingOptional.join("・")}。既知の情報があれば書いてください（実行開始の条件ではありません）。`,
     });
   }
   if (outOfOrder) {
