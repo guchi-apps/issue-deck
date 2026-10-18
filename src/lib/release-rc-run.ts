@@ -917,6 +917,15 @@ export async function cancelReleaseRc(
       console.error("[release-rc] closing candidate pull request failed", fullNameOf(ctx), error);
     }
   }
+  // 候補に紐づく修正系列を畳み、止まった系列の確認待ちが残らないようにする（#4800）。取り消し自体は戻さない
+  try {
+    const revisions = await db.releaseCandidateRevision.findMany({ where: { candidateId: row.id }, select: { prNumber: true } });
+    const prNumbers = [...revisions.map((r) => r.prNumber), pr?.number ?? null].filter((n): n is number => typeof n === "number");
+    const { closeFixSeriesForCancelledCandidate } = await import("@/lib/release-fix-series-run");
+    await closeFixSeriesForCancelledCandidate({ repositoryFullName: fullNameOf(ctx), prNumbers, candidateLabel: rcLabel(row.sequence) });
+  } catch (error) {
+    console.error("[release-rc] closing fix series after cancel failed", fullNameOf(ctx), error);
+  }
   return { ok: true, candidateId: row.id, revision: row.currentRevision, existing: false };
 }
 
