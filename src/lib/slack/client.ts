@@ -75,6 +75,24 @@ export async function postBotReply(
   return { ts: result.ts };
 }
 
+/**
+ * チャンネルへの直接投稿（スレッドなし・メンションなし）。リリース完了のような、誰かの依頼への返信ではない
+ * 通知用。依頼者への返信は従来どおり`postBotReply`を使う。
+ */
+export async function postChannelMessage(
+  client: SlackClient,
+  params: { channel: string; text: string; blocks?: SlackBlock[] },
+): Promise<{ ts: string }> {
+  const result = await client.call<{ ts: string }>("chat.postMessage", {
+    channel: params.channel,
+    text: params.text,
+    ...(params.blocks ? { blocks: params.blocks } : {}),
+    unfurl_links: false,
+    unfurl_media: false,
+  });
+  return { ts: result.ts };
+}
+
 export async function updateBotMessage(
   client: SlackClient,
   params: { channel: string; ts: string; slackUserId: string; text: string; blocks?: SlackBlock[] },
