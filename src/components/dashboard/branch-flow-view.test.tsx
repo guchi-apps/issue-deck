@@ -1419,6 +1419,14 @@ describe("BranchFlowView", () => {
       expect(screen.queryByText("マージする")).toBeNull();
     });
 
+    it("CI実行中のPRにはボタンを出さない（バッジは出す）", () => {
+      renderFlow({ pullRequests: [userMergePullRequest({ ciState: "pending" })] });
+
+      ensureRepositoryOpen();
+      expect(screen.getByText("ユーザーのマージが必要です")).toBeTruthy();
+      expect(screen.queryByText("マージする")).toBeNull();
+    });
+
     it("CIが通っていればダイアログを挟まずマージし、onMergedへ対象のPRを渡す", async () => {
       // この describe の afterEach が拾えるよう、stubGlobalではなくspyOnで差し替える
       const fetchMock = vi

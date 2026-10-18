@@ -125,6 +125,7 @@ import { getProgressStatusDef } from "@/lib/issue-progress";
 import {
   canMergeFromDeck,
   isMergeJudgementPending,
+  isMergeWaitingForChecks,
   requiresUserMerge,
 } from "@/lib/pull-request-list";
 import { isTriggerPending, RELEASE_TRIGGER_PENDING_MS } from "@/lib/trigger-pending-guard";
@@ -774,7 +775,8 @@ function PullRequestLine({
 }) {
   const kindLabel = pullRequestKindLabel(pullRequest.kind);
   const userMerge = onMerged !== undefined && requiresUserMerge(pullRequest);
-  const canMerge = userMerge && canMergeFromDeck(pullRequest);
+  // CI・レビュー・判定の完了待ちのあいだはボタンを出さない（#4783。マージ操作はPR詳細で行う）
+  const canMerge = userMerge && canMergeFromDeck(pullRequest) && !isMergeWaitingForChecks(pullRequest);
 
   return (
     <>
