@@ -620,3 +620,46 @@ export function releaseCompletionStopMessage(reason: string | null, detail: stri
       return reason;
   }
 }
+
+/** 同じ理由で本番マージを待ち続けて、画面に「長時間進んでいません」と出すまでの時間（#4725） */
+export const RELEASE_COMPLETION_LONG_WAIT_MS = 15 * 60 * 1000;
+
+/** `decideCompletionMerge`の`wait`の理由を、画面に出す日本語1行にする。未知の理由（検証ゲートの文言）はそのまま添える */
+export function describeMergeWait(reason: string | null): string | null {
+  if (!reason) return null;
+  switch (reason) {
+    case "pull_request_unobserved":
+      return "リリース候補のPRをGitHubから取得できていません";
+    case "main_unobserved":
+      return "本番mainの先端をGitHubから取得できていません";
+    case "already_merged":
+      return "マージ済みのPRを確認しています（本番反映の追跡へ進みます）";
+    case "finalization_not_ready":
+      return "公開準備（正式バンプと最終検証）がまだ完了していません";
+    case "verification":
+      return "検証（全体レビュー・統合検証・Mac検証）の条件がまだ満たされていません";
+    case "ci_pending":
+      return "CIの完了を待っています";
+    case "ci_unknown":
+      return "CIの結果を取得できていません";
+    case "mergeable_unknown":
+      return "GitHubのマージ可否を判定中";
+    default:
+      return `検証の条件を待っています: ${reason}`;
+  }
+}
+
+/** 待ち理由の記録。理由が変わったとき（または初回）だけ待ち始めを更新し、同じ理由なら何も書かない */
+export function nextMergeWait(
+  prev: { reason: string | null; since: Date | null },
+  reason: string,
+  now: Date,
+): { reason: string; since: Date } | null {
+  if (prev.reason === reason && prev.since !== null) return null;
+  return { reason, since: now };
+}
+
+/** 同じ理由で`RELEASE_COMPLETION_LONG_WAIT_MS`以上待っているか（境界を含む） */
+export function isLongMergeWait(since: Date | null, now: Date): boolean {
+  return since !== null && now.getTime() - since.getTime() >= RELEASE_COMPLETION_LONG_WAIT_MS;
+}

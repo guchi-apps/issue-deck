@@ -94,7 +94,7 @@ function reverifyStep(input: { afterBump: boolean; bumped: boolean; current: RcF
   };
 }
 
-type Step = { label: string; detail: string; tone: Tone; badge: string };
+type Step = { label: string; detail: string; tone: Tone; badge: string; wait?: { message: string; stalled: boolean } };
 
 /** 公開までの流れ。段階（候補の`phase`）と公開準備・最終検証の観測から、各工程の状態を導く */
 export function buildFinalizeSteps(input: {
@@ -155,6 +155,8 @@ function productionStep(input: {
       : "デプロイ成功と稼働中の版・SHAの一致を確かめるまで完了にしません",
     tone: phase === "completed" ? "ok" : released ? "run" : "mute",
     badge: phase === "completed" ? "完了" : phase === "verifying_production" ? "稼働確認中" : phase === "deploying" ? "反映中" : "待機",
+    // 自動公開が条件待ちのとき、いま何を待っているかを出す（#4725）
+    wait: approval?.run?.active && approval.run.waitMessage ? { message: approval.run.waitMessage, stalled: approval.run.waitStalled === true } : undefined,
   };
 }
 
@@ -612,6 +614,15 @@ export function ReleaseRcFinalizePanel({
             <div className="min-w-0">
               <p className="text-[12.5px] font-semibold">{step.label}</p>
               <p className="break-words text-[11.5px] text-muted-foreground">{step.detail}</p>
+              {step.wait && (
+                <p
+                  className={cn("break-words text-[11.5px]", step.wait.stalled ? "font-medium text-amber-700 dark:text-amber-400" : "text-primary")}
+                  data-testid="release-rc-wait-reason"
+                >
+                  {step.wait.stalled ? "長時間進んでいません: " : "いま待っているもの: "}
+                  {step.wait.message}
+                </p>
+              )}
             </div>
             <StateChip tone={step.tone}>{step.badge}</StateChip>
           </li>

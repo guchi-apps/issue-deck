@@ -290,6 +290,23 @@ describe("runReleaseCompletionSweep", () => {
     expect(mergePullRequest).toHaveBeenCalledTimes(1);
   });
 
+  it("本番マージの条件待ちでは待ち理由を記録し、同じ理由の間は待ち始めを動かさない（#4725）", async () => {
+    await start();
+    loadReleaseVerificationSummary.mockResolvedValue(summary("passed", "passed"));
+    fetchPullRequestCiState.mockResolvedValue({ ciState: "pending", mergeable: true });
+    await runReleaseCompletionSweep({ hostName: "subpc", now });
+    expect(runs[0]).toMatchObject({ status: "merging", waitReason: "ci_pending", waitSince: now });
+
+    await runReleaseCompletionSweep({ hostName: "subpc", now: later(20) });
+    expect(runs[0]).toMatchObject({ waitReason: "ci_pending", waitSince: now });
+    expect(mergePullRequest).not.toHaveBeenCalled();
+
+    fetchPullRequestCiState.mockResolvedValue({ ciState: "success", mergeable: null });
+    fetchPullRequest.mockResolvedValue(pull({ mergeable: null }));
+    await runReleaseCompletionSweep({ hostName: "subpc", now: later(21) });
+    expect(runs[0]).toMatchObject({ waitReason: "mergeable_unknown", waitSince: later(21) });
+  });
+
   it("チェック通過までの系列は本番へマージせず、人がマージしたら稼働確認まで追跡する", async () => {
     await start("until_ready");
     loadReleaseVerificationSummary.mockResolvedValue(summary("passed", "passed"));

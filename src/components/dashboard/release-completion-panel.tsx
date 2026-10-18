@@ -282,6 +282,15 @@ function RunCard({ run, busy, onStop }: { run: ReleaseCompletionRunView; busy: "
       </p>
       {run.stopMessage && <p className="break-words leading-relaxed">{run.stopMessage}</p>}
       {run.note && <p className="break-words leading-relaxed text-muted-foreground">{run.note}</p>}
+      {run.waitMessage && (
+        <p
+          className={cn("break-words leading-relaxed", run.waitStalled ? "font-medium text-amber-700 dark:text-amber-400" : "text-muted-foreground")}
+          data-testid="release-completion-wait"
+        >
+          {run.waitStalled ? "長時間進んでいません: " : "いま待っているもの: "}
+          {run.waitMessage}
+        </p>
+      )}
       {run.deployRecovery && (
         <p className="break-words leading-relaxed text-muted-foreground">
           デプロイ失敗からの復旧: {run.deployRecovery.statusLabel}

@@ -35,6 +35,9 @@ import {
   RELEASE_COMPLETION_SCOPE_PRODUCTION,
   RELEASE_COMPLETION_TTL_MS,
   isGateClearedByReviewDecisions,
+  describeMergeWait,
+  isLongMergeWait,
+  nextMergeWait,
   releaseCompletionNeedsAction,
   releaseCompletionStageIndex,
   releaseCompletionStatusLabel,
@@ -84,6 +87,11 @@ type RunRow = ReleaseCompletionRun;
 
 export type ReleaseCompletionRunView = {
   id: string;
+  /** 本番マージの条件を待っている理由（日本語1行）。`merging`で待っているときだけ入る（#4725） */
+  waitMessage: string | null;
+  /** 同じ理由で長く待っていて、人が見るべきか */
+  waitStalled: boolean;
+  waitSince: string | null;
   repositoryFullName: string;
   status: string;
   statusLabel: string;
@@ -145,8 +153,12 @@ export async function toReleaseCompletionRunView(row: RunRow): Promise<ReleaseCo
     ? await db.deployRecoverySeries.findUnique({ where: { id: row.deployRecoverySeriesId } })
     : null;
   const recoveryView = recovery ? toDeployRecoverySeriesView(recovery) : null;
+  const waiting = row.status === "merging";
   return {
     id: row.id,
+    waitMessage: waiting ? describeMergeWait(row.waitReason) : null,
+    waitStalled: waiting && isLongMergeWait(row.waitSince, new Date()),
+    waitSince: waiting ? (row.waitSince?.toISOString() ?? null) : null,
     repositoryFullName: row.repositoryFullName,
     status: row.status,
     statusLabel: releaseCompletionStatusLabel(row.status, Boolean(row.publishApprovalId)),
@@ -705,10 +717,20 @@ async function evaluateAndMerge(run: RunRow, ctx: Ctx, now: Date, observation: O
   });
   if (decision.action === "wait") {
     if (run.status !== "merging") {
-      await db.releaseCompletionRun.updateMany({ where: { id: run.id, status: run.status }, data: { status: "merging", note: null } });
+      // 別の期間の古い待ち理由を引き継がないよう、入り直しでは待ち始めを取り直す
+      await db.releaseCompletionRun.updateMany({
+        where: { id: run.id, status: run.status },
+        data: { status: "merging", note: null, waitReason: decision.reason, waitSince: now },
+      });
       return { action: "transition:merging", detail: decision.reason };
     }
-    return null;
+    const next = nextMergeWait({ reason: run.waitReason, since: run.waitSince }, decision.reason, now);
+    if (!next) return null;
+    await db.releaseCompletionRun.updateMany({
+      where: { id: run.id, status: "merging" },
+      data: { waitReason: next.reason, waitSince: next.since },
+    });
+    return { action: "wait_reason_changed", detail: decision.reason };
   }
   if (decision.action === "stop") return handOff(run, ctx, decision.reason, decision.detail);
 

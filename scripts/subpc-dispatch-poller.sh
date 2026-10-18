@@ -1631,7 +1631,10 @@ sweep_deploy_recoveries() {
     return 0
   fi
   printf '%s' "$API_RESPONSE_BODY" |
-    jq -r '.actions[]? | "本番復旧系列を進めました: \(.repositoryFullName) \(.action) \(.detail // "")"' 2>/dev/null ||
+    jq -r '
+      (.actions[]? | "本番復旧系列を進めました: \(.repositoryFullName) \(.action) \(.detail // "")"),
+      (.releaseCompletion.actions[]? | "リリース完了系列を進めました: \(.repositoryFullName // "") \(.action) \(.detail // "")")
+    ' 2>/dev/null ||
     true
   return 0
 }
