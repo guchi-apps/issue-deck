@@ -136,6 +136,7 @@ import type {
   BranchFlowDeviceBuild,
   BranchFlowIssuePriority,
   BranchFlowIssueRef,
+  BranchFlowIssueTracking,
   BranchFlowReferencedPullRequest,
   BranchFlowLane,
   BranchFlowLaneStatus,
@@ -503,6 +504,50 @@ function RunDetailToggle({ expanded, onToggle }: { expanded: boolean; onToggle: 
   );
 }
 
+/**
+ * Issue行の追跡情報（#4748）。現在地（依存待ち=青・操作不要／本人の操作待ち=橙）、リリース前／後、
+ * 待っている前提を出す。色の意味はIssue詳細・一覧（`issue-work-summary.tsx`）と同じ。
+ */
+function IssueTrackingBadges({ tracking }: { tracking?: BranchFlowIssueTracking | null }) {
+  if (!tracking) return null;
+  return (
+    <>
+      {tracking.waitKind === "dependency_wait" && (
+        <span className="shrink-0 rounded-full bg-blue-500/10 px-2 py-0.5 text-[11px] text-blue-700 dark:text-blue-400">
+          依存待ち
+        </span>
+      )}
+      {tracking.waitKind === "user_action" && (
+        <span className="shrink-0 rounded-full bg-amber-500/10 px-2 py-0.5 text-[11px] text-amber-700 dark:text-amber-400">
+          本人の操作待ち
+        </span>
+      )}
+      {tracking.timing === "pre-release" && (
+        <span className="shrink-0 rounded-full bg-emerald-500/10 px-2 py-0.5 text-[11px] text-emerald-700 dark:text-emerald-400">
+          リリース前必須
+        </span>
+      )}
+      {tracking.timing === "post-release" && (
+        <span className="shrink-0 rounded-full border border-dashed px-2 py-0.5 text-[11px] text-muted-foreground">
+          リリース後
+        </span>
+      )}
+    </>
+  );
+}
+
+/** 待っている前提の1行。待つだけで操作は要らない（#4748） */
+function IssueBlockingLine({ tracking }: { tracking?: BranchFlowIssueTracking | null }) {
+  if (!tracking || tracking.blocking.length === 0) return null;
+  const head = tracking.blocking[0];
+  const rest = tracking.blocking.length > 1 ? `（ほか${tracking.blocking.length - 1}件）` : "";
+  return (
+    <p className="min-w-0 break-words text-xs text-muted-foreground">
+      前提が{tracking.blocking.length}件残っています: {head.reference}（{head.label}）{rest}
+    </p>
+  );
+}
+
 function IssueLine({
   repositoryFullName,
   issue,
@@ -531,6 +576,7 @@ function IssueLine({
       )}
       {issue.state === null && <span className="text-xs text-muted-foreground">一覧に無い</span>}
       {issue.state === "closed" && <span className="text-xs text-muted-foreground">クローズ済み</span>}
+      <IssueTrackingBadges tracking={issue.tracking} />
     </div>
   );
 }
@@ -595,15 +641,17 @@ function RelatedIssuesLine({
     <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
       <span className="shrink-0 text-xs text-muted-foreground">関連</span>
       {issues.map((issue) => (
-        <GithubReferenceLink
-          key={issue.number}
-          href={`https://github.com/${repositoryFullName}/issues/${issue.number}`}
-          reference={{ repositoryFullName, number: issue.number, kind: "issue" }}
-          className="min-w-0 max-w-full break-words text-xs text-primary hover:underline"
-        >
-          #{issue.number}
-          {issue.title ? ` ${issue.title}` : ""}
-        </GithubReferenceLink>
+        <span key={issue.number} className="inline-flex min-w-0 max-w-full flex-wrap items-center gap-x-1.5 gap-y-1">
+          <GithubReferenceLink
+            href={`https://github.com/${repositoryFullName}/issues/${issue.number}`}
+            reference={{ repositoryFullName, number: issue.number, kind: "issue" }}
+            className="min-w-0 max-w-full break-words text-xs text-primary hover:underline"
+          >
+            #{issue.number}
+            {issue.title ? ` ${issue.title}` : ""}
+          </GithubReferenceLink>
+          <IssueTrackingBadges tracking={issue.tracking} />
+        </span>
       ))}
     </div>
   );
@@ -644,6 +692,7 @@ function ManualStepLine({
         手作業 #{manualStep.number} {manualStep.title}
       </GithubReferenceLink>
       <span className="shrink-0 text-xs text-muted-foreground">{isOpen ? "未完了" : "完了"}</span>
+      <IssueTrackingBadges tracking={manualStep.tracking} />
       {branchName && (
         <>
           <span className="shrink-0 text-xs text-muted-foreground">起点</span>
@@ -841,6 +890,7 @@ function LaneRow({
         ) : lane.referencedPullRequests.length === 0 ? (
           <span className="text-xs text-muted-foreground">対応Issue不明</span>
         ) : null}
+        <IssueBlockingLine tracking={lane.issue?.tracking} />
         <ReferencedPullRequestsLine
           repositoryFullName={repositoryFullName}
           pullRequests={lane.referencedPullRequests}
@@ -856,6 +906,16 @@ function LaneRow({
             manualStep={manualStep}
           />
         ))}
+        {lane.featureIncomplete.length > 0 && (
+          // リリース済みと機能全体の完了は別（#4524・#4748）。本番確認や手作業が残る間は未完了と言う
+          <p
+            className="min-w-0 break-words rounded-md bg-red-500/10 px-2 py-1 text-xs text-red-700 dark:text-red-400"
+            data-testid="lane-feature-incomplete"
+          >
+            <b>リリース済みですが、機能全体は未完了です。</b>
+            残り: {lane.featureIncomplete.join("、")}
+          </p>
+        )}
       </div>
     </li>
   );

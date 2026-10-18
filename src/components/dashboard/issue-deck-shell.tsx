@@ -1677,6 +1677,8 @@ export function IssueDeckShell({
         })),
         branchStatuses: branchFlowStatus.branchStatuses,
         deployStatuses: deployStatus.deployStatuses,
+        // 前提待ちの判定は一覧・詳細と同じ結果を使う（#4748）
+        prerequisiteReadiness,
       }),
     [
       visibleRepositories,
@@ -1685,6 +1687,7 @@ export function IssueDeckShell({
       issues,
       branchFlowStatus.branchStatuses,
       deployStatus.deployStatuses,
+      prerequisiteReadiness,
     ],
   );
 

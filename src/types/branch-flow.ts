@@ -245,6 +245,20 @@ export type BranchFlowManualStep = {
   number: number;
   title: string;
   state: "open" | "closed";
+  /** 現在地・前提・リリース前後（#4748）。キャッシュに無ければ付かない */
+  tracking?: BranchFlowIssueTracking | null;
+};
+
+/**
+ * リリース画面のIssue行に出す追跡情報（#4748）。Issue詳細・一覧と同じ語彙で、
+ * 依存待ち（操作不要）と本人の操作待ちを別の状態にする。
+ */
+export type BranchFlowIssueTracking = {
+  waitKind: "dependency_wait" | "user_action" | null;
+  /** まだ待っている前提。`reference`は`#123`形式の表示名、`label`は状態の短い日本語 */
+  blocking: { reference: string; label: string }[];
+  /** 次のリリースの前に要る作業か、版が出た後に残る作業か。判定できなければnull */
+  timing: "pre-release" | "post-release" | null;
 };
 
 /** レーンに紐づくIssue。DBキャッシュに無いIssueでも番号だけは出せるようにする */
@@ -256,6 +270,8 @@ export type BranchFlowIssueRef = {
   progress: ProgressStatusKey | null;
   /** DBキャッシュに無い場合はnull */
   state: "open" | "closed" | null;
+  /** 現在地・前提・リリース前後（#4748）。openでない・キャッシュに無い場合は付かない */
+  tracking?: BranchFlowIssueTracking | null;
 };
 
 /**
@@ -340,6 +356,11 @@ export type BranchFlowLane = {
   releaseState: BranchFlowReleaseState | null;
   /** このレーンの対応Issueから生まれた手作業Issue（#1510）。無ければ空配列 */
   manualSteps: BranchFlowManualStep[];
+  /**
+   * 本番（main）へ届いたのに残っている作業（#4748）。空でなければ「リリース済みだが機能全体は
+   * 未完了」。対応Issueがopenのままの場合と、未完了の手作業を1件ずつ文にして持つ。
+   */
+  featureIncomplete: string[];
   /** 並び順に使う代表日時（PRがあればその更新日時、無ければnull） */
   updatedAt: string | null;
 };

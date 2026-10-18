@@ -994,7 +994,10 @@ describe("BranchFlowView", () => {
       fireEvent.click(screen.getByText("リリース済みのバージョン"));
       await waitFor(() => expect(screen.queryByText("リリース済みの変更に残っている手作業")).toBeNull());
       expect(screen.getByText("issue-1454")).toBeTruthy();
-      expect(screen.getByText(/手作業 #184/)).toBeTruthy();
+      // 手作業のリンクに加え、リリース済みでも機能全体は未完了の注記にも出る（#4748）
+      expect(screen.getAllByText(/手作業 #184/)).toHaveLength(2);
+      expect(screen.getByTestId("lane-feature-incomplete").textContent).toContain("機能全体は未完了です");
+      expect(screen.getByText("リリース後")).toBeTruthy();
     });
   });
 
