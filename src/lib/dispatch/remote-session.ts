@@ -124,10 +124,16 @@ export async function listRemoteSessions(
   now: Date = new Date(),
 ): Promise<RemoteSessionState> {
   await settleStartingSessions(now);
-  const [sessions, allHosts, stoppingJobs, ownRepositories] = await Promise.all([
+  // 連携を失ったリポジトリのセッションはURLごと返さない（起動時だけでなく現在の連携で照合する）
+  const ownRepositories = await db.repository.findMany({
+    where: { installation: { userInstallations: { some: { userId: requestedByUserId } } } },
+    select: { fullName: true },
+  });
+  const [sessions, allHosts, stoppingJobs] = await Promise.all([
     db.remoteSession.findMany({
       where: {
         requestedByUserId,
+        repositoryFullName: { in: ownRepositories.map((row) => row.fullName) },
         OR: [
           { status: { in: ACTIVE_STATUSES } },
           { updatedAt: { gte: new Date(now.getTime() - ENDED_RETENTION_MS) } },
@@ -140,10 +146,6 @@ export async function listRemoteSessions(
     db.dispatchJob.findMany({
       where: { kind: "REMOTE_SESSION_KILL", status: { in: ["QUEUED", "CLAIMED", "RUNNING"] } },
       select: { tmuxSessionName: true },
-    }),
-    db.repository.findMany({
-      where: { installation: { userInstallations: { some: { userId: requestedByUserId } } } },
-      select: { fullName: true },
     }),
   ]);
   // ホストの登録リポジトリは、要求者が連携しているものだけ見せる（他の利用者のリポジトリ名を出さない）
@@ -228,6 +230,15 @@ export async function enqueueRemoteSessionKill(params: {
     where: { id: params.id, requestedByUserId: params.requestedByUserId ?? "" },
   });
   if (!session) return { ok: false, reason: "not_found", message: "セッションが見つかりません。" };
+  // 連携を失ったリポジトリのセッションは終了も受け付けない（存在しないものとして扱う）
+  const linked = await db.repository.findFirst({
+    where: {
+      fullName: session.repositoryFullName,
+      installation: { userInstallations: { some: { userId: params.requestedByUserId ?? "" } } },
+    },
+    select: { id: true },
+  });
+  if (!linked) return { ok: false, reason: "not_found", message: "セッションが見つかりません。" };
   if (session.status === "ended" || session.status === "failed") {
     return { ok: false, reason: "already_ended", message: "このセッションは既に終了しています。" };
   }
