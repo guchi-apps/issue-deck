@@ -1,7 +1,7 @@
 import { beforeEach, expect, it, vi } from "vitest";
-const mocks = vi.hoisted(() => ({ load: vi.fn(), reconcile: vi.fn() }));
+const mocks = vi.hoisted(() => ({ load: vi.fn(), reconcile: vi.fn(), successor: vi.fn() }));
 vi.mock("@/lib/release-rc-run", () => ({ loadCandidateRow: mocks.load }));
-vi.mock("@/lib/release-finalize-run", () => ({ reconcileRcFinalization: mocks.reconcile }));
+vi.mock("@/lib/release-finalize-run", () => ({ reconcileRcFinalization: mocks.reconcile, reconcileSuccessorWaiting: mocks.successor }));
 import { reconcileActiveRcPublication } from "@/lib/release-rc-reconcile";
 const ctx = { owner: "o", repo: "r", token: "t" };
 const row = (phase: string, activeKey: string | null = "o/r") => ({ id: "c1", phase, activeKey });
@@ -32,4 +32,10 @@ it("完了解放後に新候補へ乗り換えない", async () => {
   await reconcileActiveRcPublication(ctx);
   expect(mocks.reconcile).toHaveBeenCalledTimes(1);
   expect(mocks.load).toHaveBeenLastCalledWith({ id: "c1" });
+});
+it("後続の確認を待つ候補（#4712）を、候補の枠の照合より先に確かめ直す", async () => {
+  mocks.load.mockResolvedValue(null);
+  await reconcileActiveRcPublication(ctx);
+  expect(mocks.successor).toHaveBeenCalledWith(ctx);
+  expect(mocks.reconcile).not.toHaveBeenCalled();
 });

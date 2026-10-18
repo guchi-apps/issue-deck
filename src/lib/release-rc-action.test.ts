@@ -70,3 +70,9 @@ describe("isPreviousVerificationResult（#4635）", () => {
     expect(isPreviousVerificationResult({ series: { ...series, status: "stopped" }, pullRequestNumber: 7, targetHeadSha: "old" })).toBe(false);
   });
 });
+
+describe("describeRcPrimaryAction — 稼働確認の停止（#4712）", () => {
+  it("停止は待機（自動で進む）にせず、確かめ直す操作を出す", () => {
+    expect(describeRcPrimaryAction({ status: "production_stopped", publishable: false })).toEqual({ kind: "recheck_production", label: "稼働確認をやり直す" });
+  });
+});

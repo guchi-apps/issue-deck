@@ -5,7 +5,13 @@ import { db } from "@/lib/db";
 import { getInstallationToken } from "@/lib/github/app-auth";
 import { githubApiErrorMessage } from "@/lib/github/network-error";
 import { previewModeGuard } from "@/lib/preview-mode";
-import { loadFinalizationOverview, reconcileRcFinalization, resolveRcCandidateId, settleReservationsOnCancel } from "@/lib/release-finalize-run";
+import {
+  loadFinalizationOverview,
+  recheckRcProduction,
+  reconcileRcFinalization,
+  resolveRcCandidateId,
+  settleReservationsOnCancel,
+} from "@/lib/release-finalize-run";
 import { ensureDevelopSync, observeDevelopSync } from "@/lib/release-develop-sync-run";
 import { decideDevelopSync } from "@/lib/release-develop-sync";
 import { parseRcRequestKey } from "@/lib/release-rc";
@@ -27,6 +33,7 @@ import {
  * - POST `action=cancel`: 候補を取り消す（記録は残す）
  * - POST `action=migrate`: 開いている旧方式の候補を新方式へ移す
  * - POST `action=develop_sync`: 公開内容をdevelopへ戻す同期PRを用意する（#4641。同期済み・作成済みなら何もしない）
+ * - POST `action=recheck_production`: 稼働確認が止まった公開済み候補を、今から確かめ直す（#4712。証拠を代わりに書かない）
  *
  * **進めてよいかはサーバーが判定する。** 画面が送るのは要求キー・見ていたhead・選んだPRだけで、
  * 状態・SHA・承認範囲は`release-rc-run.ts`がGitHubと記録から取り直して確かめる。
@@ -112,6 +119,12 @@ export async function POST(request: NextRequest) {
       case "develop_sync": {
         // 画面の「同期PRを作成」。同期済み・同期PRが開いていれば何も作らず、今の状況を返す（#4641）
         return NextResponse.json({ ok: true, developSync: await ensureDevelopSync(ctx) });
+      }
+      case "recheck_production": {
+        const candidateId = readString(payload?.candidateId);
+        if (!candidateId) return NextResponse.json({ error: "invalid_request" }, { status: 400 });
+        const result = await recheckRcProduction(ctx, candidateId);
+        return NextResponse.json(result, { status: result.ok ? 200 : result.error === "not_found" ? 404 : 409 });
       }
       case "import": {
         const requestKey = parseRcRequestKey(payload?.requestKey);

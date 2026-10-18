@@ -58,6 +58,7 @@ import {
 } from "@/lib/release-publish-approval-run";
 import { createReleaseFixSeries, readReleaseFixStartState } from "@/lib/release-fix-series-run";
 import { evaluateReleaseMergeGate, isReleasePullRequest } from "@/lib/release-merge-gate";
+import { isProductionVerifiedForMergeSha } from "@/lib/release-production-verification-run";
 import { listReleaseVerificationRecords } from "@/lib/release-verification";
 import { loadReleaseVerificationSummary } from "@/lib/release-verification-load";
 import { describeIntegrationSetupGap } from "@/lib/release-verification-config";
@@ -757,8 +758,11 @@ async function advanceRelease(run: RunRow, ctx: Ctx, now: Date): Promise<ActionR
   if (!run.mergeSha || !run.releaseStartedAt) return handOff(run, ctx, "release_timed_out");
   const runs = await fetchDeployRunsForSha(ctx.owner, ctx.repo, run.mergeSha, ctx.token);
   const latest = [...runs].sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.id - a.id)[0];
+  // deploy.ymlが稼働SHAを照合しないrepoは、候補側の稼働版の確認（公開URLの照合・人の確認。#4713）の結果を使う
   const versionVerified =
-    latest?.status === "completed" && latest.conclusion === "success" ? await hasVersionVerification(ctx.owner, ctx.repo, latest, ctx.token) : false;
+    latest?.status === "completed" && latest.conclusion === "success"
+      ? (await hasVersionVerification(ctx.owner, ctx.repo, latest, ctx.token)) || (await isProductionVerifiedForMergeSha(run.repositoryFullName, run.mergeSha))
+      : false;
   let failureKey: string | null = null;
   if (latest?.status === "completed" && latest.conclusion !== "success" && latest.conclusion !== "cancelled") {
     const jobs = await fetchWorkflowRunJobs(ctx.owner, ctx.repo, latest.id, ctx.token).catch(() => []);

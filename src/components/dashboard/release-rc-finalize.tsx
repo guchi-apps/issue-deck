@@ -2,12 +2,15 @@
 
 import { useState } from "react";
 
+import { ProductionVerificationBox } from "@/components/dashboard/release-rc-production";
 import { Button } from "@/components/ui/button";
 import { formatDateTime, formatMonthDayTime } from "@/lib/format-date-time";
 import { FINALIZE_STATUS_LABEL, FINALIZE_START_ERROR_LABEL, REVERIFY_PHASE_LABEL, type ReverifyPhase } from "@/lib/release-finalize";
 import type { RcFinalizationOverview, RcFinalizationView } from "@/lib/release-finalize-run";
 import type { PublishApprovalView } from "@/lib/release-publish-approval-run";
 import type { RcCandidateView } from "@/lib/release-rc-run";
+import { PRODUCTION_STOP_TEXT } from "@/lib/release-production-stop";
+import { requestRcProductionRecheck } from "@/lib/release-request";
 import { cn } from "@/lib/utils";
 import { BUMP_KIND_CRITERIA, nextVersion, type BumpKind } from "@/lib/semver-bump";
 
@@ -99,8 +102,14 @@ export function buildFinalizeSteps(input: {
   current: RcFinalizationView | null;
   checks: RcFinalizationOverview["checks"];
   approval?: PublishApprovalView | null;
+  /** 本番の稼働確認（#4712）。止まっていれば工程を「停止」として出す（スピナーにしない） */
+  production?: RcCandidateView["production"];
+  /** 候補の状態の理由文（停止の原因・次の操作） */
+  statusReason?: string;
 }): Step[] {
   const { phase, current, checks } = input;
+  const stop = input.production?.stopReason ? PRODUCTION_STOP_TEXT[input.production.stopReason] : null;
+  const sourceRelease = phase === "completed" && input.production?.method === "source_publish";
   const approval = input.approval ?? null;
   const bumped = current?.status === "applied";
   const afterBump = ["awaiting_approval", "deploying", "verifying_production", "completed"].includes(phase);
@@ -122,15 +131,31 @@ export function buildFinalizeSteps(input: {
     },
     reverifyStep({ afterBump, bumped, current, checks }),
     approvalStep({ phase, approval, released }),
-    {
-      label: "mainマージ・タグ・本番反映",
-      detail: approval && (approval.status === "active" || approval.status === "merging" || approval.status === "consumed")
-        ? "最終検証の合格後、mainの保護・必須チェックを通して自動でマージします。デプロイ成功と稼働中の版・SHAの一致を確かめるまで完了にしません"
-        : "デプロイ成功と稼働中の版・SHAの一致を確かめるまで完了にしません",
-      tone: phase === "completed" ? "ok" : released ? "run" : "mute",
-      badge: phase === "completed" ? "完了" : phase === "verifying_production" ? "稼働確認中" : phase === "deploying" ? "反映中" : "待機",
-    },
+    productionStep({ phase, approval, released, stop, sourceRelease, statusReason: input.statusReason }),
   ];
+}
+
+/** 「mainマージ・タグ・本番反映」の工程。稼働確認が止まっていれば停止として出す（#4712） */
+function productionStep(input: {
+  phase: string;
+  approval: PublishApprovalView | null;
+  released: boolean;
+  stop: { label: string; cause: string } | null;
+  sourceRelease: boolean;
+  statusReason?: string;
+}): Step {
+  const { phase, approval, released, stop } = input;
+  const label = "mainマージ・タグ・本番反映";
+  if (stop && released && phase !== "completed") return { label, detail: input.statusReason ?? stop.cause, tone: "bad", badge: `停止（${stop.label}）` };
+  if (input.sourceRelease) return { label, detail: input.statusReason ?? "ソースを公開しました。実機への配備は未確認です", tone: "ok", badge: "ソース公開済み" };
+  return {
+    label,
+    detail: approval && (approval.status === "active" || approval.status === "merging" || approval.status === "consumed")
+      ? "最終検証の合格後、mainの保護・必須チェックを通して自動でマージします。デプロイ成功と稼働中の版・SHAの一致を確かめるまで完了にしません"
+      : "デプロイ成功と稼働中の版・SHAの一致を確かめるまで完了にしません",
+    tone: phase === "completed" ? "ok" : released ? "run" : "mute",
+    badge: phase === "completed" ? "完了" : phase === "verifying_production" ? "稼働確認中" : phase === "deploying" ? "反映中" : "待機",
+  };
 }
 
 /** 「公開承認」の工程。承認は公開準備の開始の1回だけで、最終検証の後に二度目の承認を求めない */
@@ -431,7 +456,27 @@ export function ReleaseRcFinalizePanel({
     await post({ action: "revoke" }, "自動公開を取り消せませんでした");
   };
 
-  const steps = buildFinalizeSteps({ phase: candidate.phase, current, checks: finalization.checks, approval });
+  const steps = buildFinalizeSteps({
+    phase: candidate.phase,
+    current,
+    checks: finalization.checks,
+    approval,
+    production: candidate.production,
+    statusReason: candidate.status.reason,
+  });
+  const productionStop = candidate.production?.stopReason ? PRODUCTION_STOP_TEXT[candidate.production.stopReason] : null;
+  const recheckProduction = async () => {
+    setBusy(true);
+    setMessage(null);
+    try {
+      await requestRcProductionRecheck(repositoryFullName, candidate.id);
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+      onChanged();
+    }
+  };
   const plannedKind = bumpKind === "auto" ? null : bumpKind;
   const reusing = approval?.status === "active";
   return (
@@ -446,6 +491,21 @@ export function ReleaseRcFinalizePanel({
 
       {approval && <ApprovalBox approval={approval} busy={busy} canResume={canResume} onRevoke={revoke} onResume={resume} />}
 
+      {productionStop && ["deploying", "verifying_production"].includes(candidate.phase) && (
+        <div className="flex flex-col gap-2 rounded-md border border-destructive/50 bg-destructive/10 px-3 py-2 text-[12px]" role="alert" data-testid="release-rc-production-stopped">
+          <p className="font-semibold text-destructive">稼働確認が止まっています（{productionStop.label}）</p>
+          <p className="break-words">{candidate.status.reason}</p>
+          {candidate.production?.stopDetail && <p className="break-all text-muted-foreground">詳細: {candidate.production.stopDetail}</p>}
+          <p className="text-muted-foreground">確かめるまでこの候補は完了にせず、版の予約・developへの同期の追跡も保ちます。</p>
+          {!candidate.production?.awaitingSuccessor && (
+            <div>
+              <Button size="sm" className="h-7 px-2 text-xs" disabled={busy} onClick={() => void recheckProduction()}>
+                {busy ? "確かめています…" : "稼働確認をやり直す"}
+              </Button>
+            </div>
+          )}
+        </div>
+      )}
       {current && current.status === "failed" && current.failureReason && (
         <p className="rounded-md border border-destructive/50 bg-destructive/10 px-3 py-2 text-[12px] text-destructive" role="alert">
           {current.failureReason}。同じ候補の修正工程へ戻しました。予約した版は保ち、版は増やしません。
@@ -560,14 +620,32 @@ export function ReleaseRcFinalizePanel({
 
       {current && current.status === "applied" && <EvidenceTable finalization={current} checks={finalization.checks} />}
 
+      {finalization.production && (
+        <ProductionVerificationBox
+          production={finalization.production}
+          phase={candidate.phase}
+          repositoryFullName={repositoryFullName}
+          candidateId={candidate.id}
+          onChanged={onChanged}
+        />
+      )}
+
       <div className="rounded-lg border">
         <h4 className="border-b px-3 py-2 text-[12.5px] font-semibold">公開結果（Webと配布は別）</h4>
         <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 px-3 py-2 text-[12px]">
           <dt className="text-muted-foreground">Web本番</dt>
           <dd>
             <span className="font-mono">{current?.version ? `v${current.version}` : "—"}</span>{" "}
-            <StateChip tone={candidate.phase === "completed" ? "ok" : ["deploying", "verifying_production"].includes(candidate.phase) ? "run" : "mute"}>
-              {candidate.phase === "completed" ? "稼働を確認済み" : ["deploying", "verifying_production"].includes(candidate.phase) ? "反映中" : "未反映"}
+            <StateChip tone={candidate.phase === "completed" ? "ok" : productionStop ? "bad" : ["deploying", "verifying_production"].includes(candidate.phase) ? "run" : "mute"}>
+              {candidate.phase === "completed"
+                ? finalization.production?.method === "source_publish"
+                  ? "ソース公開済み（実機配備は別管理）"
+                  : "稼働を確認済み"
+                : productionStop
+                  ? `稼働確認が停止（${productionStop.label}）`
+                  : ["deploying", "verifying_production"].includes(candidate.phase)
+                    ? "反映中"
+                    : "未反映"}
             </StateChip>
           </dd>
           <dt className="text-muted-foreground">TestFlight</dt>

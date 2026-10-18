@@ -63,6 +63,10 @@ export type ReleaseReviewDecisionRecord = {
   findingTitle: string;
   decidedBy: string;
   decidedAt: string;
+  /** 判断時に表示していたAIの推奨（#4676）。推奨が無かった・#4676より前の判断はnull */
+  recommendation?: { decision: ReleaseReviewDecisionKind; reason: string } | null;
+  /** 理由の出どころ（`ai`＝AIの理由案のまま／`ai_edited`／`manual`）。#4676より前の判断はnull */
+  reasonSource?: "ai" | "ai_edited" | "manual" | null;
 };
 
 /** 判断の対象になる指摘（AIの原判定のうち、判断の有効性を決めるのに要るところだけ） */
@@ -201,7 +205,9 @@ function describeNext(
 ): string {
   if (state !== "needs_check" && state !== "passed") return "全体レビューの結果が出てから判断できます";
   if (counts.stale > 0) return `前提が変わった判断が${counts.stale}件あります。理由を読んで判断し直してください`;
-  if (counts.undecidedBlocking > 0) return `未判断の止める指摘が${counts.undecidedBlocking}件あります。各指摘の「判断」から採否と対応時期を決めてください`;
+  if (counts.undecidedBlocking > 0) {
+    return `未判断の止める指摘が${counts.undecidedBlocking}件あります。各指摘のAIの推奨を確認して確定するか、別の判断を選んでください`;
+  }
   if (counts.fixNow > 0) return `「今回直す」の指摘が${counts.fixNow}件あります。修正Issueを起案して直してから再検証します`;
   if (cleared) {
     return "止める指摘はすべて判断済みです（修正しない）。本番公開の確認へ進めます。判断の保存だけではマージしません";

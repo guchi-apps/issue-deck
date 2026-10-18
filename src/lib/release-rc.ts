@@ -14,6 +14,8 @@
  */
 
 import type { ReleaseMergeGate } from "@/lib/release-merge-gate";
+import { PRODUCTION_COMPLETION_TEXT, PRODUCTION_STOP_TEXT, type ProductionStopReason } from "@/lib/release-production-stop";
+import type { ProductionVerificationMethod } from "@/lib/release-production-verification";
 import type { ReviewEvidenceStage } from "@/lib/release-review-reevaluation";
 
 /** 候補の状態（画面・APIに出す12種）。`phase`と検証結果から`deriveRcStatus`が決める */
@@ -28,6 +30,7 @@ export const RC_STATUSES = [
   "awaiting_approval",
   "deploying",
   "verifying_production",
+  "production_stopped",
   "completed",
   "cancelled",
 ] as const;
@@ -44,6 +47,7 @@ export const RC_STATUS_LABEL: Record<RcStatus, string> = {
   awaiting_approval: "本番承認待ち",
   deploying: "本番反映中",
   verifying_production: "稼働確認中",
+  production_stopped: "稼働確認が停止",
   completed: "完了",
   cancelled: "中止",
 };
@@ -142,6 +146,10 @@ export type RcStatusInput = {
    * 「本番承認待ち」ではなく「自動公開待ち」と出す。省略時はfalse（承認の記録が無い既存の候補）
    */
   publishApproved?: boolean;
+  /**
+   * 本番の稼働確認（#4712）。止まった理由・完了の根拠・後続の確認待ちか。省略時は従来どおり（確認中・完了）
+   */
+  production?: { stopReason: ProductionStopReason | null; method: ProductionVerificationMethod | null; awaitingSuccessor: boolean };
 };
 
 export type RcStatusView = {
@@ -165,7 +173,19 @@ function view(status: RcStatus, reason: string, attention: string | null = null,
 export function deriveRcStatus(input: RcStatusInput): RcStatusView {
   const { phase } = input;
   if (phase === "cancelled") return view("cancelled", "候補は取り消されました。記録と過去の結果は残っています");
-  if (phase === "completed") return view("completed", "本番へ反映し、稼働を確認しました");
+  const production = input.production;
+  if (phase === "completed") {
+    const method = production?.method ?? null;
+    const text = (method && PRODUCTION_COMPLETION_TEXT[method]) || "本番へ反映し、稼働を確認しました";
+    return method === "source_publish" ? view("completed", text, null, "ソース公開済み") : view("completed", text);
+  }
+  if ((phase === "deploying" || phase === "verifying_production") && production?.stopReason) {
+    const text = PRODUCTION_STOP_TEXT[production.stopReason];
+    const next = production.awaitingSuccessor
+      ? "次の候補を開始済みです。次の候補の稼働確認で、この候補を含む版が稼働していると確かめた時点で完了します"
+      : text.action;
+    return view("production_stopped", `${text.cause}。${next}`, `稼働確認が止まっています（${text.label}）`, `稼働確認が停止（${text.label}）`);
+  }
   if (phase === "deploying") return view("deploying", "mainへ反映しました。本番デプロイの完了を待っています");
   if (phase === "verifying_production") return view("verifying_production", "本番の稼働版を確認しています");
   // DBの段階よりGitHubのマージ事実を優先する。検証合格・稼働確認の代用にはしない（#4673）。
@@ -451,7 +471,9 @@ export type RcBlockKind =
   /** 通常の進行中。既存の候補を進める */
   | "in_progress"
   /** PRはmainへマージ済みなのに内部段階がレビューのまま、公開準備の記録がない等。実ジョブが無く、待っても進まない */
-  | "inconsistent";
+  | "inconsistent"
+  /** 本番へ公開済みだが稼働確認が止まっている（#4712）。原因を直して確かめ直す。証拠未設定なら次の候補で確かめられる */
+  | "production_stopped";
 
 /** 開始前の画面に出す、既存候補の要約。画面・APIが同じ判定を使う */
 export type RcBlockSummary = {
@@ -470,6 +492,15 @@ export type RcBlockSummary = {
   unconfirmed: string[];
   /** 管理記録の終了（取消）を提示してよいか。mainへマージ後（deploying以降）は不可 */
   cancellable: boolean;
+  /** 稼働確認が止まっている（#4712）なら、その理由 */
+  productionStopReason?: ProductionStopReason | null;
+  /** 次にできる操作（1文）。稼働確認の停止で使う */
+  action?: string;
+  /**
+   * 証拠未設定の候補を残したまま、次の候補を始められるか（`decideSuccessorStart`）。始められる場合の開始は、
+   * この候補を後続の確認待ちへ移して行う（完了・取消にはしない）
+   */
+  successorStart?: { allowed: true } | { allowed: false; reason: string };
 };
 
 /**
@@ -484,6 +515,10 @@ export function classifyRcBlock(input: {
   phase: RcPhase;
   status: RcStatus;
   statusLabel: string;
+  /** 稼働確認の停止理由（#4712）。止まっていなければnull */
+  productionStopReason?: ProductionStopReason | null;
+  /** 停止の理由・次の操作（`deriveRcStatus`の理由文） */
+  statusReason?: string;
 }): RcBlockSummary {
   const label = `RC-${input.sequence}`;
   const base = {
@@ -496,6 +531,18 @@ export function classifyRcBlock(input: {
     cancellable: canCancelRc(input.phase),
   };
   const prText = input.prNumber === null ? "候補のPR" : `PR #${input.prNumber}`;
+  if (input.status === "production_stopped" && input.productionStopReason) {
+    const text = PRODUCTION_STOP_TEXT[input.productionStopReason];
+    return {
+      ...base,
+      kind: "production_stopped",
+      productionStopReason: input.productionStopReason,
+      reason: `${prText}は本番へ公開済みですが、稼働確認が止まっています（${text.label}）。${text.cause}。`,
+      facts: [`${prText}はmainへマージ済み`, `現在の工程: ${input.statusLabel}`],
+      unconfirmed: ["本番の稼働版（確かめるまでこの候補は完了にせず、版の予約・候補の枠も保ちます）"],
+      action: input.statusReason ?? text.action,
+    };
+  }
   if (input.phase === "review" && input.status === "deploying") {
     return {
       ...base,

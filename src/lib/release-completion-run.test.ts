@@ -53,6 +53,8 @@ function table(store: () => Row[]) {
   };
 }
 
+vi.mock("@/lib/release-production-verification-run", () => ({ isProductionVerifiedForMergeSha: vi.fn(async () => false) }));
+
 vi.mock("@/lib/db", () => ({
   db: {
     releaseCompletionRun: {

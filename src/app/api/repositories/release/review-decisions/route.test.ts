@@ -9,6 +9,7 @@ const createComment = vi.fn();
 const fetchIssueStateOrThrow = vi.fn();
 const loadSummary = vi.fn();
 const saveDecision = vi.fn();
+const findRecommendation = vi.fn();
 
 vi.mock("@/lib/auth-user", () => ({ requireUserId: (...a: unknown[]) => requireUserId(...a) }));
 vi.mock("@/lib/db", () => ({
@@ -29,6 +30,10 @@ vi.mock("@/lib/release-review-decision-store", () => ({
   resolveReleaseDecisionChain: vi.fn(async () => [11, 10]),
   releaseDecisionScopeKey: () => "o/r#10",
   saveReleaseReviewDecision: (...a: unknown[]) => saveDecision(...a),
+}));
+
+vi.mock("@/lib/release-review-recommendation-store", () => ({
+  findUsableRecommendation: (...a: unknown[]) => findRecommendation(...a),
 }));
 
 import type { NextRequest } from "next/server";
@@ -72,6 +77,7 @@ beforeEach(() => {
   fetchIssueStateOrThrow.mockResolvedValue("open");
   createIssue.mockResolvedValue({ number: 5000 });
   createComment.mockResolvedValue({});
+  findRecommendation.mockResolvedValue(null);
   saveDecision.mockImplementation(async (input: Record<string, unknown>) => ({ ok: true, record: { id: "d1", ...input } }));
 });
 
@@ -153,5 +159,64 @@ describe("POST /api/repositories/release/review-decisions", () => {
     countSeries.mockResolvedValue(1);
     const res = await POST(request({ decision: "reject", followUp: null, timing: null, reason: "過剰な要求" }));
     expect((await res.json()).activeFixSeries).toBe(1);
+  });
+
+  describe("AIの推奨（#4676）", () => {
+    const rec = {
+      id: "rec1",
+      findingId: finding.id,
+      baseSha: BASE,
+      headSha: HEAD,
+      recommended: "reject",
+      rationale: "根拠",
+      drafts: {
+        fix_now: { reason: "直す", impact: null, scope: null, timing: null, followUpTitle: null },
+        post_release: { reason: "後で", impact: null, scope: null, timing: null, followUpTitle: null },
+        defer: { reason: "見送る", impact: null, scope: null, timing: null, followUpTitle: null },
+        reject: { reason: "対象外", impact: null, scope: null, timing: null, followUpTitle: null },
+      },
+      missing: [],
+      createdAt: "2026-10-17T00:00:00.000Z",
+    };
+    const body = { decision: "reject", followUp: null, timing: null, recommendationId: "rec1" };
+
+    it("推奨どおりの理由なら推奨の写しと「AI案のまま」を残す", async () => {
+      findRecommendation.mockResolvedValue(rec);
+      const res = await POST(request({ ...body, reason: "対象外" }));
+      expect(res.status).toBe(200);
+      expect(findRecommendation).toHaveBeenCalledWith("rec1", { scopeKey: "o/r#10", findingId: finding.id, baseSha: BASE, headSha: HEAD });
+      expect(saveDecision).toHaveBeenCalledWith(
+        expect.objectContaining({ recommendation: { id: "rec1", decision: "reject", reason: "対象外" }, reasonSource: "ai" }),
+      );
+    });
+
+    it("理由を編集した・別の判断を選んだことを区別して残す", async () => {
+      findRecommendation.mockResolvedValue(rec);
+      await POST(request({ ...body, reason: "対象外。補足あり" }));
+      expect(saveDecision).toHaveBeenLastCalledWith(expect.objectContaining({ reasonSource: "ai_edited" }));
+      await POST(request({ ...body, decision: "fix_now", reason: "直す" }));
+      expect(saveDecision).toHaveBeenLastCalledWith(
+        expect.objectContaining({ decision: "fix_now", reasonSource: "ai", recommendation: expect.objectContaining({ decision: "reject" }) }),
+      );
+    });
+
+    it("推奨なしの判断は手入力として残す", async () => {
+      await POST(request({ decision: "reject", followUp: null, timing: null, reason: "自分で書いた" }));
+      expect(findRecommendation).not.toHaveBeenCalled();
+      expect(saveDecision).toHaveBeenCalledWith(expect.objectContaining({ recommendation: null, reasonSource: "manual" }));
+    });
+
+    it("今の対象の推奨でなければ保存せず、Issueも作らない", async () => {
+      findRecommendation.mockResolvedValue(null);
+      const res = await POST(request({ recommendationId: "rec1", followUp: { kind: "create", title: "t" } }));
+      expect(res.status).toBe(409);
+      expect((await res.json()).error).toBe("recommendation_stale");
+      expect(saveDecision).not.toHaveBeenCalled();
+      expect(createIssue).not.toHaveBeenCalled();
+    });
+
+    it("推奨IDの形が違えば400", async () => {
+      expect((await POST(request({ recommendationId: "../x" }))).status).toBe(400);
+    });
   });
 });

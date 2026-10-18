@@ -15,7 +15,8 @@ import {
 import { ReleaseDevelopSyncNotice } from "@/components/dashboard/release-develop-sync";
 import { Button } from "@/components/ui/button";
 import type { RcBlockSummary } from "@/lib/release-rc";
-import { requestReleaseCandidateCancel } from "@/lib/release-request";
+import { requestRcProductionRecheck, requestReleaseCandidateCancel } from "@/lib/release-request";
+import { productionKindNotice } from "@/lib/release-production-stop";
 import type { ReleaseStartMode } from "@/lib/release-start-mode";
 import { cn } from "@/lib/utils";
 
@@ -30,6 +31,7 @@ const CHIP = "inline-flex items-center whitespace-nowrap rounded-full px-2 py-px
 /** 折り畳み・一括の1行に出す短い理由。ブロックが無いときはnull */
 export function releaseBlockShortLabel(mode: ReleaseStartMode | null): string | null {
   if (mode?.mode !== "blocked") return null;
+  if (mode.block.kind === "production_stopped") return `${mode.block.label} 稼働確認が停止・開始できません`;
   return mode.block.kind === "inconsistent" ? `${mode.block.label} 状態不整合・開始できません` : `${mode.block.label} 進行中・開始できません`;
 }
 
@@ -55,6 +57,30 @@ export function ReleaseBlockNotice({
     return <ReleaseDevelopSyncNotice repositoryFullName={repositoryFullName} sync={startMode.sync} onChanged={onChanged} showStartBlocked className={className} />;
   }
 
+  const contractNotice = !block && startMode?.mode === "candidate" ? productionKindNotice(startMode.productionKind) : null;
+  if (!block && startMode?.mode === "candidate" && !startMode.successorOf && contractNotice) {
+    return (
+      <p className={cn("break-words text-xs text-amber-700 dark:text-amber-300", className)} data-testid="release-contract-notice">
+        稼働確認: {contractNotice}
+      </p>
+    );
+  }
+  if (!block && startMode?.mode === "candidate" && startMode.successorOf) {
+    // 証拠未設定で止まった候補を、次の候補の稼働確認で確かめる（#4712）。開始はできるので、何が起きるかを先に出す
+    const prior = startMode.successorOf;
+    return (
+      <div className={cn("flex flex-col gap-1 rounded-md border border-amber-500/50 p-2.5 text-xs", className)} data-testid="release-block-successor">
+        <p>
+          <span className="mr-1.5 font-mono font-bold">{prior.label}</span>
+          <span className={cn(CHIP, "bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-300")}>{prior.statusLabel}</span>
+        </p>
+        <p className="break-words">{prior.reason}</p>
+        <p className="break-words text-muted-foreground">
+          developには稼働版の照合が入っているため、次の候補を開始できます。開始すると{prior.label}は「後続の稼働確認待ち」へ移り、次の候補の稼働確認で{prior.label}を含む版の稼働を確かめた時点で完了します（完了・取消とは記録しません）。
+        </p>
+      </div>
+    );
+  }
   if (!block) {
     if (startMode === null) {
       return (
@@ -99,6 +125,7 @@ function BlockDetail({
   className?: string;
 }) {
   const inconsistent = block.kind === "inconsistent";
+  const productionStopped = block.kind === "production_stopped";
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -124,15 +151,28 @@ function BlockDetail({
     }
   };
 
+  const recheck = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      await requestRcProductionRecheck(repositoryFullName, block.candidateId);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+      onChanged();
+    }
+  };
+
   return (
     <div
-      className={cn("flex min-w-0 flex-col gap-1.5 rounded-md border p-2.5", inconsistent ? "border-destructive/50" : "border-amber-500/50", className)}
+      className={cn("flex min-w-0 flex-col gap-1.5 rounded-md border p-2.5", inconsistent || productionStopped ? "border-destructive/50" : "border-amber-500/50", className)}
       data-testid="release-block-notice"
       data-kind={block.kind}
     >
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
         <span className="font-mono text-[13px] font-bold">{block.label}</span>
-        <span className={cn(CHIP, inconsistent ? "bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-300" : "bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300")}>
+        <span className={cn(CHIP, inconsistent || productionStopped ? "bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-300" : "bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300")}>
           {inconsistent ? "状態不整合" : block.statusLabel}
         </span>
         <span className={cn(CHIP, "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300")}>新規開始できません</span>
@@ -146,8 +186,25 @@ function BlockDetail({
         {block.unconfirmed.length > 0 && <li>未確認: {block.unconfirmed.join(" / ")}</li>}
         {inconsistent && <li>履歴・公開済みコード・版の追跡は残ります</li>}
       </ul>
+      {productionStopped && block.action && <p className="break-words text-xs font-medium">次の操作: {block.action}</p>}
+      {productionStopped && block.successorStart && !block.successorStart.allowed && (
+        <p className="break-words text-[11.5px] text-muted-foreground">次の候補を始められない理由: {block.successorStart.reason}</p>
+      )}
       <div className="flex flex-wrap gap-2">
-        {inconsistent ? (
+        {productionStopped ? (
+          <>
+            <Button size="sm" className="h-7 px-2 text-xs" disabled={busy} onClick={() => void recheck()}>
+              {busy ? "確かめています…" : "稼働確認をやり直す"}
+            </Button>
+            {prUrl && (
+              <Button size="sm" variant="outline" className="h-7 px-2 text-xs" asChild>
+                <a href={prUrl} target="_blank" rel="noreferrer">
+                  PR #{block.prNumber} を開く
+                </a>
+              </Button>
+            )}
+          </>
+        ) : inconsistent ? (
           <>
             <Button size="sm" className="h-7 px-2 text-xs" onClick={onChanged}>
               候補の状態を再確認
