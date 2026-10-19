@@ -1026,6 +1026,59 @@ describe("リモートセッション（#4836）", () => {
     expect(screen.queryByRole("button", { name: "画面を開く" })).toBeNull();
   });
 
+  it("終了ボタンは確認を挟んでから終了を送る（#4845）", async () => {
+    const onStop = vi.fn().mockResolvedValue({ ok: true });
+    render(
+      <DispatchHostPanel
+        hosts={[makeHost()]}
+        sessions={[]}
+        remoteSessions={[makeRemote()]}
+        onStopRemoteSession={onStop}
+      />,
+    );
+    act(() => screen.getByRole("button", { name: "myroomのリモートセッションを終了する" }).click());
+    // 押しただけでは送らない
+    expect(onStop).not.toHaveBeenCalled();
+    act(() => screen.getByRole("button", { name: "やめる" }).click());
+    expect(screen.queryByRole("button", { name: "終了する" })).toBeNull();
+
+    act(() => screen.getByRole("button", { name: "myroomのリモートセッションを終了する" }).click());
+    await act(async () => screen.getByRole("button", { name: "終了する" }).click());
+    expect(onStop).toHaveBeenCalledWith("remote-1");
+    expect(screen.queryByRole("button", { name: "終了する" })).toBeNull();
+  });
+
+  it("終了を積めなかったときは理由を行の下に出す", async () => {
+    const onStop = vi.fn().mockResolvedValue({ ok: false, message: "サブPCがオフラインのため終了できません。" });
+    render(
+      <DispatchHostPanel
+        hosts={[makeHost()]}
+        sessions={[]}
+        remoteSessions={[makeRemote()]}
+        onStopRemoteSession={onStop}
+      />,
+    );
+    act(() => screen.getByRole("button", { name: "myroomのリモートセッションを終了する" }).click());
+    await act(async () => screen.getByRole("button", { name: "終了する" }).click());
+    expect(screen.getByText("サブPCがオフラインのため終了できません。")).toBeTruthy();
+  });
+
+  it("終了中の行の終了ボタンは押せない・受け取り手が無ければボタンを出さない", () => {
+    const { unmount } = render(
+      <DispatchHostPanel
+        hosts={[makeHost()]}
+        sessions={[]}
+        remoteSessions={[makeRemote({ stopping: true })]}
+        onStopRemoteSession={vi.fn()}
+      />,
+    );
+    const button = screen.getByRole("button", { name: "myroomのリモートセッションを終了する" }) as HTMLButtonElement;
+    expect(button.disabled).toBe(true);
+    unmount();
+    render(<DispatchHostPanel hosts={[makeHost()]} sessions={[]} remoteSessions={[makeRemote()]} />);
+    expect(screen.queryByRole("button", { name: /リモートセッションを終了する$/ })).toBeNull();
+  });
+
   it("別のホストのもの・動いているものが無いときは小見出しごと出さない", () => {
     render(
       <DispatchHostPanel hosts={[makeHost()]} sessions={[]} remoteSessions={[makeRemote({ host: "mainpc" })]} />,

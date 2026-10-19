@@ -65,8 +65,8 @@ export type DispatchState = {
   /** 親Issueの自動実行（#4536）の稼働中の印。古い応答では欠けうる */
   parentRuns?: ParentRunBadge[];
   /**
-   * 要求者の稼働中のリモートセッション（#4836）。ホストカードに並べるだけで、操作は
-   * リモートセッション画面が持つ。古い応答では欠けうる
+   * 要求者の稼働中のリモートセッション（#4836）。ホストカードに並べ、終了だけはここからも
+   * 押せる（#4845。起動はリモートセッション画面が持つ）。古い応答では欠けうる
    */
   remoteSessions?: RemoteSessionView[];
   concurrency: number;
@@ -680,6 +680,36 @@ export function useDispatchState(enabled: boolean) {
   );
 
   /**
+   * リモートセッションを終了する（#4845）。リモートセッション画面と同じ
+   * `DELETE /api/remote-sessions?id=`を呼ぶ（`REMOTE_SESSION_KILL`を積むだけで、tmuxを畳むのは
+   * poller）。失敗の理由は戻り値で返す（`requestReboot`と同じ形）。
+   */
+  const stopRemoteSession = useCallback(
+    async (id: string): Promise<{ ok: true } | { ok: false; message: string }> => {
+      try {
+        const res = await fetch(`/api/remote-sessions?id=${encodeURIComponent(id)}`, { method: "DELETE" });
+        if (!res.ok) return { ok: false, message: await readErrorMessage(res) };
+        // 次のポーリングを待たずに「終了中」にする。**pull型で届くまで数秒〜30秒何も起きない**ため
+        setState((prev) =>
+          prev
+            ? {
+                ...prev,
+                remoteSessions: prev.remoteSessions?.map((session) =>
+                  session.id === id ? { ...session, stopping: true } : session,
+                ),
+              }
+            : prev,
+        );
+        markChanged();
+        return { ok: true };
+      } catch (err) {
+        return { ok: false, message: err instanceof Error ? err.message : String(err) };
+      }
+    },
+    [markChanged],
+  );
+
+  /**
    * CodexのRemote Control相当（#2524）。ペアリングコードを1枚発行させる。
    *
    * **`requestReboot`と同じくホスト名だけを送る。** 繋がる先はホストごとで、Issueには
@@ -1119,6 +1149,7 @@ export function useDispatchState(enabled: boolean) {
     controlManualStepRun,
     requestSelfUpdate,
     requestReboot,
+    stopRemoteSession,
     requestCodexPairing,
     requestPreview,
     cancel,

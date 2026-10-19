@@ -10,21 +10,10 @@ import { buildMergeChecks, cellsFromSummary } from "@/lib/pull-request-merge-che
 import { buildReleaseCheckCells } from "@/lib/release-candidate-checks";
 import type { PullRequestSummary } from "@/types/pull-request";
 
-/**
- * PR詳細・PR一覧・ブランチ画面で共通の6チェック（#4366）。個別PRの値は`PullRequestSummary`から、
- * リリース候補の共通結果（全体レビュー・統合検証・Mac検証）はリポジトリ単位で共有する取得から作る
- * （同じ判定対象・同じ状態定義なので、画面ごとに食い違わない）。**検証は起動しない**（読むだけ）。
- *
- * @param onOpenPullRequest 個別PRの詳細を開く。省略時は証跡の導線を出さない（既に詳細を開いている画面）
- */
-export function PullRequestChecksStrip({
-  pullRequest,
-  onOpenPullRequest,
-  grouped = true,
-  showCandidateNote = false,
-  pullRequestEvidenceLabel,
-  className,
-}: {
+/** 個別PRでは使わない共通結果の置き場（`buildMergeChecks`の入力を満たすだけで、描画には使わない） */
+const NO_RELEASE_CELLS = buildReleaseCheckCells({ source: { status: "loading" }, pullRequestNumber: 0, nowMs: 0 });
+
+type StripProps = {
   pullRequest: PullRequestSummary;
   onOpenPullRequest?: (() => void) | null;
   /** 2グループ表示（#4427）。ブランチ画面など従来の1列表示が要る場所だけfalse */
@@ -32,7 +21,49 @@ export function PullRequestChecksStrip({
   showCandidateNote?: boolean;
   pullRequestEvidenceLabel?: string;
   className?: string;
-}) {
+};
+
+/**
+ * PR詳細・PR一覧・ブランチ画面で共通のチェック（#4366）。個別PRは「このPR」の3項目（CI・コード・競合）だけを出し、
+ * リリース候補の共通結果は出さない（#4841。個別PRの判断に使わないため）。
+ * リリースPR自身（develop→main）の行だけは、リリース候補の共通結果（全体レビュー・統合検証・Mac検証）を
+ * 含む6項目を、リポジトリ単位で共有する取得から作る。**検証は起動しない**（読むだけ）。
+ *
+ * @param onOpenPullRequest 個別PRの詳細を開く。省略時は証跡の導線を出さない（既に詳細を開いている画面）
+ */
+export function PullRequestChecksStrip(props: StripProps) {
+  return props.pullRequest.kind === "release" ? (
+    <ReleasePullRequestChecksStrip {...props} />
+  ) : (
+    <OwnPullRequestChecksStrip {...props} />
+  );
+}
+
+function OwnPullRequestChecksStrip({ pullRequest, onOpenPullRequest, pullRequestEvidenceLabel, className }: StripProps) {
+  const checks = buildMergeChecks({ ...cellsFromSummary(pullRequest), release: NO_RELEASE_CELLS }).filter(
+    (check) => !check.common,
+  );
+  return (
+    <PullRequestMergeChecks
+      className={className}
+      ownOnly
+      pullRequestEvidenceLabel={pullRequestEvidenceLabel}
+      checks={checks}
+      candidate={null}
+      onOpenPullRequest={onOpenPullRequest ?? null}
+      onOpenCandidate={null}
+    />
+  );
+}
+
+function ReleasePullRequestChecksStrip({
+  pullRequest,
+  onOpenPullRequest,
+  grouped = true,
+  showCandidateNote = false,
+  pullRequestEvidenceLabel,
+  className,
+}: StripProps) {
   const source = useReleaseCandidates(pullRequest.repositoryFullName);
   const [selectedNumber, setSelectedNumber] = useState<number | null>(null);
   const navigation = useGithubReferenceNavigation();
