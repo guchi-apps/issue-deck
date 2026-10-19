@@ -56,6 +56,38 @@ describe("derivePrimaryState", () => {
     expect(derivePrimaryState(pr()).kind).toBe("mergeable");
   });
 
+  it("必須チェックが待機中ならマージ可能にせず、チェック名と説明を出す（#4884）", () => {
+    const primary = derivePrimaryState(
+      pr({
+        autoMergeEnabled: true,
+        unmetRequiredChecks: [{ name: "issue-deck/ios-precheck", state: "pending", description: "iOS修復待ち" }],
+      }),
+    );
+    expect(primary.kind).toBe("required-check");
+    expect(primary.label).toBe("必須チェック待ち");
+    expect(primary.reason).toContain("issue-deck/ios-precheck（待機中: iOS修復待ち）");
+    expect(primary.needsAction).toBe(false);
+  });
+
+  it("必須チェックが失敗していれば対応が要る状態にする（#4884）", () => {
+    const primary = derivePrimaryState(
+      pr({
+        unmetRequiredChecks: [
+          { name: "ci / test", state: "missing", description: null },
+          { name: "issue-deck/ci-gate", state: "failure", description: null },
+        ],
+      }),
+    );
+    expect(primary.label).toBe("必須チェック失敗");
+    expect(primary.reason).toContain("ci / test（未実行）、issue-deck/ci-gate（失敗）");
+    expect(primary.needsAction).toBe(true);
+  });
+
+  it("必須チェックがすべて成功・調べていなければ従来どおりマージ可能", () => {
+    expect(derivePrimaryState(pr({ unmetRequiredChecks: [] })).kind).toBe("mergeable");
+    expect(derivePrimaryState(pr({ unmetRequiredChecks: null })).kind).toBe("mergeable");
+  });
+
   it("CI失敗・競合・レビュー指摘・修正中・判定中を区別する", () => {
     expect(derivePrimaryState(pr({ ciState: "failure" })).kind).toBe("ci-failed");
     expect(derivePrimaryState(pr({ mergeable: false })).kind).toBe("conflict");

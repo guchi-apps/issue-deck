@@ -12,6 +12,7 @@ import type { PullRequestReviewVerdict } from "@/lib/github/pull-request-review-
 import type { PullRequestRole } from "@/lib/github/pull-request-role";
 import type { CiState } from "@/lib/github/release-api";
 import type { ReleaseVerification } from "@/lib/github/release-verification";
+import type { UnmetRequiredCheck } from "@/lib/github/required-checks";
 
 /** CIの内訳に並べるチェック1件（#2777）。中身は`RollupCiCheck`そのもの */
 export type PullRequestCiCheck = RollupCiCheck;
@@ -177,6 +178,12 @@ export type PullRequestSummary = {
    * **詳細（`/api/pull-requests/detail`）だけが載せる**ので省略可能で、無ければ`behind`とは扱わない。
    */
   mergeableState?: string | null;
+  /**
+   * マージ先で必須のチェックのうち、headでまだ成功していないもの（#4884）。**詳細だけが、
+   * `mergeableState`が`blocked`のときに載せる**。省略・nullは「調べていない・読めなかった」で、
+   * 空配列は「必須チェックはすべて成功」。代表状態はこれが空でなければ「マージ可能」にしない。
+   */
+  unmetRequiredChecks?: UnmetRequiredCheck[] | null;
   /**
    * 自動修復ワークフローが対象リポジトリに置かれているか（#1960）。修復ボタンを出す種類
    * （`repairKindsFor`の結果）ごとに持つ。

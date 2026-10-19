@@ -25,6 +25,7 @@ import {
 } from "@/lib/github/pull-requests-api";
 import { fetchRefCheckState } from "@/lib/github/release-api";
 import { fetchRepairWorkflowAvailability } from "@/lib/github/repair-workflow-cache";
+import { fetchUnmetRequiredChecks } from "@/lib/github/required-checks";
 import { checkUserIssueKey, fetchCheckUserIssueReasons } from "@/lib/pull-request-check-user";
 import { resolveMergeCheckReasons, type MergeCheckReasons } from "@/lib/merge-check-reasons";
 import { extractLinkedIssueNumber, requiresUserMerge } from "@/lib/pull-request-list";
@@ -135,6 +136,13 @@ async function handleGET(request: NextRequest) {
       { mergeable: pullRequest.mergeable, ciState },
     );
 
+    // GitHubがマージを止めている（`blocked`）ときだけ、必須チェックの未成功を引く（#4884）。
+    // CI状態はios-precheckのような必須のcommit statusを数えないため、緑のまま押すと405になる。
+    const unmetRequiredChecks =
+      pullRequest.state === "open" && !pullRequest.draft && pullRequest.mergeable_state === "blocked"
+        ? await fetchUnmetRequiredChecks(owner, repo, pullRequest.base.ref, pullRequest.head.sha, token)
+        : undefined;
+
     const summary = toPullRequestSummary(
         pullRequest,
         { fullName: repository.fullName, private: repository.private },
@@ -146,6 +154,7 @@ async function handleGET(request: NextRequest) {
           // 一覧のようにGraphQLで取り直す必要はない（#1742）。
           mergeable: pullRequest.mergeable,
           mergeableState: pullRequest.mergeable_state,
+          unmetRequiredChecks,
           linkedIssueCheckUser: checkUserKey !== null && checkUserReasons.has(checkUserKey),
           linkedIssueCheckReason:
             checkUserKey === null ? null : (checkUserReasons.get(checkUserKey) ?? null),

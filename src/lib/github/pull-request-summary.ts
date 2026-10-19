@@ -6,6 +6,7 @@ import type { PullRequestRepairRunSummary } from "@/lib/github/pull-request-repa
 import { parsePullRequestReviewVerdict } from "@/lib/github/pull-request-review-verdict";
 import type { GithubApiOpenPullRequest } from "@/lib/github/pull-requests-api";
 import type { CiState } from "@/lib/github/release-api";
+import type { UnmetRequiredCheck } from "@/lib/github/required-checks";
 import {
   parseReleaseVerification,
   type ReleaseVerification,
@@ -68,6 +69,8 @@ export function toPullRequestSummary(
     mergeable?: boolean | null;
     /** GitHubの`mergeable_state`（#4626）。詳細だけが渡す。省略＝載せない */
     mergeableState?: string | null;
+    /** 未成功の必須チェック（#4884）。詳細だけが渡す。省略＝載せない */
+    unmetRequiredChecks?: UnmetRequiredCheck[] | null;
     /** 自動マージ可否の判定の進み具合（#1968）。取得していない経路では省略＝`unknown` */
     mergeJudgement?: MergeJudgement;
     linkedIssueCheckUser?: boolean;
@@ -116,6 +119,7 @@ export function toPullRequestSummary(
     mergeJudgement: options.mergeJudgement ?? MERGE_JUDGEMENT_UNKNOWN,
     mergeable: options.mergeable ?? null,
     ...(options.mergeableState === undefined ? {} : { mergeableState: options.mergeableState }),
+    ...(options.unmetRequiredChecks === undefined ? {} : { unmetRequiredChecks: options.unmetRequiredChecks }),
     repairWorkflowAvailability: options.repairWorkflowAvailability ?? {},
     repairRun: options.repairRun ?? null,
     // 自動レビューの判定はPR本文に文字として残っている（#2843）。本文はこの層まで来ているので、
