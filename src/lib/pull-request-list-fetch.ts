@@ -449,10 +449,11 @@ async function attachRepairWorkflowAvailability(
  * **CI状態とコンフリクト有無は取得せず`unknown` / `null`のまま返す。** 取得にはPR1件あたり
  * 1回APIを消費するのに対し、既に閉じたPRのCIは「見て何かする」対象ではないため。マージ済みかどうかは
  * 一覧APIが返す`merged_at`から決める（単体取得の`merged`は一覧のレスポンスに含まれない）。
+ * ブランチ画面の過去のリリースの追加取得（#4844）も同じ形で返す。
  */
-function toClosedPullRequest(
+export function toClosedPullRequest(
   pullRequest: GithubApiOpenPullRequest,
-  repository: RepositoryContext,
+  repository: { fullName: string; private: boolean },
 ): PullRequestSummary {
   return toPullRequestSummary(pullRequest, repository, {
     merged: pullRequest.merged_at !== null,

@@ -2,7 +2,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { BranchFlowView } from "@/components/dashboard/branch-flow-view";
+import { BranchFlowView, type BranchFlowReleaseHistory } from "@/components/dashboard/branch-flow-view";
 import { buildBranchFlow, type BranchFlowIssueSource } from "@/lib/branch-flow";
 import { AI_REVIEW_NONE } from "@/lib/github/check-rollup";
 import type { RepositoryBranchStatus, RepositoryDeployStatus } from "@/types/branch-flow";
@@ -129,6 +129,8 @@ function renderFlow(input: {
   onPullToRefresh?: () => Promise<unknown> | void;
   /** ヘッダーの更新を文字なしのアイコンだけにするか（#1958） */
   refreshIconOnly?: boolean;
+  /** 「過去のリリース」の追加取得（#4844）。渡さなければ取り足しの導線は出ない */
+  releaseHistory?: BranchFlowReleaseHistory;
 }) {
   const flow = buildBranchFlow({
     repositories: input.repositories ?? [{ fullName: REPO, private: false }],
@@ -155,6 +157,7 @@ function renderFlow(input: {
       onMerged={input.onMerged}
       onPullToRefresh={input.onPullToRefresh}
       refreshIconOnly={input.refreshIconOnly}
+      releaseHistory={input.releaseHistory}
     />,
   );
 }
@@ -735,6 +738,101 @@ describe("BranchFlowView", () => {
       fireEvent.click(screen.getByRole("button", { name: "さらに表示" }));
       expect(screen.getByText("issue-800")).toBeTruthy();
       expect(screen.queryByRole("button", { name: /さらに表示/ })).toBeNull();
+    });
+
+    describe("過去のリリースの取り足し（#4844）", () => {
+      const pullRequests = () => [
+        makeReleasePullRequest({
+          number: 910,
+          title: "v3.16.0をmainへリリースする",
+          state: "closed",
+          merged: true,
+          mergedAt: "2026-08-05T00:00:00Z",
+        }),
+        makeReleasePullRequest({
+          number: 920,
+          title: "v3.17.0をmainへリリースする",
+          state: "closed",
+          merged: true,
+          mergedAt: "2026-08-10T00:00:00Z",
+        }),
+        makePullRequest({ number: 905, headRef: "issue-905", state: "closed", merged: true, mergedAt: "2026-08-03T00:00:00Z" }),
+        makePullRequest({ number: 915, headRef: "issue-915", state: "closed", merged: true, mergedAt: "2026-08-08T00:00:00Z" }),
+        makePullRequest({ number: 930, headRef: "issue-930", state: "closed", merged: true, mergedAt: "2026-08-12T00:00:00Z" }),
+      ];
+      const branchStatuses = [
+        branchStatus({ developVsMain: { aheadBy: 3, behindBy: 0, sameContent: false, units: null } }),
+      ];
+
+      it("表示済みの版を出し切るまでは取りに行かず、出し切ったあとの「さらに表示」で取り足す", () => {
+        const loadMore = vi.fn();
+        renderFlow({
+          pullRequests: pullRequests(),
+          branchStatuses,
+          releaseHistory: {
+            statusFor: () => ({ hasMore: true, loading: false, error: null }),
+            loadMore,
+          },
+        });
+
+        openRepository();
+        fireEvent.click(screen.getByText("過去のリリース"));
+        expect(screen.getByText("issue-915")).toBeTruthy();
+        // 取得済みの版が残っている間は、従来どおり画面の中だけで1版進める
+        fireEvent.click(screen.getByRole("button", { name: "さらに表示" }));
+        expect(screen.getByText("issue-905")).toBeTruthy();
+        expect(loadMore).not.toHaveBeenCalled();
+        // 出し切ったら、GitHubから取り足す「さらに表示」に替わる
+        fireEvent.click(screen.getByRole("button", { name: "さらに表示" }));
+        expect(loadMore).toHaveBeenCalledWith(REPO);
+        expect(screen.queryByText("ここまでが全履歴です")).toBeNull();
+      });
+
+      it("取得中は押せず、取り切ったら「ここまでが全履歴です」を出す", () => {
+        const { unmount } = renderFlow({
+          pullRequests: pullRequests(),
+          branchStatuses,
+          releaseHistory: {
+            statusFor: () => ({ hasMore: true, loading: true, error: null }),
+            loadMore: vi.fn(),
+          },
+        });
+        openRepository();
+        fireEvent.click(screen.getByText("過去のリリース"));
+        fireEvent.click(screen.getByRole("button", { name: "さらに表示" }));
+        expect(screen.getByRole("button", { name: /読み込み中/ }).hasAttribute("disabled")).toBe(true);
+        unmount();
+
+        renderFlow({
+          pullRequests: pullRequests(),
+          branchStatuses,
+          releaseHistory: {
+            statusFor: () => ({ hasMore: false, loading: false, error: null }),
+            loadMore: vi.fn(),
+          },
+        });
+        openRepository();
+        fireEvent.click(screen.getByText("過去のリリース"));
+        fireEvent.click(screen.getByRole("button", { name: "さらに表示" }));
+        expect(screen.queryByRole("button", { name: "さらに表示" })).toBeNull();
+        expect(screen.getByText("ここまでが全履歴です")).toBeTruthy();
+      });
+
+      it("畳んだ版が無くても、本番へ出た版があれば遡る入口として「過去のリリース」を出す", () => {
+        const loadMore = vi.fn();
+        renderFlow({
+          // 次のリリースに乗る分が無く、いちばん新しい版の束が既定で開いている（#1711）
+          pullRequests: pullRequests().filter((pullRequest) => pullRequest.number !== 930 && pullRequest.number !== 910 && pullRequest.number !== 905),
+          releaseHistory: {
+            statusFor: () => ({ hasMore: true, loading: false, error: null }),
+            loadMore,
+          },
+        });
+        openRepository();
+        fireEvent.click(screen.getByText("過去のリリース"));
+        fireEvent.click(screen.getByRole("button", { name: "さらに表示" }));
+        expect(loadMore).toHaveBeenCalledWith(REPO);
+      });
     });
 
     it("次のリリースに乗る分は畳まずに出す（#1586）", () => {
