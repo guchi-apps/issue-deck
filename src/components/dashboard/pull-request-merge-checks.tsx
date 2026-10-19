@@ -19,6 +19,8 @@ const TONE_TEXT: Record<MergeCheckTone, string> = {
  * PR詳細・PR一覧・ブランチ画面・本番マージ確認の一覧に出す6チェック（#4366。#4305の5項目の後継）。
  *
  * 塗りのチップにはせず、既存の検証区分と同じ「記号＋文字」で出す。ラベルを上・状態を下に積み、
+ * 個別PR（`ownOnly`）は1行に並べる。iOSを足した4項目（PR詳細。#4882）は、スマホ幅（iPhone 15の393px）でも
+ * 改行しないよう、狭い幅だけ文字を小さくして項目内の折り返しを止める。
  * スマホ幅は3項目ずつの2段（CI・コード・競合／全体・統合・iOS）、広い画面は横1行にする
  * （横スクロール・ホバーに頼らない）。色に頼らず、記号と日本語の状態で読める。各項目は44px以上の
  * タップ領域で、押すと下に詳細（正式名称・状態・判定対象・理由・証跡）を開く。
@@ -63,6 +65,10 @@ export function PullRequestMergeChecks({
   const [openKey, setOpenKey] = useState<string | null>(null);
   const open = checks.find((check) => check.key === openKey) ?? null;
 
+  // 4項目の1行（PR詳細のCI・コード・競合・iOS）。393pxで「▲ 検証待ち」まで収まる大きさにする
+  const compact = ownOnly && checks.length > 3;
+  const textSize = compact ? "text-xs leading-4 sm:text-sm sm:leading-5" : "text-sm leading-5";
+
   const renderButton = (check: MergeCheckItem) => (
     <div key={check.key} className="min-w-0">
       <button
@@ -77,13 +83,15 @@ export function PullRequestMergeChecks({
       >
         <span
           className={cn(
-            "text-sm leading-5 text-muted-foreground",
+            textSize,
+            "text-muted-foreground",
+            compact && "whitespace-nowrap",
             !grouped && check.common && "font-bold text-foreground",
           )}
         >
           {grouped ? check.shortLabel.replace("〔共通〕", "") : check.shortLabel}
         </span>
-        <span className={cn("text-sm leading-5 font-bold", TONE_TEXT[check.tone])}>
+        <span className={cn(textSize, "font-bold", compact && "whitespace-nowrap", TONE_TEXT[check.tone])}>
           <span aria-hidden="true">{check.mark}</span> {check.state}
         </span>
       </button>
@@ -100,7 +108,7 @@ export function PullRequestMergeChecks({
   return (
     <div className={cn("px-3 pb-1.5", className)} data-testid="pull-request-checks">
       {ownOnly ? (
-        <div className="grid grid-cols-3">{own.map(renderButton)}</div>
+        <div className={compact ? "grid grid-cols-4" : "grid grid-cols-3"}>{own.map(renderButton)}</div>
       ) : grouped ? (
         <div className="grid grid-cols-1 gap-x-3 gap-y-1 sm:grid-cols-2">
           <section aria-label="このPRのチェック" className="min-w-0">

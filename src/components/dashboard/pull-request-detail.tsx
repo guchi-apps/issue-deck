@@ -517,12 +517,13 @@ export function PullRequestDetail({
           )}
 
           {/* チェックの根拠（#4366・#4427）。このPR（CI・コード・競合）だけを出す（#4841）。
-              リリース候補の表示は個別PRには出さない */}
+              リリース候補の表示は個別PRには出さない。iOS事前検証は詳細の取得で引き、4項目目に出す（#4882） */}
           {!releaseCandidate && (
             <PullRequestChecksStrip
               pullRequest={pullRequest}
               onOpenPullRequest={() => selectTab("findings")}
               pullRequestEvidenceLabel="指摘・CIの内訳を開く"
+              iosPrecheck={currentDetail ? (currentDetail.summary.iosPrecheck ?? null) : "loading"}
               className="-mx-1 px-0"
             />
           )}

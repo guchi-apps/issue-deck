@@ -5,6 +5,7 @@ import {
   ciCell,
   cellsFromReleaseChange,
   cellsFromSummary,
+  iosPrecheckCheck,
   type MergeCheckItem,
 } from "@/lib/pull-request-merge-checks";
 import { buildReleaseCheckCells, type ReleaseCandidate } from "@/lib/release-candidate-checks";
@@ -200,5 +201,42 @@ describe("PRの概要（PR詳細・一覧・ブランチ）から作るセル", 
 
   it("ciCellのnoneは成功扱いにしない", () => {
     expect(ciCell("none")).toMatchObject({ state: "未実施", tone: "muted" });
+  });
+});
+
+describe("iosPrecheckCheck（#4882）", () => {
+  const result = (phase: "success" | "failure" | "running" | "waiting", sha = "a".repeat(40), description: string | null = null) => ({
+    phase,
+    description,
+    sha,
+    updatedAt: null,
+  });
+
+  it("headの結果を、記号と日本語の状態・検証したSHAつきで出す", () => {
+    const cases = [
+      ["success", "成功", "ok"],
+      ["failure", "失敗", "bad"],
+      ["running", "検証中", "run"],
+      ["waiting", "検証待ち", "warn"],
+    ] as const;
+    for (const [phase, state, tone] of cases) {
+      const item = iosPrecheckCheck({ headSha: "a".repeat(40), head: result(phase), previous: null });
+      expect(item).toMatchObject({ key: "ios", shortLabel: "iOS", state, tone, common: false });
+      expect(item.target).toContain("aaaaaaa");
+    }
+  });
+
+  it("headに結果が無ければ、前回の成功を引き継がず未実施にする", () => {
+    const item = iosPrecheckCheck({ headSha: "c".repeat(40), head: null, previous: result("success", "b".repeat(40)) });
+    expect(item.state).toBe("未実施");
+    expect(item.tone).toBe("muted");
+    expect(item.reason).toContain("bbbbbbb");
+    expect(item.reason).toContain("成功");
+  });
+
+  it("記録なし・取得中・クローズ済みを区別する", () => {
+    expect(iosPrecheckCheck(null).state).toBe("記録なし");
+    expect(iosPrecheckCheck("loading").state).toBe("取得中");
+    expect(iosPrecheckCheck(null, { closed: true }).state).toBe("対象外");
   });
 });
