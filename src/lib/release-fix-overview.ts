@@ -81,7 +81,7 @@ export type OverviewChecks = {
     stage?: ReviewEvidenceStage;
   };
   integration: { state: CheckState; reason?: string | null; updatedAt?: string | null };
-  /** Mac検証。対象外・未設定なら省略 */
+  /** iOS検証。対象外・未設定なら省略 */
   mac?: { state: "passed" | "failed" | "running" | "other" } | null;
 };
 
@@ -92,7 +92,7 @@ export type FixOverview = {
   headline: string;
   /** 補足（理由。現在の操作に必要なものなので折りたたまない） */
   detail: string | null;
-  /** 全体レビュー・統合検証・Mac検証の短い要約 */
+  /** 全体レビュー・統合検証・iOS検証の短い要約 */
   checksLine: string | null;
   /** 残っている指摘の件数。取得できていないときはnull */
   remainingFindings: number | null;
@@ -146,7 +146,7 @@ export function summarizeChecks(checks: OverviewChecks | null): string | null {
     `統合検証: ${checkWord(checks.integration.state, 0)}`,
   ];
   if (checks.mac && checks.mac.state !== "other") {
-    parts.push(`Mac検証: ${checks.mac.state === "passed" ? "問題なし" : checks.mac.state === "failed" ? "失敗" : "チェック中"}`);
+    parts.push(`iOS検証: ${checks.mac.state === "passed" ? "問題なし" : checks.mac.state === "failed" ? "失敗" : "チェック中"}`);
   }
   return parts.join(" ／ ");
 }

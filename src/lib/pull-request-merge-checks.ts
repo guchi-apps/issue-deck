@@ -44,7 +44,7 @@ export type MergeCheckItem = {
   /** 理由・指摘。無ければnull */
   reason: string | null;
   evidence: MergeCheckEvidence | null;
-  /** リリース候補の共通結果か（全体レビュー・統合検証・Mac検証） */
+  /** リリース候補の共通結果か（全体レビュー・統合検証・iOS検証） */
   common: boolean;
   /** 共通結果の判定対象の候補PR番号（個別PRの項目ではnull） */
   candidateNumber: number | null;

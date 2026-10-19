@@ -110,9 +110,9 @@ describe("describeFixOverview: 作り直しの失敗と時系列（#4398）", ()
 });
 
 describe("summarizeChecks", () => {
-  it("全体レビュー・統合検証・Mac検証を1行にする", () => {
+  it("全体レビュー・統合検証・iOS検証を1行にする", () => {
     expect(summarizeChecks(checks({ aiReview: { state: "failed", findingCount: 2 }, mac: { state: "passed" } }))).toBe(
-      "全体レビュー: 指摘2件 ／ 統合検証: 問題なし ／ Mac検証: 問題なし",
+      "全体レビュー: 指摘2件 ／ 統合検証: 問題なし ／ iOS検証: 問題なし",
     );
   });
 });

@@ -32,7 +32,7 @@ export type ReleaseCandidateProblemKind =
   | "unavailable";
 
 export type ReleaseCandidatePendingCheck = {
-  /** 「全体レビュー」「統合検証」「統合検証（Mac検証）」 */
+  /** 「全体レビュー」「統合検証」「統合検証（iOS検証）」 */
   name: string;
   /** 実行側が動き出しているか。falseは順番待ち */
   started: boolean;
@@ -106,7 +106,7 @@ export function resolveReleaseCandidateVerification(
       integration: false,
     },
     {
-      name: checks.started?.mac ? "統合検証（Mac検証）" : "統合検証",
+      name: checks.started?.mac ? "統合検証（iOS検証）" : "統合検証",
       state: checks.integration,
       started: checks.started?.integration ?? false,
       integration: true,

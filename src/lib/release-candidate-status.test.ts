@@ -106,9 +106,9 @@ describe("resolveReleaseCandidateVerification", () => {
     expect(describeReleaseVerificationWait(v)).toBe("統合検証（開始待ち）の判定が出るまでマージできません");
   });
 
-  it("Mac検証の工程にいる統合検証はMac検証と分かる名前にする", () => {
+  it("iOS検証の工程にいる統合検証はiOS検証と分かる名前にする", () => {
     const v = resolve({ integration: "running", started: { aiReview: false, integration: true, mac: true } });
-    expect(v.progress?.checks[0].name).toBe("統合検証（Mac検証）");
+    expect(v.progress?.checks[0].name).toBe("統合検証（iOS検証）");
   });
 
   it("失敗・設定不足・要確認・対象変更を理由付きで分け、いちばん重いものを見出しにする", () => {

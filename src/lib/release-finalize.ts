@@ -234,7 +234,7 @@ export function decideInheritedVerification(input: {
   currentBaseSha: string;
   diff: BumpDiffSummary;
   /**
-   * このリポジトリがiOS検証を必要とするか。Mac検証は統合検証の工程の1つなので、必要なら統合検証は
+   * このリポジトリがiOS検証を必要とするか。iOS検証は統合検証の工程の1つなので、必要なら統合検証は
    * バンプ後のheadで必ず再実行する（iOSの版情報・build番号を最終headで確かめる）
    */
   requireFreshIos?: boolean;
