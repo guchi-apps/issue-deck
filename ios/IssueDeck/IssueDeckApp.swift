@@ -39,6 +39,11 @@ struct ContentView: View {
         .animation(.easeOut(duration: 0.2), value: model.failure)
         // 共有画面の「Issueを開く」（`issuedeck://issue?id=…`）。GitHubではなくIssueDeckのIssue詳細を開く
         .onOpenURL { url in
+            // ロック画面ウィジェット（`issuedeck://usage`。#4890）は「AI使用量」を開く
+            if url.scheme == AppConfig.authCallbackScheme, url.host == "usage" {
+                PushCenter.shared.open(path: "/dashboard?pane=usage&mscreen=usage")
+                return
+            }
             guard url.scheme == AppConfig.authCallbackScheme, url.host == "issue",
                   let id = URLComponents(url: url, resolvingAgainstBaseURL: false)?
                     .queryItems?.first(where: { $0.name == "id" })?.value,

@@ -1,5 +1,6 @@
 import Foundation
 import WebKit
+import WidgetKit
 
 /// 共有画面（Share Extension）が使う専用セッションの発行・更新（#4298）。
 ///
@@ -28,6 +29,12 @@ struct ShareSessionIssuer {
         """
         let value = try? await webView.callAsyncJavaScript(script, arguments: ["deviceId": deviceId], contentWorld: .page)
         guard let dictionary = value as? [String: Any], let status = dictionary["status"] as? Int else { return }
+        // ロック画面ウィジェット（#4890）も同じセッションで読む。使えるようになった・使えなくなった時だけ描き直させる
+        // （ページを読み終えるたびに呼ばれるため、毎回描き直させるとウィジェットの更新回数を使い切る）
+        let hadSession = ShareSessionStore.load() != nil
+        defer {
+            if hadSession != (ShareSessionStore.load() != nil) { WidgetCenter.shared.reloadAllTimelines() }
+        }
         switch status {
         case 200:
             guard let token = dictionary["token"] as? String,
