@@ -206,7 +206,7 @@ export const INHERITANCE_REASON_LABEL = {
   unverified_scope: "バンプ前の結果に未確認の範囲があるため、再検証します",
   beyond_version: "版・更新履歴以外のファイルが変わったため、再検証します",
   ios_files_changed: "iOSの設定・依存関係が変わったため、iOS検証を再実行します",
-  ios_final_required: "このリポジトリはiOS（Mac）検証が必要なため、バンプ後のheadで最終検証を再実行します",
+  ios_final_required: "このリポジトリはiOS検証が必要なため、バンプ後のheadで最終検証を再実行します",
   version_and_changelog_only: "バンプで変わったのは版と更新履歴だけのため、バンプ前の合格を引き継ぎます",
   version_lines_only: "バンプで変わったのは版・更新履歴とiOS設定の版番号行だけのため、バンプ前の合格を引き継ぎます",
 } as const;
@@ -234,7 +234,7 @@ export function decideInheritedVerification(input: {
   currentBaseSha: string;
   diff: BumpDiffSummary;
   /**
-   * このリポジトリがiOS（Mac）検証を必要とするか。Mac検証は統合検証の工程の1つなので、必要なら統合検証は
+   * このリポジトリがiOS検証を必要とするか。Mac検証は統合検証の工程の1つなので、必要なら統合検証は
    * バンプ後のheadで必ず再実行する（iOSの版情報・build番号を最終headで確かめる）
    */
   requireFreshIos?: boolean;

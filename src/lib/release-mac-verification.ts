@@ -3,7 +3,7 @@ import { parseReleaseVerificationState, type ReleaseVerificationState } from "@/
 import type { ReleaseVerificationTarget } from "@/lib/release-verification";
 
 /**
- * Mac検証（iOSのビルド確認）の独立した記録（#4366）。
+ * iOS検証（iOSのビルド確認）の独立した記録（#4366）。
  *
  * **ゲートの対象ではなく表示専用**。種別は`release-merge-gate.ts`の`RELEASE_VERIFICATION_KINDS`
  * （マージ判定・待ち判定・依頼時の行作成が全種別を回す）へ足さず、ここで別に持つ。保存先は同じ
@@ -106,7 +106,7 @@ export async function listReleaseMacRows(repoFullName: string, prNumber: number)
 }
 
 /**
- * 画面に出すMac検証の状態。`needs_setup`は「必要だが設定不足」で、成功や対象外へは置き換えない。
+ * 画面に出すiOS検証の状態。`needs_setup`は「必要だが設定不足」で、成功や対象外へは置き換えない。
  * `not_recorded`は記録が無い（統合検証が先に失敗した・旧版のランナー・まだ動いていない）。
  */
 export type ReleaseMacState =
@@ -135,14 +135,14 @@ export function describeReleaseMac(input: {
   rows: readonly ReleaseMacRow[];
   /** 現在の対象の統合検証ジョブが今Mac工程を実行しているか（進捗の記録から） */
   runningNow: boolean;
-  /** このリポジトリがMac検証を行う設定か（`macBuildCheck`）。未設定で記録も無ければ理由付き対象外 */
+  /** このリポジトリがiOS検証を行う設定か（`macBuildCheck`）。未設定で記録も無ければ理由付き対象外 */
   configured?: boolean;
 }): ReleaseMacSection {
   const { current, rows, runningNow } = input;
   const row = rows.find((r) => r.baseSha === current.baseSha && r.headSha === current.headSha);
   if (!row) {
     if (runningNow) {
-      return { state: "running", reason: "Macでのビルド確認を実行中です", summary: null, evidenceUrl: null, updatedAt: null };
+      return { state: "running", reason: "iOSでのビルド確認を実行中です", summary: null, evidenceUrl: null, updatedAt: null };
     }
     if (rows.length > 0) {
       return {
@@ -156,13 +156,13 @@ export function describeReleaseMac(input: {
     if (input.configured === false) {
       return {
         state: "not_applicable",
-        reason: "このリポジトリにはMac検証の設定がないため対象外です",
+        reason: "このリポジトリにはiOS検証の設定がないため対象外です",
         summary: null,
         evidenceUrl: null,
         updatedAt: null,
       };
     }
-    return { state: "not_recorded", reason: "Mac検証の記録がありません", summary: null, evidenceUrl: null, updatedAt: null };
+    return { state: "not_recorded", reason: "iOS検証の記録がありません", summary: null, evidenceUrl: null, updatedAt: null };
   }
   const base = {
     summary: row.summary,
@@ -177,13 +177,13 @@ export function describeReleaseMac(input: {
     case "needs_check":
       return { ...base, state: "needs_setup", reason: row.unverifiedScope ?? row.message ?? "設定が不足しています" };
     case "failed":
-      return { ...base, state: "failed", reason: row.message ?? "Mac検証が失敗しました" };
+      return { ...base, state: "failed", reason: row.message ?? "iOS検証が失敗しました" };
     case "not_applicable":
       return { ...base, state: "not_applicable", reason: row.message ?? "ios/に差分がないため対象外です" };
     case "running":
     case "waiting":
       return { ...base, state: "running", reason: null };
     default:
-      return { ...base, state: "not_recorded", reason: "Mac検証の記録がありません" };
+      return { ...base, state: "not_recorded", reason: "iOS検証の記録がありません" };
   }
 }

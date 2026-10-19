@@ -26,7 +26,7 @@ type StripProps = {
 /**
  * PR詳細・PR一覧・ブランチ画面で共通のチェック（#4366）。個別PRは「このPR」の3項目（CI・コード・競合）だけを出し、
  * リリース候補の共通結果は出さない（#4841。個別PRの判断に使わないため）。
- * リリースPR自身（develop→main）の行だけは、リリース候補の共通結果（全体レビュー・統合検証・Mac検証）を
+ * リリースPR自身（develop→main）の行だけは、リリース候補の共通結果（全体レビュー・統合検証・iOS検証）を
  * 含む6項目を、リポジトリ単位で共有する取得から作る。**検証は起動しない**（読むだけ）。
  *
  * @param onOpenPullRequest 個別PRの詳細を開く。省略時は証跡の導線を出さない（既に詳細を開いている画面）
@@ -76,7 +76,10 @@ function ReleasePullRequestChecksStrip({
     selectedNumber,
     nowMs: now ?? 0,
   });
-  const checks = buildMergeChecks({ ...cellsFromSummary(pullRequest), release });
+  // リリースPR自身にはCI・コードレビューが無く常に未実施になるため出さない（#4859）
+  const checks = buildMergeChecks({ ...cellsFromSummary(pullRequest), release }).filter(
+    (check) => check.key !== "ci" && check.key !== "code",
+  );
 
   return (
     <PullRequestMergeChecks

@@ -19,10 +19,10 @@ const TONE_TEXT: Record<MergeCheckTone, string> = {
  * PR詳細・PR一覧・ブランチ画面・本番マージ確認の一覧に出す6チェック（#4366。#4305の5項目の後継）。
  *
  * 塗りのチップにはせず、既存の検証区分と同じ「記号＋文字」で出す。ラベルを上・状態を下に積み、
- * スマホ幅は3項目ずつの2段（CI・コード・競合／全体・統合・Mac）、広い画面は横1行にする
+ * スマホ幅は3項目ずつの2段（CI・コード・競合／全体・統合・iOS）、広い画面は横1行にする
  * （横スクロール・ホバーに頼らない）。色に頼らず、記号と日本語の状態で読める。各項目は44px以上の
  * タップ領域で、押すと下に詳細（正式名称・状態・判定対象・理由・証跡）を開く。
- * 共通結果（全体・統合・Mac）は、判定対象の候補PRとSHAを常に添える。複数の候補に含まれる変更は
+ * 共通結果（全体・統合・iOS）は、判定対象の候補PRとSHAを常に添える。複数の候補に含まれる変更は
  * 候補を選べる。
  */
 export function PullRequestMergeChecks({
@@ -48,7 +48,7 @@ export function PullRequestMergeChecks({
   /** 共通結果の詳細（候補PRの詳細）を開く */
   onOpenCandidate: ((candidateNumber: number) => void) | null;
   /**
-   * 「このPR（CI・コード・競合）」と「リリース候補（全体・統合・Mac）」の2グループに分けて出す（#4427）。
+   * 「このPR（競合）」と「リリース候補（全体・統合・iOS）」の2グループに分けて出す（#4427）。
    * 一覧・通常PR詳細が使う。省略時は従来どおり6項目を1つの並びで出す（ブランチ画面・本番マージ確認）
    */
   grouped?: boolean;
@@ -105,7 +105,7 @@ export function PullRequestMergeChecks({
         <div className="grid grid-cols-1 gap-x-3 gap-y-1 sm:grid-cols-2">
           <section aria-label="このPRのチェック" className="min-w-0">
             <h3 className="px-1 text-sm leading-5 font-semibold text-muted-foreground">
-              このPR<span className="font-normal">（CI・コード・競合）</span>
+              このPR<span className="font-normal">（競合）</span>
             </h3>
             <div className="grid grid-cols-3">{own.map(renderButton)}</div>
           </section>
@@ -113,7 +113,7 @@ export function PullRequestMergeChecks({
             <h3 className="px-1 text-sm leading-5 font-semibold text-muted-foreground">
               リリース候補
               <span className="font-normal">
-                {candidateLabel ? `（${candidateLabel}）` : "（全体・統合・Mac）"}
+                {candidateLabel ? `（${candidateLabel}）` : "（全体・統合・iOS）"}
               </span>
             </h3>
             <div className="grid grid-cols-3">{common.map(renderButton)}</div>

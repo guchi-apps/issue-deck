@@ -115,7 +115,7 @@ export type ReleaseVerificationSummary = {
   blockers: ReleaseMergeGateBlocker[];
   integration: ReleaseVerificationSection;
   aiReview: ReleaseVerificationSection;
-  /** Mac検証（#4366）。統合検証とは別の記録で、ゲートの判定には使わない */
+  /** iOS検証（#4366）。統合検証とは別の記録で、ゲートの判定には使わない */
   mac: ReleaseMacSection;
   /** 全体レビューを今積んだ場合の実効担当（表示用。例: `Claude Code · opus`） */
   aiReviewAssignee: string;
@@ -194,9 +194,9 @@ export function summarizeReleaseVerification(input: {
   aiReviewAssignee: string;
   /** 区分ごとの進捗（`loadReleaseVerificationSummary`が現在の対象のジョブから作る） */
   progress?: Partial<Record<ReleaseVerificationKind, ReleaseVerificationProgress | null>>;
-  /** Mac検証の記録（表示専用。無ければ空） */
+  /** iOS検証の記録（表示専用。無ければ空） */
   macRows?: readonly ReleaseMacRow[];
-  /** このリポジトリがMac検証を行う設定か。省略時は設定ありとして扱う */
+  /** このリポジトリがiOS検証を行う設定か。省略時は設定ありとして扱う */
   macConfigured?: boolean;
 }): ReleaseVerificationSummary {
   const { current, rows } = input;

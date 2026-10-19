@@ -73,7 +73,7 @@ export function ReleaseRolloutSection() {
                 {ROLLOUT_STATUS_LABELS[row.status]}
               </span>
               {row.stack ? <span className="text-muted-foreground">{row.stack}</span> : null}
-              {row.macRequired ? <span className="text-muted-foreground">Mac検証あり</span> : null}
+              {row.macRequired ? <span className="text-muted-foreground">iOS検証あり</span> : null}
               {row.hosts.length > 0 ? <span className="text-muted-foreground">実行: {row.hosts.join("・")}</span> : null}
             </div>
             {row.reasons.map((reason) => (

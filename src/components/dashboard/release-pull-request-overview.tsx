@@ -49,12 +49,12 @@ const TONE_TEXT: Record<MergeCheckTone, string> = {
 };
 
 /**
- * 本番PR詳細の「現在候補の検証」（6チェック。#4366の判定をそのまま使う）。
+ * 本番PR詳細の「現在候補の検証」（4チェック（競合・全体・統合・iOS）。#4366の判定をそのまま使う）。
  *
  * 一覧・通常PR詳細の並び（`PullRequestMergeChecks`）とは別に、**利用できる幅で列数を変える**。
  * スマホ・狭い詳細ペインは2列×3段、中くらいは3列×2段、十分な幅では6列（コンテナ幅で判定するので、
  * PCで詳細ペインが狭いときも詰め込まない）。各項目を押すと理由・対象・根拠を開く。
- * 共通結果（全体・統合・Mac）は**このリリースPR自身**を候補として読み、別の候補の結果で代用しない。
+ * 共通結果（全体・統合・iOS）は**このリリースPR自身**を候補として読み、別の候補の結果で代用しない。
  */
 function ReleaseCandidateChecks({ pullRequest }: { pullRequest: PullRequestSummary }) {
   const source = useReleaseCandidates(pullRequest.repositoryFullName);
@@ -66,14 +66,15 @@ function ReleaseCandidateChecks({ pullRequest }: { pullRequest: PullRequestSumma
     selectedNumber: pullRequest.number,
     nowMs: now ?? 0,
   });
-  const checks = buildMergeChecks({ ...cellsFromSummary(pullRequest), release });
+  // リリースPR自身にはCI・コードレビューが無く常に未実施になるため出さない（#4859）
+  const checks = buildMergeChecks({ ...cellsFromSummary(pullRequest), release }).filter((c) => c.key !== "ci" && c.key !== "code");
   const open = checks.find((check) => check.key === openKey) ?? null;
   // 自分自身が候補として見つからないとき、別の候補（古い候補など）の結果を現在値として出さない
   const candidateIsSelf = release.candidate?.number === pullRequest.number;
 
   return (
     <div className="@container" data-testid="release-candidate-checks">
-      <div className="grid grid-cols-2 gap-1.5 @md:grid-cols-3 @3xl:grid-cols-6">
+      <div className="grid grid-cols-2 gap-1.5 @3xl:grid-cols-4">
         {checks.map((check) => (
           <CheckButton
             key={check.key}
