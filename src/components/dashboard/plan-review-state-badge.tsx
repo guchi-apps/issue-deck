@@ -3,6 +3,7 @@ import type { PlanReviewListState } from "@/lib/dispatch/plan-review-list-state"
 
 const LABELS: Record<PlanReviewListState, string> = {
   queued: "計画レビュー起動待ち",
+  queued_overdue: "計画レビュー起動待ち",
   creating: "計画レビュー作成中",
   presented: "計画レビュー提示済",
 };
@@ -20,7 +21,7 @@ export function PlanReviewStateBadge({ state }: { state: PlanReviewListState }) 
         "inline-flex items-center gap-1 whitespace-nowrap rounded-full px-2 py-0.5 text-[11px]",
         state === "creating" && "bg-blue-500/10 text-blue-700 dark:text-blue-300",
         state === "presented" && "bg-green-500/10 text-green-700 dark:text-green-300",
-        state === "queued" && "bg-muted text-muted-foreground",
+        (state === "queued" || state === "queued_overdue") && "bg-muted text-muted-foreground",
       )}
     >
       {creating && (

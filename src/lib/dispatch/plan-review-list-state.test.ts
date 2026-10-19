@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { DispatchJobView } from "@/lib/dispatch/dispatch-job";
 import {
+  isPlanReviewListStateHolding,
   resolvePlanReviewListState,
   selectPlanReviewCreatingIssueIds,
 } from "@/lib/dispatch/plan-review-list-state";
@@ -35,18 +36,18 @@ describe("resolvePlanReviewListState", () => {
     ).toBe("creating");
   });
 
-  // 起動待ちは作成中と分ける（#3772）。猶予を超えても起動するまでは同じ表示
+  // 起動待ちは作成中と分ける（#3772）。猶予を超えたものは承認を伏せないよう区別する（#4869）
   it.each([
-    ["積んだ直後", "2026-09-29T11:59:00Z"],
-    ["10分を超えて待っている", "2026-09-29T07:00:00Z"],
-  ])("起動待ちは%sでも起動待ち", (_label, createdAt) => {
+    ["積んだ直後", "2026-09-29T11:59:00Z", "queued"],
+    ["10分を超えて待っている", "2026-09-29T07:00:00Z", "queued_overdue"],
+  ] as const)("起動待ちは%sなら%s", (_label, createdAt, expected) => {
     expect(
       resolvePlanReviewListState({
         ...base,
         jobs: [job({ status: "QUEUED", createdAt, finishedAt: null })],
         labels: planLabels,
       }),
-    ).toBe("queued");
+    ).toBe(expected);
   });
 
   it("成功直後（猶予内）は作成中", () => {
@@ -123,5 +124,18 @@ describe("selectPlanReviewCreatingIssueIds", () => {
       job({ issueNumber: 2, status: "QUEUED", createdAt: "2026-09-29T07:00:00Z", finishedAt: null }),
     ];
     expect([...selectPlanReviewCreatingIssueIds(issues, jobs, NOW)]).toEqual(["a"]);
+  });
+});
+
+describe("isPlanReviewListStateHolding", () => {
+  // 起動待ちも猶予内は承認を伏せ、超過したら詳細画面と同じく承認できる状態へ戻す（#4869）
+  it.each([
+    ["queued", true],
+    ["creating", true],
+    ["queued_overdue", false],
+    ["presented", false],
+    [null, false],
+  ] as const)("%sは%s", (state, expected) => {
+    expect(isPlanReviewListStateHolding(state)).toBe(expected);
   });
 });

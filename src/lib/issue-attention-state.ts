@@ -1,7 +1,10 @@
 import { describeSessionPermission } from "@/lib/dispatch/issue-session";
 import type { DispatchSessionView } from "@/lib/dispatch/session-state";
 import { describeSessionStall } from "@/lib/dispatch/session-stall";
-import type { PlanReviewListState } from "@/lib/dispatch/plan-review-list-state";
+import {
+  isPlanReviewListStateHolding,
+  type PlanReviewListState,
+} from "@/lib/dispatch/plan-review-list-state";
 
 /**
  * Issueの「いま何を待っているか」と「次に何をするか」を1つにまとめた表示用の状態（#4425）。
@@ -136,7 +139,7 @@ export function resolveIssueAttention(input: IssueAttentionInput): IssueAttentio
       openButtonLabel: "詳細を確認",
     };
   }
-  if (input.planReviewState === "creating" || input.planReviewState === "queued") {
+  if (isPlanReviewListStateHolding(input.planReviewState)) {
     return {
       kind: "plan-review-creating",
       tone: "running",

@@ -46,6 +46,11 @@ describe("resolveIssueAttention", () => {
     expect(a?.needsUser).toBe(false);
   });
 
+  it("猶予内の起動待ちは作成中と同じ、超過した起動待ちは作成中にしない（#4869）", () => {
+    expect(resolveIssueAttention({ ...base, planReviewState: "queued" })?.kind).toBe("plan-review-creating");
+    expect(resolveIssueAttention({ ...base, planReviewState: "queued_overdue" })).toBeNull();
+  });
+
   it("依存待ち・実行中・順番待ち・予約を区別する", () => {
     expect(resolveIssueAttention({ ...base, dependencyWaitLabel: "#1" })?.kind).toBe("dependency");
     expect(resolveIssueAttention({ ...base, running: true })?.kind).toBe("running");

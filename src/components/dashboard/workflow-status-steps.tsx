@@ -10,7 +10,10 @@ import {
 } from "@/lib/dispatch/issue-queue-state";
 import { shortIssueSessionLabel } from "@/lib/dispatch/issue-session";
 import type { DispatchSessionView } from "@/lib/dispatch/session-state";
-import type { PlanReviewListState } from "@/lib/dispatch/plan-review-list-state";
+import {
+  isPlanReviewListStateHolding,
+  type PlanReviewListState,
+} from "@/lib/dispatch/plan-review-list-state";
 import {
   checkUserReason,
   CHECK_USER_REASON_TEXT,
@@ -378,8 +381,10 @@ export function WorkflowStepBadge({
   const currentIndex = getWorkflowStepIndex({ projectStatus });
   if (currentIndex === null) return null;
 
-  // 計画レビューの作成中は人が押して進める操作が無いので、確認待ち（橙）にしない（#4160）
-  const approvalPending = isApprovalPending(labels) && planReviewState !== "creating";
+  // 計画レビューの作成中・起動待ち（猶予内）は人が押して進める操作が無いので、確認待ち（橙）に
+  // しない（#4160・#4869）
+  const approvalPending =
+    isApprovalPending(labels) && !isPlanReviewListStateHolding(planReviewState);
   // 何を求められているかを添える（#1490）。理由ラベルが配られていないリポジトリではnullになり、
   // 従来どおり「ユーザーの確認待ち」だけを出す
   const reason = checkUserReason(labels);
@@ -456,6 +461,7 @@ export function WorkflowStepBadge({
     step.key === "planning" && planReviewState !== null
       ? ({
           queued: "計画レビュー起動待ち",
+          queued_overdue: "計画レビュー起動待ち",
           creating: "計画レビュー中",
           presented: "計画レビュー済み・計画承認待ち",
         } satisfies Record<PlanReviewListState, string>)[planReviewState]
