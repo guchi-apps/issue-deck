@@ -68,7 +68,7 @@
 | --- | --- |
 | 認証 | 本体がログイン中にWebView内から`POST /api/share/token`（Cookie認証）で専用トークンを発行し、Keychain共有グループ（`$(AppIdentifierPrefix)com.gucchii.issuedeck.share`）へ置く。拡張はこのトークンで呼ぶ。GitHub App秘密鍵・サーバー用トークンは同梱しない |
 | トークン | `idsh_`＋256bitランダム。DBは`ShareToken`にSHA-256のみ保存。有効30日で、ページを読み終えるたびに再発行（端末識別子`deviceId`単位で前のトークンは失効。ユーザーが替わっても同じ）。Webのログアウトで`DELETE /api/share/token`が全端末分を失効。アプリは未ログイン（401）を検知してKeychainを消す |
-| 使える範囲 | `GET /api/share/repositories`・`POST /api/share/issues`・`POST /api/issues/images`だけ。他の`/api/*`はCookieしか通らない。失効・期限切れ・形式違いは401 |
+| 使える範囲 | `GET /api/share/repositories`・`POST /api/share/issues`・`POST /api/issues/images`と、ロック画面ウィジェットの`GET /api/share/usage`（#4890）だけ。他の`/api/*`はCookieしか通らない。失効・期限切れ・形式違いは401 |
 | 認可 | 検証のたびに許可判定（`decideAccess`。`ShareToken.emailVerified`は発行時の値）を通し、許可リストから外れた利用者は発行済みトークンでも401。リポジトリは利用者の連携リポジトリ（アーカイブ除く）に限り、「Issue作成の対象外」は403。サーバーで毎回検証する |
 | 重複防止 | 冪等キーは必須（`POST /api/issues`と同じ予約方式）。キーは1回の作成操作で固定し、連打・再試行・結果不明の確認で使い回す。作成中は主操作を押せない。結果不明（通信断・409・502）は「作成済みか確認する」で同じキーを再送し、二重に作らない |
 | タイトル自動記入 | 空欄なら仮タイトル（本文の先頭行／URLだけなら`共有: <ホスト>`）で作り、応答後にサーバーが`generateIssueSuggestion`で書き換える。AI未設定・失敗は仮タイトルのまま（作成は成功扱い） |
@@ -78,6 +78,20 @@
 | 既知の制約 | 「Issueを開く」は`issuedeck://issue?id=<IssueDeckのIssue ID>`でアプリ本体を前面にし、IssueDeckのIssue詳細（`/dashboard?issue=…&mscreen=issue-detail&missue=…`）を開く（GitHubへは遷移しない。#4346）。結果不明のまま保存した下書きを本体で取り込むと、作成済みのIssueと重複し得るため、取り込み画面で確認する |
 
 署名: 両ターゲットに`keychain-access-groups`を足した。自動署名で通る想定だが、TestFlightのビルドで署名エラーが出た場合はDeveloperサイトでの確認（手作業）が要る。
+
+## ロック画面ウィジェット（#4890）
+
+ロック画面の横長（2マス。`accessoryRectangular`）に、ClaudeとChatGPT（Codex）の**週間枠**を2本のバーで出す（`ios/UsageWidget/`。Bundle ID `com.gucchii.issuedeck.UsageWidget`）。読み方はWeb版「AI使用量」のメーター（`usage-meter.tsx`）と同じで、塗り＝使用率、縦の目盛り＝週の経過、目盛りを越えた分（時間より速く使っている分）は斜線。ロック画面は白の濃淡だけで描かれるため、色分けはしない。
+
+| 項目 | 方針 |
+| --- | --- |
+| 値の出どころ | `GET /api/share/usage`（`src/lib/widget-usage.ts`）。Claudeは`src/lib/claude/usage.ts`のキャッシュ、ChatGPTは`getCodexUsage`の`secondary`（週間枠） |
+| Claudeの取り直し | 値は探り（推論1回）でしか取れず、**送信が5時間枠を開始する**。ウィジェットからの呼び出しでは、5時間枠が動いている間だけ取り直し（5分キャッシュ経由）、止まっている・値が無いときは最後に見た値を返す。サーバー再起動直後でまだ一度も取れていなければ「—」 |
+| 認証 | 共有メニューと同じ専用トークン（Keychain共有グループ）。アプリでログインしてページを開いていれば発行済み。無い・失効は「IssueDeckを開くと表示されます」。トークンが使えるようになった／使えなくなった時だけアプリがウィジェットを描き直させる |
+| 更新 | 30分おきを頼み（実際の間隔はiOSが決める）、その間も10分刻みのエントリで経過の目盛りを進める。通信できないときはApp Groupに置いた前回の値を出す。値が2時間以上古い・リセット時刻を過ぎた行は薄く出す |
+| タップ | `issuedeck://usage`で「AI使用量」（`/dashboard?pane=usage&mscreen=usage`）を開く |
+
+署名: 新しい拡張のApp ID（`com.gucchii.issuedeck.UsageWidget`）にApp GroupとKeychain共有を付ける。初回の配布で未登録のため署名に失敗した場合は、共有メニューと同じくDeveloperサイトでの登録（手作業）が要る。
 
 ## ネイティブ通知（#4250）
 

@@ -155,6 +155,14 @@ export function peekClaudeUsageWindows(): ClaudeUsageWindow[] | null {
   return cache ? cache.windows : null;
 }
 
+/**
+ * 最後に取得できたウィンドウ一覧と取得時刻。**取得はしない**（`peekClaudeFiveHourWindow`と同じ理由）。
+ * ロック画面ウィジェット（#4890）が、値の古さを出すために取得時刻も要るため。
+ */
+export function peekClaudeUsage(): { windows: ClaudeUsageWindow[]; fetchedAt: number } | null {
+  return cache ? { windows: cache.windows, fetchedAt: cache.fetchedAt } : null;
+}
+
 /** テスト用にモジュールキャッシュを破棄する。 */
 export function clearClaudeUsageCache() {
   cache = null;
