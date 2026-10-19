@@ -2446,7 +2446,8 @@ function RepositorySummaryRow({
       // 2ペインでは中身が行の下に無いので、どこが開いたのかを読み上げへ伝える（#2157）
       aria-controls={showSelectionMarker ? DETAIL_PANE_ID : undefined}
       className={cn(
-        "flex w-full flex-col gap-1 border-b px-4 py-2 text-left hover:bg-accent/50",
+        // 2行目が無い行でも押しやすい高さを保つ（#4848。スマホは指で押すので少し高く）
+        "flex min-h-[52px] w-full flex-col justify-center gap-1 border-b px-4 py-2 text-left hover:bg-accent/50 md:min-h-12",
         isOpen && "bg-muted/60",
         // 枠線のぶん左padding を詰めて、選択中でない行と文字の位置を揃える
         showSelectionMarker && "border-l-2 border-l-transparent pl-3.5",
@@ -2588,26 +2589,37 @@ function RepositorySummaryRow({
       {/* TestFlightへの配布が走っている間だけ（#3806）。Webのデプロイとは別の行為なので別のピルにする */}
       {iosDistribution.running && <IosDistributingBadge />}
       <DeployStateBadge deploy={deploy} compact linkToRun={false} />
-      <span className={cn("ml-auto inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium", guidance.attention ? "bg-amber-500/10 text-amber-700 dark:text-amber-400" : guidance.loading ? "bg-muted text-muted-foreground" : "text-primary")}>
-        {guidance.attention && <CircleAlert className="size-3.5" aria-hidden="true" />}
-{guidance.loading && <Loader2 className="size-3.5 animate-spin motion-reduce:animate-none" aria-hidden="true" />}
-        {isOpen ? (showSelectionMarker ? "表示中" : "閉じる") : guidance.next}<ChevronRight className={cn("size-3", isOpen && !showSelectionMarker && "rotate-90")} aria-hidden="true" />
-      </span>
+      {guidance.attention && <AttentionGuidance next={guidance.next} isOpen={isOpen} showSelectionMarker={showSelectionMarker} />}
       </span>
       )}
-      {!hasBadges && (
-        <span className="flex w-full flex-wrap items-center justify-between gap-2 text-xs">
-          <span className="text-muted-foreground">{guidance.state}</span>
-          <span className={cn("inline-flex items-center gap-1 rounded-md px-2 py-1 font-medium", guidance.attention ? "bg-amber-500/10 text-amber-700 dark:text-amber-400" : guidance.loading ? "bg-muted text-muted-foreground" : "text-primary")}>
-            {guidance.attention && <CircleAlert className="size-3.5" aria-hidden="true" />}
-{guidance.loading && <Loader2 className="size-3.5 animate-spin motion-reduce:animate-none" aria-hidden="true" />}
-            {isOpen ? (showSelectionMarker ? "表示中" : "閉じる") : guidance.next}<ChevronRight className={cn("size-3", isOpen && !showSelectionMarker && "rotate-90")} aria-hidden="true" />
-          </span>
+      {/* 手が要らないときの状態文言（未リリース・開発中など）と導線は出さない（#4848）。
+          状態は1行目の件数が表しており、行全体を押せば開くので、2行目は手が要るときだけ使う */}
+      {!hasBadges && guidance.attention && (
+        <span className="flex w-full items-center text-xs">
+          <AttentionGuidance next={guidance.next} isOpen={isOpen} showSelectionMarker={showSelectionMarker} />
         </span>
       )}
       {/* **PRのマージ待ちは畳んだ行にもヘッダー件数にも出さない**（#2172・#4540）。通常PRの
           マージの導線は開いたPR行とPR一覧画面が持っている */}
     </button>
+  );
+}
+
+/** 畳んだ行の2行目に出す「手が要る」ときの導線（#4848） */
+function AttentionGuidance({
+  next,
+  isOpen,
+  showSelectionMarker,
+}: {
+  next: string;
+  isOpen: boolean;
+  showSelectionMarker: boolean;
+}) {
+  return (
+    <span className="ml-auto inline-flex items-center gap-1 rounded-md bg-amber-500/10 px-2 py-1 text-xs font-medium text-amber-700 dark:text-amber-400">
+      <CircleAlert className="size-3.5" aria-hidden="true" />
+      {isOpen ? (showSelectionMarker ? "表示中" : "閉じる") : next}<ChevronRight className={cn("size-3", isOpen && !showSelectionMarker && "rotate-90")} aria-hidden="true" />
+    </span>
   );
 }
 

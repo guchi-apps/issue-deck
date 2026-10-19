@@ -4,6 +4,7 @@ import type { ManualStepReadinessMap } from "@/lib/manual-step-attention";
 import { EMPTY_HEALTH_COUNTS } from "@/lib/pull-request-health";
 import {
   buildBranchFlow,
+  resolveLatestVersion,
   extractManualStepOrigin,
   formatUnreleasedSummary,
   hasChangesAfterReleaseFreeze,
@@ -2623,5 +2624,21 @@ describe("リリース画面の追跡情報（#4748）", () => {
     });
     const [lane] = allLanes(flow.repositories[0]);
     expect(lane.featureIncomplete).toEqual(["Issue #100（本番での確認などが残っています）"]);
+  });
+});
+
+describe("resolveLatestVersion (#4848)", () => {
+  it("最新のリリースPRのタイトルから取れた版を優先する", () => {
+    expect(resolveLatestVersion([{ version: "8.67.0" }, { version: "8.68.0" }], "8.66.0")).toBe("8.68.0");
+  });
+
+  it("最新がリリース候補（タイトルに版なし）なら公開済みの版で補い、古い版へ遡らない", () => {
+    expect(resolveLatestVersion([{ version: "8.67.0" }, { version: null }], "8.68.0")).toBe("8.68.0");
+    expect(resolveLatestVersion([{ version: "8.67.0" }, { version: null }], null)).toBeNull();
+  });
+
+  it("リリースPRが取れていなくても公開済みの版を出す", () => {
+    expect(resolveLatestVersion([], "4.19.0")).toBe("4.19.0");
+    expect(resolveLatestVersion([], null)).toBeNull();
   });
 });
