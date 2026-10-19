@@ -7,6 +7,7 @@ import {
 } from "@/lib/dispatch/dispatch-job";
 import {
   ACTIVE_REMOTE_SESSION_STATUSES,
+  REMOTE_SESSION_IDLE_ENDED_MESSAGE,
   REMOTE_SESSION_ISSUE_NUMBER,
   REMOTE_SESSION_MAX_PER_HOST,
   buildRemoteSessionName,
@@ -348,17 +349,21 @@ export async function applyRemoteSessionJobReport(params: {
  *   ここで拾う）
  * - 申告に無い`running` … 最後に見えてから猶予を過ぎたら`ended`（tmuxで直接閉じた・ホストの再起動）
  * - `starting` … 起動ジョブの結果を待つので触らない
+ * - 申告に無く、`idleEnded`（pollerが無操作で自動終了した名前。#4871）にあるもの … 猶予を待たずに
+ *   `ended`にし、理由を残す（画面の履歴に「なぜ消えたか」を出す）
  *
  * **`reported`が`null`（未申告の古いpoller）のときは何もしない。**
  */
 export async function syncRemoteSessionsFromHost(params: {
   hostName: string;
   reported: ReportedRemoteSession[] | null;
+  idleEnded?: string[] | null;
   now?: Date;
 }): Promise<void> {
   if (params.reported === null) return;
   const now = params.now ?? new Date();
   const reported = new Map(params.reported.map((session) => [session.tmuxSessionName, session]));
+  const idleEnded = new Set(params.idleEnded ?? []);
   const active = await db.remoteSession.findMany({
     where: { host: params.hostName, status: { in: ACTIVE_STATUSES } },
   });
@@ -374,6 +379,13 @@ export async function syncRemoteSessionsFromHost(params: {
             ? { remoteControlUrl: seen.remoteControlUrl }
             : {}),
         },
+      });
+      continue;
+    }
+    if (idleEnded.has(session.tmuxSessionName)) {
+      await db.remoteSession.update({
+        where: { id: session.id },
+        data: { status: "ended", endedAt: now, failureMessage: REMOTE_SESSION_IDLE_ENDED_MESSAGE },
       });
       continue;
     }
