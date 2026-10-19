@@ -183,6 +183,8 @@ export const SESSION_REAP_REASONS = [
   "HANDOFF_PR_OPEN",
   /** PRを作らずにローカル作業を終えた（#1600） */
   "HANDOFF_NO_PR",
+  /** `11.local`を付けたまま最終PRを作り終え、待機している（#4880） */
+  "LOCAL_PR_OPEN",
   /** 横断質問セッションで、質問Issueがcloseされた（#1454） */
   "QUESTION_CLOSED",
   /** 横断質問セッションが放置されている（#1648） */

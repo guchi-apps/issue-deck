@@ -17,6 +17,9 @@
 #                                 PRを作って引き渡した場合（#1541）と、PRを作らずに終わった
 #                                 場合（#1600）の両方に効く。**SESSION_IDLE_MINUTESとは
 #                                 独立**で、こちらの経路ではこの値だけを見る（#1649）
+#   SESSION_LOCAL_PR_IDLE_MINUTES `11.local`を付けたまま最終PRを作り終えたセッション専用の猶予
+#                                 （既定15・0でこの経路だけ無効＝従来どおり`11.local`が付いている
+#                                 間は残す）。外し忘れの拾い上げで、畳んだら`11.local`も外す（#4880）
 #   QUESTION_SESSION_IDLE_MINUTES 横断質問セッション（kind=question）専用の猶予（既定30・
 #                                 0でこの経路だけ無効＝従来どおり質問IssueがCLOSEDになるまで
 #                                 残す）。**質問IssueがOPENのままでも畳む**（#1648）
@@ -88,6 +91,12 @@ HANDOFF_IDLE_MINUTES="${SESSION_HANDOFF_IDLE_MINUTES:-5}"
 # worktreeもコミットも持たないため、畳んでも失うのは会話の文脈だけで、取り返しがつく。
 # 0でこの経路だけを無効にできる（従来どおりCLOSEDになるまで残す）。
 QUESTION_IDLE_MINUTES="${QUESTION_SESSION_IDLE_MINUTES:-30}"
+# `11.local`を付けたまま最終PRを作り終えたセッション専用の猶予（#4880）。起動プロンプトは
+# 「PRを作ったら`11.local`を外す」と指示しているが、外し忘れると引き渡し済みの経路に乗らず、
+# PRがマージされるまで残る。その間「同じPRのセッションが稼働中」を待つ処理（iOS事前検証の
+# 自動修復・scripts/ios-precheck-sweep.mjs）がPRのマージを止めていた（guchi-apps/yoteiflow#1284）。
+# 引き渡しの宣言が無いぶん、Remote Controlで追加の指示を送る余地としてHANDOFFより長く取る。
+LOCAL_PR_IDLE_MINUTES="${SESSION_LOCAL_PR_IDLE_MINUTES:-15}"
 DRY_RUN=0
 
 while [[ $# -gt 0 ]]; do
@@ -125,6 +134,10 @@ if [[ ! "$HANDOFF_IDLE_MINUTES" =~ ^[0-9]+$ ]]; then
   echo "Error: 引き渡し済みの猶予は0以上の整数（分）で指定してください: $HANDOFF_IDLE_MINUTES" >&2
   exit 1
 fi
+if [[ ! "$LOCAL_PR_IDLE_MINUTES" =~ ^[0-9]+$ ]]; then
+  echo "Error: 11.local付きで最終PRを作ったセッションの猶予は0以上の整数（分）で指定してください: $LOCAL_PR_IDLE_MINUTES" >&2
+  exit 1
+fi
 if [[ ! "$QUESTION_IDLE_MINUTES" =~ ^[0-9]+$ ]]; then
   echo "Error: 質問セッションの猶予は0以上の整数（分）で指定してください: $QUESTION_IDLE_MINUTES" >&2
   exit 1
@@ -151,9 +164,12 @@ NOW="$(date +%s)"
 IDLE_SECONDS=$((IDLE_MINUTES * 60))
 HANDOFF_IDLE_SECONDS=$((HANDOFF_IDLE_MINUTES * 60))
 QUESTION_IDLE_SECONDS=$((QUESTION_IDLE_MINUTES * 60))
+LOCAL_PR_IDLE_SECONDS=$((LOCAL_PR_IDLE_MINUTES * 60))
 CHECKED=0
 CANDIDATES=0
 REAPED=0
+# 直前の`fold_session`が実際に畳めたか（畳んだ後の後始末を続けるかの判断に使う。#4880）
+FOLDED=0
 
 # 自分がその中で動いているセッション。手で実行したときに、自分の足元を畳まないための保険
 # （pollerはsystemd配下でtmuxの外にいるため、通常は空）。
@@ -198,6 +214,7 @@ hold_until_reap() {
 # 判定は呼び出し元が済ませてある（実装セッションと横断質問セッションで条件が違うため。#1454）。
 fold_session() {
   local session="$1" repository="$2" issue_number="$3" reason="$4" restart_hint="${5:-}"
+  FOLDED=0
   if [[ "$DRY_RUN" -eq 1 ]]; then
     echo "  $session: [dry-run] 畳む対象です（$repository #$issue_number）: $reason"
     return 0
@@ -211,6 +228,7 @@ fold_session() {
     # 状態ファイルを残すと、次に同じ名前で立ったセッションが前回の`Stop`を引き継いだように見える。
     session_state_remove "$session"
     REAPED=$((REAPED + 1))
+    FOLDED=1
   else
     echo "  $session: 警告: セッションを畳めませんでした（$repository #$issue_number）" >&2
   fi
@@ -233,6 +251,7 @@ reap_one() {
   local idle_minutes idle_seconds
   local dirty remote_branches other_remote_branches issue_info issue_state issue_labels
   local local_label merged_pr open_pr handoff_reason handoff_hold handoff_code reason
+  local local_pr_info local_pr_interim release_local_label=0
 
   # 記述子が無いセッションには触らない。**これが「巻き込んではいけないもの」への線引き**で、
   # 他リポジトリの作業用セッション・人が手で立てたセッション・この仕組みより前から動いている
@@ -501,80 +520,120 @@ reap_one() {
       # セッションでもう作業しない」という宣言を前提に組んであり、無視すると経路の意味そのものが
       # 崩れる（PRを出しただけ・PRを作らずに終えただけで、まだローカルで続けているセッションが
       # 猶予5分で畳まれる）。マージ済み・CLOSEDと違って、成果物が本流へ入った証拠がまだ無い。
+      #
+      # **例外は「最終PRを作り終えて待機しているだけ」のセッション**（#4880）。`11.local`の外し忘れを
+      # プロンプトの遵守に賭けると、PRがマージされるまで残り、同じPRのセッションの稼働を待つ処理
+      # （iOS事前検証の自動修復）がマージを止める。成果物はPRとしてGitHubにあり、worktreeは
+      # cleanでpush済み（上の条件）なので、畳んでも失うのは会話の文脈だけ（`--continue`で戻れる）。
+      # ただし外す宣言が無いぶん、次のどれかなら従来どおり残す。
+      #   - PRがまだ無い（PR本文の途中PRの印`issue-deck-pr-role:interim`があるときも、続きがある）
+      #   - Issueに`00.check-user`が付いている（人の返事を待っている。マージ確認の`01.check-merge`
+      #     だけは、セッションではなくレビュー側の判断待ちなので除く）
+      #   - 猶予（`LOCAL_PR_IDLE_MINUTES`・既定15分）が経っていない。Remote Controlで追加の指示が
+      #     来れば最後のイベントが`Stop`でなくなり、応答を終えた時点から数え直される
       if [[ "$local_label" -eq 1 ]]; then
-        hold "$session" "11.local が付いている（ローカルで作業中）"
-        return 0
-      fi
-
-      # ローカル作業を終えている（#1541・#1600）。**`11.local`を外した**（すぐ上）＝
-      # このセッションでもう作業しないという実装エージェント自身の宣言にあたる。ここから先は
-      # PRを作ったか（#1541）・作らずに終わったか（#1600）で理由だけが分かれる。マージまで
-      # 残すと、人の確認待ちのPRを抱えたセッションが本数の上限（#1361）を埋めて、後続の
-      # ジョブが流れなくなる。
-      #
-      # **畳んでも失うものは無い。** worktreeはcleanでpush済み（条件7）、worktreeそのものは
-      # 残り、呼び戻せば前回の会話の続きから再開する（#1541・run-issue-session.sh の
-      # `--continue`）。
-      #
-      # **猶予は`HANDOFF_IDLE_MINUTES`だけで決める**（#1649）。以前は共通猶予も併せて満たす必要が
-      # あり、実効が max(IDLE, HANDOFF) になっていた。「CI失敗の指摘が返る余地があるので
-      # マージ済み・CLOSEDより長く取る」という段差も置いていたが、サブPCでの実測（1.7日・134件）で
-      # 畳んだ後に呼び戻したケースが1件も無かったため取り下げ、短い側を指定できるようにした。
-      if [[ "$HANDOFF_IDLE_SECONDS" -eq 0 ]]; then
-        hold "$session" "IssueがOPENで、issue-$issue_number のPRもまだマージされていない"
-        return 0
-      fi
-      open_pr="$(gh pr list --repo "$repository" --head "issue-$issue_number" --state open \
-        --json number --jq '.[0].number // empty' 2>/dev/null || true)"
-
-      # **Pull Requestを人の指示で作るリポジトリは、PRができるまで畳まない**（#2499）。
-      # `guchi-apps/ideas`のように成果物を同じセッションで何度も練り直す使い方では、
-      # 「PRが無い＝もう作業しない」が成り立たない。一覧は scripts/local-repo-pr-policy.conf。
-      #
-      # **ここまで来るのは`11.local`が外れているときだけ**（すぐ上のhold）で、起動プロンプトは
-      # 「PRを作るまで外さない」と指示している。つまりこの分岐が効くのは、その指示どおりに
-      # ならなかったとき——**プロンプトの取りこぼしに対する止め**であって主たる仕組みではない。
-      # それでも置くのは、Issueが求めているのが「PRができるまで続く」という条件そのもので、
-      # 指示の遵守に賭けるとこのIssueが直そうとした事象（会話が5分で消える）がそのまま残るため。
-      #
-      # 期限もリトライも無い`hold`にするのは、**待っているのが人の指示だから**。ここで
-      # `hold_until_reap`を書くと画面に終了予告が出てしまい、指示を出せばまだ続けられる
-      # セッションが「まもなく終了」と見える。**引き換えに、PRを作らずに終える構想の
-      # セッションは自分では畳まれない**（`11.local`を付けたまま終えた場合と同じ状態）。
-      # 畳みたくなったら画面の「終了」を押すか、Issueをcloseする（どちらも上の経路で畳まれる）。
-      if [[ -z "$open_pr" ]] && pr_policy_is_manual "$repository"; then
-        hold "$session" "PRを人の指示で作るリポジトリで、issue-$issue_number のPRがまだ作られていない"
-        return 0
-      fi
-
-      if [[ -n "$open_pr" ]]; then
-        handoff_reason="PR #$open_pr を作成しレビューへ引き渡し済み"
-        handoff_hold="PR #$open_pr を引き渡してから猶予（${HANDOFF_IDLE_MINUTES}分）が経っていない"
-        handoff_code="HANDOFF_PR_OPEN"
-      elif [[ -n "$other_remote_branches" ]]; then
-        # **PRを作らずに終わったセッション**（#1600）。子Issueへの分割・調査だけ・
-        # 「対応不要」の結論のいずれかで終わると、`issue-<番号>`のPRは最後まで作られない。
-        # 上の3経路（CLOSED・マージ済み・PRがopen）はどれもPRかIssueのcloseを見ているため、
-        # この形のセッションはどれにも当たらず**永久に残る**（#1523のセッションが実際に残った）。
-        #
-        # 見分けるのは**手元に残った成果物**で、GitHub側の状態ではない。HEADが自分の
-        # トピックブランチ以外のリモートブランチに含まれている＝このセッションのコミットは
-        # 1つも残っていないので、畳んでも失うものが無い。独自のコミットが残っている場合は
-        # 「PRを作り忘れた」可能性があるため、下の`hold`で従来どおり残す。
-        handoff_reason="PRを作らずにローカル作業を終えている（このセッションのコミットが残っていない）"
-        handoff_hold="ローカル作業を終えてから猶予（${HANDOFF_IDLE_MINUTES}分）が経っていない"
-        handoff_code="HANDOFF_NO_PR"
+        if [[ "$LOCAL_PR_IDLE_SECONDS" -eq 0 ]]; then
+          hold "$session" "11.local が付いている（ローカルで作業中）"
+          return 0
+        fi
+        local_pr_info="$(gh pr list --repo "$repository" --head "issue-$issue_number" --state open \
+          --json number,body \
+          --jq '.[0] // empty | "\(.number) \((.body // "") | contains("issue-deck-pr-role:interim"))"' \
+          2>/dev/null || true)"
+        if [[ ! "$local_pr_info" =~ ^([0-9]+)[[:space:]]+(true|false)$ ]]; then
+          hold "$session" "11.local が付いている（ローカルで作業中）"
+          return 0
+        fi
+        open_pr="${BASH_REMATCH[1]}"
+        local_pr_interim="${BASH_REMATCH[2]}"
+        if [[ "$local_pr_interim" == "true" ]]; then
+          hold "$session" "11.local が付いていて、PR #$open_pr は途中PR（ローカルで作業中）"
+          return 0
+        fi
+        if printf '%s\n' "$issue_labels" | grep -Fxq "00.check-user" \
+          && ! printf '%s\n' "$issue_labels" | grep -Fxq "01.check-merge"; then
+          hold "$session" "11.local と 00.check-user が付いている（人の返事を待っている）"
+          return 0
+        fi
+        if [[ "$idle_for" -lt "$LOCAL_PR_IDLE_SECONDS" ]]; then
+          # 経過時間は毎分変わるため、理由の文字列には入れない（入れると毎分ログへ出てしまう）。
+          hold_until_reap "$session" "$((event_at + LOCAL_PR_IDLE_SECONDS))" "LOCAL_PR_OPEN" \
+            "PR #$open_pr を作成済みだが11.localが付いたまま。猶予（${LOCAL_PR_IDLE_MINUTES}分）が経っていない"
+          return 0
+        fi
+        reason="PR #$open_pr を作成済み（11.local は付いたまま）"
+        release_local_label=1
       else
-        hold "$session" "IssueがOPENで、issue-$issue_number のPRがまだ作られていない"
-        return 0
+        # ローカル作業を終えている（#1541・#1600）。**`11.local`を外した**（このelse）＝
+        # このセッションでもう作業しないという実装エージェント自身の宣言にあたる。ここから先は
+        # PRを作ったか（#1541）・作らずに終わったか（#1600）で理由だけが分かれる。マージまで
+        # 残すと、人の確認待ちのPRを抱えたセッションが本数の上限（#1361）を埋めて、後続の
+        # ジョブが流れなくなる。
+        #
+        # **畳んでも失うものは無い。** worktreeはcleanでpush済み（条件7）、worktreeそのものは
+        # 残り、呼び戻せば前回の会話の続きから再開する（#1541・run-issue-session.sh の
+        # `--continue`）。
+        #
+        # **猶予は`HANDOFF_IDLE_MINUTES`だけで決める**（#1649）。以前は共通猶予も併せて満たす必要が
+        # あり、実効が max(IDLE, HANDOFF) になっていた。「CI失敗の指摘が返る余地があるので
+        # マージ済み・CLOSEDより長く取る」という段差も置いていたが、サブPCでの実測（1.7日・134件）で
+        # 畳んだ後に呼び戻したケースが1件も無かったため取り下げ、短い側を指定できるようにした。
+        if [[ "$HANDOFF_IDLE_SECONDS" -eq 0 ]]; then
+          hold "$session" "IssueがOPENで、issue-$issue_number のPRもまだマージされていない"
+          return 0
+        fi
+        open_pr="$(gh pr list --repo "$repository" --head "issue-$issue_number" --state open \
+          --json number --jq '.[0].number // empty' 2>/dev/null || true)"
+
+        # **Pull Requestを人の指示で作るリポジトリは、PRができるまで畳まない**（#2499）。
+        # `guchi-apps/ideas`のように成果物を同じセッションで何度も練り直す使い方では、
+        # 「PRが無い＝もう作業しない」が成り立たない。一覧は scripts/local-repo-pr-policy.conf。
+        #
+        # **ここまで来るのは`11.local`が外れているときだけ**（上のif）で、起動プロンプトは
+        # 「PRを作るまで外さない」と指示している。つまりこの分岐が効くのは、その指示どおりに
+        # ならなかったとき——**プロンプトの取りこぼしに対する止め**であって主たる仕組みではない。
+        # それでも置くのは、Issueが求めているのが「PRができるまで続く」という条件そのもので、
+        # 指示の遵守に賭けるとこのIssueが直そうとした事象（会話が5分で消える）がそのまま残るため。
+        #
+        # 期限もリトライも無い`hold`にするのは、**待っているのが人の指示だから**。ここで
+        # `hold_until_reap`を書くと画面に終了予告が出てしまい、指示を出せばまだ続けられる
+        # セッションが「まもなく終了」と見える。**引き換えに、PRを作らずに終える構想の
+        # セッションは自分では畳まれない**（`11.local`を付けたまま終えた場合と同じ状態）。
+        # 畳みたくなったら画面の「終了」を押すか、Issueをcloseする（どちらも上の経路で畳まれる）。
+        if [[ -z "$open_pr" ]] && pr_policy_is_manual "$repository"; then
+          hold "$session" "PRを人の指示で作るリポジトリで、issue-$issue_number のPRがまだ作られていない"
+          return 0
+        fi
+
+        if [[ -n "$open_pr" ]]; then
+          handoff_reason="PR #$open_pr を作成しレビューへ引き渡し済み"
+          handoff_hold="PR #$open_pr を引き渡してから猶予（${HANDOFF_IDLE_MINUTES}分）が経っていない"
+          handoff_code="HANDOFF_PR_OPEN"
+        elif [[ -n "$other_remote_branches" ]]; then
+          # **PRを作らずに終わったセッション**（#1600）。子Issueへの分割・調査だけ・
+          # 「対応不要」の結論のいずれかで終わると、`issue-<番号>`のPRは最後まで作られない。
+          # 上の3経路（CLOSED・マージ済み・PRがopen）はどれもPRかIssueのcloseを見ているため、
+          # この形のセッションはどれにも当たらず**永久に残る**（#1523のセッションが実際に残った）。
+          #
+          # 見分けるのは**手元に残った成果物**で、GitHub側の状態ではない。HEADが自分の
+          # トピックブランチ以外のリモートブランチに含まれている＝このセッションのコミットは
+          # 1つも残っていないので、畳んでも失うものが無い。独自のコミットが残っている場合は
+          # 「PRを作り忘れた」可能性があるため、下の`hold`で従来どおり残す。
+          handoff_reason="PRを作らずにローカル作業を終えている（このセッションのコミットが残っていない）"
+          handoff_hold="ローカル作業を終えてから猶予（${HANDOFF_IDLE_MINUTES}分）が経っていない"
+          handoff_code="HANDOFF_NO_PR"
+        else
+          hold "$session" "IssueがOPENで、issue-$issue_number のPRがまだ作られていない"
+          return 0
+        fi
+        if [[ "$idle_for" -lt "$HANDOFF_IDLE_SECONDS" ]]; then
+          # 経過時間は毎分変わるため、理由の文字列には入れない（入れると毎分ログへ出てしまう）。
+          hold_until_reap "$session" "$((event_at + HANDOFF_IDLE_SECONDS))" "$handoff_code" \
+            "$handoff_hold"
+          return 0
+        fi
+        reason="$handoff_reason"
       fi
-      if [[ "$idle_for" -lt "$HANDOFF_IDLE_SECONDS" ]]; then
-        # 経過時間は毎分変わるため、理由の文字列には入れない（入れると毎分ログへ出てしまう）。
-        hold_until_reap "$session" "$((event_at + HANDOFF_IDLE_SECONDS))" "$handoff_code" \
-          "$handoff_hold"
-        return 0
-      fi
-      reason="$handoff_reason"
     fi
   fi
 
@@ -582,6 +641,17 @@ reap_one() {
   reason="$reason・最後の応答終了から$((idle_for / 60))分・worktreeはcleanでpush済み"
   fold_session "$session" "$repository" "$issue_number" "$reason" \
     "もう一度作業する場合は、issue-deckの画面から起動し直してください。前回の会話の続きから再開します（worktree: $worktree）。"
+
+  # `11.local`を付けたまま畳んだ場合（#4880）は、ローカル作業の終了を代わりに宣言する。
+  # 残すと、セッションが無いのに「ローカルで対応中」と読まれ続ける。**外せなくても畳んだ判断は
+  # 変わらない**（ラベルは画面からも外せる）。起動し直せばランチャーが付け直す。
+  if [[ "$release_local_label" -eq 1 && "$FOLDED" -eq 1 ]]; then
+    if gh issue edit "$issue_number" --repo "$repository" --remove-label "11.local" >/dev/null 2>&1; then
+      echo "    11.local を外しました（$repository #$issue_number）"
+    else
+      echo "    警告: 11.local を外せませんでした（$repository #$issue_number）" >&2
+    fi
+  fi
   return 0
 }
 
@@ -591,4 +661,4 @@ while IFS= read -r session_name; do
   reap_one "$session_name"
 done < <(tmux list-sessions -F '#{session_name}' 2>/dev/null || true)
 
-echo "セッションを確認しました: $CHECKED 件（回収対象 $CANDIDATES 件・畳んだ $REAPED 件・猶予 ${IDLE_MINUTES}分・引き渡し済み ${HANDOFF_IDLE_MINUTES}分・質問 ${QUESTION_IDLE_MINUTES}分）"
+echo "セッションを確認しました: $CHECKED 件（回収対象 $CANDIDATES 件・畳んだ $REAPED 件・猶予 ${IDLE_MINUTES}分・引き渡し済み ${HANDOFF_IDLE_MINUTES}分・11.local付きPR ${LOCAL_PR_IDLE_MINUTES}分・質問 ${QUESTION_IDLE_MINUTES}分）"

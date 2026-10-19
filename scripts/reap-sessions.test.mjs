@@ -166,6 +166,8 @@ function git(cwd, args) {
  * - `repository` … 状態ファイルに書くリポジトリ（手動PRの一覧に載っているかで挙動が変わる。#2499）
  * - `pushedToBaseBranch` … HEADを`issue-<番号>`以外のリモートブランチにも載せるか
  *   （＝このセッションのコミットが手元に残っていない状態。`HANDOFF_NO_PR`の前提）
+ * - `openPrInterim` … openなPRの本文に途中PRの印（`issue-deck-pr-role:interim`）があるか（#4880）
+ * - `env` … スクリプトへ足す環境変数
  */
 function runGh({
   idleSeconds,
@@ -177,12 +179,15 @@ function runGh({
   pushedToBaseBranch = false,
   dirtyFiles = [],
   untrackedFiles = [],
+  openPrInterim = false,
+  env = {},
 }) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "reap-sessions-label-"));
   tempDirs.push(root);
   const binDir = path.join(root, "bin");
   const stateDir = path.join(root, "state");
   const killLog = path.join(root, "kill.log");
+  const editLog = path.join(root, "edit.log");
   const worktree = path.join(root, "worktree");
   const origin = path.join(root, "origin.git");
   fs.mkdirSync(binDir, { recursive: true });
@@ -227,12 +232,17 @@ function runGh({
     [
       "#!/usr/bin/env bash",
       'args="$*"',
+      'if [[ "$1 $2" == "issue edit" ]]; then',
+      `  printf '%s\\n' "$*" >>${JSON.stringify(editLog)}`,
+      "  exit 0",
+      "fi",
       'if [[ "$1" == "issue" ]]; then',
       `  printf '%s\\n' ${[issueState, ...labels].map((line) => JSON.stringify(line)).join(" ")}`,
       "  exit 0",
       "fi",
       'case "$args" in',
       `  *"--state merged"*) printf '%s' ${JSON.stringify(mergedPr)} ;;`,
+      `  *"--state open"*"number,body"*) printf '%s' ${JSON.stringify(openPr ? `${openPr} ${openPrInterim}` : "")} ;;`,
       `  *"--state open"*) printf '%s' ${JSON.stringify(openPr)} ;;`,
       "esac",
       "exit 0",
@@ -262,12 +272,14 @@ function runGh({
       PATH: `${binDir}:${process.env.PATH}`,
       TMUX: "",
       ISSUE_DECK_SESSION_STATE_DIR: stateDir,
+      ...env,
     },
   });
 
   return {
     stdout,
     killed: fs.existsSync(killLog) ? fs.readFileSync(killLog, "utf8") : "",
+    edited: fs.existsSync(editLog) ? fs.readFileSync(editLog, "utf8") : "",
     reap: fs.existsSync(path.join(stateDir, `${GH_SESSION}.reap`))
       ? fs.readFileSync(path.join(stateDir, `${GH_SESSION}.reap`), "utf8")
       : "",
@@ -296,8 +308,8 @@ describe("reap-sessions.sh: 11.local を見る経路（#2474）", () => {
     expect(result.reap).toContain("PR_MERGED");
   });
 
-  it("引き渡し済みの経路では、11.local が付いている間は残す", () => {
-    const result = runGh({ idleSeconds: 30 * 60, labels: ["11.local"], openPr: "480" });
+  it("11.local が付いていて、PRがまだ無いなら残す", () => {
+    const result = runGh({ idleSeconds: 30 * 60, labels: ["11.local"], pushedToBaseBranch: true });
     expect(result.killed).toBe("");
     expect(result.stdout).toContain("11.local が付いている");
     // 畳む経路が決まらないので終了予告も書かない（残り時間を出せる状態ではない）
@@ -309,6 +321,71 @@ describe("reap-sessions.sh: 11.local を見る経路（#2474）", () => {
     expect(result.stdout).toContain("セッションを畳みました");
     expect(result.stdout).toContain("PR #480 を作成しレビューへ引き渡し済み");
     expect(result.killed).toContain(`=${GH_SESSION}`);
+  });
+});
+
+// #4880: `11.local`を外し忘れたまま最終PRを作り終えたセッション。PRがマージされるまで残ると、
+// 同じPRのセッションの稼働を待つiOS事前検証の自動修復がマージを止める（guchi-apps/yoteiflow#1284）。
+describe("reap-sessions.sh: 11.local を付けたまま最終PRを作り終えたセッション（#4880）", () => {
+  it("猶予を過ぎたら畳み、11.local を外す", () => {
+    const result = runGh({ idleSeconds: 30 * 60, labels: ["11.local"], openPr: "480" });
+    expect(result.stdout).toContain("セッションを畳みました");
+    expect(result.stdout).toContain("PR #480 を作成済み（11.local は付いたまま）");
+    expect(result.killed).toContain(`=${GH_SESSION}`);
+    expect(result.edited).toContain(`issue edit ${GH_ISSUE}`);
+    expect(result.edited).toContain("--remove-label 11.local");
+  });
+
+  it("猶予の内は畳む予定（LOCAL_PR_OPEN）を残す", () => {
+    // 引き渡し済み（HANDOFF）の既定5分は過ぎているが、この経路の既定15分には届いていない
+    const result = runGh({ idleSeconds: 10 * 60, labels: ["11.local"], openPr: "480" });
+    expect(result.killed).toBe("");
+    expect(result.edited).toBe("");
+    expect(result.reap).toContain("LOCAL_PR_OPEN");
+  });
+
+  it("途中PRなら、続きの作業があるので残す", () => {
+    const result = runGh({ idleSeconds: 30 * 60, labels: ["11.local"], openPr: "480", openPrInterim: true });
+    expect(result.killed).toBe("");
+    expect(result.stdout).toContain("途中PR");
+    expect(result.reap).toBe("");
+  });
+
+  it("00.check-user が付いていれば、人の返事を待っているので残す", () => {
+    const result = runGh({
+      idleSeconds: 30 * 60,
+      labels: ["11.local", "00.check-user", "01.check-input"],
+      openPr: "480",
+    });
+    expect(result.killed).toBe("");
+    expect(result.stdout).toContain("00.check-user");
+    expect(result.reap).toBe("");
+  });
+
+  it("00.check-user でもマージ確認（01.check-merge）なら畳む", () => {
+    const result = runGh({
+      idleSeconds: 30 * 60,
+      labels: ["11.local", "00.check-user", "01.check-merge"],
+      openPr: "480",
+    });
+    expect(result.killed).toContain(`=${GH_SESSION}`);
+  });
+
+  it("SESSION_LOCAL_PR_IDLE_MINUTES=0 なら従来どおり残す", () => {
+    const result = runGh({
+      idleSeconds: 30 * 60,
+      labels: ["11.local"],
+      openPr: "480",
+      env: { SESSION_LOCAL_PR_IDLE_MINUTES: "0" },
+    });
+    expect(result.killed).toBe("");
+    expect(result.stdout).toContain("11.local が付いている");
+  });
+
+  it("11.local が外れていれば、ラベルには触らない", () => {
+    const result = runGh({ idleSeconds: 30 * 60, openPr: "480" });
+    expect(result.killed).toContain(`=${GH_SESSION}`);
+    expect(result.edited).toBe("");
   });
 });
 

@@ -103,6 +103,7 @@
 #   SESSION_TOOL_CALL_STALL_MINUTES 空振りとみなすまでの停滞の分数（省略時は10）
 #   SESSION_IDLE_MINUTES            セッションを畳むまでの猶予の分数（省略時は60・0で無効）
 #   SESSION_HANDOFF_IDLE_MINUTES    引き渡し済みセッション専用の猶予（省略時は30・0でその経路だけ無効）
+#   SESSION_LOCAL_PR_IDLE_MINUTES   11.localを付けたまま最終PRを作ったセッションの猶予（省略時は15・0でその経路だけ無効。#4880）
 #   DISPATCH_CHECKOUT_FETCH_INTERVAL_MINUTES
 #                                   チェックアウトの遅れを数え直す間隔の分数（省略時は360・0で無効）
 #   WORKTREE_CLEANUP_INTERVAL_MINUTES
