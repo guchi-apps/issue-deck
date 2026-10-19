@@ -15,7 +15,10 @@ import {
 } from "@/lib/dispatch/host-metrics";
 import { announceDispatchHost } from "@/lib/dispatch/jobs";
 import { syncRemoteSessionsFromHost } from "@/lib/dispatch/remote-session";
-import { parseReportedRemoteSessions } from "@/lib/dispatch/remote-session-rules";
+import {
+  parseIdleEndedRemoteSessions,
+  parseReportedRemoteSessions,
+} from "@/lib/dispatch/remote-session-rules";
 import { parseRemoteControlUrl } from "@/lib/dispatch/session-state";
 
 function parsePositiveInt(value: unknown): number | null {
@@ -204,6 +207,8 @@ export async function POST(request: NextRequest) {
     await syncRemoteSessionsFromHost({
       hostName,
       reported: parseReportedRemoteSessions(payload?.remoteSessions, parseRemoteControlUrl),
+      // 無操作で自動終了したもの（#4871）。理由を残して猶予を待たずに`ended`にする
+      idleEnded: parseIdleEndedRemoteSessions(payload?.remoteSessionsIdleEnded),
     });
   } catch (error) {
     console.error("[POST /api/dispatch/hosts] リモートセッションを突き合わせられませんでした:", error);

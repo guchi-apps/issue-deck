@@ -195,6 +195,24 @@ export function parseReportedRemoteSessions(
   return sessions;
 }
 
+/** 無操作でpollerが自動終了したセッションに残す理由（#4871） */
+export const REMOTE_SESSION_IDLE_ENDED_MESSAGE = "一定時間操作が無かったため、自動で終了しました。";
+
+/**
+ * ホスト申告の`remoteSessionsIdleEnded`（直近に無操作で自動終了したセッション名）を検証する。
+ * **配列でなければ`null`（未申告＝古いpoller）**。形の合わない名前は捨てる。
+ */
+export function parseIdleEndedRemoteSessions(value: unknown): string[] | null {
+  if (!Array.isArray(value)) return null;
+  const names = new Set<string>();
+  for (const item of value) {
+    if (typeof item !== "string" || !REMOTE_SESSION_NAME_PATTERN.test(item)) continue;
+    names.add(item);
+    if (names.size === MAX_REPORTED_REMOTE_SESSIONS) break;
+  }
+  return [...names];
+}
+
 /** 状態の表示名 */
 export function describeRemoteSessionStatus(status: RemoteSessionStatus): string {
   switch (status) {
