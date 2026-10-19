@@ -587,6 +587,41 @@ UIの名称だけ「判定に使うAI（おまかせ・ラベル付与）」に�
 - Issue編集ダイアログの「付け直す」はタイトルしか使わないので`labels: []`で呼ぶ（Jevを呼ばない）
 - 消費量は`issue_suggest`として計上する（`askSystemOne`の`feature`）
 
+### 判定の当たり外れを測る（#4852）
+
+**Sonnet 5.5とOpus 5.5の単価差は2倍にとどまる**（入力$2/$4・出力$10/$20）。Sonnetでやり直しが
+1回起きれば節約分は消えるため、Sonnetへ振る範囲は勘ではなく、やり直し率と費用で決める。
+判定の経路・判定が出したモデル・Jevの確率は起動ジョブに残る（#4853。`DispatchJob.modelPickSource`
+ほか）。それを使い道（やり直し・費用）と結ぶ計器が`scripts/model-pick-outcomes.sh`
+（受け口`GET /api/dispatch/model-pick-outcomes`、集計は`src/lib/model-pick-outcomes.ts`）。
+
+- **単位はIssue。** 期間内に最初に積まれたClaudeの起動ジョブを判定の記録とし、同じIssueの後続の
+  起動ジョブ（取り消し・見送りを除く）を「再起動」として数える
+- **モデルの軸は実際に走ったモデル。** `DispatchJob.claudeModel`は`auto`のこともあるため使わず、
+  実装セッション（`SessionUsage`の`source=local`・`kind=implementation`）の主モデルを採る。無ければ
+  判定が出したモデル。判定と違えば「上書き」として数える
+- **修復は`SessionUsage`のGitHub Actions行で数える。** `workflowName`は`GITHUB_WORKFLOW`（callerの
+  `name:`）なので、`Claude CI Fix`・`Claude Conflict Resolve`・`Claude PR Repair`・`Claude Review Fix`
+  を表示名の部分一致で判定する。**callerの名前を別の語へ変えた配布先は数えない。** PR番号しか持たない
+  行は、同じPRでIssue番号も持つ行からIssueを引く。`PullRequestRepairRun`はPR×種別で1行に上書き
+  され回数が残らないため使わない
+- **Claude自動レビューの「要修正」は数えていない。** DBに残らず、PRコメントのマーカー
+  （`issue-deck-review-verdict:changes-requested`）にしか無いため。review-fixの実行で近似する
+- 費用はIssueに紐づく`SessionUsage`の合計（実装・修復・レビューを含む）なので、**やり直しの費用は
+  平均費用に入っている。** 保持期間は180日（`SESSION_USAGE_RETENTION_DAYS`）で、それより長くは測れない
+
+**見直しの判断基準。** 各群（モデル×経路×確率帯）が**20件に届くまでは結論を出さない。**
+
+- Sonnet群の平均費用が、同じ経路のOpus群の**0.8倍以上**なら、やり直しで節約が消えている。その経路で
+  Sonnetへ振る範囲を狭める（ルールなら`pickModelByRule`の条件、Jevならしきい値を上げる）
+- Sonnet群のやり直し率がOpus群より**15ポイント以上高い**ときも同じく狭める
+- Jevの確率帯`high`（P(sonnet) ≥ 0.7）でやり直し率がOpus群と変わらず、平均費用が0.6倍以下なら、
+  しきい値を下げる余地がある。`low`帯で人がSonnetのまま起動したIssueの結果も材料にする
+- **Sonnet群のやり直し率が低くても「Sonnetで足りる」とは読まない。** 簡単なIssueほどSonnetへ振られる
+  ため、Opus群との差には難しさの差が混ざる。比べるのは同じ経路・同じ確率帯の中に限る
+
+自動修復の2回目以降でモデルを上げる案は別に調べている（#4854）。
+
 ### 「設定に従う」は削除し、設定の値を最初の選択にする（#3106）
 
 #2776で「設定に従う」チップに実際のモデル名を出したが、そもそも**どのモデルで立つのかを
