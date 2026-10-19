@@ -125,6 +125,7 @@ export function DispatchHostPanel({
   jobs = [],
   onOpenIssue,
   onOpenRemoteSessions,
+  onStopRemoteSession,
   onRequestSelfUpdate,
   onRequestReboot,
   compact = false,
@@ -134,8 +135,8 @@ export function DispatchHostPanel({
   sessions: readonly DispatchSessionView[];
   /**
    * 要求者の稼働中のリモートセッション（#4836）。右下の丸ボタンや左メニューから立てたものも
-   * サブPCのtmuxで動いているので、Issueのセッションと同じカードに並べる。**表示だけ**で、
-   * 終了・起動はリモートセッション画面が持つ。渡さなければ従来どおり出さない
+   * サブPCのtmuxで動いているので、Issueのセッションと同じカードに並べる。起動はリモート
+   * セッション画面が持つ。渡さなければ従来どおり出さない
    */
   remoteSessions?: readonly RemoteSessionView[];
   /**
@@ -151,6 +152,11 @@ export function DispatchHostPanel({
   onOpenIssue?: (issueId: string) => void;
   /** リモートセッションの小見出しから、リモートセッション画面を開く（#4836）。渡さなければ導線を出さない */
   onOpenRemoteSessions?: () => void;
+  /**
+   * リモートセッションを終了する（#4845）。渡さなければ行に終了ボタンを出さない
+   * （`onRequestReboot`と同じ形）
+   */
+  onStopRemoteSession?: (id: string) => Promise<{ ok: true } | { ok: false; message: string }>;
   /**
    * チェックアウトの更新を積む（#1875）。渡さなければボタンを出さない（`onOpenIssue`と同じ形）。
    *
@@ -198,6 +204,7 @@ export function DispatchHostPanel({
           rebootJob={selectHostRebootJob(jobs, host.name)}
           onOpenIssue={onOpenIssue}
           onOpenRemoteSessions={onOpenRemoteSessions}
+          onStopRemoteSession={onStopRemoteSession}
           onRequestSelfUpdate={onRequestSelfUpdate}
           onRequestReboot={onRequestReboot}
           compact={compact}
@@ -216,6 +223,7 @@ function HostCard({
   rebootJob,
   onOpenIssue,
   onOpenRemoteSessions,
+  onStopRemoteSession,
   onRequestSelfUpdate,
   onRequestReboot,
   compact,
@@ -228,6 +236,7 @@ function HostCard({
   rebootJob: DispatchJobView | null;
   onOpenIssue?: (issueId: string) => void;
   onOpenRemoteSessions?: () => void;
+  onStopRemoteSession?: (id: string) => Promise<{ ok: true } | { ok: false; message: string }>;
   onRequestSelfUpdate?: (
     hostName: string,
   ) => Promise<{ ok: true } | { ok: false; message: string }>;
@@ -364,7 +373,11 @@ function HostCard({
       {/* **最下段に置く**（#4836）。Issueのセッションと違い本数の上限（見出しの
           「セッション n/m」）には数えない別枠なので、小見出しで分けて上限も別に出す */}
       {remoteSessions.length > 0 && (
-        <RemoteSessionList sessions={remoteSessions} onOpenRemoteSessions={onOpenRemoteSessions} />
+        <RemoteSessionList
+          sessions={remoteSessions}
+          onOpenRemoteSessions={onOpenRemoteSessions}
+          onStopRemoteSession={onStopRemoteSession}
+        />
       )}
     </div>
   );
@@ -963,16 +976,17 @@ function PlanReviewSessionRow({
 }
 
 /**
- * リモートセッション（#4836）の小見出しと一覧。**表示だけで、終了ボタンは置かない**——
- * Issueのセッションの行も操作を持たず、押し間違えて会話中のセッションを落とさないよう、
- * 操作はリモートセッション画面（`remote-session-view.tsx`）に任せる。
+ * リモートセッション（#4836）の小見出しと一覧。行の終了ボタン（#4845）は`onStopRemoteSession`を
+ * 渡したときだけ出す。起動と履歴（終了・失敗）はリモートセッション画面（`remote-session-view.tsx`）に任せる。
  */
 function RemoteSessionList({
   sessions,
   onOpenRemoteSessions,
+  onStopRemoteSession,
 }: {
   sessions: RemoteSessionView[];
   onOpenRemoteSessions?: () => void;
+  onStopRemoteSession?: (id: string) => Promise<{ ok: true } | { ok: false; message: string }>;
 }) {
   return (
     <div className="mt-2 border-t pt-2">
@@ -992,44 +1006,121 @@ function RemoteSessionList({
       </div>
       <ul className="mt-1 flex flex-col gap-1">
         {sessions.map((session) => (
-          <RemoteSessionRow key={session.id} session={session} />
+          <RemoteSessionRow key={session.id} session={session} onStop={onStopRemoteSession} />
         ))}
       </ul>
     </div>
   );
 }
 
-function RemoteSessionRow({ session }: { session: RemoteSessionView }) {
+function RemoteSessionRow({
+  session,
+  onStop,
+}: {
+  session: RemoteSessionView;
+  onStop?: (id: string) => Promise<{ ok: true } | { ok: false; message: string }>;
+}) {
   const repoName = session.repositoryFullName.split("/")[1] ?? session.repositoryFullName;
   const label = session.stopping ? "終了中" : describeRemoteSessionStatus(session.status);
+  // **確認を1枚挟む**（#4845）。会話中のセッションを押し間違えで落とさないため。
+  // 「再起動」（`RebootRow`）と同じく、どの行から押したかをその場で読めるインラインの確認にする
+  const [confirming, setConfirming] = useState(false);
+  const [sending, setSending] = useState(false);
+  // 積めなかった理由。**次に押すまで残す**（`RebootRow`と同じ）
+  const [error, setError] = useState<string | null>(null);
+  const stopDisabled = sending || session.stopping;
+
+  async function stop() {
+    if (!onStop) return;
+    setConfirming(false);
+    setSending(true);
+    setError(null);
+    try {
+      const res = await onStop(session.id);
+      if (!res.ok) setError(res.message);
+    } finally {
+      setSending(false);
+    }
+  }
+
   return (
-    <li className="flex items-start gap-1.5 text-xs">
-      <TerminalSquare
-        aria-hidden
-        className="mt-0.5 size-3.5 shrink-0 text-teal-700 dark:text-teal-400"
-      />
-      <span className="min-w-0 flex-1">
-        <span className="block truncate font-medium">{repoName}</span>
-        <span
-          className={cn(
-            "block truncate text-muted-foreground",
-            session.status === "starting" && !session.stopping && "text-amber-700 dark:text-amber-400",
-          )}
-        >
-          {label}・{formatRelativeDate(session.createdAt)}に起動
+    <li className="flex flex-col gap-1">
+      <div className="flex items-start gap-1.5 text-xs">
+        <TerminalSquare
+          aria-hidden
+          className="mt-0.5 size-3.5 shrink-0 text-teal-700 dark:text-teal-400"
+        />
+        <span className="min-w-0 flex-1">
+          <span className="block truncate font-medium">{repoName}</span>
+          <span
+            className={cn(
+              "block truncate text-muted-foreground",
+              session.status === "starting" && !session.stopping && "text-amber-700 dark:text-amber-400",
+            )}
+          >
+            {label}・{formatRelativeDate(session.createdAt)}に起動
+          </span>
         </span>
-      </span>
-      {/* 会話の続きへの出口。リモートセッション画面の「Claude Codeアプリで開く」と同じURL */}
-      {session.remoteControlUrl && (
-        <a
-          href={session.remoteControlUrl}
-          title="Claude Codeアプリで開く"
-          aria-label={`${repoName}のリモートセッションをClaude Codeアプリで開く`}
-          className="mt-0.5 rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground"
-        >
-          <ExternalLink className="size-3.5" />
-        </a>
+        {/* 会話の続きへの出口。リモートセッション画面の「Claude Codeアプリで開く」と同じURL */}
+        {session.remoteControlUrl && (
+          <a
+            href={session.remoteControlUrl}
+            title="Claude Codeアプリで開く"
+            aria-label={`${repoName}のリモートセッションをClaude Codeアプリで開く`}
+            className="mt-0.5 rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground"
+          >
+            <ExternalLink className="size-3.5" />
+          </a>
+        )}
+        {/* 一括操作の停止ボタンと同じ赤枠の四角。押しても確認が出るだけで、まだ何も送らない */}
+        {onStop && (
+          <button
+            type="button"
+            title={session.stopping ? "終了中" : "終了する"}
+            aria-label={`${repoName}のリモートセッションを終了する`}
+            disabled={stopDisabled}
+            onClick={() => setConfirming((value) => !value)}
+            className={cn(
+              "mt-0.5 grid size-5 shrink-0 place-items-center rounded border border-destructive/45 text-destructive hover:bg-destructive/10 disabled:pointer-events-none disabled:opacity-35",
+              confirming && "bg-destructive/10",
+            )}
+          >
+            {sending ? (
+              <Loader2 aria-hidden className="size-3 animate-spin" />
+            ) : (
+              <span aria-hidden className="size-2 rounded-[1.5px] bg-current" />
+            )}
+          </button>
+        )}
+      </div>
+      {confirming && !session.stopping && (
+        <div className="ml-5 flex flex-col items-end gap-1 rounded-md border border-destructive/40 bg-destructive/5 p-2">
+          <span className="w-full text-left text-[11px] text-muted-foreground">
+            <span className="font-medium text-foreground">{repoName}</span>{" "}
+            のリモートセッションを終了します。Claude Codeアプリでの会話は続けられなくなります。
+            作業が残っていない作業用ディレクトリは片付けます。
+          </span>
+          <span className="flex gap-1.5">
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 text-[11px]"
+              onClick={() => setConfirming(false)}
+            >
+              やめる
+            </Button>
+            <Button
+              variant="destructive"
+              size="sm"
+              className="h-7 text-[11px]"
+              onClick={() => void stop()}
+            >
+              終了する
+            </Button>
+          </span>
+        </div>
       )}
+      {error && <p className="ml-5 text-[11px] text-destructive">{error}</p>}
     </li>
   );
 }
