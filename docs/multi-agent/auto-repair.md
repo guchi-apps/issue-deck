@@ -442,6 +442,44 @@ handoffで`review-fix`が始まると、`recordReviewFixHandoffStarted`（`pull-
   （`REPAIR_WORKFLOW_SPECS`。`requires`は`claude-review-develop.yml`）。callerが無い間は
   従来どおり人へ渡るだけで壊れない
 
+## 修復の2回目以降だけモデルを上げる案は保留している（#4854）
+
+「Sonnetで直らなかった修復の2回目以降をOpusで走らせる」案は、**2026-10時点では実装していない。**
+上げたときの効果を測る記録が無く、上げても費用の差が小さいので、仕組みを足す前に記録が貯まるのを待つ。
+
+**いまのモデルの決まり方。** 修復4種（ci-fix・review-fix・conflict-resolve・pr-repair）は、
+各reusableの「PRレビュー・修復用のClaudeモデルを取得する」ステップが`/api/settings/claude-model`の
+`workflowClaudeModel`（全体設定）を読むだけで、回数も元Issueの実装モデルも見ていない
+（例: `reusable-claude-ci-fix.yml`の`workflow_model`ステップ）。2026-10の本番値は`sonnet`なので、
+**元IssueがOpusで実装されていても修復は1回目からSonnet**で走っている。
+
+**保留の根拠**（issue-deck・2026-09-19〜10-19の実測）
+
+- 頻度: CI修正が走ったIssue 38件のうち、2回目まで行ったのは6件。6件とも上限到達の停止コメントは無く、
+  Sonnetの2回目で収まっている（Issueコメントの`issue-deck-source:claude-ci-fix`と「自動修正を試みます」から数えた推計）
+- 費用: CI修正1回はSonnetで$0.24〜0.36（ログの`total_cost_usd`、5本）。Opusは単価が2倍なので、
+  2回目以降だけ上げても増えるのは月$2前後。**全修復をOpusにしても月$10〜15程度**で、
+  それなら設定画面で`workflowClaudeModel`を切り替えるだけで済む
+- 成功率: 修復ごとの「どのモデルで走り、直ったか」はどこにも残らない。`PullRequestRepairRun`は
+  PR×種別で1行に上書きされ、ci-fixの回数はIssueコメントの数、画面からの自動修復ループの回数は
+  `PullRequestAutoRepairLoop.round`だけ。#4853が足す判定の記録は起動ジョブの側で、修復の成否は含まない
+
+**再検討する条件。** 修復の実行ごとにモデルと結果（直った・上限到達・人へ渡った）が残るようになり、
+Sonnetの2回目以降が直らずに人へ渡った件数が目に見えて出てきたとき。母数が小さいうちは、
+全体設定をOpusにする方が安く簡単に試せる。
+
+**実装する場合の変更範囲。** 回数を知っているのはワークフロー側（ci-fixは着手コメントの数、
+review-fixは渡しの回数）とDB側（`PullRequestAutoRepairLoop.round`）に分かれている。
+
+- **dispatchの入力にモデルを足さない。** `on.workflow_dispatch.inputs`はcallerが持つコピーで参照タグでは
+  配られず、入力を知らない古いcallerへは422が返る（前述「issue-deckからの巡回検知」の`issue_number`と同じ事例）。
+  `resolveRepairDispatch`（`src/lib/github/pull-request-repair.ts`）は触らない
+- `AppSetting`に再試行用のモデル列（既定は「1回目と同じ」）を足すmigrationと、設定画面の選択肢
+- `GET /api/settings/claude-model`が、試行回数（とリポジトリ・PR番号）を受け取ったら再試行用のモデルを返す。
+  ループ経由の起動はDBの`round`で判定する
+- 4つのreusableのモデル取得ステップで試行回数を渡す。参照タグを切って配るまで他リポジトリには効かない
+- 全体設定`workflowClaudeModel`は1回目のモデルとして残し、再試行用が「同じ」のときは従来と同じ挙動にする
+
 ## 画面のボタンからの起動（#1293）
 
 自動検知は「詰まったことに気づいて走る」経路だが、検知の取りこぼし・断念後の再試行・そもそも
