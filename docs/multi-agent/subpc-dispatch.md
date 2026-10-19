@@ -1572,6 +1572,16 @@ kill <PID>                             # 引けたPIDだけを止める
 - **`22.merge-confirm-required`の特別扱いは引き続き持たない。** マージ済みの経路では人がマージする
   まで残り、こちらの経路では猶予を過ぎたら畳まれる。どちらもラベルを見ていない
 
+#### `11.local`を外し忘れて最終PRを作り終えたセッションも畳む（#4880）
+
+上の経路は`11.local`が外れていることを前提にしているため、外し忘れたセッションはPRが
+マージされるまで残る。`guchi-apps/yoteiflow#1284`ではその間、iOS事前検証の自動修復が
+「同じPRのセッションが稼働中」を待って`issue-deck/ios-precheck`を保留し、マージが止まった。
+そこで`issue-<番号>`のPRがopen（途中PRの印が無い）・Issueに`00.check-user`が無い（`01.check-merge`は
+除く）ときは、`SESSION_LOCAL_PR_IDLE_MINUTES`（既定15・0でこの経路だけ無効）を過ぎたら畳み、
+`11.local`も外す（理由コード`LOCAL_PR_OPEN`）。条件の詳細は
+[local-quick-start.md](local-quick-start.md)の回収条件を参照。
+
 #### PRを作らずに終わったセッションも畳む（#1600）
 
 #1541を入れてもなお、条件6の3経路（CLOSED・マージ済み・PRがopen）は**すべてPRかIssueのcloseを
