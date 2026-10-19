@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import {
   Bell,
   GitMerge,
@@ -8,6 +9,7 @@ import {
   TriangleAlert,
   UserCheck,
   Wrench,
+  X,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
@@ -28,6 +30,9 @@ const GROUP_ICON: Record<NotificationGroup, LucideIcon> = {
   "manual-step": Wrench,
 };
 
+/** ×を押した直後に「元に戻す」を出しておく時間（#4857） */
+const UNDO_VISIBLE_MS = 6_000;
+
 /**
  * 通知ベルの中身（#1614・#1772）。
  *
@@ -41,10 +46,18 @@ const GROUP_ICON: Record<NotificationGroup, LucideIcon> = {
  *
  * **押されたことを伝えるだけで、閉じる操作はしない**（`DispatchQueueContent`と同じ）。
  * ポップオーバーを閉じてから遷移するのかシートを閉じてから遷移するのかは、置いた側が決める。
+ *
+ * **各行の×で通知を伏せられる**（#4857）。伏せた行は状態が変わると自動で戻る
+ * （`lib/notification-dismissals.ts`）。押し間違いに備えて直後は「元に戻す」を出し、
+ * 一覧の下の「消した通知」からも個別に戻せる。×はマウントでは行に乗せたときだけ濃く出し、
+ * タッチ端末（ホバーできない）では常に見える濃さで出す。
  */
 export function NotificationContent({
   items,
   groups,
+  dismissedItems = [],
+  onDismiss,
+  onRestore,
   onSelect,
   onOpenCheckUserView,
   onOpenFlow,
@@ -53,6 +66,11 @@ export function NotificationContent({
 }: {
   items: NotificationItem[];
   groups: { group: NotificationGroup; items: NotificationItem[] }[];
+  /** ×で伏せている通知（#4857） */
+  dismissedItems?: NotificationItem[];
+  /** 渡すと各行に×を出す */
+  onDismiss?: (item: NotificationItem) => void;
+  onRestore?: (id: string) => void;
   onSelect: (item: NotificationItem) => void;
   /** 「確認待ちを一覧で見る」。左メニュー（スマホはIssue一覧）の同名ビューへ移る */
   onOpenCheckUserView: () => void;
@@ -60,8 +78,45 @@ export function NotificationContent({
   onOpenFlow: () => void;
   listClassName?: string;
 }) {
+  // 直前に伏せた行。「元に戻す」を出す対象で、一定時間で消える
+  const [recentlyDismissed, setRecentlyDismissed] = useState<NotificationItem | null>(null);
+  const [showDismissed, setShowDismissed] = useState(false);
+  useEffect(() => {
+    if (recentlyDismissed === null) return;
+    const timer = setTimeout(() => setRecentlyDismissed(null), UNDO_VISIBLE_MS);
+    return () => clearTimeout(timer);
+  }, [recentlyDismissed]);
+  // 状態が変わって自動で戻った行に「元に戻す」を出し続けない
+  const undoTarget =
+    recentlyDismissed && dismissedItems.some((item) => item.id === recentlyDismissed.id)
+      ? recentlyDismissed
+      : null;
+
+  function handleDismiss(item: NotificationItem) {
+    onDismiss?.(item);
+    setRecentlyDismissed(item);
+  }
+
   return (
     <>
+      {undoTarget && onRestore && (
+        <div
+          role="status"
+          className="mx-3 mt-1 mb-1 flex items-center justify-between gap-2 rounded-md bg-muted px-2.5 py-1.5 text-[11px] text-muted-foreground"
+        >
+          <span className="min-w-0 truncate">「{undoTarget.title}」を消しました</span>
+          <button
+            type="button"
+            onClick={() => {
+              onRestore(undoTarget.id);
+              setRecentlyDismissed(null);
+            }}
+            className="shrink-0 font-semibold text-primary hover:underline"
+          >
+            元に戻す
+          </button>
+        </div>
+      )}
       {items.length === 0 ? (
         <div className="flex flex-col items-center gap-2 px-3 py-8 text-xs text-muted-foreground">
           <Bell className="size-6" />
@@ -78,11 +133,11 @@ export function NotificationContent({
                 </h4>
                 <ul>
                   {groupItems.map((item) => (
-                    <li key={item.id}>
+                    <li key={item.id} className="group flex items-start hover:bg-accent">
                       <button
                         type="button"
                         onClick={() => onSelect(item)}
-                        className="flex w-full items-start gap-2 px-3 py-2 text-left hover:bg-accent"
+                        className="flex min-w-0 flex-1 items-start gap-2 px-3 py-2 text-left"
                       >
                         <span
                           className={cn(
@@ -120,12 +175,66 @@ export function NotificationContent({
                           </span>
                         </span>
                       </button>
+                      {onDismiss && (
+                        <button
+                          type="button"
+                          onClick={() => handleDismiss(item)}
+                          aria-label={`「${item.title}」の通知を消す`}
+                          title="この通知を消す（状態が変わると再び出ます）"
+                          className="mt-1 mr-1.5 flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground opacity-40 group-hover:opacity-100 hover:bg-background hover:text-foreground focus-visible:opacity-100 pointer-coarse:size-10 pointer-coarse:opacity-100"
+                        >
+                          <X className="size-3.5 pointer-coarse:size-4" />
+                        </button>
+                      )}
                     </li>
                   ))}
                 </ul>
               </section>
             );
           })}
+        </div>
+      )}
+
+      {dismissedItems.length > 0 && (
+        <div className="border-t border-dashed">
+          <div className="flex items-center justify-between px-3 py-2 text-[11px] text-muted-foreground">
+            <span>消した通知 {dismissedItems.length}件</span>
+            <button
+              type="button"
+              onClick={() => setShowDismissed((value) => !value)}
+              aria-expanded={showDismissed}
+              className="font-semibold text-primary hover:underline"
+            >
+              {showDismissed ? "隠す" : "表示"}
+            </button>
+          </div>
+          {showDismissed && (
+            <ul className="pb-1">
+              {dismissedItems.map((item) => (
+                <li key={item.id} className="flex items-start gap-2 px-3 py-1.5 opacity-75">
+                  <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                    <span className="line-clamp-2 text-xs">{item.title}</span>
+                    <span className="flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
+                      <span className="rounded-full bg-muted px-1.5 font-medium">
+                        {item.badgeLabel}
+                      </span>
+                      <span className="truncate">{item.repositoryFullName}</span>
+                    </span>
+                  </span>
+                  {onRestore && (
+                    <button
+                      type="button"
+                      onClick={() => onRestore(item.id)}
+                      aria-label={`「${item.title}」の通知を戻す`}
+                      className="shrink-0 pt-0.5 text-[11px] font-semibold text-primary hover:underline pointer-coarse:py-2"
+                    >
+                      戻す
+                    </button>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
       )}
 
