@@ -65,6 +65,7 @@ import {
 import { SidebarNav } from "@/components/dashboard/sidebar-nav";
 import { TopBar, type TopBarAiSearch } from "@/components/dashboard/topbar";
 import { useBranchFlow } from "@/hooks/use-branch-flow";
+import { useBranchFlowHistory } from "@/hooks/use-branch-flow-history";
 import { useSessionUsage } from "@/hooks/use-session-usage";
 import { useNightlyRun } from "@/hooks/use-nightly-run";
 import { useCheckUserToastEnabled } from "@/hooks/use-check-user-toast-enabled";
@@ -114,6 +115,7 @@ import {
   latestReleaseMergedAtByRepository,
   orderRepositoriesBySelection,
 } from "@/lib/branch-flow";
+import { mergeHistoryPullRequests } from "@/lib/branch-flow-history";
 import { selectCheckUserRunningIssueIds } from "@/lib/check-user-attention";
 import { selectPlanReviewCreatingIssueIds } from "@/lib/dispatch/plan-review-list-state";
 import { selectReservedIssueIdsToHide, selectScheduledRunQueuedMarks } from "@/lib/nightly-run";
@@ -1525,6 +1527,8 @@ export function IssueDeckShell({
   // ブランチ状況（#1455）。取得はこの画面を開いている間だけ。自動更新はユーザーが間隔を
   // 選んだときだけ回る（#1767。既定は自動更新しない）。
   const branchFlowStatus = useBranchFlow(isFlowPaneActive, flowAutoRefreshIntervalMs);
+  // 「過去のリリース」で遡ったときだけ取り足す古いPR（#4844）。母集団へ足すのはブランチ画面だけ
+  const branchFlowHistory = useBranchFlowHistory();
 
   // AI使用量の期間（#2504）。選んだ期間は端末のlocalStorageに残す（画面を開き直すたびに
   // 30日へ戻ると、毎回選び直すことになる）。
@@ -1664,8 +1668,9 @@ export function IssueDeckShell({
           visibleRepositories.filter((repo) => !repo.archived),
           filters.repos,
         ),
-        // マージ直後のPRをマージ済みとして反映した集合（リポジトリ絞り込みは掛けない）
-        pullRequests: crossRepositoryPullRequests,
+        // マージ直後のPRをマージ済みとして反映した集合（リポジトリ絞り込みは掛けない）。
+        // 「過去のリリース」で取り足した古いPRは重複を除いて後ろへ足す（#4844）
+        pullRequests: mergeHistoryPullRequests(crossRepositoryPullRequests, branchFlowHistory.pullRequests),
         // 本文とラベルは手作業Issue（71.manual-step）の紐づけに使う（#1510）。
         // どちらもDBキャッシュ由来で、渡すのに追加の取得は要らない
         issues: issues.map((issue) => ({
@@ -1681,6 +1686,7 @@ export function IssueDeckShell({
       visibleRepositories,
       filters.repos,
       crossRepositoryPullRequests,
+      branchFlowHistory.pullRequests,
       issues,
       branchFlowStatus.branchStatuses,
       deployStatus.deployStatuses,
@@ -2186,6 +2192,7 @@ export function IssueDeckShell({
                   }}
                   onMerged={handleBranchFlowMerged}
                   onDraftIosFixIssue={openIosFixIssueDialog}
+                  releaseHistory={branchFlowHistory}
                 />
               )}
 
@@ -2602,6 +2609,8 @@ export function IssueDeckShell({
               }}
               onMerged={handleBranchFlowMerged}
               onDraftIosFixIssue={openIosFixIssueDialog}
+              /* 「過去のリリース」の続きをGitHubから取り足す（#4844） */
+              releaseHistory={branchFlowHistory}
               /* 左右2ペイン（#2157）。幅が足りるかどうかは`BranchFlowView`が実測して決める */
               splitLayout
               className="hidden flex-1 md:flex"

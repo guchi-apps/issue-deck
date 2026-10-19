@@ -16,6 +16,7 @@ import { isReleaseCandidateHeadRef, isLegacyReleaseCandidateHeadRef, rcSequenceO
 import { decidePublishForPullRequest, ReleasePublishAction } from "@/components/dashboard/release-publish-action";
 import { describePublishSteps, type PublishStep, type PublishStepsView } from "@/lib/release-publish-steps";
 import { useReleaseRc } from "@/hooks/use-release-rc";
+import type { BranchFlowHistoryStatus } from "@/hooks/use-branch-flow-history";
 import {
   ArrowUpToLine,
   Check,
@@ -247,6 +248,17 @@ type BranchFlowViewProps = {
   style?: CSSProperties;
   /** スマホのボトムナビと最後の項目が重ならないよう末尾に余白を入れる */
   footerSpacing?: boolean;
+  /**
+   * 「過去のリリース」で表示済みの版を出し切ったあと、さらに古い版をGitHubから取り足す（#4844）。
+   * 渡さない場合は取り足しの導線を出さない（取得済みの範囲だけを出す従来の形）。
+   */
+  releaseHistory?: BranchFlowReleaseHistory;
+};
+
+/** 「過去のリリース」の追加取得（#4844）。状態と取得の起動は`hooks/use-branch-flow-history.ts`が持つ */
+export type BranchFlowReleaseHistory = {
+  statusFor: (repositoryFullName: string) => BranchFlowHistoryStatus;
+  loadMore: (repositoryFullName: string) => void;
 };
 
 /**
@@ -1153,6 +1165,9 @@ function ReleaseStagePills({ stages, fallback }: { stages: ReleaseStageBadge[]; 
  */
 const BranchFlowRefreshContext = createContext<(() => void) | null>(null);
 
+/** 「過去のリリース」の追加取得（#4844）。束の描画の途中に何段もあるため、propsではなくContextで届ける */
+const BranchFlowHistoryContext = createContext<BranchFlowReleaseHistory | null>(null);
+
 /**
  * リリース候補の検証の問題（赤）と進行（紫）のピル（#4390）。畳んだ1行と束の見出しで同じものを使う。
  *
@@ -1813,11 +1828,32 @@ function NextReleaseCard({
 }
 
 /**
+ * 「過去のリリース」の末尾。表示済みの版を出し切ったあと、さらに古い版をGitHubから取り足す（#4844）。
+ * 取り切ったら押す場所を消し、ここが最古であることだけを出す（件数の総数は出さない）。
+ */
+function OlderReleasesLoader({ status, onLoad }: { status: BranchFlowHistoryStatus; onLoad: () => void }) {
+  return (
+    <li className="pt-2 pb-2 pl-[3.35rem] max-sm:pl-[2.6rem]" data-testid="older-releases-loader">
+      {status.error && <p className="mb-1.5 text-xs text-destructive">{status.error}</p>}
+      {status.hasMore ? (
+        <Button type="button" variant="outline" size="sm" disabled={status.loading} onClick={onLoad}>
+          {status.loading && <Loader2 className="size-3.5 animate-spin" aria-hidden />}
+          {status.loading ? "読み込み中..." : "さらに表示"}
+        </Button>
+      ) : (
+        <p className="text-xs text-muted-foreground">ここまでが全履歴です</p>
+      )}
+    </li>
+  );
+}
+
+/**
  * `main`と`develop`の2本のレールに、リリースの横線と作業ブランチの枝を並べた図（#1510）。
  *
  * **gitのコミットグラフではない。** 実際の分岐点やマージ順序は描かず、
  * 「どのバージョンにどのブランチ・PR・Issueが含まれるか」だけを縦に並べた模式図で、
- * 束の作り方は`lib/branch-flow.ts`が持つ（追加のGitHub API取得は無い）。
+ * 束の作り方は`lib/branch-flow.ts`が持つ（追加のGitHub API取得は無い。例外は「過去のリリース」で
+ * 遡ったときの取り足しだけで、押したときにしか走らない。#4844）。
  *
  * 作業ブランチごとに列を増やすとスマホ幅で必ず溢れるため、**レールは2本に固定**し、
  * レールが占める幅もPC 3.35rem・スマホ 2.6remの固定にしている。横スクロールは出ない。
@@ -1879,10 +1915,20 @@ function ReleaseFlowGraph({
     (group) => group.mergedAt !== null && group.pullRequest?.merged,
   )?.key;
   const unassignedLanes = repository.unassignedLanes;
+  // 取得範囲より古い版をGitHubから取り足す（#4844）。本番へ出た束が1つでもあるリポジトリだけ
+  const releaseHistory = useContext(BranchFlowHistoryContext);
+  const historyStatus =
+    releaseHistory && repository.releaseGroups.some((group) => group.mergedAt !== null)
+      ? releaseHistory.statusFor(repository.repositoryFullName)
+      : null;
   // 版を特定できないレーンもアコーディオンの中にいる（#1711）。**畳んだ束が無いときでも
   // アコーディオンを出す**理由で、ここを見ずに`hiddenGroups`だけで判断すると、開く手段が
-  // 画面のどこにも無くなる。件数は開閉に依存させない。
-  const hasReleasedAccordion = hiddenGroups.length > 0 || unassignedLanes.length > 0;
+  // 画面のどこにも無くなる。件数は開閉に依存させない。取り足せるリポジトリでは、畳んだ束が
+  // 無くても遡る入口として出す（#4844）
+  const hasReleasedAccordion =
+    hiddenGroups.length > 0 || unassignedLanes.length > 0 || historyStatus !== null;
+  // 見出しは、版の束を並べる場所なら「過去のリリース」、特定できない変更だけなら従来の文言
+  const showsReleaseHeading = hiddenGroups.length > 0 || unassignedLanes.length === 0;
   const shownHiddenGroups = hiddenGroups.slice(0, releasedShownCount);
   const hiddenGroupsLeft = hiddenGroups.length - shownHiddenGroups.length;
 
@@ -2113,14 +2159,14 @@ function ReleaseFlowGraph({
               <li className="relative mb-3 rounded-md border bg-card" data-testid="released-versions">
                 <details open={releasedOpen} onToggle={(event) => setReleasedOpen(event.currentTarget.open)}>
                   <summary className="cursor-pointer px-3 py-2 text-sm font-semibold">
-                    {hiddenGroups.length > 0 ? (
+                    {showsReleaseHeading ? (
                       <History className="mr-1.5 inline size-4 align-[-2px] text-muted-foreground" aria-hidden />
                     ) : (
                       <CircleCheckBig className="mr-1.5 inline size-4 align-[-2px] text-green-600 dark:text-green-400" aria-hidden />
                     )}
-                    {hiddenGroups.length > 0 ? "過去のリリース" : "本番反映済みの変更"}
+                    {showsReleaseHeading ? "過去のリリース" : "本番反映済みの変更"}
                     {/* 取得範囲の件数でしかないので、過去のリリースには件数を出さない（#4843） */}
-                    {hiddenGroups.length === 0 && (
+                    {!showsReleaseHeading && (
                       <span className="ml-2 text-xs font-normal text-muted-foreground">{unassignedLanes.length}件</span>
                     )}
                   </summary>
@@ -2154,6 +2200,16 @@ function ReleaseFlowGraph({
                           />
                         ))}
                       </>
+                    )}
+                    {hiddenGroupsLeft === 0 && historyStatus && releaseHistory && (
+                      <OlderReleasesLoader
+                        status={historyStatus}
+                        onLoad={() => {
+                          // 取れた古い版の最初の1つまでを出す。2つ目以降は従来の「さらに表示」で続ける
+                          setReleasedShownCount(hiddenGroups.length + 1);
+                          releaseHistory.loadMore(repository.repositoryFullName);
+                        }}
+                      />
                     )}
                   </ul>
                 </details>
@@ -2899,6 +2955,7 @@ export function BranchFlowView({
   className,
   style,
   footerSpacing = false,
+  releaseHistory,
 }: BranchFlowViewProps) {
   // 2ペイン表示（#2157）。分けるかどうかは実測した幅で決める（`SPLIT_MIN_WIDTH`）
   const layoutRef = useRef<HTMLDivElement>(null);
@@ -3044,6 +3101,7 @@ export function BranchFlowView({
   return (
     <IosFixIssueDraftContext.Provider value={onDraftIosFixIssue}>
     <BranchFlowRefreshContext.Provider value={onRefresh}>
+    <BranchFlowHistoryContext.Provider value={releaseHistory ?? null}>
     <div ref={layoutRef} className={cn("flex flex-col overflow-hidden", className)} style={style}>
       {/*
         スマホ（`md`未満）ではヘッダーを2段にする（#1638）。1段のままだと、見出しと
@@ -3273,6 +3331,7 @@ export function BranchFlowView({
         )}
       </div>
     </div>
+    </BranchFlowHistoryContext.Provider>
     </BranchFlowRefreshContext.Provider>
     </IosFixIssueDraftContext.Provider>
   );

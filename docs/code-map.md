@@ -2667,6 +2667,15 @@ export function POST(request: NextRequest) {
   （未リリースの束＋まだdevelopへ向かっているレーン）で、本番へ出た版の束と「どの版で出たか
   特定できないレーン」は「過去のリリース」アコーディオン（初期は閉じる。#4721）で開く（#1586。#1510当初は
   ひとつ前の版まで出していたが、済んだ変更が「次に何が出るか」を押し下げていた）。
+  **取得範囲（更新順30件）より古い版は、押したときだけ取り足す**（#4844）。アコーディオンで
+  表示済みの版を出し切ったあとの「さらに表示」が`GET /api/branch-flow/history`を呼び、
+  develop宛1ページ（作成順100件）と、main宛を**develop宛と同じ深さになるまで**（最大3ページ）取る。
+  main宛が浅いと、取った版より古いレーンが取得済みの最古の版へ誤って束ねられるため
+  （`resolveReleaseState`は後続の最初の版を運び手にする）。サーバーは状態を持たず、次のページ番号は
+  画面（[`hooks/use-branch-flow-history.ts`](../src/hooks/use-branch-flow-history.ts)）が持つ。
+  取った分は`mergeHistoryPullRequests`で母集団へ重複なしに足すだけで、束は作り直しで増える
+  （[`lib/branch-flow-history.ts`](../src/lib/branch-flow-history.ts)）。どちらの向きも上限件数を
+  割ったら「ここまでが全履歴です」を出す。開き直したら取り直し（ETagで同じページは消費しない）。
   **畳んだぶんに残る未完了の手作業（`71.manual-step`）だけは束の外へ出して常に見せる**——
   版が出た後も残る作業で、畳んだ束と一緒に隠すと画面のどこにも現れなくなるため。
   同じ理由で、畳んだリポジトリ行にも件数（`BranchFlowRepositorySummary.openManualStepCount`）を
