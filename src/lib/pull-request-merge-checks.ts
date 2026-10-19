@@ -1,3 +1,4 @@
+import type { IosPrecheckPhase, IosPrecheckSummary } from "@/lib/github/ios-precheck";
 import { resolveReviewVerdictFreshness } from "@/lib/github/review-verdict-freshness";
 import type { CiState } from "@/lib/github/release-api";
 import {
@@ -19,9 +20,15 @@ import type { PullRequestSummary, ReleaseChangePullRequest } from "@/types/pull-
  * 並びは固定: CI → コードレビュー → コンフリクト → 全体レビュー → 統合検証 → iOS検証。
  * **計画レビューはPRのチェックに含めない**（Issue側の計画レビューは別機能として残る）。
  */
-export type MergeCheckKey = "ci" | "code" | "conflict" | "all" | "integration" | "mac";
+export type MergeCheckKey = "ci" | "code" | "conflict" | "all" | "integration" | "mac" | "ios";
 
 export const MERGE_CHECK_KEYS: readonly MergeCheckKey[] = ["ci", "code", "conflict", "all", "integration", "mac"];
+
+/**
+ * 個別PRのiOS事前検証の項目（#4882）。`MERGE_CHECK_KEYS`の6項目とは別で、PR詳細だけが
+ * CI・コード・競合の後ろへ足す（PR一覧は10秒間隔の自動更新でiOSを引かないため出さない。#4140）。
+ */
+export type IosPrecheckInput = IosPrecheckSummary | null | "loading";
 
 export type MergeCheckTone = "ok" | "bad" | "warn" | "run" | "muted";
 
@@ -214,6 +221,81 @@ export function cellsFromSummary(pullRequest: PullRequestSummary): {
       ? { ...ciCell(pullRequest.ciState), ...(pullRequest.ciState === "unknown" ? { state: "未実施", mark: "–", tone: "muted" as const, reason: "ドラフトのためCIは未実行です" } : {}) }
       : ciCell(pullRequest.ciState);
   return { ci, code, conflict };
+}
+
+const shortSha = (sha: string) => sha.slice(0, 7);
+
+const IOS_PHASE_LABEL: Record<IosPrecheckPhase, string> = {
+  success: "成功",
+  failure: "失敗",
+  running: "検証中",
+  waiting: "検証待ち",
+};
+
+/**
+ * iOS事前検証（`issue-deck/ios-precheck`）の要約から、個別PRの「iOS」項目を作る（#4882）。
+ * statusはSHAに付くため、**headに結果が無ければ前回の成功を引き継がず「未実施」**にする。
+ * どのコミットにも記録が無い（null）は、対象外か未依頼かを区別できないので「記録なし」と出す。
+ */
+export function iosPrecheckCheck(input: IosPrecheckInput, options: { closed?: boolean } = {}): MergeCheckItem {
+  const base = {
+    key: "ios" as const,
+    shortLabel: "iOS",
+    fullName: "iOS検証（このPRのiOS事前検証）",
+    // 結果はPRの指摘・CIの内訳には出ないため、導線を出さない（判定対象のSHAと理由は詳細に出る）
+    evidence: null,
+    common: false,
+    candidateNumber: null,
+  };
+  const target = (sha: string) => `このPRのheadコミット${shortSha(sha)}のiOS事前検証（Macでのビルド・テスト）`;
+  if (options.closed) {
+    return { ...base, mark: "⊘", state: "対象外", tone: "muted", target: "このPRのiOS事前検証", reason: "クローズ済み・マージ済みのPRです" };
+  }
+  if (input === "loading") {
+    return { ...base, mark: "◷", state: "取得中", tone: "muted", target: "このPRのiOS事前検証", reason: "PR詳細を取得しています" };
+  }
+  if (input === null) {
+    return {
+      ...base,
+      mark: "–",
+      state: "記録なし",
+      tone: "muted",
+      target: "このPRのiOS事前検証",
+      reason: "このPRのコミットにiOS検証の記録がありません（iOS検証の対象外か、まだ依頼していません）",
+    };
+  }
+  const head = input.head;
+  if (!head) {
+    const previous = input.previous;
+    return {
+      ...base,
+      mark: "–",
+      state: "未実施",
+      tone: "muted",
+      target: target(input.headSha),
+      reason: previous
+        ? `最新のコミットではまだ検証していません。前回の結果は${shortSha(previous.sha)}で${IOS_PHASE_LABEL[previous.phase]}です`
+        : "最新のコミットではまだ検証していません",
+    };
+  }
+  const reason = head.description;
+  switch (head.phase) {
+    case "success":
+      return { ...base, mark: "●", state: "成功", tone: "ok", target: target(head.sha), reason };
+    case "failure":
+      return { ...base, mark: "■", state: "失敗", tone: "bad", target: target(head.sha), reason: reason ?? "iOSのビルド・テストが失敗しました" };
+    case "running":
+      return { ...base, mark: "◷", state: "検証中", tone: "run", target: target(head.sha), reason };
+    default:
+      return {
+        ...base,
+        mark: "▲",
+        state: "検証待ち",
+        tone: "warn",
+        target: target(head.sha),
+        reason: reason ?? "Macで検証できる状態を待っています。成功とは扱いません",
+      };
+  }
 }
 
 /** 6項目を、固定の並びで返す */

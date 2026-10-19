@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
 import { PullRequestMergeChecks } from "@/components/dashboard/pull-request-merge-checks";
-import { buildMergeChecks, ciCell } from "@/lib/pull-request-merge-checks";
+import { buildMergeChecks, ciCell, iosPrecheckCheck } from "@/lib/pull-request-merge-checks";
 import { buildReleaseCheckCells } from "@/lib/release-candidate-checks";
 
 const cell = { mark: "●", state: "なし", tone: "ok" as const, reason: null, target: "x", evidence: null };
@@ -64,5 +64,37 @@ describe("PullRequestMergeChecks", () => {
     fireEvent.click(screen.getByRole("button", { name: /^iOS検証/ }));
     expect(screen.getByRole("combobox").querySelectorAll("option")).toHaveLength(2);
     expect(screen.getByRole("button", { name: /候補PR #20の詳細へ/ })).toBeTruthy();
+  });
+
+  it("個別PRにiOSを足した4項目は、スマホ幅でも1行に並べ、項目内で改行しない（#4882）", () => {
+    const release = buildReleaseCheckCells({ source: { status: "loading" }, pullRequestNumber: 0, nowMs: 0 });
+    const own = buildMergeChecks({ ci: ciCell("success"), code: cell, conflict: cell, release }).filter((c) => !c.common);
+    const html = renderToStaticMarkup(
+      <PullRequestMergeChecks
+        ownOnly
+        checks={[...own, iosPrecheckCheck(null)]}
+        candidate={null}
+        onOpenPullRequest={null}
+        onOpenCandidate={null}
+      />,
+    );
+    const order = ["CI", "コード", "競合", "iOS"].map((label) => html.indexOf(`>${label}<`));
+    expect(order.every((i) => i >= 0)).toBe(true);
+    expect([...order].sort((a, b) => a - b)).toEqual(order);
+    expect(html.match(/<button/g)).toHaveLength(4);
+    expect(html).toContain('class="grid grid-cols-4"');
+    expect(html).toContain("whitespace-nowrap");
+    expect(html).toContain("text-xs leading-4 sm:text-sm sm:leading-5");
+    expect(html).toContain("記録なし");
+  });
+
+  it("iOSを渡さない個別PR（PR一覧）は従来どおり3項目・通常の文字サイズ", () => {
+    const release = buildReleaseCheckCells({ source: { status: "loading" }, pullRequestNumber: 0, nowMs: 0 });
+    const own = buildMergeChecks({ ci: ciCell("success"), code: cell, conflict: cell, release }).filter((c) => !c.common);
+    const html = renderToStaticMarkup(
+      <PullRequestMergeChecks ownOnly checks={own} candidate={null} onOpenPullRequest={null} onOpenCandidate={null} />,
+    );
+    expect(html).toContain('class="grid grid-cols-3"');
+    expect(html).not.toContain("whitespace-nowrap");
   });
 });
