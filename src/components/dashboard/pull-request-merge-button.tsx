@@ -50,7 +50,7 @@ type PullRequestMergeButtonProps = {
  * mainへのマージ（本番デプロイが走る）だけを、developへのマージと見分けるためのオレンジ（#4328）。
  * 詳細ペインの塗りつぶしと、一覧・流れ図の枠線のどちらでも同じ色味に揃える。
  */
-const PRODUCTION_MERGE_FILLED =
+export const PRODUCTION_MERGE_FILLED =
   "border-orange-600 bg-orange-600 text-white hover:bg-orange-700 hover:text-white dark:border-orange-500 dark:bg-orange-500 dark:text-orange-950 dark:hover:bg-orange-400";
 const PRODUCTION_MERGE_OUTLINE =
   "border-orange-600 text-orange-700 hover:bg-orange-500/10 hover:text-orange-700 dark:border-orange-500 dark:text-orange-400 dark:hover:text-orange-300";
