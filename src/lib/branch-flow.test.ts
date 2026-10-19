@@ -1067,6 +1067,62 @@ describe("mainへ直接マージされた作業の束（#2911）", () => {
   });
 });
 
+describe("mainへ直接マージされた束と版ごとの束は日付順に並ぶ（#4863）", () => {
+  // guchi-apps/car-careの実例（2026-10-19）を写したもの。#266は本番デプロイの復旧のため
+  // mainへ直接マージされ、その翌日に#270のリリースで現在の本番版が出た。
+  const releasePulls = [
+    releasePullRequest({
+      number: 270,
+      title: "v4.0.25をmainへリリースする",
+      createdAt: "2026-10-19T02:00:00Z",
+      state: "closed",
+      merged: true,
+      mergedAt: "2026-10-19T03:00:00Z",
+    }),
+    pullRequest({
+      number: 268,
+      headRef: "issue-267",
+      linkedIssueNumber: 267,
+      state: "closed",
+      merged: true,
+      mergedAt: "2026-10-18T20:00:00Z",
+    }),
+  ];
+  const directPull = (number: number, mergedAt: string) =>
+    pullRequest({
+      number,
+      baseRef: "main",
+      headRef: `issue-${number - 1}`,
+      linkedIssueNumber: number - 1,
+      state: "closed",
+      merged: true,
+      mergedAt,
+    });
+  const keysOf = (pullRequests: PullRequestSummary[]) =>
+    build({ pullRequests }).repositories[0].releaseGroups.map((group) => group.key);
+
+  it("直接マージが最新の版より古ければ、版の束を先頭（既定で出す位置）に置く", () => {
+    expect(keysOf([...releasePulls, directPull(266, "2026-10-18T10:00:00Z")])).toEqual([
+      "release-270",
+      "merged-to-main",
+    ]);
+  });
+
+  it("直接マージが最新の版より新しければ、直接マージの束を先頭に置く", () => {
+    expect(keysOf([...releasePulls, directPull(272, "2026-10-19T05:00:00Z")])).toEqual([
+      "merged-to-main",
+      "release-270",
+    ]);
+  });
+
+  it("同時刻なら版の束を先に出す", () => {
+    expect(keysOf([...releasePulls, directPull(266, "2026-10-19T03:00:00Z")])).toEqual([
+      "release-270",
+      "merged-to-main",
+    ]);
+  });
+});
+
 describe("isClosedLane", () => {
   it("既定で隠すのは未マージのクローズだけ。マージ済みは束に入るので隠さない", () => {
     const flow = build({
