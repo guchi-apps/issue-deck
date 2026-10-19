@@ -619,6 +619,41 @@ describe("計画レビュー中の詳細状態（#3941）", () => {
     expect(rowOf(1).textContent).toContain("計画レビュー中");
     expect(rowOf(1).textContent).toContain("計画レビュー作成中");
   });
+
+  // #4869: 起動待ちの間も「計画を確認」が出ていた。詳細画面と同じく、猶予内だけ伏せる
+  const queuedReview = (createdAt: string) => ({
+    kind: "PLAN_REVIEW",
+    repositoryFullName: "guchi-apps/issue-deck",
+    issueNumber: 1,
+    status: "QUEUED",
+    createdAt,
+    finishedAt: null,
+  });
+
+  it("起動待ち（猶予内）の行には「計画を確認」を出さない", () => {
+    renderList({
+      dispatch: makeDispatch(
+        [makeSession({ activity: "WAITING_INPUT" })],
+        [makePlanRequest()],
+        [queuedReview(new Date(Date.now() - 60_000).toISOString())],
+      ),
+    });
+
+    expect(screen.queryByRole("button", { name: "#1の計画を確認する" })).toBeNull();
+    expect(rowOf(1).textContent).toContain("計画レビュー作成中");
+  });
+
+  it("起動待ちが猶予を超えたら「計画を確認」を出す", () => {
+    renderList({
+      dispatch: makeDispatch(
+        [makeSession({ activity: "WAITING_INPUT" })],
+        [makePlanRequest()],
+        [queuedReview("2026-01-01T00:00:00.000Z")],
+      ),
+    });
+
+    expect(screen.getByRole("button", { name: "#1の計画を確認する" })).toBeTruthy();
+  });
 });
 
 // #3083: 自動マージされなかった行に「Remote」しか出ず、なぜ確認が要るのかが読めなかった

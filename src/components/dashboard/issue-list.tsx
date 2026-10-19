@@ -85,7 +85,10 @@ import {
   summarizeDispatchQueue,
 } from "@/lib/dispatch/queue-summary";
 import { findPlanRequestForIssue } from "@/lib/dispatch/session-plan-request";
-import { resolvePlanReviewListState } from "@/lib/dispatch/plan-review-list-state";
+import {
+  isPlanReviewListStateHolding,
+  resolvePlanReviewListState,
+} from "@/lib/dispatch/plan-review-list-state";
 import { PlanReviewStateBadge } from "@/components/dashboard/plan-review-state-badge";
 import { findQuestionRequestForIssue } from "@/lib/dispatch/session-question-request";
 import { resolveIssueAttention, resolveSessionAttentionFlags } from "@/lib/issue-attention-state";
@@ -1018,8 +1021,10 @@ export function IssueList({
             issueNumber: issue.number,
             now: new Date(now),
           });
-    // 作成中は押して進める操作が無いので、橙の「計画を承認」もRemoteの強調も出さない（#3625）
-    const planPending = planPendingIssueIds.has(issue.id) && planReviewState !== "creating";
+    // 作成中・起動待ち（猶予内）は押して進める操作が無いので、橙の「計画を承認」もRemoteの
+    // 強調も出さない（#3625・#4869）
+    const planReviewHolding = isPlanReviewListStateHolding(planReviewState);
+    const planPending = planPendingIssueIds.has(issue.id) && !planReviewHolding;
     // 質問への回答待ち（#2189）。計画の承認と同じ扱いで、こちらも主導線になる
     const questionPending = questionPendingIssueIds.has(issue.id);
     // 自動マージされずPRのマージを待っている行（#3083）。「Remote」しか出ないと、なぜ確認が
@@ -1067,7 +1072,7 @@ export function IssueList({
     // 種類ラベルを出すのは未着手ビューだけ（#3285）
     const showKindLabels = view === "not-started";
     const emphasizeRemoteControl =
-      planReviewState !== "creating" &&
+      !planReviewHolding &&
       shouldEmphasizeRemoteControl({
         labels: issue.labels,
         session: sessionByIssueId.get(issue.id) ?? null,
