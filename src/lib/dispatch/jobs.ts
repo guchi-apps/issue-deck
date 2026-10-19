@@ -8,6 +8,7 @@ import {
   type ClaudeModel,
   type CodexLocalModel,
 } from "@/lib/app-settings";
+import type { ModelPickRecord } from "@/lib/claude/model-pick-record";
 import { fetchClaudeUsage } from "@/lib/claude/usage";
 import { getReleaseVerificationConfig } from "@/lib/release-verification-config";
 import { db } from "@/lib/db";
@@ -705,6 +706,18 @@ async function findSessionsForStaleLaunchJobs(
   );
 }
 
+/**
+ * 「おまかせ」の判定の記録（#4853）を`DispatchJob`・`NightlyRunEntry`の3列へ展開する。
+ * 確率はJSON列なので、無いときは`null`ではなく`Prisma.DbNull`を書く。
+ */
+export function modelPickRecordColumns(record: ModelPickRecord | null | undefined) {
+  return {
+    modelPickSource: record?.source ?? null,
+    modelPickModel: record?.model ?? null,
+    modelPickProbabilities: record?.probabilities ?? Prisma.DbNull,
+  };
+}
+
 export type EnqueueDispatchJobResult =
   | { ok: true; job: DispatchJobView }
   | { ok: false; rejection: DispatchEnqueueRejection; message: string };
@@ -743,6 +756,11 @@ export async function enqueueDispatchJob(params: {
    * （古いpollerに当たっても`-m`が付かず設定の既定で立つだけで、別のCLIが立つことは無い）。
    */
   codexModel?: CodexLocalModel | null;
+  /**
+   * 「おまかせ」の判定の記録（#4853）。**省略・`null`は記録しない**（全列null）。
+   * 「実装を開始」ダイアログからの起動だけが渡し、検証は受け口が`parseModelPickRecord`で済ませておく。
+   */
+  modelPick?: ModelPickRecord | null;
   /**
    * 引き継ぎ元のエージェント（#3496）。**指定すると「別のAIで続ける」の起動になる。**
    *
@@ -852,6 +870,7 @@ export async function enqueueDispatchJob(params: {
         // 後で設定を変えても積み置きのジョブだけ古い既定のまま立つ
         claudeModel: params.claudeModel ?? null,
         codexModel: params.codexModel ?? null,
+        ...modelPickRecordColumns(params.modelPick),
         handoffFrom: params.handoffFrom ?? null,
         handoffTranscript: params.handoffFrom ? params.handoffTranscript === true : false,
         queuePriority,

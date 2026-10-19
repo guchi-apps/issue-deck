@@ -1,4 +1,5 @@
 import { parseClaudeLocalModel, parseCodexLocalModel } from "@/lib/app-settings";
+import { parseModelPickRecord } from "@/lib/claude/model-pick-record";
 import { db } from "@/lib/db";
 import { readDispatchAgent } from "@/lib/dispatch/dispatch-job";
 import { enqueueDispatchJob } from "@/lib/dispatch/jobs";
@@ -68,6 +69,10 @@ export type ScheduledRunEntryRow = {
   claudeModel: string | null;
   /** #3192。省略可なのは、この列を知らない呼び出し元・テストの値を壊さないため */
   codexModel?: string | null;
+  /** 「おまかせ」の判定の記録（#4853）。省略可なのは`codexModel`と同じ理由 */
+  modelPickSource?: string | null;
+  modelPickModel?: string | null;
+  modelPickProbabilities?: unknown;
   requestedByUserId: string | null;
 };
 
@@ -250,6 +255,15 @@ export async function launchScheduledRunEntry(params: {
     agent: readDispatchAgent(entry.agent),
     claudeModel: parseClaudeLocalModel(entry.claudeModel),
     codexModel: parseCodexLocalModel(entry.codexModel),
+    // 積んだ時点で検証済みだが、列を手で書き換えられても既知の語だけを写す（`claudeModel`と同じ作法）
+    modelPick: parseModelPickRecord(
+      {
+        source: entry.modelPickSource,
+        model: entry.modelPickModel,
+        probabilities: entry.modelPickProbabilities,
+      },
+      readDispatchAgent(entry.agent),
+    ),
     requestedByUserId: entry.requestedByUserId,
     now,
   });

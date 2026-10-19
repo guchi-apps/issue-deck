@@ -656,6 +656,10 @@ model NightlyRunEntry {
   claudeModel        String?
   // このIssueだけに使うCodexのモデル（`DispatchJob.codexModel`と同じ扱い。nullは設定に従う）
   codexModel         String?
+  // 「おまかせ」の判定の記録（#4853。`DispatchJob.modelPickSource`などと同じ扱い）。起動時にジョブへ写す
+  modelPickSource    String?
+  modelPickModel     String?
+  modelPickProbabilities Json?
   // 積むときに付けたオプションのラベル名の配列（表示用）
   optionLabels       Json
   // 予定の種類（#2995）。夜間実行（NIGHTLY）は#3019で削除したため、新規に作る行は常にNEXT_WINDOW
@@ -890,6 +894,17 @@ model DispatchJob {
   // 同じく画面・API・払い出しの3か所で既知の語だけを通す。払い出し（`POST /api/dispatch/claim`）が
   // この値をジョブごとの`codexModel`として載せ直すので、pollerは従来どおり`codexModel`だけを読む。
   codexModel            String?
+  // 「おまかせ」の判定の記録（#4853。`kind`が`LAUNCH`のときだけ意味がある）。**判定の当たり外れを後から測るため。**
+  //
+  // **既存行と、「実装を開始」ダイアログ以外から積んだジョブはすべてnull**（再計算しない）。
+  // `modelPickSource`は`jev` / `ai` / `rule` / `manual`（判定を使わず人がモデルを選んだ起動）。
+  // `modelPickModel`は判定が出したモデルで、**人が別のチップへ切り替えて起動すると`claudeModel`
+  // （Codexなら`codexModel`）と食い違う形で残る**——その食い違いが「判定を上書きした」記録になる。
+  // `modelPickProbabilities`は候補ごとの確率（0〜1）で、Jevのときだけ入る。
+  // 検証は`src/lib/claude/model-pick-record.ts`（既知の語だけを通す）。
+  modelPickSource       String?
+  modelPickModel        String?
+  modelPickProbabilities Json?
   // 別のAIへ引き継いで起動するときの、引き継ぎ元のエージェント（#3496。`kind`が`LAUNCH`のときだけ意味がある）。
   //
   // **nullは通常の起動**で、既存行はすべてnullになる。入るのは`agent`と同じ既知の語（`claude` / `codex`）

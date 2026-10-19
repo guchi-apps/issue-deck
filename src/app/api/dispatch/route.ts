@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 
 import { parseClaudeLocalModel, parseCodexLocalModel } from "@/lib/app-settings";
+import { parseModelPickRecord } from "@/lib/claude/model-pick-record";
 import { requireUserId } from "@/lib/auth-user";
 import { listDependencyWaitViews } from "@/lib/dispatch/dependency-wait-run";
 import { listParentRunBadges } from "@/lib/parent-run/run";
@@ -489,6 +490,11 @@ export async function POST(request: NextRequest) {
     }
   }
 
+  // 「おまかせ」の判定の記録（#4853）。測るための付帯情報なので、形が違っても起動は断らず記録しないだけ。
+  // モデルを指定しない起動（設定に従う）は判定とも人の選択とも言えないので記録しない
+  const modelPick =
+    claudeModel || codexModel ? parseModelPickRecord(payload?.modelPick, agent) : null;
+
   const result = await enqueueDispatchJob({
     repositoryFullName: target.repositoryFullName,
     issueNumber: target.issueNumber,
@@ -496,6 +502,7 @@ export async function POST(request: NextRequest) {
     agent,
     claudeModel,
     codexModel,
+    modelPick,
     handoffFrom,
     handoffTranscript: handoffFrom ? payload?.handoffTranscript === true : false,
     requestedByUserId: userId,

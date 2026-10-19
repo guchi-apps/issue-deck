@@ -58,6 +58,7 @@ import { useDispatchState, type DispatchStateHandle } from "@/hooks/use-dispatch
 import { useIssueRepoMeta } from "@/hooks/use-issue-repo-meta";
 import { useIssueMutations } from "@/hooks/use-issue-mutations";
 import { useModelPick } from "@/hooks/use-model-pick";
+import { buildModelPickRecord } from "@/lib/claude/model-pick-record";
 import { useNightlyRunSettings } from "@/hooks/use-nightly-run";
 import { useClaudeUsage } from "@/hooks/use-claude-usage";
 import { useCodexUsage } from "@/hooks/use-codex-usage";
@@ -631,6 +632,16 @@ export function StartImplementationDialog({
       : modelChoice;
   /** 「おまかせ」を選んだのに、まだ何で立つか決まっていない状態 */
   const isPickPending = showModels && modelChoice === AUTO_PICK && pickedModel === null;
+  /**
+   * 起動ジョブへ一緒に残す判定の記録（#4853）。判定が出ていれば、別のチップへ切り替えた後も
+   * その判定（経路・判定が出したモデル・Jevの確率）を残し、出ていなければ人が選んだ（`manual`）とする
+   */
+  const modelPickRecord = buildModelPickRecord({
+    result: modelPick.result,
+    pickedModel,
+    isAutoPick: modelChoice === AUTO_PICK,
+    effectiveModel,
+  });
   const visibleOptions = START_IMPLEMENTATION_OPTIONS;
 
   /**
@@ -845,6 +856,7 @@ export function StartImplementationDialog({
       hostName,
       agent: effectiveAgent,
       model: effectiveModel,
+      modelPick: modelPickRecord,
     });
     // 拒否された理由は`dispatch.error`に入る。ダイアログは閉じない（選び直せるように）。
     // ピン留めも解き、拒否された時点の状態で選択欄を出し直す（#1318）
@@ -949,6 +961,7 @@ export function StartImplementationDialog({
           kind,
           agent: effectiveAgent,
           ...(effectiveModel ? { model: effectiveModel } : {}),
+          ...(effectiveModel && modelPickRecord ? { modelPick: modelPickRecord } : {}),
           optionLabels: startImplementationLabelsToAdd(options),
         }),
       });
