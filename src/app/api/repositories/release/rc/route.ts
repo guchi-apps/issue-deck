@@ -14,6 +14,7 @@ import {
 } from "@/lib/release-finalize-run";
 import { ensureDevelopSync, observeDevelopSync } from "@/lib/release-develop-sync-run";
 import { decideDevelopSync } from "@/lib/release-develop-sync";
+import { recoverRcFixSeries } from "@/lib/release-fix-series-run";
 import { parseRcRequestKey } from "@/lib/release-rc";
 import {
   cancelReleaseRc,
@@ -34,6 +35,7 @@ import {
  * - POST `action=migrate`: 開いている旧方式の候補を新方式へ移す
  * - POST `action=develop_sync`: 公開内容をdevelopへ戻す同期PRを用意する（#4641。同期済み・作成済みなら何もしない）
  * - POST `action=recheck_production`: 稼働確認が止まった公開済み候補を、今から確かめ直す（#4712。証拠を代わりに書かない）
+ * - POST `action=recover`: 取り込みが止まった候補の記録を候補ブランチと照合し直し、止まった修正系列を進め直す（#4895）
  *
  * **進めてよいかはサーバーが判定する。** 画面が送るのは要求キー・見ていたhead・選んだPRだけで、
  * 状態・SHA・承認範囲は`release-rc-run.ts`がGitHubと記録から取り直して確かめる。
@@ -125,6 +127,13 @@ export async function POST(request: NextRequest) {
         if (!candidateId) return NextResponse.json({ error: "invalid_request" }, { status: 400 });
         const result = await recheckRcProduction(ctx, candidateId);
         return NextResponse.json(result, { status: result.ok ? 200 : result.error === "not_found" ? 404 : 409 });
+      }
+      case "recover": {
+        // 画面の「再取り込み・再確認」（#4895）。記録を書き換えてよいかは`recoverRcFixSeries`がGitHubと記録から判定する
+        const pullRequestNumber = readPositiveInt(payload?.pullRequestNumber);
+        if (pullRequestNumber === null) return NextResponse.json({ error: "invalid_request" }, { status: 400 });
+        const recovery = await recoverRcFixSeries({ repositoryFullName: repository.fullName, prNumber: pullRequestNumber, ctx: { owner, repo, token } });
+        return NextResponse.json({ ok: true, ...recovery });
       }
       case "import": {
         const requestKey = parseRcRequestKey(payload?.requestKey);

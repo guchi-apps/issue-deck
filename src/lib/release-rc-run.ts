@@ -30,6 +30,7 @@ import {
   canCancelRc,
   decideLegacyMigration,
   decideRcImport,
+  decideRcLaggedAdoption,
   decideRcReport,
   deriveRcStatus,
   isRcRevisionPendingExpired,
@@ -38,6 +39,7 @@ import {
   parseRcCallerSupport,
   parseRcPhase,
   RC_CALLER_REASON_LABEL,
+  RC_NOT_UPDATED_REASON,
   RC_REVISION_REASON_LABEL,
   rcLabel,
   serializeRcWorkflowRequest,
@@ -210,33 +212,61 @@ async function reconcileRevision(input: {
   const { ctx, candidate } = input;
   const row = candidate.revisions.find((r) => r.id === input.revisionId);
   if (!row) return "ignored";
-  const pr = await observeCandidatePullRequest(ctx, candidate.sequence);
-  if (pr === null || pr.state !== "open") return "waiting";
+  const observed = await observeCandidateHead(ctx, candidate.sequence);
+  if (observed === null) return "waiting";
+  const { pr, headSha } = observed;
   const from = row.expectedHeadSha ?? candidate.frozenDevelopSha;
-  const fastForward = pr.head.sha === from ? true : await isAncestorCommit(ctx.owner, ctx.repo, from, pr.head.sha, ctx.token);
+  const fastForward = headSha === from ? true : await isAncestorCommit(ctx.owner, ctx.repo, from, headSha, ctx.token);
   const decision = decideRcReport({
     row: { status: row.status as RcRevisionStatus, revision: row.revision, expectedHeadSha: row.expectedHeadSha, reason: row.reason as RcRevisionReason },
     frozenDevelopSha: candidate.frozenDevelopSha,
-    observation: { pullRequest: { number: pr.number, baseSha: pr.base.sha, headSha: pr.head.sha, headRef: pr.head.ref }, fastForward },
+    observation: { pullRequest: { number: pr.number, baseSha: pr.base.sha, headSha, headRef: pr.head.ref }, fastForward },
   });
   if (decision.action === "ignore") return "ignored";
   if (decision.action === "fail") {
-    // 未更新（まだpushされていない）だけは待つ。それ以外の食い違いは失敗として残す
-    if (row.expectedHeadSha !== null && pr.head.sha === row.expectedHeadSha && !input.runUrl) return "waiting";
+    // 未更新（まだpushが見えていない）だけは、報告が届いた後でも待つ。workflowの報告とGitHubの観測には
+    // 時差があり、ここで失敗にすると候補ブランチだけが進んで記録が取り残される（#4895）。届かなければ期限で失効する
+    if (decision.reason === RC_NOT_UPDATED_REASON) return "waiting";
     await failRevision(candidate, row.id, decision.reason, input.runUrl ?? null);
     return "failed";
   }
+  return (await applyRevision(ctx, candidate, row, decision, { from: "requested", runUrl: input.runUrl ?? null })) ? "applied" : "ignored";
+}
+
+/**
+ * 候補PRと、候補ブランチの実際の先端。PRのheadはpushから数十秒遅れて反映されることがあるため、
+ * 先端はブランチのrefから読む（読めなければPRのheadを使う）。PRが開いていなければnull
+ */
+async function observeCandidateHead(ctx: Context, sequence: number) {
+  const pr = await observeCandidatePullRequest(ctx, sequence);
+  if (pr === null || pr.state !== "open") return null;
+  const branchHead = await fetchBranchHeadSha(ctx.owner, ctx.repo, rcBranchName(sequence), ctx.token).catch(() => null);
+  return { pr, headSha: branchHead ?? pr.head.sha };
+}
+
+/**
+ * 版を適用済みにして、新しいSHAで検証を依頼する。`from`の状態のときだけ書き換える（同時の照合で二重に適用しない）。
+ * 書き換えられなければfalse
+ */
+async function applyRevision(
+  ctx: Context,
+  candidate: CandidateRow,
+  row: CandidateRow["revisions"][number],
+  decision: { prNumber: number; baseSha: string; headSha: string },
+  options: { from: "requested" | "failed"; runUrl: string | null },
+): Promise<boolean> {
   const applied = await db.$transaction(async (tx) => {
     const updated = await tx.releaseCandidateRevision.updateMany({
-      where: { id: row.id, status: "requested" },
+      where: { id: row.id, status: options.from, ...(options.from === "failed" ? { failureReason: RC_NOT_UPDATED_REASON } : {}) },
       data: {
         status: "applied",
         pendingKey: null,
+        failureReason: null,
         prNumber: decision.prNumber,
         baseSha: decision.baseSha,
         headSha: decision.headSha,
         appliedAt: new Date(),
-        ...(input.runUrl ? { runUrl: input.runUrl } : {}),
+        ...(options.runUrl ? { runUrl: options.runUrl } : {}),
       },
     });
     if (updated.count === 0) return false;
@@ -247,7 +277,7 @@ async function reconcileRevision(input: {
     await tx.releaseCandidate.updateMany({ where: { id: candidate.id, phase: "creating" }, data: { phase: "review" } });
     return true;
   });
-  if (!applied) return "ignored";
+  if (!applied) return false;
 
   // 新しいrevisionのSHAで全体レビュー・統合検証を依頼する（既存の仕組み。同じ対象は重複しない）。
   // 全体レビューは統合検証の完了後に、統合検証を実行したホストで開始する（#4763）
@@ -267,7 +297,38 @@ async function reconcileRevision(input: {
       console.error("[release-rc] closing legacy candidate failed", fullNameOf(ctx), error);
     });
   }
-  return "applied";
+  return true;
+}
+
+/**
+ * 照合の時差で失敗扱いにした最新の版を、候補ブランチの実際の先端で取り込み直す（#4895）。
+ * 判定は`decideRcLaggedAdoption`。取り込めたらtrue
+ */
+async function adoptLaggedRevision(ctx: Context, row: CandidateRow): Promise<boolean> {
+  if (row.phase !== "review" || row.activeKey === null || row.revisions.length === 0) return false;
+  const latest = row.revisions.reduce((a, b) => (b.revision > a.revision ? b : a));
+  if (latest.status !== "failed" || latest.failureReason !== RC_NOT_UPDATED_REASON) return false;
+  const current = row.revisions.find((r) => r.revision === row.currentRevision && r.status === "applied") ?? null;
+  const observed = await observeCandidateHead(ctx, row.sequence);
+  if (observed === null) return false;
+  const from = latest.expectedHeadSha;
+  const fastForward =
+    from !== null && observed.headSha !== from ? await isAncestorCommit(ctx.owner, ctx.repo, from, observed.headSha, ctx.token) : false;
+  const adopt = decideRcLaggedAdoption({
+    revision: latest,
+    latestRevision: latest.revision,
+    current: current ? { revision: current.revision, headSha: current.headSha } : null,
+    branchHeadSha: observed.headSha,
+    fastForward,
+  });
+  if (!adopt) return false;
+  return applyRevision(
+    ctx,
+    row,
+    latest,
+    { prNumber: observed.pr.number, baseSha: observed.pr.base.sha, headSha: observed.headSha },
+    { from: "failed", runUrl: null },
+  );
 }
 
 async function failRevision(candidate: CandidateRow, revisionId: string, reason: string, runUrl: string | null): Promise<void> {
@@ -410,6 +471,12 @@ async function reconcilePending(ctx: Context, row: CandidateRow): Promise<boolea
   if (pending) {
     const result = await reconcileRevision({ ctx, candidate: row, revisionId: pending.id }).catch(() => "waiting" as const);
     changed = changed || result === "applied" || result === "failed";
+  } else {
+    const adopted = await adoptLaggedRevision(ctx, row).catch((error: unknown) => {
+      console.error("[release-rc] lagged revision adoption failed", row.repositoryFullName, error);
+      return false;
+    });
+    changed = changed || adopted;
   }
   return changed;
 }
@@ -710,8 +777,8 @@ export async function requestRcImport(
   if (row.revisions.some((r) => r.status === "requested")) return { ok: false, error: "revision_in_progress" };
 
   const current = row.revisions.find((r) => r.revision === row!.currentRevision && r.status === "applied");
-  const pr = await observeCandidatePullRequest(ctx, row.sequence);
-  if (!current?.headSha || !pr || pr.state !== "open" || pr.head.sha !== current.headSha || pr.head.sha !== input.expectedHeadSha) {
+  const observed = await observeCandidateHead(ctx, row.sequence);
+  if (!current?.headSha || !observed || observed.headSha !== current.headSha || observed.headSha !== input.expectedHeadSha) {
     return { ok: false, error: "candidate_changed" };
   }
 
@@ -1015,7 +1082,13 @@ export async function observeRcRevisionAfter(input: {
   repositoryFullName: string;
   prNumber: number;
   since: Date;
-}): Promise<{ status: RcRevisionStatus; prNumber: number | null; baseSha: string | null; headSha: string | null } | null> {
+}): Promise<{
+  status: RcRevisionStatus;
+  prNumber: number | null;
+  baseSha: string | null;
+  headSha: string | null;
+  failureReason: string | null;
+} | null> {
   const find = () =>
     db.releaseCandidateRevision.findFirst({
       where: {
@@ -1027,13 +1100,20 @@ export async function observeRcRevisionAfter(input: {
     });
   let row = await find();
   if (!row) return null;
-  if (row.status === "requested") {
+  // 照合の時差で失敗扱いにした版は、候補ブランチの実際の先端で取り込み直せるかを確かめる（#4895）
+  if (row.status === "requested" || (row.status === "failed" && row.failureReason === RC_NOT_UPDATED_REASON)) {
     await reconcileRcCandidate(input.repositoryFullName, row.candidateId).catch((error: unknown) => {
       console.error("[release-rc] reconcile failed", input.repositoryFullName, error);
     });
     row = (await find()) ?? row;
   }
-  return { status: row.status as RcRevisionStatus, prNumber: row.prNumber, baseSha: row.baseSha, headSha: row.headSha };
+  return {
+    status: row.status as RcRevisionStatus,
+    prNumber: row.prNumber,
+    baseSha: row.baseSha,
+    headSha: row.headSha,
+    failureReason: row.failureReason,
+  };
 }
 
 /** 未完了の更新要求の失効と照合だけを行う（巡回用）。画面の読み込み（`loadRcOverview`）と同じ処理 */
@@ -1046,7 +1126,11 @@ export async function reconcileRcCandidate(repositoryFullName: string, candidate
   await reconcilePending(ctx, row);
 }
 
-/** 修正系列の自動取り込みの要求キー。同じ系列・同じ前提headの再試行（巡回の重なり・再起動）で同じキーになる */
-export function rcFixSeriesRequestKey(seriesId: string, headSha: string): string {
-  return `fs-${seriesId.replace(/[^A-Za-z0-9]/g, "").slice(0, 30)}-${headSha.slice(0, 12)}`;
+/**
+ * 修正系列の自動取り込みの要求キー。同じ系列・同じ前提head・同じ確保の再試行（巡回の重なり・再起動）で同じキーになる。
+ * 確保の時刻を含めるのは、止まった取り込みを画面からやり直したとき（#4895）に、失敗した前回の版を
+ * 「既に依頼済み」と取り違えないため
+ */
+export function rcFixSeriesRequestKey(seriesId: string, headSha: string, claimedAt: Date): string {
+  return `fs-${seriesId.replace(/[^A-Za-z0-9]/g, "").slice(0, 30)}-${headSha.slice(0, 12)}-${claimedAt.getTime().toString(36)}`;
 }

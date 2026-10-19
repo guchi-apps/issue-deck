@@ -335,8 +335,17 @@ export function decideRcImport(input: {
 // ---------------------------------------------------------------------------
 // workflowの報告の照合
 
+/**
+ * 取り込みの要求後、候補ブランチがまだ直前のheadのままだったときの理由。workflowの報告とGitHubの観測の
+ * 間に時差がある（PRのheadはpushから数十秒遅れて反映される）ので、照合ではこれを失敗にせず待つ（#4895）
+ */
+export const RC_NOT_UPDATED_REASON = "候補ブランチが更新されていません";
+
 export type RcReportObservation = {
-  /** `release-rc/<番号>`をheadとする、base=mainのPR（GitHubから取り直す）。無ければnull */
+  /**
+   * `release-rc/<番号>`をheadとする、base=mainのPR（GitHubから取り直す）。無ければnull。
+   * `headSha`は候補ブランチのref（pushで即時に動く）から読む。PRのheadは反映が遅れることがある（#4895）
+   */
   pullRequest: { number: number; baseSha: string; headSha: string; headRef: string } | null;
   /** 直前revisionのhead（または初回の固定SHA）が、新しいheadの祖先か */
   fastForward: boolean;
@@ -370,13 +379,45 @@ export function decideRcReport(input: {
     }
   } else {
     if (row.expectedHeadSha !== null && pr.headSha === row.expectedHeadSha) {
-      return { action: "fail", reason: "候補ブランチが更新されていません" };
+      return { action: "fail", reason: RC_NOT_UPDATED_REASON };
     }
     if (!observation.fastForward) {
       return { action: "fail", reason: "候補ブランチが直前のrevisionから早送りになっていません（履歴の書き換え・巻き戻し）" };
     }
   }
   return { action: "apply", prNumber: pr.number, baseSha: pr.baseSha, headSha: pr.headSha };
+}
+
+/**
+ * 照合の時差で失敗扱いにしたrevisionを、候補ブランチの実際の先端から取り込み直してよいか（#4895）。
+ *
+ * workflowが「適用した」と報告したのに、照合したPRのheadがまだ直前のままだったため
+ * `RC_NOT_UPDATED_REASON`で失敗にした版だけを対象にする（`runUrl`があるのは報告を受けた証拠）。
+ * 候補ブランチが記録した直前のheadから早送りで進んでいて、後から別の版が積まれていないときだけ取り込む。
+ * workflowが失敗を報告した版・期限切れ・巻き戻しは対象にしない（推測で記録を書き換えない）
+ */
+export function decideRcLaggedAdoption(input: {
+  revision: {
+    revision: number;
+    status: string;
+    reason: string;
+    failureReason: string | null;
+    runUrl: string | null;
+    expectedHeadSha: string | null;
+  };
+  /** 候補で一番新しい版の番号 */
+  latestRevision: number;
+  current: { revision: number; headSha: string | null } | null;
+  branchHeadSha: string | null;
+  fastForward: boolean;
+}): boolean {
+  const { revision, current } = input;
+  if (revision.status !== "failed" || revision.failureReason !== RC_NOT_UPDATED_REASON || revision.runUrl === null) return false;
+  if (revision.reason !== "fix_import" && revision.reason !== "history_repair") return false;
+  if (revision.revision !== input.latestRevision || current === null || revision.revision <= current.revision) return false;
+  if (revision.expectedHeadSha === null || current.headSha !== revision.expectedHeadSha) return false;
+  if (input.branchHeadSha === null || input.branchHeadSha === revision.expectedHeadSha) return false;
+  return input.fastForward;
 }
 
 // ---------------------------------------------------------------------------

@@ -12,6 +12,8 @@ import {
 } from "@/lib/github/release-api";
 import { releaseWorkflowExists } from "@/lib/github/release-workflow-cache";
 import { previewModeGuard } from "@/lib/preview-mode";
+import { isRcReleaseCandidateHeadRef, rcSequenceOf } from "@/lib/release-branch";
+import { rcLabel } from "@/lib/release-rc";
 import { canRebuildRelease } from "@/lib/release-rebuild";
 import { rebuildReleaseCandidate } from "@/lib/release-rebuild-run";
 import { loadRebuildSelectionOptions, requestSelectiveRebuild } from "@/lib/release-rebuild-selection-run";
@@ -54,6 +56,14 @@ async function findFrozenReleasePullRequest(
   return pullRequests.find((pr) => pr.head.ref.startsWith(FROZEN_RELEASE_PREFIX)) ?? null;
 }
 
+async function findRcReleasePullRequest(owner: string, repo: string, token: string) {
+  const pullRequests = await fetchOpenPullRequestsForBase(owner, repo, "main", token);
+  const pr = pullRequests.find((p) => isRcReleaseCandidateHeadRef(p.head.ref));
+  if (!pr) return null;
+  const sequence = rcSequenceOf(pr.head.ref);
+  return { number: pr.number, url: pr.html_url, label: sequence === null ? pr.head.ref : rcLabel(sequence) };
+}
+
 function githubError(label: string, error: unknown) {
   console.error(`[${label} /api/repositories/release/rebuild]`, error);
   return NextResponse.json(
@@ -88,7 +98,10 @@ async function handleGET(request: NextRequest) {
     const token = await getInstallationToken(repository.installation.installationId);
     const releasePr = await findFrozenReleasePullRequest(owner, repo, token);
     if (!releasePr) {
-      return NextResponse.json({ releasePullRequest: null, candidate: null });
+      // 新方式の候補（`release-rc/<番号>`。#4495）は作り直さず、同じ候補へ取り込む。画面は旧方式の文面を出さず、
+      // 再取り込み・再確認の導線を出す（#4895）
+      const rcPr = await findRcReleasePullRequest(owner, repo, token);
+      return NextResponse.json({ releasePullRequest: null, candidate: null, rcPullRequest: rcPr });
     }
     const candidate = await fetchReleaseRebuildCandidate(owner, repo, releasePr.head.sha, token);
     const selection = await loadRebuildSelectionOptions({ owner, repo, token, releasePr });
