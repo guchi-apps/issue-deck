@@ -139,6 +139,14 @@ export function DispatchQueueContent({
         onOpenIssue={onOpenIssue}
         onOpenRemoteSessions={onOpenRemoteSessions}
         onStopRemoteSession={dispatch.stopRemoteSession}
+        onCloseSession={(session) =>
+          dispatch.sendSessionControl({
+            repositoryFullName: session.repositoryFullName,
+            issueNumber: session.issueNumber,
+            hostName: session.host,
+            kind: "kill",
+          })
+        }
         onRequestSelfUpdate={dispatch.requestSelfUpdate}
         onRequestReboot={dispatch.requestReboot}
       />

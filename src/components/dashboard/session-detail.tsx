@@ -3,18 +3,9 @@
 import { useEffect, useState } from "react";
 import { ExternalLink, Loader2, SendHorizonal, Square, X } from "lucide-react";
 
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { InputStashList, StashConfirmDialog } from "@/components/dashboard/input-stash";
+import { SessionCloseDialog } from "@/components/dashboard/session-close-dialog";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import type { DispatchStateHandle } from "@/hooks/use-dispatch-state";
@@ -456,28 +447,13 @@ export function SessionDetail({ session, dispatch }: { session: DispatchSessionV
           }}
         />
       )}
-      <AlertDialog open={confirmingKill} onOpenChange={setConfirmingKill}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>このセッションを終了しますか？</AlertDialogTitle>
-            <AlertDialogDescription>
-              「{session.tmuxSessionName}」を終了します。作業中の内容はコミットされず、worktreeはそのまま残ります。
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={dispatch.isSubmitting}>キャンセル</AlertDialogCancel>
-            <AlertDialogAction
-              disabled={dispatch.isSubmitting}
-              onClick={(event) => {
-                event.preventDefault();
-                void submit("kill").finally(() => setConfirmingKill(false));
-              }}
-            >
-              セッション終了
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <SessionCloseDialog
+        session={session}
+        open={confirmingKill}
+        onOpenChange={setConfirmingKill}
+        submitting={dispatch.isSubmitting}
+        onConfirm={() => submit("kill")}
+      />
     </>
   );
 }
