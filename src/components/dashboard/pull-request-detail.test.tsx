@@ -252,12 +252,12 @@ describe("PullRequestDetail", () => {
     expect(screen.queryByRole("button", { name: "マージする" })).toBeNull();
   });
 
-  it("リリース候補が未作成でも通常PRのマージ判定は変わらず、共通説明を1回だけ出す（#4427）", () => {
+  it("通常PRにはリリース候補のチェックを出さず、マージ判定も変わらない（#4841）", () => {
     renderDetail({ pullRequest: makePullRequest({ ciState: "success", mergeable: true }) });
     expect(screen.getByRole("button", { name: "マージする" })).toBeTruthy();
-    expect(screen.getByLabelText("このPRのチェック")).toBeTruthy();
-    expect(screen.getByLabelText("リリース候補のチェック")).toBeTruthy();
-    expect(screen.queryAllByTestId("release-candidate-note").length).toBeLessThanOrEqual(1);
+    expect(screen.getByTestId("pull-request-checks")).toBeTruthy();
+    expect(screen.queryByLabelText("リリース候補のチェック")).toBeNull();
+    expect(screen.queryByTestId("release-candidate-note")).toBeNull();
   });
 
   it("自動でマージされないPRには「ユーザーのマージが必要です」を出す（#1469）", () => {
