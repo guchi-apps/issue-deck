@@ -42,6 +42,8 @@ type PullRequestMergeButtonProps = {
   variant?: "default" | "outline";
   /** 押せる状態のボタンの文言（本番PR詳細の「本番公開へ進む」。#4428）。押した後の確認・判定は変わらない */
   label?: string;
+  /** ボタン本体のクラス。隣のボタンと高さをそろえたいときに既定の`h-7`を上書きする */
+  buttonClassName?: string;
 };
 
 /**
@@ -89,6 +91,7 @@ export function PullRequestMergeButton({
   className,
   variant = "outline",
   label = "マージする",
+  buttonClassName,
 }: PullRequestMergeButtonProps) {
   const { mergePullRequest, isSubmitting, error, reviewConfirmation, clearReviewConfirmation } =
     usePullRequestMergeMutation();
@@ -131,6 +134,7 @@ export function PullRequestMergeButton({
         variant={variant}
         className={cn(
           "h-7 shrink-0",
+          buttonClassName,
           productionMerge && (variant === "default" ? PRODUCTION_MERGE_FILLED : PRODUCTION_MERGE_OUTLINE),
         )}
         disabled={isSubmitting || isMerged || judgementPending || verificationWait !== null}
