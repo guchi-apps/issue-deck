@@ -458,6 +458,8 @@ export function PullRequestDetail({
                     onMerged={onMerged}
                     // 隣の「最新のbaseを取り込む」と同じ高さにそろえる（#4842）
                     buttonClassName="h-9 text-xs"
+                    // 詳細ペインでは、マージを拒まれた理由をボタンの下へ全文で出す（#4878）
+                    failureLayout="block"
                     // CI・レビュー・判定の完了待ちのあいだは押してよい状態に見せないため強調しない（#4783）
                     variant={repairKinds.length === 0 && !reviewUnresolved && !isMergeWaitingForChecks(pullRequest) ? "default" : "outline"}
                   />
