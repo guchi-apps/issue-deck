@@ -74,7 +74,7 @@ type PullRequestMergeChangesProps = {
   /** 行を押したときにPR詳細を開く（#3592）。PR番号が取れない行は押せない */
   onOpenPullRequest?: (pullRequestNumber: number) => void;
   /**
-   * 凍結リリースPRの一覧で6チェック（CI・コード・競合・全体・統合・Mac。#4366）を各行に出すための材料。
+   * 凍結リリースPRの一覧で6チェック（CI・コード・競合・全体・統合・iOS。#4366）を各行に出すための材料。
    * あれば旧来のコードレビューの丸とピルは出さない（コードのチェックが引き継ぐ）
    */
   mergeChecks?: {

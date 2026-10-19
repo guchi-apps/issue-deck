@@ -15,7 +15,7 @@ import { loadReleaseVerificationSummary } from "@/lib/release-verification-load"
 /**
  * リポジトリのopenなリリース候補（base=main・head=`release-main/v*`）と、各候補が含むPR番号・検証結果（#4366）。
  *
- * PR詳細・PR一覧・ブランチ画面が、各PRの「全体レビュー・統合検証・Mac検証」を**同じ候補・同じSHA**で
+ * PR詳細・PR一覧・ブランチ画面が、各PRの「全体レビュー・統合検証・iOS検証」を**同じ候補・同じSHA**で
  * 引くための読み取り専用の取得。**検証は起動しない**（表示のために二重起動しない）。候補が無ければ
  * `candidates`は空で、画面は「リリース未作成」と出す。取得に失敗したら502（空の一覧にしない）。
  */

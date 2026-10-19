@@ -63,7 +63,7 @@ describe("buildReleaseVerificationProgress", () => {
       hostOnline: true,
       stalledAfterMs: STALL,
     });
-    expect(progress.steps.map((s) => s.label)).toEqual(["準備", "統合", "依存関係取得", "テスト", "ビルド", "Mac検証"]);
+    expect(progress.steps.map((s) => s.label)).toEqual(["準備", "統合", "依存関係取得", "テスト", "ビルド", "iOS検証"]);
     expect(progress.currentIndex).toBe(3);
     expect(progress.commandPosition).toEqual({ index: 2, total: 3 });
     // 実行中は実行側の文面を理由として出さない（終了したときだけ）

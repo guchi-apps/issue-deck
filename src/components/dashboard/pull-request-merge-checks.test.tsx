@@ -19,7 +19,7 @@ describe("PullRequestMergeChecks", () => {
         onOpenCandidate={null}
       />,
     );
-    const order = ["CI", "コード", "競合", "全体〔共通〕", "統合〔共通〕", "Mac〔共通〕"].map((label) => html.indexOf(`>${label}<`));
+    const order = ["CI", "コード", "競合", "全体〔共通〕", "統合〔共通〕", "iOS〔共通〕"].map((label) => html.indexOf(`>${label}<`));
     expect(order.every((i) => i >= 0)).toBe(true);
     expect([...order].sort((a, b) => a - b)).toEqual(order);
     expect(html).toContain("失敗");
@@ -61,7 +61,7 @@ describe("PullRequestMergeChecks", () => {
       />,
     );
     expect(screen.getByText(/共通結果の対象: 候補PR #20/)).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: /^Mac検証/ }));
+    fireEvent.click(screen.getByRole("button", { name: /^iOS検証/ }));
     expect(screen.getByRole("combobox").querySelectorAll("option")).toHaveLength(2);
     expect(screen.getByRole("button", { name: /候補PR #20の詳細へ/ })).toBeTruthy();
   });

@@ -117,7 +117,7 @@ describe("buildMergeChecks（6項目）", () => {
 });
 
 describe("リリース候補の共通結果", () => {
-  it("Mac検証は統合検証とは独立した状態を持つ（集約から推測しない）", () => {
+  it("iOS検証は統合検証とは独立した状態を持つ（集約から推測しない）", () => {
     const macStates = ["passed", "failed", "running", "not_applicable", "needs_setup", "not_recorded", "invalidated"] as const;
     const expected = ["成功", "失敗", "実行中", "対象外", "設定不足", "未実施", "古い結果"];
     macStates.forEach((state, index) => {

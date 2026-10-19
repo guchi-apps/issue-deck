@@ -7,7 +7,7 @@
  * **`enforced`を立てるまで、マージAPIは従来どおり検証結果を見ない。** 検証を実行する経路
  * （統合検証・全体レビュー）が配布されていないリポジトリで強制すると、結果が永遠に「未実施」の
  * ままマージできなくなる。未配布を導入済みと扱わないため、配布と運用検証が済んだものだけ`true`にする。
- * `setupGaps`・Mac検証の前提不足があるリポジトリは`true`にできない（`release-verification-config.test.ts`が守る）。
+ * `setupGaps`・iOS検証の前提不足があるリポジトリは`true`にできない（`release-verification-config.test.ts`が守る）。
  */
 export type ReleaseVerificationRepoConfig = {
   /** 検証と全体レビューを通常マージの必須条件にするか */
@@ -196,13 +196,13 @@ export const RELEASE_VERIFICATION_REPOS: Readonly<Record<string, ReleaseVerifica
 };
 
 /**
- * Mac検証の前提不足（`ios/scripts/remote-build-check.sh`が未配布）。Linuxの統合検証は止めないが、
+ * iOS検証の前提不足（`ios/scripts/remote-build-check.sh`が未配布）。Linuxの統合検証は止めないが、
  * 導入状態は設定不足になり、`enforced`にもできない（実行時は未確認範囲つきの要確認になる）
  */
 export function describeMacSetupGap(repoFullName: string): string | null {
   const config = RELEASE_VERIFICATION_REPOS[repoFullName];
   if (!config?.macBuildCheck || config.macScriptDistributed === true) return null;
-  return "Mac検証の`ios/scripts/remote-build-check.sh`が未配布";
+  return "iOS検証の`ios/scripts/remote-build-check.sh`が未配布";
 }
 
 /** 台帳にも対象外にも載っていない（導入漏れ）。設定が無いだけで検証済みや対象外にしない */

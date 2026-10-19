@@ -48,7 +48,7 @@ describe("対象外と設定不足の区別", () => {
     expect(RELEASE_VERIFICATION_REPOS["guchi-apps/asset-manager"].integrationCommands).toContain("npm run verify:build");
   });
 
-  it("Mac検証のスクリプトが配布済みなら、Mac前提不足もLinux統合検証の止まりも無い", () => {
+  it("iOS検証のスクリプトが配布済みなら、Mac前提不足もLinux統合検証の止まりも無い", () => {
     for (const repo of ["aide", "kurashio", "yoteiflow", "morrow", "issue-deck"]) {
       expect(describeMacSetupGap(`guchi-apps/${repo}`), repo).toBeNull();
       expect(describeIntegrationSetupGap(`guchi-apps/${repo}`), repo).toBeNull();

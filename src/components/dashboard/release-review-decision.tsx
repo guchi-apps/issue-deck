@@ -112,7 +112,7 @@ export function ReviewDecisionSummaryPanel({ decisions }: { decisions: ReleaseRe
         </div>
       )}
       <p className="text-[10.5px] text-muted-foreground">
-        判断はAIの判定を書き換えません。AIの推奨は確定するまで保存しません。判断の保存だけでは本番へマージせず、必須の検証（統合検証・CI・Mac検証）の未完了や失敗も解除しません。
+        判断はAIの判定を書き換えません。AIの推奨は確定するまで保存しません。判断の保存だけでは本番へマージせず、必須の検証（統合検証・CI・iOS検証）の未完了や失敗も解除しません。
       </p>
     </div>
   );

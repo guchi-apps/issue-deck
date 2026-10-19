@@ -16,7 +16,7 @@ import type { PullRequestSummary, ReleaseChangePullRequest } from "@/types/pull-
  *
  * 6項目は**独立した状態**で、1つの「レビュー」や総合成功へまとめない。実際に取得できた状態だけを
  * 出し、情報が足りないものを成功と推測しない（記録なし・取得不可・未実施・対象外・古い結果を別の状態にする）。
- * 並びは固定: CI → コードレビュー → コンフリクト → 全体レビュー → 統合検証 → Mac検証。
+ * 並びは固定: CI → コードレビュー → コンフリクト → 全体レビュー → 統合検証 → iOS検証。
  * **計画レビューはPRのチェックに含めない**（Issue側の計画レビューは別機能として残る）。
  */
 export type MergeCheckKey = "ci" | "code" | "conflict" | "all" | "integration" | "mac";
@@ -44,7 +44,7 @@ export type MergeCheckItem = {
   /** 理由・指摘。無ければnull */
   reason: string | null;
   evidence: MergeCheckEvidence | null;
-  /** リリース候補の共通結果か（全体レビュー・統合検証・Mac検証） */
+  /** リリース候補の共通結果か（全体レビュー・統合検証・iOS検証） */
   common: boolean;
   /** 共通結果の判定対象の候補PR番号（個別PRの項目ではnull） */
   candidateNumber: number | null;
@@ -233,7 +233,7 @@ export function buildMergeChecks(input: MergeChecksInput): MergeCheckItem[] {
     shortLabel,
     fullName,
     ...cell,
-    target: key === "mac" && candidate ? `${candidateTarget}（Macでのビルド確認）` : candidateTarget,
+    target: key === "mac" && candidate ? `${candidateTarget}（iOSでのビルド確認）` : candidateTarget,
     evidence: candidate ? { kind: "candidate", label: `候補PR #${candidate.number}の詳細へ` } : null,
     common: true,
     candidateNumber: candidate?.number ?? null,
@@ -252,7 +252,7 @@ export function buildMergeChecks(input: MergeChecksInput): MergeCheckItem[] {
     own("conflict", "競合", "コンフリクト", input.conflict),
     common("all", "全体〔共通〕", "全体レビュー（リリース候補の共通結果）", release.all),
     common("integration", "統合〔共通〕", "統合検証（リリース候補の共通結果）", release.integration),
-    common("mac", "Mac〔共通〕", "Mac検証（リリース候補のiOSビルド確認）", release.mac),
+    common("mac", "iOS〔共通〕", "iOS検証（リリース候補のiOSビルド確認）", release.mac),
   ];
 }
 

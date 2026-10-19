@@ -159,7 +159,7 @@ export function ReleaseCompletionPanel({ runState, repositoryFullName, pullReque
                   <li>修正Issueを作り、修正を自動で開始する（内部のレビュー往復は修正セッションの中で行う）</li>
                   <li>修正PRがdevelopへ入ったら、その修正だけを候補へ足して作り直す（履歴だけの差もこの経路で反映する）</li>
                   <li>
-                    作り直した候補で全体レビュー・統合検証・Mac検証をやり直す。指摘が残れば同じ修正Issueで続ける（世代の回数では止めず、停滞・予算到達・本人判断のときだけ理由つきで一時停止）
+                    作り直した候補で全体レビュー・統合検証・iOS検証をやり直す。指摘が残れば同じ修正Issueで続ける（世代の回数では止めず、停滞・予算到達・本人判断のときだけ理由つきで一時停止）
                   </li>
                 </ol>
                 <ScopeOption

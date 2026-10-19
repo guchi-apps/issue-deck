@@ -3,7 +3,7 @@ import type { ReleaseMacSection } from "@/lib/release-mac-verification";
 import type { ReleaseVerificationSection, ReleaseVerificationSummary } from "@/lib/release-verification-summary";
 
 /**
- * 6項目のうち、リリース候補の共通結果（全体レビュー・統合検証・Mac検証。#4366）の対象解決と表示内容。
+ * 6項目のうち、リリース候補の共通結果（全体レビュー・統合検証・iOS検証。#4366）の対象解決と表示内容。
  *
  * **対象は固定リリース候補（base=main・head=`release-main/v*`のopenなPR）。** 通常PRが候補に含まれるかは
  * 候補PRのコミット範囲に載っているPR番号で決め、無関係な最新の候補の結果を転用しない。
@@ -81,7 +81,7 @@ const MAC_CELL: Record<ReleaseMacSection["state"], Pick<ReleaseCheckCell, "mark"
 
 function fromMac(mac: ReleaseMacSection | undefined): ReleaseCheckCell {
   // 古いサーバーの応答（`mac`が無い）は記録なし（未実施）として扱い、成功には倒さない
-  const resolved = mac ?? { state: "not_recorded" as const, reason: "Mac検証の記録がありません" };
+  const resolved = mac ?? { state: "not_recorded" as const, reason: "iOS検証の記録がありません" };
   return { ...MAC_CELL[resolved.state], reason: resolved.reason };
 }
 
