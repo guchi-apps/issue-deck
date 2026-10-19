@@ -16,7 +16,7 @@ export const RELEASE_PROGRESS_STEP_LABEL = {
   test: "テスト",
   build: "ビルド",
   command: "検証コマンド",
-  mac: "Mac検証",
+  mac: "iOS検証",
   diff: "差分取得",
   review: "AIレビュー",
   finalize: "結果整理",

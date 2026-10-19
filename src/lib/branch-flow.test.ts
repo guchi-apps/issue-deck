@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 
+import { mergeHistoryPullRequests } from "@/lib/branch-flow-history";
 import type { ManualStepReadinessMap } from "@/lib/manual-step-attention";
 import { EMPTY_HEALTH_COUNTS } from "@/lib/pull-request-health";
 import {
   buildBranchFlow,
+  resolveLatestVersion,
   extractManualStepOrigin,
   formatUnreleasedSummary,
   hasChangesAfterReleaseFreeze,
@@ -1063,6 +1065,62 @@ describe("mainへ直接マージされた作業の束（#2911）", () => {
     const groups = developFlow.repositories[0].releaseGroups;
     expect(groups.map((group) => group.key)).toEqual(["release-178"]);
     expect(groups[0].lanes.map((lane) => lane.branchName)).toEqual(["issue-175"]);
+  });
+});
+
+describe("mainへ直接マージされた束と版ごとの束は日付順に並ぶ（#4863）", () => {
+  // guchi-apps/car-careの実例（2026-10-19）を写したもの。#266は本番デプロイの復旧のため
+  // mainへ直接マージされ、その翌日に#270のリリースで現在の本番版が出た。
+  const releasePulls = [
+    releasePullRequest({
+      number: 270,
+      title: "v4.0.25をmainへリリースする",
+      createdAt: "2026-10-19T02:00:00Z",
+      state: "closed",
+      merged: true,
+      mergedAt: "2026-10-19T03:00:00Z",
+    }),
+    pullRequest({
+      number: 268,
+      headRef: "issue-267",
+      linkedIssueNumber: 267,
+      state: "closed",
+      merged: true,
+      mergedAt: "2026-10-18T20:00:00Z",
+    }),
+  ];
+  const directPull = (number: number, mergedAt: string) =>
+    pullRequest({
+      number,
+      baseRef: "main",
+      headRef: `issue-${number - 1}`,
+      linkedIssueNumber: number - 1,
+      state: "closed",
+      merged: true,
+      mergedAt,
+    });
+  const keysOf = (pullRequests: PullRequestSummary[]) =>
+    build({ pullRequests }).repositories[0].releaseGroups.map((group) => group.key);
+
+  it("直接マージが最新の版より古ければ、版の束を先頭（既定で出す位置）に置く", () => {
+    expect(keysOf([...releasePulls, directPull(266, "2026-10-18T10:00:00Z")])).toEqual([
+      "release-270",
+      "merged-to-main",
+    ]);
+  });
+
+  it("直接マージが最新の版より新しければ、直接マージの束を先頭に置く", () => {
+    expect(keysOf([...releasePulls, directPull(272, "2026-10-19T05:00:00Z")])).toEqual([
+      "merged-to-main",
+      "release-270",
+    ]);
+  });
+
+  it("同時刻なら版の束を先に出す", () => {
+    expect(keysOf([...releasePulls, directPull(266, "2026-10-19T03:00:00Z")])).toEqual([
+      "release-270",
+      "merged-to-main",
+    ]);
   });
 });
 
@@ -2623,5 +2681,59 @@ describe("リリース画面の追跡情報（#4748）", () => {
     });
     const [lane] = allLanes(flow.repositories[0]);
     expect(lane.featureIncomplete).toEqual(["Issue #100（本番での確認などが残っています）"]);
+  });
+});
+
+describe("resolveLatestVersion (#4848)", () => {
+  it("最新のリリースPRのタイトルから取れた版を優先する", () => {
+    expect(resolveLatestVersion([{ version: "8.67.0" }, { version: "8.68.0" }], "8.66.0")).toBe("8.68.0");
+  });
+
+  it("最新がリリース候補（タイトルに版なし）なら公開済みの版で補い、古い版へ遡らない", () => {
+    expect(resolveLatestVersion([{ version: "8.67.0" }, { version: null }], "8.68.0")).toBe("8.68.0");
+    expect(resolveLatestVersion([{ version: "8.67.0" }, { version: null }], null)).toBeNull();
+  });
+
+  it("リリースPRが取れていなくても公開済みの版を出す", () => {
+    expect(resolveLatestVersion([], "4.19.0")).toBe("4.19.0");
+    expect(resolveLatestVersion([], null)).toBeNull();
+  });
+});
+
+describe("過去のリリースの取り足し（#4844）", () => {
+  // 画面を開いたときの母集団（更新順30件）。v3.17.0とその変更だけが入っている
+  const base = [
+    releasePullRequest({ number: 920, title: "v3.17.0をmainへリリースする", state: "closed", merged: true, mergedAt: "2026-08-10T00:00:00Z" }),
+    pullRequest({ number: 915, headRef: "issue-915", state: "closed", merged: true, mergedAt: "2026-08-08T00:00:00Z" }),
+    pullRequest({ number: 880, headRef: "issue-880", state: "closed", merged: true, mergedAt: "2026-07-25T00:00:00Z" }),
+  ];
+  // 「さらに表示」で取り足したPR（作成順のページ）。母集団と範囲が重なるので同じPRを含む
+  const history = [
+    releasePullRequest({ number: 920, title: "v3.17.0をmainへリリースする", state: "closed", merged: true, mergedAt: "2026-08-10T00:00:00Z" }),
+    pullRequest({ number: 880, headRef: "issue-880", state: "closed", merged: true, mergedAt: "2026-07-25T00:00:00Z" }),
+    releasePullRequest({ number: 900, title: "v3.15.0をmainへリリースする", state: "closed", merged: true, mergedAt: "2026-07-30T00:00:00Z" }),
+    pullRequest({ number: 870, headRef: "issue-870", state: "closed", merged: true, mergedAt: "2026-07-20T00:00:00Z" }),
+    releasePullRequest({ number: 860, title: "v3.14.0をmainへリリースする", state: "closed", merged: true, mergedAt: "2026-07-22T00:00:00Z" }),
+  ];
+  const lanesOf = (flow: ReturnType<typeof build>) =>
+    Object.fromEntries(
+      flow.repositories[0].releaseGroups.map((group) => [group.version, group.lanes.map((lane) => lane.branchName)]),
+    );
+
+  it("取り足す前は、取得範囲より古い変更が最古の版へ束ねられている", () => {
+    expect(lanesOf(build({ pullRequests: base }))).toEqual({ "3.17.0": ["issue-880", "issue-915"] });
+  });
+
+  it("取り足したPRを足すと古い版の束が増え、同じ版・同じ変更は2回出ない", () => {
+    const flow = build({ pullRequests: mergeHistoryPullRequests(base, history) });
+    const groups = flow.repositories[0].releaseGroups;
+    expect(groups.map((group) => group.version)).toEqual(["3.17.0", "3.15.0", "3.14.0"]);
+    expect(lanesOf(flow)).toEqual({
+      "3.17.0": ["issue-915"],
+      "3.15.0": ["issue-880"],
+      "3.14.0": ["issue-870"],
+    });
+    const branchNames = allLanes(flow.repositories[0]).map((lane) => lane.branchName);
+    expect(new Set(branchNames).size).toBe(branchNames.length);
   });
 });

@@ -51,6 +51,9 @@ export const GITHUB_API_FEATURES = [
   { key: "knowledge_promotion_merge", label: "共通知識の反映PRの自動マージ" },
   { key: "pull_request_list", label: "PR一覧の取得" },
   { key: "branch_flow", label: "ブランチ状況の取得" },
+  // ブランチ画面の「過去のリリース」で古い版を遡ったとき（#4844）。**押したときだけ**、
+  // develop宛1ページ＋main宛0〜3ページを取る
+  { key: "branch_flow_history", label: "過去のリリースの追加取得" },
   { key: "deploy_status", label: "本番デプロイ状況の取得" },
   // デプロイ・CIの実行の内訳（#2777）。**パネルを開いている間だけ**消費する。1回につき
   // run・jobsの2リクエストで、過去の実績は10分キャッシュされるため初回だけ2回増える。

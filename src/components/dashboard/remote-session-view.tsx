@@ -305,13 +305,17 @@ function RepositoryDetail({
                 {session.status === "failed" && session.failureMessage && (
                   <p className="w-full text-xs whitespace-pre-wrap text-destructive">{session.failureMessage}</p>
                 )}
+                {/* 無操作による自動終了（#4871）の理由。失敗ではないので赤くしない */}
+                {session.status === "ended" && session.failureMessage && (
+                  <p className="w-full text-xs whitespace-pre-wrap text-muted-foreground">{session.failureMessage}</p>
+                )}
               </li>
             ))}
           </ul>
         )}
       </div>
       <p className="text-xs text-muted-foreground">
-        セッションはIssueに紐づかず、終了するまでサブPCに残ります。終了すると、作業が残っていない作業用ディレクトリは片付けます。
+        セッションはIssueに紐づかず、終了するか一定時間（既定3時間）操作が無くなるまでサブPCに残ります。終了すると、作業が残っていない作業用ディレクトリは片付けます。
       </p>
     </div>
   );

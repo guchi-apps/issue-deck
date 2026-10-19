@@ -5,6 +5,7 @@ import {
   REMOTE_SESSION_MAX_PER_HOST,
   REMOTE_SESSION_NAME_PATTERN,
   buildRemoteSessionName,
+  parseIdleEndedRemoteSessions,
   parseReportedRemoteSessions,
   pickRemoteSessionHost,
   resolveRemoteSessionRejection,
@@ -84,6 +85,15 @@ describe("parseReportedRemoteSessions", () => {
       { tmuxSessionName: "issue-deck-remote-abcd1234", remoteControlUrl: "https://claude.ai/code/session_x" },
       { tmuxSessionName: "vps-remote-zzzz9999", remoteControlUrl: null },
     ]);
+  });
+});
+
+describe("parseIdleEndedRemoteSessions（#4871）", () => {
+  it("未申告はnull、規約に合う名前だけを重複なく通す", () => {
+    expect(parseIdleEndedRemoteSessions(undefined)).toBeNull();
+    expect(
+      parseIdleEndedRemoteSessions(["car-care-remote-r4wiv8se", "car-care-remote-r4wiv8se", "issue-deck-issue-1", 3]),
+    ).toEqual(["car-care-remote-r4wiv8se"]);
   });
 });
 

@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const db = vi.hoisted(() => ({
-  remoteSession: { findFirst: vi.fn(), findMany: vi.fn(), updateMany: vi.fn(), groupBy: vi.fn() },
+  remoteSession: { findFirst: vi.fn(), findMany: vi.fn(), updateMany: vi.fn(), update: vi.fn(), groupBy: vi.fn() },
   dispatchHost: { findMany: vi.fn(), findUnique: vi.fn() },
   repository: { findMany: vi.fn(), findFirst: vi.fn() },
   dispatchJob: { findMany: vi.fn(), create: vi.fn() },
@@ -9,7 +9,8 @@ const db = vi.hoisted(() => ({
 vi.mock("@/lib/db", () => ({ db }));
 vi.mock("@/lib/dispatch/wake-notify", () => ({ notifyDispatchHostWake: vi.fn() }));
 
-import { enqueueRemoteSessionKill, listRemoteSessions } from "./remote-session";
+import { enqueueRemoteSessionKill, listRemoteSessions, syncRemoteSessionsFromHost } from "./remote-session";
+import { REMOTE_SESSION_IDLE_ENDED_MESSAGE } from "./remote-session-rules";
 
 describe("リモートセッションの利用者境界", () => {
   beforeEach(() => {
@@ -67,5 +68,48 @@ describe("リモートセッションの利用者境界", () => {
       where: { id: "s1", requestedByUserId: "u2" },
     });
     expect(db.dispatchJob.create).not.toHaveBeenCalled();
+  });
+});
+
+describe("syncRemoteSessionsFromHost の自動終了（#4871）", () => {
+  const now = new Date("2026-10-19T13:00:00Z");
+  const row = (name: string) => ({
+    id: name,
+    tmuxSessionName: name,
+    status: "running",
+    remoteControlUrl: null,
+    lastSeenAt: new Date(now.getTime() - 30_000),
+    updatedAt: now,
+  });
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("無操作で自動終了した名前は、猶予を待たずに理由付きでendedにする", async () => {
+    db.remoteSession.findMany.mockResolvedValue([row("car-care-remote-r4wiv8se"), row("issue-deck-remote-hx36t96g")]);
+    await syncRemoteSessionsFromHost({
+      hostName: "subpc",
+      reported: [],
+      idleEnded: ["car-care-remote-r4wiv8se"],
+      now,
+    });
+    // 自動終了したものだけ。もう一方は猶予（3分）内なので触らない
+    expect(db.remoteSession.update).toHaveBeenCalledTimes(1);
+    expect(db.remoteSession.update).toHaveBeenCalledWith({
+      where: { id: "car-care-remote-r4wiv8se" },
+      data: { status: "ended", endedAt: now, failureMessage: REMOTE_SESSION_IDLE_ENDED_MESSAGE },
+    });
+  });
+
+  it("申告にまだ生きているものは、自動終了の記録があってもrunningのまま扱う", async () => {
+    db.remoteSession.findMany.mockResolvedValue([row("car-care-remote-r4wiv8se")]);
+    await syncRemoteSessionsFromHost({
+      hostName: "subpc",
+      reported: [{ tmuxSessionName: "car-care-remote-r4wiv8se", remoteControlUrl: null }],
+      idleEnded: ["car-care-remote-r4wiv8se"],
+      now,
+    });
+    expect(db.remoteSession.update.mock.calls[0][0].data.status).toBe("running");
   });
 });

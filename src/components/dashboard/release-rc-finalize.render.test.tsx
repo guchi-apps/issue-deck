@@ -173,10 +173,30 @@ describe("ReleaseRcFinalizePanel", () => {
     render(<ReleaseRcFinalizePanel candidate={candidate()} finalization={overview()} repositoryFullName="o/r" onChanged={vi.fn()} />);
     expect(screen.getByText("未確定")).toBeTruthy();
     expect(screen.getByText("自動判定")).toBeTruthy();
-    fireEvent.change(screen.getByLabelText(/上げ幅/), { target: { value: "minor" } });
+    // 上げ幅は既定の自動判定のまま、リンクを押したときだけ選べる（#4858）
+    expect(screen.queryByTestId("release-rc-bump-kind")).toBeNull();
+    fireEvent.click(screen.getByText("手動で上げ幅を設定する"));
+    expect(screen.getByLabelText("自動判定")).toHaveProperty("checked", true);
+    expect(screen.getByLabelText("メジャー")).toBeTruthy();
+    expect(screen.getByLabelText("パッチ")).toBeTruthy();
+    fireEvent.click(screen.getByLabelText("マイナー"));
     expect(screen.getByText("v2.14.0")).toBeTruthy();
     expect(screen.getByText("確定した正式版")).toBeTruthy();
     expect(screen.getByText("未確定")).toBeTruthy();
+  });
+
+  it("合格した候補では公開ボタンをオレンジで出し、説明は1文にとどめる（#4858）", () => {
+    render(<ReleaseRcFinalizePanel candidate={candidate()} finalization={overview()} repositoryFullName="o/r" onChanged={vi.fn()} />);
+    expect(screen.getByText("本番公開へ進む（公開承認）").closest("button")!.className).toContain("bg-orange-600");
+    expect(screen.getByText("revision 3 が全体レビュー・統合検証に合格しています。")).toBeTruthy();
+    expect(screen.queryByText(/版ファイルと更新履歴だけを変更するコミットを候補へ積み/)).toBeNull();
+  });
+
+  it("全体レビューを承知で進む候補の公開ボタンは、オレンジにしない（#4807）", () => {
+    const base = candidate();
+    const waivable = candidate({ finalizeContract: { ...base.finalizeContract!, requiresAiReviewWaiver: true } });
+    render(<ReleaseRcFinalizePanel candidate={waivable} finalization={overview()} repositoryFullName="o/r" onChanged={vi.fn()} />);
+    expect(screen.getByText("全体レビューの結果を承知で本番公開へ進む（公開承認）").closest("button")!.className).not.toContain("bg-orange-600");
   });
 
   it("押した時点の候補のheadと要求キーを送る", async () => {

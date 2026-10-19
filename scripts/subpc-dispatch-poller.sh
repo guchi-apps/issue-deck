@@ -401,6 +401,16 @@ require_non_negative_int() {
 # HTTP 2回・DBクエリ数件なので、倍にしても負荷は無視できる。
 POLL_INTERVAL="$(require_positive_int DISPATCH_POLL_INTERVAL_SECONDS "${DISPATCH_POLL_INTERVAL_SECONDS:-}" 30)"
 
+# リモートセッション（#4743）を無操作で自動終了するまでの分数（#4871）。**0で無効。**
+# 最後の会話（転記ファイルの更新）からこの時間が経ったものを巡回が畳む。放置したセッションが
+# 同時実行の上限（`REMOTE_SESSION_MAX`）を塞ぎ続けないようにするため
+REMOTE_SESSION_IDLE_MINUTES="$(require_non_negative_int ISSUE_DECK_REMOTE_SESSION_IDLE_MINUTES "${ISSUE_DECK_REMOTE_SESSION_IDLE_MINUTES:-}" 180)"
+# 自動終了したセッション名の記録。ホスト申告の`remoteSessionsIdleEnded`で終了の理由をissue-deckへ渡す
+REMOTE_SESSION_IDLE_ENDED_FILE="${XDG_STATE_HOME:-$HOME/.local/state}/issue-deck/remote-session-idle-ended"
+
+# 「更新して再起動」（`SELF_UPDATE`）が入れ替えを保留しているか（#4871。`exec_pending_self_update`）
+SELF_UPDATE_EXEC_PENDING=0
+
 # 枠外のジョブだけを取りに行く軽い巡回の間隔（#2413）。**0で無効。**
 #
 # 上の巡回は回収・申告・巡回検知まで含んでおり、起動ジョブが無い巡でも実処理だけで実測約14秒
@@ -840,6 +850,43 @@ remote_session_list_json() {
 
 count_remote_sessions() {
   remote_session_list_json | jq 'length'
+}
+
+# 無操作のリモートセッションを畳む（#4871）。最後の活動は「転記ファイルの更新」と「tmuxの起動時刻」の
+# 新しい方で、`REMOTE_SESSION_IDLE_MINUTES`を過ぎたものを`--kill-name`で終了する（worktreeは
+# 作業が残っていれば残す。判定はランチャー）。畳んだ名前は記録へ追記し、申告で理由を届ける
+reap_idle_remote_sessions() {
+  ((REMOTE_SESSION_IDLE_MINUTES > 0)) || return 0
+  [[ -f "$REMOTE_SESSION_LAUNCHER" ]] || return 0
+  local now name created last path mtime
+  now="$(date +%s)"
+  while IFS=$'\t' read -r name created; do
+    [[ "$name" =~ ^[A-Za-z0-9_-]+-remote-[a-z0-9]{8}$ ]] || continue
+    [[ "$created" =~ ^[0-9]+$ ]] || continue
+    last="$created"
+    path="$(session_transcript_path "$name" 2>/dev/null || true)"
+    if [[ -n "$path" && -f "$path" ]]; then
+      mtime="$(stat -c %Y "$path" 2>/dev/null || echo 0)"
+      ((mtime > last)) && last="$mtime"
+    fi
+    ((now - last >= REMOTE_SESSION_IDLE_MINUTES * 60)) || continue
+    echo "リモートセッション $name は$((REMOTE_SESSION_IDLE_MINUTES))分以上操作が無いため終了します。"
+    if timeout 120 bash "$REMOTE_SESSION_LAUNCHER" --kill-name "$name" </dev/null; then
+      mkdir -p "$(dirname "$REMOTE_SESSION_IDLE_ENDED_FILE")" 2>/dev/null || true
+      printf '%s\t%s\n' "$now" "$name" >>"$REMOTE_SESSION_IDLE_ENDED_FILE" 2>/dev/null || true
+    fi
+  done < <(tmux list-sessions -F $'#{session_name}\t#{session_created}' 2>/dev/null || true)
+}
+
+# 直近（30分以内）に自動終了したリモートセッション名のJSON配列。古い行は記録から落とす
+remote_session_idle_ended_json() {
+  local now cutoff kept
+  [[ -f "$REMOTE_SESSION_IDLE_ENDED_FILE" ]] || { printf '[]'; return 0; }
+  now="$(date +%s)"
+  cutoff=$((now - 1800))
+  kept="$(awk -F'\t' -v c="$cutoff" '$1 ~ /^[0-9]+$/ && $1 >= c' "$REMOTE_SESSION_IDLE_ENDED_FILE" 2>/dev/null || true)"
+  printf '%s\n' "$kept" >"$REMOTE_SESSION_IDLE_ENDED_FILE" 2>/dev/null || true
+  printf '%s\n' "$kept" | awk -F'\t' 'NF == 2 {print $2}' | jq -Rcs 'split("\n") | map(select(length > 0)) | unique'
 }
 
 # 手作業の代行実行（#1828）を実行できるか。**実行スクリプトと、実行前の照合に使う`gh`が
@@ -1493,6 +1540,7 @@ announce() {
     --argjson manualStepSession "$(manual_step_session_capable)" \
     --argjson remoteSession "$(remote_session_capable)" \
     --argjson remoteSessions "$(remote_session_list_json)" \
+    --argjson remoteSessionsIdleEnded "$(remote_session_idle_ended_json)" \
     --argjson planReview "$(plan_review_capable)" \
     --argjson planReviewAgent true \
     --argjson codeReview "$(code_review_capable)" \
@@ -1513,7 +1561,7 @@ announce() {
     --argjson launchHold "${LAUNCH_HOLD_JSON:-null}" \
     --argjson checkout "${checkout:-null}" \
     --argjson planReviewSessions "$plan_review_sessions" \
-    '{host: $host, repositories: $repositories, contractVersion: $contractVersion, agentVersion: $agentVersion, sessionControl: true, instruction: true, stashInput: true, crossRepoQuestion: $crossRepoQuestion, manualStep: $manualStep, manualStepAbort: $manualStepAbort, manualStepValues: $manualStepValues, manualStepVps: $manualStepVps, manualStepSession: $manualStepSession, planReview: $planReview, planReviewAgent: $planReviewAgent, codeReview: $codeReview, prReview: $prReview, releaseVerifyRedact: $releaseVerify, releaseReviewRedact: $releaseReview, chatCodex: $chatCodex, reviewFix: $reviewFix, codex: $codex, codexRemoteControl: $codexRemoteControl, selfUpdate: $selfUpdate, reboot: $reboot, rebootState: $rebootState, preview: $preview, previewState: $previewState, previewRepositories: $previewRepositories, maxSessions: $maxSessions, liveSessions: $liveSessions, metrics: $metrics, launchHold: $launchHold, checkout: $checkout, planReviewSessions: $planReviewSessions, remoteSession: $remoteSession, remoteSessions: $remoteSessions}')"
+    '{host: $host, repositories: $repositories, contractVersion: $contractVersion, agentVersion: $agentVersion, sessionControl: true, instruction: true, stashInput: true, crossRepoQuestion: $crossRepoQuestion, manualStep: $manualStep, manualStepAbort: $manualStepAbort, manualStepValues: $manualStepValues, manualStepVps: $manualStepVps, manualStepSession: $manualStepSession, planReview: $planReview, planReviewAgent: $planReviewAgent, codeReview: $codeReview, prReview: $prReview, releaseVerifyRedact: $releaseVerify, releaseReviewRedact: $releaseReview, chatCodex: $chatCodex, reviewFix: $reviewFix, codex: $codex, codexRemoteControl: $codexRemoteControl, selfUpdate: $selfUpdate, reboot: $reboot, rebootState: $rebootState, preview: $preview, previewState: $previewState, previewRepositories: $previewRepositories, maxSessions: $maxSessions, liveSessions: $liveSessions, metrics: $metrics, launchHold: $launchHold, checkout: $checkout, planReviewSessions: $planReviewSessions, remoteSession: $remoteSession, remoteSessions: $remoteSessions, remoteSessionsIdleEnded: $remoteSessionsIdleEnded}')"
 
   if ! api_call POST /api/dispatch/hosts "$payload"; then
     report_api_failure "ホストの申告に失敗しました"
@@ -3545,6 +3593,22 @@ run_self_update_job() {
   # 実装セッションが入っているため、`exit`で畳むと更新のたびに走っている実装セッションが
   # 全部落ちる（2026-08-18の`systemctl --user restart`では6本→0本になっている）。
   # 同じPIDのまま`exec`すればsystemdから見て何も起きておらず、停止処理も走らない。
+  #
+  # **入れ替えは、同じclaimで受け取った残りのジョブを処理し終えてから行う**（#4871）。ここで
+  # `exec`すると、後ろに並んでいたジョブ（リモートセッションの終了など）が実行も報告もされないまま
+  # 消え、`CLAIMED`のまま10分残る（画面は「終了中」のまま、その間に次の更新が来るとまた消える）。
+  SELF_UPDATE_EXEC_PENDING=1
+}
+
+# `run_self_update_job`が保留した入れ替えを行う。**claimしたジョブを全部回した後にだけ呼ぶ**
+exec_pending_self_update() {
+  [[ "$SELF_UPDATE_EXEC_PENDING" -eq 1 ]] || return 0
+  # `--once`は1巡で終わる実行なので入れ替えない（次に起動したときに新しい版で動く）
+  if [[ "$ONCE" -eq 1 ]]; then
+    SELF_UPDATE_EXEC_PENDING=0
+    echo "1巡だけの実行のため、新しいスクリプトへの入れ替えは次の起動に任せます。"
+    return 0
+  fi
   echo "更新を反映するため、新しいスクリプトへ入れ替えます（同じプロセスのまま）。"
   exec /usr/bin/env bash "${BASH_SOURCE[0]}" ${POLLER_ARGV[@]+"${POLLER_ARGV[@]}"}
 }
@@ -4682,6 +4746,8 @@ run_once() {
   # リモートセッション（#4743）のうち、tmuxが無くなったもののworktreeを片付ける。作業が残って
   # いるものは消さない（判定はランチャー）。数本しか無いので毎巡でよい
   if [[ -f "$REMOTE_SESSION_LAUNCHER" && "$DRY_RUN" -ne 1 ]]; then
+    # 無操作のものを先に畳む（#4871）。畳んだworktreeは次の`--sweep`ではなく`--kill-name`が片付ける
+    reap_idle_remote_sessions || true
     timeout 120 bash "$REMOTE_SESSION_LAUNCHER" --sweep </dev/null || true
   fi
 
@@ -4827,6 +4893,7 @@ run_once() {
     [[ -n "$job" ]] || continue
     run_job "$job"
   done < <(printf '%s' "$jobs_json" | jq -c '.jobs[]')
+  exec_pending_self_update
   return 0
 }
 
@@ -4864,6 +4931,7 @@ claim_out_of_band() {
     [[ -n "$job" ]] || continue
     run_job "$job"
   done < <(printf '%s' "$jobs_json" | jq -c '.jobs[]')
+  exec_pending_self_update
   return 0
 }
 

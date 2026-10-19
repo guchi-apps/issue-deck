@@ -32,7 +32,7 @@ export type ReleaseCandidateProblemKind =
   | "unavailable";
 
 export type ReleaseCandidatePendingCheck = {
-  /** 「全体レビュー」「統合検証」「統合検証（Mac検証）」 */
+  /** 「全体レビュー」「統合検証」「統合検証（iOS検証）」 */
   name: string;
   /** 実行側が動き出しているか。falseは順番待ち */
   started: boolean;
@@ -106,7 +106,7 @@ export function resolveReleaseCandidateVerification(
       integration: false,
     },
     {
-      name: checks.started?.mac ? "統合検証（Mac検証）" : "統合検証",
+      name: checks.started?.mac ? "統合検証（iOS検証）" : "統合検証",
       state: checks.integration,
       started: checks.started?.integration ?? false,
       integration: true,
@@ -147,12 +147,20 @@ export function resolveReleaseCandidateVerification(
           reason: !section.integration && stage ? describeStageProblem(stage) : `${section.name}に要確認の結果があります`,
         });
         break;
-      case "invalidated":
+      case "invalidated": {
+        // 再検証が実行中・開始待ちで自動再実行が見込めるなら、手の要る問題でなく待てば進むものとして出す（#4862）。
+        // 見込みが無いまま古いときは従来どおり問題（実行側の停止・依頼失敗に人が気づく必要がある）
+        const rerun = section.integration ? checks.rerun?.integration : checks.rerun?.aiReview;
+        if (rerun) {
+          pending.push({ name: section.name, started: section.started });
+          break;
+        }
         problems.push({
           kind: "invalidated",
           reason: `${section.name}: 候補（mainまたはリリースブランチの先端）が変わったため、古い結果は使えません`,
         });
         break;
+      }
       case "not_run":
         // 記録が無い（依頼されていない）ものは、強制していなければ待たない（#4354と同じ）。
         // 強制しているならゲートが「未実施」で止めるので、マージ待ちとは見せない
@@ -258,6 +266,8 @@ export function releaseChecksFromSummary(
   summary: ReleaseVerificationSummary,
   integrationSetupGap: string | null = null,
 ): PullRequestReleaseChecks {
+  const active = (section: ReleaseVerificationSummary["integration"]) =>
+    section.progress != null && ["queued", "claimed", "running"].includes(section.progress.jobStatus);
   const fold = (state: ReleaseVerificationSummary["integration"]["state"]): PullRequestReleaseCheckState =>
     state === "waiting" || state === "running" ? "running" : state;
   return {
@@ -270,6 +280,7 @@ export function releaseChecksFromSummary(
       mac: summary.mac.state === "running",
     },
     integrationSetupGap,
+    rerun: { aiReview: active(summary.aiReview), integration: active(summary.integration) },
     aiReviewStage: summary.aiReview.stage,
   };
 }

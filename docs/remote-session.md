@@ -26,6 +26,32 @@ Claude Codeアプリへ移動する**。会話そのものはIssueDeckではな�
   `start-remote-session.sh --kill`でtmuxを畳んでworktreeを片付ける
 - tmuxを直接閉じた・Claude Codeが終了した・ホストを再起動したものは、ホスト申告に出てこなくなって
   3分で`ended`になる。worktreeはpollerの巡回（`--sweep`）が片付ける
+- **無操作の自動終了**（#4871）: 最後の会話（転記ファイルの更新。無ければtmuxの起動時刻）から
+  `ISSUE_DECK_REMOTE_SESSION_IDLE_MINUTES`（既定180分・0で無効）経ったセッションは、pollerの巡回が
+  `start-remote-session.sh --kill-name`で畳む（worktreeは作業が残っていれば残す）。畳んだ名前は
+  `~/.local/state/issue-deck/remote-session-idle-ended`に30分残し、ホスト申告の`remoteSessionsIdleEnded`で
+  送る。issue-deckは猶予を待たずに`ended`にし、`failureMessage`へ「一定時間操作が無かったため、自動で
+  終了しました。」を残す（画面の履歴に灰色で出る）。Claude Codeアプリで画面を開いているだけの状態は
+  無操作とみなす
+
+### 「終了中」のまま終わらなかった不具合（#4871）
+
+「更新して再起動」（`SELF_UPDATE`）を実行したpollerは`exec`で新しいスクリプトへ入れ替わる。以前は
+`run_self_update_job`の中で即座に`exec`していたため、**同じclaimで受け取った後ろのジョブ（終了・起動など）が
+実行も報告もされないまま消えていた**（2026-10-19に4件取得→`SELF_UPDATE`だけ実行、2件取得→同じ、を
+journalで確認）。消えたジョブは`CLAIMED`のまま10分残るので画面は「終了中」が続き、developへのマージが
+続いて自動更新が頻繁に来ると、押し直しても同じ形で消える。入れ替えは保留フラグにし、claimした
+ジョブを全部回した後（`exec_pending_self_update`）で行う。自動更新（`maybe_auto_self_update`）は
+もともと`run_once`の後でしか入れ替えないので対象外
+
+### 終了したセッションの復旧（検討。未実装）
+
+会話の転記は`~/.claude/projects/<worktreeのパスを変換した名前>/`に残り、worktreeを消しても消えない。
+そのため**同じworktreeパスで`claude --continue --remote-control <名前>`を起動し直せば、会話ごと再開できる**
+見込み（worktreeが片付いていれば同じパスへ作り直す。未pushの作業はworktreeが残っているので、そのまま戻る）。
+画面の履歴に「再開」を足し、`RemoteSession`の行を`starting`へ戻して起動ジョブを積む形が最小。行の
+再利用（`tmuxSessionName`・`launchJobId`が一意）と、一覧に残す期間（今は終了後30分）の設計が要るため
+別Issue（#4874）で扱う
 
 ## 実装セッションと混ぜない
 

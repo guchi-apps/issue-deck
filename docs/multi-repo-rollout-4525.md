@@ -4,16 +4,13 @@
 配布状況の正はcallerファイル（[supported-repositories.md](supported-repositories.md)の注記と同じ）。
 配り方の一般論は [multi-repo-changes.md](multi-repo-changes.md)。
 
-## 現在の到達点（タグを配れる状態ではない）
+## 現在の到達点（2026-10-19 更新）
 
-| 前提 | 状態（2026-10-18） | 影響 |
+| 前提 | 状態 | 影響 |
 |---|---|---|
-| #4521・#4522・#4523・#4524 | PRはいずれも`develop`へマージ済み。**`main`へは未反映**（Issueはopen） | 共有タグ`workflows/vN`は`main`の先端から切るため、`develop`→`main`のリリースを通すまで新仕様のタグは作れない |
-| guchi-apps/docs#226 | PR `guchi-apps/docs#236`が未マージ（`00.check-user`＋`01.check-merge`） | 全アプリ共通ルールがまだ旧文面。Actions・ローカルでの参照確認ができない |
-| 最新タグ | `workflows/v53`（上の変更を含まない旧仕様） | **旧仕様のタグを配って本Issueの完了にしない**（Issue本文） |
-
-したがって展開（タグ公開・参照更新PR・実走）は上の2点が済むまで保留し、依存待ちとして登録した。
-本PRは先行できる「対象の確定と調査」だけを記録する。**本PRのマージは展開完了を意味しない**（途中PR）。
+| #4521・#4522・#4523・#4524 | **`main`へ反映済み**（#4723・#4734・#4737・#4749）。タグ`workflows/v54`はこれらすべてを含む（`git merge-base --is-ancestor`で確認） | 新仕様のタグを配れる |
+| guchi-apps/docs#226 | PR #236はマージ済み、Issueはclosed。`standards/work-issues.md`・`agent-rules/implementation.md`・`agent-rules/review.md`が追加された | Actions（`.shared-context/`）・ローカル（`~/apps/_docs`）が読む索引に載っている。ローカルの`_docs`チェックアウトは`git pull`していないため古く、反映確認は実セッションで行う（後述） |
+| 参照タグの配布 | `claude-review-develop.yml`・`release-develop-to-main.yml`は**導入済み全リポジトリが`workflows/v54`**（再調査の手順で確認。`db-console`・`morrow`の`v52`はコメント内の記述で、実際の`uses:`は`v54`。当初の「混在」の指摘は誤検出） | 参照更新は完了 |
 
 ## 対象の全体像（guchi-apps の非アーカイブ 27 リポジトリ）
 
@@ -29,9 +26,9 @@
 
 | 観点 | 結果 |
 |---|---|
-| `claude-review-develop.yml`・`release-develop-to-main.yml`のuses | 全て`workflows/v53`（`db-console`・`morrow`のrelease callerに`v52`と`v53`が混在、要確認） |
+| `claude-review-develop.yml`・`release-develop-to-main.yml`のuses | 全て`workflows/v54`（初回調査時の`v52`/`v53`混在はコメント内記述の誤検出。上の到達点を参照） |
 | `claude-issue-dispatch.yml`のuses／`prompts-ref` | **全て`v52`**。IssueのActions実装は#4680で廃止済みのため、このcallerはタグ配布の対象にせず、旧タグで動く配布先向けの互換扱い |
-| 異常 | `signaly`の`claude-issue-dispatch.yml`に`workflows/v10`の参照が残っている（`prompts-ref`は`v52`） |
+| 異常 | `signaly`の`claude-issue-dispatch.yml`にある`workflows/v10`はコメント内の記述で参照ではない。廃止済みの実装callerなので配布対象外 |
 | `CLAUDE.md`の固有ルール | `meisai-lab`・`car-care`・`status-hub`・`db-console`は11バイト（実質空）。`yoteiflow`（約353KB）・`morrow`（約273KB）・`kurashio`（約105KB）は大きく、旧「手作業は起案時に固定」の記述が残っていないかの個別確認が要る（後述） |
 
 ### B. 無人実行を持たない運用リポジトリ — 6
@@ -47,16 +44,23 @@
 | `gucchii-os`・`uptime-kuma`・`wifi-speed` | ワークフロー・`CLAUDE.md`とも無し。説明も無く用途不明。**導入するか対象外かの判断が要る**（セットアップIssue or 対象外の記録のどちらかをユーザーが決める） |
 | `sensor_260531`（リビング設置中）・`sensor_260218`（設置なし）| ラズパイセンサー。private・`master`/`main`運用。実機運用でコードの共通フロー対象外が自然だが、**未確認のため暫定**扱い |
 
-## 残る作業（依存待ちの後に実施）
+## 確認結果と残る作業
 
-1. `develop`→`main`のリリース（人が実施）後、`workflows/vN`を切る → 画面「新しいタグを切って配る」で全導入先へ配布PR
-2. `guchi-apps/docs#236`のマージ後、Actions（`.shared-context/`）・ローカル（`~/apps/_docs`）の双方で新ルールが読まれることの確認
-3. 大きい固有`CLAUDE.md`（`yoteiflow`・`morrow`・`kurashio`・`stockly`・`asset-manager`・`signaly`）の旧ルール矛盾確認 → 矛盾がある対象にだけ個別Issue（重複を探してから起票）
-4. `signaly`の`v10`参照、`db-console`・`morrow`のrelease callerの`v52`/`v53`混在の修正（配布PRで解消しなければ個別Issue）
-5. 新規アプリ雛形（`src/lib/new-app/scaffold.ts`）が新方式のまま届くことの確認
-6. 代表実走（Web・iOS含む・実機デプロイ・private運用）と、設定整合確認との区別した記録
-7. 新旧混在期間の互換確認（旧`71.manual-step`本文・ラベル・進行中セッション。未対応ホストへ新ジョブを送らない）
-8. 親Epic #4520 の残作業へ、上記の未了・取得不能・実走不能を反映
+| 項目 | 結果 |
+|---|---|
+| 参照タグの配布 | 完了（上記）。実装callerの`v52`は#4680で廃止済みのため意図的に残す |
+| 大きい固有`CLAUDE.md`の矛盾 | `yoteiflow`・`morrow`・`kurashio`・`stockly`・`signaly`・`asset-manager`の「手作業」「`71.manual-step`」を検索。ラベル表や個別の手作業の記述のみで、「手作業は起案時に固定する」ように新方式を妨げる記述は見つからなかった（旧`71.manual-step`は互換として読み続ける方針と整合）。個別Issueは起票しない |
+| 新規アプリ雛形 | `src/lib/new-app/scaffold.ts`は`workflowTag`を呼び出し側から受け取る作りで、固定タグを持たない。最新タグが渡れば新方式で届く |
+| 追加Issue | 固有コード・caller・実行ホスト設定の変更が必要と確認できた対象は無く、起票していない |
+| 共通自動化なし5件 | **全て対象外**（ユーザー判断 2026-10-19）。`uptime-kuma`は他リポジトリをクローンして使う死活監視ツールで更新対象が無い。`gucchii-os`はユーザーの学習用。`wifi-speed`は現在使っていない。`sensor_260531`・`sensor_260218`は実機運用。セットアップIssueは起票しない |
+
+### 未了（成功扱いにしない）
+
+1. **代表実走（Web・iOS含む・実機デプロイ・private運用）**: 未実施。ユーザーは「既に色々実施済みで問題が出ていないため、改めての実走は不要」との見解（2026-10-19）。**実走は省く**（ユーザー判断 2026-10-19）。完了条件の代表実走は未実施のまま、省略の判断として親Epicに記録する（成功扱いにはしない）。実環境でIssue起案→AI実行→リリース前後の依存待ち→本番確認を通す作業で、本番反映と人の確認を伴うため、このPRでは行っていない。実施したら設定整合確認と区別して記録する
+2. **docs#226の共通ルールの実参照**: 静的な参照経路は確認済み（2026-10-19）。`guchi-apps/docs`の`main`の`CLAUDE.md`が`agent-rules/implementation.md`・`review.md`・`standards/work-issues.md`を索引し、`implementation.md`も`work-issues.md`へリンクする。Actionsは`reusable-claude-review-develop.yml`が`.shared-context/`へcheckoutする。**未確認**: 実セッションが実際にこれらを読んで従った証跡（ローカル`~/apps/_docs`は未pullのため古い。`git pull`は指示があるまで行わない）
+3. **新旧混在の互換**: プロンプト上の確認は済み（`scripts/prompts/manual-step-agent.md`は旧`71.manual-step`本文を読み続け、テンプレートの見出しや手順が無い本文も目的から組み立てる。各実装プロンプトも旧雛形を互換用と明記）。**未確認**: 未対応ホストへ新ジョブを送らないことは、実機のホスト構成を見ないと確かめられない
+4. ~~共通自動化なし5件の扱い~~: 全て対象外で確定（上の表）
+5. **親Epic #4520への反映**: 上記1〜4を残作業として記載する
 
 ## 再調査の手順
 

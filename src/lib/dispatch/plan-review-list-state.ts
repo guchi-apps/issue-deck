@@ -8,12 +8,24 @@ import type { SessionPlanRequestView } from "@/lib/dispatch/session-plan-request
 import { checkUserReason } from "@/lib/github/approval-labels";
 
 /** Issue一覧の行に出す計画レビューの状態（#3607） */
-export type PlanReviewListState = "queued" | "creating" | "presented";
+export type PlanReviewListState = "queued" | "queued_overdue" | "creating" | "presented";
+
+/**
+ * 計画の承認を伏せる（「計画を承認」ボタン・承認待ちの橙・Remoteの強調を出さない）状態か（#4869）。
+ *
+ * 起動待ちも猶予内（`queued`）は作成中と同じに扱う。Issue詳細の承認パネル・通知・件数が読む
+ * `isPlanReviewJobCreating`と同じ線で、猶予を超えた起動待ち（`queued_overdue`）は承認できる状態へ戻す。
+ */
+export function isPlanReviewListStateHolding(state: PlanReviewListState | null): boolean {
+  return state === "queued" || state === "creating";
+}
 
 /**
  * 計画レビュー（G1）の状態を一覧の行向けに判定する。
  *
- * - `queued`: ジョブが起動待ち（`QUEUED`。#3772）。猶予を超えても起動するまでは出し続ける
+ * - `queued`: ジョブが起動待ち（`QUEUED`。#3772）で、積んでから猶予内
+ * - `queued_overdue`: 猶予を超えても起動していない。バッジは起動待ちのまま出し続けるが、
+ *   承認は伏せない（#4869。`isPlanReviewListStateHolding`）
  * - `creating`: ジョブが実行中、または成功から猶予内（`resolvePlanReviewJobPhase`。詳細画面と同じ）
  * - `presented`: 成功したジョブがあり、計画の承認待ち（`00.check-user`＋`01.check-plan`）のとき。
  *   承認待ちは`WAITING`ではなくラベルで見る（`WAITING`は期限切れで一覧から消えるため）。
@@ -34,7 +46,7 @@ export function resolvePlanReviewListState(params: {
   const job = findPlanReviewJobForIssue(params.jobs, params.repositoryFullName, params.issueNumber);
   if (job === null) return null;
   const phase = resolvePlanReviewJobPhase(job, params.now);
-  if (phase === "queued" || phase === "queued_overdue") return "queued";
+  if (phase === "queued" || phase === "queued_overdue") return phase;
   if (phase === "creating") return "creating";
   if (job.status !== "SUCCEEDED") return null;
   if (checkUserReason(params.labels) !== "plan") return null;

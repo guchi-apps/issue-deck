@@ -106,9 +106,9 @@ describe("resolveReleaseCandidateVerification", () => {
     expect(describeReleaseVerificationWait(v)).toBe("統合検証（開始待ち）の判定が出るまでマージできません");
   });
 
-  it("Mac検証の工程にいる統合検証はMac検証と分かる名前にする", () => {
+  it("iOS検証の工程にいる統合検証はiOS検証と分かる名前にする", () => {
     const v = resolve({ integration: "running", started: { aiReview: false, integration: true, mac: true } });
-    expect(v.progress?.checks[0].name).toBe("統合検証（Mac検証）");
+    expect(v.progress?.checks[0].name).toBe("統合検証（iOS検証）");
   });
 
   it("失敗・設定不足・要確認・対象変更を理由付きで分け、いちばん重いものを見出しにする", () => {
@@ -127,6 +127,31 @@ describe("resolveReleaseCandidateVerification", () => {
     const both = resolve({ aiReview: "needs_check", integration: "failed" });
     expect(both.problem?.label).toBe("検証失敗");
     expect(both.problem?.reasons).toHaveLength(2);
+  });
+
+  it("再実行が見込める invalidated は問題にせず進行中として出す（#4862）", () => {
+    const base = { aiReview: "invalidated", integration: "invalidated", enforced: true } as const;
+    const waiting = resolveReleaseCandidateVerification(
+      { ...base, rerun: { aiReview: true, integration: true }, started: { aiReview: false, integration: false, mac: false } },
+      true,
+    );
+    expect(waiting.problem).toBeNull();
+    expect(waiting.progress?.label).toBe("リリース検証待ち");
+    const running = resolveReleaseCandidateVerification(
+      { ...base, rerun: { aiReview: true, integration: true }, started: { aiReview: false, integration: true, mac: false } },
+      true,
+    );
+    expect(running.problem).toBeNull();
+    expect(running.progress?.label).toBe("リリース検証中");
+  });
+
+  it("再実行が見込めない invalidated は従来どおり問題にする（#4862）", () => {
+    const v = resolveReleaseCandidateVerification(
+      { aiReview: "passed", integration: "invalidated", enforced: true, rerun: { aiReview: true, integration: false } },
+      true,
+    );
+    expect(v.problem?.label).toBe("再検証が必要");
+    expect(v.progress).toBeNull();
   });
 
   it("問題と進行が同時にあるときは両方を返す（問題を隠さない）", () => {

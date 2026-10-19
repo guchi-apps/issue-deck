@@ -124,6 +124,11 @@ describe("ReleasePullRequestOverview（#4428）", () => {
     expect(sections.indexOf("今回リリースする変更")).toBeGreaterThan(sections.indexOf("今必要な対応"));
     // 6チェックはこのPR自身を候補として読む
     expect(screen.getByTestId("release-candidate-checks").textContent).toContain("候補PR #768");
+    // リリースPRにはCI・コードレビューが無いため出さず、Macは「iOS」と表示する（#4859）
+    const checks = screen.getByTestId("release-candidate-checks").textContent ?? "";
+    expect(checks).not.toMatch(/CI|コード/);
+    expect(checks).not.toContain("Mac");
+    expect(checks).toContain("iOS");
   });
 
   it("修正の取り込み中は操作不要と工程を出し、旧候補の結果を現在の検証として出さない", async () => {

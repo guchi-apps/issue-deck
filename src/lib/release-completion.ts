@@ -129,7 +129,7 @@ export type CompletionCheckState = "passed" | "failed" | "needs_check" | "pendin
 export type CompletionChecks = {
   aiReview: CompletionCheckState;
   integration: CompletionCheckState;
-  /** Mac検証。`passed`・`not_applicable`（設定が無いリポジトリ）以外は合格にしない */
+  /** iOS検証。`passed`・`not_applicable`（設定が無いリポジトリ）以外は合格にしない */
   mac: "passed" | "failed" | "pending" | "not_applicable" | "needs_setup" | "not_recorded" | "invalidated";
   /** 全体レビューの指摘の件数（起案に使う） */
   findingCount: number;
@@ -397,7 +397,7 @@ export function decideReleaseCompletion(
     }
     return { action: "create_fix", sourceKind };
   }
-  if (checks.mac === "failed" || checks.mac === "needs_setup") return { action: "stop", reason: "setup_missing", detail: "Mac検証" };
+  if (checks.mac === "failed" || checks.mac === "needs_setup") return { action: "stop", reason: "setup_missing", detail: "iOS検証" };
   if (unverifiedOnly) {
     // 統合検証が終わっていなければ待つ（終われば証跡に依存する未確認は再評価で解消し得る）
     if (checks.integration === "pending" || checks.integration === "not_run" || checks.integration === "invalidated") {
@@ -494,7 +494,7 @@ export type CompletionMergeObservation = {
   gateReasons: readonly string[];
   /** 要確認がユーザーの判断で解除できるものだけか（`isGateClearedByReviewDecisions`）。省略時はfalse */
   gateClearedByDecision?: boolean;
-  /** Mac検証が合格（または対象外）か */
+  /** iOS検証が合格（または対象外）か */
   macOk: boolean;
   ciState: "pending" | "success" | "failure" | "unknown";
   /**
@@ -723,7 +723,7 @@ export function describeMergeWait(reason: string | null): string | null {
     case "finalization_not_ready":
       return "公開準備（正式バンプと最終検証）がまだ完了していません";
     case "verification":
-      return "検証（全体レビュー・統合検証・Mac検証）の条件がまだ満たされていません";
+      return "検証（全体レビュー・統合検証・iOS検証）の条件がまだ満たされていません";
     case "ci_pending":
       return "CIの完了を待っています";
     case "ci_unknown":

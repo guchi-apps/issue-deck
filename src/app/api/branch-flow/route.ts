@@ -96,6 +96,12 @@ async function handleGET() {
 
   const failedRepositories: string[] = [];
 
+  // 新方式のリリース候補で最後に公開した版（#4848）。候補PRのタイトルは版を含まないため、
+  // 一覧の版をここで補う。取れなくても画面は版無しで出せるので、失敗は握りつぶす。
+  const releasedVersionByRepository = await loadReleasedVersions(
+    repositories.map((repository) => repository.fullName),
+  );
+
   const results = await Promise.all(
     repositories.map(async (repository): Promise<RepositoryBranchStatus | null> => {
       const checkedBranches = branchesByRepositoryId.get(repository.id) ?? [];
@@ -134,6 +140,7 @@ async function handleGET() {
           hasDeployWorkflow,
           mainHead: lookup.mainHead,
           developHeadOid: lookup.developHeadOid,
+          releasedVersion: releasedVersionByRepository.get(repository.fullName) ?? null,
         };
       } catch (error) {
         // 1リポジトリの取得失敗で画面全体を落とさない。取れなかったことだけを返す。
@@ -150,4 +157,22 @@ async function handleGET() {
     failedRepositories: failedRepositories.sort((a, b) => a.localeCompare(b)),
   };
   return NextResponse.json(response);
+}
+
+/** リポジトリごとに、いちばん新しく公開（`consumed`）した版を返す */
+async function loadReleasedVersions(repositoryFullNames: string[]): Promise<Map<string, string>> {
+  const byRepository = new Map<string, string>();
+  try {
+    const rows = await db.releaseVersionReservation.findMany({
+      where: { repositoryFullName: { in: repositoryFullNames }, status: "consumed", consumedAt: { not: null } },
+      orderBy: { consumedAt: "desc" },
+      select: { repositoryFullName: true, version: true },
+    });
+    for (const row of rows) {
+      if (!byRepository.has(row.repositoryFullName)) byRepository.set(row.repositoryFullName, row.version);
+    }
+  } catch (error) {
+    console.error("[GET /api/branch-flow] released version lookup failed", error);
+  }
+  return byRepository;
 }

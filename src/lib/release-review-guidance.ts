@@ -22,8 +22,8 @@ export function describeReleaseGuidance(v: ReleaseVerificationSummary): ReleaseG
     if (review.unverifiedScope?.trim() || (review.state === "needs_check" && review.findings.length === 0)) result.push({ kind: "attention", title: "確認できていない範囲があります", next: "未確認の理由を開いてください。検証結果待ちなら到着後の再評価、環境不足なら環境の解消、公開後にしか確認できない作業なら実施時期の判断が必要です。同じ条件で再実行を繰り返しても解消するとは限りません。" });
   }
   if (v.integration.state === "needs_check") result.push({ kind: "attention", title: "統合検証に確認事項があります", next: "統合検証の詳細で不足している検証・設定を確認してください。AIの指摘への判断では解除されません。" });
-  if (v.mac.state === "failed" || v.mac.state === "needs_setup" || v.mac.state === "invalidated") result.push({ kind: "attention", title: "Mac検証に対応が必要です", next: "Mac検証の詳細でビルドの失敗・接続や設定の不足を確認してください。" });
-  if (v.mac.state === "running") result.push({ kind: "waiting", title: "Mac検証の結果待ちです", next: "Macでのビルド確認の結果を待っています。下の詳細で進行状況を確認してください。" });
+  if (v.mac.state === "failed" || v.mac.state === "needs_setup" || v.mac.state === "invalidated") result.push({ kind: "attention", title: "iOS検証に対応が必要です", next: "iOS検証の詳細でビルドの失敗・接続や設定の不足を確認してください。" });
+  if (v.mac.state === "running") result.push({ kind: "waiting", title: "iOS検証の結果待ちです", next: "iOSでのビルド確認の結果を待っています。下の詳細で進行状況を確認してください。" });
   if (result.length === 0) result.push({ kind: "complete", title: "この画面の検証に対応待ちはありません", next: "公開内容と本番公開の条件を確認してください。公開を止めない改善提案への判断は任意です。公開承認・CIなど、他の公開条件は別途確認されます。" });
   return result;
 }

@@ -6,6 +6,7 @@
 #   scripts/start-remote-session.sh <owner> <repo> <セッション名>          起動する
 #   scripts/start-remote-session.sh --kill <owner> <repo> <セッション名>   畳んでworktreeを片付ける
 #   scripts/start-remote-session.sh --sweep                                 tmuxの無いworktreeを片付ける
+#   scripts/start-remote-session.sh --kill-name <セッション名>              名前だけで畳む（無操作の自動終了。#4871）
 #
 # 呼び出し経路:
 #   issue-deckの画面「リモートセッション」→ ジョブキュー（kind=REMOTE_SESSION / REMOTE_SESSION_KILL）
@@ -52,6 +53,7 @@ NAME_PATTERN='^[A-Za-z0-9_-]+-remote-[a-z0-9]{8}$'
 usage() {
   echo "Usage: scripts/start-remote-session.sh [--kill] <owner> <repo> <セッション名>" >&2
   echo "       scripts/start-remote-session.sh --sweep" >&2
+  echo "       scripts/start-remote-session.sh --kill-name <セッション名>" >&2
 }
 
 worktree_base_for() {
@@ -98,6 +100,7 @@ for arg in "$@"; do
   case "$arg" in
     --kill) MODE=kill ;;
     --sweep) MODE=sweep ;;
+    --kill-name) MODE=kill_name ;;
     -h | --help)
       usage
       exit 0
@@ -122,6 +125,26 @@ if [[ "$MODE" == "sweep" ]]; then
     printf '%s\n' "$live" | grep -qxF "$name" && continue
     mtime="$(stat -c %Y "$dir" 2>/dev/null || echo "$now")"
     ((now - mtime >= min_age)) || continue
+    remove_worktree "$dir"
+  done
+  exit 0
+fi
+
+# --- 名前だけで畳む: pollerの無操作の自動終了（#4871）から呼ぶ -------------------------
+# セッション名にはリポジトリ名を`-`へ置き換えた形しか残らないため、worktreeは末尾8文字
+# （起動ごとにランダム）で`~/apps/*-worktrees/remote-<8文字>`を引く
+if [[ "$MODE" == "kill_name" ]]; then
+  if [[ $# -ne 1 || ! "$1" =~ $NAME_PATTERN ]]; then
+    usage
+    exit 2
+  fi
+  SESSION_NAME="$1"
+  if tmux has-session -t "=$SESSION_NAME" 2>/dev/null; then
+    tmux kill-session -t "=$SESSION_NAME"
+    echo "tmuxセッション「$SESSION_NAME」を終了しました。"
+  fi
+  shopt -s nullglob
+  for dir in "$HOME"/apps/*-worktrees/remote-"$(session_suffix "$SESSION_NAME")"; do
     remove_worktree "$dir"
   done
   exit 0

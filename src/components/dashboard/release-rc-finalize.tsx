@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 
+import { PRODUCTION_MERGE_FILLED } from "@/components/dashboard/pull-request-merge-button";
 import { ProductionVerificationBox } from "@/components/dashboard/release-rc-production";
 import { Button } from "@/components/ui/button";
 import { formatDateTime, formatMonthDayTime } from "@/lib/format-date-time";
@@ -382,6 +383,13 @@ function ApprovalBox({
   );
 }
 
+const BUMP_KIND_OPTIONS: { value: BumpKind | "auto"; label: string }[] = [
+  { value: "auto", label: "自動判定" },
+  { value: "major", label: "メジャー" },
+  { value: "minor", label: "マイナー" },
+  { value: "patch", label: "パッチ" },
+];
+
 export function ReleaseRcFinalizePanel({
   candidate,
   finalization,
@@ -394,6 +402,8 @@ export function ReleaseRcFinalizePanel({
   onChanged: () => void;
 }) {
   const [bumpKind, setBumpKind] = useState<BumpKind | "auto">("auto");
+  // 上げ幅は既定の自動判定で足りるため、手動で選ぶ欄はリンクを押したときだけ開く（#4858）
+  const [bumpOpen, setBumpOpen] = useState(false);
   const [confirming, setConfirming] = useState(false);
   // 全体レビューが合格していない候補で、結果を承知で進むと明示したか（#4807）
   const [waiveAiReview, setWaiveAiReview] = useState(false);
@@ -543,27 +553,8 @@ export function ReleaseRcFinalizePanel({
               最終検証（バンプ後のCI・統合検証）に合格したら自動で本番公開します。
             </p>
           ) : (
-            <p className="text-[12px]">
-              revision {contract!.revision} が全体レビュー・統合検証に合格しています。「本番公開へ進む（公開承認）」を押すと、版ファイルと更新履歴だけを変更するコミットを候補へ積み、
-              最終検証に合格したら自動で本番公開します。最終検証の後に承認し直す必要はありません。
-            </p>
+            <p className="text-[12px]">revision {contract!.revision} が全体レビュー・統合検証に合格しています。</p>
           )}
-          <label className="flex flex-wrap items-center gap-2 text-[12px]" htmlFor="finalize-bump-kind">
-            <span className="font-semibold">上げ幅</span>
-            <select
-              id="finalize-bump-kind"
-              className="h-8 rounded-md border bg-background px-2 text-[12px]"
-              value={bumpKind}
-              onChange={(e) => setBumpKind(e.target.value as BumpKind | "auto")}
-              disabled={busy}
-            >
-              <option value="auto">最終公開差分から自動判定</option>
-              <option value="patch">patch</option>
-              <option value="minor">minor</option>
-              <option value="major">major</option>
-            </select>
-            {bumpKind !== "auto" && <span className="text-muted-foreground">{BUMP_KIND_CRITERIA[bumpKind]}</span>}
-          </label>
           {confirming ? (
             <>
               <ApprovalConfirm repositoryFullName={repositoryFullName} candidate={candidate} target={contract!} bumpPolicy={bumpKind} reusing={reusing} />
@@ -581,7 +572,12 @@ export function ReleaseRcFinalizePanel({
                 </label>
               )}
               <div className="flex flex-wrap gap-2">
-                <Button size="sm" onClick={start} disabled={busy || (contract!.requiresAiReviewWaiver && !waiveAiReview)}>
+                <Button
+                  size="sm"
+                  className={cn(!contract!.requiresAiReviewWaiver && PRODUCTION_MERGE_FILLED)}
+                  onClick={start}
+                  disabled={busy || (contract!.requiresAiReviewWaiver && !waiveAiReview)}
+                >
                   {busy ? "公開準備を始めています…" : reusing ? "公開準備をやり直す" : "公開を承認して進める"}
                 </Button>
                 <Button size="sm" variant="outline" onClick={() => setConfirming(false)} disabled={busy}>
@@ -591,7 +587,12 @@ export function ReleaseRcFinalizePanel({
             </>
           ) : (
             <div>
-              <Button size="sm" variant={contract!.requiresAiReviewWaiver ? "outline" : "default"} onClick={() => setConfirming(true)}>
+              <Button
+                size="sm"
+                variant={contract!.requiresAiReviewWaiver ? "outline" : "default"}
+                className={cn(!contract!.requiresAiReviewWaiver && PRODUCTION_MERGE_FILLED)}
+                onClick={() => setConfirming(true)}
+              >
                 {reusing
                   ? "公開準備をやり直す（承認済み）"
                   : contract!.requiresAiReviewWaiver
@@ -599,6 +600,42 @@ export function ReleaseRcFinalizePanel({
                     : "本番公開へ進む（公開承認）"}
               </Button>
             </div>
+          )}
+          {bumpOpen ? (
+            <fieldset className="flex flex-col gap-1.5" data-testid="release-rc-bump-kind">
+              <legend className="mb-1.5 text-[11.5px] text-muted-foreground">上げ幅</legend>
+              <div className="inline-flex flex-wrap self-start overflow-hidden rounded-md border">
+                {BUMP_KIND_OPTIONS.map((option) => (
+                  <label
+                    key={option.value}
+                    className={cn(
+                      "cursor-pointer border-r px-3 py-1 text-[12px] last:border-r-0 focus-within:outline focus-within:outline-2 focus-within:outline-ring",
+                      bumpKind === option.value && "bg-muted font-semibold",
+                    )}
+                  >
+                    <input
+                      type="radio"
+                      name="finalize-bump-kind"
+                      className="sr-only"
+                      value={option.value}
+                      checked={bumpKind === option.value}
+                      onChange={() => setBumpKind(option.value)}
+                      disabled={busy}
+                    />
+                    {option.label}
+                  </label>
+                ))}
+              </div>
+              <p className="text-[11.5px] text-muted-foreground">{bumpKind === "auto" ? "最終公開差分から自動で判定します" : BUMP_KIND_CRITERIA[bumpKind]}</p>
+            </fieldset>
+          ) : (
+            <button
+              type="button"
+              className="self-start text-[11.5px] text-muted-foreground underline underline-offset-2 hover:text-foreground"
+              onClick={() => setBumpOpen(true)}
+            >
+              手動で上げ幅を設定する
+            </button>
           )}
         </div>
       )}

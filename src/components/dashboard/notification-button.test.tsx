@@ -155,6 +155,7 @@ function renderButton(options: RenderOptions = {}) {
 }
 
 afterEach(() => {
+  window.localStorage.clear();
   releaseStatusesMock.current = [];
   releaseStatusesEnabled.calls = [];
   releaseStatusesRefetch.mockClear();
@@ -343,5 +344,80 @@ describe("NotificationButton 自動更新", () => {
       expect(releaseStatusesRefetch).toHaveBeenCalledTimes(2);
       expect(refreshIssuesMock).toHaveBeenCalledTimes(2);
     });
+  });
+});
+
+/** #4857。×で伏せた通知は一覧とバッジから外れ、「元に戻す」「消した通知」から戻せる */
+describe("NotificationButton 通知を消す", () => {
+  const issues = [
+    makeIssue({ id: "a", number: 1, title: "計画を見てほしいIssue", labels: [label("00.check-user")] }),
+    makeIssue({ id: "b", number: 2, title: "質問に答えてほしいIssue", labels: [label("00.check-user")] }),
+  ];
+
+  it("×を押すと一覧とバッジから外れ、見出しに消した件数が出る", () => {
+    const { container } = renderButton({ issues });
+    fireEvent.click(screen.getByLabelText("対応が必要なもの"));
+
+    fireEvent.click(screen.getByLabelText("「#1 計画を見てほしいIssue」の通知を消す"));
+
+    expect(screen.queryByText("#1 計画を見てほしいIssue")).toBeNull();
+    expect(container.querySelector(".bg-amber-500")?.textContent).toBe("1");
+    expect(screen.getByLabelText("対応が必要なもの").getAttribute("title")).toBe(
+      "対応が必要なもの（1件）",
+    );
+    expect(screen.getByText("1件・消した通知1件")).toBeTruthy();
+    expect(screen.getByText("消した通知 1件")).toBeTruthy();
+  });
+
+  it("直後の「元に戻す」で一覧へ戻る", () => {
+    renderButton({ issues });
+    fireEvent.click(screen.getByLabelText("対応が必要なもの"));
+
+    fireEvent.click(screen.getByLabelText("「#1 計画を見てほしいIssue」の通知を消す"));
+    fireEvent.click(screen.getByText("元に戻す"));
+
+    expect(screen.getByText("#1 計画を見てほしいIssue")).toBeTruthy();
+    expect(screen.queryByText(/消した通知/)).toBeNull();
+  });
+
+  it("「消した通知」を開いて個別に戻せる", () => {
+    renderButton({ issues });
+    fireEvent.click(screen.getByLabelText("対応が必要なもの"));
+    fireEvent.click(screen.getByLabelText("「#2 質問に答えてほしいIssue」の通知を消す"));
+
+    fireEvent.click(screen.getByText("表示"));
+    fireEvent.click(screen.getByLabelText("「#2 質問に答えてほしいIssue」の通知を戻す"));
+
+    expect(screen.getByText("#2 質問に答えてほしいIssue")).toBeTruthy();
+    expect(screen.queryByText(/消した通知/)).toBeNull();
+  });
+
+  it("確認待ちの理由が変わった通知は伏せたままにしない", () => {
+    const { rerender } = renderButton({ issues });
+    fireEvent.click(screen.getByLabelText("対応が必要なもの"));
+    fireEvent.click(screen.getByLabelText("「#1 計画を見てほしいIssue」の通知を消す"));
+    expect(screen.queryByText("#1 計画を見てほしいIssue")).toBeNull();
+
+    rerender(
+      <NotificationProvider
+        repositories={[repository("guchi-apps/issue-deck")]}
+        issues={[
+          makeIssue({
+            id: "a",
+            number: 1,
+            title: "計画を見てほしいIssue",
+            labels: [label("00.check-user"), label("01.check-plan")],
+          }),
+          issues[1],
+        ]}
+        pullRequests={[]}
+        onRefreshIssues={refreshIssuesMock}
+        onRefreshPullRequests={refreshPullRequestsMock}
+      >
+        <NotificationButton onOpenTarget={() => {}} onOpenCheckUserView={() => {}} onOpenFlow={() => {}} />
+      </NotificationProvider>,
+    );
+
+    expect(screen.getByText("#1 計画を見てほしいIssue")).toBeTruthy();
   });
 });

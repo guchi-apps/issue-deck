@@ -1,7 +1,17 @@
 "use client";
 
-import { createContext, useCallback, useContext, useMemo, useRef, useState, type ReactNode } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 
+import { usePersistedState } from "@/hooks/use-persisted-state";
 import { useReleaseUncheckedCount } from "@/hooks/use-release-unchecked-count";
 import { useRepositoryReleaseStatuses } from "@/hooks/use-repository-release-statuses";
 import {
@@ -13,6 +23,14 @@ import {
   type NotificationGroup,
   type NotificationItem,
 } from "@/lib/notifications";
+import {
+  addDismissal,
+  parseDismissals,
+  pruneDismissals,
+  removeDismissal,
+  splitDismissedNotifications,
+  type NotificationDismissal,
+} from "@/lib/notification-dismissals";
 import {
   countReleaseActivity,
   selectVisibleReleaseStatuses,
@@ -44,8 +62,21 @@ const POLL_INTERVAL_MS = 30_000;
  */
 const MIN_FETCHING_MS = 500;
 
+/**
+ * ×で伏せた通知の保存先（#4857）。**ブラウザごと**で、PCとスマホでは別々に伏せる。
+ * 端末をまたいで揃えるにはDBへ置く必要があり、そこまでの重さは要らないと判断した
+ */
+const DISMISSALS_STORAGE_KEY = "issue-deck:notification-dismissals";
+
 type NotificationState = {
+  /** 表示する通知。×で伏せたもの（`dismissedItems`）は含まない */
   items: NotificationItem[];
+  /** ×で伏せている通知（#4857）。状態が変わったものは自動で`items`へ戻る */
+  dismissedItems: NotificationItem[];
+  /** 通知を伏せる（#4857）。一覧からもバッジの件数からも外れる */
+  dismiss: (item: NotificationItem) => void;
+  /** 伏せた通知を戻す（「元に戻す」「戻す」） */
+  restore: (id: string) => void;
   groups: { group: NotificationGroup; items: NotificationItem[] }[];
   /**
    * ベルに重ねる件数バッジの数字（#1936）。**手作業待ちを含まない**ので`items.length`とは
@@ -104,6 +135,9 @@ type NotificationState = {
 
 const EMPTY_STATE: NotificationState = {
   items: [],
+  dismissedItems: [],
+  dismiss: () => {},
+  restore: () => {},
   groups: [],
   badgeCount: 0,
   countLabel: "0件",
@@ -253,28 +287,72 @@ export function NotificationProvider({
     onRefreshPullRequests,
   ]);
 
+  const [storedDismissals, setDismissals] = usePersistedState<NotificationDismissal[]>(
+    DISMISSALS_STORAGE_KEY,
+    [],
+  );
+  // 保存値は古い版・手で壊された値でも落ちないよう検めてから使う
+  const dismissals = useMemo(() => parseDismissals(storedDismissals), [storedDismissals]);
+  const dismiss = useCallback(
+    (item: NotificationItem) =>
+      setDismissals((current) => addDismissal(parseDismissals(current), item, Date.now())),
+    [setDismissals],
+  );
+  const restore = useCallback(
+    (id: string) => setDismissals((current) => removeDismissal(parseDismissals(current), id)),
+    [setDismissals],
+  );
+
+  // 左メニューで非表示にしたリポジトリは、通知ベルの項目からも件数からも外す（#2279）。
+  // **絞るのはここ1か所**——項目だけ非表示ぶんを含んでいた（#2167は「取りこぼしを防ぐ
+  // 場所」として意図的に残していた）が、非表示にした以上は開いた先に何も無い。
+  // APIの母集団は絞らない（スマホのリポジトリ画面が同じ結果でバッジを出しており、
+  // あちらは「すべて表示する」で非表示のリポジトリも並べる）
+  const visibleReleaseStatuses = useMemo(
+    () => selectVisibleReleaseStatuses(releaseStatuses, repositories),
+    [releaseStatuses, repositories],
+  );
+  const allItems = useMemo(
+    () =>
+      buildNotifications({
+        issues,
+        pullRequests,
+        releaseStatuses: visibleReleaseStatuses,
+        checkUserRunningIssueIds,
+        sessions,
+        // 保留中は件数からも一覧からも外してあるので、ベルからも外す（#2398）
+        snoozes,
+        now,
+      }),
+    [issues, pullRequests, visibleReleaseStatuses, checkUserRunningIssueIds, sessions, snoozes, now],
+  );
+
+  // もう効かない伏せた記録を片付ける（#4857）。対象が一覧から消えた記録まで消してよいのは、
+  // 取り直しが済んで材料がそろっているときだけ（`pruneDismissals`）
+  const settled = fetchedAt !== null && !isSelfFetching && !isRefreshingPullRequests;
+  useEffect(() => {
+    const next = pruneDismissals(dismissals, allItems, settled);
+    if (next !== dismissals) setDismissals([...next]);
+  }, [dismissals, allItems, settled, setDismissals]);
+
   const value = useMemo<NotificationState>(() => {
-    // 左メニューで非表示にしたリポジトリは、通知ベルの項目からも件数からも外す（#2279）。
-    // **絞るのはここ1か所**——項目だけ非表示ぶんを含んでいた（#2167は「取りこぼしを防ぐ
-    // 場所」として意図的に残していた）が、非表示にした以上は開いた先に何も無い。
-    // APIの母集団は絞らない（スマホのリポジトリ画面が同じ結果でバッジを出しており、
-    // あちらは「すべて表示する」で非表示のリポジトリも並べる）
-    const visibleReleaseStatuses = selectVisibleReleaseStatuses(releaseStatuses, repositories);
-    const items = buildNotifications({
-      issues,
-      pullRequests,
-      releaseStatuses: visibleReleaseStatuses,
-      checkUserRunningIssueIds,
-      sessions,
-      // 保留中は件数からも一覧からも外してあるので、ベルからも外す（#2398）
-      snoozes,
-      now,
-    });
+    // ×で伏せたもの（#4857）は一覧からもバッジの件数からも外し、見出しの内訳にだけ数を出す
+    const { visible: items, dismissed: dismissedItems } = splitDismissedNotifications(
+      allItems,
+      dismissals,
+    );
+    const countLabel = describeNotificationCount(items);
     return {
       items,
+      dismissedItems,
+      dismiss,
+      restore,
       groups: groupNotifications(items),
       badgeCount: countBadgeNotifications(items),
-      countLabel: describeNotificationCount(items),
+      countLabel:
+        dismissedItems.length > 0
+          ? `${countLabel}・消した通知${dismissedItems.length}件`
+          : countLabel,
       hasError: hasErrorNotification(items),
       releaseMergePending: countReleaseMergePending(visibleReleaseStatuses),
       releaseActivity: countReleaseActivity(visibleReleaseStatuses),
@@ -288,14 +366,13 @@ export function NotificationProvider({
       repositories,
     };
   }, [
+    allItems,
+    dismissals,
+    dismiss,
+    restore,
+    visibleReleaseStatuses,
     issues,
     repositories,
-    pullRequests,
-    checkUserRunningIssueIds,
-    sessions,
-    snoozes,
-    now,
-    releaseStatuses,
     releaseUncheckedCount,
     refresh,
     isSelfFetching,

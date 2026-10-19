@@ -1,6 +1,6 @@
 "use client";
 
-import { BranchFlowView } from "@/components/dashboard/branch-flow-view";
+import { BranchFlowView, type BranchFlowReleaseHistory } from "@/components/dashboard/branch-flow-view";
 import { MobileDispatchStatusButton } from "@/components/dashboard/mobile/mobile-dispatch-status-button";
 import { MobileNotificationButton } from "@/components/dashboard/mobile/mobile-notification-button";
 import type { IosFixIssueOrigin } from "@/components/dashboard/ios-release-group-panel";
@@ -29,6 +29,8 @@ type MobileFlowScreenProps = {
   onMerged: (pullRequest: PullRequestSummary) => void;
   /** iOS配布失敗の「修正Issueを起案」（#3784）。`BranchFlowView`へそのまま渡す */
   onDraftIosFixIssue?: (draft: IosDistributionFixIssueDraft, origin: IosFixIssueOrigin) => void;
+  /** 「過去のリリース」の追加取得（#4844）。`BranchFlowView`へそのまま渡す */
+  releaseHistory?: BranchFlowReleaseHistory;
 };
 
 /**
@@ -55,6 +57,7 @@ export function MobileFlowScreen({
   onRefresh,
   onMerged,
   onDraftIosFixIssue,
+  releaseHistory,
 }: MobileFlowScreenProps) {
   return (
     <BranchFlowView
@@ -71,6 +74,7 @@ export function MobileFlowScreen({
       onRefresh={onRefresh}
       onMerged={onMerged}
       onDraftIosFixIssue={onDraftIosFixIssue}
+      releaseHistory={releaseHistory}
       /* 引っ張って更新（#1958）。ブランチ状況・PR一覧・デプロイ状況の取り直しをまとめて
          起こす`onRefresh`をそのまま渡す。**完了は待てない**（取り直しのきっかけを作る
          同期関数のため）ので、「更新中…」の表示は`isRefreshing`で保つ */
