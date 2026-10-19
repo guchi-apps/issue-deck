@@ -1,3 +1,4 @@
+import { Prisma } from "@prisma/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { OUT_OF_BAND_JOB_KIND_CAPABILITY } from "./dispatch-job";
@@ -395,6 +396,32 @@ describe("enqueueDispatchJob のモデル", () => {
     expect(dispatchJobCreate.mock.calls[0][0].data.claudeModel).toBe("fable");
     if (!result.ok) return;
     expect(result.job.claudeModel).toBe("fable");
+  });
+
+  // #4853。「おまかせ」の判定の記録。渡さない起動（既存の経路）は全列nullのまま
+  it("判定の記録を3列へ保存し、渡さなければnullのまま積む", async () => {
+    await enqueueDispatchJob({
+      repositoryFullName: REPOSITORY,
+      issueNumber: 1311,
+      hostName: "subpc",
+      claudeModel: "sonnet",
+      modelPick: { source: "jev", model: "opus", probabilities: { opus: 0.6, sonnet: 0.4 } },
+      requestedByUserId: null,
+      now: NOW,
+    });
+    expect(dispatchJobCreate.mock.calls[0][0].data).toMatchObject({
+      claudeModel: "sonnet",
+      modelPickSource: "jev",
+      modelPickModel: "opus",
+      modelPickProbabilities: { opus: 0.6, sonnet: 0.4 },
+    });
+
+    dispatchJobCreate.mockClear();
+    await enqueue();
+    const data = dispatchJobCreate.mock.calls[0][0].data;
+    expect(data.modelPickSource).toBeNull();
+    expect(data.modelPickModel).toBeNull();
+    expect(data.modelPickProbabilities).toBe(Prisma.DbNull);
   });
 
   // `agent`と違い、ホストの申告では塞がない。`--model`はどのバージョンのClaude Codeでも

@@ -391,6 +391,8 @@ describe("StartImplementationDialog", () => {
       agent: "claude",
       // 選ばなければ設定（設定 ＞ 実行）の値が最初から選ばれている（#3106）
       model: "sonnet",
+      // 判定を走らせずに積んだので、人が選んだ起動として残す（#4853）
+      modelPick: { source: "manual", model: null, probabilities: null },
     });
     await waitFor(() => expect(updateIssue).toHaveBeenCalledTimes(1));
     expect(updateIssue.mock.calls[0][0].labels).toContain(LOCAL_LABEL_NAME);
@@ -634,6 +636,29 @@ describe("StartImplementationDialog", () => {
         clickStart();
         await waitFor(() => expect(enqueue).toHaveBeenCalledTimes(1));
         expect(enqueue.mock.calls[0][0].model).toBe("opus");
+        // 判定の経路と判定が出したモデルも一緒に積む（#4853）
+        expect(enqueue.mock.calls[0][0].modelPick).toEqual({
+          source: "ai",
+          model: "opus",
+          probabilities: null,
+        });
+      });
+
+      // #4853。上書きした記録は「判定が出したモデル」と積んだモデルの食い違いとして残す
+      it("判定の後に別のモデルへ切り替えて積むと、判定の記録はそのまま残る", async () => {
+        dispatchState.hosts = [makeHost()];
+        renderDialog({ includeDispatchTargets: true, claudeLocalModel: "pick" });
+
+        fireEvent.click(screen.getByRole("radio", { name: /^サブPC/ }));
+        await waitFor(() => expect(screen.getByText(/調査から始まるためです/)).toBeTruthy());
+        fireEvent.click(screen.getByRole("radio", { name: /^Sonnet/ }));
+
+        clickStart();
+        await waitFor(() => expect(enqueue).toHaveBeenCalledTimes(1));
+        expect(enqueue.mock.calls[0][0]).toMatchObject({
+          model: "sonnet",
+          modelPick: { source: "ai", model: "opus", probabilities: null },
+        });
       });
 
       it("判定が終わるまで開始を押させない", async () => {

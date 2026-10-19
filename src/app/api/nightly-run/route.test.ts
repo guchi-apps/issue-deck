@@ -112,6 +112,34 @@ describe("/api/nightly-run", () => {
     expect(data.reservedResetsAt).toEqual(new Date(RESETS_AT));
   });
 
+  /** #4853: 「おまかせ」の判定の記録を予定へ残し、起動時にジョブへ写す */
+  it("モデルと一緒に送られた判定の記録を予定へ残す", async () => {
+    const response = await POST(
+      request({
+        ...VALID_BODY,
+        model: "sonnet",
+        modelPick: { source: "jev", model: "opus", probabilities: { opus: 0.55, sonnet: 0.45 } },
+      }),
+    );
+
+    expect(response.status).toBe(201);
+    expect(createEntry.mock.calls[0][0].data).toMatchObject({
+      claudeModel: "sonnet",
+      modelPickSource: "jev",
+      modelPickModel: "opus",
+      modelPickProbabilities: { opus: 0.55, sonnet: 0.45 },
+    });
+  });
+
+  it("モデルを指定しない予定には判定の記録を残さない", async () => {
+    await POST(request({ ...VALID_BODY, modelPick: { source: "manual" } }));
+
+    expect(createEntry.mock.calls[0][0].data).toMatchObject({
+      modelPickSource: null,
+      modelPickModel: null,
+    });
+  });
+
   /** #2995: 枠を取れなくても積める（起動の判定側が枠の状態だけで待つ） */
   it("枠を取得できなくても「次の5時間枠」に積める", async () => {
     readClaudeWindowSnapshot.mockResolvedValue(null);

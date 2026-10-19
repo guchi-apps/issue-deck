@@ -5,6 +5,7 @@ import { useCallback, useEffect, useState } from "react";
 
 import { fetchWithTimeout } from "@/lib/fetch-with-timeout";
 import type { ClaudeLocalModel, ClaudeModel, CodexLocalModel } from "@/lib/app-settings";
+import type { ModelPickRecord } from "@/lib/claude/model-pick-record";
 import {
   isActiveDispatchJobStatus,
   type DispatchAgent,
@@ -300,6 +301,11 @@ export function useDispatchState(enabled: boolean) {
        */
       model?: ClaudeModel | CodexLocalModel | null;
       /**
+       * 「おまかせ」の判定の記録（#4853）。「実装を開始」ダイアログだけが渡す。
+       * 省略・`null`は送らない（記録しない）。`model`を送らない起動ではAPIが読まない。
+       */
+      modelPick?: ModelPickRecord | null;
+      /**
        * 別のAIへ引き継いで起動するときの、引き継ぎ元のエージェント（#3496）。
        * **実装セッション（`LAUNCH`）でだけ意味がある。** 指定すると、サブPCのpollerが元セッションの
        * やり取りとブランチの状態を要約し、元セッションを止めてから新しいセッションを起こす。
@@ -323,6 +329,7 @@ export function useDispatchState(enabled: boolean) {
             // 「設定に従う」（null）はキーごと送らない。APIは`model`の有無で
             // 「指定なし」と「未知の値」を区別する（未知は400）
             ...(params.model ? { model: params.model } : {}),
+            ...(params.model && params.modelPick ? { modelPick: params.modelPick } : {}),
             ...(params.handoffFrom
               ? {
                   handoffFrom: params.handoffFrom,

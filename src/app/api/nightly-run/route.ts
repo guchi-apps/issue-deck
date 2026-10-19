@@ -2,7 +2,9 @@ import { NextResponse, type NextRequest } from "next/server";
 
 import { parseClaudeLocalModel, parseCodexLocalModel } from "@/lib/app-settings";
 import { requireUserId } from "@/lib/auth-user";
+import { parseModelPickRecord } from "@/lib/claude/model-pick-record";
 import { db } from "@/lib/db";
+import { modelPickRecordColumns } from "@/lib/dispatch/jobs";
 import {
   DEFAULT_DISPATCH_AGENT,
   parseDispatchAgent,
@@ -94,6 +96,9 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "invalid_request" }, { status: 400 });
     }
   }
+  // 「おまかせ」の判定の記録（#4853。`POST /api/dispatch`と同じ扱い）。起動時にジョブへ写す
+  const modelPick =
+    claudeModel || codexModel ? parseModelPickRecord(payload?.modelPick, agent) : null;
   const optionLabels = Array.isArray(payload?.optionLabels)
     ? payload.optionLabels.filter((item: unknown): item is string => typeof item === "string")
     : [];
@@ -158,6 +163,7 @@ export async function POST(request: NextRequest) {
         agent,
         claudeModel,
         codexModel,
+        ...modelPickRecordColumns(modelPick),
         optionLabels,
         kind,
         reservedResetsAt: reservedResetsAt === null ? null : new Date(reservedResetsAt),
