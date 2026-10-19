@@ -174,12 +174,12 @@ describe("PullRequestList", () => {
     expect(screen.getByTestId("merge-hold").textContent).toContain("マージ前の確認待ち");
   });
 
-  it("6チェックを2グループ（このPR／リリース候補）に分けて出す（#4427）", () => {
+  it("通常PRはこのPRの3チェックだけを出し、リリース候補は出さない（#4841）", () => {
     renderList([makePullRequest({ ciState: "success", mergeable: false })]);
     expect(screen.getByRole("button", { name: "CI（個別PRのチェック）: 成功" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "コンフリクト: あり" })).toBeTruthy();
-    expect(screen.getByLabelText("このPRのチェック")).toBeTruthy();
-    expect(screen.getByLabelText("リリース候補のチェック")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /^全体/ })).toBeNull();
+    expect(screen.queryByLabelText("リリース候補のチェック")).toBeNull();
   });
 
   it("draftのPRはGitHubがマージを受け付けないためボタンを出さない", () => {

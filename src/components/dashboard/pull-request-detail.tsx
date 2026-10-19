@@ -514,13 +514,12 @@ export function PullRequestDetail({
           </section>
           )}
 
-          {/* チェックの根拠（#4366・#4427）。このPR（CI・コード・競合）とリリース候補（全体・統合・Mac）を分けて読む。
-              リリース候補が未作成でも通常PRのマージ条件は増えない */}
+          {/* チェックの根拠（#4366・#4427）。このPR（CI・コード・競合）だけを出す（#4841）。
+              リリース候補の表示は個別PRには出さない */}
           {!releaseCandidate && (
             <PullRequestChecksStrip
               pullRequest={pullRequest}
               onOpenPullRequest={() => selectTab("findings")}
-              showCandidateNote
               pullRequestEvidenceLabel="指摘・CIの内訳を開く"
               className="-mx-1 px-0"
             />
