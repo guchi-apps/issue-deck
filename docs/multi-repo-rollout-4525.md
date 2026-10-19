@@ -26,7 +26,7 @@
 
 | 観点 | 結果 |
 |---|---|
-| `claude-review-develop.yml`・`release-develop-to-main.yml`のuses | 全て`workflows/v53`（`db-console`・`morrow`のrelease callerに`v52`と`v53`が混在、要確認） |
+| `claude-review-develop.yml`・`release-develop-to-main.yml`のuses | 全て`workflows/v54`（初回調査時の`v52`/`v53`混在はコメント内記述の誤検出。上の到達点を参照） |
 | `claude-issue-dispatch.yml`のuses／`prompts-ref` | **全て`v52`**。IssueのActions実装は#4680で廃止済みのため、このcallerはタグ配布の対象にせず、旧タグで動く配布先向けの互換扱い |
 | 異常 | `signaly`の`claude-issue-dispatch.yml`にある`workflows/v10`はコメント内の記述で参照ではない。廃止済みの実装callerなので配布対象外 |
 | `CLAUDE.md`の固有ルール | `meisai-lab`・`car-care`・`status-hub`・`db-console`は11バイト（実質空）。`yoteiflow`（約353KB）・`morrow`（約273KB）・`kurashio`（約105KB）は大きく、旧「手作業は起案時に固定」の記述が残っていないかの個別確認が要る（後述） |
@@ -57,7 +57,7 @@
 ### 未了（成功扱いにしない）
 
 1. **代表実走（Web・iOS含む・実機デプロイ・private運用）**: 未実施。実環境でIssue起案→AI実行→リリース前後の依存待ち→本番確認を通す作業で、本番反映と人の確認を伴うため、このPRでは行っていない。実施したら設定整合確認と区別して記録する
-2. **docs#226の共通ルールの実参照**: ローカル`~/apps/_docs`が未更新のため、更新後の実セッション、およびActionsの`.shared-context/`checkoutでの参照を確認する必要がある
+2. **docs#226の共通ルールの実参照**: 静的な参照経路は確認済み（2026-10-19）。`guchi-apps/docs`の`main`の`CLAUDE.md`が`agent-rules/implementation.md`・`review.md`・`standards/work-issues.md`を索引し、`implementation.md`も`work-issues.md`へリンクする。Actionsは`reusable-claude-review-develop.yml`が`.shared-context/`へcheckoutする。**未確認**: 実セッションが実際にこれらを読んで従った証跡（ローカル`~/apps/_docs`は未pullのため古い。`git pull`は指示があるまで行わない）
 3. **新旧混在の互換**: 旧`71.manual-step`本文・進行中セッションの継続と、未対応ホストへ新ジョブを送らないことは、実機のホスト構成を見ないと確かめられない。未確認
 4. **共通自動化なし5件の扱い**: ユーザーの判断待ち
 5. **親Epic #4520への反映**: 上記1〜4を残作業として記載する
