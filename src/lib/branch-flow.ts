@@ -959,7 +959,7 @@ export function resolveDeployState({
  *
  * - まだdevelopへ入っていないレーン（マージ待ち・PR未作成・未マージのクローズ）は`activeLanes`
  * - developへ入ったが本番未反映のレーンは、先頭の束（未リリース）
- * - `main`へ直接マージされたレーンは`merged-to-main`の束（#2911）
+ * - `main`へ直接マージされたレーンは`merged-to-main`の束（#2911）。版ごとの束と日付順に並べる（#4863）
  * - 本番へ出たレーンは、それを運んだリリースPRごとの束
  * - どの版か特定できないレーン（取得したPRの範囲より古い）は`unassignedLanes`
  *
@@ -1041,28 +1041,30 @@ function groupLanesByRelease({
     );
   }
 
-  // `main`へ直接マージされた作業の束（#2911）。**未リリースの束の直後・版ごとの束の前に置く。**
-  // developを経由しないリポジトリ（vps・subpc・docs等）ではリリースPRが1件も無く、
-  // 版ごとの束もできないため、ここに置かないと直近の作業が「すべての版を表示」を押すまで
-  // 画面に出ない（既定で出すのは配列の先頭からの連続した並びだけ。#1586・#1711）。
-  if (mergedToMainLanes.length > 0) {
-    const sortedLanes = mergedToMainLanes.sort(compareLanes);
-    releaseGroups.push(
-      toReleaseGroup({
-        key: MERGED_TO_MAIN_GROUP_KEY,
-        // 版もリリースPRも無い。見出しは画面がkeyから決める
-        version: null,
-        pullRequest: null,
-        bumpPullRequest: null,
-        // 束の日付は、この束に入っている作業のうち最後にmainへ入った時刻
-        mergedAt: laneMergedAts(sortedLanes).at(-1) ?? null,
-        // デプロイの状態はリリースPRのマージ時刻と突き合わせて決まる（#1579）ため、
-        // リリースPRを持たないこの束については何も言えない
-        deploy: null,
-        lanes: sortedLanes,
-      }),
-    );
-  }
+  // `main`へ直接マージされた作業の束（#2911）。版ごとの束と一緒に**日付の新しい順**へ差し込む（#4863）。
+  // 以前は日付に関係なく版ごとの束の前に置いていたため、古い直接マージ（本番デプロイの復旧PRなど）が
+  // 最新の版より上に出て、最新のリリースに見えた。
+  // developを経由しないリポジトリ（vps・subpc・docs等）ではリリースPRが1件も無いか、あっても
+  // 古い版だけなので、日付順でもこの束が先頭に来る——既定で出すのは配列の先頭からの連続した
+  // 並びだけ（#1586・#1711）なので、直近の作業が「過去のリリース」へ畳まれることはない。
+  // 束は1つしか作らないため、直接マージが多くても版の束を押し出すのは高々1枠。
+  const sortedMergedToMainLanes = mergedToMainLanes.sort(compareLanes);
+  const mergedToMainGroup =
+    sortedMergedToMainLanes.length > 0
+      ? toReleaseGroup({
+          key: MERGED_TO_MAIN_GROUP_KEY,
+          // 版もリリースPRも無い。見出しは画面がkeyから決める
+          version: null,
+          pullRequest: null,
+          bumpPullRequest: null,
+          // 束の日付は、この束に入っている作業のうち最後にmainへ入った時刻
+          mergedAt: laneMergedAts(sortedMergedToMainLanes).at(-1) ?? null,
+          // デプロイの状態はリリースPRのマージ時刻と突き合わせて決まる（#1579）ため、
+          // リリースPRを持たないこの束については何も言えない
+          deploy: null,
+          lanes: sortedMergedToMainLanes,
+        })
+      : null;
 
   const latestReleaseNumber = releases.at(-1)?.pullRequestNumber ?? null;
 
@@ -1083,6 +1085,19 @@ function groupLanesByRelease({
         lanes: groupLanes.sort(compareLanes),
       }),
     );
+  }
+
+  if (mergedToMainGroup !== null) {
+    // 自分より古い最初の版の束の前へ入れる。**同時刻なら版の束を先に出す**（版を持つ束のほうが
+    // 「いま本番に出ているもの」を表すため）。日付が取れない場合は、直近の作業を見失わないよう
+    // 従来どおり版ごとの束の前に置く
+    const mergedAt =
+      mergedToMainGroup.mergedAt === null ? null : new Date(mergedToMainGroup.mergedAt).getTime();
+    const index = releaseGroups.findIndex(
+      (group) =>
+        group.mergedAt !== null && (mergedAt === null || new Date(group.mergedAt).getTime() < mergedAt),
+    );
+    releaseGroups.splice(index === -1 ? releaseGroups.length : index, 0, mergedToMainGroup);
   }
 
   return {
