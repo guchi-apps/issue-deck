@@ -629,6 +629,10 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   画面側が`endedAt`で行う。**プラン枠への換算（「枠%」）は逆算した目安**で、実測の枠は
   同じ画面に置いた`ClaudeUsageCard`が受け持つ。流れと決まりは
   [multi-agent/session-inspect.md](multi-agent/session-inspect.md)を参照。
+  - **「おまかせ」の判定の当たり外れは、この表と起動ジョブを結んで端末から見る**（#4852。
+    `scripts/model-pick-outcomes.sh` → `GET /api/dispatch/model-pick-outcomes` →
+    [`lib/model-pick-outcomes.ts`](../src/lib/model-pick-outcomes.ts)）。画面は無い。指標と見直しの基準は
+    [multi-agent/prompts-and-models.md](multi-agent/prompts-and-models.md)「判定の当たり外れを測る」
   - **転記の残らないサブPCのPRレビュー（Codex PRレビュー）は別の受け口**（#3995。
     `POST /api/dispatch/review-usage` → [`lib/dispatch/review-usage.ts`](../src/lib/dispatch/review-usage.ts)）。
     `kind: "actions"`（「CI/CD・レビュー」）・`source: "local"`で保存し、試行ごとに1行。送り手は
