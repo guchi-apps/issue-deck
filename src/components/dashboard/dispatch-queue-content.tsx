@@ -138,6 +138,7 @@ export function DispatchQueueContent({
         jobs={dispatch.jobs}
         onOpenIssue={onOpenIssue}
         onOpenRemoteSessions={onOpenRemoteSessions}
+        onStopRemoteSession={dispatch.stopRemoteSession}
         onRequestSelfUpdate={dispatch.requestSelfUpdate}
         onRequestReboot={dispatch.requestReboot}
       />

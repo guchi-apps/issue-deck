@@ -33,6 +33,7 @@ export function PullRequestMergeChecks({
   onOpenPullRequest,
   onOpenCandidate,
   grouped = false,
+  ownOnly = false,
   showCandidateNote = false,
   pullRequestEvidenceLabel,
   className,
@@ -51,6 +52,8 @@ export function PullRequestMergeChecks({
    * 一覧・通常PR詳細が使う。省略時は従来どおり6項目を1つの並びで出す（ブランチ画面・本番マージ確認）
    */
   grouped?: boolean;
+  /** 「このPR」の項目だけを1つの並びで出す（#4841。個別PR向け。リリース候補のグループ・補足文は出さない） */
+  ownOnly?: boolean;
   /** `grouped`のとき、候補が無い・読めない理由を共通説明として1回出す（詳細向け。一覧は見出しの印だけ） */
   showCandidateNote?: boolean;
   /** このPRの証跡の導線の文言を差し替える（詳細では「PR詳細を開く」が自画面を指してしまうため） */
@@ -96,7 +99,9 @@ export function PullRequestMergeChecks({
 
   return (
     <div className={cn("px-3 pb-1.5", className)} data-testid="pull-request-checks">
-      {grouped ? (
+      {ownOnly ? (
+        <div className="grid grid-cols-3">{own.map(renderButton)}</div>
+      ) : grouped ? (
         <div className="grid grid-cols-1 gap-x-3 gap-y-1 sm:grid-cols-2">
           <section aria-label="このPRのチェック" className="min-w-0">
             <h3 className="px-1 text-sm leading-5 font-semibold text-muted-foreground">

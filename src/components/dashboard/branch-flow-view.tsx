@@ -24,12 +24,17 @@ import {
   CircleAlert,
   CircleDashed,
   CirclePlay,
+  CircleCheckBig,
   Clock,
   ExternalLink,
   GitBranch,
+  GitMerge,
+  History,
   Loader2,
   Lock,
+  Play,
   RefreshCw,
+  Rocket,
   TriangleAlert,
   Wrench,
   type LucideIcon,
@@ -1850,7 +1855,7 @@ function ReleaseFlowGraph({
   /** PRをこの画面からマージできたとき（#1756） */
   onMerged: (pullRequest: PullRequestSummary) => void;
 }) {
-  // 「リリース済みのバージョン」アコーディオンの開閉。既定は閉じる（#4721）
+  // 「過去のリリース」アコーディオンの開閉。既定は閉じる（#4721）
   const [releasedOpen, setReleasedOpen] = useState(false);
   // その中で出している版の数。直前の版だけを出し、「さらに表示」で1版ずつ過去へ続ける（#4830）
   const [releasedShownCount, setReleasedShownCount] = useState(1);
@@ -1860,7 +1865,7 @@ function ReleaseFlowGraph({
   const hiddenClosedCount = repository.activeLanes.length - activeLanes.length;
 
   // 既定で出すのは**次のリリースに乗る分まで**（#1586）。本番へ出た版の束と、どの版で出たか
-  // 特定できないレーンは、すでに済んだ変更なので「リリース済みのバージョン」アコーディオンへ
+  // 特定できないレーンは、すでに済んだ変更なので「過去のリリース」アコーディオンへ
   // 畳み、開くまで見せない（#4721。以前は「表示」ボタンで一度だけ開く作りだった）。
   //
   // **その「次のリリースに乗る分」が無いときは、いちばん新しい版の束を代わりに出す**（#1711）。
@@ -2068,7 +2073,8 @@ function ReleaseFlowGraph({
         <li className="relative mb-3 rounded-md border bg-card">
           <details open>
             <summary className="cursor-pointer px-3 py-2 text-sm font-semibold">
-              作業中のIssue・PR
+              <Play className="mr-1.5 inline size-4 align-[-2px] text-blue-600 dark:text-blue-400" aria-hidden />
+              作業中
               <span className="ml-2 text-xs font-normal text-muted-foreground">{activeLanes.length + repository.startedIssues.length}件</span>
             </summary>
             <ul className="relative">
@@ -2102,17 +2108,21 @@ function ReleaseFlowGraph({
           </li>
         ) : (
           <>
-            {/* 本番へ出た版は「リリース候補のPR」と同じ見出し＋三角のアコーディオンに畳む（#4721） */}
+            {/* 本番へ出た版は「リリース候補」と同じ見出し＋三角のアコーディオンに畳む（#4721） */}
             {hasReleasedAccordion && (
               <li className="relative mb-3 rounded-md border bg-card" data-testid="released-versions">
                 <details open={releasedOpen} onToggle={(event) => setReleasedOpen(event.currentTarget.open)}>
                   <summary className="cursor-pointer px-3 py-2 text-sm font-semibold">
-                    {hiddenGroups.length > 0 ? "リリース済みのバージョン" : "本番へ出た変更"}
-                    <span className="ml-2 text-xs font-normal text-muted-foreground">
-                      {hiddenGroups.length > 0
-                        ? `${hiddenGroups.length}件`
-                        : `${unassignedLanes.length}件`}
-                    </span>
+                    {hiddenGroups.length > 0 ? (
+                      <History className="mr-1.5 inline size-4 align-[-2px] text-muted-foreground" aria-hidden />
+                    ) : (
+                      <CircleCheckBig className="mr-1.5 inline size-4 align-[-2px] text-green-600 dark:text-green-400" aria-hidden />
+                    )}
+                    {hiddenGroups.length > 0 ? "過去のリリース" : "本番反映済みの変更"}
+                    {/* 取得範囲の件数でしかないので、過去のリリースには件数を出さない（#4843） */}
+                    {hiddenGroups.length === 0 && (
+                      <span className="ml-2 text-xs font-normal text-muted-foreground">{unassignedLanes.length}件</span>
+                    )}
                   </summary>
                   <ul className="relative">
                     <ReleaseRails />
@@ -2125,7 +2135,7 @@ function ReleaseFlowGraph({
                           size="sm"
                           onClick={() => setReleasedShownCount((count) => count + 1)}
                         >
-                          さらに表示（残り{hiddenGroupsLeft}件）
+                          さらに表示
                         </Button>
                       </li>
                     )}
@@ -2211,7 +2221,7 @@ function ReleaseGroupHeaderWithLanes({
   group: BranchFlowReleaseGroup;
   releaseButton?: React.ReactNode;
   rebuildButton?: React.ReactNode;
-  /** 「リリース済みのバージョン」の中に並べる束か。畳まず見出しと変更をそのまま出す（#4830） */
+  /** 「過去のリリース」の中に並べる束か。畳まず見出しと変更をそのまま出す（#4830） */
   flat?: boolean;
   /** 状態・主操作・検証を「次のリリース」カードが持つ束か（#4428） */
   summarizedInCard?: boolean;
@@ -2219,8 +2229,8 @@ function ReleaseGroupHeaderWithLanes({
   showIosDistribution?: boolean;
   onMerged: (pullRequest: PullRequestSummary) => void;
 }) {
-  // 「リリース候補のPR」に出すのはリリース候補に入ったレーンだけ。候補に入っていない作業
-  // （凍結後にdevelopへ入った分・候補をまだ作っていないときの全て）は「完了したPR」へ出す（#4787・#4830）。
+  // 「リリース候補」に出すのはリリース候補に入ったレーンだけ。候補に入っていない作業
+  // （凍結後にdevelopへ入った分・候補をまだ作っていないときの全て）は「developへ反映済み」へ出す（#4787・#4830）。
   // Xcodeで実機へ反映するリポジトリ（#3468）は従来どおり凍結の前後だけで分ける
   const { afterFreeze, included: frozenIncluded } = splitLanesByReleaseFreeze(group);
   const { included, waiting } = deviceBuild
@@ -2250,7 +2260,7 @@ function ReleaseGroupHeaderWithLanes({
     </>
   );
 
-  // 「リリース済みのバージョン」の中では束ごとに畳まず、見出しと変更を平らに並べる（#4830）。
+  // 「過去のリリース」の中では束ごとに畳まず、見出しと変更を平らに並べる（#4830）。
   // レールは親の一覧が引く
   if (flat) {
     return (
@@ -2261,7 +2271,7 @@ function ReleaseGroupHeaderWithLanes({
     );
   }
 
-  // 未リリースの束（完了したPR・リリース候補のPR）はdevelopの上の話なので、レールはdevelopの1本だけにする（#4830）
+  // 未リリースの束（developへ反映済み・リリース候補）はdevelopの上の話なので、レールはdevelopの1本だけにする（#4830）
   const rails = released ? <ReleaseRails /> : <ReleaseRails developOnly />;
 
   const candidateSection = (
@@ -2269,8 +2279,15 @@ function ReleaseGroupHeaderWithLanes({
       {/* リリース候補が無い間は中身が見出しと操作だけなので、既定で閉じる */}
       <details open={hasCandidate}>
         <summary className="cursor-pointer px-3 py-2 text-sm font-semibold">
-          {released ? "リリース済みの変更" : "リリース候補のPR"}
-          <span className="ml-2 text-xs font-normal text-muted-foreground">{group.version ? `v${group.version} · ` : ""}{included.length}件</span>
+          {released ? (
+            <CircleCheckBig className="mr-1.5 inline size-4 align-[-2px] text-green-600 dark:text-green-400" aria-hidden />
+          ) : (
+            <Rocket className="mr-1.5 inline size-4 align-[-2px] text-amber-600 dark:text-amber-400" aria-hidden />
+          )}
+          {released ? (group.version ? `v${group.version} の変更（本番反映済み）` : "本番反映済みの変更") : "リリース候補"}
+          <span className="ml-2 text-xs font-normal text-muted-foreground">
+            {!released && group.version ? `v${group.version} · ` : ""}{included.length}件
+          </span>
         </summary>
         <ul className="relative">
           {rails}
@@ -2283,12 +2300,13 @@ function ReleaseGroupHeaderWithLanes({
 
   return (
     <>
-      {/* 並びは上流から下流へ: 完了したPR（developへ入った分）→リリース候補のPR（#4830） */}
+      {/* 並びは上流から下流へ: developへ反映済み→リリース候補（#4830） */}
       {waiting.length > 0 && (
         <li className="relative mb-3 rounded-md border bg-card" data-testid="release-waiting-prs">
           <details>
             <summary className="cursor-pointer px-3 py-2 text-sm font-semibold">
-              完了したPR
+              <GitMerge className="mr-1.5 inline size-4 align-[-2px] text-violet-600 dark:text-violet-400" aria-hidden />
+              developへ反映済み
               <span className="ml-2 text-xs font-normal text-muted-foreground">
                 {waiting.length}件{hasCandidate ? "（次のリリースへ回ります）" : ""}
               </span>
