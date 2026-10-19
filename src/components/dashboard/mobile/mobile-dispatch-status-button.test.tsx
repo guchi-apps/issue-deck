@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 // マウントされていないため、遷移だけ差し替える
 const openIssue = vi.fn();
 vi.mock("@/hooks/use-reference-navigation", () => ({
-  useReferenceNavigation: () => ({ openIssue, openPullRequest: vi.fn() }),
+  useReferenceNavigation: () => ({ openIssue, openPullRequest: vi.fn(), openRemoteSessions: vi.fn() }),
 }));
 
 import { MobileDispatchStatusButton } from "@/components/dashboard/mobile/mobile-dispatch-status-button";

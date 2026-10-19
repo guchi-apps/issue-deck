@@ -652,9 +652,19 @@ describe("BranchFlowView", () => {
 
       openRepository();
       expect(screen.getByText("本番未反映")).toBeTruthy();
-      // リリース候補が無いので「今回公開する変更」は出さず、レーンは「リリース待ちのPR」へ入る（#4787）
-      expect(screen.queryByText("今回公開する変更")).toBeNull();
-      expect(screen.getByTestId("release-waiting-prs").textContent).toContain("issue-1456");
+      // リリース候補が無いので、レーンは「完了したPR」へ入る（#4787）
+      const waiting = screen.getByTestId("release-waiting-prs");
+      expect(waiting.textContent).toContain("完了したPR");
+      expect(waiting.textContent).toContain("issue-1456");
+      // 「リリース候補のPR」は候補が無い間も畳めるアコーディオンにし、既定は閉じる。完了したPRの後に並ぶ（#4830）
+      const candidate = screen.getByText("リリース候補のPR").closest("details");
+      expect(candidate?.open).toBe(false);
+      expect(waiting.compareDocumentPosition(candidate!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(screen.queryByText("状態・操作・検証は上の「次のリリース」にあります")).toBeNull();
+      // 「次のリリース」カードには件数の2マスを出さない（#4830）
+      expect(screen.queryByText("次のリリースで反映")).toBeNull();
+      expect(screen.queryByText("反映待ち/実装中のPR")).toBeNull();
+      expect(screen.getByText("mainへ反映済みの版")).toBeTruthy();
     });
 
     it("既定は次のリリースの束だけを出し、リリース済みはアコーディオンで開く（#1586）", () => {
@@ -715,9 +725,16 @@ describe("BranchFlowView", () => {
       fireEvent.click(screen.getByText("リリース済みのバージョン"));
       expect(releasedAccordion().open).toBe(true);
       expect(screen.getByText("リリース済みのバージョン").parentElement?.textContent).toContain("3件");
+      // 中は版ごとに畳まず、直前の版だけを出す。「さらに表示」で1版ずつ過去へ続ける（#4830）
+      expect(releasedAccordion().querySelector("details")).toBeNull();
       expect(screen.getByText("issue-915")).toBeTruthy();
+      expect(screen.queryByText("issue-905")).toBeNull();
+      fireEvent.click(screen.getByRole("button", { name: "さらに表示（残り2件）" }));
       expect(screen.getByText("issue-905")).toBeTruthy();
+      expect(screen.queryByText("issue-800")).toBeNull();
+      fireEvent.click(screen.getByRole("button", { name: "さらに表示（残り1件）" }));
       expect(screen.getByText("issue-800")).toBeTruthy();
+      expect(screen.queryByRole("button", { name: /さらに表示/ })).toBeNull();
     });
 
     it("次のリリースに乗る分は畳まずに出す（#1586）", () => {
@@ -2875,7 +2892,7 @@ describe("ブランチ画面の情報配置 (#4683)", () => {
     expect(screen.getByText("作業・PRを見る")).toBeTruthy();
     openRepository();
     expect(screen.getByText("閉じる")).toBeTruthy();
-    const section = screen.getByText("開発中の作業・PR").closest("details");
+    const section = screen.getByText("作業中のIssue・PR").closest("details");
     expect(section?.open).toBe(true);
     expect(section?.textContent).toContain("PRのタイトル");
 

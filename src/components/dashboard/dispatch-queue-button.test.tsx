@@ -2,6 +2,12 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+// ポップオーバーの中身はリモートセッション画面への遷移（#4836）にルーターを要求する。jsdomでは
+// App Routerがマウントされていないため、遷移だけ差し替える（`mobile-dispatch-status-button.test.tsx`と同じ）
+vi.mock("@/hooks/use-reference-navigation", () => ({
+  useReferenceNavigation: () => ({ openIssue: vi.fn(), openPullRequest: vi.fn(), openRemoteSessions: vi.fn() }),
+}));
+
 import { DispatchQueueButton } from "@/components/dashboard/dispatch-queue-button";
 import type { DispatchStateHandle } from "@/hooks/use-dispatch-state";
 import type { DispatchHostView, DispatchJobView } from "@/lib/dispatch/dispatch-job";

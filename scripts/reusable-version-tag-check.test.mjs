@@ -279,6 +279,72 @@ describe("reusable-version-tag-check の deploy-config-check", () => {
     });
   });
 
+  describe("tar -C で入力の起点を変えている", () => {
+    /** solitaire の deploy.yml（guchi-apps/solitaire#202）と同じ形 */
+    function bundleWorkflow(tarLine) {
+      return [
+        "name: Deploy",
+        "jobs:",
+        "  build:",
+        "    runs-on: ubuntu-latest",
+        "    steps:",
+        "      - name: Create archive",
+        "        run: |",
+        "          mkdir -p bundle/deploy",
+        "          cp -a dist bundle/public",
+        "          cp deploy/gate-static bundle/deploy/gate-static",
+        `          ${tarLine}`,
+        "",
+      ].join("\n");
+    }
+
+    it.each([
+      "tar -C bundle -czf deploy.tar.gz public deploy/gate-static",
+      "tar --directory=bundle -czf deploy.tar.gz public deploy/gate-static",
+      "tar -czf deploy.tar.gz --directory bundle public deploy/gate-static",
+    ])("起点が同じ run の中で作られるなら落とさず、見送ったことを残す: %s", (tarLine) => {
+      place(".github/workflows/deploy.yml", bundleWorkflow(tarLine));
+      place("deploy/gate-static", "#!/bin/sh\n");
+
+      const result = runCheck();
+
+      expect(result.stdout).not.toContain("::error::");
+      expect(result.status).toBe(0);
+      expect(result.stdout).toContain("tar -C bundle の起点がチェックアウトに無いため、対象 public は検査していません");
+    });
+
+    it("起点がチェックアウトにあれば、その中の相対パスとして確かめる", () => {
+      place(".github/workflows/deploy.yml", bundleWorkflow("tar -C site -czf deploy.tar.gz public"));
+      place("site/index.html", "");
+      // 直下の public があっても、起点の中に無ければ落とす
+      place("public/.gitkeep", "");
+
+      const result = runCheck();
+
+      expect(result.status).toBe(1);
+      expect(result.stdout).toContain("tar の対象 site/public がリポジトリにありません");
+    });
+
+    it("起点の中に実在すれば通す", () => {
+      place(".github/workflows/deploy.yml", bundleWorkflow("tar -C site -czf deploy.tar.gz public"));
+      place("site/public/index.html", "");
+
+      const result = runCheck();
+
+      expect(result.status).toBe(0);
+      expect(result.stdout).not.toContain("::error::");
+    });
+
+    it("-C より前の入力は従来どおり直下から探し、無ければ落とす", () => {
+      place(".github/workflows/deploy.yml", bundleWorkflow("tar -czf deploy.tar.gz public -C bundle deploy"));
+
+      const result = runCheck();
+
+      expect(result.status).toBe(1);
+      expect(result.stdout).toContain("tar の対象 public がリポジトリにありません");
+    });
+  });
+
   describe("packageManager の pnpm メジャー", () => {
     it("pnpm 11 を落とす（VPSの Node 20 では node:sqlite で失敗するため）", () => {
       place("package.json", JSON.stringify({ packageManager: "pnpm@11.2.0" }));

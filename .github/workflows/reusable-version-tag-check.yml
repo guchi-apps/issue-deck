@@ -135,7 +135,8 @@ jobs:
     #   C. `packageManager` の pnpm が、デプロイ先のNodeで動かないメジャーになっている
     #
     # **落とせるのは静的に確かめられるものだけ**で、`deploy.yml` の書き方はリポジトリごとに
-    # 違う。判定できない形（`cd` を挟む `run:`、変数・グロブを含む `tar` の引数など）は
+    # 違う。判定できない形（`cd` を挟む `run:`、変数・グロブを含む `tar` の引数、
+    # 同じ run の中で作る `tar -C <dir>` の起点など）は
     # 黙って通し、ログに理由を残す。**誤検知でmain宛PRを止める方が、見逃すより高くつく。**
     runs-on: ubuntu-latest
     permissions:
@@ -353,18 +354,44 @@ jobs:
 
 
           def tar_inputs(tokens):
-              """tar の引数のうち、リポジトリに存在すべきパスだけを返す"""
+              """tar の引数のうち、存在すべき入力パスを (起点ディレクトリ, パス) の組で返す。
+
+              `-C <dir>`・`--directory=<dir>`・`--directory <dir>` は、それより後ろの入力の
+              起点を変える（GNU tar では位置に意味があり、相対指定は直前の起点からの相対）。
+              起点が無い入力は `""`（チェックアウトの直下）になる。
+              """
               inputs = []
-              skip_next = False
+              directory = ""
+              skip_next = None
               archive_taken = False
               has_f = False
+
+              def change_dir(value):
+                  nonlocal directory
+                  directory = os.path.join(directory, value) if directory else value
+
               for token in tokens[1:]:
+                  if skip_next == "directory":
+                      skip_next = None
+                      change_dir(token)
+                      continue
                   if skip_next:
-                      skip_next = False
+                      skip_next = None
+                      continue
+                  if token.startswith("--directory="):
+                      change_dir(token[len("--directory="):])
                       continue
                   if token.startswith("--"):
-                      if token in ("--file", "--exclude", "--directory"):
-                          skip_next = True
+                      if token == "--directory":
+                          skip_next = "directory"
+                      elif token in ("--file", "--exclude"):
+                          skip_next = "value"
+                      continue
+                  if token == "-C":
+                      skip_next = "directory"
+                      continue
+                  if token.startswith("-C"):
+                      change_dir(token[2:])
                       continue
                   if token.startswith("-") or (not inputs and TAR_FLAGS_RE.match(token) and not has_f):
                       if "f" in token:
@@ -376,7 +403,7 @@ jobs:
                   # 変数・グロブを含むものは静的に確かめられないので見送る
                   if any(c in token for c in "$*?`(){}"):
                       continue
-                  inputs.append(token)
+                  inputs.append((directory, token))
               return inputs
 
 
@@ -420,8 +447,21 @@ jobs:
                       if "c" not in flags and "--create" not in tokens:
                           continue
                       checked += 1
-                      for path in tar_inputs(tokens):
-                          target = os.path.join(workdir, path) if workdir else path
+                      for directory, path in tar_inputs(tokens):
+                          if directory:
+                              # `-C` の起点は同じ run の中で作られることが多い（`cp -a dist bundle/public`
+                              # のあと `tar -C bundle ... public`。#4829）。起点がチェックアウトに無ければ
+                              # 中身は静的に分からないので、落とさずに見送る
+                              base = os.path.join(workdir, directory) if workdir else directory
+                              if any(c in directory for c in "$*?`(){}") or not os.path.isdir(base):
+                                  notes.append(
+                                      f"{workflow}: tar -C {directory} の起点がチェックアウトに無いため、"
+                                      f"対象 {path} は検査していません"
+                                  )
+                                  continue
+                              target = os.path.join(base, path)
+                          else:
+                              target = os.path.join(workdir, path) if workdir else path
                           if os.path.exists(target) or git_ignored(target):
                               continue
                           errors.append(

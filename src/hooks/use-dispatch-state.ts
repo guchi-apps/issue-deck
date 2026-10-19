@@ -18,6 +18,7 @@ import type {
   SessionQuestionAnswerInput,
   SessionQuestionRequestView,
 } from "@/lib/dispatch/session-question-request";
+import type { RemoteSessionView } from "@/lib/dispatch/remote-session-rules";
 import type { DispatchSessionView } from "@/lib/dispatch/session-state";
 import type { ManualStepRunView } from "@/lib/manual-step-run-view";
 
@@ -63,6 +64,11 @@ export type DispatchState = {
   dependencyWaits?: DependencyWaitView[];
   /** 親Issueの自動実行（#4536）の稼働中の印。古い応答では欠けうる */
   parentRuns?: ParentRunBadge[];
+  /**
+   * 要求者の稼働中のリモートセッション（#4836）。ホストカードに並べるだけで、操作は
+   * リモートセッション画面が持つ。古い応答では欠けうる
+   */
+  remoteSessions?: RemoteSessionView[];
   concurrency: number;
   /** エージェント別の新規実行の一時停止状態（#2994） */
   agentPause: DispatchAgentPauseState;
@@ -1085,6 +1091,7 @@ export function useDispatchState(enabled: boolean) {
     questionRequests: state?.questionRequests ?? [],
     dependencyWaits: state?.dependencyWaits ?? [],
     parentRuns: state?.parentRuns ?? [],
+    remoteSessions: state?.remoteSessions ?? [],
     controlDependencyWait,
     concurrency: state?.concurrency ?? null,
     agentPause: state?.agentPause ?? { claude: null, codex: null },

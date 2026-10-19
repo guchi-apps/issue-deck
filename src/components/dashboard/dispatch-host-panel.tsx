@@ -1,6 +1,14 @@
 "use client";
 
-import { ChevronRight, ExternalLink, Loader2, Monitor, Power, RefreshCw } from "lucide-react";
+import {
+  ChevronRight,
+  ExternalLink,
+  Loader2,
+  Monitor,
+  Power,
+  RefreshCw,
+  TerminalSquare,
+} from "lucide-react";
 import { useState, type ReactNode } from "react";
 
 import { Button } from "@/components/ui/button";
@@ -21,6 +29,12 @@ import {
   type DispatchHostSelfUpdateRow,
 } from "@/lib/dispatch/host-checkout";
 import { formatDispatchHostName } from "@/lib/dispatch/host-label";
+import {
+  REMOTE_SESSION_MAX_PER_HOST,
+  describeRemoteSessionStatus,
+  selectHostRemoteSessions,
+  type RemoteSessionView,
+} from "@/lib/dispatch/remote-session-rules";
 import {
   describeDispatchHostLaunchHold,
   describeDispatchHostMetrics,
@@ -107,8 +121,10 @@ const SESSION_TEXT_CLASS: Record<IssueSessionTone, string> = {
 export function DispatchHostPanel({
   hosts,
   sessions,
+  remoteSessions = [],
   jobs = [],
   onOpenIssue,
+  onOpenRemoteSessions,
   onRequestSelfUpdate,
   onRequestReboot,
   compact = false,
@@ -116,6 +132,12 @@ export function DispatchHostPanel({
 }: {
   hosts: readonly DispatchHostView[];
   sessions: readonly DispatchSessionView[];
+  /**
+   * 要求者の稼働中のリモートセッション（#4836）。右下の丸ボタンや左メニューから立てたものも
+   * サブPCのtmuxで動いているので、Issueのセッションと同じカードに並べる。**表示だけ**で、
+   * 終了・起動はリモートセッション画面が持つ。渡さなければ従来どおり出さない
+   */
+  remoteSessions?: readonly RemoteSessionView[];
   /**
    * 積まれているジョブ（#1927）。**チェックアウトの更新（`SELF_UPDATE`）の結果を出すためだけに
    * 受け取る。** 渡さなければ従来どおり、押した後は何も出ない。
@@ -127,6 +149,8 @@ export function DispatchHostPanel({
    * 押しても何も起きない行は生まれない。
    */
   onOpenIssue?: (issueId: string) => void;
+  /** リモートセッションの小見出しから、リモートセッション画面を開く（#4836）。渡さなければ導線を出さない */
+  onOpenRemoteSessions?: () => void;
   /**
    * チェックアウトの更新を積む（#1875）。渡さなければボタンを出さない（`onOpenIssue`と同じ形）。
    *
@@ -169,9 +193,11 @@ export function DispatchHostPanel({
           key={host.name}
           host={host}
           sessions={selectHostSessions(sessions, host.name)}
+          remoteSessions={selectHostRemoteSessions(remoteSessions, host.name)}
           selfUpdateJob={selectHostSelfUpdateJob(jobs, host.name)}
           rebootJob={selectHostRebootJob(jobs, host.name)}
           onOpenIssue={onOpenIssue}
+          onOpenRemoteSessions={onOpenRemoteSessions}
           onRequestSelfUpdate={onRequestSelfUpdate}
           onRequestReboot={onRequestReboot}
           compact={compact}
@@ -185,9 +211,11 @@ export function DispatchHostPanel({
 function HostCard({
   host,
   sessions,
+  remoteSessions,
   selfUpdateJob,
   rebootJob,
   onOpenIssue,
+  onOpenRemoteSessions,
   onRequestSelfUpdate,
   onRequestReboot,
   compact,
@@ -195,9 +223,11 @@ function HostCard({
 }: {
   host: DispatchHostView;
   sessions: DispatchSessionView[];
+  remoteSessions: RemoteSessionView[];
   selfUpdateJob: DispatchJobView | null;
   rebootJob: DispatchJobView | null;
   onOpenIssue?: (issueId: string) => void;
+  onOpenRemoteSessions?: () => void;
   onRequestSelfUpdate?: (
     hostName: string,
   ) => Promise<{ ok: true } | { ok: false; message: string }>;
@@ -249,6 +279,7 @@ function HostCard({
         atCapacity={atCapacity}
         hasSessionCount={hasSessionCount}
         waitingCount={countWaitingSessions(sessions)}
+        remoteCount={remoteSessions.length}
         onOpenDetail={onOpenDetail}
       />
     );
@@ -329,6 +360,11 @@ function HostCard({
             />
           ))}
         </ul>
+      )}
+      {/* **最下段に置く**（#4836）。Issueのセッションと違い本数の上限（見出しの
+          「セッション n/m」）には数えない別枠なので、小見出しで分けて上限も別に出す */}
+      {remoteSessions.length > 0 && (
+        <RemoteSessionList sessions={remoteSessions} onOpenRemoteSessions={onOpenRemoteSessions} />
       )}
     </div>
   );
@@ -609,6 +645,7 @@ function CompactHostCard({
   atCapacity,
   hasSessionCount,
   waitingCount,
+  remoteCount,
   onOpenDetail,
 }: {
   host: DispatchHostView;
@@ -618,6 +655,8 @@ function CompactHostCard({
   atCapacity: boolean;
   hasSessionCount: boolean;
   waitingCount: number;
+  /** そのホストで動いているリモートセッションの本数（#4836）。0なら出さない */
+  remoteCount: number;
   onOpenDetail?: () => void;
 }) {
   const body = (
@@ -628,6 +667,11 @@ function CompactHostCard({
         hasSessionCount={hasSessionCount}
         trailing={
           <>
+            {remoteCount > 0 && (
+              <span className="text-[11px] text-teal-700 dark:text-teal-400">
+                リモート {remoteCount}
+              </span>
+            )}
             {waitingCount > 0 && (
               <span className="text-[11px] text-amber-700 dark:text-amber-400">
                 入力待ち {waitingCount}
@@ -914,6 +958,78 @@ function PlanReviewSessionRow({
         />
         <span className="block truncate text-muted-foreground">{repoName}・計画レビュー中</span>
       </span>
+    </li>
+  );
+}
+
+/**
+ * リモートセッション（#4836）の小見出しと一覧。**表示だけで、終了ボタンは置かない**——
+ * Issueのセッションの行も操作を持たず、押し間違えて会話中のセッションを落とさないよう、
+ * 操作はリモートセッション画面（`remote-session-view.tsx`）に任せる。
+ */
+function RemoteSessionList({
+  sessions,
+  onOpenRemoteSessions,
+}: {
+  sessions: RemoteSessionView[];
+  onOpenRemoteSessions?: () => void;
+}) {
+  return (
+    <div className="mt-2 border-t pt-2">
+      <div className="flex items-baseline justify-between gap-2 text-[11px] text-muted-foreground">
+        <span>
+          リモートセッション {sessions.length}/{REMOTE_SESSION_MAX_PER_HOST}
+        </span>
+        {onOpenRemoteSessions && (
+          <button
+            type="button"
+            onClick={onOpenRemoteSessions}
+            className="shrink-0 text-primary hover:underline"
+          >
+            画面を開く
+          </button>
+        )}
+      </div>
+      <ul className="mt-1 flex flex-col gap-1">
+        {sessions.map((session) => (
+          <RemoteSessionRow key={session.id} session={session} />
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function RemoteSessionRow({ session }: { session: RemoteSessionView }) {
+  const repoName = session.repositoryFullName.split("/")[1] ?? session.repositoryFullName;
+  const label = session.stopping ? "終了中" : describeRemoteSessionStatus(session.status);
+  return (
+    <li className="flex items-start gap-1.5 text-xs">
+      <TerminalSquare
+        aria-hidden
+        className="mt-0.5 size-3.5 shrink-0 text-teal-700 dark:text-teal-400"
+      />
+      <span className="min-w-0 flex-1">
+        <span className="block truncate font-medium">{repoName}</span>
+        <span
+          className={cn(
+            "block truncate text-muted-foreground",
+            session.status === "starting" && !session.stopping && "text-amber-700 dark:text-amber-400",
+          )}
+        >
+          {label}・{formatRelativeDate(session.createdAt)}に起動
+        </span>
+      </span>
+      {/* 会話の続きへの出口。リモートセッション画面の「Claude Codeアプリで開く」と同じURL */}
+      {session.remoteControlUrl && (
+        <a
+          href={session.remoteControlUrl}
+          title="Claude Codeアプリで開く"
+          aria-label={`${repoName}のリモートセッションをClaude Codeアプリで開く`}
+          className="mt-0.5 rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground"
+        >
+          <ExternalLink className="size-3.5" />
+        </a>
+      )}
     </li>
   );
 }

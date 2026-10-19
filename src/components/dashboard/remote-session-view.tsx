@@ -56,11 +56,14 @@ export function RemoteSessionView({
   repositories,
   active = true,
   onBack,
+  hideHeader = false,
 }: {
   /** 一覧に並べるリポジトリ（アーカイブ済み・非表示は呼び出し側で除く） */
   repositories: ConnectedRepository[];
   active?: boolean;
   onBack?: () => void;
+  /** モーダル（#4835）では見出しをダイアログ側が持つため出さない */
+  hideHeader?: boolean;
 }) {
   const isDesktop = useMediaQuery("(min-width: 768px)");
   const remote = useRemoteSessions({
@@ -158,13 +161,13 @@ export function RemoteSessionView({
 
   return (
     <section className="flex h-full min-h-0 flex-col gap-3">
-      <header>
+      <header className={cn(hideHeader && "pr-8")}>
         {onBack && (
           <Button variant="ghost" size="sm" className="-ml-2 mb-1" onClick={onBack}>
             ← 戻る
           </Button>
         )}
-        <h1 className="flex items-center gap-2 text-lg font-semibold">
+        <h1 className="flex items-center gap-2 text-lg font-semibold" aria-hidden={hideHeader || undefined}>
           <TerminalSquare className="size-5" />
           リモートセッション
         </h1>
