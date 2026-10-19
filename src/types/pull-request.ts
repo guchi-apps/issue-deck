@@ -60,6 +60,11 @@ export type PullRequestReleaseChecks = {
   started?: { aiReview: boolean; integration: boolean; mac: boolean };
   /** 統合検証の設定不足の理由（#4365）。`integration`が`failed`ならこれが原因。対象外とは混同しない */
   integrationSetupGap?: string | null;
+  /**
+   * 現在の先端に対して、再検証が自動で走る見込みがある区分（#4862）。`invalidated`のとき、これがtrueなら
+   * 「再検証が必要」でなく進行中として出す。省略・falseは見込みなし
+   */
+  rerun?: { aiReview: boolean; integration: boolean };
   /** 検証の記録を読めなかった。状態は推測せず、マージ待ちにもしない（#4390） */
   unavailable?: boolean;
   /**

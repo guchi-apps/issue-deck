@@ -92,7 +92,7 @@ export async function listReleaseVerificationRecords(
  * 引継ぎの証跡（元のSHA・差分・条件）が残っていて元の結果が今も合格のときだけ、バンプ後の対象に対する記録として足す。
  * バンプ後のSHAで実行した結果とは区別できるよう`inheritedFromHeadSha`を持つ
  */
-async function loadInheritedRecords<R extends ReleaseVerificationRecord>(
+export async function loadInheritedRecords<R extends ReleaseVerificationRecord>(
   repoFullName: string,
   prNumber: number,
   originals: readonly R[],

@@ -1,5 +1,7 @@
 import { db } from "@/lib/db";
 import { describeIntegrationSetupGap, getReleaseVerificationConfig } from "@/lib/release-verification-config";
+import { parseInheritanceEvidence } from "@/lib/release-finalize";
+import { loadInheritedRecords } from "@/lib/release-verification";
 import { parseReleaseProgress } from "@/lib/release-verification-progress";
 import { attachReleaseReviewDecisions } from "@/lib/release-verification-load";
 import { summarizeReleaseVerification, type ReleaseVerificationSummary } from "@/lib/release-verification-summary";
@@ -64,6 +66,37 @@ function stageOrUndefined(compute: () => ReleaseVerificationSummary): ReleaseVer
   }
 }
 
+/** 適用済みの公開準備が再実行と記録した種別を、まだ「再実行が見込める」と見てよい時間。過ぎても行が無ければ依頼の失敗を疑って問題へ戻す */
+export const RERUN_EXPECTATION_WINDOW_MS = 30 * 60 * 1000;
+
+type RerunKind = "aiReview" | "integration";
+
+/**
+ * 現在の先端に対して、再検証が自動で走る見込みがある区分（#4862）。現在の対象の未完了ジョブ（待機中・実行中）があるか、
+ * 適用済みの公開準備がバンプ後のheadでその種別を再実行すると記録して間もないとき。どちらも無ければ見込まない
+ */
+export function expectedRerunKinds(input: {
+  activeJobKinds: readonly string[];
+  finalizations: readonly { status: string; finalHeadSha: string | null; handoffEvidence: unknown; updatedAt: Date }[];
+  headSha: string;
+  now: Date;
+}): Record<RerunKind, boolean> {
+  const result: Record<RerunKind, boolean> = {
+    aiReview: input.activeJobKinds.includes("RELEASE_REVIEW"),
+    integration: input.activeJobKinds.includes("RELEASE_VERIFY"),
+  };
+  for (const f of input.finalizations) {
+    if (f.status !== "applied" || f.finalHeadSha !== input.headSha) continue;
+    if (input.now.getTime() - f.updatedAt.getTime() > RERUN_EXPECTATION_WINDOW_MS) continue;
+    for (const e of parseInheritanceEvidence(f.handoffEvidence)) {
+      if (e.action !== "rerun") continue;
+      if (e.kind === "ai_review") result.aiReview = true;
+      if (e.kind === "integration") result.integration = true;
+    }
+  }
+  return result;
+}
+
 const UNAVAILABLE: PullRequestReleaseChecks = {
   aiReview: "not_run",
   integration: "not_run",
@@ -96,7 +129,7 @@ export async function fetchReleaseChecks(
   if (releases.length === 0) return result;
   try {
     const where = { OR: releases.map((t) => ({ repoFullName: t.repositoryFullName, prNumber: t.number })) };
-    const [rows, runningJobs] = await Promise.all([
+    const [rows, runningJobs, activeJobs, finalizations] = await Promise.all([
       db.releaseVerification.findMany({ where, orderBy: { updatedAt: "desc" } }),
       db.dispatchJob.findMany({
         where: {
@@ -106,10 +139,27 @@ export async function fetchReleaseChecks(
         },
         select: { kind: true, repositoryFullName: true, prNumber: true, baseSha: true, headSha: true, progress: true },
       }),
+      // 待機中のジョブ（実行中は上で引いている）。再検証が見込めるかの判定に使う（#4862）
+      db.dispatchJob.findMany({
+        where: {
+          kind: { in: ["RELEASE_VERIFY", "RELEASE_REVIEW"] },
+          status: { in: ["QUEUED", "CLAIMED"] },
+          OR: releases.map((t) => ({ repositoryFullName: t.repositoryFullName, prNumber: t.number })),
+        },
+        select: { kind: true, repositoryFullName: true, prNumber: true, baseSha: true, headSha: true },
+      }),
+      db.releaseCandidateFinalization.findMany({
+        where: {
+          status: "applied",
+          finalHeadSha: { not: null },
+          OR: releases.map((t) => ({ repositoryFullName: t.repositoryFullName, prNumber: t.number })),
+        },
+        select: { repositoryFullName: true, prNumber: true, status: true, finalHeadSha: true, handoffEvidence: true, updatedAt: true },
+      }),
     ]);
     for (const target of releases) {
       const current = { baseSha: target.baseSha, headSha: target.headSha };
-      const records = rows
+      const ownRecords = rows
         .filter((row) => row.repoFullName === target.repositoryFullName && row.prNumber === target.number)
         .flatMap((row) => {
           const kind = parseReleaseVerificationKind(row.kind);
@@ -117,6 +167,9 @@ export async function fetchReleaseChecks(
           if (!kind || !state) return [];
           return [{ kind, state, baseSha: row.baseSha, headSha: row.headSha, unverifiedScope: row.unverifiedScope }];
         });
+      // 公開準備で引き継いだ種別は、バンプ後の先端の行が無い。リリース画面・ゲートと同じ派生記録を足し、
+      // 引継ぎ済みを「再検証が必要」と見せない（#4862）
+      const records = [...ownRecords, ...(await loadInheritedRecords(target.repositoryFullName, target.number, ownRecords))];
       // 候補のSHAが変わったら古い対象のジョブは見ない（旧候補の進行を現在の候補へ流用しない）
       const jobs = runningJobs.filter(
         (job) =>
@@ -160,6 +213,20 @@ export async function fetchReleaseChecks(
           mac: parseReleaseProgress("integration", integrationJob?.progress)?.step === "mac",
         },
         integrationSetupGap: describeIntegrationSetupGap(target.repositoryFullName),
+        rerun: expectedRerunKinds({
+          activeJobKinds: [...jobs, ...activeJobs.filter(
+            (job) =>
+              job.repositoryFullName === target.repositoryFullName &&
+              job.prNumber === target.number &&
+              job.baseSha === current.baseSha &&
+              job.headSha === current.headSha,
+          )].map((job) => job.kind),
+          finalizations: finalizations.filter(
+            (f) => f.repositoryFullName === target.repositoryFullName && f.prNumber === target.number,
+          ),
+          headSha: current.headSha,
+          now: new Date(),
+        }),
       });
     }
   } catch (error) {
