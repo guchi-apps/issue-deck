@@ -22,6 +22,10 @@ vi.mock("@/lib/release-finalize-run", () => ({ loadFinalizationSnapshot: (...a: 
 vi.mock("@/lib/release-verification", () => ({ listReleaseVerificationRecords: (...a: unknown[]) => listReleaseVerificationRecords(...a) }));
 vi.mock("@/lib/release-prerequisites-run", () => ({ loadReleasePrerequisiteBlockers: async () => [] }));
 vi.mock("@/lib/release-verification-config", () => ({ getReleaseVerificationConfig: () => ({ enforced: false }) }));
+const fetchMergeFailureCheck = vi.fn();
+vi.mock("@/lib/github/merge-failure-check", () => ({ fetchMergeFailureCheck: (...a: unknown[]) => fetchMergeFailureCheck(...a) }));
+
+import { GithubApiError } from "@/lib/github/github-api-error";
 
 import { POST } from "./route";
 
@@ -95,5 +99,41 @@ describe("POST /api/issues/pull-request-merge の新方式候補の工程検査�
     const res = await POST(request());
     expect(res.status).toBe(200);
     expect(loadFinalizationSnapshot).not.toHaveBeenCalled();
+  });
+});
+
+describe("POST /api/issues/pull-request-merge でGitHubにマージを拒まれたとき（#4878）", () => {
+  const developPr = { head: { sha: "h1", ref: "issue-1" }, base: { sha: "b", ref: "develop" }, body: null, draft: false, state: "open", merged: false, auto_merge: { merge_method: "merge" } };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    requireUserId.mockResolvedValue("u1");
+    findFirst.mockResolvedValue({ installation: { installationId: 1 } });
+    getInstallationToken.mockResolvedValue("t");
+    fetchPullRequest.mockResolvedValue(developPr);
+  });
+
+  it("405の必須チェック待ちは、理由とチェックの状態を409で返す", async () => {
+    const raw = JSON.stringify({ message: 'Repository rule violations found\n\nRequired status check "issue-deck/ios-precheck" is expected.' });
+    mergePullRequest.mockRejectedValue(new GithubApiError(405, `GitHub API request failed: 405 https://api.github.com/x ${raw}`, raw));
+    fetchMergeFailureCheck.mockResolvedValue({ state: "pending", description: "iOS修復待ち" });
+    const res = await POST(request());
+    expect(res.status).toBe(409);
+    const json = await res.json();
+    expect(json).toMatchObject({
+      error: "merge_rejected",
+      message: "必須チェックがまだ成功していないため、マージできません",
+      failure: { kind: "required_check", checkName: "issue-deck/ios-precheck", check: { state: "pending" } },
+    });
+    expect(json.failure.next).toContain("Auto-merge");
+    expect(fetchMergeFailureCheck).toHaveBeenCalledWith("o", "r", "h1", "issue-deck/ios-precheck", "t");
+  });
+
+  it("401・5xxは従来どおりgithub_api_errorの502で返す", async () => {
+    mergePullRequest.mockRejectedValue(new GithubApiError(500, "GitHub API request failed: 500", "oops"));
+    const res = await POST(request());
+    expect(res.status).toBe(502);
+    expect(await res.json()).toMatchObject({ error: "github_api_error" });
+    expect(fetchMergeFailureCheck).not.toHaveBeenCalled();
   });
 });

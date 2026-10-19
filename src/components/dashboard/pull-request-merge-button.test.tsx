@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { PullRequestMergeButton } from "@/components/dashboard/pull-request-merge-button";
@@ -264,5 +264,56 @@ describe("要修正PRのマージ確認（#4377）", () => {
     expect(fetchMock.mock.calls.some(([url]) => String(url).includes("pull-request-merge"))).toBe(false);
     const mergeWithoutFix = screen.getByRole("button", { name: "修正せずマージする" }) as HTMLButtonElement;
     expect(mergeWithoutFix.disabled).toBe(true);
+  });
+});
+
+describe("PullRequestMergeButton でGitHubにマージを拒まれたとき（#4878）", () => {
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+  });
+
+  const failure = {
+    kind: "required_check",
+    httpStatus: 405,
+    title: "必須チェックがまだ成功していないため、マージできません",
+    reason: "「develop」のルールで、チェック「issue-deck/ios-precheck」の成功がマージの条件になっています。",
+    next: "Auto-mergeが有効なので、チェックが成功すれば自動でマージされます。",
+    checkName: "issue-deck/ios-precheck",
+    check: { state: "pending", description: "iOS修復待ち" },
+    githubMessage: 'Required status check "issue-deck/ios-precheck" is expected.',
+  };
+
+  function stubRejected() {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({ ok: false, status: 409, json: async () => ({ error: "merge_rejected", message: failure.title, failure }) })),
+    );
+  }
+
+  const developPr = () => makePullRequest({ baseRef: "develop", headRef: "issue-1", kind: "issue" });
+
+  it("詳細ペイン（block）では理由・チェックの状態・次の操作を出し、GitHubの原文はURLなしで折りたたむ", async () => {
+    stubRejected();
+    render(<PullRequestMergeButton pullRequest={developPr()} onMerged={() => {}} failureLayout="block" />);
+    fireEvent.click(screen.getByRole("button", { name: "マージする" }));
+
+    await waitFor(() => expect(screen.getByRole("alert")).toBeTruthy());
+    expect(screen.getByText(failure.title)).toBeTruthy();
+    expect(screen.getByText(failure.reason)).toBeTruthy();
+    expect(screen.getByText(/待機中: iOS修復待ち/)).toBeTruthy();
+    expect(screen.getByText(failure.next)).toBeTruthy();
+    expect(screen.getByText("GitHubの応答（HTTP 405）")).toBeTruthy();
+    expect(screen.queryByText(/api\.github\.com/)).toBeNull();
+  });
+
+  it("一覧（inline）では見出し1行だけを出し、理由はtitleに入れる", async () => {
+    stubRejected();
+    render(<PullRequestMergeButton pullRequest={developPr()} onMerged={() => {}} />);
+    fireEvent.click(screen.getByRole("button", { name: "マージする" }));
+
+    const line = await screen.findByText(failure.title);
+    expect(line.getAttribute("title")).toContain(failure.reason);
+    expect(screen.queryByRole("alert")).toBeNull();
   });
 });

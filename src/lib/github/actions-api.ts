@@ -154,6 +154,11 @@ export type GithubApiPullRequest = {
   body?: string | null;
   /** ドラフトか。GitHubは常に返すが、無いときは推測せず未取得として扱う（#4635） */
   draft?: boolean;
+  /** `open` / `closed`。マージを拒まれたときの説明に使う（#4878） */
+  state?: string;
+  merged?: boolean;
+  /** Auto-mergeが有効ならオブジェクト、無効ならnull（#4878） */
+  auto_merge?: unknown;
 };
 
 export async function fetchPullRequest(
@@ -198,7 +203,8 @@ export async function mergePullRequest(
   });
   if (!res.ok) {
     const detail = await res.text().catch(() => "");
-    throw new GithubApiError(res.status, `GitHub API request failed: ${res.status} ${url} ${detail}`);
+    // 本文は別にも持たせ、画面へ出す理由を読み直せるようにする（#4878。`describeMergeFailure`）
+    throw new GithubApiError(res.status, `GitHub API request failed: ${res.status} ${url} ${detail}`, detail);
   }
   const data: { sha?: unknown } = await res.json().catch(() => ({}));
   return { sha: typeof data.sha === "string" ? data.sha : null };
