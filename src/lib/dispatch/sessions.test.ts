@@ -469,6 +469,21 @@ describe("reportDispatchSessions", () => {
 
       expect(upsert.mock.calls[0]?.[0]?.update).not.toHaveProperty("reapAt");
     });
+
+    // 「セッション終了」の確認ダイアログへ出す未コミットの件数（#4881）
+    it("未コミットの件数は送ってきた巡の値で置き換え、送らない古いpollerでは触らない", async () => {
+      findMany.mockResolvedValueOnce([existingRow()]).mockResolvedValueOnce([]);
+      await reportDispatchSessions({
+        hostName: "subpc",
+        sessions: [report({ worktreeChangeCount: 3 })],
+        now: NOW,
+      });
+      expect(upsert.mock.calls[0]?.[0]?.update).toMatchObject({ worktreeChangeCount: 3 });
+
+      findMany.mockResolvedValueOnce([existingRow()]).mockResolvedValueOnce([]);
+      await reportDispatchSessions({ hostName: "subpc", sessions: [report()], now: NOW });
+      expect(upsert.mock.calls[1]?.[0]?.update).not.toHaveProperty("worktreeChangeCount");
+    });
   });
 
   /**

@@ -19,19 +19,10 @@ import {
   TimerReset,
 } from "lucide-react";
 
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { CodexPairingControl } from "@/components/dashboard/codex-pairing-control";
+import { SessionCloseDialog } from "@/components/dashboard/session-close-dialog";
 import { SESSION_INSTRUCTION_PRESETS, SessionDetail } from "@/components/dashboard/session-detail";
 import type { DispatchStateHandle } from "@/hooks/use-dispatch-state";
 import {
@@ -751,31 +742,13 @@ export function IssueSessionStatus({
         </p>
       )}
 
-      <AlertDialog open={confirmingKill} onOpenChange={setConfirmingKill}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>このセッションを終了しますか？</AlertDialogTitle>
-            <AlertDialogDescription>
-              {formatDispatchHostName(session.host)}の「{session.tmuxSessionName}」を終了します。作業中の内容は
-              コミットされず、worktreeはそのまま残ります。次にこのIssueで起動したときは、前回の会話の
-              続きから再開します。
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={dispatch.isSubmitting}>キャンセル</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={(event) => {
-                // 送信の結果を待たずに閉じないよう、既定の閉じる動作を止めてから実行する
-                event.preventDefault();
-                void send("kill").finally(() => setConfirmingKill(false));
-              }}
-              disabled={dispatch.isSubmitting}
-            >
-              {SESSION_CONTROL_LABELS.KILL.action}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <SessionCloseDialog
+        session={session}
+        open={confirmingKill}
+        onOpenChange={setConfirmingKill}
+        submitting={dispatch.isSubmitting}
+        onConfirm={() => send("kill")}
+      />
     </div>
   );
 }

@@ -74,6 +74,8 @@ function toSessionView(session: DispatchSession): DispatchSessionView {
     // 追加指示の判定に効かない
     codexThreadKnown: session.codexThreadKnown,
     codexThreadId: session.codexThreadId,
+    // 未コミットの変更の件数（#4881）。「セッション終了」の確認ダイアログが使う
+    worktreeChangeCount: session.worktreeChangeCount,
     // コードが読めなければ時刻も出さない（経過時間だけが宙に浮くのを防ぐ）
     step,
     stepAt: step === null ? null : (session.stepAt?.toISOString() ?? null),
@@ -404,6 +406,13 @@ export async function reportDispatchSessions(params: {
             stepSeenAt: report.stepSeenAt == null ? null : new Date(report.stepSeenAt),
           };
 
+    // 未コミットの変更の件数（#4881）。**送ってきた巡の値でそのまま置き換える**（畳む予定と同じ
+    // 扱い）。古いpollerは項目そのものを送ってこない（`undefined`）ので、そのときは触らない
+    const worktreeChanges =
+      report.worktreeChangeCount === undefined
+        ? {}
+        : { worktreeChangeCount: report.worktreeChangeCount };
+
     const stored = await db.dispatchSession.upsert({
       where: {
         host_tmuxSessionName: {
@@ -428,6 +437,7 @@ export async function reportDispatchSessions(params: {
         ...codexThread,
         ...codexThreadId,
         ...step,
+        ...worktreeChanges,
         // Remote ControlのURL（#2771）。pollerが引けた巡だけ載る。フックの報告より先に行を
         // 作る1巡目でも、ここで入れば起動直後から「Claude Codeアプリで開く」が出る
         ...(report.remoteControlUrl ? { remoteControlUrl: report.remoteControlUrl } : {}),
@@ -452,6 +462,8 @@ export async function reportDispatchSessions(params: {
               activityAt: null,
               remoteControlUrl: null,
               codexThreadId: null,
+              // 未コミットの件数も捨てる（#4881）。古いpollerでは送られず、前の値が残るため
+              worktreeChangeCount: null,
               firstSeenAt: now,
               reapAt: null,
               reapReason: null,
@@ -483,6 +495,7 @@ export async function reportDispatchSessions(params: {
         ...codexThread,
         ...codexThreadId,
         ...step,
+        ...worktreeChanges,
         // **`revived`の後に置く**（立ち上がり直した行では、捨てた後にこの巡のURLを入れる。
         // 引くのは同じtmux名を持つ最新の記録なので、前のセッションのURLは載らない）
         ...(report.remoteControlUrl ? { remoteControlUrl: report.remoteControlUrl } : {}),

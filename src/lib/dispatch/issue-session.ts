@@ -357,6 +357,21 @@ export function summarizeIssueSession(session: DispatchSessionView): IssueSessio
   };
 }
 
+/**
+ * いま作業中（busy）か（#4881）。「セッション終了」の確認ダイアログが、途中の作業を
+ * 打ち切ることになると知らせるためにだけ使う。
+ *
+ * **`summarizeIssueSession`が「作業中」「実行中」と出す状態と揃える。** 入力待ち・起動確認で
+ * 止まっている・応答を終えて次の指示を待っている（その後ツールが走っていない）セッションは
+ * 作業中にしない。生きていないセッションも同じ。
+ */
+export function isSessionBusy(session: DispatchSessionView): boolean {
+  if (session.state !== "ALIVE") return false;
+  if (session.activity === null || session.activity === "WORKING") return true;
+  if (session.activity === "RESPONDED") return isSessionStepFresh(session);
+  return false;
+}
+
 /** 許可を求めているツールの説明（#2971）。名前は画面でもそのまま出し、何をするツールかを添える */
 const PERMISSION_TOOL_TEXT: Record<string, string> = {
   Read: "ファイルの読み取り",

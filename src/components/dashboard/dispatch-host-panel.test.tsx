@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -975,6 +975,54 @@ describe("DispatchHostPanel", () => {
 
       expect(screen.queryByText(/起動を見送っています/)).toBeNull();
     });
+  });
+});
+
+describe("セッション終了（#4881）", () => {
+  it("行の終了ボタンは確認を挟んでから終了を送る", async () => {
+    const onClose = vi.fn().mockResolvedValue({ ok: true });
+    render(
+      <DispatchHostPanel
+        hosts={[makeHost()]}
+        sessions={[makeSession({ activity: "RESPONDED", activityAt: NOW.toISOString() })]}
+        onCloseSession={onClose}
+      />,
+    );
+    act(() => screen.getByRole("button", { name: "#1567のセッションを終了する" }).click());
+    expect(onClose).not.toHaveBeenCalled();
+    const dialog = screen.getByRole("alertdialog");
+    await act(async () => within(dialog).getByRole("button", { name: "セッション終了" }).click());
+    expect(onClose).toHaveBeenCalledWith(expect.objectContaining({ tmuxSessionName: "issue-deck-issue-1567" }));
+  });
+
+  it("導線を渡さない・終了に対応していないホストではボタンを出さない", () => {
+    const { unmount } = render(<DispatchHostPanel hosts={[makeHost()]} sessions={[makeSession()]} />);
+    expect(screen.queryByRole("button", { name: "#1567のセッションを終了する" })).toBeNull();
+    unmount();
+    render(
+      <DispatchHostPanel
+        hosts={[makeHost({ sessionControlCapable: null })]}
+        sessions={[makeSession()]}
+        onCloseSession={vi.fn()}
+      />,
+    );
+    expect(screen.queryByRole("button", { name: "#1567のセッションを終了する" })).toBeNull();
+  });
+
+  it("終了を積めなかったときは理由を行に出す", async () => {
+    const onClose = vi.fn().mockResolvedValue({ ok: false, message: "サブPCがオフラインです。" });
+    render(
+      <DispatchHostPanel
+        hosts={[makeHost()]}
+        sessions={[makeSession({ activity: "RESPONDED", activityAt: NOW.toISOString() })]}
+        onCloseSession={onClose}
+      />,
+    );
+    act(() => screen.getByRole("button", { name: "#1567のセッションを終了する" }).click());
+    await act(async () =>
+      within(screen.getByRole("alertdialog")).getByRole("button", { name: "セッション終了" }).click(),
+    );
+    expect(screen.getByText("サブPCがオフラインです。")).toBeTruthy();
   });
 });
 

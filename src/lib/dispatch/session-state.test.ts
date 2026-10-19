@@ -370,6 +370,22 @@ describe("parseDispatchSessionReport", () => {
     expect(parseDispatchSessionReport({ ...valid, codexThreadId: "not-a-uuid" })).toBeNull();
   });
 
+  // 未コミットの変更の件数（#4881）。壊れていても報告全体は通し、項目だけ「分からない」へ落とす
+  it("未コミットの件数は省略とnullを区別し、壊れた値はnullへ落とす", () => {
+    expect(parseDispatchSessionReport({ ...valid, worktreeChangeCount: 4 })).toEqual({
+      ...valid,
+      worktreeChangeCount: 4,
+    });
+    for (const broken of [null, -1, 1.5, "4"]) {
+      expect(parseDispatchSessionReport({ ...valid, worktreeChangeCount: broken })).toEqual({
+        ...valid,
+        worktreeChangeCount: null,
+      });
+    }
+    const parsed = parseDispatchSessionReport(valid);
+    expect(parsed && "worktreeChangeCount" in parsed).toBe(false);
+  });
+
   it("CodexのスレッドUUIDは省略とnullを区別する", () => {
     expect(parseDispatchSessionReport({ ...valid, codexThreadId: null })).toEqual({
       ...valid,
