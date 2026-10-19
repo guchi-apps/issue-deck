@@ -126,6 +126,12 @@ export type RepositoryBranchStatus = {
   mainHead?: BranchHead | null;
   /** `develop`の先頭コミットのOID（#3468）。`develop`が無ければnull。古い応答には無い */
   developHeadOid?: string | null;
+  /**
+   * 新方式のリリース候補で最後に公開した版（`ReleaseVersionReservation`の`consumed`。#4848）。
+   * 候補PRのタイトル（`リリース候補 RC-13`）は版を含まないため、最新のリリースが候補だったときに
+   * 版を補う。記録が無ければnull。古い応答には無い
+   */
+  releasedVersion?: string | null;
 };
 
 /**

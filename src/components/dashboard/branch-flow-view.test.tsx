@@ -2887,11 +2887,11 @@ describe("iOS自動配布の印（#3759）", () => {
 
 describe("ブランチ画面の情報配置 (#4683)", () => {
   afterEach(() => { cleanup(); vi.restoreAllMocks(); window.localStorage.clear(); });
-  it("文章を重ねず短い操作ラベルで詳細を開き、閉じる操作へ切り替える", () => {
+  it("手が要らない行は2行目の状態文言と導線を出さず、開くと中身が出る (#4848)", () => {
     renderFlow({ branchStatuses: [branchStatus()], pullRequests: [makePullRequest()] });
-    expect(screen.getByText("作業・PRを見る")).toBeTruthy();
+    expect(screen.queryByText("開発中")).toBeNull();
+    expect(screen.queryByText("作業・PRを見る")).toBeNull();
     openRepository();
-    expect(screen.getByText("閉じる")).toBeTruthy();
     const section = screen.getByText("作業中").closest("details");
     expect(section?.open).toBe(true);
     expect(section?.textContent).toContain("PRのタイトル");

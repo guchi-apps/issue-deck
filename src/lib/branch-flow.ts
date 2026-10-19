@@ -650,7 +650,7 @@ function buildRepository({
     release: {
       pullRequest: releasePullRequest,
       comparison: branchStatus?.developVsMain ?? null,
-      latestVersion: releases.at(-1)?.version ?? null,
+      latestVersion: resolveLatestVersion(releases, branchStatus?.releasedVersion ?? null),
     },
     activeLanes,
     releaseGroups,
@@ -858,6 +858,20 @@ export function latestReleaseMergedAtByRepository(
     }
   }
   return byRepository;
+}
+
+/**
+ * 本番の版。最新のリリースPRのタイトルから取る。新方式のリリース候補（`リリース候補 RC-13`）は
+ * タイトルに版を含まないので、公開時に記録した版（`releasedVersion`）で補う（#4848）。
+ * **古いリリースPRの版へ遡らない**——本番の版とずれた値を出すより、出さない方がよい。
+ */
+export function resolveLatestVersion(
+  releases: { version: string | null }[],
+  releasedVersion: string | null,
+): string | null {
+  const latest = releases.at(-1);
+  if (latest === undefined) return releasedVersion;
+  return latest.version ?? releasedVersion;
 }
 
 function collectReleases(pullRequests: PullRequestSummary[]): MergedRelease[] {
