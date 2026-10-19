@@ -16,11 +16,13 @@ import {
   canTransitionRcPhase,
   decideLegacyMigration,
   decideRcImport,
+  decideRcLaggedAdoption,
   decideRcReport,
   deriveRcStatus,
   isRcRevisionPendingExpired,
   parseRcCallerSupport,
   parseRcRequestKey,
+  RC_NOT_UPDATED_REASON,
   RC_REVISION_TTL_MS,
   type RcStatusInput,
 } from "@/lib/release-rc";
@@ -379,3 +381,37 @@ describe("本番の稼働確認の停止（#4712）", () => {
     expect(block.reason).toContain("PR #254");
   });
 });
+
+describe("decideRcLaggedAdoption（#4895）", () => {
+  const lagged = {
+    revision: 3,
+    status: "failed",
+    reason: "fix_import",
+    failureReason: RC_NOT_UPDATED_REASON,
+    runUrl: "https://github.com/o/r/actions/runs/1",
+    expectedHeadSha: HEAD1,
+  };
+  const base = { revision: lagged, latestRevision: 3, current: { revision: 2, headSha: HEAD1 }, branchHeadSha: HEAD2, fastForward: true };
+
+  it("報告を受けたのに未更新として失敗にした版は、候補ブランチが早送りで進んでいれば取り込み直す", () => {
+    expect(decideRcLaggedAdoption(base)).toBe(true);
+  });
+
+  it("workflowが失敗を報告した版・報告の無い版は取り込み直さない", () => {
+    expect(decideRcLaggedAdoption({ ...base, revision: { ...lagged, failureReason: "競合" } })).toBe(false);
+    expect(decideRcLaggedAdoption({ ...base, revision: { ...lagged, runUrl: null } })).toBe(false);
+    expect(decideRcLaggedAdoption({ ...base, revision: { ...lagged, status: "expired" } })).toBe(false);
+  });
+
+  it("後から別の版が積まれた・直前の記録と前提が違う・巻き戻しなら取り込み直さない", () => {
+    expect(decideRcLaggedAdoption({ ...base, latestRevision: 4 })).toBe(false);
+    expect(decideRcLaggedAdoption({ ...base, current: { revision: 2, headSha: HEAD2 } })).toBe(false);
+    expect(decideRcLaggedAdoption({ ...base, branchHeadSha: HEAD1 })).toBe(false);
+    expect(decideRcLaggedAdoption({ ...base, fastForward: false })).toBe(false);
+  });
+
+  it("初回の作成・移行の版は対象にしない", () => {
+    expect(decideRcLaggedAdoption({ ...base, revision: { ...lagged, reason: "initial" } })).toBe(false);
+  });
+});
+

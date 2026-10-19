@@ -14,6 +14,10 @@ import {
   decideReverification,
   decideReverificationFollowUp,
   isLegacyReverificationStopReason,
+  isRcImportFailureReason,
+  isRebuildFailureReason,
+  rcImportFailureReason,
+  REBUILD_FAILURE_REASONS,
   releaseFixStepIndex,
   type ReleaseFixSeriesSnapshot,
 } from "@/lib/release-fix-series";
@@ -326,3 +330,23 @@ describe("isLegacyReverificationStopReason", () => {
     expect(isLegacyReverificationStopReason(null)).toBe(false);
   });
 });
+
+describe("rcImportFailureReason（#4895）", () => {
+  it("止まった段階を理由に入れる", () => {
+    expect(rcImportFailureReason({ kind: "request", error: "candidate_changed" })).toContain(
+      "取り込みの依頼に失敗: 候補ブランチが記録したrevisionのheadから動いています",
+    );
+    expect(rcImportFailureReason({ kind: "failed", detail: "競合" })).toContain("取り込みのrevisionが失敗: 競合");
+    expect(rcImportFailureReason({ kind: "failed", detail: null })).toContain("理由の記録なし");
+    expect(rcImportFailureReason({ kind: "expired" })).toContain("取り込みのrevisionが期限切れ");
+  });
+
+  it("段階つきの理由も、従来の理由も「準備に失敗」として判別する", () => {
+    const reason = rcImportFailureReason({ kind: "expired" });
+    expect(isRcImportFailureReason(reason)).toBe(true);
+    expect(isRebuildFailureReason(reason)).toBe(true);
+    expect(isRcImportFailureReason(REBUILD_FAILURE_REASONS.rc)).toBe(true);
+    expect(isRcImportFailureReason(REBUILD_FAILURE_REASONS.full)).toBe(false);
+  });
+});
+

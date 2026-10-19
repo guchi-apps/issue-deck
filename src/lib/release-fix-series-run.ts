@@ -1,6 +1,13 @@
 import type { ReleaseFixSeries } from "@prisma/client";
 import { isRcReleaseCandidateHeadRef, isReleaseCandidateHeadRef, legacyReleaseVersionOf } from "@/lib/release-branch";
-import { findReviewableRcForPullRequest, observeRcRevisionAfter, rcFixSeriesRequestKey, requestRcImport } from "@/lib/release-rc-run";
+import {
+  findCandidateIdByPullRequest,
+  findReviewableRcForPullRequest,
+  observeRcRevisionAfter,
+  rcFixSeriesRequestKey,
+  reconcileRcCandidate,
+  requestRcImport,
+} from "@/lib/release-rc-run";
 
 import { parseClaudeLocalModel, parseCodexLocalModel, resolveAiExecutionAgent } from "@/lib/app-settings";
 import { db } from "@/lib/db";
@@ -40,8 +47,11 @@ import {
   decideReverificationFollowUp,
   defaultVerifyConditions,
   isLegacyReverificationStopReason,
+  isRcImportFailureReason,
   isRebuildFailureReason,
   NOTHING_TO_ADD_REASON,
+  RC_IMPORT_FAILURE_PREFIX,
+  rcImportFailureReason,
   isReleaseFixActive,
   itemFromFinding,
   parseReleaseFixStatus,
@@ -50,6 +60,7 @@ import {
   reviewFindingKey,
   RELEASE_FIX_STATUS_LABEL,
   REBUILD_FAILURE_REASONS,
+  type RcImportFailureStage,
   type ReleaseFixCauseClass,
   type ReleaseFixDraftItem,
   type ReleaseFixSourceKind,
@@ -706,7 +717,7 @@ async function sweepGroup(repositoryFullName: string, releasePrNumber: number, r
             expectedHeadSha: frozen.head.sha,
             selected: decision.selectedPrs.map((number) => ({ number })),
             approveExtra: accepted,
-            requestKey: rcFixSeriesRequestKey(decision.seriesIds[0], frozen.head.sha),
+            requestKey: rcFixSeriesRequestKey(decision.seriesIds[0], frozen.head.sha, claimedAt),
             source: "fix_series",
             fixSeriesId: decision.seriesIds[0],
           }).catch((error: unknown) => {
@@ -714,7 +725,9 @@ async function sweepGroup(repositoryFullName: string, releasePrNumber: number, r
             return { ok: false as const, error: "dispatch_failed" as const };
           })
         : ({ ok: false as const, error: "not_found" as const });
-    if (!result.ok) return { rebuilt: false, changed: await stopRows(ctx, decision.seriesIds, "stopped", REBUILD_FAILURE_REASONS.rc) };
+    if (!result.ok) {
+      return { rebuilt: false, changed: await stopRows(ctx, decision.seriesIds, "stopped", rcImportFailureReason({ kind: "request", error: result.error })) };
+    }
     return { rebuilt: true, changed: decision.seriesIds.length };
   }
   if (decision.selectedPrs.length > 0) {
@@ -810,7 +823,9 @@ async function sweepSuccessor(row: ReleaseFixSeries, hostName: string | null): P
           return 1;
         }
         if (rcRevision.status === "failed" || rcRevision.status === "expired") {
-          return stopRows(access, [row.id], "stopped", REBUILD_FAILURE_REASONS.rc);
+          const stage: RcImportFailureStage =
+            rcRevision.status === "failed" ? { kind: "failed", detail: rcRevision.failureReason } : { kind: "expired" };
+          return stopRows(access, [row.id], "stopped", rcImportFailureReason(stage));
         }
         return 0;
       }
@@ -844,6 +859,9 @@ async function sweepSuccessor(row: ReleaseFixSeries, hostName: string | null): P
     }
     return 0;
   }
+
+  // 新方式の候補への取り込みで止めた系列は、取り込みのrevisionが後から適用されたら再検証へ戻す（#4895）
+  if (row.status === "stopped" && isRcImportFailureReason(row.stopReason)) return resumeAppliedRcImport(access, row);
 
   // reverifying（と、旧い巡回が再検証失敗で止めた`stopped`。#4478）
   if (row.successorPrNumber === null) return 0;
@@ -890,6 +908,102 @@ async function sweepSuccessor(row: ReleaseFixSeries, hostName: string | null): P
 }
 
 type SweepContext = { owner: string; repo: string; token: string };
+
+/**
+ * 取り込みの失敗で止めた系列を、その取り込みのrevisionが適用済みになっていれば再検証中へ戻す（#4895）。
+ * 照合の時差で失敗扱いにした版は`observeRcRevisionAfter`が候補ブランチの先端から取り込み直す。
+ * 適用されていなければ何もしない（止めたまま）
+ */
+async function resumeAppliedRcImport(ctx: SweepContext, row: ReleaseFixSeries): Promise<number> {
+  if (!row.rebuildClaimedAt) return 0;
+  const rcRevision = await observeRcRevisionAfter({
+    repositoryFullName: row.repositoryFullName,
+    prNumber: row.releasePrNumber,
+    since: row.rebuildClaimedAt,
+  });
+  if (!rcRevision || rcRevision.status !== "applied" || rcRevision.prNumber === null || !rcRevision.baseSha || !rcRevision.headSha) return 0;
+  const moved = await db.releaseFixSeries.updateMany({
+    where: { id: row.id, status: "stopped", stopReason: row.stopReason },
+    data: {
+      status: "reverifying",
+      stopReason: null,
+      successorPrNumber: rcRevision.prNumber,
+      successorBaseSha: rcRevision.baseSha,
+      successorHeadSha: rcRevision.headSha,
+    },
+  });
+  if (moved.count === 0) return 0;
+  await resolveStopLabels(ctx, row.issueNumber);
+  await createComment(ctx.owner, ctx.repo, row.issueNumber, ctx.token, {
+    body: `リリース候補 #${row.releasePrNumber} への修正PRの取り込みを確認できました（\`${rcRevision.headSha.slice(0, 12)}\`）。修正系列を「${RELEASE_FIX_STATUS_LABEL.reverifying}」へ戻し、新しいSHAで統合検証と全体レビューをやり直します。\n\n${STOP_COMMENT_MARKER}`,
+  }).catch(() => undefined);
+  return 1;
+}
+
+export type RcFixRecoveryResult = {
+  /** 取り込みを確認できて再検証へ戻した系列の修正Issue */
+  resumed: number[];
+  /** 記録と候補ブランチが一致していたので、取り込みをやり直す系列の修正Issue（次の巡回で依頼する） */
+  requeued: number[];
+  /** 自動では続けられない系列と理由 */
+  blocked: { issueNumber: number; reason: string }[];
+};
+
+/**
+ * 新方式の候補（#4495）で取り込みが止まった修正系列を、画面の「再取り込み・再確認」から進め直す（#4895）。
+ *
+ * 1. 候補の記録を候補ブランチと照合し直す（照合の時差で失敗扱いにした版の取り込み直しを含む）
+ * 2. 取り込みが適用されていれば、系列を再検証中へ戻す（検証は適用時に依頼済み）
+ * 3. 適用されておらず、候補ブランチが系列の起点のheadのままなら、取り込みを依頼し直せる状態へ戻す
+ *    （依頼の判定・承認範囲は巡回の`decideReleaseFix`と`requestRcImport`がそのまま行う）
+ * 4. 候補ブランチが記録に無い変更で進んでいるものは推測で取り込まず、理由を返す
+ */
+export async function recoverRcFixSeries(input: {
+  repositoryFullName: string;
+  prNumber: number;
+  ctx: SweepContext;
+}): Promise<RcFixRecoveryResult> {
+  const result: RcFixRecoveryResult = { resumed: [], requeued: [], blocked: [] };
+  const candidateId = await findCandidateIdByPullRequest(input.repositoryFullName, input.prNumber);
+  if (candidateId) await reconcileRcCandidate(input.repositoryFullName, candidateId);
+  const rows = await db.releaseFixSeries.findMany({
+    where: {
+      repositoryFullName: input.repositoryFullName,
+      releasePrNumber: input.prNumber,
+      status: "stopped",
+      stopReason: { startsWith: RC_IMPORT_FAILURE_PREFIX },
+    },
+    orderBy: { createdAt: "asc" },
+  });
+  if (rows.length === 0) return result;
+  const frozen = await findOpenFrozenReleasePr(input.ctx.owner, input.ctx.repo, input.ctx.token);
+  for (const row of rows) {
+    if ((await resumeAppliedRcImport(input.ctx, row)) > 0) {
+      result.resumed.push(row.issueNumber);
+      continue;
+    }
+    if (!frozen || frozen.number !== row.releasePrNumber || !isRcReleaseCandidateHeadRef(frozen.head.ref)) {
+      result.blocked.push({ issueNumber: row.issueNumber, reason: "取り込み先のリリース候補が開いていません" });
+      continue;
+    }
+    if (frozen.head.sha !== row.originHeadSha) {
+      result.blocked.push({
+        issueNumber: row.issueNumber,
+        reason: `候補ブランチ（${frozen.head.sha.slice(0, 7)}）が、この修正系列の起点（${row.originHeadSha.slice(0, 7)}）から記録に無い変更で進んでいます。候補を取り消して作り直してください`,
+      });
+      continue;
+    }
+    // 取り込みを依頼し直す。確保の時刻が変わるので要求キーも変わり、失敗した前回の版と取り違えない
+    const moved = await db.releaseFixSeries.updateMany({
+      where: { id: row.id, status: "stopped", stopReason: row.stopReason },
+      data: { status: "fix_merged", stopReason: null, rebuildClaimedAt: null },
+    });
+    if (moved.count === 0) continue;
+    await resolveStopLabels(input.ctx, row.issueNumber);
+    result.requeued.push(row.issueNumber);
+  }
+  return result;
+}
 
 /**
  * 本系列が停止時に付けた`00.check-user`＋`01.check-blocked`を解く。
@@ -1070,6 +1184,8 @@ export async function runReleaseFixSweep(options: { hostName?: string | null } =
         { status: "stopped", successorPrNumber: { not: null }, stopReason: { contains: "の再検証で指摘・失敗が残りました（世代" } },
         // 世代数の固定上限（3回）で止めた系列も、上限の撤廃後は同じ記録から再評価する（#4589）
         { status: "stopped", successorPrNumber: { not: null }, stopReason: { contains: "修正の反復が上限（" } },
+        // 新方式の候補への取り込みで止めた系列は、取り込みのrevisionが後から適用されたら再検証へ戻す（#4895）
+        { status: "stopped", rebuildClaimedAt: { not: null }, stopReason: { startsWith: RC_IMPORT_FAILURE_PREFIX } },
       ],
     },
     orderBy: { createdAt: "asc" },
@@ -1080,7 +1196,14 @@ export async function runReleaseFixSweep(options: { hostName?: string | null } =
   const groups = new Map<string, ReleaseFixSeries[]>();
   const successors: ReleaseFixSeries[] = [];
   for (const row of active) {
-    if (row.status === "rebuilding" || row.status === "reverifying" || (row.status === "stopped" && (isLegacyReverificationStopReason(row.stopReason) || isLegacyGenerationLimitStopReason(row.stopReason)))) {
+    if (
+      row.status === "rebuilding" ||
+      row.status === "reverifying" ||
+      (row.status === "stopped" &&
+        (isLegacyReverificationStopReason(row.stopReason) ||
+          isLegacyGenerationLimitStopReason(row.stopReason) ||
+          isRcImportFailureReason(row.stopReason)))
+    ) {
       successors.push(row);
       continue;
     }

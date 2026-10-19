@@ -19,6 +19,7 @@ const { state, seriesDb } = vi.hoisted(() => {
         if ("in" in c) return (c.in as unknown[]).includes(value);
         if ("not" in c) return value !== c.not;
         if ("contains" in c) return typeof value === "string" && value.includes(c.contains as string);
+        if ("startsWith" in c) return typeof value === "string" && value.startsWith(c.startsWith as string);
         return true;
       }
       return value === cond;
@@ -77,8 +78,9 @@ vi.mock("@/lib/github/issues-api", () => ({
   fetchIssueState: vi.fn(async () => "open"),
   updateIssue: vi.fn(async () => ({})),
 }));
+const fetchOpenPullRequestsForBase = vi.fn(async () => [] as unknown[]);
 vi.mock("@/lib/github/release-api", () => ({
-  fetchOpenPullRequestsForBase: vi.fn(async () => []),
+  fetchOpenPullRequestsForBase: (...a: unknown[]) => (fetchOpenPullRequestsForBase as (...x: unknown[]) => unknown)(...a),
   fetchPullRequestForRebuild: vi.fn(),
   isAncestorCommit: vi.fn(),
   fetchPullRequestsByHead: vi.fn(async () => []),
@@ -96,9 +98,19 @@ const removeLabels = vi.fn(async () => undefined);
 vi.mock("@/lib/dispatch/check-user-labels", () => ({ removeCheckUserWithReason: (...a: unknown[]) => (removeLabels as (...x: unknown[]) => unknown)(...a) }));
 const enqueueDispatchJob = vi.fn();
 vi.mock("@/lib/dispatch/jobs", () => ({ enqueueDispatchJob: (...a: unknown[]) => enqueueDispatchJob(...a) }));
+const observeRcRevisionAfter = vi.fn(async () => null as unknown);
+const reconcileRcCandidate = vi.fn(async () => undefined);
+vi.mock("@/lib/release-rc-run", () => ({
+  findCandidateIdByPullRequest: vi.fn(async () => "c1"),
+  findReviewableRcForPullRequest: vi.fn(async () => null),
+  observeRcRevisionAfter: (...a: unknown[]) => (observeRcRevisionAfter as (...x: unknown[]) => unknown)(...a),
+  rcFixSeriesRequestKey: vi.fn(() => "key"),
+  reconcileRcCandidate: (...a: unknown[]) => (reconcileRcCandidate as (...x: unknown[]) => unknown)(...a),
+  requestRcImport: vi.fn(),
+}));
 
-import { buildReleaseFixSourceKey, reviewFindingKey } from "@/lib/release-fix-series";
-import { closeFixSeriesForCancelledCandidate, runReleaseFixSweep } from "@/lib/release-fix-series-run";
+import { buildReleaseFixSourceKey, rcImportFailureReason, REBUILD_FAILURE_REASONS, reviewFindingKey } from "@/lib/release-fix-series";
+import { closeFixSeriesForCancelledCandidate, recoverRcFixSeries, runReleaseFixSweep } from "@/lib/release-fix-series-run";
 import { summarizeReleaseReviewDecisions } from "@/lib/release-review-decision";
 import { reviewFindingId } from "@/lib/release-review-result";
 
@@ -406,3 +418,76 @@ describe("候補の取り消しで修正系列を畳む（#4800）", () => {
     expect(removeLabels).not.toHaveBeenCalled();
   });
 });
+
+describe("新方式の候補への取り込みで止めた系列（#4895）", () => {
+  const stoppedRc = (over: Partial<Row> = {}) =>
+    baseRow({
+      status: "stopped",
+      stopReason: rcImportFailureReason({ kind: "failed", detail: "候補ブランチが更新されていません" }),
+      activeKey: null,
+      successorPrNumber: null,
+      successorBaseSha: null,
+      successorHeadSha: null,
+      ...over,
+    });
+  const applied = { status: "applied", prNumber: 10, baseSha: "b2", headSha: "h2", failureReason: null };
+
+  beforeEach(() => {
+    observeRcRevisionAfter.mockResolvedValue(null);
+    fetchOpenPullRequestsForBase.mockResolvedValue([]);
+  });
+
+  it("取り込みのrevisionが後から適用されていれば、巡回が再検証中へ戻して確認待ちを解く", async () => {
+    state.rows = [stoppedRc()];
+    observeRcRevisionAfter.mockResolvedValue(applied);
+    await runReleaseFixSweep({ hostName: "subpc" });
+    expect(state.rows[0]).toMatchObject({ status: "reverifying", stopReason: null, successorPrNumber: 10, successorHeadSha: "h2" });
+    expect(removeLabels).toHaveBeenCalled();
+  });
+
+  it("従来の理由（段階なし）で止めた系列も同じく戻す", async () => {
+    state.rows = [stoppedRc({ stopReason: REBUILD_FAILURE_REASONS.rc })];
+    observeRcRevisionAfter.mockResolvedValue(applied);
+    await runReleaseFixSweep({ hostName: "subpc" });
+    expect(state.rows[0]).toMatchObject({ status: "reverifying" });
+  });
+
+  it("適用されていなければ止めたままにする", async () => {
+    state.rows = [stoppedRc()];
+    observeRcRevisionAfter.mockResolvedValue({ ...applied, status: "failed", failureReason: "競合" });
+    await runReleaseFixSweep({ hostName: "subpc" });
+    expect(state.rows[0]).toMatchObject({ status: "stopped" });
+    expect(removeLabels).not.toHaveBeenCalled();
+  });
+
+  describe("recoverRcFixSeries（画面の「再取り込み・再確認」）", () => {
+    const ctx = { owner: "o", repo: "r", token: "t" };
+    const rcPr = (sha: string) => ({ number: 10, head: { ref: "release-rc/2", sha }, base: { sha: "b0" } });
+
+    it("記録を照合し直し、取り込みが適用されていれば再検証へ戻す", async () => {
+      state.rows = [stoppedRc()];
+      observeRcRevisionAfter.mockResolvedValue(applied);
+      const result = await recoverRcFixSeries({ repositoryFullName: "o/r", prNumber: 10, ctx });
+      expect(reconcileRcCandidate).toHaveBeenCalledWith("o/r", "c1");
+      expect(result).toEqual({ resumed: [100], requeued: [], blocked: [] });
+    });
+
+    it("候補ブランチが系列の起点のままなら、取り込みを依頼し直せる状態へ戻す", async () => {
+      state.rows = [stoppedRc()];
+      fetchOpenPullRequestsForBase.mockResolvedValue([rcPr("h0")]);
+      const result = await recoverRcFixSeries({ repositoryFullName: "o/r", prNumber: 10, ctx });
+      expect(result).toEqual({ resumed: [], requeued: [100], blocked: [] });
+      expect(state.rows[0]).toMatchObject({ status: "fix_merged", stopReason: null, rebuildClaimedAt: null });
+    });
+
+    it("候補ブランチが記録に無い変更で進んでいれば、推測で取り込まず理由を返す", async () => {
+      state.rows = [stoppedRc()];
+      fetchOpenPullRequestsForBase.mockResolvedValue([rcPr("zz")]);
+      const result = await recoverRcFixSeries({ repositoryFullName: "o/r", prNumber: 10, ctx });
+      expect(result.blocked).toHaveLength(1);
+      expect(result.blocked[0].reason).toContain("記録に無い変更で進んでいます");
+      expect(state.rows[0]).toMatchObject({ status: "stopped" });
+    });
+  });
+});
+

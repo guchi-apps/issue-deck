@@ -174,3 +174,27 @@ describe("リリース準備の失敗（#4335）", () => {
     expect(container.textContent).toBe("");
   });
 });
+
+describe("修正を入れて作り直す：新方式のリリース候補（#4895）", () => {
+  it("旧方式の文面を出さず、再取り込み・再確認を送って結果を出す", async () => {
+    fetchMock.mockImplementation((_url: string, init?: RequestInit) =>
+      init?.method === "POST"
+        ? json({ ok: true, resumed: [581], requeued: [], blocked: [{ issueNumber: 582, reason: "候補を取り消して作り直してください" }] })
+        : json({ releasePullRequest: null, candidate: null, rcPullRequest: { number: 580, url: "https://github.com/o/r/pull/580", label: "RC-2" } }),
+    );
+    render(<ReleaseRebuildButton repositoryFullName="o/r" hasChanges />);
+    fireEvent.click(screen.getByRole("button", { name: /修正を入れて作り直す/ }));
+
+    const action = await screen.findByRole("button", { name: "再取り込み・再確認" });
+    expect(screen.queryByText(/release-main\/v…/)).toBeNull();
+    expect(screen.getByText(/リリース候補 RC-2 の取り込みを確認し直しますか/)).toBeTruthy();
+    fireEvent.click(action);
+
+    await waitFor(() => expect(screen.getByText(/再検証へ戻しました（修正Issue #581）/)).toBeTruthy());
+    expect(screen.getByText(/修正Issue #582: 候補を取り消して作り直してください/)).toBeTruthy();
+    const post = fetchMock.mock.calls.find(([, init]) => (init as RequestInit | undefined)?.method === "POST");
+    expect(post?.[0]).toBe("/api/repositories/release/rc");
+    expect(JSON.parse((post?.[1] as RequestInit).body as string)).toEqual({ owner: "o", repo: "r", action: "recover", pullRequestNumber: 580 });
+  });
+});
+
