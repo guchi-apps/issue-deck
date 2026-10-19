@@ -70,6 +70,12 @@ export type NotificationItem = {
    */
   since: string | null;
   target: NotificationTarget;
+  /**
+   * 同じ対象の状態の版（#4857）。×で伏せた行は、これかバッジの文言が変わると再び出る
+   * （`lib/notification-dismissals.ts`）。確認待ちは`00.check-user`が付いた時刻を入れ、
+   * 付け直されたら別の依頼として扱う。版を持たない区分は省く
+   */
+  revision?: string | null;
 };
 
 export const NOTIFICATION_GROUP_LABEL: Record<NotificationGroup, string> = {
@@ -234,6 +240,7 @@ function buildCheckUserNotifications(
         repositoryFullName: issue.repositoryFullName,
         since: issue.checkUserLabeledAt ?? issue.updatedAt,
         target: { kind: "issue", issueId: issue.id },
+        revision: issue.checkUserLabeledAt,
       } satisfies NotificationItem;
     });
 }

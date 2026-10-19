@@ -45,7 +45,8 @@ export function NotificationButton({
   onOpenFlow,
 }: NotificationButtonProps) {
   const [open, setOpen] = useState(false);
-  const { items, groups, badgeCount, countLabel, hasError } = useNotificationState();
+  const { items, groups, dismissedItems, dismiss, restore, badgeCount, countLabel, hasError } =
+    useNotificationState();
 
   function handleSelect(item: NotificationItem) {
     setOpen(false);
@@ -83,6 +84,9 @@ export function NotificationButton({
         <NotificationContent
           items={items}
           groups={groups}
+          dismissedItems={dismissedItems}
+          onDismiss={dismiss}
+          onRestore={restore}
           onSelect={handleSelect}
           onOpenCheckUserView={() => {
             setOpen(false);

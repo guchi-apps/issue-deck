@@ -93,7 +93,8 @@ export function MobileNotificationButton() {
  * 置いた画面すべてのテストがルーターのマウントを求めることになる。
  */
 function SheetBody({ onClose }: { onClose: () => void }) {
-  const { items, groups, issues, repositories } = useNotificationState();
+  const { items, groups, dismissedItems, dismiss, restore, issues, repositories } =
+    useNotificationState();
   const { openIssue, openPullRequest } = useReferenceNavigation();
   const { selectTab, selectQuickView } = useMobileScreen(issues, repositories);
 
@@ -121,6 +122,9 @@ function SheetBody({ onClose }: { onClose: () => void }) {
     <NotificationContent
       items={items}
       groups={groups}
+      dismissedItems={dismissedItems}
+      onDismiss={dismiss}
+      onRestore={restore}
       onSelect={handleSelect}
       // PCの「確認待ちビュー」に当たるのはスマホではIssue一覧の同ビュー（ホーム経由と同じ遷移）
       onOpenCheckUserView={() => navigate(() => selectQuickView("check-user"))}
