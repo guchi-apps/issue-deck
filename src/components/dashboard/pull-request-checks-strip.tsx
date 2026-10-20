@@ -6,7 +6,12 @@ import { useGithubReferenceNavigation } from "@/components/dashboard/github-refe
 import { PullRequestMergeChecks } from "@/components/dashboard/pull-request-merge-checks";
 import { useNow } from "@/hooks/use-now";
 import { useReleaseCandidates } from "@/hooks/use-release-candidates";
-import { buildMergeChecks, cellsFromSummary } from "@/lib/pull-request-merge-checks";
+import {
+  buildMergeChecks,
+  cellsFromSummary,
+  iosPrecheckCheck,
+  type IosPrecheckInput,
+} from "@/lib/pull-request-merge-checks";
 import { buildReleaseCheckCells } from "@/lib/release-candidate-checks";
 import type { PullRequestSummary } from "@/types/pull-request";
 
@@ -20,12 +25,18 @@ type StripProps = {
   grouped?: boolean;
   showCandidateNote?: boolean;
   pullRequestEvidenceLabel?: string;
+  /**
+   * このPRのiOS事前検証（#4882）。渡したときだけ4項目目の「iOS」を足す（PR詳細）。
+   * 省略時（PR一覧・ブランチ画面）は従来どおり3項目。`"loading"`は詳細の取得前
+   */
+  iosPrecheck?: IosPrecheckInput;
   className?: string;
 };
 
 /**
  * PR詳細・PR一覧・ブランチ画面で共通のチェック（#4366）。個別PRは「このPR」の3項目（CI・コード・競合）だけを出し、
- * リリース候補の共通結果は出さない（#4841。個別PRの判断に使わないため）。
+ * リリース候補の共通結果は出さない（#4841。個別PRの判断に使わないため）。PR詳細だけは、このPRのiOS事前検証を
+ * 4項目目として足す（#4882）。
  * リリースPR自身（develop→main）の行だけは、リリース候補の共通結果（全体レビュー・統合検証・iOS検証）を
  * 含む6項目を、リポジトリ単位で共有する取得から作る。**検証は起動しない**（読むだけ）。
  *
@@ -39,10 +50,20 @@ export function PullRequestChecksStrip(props: StripProps) {
   );
 }
 
-function OwnPullRequestChecksStrip({ pullRequest, onOpenPullRequest, pullRequestEvidenceLabel, className }: StripProps) {
-  const checks = buildMergeChecks({ ...cellsFromSummary(pullRequest), release: NO_RELEASE_CELLS }).filter(
+function OwnPullRequestChecksStrip({
+  pullRequest,
+  onOpenPullRequest,
+  pullRequestEvidenceLabel,
+  iosPrecheck,
+  className,
+}: StripProps) {
+  const own = buildMergeChecks({ ...cellsFromSummary(pullRequest), release: NO_RELEASE_CELLS }).filter(
     (check) => !check.common,
   );
+  const checks =
+    iosPrecheck === undefined
+      ? own
+      : [...own, iosPrecheckCheck(iosPrecheck, { closed: pullRequest.merged || pullRequest.state === "closed" })];
   return (
     <PullRequestMergeChecks
       className={className}

@@ -309,7 +309,28 @@ export type ReleaseRebuildInfo = {
   candidate: ReleaseRebuildCandidate | null;
   /** PRを選んだ作り直し（#4335）の材料。リリースPRが無ければ無い */
   selection?: RebuildSelectionOptions;
+  /** 旧方式のリリースPRが無く、新方式の候補（`release-rc/<番号>`。#4495）が開いているときの候補PR（#4895） */
+  rcPullRequest?: { number: number; url: string; label: string } | null;
 };
+
+/** 新方式の候補の「再取り込み・再確認」の結果（`POST /api/repositories/release/rc` action=recover。#4895） */
+export type RcFixRecoveryResponse = {
+  resumed: number[];
+  requeued: number[];
+  blocked: { issueNumber: number; reason: string }[];
+};
+
+export async function requestRcFixRecovery(repoFullName: string, pullRequestNumber: number): Promise<RcFixRecoveryResponse> {
+  const [owner, repo] = repoFullName.split("/");
+  const res = await fetch("/api/repositories/release/rc", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ owner, repo, action: "recover", pullRequestNumber }),
+  });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(releaseErrorMessage(res.status, json.error, json.message));
+  return json as RcFixRecoveryResponse;
+}
 
 export async function fetchReleaseRebuild(repoFullName: string): Promise<ReleaseRebuildInfo> {
   const [owner, repo] = repoFullName.split("/");

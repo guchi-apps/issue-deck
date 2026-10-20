@@ -33,6 +33,7 @@ export type IosExtension = {
  * issue-deckが扱うiOSアプリのリポジトリ。判定は`webview-ios-repos.ts`・`device-build-repos.ts`の
  * 固定リストと同じ判断（`Repository`に種別の列は無い）で、ここは走査の候補を並べるだけ。
  * `guchi-apps/myroom`は`kurashio`の旧名（再同期されるまで旧名で残る）。
+ * 定数なので、足したリポジトリが本番の画面に出るのはmainへのリリース後（#4887）。
  */
 export const IOS_EXTENSION_REPOSITORY_NAMES = [
   "guchi-apps/aide-ios",
@@ -41,6 +42,7 @@ export const IOS_EXTENSION_REPOSITORY_NAMES = [
   "guchi-apps/yoteiflow",
   "guchi-apps/aide",
   "guchi-apps/morrow",
+  "guchi-apps/issue-deck",
 ] as const;
 
 /** 走査するSwiftファイルのパス。拡張が置かれる名前だけに絞り、取得するBlobの数を抑える */

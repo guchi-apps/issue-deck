@@ -4,6 +4,7 @@ import {
   buildIosExtensionIssue,
   detectExtensions,
   detectExtensionsInSource,
+  IOS_EXTENSION_REPOSITORY_NAMES,
   isExtensionCandidatePath,
 } from "./ios-extensions";
 
@@ -91,5 +92,11 @@ describe("buildIosExtensionIssue", () => {
     expect(only.body).toContain(image);
     const withText = buildIosExtensionIssue({ mode: "add", repositoryFullName: "guchi-apps/aide-ios", kind: "widget", description: `天気を出す\n\n${image}` });
     expect(withText.title).toBe("iOSウィジェットを追加する: 天気を出す");
+  });
+});
+
+describe("IOS_EXTENSION_REPOSITORY_NAMES", () => {
+  it("issue-deck自身のiOSアプリも走査の対象に含める（#4887）", () => {
+    expect(IOS_EXTENSION_REPOSITORY_NAMES).toContain("guchi-apps/issue-deck");
   });
 });

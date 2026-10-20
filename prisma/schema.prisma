@@ -1470,6 +1470,12 @@ model DispatchSession {
   codexThreadKnown Boolean?
   codexThreadId    String?  @db.VarChar(36)
 
+  // worktreeの未コミットの変更の件数（#4881）。**pollerが毎巡`git status --porcelain`で数えて
+  // 運んでくる値**で、判定材料はサブPCのファイルシステムにしか無い（`reapAt`と同じ立場）。
+  // 画面の「セッション終了」の確認ダイアログが、閉じる前に知らせるためにだけ使う。
+  // NULLは「分からない」（古いpoller・worktreeが読めない）で、注意を出さない
+  worktreeChangeCount Int?
+
   // いま何をしているか（#2705）。**Claude Codeのフックが渡してきたツール名とコマンドを、
   // サブPC側（`scripts/lib/session-step.sh`）が固定語彙のコードへ畳んだもの。**
   //

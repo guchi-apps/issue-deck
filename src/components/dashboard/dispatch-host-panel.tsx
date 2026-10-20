@@ -16,10 +16,16 @@ import { Skeleton } from "@/components/ui/skeleton";
 
 import { DispatchIssueTitle } from "@/components/dashboard/dispatch-issue-title";
 import { ModelDot } from "@/components/dashboard/model-dot";
+import { SessionCloseDialog } from "@/components/dashboard/session-close-dialog";
 import { pickPrimaryModel } from "@/lib/agent-model-color";
 import type { DispatchHostView, DispatchJobView } from "@/lib/dispatch/dispatch-job";
 import type { DispatchPlanReviewSession } from "@/lib/dispatch/plan-review-session";
-import { isDispatchHostAtSessionCapacity } from "@/lib/dispatch/dispatch-job";
+import {
+  findSessionControlJobForIssue,
+  isActiveDispatchJobStatus,
+  isDispatchHostAtSessionCapacity,
+  resolveSessionControlRejection,
+} from "@/lib/dispatch/dispatch-job";
 import {
   describeDispatchHostCheckout,
   describeDispatchHostSelfUpdate,
@@ -126,6 +132,7 @@ export function DispatchHostPanel({
   onOpenIssue,
   onOpenRemoteSessions,
   onStopRemoteSession,
+  onCloseSession,
   onRequestSelfUpdate,
   onRequestReboot,
   compact = false,
@@ -157,6 +164,14 @@ export function DispatchHostPanel({
    * （`onRequestReboot`と同じ形）
    */
   onStopRemoteSession?: (id: string) => Promise<{ ok: true } | { ok: false; message: string }>;
+  /**
+   * Issueのセッションを終了する（#4881。Issue詳細の「セッション終了」と同じ`KILL`）。
+   * 渡さなければ行に終了ボタンを出さない（`onStopRemoteSession`と同じ形）。押せるかどうかは
+   * `jobs`に積まれている未処理の操作とホストの申告から決める
+   */
+  onCloseSession?: (
+    session: DispatchSessionView,
+  ) => Promise<{ ok: true } | { ok: false; message: string }>;
   /**
    * チェックアウトの更新を積む（#1875）。渡さなければボタンを出さない（`onOpenIssue`と同じ形）。
    *
@@ -205,6 +220,8 @@ export function DispatchHostPanel({
           onOpenIssue={onOpenIssue}
           onOpenRemoteSessions={onOpenRemoteSessions}
           onStopRemoteSession={onStopRemoteSession}
+          jobs={jobs}
+          onCloseSession={onCloseSession}
           onRequestSelfUpdate={onRequestSelfUpdate}
           onRequestReboot={onRequestReboot}
           compact={compact}
@@ -224,6 +241,8 @@ function HostCard({
   onOpenIssue,
   onOpenRemoteSessions,
   onStopRemoteSession,
+  jobs,
+  onCloseSession,
   onRequestSelfUpdate,
   onRequestReboot,
   compact,
@@ -237,6 +256,10 @@ function HostCard({
   onOpenIssue?: (issueId: string) => void;
   onOpenRemoteSessions?: () => void;
   onStopRemoteSession?: (id: string) => Promise<{ ok: true } | { ok: false; message: string }>;
+  jobs: readonly DispatchJobView[];
+  onCloseSession?: (
+    session: DispatchSessionView,
+  ) => Promise<{ ok: true } | { ok: false; message: string }>;
   onRequestSelfUpdate?: (
     hostName: string,
   ) => Promise<{ ok: true } | { ok: false; message: string }>;
@@ -354,7 +377,10 @@ function HostCard({
             <SessionRow
               key={session.tmuxSessionName}
               session={session}
+              host={host}
+              jobs={jobs}
               onOpenIssue={onOpenIssue}
+              onClose={onCloseSession}
             />
           ))}
         </ul>
@@ -874,12 +900,43 @@ function MetricRow({
 
 function SessionRow({
   session,
+  host,
+  jobs,
   onOpenIssue,
+  onClose,
 }: {
   session: DispatchSessionView;
+  host: DispatchHostView;
+  jobs: readonly DispatchJobView[];
   onOpenIssue?: (issueId: string) => void;
+  onClose?: (session: DispatchSessionView) => Promise<{ ok: true } | { ok: false; message: string }>;
 }) {
   const summary = summarizeIssueSession(session);
+  const [confirmingClose, setConfirmingClose] = useState(false);
+  const [closing, setClosing] = useState(false);
+  const [closeError, setCloseError] = useState<string | null>(null);
+  // 終了できるか（#4881）。**Issue詳細のボタンと同じ判定**（`resolveSessionControlRejection`）。
+  // 押せない行にはボタンを出さない——理由まで1行に収める場所が無く、詳しくはIssueを開けば出る
+  const controlJob = findSessionControlJobForIssue(jobs, session.repositoryFullName, session.issueNumber);
+  const closeRejection = resolveSessionControlRejection({
+    host,
+    session,
+    kind: "KILL",
+    hasActiveControlJob: controlJob !== null && isActiveDispatchJobStatus(controlJob.status),
+  });
+  const canClose = onClose !== undefined && closeRejection === null;
+
+  async function close() {
+    if (!onClose) return;
+    setClosing(true);
+    setCloseError(null);
+    try {
+      const result = await onClose(session);
+      if (!result.ok) setCloseError(result.message);
+    } finally {
+      setClosing(false);
+    }
+  }
   const repoName = session.repositoryFullName.split("/")[1] ?? session.repositoryFullName;
   // 自動終了までの残り時間（#1817）。**文言は`describeSessionReap`をそのまま使う**（Issue詳細と
   // 同じ状態が、画面によって違う言い方にならないようにする）。理由の1行はここには出さない
@@ -916,6 +973,7 @@ function SessionRow({
             </>
           )}
         </span>
+        {closeError && <span className="block break-words text-destructive">{closeError}</span>}
       </span>
       {/*
         入力待ちのときに答える唯一の出口（#1264）。ここに出しておくと、Issueを開かずに
@@ -945,6 +1003,32 @@ function SessionRow({
         >
           <Monitor className="size-3.5" />
         </a>
+      )}
+      {/* セッション終了（#4881）。リモートセッションの終了と同じ赤枠の四角。押しても確認が出るだけ */}
+      {canClose && (
+        <button
+          type="button"
+          title="セッションを終了する"
+          aria-label={`#${session.issueNumber}のセッションを終了する`}
+          disabled={closing}
+          onClick={() => setConfirmingClose(true)}
+          className="mt-0.5 grid size-5 shrink-0 place-items-center rounded border border-destructive/45 text-destructive hover:bg-destructive/10 disabled:pointer-events-none disabled:opacity-35"
+        >
+          {closing ? (
+            <Loader2 aria-hidden className="size-3 animate-spin" />
+          ) : (
+            <span aria-hidden className="size-2 rounded-[1.5px] bg-current" />
+          )}
+        </button>
+      )}
+      {canClose && (
+        <SessionCloseDialog
+          session={session}
+          open={confirmingClose}
+          onOpenChange={setConfirmingClose}
+          submitting={closing}
+          onConfirm={close}
+        />
       )}
     </li>
   );

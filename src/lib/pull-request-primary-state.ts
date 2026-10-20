@@ -8,6 +8,7 @@ import {
   requiresUserMerge,
 } from "@/lib/pull-request-list";
 import type { ReleaseCheckCells } from "@/lib/release-candidate-checks";
+import type { UnmetRequiredCheck } from "@/lib/github/required-checks";
 import type { PullRequestSummary } from "@/types/pull-request";
 
 /**
@@ -30,6 +31,7 @@ export type PrimaryStateKind =
   | "ci-running"
   | "judging"
   | "merge-held"
+  | "required-check"
   | "mergeable"
   | "unknown";
 
@@ -68,6 +70,32 @@ function state(
     needsAction: extra.needsAction ?? false,
     repairKinds: extra.repairKinds ?? [],
   };
+}
+
+const REQUIRED_CHECK_STATE_LABEL: Record<UnmetRequiredCheck["state"], string> = {
+  pending: "待機中",
+  failure: "失敗",
+  missing: "未実行",
+};
+
+/**
+ * 必須チェック（ルールセット・ブランチ保護）が未成功のPR（#4884）。CI・競合が緑でもGitHubはマージを
+ * 拒むため「マージ可能」にしない。待っているチェック名と状態（commit statusならdescription）を理由に出す。
+ * 失敗が1件でもあれば人の対応が要る。待機中・未実行だけなら、走るのを待つ状態として出す。
+ */
+function requiredCheckState(unmet: UnmetRequiredCheck[]): PrimaryState {
+  const detail = unmet
+    .map((check) => {
+      const base = `${check.name}（${REQUIRED_CHECK_STATE_LABEL[check.state]}`;
+      return check.description ? `${base}: ${check.description}）` : `${base}）`;
+    })
+    .join("、");
+  if (unmet.some((check) => check.state === "failure")) {
+    return state("required-check", "必須チェック失敗", "bad", `必須チェックが成功していないため、GitHubがマージを拒みます: ${detail}`, {
+      needsAction: true,
+    });
+  }
+  return state("required-check", "必須チェック待ち", "run", `必須チェックの成功を待っています。成功するまでマージできません: ${detail}`);
 }
 
 /** レビュー判定が今のheadに対するものか。判定が古いときは現在の指摘として扱わない */
@@ -137,6 +165,11 @@ export function derivePrimaryState(pullRequest: PullRequestSummary): PrimaryStat
     return state("unknown", "CI状態不明", "warn", `${CI_STATE_LABEL.unknown}。成功とは扱いません`, {
       needsAction: true,
     });
+  }
+  // マージ前の確認より先に出す。確認を済ませて押しても、GitHubが必須チェックで拒むため（#4884）
+  const unmet = pullRequest.unmetRequiredChecks ?? [];
+  if (unmet.length > 0) {
+    return requiredCheckState(unmet);
   }
   const hold = deriveMergeHold(pullRequest);
   if (hold.status === "held") {

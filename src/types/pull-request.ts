@@ -12,6 +12,7 @@ import type { PullRequestReviewVerdict } from "@/lib/github/pull-request-review-
 import type { PullRequestRole } from "@/lib/github/pull-request-role";
 import type { CiState } from "@/lib/github/release-api";
 import type { ReleaseVerification } from "@/lib/github/release-verification";
+import type { UnmetRequiredCheck } from "@/lib/github/required-checks";
 
 /** CIの内訳に並べるチェック1件（#2777）。中身は`RollupCiCheck`そのもの */
 export type PullRequestCiCheck = RollupCiCheck;
@@ -178,6 +179,12 @@ export type PullRequestSummary = {
    */
   mergeableState?: string | null;
   /**
+   * マージ先で必須のチェックのうち、headでまだ成功していないもの（#4884）。**詳細だけが、
+   * `mergeableState`が`blocked`のときに載せる**。省略・nullは「調べていない・読めなかった」で、
+   * 空配列は「必須チェックはすべて成功」。代表状態はこれが空でなければ「マージ可能」にしない。
+   */
+  unmetRequiredChecks?: UnmetRequiredCheck[] | null;
+  /**
    * 自動修復ワークフローが対象リポジトリに置かれているか（#1960）。修復ボタンを出す種類
    * （`repairKindsFor`の結果）ごとに持つ。
    *
@@ -237,7 +244,8 @@ export type PullRequestSummary = {
    * iOS事前検証（#4138）の結果と検証したSHA（#4602）。**開いているリリース候補PRだけ**に、
    * ブランチ画面の「iOS検証中」表示のために追加で引く（通常PRは引かない。接続のノード数が
    * PR件数×コミット窓になり、10秒間隔の一覧の消費を押し上げるため）。引いていない・対象外・
-   * 取得失敗は未定義かnullで、その場合は「iOS検証中」を出さない（推測しない）
+   * 取得失敗は未定義かnullで、その場合は「iOS検証中」を出さない（推測しない）。
+   * PR詳細（`GET /api/pull-requests/detail`）も、openかつdraftでないPRで引き、チェック欄の「iOS」に出す（#4882）
    */
   iosPrecheck?: IosPrecheckSummary | null;
   createdAt: string;

@@ -103,6 +103,7 @@
 #   SESSION_TOOL_CALL_STALL_MINUTES 空振りとみなすまでの停滞の分数（省略時は10）
 #   SESSION_IDLE_MINUTES            セッションを畳むまでの猶予の分数（省略時は60・0で無効）
 #   SESSION_HANDOFF_IDLE_MINUTES    引き渡し済みセッション専用の猶予（省略時は30・0でその経路だけ無効）
+#   SESSION_LOCAL_PR_IDLE_MINUTES   11.localを付けたまま最終PRを作ったセッションの猶予（省略時は15・0でその経路だけ無効。#4880）
 #   DISPATCH_CHECKOUT_FETCH_INTERVAL_MINUTES
 #                                   チェックアウトの遅れを数え直す間隔の分数（省略時は360・0で無効）
 #   WORKTREE_CLEANUP_INTERVAL_MINUTES
@@ -659,6 +660,13 @@ report_api_failure() {
 
 ios_automation_state_dir() {
   printf '%s' "${ISSUE_DECK_IOS_AUTOMATION_STATE:-${XDG_STATE_HOME:-$HOME/.local/state}/issue-deck/ios-automation}"
+}
+
+# 次の巡で`sweep_ios_prechecks`が間隔を待たずに走るよう、最後に巡回した時刻を消す（#4881）。
+# セッションを閉じた直後に、そのセッションを待って保留していたPRを見直させるために使う。
+# 走っている巡回は止めない（flockで二重起動しないので、終わった後の巡で拾われる）
+request_ios_precheck_resweep() {
+  rm -f "$(ios_automation_state_dir)/last-sweep" 2>/dev/null || true
 }
 
 # 専用flockを検証・修復の終了まで保持。pollerを再起動しても二重起動しない。
@@ -2600,6 +2608,35 @@ session_reap_json() {
   jq -nc --arg at "$iso" --arg reason "$reason" '{reapAt: $at, reapReason: $reason}'
 }
 
+# worktreeの未コミットの変更の件数（#4881）。画面の「セッション終了」の確認ダイアログが、
+# 閉じる前に「未コミットの変更がN件あります」と知らせるためのもの。
+#
+# **数え方は自動回収（`reap-sessions.sh`）と揃える。** `git status --porcelain`の行数で、
+# `package-lock.json`の書き換えだけ（#3149）なら0件とみなす。判定はしない（閉じるかどうかは
+# 押した人が決める）。worktreeが分からない・読めないときは`null`で、画面は注意を出さない。
+session_worktree_changes_json() {
+  local session="$1" descriptor worktree dirty
+  descriptor="$(session_state_descriptor_file "$session" 2>/dev/null || true)"
+  if [[ -z "$descriptor" || ! -f "$descriptor" ]]; then
+    printf 'null'
+    return 0
+  fi
+  worktree="$(session_state_field "$descriptor" worktree 2>/dev/null || true)"
+  if [[ -z "$worktree" || ! -d "$worktree" ]]; then
+    printf 'null'
+    return 0
+  fi
+  if ! dirty="$(git -C "$worktree" status --porcelain 2>/dev/null)"; then
+    printf 'null'
+    return 0
+  fi
+  if [[ -z "$dirty" || "$dirty" == " M package-lock.json" ]]; then
+    printf '0'
+    return 0
+  fi
+  printf '%s\n' "$dirty" | grep -c .
+}
+
 # セッションがいま何をしているか（#2705）。**フックが書いた`.step`を運ぶだけ。**
 #
 # `session_reap_json`と同じで、**ここでは判定をしない**（何のツールを呼んだかはフックにしか
@@ -2776,11 +2813,12 @@ report_sessions() {
       --argjson codexThreadId "$(session_codex_thread_id_json "$session_name")" \
       --argjson reap "$(session_reap_json "$session_name")" \
       --argjson step "$(session_step_json "$session_name")" \
+      --argjson worktreeChangeCount "$(session_worktree_changes_json "$session_name")" \
       --arg remoteControlUrl "$(session_transcript_remote_control_url "$session_name" 2>/dev/null || true)" \
       '{tmuxSessionName: $tmuxSessionName, repositoryFullName: $repositoryFullName,
         issueNumber: $issueNumber, paneDead: $paneDead, paneDeadStatus: $paneDeadStatus,
         claudeStarting: $claudeStarting, codexThreadKnown: $codexThreadKnown,
-        codexThreadId: $codexThreadId}
+        codexThreadId: $codexThreadId, worktreeChangeCount: $worktreeChangeCount}
          + $reap + $step
          + (if $remoteControlUrl == "" then {} else {remoteControlUrl: $remoteControlUrl} end)')")
   done < <(tmux list-panes -a -F $'#{session_name}\t#{pane_dead}\t#{pane_dead_status}' 2>/dev/null || true)
@@ -3501,6 +3539,10 @@ run_control_job() {
       # 状態ファイルを残すと、次に同じ名前で立ったセッションが前回の`Stop`を引き継いだように
       # 見える（reap-sessions.shと同じ後始末）。
       session_state_remove "$session"
+      # iOS事前検証が「同じPRのセッションが稼働中」で保留しているPRを、巡回の間隔（既定5分）を
+      # 待たずに次の巡で見直させる（#4881）。保留の判定はtmuxを直接見ているので、閉じた事実は
+      # 次の巡回でそのまま反映される
+      request_ios_precheck_resweep
       ;;
     *)
       report_job "$job_id" failed "未知のジョブ種別です: $kind"

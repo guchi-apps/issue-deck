@@ -85,8 +85,47 @@ export function isReverifyFailureReason(reason: string | null | undefined): bool
   return reason != null && reason.includes(REVERIFY_FAILED_MARKER);
 }
 
+/** 新方式の候補へ取り込めなかったときの理由の書き出し。段階つきの理由（`rcImportFailureReason`）もこれで始まる */
+export const RC_IMPORT_FAILURE_PREFIX = "修正PRをリリース候補へ取り込めませんでした";
+
+/** 新方式の候補への取り込みが、どの段階で止まったか（#4895） */
+export type RcImportFailureStage =
+  | { kind: "request"; error: string }
+  | { kind: "failed"; detail: string | null }
+  | { kind: "expired" };
+
+const RC_IMPORT_REQUEST_ERROR_LABEL: Record<string, string> = {
+  not_found: "取り込みを受け付ける段階の候補が見つかりません",
+  not_reviewable: "候補が取り込みを受け付ける段階にありません",
+  caller_unsupported: "リリースworkflowが候補管理に対応していません",
+  revision_in_progress: "同じ候補への更新が進行中です",
+  candidate_changed: "候補ブランチが記録したrevisionのheadから動いています",
+  approval_required: "承認されていないPRが含まれます",
+  invalid_selection: "取り込めないPRが含まれます",
+  empty_selection: "取り込むPRがありません",
+  dispatch_failed: "リリースworkflowを起動できませんでした",
+};
+
+/**
+ * 新方式の候補へ修正PRを取り込めずに止めるときの理由（#4895）。依頼の失敗・revisionの失敗・期限切れの
+ * どれで止まったかを入れる。画面の「準備に失敗」の判別（`isRebuildFailureReason`）は書き出しで行う
+ */
+export function rcImportFailureReason(stage: RcImportFailureStage): string {
+  const what =
+    stage.kind === "request"
+      ? `取り込みの依頼に失敗: ${RC_IMPORT_REQUEST_ERROR_LABEL[stage.error] ?? stage.error}`
+      : stage.kind === "failed"
+        ? `取り込みのrevisionが失敗: ${stage.detail?.trim() || "理由の記録なし"}`
+        : "取り込みのrevisionが期限切れ: workflowの結果を期限内に受け取れませんでした";
+  return `${RC_IMPORT_FAILURE_PREFIX}（${what}）。候補の画面の「再取り込み・再確認」から続きを進められます（候補と元のrevisionは残っています）`;
+}
+
+export function isRcImportFailureReason(reason: string | null | undefined): boolean {
+  return reason != null && reason.startsWith(RC_IMPORT_FAILURE_PREFIX);
+}
+
 export function isRebuildFailureReason(reason: string | null | undefined): boolean {
-  return reason != null && (Object.values(REBUILD_FAILURE_REASONS) as string[]).includes(reason);
+  return reason != null && ((Object.values(REBUILD_FAILURE_REASONS) as string[]).includes(reason) || isRcImportFailureReason(reason));
 }
 
 /**

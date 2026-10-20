@@ -20,7 +20,9 @@ import { Button } from "@/components/ui/button";
 import { canRebuildRelease } from "@/lib/release-rebuild";
 import {
   fetchReleaseRebuild,
+  requestRcFixRecovery,
   requestReleaseRebuild,
+  type RcFixRecoveryResponse,
   type ReleaseRebuildInfo,
 } from "@/lib/release-request";
 import type { BumpKind } from "@/lib/semver-bump";
@@ -68,6 +70,8 @@ export function ReleaseRebuildButton({
   const [bumpKind, setBumpKind] = useState<BumpKind | null>(null);
   // PRを選んだ作り直し（#4335）で元の候補へ足すPR。既定はサーバーの`defaultSelected`（当該リリースの修正PRだけ）
   const [selected, setSelected] = useState<Set<number>>(new Set());
+  // 新方式の候補（#4495）の「再取り込み・再確認」の結果（#4895）
+  const [recovery, setRecovery] = useState<RcFixRecoveryResponse | null>(null);
 
   // 呼び出し側が判定できないときだけ、変更の有無を先に確かめる。取得に失敗したら隠さない
   // （押せば確認ダイアログでエラーが読める）
@@ -94,6 +98,7 @@ export function ReleaseRebuildButton({
     setError(null);
     setBumpKind(null);
     setSelected(new Set());
+    setRecovery(null);
     setLoading(true);
     try {
       const loaded = await fetchReleaseRebuild(repositoryFullName);
@@ -135,7 +140,23 @@ export function ReleaseRebuildButton({
     }
   }
 
+  async function handleRecover() {
+    const rcPullRequest = info?.rcPullRequest;
+    if (!rcPullRequest) return;
+    setSubmitting(true);
+    setError(null);
+    try {
+      setRecovery(await requestRcFixRecovery(repositoryFullName, rcPullRequest.number));
+      onTriggered?.();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
   const pullRequest = info?.releasePullRequest ?? null;
+  const rcPullRequest = pullRequest === null ? (info?.rcPullRequest ?? null) : null;
   const candidate = info?.candidate ?? null;
   const selection = info?.selection ?? null;
   const selective = selection?.supported === true;
@@ -164,10 +185,16 @@ export function ReleaseRebuildButton({
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>
-              {pullRequest ? `v${pullRequest.version} のリリースを作り直しますか？` : "リリースを作り直しますか？"}
+              {pullRequest
+                ? `v${pullRequest.version} のリリースを作り直しますか？`
+                : rcPullRequest
+                  ? `リリース候補 ${rcPullRequest.label} の取り込みを確認し直しますか？`
+                  : "リリースを作り直しますか？"}
             </AlertDialogTitle>
             <AlertDialogDescription>
-              {selective
+              {rcPullRequest
+                ? "新方式のリリース候補は閉じて作り直さず、developへ入った修正PRを同じ候補へ取り込んでrevisionを進めます。"
+                : selective
                 ? "元の候補の内容はそのままに、選んだPRだけを足してバージョンバンプからやり直します。選んでいないdevelopの変更は入りません。"
                 : "まだ本番へ出ていないリリースPRを閉じ、developの最新の内容でバージョンバンプからやり直します。修正は先にdevelopへマージしておいてください。"}
             </AlertDialogDescription>
@@ -180,10 +207,27 @@ export function ReleaseRebuildButton({
             </p>
           )}
 
-          {info && !pullRequest && (
+          {info && !pullRequest && !rcPullRequest && (
             <p className="text-xs text-muted-foreground">
               作り直せるリリースPR（release-main/v…）が開いていません。
             </p>
+          )}
+
+          {rcPullRequest && (
+            <div className="flex flex-col gap-1.5 text-xs" data-testid="release-rc-recovery">
+              <ol className="flex list-decimal flex-col gap-1 pl-5">
+                <li>
+                  候補{" "}
+                  <GithubReferenceLink href={rcPullRequest.url} className="text-primary hover:underline">
+                    #{rcPullRequest.number}
+                  </GithubReferenceLink>{" "}
+                  の記録を候補ブランチと照合し直します。取り込みが実際には入っていれば、そのrevisionを記録して統合検証と全体レビューを依頼します
+                </li>
+                <li>取り込みで止まっていた修正系列を再検証へ戻します。取り込めていなかったものは、次の巡回で取り込みを依頼し直します</li>
+                <li>候補ブランチが記録に無い変更で進んでいるものは推測で取り込まず、理由を表示します</li>
+              </ol>
+              {recovery && <RecoveryResult recovery={recovery} />}
+            </div>
           )}
 
           {pullRequest && selection && selective && (
@@ -292,19 +336,54 @@ export function ReleaseRebuildButton({
 
           <AlertDialogFooter>
             <AlertDialogCancel disabled={submitting}>キャンセル</AlertDialogCancel>
-            <AlertDialogAction
-              disabled={!rebuildable || submitting}
-              onClick={(event) => {
-                // 結果を待たずに閉じると、失敗の文言が出ず連打で多重に起動できてしまう
-                event.preventDefault();
-                void handleRebuild();
-              }}
-            >
-              {submitting ? "作り直し中..." : selective ? `選んだ${selected.size}件で作り直す` : "作り直す"}
-            </AlertDialogAction>
+            {rcPullRequest ? (
+              <AlertDialogAction
+                disabled={submitting}
+                onClick={(event) => {
+                  event.preventDefault();
+                  void handleRecover();
+                }}
+              >
+                {submitting ? "確認中..." : "再取り込み・再確認"}
+              </AlertDialogAction>
+            ) : (
+              <AlertDialogAction
+                disabled={!rebuildable || submitting}
+                onClick={(event) => {
+                  // 結果を待たずに閉じると、失敗の文言が出ず連打で多重に起動できてしまう
+                  event.preventDefault();
+                  void handleRebuild();
+                }}
+              >
+                {submitting ? "作り直し中..." : selective ? `選んだ${selected.size}件で作り直す` : "作り直す"}
+              </AlertDialogAction>
+            )}
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
     </>
+  );
+}
+
+function RecoveryResult({ recovery }: { recovery: RcFixRecoveryResponse }) {
+  const nothing = recovery.resumed.length + recovery.requeued.length + recovery.blocked.length === 0;
+  const issues = (numbers: number[]) => numbers.map((n) => `#${n}`).join("、");
+  return (
+    <div className="flex flex-col gap-1 rounded-md border p-2">
+      {nothing && <p className="text-muted-foreground">記録を照合し直しました。取り込みで止まっている修正系列はありません。</p>}
+      {recovery.resumed.length > 0 && (
+        <p className="text-emerald-700 dark:text-emerald-400">
+          取り込みを確認できたため、再検証へ戻しました（修正Issue {issues(recovery.resumed)}）
+        </p>
+      )}
+      {recovery.requeued.length > 0 && (
+        <p>次の巡回で取り込みを依頼し直します（修正Issue {issues(recovery.requeued)}）</p>
+      )}
+      {recovery.blocked.map((item) => (
+        <p key={item.issueNumber} className="text-amber-700 dark:text-amber-400">
+          修正Issue #{item.issueNumber}: {item.reason}
+        </p>
+      ))}
+    </div>
   );
 }

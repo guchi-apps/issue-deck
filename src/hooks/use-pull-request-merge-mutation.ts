@@ -2,6 +2,8 @@
 
 import { useState } from "react";
 
+import type { MergeFailure } from "@/lib/github/merge-failure";
+
 export type MergePullRequestInput = {
   owner: string;
   repo: string;
@@ -34,10 +36,13 @@ export function usePullRequestMergeMutation() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [reviewConfirmation, setReviewConfirmation] = useState<ReviewConfirmationRequired | null>(null);
+  /** GitHubがマージを拒んだ理由（#4878）。`error`には見出しだけが入る。マージの経路でだけ設定する */
+  const [failure, setFailure] = useState<MergeFailure | null>(null);
 
   async function mergePullRequest(input: MergePullRequestInput): Promise<boolean> {
     setIsSubmitting(true);
     setError(null);
+    setFailure(null);
     setReviewConfirmation(null);
     try {
       const res = await fetch("/api/issues/pull-request-merge", {
@@ -46,8 +51,13 @@ export function usePullRequestMergeMutation() {
         body: JSON.stringify(input),
       });
       if (!res.ok) {
-        const data: { error?: string; message?: string } & Partial<ReviewConfirmationRequired> =
+        const data: { error?: string; message?: string; failure?: MergeFailure } & Partial<ReviewConfirmationRequired> =
           await res.json().catch(() => ({}));
+        if (data.error === "merge_rejected" && data.failure) {
+          setFailure(data.failure);
+          setError(data.failure.title);
+          return false;
+        }
         if (res.status === 409 && data.error === "review_confirmation_required") {
           setReviewConfirmation({
             reviewLabel: data.reviewLabel ?? "要修正",
@@ -96,6 +106,7 @@ export function usePullRequestMergeMutation() {
     isSubmitting,
     error,
     setError,
+    failure,
     reviewConfirmation,
     clearReviewConfirmation: () => setReviewConfirmation(null),
   };

@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		4B52A2043061842400F8C8D5 /* ShareExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 4B52A2013061842400F8C8D5 /* ShareExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		4B52A2203061842500F8C8D5 /* UsageWidget.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 4B52A2223061842500F8C8D5 /* UsageWidget.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -17,6 +18,13 @@
 			proxyType = 1;
 			remoteGlobalIDString = 4B52A20B3061842400F8C8D5;
 			remoteInfo = ShareExtension;
+		};
+		4B52A2213061842500F8C8D5 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 4B52A1E93061842200F8C8D5 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 4B52A2253061842500F8C8D5;
+			remoteInfo = UsageWidget;
 		};
 /* End PBXContainerItemProxy section */
 
@@ -28,6 +36,7 @@
 			dstSubfolderSpec = 13;
 			files = (
 				4B52A2043061842400F8C8D5 /* ShareExtension.appex in Embed Foundation Extensions */,
+				4B52A2203061842500F8C8D5 /* UsageWidget.appex in Embed Foundation Extensions */,
 			);
 			name = "Embed Foundation Extensions";
 			runOnlyForDeploymentPostprocessing = 0;
@@ -37,6 +46,7 @@
 /* Begin PBXFileReference section */
 		4B52A2013061842400F8C8D5 /* ShareExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = ShareExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		4B52A1F13061842200F8C8D5 /* IssueDeck.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = IssueDeck.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		4B52A2223061842500F8C8D5 /* UsageWidget.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = UsageWidget.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -53,6 +63,11 @@
 		4B52A2033061842400F8C8D5 /* Shared */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = Shared;
+			sourceTree = "<group>";
+		};
+		4B52A2233061842500F8C8D5 /* UsageWidget */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = UsageWidget;
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -72,6 +87,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		4B52A2243061842500F8C8D5 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -81,6 +103,7 @@
 				4B52A1F33061842200F8C8D5 /* IssueDeck */,
 				4B52A2023061842400F8C8D5 /* ShareExtension */,
 				4B52A2033061842400F8C8D5 /* Shared */,
+				4B52A2233061842500F8C8D5 /* UsageWidget */,
 				4B52A1F23061842200F8C8D5 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -90,6 +113,7 @@
 			children = (
 				4B52A1F13061842200F8C8D5 /* IssueDeck.app */,
 				4B52A2013061842400F8C8D5 /* ShareExtension.appex */,
+				4B52A2223061842500F8C8D5 /* UsageWidget.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -110,6 +134,7 @@
 			);
 			dependencies = (
 				4B52A20A3061842400F8C8D5 /* PBXTargetDependency */,
+				4B52A22B3061842500F8C8D5 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				4B52A1F33061842200F8C8D5 /* IssueDeck */,
@@ -139,6 +164,27 @@
 			name = ShareExtension;
 			productName = ShareExtension;
 			productReference = 4B52A2013061842400F8C8D5 /* ShareExtension.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
+		4B52A2253061842500F8C8D5 /* UsageWidget */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 4B52A2263061842500F8C8D5 /* Build configuration list for PBXNativeTarget "UsageWidget" */;
+			buildPhases = (
+				4B52A2293061842500F8C8D5 /* Sources */,
+				4B52A2243061842500F8C8D5 /* Frameworks */,
+				4B52A22A3061842500F8C8D5 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				4B52A2233061842500F8C8D5 /* UsageWidget */,
+				4B52A2033061842400F8C8D5 /* Shared */,
+			);
+			name = UsageWidget;
+			productName = UsageWidget;
+			productReference = 4B52A2223061842500F8C8D5 /* UsageWidget.appex */;
 			productType = "com.apple.product-type.app-extension";
 		};
 /* End PBXNativeTarget section */
@@ -173,6 +219,7 @@
 			targets = (
 				4B52A1F03061842200F8C8D5 /* IssueDeck */,
 				4B52A20B3061842400F8C8D5 /* ShareExtension */,
+				4B52A2253061842500F8C8D5 /* UsageWidget */,
 			);
 		};
 /* End PBXProject section */
@@ -186,6 +233,13 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		4B52A2073061842400F8C8D5 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		4B52A22A3061842500F8C8D5 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -209,6 +263,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		4B52A2293061842500F8C8D5 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -216,6 +277,11 @@
 			isa = PBXTargetDependency;
 			target = 4B52A20B3061842400F8C8D5 /* ShareExtension */;
 			targetProxy = 4B52A2093061842400F8C8D5 /* PBXContainerItemProxy */;
+		};
+		4B52A22B3061842500F8C8D5 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 4B52A2253061842500F8C8D5 /* UsageWidget */;
+			targetProxy = 4B52A2213061842500F8C8D5 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -365,7 +431,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 8.70.0;
+				MARKETING_VERSION = 8.71.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.gucchii.issuedeck;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -402,7 +468,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 8.70.0;
+				MARKETING_VERSION = 8.71.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.gucchii.issuedeck;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -430,7 +496,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 8.70.0;
+				MARKETING_VERSION = 8.71.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.gucchii.issuedeck.ShareExtension;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
@@ -458,12 +524,64 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 8.70.0;
+				MARKETING_VERSION = 8.71.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.gucchii.issuedeck.ShareExtension;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SKIP_INSTALL = YES;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		4B52A2273061842500F8C8D5 /* Debug configuration for PBXNativeTarget "UsageWidget" */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = Config/UsageWidget.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 6AA3WFTR94;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Config/UsageWidget-Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = IssueDeck;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 8.71.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.gucchii.issuedeck.UsageWidget;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		4B52A2283061842500F8C8D5 /* Release configuration for PBXNativeTarget "UsageWidget" */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = Config/UsageWidget.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 6AA3WFTR94;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = Config/UsageWidget-Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = IssueDeck;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 8.71.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.gucchii.issuedeck.UsageWidget;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
@@ -495,6 +613,14 @@
 			buildConfigurations = (
 				4B52A20D3061842400F8C8D5 /* Debug configuration for PBXNativeTarget "ShareExtension" */,
 				4B52A20E3061842400F8C8D5 /* Release configuration for PBXNativeTarget "ShareExtension" */,
+			);
+			defaultConfigurationName = Release;
+		};
+		4B52A2263061842500F8C8D5 /* Build configuration list for PBXNativeTarget "UsageWidget" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				4B52A2273061842500F8C8D5 /* Debug configuration for PBXNativeTarget "UsageWidget" */,
+				4B52A2283061842500F8C8D5 /* Release configuration for PBXNativeTarget "UsageWidget" */,
 			);
 			defaultConfigurationName = Release;
 		};

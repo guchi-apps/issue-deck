@@ -458,6 +458,8 @@ export function PullRequestDetail({
                     onMerged={onMerged}
                     // 隣の「最新のbaseを取り込む」と同じ高さにそろえる（#4842）
                     buttonClassName="h-9 text-xs"
+                    // 詳細ペインでは、マージを拒まれた理由をボタンの下へ全文で出す（#4878）
+                    failureLayout="block"
                     // CI・レビュー・判定の完了待ちのあいだは押してよい状態に見せないため強調しない（#4783）
                     variant={repairKinds.length === 0 && !reviewUnresolved && !isMergeWaitingForChecks(pullRequest) ? "default" : "outline"}
                   />
@@ -517,12 +519,13 @@ export function PullRequestDetail({
           )}
 
           {/* チェックの根拠（#4366・#4427）。このPR（CI・コード・競合）だけを出す（#4841）。
-              リリース候補の表示は個別PRには出さない */}
+              リリース候補の表示は個別PRには出さない。iOS事前検証は詳細の取得で引き、4項目目に出す（#4882） */}
           {!releaseCandidate && (
             <PullRequestChecksStrip
               pullRequest={pullRequest}
               onOpenPullRequest={() => selectTab("findings")}
               pullRequestEvidenceLabel="指摘・CIの内訳を開く"
+              iosPrecheck={currentDetail ? (currentDetail.summary.iosPrecheck ?? null) : "loading"}
               className="-mx-1 px-0"
             />
           )}

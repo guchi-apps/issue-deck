@@ -95,6 +95,24 @@ export function checkConsistency() {
     read(`src/app/api/share/${route}/route.ts`);
   }
 
+  // ロック画面ウィジェット（#4890）。共有トークンで読むので、App Group・Keychain共有グループ・呼ぶAPI・
+  // 開くURLが本体と揃い、拡張として組み込まれている
+  for (const needle of ["group.com.gucchii.issuedeck", "$(AppIdentifierPrefix)com.gucchii.issuedeck.share"]) {
+    if (!read("ios/Config/UsageWidget.entitlements").includes(needle)) {
+      problems.push(`ios/Config/UsageWidget.entitlements に ${needle} がありません`);
+    }
+  }
+  if (!read("ios/Shared/UsageSnapshot.swift").includes('"api/share/usage"')) {
+    problems.push("UsageSnapshot.swift が api/share/usage を呼んでいません");
+  }
+  read("src/app/api/share/usage/route.ts");
+  if (!pbxproj.includes("UsageWidget.appex in Embed Foundation Extensions */,")) {
+    problems.push("ロック画面ウィジェットがアプリへ組み込まれていません");
+  }
+  if (!read("ios/UsageWidget/UsageWidget.swift").includes('://usage")') || !read("ios/IssueDeck/IssueDeckApp.swift").includes('url.host == "usage"')) {
+    problems.push("ウィジェットのタップ先（issuedeck://usage）をアプリが受けていません");
+  }
+
   // 開発用のURLをコミットしていない
   if (!/baseURL = URL\(string: "https:\/\/issuedeck\.gucchii\.com\/"\)!/.test(appConfig)) {
     problems.push("AppConfig.baseURL が本番URLではありません（開発用のまま？）");

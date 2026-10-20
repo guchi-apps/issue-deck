@@ -4,7 +4,8 @@ import { requireUserId } from "@/lib/auth-user";
 import { db } from "@/lib/db";
 import { withGithubApiFeature } from "@/lib/github/api-usage";
 import { getInstallationToken } from "@/lib/github/app-auth";
-import { MERGE_JUDGEMENT_UNKNOWN } from "@/lib/github/check-rollup";
+import { fetchPullRequestRollups, MERGE_JUDGEMENT_UNKNOWN, pullRequestRollupKey } from "@/lib/github/check-rollup";
+import type { IosPrecheckSummary } from "@/lib/github/ios-precheck";
 import { mapComment } from "@/lib/github/issue-mapper";
 import { fetchCommentsForIssue } from "@/lib/github/issues-api";
 import { githubApiErrorMessage } from "@/lib/github/network-error";
@@ -24,6 +25,7 @@ import {
 } from "@/lib/github/pull-requests-api";
 import { fetchRefCheckState } from "@/lib/github/release-api";
 import { fetchRepairWorkflowAvailability } from "@/lib/github/repair-workflow-cache";
+import { fetchUnmetRequiredChecks } from "@/lib/github/required-checks";
 import { checkUserIssueKey, fetchCheckUserIssueReasons } from "@/lib/pull-request-check-user";
 import { resolveMergeCheckReasons, type MergeCheckReasons } from "@/lib/merge-check-reasons";
 import { extractLinkedIssueNumber, requiresUserMerge } from "@/lib/pull-request-list";
@@ -82,10 +84,15 @@ async function handleGET(request: NextRequest) {
     // CI状態はまだマージ・レビューの判断が要るPRでしか意味を持たない。closedなPRや
     // draftでは追加の1リクエストを使わずunknownのままにする（一覧側と同じ方針）。
     // 自動マージ可否の判定の進み具合（#1968）も同じ1回のクエリから取り出す。
-    const { ciState, mergeJudgement } =
-      pullRequest.state === "open" && !pullRequest.draft
-        ? await fetchRefCheckState(owner, repo, pullRequest.head.sha, token)
-        : { ciState: "unknown" as const, mergeJudgement: MERGE_JUDGEMENT_UNKNOWN };
+    // iOS事前検証（#4882）も同じ条件で並行して引く（Issue詳細の対応PRと同じ。#4140）。
+    // 取得に失敗しても詳細全体は落とさず、「記録なし」として出す（成功とは推測しない）。
+    const checkable = pullRequest.state === "open" && !pullRequest.draft;
+    const [{ ciState, mergeJudgement }, iosPrecheck] = await Promise.all([
+      checkable
+        ? fetchRefCheckState(owner, repo, pullRequest.head.sha, token)
+        : { ciState: "unknown" as const, mergeJudgement: MERGE_JUDGEMENT_UNKNOWN },
+      checkable ? fetchIosPrecheck(owner, repo, number, token) : null,
+    ]);
 
     // 対応Issueの`00.check-user`と、その理由（#1490）を合流させる（#1469）。GitHub APIは
     // 消費せず、DBキャッシュを1件引くだけ。番号の推定は一覧と同じ純粋関数を通す。
@@ -129,6 +136,13 @@ async function handleGET(request: NextRequest) {
       { mergeable: pullRequest.mergeable, ciState },
     );
 
+    // GitHubがマージを止めている（`blocked`）ときだけ、必須チェックの未成功を引く（#4884）。
+    // CI状態はios-precheckのような必須のcommit statusを数えないため、緑のまま押すと405になる。
+    const unmetRequiredChecks =
+      pullRequest.state === "open" && !pullRequest.draft && pullRequest.mergeable_state === "blocked"
+        ? await fetchUnmetRequiredChecks(owner, repo, pullRequest.base.ref, pullRequest.head.sha, token)
+        : undefined;
+
     const summary = toPullRequestSummary(
         pullRequest,
         { fullName: repository.fullName, private: repository.private },
@@ -140,6 +154,7 @@ async function handleGET(request: NextRequest) {
           // 一覧のようにGraphQLで取り直す必要はない（#1742）。
           mergeable: pullRequest.mergeable,
           mergeableState: pullRequest.mergeable_state,
+          unmetRequiredChecks,
           linkedIssueCheckUser: checkUserKey !== null && checkUserReasons.has(checkUserKey),
           linkedIssueCheckReason:
             checkUserKey === null ? null : (checkUserReasons.get(checkUserKey) ?? null),
@@ -147,6 +162,7 @@ async function handleGET(request: NextRequest) {
           repairRun,
         },
       );
+    summary.iosPrecheck = iosPrecheck;
 
     // ユーザーのマージが必要な理由（#4088）。必要なPRでだけ、対応Issueのコメントを1回読む。
     let userMergeReasons: MergeCheckReasons | null = null;
@@ -201,6 +217,22 @@ async function handleGET(request: NextRequest) {
       { error: "github_api_error", message: githubApiErrorMessage(error) },
       { status: 502 },
     );
+  }
+}
+
+/** PR1件のiOS事前検証の要約。取得できなければnull（記録なしと同じ扱い） */
+async function fetchIosPrecheck(
+  owner: string,
+  repo: string,
+  number: number,
+  token: string,
+): Promise<IosPrecheckSummary | null> {
+  try {
+    const rollups = await fetchPullRequestRollups([{ owner, repo, number }], token, { includeIosPrecheck: true });
+    return rollups.get(pullRequestRollupKey(owner, repo, number))?.iosPrecheck ?? null;
+  } catch (error) {
+    console.warn(`[GET /api/pull-requests/detail] iOS事前検証を取得できませんでした ${owner}/${repo}#${number}:`, error);
+    return null;
   }
 }
 

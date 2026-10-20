@@ -183,6 +183,8 @@ export const SESSION_REAP_REASONS = [
   "HANDOFF_PR_OPEN",
   /** PRを作らずにローカル作業を終えた（#1600） */
   "HANDOFF_NO_PR",
+  /** `11.local`を付けたまま最終PRを作り終え、待機している（#4880） */
+  "LOCAL_PR_OPEN",
   /** 横断質問セッションで、質問Issueがcloseされた（#1454） */
   "QUESTION_CLOSED",
   /** 横断質問セッションが放置されている（#1648） */
@@ -396,6 +398,13 @@ export type DispatchSessionReport = {
    * （フックが先に載せたURLを消さない）。
    */
   remoteControlUrl?: string;
+  /**
+   * worktreeの未コミットの変更の件数（#4881）。`package-lock.json`だけの変更は0件として数える。
+   *
+   * `reapAt`と同じく、**`undefined`（項目そのものが無い）と`null`は別物**。無いのは古いpollerで
+   * 既存の値を触らない。`null`は「新しいpollerがworktreeを読めなかった」で、値を消す。
+   */
+  worktreeChangeCount?: number | null;
 };
 
 /** 画面へ返すセッション。DBの行をそのまま出さず、必要な項目だけを整える */
@@ -454,6 +463,11 @@ export type DispatchSessionView = {
   codexThreadKnown: boolean | null;
   /** CodexのスレッドUUID。未取得・Claude Codeのセッションではnull。 */
   codexThreadId?: string | null;
+  /**
+   * worktreeの未コミットの変更の件数（#4881）。分からなければ`null`（項目が無い場合も同じ扱い）。
+   * 「セッション終了」の確認ダイアログが、1件以上のときだけ注意を出す。
+   */
+  worktreeChangeCount?: number | null;
   /**
    * いま何をしているか（#2705）と、そのステップに入った時刻。申告が無ければ`null`。
    * 画面に出す形にするのは`describeSessionStep`（`issue-session.ts`）。
@@ -745,6 +759,16 @@ export function parseDispatchSessionReport(value: unknown): DispatchSessionRepor
   // 検証）。読めなければ項目ごと無かったことにする（報告全体は通し、既存の値も触らない）
   const remoteControlUrl = parseRemoteControlUrl(input.remoteControlUrl);
 
+  // 未コミットの変更の件数（#4881）。**壊れていても報告全体は通す**（`reap`と同じ扱い）。
+  // 0以上の整数でなければ「分からない」（null）へ落とす
+  const hasWorktreeChangeCount = "worktreeChangeCount" in input;
+  const worktreeChangeCount =
+    typeof input.worktreeChangeCount === "number" &&
+    Number.isInteger(input.worktreeChangeCount) &&
+    input.worktreeChangeCount >= 0
+      ? input.worktreeChangeCount
+      : null;
+
   return {
     tmuxSessionName,
     repositoryFullName,
@@ -758,5 +782,6 @@ export function parseDispatchSessionReport(value: unknown): DispatchSessionRepor
     ...(codexThreadKnown === undefined ? {} : { codexThreadKnown }),
     ...(codexThreadId === undefined ? {} : { codexThreadId }),
     ...(hasStepField ? step : {}),
+    ...(hasWorktreeChangeCount ? { worktreeChangeCount } : {}),
   };
 }

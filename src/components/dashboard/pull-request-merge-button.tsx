@@ -3,6 +3,7 @@
 import { useState } from "react";
 
 import { ApiErrorMessage } from "@/components/dashboard/api-error-message";
+import { PullRequestMergeFailure } from "@/components/dashboard/pull-request-merge-failure";
 import { PullRequestMergeProduction } from "@/components/dashboard/pull-request-merge-production";
 import { PullRequestMergeReviewGate } from "@/components/dashboard/pull-request-merge-review-gate";
 import { PullRequestMergeReview } from "@/components/dashboard/pull-request-merge-review";
@@ -44,6 +45,11 @@ type PullRequestMergeButtonProps = {
   label?: string;
   /** ボタン本体のクラス。隣のボタンと高さをそろえたいときに既定の`h-7`を上書きする */
   buttonClassName?: string;
+  /**
+   * GitHubにマージを拒まれたときの出し方（#4878）。`block`は理由・チェックの状態・次の操作を
+   * ボタンの下へ折り返して出す（詳細ペイン）。`inline`はボタンの横に見出し1行だけ（一覧の行など）
+   */
+  failureLayout?: "inline" | "block";
 };
 
 /**
@@ -92,8 +98,9 @@ export function PullRequestMergeButton({
   variant = "outline",
   label = "マージする",
   buttonClassName,
+  failureLayout = "inline",
 }: PullRequestMergeButtonProps) {
-  const { mergePullRequest, isSubmitting, error, reviewConfirmation, clearReviewConfirmation } =
+  const { mergePullRequest, isSubmitting, error, failure, reviewConfirmation, clearReviewConfirmation } =
     usePullRequestMergeMutation();
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [isMerged, setIsMerged] = useState(false);
@@ -127,8 +134,18 @@ export function PullRequestMergeButton({
   }
 
   return (
-    <div className={cn("flex min-w-0 items-center gap-2", className)}>
-      {error && <span className="truncate text-xs text-destructive">{error}</span>}
+    // 理由を全文で出すときは外枠を`contents`にし、説明を親の折り返し行の末尾へ全幅で並べる（#4878）。
+    // 外枠の幅のままだと、隣のボタン群に押されて説明が細い列に押し込まれる
+    <div className={cn("flex min-w-0 items-center gap-2", className, failureLayout === "block" && failure && "contents")}>
+      {error && !(failureLayout === "block" && failure) && (
+        // 狭い場所では見出しだけを1行で出し、全文（理由・次の操作）はtitleに入れる（#4878）
+        <span
+          className="truncate text-xs text-destructive"
+          title={failure ? [failure.title, failure.reason, failure.next].filter(Boolean).join("\n") : error}
+        >
+          {error}
+        </span>
+      )}
       <Button
         size="sm"
         variant={variant}
@@ -155,6 +172,9 @@ export function PullRequestMergeButton({
                 ? "検証の完了待ち"
                 : label}
       </Button>
+      {failureLayout === "block" && failure && !confirmOpen && (
+        <PullRequestMergeFailure failure={failure} className="order-last basis-full" />
+      )}
 
       <AlertDialog
         open={confirmOpen}
@@ -223,7 +243,7 @@ export function PullRequestMergeButton({
                 isReviewing={judgementPending}
               />
             )}
-            <ApiErrorMessage message={error} />
+            {failure ? <PullRequestMergeFailure failure={failure} /> : <ApiErrorMessage message={error} />}
           </div>
           {!reviewGate && (
           <AlertDialogFooter className="flex-row gap-2.5 border-t px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:justify-stretch sm:px-6 sm:pt-4 sm:pb-4">

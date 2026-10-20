@@ -374,7 +374,12 @@ describe("IssueSessionStatus のセッション操作", () => {
 
   // 畳むと戻せないため、閉じるだけ確認を挟む
   it("閉じるは確認してから積む", async () => {
-    render(<IssueSessionStatus session={session()} dispatch={makeDispatch()} />);
+    render(
+      <IssueSessionStatus
+        session={session({ activity: "RESPONDED", activityAt: NOW.toISOString() })}
+        dispatch={makeDispatch()}
+      />,
+    );
     openControls();
     fireEvent.click(screen.getByRole("button", { name: "セッション終了" }));
 

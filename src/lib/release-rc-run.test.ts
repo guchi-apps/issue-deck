@@ -94,7 +94,8 @@ vi.mock("@/lib/dispatch/release-verify-jobs", () => ({ requestReleaseVerifyJob: 
 vi.mock("@/lib/dispatch/release-review-start", () => ({ requestReleaseReviewAfterIntegration: mocks.reviewJob }));
 
 vi.mock("@/lib/release-fix-series-run", () => ({ closeFixSeriesForCancelledCandidate: (...a: unknown[]) => (mocks.closeSeries as (...x: unknown[]) => unknown)(...a) }));
-import { cancelReleaseRc, createReleaseRc, recordRcReport, requestRcImport } from "@/lib/release-rc-run";
+import { cancelReleaseRc, createReleaseRc, reconcileRcCandidate, recordRcReport, requestRcImport } from "@/lib/release-rc-run";
+import { RC_NOT_UPDATED_REASON } from "@/lib/release-rc";
 
 const CALLER = "    inputs:\n      candidate_request:\n        type: string\n    with:\n      candidate-request: x\n";
 const FROZEN = "f".repeat(40);
@@ -139,7 +140,8 @@ beforeEach(() => {
   mocks.revisionFindUnique.mockResolvedValue(null);
   mocks.candidateFindFirst.mockResolvedValue(null);
   mocks.openPrs.mockResolvedValue([]);
-  mocks.branchHead.mockResolvedValue(FROZEN);
+  // 候補ブランチ（release-rc/<番号>）のrefは既定で読めない扱いにし、PRのheadへ戻す。developなどはFROZEN
+  mocks.branchHead.mockImplementation(async (_o: string, _r: string, branch: string) => (branch.startsWith("release-rc/") ? null : FROZEN));
   mocks.mainHead.mockResolvedValue("m".repeat(40));
   mocks.rebuildCandidate.mockResolvedValue({ pullRequests: [{ number: 1, title: "a", mergeSha: "a".repeat(40) }] });
   mocks.candidateCreate.mockResolvedValue({ id: "c1", sequence: 1 });
@@ -311,6 +313,87 @@ describe("recordRcReport", () => {
     expect(mocks.isAncestor).toHaveBeenCalledWith("o", "r", HEAD1, HEAD2, "t");
     expect(mocks.registerVerification).toHaveBeenCalledWith({ repoFullName: "o/r", prNumber: 10, baseSha: "b".repeat(40), headSha: HEAD2 });
     expect(mocks.candidateUpdateMany).toHaveBeenCalledWith({ where: { id: "c1", currentRevision: { lt: 2 } }, data: { currentRevision: 2 } });
+  });
+
+  const pendingImport = () =>
+    candidateRow({
+      revisions: [
+        ...candidateRow().revisions,
+        { id: "r2", revision: 2, reason: "fix_import", status: "requested", expectedHeadSha: HEAD1, importedPrs: [], createdAt: new Date() },
+      ],
+    });
+
+  it("PRのheadの反映が遅れていても、候補ブランチのrefが進んでいれば適用する（#4895）", async () => {
+    mocks.revisionFindUnique.mockResolvedValue({ id: "r2", candidateId: "c1", status: "requested" });
+    mocks.candidateFindUnique.mockResolvedValue(pendingImport());
+    mocks.prsByHead.mockResolvedValue([{ number: 10, state: "open", head: { sha: HEAD1, ref: "release-rc/3" }, base: { sha: "b".repeat(40) } }]);
+    mocks.branchHead.mockResolvedValue(HEAD2);
+    const result = await recordRcReport({ repositoryFullName: "o/r", requestKey: "key-000002", outcome: "applied", runId: 5, reason: null });
+    expect(result).toEqual({ ok: true, outcome: "applied" });
+    expect(mocks.branchHead).toHaveBeenCalledWith("o", "r", "release-rc/3", "t");
+    expect(mocks.revisionUpdateMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: "r2", status: "requested" }, data: expect.objectContaining({ status: "applied", headSha: HEAD2 }) }),
+    );
+  });
+
+  it("適用の報告が届いても候補ブランチがまだ直前のheadなら、失敗にせず待つ（#4895）", async () => {
+    mocks.revisionFindUnique.mockResolvedValue({ id: "r2", candidateId: "c1", status: "requested" });
+    mocks.candidateFindUnique.mockResolvedValue(pendingImport());
+    mocks.prsByHead.mockResolvedValue([{ number: 10, state: "open", head: { sha: HEAD1, ref: "release-rc/3" }, base: { sha: "b".repeat(40) } }]);
+    const result = await recordRcReport({ repositoryFullName: "o/r", requestKey: "key-000002", outcome: "applied", runId: 5, reason: null });
+    expect(result).toEqual({ ok: true, outcome: "waiting" });
+    expect(mocks.revisionUpdateMany).not.toHaveBeenCalled();
+  });
+});
+
+describe("reconcileRcCandidate（照合の時差で失敗扱いにした版の取り込み直し。#4895）", () => {
+  const laggedRow = (overrides: Record<string, unknown> = {}) =>
+    candidateRow({
+      revisions: [
+        ...candidateRow().revisions,
+        {
+          id: "r2",
+          revision: 2,
+          reason: "fix_import",
+          status: "failed",
+          failureReason: RC_NOT_UPDATED_REASON,
+          runUrl: "https://github.com/o/r/actions/runs/5",
+          expectedHeadSha: HEAD1,
+          importedPrs: [],
+          createdAt: new Date(),
+          ...overrides,
+        },
+      ],
+    });
+
+  beforeEach(() => {
+    mocks.prsByHead.mockResolvedValue([{ number: 10, state: "open", head: { sha: HEAD2, ref: "release-rc/3" }, base: { sha: "b".repeat(40) } }]);
+  });
+
+  it("候補ブランチが直前のheadから早送りで進んでいれば、その先端で適用して検証を依頼する", async () => {
+    mocks.candidateFindUnique.mockResolvedValue(laggedRow());
+    await reconcileRcCandidate("o/r", "c1");
+    expect(mocks.isAncestor).toHaveBeenCalledWith("o", "r", HEAD1, HEAD2, "t");
+    expect(mocks.revisionUpdateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: "r2", status: "failed", failureReason: RC_NOT_UPDATED_REASON },
+        data: expect.objectContaining({ status: "applied", failureReason: null, headSha: HEAD2, prNumber: 10 }),
+      }),
+    );
+    expect(mocks.registerVerification).toHaveBeenCalledWith({ repoFullName: "o/r", prNumber: 10, baseSha: "b".repeat(40), headSha: HEAD2 });
+  });
+
+  it("workflowが失敗を報告した版は取り込み直さない", async () => {
+    mocks.candidateFindUnique.mockResolvedValue(laggedRow({ failureReason: "競合" }));
+    await reconcileRcCandidate("o/r", "c1");
+    expect(mocks.revisionUpdateMany).not.toHaveBeenCalled();
+  });
+
+  it("早送りでない（書き換え・巻き戻し）なら取り込み直さない", async () => {
+    mocks.candidateFindUnique.mockResolvedValue(laggedRow());
+    mocks.isAncestor.mockResolvedValue(false);
+    await reconcileRcCandidate("o/r", "c1");
+    expect(mocks.revisionUpdateMany).not.toHaveBeenCalled();
   });
 });
 

@@ -4673,6 +4673,7 @@ Webhookで取り込む。運用・移行・ロールバックは[backup-ci.md](b
 
 - 左メニュー「iOS拡張」（`?pane=ios-extensions`・スマホは`screen=ios-extensions`）。ウィジェット・ロック画面・ライブアクティビティ・コントロールを、iOSアプリのリポジトリごとに一覧する。パネルは`components/dashboard/ios-extensions-panel.tsx`（PC・スマホ共用）、取得は`hooks/use-ios-extensions.ts`
 - 対象リポジトリは`lib/ios-extensions.ts`の`IOS_EXTENSION_REPOSITORY_NAMES`の固定リスト（`Repository`に種別の列は無い。`webview-ios-repos.ts`・`device-build-repos.ts`と同じ判断）。**新しいiOSアプリを足すときはここにも足す**
+- **対象を足したときの反映のタイミング**（#4887）: リストはコード上の定数なので、本番の画面に出るのは`develop`→`main`のリリースPRがマージされ`deploy.yml`が反映した後（`develop`へのマージだけでは本番は変わらない）。反映後は、画面を開いた時点でそのリポジトリのカードが1枚増え、「追加」の起票ダイアログのリポジトリ選択にも出る。走査はリポジトリの既定ブランチ（issue-deckは`develop`）が対象で、結果はサーバーのメモリに5分キャッシュされる（「更新」ボタンで取り直す。デプロイの再起動で消える）。共有拡張（Share Extension）は検出の種類に無いため、それしか持たないissue-deckのカードは「拡張なし」と出る
 - 一覧はSwiftソースの宣言（`: Widget`・`ActivityConfiguration`・`ControlWidget`・`.accessory*`）からの**推定**。`api/repositories/ios-extensions/route.ts`がデフォルトブランチのツリーから拡張らしい名前のSwiftを最大40件読み、5分キャッシュする。命名次第で漏れるため画面にも「検出結果」と出している
 - 起票ダイアログ（`ios-extension-issue-dialog.tsx`）は、起票後の「実装を開始」を閉じる（キャンセル含む）とIssue詳細へ移る（#4172）。計画の承認パネル・計画コメントは詳細にしか出ないため、通常の作成フォームと同じ挙動に揃えている
 - 追加・編集は画面からSwiftを生成せず、種類別テンプレート（`buildIosExtensionIssue`）でIssueを起票して通常の実装経路へ渡す（`POST /api/issues`）

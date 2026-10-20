@@ -8,6 +8,8 @@ import { getInstallationToken } from "@/lib/github/app-auth";
 import { evaluateReviewMergeGuard } from "@/lib/github/review-merge-guard";
 import { recordDeployLaunchWatch } from "@/lib/github/deploy-launch-watch";
 import { GithubApiError } from "@/lib/github/issues-api";
+import { describeMergeFailure, MERGE_REJECTION_STATUSES, requiredCheckNameOf } from "@/lib/github/merge-failure";
+import { fetchMergeFailureCheck } from "@/lib/github/merge-failure-check";
 import { previewModeGuard } from "@/lib/preview-mode";
 import {
   evaluateReleaseMergeGate,
@@ -152,7 +154,30 @@ async function handlePOST(request: NextRequest) {
 
     // 明示確認したときは、HEADが確認時から動いていないことをGitHubにも保証させる（追いコミットを巻き込まない）
     if (body.acknowledgeReviewSha) expectedHeadSha ??= pr.head.sha;
-    const merged = await mergePullRequest(owner, repo, Number(number), token, expectedHeadSha);
+    let merged: Awaited<ReturnType<typeof mergePullRequest>>;
+    try {
+      merged = await mergePullRequest(owner, repo, Number(number), token, expectedHeadSha);
+    } catch (error) {
+      // GitHubがマージを拒んだときは、生の応答ではなく理由と次の操作を返す（#4878）。
+      // 401・5xxなどは従来の`github_api_error`のまま（再ログイン案内などを崩さない）
+      if (!(error instanceof GithubApiError) || !MERGE_REJECTION_STATUSES.has(error.status)) throw error;
+      console.warn(`[POST /api/issues/pull-request-merge] ${owner}/${repo}#${number} GitHubがマージを拒否:`, error.message);
+      const checkName = requiredCheckNameOf(error.responseBody);
+      const check = checkName ? await fetchMergeFailureCheck(owner, repo, pr.head.sha, checkName, token) : null;
+      const failure = describeMergeFailure({
+        status: error.status,
+        body: error.responseBody,
+        pullRequest: {
+          state: pr.state,
+          merged: pr.merged,
+          draft: pr.draft,
+          autoMerge: pr.auto_merge != null,
+          baseRef: pr.base?.ref,
+        },
+        check,
+      });
+      return NextResponse.json({ error: "merge_rejected", message: failure.title, failure }, { status: 409 });
+    }
 
     // mainへのマージなら、本番デプロイが本当に起動したかを見張る行を1つ置く（#2703）。
     // **GitHubはマージのイベントを配送し損ねることがあり**、そのときはワークフローの定義が
