@@ -4,6 +4,7 @@ import { requireUserId } from "@/lib/auth-user";
 import {
   enqueueRemoteSession,
   enqueueRemoteSessionKill,
+  enqueueRemoteSessionResume,
   listRemoteSessions,
 } from "@/lib/dispatch/remote-session";
 import { findRepositoryByFullName } from "@/lib/github/issue-create-service";
@@ -28,7 +29,10 @@ export async function GET() {
   return NextResponse.json(state, { headers: NO_STORE });
 }
 
-/** 起動する。本文は`{ repositoryFullName: "owner/repo" }` */
+/**
+ * 起動する。本文は`{ repositoryFullName: "owner/repo" }`。
+ * 終了したセッションを会話ごと再開する（#4874）ときは`{ resumeId: "<RemoteSessionのid>" }`
+ */
 export async function POST(request: NextRequest) {
   const blocked = previewModeGuard();
   if (blocked) return blocked;
@@ -36,6 +40,14 @@ export async function POST(request: NextRequest) {
   if (!userId) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
   const payload = await request.json().catch(() => null);
+  if (typeof payload?.resumeId === "string" && payload.resumeId) {
+    const resumed = await enqueueRemoteSessionResume({ id: payload.resumeId, requestedByUserId: userId });
+    if (!resumed.ok) {
+      const status = resumed.reason === "not_found" ? 404 : 409;
+      return NextResponse.json({ error: resumed.reason, message: resumed.message }, { status, headers: NO_STORE });
+    }
+    return NextResponse.json({ ok: true, session: resumed.session }, { headers: NO_STORE });
+  }
   const repository =
     typeof payload?.repositoryFullName === "string"
       ? parseRepositoryFullName(payload.repositoryFullName)

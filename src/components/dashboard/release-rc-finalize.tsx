@@ -590,7 +590,7 @@ export function ReleaseRcFinalizePanel({
               <Button
                 size="sm"
                 variant={contract!.requiresAiReviewWaiver ? "outline" : "default"}
-                className={cn(!contract!.requiresAiReviewWaiver && PRODUCTION_MERGE_FILLED)}
+                className={cn("h-auto max-w-full whitespace-normal py-1.5 text-left", !contract!.requiresAiReviewWaiver && PRODUCTION_MERGE_FILLED)}
                 onClick={() => setConfirming(true)}
               >
                 {reusing

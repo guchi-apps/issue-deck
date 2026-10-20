@@ -5,10 +5,12 @@ import { useEffect, useState } from "react";
 
 import { useIosTestflight } from "@/hooks/use-ios-testflight";
 import {
+  isIosDistributionFailed,
   isIosDistributionPending,
   isIosDistributionRunning,
   judgeIosReleasePanel,
 } from "@/lib/ios-testflight-status";
+import { cn } from "@/lib/utils";
 
 const PENDING_REFRESH_MS = 60_000;
 
@@ -23,7 +25,7 @@ export function useIosDistributionState(
   repo: string,
   prNumber: number | null,
   enabled: boolean,
-): { pending: boolean; running: boolean } {
+): { pending: boolean; running: boolean; failed: boolean } {
   // 未配布の間だけ長めの間隔で取り直す（束の「配布する」で配布が済んだら斜線が消える）。
   // 裏のタブでは`useIosTestflight`が取りに行かない
   const [watching, setWatching] = useState(false);
@@ -47,20 +49,31 @@ export function useIosDistributionState(
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setWatching(pending);
   }, [pending]);
-  return { pending, running: isIosDistributionRunning(state) };
+  return { pending, running: isIosDistributionRunning(state), failed: isIosDistributionFailed(state) };
 }
 
 /**
  * 畳んだ行のiOS自動配布アイコン（#3759・#3799）。未配布の間だけ、スマホに斜線を重ねる。
  * 色・大きさは配布済みと同じで、文字は足さない（足すとスマホ幅で行が折り返す。#2172）。
+ * 配布が失敗している間は、斜線の代わりに赤くして右上に点を付ける（#4907。開かなくても失敗が分かるように）。
  */
-export function IosDistributionIcon({ pending }: { pending: boolean }) {
-  const label = pending ? "iOS未配布" : "iOS自動配布";
+export function IosDistributionIcon({ pending, failed = false }: { pending: boolean; failed?: boolean }) {
+  const label = failed ? "iOS配布に失敗" : pending ? "iOS未配布" : "iOS自動配布";
 
   return (
-    <span title={label} aria-label={label} className="relative inline-flex shrink-0 text-blue-600 dark:text-blue-400">
+    <span
+      title={label}
+      aria-label={label}
+      className={cn(
+        "relative inline-flex shrink-0",
+        failed ? "text-destructive" : "text-blue-600 dark:text-blue-400",
+      )}
+    >
       <Smartphone className="size-3.5" aria-hidden="true" />
-      {pending && (
+      {failed && (
+        <span className="absolute -right-0.5 -top-0.5 size-1.5 rounded-full bg-destructive" aria-hidden="true" />
+      )}
+      {pending && !failed && (
         <svg viewBox="0 0 14 14" className="absolute inset-0 size-3.5" aria-hidden="true">
           <line x1="1.5" y1="1.5" x2="12.5" y2="12.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
         </svg>

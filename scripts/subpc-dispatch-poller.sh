@@ -184,7 +184,9 @@ set -euo pipefail
 # 39: 未送信入力の退避対応をstashInputとして明示申告する（#4408）。
 # 40: Issueに紐づかないリモートセッション（`REMOTE_SESSION`・`REMOTE_SESSION_KILL`）を受け取り、
 #     `start-remote-session.sh`で起動・終了する。生きているものはホスト申告の`remoteSessions`で送る（#4743）。
-DISPATCH_POLLER_VERSION="40"
+# 41: 終了したリモートセッションを同じ名前で起動し直すと、ランチャーが同じworktreeパスの転記を見つけて
+#     `claude --continue`で会話ごと再開する（#4874）。issue-deckはこの版数以上のホストにだけ「再開」を配る。
+DISPATCH_POLLER_VERSION="41"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -4647,6 +4649,13 @@ run_remote_session_job() {
   if (( $(count_remote_sessions) >= REMOTE_SESSION_MAX )); then
     report_job "$job_id" failed "同時に動かせるリモートセッションは${REMOTE_SESSION_MAX}本までです。使っていないセッションを終了してください。"
     return 0
+  fi
+
+  # 再開（#4874）では、無操作で自動終了した記録に同じ名前が残っていることがある。残すと申告の
+  # `remoteSessionsIdleEnded`で起動し直したセッションまで「自動で終了しました」に戻されるため外す
+  if [[ -f "$REMOTE_SESSION_IDLE_ENDED_FILE" ]]; then
+    awk -F'\t' -v n="$session" '$2 != n' "$REMOTE_SESSION_IDLE_ENDED_FILE" >"$REMOTE_SESSION_IDLE_ENDED_FILE.tmp" 2>/dev/null \
+      && mv "$REMOTE_SESSION_IDLE_ENDED_FILE.tmp" "$REMOTE_SESSION_IDLE_ENDED_FILE" 2>/dev/null || true
   fi
 
   ensure_tmux_server_scope

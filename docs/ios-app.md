@@ -91,7 +91,7 @@
 | 更新 | 30分おきを頼み（実際の間隔はiOSが決める）、その間も10分刻みのエントリで経過の目盛りを進める。通信できないときはApp Groupに置いた前回の値を出す。値が2時間以上古い・リセット時刻を過ぎた行は薄く出す |
 | タップ | `issuedeck://usage`で「AI使用量」（`/dashboard?pane=usage&mscreen=usage`）を開く |
 
-署名: 新しい拡張のApp ID（`com.gucchii.issuedeck.UsageWidget`）にApp GroupとKeychain共有を付ける。初回の配布で未登録のため署名に失敗した場合は、共有メニューと同じくDeveloperサイトでの登録（手作業）が要る。
+署名: 拡張のApp ID（`com.gucchii.issuedeck.UsageWidget`）はDeveloperサイトで登録し、App Group（`group.com.gucchii.issuedeck`）を付けてある（#4899）。**クラウド署名（`-allowProvisioningUpdates`＋APIキー）はApp IDへApp Groupを割り当てられない**ため、拡張を足すときは共有メニュー（#4267）と同じく、リリース前に本人がDeveloperサイトで登録する。Keychain共有はApp ID側の設定が要らず、entitlementsの`keychain-access-groups`だけで通る。登録の有無はApp Store Connect APIの`GET /v1/bundleIds?filter[identifier]=…&include=bundleIdCapabilities`で読み取りのみで確かめられる（手順の例は#4899の「完了の確認方法」）。v8.71.0（build 701）でTestFlightへ配布し、実機で表示・タップ・見た目を確認済み（#4893）。
 
 ## ネイティブ通知（#4250）
 

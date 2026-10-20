@@ -120,3 +120,23 @@ describe("IosReleaseGroupPanel 手動配布（#3840）", () => {
     expect(screen.queryByRole("button", { name: "手動で配布" })).toBeNull();
   });
 });
+
+describe("IosReleaseGroupPanel 先頭の要約（#4907）", () => {
+  const summary = (
+    <IosReleaseGroupPanel owner="guchi-apps" repo="kurashio" prNumber={5} version="1.8.0" variant="summary" />
+  );
+
+  it("失敗した段階を見出しに出し、内訳は開かずに操作を並べる", async () => {
+    stubTestflight(null);
+    render(<IosFixIssueDraftContext.Provider value={vi.fn()}>{summary}</IosFixIssueDraftContext.Provider>);
+    expect(await screen.findByText("失敗：署名で停止")).toBeTruthy();
+    expect(screen.getByTestId("ios-distribution-summary").dataset.tone).toBe("bad");
+    expect(screen.getByRole("list", { name: "iOS配布の段階" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "再実行" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /修正Issueを起案/ })).toBeTruthy();
+    expect(screen.getByRole("link", { name: "実行ログ" })).toBeTruthy();
+    expect(screen.queryByText("iOS配布の内訳")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "内訳" }));
+    expect(await screen.findByText("iOS配布の内訳")).toBeTruthy();
+  });
+});

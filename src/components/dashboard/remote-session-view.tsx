@@ -1,6 +1,6 @@
 "use client";
 
-import { ExternalLink, Loader2, Search, Star, TerminalSquare } from "lucide-react";
+import { ExternalLink, Loader2, RotateCcw, Search, Star, TerminalSquare } from "lucide-react";
 import { useMemo, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
@@ -13,12 +13,16 @@ import { formatDispatchHostName } from "@/lib/dispatch/host-label";
 import {
   ACTIVE_REMOTE_SESSION_STATUSES,
   describeRemoteSessionStatus,
+  isRemoteSessionResumable,
   type RemoteSessionState,
   type RemoteSessionView as RemoteSession,
 } from "@/lib/dispatch/remote-session-rules";
 import { formatRelativeDate } from "@/lib/format-relative-date";
 import { cn } from "@/lib/utils";
 import type { ConnectedRepository } from "@/types/repository";
+
+/** 「終了したセッション」に並べる件数。古いものは一覧（7日）から自然に落ちる */
+const HISTORY_LIMIT = 5;
 
 const DESCRIPTION = "リポジトリを選ぶと、サブPCでClaude Codeのセッションを立ち上げてClaude Codeアプリで開きます。";
 
@@ -151,6 +155,7 @@ export function RemoteSessionView({
       pending={remote.pending}
       error={remote.error}
       onStart={() => void remote.start(currentRepo.fullName)}
+      onResume={(session) => void remote.resume(session)}
       onStop={(id) => void remote.stop(id)}
       onDismissLaunch={remote.dismissLaunch}
       compact={!isDesktop}
@@ -214,6 +219,7 @@ function RepositoryDetail({
   pending,
   error,
   onStart,
+  onResume,
   onStop,
   onDismissLaunch,
   compact,
@@ -225,6 +231,7 @@ function RepositoryDetail({
   pending: boolean;
   error: string | null;
   onStart: () => void;
+  onResume: (session: RemoteSession) => void;
   onStop: (id: string) => void;
   onDismissLaunch: () => void;
   compact: boolean;
@@ -235,6 +242,19 @@ function RepositoryDetail({
   const limitReached = host !== null && state !== null && host.activeCount >= state.maxPerHost;
   const startDisabled = pending || launching || !host || !host.online || limitReached;
   const visible = sessions.filter((session) => isActive(session) || session.id === launch?.sessionId);
+  // 会話ごと再開できる終了済みのセッション（#4874）。最後に動いていた順
+  const history = sessions
+    .filter((session) => isRemoteSessionResumable(session) && !visible.includes(session))
+    .sort((a, b) => (b.lastSeenAt ?? "").localeCompare(a.lastSeenAt ?? ""))
+    .slice(0, HISTORY_LIMIT);
+  /** 再開できない理由（できるならnull）。転記はそのセッションが動いていたホストにしか無いので、そのホストで判定する */
+  const resumeBlocker = (session: RemoteSession): string | null => {
+    const origin = state?.hosts.find((item) => item.name === session.host) ?? null;
+    if (!origin || !origin.online) return "サブPCがオフラインです。";
+    if (!origin.resumeCapable) return "サブPCのpollerが再開に対応していません。設定の実行環境から「更新して再起動」を押してください。";
+    if (state && origin.activeCount >= state.maxPerHost) return "同時に動かせる本数に達しています。";
+    return null;
+  };
 
   return (
     <div className="flex flex-col gap-4">
@@ -314,8 +334,50 @@ function RepositoryDetail({
           </ul>
         )}
       </div>
+      {history.length > 0 && (
+        <div className="rounded-lg border bg-background">
+          <h3 className="border-b px-4 py-2.5 text-sm font-medium">終了したセッション</h3>
+          <ul>
+            {history.map((session) => {
+              const blocker = resumeBlocker(session);
+              return (
+                <li key={session.id} className="flex flex-wrap items-center gap-2 border-b px-4 py-2.5 last:border-b-0">
+                  <span className="min-w-0 flex-1 truncate font-mono text-xs">{session.tmuxSessionName}</span>
+                  <StatusBadge session={session} />
+                  <span className="text-xs text-muted-foreground">
+                    {formatDispatchHostName(session.host)}・
+                    {session.lastSeenAt ? `${formatRelativeDate(session.lastSeenAt)}まで稼働` : `${formatRelativeDate(session.createdAt)}に起動`}
+                  </span>
+                  <div className="flex w-full justify-end gap-2 sm:w-auto">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={pending || launching || blocker !== null}
+                      onClick={() => onResume(session)}
+                    >
+                      <RotateCcw className="size-3.5" />
+                      再開
+                    </Button>
+                  </div>
+                  {session.failureMessage && (
+                    <p
+                      className={cn(
+                        "w-full text-xs whitespace-pre-wrap",
+                        session.status === "failed" ? "text-destructive" : "text-muted-foreground",
+                      )}
+                    >
+                      {session.failureMessage}
+                    </p>
+                  )}
+                  {blocker && <p className="w-full text-xs text-muted-foreground">{blocker}</p>}
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      )}
       <p className="text-xs text-muted-foreground">
-        セッションはIssueに紐づかず、終了するか一定時間（既定3時間）操作が無くなるまでサブPCに残ります。終了すると、作業が残っていない作業用ディレクトリは片付けます。
+        セッションはIssueに紐づかず、終了するか一定時間（既定3時間）操作が無くなるまでサブPCに残ります。終了すると、作業が残っていない作業用ディレクトリは片付けます。終了したセッションは7日間「再開」から会話の続きとして起動し直せます。
       </p>
     </div>
   );
