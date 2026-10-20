@@ -1374,14 +1374,14 @@ describe("BranchFlowView", () => {
         expect(screen.queryByText("リリース起動中…")).toBeNull();
       });
 
-      it("起動中は「未リリース ◯コミット」を出さない（リリース中と同じ扱い）", async () => {
+      it("起動中も「未リリース ◯コミット」を出し続ける（#4897）", async () => {
         mockFetchWithMode("candidate", new Response(JSON.stringify({ ok: true }), { status: 200 }));
         renderFlow({ branchStatuses: [unreleased] });
         openRepository();
         expect(screen.getAllByLabelText("未リリース 3コミット").length).toBeGreaterThan(0);
 
         await trigger();
-        expect(screen.queryByLabelText("未リリース 3コミット")).toBeNull();
+        expect(screen.getAllByLabelText("未リリース 3コミット").length).toBeGreaterThan(0);
       });
 
       it("押していなければ出さない", () => {
@@ -1437,6 +1437,21 @@ describe("BranchFlowView", () => {
       ensureRepositoryOpen();
       // 主操作は「次のリリース」カードへ集約する（#4428）
       expect(screen.getByText("本番公開へ進む")).toBeTruthy();
+    });
+
+    it("openなリリースPRがあっても、畳んだ行に未リリースの件数を出す（#4897）", () => {
+      renderFlow({
+        pullRequests: [
+          makeReleasePullRequest({
+            number: 1550,
+            title: "v3.22.0をmainへリリースする",
+            state: "open",
+          }),
+        ],
+        branchStatuses: [unreleased],
+      });
+
+      expect(screen.getAllByLabelText("未リリース 3コミット").length).toBeGreaterThan(0);
     });
 
     it("押すと本番デプロイが走る旨の確認を挟む", () => {

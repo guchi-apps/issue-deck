@@ -2607,8 +2607,10 @@ function RepositorySummaryRow({
           className="text-teal-600 dark:text-teal-400"
         />
       )}
-      {/* 未リリースは「リリース中」のピルと同じ紫にして、同じリリースの軸だと分かるようにする（#1886） */}
-      {unreleased.count > 0 && !summary.releaseInProgress && !releaseLaunching && (
+      {/* 未リリースは「リリース中」のピルと同じ紫にして、同じリリースの軸だと分かるようにする（#1886）。
+          リリース候補・バンプPRが開いている間も出す（#4897）。新方式の候補は検証・公開承認待ちで
+          長く開いたままになり、そのあいだ隠すと本番反映待ちの件数がほとんど見えなくなっていた */}
+      {unreleased.count > 0 && (
         <SummaryCount
           icon={ArrowUpToLine}
           label={`未リリース ${formatUnreleasedSummary(unreleased)}`}
