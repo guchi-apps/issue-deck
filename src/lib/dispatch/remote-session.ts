@@ -12,9 +12,11 @@ import {
   REMOTE_SESSION_MAX_PER_HOST,
   buildRemoteSessionName,
   describeRemoteSessionRejection,
+  isRemoteSessionResumable,
   parseRemoteSessionStatus,
   pickRemoteSessionHost,
   resolveRemoteSessionRejection,
+  supportsRemoteSessionResume,
   type RemoteSessionHostInfo,
   type RemoteSessionRejection,
   type RemoteSessionState,
@@ -22,6 +24,7 @@ import {
   type ReportedRemoteSession,
 } from "@/lib/dispatch/remote-session-rules";
 import { notifyDispatchHostWake } from "@/lib/dispatch/wake-notify";
+import { isUniqueConstraintError } from "@/lib/prisma-error";
 
 /**
  * リモートセッション（#4743）のDB側。判定は`remote-session-rules.ts`に寄せ、ここは
@@ -30,6 +33,13 @@ import { notifyDispatchHostWake } from "@/lib/dispatch/wake-notify";
 
 /** 終わったセッションを一覧に残す期間。起動に失敗した理由を押した人が読めるようにする */
 const ENDED_RETENTION_MS = 30 * 60 * 1000;
+
+/**
+ * 会話ごと再開できる（一度動いた）終了済みセッションを一覧に残す期間（#4874）。無操作の自動終了
+ * （既定3時間）やホストの再起動の翌日以降にも戻れるよう、30分より長くとる。転記はClaude Codeの
+ * 既定（30日）まで残るので、それより短ければ再開の失敗にはならない。
+ */
+const RESUMABLE_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 
 /**
  * 起動ジョブが終わったのにセッションの報告が無いまま`running`扱いを続けない猶予。
@@ -61,6 +71,7 @@ function toHostInfo(host: DispatchHost, activeCount: number, now: Date): RemoteS
     remoteSessionCapable: host.remoteSessionCapable === true,
     repositories: parseDispatchHostRepositories(host.repositories),
     activeCount,
+    resumeCapable: supportsRemoteSessionResume(host.agentVersion),
   };
 }
 
@@ -138,6 +149,12 @@ export async function listRemoteSessions(
         OR: [
           { status: { in: ACTIVE_STATUSES } },
           { updatedAt: { gte: new Date(now.getTime() - ENDED_RETENTION_MS) } },
+          // 再開できるもの（#4874。`isRemoteSessionResumable`と同じ条件）は長く残す
+          {
+            status: { in: ["ended", "failed"] },
+            lastSeenAt: { not: null },
+            updatedAt: { gte: new Date(now.getTime() - RESUMABLE_RETENTION_MS) },
+          },
         ],
       },
       orderBy: { createdAt: "desc" },
@@ -255,6 +272,25 @@ export type EnqueueRemoteSessionKillResult =
   | { ok: true }
   | { ok: false; reason: "not_found" | "already_ended" | "host_offline" | "already_queued"; message: string };
 
+/**
+ * 要求者のセッションを引く。他の利用者のもの・連携を失ったリポジトリのものは`null`
+ * （存在しないものとして扱う）。終了・再開で共有する。
+ */
+async function findOwnedRemoteSession(id: string, requestedByUserId: string | null): Promise<RemoteSession | null> {
+  const session = await db.remoteSession.findFirst({
+    where: { id, requestedByUserId: requestedByUserId ?? "" },
+  });
+  if (!session) return null;
+  const linked = await db.repository.findFirst({
+    where: {
+      fullName: session.repositoryFullName,
+      installation: { userInstallations: { some: { userId: requestedByUserId ?? "" } } },
+    },
+    select: { id: true },
+  });
+  return linked ? session : null;
+}
+
 /** リモートセッションを終了する（`REMOTE_SESSION_KILL`を積む）。worktreeの片付けはpoller側 */
 export async function enqueueRemoteSessionKill(params: {
   id: string;
@@ -262,20 +298,8 @@ export async function enqueueRemoteSessionKill(params: {
   now?: Date;
 }): Promise<EnqueueRemoteSessionKillResult> {
   const now = params.now ?? new Date();
-  // 要求者のセッションだけを対象にする（他の利用者のIDは存在しないものとして扱う）
-  const session = await db.remoteSession.findFirst({
-    where: { id: params.id, requestedByUserId: params.requestedByUserId ?? "" },
-  });
+  const session = await findOwnedRemoteSession(params.id, params.requestedByUserId);
   if (!session) return { ok: false, reason: "not_found", message: "セッションが見つかりません。" };
-  // 連携を失ったリポジトリのセッションは終了も受け付けない（存在しないものとして扱う）
-  const linked = await db.repository.findFirst({
-    where: {
-      fullName: session.repositoryFullName,
-      installation: { userInstallations: { some: { userId: params.requestedByUserId ?? "" } } },
-    },
-    select: { id: true },
-  });
-  if (!linked) return { ok: false, reason: "not_found", message: "セッションが見つかりません。" };
   if (session.status === "ended" || session.status === "failed") {
     return { ok: false, reason: "already_ended", message: "このセッションは既に終了しています。" };
   }
@@ -302,6 +326,94 @@ export async function enqueueRemoteSessionKill(params: {
   notifyDispatchHostWake(session.host);
   return { ok: true };
 }
+
+export type EnqueueRemoteSessionResumeResult =
+  | { ok: true; session: RemoteSessionView }
+  | {
+      ok: false;
+      reason: "not_found" | "not_resumable" | "already_queued" | RemoteSessionRejection;
+      message: string;
+    };
+
+/**
+ * 終了したリモートセッションを会話ごと再開する（#4874）。
+ *
+ * **行は使い回す**（新しい行を作らない）。tmux名＝worktreeのパス（`remote-<8文字>`）＝転記の置き場で、
+ * 同じ名前で起こし直すことが再開そのものだから。行を`starting`へ戻して`launchJobId`を新しい起動ジョブへ
+ * 差し替え、古いURL・理由は消す（URLは起動のたびに変わる。残すと画面が古いURLへ移動する）。
+ * ランチャーは同じパスの転記を見つけて`claude --continue`で起こす。
+ *
+ * 起動先は**そのセッションが動いていたホストに固定**する（転記とworktreeはそのホストにしか無い）。
+ */
+export async function enqueueRemoteSessionResume(params: {
+  id: string;
+  requestedByUserId: string | null;
+  now?: Date;
+}): Promise<EnqueueRemoteSessionResumeResult> {
+  const now = params.now ?? new Date();
+  const session = await findOwnedRemoteSession(params.id, params.requestedByUserId);
+  if (!session) return { ok: false, reason: "not_found", message: "セッションが見つかりません。" };
+  if (!isRemoteSessionResumable({ status: parseRemoteSessionStatus(session.status), lastSeenAt: session.lastSeenAt?.toISOString() ?? null })) {
+    return {
+      ok: false,
+      reason: "not_resumable",
+      message:
+        session.status === "starting" || session.status === "running"
+          ? "このセッションはまだ動いています。"
+          : "このセッションには続けられる会話がありません。",
+    };
+  }
+
+  await settleStartingSessions(now);
+  const hosts = await loadHostInfos(now);
+  const host = hosts.find((item) => item.name === session.host) ?? null;
+  const rejection =
+    resolveRemoteSessionRejection(host, session.repositoryFullName) ??
+    (host && !host.resumeCapable ? "resume_unsupported" : null);
+  if (rejection) {
+    return { ok: false, reason: rejection, message: describeRemoteSessionRejection(rejection) };
+  }
+
+  let resumed: RemoteSession | null;
+  try {
+    resumed = await db.$transaction(async (tx) => {
+      const job = await tx.dispatchJob.create({
+        data: {
+          repositoryFullName: session.repositoryFullName,
+          issueNumber: REMOTE_SESSION_ISSUE_NUMBER,
+          targetHost: session.host,
+          kind: "REMOTE_SESSION",
+          status: "QUEUED",
+          activeKey: `remote_session:${session.tmuxSessionName}`,
+          tmuxSessionName: session.tmuxSessionName,
+          requestedByUserId: params.requestedByUserId,
+        },
+      });
+      // 読んでから書くまでに別の再開が通っていないことを、状態の条件で確かめる
+      const updated = await tx.remoteSession.updateMany({
+        where: { id: session.id, status: { in: ["ended", "failed"] } },
+        data: {
+          status: "starting",
+          launchJobId: job.id,
+          remoteControlUrl: null,
+          failureMessage: null,
+          endedAt: null,
+        },
+      });
+      if (updated.count === 0) throw new ResumeRaceError();
+      return tx.remoteSession.findUnique({ where: { id: session.id } });
+    });
+  } catch (error) {
+    // 起動ジョブの`activeKey`の重複（同じセッションの起動が未完了）か、別の再開が先に通った
+    if (!(error instanceof ResumeRaceError) && !isUniqueConstraintError(error)) throw error;
+    return { ok: false, reason: "already_queued", message: "このセッションは再開の処理を待っています。" };
+  }
+  if (!resumed) return { ok: false, reason: "not_found", message: "セッションが見つかりません。" };
+  notifyDispatchHostWake(session.host);
+  return { ok: true, session: toView(resumed, false) };
+}
+
+class ResumeRaceError extends Error {}
 
 /**
  * pollerからのジョブ報告を`RemoteSession`へ写す（`POST /api/dispatch/report`から呼ぶ）。
@@ -382,7 +494,9 @@ export async function syncRemoteSessionsFromHost(params: {
       });
       continue;
     }
-    if (idleEnded.has(session.tmuxSessionName)) {
+    // `starting`は対象にしない。再開（#4874）を積んだ直後は、前回の自動終了の記録に同じ名前が
+    // まだ残っていることがあり、起動前に`ended`へ戻してしまうため
+    if (session.status === "running" && idleEnded.has(session.tmuxSessionName)) {
       await db.remoteSession.update({
         where: { id: session.id },
         data: { status: "ended", endedAt: now, failureMessage: REMOTE_SESSION_IDLE_ENDED_MESSAGE },

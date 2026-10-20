@@ -57,7 +57,9 @@ export type RemoteSessionRejection =
   | "host_offline"
   | "unsupported"
   | "repository_not_runnable"
-  | "limit_reached";
+  | "limit_reached"
+  /** 再開（#4874）に対応していないpoller。起動の判定（`resolveRemoteSessionRejection`）では返さない */
+  | "resume_unsupported";
 
 /** 判定に要るホストの情報 */
 export type RemoteSessionHostInfo = {
@@ -66,6 +68,8 @@ export type RemoteSessionHostInfo = {
   remoteSessionCapable: boolean;
   repositories: string[];
   activeCount: number;
+  /** 終了したセッションを会話ごと再開できるpollerか（#4874。`supportsRemoteSessionResume`） */
+  resumeCapable: boolean;
 };
 
 /**
@@ -97,7 +101,33 @@ export function describeRemoteSessionRejection(rejection: RemoteSessionRejection
       return "このリポジトリはサブPCに登録されていません。";
     case "limit_reached":
       return `同時に動かせるリモートセッションは${REMOTE_SESSION_MAX_PER_HOST}本までです。使っていないセッションを終了してください。`;
+    case "resume_unsupported":
+      return "サブPCのpollerがセッションの再開に対応していません。設定の実行環境から「更新して再起動」を押してください。";
   }
+}
+
+/**
+ * 再開（#4874）に対応したpollerの版数。**この版数からランチャーが同じworktreeパスの転記を見つけて
+ * `claude --continue`で起こす**。古いpollerへ配ると、同じ名前で新しい会話を始めてしまう
+ * （会話は消えないが「再開」にならない）ため、申告された版数で配り分ける。
+ */
+export const REMOTE_SESSION_RESUME_MIN_AGENT_VERSION = 41;
+
+/** ホスト申告の`agentVersion`（pollerの版数。文字列）が再開に対応しているか */
+export function supportsRemoteSessionResume(agentVersion: string | null | undefined): boolean {
+  if (!agentVersion || !/^\d+$/.test(agentVersion)) return false;
+  return Number(agentVersion) >= REMOTE_SESSION_RESUME_MIN_AGENT_VERSION;
+}
+
+/**
+ * 終了したセッションを会話ごと再開できるか（#4874）。
+ *
+ * **一度でも動いた（`lastSeenAt`がある）`ended`・`failed`だけ**を対象にする。起動に失敗したまま
+ * 一度も動かなかったものには続ける会話が無い。`failed`を含めるのは、再開の起動が失敗した行を
+ * もう一度再開できるようにするため（行は再開のたびに使い回すので、`lastSeenAt`は前回の稼働から残る）。
+ */
+export function isRemoteSessionResumable(session: Pick<RemoteSessionView, "status" | "lastSeenAt">): boolean {
+  return (session.status === "ended" || session.status === "failed") && session.lastSeenAt !== null;
 }
 
 /**
