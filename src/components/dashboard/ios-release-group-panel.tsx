@@ -4,6 +4,7 @@ import { createContext, useContext, useEffect, useState } from "react";
 import { ChevronDown, ChevronRight, ExternalLink, Loader2, Plus, RefreshCw, Smartphone } from "lucide-react";
 
 import { GithubReferenceLink } from "@/components/dashboard/github-reference-link";
+import { IosDistributionStageBar } from "@/components/dashboard/ios-distribution-stage-bar";
 import { IosRunProgressPanel } from "@/components/dashboard/ios-run-progress-panel";
 import {
   AlertDialog,
@@ -17,8 +18,15 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { useIosTestflight } from "@/hooks/use-ios-testflight";
+import { formatMonthDayTime } from "@/lib/format-date-time";
 import { buildIosDistributionFixIssueDraft, type IosDistributionFixIssueDraft } from "@/lib/ios-distribution-failure";
-import { judgeIosReleasePanel, type IosDispatchBlock } from "@/lib/ios-testflight-status";
+import {
+  describeIosDistributionHeadline,
+  judgeIosReleasePanel,
+  type IosDispatchBlock,
+  type IosDistributionHeadline,
+} from "@/lib/ios-testflight-status";
+import { cn } from "@/lib/utils";
 
 const DISPATCH_ERROR: Record<IosDispatchBlock | string, string> = {
   not_merged: "このリリースはまだmainへマージされていません。",
@@ -57,21 +65,45 @@ export const IosFixIssueDraftContext = createContext<
   ((draft: IosDistributionFixIssueDraft, origin: IosFixIssueOrigin) => void) | undefined
 >(undefined);
 
+const SUMMARY_TONE_CLASS: Record<IosDistributionHeadline["tone"], { box: string; text: string; icon: string }> = {
+  bad: {
+    box: "border-destructive/50 bg-destructive/5",
+    text: "font-semibold text-destructive",
+    icon: "text-destructive",
+  },
+  run: {
+    box: "border-blue-500/40 bg-blue-500/5",
+    text: "font-semibold text-blue-700 dark:text-blue-400",
+    icon: "text-blue-600 dark:text-blue-400",
+  },
+  ok: { box: "", text: "font-semibold text-green-700 dark:text-green-400", icon: "text-blue-600 dark:text-blue-400" },
+  idle: { box: "", text: "text-muted-foreground", icon: "text-muted-foreground" },
+};
+
 /**
  * ブランチ画面のリリース束に置くiOS配布欄（#3644）。Webの本番デプロイとは別の行にし、
  * iOSの成否をWebの成否と混ぜない。対象は`webview-ios-repos.ts`のリポジトリの、mainへマージ済みの束。
+ *
+ * `variant="summary"`は、リポジトリを開いた先頭（「次のリリース」カード）に置く最新版の要約（#4907）。
+ * 過去のリリースを開かなくても、止まった段階・進んでいる段階・配布済みかを段階のバーと1行の見出しで出す。
+ * 操作（再実行・修正Issueの起案・手動配布）と確認ダイアログは束の欄と同じものを使う。
  */
 export function IosReleaseGroupPanel({
   owner,
   repo,
   prNumber,
   version,
+  variant = "group",
+  className,
 }: {
   owner: string;
   repo: string;
   prNumber: number;
   version: string | null;
+  variant?: "group" | "summary";
+  className?: string;
 }) {
+  const summary = variant === "summary";
   const onDraftFixIssue = useContext(IosFixIssueDraftContext);
   // null=自動（実行中・失敗のときだけ開く）。人が開閉したらその値を優先する
   const [detailToggle, setDetailToggle] = useState<boolean | null>(null);
@@ -212,86 +244,46 @@ export function IosReleaseGroupPanel({
       { repositoryFullName: `${owner}/${repo}`, runId: failedRun.id, runUrl: failedRun.htmlUrl, failedStage },
     );
   }
-  const autoOpen = state.kind === "running" || state.kind === "failed";
+  // 先頭の要約は段階のバーで足りるので、内訳は人が開いたときだけ出す
+  const autoOpen = !summary && (state.kind === "running" || state.kind === "failed");
   const detailOpen = detailToggle ?? autoOpen;
   // 内訳を開いている、または実行中のrunがあるあいだだけ自動更新する（フック側の条件と同じ）
   const autoRefreshing = tipKnown !== false && (detailOpen || data.runs.some((run) => run.status !== "completed"));
 
-  return (
-    <div className="mt-1 flex max-w-2xl flex-col gap-1 rounded border border-dashed px-2 py-1.5 text-xs">
-      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-        <Smartphone className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
-        <span className="font-medium">iOS配布</span>
-        {label}
-        {launching && <span className="text-muted-foreground">起動しています…</span>}
-        {canDispatch && (
-          <Button size="sm" variant="outline" className="h-6 px-2 text-xs" onClick={() => setOpen(true)}>
-            {state.kind === "failed" ? "再実行" : "iOSへ配布"}
-          </Button>
-        )}
-        {canForceDispatch && (
-          <Button size="sm" variant="outline" className="h-6 px-2 text-xs" onClick={() => setForceOpen(true)}>
-            手動で配布
-          </Button>
-        )}
-        {state.kind === "failed" && trackedIssue && (
-          <Button asChild size="sm" variant="outline" className="h-6 px-2 text-xs">
-            <GithubReferenceLink
-              href={trackedIssue.htmlUrl}
-              reference={{ repositoryFullName: `${owner}/${repo}`, number: trackedIssue.number, kind: "issue" }}
-            >
-              <ExternalLink aria-hidden="true" />
-              起票済み（#{trackedIssue.number}）
-            </GithubReferenceLink>
-          </Button>
-        )}
-        {state.kind === "failed" && !trackedIssue && failedRun && onDraftFixIssue && (
-          <Button size="sm" variant="outline" className="h-6 px-2 text-xs" onClick={draftFixIssue}>
-            <Plus aria-hidden="true" />
-            修正Issueを起案
-          </Button>
-        )}
-        {detailRun && (
-          <button
-            type="button"
-            onClick={() => setDetailToggle(!detailOpen)}
-            aria-expanded={detailOpen}
-            className="inline-flex shrink-0 items-center rounded p-0.5 text-muted-foreground hover:text-foreground"
-            title={detailOpen ? "実行の内訳を閉じる" : "実行の内訳を開く"}
-            aria-label={detailOpen ? "実行の内訳を閉じる" : "実行の内訳を開く"}
-          >
-            {detailOpen ? (
-              <ChevronDown className="size-3.5" aria-hidden="true" />
-            ) : (
-              <ChevronRight className="size-3.5" aria-hidden="true" />
-            )}
-          </button>
-        )}
-        <Button
-          size="sm"
-          variant="ghost"
-          className="ml-auto h-6 px-1.5 text-xs"
-          onClick={refresh}
-          disabled={isLoading}
-          aria-label="iOS配布の状態を更新"
-        >
-          <RefreshCw className={isLoading ? "size-3 animate-spin" : "size-3"} aria-hidden="true" />
+  const dispatchButtons = (
+    <>
+      {launching && <span className="text-muted-foreground">起動しています…</span>}
+      {canDispatch && (
+        <Button size="sm" variant="outline" className="h-6 px-2 text-xs" onClick={() => setOpen(true)}>
+          {state.kind === "failed" ? "再実行" : "iOSへ配布"}
         </Button>
-      </div>
-      {(error || actionError) && <p className="text-destructive">{error ?? actionError}</p>}
-      {detailRun && detailOpen && (
-        <IosRunProgressPanel
-          run={detailRun}
-          lastFetchedAt={lastFetchedAt}
-          autoRefreshLabel={autoRefreshing ? `自動更新中（${AUTO_REFRESH_MS / 1000}秒）` : undefined}
-        />
       )}
-      {state.kind === "not-needed" && latestRun && (
-        <GithubReferenceLink href={latestRun.htmlUrl} className="self-start underline underline-offset-2">
-          判定の詳細を開く
-        </GithubReferenceLink>
+      {canForceDispatch && (
+        <Button size="sm" variant="outline" className="h-6 px-2 text-xs" onClick={() => setForceOpen(true)}>
+          手動で配布
+        </Button>
       )}
-
+      {state.kind === "failed" && trackedIssue && (
+        <Button asChild size="sm" variant="outline" className="h-6 px-2 text-xs">
+          <GithubReferenceLink
+            href={trackedIssue.htmlUrl}
+            reference={{ repositoryFullName: `${owner}/${repo}`, number: trackedIssue.number, kind: "issue" }}
+          >
+            <ExternalLink aria-hidden="true" />
+            起票済み（#{trackedIssue.number}）
+          </GithubReferenceLink>
+        </Button>
+      )}
+      {state.kind === "failed" && !trackedIssue && failedRun && onDraftFixIssue && (
+        <Button size="sm" variant="outline" className="h-6 px-2 text-xs" onClick={draftFixIssue}>
+          <Plus aria-hidden="true" />
+          修正Issueを起案
+        </Button>
+      )}
+    </>
+  );
+  const dialogs = (
+    <>
       <AlertDialog open={open} onOpenChange={setOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -358,6 +350,134 @@ export function IosReleaseGroupPanel({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+    </>
+  );
+  const detail = detailRun && detailOpen && (
+    <IosRunProgressPanel
+      run={detailRun}
+      lastFetchedAt={lastFetchedAt}
+      autoRefreshLabel={autoRefreshing ? `自動更新中（${AUTO_REFRESH_MS / 1000}秒）` : undefined}
+    />
+  );
+
+  if (summary) {
+    // この版の実行（失敗・完了の時刻と、失敗時の段階・理由を読む）。実行中は版を問わず走っているもの
+    const versionRun =
+      state.kind === "running" ? data.runs.find((run) => run.status !== "completed") : data.runs.find((run) => run.headSha === sha);
+    const headline = describeIosDistributionHeadline(state, versionRun?.stages ?? null);
+    const tone = SUMMARY_TONE_CLASS[headline.tone];
+    const reason = state.kind === "failed" ? versionRun?.notes[0] : undefined;
+    const finishedAt =
+      versionRun && versionRun.status === "completed" && (state.kind === "failed" || state.kind === "delivered")
+        ? versionRun.updatedAt
+        : null;
+    return (
+      <section
+        aria-label="iOS配布"
+        className={cn("flex min-w-0 flex-col gap-1.5 rounded-md border px-2.5 py-1.5 text-xs", tone.box, className)}
+        data-testid="ios-distribution-summary"
+        data-tone={headline.tone}
+      >
+        <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5">
+          <span className="inline-flex shrink-0 items-center gap-1 font-medium">
+            <Smartphone className={cn("size-3.5", tone.icon)} aria-hidden="true" />
+            iOS配布
+          </span>
+          <span className={cn("min-w-0 break-words", tone.text)}>{headline.text}</span>
+          <span className="text-muted-foreground">
+            {[version ? `v${version}` : null, finishedAt ? formatMonthDayTime(finishedAt) : null]
+              .filter(Boolean)
+              .join(" ・ ")}
+          </span>
+          <Button
+            size="sm"
+            variant="ghost"
+            className="ml-auto h-6 px-1.5 text-xs"
+            onClick={refresh}
+            disabled={isLoading}
+            aria-label="iOS配布の状態を更新"
+          >
+            <RefreshCw className={isLoading ? "size-3 animate-spin" : "size-3"} aria-hidden="true" />
+          </Button>
+        </div>
+        {headline.stages && <IosDistributionStageBar stages={headline.stages} />}
+        {reason && <p className="min-w-0 break-words">{reason}</p>}
+        {(error || actionError) && <p className="text-destructive">{error ?? actionError}</p>}
+        <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 empty:hidden">
+          {dispatchButtons}
+          {versionRun && (
+            <GithubReferenceLink
+              href={versionRun.htmlUrl}
+              className="text-muted-foreground underline underline-offset-2 hover:text-foreground"
+            >
+              {state.kind === "not-needed" ? "判定の詳細" : "実行ログ"}
+            </GithubReferenceLink>
+          )}
+          {detailRun && state.kind !== "not-needed" && (
+            <button
+              type="button"
+              onClick={() => setDetailToggle(!detailOpen)}
+              aria-expanded={detailOpen}
+              className="inline-flex items-center gap-0.5 text-muted-foreground hover:text-foreground"
+            >
+              内訳
+              {detailOpen ? (
+                <ChevronDown className="size-3.5" aria-hidden="true" />
+              ) : (
+                <ChevronRight className="size-3.5" aria-hidden="true" />
+              )}
+            </button>
+          )}
+        </div>
+        {detail}
+        {dialogs}
+      </section>
+    );
+  }
+
+  return (
+    <div className="mt-1 flex max-w-2xl flex-col gap-1 rounded border border-dashed px-2 py-1.5 text-xs">
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+        <Smartphone className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+        <span className="font-medium">iOS配布</span>
+        {label}
+        {dispatchButtons}
+        {detailRun && (
+          <button
+            type="button"
+            onClick={() => setDetailToggle(!detailOpen)}
+            aria-expanded={detailOpen}
+            className="inline-flex shrink-0 items-center rounded p-0.5 text-muted-foreground hover:text-foreground"
+            title={detailOpen ? "実行の内訳を閉じる" : "実行の内訳を開く"}
+            aria-label={detailOpen ? "実行の内訳を閉じる" : "実行の内訳を開く"}
+          >
+            {detailOpen ? (
+              <ChevronDown className="size-3.5" aria-hidden="true" />
+            ) : (
+              <ChevronRight className="size-3.5" aria-hidden="true" />
+            )}
+          </button>
+        )}
+        <Button
+          size="sm"
+          variant="ghost"
+          className="ml-auto h-6 px-1.5 text-xs"
+          onClick={refresh}
+          disabled={isLoading}
+          aria-label="iOS配布の状態を更新"
+        >
+          <RefreshCw className={isLoading ? "size-3 animate-spin" : "size-3"} aria-hidden="true" />
+        </Button>
+      </div>
+      {(error || actionError) && <p className="text-destructive">{error ?? actionError}</p>}
+      {detail}
+      {state.kind === "not-needed" && latestRun && (
+        <GithubReferenceLink href={latestRun.htmlUrl} className="self-start underline underline-offset-2">
+          判定の詳細を開く
+        </GithubReferenceLink>
+      )}
+
+      {dialogs}
     </div>
   );
 }
