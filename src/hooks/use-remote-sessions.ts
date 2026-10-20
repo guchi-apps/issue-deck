@@ -112,6 +112,38 @@ export function useRemoteSessions(params: { active: boolean; onReady: (url: stri
     [refresh, updateLaunch],
   );
 
+  /** 終了したセッションを会話ごと再開する（#4874）。起動と同じく、URLが届いたら移動する */
+  const resume = useCallback(
+    async (session: RemoteSessionView) => {
+      setPending(true);
+      setError(null);
+      try {
+        const response = await fetch("/api/remote-sessions", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ resumeId: session.id }),
+        });
+        const body = (await response.json().catch(() => null)) as
+          | { session?: RemoteSessionView; message?: string }
+          | null;
+        if (!response.ok || !body?.session) {
+          setError(body?.message ?? "リモートセッションを再開できませんでした。");
+          return;
+        }
+        updateLaunch({
+          sessionId: body.session.id,
+          repositoryFullName: session.repositoryFullName,
+          startedAt: Date.now(),
+          gaveUp: false,
+        });
+        await refresh();
+      } finally {
+        setPending(false);
+      }
+    },
+    [refresh, updateLaunch],
+  );
+
   const stop = useCallback(
     async (id: string) => {
       setError(null);
@@ -127,5 +159,5 @@ export function useRemoteSessions(params: { active: boolean; onReady: (url: stri
 
   const dismissLaunch = useCallback(() => updateLaunch(null), [updateLaunch]);
 
-  return { state, error, launch, pending, start, stop, refresh, dismissLaunch };
+  return { state, error, launch, pending, start, resume, stop, refresh, dismissLaunch };
 }

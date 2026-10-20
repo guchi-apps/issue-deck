@@ -44,14 +44,40 @@ journalで確認）。消えたジョブは`CLAIMED`のまま10分残るので�
 ジョブを全部回した後（`exec_pending_self_update`）で行う。自動更新（`maybe_auto_self_update`）は
 もともと`run_once`の後でしか入れ替えないので対象外
 
-### 終了したセッションの復旧（検討。未実装）
+### 終了したセッションの再開（#4874）
 
-会話の転記は`~/.claude/projects/<worktreeのパスを変換した名前>/`に残り、worktreeを消しても消えない。
-そのため**同じworktreeパスで`claude --continue --remote-control <名前>`を起動し直せば、会話ごと再開できる**
-見込み（worktreeが片付いていれば同じパスへ作り直す。未pushの作業はworktreeが残っているので、そのまま戻る）。
-画面の履歴に「再開」を足し、`RemoteSession`の行を`starting`へ戻して起動ジョブを積む形が最小。行の
-再利用（`tmuxSessionName`・`launchJobId`が一意）と、一覧に残す期間（今は終了後30分）の設計が要るため
-別Issue（#4874）で扱う
+終了（手動・無操作の自動終了・ホスト再起動）したセッションは、画面の「終了したセッション」の
+「再開」から**会話の続きとして**起動し直せる。
+
+```text
+画面「再開」→ POST /api/remote-sessions { resumeId }
+  └ enqueueRemoteSessionResume: 同じ RemoteSession の行を starting へ戻し、launchJobId を新しい
+    REMOTE_SESSION ジョブへ差し替える（tmux名はそのまま。URL・理由・endedAt は消す）
+       poller → start-remote-session.sh <owner> <repo> <同じセッション名>
+         └ 同じ worktree パス（remote-<8文字>）。片付け済みなら既定ブランチの最新で作り直す
+         └ そのパスの転記（~/.claude/projects/<パスの英数字以外を-にした名前>/*.jsonl）があれば
+           claude --continue --remote-control <名前> で起こす
+```
+
+- **行は使い回す**（新しい行を作らない）。tmux名＝worktreeのパス＝転記の置き場で、同じ名前で起こし
+  直すことが再開そのものだから。`tmuxSessionName`の一意制約もそのまま守れる。`launchJobId`は再開の
+  たびに新しいジョブへ差し替える（古いジョブの報告は`launchJobId`で照合されるので混ざらない）
+- **`--continue`が別の会話を拾わない理由**: パスはセッションごとにランダムな8文字で分かれるため、
+  そのパスの転記はそのセッションの会話だけ。何度再開しても「そのパスの最新の会話」＝前回の続きになる
+- **再開できるのは一度でも動いた（`lastSeenAt`がある）`ended`・`failed`**（`isRemoteSessionResumable`）。
+  `failed`を含めるのは、再開の起動に失敗した行をもう一度押せるようにするため
+- **一覧に残す期間**は、再開できるものだけ終了後7日（それ以外は従来どおり30分）。画面の「終了したセッション」は
+  最後に動いていた順に5件まで出す。転記はClaude Codeの既定で30日残るので、7日なら転記切れで失敗しない
+- **起動先はそのセッションが動いていたホストに固定**する（転記とworktreeはそのホストにしか無い）。
+  同時実行の上限・オンライン判定は新規起動と同じ
+- **pollerの版数41以上**（`REMOTE_SESSION_RESUME_MIN_AGENT_VERSION`）にだけ配る。古いランチャーは
+  `--continue`を付けないため、同じ名前で新しい会話を始めてしまう。画面は「更新して再起動」を案内する
+- **無操作の自動終了の記録**（`remote-session-idle-ended`。30分残る）に同じ名前が残っていると、申告の
+  `remoteSessionsIdleEnded`で再開したセッションまで`ended`へ戻される。pollerは起動前に記録からその
+  名前を外し、issue-deckも`starting`の行には自動終了の記録を当てない
+- worktreeを片付けたあとに再開すると、作業ツリーは**既定ブランチの最新**から作り直される（会話は戻るが、
+  前回切ったブランチのチェックアウトまでは戻らない。pushしていない作業がある場合はworktreeが残っているので、
+  そのまま戻る）
 
 ## 実装セッションと混ぜない
 

@@ -5,11 +5,13 @@ import {
   REMOTE_SESSION_MAX_PER_HOST,
   REMOTE_SESSION_NAME_PATTERN,
   buildRemoteSessionName,
+  isRemoteSessionResumable,
   parseIdleEndedRemoteSessions,
   parseReportedRemoteSessions,
   pickRemoteSessionHost,
   resolveRemoteSessionRejection,
   selectHostRemoteSessions,
+  supportsRemoteSessionResume,
   type RemoteSessionHostInfo,
   type RemoteSessionView,
 } from "@/lib/dispatch/remote-session-rules";
@@ -20,6 +22,7 @@ const host = (overrides: Partial<RemoteSessionHostInfo> = {}): RemoteSessionHost
   remoteSessionCapable: true,
   repositories: ["guchi-apps/issue-deck"],
   activeCount: 0,
+  resumeCapable: true,
   ...overrides,
 });
 
@@ -124,5 +127,24 @@ describe("selectHostRemoteSessions（#4836）", () => {
       "subpc",
     );
     expect(result.map((item) => item.id)).toEqual(["early", "late"]);
+  });
+});
+
+describe("再開の判定（#4874）", () => {
+  it("一度でも動いた終了・失敗だけを再開できる", () => {
+    const seen = "2026-10-20T00:00:00.000Z";
+    expect(isRemoteSessionResumable({ status: "ended", lastSeenAt: seen })).toBe(true);
+    expect(isRemoteSessionResumable({ status: "failed", lastSeenAt: seen })).toBe(true);
+    expect(isRemoteSessionResumable({ status: "failed", lastSeenAt: null })).toBe(false);
+    expect(isRemoteSessionResumable({ status: "running", lastSeenAt: seen })).toBe(false);
+    expect(isRemoteSessionResumable({ status: "starting", lastSeenAt: seen })).toBe(false);
+  });
+
+  it("pollerの版数41以上だけを再開対応とみなす", () => {
+    expect(supportsRemoteSessionResume("41")).toBe(true);
+    expect(supportsRemoteSessionResume("42")).toBe(true);
+    expect(supportsRemoteSessionResume("40")).toBe(false);
+    expect(supportsRemoteSessionResume(null)).toBe(false);
+    expect(supportsRemoteSessionResume("41-dev")).toBe(false);
   });
 });

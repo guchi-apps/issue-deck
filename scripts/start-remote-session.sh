@@ -26,6 +26,15 @@
 #   権限モード      `ISSUE_DECK_CLAUDE_PERMISSION_MODE`（既定auto。実装セッションと同じ）
 #   開発サーバー    起動しない（要ればセッションの中で起こす）
 #
+# ## 再開（#4874）
+#
+# 同じセッション名で起動し直すと、同じworktreeパス（`remote-<8文字>`）を使う。そのパスの転記
+# （`~/.claude/projects/<パスの英数字以外を-にした名前>/*.jsonl`）が残っていれば
+# `claude --continue`で起こし、**会話の続きとして再開する**。転記はworktreeを消しても残るので、
+# 片付けたあとでも同じパスへworktreeを作り直せば戻れる（作業が残っていたworktreeはそのまま使う）。
+# パスはセッションごとにランダムな8文字で分かれるため、`--continue`が別のセッションの会話を
+# 拾うことはない（同じセッションを何度再開しても、そのパスの最新の会話＝前回の続きになる）。
+#
 # ## 片付け
 #
 # worktreeは**作業が残っていないときだけ**消す（未コミットの変更が無く、HEADがどのリモート
@@ -33,6 +42,7 @@
 # 作業ツリーはサブPCにしか無いため、勝手に消すと取り返せない。
 #
 # 環境変数:
+#   CLAUDE_PROJECTS_DIR                 転記の置き場（既定は ~/.claude/projects）
 #   ISSUE_DECK_CLAUDE_PERMISSION_MODE   claude の権限モード（既定は auto）
 #   ISSUE_DECK_CLAUDE_MODEL             claude の --model（未設定ならCLIの既定）
 #   ISSUE_DECK_REMOTE_SWEEP_MIN_AGE     --sweep で片付けるまでの猶予秒（既定600。起動直後を消さない）
@@ -74,6 +84,14 @@ worktree_is_disposable() {
   # ブランチを切ってコミットした場合も、pushしていなければ上で拾える。ブランチだけ作って
   # 切り替えたままのworktreeは、ブランチが残るので作業ツリーは消してよい
   return 0
+}
+
+# そのworktreeパスに続けられる会話（転記）が残っているか。残っていれば0
+has_conversation_for() {
+  local projects_dir="${CLAUDE_PROJECTS_DIR:-$HOME/.claude/projects}"
+  # Claude Codeは作業ディレクトリの英数字以外を`-`に置き換えた名前で転記を置く
+  local slug="${1//[^A-Za-z0-9]/-}"
+  compgen -G "$projects_dir/$slug/*.jsonl" >/dev/null
 }
 
 remove_worktree() {
@@ -220,11 +238,19 @@ fi
 
 mkdir -p "$(dirname "$WORKTREE_DIR")"
 if [[ ! -d "$WORKTREE_DIR" ]]; then
+  # 再開（#4874）で片付け済みのパスへ作り直すとき、登録だけ残っていると`worktree add`が断るため先に掃除する
+  git -C "$REPO_PATH" worktree prune >/dev/null 2>&1 || true
   git -C "$REPO_PATH" worktree add --quiet --detach "$WORKTREE_DIR" "$BASE_REF"
 fi
 
+RESUME=0
+has_conversation_for "$WORKTREE_DIR" && RESUME=1
+
 PERMISSION_MODE="${ISSUE_DECK_CLAUDE_PERMISSION_MODE:-auto}"
 CLAUDE_ARGS=(--remote-control "$SESSION_NAME" --name "$SESSION_NAME" --permission-mode "$PERMISSION_MODE")
+if ((RESUME)); then
+  CLAUDE_ARGS+=(--continue)
+fi
 if [[ -n "${ISSUE_DECK_CLAUDE_MODEL:-}" && "${ISSUE_DECK_CLAUDE_MODEL}" != "auto" ]]; then
   CLAUDE_ARGS+=(--model "$ISSUE_DECK_CLAUDE_MODEL")
 fi
@@ -234,7 +260,11 @@ for arg in "${CLAUDE_ARGS[@]}"; do
   SESSION_CMD+=" $(printf '%q' "$arg")"
 done
 
-echo "tmuxセッション「$SESSION_NAME」でリモートセッションを起動します（$FULL_NAME・$BASE_REF）..."
+if ((RESUME)); then
+  echo "tmuxセッション「$SESSION_NAME」で前回の会話を再開します（$FULL_NAME）..."
+else
+  echo "tmuxセッション「$SESSION_NAME」でリモートセッションを起動します（$FULL_NAME・$BASE_REF）..."
+fi
 if ! tmux new-session -d -s "$SESSION_NAME" -c "$WORKTREE_DIR" "bash -lc $(printf '%q' "$SESSION_CMD")"; then
   echo "Error: tmuxセッション「$SESSION_NAME」の起動に失敗しました。" >&2
   remove_worktree "$WORKTREE_DIR"
