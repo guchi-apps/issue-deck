@@ -4,8 +4,10 @@ import {
   buildNumberFromTag,
   checkIosDispatchable,
   deliveredBuildForSha,
+  describeIosDistributionHeadline,
   iosDeliveryForReleases,
   iosFailuresForReleases,
+  isIosDistributionFailed,
   isIosDistributionPending,
   isIosDistributionRunning,
   judgeIosReleasePanel,
@@ -15,6 +17,7 @@ import {
   summarizeIosStages,
   toStageState,
   type IosReleasePanelInput,
+  type IosStageStatus,
 } from "@/lib/ios-testflight-status";
 
 const job = (name: string, conclusion: string | null, steps: { name: string; conclusion: string | null }[] = []) => ({
@@ -271,5 +274,53 @@ describe("isIosDistributionRunning", () => {
     expect(isIosDistributionRunning({ kind: "awaiting-web", failed: false })).toBe(false);
     expect(isIosDistributionRunning({ kind: "delivered", buildNumber: 3 })).toBe(false);
     expect(isIosDistributionRunning(null)).toBe(false);
+  });
+});
+
+describe("describeIosDistributionHeadline（#4907）", () => {
+  const stage = (key: IosStageStatus["key"], label: string, state: IosStageStatus["state"]): IosStageStatus => ({
+    key,
+    label,
+    state,
+    startedAt: null,
+    completedAt: null,
+  });
+
+  it("失敗は止まった段階を見出しにし、実行の段階をそのままバーへ出す", () => {
+    const stages = [stage("detect", "変更判定", "success"), stage("build", "ビルド", "failure")];
+    const headline = describeIosDistributionHeadline({ kind: "failed", failedStage: "ビルド" }, stages);
+    expect(headline).toEqual({ tone: "bad", text: "失敗：ビルドで停止", stages });
+    expect(describeIosDistributionHeadline({ kind: "failed", failedStage: null }, null).text).toBe("iOS配布に失敗");
+  });
+
+  it("配布中は進んでいる段階と何段目かを出す", () => {
+    const stages = [
+      stage("detect", "変更判定", "success"),
+      stage("sign", "署名", "success"),
+      stage("build", "ビルド", "running"),
+      stage("upload", "アップロード", "pending"),
+    ];
+    const headline = describeIosDistributionHeadline({ kind: "running", stages }, null);
+    expect(headline.tone).toBe("run");
+    expect(headline.text).toBe("配布中：ビルド（3/4）");
+  });
+
+  it("配布済み・更新不要は結果から段階を組み立てる", () => {
+    const delivered = describeIosDistributionHeadline({ kind: "delivered", buildNumber: 142 }, null);
+    expect(delivered.text).toBe("TestFlightへ配布済み #142");
+    expect(delivered.stages?.every((s) => s.state === "success")).toBe(true);
+    const notNeeded = describeIosDistributionHeadline({ kind: "not-needed" }, null);
+    expect(notNeeded.stages?.map((s) => s.state)).toEqual(["success", "skipped", "skipped", "skipped", "skipped", "skipped"]);
+  });
+
+  it("未配布・Web待ちはバーを出さない", () => {
+    expect(describeIosDistributionHeadline({ kind: "ready" }, null)).toEqual({ tone: "idle", text: "iOS未配布", stages: null });
+    expect(describeIosDistributionHeadline({ kind: "awaiting-web", failed: false }, null).stages).toBeNull();
+  });
+
+  it("行のアイコンを赤くするのは失敗のときだけ", () => {
+    expect(isIosDistributionFailed({ kind: "failed", failedStage: null })).toBe(true);
+    expect(isIosDistributionFailed({ kind: "running", stages: [] })).toBe(false);
+    expect(isIosDistributionFailed(null)).toBe(false);
   });
 });

@@ -70,3 +70,11 @@ describe("iOS配布中バッジ（#3806）", () => {
     expect(fetch).not.toHaveBeenCalled();
   });
 });
+
+describe("IosDistributionIcon 失敗表示（#4907）", () => {
+  it("失敗中は斜線ではなく「iOS配布に失敗」として出す", () => {
+    const { container } = render(<IosDistributionIcon pending failed />);
+    expect(screen.getByLabelText("iOS配布に失敗")).toBeTruthy();
+    expect(container.querySelector("svg line")).toBeNull();
+  });
+});

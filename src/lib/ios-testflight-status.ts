@@ -331,3 +331,71 @@ export function isIosDistributionPending(state: IosReleasePanelState | null): bo
 export function isIosDistributionRunning(state: IosReleasePanelState | null): boolean {
   return state?.kind === "running";
 }
+
+/** 畳んだ行のスマホアイコンを赤くするか（#4907）。最新リリースの配布が失敗しているときだけtrue */
+export function isIosDistributionFailed(state: IosReleasePanelState | null): boolean {
+  return state?.kind === "failed";
+}
+
+export type IosDistributionHeadline = {
+  /** 枠と文字の色。bad=失敗（赤）・run=配布中（青）・ok=配布済み・idle=操作待ちや対象外 */
+  tone: "bad" | "run" | "ok" | "idle";
+  text: string;
+  /** 段階のバーに出す段階。バーを出さない状態はnull */
+  stages: readonly IosStageStatus[] | null;
+};
+
+function syntheticStages(stateOf: (key: IosStageKey) => IosStageState): IosStageStatus[] {
+  return IOS_STAGES.map(({ key, label }) => ({ key, label, state: stateOf(key), startedAt: null, completedAt: null }));
+}
+
+/**
+ * リポジトリ先頭のiOS配布ブロックの見出し（#4907）。過去のリリースを開かなくても、どこで止まったか・
+ * どこまで進んだか・配布済みかが1行で分かるようにする。`runStages`はその版の実行の段階（無ければnull）。
+ *
+ * 配布済み・更新不要はタグ・判定で決まり、対応する実行が手元に無いこともあるため、段階は結果から組み立てる。
+ */
+export function describeIosDistributionHeadline(
+  state: IosReleasePanelState,
+  runStages: readonly IosStageStatus[] | null,
+): IosDistributionHeadline {
+  switch (state.kind) {
+    case "failed":
+      return {
+        tone: "bad",
+        text: state.failedStage ? `失敗：${state.failedStage}で停止` : "iOS配布に失敗",
+        stages: runStages,
+      };
+    case "running": {
+      const index = state.stages.findIndex((stage) => stage.state === "running");
+      const current = index >= 0 ? state.stages[index] : undefined;
+      return {
+        tone: "run",
+        text: current ? `配布中：${current.label}（${index + 1}/${state.stages.length}）` : "TestFlightへ配布中",
+        stages: state.stages,
+      };
+    }
+    case "delivered":
+      return {
+        tone: "ok",
+        text: `TestFlightへ配布済み${state.buildNumber !== null ? ` #${state.buildNumber}` : ""}`,
+        stages: syntheticStages(() => "success"),
+      };
+    case "not-needed":
+      return {
+        tone: "idle",
+        text: "iOS更新不要",
+        stages: syntheticStages((key) => (key === "detect" ? "success" : "skipped")),
+      };
+    case "awaiting-web":
+      return {
+        tone: "idle",
+        text: state.failed ? "Webの本番デプロイが失敗しているため、iOSは操作できません" : "Webの本番反映後に配布できます",
+        stages: null,
+      };
+    case "stale":
+      return { tone: "idle", text: "最新のmainではないため、ここからは配布できません", stages: null };
+    default:
+      return { tone: "idle", text: "iOS未配布", stages: null };
+  }
+}

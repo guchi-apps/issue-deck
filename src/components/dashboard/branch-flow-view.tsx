@@ -1660,9 +1660,12 @@ function NextReleaseCard({
   latestReleaseMergedAt,
   releaseButton,
   deployButton,
+  iosRelease,
   onMerged,
 }: {
   repository: BranchFlowRepository;
+  /** iOS配布の要約を出す最新のマージ済みリリース（#4907）。iOS配布の対象外ならnull */
+  iosRelease: { prNumber: number; version: string | null } | null;
   /** 次のリリースに乗る束。未リリースの変更が無ければnull */
   group: BranchFlowReleaseGroup | null;
   latestReleaseMergedAt: string | null;
@@ -1809,8 +1812,11 @@ function NextReleaseCard({
         />
       )}
 
-      {/* 3. 現在の本番版（補足）。次のリリースで反映・反映待ちの件数は下の一覧と重なるため出さない（#4830） */}
-      <dl>
+      {/* 3. 現在の本番版（補足）。次のリリースで反映・反映待ちの件数は下の一覧と重なるため出さない（#4830）。
+          iOS配布の対象なら、その版の配布状況を隣へ並べる（#4907。過去のリリースを開かなくても見えるように）。
+          幅が狭いと縦に積む */}
+      <div className="flex min-w-0 flex-col gap-2 @2xl:flex-row @2xl:items-start">
+      <dl className="min-w-0 @2xl:flex-1">
         <div className="min-w-0 rounded-md border px-2.5 py-1.5">
           <dt className="text-muted-foreground">mainへ反映済みの版</dt>
           <dd className="flex flex-wrap items-center gap-x-1.5 text-sm font-semibold">
@@ -1823,6 +1829,17 @@ function NextReleaseCard({
           {deployButton && <dd className="mt-1">{deployButton}</dd>}
         </div>
       </dl>
+      {iosRelease && (
+        <IosReleaseGroupPanel
+          owner={repository.repositoryFullName.split("/")[0]}
+          repo={repository.repositoryFullName.split("/")[1]}
+          prNumber={iosRelease.prNumber}
+          version={iosRelease.version}
+          variant="summary"
+          className="@2xl:flex-[1.6]"
+        />
+      )}
+      </div>
     </section>
   );
 }
@@ -1911,9 +1928,15 @@ function ReleaseFlowGraph({
     pendingGroups.length > 0 ? pendingGroups : repository.releaseGroups.slice(0, 1);
   const hiddenGroups = repository.releaseGroups.slice(visibleGroups.length);
   // iOS配布のパネルは最新のマージ済みの束にだけ出す（#3808。見出しのアイコンと同じ基準）
-  const latestMergedGroupKey = repository.releaseGroups.find(
+  const latestMergedGroup = repository.releaseGroups.find(
     (group) => group.mergedAt !== null && group.pullRequest?.merged,
-  )?.key;
+  );
+  const latestMergedGroupKey = latestMergedGroup?.key;
+  // リポジトリ先頭のiOS配布の要約（#4907）。束のパネルと同じ版を対象にする
+  const iosRelease =
+    getWebviewIosRepository(repository.repositoryFullName) !== null && latestMergedGroup?.pullRequest
+      ? { prNumber: latestMergedGroup.pullRequest.number, version: latestMergedGroup.version }
+      : null;
   const unassignedLanes = repository.unassignedLanes;
   // 取得範囲より古い版をGitHubから取り足す（#4844）。本番へ出た束が1つでもあるリポジトリだけ
   const releaseHistory = useContext(BranchFlowHistoryContext);
@@ -2066,6 +2089,7 @@ function ReleaseFlowGraph({
           repository={repository}
           group={nextGroup}
           latestReleaseMergedAt={latestReleaseMergedAt}
+          iosRelease={iosRelease}
           releaseButton={nextGroup ? releaseButtonFor(nextGroup) : undefined}
           deployButton={
             repository.canTriggerDeploy && !deployFailure ? (
@@ -2560,7 +2584,7 @@ function RepositorySummaryRow({
           版番号・鍵と同じ「静的な属性」なので右側の「手が要るか」の列へは並べず、「動きなし」の
           判定（`hasAnything`）にも数えない。色は配布カード・内訳（`ios-release-group-panel.tsx`）の
           青で、他の意味の色（紫＝リリース・琥珀＝手が要る・緑＝成功・赤＝失敗）とは重ねない */}
-      {webviewIos && <IosDistributionIcon pending={iosDistribution.pending} />}
+      {webviewIos && <IosDistributionIcon pending={iosDistribution.pending} failed={iosDistribution.failed} />}
 
       <span className="min-w-0 flex-1" />
 
