@@ -38,6 +38,7 @@ vi.mock("@/lib/pull-request-release-checks", async (importOriginal) => ({
 vi.mock("@/lib/github/release-api", () => ({
   fetchOpenPullRequestsForBase: vi.fn(async () => []),
   fetchRefCheckState: vi.fn(async () => ({ ciState: "success", mergeJudgement: null })),
+  DRAFT_PULL_REQUEST_CHECK_STATE: { ciState: "unknown", mergeJudgement: null },
 }));
 
 const NOW = new Date("2026-08-26T09:00:00.000Z");
@@ -157,6 +158,24 @@ describe("runReleaseMergePushSweep", () => {
     // **送る前に席を取る**（#2300と同じ理由）
     expect(create).toHaveBeenCalled();
     expect(sendPushNotification).toHaveBeenCalledOnce();
+  });
+
+  it("draftの候補はチェックを読まず、ブランチ画面と同じく「mainへマージ待ち」で鳴らす（#4916）", async () => {
+    stubDb({ repositories: [REPOSITORY] });
+    vi.mocked(fetchOpenPullRequestsForBase).mockResolvedValue([
+      { number: 1308, title: "リリース候補 RC-11", head: { ref: "release-rc/11" }, draft: true },
+    ] as never);
+    // 正式バンプ前の候補では`version-tag-check`が落ちている。読めば「チェック失敗」になる
+    vi.mocked(fetchRefCheckState).mockResolvedValue({
+      ciState: "failure",
+      mergeJudgement: MERGE_JUDGEMENT_UNKNOWN,
+    });
+
+    const result = await runReleaseMergePushSweep({ now: NOW });
+
+    expect(fetchRefCheckState).not.toHaveBeenCalled();
+    expect(result.pending).toHaveLength(1);
+    expect(result.pending[0]?.ciState).toBe("unknown");
   });
 
   it("自動マージ可否の判定中は鳴らさない（#2326。画面が我慢している最中に鳴らさない）", async () => {

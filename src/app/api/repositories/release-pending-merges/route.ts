@@ -6,6 +6,7 @@ import { withGithubApiFeature } from "@/lib/github/api-usage";
 import { getInstallationToken } from "@/lib/github/app-auth";
 import {
   type CiState,
+  DRAFT_PULL_REQUEST_CHECK_STATE,
   fetchLatestDeployWorkflowRun,
   fetchLatestReleaseWorkflowRun,
   fetchOpenPullRequestsForBase,
@@ -135,8 +136,13 @@ async function handleGET() {
         // **CI状態と一緒に自動マージ可否の判定の進み具合も取る**（#2326）。同じ
         // `statusCheckRollup`から取り出せるためGitHub APIの消費は増えず、Claudeのレビューが
         // 走っている最中に「mainへマージ待ち」と促してしまうのを止められる。
+        //
+        // **draftのPRはチェックを読まない**（#4916。`DRAFT_PULL_REQUEST_CHECK_STATE`）。ブランチ画面の
+        // PR一覧と同じ扱いにし、正式バンプ前の候補で通知だけが「チェック失敗」になるのを防ぐ。
         const releaseCheck: RefCheckState | null = releasePr
-          ? await fetchRefCheckState(
+          ? releasePr.draft
+            ? DRAFT_PULL_REQUEST_CHECK_STATE
+            : await fetchRefCheckState(
               repository.ownerLogin,
               repository.name,
               releasePr.head.ref,
@@ -145,7 +151,9 @@ async function handleGET() {
           : null;
         const bumpCheck: RefCheckState | null =
           !releasePr && bumpPr
-            ? await fetchRefCheckState(
+            ? bumpPr.draft
+              ? DRAFT_PULL_REQUEST_CHECK_STATE
+              : await fetchRefCheckState(
                 repository.ownerLogin,
                 repository.name,
                 bumpPr.head.ref,

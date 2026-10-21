@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { getInstallationToken } from "@/lib/github/app-auth";
 import {
   type CiState,
+  DRAFT_PULL_REQUEST_CHECK_STATE,
   fetchOpenPullRequestsForBase,
   fetchRefCheckState,
 } from "@/lib/github/release-api";
@@ -244,12 +245,10 @@ export async function runReleaseMergePushSweep(
       await forgetSettledNotices(repository.fullName, releasePr?.number ?? null);
       if (!releasePr) continue;
 
-      const check = await fetchRefCheckState(
-        repository.ownerLogin,
-        repository.name,
-        releasePr.head.ref,
-        token,
-      );
+      // draftの候補はチェックを読まない（#4916）。通知ベル・ブランチ画面と同じ扱い
+      const check = releasePr.draft
+        ? DRAFT_PULL_REQUEST_CHECK_STATE
+        : await fetchRefCheckState(repository.ownerLogin, repository.name, releasePr.head.ref, token);
       // 統合検証・全体レビューが進行中・問題ありの間は鳴らさない（#4390）。判定が揃ってから
       // 「mainへマージ待ち」として1回だけ鳴る（送った記録は鳴らした時点で残る）
       const verification = resolvePullRequestReleaseVerification({
