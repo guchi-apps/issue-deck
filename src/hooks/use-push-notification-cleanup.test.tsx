@@ -44,7 +44,30 @@ beforeEach(() => {
 
 afterEach(() => {
   Reflect.deleteProperty(window.navigator, "serviceWorker");
+  Reflect.deleteProperty(window, "webkit");
+  vi.restoreAllMocks();
 });
+
+/**
+ * iOSアプリ（#4921）。UAに`IssueDeckIOS`を入れ、`issueDeckPush`ハンドラを生やす。
+ * `deliveredTags`が`null`なら、その操作を持たない古いビルド（失敗を返す）
+ */
+function setupNativeApp(deliveredTags: string[] | null) {
+  vi.spyOn(window.navigator, "userAgent", "get").mockReturnValue("Mozilla/5.0 IssueDeckIOS");
+  const postMessage = vi.fn(async (message: { action: string; tags?: string[] }) => {
+    if (message.action === "deliveredTags") {
+      if (deliveredTags === null) throw new Error("unsupported");
+      return deliveredTags;
+    }
+    if (message.action === "removeDelivered") return null;
+    throw new Error("unsupported");
+  });
+  Object.defineProperty(window, "webkit", {
+    configurable: true,
+    value: { messageHandlers: { issueDeckPush: { postMessage } } },
+  });
+  return postMessage;
+}
 
 describe("usePushNotificationCleanup", () => {
   it("確認待ちが解けた通知だけを閉じる", async () => {
@@ -88,5 +111,79 @@ describe("usePushNotificationCleanup", () => {
     const beforeReturn = done.close.mock.calls.length;
     document.dispatchEvent(new Event("visibilitychange"));
     await waitFor(() => expect(done.close.mock.calls.length).toBeGreaterThan(beforeReturn));
+  });
+
+  describe("iOSアプリ内", () => {
+    it("確認待ちが解けた通知だけをネイティブの通知センターから消す", async () => {
+      const postMessage = setupNativeApp(["check-user:2195", "check-user:2196", "test"]);
+      const getRegistration = vi.fn();
+      Object.defineProperty(window.navigator, "serviceWorker", {
+        configurable: true,
+        value: { getRegistration },
+      });
+
+      renderHook(() =>
+        usePushNotificationCleanup({
+          issues: [makeIssue({ labels: [] }), makeIssue({ id: "2196" })],
+          pullRequests: [],
+        }),
+      );
+
+      await waitFor(() =>
+        expect(postMessage).toHaveBeenCalledWith({
+          action: "removeDelivered",
+          tags: ["check-user:2195"],
+        }),
+      );
+      // アプリ内ではService Workerを見ない（APNsの通知はそこに無い）
+      expect(getRegistration).not.toHaveBeenCalled();
+    });
+
+    it("済んだ通知が無ければ消す操作を呼ばない", async () => {
+      const postMessage = setupNativeApp(["check-user:2196"]);
+
+      renderHook(() =>
+        usePushNotificationCleanup({ issues: [makeIssue({ id: "2196" })], pullRequests: [] }),
+      );
+
+      await waitFor(() =>
+        expect(postMessage).toHaveBeenCalledWith({ action: "deliveredTags" }),
+      );
+      expect(postMessage).not.toHaveBeenCalledWith(
+        expect.objectContaining({ action: "removeDelivered" }),
+      );
+    });
+
+    it("操作を持たない古いビルドでは何もしない", async () => {
+      const postMessage = setupNativeApp(null);
+
+      renderHook(() =>
+        usePushNotificationCleanup({ issues: [makeIssue({ labels: [] })], pullRequests: [] }),
+      );
+
+      await waitFor(() =>
+        expect(postMessage).toHaveBeenCalledWith({ action: "deliveredTags" }),
+      );
+      expect(postMessage).not.toHaveBeenCalledWith(
+        expect.objectContaining({ action: "removeDelivered" }),
+      );
+    });
+
+    it("アプリが前面へ戻った合図でも見直す", async () => {
+      const postMessage = setupNativeApp(["check-user:2195"]);
+
+      renderHook(() =>
+        usePushNotificationCleanup({ issues: [makeIssue({ labels: [] })], pullRequests: [] }),
+      );
+      await waitFor(() =>
+        expect(postMessage).toHaveBeenCalledWith(
+          expect.objectContaining({ action: "removeDelivered" }),
+        ),
+      );
+
+      const before = postMessage.mock.calls.length;
+      window.dispatchEvent(new Event("issue-deck:native-push-refresh"));
+      await waitFor(() => expect(postMessage.mock.calls.length).toBeGreaterThan(before));
+    });
   });
 });
