@@ -135,6 +135,16 @@ develop向け`issue-<番号>`PRを見て、コンフリクトしていれば
   頻繁に再試行することはない
 - **対応Issueに`00.check-user`が付いていれば起動しない。** 自動解消を断念したワークフローが
   付けるラベルなので、そのまま「人が見ると決めたもの」の目印として使う
+- **コンフリクトが消えたPRでは、コンフリクト解消が付けた確認待ちを外す**（#4924）。断念・
+  フォールバックで確認待ちになった後、別経路（`workflow_run`など）から走り直した解消が成功しても、
+  ワークフローは付けた`00.check-user`を外さないため、PRがマージ可能になってもIssueが
+  「ユーザーの確認待ち」に残っていた。巡回は`mergeable === true`・解消が実行中でない・理由が
+  `01.check-blocked`・**Issueの最新コメントが`issue-deck-source:claude-conflict-resolve`**の
+  ときだけ、`00.check-user`と理由ラベルを外してIssueへ報告する（判定は
+  `src/lib/github/conflict-check-user-clear.ts`）。最新コメントが人や別の実行体のものなら外さない
+  （新しい起点かもしれないため）。コメントの取得はDBで絞り込んだ後だけ行い、外さなかった
+  Issueは同じ待ち時間（30分）取り直さない。解消が走っている間は、確認待ちの件数でも
+  「実行中」に数える（`isCheckUserWaitingForAgent`）
 - **対象は`issue-<番号>`と`release/vX.Y.Z`→developのPR。** バンプPRは同一repoに限り、
   `claude-pr-repair.yml`へ渡す（#4186）。PRの`00.check-user`を尊重し、PRあたり1回だけ自動起動する。
   main向けは画面からの操作が必要

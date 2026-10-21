@@ -10,6 +10,9 @@ const fetchLatestConflictRepairRuns = vi.fn();
 const recordPullRequestRepairRun = vi.fn();
 const settleResolvedConflictRepairRuns = vi.fn();
 const dispatchWorkflow = vi.fn();
+const fetchCommentsForIssue = vi.fn();
+const removeIssueLabel = vi.fn();
+const createComment = vi.fn();
 
 vi.mock("@/lib/db", () => ({
   db: {
@@ -75,6 +78,18 @@ vi.mock("@/lib/github/pull-request-repair-run", async (importOriginal) => {
   };
 });
 
+vi.mock("@/lib/github/issues-api", () => ({
+  get fetchCommentsForIssue() {
+    return fetchCommentsForIssue;
+  },
+  get removeIssueLabel() {
+    return removeIssueLabel;
+  },
+  get createComment() {
+    return createComment;
+  },
+}));
+
 vi.mock("@/lib/github/workflow-dispatch", () => ({
   get dispatchWorkflow() {
     return dispatchWorkflow;
@@ -121,6 +136,9 @@ describe("runConflictSweep", () => {
     recordPullRequestRepairRun.mockResolvedValue(undefined);
     settleResolvedConflictRepairRuns.mockResolvedValue(0);
     dispatchWorkflow.mockResolvedValue(undefined);
+    fetchCommentsForIssue.mockResolvedValue([]);
+    removeIssueLabel.mockResolvedValue([]);
+    createComment.mockResolvedValue({});
   });
 
   afterEach(() => {
@@ -190,8 +208,10 @@ describe("runConflictSweep", () => {
 
     expect(result.conflicting).toBe(0);
     expect(dispatchWorkflow).not.toHaveBeenCalled();
-    // コンフリクトしていないPRのためにDBを引きにいかない。
-    expect(fetchCheckUserIssueReasons).not.toHaveBeenCalled();
+    // 確認待ちの解除（#4924）のためにDBは1回引くが、確認待ちでなければGitHubのコメントは取らない。
+    expect(fetchCheckUserIssueReasons).toHaveBeenCalledTimes(1);
+    expect(fetchLatestConflictRepairRuns).not.toHaveBeenCalled();
+    expect(fetchCommentsForIssue).not.toHaveBeenCalled();
   });
 
   // 終了の報告が届かないままの行を残すと、そのPRが再びコンフリクトしても`repair_running`で
@@ -317,5 +337,61 @@ describe("runConflictSweep", () => {
 
     expect(result).toMatchObject({ swept: false, disabled: true });
     expect(findMany).not.toHaveBeenCalled();
+  });
+
+  describe("コンフリクトが消えたPRの確認待ちを外す（#4924）", () => {
+    const CONFLICT_COMMENT = "解消しました\n\n<!-- issue-deck-source:claude-conflict-resolve -->";
+
+    beforeEach(() => {
+      fetchPullRequestCiStates.mockResolvedValue(
+        new Map([["guchi-apps/myroom#191", { ciState: "success", mergeable: true }]]),
+      );
+      fetchCheckUserIssueReasons.mockResolvedValue(new Map([["repo-myroom#109", "blocked"]]));
+      fetchCommentsForIssue.mockResolvedValue([{ body: "人のコメント" }, { body: CONFLICT_COMMENT }]);
+      removeIssueLabel.mockResolvedValueOnce(["01.check-blocked", "30.bug"]).mockResolvedValue([]);
+    });
+
+    it("最新コメントがコンフリクト解消のものなら、00.check-userと理由ラベルを外して報告する", async () => {
+      const result = await runConflictSweep();
+
+      expect(removeIssueLabel).toHaveBeenNthCalledWith(1, "guchi-apps", "myroom", 109, "token", "00.check-user");
+      expect(removeIssueLabel).toHaveBeenNthCalledWith(2, "guchi-apps", "myroom", 109, "token", "01.check-blocked");
+      expect(removeIssueLabel).toHaveBeenCalledTimes(2);
+      expect(createComment).toHaveBeenCalledTimes(1);
+      expect(result.clearedCheckUser).toEqual([
+        { repositoryFullName: "guchi-apps/myroom", pullRequestNumber: 191, issueNumber: "109" },
+      ]);
+      expect(dispatchWorkflow).not.toHaveBeenCalled();
+    });
+
+    it("確認待ちの後に別のコメントがあれば外さず、間隔内は取り直さない", async () => {
+      fetchCommentsForIssue.mockResolvedValue([{ body: CONFLICT_COMMENT }, { body: "人のコメント" }]);
+
+      expect((await runConflictSweep()).clearedCheckUser).toEqual([]);
+      expect(removeIssueLabel).not.toHaveBeenCalled();
+
+      await runConflictSweep({ force: true });
+      expect(fetchCommentsForIssue).toHaveBeenCalledTimes(1);
+    });
+
+    it("解消が走っている間・理由がblocked以外・未判定のPRはコメントも取りに行かない", async () => {
+      fetchLatestConflictRepairRuns.mockResolvedValue(
+        new Map([["guchi-apps/myroom#191", { status: "running", startedAt: new Date() }]]),
+      );
+      await runConflictSweep();
+
+      fetchLatestConflictRepairRuns.mockResolvedValue(new Map());
+      fetchCheckUserIssueReasons.mockResolvedValue(new Map([["repo-myroom#109", "merge"]]));
+      await runConflictSweep({ force: true });
+
+      fetchCheckUserIssueReasons.mockResolvedValue(new Map([["repo-myroom#109", "blocked"]]));
+      fetchPullRequestCiStates.mockResolvedValue(
+        new Map([["guchi-apps/myroom#191", { ciState: "success", mergeable: null }]]),
+      );
+      await runConflictSweep({ force: true });
+
+      expect(fetchCommentsForIssue).not.toHaveBeenCalled();
+      expect(removeIssueLabel).not.toHaveBeenCalled();
+    });
   });
 });

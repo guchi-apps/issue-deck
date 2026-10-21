@@ -1,6 +1,12 @@
 import { db } from "@/lib/db";
 import { getInstallationToken } from "@/lib/github/app-auth";
+import { CHECK_USER_LABEL, isCheckUserReasonLabel } from "@/lib/github/approval-labels";
 import { pullRequestRollupKey, type PullRequestRollupTarget } from "@/lib/github/check-rollup";
+import {
+  conflictCheckUserClearedCommentBody,
+  isConflictCheckUserClearCandidate,
+  shouldClearConflictCheckUser,
+} from "@/lib/github/conflict-check-user-clear";
 import {
   CONFLICT_SWEEP_RETRY_COOLDOWN_MINUTES,
   conflictSweepIntervalMinutes,
@@ -10,12 +16,14 @@ import {
   type ConflictSweepSkipReason,
 } from "@/lib/github/conflict-sweep";
 import { GithubApiError } from "@/lib/github/github-api-error";
+import { createComment, fetchCommentsForIssue, removeIssueLabel } from "@/lib/github/issues-api";
 import {
   isRepairWorkflowMissing,
   resolveRepairDispatch,
 } from "@/lib/github/pull-request-repair";
 import {
   fetchLatestConflictRepairRuns,
+  isRepairRunActive,
   recordPullRequestRepairRun,
   repairRunKey,
   settleResolvedConflictRepairRuns,
@@ -56,6 +64,8 @@ export type ConflictSweepResult = {
   conflicting: number;
   /** 起動したもの */
   dispatched: ConflictSweepDispatched[];
+  /** コンフリクトが消えたため、確認待ちを外した対応Issue（#4924） */
+  clearedCheckUser: ConflictSweepDispatched[];
   /** 起動を見送った理由ごとの件数 */
   skipped: Partial<
     Record<
@@ -90,7 +100,17 @@ const dispatchFailedAt = new Map<string, number>();
 export function resetConflictSweepIntervalForTest(): void {
   lastSweptAt = null;
   dispatchFailedAt.clear();
+  checkUserClearCheckedAt.clear();
 }
+
+/**
+ * 確認待ちを外すかどうかのためにコメントを取りに行った対応Issueと、その時刻（epoch ms）（#4924）。
+ *
+ * 外す条件のうち「最新コメントがコンフリクト解消のもの」だけはGitHub APIを引かないと分からない。
+ * 外さなかったIssue（人が後からコメントしている等）は次の巡回でも同じ結果になるので、
+ * 巡回のたびに全コメントを取り直さないよう、再試行の抑制と同じ間隔だけ見送る。
+ */
+const checkUserClearCheckedAt = new Map<string, number>();
 
 function emptyResult(overrides: Partial<ConflictSweepResult>): ConflictSweepResult {
   return {
@@ -99,6 +119,7 @@ function emptyResult(overrides: Partial<ConflictSweepResult>): ConflictSweepResu
     repositories: 0,
     conflicting: 0,
     dispatched: [],
+    clearedCheckUser: [],
     skipped: {},
     failedRepositories: [],
     ...overrides,
@@ -255,18 +276,29 @@ export async function runConflictSweep(
       ) ?? UNKNOWN_PULL_REQUEST_CI_STATE.mergeable) === false,
   );
 
+  const resolved = candidates.filter(
+    (candidate) =>
+      mergeables.get(
+        pullRequestRollupKey(candidate.ownerLogin, candidate.name, candidate.number),
+      ) === true,
+  );
+
+  // コンフリクト解消が付けた確認待ちを、コンフリクトが消えたPRについて外す（#4924）。
+  // **下の「実行中」の片付けより先に見る**——片付けた後では、解消が走っている最中かどうかが
+  // 読めなくなる。1件の失敗で巡回（コンフリクトしたPRへの起動）を止めない。
+  const clearedCheckUser = await clearResolvedConflictCheckUsers(resolved, tokenFor, now).catch(
+    (error: unknown) => {
+      console.error("[conflict-sweep] 確認待ちの解除:", error);
+      return [];
+    },
+  );
+
   // コンフリクトが消えたPRに「実行中」の行が残っていたら、ここで終わったことにする（#2165）。
   // 終了の報告は届かないことがある（ジョブが始まる前のキャンセル・報告のステップを持たない
   // 世代のワークフロー）ため、**巡回がコンフリクト有無を見たついでに片付ける**。放っておくと、
   // そのPRが再びコンフリクトしても`repair_running`で6時間起動しなくなる。
   await settleResolvedConflictRepairRuns(
-    candidates
-      .filter(
-        (candidate) =>
-          mergeables.get(
-            pullRequestRollupKey(candidate.ownerLogin, candidate.name, candidate.number),
-          ) === true,
-      )
+    resolved
       .map((candidate) => ({
         repositoryFullName: candidate.fullName,
         pullRequestNumber: candidate.number,
@@ -278,6 +310,7 @@ export async function runConflictSweep(
     return emptyResult({
       swept: true,
       repositories: repositories.length,
+      clearedCheckUser,
       skipped,
       failedRepositories,
     });
@@ -395,7 +428,123 @@ export async function runConflictSweep(
     repositories: repositories.length,
     conflicting: conflicting.length,
     dispatched,
+    clearedCheckUser,
     skipped,
     failedRepositories,
   };
+}
+
+/** 確認待ちの解除で見る、コンフリクトが消えたPR1件ぶん */
+type ResolvedConflictCandidate = {
+  repositoryId: string;
+  ownerLogin: string;
+  name: string;
+  fullName: string;
+  installationId: number;
+  number: number;
+  issueNumber: string | null;
+};
+
+/**
+ * コンフリクトが消えたPRのうち、対応Issueの確認待ちがコンフリクト解消の付けたものなら外す（#4924）。
+ * 外してよいかの判定は`conflict-check-user-clear.ts`の純関数に閉じている。
+ *
+ * GitHub APIを使うのはDBだけで絞り込んだ後（`01.check-blocked`の確認待ちで、解消が走っていない
+ * もの）に限る。外す手順は`removeCheckUserWithReason`と同じ（`00.check-user`→残った理由ラベル）
+ * だが、あちらの「自分が付けたか」のガード（#1905）はローカルセッション用なので使わない。
+ */
+async function clearResolvedConflictCheckUsers(
+  resolved: readonly ResolvedConflictCandidate[],
+  tokenFor: (installationId: number) => Promise<string>,
+  now: Date,
+): Promise<ConflictSweepDispatched[]> {
+  const withIssue = resolved.filter((candidate) => candidate.issueNumber !== null);
+  if (withIssue.length === 0) return [];
+
+  const reasons = await fetchCheckUserIssueReasons(
+    [...new Set(withIssue.map((candidate) => candidate.repositoryId))].map((repositoryId) => ({
+      repositoryId,
+      issueNumbers: withIssue
+        .filter((candidate) => candidate.repositoryId === repositoryId)
+        .map((candidate) => Number(candidate.issueNumber)),
+    })),
+  );
+  const blocked = withIssue.filter(
+    (candidate) =>
+      reasons.get(checkUserIssueKey(candidate.repositoryId, Number(candidate.issueNumber))) ===
+      "blocked",
+  );
+  if (blocked.length === 0) return [];
+
+  const repairRuns = await fetchLatestConflictRepairRuns(
+    blocked.map((candidate) => ({
+      repositoryFullName: candidate.fullName,
+      pullRequestNumber: candidate.number,
+    })),
+  );
+
+  const cleared: ConflictSweepDispatched[] = [];
+  for (const candidate of blocked) {
+    const issueNumber = Number(candidate.issueNumber);
+    const repairRun = repairRuns.get(repairRunKey(candidate.fullName, candidate.number));
+    const base = {
+      checkUserReason: "blocked" as const,
+      mergeable: true,
+      repairRunning: repairRun !== undefined && isRepairRunActive(repairRun, now),
+    };
+    if (!isConflictCheckUserClearCandidate(base)) continue;
+
+    const checkKey = `${candidate.fullName}#${issueNumber}`;
+    const checkedAt = checkUserClearCheckedAt.get(checkKey);
+    if (
+      checkedAt !== undefined &&
+      now.getTime() - checkedAt < CONFLICT_SWEEP_RETRY_COOLDOWN_MINUTES * 60_000
+    ) {
+      continue;
+    }
+    checkUserClearCheckedAt.set(checkKey, now.getTime());
+
+    try {
+      const token = await tokenFor(candidate.installationId);
+      const comments = await fetchCommentsForIssue(
+        candidate.ownerLogin,
+        candidate.name,
+        issueNumber,
+        token,
+      );
+      if (!shouldClearConflictCheckUser({ ...base, comments })) continue;
+
+      const remaining = await removeIssueLabel(
+        candidate.ownerLogin,
+        candidate.name,
+        issueNumber,
+        token,
+        CHECK_USER_LABEL,
+      );
+      // 404＝既に人が外している。理由ラベルも画面の操作が一緒に落としているので何もしない
+      if (remaining === null) continue;
+      for (const name of remaining.filter(isCheckUserReasonLabel)) {
+        await removeIssueLabel(candidate.ownerLogin, candidate.name, issueNumber, token, name);
+      }
+      await createComment(candidate.ownerLogin, candidate.name, issueNumber, token, {
+        body: conflictCheckUserClearedCommentBody(
+          `https://github.com/${candidate.fullName}/pull/${candidate.number}`,
+        ),
+      }).catch((error: unknown) => {
+        console.warn(`[conflict-sweep] ${candidate.fullName}#${issueNumber} への報告:`, error);
+      });
+      checkUserClearCheckedAt.delete(checkKey);
+      cleared.push({
+        repositoryFullName: candidate.fullName,
+        pullRequestNumber: candidate.number,
+        issueNumber: candidate.issueNumber,
+      });
+    } catch (error) {
+      console.error(
+        `[conflict-sweep] ${candidate.fullName}#${issueNumber} の確認待ちを外せませんでした:`,
+        error,
+      );
+    }
+  }
+  return cleared;
 }
