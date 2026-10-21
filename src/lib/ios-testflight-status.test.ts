@@ -311,6 +311,9 @@ describe("describeIosDistributionHeadline（#4907）", () => {
     expect(delivered.stages?.every((s) => s.state === "success")).toBe(true);
     const notNeeded = describeIosDistributionHeadline({ kind: "not-needed" }, null);
     expect(notNeeded.stages?.map((s) => s.state)).toEqual(["success", "skipped", "skipped", "skipped", "skipped", "skipped"]);
+    expect(notNeeded.text).toBe("配布なし（iOS更新不要）");
+    expect(notNeeded.notDistributed).toBe(true);
+    expect(delivered.notDistributed).toBeUndefined();
   });
 
   it("未配布・Web待ちはバーを出さない", () => {

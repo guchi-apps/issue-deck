@@ -400,7 +400,7 @@ export function IosReleaseGroupPanel({
             <RefreshCw className={isLoading ? "size-3 animate-spin" : "size-3"} aria-hidden="true" />
           </Button>
         </div>
-        {headline.stages && <IosDistributionStageBar stages={headline.stages} />}
+        {headline.stages && <IosDistributionStageBar stages={headline.stages} notDistributed={headline.notDistributed} />}
         {reason && <p className="min-w-0 break-words">{reason}</p>}
         {(error || actionError) && <p className="text-destructive">{error ?? actionError}</p>}
         <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 empty:hidden">

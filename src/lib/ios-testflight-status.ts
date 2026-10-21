@@ -343,6 +343,8 @@ export type IosDistributionHeadline = {
   text: string;
   /** 段階のバーに出す段階。バーを出さない状態はnull */
   stages: readonly IosStageStatus[] | null;
+  /** 更新不要で配布しなかった版。バーを灰色の無地にして、途中で止まっているように見せない（#4925） */
+  notDistributed?: boolean;
 };
 
 function syntheticStages(stateOf: (key: IosStageKey) => IosStageState): IosStageStatus[] {
@@ -384,8 +386,9 @@ export function describeIosDistributionHeadline(
     case "not-needed":
       return {
         tone: "idle",
-        text: "iOS更新不要",
+        text: "配布なし（iOS更新不要）",
         stages: syntheticStages((key) => (key === "detect" ? "success" : "skipped")),
+        notDistributed: true,
       };
     case "awaiting-web":
       return {
