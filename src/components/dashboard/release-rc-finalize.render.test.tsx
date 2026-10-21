@@ -238,6 +238,21 @@ describe("ReleaseRcFinalizePanel", () => {
     expect(screen.queryByText("本番公開へ進む（公開承認）")).toBeNull();
   });
 
+  it("済んだ状態のバッジにはチェック、実行中のバッジには回転するアイコンを文字の前に出す（#4918）", () => {
+    render(
+      <ReleaseRcFinalizePanel
+        candidate={candidate({ phase: "preparing", finalizeContract: null })}
+        finalization={overview({ current: view({ status: "requested", statusLabel: "バンプ中", finalHeadSha: null, appliedAt: null }) })}
+        repositoryFullName="o/r"
+        onChanged={vi.fn()}
+      />,
+    );
+    const chip = (text: string) => screen.getAllByText(text)[0].closest("span")!;
+    expect(chip("合格").querySelector(".lucide-check")).toBeTruthy();
+    expect(chip("実行中").querySelector(".lucide-loader-circle, .lucide-loader2")).toBeTruthy();
+    expect(chip("待機").querySelector("svg")).toBeNull();
+  });
+
   it("承認の記録が無い公開準備済みの候補には、1回だけの承認を出す", async () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ ok: true }) });
     vi.stubGlobal("fetch", fetchMock);

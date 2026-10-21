@@ -1,5 +1,6 @@
 "use client";
 
+import { Check, Loader2 } from "lucide-react";
 import { useState } from "react";
 
 import { PRODUCTION_MERGE_FILLED } from "@/components/dashboard/pull-request-merge-button";
@@ -26,7 +27,7 @@ import { BUMP_KIND_CRITERIA, nextVersion, type BumpKind } from "@/lib/semver-bum
  *   最終検証の後に二度目の「本番承認」を出さない。承認の記録が無い既存の候補だけ、1回だけ承認を求める
  */
 
-const CHIP = "inline-flex items-center whitespace-nowrap rounded-full px-2 py-px text-[11px] font-semibold";
+const CHIP = "inline-flex items-center gap-1 whitespace-nowrap rounded-full px-2 py-px text-[11px] font-semibold";
 const TONE = {
   ok: "bg-green-100 text-green-800 dark:bg-green-950 dark:text-green-300",
   run: "bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300",
@@ -178,8 +179,15 @@ function approvalStep(input: { phase: string; approval: PublishApprovalView | nu
   return { label, detail: `${when}に承認（revision ${approval.revision} · ${short(approval.headSha)}）。想定した正式バンプの変更までが範囲です`, tone: "ok", badge: "承認済み" };
 }
 
+// 合格・承認済みなど済んだ状態にはチェック、実行中には回転するアイコンを文字の前に出す（#4918）
 function StateChip({ tone, children }: { tone: Tone; children: React.ReactNode }) {
-  return <span className={cn(CHIP, TONE[tone])}>{children}</span>;
+  return (
+    <span className={cn(CHIP, TONE[tone])}>
+      {tone === "ok" && <Check className="size-3 shrink-0" strokeWidth={3} aria-hidden />}
+      {tone === "run" && <Loader2 className="size-3 shrink-0 animate-spin motion-reduce:animate-none" strokeWidth={3} aria-hidden />}
+      {children}
+    </span>
+  );
 }
 
 const EVIDENCE_TONE = (action: string): Tone => (action === "inherit" ? "ok" : "warn");
