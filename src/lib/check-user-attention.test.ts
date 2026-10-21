@@ -200,6 +200,23 @@ describe("isCheckUserWaitingForAgent", () => {
     ).toBe(true);
   });
 
+  it("対応PRのコンフリクト自動解消が走っている間は実行中とみなす（#4924）", () => {
+    const blocked = makeIssue({ labels: [label("00.check-user"), label("01.check-blocked")] });
+    const repairRun = { kind: "conflict" as const, startedAt: "2026-08-22T11:55:00.000Z", runUrl: null };
+    expect(
+      isCheckUserWaitingForAgent(
+        blocked,
+        context({ pullRequests: [makePullRequest({ mergeable: false, repairRun })] }),
+      ),
+    ).toBe(true);
+    expect(
+      isCheckUserWaitingForAgent(
+        blocked,
+        context({ pullRequests: [makePullRequest({ mergeable: false, repairRun: null })] }),
+      ),
+    ).toBe(false);
+  });
+
   it("自動マージ可否の判定中も実行中とみなす（#2081と同じ判定）", () => {
     const pullRequest = makePullRequest({
       mergeJudgement: {

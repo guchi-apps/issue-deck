@@ -58,6 +58,8 @@ export const COMMENT_SOURCE_IDS = [
   "claude-review-fix",
   "claude-pr-repair",
   "manual-step-body-check",
+  // コンフリクトが消えたPRについて、コンフリクト解消が付けた確認待ちを外した巡回（#4924）
+  "conflict-sweep",
 ] as const;
 
 export type CommentSourceId = (typeof COMMENT_SOURCE_IDS)[number];
@@ -220,6 +222,7 @@ const SOURCE_ID_ROLES: Partial<Record<CommentSourceId, CommentAgentRole>> = {
   "issue-labels": "notifier",
   "progress-sweep": "notifier",
   "manual-step-body-check": "notifier",
+  "conflict-sweep": "notifier",
   "claude-review-fix": "review-fixer",
   "claude-pr-repair": "pr-repairer",
   // project-status-dispatchは意図的に割り当てない。カンバンのStatus変更で起動した
