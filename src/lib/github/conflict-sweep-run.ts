@@ -106,7 +106,8 @@ export function resetConflictSweepIntervalForTest(): void {
 /**
  * 確認待ちを外すかどうかのためにコメントを取りに行った対応Issueと、その時刻（epoch ms）（#4924）。
  *
- * 外す条件のうち「最新コメントがコンフリクト解消のもの」だけはGitHub APIを引かないと分からない。
+ * 外す条件のうち「確認待ちの起点と、その後のコメントがコンフリクト解消のもの」だけはGitHub APIを
+ * 引かないと分からない。
  * 外さなかったIssue（人が後からコメントしている等）は次の巡回でも同じ結果になるので、
  * 巡回のたびに全コメントを取り直さないよう、再試行の抑制と同じ間隔だけ見送る。
  */
@@ -482,6 +483,19 @@ async function clearResolvedConflictCheckUsers(
       pullRequestNumber: candidate.number,
     })),
   );
+  // 確認待ちが付いた時刻。起点のコメントを見分けるのに使う（`shouldClearConflictCheckUser`）
+  const labeledRows = await db.issue.findMany({
+    where: {
+      OR: blocked.map((candidate) => ({
+        repositoryId: candidate.repositoryId,
+        number: Number(candidate.issueNumber),
+      })),
+    },
+    select: { repositoryId: true, number: true, checkUserLabeledAt: true },
+  });
+  const labeledAt = new Map(
+    labeledRows.map((row) => [checkUserIssueKey(row.repositoryId, row.number), row.checkUserLabeledAt]),
+  );
 
   const cleared: ConflictSweepDispatched[] = [];
   for (const candidate of blocked) {
@@ -489,6 +503,7 @@ async function clearResolvedConflictCheckUsers(
     const repairRun = repairRuns.get(repairRunKey(candidate.fullName, candidate.number));
     const base = {
       checkUserReason: "blocked" as const,
+      checkUserLabeledAt: labeledAt.get(checkUserIssueKey(candidate.repositoryId, issueNumber)) ?? null,
       mergeable: true,
       repairRunning: repairRun !== undefined && isRepairRunActive(repairRun, now),
     };

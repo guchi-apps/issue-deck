@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const findMany = vi.fn();
+const issueFindMany = vi.fn();
 const getInstallationToken = vi.fn();
 const fetchOpenPullRequests = vi.fn();
 const fetchPullRequestCiStates = vi.fn();
@@ -19,6 +20,11 @@ vi.mock("@/lib/db", () => ({
     repository: {
       get findMany() {
         return findMany;
+      },
+    },
+    issue: {
+      get findMany() {
+        return issueFindMany;
       },
     },
   },
@@ -340,14 +346,21 @@ describe("runConflictSweep", () => {
   });
 
   describe("コンフリクトが消えたPRの確認待ちを外す（#4924）", () => {
-    const CONFLICT_COMMENT = "解消しました\n\n<!-- issue-deck-source:claude-conflict-resolve -->";
+    const CONFLICT_COMMENT = {
+      body: "解消しました\n\n<!-- issue-deck-source:claude-conflict-resolve -->",
+      created_at: "2026-10-21T21:43:50Z",
+    };
+    const HUMAN_COMMENT = { body: "人のコメント", created_at: "2026-10-21T21:00:00Z" };
 
     beforeEach(() => {
       fetchPullRequestCiStates.mockResolvedValue(
         new Map([["guchi-apps/myroom#191", { ciState: "success", mergeable: true }]]),
       );
       fetchCheckUserIssueReasons.mockResolvedValue(new Map([["repo-myroom#109", "blocked"]]));
-      fetchCommentsForIssue.mockResolvedValue([{ body: "人のコメント" }, { body: CONFLICT_COMMENT }]);
+      issueFindMany.mockResolvedValue([
+        { repositoryId: "repo-myroom", number: 109, checkUserLabeledAt: new Date("2026-10-21T21:43:55Z") },
+      ]);
+      fetchCommentsForIssue.mockResolvedValue([HUMAN_COMMENT, CONFLICT_COMMENT]);
       removeIssueLabel.mockResolvedValueOnce(["01.check-blocked", "30.bug"]).mockResolvedValue([]);
     });
 
@@ -365,7 +378,10 @@ describe("runConflictSweep", () => {
     });
 
     it("確認待ちの後に別のコメントがあれば外さず、間隔内は取り直さない", async () => {
-      fetchCommentsForIssue.mockResolvedValue([{ body: CONFLICT_COMMENT }, { body: "人のコメント" }]);
+      fetchCommentsForIssue.mockResolvedValue([
+        CONFLICT_COMMENT,
+        { body: "人のコメント", created_at: "2026-10-21T22:00:00Z" },
+      ]);
 
       expect((await runConflictSweep()).clearedCheckUser).toEqual([]);
       expect(removeIssueLabel).not.toHaveBeenCalled();

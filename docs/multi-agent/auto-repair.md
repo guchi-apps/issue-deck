@@ -139,10 +139,11 @@ develop向け`issue-<番号>`PRを見て、コンフリクトしていれば
   フォールバックで確認待ちになった後、別経路（`workflow_run`など）から走り直した解消が成功しても、
   ワークフローは付けた`00.check-user`を外さないため、PRがマージ可能になってもIssueが
   「ユーザーの確認待ち」に残っていた。巡回は`mergeable === true`・解消が実行中でない・理由が
-  `01.check-blocked`・**Issueの最新コメントが`issue-deck-source:claude-conflict-resolve`**の
-  ときだけ、`00.check-user`と理由ラベルを外してIssueへ報告する（判定は
-  `src/lib/github/conflict-check-user-clear.ts`）。最新コメントが人や別の実行体のものなら外さない
-  （新しい起点かもしれないため）。コメントの取得はDBで絞り込んだ後だけ行い、外さなかった
+  `01.check-blocked`・**確認待ちが付いた時点（`checkUserLabeledAt`）の直前のコメントと、それ以降の
+  コメントがすべて`issue-deck-source:claude-conflict-resolve`**のときだけ、`00.check-user`と理由
+  ラベルを外してIssueへ報告する（判定は`src/lib/github/conflict-check-user-clear.ts`）。同じマーカーは
+  着手・成功報告にも付くため最新コメントだけでは起点にならず、CI修正などが付けた確認待ちを外さない
+  よう付与の直前のコメントで起点を確かめる。後から人や別の実行体が書いていれば外さない。コメントの取得はDBで絞り込んだ後だけ行い、外さなかった
   Issueは同じ待ち時間（30分）取り直さない。解消が走っている間は、確認待ちの件数でも
   「実行中」に数える（`isCheckUserWaitingForAgent`）
 - **対象は`issue-<番号>`と`release/vX.Y.Z`→developのPR。** バンプPRは同一repoに限り、
