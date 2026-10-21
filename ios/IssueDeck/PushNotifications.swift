@@ -1,7 +1,8 @@
 import UIKit
 import UserNotifications
 
-/// ネイティブ通知（APNs。#4250）の受け口。通知の許可・端末トークンの取得・タップ時の遷移だけを持つ。
+/// ネイティブ通知（APNs。#4250）の受け口。通知の許可・端末トークンの取得・タップ時の遷移と、
+/// 済んだ通知を通知センターから消す操作（#4921）だけを持つ。
 /// 送る中身と宛先の管理はサーバー（`/api/notifications/apns`・`src/lib/notifications/apns.ts`）が正。
 final class PushCenter {
     static let shared = PushCenter()
@@ -91,6 +92,25 @@ final class PushCenter {
         UserDefaults.standard.set(token, forKey: Self.lastTokenKey)
         resumeWaiters(with: token)
         onDeviceToken?()
+    }
+
+    /// 通知センターに残っている通知のタグ（#4921）。サーバーはタグを`thread-id`に入れて送る
+    /// （`src/lib/notifications/apns.ts`）ので、`threadIdentifier`がそのままWeb Pushのタグにあたる
+    func deliveredTags() async -> [String] {
+        let delivered = await UNUserNotificationCenter.current().deliveredNotifications()
+        return Array(Set(delivered.map { $0.request.content.threadIdentifier }.filter { !$0.isEmpty }))
+    }
+
+    /// 指定したタグの通知を通知センターから消す（#4921）。済んだかどうかの判定は画面側
+    /// （`selectStalePushTags`）が持ち、ここは言われたタグを消すだけ
+    func removeDelivered(tags: [String]) async {
+        guard !tags.isEmpty else { return }
+        let targets = Set(tags)
+        let center = UNUserNotificationCenter.current()
+        let identifiers = await center.deliveredNotifications()
+            .filter { targets.contains($0.request.content.threadIdentifier) }
+            .map { $0.request.identifier }
+        if !identifiers.isEmpty { center.removeDeliveredNotifications(withIdentifiers: identifiers) }
     }
 
     func open(path: String) {
