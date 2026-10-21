@@ -115,6 +115,8 @@ function renderFlow(input: {
   failedRepositories?: string[];
   /** マージ済みPRまで取得済みか（#1711）。既定は取得済み */
   mergedPullRequestsLoaded?: boolean;
+  /** ブランチ状況の最終取得時刻（#4913）。`null`は未取得。既定は取得済み */
+  fetchedAt?: string | null;
   error?: string | null;
   isRefreshing?: boolean;
   /** 自動更新の間隔（#1767）。既定は「自動更新しない」 */
@@ -144,7 +146,7 @@ function renderFlow(input: {
   return render(
     <BranchFlowView
       flow={flow}
-      fetchedAt="2026-08-15T10:30:00Z"
+      fetchedAt={input.fetchedAt === undefined ? "2026-08-15T10:30:00Z" : input.fetchedAt}
       isLoading={false}
       isRefreshing={input.isRefreshing}
       error={input.error ?? null}
@@ -2325,6 +2327,40 @@ describe("BranchFlowView", () => {
       // 畳んだ行も「動きなし」と言い切らない
       expect(screen.getByText("読み込み中")).toBeTruthy();
       expect(screen.queryByText("動きなし")).toBeNull();
+    });
+
+    describe("畳んだ行は材料が揃ってから件数を一度に出す（#4913）", () => {
+      const activeLane = {
+        pullRequests: [makePullRequest({ number: 940 })],
+        issues: [],
+        branchStatuses: [branchStatus()],
+      };
+
+      it("PRが揃ってもブランチ状況が未着の間は「動きなし」も件数も出さない", () => {
+        renderFlow({ ...activeLane, fetchedAt: null });
+
+        const row = screen.getByText(REPO_SHORT).closest("button")!;
+        expect(row.textContent).toContain("読み込み中");
+        expect(row.querySelector(".animate-spin")).not.toBeNull();
+        expect(screen.queryByText("動きなし")).toBeNull();
+        expect(screen.queryByLabelText(/進行中 \d+件/)).toBeNull();
+      });
+
+      it("ブランチ状況が届けば件数に切り替わる", () => {
+        renderFlow({ ...activeLane });
+
+        const row = screen.getByText(REPO_SHORT).closest("button")!;
+        expect(row.textContent).not.toContain("読み込み中");
+        expect(screen.getByLabelText(/進行中 1件/)).toBeTruthy();
+      });
+
+      it("取り直し中も件数を出したままにする", () => {
+        renderFlow({ ...activeLane, isRefreshing: true });
+
+        const row = screen.getByText(REPO_SHORT).closest("button")!;
+        expect(row.textContent).not.toContain("読み込み中");
+        expect(screen.getByLabelText(/進行中 1件/)).toBeTruthy();
+      });
     });
 
     it("取得に失敗したときは読み込み中で止めない（#1711）", () => {
