@@ -26,14 +26,28 @@ const STATE_TEXT: Record<IosStageState, string> = {
  * どこまで進んだかを開かずに読めるようにする。色は内訳（`ios-run-progress-panel.tsx`）と同じく、成功は
  * 緑でなく青（Webのデプロイ成功と取り違えないため）。幅が狭いと段階名を省き、失敗・実行中の名前だけを出す。
  */
-export function IosDistributionStageBar({ stages }: { stages: readonly IosStageStatus[] }) {
+export function IosDistributionStageBar({
+  stages,
+  notDistributed = false,
+}: {
+  stages: readonly IosStageStatus[];
+  /** 配布しなかった版。全段階を同じ灰色の無地にし、段階名も出さない */
+  notDistributed?: boolean;
+}) {
   return (
     <ol
       className="@container grid gap-[3px]"
       style={{ gridTemplateColumns: `repeat(${stages.length}, minmax(0, 1fr))` }}
-      aria-label="iOS配布の段階"
+      aria-label={notDistributed ? "iOS配布の段階（配布なし）" : "iOS配布の段階"}
     >
       {stages.map((stage) => {
+        if (notDistributed) {
+          return (
+            <li key={stage.key} className="min-w-0" aria-label={`${stage.label}: 配布なし`}>
+              <span className="block h-1.5 rounded-sm bg-muted-foreground/25" aria-hidden="true" />
+            </li>
+          );
+        }
         const emphasized = stage.state === "failure" || stage.state === "running";
         return (
           <li key={stage.key} className="flex min-w-0 flex-col gap-0.5" aria-label={`${stage.label}: ${STATE_TEXT[stage.state]}`}>

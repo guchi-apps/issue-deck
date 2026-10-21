@@ -42,6 +42,8 @@ export type IosRunProgressSummary = {
   ratio: number;
   failed: boolean;
   isRunning: boolean;
+  /** 判定だけ済んで以降を全て飛ばした実行（iOS更新不要）。配布していないので完了割合を出さない */
+  notDistributed: boolean;
   elapsedMs: number;
 };
 
@@ -50,6 +52,7 @@ export function summarizeIosRunProgress(run: IosTestflightRun, now: number): Ios
   const total = run.stages.length;
   const done = run.stages.filter((s) => s.state === "success" || s.state === "skipped").length;
   const isRunning = run.status !== "completed";
+  const later = run.stages.filter((s) => s.key !== "detect");
   const start = Date.parse(run.createdAt);
   const end = isRunning ? now : Date.parse(run.updatedAt);
   return {
@@ -58,6 +61,12 @@ export function summarizeIosRunProgress(run: IosTestflightRun, now: number): Ios
     ratio: total === 0 ? 0 : done / total,
     failed: run.stages.some((s) => s.state === "failure"),
     isRunning,
+    notDistributed:
+      !isRunning &&
+      !run.stages.some((s) => s.state === "failure") &&
+      later.length > 0 &&
+      later.every((s) => s.state === "skipped" || s.state === "unknown") &&
+      later.some((s) => s.state === "skipped"),
     elapsedMs: Number.isNaN(start) || Number.isNaN(end) ? 0 : Math.max(0, end - start),
   };
 }
@@ -125,7 +134,11 @@ export function IosRunProgressPanel({
         <span className="text-xs font-semibold">iOS配布の内訳</span>
         <span className="text-[11px] text-muted-foreground">
           iOS TestFlight
-          {summary.total > 0 ? ` ・ ${summary.total}件中 ${summary.done}件が完了` : ""}
+          {summary.notDistributed
+            ? " ・ 配布なし（iOS更新不要）"
+            : summary.total > 0
+              ? ` ・ ${summary.total}件中 ${summary.done}件が完了`
+              : ""}
         </span>
         <span className="flex-1" />
         <a
@@ -143,8 +156,9 @@ export function IosRunProgressPanel({
             className={cn(
               "h-full rounded-full transition-[width] duration-500",
               summary.failed ? "bg-destructive" : "bg-blue-600 dark:bg-blue-500",
+              summary.notDistributed && "bg-muted-foreground/25 dark:bg-muted-foreground/25",
             )}
-            style={{ width: `${Math.round(summary.ratio * 100)}%` }}
+            style={{ width: `${summary.notDistributed ? 100 : Math.round(summary.ratio * 100)}%` }}
           />
         </div>
         <div className="flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] tabular-nums text-muted-foreground">
