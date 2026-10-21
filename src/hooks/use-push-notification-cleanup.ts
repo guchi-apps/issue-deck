@@ -2,6 +2,7 @@
 
 import { useEffect } from "react";
 
+import { isNativeApp, NATIVE_PUSH_REFRESH_EVENT, nativePushBridge } from "@/lib/native-push";
 import { selectStalePushTags } from "@/lib/notifications/stale-push";
 import { SERVICE_WORKER_PATH } from "@/lib/push-client";
 import type { Issue } from "@/types/issue";
@@ -25,14 +26,53 @@ import type { PullRequestSummary } from "@/types/pull-request";
  * **閉じられるのはこの端末の通知だけ。** 他の端末に出ているものは、その端末で画面を開くまで
  * 残る——Web Pushの購読は`userVisibleOnly: true`で作っており、「閉じるだけのpush」は
  * 送れないため（#2196）。
+ *
+ * **iOSアプリ（WKWebView）の通知はAPNsで届き、Service Workerを通らない**（#4250）。
+ * アプリ内では`nativePushBridge`越しにネイティブの通知センターを読み・消す（#4921）。
+ * 判定は同じ`selectStalePushTags`なので、ブラウザとアプリで消す条件はずれない。
  */
 
-/** 表示中の通知のタグを引く。対応していない・登録が無いブラウザはnull（＝何もしない） */
-async function readDisplayedNotifications(): Promise<Notification[] | null> {
+/** 表示中の通知と、それを閉じる手段。取得元ごとの違いはここへ閉じ込める */
+type DisplayedNotifications = {
+  tags: string[];
+  close: (tags: ReadonlySet<string>) => Promise<void>;
+};
+
+/** Service Workerが出した通知。対応していない・登録が無いブラウザはnull（＝何もしない） */
+async function readServiceWorkerNotifications(): Promise<DisplayedNotifications | null> {
   if (typeof navigator === "undefined" || !("serviceWorker" in navigator)) return null;
   const registration = await navigator.serviceWorker.getRegistration(SERVICE_WORKER_PATH);
   if (!registration) return null;
-  return registration.getNotifications();
+  const notifications = await registration.getNotifications();
+  return {
+    tags: notifications.map((notification) => notification.tag),
+    close: async (stale) => {
+      for (const notification of notifications) {
+        if (stale.has(notification.tag)) notification.close();
+      }
+    },
+  };
+}
+
+/**
+ * iOSアプリの通知センターに残っている通知。**この操作を持たない古いビルドでは失敗する**ので、
+ * そのときはnull（＝今までどおり残る）にする
+ */
+async function readNativeNotifications(): Promise<DisplayedNotifications | null> {
+  try {
+    const tags = await nativePushBridge.deliveredTags();
+    if (!Array.isArray(tags)) return null;
+    return {
+      tags,
+      close: (stale) => nativePushBridge.removeDelivered([...stale]),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function readDisplayedNotifications(): Promise<DisplayedNotifications | null> {
+  return isNativeApp() ? readNativeNotifications() : readServiceWorkerNotifications();
 }
 
 export type UsePushNotificationCleanupInput = {
@@ -51,19 +91,17 @@ export function usePushNotificationCleanup(input: UsePushNotificationCleanupInpu
     let cancelled = false;
 
     const sweep = async () => {
-      const notifications = await readDisplayedNotifications();
-      if (cancelled || notifications === null || notifications.length === 0) return;
+      const displayed = await readDisplayedNotifications();
+      if (cancelled || displayed === null || displayed.tags.length === 0) return;
       const stale = new Set(
         selectStalePushTags({
-          tags: notifications.map((notification) => notification.tag),
+          tags: displayed.tags,
           issues,
           pullRequests,
           failedRepositories,
         }),
       );
-      for (const notification of notifications) {
-        if (stale.has(notification.tag)) notification.close();
-      }
+      if (stale.size > 0) await displayed.close(stale);
     };
 
     // 失敗しても画面には何も出さない（消えないだけで、知らせは残る側）
@@ -78,10 +116,13 @@ export function usePushNotificationCleanup(input: UsePushNotificationCleanupInpu
       if (document.visibilityState === "visible") run();
     };
     document.addEventListener("visibilitychange", onVisibilityChange);
+    // iOSアプリが前面へ戻ったときにSwift側が投げる合図。ブラウザでは飛んでこない
+    window.addEventListener(NATIVE_PUSH_REFRESH_EVENT, run);
 
     return () => {
       cancelled = true;
       document.removeEventListener("visibilitychange", onVisibilityChange);
+      window.removeEventListener(NATIVE_PUSH_REFRESH_EVENT, run);
     };
     // Issue一覧のポーリング（10秒ごと）で`issues`が差し替わるたびに走らせる。
     // 中身はローカルの読み取り2回だけで、通信もGitHub APIの消費も増えない

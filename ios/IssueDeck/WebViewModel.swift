@@ -405,7 +405,7 @@ struct WebViewContainer: UIViewRepresentable {
 // MARK: - 設定画面の通知欄との橋渡し（#4275）
 
 extension WebViewModel: WKScriptMessageHandlerWithReply {
-    /// 設定 > 通知から呼ばれる。アプリ自身のページ（メインフレーム）以外からのメッセージは受け付けない
+    /// 設定 > 通知と、済んだ通知の掃除（ダッシュボード）から呼ばれる。アプリ自身のページ（メインフレーム）以外からのメッセージは受け付けない
     func userContentController(
         _ userContentController: WKUserContentController,
         didReceive message: WKScriptMessage,
@@ -421,6 +421,8 @@ extension WebViewModel: WKScriptMessageHandlerWithReply {
             return
         }
         let reply = ReplyBox(replyHandler)
+        // `body`（`[String: Any]`）は`Task`へ持ち込まず、ここで値だけ取り出す
+        let tags = (body["tags"] as? [Any])?.compactMap { $0 as? String } ?? []
         Task { @MainActor in
             switch action {
             case "status":
@@ -441,6 +443,12 @@ extension WebViewModel: WKScriptMessageHandlerWithReply {
                 reply.send(await self.pushStatus(serverOk: ok))
             case "openSettings":
                 if let url = URL(string: UIApplication.openSettingsURLString) { _ = await UIApplication.shared.open(url) }
+                reply.send(nil)
+            case "deliveredTags":
+                // 済んだ通知を閉じるため（#4921。`use-push-notification-cleanup.ts`）
+                reply.send(await PushCenter.shared.deliveredTags())
+            case "removeDelivered":
+                await PushCenter.shared.removeDelivered(tags: tags)
                 reply.send(nil)
             default:
                 reply.fail("unsupported")

@@ -102,7 +102,7 @@ const REPO_B = {
 function openPullRequestsFor(target: {
   repo: string;
   base: string;
-  pullRequest: { number: number; html_url: string; title: string; head: { ref: string } };
+  pullRequest: { number: number; html_url: string; title: string; head: { ref: string }; draft?: boolean };
 }) {
   return async (_owner: string, repo: string, base: string) =>
     repo === target.repo && base === target.base ? [target.pullRequest] : [];
@@ -218,6 +218,45 @@ describe("GET /api/repositories/release-pending-merges", () => {
         },
       },
     ]);
+  });
+
+  it("draftのリリース候補はチェックを読まず、ブランチ画面と同じくマージ待ちとして返す（#4916）", async () => {
+    fetchOpenPullRequestsForBase.mockImplementation(
+      openPullRequestsFor({
+        repo: "repo-a",
+        base: "main",
+        pullRequest: { ...RELEASE_PR, head: { ref: "release-rc/11" }, draft: true },
+      }),
+    );
+    // 正式バンプ前の候補では`version-tag-check`が落ちている。読めば「チェック失敗」になる
+    fetchRefCheckState.mockResolvedValue(checkState("failure"));
+
+    const response = await GET();
+    const json = await response.json();
+
+    expect(fetchRefCheckState).not.toHaveBeenCalled();
+    expect(json.releaseStatuses).toEqual([
+      expect.objectContaining({
+        repoFullName: "owner/repo-a",
+        status: "action_required",
+        pendingMerge: expect.objectContaining({ mergeTarget: "main", ciState: "unknown" }),
+      }),
+    ]);
+  });
+
+  it("draftのバンプPRもチェックを読まない（#4916）", async () => {
+    fetchOpenPullRequestsForBase.mockImplementation(
+      openPullRequestsFor({ repo: "repo-a", base: "develop", pullRequest: { ...BUMP_PR, draft: true } }),
+    );
+    fetchRefCheckState.mockResolvedValue(checkState("failure"));
+
+    const response = await GET();
+    const json = await response.json();
+
+    expect(fetchRefCheckState).not.toHaveBeenCalled();
+    expect(json.releaseStatuses[0]?.pendingMerge).toEqual(
+      expect.objectContaining({ mergeTarget: "develop", ciState: "unknown" }),
+    );
   });
 
   it("リリースPRのCIがpending中はマージ待ちではなく実行中として返す（#1433）", async () => {
