@@ -88,6 +88,21 @@ describe("PullRequestMergeChecks", () => {
     expect(html).toContain("記録なし");
   });
 
+  it("ブランチ画面の4項目（競合・全体・統合・iOS）は4列1段・狭い幅は10pxで、〔共通〕を省く（#4912）", () => {
+    const release = buildReleaseCheckCells({ source: { status: "loaded", candidates: [] }, pullRequestNumber: 1, nowMs: 0 });
+    const checks = buildMergeChecks({ ci: ciCell("success"), code: cell, conflict: cell, release }).filter(
+      (c) => c.key !== "ci" && c.key !== "code",
+    );
+    const html = renderToStaticMarkup(
+      <PullRequestMergeChecks checks={checks} candidate={release.candidate} onOpenPullRequest={null} onOpenCandidate={null} />,
+    );
+    expect(checks).toHaveLength(4);
+    expect(html).toContain('class="grid grid-cols-4"');
+    expect(html).toContain("text-[10px] leading-3 sm:text-sm sm:leading-5");
+    expect(html).not.toContain("〔共通〕");
+    expect(html).not.toContain("whitespace-nowrap");
+  });
+
   it("iOSを渡さない個別PR（PR一覧）は従来どおり3項目・通常の文字サイズ", () => {
     const release = buildReleaseCheckCells({ source: { status: "loading" }, pullRequestNumber: 0, nowMs: 0 });
     const own = buildMergeChecks({ ci: ciCell("success"), code: cell, conflict: cell, release }).filter((c) => !c.common);

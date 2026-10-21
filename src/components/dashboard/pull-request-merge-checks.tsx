@@ -65,9 +65,16 @@ export function PullRequestMergeChecks({
   const [openKey, setOpenKey] = useState<string | null>(null);
   const open = checks.find((check) => check.key === openKey) ?? null;
 
-  // 4項目の1行（PR詳細のCI・コード・競合・iOS）。393pxで「▲ 検証待ち」まで収まる大きさにする
-  const compact = ownOnly && checks.length > 3;
-  const textSize = compact ? "text-xs leading-4 sm:text-sm sm:leading-5" : "text-sm leading-5";
+  // 4項目の1行（PR詳細のCI・コード・競合・iOS、ブランチ画面のリリースPRの競合・全体・統合・iOS）。
+  // 393pxで1行に収まるよう、狭い幅だけ文字を小さくする。ブランチ画面は「– リリース未作成」が最長で、
+  // 収まらない幅では状態だけが項目内で折り返し、4項目は1行のまま保つ
+  const ownRow = ownOnly && checks.length > 3;
+  const releaseRow = !ownOnly && !grouped && checks.length === 4;
+  const textSize = ownRow
+    ? "text-xs leading-4 sm:text-sm sm:leading-5"
+    : releaseRow
+      ? "text-[10px] leading-3 sm:text-sm sm:leading-5"
+      : "text-sm leading-5";
 
   const renderButton = (check: MergeCheckItem) => (
     <div key={check.key} className="min-w-0">
@@ -85,13 +92,13 @@ export function PullRequestMergeChecks({
           className={cn(
             textSize,
             "text-muted-foreground",
-            compact && "whitespace-nowrap",
+            ownRow && "whitespace-nowrap",
             !grouped && check.common && "font-bold text-foreground",
           )}
         >
-          {grouped ? check.shortLabel.replace("〔共通〕", "") : check.shortLabel}
+          {grouped || releaseRow ? check.shortLabel.replace("〔共通〕", "") : check.shortLabel}
         </span>
-        <span className={cn(textSize, "font-bold", compact && "whitespace-nowrap", TONE_TEXT[check.tone])}>
+        <span className={cn(textSize, "font-bold", ownRow && "whitespace-nowrap", TONE_TEXT[check.tone])}>
           <span aria-hidden="true">{check.mark}</span> {check.state}
         </span>
       </button>
@@ -108,7 +115,7 @@ export function PullRequestMergeChecks({
   return (
     <div className={cn("px-3 pb-1.5", className)} data-testid="pull-request-checks">
       {ownOnly ? (
-        <div className={compact ? "grid grid-cols-4" : "grid grid-cols-3"}>{own.map(renderButton)}</div>
+        <div className={ownRow ? "grid grid-cols-4" : "grid grid-cols-3"}>{own.map(renderButton)}</div>
       ) : grouped ? (
         <div className="grid grid-cols-1 gap-x-3 gap-y-1 sm:grid-cols-2">
           <section aria-label="このPRのチェック" className="min-w-0">
@@ -128,7 +135,7 @@ export function PullRequestMergeChecks({
           </section>
         </div>
       ) : (
-        <div className="grid grid-cols-3 xl:grid-cols-6">{checks.map(renderButton)}</div>
+        <div className={releaseRow ? "grid grid-cols-4" : "grid grid-cols-3 xl:grid-cols-6"}>{checks.map(renderButton)}</div>
       )}
 
       {grouped && showCandidateNote && !candidate && candidateNote && (
