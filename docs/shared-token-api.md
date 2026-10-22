@@ -89,3 +89,5 @@ issue-deckは共有トークンの保存先なので、自分が使うアプリ�
 | `ISSUE_DECK_IMAGE_UPLOAD_SECRET` | `IMAGE_UPLOAD_SECRET` | `images/image-upload-auth.ts` |
 | `ISSUE_DECK_DEVELOPMENT_SUMMARY_TOKEN` | `AIDE_SUMMARY_SECRET` | `aide-summary-auth.ts`（AIDE向け開発状況サマリAPI。#3999） |
 | `ISSUE_DECK_VPS_MEMORY_TOKEN` | `VPS_MEMORY_READ_SECRET` | `vps-memory/auth.ts`（AIDEのMCPがVPSのメモリ状況を読む。#4779） |
+
+**`OPS_API_TOKEN`は本番の`.env`へ配らない**（#4778）。設定画面の利用元に`issue-deck`が出ていることを確かめたうえで、`.github/secrets-manifest.tsv`・`deploy.yml`・`load-secrets-check.yml`から撤去した。ほかの行も、利用元を確かめてから同じ形で撤去する（共有トークンに値が無いまま配布をやめると、フォールバック先も消えて連携が止まる）。
