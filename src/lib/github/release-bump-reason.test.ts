@@ -7,6 +7,8 @@ import {
   extractBumpChangelog,
   extractBumpReason,
   extractBumpUsage,
+  extractFinalizeBumpReason,
+  type FinalizeReasonComment,
 } from "@/lib/github/release-bump-reason";
 
 describe("extractBumpReason", () => {
@@ -179,5 +181,45 @@ describe("バンプPR本文の見出しとワークフローの契約", () => {
     // env: と export の両方に無いと、bump-commandを使うリポジトリでだけ空文字になる（#1181と同じ罠）
     expect(workflow).toContain("RELEASE_USAGE: ${{ steps.bump.outputs.usage }}");
     expect(workflow).toContain("export NEW_VERSION BUMP_KIND RELEASE_CHANGELOG RELEASE_USAGE");
+  });
+});
+
+describe("extractFinalizeBumpReason", () => {
+  const body = (version: string, reason: string) =>
+    [
+      `公開準備: 正式版を **v${version}** に確定しました（\`abcdef012345\`）。`,
+      "",
+      "## バージョンの判断根拠",
+      "コード差分の内容からpatchバージョンと判定しました。",
+      "",
+      reason,
+      "",
+      "バンプ前の検証結果は、バンプ後のheadの合否に使いません。引き継ぐ場合は、issue-deckが元の結果と差分の根拠を記録します。",
+    ].join("\n");
+  const comment = (over: Partial<FinalizeReasonComment> = {}): FinalizeReasonComment => ({
+    body: body("0.55.5", "表示の修正だけのためpatchと判定しました。"),
+    login: "github-actions[bot]",
+    association: "NONE",
+    createdAt: "2026-10-22T14:00:00Z",
+    ...over,
+  });
+
+  it("確定した版のコメントから、判断根拠だけを抜き出す（1行目と末尾の定型文は外す）", () => {
+    expect(extractFinalizeBumpReason([comment()], "0.55.5")).toBe("表示の修正だけのためpatchと判定しました。");
+  });
+
+  it("同じ版のコメントが複数あれば最新を使い、別の版のコメントは読まない", () => {
+    const comments = [
+      comment({ body: body("0.55.5", "古い理由"), createdAt: "2026-10-22T13:00:00Z" }),
+      comment({ body: body("0.55.5", "新しい理由"), createdAt: "2026-10-22T15:00:00Z" }),
+      comment({ body: body("0.55.6", "別の版"), createdAt: "2026-10-22T16:00:00Z" }),
+    ];
+    expect(extractFinalizeBumpReason(comments, "0.55.5")).toBe("新しい理由");
+    expect(extractFinalizeBumpReason(comments, "0.56.0")).toBeNull();
+  });
+
+  it("外部の人が書いた同じ形のコメントは読まない（PUBLICで誰でもコメントできるため）", () => {
+    expect(extractFinalizeBumpReason([comment({ login: "someone", association: "NONE", body: body("0.55.5", "偽の理由") })], "0.55.5")).toBeNull();
+    expect(extractFinalizeBumpReason([comment({ login: "owner", association: "OWNER" })], "0.55.5")).toBe("表示の修正だけのためpatchと判定しました。");
   });
 });

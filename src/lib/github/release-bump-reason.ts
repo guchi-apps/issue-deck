@@ -1,3 +1,5 @@
+import { isTrustedGithubAuthor } from "@/lib/github/trusted-author";
+
 const BUMP_REASON_HEADING = "## バージョンの判断根拠";
 const BUMP_CHANGELOG_HEADING = "## 更新履歴（生成された利用者向け文言）";
 const BUMP_USAGE_HEADING = "## 使い方（生成された利用者向け文言）";
@@ -48,4 +50,36 @@ export function extractBumpChangelog(body: string | null | undefined): string | 
  */
 export function extractBumpUsage(body: string | null | undefined): string | null {
   return extractSection(body, BUMP_USAGE_HEADING);
+}
+
+/** 公開準備のworkflowが候補PRへ書くコメントの1行目。`v<版>`まで含めて、どの版の判定かを見分ける */
+const FINALIZE_COMMENT_PREFIX = "公開準備: 正式版を **v";
+/** 判断根拠の節の1行目（「〜バージョンと判定しました。」）。上げ幅は画面が別に出すので重ねない */
+const FINALIZE_REASON_LEAD = /^コード差分の内容から\S+バージョンと判定しました。\s*/;
+/** 判断根拠の節の末尾に続く定型文。判定の理由ではないので外す */
+const FINALIZE_REASON_TRAILER = "バンプ前の検証結果は、バンプ後のheadの合否に使いません。";
+
+export type FinalizeReasonComment = { body: string | null; login: string; association: string | null; createdAt: string };
+
+/**
+ * 公開準備（#4496）で確定した版`version`について、上げ幅の判断根拠を候補PRのコメントから抜き出す（#4937）。
+ * 判断根拠はDBに保存しておらず、`reusable-release-develop-to-main.yml`の`finalize`ジョブが候補PRへ書く
+ * コメントにだけ残る。**見出し・1行目の文言はworkflow側のコメント本文と対になっている**ので、変えるときは両方を直す。
+ *
+ * - PRはPUBLICで誰でもコメントできるため、信頼できる投稿者（`isTrustedGithubAuthor`）のものだけを読む
+ * - 同じ版を予約し直してバンプし直すと複数書かれるため、最新を使う
+ */
+export function extractFinalizeBumpReason(comments: FinalizeReasonComment[], version: string): string | null {
+  const prefix = `${FINALIZE_COMMENT_PREFIX}${version}**`;
+  const matched = comments
+    .filter((c) => c.body?.startsWith(prefix) && isTrustedGithubAuthor({ login: c.login, association: c.association }))
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  for (const comment of matched) {
+    const section = extractBumpReason(comment.body);
+    if (!section) continue;
+    const trailer = section.indexOf(FINALIZE_REASON_TRAILER);
+    const reason = (trailer === -1 ? section : section.slice(0, trailer)).replace(FINALIZE_REASON_LEAD, "").trim();
+    if (reason.length > 0) return reason;
+  }
+  return null;
 }

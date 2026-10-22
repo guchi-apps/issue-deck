@@ -13,14 +13,15 @@ import type { RcFinalizationOverview, RcFinalizationView } from "@/lib/release-f
 import type { PublishApprovalView } from "@/lib/release-publish-approval-run";
 import type { RcCandidateView } from "@/lib/release-rc-run";
 import { PRODUCTION_STOP_TEXT } from "@/lib/release-production-stop";
-import { requestRcProductionRecheck } from "@/lib/release-request";
+import { fetchFinalizeBumpReason, requestRcProductionRecheck } from "@/lib/release-request";
 import { cn } from "@/lib/utils";
-import { BUMP_KIND_CRITERIA, nextVersion, type BumpKind } from "@/lib/semver-bump";
+import { BUMP_KIND_CRITERIA, BUMP_KINDS, nextVersion, type BumpKind } from "@/lib/semver-bump";
 
 /**
  * 公開準備（正式バンプ。#4496）のパネル。本番PR詳細の候補の帯の下に出す。
  *
- * - **予定の版と確定した版を分ける。** 検証中の版表示は予定値（点線）で、公開準備でバンプして予約した後だけ「確定」と出す
+ * - **「次のバージョン」は1枚で出す（#4937）。** 確定前は「未確定」と判定の予定、確定後は上げ幅と版の変化を文で示し、
+ *   押すと判定理由をモーダルで出す。見込みの版を確定値のように見せない（確定前は版の数字を大きく出さない）
  * - バンプ前の検証結果は書き換えない。引継ぎは元の結果のhead・差分のファイル・理由を並べ、
  *   バンプ後のheadで実行した結果とは区別する
  * - Web本番とTestFlight配布は別の行にし、build番号と正式版を混ぜない
@@ -196,32 +197,145 @@ function StateChip({ tone, children }: { tone: Tone; children: React.ReactNode }
 
 const EVIDENCE_TONE = (action: string): Tone => (action === "inherit" ? "ok" : "warn");
 
-function VersionBox({ finalization, plannedKind, mainVersion }: { finalization: RcFinalizationView | null; plannedKind: BumpKind | null; mainVersion: string | null }) {
-  const planned = plannedKind ? nextVersion(mainVersion, plannedKind) : null;
+const BUMP_KIND_JA: Record<BumpKind, string> = { major: "メジャー", minor: "マイナー", patch: "パッチ" };
+
+type ReasonState = { status: "loading" } | { status: "loaded"; reason: string | null } | { status: "error"; message: string };
+
+/**
+ * 「次のバージョン」（#4937）。確定前の見込みカードは出さず、1枚で確定前・確定後を出し分ける。
+ * 確定後はカードを押すと、上げ幅の判定理由をモーダルで出す（理由は候補PRのコメントから、開いたときだけ読む）
+ */
+function VersionBox({
+  finalization,
+  plannedKind,
+  mainVersion,
+  repositoryFullName,
+}: {
+  finalization: RcFinalizationView | null;
+  plannedKind: BumpKind | null;
+  mainVersion: string | null;
+  repositoryFullName: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [reason, setReason] = useState<ReasonState | null>(null);
+  const version = finalization?.version ?? null;
+  const reasonKey = finalization && version ? `${finalization.id}:${version}` : null;
+  const loadedKey = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!open || !finalization || !version || loadedKey.current === reasonKey) return;
+    loadedKey.current = reasonKey;
+    setReason({ status: "loading" });
+    fetchFinalizeBumpReason(repositoryFullName, finalization.id)
+      .then((text) => setReason({ status: "loaded", reason: text }))
+      .catch((err) => {
+        loadedKey.current = null;
+        setReason({ status: "error", message: err instanceof Error ? err.message : String(err) });
+      });
+  }, [open, finalization, version, reasonKey, repositoryFullName]);
+
+  if (!finalization || !version) {
+    const planned = plannedKind ? nextVersion(mainVersion, plannedKind) : null;
+    return (
+      <div className="rounded-lg border p-3" data-testid="release-rc-next-version">
+        <p className="text-[11px] text-muted-foreground">次のバージョン</p>
+        <p className="mt-0.5 font-mono text-xl font-bold text-muted-foreground">未確定</p>
+        <p className="mt-0.5 text-[12px]">
+          {plannedKind
+            ? `手動指定の${BUMP_KIND_JA[plannedKind]}で${planned ? ` v${planned} に` : ""}なる見込みです`
+            : `公開準備で、最終公開${mainVersion ? `（v${mainVersion}）` : ""}からの差分を見て自動判定します`}
+        </p>
+      </div>
+    );
+  }
+
+  const consumed = finalization.versionReservation === "consumed";
+  // 公開後はmainが新しい版になり、旧版→新版の矢印が成り立たないので旧版を省く
+  const previous = !consumed && mainVersion && mainVersion !== version ? mainVersion : null;
+  const kind = finalization.bumpKind;
+  const how = finalization.bumpKindSource === "manual" ? "手動指定で" : "自動判定の結果、";
+  const transition = previous ? `v${previous} → v${version}` : `v${version}`;
+  const summary = kind ? `${how}${BUMP_KIND_JA[kind]}（${transition}）になりました` : `v${version} に確定しました`;
+  const pullUrl = `https://github.com/${repositoryFullName}/pull/${finalization.prNumber}`;
+
   return (
-    <div className="flex flex-wrap gap-2.5">
-      <div className="min-w-[200px] flex-1 rounded-lg border p-3">
-        <p className="text-[11px] text-muted-foreground">検証中の予定（見込み）</p>
-        <p className="mt-0.5 inline-block border-b-2 border-dashed font-mono text-xl font-bold text-muted-foreground">{planned ? `v${planned}` : "自動判定"}</p>
-        <p className="mt-0.5 text-[11.5px] text-muted-foreground">
-          {planned ? "指定した上げ幅から計算した見込みです。変わることがあります。" : "上げ幅は公開準備で最終公開差分から判定します。確定するまで版は決まりません。"}
-        </p>
-      </div>
-      <div className={cn("min-w-[200px] flex-1 rounded-lg border p-3", finalization?.version && "border-green-600/60")}>
-        <p className="text-[11px] text-muted-foreground">確定した正式版</p>
-        <p className="mt-0.5 font-mono text-xl font-bold">{finalization?.version ? `v${finalization.version}` : "未確定"}</p>
-        <p className="mt-0.5 text-[11.5px] text-muted-foreground">
-          {finalization?.version ? (
-            <>
-              <StateChip tone={finalization.versionReservation === "consumed" ? "mute" : "ok"}>{finalization.versionReservation === "consumed" ? "消費済み" : "予約済み"}</StateChip>{" "}
-              公開前の再試行では増やしません。公開した版は再利用しません。
-            </>
-          ) : (
-            "公開準備でバンプすると確定し、版を予約します。"
-          )}
-        </p>
-      </div>
-    </div>
+    <>
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="block w-full rounded-lg border border-green-600/60 p-3 text-left transition-colors hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        data-testid="release-rc-next-version"
+      >
+        <span className="flex items-center justify-between gap-2">
+          <span className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+            次のバージョン
+            <StateChip tone={consumed ? "mute" : "ok"}>{consumed ? "消費済み" : "予約済み"}</StateChip>
+          </span>
+          <span className="text-[11.5px] text-primary">判定理由を見る ›</span>
+        </span>
+        <span className="mt-0.5 block font-mono text-xl font-bold">v{version}</span>
+        <span className="mt-0.5 block text-[12px]">{summary}</span>
+      </button>
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent className="max-h-[85dvh] overflow-y-auto sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>v{version} になった理由</DialogTitle>
+            <DialogDescription>
+              {finalization.bumpKindSource === "manual"
+                ? "公開準備の開始時に、画面から上げ幅を指定しました"
+                : `最終公開${previous ? `（v${previous}）` : ""}からの差分をAIが読み、上げ幅を判定しました`}
+            </DialogDescription>
+          </DialogHeader>
+          <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-[12.5px]">
+            <dt className="text-muted-foreground">上げ幅</dt>
+            <dd>
+              {kind ? (
+                <>
+                  <b>{BUMP_KIND_JA[kind]}</b>（{kind}）· {finalization.bumpKindSource === "manual" ? "手動指定" : "自動判定"}
+                </>
+              ) : (
+                "記録がありません"
+              )}
+            </dd>
+            <dt className="text-muted-foreground">版</dt>
+            <dd className="font-mono">{transition}</dd>
+          </dl>
+          <div className="flex flex-col gap-1">
+            <p className="text-[11.5px] font-semibold text-muted-foreground">判断根拠</p>
+            <div className="whitespace-pre-wrap break-words rounded-md border bg-muted/40 px-3 py-2 text-[12.5px]" data-testid="release-rc-bump-reason">
+              {reason === null || reason.status === "loading" ? (
+                <span className="inline-flex items-center gap-1.5 text-muted-foreground">
+                  <Loader2 className="size-3.5 animate-spin motion-reduce:animate-none" aria-hidden />
+                  読み込んでいます…
+                </span>
+              ) : reason.status === "error" ? (
+                <span className="text-destructive">判定理由を取得できませんでした（{reason.message}）</span>
+              ) : (
+                (reason.reason ?? <span className="text-muted-foreground">判定理由の記録が見つかりませんでした</span>)
+              )}
+            </div>
+          </div>
+          <div className="flex flex-col gap-1">
+            <p className="text-[11.5px] font-semibold text-muted-foreground">上げ幅の基準</p>
+            <ul className="flex flex-col gap-1 text-[12px]">
+              {BUMP_KINDS.map((k) => (
+                <li key={k} className={cn("rounded-md px-2 py-1", k === kind ? "bg-green-100 text-green-900 dark:bg-green-950 dark:text-green-200" : "text-muted-foreground")}>
+                  <b>{BUMP_KIND_JA[k]}</b>: {BUMP_KIND_CRITERIA[k]}
+                </li>
+              ))}
+            </ul>
+          </div>
+          <DialogFooter className="flex-row items-center justify-between gap-2 sm:justify-between">
+            <a href={pullUrl} target="_blank" rel="noreferrer" className="text-[12.5px] text-primary underline-offset-2 hover:underline">
+              候補PR #{finalization.prNumber} で見る ↗
+            </a>
+            <Button variant="outline" size="sm" onClick={() => setOpen(false)}>
+              閉じる
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }
 
@@ -725,7 +839,7 @@ export function ReleaseRcFinalizePanel({
         <span className="text-[11.5px] text-muted-foreground">合格した候補だけを、公開の直前に正式バンプします</span>
       </div>
 
-      <VersionBox finalization={current && current.status !== "superseded" ? current : null} plannedKind={plannedKind} mainVersion={finalization.mainVersion} />
+      <VersionBox finalization={current && current.status !== "superseded" ? current : null} plannedKind={plannedKind} mainVersion={finalization.mainVersion} repositoryFullName={repositoryFullName} />
 
       {approval && <ApprovalBox approval={approval} busy={busy} canResume={canResume} onRevoke={revoke} onResume={resume} />}
 
