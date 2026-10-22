@@ -1817,6 +1817,7 @@ function NextReleaseCard({
               pullRequest={pullRequest}
               decision={publishDecision}
               onMerged={() => onMerged(pullRequest)}
+              hideVerifyHint
               className="shrink-0"
             />
           ) : null}

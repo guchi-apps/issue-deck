@@ -37,6 +37,7 @@ export function ReleasePublishAction({
   decision,
   onMerged,
   variant = "default",
+  hideVerifyHint = false,
   className,
 }: {
   pullRequest: PullRequestSummary;
@@ -44,6 +45,11 @@ export function ReleasePublishAction({
   decision: RcPublishDecision | null | undefined;
   onMerged: () => void;
   variant?: "default" | "outline";
+  /**
+   * 検証の合格待ち（`next === "verify"`）の理由文を出さない（#4938）。ブランチ画面は進行バーと検証枠が
+   * 同じ状況を示すので、重ねて書かない
+   */
+  hideVerifyHint?: boolean;
   className?: string;
 }) {
   if (decision === undefined) {
@@ -59,6 +65,7 @@ export function ReleasePublishAction({
     );
   }
   if (!decision.ok) {
+    if (hideVerifyHint && decision.next === "verify") return null;
     return (
       <p className="text-xs text-muted-foreground" data-testid="release-publish-blocked">
         {decision.message}
