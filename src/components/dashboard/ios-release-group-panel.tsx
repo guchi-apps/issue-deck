@@ -371,65 +371,94 @@ export function IosReleaseGroupPanel({
       versionRun && versionRun.status === "completed" && (state.kind === "failed" || state.kind === "delivered")
         ? versionRun.updatedAt
         : null;
+    // 内訳を開ける版は、見出し行と段階のバーのどこを押しても開閉する（#4929）。小さな「›」だけでは押しにくいため。
+    // キーボード・読み上げは「›」のボタンで開閉し、ここは指・マウス向けの広い当たり判定として足す
+    const expandable = Boolean(detailRun) && state.kind !== "not-needed";
+    function toggleFromCard(event: React.MouseEvent<HTMLDivElement>) {
+      const target = event.target as Element;
+      // ダイアログはポータル越しにクリックが伝わるので、カードの外のDOMからのクリックは数えない。
+      // 中のボタン・リンクは、それぞれの動作だけをさせる
+      if (!event.currentTarget.contains(target) || target.closest("button, a")) return;
+      setDetailToggle(!detailOpen);
+    }
     return (
       <section
         aria-label="iOS配布"
-        className={cn("flex min-w-0 flex-col gap-1.5 rounded-md border px-2.5 py-1.5 text-xs", tone.box, className)}
+        className={cn("flex min-w-0 flex-col rounded-md border text-xs", tone.box, className)}
         data-testid="ios-distribution-summary"
         data-tone={headline.tone}
       >
-        <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5">
-          <span className="inline-flex shrink-0 items-center gap-1 font-medium">
-            <Smartphone className={cn("size-3.5", tone.icon)} aria-hidden="true" />
-            iOS配布
-          </span>
-          <span className={cn("min-w-0 break-words", tone.text)}>{headline.text}</span>
-          <span className="text-muted-foreground">
-            {[version ? `v${version}` : null, finishedAt ? formatMonthDayTime(finishedAt) : null]
-              .filter(Boolean)
-              .join(" ・ ")}
-          </span>
-          <Button
-            size="sm"
-            variant="ghost"
-            className="ml-auto h-6 px-1.5 text-xs"
-            onClick={refresh}
-            disabled={isLoading}
-            aria-label="iOS配布の状態を更新"
-          >
-            <RefreshCw className={isLoading ? "size-3 animate-spin" : "size-3"} aria-hidden="true" />
-          </Button>
-        </div>
-        {headline.stages && <IosDistributionStageBar stages={headline.stages} notDistributed={headline.notDistributed} />}
-        {reason && <p className="min-w-0 break-words">{reason}</p>}
-        {(error || actionError) && <p className="text-destructive">{error ?? actionError}</p>}
-        <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 empty:hidden">
-          {dispatchButtons}
-          {versionRun && (
-            <GithubReferenceLink
-              href={versionRun.htmlUrl}
-              className="text-muted-foreground underline underline-offset-2 hover:text-foreground"
-            >
-              {state.kind === "not-needed" ? "判定の詳細" : "実行ログ"}
-            </GithubReferenceLink>
+        <div
+          className={cn(
+            "flex min-w-0 flex-col gap-1 rounded-md px-2.5 py-1",
+            expandable && "cursor-pointer hover:bg-muted/50",
           )}
-          {detailRun && state.kind !== "not-needed" && (
-            <button
-              type="button"
-              onClick={() => setDetailToggle(!detailOpen)}
-              aria-expanded={detailOpen}
-              className="inline-flex items-center gap-0.5 text-muted-foreground hover:text-foreground"
-            >
-              内訳
-              {detailOpen ? (
-                <ChevronDown className="size-3.5" aria-hidden="true" />
-              ) : (
-                <ChevronRight className="size-3.5" aria-hidden="true" />
+          onClick={expandable ? toggleFromCard : undefined}
+          data-testid="ios-distribution-summary-head"
+        >
+          <div className="flex min-w-0 items-center gap-x-2 whitespace-nowrap">
+            <span className="inline-flex shrink-0 items-center gap-1 font-medium">
+              <Smartphone className={cn("size-3.5", tone.icon)} aria-hidden="true" />
+              iOS配布
+            </span>
+            <span className={cn("min-w-0 truncate", tone.text)} title={headline.text}>
+              {headline.text}
+            </span>
+            <span className="shrink-0 text-muted-foreground">
+              {[version ? `v${version}` : null, finishedAt ? formatMonthDayTime(finishedAt) : null]
+                .filter(Boolean)
+                .join(" ・ ")}
+            </span>
+            <span className="ml-auto flex shrink-0 items-center">
+              {expandable && (
+                <button
+                  type="button"
+                  onClick={() => setDetailToggle(!detailOpen)}
+                  aria-expanded={detailOpen}
+                  className="inline-flex size-6 items-center justify-center rounded text-muted-foreground hover:text-foreground"
+                  title={detailOpen ? "実行の内訳を閉じる" : "実行の内訳を開く"}
+                  aria-label={detailOpen ? "実行の内訳を閉じる" : "実行の内訳を開く"}
+                >
+                  {detailOpen ? (
+                    <ChevronDown className="size-3.5" aria-hidden="true" />
+                  ) : (
+                    <ChevronRight className="size-3.5" aria-hidden="true" />
+                  )}
+                </button>
               )}
-            </button>
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-6 px-1.5 text-xs"
+                onClick={refresh}
+                disabled={isLoading}
+                aria-label="iOS配布の状態を更新"
+              >
+                <RefreshCw className={isLoading ? "size-3 animate-spin" : "size-3"} aria-hidden="true" />
+              </Button>
+            </span>
+          </div>
+          {headline.stages && (
+            <IosDistributionStageBar stages={headline.stages} notDistributed={headline.notDistributed} thin />
           )}
         </div>
-        {detail}
+        {/* 操作や理由があるときだけ足す行。実行ログへのリンクは開いた内訳の中にある */}
+        <div className="hidden min-w-0 flex-col gap-1 px-2.5 pb-1.5 has-[>:not(:empty)]:flex">
+          {reason && <p className="min-w-0 break-words">{reason}</p>}
+          {(error || actionError) && <p className="text-destructive">{error ?? actionError}</p>}
+          <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 empty:hidden">
+            {dispatchButtons}
+            {versionRun && state.kind === "not-needed" && (
+              <GithubReferenceLink
+                href={versionRun.htmlUrl}
+                className="text-muted-foreground underline underline-offset-2 hover:text-foreground"
+              >
+                判定の詳細
+              </GithubReferenceLink>
+            )}
+          </div>
+          {detail}
+        </div>
         {dialogs}
       </section>
     );
