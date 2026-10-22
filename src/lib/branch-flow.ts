@@ -13,6 +13,7 @@ import {
   isMergeJudgementPending,
 } from "@/lib/pull-request-list";
 import { resolveReleaseStageBadges } from "@/lib/release-stage-badges";
+import { resolveReleaseProgressTrack } from "@/lib/release-progress-track";
 import { summarizePullRequestHealth, type PullRequestHealthSummary } from "@/lib/pull-request-health";
 import {
   isReleaseCandidateClear,
@@ -629,6 +630,12 @@ function buildRepository({
     releaseStages: resolveReleaseStageBadges({
       bumpPullRequest,
       candidatePullRequest: releasePullRequest,
+    }),
+    releaseTrack: resolveReleaseProgressTrack({
+      bumpPullRequest,
+      candidatePullRequest: releasePullRequest,
+      mergeTarget: resolveReleaseMergeTarget(releasePullRequest, bumpPullRequest),
+      deploy: deployState,
     }),
     // 畳んだ1行にアイコンと数字だけで出す（#1704・#1886）。手が要るものではないので、
     // 「手が要るもの◯件」の判定（`needsAttention`）には入れない。

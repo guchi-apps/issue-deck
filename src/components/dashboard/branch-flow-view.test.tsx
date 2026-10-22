@@ -1774,8 +1774,10 @@ describe("BranchFlowView", () => {
       expect(screen.getByText("本番へデプロイ中")).toBeTruthy();
       expect(screen.getByText("8/15にmainへマージ")).toBeTruthy();
       expect(screen.queryByText("8/15に本番反映")).toBeNull();
-      // 畳んだ1行にも出す（開かなくても気づけるように）
-      expect(screen.getByText("デプロイ中")).toBeTruthy();
+      // 畳んだ1行にも出す（開かなくても気づけるように）。進行バーの最後の区切り（本番反映）が引き継ぐ（#4930）
+      expect(screen.getByText("本番反映中")).toBeTruthy();
+      expect(screen.getByLabelText("本番リリース 5/6：本番反映中")).toBeTruthy();
+      expect(screen.queryByText("デプロイ中")).toBeNull();
     });
 
     it("デプロイ失敗は実行ログへのリンク付きで出し、隣に内訳の開閉を置く（#2777）", () => {
@@ -2003,9 +2005,9 @@ describe("BranchFlowView", () => {
       });
 
       ensureRepositoryOpen();
-      // 畳んだ1行と束の見出しの両方に付く
-      const pills = screen.getAllByLabelText("リリース候補のCI実行中（実行中のチェックがあります）");
-      expect(pills).toHaveLength(2);
+      // 畳んだ1行の進行バー（#4930）に付く
+      const pills = screen.getAllByLabelText(/^本番リリース \d\/\d：リリース候補のCI実行中/);
+      expect(pills.length).toBeGreaterThan(0);
       // 「デプロイ中」と同じ回るアイコン。止まったアイコンを添えても状態は伝わらない
       pills.forEach((pill) => expect(pill.querySelector(".animate-spin")).toBeTruthy());
     });
@@ -2037,9 +2039,9 @@ describe("BranchFlowView", () => {
 
       ensureRepositoryOpen();
       expect(screen.queryByText("mainへマージ待ち")).toBeNull();
-      // 畳んだ1行と束の見出しの両方が、回るアイコン付きの「マージ判定中」に戻る
-      const pills = screen.getAllByLabelText("リリース候補のマージ判定中（自動マージ可否の判定を実行しています）");
-      expect(pills).toHaveLength(2);
+      // 畳んだ1行の進行バー（#4930）が、回るアイコン付きの「マージ判定中」に戻る
+      const pills = screen.getAllByLabelText(/^本番リリース \d\/\d：リリース候補のマージ判定中/);
+      expect(pills.length).toBeGreaterThan(0);
       pills.forEach((pill) => expect(pill.querySelector(".animate-spin")).toBeTruthy());
     });
 
@@ -2176,8 +2178,9 @@ describe("BranchFlowView", () => {
         started: { aiReview: true, integration: true, mac: false },
       });
 
-      expect(screen.getByText("全体レビュー中")).toBeTruthy();
+      // 進行バー（#4930）の見出しは工程順で先の統合検証、並行する全体レビューは後ろへ添える
       expect(screen.getByText("統合検証中")).toBeTruthy();
+      expect(screen.getByText("＋全体レビュー中")).toBeTruthy();
       expect(screen.queryByText("リリース中")).toBeNull();
       expect(screen.queryByText(/CI実行中/)).toBeNull();
     });
@@ -2211,8 +2214,9 @@ describe("BranchFlowView", () => {
     it("検証の失敗は理由付きの「検証失敗」で、マージ待ちではなく「手が要るもの」に数える（#4390）", () => {
       renderCandidate({ aiReview: "failed", integration: "passed", enforced: false });
 
-      expect(screen.getByText("検証失敗")).toBeTruthy();
-      expect(screen.getByLabelText("検証失敗: 全体レビューが失敗しています")).toBeTruthy();
+      // 進行バー（#4930）の全体レビューの区切りが赤になり、理由は見出しの補足に入る
+      expect(screen.getByText("全体レビューが失敗")).toBeTruthy();
+      expect(screen.getByTitle("全体レビューが失敗しています")).toBeTruthy();
       expect(screen.queryByText("mainへマージ待ち")).toBeNull();
       expect(screen.getByText(/手が要るもの1件/)).toBeTruthy();
     });
