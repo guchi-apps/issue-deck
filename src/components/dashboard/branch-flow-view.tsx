@@ -14,6 +14,7 @@ import {
 import { createPortal } from "react-dom";
 import { isReleaseCandidateHeadRef, isLegacyReleaseCandidateHeadRef, rcSequenceOf } from "@/lib/release-branch";
 import { decidePublishForPullRequest, ReleasePublishAction } from "@/components/dashboard/release-publish-action";
+import { ReleaseProgressTrackInline, ReleaseProgressTrackLabeled, type LabeledTrackStep } from "@/components/dashboard/release-progress-track";
 import { describePublishSteps, type PublishStep, type PublishStepsView } from "@/lib/release-publish-steps";
 import { useReleaseRc } from "@/hooks/use-release-rc";
 import type { BranchFlowHistoryStatus } from "@/hooks/use-branch-flow-history";
@@ -107,6 +108,7 @@ import {
 import { describeBranchFlow } from "@/lib/branch-flow-guidance";
 import { readTriggeredAt, useTriggerPending } from "@/hooks/use-trigger-pending";
 import { resolveReleaseStageBadges, type ReleaseStageBadge } from "@/lib/release-stage-badges";
+import { resolveReleaseProgressTrack, type ReleaseTrack } from "@/lib/release-progress-track";
 import { resolvePullRequestHealth, type PullRequestHealthDisposition } from "@/lib/pull-request-health";
 import {
   DEVELOP_BRANCH,
@@ -1283,16 +1285,24 @@ function ReleaseGroupStatePill({
   group: BranchFlowReleaseGroup;
   deviceBuild: BranchFlowDeviceBuild | null;
 }) {
-  const { verificationShown, waitingUserMerge } = releaseGroupStateOf(group, deviceBuild);
-  if (waitingUserMerge) {
-    // mainへのマージだけは人が行う。待っているのが人の操作であることを、
-    // ヘッダーのリリース状況・スマホの一覧と同じ文言・同じ色で出す（#1579）
-    return <AttentionPill>{releaseMergeTargetLabel("main")}</AttentionPill>;
-  }
+  // mainへのマージ待ち（人の操作）は進行バーの琥珀の区切りと文言で出す（#1579・#4930）
+  const { verificationShown } = releaseGroupStateOf(group, deviceBuild);
   if (deviceBuild) return <AttentionPill>{deviceBuild.pendingLabel}</AttentionPill>;
   if (!group.pullRequest && !group.bumpPullRequest) {
     // まだPRが無い状態なので、そもそもCIも判定も走っていない
     return <ReleaseProgressPill label="本番未反映" spinning={false} />;
+  }
+  const track = releaseGroupTrackOf(group);
+  if (track) {
+    // 畳んだ行と同じ進行バー（#4930）。区切りの失敗に表れない検証の問題だけはピルで残す
+    return (
+      <>
+        <ReleaseProgressTrackInline track={track} />
+        {verificationShown?.problem && !track.steps.some((step) => step.state === "failed") && (
+          <ReleaseCandidateVerificationPills verification={verificationShown} />
+        )}
+      </>
+    );
   }
   const stages = resolveReleaseStageBadges({
     bumpPullRequest: group.bumpPullRequest,
@@ -1304,6 +1314,20 @@ function ReleaseGroupStatePill({
       <ReleaseStagePills stages={stages} fallback={!verificationShown?.problem} />
     </>
   );
+}
+
+/**
+ * 未リリースの束の進行バー（#4930）。マージ待ちは束の見出しと同じ`releaseGroupStateOf`で決める。
+ * デプロイは束がまだmainへ入っていないので渡さない
+ */
+function releaseGroupTrackOf(group: BranchFlowReleaseGroup): ReleaseTrack | null {
+  const { waitingUserMerge } = releaseGroupStateOf(group, null);
+  return resolveReleaseProgressTrack({
+    bumpPullRequest: group.bumpPullRequest,
+    candidatePullRequest: group.pullRequest,
+    mergeTarget: waitingUserMerge ? "main" : null,
+    deploy: null,
+  });
 }
 
 /**
@@ -1613,37 +1637,37 @@ function PublishStepsPill({ pill }: { pill: PublishStepsView["pill"] }) {
 }
 
 /** 承認→バンプ→mainへのマージ→本番反映→稼働確認→完了のどこにいるか（#4814）。mainへのマージは時刻を添える */
+// 段階の見た目は進行バー（#4930）にそろえる。止まった段は赤、進行中は紫
+const PUBLISH_STEP_TRACK_STATE: Record<PublishStep["state"], LabeledTrackStep["state"]> = {
+  done: "done",
+  current: "running",
+  stopped: "failed",
+  todo: "todo",
+};
+
 function PublishStepsLine({ steps }: { steps: PublishStep[] }) {
   return (
-    <ol className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[11.5px] text-muted-foreground" data-testid="next-release-publish-steps">
-      {steps.map((step, index) => (
-        <li key={step.key} className="inline-flex items-center gap-1.5 whitespace-nowrap">
-          {index > 0 && (
-            <span aria-hidden="true" className="text-border">
-              ›
-            </span>
-          )}
-          <span
-            className={cn(
-              "inline-flex items-center gap-1",
-              step.state === "done" && "text-foreground",
-              step.state === "current" && "font-semibold text-purple-700 dark:text-purple-300",
-              step.state === "stopped" && "font-semibold text-destructive",
-            )}
-            aria-current={step.state === "current" || step.state === "stopped" ? "step" : undefined}
-          >
-            {step.state === "done" && (
-              <span aria-hidden="true" className="text-green-600 dark:text-green-400">
-                ✓
-              </span>
-            )}
-            {(step.state === "current" || step.state === "stopped") && <span aria-hidden="true">●</span>}
-            {step.label}
-            {step.at && <span className="font-normal tabular-nums text-muted-foreground">{formatMonthDayTime(step.at)}</span>}
-          </span>
-        </li>
-      ))}
-    </ol>
+    <ReleaseProgressTrackLabeled
+      ariaLabel="公開の段階"
+      testId="next-release-publish-steps"
+      steps={steps.map((step) => ({
+        key: step.key,
+        label: step.label,
+        state: PUBLISH_STEP_TRACK_STATE[step.state],
+        sub: step.at ? formatMonthDayTime(step.at) : null,
+      }))}
+    />
+  );
+}
+
+/** 公開承認の無い候補の段階（#4930）。進行バーの区切りに工程名と、動いている工程の文言を添える */
+function ReleaseTrackLine({ track }: { track: ReleaseTrack }) {
+  return (
+    <ReleaseProgressTrackLabeled
+      ariaLabel={`本番リリースの工程 ${track.done}/${track.total}`}
+      testId="next-release-track"
+      steps={track.steps.map((step) => ({ key: step.key, label: step.label, state: step.state, sub: step.status }))}
+    />
   );
 }
 
@@ -1708,6 +1732,8 @@ function NextReleaseCard({
           finalization: rc.overview?.finalization?.current ?? null,
         })
       : null;
+  // 公開承認の無い候補は、畳んだ行と同じ進行バーを工程名つきで出す（#4930）
+  const groupTrack = group && !publishSteps ? releaseGroupTrackOf(group) : null;
   // 承認がある間も、本当に人の手が要る検証の問題（未判断の指摘・失敗）は従来どおり赤で出す
   const verificationReasonShown = publishSteps ? (verificationShown?.problem ? verificationShown : null) : verificationShown;
 
@@ -1746,11 +1772,18 @@ function NextReleaseCard({
               <PublishStepsPill pill={publishSteps.pill} />
               {verificationShown?.problem && <ReleaseCandidateVerificationPills verification={verificationShown} />}
             </>
+          ) : groupTrack ? (
+            // 進行はすぐ下の工程名付きのバーが出す。区切りの失敗に表れない検証の問題だけピルで残す
+            verificationShown?.problem &&
+            !groupTrack.steps.some((step) => step.state === "failed") && (
+              <ReleaseCandidateVerificationPills verification={verificationShown} />
+            )
           ) : (
             group && <ReleaseGroupStatePill group={group} deviceBuild={null} />
           )}
         </div>
         {publishSteps && <PublishStepsLine steps={publishSteps.steps} />}
+        {!publishSteps && groupTrack && <ReleaseTrackLine track={groupTrack} />}
         <p className="min-w-0 break-words text-muted-foreground">
           {pullRequest ? (
             <GithubReferenceLink
@@ -2683,6 +2716,15 @@ function RepositorySummaryRow({
         // 「実機未反映」を出す
         repository.deviceBuild ? (
           <AttentionPill>{repository.deviceBuild.pendingLabel}</AttentionPill>
+        ) : summary.releaseTrack ? (
+          // 工程を固定の6区切りで並べ、どこまで済んだかを出す（#4930）。工程ピルとマージ待ちのピルはここへ統合した
+          <>
+            <ReleaseProgressTrackInline track={summary.releaseTrack} />
+            {/* 検証の状態を取得できないなど、区切りの失敗に表れない問題だけは従来のピルで残す */}
+            {verification?.problem && !summary.releaseTrack.steps.some((step) => step.state === "failed") && (
+              <ReleaseCandidateVerificationPills verification={verification} />
+            )}
+          </>
         ) : summary.releaseMergeTarget ? (
           <AttentionPill>{releaseMergeTargetLabel(summary.releaseMergeTarget)}</AttentionPill>
         ) : (
@@ -2692,17 +2734,21 @@ function RepositorySummaryRow({
             <ReleaseStagePills stages={summary.releaseStages} fallback={!verification?.problem} />
           </>
         )
-      ) : (
+      ) : releaseLaunching ? (
         // 起動からバンプPRが現れるまでは、開いたときのボタン（「リリース起動中…」）にしか
         // 出ていなかった（#1955）。バンプPRが現れれば上の「リリース中」へ引き継がれる
-        releaseLaunching && (
-          <ReleaseProgressPill label="リリース起動中" spinning={false} note="workflowの起動待ち" />
-        )
+        <ReleaseProgressPill label="リリース起動中" spinning={false} note="workflowの起動待ち" />
+      ) : (
+        // マージ後、リリースのデプロイが進行中・失敗のあいだは最後の区切り（本番反映）が引き継ぐ（#4930）
+        !repository.deviceBuild && summary.releaseTrack && <ReleaseProgressTrackInline track={summary.releaseTrack} />
       )}
       {/* マージ後もデプロイが終わるまでは本番へ出ていない。開かなくても分かるようにする（#1579） */}
       {/* TestFlightへの配布が走っている間だけ（#3806）。Webのデプロイとは別の行為なので別のピルにする */}
       {iosDistribution.running && <IosDistributingBadge />}
-      <DeployStateBadge deploy={deploy} compact linkToRun={false} />
+      {/* 進行バーが本番反映を出しているときは、同じ状態のピルを重ねない */}
+      {!(summary.releaseTrack && !summary.releaseInProgress && !releaseLaunching && !repository.deviceBuild) && (
+        <DeployStateBadge deploy={deploy} compact linkToRun={false} />
+      )}
       {guidance.attention && <AttentionGuidance next={guidance.next} isOpen={isOpen} showSelectionMarker={showSelectionMarker} />}
       </span>
       )}

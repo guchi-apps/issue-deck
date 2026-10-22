@@ -1,6 +1,7 @@
 import type { ReleaseMergeTarget } from "@/lib/github/release-button-status";
 import type { ReleaseCandidateVerification } from "@/lib/release-candidate-status";
 import type { ReleaseStageBadge } from "@/lib/release-stage-badges";
+import type { ReleaseTrack } from "@/lib/release-progress-track";
 import type { PullRequestHealthSummary } from "@/lib/pull-request-health";
 import type { ProgressStatusKey } from "@/lib/issue-progress";
 import type { PullRequestKind, PullRequestSummary } from "@/types/pull-request";
@@ -484,6 +485,11 @@ export type BranchFlowRepositorySummary = {
   releaseVerification: ReleaseCandidateVerification | null;
   /** 本番リリース工程の実行中バッジ（#4602）。畳んだ行・見出しが同じ値を読む */
   releaseStages: ReleaseStageBadge[];
+  /**
+   * 本番リリースの進行バー（#4930）。工程を固定の6区切りで並べ、どこまで済んだかを畳んだ行に出す。
+   * リリースが動いていない（開いたバンプPR・候補PRが無く、リリースのデプロイも進行中・失敗でない）ときはnull
+   */
+  releaseTrack: ReleaseTrack | null;
   /**
    * 実行ボタンを押したがまだブランチが無いIssueの件数（#1704・#2386）。畳んだ1行に再生マークの丸の
    * アイコンと数字だけで出す（#1886・#3163。言葉は`title`と`aria-label`が持つ）。

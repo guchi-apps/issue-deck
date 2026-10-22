@@ -134,9 +134,21 @@ describe("IosReleaseGroupPanel 先頭の要約（#4907）", () => {
     expect(screen.getByRole("list", { name: "iOS配布の段階" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "再実行" })).toBeTruthy();
     expect(screen.getByRole("button", { name: /修正Issueを起案/ })).toBeTruthy();
-    expect(screen.getByRole("link", { name: "実行ログ" })).toBeTruthy();
     expect(screen.queryByText("iOS配布の内訳")).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "内訳" }));
+    fireEvent.click(screen.getByRole("button", { name: "実行の内訳を開く" }));
     expect(await screen.findByText("iOS配布の内訳")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "実行の内訳を閉じる" }).getAttribute("aria-expanded")).toBe("true");
+  });
+
+  it("見出し行・段階のバーを押すと内訳が開閉し、中のボタンを押しても開閉しない（#4929）", async () => {
+    stubTestflight(null);
+    render(summary);
+    await screen.findByText("失敗：署名で停止");
+    fireEvent.click(screen.getByRole("button", { name: "iOS配布の状態を更新" }));
+    expect(screen.queryByText("iOS配布の内訳")).toBeNull();
+    fireEvent.click(screen.getByRole("list", { name: "iOS配布の段階" }));
+    expect(await screen.findByText("iOS配布の内訳")).toBeTruthy();
+    fireEvent.click(screen.getByText("失敗：署名で停止"));
+    expect(screen.queryByText("iOS配布の内訳")).toBeNull();
   });
 });
