@@ -375,3 +375,16 @@ export async function requestReleaseRebuild(
     throw new Error(releaseErrorMessage(res.status, json.error, json.message));
   }
 }
+
+/**
+ * `GET /api/repositories/release/finalize`（#4937）。公開準備で確定した版の上げ幅の判断根拠を、
+ * 候補PRのコメントから読む。見つからなければ`reason: null`。
+ */
+export async function fetchFinalizeBumpReason(repoFullName: string, pullNumber: number, version: string): Promise<string | null> {
+  const [owner, repo] = repoFullName.split("/");
+  const params = new URLSearchParams({ owner, repo, pullNumber: String(pullNumber), version });
+  const res = await fetch(`/api/repositories/release/finalize?${params}`);
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(releaseErrorMessage(res.status, json.error, json.message));
+  return typeof json.reason === "string" ? json.reason : null;
+}

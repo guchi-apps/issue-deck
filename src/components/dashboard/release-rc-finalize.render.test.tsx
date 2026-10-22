@@ -172,7 +172,9 @@ describe("ReleaseRcFinalizePanel", () => {
   it("合格した候補では、予定の版を確定済みとして出さずに公開準備を始められる", () => {
     render(<ReleaseRcFinalizePanel candidate={candidate()} finalization={overview()} repositoryFullName="o/r" onChanged={vi.fn()} />);
     expect(screen.getByText("未確定")).toBeTruthy();
-    expect(screen.getByText("自動判定")).toBeTruthy();
+    // 確定前の見込みカード（「検証中の予定」）は出さず、「次のバージョン」1枚にまとめる（#4937）
+    expect(screen.queryByText("検証中の予定（見込み）")).toBeNull();
+    expect(screen.getByText(/からの差分を見て自動判定します/)).toBeTruthy();
     // 上げ幅は既定の自動判定のまま、リンクを押したときだけ選べる（#4858）
     expect(screen.queryByTestId("release-rc-bump-kind")).toBeNull();
     fireEvent.click(screen.getByText("手動で上げ幅を設定する"));
@@ -180,9 +182,34 @@ describe("ReleaseRcFinalizePanel", () => {
     expect(screen.getByLabelText("メジャー")).toBeTruthy();
     expect(screen.getByLabelText("パッチ")).toBeTruthy();
     fireEvent.click(screen.getByLabelText("マイナー"));
-    expect(screen.getByText("v2.14.0")).toBeTruthy();
-    expect(screen.getByText("確定した正式版")).toBeTruthy();
+    expect(screen.getByText("手動指定のマイナーで v2.14.0 になる見込みです")).toBeTruthy();
+    expect(screen.getByText("次のバージョン")).toBeTruthy();
     expect(screen.getByText("未確定")).toBeTruthy();
+  });
+
+  it("確定した版は「次のバージョン」に上げ幅と版の変化を文で出し、押すと判定理由をモーダルで出す（#4937）", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ reason: "新機能としてXXXを追加したためminorと判定しました。" }) });
+    vi.stubGlobal("fetch", fetchMock);
+    render(<ReleaseRcFinalizePanel candidate={candidate({ phase: "preparing" })} finalization={overview({ current: view() })} repositoryFullName="o/r" onChanged={vi.fn()} />);
+    const card = screen.getByTestId("release-rc-next-version");
+    expect(card.textContent).toContain("v2.14.0");
+    expect(card.textContent).toContain("予約済み");
+    expect(card.textContent).toContain("自動判定の結果、マイナー（v2.13.4 → v2.14.0）になりました");
+    expect(card.textContent).not.toContain("公開前の再試行では増やしません");
+    fireEvent.click(card);
+    await waitFor(() => expect(screen.getByTestId("release-rc-bump-reason").textContent).toBe("新機能としてXXXを追加したためminorと判定しました。"));
+    expect(screen.getByText("v2.14.0 になった理由")).toBeTruthy();
+    expect(String(fetchMock.mock.calls[0][0])).toBe("/api/repositories/release/finalize?owner=o&repo=r&pullNumber=12&version=2.14.0");
+    vi.unstubAllGlobals();
+  });
+
+  it("判定理由のコメントが見つからなくても、上げ幅と基準はモーダルに出す（#4937）", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: async () => ({ reason: null }) }));
+    render(<ReleaseRcFinalizePanel candidate={candidate({ phase: "preparing" })} finalization={overview({ current: view({ bumpKind: "patch", version: "2.13.1" }) })} repositoryFullName="o/r" onChanged={vi.fn()} />);
+    fireEvent.click(screen.getByTestId("release-rc-next-version"));
+    await waitFor(() => expect(screen.getByText("判定理由の記録が見つかりませんでした")).toBeTruthy());
+    expect(screen.getByText(/バグ修正・リファクタリング/)).toBeTruthy();
+    vi.unstubAllGlobals();
   });
 
   it("合格した候補では公開ボタンをオレンジで出し、説明は1文にとどめる（#4858）", () => {
@@ -298,7 +325,7 @@ describe("ReleaseRcFinalizePanel", () => {
         onChanged={vi.fn()}
       />,
     );
-    expect(screen.getByText("v2.14.0", { selector: "p" })).toBeTruthy();
+    expect(screen.getByTestId("release-rc-next-version").textContent).toContain("v2.14.0");
     expect(screen.getByText("予約済み")).toBeTruthy();
     expect(screen.getAllByText("引継ぎ").length).toBe(2);
     expect(screen.getAllByText("再検証").length).toBe(2);

@@ -3,7 +3,9 @@ import { NextResponse, type NextRequest } from "next/server";
 import { requireUserId } from "@/lib/auth-user";
 import { db } from "@/lib/db";
 import { getInstallationToken } from "@/lib/github/app-auth";
+import { fetchCommentsForIssue } from "@/lib/github/issues-api";
 import { githubApiErrorMessage } from "@/lib/github/network-error";
+import { extractFinalizeBumpReason } from "@/lib/github/release-bump-reason";
 import { previewModeGuard } from "@/lib/preview-mode";
 import { FINALIZE_START_ERROR_LABEL } from "@/lib/release-finalize";
 import { approveRcPublish, requestRcFinalize, revokeRcPublish, type FinalizeMutationResult } from "@/lib/release-finalize-run";
@@ -19,6 +21,8 @@ import { isBumpKind } from "@/lib/semver-bump";
  *   止めているのが全体レビューだけの候補は、`waiveAiReview: true`（結果を承知で進む明示）があるときだけ始める（#4807）
  * - POST `action=approve`: 承認の記録が無い既存の公開準備済み候補を1回だけ承認する／停止した自動公開を再開する
  * - POST `action=revoke`: 本番マージを確保する前の自動公開を取り消す
+ * - GET `?owner&repo&pullNumber&version`: 確定した版の上げ幅の判断根拠を、候補PRのコメントから読む（#4937）。
+ *   「次のバージョン」のモーダルを開いたときだけ呼ぶ（候補の状況の取得のたびにコメントを読まない）
  *
  * **進めてよいかはサーバーが判定する。** 画面が送るのは要求キー・見ていた候補のhead・上げ幅だけで、合格の有無・
  * mainの先端・版の予約・段階・承認の範囲は記録とGitHubから取り直して確かめる。マージはmainの保護・必須チェックを迂回しない
@@ -43,6 +47,36 @@ function respond(result: FinalizeMutationResult) {
   if (result.ok) return NextResponse.json(result);
   const label = (FINALIZE_START_ERROR_LABEL as Record<string, string>)[result.error];
   return NextResponse.json({ ...result, message: result.message ?? label }, { status: STATUS_BY_ERROR[result.error] ?? 409 });
+}
+
+const SEMVER = /^\d+\.\d+\.\d+$/;
+
+export async function GET(request: NextRequest) {
+  const userId = await requireUserId();
+  if (!userId) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  const params = request.nextUrl.searchParams;
+  const owner = readString(params.get("owner"));
+  const repo = readString(params.get("repo"));
+  const pullNumber = Number(params.get("pullNumber"));
+  const version = readString(params.get("version"));
+  if (!owner || !repo || !Number.isInteger(pullNumber) || pullNumber <= 0 || !version || !SEMVER.test(version)) {
+    return NextResponse.json({ error: "invalid_request" }, { status: 400 });
+  }
+  const repository = await findRepository(userId, owner, repo);
+  if (!repository) return NextResponse.json({ error: "not_found" }, { status: 404 });
+
+  try {
+    const token = await getInstallationToken(repository.installation.installationId);
+    const comments = await fetchCommentsForIssue(owner, repo, pullNumber, token);
+    const reason = extractFinalizeBumpReason(
+      comments.map((c) => ({ body: c.body, login: c.user?.login ?? "", association: c.author_association ?? null, createdAt: c.created_at })),
+      version,
+    );
+    return NextResponse.json({ reason });
+  } catch (error) {
+    console.error(`[GET /api/repositories/release/finalize] ${owner}/${repo}#${pullNumber}:`, error);
+    return NextResponse.json({ error: "github_api_error", message: githubApiErrorMessage(error) }, { status: 502 });
+  }
 }
 
 export async function POST(request: NextRequest) {
