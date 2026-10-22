@@ -105,11 +105,13 @@
 | 設定（サーバーの`.env`。secrets-manifestには載せない） | `APNS_KEY_P8`（`.p8`のPEM。改行は`\n`可）・`APNS_KEY_ID`・`APNS_TEAM_ID`・`APNS_ENVIRONMENT`（`production`が既定／Xcode実機デバッグは`sandbox`）。揃っていなければAPNsへは送らない |
 | 失効 | 410と`Unregistered`だけ行を削除。`BadDeviceToken`は環境の取り違えでも出るため削除せず失敗として記録する |
 
+**済んだ通知は、アプリでダッシュボードを開いたとき・前面へ戻ったときに通知センターから消す**（#4921）。APNsの通知はService Workerを通らないため、Web Push用の掃除（`registration.getNotifications()`。#2407）では消えず、確認待ちを片付けても残り続けていた。`src/hooks/use-push-notification-cleanup.ts`がアプリ内（UAに`IssueDeckIOS`）では`issueDeckPush`の`deliveredTags`／`removeDelivered`を使い、済みかどうかは同じ`selectStalePushTags`で判定する。照合の鍵は`aps.thread-id`（＝Web Pushのタグ）で、Swift側は`threadIdentifier`が一致する通知を`removeDeliveredNotifications`で消す。この操作を持たない古いビルドでは失敗するので、何もしない（従来どおり残る）。
+
 `isPushConfigured()`はVAPIDまたはAPNsのどちらかが設定済みで真。Apple Developerでの鍵発行・App IDのPush Notifications有効化・`.env`への登録は本人の手作業（`71.manual-step`）。
 
 ### 設定 > 通知からのオン・オフ（#4275）
 
-アプリ内（UAに`IssueDeckIOS`）の通知欄はWeb Push（`usePushSubscription`）ではなく、`src/hooks/use-native-push.ts`が状態を決める。Swift側の窓口はWebViewModelの`issueDeckPush`メッセージハンドラ（`status`／`enable`／`disable`／`openSettings`。アプリ自身のメインフレームからだけ受け付ける）。
+アプリ内（UAに`IssueDeckIOS`）の通知欄はWeb Push（`usePushSubscription`）ではなく、`src/hooks/use-native-push.ts`が状態を決める。Swift側の窓口はWebViewModelの`issueDeckPush`メッセージハンドラ（`status`／`enable`／`disable`／`openSettings`、#4921で`deliveredTags`／`removeDelivered`。アプリ自身のメインフレームからだけ受け付ける）。
 
 | 項目 | 方針 |
 | --- | --- |

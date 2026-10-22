@@ -349,6 +349,11 @@ export type GithubApiPullRequest = {
   head: { ref: string; sha: string };
   /** GitHubの一覧応答は常に返す。検証記録の対象（mainの先端）の照合に使う（#4238） */
   base?: { ref: string; sha: string };
+  /**
+   * ドラフトか。GitHubの一覧応答は常に返す。draftのPRはPR一覧（ブランチ画面）がチェックを読まないため、
+   * 通知側もそれに揃えるのに使う（#4916）
+   */
+  draft?: boolean;
 };
 
 /**
@@ -935,6 +940,21 @@ export async function fetchRefCheckState(
     mergeJudgement: rollup?.mergeJudgement ?? MERGE_JUDGEMENT_UNKNOWN,
   };
 }
+
+/**
+ * draftのリリース候補・バンプPRに使うチェック状態（#4916）。**draftのPRのチェックは読まない。**
+ *
+ * PR一覧（ブランチ画面の「mainへマージ待ち」もここから決まる）はdraftのチェックを取りに行かず
+ * `unknown`のまま扱う（`pull-request-list-fetch.ts`の`fetchCiStates`）。通知ベル・Push通知だけが
+ * ブランチ名で直接チェックを引くと、正式バンプ前の新方式候補（`release-rc/<番号>`）で想定どおりに
+ * 落ちる`version-tag-check`（版がまだmainと同じ）を拾い、ブランチ画面が「mainへマージ待ち」の
+ * ときに通知だけが赤の「チェック失敗」になっていた。取得経路の違いで判定が割れないよう、こちらも
+ * 読まない側へ揃える。
+ */
+export const DRAFT_PULL_REQUEST_CHECK_STATE: RefCheckState = {
+  ciState: "unknown",
+  mergeJudgement: MERGE_JUDGEMENT_UNKNOWN,
+};
 
 /** チェック集約から`CiState`を決める。取得できていなければ`unknown` */
 function toCiState(rollup: CheckRollup | null): CiState {

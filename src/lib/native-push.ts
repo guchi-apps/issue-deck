@@ -40,7 +40,7 @@ export type NativePushState =
   | "expired";
 
 type NativePushHandler = {
-  postMessage(message: { action: string }): Promise<unknown>;
+  postMessage(message: { action: string; tags?: string[] }): Promise<unknown>;
 };
 
 type WebKitWindow = Window & {
@@ -56,10 +56,13 @@ function handler(): NativePushHandler | null {
   return (window as WebKitWindow).webkit?.messageHandlers?.issueDeckPush ?? null;
 }
 
-async function call<T>(action: "status" | "enable" | "disable" | "openSettings"): Promise<T> {
+async function call<T>(
+  action: "status" | "enable" | "disable" | "openSettings" | "deliveredTags" | "removeDelivered",
+  extra: { tags?: string[] } = {},
+): Promise<T> {
   const target = handler();
   if (!target) throw new Error("アプリ本体と通信できませんでした。アプリを更新してください");
-  return (await target.postMessage({ action })) as T;
+  return (await target.postMessage({ action, ...extra })) as T;
 }
 
 export const nativePushBridge = {
@@ -67,6 +70,13 @@ export const nativePushBridge = {
   enable: () => call<NativePushActionResult>("enable"),
   disable: () => call<NativePushActionResult>("disable"),
   openSettings: () => call<void>("openSettings"),
+  /**
+   * 通知センターに残っている通知のタグ（#4921）。**この操作を持たない古いビルドは失敗する**ので、
+   * 呼び出し側は失敗を「何もしない」として扱う
+   */
+  deliveredTags: () => call<string[]>("deliveredTags"),
+  /** 指定したタグの通知を通知センターから消す（#4921） */
+  removeDelivered: (tags: string[]) => call<void>("removeDelivered", { tags }),
 };
 
 /**

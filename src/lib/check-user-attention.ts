@@ -38,6 +38,7 @@ import type { PullRequestSummary } from "@/types/pull-request";
  * |---|---|
  * | 計画・質問の待ち（#2238） | `WAITING`が1件でもあれば**実行中ではない**（他の材料より優先） |
  * | 対応PR（`linkedIssueNumber`） | `isMergeWaitingForChecks`（CI実行中・自動マージ判定中） |
+ * | 対応PRのコンフリクト自動解消（#4924） | `repairRun.kind === "conflict"`（解消中） |
  * | サブPCのセッション | `isSessionActivelyWorking`（`ALIVE`かつ入力待ち・未開始でなく、報告が新しい） |
  *
  * **計画の承認待ち・質問の回答待ちを最初に見るのは、セッションの様子（`activity`）では
@@ -131,6 +132,10 @@ export function isCheckUserWaitingForAgent(
   if (hasPendingSessionRequest(issue, context)) return false;
   const pullRequest = findLinkedPullRequest(context.pullRequests, issue);
   if (pullRequest !== null && isMergeWaitingForChecks(pullRequest)) return true;
+  // 断念・フォールバックで確認待ちになった後に、コンフリクト解消が走り直している（#4924）。
+  // 解消できれば巡回（`clearResolvedConflictCheckUsers`）が確認待ちごと外すので、その間は人の番に
+  // しない。`repairRun`はサーバー側で`visibleRepairRun`済み（コンフリクトが消えたPRでは落ちている）
+  if (pullRequest?.repairRun?.kind === "conflict") return true;
   const session = findSessionForIssue(context.sessions, issue.repositoryFullName, issue.number);
   return isSessionActivelyWorking(session, context.now);
 }

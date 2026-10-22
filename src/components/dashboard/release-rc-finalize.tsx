@@ -1,10 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { Check, Loader2 } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 
 import { PRODUCTION_MERGE_FILLED } from "@/components/dashboard/pull-request-merge-button";
 import { ProductionVerificationBox } from "@/components/dashboard/release-rc-production";
 import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { formatDateTime, formatMonthDayTime } from "@/lib/format-date-time";
 import { FINALIZE_STATUS_LABEL, FINALIZE_START_ERROR_LABEL, REVERIFY_PHASE_LABEL, type ReverifyPhase } from "@/lib/release-finalize";
 import type { RcFinalizationOverview, RcFinalizationView } from "@/lib/release-finalize-run";
@@ -24,9 +26,12 @@ import { BUMP_KIND_CRITERIA, nextVersion, type BumpKind } from "@/lib/semver-bum
  * - Web本番とTestFlight配布は別の行にし、build番号と正式版を混ぜない
  * - **公開準備の開始が唯一の公開承認（#4666）。** 確認画面で「合格後は自動で本番公開する」ことと承認の範囲を示し、
  *   最終検証の後に二度目の「本番承認」を出さない。承認の記録が無い既存の候補だけ、1回だけ承認を求める
+ * - **確認はモーダルで出し、承認を受け付けた後は画面への反映を確かめるまで送信中として扱う（#4917）。**
+ *   受け付けてから候補の状況を取り直し終えるまでの間に、古い状況のまま「本番公開へ進む」が出て見えていたため。
+ *   モーダルは送信中でも閉じられ、閉じてもパネル側で反映の確認を続ける
  */
 
-const CHIP = "inline-flex items-center whitespace-nowrap rounded-full px-2 py-px text-[11px] font-semibold";
+const CHIP = "inline-flex items-center gap-1 whitespace-nowrap rounded-full px-2 py-px text-[11px] font-semibold";
 const TONE = {
   ok: "bg-green-100 text-green-800 dark:bg-green-950 dark:text-green-300",
   run: "bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300",
@@ -178,8 +183,15 @@ function approvalStep(input: { phase: string; approval: PublishApprovalView | nu
   return { label, detail: `${when}に承認（revision ${approval.revision} · ${short(approval.headSha)}）。想定した正式バンプの変更までが範囲です`, tone: "ok", badge: "承認済み" };
 }
 
+// 合格・承認済みなど済んだ状態にはチェック、実行中には回転するアイコンを文字の前に出す（#4918）
 function StateChip({ tone, children }: { tone: Tone; children: React.ReactNode }) {
-  return <span className={cn(CHIP, TONE[tone])}>{children}</span>;
+  return (
+    <span className={cn(CHIP, TONE[tone])}>
+      {tone === "ok" && <Check className="size-3 shrink-0" strokeWidth={3} aria-hidden />}
+      {tone === "run" && <Loader2 className="size-3 shrink-0 animate-spin motion-reduce:animate-none" strokeWidth={3} aria-hidden />}
+      {children}
+    </span>
+  );
 }
 
 const EVIDENCE_TONE = (action: string): Tone => (action === "inherit" ? "ok" : "warn");
@@ -328,6 +340,91 @@ function ApprovalConfirm({
   );
 }
 
+/**
+ * 公開承認の確認モーダル（#4917）。承認を押した後は、受け付け→画面への反映をこの中で示し、反映を確かめたら
+ * 呼び出し側が閉じる。**送信中・反映待ちでも閉じられる**（送信と反映の確認はパネル側で続く）
+ */
+function ApprovalDialog({
+  open,
+  onOpenChange,
+  kind,
+  pending,
+  message,
+  repositoryFullName,
+  candidate,
+  target,
+  bumpPolicy,
+  reusing,
+  requiresWaiver,
+  waiveAiReview,
+  onWaiveAiReviewChange,
+  onSubmit,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  kind: PendingApproval["kind"];
+  pending: PendingApproval | null;
+  message: string | null;
+  repositoryFullName: string;
+  candidate: RcCandidateView;
+  target: { revision: number; baseSha: string; headSha: string } | null;
+  bumpPolicy: string;
+  reusing: boolean;
+  requiresWaiver: boolean;
+  waiveAiReview: boolean;
+  onWaiveAiReviewChange: (checked: boolean) => void;
+  onSubmit: () => void;
+}) {
+  const own = pending !== null && pending.kind === kind ? pending : null;
+  const submitLabel = own ? PENDING_LABEL[kind][own.stage] : kind === "approve" ? "公開を承認する" : reusing ? "公開準備をやり直す" : "公開を承認して進める";
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="flex flex-col sm:max-w-lg" data-testid="release-rc-approval-dialog">
+        <DialogHeader className="pr-6">
+          <DialogTitle>{reusing ? "公開準備をやり直しますか？" : "本番公開を承認しますか？"}</DialogTitle>
+          <DialogDescription className="sr-only">公開承認の対象と範囲を確かめてから承認します</DialogDescription>
+        </DialogHeader>
+        <div className="flex min-h-0 flex-1 flex-col gap-2.5 overflow-y-auto">
+          {target && <ApprovalConfirm repositoryFullName={repositoryFullName} candidate={candidate} target={target} bumpPolicy={bumpPolicy} reusing={reusing} />}
+          {requiresWaiver && (
+            <label className="flex items-start gap-2 text-[12px]">
+              <input
+                type="checkbox"
+                className="mt-0.5"
+                checked={waiveAiReview}
+                onChange={(e) => onWaiveAiReviewChange(e.target.checked)}
+                disabled={own !== null}
+                data-testid="release-rc-ai-review-waiver"
+              />
+              <span>全体レビューの結果（指摘・失敗・未完了）を確認し、承知のうえで本番公開へ進めます</span>
+            </label>
+          )}
+          {own && <PendingProgress pending={own} />}
+          {own && own.stage !== "timeout" && <p className="text-[11.5px] text-muted-foreground">閉じても処理は続きます。反映を確かめたら自動で閉じます。</p>}
+          {message && !own && (
+            <p className="text-[11.5px] text-destructive" role="alert">
+              {message}
+            </p>
+          )}
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>
+            {own ? "閉じる" : "やめる"}
+          </Button>
+          <Button
+            className={cn(kind === "start" && !requiresWaiver && PRODUCTION_MERGE_FILLED)}
+            onClick={onSubmit}
+            disabled={own !== null || pending !== null || target === null || (requiresWaiver && !waiveAiReview)}
+          >
+            {own && own.stage !== "timeout" && <Loader2 className="size-3.5 animate-spin" aria-hidden />}
+            {submitLabel}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 /** 公開承認と自動公開の状況。承認者・日時・対象・失効の理由と差分・止まった理由を出す */
 function ApprovalBox({
   approval,
@@ -383,6 +480,75 @@ function ApprovalBox({
   );
 }
 
+/** 公開準備を始めた後の段階。`failed`などへの移動は「承認が反映された」とはみなさない */
+const STARTED_PHASES = new Set(["preparing", "awaiting_approval", "deploying", "verifying_production", "completed"]);
+/** 反映待ちで、取り直した応答がまだ反映していなかったときに次を取り直すまでの間隔 */
+const REFLECT_RECHECK_MS = 3_000;
+/** 反映を待つ上限。過ぎたら受け付け済みであることを伝えて待つのをやめる（承認は送り直さない） */
+const REFLECT_TIMEOUT_MS = 60_000;
+
+/** 承認を送ってから画面へ反映されるまで。`start`は公開準備の開始、`approve`は承認の記録が無い既存候補の承認 */
+type PendingApproval = { kind: "start" | "approve"; stage: "sending" | "reflecting" | "timeout" };
+
+const PENDING_LABEL: Record<PendingApproval["kind"], Record<PendingApproval["stage"], string>> = {
+  start: { sending: "公開準備を始めています…", reflecting: "反映を確認しています…", timeout: "反映を確認できませんでした" },
+  approve: { sending: "承認しています…", reflecting: "反映を確認しています…", timeout: "反映を確認できませんでした" },
+};
+const REFLECT_TIMEOUT_TEXT = "公開承認は受け付け済みです。画面への反映を確認できませんでした。「更新」で取り直してください";
+
+/** 送信中・反映待ちの進み具合。モーダルとパネルの両方に出す */
+function PendingProgress({ pending }: { pending: PendingApproval }) {
+  if (pending.stage === "timeout") {
+    return (
+      <p className="rounded-md border border-amber-500/60 bg-amber-500/10 px-3 py-2 text-[12px]" role="status" data-testid="release-rc-approval-pending">
+        {REFLECT_TIMEOUT_TEXT}
+      </p>
+    );
+  }
+  return (
+    <div className="flex flex-col gap-1.5 rounded-md border bg-muted/50 px-3 py-2 text-[12px]" role="status" data-testid="release-rc-approval-pending">
+      {pending.stage === "sending" ? (
+        <p className="flex items-center gap-2">
+          <Loader2 className="size-3.5 shrink-0 animate-spin text-primary" aria-hidden />
+          公開承認を送信しています…
+        </p>
+      ) : (
+        <>
+          <p className="flex items-center gap-2">
+            <Check className="size-3.5 shrink-0 text-green-700 dark:text-green-400" aria-hidden />
+            公開承認を受け付けました
+          </p>
+          <p className="flex items-center gap-2">
+            <Loader2 className="size-3.5 shrink-0 animate-spin text-primary" aria-hidden />
+            画面へ反映されるのを待っています…
+          </p>
+        </>
+      )}
+    </div>
+  );
+}
+
+/** 送信中・反映待ちの間、「本番公開へ進む」の代わりに置く押せないボタン */
+function PendingButton({ pending }: { pending: PendingApproval }) {
+  return (
+    <div className="flex flex-col gap-1.5">
+      <div>
+        <Button size="sm" className="h-auto max-w-full whitespace-normal py-1.5 text-left" disabled data-testid="release-rc-approval-pending-button">
+          {pending.stage !== "timeout" && <Loader2 className="size-3.5 animate-spin" aria-hidden />}
+          {PENDING_LABEL[pending.kind][pending.stage]}
+        </Button>
+      </div>
+      <p className="text-[11.5px] text-muted-foreground">
+        {pending.stage === "sending"
+          ? "公開承認を送信しています。"
+          : pending.stage === "reflecting"
+            ? "公開承認を受け付けました。画面へ反映されるのを待っています。"
+            : REFLECT_TIMEOUT_TEXT}
+      </p>
+    </div>
+  );
+}
+
 const BUMP_KIND_OPTIONS: { value: BumpKind | "auto"; label: string }[] = [
   { value: "auto", label: "自動判定" },
   { value: "major", label: "メジャー" },
@@ -404,7 +570,12 @@ export function ReleaseRcFinalizePanel({
   const [bumpKind, setBumpKind] = useState<BumpKind | "auto">("auto");
   // 上げ幅は既定の自動判定で足りるため、手動で選ぶ欄はリンクを押したときだけ開く（#4858）
   const [bumpOpen, setBumpOpen] = useState(false);
-  const [confirming, setConfirming] = useState(false);
+  // 確認モーダル。`start`は公開準備の開始（公開承認）、`approve`は承認の記録が無い既存候補の承認
+  const [confirmKind, setConfirmKind] = useState<PendingApproval["kind"] | null>(null);
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [pending, setPending] = useState<PendingApproval | null>(null);
+  // 反映待ちで最後に取り直しを頼んだ時点の状況。参照が変わるまでは応答待ちとして次を頼まない
+  const seenRef = useRef<{ candidate: RcCandidateView; finalization: RcFinalizationOverview } | null>(null);
   // 全体レビューが合格していない候補で、結果を承知で進むと明示したか（#4807）
   const [waiveAiReview, setWaiveAiReview] = useState(false);
   const [requestKey, setRequestKey] = useState(newRequestKey);
@@ -414,12 +585,49 @@ export function ReleaseRcFinalizePanel({
   const current = finalization.current;
   const approval = finalization.approval ?? null;
   const approvalLive = approval !== null && (approval.status === "active" || approval.status === "merging");
+  const reflecting = pending?.stage === "reflecting";
+
+  // 新しい応答が届いてもまだ反映されていなければ、少し待って取り直す。応答が返る前には頼まない
+  // （取り直しは進行中の取得を中断するため、短い間隔で連打すると反映を確かめられなくなる）
+  useEffect(() => {
+    if (!reflecting) return;
+    const seen = seenRef.current;
+    if (seen === null) {
+      seenRef.current = { candidate, finalization };
+      return;
+    }
+    if (seen.candidate === candidate && seen.finalization === finalization) return;
+    const timer = setTimeout(() => {
+      seenRef.current = { candidate, finalization };
+      onChanged();
+    }, REFLECT_RECHECK_MS);
+    return () => clearTimeout(timer);
+  }, [reflecting, candidate, finalization, onChanged]);
+
+  useEffect(() => {
+    if (!reflecting) return;
+    const timer = setTimeout(() => setPending((p) => (p?.stage === "reflecting" ? { ...p, stage: "timeout" } : p)), REFLECT_TIMEOUT_MS);
+    return () => clearTimeout(timer);
+  }, [reflecting]);
+
   const contract = candidate.finalizeContract;
   const canStart = contract !== null && candidate.phase === "review" && finalization.caller.supported;
   // 承認の記録が無い既存の公開準備済み候補（推定で承認扱いしない）
   const needsLegacyApproval =
     !approvalLive && ["preparing", "awaiting_approval"].includes(candidate.phase) && current?.status === "applied" && current.finalHeadSha !== null;
   const canResume = approval?.status === "active" && ["preparing", "awaiting_approval"].includes(candidate.phase) && approval.run?.active !== true;
+  // 承認が画面へ反映されたら、送信中の表示とモーダルを片付ける（取り直した状況から判定する）。
+  // 承認済みの「やり直す」は押す前から`approvalLive`が真なので、公開準備の開始は段階の変化だけで見る。
+  // 反映せずに承認できる状態でなくなった（取消・失敗などで段階が動いた）ときも待つのをやめ、いまの状況を見せる
+  if (pending !== null && pending.stage !== "sending") {
+    const reflected = pending.kind === "start" ? STARTED_PHASES.has(candidate.phase) : approvalLive;
+    const stillWaitable = pending.kind === "start" ? canStart : needsLegacyApproval;
+    if (reflected || !stillWaitable) {
+      setPending(null);
+      setDialogOpen(false);
+      if (!reflected) setMessage("候補の状況が変わったため、公開承認の反映を確認できませんでした。いまの状況を確かめてください");
+    }
+  }
   // 公開準備に関係する段階・記録が無い候補は、パネルを出さない
   if (!canStart && !current && !["preparing", "awaiting_approval", "deploying", "verifying_production", "completed"].includes(candidate.phase)) {
     return null;
@@ -442,7 +650,6 @@ export function ReleaseRcFinalizePanel({
         setRequestKey(newRequestKey());
         return false;
       }
-      setConfirming(false);
       onChanged();
       return true;
     } catch {
@@ -453,17 +660,30 @@ export function ReleaseRcFinalizePanel({
     }
   };
 
+  /** 承認を送り、受け付けられたら反映待ちにする。モーダルを閉じても送信と反映の確認は続く */
+  const submitApproval = async (kind: PendingApproval["kind"], body: Record<string, unknown>, failure: string) => {
+    setPending({ kind, stage: "sending" });
+    seenRef.current = null;
+    const ok = await post(body, failure);
+    setPending(ok ? { kind, stage: "reflecting" } : null);
+  };
   const start = async () => {
     if (!contract) return;
     if (contract.requiresAiReviewWaiver && !waiveAiReview) return;
-    await post(
+    await submitApproval(
+      "start",
       { action: "start", expectedHeadSha: contract.headSha, bumpKind, requestKey, approvePublish: true, waiveAiReview: contract.requiresAiReviewWaiver && waiveAiReview },
       "公開準備を始められませんでした",
     );
   };
   const approveLegacy = async () => {
     if (!current?.finalHeadSha) return;
-    await post({ action: "approve", expectedHeadSha: current.finalHeadSha, requestKey }, "公開を承認できませんでした");
+    await submitApproval("approve", { action: "approve", expectedHeadSha: current.finalHeadSha, requestKey }, "公開を承認できませんでした");
+  };
+  const openConfirm = (kind: PendingApproval["kind"]) => {
+    setMessage(null);
+    setConfirmKind(kind);
+    setDialogOpen(true);
   };
   const resume = async () => {
     if (!current?.finalHeadSha && !approval) return;
@@ -555,43 +775,16 @@ export function ReleaseRcFinalizePanel({
           ) : (
             <p className="text-[12px]">revision {contract!.revision} が全体レビュー・統合検証に合格しています。</p>
           )}
-          {confirming ? (
-            <>
-              <ApprovalConfirm repositoryFullName={repositoryFullName} candidate={candidate} target={contract!} bumpPolicy={bumpKind} reusing={reusing} />
-              {contract!.requiresAiReviewWaiver && (
-                <label className="flex items-start gap-2 text-[12px]">
-                  <input
-                    type="checkbox"
-                    className="mt-0.5"
-                    checked={waiveAiReview}
-                    onChange={(e) => setWaiveAiReview(e.target.checked)}
-                    disabled={busy}
-                    data-testid="release-rc-ai-review-waiver"
-                  />
-                  <span>全体レビューの結果（指摘・失敗・未完了）を確認し、承知のうえで本番公開へ進めます</span>
-                </label>
-              )}
-              <div className="flex flex-wrap gap-2">
-                <Button
-                  size="sm"
-                  className={cn(!contract!.requiresAiReviewWaiver && PRODUCTION_MERGE_FILLED)}
-                  onClick={start}
-                  disabled={busy || (contract!.requiresAiReviewWaiver && !waiveAiReview)}
-                >
-                  {busy ? "公開準備を始めています…" : reusing ? "公開準備をやり直す" : "公開を承認して進める"}
-                </Button>
-                <Button size="sm" variant="outline" onClick={() => setConfirming(false)} disabled={busy}>
-                  やめる
-                </Button>
-              </div>
-            </>
+          {pending?.kind === "start" ? (
+            <PendingButton pending={pending} />
           ) : (
             <div>
               <Button
                 size="sm"
                 variant={contract!.requiresAiReviewWaiver ? "outline" : "default"}
                 className={cn("h-auto max-w-full whitespace-normal py-1.5 text-left", !contract!.requiresAiReviewWaiver && PRODUCTION_MERGE_FILLED)}
-                onClick={() => setConfirming(true)}
+                onClick={() => openConfirm("start")}
+                disabled={pending !== null}
               >
                 {reusing
                   ? "公開準備をやり直す（承認済み）"
@@ -601,7 +794,7 @@ export function ReleaseRcFinalizePanel({
               </Button>
             </div>
           )}
-          {bumpOpen ? (
+          {pending?.kind === "start" ? null : bumpOpen ? (
             <fieldset className="flex flex-col gap-1.5" data-testid="release-rc-bump-kind">
               <legend className="mb-1.5 text-[11.5px] text-muted-foreground">上げ幅</legend>
               <div className="inline-flex flex-wrap self-start overflow-hidden rounded-md border">
@@ -646,32 +839,40 @@ export function ReleaseRcFinalizePanel({
               ? "前の公開承認は使えません（失効・取り消し）。現在の内容を確かめて承認し直すと、最終検証の合格後に自動で本番公開します。"
               : "この候補は公開準備が済んでいますが、公開承認の記録がありません（以前の画面で公開準備を始めた候補です）。内容を確かめて1回だけ承認すると、最終検証の合格後に自動で本番公開します。"}
           </p>
-          {confirming ? (
-            <>
-              <ApprovalConfirm
-                repositoryFullName={repositoryFullName}
-                candidate={candidate}
-                target={{ revision: candidate.currentRevision, baseSha: current.finalBaseSha ?? "", headSha: current.finalHeadSha ?? "" }}
-                bumpPolicy={current.bumpKind ?? "auto"}
-                reusing={false}
-              />
-              <div className="flex flex-wrap gap-2">
-                <Button size="sm" onClick={approveLegacy} disabled={busy}>
-                  {busy ? "承認しています…" : "公開を承認する"}
-                </Button>
-                <Button size="sm" variant="outline" onClick={() => setConfirming(false)} disabled={busy}>
-                  やめる
-                </Button>
-              </div>
-            </>
+          {pending?.kind === "approve" ? (
+            <PendingButton pending={pending} />
           ) : (
             <div>
-              <Button size="sm" onClick={() => setConfirming(true)}>
+              <Button size="sm" onClick={() => openConfirm("approve")} disabled={pending !== null}>
                 公開の承認内容を確認する
               </Button>
             </div>
           )}
         </div>
+      )}
+      {confirmKind && (
+        <ApprovalDialog
+          open={dialogOpen}
+          onOpenChange={setDialogOpen}
+          kind={confirmKind}
+          pending={pending}
+          message={message}
+          repositoryFullName={repositoryFullName}
+          candidate={candidate}
+          target={
+            confirmKind === "start"
+              ? contract
+              : current
+                ? { revision: candidate.currentRevision, baseSha: current.finalBaseSha ?? "", headSha: current.finalHeadSha ?? "" }
+                : null
+          }
+          bumpPolicy={confirmKind === "start" ? bumpKind : (current?.bumpKind ?? "auto")}
+          reusing={confirmKind === "start" && reusing}
+          requiresWaiver={confirmKind === "start" && contract?.requiresAiReviewWaiver === true}
+          waiveAiReview={waiveAiReview}
+          onWaiveAiReviewChange={setWaiveAiReview}
+          onSubmit={() => void (confirmKind === "start" ? start() : approveLegacy())}
+        />
       )}
       {!finalization.caller.supported && contract !== null && candidate.phase === "review" && (
         <p className="text-[11.5px] text-muted-foreground">{finalization.caller.reasonLabel}</p>

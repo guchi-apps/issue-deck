@@ -2473,7 +2473,7 @@ function SummaryCount({
 function RepositorySummaryRow({
   repository,
   branchesFailed,
-  mergedPullRequestsLoaded,
+  loaded,
   releaseTriggerPending,
   isOpen,
   showSelectionMarker = false,
@@ -2481,7 +2481,11 @@ function RepositorySummaryRow({
 }: {
   repository: BranchFlowRepository;
   branchesFailed: boolean;
-  mergedPullRequestsLoaded: boolean;
+  /**
+   * 行に出す件数・状態を組み立てる材料（Issue・マージ済みPR・ブランチ状況）が揃ったか（#4913）。
+   * 揃うまでは件数を出さず、回るアイコン付きの「読み込み中」だけを出す
+   */
+  loaded: boolean;
   /** この端末からリリースworkflowを起こした直後で、まだバンプPRが現れていない（#1955） */
   releaseTriggerPending: boolean;
   isOpen: boolean;
@@ -2514,13 +2518,14 @@ function RepositorySummaryRow({
   // 開いているリリース候補の検証の進行・問題（#4357・#4390）。見出しと同じ値を読む
   const verification = candidateVerificationOf(repository);
   // 状態バッジが1つでもあるか。無いときは2行目を作らない（#4032）
-  const hasBadges =
+  // 揃う前のバッジは途中の材料から組み立てた値なので出さない（#4913。件数と一緒に一度に出す）
+  const hasBadges = loaded && (
     verification !== null ||
     hasPullRequestHealthChips(summary.pullRequestHealth) ||
     summary.releaseInProgress ||
     releaseLaunching ||
     iosDistribution.running ||
-    deploy !== null;
+    deploy !== null);
   const hasAnything =
     summary.activeLaneCount > 0 ||
     summary.releaseInProgress ||
@@ -2589,6 +2594,16 @@ function RepositorySummaryRow({
       <span className="min-w-0 flex-1" />
 
       <span className="flex shrink-0 items-center gap-2">
+      {/* 材料が揃うまでは件数を1つも出さない（#4913）。Issue・PRとブランチ状況は別々に届くため、
+          揃った分から出すと「読み込み中」→「動きなし」→件数のように行の表示が何度も変わっていた。
+          一度揃った後の取り直しでは`loaded`は真のままで、件数を出したまま更新アイコンだけが回る */}
+      {!loaded && !branchesFailed ? (
+        <span className="inline-flex shrink-0 items-center gap-1 text-xs text-muted-foreground">
+          <Loader2 className="size-3 shrink-0 animate-spin motion-reduce:animate-none" aria-hidden="true" />
+          読み込み中
+        </span>
+      ) : (
+      <>
       {/* 手作業は畳んだ束にも残る（#1586）。開かなくても残っていることが分かるようにする。
           **他の件数と同じアイコン＋数字で出す**（#2243）。琥珀のピルだけ形が違ったため、
           右端に件数が並んでも手作業だけ縦位置と字送りがそろわず、スマホ幅ではそのぶん
@@ -2645,12 +2660,11 @@ function RepositorySummaryRow({
       {branchesFailed && (
         <span className="shrink-0 text-xs text-muted-foreground">ブランチ状況を取得できず</span>
       )}
-      {/* 取得が済むまで「動きなし」と言い切らない（#1711）。マージ済みのPRが揃っていない間は
-          進行中の件数も版も出せず、静かなだけなのか読み込み中なのかを行から区別できない */}
+      {/* 取得が済むまで「動きなし」と言い切らない（#1711）。揃っていない間は上の「読み込み中」が出る */}
       {!hasAnything && !branchesFailed && (
-        <span className="shrink-0 text-xs text-muted-foreground">
-          {mergedPullRequestsLoaded ? "動きなし" : "読み込み中"}
-        </span>
+        <span className="shrink-0 text-xs text-muted-foreground">動きなし</span>
+      )}
+      </>
       )}
       </span>
       </span>
@@ -2694,7 +2708,7 @@ function RepositorySummaryRow({
       )}
       {/* 手が要らないときの状態文言（未リリース・開発中など）と導線は出さない（#4848）。
           状態は1行目の件数が表しており、行全体を押せば開くので、2行目は手が要るときだけ使う */}
-      {!hasBadges && guidance.attention && (
+      {loaded && !hasBadges && guidance.attention && (
         <span className="flex w-full items-center text-xs">
           <AttentionGuidance next={guidance.next} isOpen={isOpen} showSelectionMarker={showSelectionMarker} />
         </span>
@@ -2734,6 +2748,7 @@ function RepositorySection({
   repository,
   branchesFailed,
   mergedPullRequestsLoaded,
+  rowLoaded,
   showClosed,
   isOpen,
   selectionMode = false,
@@ -2746,6 +2761,8 @@ function RepositorySection({
   repository: BranchFlowRepository;
   branchesFailed: boolean;
   mergedPullRequestsLoaded: boolean;
+  /** 畳んだ行の件数を出してよいか（#4913。`RepositorySummaryRow`の`loaded`） */
+  rowLoaded: boolean;
   showClosed: boolean;
   isOpen: boolean;
   /** 2ペイン表示か（#2157）。行の見た目（選択の縦棒）と中身の行き先が変わる */
@@ -2810,7 +2827,7 @@ function RepositorySection({
       <RepositorySummaryRow
         repository={repository}
         branchesFailed={branchesFailed}
-        mergedPullRequestsLoaded={mergedPullRequestsLoaded}
+        loaded={rowLoaded}
         releaseTriggerPending={isPending}
         isOpen={isOpen}
         showSelectionMarker={selectionMode}
@@ -3063,6 +3080,11 @@ export function BranchFlowView({
   // そこへ終わらない「読み込み中」を重ねると、待てば直るものとして読めてしまう。
   // 失敗しているときは従来どおりの表示（＝取れた範囲で描く）に戻す。
   const releasesLoaded = mergedPullRequestsLoaded || error !== null;
+  // 畳んだ行の件数は、マージ済みPRに加えてブランチ状況（`fetchedAt`）の初回取得も待つ（#4913）。
+  // 行はIssue・PRから先に組み立てられ、ブランチ状況だけが遅れて届くため、PRだけで判定すると
+  // その間に「動きなし」が出てから件数へ変わっていた。`fetchedAt`は取り直し中も残るので、
+  // 2回目以降の更新で「読み込み中」へ戻ることはない
+  const rowsLoaded = (mergedPullRequestsLoaded && fetchedAt !== null) || error !== null;
 
   // **手が要るリポジトリを初回に自動で開くのはやめた**（#1932）。#1510・#1711では
   // CI失敗・マージ待ち・リリース中のリポジトリを開いた直後に展開していたが、そのぶん
@@ -3317,6 +3339,7 @@ export function BranchFlowView({
               repository={repository}
               branchesFailed={failedRepositories.includes(repository.repositoryFullName)}
               mergedPullRequestsLoaded={releasesLoaded}
+              rowLoaded={rowsLoaded}
               showClosed={showClosed}
               isOpen={isRepositoryOpen(repository.repositoryFullName)}
               selectionMode={isSplit}

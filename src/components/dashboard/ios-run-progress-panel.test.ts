@@ -28,6 +28,13 @@ function run(overrides: Partial<IosTestflightRun>, states: string[]): IosTestfli
 }
 
 describe("summarizeIosRunProgress", () => {
+  it("判定だけ済んで以降を全て飛ばした実行は配布なしとして扱う（#4925）", () => {
+    const skipped = ["success", "skipped", "skipped", "skipped", "skipped", "skipped"];
+    expect(summarizeIosRunProgress(run({}, skipped), 0).notDistributed).toBe(true);
+    expect(summarizeIosRunProgress(run({}, ["success", "success", "success", "success", "success", "success"]), 0).notDistributed).toBe(false);
+    expect(summarizeIosRunProgress(run({ status: "in_progress", conclusion: null }, skipped), 0).notDistributed).toBe(false);
+  });
+
   it("完了した実行は作成から更新までを所要時間にする", () => {
     const s = summarizeIosRunProgress(run({}, ["success", "success", "success", "success", "success", "success"]), 0);
     expect(s).toMatchObject({ total: 6, done: 6, ratio: 1, failed: false, isRunning: false, elapsedMs: 600_000 });

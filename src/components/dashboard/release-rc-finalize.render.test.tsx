@@ -220,6 +220,75 @@ describe("ReleaseRcFinalizePanel", () => {
     vi.unstubAllGlobals();
   });
 
+  it("確認はモーダルで出し、承認後は反映を確かめるまで閉じず、閉じても「本番公開へ進む」を出さない（#4917）", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ ok: true }) });
+    vi.stubGlobal("fetch", fetchMock);
+    const onChanged = vi.fn();
+    const { rerender } = render(<ReleaseRcFinalizePanel candidate={candidate()} finalization={overview()} repositoryFullName="o/r" onChanged={onChanged} />);
+    fireEvent.click(screen.getByText("本番公開へ進む（公開承認）"));
+    const dialog = screen.getByTestId("release-rc-approval-dialog");
+    expect(dialog.getAttribute("role")).toBe("dialog");
+    expect(dialog.textContent).toContain("本番公開を承認しますか？");
+    fireEvent.click(screen.getByText("公開を承認して進める"));
+    await waitFor(() => expect(screen.getByTestId("release-rc-approval-dialog").textContent).toContain("公開承認を受け付けました"));
+    expect(onChanged).toHaveBeenCalledTimes(1);
+
+    // 取り直した状況がまだ`review`のままなら、モーダルは開いたまま
+    rerender(<ReleaseRcFinalizePanel candidate={candidate()} finalization={overview()} repositoryFullName="o/r" onChanged={onChanged} />);
+    expect(screen.getByTestId("release-rc-approval-dialog")).toBeTruthy();
+
+    // 閉じても送信中の表示が残り、「本番公開へ進む」は出さない
+    fireEvent.click(screen.getByText("閉じる"));
+    await waitFor(() => expect(screen.queryByTestId("release-rc-approval-dialog")).toBeNull());
+    expect(screen.queryByText("本番公開へ進む（公開承認）")).toBeNull();
+    expect(screen.queryByText("手動で上げ幅を設定する")).toBeNull();
+    expect(screen.getByTestId("release-rc-approval-pending-button").textContent).toContain("反映を確認しています");
+
+    // 公開準備へ進んだ状況が届いたら、送信中の表示を片付ける
+    rerender(
+      <ReleaseRcFinalizePanel
+        candidate={candidate({ phase: "preparing", finalizeContract: null })}
+        finalization={overview({ approval: approval() })}
+        repositoryFullName="o/r"
+        onChanged={onChanged}
+      />,
+    );
+    expect(screen.queryByTestId("release-rc-approval-pending-button")).toBeNull();
+    expect(screen.getByTestId("release-rc-approval")).toBeTruthy();
+    vi.unstubAllGlobals();
+  });
+
+  it("反映を確かめたらモーダルを自動で閉じる（#4917）", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: async () => ({ ok: true }) }));
+    const onChanged = vi.fn();
+    const { rerender } = render(<ReleaseRcFinalizePanel candidate={candidate()} finalization={overview()} repositoryFullName="o/r" onChanged={onChanged} />);
+    fireEvent.click(screen.getByText("本番公開へ進む（公開承認）"));
+    fireEvent.click(screen.getByText("公開を承認して進める"));
+    await waitFor(() => expect(screen.getByTestId("release-rc-approval-dialog").textContent).toContain("公開承認を受け付けました"));
+    rerender(
+      <ReleaseRcFinalizePanel
+        candidate={candidate({ phase: "preparing", finalizeContract: null })}
+        finalization={overview({ approval: approval() })}
+        repositoryFullName="o/r"
+        onChanged={onChanged}
+      />,
+    );
+    await waitFor(() => expect(screen.queryByTestId("release-rc-approval-dialog")).toBeNull());
+    vi.unstubAllGlobals();
+  });
+
+  it("送信が拒否されたらモーダルを閉じずに理由を出し、やり直せる（#4917）", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 409, json: async () => ({ ok: false, error: "run_active" }) }));
+    const onChanged = vi.fn();
+    render(<ReleaseRcFinalizePanel candidate={candidate()} finalization={overview()} repositoryFullName="o/r" onChanged={onChanged} />);
+    fireEvent.click(screen.getByText("本番公開へ進む（公開承認）"));
+    fireEvent.click(screen.getByText("公開を承認して進める"));
+    await waitFor(() => expect(screen.getByTestId("release-rc-approval-dialog").textContent).toContain("別の完了系列が進行中です"));
+    expect(screen.getByText("公開を承認して進める").closest("button")!.disabled).toBe(false);
+    expect(onChanged).not.toHaveBeenCalled();
+    vi.unstubAllGlobals();
+  });
+
   it("バンプ後は確定した版・引継ぎと再検証の別・元のheadを出す", () => {
     render(
       <ReleaseRcFinalizePanel
@@ -236,6 +305,21 @@ describe("ReleaseRcFinalizePanel", () => {
     expect(screen.getAllByText(/バンプ前 aaaaaaa/).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/バンプ後 ccccccc/).length).toBeGreaterThan(0);
     expect(screen.queryByText("本番公開へ進む（公開承認）")).toBeNull();
+  });
+
+  it("済んだ状態のバッジにはチェック、実行中のバッジには回転するアイコンを文字の前に出す（#4918）", () => {
+    render(
+      <ReleaseRcFinalizePanel
+        candidate={candidate({ phase: "preparing", finalizeContract: null })}
+        finalization={overview({ current: view({ status: "requested", statusLabel: "バンプ中", finalHeadSha: null, appliedAt: null }) })}
+        repositoryFullName="o/r"
+        onChanged={vi.fn()}
+      />,
+    );
+    const chip = (text: string) => screen.getAllByText(text)[0].closest("span")!;
+    expect(chip("合格").querySelector(".lucide-check")).toBeTruthy();
+    expect(chip("実行中").querySelector(".lucide-loader-circle, .lucide-loader2")).toBeTruthy();
+    expect(chip("待機").querySelector("svg")).toBeNull();
   });
 
   it("承認の記録が無い公開準備済みの候補には、1回だけの承認を出す", async () => {
