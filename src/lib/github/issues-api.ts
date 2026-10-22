@@ -135,6 +135,22 @@ export async function fetchCommentsForIssue(
 }
 
 /**
+ * Issueのtimeline（コメント・ラベルの付け外しなどを古い順に並べたもの）を全件取得する。
+ * コメントとラベル付与の前後関係を、同期した時刻ではなくGitHubが記録した並びで見たいときに使う（#4931）。
+ */
+export async function fetchIssueTimeline<T>(
+  owner: string,
+  repo: string,
+  number: number,
+  token: string,
+): Promise<T[]> {
+  return fetchAllPages<T>(
+    `${GITHUB_API}/repos/${owner}/${repo}/issues/${number}/timeline?per_page=100`,
+    token,
+  );
+}
+
+/**
  * コメント1件だけを取得する。`fetchCommentsForIssue`（全件・ページネーション付き）は
  * コメント単位の要約生成のように1件だけ必要な場面では無駄なAPI消費になるため分けている。
  */

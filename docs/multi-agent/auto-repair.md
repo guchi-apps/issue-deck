@@ -139,11 +139,15 @@ develop向け`issue-<番号>`PRを見て、コンフリクトしていれば
   フォールバックで確認待ちになった後、別経路（`workflow_run`など）から走り直した解消が成功しても、
   ワークフローは付けた`00.check-user`を外さないため、PRがマージ可能になってもIssueが
   「ユーザーの確認待ち」に残っていた。巡回は`mergeable === true`・解消が実行中でない・理由が
-  `01.check-blocked`・**確認待ちが付いた時点（`checkUserLabeledAt`）の直前のコメントと、それ以降の
-  コメントがすべて`issue-deck-source:claude-conflict-resolve`**のときだけ、`00.check-user`と理由
-  ラベルを外してIssueへ報告する（判定は`src/lib/github/conflict-check-user-clear.ts`）。同じマーカーは
-  着手・成功報告にも付くため最新コメントだけでは起点にならず、CI修正などが付けた確認待ちを外さない
-  よう付与の直前のコメントで起点を確かめる。後から人や別の実行体が書いていれば外さない。コメントの取得はDBで絞り込んだ後だけ行い、外さなかった
+  `01.check-blocked`・**最後に`00.check-user`を付けたイベントの直前のコメントと、それ以降の
+  コメントがすべて`issue-deck-source:claude-conflict-resolve`で、そのコメントの投稿者がラベルを
+  付けた者と同じ**ときだけ、`00.check-user`と理由ラベルを外してIssueへ報告する（判定は
+  `src/lib/github/conflict-check-user-clear.ts`）。同じマーカーは着手・成功報告にも付くため最新
+  コメントだけでは起点にならず、CI修正などが付けた確認待ちを外さないよう付与の直前のコメントで起点を
+  確かめる。後から人や別の実行体が書いていれば外さない。**付与の時点はIssueのtimeline（`labeled`
+  イベント）で取り、DBの`checkUserLabeledAt`は使わない**（#4931）。あの列は同期でラベルを初めて
+  見た時刻なので、別の実行体の付与から同期までの間にコンフリクト解消がコメントすると、そのコメントを
+  起点と取り違えて他人の確認待ちを外していた。付与イベントが見つからなければ外さない。timelineの取得はDBで絞り込んだ後だけ行い、外さなかった
   Issueは同じ待ち時間（30分）取り直さない。解消が走っている間は、確認待ちの件数でも
   「実行中」に数える（`isCheckUserWaitingForAgent`）
 - **対象は`issue-<番号>`と`release/vX.Y.Z`→developのPR。** バンプPRは同一repoに限り、
