@@ -199,7 +199,7 @@ describe("ReleaseRcFinalizePanel", () => {
     fireEvent.click(card);
     await waitFor(() => expect(screen.getByTestId("release-rc-bump-reason").textContent).toBe("新機能としてXXXを追加したためminorと判定しました。"));
     expect(screen.getByText("v2.14.0 になった理由")).toBeTruthy();
-    expect(String(fetchMock.mock.calls[0][0])).toBe("/api/repositories/release/finalize?owner=o&repo=r&pullNumber=12&version=2.14.0");
+    expect(String(fetchMock.mock.calls[0][0])).toBe("/api/repositories/release/finalize?owner=o&repo=r&finalizationId=f1");
     vi.unstubAllGlobals();
   });
 

@@ -219,14 +219,14 @@ function VersionBox({
   const [open, setOpen] = useState(false);
   const [reason, setReason] = useState<ReasonState | null>(null);
   const version = finalization?.version ?? null;
-  const reasonKey = finalization && version ? `${finalization.prNumber}:${version}` : null;
+  const reasonKey = finalization && version ? `${finalization.id}:${version}` : null;
   const loadedKey = useRef<string | null>(null);
 
   useEffect(() => {
     if (!open || !finalization || !version || loadedKey.current === reasonKey) return;
     loadedKey.current = reasonKey;
     setReason({ status: "loading" });
-    fetchFinalizeBumpReason(repositoryFullName, finalization.prNumber, version)
+    fetchFinalizeBumpReason(repositoryFullName, finalization.id)
       .then((text) => setReason({ status: "loaded", reason: text }))
       .catch((err) => {
         loadedKey.current = null;

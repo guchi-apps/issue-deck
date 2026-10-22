@@ -21,7 +21,8 @@ import { isBumpKind } from "@/lib/semver-bump";
  *   止めているのが全体レビューだけの候補は、`waiveAiReview: true`（結果を承知で進む明示）があるときだけ始める（#4807）
  * - POST `action=approve`: 承認の記録が無い既存の公開準備済み候補を1回だけ承認する／停止した自動公開を再開する
  * - POST `action=revoke`: 本番マージを確保する前の自動公開を取り消す
- * - GET `?owner&repo&pullNumber&version`: 確定した版の上げ幅の判断根拠を、候補PRのコメントから読む（#4937）。
+ * - GET `?owner&repo&finalizationId`: 確定した版の上げ幅の判断根拠を、候補PRのコメントから読む（#4937）。
+ *   読むPRと版は公開準備の記録から引き、画面からは受けない。
  *   「次のバージョン」のモーダルを開いたときだけ呼ぶ（候補の状況の取得のたびにコメントを読まない）
  *
  * **進めてよいかはサーバーが判定する。** 画面が送るのは要求キー・見ていた候補のhead・上げ幅だけで、合格の有無・
@@ -49,21 +50,25 @@ function respond(result: FinalizeMutationResult) {
   return NextResponse.json({ ...result, message: result.message ?? label }, { status: STATUS_BY_ERROR[result.error] ?? 409 });
 }
 
-const SEMVER = /^\d+\.\d+\.\d+$/;
-
 export async function GET(request: NextRequest) {
   const userId = await requireUserId();
   if (!userId) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const params = request.nextUrl.searchParams;
   const owner = readString(params.get("owner"));
   const repo = readString(params.get("repo"));
-  const pullNumber = Number(params.get("pullNumber"));
-  const version = readString(params.get("version"));
-  if (!owner || !repo || !Number.isInteger(pullNumber) || pullNumber <= 0 || !version || !SEMVER.test(version)) {
-    return NextResponse.json({ error: "invalid_request" }, { status: 400 });
-  }
+  const finalizationId = readString(params.get("finalizationId"));
+  if (!owner || !repo || !finalizationId) return NextResponse.json({ error: "invalid_request" }, { status: 400 });
   const repository = await findRepository(userId, owner, repo);
   if (!repository) return NextResponse.json({ error: "not_found" }, { status: 404 });
+  // 読むPRと版は画面から受けず、公開準備の記録から引く（任意のPRのコメントを読ませない）
+  const row = await db.releaseCandidateFinalization.findFirst({
+    where: { id: finalizationId, repositoryFullName: repository.fullName },
+    select: { prNumber: true, reservedVersion: true },
+  });
+  if (!row) return NextResponse.json({ error: "not_found" }, { status: 404 });
+  if (!row.reservedVersion) return NextResponse.json({ reason: null });
+  const pullNumber = row.prNumber;
+  const version = row.reservedVersion;
 
   try {
     const token = await getInstallationToken(repository.installation.installationId);
