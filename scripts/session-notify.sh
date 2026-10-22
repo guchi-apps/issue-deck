@@ -30,6 +30,9 @@
 #   Pre/PostToolUse（すべて）        いま何をしているか → ホスト側の`.step`へコードを書く（#2705）。
 #                                               上の間引きより前で扱う。issue-deckへは
 #                                               pollerが次の巡で運ぶので、ここからは送らない
+#   PreToolUse(Edit / Write / NotebookEdit / Bash)
+#                                   計画・デザインの提示前の実装 → 拒否する（#4944。
+#                                               `ISSUE_DECK_REQUIRED_GATES`があるときだけ）
 #   SessionStart                    セッション開始 → 「まだ開始していない」印を消し、Codexなら
 #                                               `codex queue`の宛先（session_id）を残す（#2519）。
 #                                               **issue-deckへも送らない**
@@ -667,6 +670,195 @@ record_session_step() {
 
 if [[ "$HOOK_JSON" =~ \"hook_event_name\"[[:space:]]*:[[:space:]]*\"(Pre|Post)ToolUse\" ]]; then
   record_session_step
+fi
+
+# ---------------------------------------------------------------------------
+# 計画・デザインの提示を飛ばしたまま実装へ進ませない（#4944）
+#
+# `21.plan-required`・`25.artifact-required`を守らせていたのは起動プロンプトの文面だけで、
+# 読み飛ばされると止めるものが無かった。guchi-apps/yoteiflow#1321では両ラベルが起動前から
+# 付いていたのに、Plan modeにもアーティファクトにも触れないまま2分でPRまで進んだ。
+#
+# 起動時のラベルはランチャーが`ISSUE_DECK_REQUIRED_GATES`（`plan`・`artifact`のカンマ区切り）で
+# 渡す。提示が転記に無い間は、worktree内のファイル変更（`Edit`・`Write`・`NotebookEdit`）と
+# `git commit`・`git push`・`gh pr create`を**固定の文面で拒否する**。提示そのものは
+# エージェントに任せ、ここでは承認を生成しない。
+#
+#   - 提示済みの判定は**同じworktreeの転記すべて**を見る。再開・引き継ぎで転記が新しくなっても、
+#     前の転記で承認した計画が効く（端末・Remote Controlでの承認はIssueに記録が残らないため）
+#   - 拒否する直前に限りIssueのラベルを引き直し、外れていれば通す。人が外せば解ける逃げ道
+#   - アーティファクトのHTMLは書けないと公開できないので、`.html`・`.htm`は場所を問わず通す
+#   - Bashのheredocでのファイル書き込みは見分けられないが、コミットの時点で止まる
+enforce_required_gates() {
+  local decision
+  decision="$(
+    GATES_ISSUE_NUMBER="$ISSUE_NUMBER" GATES_REPO_SLUG="$REPO_SLUG" python3 - <<'PY' 2>/dev/null
+import glob
+import json
+import os
+import re
+import subprocess
+import sys
+
+try:
+    with open(os.environ["NOTIFY_HOOK_JSON_FILE"], encoding="utf-8") as handle:
+        hook_json = handle.read()
+except Exception:
+    hook_json = os.environ.get("HOOK_JSON", "")
+try:
+    hook = json.loads(hook_json)
+except Exception:
+    sys.exit(0)
+if not isinstance(hook, dict) or hook.get("hook_event_name") != "PreToolUse":
+    sys.exit(0)
+
+gates = [g for g in os.environ.get("ISSUE_DECK_REQUIRED_GATES", "").split(",") if g in ("plan", "artifact")]
+if not gates:
+    sys.exit(0)
+
+tool = hook.get("tool_name")
+tool_input = hook.get("tool_input") if isinstance(hook.get("tool_input"), dict) else {}
+cwd = hook.get("cwd") or ""
+
+
+def guarded():
+    if tool in ("Edit", "Write", "NotebookEdit"):
+        target = tool_input.get("file_path") or tool_input.get("notebook_path") or ""
+        if not isinstance(target, str) or not target or not cwd:
+            return False
+        if target.lower().endswith((".html", ".htm")):
+            return False
+        target = os.path.realpath(os.path.join(cwd, target))
+        root = os.path.realpath(cwd)
+        return target == root or target.startswith(root + os.sep)
+    if tool == "Bash":
+        command = tool_input.get("command")
+        if not isinstance(command, str):
+            return False
+        return bool(
+            re.search(r"(^|[\s;&|(])git(\s+-C\s+\S+)?\s+(commit|push)\b", command)
+            or re.search(r"(^|[\s;&|(])gh\s+pr\s+create\b", command)
+        )
+    return False
+
+
+if not guarded():
+    sys.exit(0)
+
+
+def satisfied_gates():
+    """同じworktreeの転記から、計画の承認とアーティファクトの公開を探す。"""
+    found = set()
+    transcript = hook.get("transcript_path") or ""
+    if not transcript:
+        return found
+    files = sorted(glob.glob(os.path.join(os.path.dirname(transcript), "*.jsonl")), key=os.path.getmtime, reverse=True)
+    for path in files[:30]:
+        plan_ids, artifact_ids = set(), set()
+        try:
+            handle = open(path, encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        with handle:
+            for line in handle:
+                # 該当しそうな行だけを解析する（転記は数MBになる）
+                if "plan_mode_exit" not in line and "ExitPlanMode" not in line and "Artifact" not in line and "tool_result" not in line:
+                    continue
+                try:
+                    record = json.loads(line)
+                except Exception:
+                    continue
+                attachment = record.get("attachment")
+                if isinstance(attachment, dict) and attachment.get("type") == "plan_mode_exit":
+                    found.add("plan")
+                content = (record.get("message") or {}).get("content")
+                if not isinstance(content, list):
+                    continue
+                for block in content:
+                    if not isinstance(block, dict):
+                        continue
+                    if block.get("type") == "tool_use":
+                        name, given = block.get("name"), block.get("input") or {}
+                        if name == "ExitPlanMode":
+                            plan_ids.add(block.get("id"))
+                        elif (
+                            name == "Artifact"
+                            and given.get("action") in (None, "", "publish")
+                            and not given.get("type_url")
+                            and not given.get("asset")
+                            and str(given.get("file_path") or "").lower().endswith((".html", ".htm"))
+                        ):
+                            artifact_ids.add(block.get("id"))
+                    elif block.get("type") == "tool_result" and not block.get("is_error"):
+                        if block.get("tool_use_id") in plan_ids:
+                            found.add("plan")
+                        if block.get("tool_use_id") in artifact_ids:
+                            found.add("artifact")
+        if found >= set(gates):
+            break
+    return found
+
+
+missing = [g for g in gates if g not in satisfied_gates()]
+if not missing:
+    sys.exit(0)
+
+# 拒否する直前だけラベルを引き直す。外れていれば通す（引けなければ拒否のまま）
+labels = {"plan": "21.plan-required", "artifact": "25.artifact-required"}
+issue, repo = os.environ.get("GATES_ISSUE_NUMBER", ""), os.environ.get("GATES_REPO_SLUG", "")
+if issue and repo:
+    try:
+        result = subprocess.run(
+            ["gh", "issue", "view", issue, "--repo", repo, "--json", "labels", "--jq", ".labels[].name"],
+            capture_output=True, text=True, timeout=20,
+        )
+        if result.returncode == 0:
+            current = set(result.stdout.split())
+            missing = [g for g in missing if labels[g] in current]
+    except Exception:
+        pass
+if not missing:
+    sys.exit(0)
+
+reasons = []
+if "artifact" in missing:
+    reasons.append(
+        "このIssueには`25.artifact-required`（デザインを提示）が付いていますが、見た目のアーティファクトをまだ公開していません。"
+        "コードを書き始める前に、1枚の自己完結HTML（worktree外か`.html`ファイル）を書いて`Artifact`ツールで公開してください。"
+    )
+if "plan" in missing:
+    reasons.append(
+        "このIssueには`21.plan-required`（計画を立案）が付いていますが、計画がまだ承認されていません。"
+        "実装の前に`EnterPlanMode`でPlan modeに入り、計画を`ExitPlanMode`で提示して承認を得てください。"
+    )
+reasons.append(
+    "提示と承認が済むまで、worktree内のファイル変更と`git commit`・`git push`・`gh pr create`はこのフックが止めます。"
+    "承認済みなのにこの拒否が出る場合は、ユーザーにIssueから該当ラベルを外してもらってください。"
+)
+sys.stdout.write(
+    json.dumps(
+        {
+            "hookSpecificOutput": {
+                "hookEventName": "PreToolUse",
+                "permissionDecision": "deny",
+                "permissionDecisionReason": "\n".join(reasons),
+            }
+        },
+        ensure_ascii=False,
+    )
+)
+PY
+  )"
+  [[ -n "$decision" ]] || return 1
+  printf '%s\n' "$decision"
+  return 0
+}
+
+if [[ -n "${ISSUE_DECK_REQUIRED_GATES:-}" ]] &&
+  [[ "$HOOK_JSON" =~ \"hook_event_name\"[[:space:]]*:[[:space:]]*\"PreToolUse\" ]] &&
+  [[ "$HOOK_JSON" =~ \"tool_name\"[[:space:]]*:[[:space:]]*\"(Edit|Write|NotebookEdit|Bash)\" ]]; then
+  # 拒否したらこのイベントはそれで終わり（下の早期終了と同じく、ほかに送るものは無い）
+  enforce_required_gates && exit 0
 fi
 
 # `PreToolUse`のうち、計画（`ExitPlanMode`）と質問（`AskUserQuestion`）以外はここで打ち切る（#2705）。

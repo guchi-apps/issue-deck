@@ -896,6 +896,32 @@ guchi-apps/aide#253で実際に起きた。`gh pr create`が拒否され（11:55
 起動したセッションは起動時の版のままで、developへ入ったあとに起動したセッションから効く。
 issue-deck以外のリポジトリのセッションも同じスクリプトを使うため、共有ワークフローの配布は要らない。
 
+### 計画・デザインを出さずに実装へ進ませない（#4944）
+
+**`21.plan-required`・`25.artifact-required`を守らせていたのは起動プロンプトの文面だけだった。**
+guchi-apps/yoteiflow#1321では両ラベルが起動前から付いていたのに、セッションはPlan modeにも
+アーティファクトにも触れず、2分でPRまで進んだ。yoteiflowは自前の古い
+`scripts/prompts/implementation-agent.md`を持っていて汎用テンプレートより優先されるため、
+アーティファクトの指示がそもそも無く、計画の指示も1行だけだった。文面を直しても、読み飛ばされれば
+同じことが起きる。
+
+そこで`run-issue-session.sh`が起動時のラベル（プロンプトファイルの`- ラベル:`行）から関門を決め、
+`ISSUE_DECK_REQUIRED_GATES`（`plan`・`artifact`）としてフックへ渡す。`session-notify.sh`は
+`PreToolUse`で次を**固定の文面で拒否**し、先に計画・デザインを出すよう差し戻す。承認は生成しない。
+
+- worktree内への`Edit`・`Write`・`NotebookEdit`（`.html`・`.htm`は公開前に書く必要があるので通す）
+- Bashの`git commit`・`git push`・`gh pr create`（heredocでのファイル書き込みは見分けられないが、
+  コミットの時点で止まる）
+
+提示済みの判定は**同じworktreeの転記すべて**から、`ExitPlanMode`の成功結果（または
+`plan_mode_exit`）と、HTMLを公開した`Artifact`の成功結果を探す。再開・引き継ぎで転記が新しくなっても、
+端末・Remote Controlで承認した計画が効く（どちらもIssueには記録が残らない）。拒否する直前に限り
+Issueのラベルを引き直し、外れていれば通す——判定が外れたときに人が解く手段はラベルを外すこと。
+
+- 実装セッション（`ISSUE_DECK_SESSION_KIND`が`implementation`）でClaude Codeのときだけ。Codexは
+  `PreToolUse`を繋いでいないので効かない
+- 境界は`scripts/session-notify-required-gates.test.mjs`が固定している
+
 ### 停滞からの復旧は画面から送れる（#2886）
 
 **引き上げ（`supervisor:session-interrupted`）はIssueコメントと`00.check-user`にしか残って
