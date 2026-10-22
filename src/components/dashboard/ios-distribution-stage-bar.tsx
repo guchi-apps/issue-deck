@@ -29,11 +29,15 @@ const STATE_TEXT: Record<IosStageState, string> = {
 export function IosDistributionStageBar({
   stages,
   notDistributed = false,
+  thin = false,
 }: {
   stages: readonly IosStageStatus[];
   /** 配布しなかった版。全段階を同じ灰色の無地にし、段階名も出さない */
   notDistributed?: boolean;
+  /** バーを細く（4px）出す。ブランチ画面の要約カードを詰めるため（#4929） */
+  thin?: boolean;
 }) {
+  const barHeight = thin ? "h-1" : "h-1.5";
   return (
     <ol
       className="@container grid gap-[3px]"
@@ -44,14 +48,14 @@ export function IosDistributionStageBar({
         if (notDistributed) {
           return (
             <li key={stage.key} className="min-w-0" aria-label={`${stage.label}: 配布なし`}>
-              <span className="block h-1.5 rounded-sm bg-muted-foreground/25" aria-hidden="true" />
+              <span className={cn("block rounded-sm bg-muted-foreground/25", barHeight)} aria-hidden="true" />
             </li>
           );
         }
         const emphasized = stage.state === "failure" || stage.state === "running";
         return (
           <li key={stage.key} className="flex min-w-0 flex-col gap-0.5" aria-label={`${stage.label}: ${STATE_TEXT[stage.state]}`}>
-            <span className={cn("h-1.5 rounded-sm", SEGMENT_CLASS[stage.state])} aria-hidden="true" />
+            <span className={cn("rounded-sm", barHeight, SEGMENT_CLASS[stage.state])} aria-hidden="true" />
             <span
               className={cn(
                 "truncate text-[10px] leading-tight text-muted-foreground",
