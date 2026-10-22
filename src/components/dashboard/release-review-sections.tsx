@@ -248,7 +248,11 @@ export type SectionHead = {
  * 統合検証・全体レビューの区分の「閉じた1行」を、記録の状態と進捗から決める。
  * **記録が待機・実行中でないときは進捗で状態を上書きしない**（結果が正）。
  */
-export function describeSection(section: ReleaseVerificationSection, nowMs: number): SectionHead {
+export function describeSection(
+  section: ReleaseVerificationSection,
+  nowMs: number,
+  options: { compact?: boolean } = {},
+): SectionHead {
   const progress = section.progress;
   const view = progress ? viewReleaseProgress(progress, nowMs) : null;
   const base = { meta: [] as string[], reason: section.reason, reasonTone: "muted" as Tone, steps: null, ticking: false };
@@ -290,10 +294,11 @@ export function describeSection(section: ReleaseVerificationSection, nowMs: numb
           mark: "●",
           label: "実行中",
           detail: view.stepLabel ?? "工程: 未取得",
+          // ブランチ画面（compact）は開始からの時間だけを札の行に残す。実行先は詳細に出る（#4938）
           meta: [
             view.elapsedMs !== null ? `開始から ${formatReleaseElapsed(view.elapsedMs)}` : null,
-            progress.host,
-            lastReport,
+            options.compact ? null : progress.host,
+            options.compact ? null : lastReport,
           ].filter((v): v is string => Boolean(v)),
           steps: { tone: "run", animate: true },
           ticking: true,
@@ -599,9 +604,14 @@ function AiReviewSection({
   onFixCreated,
   nowMs,
   hideRebuild = false,
+  compact = false,
 }: {
   /** ブランチ画面は作り直しを追加PR群の直下に1つだけ置く（#4357）ので、ここでは出さない */
   hideRebuild?: boolean;
+  /**
+   * ブランチ画面の要約（#4938）。札の行を「札・要点・時刻」に絞り、「指摘なし」は出さず、担当は詳細へ移す
+   */
+  compact?: boolean;
   section: ReleaseVerificationSection;
   /** 統合検証の区分。再実行の前提（結果待ちか・証跡が更新されたか）の判定に使う（#4632） */
   integration?: ReleaseVerificationSection;
@@ -613,7 +623,7 @@ function AiReviewSection({
   onFixCreated?: () => void;
   nowMs: number;
 }) {
-  const baseHead = describeSection(section, nowMs);
+  const baseHead = describeSection(section, nowMs, { compact });
   // 実行障害（レビューを最後まで行えなかった）は、コードへの指摘とは別の見た目にする（#4300）。
   // 「失敗」「不合格」と読ませず、レビュー未完了であることと工程・原因・次の操作を出す
   const executionFailed = section.state === "failed";
@@ -699,7 +709,7 @@ function AiReviewSection({
   const findingsText = finished
     ? section.findings.length > 0
       ? `指摘 ${section.findings.length}件（重大 ${counts.high}・中 ${counts.medium}・軽微 ${counts.low}）${decisionText}`
-      : section.state === "failed"
+      : section.state === "failed" || compact
         ? null
         : "指摘なし"
     : null;
@@ -729,6 +739,7 @@ function AiReviewSection({
   // 実行障害にはコード修正→作り直しを勧めない（直すものが無い）。再実行が主導線
   const needsFix = fixable.length > 0 || section.state === "invalidated";
   const hasDetail =
+    compact ||
     Boolean(section.summary) ||
     section.findings.length > 0 ||
     section.suggestions.length > 0 ||
@@ -748,7 +759,7 @@ function AiReviewSection({
           extra={
             <>
               {findingsText && <span>{findingsText}</span>}
-              <span className="text-[11px] text-muted-foreground">{agentLabel}</span>
+              {!compact && <span className="text-[11px] text-muted-foreground">{agentLabel}</span>}
             </>
           }
         />
@@ -775,6 +786,12 @@ function AiReviewSection({
       {hasDetail ? (
         <>
           <dl className="grid grid-cols-[6.5rem_1fr] gap-x-2 gap-y-0.5 text-[11.5px]">
+            {compact && (
+              <>
+                <dt className="text-muted-foreground">{recordedAgent ? "担当" : "担当予定"}</dt>
+                <dd>{recordedAgent ? formatReleaseReviewAgent(recordedAgent) : assignee}</dd>
+              </>
+            )}
             {section.totalFiles !== null && (
               <>
                 <dt className="text-muted-foreground">確認した範囲</dt>
@@ -1076,6 +1093,7 @@ function IntegrationSection({
   pullRequestNumber,
   target,
   onFixCreated,
+  compact = false,
 }: {
   section: ReleaseVerificationSection;
   nowMs: number;
@@ -1083,8 +1101,10 @@ function IntegrationSection({
   pullRequestNumber?: number;
   target?: { baseSha: string; headSha: string };
   onFixCreated?: () => void;
+  /** ブランチ画面の要約（#4938）。実行中の札の行から実行先・最終報告を外す（実行先は詳細に出る） */
+  compact?: boolean;
 }) {
-  const head = describeSection(section, nowMs);
+  const head = describeSection(section, nowMs, { compact });
   const progress = section.progress;
   const canDraftFix =
     (section.state === "failed" || section.state === "needs_check") && pullRequestNumber !== undefined && target !== undefined;
@@ -1092,7 +1112,7 @@ function IntegrationSection({
   return (
     <SectionRow
       title="統合検証"
-      note="mainへ統合した状態でビルド・自動テスト（AIではない）"
+      note="mainへ統合した状態でビルド・自動テスト"
       line={<HeadLine head={head} />}
       steps={
         head.steps && progress ? (
@@ -1720,6 +1740,7 @@ export function ReleaseVerificationBrief({
             onFixCreated={reload}
             nowMs={nowMs}
             hideRebuild
+            compact
           />
           <IntegrationSection
             section={verification.integration}
@@ -1728,6 +1749,7 @@ export function ReleaseVerificationBrief({
             pullRequestNumber={pullRequestNumber}
             target={verification.target}
             onFixCreated={reload}
+            compact
           />
           {error && (
             <p className="border-t px-3 py-1 text-[11px] text-destructive">

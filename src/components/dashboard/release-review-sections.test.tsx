@@ -451,6 +451,40 @@ describe("ReleaseVerificationBrief（ブランチ画面。#4357）", () => {
     expect(screen.queryByRole("button", { name: /作り直す/ })).toBeNull();
   });
 
+  it("合格の行は札と時刻だけにし、「指摘なし」は出さず、担当は詳細へ移す（#4938）", async () => {
+    stubFetch(
+      summary({
+        aiReview: section({ state: "passed", agent: "codex", updatedAt: new Date().toISOString() }),
+        integration: section({ kind: "integration", state: "passed" }),
+      }),
+    );
+    render(
+      <ReleaseVerificationBrief repositoryFullName="guchi-apps/issue-deck" pullRequestNumber={4345} headRef={HEAD} />,
+    );
+    await waitFor(() => expect(within(row("全体レビュー")).getByText("問題なし")).toBeTruthy());
+    const head = row("全体レビュー").querySelector("summary")!;
+    expect(within(head).queryByText("指摘なし")).toBeNull();
+    expect(within(head).queryByText(/担当/)).toBeNull();
+    expect(within(row("全体レビュー")).getByText("担当")).toBeTruthy();
+    expect(screen.queryByText(/AIではない/)).toBeNull();
+  });
+
+  it("実行中の行は開始からの時間だけを出し、実行先・最終報告は出さない（#4938）", async () => {
+    stubFetch(
+      summary({
+        integration: section({ kind: "integration", state: "running", progress: progress() }),
+      }),
+    );
+    render(
+      <ReleaseVerificationBrief repositoryFullName="guchi-apps/issue-deck" pullRequestNumber={4345} headRef={HEAD} />,
+    );
+    await waitFor(() => expect(within(row("統合検証")).getByText("実行中")).toBeTruthy());
+    const head = row("統合検証").querySelector("summary")!;
+    expect(within(head).getByText(/開始から/)).toBeTruthy();
+    expect(within(head).queryByText(/subpc/)).toBeNull();
+    expect(within(head).queryByText(/最終報告/)).toBeNull();
+  });
+
   it("凍結ブランチ以外では何も出さない", () => {
     stubFetch(summary());
     const { container } = render(
