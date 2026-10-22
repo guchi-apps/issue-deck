@@ -240,9 +240,6 @@ jobs:
           TYPESAFE_API_KEY: ${{ secrets.TYPESAFE_API_KEY }}
           # AIDE向け開発状況サマリAPIの集計対象利用者（#4048）。未設定ならAPIは503 user_not_configured
           AIDE_SUMMARY_USER_LOGIN: ${{ secrets.AIDE_SUMMARY_USER_LOGIN }}
-          # Codex枠をops-dashboardの`/api/ai-usage`から読むための読み取り用トークン（#3037）。
-          # ops-dashboardのOPS_API_TOKENと同じ値。未設定なら転記のスナップショットへ戻るだけ
-          OPS_API_TOKEN: ${{ secrets.OPS_API_TOKEN }}
           # バックアップCI（#4065・#4113。docs/backup-ci.md 4章）。未設定でもデプロイは通り、
           # バックアップCIの起動とCircleCIの完了Webhookの受信だけができない
           CIRCLECI_API_TOKEN: ${{ secrets.CIRCLECI_API_TOKEN }}
@@ -284,7 +281,7 @@ jobs:
             VAPID_PRIVATE_KEY VAPID_SUBJECT GITHUB_USER_TOKEN_ENCRYPTION_KEY SHARED_TOKEN_API_SECRET \
             SHARED_TOKEN_WRITE_SECRET GITHUB_OAUTH_CLIENT_ID GITHUB_OAUTH_CLIENT_SECRET \
             CLAUDE_CODE_OAUTH_TOKEN OPENAI_API_KEY TYPESAFE_API_KEY AIDE_SUMMARY_USER_LOGIN \
-            OPS_API_TOKEN CIRCLECI_API_TOKEN CIRCLECI_WEBHOOK_SECRET MIGRATE_DATABASE_URL; do
+            CIRCLECI_API_TOKEN CIRCLECI_WEBHOOK_SECRET MIGRATE_DATABASE_URL; do
             case "${!name:-}" in
               *$'\n'*) echo "::error::${name} が改行を含むためgateへ送れません"; exit 1 ;;
             esac
@@ -326,7 +323,6 @@ jobs:
             printf '%s\n' "OPENAI_API_KEY=${OPENAI_API_KEY}"
             printf '%s\n' "TYPESAFE_API_KEY=${TYPESAFE_API_KEY}"
             printf '%s\n' "AIDE_SUMMARY_USER_LOGIN=${AIDE_SUMMARY_USER_LOGIN}"
-            printf '%s\n' "OPS_API_TOKEN=${OPS_API_TOKEN}"
             printf '%s\n' "CIRCLECI_API_TOKEN=${CIRCLECI_API_TOKEN}"
             printf '%s\n' "CIRCLECI_WEBHOOK_SECRET=${CIRCLECI_WEBHOOK_SECRET}"
             # ops-dashboardは同じVPSで待ち受けている。ポートは設定値として平文で持つ（#1849・#3037）

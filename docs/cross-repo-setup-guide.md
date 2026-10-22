@@ -1088,7 +1088,7 @@ issue-deckにはこの他に`51.improvement`・`65.docs`等、Issueの分類目�
 | `OP_SERVICE_ACCOUNT_TOKEN` | 1Password Service Accountトークン | **issue-deckでは不要になった。** `ci.yml`/`deploy.yml`/`release.yml`は#1302で1Password依存を外し、唯一の利用元だったプレビュー環境系は#1308で廃止したため、issue-deckの1Password利用はゼロになった。1Passwordは引き続き値の「正」として使うが、GitHubへの反映は`scripts/sync-github-secrets.sh`で値の変更時にのみ行う |
 | `CIRCLECI_API_TOKEN` | バックアップ用CIの結果を取得するCircleCI APIトークン（#4113）。`issue-deck/ci-gate`への写しで使う | issue-deck固有。他リポジトリへの配布は不要。値の配り方は[backup-ci.md](backup-ci.md)を参照 |
 | `CIRCLECI_WEBHOOK_SECRET` | CircleCIからのWebhookを検証する共有シークレット（#4113） | issue-deck固有。他リポジトリへの配布は不要。CircleCI側にも同じ値を登録する。詳細は[backup-ci.md](backup-ci.md) |
-| `OPS_API_TOKEN` | ops-dashboardの`GET /api/ai-usage`を読むためのトークン（#3037）。`OPS_DASHBOARD_URL`（`deploy.yml`がVPS上で`http://127.0.0.1:3110`固定で設定するため、GitHub側にsecret/variableとしては登録しない）とあわせて`getCodexUsage`（`src/lib/dispatch/codex-usage.ts`）が使う | ops-dashboardの`OPS_API_TOKEN`と同じ値を登録する。未設定のときは転記のスナップショットへ戻るだけで、issue-deck自体の動作は止まらない |
+| `OPS_API_TOKEN` | ops-dashboardの`GET /api/ai-usage`を読むためのトークン（#3037）。`OPS_DASHBOARD_URL`（`deploy.yml`がVPS上で`http://127.0.0.1:3110`固定で設定するため、GitHub側にsecret/variableとしては登録しない）とあわせて`getCodexUsage`（`src/lib/dispatch/codex-usage.ts`）が使う | **GitHub Secretへは登録しない（#4778で配布を撤去）。** 本番は共有トークン`OPS_API_TOKEN`を自DBから読む（[shared-token-api.md](shared-token-api.md)「issue-deck自身が使う値は自DBから読む」）。取れないときは転記のスナップショットへ戻るだけで、issue-deck自体の動作は止まらない |
 
 ### `provision-secret.sh --from-stdin`はパイプ経由だと必ず失敗していた（#2728）
 
