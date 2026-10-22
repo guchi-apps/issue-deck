@@ -1,4 +1,4 @@
-import type { CheckUserReason } from "@/lib/github/approval-labels";
+import { CHECK_USER_LABEL, type CheckUserReason } from "@/lib/github/approval-labels";
 import { extractCommentSourceId } from "@/lib/github/comment-source";
 
 /**
@@ -19,14 +19,21 @@ import { extractCommentSourceId } from "@/lib/github/comment-source";
  * | PRが`mergeable === true` | 未判定（null）は外さない。直ったと言える根拠が無い |
  * | 解消の実行中でない | 走っている間は結果（断念の報告）がまだ出ていない |
  * | 理由ラベルが`01.check-blocked` | ワークフローが付けるのはこの1枚だけ。`01.check-merge`等は別の実行体の合図 |
- * | 確認待ちが付いた時点の直前のコメントが`issue-deck-source:claude-conflict-resolve` | 確認待ちを付けたのがコンフリクト解消であること |
- * | それより後のコメントもすべて同じ出所 | 確認待ちの後に人や別の実行体が書いていれば、それが新しい起点かもしれない |
+ * | 最後に`00.check-user`を付けたイベントの直前のコメントが`issue-deck-source:claude-conflict-resolve` | 確認待ちを付けたのがコンフリクト解消であること |
+ * | そのコメントの投稿者と、ラベルを付けた者が同じ | 人が手で付けた確認待ちを、直前のワークフローのコメントに結び付けない |
+ * | それより後のコメントもすべて同じ出所で、`00.check-user`が外されていない | 確認待ちの後に人や別の実行体が書いていれば、それが新しい起点かもしれない |
  *
  * **最新コメントの出所だけでは足りない。** 同じマーカーは着手・成功報告・フォールバック・断念の
  * すべてに付くので、CI修正が断念して付けた`01.check-blocked`の後にコンフリクト解消が着手・成功
  * すると、最新コメントだけ見れば条件を満たしてしまう（計画レビューの指摘）。そこで、ワークフローが
  * 「コメント→ラベル」の順で付ける（`.github/prompts/conflict-resolve.md`・フォールバック）ことを
  * 使い、ラベルが付いた時点の直前のコメントで起点を確かめる。
+ *
+ * **付与の時点はGitHubのtimeline（`labeled`イベント）で取り、DBの`Issue.checkUserLabeledAt`は
+ * 使わない**（#4931）。あの列は同期でラベルを初めて見た時刻なので、別の実行体が付けてから同期
+ * までの間にコンフリクト解消がコメントすると、そのコメントが「付与直前」に見えてしまう。timeline
+ * はコメントとラベル付与を同じ並びで返すので、秒単位で同時刻になっても前後を取り違えない。
+ * 付与イベントが見つからなければ起点が分からないので外さない。
  *
  * 後半の条件は保守的に倒してある。フォールバックの後に人がコメントしていれば外さない——
  * 誤って外すと、人が見るべき状態が一覧から黙って消える。外し損ねても従来どおり人が外せる。
@@ -38,37 +45,55 @@ export type ConflictCheckUserClearInput = {
   mergeable: boolean | null;
   /** 同じPRのコンフリクト解消が走っているか */
   repairRunning: boolean;
-  /**
-   * `00.check-user`が付いた時刻（`Issue.checkUserLabeledAt`）。同期した時刻なので実際の付与より
-   * 数秒遅い。未記録（null）なら起点が分からないので外さない
-   */
-  checkUserLabeledAt: Date | null;
-  /** 対応Issueのコメント（古い順）。本文がnullのものも含めてよい */
-  comments: readonly { body: string | null; created_at: string }[];
+  /** 対応Issueのtimeline（GitHubが返す順＝古い順） */
+  timeline: readonly ConflictCheckUserTimelineEvent[];
+};
+
+/** GitHubの`/issues/{number}/timeline`のうち、この判定が読むフィールド */
+export type ConflictCheckUserTimelineEvent = {
+  event?: string;
+  /** `commented`の本文 */
+  body?: string | null;
+  /** `labeled`・`unlabeled`のラベル */
+  label?: { name: string } | null;
+  /** 操作した者。`commented`では投稿者 */
+  actor?: { login: string } | null;
 };
 
 /** コメントを取りに行く前に絞り込む条件（GitHub APIを消費しないもの） */
 export function isConflictCheckUserClearCandidate(
-  input: Omit<ConflictCheckUserClearInput, "comments">,
+  input: Omit<ConflictCheckUserClearInput, "timeline">,
 ): boolean {
-  if (input.mergeable !== true || input.repairRunning || input.checkUserLabeledAt === null) {
-    return false;
-  }
+  if (input.mergeable !== true || input.repairRunning) return false;
   return input.checkUserReason === "blocked";
 }
 
-function isConflictResolveComment(comment: { body: string | null }): boolean {
-  return extractCommentSourceId({ body: comment.body ?? "" }) === "claude-conflict-resolve";
+function isConflictResolveComment(event: ConflictCheckUserTimelineEvent): boolean {
+  return extractCommentSourceId({ body: event.body ?? "" }) === "claude-conflict-resolve";
+}
+
+function isCheckUserLabelEvent(event: ConflictCheckUserTimelineEvent, kind: string): boolean {
+  return event.event === kind && event.label?.name === CHECK_USER_LABEL;
 }
 
 export function shouldClearConflictCheckUser(input: ConflictCheckUserClearInput): boolean {
-  if (!isConflictCheckUserClearCandidate(input) || input.checkUserLabeledAt === null) return false;
-  const labeledAt = input.checkUserLabeledAt.getTime();
-  const before = input.comments.filter((comment) => Date.parse(comment.created_at) <= labeledAt);
-  const after = input.comments.filter((comment) => Date.parse(comment.created_at) > labeledAt);
+  if (!isConflictCheckUserClearCandidate(input)) return false;
+  const { timeline } = input;
+  const labeledIndex = timeline.findLastIndex((event) => isCheckUserLabelEvent(event, "labeled"));
+  if (labeledIndex < 0) return false;
+
+  const before = timeline.slice(0, labeledIndex).filter((event) => event.event === "commented");
+  const after = timeline.slice(labeledIndex + 1);
   const trigger = before.at(-1);
   if (trigger === undefined || !isConflictResolveComment(trigger)) return false;
-  return after.every(isConflictResolveComment);
+
+  const labeler = timeline[labeledIndex].actor?.login;
+  if (labeler === undefined || labeler !== trigger.actor?.login) return false;
+
+  if (after.some((event) => isCheckUserLabelEvent(event, "unlabeled"))) return false;
+  return after
+    .filter((event) => event.event === "commented")
+    .every(isConflictResolveComment);
 }
 
 /** 外したときにIssueへ残すコメント */

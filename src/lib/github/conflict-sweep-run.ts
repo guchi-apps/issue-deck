@@ -6,6 +6,7 @@ import {
   conflictCheckUserClearedCommentBody,
   isConflictCheckUserClearCandidate,
   shouldClearConflictCheckUser,
+  type ConflictCheckUserTimelineEvent,
 } from "@/lib/github/conflict-check-user-clear";
 import {
   CONFLICT_SWEEP_RETRY_COOLDOWN_MINUTES,
@@ -16,7 +17,7 @@ import {
   type ConflictSweepSkipReason,
 } from "@/lib/github/conflict-sweep";
 import { GithubApiError } from "@/lib/github/github-api-error";
-import { createComment, fetchCommentsForIssue, removeIssueLabel } from "@/lib/github/issues-api";
+import { createComment, fetchIssueTimeline, removeIssueLabel } from "@/lib/github/issues-api";
 import {
   isRepairWorkflowMissing,
   resolveRepairDispatch,
@@ -483,27 +484,12 @@ async function clearResolvedConflictCheckUsers(
       pullRequestNumber: candidate.number,
     })),
   );
-  // 確認待ちが付いた時刻。起点のコメントを見分けるのに使う（`shouldClearConflictCheckUser`）
-  const labeledRows = await db.issue.findMany({
-    where: {
-      OR: blocked.map((candidate) => ({
-        repositoryId: candidate.repositoryId,
-        number: Number(candidate.issueNumber),
-      })),
-    },
-    select: { repositoryId: true, number: true, checkUserLabeledAt: true },
-  });
-  const labeledAt = new Map(
-    labeledRows.map((row) => [checkUserIssueKey(row.repositoryId, row.number), row.checkUserLabeledAt]),
-  );
-
   const cleared: ConflictSweepDispatched[] = [];
   for (const candidate of blocked) {
     const issueNumber = Number(candidate.issueNumber);
     const repairRun = repairRuns.get(repairRunKey(candidate.fullName, candidate.number));
     const base = {
       checkUserReason: "blocked" as const,
-      checkUserLabeledAt: labeledAt.get(checkUserIssueKey(candidate.repositoryId, issueNumber)) ?? null,
       mergeable: true,
       repairRunning: repairRun !== undefined && isRepairRunActive(repairRun, now),
     };
@@ -521,13 +507,15 @@ async function clearResolvedConflictCheckUsers(
 
     try {
       const token = await tokenFor(candidate.installationId);
-      const comments = await fetchCommentsForIssue(
+      // 付与の時点はtimelineの`labeled`イベントで見る。DBの`checkUserLabeledAt`は同期した時刻で、
+      // 付与から同期までの間に書かれたコメントを起点と取り違える（#4931）
+      const timeline = await fetchIssueTimeline<ConflictCheckUserTimelineEvent>(
         candidate.ownerLogin,
         candidate.name,
         issueNumber,
         token,
       );
-      if (!shouldClearConflictCheckUser({ ...base, comments })) continue;
+      if (!shouldClearConflictCheckUser({ ...base, timeline })) continue;
 
       const remaining = await removeIssueLabel(
         candidate.ownerLogin,
