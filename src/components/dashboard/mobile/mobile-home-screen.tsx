@@ -26,6 +26,7 @@ import { PullToRefreshIndicator } from "@/components/dashboard/pull-to-refresh-i
 import { Separator } from "@/components/ui/separator";
 import { useDispatchState } from "@/hooks/use-dispatch-state";
 import { usePullToRefresh } from "@/hooks/use-pull-to-refresh";
+import { summarizeRemoteSessionNav } from "@/lib/dispatch/remote-session-rules";
 import type { ManualStepAttention } from "@/lib/manual-step-attention";
 import { resolveQuestionNavSignals } from "@/lib/question-attention";
 import {
@@ -204,6 +205,7 @@ export function MobileHomeScreenView({
   const [dispatchStatusOpen, setDispatchStatusOpen] = useState(false);
   // 確認待ちはIssueの確認待ち（計画待ちなど）だけを数える。マージ待ちは別のタイルで見る（#3650）
   const checkUserCount = navCounts["check-user"];
+  const remoteSessionNav = summarizeRemoteSessionNav(dispatch.remoteSessions, dispatch.isLoaded);
   const tiles = buildHomeTiles({
     navCounts,
     checkUserCount,
@@ -215,6 +217,7 @@ export function MobileHomeScreenView({
     previewRunning,
     nightlyRunQueuedCount,
     ideasCount,
+    remoteSessionNav,
     repositoryCount,
     onSelectQuickView,
     onSelectPullRequests,
@@ -463,6 +466,8 @@ type BuildHomeTilesInput = {
   previewRunning: boolean;
   nightlyRunQueuedCount: number | null;
   ideasCount: number | null;
+  /** リモートセッションの起動数と、起動中があるか（#4948） */
+  remoteSessionNav: { count: number | null; starting: boolean };
   repositoryCount: number;
   onSelectQuickView: (view: NavViewId) => void;
   onSelectPullRequests: (view: PullRequestViewId) => void;
@@ -607,9 +612,10 @@ function buildHomeTiles(input: BuildHomeTilesInput): HomeTile[] {
       key: "remote-sessions",
       label: "リモートセッション",
       icon: TerminalSquare,
-      count: null,
+      // 起動数（#4948）。URL待ちの1本があれば回転アイコンを出す
+      count: input.remoteSessionNav.count,
       emphasis: "none",
-      busy: false,
+      busy: input.remoteSessionNav.starting,
       title: "リポジトリを選んでClaude Codeのセッションを立ち上げる",
       onClick: input.onSelectRemoteSessions,
     },

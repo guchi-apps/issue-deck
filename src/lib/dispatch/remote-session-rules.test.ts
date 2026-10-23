@@ -11,6 +11,7 @@ import {
   pickRemoteSessionHost,
   resolveRemoteSessionRejection,
   selectHostRemoteSessions,
+  summarizeRemoteSessionNav,
   supportsRemoteSessionResume,
   type RemoteSessionHostInfo,
   type RemoteSessionView,
@@ -146,5 +147,31 @@ describe("再開の判定（#4874）", () => {
     expect(supportsRemoteSessionResume("40")).toBe(false);
     expect(supportsRemoteSessionResume(null)).toBe(false);
     expect(supportsRemoteSessionResume("41-dev")).toBe(false);
+  });
+});
+
+describe("summarizeRemoteSessionNav（#4948）", () => {
+  it("終わっていないものを全ホスト合計で数え、起動中があれば立てる", () => {
+    expect(
+      summarizeRemoteSessionNav(
+        [
+          { status: "running", stopping: false },
+          { status: "starting", stopping: false },
+          { status: "running", stopping: true },
+          { status: "ended", stopping: false },
+          { status: "failed", stopping: false },
+        ],
+        true,
+      ),
+    ).toEqual({ count: 2, starting: true });
+    expect(summarizeRemoteSessionNav([{ status: "running", stopping: false }], true)).toEqual({
+      count: 1,
+      starting: false,
+    });
+  });
+
+  it("0本は0、取得前はnull", () => {
+    expect(summarizeRemoteSessionNav([], true)).toEqual({ count: 0, starting: false });
+    expect(summarizeRemoteSessionNav([{ status: "running", stopping: false }], false)).toEqual({ count: null, starting: false });
   });
 });
