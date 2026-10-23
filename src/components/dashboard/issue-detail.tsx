@@ -107,7 +107,7 @@ import { useIssueArtifacts } from "@/hooks/use-issue-artifacts";
 import { useIssueComments } from "@/hooks/use-issue-comments";
 import { useNow } from "@/hooks/use-now";
 import { useIssueMutations } from "@/hooks/use-issue-mutations";
-import { ParentRunSection } from "@/components/dashboard/parent-run-section";
+import { ParentRunChildBadge, ParentRunSection } from "@/components/dashboard/parent-run-section";
 import { useIssueSubIssues } from "@/hooks/use-issue-sub-issues";
 import { useIssueTaskList } from "@/hooks/use-issue-task-list";
 import { resolveWorkStatus } from "@/lib/issue-work-summary";
@@ -1073,6 +1073,11 @@ export function IssueDetail({
               <>
               {/* 進捗・ジョブ・セッション・回答待ち・実行キャンセルを1枚に集約する（#1577）。
                   走っているものが1つも無いIssueでは何も描かない */}
+              {issue.parentRunChild && (
+                <div className="rounded-lg border bg-card px-3 py-2 text-sm">
+                  <ParentRunChildBadge mark={issue.parentRunChild} showReason />
+                </div>
+              )}
               {attention && <IssueAttentionLine attention={attention} className="rounded-lg border bg-card px-3 py-2 text-sm" />}
               <IssueStatusCard
                 issue={issue}

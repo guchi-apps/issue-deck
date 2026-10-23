@@ -14,6 +14,7 @@ import type { GithubApiIssue } from "@/lib/github/issues-api";
 import { fetchIssuesForRepo } from "@/lib/github/issues-api";
 import { runExclusive } from "@/lib/keyed-mutex";
 import { isUniqueConstraintError } from "@/lib/prisma-error";
+import { getParentRunChildMarksByIssue, toParentRunChildMark } from "@/lib/parent-run/child-state-query";
 import type { Issue } from "@/types/issue";
 import type { IssueState, IssueStateReason } from "@prisma/client";
 
@@ -434,9 +435,13 @@ export async function upsertIssueAndGetDisplay(
   // 完了確認の巡回の印（#2008）も同じ理由で落とさない。落とすと、この1件で一覧を差し替えた
   // 瞬間だけ「完了済みの可能性」が消えて次のポーリングで戻る
   const verifiedAt = await getManualStepVerifiedAt(repository.fullName, row.number);
+  // 親の自動実行の印（#4953）も同じ理由で落とさない
+  const parentRunChild = (await getParentRunChildMarksByIssue()).get(`${repository.fullName}#${row.number}`);
+  const dispatchedAt = pendingAt ?? (parentRunChild?.kind === "running" ? new Date(parentRunChild.at) : null);
   return {
     ...dbIssueToDisplayIssue(repository, row),
-    dispatchPendingAt: pendingAt?.toISOString() ?? null,
+    dispatchPendingAt: dispatchedAt?.toISOString() ?? null,
+    parentRunChild: toParentRunChildMark(parentRunChild),
     manualStepVerifiedAt: verifiedAt?.toISOString() ?? null,
   };
 }

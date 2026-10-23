@@ -1,3 +1,5 @@
+import type { ParentRunChildMark } from "@/lib/parent-run/child-state";
+
 export type IssueState = "open" | "closed";
 
 export type IssueStateReason = "completed" | "not_planned" | "reopened" | null;
@@ -138,6 +140,12 @@ export type Issue = {
    * （@/lib/issues-for-user・@/lib/github/sync-issues）で、マッパーの既定はnull
    */
   dispatchPendingAt: string | null;
+  /**
+   * 親Issueの自動実行（#4536）の対象になっている子の印（#4953）。対象外・実行が終了した親の子はnull。
+   * `running`の子は`dispatchPendingAt`にも合流して「実行中」へ振り分ける。値を入れるのは
+   * ジョブを引く側（@/lib/issues-for-user・@/lib/github/sync-issues）で、マッパーの既定はnull
+   */
+  parentRunChild?: ParentRunChildMark | null;
   /**
    * 手作業Issue（`71.manual-step`）の`## 完了の確認方法`が、定期巡回で**すべて終了コード0で
    * 通った**日時（ISO8601。#2008）。通っていない・巡回の対象外はnull。
