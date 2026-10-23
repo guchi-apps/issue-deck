@@ -192,7 +192,8 @@ describe("PullRequestDetail", () => {
   it("マージできるPRには主操作の帯にマージボタンを出し、状態と理由を添える（#4427）", () => {
     renderDetail({ pullRequest: makePullRequest({ ciState: "success", mergeable: true }) });
     const band = within(screen.getByTestId("pull-request-primary-action"));
-    expect(band.getByText(/マージ可能/)).toBeTruthy();
+    // 自動マージが予約されていないPRは「手動マージ待ち」として出す（#4952）
+    expect(band.getByText(/手動マージ待ち/)).toBeTruthy();
     expect(band.getByRole("button", { name: "マージする" })).toBeTruthy();
   });
 

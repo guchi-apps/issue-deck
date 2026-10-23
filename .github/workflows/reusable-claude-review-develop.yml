@@ -259,6 +259,8 @@ jobs:
     permissions:
       contents: read
       issues: read
+      # 対応Issueを持たないPRは、確認ラベルをPR自身から読む(#4952)
+      pull-requests: read
     outputs:
       # 機械的リスク判定に該当したか(auto-mergeジョブでの00.check-user付与の有無と一致する)
       risky: ${{ steps.risk.outputs.risky }}
@@ -284,7 +286,9 @@ jobs:
         id: risk
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
           ISSUE_NUMBER: ${{ needs.identify-issue.outputs.number }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
           BASE_REF: ${{ github.base_ref }}
           # claude-reviewを実行する差分規模の閾値(#992)。いずれかを超えたら「大きな差分」と
           # みなしてレビューを実行する。直近のdevelop向けPRの実測(2〜5ファイル・数十〜200行が
@@ -430,14 +434,20 @@ jobs:
             fi
           fi
 
+          # 確認ラベルは対応Issueから読む。対応Issueを持たないPR(ブランチ名がissue-<番号>でない)は
+          # PR自身のラベルで代える(#4952)。以下ISSUE_LABELSは「確認ラベルの置き場」の意味で使う
           if [ -n "$ISSUE_NUMBER" ]; then
             ISSUE_LABELS="$(gh issue view "$ISSUE_NUMBER" --json labels --jq '.labels[].name')"
-            if echo "$ISSUE_LABELS" | grep -qx "22.merge-confirm-required"; then
-              add_reason "Issueに \`22.merge-confirm-required\` ラベルが付与されているため（developへのマージ前に必ずユーザー確認を行う設定）"
-            fi
-            if echo "$ISSUE_LABELS" | grep -qx "23.preview-required"; then
-              add_reason "Issueに \`23.preview-required\` ラベルが付与されているため（画面プレビュー確認のため、developへのマージ前に必ずユーザー確認を行う設定）"
-            fi
+            LABEL_HOLDER="Issue"
+          else
+            ISSUE_LABELS="$(gh pr view "$PR_NUMBER" --json labels --jq '.labels[].name')"
+            LABEL_HOLDER="PR"
+          fi
+          if echo "$ISSUE_LABELS" | grep -qx "22.merge-confirm-required"; then
+            add_reason "${LABEL_HOLDER}に \`22.merge-confirm-required\` ラベルが付与されているため（developへのマージ前に必ずユーザー確認を行う設定）"
+          fi
+          if echo "$ISSUE_LABELS" | grep -qx "23.preview-required"; then
+            add_reason "${LABEL_HOLDER}に \`23.preview-required\` ラベルが付与されているため（画面プレビュー確認のため、developへのマージ前に必ずユーザー確認を行う設定）"
           fi
 
           # ここでは判定するだけで、00.check-userの付与と理由コメントの投稿は行わない(#1406)。
@@ -524,13 +534,12 @@ jobs:
           fi
 
           if [ -z "$ISSUE_NUMBER" ]; then
-            # 対応Issueが分からない場合はauto-merge自体もスキップされる。
-            # 判断材料を残すため、レビューは安全側に倒して実行する。
-            add_review_reason "対応Issue番号を特定できないため（安全側でレビューを実行）"
-          else
-            if echo "$ISSUE_LABELS" | grep -qx "00.check-user"; then
-              add_review_reason "対応Issueに \`00.check-user\` が付与されており、ユーザーが確認する際の判断材料が必要なため"
-            fi
+            # 対応Issueを持たないPRは、レビューの「問題なし」を自動マージの条件にする(#4952)。
+            # 判定が無いままマージしないため、規模にかかわらずレビューを実行する
+            add_review_reason "対応Issue番号を特定できないため（自動マージにはレビューの「問題なし」が必要）"
+          fi
+          if echo "$ISSUE_LABELS" | grep -qx "00.check-user"; then
+            add_review_reason "${LABEL_HOLDER}に \`00.check-user\` が付与されており、ユーザーが確認する際の判断材料が必要なため"
           fi
 
           if [ "$NEEDS_REVIEW" = "true" ]; then
@@ -592,18 +601,31 @@ jobs:
           if [ -z "$ISSUE_NUMBER" ]; then
             # 実装Issueを持たないPRだけは共通設定を使用する。取得失敗は推測しない。
             echo "対応IssueがないPRのため共通のレビュー設定を使います"
-            RESPONSE="$(curl -fsS --max-time 10 "${APP_BASE_URL%/}/api/settings/claude-model")"
-            provider="$(jq -r '.aiExecutionProvider' <<< "$RESPONSE")"
+            provider=""
+            if RESPONSE="$(curl -fsS --max-time 10 "${APP_BASE_URL%/}/api/settings/claude-model")"; then
+              provider="$(jq -r '.aiExecutionProvider // empty' <<< "$RESPONSE" 2>/dev/null || true)"
+            fi
+            if [ -z "$provider" ]; then
+              echo "::warning::共通のレビュー設定を取得できなかったため、Claudeでレビューします"
+              provider=claude
+            fi
           else
-            [ -n "$APP_BASE_URL" ] && [ -n "$PROGRESS_REPORT_SECRET" ] || {
-              echo "::error::実装担当の取得に必要な接続設定がありません"; exit 1;
-            }
-            BODY="$(jq -nc --arg repository "$REPOSITORY" --argjson issueNumber "$ISSUE_NUMBER" '{action:"resolve",repository:$repository,issueNumber:$issueNumber}')"
-            RESPONSE="$(curl -fsS --max-time 15 -X POST "${APP_BASE_URL%/}/api/dispatch/implementation-provider" \
-              -H "Authorization: Bearer $PROGRESS_REPORT_SECRET" -H 'Content-Type: application/json' --data "$BODY")" || {
-              echo "::error::実装担当が不明、または取得できません。共通設定へ切り替えず停止します"; exit 1;
-            }
-            provider="$(jq -r '.provider' <<< "$RESPONSE")"
+            # 実装担当を解決できないとき(記録が無い・APIに届かない)は、止めずにClaudeでレビューする
+            # (#4952)。以前は停止してPRへコメントするだけで、ラベルも付かないまま自動マージも
+            # 止まり、マージ待ちに「止める理由はありません」と出たまま放置されていた
+            provider=""
+            if [ -n "$APP_BASE_URL" ] && [ -n "$PROGRESS_REPORT_SECRET" ]; then
+              BODY="$(jq -nc --arg repository "$REPOSITORY" --argjson issueNumber "$ISSUE_NUMBER" '{action:"resolve",repository:$repository,issueNumber:$issueNumber}')"
+              if RESPONSE="$(curl -fsS --max-time 15 -X POST "${APP_BASE_URL%/}/api/dispatch/implementation-provider" \
+                -H "Authorization: Bearer $PROGRESS_REPORT_SECRET" -H 'Content-Type: application/json' --data "$BODY")"; then
+                provider="$(jq -r '.provider // empty' <<< "$RESPONSE" 2>/dev/null || true)"
+              fi
+            fi
+            if [ -z "$provider" ]; then
+              echo "::warning::実装担当を特定できなかったため、Claudeでレビューします"
+              echo "実装担当を特定できなかったため、Claudeでレビューします（#4952）" >> "$GITHUB_STEP_SUMMARY"
+              provider=claude
+            fi
           fi
           case "$provider" in claude|codex) ;; *) echo "::error::レビュー担当が不正です"; exit 1 ;; esac
           echo "provider=$provider" >> "$GITHUB_OUTPUT"
@@ -622,7 +644,7 @@ jobs:
           GH_REPO: ${{ github.repository }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
-          gh pr comment "$PR_NUMBER" --body '⚠️ 実装担当を特定できなかったため、PRレビューと自動マージを停止しました。実装セッションの記録・Issue番号・IssueDeck APIの接続状態を確認し、review-providerジョブを再実行してください。共通設定のエージェントへは切り替えていません。'
+          gh pr comment "$PR_NUMBER" --body '⚠️ レビュー担当を決めるジョブ（review-provider）が失敗したため、PRレビューと自動マージを停止しました。Actionsの実行ログを確認し、review-providerジョブを再実行してください。'
 
   claude-review:
     # risk-checkがレビュー要と判定した場合のみ実行する(#992)。
@@ -1215,15 +1237,18 @@ jobs:
             *) emit failed "" "Codexレビューの状態を読み取れませんでした" ;;
           esac
 
+      # 対応Issueを持たないPR(ブランチ名がissue-<番号>でない)もここを通す(#4952)。ラベル・理由コメントの
+      # 置き場をIssueの代わりにPRにし、自動マージにはレビューの「問題なし」(lgtm)を必須にする。
+      # リリース・タグ配布などのシステムブランチは専用の経路がマージするため、何もしない
       - name: マージ保留の判定を反映する
         id: hold
-        if: needs.identify-issue.outputs.number != ''
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           ISSUE_NUMBER: ${{ needs.identify-issue.outputs.number }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          HEAD_REF: ${{ github.head_ref }}
           RISKY: ${{ needs.risk-check.outputs.risky }}
           REASONS: ${{ needs.risk-check.outputs.reasons }}
           ALREADY_CHECK_USER: ${{ needs.risk-check.outputs.already-check-user }}
@@ -1238,6 +1263,14 @@ jobs:
         run: |
           set -e
 
+          # システムブランチの一覧は src/lib/system-branch.ts の
+          # SYSTEM_BRANCH_PREFIXES と対で、テストが一致を確かめる(#4952)
+          SYSTEM_BRANCH_PATTERN='^(release|release-sync|release-rc|release-main|release-candidate|release-bump|workflow-tag|deploy-recovery|dependabot)/'
+          if [ -z "$ISSUE_NUMBER" ] && [[ "$HEAD_REF" =~ $SYSTEM_BRANCH_PATTERN ]]; then
+            echo "システムブランチ(${HEAD_REF})のPRは専用の経路がマージするため、判定を反映しません。"
+            exit 0
+          fi
+
           # 意味的判定(claude-review)の結果は、レビューが対応Issueへ投稿した理由コメントの
           # 末尾のマーカーから読む(#2136)。マーカーの文字列はレビュープロンプト
           # (.github/prompts/review-develop.md)と対で、ずれるとここが黙って
@@ -1250,7 +1283,8 @@ jobs:
           # - マーカーが無ければ「該当なし」に倒す(fail-open)。Claudeが判定を残せなかった場合の
           #   挙動は、ラベルを自分で付けていた頃(付け忘れれば同じく自動マージされる)と変わらない
           REVIEW_BLOCKED=false
-          if [ "$REVIEW_RESULT" = "success" ]; then
+          # 対応Issueを持たないPRでは、レビューはIssueへ理由を書けないため、この下でPRの総評マーカーを読む
+          if [ "$REVIEW_RESULT" = "success" ] && [ -n "$ISSUE_NUMBER" ]; then
             VERDICT_MARKER="<!-- issue-deck-review-verdict:merge-blocked sha=${HEAD_SHA} -->"
             # 取得に失敗したらステップごと落とす(set -e)。auto-merge-fallbackが
             # 00.check-userを付けるので、判定を読めないまま自動マージされることはない
@@ -1333,10 +1367,39 @@ jobs:
             fi
           fi
 
-          if [ "$RISKY" != "true" ] && [ "$REVIEW_BLOCKED" != "true" ] && [ "$CODEX_REVIEW_BLOCKED" != "true" ] && [ "$WORKFLOW_UNREVIEWED" != "true" ]; then
+          # 対応Issueを持たないPRは、ClaudeかCodexのどちらかが今のHEADに「問題なし」(lgtm)を出したときだけ
+          # 自動マージする(#4952)。総評マーカーが無い・lgtm以外なら止める(判定を読めないまま通さない)
+          NO_ISSUE_UNREVIEWED=false
+          if [ -z "$ISSUE_NUMBER" ] && [ "$WORKFLOW_UNREVIEWED" != "true" ]; then
+            CLAUDE_VERDICT=""
+            if [ "$REVIEW_RESULT" = "success" ] && [ "$REVIEW_EXECUTED" = "true" ]; then
+              CLAUDE_VERDICT="$(gh pr view "$PR_NUMBER" --json comments --jq '.comments[].body' \
+                | grep -oE "issue-deck-review-verdict:(lgtm|needs-check|changes-requested) sha=${HEAD_SHA}" \
+                | tail -n 1 | sed -E 's/^.*verdict:([a-z-]+) sha=.*$/\1/' || true)"
+            fi
+            if [ "$CLAUDE_VERDICT" = "lgtm" ] || [ "$CODEX_VERDICT" = "lgtm" ]; then
+              echo "対応Issueを持たないPRですが、自動レビューが問題なしと判定しています。"
+            else
+              NO_ISSUE_UNREVIEWED=true
+              echo "対応Issueを持たないPRで、自動レビューの「問題なし」が得られていないため、自動マージを保留します。"
+              case "$CLAUDE_VERDICT" in
+                needs-check|changes-requested) NO_ISSUE_REASON="自動レビューが \`${CLAUDE_VERDICT}\` と判定したため。詳細はこのPRのレビューコメントを確認してください" ;;
+                *) NO_ISSUE_REASON="対応Issueを特定できないPRで、自動レビューの「問題なし」が得られなかったため（対応Issueが無いPRは、問題なしの判定を自動マージの条件にしています）" ;;
+              esac
+              if [ "$RISKY" = "true" ]; then
+                REASONS="$REASONS"$'\n'"- ${NO_ISSUE_REASON}"
+              else
+                REASONS="- ${NO_ISSUE_REASON}"
+              fi
+            fi
+          fi
+
+          if [ "$RISKY" != "true" ] && [ "$REVIEW_BLOCKED" != "true" ] && [ "$CODEX_REVIEW_BLOCKED" != "true" ] && [ "$WORKFLOW_UNREVIEWED" != "true" ] && [ "$NO_ISSUE_UNREVIEWED" != "true" ]; then
             echo "どちらの判定にも該当しないため、00.check-userは付与しません。"
             exit 0
           fi
+          # 下の自動マージのステップは、ラベルが付けられなかった場合もこれを見てマージしない
+          echo "blocked=true" >> "$GITHUB_OUTPUT"
 
           # レビュー指摘の自動修正へ渡すか(#3363)。止めた理由がレビューの「要修正」だけで、
           # レビュー自身が「人の判断が要らない指摘だけ」と印を付けたときに限り、00.check-userを
@@ -1344,7 +1407,7 @@ jobs:
           # 渡したことはIssueへの印付きコメントで伝える。claude-review-fix.ymlはこのワークフローの
           # 完了(workflow_run)で起動し、この印がいまのheadに対して残っているときだけ着手する。
           # 条件を満たさないときは下の従来の処理(00.check-user＋01.check-merge)へ落ちる。
-          if { [ "$REVIEW_BLOCKED" = "true" ] || [ "$CODEX_VERDICT" = "changes-requested" ]; } && [ "$CODEX_REVIEW_FAILED" != "true" ] && [ "$CODEX_VERDICT" != "needs-check" ] && [ "$RISKY" != "true" ] && [ "$WORKFLOW_UNREVIEWED" != "true" ] && [ "$REVIEW_AUTO_FIX" = "true" ]; then
+          if [ -n "$ISSUE_NUMBER" ] && { [ "$REVIEW_BLOCKED" = "true" ] || [ "$CODEX_VERDICT" = "changes-requested" ]; } && [ "$CODEX_REVIEW_FAILED" != "true" ] && [ "$CODEX_VERDICT" != "needs-check" ] && [ "$RISKY" != "true" ] && [ "$WORKFLOW_UNREVIEWED" != "true" ] && [ "$REVIEW_AUTO_FIX" = "true" ]; then
             HANDOFF_BLOCKER=""
             AUTOFIX_MARKER="<!-- issue-deck-review-autofix:ok sha=${HEAD_SHA} -->"
             HANDOFF_MAX=2
@@ -1411,7 +1474,37 @@ jobs:
             fi
           done
           if [ "${#LABEL_ARGS[@]}" -gt 0 ]; then
-            gh issue edit "$ISSUE_NUMBER" "${LABEL_ARGS[@]}"
+            if [ -n "$ISSUE_NUMBER" ]; then
+              gh issue edit "$ISSUE_NUMBER" "${LABEL_ARGS[@]}"
+            else
+              # 対応Issueを持たないPRはPR自身へ付ける(#4952)。`gh pr edit`はProjects classic廃止の
+              # エラーで落ちることがあるため、Issues APIで付け外しする(PRもIssue番号で扱える)
+              for ((i = 0; i < ${#LABEL_ARGS[@]}; i += 2)); do
+                if [ "${LABEL_ARGS[i]}" = "--add-label" ]; then
+                  gh api "repos/${GH_REPO}/issues/${PR_NUMBER}/labels" -f "labels[]=${LABEL_ARGS[i+1]}" --silent
+                else
+                  gh api -X DELETE "repos/${GH_REPO}/issues/${PR_NUMBER}/labels/${LABEL_ARGS[i+1]}" --silent >/dev/null 2>&1 || true
+                fi
+              done
+            fi
+          fi
+          # 対応Issueを持たないPRは、理由をPRへ書く(#4952)。同じHEADで既に書いていれば重ねない
+          if [ -z "$ISSUE_NUMBER" ]; then
+            NO_ISSUE_MARKER="<!-- issue-deck-no-issue-merge-hold sha=${HEAD_SHA} -->"
+            if gh pr view "$PR_NUMBER" --json comments --jq '.comments[].body' | grep -qF "$NO_ISSUE_MARKER"; then
+              echo "このHEADの理由は投稿済みのため、コメントを省略します。"
+              exit 0
+            fi
+            BODY="⚠️ 以下の理由により、developへのマージ前にユーザーの確認が必要と判定しました。自動マージはされないため、内容を確認してマージしてください。"
+            BODY="$BODY"$'\n\n'"$REASONS"
+            if [ "$CODEX_REVIEW_FAILED" = "true" ]; then
+              BODY="$BODY"$'\n'"- Codexによる自動レビューを完了できなかったため"$'\n'"  - ${CODEX_FAILURE_REASON}"
+            elif [ "$CODEX_REVIEW_BLOCKED" = "true" ]; then
+              BODY="$BODY"$'\n'"- Codexによる自動レビューが \`${CODEX_VERDICT}\` と判定したため"
+            fi
+            BODY="$BODY"$'\n\n<!-- issue-deck-source:claude-review-develop -->'$'\n'"$NO_ISSUE_MARKER"
+            gh pr comment "$PR_NUMBER" --body "$BODY"
+            exit 0
           fi
           # ここで投稿するのは機械的リスク判定(risk-check)の理由だけ。意味的判定の理由は
           # claude-review自身が投稿済みで(その末尾のマーカーを上で読んでいる)、同じ理由を
@@ -1688,9 +1781,14 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           REVIEW_FIX_HANDOFF: ${{ steps.hold.outputs.handoff }}
           WAITING_FOR_CODEX: ${{ steps.hold.outputs.waiting }}
+          HOLD_BLOCKED: ${{ steps.hold.outputs.blocked }}
+          HEAD_REF: ${{ github.head_ref }}
         run: |
-          if [ -z "$ISSUE_NUMBER" ]; then
-            echo "対応Issue番号を特定できないため、自動マージをスキップします。"
+          # 対応Issueを持たないPRも、システムブランチ以外は自動マージの対象にする(#4952)。
+          # 一覧はholdステップと同じ(src/lib/system-branch.tsと対)
+          SYSTEM_BRANCH_PATTERN='^(release|release-sync|release-rc|release-main|release-candidate|release-bump|workflow-tag|deploy-recovery|dependabot)/'
+          if [ -z "$ISSUE_NUMBER" ] && [[ "$HEAD_REF" =~ $SYSTEM_BRANCH_PATTERN ]]; then
+            echo "システムブランチ(${HEAD_REF})のPRは専用の経路がマージするため、自動マージをスキップします。"
             exit 0
           fi
 
@@ -1708,9 +1806,20 @@ jobs:
             exit 0
           fi
 
-          LABELS="$(gh issue view "$ISSUE_NUMBER" --json labels --jq '.labels[].name')"
+          if [ "$HOLD_BLOCKED" = "true" ]; then
+            echo "マージ保留の判定に該当したため、自動マージをスキップします。"
+            exit 0
+          fi
+
+          if [ -n "$ISSUE_NUMBER" ]; then
+            LABELS="$(gh issue view "$ISSUE_NUMBER" --json labels --jq '.labels[].name')"
+            HOLDER="対応Issue #${ISSUE_NUMBER}"
+          else
+            LABELS="$(gh pr view "$PR_NUMBER" --json labels --jq '.labels[].name')"
+            HOLDER="PR #${PR_NUMBER}"
+          fi
           if echo "$LABELS" | grep -qx "00.check-user"; then
-            echo "対応Issue #${ISSUE_NUMBER} に 00.check-user が付与されているため、自動マージをスキップします。"
+            echo "${HOLDER} に 00.check-user が付与されているため、自動マージをスキップします。"
             exit 0
           fi
 

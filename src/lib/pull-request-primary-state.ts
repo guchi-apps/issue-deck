@@ -1,6 +1,7 @@
 import type { RepairKind } from "@/lib/github/pull-request-repair";
 import { repairKindsFor } from "@/lib/github/pull-request-repair";
 import { resolveReviewVerdictFreshness } from "@/lib/github/review-verdict-freshness";
+import { deriveAutoMergeOutlook } from "@/lib/pull-request-auto-merge-outlook";
 import { deriveMergeHold } from "@/lib/pull-request-merge-hold";
 import {
   CI_STATE_LABEL,
@@ -179,6 +180,12 @@ export function derivePrimaryState(pullRequest: PullRequestSummary): PrimaryStat
   }
   if (pullRequest.mergeable === null) {
     return state("unknown", "競合を確認中", "warn", "GitHubが競合を計算中です。成功とは扱いません");
+  }
+  // 自動マージされないPRを「マージ可能」で済ませない（#4952）。判定が終わったのに予約されていない、
+  // 判定の記録が無いといったPRは、止める理由が無くても人がマージしない限り残り続ける
+  const outlook = deriveAutoMergeOutlook(pullRequest);
+  if (outlook?.kind === "manual") {
+    return state("mergeable", "手動マージ待ち", "warn", `自動マージされません: ${outlook.reason}`, { needsAction: true });
   }
   return state(
     "mergeable",
