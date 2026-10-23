@@ -118,6 +118,7 @@ import {
 import { mergeHistoryPullRequests } from "@/lib/branch-flow-history";
 import { selectCheckUserRunningIssueIds } from "@/lib/check-user-attention";
 import { selectPlanReviewCreatingIssueIds } from "@/lib/dispatch/plan-review-list-state";
+import { summarizeRemoteSessionNav } from "@/lib/dispatch/remote-session-rules";
 import { selectReservedIssueIdsToHide, selectScheduledRunQueuedMarks } from "@/lib/nightly-run";
 import { findActiveSnooze, selectSnoozedIssueIds } from "@/lib/snooze";
 import {
@@ -1567,6 +1568,8 @@ export function IssueDeckShell({
   );
   /** 左メニューの件数。次の5時間枠に積んである予定の総数 */
   const nightlyRunQueuedCount = nightlyRun.state ? nightlyRun.state.nextWindow.queued.length : null;
+  // 左メニューの「リモートセッション」に出す起動数（#4948）。実行状況と同じ取得結果を数える
+  const remoteSessionNav = summarizeRemoteSessionNav(dispatch.remoteSessions, dispatch.isLoaded);
   const visibleReleaseHistoryEntries = useMemo(
     () =>
       releaseHistory.entries ? selectVisibleReleaseHistory(releaseHistory.entries, repositories) : null,
@@ -2475,6 +2478,8 @@ export function IssueDeckShell({
                 onSelectIosExtensions={selectIosExtensionsPane}
                 nightlyRunQueuedCount={nightlyRunQueuedCount}
                   ideasCount={ideasCount}
+                remoteSessionCount={remoteSessionNav.count}
+                remoteSessionStarting={remoteSessionNav.starting}
                 repoFilterApplies={
                   filters.pane === "pull-requests" ||
                   (filters.pane === "issues" && !navViewIgnoresIssueFilters(filters.view))

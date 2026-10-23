@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { DispatchHostView } from "@/lib/dispatch/dispatch-job";
 import type { DispatchStateHandle } from "@/hooks/use-dispatch-state";
+import type { RemoteSessionView } from "@/lib/dispatch/remote-session-rules";
 import type { DispatchSessionView } from "@/lib/dispatch/session-state";
 
 // ホームは`useDispatchState`を自分で1回呼び、ヘッダーのボタンへ配る（#1690）。
@@ -50,11 +51,13 @@ function makeDispatch(overrides: {
   sessions?: DispatchSessionView[];
   /** 最初の取得が終わったか（#2090）。偽の間はサブPCのカードの代わりにスケルトンが出る */
   isLoaded?: boolean;
+  remoteSessions?: RemoteSessionView[];
 }): DispatchStateHandle {
   return {
     hosts: overrides.hosts ?? [],
     jobs: [],
     sessions: overrides.sessions ?? [],
+    remoteSessions: overrides.remoteSessions ?? [],
     // エージェント別の一時停止（#2994）。既定は両方とも稼働中
     agentPause: { claude: null, codex: null },
     concurrency: 2,
@@ -471,6 +474,44 @@ describe("MobileHomeScreen（#1690）", () => {
 
 // 引っ張って更新（#2182）。ジェスチャーの判定そのものは`use-pull-to-refresh.test.tsx`が見るので、
 // ここでは「ホームの枠に付いていて、離すとホームに出ているものが取り直されるか」だけを確かめる
+describe("MobileHomeScreen リモートセッションの起動数（#4948）", () => {
+  const remoteSession = (status: RemoteSessionView["status"]): RemoteSessionView => ({
+    id: status,
+    repositoryFullName: "guchi-apps/issue-deck",
+    host: "subpc",
+    tmuxSessionName: "issue-deck-remote-abcdefgh",
+    status,
+    remoteControlUrl: null,
+    failureMessage: null,
+    stopping: false,
+    createdAt: "2026-10-18T00:00:00.000Z",
+    lastSeenAt: null,
+  });
+  const remoteTile = () => screen.getByText("リモートセッション").closest("button") as HTMLElement;
+
+  it("終わっていないセッションの本数をタイルに出し、起動中なら回転アイコンを出す", () => {
+    dispatchState = makeDispatch({
+      remoteSessions: [remoteSession("running"), remoteSession("starting"), remoteSession("ended")],
+    });
+    renderHome();
+
+    expect(remoteTile().textContent).toBe("リモートセッション2");
+    expect(remoteTile().querySelector(".animate-spin")).toBeTruthy();
+  });
+
+  it("0本は0と出し、取得前は数字を出さない", () => {
+    dispatchState = makeDispatch({ remoteSessions: [] });
+    renderHome();
+    expect(remoteTile().textContent).toBe("リモートセッション0");
+    expect(remoteTile().querySelector(".animate-spin")).toBeNull();
+
+    cleanup();
+    dispatchState = makeDispatch({ isLoaded: false });
+    renderHome();
+    expect(remoteTile().textContent).toBe("リモートセッション");
+  });
+});
+
 describe("MobileHomeScreen の引っ張って更新（#2182）", () => {
   afterEach(cleanup);
 
