@@ -3,6 +3,7 @@ import { buildDispatchActiveKey } from "@/lib/dispatch/dispatch-job";
 import { getPendingDispatchAt, getPendingDispatchAtByIssue } from "@/lib/dispatch/pending-dispatch";
 import { listManualStepVerifiedAtByIssue } from "@/lib/manual-step-verification-patrol";
 import { dbIssueToDisplayIssue } from "@/lib/github/issue-mapper";
+import { getParentRunChildMarksByIssue, toParentRunChildMark } from "@/lib/parent-run/child-state-query";
 import type { Issue } from "@/types/issue";
 
 /**
@@ -21,7 +22,7 @@ export async function getIssuesForUser(
 ): Promise<Issue[]> {
   // 未完了ジョブ（#1347）はIssueの件数によらず1本で引ける。Issueごとに引くとN+1になる
   const where = { repository: { installation: { userInstallations: { some: { userId } } } } };
-  const [issueRows, openBodies, pendingDispatchAt, manualStepVerifiedAt] = await Promise.all([
+  const [issueRows, openBodies, pendingDispatchAt, manualStepVerifiedAt, parentRunChildMarks] = await Promise.all([
     db.issue.findMany({
       where,
       // 並びを固定する。`GET /api/issues`は一覧のハッシュをETagにしており（#3387）、
@@ -44,18 +45,24 @@ export async function getIssuesForUser(
     getPendingDispatchAtByIssue(),
     // 完了確認の巡回の結果（#2008）も1本で引く。Issueごとに引くと順番待ちと同じくN+1になる
     listManualStepVerifiedAtByIssue(),
+    // 親の自動実行の対象の子（#4953）も1本で引く
+    getParentRunChildMarksByIssue(),
   ]);
 
   return issueRows.map((row) => {
     const readCommentCount = row.commentReadBy[0]?.readCommentCount ?? 0;
     const activeKey = buildDispatchActiveKey(row.repository.fullName, row.number);
-    const dispatchedAt = pendingDispatchAt.get(activeKey);
+    const parentRunChild = parentRunChildMarks.get(`${row.repository.fullName}#${row.number}`);
+    // 親の実行で起動済みの子は、Statusが`Ready`のままでも「実行中」へ振り分ける（#4953）
+    const dispatchedAt =
+      pendingDispatchAt.get(activeKey) ?? (parentRunChild?.kind === "running" ? new Date(parentRunChild.at) : undefined);
     const verifiedAt = manualStepVerifiedAt.get(activeKey);
     const issue: Issue = {
       ...dbIssueToDisplayIssue(row.repository, { ...row, body: openBodies.get(row.id) ?? null }),
       hasUnreadComments: row.commentCount > readCommentCount,
       readCommentCount,
       dispatchPendingAt: dispatchedAt?.toISOString() ?? null,
+      parentRunChild: toParentRunChildMark(parentRunChild),
       manualStepVerifiedAt: verifiedAt?.toISOString() ?? null,
     };
     return shouldOmitBody(issue, options.bodies) ? omitIssueBody(issue) : issue;
@@ -93,12 +100,16 @@ export async function getIssueForUser(
   });
   if (!row) return null;
   const readCommentCount = row.commentReadBy[0]?.readCommentCount ?? 0;
-  const dispatchedAt = await getPendingDispatchAt(buildDispatchActiveKey(row.repository.fullName, row.number));
+  const parentRunChild = (await getParentRunChildMarksByIssue()).get(`${row.repository.fullName}#${row.number}`);
+  const dispatchedAt =
+    (await getPendingDispatchAt(buildDispatchActiveKey(row.repository.fullName, row.number))) ??
+    (parentRunChild?.kind === "running" ? new Date(parentRunChild.at) : null);
   return {
     ...dbIssueToDisplayIssue(row.repository, row),
     hasUnreadComments: row.commentCount > readCommentCount,
     readCommentCount,
     dispatchPendingAt: dispatchedAt?.toISOString() ?? null,
+    parentRunChild: toParentRunChildMark(parentRunChild),
     manualStepVerifiedAt: null,
   };
 }

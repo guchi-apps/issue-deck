@@ -16,6 +16,7 @@ import { Button } from "@/components/ui/button";
 import type { DispatchHostView } from "@/lib/dispatch/dispatch-job";
 import type { PlanChild } from "@/lib/execution-plan/types";
 import { formatRef } from "@/lib/execution-plan/types";
+import { parentRunChildMarkText, type ParentRunChildMark } from "@/lib/parent-run/child-state";
 import type { ChildAction, ChildPhase } from "@/lib/parent-run/decide";
 import type { ParentRunBadge as ParentRunBadgeData, ParentRunChildView, ParentRunView } from "@/lib/parent-run/run";
 import { cn } from "@/lib/utils";
@@ -431,6 +432,27 @@ export function ParentRunBadge({ run }: { run: ParentRunBadgeData }) {
     >
       {text}
       {run.counts ? ` ${run.counts.done}/${run.counts.total}` : ""}
+    </span>
+  );
+}
+
+/**
+ * 親の自動実行の対象になっている子Issueの印（#4953）。一覧の行と詳細の状態欄に出す。
+ * `showReason`なら待機先・理由を続けて書く（詳細）。一覧ではtitleに置く
+ */
+export function ParentRunChildBadge({ mark, showReason = false }: { mark: ParentRunChildMark; showReason?: boolean }) {
+  const tone = mark.kind === "running" ? PHASE_CLASS.running : PHASE_CLASS.waiting;
+  return (
+    <span className="inline-flex flex-wrap items-center gap-x-2 gap-y-1">
+      <span
+        data-testid="parent-run-child-badge"
+        data-kind={mark.kind}
+        title={mark.reason}
+        className={cn("inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-bold", tone)}
+      >
+        {parentRunChildMarkText(mark)}
+      </span>
+      {showReason && <span className="text-xs text-muted-foreground">{mark.reason}</span>}
     </span>
   );
 }

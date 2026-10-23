@@ -52,6 +52,7 @@
 
 ## 入口
 
+- 子Issueの印（#4953）: 稼働中の親の実行の子に、一覧の行とIssue詳細の状態欄へ「親 #N の自動実行中」（phaseが`running`／`launching`。Statusが`Ready`のままでも一覧の「実行中」へ振り分ける）か「親 #N の順番待ち」（未起動の`ready`／`waiting`。「未着手」に残す）を出す。`attention`・`blocked`・`done`・`skipped`は印なし。判定は`src/lib/parent-run/child-state.ts`、引く処理は`child-state-query.ts`（`run.ts`はGitHub App認証を引きずるため分けてある）。Statusは書き換えない
 - 画面: Issue詳細（PC・スマホ）の「自動実行」セクション（`components/dashboard/parent-run-section.tsx`）、一覧の親の行の印
 - API: `GET/POST /api/parent-runs`（ログイン中の本人。`start`／`pause`／`resume`／`stop`／`retry`／`verify`）
 - 巡回: `POST /api/dispatch/parent-run/sweep`（`DISPATCH_SECRET`）を`scripts/subpc-dispatch-poller.sh`の`sweep_parent_runs`が呼ぶ

@@ -24,7 +24,7 @@ import {
 import { BulkReserveDock, BulkReserveEntryBar } from "@/components/dashboard/bulk-reserve-bar";
 import { useCodeReviewRecommendSettings } from "@/components/dashboard/use-code-review-recommend-settings";
 import { DependencyWaitBadge } from "@/components/dashboard/dependency-wait-panel";
-import { ParentRunBadge } from "@/components/dashboard/parent-run-section";
+import { ParentRunBadge, ParentRunChildBadge } from "@/components/dashboard/parent-run-section";
 import { CodeReviewRepoOverview } from "@/components/dashboard/code-review-repo-overview";
 import { CodeReviewResultBadges } from "@/components/dashboard/code-review-result-badges";
 import { IssueAttentionLine } from "@/components/dashboard/issue-attention-line";
@@ -1286,6 +1286,7 @@ export function IssueList({
               )}
               {dependencyWait && <DependencyWaitBadge wait={dependencyWait} />}
               {parentRun && <ParentRunBadge run={parentRun} />}
+              {issue.parentRunChild && <ParentRunChildBadge mark={issue.parentRunChild} />}
               <QuestionStateBadge
                 state={resolveQuestionState(issue)}
                 waiting={isQaAnswerWaiting(issue) && !stepBadgeShowsQaAnswerPending}

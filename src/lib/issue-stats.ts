@@ -2,6 +2,7 @@ import type { Issue, LabelSummary, NavViewId } from "@/types/issue";
 import type { IssueFilters, IssueSort } from "@/hooks/use-issue-filters";
 import { isAskRepoQuestionIssue } from "@/lib/github/ask-claude";
 import { isCodeReviewIssue } from "@/lib/github/code-review";
+import { isSameParentRunChildMark } from "@/lib/parent-run/child-state";
 import { resolveProgressStatus } from "@/lib/issue-progress";
 import { computeManualStepAttention } from "@/lib/manual-step-attention";
 import {
@@ -480,6 +481,8 @@ function isIssueContentEqual(a: Issue, b: Issue): boolean {
     a.projectStatus === b.projectStatus &&
     // 順番待ちの開始・終了でビューの振り分けが変わるため同様に含める（#1347）
     a.dispatchPendingAt === b.dispatchPendingAt &&
+    // 親の自動実行の印が変わると行の表示が変わるため含める（#4953）
+    isSameParentRunChildMark(a.parentRunChild ?? null, b.parentRunChild ?? null) &&
     // 完了確認の巡回が通ると一覧の印が変わるため含める（#2008）
     a.manualStepVerifiedAt === b.manualStepVerifiedAt &&
     a.commentCount === b.commentCount &&

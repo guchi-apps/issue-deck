@@ -170,7 +170,7 @@ import {
   type SnoozeTarget,
 } from "@/lib/snooze";
 import { useIssueMutations } from "@/hooks/use-issue-mutations";
-import { ParentRunSection } from "@/components/dashboard/parent-run-section";
+import { ParentRunChildBadge, ParentRunSection } from "@/components/dashboard/parent-run-section";
 import { useIssueSubIssues } from "@/hooks/use-issue-sub-issues";
 import { useIssueTaskList } from "@/hooks/use-issue-task-list";
 import { resolveWorkStatus } from "@/lib/issue-work-summary";
@@ -998,6 +998,11 @@ export function MobileIssueDetail({
             {/* 進捗ステップ・積んだジョブ・セッションの様子・横断質問・回答待ち・実行のキャンセルを
                 1枚に集約する（#1577）。PCの詳細と同じものを使う。走っているものが1つも無いIssueでは
                 カードごと描かれない */}
+            {issue.parentRunChild && (
+              <div className="rounded-lg border bg-card px-3 py-2 text-sm">
+                <ParentRunChildBadge mark={issue.parentRunChild} showReason />
+              </div>
+            )}
             {attention && (
               <IssueAttentionLine
                 attention={attention}
