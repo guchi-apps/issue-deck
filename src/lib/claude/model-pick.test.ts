@@ -60,30 +60,30 @@ describe("parseModelPick", () => {
 describe("pickModelByRule", () => {
   // #4106。ラベル・本文の長さ・コメント数だけでは昇格しない
   it("bug・investigation・plan-requiredのラベルだけでは昇格しない", () => {
-    expect(pickModelByRule(input({ labels: ["30.bug"] })).model).toBe("opus");
-    expect(pickModelByRule(input({ labels: ["40.investigation"] })).model).toBe("opus");
-    expect(pickModelByRule(input({ labels: ["21.plan-required"] })).model).toBe("opus");
+    expect(pickModelByRule(input({ labels: ["30.bug"] })).model).toBe("sonnet");
+    expect(pickModelByRule(input({ labels: ["40.investigation"] })).model).toBe("sonnet");
+    expect(pickModelByRule(input({ labels: ["21.plan-required"] })).model).toBe("sonnet");
   });
 
   it("長い本文・多数のコメントだけでは昇格しない", () => {
-    expect(pickModelByRule(input({ body: "あ".repeat(2000) })).model).toBe("opus");
-    expect(pickModelByRule(input({ commentCount: 30 })).model).toBe("opus");
+    expect(pickModelByRule(input({ body: "あ".repeat(2000) })).model).toBe("sonnet");
+    expect(pickModelByRule(input({ commentCount: 30 })).model).toBe("sonnet");
   });
 
-  it("修正方法が明確な不具合・仕様が決まった新規画面は通常の実装（Opus）", () => {
+  it("修正方法が明確な不具合・仕様が決まった新規画面は通常の実装（Sonnet）", () => {
     expect(
       pickModelByRule(
         input({ labels: ["30.bug"], body: "保存ボタンのonClickでidを渡し忘れている。引数を足して直す。" }),
       ).model,
-    ).toBe("opus");
+    ).toBe("sonnet");
     expect(
       pickModelByRule(
         input({ title: "設定画面を新規追加", labels: ["50.design"], body: "左メニュー配下に一覧と編集フォームを置く。レイアウトは添付のとおり。" }),
       ).model,
-    ).toBe("opus");
+    ).toBe("sonnet");
   });
 
-  it("本文に未解決の判断（原因の切り分け・案の比較）があれば中級", () => {
+  it("本文に未解決の判断（原因の切り分け・案の比較）があればOpus", () => {
     expect(pickModelByRule(input({ body: "原因が不明で、再現しない日がある。" })).model).toBe("opus");
     expect(pickModelByRule(input({ body: "導線は複数案があり、どちらにするか決まっていない。" })).model).toBe(
       "opus",
@@ -91,23 +91,22 @@ describe("pickModelByRule", () => {
   });
 
   // Haikuはauto mode（--permission-mode auto）で動作しないため候補から外している
-  // （#2756・https://github.com/anthropics/claude-code/issues/43235）。既定はOpus（#4812）
-  it("短く書かれた改善もOpus", () => {
-    expect(pickModelByRule(input()).model).toBe("opus");
+  // （#2756・https://github.com/anthropics/claude-code/issues/43235）。既定はSonnet（#4946）
+  it("短く書かれた改善はSonnet", () => {
+    expect(pickModelByRule(input()).model).toBe("sonnet");
   });
 
-  it("判断が付かなければOpus", () => {
-    expect(pickModelByRule(input({ labels: [], body: "a".repeat(400) })).model).toBe("opus");
+  it("判断が付かなければSonnet", () => {
+    expect(pickModelByRule(input({ labels: [], body: "a".repeat(400) })).model).toBe("sonnet");
   });
 
-  // #4812。本当に簡単な作業だけSonnet
-  it("文書だけの短い更新はSonnet", () => {
+  it("文書の更新は長さに関わらずSonnet", () => {
     expect(
       pickModelByRule(input({ labels: ["60.documentation"], body: "READMEの誤字を直す。" })).model,
     ).toBe("sonnet");
     expect(
       pickModelByRule(input({ labels: ["60.documentation"], body: "あ".repeat(500) })).model,
-    ).toBe("opus");
+    ).toBe("sonnet");
   });
 
   // AIが落ちている間ずっと一番高いモデルで走らないよう、ここでFableは選ばない
@@ -167,14 +166,14 @@ describe("buildModelPickPrompt", () => {
   it("名称ではなく未解決の判断で選ぶ基準として書く", () => {
     const prompt = buildModelPickPrompt(input());
     expect(prompt).toContain("未解決の判断とリスク");
-    expect(prompt).toMatch(/`opus`:.*仕様が決まった新規画面/);
-    expect(prompt).toMatch(/`sonnet`:.*変更点が読み違えようのない作業/);
-    expect(prompt).toContain("迷ったら`opus`にしてください");
+    expect(prompt).toMatch(/`sonnet`:.*仕様が決まった新規画面/);
+    expect(prompt).toMatch(/`opus`:.*複雑な計画や設計/);
+    expect(prompt).toContain("迷ったら`sonnet`にしてください");
     expect(prompt).not.toMatch(/`opus`:.*新しい画面・UIを設計/);
     expect(prompt).toContain("解決済みの設計課題を難しさへ加算せず");
   });
 
-  // #4831。見た目だけの変更・計画で変更点が決まった作業はSonnet、大きなデザイン変更はOpus
+  // #4831・#4946。見た目だけの変更・計画で変更点が決まった作業はSonnet、大きなデザイン変更はOpus
   it("ロジックに関わらない見た目の変更と詳細な計画のある作業をSonnetへ振る基準として書く", () => {
     const prompt = buildModelPickPrompt(input());
     expect(prompt).toMatch(/`sonnet`:.*ロジックに関わらないデザイン・見た目の変更/);
@@ -294,19 +293,20 @@ describe("buildModelPickState / buildModelPickQuestions", () => {
     ]);
   });
 
-  it("Jevの基準でも通常の実装はOpus、変更点の明確な作業はSonnetとして書く（#4106・#4812・#4831）", () => {
+  it("Jevの基準でも通常の実装はSonnet、複雑な計画・設計はOpusとして書く（#4106・#4831・#4946）", () => {
     const { criteria, instructions } = buildModelPickQuestions().model as {
       criteria: Record<string, string>;
       instructions: string;
     };
-    expect(criteria.sonnet).toContain("変更点が読み違えようのない作業");
+    expect(criteria.sonnet).toContain("ロジックを伴う通常の実装");
+    expect(criteria.sonnet).toContain("仕様が決まった新規画面");
     expect(criteria.sonnet).toContain("ロジックに関わらないデザイン・見た目の変更");
     expect(criteria.sonnet).toContain("変更点が具体的に書かれた作業");
+    expect(criteria.opus).toContain("複雑な計画や設計");
     expect(criteria.opus).toContain("大きなデザイン変更");
+    expect(criteria.opus).toContain("比較判断");
     expect(instructions).toContain("ロジックに関わらないデザイン・見た目の変更");
-    expect(criteria.opus).toContain("仕様が決まった新規画面");
-    expect(criteria.opus).toContain("未確定のUI/UXの比較判断");
-    expect(instructions).toContain("迷ったらopusにしてください");
+    expect(instructions).toContain("迷ったらsonnetにしてください");
     expect(criteria.opus).not.toContain("新しい画面・UIを設計");
     expect(instructions).toContain("未解決の判断とリスク");
     expect(instructions).toContain("解決済みの設計課題を難しさへ加算せず");

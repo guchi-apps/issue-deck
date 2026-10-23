@@ -866,6 +866,30 @@ elif [[ -x "$NOTIFY_SCRIPT" ]]; then
   #
   # 人が`ISSUE_DECK_CLAUDE_PERMISSION_MODE`で別のモードを選んでいるときは書かない。ここだけ
   # `auto`を残すと、CLI引数と設定ファイルで食い違ったまま起動する。
+  # **計画・デザインの提示を求めるラベルは、フック側の関門で守らせる**（#4944）。プロンプトの
+  # 文面だけでは読み飛ばされる（guchi-apps/yoteiflow#1321）。起動時のラベル（プロンプトファイルの
+  # `- ラベル:`行）から関門を決め、`Bash`と`Edit|Write|NotebookEdit`のフックへ環境変数で渡す。
+  # 判定は`session-notify.sh`の`enforce_required_gates`が持つ。実装セッションだけが対象。
+  REQUIRED_GATES=""
+  if [[ "${ISSUE_DECK_SESSION_KIND:-implementation}" == "implementation" ]]; then
+    SESSION_LABELS=",$(kickoff_prompt_field "$PROMPT_FILE" "ラベル" | tr -d ' '),"
+    [[ "$SESSION_LABELS" == *",21.plan-required,"* ]] && REQUIRED_GATES+="plan,"
+    [[ "$SESSION_LABELS" == *",25.artifact-required,"* ]] && REQUIRED_GATES+="artifact,"
+    REQUIRED_GATES="${REQUIRED_GATES%,}"
+  fi
+  GATE_HOOK_COMMAND="$HOOK_COMMAND"
+  GATE_HOOK_ENTRY=""
+  if [[ -n "$REQUIRED_GATES" ]]; then
+    GATE_HOOK_COMMAND="ISSUE_DECK_REQUIRED_GATES=$REQUIRED_GATES $HOOK_COMMAND"
+    GATE_HOOK_ENTRY=",
+      {
+        \"matcher\": \"Edit|Write|NotebookEdit\",
+        \"hooks\": [{ \"type\": \"command\", \"command\": \"$GATE_HOOK_COMMAND\" }]
+      }"
+    GATE_NAMES="${REQUIRED_GATES//plan/計画}"
+    GATE_NAMES="${GATE_NAMES//artifact/デザイン}"
+    echo "#$ISSUE_NUMBER: ${GATE_NAMES//,/・}の提示が済むまで、実装の変更とコミット・PR作成をフックで止めます。"
+  fi
   HOOK_PERMISSIONS_JSON=""
   if [[ "${ISSUE_DECK_CLAUDE_PERMISSION_MODE:-auto}" == "auto" ]]; then
     HOOK_PERMISSIONS_JSON='  "permissions": { "defaultMode": "auto" },'
@@ -887,8 +911,8 @@ ${HOOK_PERMISSIONS_JSON:+$HOOK_PERMISSIONS_JSON
       },
       {
         "matcher": "Bash",
-        "hooks": [{ "type": "command", "command": "$HOOK_COMMAND" }]
-      }
+        "hooks": [{ "type": "command", "command": "$GATE_HOOK_COMMAND" }]
+      }$GATE_HOOK_ENTRY
     ],
     "PostToolUse": [
       { "hooks": [{ "type": "command", "command": "$HOOK_COMMAND" }] }
