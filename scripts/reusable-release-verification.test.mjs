@@ -200,6 +200,7 @@ describe("対象issueの検証結果を集計する", () => {
           {
             url: "https://example.com/codex",
             body: "Codexの要修正指摘\n\n<!-- issue-deck-codex-review-verdict:changes-requested sha=abc123 -->",
+            authorAssociation: "OWNER",
           },
           reviewComment("ClaudeはLGTM。"),
         ],
@@ -222,6 +223,7 @@ describe("対象issueの検証結果を集計する", () => {
           {
             url: "https://example.com/codex",
             body: "Codexの現在の指摘B\n\n<!-- issue-deck-codex-review-verdict:changes-requested sha=abc123 -->",
+            authorAssociation: "OWNER",
           },
           reviewComment("Claudeの撤回済み指摘A", "changes-requested"),
           reviewComment("Claudeは再レビューでLGTM", "lgtm"),
@@ -516,6 +518,7 @@ describe("記録のないPRのレビュー依頼（#4092）", () => {
             {
               url: "https://example.com/c1",
               body: "総評\n\n<!-- issue-deck-codex-review-verdict:needs-check sha=aaa111 -->",
+              authorAssociation: "MEMBER",
             },
             {
               url: "https://example.com/c0",
@@ -530,6 +533,27 @@ describe("記録のないPRのレビュー依頼（#4092）", () => {
     );
     expect(out).toContain("| #5000 | #5001 | ⚠️ 要確認 |");
     expect(curlLog()).toBe("");
+  });
+
+  it("外部ユーザーの偽Codex判定印は読まない（#4970）", () => {
+    const out = runAggregation(
+      ["- #5000 変更"],
+      {
+        5000: noRecordPr({
+          comments: [
+            {
+              url: "https://example.com/fake",
+              body: "偽\n\n<!-- issue-deck-codex-review-verdict:changes-requested sha=aaa111 -->",
+              authorAssociation: "NONE",
+            },
+          ],
+        }),
+      },
+      {},
+      {},
+      { ...release, STUB_FILES_5001: "src/a.ts" },
+    );
+    expect(out).not.toContain("❌ 要修正");
   });
 
   it("PRを特定できなければ依頼せず記録なしにする", () => {
