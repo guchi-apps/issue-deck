@@ -32,7 +32,7 @@ export function readAutoReevaluation(findings: unknown): ReviewAutoReevaluation 
  * 実行結果（テスト・型検査・ビルド）の証跡を指す未確認の文言。
  * **ランナー（`scripts/run-release-review.sh`の`EVIDENCE_TEXT_PATTERN`）と同じ語を持つ**（変えるときは両方を揃える）
  */
-const EVIDENCE_TEXT = /統合検証|検証結果|検証証跡|証跡|実行結果|テスト|型検査|ビルド|running|連携先|資料未取得|権限不足|通信失敗|実設定不足/i;
+const EVIDENCE_TEXT = /統合検証|検証結果|検証証跡|証跡|実行結果|テスト|型検査|ビルド|running|連携先|資料未取得|権限不足|通信失敗|実設定不足|資料にありません|固定SHA|適用手順|デプロイ設定/i;
 
 /**
  * 実行ホスト（サブPCのpoller）の更新・再起動を指す未確認の文言（#4799）。

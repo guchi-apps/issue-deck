@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, writeFileSync, readFileSync, rmSync, chmodSync, existsSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync, readFileSync, rmSync, chmodSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, expect, it } from "vitest";
@@ -56,11 +56,37 @@ it("repo付き参照だけを解決し、固定SHAのコードを取得、秘密
   expect(r.pulls[0].integrated).toEqual({ develop: true, main: false });
   expect(r.pulls[0].deploy.state).toContain("見つからない");
   expect(r.body).not.toContain("abcdefghijklmnop1234");
-  const saved = readFileSync(r.pulls[0].files[0].local, "utf8");
+  const saved = readFileSync(r.pulls[0].codeAtMerge.files[0].local, "utf8");
   expect(saved).not.toContain("ghp_");
-  expect(r.pulls[0].skipped[0].path).toBe(".env.production");
+  expect(r.pulls[0].codeAtMerge.skipped[0].path).toBe(".env.production");
   expect(prompt).toContain("実行も巡回もしません");
   expect(readFileSync(path.join(dir, "calls.log"), "utf8")).not.toContain("evil");
+});
+it("後続PRが入った稼働中のSHAでも同じファイルを別に取得し、取得時刻は指紋に影響しない", () => {
+  const LIVE = "b".repeat(40);
+  writeFake({
+    [`repos/guchi-apps/kurashio/contents/src/api.ts?ref=${LIVE}`]: "export const x = 2; // 後続PR\n",
+    ...routes,
+    "repos/guchi-apps/kurashio/compare/main": { status: "behind" },
+    [`repos/guchi-apps/kurashio/compare/${LIVE}`]: { status: "behind" },
+    "repos/guchi-apps/kurashio/actions/runs": { workflow_runs: [{ name: "deploy", path: ".github/workflows/deploy.yml", head_sha: LIVE }] },
+  });
+  run();
+  const m = JSON.parse(readFileSync(path.join(out, "manifest.json"), "utf8"));
+  const pr = m.resolved.find((x) => x.repository === "guchi-apps/kurashio").pulls[0];
+  expect(pr.deploy.headSha).toBe(LIVE);
+  expect(readFileSync(pr.codeAtMerge.files[0].local, "utf8")).toContain("x = 1");
+  expect(readFileSync(pr.codeAtDeployed.files[0].local, "utf8")).toContain("x = 2");
+  expect(m.fetchedAt).toMatch(/^\d{4}-/);
+  expect(m.judgeVersion).toBeGreaterThan(0);
+  expect(m.sharedTokens).toContain("未確認");
+});
+it("予期しない例外は空資料にせず取得不能として残す", () => {
+  writeFake(routes);
+  mkdirSync(path.join(out, "manifest.json"), { recursive: true }); // 書き込みを失敗させる
+  const prompt = run();
+  expect(prompt).toContain("取得不能");
+  expect(readFileSync(path.join(out, "fingerprint"), "utf8")).toMatch(/^failed-/);
 });
 it("取得失敗は分類して残し、回復すると指紋が変わる", () => {
   writeFake({});
@@ -82,4 +108,16 @@ it("参照が無い候補は何も出力せず指紋も空", () => {
   expect(run()).toBe("");
   expect(existsSync(path.join(out, "fingerprint"))).toBe(true);
   expect(readFileSync(path.join(out, "fingerprint"), "utf8")).toBe("");
+});
+it("連携先の証跡があるとき、旧文言の未確認も含め全ての未確認が再評価対象になり、確認済みだけが再利用される", () => {
+  const f = path.join(dir, "r1.json");
+  writeFileSync(f, JSON.stringify({ checks: [{ status: "unconfirmed", evidence: "別の文言の読み残し" }, { status: "confirmed" }] }));
+  const probe = (active) => {
+    try {
+      execFileSync("bash", ["-c", `source scripts/run-release-review.sh; INTEGRATION_EVIDENCE_ACTIVE=${active}; result_depends_on_evidence "${f}"`]);
+      return true;
+    } catch { return false; }
+  };
+  expect(probe(0)).toBe(false);
+  expect(probe(1)).toBe(true);
 });

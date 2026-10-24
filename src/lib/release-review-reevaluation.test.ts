@@ -40,6 +40,11 @@ describe("reviewDependsOnEvidence", () => {
   it("未確認の確認項目があれば依存とみなす（ランナーの判定と同じ）", () => {
     expect(reviewDependsOnEvidence({ checks: [{ status: "unconfirmed" }], unverifiedScope: null })).toBe(true);
   });
+  it("#4975の旧needs_check文言（連携先の資料不足）も証跡への依存とみなす", () => {
+    const old = "guchi-apps/kurashio #814 の固定SHAにある GET /api/internal/bills/contracts の実装・認証・一意制約／ロールバック、および MYROOM_INTERNAL_BILLS_WRITE_API_KEY の登録・適用手順が資料にありません。";
+    expect(reviewDependsOnEvidence({ checks: [{ status: "unconfirmed", evidence: old }], unverifiedScope: null })).toBe(true);
+    expect(reviewDependsOnEvidence({ checks: [], unverifiedScope: old })).toBe(true);
+  });
   it("未確認範囲が実行結果の証跡を指すときだけ依存とみなす", () => {
     expect(reviewDependsOnEvidence({ checks: [], unverifiedScope: "検証ランナーのテスト・型検査・ビルドはrunning" })).toBe(true);
     expect(reviewDependsOnEvidence({ checks: [], unverifiedScope: "差分71ファイルのうち65ファイルを確認済み（未確認6）" })).toBe(false);
