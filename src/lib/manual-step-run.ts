@@ -619,7 +619,7 @@ async function checkManualStepLine(
   const [owner, repo] = repositoryFullName.split("/");
   try {
     const updated = await updateIssue(owner, repo, issueNumber, token, { body: nextBody });
-    await upsertIssueAndGetDisplay(repository, updated);
+    await upsertIssueAndGetDisplay(repository, updated, null);
   } catch (error) {
     // **チェックが付かなくても実行は続ける。** 実行そのものは終わっているので、ここで
     // 止めると「実行済みなのに次へ進めない」状態になる（付け直しは画面からできる）

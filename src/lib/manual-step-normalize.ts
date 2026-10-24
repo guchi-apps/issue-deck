@@ -170,7 +170,7 @@ async function normalize(params: {
   if (current === null || current !== body) return { status: "unchanged", reason: "body_changed" };
 
   const updated = await updateIssue(owner, repo, issueNumber, githubToken, { body: normalized });
-  await upsertIssueAndGetDisplay(repository, updated);
+  await upsertIssueAndGetDisplay(repository, updated, null);
 
   await createComment(owner, repo, issueNumber, githubToken, {
     body: `手作業の自動実行を始める前に、本文を雛形（\`docs/multi-agent/manual-step-body-template.md\`）の書式へ自動で整えました。コマンドと実行する端末は変えていません（検証済み）。元の本文はIssueの編集履歴から戻せます。\n\n<!-- issue-deck-agent:implementer -->`,

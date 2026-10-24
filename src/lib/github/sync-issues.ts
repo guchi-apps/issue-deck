@@ -418,9 +418,14 @@ export async function updateQaAnswerPendingState(
   }
 }
 
+/**
+ * @param viewerUserId 返したIssueを見る利用者。親の自動実行の印（親のリポジトリ名・待機理由）は、
+ *   この利用者に見える親の実行のものだけを載せる（#4969）。結果を捨てる呼び出しはnullを渡す（印は載せない）
+ */
 export async function upsertIssueAndGetDisplay(
   repository: { id: string; fullName: string; private: boolean; archived: boolean },
   raw: GithubApiIssue,
+  viewerUserId: string | null,
 ): Promise<Issue> {
   const issue = await upsertIssueRow(repository.id, raw);
   const row = await db.issue.findUniqueOrThrow({
@@ -436,7 +441,9 @@ export async function upsertIssueAndGetDisplay(
   // 瞬間だけ「完了済みの可能性」が消えて次のポーリングで戻る
   const verifiedAt = await getManualStepVerifiedAt(repository.fullName, row.number);
   // 親の自動実行の印（#4953）も同じ理由で落とさない
-  const parentRunChild = (await getParentRunChildMarksByIssue()).get(`${repository.fullName}#${row.number}`);
+  const parentRunChild = viewerUserId
+    ? (await getParentRunChildMarksByIssue(viewerUserId)).get(`${repository.fullName}#${row.number}`)
+    : undefined;
   const dispatchedAt = pendingAt ?? (parentRunChild?.kind === "running" ? new Date(parentRunChild.at) : null);
   return {
     ...dbIssueToDisplayIssue(repository, row),

@@ -46,7 +46,7 @@ export async function getIssuesForUser(
     // 完了確認の巡回の結果（#2008）も1本で引く。Issueごとに引くと順番待ちと同じくN+1になる
     listManualStepVerifiedAtByIssue(),
     // 親の自動実行の対象の子（#4953）も1本で引く
-    getParentRunChildMarksByIssue(),
+    getParentRunChildMarksByIssue(userId),
   ]);
 
   return issueRows.map((row) => {
@@ -100,7 +100,7 @@ export async function getIssueForUser(
   });
   if (!row) return null;
   const readCommentCount = row.commentReadBy[0]?.readCommentCount ?? 0;
-  const parentRunChild = (await getParentRunChildMarksByIssue()).get(`${row.repository.fullName}#${row.number}`);
+  const parentRunChild = (await getParentRunChildMarksByIssue(userId)).get(`${row.repository.fullName}#${row.number}`);
   const dispatchedAt =
     (await getPendingDispatchAt(buildDispatchActiveKey(row.repository.fullName, row.number))) ??
     (parentRunChild?.kind === "running" ? new Date(parentRunChild.at) : null);

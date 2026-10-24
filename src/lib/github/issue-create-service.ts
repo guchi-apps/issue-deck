@@ -54,7 +54,7 @@ export async function createIssueForUser(
       labels: request.labels,
       assignees: request.assignee ? [request.assignee] : undefined,
     });
-    return upsertIssueAndGetDisplay(repository, created);
+    return upsertIssueAndGetDisplay(repository, created, user.id);
   });
 }
 
@@ -85,7 +85,7 @@ export async function fillIssueTitleByAi(
       (token) => updateIssue(owner, repo, issue.number, token, { title: suggestion.title }),
     );
     if ("errorResponse" in updated) return;
-    await upsertIssueAndGetDisplay(repository, updated.value);
+    await upsertIssueAndGetDisplay(repository, updated.value, null);
   } catch (error) {
     console.error("[share] タイトルの自動記入に失敗しました（仮タイトルのまま）", error);
   }

@@ -13,14 +13,18 @@ import type { ChildDisplay } from "@/lib/parent-run/decide";
  * 親の実行が1件も無ければ`ParentRunChild`は引かない。
  *
  * 子が複数の稼働中の実行に載ることは想定しない。載っている場合は先に見つけた方を使う。
+ *
+ * **閲覧者（`userId`）が見えるリポジトリを親に持つ実行の印だけを返す**（#4969）。印には親のリポジトリ名・
+ * 親Issue番号・待機理由が入るので、子のリポジトリだけを共有された別の利用者へ、見えない親の情報が
+ * 漏れてしまう。権限の基準はIssue一覧と同じ「ユーザーが見えるインストールのリポジトリ」。
  */
 export type ParentRunChildMarkEntry = ParentRunChildMark & {
   /** 起動済み（`running`）の子を「実行中」へ振り分けるときの日時（ISO8601） */
   at: string;
 };
 
-export async function getParentRunChildMarksByIssue(): Promise<Map<string, ParentRunChildMarkEntry>> {
-  const runs = await db.parentRun.findMany({
+export async function getParentRunChildMarksByIssue(userId: string): Promise<Map<string, ParentRunChildMarkEntry>> {
+  const allRuns = await db.parentRun.findMany({
     where: { activeKey: { not: null } },
     select: {
       parentRepository: true,
@@ -32,6 +36,22 @@ export async function getParentRunChildMarksByIssue(): Promise<Map<string, Paren
   });
 
   const map = new Map<string, ParentRunChildMarkEntry>();
+  if (allRuns.length === 0) return map;
+
+  // 親のリポジトリが閲覧者に見えるものだけを残す。実行が1件も無ければリポジトリは引かない
+  const visibleParents = new Set(
+    (
+      await db.repository.findMany({
+        where: {
+          fullName: { in: [...new Set(allRuns.map((run) => run.parentRepository))] },
+          installation: { userInstallations: { some: { userId } } },
+        },
+        select: { fullName: true },
+      })
+    ).map((repository) => repository.fullName),
+  );
+  const runs = allRuns.filter((run) => visibleParents.has(run.parentRepository));
+
   for (const run of runs) {
     for (const child of run.children) {
       const display = child.display as ChildDisplay | null;

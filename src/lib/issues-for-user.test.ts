@@ -20,8 +20,9 @@ vi.mock("@/lib/manual-step-verification-patrol", () => ({
   listManualStepVerifiedAtByIssue: async () => new Map(),
 }));
 
+const getParentRunChildMarksByIssue = vi.fn<(userId: string) => Promise<Map<string, unknown>>>(async () => new Map());
 vi.mock("@/lib/parent-run/child-state-query", () => ({
-  getParentRunChildMarksByIssue: async () => new Map(),
+  getParentRunChildMarksByIssue: (userId: string) => getParentRunChildMarksByIssue(userId),
   toParentRunChildMark: () => null,
 }));
 
@@ -91,5 +92,14 @@ describe("getIssuesForUser の本文（#3390）", () => {
       ["", true],
       ["", true],
     ]);
+  });
+});
+
+describe("getIssuesForUser の親実行の印（#4969）", () => {
+  it("親実行の印は閲覧者のユーザーIDで絞って引く（別利用者の親の情報を載せない）", async () => {
+    issueFindMany.mockReset().mockImplementation(async () => []);
+    getParentRunChildMarksByIssue.mockClear();
+    await getIssuesForUser("user-9");
+    expect(getParentRunChildMarksByIssue).toHaveBeenCalledWith("user-9");
   });
 });

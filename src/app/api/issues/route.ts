@@ -221,7 +221,7 @@ async function handlePATCH(request: NextRequest) {
         }
       }
       const updated = await updateIssue(owner, repo, number, token, input);
-      return upsertIssueAndGetDisplay(repository, updated);
+      return upsertIssueAndGetDisplay(repository, updated, user.id);
     },
   );
   if ("errorResponse" in result) {

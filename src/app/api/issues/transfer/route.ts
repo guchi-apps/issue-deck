@@ -64,7 +64,7 @@ async function handlePOST(request: NextRequest) {
   try {
     const token = await getInstallationToken(destinationRepository.installation.installationId);
     const transferred = await transferIssue(owner, repo, number, newOwner, newRepo, token);
-    const issue = await upsertIssueAndGetDisplay(destinationRepository, transferred);
+    const issue = await upsertIssueAndGetDisplay(destinationRepository, transferred, user.id);
     // 移動元の行を消す（#2406）。`upsertIssueAndGetDisplay`は移動後のIssue（GitHub上で別IDに
     // なっている）を書くだけなので、消さないと移動元の番号・URLのまま一覧に残り続ける。
     // `issues.transferred` Webhookでも同じ後始末をしているが、到着を待たずにここで消す。
