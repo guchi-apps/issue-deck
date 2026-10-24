@@ -103,3 +103,39 @@ describe("RC取り込みパネル（#4986）", () => {
     expect(screen.getByText(/進行中です/)).toBeTruthy();
   });
 });
+
+describe("RC取り込みパネル：失敗後の再送（#4986）", () => {
+  it("サーバーが失敗を返したあとは新しい要求キーで送り直す（失敗済みの要求を再送しない）", async () => {
+    let posts = 0;
+    fetchMock.mockImplementation((_url: string, init?: RequestInit) => {
+      if (init?.method !== "POST") return json(importOptions({ options: [option({ relatedFix: true, approvalRequired: false })] }));
+      posts += 1;
+      return posts === 1 ? json({ ok: false, error: "dispatch_failed" }, 502) : json({ ok: true, candidateId: "cand1", revision: 3, existing: false });
+    });
+    render(<RcImportPanel repositoryFullName="o/r" pullRequestNumber={5} />);
+    fireEvent.click(await screen.findByRole("checkbox", { name: /#684/ }));
+    fireEvent.click(screen.getByRole("button", { name: "選んだ1件を取り込む" }));
+    await screen.findByText(/workflowを起動できませんでした/);
+    fireEvent.click(screen.getByRole("button", { name: "選んだ1件を取り込む" }));
+    await screen.findByText(/取り込みを依頼しました/);
+    const keys = fetchMock.mock.calls.filter(([, i]) => i?.method === "POST").map(([, i]) => JSON.parse(i.body as string).requestKey);
+    expect(keys[0]).not.toBe(keys[1]);
+  });
+
+  it("通信が途切れたときは同じ要求キーで再送する", async () => {
+    let posts = 0;
+    fetchMock.mockImplementation((_url: string, init?: RequestInit) => {
+      if (init?.method !== "POST") return json(importOptions({ options: [option({ relatedFix: true, approvalRequired: false })] }));
+      posts += 1;
+      return posts === 1 ? Promise.reject(new TypeError("Failed to fetch")) : json({ ok: true, candidateId: "cand1", revision: 3, existing: true });
+    });
+    render(<RcImportPanel repositoryFullName="o/r" pullRequestNumber={5} />);
+    fireEvent.click(await screen.findByRole("checkbox", { name: /#684/ }));
+    fireEvent.click(screen.getByRole("button", { name: "選んだ1件を取り込む" }));
+    await screen.findByText(/Failed to fetch/);
+    fireEvent.click(screen.getByRole("button", { name: "選んだ1件を取り込む" }));
+    await screen.findByText(/取り込みを依頼しました/);
+    const keys = fetchMock.mock.calls.filter(([, i]) => i?.method === "POST").map(([, i]) => JSON.parse(i.body as string).requestKey);
+    expect(keys[0]).toBe(keys[1]);
+  });
+});

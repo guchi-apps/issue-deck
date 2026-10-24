@@ -94,7 +94,7 @@ vi.mock("@/lib/dispatch/release-verify-jobs", () => ({ requestReleaseVerifyJob: 
 vi.mock("@/lib/dispatch/release-review-start", () => ({ requestReleaseReviewAfterIntegration: mocks.reviewJob }));
 
 vi.mock("@/lib/release-fix-series-run", () => ({ closeFixSeriesForCancelledCandidate: (...a: unknown[]) => (mocks.closeSeries as (...x: unknown[]) => unknown)(...a) }));
-import { cancelReleaseRc, createReleaseRc, reconcileRcCandidate, recordRcReport, requestRcImport } from "@/lib/release-rc-run";
+import { cancelReleaseRc, createReleaseRc, loadRcImportOptions, reconcileRcCandidate, recordRcReport, requestRcImport } from "@/lib/release-rc-run";
 import { RC_NOT_UPDATED_REASON } from "@/lib/release-rc";
 
 const CALLER = "    inputs:\n      candidate_request:\n        type: string\n    with:\n      candidate-request: x\n";
@@ -275,6 +275,79 @@ describe("requestRcImport", () => {
     );
     const result = await requestRcImport({ ...base, expectedHeadSha: HEAD1, selected: [{ number: 21 }] });
     expect(result).toEqual({ ok: false, error: "revision_in_progress" });
+  });
+
+  it("失敗した更新と同じ要求キーの再送は成功として返さない（#4986）", async () => {
+    mocks.revisionFindUnique.mockResolvedValue({ candidateId: "c1", revision: 2, status: "failed" });
+    const result = await requestRcImport({ ...base, expectedHeadSha: HEAD1, selected: [{ number: 21 }] });
+    expect(result).toMatchObject({ ok: false, error: "dispatch_failed" });
+    expect(mocks.dispatch).not.toHaveBeenCalled();
+  });
+
+  it("起動済みの更新と同じ要求キーの再送は既存を返す", async () => {
+    mocks.revisionFindUnique.mockResolvedValue({ candidateId: "c1", revision: 2, status: "requested" });
+    const result = await requestRcImport({ ...base, expectedHeadSha: HEAD1, selected: [{ number: 21 }] });
+    expect(result).toEqual({ ok: true, candidateId: "c1", revision: 2, existing: true });
+  });
+});
+
+describe("loadRcImportOptions（#4986）", () => {
+  const RC_PR = { number: 10, state: "open", head: { sha: HEAD1, ref: "release-rc/3" }, base: { sha: "b".repeat(40) } };
+  const pr = (n: number, over: Record<string, unknown> = {}) => ({
+    number: n, title: `PR${n}`, merged_at: "2026-10-12T00:00:00Z", merge_commit_sha: `${n}`.padEnd(40, "0"),
+    base: { ref: "develop" }, head: { ref: `issue-${n}` }, ...over,
+  });
+
+  beforeEach(() => {
+    mocks.candidateFindUnique.mockImplementation(async ({ where }: { where: { id?: string } }) => (where.id ? candidateRow() : null));
+    mocks.prsByHead.mockResolvedValue([RC_PR]);
+    mocks.isAncestor.mockResolvedValue(false);
+    mocks.rebuildCandidate.mockResolvedValue({
+      pullRequests: [
+        { number: 684, title: "証跡補充", issueNumber: null, mergeSha: "e".repeat(40) },
+        { number: 686, title: "安全修正", issueNumber: 12, mergeSha: "f".repeat(40) },
+      ],
+    });
+  });
+
+  it("候補headの後のPRを返し、修正系列のPRは承認不要・範囲外は承認要と示す", async () => {
+    mocks.fixFindMany.mockResolvedValue([{ fixPrNumber: 686, status: "fix_merged" }]);
+    const result = await loadRcImportOptions(ctx, "c1");
+    expect(result).toMatchObject({ candidateId: "c1", headSha: HEAD1, blocked: null });
+    expect(mocks.rebuildCandidate.mock.calls[0][2]).toBe(HEAD1);
+    expect(result?.options.map((o) => [o.number, o.relatedFix, o.approvalRequired])).toEqual([
+      [684, false, true],
+      [686, true, false],
+    ]);
+  });
+
+  it("未マージの修正系列PRは理由付きで選べない", async () => {
+    mocks.fixFindMany.mockResolvedValue([{ fixPrNumber: 700, status: "fix_pending" }]);
+    mocks.prForRebuild.mockResolvedValue(pr(700, { merged_at: null, merge_commit_sha: null }));
+    const result = await loadRcImportOptions(ctx, "c1");
+    expect(result?.options.find((o) => o.number === 700)).toMatchObject({ problem: "not_merged", approvalRequired: false });
+  });
+
+  it("別リポジトリの候補・候補PRが開いていない場合は返さない", async () => {
+    mocks.candidateFindUnique.mockImplementation(async () => candidateRow({ repositoryFullName: "x/y" }));
+    expect(await loadRcImportOptions(ctx, "c1")).toBeNull();
+    mocks.candidateFindUnique.mockImplementation(async () => candidateRow());
+    mocks.prsByHead.mockResolvedValue([]);
+    expect(await loadRcImportOptions(ctx, "c1")).toBeNull();
+  });
+
+  it("候補ブランチの先端が記録と違えば取り込めないと示す", async () => {
+    mocks.branchHead.mockImplementation(async (_o: string, _r: string, branch: string) => (branch.startsWith("release-rc/") ? HEAD2 : FROZEN));
+    const result = await loadRcImportOptions(ctx, "c1");
+    expect(result?.headSha).toBe(HEAD2);
+    expect(result?.blocked).toContain("記録と一致しません");
+  });
+
+  it("取り込みの更新が進行中なら取り込めないと示す", async () => {
+    mocks.candidateFindUnique.mockImplementation(async () =>
+      candidateRow({ revisions: [...candidateRow().revisions, { id: "r2", revision: 2, status: "requested", createdAt: new Date() }] }),
+    );
+    expect((await loadRcImportOptions(ctx, "c1"))?.blocked).toContain("進行中");
   });
 });
 
