@@ -297,7 +297,7 @@ export async function ensurePublishApprovalRun(ctx: Ctx, approvalId: string, now
     if (existing.candidatePrNumber !== approval.prNumber) {
       return { ok: false, error: "run_active", message: `このリポジトリでは別のリリース候補（#${existing.candidatePrNumber}）の完了系列が進行中です` };
     }
-    // 同じ候補の復旧系列（「リリース完了まで進める」）が進行中なら、それに承認を紐付けて本番まで進める
+    // 同じ候補の復旧系列（「修正を自動で続ける」）が進行中なら、それに承認を紐付けて本番まで進める
     const attached = await db.releaseCompletionRun.updateMany({
       where: { id: existing.id, activeKey: { not: null } },
       data: { publishApprovalId: approval.id, scope: RELEASE_COMPLETION_SCOPE_PRODUCTION },

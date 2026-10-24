@@ -84,7 +84,7 @@ describe("ReleaseCompletionPanel（#4480）", () => {
     expect(screen.getByTestId("release-completion-note").textContent).toContain("操作は不要です");
     expect(screen.getByRole("button", { name: "停止" })).toBeTruthy();
     // 進行中は開始ボタンを重ねて出さない
-    expect(screen.queryByRole("button", { name: "リリース完了まで進める" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "修正を自動で続ける" })).toBeNull();
   });
 
   it("止まったときは操作が必要なことと理由を出す", async () => {
@@ -105,7 +105,7 @@ describe("ReleaseCompletionPanel（#4480）", () => {
   it("系列が無く問題のある候補では開始でき、範囲を選んでサーバーへ送る", async () => {
     const fetchMock = mockRun(null);
     render(<ReleaseCompletionPanel {...props} canStart />);
-    const button = await screen.findByRole("button", { name: "リリース完了まで進める" });
+    const button = await screen.findByRole("button", { name: "修正を自動で続ける" });
     fireEvent.click(button);
     expect(await screen.findByTestId("release-completion-dialog")).toBeTruthy();
     expect((screen.getByRole("button", { name: "開始する" }) as HTMLButtonElement).disabled).toBe(true);
@@ -116,6 +116,26 @@ describe("ReleaseCompletionPanel（#4480）", () => {
     await waitFor(() => expect(fetchMock.mock.calls.some(isPost)).toBe(true));
     const post = fetchMock.mock.calls.find(isPost) as unknown as [string, RequestInit];
     expect(JSON.parse(String(post[1].body))).toMatchObject({ pullRequestNumber: 4497, scope: "until_ready", headSha: "8be41d0aaaa" });
+  });
+
+  it("新方式の候補では範囲を選ばせず、公開承認で公開することを示して`until_ready`で始める（#4981）", async () => {
+    const fetchMock = mockRun(null);
+    render(<ReleaseCompletionPanel {...props} canStart rcCandidate />);
+    fireEvent.click(await screen.findByRole("button", { name: "修正を自動で続ける" }));
+    expect(await screen.findByTestId("release-completion-rc-publish")).toBeTruthy();
+    expect(screen.queryByLabelText(/本番反映・稼働確認まで/)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "開始する" }));
+    const isPost = (call: unknown) => ((call as unknown[])[1] as RequestInit | undefined)?.method === "POST";
+    await waitFor(() => expect(fetchMock.mock.calls.some(isPost)).toBe(true));
+    const post = fetchMock.mock.calls.find(isPost) as unknown as [string, RequestInit];
+    expect(JSON.parse(String(post[1].body))).toMatchObject({ scope: "until_ready" });
+  });
+
+  it("新方式の候補のチェック通過後は、公開承認を押すよう案内する（#4981）", async () => {
+    mockRun({ status: "awaiting_approval", statusLabel: "本番承認待ち", needsAction: true, scope: "until_ready" });
+    render(<ReleaseCompletionPanel {...props} canStart rcCandidate />);
+    await waitFor(() => expect(screen.getByTestId("release-completion-note").textContent).toContain("「本番公開へ進む（公開承認）」を押すと"));
+    expect(screen.getByText(/本番公開は公開承認で/, { selector: "span" })).toBeTruthy();
   });
 
   it("問題の無い候補（開始できない）で系列も無ければ何も出さない", async () => {
