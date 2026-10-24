@@ -1,4 +1,5 @@
-import { callClaudeMessages } from "@/lib/claude/request";
+import { formatTimeOfDay } from "@/lib/format-date-time";
+import { callClaudeMessages, type AiApiError } from "@/lib/claude/request";
 import {
   buildRecommendationPrompt,
   parseRecommendationResponse,
@@ -22,11 +23,20 @@ export type GeneratedRecommendations = {
   byFinding: Map<string, Omit<ReleaseReviewRecommendation, "id" | "findingId" | "baseSha" | "headSha" | "createdAt">>;
 };
 
+/** 画面にそのまま出る失敗理由。429は利用枠の上限なので、再取得できる時刻を添える */
+export function recommendationFailureMessage(status: number, error: AiApiError | null): string {
+  if (status !== 429) return `AIの推奨を作れませんでした (${status})`;
+  const at = error?.retryAt ? formatTimeOfDay(error.retryAt) : null;
+  return at
+    ? `AIの利用枠が上限に達しています。${at}ごろ以降に再取得できます`
+    : "AIの利用枠が上限に達しています。しばらく待ってから再取得してください";
+}
+
 export async function generateReleaseReviewRecommendations(
   token: string,
   input: { repoFullName: string; prNumber: number; findings: readonly RecommendationTarget[] },
 ): Promise<GeneratedRecommendations> {
-  const { response, json } = await callClaudeMessages<AnthropicMessageResponse>({
+  const { response, json, error } = await callClaudeMessages<AnthropicMessageResponse>({
     feature: "release_review_recommend",
     token,
     timeoutMs: RECOMMEND_TIMEOUT_MS,
@@ -35,7 +45,7 @@ export async function generateReleaseReviewRecommendations(
       messages: [{ role: "user", content: buildRecommendationPrompt(input) }],
     },
   });
-  if (!response.ok) throw new Error(`AIの推奨を作れませんでした (${response.status})`);
+  if (!response.ok) throw new Error(recommendationFailureMessage(response.status, error));
   const text = json?.content?.find((block) => block.type === "text")?.text ?? "";
   return {
     model: json?.model ?? null,

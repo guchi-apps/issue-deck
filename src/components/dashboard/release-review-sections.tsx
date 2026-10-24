@@ -452,7 +452,7 @@ function ReviewRerunButton({
         type="button"
         onClick={run}
         disabled={busy || disabled}
-        className="inline-flex min-h-8 items-center gap-1 rounded border px-2 py-0.5 text-[11.5px] font-medium text-foreground hover:bg-muted disabled:opacity-50"
+        className="inline-flex min-h-11 items-center gap-1 rounded border px-4 text-[13px] font-medium text-foreground hover:bg-muted disabled:opacity-50"
       >
         <RotateCcw aria-hidden className="size-3" />
         {busy ? "依頼中…" : label}

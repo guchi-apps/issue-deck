@@ -55,7 +55,18 @@ export type ClaudeMessagesResult<T> = {
 export type AiApiError = {
   code: string | null;
   requestId: string | null;
+  /** 429などで再試行できるようになる時刻（epochミリ秒）。ヘッダから読めなければnull */
+  retryAt: number | null;
 };
+
+/** `retry-after`（秒）か統合レート制限のリセット時刻（epoch秒）から、再試行できる時刻を読む */
+export function readRetryAt(headers: Headers, now: number = Date.now()): number | null {
+  const retryAfter = Number(headers.get("retry-after"));
+  if (headers.get("retry-after") && Number.isFinite(retryAfter) && retryAfter >= 0) return now + retryAfter * 1000;
+  const reset = Number(headers.get("anthropic-ratelimit-unified-reset"));
+  if (headers.get("anthropic-ratelimit-unified-reset") && Number.isFinite(reset) && reset * 1000 > now) return reset * 1000;
+  return null;
+}
 
 function readTokenCount(value: number | undefined): number {
   return typeof value === "number" && Number.isFinite(value) ? value : 0;
@@ -76,7 +87,7 @@ async function readAiApiError(response: Response): Promise<AiApiError> {
   } catch {
     // 失敗本文がJSONでなくても、HTTPステータスを扱う呼び出し元は継続できる。
   }
-  return { code, requestId: response.headers.get("x-request-id") };
+  return { code, requestId: response.headers.get("x-request-id"), retryAt: readRetryAt(response.headers) };
 }
 
 const REASONING_FEATURES = new Set<ClaudeApiFeature>([
