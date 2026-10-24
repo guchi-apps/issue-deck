@@ -38,7 +38,7 @@ MAX_BATCHES_PER_RUN="${ISSUE_DECK_RELEASE_REVIEW_MAX_BATCHES_PER_RUN:-8}"
 # 保存（`*.batches`）の掃除。3日より古いものに加え、新しい順にこの件数を超えた分を消す（ディスクを使い切らない。#4767）
 KEEP_BATCH_DIRS="${ISSUE_DECK_RELEASE_REVIEW_KEEP_BATCH_DIRS:-20}"
 # 実行結果（テスト・型検査・ビルド）の証跡を指す文言。`src/lib/release-review-reevaluation.ts`の`EVIDENCE_TEXT`と揃える
-EVIDENCE_TEXT_PATTERN='統合検証|検証結果|検証証跡|証跡|実行結果|テスト|型検査|ビルド|running'
+EVIDENCE_TEXT_PATTERN='統合検証|検証結果|検証証跡|証跡|実行結果|テスト|型検査|ビルド|running|連携先|資料未取得|権限不足|通信失敗|実設定不足'
 # 実行ホスト（サブPCのpoller）の稼働状態を指す文言（#4799）。`src/lib/release-review-reevaluation.ts`の`HOST_TEXT`と揃える
 HOST_TEXT_PATTERN='poller|ポーラー|サブPC|再起動|実機|起動時|実行ホスト|稼働コミット|host_compat'
 # 同時に確認するバッチ数の上限（#4769）。1で従来どおり1本ずつ。相互作用の確認・実績の補完は全バッチの後に1本だけ走る
@@ -877,6 +877,11 @@ main() {
   local dependency_dir
   dependency_dir="$(mktemp -d "$WORKTREE/.release-review-dependencies.XXXXXX")"
   python3 "$SCRIPT_DIR/release-review-dependencies.py" "$WORKTREE" "$SCRIPT_DIR/.." "$dependency_dir" >"$dependency_dir/prompt"
+  # 別repoの連携先（Issue/PR）の実装・運用証跡も、利用者の送付なしに固定SHAで取得する（#4975）。失敗してもレビューは止めない
+  local integration_dir
+  integration_dir="$(mktemp -d "$WORKTREE/.release-review-integrations.XXXXXX")"
+  python3 "$SCRIPT_DIR/release-review-integrations.py" "$WORKTREE" "$full_name" "$base_sha" "$head_sha" "$integration_dir" \
+    >"$integration_dir/prompt" 2>/dev/null || : >"$integration_dir/prompt"
 
   # 差分の材料。ファイルごとの差分を、予算の範囲でバッチへ詰める（#4615）。
   # **入力へ載せることは確認の実績ではない。** 容量を超えた分は次のバッチで確認し、省略・黙った除外はしない
@@ -899,6 +904,7 @@ main() {
   evidence_fp="$(evidence_fingerprint "$full_name" "$pr_number" "$base_sha" "$head_sha")"
   if [[ -n "$evidence_fp" ]]; then
     evidence_fp="${evidence_fp}:shared-$(cat "$dependency_dir/fingerprint")"
+    evidence_fp="${evidence_fp}:integ-$(cat "$integration_dir/fingerprint" 2>/dev/null || true)"
   fi
   prs_text="$(git -C "$WORKTREE" log --format='- %s' "$base_sha..$head_sha" | head -n 200)"
 
@@ -956,6 +962,7 @@ main() {
   evidence_prompt_text "$full_name" "$pr_number" "$base_sha" "$head_sha" >"$part_dir/evidence"
   runner_host_prompt_text "$full_name" "$head_sha" >>"$part_dir/evidence"
   cat "$dependency_dir/prompt" >>"$part_dir/evidence"
+  cat "$integration_dir/prompt" >>"$part_dir/evidence"
   if [[ -n "$checklist_version" ]]; then
     jq -r '.checklistPrompt // ""' <<<"$ctx_json" >"$part_dir/checklist"
     jq -r '.blockingPolicy // ""' <<<"$ctx_json" >"$part_dir/blocking"
