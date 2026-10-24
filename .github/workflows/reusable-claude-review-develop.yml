@@ -980,7 +980,11 @@ jobs:
             exit 1
           }
           # 移行前の実装がこのHEADへ投稿済みの結果があれば、積み直さずそれを使う（二重に実行しない）。
-          if gh pr view "$PR_NUMBER" --json comments --jq '.comments[].body' \
+          # 判定印はサブPCがユーザー本人のトークンで投稿するため、書き込み権限のある投稿者
+          # (OWNER/MEMBER/COLLABORATOR)のコメントだけを読む。外部ユーザーが書いた偽の判定印で
+          # 依頼を省かせないため(#4969)
+          if gh api --paginate "repos/${GH_REPO}/issues/${PR_NUMBER}/comments" \
+            --jq '.[] | select(.author_association == "OWNER" or .author_association == "MEMBER" or .author_association == "COLLABORATOR") | .body' \
             | grep -qE "issue-deck-codex-review-verdict:(lgtm|needs-check|changes-requested) sha=${HEAD_SHA}"; then
             echo "このHEADのCodexレビュー結果が既にPRにあるため、依頼しません。"
             echo "requested=true" >> "$GITHUB_OUTPUT"
@@ -1170,6 +1174,8 @@ jobs:
       #   pending … キュー待ち・実行中。判定を保留し、完了後にこのジョブが再実行される
       #   stale   … PRのHEADが進んだ。この結果では判定しない（新しいHEADのrunが判定する）
       #   failed  … 失敗・時間切れ・不正出力・取得不能。**自動マージせず人へ渡す**（`reason`）
+      # `source`は判定の出所（`job`＝DispatchJobの完了結果／`marker`＝PRコメントの判定印）。
+      # 対応Issueを持たないPRの自動マージは`job`の判定だけを根拠にする（#4969）
       - name: Codexレビューの状態を取得する
         id: codex
         env:
@@ -1189,6 +1195,7 @@ jobs:
               echo "result=$1"
               echo "verdict=${2:-}"
               printf 'reason=%s\n' "$(printf '%s' "${3:-}" | tr '\n' ' ')"
+              echo "source=${4:-}"
             } >> "$GITHUB_OUTPUT"
             echo "Codexレビューの状態: $1 ${2:-} ${3:-}"
             exit 0
@@ -1206,11 +1213,13 @@ jobs:
           if [ -n "$CURRENT_HEAD" ] && [ "$CURRENT_HEAD" != "$HEAD_SHA" ]; then
             emit stale
           fi
-          MARKER_VERDICT="$(gh pr view "$PR_NUMBER" --json comments --jq '.comments[].body' 2>/dev/null \
+          # 判定印は書き込み権限のある投稿者のコメントだけから読む(外部ユーザーが偽の判定印を書けるため。#4969)
+          MARKER_VERDICT="$(gh api --paginate "repos/${GH_REPO}/issues/${PR_NUMBER}/comments" \
+            --jq '.[] | select(.author_association == "OWNER" or .author_association == "MEMBER" or .author_association == "COLLABORATOR") | .body' 2>/dev/null \
             | grep -oE "issue-deck-codex-review-verdict:(lgtm|needs-check|changes-requested) sha=${HEAD_SHA}" \
             | tail -n 1 | sed -E 's/^.*verdict:([a-z-]+) sha=.*$/\1/' || true)"
           if [ -z "$APP_BASE_URL" ] || [ -z "$PROGRESS_REPORT_SECRET" ]; then
-            [ -z "$MARKER_VERDICT" ] || emit success "$MARKER_VERDICT"
+            [ -z "$MARKER_VERDICT" ] || emit success "$MARKER_VERDICT" "" marker
             emit failed "" "APP_BASE_URL / PROGRESS_REPORT_SECRET が未設定のため、Codexレビューの状態を取得できません"
           fi
           BODY="$(jq -n --arg repository "$GH_REPO" --argjson pr "$PR_NUMBER" --arg head "$HEAD_SHA" \
@@ -1221,17 +1230,17 @@ jobs:
             -H "Authorization: Bearer $PROGRESS_REPORT_SECRET" \
             -H "Content-Type: application/json" -d "$BODY")" || CODE=000
           if [ "$CODE" != "200" ]; then
-            [ -z "$MARKER_VERDICT" ] || emit success "$MARKER_VERDICT"
+            [ -z "$MARKER_VERDICT" ] || emit success "$MARKER_VERDICT" "" marker
             emit failed "" "IssueDeckからCodexレビューの状態を取得できませんでした（HTTP ${CODE}）"
           fi
           STATE="$(jq -r '.state // empty' "$RESPONSE")"
           case "$STATE" in
-            done) emit success "$(jq -r '.verdict // empty' "$RESPONSE")" ;;
+            done) emit success "$(jq -r '.verdict // empty' "$RESPONSE")" "" job ;;
             pending) emit pending "" "$(jq -r '.message // empty' "$RESPONSE")" ;;
             stale) emit stale ;;
             failed) emit failed "" "$(jq -r '.reason // "レビューが失敗しました"' "$RESPONSE")" ;;
             missing)
-              [ -z "$MARKER_VERDICT" ] || emit success "$MARKER_VERDICT"
+              [ -z "$MARKER_VERDICT" ] || emit success "$MARKER_VERDICT" "" marker
               emit failed "" "Codexレビューのジョブが見つかりません（依頼が届いていません）"
               ;;
             *) emit failed "" "Codexレビューの状態を読み取れませんでした" ;;
@@ -1258,6 +1267,7 @@ jobs:
           WORKFLOW_CHANGE_POLICY: ${{ inputs.workflow-change-policy }}
           CODEX_REVIEW_RESULT: ${{ steps.codex.outputs.result }}
           CODEX_VERDICT_INPUT: ${{ steps.codex.outputs.verdict }}
+          CODEX_VERDICT_SOURCE: ${{ steps.codex.outputs.source }}
           CODEX_FAILURE_REASON: ${{ steps.codex.outputs.reason }}
           REVIEW_AUTO_FIX: ${{ inputs.review-auto-fix }}
         run: |
@@ -1309,6 +1319,8 @@ jobs:
           CODEX_REVIEW_BLOCKED=false
           CODEX_REVIEW_FAILED=false
           CODEX_VERDICT=""
+          # DispatchJobの完了結果から得た判定か(#4969)。PRコメントの判定印から補った判定はfalse
+          CODEX_VERDICT_FROM_JOB=false
           if [ "$CODEX_REVIEW_RESULT" = "failed" ]; then
             # 失敗・時間切れ・不正出力は、判定が無いのと同じ。**自動マージせず人へ渡す**
             CODEX_REVIEW_BLOCKED=true
@@ -1316,6 +1328,7 @@ jobs:
             echo "Codexレビューの結果を得られませんでした: ${CODEX_FAILURE_REASON}"
           elif [ "$CODEX_REVIEW_RESULT" = "success" ]; then
             CODEX_VERDICT="${CODEX_VERDICT_INPUT:-}"
+            [ -z "$CODEX_VERDICT" ] || [ "${CODEX_VERDICT_SOURCE:-}" != "job" ] || CODEX_VERDICT_FROM_JOB=true
             if [ -z "$CODEX_VERDICT" ]; then
               # 投稿者がBotのコメントだけを読む(外部ユーザーが偽の判定マーカーを書けるため。#4952)
               CODEX_VERDICT="$(gh api --paginate "repos/${GH_REPO}/issues/${PR_NUMBER}/comments" \
@@ -1370,7 +1383,8 @@ jobs:
           fi
 
           # 対応Issueを持たないPRは、ClaudeかCodexのどちらかが今のHEADに「問題なし」(lgtm)を出したときだけ
-          # 自動マージする(#4952)。総評マーカーが無い・lgtm以外なら止める(判定を読めないまま通さない)
+          # 自動マージする(#4952)。総評マーカーが無い・lgtm以外なら止める(判定を読めないまま通さない)。
+          # CodexのLGTMはDispatchJobの完了結果だけを数え、PRコメントの判定印から補ったものは使わない(#4969)
           NO_ISSUE_UNREVIEWED=false
           if [ -z "$ISSUE_NUMBER" ] && [ "$WORKFLOW_UNREVIEWED" != "true" ]; then
             CLAUDE_VERDICT=""
@@ -1381,7 +1395,7 @@ jobs:
                 | grep -oE "issue-deck-review-verdict:(lgtm|needs-check|changes-requested) sha=${HEAD_SHA}" \
                 | tail -n 1 | sed -E 's/^.*verdict:([a-z-]+) sha=.*$/\1/' || true)"
             fi
-            if [ "$CLAUDE_VERDICT" = "lgtm" ] || [ "$CODEX_VERDICT" = "lgtm" ]; then
+            if [ "$CLAUDE_VERDICT" = "lgtm" ] || { [ "$CODEX_VERDICT" = "lgtm" ] && [ "$CODEX_VERDICT_FROM_JOB" = "true" ]; }; then
               echo "対応Issueを持たないPRですが、自動レビューが問題なしと判定しています。"
             else
               NO_ISSUE_UNREVIEWED=true
@@ -1671,7 +1685,9 @@ jobs:
             success)
               FOUND="${CODEX_VERDICT_INPUT:-}"
               if [ -z "$FOUND" ]; then
-                FOUND="$(gh pr view "$PR_NUMBER" --json comments --jq '.comments[].body' \
+                # 書き込み権限のある投稿者のコメントだけを読む(#4969)
+                FOUND="$(gh api --paginate "repos/${GH_REPO}/issues/${PR_NUMBER}/comments" \
+                  --jq '.[] | select(.author_association == "OWNER" or .author_association == "MEMBER" or .author_association == "COLLABORATOR") | .body' \
                   | grep -oE "issue-deck-codex-review-verdict:(lgtm|needs-check|changes-requested) sha=${HEAD_SHA}" \
                   | tail -n 1 \
                   | sed -E 's/^.*verdict:([a-z-]+) sha=.*$/\1/' || true)"
