@@ -72,6 +72,14 @@ def extract_refs(worktree, base, head):
     return found
 
 
+def is_deploy_workflow(run_):
+    base = (run_.get("path") or "").rsplit("/", 1)[-1].lower()
+    name = (run_.get("name") or "").lower()
+    if re.search(r"release|sync|prepare|publish", base + " " + name):
+        return False
+    return bool(re.match(r"deploy([-_.]|$)", base) or re.match(r"deploy\b", name))
+
+
 def contained(owner, repo, branch, sha):
     data, err = api_json(f"repos/{owner}/{repo}/compare/{branch}...{sha}")
     if data is None:
@@ -108,10 +116,11 @@ def collect_pr(owner, repo, number, outdir, record):
         entry["deploy"] = {"state": f"取得不能（{e}）"}
     else:
         for r in runs.get("workflow_runs", []):
-            if re.search(r"deploy|release", (r.get("name") or "") + (r.get("path") or ""), re.I):
+            # 本番デプロイ用のworkflowだけ。release-sync・公開準備のような成功runは拾わない
+            if is_deploy_workflow(r):
                 ok, _ = contained(owner, repo, r["head_sha"], sha)
                 if ok:
-                    deploy = {"state": "成功", "run": r.get("html_url"), "headSha": r["head_sha"], "at": r.get("updated_at")}
+                    deploy = {"state": "デプロイworkflowの成功run（稼働中のversionとの照合は未実施。稼働SHAは未確認）", "run": r.get("html_url"), "headSha": r["head_sha"], "at": r.get("updated_at")}
                     break
         entry["deploy"] = deploy or {"state": "マージコミットを含む成功したデプロイが見つからない"}
     files, e = api_json(f"repos/{owner}/{repo}/pulls/{number}/files?per_page={MAX_FILES}")
@@ -124,11 +133,11 @@ def collect_pr(owner, repo, number, outdir, record):
     entry["codeAtMerge"] = fetch_files(owner, repo, names, sha, outdir)
     live = (entry.get("deploy") or {}).get("headSha")
     if live and live != sha:
-        entry["codeAtDeployed"] = fetch_files(owner, repo, names, live, outdir)
+        entry["codeAtDeployCandidate"] = fetch_files(owner, repo, names, live, outdir)
     elif live:
-        entry["codeAtDeployed"] = {"note": "実装PRのマージコミットが最新の成功デプロイと同一"}
+        entry["codeAtDeployCandidate"] = {"note": "実装PRのマージコミットが最新のデプロイ成功runと同一（稼働版の照合は未実施）"}
     else:
-        entry["codeAtDeployed"] = {"note": "成功デプロイを特定できないため稼働中のコードは未確認"}
+        entry["codeAtDeployCandidate"] = {"note": "デプロイworkflowの成功runを特定できないため、稼働中のコードは未確認"}
 
 
 def fetch_files(owner, repo, names, sha, outdir):

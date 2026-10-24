@@ -68,15 +68,17 @@ it("後続PRが入った稼働中のSHAでも同じファイルを別に取得�
     [`repos/guchi-apps/kurashio/contents/src/api.ts?ref=${LIVE}`]: "export const x = 2; // 後続PR\n",
     ...routes,
     "repos/guchi-apps/kurashio/compare/main": { status: "behind" },
+    ["repos/guchi-apps/kurashio/compare/" + "c".repeat(40)]: { status: "behind" },
     [`repos/guchi-apps/kurashio/compare/${LIVE}`]: { status: "behind" },
-    "repos/guchi-apps/kurashio/actions/runs": { workflow_runs: [{ name: "deploy", path: ".github/workflows/deploy.yml", head_sha: LIVE }] },
+    "repos/guchi-apps/kurashio/actions/runs": { workflow_runs: [{ name: "release-sync", path: ".github/workflows/release-sync.yml", head_sha: "c".repeat(40) }, { name: "deploy", path: ".github/workflows/deploy.yml", head_sha: LIVE }] },
   });
   run();
   const m = JSON.parse(readFileSync(path.join(out, "manifest.json"), "utf8"));
   const pr = m.resolved.find((x) => x.repository === "guchi-apps/kurashio").pulls[0];
-  expect(pr.deploy.headSha).toBe(LIVE);
+  expect(pr.deploy.headSha).toBe(LIVE); // 新しいrelease-sync成功runではなく、実deployのrunを使う
+  expect(pr.deploy.state).toContain("稼働SHAは未確認");
   expect(readFileSync(pr.codeAtMerge.files[0].local, "utf8")).toContain("x = 1");
-  expect(readFileSync(pr.codeAtDeployed.files[0].local, "utf8")).toContain("x = 2");
+  expect(readFileSync(pr.codeAtDeployCandidate.files[0].local, "utf8")).toContain("x = 2");
   expect(m.fetchedAt).toMatch(/^\d{4}-/);
   expect(m.judgeVersion).toBeGreaterThan(0);
   expect(m.sharedTokens).toContain("未確認");
