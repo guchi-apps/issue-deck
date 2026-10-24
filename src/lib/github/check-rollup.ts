@@ -166,6 +166,11 @@ export type MergeJudgement = {
    * これを持つことでGitHub APIの消費は増えない。**
    */
   aiReview: AiReview;
+  /**
+   * 失敗で終わった判定ジョブの名前（`review-provider`・`auto-merge`など。#4952）。同じジョブが複数回
+   * 走ったときは最後の結果で決める。マージ待ちの「自動マージされません」の理由に使う。省略は「無し」
+   */
+  failedJobs?: string[];
 };
 
 /** 判定のcheck-runを1件も見られなかったときの値。従来どおり画面からマージできる側へ倒す */
@@ -588,8 +593,11 @@ function toMergeJudgement(nodes: RollupContextNode[]): MergeJudgement {
   if (judgementChecks.length === 0) return MERGE_JUDGEMENT_UNKNOWN;
 
   const aiReview = toAiReview(judgementChecks);
+  // 失敗が無ければ省く（省略は「無し」と同じ扱い）
+  const failed = failedJudgementJobs(judgementChecks);
+  const failedJobs = failed.length > 0 ? { failedJobs: failed } : {};
   const pendingChecks = judgementChecks.filter((node) => checkRunPhaseOf(node) !== "completed");
-  if (pendingChecks.length === 0) return { state: "settled", step: null, runUrl: null, aiReview };
+  if (pendingChecks.length === 0) return { state: "settled", step: null, runUrl: null, aiReview, ...failedJobs };
 
   // 本当に動いているものが1件でもあれば、そちらを待っているものとして名乗らせる（#4049）。
   // 残りが矛盾した状態のものだけなら、終わったとは言えないが何かが動いているとも言えない。
@@ -600,6 +608,7 @@ function toMergeJudgement(nodes: RollupContextNode[]): MergeJudgement {
       step: "state-mismatch",
       runUrl: pendingChecks[0]?.detailsUrl ?? null,
       aiReview,
+      ...failedJobs,
     };
   }
 
@@ -609,7 +618,19 @@ function toMergeJudgement(nodes: RollupContextNode[]): MergeJudgement {
     step: current ? judgementStepOf(current) : null,
     runUrl: current?.detailsUrl ?? null,
     aiReview,
+    ...failedJobs,
   };
+}
+
+const FAILED_CONCLUSIONS = new Set(["failure", "timed_out", "startup_failure", "action_required"]);
+
+/** 判定ジョブのうち、最後の実行が失敗で終わったものの名前（#4952）。並びはcheck-runの順 */
+function failedJudgementJobs(judgementChecks: RollupContextNode[]): string[] {
+  const latest = new Map<string, RollupContextNode>();
+  for (const node of judgementChecks) latest.set(jobNameOf(node), node);
+  return [...latest.entries()]
+    .filter(([, node]) => checkRunPhaseOf(node) === "completed" && FAILED_CONCLUSIONS.has((node.conclusion ?? "").toLowerCase()))
+    .map(([job]) => job);
 }
 
 /**

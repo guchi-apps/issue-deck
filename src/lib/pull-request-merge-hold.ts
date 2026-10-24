@@ -1,4 +1,5 @@
 import { needsReviewAttention } from "@/lib/github/pull-request-review-verdict";
+import { isSystemBranch } from "@/lib/system-branch";
 import type { PullRequestSummary } from "@/types/pull-request";
 
 /**
@@ -83,7 +84,16 @@ export function deriveMergeHold(pullRequest: PullRequestSummary): MergeHold {
   } else if (!pullRequest.autoMergeEnabled) {
     const issueNumber = pullRequest.linkedIssueNumber;
     if (issueNumber === null) {
-      reasons.push({ kind: "issue-unknown", text: "対応Issueを特定できません", issueNumber: null });
+      // 対応Issueを持たないPRは、自動レビューの「問題なし」が出れば自動マージされる（#4952）。
+      // ここへ来るのは判定が終わった・読めないのに予約されていないときなので、その条件を添える。
+      // システムブランチ（リリース同期など）は専用の経路がマージするので、保留理由にしない
+      if (!isSystemBranch(pullRequest.headRef)) {
+        reasons.push({
+          kind: "issue-unknown",
+          text: "対応Issueを特定できないPRで、自動レビューの「問題なし」が得られていません",
+          issueNumber: null,
+        });
+      }
     } else {
       const checkUserReason = pullRequest.linkedIssueCheckReason;
       if (checkUserReason !== null || pullRequest.linkedIssueCheckUser) {

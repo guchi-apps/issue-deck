@@ -38,8 +38,16 @@ it.each(["claude", "codex"])("実装担当%sだけを選び共通設定を読ま
   expect(result.output).toBe(`provider=${provider}\n`);
   expect(readFileSync(path.join(dir, "calls"), "utf8")).not.toContain("claude-model");
 });
-it.each([{ HTTP_EXIT: "22" }, { RESPONSE: '{"provider":"unknown"}' }, { RESPONSE: 'invalid' }, { PROGRESS_REPORT_SECRET: '' }])("不明・通信失敗で別担当へ切り替えない %j", (patch) => {
+// 実装担当を解決できない（記録が無い・通信失敗・設定不足）ときは、止めずにClaudeでレビューする（#4952）。
+// 共通設定は読まない（既存Issueの担当を共通設定の変更で入れ替えないため。#4037）
+it.each([{ HTTP_EXIT: "22" }, { RESPONSE: 'invalid' }, { RESPONSE: '{}' }, { PROGRESS_REPORT_SECRET: '' }])("解決できなければClaudeでレビューを続ける %j", (patch) => {
   const result = run(patch);
+  expect(result.status).toBe(0);
+  expect(result.output).toBe("provider=claude\n");
+  expect(readFileSync(path.join(dir, "calls"), { encoding: "utf8", flag: "a+" })).not.toContain("claude-model");
+});
+it("想定外の担当名が返ったら止める", () => {
+  const result = run({ RESPONSE: '{"provider":"unknown"}' });
   expect(result.status).not.toBe(0);
   expect(result.output).toBe("");
 });

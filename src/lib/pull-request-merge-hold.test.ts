@@ -58,7 +58,7 @@ describe("deriveMergeHold", () => {
   it("対応Issueを特定できないPR（#4372相当）は理由が確定した保留になる", () => {
     const hold = deriveMergeHold(pr({ kind: "other", linkedIssueNumber: null, linkedIssueNumbers: [] }));
     expect(hold.status).toBe("held");
-    expect(hold.reasons[0].text).toBe("対応Issueを特定できません");
+    expect(hold.reasons[0].text).toBe("対応Issueを特定できないPRで、自動レビューの「問題なし」が得られていません");
   });
 
   it("対応Issueが00.check-user付き（#697相当）なら、Issue番号つきのユーザー確認待ち", () => {
