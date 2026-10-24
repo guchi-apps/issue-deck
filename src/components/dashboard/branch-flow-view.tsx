@@ -1491,9 +1491,13 @@ function ReleaseGroupHeader({
                           ? "本番反映"
                           : "mainへマージ"
                   }`}
-                {/* いつ頃かを日付だけで測らなくて済むよう、相対時間を添える（#4984）。マウント前は日付のみ */}
-                {group.mergedAt && now !== null && `（${formatRelativeDate(group.mergedAt, now)}）`}
               </span>
+              {/* いつ頃かを日付だけで測らなくて済むよう、相対時間を添える（#4984）。マウント前は日付のみ */}
+              {group.mergedAt && now !== null && (
+                <span className="text-xs text-muted-foreground">
+                  {`（${formatRelativeDate(group.mergedAt, now)}）`}
+                </span>
+              )}
               {/* 成功は日付の後ろへ回す。「本番反映」を主にし、その裏付けとして添える */}
               {inProduction && (
                 <>
