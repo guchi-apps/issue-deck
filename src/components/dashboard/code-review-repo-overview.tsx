@@ -293,20 +293,20 @@ function RepoPickerList({
             <button
               type="button"
               onClick={() => onPick(row.repositoryFullName)}
-              className="grid w-full grid-cols-[minmax(0,1fr)_auto] gap-x-3 rounded-lg border p-3 text-left hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+              className="block w-full rounded-lg border p-3 text-left hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
             >
-              <span className="min-w-0">
-                <span className="block truncate text-sm font-medium">{name}</span>
-                <span className="mt-0.5 block text-[11px] text-muted-foreground">
-                  {describeMobileReviewStats(row, sinceLastCount, countsLoading)}
-                </span>
-                <ReviewTimelineStrip row={row} className="mt-2 h-2" />
+              <span className="flex items-center justify-between gap-x-3">
+                <span className="min-w-0 truncate text-sm font-medium">{name}</span>
+                {recommended && (
+                  <span className="shrink-0 rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-medium text-amber-700 dark:text-amber-400">
+                    {row.lastReviewedAt === null ? "初回を提案" : "レビューを提案"}
+                  </span>
+                )}
               </span>
-              {recommended && (
-                <span className="self-center rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-medium text-amber-700 dark:text-amber-400">
-                  {row.lastReviewedAt === null ? "初回を提案" : "レビューを提案"}
-                </span>
-              )}
+              <span className="mt-0.5 block text-[11px] text-muted-foreground">
+                {describeMobileReviewStats(row, sinceLastCount, countsLoading)}
+              </span>
+              <ReviewTimelineStrip row={row} className="mt-2 h-2" />
             </button>
           </li>
         );
