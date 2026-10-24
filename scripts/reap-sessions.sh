@@ -91,6 +91,11 @@ HANDOFF_IDLE_MINUTES="${SESSION_HANDOFF_IDLE_MINUTES:-5}"
 # worktreeもコミットも持たないため、畳んでも失うのは会話の文脈だけで、取り返しがつく。
 # 0でこの経路だけを無効にできる（従来どおりCLOSEDになるまで残す）。
 QUESTION_IDLE_MINUTES="${QUESTION_SESSION_IDLE_MINUTES:-30}"
+# 手作業セッション（`kind=manual-step`）専用の猶予（#4973）。以前は質問セッションの30分を共用して
+# いたが、手作業は人の操作や外部設定の完了を待つ間が長く、調査・実行の途中で30分放置されただけで
+# 畳まれていた。計画・質問の画面待ち（12時間）に揃える。0にすると放置では畳まず、手作業Issueが
+# CLOSEDになるまで残す。
+MANUAL_STEP_IDLE_MINUTES="${MANUAL_STEP_SESSION_IDLE_MINUTES:-720}"
 # `11.local`を付けたまま最終PRを作り終えたセッション専用の猶予（#4880）。起動プロンプトは
 # 「PRを作ったら`11.local`を外す」と指示しているが、外し忘れると引き渡し済みの経路に乗らず、
 # PRがマージされるまで残る。その間「同じPRのセッションが稼働中」を待つ処理（iOS事前検証の
@@ -117,8 +122,12 @@ while [[ $# -gt 0 ]]; do
       QUESTION_IDLE_MINUTES="${2:-}"
       shift 2 || true
       ;;
+    --manual-step-idle-minutes)
+      MANUAL_STEP_IDLE_MINUTES="${2:-}"
+      shift 2 || true
+      ;;
     *)
-      echo "Usage: scripts/reap-sessions.sh [--dry-run] [--idle-minutes <分>] [--handoff-idle-minutes <分>] [--question-idle-minutes <分>]" >&2
+      echo "Usage: scripts/reap-sessions.sh [--dry-run] [--idle-minutes <分>] [--handoff-idle-minutes <分>] [--question-idle-minutes <分>] [--manual-step-idle-minutes <分>]" >&2
       exit 1
       ;;
   esac
@@ -140,6 +149,10 @@ if [[ ! "$LOCAL_PR_IDLE_MINUTES" =~ ^[0-9]+$ ]]; then
 fi
 if [[ ! "$QUESTION_IDLE_MINUTES" =~ ^[0-9]+$ ]]; then
   echo "Error: 質問セッションの猶予は0以上の整数（分）で指定してください: $QUESTION_IDLE_MINUTES" >&2
+  exit 1
+fi
+if [[ ! "$MANUAL_STEP_IDLE_MINUTES" =~ ^[0-9]+$ ]]; then
+  echo "Error: 手作業セッションの猶予は0以上の整数（分）で指定してください: $MANUAL_STEP_IDLE_MINUTES" >&2
   exit 1
 fi
 
@@ -164,6 +177,7 @@ NOW="$(date +%s)"
 IDLE_SECONDS=$((IDLE_MINUTES * 60))
 HANDOFF_IDLE_SECONDS=$((HANDOFF_IDLE_MINUTES * 60))
 QUESTION_IDLE_SECONDS=$((QUESTION_IDLE_MINUTES * 60))
+MANUAL_STEP_IDLE_SECONDS=$((MANUAL_STEP_IDLE_MINUTES * 60))
 LOCAL_PR_IDLE_SECONDS=$((LOCAL_PR_IDLE_MINUTES * 60))
 CHECKED=0
 CANDIDATES=0
@@ -324,9 +338,15 @@ reap_one() {
   # 共通の猶予で判定する（下の質問ブロックがCLOSEDのときだけ畳む）。
   idle_minutes="$IDLE_MINUTES"
   idle_seconds="$IDLE_SECONDS"
-  if [[ ("$kind" == "question" || "$kind" == "manual-step") && "$QUESTION_IDLE_MINUTES" -gt 0 ]]; then
-    idle_minutes="$QUESTION_IDLE_MINUTES"
-    idle_seconds="$QUESTION_IDLE_SECONDS"
+  # 手作業セッションは質問より長い専用の値を使う（#4973）。
+  local kind_idle_minutes="$QUESTION_IDLE_MINUTES" kind_idle_seconds="$QUESTION_IDLE_SECONDS"
+  if [[ "$kind" == "manual-step" ]]; then
+    kind_idle_minutes="$MANUAL_STEP_IDLE_MINUTES"
+    kind_idle_seconds="$MANUAL_STEP_IDLE_SECONDS"
+  fi
+  if [[ ("$kind" == "question" || "$kind" == "manual-step") && "$kind_idle_minutes" -gt 0 ]]; then
+    idle_minutes="$kind_idle_minutes"
+    idle_seconds="$kind_idle_seconds"
   fi
   idle_for=$((NOW - event_at))
 
@@ -370,7 +390,7 @@ reap_one() {
         "$restart_hint"
       return 0
     fi
-    if [[ "$QUESTION_IDLE_MINUTES" -eq 0 ]]; then
+    if [[ "$kind_idle_minutes" -eq 0 ]]; then
       # 放置の猶予を無効にしている場合だけ、従来どおり${issue_label}のcloseを待つ。
       hold "$session" "${issue_label} #$issue_number がまだOPEN（閉じると畳みます）"
       return 0
@@ -385,7 +405,7 @@ reap_one() {
       return 0
     fi
     fold_session "$session" "$repository" "$issue_number" \
-      "${issue_label} #$issue_number はOPENだが、最後の応答終了から$((idle_for / 60))分（放置の猶予${QUESTION_IDLE_MINUTES}分）" \
+      "${issue_label} #$issue_number はOPENだが、最後の応答終了から$((idle_for / 60))分（放置の猶予${kind_idle_minutes}分）" \
       "$restart_hint_idle"
     return 0
   fi
@@ -661,4 +681,4 @@ while IFS= read -r session_name; do
   reap_one "$session_name"
 done < <(tmux list-sessions -F '#{session_name}' 2>/dev/null || true)
 
-echo "セッションを確認しました: $CHECKED 件（回収対象 $CANDIDATES 件・畳んだ $REAPED 件・猶予 ${IDLE_MINUTES}分・引き渡し済み ${HANDOFF_IDLE_MINUTES}分・11.local付きPR ${LOCAL_PR_IDLE_MINUTES}分・質問 ${QUESTION_IDLE_MINUTES}分）"
+echo "セッションを確認しました: $CHECKED 件（回収対象 $CANDIDATES 件・畳んだ $REAPED 件・猶予 ${IDLE_MINUTES}分・引き渡し済み ${HANDOFF_IDLE_MINUTES}分・11.local付きPR ${LOCAL_PR_IDLE_MINUTES}分・質問 ${QUESTION_IDLE_MINUTES}分・手作業 ${MANUAL_STEP_IDLE_MINUTES}分）"
