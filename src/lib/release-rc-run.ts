@@ -593,8 +593,12 @@ export type RcMutationResult =
   | { ok: true; candidateId: string; revision: number; existing: boolean }
   | { ok: false; error: RcMutationError; message?: string; block?: RcBlockSummary; unapproved?: number[]; problems?: { number: number; problem: RebuildPullRequestProblem; label: string }[] };
 
-async function existingByRequestKey(requestKey: string): Promise<RcMutationResult | null> {
+async function existingByRequestKey(requestKey: string, options: { rejectFailed?: boolean } = {}): Promise<RcMutationResult | null> {
   const revision = await db.releaseCandidateRevision.findUnique({ where: { requestKey } });
+  // 失敗・失効した更新を、同じ要求キーの再送で成功として返さない（#4986。workflowは起動されていない）
+  if (revision && options.rejectFailed && (revision.status === "failed" || revision.status === "expired")) {
+    return { ok: false, error: "dispatch_failed", message: "この取り込み要求は失敗しています。一覧を読み込み直して、選び直してください" };
+  }
   if (revision) return { ok: true, candidateId: revision.candidateId, revision: revision.revision, existing: true };
   const candidate = await db.releaseCandidate.findUnique({ where: { requestKey } });
   if (candidate) return { ok: true, candidateId: candidate.id, revision: 1, existing: true };
@@ -767,7 +771,7 @@ export async function requestRcImport(
   },
 ): Promise<RcMutationResult> {
   const ctx: Context = input;
-  const existing = await existingByRequestKey(input.requestKey);
+  const existing = await existingByRequestKey(input.requestKey, { rejectFailed: true });
   if (existing) return existing;
   let row = await loadCandidateRow({ id: input.candidateId });
   if (!row || row.repositoryFullName !== fullNameOf(ctx)) return { ok: false, error: "not_found" };
@@ -854,7 +858,7 @@ export async function requestRcImport(
     });
   } catch (error) {
     if (!isUniqueConstraintError(error)) throw error;
-    const again = await existingByRequestKey(input.requestKey);
+    const again = await existingByRequestKey(input.requestKey, { rejectFailed: true });
     if (again) return again;
     return { ok: false, error: "revision_in_progress" };
   }

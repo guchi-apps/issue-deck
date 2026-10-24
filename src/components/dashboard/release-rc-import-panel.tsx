@@ -87,7 +87,7 @@ export function RcImportPanel({
   const chosen = options.filter((o) => selected.has(o.number));
   const needApproval = chosen.filter((o) => o.approvalRequired);
   const missingApproval = needApproval.filter((o) => !approved.has(o.number));
-  // 選んだPRより番号が小さい（先にdevelopへ入った可能性が高い）未選択のPR。依存漏れの手がかり
+  // 選んだPRより番号が小さい未選択のPR。マージ順は確かめていないので、依存漏れの手がかりとして示すだけ
   const maxChosen = chosen.reduce((m, o) => Math.max(m, o.number), 0);
   const possiblyNeeded = options.filter((o) => !selected.has(o.number) && o.problem === null && o.number < maxChosen);
   const canSubmit = !submitting && data.blocked === null && chosen.length > 0 && missingApproval.length === 0 && done === null;
@@ -108,6 +108,8 @@ export function RcImportPanel({
       setDone(result.revision);
       onImported?.();
     } catch (err) {
+      // 通信自体の失敗（応答を受け取れなかった）だけ同じ要求キーで再送できる。サーバーが拒否・失敗を返したら新しい要求にする
+      if (!(err instanceof TypeError)) requestKey.current = null;
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setSubmitting(false);
@@ -191,7 +193,7 @@ export function RcImportPanel({
       </p>
       {possiblyNeeded.length > 0 && (
         <p className="text-amber-700 dark:text-amber-400" data-testid="release-rc-import-deps">
-          選んだPRより先にdevelopへ入った未選択のPRがあります（{possiblyNeeded.map((o) => `#${o.number}`).join("、")}）。選んだPRがこれらに依存している場合、
+          選んだPRより番号が小さい未選択のPRがあります（{possiblyNeeded.map((o) => `#${o.number}`).join("、")}）。マージ順は確かめていません。選んだPRがこれらに依存している場合、
           競合して止まり、必要なPRが示されます。必要なら追加で選んでください。
         </p>
       )}
