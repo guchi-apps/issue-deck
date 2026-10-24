@@ -178,6 +178,7 @@ export function ReleasePullRequestOverview({
     changes,
     reloadToken,
     publishBlock,
+    headRef,
   });
   const { openPullRequest } = useReferenceNavigation();
   const reload = () => setReloadToken((n) => n + 1);

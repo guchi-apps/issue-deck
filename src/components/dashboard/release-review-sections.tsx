@@ -1461,6 +1461,7 @@ export function ReleaseReviewSections({
           changes={changes}
           reloadToken={fixTick}
           onPreviousResultsChange={setPreviousResults}
+          headRef={headRef}
         />
       )}
       {verification && !verificationError && !previousResults && <ReleaseGuidancePanel verification={verification} onOpenReview={() => openSection("全体レビュー")} onOpenIntegration={() => openSection("統合検証")} />}
