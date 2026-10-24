@@ -44,7 +44,7 @@ export function IosDistributionStageBar({
       style={{ gridTemplateColumns: `repeat(${stages.length}, minmax(0, 1fr))` }}
       aria-label={notDistributed ? "iOS配布の段階（配布なし）" : "iOS配布の段階"}
     >
-      {stages.map((stage) => {
+      {stages.map((stage, index) => {
         if (notDistributed) {
           return (
             <li key={stage.key} className="min-w-0" aria-label={`${stage.label}: 配布なし`}>
@@ -62,6 +62,8 @@ export function IosDistributionStageBar({
                 !emphasized && "hidden @md:block",
                 stage.state === "failure" && "overflow-visible font-semibold text-destructive",
                 stage.state === "running" && "overflow-visible font-semibold text-blue-700 dark:text-blue-400",
+                // 最終段階は右端なので、右へ伸ばすとカードの外へはみ出す。右端を揃えて左へ伸ばす
+                emphasized && index === stages.length - 1 && "w-max self-end whitespace-nowrap",
               )}
               aria-hidden="true"
             >
