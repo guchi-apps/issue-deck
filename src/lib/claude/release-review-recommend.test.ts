@@ -28,3 +28,15 @@ describe("readRetryAt", () => {
     expect(readRetryAt(new Headers(), 1000)).toBeNull();
   });
 });
+
+describe("readRetryAt（窓ごとのヘッダ）", () => {
+  it("拒否された窓のリセットを使う", () => {
+    const h = new Headers({
+      "anthropic-ratelimit-unified-5h-reset": "2000",
+      "anthropic-ratelimit-unified-5h-status": "rejected",
+      "anthropic-ratelimit-unified-7d-reset": "9000",
+      "anthropic-ratelimit-unified-7d-status": "allowed",
+    });
+    expect(readRetryAt(h, 1000)).toBe(2_000_000);
+  });
+});

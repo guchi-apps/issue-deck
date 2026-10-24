@@ -61,11 +61,20 @@ export type AiApiError = {
 
 /** `retry-after`（秒）か統合レート制限のリセット時刻（epoch秒）から、再試行できる時刻を読む */
 export function readRetryAt(headers: Headers, now: number = Date.now()): number | null {
-  const retryAfter = Number(headers.get("retry-after"));
-  if (headers.get("retry-after") && Number.isFinite(retryAfter) && retryAfter >= 0) return now + retryAfter * 1000;
-  const reset = Number(headers.get("anthropic-ratelimit-unified-reset"));
-  if (headers.get("anthropic-ratelimit-unified-reset") && Number.isFinite(reset) && reset * 1000 > now) return reset * 1000;
-  return null;
+  const retryAfterRaw = headers.get("retry-after");
+  const retryAfter = Number(retryAfterRaw);
+  if (retryAfterRaw && Number.isFinite(retryAfter) && retryAfter >= 0) return now + retryAfter * 1000;
+  // 窓ごとのヘッダ（usage.tsと同じ名前）。拒否された窓があればそのリセットを、無ければ最も近いリセットを使う
+  const resets: { at: number; rejected: boolean }[] = [];
+  for (const key of ["5h", "7d", ""]) {
+    const prefix = key ? `anthropic-ratelimit-unified-${key}` : "anthropic-ratelimit-unified";
+    const raw = headers.get(`${prefix}-reset`);
+    const at = Number(raw) * 1000;
+    if (raw && Number.isFinite(at) && at > now) resets.push({ at, rejected: headers.get(`${prefix}-status`) === "rejected" });
+  }
+  const rejected = resets.filter((r) => r.rejected);
+  if (rejected.length > 0) return Math.max(...rejected.map((r) => r.at));
+  return resets.length > 0 ? Math.min(...resets.map((r) => r.at)) : null;
 }
 
 function readTokenCount(value: number | undefined): number {
