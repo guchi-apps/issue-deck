@@ -1400,6 +1400,29 @@ jobs:
 
           if [ "$RISKY" != "true" ] && [ "$REVIEW_BLOCKED" != "true" ] && [ "$CODEX_REVIEW_BLOCKED" != "true" ] && [ "$WORKFLOW_UNREVIEWED" != "true" ] && [ "$NO_ISSUE_UNREVIEWED" != "true" ]; then
             echo "どちらの判定にも該当しないため、00.check-userは付与しません。"
+            # 対応Issueを持たないPRが前回のHEADで保留され、このワークフローがPRへ付けた
+            # 00.check-userが残っていると、後段の自動マージが必ずスキップされ回復できない(#4952)。
+            # 自動付与したものだけを外す: 最後に00.check-userを付けたのがgithub-actions[bot]で、
+            # かつBot投稿の保留マーカーがあるときに限る(人が付けたラベルは外さない)
+            if [ -z "$ISSUE_NUMBER" ]; then
+              PR_LABELS="$(gh api "repos/${GH_REPO}/issues/${PR_NUMBER}/labels" --jq '.[].name' || true)"
+              if grep -qx "00.check-user" <<<"$PR_LABELS"; then
+                LAST_ACTOR="$(gh api --paginate "repos/${GH_REPO}/issues/${PR_NUMBER}/events" \
+                  --jq '.[] | select(.event == "labeled" and .label.name == "00.check-user") | .actor.login' \
+                  | tail -n 1 || true)"
+                HAS_HOLD_MARKER="$(gh api --paginate "repos/${GH_REPO}/issues/${PR_NUMBER}/comments" \
+                  --jq '.[] | select(.user.type == "Bot") | .body' \
+                  | grep -c "issue-deck-no-issue-merge-hold sha=" || true)"
+                if [ "$LAST_ACTOR" = "github-actions[bot]" ] && [ "${HAS_HOLD_MARKER:-0}" -gt 0 ]; then
+                  echo "前回の保留で自動付与した00.check-userを、問題なしの判定を受けて外します。"
+                  for name in 00.check-user 01.check-merge 01.check-blocked; do
+                    gh api -X DELETE "repos/${GH_REPO}/issues/${PR_NUMBER}/labels/${name}" --silent >/dev/null 2>&1 || true
+                  done
+                else
+                  echo "00.check-userは自動付与ではない(または保留マーカーが無い)ため、そのまま残します。"
+                fi
+              fi
+            fi
             exit 0
           fi
           # 下の自動マージのステップは、ラベルが付けられなかった場合もこれを見てマージしない
