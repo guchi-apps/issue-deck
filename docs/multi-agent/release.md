@@ -568,19 +568,18 @@ lifecycleスクリプト（`scripts/version-changelog.mjs`）が`src/lib/changel
 載る**（[auto-repair.md](auto-repair.md)「リリースだけ宛先と見た目を変える」）。最新
 リリースぶんだけを持ち毎回上書きするので、履歴の置き場は従来どおり各アプリの更新履歴ファイル。
 
-### リリースの完了はSlackのチャンネルへカードで届く（#2725・#4791）
+### リリースの完了はDiscordのチャンネルへ埋め込みで届く（#2725・#4791・#4994）
 
 リリース通知の宛先はSignalyだけだった（`deploy.yml`の`notify-release`が
 `.github/scripts/signaly-notify.sh`を呼ぶ）。**フリート全体のリリースを画面で扱っている
 issue-deck自身には届かない**ため、サブPCのpollerが叩く巡回
 （`POST /api/repositories/release-push-sweep`）が新しいリリースを見つけて通知を出す。
-当初（#2725）はPush通知だったが、**#4791からはプッシュ通知をせず、SlackのチャンネルへBlock Kitの
-カード（見出し・リポジトリ・バージョン・更新内容・「ブランチ画面を開く」「アプリを開く」ボタン・公開時刻）
-を投稿する。** 投稿は`SLACK_BOT_TOKEN`（署名シークレットは不要）、チャンネルは
-`SLACK_RELEASE_CHANNEL_ID`（未設定なら`C0CA52U82HY`。#4826で起案の許可チャンネルへのフォールバックを
-やめた）。**Botはそのチャンネルへ`/invite`しておく**（`chat:write`だけでは未参加のチャンネルへ投稿できず
-`not_in_channel`になり、席を取った後なのでそのリリースは鳴らし直されない）。「アプリを開く」は
-GitHubリポジトリの`homepage`があるときだけ出す。**Signalyへの通知はそのまま残す。**
+当初（#2725）はPush通知、#4791でSlackへの投稿に替え、**#4994からはDiscordのチャンネルへWebhookで
+埋め込み（タイトル・リポジトリ・バージョン・更新内容・各種リンク・公開時刻）を投稿する。**
+投稿先は環境変数`DISCORD_RELEASE_WEBHOOK_URL`（Discordのチャンネル設定「連携サービス」で発行した
+Webhook URL。**URL自体が資格情報**なので`.env.local`・1Passwordにだけ置く）。未設定ならGitHubも
+叩かず何も送らない。メンションは解決させない（更新内容の`@everyone`で鳴らさない）。
+「アプリを開く」はGitHubリポジトリの`homepage`があるときだけ出す。**Signalyへの通知はそのまま残す。**
 チャンネル宛のため、ユーザーごとのリポジトリ非表示・ミュート設定は効かない。
 
 - 見ているのは各リポジトリの`releases/latest`（draftとprereleaseを除く）で、**記録した
