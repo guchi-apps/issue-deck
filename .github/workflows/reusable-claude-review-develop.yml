@@ -1455,8 +1455,10 @@ jobs:
             ISSUE_COMMENTS="$(gh issue view "$ISSUE_NUMBER" --json comments --jq ' .comments[].body')"
             HANDOFF_COUNT="$(printf '%s' "$ISSUE_COMMENTS" | grep -c "issue-deck-review-fix:handoff sha=" || true)"
             # 同じHEADでも古い安全マーカーは使わず、agentごとの最新判定に限定する。
+            # Codexの判定印は書き込み権限のある投稿者(OWNER/MEMBER/COLLABORATOR)のものだけを読む(#4970)
             SAFE="$(gh api "repos/$GH_REPO/issues/$PR_NUMBER/comments?per_page=100" --paginate | jq -rs --arg sha "$HEAD_SHA" --arg marker "$AUTOFIX_MARKER" '
-              [.[][] | select(.body | test("issue-deck(-codex)?-review-verdict:(lgtm|needs-check|changes-requested) sha=" + $sha + " -->"))]
+              [.[][] | select(.body | test("issue-deck(-codex)?-review-verdict:(lgtm|needs-check|changes-requested) sha=" + $sha + " -->"))
+                | select((.body | contains("issue-deck-codex-review-verdict:") | not) or (.author_association | IN("OWNER", "MEMBER", "COLLABORATOR")))]
               | group_by(if (.body | contains("issue-deck-codex-review-verdict:")) then "codex" else "claude" end)
               | map(sort_by(.created_at) | last)
               | map(select(.body | contains("lgtm sha=" + $sha + " -->") | not))
