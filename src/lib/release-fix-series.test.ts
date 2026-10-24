@@ -289,6 +289,17 @@ describe("修正Issue本文の内部確認の手順", () => {
     expect(body).toContain("## 内部確認");
     expect(body).toContain("scripts/create-release-fix-pr.sh");
   });
+  it("報告コマンドには対象リポジトリの--repoが付き、他リポジトリはissue-deckのスクリプトを案内する（#4964）", () => {
+    const own = buildReleaseFixIssue({ ...input, repositoryFullName: "guchi-apps/issue-deck", internalReview: true }, "k").body;
+    expect(own).toContain("`scripts/report-release-fix-round.sh claim <issue番号> <担当名> --repo guchi-apps/issue-deck`");
+    expect(own).not.toContain("~/apps/issue-deck/scripts");
+    const other = buildReleaseFixIssue({ ...input, repositoryFullName: "guchi-apps/kurashio", internalReview: true }, "k").body;
+    expect(other).toContain("`~/apps/issue-deck/scripts/report-release-fix-round.sh claim <issue番号> <担当名> --repo guchi-apps/kurashio`");
+    expect(other).toContain("`~/apps/issue-deck/scripts/create-release-fix-pr.sh --repo guchi-apps/kurashio");
+    for (const action of ["review", "test", "claim", "pause"]) {
+      expect(other).toMatch(new RegExp(`report-release-fix-round\\.sh ${action} [^\`]*--repo guchi-apps/kurashio\``));
+    }
+  });
   it("指定しなければ従来の本文のまま", () => {
     expect(buildReleaseFixIssue(input, "k").body).not.toContain("## 内部確認");
   });

@@ -142,6 +142,15 @@ const toFindingRecord = (row: ReleaseFixFinding): InternalFindingRecord => ({
 });
 
 /** 内部確認を求める、進行中の系列（同じ修正Issueの最新の世代） */
+/** 報告先のリポジトリ取り違え（#4964）にその場で気付けるよう、照会した対象を名前で返す */
+function seriesNotFound(repositoryFullName: string, issueNumber: number): InternalReportError {
+  return {
+    ok: false,
+    error: "series_not_found",
+    message: `${repositoryFullName}#${issueNumber} に結び付いた、進行中の内部確認つきの修正系列がありません。別のリポジトリの修正なら --repo <owner/repo> を付けて報告してください`,
+  };
+}
+
 async function findActiveSeries(repositoryFullName: string, issueNumber: number): Promise<ReleaseFixSeries | null> {
   const rows = await db.releaseFixSeries.findMany({
     where: { repositoryFullName, issueNumber, internalReview: true },
@@ -297,7 +306,7 @@ export async function readInternalStatus(
   issueNumber: number,
 ): Promise<{ ok: true; status: InternalStatusView } | InternalReportError> {
   const series = await findActiveSeries(repositoryFullName, issueNumber);
-  if (!series) return { ok: false, error: "series_not_found", message: "この修正Issueに結び付いた、進行中の内部確認つきの修正系列がありません" };
+  if (!series) return seriesNotFound(repositoryFullName, issueNumber);
   const access = await repositoryAccess(repositoryFullName);
   if (!access) return { ok: false, error: "repository_not_found", message: "リポジトリが見つかりません" };
   const currentSha = await fetchBranchHeadSha(access.owner, access.repo, `issue-${issueNumber}`, access.token);
@@ -388,7 +397,7 @@ type Prepared = { error: InternalReportError } | (Mutable & { sha: string });
 
 async function prepare(repositoryFullName: string, issueNumber: number, actor: Actor, opts: { allowPaused?: boolean; expectedSha?: string | null } = {}): Promise<Prepared> {
   const series = await findActiveSeries(repositoryFullName, issueNumber);
-  if (!series) return { error: { ok: false, error: "series_not_found", message: "この修正Issueに結び付いた、進行中の内部確認つきの修正系列がありません" } };
+  if (!series) return { error: seriesNotFound(repositoryFullName, issueNumber) };
   const access = await repositoryAccess(repositoryFullName);
   if (!access) return { error: { ok: false, error: "repository_not_found", message: "リポジトリが見つかりません" } };
   const sha = await fetchBranchHeadSha(access.owner, access.repo, `issue-${issueNumber}`, access.token);
@@ -571,7 +580,7 @@ export async function claimInternalSession(input: {
   takeover?: boolean;
 }): Promise<{ ok: true; epoch: number; handover: boolean; status: InternalStatusView } | InternalReportError> {
   const series = await findActiveSeries(input.repositoryFullName, input.issueNumber);
-  if (!series) return { ok: false, error: "series_not_found", message: "この修正Issueに結び付いた、進行中の内部確認つきの修正系列がありません" };
+  if (!series) return seriesNotFound(input.repositoryFullName, input.issueNumber);
   const access = await repositoryAccess(input.repositoryFullName);
   if (!access) return { ok: false, error: "repository_not_found", message: "リポジトリが見つかりません" };
   const sha = await fetchBranchHeadSha(access.owner, access.repo, `issue-${input.issueNumber}`, access.token);
@@ -602,7 +611,7 @@ export async function claimInternalSession(input: {
 /** 担当の解放。世代番号を進め、解放した担当の遅延報告を弾く。作業内容・指摘・稼働時間は保持する */
 export async function releaseInternalSession(input: { repositoryFullName: string; issueNumber: number; actor: Actor; /** 利用者の操作（引き継ぎのための強制解放） */ force?: boolean }): Promise<{ ok: true; status: InternalStatusView } | InternalReportError> {
   const series = await findActiveSeries(input.repositoryFullName, input.issueNumber);
-  if (!series) return { ok: false, error: "series_not_found", message: "この修正Issueに結び付いた、進行中の内部確認つきの修正系列がありません" };
+  if (!series) return seriesNotFound(input.repositoryFullName, input.issueNumber);
   const session = await ensureSession(series);
   const stale = input.force ? null : checkActor(session, input.actor);
   if (stale) return stale;

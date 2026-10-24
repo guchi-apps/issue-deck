@@ -10,6 +10,11 @@
 #   scripts/report-release-fix-round.sh pause <issue番号> environment|needs_decision "<理由>"  … 実行環境の障害・判断や権限の不足で一時停止
 #   scripts/report-release-fix-round.sh resume <issue番号>                      … 回復済みの実行障害だけ、入力なしで再開
 #
+# どの操作にも`--repo <owner/repo>`を付けられる。報告先のリポジトリは`--repo`、無ければ**実行したディレクトリ**の
+# originで決まる（#4964）。issue-deck以外のリポジトリの修正では、対象のworktreeで実行するか`--repo`を付ける。
+# スクリプトの置き場所（issue-deckのチェックアウト）のoriginは使わない（他リポジトリの報告が常に
+# `guchi-apps/issue-deck`宛てになり、系列が見つからず内部確認を記録できなかった）。
+#
 # 担当を取ったら環境変数 RELEASE_FIX_ASSIGNEE（担当名）と RELEASE_FIX_EPOCH（claimの応答のepoch）を設定する。
 # review・test・release・pause・resumeへ自動で添える。担当が変わった後の旧担当の遅延報告は記録されない。
 # statusは読み取り専用（停止・再開・コメント・ラベルの操作をしない）。予算の追加・方針が要る再開は画面から行う。
@@ -28,13 +33,28 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck source=lib/progress-report.sh
 source "$ROOT/scripts/lib/progress-report.sh"
 
+repo=""
+args=()
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --repo) repo="${2:-}"; shift 2 || { echo "--repoには owner/repo を渡してください" >&2; exit 2; } ;;
+    --repo=*) repo="${1#--repo=}"; shift ;;
+    *) args+=("$1"); shift ;;
+  esac
+done
+set -- "${args[@]}"
+
 action="${1:-}"; issue="${2:-}"
 [[ "$action" =~ ^(status|test|review|claim|release|pause|resume)$ && "$issue" =~ ^[0-9]+$ ]] || { echo "使い方: $0 status|test|review <issue番号> …" >&2; exit 2; }
 
 progress_resolve_endpoint "$ROOT"
 [[ -n "$PROGRESS_BASE_URL" && -n "$PROGRESS_SECRET" ]] || { echo "報告先または鍵が見つかりません（APP_BASE_URL・PROGRESS_REPORT_SECRET）" >&2; exit 1; }
 
-repo="$(git -C "$ROOT" remote get-url origin | sed -E 's#(git@github.com:|https://github.com/)##; s#\.git$##')"
+if [[ -z "$repo" ]]; then
+  repo="$(git remote get-url origin 2>/dev/null | sed -E 's#(git@github.com:|https://github.com/)##; s#\.git$##')" || true
+  [[ -n "$repo" ]] || { echo "報告先のリポジトリが分かりません。対象のworktreeで実行するか --repo <owner/repo> を付けてください" >&2; exit 2; }
+fi
+[[ "$repo" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9._-]+$ ]] || { echo "--repoは owner/repo の形で渡してください: $repo" >&2; exit 2; }
 
 case "$action" in
   status) body="$(jq -n --arg r "$repo" --argjson i "$issue" '{action:"status",repository:$r,issue:$i}')" ;;
