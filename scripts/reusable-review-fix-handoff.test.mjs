@@ -70,6 +70,8 @@ case "$1 $2" in
     exit 0 ;;
 esac
 if [ "$1" = "api" ]; then
+  # 判定マーカーの取得はBot投稿に絞った本文を返す(--jqの絞り込み後を模す)
+  if [[ "$all" == *'.user.type == "Bot"'* ]]; then printf '%s' "\${STUB_PR_COMMENTS:-}"; exit 0; fi
   if [[ "$2" == *comments* ]]; then printf '%s' "\${STUB_PR_JSON:-[]}"; exit 0; fi
   exit "\${STUB_CALLER_EXIT:-0}"
 fi

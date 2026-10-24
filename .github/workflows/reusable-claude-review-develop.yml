@@ -1317,7 +1317,9 @@ jobs:
           elif [ "$CODEX_REVIEW_RESULT" = "success" ]; then
             CODEX_VERDICT="${CODEX_VERDICT_INPUT:-}"
             if [ -z "$CODEX_VERDICT" ]; then
-              CODEX_VERDICT="$(gh pr view "$PR_NUMBER" --json comments --jq '.comments[].body' \
+              # 投稿者がBotのコメントだけを読む(外部ユーザーが偽の判定マーカーを書けるため。#4952)
+              CODEX_VERDICT="$(gh api --paginate "repos/${GH_REPO}/issues/${PR_NUMBER}/comments" \
+                --jq '.[] | select(.user.type == "Bot") | .body' \
                 | grep -oE "issue-deck-codex-review-verdict:(lgtm|needs-check|changes-requested) sha=${HEAD_SHA}" \
                 | tail -n 1 \
                 | sed -E 's/^.*verdict:([a-z-]+) sha=.*$/\1/' || true)"
@@ -1373,7 +1375,9 @@ jobs:
           if [ -z "$ISSUE_NUMBER" ] && [ "$WORKFLOW_UNREVIEWED" != "true" ]; then
             CLAUDE_VERDICT=""
             if [ "$REVIEW_RESULT" = "success" ] && [ "$REVIEW_EXECUTED" = "true" ]; then
-              CLAUDE_VERDICT="$(gh pr view "$PR_NUMBER" --json comments --jq '.comments[].body' \
+              # 投稿者がBotのコメントだけを読む(外部ユーザーが偽の判定マーカーを書けるため)
+              CLAUDE_VERDICT="$(gh api --paginate "repos/${GH_REPO}/issues/${PR_NUMBER}/comments" \
+                --jq '.[] | select(.user.type == "Bot") | .body' \
                 | grep -oE "issue-deck-review-verdict:(lgtm|needs-check|changes-requested) sha=${HEAD_SHA}" \
                 | tail -n 1 | sed -E 's/^.*verdict:([a-z-]+) sha=.*$/\1/' || true)"
             fi
