@@ -38,7 +38,7 @@ MAX_BATCHES_PER_RUN="${ISSUE_DECK_RELEASE_REVIEW_MAX_BATCHES_PER_RUN:-8}"
 # 保存（`*.batches`）の掃除。3日より古いものに加え、新しい順にこの件数を超えた分を消す（ディスクを使い切らない。#4767）
 KEEP_BATCH_DIRS="${ISSUE_DECK_RELEASE_REVIEW_KEEP_BATCH_DIRS:-20}"
 # 実行結果（テスト・型検査・ビルド）の証跡を指す文言。`src/lib/release-review-reevaluation.ts`の`EVIDENCE_TEXT`と揃える
-EVIDENCE_TEXT_PATTERN='統合検証|検証結果|検証証跡|証跡|実行結果|テスト|型検査|ビルド|running|連携先|資料未取得|権限不足|通信失敗|実設定不足'
+EVIDENCE_TEXT_PATTERN='統合検証|検証結果|検証証跡|証跡|実行結果|テスト|型検査|ビルド|running|連携先|資料未取得|権限不足|通信失敗|実設定不足|資料にありません|固定SHA|適用手順|デプロイ設定'
 # 実行ホスト（サブPCのpoller）の稼働状態を指す文言（#4799）。`src/lib/release-review-reevaluation.ts`の`HOST_TEXT`と揃える
 HOST_TEXT_PATTERN='poller|ポーラー|サブPC|再起動|実機|起動時|実行ホスト|稼働コミット|host_compat'
 # 同時に確認するバッチ数の上限（#4769）。1で従来どおり1本ずつ。相互作用の確認・実績の補完は全バッチの後に1本だけ走る
@@ -236,6 +236,42 @@ fetch_review_context() {
     curl --silent --fail --max-time 20 --header @- --get --data-urlencode "jobId=$JOB_ID" \
       "${app_base_url%/}/api/dispatch/release-review-context" 2>/dev/null |
     jq -ce 'select(type == "object")' 2>/dev/null
+}
+
+# shared_token_prompt_text <context JSON> <連携先資料ディレクトリ> <PR一覧>: 共有トークンの非機密情報（#4975）
+# サーバーが返した一覧のうち、候補の差分・連携先のコードに名前が出るものだけを渡す（必要最小限）。値は扱わない。
+# 一覧を取得できなかったとき（`sharedTokens`が無い・null）は「未確認」と書き、「未登録」とは書かない
+shared_token_matches() {
+  local ctx="$1" dir="$2" prs="$3" hay
+  jq -e '(.sharedTokens | type) == "array"' <<<"$ctx" >/dev/null 2>&1 || { printf 'null'; return 0; }
+  # 差分や連携先コードは大きい（argvは1引数128KiBまで。#4316）。ファイル経由で`--rawfile`に渡す
+  hay="$(mktemp "$dir/haystack.XXXXXX")"
+  { printf '%s\n' "$prs"; git -C "$WORKTREE" diff "$base_sha...$head_sha" 2>/dev/null | head -c 2000000
+    find "$dir" -type f ! -name prompt ! -name fingerprint ! -name 'haystack.*' -size -200k -exec cat {} + 2>/dev/null; } >"$hay"
+  jq -c --rawfile hay "$hay" '[.sharedTokens[] | select(.name as $n | $hay | contains($n))]' <<<"$ctx"
+  rm -f "$hay"
+}
+
+# shared_token_generation <matches JSON>: 設定世代（名前・更新日時・利用元の集合）。最終利用日時は含めない。
+# 通常のAPI利用だけで最終利用日時が動いても、全未確認を再評価しない。順序はサーバーの返す順に依存させない
+shared_token_generation() {
+  local matched="$1"
+  [[ "$matched" == "null" ]] && { printf 'unavailable'; return 0; }
+  jq -c '[.[] | {name, updatedAt, consumers: (.consumers | sort)}] | sort_by(.name)' <<<"$matched"
+}
+
+shared_token_prompt_text() {
+  local matched="$1"
+  if [[ "$matched" == "null" ]]; then
+    printf '\n## 共有トークンの登録状況\n\n今回は照会できていません（未確認）。**未登録という意味ではありません。** 登録の有無が結論に要る項目は未確認として分類し、資格情報の新規発行を前提にしないでください。\n'
+    return 0
+  fi
+  printf '\n## 共有トークンの登録状況（値は含まない。候補・連携先のコードに名前が出るものだけ）\n\n'
+  if [[ "$matched" == "[]" ]]; then
+    printf 'コードに名前が出る共有トークンは、サーバーの登録に見つかりませんでした。**コードが読む環境変数がリポジトリのSecrets/環境変数で別に管理されている場合は、この一覧では分からず未確認です。**\n'
+  else
+    printf '%s\n\n登録の有無・更新日時・最終利用日時・利用元だけを示します。新規発行や値の取得は行いません。\n' "$matched"
+  fi
 }
 
 # review_context_text <context JSON> <実効モード initial|rereview> <引き継げない理由> <修正差分のファイル一覧ファイル> <修正差分ファイル>
@@ -551,6 +587,10 @@ runner_host_prompt_text() {
 # **証跡を指す文言の未確認だけを依存に数える**（`reviewDependsOnEvidence`と同じ規則）。根拠の無い未確認は、何に
 # 依存するか分からないので依存側へ倒す。poller更新のような運用の未確認・コードの未読は、証跡が更新されても変わらない
 result_depends_on_evidence() {
+  # 連携先の証跡を取得できた候補では、旧文言の未確認も含め全ての未確認を連携先の証跡の更新に依存させる（#4975）
+  if [[ "${INTEGRATION_EVIDENCE_ACTIVE:-0}" == 1 ]]; then
+    jq -e 'any(.checks[]?; .status == "unconfirmed") or ((.unverifiedScope // "") | tostring | length > 0)' "$1" >/dev/null 2>&1 && return 0
+  fi
   jq -e --arg re "$EVIDENCE_TEXT_PATTERN" '
     any(.checks[]?; .status == "unconfirmed" and (((.evidence // "") | tostring) as $e | $e == "" or ($e | test($re; "i"))))
     or ((.unverifiedScope // "") | tostring | test($re; "i"))' "$1" >/dev/null 2>&1
@@ -881,7 +921,11 @@ main() {
   local integration_dir
   integration_dir="$(mktemp -d "$WORKTREE/.release-review-integrations.XXXXXX")"
   python3 "$SCRIPT_DIR/release-review-integrations.py" "$WORKTREE" "$full_name" "$base_sha" "$head_sha" "$integration_dir" \
-    >"$integration_dir/prompt" 2>/dev/null || : >"$integration_dir/prompt"
+    >"$integration_dir/prompt" 2>/dev/null || {
+    # 空資料にして正常扱いにしない。取得不能として資料と指紋へ残す
+    printf '\n## 連携先の実装・運用証跡（ランナーが固定SHAで自動取得）\n\n連携先の自動取得スクリプトが異常終了しました。連携先の証跡は取得不能として扱い、関連する未確認を合格にも対象外にもしません。\n' >"$integration_dir/prompt"
+    printf 'script-failed' >"$integration_dir/fingerprint"
+  }
 
   # 差分の材料。ファイルごとの差分を、予算の範囲でバッチへ詰める（#4615）。
   # **入力へ載せることは確認の実績ではない。** 容量を超えた分は次のバッチで確認し、省略・黙った除外はしない
@@ -906,6 +950,8 @@ main() {
     evidence_fp="${evidence_fp}:shared-$(cat "$dependency_dir/fingerprint")"
     evidence_fp="${evidence_fp}:integ-$(cat "$integration_dir/fingerprint" 2>/dev/null || true)"
   fi
+  INTEGRATION_EVIDENCE_ACTIVE=0
+  [[ -s "$integration_dir/fingerprint" ]] && INTEGRATION_EVIDENCE_ACTIVE=1
   prs_text="$(git -C "$WORKTREE" log --format='- %s' "$base_sha..$head_sha" | head -n 200)"
 
   # 再レビューの文脈（#4559）。引き継げるかは、サーバーの判定（base・版・履歴）に、ここで実測した事実
@@ -918,6 +964,11 @@ main() {
     prev_head="$(jq -r '.previous.headSha // ""' <<<"$ctx_json")"
     checklist_version="$(jq -r '.checklistVersion // empty' <<<"$ctx_json")"
     fix_prs_json="$(jq -c '.fixPrNumbers // []' <<<"$ctx_json")"
+  fi
+  # 共有トークンの登録状況が変わったら、影響する未確認を再評価する（取得不能もその状態として指紋に入る）
+  shared_matched="$(shared_token_matches "${ctx_json:-{\}}" "$integration_dir" "$prs_text")"
+  if [[ -n "$evidence_fp" ]]; then
+    evidence_fp="${evidence_fp}:tok-$(shared_token_generation "$shared_matched" | sha256sum | cut -c1-16)"
   fi
   host_fp="$(runner_host_fingerprint "$full_name" "$head_sha")"
   invalidate_stale_batches "$evidence_fp" "$checklist_version" "$host_fp"
@@ -963,6 +1014,7 @@ main() {
   runner_host_prompt_text "$full_name" "$head_sha" >>"$part_dir/evidence"
   cat "$dependency_dir/prompt" >>"$part_dir/evidence"
   cat "$integration_dir/prompt" >>"$part_dir/evidence"
+  shared_token_prompt_text "$shared_matched" >>"$part_dir/evidence"
   if [[ -n "$checklist_version" ]]; then
     jq -r '.checklistPrompt // ""' <<<"$ctx_json" >"$part_dir/checklist"
     jq -r '.blockingPolicy // ""' <<<"$ctx_json" >"$part_dir/blocking"

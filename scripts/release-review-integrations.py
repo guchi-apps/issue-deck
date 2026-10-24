@@ -4,6 +4,7 @@
 候補のコミットメッセージと追加行に書かれた `guchi-apps/<repo>#<番号>`（と同repoのissues/pullのURL）だけを
 連携先として解決する。任意URLは巡回せず、取得した本文・コードは読むだけで実行しない。
 """
+import datetime
 import hashlib
 import json
 import os
@@ -14,6 +15,7 @@ import sys
 
 GH = os.environ.get("RELEASE_REVIEW_GH", "gh")
 ALLOWED_OWNERS = {o for o in os.environ.get("RELEASE_REVIEW_ALLOWED_OWNERS", "guchi-apps").split(",") if o}
+JUDGE_VERSION = 2  # 判定器の版。変えると指紋が変わり、影響する未確認が再評価される
 MAX_REFS, MAX_FILES, MAX_FILE_BYTES, MAX_BODY = 8, 30, 40000, 3000
 REPO = r"[A-Za-z0-9][A-Za-z0-9._-]*"
 REF_RE = re.compile(rf"\b([A-Za-z0-9-]+)/({REPO})#(\d+)\b")
@@ -70,6 +72,14 @@ def extract_refs(worktree, base, head):
     return found
 
 
+def is_deploy_workflow(run_):
+    base = (run_.get("path") or "").rsplit("/", 1)[-1].lower()
+    name = (run_.get("name") or "").lower()
+    if re.search(r"release|sync|prepare|publish", base + " " + name):
+        return False
+    return bool(re.match(r"deploy([-_.]|$)", base) or re.match(r"deploy\b", name))
+
+
 def contained(owner, repo, branch, sha):
     data, err = api_json(f"repos/{owner}/{repo}/compare/{branch}...{sha}")
     if data is None:
@@ -106,28 +116,42 @@ def collect_pr(owner, repo, number, outdir, record):
         entry["deploy"] = {"state": f"取得不能（{e}）"}
     else:
         for r in runs.get("workflow_runs", []):
-            if re.search(r"deploy|release", (r.get("name") or "") + (r.get("path") or ""), re.I):
+            # 本番デプロイ用のworkflowだけ。release-sync・公開準備のような成功runは拾わない
+            if is_deploy_workflow(r):
                 ok, _ = contained(owner, repo, r["head_sha"], sha)
                 if ok:
-                    deploy = {"state": "成功", "run": r.get("html_url"), "headSha": r["head_sha"], "at": r.get("updated_at")}
+                    deploy = {"state": "デプロイworkflowの成功run（稼働中のversionとの照合は未実施。稼働SHAは未確認）", "run": r.get("html_url"), "headSha": r["head_sha"], "at": r.get("updated_at")}
                     break
         entry["deploy"] = deploy or {"state": "マージコミットを含む成功したデプロイが見つからない"}
     files, e = api_json(f"repos/{owner}/{repo}/pulls/{number}/files?per_page={MAX_FILES}")
     if files is None:
         entry["filesError"] = e
         return
+    names = [f.get("filename", "") for f in files[:MAX_FILES] if f.get("status") != "removed"]
+    # 実装PRの時点と、現在稼働している（最新の成功デプロイの）時点を別々に固定して取得する。
+    # 後続PRがAPIを変えていても、実装PRのコードだけで稼働中の契約を判断させない。
+    entry["codeAtMerge"] = fetch_files(owner, repo, names, sha, outdir)
+    live = (entry.get("deploy") or {}).get("headSha")
+    if live and live != sha:
+        entry["codeAtDeployCandidate"] = fetch_files(owner, repo, names, live, outdir)
+    elif live:
+        entry["codeAtDeployCandidate"] = {"note": "実装PRのマージコミットが最新のデプロイ成功runと同一（稼働版の照合は未実施）"}
+    else:
+        entry["codeAtDeployCandidate"] = {"note": "デプロイworkflowの成功runを特定できないため、稼働中のコードは未確認"}
+
+
+def fetch_files(owner, repo, names, sha, outdir):
     saved, skipped = [], []
-    for f in files[:MAX_FILES]:
-        name = f.get("filename", "")
+    for name in names:
         parts = name.split("/")
-        if f.get("status") == "removed" or ".." in parts or name.startswith("/"):
+        if ".." in parts or name.startswith("/"):
             continue
         if SECRET_NAME.search(name):
             skipped.append({"path": name, "reason": "秘密値を含みうるため取得しない"})
             continue
         ok, body, e = run("api", f"repos/{owner}/{repo}/contents/{name}?ref={sha}", "-H", "Accept: application/vnd.github.raw")
         if not ok:
-            skipped.append({"path": name, "reason": e})
+            skipped.append({"path": name, "reason": e or "取得失敗"})
             continue
         lines = [("[秘密値の可能性があるため除外]" if SECRET_LINE.search(l) else l) for l in body[:MAX_FILE_BYTES].splitlines()]
         dest = outdir / f"{owner}__{repo}" / sha / name
@@ -136,7 +160,7 @@ def collect_pr(owner, repo, number, outdir, record):
         dest.write_text("\n".join(lines) + "\n", encoding="utf-8")
         dest.chmod(0o444)
         saved.append({"path": name, "local": str(dest), "truncated": len(body) > MAX_FILE_BYTES})
-    entry["files"], entry["skipped"] = saved, skipped
+    return {"sha": sha, "files": saved, "skipped": skipped}
 
 
 def resolve(owner, repo, number, outdir):
@@ -172,13 +196,15 @@ def prepare(worktree, full_name, base, head, output):
     refs = [r for r in extract_refs(worktree, base, head) if f"{r[0]}/{r[1]}" != full_name.lower()]
     omitted = max(0, len(refs) - MAX_REFS)
     records = [resolve(*r, output) for r in refs[:MAX_REFS]]
-    manifest = {"target": full_name, "resolved": records, "omittedRefs": omitted,
-                "sharedTokens": "値は取得しない。登録有無・利用先の照会は未提供のため、実設定の確認が要る項目は実設定不足として扱う"}
+    manifest = {"target": full_name, "resolved": records, "omittedRefs": omitted, "judgeVersion": JUDGE_VERSION,
+                "fetchedAt": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
+                "sharedTokens": "値は取得していない。登録の有無・利用先は今回の取得では照会していない（未確認）。登録されていないことが確認済みという意味ではないため、"
+                                "資格情報の新規発行を前提にせず、実設定の確認が要る項目は『実設定は未確認』として分類する"}
     (output / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, sort_keys=True) + "\n", encoding="utf-8")
     # 取得日時・ローカルパスは指紋に含めない。SHA・状態・デプロイ・取得失敗の分類が変わったときだけ変わる。
     def stable(o):
         if isinstance(o, dict):
-            return {k: stable(v) for k, v in o.items() if k not in ("local", "at", "run")}
+            return {k: stable(v) for k, v in o.items() if k not in ("local", "at", "run", "fetchedAt")}
         return [stable(v) for v in o] if isinstance(o, list) else o
     fp = hashlib.sha256(json.dumps(stable(manifest), sort_keys=True).encode()).hexdigest() if records else ""
     (output / "fingerprint").write_text(fp)
@@ -193,5 +219,19 @@ def prepare(worktree, full_name, base, head, output):
     print(json.dumps(manifest, ensure_ascii=False, sort_keys=True))
 
 
+def main():
+    try:
+        prepare(*sys.argv[1:])
+    except Exception as exc:  # 予期しない失敗も空資料にせず、取得不能として残す。メッセージは資格情報を含みうるので型名だけ
+        out = Path(sys.argv[5]) if len(sys.argv) > 5 else None
+        kind = type(exc).__name__
+        if out:
+            out.mkdir(parents=True, exist_ok=True)
+            (out / "fingerprint").write_text("failed-" + hashlib.sha256(f"{kind}:{JUDGE_VERSION}".encode()).hexdigest())
+        print("\n## 連携先の実装・運用証跡（ランナーが固定SHAで自動取得）\n")
+        print(f"連携先の自動取得が予期せず失敗しました（{kind}）。連携先の証跡は**取得不能（通信失敗/実装不具合の区別は未確認）**として扱い、"
+              "関連する未確認を合格にも対象外にもしません。取得の再試行はランナーの再実行で行われます。")
+
+
 if __name__ == "__main__":
-    prepare(*sys.argv[1:])
+    main()
