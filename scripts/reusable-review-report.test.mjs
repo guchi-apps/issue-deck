@@ -39,8 +39,21 @@ function extractRunScript(stepName) {
 
 // `gh pr view --json comments --jq ...`は既存コメントの本文を、`gh pr comment --body-file`は
 // 投稿内容をファイルへ書き出す（テストはそのファイルの有無と中身で判定する）。
+// `gh api --paginate .../comments --jq <式>`は、STUB_COMMENTSの各行を1件のコメント（既定は書き込み権限の
+// ある投稿者。STUB_COMMENT_ASSOCIATIONで変えられる）として、式を当てて返す（#4969）。
 const STUB_GH = `#!/usr/bin/env bash
 set -u
+if [ "\${1:-}" = "api" ] && [ "\${2:-}" = "--paginate" ]; then
+  case "\${3:-}" in
+    */comments)
+      expr="."
+      while [ $# -gt 0 ]; do [ "$1" = "--jq" ] && expr="$2"; shift; done
+      printf '%s' "\${STUB_COMMENTS:-}" \
+        | jq -Rn --arg assoc "\${STUB_COMMENT_ASSOCIATION:-OWNER}" '[inputs | {user: {type: "User"}, author_association: $assoc, body: .}]' \
+        | jq -r "$expr"
+      exit 0 ;;
+  esac
+fi
 if [ "\${1:-}" = "pr" ] && [ "\${2:-}" = "view" ]; then
   if [ "\${5:-}" = "body" ]; then
     printf '%s' "\${STUB_BODY:-}"
@@ -233,6 +246,15 @@ describe("検証結果をPR本文へ記録する", () => {
     expect(body).toContain("review=lgtm");
     expect(body).toContain("代わりにCodexでレビュー");
     expect(body).toContain("- ユーザーの確認: 不要（自動マージの対象）");
+  });
+
+  it("書き込み権限の無い投稿者のCodex判定印は検証結果に使わない（#4969）", () => {
+    const body = runVerification("<!-- issue-deck-codex-review-verdict:lgtm sha=abc123 -->", {
+      ...workflowChange,
+      STUB_COMMENT_ASSOCIATION: "NONE",
+    });
+    expect(body).not.toContain("review=lgtm");
+    expect(body).toContain("- Codexによる自動レビュー: ? 判定を取得できませんでした");
   });
 
   it("代わりのCodexを依頼できなかったら、人の確認が必要と記録する", () => {
