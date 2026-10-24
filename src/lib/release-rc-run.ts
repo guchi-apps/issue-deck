@@ -884,6 +884,101 @@ export async function requestRcImport(
   return { ok: true, candidateId, revision: nextRevision, existing: false };
 }
 
+export type RcImportOption = {
+  number: number;
+  title: string;
+  issueNumber: number | null;
+  url: string;
+  mergeSha: string | null;
+  merged: boolean;
+  /** この候補の修正系列の修正PR（承認なしで取り込める） */
+  relatedFix: boolean;
+  /** 承認済みの固定範囲外PR */
+  approved: boolean;
+  /** 取り込むには画面での明示的な承認（approveExtra）が要る */
+  approvalRequired: boolean;
+  /** 選べない理由（選べるならnull） */
+  problem: RebuildPullRequestProblem | null;
+  problemLabel: string | null;
+};
+
+export type RcImportOptions = {
+  candidateId: string;
+  /** 画面で見たheadとして送り返す値。取り込み時にサーバーが候補ブランチの現在のheadと照合する */
+  headSha: string;
+  revision: number;
+  options: RcImportOption[];
+  /** 今は取り込めない理由（取り込み中・レビュー段階でないなど）。取り込めるならnull */
+  blocked: string | null;
+};
+
+/**
+ * 候補へ取り込めるPR（候補headの後にdevelopへ入ったもの）と、この候補の修正系列の修正PR（未マージを含む）を並べる。
+ * **何も選ばせない・承認しない。** 選択と承認は`requestRcImport`が改めてGitHubと記録から検証する
+ */
+export async function loadRcImportOptions(ctx: Context, candidateId: string): Promise<RcImportOptions | null> {
+  const row = await loadCandidateRow({ id: candidateId });
+  if (!row || row.repositoryFullName !== fullNameOf(ctx)) return null;
+  const current = row.revisions.find((r) => r.revision === row.currentRevision && r.status === "applied");
+  const observed = await observeCandidateHead(ctx, row.sequence);
+  if (!current?.headSha || !observed) return null;
+
+  const blocked =
+    row.phase !== "review" || row.activeKey === null
+      ? "この候補は取り込める段階ではありません"
+      : row.revisions.some((r) => r.status === "requested")
+        ? "取り込みの更新が進行中です。完了してから選んでください"
+        : observed.headSha !== current.headSha
+          ? "候補ブランチが記録と一致しません。「再取り込み・再確認」で記録を照合し直してください"
+          : null;
+
+  const prNumbers = [...new Set(row.revisions.flatMap((r) => (r.prNumber === null ? [] : [r.prNumber])))];
+  const fix = await relatedFixPrNumbers(row.repositoryFullName, prNumbers);
+  const approved = jsonArray<ApprovedExtra>(row.approvedExtraPrs).map((a) => a.number);
+  const toOption = (base: { number: number; title: string; issueNumber: number | null; mergeSha: string | null; merged: boolean; problem: RebuildPullRequestProblem | null }): RcImportOption => {
+    const relatedFix = fix.fixPrs.includes(base.number);
+    const isApproved = approved.includes(base.number);
+    return {
+      ...base,
+      url: `https://github.com/${row.repositoryFullName}/pull/${base.number}`,
+      relatedFix,
+      approved: isApproved,
+      approvalRequired: base.problem === null && !relatedFix && !isApproved,
+      problemLabel: base.problem ? REBUILD_PR_PROBLEM_LABEL[base.problem] : null,
+    };
+  };
+
+  const ahead = await fetchReleaseRebuildCandidate(ctx.owner, ctx.repo, current.headSha, ctx.token);
+  const options = ahead.pullRequests.map((pr) =>
+    toOption({ number: pr.number, title: pr.title, issueNumber: pr.issueNumber, mergeSha: pr.mergeSha ?? null, merged: true, problem: pr.mergeSha ? null : "not_merged" }),
+  );
+  // 修正系列の修正PRのうち、まだdevelopへ入っていない・既に候補に入っているものは理由付きで並べる（選べない）
+  for (const number of fix.fixPrs) {
+    if (options.some((o) => o.number === number)) continue;
+    const pr = await fetchPullRequestForRebuild(ctx.owner, ctx.repo, number, ctx.token).catch(() => undefined);
+    const includedInOrigin = pr?.merge_commit_sha ? await isAncestorCommit(ctx.owner, ctx.repo, pr.merge_commit_sha, current.headSha, ctx.token).catch(() => false) : false;
+    const check =
+      pr === undefined
+        ? ({ ok: false, problem: "lookup_failed" } as const)
+        : checkRebuildPullRequest(
+            { number, pr: pr ? { title: pr.title, mergedAt: pr.merged_at, mergeSha: pr.merge_commit_sha, baseRef: pr.base.ref, headRef: pr.head.ref } : null, includedInOrigin },
+            null,
+          );
+    options.push(
+      toOption({
+        number,
+        title: pr?.title ?? `#${number}`,
+        issueNumber: pr ? Number(/^issue-(\d+)$/.exec(pr.head.ref)?.[1] ?? NaN) || null : null,
+        mergeSha: pr?.merge_commit_sha ?? null,
+        merged: pr?.merged_at != null,
+        problem: check.ok ? null : check.problem,
+      }),
+    );
+  }
+  options.sort((a, b) => a.number - b.number);
+  return { candidateId: row.id, headSha: observed.headSha, revision: row.currentRevision, options, blocked };
+}
+
 /**
  * マージ済みの候補PRを取り消すとき、マージコミット（main）に入っている正式版を読む。
  * 自動バンプでは取込前に予約が無いことがあるため、取消側が版を確定して消費済みとして残す（developへの同期の検出を失わない）。

@@ -19,6 +19,8 @@ import { parseRcRequestKey } from "@/lib/release-rc";
 import {
   cancelReleaseRc,
   createReleaseRc,
+  findCandidateIdByPullRequest,
+  loadRcImportOptions,
   loadRcOverview,
   migrateLegacyReleaseCandidate,
   requestRcImport,
@@ -29,6 +31,7 @@ import {
  * 正式版を上げる前に固定したリリース候補（#4495）。
  *
  * - GET: 候補の状況（caller対応・進行中の候補またはPRに対応する候補・開いている旧方式の候補）
+ * - GET `view=import_options&pullRequest=<候補PR番号>`: 候補へ取り込めるPRの一覧（読むだけ。選択も承認もしない。#4986）
  * - POST `action=create`: developの先端を固定して候補を作る
  * - POST `action=import`: 関連修正（と明示的に承認したPR）を取り込み、revisionを進める
  * - POST `action=cancel`: 候補を取り消す（記録は残す）
@@ -78,6 +81,13 @@ export async function GET(request: NextRequest) {
   try {
     const token = await getInstallationToken(repository.installation.installationId);
     const ctx = { owner, repo, token };
+    if (request.nextUrl.searchParams.get("view") === "import_options") {
+      if (pullRequestNumber === undefined) return NextResponse.json({ error: "invalid_request" }, { status: 400 });
+      const candidateId = await findCandidateIdByPullRequest(repository.fullName, pullRequestNumber);
+      const importOptions = candidateId ? await loadRcImportOptions(ctx, candidateId) : null;
+      if (!importOptions) return NextResponse.json({ error: "not_found" }, { status: 404 });
+      return NextResponse.json(importOptions, { headers: { "Cache-Control": "no-store" } });
+    }
     // 公開準備・本番反映の進行を先に1巡進め、候補の状態（段階）を最新にしてから読む
     const candidateId = await resolveRcCandidateId(repository.fullName, pullRequestNumber);
     if (candidateId) await reconcileRcFinalization(ctx, candidateId).catch((error: unknown) => console.error("[release-finalize] reconcile failed", error));
