@@ -121,3 +121,18 @@ it("連携先の証跡があるとき、旧文言の未確認も含め全ての�
   expect(probe(0)).toBe(false);
   expect(probe(1)).toBe(true);
 });
+it("共有トークンは名前がコードに出るものだけを渡し、取得不能は『未登録』と書かない", () => {
+  const ctx = JSON.stringify({ sharedTokens: [
+    { name: "MYROOM_INTERNAL_BILLS_WRITE_API_KEY", updatedAt: "2026-10-01T00:00:00Z", lastUsedAt: null, consumers: [] },
+    { name: "UNRELATED_TOKEN", updatedAt: "2026-10-01T00:00:00Z", lastUsedAt: null, consumers: ["x"] },
+  ] });
+  const sh = (c, prs) => execFileSync("bash", ["-c", `source scripts/run-release-review.sh
+WORKTREE="${repo}"; base_sha="${base}"; head_sha="${head}"
+m="$(shared_token_matches '${c}' "${dir}" "${prs}")"; echo "$m"; shared_token_prompt_text "$m"`], { encoding: "utf8" });
+  const hit = sh(ctx, "MYROOM_INTERNAL_BILLS_WRITE_API_KEY を使う");
+  expect(hit).toContain("MYROOM_INTERNAL_BILLS_WRITE_API_KEY");
+  expect(hit).not.toContain("UNRELATED_TOKEN");
+  const none = sh("{}", "x");
+  expect(none).toContain("未確認");
+  expect(none).toContain("未登録という意味ではありません");
+});

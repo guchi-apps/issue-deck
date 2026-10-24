@@ -26,4 +26,8 @@
 
 共通ランナー（`run-release-review.sh`）とcallerの参照タグは同一で、共通修正だけで全管理対象に適用される。callerは`reusable-release-develop-to-main.yml@workflows/v54`を参照する15リポジトリ（aide・asset-manager・car-care・clip-hive・db-console・kurashio・meisai-lab・morrow・pi0w・signaly・solitaire・status-hub・stockly・work-relay・yoteiflow）で、独立のrelease-review実装は見つかっていない。このため子Issueは起案していない（個別修正が必要と分かったrepoだけ起案する）。タグの参照が同じでも、実行ホスト（サブPC）のrunnerは「更新して再起動」で更新するまで旧版のまま。
 
-未対応: 共有トークンの登録有無・利用先を返す非機密の照会（既存の`/api/settings/shared-tokens`の`toSharedToken`相当の射影をレビューcontextへ載せる）、ホストへの配布と実走。
+## 共有トークンの非機密情報（#4975）
+
+`GET /api/dispatch/release-review-context`（pollerの共有シークレットで認可。既存のレビューcontextの経路）が、`sharedTokens`として名前・更新日時・最終利用日時・利用元だけを返す（`src/lib/release-review-shared-token-meta.ts`）。値・暗号文・説明・`op://`参照は含めず、復号もしない。ランナーは、その一覧のうち候補の差分・連携先のコードに名前が出るものだけをAI入力へ渡し、同じ集合の要約を証跡指紋へ加える（登録・利用状況が変わると影響する未確認が再評価される）。取得できなかったときは「未確認」と書き、「未登録」とは書かない。リポジトリのSecrets/環境変数で管理される値はこの一覧では分からない。
+
+未対応: ホストへの配布と実走（本番反映後）。

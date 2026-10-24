@@ -238,6 +238,30 @@ fetch_review_context() {
     jq -ce 'select(type == "object")' 2>/dev/null
 }
 
+# shared_token_prompt_text <context JSON> <連携先資料ディレクトリ> <PR一覧>: 共有トークンの非機密情報（#4975）
+# サーバーが返した一覧のうち、候補の差分・連携先のコードに名前が出るものだけを渡す（必要最小限）。値は扱わない。
+# 一覧を取得できなかったとき（`sharedTokens`が無い・null）は「未確認」と書き、「未登録」とは書かない
+shared_token_matches() {
+  local ctx="$1" dir="$2" prs="$3" haystack
+  jq -e '(.sharedTokens | type) == "array"' <<<"$ctx" >/dev/null 2>&1 || { printf 'null'; return 0; }
+  haystack="$( { printf '%s\n' "$prs"; git -C "$WORKTREE" diff "$base_sha...$head_sha" 2>/dev/null | head -c 2000000; find "$dir" -type f ! -name prompt ! -name fingerprint -size -200k -exec cat {} + 2>/dev/null; } )"
+  jq -c --arg hay "$haystack" '[.sharedTokens[] | select(.name as $n | $hay | contains($n))]' <<<"$ctx"
+}
+
+shared_token_prompt_text() {
+  local matched="$1"
+  if [[ "$matched" == "null" ]]; then
+    printf '\n## 共有トークンの登録状況\n\n今回は照会できていません（未確認）。**未登録という意味ではありません。** 登録の有無が結論に要る項目は未確認として分類し、資格情報の新規発行を前提にしないでください。\n'
+    return 0
+  fi
+  printf '\n## 共有トークンの登録状況（値は含まない。候補・連携先のコードに名前が出るものだけ）\n\n'
+  if [[ "$matched" == "[]" ]]; then
+    printf 'コードに名前が出る共有トークンは、サーバーの登録に見つかりませんでした。**コードが読む環境変数がリポジトリのSecrets/環境変数で別に管理されている場合は、この一覧では分からず未確認です。**\n'
+  else
+    printf '%s\n\n登録の有無・更新日時・最終利用日時・利用元だけを示します。新規発行や値の取得は行いません。\n' "$matched"
+  fi
+}
+
 # review_context_text <context JSON> <実効モード initial|rereview> <引き継げない理由> <修正差分のファイル一覧ファイル> <修正差分ファイル>
 # 再レビュー（または前回記録つきの全体確認）の節を標準出力へ。前回の記録が無ければ何も出さない
 review_context_text() {
@@ -929,6 +953,11 @@ main() {
     checklist_version="$(jq -r '.checklistVersion // empty' <<<"$ctx_json")"
     fix_prs_json="$(jq -c '.fixPrNumbers // []' <<<"$ctx_json")"
   fi
+  # 共有トークンの登録状況が変わったら、影響する未確認を再評価する（取得不能もその状態として指紋に入る）
+  shared_matched="$(shared_token_matches "${ctx_json:-{\}}" "$integration_dir" "$prs_text")"
+  if [[ -n "$evidence_fp" ]]; then
+    evidence_fp="${evidence_fp}:tok-$(printf '%s' "$shared_matched" | sha256sum | cut -c1-16)"
+  fi
   host_fp="$(runner_host_fingerprint "$full_name" "$head_sha")"
   invalidate_stale_batches "$evidence_fp" "$checklist_version" "$host_fp"
   mkdir -p "$WORK_ROOT"
@@ -973,6 +1002,7 @@ main() {
   runner_host_prompt_text "$full_name" "$head_sha" >>"$part_dir/evidence"
   cat "$dependency_dir/prompt" >>"$part_dir/evidence"
   cat "$integration_dir/prompt" >>"$part_dir/evidence"
+  shared_token_prompt_text "$shared_matched" >>"$part_dir/evidence"
   if [[ -n "$checklist_version" ]]; then
     jq -r '.checklistPrompt // ""' <<<"$ctx_json" >"$part_dir/checklist"
     jq -r '.blockingPolicy // ""' <<<"$ctx_json" >"$part_dir/blocking"
