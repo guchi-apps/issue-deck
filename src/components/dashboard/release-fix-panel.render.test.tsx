@@ -158,6 +158,22 @@ describe("ReleaseFixStartButton", () => {
     expect(screen.getByText("もう一度開始")).toBeTruthy();
   });
 
+  it("作成直後はIssueが取り込まれるまで無効で、取り込まれたら押せる（#4956）", async () => {
+    const responses = [
+      new Response(JSON.stringify({ error: "issue_not_synced" }), { status: 409 }),
+      new Response(JSON.stringify({ ok: true, issue: { id: "i1", number: 5 } }), { status: 200 }),
+    ];
+    vi.stubGlobal("fetch", vi.fn(async () => responses.shift() ?? new Response("{}", { status: 200 })));
+    render(
+      <ReleaseFixStartContext.Provider value={vi.fn()}>
+        <ReleaseFixStartButton repositoryFullName="o/r" seriesId="s1" startState="none" waitForIssue />
+      </ReleaseFixStartContext.Provider>,
+    );
+    const waiting = screen.getByText("Issueを取り込み中…").closest("button") as HTMLButtonElement;
+    expect(waiting.disabled).toBe(true);
+    await waitFor(() => expect((screen.getByText("修正を開始") as HTMLButtonElement).disabled).toBe(false), { timeout: 4000 });
+  });
+
   it("受付済みなら状態と「進捗を見る」を出す", () => {
     render(
       <ReleaseFixStartContext.Provider value={vi.fn()}>
