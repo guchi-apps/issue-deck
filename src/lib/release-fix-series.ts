@@ -354,7 +354,7 @@ export function buildReleaseFixIssue(input: ReleaseFixIssueInput, sourceKey: str
     "",
     ...input.verifyConditions.map((condition) => `- ${condition}`),
     "",
-    ...(input.internalReview ? internalReviewSection() : []),
+    ...(input.internalReview ? internalReviewSection(input.repositoryFullName) : []),
     "## 取り込みの流れ",
     "",
     "- この修正PRがdevelopへマージされると、issue-deckが元リリースPRの作り直しを行い、新しいSHAで統合検証と全体レビューを自動でやり直します（リリースブランチへは直接書き込みません）。",
@@ -364,22 +364,39 @@ export function buildReleaseFixIssue(input: ReleaseFixIssueInput, sourceKey: str
   return { title, body: lines.join("\n") };
 }
 
-/** 修正Issue本文へ入れる、内部確認（#4410）の手順。実装担当の作業手順として読まれる */
-export function internalReviewSection(): string[] {
+/** issue-deck自身。他リポジトリの修正では、報告スクリプトをissue-deckの本体チェックアウトから実行する */
+const ISSUE_DECK_REPOSITORY = "guchi-apps/issue-deck";
+
+/**
+ * 修正Issue本文へ入れる、内部確認（#4410）の手順。実装担当の作業手順として読まれる。
+ *
+ * 報告スクリプトはissue-deckにしか無く、報告先のリポジトリを`--repo`で明示しないと他リポジトリの修正は
+ * issue-deck宛てに送られて系列が見つからず、内部確認を記録できないまま判断待ちで止まっていた（#4964）。
+ */
+export function internalReviewSection(repositoryFullName: string): string[] {
+  const own = repositoryFullName === ISSUE_DECK_REPOSITORY;
+  const dir = own ? "scripts" : "~/apps/issue-deck/scripts";
+  const report = `${dir}/report-release-fix-round.sh`;
+  const repo = `--repo ${repositoryFullName}`;
   return [
     "## 内部確認（このセッションの中で完結させる）",
     "",
     "修正は、1つのセッション内で「実装 → 独立レビュー → 修正 → テスト」を繰り返し、**内部確認が完了してから修正PRを1件だけ**作成します。レビューのたびに修正Issue・PR・リリース候補を増やしません。",
     "",
+    ...(own
+      ? []
+      : [
+          `- 報告スクリプト: issue-deckの本体チェックアウト（\`${dir}/\`）にある。**このリポジトリのworktreeから実行し、報告にはすべて\`${repo}\`を付ける**（付けないとissue-deck宛てに送られ、\`series_not_found\`で記録されず判断待ちで止まる）`,
+        ]),
     "- 作業場所: 元候補（base/headは上記）の凍結ブランチを一時worktreeへ取得し、そこへ修正を重ねた状態で確認する。**developの最新は混ぜない**。内部の往復では候補の作り直し・バージョン更新をしない",
     "- 独立レビュー: `Agent`ツールで**読み取り専用の別エージェント**に依頼する（実装した本人は合否を決めない）。差分だけでなく、修正を取り込んだ候補全体との整合（認可・関連エンドポイント・スキーマ・設定と配布物・旧pollerなどの互換性）を確認させ、指摘と検証結果を返させる",
-    "- 修正は実装担当が行う。指摘は`scripts/report-release-fix-round.sh review`で記録するとIDが付く（`F-001`〜）。解消は根拠つきで報告する。対象のSHAは`issue-<番号>`ブランチのHEADからサーバーが取り直すので、**報告の前にpushする**",
-    "- テストは`scripts/report-release-fix-round.sh test`で結果を記録する。内容が変わったら、レビューもテストもやり直す（古い合格は使われない）",
+    `- 修正は実装担当が行う。指摘は\`${report} review <issue番号> <JSON> ${repo}\`で記録するとIDが付く（\`F-001\`〜）。解消は根拠つきで報告する。対象のSHAは\`issue-<番号>\`ブランチのHEADからサーバーが取り直すので、**報告の前にpushする**`,
+    `- テストは\`${report} test <issue番号> passed|failed "<要約>" ${repo}\`で結果を記録する。内容が変わったら、レビューもテストもやり直す（古い合格は使われない）`,
     `- 確認方針（最終候補の全体レビューと同じ基準。確認項目v${RELEASE_REVIEW_CHECKLIST_VERSION}）: 独立レビューには、修正を取り込んだ候補全体について次の観点を項目ごとに確認させ、確認済み／非該当／未確認と根拠を返させる（根拠の無い確認済みは未確認として扱う）。${RELEASE_REVIEW_CHECK_ITEMS.map((i) => i.label).join("／")}`,
     `- 指摘の区別: ${BLOCKING_POLICY_LINES.join(" ")}止めない提案だけで往復を続けない（別Issueで追跡する）`,
-    "- 完了の条件: 独立レビューの実施・未解決指摘0件・必要テストの合格が、同じ内容に対してそろっていること。そろったら`scripts/create-release-fix-pr.sh`でPRを作る（通常の往復で追加Issue・PRは作らない。再実行してもPRは重複しない）",
-    "- 担当: 作業の最初に`scripts/report-release-fix-round.sh claim <issue番号> <担当名>`で担当を取り、応答の`epoch`を以降の`review`・`test`へ環境変数`RELEASE_FIX_ASSIGNEE`・`RELEASE_FIX_EPOCH`で渡す（旧担当の遅延報告は記録されない）。別のエージェントから引き継ぐときも同じ記録（指摘・往復・稼働時間）から未完了の部分を続ける",
-    "- 一時停止: 往復の回数では止まらない。**進捗の根拠が無い停滞**（変更も解消も無いまま同じ指摘が再指摘される・未解決が減らず解消も無い）と**実行予算（稼働時間。待機・中断は含まない）の到達**で、記録を保持したまま一時停止し、必要な操作がIssueに残る。停止中は報告できず、画面から再開（予算の追加・方針の入力）する。実行環境の障害・判断や権限の不足は`scripts/report-release-fix-round.sh pause`で報告して止める",
+    `- 完了の条件: 独立レビューの実施・未解決指摘0件・必要テストの合格が、同じ内容に対してそろっていること。そろったら\`${dir}/create-release-fix-pr.sh ${repo} <issue番号> <PRタイトル> <PR本文ファイル>\`でPRを作る（通常の往復で追加Issue・PRは作らない。再実行してもPRは重複しない）`,
+    `- 担当: 作業の最初に\`${report} claim <issue番号> <担当名> ${repo}\`で担当を取り、応答の\`epoch\`を以降の\`review\`・\`test\`へ環境変数\`RELEASE_FIX_ASSIGNEE\`・\`RELEASE_FIX_EPOCH\`で渡す（旧担当の遅延報告は記録されない）。別のエージェントから引き継ぐときも同じ記録（指摘・往復・稼働時間）から未完了の部分を続ける`,
+    `- 一時停止: 往復の回数では止まらない。**進捗の根拠が無い停滞**（変更も解消も無いまま同じ指摘が再指摘される・未解決が減らず解消も無い）と**実行予算（稼働時間。待機・中断は含まない）の到達**で、記録を保持したまま一時停止し、必要な操作がIssueに残る。停止中は報告できず、画面から再開（予算の追加・方針の入力）する。実行環境の障害・判断や権限の不足は\`${report} pause <issue番号> environment|needs_decision "<理由>" ${repo}\`で報告して止める`,
     "",
   ];
 }

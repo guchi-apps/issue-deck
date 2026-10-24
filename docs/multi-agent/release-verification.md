@@ -378,6 +378,7 @@ PR詳細・PR一覧・ブランチ画面・本番マージ確認の一覧は、�
 - **作業場所**: 元候補（凍結ブランチ）を一時worktreeへ取得し、修正を重ねた状態で確認する。developの最新は混ぜず、内部の往復では候補の作り直し・バージョン更新をしない（手順は修正Issue本文の「内部確認」節。`internalReviewSection`）
 - **記録**（`ReleaseFixInternalRound`・`ReleaseFixFinding`）: 論理セッションは**リポジトリ＋修正Issue番号**で、再検証の失敗で世代が進んでも指摘・往復を引き継ぐ。指摘はサーバーが`F-001`から採番し、解消は根拠つき、再発は`reopenCount`で数える。中断・再起動しても同じ記録から再開する
 - **報告API**（`POST /api/dispatch/release-fix-internal`、`scripts/report-release-fix-round.sh`）: `review`・`test`・`status`。認証は共有シークレット。**対象のSHAは受け取らず、サーバーが`issue-<番号>`ブランチのHEADから取り直す**。進行中の内部確認つき系列に結び付かない報告・整合しない報告（`pass`なのに未解決が残るなど）は記録しない
+- **報告先のリポジトリ**（#4964）: スクリプトはissue-deckにしか無いため、他リポジトリの修正セッションはissue-deckの本体チェックアウト（`~/apps/issue-deck/scripts/`）から呼ぶ。報告先は`--repo <owner/repo>`、無ければ**実行したディレクトリ**のoriginで決まる。以前はスクリプトの置き場所のoriginを使っていたため、他リポジトリの報告が常に`guchi-apps/issue-deck#<番号>`宛てになって`series_not_found`で弾かれ、修正PRがマージされても内部確認未実施として必ず`awaiting_decision`で止まっていた（kurashio・yoteiflow・pi0w・morrow・asset-managerで発生）。修正Issue本文の手順は、全コマンドに対象リポジトリの`--repo`を付けて書く。`create-release-fix-pr.sh`はブランチの確認とPR作成を実行したworktreeで行い、`--repo`がそのoriginと違えば止まる
 - **完了判定**（`evaluateInternalGate`）: 最新の往復で、独立レビューの実施・未解決指摘0件・必要テストの合格が**同じ対象SHA**に対してそろっているときだけ。レビューやテストの後に内容が変わると古い合格は使われない
 - **PR作成**: `scripts/create-release-fix-pr.sh`が完了判定・push済みの内容との一致・開いているPRの有無を確かめ、満たさなければ作らない（再実行でも重複しない）
 - **強制は取り込みの手前**: GitHub側のPR作成そのものはサーバーから止められない。そこで巡回（`sweepGroup`）が修正PRのhead SHAで同じ判定をし、**未完了または確認した内容と違うPRは候補の作り直しへ進めず`awaiting_decision`にする**（`decideReleaseFix`の`internalHold`）。確認が完了すれば次の巡回で自動的に進む
