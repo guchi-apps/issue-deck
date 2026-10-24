@@ -111,7 +111,7 @@ describe("callClaudeMessages", () => {
 
     expect(response.status).toBe(429);
     expect(json).toBeNull();
-    expect(error).toEqual({ code: "insufficient_quota", requestId: "req_quota" });
+    expect(error).toEqual({ code: "insufficient_quota", requestId: "req_quota", retryAt: null });
     expect(fetch).toHaveBeenCalledTimes(1);
     expect(getClaudeApiUsageSummary(NOW).features).toEqual([]);
   });

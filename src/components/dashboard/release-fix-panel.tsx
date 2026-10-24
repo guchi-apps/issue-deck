@@ -243,7 +243,7 @@ export function ReleaseFixCreate({
             type="button"
             onClick={() => submit(true)}
             disabled={busy}
-            className="w-fit rounded border px-2 py-0.5 text-[11.5px] hover:bg-muted disabled:opacity-50"
+            className="min-h-11 w-fit rounded border px-4 text-[13px] hover:bg-muted disabled:opacity-50 max-sm:w-full"
           >
             コードの修正として起案する
           </button>
@@ -254,7 +254,7 @@ export function ReleaseFixCreate({
           type="button"
           onClick={() => submit(false)}
           disabled={!canSubmit}
-          className="inline-flex items-center gap-1 rounded border px-2 py-0.5 text-[11.5px] font-medium text-foreground hover:bg-muted disabled:opacity-50"
+          className="inline-flex min-h-11 items-center gap-1 rounded border px-4 text-[13px] font-medium text-foreground hover:bg-muted disabled:opacity-50"
         >
           {busy ? "起案中…" : "修正Issueを作成"}
         </button>
@@ -509,7 +509,7 @@ export function ReleaseFixPrimaryAction({ state }: { state: ReleaseFixOverviewSt
         <button
           type="button"
           onClick={() => document.getElementById("release-fix-create")?.scrollIntoView({ block: "center" })}
-          className="rounded border border-primary bg-primary px-3 py-1 text-[12px] font-semibold text-primary-foreground"
+          className="min-h-11 rounded border border-primary bg-primary px-4 py-1 text-[13px] font-semibold text-primary-foreground"
         >
           {action.label}
         </button>
@@ -518,7 +518,7 @@ export function ReleaseFixPrimaryAction({ state }: { state: ReleaseFixOverviewSt
         <button
           type="button"
           onClick={() => document.querySelector('[data-testid="review-rerun-panel"]')?.scrollIntoView({ block: "center" })}
-          className="rounded border border-primary bg-primary px-3 py-1 text-[12px] font-semibold text-primary-foreground"
+          className="min-h-11 rounded border border-primary bg-primary px-4 py-1 text-[13px] font-semibold text-primary-foreground"
         >
           {action.label}
         </button>
@@ -527,7 +527,7 @@ export function ReleaseFixPrimaryAction({ state }: { state: ReleaseFixOverviewSt
         <button
           type="button"
           onClick={() => acceptExtra(current.id)}
-          className="rounded border border-primary bg-primary px-3 py-1 text-[12px] font-semibold text-primary-foreground"
+          className="min-h-11 rounded border border-primary bg-primary px-4 py-1 text-[13px] font-semibold text-primary-foreground"
         >
           {action.label}
         </button>

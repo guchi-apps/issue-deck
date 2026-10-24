@@ -175,7 +175,7 @@ export function DeployFailureAlert({
               type="button"
               onClick={() => void askAi()}
               disabled={analysisState.status === "loading"}
-              className="inline-flex items-center gap-1 rounded-md border border-primary px-2 py-1 text-primary hover:bg-primary/10 disabled:opacity-60"
+              className="inline-flex min-h-11 items-center gap-1 rounded-md border border-primary px-4 text-primary hover:bg-primary/10 disabled:opacity-60"
             >
               {analysisState.status === "loading" ? (
                 <Loader2 className="size-3 animate-spin" aria-hidden="true" />
@@ -192,7 +192,7 @@ export function DeployFailureAlert({
               <button
                 type="button"
                 onClick={createFixIssue}
-                className="mt-1 inline-flex items-center gap-1 rounded-md border border-primary px-2 py-1 text-primary hover:bg-primary/10"
+                className="mt-1 inline-flex min-h-11 items-center gap-1 rounded-md border border-primary px-4 text-primary hover:bg-primary/10"
               >
                 <Wrench className="size-3" aria-hidden="true" />
                 修正Issueを作成
@@ -245,7 +245,7 @@ export function DeployFailureAlert({
               <button
                 type="button"
                 onClick={createFixIssue}
-                className="rounded-md bg-primary px-3 py-1.5 text-primary-foreground hover:opacity-90"
+                className="min-h-11 rounded-md bg-primary px-4 py-1.5 text-primary-foreground hover:opacity-90"
               >
                 この内容で修正Issueを作成
               </button>

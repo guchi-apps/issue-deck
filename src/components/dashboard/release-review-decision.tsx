@@ -423,7 +423,7 @@ export function FindingDecisionControl({
           <button
             type="button"
             onClick={() => setEditing(true)}
-            className="self-start rounded border px-2 py-0.5 text-[11.5px] hover:bg-muted"
+            className="inline-flex min-h-11 items-center self-start rounded border px-4 text-[13px] font-medium hover:bg-muted max-sm:w-full max-sm:justify-center"
           >
             {current ? "判断を変更・撤回" : blocking ? "対応案を確認して判断" : "対応を記録する（任意）"}
           </button>
@@ -463,7 +463,7 @@ function RecommendationCard({
       <div className="flex flex-wrap items-center gap-2 rounded border px-2 py-1 text-[11.5px] text-muted-foreground" data-testid="recommendation-failure">
         <span>AIの推奨を取得できませんでした（{failure}）。判断と理由は手動で保存できます。</span>
         {onRetry && (
-          <button type="button" onClick={onRetry} className="rounded border px-2 py-0.5 hover:bg-muted">
+          <button type="button" onClick={onRetry} className="inline-flex min-h-11 items-center rounded border px-4 text-[13px] font-medium hover:bg-muted max-sm:w-full max-sm:justify-center">
             推奨を再取得
           </button>
         )}
@@ -510,12 +510,12 @@ function RecommendationCard({
             type="button"
             onClick={onConfirm}
             disabled={busy}
-            className="min-h-8 rounded bg-foreground px-2.5 py-1 text-[12px] text-background disabled:opacity-50 max-sm:w-full"
+            className="min-h-11 rounded bg-foreground px-4 py-1 text-[13px] font-medium text-background disabled:opacity-50 max-sm:w-full"
           >
             {busy ? "保存中…" : `推奨どおり「${RELEASE_REVIEW_DECISION_LABEL[rec.recommended]}」で確定${rec.recommended === "post_release" ? "（Issueを作成）" : ""}`}
           </button>
         )}
-        <button type="button" onClick={onChooseOther} disabled={busy} className="min-h-8 rounded border px-2.5 py-1 text-[12px] hover:bg-muted">
+        <button type="button" onClick={onChooseOther} disabled={busy} className="min-h-11 rounded border px-4 py-1 text-[13px] font-medium hover:bg-muted max-sm:w-full">
           別の判断を選ぶ
         </button>
       </div>
