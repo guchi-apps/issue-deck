@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { CodeReviewDialog } from "@/components/dashboard/code-review-dialog";
-import { CrossRepoQuestionDialog } from "@/components/dashboard/cross-repo-question-dialog";
 import { NewAppDialog } from "@/components/dashboard/new-app-dialog";
 import { BranchFlowView } from "@/components/dashboard/branch-flow-view";
 import {
@@ -51,6 +50,7 @@ import { MobileNightlyRunScreen } from "@/components/dashboard/mobile/mobile-nig
 import { MobileReleaseHistoryScreen } from "@/components/dashboard/mobile/mobile-release-history-screen";
 import { PreviewPanel } from "@/components/dashboard/preview-panel";
 import { NightlyRunPanel } from "@/components/dashboard/nightly-run-panel";
+import { RemoteSessionActiveList } from "@/components/dashboard/remote-session-active-list";
 import { RemoteSessionView } from "@/components/dashboard/remote-session-view";
 import { IdeasPanel } from "@/components/dashboard/ideas-panel";
 import { IosExtensionsPanel } from "@/components/dashboard/ios-extensions-panel";
@@ -431,12 +431,10 @@ export function IssueDeckShell({
    * 登録し、巡回が重ねて自動起票しないようにするために覚えておく。**他の入口はすべて`null`へ戻す**
    */
   const [iosFixOrigin, setIosFixOrigin] = useState<IosFixIssueOrigin | null>(null);
-  const [crossQuestionDialogOpen, setCrossQuestionDialogOpen] = useState(false);
   /** 新規アプリの立ち上げ（#2188）。入口はPCの左メニューとスマホのホームの最下部の1行だけ */
   const [newAppDialogOpen, setNewAppDialogOpen] = useState(false);
   // 右下ボタンから開くリモートセッションのモーダル（#4835）。左メニューの入口は従来どおり全画面ペイン
   const [remoteSessionModalOpen, setRemoteSessionModalOpen] = useState(false);
-  const [crossQuestionDialogRepo, setCrossQuestionDialogRepo] = useState<string | null>(null);
   const [codeReviewDialogOpen, setCodeReviewDialogOpen] = useState(false);
   const [codeReviewDialogRepo, setCodeReviewDialogRepo] = useState<string | null>(null);
   const [editingIssue, setEditingIssue] = useState<Issue | null>(null);
@@ -525,13 +523,6 @@ export function IssueDeckShell({
     setConfigIssueOrigin(issue);
     setIosFixOrigin(null);
     setCreateDialogOpen(true);
-  }
-
-  // 単一リポジトリへの質問は新規作成ダイアログの「質問」種別に統合済みで、こちらは横断専用
-  // （#1641）。回答するのがサブPCの質問セッションで、実行先の選択も要るため入口を分けている
-  function openCrossRepoQuestionDialog(repositoryFullName?: string | null) {
-    setCrossQuestionDialogRepo(repositoryFullName ?? null);
-    setCrossQuestionDialogOpen(true);
   }
 
   /** リポジトリ全体のコードレビュー（#698）。対象は開く時点で決まっており、ダイアログでは選び直さない（#3125） */
@@ -2042,9 +2033,7 @@ export function IssueDeckShell({
                 : (visibleIssue?.repositoryFullName ?? null),
             )
           }
-          onAskCrossRepoQuestion={() =>
-            openCrossRepoQuestionDialog(filters.repos.length === 1 ? filters.repos[0] : null)
-          }
+          remoteSessionRepositories={remoteSessionRepositories}
           onOpenNotificationTarget={openNotificationTarget}
           /* 実行キューの行のタイトルからIssue詳細を開く（#1625） */
           onOpenIssue={openIssueUrl}
@@ -2426,15 +2415,15 @@ export function IssueDeckShell({
                   raised={mobileFabRaised}
                   onCreateIssue={() => openCreateDialog(mobileFabRepositoryFullName)}
                   onOpenRemoteSessions={() => setRemoteSessionModalOpen(true)}
-                  onAskCrossRepoQuestion={() =>
-                    openCrossRepoQuestionDialog(mobileFabRepositoryFullName)
-                  }
+                  remoteSessionCount={remoteSessionNav.count}
                 />
               )}
 
               <Dialog open={remoteSessionModalOpen} onOpenChange={setRemoteSessionModalOpen}>
                 <DialogContent className="flex h-[min(46rem,calc(100%-2rem))] max-w-[calc(100%-2rem)] flex-col gap-3 p-4 sm:max-w-5xl">
                   <DialogTitle className="sr-only">リモートセッション</DialogTitle>
+                  {/* 起動中のセッションを最上部に出し、1タップでClaude Codeアプリへ移れるようにする（#4991） */}
+                  <RemoteSessionActiveList sessions={dispatch.remoteSessions} className="max-h-40 shrink-0 overflow-y-auto pr-8" />
                   <RemoteSessionView
                     repositories={remoteSessionRepositories}
                     active={remoteSessionModalOpen}
@@ -2881,14 +2870,6 @@ export function IssueDeckShell({
           onCreated={handleIssueCreated}
         />
         <NewAppDialog open={newAppDialogOpen} onOpenChange={setNewAppDialogOpen} />
-        <CrossRepoQuestionDialog
-          open={crossQuestionDialogOpen}
-          onOpenChange={setCrossQuestionDialogOpen}
-          repositories={visibleRepositories}
-          defaultRepositoryFullName={crossQuestionDialogRepo}
-          issues={allIssues}
-          onCreated={handleIssueCreated}
-        />
         <SettingsDialog
           open={settingsDialogOpen}
           onOpenChange={setSettingsDialogOpen}
