@@ -6,11 +6,10 @@ import {
   fetchReleaseNotesFile,
   fetchRepositoryHomepage,
 } from "@/lib/github/release-api";
-import { postChannelMessage } from "@/lib/slack/client";
-import { loadReleaseSlackTarget } from "@/lib/slack/config";
+import { loadReleaseDiscordTarget, postWebhookMessage } from "@/lib/discord/webhook";
 import {
-  buildReleaseSlackBlocks,
-  buildReleaseSlackText,
+  buildReleaseDiscordEmbed,
+  buildReleaseDiscordText,
   decideReleasePush,
   parseReleaseNotes,
   RELEASE_PUSH_EMPTY_BODY,
@@ -22,9 +21,9 @@ import {
 } from "@/lib/notifications/release-push";
 
 vi.mock("@/lib/db", () => ({ db: {} }));
-vi.mock("@/lib/slack/client", () => ({
-  createSlackClient: vi.fn(() => ({ call: vi.fn() })),
-  postChannelMessage: vi.fn(async () => ({ ts: "1.0" })),
+vi.mock("@/lib/discord/webhook", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/discord/webhook")>()),
+  postWebhookMessage: vi.fn(async () => undefined),
 }));
 vi.mock("@/lib/github/app-auth", () => ({ getInstallationToken: vi.fn(async () => "token") }));
 vi.mock("@/lib/github/release-api", () => ({
@@ -32,6 +31,8 @@ vi.mock("@/lib/github/release-api", () => ({
   fetchReleaseNotesFile: vi.fn(async () => null),
   fetchRepositoryHomepage: vi.fn(async () => null),
 }));
+
+const WEBHOOK_URL = "https://discord.com/api/webhooks/123456789/abc-DEF_ghi";
 
 const NOW = new Date("2026-09-02T09:00:00.000Z");
 
@@ -56,7 +57,7 @@ const NOTES = [
   "",
   "# v4.75.0",
   "",
-  "- リリースの完了がSlackへ届くようになりました",
+  "- リリースの完了がDiscordへ届くようになりました",
   "",
   "**使い方**",
   "",
@@ -90,9 +91,7 @@ function stubDb(overrides: {
 beforeEach(() => {
   vi.clearAllMocks();
   resetReleasePushSweepIntervalForTest();
-  process.env.SLACK_BOT_TOKEN = "xoxb-test";
-  delete process.env.SLACK_RELEASE_CHANNEL_ID;
-  delete process.env.SLACK_ALLOWED_CHANNEL_IDS;
+  process.env.DISCORD_RELEASE_WEBHOOK_URL = WEBHOOK_URL;
   vi.mocked(fetchRepositoryHomepage).mockResolvedValue("https://app.example.test");
   vi.mocked(fetchLatestRelease).mockResolvedValue(LATEST);
   vi.mocked(fetchReleaseNotesFile).mockResolvedValue(NOTES);
@@ -157,7 +156,7 @@ describe("decideReleasePush", () => {
 describe("parseReleaseNotes", () => {
   it("見出しがバージョンと一致したときだけ本文を返す", () => {
     expect(parseReleaseNotes(NOTES, "v4.75.0")).toBe(
-      "- リリースの完了がSlackへ届くようになりました",
+      "- リリースの完了がDiscordへ届くようになりました",
     );
   });
 
@@ -186,7 +185,7 @@ describe("parseReleaseNotes", () => {
   });
 });
 
-describe("buildReleaseSlackBlocks", () => {
+describe("buildReleaseDiscordEmbed", () => {
   const release = { repositoryFullName: "guchi-apps/issue-deck", tagName: "v4.75.0", notes: "- 直しました" };
   const extras = {
     publishedAt: new Date("2026-09-02T08:55:00.000Z"),
@@ -194,30 +193,27 @@ describe("buildReleaseSlackBlocks", () => {
     releaseUrl: LATEST.htmlUrl,
   };
 
-  it("見出し・リポジトリとバージョン・更新内容・ボタン・公開時刻の順に組む", () => {
-    const blocks = buildReleaseSlackBlocks(release, extras, "https://deck.example.test/dashboard?pane=flow");
-    expect(blocks.map((b) => b.type)).toEqual(["header", "section", "section", "actions", "context"]);
-    expect(JSON.stringify(blocks[2])).toContain("- 直しました");
-    expect(JSON.stringify(blocks[4])).toContain("2026-09-02 17:55");
-    const buttons = (blocks[3] as { elements: { url: string }[] }).elements;
-    expect(buttons.map((b) => b.url)).toEqual([
-      "https://deck.example.test/dashboard?pane=flow",
-      "https://app.example.test",
-    ]);
+  it("リポジトリ・バージョン・更新内容・リンク・公開時刻を載せる", () => {
+    const embed = buildReleaseDiscordEmbed(release, extras, "https://deck.example.test/dashboard?pane=flow");
+    expect(embed.description).toBe("- 直しました");
+    expect(embed.fields?.map((f) => f.name)).toEqual(["リポジトリ", "バージョン", "リンク"]);
+    const links = embed.fields?.[2].value ?? "";
+    expect(links).toContain("(https://deck.example.test/dashboard?pane=flow)");
+    expect(links).toContain("(https://app.example.test)");
+    expect(embed.footer?.text).toContain("2026-09-02 17:55");
   });
 
-  it("アプリのURLが無ければボタンを出さない", () => {
-    const blocks = buildReleaseSlackBlocks(release, { ...extras, appUrl: null });
-    expect((blocks[3] as { elements: unknown[] }).elements).toHaveLength(1);
+  it("アプリのURLが無ければリンクを出さない", () => {
+    const embed = buildReleaseDiscordEmbed(release, { ...extras, appUrl: null });
+    expect(embed.fields?.[2].value).not.toContain("アプリを開く");
   });
 
   it("更新内容が無くても本文を空にしない", () => {
-    const blocks = buildReleaseSlackBlocks({ ...release, notes: "" }, extras);
-    expect(JSON.stringify(blocks[2])).toContain(RELEASE_PUSH_EMPTY_BODY);
+    expect(buildReleaseDiscordEmbed({ ...release, notes: "" }, extras).description).toBe(RELEASE_PUSH_EMPTY_BODY);
   });
 
-  it("textにリポジトリとバージョンを入れる", () => {
-    expect(buildReleaseSlackText(release)).toBe("リリースしました: guchi-apps/issue-deck v4.75.0");
+  it("contentにリポジトリとバージョンを入れる", () => {
+    expect(buildReleaseDiscordText(release)).toBe("リリースしました: guchi-apps/issue-deck v4.75.0");
   });
 });
 
@@ -228,25 +224,18 @@ describe("releaseBranchScreenUrl", () => {
   });
 });
 
-describe("loadReleaseSlackTarget", () => {
-  it("Botトークンだけで決まる。無ければnull", () => {
-    expect(loadReleaseSlackTarget({})).toBeNull();
-    expect(loadReleaseSlackTarget({ SLACK_BOT_TOKEN: "t", SLACK_RELEASE_CHANNEL_ID: "CREL" })).toEqual({
-      botToken: "t",
-      channel: "CREL",
+describe("loadReleaseDiscordTarget", () => {
+  it("Webhook URLで決まる。無い・形が違うならnull", () => {
+    expect(loadReleaseDiscordTarget({})).toBeNull();
+    expect(loadReleaseDiscordTarget({ DISCORD_RELEASE_WEBHOOK_URL: "https://evil.example/hook" })).toBeNull();
+    expect(loadReleaseDiscordTarget({ DISCORD_RELEASE_WEBHOOK_URL: ` ${WEBHOOK_URL} ` })).toEqual({
+      webhookUrl: WEBHOOK_URL,
     });
-  });
-
-  it("チャンネル未設定ならリリース通知用の既定で、起案の許可チャンネルには引きずられない", () => {
-    expect(loadReleaseSlackTarget({ SLACK_BOT_TOKEN: "t", SLACK_ALLOWED_CHANNEL_IDS: "C1,C2" })?.channel).toBe(
-      "C0CA52U82HY",
-    );
-    expect(loadReleaseSlackTarget({ SLACK_BOT_TOKEN: "t", SLACK_RELEASE_CHANNEL_ID: " " })?.channel).toBe("C0CA52U82HY");
   });
 });
 
 describe("runReleasePushSweep", () => {
-  it("新しいリリースを見つけたらSlackへ投稿する", async () => {
+  it("新しいリリースを見つけたらDiscordへ投稿する", async () => {
     const { updateMany } = stubDb({ repositories: [REPOSITORY], recordedTagName: "v4.74.0" });
 
     const result = await runReleasePushSweep({ now: NOW });
@@ -255,13 +244,13 @@ describe("runReleasePushSweep", () => {
       {
         repositoryFullName: "guchi-apps/issue-deck",
         tagName: "v4.75.0",
-        notes: "- リリースの完了がSlackへ届くようになりました",
+        notes: "- リリースの完了がDiscordへ届くようになりました",
       },
     ]);
     // **送る前に席を取る**（タグが変わっていることを条件にした更新が席になる）
     expect(updateMany).toHaveBeenCalled();
-    expect(postChannelMessage).toHaveBeenCalledOnce();
-    expect(vi.mocked(postChannelMessage).mock.calls[0][1].channel).toBe("C0CA52U82HY");
+    expect(postWebhookMessage).toHaveBeenCalledOnce();
+    expect(vi.mocked(postWebhookMessage).mock.calls[0][0]).toBe(WEBHOOK_URL);
   });
 
   it("初めて見るリポジトリは鳴らさずタグだけ記録する", async () => {
@@ -279,7 +268,7 @@ describe("runReleasePushSweep", () => {
         notifiedAt: null,
       },
     });
-    expect(postChannelMessage).not.toHaveBeenCalled();
+    expect(postWebhookMessage).not.toHaveBeenCalled();
   });
 
   it("記録済みのタグと同じなら更新内容も読みに行かない", async () => {
@@ -295,7 +284,7 @@ describe("runReleasePushSweep", () => {
     stubDb({ repositories: [REPOSITORY], recordedTagName: "v4.74.0", reserveCount: 0 });
 
     expect((await runReleasePushSweep({ now: NOW })).notified).toHaveLength(0);
-    expect(postChannelMessage).not.toHaveBeenCalled();
+    expect(postWebhookMessage).not.toHaveBeenCalled();
   });
 
   it("リリースを1度も出していないリポジトリは数にも入れない", async () => {
@@ -316,7 +305,7 @@ describe("runReleasePushSweep", () => {
     const result = await runReleasePushSweep({ now: NOW });
 
     expect(result.notified[0]?.notes).toBe("");
-    expect(postChannelMessage).toHaveBeenCalledOnce();
+    expect(postWebhookMessage).toHaveBeenCalledOnce();
     errorSpy.mockRestore();
   });
 
@@ -331,8 +320,8 @@ describe("runReleasePushSweep", () => {
     expect(fetchLatestRelease).not.toHaveBeenCalled();
   });
 
-  it("Botトークンが無ければGitHubを叩かず、記録もしない", async () => {
-    delete process.env.SLACK_BOT_TOKEN;
+  it("Webhook URLが無ければGitHubを叩かず、記録もしない", async () => {
+    delete process.env.DISCORD_RELEASE_WEBHOOK_URL;
     const { create } = stubDb({ repositories: [REPOSITORY] });
 
     const result = await runReleasePushSweep({ now: NOW });

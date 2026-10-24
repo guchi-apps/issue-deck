@@ -3342,7 +3342,7 @@ export function POST(request: NextRequest) {
     リリースPRがあるときだけCI状態のGraphQLが1回増える。
   - 種別ごとのON/OFFは**持たない**（設定は購読の有無だけ）。通知する2種類はどちらも
     「人が動かないと止まるもの」で、片方だけ止めたい理由が出ていないため。
-- **リリース（本番反映）の完了はSlackのチャンネルへカードで届く**（#2725でPush通知として導入し、#4791でプッシュ通知をやめてSlack投稿へ替えた。投稿は`lib/slack/client.ts`の`postChannelMessage`、投稿先は`lib/slack/config.ts`の`loadReleaseSlackTarget`。以下のPush・購読・ミュートに関する記述は#4791より前の経緯で、送り先以外の検知・記録の仕組みは今も同じ。
+- **リリース（本番反映）の完了はDiscordのチャンネルへ埋め込みで届く**（#2725でPush通知として導入し、#4791でSlack投稿へ、#4994でDiscord Webhook投稿へ替えた。投稿は`lib/discord/webhook.ts`の`postWebhookMessage`、投稿先は同ファイルの`loadReleaseDiscordTarget`（`DISCORD_RELEASE_WEBHOOK_URL`）。以下のPush・購読・ミュートに関する記述は#4791より前の経緯で、送り先以外の検知・記録の仕組みは今も同じ。
   [`lib/notifications/release-push.ts`](../src/lib/notifications/release-push.ts)）。
   リリース通知はSignalyへのwebhook（`deploy.yml`の`notify-release`が
   `.github/scripts/signaly-notify.sh`を呼ぶ）にしか流れておらず、**フリート全体のリリースを
