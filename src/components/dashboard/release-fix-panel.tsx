@@ -1,6 +1,6 @@
 "use client";
 
-import { ExternalLink } from "lucide-react";
+import { ExternalLink, Loader2 } from "lucide-react";
 import { useCallback, useContext, useEffect, useState, type ReactNode } from "react";
 
 import { ReleaseCompletionPanel, useReleaseCompletionRun } from "@/components/dashboard/release-completion-panel";
@@ -33,6 +33,10 @@ import type { Issue } from "@/types/issue";
 
 const SEVERITY_LABEL = { high: "重大", medium: "中", low: "軽微" } as const;
 
+/** 作成直後の取り込み確認（#4956）。2秒おきに最大30回（約60秒） */
+const SYNC_POLL_INTERVAL_MS = 2000;
+const SYNC_POLL_MAX_ATTEMPTS = 30;
+
 const START_STATE_LABEL: Record<Exclude<ReleaseFixStartState, "none">, string> = {
   queued: "受付済み・起動待ち",
   running: "修正を実行中",
@@ -47,15 +51,52 @@ export function ReleaseFixStartButton({
   repositoryFullName,
   seriesId,
   startState,
+  waitForIssue = false,
 }: {
   repositoryFullName: string;
   seriesId: string;
   startState: ReleaseFixStartState;
+  /** 作成直後（#4956）。修正Issueが一覧へ取り込まれるまでボタンを無効にして待つ */
+  waitForIssue?: boolean;
 }) {
   const openStart = useContext(ReleaseFixStartContext);
   const { openIssue } = useReferenceNavigation();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [syncState, setSyncState] = useState<"waiting" | "timeout" | "ready">(waitForIssue ? "waiting" : "ready");
+  const [syncRound, setSyncRound] = useState(0);
+  const hasContext = openStart !== null && openStart !== undefined;
+
+  useEffect(() => {
+    if (!waitForIssue || !hasContext) return;
+    let cancelled = false;
+    let attempts = 0;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const poll = async () => {
+      let synced = false;
+      try {
+        const [owner, repo] = repositoryFullName.split("/");
+        const res = await fetch(
+          `/api/repositories/release/fix-series?owner=${owner}&repo=${repo}&startCheck=${encodeURIComponent(seriesId)}`,
+        );
+        const body: { error?: string } = await res.json().catch(() => ({}));
+        synced = body.error !== "issue_not_synced";
+      } catch {
+        synced = false;
+      }
+      if (cancelled) return;
+      if (synced) return setSyncState("ready");
+      attempts += 1;
+      if (attempts >= SYNC_POLL_MAX_ATTEMPTS) return setSyncState("timeout");
+      timer = setTimeout(poll, SYNC_POLL_INTERVAL_MS);
+    };
+    void poll();
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
+  }, [waitForIssue, hasContext, repositoryFullName, seriesId, syncRound]);
+
   if (!openStart) return null;
 
   const check = async (): Promise<{ issue?: Issue; ok: boolean; message?: string }> => {
@@ -84,6 +125,7 @@ export function ReleaseFixStartButton({
   };
 
   const started = startState !== "none";
+  const syncing = syncState !== "ready";
   return (
     <span className="inline-flex flex-wrap items-center gap-x-2 gap-y-1" data-testid="release-fix-start">
       {started && (
@@ -94,14 +136,33 @@ export function ReleaseFixStartButton({
       <button
         type="button"
         onClick={onClick}
-        disabled={busy}
+        disabled={busy || syncing}
+        aria-disabled={busy || syncing}
         className={cn(
-          "min-h-8 rounded border px-3 py-1 text-[11.5px] disabled:opacity-50",
+          "min-h-11 w-full rounded border px-4 py-1.5 text-[14px] sm:w-auto",
+          "disabled:cursor-not-allowed disabled:border-border disabled:bg-muted disabled:text-muted-foreground",
           started ? "hover:bg-muted" : "bg-primary font-medium text-primary-foreground hover:opacity-90",
         )}
       >
-        {busy ? "確認中…" : started ? "進捗を見る" : error ? "もう一度開始" : "修正を開始"}
+        {syncing ? (
+          <>
+            {syncState === "waiting" && <Loader2 className="mr-2 inline size-3.5 animate-spin motion-reduce:animate-none" aria-hidden />}
+            {syncState === "waiting" ? "Issueを取り込み中…" : "Issueの取り込み待ち"}
+          </>
+        ) : busy ? "確認中…" : started ? "進捗を見る" : error ? "もう一度開始" : "修正を開始"}
       </button>
+      {syncState === "timeout" && (
+        <button
+          type="button"
+          onClick={() => {
+            setSyncState("waiting");
+            setSyncRound((n) => n + 1);
+          }}
+          className="min-h-11 w-full rounded border px-4 py-1.5 text-[14px] hover:bg-muted sm:w-auto"
+        >
+          もう一度確認
+        </button>
+      )}
       {error && (
         <span role="alert" className="break-words text-destructive">
           {error}（修正Issueは作成済みです）
@@ -267,6 +328,7 @@ export function ReleaseFixCreate({
             repositoryFullName={repositoryFullName}
             seriesId={created.id}
             startState={created.startState}
+            waitForIssue
           />
         </div>
       )}
