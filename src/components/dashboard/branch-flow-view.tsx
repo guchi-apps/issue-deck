@@ -129,6 +129,7 @@ import {
   type ReleaseCandidateVerification,
 } from "@/lib/release-candidate-status";
 import { formatMonthDay, formatMonthDayTime, formatTimeOfDay } from "@/lib/format-date-time";
+import { formatRelativeDate } from "@/lib/format-relative-date";
 import { releaseMergeTargetLabel } from "@/lib/github/release-button-status";
 import { getProgressStatusDef } from "@/lib/issue-progress";
 import {
@@ -1376,6 +1377,8 @@ function ReleaseGroupHeader({
   const deployRunId = group.deploy?.runId ?? null;
   const toggleRunDetail = deployRunId !== null ? () => setRunDetailOpen((open) => !open) : undefined;
   const released = group.mergedAt !== null;
+  // 分単位の相対表示なので60秒間隔で足りる。リリース済みの束だけ時計を回す
+  const now = useNow(60_000, released);
   const webviewIos = getWebviewIosRepository(repositoryFullName);
   // `main`へ直接マージされた作業の束（#2911）。**版もリリースPRも持たない**ので、
   // 「v◯」とも「リリース済み」とも言えず、デプロイの状態も判定できない
@@ -1489,6 +1492,12 @@ function ReleaseGroupHeader({
                           : "mainへマージ"
                   }`}
               </span>
+              {/* いつ頃かを日付だけで測らなくて済むよう、相対時間を添える（#4984）。マウント前は日付のみ */}
+              {group.mergedAt && now !== null && (
+                <span className="text-xs text-muted-foreground">
+                  {`（${formatRelativeDate(group.mergedAt, now)}）`}
+                </span>
+              )}
               {/* 成功は日付の後ろへ回す。「本番反映」を主にし、その裏付けとして添える */}
               {inProduction && (
                 <>

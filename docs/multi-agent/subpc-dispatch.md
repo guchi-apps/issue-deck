@@ -1560,7 +1560,8 @@ kill <PID>                             # 引けたPIDだけを止める
 [作業が終わったセッションは自動で畳む](local-quick-start.md#作業が終わったセッションは自動で畳む1256)を参照。
 閾値は`SESSION_IDLE_MINUTES`（既定5・0で無効）と`SESSION_HANDOFF_IDLE_MINUTES`（既定5・#1541）、
 横断質問セッション専用の`QUESTION_SESSION_IDLE_MINUTES`（既定30・#1648）。**3つとも経路ごとに
-独立していて、掛け合わせない**（#1649）。
+独立していて、掛け合わせない**（#1649）。手作業セッションは専用の
+`MANUAL_STEP_SESSION_IDLE_MINUTES`（既定720・#4973）を使う。
 
 **畳んでよいかを起動経路で切る。** 対象になるのはpollerが`run_job()`で起動したセッションだけで、
 `ISSUE_DECK_SESSION_REAPABLE=1`をランチャー経由でtmuxの中まで渡し、`run-issue-session.sh`が

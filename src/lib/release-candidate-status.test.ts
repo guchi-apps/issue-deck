@@ -23,6 +23,49 @@ function resolve(overrides: Partial<PullRequestReleaseChecks>) {
   return resolveReleaseCandidateVerification({ ...PASSED, ...overrides }, true);
 }
 
+describe("修正系列の合流（#4972）", () => {
+  const fix = (overrides: Record<string, unknown> = {}) =>
+    ({ status: "fix_in_progress", issueNumber: 4980, sourceKind: "review_finding", stalled: false, reason: null, ...overrides }) as PullRequestReleaseChecks["fix"];
+
+  it("全体レビューが要確認で修正が対応中なら、問題でなく「修正対応中」として出す", () => {
+    const v = resolve({ aiReview: "needs_check", fix: fix() });
+    expect(v.problem).toBeNull();
+    expect(v.progress?.label).toBe("修正対応中");
+    expect(v.progress?.checks[0]).toMatchObject({ name: "全体レビュー", stageLabel: "修正対応中（修正Issue #4980）" });
+  });
+
+  it("修正が止まっているときは、理由つきの問題にする", () => {
+    const v = resolve({ aiReview: "needs_check", fix: fix({ stalled: true, reason: "判断待ち" }) });
+    expect(v.progress).toBeNull();
+    expect(v.problem).toMatchObject({ kind: "fix_stalled", label: "修正が停止中" });
+    expect(v.problem?.reasons[0]).toContain("判断待ち");
+  });
+
+  it("起点が統合検証失敗なら統合検証に重ね、全体レビューの要確認は隠さない", () => {
+    const v = resolve({ integration: "failed", aiReview: "needs_check", fix: fix({ sourceKind: "integration_failure" }) });
+    expect(v.progress?.checks.map((c) => c.name)).toEqual(["統合検証"]);
+    expect(v.problem?.kind).toBe("needs_check");
+  });
+
+  it("結果が通っている区分や、fixが無いときは従来どおり", () => {
+    expect(resolve({ fix: fix() }).problem).toBeNull();
+    expect(resolve({ fix: fix() }).progress).toBeNull();
+    expect(resolve({ aiReview: "needs_check" }).problem?.kind).toBe("needs_check");
+  });
+
+  it("要約から組み直した検証にも修正の状態が載る", () => {
+    const section = (state: string) => ({ state }) as ReleaseVerificationSummary["integration"];
+    const summary = {
+      enforced: true,
+      aiReview: section("needs_check"),
+      integration: section("passed"),
+      mac: { state: "not_applicable" },
+      fix: fix(),
+    } as unknown as ReleaseVerificationSummary;
+    expect(resolveReleaseCandidateVerification(releaseChecksFromSummary(summary), true).progress?.label).toBe("修正対応中");
+  });
+});
+
 describe("resolveReleaseCandidateVerification", () => {
   it("コード確認済み・統合検証待ち／検証結果を確認中は、要確認でなく待てば進むものとして出す（#4664）", () => {
     const waiting = resolve({ aiReview: "needs_check", integration: "running", aiReviewStage: { kind: "integration_waiting" } });

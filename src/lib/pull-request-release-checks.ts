@@ -1,4 +1,5 @@
 import { db } from "@/lib/db";
+import { loadReleaseCandidateFixes } from "@/lib/release-candidate-fix";
 import { describeIntegrationSetupGap, getReleaseVerificationConfig } from "@/lib/release-verification-config";
 import { parseInheritanceEvidence } from "@/lib/release-finalize";
 import { loadInheritedRecords } from "@/lib/release-verification";
@@ -129,7 +130,7 @@ export async function fetchReleaseChecks(
   if (releases.length === 0) return result;
   try {
     const where = { OR: releases.map((t) => ({ repoFullName: t.repositoryFullName, prNumber: t.number })) };
-    const [rows, runningJobs, activeJobs, finalizations] = await Promise.all([
+    const [rows, runningJobs, activeJobs, finalizations, fixes] = await Promise.all([
       db.releaseVerification.findMany({ where, orderBy: { updatedAt: "desc" } }),
       db.dispatchJob.findMany({
         where: {
@@ -155,6 +156,11 @@ export async function fetchReleaseChecks(
           OR: releases.map((t) => ({ repositoryFullName: t.repositoryFullName, prNumber: t.number })),
         },
         select: { repositoryFullName: true, prNumber: true, status: true, finalHeadSha: true, handoffEvidence: true, updatedAt: true },
+      }),
+      // 修正系列の進み具合（#4972）。補助の情報なので、読めなくても検証の状態は返す
+      loadReleaseCandidateFixes(releases).catch((error) => {
+        console.error("[fetchReleaseChecks] 修正系列を読めませんでした:", error);
+        return new Map<string, import("@/lib/release-fix-series").ReleaseCandidateFix>();
       }),
     ]);
     for (const target of releases) {
@@ -206,6 +212,7 @@ export async function fetchReleaseChecks(
       result.set(releaseChecksKey(target.repositoryFullName, target.number), {
         ...summarizeReleaseChecks(current, records),
         aiReviewStage,
+        fix: fixes.get(releaseChecksKey(target.repositoryFullName, target.number)) ?? null,
         enforced: getReleaseVerificationConfig(target.repositoryFullName).enforced,
         started: {
           aiReview: jobs.some((job) => job.kind === "RELEASE_REVIEW") || recordedRunning("ai_review"),

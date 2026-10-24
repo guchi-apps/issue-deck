@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 
 import { db } from "@/lib/db";
 import { authorizeDispatch } from "@/lib/dispatch/dispatch-auth";
+import { buildSharedTokenReviewMeta } from "@/lib/release-review-shared-token-meta";
 import { BLOCKING_POLICY_LINES, checklistPromptText } from "@/lib/release-review-checklist";
 import { loadReleaseReviewContext } from "@/lib/release-review-context-load";
 
@@ -28,9 +29,18 @@ export async function GET(request: NextRequest) {
     baseSha: job.baseSha,
     headSha: job.headSha,
   });
+  // 共有トークンの非機密情報（登録有無・利用先）。読めなければnull＝「未確認」であり「未登録」ではない（#4975）
+  const sharedTokens = await Promise.all([
+    db.sharedToken.findMany({ select: { id: true, name: true, updatedAt: true } }),
+    db.sharedTokenUsage.groupBy({ by: ["sharedTokenId", "consumer"], _max: { usedAt: true } }),
+  ])
+    .then(([rows, grouped]) =>
+      buildSharedTokenReviewMeta(rows, grouped.map((g) => ({ sharedTokenId: g.sharedTokenId, consumer: g.consumer, usedAt: g._max.usedAt }))),
+    )
+    .catch(() => null);
   // プロンプトへ入れる確認項目と止める／止めないの基準も一緒に返す（正はTypeScript側の定義1か所）
   return NextResponse.json(
-    { ...context, checklistPrompt: checklistPromptText(), blockingPolicy: BLOCKING_POLICY_LINES.map((l) => `- ${l}`).join("\n") },
+    { ...context, sharedTokens, checklistPrompt: checklistPromptText(), blockingPolicy: BLOCKING_POLICY_LINES.map((l) => `- ${l}`).join("\n") },
     { headers: { "Cache-Control": "no-store" } },
   );
 }

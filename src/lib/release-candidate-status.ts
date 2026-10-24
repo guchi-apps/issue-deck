@@ -25,6 +25,7 @@ import type { PullRequestReleaseCheckState, PullRequestReleaseChecks } from "@/t
  */
 export type ReleaseCandidateProblemKind =
   | "failed"
+  | "fix_stalled"
   | "setup_missing"
   | "needs_check"
   | "invalidated"
@@ -41,6 +42,8 @@ export type ReleaseCandidatePendingCheck = {
    * 「検証結果を確認中」のときに入る。無ければ従来どおり
    */
   stageLabel?: string;
+  /** 修正系列が対応中のため待っているもの（#4972）。見出しは「リリース検証中」でなく「修正対応中」にする */
+  fix?: boolean;
 };
 
 export type ReleaseCandidateVerification = {
@@ -54,9 +57,11 @@ export type ReleaseCandidateVerification = {
 
 export const RELEASE_VERIFYING_LABEL = "リリース検証中";
 export const RELEASE_VERIFICATION_WAITING_LABEL = "リリース検証待ち";
+export const RELEASE_FIX_WORKING_LABEL = "修正対応中";
 
 const PROBLEM_LABEL: Record<ReleaseCandidateProblemKind, string> = {
   failed: "検証失敗",
+  fix_stalled: "修正が停止中",
   setup_missing: "検証の設定不足",
   needs_check: "検証要確認",
   invalidated: "再検証が必要",
@@ -67,6 +72,7 @@ const PROBLEM_LABEL: Record<ReleaseCandidateProblemKind, string> = {
 /** 重いものから。見出しの1語にはいちばん重い問題を出す */
 const PROBLEM_ORDER: ReleaseCandidateProblemKind[] = [
   "failed",
+  "fix_stalled",
   "setup_missing",
   "needs_check",
   "invalidated",
@@ -127,6 +133,25 @@ export function resolveReleaseCandidateVerification(
       pending.push({ name: section.name, started: stage.kind === "reevaluating", stageLabel: describeReviewStageLabel(stage) });
       continue;
     }
+    // 修正系列が対応中の区分（#4972）。結果が要確認・失敗のまま修正を待っているので、問題でなく待てば進むものとして出す。
+    // 止まっているときは、停止の理由を問題に出す。再検証（reverifying）以降は`fix`が付かず、結果の判定に任せる
+    if (
+      checks.fix &&
+      (section.state === "needs_check" || section.state === "failed") &&
+      section.integration === (checks.fix.sourceKind === "integration_failure") &&
+      !(!section.integration && stage?.kind === "needs_check" && stage.cleared)
+    ) {
+      const issue = `修正Issue #${checks.fix.issueNumber}`;
+      if (checks.fix.stalled) {
+        problems.push({
+          kind: "fix_stalled",
+          reason: `${section.name}: ${issue}の対応が止まっています${checks.fix.reason ? `（${checks.fix.reason}）` : ""}`,
+        });
+      } else {
+        pending.push({ name: section.name, started: true, stageLabel: `${RELEASE_FIX_WORKING_LABEL}（${issue}）`, fix: true });
+      }
+      continue;
+    }
     switch (section.state) {
       case "running":
         pending.push({ name: section.name, started: section.started });
@@ -175,7 +200,11 @@ export function resolveReleaseCandidateVerification(
   const progress =
     pending.length > 0
       ? {
-          label: pending.some((check) => check.started) ? RELEASE_VERIFYING_LABEL : RELEASE_VERIFICATION_WAITING_LABEL,
+          label: pending.every((check) => check.fix)
+            ? RELEASE_FIX_WORKING_LABEL
+            : pending.some((check) => check.started)
+              ? RELEASE_VERIFYING_LABEL
+              : RELEASE_VERIFICATION_WAITING_LABEL,
           checks: pending,
         }
       : null;
@@ -282,5 +311,6 @@ export function releaseChecksFromSummary(
     integrationSetupGap,
     rerun: { aiReview: active(summary.aiReview), integration: active(summary.integration) },
     aiReviewStage: summary.aiReview.stage,
+    fix: summary.fix ?? null,
   };
 }

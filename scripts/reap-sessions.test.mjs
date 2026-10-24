@@ -454,3 +454,86 @@ describe("reap-sessions.sh: PRを人の指示で作るリポジトリ（#2499）
     expect(result.killed).toContain(`=${GH_SESSION}`);
   });
 });
+
+// ---------------------------------------------------------------------------
+// 手作業セッション（kind=manual-step）の放置の猶予（#4973）
+//
+// 以前は質問セッションの30分を共用していて、人の操作待ちの途中で畳まれていた。専用の
+// `MANUAL_STEP_SESSION_IDLE_MINUTES`（既定720）で畳み、質問セッションの30分は変えない。
+// 手作業Issueは常にOPENの偽の`gh`で、放置の猶予だけが結果を分けるようにする。
+
+function runKind({ kind, idleSeconds, env = {} }) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "reap-sessions-kind-"));
+  tempDirs.push(root);
+  const binDir = path.join(root, "bin");
+  const stateDir = path.join(root, "state");
+  const killLog = path.join(root, "kill.log");
+  fs.mkdirSync(binDir, { recursive: true });
+  fs.mkdirSync(stateDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(binDir, "tmux"),
+    [
+      "#!/usr/bin/env bash",
+      "case \"$1\" in",
+      `  list-sessions) printf '%s\\n' ${JSON.stringify(SESSION)} ;;`,
+      "  list-panes) echo 0 ;;",
+      `  kill-session) printf '%s\\n' "$*" >>${JSON.stringify(killLog)} ;;`,
+      "  *) : ;;",
+      "esac",
+      "exit 0",
+    ].join("\n"),
+    { mode: 0o755 },
+  );
+  fs.writeFileSync(path.join(binDir, "gh"), "#!/usr/bin/env bash\necho OPEN\n", { mode: 0o755 });
+  fs.writeFileSync(
+    path.join(stateDir, `${SESSION}.session`),
+    [
+      `session=${SESSION}`,
+      `worktree=${path.join(root, "worktrees", "issue-2422")}`,
+      "repository=guchi-apps/issue-deck",
+      "issue=2422",
+      "reapable=1",
+      `kind=${kind}`,
+      "startedAt=0",
+    ].join("\n") + "\n",
+  );
+  const eventAt = Math.floor(Date.now() / 1000) - idleSeconds;
+  fs.writeFileSync(path.join(stateDir, `${SESSION}.event`), `${eventAt} Stop\n`);
+  const stdout = execFileSync("bash", [script], {
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      PATH: `${binDir}:${process.env.PATH}`,
+      TMUX: "",
+      ISSUE_DECK_SESSION_STATE_DIR: stateDir,
+      ...env,
+    },
+  });
+  return { stdout, killed: fs.existsSync(killLog) ? fs.readFileSync(killLog, "utf8") : "" };
+}
+
+describe("reap-sessions.sh: 手作業セッションの放置の猶予（#4973）", () => {
+  it("30分放置では畳まない（既定は720分）", () => {
+    const result = runKind({ kind: "manual-step", idleSeconds: 31 * 60 });
+    expect(result.killed).toBe("");
+  });
+
+  it("猶予（720分）を過ぎたら畳む", () => {
+    const result = runKind({ kind: "manual-step", idleSeconds: 721 * 60 });
+    expect(result.killed).toContain(`=${SESSION}`);
+  });
+
+  it("MANUAL_STEP_SESSION_IDLE_MINUTES=0なら、OPENのままいくら放置しても残す", () => {
+    const result = runKind({
+      kind: "manual-step",
+      idleSeconds: 5000 * 60,
+      env: { MANUAL_STEP_SESSION_IDLE_MINUTES: "0" },
+    });
+    expect(result.killed).toBe("");
+  });
+
+  it("質問セッションは従来どおり30分で畳む", () => {
+    const result = runKind({ kind: "question", idleSeconds: 31 * 60 });
+    expect(result.killed).toContain(`=${SESSION}`);
+  });
+});

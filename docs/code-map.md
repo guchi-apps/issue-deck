@@ -3618,7 +3618,7 @@ export function POST(request: NextRequest) {
   運ぶ**（#1817。画面の文言は`lib/dispatch/issue-session.ts`の`describeSessionReap`。
   **判定を画面側へ写さない**——worktreeがcleanか・push済みかはホストにしか無く、写すと必ずずれて
   終わらないセッションに終了予告が出る）。**横断質問セッションは
-  質問IssueがOPENのままでも放置で畳む**（#1648。猶予は`QUESTION_SESSION_IDLE_MINUTES`。
+  質問IssueがOPENのままでも放置で畳む**（#1648。猶予は`QUESTION_SESSION_IDLE_MINUTES`。手作業セッションは専用の`MANUAL_STEP_SESSION_IDLE_MINUTES`〈既定720〉で、#4973。
   こちらはcwdが質問Issue間で共有されるため`--continue`ではなく、質問Issueごとに控えたsessionIdで
   `--resume`する。#3033）。設計は
   [multi-agent/local-quick-start.md](multi-agent/local-quick-start.md)。

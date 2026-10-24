@@ -737,7 +737,7 @@ function AiReviewSection({
           ? "warn"
           : "muted";
   // 実行障害にはコード修正→作り直しを勧めない（直すものが無い）。再実行が主導線
-  const needsFix = fixable.length > 0 || section.state === "invalidated";
+  const needsFix = fixable.length > 0 || section.state === "invalidated" || section.state === "needs_check";
   const hasDetail =
     compact ||
     Boolean(section.summary) ||

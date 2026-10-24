@@ -177,8 +177,10 @@ describe("リリース準備の失敗（#4335）", () => {
 
 describe("修正を入れて作り直す：新方式のリリース候補（#4895）", () => {
   it("旧方式の文面を出さず、再取り込み・再確認を送って結果を出す", async () => {
-    fetchMock.mockImplementation((_url: string, init?: RequestInit) =>
-      init?.method === "POST"
+    fetchMock.mockImplementation((url: string, init?: RequestInit) =>
+      String(url).includes("view=import_options")
+        ? json({ candidateId: "c1", headSha: HEAD, revision: 1, blocked: null, options: [] })
+        : init?.method === "POST"
         ? json({ ok: true, resumed: [581], requeued: [], blocked: [{ issueNumber: 582, reason: "候補を取り消して作り直してください" }] })
         : json({ releasePullRequest: null, candidate: null, rcPullRequest: { number: 580, url: "https://github.com/o/r/pull/580", label: "RC-2" } }),
     );
@@ -187,7 +189,7 @@ describe("修正を入れて作り直す：新方式のリリース候補（#489
 
     const action = await screen.findByRole("button", { name: "再取り込み・再確認" });
     expect(screen.queryByText(/release-main\/v…/)).toBeNull();
-    expect(screen.getByText(/リリース候補 RC-2 の取り込みを確認し直しますか/)).toBeTruthy();
+    expect(screen.getByText(/リリース候補 RC-2 への取り込み/)).toBeTruthy();
     fireEvent.click(action);
 
     await waitFor(() => expect(screen.getByText(/再検証へ戻しました（修正Issue #581）/)).toBeTruthy());

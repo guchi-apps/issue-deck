@@ -5,6 +5,7 @@ import { Loader2, RotateCcw } from "lucide-react";
 
 import { GithubReferenceLink } from "@/components/dashboard/github-reference-link";
 import { ReleaseBumpKindSelect } from "@/components/dashboard/release-bump-kind-select";
+import { RcImportPanel } from "@/components/dashboard/release-rc-import-panel";
 import { ReleaseRebuildSelectionList } from "@/components/dashboard/release-rebuild-selection-list";
 import {
   AlertDialog,
@@ -188,7 +189,7 @@ export function ReleaseRebuildButton({
               {pullRequest
                 ? `v${pullRequest.version} のリリースを作り直しますか？`
                 : rcPullRequest
-                  ? `リリース候補 ${rcPullRequest.label} の取り込みを確認し直しますか？`
+                  ? `リリース候補 ${rcPullRequest.label} への取り込み`
                   : "リリースを作り直しますか？"}
             </AlertDialogTitle>
             <AlertDialogDescription>
@@ -227,6 +228,11 @@ export function ReleaseRebuildButton({
                 <li>候補ブランチが記録に無い変更で進んでいるものは推測で取り込まず、理由を表示します</li>
               </ol>
               {recovery && <RecoveryResult recovery={recovery} />}
+              <RcImportPanel
+                repositoryFullName={repositoryFullName}
+                pullRequestNumber={rcPullRequest.number}
+                onImported={onTriggered}
+              />
             </div>
           )}
 

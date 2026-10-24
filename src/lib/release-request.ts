@@ -332,6 +332,56 @@ export async function requestRcFixRecovery(repoFullName: string, pullRequestNumb
   return json as RcFixRecoveryResponse;
 }
 
+/** 候補へ取り込めるPRの一覧（`GET /api/repositories/release/rc?view=import_options`。#4986） */
+export type RcImportOptionsResponse = import("@/lib/release-rc-run").RcImportOptions;
+
+export async function fetchRcImportOptions(repoFullName: string, pullRequestNumber: number): Promise<RcImportOptionsResponse> {
+  const [owner, repo] = repoFullName.split("/");
+  const params = new URLSearchParams({ owner, repo, view: "import_options", pullRequest: String(pullRequestNumber) });
+  const res = await fetch(`/api/repositories/release/rc?${params}`);
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(releaseErrorMessage(res.status, json.error, json.message));
+  return json as RcImportOptionsResponse;
+}
+
+const RC_IMPORT_ERROR: Record<string, string> = {
+  candidate_changed: "候補ブランチが更新されています。一覧を開き直して選び直してください。",
+  revision_in_progress: "取り込みの更新が進行中です。完了してから選んでください。",
+  not_reviewable: "この候補は取り込める段階ではありません。",
+  approval_required: "固定範囲外のPRは、承認にチェックしたものだけ取り込めます。",
+  empty_selection: "取り込むPRを選んでください。",
+  caller_unsupported: "このリポジトリのリリースworkflowは候補の取り込みに未対応です。",
+  dispatch_failed: "リリースworkflowを起動できませんでした。時間をおいて、もう一度お試しください。",
+  not_found: "候補が見つかりません。",
+};
+
+export type RcImportResponse = { ok: true; revision: number; existing: boolean };
+
+/**
+ * 選んだPRを候補へ取り込む（`POST /api/repositories/release/rc` action=import。#4986）。
+ * 見ていたhead・PRごとのマージコミット・承認したPRだけを送り、可否はサーバーが取り直して判定する
+ */
+export async function requestRcImport(
+  repoFullName: string,
+  input: { candidateId: string; expectedHeadSha: string; selected: { number: number; expectedMergeSha: string | null }[]; approveExtra: number[]; requestKey: string },
+): Promise<RcImportResponse> {
+  const [owner, repo] = repoFullName.split("/");
+  const res = await fetch("/api/repositories/release/rc", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ owner, repo, action: "import", ...input }),
+  });
+  const json = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const problems = Array.isArray(json.problems) ? (json.problems as { number: number; label: string }[]).map((p) => `#${p.number} ${p.label}`).join(" / ") : "";
+    const unapproved = Array.isArray(json.unapproved) ? `（承認が必要: ${(json.unapproved as number[]).map((n) => `#${n}`).join("、")}）` : "";
+    const known = RC_IMPORT_ERROR[json.error as string];
+    if (known || problems) throw new Error(`${known ?? "選べないPRがあります。"}${unapproved}${problems ? ` ${problems}` : ""}`);
+    throw new Error(releaseErrorMessage(res.status, json.error, json.message));
+  }
+  return json as RcImportResponse;
+}
+
 export async function fetchReleaseRebuild(repoFullName: string): Promise<ReleaseRebuildInfo> {
   const [owner, repo] = repoFullName.split("/");
   const params = new URLSearchParams({ owner, repo });

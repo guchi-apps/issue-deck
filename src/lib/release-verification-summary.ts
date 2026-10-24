@@ -1,3 +1,4 @@
+import type { ReleaseCandidateFix } from "@/lib/release-fix-series";
 import {
   evaluateReleaseMergeGate,
   viewReleaseVerifications,
@@ -121,6 +122,8 @@ export type ReleaseVerificationSummary = {
   aiReviewAssignee: string;
   /** 判定の対象（GitHubから取った現在のbase・head）。画面は「どのSHAの結果か」を出すのに使う */
   target: { baseSha: string; headSha: string };
+  /** 修正系列の進み具合（#4972）。ヘッダーの判定が一覧と同じ結果になるよう、読み込み時に添える */
+  fix?: ReleaseCandidateFix | null;
 };
 
 function readPreviousRun(findings: unknown): ReleaseVerificationPreviousRun | null {
