@@ -350,6 +350,12 @@ develop向けPRを「自動マージしてよい」「ユーザーのマージ�
   （`hold`ステップ。総評マーカーが無い・`lgtm`以外なら止める）。規模にかかわらずレビューを実行し、確認ラベル
   （`22.merge-confirm-required`・`23.preview-required`・`00.check-user`）は**PR自身**から読む。止めたときは
   PRへ`00.check-user`＋`01.check-merge`と理由コメントを付ける
+- **判定の根拠は偽造できない出所に限る**（#4969）。PRコメントは外部ユーザーも書けるため、ClaudeのLGTMは
+  Bot投稿の総評マーカーだけ、CodexのLGTMは**DispatchJobの完了結果（`source=job`）だけ**を数える。
+  Codexの判定印（`issue-deck-codex-review-verdict`）はサブPCがユーザー本人のトークンで投稿するのでBotでは
+  絞れず、移行前のPR向けのフォールバックとして読むときも`author_association`が`OWNER`/`MEMBER`/
+  `COLLABORATOR`のコメントに限る。そのフォールバックで得た判定（`source=marker`）は、対応Issueを持つPRの
+  判定には使うが、Issue無しPRの自動マージ条件には使わない
 - **システムブランチは対象外のまま**（`release/`・`release-sync/`・`release-rc/`・`release-main/`・
   `release-candidate/`・`release-bump/`・`workflow-tag/`・`deploy-recovery/`・`dependabot/`）。リリース・タグ配布・
   復旧の流れがそれぞれマージする。一覧の正は`src/lib/system-branch.ts`で、ワークフローの
