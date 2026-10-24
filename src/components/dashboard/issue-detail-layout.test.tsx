@@ -32,15 +32,15 @@ describe("IssueDetailLayout（#4440）", () => {
     cleanup();
   });
 
-  it("タイトル→状態と主操作→判断材料→補足→概要→関連→対応PR→活動の順に並べる", () => {
+  it("タイトル→状態と主操作→判断材料→補足→対応PR→概要→関連→活動の順に並べる（#4959）", () => {
     expect(renderOrder(false)).toEqual([
       "title",
       "status",
       "decision",
       "supplement",
+      "pull-requests",
       "overview",
       "related",
-      "pull-requests",
       "activity",
     ]);
   });
@@ -63,9 +63,9 @@ describe("IssueDetailLayout（#4440）", () => {
       "title",
       "status",
       "decision",
+      "pull-requests",
       "overview",
       "related",
-      "pull-requests",
       "activity",
     ]);
   });

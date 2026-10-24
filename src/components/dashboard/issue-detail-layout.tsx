@@ -33,6 +33,8 @@ type IssueDetailLayoutProps = {
   /**
    * 対応PRを判断材料の末尾へ上げるか。マージ待ち・PR失敗のときだけ真にする。
    *
+   * 昇格しないときも、対応PRはプロパティ（補足）の下・説明の上に置く（#4959）。
+   *
    * 以前は対応PRを常に説明より上へ置いていた（マージボタンをコメント欄まで下げずに押せる位置を
    * 保つ #1288・#1339）。並びを「判断材料→概要／活動／関連PR」へ揃えた（#4440）あとも、
    * **PRを見る必要があるときだけ**判断材料の位置に出して、その意図を保つ。
@@ -47,7 +49,7 @@ type IssueDetailLayoutProps = {
  * 同じ順で描くよう、並びはここにだけ書く。
  *
  * 短い固定ヘッダー（各画面が持つ）→ 正式タイトル → 状態と主操作 → 判断材料 →（補足）→
- * 概要 → 関連・対応PR → 活動。
+ * 対応PR → 概要 → 関連 → 活動。
  *
  * **外枠は持たない**（Fragmentを返す）。スクロール領域の`ref`・`flex-1`・下端の余白は画面ごとに
  * 事情が違い（#1664・#1793）、ここで包むとその規約を壊す。
@@ -70,12 +72,12 @@ export function IssueDetailLayout({
       {decision}
       {promotePullRequests && pullRequests}
       {supplement}
+      {!promotePullRequests && pullRequests}
 
       <Separator />
 
       {overview}
       {related}
-      {!promotePullRequests && pullRequests}
 
       <Separator />
 

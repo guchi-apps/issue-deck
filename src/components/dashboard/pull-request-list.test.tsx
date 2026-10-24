@@ -126,7 +126,7 @@ describe("PullRequestList", () => {
 
   it("代表状態と理由を、状態ごとに区別して出す（#4427）", () => {
     renderList([
-      makePullRequest({ number: 1, ciState: "success", mergeable: true }),
+      makePullRequest({ number: 1, ciState: "success", mergeable: true, autoMergeEnabled: true }),
       makePullRequest({ number: 2, ciState: "failure" }),
       makePullRequest({ number: 3, mergeable: false }),
       makePullRequest({ number: 4, ciState: "pending" }),
@@ -136,6 +136,8 @@ describe("PullRequestList", () => {
         mergeJudgement: { state: "pending", step: null, runUrl: null, aiReview: AI_REVIEW_NONE },
       }),
       makePullRequest({ number: 6, mergeable: null }),
+      // 判定の記録が無く自動マージが予約されていないPRは「マージ可能」で済ませない（#4952）
+      makePullRequest({ number: 7, ciState: "success", mergeable: true }),
     ]);
     const labels = screen
       .getAllByTestId("pull-request-primary-state")
@@ -147,6 +149,7 @@ describe("PullRequestList", () => {
     expect(labels[4]).toContain("判定中");
     // 読めない値は成功へ倒さない
     expect(labels[5]).toContain("競合を確認中");
+    expect(labels[6]).toContain("手動マージ待ち");
   });
 
   it("自動修正が走っているあいだは「修正中」と経過を出し、再起動は促さない（#2072・#4427）", () => {

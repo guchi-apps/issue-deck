@@ -20,6 +20,11 @@ vi.mock("@/lib/manual-step-verification-patrol", () => ({
   listManualStepVerifiedAtByIssue: async () => new Map(),
 }));
 
+vi.mock("@/lib/parent-run/child-state-query", () => ({
+  getParentRunChildMarksByIssue: async () => new Map(),
+  toParentRunChildMark: () => null,
+}));
+
 import { getIssuesForUser } from "@/lib/issues-for-user";
 
 function row(number: number, state: "OPEN" | "CLOSED") {

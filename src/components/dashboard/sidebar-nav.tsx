@@ -93,6 +93,12 @@ type SidebarNavProps = {
   /** 構想の件数（#3639）。取得できていないときはnullで、何も出さない */
   ideasCount?: number | null;
   /**
+   * リモートセッションの起動数（#4948。起動中＋稼働中）。取得できていないときはnullで、何も出さない。
+   * `remoteSessionStarting`はURL待ちの1本があるときに回転アイコンを出す
+   */
+  remoteSessionCount?: number | null;
+  remoteSessionStarting?: boolean;
+  /**
    * いま表示中の画面がリポジトリの絞り込みを適用するか（#4543）。質問・確認待ち・ブランチ等の
    * 適用外の画面では、選択が残っていても効いていないことを注記する。
    */
@@ -190,6 +196,8 @@ export function SidebarNavView({
   onSelectIosExtensions = () => {},
   nightlyRunQueuedCount = null,
   ideasCount = null,
+  remoteSessionCount = null,
+  remoteSessionStarting = false,
   repoFilterApplies = true,
   navCounts,
   checkUserPullRequestCount,
@@ -576,7 +584,8 @@ export function SidebarNavView({
             icon: TerminalSquare,
             active: activePane === "remote-sessions",
             onClick: onSelectRemoteSessions,
-            count: null,
+            count: remoteSessionCount,
+            busy: remoteSessionStarting,
             title: "リポジトリを選んでClaude Codeのセッションを立ち上げる",
           })}
           {navRow({

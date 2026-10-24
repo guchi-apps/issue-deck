@@ -136,7 +136,7 @@ export function ReleaseCompletionPanel({ runState, repositoryFullName, pullReque
     <div className="flex flex-col gap-1.5" data-testid="release-completion">
       {shown && <RunCard run={shown} busy={busy} onStop={() => void stop()} />}
       {showStart && (
-        <Button size="sm" className="h-7 w-fit gap-1 px-3 text-xs" onClick={() => { setScope(null); setConfirmOpen(true); }} disabled={busy !== null}>
+        <Button size="sm" className="min-h-11 w-fit gap-1 px-4 text-sm" onClick={() => { setScope(null); setConfirmOpen(true); }} disabled={busy !== null}>
           {busy === "start" ? <Loader2 className="size-3 animate-spin" aria-hidden="true" /> : <Rocket className="size-3" aria-hidden="true" />}
           リリース完了まで進める
         </Button>
@@ -250,7 +250,7 @@ function RunCard({ run, busy, onStop }: { run: ReleaseCompletionRunView; busy: "
             type="button"
             onClick={onStop}
             disabled={busy !== null}
-            className="inline-flex items-center gap-1 rounded-md border px-2 py-0.5 hover:bg-muted disabled:opacity-60"
+            className="inline-flex min-h-11 items-center gap-1 rounded-md border px-4 hover:bg-muted disabled:opacity-60"
           >
             {busy === "stop" ? <Loader2 className="size-3 animate-spin" aria-hidden="true" /> : <Square className="size-3" aria-hidden="true" />}
             停止

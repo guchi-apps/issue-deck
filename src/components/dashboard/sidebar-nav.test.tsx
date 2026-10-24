@@ -40,6 +40,8 @@ function renderSidebar(
     releaseUncheckedCount = null,
     mergePendingAttention = NO_MERGE_PENDING,
     ideasCount = null,
+    remoteSessionCount = null,
+    remoteSessionStarting = false,
   }: {
     checkUserPullRequestCount?: number;
     manualStepAttention?: ManualStepAttention;
@@ -49,6 +51,8 @@ function renderSidebar(
     releaseUncheckedCount?: number | null;
     mergePendingAttention?: MergePendingAttention | null;
     ideasCount?: number | null;
+    remoteSessionCount?: number | null;
+    remoteSessionStarting?: boolean;
   } = {},
 ) {
   render(
@@ -64,6 +68,8 @@ function renderSidebar(
       onSelectReleaseHistory={() => {}}
       onSelectNightlyRun={() => {}}
       ideasCount={ideasCount}
+      remoteSessionCount={remoteSessionCount}
+      remoteSessionStarting={remoteSessionStarting}
       navCounts={navCounts}
       checkUserPullRequestCount={checkUserPullRequestCount}
       manualStepAttention={manualStepAttention}
@@ -165,6 +171,28 @@ describe("SidebarNav 構想の件数（#3639）", () => {
     cleanup();
     renderSidebar({ all: 0 } as never, undefined, { ideasCount: null });
     expect(ideasRow().textContent).toBe("構想");
+  });
+});
+
+describe("SidebarNav リモートセッションの起動数（#4948）", () => {
+  const remoteRow = () => screen.getByText("リモートセッション").closest("button") as HTMLElement;
+
+  it("起動数を出し、未取得（null）なら何も出さない", () => {
+    renderSidebar({ all: 0 } as never, undefined, { remoteSessionCount: 2 });
+    expect(remoteRow().textContent).toBe("リモートセッション2");
+
+    cleanup();
+    renderSidebar({ all: 0 } as never, undefined, { remoteSessionCount: null });
+    expect(remoteRow().textContent).toBe("リモートセッション");
+  });
+
+  it("起動中があるときだけ回転アイコンを出す", () => {
+    renderSidebar({ all: 0 } as never, undefined, { remoteSessionCount: 1, remoteSessionStarting: true });
+    expect(remoteRow().querySelector(".animate-spin")).toBeTruthy();
+
+    cleanup();
+    renderSidebar({ all: 0 } as never, undefined, { remoteSessionCount: 1 });
+    expect(remoteRow().querySelector(".animate-spin")).toBeNull();
   });
 });
 

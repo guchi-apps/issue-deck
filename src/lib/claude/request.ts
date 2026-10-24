@@ -55,7 +55,27 @@ export type ClaudeMessagesResult<T> = {
 export type AiApiError = {
   code: string | null;
   requestId: string | null;
+  /** 429などで再試行できるようになる時刻（epochミリ秒）。ヘッダから読めなければnull */
+  retryAt: number | null;
 };
+
+/** `retry-after`（秒）か統合レート制限のリセット時刻（epoch秒）から、再試行できる時刻を読む */
+export function readRetryAt(headers: Headers, now: number = Date.now()): number | null {
+  const retryAfterRaw = headers.get("retry-after");
+  const retryAfter = Number(retryAfterRaw);
+  if (retryAfterRaw && Number.isFinite(retryAfter) && retryAfter >= 0) return now + retryAfter * 1000;
+  // 窓ごとのヘッダ（usage.tsと同じ名前）。拒否された窓があればそのリセットを、無ければ最も近いリセットを使う
+  const resets: { at: number; rejected: boolean }[] = [];
+  for (const key of ["5h", "7d", ""]) {
+    const prefix = key ? `anthropic-ratelimit-unified-${key}` : "anthropic-ratelimit-unified";
+    const raw = headers.get(`${prefix}-reset`);
+    const at = Number(raw) * 1000;
+    if (raw && Number.isFinite(at) && at > now) resets.push({ at, rejected: headers.get(`${prefix}-status`) === "rejected" });
+  }
+  const rejected = resets.filter((r) => r.rejected);
+  if (rejected.length > 0) return Math.max(...rejected.map((r) => r.at));
+  return resets.length > 0 ? Math.min(...resets.map((r) => r.at)) : null;
+}
 
 function readTokenCount(value: number | undefined): number {
   return typeof value === "number" && Number.isFinite(value) ? value : 0;
@@ -76,7 +96,7 @@ async function readAiApiError(response: Response): Promise<AiApiError> {
   } catch {
     // 失敗本文がJSONでなくても、HTTPステータスを扱う呼び出し元は継続できる。
   }
-  return { code, requestId: response.headers.get("x-request-id") };
+  return { code, requestId: response.headers.get("x-request-id"), retryAt: readRetryAt(response.headers) };
 }
 
 const REASONING_FEATURES = new Set<ClaudeApiFeature>([

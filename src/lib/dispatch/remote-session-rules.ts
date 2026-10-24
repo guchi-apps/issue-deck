@@ -187,6 +187,23 @@ export function selectHostRemoteSessions(
     .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
 }
 
+/**
+ * 左メニュー・ホームのタイルに出す起動数（#4948）。終わっていないもの（起動中＋稼働中）を全ホスト
+ * 合計で数え、URLを待っている`starting`が1本でもあれば`starting`を立てる（回転アイコン）。
+ * 終了を押して結果を待っている（`stopping`）ものは、押した時点で減ったように見せるため数えない。
+ * 状態をまだ取得できていないときは`count`をnullにして数字を出さない（0と区別する）。
+ */
+export function summarizeRemoteSessionNav(
+  sessions: readonly Pick<RemoteSessionView, "status" | "stopping">[],
+  loaded: boolean,
+): { count: number | null; starting: boolean } {
+  if (!loaded) return { count: null, starting: false };
+  const active = sessions.filter(
+    (session) => !session.stopping && ACTIVE_REMOTE_SESSION_STATUSES.includes(session.status),
+  );
+  return { count: active.length, starting: active.some((session) => session.status === "starting") };
+}
+
 /** `GET /api/remote-sessions`の応答 */
 export type RemoteSessionState = {
   sessions: RemoteSessionView[];

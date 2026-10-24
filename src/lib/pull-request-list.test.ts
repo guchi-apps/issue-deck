@@ -629,6 +629,38 @@ describe("mergePendingIssueKeys（#3650）", () => {
     expect(isIssueAwaitingMerge({ repositoryFullName: "guchi-apps/issue-deck", number: 1600 }, keys)).toBe(false);
   });
 
+  // 失敗PRは「マージ待ち」に出るので、確認待ちの理由が何であっても外す（#4963）
+  it("失敗PR（CI失敗・要修正レビュー）の対応Issueを含め、実行中・要確認・ドラフトは含めない", () => {
+    const keys = mergePendingIssueKeys([
+      pullRequest({ number: 201, linkedIssueNumber: 11, ciState: "failure", linkedIssueCheckReason: "blocked" }),
+      pullRequest({
+        number: 202,
+        linkedIssueNumber: 12,
+        ciState: "success",
+        headSha: "aaa",
+        reviewVerdict: { reviewKind: "changes-requested", reviewedSha: "aaa" } as never,
+      }),
+      pullRequest({ number: 203, linkedIssueCheckReason: null, linkedIssueNumber: 13, ciState: "pending", mergeable: false }),
+      pullRequest({
+        number: 204,
+        linkedIssueCheckReason: null,
+        linkedIssueNumber: 14,
+        ciState: "success",
+        headSha: "aaa",
+        reviewVerdict: { reviewKind: "needs-check", reviewedSha: "aaa" } as never,
+      }),
+      pullRequest({ number: 205, linkedIssueCheckReason: null, linkedIssueNumber: 15, ciState: "failure", draft: true }),
+    ]);
+
+    const has = (number: number) =>
+      isIssueAwaitingMerge({ repositoryFullName: "guchi-apps/issue-deck", number }, keys);
+    expect(has(11)).toBe(true);
+    expect(has(12)).toBe(true);
+    expect(has(13)).toBe(false);
+    expect(has(14)).toBe(false);
+    expect(has(15)).toBe(false);
+  });
+
   // 判定より先にマージされた「事後の確認」は開いているPRが無いので、外さず確認待ちに残す
   it("マージ済みPRの対応Issueは含めない", () => {
     const keys = mergePendingIssueKeys([
@@ -664,7 +696,7 @@ describe("pullRequestsWaitingForMergeChecks", () => {
       }),
       releasePullRequest({ number: 3 }),
       // マージ待ちですらないものは、どちらにも入らない
-      pullRequest({ number: 4, linkedIssueCheckUser: false, ciState: "pending" }),
+      pullRequest({ number: 4, linkedIssueCheckReason: null, ciState: "pending" }),
     ];
 
     const waiting = pullRequestsWaitingForMergeChecks(pullRequests);
@@ -894,7 +926,7 @@ describe("requiresUserMerge", () => {
           baseRef: "main",
           headRef: "develop",
           linkedIssueNumber: null,
-          linkedIssueCheckUser: false,
+          linkedIssueCheckReason: null,
         }),
       ),
     ).toBe(true);

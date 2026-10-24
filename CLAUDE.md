@@ -300,6 +300,7 @@ Issueコメントとして投稿し、「なぜエージェントが実行でき
 - Claudeの自動レビューが「実際に直すべき問題がある」と判定した
 - Claudeが走っていない`.github/workflows/**`変更PRで、代わりのCodexレビューが`lgtm`を出せなかった（`workflow-change-policy: confirm`。#4144・#4149）
 - `claude-review`・`auto-merge`ジョブ自体が失敗した（フォールバックが`00.check-user`を付ける）
+- ブランチ名が`issue-<番号>`でない（対応Issueを持たない）PRで、自動レビューの`lgtm`が得られなかった（#4952。確認ラベルはPR自身から読み、止めたときはPRへ`00.check-user`を付ける。`release-sync/`などのシステムブランチは専用の経路がマージするため対象外。一覧の正は`src/lib/system-branch.ts`。詳細は[docs/supported-repositories.md](docs/supported-repositories.md)「対応Issueを持たないPRも自動マージする」）
 
 **`relaxed`は「レビューを省く」ことではない。** カテゴリに該当したPRでは従来どおりClaudeの自動レビューが走り、止めるかどうかだけがレビューの判定に委ねられる。したがって、マージ前に必ず自分の目で通したい変更には`22.merge-confirm-required`を明示的に付ける（詳細は[docs/multi-agent/labels.md](docs/multi-agent/labels.md)「developへのマージ前確認要否をIssueラベルでトグルする」参照）。
 

@@ -333,6 +333,38 @@ develop向けPRを「自動マージしてよい」「ユーザーのマージ�
   書いてある）
 
 
+### 対応Issueを持たないPRも自動マージする（#4952）
+
+**2026-10-23の実測**では、アプリ15リポジトリはすべてcaller（`@workflows/v54`）・`allow_auto_merge`・
+`develop`の必須チェックを揃えていた。それでもマージ待ちにPRが残った経路は2つで、どちらも画面に
+「止める理由はありません」と出たまま誰も気付けなかった。
+
+- **ブランチ名が`issue-<番号>`でないPR**（`guchi-apps/aide#680`の`cleanup/…`）。`identify-issue`がブランチ名だけで
+  対応Issueを決めるため、`auto-merge`が黙ってスキップしていた
+- **実装担当を解決できないPR**（`guchi-apps/yoteiflow#1337`。`/api/dispatch/implementation-provider`が409）。
+  `review-provider`が失敗し、PRへコメントするだけでレビューも自動マージも止まっていた
+
+#4952で次のように変えた。**配布先へ届くのは、develop→mainのリリース後にタグを配ってから**。
+
+- 対応Issueを持たないPRは、**ClaudeかCodexのどちらかが今のHEADに`lgtm`を出したときだけ**自動マージする
+  （`hold`ステップ。総評マーカーが無い・`lgtm`以外なら止める）。規模にかかわらずレビューを実行し、確認ラベル
+  （`22.merge-confirm-required`・`23.preview-required`・`00.check-user`）は**PR自身**から読む。止めたときは
+  PRへ`00.check-user`＋`01.check-merge`と理由コメントを付ける
+- **判定の根拠は偽造できない出所に限る**（#4969）。PRコメントは外部ユーザーも書けるため、ClaudeのLGTMは
+  Bot投稿の総評マーカーだけ、CodexのLGTMは**DispatchJobの完了結果（`source=job`）だけ**を数える。
+  Codexの判定印（`issue-deck-codex-review-verdict`）はサブPCがユーザー本人のトークンで投稿するのでBotでは
+  絞れず、移行前のPR向けのフォールバックとして読むときも`author_association`が`OWNER`/`MEMBER`/
+  `COLLABORATOR`のコメントに限る。そのフォールバックで得た判定（`source=marker`）は、対応Issueを持つPRの
+  判定には使うが、Issue無しPRの自動マージ条件には使わない
+- **システムブランチは対象外のまま**（`release/`・`release-sync/`・`release-rc/`・`release-main/`・
+  `release-candidate/`・`release-bump/`・`workflow-tag/`・`deploy-recovery/`・`dependabot/`）。リリース・タグ配布・
+  復旧の流れがそれぞれマージする。一覧の正は`src/lib/system-branch.ts`で、ワークフローの
+  `SYSTEM_BRANCH_PATTERN`との一致はテストが確かめる
+- 実装担当を解決できないときは、**止めずにClaudeでレビューする**（共通設定は読まない。#4037の「既存Issueの
+  担当を共通設定の変更で入れ替えない」は保つ）
+- 画面のマージ待ちは、develop向けPRに「自動マージ 予約済み／予定／されません／対象外」の帯を出し、
+  されないPRは代表状態を「手動マージ待ち」にする（`src/lib/pull-request-auto-merge-outlook.ts`）
+
 **`aide-bot`は立ち上げ（#2213）の時点から配布済み。** 初期化Issue（guchi-apps/aide-bot#1）で
 callerを8つまとめて置いたため、この配布経路の後追いが要らなかった。同じことが下の
 `release-develop-to-main.yml`・自動修復3つ・`version-tag-check.yml`にも当てはまる。

@@ -1224,7 +1224,7 @@ export function POST(request: NextRequest) {
   `issue-detail-layout.test.tsx`が固定）。外枠は持たず、スクロール領域の`ref`・`flex-1`・下端の余白は
   各画面が持つ。次の点が判断の要る箇所。
   - **対応PRは、マージ待ち・PR失敗のときだけ判断材料の末尾へ上がる**（`promotePullRequests`）。それ以外は
-    説明・子Issueの下に畳む。以前は常に説明より上に置いて「マージボタンをコメント欄まで下げずに押せる」
+    プロパティ（スマホの補足）の下・説明の上に畳む（#4959）。以前は常に説明より上に置いて「マージボタンをコメント欄まで下げずに押せる」
     （#1288・#1339）を保っていたが、PRを見る必要があるときだけ上げれば同じ意図を保てる。
   - **ヘッダー**（[`issue-detail-header.tsx`](../src/components/dashboard/issue-detail-header.tsx)）は
     スクロール領域の先頭で`sticky`。リポジトリ・番号・1行に省略したタイトル・操作だけを持ち、
@@ -1351,7 +1351,7 @@ export function POST(request: NextRequest) {
   3グループへの割り振りは同ファイルの`HOME_TILE_LAYOUT`の1か所で決め、対応表に無い項目は
   「一覧」の末尾へ出る（PRの「実行中」は見出しが無いので「PR実行中」と出す）。
   **スマホの「ユーザーの確認待ち」は、マージ待ちPRの対応Issueを除いた数・一覧にする**（#3650。
-  除く対象は`mergePendingIssueKeys`。対応するopenなPRが無い`01.check-merge`のIssueは残す）。
+  除く対象は`mergePendingIssueKeys`。失敗PR（CI失敗・競合・要修正レビュー）で「マージ待ち」に出るものの対応Issueも除く〈#4963〉。対応するopenなPRが無い`01.check-merge`のIssueは残す）。
   マージ待ちは「マージ待ち」のタイルで見る。フッターの「ホーム」バッジ・アプリアイコンは従来どおり
   確認待ち＋マージ待ちPRの合計で、ホームのタイルの数字と一致しないことがある。
   **片方を足せば両方に出る**のが今の形で、PC専用のまま残しているのは
