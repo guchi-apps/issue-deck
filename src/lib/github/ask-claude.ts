@@ -91,8 +91,8 @@ export function isCrossRepoQuestionComment(comment: Pick<IssueComment, "body">):
  *
  * 記録先のリポジトリ名（`question`）では判定しない。**`resolveCrossRepoQuestionRepository`が
  * フォールバックを持つため、`question`リポジトリが無い環境では別のリポジトリへ立つ。**
- * `CrossRepoQuestionDialog`が必ず投稿する`CROSS_REPO_QUESTION_MARKER`付きのコメントだけが
- * 恒久的な目印になる。
+ * 横断質問ダイアログ（#4991で廃止）が投稿していた`CROSS_REPO_QUESTION_MARKER`付きのコメントだけが
+ * 恒久的な目印になる。過去に立てたIssueの判定のために残している。
  */
 export function isCrossRepoQuestionIssue(comments: Pick<IssueComment, "body">[]): boolean {
   return comments.some(isCrossRepoQuestionComment);
@@ -138,8 +138,8 @@ const ASK_REPO_QUESTION_TITLE_MAX_LENGTH = 40;
  * 質問文からIssueタイトルを機械的に生成する（Claudeによる自動生成は行わない）。
  * 改行・連続空白は1つの半角スペースにまとめ、長い質問は末尾を省略記号で丸める。
  *
- * **単一リポジトリへの質問（新規作成ダイアログの「質問」種別・#1641）と横断質問
- * （CrossRepoQuestionDialog・#1454）で共有する。** どちらも同じ接頭辞で作られた質問Issueとして
+ * **単一リポジトリへの質問（新規作成ダイアログの「質問」種別・#1641）と過去の横断質問
+ * （#1454。ダイアログは#4991で廃止）で共有する。** どちらも同じ接頭辞で作られた質問Issueとして
  * `isAskRepoQuestionIssue`に拾われる必要があるため、生成はここ1か所に置く。
  */
 export function buildAskRepoQuestionTitle(question: string): string {

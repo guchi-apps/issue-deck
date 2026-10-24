@@ -51,7 +51,6 @@ function topBarProps(
     onChangeGroupByRepo: () => {},
     assigneeOptions: [],
     onCreateIssue: () => {},
-    onAskCrossRepoQuestion: () => {},
     onOpenNotificationTarget: () => {},
     onOpenIssue: () => {},
     onOpenCheckUserView: () => {},
