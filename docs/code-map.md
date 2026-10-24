@@ -1224,7 +1224,7 @@ export function POST(request: NextRequest) {
   `issue-detail-layout.test.tsx`が固定）。外枠は持たず、スクロール領域の`ref`・`flex-1`・下端の余白は
   各画面が持つ。次の点が判断の要る箇所。
   - **対応PRは、マージ待ち・PR失敗のときだけ判断材料の末尾へ上がる**（`promotePullRequests`）。それ以外は
-    説明・子Issueの下に畳む。以前は常に説明より上に置いて「マージボタンをコメント欄まで下げずに押せる」
+    プロパティ（スマホの補足）の下・説明の上に畳む（#4959）。以前は常に説明より上に置いて「マージボタンをコメント欄まで下げずに押せる」
     （#1288・#1339）を保っていたが、PRを見る必要があるときだけ上げれば同じ意図を保てる。
   - **ヘッダー**（[`issue-detail-header.tsx`](../src/components/dashboard/issue-detail-header.tsx)）は
     スクロール領域の先頭で`sticky`。リポジトリ・番号・1行に省略したタイトル・操作だけを持ち、
