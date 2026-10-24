@@ -1,5 +1,6 @@
 import type { MergeCheckReasons } from "@/lib/merge-check-reasons";
 import type { ReviewEvidenceStage } from "@/lib/release-review-reevaluation";
+import type { ReleaseCandidateFix } from "@/lib/release-fix-series";
 import type { CheckUserReason } from "@/lib/github/approval-labels";
 import type { MergeJudgement, RollupCiCheck } from "@/lib/github/check-rollup";
 import type { IosPrecheckSummary } from "@/lib/github/ios-precheck";
@@ -73,6 +74,8 @@ export type PullRequestReleaseChecks = {
    * 「コード確認済み・統合検証待ち」「検証結果を確認中」を要確認と取り違えないために使う。旧応答では省略
    */
   aiReviewStage?: ReviewEvidenceStage;
+  /** 修正系列の進み具合（#4972）。修正対応中・停止の表示に使う。系列が無い・検証結果に任せるときは省略 */
+  fix?: ReleaseCandidateFix | null;
 };
 
 export type PullRequestSummary = {
