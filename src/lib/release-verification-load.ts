@@ -1,3 +1,4 @@
+import { loadReleaseCandidateFixes } from "@/lib/release-candidate-fix";
 import { db } from "@/lib/db";
 import {
   DISPATCH_HEARTBEAT_TIMEOUT_MS,
@@ -55,7 +56,12 @@ export async function loadReleaseVerificationSummary(
     progress: await loadReleaseVerificationProgress(repoFullName, prNumber, current),
   });
   const decided = await attachReleaseReviewDecisions(repoFullName, prNumber, current, summary);
-  return attachReleaseOpsContext(repoFullName, current, decided, options.token);
+  const withOps = await attachReleaseOpsContext(repoFullName, current, decided, options.token);
+  // 修正系列の進み具合（#4972）。読めなくても検証の要約そのものは返す
+  const fix = await loadReleaseCandidateFixes([{ repositoryFullName: repoFullName, number: prNumber }])
+    .then((map) => map.get(`${repoFullName}#${prNumber}`) ?? null)
+    .catch(() => null);
+  return { ...withOps, fix };
 }
 
 /**

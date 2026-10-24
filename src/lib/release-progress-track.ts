@@ -194,7 +194,16 @@ export function resolveReleaseProgressTrack({
           const reasons = resolvePullRequestReleaseVerification(candidate).problem?.reasons ?? [];
           const enforced = checks.enforced !== false;
           const stage = checks.aiReviewStage;
-          drafts.integration = verificationDraft("統合検証", checks.integration, {
+          const fix = checks.fix ?? null;
+          // 修正系列が対応中・停止の区分は、結果より修正の進み具合を優先する（#4972。`resolveReleaseCandidateVerification`と同じ）
+          const fixDraft = (integration: boolean, state: PullRequestReleaseCheckState, cleared: boolean): Draft | null => {
+            if (!fix || (state !== "needs_check" && state !== "failed") || cleared) return null;
+            if (integration !== (fix.sourceKind === "integration_failure")) return null;
+            return fix.stalled
+              ? { state: "failed", status: "修正が停止中", title: `修正Issue #${fix.issueNumber}${fix.reason ? `: ${fix.reason}` : ""}` }
+              : { state: "running", status: "修正対応中", title: `修正Issue #${fix.issueNumber}を対応中です。操作は不要です` };
+          };
+          drafts.integration = fixDraft(true, checks.integration, false) ?? verificationDraft("統合検証", checks.integration, {
             enforced,
             cleared: false,
             rerun: checks.rerun?.integration ?? false,
@@ -205,7 +214,8 @@ export function resolveReleaseProgressTrack({
           drafts.review =
             stage?.kind === "integration_waiting" || stage?.kind === "reevaluating" || stage?.kind === "awaiting_integration"
               ? { state: "waiting", status: null, title: null }
-              : verificationDraft("全体レビュー", checks.aiReview, {
+              : fixDraft(false, checks.aiReview, stage?.kind === "needs_check" && stage.cleared === true) ??
+                verificationDraft("全体レビュー", checks.aiReview, {
                   enforced,
                   cleared: stage?.kind === "needs_check" && stage.cleared === true,
                   rerun: checks.rerun?.aiReview ?? false,

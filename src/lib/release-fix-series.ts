@@ -659,3 +659,47 @@ export function decideReleaseFixStart(input: {
   }
   return { ok: true };
 }
+
+/**
+ * リリース候補に出す、修正系列の進み具合（#4972）。ブランチ画面・工程トラック・ヘッダーが同じ値を読む。
+ * `reverifying`以降は検証の結果そのものが状態を表すので返さない（本物の要確認を「修正対応中」で隠さない）
+ */
+export type ReleaseCandidateFix = {
+  status: ReleaseFixStatus;
+  issueNumber: number;
+  /** 指摘の起点。`review_finding`は全体レビュー、`integration_failure`は統合検証に重ねる */
+  sourceKind: ReleaseFixSourceKind;
+  /** 待っても進まない（判断待ち・内部確認の停止・作り直しの失敗） */
+  stalled: boolean;
+  reason: string | null;
+};
+
+const CANDIDATE_FIX_WORKING: ReadonlySet<string> = new Set(["issue_created", "fix_in_progress", "fix_merged", "rebuilding"]);
+
+/** 候補に対する最新の系列1件から、候補に出す修正の状態を決める。出さないときはnull */
+export function toReleaseCandidateFix(row: {
+  status: string;
+  issueNumber: number;
+  sourceKind: string;
+  stopReason: string | null;
+  internalStopReason: string | null;
+}): ReleaseCandidateFix | null {
+  const status = parseReleaseFixStatus(row.status);
+  if (!status) return null;
+  const sourceKind = (RELEASE_FIX_SOURCE_KINDS as readonly string[]).includes(row.sourceKind)
+    ? (row.sourceKind as ReleaseFixSourceKind)
+    : null;
+  if (!sourceKind) return null;
+  const base = { status, issueNumber: row.issueNumber, sourceKind };
+  if (CANDIDATE_FIX_WORKING.has(status)) {
+    return { ...base, stalled: row.internalStopReason !== null, reason: row.internalStopReason };
+  }
+  if (status === "awaiting_decision") {
+    return { ...base, stalled: true, reason: row.stopReason ?? RELEASE_FIX_STATUS_LABEL.awaiting_decision };
+  }
+  // 作り直しの失敗で止まったものだけ警告にする。再検証の失敗で止まった`stopped`は検証結果の表示に任せる
+  if (status === "stopped" && row.stopReason !== null && (Object.values(REBUILD_FAILURE_REASONS) as string[]).includes(row.stopReason)) {
+    return { ...base, stalled: true, reason: row.stopReason };
+  }
+  return null;
+}

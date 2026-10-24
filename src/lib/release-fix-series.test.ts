@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  toReleaseCandidateFix,
   decideReleaseFixStart,
   buildReleaseFixIssue,
   buildReleaseFixSourceKey,
@@ -361,3 +362,23 @@ describe("rcImportFailureReason（#4895）", () => {
   });
 });
 
+
+describe("toReleaseCandidateFix（#4972）", () => {
+  const row = (o: Record<string, unknown> = {}) => ({
+    status: "fix_in_progress", issueNumber: 7, sourceKind: "review_finding", stopReason: null, internalStopReason: null, ...o,
+  }) as Parameters<typeof toReleaseCandidateFix>[0];
+
+  it("起案〜反映待ちは対応中、内部確認の停止は停止扱い", () => {
+    for (const status of ["issue_created", "fix_in_progress", "fix_merged", "rebuilding"]) {
+      expect(toReleaseCandidateFix(row({ status }))).toMatchObject({ stalled: false, issueNumber: 7 });
+    }
+    expect(toReleaseCandidateFix(row({ internalStopReason: "上限" }))).toMatchObject({ stalled: true, reason: "上限" });
+  });
+
+  it("判断待ちと作り直しの失敗は停止、再検証以降と通常のstoppedは検証結果に任せる", () => {
+    expect(toReleaseCandidateFix(row({ status: "awaiting_decision", stopReason: "仕様の判断が必要" }))).toMatchObject({ stalled: true });
+    expect(toReleaseCandidateFix(row({ status: "stopped", stopReason: REBUILD_FAILURE_REASONS.full }))).toMatchObject({ stalled: true });
+    for (const status of ["reverifying", "ready", "superseded"]) expect(toReleaseCandidateFix(row({ status }))).toBeNull();
+    expect(toReleaseCandidateFix(row({ status: "stopped", stopReason: "再検証が失敗" }))).toBeNull();
+  });
+});
