@@ -136,3 +136,24 @@ m="$(shared_token_matches '${c}' "${dir}" "${prs}")"; echo "$m"; shared_token_pr
   expect(none).toContain("未確認");
   expect(none).toContain("未登録という意味ではありません");
 });
+it("共有トークンの照合は巨大な差分・連携先コード（200KiB超）でもargv上限に当たらない", () => {
+  const bigDir = path.join(dir, "big");
+  mkdirSync(bigDir);
+  writeFileSync(path.join(bigDir, "code.ts"), `${"x".repeat(150000)}\nMYROOM_KEY\n`);
+  writeFileSync(path.join(bigDir, "code2.ts"), "y".repeat(190000));
+  const ctx = JSON.stringify({ sharedTokens: [{ name: "MYROOM_KEY", updatedAt: "t", lastUsedAt: null, consumers: [] }] });
+  const out = execFileSync("bash", ["-c", `source scripts/run-release-review.sh
+WORKTREE="${repo}"; base_sha="${base}"; head_sha="${head}"
+shared_token_matches '${ctx}' "${bigDir}" ""`], { encoding: "utf8" });
+  expect(out).toContain("MYROOM_KEY");
+});
+it("共有トークンの指紋は最終利用日時・並び順では変わらず、更新日時・利用元・取得不能では変わる", () => {
+  const gen = (m) => execFileSync("bash", ["-c", `source scripts/run-release-review.sh; shared_token_generation '${m}'`], { encoding: "utf8" });
+  const a = { name: "A", updatedAt: "t1", lastUsedAt: "u1", consumers: ["x", "y"] };
+  const b = { name: "B", updatedAt: "t2", lastUsedAt: null, consumers: [] };
+  const base0 = gen(JSON.stringify([a, b]));
+  expect(gen(JSON.stringify([b, { ...a, lastUsedAt: "u2", consumers: ["y", "x"] }]))).toBe(base0);
+  expect(gen(JSON.stringify([a, { ...b, updatedAt: "t3" }]))).not.toBe(base0);
+  expect(gen(JSON.stringify([a, { ...b, consumers: ["z"] }]))).not.toBe(base0);
+  expect(gen("null")).not.toBe(base0);
+});

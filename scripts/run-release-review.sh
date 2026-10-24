@@ -242,10 +242,22 @@ fetch_review_context() {
 # サーバーが返した一覧のうち、候補の差分・連携先のコードに名前が出るものだけを渡す（必要最小限）。値は扱わない。
 # 一覧を取得できなかったとき（`sharedTokens`が無い・null）は「未確認」と書き、「未登録」とは書かない
 shared_token_matches() {
-  local ctx="$1" dir="$2" prs="$3" haystack
+  local ctx="$1" dir="$2" prs="$3" hay
   jq -e '(.sharedTokens | type) == "array"' <<<"$ctx" >/dev/null 2>&1 || { printf 'null'; return 0; }
-  haystack="$( { printf '%s\n' "$prs"; git -C "$WORKTREE" diff "$base_sha...$head_sha" 2>/dev/null | head -c 2000000; find "$dir" -type f ! -name prompt ! -name fingerprint -size -200k -exec cat {} + 2>/dev/null; } )"
-  jq -c --arg hay "$haystack" '[.sharedTokens[] | select(.name as $n | $hay | contains($n))]' <<<"$ctx"
+  # 差分や連携先コードは大きい（argvは1引数128KiBまで。#4316）。ファイル経由で`--rawfile`に渡す
+  hay="$(mktemp "$dir/haystack.XXXXXX")"
+  { printf '%s\n' "$prs"; git -C "$WORKTREE" diff "$base_sha...$head_sha" 2>/dev/null | head -c 2000000
+    find "$dir" -type f ! -name prompt ! -name fingerprint ! -name 'haystack.*' -size -200k -exec cat {} + 2>/dev/null; } >"$hay"
+  jq -c --rawfile hay "$hay" '[.sharedTokens[] | select(.name as $n | $hay | contains($n))]' <<<"$ctx"
+  rm -f "$hay"
+}
+
+# shared_token_generation <matches JSON>: 設定世代（名前・更新日時・利用元の集合）。最終利用日時は含めない。
+# 通常のAPI利用だけで最終利用日時が動いても、全未確認を再評価しない。順序はサーバーの返す順に依存させない
+shared_token_generation() {
+  local matched="$1"
+  [[ "$matched" == "null" ]] && { printf 'unavailable'; return 0; }
+  jq -c '[.[] | {name, updatedAt, consumers: (.consumers | sort)}] | sort_by(.name)' <<<"$matched"
 }
 
 shared_token_prompt_text() {
@@ -956,7 +968,7 @@ main() {
   # 共有トークンの登録状況が変わったら、影響する未確認を再評価する（取得不能もその状態として指紋に入る）
   shared_matched="$(shared_token_matches "${ctx_json:-{\}}" "$integration_dir" "$prs_text")"
   if [[ -n "$evidence_fp" ]]; then
-    evidence_fp="${evidence_fp}:tok-$(printf '%s' "$shared_matched" | sha256sum | cut -c1-16)"
+    evidence_fp="${evidence_fp}:tok-$(shared_token_generation "$shared_matched" | sha256sum | cut -c1-16)"
   fi
   host_fp="$(runner_host_fingerprint "$full_name" "$head_sha")"
   invalidate_stale_batches "$evidence_fp" "$checklist_version" "$host_fp"

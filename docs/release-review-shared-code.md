@@ -30,4 +30,15 @@
 
 `GET /api/dispatch/release-review-context`（pollerの共有シークレットで認可。既存のレビューcontextの経路）が、`sharedTokens`として名前・更新日時・最終利用日時・利用元だけを返す（`src/lib/release-review-shared-token-meta.ts`）。値・暗号文・説明・`op://`参照は含めず、復号もしない。ランナーは、その一覧のうち候補の差分・連携先のコードに名前が出るものだけをAI入力へ渡し、同じ集合の要約を証跡指紋へ加える（登録・利用状況が変わると影響する未確認が再評価される）。取得できなかったときは「未確認」と書き、「未登録」とは書かない。リポジトリのSecrets/環境変数で管理される値はこの一覧では分からない。
 
-未対応: ホストへの配布と実走（本番反映後）。
+## 適用区分（2026-10-24、非アーカイブ25リポジトリを実取得）
+
+| 区分 | 対象 | 扱い |
+| --- | --- | --- |
+| 共通修正で適用 | aide・asset-manager・car-care・clip-hive・db-console・kurashio・meisai-lab・morrow・pi0w・signaly・solitaire・status-hub・stockly・work-relay・yoteiflow（`reusable-release-develop-to-main.yml@workflows/v54`） | ランナーはIssueDeck側の1つ。実行ホストの更新のみ必要 |
+| 自身 | issue-deck（ローカルreusable参照） | develop反映で効く |
+| 対象外（リリースPR無し） | docs・subpc・vps・question・ideas・claude-config・gucchii-os・uptime-kuma・sensor_260531・sensor_260218・wifi-speed | release-develop-to-main caller無し |
+| 固有対応 | 無し（個別修正が要るrepoは確認できていない） | 子Issueは起案しない |
+
+実走確認: RC-5以外の例として、別repoの`guchi-apps/issue-deck#4969`（PR #4971）を参照する擬似候補で取得を実走し、状態・マージSHA・develop取り込み・デプロイ未検出・変更ファイル4件が取得できた。
+
+未対応: 実行ホストへの配布と、AIDE→kurashioの実走（ホスト更新はaide#683側でユーザーが選択済みのため、二重操作しない）。
