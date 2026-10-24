@@ -1351,7 +1351,7 @@ export function POST(request: NextRequest) {
   3グループへの割り振りは同ファイルの`HOME_TILE_LAYOUT`の1か所で決め、対応表に無い項目は
   「一覧」の末尾へ出る（PRの「実行中」は見出しが無いので「PR実行中」と出す）。
   **スマホの「ユーザーの確認待ち」は、マージ待ちPRの対応Issueを除いた数・一覧にする**（#3650。
-  除く対象は`mergePendingIssueKeys`。対応するopenなPRが無い`01.check-merge`のIssueは残す）。
+  除く対象は`mergePendingIssueKeys`。失敗PR（CI失敗・競合・要修正レビュー）で「マージ待ち」に出るものの対応Issueも除く〈#4963〉。対応するopenなPRが無い`01.check-merge`のIssueは残す）。
   マージ待ちは「マージ待ち」のタイルで見る。フッターの「ホーム」バッジ・アプリアイコンは従来どおり
   確認待ち＋マージ待ちPRの合計で、ホームのタイルの数字と一致しないことがある。
   **片方を足せば両方に出る**のが今の形で、PC専用のまま残しているのは

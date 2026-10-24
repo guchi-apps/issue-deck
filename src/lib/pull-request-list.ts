@@ -426,16 +426,41 @@ export function isLinkedIssueListed(
  * 引ける形にする（#3650）。スマホのホームは「マージ待ち」を独立したタイルへ寄せ、確認待ちからは
  * 外すため、外す対象のIssueをここで決める。
  *
+ * **失敗しているPR（CI失敗・コンフリクト・要修正レビュー）の対応Issueも外す**（#4963）。
+ * 失敗は「マージ待ち」に出るので、確認待ちに残すと同じ案件が2か所に出る。母集団は
+ * 「マージ待ち」ビューに実際に出るPR（`filterPullRequestsByView`の`completed`）に限り、
+ * そこに出ないPR（CI実行中・ドラフト・リリース等）の対応Issueは確認待ちに残す。
+ *
  * **対応するopenなPRが無い`01.check-merge`のIssue（判定より先にマージされた「事後の確認」など）は
  * ここに入らない**ので、確認待ちに残る。外すとマージ待ちにも確認待ちにも出なくなるため。
  */
 export function mergePendingIssueKeys(pullRequests: PullRequestSummary[]): ReadonlySet<string> {
   const keys = new Set<string>();
+  const failed = new Set(
+    filterPullRequestsByView(pullRequests, "completed").filter(isFailedPullRequest),
+  );
   for (const pullRequest of pullRequests) {
-    if (!requiresUserMerge(pullRequest) || pullRequest.linkedIssueNumber === null) continue;
+    if (pullRequest.linkedIssueNumber === null) continue;
+    if (!requiresUserMerge(pullRequest) && !failed.has(pullRequest)) continue;
     keys.add(`${pullRequest.repositoryFullName}#${pullRequest.linkedIssueNumber}`);
   }
   return keys;
+}
+
+/**
+ * 失敗しているPRか（#4963）。CI失敗・コンフリクト・現在のHEADへの自動レビュー要修正。
+ * 要確認（`needs-check`）は失敗ではなく判断待ちなので含めない。
+ */
+function isFailedPullRequest(pullRequest: PullRequestSummary): boolean {
+  if (pullRequest.ciState === "failure" || pullRequest.mergeable === false) return true;
+  const verdict = pullRequest.reviewVerdict;
+  return (
+    verdict?.reviewKind === "changes-requested" &&
+    resolveReviewVerdictFreshness({
+      reviewedSha: verdict.reviewedSha,
+      headSha: pullRequest.headSha,
+    }) !== "stale"
+  );
 }
 
 /** Issueがユーザーのマージ待ちPRの対応Issueか（#3650）。`mergePendingIssueKeys`の結果で引く */
