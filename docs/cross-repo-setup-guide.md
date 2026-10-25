@@ -1238,6 +1238,12 @@ CI・デプロイの通知先は変えない。
 `DISCORD_SHARED_TOKEN_ALERT_WEBHOOK_URL` を `repo` スコープsecretに登録し、`deploy.yml` が
 本番の `.env` へ書き出す（#5043）。未設定ならリリース通知の `DISCORD_RELEASE_WEBHOOK_URL` へ退避する。
 
+**GitHub Actionsの異常通知（Discord）も別系統。** `.github/scripts/discord-alert.sh` が読む
+`DISCORD_ALERT_WEBHOOK_URL` は、ジョブの失敗・明確な異常だけを送るwebhookのsecretで、
+`ci.yml`・`deploy.yml`・`release.yml`・`ios-testflight.yml` が参照する（#5057。Signaly廃止の第1段で、
+Signalyの通知と併走する）。未登録の間は警告を出して通知を送らず、ジョブ結果は変えない。
+マニフェストへの行追加は1Passwordへの登録と同期が済んでから行う。詳細は[discord-alerts.md](discord-alerts.md)。
+
 **変更内容の出どころは `.github/release-notes.md`。** 共有ワークフロー
 `reusable-release-develop-to-main.yml` がバージョンbumpのたびに、生成した利用者向けの文面
 （`RELEASE_CHANGELOG`・`RELEASE_USAGE`）をこのファイルへ書き出してバンプPRに含める。
