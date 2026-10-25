@@ -459,7 +459,7 @@ describe("reap-sessions.sh: PRを人の指示で作るリポジトリ（#2499）
 // 手作業セッション（kind=manual-step）の放置の猶予（#4973）
 //
 // 以前は質問セッションの30分を共用していて、人の操作待ちの途中で畳まれていた。専用の
-// `MANUAL_STEP_SESSION_IDLE_MINUTES`（既定720）で畳み、質問セッションの30分は変えない。
+// `MANUAL_STEP_SESSION_IDLE_MINUTES`（既定720）で畳む。
 // 手作業Issueは常にOPENの偽の`gh`で、放置の猶予だけが結果を分けるようにする。
 
 function runKind({ kind, idleSeconds, env = {} }) {
@@ -530,10 +530,5 @@ describe("reap-sessions.sh: 手作業セッションの放置の猶予（#4973�
       env: { MANUAL_STEP_SESSION_IDLE_MINUTES: "0" },
     });
     expect(result.killed).toBe("");
-  });
-
-  it("質問セッションは従来どおり30分で畳む", () => {
-    const result = runKind({ kind: "question", idleSeconds: 31 * 60 });
-    expect(result.killed).toContain(`=${SESSION}`);
   });
 });

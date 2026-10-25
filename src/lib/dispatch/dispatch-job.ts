@@ -47,15 +47,9 @@ export type DispatchJobStatus =
  * - `LAUNCH` … セッションを立てる（従来のジョブ）
  * - `INTERRUPT` … 走っている処理を中断する（`tmux send-keys … C-c`）。セッションは残る
  * - `KILL` … セッションごと畳む（`tmux kill-session`）
- * - `QUESTION` … 読み取り専用の質問応答を1回走らせ、回答コメントを投稿する（#1294）。
- *   セッションは立てない。**まだ積む経路も払い出し口も無い**（器だけ。実行はStep 3）
  * - `INSTRUCTION` … 走っているセッションへ追加指示を1行流す（#1012）。pollerが3段階プロトコル
  *   （状態確認 → 本文のみ送出 → 反映の再確認 → 確定キーを別送）で送る。**Codexのセッションへは
  *   `codex queue`で積む**（#2519。`send-keys`を使わないので3段階プロトコルを通らない）
- * - `CROSS_REPO_QUESTION` … 複数リポジトリ横断の質問セッションを立てる（#1454）。**`QUESTION`とは
- *   別物**で、あちらは`claude -p`を1回走らせて終わる想定なのに対し、こちらは`LAUNCH`と同じく
- *   tmuxセッションを立てる（回答後もセッションが残り、追加指示で追い質問ができる）。参照する
- *   リポジトリは**そのホストが実行できると申告した全部**で、ジョブには載せない
  * - `PLAN_REVIEW` … 計画の関門（G1・#1218）のセッションを立てる（#1855）。計画コメントの投稿を
  *   契機に自動で積まれ、対象リポジトリの`origin/develop`のスナップショットを読んで指摘を
  *   Issueコメントへ投稿する。**worktreeは作らず、レビュー1本で終わってセッションごと畳む**
@@ -98,14 +92,15 @@ export type DispatchJobStatus =
  *   作ったworktreeで`claude --remote-control`を起こし、Remote ControlのURLを報告する。tmux名は
  *   `<repo>-remote-<8文字>`で`tmuxSessionName`列に載せて渡す。`issueNumber`は埋め草の0
  * - `REMOTE_SESSION_KILL` … そのリモートセッションを畳み、worktreeを片付ける（#4743）
+ *
+ * かつての質問ジョブ（`QUESTION`・#1294と`CROSS_REPO_QUESTION`・#1454）は、質問機能の入口（#5047）に
+ * 続いてバックエンドも撤去した（#5051）。DBのenumからも外し、過去の行はマイグレーションで消している。
  */
 export type DispatchJobKind =
   | "LAUNCH"
   | "INTERRUPT"
   | "KILL"
-  | "QUESTION"
   | "INSTRUCTION"
-  | "CROSS_REPO_QUESTION"
   | "MANUAL_STEP"
   | "MANUAL_STEP_ABORT"
   | "PLAN_REVIEW"
@@ -144,15 +139,13 @@ export function isSessionControlJobKind(kind: DispatchJobKind): kind is SessionC
  *
  * 払い出しの空き計算（`claimDispatchJobs`）・画面の実行キュー（`summarizeDispatchQueue`）・
  * 「先頭へ上げる」（`prioritizeDispatchJob`）は、**すべて同じ集合を見る必要がある**。
- * 枠の計算だけが`CROSS_REPO_QUESTION`を含み画面が`LAUNCH`しか数えていなかったため、
- * 横断質問セッションが枠を埋めていても「実行中 0/2」と出ていた（#1454の追加が画面へ
- * 反映されていなかった）。
+ * 枠の計算だけが横断質問（#1454・#5051で撤去）を含み画面が`LAUNCH`しか数えていなかったため、
+ * そのセッションが枠を埋めていても「実行中 0/2」と出ていた。
  *
  * 制御ジョブ（`SESSION_CONTROL_JOB_KINDS`）は含めない。あちらは**枠外で先に配られる**（#1332）。
  */
 export const SESSION_LAUNCH_JOB_KINDS = [
   "LAUNCH",
-  "CROSS_REPO_QUESTION",
   "PLAN_REVIEW",
   "CODE_REVIEW",
   "MANUAL_STEP_SESSION",
@@ -180,7 +173,6 @@ export function isSessionLaunchJobKind(kind: DispatchJobKind): kind is SessionLa
  */
 export const SESSION_REPORTED_JOB_KINDS = [
   "LAUNCH",
-  "CROSS_REPO_QUESTION",
   "MANUAL_STEP_SESSION",
 ] as const satisfies readonly SessionLaunchJobKind[];
 
@@ -196,9 +188,7 @@ export function parseDispatchJobKind(value: unknown): DispatchJobKind | null {
   if (value === undefined || value === null || value === "launch") return "LAUNCH";
   if (value === "interrupt") return "INTERRUPT";
   if (value === "kill") return "KILL";
-  if (value === "question") return "QUESTION";
   if (value === "instruction") return "INSTRUCTION";
-  if (value === "cross_repo_question") return "CROSS_REPO_QUESTION";
   if (value === "manual_step") return "MANUAL_STEP";
   if (value === "manual_step_abort") return "MANUAL_STEP_ABORT";
   if (value === "plan_review") return "PLAN_REVIEW";
@@ -709,12 +699,6 @@ export type DispatchHostView = {
   instructionCapable: boolean | null;
   stashInputCapable?: boolean | null;
   /**
-   * 複数リポジトリ横断の質問セッション（#1454）を起こせるか。**`null`（未申告）は「できない」として
-   * 扱う**（`sessionControlCapable`と同じ）。古いpollerは未知の種別を`failed`で返すため、
-   * 配ると質問が必ず失われる。
-   */
-  crossRepoQuestionCapable: boolean | null;
-  /**
    * 手作業アシスタントからの代行実行（#1828）を実行できるか。**`null`（未申告）は「できない」として
    * 扱う**（`sessionControlCapable`と同じ）。
    *
@@ -751,7 +735,7 @@ export type DispatchHostView = {
   manualStepVpsCapable: boolean | null;
   /**
    * 計画の関門（G1・#1218）のセッションを起こせるか（#1855）。**`null`（未申告）は「できない」として
-   * 扱う**（`crossRepoQuestionCapable`と同じ）。
+   * 扱う**（`sessionControlCapable`と同じ）。
    *
    * **判定材料が無いことを理由に配らない向きは、この種別でいちばん効く。** 計画レビューは
    * 計画コメントの投稿を契機に自動で積まれるため、対応していないpollerへ配ると、計画を出すたびに
@@ -788,7 +772,7 @@ export type DispatchHostView = {
   codexRemoteControlCapable: boolean | null;
   /**
    * 手作業Issueを実施するエージェントセッション（#2771）を起こせるか。**`null`（未申告）は
-   * 「できない」として扱う**（`crossRepoQuestionCapable`と同じ向き）。古いpollerは未知の種別を
+   * 「できない」として扱う**（`sessionControlCapable`と同じ向き）。古いpollerは未知の種別を
    * `failed`で返すため、配ると押した起動が失われる。
    */
   manualStepSessionCapable: boolean | null;
@@ -972,30 +956,12 @@ export function parseDispatchTarget(
  * `interrupt:owner/repo#番号`のように前置きする。制御ジョブでnullにすると起動ジョブとは
  * 衝突しない代わりに、スマホでの連打ぶんだけ`C-c`が積まれる。前置きなら衝突せず、
  * 「同じIssueに未処理の停止は1件まで」もDBが保証する。
- *
- * **質問ジョブ（`QUESTION`）だけは`null`を返す**（#1294）。「未完了は1件まで」は実装ジョブの
- * 二重起動を防ぐための制約で、質問には当てはまらない。ここでキーを取ると
- * **実装ジョブが走っているIssueに質問を積めなくなる**（質問はまさに実装中に割り込んで聞くための
- * 機能なので、それでは意味が無い）。同じIssueに質問が並ぶこと自体は害にならない。
  */
-// 質問以外は必ずキーを持つ。**呼び出し元（Issue一覧の順番待ち表示など）に不要なnull分岐を
-// 増やさないよう、種別を渡さない・質問以外を渡す呼び方では`string`を返す**とオーバーロードで示す
-export function buildDispatchActiveKey(
-  repositoryFullName: string,
-  issueNumber: number,
-  kind?: Exclude<DispatchJobKind, "QUESTION">,
-): string;
-export function buildDispatchActiveKey(
-  repositoryFullName: string,
-  issueNumber: number,
-  kind: DispatchJobKind,
-): string | null;
 export function buildDispatchActiveKey(
   repositoryFullName: string,
   issueNumber: number,
   kind: DispatchJobKind = "LAUNCH",
-): string | null {
-  if (kind === "QUESTION") return null;
+): string {
   const target = `${repositoryFullName}#${issueNumber}`;
   return kind === "LAUNCH" ? target : `${kind.toLowerCase()}:${target}`;
 }
@@ -1201,7 +1167,7 @@ export const SESSION_CONTROL_LABELS = {
  *
  * **すべての種別に文言を持たせる。** 既定の`LAUNCH`だけ無印にすると「チップが無い＝実装」という
  * 暗黙のルールを覚える必要が出る。状態ラベル（`describeDispatchJobStatus`）だけでは、
- * **`QUEUED`のときに`LAUNCH`と`CROSS_REPO_QUESTION`がどちらも「順番待ち」**になり区別が付かない。
+ * **`QUEUED`のときに`LAUNCH`と`PLAN_REVIEW`がどちらも「順番待ち」**になり区別が付かない。
  *
  * 制御ジョブは`SESSION_CONTROL_LABELS`の`action`（＝押したボタンの文言）をそのまま使う。
  * 押したボタンとキューに出る言葉が違うと、それが自分の押したものかどうか分からなくなる。
@@ -1210,10 +1176,6 @@ export function describeDispatchJobKind(kind: DispatchJobKind): string {
   switch (kind) {
     case "LAUNCH":
       return "実装";
-    case "QUESTION":
-      return "質問";
-    case "CROSS_REPO_QUESTION":
-      return "横断質問";
     case "MANUAL_STEP":
       return "手作業の代行";
     case "MANUAL_STEP_ABORT":
@@ -1549,69 +1511,8 @@ export function resolveDispatchTargetRejection(params: {
 }
 
 /**
- * 複数リポジトリ横断の質問セッション（#1454）を起こせない理由。
- *
- * 起動ジョブ（`DispatchEnqueueRejection`）と似ているが、**`repository_not_runnable`が無い**のが
- * 要点。横断質問セッションはworktreeを作らず、記録先リポジトリには`gh issue comment`で書くだけ
- * なので、記録先がサブPCにcloneされている必要が無い。代わりに「参照できるリポジトリが1件も無い」
- * を見る（cloneが1つも無いホストでは、質問に答える材料そのものが無い）。
- */
-export type CrossRepoQuestionRejection =
-  | "host_unknown"
-  | "host_offline"
-  | "cross_repo_question_unsupported"
-  | "no_runnable_repositories"
-  | "already_queued"
-  | "session_alive";
-
-export function describeCrossRepoQuestionRejection(
-  rejection: CrossRepoQuestionRejection,
-  context: { hostName: string },
-): string {
-  switch (rejection) {
-    case "host_unknown":
-      return `${formatDispatchHostName(context.hostName)} からの申告がまだ届いていません。ディスパッチのpollerが動いているか確認してください。`;
-    case "host_offline":
-      return `${formatDispatchHostName(context.hostName)} が応答していません（最後の申告から時間が経ちすぎています）。`;
-    case "cross_repo_question_unsupported":
-      // **何をすれば押せるようになるかまで書く**（`session_control_unsupported`と同じ）。
-      // pollerはサブPC側の作業ツリーから動くため、更新するのは人の作業になる
-      return `${formatDispatchHostName(context.hostName)} のpollerが横断質問に対応していません（更新してから押せるようになります）。`;
-    case "no_runnable_repositories":
-      return `${formatDispatchHostName(context.hostName)} に参照できるリポジトリが1つもありません（cloneと \`local-repos.conf\` への記載を確認してください）。`;
-    case "already_queued":
-      return "この質問Issueには実行中または待機中のジョブが既にあります。";
-    case "session_alive":
-      return "この質問Issueのセッションは既に動いています。追加で聞く場合は、そのセッションへ追加指示を送ってください。";
-  }
-}
-
-/**
- * 横断質問を起こせない理由を、**押される前に**判定する（#1454）。
- *
- * 判定の並びと文言は`enqueueCrossRepoQuestionJob`（`jobs.ts`）と同じものを使う。片方だけで
- * 持つと「画面では押せるのにAPIが断る」状態が生まれるのは、起動側（#1180）・制御側（#1332）と同じ。
- */
-export function resolveCrossRepoQuestionRejection(params: {
-  host:
-    | Pick<DispatchHostView, "online" | "crossRepoQuestionCapable" | "repositories">
-    | null
-    | undefined;
-  hasActiveJob: boolean;
-  blockingSession: Pick<DispatchSessionView, "host" | "tmuxSessionName"> | null;
-}): CrossRepoQuestionRejection | null {
-  if (!params.host) return "host_unknown";
-  if (!params.host.online) return "host_offline";
-  if (params.host.crossRepoQuestionCapable !== true) return "cross_repo_question_unsupported";
-  if (params.host.repositories.length === 0) return "no_runnable_repositories";
-  if (params.hasActiveJob) return "already_queued";
-  if (params.blockingSession) return "session_alive";
-  return null;
-}
-
-/**
  * 手作業セッション（#2771）を起こせない理由。**画面にそのまま出す前提**で、判定の並びと文言は
- * `enqueueManualStepSessionJob`（`jobs.ts`）と同じものを使う（横断質問と同じ作法）。
+ * `enqueueManualStepSessionJob`（`jobs.ts`）と同じものを使う（起動側・#1180と同じ作法）。
  */
 export type ManualStepSessionRejection =
   | "host_unknown"
@@ -1646,7 +1547,7 @@ export function describeManualStepSessionRejection(
 
 /**
  * 手作業セッションを起こせない理由を、**押される前に**判定する（#2771）。
- * `resolveCrossRepoQuestionRejection`と同じ立場で、片方だけで持つと「画面では押せるのにAPIが
+ * 起動側（#1180）と同じ立場で、片方だけで持つと「画面では押せるのにAPIが
  * 断る」状態が生まれるため、投入側（`jobs.ts`）もこの関数を通す。
  */
 export function resolveManualStepSessionRejection(params: {
@@ -1673,7 +1574,7 @@ export function resolveManualStepSessionRejection(params: {
 
 /**
  * 手作業セッションの既定の起動先を決める（#2771）。対応を申告しているオンラインのホストが
- * 無ければ`null`（横断質問と同じくGitHub Actionsへのフォールバックは無い）。
+ * 無ければ`null`（GitHub Actionsへのフォールバックは無い）。
  */
 export function resolveDefaultManualStepSessionHost(
   hosts: readonly DispatchHostView[],
@@ -1683,7 +1584,7 @@ export function resolveDefaultManualStepSessionHost(
 
 /**
  * ある手作業Issueについて画面に出す手作業セッションの起動ジョブ（#2771）を1件選ぶ。
- * **起動ジョブ（`LAUNCH`）とは別に返す**（`findCrossRepoQuestionJobForIssue`と同じ理由）。
+ * **起動ジョブ（`LAUNCH`）とは別に返す**（`findPlanReviewJobForIssue`と同じ理由）。
  */
 export function findManualStepSessionJobForIssue(
   jobs: readonly DispatchJobView[],
@@ -1699,30 +1600,12 @@ export function findManualStepSessionJobForIssue(
 }
 
 /**
- * 横断質問の既定の起動先を決める（#1454）。選べるホストが1台も無ければ`null`。
- *
- * 起動ジョブの`resolveDefaultDispatchHost`と同じ立場だが、**GitHub Actionsへのフォールバックは
- * 無い**（Actionsは1リポジトリしかチェックアウトしないため、横断質問はサブPC限定）。
- */
-export function resolveDefaultCrossRepoQuestionHost(
-  hosts: readonly DispatchHostView[],
-): string | null {
-  return (
-    hosts.find(
-      (host) =>
-        resolveCrossRepoQuestionRejection({ host, hasActiveJob: false, blockingSession: null }) ===
-        null,
-    )?.name ?? null
-  );
-}
-
-/**
  * 計画の関門（G1・#1855）のセッションを起こせない理由。
  *
- * 横断質問（`CrossRepoQuestionRejection`）と似ているが、要点は2つ違う。
+ * 起動ジョブ（`DispatchEnqueueRejection`）と似ているが、要点は2つ違う。
  *
  * - **`repository_not_runnable`がある。** 計画レビューは対象リポジトリのコードを読んで計画と
- *   突き合わせるので、そのリポジトリがcloneされている必要がある（横断質問は記録先のcloneが要らない）
+ *   突き合わせるので、そのリポジトリがcloneされている必要がある
  * - **`session_alive`が無い。** 計画を出したセッションは承認待ちで生きているのが常態で、
  *   そこで弾くと**自動起動が常に断られる**（この機能そのものが成立しない）
  */
@@ -1744,7 +1627,7 @@ export function describePlanReviewRejection(
     case "host_offline":
       return `${formatDispatchHostName(context.hostName)} が応答していません（最後の申告から時間が経ちすぎています）。`;
     case "plan_review_unsupported":
-      // **何をすれば押せるようになるかまで書く**（`cross_repo_question_unsupported`と同じ）。
+      // **何をすれば押せるようになるかまで書く**（`session_control_unsupported`と同じ）。
       // pollerはサブPC側の作業ツリーから動くため、更新するのは人の作業になる
       return `${formatDispatchHostName(context.hostName)} のpollerが計画レビューに対応していません（更新してから押せるようになります）。`;
     case "repository_not_runnable":
@@ -1790,7 +1673,7 @@ export function resolvePlanReviewRejection(params: {
 /**
  * 計画レビューの既定の起動先を決める（#1855）。選べるホストが1台も無ければ`null`。
  *
- * **GitHub Actionsへのフォールバックは無い**（`resolveDefaultCrossRepoQuestionHost`と同じ）。
+ * **GitHub Actionsへのフォールバックは無い**（`resolveDefaultManualStepSessionHost`と同じ）。
  * 無人実行のG1は`reusable-issue-dispatch.yml`が計画提示の直後に自分で走らせるもので、
  * こちらから積む相手ではない。
  */
@@ -2032,14 +1915,12 @@ export type DispatchJobTone = "pending" | "running" | "success" | "error" | "mut
 
 export function describeDispatchJobStatus(
   status: DispatchJobStatus,
-  /** 制御ジョブ（#1332）・質問ジョブ（#1294）は「起動しました」では意味が通らないため、種別で文言を変える */
+  /** 制御ジョブ（#1332）などは「起動しました」では意味が通らないため、種別で文言を変える */
   kind: DispatchJobKind = "LAUNCH",
 ): {
   label: string;
   tone: DispatchJobTone;
 } {
-  if (kind === "QUESTION") return describeQuestionJobStatus(status);
-  if (kind === "CROSS_REPO_QUESTION") return describeCrossRepoQuestionJobStatus(status);
   if (kind === "MANUAL_STEP_SESSION") return describeManualStepSessionJobStatus(status);
   if (kind === "MANUAL_STEP") return describeManualStepJobStatus(status);
   if (kind === "PLAN_REVIEW") return describePlanReviewJobStatus(status);
@@ -2076,70 +1957,8 @@ export function describeDispatchJobStatus(
  * ポーリング間隔（既定30秒）は何も起きず、そこを黙っていると押せていないように見える。
  */
 /**
- * 質問ジョブ（#1294）の状態の見せ方。
- *
- * **起動ジョブと寿命の意味が違う。** 起動ジョブの`succeeded`は「tmuxセッションが立った」までで、
- * そこから先はProject Statusが持つ。質問ジョブにはその続きが無く、
- * **`succeeded`は「回答コメントが投稿された」まで**を指す。だから「起動しました」ではなく
- * 「回答しました」と書く（実行はStep 3。文言の出し分けだけを先に入れている）。
- */
-function describeQuestionJobStatus(status: DispatchJobStatus): {
-  label: string;
-  tone: DispatchJobTone;
-} {
-  switch (status) {
-    case "QUEUED":
-      return { label: "順番待ち", tone: "pending" };
-    case "CLAIMED":
-      return { label: "起動先が受け取りました", tone: "pending" };
-    case "RUNNING":
-      return { label: "回答中", tone: "running" };
-    case "SUCCEEDED":
-      return { label: "回答しました", tone: "success" };
-    case "FAILED":
-      return { label: "回答できませんでした", tone: "error" };
-    case "SKIPPED":
-      return { label: "回答を見送りました", tone: "muted" };
-    case "TIMEOUT":
-      return { label: "応答なし", tone: "error" };
-    case "CANCELED":
-      return { label: "取り消し済み", tone: "muted" };
-  }
-}
-
-/**
- * 横断質問ジョブ（#1454）の状態の見せ方。
- *
- * **`succeeded`は「質問セッションが立った」まで**で、回答が投稿されたことではない（そこは
- * `QUESTION`（#1294）と違う）。回答はIssueのコメントとして返るため、そちらを見てもらう。
- */
-function describeCrossRepoQuestionJobStatus(status: DispatchJobStatus): {
-  label: string;
-  tone: DispatchJobTone;
-} {
-  switch (status) {
-    case "QUEUED":
-      return { label: "順番待ち", tone: "pending" };
-    case "CLAIMED":
-      return { label: "起動先が受け取りました", tone: "pending" };
-    case "RUNNING":
-      return { label: "質問セッションを起動中", tone: "running" };
-    case "SUCCEEDED":
-      return { label: "質問セッションを起動しました", tone: "success" };
-    case "FAILED":
-      return { label: "失敗", tone: "error" };
-    case "SKIPPED":
-      return { label: "起動済みのため見送り", tone: "muted" };
-    case "TIMEOUT":
-      return { label: "応答なし", tone: "error" };
-    case "CANCELED":
-      return { label: "取り消し済み", tone: "muted" };
-  }
-}
-
-/**
  * 手作業セッション（#2771）の状態の見せ方。**`succeeded`は「セッションが立った」まで**で、
- * 手順が進んだことではない（横断質問と同じ立場）。以降の様子は`IssueSessionStatus`が出す。
+ * 手順が進んだことではない（計画レビューと同じ立場）。以降の様子は`IssueSessionStatus`が出す。
  */
 function describeManualStepSessionJobStatus(status: DispatchJobStatus): {
   label: string;
@@ -2169,7 +1988,7 @@ function describeManualStepSessionJobStatus(status: DispatchJobStatus): {
  * 計画レビュー（G1・#1855）の状態の見せ方。
  *
  * **`succeeded`は「レビューのセッションが立った」まで**で、指摘が投稿されたことではない
- * （`CROSS_REPO_QUESTION`と同じ立場）。指摘はIssueのコメントとして返るため、そちらを見てもらう。
+ * （手作業セッションと同じ立場）。指摘はIssueのコメントとして返るため、そちらを見てもらう。
  *
  * **`skipped`は「レビューしなかった」**（同じ計画のレビューが既に動いていた・対象の計画が
  * 見つからなかった）。何も壊れていないので赤くしない。
@@ -2371,26 +2190,6 @@ export function findSessionControlJobForIssue(
 }
 
 /**
- * あるIssueについて画面に出す横断質問ジョブ（#1454）を1件選ぶ。
- *
- * **起動ジョブとは別に返す**（`findDispatchJobForIssue`が`LAUNCH`に限っているのと同じ理由）。
- * 呼び出し元は起動ジョブの未完了判定を「起動を塞ぐか」に使うため、混ぜると質問を積んだ瞬間に
- * 実装の起動が押せなくなる。
- */
-export function findCrossRepoQuestionJobForIssue(
-  jobs: readonly DispatchJobView[],
-  repositoryFullName: string,
-  issueNumber: number,
-): DispatchJobView | null {
-  return findJobForIssue(
-    jobs,
-    repositoryFullName,
-    issueNumber,
-    (job) => job.kind === "CROSS_REPO_QUESTION",
-  );
-}
-
-/**
  * ある手順について画面に出す代行実行ジョブ（#1828）を1件選ぶ。
  *
  * **手順の行番号まで一致するものに限る。** 同じIssueの別の手順の結果を、いま開いている手順の
@@ -2478,7 +2277,7 @@ export function resolveManualStepAbortRejection(
 /**
  * あるIssueについて画面に出す計画レビュージョブ（#1855）を1件選ぶ。
  *
- * **起動ジョブとは別に返す**（`findCrossRepoQuestionJobForIssue`と同じ理由）。計画レビューは
+ * **起動ジョブとは別に返す**（`findDispatchJobForIssue`が`LAUNCH`に限っているのと同じ理由）。計画レビューは
  * 実装セッションが動いている最中に走るのが常態なので、混ぜると計画を出した瞬間に
  * そのIssueの実装の起動が押せなくなる。
  */

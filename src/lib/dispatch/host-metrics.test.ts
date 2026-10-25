@@ -33,7 +33,6 @@ function host(overrides: Partial<DispatchHostView> = {}): DispatchHostView {
     lastSeenAt: "2026-08-15T00:00:00.000Z",
     sessionControlCapable: true,
     instructionCapable: true,
-    crossRepoQuestionCapable: true,
     manualStepCapable: null,
     manualStepAbortCapable: null,
     manualStepValuesCapable: null,

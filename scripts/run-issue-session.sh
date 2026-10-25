@@ -17,8 +17,8 @@
 #   ISSUE_DECK_DEV_COMMAND      開発サーバーの起動コマンド（既定は `pnpm dev`）
 #   ISSUE_DECK_CLAUDE_RESUME=0  前回の会話を引き継がず、新しい会話で始める
 #                                （Claude Code・Codex共通。#1541・#2520。既定は引き継ぐ）
-#                                ※横断質問セッション（ISSUE_DECK_SESSION_KIND=question）は`--continue`
-#                                  ではなく、`SessionStart`フックが控えたsessionIdで`--resume`する（#3033）
+#                                ※手作業セッション（ISSUE_DECK_SESSION_KIND=manual-step）は`--continue`
+#                                  ではなく、`SessionStart`フックが控えたsessionIdで`--resume`する（#4231）
 #   ISSUE_DECK_AGENT=codex      Claude Codeではなく Codex CLI を起こす（#2377。既定は claude）
 #
 # **Codexで起こした場合、Claude Code側の連携の一部は効かない**（Remote Control・Plan modeの
@@ -202,9 +202,9 @@ dispatch_env_value() {
 # issue-deckへ報告するときの`owner/repo`。remoteのURLから導く。
 #
 # **cwdがgitリポジトリでない場合は呼び出し元が渡した`ISSUE_DECK_REPO_SLUG`を使う**（#1454）。
-# 横断質問セッションのcwdはどのリポジトリでもない作業ディレクトリなので、remoteからは何も
+# 手作業セッションのcwdはどのリポジトリでもない作業ディレクトリでありうるので、remoteからは何も
 # 取れない。フォールバックが無いと呼び出し側が一律に「報告しない」を選び、受付コメント
-# （#1119）が質問Issueへ1件も出ないまま黙って終わっていた（#1530）。
+# （#1119）がIssueへ1件も出ないまま黙って終わる（横断質問セッション〈#5051で撤去〉で起きた。#1530）。
 #
 # どちらも取れなければ空を返し、呼び出し側が「報告しない」を選ぶ。
 current_repo_slug() {
@@ -544,26 +544,9 @@ else
   echo "#$ISSUE_NUMBER: 共有知識リポジトリ（$SHARED_CONTEXT_DIR）が見つからないため、参照なしで起動します。"
 fi
 
-# 追加で参照させるディレクトリ（#1454）。改行区切りで受け取り、実在するものだけを --add-dir する。
-# 横断質問セッション（scripts/start-cross-repo-question.sh）が、サブPCにある全リポジトリの
-# チェックアウトをここへ渡す。**実装セッションの経路では空**なので、従来の起動は変わらない。
-if [[ -n "${ISSUE_DECK_EXTRA_DIRS:-}" ]]; then
-  while IFS= read -r extra_dir; do
-    [[ -n "$extra_dir" ]] || continue
-    if [[ ! -d "$extra_dir" ]]; then
-      echo "#$ISSUE_NUMBER: 情報: 参照先が見つからないため飛ばします: $extra_dir" >&2
-      continue
-    fi
-    # Codexでは付けない（理由は共有知識リポジトリと同じ。#2377）
-    if [[ "$AGENT_KIND" == "claude" ]]; then
-      CLAUDE_EXTRA_ARGS+=(--add-dir "$extra_dir")
-    fi
-  done <<<"${ISSUE_DECK_EXTRA_DIRS}"
-fi
-
-# 使わせないツール（#1454）。横断質問セッションは読み取り専用なので、
-# `Edit,Write,NotebookEdit`を封じたうえで起動する（回答の投稿に`gh issue comment`が要るため
-# Bashは残す）。**プロンプトの指示だけに頼らず、機械的にも塞ぐ。**
+# 使わせないツール（#1454）。起動元は`ISSUE_DECK_DISALLOWED_TOOLS`で足せる（もとは横断質問
+# セッション〈#5051で撤去〉が読み取り専用にするために使っていた）。**プロンプトの指示だけに頼らず、
+# 機械的にも塞ぐ。**
 #
 # **基本セットはどのセッションにも常に効かせる**（#2744）。`pkill`・`killall`は名前や
 # コマンドラインで相手を選ぶため、撃つ相手が**このホストで走っている他Issueのセッション**に
@@ -638,7 +621,7 @@ fi
 #     無人に近い起動ではそこで止まっていた。#2778で直したかったのはこれ
 #   - 開発サーバーのログ（`.dev-servers/issue-<番号>.log`）——**繋がらないときだけ見る。**
 #     キックオフ文面と指示ファイルには場所が載るだけで、読めという指示は無い。ついでに許可して
-#     おくもので、**開発サーバーを使わない起動（ポート0の横断質問セッション）では渡さない**
+#     おくもので、**開発サーバーを使わない起動（ポート0の手作業セッション）では渡さない**
 #
 #   - 添付画像の保存先（ディレクトリ・#3039）——**Issueに画像が貼られていれば読む。**
 #     `fetch-issue-images.sh`（#2967）の保存先で、画像を開くたびに承認待ちになっていた。
@@ -673,7 +656,7 @@ fi
 
 # PR作成の明示指示（#3752）。個人設定の「明示的な指示があるまでPRを作らない」に負けて、PRを
 # 作らないまま止まるのを防ぐ。**実装セッションで、PRを自動で作るリポジトリのときだけ**付ける。
-# 横断質問・手作業はPRを作らず、`guchi-apps/ideas`のような人の指示で作るリポジトリでは
+# 手作業はPRを作らず、`guchi-apps/ideas`のような人の指示で作るリポジトリでは
 # プロンプト本文と矛盾する。tmuxを挟むと環境変数は届かないため、ここで自分で判定する。
 SEND_PR_INSTRUCTION=0
 if [[ "${ISSUE_DECK_SESSION_KIND:-implementation}" == "implementation" ]] &&
@@ -687,8 +670,8 @@ fi
 # セッション名（プロンプトボックス・`/resume`の一覧・ターミナルのタイトルに出る）。
 # どのリポジトリのどのIssueかがタブから分かるよう「<リポジトリ名> #<Issue番号>」にする（#1105）。
 REPO_NAME="$(basename -s .git "$(git config --get remote.origin.url 2>/dev/null || true)")"
-# **cwdがgitリポジトリでない場合は呼び出し元が渡す**（#1454）。横断質問セッションのcwdは
-# どのリポジトリでもない作業ディレクトリなので、ここでは何も取れない。
+# **cwdがgitリポジトリでない場合は呼び出し元が渡す**（#1454）。手作業セッションのcwdは
+# どのリポジトリでもない作業ディレクトリでありうるので、ここでは何も取れない。
 if [[ -z "$REPO_NAME" || "$REPO_NAME" == "." ]] && [[ -n "${ISSUE_DECK_REPO_SLUG:-}" ]]; then
   REPO_NAME="${ISSUE_DECK_REPO_SLUG#*/}"
 fi
@@ -741,7 +724,7 @@ fi
 # 直接起動したセッションには渡らない。issue-deck側にジョブとして残らないセッションを
 # 巻き込まないための線引きで、判定材料ではなく**起動経路そのもの**で切る。
 if [[ -n "$TMUX_SESSION_NAME" ]]; then
-  # 第6引数はセッションの種別（#1454）。横断質問セッションは`question`で、回収の条件が変わる。
+  # 第6引数はセッションの種別（#1454）。手作業セッションは`manual-step`で、回収の条件が変わる。
   # 第7引数はエージェントCLIの種別（#2519）。**追加指示の送り方がここで決まる**——pollerは
   # この値を見て、Codexのセッションには`send-keys`ではなく`codex queue`を使う
   if ! session_state_write_descriptor "$TMUX_SESSION_NAME" "$PWD" "$REPO_SLUG" "$ISSUE_NUMBER" \
@@ -1011,13 +994,13 @@ KICKOFF_CONTEXT="$(kickoff_prompt_context_block \
 RESUME_CONVERSATION=0
 CODEX_RESUME_THREAD=""
 CLAUDE_RESUME_FLAG="--continue"
-if [[ "$AGENT_KIND" == "claude" && ( "${ISSUE_DECK_SESSION_KIND:-implementation}" == "question" ||
-  "${ISSUE_DECK_SESSION_KIND:-implementation}" == "manual-step" ) &&
+if [[ "$AGENT_KIND" == "claude" && "${ISSUE_DECK_SESSION_KIND:-implementation}" == "manual-step" &&
   "${ISSUE_DECK_CLAUDE_RESUME:-1}" != "0" && -n "$TMUX_SESSION_NAME" ]]; then
-  # 横断質問セッション（#3033）。**`--continue`は使わない。** 質問セッションのcwdは質問Issueごとでは
-  # なくリポジトリごとに固定されている（#1529）ため、「そのcwdで最後に動いた会話」は別の質問の
-  # ものでありうる（#1648）。代わりに、`SessionStart`フックがtmuxセッション名（質問Issueごとに一定）
-  # をキーに控えたsessionIdを`--resume`へ渡し、**同じ質問の会話だけ**へ戻す。
+  # 手作業セッション（#4231。仕組みは横断質問セッション〈#3033・#5051で撤去〉から引き継いだ）。
+  # **`--continue`は使わない。** cwdはIssueごとではなくリポジトリごとに固定されているため、
+  # 「そのcwdで最後に動いた会話」は別のIssueのものでありうる。代わりに、`SessionStart`フックが
+  # tmuxセッション名（Issueごとに一定）をキーに控えたsessionIdを`--resume`へ渡し、
+  # **同じIssueの会話だけ**へ戻す。
   # 控えが無い・履歴の`<id>.jsonl`が消えている場合は新しい会話で始める（安全側）。
   QUESTION_SESSION_ID="$(session_state_read_claude_session "$TMUX_SESSION_NAME" 2>/dev/null || true)"
   CLAUDE_HISTORY_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects/$(printf '%s' "$PWD" | sed 's/[^a-zA-Z0-9]/-/g')"
@@ -1026,8 +1009,7 @@ if [[ "$AGENT_KIND" == "claude" && ( "${ISSUE_DECK_SESSION_KIND:-implementation}
     CLAUDE_EXTRA_ARGS+=(--resume "$QUESTION_SESSION_ID")
     CLAUDE_RESUME_FLAG="--resume"
   fi
-elif [[ "$AGENT_KIND" == "claude" && "${ISSUE_DECK_SESSION_KIND:-implementation}" != "question" &&
-  "${ISSUE_DECK_SESSION_KIND:-implementation}" != "manual-step" &&
+elif [[ "$AGENT_KIND" == "claude" && "${ISSUE_DECK_SESSION_KIND:-implementation}" != "manual-step" &&
   "${ISSUE_DECK_CLAUDE_RESUME:-1}" != "0" ]]; then
   CLAUDE_HISTORY_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects/$(printf '%s' "$PWD" | sed 's/[^a-zA-Z0-9]/-/g')"
   if compgen -G "$CLAUDE_HISTORY_DIR/*.jsonl" >/dev/null 2>&1; then
@@ -1058,19 +1040,13 @@ fi
 if [[ "$AGENT_KIND" == "codex" && "$RESUME_CONVERSATION" != "1" && -n "$TMUX_SESSION_NAME" ]]; then
   session_state_clear_codex_thread "$TMUX_SESSION_NAME" || true
 fi
-# 質問セッション（#3033）も、新しい会話で始めるなら前回のsessionIdを残さない
-if [[ "$AGENT_KIND" == "claude" && ( "${ISSUE_DECK_SESSION_KIND:-implementation}" == "question" ||
-  "${ISSUE_DECK_SESSION_KIND:-implementation}" == "manual-step" ) &&
+# 手作業セッション（#4231）も、新しい会話で始めるなら前回のsessionIdを残さない
+if [[ "$AGENT_KIND" == "claude" && "${ISSUE_DECK_SESSION_KIND:-implementation}" == "manual-step" &&
   "$RESUME_CONVERSATION" != "1" && -n "$TMUX_SESSION_NAME" ]]; then
   session_state_clear_claude_session "$TMUX_SESSION_NAME" || true
 fi
 
-if [[ "$RESUME_CONVERSATION" == "1" && "${ISSUE_DECK_SESSION_KIND:-implementation}" == "question" ]]; then
-  # 横断質問セッション（#3033）。**cwdがgitリポジトリではない**ため、`gh issue view`に
-  # `--repo`が要る（無いと別のリポジトリの同じ番号を引くか失敗する）。やることも「作業の続き」
-  # ではなく「追加のコメント（追い質問）への回答」なので、言い方を分ける。
-  KICKOFF_PROMPT="${ISSUE_LABEL}の質問セッションを再開しました。前回の会話の続きです。最初からやり直さず、まず gh issue view $ISSUE_NUMBER --repo ${REPO_SLUG:-<質問Issueのリポジトリ>} --comments で前回以降に追加されたコメント（追い質問）を確認し、$PROMPT_FILE を読み直したうえで、まだ回答していない質問があれば同じ手順で調べて回答コメントを投稿してください。無ければ、追い質問が届くのを待ってください。"
-elif [[ "$RESUME_CONVERSATION" == "1" && "${ISSUE_DECK_SESSION_KIND:-implementation}" == "manual-step" ]]; then
+if [[ "$RESUME_CONVERSATION" == "1" && "${ISSUE_DECK_SESSION_KIND:-implementation}" == "manual-step" ]]; then
   # 手作業セッション（#4231）。実施済みの手順をやり直さないよう、本文のチェック状況を読み直させる
   KICKOFF_PROMPT="${ISSUE_LABEL}の手作業セッションを再開しました。前回の会話の続きです。最初からやり直さず、まず gh issue view $ISSUE_NUMBER --repo ${REPO_SLUG:-<手作業Issueのリポジトリ>} --comments で本文のチェック状況と前回以降のコメントを確認し、$PROMPT_FILE を読み直したうえで、実施済みの手順は繰り返さず残りを続けてください。"
 elif [[ "$RESUME_CONVERSATION" == "1" ]]; then

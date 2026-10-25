@@ -115,9 +115,9 @@ describe("buildIssueQueueStates", () => {
     expect(stateFor(jobs, 13)?.queuedTotal).toBe(1);
   });
 
-  it("横断質問も枠を使うので順番待ちに数える（#1544。計画レビューは#3785で別枠）", () => {
+  it("手作業セッションも枠を使うので順番待ちに数える（#1544。計画レビューは#3785で別枠）", () => {
     const jobs = [
-      job({ id: "a", issueNumber: 10, kind: "CROSS_REPO_QUESTION" }),
+      job({ id: "a", issueNumber: 10, kind: "MANUAL_STEP_SESSION" }),
       job({ id: "b", issueNumber: 11, kind: "LAUNCH", createdAt: "2026-08-14T00:01:00.000Z" }),
     ];
 

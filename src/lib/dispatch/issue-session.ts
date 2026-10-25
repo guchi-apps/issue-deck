@@ -480,23 +480,18 @@ const REAP_REASON_TEXT: Record<DispatchSessionReapReason, string> = {
   HANDOFF_PR_OPEN: "PRを作成しレビューへ引き渡し済みのため",
   HANDOFF_NO_PR: "PRを作らずにローカル作業を終えているため",
   LOCAL_PR_OPEN: "PRを作り終えて待機しているため",
-  QUESTION_CLOSED: "対象のIssue（質問・手作業）がcloseされているため",
-  QUESTION_IDLE: "セッション（質問・手作業）が放置されているため",
+  QUESTION_CLOSED: "対象の手作業Issueがcloseされているため",
+  QUESTION_IDLE: "手作業セッションが放置されているため",
   WORKTREE_GONE: "worktreeが削除されているため",
 };
 
 /**
- * 横断質問セッション（#1454）は畳まれても`--continue`では戻れない（cwdが質問Issue間で共有される
- * ため別の質問を拾う。#1648）。**実装セッションと同じ案内を出さない。** 放置で畳まれた場合は
- * 終了した行の「セッションを復旧」（質問Issueごとに控えたsessionIdで`--resume`。#3033）で
- * 同じ会話へ戻れるが、Issueが閉じられている場合は復旧の入口が出ないので新しく質問してもらう。
- *
- * worktreeが消えているセッション（`WORKTREE_GONE`・#2422）も会話は引き継がないが、案内の中身が
- * 違う（起動し直す先は「質問する」ではなく同じIssueで、ランチャーがworktreeを作り直す経路では
- * `ISSUE_DECK_CLAUDE_RESUME=0`が渡って新しい会話で始まる。`run-issue-session.sh`）ため、
- * この集合には入れず個別に出し分ける。
+ * `QUESTION_CLOSED`・`QUESTION_IDLE`は、いまは手作業セッション（#2771）だけが使う理由コード。
+ * 名前は横断質問セッション（#1454・#5051で撤去）の名残で、稼働中のpollerとの互換のために変えていない。
+ * 手作業セッションは`--continue`では戻れない（cwdがIssue間で共有される）ため、**実装セッションと
+ * 同じ案内を出さない。** 放置で畳まれた場合は終了した行の「セッションを復旧」（Issueごとに控えた
+ * sessionIdで`--resume`。#4231）で同じ会話へ戻れるが、Issueが閉じられている場合は復旧の入口が出ない。
  */
-const QUESTION_REAP_REASONS = new Set<DispatchSessionReapReason>(["QUESTION_CLOSED", "QUESTION_IDLE"]);
 
 /**
  * 期限を過ぎた予定を出し続けない上限（ミリ秒）。
@@ -530,9 +525,9 @@ export function describeSessionReap(
   if (session.reapReason === "WORKTREE_GONE") {
     suffix = `${head}次に起動するとworktreeを作り直すため、前回の会話は引き継ぎません。`;
   } else if (session.reapReason === "QUESTION_IDLE") {
-    suffix = `${head}畳まれた後は、終了した行の「セッションを復旧」で会話の続きへ戻れます（「質問する」から新しく質問しても構いません）。`;
-  } else if (QUESTION_REAP_REASONS.has(session.reapReason)) {
-    suffix = `${head}続きを聞くときは「質問する」から新しく質問してください。`;
+    suffix = `${head}畳まれた後は、終了した行の「セッションを復旧」で会話の続きへ戻れます。`;
+  } else if (session.reapReason === "QUESTION_CLOSED") {
+    suffix = head;
   } else {
     suffix = `${head}worktreeは残るので、次に起動すると前回の続きから再開します。`;
   }
@@ -565,19 +560,10 @@ export type SessionRecoveryNotice = {
 
 export function describeSessionRecovery(
   session: DispatchSessionView,
-  options: { isCrossRepoQuestion?: boolean; isManualStep?: boolean } = {},
+  options: { isManualStep?: boolean } = {},
 ): SessionRecoveryNotice | null {
   // 動いているセッションには復旧する相手がいない（止めたい・送りたいは既存の操作の担当）
   if (session.state === "ALIVE") return null;
-  // 横断質問セッション（#3033）。worktreeもラベルも無く、戻れるかはホストが控えたsessionId次第
-  // （`scripts/run-issue-session.sh`）。**「必ず続きから」とは言わない**——記録が消えていれば
-  // 質問Issueのコメントを読み直した新しい会話で始まる
-  if (options.isCrossRepoQuestion) {
-    return {
-      primary: session.activity === "WAITING_INPUT",
-      detail: `${formatDispatchHostName(session.host)}で前回の会話の続きから再開します（会話の記録が残っていない場合は、質問Issueのコメントを読み直した新しい会話で始まります）`,
-    };
-  }
   // 手作業セッション（#4231）。worktreeもラベルも無く、戻れるかはホストが控えたsessionId次第
   if (options.isManualStep) {
     return {

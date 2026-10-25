@@ -7,7 +7,6 @@ import { CancelWorkflowRunButton } from "@/components/dashboard/cancel-workflow-
 import { DependencyWaitPanel, LegacyHoldNotice } from "@/components/dashboard/dependency-wait-panel";
 import { CheckUserReasonNotice } from "@/components/dashboard/check-user-reason-notice";
 import { CodeReviewJobStatus } from "@/components/dashboard/code-review-job-status";
-import { CrossRepoQuestionJobStatus } from "@/components/dashboard/cross-repo-question-job-status";
 import { DispatchJobStatus } from "@/components/dashboard/dispatch-job-status";
 import { IssueSessionStatus } from "@/components/dashboard/issue-session-status";
 import { SessionHandoffButton } from "@/components/dashboard/session-handoff-dialog";
@@ -15,10 +14,7 @@ import { SessionRecoveryButton } from "@/components/dashboard/session-recovery-b
 import { WorkflowStatusSteps } from "@/components/dashboard/workflow-status-steps";
 import type { DispatchStateHandle } from "@/hooks/use-dispatch-state";
 import type { WorkflowRunInfo } from "@/hooks/use-issue-workflow-run";
-import {
-  findCrossRepoQuestionJobForIssue,
-  findDispatchJobForIssue,
-} from "@/lib/dispatch/dispatch-job";
+import { findDispatchJobForIssue } from "@/lib/dispatch/dispatch-job";
 import type { IssueExecutionTarget } from "@/lib/dispatch/issue-execution-target";
 import { describeDispatchJobWaitReason } from "@/lib/dispatch/queue-summary";
 import type { DispatchSessionView } from "@/lib/dispatch/session-state";
@@ -116,13 +112,6 @@ export function IssueStatusCard({
     handoff !== undefined && issueSession !== null && issueSession.state !== "ALIVE";
   // ステップはProject Statusを持たないIssueでは何も描かない（`WorkflowStatusSteps`と同じ判定）
   const hasSteps = getWorkflowStepIndex({ projectStatus: issue.projectStatus }) !== null;
-  // 横断質問（#1454）は成功後に`IssueSessionStatus`が引き継ぐので、そこから先は数えない
-  const crossRepoJob = findCrossRepoQuestionJobForIssue(
-    dispatch.jobs,
-    issue.repositoryFullName,
-    issue.number,
-  );
-  const hasCrossRepoJob = crossRepoJob !== null && crossRepoJob.status !== "SUCCEEDED";
   // キャンセルボタンが出る条件（`CancelWorkflowRunButton`と同じ判定）
   const hasCancelableRun =
     workflowRun !== null && workflowRun.status !== "completed" && workflowRunId !== null;
@@ -147,7 +136,6 @@ export function IssueStatusCard({
     dispatchJob !== null ||
     issueSession !== null ||
     localOnly ||
-    hasCrossRepoJob ||
     qaAnswerPending ||
     hasCancelableRun;
   /**
@@ -277,7 +265,6 @@ export function IssueStatusCard({
               </span>
             </div>
           )}
-          <CrossRepoQuestionJobStatus issue={issue} dispatch={dispatch} align="end" />
           <CodeReviewJobStatus issue={issue} dispatch={dispatch} align="end" />
           {(qaAnswerPending || hasCancelableRun) && (
             <div className="flex flex-wrap items-center justify-end gap-2">

@@ -84,7 +84,6 @@ function makeHost(overrides: Partial<DispatchHostView> = {}): DispatchHostView {
     lastSeenAt: "2026-08-16T00:00:00Z",
     sessionControlCapable: true,
     instructionCapable: true,
-    crossRepoQuestionCapable: true,
     manualStepCapable: null,
     manualStepAbortCapable: null,
     manualStepValuesCapable: null,

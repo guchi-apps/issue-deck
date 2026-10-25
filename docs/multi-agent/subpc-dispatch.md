@@ -112,9 +112,7 @@ pollerの担当のまま（`remain-on-exit`で死んだペインが残ってい�
 | `LAUNCH`（既定） | 従来のランチャー起動 | セッションを立てる |
 | `INTERRUPT` | `tmux send-keys -t "=<名前>:" C-c` | 走っている処理を止める。セッションは残る |
 | `KILL` | `tmux kill-session -t "=<名前>"` | セッションごと畳む |
-| `QUESTION`（#1294） | （未実装） | 読み取り専用の質問応答を1回走らせ、回答コメントを投稿する |
 | `INSTRUCTION`（#1012） | 人が書いた1行を送る（Claude Codeは3段階プロトコルで入力欄へ、Codexは`codex queue`で積む。#2519） | 走っているセッションへ追加指示を流す |
-| `CROSS_REPO_QUESTION`（#1454） | `scripts/start-cross-repo-question.sh` | 複数リポジトリ横断の質問セッションを立てる |
 | `MANUAL_STEP`（#1828） | `scripts/run-manual-step.sh`（別プロセス） | 手作業アシスタントで承認された1手順ぶんのコマンドを実行する |
 | `MANUAL_STEP_ABORT`（#1882） | `systemctl --user stop issue-deck-manual-step-<対象ジョブID>` | 走っている代行実行を止める |
 | `PLAN_REVIEW`（#1855） | `scripts/start-plan-review.sh` | 計画の関門（G1）のセッションを立てる |
@@ -124,10 +122,10 @@ pollerの担当のまま（`remain-on-exit`で死んだペインが残ってい�
 | `REBOOT`（#2496） | `sudo -n /usr/sbin/reboot` | ホストをOSごと再起動する |
 | `CODEX_PAIRING`（#2524） | `codex remote-control start` / `pair --json` | CodexのRemote Control用のペアリングコードを1枚発行する |
 
-**`CROSS_REPO_QUESTION`・`PLAN_REVIEW`・`CODE_REVIEW`はセッションを立てる側**（`LAUNCH`と同じ枠・
-同じ払い出し経路）で、`INTERRUPT`〜`INSTRUCTION`のように「立っているセッションを操作する」ものでは
-ない。詳細は[複数リポジトリ横断の質問セッション](#複数リポジトリ横断の質問セッション1454)と
-[リポジトリ全体のコードレビュー](code-review.md)。
+**`PLAN_REVIEW`・`CODE_REVIEW`・`MANUAL_STEP_SESSION`はセッションを立てる側**（`LAUNCH`と同じ払い出し
+経路）で、`INTERRUPT`〜`INSTRUCTION`のように「立っているセッションを操作する」ものではない。詳細は
+[計画レビュー（G1）のセッション](#計画レビューg1のセッション1855)と[リポジトリ全体のコードレビュー](code-review.md)。
+かつての`QUESTION`（#1294）・`CROSS_REPO_QUESTION`（#1454）は撤去した（#5051。[後述](#質問機能は撤去した50475051)）。
 
 **`MANUAL_STEP`と`MANUAL_STEP_ABORT`はセッションにも tmux にも触らない**（枠外で先に配る点だけ
 制御ジョブと同じ）。詳細は[手作業アシスタントからの代行実行](#手作業アシスタントからの代行実行1828)。
@@ -185,8 +183,8 @@ journaldにもIssueにも出さない。詳細は[codex.md](codex.md)「Remote C
 
 払い出しでは、制御ジョブを**起動ジョブより先に・同時実行数の枠外で**渡す。tmuxを1回叩くだけで
 重くないうえ、起動待ちの後ろに並ばせると**止めたいときほど待たされる**（1巡で取るのは既定1本）。
-実行キューの表示（#1266）が数えるのは**枠を消費する種別だけ**（`SESSION_LAUNCH_JOB_KINDS`＝起動と
-横断質問）で、制御ジョブの状態はIssueのセッション表示に出る。
+実行キューの表示（#1266）が数えるのは**枠を消費する種別だけ**（`SESSION_LAUNCH_JOB_KINDS`＝起動・
+計画レビュー・コードレビュー・手作業セッションなど）で、制御ジョブの状態はIssueのセッション表示に出る。
 
 **セッション本数の上限（#1361）に達していても、制御ジョブだけは取りに行く。** pollerは
 `maxJobs: 0`で「起動ジョブは要らない」と伝えてclaimする。上限に達している状態は**セッションを
@@ -425,11 +423,10 @@ Issue詳細の「いま何が起きているか」カードの、その行のす
   答えた後に作業が進めば`WORKING`／`RESPONDED`へ移る
 - **押せない理由（サブPCが未申告・未処理の起動ジョブがある・もう立ち上がり直している）は
   起動ジョブと同じ判定**（`resolveDispatchTargetRejection`）を使い、ボタンは消さずに理由を下に出す
-- **横断質問セッションも復旧できる**（#3033）。ただし積むのは`LAUNCH`ではなく質問ジョブ
-  （`CROSS_REPO_QUESTION`）で、`11.local`は付けず、押せない理由も横断質問と同じ判定
-  （`resolveCrossRepoQuestionRejection`）を使う。**`--continue`は使えない**（cwdが質問Issue間で
-  共有されるため別の質問を拾う。#1648）が、ランチャーが質問Issueごとに控えたsessionIdで
-  `--resume`するので同じ質問の会話へ戻れる（[後述](#畳んだ質問セッションは同じ質問の会話へ戻れる3033)）。
+- **手作業セッションも復旧できる**（#4231）。積むのは`LAUNCH`ではなく手作業セッションのジョブ
+  （`MANUAL_STEP_SESSION`）で、`11.local`は付けず、押せない理由も手作業セッションの判定
+  （`resolveManualStepSessionRejection`）を使う。**`--continue`は使えない**（cwdがIssue間で共有される
+  ため別の会話を拾う）が、ランチャーがIssueごとに控えたsessionIdで`--resume`するので同じ会話へ戻れる
   判定は、そのセッションを立てた質問ジョブが画面に残っているかどうかで行う
 - **手作業セッションも復旧できる**（#4231）。積むのは手作業セッションのジョブ（`MANUAL_STEP_SESSION`）で、
   `11.local`は付けず、押せない理由は`resolveManualStepSessionRejection`。cwdが手作業Issue間で共有される
@@ -1080,8 +1077,8 @@ scripts/subpc-dispatch-poller.sh → scripts/start-manual-step-session.sh
   追加指示を`codex queue`で送る。
   cwdはリポジトリの本体チェックアウト（対応表で解決できないときは
   `~/apps/issue-deck-worktrees/.manual-steps/_session-<repo>`）で、**前回の会話は引き継がない**
-  （cwdがIssueごとではないため。横断質問と同じ）。回収は`kind=manual-step`として
-  質問セッションと同じ放置の猶予で畳む（`scripts/reap-sessions.sh`）
+  （cwdがIssueごとではないため）。回収は`kind=manual-step`として
+  専用の放置の猶予（`MANUAL_STEP_SESSION_IDLE_MINUTES`）で畳む（`scripts/reap-sessions.sh`）
 - **本文の記載に関わらず、起動を押した1回で目的達成まで進める**（#2830・#3870）。本文は
   コマンドの許可リストではなく、目的・制約・既知の手順を伝える材料として扱う。セッションは
   本文に無い安全な調査・修正・確認を自律して追加し、秘密値・本人操作・未確定の不可逆な変更、
@@ -1133,304 +1130,29 @@ scripts/subpc-dispatch-poller.sh → scripts/start-manual-step-session.sh
 - 画面の入口は`manual-step-session-panel.tsx`（PC・スマホ共用）。押せない理由の判定は
   `resolveManualStepSessionRejection`（`dispatch-job.ts`）で、投入側の`jobs.ts`も同じ関数を通す
 
-### 質問をサブPCで実行するための土台（#1294）
+### 質問機能は撤去した（#5047・#5051）
 
-「リポジトリに質問する」（`mode=ask`）をサブPCでも実行できるようにするための**器だけ**が入っている。
-実行（pollerでの`claude -p`と`gh issue comment`）・フォールバック・実行先の選択はStep 3以降で、
-**この時点では質問ジョブを積む経路も払い出し口も無い**。方針の全文は #1290 のコメントを参照
-（Actionsを廃さず、サブPCを既定にしてActionsをフォールバックとして残す）。
+リポジトリへの質問（`mode=ask`・#1294）と、サブPCで全リポジトリを読み取り用に参照させる横断質問
+セッション（`CROSS_REPO_QUESTION`・#1454）は、入口を#5047で削除し、リモートセッション
+（[remote-session.md](../remote-session.md)）へ置き換えた。バックエンドも#5051で撤去した。
 
-**1. 質問コメントの識別を、Actionsの起動トリガーから切り離した。**
-`@claude 質問: `プレフィックスは`claude-issue-dispatch.yml`の起動トリガーそのもので、
-このままでは同じコメントをサブPC側でも処理させた時点で**必ず二重に回答する**。
-「Issueに残す質問コメント」と「Actionsを起こすトリガー」を別の軸にした。
-
-| 軸 | 何で決まるか |
-|---|---|
-| 質問コメントかどうか | `<!-- issue-deck-question -->`マーカー（`QUESTION_COMMENT_MARKER`）。**旧形式（`@claude 質問: `で始まる）も引き続き質問として扱う**（既存Issueに積まれたコメントは移行できないため） |
-| Actionsが起動するか | 本文の先頭が`@claude`であること（`triage`ジョブの`if`）。サブPCで答えさせる場合は`@claude`を含めない本文（`askClaudeCommentBody(question, { trigger: "none" })`）を投稿する |
-
-**Actionsに答えさせる形の本文は従来のまま**（`@claude 質問: <本文>`で始まる）。他リポジトリは
-`reusable-issue-dispatch.yml`をタグ固定（`@workflows/vX`）で参照しており、**古いタグの`IS_ASK`は
-プレフィックスしか見ない**。ここで本文の形を変えると、古いタグのリポジトリでは質問が`mode=ask`に
-落ちず実装モードとして走る。
-
-**2. `DispatchJobKind`に`QUESTION`を足し、質問ジョブは`activeKey`を取らない（NULLのまま）。**
-`activeKey`のunique制約は「同じIssueの未完了ジョブは1件まで」＝実装ジョブの二重起動を防ぐための
-ものであって、質問には当てはまらない。ここで枠を取ると**実装ジョブが走っているIssueに質問を
-積めなくなる**が、質問はまさに実装中に割り込んで聞くための導線（`00.check-user`も`11.local`も
-貫通する唯一のモード）なので、それでは意味が無い。同じIssueに質問が並ぶこと自体は害にならない。
-
-**質問ジョブは誰にも払い出さない。** 現行のpollerは未知の種別を「未知のジョブ種別です」として
-`failed`で返すため、実行側が来ていない段階で配ると質問が必ず失敗として残る。開けるのはStep 3で、
-`sessionControlCapable`と同じ形のpoller側の申告とセットにする。
-
-**ジョブの寿命の意味が種別で変わる。** 起動ジョブの`succeeded`は「tmuxセッションが立った」までで、
-その先はProject Statusが持つ。質問ジョブにはその続きが無く、`succeeded`は「回答コメントが投稿された」
-まで。画面の文言も種別で分けている（「起動しました」／「回答しました」）。
-
-### 複数リポジトリ横断の質問セッション（#1454）
-
-「issue-deckとops-dashboardで同じ仕組みをどう分けているか」のような**リポジトリをまたぐ問い**は、
-これまでどこにも聞く先が無かった。既存の「リポジトリに質問する」（#691）はGitHub Actionsが答える
-仕組みで、**Actionsは1リポジトリしかチェックアウトしない**ため構造的に横断できない。
-
-サブPCには連携リポジトリのcloneが揃っているので、そこで**読み取り専用のClaude Codeセッションを
-立て、全リポジトリを`--add-dir`で参照させて答えさせる**。
-
-```text
-issue-deckの画面「横断質問」（PCはヘッダー・スマホはIssue一覧の「？」）
-  ↓ 記録先リポジトリに質問Issueを作成（タイトルは既存と同じ `[質問] ` 接頭辞）
-  ↓ `@claude`を含まない質問コメントを投稿（Actionsは起きない。#1294の軸分離）
-  ↓ POST /api/dispatch（kind=cross_repo_question）
-（キュー: DispatchJob）
-  ↑ claim（crossRepoQuestionCapable を申告したホストにだけ払い出す）
-scripts/subpc-dispatch-poller.sh
-  ↓ scripts/start-cross-repo-question.sh <owner> <repo> <番号>
-tmuxセッションが立つ → 回答は質問Issueへのコメントとして返る
-```
-
-**質問Issueは普通のIssueとして作る。** そのため`DispatchJob.repositoryFullName`/`issueNumber`・
-セッション名の規約（`<リポジトリ名>-issue-<番号>`）・`DispatchSession`・停止/終了（#1332）・
-追加指示（#1012）・Remote Control（#1219）が**すべてそのまま使える**。専用のモデルを作ると
-これらを一式もう1セット持つことになる。
-
-#### 参照範囲は「そのホストが実行できる全リポジトリ」に固定する
-
-**ジョブに参照範囲を載せない**（`DispatchJob`のスキーマを増やさない）。ランチャーは申告と同じ
-`local_repo_list_runnable`（[scripts/lib/local-repo-resolve.sh](../../scripts/lib/local-repo-resolve.sh)）で
-一覧を作るため、画面に出ている件数と実際に渡すディレクトリがずれない。
-**選ばせない**のは、どのリポジトリに答えがあるか分かっているなら横断で聞く必要が無いため。
-
-#### 参照先は本体チェックアウトではなく`origin/develop`のスナップショット（#1583）
-
-**本体チェックアウト（`~/apps/<repo>`）をそのまま`--add-dir`で渡さない。** 本体チェックアウトを
-更新する仕組みはどこにも無く（`start-issue.sh`は「本体の作業ツリーには触れない」ことを設計上の
-約束にしている）、**誰も`git pull`しない限り古いまま**になる。2026-08-17の実測では、`git fetch`
-し直した後でも shopping-list が29コミット、car-care が24、dayspan が21、issue-deck自身は`main`に
-乗ったまま67コミット遅れていた。質問の主用途はコード調査で、回答は「いまのdevelopがどうなって
-いるか」を前提に読まれる。**古いコードを根拠に自信を持って答えるのは、いちばん困る壊れ方**
-（#1290がStep 4「チェックアウトの鮮度」として挙げていた懸念がそのまま現実になった）。
-
-ランチャーは起動時に各リポジトリを`fetch`し、**リポジトリごとに固定のdetached worktree**を
-`origin/develop`（無ければ`origin/main`）へ合わせて、そこを渡す
-（[scripts/lib/question-refs.sh](../../scripts/lib/question-refs.sh)）。
-
-```text
-~/apps/issue-deck-worktrees/.questions/_refs/<owner>-<repo>
-```
-
-- **本体の作業ツリーには触れない。** `git worktree add`が書くのは本体リポジトリの
-  `.git/worktrees/`だけで、チェックアウト中のブランチも未コミットの変更も動かさない
-  （確認環境の`scripts/start-preview-dev.sh`と同じ手口）。質問セッション側から
-  gitの書き込み操作を禁じている前提も変わらない
-- **質問ごとには分けず、リポジトリごとに固定する。** `_session-<repo>`（#1529）と同じ理由に加え、
-  質問のたびに十数リポジトリぶんのチェックアウトを作り直すのが無駄なため。すでに同じコミットなら
-  `checkout`すら走らない。同時に走る質問セッションどうしのために`flock`で囲む
-- **fetchは全リポジトリぶんを並列で行う**（直列だと1件0.5秒でも十数秒かかる）。失敗・タイムアウト・
-  `origin/develop`も`origin/main`も無いといった場合は、**そのリポジトリだけ本体チェックアウトへ
-  落として続ける**。参照先が古いことより、質問に答えられないことのほうが困る
-- **落ちたリポジトリは理由と遅れコミット数を参照一覧に出す**（`本体チェックアウト・main・
-  origin/develop から 67コミット遅れ（…）`）。プロンプトは各リポジトリの ref・短縮SHA・コミット日を
-  載せ、**回答の冒頭にその基準を書かせる**。読む側が何時点のコードの話かを確かめられるようにする
-- 掃除の対象外。`scripts/cleanup-worktrees.sh`が触るのは各リポジトリのworktreeの置き場の
-  `issue-*`だけで、`--all-repos`（#2123）で全リポジトリを回してもここには来ない
-
-**副作用として、他セッションが編集中の未コミットの変更は質問セッションから見えなくなる。**
-「いま誰かが書いている途中のもの」ではなく「developがどうなっているか」を答える器に振り切っている
-（プロンプトにも、その旨と「聞かれたらスナップショットに無いことを断る」ことを書いてある）。
-
-#### ランチャー自身も同期コピーから実行し直す（#1583）
-
-pollerはsystemd unitの`ExecStart`で本体チェックアウトの`scripts/subpc-dispatch-poller.sh`を起動し、
-そこから呼ぶ`start-cross-repo-question.sh`も本体のものになる。#1438の同期コピーで新しくなるのは
-**その先の`run-issue-session.sh`と`prompts/`だけ**だったため、**ランチャーの修正はdevelopへ
-マージしても人が`git pull`するまで効かなかった**（#1529のcwd固定がサブPCで効いていなかったのは
-これが原因）。
-
-そこで`start-cross-repo-question.sh`は、同期コピーが使えるなら**自分自身をそこから実行し直す**
-（`ISSUE_DECK_LAUNCHER_REEXEC`で1回だけ）。**対象は横断質問のランチャーに限る。** 実装セッションの
-`start-local-session.sh`経路は影響範囲が広いため、これまでどおり本体の作業ツリーから動かす。
-
-あわせて、同期コピーを使うかどうかの判定も直した。`resolve_launcher_scripts_dir`は
-「HEADが`origin/develop`の祖先か」で「単に古いだけ」を判定していたが、**本体チェックアウトが
-`main`に乗っていると`main`のマージコミットは`develop`に含まれないため必ず外れ、同期コピーが
-丸ごと無効化されていた**（サブPCは`main`（v4.0.0）に乗ったまま67コミット遅れており、#1438が
-入っているのにセッション側のスクリプトもプロンプトも古いままだった）。判定は
-**「HEADがリモート追跡ブランチのどれかに含まれているか」**に変えてある。未コミットの変更があれば
-作業ツリーを優先する、という「人が今書いているものを黙って無かったことにしない」約束はそのまま。
-
-#### 記録先リポジトリはcloneされていなくてよい
-
-起動ジョブの`repository_not_runnable`に当たる判定を持たない。横断質問セッションはworktreeを
-作らず、記録先へは`gh issue comment`で書くだけなので、**記録先のcloneも`local-repos.conf`への
-記載も要らない**。代わりに「参照できるリポジトリが1件以上あるか」を見る
-（`resolveCrossRepoQuestionRejection`）。
-
-既定の記録先は**名前が`question`のリポジトリ**（`resolveCrossRepoQuestionRepository`）。
-質問Issueが実装対象のリポジトリへ混ざると、そのリポジトリのIssue一覧・カンバンが質問で埋まる。
-設定値（AppSetting・環境変数）を増やさず**リポジトリ名だけを見る**のは、作って連携した時点で
-自動的に既定になるようにするため。**未作成でも機能は動く**（記録先が従来の既定に戻るだけ）。
-
-記録先の選択肢は`claude-issue-dispatch.yml`の有無で絞らない。回答するのはActionsではないため、
-ワークフローを持たない`question`リポジトリでも成立する。
-
-#### 実装セッションとの違い
-
-| | 実装セッション | 横断質問セッション |
-|---|---|---|
-| worktree | 作る | **質問用には作らない**（cwdは`~/apps/issue-deck-worktrees/.questions/_session-<repo>`の空ディレクトリ） |
-| 参照 | そのリポジトリのworktree | 実行できる全リポジトリの**`origin/develop`のスナップショット**（`--add-dir`。#1583） |
-| 書き込みツール | 使える | `--disallowedTools "Edit,Write,NotebookEdit"`で**封じる** |
-| 開発サーバー | ラベル次第で起動 | 起動しない |
-| 成果物 | ブランチ・PR | 質問Issueへの回答コメント1件（＋気付いた別件があれば`70.needs-decision`付きの新規Issue。#1528） |
-| 回収（#1256） | worktreeがcleanでpush済み＋IssueがCLOSED/PRマージ済み | **質問IssueがCLOSED、またはOPENのまま`QUESTION_SESSION_IDLE_MINUTES`（既定30）放置**（gitの判定は当てない。#1648） |
-| 畳んだ後の再起動 | 前回の会話の続きから再開する（Claude Codeは`--continue`・#1541、Codexは`codex resume`・#2520） | **質問Issueごとに控えたsessionIdで`--resume`する**（`--continue`はcwdが共有のため使えない。#1648・#3033）。控えが無ければ新しい会話 |
-
-**cwdをどれか1つのリポジトリにしない。** そのリポジトリの`CLAUDE.md`だけが最初から効いて
-横断の視点が偏るうえ、他セッションが編集中の作業ツリーへ書き込む余地を残すことになる。
-
-**cwdは質問Issueごとに分けず、リポジトリごとに固定する**（#1529）。フォルダの信頼確認
-（`Is this a project you created or one you trust?`）はディレクトリ単位で`~/.claude.json`へ
-記録されるため、質問ごとに新しいディレクトリを作ると毎回聞かれ、答えるまでセッションが
-始まらない。しかも**信頼確認の表示中はフックが1つも飛ばない**（#1465）ので、画面には
-「実行中」と出たまま何も進まない。固定すれば人が1回答えるだけで済み、`~/.claude.json`を
-機械が書き換えないため「信頼確認そのものは自動化しない」（[session-notify.md](./session-notify.md)）
-とも衝突しない。全質問で1つにまとめず**リポジトリごと**にしているのは、会話履歴とメモリが
-cwd単位（`~/.claude/projects/<cwd>/`）に置かれ、`/resume`の一覧に無関係なリポジトリの質問まで
-並ぶのを避けるため。**cwdは同じリポジトリの質問セッションで共有される**ので、一時ファイルを
-置くときは名前を一意にする（プロンプトにも書いてある）。
-
-回収の条件を分けているのは、質問セッションにはworktreeが無く、実装セッション向けの
-「worktreeがcleanでpush済み」を当てると**必ず「確認できない」に落ちて永久に残る**ため。
-種別は状態ファイルの記述子（`kind=question`）が持つ（[scripts/lib/session-state.sh](../../scripts/lib/session-state.sh)）。
-**古い記述子には`kind`が無い**ので、読む側は空を実装セッションとして扱う。
-
-#### issue-deckへ報告する`owner/repo`は`current_repo_slug()`から取る（#1530）
-
-cwdがどのリポジトリでもないため、**`git remote`からは`owner/repo`が取れない。** 記録先は
-起動側（[scripts/start-cross-repo-question.sh](../../scripts/start-cross-repo-question.sh)）が
-`ISSUE_DECK_REPO_SLUG`で渡しており、
-[scripts/run-issue-session.sh](../../scripts/run-issue-session.sh)の`current_repo_slug()`が
-remote→この環境変数の順で解決する。**issue-deckへ報告する処理を足すときは、`git remote`から
-直に導かずこの関数を使う。**
-
-#1530はこれを踏んだもので、受付コメント（#1119）とプレビューURLの報告が`git remote`から
-直に導いていたため、質問セッションでは`owner/repo`が空になり**エラーも出さずに報告を
-やめていた**（`guchi-apps/question`の受付コメントが1件も無かった）。報告系は「取れなければ
-報告しない」で失敗を握り潰す作りなので、フォールバックの取りこぼしは黙って消える。
-
-#### 回答は`<!-- issue-deck-qa-answer -->`付きのコメントで返す
-
-既存の`QA_ANSWER_MARKER`をそのまま使うため、画面の「回答待ち」表示とワンボタンクローズ
-（`canCloseAskRepoQuestion`）が横断質問でも働く。プロンプトは
-[scripts/prompts/cross-repo-question-agent.md](../../scripts/prompts/cross-repo-question-agent.md)。
-
-**回答後もセッションは残る。** 追い質問は追加指示（#1012）としてこのセッションへ送れる。
-聞き終わったら質問Issueを閉じる（次の巡回で畳まれる）。
-
-#### 聞き終わらないまま放置されたセッションも畳む（#1648）
-
-「質問Issueを閉じることが終了の合図」だけでは、**追い質問を送らないまま忘れられたセッションを
-畳む経路が1つも無い**。実装セッションと違ってPRもマージも無く、時間切れも無かったため、質問Issueを
-閉じる人が現れない限り永久に残り、その1本ぶんずっと本数の上限（`DISPATCH_MAX_SESSIONS`・#1361）を
-埋めていた。セッションの積み上がりは2026-08-14にホストをメモリ枯渇で止めた実績がある。
-
-そこで、**質問IssueがOPENのままでも`QUESTION_SESSION_IDLE_MINUTES`（既定30・0でこの経路だけ無効）
-放置されていれば畳む**。判定は[scripts/reap-sessions.sh](../../scripts/reap-sessions.sh)の
-`kind == "question"`のブロックにあり、条件4の猶予もこの値を使う（実装セッションの
-`SESSION_IDLE_MINUTES`より短い）。
-
-- **短くしてよい理由は、畳んでも失うものが会話の文脈だけであること。** worktreeもコミットも
-  持たず、回答コメントは質問Issueに残っている。実装セッションのように「手元にしか無い成果物」が
-  消える余地が無い
-- **`Stop`以外は畳まないという共通ゲートはそのまま。** 承認プロンプト待ち（`permission_prompt`）や
-  作業中（`working`）のセッションは従来どおり残るので、回答の途中で畳まれることはない
-- **「回答は終わったがIssueは記録として残したい」ためのラベルは作らない**（#1648）。
-  Issue詳細のセッション表示の「終了」が、Issueをopenのままセッションだけ畳む操作としてすでに
-  ある（`src/components/dashboard/issue-session-status.tsx`）。ラベル方式は質問Issueの記録先
-  リポジトリ全部へラベルを配る必要があり、回収の判定にラベル分岐を増やす代償に見合わない
-- したがって畳む経路は3つになる。**画面の「終了」**（すぐ）・**質問Issueのclose**（次の巡回）・
-  **放置の猶予**（既定30分）
-
-#### 畳んだ質問セッションは同じ質問の会話へ戻れる（#3033）
-
-実装セッションは畳まれても`--continue`で前回の続きから再開する（#1541）が、**質問セッションでは
-`--continue`を使わない**。`claude --continue`が拾うのは「そのcwdで最後に動いた会話」で、質問セッションの
-cwdは**質問Issueごとではなくリポジトリごと**に固定されている（#1529）。使うと、同じリポジトリへの
-2回目以降の質問が**別の質問Issueの会話の続き**として始まる（#1648で`ISSUE_DECK_CLAUDE_RESUME=0`を
-固定して塞いだ）。
-
-そのため畳まれた質問セッションを画面から続けられなかった（「新しい質問として聞き直す」しかなかった）。
-#3033で、cwdを分けずに**会話だけを質問Issueごとに特定する**形にした（Codexの`.codex-thread`と同じ手口）。
-
-```text
-SessionStart フック（scripts/session-notify.sh）
-  ↓ kind=question かつ Claude Code のときだけ、フックのJSONの session_id を控える
-~/.local/state/issue-deck/sessions/<リポジトリ名>-issue-<番号>.claude-session   ← tmuxセッション名がキー
-  ↓ 畳んだ後、画面の「セッションを復旧」（CROSS_REPO_QUESTION ジョブ）で起動し直す
-scripts/run-issue-session.sh
-  ↓ 控えたIDと履歴（~/.claude/projects/<cwd>/<id>.jsonl）が揃えば `claude --resume <id>`
-```
-
-- **`--continue`は質問セッションでは一切使わない。** 控えが無い・履歴が消えている場合は新しい会話で
-  始め、古いIDは消す（安全側。**別の質問の会話へ戻るより、新しい会話の方がまし**）。新しい会話でも、
-  起動プロンプトには質問Issueの全コメント（前回の回答を含む）を載せているので、経緯は読める
-- **再開時のキックオフ文面は質問セッション専用**。cwdがgitリポジトリではないため`gh issue view`に
-  `--repo`（`ISSUE_DECK_REPO_SLUG`）を付け、「作業の続き」ではなく「追い質問（未回答のコメント）への回答」を
-  指示する。実装セッションの再開文面（`--repo`なし）をそのまま使うと、質問Issueを引けない
-- **控えるのは質問セッションだけ**（記述子の`kind`）。実装セッションはworktreeごとに`--continue`で戻れる
-  ので、ファイルを増やす理由が無い。Codexは従来の`.codex-thread`
-- `session_state_remove`は`.claude-session`を消さない（畳んだ後にこそ要るため）
-- **画面の入口は「終了したセッションの行」**（`SessionRecoveryButton`）。行は24時間残るので、それを過ぎると
-  入口が無い（控えたIDはホストに残るが、押す場所が無い）。積むのは`LAUNCH`ではなく質問ジョブで、
-  `11.local`は付けない。説明文は「記録が残っていない場合は新しい会話で始まる」まで書く
-- 再開後もsessionIdが変わるかどうかは実機依存だが、変わってもフックが起動のたびに最新のIDで上書きする
-  ので復旧の妥当性は変わらない
-
-#### 実装はしないが、Issueの起票はしてよい（#1528）
-
-調べた結果「対応が必要だ」と分かったことを回答コメントに書くだけで終わらせると、どのカンバンにも
-残らず追跡できなくなる。そのため**起票だけを認め、実装は引き続き行わない**（`Edit`・`Write`は
-`--disallowedTools`で封じたまま）。ルールは無人実行の質問応答と同じで、
-[labels.md](labels.md)「質問セッションは実装しないが、Issueの起票はしてよい」に集約してある。
-
-**起票は許可規則として渡してある**（#2017）。`--permission-mode auto`のクラシファイアは同じ
-コマンドでも判断が変わり、実際に guchi-apps/dayspan#292 で起票が拒否されて、回答で挙がった改善が
-Issueとして残らないまま質問Issue自身で実装された。`run-issue-session.sh`が
-`--allowedTools "Bash(gh issue create:*)"`を常に渡すので、以後はクラシファイアの判断を待たない。
-**ただし効くのは静的解析できる形のコマンドだけ**で、`--body "$(cat <<'EOF' … EOF)"`のように
-コマンド置換を含む起票は規則の対象外として拒否される。プロンプトが「起票の`--body`は複数行の
-ままそのまま渡す」と指示しているのはこのため
-（[local-quick-start.md](local-quick-start.md)「起票（`gh issue create`）だけは許可規則として渡す」）。
-
-横断質問セッションだけの注意として、**起票先は質問Issueの記録先リポジトリとは限らない。**
-記録先（`question`等）へ誤って起票すると実装セッションを起こせない場所に埋もれるため、
-プロンプトは`gh issue create --repo <owner/repo>`で起票先を明示させる。`70.needs-decision`が定義されて
-いないリポジトリではラベル付きの作成が失敗するので、その場合はラベル無しで起票して回答に
-その旨を書く。
-
-#### 質問Issueの識別と置き場（#885・#1514）
-
-**質問Issueかどうかはタイトル接頭辞だけで判定する**（`isAskRepoQuestionIssue`）。ラベルを使わないのは、
-全連携リポジトリへラベルを配る必要があり、既に作られた質問Issueを遡って拾えないため。
-
-接頭辞は`[質問] `で、**旧形式の`質問: `も引き続き質問として扱う**（#1514で変更した。既存Issueの
-タイトルはGitHub上に残るので、片方しか見ないと既存分がビューからもワンボタンクローズからも消える）。
-旧形式の受け入れを外せるのは、旧形式の質問Issueが全てcloseされたあと。
-なおコメント側のトリガー接頭辞`@claude 質問: `（`ASK_CLAUDE_COMMENT_PREFIX`）は他リポジトリの
-ワークフローの起動条件と対になっている**別物で、変更していない**。
-
-画面では、openな質問Issueはサイドメニュー・スマホのホーム画面の**「質問」ビュー**（`view=question`）に
-集まり、「未着手」「実行中」からは除外される（#1514）。質問Issueは実装フローに乗らないまま
-Statusが`Ready`のため、除外しないと「次にどれへ着手させるか」を選ぶビューにcloseするまで居座る
-（`71.manual-step`を専用ビューへ寄せたのと同じ理由、#1240）。**closeが完了の合図**なので、
-質問ビューはstate=openのまま件数を出す。
+- **ジョブ種別**: `QUESTION`・`CROSS_REPO_QUESTION`は`DispatchJobKind`から外し、過去の行は
+  マイグレーション（`20261031090000_remove_question_jobs`）で消した。`DispatchHost.crossRepoQuestionCapable`も
+  落とした。`POST /api/dispatch`へ`question`・`cross_repo_question`が届いても未知の種別として400を返す
+- **poller**: 版数42で実行（`start-cross-repo-question.sh`）と申告（`crossRepoQuestion`）を外した。
+  **41以前のpollerと撤去後のサーバー、42のpollerと撤去前のサーバーのどちらの組み合わせでも、
+  ジョブの取得・報告は変わらない**——撤去後のサーバーは古い申告を読まずこの種別を配らず、撤去前の
+  サーバーは申告が無いホストを「非対応」として扱って配らないため
+- **残したもの**: 過去の質問Issueの表示（一覧の「回答待ち」「未確認」、コメントの質問・回答バッジ、
+  「回答を確認してクローズ」。[`lib/github/ask-claude.ts`](../../src/lib/github/ask-claude.ts)）。
+  引き上げ理由の`QUESTION_CLOSED`・`QUESTION_IDLE`は手作業セッションが使い続けているため名前ごと残し、
+  参照スナップショット（`scripts/lib/question-refs.sh`）も計画レビュー・コードレビューが使うため残した。
+  畳んだセッションをsessionIdで同じ会話へ戻す仕組み（#3033）は手作業セッション（#4231）が引き継いでいる
 
 ### 計画レビュー（G1）のセッション（#1855）
 
 ローカルセッションが計画を投稿した直後に、計画の関門（G1・#1218）を自動で通すためのジョブ。
-**人が押さなくても積まれる唯一の種別**で、そこが横断質問（#1454）・手作業の代行（#1828）との
+**人が押さなくても積まれる唯一の種別**で、そこがコードレビュー（#698）・手作業の代行（#1828）との
 いちばんの違いになる。設計の理由は[gates.md](gates.md)「ローカル経路の自動起動（#1855）」が正で、
 ここにはディスパッチの仕組みとして押さえる点だけを書く。
 
@@ -1469,12 +1191,12 @@ tmuxセッション <リポジトリ名>-plan-review-<番号> → 指摘はIssue
   数えるのは生きているペインを持つセッションだけ。固まった場合に備えて、
   ランチャーは`claude -p`に実行時間の上限（既定30分）を被せる。
   `planReviewMaxJobs`を送らない古いpollerには、従来どおり起動枠で配る
-- **参照スナップショットの置き場は横断質問と分ける**（`.plan-reviews/_refs`）。あちらは質問が
+- **参照スナップショットの置き場は他の経路と分ける**（`.plan-reviews/_refs`）。横断質問（#5051で撤去）は質問が
   起きるたびに`checkout --force --detach`で貼り替えるため、共有するとレビューの最中に足元の
   コードが変わる（`plan-base`のSHAとの突き合わせという、G1の中心的な作業の根拠が壊れる）。
   同じリポジトリの別の計画レビューが走っている間も貼り替えず、そのまま読む
 - 失敗したときだけ`remain-on-exit failed`でペインが残る。次に同じIssueのレビューを起こしたとき、
-  ランチャーが最後の出力を表示してから畳む（横断質問と同じ扱い）。出力は
+  ランチャーが最後の出力を表示してから畳む。出力は
   `~/apps/issue-deck-worktrees/.plan-reviews/<リポジトリ名>-<番号>.log`にも残る
 
 ### 開発サーバーの回収も1巡に相乗りさせる（#1223）
@@ -1559,9 +1281,9 @@ kill <PID>                             # 引けたPIDだけを止める
 `capture-pane`の内容は読まない。条件の一覧と、状態ファイルの置き場・書式は
 [作業が終わったセッションは自動で畳む](local-quick-start.md#作業が終わったセッションは自動で畳む1256)を参照。
 閾値は`SESSION_IDLE_MINUTES`（既定5・0で無効）と`SESSION_HANDOFF_IDLE_MINUTES`（既定5・#1541）、
-横断質問セッション専用の`QUESTION_SESSION_IDLE_MINUTES`（既定30・#1648）。**3つとも経路ごとに
-独立していて、掛け合わせない**（#1649）。手作業セッションは専用の
-`MANUAL_STEP_SESSION_IDLE_MINUTES`（既定720・#4973）を使う。
+手作業セッション専用の`MANUAL_STEP_SESSION_IDLE_MINUTES`（既定720・#4973）。**3つとも経路ごとに
+独立していて、掛け合わせない**（#1649）。かつての横断質問セッション専用の`QUESTION_SESSION_IDLE_MINUTES`は
+#5051で撤去した。
 
 **畳んでよいかを起動経路で切る。** 対象になるのはpollerが`run_job()`で起動したセッションだけで、
 `ISSUE_DECK_SESSION_REAPABLE=1`をランチャー経由でtmuxの中まで渡し、`run-issue-session.sh`が
@@ -1635,8 +1357,8 @@ PRを最後まで作らないため、**どの経路にも当たらず永久に�
   返る余地があるので長めに取る」という段差も、既定値では成立していない（どちらも60分）。
   サブPCが`SESSION_IDLE_MINUTES=5`を設定して初めて30が効き、実効30分になった
 - **経路ごとに独立させる。** CLOSED・マージ済みは`SESSION_IDLE_MINUTES`だけ、引き渡し済みは
-  `SESSION_HANDOFF_IDLE_MINUTES`だけを見る。横断質問セッション（#1648）がすでに
-  `QUESTION_SESSION_IDLE_MINUTES`で共通猶予を置き換える方式だったので、そちらに揃えた形になる。
+  `SESSION_HANDOFF_IDLE_MINUTES`だけを見る。横断質問セッション（#1648・#5051で撤去）がすでに
+  専用の猶予で共通猶予を置き換える方式だったので、そちらに揃えた形になる。
   早い段階の猶予チェックは**短い方での足切り**として残す（`gh`を叩く前に落とすため）
 - **段差そのものも取り下げ、既定を60/30から5/5へ下げた。** 根拠はサブPCのpollerログの実測
   （2026-08-14〜15の1.7日・134件を回収して、**畳んだ後に呼び戻したケースが0件**）。
@@ -2092,8 +1814,8 @@ issue-deck 1つだけ**になっていた。詳細は[generic-launcher.md](gener
    含まれないため、別ownerに同名のリポジトリがあるとどちらのIssueか決められない。**曖昧なときは
    送らない**（当てずっぽうに選ぶと、無関係なIssueへ引き上げのコメントを投稿することになる）
 
-**1を先に見るのは、横断質問セッション（#1454）の記録先が`local-repos.conf`に載らないため**
-（後述の「記録先リポジトリはcloneされていなくてよい」）。2だけを見ていた間は質問セッションが
+**1を先に見るのは、記録先が`local-repos.conf`に載らないセッションがあるため**
+（横断質問セッション〈#1454・#5051で撤去〉の記録先`guchi-apps/question`で起きた）。2だけを見ていた間は質問セッションが
 まるごと報告から落ち、画面にも出ず、#1465の「Claude Codeがまだ開始していません」の引き上げも
 一度も働いていなかった（#1537）。**質問セッションこそ、初めて触るリポジトリの参照でフォルダの
 信頼確認に当たりやすく、フックが1つも飛ばないまま止まる**ので、この経路が効かないと止まっている
@@ -2487,8 +2209,8 @@ GitHub Actionsで並列に一括で流す使い方をやめ、**サブPCで順�
 **並びは`createdAt`の昇順で、払い出し（`claimDispatchJob`の`orderBy`）と同じ。** 画面に見えて
 いる順番と実際に走る順番が一致する。
 
-**数える種別も払い出しと同じ`SESSION_LAUNCH_JOB_KINDS`（`LAUNCH`・`CROSS_REPO_QUESTION`）にする**
-（#1544）。横断質問セッション（#1454）は起動ジョブと同じ同時実行数の枠を消費するのに、画面が
+**数える種別も払い出しと同じ`SESSION_LAUNCH_JOB_KINDS`（`LAUNCH`・`MANUAL_STEP_SESSION`など）にする**
+（#1544）。横断質問セッション（#1454・#5051で撤去）は起動ジョブと同じ同時実行数の枠を消費するのに、画面が
 `LAUNCH`しか数えていなかったため、枠が埋まっていても「実行中 0/2」と出ていた。順番待ちが進まない
 理由（`describeDispatchQueueStall`・`describeDispatchJobWaitReason`）も、枠を使っているジョブを
 数えないまま判断することになる。**枠の計算・画面・「先頭へ上げる」は同じ定数を見る。**
@@ -2621,7 +2343,7 @@ tmuxセッションが立った時点で`succeeded`になるため、**10本走�
 |---|---|---|
 | 同時に起動する本数を減らす | `AppSetting.dispatchConcurrency`（既定2） | アプリ設定ダイアログ |
 | 生かしておくセッションの本数の天井 | `DISPATCH_MAX_SESSIONS`（既定12） | サブPCの`dispatch.env`（後述） |
-| 終わったセッションを早く畳む | `SESSION_IDLE_MINUTES`・`SESSION_HANDOFF_IDLE_MINUTES`・`QUESTION_SESSION_IDLE_MINUTES` | 同上 |
+| 終わったセッションを早く畳む | `SESSION_IDLE_MINUTES`・`SESSION_HANDOFF_IDLE_MINUTES`・`MANUAL_STEP_SESSION_IDLE_MINUTES` | 同上 |
 | 先に流したいIssueを割り込ませる | 実行キューの↑ | 画面 |
 
 ホストが落ちた#1361の直接原因は**セッションの本数**で、そこは`DISPATCH_MAX_SESSIONS`が入口で
@@ -2881,13 +2603,13 @@ poller の POST /api/dispatch/claim（非fast） → 次枠実行 → keepClaude
 
 | ルート | 認証 | 用途 |
 |---|---|---|
-| `POST /api/dispatch` | ログインセッション | ジョブを積む。実行できない組み合わせは理由付きで拒否。`kind`（省略時は起動／`interrupt`／`kill`）で種別を指定する（#1332）。`instruction`は本文（`instruction`）も要る（#1012）。`cross_repo_question`は横断質問セッション（#1454）。`question`は**まだ受け付けない**（400。#1294） |
+| `POST /api/dispatch` | ログインセッション | ジョブを積む。実行できない組み合わせは理由付きで拒否。`kind`（省略時は起動／`interrupt`／`kill`）で種別を指定する（#1332）。`instruction`は本文（`instruction`）も要る（#1012）。かつての`question`・`cross_repo_question`は撤去済みで400（#5051） |
 | `GET /api/dispatch` | ログインセッション | ホストの申告・未完了ジョブ・直近24時間の終了ジョブ・セッションの状態・同時実行数 |
 | `POST /api/dispatch/<id>/cancel` | ログインセッション | 取り消し（`queued`・`claimed`のみ） |
-| `POST /api/dispatch/<id>/prioritize` | ログインセッション | 順番待ちを先頭へ上げる（`queued`の起動ジョブ・横断質問のみ。#1541） |
+| `POST /api/dispatch/<id>/prioritize` | ログインセッション | 順番待ちを先頭へ上げる（`queued`のセッションを立てるジョブのみ。#1541） |
 | `POST /api/dispatch/claim` | `DISPATCH_SECRET` | ジョブの払い出し |
 | `POST /api/dispatch/report` | `DISPATCH_SECRET` | `running` / `succeeded` / `failed` / `skipped` の報告 |
-| `POST /api/dispatch/hosts` | `DISPATCH_SECRET` | 実行可能リポジトリの申告＋生存報告（プレビューの可否・セッション操作の可否・追加指示の可否・横断質問の可否・セッションの本数と上限・リソース使用率も申告する） |
+| `POST /api/dispatch/hosts` | `DISPATCH_SECRET` | 実行可能リポジトリの申告＋生存報告（プレビューの可否・セッション操作の可否・追加指示の可否・セッションの本数と上限・リソース使用率も申告する） |
 | `POST /api/dispatch/pr-review` | `PROGRESS_REPORT_SECRET` | develop向けPRのAIレビュー（`PR_REVIEW`）の依頼（`action: request`。冪等・結果は待たない）と状態の取得（`action: status`）。呼ぶのはActionsの`codex-review`・`auto-merge`ジョブ（#3990） |
 | `POST /api/dispatch/pr-review/resume-sweep` | `DISPATCH_SECRET` | 確定したPRレビューの最終マージ判定（`auto-merge`ジョブの再実行）を再開する巡回。pollerが毎巡呼ぶ（#3990） |
 | `POST /api/dispatch/sessions` | `DISPATCH_SECRET` | 起動後のtmuxセッションの状態報告（#1217） |

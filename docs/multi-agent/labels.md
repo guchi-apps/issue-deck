@@ -792,8 +792,8 @@ gh api repos/guchi-apps/issue-deck/issues/<親の番号>/sub_issue --method DELE
 
 ## 質問セッションは実装しないが、Issueの起票はしてよい
 
-**質問セッションでも新規Issueの起票だけは認める**（#1528）。対象は無人実行の質問応答（`mode=ask`）と、
-ローカルの横断質問セッション（[subpc-dispatch.md](subpc-dispatch.md)）の両方。
+**質問セッションでも新規Issueの起票だけは認める**（#1528）。対象は無人実行の質問応答（`mode=ask`）
+（ローカルの横断質問セッションも対象だったが、#5051で撤去した）。
 
 質問セッションは実装を行わない。しかし、答えた結果「これは対応が必要だ」と分かったことを回答
 コメントに書くだけで終わらせると、**どのカンバンにも残らず追跡できなくなる**。実装しないことと、
@@ -812,8 +812,6 @@ gh api repos/guchi-apps/issue-deck/issues/<親の番号>/sub_issue --method DELE
 - **既存Issueのラベル・状態は変更しない。** 許可ツールにも`gh issue edit`・`gh issue close`を
   含めていない（[dispatch.md](dispatch.md)「無人実行時の権限モード（許可ツールリスト）」）。
   質問された側のIssueの進行を、質問への回答が動かしてしまわないようにするため
-- **横断質問セッションでは起票先が質問Issueの記録先リポジトリとは限らない。**
-  `gh issue create --repo <owner/repo>`で起票先を明示させる
 
 ## 開発環境プレビュー要否をIssueラベルでトグルする
 

@@ -24,12 +24,12 @@ issue-deckの画面のボタン（アプリ設定 → 共有ワークフロー�
 思想として避けているのではなく、**実行体が1リポジトリしか見られない**という構造による。
 
 - **無人実行（GitHub Actions）は1リポジトリしかcheckoutしない。** そのため構造的に横断できない
-  （[multi-agent/subpc-dispatch.md](multi-agent/subpc-dispatch.md)「複数リポジトリ横断の質問セッション」）
+  （横断して読めた横断質問セッションは#5051で撤去した。[multi-agent/subpc-dispatch.md](multi-agent/subpc-dispatch.md)「質問機能は撤去した」）
 - **ローカルの実装セッションはIssue 1件＝worktree 1つ**で、担当Issue以外の実装は
   [CLAUDE.md](../CLAUDE.md)「実装エージェントの禁止事項」で明示的に禁止している。進捗の遷移・
   closeがブランチ名`issue-<番号>`だけを見ているため、混ぜると起票側が`Ready`のまま取り残される
-- **横断して読める実行体は横断質問セッションだけで、それは読み取り専用**である
-  （`--disallowedTools "Edit,Write,NotebookEdit"`。[scripts/start-cross-repo-question.sh](../scripts/start-cross-repo-question.sh)）
+- **横断して読むのは人が開くリモートセッション**（[remote-session.md](remote-session.md)）で、
+  自動で横断して読む実行体は無い
 - 画面のIssue作成も**単一リポジトリ固定**（`repositoryFullName`は1つだけ受け取る。
   [src/components/dashboard/create-issue-dialog.tsx](../src/components/dashboard/create-issue-dialog.tsx)・
   [src/app/api/issues/route.ts](../src/app/api/issues/route.ts)の`handlePOST`）
@@ -57,11 +57,12 @@ issue-deckの画面のボタン（アプリ設定 → 共有ワークフロー�
 
 自動化が無いのはこの行だけで、実際に手間がかかるのもここ。次の順で進める。
 
-### 1. 影響範囲を横断質問で出す
+### 1. 影響範囲を横断して調べる
 
-どのリポジトリが該当するかを先に確定させる。**推測で列挙しない。** issue-deckの画面の
-「横断質問」（PCはヘッダー・スマホはIssue一覧の「？」）から聞くと、サブPCが全リポジトリの
-チェックアウトを`--add-dir`で参照した読み取り専用セッションで答える。
+どのリポジトリが該当するかを先に確定させる。**推測で列挙しない。** issue-deckの画面から
+リモートセッション（[remote-session.md](remote-session.md)）を立て、サブPCにある各リポジトリの
+チェックアウト（`~/apps/<repo>`）を横断して検索させる。かつての「横断質問」（全リポジトリを`--add-dir`で
+参照した読み取り専用セッション）は#5047・#5051で撤去した。
 
 質問例: 「`withUserGithubToken`と同じ形でトークンを復号している箇所が、issue-deck以外の
 どのリポジトリのどのファイルにあるか」
@@ -180,6 +181,6 @@ Issue作成ダイアログに「複数のリポジトリへ同じ内容で作る
 ## 未確定・要判断
 
 - 親Issueをどのリポジトリに置くか。変更の発生元に置く運用にしているが、**アプリを持たない
-  `guchi-apps/question`**（横断質問の置き場）へ寄せる案もある。ただしあちらは盤面に載らず
+  `guchi-apps/question`**（かつての横断質問の置き場）へ寄せる案もある。ただしあちらは盤面に載らず
   実装フローの導線も持たないため、追跡の器としては弱い
   （[supported-repositories.md](supported-repositories.md)「`guchi-apps/question`（質問専用・盤面外）」）

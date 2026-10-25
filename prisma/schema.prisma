@@ -821,17 +821,15 @@ enum DispatchJobStatus {
 // **poller側はセッション名をジョブのrepositoryFullName/issueNumberから組み立て直し、
 // 受け取った名前と一致しなければ実行しない**（任意コマンド実行の経路にしないため）。
 //
-// QUESTION（#1294）はセッションを立てず、読み取り専用の質問応答を1回走らせて回答コメントを
-// 投稿するジョブ。**activeKeyを取らない**（下記`activeKey`のコメント参照）。
-// **まだ積む経路も払い出し口も無い**（器だけを先に入れている）。実行はStep 3（別Issue）で、
-// poller側の対応申告とセットで開ける。
+// かつてのQUESTION（#1294）・CROSS_REPO_QUESTION（#1454）は質問機能の撤去（#5047・#5051）で外した。
+// 過去の行はマイグレーションで消している。
 // MANUAL_STEP_ABORT（#1882）は走っている代行実行（MANUAL_STEP）を止めるジョブ。
 // pollerが`systemctl --user stop issue-deck-manual-step-<対象ジョブID>`を実行する。
 // **セッションを操作するジョブではない**（相手はtmuxではなくtransient unit）ため、
 // `SESSION_CONTROL_JOB_KINDS`ではなく`OUT_OF_BAND_JOB_KINDS`に入れて枠外で先に配る。
 // 止める対象は`targetJobId`で指す（pollerはユニット名を組み立て直す。任意の
 // `systemctl stop`を流す経路にしない）。
-// PLAN_REVIEW（#1855）は計画の関門（G1・#1218）のセッションを立てるジョブ。CROSS_REPO_QUESTIONと
+// PLAN_REVIEW（#1855）は計画の関門（G1・#1218）のセッションを立てるジョブ。LAUNCHと
 // 同じく「セッションを立てる」側で、worktreeは作らず対象リポジトリの`origin/develop`の
 // スナップショットを読むだけ。**実装セッションが承認待ちで生きている最中に走るのが常態**なので、
 // 起動ジョブと違って「そのIssueのセッションが動いている」ことを理由に弾かない。
@@ -845,9 +843,7 @@ enum DispatchJobKind {
   LAUNCH
   INTERRUPT
   KILL
-  QUESTION
   INSTRUCTION
-  CROSS_REPO_QUESTION
   MANUAL_STEP
   MANUAL_STEP_ABORT
   PLAN_REVIEW
@@ -939,11 +935,6 @@ model DispatchJob {
   // **種別ごとに名前空間を分ける**（#1332。制御ジョブは `interrupt:owner/repo#番号`）。
   // 制御ジョブでnullにすると起動ジョブとは衝突しない代わりに、スマホでの連打ぶんだけ
   // `C-c`が積まれる。前置きを付ければ衝突せず、「未処理の停止は1件まで」も同時に守れる。
-  //
-  // **質問ジョブ（QUESTION）だけはnullのままにする**（#1294）。「未完了は1件まで」は実装ジョブの
-  // 二重起動を防ぐための制約で、質問には当てはまらない。ここで枠を取ると、
-  // **実装ジョブが走っているIssueに質問を積めなくなる**（質問はまさに実装中に割り込んで
-  // 聞くための機能なので、それでは意味が無い）。
   activeKey             String?           @unique
   // 画面から積んだユーザー（User.id）。Userを消してもジョブの履歴は残すためFKは張らない
   requestedByUserId     String?
@@ -1165,11 +1156,6 @@ model DispatchHost {
   // （`null`＝未申告は「できない」として扱うのは同じ）
   instructionCapable        Boolean?
   stashInputCapable          Boolean?
-  // 複数リポジトリ横断の質問セッション（#1454）を起こせるか。`scripts/start-cross-repo-question.sh`を
-  // 持つpollerだけが申告する。**`null`（未申告＝古いpoller）は「できない」として扱う**
-  // （`sessionControlCapable`・`instructionCapable`と同じ向き。古いpollerへ配ると未知の種別として
-  // `failed`になり、質問が必ず失われる）
-  crossRepoQuestionCapable  Boolean?
   // 手作業アシスタントからの代行実行（#1828）を実行できるか。`scripts/run-manual-step.sh`を
   // 持つpollerだけが申告する。**`null`（未申告＝古いpoller）は「できない」として扱う**
   // （`sessionControlCapable`・`instructionCapable`と同じ向き）。
@@ -1207,7 +1193,7 @@ model DispatchHost {
   manualStepVpsCapable      Boolean?
   // 計画の関門（G1・#1218）のセッションを起こせるか（#1855）。`scripts/start-plan-review.sh`を
   // 持つpollerだけが申告する。**`null`（未申告＝古いpoller）は「できない」として扱う**
-  // （`crossRepoQuestionCapable`・`manualStepCapable`と同じ向き）。
+  // （`sessionControlCapable`・`manualStepCapable`と同じ向き）。
   //
   // 計画レビューは**計画コメントの投稿を契機に自動で積まれる**ため、対応していないホストへ配ると
   // 計画のたびに`failed`のジョブが並ぶ。申告を見てから配る意味は他の種別より大きい。

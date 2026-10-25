@@ -61,7 +61,6 @@ import {
   describeDispatchEnqueueRejection,
   describeCodeReviewRejection,
   describeManualStepAbortRejection,
-  describeCrossRepoQuestionRejection,
   describeManualStepSessionRejection,
   describeDispatchReportLost,
   describeDispatchTimeout,
@@ -87,7 +86,6 @@ import {
   readDispatchAgent,
   resolveCodeReviewRejection,
   resolveDefaultCodeReviewHost,
-  resolveCrossRepoQuestionRejection,
   resolveManualStepSessionRejection,
   resolveDispatchConcurrency,
   resolveDispatchAgentRejection,
@@ -102,7 +100,6 @@ import {
   SESSION_CONTROL_JOB_KINDS,
   SESSION_LAUNCH_JOB_KINDS,
   type CodeReviewRejection,
-  type CrossRepoQuestionRejection,
   type ManualStepSessionRejection,
   type AgentPauseReason,
   type DispatchAgent,
@@ -275,7 +272,6 @@ function toHostView(host: DispatchHost, now: Date): DispatchHostView {
     sessionControlCapable: host.sessionControlCapable,
     instructionCapable: host.instructionCapable,
     stashInputCapable: host.stashInputCapable,
-    crossRepoQuestionCapable: host.crossRepoQuestionCapable,
     manualStepCapable: host.manualStepCapable,
     manualStepAbortCapable: host.manualStepAbortCapable,
     manualStepValuesCapable: host.manualStepValuesCapable,
@@ -908,96 +904,6 @@ async function isHighPriorityDispatchIssue(
   return issue?.labels.length === 1;
 }
 
-export type EnqueueCrossRepoQuestionJobResult =
-  | { ok: true; job: DispatchJobView }
-  | { ok: false; rejection: CrossRepoQuestionRejection; message: string };
-
-/**
- * 複数リポジトリ横断の質問セッション（#1454）を積む。
- *
- * **起動ジョブ（`enqueueDispatchJob`）とは判定が違う。** 記録先リポジトリがサブPCに
- * cloneされているかは問わない（worktreeを作らず、記録先へは`gh issue comment`で書くだけ）。
- * 代わりに「参照できるリポジトリが1件以上あるか」と「pollerが横断質問に対応しているか」を見る。
- */
-export async function enqueueCrossRepoQuestionJob(params: {
-  /** 質問Issueの置き場所（`question`リポジトリなど）。**参照範囲とは無関係** */
-  repositoryFullName: string;
-  issueNumber: number;
-  hostName: string;
-  requestedByUserId: string | null;
-  now?: Date;
-}): Promise<EnqueueCrossRepoQuestionJobResult> {
-  const now = params.now ?? new Date();
-  await expireStaleDispatchJobs(now);
-
-  const reject = (rejection: CrossRepoQuestionRejection): EnqueueCrossRepoQuestionJobResult => ({
-    ok: false,
-    rejection,
-    message: describeCrossRepoQuestionRejection(rejection, { hostName: params.hostName }),
-  });
-
-  const host = await db.dispatchHost.findUnique({ where: { name: params.hostName } });
-
-  // そのIssueで既にセッションが動いていれば積ませない（#1311と同じ層）。判定の材料が
-  // DBの行かビューかの違いだけで、中身は`findBlockingSession`と揃えている
-  const aliveSession = await db.dispatchSession.findFirst({
-    where: {
-      repositoryFullName: params.repositoryFullName,
-      issueNumber: params.issueNumber,
-      state: "ALIVE",
-    },
-    orderBy: { lastReportedAt: "desc" },
-  });
-  const sessionHost = aliveSession
-    ? aliveSession.host === host?.name
-      ? host
-      : await db.dispatchHost.findUnique({ where: { name: aliveSession.host } })
-    : null;
-  const blockingSession =
-    aliveSession && sessionHost && isDispatchHostOnline(sessionHost.lastSeenAt, now)
-      ? aliveSession
-      : null;
-
-  // 判定そのものは画面側と同じ関数を使う（片方だけで持つと、押せるのに拒否される状態が生まれる）
-  const rejection = resolveCrossRepoQuestionRejection({
-    host: host
-      ? {
-          online: isDispatchHostOnline(host.lastSeenAt, now),
-          crossRepoQuestionCapable: host.crossRepoQuestionCapable,
-          repositories: parseDispatchHostRepositories(host.repositories),
-        }
-      : null,
-    // 二重投入はactiveKeyのunique制約が確実に止める（下のcatch）。ここでは先読みしない
-    hasActiveJob: false,
-    blockingSession,
-  });
-  if (rejection) return reject(rejection);
-
-  try {
-    const job = await db.dispatchJob.create({
-      data: {
-        repositoryFullName: params.repositoryFullName,
-        issueNumber: params.issueNumber,
-        targetHost: params.hostName,
-        kind: "CROSS_REPO_QUESTION",
-        status: "QUEUED",
-        // **実装ジョブとは名前空間を分ける**（`cross_repo_question:owner/repo#番号`）。同じ
-        // 質問Issueへの二重起動だけを止め、実装中のIssueへ質問を積むことは妨げない
-        activeKey: buildDispatchActiveKey(
-          params.repositoryFullName,
-          params.issueNumber,
-          "CROSS_REPO_QUESTION",
-        ),
-        requestedByUserId: params.requestedByUserId,
-      },
-    });
-    notifyDispatchHostWake(job.targetHost);
-    return { ok: true, job: toJobView(job) };
-  } catch {
-    return reject("already_queued");
-  }
-}
-
 export type EnqueueManualStepSessionJobResult =
   | { ok: true; job: DispatchJobView }
   | { ok: false; rejection: ManualStepSessionRejection; message: string };
@@ -1005,7 +911,7 @@ export type EnqueueManualStepSessionJobResult =
 /**
  * 手作業Issueを実施するエージェントセッション（#2771）を積む。
  *
- * 横断質問（`enqueueCrossRepoQuestionJob`）と同じ作法で、**動いているセッションがあれば弾く**
+ * 起動ジョブ（`enqueueDispatchJob`）と同じ作法で、**動いているセッションがあれば弾く**
  * （同じIssueにセッションは1本）。対象が`71.manual-step`のIssueかどうかは**DBのIssueキャッシュの
  * ラベル**で確かめる——代行実行（`enqueueManualStepJob`）と同じ材料で、画面が送ってきた値は
  * 信用しない。`activeKey`は`manual_step_session:owner/repo#番号`で、代行実行（`manual_step:…`）
@@ -2017,13 +1923,12 @@ export async function claimDispatchJobs(params: {
     claimed.push(...(await claimCandidates(controls, params.hostName, now)));
   }
 
-  // **横断質問（#1454）は起動ジョブと同じ枠で扱う。** tmuxセッションを立てるジョブなので、
-  // 制御ジョブのように枠外へ出すとセッション本数の見積もりが崩れる。対応を申告していない
-  // pollerには配らない（古いpollerは未知の種別として`failed`で返すため、質問が必ず失われる）
+  // **tmuxセッションを立てるジョブは起動ジョブと同じ枠で扱う。** 制御ジョブのように枠外へ出すと
+  // セッション本数の見積もりが崩れる。対応を申告していないpollerには配らない（古いpollerは
+  // 未知の種別として`failed`で返すため、押した起動が失われる）
   const launchKinds: DispatchJobKind[] = ["LAUNCH"];
   if (host?.reviewFixCapable === true && host.codexCapable === true) launchKinds.push("REVIEW_FIX");
-  if (host?.crossRepoQuestionCapable === true) launchKinds.push("CROSS_REPO_QUESTION");
-  // **計画レビュー（G1・#1855）も同じ枠。** tmuxセッションを立てる点は横断質問と同じで、
+  // **計画レビュー（G1・#1855）も同じ枠。** tmuxセッションを立てる点は起動ジョブと同じで、
   // 対応を申告していないpollerに配ると、計画を出すたびに`failed`のジョブが並ぶ。
   // **空き本数を申告したpollerには、下で枠外として配る**（#3772）
   const planReviewSeparate = params.planReviewMaxJobs !== undefined;
@@ -2031,7 +1936,7 @@ export async function claimDispatchJobs(params: {
   // **コードレビュー（#698）も同じ枠。** レビュー1本で終わるが、走っている間はtmuxセッションを
   // 1本占めるため、枠外へ出すと本数の見積もりが崩れる（計画レビューと同じ扱い）
   if (host?.codeReviewCapable === true) launchKinds.push("CODE_REVIEW");
-  // **手作業セッション（#2771）も同じ枠。** tmuxセッションを1本立てる点は横断質問と同じで、
+  // **手作業セッション（#2771）も同じ枠。** tmuxセッションを1本立てる点は起動ジョブと同じで、
   // 対応を申告していないpollerに配ると未知の種別として`failed`になり、押した起動が失われる
   if (host?.manualStepSessionCapable === true) launchKinds.push("MANUAL_STEP_SESSION");
 
@@ -2086,11 +1991,6 @@ export async function claimDispatchJobs(params: {
   }
   if (available <= 0) return claimed;
 
-  // **質問ジョブ（`QUESTION`、#1294）はどのpollerにも配らない。** 種別を明示して引くため
-  // ここに混ざることは無いが、意図として書いておく。現行のpollerは未知の種別を
-  // 「未知のジョブ種別です」として`failed`で返す（`scripts/subpc-dispatch-poller.sh`）ので、
-  // 実行側が来ていない段階で配ると質問が必ず失敗として残る。払い出しはStep 3（別Issue）で、
-  // poller側の対応申告（`sessionControlCapable`と同じ形）とセットで開ける。
   // **並びは`queuePriority`降順 →`createdAt`昇順**（#1541）。既定は全件0なので、既存の
   // 「積んだ順」がそのまま残る。画面（`summarizeDispatchQueue`）も同じ並びで出すので、
   // 見えている順番と実際に走る順番が一致する。
@@ -2643,8 +2543,6 @@ export async function announceDispatchHost(params: {
   /** 追加指示を送れるか（#1012）。申告していないpollerでは`null`＝非対応 */
   instructionCapable: boolean | null;
   stashInputCapable?: boolean | null;
-  /** 横断質問セッションを起こせるか（#1454）。申告していないpollerでは`null`＝非対応 */
-  crossRepoQuestionCapable: boolean | null;
   /** 手作業の代行実行を実行できるか（#1828）。申告していないpollerでは`null`＝非対応 */
   manualStepCapable: boolean | null;
   /** 走っている代行実行を止められるか（#1882）。申告していないpollerでは`null`＝非対応 */
@@ -2736,7 +2634,6 @@ export async function announceDispatchHost(params: {
     sessionControlCapable: params.sessionControlCapable,
     instructionCapable: params.instructionCapable,
     stashInputCapable: params.stashInputCapable ?? null,
-    crossRepoQuestionCapable: params.crossRepoQuestionCapable,
     manualStepCapable: params.manualStepCapable,
     manualStepAbortCapable: params.manualStepAbortCapable,
     manualStepValuesCapable: params.manualStepValuesCapable,
