@@ -134,9 +134,38 @@ describe("callClaudeMessages", () => {
     expect(JSON.parse(String(init.body))).toEqual({
       model: "claude-haiku-4-5",
       max_tokens: 8,
-      system: "sys",
+      system: [
+        { type: "text", text: "You are Claude Code, Anthropic's official CLI for Claude." },
+        { type: "text", text: "sys" },
+      ],
       messages: [],
     });
+  });
+
+  // OAuthトークンは名乗りが独立した先頭ブロックでないとSonnet・Opusを429で拒否する（#5006）
+  it.each([
+    ["systemが無い", undefined, []],
+    ["文字列", "sys", [{ type: "text", text: "sys" }]],
+    [
+      "ブロック配列",
+      [{ type: "text", text: "a", cache_control: { type: "ephemeral" } }],
+      [{ type: "text", text: "a", cache_control: { type: "ephemeral" } }],
+    ],
+  ])("systemが%sでも先頭にClaude Codeの名乗りブロックを置く", async (_label, system, rest) => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ content: [{ type: "text", text: "ok" }] }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await callClaudeMessages({
+      feature: "release_review_recommend",
+      token: "test-token",
+      body: { max_tokens: 8, messages: [], ...(system === undefined ? {} : { system }) },
+    });
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(JSON.parse(String(init.body)).system).toEqual([
+      { type: "text", text: "You are Claude Code, Anthropic's official CLI for Claude." },
+      ...rest,
+    ]);
   });
 
   it("旧IDで保存されたclaude-sonnet-5はSonnet 5.5へ読み替えて送る（#3612）", async () => {

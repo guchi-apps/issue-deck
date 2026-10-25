@@ -784,6 +784,14 @@ Claudeモデルは`CLAUDE_CODE_OAUTH_TOKEN`、GPTモデルは`OPENAI_API_KEY`を
 [`src/lib/ai-model-pricing.ts`](../../src/lib/ai-model-pricing.ts)から引き、**単価を知らない
 モデルが1つでも混じっている機能には金額を出さない**——足りない分を0として足すと実際より安く見える。
 
+**Claudeへ送る`system`の先頭には、送信口が必ずClaude Codeの名乗りブロックを差し込む**（#5006）。
+`CLAUDE_CODE_OAUTH_TOKEN`（サブスク枠のOAuth）は、`system`の**独立した最初のブロック**が
+`You are Claude Code, Anthropic's official CLI for Claude.`でないと、Sonnet・Opusを
+`429 rate_limit_error`（message `"Error"`）で拒否する。Haikuは名乗りが無くても通る。利用枠の
+ヘッダ（`anthropic-ratelimit-unified-*-status`）は`allowed`のままなので、**枠の上限ではない**。
+名乗りを機能の`system`文字列へ連結しても通らないため、機能ごとの指示は後続のブロックに置く。
+この入口を通らずにOAuthトークンでSonnet・Opusを呼ぶ処理を足すと、同じ429になる。
+
 **Claude Fable 5.1も候補に入っている**（#2717）が、ここでの呼び出しは1往復で終わり
 キャッシュがほとんど効かないため、単価差（Sonnet 5.5の5倍）がそのまま金額に出る。上の
 「重いIssueだけモデルを上げる」で書いたセッションの話とは逆向きになる点に注意する。

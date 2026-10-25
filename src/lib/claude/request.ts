@@ -31,6 +31,26 @@ const ANTHROPIC_API = "https://api.anthropic.com";
 const ANTHROPIC_VERSION = "2023-06-01";
 const OAUTH_BETA = "oauth-2025-04-20";
 
+/**
+ * サブスク枠のOAuthトークンは、`system`の**独立した最初のブロック**がこの名乗りでないと、
+ * Sonnet・Opusを`429 rate_limit_error`（message `"Error"`。利用枠ヘッダは`allowed`のまま）で拒否する
+ * （Haikuは通る。#5006）。文字列へ連結しても通らないため、機能ごとの`system`はこの後ろのブロックに置く
+ */
+const CLAUDE_CODE_IDENTITY = "You are Claude Code, Anthropic's official CLI for Claude.";
+
+type SystemBlock = { type: "text"; text: string } & Record<string, unknown>;
+
+/** 機能が渡した`system`（無し・文字列・ブロック配列）の前に名乗りブロックを差し込む */
+export function withClaudeCodeIdentity(system: unknown): SystemBlock[] {
+  const identity: SystemBlock = { type: "text", text: CLAUDE_CODE_IDENTITY };
+  if (typeof system === "string") return system ? [identity, { type: "text", text: system }] : [identity];
+  if (Array.isArray(system)) {
+    const blocks = system as SystemBlock[];
+    return blocks[0]?.text === CLAUDE_CODE_IDENTITY ? blocks : [identity, ...blocks];
+  }
+  return [identity];
+}
+
 /** 応答のうち、どの機能でも共通して読む部分。 */
 export type ClaudeMessagesResponse = {
   content?: { type: string; text?: string }[];
@@ -163,7 +183,7 @@ export async function callClaudeMessages<T extends ClaudeMessagesResponse = Clau
       "anthropic-version": ANTHROPIC_VERSION,
       "content-type": "application/json",
     },
-    body: JSON.stringify({ ...options.body, model }),
+    body: JSON.stringify({ ...options.body, system: withClaudeCodeIdentity(options.body.system), model }),
     cache: "no-store",
     ...(options.timeoutMs === undefined ? {} : { signal: AbortSignal.timeout(options.timeoutMs) }),
   });
