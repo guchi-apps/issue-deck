@@ -38,6 +38,18 @@ export function loadReleaseDiscordTarget(
   return { webhookUrl };
 }
 
+/**
+ * 共有トークン警告の投稿先（#5043）。専用の`DISCORD_SHARED_TOKEN_ALERT_WEBHOOK_URL`を優先し、
+ * 未設定・形が違うときはリリース通知の宛先へ退避する（どちらも無ければnull）。
+ */
+export function loadSharedTokenAlertDiscordTarget(
+  env: Record<string, string | undefined> = process.env,
+): { webhookUrl: string } | null {
+  const webhookUrl = env.DISCORD_SHARED_TOKEN_ALERT_WEBHOOK_URL?.trim();
+  if (webhookUrl && WEBHOOK_URL_PATTERN.test(webhookUrl)) return { webhookUrl };
+  return loadReleaseDiscordTarget(env);
+}
+
 /** フォーラムの投稿タイトルの上限（Discordの`thread_name`は100文字まで） */
 const THREAD_NAME_MAX_LENGTH = 100;
 

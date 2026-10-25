@@ -6,7 +6,9 @@ import { CI_BYPASS_COOKIE_NAME, isCiBypassRequest } from "@/lib/ci-auth-bypass";
 import { getRequestOrigin } from "@/lib/request-origin";
 import { toSafeRedirectPath } from "@/lib/safe-redirect-path";
 
-const publicPaths = ["/login", "/auth/callback", "/auth/native"];
+// `/share`はリンクプレビュー用のOGメタ・カード画像（#5036）。載せるのはリポジトリ名と種別・番号だけで、
+// Issue・PRの本文は返さない
+const publicPaths = ["/login", "/auth/callback", "/auth/native", "/share"];
 
 function isPublicPath(pathname: string): boolean {
   return publicPaths.some((p) => pathname === p || pathname.startsWith(`${p}/`));
@@ -72,7 +74,8 @@ export async function updateSession(request: NextRequest) {
     if (user) {
       loginUrl.searchParams.set("error", "not_allowed");
     } else {
-      loginUrl.searchParams.set("callbackUrl", pathname);
+      // クエリも残す。Issue/PR詳細のリンク（`?issue=…&mscreen=…`。#5035）がログイン後に失われない
+      loginUrl.searchParams.set("callbackUrl", pathname + request.nextUrl.search);
     }
     return NextResponse.redirect(loginUrl);
   }

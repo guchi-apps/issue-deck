@@ -55,6 +55,21 @@ describe("notifyUnexpectedSharedTokenConsumer", () => {
     expect(createAlert).not.toHaveBeenCalled();
   });
 
+  it("専用Webhookがあればそちらへ投稿し、無ければリリース通知の宛先へ退避する", async () => {
+    const dedicated = "https://discord.com/api/webhooks/999/dedicated-TOKEN";
+    const fetchDedicated = okFetch();
+    await notifyUnexpectedSharedTokenConsumer(token, "hermes-agent", {
+      now,
+      env: { ...env, DISCORD_SHARED_TOKEN_ALERT_WEBHOOK_URL: dedicated },
+      fetchImpl: fetchDedicated,
+    });
+    expect(fetchDedicated.mock.calls[0][0]).toBe(dedicated);
+
+    const fetchFallback = okFetch();
+    await notifyUnexpectedSharedTokenConsumer(token, "hermes-agent", { now, env, fetchImpl: fetchFallback });
+    expect(fetchFallback.mock.calls[0][0]).toBe(WEBHOOK);
+  });
+
   it("想定外の利用元をトークン名・利用元・時刻だけでDiscordへ通知する", async () => {
     const fetchImpl = okFetch();
     expect(await notifyUnexpectedSharedTokenConsumer(token, "Hermes-Agent", { now, env, fetchImpl })).toBe("notified");

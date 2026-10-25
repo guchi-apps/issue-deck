@@ -12,7 +12,7 @@
 | 認証シートの戻り先 | `issuedeck://auth-callback` |
 | 共有メニュー（Share Extension） | `ios/ShareExtension/`。Bundle ID `com.gucchii.issuedeck.ShareExtension`。App Group `group.com.gucchii.issuedeck`（下書きの受け渡し。方式は [docs/ios-app.md](../docs/ios-app.md)「共有メニューからの起案」） |
 | ロック画面ウィジェット | `ios/UsageWidget/`。Bundle ID `com.gucchii.issuedeck.UsageWidget`。ClaudeとChatGPTの週間枠を表示（方式は [docs/ios-app.md](../docs/ios-app.md)「ロック画面ウィジェット」） |
-| Associated Domains | 使わない |
+| Associated Domains | 使う（#5035）。`applinks:issuedeck.gucchii.com`。IssueDeckのIssue/PR詳細のHTTPSリンクをアプリで開く。AASAは`src/lib/ios-universal-links.ts`が正で、`/.well-known/apple-app-site-association`から認証なしで配る |
 | Push通知（APNs） | 使う（#4250）。`aps-environment`は`development`と書いてあり、配布の書き出しで本番へ置き換わる。方式は [docs/ios-app.md](../docs/ios-app.md)「ネイティブ通知」 |
 
 ## 更新が要る場所
