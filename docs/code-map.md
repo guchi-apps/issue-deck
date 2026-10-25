@@ -1006,11 +1006,10 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   生成と同じ1回の呼び出しに相乗りさせる**——質問かどうかだけのために往復を増やさない。
   `kind`が欠けた・知らない値だった応答は`issue`扱い（`normalizeSuggestedKind`）で、
   提案を出さない側へ倒す。
-  **横断質問（#1454）はここに混ぜず、
-  [`cross-repo-question-dialog.tsx`](../src/components/dashboard/cross-repo-question-dialog.tsx)
-  として独立した入口（ヘッダーの「横断質問」）に残す。** 回答するのがGitHub Actionsではなく
-  サブPCの質問セッションで、リポジトリの絞り込み条件（ワークフロー不要）も実行先の選択も
-  別物になるため。
+  横断質問（#1454）の専用ダイアログとヘッダーの入口は#4991で廃止した（代わりにヘッダーの
+  リモートセッションのアイコン
+  [`remote-session-popover.tsx`](../src/components/dashboard/remote-session-popover.tsx)を置く）。
+  質問Issueへの回答に使うジョブ種別`CROSS_REPO_QUESTION`・pollerの実行側・復旧ボタンは残している。
 - **そのダイアログは1画面で、項目はすべて最初から見えている**（#1884）。種別・リポジトリ・内容・
   タイトル・ラベル・担当者が縦に並ぶだけで、ステップも「次へ」も無い。#1605で入れた2ステップ
   （内容だけを書く`input` → 推定結果を確かめる`confirm`）と、そこに足された本文テンプレート
@@ -3343,7 +3342,7 @@ export function POST(request: NextRequest) {
     リリースPRがあるときだけCI状態のGraphQLが1回増える。
   - 種別ごとのON/OFFは**持たない**（設定は購読の有無だけ）。通知する2種類はどちらも
     「人が動かないと止まるもの」で、片方だけ止めたい理由が出ていないため。
-- **リリース（本番反映）の完了はSlackのチャンネルへカードで届く**（#2725でPush通知として導入し、#4791でプッシュ通知をやめてSlack投稿へ替えた。投稿は`lib/slack/client.ts`の`postChannelMessage`、投稿先は`lib/slack/config.ts`の`loadReleaseSlackTarget`。以下のPush・購読・ミュートに関する記述は#4791より前の経緯で、送り先以外の検知・記録の仕組みは今も同じ。
+- **リリース（本番反映）の完了はDiscordのチャンネルへ埋め込みで届く**（#2725でPush通知として導入し、#4791でSlack投稿へ、#4994でDiscord Webhook投稿へ替えた。投稿は`lib/discord/webhook.ts`の`postWebhookMessage`、投稿先は同ファイルの`loadReleaseDiscordTarget`（`DISCORD_RELEASE_WEBHOOK_URL`）。以下のPush・購読・ミュートに関する記述は#4791より前の経緯で、送り先以外の検知・記録の仕組みは今も同じ。
   [`lib/notifications/release-push.ts`](../src/lib/notifications/release-push.ts)）。
   リリース通知はSignalyへのwebhook（`deploy.yml`の`notify-release`が
   `.github/scripts/signaly-notify.sh`を呼ぶ）にしか流れておらず、**フリート全体のリリースを

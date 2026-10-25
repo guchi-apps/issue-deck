@@ -568,19 +568,22 @@ lifecycleスクリプト（`scripts/version-changelog.mjs`）が`src/lib/changel
 載る**（[auto-repair.md](auto-repair.md)「リリースだけ宛先と見た目を変える」）。最新
 リリースぶんだけを持ち毎回上書きするので、履歴の置き場は従来どおり各アプリの更新履歴ファイル。
 
-### リリースの完了はSlackのチャンネルへカードで届く（#2725・#4791）
+### リリースの完了はDiscordのチャンネルへ埋め込みで届く（#2725・#4791・#4994）
 
 リリース通知の宛先はSignalyだけだった（`deploy.yml`の`notify-release`が
 `.github/scripts/signaly-notify.sh`を呼ぶ）。**フリート全体のリリースを画面で扱っている
 issue-deck自身には届かない**ため、サブPCのpollerが叩く巡回
 （`POST /api/repositories/release-push-sweep`）が新しいリリースを見つけて通知を出す。
-当初（#2725）はPush通知だったが、**#4791からはプッシュ通知をせず、SlackのチャンネルへBlock Kitの
-カード（見出し・リポジトリ・バージョン・更新内容・「ブランチ画面を開く」「アプリを開く」ボタン・公開時刻）
-を投稿する。** 投稿は`SLACK_BOT_TOKEN`（署名シークレットは不要）、チャンネルは
-`SLACK_RELEASE_CHANNEL_ID`（未設定なら`C0CA52U82HY`。#4826で起案の許可チャンネルへのフォールバックを
-やめた）。**Botはそのチャンネルへ`/invite`しておく**（`chat:write`だけでは未参加のチャンネルへ投稿できず
-`not_in_channel`になり、席を取った後なのでそのリリースは鳴らし直されない）。「アプリを開く」は
-GitHubリポジトリの`homepage`があるときだけ出す。**Signalyへの通知はそのまま残す。**
+当初（#2725）はPush通知、#4791でSlackへの投稿に替え、**#4994からはDiscordのチャンネルへWebhookで
+埋め込み（タイトル・リポジトリ・バージョン・更新内容・各種リンク・公開時刻）を投稿する。**
+投稿先は環境変数`DISCORD_RELEASE_WEBHOOK_URL`（Discordのチャンネル設定「連携サービス」で発行した
+Webhook URL。**URL自体が資格情報**なので`.env.local`・1Passwordにだけ置く）。未設定ならGitHubも
+叩かず何も送らない。**本番への配布経路**（#5007）は`.github/secrets-manifest.tsv`（`op://apps/issue-deck/discord-release-webhook-url`）
+→`scripts/sync-github-secrets.sh`→`deploy.yml`のenv転送と.env書き出しで、デプロイのたびに.envが
+作り直されるため、VPSの.envを手で書き換えても次のデプロイで消える。Slack時代の`SLACK_BOT_TOKEN`は
+この経路に載っていなかった。**Webhookを1Passwordへ登録して同期するまでは通知が止まる**ので、公開前に
+登録を済ませる。メンションは解決させない（更新内容の`@everyone`で鳴らさない）。
+「アプリを開く」はGitHubリポジトリの`homepage`があるときだけ出す。**Signalyへの通知はそのまま残す。**
 チャンネル宛のため、ユーザーごとのリポジトリ非表示・ミュート設定は効かない。
 
 - 見ているのは各リポジトリの`releases/latest`（draftとprereleaseを除く）で、**記録した
@@ -933,7 +936,7 @@ main起点の`deploy-recovery/*`ブランチへ取り込む。**`merges`APIは�
 
 ## リリース完了系列に限り、リリース候補を本番へ自動マージする（#4480）
 
-リリース候補（`release-main/v*`→main）の全体レビューの指摘・統合検証の失敗から、画面の「リリース完了まで進める」で
+リリース候補（`release-main/v*`→main）の全体レビューの指摘・統合検証の失敗から、画面の「修正を自動で続ける」（#4981で旧「リリース完了まで進める」から改名）で
 開始する系列（`ReleaseCompletionRun`）。開始者が「本番反映・稼働確認まで」（`scope=until_production`）を選んだ系列
 だけが、上の復旧PRと並ぶ**もう1つの限定例外**として、記録した候補1本を本番mainへマージする（ルールの全文は
 `CLAUDE.md`「自動マージ不可カテゴリ」）。「チェック通過まで」（`until_ready`）を選んだ系列・系列の外のリリースは

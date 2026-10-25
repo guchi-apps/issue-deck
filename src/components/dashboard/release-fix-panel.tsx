@@ -17,6 +17,7 @@ import {
   type OverviewChecks,
   type OverviewTone,
 } from "@/lib/release-fix-overview";
+import { isRcReleaseCandidateHeadRef } from "@/lib/release-branch";
 import { RELEASE_FIX_STEPS, type ReleaseFixSourceKind, type ReleaseFixStartState } from "@/lib/release-fix-series";
 import type { RebuildEpisode } from "@/lib/release-rebuild-history";
 import { isPreviousVerificationResult, type RcPublishNext } from "@/lib/release-rc-action";
@@ -390,8 +391,10 @@ export function toOverviewChecks(verification: ReleaseVerificationSummary | null
 export type ReleaseFixOverviewState = {
   repositoryFullName: string;
   pullRequestNumber: number;
-  /** 検証の対象（現在のbase・head）。取得前はnull。「リリース完了まで進める」の開始で使う（#4480） */
+  /** 検証の対象（現在のbase・head）。取得前はnull。「修正を自動で続ける」の開始で使う（#4480） */
   target: { baseSha: string; headSha: string } | null;
+  /** 新方式の候補（`release-rc/<番号>`）か。「修正を自動で続ける」で範囲を選ばせない（#4981） */
+  rcCandidate: boolean;
   overview: FixOverview;
   /** 表示する修正系列（進行中を優先）。修正の記録が無ければnull */
   current: ReleaseFixSeriesView | null;
@@ -421,9 +424,12 @@ export function useReleaseFixOverview({
   changes,
   reloadToken,
   publishBlock,
+  headRef,
 }: {
   repositoryFullName: string;
   pullRequestNumber: number;
+  /** 候補のheadブランチ。新方式の候補かの判定に使う。不明なら旧方式として扱う */
+  headRef?: string;
   verification: ReleaseVerificationSummary | null;
   verificationError: string | null;
   changes: UseReleaseChangesResult;
@@ -520,6 +526,7 @@ export function useReleaseFixOverview({
     repositoryFullName,
     pullRequestNumber,
     target: verification?.target ?? null,
+    rcCandidate: headRef !== undefined && isRcReleaseCandidateHeadRef(headRef),
     overview,
     current,
     list,
@@ -826,6 +833,7 @@ export function ReleaseFixSummary({
         pullRequestNumber={state.pullRequestNumber}
         target={state.target}
         canStart={overview.tone === "bad" || current !== null}
+        rcCandidate={state.rcCandidate}
       />
       {error && <p className="text-destructive">{error}</p>}
       {overview.action.kind !== "none" ? <ReleaseFixPrimaryAction state={state} /> : extraAction}
@@ -969,9 +977,11 @@ export function ReleaseFixOverviewPanel({
   changes,
   reloadToken,
   onPreviousResultsChange,
+  headRef,
 }: {
   repositoryFullName: string;
   pullRequestNumber: number;
+  headRef?: string;
   verification: ReleaseVerificationSummary | null;
   verificationError: string | null;
   changes: UseReleaseChangesResult;
@@ -979,7 +989,7 @@ export function ReleaseFixOverviewPanel({
   /** 表示中の検証結果が修正前のリリースのものか。trueの間、呼び出し側は結果を履歴の折りたたみへ移す */
   onPreviousResultsChange?: (previous: boolean) => void;
 }) {
-  const state = useReleaseFixOverview({ repositoryFullName, pullRequestNumber, verification, verificationError, changes, reloadToken });
+  const state = useReleaseFixOverview({ repositoryFullName, pullRequestNumber, verification, verificationError, changes, reloadToken, headRef });
   const { previousResults } = state;
   useEffect(() => {
     onPreviousResultsChange?.(previousResults);

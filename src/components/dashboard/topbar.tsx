@@ -7,7 +7,6 @@ import {
   FolderTree,
   LayoutDashboard,
   Loader2,
-  MessageCircleQuestion,
   PanelLeftClose,
   PanelLeftOpen,
   Plus,
@@ -19,12 +18,14 @@ import {
 
 import { DispatchQueueButton } from "@/components/dashboard/dispatch-queue-button";
 import { NotificationButton } from "@/components/dashboard/notification-button";
+import { RemoteSessionPopover } from "@/components/dashboard/remote-session-popover";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { UserAvatar } from "@/components/dashboard/user-avatar";
 import type { IssueFilters } from "@/hooks/use-issue-filters";
 import type { NotificationTarget } from "@/lib/notifications";
+import type { ConnectedRepository } from "@/types/repository";
 import type { CurrentUser } from "@/types/user";
 
 /** フィルターポップオーバー内の選択肢チップ（#944：ヘッダーが崩れないよう状態・担当者・
@@ -77,8 +78,8 @@ type TopBarProps = {
   reservedIssueCount?: number;
   assigneeOptions: string[];
   onCreateIssue: () => void;
-  /** 複数リポジトリ横断の質問（#1454）。単一リポジトリへの質問は新規作成ダイアログ側（#1641） */
-  onAskCrossRepoQuestion: () => void;
+  /** リモートセッションのポップオーバー（#4991）で起動先に並べるリポジトリ */
+  remoteSessionRepositories?: ConnectedRepository[];
   /** 通知ベルの項目を押したときの遷移 */
   onOpenNotificationTarget: (target: NotificationTarget) => void;
   /** 実行キューの行のタイトルを押したときの遷移（#1625）。通知ベルと同じくIssue詳細を開く */
@@ -107,7 +108,7 @@ export function TopBar({
   reservedIssueCount = 0,
   assigneeOptions,
   onCreateIssue,
-  onAskCrossRepoQuestion,
+  remoteSessionRepositories = [],
   onOpenNotificationTarget,
   onOpenIssue,
   onOpenCheckUserView,
@@ -365,13 +366,6 @@ export function TopBar({
         </Popover>
       </div>
 
-      {/* 単一リポジトリへの質問は「新規」の中（種別「質問」）へ移した（#1641）。
-          ここに残すのは、実行先も参照範囲も別物の横断質問だけ */}
-      <Button variant="outline" size="sm" className="text-xs" onClick={onAskCrossRepoQuestion}>
-        <MessageCircleQuestion />
-        横断質問
-      </Button>
-
       <Button size="sm" className="text-xs" onClick={onCreateIssue}>
         <Plus />
         新規
@@ -379,6 +373,9 @@ export function TopBar({
 
       {/* サブPCで順に流すようにしたため、キュー全体を見る場所が要る（#1266） */}
       <DispatchQueueButton onOpenIssue={onOpenIssue} />
+
+      {/* 起動中のリモートセッションを開く・新しく起動する（#4991） */}
+      <RemoteSessionPopover repositories={remoteSessionRepositories} />
 
       {/* リリース専用のロケットボタンを置き換え、ユーザーの操作が必要なものをリポジトリ横断で
           1か所に集める（#1614）。リリースの起動・マージは「ブランチ」画面が持つ。

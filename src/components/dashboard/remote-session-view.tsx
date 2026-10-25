@@ -27,7 +27,7 @@ const HISTORY_LIMIT = 5;
 const DESCRIPTION = "リポジトリを選ぶと、サブPCでClaude Codeのセッションを立ち上げてClaude Codeアプリで開きます。";
 
 /** 起動先として選べるリポジトリ。ホストの申告が読めるまでは`dispatchRunnable`で代える */
-function runnableRepositories(state: RemoteSessionState | null, repositories: ConnectedRepository[]): Set<string> {
+export function runnableRepositories(state: RemoteSessionState | null, repositories: ConnectedRepository[]): Set<string> {
   if (!state) return new Set(repositories.filter((repo) => repo.dispatchRunnable).map((repo) => repo.fullName));
   return new Set(state.hosts.filter((host) => host.remoteSessionCapable).flatMap((host) => host.repositories));
 }

@@ -1474,7 +1474,8 @@ jobs:
               # Claude/Codexいずれかの要修正コメントを隠さない。
               REVIEW_COMMENT="$(printf '%s' "$PR_JSON" | jq -c --arg review "$REVIEW" '
                 (.headRefOid // "") as $sha
-                | [ .comments[]? | select((.body // "") | test("issue-deck-(codex-)?review-verdict:(lgtm|needs-check|changes-requested) |issue-deck-review-report ")) ] as $all
+                | [ .comments[]? | select((.body // "") | test("issue-deck-(codex-)?review-verdict:(lgtm|needs-check|changes-requested) |issue-deck-review-report "))
+                    | select(((.body // "") | contains("issue-deck-codex-review-verdict:") | not) or (.authorAssociation | IN("OWNER", "MEMBER", "COLLABORATOR"))) ] as $all
                 | ([ $all[] | select((.body // "") | contains("sha=" + $sha)) ] | if length > 0 then . else $all end) as $current
                 | ([ $current[] | select((.body // "") | test("issue-deck-review-(verdict|report)")) ] | last) as $claude
                 | ([ $current[] | select((.body // "") | contains("issue-deck-codex-review-verdict:")) ] | last) as $codex
@@ -1490,7 +1491,9 @@ jobs:
               if [ -z "$REVIEW" ]; then
                 REVIEW="$(printf '%s' "$PR_JSON" | jq -r '
                   (.headRefOid // "") as $sha
-                  | [ .comments[]?.body // empty
+                  | [ .comments[]?
+                      | select(((.body // "") | contains("issue-deck-codex-review-verdict:") | not) or (.authorAssociation | IN("OWNER", "MEMBER", "COLLABORATOR")))
+                      | .body // empty
                       | capture("issue-deck-(codex-)?review-verdict:(?<v>lgtm|needs-check|changes-requested) sha=(?<s>[0-9a-fA-F]+)")?
                       | select($sha != "" and .s == $sha) | .v ] as $v
                   | if ($v | index("changes-requested")) then "changes-requested"

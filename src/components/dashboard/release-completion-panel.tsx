@@ -68,16 +68,22 @@ type Props = {
   target: { baseSha: string; headSha: string } | null;
   /** 候補に問題がある、または修正の記録があるときだけ開始できる（問題の無い候補は通常のリリース） */
   canStart: boolean;
+  /**
+   * 新方式の候補（`release-rc/<番号>`）か。新方式は公開準備（＝公開承認）が済むまで本番マージへ進まないため、
+   * 範囲の選択に違いが無い。範囲を選ばせず、本番公開は公開承認で行うと示す（#4981）
+   */
+  rcCandidate?: boolean;
 };
 
 /**
- * リリース候補の「リリース完了まで進める」（#4480）と、その系列の現在状態。PC・スマホで同じ部品を使う。
+ * リリース候補の「修正を自動で続ける」（#4480。#4981で旧「リリース完了まで進める」から改名）と、その系列の現在状態。
+ * PC・スマホで同じ部品を使う。
  *
  * 開始は1回だけで、以後の工程（修正Issueの起動・修正のレビュー・候補の作り直し・再チェック・許可した範囲の
  * 本番マージ・デプロイ・稼働確認）ごとの再操作は求めない。押す前に**どこまで自動で進めるか**を選ばせ、
  * 本番へのマージは開始者が選んだ系列だけにする。
  */
-export function ReleaseCompletionPanel({ runState, repositoryFullName, pullRequestNumber, target, canStart }: Props) {
+export function ReleaseCompletionPanel({ runState, repositoryFullName, pullRequestNumber, target, canStart, rcCandidate = false }: Props) {
   const [owner, repo] = repositoryFullName.split("/");
   const own = useReleaseCompletionRun(repositoryFullName, pullRequestNumber, !runState);
   const { run: shownRun, setRun: setShownRun } = runState ?? own;
@@ -134,12 +140,26 @@ export function ReleaseCompletionPanel({ runState, repositoryFullName, pullReque
 
   return (
     <div className="flex flex-col gap-1.5" data-testid="release-completion">
-      {shown && <RunCard run={shown} busy={busy} onStop={() => void stop()} />}
+      {shown && <RunCard run={shown} busy={busy} onStop={() => void stop()} rcCandidate={rcCandidate} />}
       {showStart && (
-        <Button size="sm" className="min-h-11 w-fit gap-1 px-4 text-sm" onClick={() => { setScope(null); setConfirmOpen(true); }} disabled={busy !== null}>
-          {busy === "start" ? <Loader2 className="size-3 animate-spin" aria-hidden="true" /> : <Rocket className="size-3" aria-hidden="true" />}
-          リリース完了まで進める
-        </Button>
+        <div className="flex flex-col gap-1">
+          <Button
+            size="sm"
+            className="min-h-11 w-fit gap-1 px-4 text-sm"
+            onClick={() => {
+              // 新方式は範囲に違いが無いので、選ばせずに`until_ready`で始める
+              setScope(rcCandidate ? RELEASE_COMPLETION_SCOPE_READY : null);
+              setConfirmOpen(true);
+            }}
+            disabled={busy !== null}
+          >
+            {busy === "start" ? <Loader2 className="size-3 animate-spin" aria-hidden="true" /> : <Rocket className="size-3" aria-hidden="true" />}
+            修正を自動で続ける
+          </Button>
+          <p className="text-muted-foreground" data-testid="release-completion-hint">
+            修正Issueの作成から修正・取り込み・再検証までを、指摘が残る限り自動で繰り返します。使わない場合は、修正を1世代ずつ手で進めます。
+          </p>
+        </div>
       )}
       {error && (
         <p role="alert" className="text-destructive">
@@ -150,7 +170,7 @@ export function ReleaseCompletionPanel({ runState, repositoryFullName, pullReque
       <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>リリース完了まで進めますか</AlertDialogTitle>
+            <AlertDialogTitle>修正を自動で続けますか</AlertDialogTitle>
             <AlertDialogDescription asChild>
               <div className="flex flex-col gap-2 text-sm" data-testid="release-completion-dialog">
                 <p>このリリース候補（#{pullRequestNumber}）に限って、次の工程を確認なしで進めます。</p>
@@ -162,6 +182,12 @@ export function ReleaseCompletionPanel({ runState, repositoryFullName, pullReque
                     作り直した候補で全体レビュー・統合検証・iOS検証をやり直す。指摘が残れば同じ修正Issueで続ける（世代の回数では止めず、停滞・予算到達・本人判断のときだけ理由つきで一時停止）
                   </li>
                 </ol>
+                {rcCandidate ? (
+                  <p className="rounded-md border border-primary bg-primary/10 p-2 text-foreground" data-testid="release-completion-rc-publish">
+                    本番公開はこの操作では行いません。チェックがすべて通ったら「本番公開へ進む（公開承認）」を押してください。押した後は本番反映・稼働確認まで自動で進みます。
+                  </p>
+                ) : (
+                  <>
                 <ScopeOption
                   id="release-completion-scope-ready"
                   checked={scope === RELEASE_COMPLETION_SCOPE_READY}
@@ -176,6 +202,8 @@ export function ReleaseCompletionPanel({ runState, repositoryFullName, pullReque
                   title="本番反映・稼働確認まで"
                   body="現在のmainと候補の先端に対する検証・CIがすべて合格し、作り直した候補が記録と一致するときだけ自動で本番へマージし、デプロイ成功と稼働中の版の一致を確かめて完了にします。デプロイが失敗したら同じ系列で調べ直します。"
                 />
+                  </>
+                )}
                 <p className="text-xs text-muted-foreground">
                   許可はこの候補の系列だけに有効で、通常のリリースには及びません。mainが進んだ・候補が系列の外で作り直された・費用の上限（$
                   {RELEASE_COMPLETION_COST_LIMIT_USD}）・24時間の期限に達したときは止めて知らせます。途中でいつでも停止できます。
@@ -218,7 +246,7 @@ function ScopeOption({ id, checked, onSelect, title, body }: { id: string; check
   );
 }
 
-function RunCard({ run, busy, onStop }: { run: ReleaseCompletionRunView; busy: "start" | "stop" | null; onStop: () => void }) {
+function RunCard({ run, busy, onStop, rcCandidate }: { run: ReleaseCompletionRunView; busy: "start" | "stop" | null; onStop: () => void; rcCandidate: boolean }) {
   const github = `https://github.com/${run.repositoryFullName}`;
   const stopped = run.stageIndex < 0;
   const generation = run.fixes.length > 0 ? Math.max(...run.fixes.map((f) => f.generation)) : 0;
@@ -227,7 +255,7 @@ function RunCard({ run, busy, onStop }: { run: ReleaseCompletionRunView; busy: "
   return (
     <div className="flex flex-col gap-1 rounded-md border bg-background/70 p-2" data-testid="release-completion-run">
       <p className="flex flex-wrap items-center gap-x-2 gap-y-1">
-        <span className="font-semibold">{run.fromPublishApproval ? "自動公開（公開承認済み）:" : "リリース完了まで進める:"}</span>
+        <span className="font-semibold">{run.fromPublishApproval ? "自動公開（公開承認済み）:" : "修正の自動継続:"}</span>
         <span
           className={cn(
             "rounded-full border px-2 py-0.5",
@@ -243,7 +271,13 @@ function RunCard({ run, busy, onStop }: { run: ReleaseCompletionRunView; busy: "
         </span>
         <span className="text-muted-foreground tabular-nums">
           {generation > 0 ? `世代 ${generation} ・ ` : ""}費用 ${run.costUsedUsd.toFixed(2)} / ${run.costLimitUsd} ・{" "}
-          {run.fromPublishApproval ? "公開承認から本番反映・稼働確認まで" : run.scope === RELEASE_COMPLETION_SCOPE_PRODUCTION ? "本番反映・稼働確認まで許可" : "チェック通過まで許可"}
+          {run.fromPublishApproval
+            ? "公開承認から本番反映・稼働確認まで"
+            : rcCandidate
+              ? "本番公開は公開承認で"
+              : run.scope === RELEASE_COMPLETION_SCOPE_PRODUCTION
+                ? "本番反映・稼働確認まで許可"
+                : "チェック通過まで許可"}
         </span>
         {run.active && (
           <button
@@ -278,7 +312,7 @@ function RunCard({ run, busy, onStop }: { run: ReleaseCompletionRunView; busy: "
         ))}
       </ol>
       <p className="break-words leading-relaxed" data-testid="release-completion-note">
-        {progressNote(run)}
+        {progressNote(run, rcCandidate)}
       </p>
       {run.stopMessage && <p className="break-words leading-relaxed">{run.stopMessage}</p>}
       {run.note && <p className="break-words leading-relaxed text-muted-foreground">{run.note}</p>}
@@ -336,7 +370,7 @@ function RunCard({ run, busy, onStop }: { run: ReleaseCompletionRunView; busy: "
           </dd>
           <dt className="text-muted-foreground">承認</dt>
           <dd>
-            {formatMonthDayTime(run.createdAt)} 開始（{run.scope === RELEASE_COMPLETION_SCOPE_PRODUCTION ? "本番反映・稼働確認まで" : "チェック通過まで"}／期限{" "}
+            {formatMonthDayTime(run.createdAt)} 開始（{run.scope === RELEASE_COMPLETION_SCOPE_PRODUCTION ? "本番反映・稼働確認まで" : rcCandidate ? "本番公開は公開承認で" : "チェック通過まで"}／期限{" "}
             {formatMonthDayTime(run.expiresAt)}）
           </dd>
           {run.releaseRunUrl && (
@@ -362,8 +396,8 @@ function RunCard({ run, busy, onStop }: { run: ReleaseCompletionRunView; busy: "
 }
 
 /** 原因・残り・操作が要るかを1文で。経緯の詳細はIssue・PRで追える */
-export function progressNote(run: Pick<ReleaseCompletionRunView, "status" | "scope" | "candidatePrNumber">): string {
-  const rest = run.scope === RELEASE_COMPLETION_SCOPE_PRODUCTION ? "チェック通過 → 本番マージ → デプロイ → 稼働確認" : "チェック通過 → 本番承認";
+export function progressNote(run: Pick<ReleaseCompletionRunView, "status" | "scope" | "candidatePrNumber">, rcCandidate = false): string {
+  const rest = run.scope === RELEASE_COMPLETION_SCOPE_PRODUCTION ? "チェック通過 → 本番マージ → デプロイ → 稼働確認" : rcCandidate ? "チェック通過 → 公開承認" : "チェック通過 → 本番承認";
   switch (run.status) {
     case "investigating":
       return `失敗の原因を調べています。操作は不要です。残り: 修正 → ${rest}。`;
@@ -374,6 +408,9 @@ export function progressNote(run: Pick<ReleaseCompletionRunView, "status" | "sco
     case "awaiting_decision":
       return "修正の続行に判断が必要です。下の理由を確かめてください。";
     case "awaiting_approval":
+      if (rcCandidate && run.scope !== RELEASE_COMPLETION_SCOPE_PRODUCTION) {
+        return `候補 #${run.candidatePrNumber} は全てのチェックを通過しました。操作が必要です: 「本番公開へ進む（公開承認）」を押すと、本番反映・稼働確認まで自動で進みます。`;
+      }
       return `候補 #${run.candidatePrNumber} は全てのチェックを通過しました。操作が必要です: 本番へのマージは確認画面から人が行います。マージ後は、このまま稼働確認まで追跡します。`;
     case "merging":
       return `候補 #${run.candidatePrNumber} の本番マージの条件（CI・mainの位置）を確かめています。操作は不要です。`;

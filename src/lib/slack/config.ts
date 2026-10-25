@@ -68,21 +68,3 @@ export function isAllowedRepoOwner(config: SlackConfig, fullName: string): boole
   const owner = fullName.split("/")[0]?.toLowerCase();
   return config.repoOwners.some((allowed) => allowed.toLowerCase() === owner);
 }
-
-/**
- * リリース完了カードの既定の投稿先（#4826）。起案の許可チャンネルとは別に持ち、
- * `SLACK_ALLOWED_CHANNEL_IDS`を変えてもリリース通知の宛先が動かないようにする。
- */
-const DEFAULT_RELEASE_CHANNEL_ID = "C0CA52U82HY";
-
-/**
- * リリース完了通知の投稿先（#4791）。発信専用なので`SLACK_SIGNING_SECRET`は要らず、Botトークンだけで決まる。
- * チャンネルは`SLACK_RELEASE_CHANNEL_ID`、未設定なら`DEFAULT_RELEASE_CHANNEL_ID`。
- */
-export function loadReleaseSlackTarget(
-  env: Record<string, string | undefined> = process.env,
-): { botToken: string; channel: string } | null {
-  const botToken = env.SLACK_BOT_TOKEN?.trim();
-  if (!botToken) return null;
-  return { botToken, channel: env.SLACK_RELEASE_CHANNEL_ID?.trim() || DEFAULT_RELEASE_CHANNEL_ID };
-}

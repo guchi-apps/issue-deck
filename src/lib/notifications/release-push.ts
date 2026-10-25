@@ -6,8 +6,11 @@ import {
   fetchRepositoryHomepage,
   type LatestRelease,
 } from "@/lib/github/release-api";
-import { createSlackClient, postChannelMessage, type SlackBlock } from "@/lib/slack/client";
-import { loadReleaseSlackTarget } from "@/lib/slack/config";
+import {
+  loadReleaseDiscordTarget,
+  postWebhookMessage,
+  type DiscordEmbed,
+} from "@/lib/discord/webhook";
 
 /**
  * リリース（本番反映）の完了のPush通知（#2725）。
@@ -17,9 +20,9 @@ import { loadReleaseSlackTarget } from "@/lib/slack/config";
  * issue-deckはフリート全体のリリースを画面で扱っているのに、**出たことだけは別のアプリで
  * 受け取る**という形になっていたため、#2725でPush通知を足した。
  *
- * **#4791からは宛先がPushではなくSlackのチャンネルになった**（プッシュ通知はしない）。
- * Block Kitのカードを`chat.postMessage`で投稿する。検知・重複防止・巡回の仕組みは
- * そのままで、送り先だけが違う。**Signalyへの通知はそのまま残す**。
+ * **#4791からは宛先がPushではなくSlackのチャンネルになり、#4994でDiscordに替えた**
+ * （プッシュ通知はしない）。埋め込み（embed）のカードをWebhookで投稿する。検知・重複防止・
+ * 巡回の仕組みはそのままで、送り先だけが違う。**Signalyへの通知はそのまま残す**。
  *
  * ## 既存3種と違い、これは「報せるだけ」の通知
  *
@@ -169,7 +172,7 @@ export type PublishedRelease = {
   notes: string;
 };
 
-/** Slackカードに足す情報。取れなかったものは省く */
+/** Discordカードに足す情報。取れなかったものは省く */
 export type ReleaseCardExtras = {
   /** リリースの公開時刻。取れなければnull */
   publishedAt: Date | null;
@@ -187,53 +190,40 @@ export function releaseBranchScreenUrl(
   return `${origin}/dashboard?pane=flow&mscreen=flow`;
 }
 
-/** Slackの`text`（通知のプレビュー・カードを描画できない場面の代替）。 */
-export function buildReleaseSlackText(release: PublishedRelease): string {
+/** Discordの`content`（通知のプレビュー・埋め込みを描画できない場面の代替）。 */
+export function buildReleaseDiscordText(release: PublishedRelease): string {
   return `リリースしました: ${release.repositoryFullName} ${release.tagName}`;
 }
 
+/** 埋め込みの左帯の色（緑） */
+const RELEASE_EMBED_COLOR = 0x2ecc71;
+
 /**
- * リリース完了のSlackカード（Block Kit）。見出し・リポジトリとバージョン・更新内容・
- * リンクのボタン・公開時刻の順。**アプリのリンクは`homepage`がある場合だけ出す。**
+ * リリース完了のDiscord埋め込み。タイトル・リポジトリとバージョン・更新内容・リンク・公開時刻の順。
+ * **アプリのリンクは`homepage`がある場合だけ出す。**
  */
-export function buildReleaseSlackBlocks(
+export function buildReleaseDiscordEmbed(
   release: PublishedRelease,
   extras: ReleaseCardExtras,
   branchScreenUrl: string = releaseBranchScreenUrl(),
-): SlackBlock[] {
-  const buttons: SlackBlock[] = [
-    {
-      type: "button",
-      text: { type: "plain_text", text: "ブランチ画面を開く" },
-      url: branchScreenUrl,
-      style: "primary",
-      action_id: "release_open_branch_screen",
-    },
-  ];
-  if (extras.appUrl) {
-    buttons.push({
-      type: "button",
-      text: { type: "plain_text", text: "アプリを開く" },
-      url: extras.appUrl,
-      action_id: "release_open_app",
-    });
-  }
-  const published = extras.publishedAt
-    ? `公開 ${formatJst(extras.publishedAt)} ・ <${extras.releaseUrl}|リリースノート>`
-    : `<${extras.releaseUrl}|リリースノート>`;
-  return [
-    { type: "header", text: { type: "plain_text", text: "リリースしました" } },
-    {
-      type: "section",
-      fields: [
-        { type: "mrkdwn", text: `*リポジトリ*\n${release.repositoryFullName}` },
-        { type: "mrkdwn", text: `*バージョン*\n\`${release.tagName}\`` },
-      ],
-    },
-    { type: "section", text: { type: "mrkdwn", text: release.notes || RELEASE_PUSH_EMPTY_BODY } },
-    { type: "actions", elements: buttons },
-    { type: "context", elements: [{ type: "mrkdwn", text: published }] },
-  ];
+): DiscordEmbed {
+  const links = [`[ブランチ画面を開く](${branchScreenUrl})`];
+  if (extras.appUrl) links.push(`[アプリを開く](${extras.appUrl})`);
+  links.push(`[リリースノート](${extras.releaseUrl})`);
+  return {
+    title: "リリースしました",
+    url: extras.releaseUrl,
+    color: RELEASE_EMBED_COLOR,
+    description: release.notes || RELEASE_PUSH_EMPTY_BODY,
+    fields: [
+      { name: "リポジトリ", value: release.repositoryFullName, inline: true },
+      { name: "バージョン", value: `\`${release.tagName}\``, inline: true },
+      { name: "リンク", value: links.join(" ・ ") },
+    ],
+    ...(extras.publishedAt
+      ? { timestamp: extras.publishedAt.toISOString(), footer: { text: `公開 ${formatJst(extras.publishedAt)}` } }
+      : {}),
+  };
 }
 
 function formatJst(date: Date): string {
@@ -281,11 +271,11 @@ export function resetReleasePushSweepIntervalForTest(): void {
 }
 
 /**
- * 新しく出たリリースを巡回し、見つけたらSlackのチャンネルへカードを投稿する。
+ * 新しく出たリリースを巡回し、見つけたらDiscordのチャンネルへカードを投稿する。
  *
  * **連携済みリポジトリ全部を1回の巡回で見る。** 呼ぶのはログインセッションを持たない
  * サブPCのpollerなので、ユーザー単位の絞り込みは母集団では行わない（他の巡回と同じ方針）。
- * 宛先はSlackのチャンネル1つ（#4791）で、ユーザーごとの非表示・ミュートは効かない。
+ * 宛先はDiscordのチャンネル1つ（#4994）で、ユーザーごとの非表示・ミュートは効かない。
  *
  * ## GitHub APIの消費
  *
@@ -305,12 +295,11 @@ export async function runReleasePushSweep(
   }
   lastSweptAt = now.getTime();
 
-  // **投稿先（Botトークン）が無ければGitHubを叩かない。** 送り先の無い巡回でレート制限を使わない。
+  // **投稿先（Webhook URL）が無ければGitHubを叩かない。** 送り先の無い巡回でレート制限を使わない。
   // 種まきもしないので、設定した直後の1巡は全リポジトリが「記録が無い」状態から始まり、
   // そこで初めてタグが入る（＝そのときも鳴らない）。
-  const target = loadReleaseSlackTarget();
+  const target = loadReleaseDiscordTarget();
   if (!target) return emptyResult({ swept: true });
-  const slack = createSlackClient(target.botToken);
 
   const repositories = await db.repository.findMany({
     where: { archived: false },
@@ -381,14 +370,15 @@ export async function runReleasePushSweep(
           latest.tagName,
         ),
       };
-      await postChannelMessage(slack, {
-        channel: target.channel,
-        text: buildReleaseSlackText(published),
-        blocks: buildReleaseSlackBlocks(published, {
-          publishedAt,
-          appUrl: await fetchAppUrl(repository.ownerLogin, repository.name, token),
-          releaseUrl: latest.htmlUrl,
-        }),
+      await postWebhookMessage(target.webhookUrl, {
+        content: buildReleaseDiscordText(published),
+        embeds: [
+          buildReleaseDiscordEmbed(published, {
+            publishedAt,
+            appUrl: await fetchAppUrl(repository.ownerLogin, repository.name, token),
+            releaseUrl: latest.htmlUrl,
+          }),
+        ],
       });
       result.notified.push(published);
     } catch (error) {
