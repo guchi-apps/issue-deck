@@ -82,6 +82,28 @@ export function useSharedTokenMutations() {
     }
   }
 
+  async function updateExpectedConsumers(id: string, expectedConsumers: string[]): Promise<boolean> {
+    setIsSubmitting(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/settings/shared-tokens/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ expectedConsumers }),
+      });
+      if (!res.ok) {
+        if (res.status === 400) throw new Error("想定される利用元が不正です。数と各名前の文字数を確認してください");
+        throw new Error(`更新に失敗しました (${res.status})`);
+      }
+      return true;
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+      return false;
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
   async function deleteSharedToken(id: string): Promise<boolean> {
     setIsSubmitting(true);
     setError(null);
@@ -97,5 +119,5 @@ export function useSharedTokenMutations() {
     }
   }
 
-  return { createSharedToken, revealSharedToken, deleteSharedToken, isSubmitting, error };
+  return { createSharedToken, revealSharedToken, updateExpectedConsumers, deleteSharedToken, isSubmitting, error };
 }

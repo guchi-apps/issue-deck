@@ -37,6 +37,25 @@ function input(
   };
 }
 
+describe("セッションの入力待ち（#5025）", () => {
+  const withInv = { investigation: investigation(0), investigationIndex: 0 };
+
+  it("生きたセッションが入力待ちなら、質問リクエストが無くてもあなたの操作待ち", () => {
+    const i = input(withInv, { sessionAlive: true, sessionWaitingInput: true });
+    expect(resolveManualStepPhase(i)).toBe("user_action");
+    expect(resolveManualStepPrimaryAction("user_action", false, true)).toBe("none");
+  });
+
+  it("セッションが生きていなければ入力待ちの古い値は無視する", () => {
+    const i = input(withInv, { sessionAlive: false, sessionWaitingInput: true });
+    expect(resolveManualStepPhase(i)).toBe("ai_stopped");
+  });
+
+  it("入力待ちでないときは従来どおりAI作業中", () => {
+    expect(resolveManualStepPhase(input(withInv, { sessionAlive: true }))).toBe("ai_working");
+  });
+});
+
 describe("resolveManualStepPhase（#4426）", () => {
   it("報告もセッションも無ければ調査前", () => {
     expect(resolveManualStepPhase(input({}))).toBe("not_investigated");

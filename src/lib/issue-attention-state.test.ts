@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { resolveIssueAttention, type IssueAttentionInput } from "@/lib/issue-attention-state";
+import {
+  resolveIssueAttention,
+  resolveSessionAttentionFlags,
+  type IssueAttentionInput,
+} from "@/lib/issue-attention-state";
+import type { DispatchSessionView } from "@/lib/dispatch/session-state";
 
 const base: IssueAttentionInput = {
   permissionPending: false,
@@ -27,6 +32,22 @@ describe("resolveIssueAttention", () => {
     expect(a?.kind).toBe("permission");
     expect(a?.nextAction).toContain("この画面では解消できません");
     expect(a?.openButtonLabel).toBeNull();
+  });
+
+  it("入力待ち（権限待ちでない）は要対応で、質問・計画・マージ・権限より後に見る（#5025）", () => {
+    const a = resolveIssueAttention({ ...base, inputPending: true, running: true });
+    expect(a?.kind).toBe("input");
+    expect(a?.needsUser).toBe(true);
+    expect(resolveIssueAttention({ ...base, inputPending: true, questionPending: true })?.kind).toBe("question");
+    expect(resolveIssueAttention({ ...base, inputPending: true, permissionPending: true })?.kind).toBe("permission");
+  });
+
+  it("入力待ちはALIVEのセッションだけ（落ちたセッションの古い値で残さない）", () => {
+    const session = (state: string) =>
+      ({ state, activity: "WAITING_INPUT", waitingTool: null }) as unknown as DispatchSessionView;
+    expect(resolveSessionAttentionFlags(session("ALIVE")).inputPending).toBe(true);
+    expect(resolveSessionAttentionFlags(session("DEAD")).inputPending).toBe(false);
+    expect(resolveSessionAttentionFlags(null).inputPending).toBe(false);
   });
 
   it("遷移だけのボタンを「承認」「マージ」と呼ばない", () => {

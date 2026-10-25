@@ -23,6 +23,7 @@ import {
   splitSnoozedPullRequests,
   requiresUserMerge,
   resolvePullRequestHeader,
+  resolvePullRequestViewFor,
   sortOpenPullRequests,
   sortPullRequestsByUpdated,
 } from "@/lib/pull-request-list";
@@ -358,6 +359,33 @@ describe("filterPullRequestsByView", () => {
     const completed = filterPullRequestsByView(pullRequests, "completed");
 
     expect([...inProgress, ...completed].map((pr) => pr.number).sort()).toEqual([1, 2, 3, 4]);
+  });
+});
+
+describe("resolvePullRequestViewFor（#5024）", () => {
+  it("本番リリースPR（リリース候補・バンプ・本番復旧）は「PR：本番リリース」", () => {
+    expect(resolvePullRequestViewFor(pullRequest({ kind: "release", baseRef: "main" }))).toBe("release");
+    expect(resolvePullRequestViewFor(pullRequest({ kind: "version-bump" }))).toBe("release");
+    expect(
+      resolvePullRequestViewFor(
+        pullRequest({ kind: "other", baseRef: "main", headRef: "deploy-recovery/run-1" }),
+      ),
+    ).toBe("release");
+  });
+
+  it("それ以外は、どのPRも載る「PR一覧」", () => {
+    expect(resolvePullRequestViewFor(pullRequest({}))).toBe("all");
+  });
+
+  it("選んだビューの一覧に、そのPRが必ず含まれる", () => {
+    const pullRequests = [
+      pullRequest({ number: 1, kind: "release", baseRef: "main" }),
+      pullRequest({ number: 2, ciState: "pending" }),
+      pullRequest({ number: 3, ciState: "success" }),
+    ];
+    for (const pr of pullRequests) {
+      expect(filterPullRequestsByView(pullRequests, resolvePullRequestViewFor(pr))).toContain(pr);
+    }
   });
 });
 

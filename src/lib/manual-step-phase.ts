@@ -9,7 +9,7 @@ import type { ManualStepReports } from "@/lib/manual-step-investigation";
  *
  * - `not_investigated`: 事前調査の報告が無く、セッションもジョブも無い（調査前）
  * - `ai_working`: セッションかジョブが動いていて、あなたへの質問は出ていない
- * - `user_action`: あなたの操作が要る（質問待ち、またはセッション終了後に操作が残っている）
+ * - `user_action`: あなたの操作が要る（質問待ち・セッションの入力待ち、またはセッション終了後に操作が残っている）
  * - `ai_verifying`: 質問に答えた直後で、セッションが結果を確かめている
  * - `ai_stopped`: 調査報告はあるが、あなたの操作は無く、セッションも完了検証も無い（途中で止まった）
  * - `verify_failed`: 最新の完了検証が成功していない
@@ -40,10 +40,16 @@ export type ManualStepPhaseInput = {
   questionPending: boolean;
   /** 質問に答えた直後（結果表示の行が残っている間） */
   questionAnswered: boolean;
+  /**
+   * セッションが端末・アプリで入力待ち（`isSessionWaitingInput`。許可・質問・選択フォーム）。
+   * アプリ回答の質問リクエストが無くても「あなたの番」にする（#5025）。省略時は偽
+   */
+  sessionWaitingInput?: boolean;
 };
 
 export function resolveManualStepPhase(input: ManualStepPhaseInput): ManualStepPhase {
   const { reports, isOpen, sessionAlive, jobActive, questionPending, questionAnswered } = input;
+  const sessionWaitingInput = input.sessionWaitingInput ?? false;
   const { investigation, verification } = reports;
   // 調査が検証より新しければ、検証の結果は「その前の試み」のもの
   const latestVerification =
@@ -52,7 +58,7 @@ export function resolveManualStepPhase(input: ManualStepPhaseInput): ManualStepP
 
   if (latestVerification?.passed) return "done";
   if (!isOpen) return "closed";
-  if (questionPending) return "user_action";
+  if (questionPending || (sessionAlive && sessionWaitingInput)) return "user_action";
   if (running) {
     if (questionAnswered && sessionAlive) return "ai_verifying";
     return "ai_working";
@@ -79,12 +85,16 @@ export type ManualStepPrimaryAction =
 export function resolveManualStepPrimaryAction(
   phase: ManualStepPhase,
   questionPending: boolean,
+  sessionWaitingInput = false,
 ): ManualStepPrimaryAction {
   switch (phase) {
     case "not_investigated":
       return "start";
     case "user_action":
-      return questionPending ? "answer_question" : "request_check";
+      if (questionPending) return "answer_question";
+      // 生きているセッションが入力待ちのとき、起動し直すと答える前のセッションを増やす。
+      // 答える場所（アプリ・端末）は状態カードが言うので、ここに主操作は出さない（#5025）
+      return sessionWaitingInput ? "none" : "request_check";
     case "verify_failed":
     case "ai_stopped":
       return "request_recheck";

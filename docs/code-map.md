@@ -198,6 +198,17 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   - ヘッダーの材料（`PullRequestSummary`）を一覧と詳細APIのどちらから採るかは
     `resolvePullRequestHeader`（[`lib/pull-request-list.ts`](../src/lib/pull-request-list.ts)）
     に集約してあり、PRペインと重ね表示で共用する。
+- **リンクから詳細を開いたときの左の一覧は、開いた対象が載る一覧にそろえる**（#5024）。
+  - PR: [`use-reference-navigation.ts`](../src/hooks/use-reference-navigation.ts)の`openPullRequest`は
+    PR一覧の中からでも`prview`を落とし、[`issue-deck-shell.tsx`](../src/components/dashboard/issue-deck-shell.tsx)の
+    `effectivePullRequestView`が、`prview`の明示（`all`以外）が無いときに開いたPRから
+    `resolvePullRequestViewFor`（[`lib/pull-request-list.ts`](../src/lib/pull-request-list.ts)）でビューを決める。
+    本番リリースPRは`all`から外してある（#4542）ため、決めないとRCをブランチ画面から開いても左に出ない。
+    URLを組み立てる側（プッシュ通知など）は`prview`を付けなくてよい。一覧の行を押す操作は`prview`を保つ
+  - Issue: 一覧の外からの経路（通知ベル・本文中の参照・使用量の明細・確認待ちトースト・実行キュー）は
+    シェルの`openIssueFromLink`を通す。今の`filteredIssues`に含まれないときだけ`openIssue`へ
+    `resetList`を渡して絞り込み（`view`・`state`・`q`・`labels`・`assignee`・`repos`）を既定へ戻し、
+    閉じたIssueなら`state=all`にする。作成直後のIssueはまだ一覧に反映されていないので通さない
 - **スマホのPR一覧とPR詳細は同じ`mscreen=pull-requests`を共有し、どちらを出すかは`pr`クエリ
   だけが決める**（#1087・#1260。判定は[`issue-deck-shell.tsx`](../src/components/dashboard/issue-deck-shell.tsx)）。
   そのため**画面を移る遷移では`prmodal`と一緒に`pr`も落とす**——落とし忘れると`pr`がURLに残り、
@@ -3342,7 +3353,7 @@ export function POST(request: NextRequest) {
     リリースPRがあるときだけCI状態のGraphQLが1回増える。
   - 種別ごとのON/OFFは**持たない**（設定は購読の有無だけ）。通知する2種類はどちらも
     「人が動かないと止まるもの」で、片方だけ止めたい理由が出ていないため。
-- **リリース（本番反映）の完了はDiscordのチャンネルへ埋め込みで届く**（#2725でPush通知として導入し、#4791でSlack投稿へ、#4994でDiscord Webhook投稿へ替えた。投稿は`lib/discord/webhook.ts`の`postWebhookMessage`、投稿先は同ファイルの`loadReleaseDiscordTarget`（`DISCORD_RELEASE_WEBHOOK_URL`）。以下のPush・購読・ミュートに関する記述は#4791より前の経緯で、送り先以外の検知・記録の仕組みは今も同じ。
+- **リリース（本番反映）の完了はDiscordのチャンネルへ埋め込みで届く**（#2725でPush通知として導入し、#4791でSlack投稿へ、#4994でDiscord Webhook投稿へ、#5031でフォーラム投稿〈`thread_name`付き。400なら外して再送〉へ替えた。投稿は`lib/discord/webhook.ts`の`postWebhookMessage`、投稿先は同ファイルの`loadReleaseDiscordTarget`（`DISCORD_RELEASE_WEBHOOK_URL`）。以下のPush・購読・ミュートに関する記述は#4791より前の経緯で、送り先以外の検知・記録の仕組みは今も同じ。
   [`lib/notifications/release-push.ts`](../src/lib/notifications/release-push.ts)）。
   リリース通知はSignalyへのwebhook（`deploy.yml`の`notify-release`が
   `.github/scripts/signaly-notify.sh`を呼ぶ）にしか流れておらず、**フリート全体のリリースを

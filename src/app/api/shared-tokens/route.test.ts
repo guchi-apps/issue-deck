@@ -27,6 +27,15 @@ vi.mock("@/lib/db", () => ({
   },
 }));
 
+const notifyUnexpected = vi.fn().mockResolvedValue("expected");
+vi.mock("@/lib/shared-token-consumer-alert", () => ({
+  notifyUnexpectedSharedTokenConsumer: (...args: unknown[]) => notifyUnexpected(...args),
+}));
+vi.mock("next/server", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("next/server")>()),
+  after: (fn: () => void) => void fn(),
+}));
+
 vi.mock("@/lib/crypto/secret-cipher", () => ({
   encryptSecret: (value: string) => `encrypted:${value}`,
   decryptSecret: (value: string) => value.replace(/^encrypted:/, ""),
@@ -78,6 +87,20 @@ describe("共有トークンAPI", () => {
     expect(createUsage).toHaveBeenCalledWith({
       data: { sharedTokenId: "token-1", consumer: "example-app", action: "read" },
     });
+    // 想定外の利用元の判定へは行と利用元だけを渡す（#4998）
+    expect(notifyUnexpected).toHaveBeenCalledWith(expect.objectContaining({ id: "token-1", name: "TOKEN" }), "example-app");
+  });
+
+  it("想定外の利用元の通知が失敗しても取得は成功させる（#4998）", async () => {
+    findUnique.mockResolvedValue({ id: "token-1", name: "TOKEN", encryptedValue: "encrypted:value" });
+    createUsage.mockResolvedValue({});
+    notifyUnexpected.mockRejectedValueOnce(new Error("db down"));
+    const res = await GET(
+      request("/api/shared-tokens?name=TOKEN", {
+        headers: { authorization: "Bearer shared-secret", "x-shared-token-consumer": "hermes-agent" },
+      }),
+    );
+    expect(res.status).toBe(200);
   });
 
   it("AIエージェントも認証済みなら登録でき、応答へ値を含めない", async () => {

@@ -4,6 +4,7 @@ import {
   CircleCheck,
   CircleDashed,
   Hourglass,
+  Keyboard,
   Link2,
   Loader2,
   Lock,
@@ -29,6 +30,7 @@ import type {
  */
 const ICONS: Record<IssueAttentionKind, typeof Lock> = {
   permission: Lock,
+  input: Keyboard,
   question: MessageCircleQuestion,
   plan: ScrollText,
   merge: GitMerge,
