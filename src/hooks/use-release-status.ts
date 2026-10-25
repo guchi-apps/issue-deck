@@ -52,6 +52,8 @@ export type ReleasePullRequest = {
    * 古いサーバーの応答ではnull／省略）
    */
   verification?: ReleaseVerificationSummary | null;
+  /** 公開承認済みで、mainへは自動でマージされる（#5064）。「人が押す番」にしない。読めない・古い応答では省略 */
+  publishApproved?: boolean;
 };
 
 export type BumpPullRequest = ReleasePullRequest & {

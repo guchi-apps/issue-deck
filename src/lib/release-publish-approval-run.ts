@@ -159,6 +159,35 @@ export async function hasActivePublishApproval(candidateId: string): Promise<boo
   return row !== null;
 }
 
+/**
+ * 公開承認が有効（`active`・`merging`）で、現在のPRの先端が承認の範囲内にある候補の番号を返す。
+ * ブランチ画面・ヘッダーの「mainへマージ待ち」を、承認後は自動で進むものとして出し分けるために使う。
+ * 先端が承認の範囲外（承認後に進んだ）なら含めない（失効の掃除前に誤表示しない）。読めなければ空
+ */
+export async function loadPublishApprovedPullRequests(
+  repositoryFullName: string,
+  targets: readonly { number: number; baseSha: string | null; headSha: string }[],
+): Promise<Set<number>> {
+  const approved = new Set<number>();
+  if (targets.length === 0) return approved;
+  try {
+    const rows = await db.releasePublishApproval.findMany({
+      where: { repositoryFullName, status: { in: ACTIVE }, prNumber: { in: targets.map((t) => t.number) } },
+    });
+    for (const row of rows) {
+      const target = targets.find((t) => t.number === row.prNumber);
+      if (!target || target.baseSha === null) continue;
+      const finalizations = await loadFinalizations(row.candidateId);
+      if (isWithinApprovalTarget({ approval: row, finalizations, target: { baseSha: target.baseSha, headSha: target.headSha } })) {
+        approved.add(row.prNumber);
+      }
+    }
+  } catch (error) {
+    console.error(`[loadPublishApprovedPullRequests] 公開承認を読めませんでした ${repositoryFullName}:`, error);
+  }
+  return approved;
+}
+
 async function loadFinalizations(candidateId: string): Promise<PublishApprovalFinalization[]> {
   const rows = await db.releaseCandidateFinalization.findMany({ where: { candidateId }, orderBy: { createdAt: "asc" } });
   return rows.map((r) => ({

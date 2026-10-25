@@ -1,4 +1,5 @@
 import { db } from "@/lib/db";
+import { loadPublishApprovedPullRequests } from "@/lib/release-publish-approval-run";
 import { loadReleaseCandidateFixes } from "@/lib/release-candidate-fix";
 import { describeIntegrationSetupGap, getReleaseVerificationConfig } from "@/lib/release-verification-config";
 import { parseInheritanceEvidence } from "@/lib/release-finalize";
@@ -163,6 +164,16 @@ export async function fetchReleaseChecks(
         return new Map<string, import("@/lib/release-fix-series").ReleaseCandidateFix>();
       }),
     ]);
+    const approvedByRepo = new Map<string, Set<number>>();
+    for (const repositoryFullName of new Set(releases.map((t) => t.repositoryFullName))) {
+      approvedByRepo.set(
+        repositoryFullName,
+        await loadPublishApprovedPullRequests(
+          repositoryFullName,
+          releases.filter((t) => t.repositoryFullName === repositoryFullName),
+        ),
+      );
+    }
     for (const target of releases) {
       const current = { baseSha: target.baseSha, headSha: target.headSha };
       const ownRecords = rows
@@ -212,6 +223,7 @@ export async function fetchReleaseChecks(
       result.set(releaseChecksKey(target.repositoryFullName, target.number), {
         ...summarizeReleaseChecks(current, records),
         aiReviewStage,
+        publishApproved: approvedByRepo.get(target.repositoryFullName)?.has(target.number) === true,
         fix: fixes.get(releaseChecksKey(target.repositoryFullName, target.number)) ?? null,
         enforced: getReleaseVerificationConfig(target.repositoryFullName).enforced,
         started: {

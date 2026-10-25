@@ -39,6 +39,8 @@ export type PendingMergePullRequestState = {
    * 検証の対象でない（バンプPR・旧世代のリリースPR）・問題も進行も無いときはnull／省略
    */
   verification?: ReleaseVerificationBlock | null;
+  /** 公開承認済みで、mainへは自動でマージされる（#5064）。人が押す番ではない */
+  publishApproved?: boolean;
 };
 
 /**
@@ -133,6 +135,8 @@ export function isWaitingUserMerge(pullRequest: PendingMergePullRequestState | n
   if (pullRequest === null) return false;
   // 統合検証・全体レビューが進行中・問題ありのあいだは「人が押す番」と言わない（#4390）
   if (pullRequest.verification) return false;
+  // 公開承認済みの候補は、条件が揃えばシステムがmainへマージする（#5064）
+  if (pullRequest.publishApproved) return false;
   return pullRequest.ciState !== "pending" && !pullRequest.mergeJudgementPending;
 }
 
@@ -178,6 +182,7 @@ export function summarizeReleaseButtonStatus(
                   ),
                 )
               : null,
+            publishApproved: status.releasePullRequest.publishApproved === true,
           }
         : null,
     releasePending: status.phase === "release_pending" && !isDeviceBuild,
