@@ -163,6 +163,11 @@ export function useIssueFilters() {
   // 状態がユーザーの明示的な選択かどうか。既定値と同じ状態はクエリに残さない運用のため、
   // クエリの有無がそのまま「明示的に選ばれているか」になる（ビュー切り替え時の判断に使う）。
   const isStateExplicit = ["all", "open", "closed"].includes(searchParams.get("state") ?? "");
+  // PR一覧のビューも同じ（既定の`all`はクエリに残らない）。一覧の外からPRを開く経路は`prview`を
+  // 落とすので、明示が無いときは開いたPRが載るビューを画面側で決める（#5024）
+  const prViewQuery = searchParams.get("prview");
+  const isPullRequestViewExplicit =
+    isPullRequestViewId(prViewQuery) && prViewQuery !== DEFAULT_PULL_REQUEST_VIEW;
 
   const filters = useMemo<IssueFilters>(() => {
     const viewParam = searchParams.get("view");
@@ -341,6 +346,7 @@ export function useIssueFilters() {
 
   return {
     filters,
+    isPullRequestViewExplicit,
     setFilter,
     setFilters,
     selectView,
