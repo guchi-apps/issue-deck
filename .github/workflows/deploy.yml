@@ -244,6 +244,9 @@ jobs:
           # バックアップCIの起動とCircleCIの完了Webhookの受信だけができない
           CIRCLECI_API_TOKEN: ${{ secrets.CIRCLECI_API_TOKEN }}
           CIRCLECI_WEBHOOK_SECRET: ${{ secrets.CIRCLECI_WEBHOOK_SECRET }}
+          # リリース完了通知の投稿先（Discord Webhook。#4994・#5007）。URL自体が資格情報のためsecret。
+          # 未設定でもデプロイは通り、リリース完了通知が送られないだけ
+          DISCORD_RELEASE_WEBHOOK_URL: ${{ secrets.DISCORD_RELEASE_WEBHOOK_URL }}
           # 進捗管理に使うGitHub Projects v2の場所(#991)。シークレットではないためリポジトリ変数から取る。
           # 未設定ならProject連携を行わない(進捗は従来どおり進捗ラベルで判定する)
           PROJECT_V2_OWNER: ${{ vars.PROJECT_V2_OWNER }}
@@ -281,7 +284,7 @@ jobs:
             VAPID_PRIVATE_KEY VAPID_SUBJECT GITHUB_USER_TOKEN_ENCRYPTION_KEY SHARED_TOKEN_API_SECRET \
             SHARED_TOKEN_WRITE_SECRET GITHUB_OAUTH_CLIENT_ID GITHUB_OAUTH_CLIENT_SECRET \
             CLAUDE_CODE_OAUTH_TOKEN OPENAI_API_KEY TYPESAFE_API_KEY AIDE_SUMMARY_USER_LOGIN \
-            CIRCLECI_API_TOKEN CIRCLECI_WEBHOOK_SECRET MIGRATE_DATABASE_URL; do
+            CIRCLECI_API_TOKEN CIRCLECI_WEBHOOK_SECRET DISCORD_RELEASE_WEBHOOK_URL MIGRATE_DATABASE_URL; do
             case "${!name:-}" in
               *$'\n'*) echo "::error::${name} が改行を含むためgateへ送れません"; exit 1 ;;
             esac
@@ -325,6 +328,7 @@ jobs:
             printf '%s\n' "AIDE_SUMMARY_USER_LOGIN=${AIDE_SUMMARY_USER_LOGIN}"
             printf '%s\n' "CIRCLECI_API_TOKEN=${CIRCLECI_API_TOKEN}"
             printf '%s\n' "CIRCLECI_WEBHOOK_SECRET=${CIRCLECI_WEBHOOK_SECRET}"
+            printf '%s\n' "DISCORD_RELEASE_WEBHOOK_URL=${DISCORD_RELEASE_WEBHOOK_URL}"
             # ops-dashboardは同じVPSで待ち受けている。ポートは設定値として平文で持つ（#1849・#3037）
             printf '%s\n' "OPS_DASHBOARD_URL=http://127.0.0.1:3110"
           } | ssh -p "${SSH_PORT}" "${USERNAME}@${HOST}" env
