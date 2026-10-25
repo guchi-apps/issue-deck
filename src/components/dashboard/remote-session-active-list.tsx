@@ -65,6 +65,8 @@ export function RemoteSessionActiveList({
               {session.remoteControlUrl ? (
                 <a
                   href={session.remoteControlUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
                   className="inline-flex shrink-0 items-center gap-1 rounded-md bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground"
                 >
                   開く
