@@ -21,6 +21,13 @@ export type WebviewIosRepository = {
   command: string;
   /** 初回セットアップの手順が書かれたIssue・READMEへのリンク */
   setupReferences: { label: string; url: string }[];
+  /**
+   * リリース通知の「アプリを開く」に出すURL（#5049）。アプリのUniversal Link（AASA）の対象パス上に置き、
+   * iOSではインストール済みのアプリで、それ以外（アプリ未導入・AASA未配信）ではブラウザで開く。
+   * GitHubの`homepage`より優先する。無ければ`homepage`へ戻る（issue-deck自身は「リリース画面を開く」が
+   * 既にアプリで開くので持たない）。**アプリ側でAASAの対象パスを変えたらここも揃える。**
+   */
+  launchUrl?: string;
 };
 
 /**
@@ -43,6 +50,8 @@ const KURASHIO: WebviewIosRepository = {
       url: "https://github.com/guchi-apps/kurashio/blob/develop/ios/README.md",
     },
   ],
+  // AASAは未配信（kurashio#843）。配信されるまではブラウザで開く
+  launchUrl: "https://myroom.gucchii.com/",
 };
 
 /** yoteiflow（旧DaySpan）。kurashioと同じ契約のTestFlight自動配信を持つ（#3737） */
@@ -58,6 +67,8 @@ const YOTEIFLOW: WebviewIosRepository = {
       url: "https://github.com/guchi-apps/yoteiflow/blob/develop/ios/README.md",
     },
   ],
+  // AASAの対象は`/calendar`だけ（yoteiflowの`src/lib/universal-links.ts`）
+  launchUrl: "https://dayspan.gucchii.com/calendar",
 };
 
 /** aide。ios/配下のAIDEiosをTestFlightへ自動配信する（#3834）。Mac miniのチェックアウトは`~/apps/aide` */
@@ -72,6 +83,8 @@ const AIDE: WebviewIosRepository = {
       url: "https://github.com/guchi-apps/aide/blob/develop/ios/README.md",
     },
   ],
+  // AASAは`/*`が対象（aideの`src/web/aasa.ts`）。本番ではTeam ID未設定で404のまま（aide#701）
+  launchUrl: "https://aide.gucchii.com/",
 };
 
 /** morrow。ios/配下のMorrowをTestFlightへ自動配信する（#3834）。Mac miniのチェックアウトは`~/apps/morrow` */
@@ -86,6 +99,8 @@ const MORROW: WebviewIosRepository = {
       url: "https://github.com/guchi-apps/morrow/blob/develop/ios/README.md",
     },
   ],
+  // AASAは未配信（morrow#619）。配信されるまではブラウザで開く
+  launchUrl: "https://aide-bot.gucchii.com/",
 };
 
 /** issue-deck自身。ios/配下のIssueDeckをTestFlightへ自動配信する（#3846）。Mac miniのチェックアウトは`~/apps/issue-deck` */

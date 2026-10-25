@@ -177,7 +177,7 @@ export type PublishedRelease = {
 export type ReleaseCardExtras = {
   /** リリースの公開時刻。取れなければnull */
   publishedAt: Date | null;
-  /** アプリ本体のURL（GitHubリポジトリの`homepage`）。未設定ならnull */
+  /** アプリ本体のURL（iOSアプリの起動用URL〈#5049〉、無ければGitHubリポジトリの`homepage`）。どちらも無ければnull */
   appUrl: string | null;
   /** GitHubのリリースページ */
   releaseUrl: string;
@@ -206,7 +206,7 @@ const RELEASE_EMBED_COLOR = 0x2ecc71;
 
 /**
  * リリース完了のDiscord埋め込み（テキストチャンネル宛て。#5046）。更新内容・リンク・公開時刻の順。
- * **アプリのリンクは`homepage`がある場合だけ出す。**
+ * **アプリのリンクは起動用URL（`webview-ios-repos.ts`の`launchUrl`）か`homepage`がある場合だけ出す。**
  */
 export function buildReleaseDiscordEmbed(
   release: PublishedRelease,
@@ -372,13 +372,15 @@ export async function runReleasePushSweep(
           latest.tagName,
         ),
       };
+      const iosApp = getWebviewIosRepository(repository.fullName);
       await postWebhookMessage(target.webhookUrl, {
         embeds: [
           buildReleaseDiscordEmbed(published, {
             publishedAt,
-            appUrl: await fetchAppUrl(repository.ownerLogin, repository.name, token),
+            // iOSアプリの起動用URL（Universal Link）を`homepage`より優先する（#5049）
+            appUrl: iosApp?.launchUrl ?? (await fetchAppUrl(repository.ownerLogin, repository.name, token)),
             releaseUrl: latest.htmlUrl,
-            iosApp: getWebviewIosRepository(repository.fullName) !== null,
+            iosApp: iosApp !== null,
           }),
         ],
       });
