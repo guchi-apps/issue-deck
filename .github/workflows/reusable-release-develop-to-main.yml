@@ -1470,12 +1470,13 @@ jobs:
                 REVIEW="$(printf '%s' "$MARKER" | sed -nE 's/.*review=([a-z-]+).*/\1/p')"
                 RISK="$(printf '%s' "$MARKER" | sed -nE 's/.*risk=([a-z-]+).*/\1/p')"
               fi
+              # 判定印はBot・書き込み権限のある投稿者のコメントだけを出どころにする（#5001。外部ユーザーの偽LGTMを除く）。
               # 総合判定と同じSHA・判定のレビュー本文を選ぶ。後から届いたLGTMで
               # Claude/Codexいずれかの要修正コメントを隠さない。
               REVIEW_COMMENT="$(printf '%s' "$PR_JSON" | jq -c --arg review "$REVIEW" '
                 (.headRefOid // "") as $sha
                 | [ .comments[]? | select((.body // "") | test("issue-deck-(codex-)?review-verdict:(lgtm|needs-check|changes-requested) |issue-deck-review-report "))
-                    | select(((.body // "") | contains("issue-deck-codex-review-verdict:") | not) or (.authorAssociation | IN("OWNER", "MEMBER", "COLLABORATOR"))) ] as $all
+                    | select((.authorAssociation | IN("OWNER", "MEMBER", "COLLABORATOR")) or (.author.login | IN("github-actions", "issue-deck", "issue-deck[bot]", "github-actions[bot]"))) ] as $all
                 | ([ $all[] | select((.body // "") | contains("sha=" + $sha)) ] | if length > 0 then . else $all end) as $current
                 | ([ $current[] | select((.body // "") | test("issue-deck-review-(verdict|report)")) ] | last) as $claude
                 | ([ $current[] | select((.body // "") | contains("issue-deck-codex-review-verdict:")) ] | last) as $codex
@@ -1492,7 +1493,7 @@ jobs:
                 REVIEW="$(printf '%s' "$PR_JSON" | jq -r '
                   (.headRefOid // "") as $sha
                   | [ .comments[]?
-                      | select(((.body // "") | contains("issue-deck-codex-review-verdict:") | not) or (.authorAssociation | IN("OWNER", "MEMBER", "COLLABORATOR")))
+                      | select((.authorAssociation | IN("OWNER", "MEMBER", "COLLABORATOR")) or (.author.login | IN("github-actions", "issue-deck", "issue-deck[bot]", "github-actions[bot]")))
                       | .body // empty
                       | capture("issue-deck-(codex-)?review-verdict:(?<v>lgtm|needs-check|changes-requested) sha=(?<s>[0-9a-fA-F]+)")?
                       | select($sha != "" and .s == $sha) | .v ] as $v
