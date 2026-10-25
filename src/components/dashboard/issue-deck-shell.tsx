@@ -173,7 +173,6 @@ import {
   computeManualStepAttention,
 } from "@/lib/manual-step-attention";
 import { countMergePendingAttention } from "@/lib/merge-pending-attention";
-import { countUnconfirmedQuestions, countWaitingQuestions } from "@/lib/question-attention";
 import { selectVisibleIssues } from "@/lib/repository-visibility";
 import { buildReleaseCheckIndex, countUncheckedReleases } from "@/lib/release-check";
 import { selectVisibleReleaseHistory } from "@/lib/release-history";
@@ -275,8 +274,11 @@ export function IssueDeckShell({
     toggleLabel,
     toggleRepo,
   } = useIssueFilters();
-  const { openIssue: openIssueUrl, openPullRequest: openPullRequestUrl } =
-    useReferenceNavigation();
+  const {
+    openIssue: openIssueUrl,
+    openPullRequest: openPullRequestUrl,
+    openRemoteSessions,
+  } = useReferenceNavigation();
   const { goBackOrFallback } = useHistoryNavigation();
   // PC版ヘッダーの戻るボタンが押せるかどうか（#1771）
   const canGoBack = useCanGoBackInApp();
@@ -1231,34 +1233,6 @@ export function IssueDeckShell({
       ),
     [issues, filters, snoozedIssueIds],
   );
-  // 未確認（回答が届いていて未読）の質問の件数（#1796・#2070）。左メニュー・スマホのホームで
-  // オレンジの丸を点けるかどうかと、吹き出しの内訳にだけ使う（**件数そのものは`navCounts`から
-  // 引く**——画面側で数え直すと同じ行の数字と吹き出しが別の数え方になる）。
-  // 「質問」も絞り込みを適用しないビュー（#1750）なので、母集団の解決は上の2つと同じ。
-  // **保留中は外す**（#2456）。#2456で「質問」でも伏せられるようになったため、外さないと
-  // 未確認の回答が届いた質問を伏せた時点で「丸は点いているのに一覧は0件」になる。
-  const questionAttentionIssues = useMemo(
-    () =>
-      filterIssuesByView(
-        applyIssueFilters(issues, resolveFiltersForView(filters, "question")),
-        "question",
-        currentUserLogin,
-        issues,
-      ).filter((issue) => !snoozedIssueIds.has(issue.id)),
-    [issues, filters, currentUserLogin, snoozedIssueIds],
-  );
-  const unconfirmedQuestionCount = useMemo(
-    () => countUnconfirmedQuestions(questionAttentionIssues),
-    [questionAttentionIssues],
-  );
-  // 回答待ち（質問を投げてまだ回答が届いていない）の質問の件数（#2309）。左メニュー・
-  // スマホのホームでスピナーを回すかどうかと、吹き出しの内訳に使う。**母集団は
-  // `unconfirmedQuestionCount`と同じ**——同じ行に出す2つの合図が別の集合を数えていると、
-  // 丸とスピナーで指している質問が食い違う。
-  const waitingQuestionCount = useMemo(
-    () => countWaitingQuestions(questionAttentionIssues),
-    [questionAttentionIssues],
-  );
   // 一覧の行に出す前提待ちの印は、手作業Issue以外にも広げる（#2003）。
   const prerequisiteReadiness = useMemo(
     () => computeIssuePrerequisiteReadiness(issues),
@@ -2109,8 +2083,6 @@ export function IssueDeckShell({
                 <MobileHomeScreen
                   navCounts={{ ...navCounts, "check-user": mobileCheckUserCount }}
                   manualStepAttention={manualStepAttention}
-                  unconfirmedQuestionCount={unconfirmedQuestionCount}
-                  waitingQuestionCount={waitingQuestionCount}
                   pullRequestNavCounts={pullRequestNavCounts}
                   mergePendingAttention={mergePendingAttention}
                   onSelectQuickView={selectQuickView}
@@ -2516,8 +2488,6 @@ export function IssueDeckShell({
                 navCounts={navCounts}
                 checkUserPullRequestCount={checkUserPullRequestCount}
                 manualStepAttention={manualStepAttention}
-                unconfirmedQuestionCount={unconfirmedQuestionCount}
-                waitingQuestionCount={waitingQuestionCount}
                 pullRequestNavCounts={pullRequestNavCounts}
                 mergePendingAttention={mergePendingAttention}
                 repositories={repositories}
@@ -2882,6 +2852,7 @@ export function IssueDeckShell({
           // 作った直後に詳細へ進むかどうかは、このダイアログが出す選択画面で決まる（#2862）
           onCreated={registerCreatedIssue}
           onNavigateToIssue={selectIssue}
+          onOpenRemoteSession={openRemoteSessions}
           /* 「作成+実装開始」から次の5時間枠へ積んだぶんも即時に目印を出す（#2866・計画レビューG1）。
              別ウィンドウ（`/issues/new`）から積んだぶんはこの経路を通らず、取り直しで出る */
           onNightlyRunQueued={nightlyRun.refresh}

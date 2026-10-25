@@ -180,6 +180,7 @@ function makeOtherRepository(): ConnectedRepository {
 function Harness({
   onCreated,
   onNavigateToIssue,
+  onOpenRemoteSession,
   repositories = [makeRepository()],
   defaultRepositoryFullName = REPOSITORY_FULL_NAME,
   initialSelectedLabels = [],
@@ -187,6 +188,7 @@ function Harness({
   onCreated: (issue: Issue) => void;
   /** 渡したときだけ「次に開く画面」の選択が出る（#2862） */
   onNavigateToIssue?: (issue: Issue) => void;
+  onOpenRemoteSession?: (repositoryFullName?: string) => void;
   repositories?: ConnectedRepository[];
   defaultRepositoryFullName?: string | null;
   initialSelectedLabels?: string[];
@@ -201,7 +203,6 @@ function Harness({
       initialHandoff={
         initialSelectedLabels.length > 0
           ? {
-              kind: "issue",
               repositoryFullName: defaultRepositoryFullName ?? "",
               title: "",
               body: "",
@@ -215,6 +216,7 @@ function Harness({
       issues={[]}
       onCreated={onCreated}
       onNavigateToIssue={onNavigateToIssue}
+      onOpenRemoteSession={onOpenRemoteSession}
       claudeLocalModel="sonnet"
       codexModel="gpt-5.6-terra"
     />
@@ -480,91 +482,6 @@ describe("CreateIssueDialog の「次に開く画面」", () => {
 });
 
 /**
- * #1641。「リポジトリに質問する」を新規作成ダイアログの種別として統合したもの。
- * 本文欄・画像添付・ラベルはIssueと共有し、種別で変わるのはタイトル・担当者・作成後の動きだけ。
- */
-describe("CreateIssueDialog の種別「質問」", () => {
-  beforeEach(() => {
-    dispatchState.hosts = [makeHost()];
-    createIssue.mockResolvedValue(makeIssue({ title: "[質問] 認証の流れを教えて" }));
-    commentMutations.createComment.mockResolvedValue({ id: "c1" });
-  });
-
-  afterEach(() => {
-    cleanup();
-    createIssue.mockReset();
-    commentMutations.createComment.mockReset();
-    resetSuggest();
-  });
-
-  function selectQuestion() {
-    fireEvent.click(screen.getByRole("button", { name: "質問" }));
-  }
-
-  it("質問ではタイトル欄・担当者・「作成+実装開始」を出さない", () => {
-    render(<Harness onCreated={vi.fn()} />);
-    selectQuestion();
-
-    expect(screen.queryByLabelText("タイトル")).toBeNull();
-    expect(screen.queryByLabelText("担当者")).toBeNull();
-    expect(screen.queryByRole("button", { name: "作成+実装開始" })).toBeNull();
-    expect(screen.getByRole("button", { name: "質問する" })).not.toBeNull();
-  });
-
-  /** 質問のタイトルは質問文から機械生成する。判定し直す「付け直す」を出す意味が無い（#1884） */
-  it("質問では「付け直す」を出さない", () => {
-    render(<Harness onCreated={vi.fn()} />);
-    selectQuestion();
-
-    expect(screen.queryByRole("button", { name: "付け直す" })).toBeNull();
-  });
-
-  // 質問でも画像を貼れて`#123`のIssue補完が効くこと（この統合の主目的）
-  it("本文の入力欄はIssueと同じもので、画像添付を出す", () => {
-    render(<Harness onCreated={vi.fn()} />);
-    selectQuestion();
-
-    expect(screen.getByLabelText("質問内容")).not.toBeNull();
-    expect(screen.getByRole("button", { name: "画像を添付" })).not.toBeNull();
-  });
-
-  it("タイトルは質問文から自動で作り、プレビューとして見せる", () => {
-    render(<Harness onCreated={vi.fn()} />);
-    selectQuestion();
-
-    expect(screen.getByText("質問内容から自動で作られます")).not.toBeNull();
-
-    fireEvent.change(screen.getByLabelText("質問内容"), {
-      target: { value: "認証の流れを教えて" },
-    });
-    expect(screen.getByText("[質問] 認証の流れを教えて")).not.toBeNull();
-  });
-
-  it("Issueを作成したうえで、質問コメントとホストへの起動依頼を送る", async () => {
-    const onCreated = vi.fn();
-    render(<Harness onCreated={onCreated} />);
-    selectQuestion();
-
-    fireEvent.change(screen.getByLabelText("質問内容"), {
-      target: { value: "認証の流れを教えて" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "質問する" }));
-
-    await waitFor(() => expect(createIssue).toHaveBeenCalledTimes(1));
-    expect(createIssue).toHaveBeenCalledWith(
-      expect.objectContaining({ title: "[質問] 認証の流れを教えて", assignee: null }),
-    );
-    await waitFor(() => expect(commentMutations.createComment).toHaveBeenCalledTimes(1));
-    expect(commentMutations.createComment.mock.calls[0][0].body).not.toContain("@claude");
-    expect(commentMutations.createComment.mock.calls[0][0].askQuestion).toBe(true);
-    // 投稿したコメントぶんを数えたIssueを呼び出し側へ渡す（一覧のコメント数がずれない）
-    await waitFor(() =>
-      expect(onCreated).toHaveBeenCalledWith(expect.objectContaining({ commentCount: 1 })),
-    );
-  });
-});
-
-/**
  * #1884。項目をすべて1画面に並べ、リポジトリは人が選ぶ。タイトル・ラベルは、空欄のまま
  * 「作成」系ボタンを押した送信の直前に自動で決まる（#2773。専用の付与ボタンは廃止）。
  * 2ステップ（#1605）と内容からのリポジトリ推定（#1710・#1733）も廃止した。
@@ -718,27 +635,6 @@ describe("CreateIssueDialog の1画面フォーム", () => {
 
     expect(screen.getByLabelText("リポジトリ").textContent).toContain(OTHER_REPOSITORY_FULL_NAME);
     expect(screen.queryByText("表示中のリポジトリ")).toBeNull();
-  });
-
-  /** #1884。押しただけで選んでいないリポジトリが入る経路を残さない */
-  it("質問へ切り替えたとき、質問に使えないリポジトリなら未選択へ戻して選ばせる", () => {
-    const notConfigured: ConnectedRepository = {
-      ...makeOtherRepository(),
-      hasClaudeWorkflow: false,
-      dispatchRunnable: false,
-    };
-    render(
-      <Harness
-        onCreated={vi.fn()}
-        repositories={[makeRepository(), notConfigured]}
-        defaultRepositoryFullName={OTHER_REPOSITORY_FULL_NAME}
-      />,
-    );
-
-    expect(screen.getByLabelText("リポジトリ").textContent).toContain(OTHER_REPOSITORY_FULL_NAME);
-    fireEvent.click(screen.getByRole("button", { name: "質問" }));
-
-    expect(screen.getByLabelText("リポジトリ").textContent).toContain("リポジトリを選択");
   });
 
   it("開いただけでは自動生成を呼ばない", () => {
@@ -953,10 +849,10 @@ describe("CreateIssueDialog の1画面フォーム", () => {
  * 移す入口はこのダイアログの中だけで、外枠を差し替えたものが別ウィンドウのページ本体になる。
  */
 /**
- * #1890。AI判定の応答に種別が乗る。質問だと判定されても**種別は変えず**、
- * 切り替えるかどうかは押した人が決める。
+ * #1890・#5047。AI判定の応答に種別が乗る。質問だと判定されたら作成をいったん止めて提案を出し、
+ * 聞きたいだけならリモートセッションへ案内する（質問の種別は#5047で廃止）。
  */
-describe("CreateIssueDialog の質問への切り替え提案", () => {
+describe("CreateIssueDialog の質問らしい内容への提案", () => {
   beforeEach(() => {
     dispatchState.hosts = [makeHost()];
     createIssue.mockResolvedValue(makeIssue());
@@ -973,13 +869,13 @@ describe("CreateIssueDialog の質問への切り替え提案", () => {
    * #2773。タイトルが空のまま「作成」を押させて自動判定を起こす。判定結果が「質問のようです」
    * のときは`createIssue`まで進まず、その場で止まって提案を出す（`ensureTitleAndLabels`）。
    */
-  async function generateAsQuestion() {
+  async function generateAsQuestion(props: { onOpenRemoteSession?: (repo?: string) => void } = {}) {
     suggestGenerate.mockResolvedValue({
       kind: "question",
       title: "タイトル案",
       labels: ["51.improvement"],
     });
-    render(<Harness onCreated={vi.fn()} />);
+    render(<Harness onCreated={vi.fn()} {...props} />);
 
     fireEvent.change(screen.getByLabelText("内容"), { target: { value: "違いはなんですか？" } });
     fireEvent.click(screen.getByRole("button", { name: "作成" }));
@@ -988,12 +884,12 @@ describe("CreateIssueDialog の質問への切り替え提案", () => {
     expect(createIssue).not.toHaveBeenCalled();
   }
 
-  it("質問だと判定されても種別は変えず、提案だけを出す", async () => {
-    await generateAsQuestion();
+  it("種別の切り替えは出さない（#5047）", () => {
+    render(<Harness onCreated={vi.fn()} />);
 
-    // 種別はIssueのまま（質問ならタイトルは入力欄ではなく自動プレビューになる）
-    expect(screen.getByRole("button", { name: "Issue" }).getAttribute("aria-pressed")).toBe("true");
-    expect((screen.getByLabelText("タイトル") as HTMLInputElement).value).toBe("タイトル案");
+    expect(screen.queryByRole("button", { name: "質問" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "質問する" })).toBeNull();
+    expect(screen.getByRole("button", { name: "作成+実装開始" })).not.toBeNull();
   });
 
   it("質問と判定されなければ提案を出さない", async () => {
@@ -1011,61 +907,37 @@ describe("CreateIssueDialog の質問への切り替え提案", () => {
     expect(screen.queryByText("内容から質問のようです")).toBeNull();
   });
 
-  it("「Issueのままにする」で提案を降ろす。フォームの中身は変わらない", async () => {
+  it("「Issueのままにする」で提案を降ろし、次の「作成」でそのまま作る", async () => {
     await generateAsQuestion();
 
     fireEvent.click(screen.getByRole("button", { name: "Issueのままにする" }));
 
     expect(screen.queryByText("内容から質問のようです")).toBeNull();
-    expect(screen.getByRole("button", { name: "Issue" }).getAttribute("aria-pressed")).toBe("true");
     expect((screen.getByLabelText("タイトル") as HTMLInputElement).value).toBe("タイトル案");
+
+    fireEvent.click(screen.getByRole("button", { name: "作成" }));
+    await waitFor(() => expect(createIssue).toHaveBeenCalledTimes(1));
   });
 
-  it("「質問に切り替える」で質問の形になり、「Issueに戻す」で元へ戻る", async () => {
+  it("「リモートセッションで聞く」で、選んでいるリポジトリを渡して閉じる", async () => {
+    const onOpenRemoteSession = vi.fn();
+    await generateAsQuestion({ onOpenRemoteSession });
+
+    fireEvent.click(screen.getByRole("button", { name: "リモートセッションで聞く" }));
+
+    expect(onOpenRemoteSession).toHaveBeenCalledWith(REPOSITORY_FULL_NAME);
+    expect(createIssue).not.toHaveBeenCalled();
+    await waitFor(() => expect(screen.queryByText("内容から質問のようです")).toBeNull());
+  });
+
+  it("遷移先を渡されていなければ「リモートセッションで聞く」は出さない（別ウィンドウ）", async () => {
     await generateAsQuestion();
 
-    fireEvent.click(screen.getByRole("button", { name: "質問に切り替える" }));
-
-    expect(screen.getByRole("button", { name: "質問" }).getAttribute("aria-pressed")).toBe("true");
-    // タイトルは質問文から作った読み取り専用のプレビューへ変わり、担当者欄は消える
-    expect(screen.getByText("[質問] 違いはなんですか？")).not.toBeNull();
-    expect(screen.queryByLabelText("担当者")).toBeNull();
-
-    fireEvent.click(screen.getByRole("button", { name: "Issueに戻す" }));
-
-    expect(screen.getByRole("button", { name: "Issue" }).getAttribute("aria-pressed")).toBe("true");
-    expect((screen.getByLabelText("タイトル") as HTMLInputElement).value).toBe("タイトル案");
-    expect(screen.queryByText("質問に切り替えました。")).toBeNull();
-  });
-
-  it("質問に使えないリポジトリで切り替えたときも、「Issueに戻す」で選び直さずに済む", async () => {
-    const notConfigured: ConnectedRepository = {
-      ...makeOtherRepository(),
-      hasClaudeWorkflow: false,
-      dispatchRunnable: false,
-    };
-    suggestGenerate.mockResolvedValue({ kind: "question", title: "タイトル案", labels: [] });
-    render(
-      <Harness
-        onCreated={vi.fn()}
-        repositories={[makeRepository(), notConfigured]}
-        defaultRepositoryFullName={OTHER_REPOSITORY_FULL_NAME}
-      />,
-    );
-
-    fireEvent.change(screen.getByLabelText("内容"), { target: { value: "違いはなんですか？" } });
-    fireEvent.click(screen.getByRole("button", { name: "作成" }));
-    await waitFor(() => expect(screen.queryByText("内容から質問のようです")).not.toBeNull());
-
-    fireEvent.click(screen.getByRole("button", { name: "質問に切り替える" }));
-    expect(screen.getByLabelText("リポジトリ").textContent).toContain("リポジトリを選択");
-
-    fireEvent.click(screen.getByRole("button", { name: "Issueに戻す" }));
-    expect(screen.getByLabelText("リポジトリ").textContent).toContain(OTHER_REPOSITORY_FULL_NAME);
+    expect(screen.queryByRole("button", { name: "リモートセッションで聞く" })).toBeNull();
   });
 
   /**
-   * #1890。判定を起こす「作成」はフッターにあり、提案は先頭の種別欄の下に出る。
+   * #1890。判定を起こす「作成」はフッターにあり、提案はフォームの先頭に出る。
    * ダイアログは中身ごとスクロールするため、寄せないと押した位置からは見えないことがある。
    */
   it("提案を出したら、その位置まで画面を寄せる", async () => {
@@ -1078,15 +950,6 @@ describe("CreateIssueDialog の質問への切り替え提案", () => {
     // より後のタイミングでコミットされることがある（#2401）。ここもwaitForで待つ
     await waitFor(() => expect(scrollIntoView).toHaveBeenCalledWith({ block: "nearest" }));
     vi.restoreAllMocks();
-  });
-
-  it("人が種別を押し直したら提案は降りる", async () => {
-    await generateAsQuestion();
-
-    fireEvent.click(screen.getByRole("button", { name: "質問" }));
-
-    expect(screen.queryByText("内容から質問のようです")).toBeNull();
-    expect(screen.queryByText("質問に切り替えました。")).toBeNull();
   });
 });
 
@@ -1148,7 +1011,6 @@ describe("CreateIssueDialog の別ウィンドウ", () => {
         claudeLocalModel="sonnet"
         codexModel="gpt-5.6-terra"
         initialHandoff={{
-          kind: "issue",
           repositoryFullName: REPOSITORY_FULL_NAME,
           title: "移してきたタイトル",
           body: "移してきた本文",

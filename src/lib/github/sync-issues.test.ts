@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { askClaudeCommentBody, QA_ANSWER_MARKER } from "@/lib/github/ask-claude";
+import { QA_ANSWER_MARKER, QUESTION_COMMENT_MARKER } from "@/lib/github/ask-claude";
 import { FALLBACK_NOTICE_MARKER } from "@/lib/github/fallback-notice";
 import {
   deleteTransferredSourceIssue,
@@ -299,7 +299,7 @@ describe("updateQaAnswerPendingState", () => {
   });
 
   it("質問コメントの場合、現在時刻を設定する", async () => {
-    await updateQaAnswerPendingState(1, askClaudeCommentBody("質問内容"));
+    await updateQaAnswerPendingState(1, `質問内容\n\n${QUESTION_COMMENT_MARKER}`);
 
     expect(updateMany).toHaveBeenCalledWith({
       where: { githubIssueId: BigInt(1) },

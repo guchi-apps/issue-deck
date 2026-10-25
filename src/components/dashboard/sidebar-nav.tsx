@@ -36,7 +36,6 @@ import {
   isPullRequestViewAttention,
   type MergePendingAttention,
 } from "@/lib/merge-pending-attention";
-import { resolveQuestionNavSignals } from "@/lib/question-attention";
 import {
   getNavViewPcLabel,
   navViewIcons,
@@ -99,7 +98,7 @@ type SidebarNavProps = {
   remoteSessionCount?: number | null;
   remoteSessionStarting?: boolean;
   /**
-   * いま表示中の画面がリポジトリの絞り込みを適用するか（#4543）。質問・確認待ち・ブランチ等の
+   * いま表示中の画面がリポジトリの絞り込みを適用するか（#4543）。確認待ち・ブランチ等の
    * 適用外の画面では、選択が残っていても効いていないことを注記する。
    */
   repoFilterApplies?: boolean;
@@ -111,16 +110,6 @@ type SidebarNavProps = {
   checkUserPullRequestCount: number;
   /** 「ユーザーの作業待ち」の内訳（#1613）。いま実行できるものがあるときだけ強調する */
   manualStepAttention: ManualStepAttention;
-  /**
-   * 未確認（回答が届いていて未読）の質問の件数（#2070）。**行に出す数字は`navCounts`から
-   * 引き、これは使わない**——オレンジの丸を点けるかどうかと、吹き出しの内訳だけに使う。
-   */
-  unconfirmedQuestionCount: number;
-  /**
-   * 回答待ち（質問を投げてまだ回答が届いていない）の質問の件数（#2309）。**「質問」の行の
-   * スピナーを回すかどうかと、吹き出しの内訳に使う。行に出す数字はこれまでどおり`navCounts`。**
-   */
-  waitingQuestionCount: number;
   /**
    * リリース・デプロイが動いているリポジトリ数（#2167）。「ブランチ」行の件数とオレンジの丸に
    * 使う。**nullは未取得**で、そのときは件数を出さない（0を出すと「動いているものが無い」と
@@ -202,8 +191,6 @@ export function SidebarNavView({
   navCounts,
   checkUserPullRequestCount,
   manualStepAttention,
-  unconfirmedQuestionCount,
-  waitingQuestionCount,
   releaseActivity,
   releaseUncheckedCount,
   pullRequestNavCounts,
@@ -343,13 +330,11 @@ export function SidebarNavView({
     });
   }
 
-  /** 質問・コードレビューの行。合図（丸・回るアイコン・吹き出し）は行ごとに決める（#2325） */
-  function questionSignalRow(id: NavViewId) {
-    const signals = resolveQuestionNavSignals(id, {
-      total: navCounts.question,
-      unconfirmed: unconfirmedQuestionCount,
-      waiting: waitingQuestionCount,
-    });
+  /**
+   * コードレビューの行（#698）。レビューが走っているかどうかの合図は出せない（左メニューが見ている
+   * 一覧のデータにはコメントが載っていない。#2325）。並んでいた「質問」の行は#5047で廃止した
+   */
+  function codeReviewRow(id: NavViewId) {
     return navRow({
       key: id,
       label: getNavViewPcLabel(id),
@@ -357,9 +342,6 @@ export function SidebarNavView({
       active: activeView === id && activePane === "issues",
       onClick: () => onSelectView(id),
       count: navCounts[id],
-      emphasis: signals.attention ? "attention" : "none",
-      busy: signals.busy,
-      title: signals.title,
     });
   }
 
@@ -577,7 +559,6 @@ export function SidebarNavView({
       <div>
         <h2 className="mb-1 px-2 text-xs font-semibold text-muted-foreground">構想・相談</h2>
         <ul className="flex flex-col gap-0.5">
-          {questionSignalRow("question")}
           {navRow({
             key: "remote-sessions",
             label: "リモートセッション",
@@ -605,7 +586,7 @@ export function SidebarNavView({
             onClick: onSelectIosExtensions,
             title: "ウィジェット・ロック画面・ライブアクティビティ・コントロールを一覧する",
           })}
-          {sidebarCodeReviewNavViews.map((view) => questionSignalRow(view.id))}
+          {sidebarCodeReviewNavViews.map((view) => codeReviewRow(view.id))}
         </ul>
       </div>
 

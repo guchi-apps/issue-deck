@@ -78,19 +78,16 @@ export function filterIssuesByView(
         (!viewLabels || viewLabels.length === 0) &&
         (!excludeLabels || excludeLabels.length === 0) &&
         (!viewStatuses || viewStatuses.length === 0) &&
-        !navView.questionOnly &&
         !navView.excludeQuestions &&
         !navView.codeReviewOnly &&
         !navView.excludeCodeReviews;
       if (hasNoCondition) return issues;
 
       const matchesView = (issue: Issue) => {
-        // 質問Issueの振り分け（#1514）。**他のどの特例よりも先に判定する。** 特に
+        // 過去の質問Issueの除外（#1514）。**他のどの特例よりも先に判定する。** 特に
         // excludeQuestionsを下のqaAnswerPendingAt特例より後ろに置くと、回答待ちの質問Issueが
         // 「実行中」へ抜けてしまう。
-        const isQuestion = isAskRepoQuestionIssue(issue);
-        if (navView.questionOnly && !isQuestion) return false;
-        if (navView.excludeQuestions && isQuestion) return false;
+        if (navView.excludeQuestions && isAskRepoQuestionIssue(issue)) return false;
         // レビューIssue（#698）も質問と同じ扱い。**下の`dispatchPendingAt`の特例より先に
         // 判定する。** 後ろに置くと、レビューを積んだ直後のIssueが「実行中」へ抜ける
         const isCodeReview = isCodeReviewIssue(issue);

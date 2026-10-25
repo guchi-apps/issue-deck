@@ -34,8 +34,6 @@ function renderSidebar(
   {
     checkUserPullRequestCount = 0,
     manualStepAttention = NO_MANUAL_STEP,
-    unconfirmedQuestionCount = 0,
-    waitingQuestionCount = 0,
     releaseActivity = null,
     releaseUncheckedCount = null,
     mergePendingAttention = NO_MERGE_PENDING,
@@ -45,8 +43,6 @@ function renderSidebar(
   }: {
     checkUserPullRequestCount?: number;
     manualStepAttention?: ManualStepAttention;
-    unconfirmedQuestionCount?: number;
-    waitingQuestionCount?: number;
     releaseActivity?: ReleaseActivityCounts | null;
     releaseUncheckedCount?: number | null;
     mergePendingAttention?: MergePendingAttention | null;
@@ -73,8 +69,6 @@ function renderSidebar(
       navCounts={navCounts}
       checkUserPullRequestCount={checkUserPullRequestCount}
       manualStepAttention={manualStepAttention}
-      unconfirmedQuestionCount={unconfirmedQuestionCount}
-      waitingQuestionCount={waitingQuestionCount}
       releaseActivity={releaseActivity}
       releaseUncheckedCount={releaseUncheckedCount}
       pullRequestNavCounts={pullRequestNavCounts}
@@ -121,8 +115,6 @@ function renderSidebarWithRepositories(
       navCounts={NAV_COUNTS}
       checkUserPullRequestCount={0}
       manualStepAttention={NO_MANUAL_STEP}
-      unconfirmedQuestionCount={0}
-      waitingQuestionCount={0}
       pullRequestNavCounts={{ all: 0, "in-progress": 0, completed: 0, release: 0 }}
       mergePendingAttention={NO_MERGE_PENDING}
       repositories={repositories}
@@ -342,76 +334,19 @@ describe("SidebarNav", () => {
     ).toBeNull();
   });
 
-  // 数字は一覧に並ぶ件数で、オレンジの丸は未確認があるときだけ（#2070）。#1910のように
-  // 未確認の数を数字に出すと、読み終えた質問しか無いときに「質問は無い」と読めてしまう
-  it("未確認の質問があれば一覧の件数をオレンジの丸で出す", () => {
+  // 「質問」の行は#5047で廃止した。並んでいたコードレビューの行は件数だけを出す（#2325）
+  it("「質問」の行を出さず、コードレビューの行は合図なしで件数だけを出す", () => {
     renderSidebar(
       { all: 0, "in-progress": 0, completed: 0, release: 0 },
-      { ...NAV_COUNTS, question: 3 },
-      { unconfirmedQuestionCount: 1 },
+      { ...NAV_COUNTS, "code-review": 2 },
     );
 
-    const button = screen.getByRole("button", { name: /質問/ });
-    expect(button.textContent).toContain("3");
-    expect(button.querySelector("span:last-child")?.className).toContain("bg-amber-500");
-    // 数字（総数）と丸（未確認）で意味が違うため、内訳は吹き出しで補う
-    expect(button.getAttribute("title")).toContain("3件");
-    expect(button.getAttribute("title")).toContain("1件");
-  });
-
-  // 回答待ちのあいだは回るアイコンを出す（#2309）。丸（未確認）とは別の合図で、併存する
-  it("回答待ちの質問があれば回るアイコンを出し、内訳を吹き出しへ添える", () => {
-    renderSidebar(
-      { all: 0, "in-progress": 0, completed: 0, release: 0 },
-      { ...NAV_COUNTS, question: 3 },
-      { unconfirmedQuestionCount: 1, waitingQuestionCount: 2 },
-    );
-
-    const button = screen.getByRole("button", { name: /質問/ });
-    expect(button.querySelector(".animate-spin")).not.toBeNull();
-    expect(button.getAttribute("title")).toContain("回答待ちが2件");
-    expect(button.getAttribute("title")).toContain("まだ開いていないものが1件");
-  });
-
-  it("回答待ちの質問が無ければ回るアイコンを出さない", () => {
-    renderSidebar(
-      { all: 0, "in-progress": 0, completed: 0, release: 0 },
-      { ...NAV_COUNTS, question: 3 },
-      { unconfirmedQuestionCount: 1, waitingQuestionCount: 0 },
-    );
-
-    expect(
-      screen.getByRole("button", { name: /質問/ }).querySelector(".animate-spin"),
-    ).toBeNull();
-  });
-
-  // 質問の合図をコードレビューの行へ持ち込まない（#2325）。同じ枠に並んでいるだけで、
-  // 回っているのは質問の回答待ち——押した先にレビューは1件も走っていない
-  it("回答待ちの質問があってもコードレビューの行は回さない", () => {
-    renderSidebar(
-      { all: 0, "in-progress": 0, completed: 0, release: 0 },
-      { ...NAV_COUNTS, question: 3 },
-      { unconfirmedQuestionCount: 1, waitingQuestionCount: 2 },
-    );
-
+    expect(screen.queryByRole("button", { name: /^質問/ })).toBeNull();
     const button = screen.getByRole("button", { name: /コードレビュー/ });
+    expect(button.textContent).toContain("2");
     expect(button.querySelector(".animate-spin")).toBeNull();
-    // 質問の未確認でオレンジの丸を点けたり、質問の内訳を吹き出しに出したりもしない
     expect(button.querySelector("span:last-child")?.className).not.toContain("amber");
     expect(button.getAttribute("title")).toBeNull();
-  });
-
-  it("未確認の質問が無ければ強調しないが、件数は出す", () => {
-    renderSidebar(
-      { all: 0, "in-progress": 0, completed: 0, release: 0 },
-      { ...NAV_COUNTS, question: 3 },
-      { unconfirmedQuestionCount: 0 },
-    );
-
-    const button = screen.getByRole("button", { name: /質問/ });
-    expect(button.textContent).toContain("3");
-    expect(button.querySelector("span:last-child")?.className).not.toContain("amber");
-    expect(button.getAttribute("title")).toContain("3件");
   });
 
   // 取得前に0を出すと「PRが無い」と読めてしまうため。
@@ -437,7 +372,6 @@ describe("SidebarNav", () => {
       "PR一覧",
       "確認待ち",
       "作業待ち",
-      "質問",
       "リモートセッション",
       "構想",
       "iOS拡張",

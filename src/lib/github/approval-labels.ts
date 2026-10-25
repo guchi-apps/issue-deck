@@ -247,11 +247,6 @@ export type LabelFilterPreset = {
    */
   statuses?: ProgressStatusKey[];
   /**
-   * 質問Issue（`isAskRepoQuestionIssue`＝タイトルが`[質問] `/`質問: `で始まる）だけに
-   * 絞り込む（#1514）。質問であることはラベルにもStatusにも現れないため、専用の条件にしている。
-   */
-  questionOnly?: boolean;
-  /**
    * 質問Issueを除外する（#1514）。質問Issueは実装フローに乗らないまま`Ready`に居続けるため、
    * 除外しないと「次にどれへ着手させるか」を選ぶビューへ恒久的に溜まる。
    */
@@ -289,12 +284,10 @@ export const LABEL_FILTER_PRESETS: readonly LabelFilterPreset[] = [
   { key: "check-user", label: "ユーザーの確認待ち", labels: [CHECK_USER_LABEL] },
   // 表示名は「ユーザーの確認待ち」と対にして、どちらも人が動くまで進まないことを揃える（#1613）
   { key: "manual-step", label: "ユーザーの作業待ち", labels: [MANUAL_STEP_LABEL] },
-  // 「リポジトリに質問する」で作られた質問Issueの置き場（#1514）。回答を読み終えて承認を押すと
-  // `00.check-user`が外れ、Statusは`Ready`のままなので、専用ビューが無いと「未着手」へ戻る。
-  // 完了の合図はcloseなので、openな質問Issueが全部ここに並ぶ（既定のstate=openのまま）。
-  { key: "question", label: "質問", labels: [], questionOnly: true },
-  // 「コードレビューを実行」で作られたレビューIssueの置き場（#698）。質問と同じく実装フローに
-  // 乗らない。
+  // 質問Issueの置き場だった「質問」（#1514）は、質問機能の廃止（#5047）で外した。過去の質問Issueは
+  // 進捗のビューからは引き続き除外し（`excludeQuestions`）、「すべてのIssue」で見る。
+  //
+  // 「コードレビューを実行」で作られたレビューIssueの置き場（#698）。実装フローに乗らない。
   //
   // **状態は他のビューと同じ既定（open）のまま（#3141）。** 完了の合図はcloseなので、読み終えた
   // レビューは一覧から外れる（一時は過去の結果を読み返す場所として`state: "all"`にしていた

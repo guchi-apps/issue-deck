@@ -6,13 +6,13 @@ import {
   ExternalLink,
   FilePlus2,
   Loader2,
-  MessageCircleQuestion,
   Clock,
   MoreHorizontal,
   Pencil,
   Play,
   RotateCcw,
   SlidersHorizontal,
+  TerminalSquare,
   Trash2,
   XCircle,
 } from "lucide-react";
@@ -106,6 +106,7 @@ import { useDispatchState } from "@/hooks/use-dispatch-state";
 import { useIssueArtifacts } from "@/hooks/use-issue-artifacts";
 import { useIssueComments } from "@/hooks/use-issue-comments";
 import { useNow } from "@/hooks/use-now";
+import { useReferenceNavigation } from "@/hooks/use-reference-navigation";
 import { useIssueMutations } from "@/hooks/use-issue-mutations";
 import { ParentRunChildBadge, ParentRunSection } from "@/components/dashboard/parent-run-section";
 import { useIssueSubIssues } from "@/hooks/use-issue-sub-issues";
@@ -135,10 +136,7 @@ import { resolveCheckUserGuidance } from "@/lib/github/check-user-guidance";
 import { CLOSE_REASON_LABELS } from "@/lib/github/issue-close";
 import { isPlanningPhaseSkipped } from "@/lib/github/planning-phase";
 import {
-  askClaudeCommentBody,
-  canAskClaude,
   canCloseAskRepoQuestion,
-  canContinueQuestionFromComposer,
   isQaAnswerPending,
   resolveComposerPrimaryAction,
 } from "@/lib/github/ask-claude";
@@ -313,6 +311,7 @@ export function IssueDetail({
     error: commentMutationError,
     setError: setCommentMutationError,
   } = useIssueCommentMutations();
+  const { openRemoteSessions } = useReferenceNavigation();
   const [newCommentBody, setNewCommentBody] = useState("");
   // 計画レビューカードの「追加で修正したいこと」の下書き。承認欄の承認へ同梱する（#3852）
   const [planReviewAdditional, setPlanReviewAdditional] = useState("");
@@ -421,10 +420,10 @@ export function IssueDetail({
   }
 
   /** コメントを1件投稿し、一覧と件数へ反映する（投稿元の入力欄はそれぞれの呼び出し側が畳む） */
-  async function postComment(body: string, askQuestion = false): Promise<boolean> {
+  async function postComment(body: string): Promise<boolean> {
     if (!issue) return false;
     const [owner, repo] = issue.repositoryFullName.split("/");
-    const created = await createComment({ owner, repo, number: issue.number, body, askQuestion });
+    const created = await createComment({ owner, repo, number: issue.number, body });
     if (!created) return false;
     setComments((prev) => [...prev, created]);
     onIssueUpdated({ ...issue, commentCount: issue.commentCount + 1 });
@@ -436,19 +435,14 @@ export function IssueDetail({
     if (await postComment(newCommentBody)) setNewCommentBody("");
   }
 
-  async function handleAskClaudeFromComposer() {
-    if (!issue || !newCommentBody.trim()) return;
-    if (await postComment(askClaudeCommentBody(newCommentBody), true)) setNewCommentBody("");
-  }
-
   /**
-   * `Ctrl`+`Enter`の宛先（#2345）。**そのとき主ボタンになっている投稿操作へ届かせる。**
-   * 従来は常に「コメント」で、質問Issueで続きを聞いたつもりの文章が、誰も読まないコメントとして
-   * 積まれていた。**クローズには絶対に割り当てない**ので、`close`のときは「コメント」へ倒す。
+   * 「リモートセッションで聞く」（#5047）。廃止した「質問する」の代わりに、このIssueのリポジトリを
+   * 選んだ状態でリモートセッション画面を開く。起動はせず、稼働中のセッションを使うか新しく
+   * 起動するかは画面で選ばせる
    */
-  async function handleSubmitPrimary() {
-    if (composerPrimaryAction === "question") await handleAskClaudeFromComposer();
-    else await handleCreateComment();
+  function handleOpenRemoteSession() {
+    if (!issue) return;
+    openRemoteSessions(issue.repositoryFullName);
   }
 
   /**
@@ -460,10 +454,6 @@ export function IssueDetail({
    */
   async function handleApprovalComment(body: string) {
     await postComment(body);
-  }
-
-  async function handleApprovalAskClaude(question: string) {
-    await postComment(askClaudeCommentBody(question), true);
   }
 
   async function handleDismissCheckUser(text?: string) {
@@ -625,16 +615,12 @@ export function IssueDetail({
   // 2か所で同じ値を使い、片方だけ出る状態を作らない
   const canCloseQuestion = canCloseAskRepoQuestion(issue, comments);
   // コメント欄の下の操作列で、どれを主ボタン（塗りつぶし）にするか（#2345）。**入力欄が空か
-  // どうかで付け替える**ので、書き始めた時点で強調が「質問する」へ移る
+  // どうかで付け替える**ので、書き始めた時点で強調が「コメント」へ移る
   const composerPrimaryAction = resolveComposerPrimaryAction(
     issue,
     comments,
     newCommentBody.trim().length > 0,
   );
-  // 質問Issueでは、この欄が次の質問を書く場所だと分かるようにする（#2345）
-  const composerPlaceholder = canContinueQuestionFromComposer(issue, comments)
-    ? "続けて質問する場合はここへ..."
-    : "コメントを追加...";
   // コードレビューIssue（#698）の結果。**いちばん新しい結果だけ**をパネルに出す
   const codeReview = isCodeReviewIssue(issue)
     ? {
@@ -889,10 +875,6 @@ export function IssueDetail({
                   )}
                 />
               )}
-              {/* 「Claudeに質問する」はここに置かない（#1913）。コメント欄の下の「質問する」と
-                  投稿されるコメントが同一（`askClaudeCommentBody`）で、あちらは本文をメンション
-                  補完・画像添付付きの入力欄で書けるぶん上位互換だった。ヘッダーに置くと、
-                  上のトップバーの「横断質問」とも見分けが付かない */}
               {canCloseQuestion && (
                 <Button
                   variant="outline"
@@ -1382,10 +1364,9 @@ export function IssueDetail({
                   sessionStatePending={sessionStatePending}
                   localSession={!executionTarget.expectsActionsRun}
                   sessionAlive={sessionAlive}
-                  canAskClaude={canAskClaude(issue)}
                   qaAnswerPending={qaAnswerPending}
                   onComment={handleApprovalComment}
-                  onAskClaude={handleApprovalAskClaude}
+                  onOpenRemoteSession={handleOpenRemoteSession}
                   onDismissCheckUser={handleDismissCheckUser}
                   mergeApprovalPending={mergeApprovalPending}
                   hasPullRequestSection={visiblePullRequestLinks.length > 0}
@@ -1413,7 +1394,7 @@ export function IssueDetail({
                     <LocalSessionCommentNotice session={issueSession} />
                   )}
                   <MentionTextarea
-                    placeholder={composerPlaceholder}
+                    placeholder="コメントを追加..."
                     className="min-h-20"
                     value={newCommentBody}
                     onChange={setNewCommentBody}
@@ -1424,14 +1405,13 @@ export function IssueDetail({
                     onKeyDown={(e) => {
                       if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
                         e.preventDefault();
-                        handleSubmitPrimary();
+                        handleCreateComment();
                       }
                     }}
                   />
                   <BodyCleanupButton value={newCommentBody} onCleaned={setNewCommentBody} />
                   <div className="flex flex-wrap items-center justify-end gap-2">
-                    {/* Ctrl+Enterの宛先は状態で変わる（#2345）。主ボタンの塗りつぶしと文言を
-                        一致させて、どちらへ飛ぶのかを押す前に読めるようにする */}
+                    {/* Ctrl+Enterの宛先は常に「コメント」（クローズには割り当てない・#2345） */}
                     <span className="mr-auto text-xs text-muted-foreground">
                       <kbd className="rounded border bg-muted px-1 py-0.5 font-mono text-[0.7rem]">
                         Ctrl
@@ -1441,7 +1421,7 @@ export function IssueDetail({
                         Enter
                       </kbd>
                       <span className="ml-1">
-                        で{composerPrimaryAction === "question" ? "質問" : "コメント"}
+                        でコメント
                       </span>
                     </span>
                     {canCreateFollowupFromComment(issue) && (
@@ -1450,21 +1430,18 @@ export function IssueDetail({
                         引き継いでIssueを作成
                       </Button>
                     )}
-                    {/* ヘッダーの「Claudeに質問する」を畳んだぶん、ダイアログが出していた説明を
-                        ここへ引き継ぐ（#1913） */}
-                    {canAskClaude(issue) && (
-                      <Button
-                        variant={composerPrimaryAction === "question" ? "default" : "outline"}
-                        title="入力した内容をClaudeへの質問として投稿します。コードは変更されません。回答はコメントとして返るまで数十秒〜数分かかります。"
-                        onClick={handleAskClaudeFromComposer}
-                        disabled={!newCommentBody.trim() || isCommentSubmitting || isImageUploading}
-                      >
-                        <MessageCircleQuestion />
-                        質問する
-                      </Button>
-                    )}
-                    {/* 質問Issueでは「コメント」を主ボタンにしない（#1770）。さらに枠線でもなく
-                        枠なしまで沈める（#2345）——質問Issueへ書いたふつうのコメントは誰も読まない */}
+                    {/* 廃止した「質問する」（#5047）の代わり。リポジトリについて聞きたいことは、
+                        このIssueのリポジトリを選んだリモートセッション画面へ渡す */}
+                    <Button
+                      variant="outline"
+                      title="このIssueのリポジトリを選んだ状態でリモートセッション画面を開きます。Claude Codeと対話して聞けます。"
+                      onClick={handleOpenRemoteSession}
+                    >
+                      <TerminalSquare />
+                      リモートセッションで聞く
+                    </Button>
+                    {/* 回答を読み終えた過去の質問Issueでは、主ボタンを「回答を確認してクローズ」へ
+                        譲り、「コメント」は枠なしまで沈める（#1770・#2345） */}
                     <Button
                       variant={composerPrimaryAction === "comment" ? "default" : "ghost"}
                       onClick={handleCreateComment}
@@ -1475,7 +1452,7 @@ export function IssueDetail({
                     </Button>
                     {/* 回答を読み終えた位置に出口を置く（#1770）。ヘッダーにも同じ操作があるが、
                         コメントを読み進めるとそちらは押す対象として遠い。書きかけがあるときは
-                        主ボタンを「質問する」へ譲って枠線まで下がる（#2345） */}
+                        主ボタンを「コメント」へ譲って枠線まで下がる（#2345） */}
                     {canCloseQuestion && (
                       <Button
                         variant={composerPrimaryAction === "close" ? "default" : "outline"}

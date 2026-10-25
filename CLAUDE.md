@@ -201,7 +201,7 @@ Statusを進めるのはissue-deckだけで、各ワークフロー・ローカ�
 
 IssueのActions実装は#4680で廃止した。現行の入口・残すワークフロー・既存配布先の扱いは[廃止方針](docs/actions-implementation-retirement.md)を参照。以下の旧callerへの言及は旧タグで動く配布先向けの互換説明である。
 
-`11.local`（ローカルで対応中）も同様にどの段階でも併用でき、付いている間は`claude-issue-dispatch.yml`（無人実行）がそのIssueに対して計画・実装・分割・追加対応を一切行わない（読み取り専用の質問応答のみ例外）。VSCode等のローカルClaude Codeセッションで対応するIssueに付けることで、ローカルと無人実行がラベル操作をきっかけに二重起動するのを防ぐ（詳細は[docs/multi-agent/branching.md](docs/multi-agent/branching.md)「ローカル実行と無人実行の二重起動を防ぐ」参照）。優先度ラベルは`11.local`と番号帯が重ならないよう`80.Priority: High`・`85.Priority: Medium`・`89.Priority: Low`としている。
+`11.local`（ローカルで対応中）も同様にどの段階でも併用でき、付いている間は`claude-issue-dispatch.yml`（無人実行）がそのIssueに対して計画・実装・分割・追加対応を一切行わない。VSCode等のローカルClaude Codeセッションで対応するIssueに付けることで、ローカルと無人実行がラベル操作をきっかけに二重起動するのを防ぐ（詳細は[docs/multi-agent/branching.md](docs/multi-agent/branching.md)「ローカル実行と無人実行の二重起動を防ぐ」参照）。優先度ラベルは`11.local`と番号帯が重ならないよう`80.Priority: High`・`85.Priority: Medium`・`89.Priority: Low`としている。
 
 **共通GitHubラベルの名前・説明・色の正本は`.github/labels.json`で、全リポジトリへは`scripts/sync-labels.sh`で配る**（#3237。体系・旧名との対応・手順は[docs/label-scheme.md](docs/label-scheme.md)）。ラベルを足す・改名するときは正本を先に直し、個別のリポジトリだけでは直さない。
 
