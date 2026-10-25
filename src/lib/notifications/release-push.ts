@@ -6,6 +6,7 @@ import {
   fetchRepositoryHomepage,
   type LatestRelease,
 } from "@/lib/github/release-api";
+import { getWebviewIosRepository } from "@/lib/webview-ios-repos";
 import {
   loadReleaseDiscordTarget,
   postWebhookMessage,
@@ -60,7 +61,7 @@ const DEFAULT_MAX_AGE_HOURS = 24;
 /** 1回の巡回で見るリポジトリ数の上限。取りこぼしても次の巡回で拾える */
 const SWEEP_REPOSITORY_LIMIT = 60;
 
-/** issue-deck自身の公開URL。ブランチ画面へのリンクに使う。`ISSUE_DECK_BASE_URL`で上書きできる */
+/** issue-deck自身の公開URL。リリース画面へのリンクに使う。`ISSUE_DECK_BASE_URL`で上書きできる */
 const DEFAULT_ISSUE_DECK_BASE_URL = "https://issuedeck.gucchii.com";
 
 /**
@@ -180,18 +181,23 @@ export type ReleaseCardExtras = {
   appUrl: string | null;
   /** GitHubのリリースページ */
   releaseUrl: string;
+  /** WebViewでiOSアプリを包んでいるリポジトリか（#5046）。アプリのリンクに印を付ける */
+  iosApp?: boolean;
 };
 
-/** ブランチ画面のURL。PC（`pane`）とスマホ（`mscreen`）で現在地の持ち方が違うので両方を載せる */
-export function releaseBranchScreenUrl(
+/**
+ * issue-deckのリリース画面（リリース履歴）のURL（#5046）。PC（`pane`）とスマホ（`mscreen`）で
+ * 現在地の持ち方が違うので両方を載せる。iOSアプリではUniversal Link（`ios-universal-links.ts`）で開く。
+ */
+export function releaseScreenUrl(
   base: string | undefined = process.env.ISSUE_DECK_BASE_URL,
 ): string {
   const origin = (base?.trim() || DEFAULT_ISSUE_DECK_BASE_URL).replace(/\/+$/, "");
-  return `${origin}/dashboard?pane=flow&mscreen=flow`;
+  return `${origin}/dashboard?pane=releases&mscreen=release-history`;
 }
 
-/** フォーラムの投稿タイトル（#5031）。リポジトリとバージョンはここに載せ、本文では繰り返さない */
-export function buildReleaseThreadName(release: PublishedRelease): string {
+/** 埋め込みのタイトル（#5046）。テキストチャンネルには投稿タイトルが無いので、リポジトリとバージョンはここに載せる */
+export function buildReleaseEmbedTitle(release: PublishedRelease): string {
   return `${release.repositoryFullName} ${release.tagName}`;
 }
 
@@ -199,19 +205,19 @@ export function buildReleaseThreadName(release: PublishedRelease): string {
 const RELEASE_EMBED_COLOR = 0x2ecc71;
 
 /**
- * リリース完了のDiscord埋め込み（フォーラム投稿の本文。#5031）。更新内容・リンク・公開時刻の順。
+ * リリース完了のDiscord埋め込み（テキストチャンネル宛て。#5046）。更新内容・リンク・公開時刻の順。
  * **アプリのリンクは`homepage`がある場合だけ出す。**
  */
 export function buildReleaseDiscordEmbed(
   release: PublishedRelease,
   extras: ReleaseCardExtras,
-  branchScreenUrl: string = releaseBranchScreenUrl(),
+  releaseScreen: string = releaseScreenUrl(),
 ): DiscordEmbed {
-  const links = [`[ブランチ画面を開く](${branchScreenUrl})`];
-  if (extras.appUrl) links.push(`[アプリを開く](${extras.appUrl})`);
+  const links = [`[リリース画面を開く](${releaseScreen})`];
+  if (extras.appUrl) links.push(`[アプリを開く${extras.iosApp ? "（iOSアプリ）" : ""}](${extras.appUrl})`);
   links.push(`[リリースノート](${extras.releaseUrl})`);
   return {
-    title: "リリースノートを開く",
+    title: buildReleaseEmbedTitle(release),
     url: extras.releaseUrl,
     color: RELEASE_EMBED_COLOR,
     description: release.notes || RELEASE_PUSH_EMPTY_BODY,
@@ -367,12 +373,12 @@ export async function runReleasePushSweep(
         ),
       };
       await postWebhookMessage(target.webhookUrl, {
-        threadName: buildReleaseThreadName(published),
         embeds: [
           buildReleaseDiscordEmbed(published, {
             publishedAt,
             appUrl: await fetchAppUrl(repository.ownerLogin, repository.name, token),
             releaseUrl: latest.htmlUrl,
+            iosApp: getWebviewIosRepository(repository.fullName) !== null,
           }),
         ],
       });

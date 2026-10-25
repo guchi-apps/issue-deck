@@ -10,6 +10,7 @@ describe("AASA", () => {
     expect(detail.components).toEqual([
       { "/": "/dashboard", "?": { mscreen: "issue-detail" } },
       { "/": "/dashboard", "?": { mscreen: "pull-requests" } },
+      { "/": "/dashboard", "?": { mscreen: "release-history" } },
     ]);
   });
 });
