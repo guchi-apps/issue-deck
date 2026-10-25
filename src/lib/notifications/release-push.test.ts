@@ -208,6 +208,12 @@ describe("buildReleaseDiscordEmbed", () => {
     expect(embed.fields?.[0].value).not.toContain("アプリを開く");
   });
 
+  it("リンク欄にGitHubのリリースノートを出さない（#5063）", () => {
+    const embed = buildReleaseDiscordEmbed(release, extras);
+    expect(embed.fields?.[0].value).not.toContain("リリースノート");
+    expect(embed.fields?.[0].value).not.toContain(LATEST.htmlUrl);
+  });
+
   it("更新内容が無くても本文を空にしない", () => {
     expect(buildReleaseDiscordEmbed({ ...release, notes: "" }, extras).description).toBe(RELEASE_PUSH_EMPTY_BODY);
   });
@@ -276,12 +282,21 @@ describe("runReleasePushSweep", () => {
   });
 
   it("起動用URLを持たないリポジトリは従来どおり`homepage`を出す", async () => {
+    stubDb({ repositories: [{ ...REPOSITORY, fullName: "guchi-apps/other", name: "other" }], recordedTagName: "v4.74.0" });
+
+    await runReleasePushSweep({ now: NOW });
+
+    const links = vi.mocked(postWebhookMessage).mock.calls[0][1].embeds?.[0].fields?.[0].value ?? "";
+    expect(links).toContain("[アプリを開く](https://app.example.test)");
+  });
+
+  it("issue-deck自身はトップページの「アプリを開く」を出す（#5063）", async () => {
     stubDb({ repositories: [REPOSITORY], recordedTagName: "v4.74.0" });
 
     await runReleasePushSweep({ now: NOW });
 
     const links = vi.mocked(postWebhookMessage).mock.calls[0][1].embeds?.[0].fields?.[0].value ?? "";
-    expect(links).toContain("[アプリを開く（iOSアプリ）](https://app.example.test)");
+    expect(links).toContain("[アプリを開く（iOSアプリ）](https://issuedeck.gucchii.com/)");
   });
 
   it("初めて見るリポジトリは鳴らさずタグだけ記録する", async () => {
