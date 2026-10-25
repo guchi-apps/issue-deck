@@ -12,6 +12,7 @@
 - Actions側のトークンと自己ループ防止: [actions-token-model.md](actions-token-model.md)
 - 無人実行フローの全体像: [multi-agent-workflow.md](multi-agent-workflow.md)・[multi-agent/](multi-agent/)
 - 会話型の操作入口（IssueDeck Chat。意図解釈・確認カード・共通サービスの切り出し）: [chat.md](chat.md)。**アプリ内の画面は#4743で廃止**し、処理部分はSlack起案が使う
+- アプリ内AI（要約・検索・文章整理など）をGPT系選択時にサブPCのCodex CLIで動かす経路と、機能ごとのClaude停止時の可否: [app-ai-codex.md](app-ai-codex.md)
 - リポジトリだけを指定してサブPCにClaude Codeのセッションを立て、Claude Codeアプリへ移動する「リモートセッション」（`src/lib/dispatch/remote-session*.ts`・`src/app/api/remote-sessions/`・`scripts/start-remote-session.sh`）: [remote-session.md](remote-session.md)（#4743）
 - Slackの`#アプリissue起案`からのIssue起案（Events受信・対象選択UI・Bot返信。`src/lib/slack/`・`src/app/api/slack/`）: [slack-intake.md](slack-intake.md)（#4454）
 - 親子Issue・依存関係・実行計画をまとめて起案する共通サービス（Slack・Chat共通。`src/lib/epic-draft/`）: [epic-draft.md](epic-draft.md)（#4537）

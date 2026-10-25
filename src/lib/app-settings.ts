@@ -479,19 +479,21 @@ export function resolveCodexInitialModel(
   return parseCodexLocalModel(setting) ?? CODEX_MODEL_DEFAULT;
 }
 
-// アプリ内の要約・検索・文章整理など、Anthropic APIを直接呼ぶ機能で使うモデル（#2562）。
+// アプリ内の要約・検索・文章整理などで使うモデル（#2562）。
 // スナップショット日付を固定せず、同じモデル系列の更新を自動で受けられるエイリアスを使う。
+// **選択肢名に実際の実行先を出す**（#5067）。Claude系はAnthropic API、GPT系はサブPCのCodex CLI
+// （ChatGPTサブスク枠）で動き、OpenAI API（従量課金）は使わない。`request.ts`の`routeAppAi`が正。
 export const APP_AI_MODEL_OPTIONS = [
-  { value: "claude-haiku-4-5", label: "Claude Haiku 4.5（高速）" },
-  { value: "claude-sonnet-5-5", label: "Claude Sonnet 5.5（標準）" },
-  { value: "claude-opus-5-5", label: "Claude Opus 5.5（高精度）" },
+  { value: "claude-haiku-4-5", label: "Claude Haiku 4.5（高速）・Anthropic API" },
+  { value: "claude-sonnet-5-5", label: "Claude Sonnet 5.5（標準）・Anthropic API" },
+  { value: "claude-opus-5-5", label: "Claude Opus 5.5（高精度）・Anthropic API" },
   // Fable 5.1は単価がSonnet 5.5の5倍（入力$10 / 出力$50）。**1往復で終わる要約・検索では
   // キャッシュが効かず倍率がそのまま効く**ので、選ぶのは判断力が要る用途（原因診断・
   // 新規アプリの相談）に限る想定（#2717）
-  { value: "claude-fable-5-1", label: "Claude Fable 5.1（最高精度）" },
-  { value: "gpt-6-sol", label: "GPT-6 Sol（最高精度）" },
-  { value: "gpt-5.6-terra", label: "GPT-5.6 Terra（標準）" },
-  { value: "gpt-6-luna", label: "GPT-6 Luna（高速）" },
+  { value: "claude-fable-5-1", label: "Claude Fable 5.1（最高精度）・Anthropic API" },
+  { value: "gpt-6-sol", label: "GPT-6 Sol（最高精度）・サブPCのCodex CLI" },
+  { value: "gpt-5.6-terra", label: "GPT-5.6 Terra（標準）・サブPCのCodex CLI" },
+  { value: "gpt-6-luna", label: "GPT-6 Luna（高速）・サブPCのCodex CLI" },
 ] as const;
 
 export const APP_AI_MODEL_DEFAULT = APP_AI_MODEL_OPTIONS[0].value;

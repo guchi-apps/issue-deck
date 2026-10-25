@@ -3,15 +3,35 @@ import { Prisma } from "@prisma/client";
 import { notifyDispatchHostWake } from "@/lib/dispatch/wake-notify";
 import { STEP_SCHEMA, type RunSession, type SessionToolRunner } from "@/lib/chat/investigation/agent";
 import { TOOL_SPECS } from "@/lib/chat/investigation/tools";
-import { recordClaudeApiCall } from "@/lib/claude/api-usage";
-import { CODEX_LOCAL_MODEL_VALUES } from "@/lib/app-settings";
 import { db } from "@/lib/db";
+import {
+  abandonChatTurnJob,
+  CHAT_TURN_CLAIM_WAIT_MS,
+  isCodexCliModel,
+  parseChatTurnErrorKind,
+  pickChatCodexHost,
+  type ChatTurnErrorKind,
+  type ChatTurnRequest,
+} from "@/lib/chat/codex-turn-common";
 import {
   buildChatTurnActiveKey,
   CHAT_TURN_ISSUE_NUMBER,
   CHAT_TURN_REPOSITORY,
-  isDispatchHostOnline,
 } from "@/lib/dispatch/dispatch-job";
+
+// 既存の呼び出し元のため、切り出した共通部分をここからも公開する（#5067）
+export {
+  abandonChatTurnJob,
+  CHAT_TURN_CLAIM_WAIT_MS,
+  CHAT_TURN_ERROR_KINDS,
+  CODEX_CLI_PROVIDER,
+  isCodexCliModel,
+  parseChatTurnErrorKind,
+  pickChatCodexHost,
+  recordCodexChatUsage,
+  type ChatTurnErrorKind,
+  type ChatTurnRequest,
+} from "@/lib/chat/codex-turn-common";
 
 /**
  * チャット調査のモデル呼び出しを、サブPCのログイン済みCodex CLIで行う（#4109・#4199）。
@@ -26,50 +46,13 @@ import {
  * **どの失敗でもAPIへ逃がさない**（要件10）。
  */
 
-/** 実行先の表記。利用状況・診断に残す（OpenAI APIの`gpt-*`と混ぜない） */
-export const CODEX_CLI_PROVIDER = "codex-cli";
-
 /** Codex経路の調査の上限。1回の実行（起動1回）で調査から回答まで進めるので、全体＝1回の待ちの上限（#4199） */
 export const CODEX_INVESTIGATION_LIMITS = {
   maxDurationMs: 240_000,
   stepTimeoutMs: 240_000,
 } as const;
 
-/** 積んだジョブがこの時間内に受け取られなければ、サブPCへ届いていないと判断する */
-export const CHAT_TURN_CLAIM_WAIT_MS = 30_000;
 const POLL_INTERVAL_MS = 1_000;
-
-/** サブPC側（`scripts/run-chat-codex.sh`）が返す失敗の種別。受け口で既知の語だけを通す */
-export const CHAT_TURN_ERROR_KINDS = [
-  "not_logged_in",
-  "api_key_auth",
-  "usage_limit",
-  "timeout",
-  "bad_output",
-  "codex_error",
-] as const;
-export type ChatTurnErrorKind = (typeof CHAT_TURN_ERROR_KINDS)[number];
-
-export function parseChatTurnErrorKind(value: unknown): ChatTurnErrorKind | null {
-  return (CHAT_TURN_ERROR_KINDS as readonly unknown[]).includes(value) ? (value as ChatTurnErrorKind) : null;
-}
-
-/** Codex CLIで動かせるモデルか。`-m`へ渡すのはこの4つだけ（計画レビュー指摘2） */
-export function isCodexCliModel(model: string): boolean {
-  return (CODEX_LOCAL_MODEL_VALUES as readonly string[]).includes(model);
-}
-
-/** ジョブの本文。pollerは`GET /api/dispatch/chat-turn`でこれを受け取る */
-export type ChatTurnRequest = {
-  model: string;
-  system: string;
-  messages: { role: "user" | "assistant"; content: string }[];
-  schema: unknown;
-  /** `session`＝1回の起動でMCPブリッジ経由のツールを使って最終回答まで進める（#4199） */
-  mode?: "session";
-  /** セッション型でCodexへ見せる読み取りツール（名前と説明だけ。引数の形はブリッジ側が持つ） */
-  tools?: { name: string; description: string }[];
-};
 
 /**
  * Codexへ渡すプロンプト。`codex exec`は会話の配列を受け取らないため、system・履歴・今回の依頼を
@@ -89,22 +72,6 @@ export function buildCodexPrompt(request: Pick<ChatTurnRequest, "system" | "mess
     "# 会話（古い順。最後が今回の入力）",
     turns,
   ].join("\n\n");
-}
-
-type HostCheck = { ok: true; hostName: string } | { ok: false; reason: string };
-
-/** オンラインかつ`CHAT_TURN`に対応したホストを1台選ぶ（最後に申告したもの） */
-export async function pickChatCodexHost(now: Date = new Date()): Promise<HostCheck> {
-  const hosts = await db.dispatchHost.findMany({ orderBy: { lastSeenAt: "desc" } });
-  const online = hosts.filter((host) => isDispatchHostOnline(host.lastSeenAt, now));
-  if (online.length === 0) {
-    return { ok: false, reason: "Codex(offline) サブPCがオフラインです" };
-  }
-  const capable = online.find((host) => host.chatCodexCapable === true);
-  if (!capable) {
-    return { ok: false, reason: "Codex(unsupported) サブPCのpollerがチャットのCodex実行に未対応です" };
-  }
-  return { ok: true, hostName: capable.name };
 }
 
 /** 失敗の種別を、利用者に出す理由の文字列へ */
@@ -311,28 +278,4 @@ async function waitForSession(params: {
       await setPhase(params.runId, params.jobId, "Codexを起動しています");
     }
   }
-}
-
-/** 待つのをやめたジョブを閉じる。遅れて届いた結果は`currentJobId`の不一致で捨てられる */
-async function abandonChatTurnJob(jobId: string, message: string): Promise<void> {
-  await db.dispatchJob.updateMany({
-    where: { id: jobId, status: { in: ["QUEUED", "CLAIMED", "RUNNING"] } },
-    data: { status: "CANCELED", activeKey: null, finishedAt: new Date(), message },
-  });
-}
-
-/** サブPCの`codex exec --json`が返した使用量を、OpenAI APIとは別の実行先として計上する */
-export function recordCodexChatUsage(model: string, usage: unknown): void {
-  const u = (usage && typeof usage === "object" ? usage : {}) as Record<string, unknown>;
-  const n = (v: unknown) => (typeof v === "number" && Number.isFinite(v) && v >= 0 ? Math.floor(v) : 0);
-  recordClaudeApiCall({
-    feature: "chat_investigation",
-    model: `${CODEX_CLI_PROVIDER}/${model}`,
-    tokens: {
-      inputTokens: n(u.input_tokens),
-      outputTokens: n(u.output_tokens),
-      cacheReadTokens: n(u.cached_input_tokens),
-      cacheCreationTokens: 0,
-    },
-  });
 }
