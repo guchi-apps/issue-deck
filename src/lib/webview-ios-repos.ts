@@ -24,8 +24,7 @@ export type WebviewIosRepository = {
   /**
    * リリース通知の「アプリを開く」に出すURL（#5049）。アプリのUniversal Link（AASA）の対象パス上に置き、
    * iOSではインストール済みのアプリで、それ以外（アプリ未導入・AASA未配信）ではブラウザで開く。
-   * GitHubの`homepage`より優先する。無ければ`homepage`へ戻る（issue-deck自身は「リリース画面を開く」が
-   * 既にアプリで開くので持たない）。**アプリ側でAASAの対象パスを変えたらここも揃える。**
+   * GitHubの`homepage`より優先する。無ければ`homepage`へ戻る。**アプリ側でAASAの対象パスを変えたらここも揃える。**
    */
   launchUrl?: string;
 };
@@ -115,6 +114,8 @@ const ISSUE_DECK: WebviewIosRepository = {
       url: "https://github.com/guchi-apps/issue-deck/blob/develop/ios/README.md",
     },
   ],
+  // リリース通知の「アプリを開く」でトップページを開く（#5063）
+  launchUrl: "https://issuedeck.gucchii.com/",
 };
 
 const WEBVIEW_IOS_REPOSITORIES: Readonly<Record<string, WebviewIosRepository>> = {
