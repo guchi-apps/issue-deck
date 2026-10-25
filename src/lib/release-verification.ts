@@ -1,3 +1,5 @@
+import { Prisma } from "@prisma/client";
+
 import { db } from "@/lib/db";
 import { deriveInheritedRecords, parseInheritanceEvidence, type FinalizeStatus } from "@/lib/release-finalize";
 import type { ReleaseVerificationDetailRow } from "@/lib/release-verification-summary";
@@ -43,6 +45,25 @@ export async function registerReleaseVerification(
     }
   }
   return { created };
+}
+
+/**
+ * 統合検証の再開（#5020）で、前回の結果を消して`waiting`へ戻す。**ジョブを積めたあとにだけ呼ぶ**
+ * （積めなかったときに前回の証跡だけが失われないように）。対象の行が無ければ何もしない
+ */
+export async function resetIntegrationVerification(target: ReleaseVerificationTarget): Promise<void> {
+  await db.releaseVerification.updateMany({
+    where: { ...target, kind: "integration" },
+    data: {
+      state: "waiting",
+      agent: null,
+      summary: null,
+      findings: Prisma.DbNull,
+      unverifiedScope: null,
+      evidenceUrl: null,
+      message: null,
+    },
+  });
 }
 
 export type ReleaseVerificationResult = {
