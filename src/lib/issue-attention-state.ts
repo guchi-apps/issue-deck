@@ -1,4 +1,4 @@
-import { describeSessionPermission } from "@/lib/dispatch/issue-session";
+import { describeSessionPermission, isSessionWaitingInput } from "@/lib/dispatch/issue-session";
 import type { DispatchSessionView } from "@/lib/dispatch/session-state";
 import { describeSessionStall } from "@/lib/dispatch/session-stall";
 import {
@@ -18,6 +18,7 @@ import {
  */
 export type IssueAttentionKind =
   | "permission"
+  | "input"
   | "question"
   | "plan"
   | "merge"
@@ -41,6 +42,11 @@ export type IssueAttentionInput = {
   planPending: boolean;
   mergePending: boolean;
   planReviewState: PlanReviewListState | null;
+  /**
+   * セッションが入力待ち（`isSessionWaitingInput`）。`waitingTool`が無い質問・選択フォームの待ちは
+   * `permissionPending`に出ないため、ここで拾う。アプリで答えられる待ち・マージ待ちより後に見る
+   */
+  inputPending?: boolean;
   /** 起動ジョブの失敗など、人が見ないと進まないエラー */
   failed?: boolean;
   /** 依存先の完了待ち。依存先の表示名（`#4375`など） */
@@ -149,6 +155,16 @@ export function resolveIssueAttention(input: IssueAttentionInput): IssueAttentio
       openButtonLabel: null,
     };
   }
+  if (input.inputPending) {
+    return {
+      kind: "input",
+      tone: "needs-user",
+      label: "入力待ち",
+      nextAction: "Claude Codeアプリまたは端末で、セッションからの確認に答えてください",
+      needsUser: true,
+      openButtonLabel: null,
+    };
+  }
   if (input.dependencyWaitLabel) {
     return {
       kind: "dependency",
@@ -231,6 +247,8 @@ export function resolveIssueDetailAttention(params: {
   /** `resolveSessionAttentionFlags`の結果（#4562） */
   stalled?: boolean;
   responded?: boolean;
+  /** `resolveSessionAttentionFlags`の結果。入力待ち */
+  inputPending?: boolean;
   reserved: boolean;
   queueLabel?: string | null;
 }): IssueAttention | null {
@@ -245,6 +263,7 @@ export function resolveIssueDetailAttention(params: {
     dependencyWaitLabel: params.dependencyWaitLabel ?? null,
     stalled: params.stalled ?? false,
     responded: params.responded ?? false,
+    inputPending: params.inputPending ?? false,
     reserved: params.reserved,
     queueLabel: params.queueLabel ?? null,
     running: params.session?.state === "ALIVE",
@@ -289,14 +308,20 @@ export function resolveIssueDetailAttentionFromState(params: {
 
 /**
  * セッションが「停滞の引き上げを受けたまま」か「応答を終えている」かを、一覧と詳細で同じ材料から
- * 引く（#4562）。生きていないセッション・作業中・入力待ちはどちらも偽。
+ * 引く（#4562）。生きていないセッション・作業中はどれも偽。入力待ちは`inputPending`だけが真。
  */
 export function resolveSessionAttentionFlags(
   session: DispatchSessionView | null,
-): { stalled: boolean; responded: boolean } {
-  if (!session || session.state !== "ALIVE") return { stalled: false, responded: false };
+): { stalled: boolean; responded: boolean; inputPending: boolean } {
+  if (!session || session.state !== "ALIVE") {
+    return { stalled: false, responded: false, inputPending: false };
+  }
   const stalled = describeSessionStall(session) !== null;
-  return { stalled, responded: !stalled && session.activity === "RESPONDED" };
+  return {
+    stalled,
+    responded: !stalled && session.activity === "RESPONDED",
+    inputPending: isSessionWaitingInput(session),
+  };
 }
 
 /** 実装セッションの依存待ち（#4321）のうち、いま待っているものの表示名（`#4375`など）。無ければnull */

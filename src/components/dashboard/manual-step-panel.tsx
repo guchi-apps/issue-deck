@@ -45,7 +45,11 @@ import {
   isActiveDispatchJobStatus,
 } from "@/lib/dispatch/dispatch-job";
 import { formatDispatchHostName } from "@/lib/dispatch/host-label";
-import { findSessionForIssue } from "@/lib/dispatch/issue-session";
+import {
+  describeSessionPermission,
+  findSessionForIssue,
+  isSessionWaitingInput,
+} from "@/lib/dispatch/issue-session";
 import { extractVerificationCommands } from "@/lib/manual-step-command";
 import {
   matchManualStepDeviceNames,
@@ -186,6 +190,8 @@ export function ManualStepPanel({
     ? findSessionForIssue(dispatch.sessions, sessionIssue.repositoryFullName, sessionIssue.number)
     : null;
   const sessionAlive = session?.state === "ALIVE";
+  const sessionWaitingInput = isSessionWaitingInput(session);
+  const waitingPermission = session ? describeSessionPermission(session) : null;
   const phase = resolveManualStepPhase({
     reports,
     isOpen: sessionIssue.state !== "closed",
@@ -193,8 +199,9 @@ export function ManualStepPanel({
     jobActive,
     questionPending,
     questionAnswered,
+    sessionWaitingInput,
   });
-  const primary = resolveManualStepPrimaryAction(phase, questionPending);
+  const primary = resolveManualStepPrimaryAction(phase, questionPending, sessionWaitingInput);
   const guide = parseManualStepGuide(sessionIssue.body);
   const verificationCount = extractVerificationCommands(sessionIssue.body, guide).length;
   const status = resolveWorkStatus({
@@ -218,6 +225,8 @@ export function ManualStepPanel({
             hasInvestigation={reports.investigation !== null}
             jobActive={jobActive && !sessionAlive}
             questionPending={questionPending}
+            sessionWaitingInput={sessionWaitingInput}
+            waitingTarget={waitingPermission ? `${waitingPermission.toolLabel}${waitingPermission.target ? `: ${waitingPermission.target}` : ""}` : null}
             blockingMessage={blocking?.message ?? null}
           >
             <WorkPurposeAndCriteria
@@ -290,6 +299,8 @@ function ManualStepPhaseCard({
   hasInvestigation,
   jobActive,
   questionPending,
+  sessionWaitingInput,
+  waitingTarget,
   blockingMessage,
   children,
 }: {
@@ -300,6 +311,10 @@ function ManualStepPhaseCard({
   /** 起動ジョブが未処理で、セッションはまだ立っていない */
   jobActive: boolean;
   questionPending: boolean;
+  /** セッションが入力待ち（アプリ回答の質問が無くても「あなたの番」） */
+  sessionWaitingInput: boolean;
+  /** 許可を待っているツールと対象。分からなければ`null` */
+  waitingTarget: string | null;
   blockingMessage: string | null;
   children?: React.ReactNode;
 }) {
@@ -311,6 +326,8 @@ function ManualStepPhaseCard({
     hasInvestigation,
     jobActive,
     questionPending,
+    sessionWaitingInput,
+    waitingTarget,
     blockingMessage,
   });
   return (
@@ -346,6 +363,8 @@ function describePhase({
   hasInvestigation,
   jobActive,
   questionPending,
+  sessionWaitingInput,
+  waitingTarget,
   blockingMessage,
 }: {
   phase: ManualStepPhase;
@@ -354,6 +373,8 @@ function describePhase({
   hasInvestigation: boolean;
   jobActive: boolean;
   questionPending: boolean;
+  sessionWaitingInput: boolean;
+  waitingTarget: string | null;
   blockingMessage: string | null;
 }): [string, string] {
   if (status === "dependency_wait") {
@@ -378,6 +399,12 @@ function describePhase({
         "サブPCのセッションが進めています。あなたの操作が必要になると、質問としてこの下に出ます。",
       ];
     case "user_action":
+      if (sessionWaitingInput && !questionPending) {
+        return [
+          "AIがあなたの確認を待っています",
+          `セッションが入力待ちで止まっています${waitingTarget ? `（待っている内容: ${waitingTarget}）` : ""}。Claude Codeアプリか端末で答えると作業が進みます。`,
+        ];
+      }
       if (questionPending) {
         return [
           userActionCount > 0 ? `${userActionCount}件の操作が必要です` : "AIから質問が届いています",
