@@ -292,7 +292,11 @@ jobs:
             # いまのheadに対する渡しに絞る——追いコミットで前の判定が古くなったPRや、
             # 人へ渡った（印の無い）判定に反応しないため
             HANDOFF="<!-- issue-deck-review-fix:handoff sha=${HEAD_SHA} -->"
-            if ! echo "$ISSUE_JSON" | jq -r '.comments[].body' | grep -qF "$HANDOFF"; then
+            # 印は信頼できる投稿者(Bot、またはOWNER/MEMBER/COLLABORATOR)のコメントだけを読む(#5000)。
+            # 外部ユーザーが偽の印を投稿しても自動修正を起動させない
+            if ! gh api "repos/$GH_REPO/issues/$ISSUE_NUMBER/comments?per_page=100" --paginate \
+                | jq -rs '.[][] | select(.user.type == "Bot" or (.author_association | IN("OWNER", "MEMBER", "COLLABORATOR"))) | .body' \
+                | grep -qF "$HANDOFF"; then
               echo "いまのhead（$HEAD_SHA）に対する自動修正の渡しが無いため何もしません"
               echo "should_fix=false" >> "$GITHUB_OUTPUT"
               exit 0
@@ -309,10 +313,12 @@ jobs:
           # ClaudeとCodexは同じPRを再レビューするため、**手動実行では両方の指摘を渡す**。
           # 自動実行では同じ最新コメント内の安全マーカーも必要。どちらの指摘も同じPRで直す。
           # --paginateの--jqはページごとに評価されるため、ページをまとめてから対象を抜き出す。
-          # Codexの判定印は書き込み権限のある投稿者(OWNER/MEMBER/COLLABORATOR)のものだけを読む(#4970)
+          # 判定印は信頼できる投稿者(Bot、またはOWNER/MEMBER/COLLABORATOR)のものだけを読む(#4970・#5000)。
+          # 外部ユーザーの偽コメントは、修正の材料にも着手の判断にも入れない
           gh api "repos/$GH_REPO/issues/$PR_NUMBER/comments?per_page=100" --paginate \
             | jq -rs --arg head_sha "$HEAD_SHA" --arg manual "$MANUAL" '
-                [.[][] | select(.body | test("issue-deck(-codex)?-review-verdict:(lgtm|needs-check|changes-requested) sha=" + $head_sha))
+                [.[][] | select(.user.type == "Bot" or (.author_association | IN("OWNER", "MEMBER", "COLLABORATOR")))
+                  | select(.body | test("issue-deck(-codex)?-review-verdict:(lgtm|needs-check|changes-requested) sha=" + $head_sha))
                   | select((.body | contains("issue-deck-codex-review-verdict:") | not) or (.author_association | IN("OWNER", "MEMBER", "COLLABORATOR")))]
                 | group_by(if (.body | test("issue-deck-codex-review-verdict:")) then "codex" else "claude" end)
                 | map(sort_by(.created_at) | last)

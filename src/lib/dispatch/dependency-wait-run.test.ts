@@ -67,6 +67,7 @@ import {
   registerDependencyWait,
   runDependencyWaitSweep,
 } from "@/lib/dispatch/dependency-wait-run";
+import { addCheckUserWithReason } from "@/lib/dispatch/check-user-labels";
 import type { DependencyObservation, DependencyRef } from "@/lib/dispatch/dependency-wait";
 
 const issueDep: DependencyRef = { repository: "guchi-apps/aide", number: 614, kind: "issue" };
@@ -90,6 +91,7 @@ beforeEach(() => {
   seq = 0;
   enqueue.mockReset();
   createComment.mockClear();
+  vi.mocked(addCheckUserWithReason).mockClear();
   findSession.mockReset();
   findSession.mockResolvedValue({ host: "subpc", state: "ALIVE", activity: "RESPONDED", activityAt: null });
   enqueue.mockResolvedValue({ ok: true, job: { id: "job1" } });
@@ -277,6 +279,85 @@ describe("runDependencyWaitSweep", () => {
   });
 });
 
+
+describe("一時的な見送りの自動再試行（#5005）", () => {
+  const unsent = "入力欄に未送信の文字が残っているため送りませんでした";
+  const at = (minutes: number) => new Date(Date.parse("2026-10-10T12:00:00Z") + minutes * 60 * 1000);
+
+  async function failOnce(jobId: string, minutes: number, message = unsent) {
+    jobs.set(jobId, { status: "SKIPPED", message });
+    return advanceDependencyWait(rows[0].id, { manual: false }, depsWith(closed, at(minutes)));
+  }
+
+  it("未送信入力で見送られたら確認待ちを付けず、間隔を空けて再試行し、入力が空になれば再開へ進む", async () => {
+    await register(["closed"], closed);
+    const failed = await failOnce("job1", 0);
+    expect(failed?.status).toBe("RESUME_FAILED");
+    expect(failed?.nextAutoRetryAt).toBe(at(2).toISOString());
+    expect(addCheckUserWithReason).not.toHaveBeenCalled();
+    expect(createComment).toHaveBeenCalledTimes(1);
+
+    // 間隔の前は再試行しない
+    await runDependencyWaitSweep(depsWith(closed, at(1)));
+    expect(enqueue).toHaveBeenCalledTimes(1);
+
+    enqueue.mockResolvedValue({ ok: true, job: { id: "job2" } });
+    const result = await runDependencyWaitSweep(depsWith(closed, at(3)));
+    expect(result.actions).toEqual([{ id: rows[0].id, status: "RESUME_REQUESTED" }]);
+    expect(enqueue).toHaveBeenCalledTimes(2);
+    // 自動の再試行は入力欄に触れない
+    expect(enqueue.mock.calls[1][0].stashInput).toBe(false);
+    expect(rows[0].autoRetryCount).toBe(1);
+  });
+
+  it("再試行を使い切ったら、確認待ち（blocked）を付けて人へ渡す", async () => {
+    await register(["closed"], closed);
+    await failOnce("job1", 0);
+    let minutes = 0;
+    for (const [i, delay] of [2, 5, 15].entries()) {
+      minutes += delay + 1;
+      enqueue.mockResolvedValue({ ok: true, job: { id: `retry${i}` } });
+      await runDependencyWaitSweep(depsWith(closed, at(minutes)));
+      expect(addCheckUserWithReason).not.toHaveBeenCalled();
+      await failOnce(`retry${i}`, minutes);
+    }
+    expect(rows[0].autoRetryCount).toBe(3);
+    expect(rows[0].status).toBe("RESUME_FAILED");
+    expect(vi.mocked(addCheckUserWithReason).mock.calls[0][4]).toBe("blocked");
+    // 見送りの案内1件と、使い切りの報告1件だけ
+    expect(createComment).toHaveBeenCalledTimes(2);
+
+    enqueue.mockClear();
+    await runDependencyWaitSweep(depsWith(closed, at(minutes + 120)));
+    expect(enqueue).not.toHaveBeenCalled();
+  });
+
+  it("承認待ちの見送りは自動では再試行せず、すぐ確認待ちにする", async () => {
+    await register(["closed"], closed);
+    const failed = await failOnce("job1", 0, "承認プロンプトまたは選択フォームの表示中のため送りませんでした");
+    expect(failed?.nextAutoRetryAt).toBeNull();
+    expect(addCheckUserWithReason).toHaveBeenCalledTimes(1);
+    await runDependencyWaitSweep(depsWith(closed, at(60)));
+    expect(enqueue).toHaveBeenCalledTimes(1);
+  });
+
+  it("再試行の時点で条件が崩れていたら待機へ戻す", async () => {
+    await register(["closed"], closed);
+    await failOnce("job1", 0);
+    await runDependencyWaitSweep(depsWith(open, at(3)));
+    expect(rows[0].status).toBe("WAITING");
+    expect(enqueue).toHaveBeenCalledTimes(1);
+  });
+
+  it("人が押した再開は再試行の回数を数え直す", async () => {
+    await register(["closed"], closed);
+    await failOnce("job1", 0);
+    rows[0].autoRetryCount = 3;
+    enqueue.mockResolvedValue({ ok: true, job: { id: "job2" } });
+    await advanceDependencyWait(rows[0].id, { manual: true, userId: "u1" }, depsWith(closed, at(1)));
+    expect(rows[0].autoRetryCount).toBe(0);
+  });
+});
 
 describe("依存再開の活動照合の回帰", () => {
   const sentAt = new Date("2026-10-10T12:00:05Z");

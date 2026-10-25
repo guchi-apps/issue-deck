@@ -15,6 +15,9 @@ import {
   parseDependencyRef,
   parseDependencyWaitStatus,
   DEPENDENCY_WAIT_CONDITIONS,
+  DEPENDENCY_RESUME_AUTO_RETRY_DELAYS_MS,
+  isTransientResumeFailure,
+  nextDependencyResumeRetryAt,
   type ConditionResult,
   type DependencyConditionRevision,
   type DependencyObservation,
@@ -86,6 +89,9 @@ export function toDependencyWaitView(row: SessionDependencyWait): DependencyWait
     resumeRequestedAt: row.resumeRequestedAt?.toISOString() ?? null,
     resumeSentAt: row.resumeSentAt?.toISOString() ?? null,
     resumedAt: row.resumedAt?.toISOString() ?? null,
+    autoRetryCount: row.autoRetryCount,
+    nextAutoRetryAt:
+      row.status === "RESUME_FAILED" ? (nextDependencyResumeRetryAt(row)?.toISOString() ?? null) : null,
     conditionHistory: parseConditionHistory(row.conditionHistory),
   };
 }
@@ -274,6 +280,8 @@ export async function registerDependencyWait(
     lastObservation: undefined,
     lastError: null,
     failureReason: null,
+    resumeFailedAt: null,
+    autoRetryCount: 0,
     notifiedKey: null,
     resumeJobId: null,
     resumeRequestedAt: null,
@@ -364,15 +372,36 @@ async function updateObservedWait(
   };
 }
 
-async function failResume(row: SessionDependencyWait, reason: string): Promise<SessionDependencyWait> {
-  const result = await updateObservedWait(row, { status: "RESUME_FAILED", failureReason: reason.slice(0, 300) });
+/**
+ * 再開の失敗を記録する。**一時的な理由（未送信入力・作業中）で再試行が残っている間は、
+ * `00.check-user`を付けずにコメントだけ残す**（#5005。巡回が間隔を空けて自動で再試行する）。
+ * 再試行を使い切った・一時的でない理由のときは、従来どおり`00.check-user`＋`01.check-blocked`で人へ渡す
+ * （Push通知は`check-user-push.ts`がラベルから送る）。
+ */
+async function failResume(row: SessionDependencyWait, reason: string, now: Date): Promise<SessionDependencyWait> {
+  const failureReason = reason.slice(0, 300);
+  const result = await updateObservedWait(row, { status: "RESUME_FAILED", failureReason, resumeFailedAt: now });
   if (!result.applied || result.row.status !== "RESUME_FAILED") return result.row;
   const updated = result.row;
+  const dep = `${row.depRepository}#${row.depNumber}`;
+  if (nextDependencyResumeRetryAt(updated)) {
+    await notifyOnce(updated, `retry:${reason.slice(0, 40)}`, () =>
+      postIssueComment(
+        row.repositoryFullName,
+        row.issueNumber,
+        `依存先 ${dep} の再開条件は成立しましたが、再開の指示を見送りました。\n\n- 理由: ${reason}\n\n一時的な理由のため、間隔を空けて最大${DEPENDENCY_RESUME_AUTO_RETRY_DELAYS_MS.length}回まで自動で再試行します。入力欄に下書きが残っている場合は、送信するか消してください。`,
+      ),
+    );
+    return updated;
+  }
+  const exhausted = isTransientResumeFailure(failureReason) && updated.autoRetryCount > 0;
   await notifyOnce(updated, `failed:${reason.slice(0, 40)}`, async () => {
     await postIssueComment(
       row.repositoryFullName,
       row.issueNumber,
-      `依存先 ${row.depRepository}#${row.depNumber} の再開条件は成立しましたが、実装を再開できませんでした。\n\n- 理由: ${reason}\n\nIssueDeckのIssue詳細から「作業を再開」で再試行できます。`,
+      `依存先 ${dep} の再開条件は成立しましたが、${
+        exhausted ? `自動の再試行（${updated.autoRetryCount}回）でも` : ""
+      }実装を再開できませんでした。\n\n- 理由: ${reason}\n\nIssueDeckのIssue詳細から「作業を再開」で再試行できます。`,
     );
     await raiseCheckUser(row.repositoryFullName, row.issueNumber, "blocked");
   });
@@ -397,6 +426,8 @@ async function requestResume(
     resumeSentAt: null,
     resumedAt: null,
     failureReason: null,
+    // 人が押した再開は、一時的な失敗の再試行回数を数え直す（自動の再試行は巡回が数える）
+    ...(userId ? { autoRetryCount: 0 } : {}),
     satisfiedAt: row.satisfiedAt ?? now,
   });
   const current = claimed.row;
@@ -412,6 +443,7 @@ async function requestResume(
     return failResume(
       current,
       "実装セッションが終了しています。「セッションを復旧」で履歴を引き継いで呼び戻してください",
+      now,
     );
   }
   const result = await enqueueSessionControlJob({
@@ -429,7 +461,7 @@ async function requestResume(
     stashInput,
     requestedByUserId: userId,
   });
-  if (!result.ok) return failResume(current, result.message);
+  if (!result.ok) return failResume(current, result.message, now);
   return (await updateObservedWait(current, { resumeJobId: result.job.id })).row;
 }
 
@@ -439,7 +471,7 @@ async function requestResume(
  */
 export async function advanceDependencyWait(
   id: string,
-  options: { manual: boolean; userId?: string | null; stashInput?: boolean },
+  options: { manual: boolean; userId?: string | null; stashInput?: boolean; autoRetry?: boolean },
   deps: Deps = defaultDeps,
 ): Promise<DependencyWaitView | null> {
   let row = await db.sessionDependencyWait.findUnique({ where: { id } });
@@ -494,7 +526,7 @@ export async function advanceDependencyWait(
     return toDependencyWaitView(row);
   }
   if (decision === "wait") {
-    if (options.manual && status === "RESUME_FAILED") {
+    if ((options.manual || options.autoRetry) && status === "RESUME_FAILED") {
       // 失敗後の再確認で条件が崩れていたら待機へ戻す
       row = (await updateObservedWait(row, { status: "WAITING", failureReason: null })).row;
     }
@@ -514,7 +546,7 @@ async function trackRequested(row: SessionDependencyWait, now: Date): Promise<Se
     // 要求を取ったがジョブを積む前に落ちた。巡回が一定時間後に失敗として拾う
     const requestedAt = row.resumeRequestedAt?.getTime() ?? now.getTime();
     if (now.getTime() - requestedAt > DEPENDENCY_WAIT_RESUME_CONFIRM_TIMEOUT_MS) {
-      return failResume(row, "再開の指示を積めないまま止まりました");
+      return failResume(row, "再開の指示を積めないまま止まりました", now);
     }
     return row;
   }
@@ -522,7 +554,7 @@ async function trackRequested(row: SessionDependencyWait, now: Date): Promise<Se
     where: { id: row.resumeJobId },
     select: { status: true, message: true, finishedAt: true },
   });
-  if (!job) return failResume(row, "再開の指示ジョブが見つかりません");
+  if (!job) return failResume(row, "再開の指示ジョブが見つかりません", now);
   if (job.status === "SUCCEEDED") {
     // 巡回時刻で上書きすると、送信から巡回までに走ったツール・応答を見落とす。
     return (await updateObservedWait(row, {
@@ -532,12 +564,12 @@ async function trackRequested(row: SessionDependencyWait, now: Date): Promise<Se
   }
   if (job.status === "FAILED" || job.status === "TIMEOUT" || job.status === "CANCELED" || job.status === "SKIPPED") {
     // ジョブの具体的な理由を失敗理由へ載せる（#4383。「SKIPPED」だけで終えない）
-    return failResume(row, describeInstructionJobFailure(job.status, job.message));
+    return failResume(row, describeInstructionJobFailure(job.status, job.message), now);
   }
   // 未処理のまま期限を過ぎたら、理由付きで止めて再試行を促す（送信待ちを無期限にしない）
   const requestedAt = row.resumeRequestedAt?.getTime() ?? now.getTime();
   if (now.getTime() - requestedAt > DEPENDENCY_WAIT_RESUME_CONFIRM_TIMEOUT_MS) {
-    return failResume(row, "再開の指示がサブPCに取り込まれないまま期限を過ぎました。サブPCの稼働を確認して再試行してください");
+    return failResume(row, "再開の指示がサブPCに取り込まれないまま期限を過ぎました。サブPCの稼働を確認して再試行してください", now);
   }
   return row;
 }
@@ -582,7 +614,7 @@ async function trackSent(row: SessionDependencyWait, now: Date): Promise<Session
     return result.row;
   }
   if (now.getTime() - sentAt.getTime() > DEPENDENCY_WAIT_RESUME_CONFIRM_TIMEOUT_MS) {
-    return failResume(row, "再開の指示を送りましたが、セッションが動き出したことを確認できませんでした");
+    return failResume(row, "再開の指示を送りましたが、セッションが動き出したことを確認できませんでした", now);
   }
   return row;
 }
@@ -623,9 +655,20 @@ export async function runDependencyWaitSweep(
         data: { lastSweepAt: now },
       });
       if (claim.count !== 1) continue;
-      // 失敗して止まった待ちは、人の「作業を再開」を待つ（自動では蒸し返さない）
-      if (stored.status === "RESUME_FAILED") continue;
-      const view = await advanceDependencyWait(stored.id, { manual: false }, deps);
+      // 失敗して止まった待ちは、人の「作業を再開」を待つ。例外は一時的な理由（未送信入力・作業中）で
+      // 見送られたものだけで、間隔を空けて上限回数まで自動で再試行する（#5005）
+      let autoRetry = false;
+      if (stored.status === "RESUME_FAILED") {
+        const retryAt = nextDependencyResumeRetryAt(stored);
+        if (!retryAt || now < retryAt) continue;
+        const counted = await db.sessionDependencyWait.updateMany({
+          where: { id: stored.id, status: "RESUME_FAILED", autoRetryCount: stored.autoRetryCount },
+          data: { autoRetryCount: stored.autoRetryCount + 1 },
+        });
+        if (counted.count !== 1) continue;
+        autoRetry = true;
+      }
+      const view = await advanceDependencyWait(stored.id, { manual: false, autoRetry }, deps);
       if (view && view.status !== stored.status) actions.push({ id: stored.id, status: view.status });
     } catch (error) {
       console.error("[runDependencyWaitSweep]", stored.id, error);

@@ -4,6 +4,7 @@ import { getCurrentUser } from "@/lib/auth-user";
 import { db } from "@/lib/db";
 import { getInstallationToken } from "@/lib/github/app-auth";
 import { fetchReleaseBodyByTag, fetchUserCanWriteRepo, updateReleaseBody } from "@/lib/github/release-body-api";
+import { previewModeGuard } from "@/lib/preview-mode";
 import { convertBulletsToTasks, parseReleaseBodyTasks } from "@/lib/release-body-tasks";
 
 /**
@@ -24,6 +25,9 @@ import { convertBulletsToTasks, parseReleaseBodyTasks } from "@/lib/release-body
 const MAX_RELEASES_PER_CALL = 30;
 
 export async function POST(request: NextRequest) {
+  const guard = previewModeGuard();
+  if (guard) return guard;
+
   const user = await getCurrentUser();
   if (!user) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });

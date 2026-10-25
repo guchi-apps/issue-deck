@@ -52,6 +52,26 @@ describe("DependencyWaitPanel の待機解除", () => {
   });
 });
 
+describe("DependencyWaitPanel の自動再試行の表示（#5005）", () => {
+  it("未送信入力で見送られた待ちは、理由を目立たせて次の再試行時刻を出す", () => {
+    const dispatch = { isSubmitting: false, controlDependencyWait: vi.fn(), hosts: [], sessions: [] } as unknown as DispatchStateHandle;
+    render(
+      <DependencyWaitPanel
+        wait={makeWait({
+          status: "RESUME_FAILED",
+          failureReason: "再開の指示は見送られました: 入力欄に未送信の文字が残っています",
+          autoRetryCount: 1,
+          nextAutoRetryAt: "2026-10-10T12:07:00Z",
+        })}
+        dispatch={dispatch}
+      />,
+    );
+    expect(screen.getByTestId("dependency-wait-unsent-input")).toBeTruthy();
+    expect(screen.getByText(/次の自動再試行/)).toBeTruthy();
+    expect(screen.getByText(/残り2回/)).toBeTruthy();
+  });
+});
+
 describe("DependencyWaitPanel の未送信入力の退避（#4383）", () => {
   const session = {
     repositoryFullName: "guchi-apps/issue-deck",
