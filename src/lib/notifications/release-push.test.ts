@@ -9,11 +9,11 @@ import {
 import { loadReleaseDiscordTarget, postWebhookMessage } from "@/lib/discord/webhook";
 import {
   buildReleaseDiscordEmbed,
-  buildReleaseThreadName,
+  buildReleaseEmbedTitle,
   decideReleasePush,
   parseReleaseNotes,
   RELEASE_PUSH_EMPTY_BODY,
-  releaseBranchScreenUrl,
+  releaseScreenUrl,
   releasePushMaxAgeHours,
   releasePushSweepIntervalMinutes,
   resetReleasePushSweepIntervalForTest,
@@ -212,15 +212,23 @@ describe("buildReleaseDiscordEmbed", () => {
     expect(buildReleaseDiscordEmbed({ ...release, notes: "" }, extras).description).toBe(RELEASE_PUSH_EMPTY_BODY);
   });
 
-  it("フォーラムの投稿タイトルにリポジトリとバージョンを入れる", () => {
-    expect(buildReleaseThreadName(release)).toBe("guchi-apps/issue-deck v4.75.0");
+  it("埋め込みのタイトルにリポジトリとバージョンを入れ、リリース画面へのリンクを出す", () => {
+    const embed = buildReleaseDiscordEmbed(release, extras);
+    expect(buildReleaseEmbedTitle(release)).toBe("guchi-apps/issue-deck v4.75.0");
+    expect(embed.title).toBe("guchi-apps/issue-deck v4.75.0");
+    expect(embed.fields?.[0].value).toContain("[リリース画面を開く](https://issuedeck.gucchii.com/dashboard?pane=releases&mscreen=release-history)");
+  });
+
+  it("iOSアプリのリポジトリはアプリのリンクに印を付ける", () => {
+    const embed = buildReleaseDiscordEmbed(release, { ...extras, iosApp: true });
+    expect(embed.fields?.[0].value).toContain("[アプリを開く（iOSアプリ）](");
   });
 });
 
-describe("releaseBranchScreenUrl", () => {
+describe("releaseScreenUrl", () => {
   it("既定は本番、環境変数で上書きでき、末尾のスラッシュは畳む", () => {
-    expect(releaseBranchScreenUrl("")).toBe("https://issuedeck.gucchii.com/dashboard?pane=flow&mscreen=flow");
-    expect(releaseBranchScreenUrl("https://x.test//")).toBe("https://x.test/dashboard?pane=flow&mscreen=flow");
+    expect(releaseScreenUrl("")).toBe("https://issuedeck.gucchii.com/dashboard?pane=releases&mscreen=release-history");
+    expect(releaseScreenUrl("https://x.test//")).toBe("https://x.test/dashboard?pane=releases&mscreen=release-history");
   });
 });
 
@@ -251,7 +259,7 @@ describe("runReleasePushSweep", () => {
     expect(updateMany).toHaveBeenCalled();
     expect(postWebhookMessage).toHaveBeenCalledOnce();
     expect(vi.mocked(postWebhookMessage).mock.calls[0][0]).toBe(WEBHOOK_URL);
-    expect(vi.mocked(postWebhookMessage).mock.calls[0][1].threadName).toBe("guchi-apps/issue-deck v4.75.0");
+    expect(vi.mocked(postWebhookMessage).mock.calls[0][1].threadName).toBeUndefined();
   });
 
   it("初めて見るリポジトリは鳴らさずタグだけ記録する", async () => {

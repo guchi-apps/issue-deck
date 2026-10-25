@@ -130,7 +130,14 @@ export function checkConsistency() {
     problems.push(`IssueDeck.entitlements に applinks:${host} がありません`);
   }
   read("src/app/.well-known/apple-app-site-association/route.ts");
-  read("ios/IssueDeck/UniversalLink.swift");
+  const swiftLink = read("ios/IssueDeck/UniversalLink.swift");
+  // 対象のmscreenはTSとSwiftに別々に書くので、片方の追加漏れをここで検知する（#5046）
+  const tsScreens = [...(ul.match(/UNIVERSAL_LINK_MSCREENS = \[([^\]]*)\]/)?.[1] ?? "").matchAll(/"([^"]+)"/g)].map((m) => m[1]);
+  for (const screen of tsScreens) {
+    if (!swiftLink.includes(`case "${screen}"`)) {
+      problems.push(`UniversalLink.swift に mscreen=${screen} の case がありません（ios-universal-links.ts と不一致）`);
+    }
+  }
 
   return problems;
 }
