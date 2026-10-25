@@ -195,7 +195,7 @@ const JOB_KIND_TO_SECTION = { RELEASE_VERIFY: "integration", RELEASE_REVIEW: "ai
  * 対象の違うジョブ（作り直す前のSHA）は見ない——古い実行の工程や成功を現在の進捗に見せない。
  * 実行先の生死は`DispatchHost.lastSeenAt`で読み、ホストの記録が無ければ「未取得」にする。
  */
-async function loadReleaseVerificationProgress(
+export async function loadReleaseVerificationProgress(
   repoFullName: string,
   prNumber: number,
   current: { baseSha: string; headSha: string },

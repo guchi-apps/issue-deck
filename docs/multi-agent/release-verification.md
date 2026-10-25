@@ -65,6 +65,7 @@ AIレビューはテスト実行の代わりにしない。個別レビューの
 - 既存CI（`ci.yml`のhead SHA成功）は証跡URLとして再利用するが、統合状態のビルド・テストの代わりにはしない。サマリは実施／未実施／対象外を行ごとに残す
 - Mac検証: `ios/`に差分があるときだけ`ios/scripts/remote-build-check.sh`を実行する。差分なしは対象外、スクリプト無し・Mac未接続は**成功にせず`unverifiedScope`付きの`passed`（＝要確認）**
 - 結果は`/api/dispatch/report`の`releaseVerification`として届き、記録先はジョブの対象で決まる（ランナーは別の対象へ書けない）。完走しても結果が無ければ`failed`
+- **中断・失敗した統合検証は画面の「統合検証を再開」で積み直せる（#5020）。** 「中断」は記録の状態ではなく、記録が`waiting`/`running`のまま最新ジョブが終了・取消済みであること（`viewReleaseProgress`の段階が`canceled`/`ended`）から導かれる表示なので、可否は進捗を入力にした純関数`decideIntegrationResume`（`src/lib/release-integration-rerun-view.ts`）が画面とAPI（`POST /api/repositories/release/integration-rerun`）で共有する。応答なし（`stalled`）・実行中・待機中・合格・要確認・対象外は再開できない（失敗は再開できる）。**前回の結果を消して`waiting`へ戻すのは`requestReleaseVerifyJob`が`queued`を返した後だけ**で、`already_queued`・`no_host`・`not_configured`では記録に触れない（証跡を失わない）。対象はサーバーが今のリリースPRから解決し、クライアントのSHAは一致確認だけに使う（ずれは409）
 - リリースワークフロー（`reusable-release-develop-to-main.yml`）がPR作成直後に`request`を送る。ベストエフォートで、依頼できなくてもPR作成は止めない。**配布先へはタグを配るまで届かない**
 
 ## 全体AIレビューの実行（#4238・PR3）

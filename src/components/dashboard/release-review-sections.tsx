@@ -30,6 +30,7 @@ import { toJstParts } from "@/lib/format-date-time";
 import { tallyReleaseReviews } from "@/lib/release-changes";
 import { describeReleaseReviewDiagnostic } from "@/lib/release-review-diagnostic";
 import { POLLER_EXPLANATION, type ReleaseOpsAssessment } from "@/lib/release-review-ops-evidence";
+import { describeIntegrationResume } from "@/lib/release-integration-rerun-view";
 import { describeReviewRerun, type ReviewRerunView } from "@/lib/release-review-rerun-view";
 import { describeReviewStageLabel, REVIEW_OPEN_ITEM_LABEL } from "@/lib/release-review-reevaluation";
 import {
@@ -399,12 +400,17 @@ function ReviewRerunButton({
   label = "全体レビューを再実行",
   disabled = false,
   onDone,
+  endpoint = "/api/repositories/release/review-rerun",
+  acceptedMessage = "再実行を受け付けました。これはレビューの合格ではありません。待機中→実行中→完了の順に表示が変わります。",
 }: {
   repositoryFullName: string;
   pullRequestNumber: number;
   baseSha: string;
   headSha: string;
   label?: string;
+  /** 統合検証の再開（#5020）でも同じ押下処理を使う */
+  endpoint?: string;
+  acceptedMessage?: string;
   /** 統合検証の結果待ちなど、今は押せないとき */
   disabled?: boolean;
   onDone?: () => void;
@@ -418,7 +424,7 @@ function ReviewRerunButton({
     setMessage(null);
     try {
       const [owner, repo] = repositoryFullName.split("/");
-      const res = await fetch("/api/repositories/release/review-rerun", {
+      const res = await fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ owner, repo, pullRequestNumber, baseSha, headSha }),
@@ -436,7 +442,7 @@ function ReviewRerunButton({
         setMessage(
           body.outcome === "already_queued"
             ? "すでに実行中または待機中です。新しい依頼は積んでいません。結果が出るまでお待ちください。"
-            : "再実行を受け付けました。これはレビューの合格ではありません。待機中→実行中→完了の順に表示が変わります。",
+            : acceptedMessage,
         );
         onDone?.();
       }
@@ -1093,6 +1099,7 @@ function IntegrationSection({
   pullRequestNumber,
   target,
   onFixCreated,
+  onReload,
   compact = false,
 }: {
   section: ReleaseVerificationSection;
@@ -1101,6 +1108,8 @@ function IntegrationSection({
   pullRequestNumber?: number;
   target?: { baseSha: string; headSha: string };
   onFixCreated?: () => void;
+  /** 再開を受け付けたあとに状態を取り直す（#5020） */
+  onReload?: () => void;
   /** ブランチ画面の要約（#4938）。実行中の札の行から実行先・最終報告を外す（実行先は詳細に出る） */
   compact?: boolean;
 }) {
@@ -1109,6 +1118,8 @@ function IntegrationSection({
   const canDraftFix =
     (section.state === "failed" || section.state === "needs_check") && pullRequestNumber !== undefined && target !== undefined;
   const hasDetail = Boolean(section.summary) || Boolean(section.evidenceUrl) || progress !== null || canDraftFix;
+  // 中断・失敗した統合検証は、詳細を開かなくても再開できる（#5020）
+  const resume = pullRequestNumber !== undefined && target ? describeIntegrationResume(section, nowMs) : ({ kind: "none" } as const);
   return (
     <SectionRow
       title="統合検証"
@@ -1121,6 +1132,41 @@ function IntegrationSection({
       }
       reason={head.reason}
       reasonTone={head.reasonTone}
+      actions={
+        resume.kind === "ready" && pullRequestNumber !== undefined && target ? (
+          <div
+            className="flex flex-col gap-1.5 rounded border border-amber-300 bg-amber-50/60 px-2 py-1.5 text-[11.5px] dark:border-amber-800 dark:bg-amber-950/20"
+            data-testid="integration-resume-panel"
+          >
+            <p className="font-medium">{resume.lead}</p>
+            <dl className="grid grid-cols-[6.5rem_1fr] gap-x-2 gap-y-0.5">
+              <dt className="text-muted-foreground">対象</dt>
+              <dd className="font-mono">
+                main {shortSha(target.baseSha)} ← release {shortSha(target.headSha)}
+              </dd>
+              {progress?.host && (
+                <>
+                  <dt className="text-muted-foreground">実行先</dt>
+                  <dd>
+                    {progress.host}
+                    {progress.hostOnline === false ? "（オフライン）" : progress.hostOnline ? "（オンライン）" : ""}
+                  </dd>
+                </>
+              )}
+            </dl>
+            <ReviewRerunButton
+              repositoryFullName={repositoryFullName}
+              pullRequestNumber={pullRequestNumber}
+              baseSha={target.baseSha}
+              headSha={target.headSha}
+              label={resume.buttonLabel}
+              endpoint="/api/repositories/release/integration-rerun"
+              acceptedMessage="再開を受け付けました。これは検証の合格ではありません。待機中→実行中→完了の順に表示が変わります。"
+              onDone={onReload}
+            />
+          </div>
+        ) : undefined
+      }
     >
       {hasDetail ? (
         <>
@@ -1515,6 +1561,7 @@ export function ReleaseReviewSections({
               pullRequestNumber={pullRequestNumber}
               target={verification.target}
               onFixCreated={onFixCreated}
+              onReload={onReload}
             />
           </>
         )
@@ -1750,6 +1797,7 @@ export function ReleaseVerificationBrief({
             pullRequestNumber={pullRequestNumber}
             target={verification.target}
             onFixCreated={reload}
+            onReload={reload}
             compact
           />
           {error && (
