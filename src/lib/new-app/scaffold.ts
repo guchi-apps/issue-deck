@@ -76,6 +76,7 @@ export function scaffoldCopies(spec: NewAppSpec): ScaffoldCopy[] {
   const profile = newAppKindProfile(spec.kind);
   const copies: ScaffoldCopy[] = [
     { source: ".github/scripts/signaly-notify.sh", path: ".github/scripts/signaly-notify.sh", executable: true },
+    { source: ".github/scripts/discord-alert.sh", path: ".github/scripts/discord-alert.sh", executable: true },
     {
       source: "scripts/generate-workflow-env-block.sh",
       path: "scripts/generate-workflow-env-block.sh",
