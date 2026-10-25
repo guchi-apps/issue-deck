@@ -1234,6 +1234,10 @@ CI・デプロイの通知先は変えない。
 `deploy.yml` が本番の `.env` へ書き出す（#5007）。上の `SIGNALY_*` の集約とは別で、
 フリートの他リポジトリには配らない。
 
+共有トークンの警告（`SharedToken`の利用元不一致など）の投稿先も同じ系統で、専用の
+`DISCORD_SHARED_TOKEN_ALERT_WEBHOOK_URL` を `repo` スコープsecretに登録し、`deploy.yml` が
+本番の `.env` へ書き出す（#5043）。未設定ならリリース通知の `DISCORD_RELEASE_WEBHOOK_URL` へ退避する。
+
 **変更内容の出どころは `.github/release-notes.md`。** 共有ワークフロー
 `reusable-release-develop-to-main.yml` がバージョンbumpのたびに、生成した利用者向けの文面
 （`RELEASE_CHANGELOG`・`RELEASE_USAGE`）をこのファイルへ書き出してバンプPRに含める。
