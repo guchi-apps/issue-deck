@@ -598,7 +598,7 @@ poller の巡回（trapを通らなかった場合）  → POST /api/dispatch/se
 | `Notification` | `notification_type` が `permission_prompt` | 承認プロンプト・`AskUserQuestion`の質問 | 様子（`waiting_input`）＋`00.check-user`（＝Push通知） |
 | `Notification` | `notification_type` が `idle_prompt` | 応答終了から60秒アイドル | **送らない** |
 | `Stop` | — | 応答の終了。無人で回すセッションでは実質「作業完了」 | 様子（`responded`）＋`00.check-user`を解く保険 |
-| `Stop` | 転記の末尾が「クラシファイアの拒否のあと一度もtool_useが無い」形 | 拒否されたまま応答を終えた（#2844） | Issueコメント＋`00.check-user`＋`01.check-blocked`＋様子（`waiting_input`）（後述） |
+| `Stop` | 転記の末尾が「クラシファイアの拒否のあと一度もtool_useが無い」か「少しだけ確認して拒否に触れて終えた」形 | 拒否されたまま応答を終えた（#2844・#5011） | Issueコメント＋`00.check-user`＋`01.check-blocked`＋様子（`waiting_input`）（後述） |
 | `PreToolUse` | `tool_name` が `ExitPlanMode` | 計画の提示（#1342） | 計画を送り、画面の返事を待つ |
 | `PreToolUse` | `tool_name` が `AskUserQuestion` | 質問（#2189） | 質問を送り、画面の回答を待つ |
 | `PermissionRequest` | — | 承認ダイアログを出す直前（#2971） | **送らない**（何の許可かをホスト側の`.permission`へ控える。後述） |
@@ -824,12 +824,23 @@ guchi-apps/aide#253で実際に起きた。`gh pr create`が拒否され（11:55
 伝え方の方**。プロンプトは「拒否されたら`AskUserQuestion`で聞く」と指示しているが、それは
 エージェントが従うかどうかに依存していて担保が無い（計画の投稿をフックへ移した#1342と同じ形）。
 
-- **判定は`Stop`の時点で行う**（pollerではない）。転記の末尾を行単位で見て、
-  `"type":"tool_use"`を含む行と拒否の決まり文句を含む行の**最後の出現位置**を比べ、拒否の方が
-  後ろなら「拒否されたきり何も動いていない」とみなす。**判定材料はその時点で揃っている**ので、
-  #2655の停滞検知のように時間を待つ理由が無い（待つと、その分だけ人が気づくのが遅れる）
-- **自力で迂回した場合・`AskUserQuestion`へ進んだ場合は対象外。** どちらも拒否の後ろに
-  tool_useが来るので、位置の比較で落ちる
+- **判定は`Stop`の時点で行う**（pollerではない）。転記の末尾をJSONLとして**レコード単位**で読み、
+  本物の`assistant`のtool_useと、`user`のtool_resultに入った拒否の決まり文句の前後を比べる。
+  拒否のあとtool_useが1件も無ければ「拒否されたきり何も動いていない」とみなす。**判定材料はその
+  時点で揃っている**ので、#2655の停滞検知のように時間を待つ理由が無い（待つと、その分だけ人が
+  気づくのが遅れる）
+- **行の文字列一致では判定しない**（#5011）。Claude Code 2.1.3xxの転記には、拒否の直後に
+  `api-request-blob`（直前のassistant発言の複製で、tool_useを含む）が書かれる。以前は
+  `"type":"tool_use"`を含む行を探していたため、これを「ツールが走った」と読み、
+  guchi-apps/morrow#614で拒否されたセッションを素通りさせた。`isSidechain`（サブエージェントの
+  内側）も数えない
+- **少しだけ確認して諦めた形も拾う**（#5011）。morrow#614では、拒否のあと`git status`を1回だけ
+  叩き、「権限判定に拒否されたので実行していません」で終えていた。拒否が最後の人の入力より後にあり、
+  そのあとのtool_useが2件以下で、`Stop`の`last_assistant_message`が拒否・権限に触れていれば対象に
+  する。PRのURLなど完了の印があれば外す（質問の判定#3447の「完了報告」は印にしない——諦めた応答は
+  「完了報告のコメントも残っています」と残作業として書くため）
+- **自力で迂回して作業を続けた場合・`AskUserQuestion`へ進んだ場合は対象外。** どちらも拒否の
+  後ろにtool_useが続く（3件以上か、最終応答が拒否に触れない）ので落ちる
 - **既存の`/api/dispatch/sessions/interrupted`をそのまま使う**（`reason: "classifier_blocked"`）。
   Issueコメントの原因説明と続け方だけを出し分け、出口の構造は共通
 - **`detail`に拒否されたコマンドを載せない。** コマンドにはシークレットが混ざりうるうえ、
