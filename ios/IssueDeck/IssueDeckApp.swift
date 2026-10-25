@@ -39,6 +39,11 @@ struct ContentView: View {
         .animation(.easeOut(duration: 0.2), value: model.failure)
         // 共有画面の「Issueを開く」（`issuedeck://issue?id=…`）。GitHubではなくIssueDeckのIssue詳細を開く
         .onOpenURL { url in
+            // IssueDeckのHTTPSリンク（Universal Links。#5035）。Issue/PR詳細だけを開き、他は無視する
+            if url.scheme == "https" {
+                if let path = UniversalLink.appPath(for: url) { PushCenter.shared.open(path: path) }
+                return
+            }
             // ロック画面ウィジェット（`issuedeck://usage`。#4890）は「AI使用量」を開く
             if url.scheme == AppConfig.authCallbackScheme, url.host == "usage" {
                 PushCenter.shared.open(path: "/dashboard?pane=usage&mscreen=usage")
