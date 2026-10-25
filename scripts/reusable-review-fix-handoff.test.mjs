@@ -39,7 +39,19 @@ function extractRunScript(stepName) {
     if (line.trim() !== "" && line.search(/\S/) < indent) break;
     body.push(line.slice(indent));
   }
-  return body.join("\n");
+  return `${workflowEnvExports()}\n${body.join("\n")}`;
+}
+
+/** ワークフロー直下の`env:`（CODEX_TRUSTED_COMMENTS_JQなど）を、ステップのシェルへ引き継ぐ（#5004） */
+function workflowEnvExports() {
+  const match = workflowYaml.match(/^env:\n((?:[ ]+.*\n|\n)+)/m);
+  if (!match) return "";
+  return match[1]
+    .split("\n")
+    .map((line) => line.match(/^\s+([A-Z_]+): '(.*)'\s*$/))
+    .filter(Boolean)
+    .map(([, key, value]) => `export ${key}='${value}'`)
+    .join("\n");
 }
 
 // 読み出しは環境変数の値を返し、書き込み（issue edit / issue comment）はログへ残す。
@@ -70,8 +82,8 @@ case "$1 $2" in
     exit 0 ;;
 esac
 if [ "$1" = "api" ]; then
-  # 判定マーカーの取得はBot投稿に絞った本文を返す(--jqの絞り込み後を模す)
-  if [[ "$all" == *'.user.type == "Bot"'* ]]; then printf '%s' "\${STUB_PR_COMMENTS:-}"; exit 0; fi
+  # 判定マーカーの取得は書き込み権限のある投稿者に絞った本文を返す(--jqの絞り込み後を模す)
+  if [[ "$all" == *'author_association'* ]]; then printf '%s' "\${STUB_PR_COMMENTS:-}"; exit 0; fi
   if [[ "$2" == *comments* ]]; then printf '%s' "\${STUB_PR_JSON:-[]}"; exit 0; fi
   exit "\${STUB_CALLER_EXIT:-0}"
 fi
