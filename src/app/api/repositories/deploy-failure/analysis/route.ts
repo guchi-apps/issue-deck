@@ -5,6 +5,7 @@ import {
   analyzeDeployFailure,
   tailDeployLog,
 } from "@/lib/claude/deploy-failure-analysis";
+import { AppAiCodexError } from "@/lib/claude/app-ai-codex";
 import { getAppAiToken } from "@/lib/claude/request";
 import { db } from "@/lib/db";
 import { fetchWorkflowJobLogs, fetchWorkflowRunJobs } from "@/lib/github/actions-api";
@@ -74,6 +75,8 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ analysis, jobName: target.name ?? null });
   } catch (error) {
     console.error("[deploy-failure-analysis]", error);
-    return NextResponse.json({ error: "analysis_failed" }, { status: 502 });
+    // Codex経路の失敗（#5067）だけは原因を利用者へ返す（オフライン・未ログイン・枠超過などを区別するため）
+    const message = error instanceof AppAiCodexError ? error.message : undefined;
+    return NextResponse.json({ error: "analysis_failed", ...(message ? { message } : {}) }, { status: 502 });
   }
 }

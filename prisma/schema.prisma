@@ -2410,6 +2410,30 @@ model ChatRun {
   @@index([currentJobId])
 }
 
+/// アプリ内AI（要約・検索・文章整理など）をサブPCのCodex CLIで動かしている途中の1回ぶん（#5067）。
+/// 受け渡しはチャット調査と同じ`CHAT_TURN`ジョブで行い、プロンプトと結果だけをここに置く
+/// （`ChatRun`は会話への外部キーが必須なため流用しない）。結果を受け取ったら行ごと消す。
+model AppAiCodexRun {
+  id           String   @id @default(cuid())
+  /// 呼び出した機能（`ClaudeApiFeature`）。使用量を機能別に記録するために持つ
+  feature      String   @db.VarChar(48)
+  model        String   @db.VarChar(64)
+  /// `running` / `succeeded` / `failed`
+  status       String   @db.VarChar(16)
+  /// いま待っている`CHAT_TURN`ジョブ
+  currentJobId String?  @db.VarChar(32)
+  /// そのジョブで渡すプロンプト（system・messages・schema・model）
+  stepRequest  Json?
+  /// サブPCが返した最終メッセージ（構造化出力のJSON文字列）
+  stepResult   String?  @db.Text
+  /// サブPCが返した失敗の種別（`not_logged_in`・`usage_limit`など）
+  stepError    String?  @db.VarChar(32)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([currentJobId])
+}
+
 // 実装担当の記録。セッション回収後もPRレビューが共通設定へ戻らないよう保持する（#4037）。
 model ImplementationRun {
   id                 String   @id @default(cuid())

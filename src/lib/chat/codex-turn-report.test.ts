@@ -3,7 +3,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const state = vi.hoisted(() => ({
   job: null as null | { kind: string; claimedByHost: string; status: string },
   run: null as null | { id: string; stepRequest: unknown; currentJobId: string; stepResult?: string | null; stepError?: string | null },
-  reports: [] as { status: string }[],
+  appRun: null as null | { id: string; feature: string; stepRequest: unknown; currentJobId: string; stepResult?: string | null; stepError?: string | null; status?: string },
+  reports: [] as { status: string; message?: string }[],
   usage: [] as unknown[],
 }));
 
@@ -25,6 +26,13 @@ vi.mock("@/lib/db", () => ({
         return { count: state.run ? 1 : 0 };
       },
     },
+    appAiCodexRun: {
+      findFirst: async () => state.appRun,
+      updateMany: async ({ data }: { data: Record<string, unknown> }) => {
+        if (state.appRun) Object.assign(state.appRun, data);
+        return { count: state.appRun ? 1 : 0 };
+      },
+    },
   },
 }));
 
@@ -35,6 +43,7 @@ const request = { model: "gpt-6-sol", system: "S", messages: [{ role: "user", co
 beforeEach(() => {
   state.job = { kind: "CHAT_TURN", claimedByHost: "subpc", status: "CLAIMED" };
   state.run = { id: "run1", stepRequest: request, currentJobId: "job1" };
+  state.appRun = null;
   state.reports = [];
   state.usage = [];
 });
@@ -83,5 +92,45 @@ describe("セッション型のツール受け口（#4199）", () => {
     expect(await runChatTurnTool({ jobId: "job1", host: "other", name: "get_issue", args: {} })).toMatchObject({ ok: false, status: 403 });
     state.run = null;
     expect(await runChatTurnTool({ jobId: "job1", host: "subpc", name: "get_issue", args: {} })).toMatchObject({ ok: false, status: 409 });
+  });
+});
+
+describe("アプリ内AIの単発実行（#5067）", () => {
+  const appRequest = {
+    model: "gpt-6-luna",
+    system: "要約係",
+    messages: [{ role: "user", content: "コメントを要約して" }],
+    schema: { type: "object", properties: { text: { type: "string" } }, required: ["text"], additionalProperties: false },
+    textWrapped: true,
+  };
+
+  beforeEach(() => {
+    state.run = null;
+    state.appRun = { id: "app1", feature: "comment_summary", stepRequest: appRequest, currentJobId: "job1", status: "running" };
+  });
+
+  it("ツールもMCPも付けない単発の依頼として渡す", async () => {
+    const result = await fetchChatTurnRequest({ jobId: "job1", host: "subpc" });
+    expect(result.ok && result.body).toMatchObject({ model: "gpt-6-luna", mode: null, tools: [], schema: appRequest.schema });
+    expect(result.ok && result.body.prompt).toContain("コメントを要約して");
+    expect(result.ok && result.body.prompt).toContain("text 欄");
+    expect(state.reports[0]?.message).toContain("アプリ内AI");
+  });
+
+  it("成功は待ち手へ書き、呼び出した機能の`codex-cli/<model>`として使用量を記録する", async () => {
+    await reportChatTurnResult({ jobId: "job1", host: "subpc", status: "succeeded", output: '{"text":"要約"}', errorKind: null, usage: { input_tokens: 7, output_tokens: 3 } });
+    expect(state.appRun).toMatchObject({ stepResult: '{"text":"要約"}', status: "succeeded" });
+    expect(state.usage[0]).toMatchObject({ feature: "comment_summary", model: "codex-cli/gpt-6-luna", tokens: { inputTokens: 7, outputTokens: 3 } });
+  });
+
+  it("失敗は種別を待ち手へ書き、使用量は記録しない", async () => {
+    await reportChatTurnResult({ jobId: "job1", host: "subpc", status: "failed", output: null, errorKind: "usage_limit", usage: null });
+    expect(state.appRun).toMatchObject({ stepError: "usage_limit", status: "failed" });
+    expect(state.usage).toHaveLength(0);
+  });
+
+  it("ツールの受け口は使わせない", async () => {
+    const result = await runChatTurnTool({ jobId: "job1", host: "subpc", name: "get_issue", args: {} });
+    expect(result).toMatchObject({ ok: false, status: 409, error: "session_missing" });
   });
 });

@@ -23,6 +23,7 @@ import {
   AUTO_RETRY_LIMIT_MAX,
   AUTO_RETRY_LIMIT_MIN,
   APP_AI_MODEL_OPTIONS,
+  appAiProvider,
   CLAUDE_LOCAL_MODEL_SETTING_OPTIONS,
   CLAUDE_MODEL_OPTIONS,
   CODEX_MODEL_SETTING_OPTIONS,
@@ -811,8 +812,10 @@ export function ExecutionSettingsSection({
         <div className="flex items-center gap-1.5">
           <Label htmlFor="app-ai-model">アプリ内AI：要約・検索・文章整理</Label>
           <InfoHint label="アプリ内AI：要約・検索・文章整理">
-            Issueとコメントの要約、類似Issue検索、本文整理、並び替え、Issue作成補助に使います。
-            定型処理が中心のため、通常はHaikuが適しています。GPT系を選んでもOpenAI API（従量課金）は使わず、これらはClaude（Haiku）で実行します。
+            Issueとコメントの要約、類似Issue検索、本文整理、Issue作成補助、デプロイ失敗の原因分析に使います。
+            定型処理が中心のため、通常はHaikuが適しています。GPT系を選ぶとサブPCのログイン済みCodex CLI（ChatGPTサブスク枠）で実行し、
+            Claudeが使えないときの代わりになります。OpenAI API（従量課金）は使わず、Codexが使えないときはエラーを表示してClaudeへは切り替えません。
+            画像からの変更内容の抽出はCodex未対応で、モデルの自動選択はルールで判定します。
           </InfoHint>
         </div>
         <Select value={appAiModel} onValueChange={(value) => setAppAiModel(value as AppAiModel)}>
@@ -827,6 +830,7 @@ export function ExecutionSettingsSection({
             ))}
           </SelectContent>
         </Select>
+        <AppAiRuntimeNote model={appAiModel} />
       </div>
 
       <div className="flex flex-col gap-1.5">
@@ -834,7 +838,8 @@ export function ExecutionSettingsSection({
           <Label htmlFor="app-ai-model-reasoning">アプリ内AI：原因診断・新規アプリ相談</Label>
           <InfoHint label="アプリ内AI：原因診断・新規アプリ相談">
             手作業が失敗した原因の診断と、新規アプリの構成相談に使います。判断力が必要なため、
-            通常はSonnetが適しています。原因診断（チャット調査）はGPTを選ぶとサブPCのCodex CLI（サブスク枠）で実行します。新規アプリ相談・手作業の修正提案・全体レビューの判断の推奨はGPTを選んでもClaude（Sonnet）で実行し、OpenAI API（従量課金）は使いません。
+            通常はSonnetが適しています。GPT系を選ぶと、原因診断（チャット調査）・新規アプリ相談・手作業の修正提案・全体レビューの判断の推奨を
+            サブPCのCodex CLI（ChatGPTサブスク枠）で実行します。OpenAI API（従量課金）は使わず、Codexが使えないときはClaudeへ切り替えません。
           </InfoHint>
         </div>
         <Select
@@ -852,6 +857,7 @@ export function ExecutionSettingsSection({
             ))}
           </SelectContent>
         </Select>
+        <AppAiRuntimeNote model={appAiModelReasoning} />
         {/* リリースPRの全体AIレビュー（#4238）の担当は、この設定で決まる。画面の表示と実際に積むジョブは同じ関数を使う */}
         <p className="text-xs text-muted-foreground" data-testid="release-review-assignee">
           リリース全体レビューの担当（実効）:{" "}
@@ -882,5 +888,18 @@ export function ExecutionSettingsSection({
       <PlanReviewAutoReflectField />
       </>}
     </div>
+  );
+}
+
+/** 選んだモデルの実際の実行先（#5067）。GPT系を「Claudeで動く代替」と誤認させない */
+function AppAiRuntimeNote({ model }: { model: AppAiModel }) {
+  const codex = appAiProvider(model) === "openai";
+  return (
+    <p className="text-xs text-muted-foreground" data-testid="app-ai-runtime">
+      実行先:{" "}
+      {codex
+        ? "サブPCのCodex CLI（ChatGPTサブスク枠）。Claudeが止まっていても動きます。サブPCがオフライン・未ログイン・枠超過のときはエラーになります"
+        : "IssueDeckサーバーからAnthropic API（Claudeのサブスク枠）"}
+    </p>
   );
 }

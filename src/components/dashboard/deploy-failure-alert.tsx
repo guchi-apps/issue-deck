@@ -106,7 +106,9 @@ export function DeployFailureAlert({
             ? "AIが設定されていないため分析できません。"
             : data?.error === "no_failed_job"
               ? "失敗したジョブが見つかりませんでした。実行ログで確かめてください。"
-              : "原因を分析できませんでした。時間をおいて押し直すか、実行ログを確かめてください。";
+              : typeof data?.message === "string"
+                ? data.message
+                : "原因を分析できませんでした。時間をおいて押し直すか、実行ログを確かめてください。";
         setAnalysisState({ status: "error", message });
         return;
       }
