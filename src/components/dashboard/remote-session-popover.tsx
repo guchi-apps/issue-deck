@@ -66,12 +66,7 @@ function PopoverBody({
   onClose: () => void;
 }) {
   const { openRemoteSessions } = useReferenceNavigation();
-  const remote = useRemoteSessions({
-    active: open,
-    onReady: (url) => {
-      window.location.assign(url);
-    },
-  });
+  const remote = useRemoteSessions({ active: open });
   const [query, setQuery] = useState("");
   const runnable = useMemo(() => runnableRepositories(remote.state, repositories), [remote.state, repositories]);
   const candidates = useMemo(() => {

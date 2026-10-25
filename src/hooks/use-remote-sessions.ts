@@ -22,10 +22,26 @@ export type RemoteSessionLaunch = {
 };
 
 /**
- * リモートセッション（#4743）の状態取得・起動・終了。起動した1件はURLが届いた時点で
- * `onReady`を呼ぶ（画面はそこでClaude Codeアプリへ移動する）。
+ * 起動の操作（クリック）の中で空のタブを先に開いておく。URLが届くのは非同期で、その時点の
+ * `window.open`はポップアップとしてブロックされるため、届いたらこのタブを遷移させる（#5026）。
+ * タブを開けなかった場合は`null`を返す。
  */
-export function useRemoteSessions(params: { active: boolean; onReady: (url: string) => void }) {
+function openPlaceholderTab(): Window | null {
+  try {
+    const tab = window.open("about:blank", "_blank");
+    if (tab) tab.opener = null;
+    return tab;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * リモートセッション（#4743）の状態取得・起動・終了。起動した1件はURLが届いた時点で、
+ * 起動時に開いておいた新しいタブをClaude Codeの画面へ遷移させる（Issue Deckの画面は移動しない。#5026）。
+ * タブを開けていなければ`onReady`を呼ぶ。
+ */
+export function useRemoteSessions(params: { active: boolean; onReady?: (url: string) => void }) {
   const { active, onReady } = params;
   const [state, setState] = useState<RemoteSessionState | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -33,6 +49,7 @@ export function useRemoteSessions(params: { active: boolean; onReady: (url: stri
   const [pending, setPending] = useState(false);
   // 取得のたびに起動中の1件を照らし合わせるため、最新の値を参照で持つ（取得の関数を作り直さない）
   const launchRef = useRef<RemoteSessionLaunch | null>(null);
+  const tabRef = useRef<Window | null>(null);
   const onReadyRef = useRef(onReady);
   useEffect(() => {
     onReadyRef.current = onReady;
@@ -41,6 +58,13 @@ export function useRemoteSessions(params: { active: boolean; onReady: (url: stri
   const updateLaunch = useCallback((next: RemoteSessionLaunch | null) => {
     launchRef.current = next;
     setLaunch(next);
+  }, []);
+
+  /** 待つのをやめるとき、用意しておいた空タブを閉じる */
+  const closeTab = useCallback(() => {
+    const tab = tabRef.current;
+    tabRef.current = null;
+    if (tab && !tab.closed) tab.close();
   }, []);
 
   const refresh = useCallback(async () => {
@@ -62,7 +86,10 @@ export function useRemoteSessions(params: { active: boolean; onReady: (url: stri
     const session = next.sessions.find((item) => item.id === current.sessionId);
     if (session?.remoteControlUrl && session.status === "running") {
       updateLaunch(null);
-      onReadyRef.current(session.remoteControlUrl);
+      const tab = tabRef.current;
+      tabRef.current = null;
+      if (tab && !tab.closed) tab.location.href = session.remoteControlUrl;
+      else onReadyRef.current?.(session.remoteControlUrl);
       return;
     }
     if (
@@ -70,9 +97,13 @@ export function useRemoteSessions(params: { active: boolean; onReady: (url: stri
       session?.status === "ended" ||
       Date.now() - current.startedAt > AUTO_OPEN_TIMEOUT_MS
     ) {
+      closeTab();
       updateLaunch({ ...current, gaveUp: true });
     }
-  }, [updateLaunch]);
+  }, [updateLaunch, closeTab]);
+
+  // ポップオーバーを閉じる・画面を離れてフックが破棄されると、URLを渡す機会が無くなる。空白のまま残さない
+  useEffect(() => closeTab, [closeTab]);
 
   const waiting = launch !== null && !launch.gaveUp;
 
@@ -88,6 +119,8 @@ export function useRemoteSessions(params: { active: boolean; onReady: (url: stri
 
   const start = useCallback(
     async (repositoryFullName: string) => {
+      closeTab();
+      tabRef.current = openPlaceholderTab();
       setPending(true);
       setError(null);
       try {
@@ -101,6 +134,7 @@ export function useRemoteSessions(params: { active: boolean; onReady: (url: stri
           | null;
         if (!response.ok || !body?.session) {
           setError(body?.message ?? "リモートセッションを起動できませんでした。");
+          closeTab();
           return;
         }
         updateLaunch({ sessionId: body.session.id, repositoryFullName, startedAt: Date.now(), gaveUp: false });
@@ -109,12 +143,14 @@ export function useRemoteSessions(params: { active: boolean; onReady: (url: stri
         setPending(false);
       }
     },
-    [refresh, updateLaunch],
+    [refresh, updateLaunch, closeTab],
   );
 
   /** 終了したセッションを会話ごと再開する（#4874）。起動と同じく、URLが届いたら移動する */
   const resume = useCallback(
     async (session: RemoteSessionView) => {
+      closeTab();
+      tabRef.current = openPlaceholderTab();
       setPending(true);
       setError(null);
       try {
@@ -128,6 +164,7 @@ export function useRemoteSessions(params: { active: boolean; onReady: (url: stri
           | null;
         if (!response.ok || !body?.session) {
           setError(body?.message ?? "リモートセッションを再開できませんでした。");
+          closeTab();
           return;
         }
         updateLaunch({
@@ -141,7 +178,7 @@ export function useRemoteSessions(params: { active: boolean; onReady: (url: stri
         setPending(false);
       }
     },
-    [refresh, updateLaunch],
+    [refresh, updateLaunch, closeTab],
   );
 
   const stop = useCallback(
@@ -157,7 +194,10 @@ export function useRemoteSessions(params: { active: boolean; onReady: (url: stri
     [refresh],
   );
 
-  const dismissLaunch = useCallback(() => updateLaunch(null), [updateLaunch]);
+  const dismissLaunch = useCallback(() => {
+    closeTab();
+    updateLaunch(null);
+  }, [updateLaunch, closeTab]);
 
   return { state, error, launch, pending, start, resume, stop, refresh, dismissLaunch };
 }

@@ -70,12 +70,7 @@ export function RemoteSessionView({
   hideHeader?: boolean;
 }) {
   const isDesktop = useMediaQuery("(min-width: 768px)");
-  const remote = useRemoteSessions({
-    active,
-    onReady: (url) => {
-      window.location.assign(url);
-    },
-  });
+  const remote = useRemoteSessions({ active });
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<string | null>(null);
   const [sheetOpen, setSheetOpen] = useState(false);
@@ -306,7 +301,7 @@ function RepositoryDetail({
                 <div className="flex w-full justify-end gap-2 sm:w-auto">
                   {session.remoteControlUrl ? (
                     <Button size="sm" asChild>
-                      <a href={session.remoteControlUrl}>
+                      <a href={session.remoteControlUrl} target="_blank" rel="noopener noreferrer">
                         <ExternalLink className="size-3.5" />
                         Claude Codeアプリで開く
                       </a>
