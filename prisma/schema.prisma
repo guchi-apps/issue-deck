@@ -3295,6 +3295,9 @@ model SessionDependencyWait {
   resumeSentAt       DateTime?
   resumedAt          DateTime?
   failureReason      String?  @db.VarChar(300)
+  // 一時的な理由（未送信入力・作業中）で見送られた再開の自動再試行（#5005）。失敗した時刻と試した回数
+  resumeFailedAt     DateTime?
+  autoRetryCount     Int      @default(0)
   // 待ちが続いている間だけ`repo#issue`を入れる（同じIssueの二重登録を止める）
   activeKey          String?  @unique @db.VarChar(255)
   // 条件成立・失敗の通知を出し済みか（同じ待機理由で繰り返さない）
