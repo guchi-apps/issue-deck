@@ -6,7 +6,9 @@ import { CI_BYPASS_COOKIE_NAME, isCiBypassRequest } from "@/lib/ci-auth-bypass";
 import { getRequestOrigin } from "@/lib/request-origin";
 import { toSafeRedirectPath } from "@/lib/safe-redirect-path";
 
-const publicPaths = ["/login", "/auth/callback", "/auth/native"];
+// `/share`はリンクプレビュー用のOGメタ・カード画像（#5036）。載せるのはリポジトリ名と種別・番号だけで、
+// Issue・PRの本文は返さない
+const publicPaths = ["/login", "/auth/callback", "/auth/native", "/share"];
 
 function isPublicPath(pathname: string): boolean {
   return publicPaths.some((p) => pathname === p || pathname.startsWith(`${p}/`));

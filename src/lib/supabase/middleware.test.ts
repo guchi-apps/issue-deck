@@ -26,6 +26,18 @@ describe("コールバック失敗後の再ログイン", () => {
     expect(result.headers.get("location")).toContain("/login?error=not_allowed");
   });
 });
+describe("リンクプレビュー用の公開パス（#5036）", () => {
+  it("未ログインでも/share配下はログインへ転送しない", async () => {
+    mocks.allowed.mockResolvedValue(false);
+    const result = await updateSession(new NextRequest("https://example.com/share/issue/1/opengraph-image"));
+    expect(result.headers.get("location")).toBeNull();
+  });
+  it("/dashboardは従来どおりログインへ転送する", async () => {
+    mocks.allowed.mockResolvedValue(false);
+    const result = await updateSession(new NextRequest("https://example.com/dashboard?issue=1"));
+    expect(result.headers.get("location")).toContain("/login");
+  });
+});
 describe("未ログイン時のcallbackUrl（#5035）", () => {
   it("Issue詳細リンクのクエリを保ったままログインへ送る", async () => {
     mocks.user = null;
