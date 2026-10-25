@@ -389,6 +389,18 @@ jobs:
           NOTIFY_STATUS: \${{ steps.status.outputs.result }}
           NOTIFY_JOB: \${{ steps.status.outputs.jobs }}
         run: bash .github/scripts/signaly-notify.sh
+
+      - name: Discord に異常を通知
+        # 失敗・異常だけ送る（成功・キャンセルはスクリプトが送らない。guchi-apps/issue-deck#5057）。
+        if: always()
+        continue-on-error: true
+        env:
+          DISCORD_ALERT_WEBHOOK_URL: \${{ secrets.DISCORD_ALERT_WEBHOOK_URL }}
+          NOTIFY_APP: ${spec.repositoryName}
+          NOTIFY_KIND: CI
+          NOTIFY_STATUS: \${{ steps.status.outputs.result }}
+          NOTIFY_JOB: \${{ steps.status.outputs.jobs }}
+        run: bash .github/scripts/discord-alert.sh
 `;
 }
 
@@ -742,6 +754,17 @@ ${gatePrintf}
           NOTIFY_STATUS: \${{ steps.status.outputs.result }}
         run: bash .github/scripts/signaly-notify.sh
 
+      - name: Discord に異常を通知
+        # 失敗・異常だけ送る（成功・キャンセルはスクリプトが送らない。guchi-apps/issue-deck#5057）。
+        if: always()
+        continue-on-error: true
+        env:
+          DISCORD_ALERT_WEBHOOK_URL: \${{ secrets.DISCORD_ALERT_WEBHOOK_URL }}
+          NOTIFY_APP: ${spec.repositoryName}
+          NOTIFY_KIND: デプロイ
+          NOTIFY_STATUS: \${{ steps.status.outputs.result }}
+        run: bash .github/scripts/discord-alert.sh
+
   notify-release:
     runs-on: ubuntu-latest
     needs: [tag, deploy, release]
@@ -766,5 +789,17 @@ ${gatePrintf}
           NOTIFY_KIND: リリース
           NOTIFY_VERSION: \${{ needs.tag.outputs.tag }}
         run: bash .github/scripts/signaly-notify.sh
+
+      - name: Discord に異常を通知
+        # 失敗・異常だけ送る（成功・キャンセルはスクリプトが送らない。guchi-apps/issue-deck#5057）。
+        if: always()
+        continue-on-error: true
+        env:
+          DISCORD_ALERT_WEBHOOK_URL: \${{ secrets.DISCORD_ALERT_WEBHOOK_URL }}
+          NOTIFY_APP: ${spec.repositoryName}
+          NOTIFY_KIND: リリース
+          NOTIFY_STATUS: \${{ needs.release.result }}
+          NOTIFY_VERSION: \${{ needs.tag.outputs.tag }}
+        run: bash .github/scripts/discord-alert.sh
 `;
 }

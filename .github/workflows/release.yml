@@ -82,3 +82,16 @@ jobs:
           NOTIFY_KIND: リリース
           NOTIFY_VERSION: ${{ github.ref_name }}
         run: bash .github/scripts/signaly-notify.sh
+
+      - name: Discord に異常を通知
+        # 失敗・異常だけ送る（成功・キャンセルはスクリプトが送らない）。結果は改変せず、
+        # 通知の失敗でrunを落とさない（#5057）。
+        if: always()
+        continue-on-error: true
+        env:
+          DISCORD_ALERT_WEBHOOK_URL: ${{ secrets.DISCORD_ALERT_WEBHOOK_URL }}
+          NOTIFY_APP: issue-deck
+          NOTIFY_KIND: リリース
+          NOTIFY_STATUS: ${{ needs.release.result }}
+          NOTIFY_VERSION: ${{ github.ref_name }}
+        run: bash .github/scripts/discord-alert.sh
