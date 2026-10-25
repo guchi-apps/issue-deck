@@ -1228,6 +1228,12 @@ CI・デプロイの通知先は変えない。
 違って「organization secretを先に作る」順序の制約が無く、secretの登録・スクリプトの配布・
 ワークフローの1行追加をどの順で進めてもよい。
 
+**issue-deck本体のリリース完了通知（Discord）は別系統。** 本番アプリが実行時に読む
+`DISCORD_RELEASE_WEBHOOK_URL` は、`.github/secrets-manifest.tsv` の
+`repo` スコープsecret（値の正は `op://apps/issue-deck/discord-release-webhook-url`）に登録し、
+`deploy.yml` が本番の `.env` へ書き出す（#5007）。上の `SIGNALY_*` の集約とは別で、
+フリートの他リポジトリには配らない。
+
 **変更内容の出どころは `.github/release-notes.md`。** 共有ワークフロー
 `reusable-release-develop-to-main.yml` がバージョンbumpのたびに、生成した利用者向けの文面
 （`RELEASE_CHANGELOG`・`RELEASE_USAGE`）をこのファイルへ書き出してバンプPRに含める。

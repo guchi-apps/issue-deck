@@ -578,7 +578,11 @@ issue-deck自身には届かない**ため、サブPCのpollerが叩く巡回
 埋め込み（タイトル・リポジトリ・バージョン・更新内容・各種リンク・公開時刻）を投稿する。**
 投稿先は環境変数`DISCORD_RELEASE_WEBHOOK_URL`（Discordのチャンネル設定「連携サービス」で発行した
 Webhook URL。**URL自体が資格情報**なので`.env.local`・1Passwordにだけ置く）。未設定ならGitHubも
-叩かず何も送らない。メンションは解決させない（更新内容の`@everyone`で鳴らさない）。
+叩かず何も送らない。**本番への配布経路**（#5007）は`.github/secrets-manifest.tsv`（`op://apps/issue-deck/discord-release-webhook-url`）
+→`scripts/sync-github-secrets.sh`→`deploy.yml`のenv転送と.env書き出しで、デプロイのたびに.envが
+作り直されるため、VPSの.envを手で書き換えても次のデプロイで消える。Slack時代の`SLACK_BOT_TOKEN`は
+この経路に載っていなかった。**Webhookを1Passwordへ登録して同期するまでは通知が止まる**ので、公開前に
+登録を済ませる。メンションは解決させない（更新内容の`@everyone`で鳴らさない）。
 「アプリを開く」はGitHubリポジトリの`homepage`があるときだけ出す。**Signalyへの通知はそのまま残す。**
 チャンネル宛のため、ユーザーごとのリポジトリ非表示・ミュート設定は効かない。
 
