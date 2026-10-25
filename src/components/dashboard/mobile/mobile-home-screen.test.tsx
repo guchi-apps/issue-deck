@@ -84,7 +84,6 @@ function makeHost(overrides: Partial<DispatchHostView> = {}): DispatchHostView {
     lastSeenAt: "2026-08-16T00:00:00Z",
     sessionControlCapable: true,
     instructionCapable: true,
-    crossRepoQuestionCapable: true,
     manualStepCapable: null,
     manualStepAbortCapable: null,
     manualStepValuesCapable: null,
@@ -117,8 +116,6 @@ function renderHome(
     <MobileHomeScreen
       navCounts={NAV_COUNTS}
       manualStepAttention={NO_MANUAL_STEP}
-      unconfirmedQuestionCount={0}
-      waitingQuestionCount={0}
       pullRequestNavCounts={PR_NAV_COUNTS}
       mergePendingAttention={NO_MERGE_PENDING}
       onSelectQuickView={() => {}}
@@ -160,7 +157,6 @@ describe("MobileHomeScreen（#1690）", () => {
       "ユーザーの確認待ち",
       "ユーザーの作業待ち",
       "マージ待ち",
-      "質問",
       // 進行状況の順に左上から右へ並べる（#3676）
       "未着手",
       "予約実行",
@@ -269,8 +265,6 @@ describe("MobileHomeScreen（#1690）", () => {
       <MobileHomeScreen
         navCounts={{ ...NAV_COUNTS, "manual-step": 2 }}
         manualStepAttention={{ total: 2, actionable: 1, waitingForPrerequisites: 1 }}
-        unconfirmedQuestionCount={0}
-        waitingQuestionCount={0}
         pullRequestNavCounts={PR_NAV_COUNTS}
       mergePendingAttention={NO_MERGE_PENDING}
         onSelectQuickView={() => {}}
@@ -291,73 +285,16 @@ describe("MobileHomeScreen（#1690）", () => {
     expect(badgeClassName()).toContain("bg-amber-500");
   });
 
-  // 数字は一覧に並ぶ件数で、オレンジの丸は未確認があるときだけ（#2070・PCと同じ）。
-  // #1910のように未確認の数を数字に出すと、読み終えた質問しか無いときに
-  // 質問が何件も開いたままでも`0`と出て「質問は無い」と読めてしまう
-  function questionRow(total: number) {
-    // 横断質問のボタンも同じ画面にあるため、件数まで含めてメニューの行を指名する
-    return screen.getByRole("button", { name: new RegExp(`^質問\\s*${total}$`) });
-  }
+  // 「質問」のタイルは#5047で廃止した。コードレビューは合図なしで件数だけ（#2325・PCと同じ）
+  it("「質問」のタイルを出さず、コードレビューは件数だけを出す", () => {
+    renderHome({ navCounts: { ...NAV_COUNTS, "code-review": 2 } });
 
-  it("未確認の質問があれば、一覧の件数をオレンジの丸で出す", () => {
-    renderHome({
-      navCounts: { ...NAV_COUNTS, question: 3 },
-      unconfirmedQuestionCount: 1,
-    });
-
-    const row = questionRow(3);
-    expect(row.className).toContain("bg-amber-500");
-    // 数字（総数）と丸（未確認）で意味が違うため、内訳は吹き出しで補う
-    expect(row.getAttribute("title")).toContain("3件");
-    expect(row.getAttribute("title")).toContain("1件");
-  });
-
-  // 回答待ちのあいだは回るアイコンを出す（#2309・PCと同じ）
-  it("回答待ちの質問があれば回るアイコンを出す", () => {
-    renderHome({
-      navCounts: { ...NAV_COUNTS, question: 3 },
-      unconfirmedQuestionCount: 1,
-      waitingQuestionCount: 2,
-    });
-
-    const row = questionRow(3);
-    expect(row.querySelector(".animate-spin")).not.toBeNull();
-    expect(row.getAttribute("title")).toContain("回答待ちが2件");
-  });
-
-  it("回答待ちの質問が無ければ回るアイコンを出さない", () => {
-    renderHome({
-      navCounts: { ...NAV_COUNTS, question: 3 },
-      unconfirmedQuestionCount: 1,
-      waitingQuestionCount: 0,
-    });
-
-    expect(questionRow(3).querySelector(".animate-spin")).toBeNull();
-  });
-
-  // 質問の合図をコードレビューの行へ持ち込まない（#2325・PCと同じ）
-  it("回答待ちの質問があってもコードレビューの行は回さない", () => {
-    renderHome({
-      navCounts: { ...NAV_COUNTS, question: 3 },
-      unconfirmedQuestionCount: 1,
-      waitingQuestionCount: 2,
-    });
-
+    expect(screen.queryByRole("button", { name: /^質問/ })).toBeNull();
     const row = screen.getByRole("button", { name: /^コードレビュー/ });
+    expect(row.textContent).toContain("2");
     expect(row.querySelector(".animate-spin")).toBeNull();
     expect(row.className).not.toContain("amber");
     expect(row.getAttribute("title")).toBeNull();
-  });
-
-  it("未確認の質問が無くても、開いている質問の件数は出す（強調はしない）", () => {
-    renderHome({
-      navCounts: { ...NAV_COUNTS, question: 3 },
-      unconfirmedQuestionCount: 0,
-    });
-
-    const row = questionRow(3);
-    expect(row.className).not.toContain("amber");
-    expect(row.getAttribute("title")).toContain("3件");
   });
 
   it("タイルを押すと、そのビューへ遷移する", () => {
@@ -538,8 +475,6 @@ describe("MobileHomeScreen の引っ張って更新（#2182）", () => {
       <MobileHomeScreenView
         navCounts={NAV_COUNTS}
         manualStepAttention={NO_MANUAL_STEP}
-        unconfirmedQuestionCount={0}
-        waitingQuestionCount={0}
         pullRequestNavCounts={PR_NAV_COUNTS}
       mergePendingAttention={NO_MERGE_PENDING}
         onSelectQuickView={() => {}}

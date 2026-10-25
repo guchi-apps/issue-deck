@@ -88,7 +88,7 @@ Issueごとに専用ブランチ・git worktree・Claude Codeセッションを�
 
 **Issueを起点に他リポジトリへIssueやPRが自動作成される仕組みは無い**（#1698）。自動でPRが配られるのは共有ワークフローの参照タグ（`@workflows/vN`・`prompts-ref`）だけで、それも画面のボタンから起動する別経路であり、内容の変更は運ばない。
 
-横展開が必要だと分かったら、**このセッションで他リポジトリを触らず**、対象リポジトリごとにIssueを立てて親IssueへサブIssueとして紐付ける。上の禁止事項「担当Issue以外の実装」がそのまま当てはまる。影響範囲の調べ方（横断質問）・変更の種類ごとの配り方・追跡の残し方は[docs/multi-repo-changes.md](docs/multi-repo-changes.md)を参照する。
+横展開が必要だと分かったら、**このセッションで他リポジトリを触らず**、対象リポジトリごとにIssueを立てて親IssueへサブIssueとして紐付ける。上の禁止事項「担当Issue以外の実装」がそのまま当てはまる。影響範囲の調べ方（リモートセッションでの横断検索）・変更の種類ごとの配り方・追跡の残し方は[docs/multi-repo-changes.md](docs/multi-repo-changes.md)を参照する。
 
 ### 他リポジトリへ起票する前に、同じ対象のopenなIssueを探す
 
@@ -201,7 +201,7 @@ Statusを進めるのはissue-deckだけで、各ワークフロー・ローカ�
 
 IssueのActions実装は#4680で廃止した。現行の入口・残すワークフロー・既存配布先の扱いは[廃止方針](docs/actions-implementation-retirement.md)を参照。以下の旧callerへの言及は旧タグで動く配布先向けの互換説明である。
 
-`11.local`（ローカルで対応中）も同様にどの段階でも併用でき、付いている間は`claude-issue-dispatch.yml`（無人実行）がそのIssueに対して計画・実装・分割・追加対応を一切行わない（読み取り専用の質問応答のみ例外）。VSCode等のローカルClaude Codeセッションで対応するIssueに付けることで、ローカルと無人実行がラベル操作をきっかけに二重起動するのを防ぐ（詳細は[docs/multi-agent/branching.md](docs/multi-agent/branching.md)「ローカル実行と無人実行の二重起動を防ぐ」参照）。優先度ラベルは`11.local`と番号帯が重ならないよう`80.Priority: High`・`85.Priority: Medium`・`89.Priority: Low`としている。
+`11.local`（ローカルで対応中）も同様にどの段階でも併用でき、付いている間は`claude-issue-dispatch.yml`（無人実行）がそのIssueに対して計画・実装・分割・追加対応を一切行わない。VSCode等のローカルClaude Codeセッションで対応するIssueに付けることで、ローカルと無人実行がラベル操作をきっかけに二重起動するのを防ぐ（詳細は[docs/multi-agent/branching.md](docs/multi-agent/branching.md)「ローカル実行と無人実行の二重起動を防ぐ」参照）。優先度ラベルは`11.local`と番号帯が重ならないよう`80.Priority: High`・`85.Priority: Medium`・`89.Priority: Low`としている。
 
 **共通GitHubラベルの名前・説明・色の正本は`.github/labels.json`で、全リポジトリへは`scripts/sync-labels.sh`で配る**（#3237。体系・旧名との対応・手順は[docs/label-scheme.md](docs/label-scheme.md)）。ラベルを足す・改名するときは正本を先に直し、個別のリポジトリだけでは直さない。
 

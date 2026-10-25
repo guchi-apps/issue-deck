@@ -174,13 +174,12 @@ export type Issue = {
  * URLの持ち方を揃える。
  *
  * 名前のとおりラベル起点で始まったが、進捗ラベルの廃止（#991 Phase 5）でStatus起点の
- * ビューが加わり、`question`（#1514）と`code-review`（#698）はタイトル接頭辞で判定する。
+ * ビューが加わり、`code-review`（#698）はタイトル接頭辞で判定する（`question`〈#1514〉は#5047で廃止）。
  * 判定材料はビューごとに異なるが、URLと件数の扱いを揃えるため同じ枠にまとめている。
  */
 export const LABEL_NAV_VIEW_IDS = [
   "check-user",
   "manual-step",
-  "question",
   "code-review",
   "not-started",
   "in-progress",

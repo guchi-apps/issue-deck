@@ -7,11 +7,11 @@ import {
   BellOff,
   Check,
   Loader2,
-  MessageCircleQuestion,
   MessageSquare,
   MoreHorizontal,
   Pencil,
   RotateCw,
+  TerminalSquare,
   ThumbsUp,
   Trash2,
   X,
@@ -95,13 +95,11 @@ type CommentThreadProps = {
   sessionWaitingInput?: boolean;
   /**
    * そのIssueをローカルセッションが担当しているか（#1903）。trueのとき、承認欄のボタンを
-   * 「コメント」「質問する」「確認待ちを外す」「取り下げ」へ差し替える。
+   * 「コメント」「リモートセッションで聞く」「確認待ちを外す」「取り下げ」へ差し替える。
    */
   localSession?: boolean;
   /** そのセッションが生きているか。案内の言い方（届かない／終了している）を決める */
   sessionAlive?: boolean;
-  /** 「質問する」を出してよいか（`canAskClaude`の結果）。openなIssueなら常にtrue */
-  canAskClaude?: boolean;
   /**
    * Claudeへの質問が回答待ちか（#2309・`isQaAnswerPending`の結果）。trueの間、コメント一覧の
    * 末尾に待ちの吹き出しを出す。
@@ -142,8 +140,11 @@ type CommentThreadProps = {
   onWithdraw?: () => Promise<void> | void;
   /** ローカルセッション担当中の承認欄で「コメント」を押したときの処理（#1903。ラベルは変えない） */
   onComment?: (body: string) => Promise<void> | void;
-  /** 同じく「質問する」（読み取り専用の質問応答。`11.local`が付いていても唯一起動できる経路） */
-  onAskClaude?: (question: string) => Promise<void> | void;
+  /**
+   * 同じく「リモートセッションで聞く」（#5047。廃止した「質問する」の代わり）。そのIssueの
+   * リポジトリを選んだ状態でリモートセッション画面を開く。渡されなければボタンを出さない
+   */
+  onOpenRemoteSession?: () => void;
   /** 同じく「確認待ちを外す」（`00.check-user`と理由ラベルを外し、記録のコメントを残す） */
   onDismissCheckUser?: (text?: string) => Promise<void> | void;
   /** フォールバック通知（行き詰まり・エラー終了）に対する「続きを実装・調査を依頼」ボタン押下時の処理 */
@@ -165,7 +166,7 @@ function ApprovalActions({
   onReject,
   onWithdraw,
   onComment,
-  onAskClaude,
+  onOpenRemoteSession,
   onDismissCheckUser,
   onRequestContinuation,
   isApproving,
@@ -179,7 +180,6 @@ function ApprovalActions({
   sessionStatePending = false,
   localSession = false,
   sessionAlive = false,
-  canAskClaude = false,
   hasPullRequestSection = true,
   pullRequestStop = null,
   repositoryFullName,
@@ -191,7 +191,7 @@ function ApprovalActions({
   onReject: (reason: string) => Promise<void> | void;
   onWithdraw: () => Promise<void> | void;
   onComment?: (body: string) => Promise<void> | void;
-  onAskClaude?: (question: string) => Promise<void> | void;
+  onOpenRemoteSession?: () => void;
   onDismissCheckUser?: (text?: string) => Promise<void> | void;
   onRequestContinuation?: () => Promise<void> | void;
   isApproving?: boolean;
@@ -209,8 +209,6 @@ function ApprovalActions({
   localSession?: boolean;
   /** そのセッションが生きているか（#1903）。案内の言い方を決める */
   sessionAlive?: boolean;
-  /** 「質問する」を出してよいか（#1903） */
-  canAskClaude?: boolean;
   /** 上部に対応PRセクションがあるか（#2914）。マージ待ちの案内の行き先を決める */
   hasPullRequestSection?: boolean;
   /** 対応PRが止まっている原因（#3144）。承認カードの案内の見出しを上部と揃える */
@@ -250,7 +248,7 @@ function ApprovalActions({
 
   /**
    * ローカルセッション担当中の承認欄（#1903）。押しても走っているセッションには届かないため、
-   * ここでできるのは「記録を残す」「質問する」「確認待ちの印を片付ける」の3つだけ。
+   * ここでできるのは「記録を残す」「リモートセッションで聞く」「確認待ちの印を片付ける」の3つだけ。
    */
   async function submitLocalComment() {
     if (!onComment) return;
@@ -259,17 +257,6 @@ function ApprovalActions({
       return;
     }
     await onComment(text);
-    setText("");
-    setTextValidationError(null);
-  }
-
-  async function submitLocalQuestion() {
-    if (!onAskClaude) return;
-    if (!text.trim()) {
-      setTextValidationError("質問を入力してください");
-      return;
-    }
-    await onAskClaude(text);
     setText("");
     setTextValidationError(null);
   }
@@ -407,15 +394,10 @@ function ApprovalActions({
                 コメント
               </Button>
             )}
-            {onAskClaude && canAskClaude && (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={submitLocalQuestion}
-                disabled={busy || isTextUploading || !text.trim()}
-              >
-                <MessageCircleQuestion />
-                質問する
+            {onOpenRemoteSession && (
+              <Button variant="outline" size="sm" onClick={onOpenRemoteSession} disabled={busy}>
+                <TerminalSquare />
+                リモートセッションで聞く
               </Button>
             )}
             {onDismissCheckUser && (
@@ -559,7 +541,6 @@ export function CommentThread({
   sessionStatePending,
   localSession,
   sessionAlive,
-  canAskClaude,
   qaAnswerPending = false,
   mergeApprovalPending,
   hasPullRequestSection,
@@ -570,7 +551,7 @@ export function CommentThread({
   onReject,
   onWithdraw,
   onComment,
-  onAskClaude,
+  onOpenRemoteSession,
   onDismissCheckUser,
   onRequestContinuation,
   isApproving,
@@ -620,7 +601,7 @@ export function CommentThread({
         onReject={onReject}
         onWithdraw={onWithdraw}
         onComment={onComment}
-        onAskClaude={onAskClaude}
+        onOpenRemoteSession={onOpenRemoteSession}
         onDismissCheckUser={onDismissCheckUser}
         onRequestContinuation={onRequestContinuation}
         isApproving={isApproving}
@@ -634,7 +615,6 @@ export function CommentThread({
         sessionStatePending={sessionStatePending}
         localSession={localSession}
         sessionAlive={sessionAlive}
-        canAskClaude={canAskClaude}
         hasPullRequestSection={hasPullRequestSection}
         pullRequestStop={pullRequestStop}
         repositoryFullName={repositoryFullName}

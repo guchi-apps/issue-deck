@@ -14,7 +14,6 @@ import {
 } from "@/hooks/use-issue-draft";
 
 const emptyDraft: IssueDraft = {
-  kind: "issue",
   repositoryFullName: "",
   title: "",
   body: "",
@@ -84,7 +83,6 @@ describe("resolveInitialIssueDraft", () => {
 
   it("保存済みの下書きがあっても自動では復元せず空の状態を返す", () => {
     const draft: IssueDraft = {
-      kind: "issue",
       repositoryFullName: "owner/repo",
       title: "下書きタイトル",
       body: "下書き本文",
@@ -113,7 +111,6 @@ describe("resolveInitialIssueDraft", () => {
 
   it("defaultRepositoryFullNameが渡された場合は保存済み下書きのリポジトリより優先する", () => {
     const draft: IssueDraft = {
-      kind: "issue",
       repositoryFullName: "owner/draft-repo",
       title: "下書きタイトル",
       body: "下書き本文",
@@ -142,7 +139,6 @@ describe("readRestorableIssueDraft", () => {
 
   it("明示的なプリフィルがない場合は保存済みの下書きを返す", () => {
     const draft: IssueDraft = {
-      kind: "issue",
       repositoryFullName: "owner/repo",
       title: "下書きタイトル",
       body: "下書き本文",
@@ -165,7 +161,6 @@ describe("readRestorableIssueDraft", () => {
 
   it("defaultRepositoryFullNameのみが渡された場合は保存済みの下書きを返す", () => {
     const draft: IssueDraft = {
-      kind: "issue",
       repositoryFullName: "owner/draft-repo",
       title: "下書きタイトル",
       body: "下書き本文",
@@ -212,27 +207,22 @@ describe("useIssueDraftAutosave", () => {
 });
 
 /**
- * #1641。Issueと質問が同じフォームを共有するようになったため、下書きにも種別を持たせる。
- * 復元したときに、書いていたときの種別（質問なら質問）へ戻る必要がある。
+ * #5047。質問を廃止して下書きから種別（`kind`）を外した。#1641〜#5047の間に保存された下書きは
+ * `kind`を持っているが、質問として書いたものでもIssueの書きかけとして戻す。
  */
-describe("下書きの種別（#1641）", () => {
-  it("種別を保存して読み戻す", () => {
-    const draft: IssueDraft = { ...emptyDraft, kind: "question", body: "これは質問です" };
-    writeIssueDraft(draft);
-    expect(readIssueDraft()?.kind).toBe("question");
-  });
-
-  it("#1641以前に保存された（種別を持たない）下書きはIssueとして読む", () => {
+describe("種別を持っていた下書き（#1641〜#5047）", () => {
+  it("kindを捨ててIssueの下書きとして読む", () => {
     window.localStorage.setItem(
       "issue-create-draft",
       JSON.stringify({
+        kind: "question",
         repositoryFullName: "owner/repo",
-        title: "旧形式の下書き",
-        body: "",
+        title: "",
+        body: "これは質問です",
         selectedLabels: [],
         assignee: null,
       }),
     );
-    expect(readIssueDraft()).toEqual({ ...emptyDraft, repositoryFullName: "owner/repo", title: "旧形式の下書き" });
+    expect(readIssueDraft()).toEqual({ ...emptyDraft, repositoryFullName: "owner/repo", body: "これは質問です" });
   });
 });

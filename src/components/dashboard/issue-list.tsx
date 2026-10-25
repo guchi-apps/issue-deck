@@ -126,7 +126,6 @@ import {
   type ScheduledRunQueuedMap,
 } from "@/lib/nightly-run";
 import {
-  formatQuestionListCount,
   isQaAnswerWaiting,
   resolveQuestionState,
   type QuestionState,
@@ -868,7 +867,6 @@ export function IssueList({
     (view === "manual-step" && prerequisiteReadiness
       ? formatManualStepListCount(issues, prerequisiteReadiness, snoozedTotal)
       : null) ??
-    (view === "question" ? formatQuestionListCount(issues, listedCount, snoozedTotal) : null) ??
     formatCheckUserListCount(listedCount, checkUserRunningCount, snoozedTotal) ??
     `${listedCount}件`;
 

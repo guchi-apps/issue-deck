@@ -92,10 +92,7 @@ export async function POST(request: NextRequest) {
       typeof payload?.stashInput === "boolean" ? payload.stashInput : null,
     instructionCapable:
       typeof payload?.instruction === "boolean" ? payload.instruction : null,
-    // 横断質問セッション（#1454）を起こせるpollerだけが送ってくる。**未申告はnull＝非対応扱い**で、
-    // 横断質問ジョブを配らない（`sessionControl`・`instruction`と同じ向き）
-    crossRepoQuestionCapable:
-      typeof payload?.crossRepoQuestion === "boolean" ? payload.crossRepoQuestion : null,
+    // 横断質問（#1454）の申告`crossRepoQuestion`は撤去した（#5051）。古いpollerが送ってきても読まない
     // 手作業の代行実行（#1828）を実行できるpollerだけが送ってくる。**未申告はnull＝非対応扱い**。
     // `instruction`と分けるのは、あちらが走っているセッションの入力欄へ1行流すだけなのに対し、
     // こちらは**シェルでコマンドを実行する**ため、届いた先で起きることが違うから
@@ -139,7 +136,7 @@ export async function POST(request: NextRequest) {
     codexRemoteControlCapable:
       typeof payload?.codexRemoteControl === "boolean" ? payload.codexRemoteControl : null,
     // 手作業セッション（#2771）を起こせるpollerだけが送ってくる。**未申告はnull＝非対応扱い**
-    // （`crossRepoQuestion`と同じ向き。配ると未知の種別として`failed`になり、押した起動が失われる）
+    // （`instruction`と同じ向き。配ると未知の種別として`failed`になり、押した起動が失われる）
     manualStepSessionCapable:
       typeof payload?.manualStepSession === "boolean" ? payload.manualStepSession : null,
     // develop向けPRのAIレビュー（#3990）を実行できるpollerだけが送ってくる。**未申告はnull＝

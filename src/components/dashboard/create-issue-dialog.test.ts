@@ -3,7 +3,6 @@ import { describe, expect, it } from "vitest";
 import {
   groupRepositoriesByWorkflowStatus,
   mergeSuggestedLabels,
-  resolveKindRepository,
 } from "@/components/dashboard/create-issue-dialog";
 import { PLAN_REQUIRED_LABEL } from "@/lib/github/approval-labels";
 import type { ConnectedRepository } from "@/types/repository";
@@ -88,47 +87,5 @@ describe("groupRepositoriesByWorkflowStatus", () => {
       registered: [second, first],
       unregistered: [],
     });
-  });
-});
-
-/**
- * #1641。質問はGitHub Actions（mode=ask）が答えるため、`claude-issue-dispatch.yml`が
- * 導入済みのリポジトリでしか成立しない。
- */
-describe("resolveKindRepository", () => {
-  const configured = makeRepo({ fullName: "owner/configured", dispatchRunnable: true });
-  const notConfigured = makeRepo({ fullName: "owner/not-configured", dispatchRunnable: false });
-
-  it("Issueでは選択中のリポジトリをそのまま残す", () => {
-    expect(
-      resolveKindRepository("issue", [configured, notConfigured], "owner/not-configured"),
-    ).toBe("owner/not-configured");
-  });
-
-  /**
-   * #1884。リポジトリを人が決める形にした以上、種別を押しただけで選んでいないリポジトリが
-   * 入る経路は残さない（以前は導入済みの先頭1件を入れていた）。
-   */
-  it("質問へ切り替えたとき、ホスト未登録のリポジトリを選んでいたら未選択へ戻す", () => {
-    expect(
-      resolveKindRepository("question", [notConfigured, configured], "owner/not-configured"),
-    ).toBe("");
-  });
-
-  it("質問で選べるリポジトリを既に選んでいる場合は変えない", () => {
-    expect(resolveKindRepository("question", [configured, notConfigured], "owner/configured")).toBe(
-      "owner/configured",
-    );
-  });
-
-  it("質問で選べるリポジトリが1つも無ければ未選択にする", () => {
-    expect(resolveKindRepository("question", [notConfigured], "owner/not-configured")).toBe("");
-  });
-
-  /**
-   * #1733。種別を押しただけで1件目が入ると、選んでいないものを選んだように見える。
-   */
-  it("未選択のまま質問へ切り替えても未選択のままにする", () => {
-    expect(resolveKindRepository("question", [configured, notConfigured], "")).toBe("");
   });
 });

@@ -14,6 +14,10 @@ Claude Codeアプリへ移動する**。会話そのものはIssueDeckではな�
   （`remote-session-active-list.tsx`）。その下は従来のリポジトリ一覧
 - 起動中の一覧は、実行状況と同じ`useDispatchState`の`remoteSessions`を使う。横断質問の入口
   （ヘッダーのボタン・スマホ右下のボタン・専用ダイアログ）は同じ#4991で廃止した
+- **Issue詳細のコメント欄の「リモートセッションで聞く」**（#5047）: 廃止した「質問する」の代わり。
+  `openRemoteSessions(<Issueのリポジトリ>)`がクエリ`rsrepo`（`REMOTE_SESSION_REPOSITORY_PARAM`）を付けて
+  この画面を開き、そのリポジトリを選んだ状態にする（スマホは詳細シートまで開く）。**起動はしない**。
+  新規作成ダイアログで内容が質問だと判定されたときの提案（#1890）も同じ経路で開く
 
 ## 流れ
 

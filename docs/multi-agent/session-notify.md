@@ -402,8 +402,8 @@ Codexには`AskUserQuestion`とそのフックが無いため、#2579では同�
   タイムアウトも両方に掛ける——片方だけに付けると、付いていない方は既定の10分で打ち切られ、
   画面から答えられる時間が縮む
 - **効くのはissue-deckのセッションだけではない。** フック設定を書く`run-issue-session.sh`は
-  `generic-start-issue.sh`（他リポジトリのローカルセッション）と`start-cross-repo-question.sh`
-  （横断質問セッション）からも呼ばれる。どちらもissue-deckが見ているIssueから起動するので
+  `generic-start-issue.sh`（他リポジトリのローカルセッション）と`start-manual-step-session.sh`
+  （手作業セッション）からも呼ばれる。どちらもissue-deckが見ているIssueから起動するので
   パネルは出るが、**issue-deckに無いIssueで質問すると待ち時間ぶん誰も答えられない**
   （待ち切れば端末のフォームへ倒れる）。既定の12時間がここの上限でもある
 - **質問の中身はPush通知に載せない。** 通知はIssueの識別と「確認待ち」であることだけを出し、
@@ -1159,7 +1159,6 @@ Issue番号・リポジトリ名だけ（[codex.md](codex.md)）。
 | 実行されるもの | どこから |
 | --- | --- |
 | `start-issue.sh`・`generic-start-issue.sh` | 本体の作業ツリー（人が叩く入口なので、ここは変えられない） |
-| `start-cross-repo-question.sh` | 同期コピー（自分自身を実行し直す。#1583。作れなかった場合は本体の作業ツリー） |
 | `run-issue-session.sh` | 同期コピー（作れなかった場合は本体の作業ツリー） |
 | `session-notify.sh`・`scripts/lib/` | 同上（`run-issue-session.sh`が自分の`$SCRIPT_DIR`から読むため自動で揃う） |
 | プロンプトのひな形（`scripts/prompts/`） | 同上（セッションへそのまま渡るものなので同じ扱い） |

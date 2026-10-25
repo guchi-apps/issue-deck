@@ -20,17 +20,14 @@ import { useLocalSessionLaunch } from "@/hooks/use-local-session-launch";
 import type { ClaudeLocalModel, CodexLocalModel } from "@/lib/app-settings";
 import {
   ACTIONS_RUNNING_ENQUEUE_REASON,
-  describeCrossRepoQuestionRejection,
   describeDispatchEnqueueRejection,
   describeManualStepSessionRejection,
   findBlockingSession,
-  findCrossRepoQuestionJobForIssue,
   findDispatchJobForIssue,
   findManualStepSessionJobForIssue,
   isActionsRunInProgress,
   isActiveDispatchJobStatus,
   isDispatchAgentSelectable,
-  resolveCrossRepoQuestionRejection,
   resolveDispatchTargetRejection,
   resolveManualStepSessionRejection,
   type DispatchAgent,
@@ -67,12 +64,6 @@ const AGENT_MENU_LABELS: Readonly<Record<DispatchAgent, string>> = {
  *
  * **押せない理由は押す前に出し、ボタンごと消さない**（#1332の「停止」と同じ立場）。導線ごと
  * 消すと、なぜ復旧できないのか（サブPCが落ちている・もう起動済み）が画面から分からなくなる。
- *
- * **横断質問セッション（#1454）も復旧できる**（#3033）。ただし積むのは`LAUNCH`ではなく質問ジョブ
- * （`CROSS_REPO_QUESTION`）で、`11.local`は付けない（記録先の`question`リポジトリに無人実行は
- * 無く、実装のためのラベルでもない）。会話がcwd（質問Issue間で共有）に紐づくため`--continue`は
- * 使えない（#1648）が、ランチャーが質問Issueごとに控えたsessionIdで`--resume`する
- * （`scripts/run-issue-session.sh`）ので、issue-deck側はここでも「もう一度起動する」以上のことをしない。
  */
 export function SessionRecoveryButton({
   issue,
@@ -113,32 +104,20 @@ export function SessionRecoveryButton({
     onIssueUpdated,
   });
 
-  // 横断質問セッション（#1454）か。判定材料は、そのセッションを立てた質問ジョブ——終了した
-  // セッションの行と同じく24時間は画面に残るので、行が出ている間は必ず突き合わせられる
-  const questionJob = findCrossRepoQuestionJobForIssue(
-    dispatch.jobs,
-    issue.repositoryFullName,
-    issue.number,
-  );
-  const isQuestion = questionJob !== null;
-
   // 手作業Issue（#4231）。積むのは`LAUNCH`ではなく手作業セッションのジョブ
   const isManualStep = isManualStepIssue(issue.labels);
-  const recovery = describeSessionRecovery(session, {
-    isCrossRepoQuestion: isQuestion,
-    isManualStep,
-  });
+  const recovery = describeSessionRecovery(session, { isManualStep });
   // closedなIssueには起動する相手がいない（`StartLocalSessionButton`と同じ判定）
   const isAvailable =
     parseRepositoryFullName(issue.repositoryFullName) !== null && issue.state === "open";
 
   const host = dispatch.hosts.find((candidate) => candidate.name === session.host) ?? null;
   const job = findDispatchJobForIssue(dispatch.jobs, issue.repositoryFullName, issue.number);
-  // 未処理のジョブは、積む種別のものだけを見る（質問を積む導線が実装の起動ジョブに塞がれない）
+  // 未処理のジョブは、積む種別のものだけを見る（手作業セッションの導線が実装の起動ジョブに塞がれない）
   const manualJob = isManualStep
     ? findManualStepSessionJobForIssue(dispatch.jobs, issue.repositoryFullName, issue.number)
     : null;
-  const relevantJob = isQuestion ? questionJob : isManualStep ? manualJob : job;
+  const relevantJob = isManualStep ? manualJob : job;
   const hasActiveJob = relevantJob !== null && isActiveDispatchJobStatus(relevantJob.status);
   // 既に立ち上がり直している場合は積ませない（#1311と同じ判定）
   const blockingSession = findBlockingSession({
@@ -147,9 +126,6 @@ export function SessionRecoveryButton({
     repositoryFullName: issue.repositoryFullName,
     issueNumber: issue.number,
   });
-  const questionRejection = isQuestion
-    ? resolveCrossRepoQuestionRejection({ host, hasActiveJob, blockingSession })
-    : null;
   const manualRejection = isManualStep
     ? resolveManualStepSessionRejection({
         host,
@@ -160,7 +136,7 @@ export function SessionRecoveryButton({
       })
     : null;
   const launchRejection =
-    isQuestion || isManualStep
+    isManualStep
       ? null
       : resolveDispatchTargetRejection({
         host,
@@ -168,19 +144,17 @@ export function SessionRecoveryButton({
         hasActiveJob,
         blockingSession,
       });
-  const rejection = questionRejection ?? manualRejection ?? launchRejection;
+  const rejection = manualRejection ?? launchRejection;
 
   // Actionsが走っている間は復旧させない（#2032）。**ボタンごと消さず、理由を出して押せなく
   // する**——このコンポーネントは「なぜ復旧できないのかを画面から分かるようにする」ために
-  // 導線を残す方針で作られている（`rejection`の扱いと同じ）。質問セッションはActionsと
+  // 導線を残す方針で作られている（`rejection`の扱いと同じ）。手作業セッションはActionsと
   // 同じブランチを進める心配が無いので見ない
-  const actionsRunning = !isQuestion && !isManualStep && isActionsRunInProgress(actionsRun);
+  const actionsRunning = !isManualStep && isActionsRunInProgress(actionsRun);
 
   if (!recovery || !isAvailable) return null;
 
-  const rejectionMessage = questionRejection
-    ? describeCrossRepoQuestionRejection(questionRejection, { hostName: session.host })
-    : manualRejection
+  const rejectionMessage = manualRejection
       ? describeManualStepSessionRejection(manualRejection, { hostName: session.host })
       : launchRejection
       ? describeDispatchEnqueueRejection(launchRejection, {
@@ -194,15 +168,6 @@ export function SessionRecoveryButton({
   const textClassName = "w-full break-words text-xs text-muted-foreground text-left";
 
   function recover() {
-    if (isQuestion) {
-      void dispatch.enqueue({
-        repositoryFullName: issue.repositoryFullName,
-        issueNumber: issue.number,
-        hostName: session.host,
-        kind: "cross_repo_question",
-      });
-      return;
-    }
     if (isManualStep) {
       void dispatch.startManualStepSession({
         repositoryFullName: issue.repositoryFullName,
@@ -238,10 +203,8 @@ export function SessionRecoveryButton({
     void launch(session.host, agentChoice, model);
   }
 
-  // 横断質問セッションにはエージェント・モデルの概念が無いため出さない。それ以外は
   // そのホストがCodexに対応していると申告している場合だけCodexの選択肢も並べる
   // （`isDispatchAgentSelectable`と同じ判定。#2505）
-  const showModelMenu = !isQuestion;
   const canSelectAgent = isDispatchAgentSelectable(host);
 
   return (
@@ -256,83 +219,81 @@ export function SessionRecoveryButton({
         <Button
           variant={recovery.primary ? "default" : "outline"}
           size="sm"
-          className={cn("flex-1 sm:w-auto", showModelMenu && "rounded-r-none")}
+          className="flex-1 rounded-r-none sm:w-auto"
           disabled={isSubmitting || rejection !== null || actionsRunning}
           onClick={recover}
         >
           {isSubmitting ? <Loader2 className="animate-spin" /> : <RotateCcw />}
           セッションを復旧
         </Button>
-        {showModelMenu && (
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button
-                variant={recovery.primary ? "default" : "outline"}
-                size="sm"
-                className="rounded-l-none px-2"
-                disabled={isSubmitting || rejection !== null || actionsRunning}
-                aria-label="別のエージェント・モデルで復旧"
-              >
-                <ChevronDown />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-64">
-              <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">
-                別のエージェント・モデルで復旧（会話の続きから。別のエージェントは新しい会話）
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              variant={recovery.primary ? "default" : "outline"}
+              size="sm"
+              className="rounded-l-none px-2"
+              disabled={isSubmitting || rejection !== null || actionsRunning}
+              aria-label="別のエージェント・モデルで復旧"
+            >
+              <ChevronDown />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-64">
+            <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">
+              別のエージェント・モデルで復旧（会話の続きから。別のエージェントは新しい会話）
+            </DropdownMenuLabel>
+            {canSelectAgent && (
+              <DropdownMenuLabel className="text-xs">
+                {AGENT_MENU_LABELS.claude}
               </DropdownMenuLabel>
-              {canSelectAgent && (
+            )}
+            {MODEL_ENTRIES.map((entry) => (
+              <DropdownMenuItem
+                key={`claude-${entry.model}`}
+                className="flex-col items-start gap-0.5"
+                onSelect={() => recoverWith("claude", entry.model)}
+              >
+                <span className="font-medium">{entry.label}</span>
+                <span className="text-xs text-muted-foreground">{entry.fit}</span>
+              </DropdownMenuItem>
+            ))}
+            {canSelectAgent && (
+              <>
+                <DropdownMenuSeparator />
                 <DropdownMenuLabel className="text-xs">
-                  {AGENT_MENU_LABELS.claude}
+                  {AGENT_MENU_LABELS.codex}
                 </DropdownMenuLabel>
-              )}
-              {MODEL_ENTRIES.map((entry) => (
-                <DropdownMenuItem
-                  key={`claude-${entry.model}`}
-                  className="flex-col items-start gap-0.5"
-                  onSelect={() => recoverWith("claude", entry.model)}
-                >
-                  <span className="font-medium">{entry.label}</span>
-                  <span className="text-xs text-muted-foreground">{entry.fit}</span>
-                </DropdownMenuItem>
-              ))}
-              {canSelectAgent && (
-                <>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuLabel className="text-xs">
-                    {AGENT_MENU_LABELS.codex}
-                  </DropdownMenuLabel>
-                  {CODEX_MODEL_ENTRIES.map((entry) => (
-                    <DropdownMenuItem
-                      key={`codex-${entry.model}`}
-                      className="flex-col items-start gap-0.5"
-                      onSelect={() => recoverWith("codex", entry.model)}
-                    >
-                      <span className="font-medium">{entry.label}</span>
-                      <span className="text-xs text-muted-foreground">{entry.fit}</span>
-                    </DropdownMenuItem>
-                  ))}
-                </>
-              )}
-              {onHandoff && (
-                <>
-                  <DropdownMenuSeparator />
+                {CODEX_MODEL_ENTRIES.map((entry) => (
                   <DropdownMenuItem
+                    key={`codex-${entry.model}`}
                     className="flex-col items-start gap-0.5"
-                    onSelect={onHandoff}
+                    onSelect={() => recoverWith("codex", entry.model)}
                   >
-                    <span className="flex items-center gap-1.5 font-medium">
-                      <ArrowRightLeft className="size-3.5" />
-                      要約を引き継いで別のAIで続ける
-                    </span>
-                    <span className="text-xs text-muted-foreground">
-                      会話は新しく始め、直近のやり取りとブランチの状態を要約して渡す
-                    </span>
+                    <span className="font-medium">{entry.label}</span>
+                    <span className="text-xs text-muted-foreground">{entry.fit}</span>
                   </DropdownMenuItem>
-                </>
-              )}
-            </DropdownMenuContent>
-          </DropdownMenu>
-        )}
+                ))}
+              </>
+            )}
+            {onHandoff && (
+              <>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  className="flex-col items-start gap-0.5"
+                  onSelect={onHandoff}
+                >
+                  <span className="flex items-center gap-1.5 font-medium">
+                    <ArrowRightLeft className="size-3.5" />
+                    要約を引き継いで別のAIで続ける
+                  </span>
+                  <span className="text-xs text-muted-foreground">
+                    会話は新しく始め、直近のやり取りとブランチの状態を要約して渡す
+                  </span>
+                </DropdownMenuItem>
+              </>
+            )}
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
       {/* 押すと何が起きるかは常に出す。**畳まない。** 「復旧」だけでは、会話が続くのか
           最初からやり直すのかが読み取れず、押してよいか判断できない */}

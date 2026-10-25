@@ -334,6 +334,7 @@ describe("scaffoldCopies（issue-deckの実物をそのまま配る）", () => {
     expect(paths).toContain("scripts/update-env-file.sh");
     expect(paths).toContain("scripts/construct-database-url.sh");
     expect(paths).toContain(".github/scripts/signaly-notify.sh");
+    expect(paths).toContain(".github/scripts/discord-alert.sh");
   });
 
   it("sync-secrets.yml が読むスクリプトと対応表がそろう", () => {

@@ -8,12 +8,12 @@ import {
   ExternalLink,
   FilePlus2,
   Loader2,
-  MessageCircleQuestion,
   Clock,
   MoreHorizontal,
   Pencil,
   Play,
   RotateCcw,
+  TerminalSquare,
   Trash2,
   XCircle,
 } from "lucide-react";
@@ -117,10 +117,7 @@ import { resolveCheckUserGuidance } from "@/lib/github/check-user-guidance";
 import { CLOSE_REASON_LABELS } from "@/lib/github/issue-close";
 import { isPlanningPhaseSkipped } from "@/lib/github/planning-phase";
 import {
-  askClaudeCommentBody,
-  canAskClaude,
   canCloseAskRepoQuestion,
-  canContinueQuestionFromComposer,
   isQaAnswerPending,
   resolveComposerPrimaryAction,
 } from "@/lib/github/ask-claude";
@@ -164,6 +161,7 @@ import { useIssueCommentSummaries } from "@/hooks/use-issue-comment-summaries";
 import { useIssueArtifacts } from "@/hooks/use-issue-artifacts";
 import { useIssueComments } from "@/hooks/use-issue-comments";
 import { useNow } from "@/hooks/use-now";
+import { useReferenceNavigation } from "@/hooks/use-reference-navigation";
 import {
   findActiveIssueSnooze,
   type SnoozeMap,
@@ -476,6 +474,7 @@ export function MobileIssueDetail({
     error: commentMutationError,
     setError: setCommentMutationError,
   } = useIssueCommentMutations();
+  const { openRemoteSessions } = useReferenceNavigation();
   const [newCommentBody, setNewCommentBody] = useState("");
   // 計画レビューカードの「追加で修正したいこと」の下書き。承認欄の承認へ同梱する（#3852）
   const [planReviewAdditional, setPlanReviewAdditional] = useState("");
@@ -514,9 +513,6 @@ export function MobileIssueDetail({
     comments,
     newCommentBody.trim().length > 0,
   );
-  const composerPlaceholder = canContinueQuestionFromComposer(issue, comments)
-    ? "続けて質問する場合はここへ..."
-    : "コメントを追加...";
   // コードレビューIssue（#698）の結果。PC版（`issue-detail.tsx`）と同じ扱い
   const codeReview = isCodeReviewIssue(issue)
     ? {
@@ -631,9 +627,9 @@ export function MobileIssueDetail({
   }
 
   /** コメントを1件投稿し、一覧と件数へ反映する（PCのIssue詳細と同じ扱い） */
-  async function postComment(body: string, askQuestion = false): Promise<boolean> {
+  async function postComment(body: string): Promise<boolean> {
     const [owner, repo] = issue.repositoryFullName.split("/");
-    const created = await createComment({ owner, repo, number: issue.number, body, askQuestion });
+    const created = await createComment({ owner, repo, number: issue.number, body });
     if (!created) return false;
     setComments((prev) => [...prev, created]);
     onIssueUpdated({ ...issue, commentCount: issue.commentCount + 1 });
@@ -645,24 +641,14 @@ export function MobileIssueDetail({
     if (await postComment(newCommentBody)) setNewCommentBody("");
   }
 
-  async function handleAskClaudeFromComposer() {
-    if (!newCommentBody.trim()) return;
-    if (await postComment(askClaudeCommentBody(newCommentBody), true)) setNewCommentBody("");
-  }
-
-  /** `Ctrl`+`Enter`の宛先（#2345。PCのIssue詳細と同じ。クローズには割り当てない） */
-  async function handleSubmitPrimary() {
-    if (composerPrimaryAction === "question") await handleAskClaudeFromComposer();
-    else await handleCreateComment();
+  /** 「リモートセッションで聞く」（#5047。PCのIssue詳細と同じ） */
+  function handleOpenRemoteSession() {
+    openRemoteSessions(issue.repositoryFullName);
   }
 
   /** ローカルセッション担当中の承認欄から押せる3つ（#1903。PCのIssue詳細と同じ） */
   async function handleApprovalComment(body: string) {
     await postComment(body);
-  }
-
-  async function handleApprovalAskClaude(question: string) {
-    await postComment(askClaudeCommentBody(question), true);
   }
 
   async function handleDismissCheckUser(text?: string) {
@@ -811,11 +797,11 @@ export function MobileIssueDetail({
         )}
         {/* ヘッダーに残す操作は★と⋯だけにする（#1646）。以前は▶（実装を開始）と?（Claudeに
             質問する）も並べていたが、▶は本文の全幅ボタンと表示条件が同一（`canStartImplementation`）で
-            必ず二重になり、?は`canAskClaude`＝openなIssューすべてで常時居座るため、390px幅では
+            必ず二重になり、?はopenなIssueすべてで常時居座るため、390px幅では
             タイトルに120pxしか残らなかった。どちらも操作自体は消さず、▶は本文のボタンへ一本化し、
             ?と「回答を確認してクローズ」は下の⋯メニューへ移した（後者はコメント欄の下にも
-            出す。#1770）。その後、?（Claudeに質問する）はコメント欄の下の「質問する」と
-            投稿されるコメントが同一だったため、⋯メニューからも外した（#1913）。
+            出す。#1770）。その後、?（Claudeに質問する）は⋯メニューからも外し（#1913）、
+            質問機能そのものを#5047で廃止した。
             マージボタンはIssue単位ではなくPR単位の操作なので、対応PR一覧の各行に置いている（#1339） */}
         <DropdownMenu open={isMoreMenuOpen} onOpenChange={setIsMoreMenuOpen}>
           <DropdownMenuTrigger asChild>
@@ -1336,7 +1322,6 @@ export function MobileIssueDetail({
                 sessionStatePending={sessionStatePending}
                 localSession={!executionTarget.expectsActionsRun}
                 sessionAlive={sessionAlive}
-                canAskClaude={canAskClaude(issue)}
                 qaAnswerPending={qaAnswerPending}
                 mergeApprovalPending={mergeApprovalPending}
                 hasPullRequestSection={visiblePullRequestLinks.length > 0}
@@ -1347,7 +1332,7 @@ export function MobileIssueDetail({
                 onReject={handleReject}
                 onWithdraw={handleWithdraw}
                 onComment={handleApprovalComment}
-                onAskClaude={handleApprovalAskClaude}
+                onOpenRemoteSession={handleOpenRemoteSession}
                 onDismissCheckUser={handleDismissCheckUser}
                 onRequestContinuation={handleRequestContinuation}
                 isApproving={isSubmitting}
@@ -1366,7 +1351,7 @@ export function MobileIssueDetail({
                   <LocalSessionCommentNotice session={issueSession} />
                 )}
                 <MentionTextarea
-                  placeholder={composerPlaceholder}
+                  placeholder="コメントを追加..."
                   className="min-h-20"
                   value={newCommentBody}
                   onChange={setNewCommentBody}
@@ -1377,7 +1362,7 @@ export function MobileIssueDetail({
                   onKeyDown={(e) => {
                     if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
                       e.preventDefault();
-                      handleSubmitPrimary();
+                      handleCreateComment();
                     }
                   }}
                 />
@@ -1389,21 +1374,13 @@ export function MobileIssueDetail({
                       引き継いでIssueを作成
                     </Button>
                   )}
-                  {/* ⋯メニューの「Claudeに質問する」を畳んだぶん、ダイアログが出していた説明を
-                      ここへ引き継ぐ（#1913） */}
-                  {canAskClaude(issue) && (
-                    <Button
-                      variant={composerPrimaryAction === "question" ? "default" : "outline"}
-                      title="入力した内容をClaudeへの質問として投稿します。コードは変更されません。回答はコメントとして返るまで数十秒〜数分かかります。"
-                      onClick={handleAskClaudeFromComposer}
-                      disabled={!newCommentBody.trim() || isCommentSubmitting || isImageUploading}
-                    >
-                      <MessageCircleQuestion />
-                      質問する
-                    </Button>
-                  )}
-                  {/* PC側と同じ理由で、質問Issueでは「コメント」を主ボタンにせず（#1770）、
-                      枠なしまで沈める（#2345） */}
+                  {/* 廃止した「質問する」（#5047）の代わり。PC側と同じ */}
+                  <Button variant="outline" onClick={handleOpenRemoteSession}>
+                    <TerminalSquare />
+                    リモートセッションで聞く
+                  </Button>
+                  {/* PC側と同じ理由で、回答を確認してクローズが主のときは「コメント」を
+                      枠なしまで沈める（#1770・#2345） */}
                   <Button
                     variant={composerPrimaryAction === "comment" ? "default" : "ghost"}
                     onClick={handleCreateComment}
@@ -1414,7 +1391,7 @@ export function MobileIssueDetail({
                   </Button>
                   {/* 回答を読み終えた位置に出口を置く（#1770）。スマホでは同じ操作が⋯メニューの
                       奥にしかなく、開き直さないと終えられなかった。書きかけがあるときは主ボタンを
-                      「質問する」へ譲る（#2345） */}
+                      「コメント」へ譲る（#2345） */}
                   {canCloseQuestion && (
                     <Button
                       variant={composerPrimaryAction === "close" ? "default" : "outline"}

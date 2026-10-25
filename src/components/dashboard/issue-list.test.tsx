@@ -282,7 +282,7 @@ describe("質問Issueの状態ラベル（#1796）", () => {
   }
 
   it("回答が届いていて未読なら「未確認」、まだ回答が来ていなければ「回答待ち」を出す", () => {
-    renderList({ issues: questions, view: "question", showHeader: true });
+    renderList({ issues: questions, view: "all", showHeader: true });
 
     expect(questionRow(10).textContent).toContain("未確認");
     expect(questionRow(11).textContent).toContain("回答待ち");
@@ -296,7 +296,7 @@ describe("質問Issueの状態ラベル（#1796）", () => {
     expect(rowOf(20).textContent).not.toContain("未確認");
   });
 
-  // 「質問する」はIssue詳細のコメント欄にもあり、通常のIssueも回答待ちになる（#2309）
+  // 廃止前の「質問する」はIssue詳細のコメント欄にもあり、通常のIssueも回答待ちになっていた（#2309）
   it("質問Issueでなくても、進捗バッジが出ない行なら「回答待ち」を出す", () => {
     renderList({
       issues: [makeIssue({ number: 21, qaAnswerPendingAt: "2026-08-16T00:00:00Z" })],
@@ -326,24 +326,11 @@ describe("質問Issueの状態ラベル（#1796）", () => {
 
   // 待っているのは処理なので回す。未確認（人が読む番）は回さない（#2309）
   it("回答待ちだけ回るアイコンを添える", () => {
-    renderList({ issues: questions, view: "question", showHeader: true });
+    renderList({ issues: questions, view: "all", showHeader: true });
 
     expect(questionRow(11).querySelector(".animate-spin")).not.toBeNull();
     expect(questionRow(10).querySelector(".animate-spin")).toBeNull();
     expect(questionRow(12).querySelector(".animate-spin")).toBeNull();
-  });
-
-  // 左メニューの数字は総数のままなので、内訳はここでしか読めない
-  it("質問ビューのヘッダーに未確認の件数を添える", () => {
-    renderList({ issues: questions, view: "question", showHeader: true });
-
-    expect(screen.getByText("3件・未確認1件")).toBeTruthy();
-  });
-
-  it("未確認が無ければヘッダーは従来どおりの件数だけにする", () => {
-    renderList({ issues: [questions[2]], view: "question", showHeader: true });
-
-    expect(screen.getByText("1件")).toBeTruthy();
   });
 });
 

@@ -10,7 +10,6 @@ const NOW = 1_760_000_000_000;
 
 function makeHandoff(overrides: Partial<IssueCreateHandoff> = {}): IssueCreateHandoff {
   return {
-    kind: "issue",
     repositoryFullName: "guchi-apps/issue-deck",
     title: "別ウィンドウで開けるようにする",
     body: "一覧を見ながら書きたい",
@@ -45,7 +44,6 @@ describe("parseIssueCreateHandoff", () => {
       NOW,
     );
     expect(parsed).toEqual({
-      kind: "issue",
       repositoryFullName: "",
       title: "",
       body: "",

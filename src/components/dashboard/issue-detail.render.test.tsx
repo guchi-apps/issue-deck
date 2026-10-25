@@ -8,7 +8,6 @@ import { MobileIssueDetail } from "@/components/dashboard/mobile/mobile-issue-de
 import type { DispatchHostView, DispatchJobView } from "@/lib/dispatch/dispatch-job";
 import type { DispatchSessionView } from "@/lib/dispatch/session-state";
 import {
-  CROSS_REPO_QUESTION_MARKER,
   QA_ANSWER_MARKER,
   QUESTION_COMMENT_MARKER,
 } from "@/lib/github/ask-claude";
@@ -116,6 +115,10 @@ const mergeMutation = {
 };
 
 vi.mock("@/hooks/use-issue-comments", () => ({ useIssueComments: () => commentsState }));
+const openRemoteSessions = vi.hoisted(() => vi.fn());
+vi.mock("@/hooks/use-reference-navigation", () => ({
+  useReferenceNavigation: () => ({ openIssue: vi.fn(), openPullRequest: vi.fn(), openRemoteSessions }),
+}));
 vi.mock("@/hooks/use-issue-sub-issues", () => ({ useIssueSubIssues: () => subIssues }));
 vi.mock("@/hooks/use-manual-step-prerequisites", () => ({
   useManualStepPrerequisites: () => manualStepPrerequisites,
@@ -260,10 +263,9 @@ function renderMobileDetail(
   return render(mobileDetailElement(issue, overrides));
 }
 
-/** コメント入力欄そのもの。質問Issueではプレースホルダが変わる（#2345） */
+/** コメント入力欄そのもの */
 function composerTextarea(): HTMLTextAreaElement {
-  return screen.getByPlaceholderText(/コメントを追加\.\.\.|続けて質問する場合はここへ\.\.\./) as
-    HTMLTextAreaElement;
+  return screen.getByPlaceholderText("コメントを追加...") as HTMLTextAreaElement;
 }
 
 /** コメント入力欄と同じブロックにあるボタンだけを見る（ヘッダーの同名ボタンと区別する） */
@@ -369,78 +371,45 @@ describe("IssueDetailのコメント欄の下の操作列（#1770・#2345）", (
   it("入力が空なら、クローズが主ボタンで「コメント」は枠なしまで沈む", () => {
     renderDetail(buildIssue());
     expect(variantOf("回答を確認してクローズ")).toBe("default");
-    expect(variantOf("質問する")).toBe("outline");
+    expect(variantOf("リモートセッションで聞く")).toBe("outline");
     expect(variantOf("コメント")).toBe("ghost");
   });
 
-  it("入力があれば、主ボタンが「質問する」へ移りクローズは枠線へ下がる", () => {
+  it("入力があれば、主ボタンが「コメント」へ移りクローズは枠線へ下がる", () => {
     renderDetail(buildIssue());
     typeDraft("その場合、`11.local`が付いたままだとどうなりますか？");
-    expect(variantOf("質問する")).toBe("default");
+    expect(variantOf("コメント")).toBe("default");
     expect(variantOf("回答を確認してクローズ")).toBe("outline");
-    expect(variantOf("コメント")).toBe("ghost");
   });
 
   it("空白だけの入力では主ボタンが移らない", () => {
     renderDetail(buildIssue());
     typeDraft("   ");
     expect(variantOf("回答を確認してクローズ")).toBe("default");
-    expect(variantOf("質問する")).toBe("outline");
   });
 
   it("通常のIssueでは出ず、「コメント」が主ボタンのまま", () => {
     renderDetail(buildIssue({ title: "ログイン画面のレイアウトを見直す" }));
     expect(within(composer()).queryByRole("button", { name: "回答を確認してクローズ" })).toBeNull();
     expect(variantOf("コメント")).toBe("default");
-    expect(variantOf("質問する")).toBe("outline");
   });
 
-  it("回答待ち（最後が質問コメント）ではクローズが出ず、「質問する」が主ボタンになる", () => {
+  it("回答待ち（最後が質問コメント）ではクローズが出ず、「コメント」が主ボタン", () => {
     commentsState.comments = [comments[0]];
     try {
       renderDetail(buildIssue());
       expect(
         within(composer()).queryByRole("button", { name: "回答を確認してクローズ" }),
       ).toBeNull();
-      expect(variantOf("質問する")).toBe("default");
-      expect(variantOf("コメント")).toBe("ghost");
+      expect(variantOf("コメント")).toBe("default");
     } finally {
       commentsState.comments = comments;
     }
-  });
-
-  /**
-   * 横断質問Issue（#1454）は`[質問] `タイトルを持つが、記録先にコメントを拾う無人実行が無い。
-   * 「質問する」を主ボタンにすると、押した人が回答も出口も失う（#2345）。
-   */
-  it("横断質問Issueでは、入力があっても主ボタンが「質問する」へ移らない", () => {
-    commentsState.comments = [
-      { ...comments[0], body: `横断の質問\n\n${QUESTION_COMMENT_MARKER}\n${CROSS_REPO_QUESTION_MARKER}` },
-      comments[1],
-    ];
-    try {
-      renderDetail(buildIssue());
-      typeDraft("続きの質問です");
-      expect(variantOf("回答を確認してクローズ")).toBe("default");
-      expect(variantOf("質問する")).toBe("outline");
-      expect(composerTextarea().placeholder).toBe("コメントを追加...");
-    } finally {
-      commentsState.comments = comments;
-    }
-  });
-
-  it("質問Issueでは入力欄のプレースホルダが「続けて質問する場合はここへ...」になる", () => {
-    renderDetail(buildIssue());
-    expect(composerTextarea().placeholder).toBe("続けて質問する場合はここへ...");
-    cleanup();
-    renderDetail(buildIssue({ title: "ログイン画面のレイアウトを見直す" }));
-    expect(composerTextarea().placeholder).toBe("コメントを追加...");
   });
 });
 
 /**
- * `Ctrl`+`Enter`は、そのとき主ボタンになっている投稿操作へ届かせる（#2345）。
- * **クローズには割り当てない**ので、クローズが主のときはコメントとして投稿される。
+ * `Ctrl`+`Enter`は常に「コメント」（#2345）。**クローズには割り当てない。** 質問の送信は#5047で廃止した。
  */
 describe("IssueDetailのコメント欄のCtrl+Enter（#2345）", () => {
   afterEach(() => commentMutations.createComment.mockReset());
@@ -449,30 +418,23 @@ describe("IssueDetailのコメント欄のCtrl+Enter（#2345）", () => {
     fireEvent.keyDown(composerTextarea(), { key: "Enter", ctrlKey: true });
   }
 
-  it("質問Issueで入力があるときは、質問コメントとして投稿する", () => {
+  it("質問Issueでも、ふつうのコメントとして投稿する", () => {
     renderDetail(buildIssue());
     typeDraft("続きの質問です");
     pressCtrlEnter();
-    const body = commentMutations.createComment.mock.calls[0][0].body as string;
-    expect(body).toContain(QUESTION_COMMENT_MARKER);
-    expect(body).toContain("続きの質問です");
+    expect(commentMutations.createComment.mock.calls[0][0]).toEqual(
+      expect.objectContaining({ body: "続きの質問です" }),
+    );
+    expect(commentMutations.createComment.mock.calls[0][0]).not.toHaveProperty("askQuestion");
   });
 
-  it("通常のIssueでは、ふつうのコメントとして投稿する", () => {
-    renderDetail(buildIssue({ title: "ログイン画面のレイアウトを見直す" }));
-    typeDraft("ふつうのコメント");
-    pressCtrlEnter();
-    const body = commentMutations.createComment.mock.calls[0][0].body as string;
-    expect(body).toBe("ふつうのコメント");
-    expect(body).not.toContain(QUESTION_COMMENT_MARKER);
-  });
-
-  it("PCとスマホで宛先が揃う", () => {
+  it("スマホも同じ", () => {
     renderMobileDetail(buildIssue());
     typeDraft("スマホから続きの質問です");
     pressCtrlEnter();
     const body = commentMutations.createComment.mock.calls[0][0].body as string;
-    expect(body).toContain(QUESTION_COMMENT_MARKER);
+    expect(body).toBe("スマホから続きの質問です");
+    expect(body).not.toContain(QUESTION_COMMENT_MARKER);
   });
 });
 
@@ -487,10 +449,10 @@ describe("MobileIssueDetailのコメント欄の下の操作列（#1770・#2345�
     expect(variantOf("コメント")).toBe("ghost");
   });
 
-  it("入力があれば、主ボタンが「質問する」へ移る（PCと同じ）", () => {
+  it("入力があれば、主ボタンが「コメント」へ移る（PCと同じ）", () => {
     renderMobileDetail(buildIssue());
     typeDraft("続きの質問です");
-    expect(variantOf("質問する")).toBe("default");
+    expect(variantOf("コメント")).toBe("default");
     expect(variantOf("回答を確認してクローズ")).toBe("outline");
   });
 
@@ -559,7 +521,6 @@ describe("GitHub Actionsが走っているIssueの起動ボタン（#2032）", (
     lastSeenAt: "2026-08-20T00:00:00.000Z",
     sessionControlCapable: true,
     instructionCapable: true,
-    crossRepoQuestionCapable: true,
     manualStepCapable: true,
     manualStepAbortCapable: null,
     manualStepValuesCapable: null,
@@ -797,24 +758,25 @@ describe("確認待ちの案内が出るタイミング（#1810）", () => {
 });
 
 /**
- * 質問の導線をコメント欄の下の「質問する」へ一本化した（#1913）。ヘッダーの
- * 「Claudeに質問する」は投稿されるコメントが同一で、押した結果が変わらなかった
+ * 質問の送信は#5047で廃止し、コメント欄の下の「質問する」を「リモートセッションで聞く」へ
+ * 置き換えた。押すとそのIssueのリポジトリを選んだ状態でリモートセッション画面を開く
  */
-describe("質問の導線（#1913）", () => {
-  it("ヘッダーに「Claudeに質問する」は出ない", () => {
+describe("リモートセッションで聞く（#5047）", () => {
+  afterEach(() => openRemoteSessions.mockReset());
+
+  it("PCは「質問する」を出さず、押すとIssueのリポジトリでリモートセッション画面を開く", () => {
     renderDetail(buildIssue());
     expect(screen.queryByRole("button", { name: "Claudeに質問する" })).toBeNull();
+    expect(within(composer()).queryByRole("button", { name: "質問する" })).toBeNull();
+    fireEvent.click(within(composer()).getByRole("button", { name: "リモートセッションで聞く" }));
+    expect(openRemoteSessions).toHaveBeenCalledWith(repository.fullName);
   });
 
-  it("コメント欄の下の「質問する」は残る", () => {
-    renderDetail(buildIssue());
-    expect(within(composer()).getByRole("button", { name: "質問する" })).toBeTruthy();
-  });
-
-  it("スマホも同じ（⋯メニューから消し、コメント欄の下だけに残す）", () => {
+  it("スマホも同じ", () => {
     renderMobileDetail(buildIssue());
-    expect(screen.queryByText("Claudeに質問する")).toBeNull();
-    expect(within(composer()).getByRole("button", { name: "質問する" })).toBeTruthy();
+    expect(within(composer()).queryByRole("button", { name: "質問する" })).toBeNull();
+    fireEvent.click(within(composer()).getByRole("button", { name: "リモートセッションで聞く" }));
+    expect(openRemoteSessions).toHaveBeenCalledWith(repository.fullName);
   });
 });
 

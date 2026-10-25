@@ -19,7 +19,6 @@ function host(overrides: Partial<DispatchHostView> = {}): DispatchHostView {
     lastSeenAt: new Date(NOW.getTime() - 20_000).toISOString(),
     sessionControlCapable: true,
     instructionCapable: true,
-    crossRepoQuestionCapable: true,
     manualStepCapable: null,
     manualStepAbortCapable: null,
     manualStepValuesCapable: null,

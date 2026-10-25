@@ -1,23 +1,16 @@
 import { isFallbackNoticeComment } from "@/lib/github/fallback-notice";
 import type { Issue, IssueComment } from "@/types/issue";
 
-/** 新しい質問はこのマーカーで識別し、起動先はコメントAPIが決める。 */
+/**
+ * リポジトリへの質問機能（#691・#1641）は#5047で廃止し、聞きたいことはリモートセッションで聞く形にした。
+ * **このファイルに残っているのは、過去に作られた質問Issue・質問コメント・回答コメントを読むための判定だけ。**
+ * 質問を新しく投稿する経路（本文の組み立て・送信）はもう無い。
+ */
+
+/** 質問コメントの目印 */
 export const QUESTION_COMMENT_MARKER = "<!-- issue-deck-question -->";
 /** 過去に投稿されたActions向け質問を読むためだけに残す。 */
 export const ASK_CLAUDE_COMMENT_PREFIX = "@claude 質問: ";
-
-export function askClaudeCommentBody(question: string): string {
-  return `${question.trim()}\n\n${QUESTION_COMMENT_MARKER}`;
-}
-
-/**
- * 「質問する」ボタンは、実装状況によらずopenなissueであればいつでも
- * 表示する（コード変更を伴わない読み取り専用の質問のため、実装中・承認待ち等の
- * 状態を問わず利用できる）。
- */
-export function canAskClaude(issue: Pick<Issue, "state">): boolean {
-  return issue.state === "open";
-}
 
 /**
  * claude-issue-dispatch.ymlが質問への回答コメントを投稿する際に末尾へ付与するマーカー
@@ -73,14 +66,6 @@ export function isQaAnswerPending(comments: Pick<IssueComment, "body">[]): boole
  */
 export const CROSS_REPO_QUESTION_MARKER = "<!-- issue-deck-cross-repo-question -->";
 
-/**
- * 横断質問のコメント本文を組み立てる。**Actionsを起こさない形**（`trigger: "none"`）に
- * 横断質問のマーカーを足したもの。
- */
-export function crossRepoQuestionCommentBody(question: string): string {
-  return `${askClaudeCommentBody(question)}\n${CROSS_REPO_QUESTION_MARKER}`;
-}
-
 /** 指定したコメントが横断質問（#1454）かどうかを判定する */
 export function isCrossRepoQuestionComment(comment: Pick<IssueComment, "body">): boolean {
   return comment.body.includes(CROSS_REPO_QUESTION_MARKER);
@@ -99,57 +84,10 @@ export function isCrossRepoQuestionIssue(comments: Pick<IssueComment, "body">[])
 }
 
 /**
- * 横断質問Issueの既定の置き場所として探すリポジトリ名（#1454）。
- *
- * **`owner`は問わず、リポジトリ名だけで探す。** 質問Issueが実装対象のリポジトリへ混ざると、
- * そのリポジトリのIssue一覧・カンバンが質問で埋まるため、専用リポジトリを既定にしている。
- * 設定値（AppSetting・環境変数）を増やさないのは、**リポジトリを作って連携した時点で
- * 自動的に既定になる**ようにするため。
- */
-export const CROSS_REPO_QUESTION_REPOSITORY_NAME = "question";
-
-/**
- * 横断質問Issueの記録先として既定で選ぶリポジトリを決める（#1454）。
- *
- * 名前が`question`のリポジトリがあればそれ、無ければ`fallback`（呼び出し元が渡す従来の既定＝
- * 選択中のリポジトリか一覧の先頭）。**`question`リポジトリが未作成でも機能そのものは動く**
- * ようにするためのフォールバックで、リポジトリ名をもう1つハードコードはしない。
- */
-export function resolveCrossRepoQuestionRepository(
-  repositoryFullNames: readonly string[],
-  fallback: string | null,
-): string | null {
-  const preferred = repositoryFullNames.find(
-    (fullName) => fullName.split("/")[1] === CROSS_REPO_QUESTION_REPOSITORY_NAME,
-  );
-  return preferred ?? fallback;
-}
-
-/**
  * 質問フローがIssueタイトルに付与する接頭辞。
  * このタイトルを持つIssueかどうかで、質問フロー由来のIssueかを判定する（#885）。
  */
 export const ASK_REPO_QUESTION_TITLE_PREFIX = "[質問] ";
-
-/** 質問文から機械的に組み立てるIssueタイトルの、接頭辞を除いた最大長 */
-const ASK_REPO_QUESTION_TITLE_MAX_LENGTH = 40;
-
-/**
- * 質問文からIssueタイトルを機械的に生成する（Claudeによる自動生成は行わない）。
- * 改行・連続空白は1つの半角スペースにまとめ、長い質問は末尾を省略記号で丸める。
- *
- * **単一リポジトリへの質問（新規作成ダイアログの「質問」種別・#1641）と過去の横断質問
- * （#1454。ダイアログは#4991で廃止）で共有する。** どちらも同じ接頭辞で作られた質問Issueとして
- * `isAskRepoQuestionIssue`に拾われる必要があるため、生成はここ1か所に置く。
- */
-export function buildAskRepoQuestionTitle(question: string): string {
-  const normalized = question.trim().replace(/\s+/g, " ");
-  const truncated =
-    normalized.length > ASK_REPO_QUESTION_TITLE_MAX_LENGTH
-      ? `${normalized.slice(0, ASK_REPO_QUESTION_TITLE_MAX_LENGTH)}…`
-      : normalized;
-  return `${ASK_REPO_QUESTION_TITLE_PREFIX}${truncated}`;
-}
 
 /**
  * 上記接頭辞の**旧形式**（#1514で`[質問] `へ変更する前のもの）。
@@ -185,50 +123,22 @@ export function canCloseAskRepoQuestion(
 }
 
 /** コメント入力欄の下の操作列で、主ボタン（塗りつぶし）を持つ操作（#2345） */
-export type ComposerPrimaryAction = "question" | "comment" | "close";
+export type ComposerPrimaryAction = "comment" | "close";
 
 /**
  * コメント入力欄の下の操作列で、どれを主ボタンにするかを決める（#2345）。
  *
- * **主ボタンは固定せず、入力欄が空かどうかで「いま人がやろうとしていること」に付け替える。**
- * 従来は質問Issueなら常にクローズが主で（#1770）、続きを聞きたい人にも話を終える操作が
- * いちばん強く見えていた。空なら回答を読み終えた人なので用事はクローズ、書きかけがあるなら
- * 会話の途中なので用事は次の質問、と読み替える。
+ * 回答を読み終えた過去の質問Issueで入力欄が空なら、用事はクローズなので「回答を確認して
+ * クローズ」を主にする。書きかけがあるか、質問Issueでなければ「コメント」が主。
+ * 質問の送信は#5047で廃止したため、`question`を主にすることはもう無い。
  *
- * `Ctrl`+`Enter`の宛先もこの判定に合わせる（`close`のときは投稿操作の`comment`へ倒す）。
- * **クローズをキーボードショートカットに割り当ててはいけない。**
- *
- * 質問Issueでない場合と、closeしたIssue（「質問する」ボタンが出ない）では従来どおり
- * `comment`が主。
- *
- * **横断質問Issue（#1454）でも`question`を主にしない。** 記録先（既定は`guchi-apps/question`）は
- * コメントを拾う無人実行を持たず、答えるのはサブPCの質問セッションで、追い質問は追加指示
- * （#1012）で送る。それでも「質問する」を押すと`@claude 質問: `コメントが積まれ、誰も答えない
- * まま`isQaAnswerPending`が立ち続けて**「回答を確認してクローズ」が二度と出なくなる**ため、
- * 強調と`Ctrl`+`Enter`の宛先からは外す（ボタン自体は従来どおり残す）。
+ * `Ctrl`+`Enter`の宛先は常に投稿操作の`comment`。**クローズをキーボードショートカットに
+ * 割り当ててはいけない。**
  */
 export function resolveComposerPrimaryAction(
   issue: Pick<Issue, "state" | "title">,
   comments: Pick<IssueComment, "body">[],
   hasDraft: boolean,
 ): ComposerPrimaryAction {
-  if (!isAskRepoQuestionIssue(issue) || !canAskClaude(issue)) return "comment";
-  if (isCrossRepoQuestionIssue(comments)) {
-    return canCloseAskRepoQuestion(issue, comments) ? "close" : "comment";
-  }
-  if (hasDraft) return "question";
-  return canCloseAskRepoQuestion(issue, comments) ? "close" : "question";
-}
-
-/**
- * 入力欄のプレースホルダで「続けて質問する場所」だと案内してよいか（#2345）。
- * `resolveComposerPrimaryAction`が`question`を主にし得るIssueと同じ範囲にする。
- */
-export function canContinueQuestionFromComposer(
-  issue: Pick<Issue, "state" | "title">,
-  comments: Pick<IssueComment, "body">[],
-): boolean {
-  return (
-    isAskRepoQuestionIssue(issue) && canAskClaude(issue) && !isCrossRepoQuestionIssue(comments)
-  );
+  return !hasDraft && canCloseAskRepoQuestion(issue, comments) ? "close" : "comment";
 }

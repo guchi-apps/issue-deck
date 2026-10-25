@@ -21,7 +21,6 @@ function makeHost(overrides: Partial<DispatchHostView> = {}): DispatchHostView {
     lastSeenAt: NOW.toISOString(),
     sessionControlCapable: true,
     instructionCapable: true,
-    crossRepoQuestionCapable: true,
     manualStepCapable: null,
     manualStepAbortCapable: null,
     manualStepValuesCapable: null,

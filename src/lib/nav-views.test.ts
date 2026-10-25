@@ -13,15 +13,14 @@ import {
   sidebarAttentionNavViews,
   sidebarCodeReviewNavViews,
   sidebarIssueNavViews,
-  sidebarQuestionNavViews,
 } from "@/lib/nav-views";
 
 describe("navViews", () => {
-  it("「質問」「コードレビュー」は手作業と未着手のあいだに並ぶ（#1514・#698）", () => {
+  it("「コードレビュー」は手作業と未着手のあいだに並ぶ（#698。「質問」は#5047で廃止）", () => {
     const ids = navViews.map((view) => view.id);
+    expect(ids).not.toContain("question");
     expect(ids.slice(ids.indexOf("manual-step"), ids.indexOf("not-started") + 1)).toEqual([
       "manual-step",
-      "question",
       "code-review",
       "not-started",
     ]);
@@ -37,7 +36,6 @@ describe("スマホの一覧に並べるビュー（#1645）", () => {
       "release-pending",
       "check-user",
       "manual-step",
-      "question",
       "code-review",
     ]);
   });
@@ -70,10 +68,6 @@ describe("左メニューのグループ（#1613）", () => {
     expect(sidebarAttentionNavViews.map((view) => view.id)).toEqual(["check-user", "manual-step"]);
   });
 
-  it("質問は要対応にもIssueにも入れない", () => {
-    expect(sidebarQuestionNavViews.map((view) => view.id)).toEqual(["question"]);
-  });
-
   // Pull Requestの枠の下・リポジトリの枠の上に置く（#2674）
   it("コードレビューは要対応にもIssueにも入れない", () => {
     expect(sidebarCodeReviewNavViews.map((view) => view.id)).toEqual(["code-review"]);
@@ -100,10 +94,6 @@ describe("getNavViewDefaultState", () => {
     expect(getNavViewDefaultState("all")).toBe("open");
     expect(getNavViewDefaultState("recently-added")).toBe("open");
     expect(getNavViewDefaultState("recently-merged")).toBe("all");
-  });
-
-  it("質問ビューは「完了していない質問」を出すためopen（#1514）", () => {
-    expect(getNavViewDefaultState("question")).toBe("open");
   });
 
   it("コードレビュービューも他のビューと同じくopen（#3141）", () => {
@@ -189,12 +179,11 @@ describe("getAdjacentNavViewId", () => {
 
 // #1750: リポジトリ横断で全体を見るビューは、ユーザーの絞り込みを適用しない
 describe("navViewIgnoresIssueFilters", () => {
-  it("要対応の2つと質問・コードレビューだけが対象になる", () => {
+  it("要対応の2つとコードレビューだけが対象になる", () => {
     const ignored = navViews.filter((view) => navViewIgnoresIssueFilters(view.id));
     expect(ignored.map((view) => view.id)).toEqual([
       "check-user",
       "manual-step",
-      "question",
       "code-review",
     ]);
   });
@@ -202,7 +191,6 @@ describe("navViewIgnoresIssueFilters", () => {
   it("左メニュー最上段（要対応）はすべて対象（画像の並びと揃える）", () => {
     for (const view of [
       ...sidebarAttentionNavViews,
-      ...sidebarQuestionNavViews,
       ...sidebarCodeReviewNavViews,
     ]) {
       expect(navViewIgnoresIssueFilters(view.id)).toBe(true);

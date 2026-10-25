@@ -4,7 +4,6 @@ import {
   GitMerge,
   Inbox,
   ListChecks,
-  MessageCircleQuestionMark,
   PlayCircle,
   Rocket,
   UserCheck,
@@ -35,16 +34,11 @@ export type NavView = {
    * 判定は`resolveProgressStatus`（＝Project Status）を通す（#991 Phase 5）。
    */
   statuses?: readonly ProgressStatusKey[];
-  /**
-   * 質問Issue（`isAskRepoQuestionIssue`）だけに絞り込むビューかどうか（#1514）。
-   * 質問であることはラベルにもStatusにも現れないため、専用の条件にしている。
-   */
-  questionOnly?: boolean;
-  /** 質問Issueを除外するビューかどうか（#1514） */
+  /** 過去の質問Issue（`isAskRepoQuestionIssue`）を除外するビューかどうか（#1514） */
   excludeQuestions?: boolean;
   /**
    * コードレビューIssue（`isCodeReviewIssue`）だけに絞り込むビューかどうか（#698）。
-   * 質問と同じく、レビューであることはラベルにもStatusにも現れない。
+   * レビューであることはラベルにもStatusにも現れない。
    */
   codeReviewOnly?: boolean;
   /** コードレビューIssueを除外するビューかどうか（#698） */
@@ -76,11 +70,11 @@ export type NavView = {
    * 適用しないビューかどうか（#1750）。
    *
    * このアプリは複数リポジトリを横断で見るためのもので、「人が動くまで進まないもの」と
-   * 「質問」は**全体で取りこぼしが無いか**を確かめる場所になる。1リポジトリへ絞ったまま
+   * 「コードレビュー」は**全体で取りこぼしが無いか**を確かめる場所になる。1リポジトリへ絞ったまま
    * 見ると、他のリポジトリで止まっているものが画面から消える。
    *
    * 無視するのはユーザーが指定した条件だけで、**ビューの定義そのもの**
-   * （`labels`・`questionOnly`・`defaultState`）は従来どおり効く。
+   * （`labels`・`codeReviewOnly`・`defaultState`）は従来どおり効く。
    */
   ignoresIssueFilters?: boolean;
   /**
@@ -98,7 +92,6 @@ export type NavView = {
 const LABEL_NAV_VIEW_ICONS: Record<LabelNavViewId, LucideIcon> = {
   "check-user": UserCheck,
   "manual-step": Wrench,
-  question: MessageCircleQuestionMark,
   // コードを読んで指摘を返す場所なので、コードの記号（`</>`）を使う（#698）
   "code-review": Code2,
   // 「すべてのIssue」（ListChecks）と並ぶため、同じ線画に見えるListTodoは使わない（#1613）。
@@ -127,7 +120,7 @@ const GROUP_BY_REPO_DEFAULT_VIEWS: readonly LabelNavViewId[] = [
 
 /**
  * ユーザーの絞り込み条件を適用しないビュー（#1750）。左メニューの最上段（要対応の2つ）と
- * 「質問」で、どれも「全体で漏れが無いか」を見る場所。画面ではなくビューの性質として
+ * 「コードレビュー」で、どれも「全体で漏れが無いか」を見る場所。画面ではなくビューの性質として
  * ここに持つ——PC・スマホの各画面で条件を書くと、片方だけ直され続ける。
  *
  * 「ブランチ」（`pane=flow`）も同じ扱いにするが、ビューではないので画面側で行う。
@@ -135,13 +128,11 @@ const GROUP_BY_REPO_DEFAULT_VIEWS: readonly LabelNavViewId[] = [
 const IGNORE_FILTER_VIEWS: readonly LabelNavViewId[] = [
   "check-user",
   "manual-step",
-  "question",
   "code-review",
 ];
 
 /**
  * Issue以外のものが並ぶ「人が手を動かすもの」のビュー（#2081。`NavView.userActionList`）。
- * 「質問」を含めないのは、あちらに並ぶのがIssue（質問Issue）だけのため。
  */
 const USER_ACTION_LIST_VIEWS: readonly LabelNavViewId[] = ["check-user", "manual-step"];
 
@@ -152,7 +143,6 @@ export const labelNavViews: NavView[] = LABEL_FILTER_PRESETS.map((preset) => ({
   labels: preset.labels,
   excludeLabels: preset.excludeLabels,
   statuses: preset.statuses,
-  questionOnly: preset.questionOnly,
   excludeQuestions: preset.excludeQuestions,
   codeReviewOnly: preset.codeReviewOnly,
   excludeCodeReviews: preset.excludeCodeReviews,
@@ -186,19 +176,6 @@ export const sidebarAttentionNavViews: NavView[] = labelNavViews.filter((view) =
 );
 
 /**
- * 要対応の枠とIssueの枠のあいだに置くビュー（#1613）。「質問」は人が読む先だが承認の待ちでは
- * ないため要対応には入れず、Issueの絞り込みとも性質が違うので独立させる。
- * 「ブランチ」（`pane=flow`）はビューではないので、ここではなく画面側で並べる。
- *
- * 「コードレビュー」（#698）はここには入れない。#2674でPull Requestの枠の下・リポジトリの
- * 枠の上へ移した——質問と違って承認Issueへ結果を残す先がリポジトリ単位の作業に近いため。
- * 定義は`sidebarCodeReviewNavViews`。
- */
-export const sidebarQuestionNavViews: NavView[] = labelNavViews.filter((view) =>
-  ["question"].includes(view.id),
-);
-
-/**
  * 「確認環境」の入口（左メニュー・スマホのホーム）を出すか（#3647）。機能は廃止方向だが、後で
  * 使うかもしれないため、コード・API・画面本体は残して入口だけを隠している。戻すときはtrueにする。
  */
@@ -206,9 +183,8 @@ export const PREVIEW_NAV_VISIBLE = false;
 
 /**
  * Pull Requestの枠と、リポジトリ（お気に入りを含む）の枠のあいだに置くビュー（#2674）。
- * 「コードレビュー」はエージェントに読ませて結果を人が読む場所で、実装フローには乗らない点は
- * `sidebarQuestionNavViews`と同じだが、他のIssue由来のビューより下、リポジトリ操作に近い
- * 位置へ置く。「確認環境」（ビューではなくpane）はここではなく画面側で並べる。
+ * 「コードレビュー」はエージェントに読ませて結果を人が読む場所で実装フローには乗らないため、
+ * 他のIssue由来のビューより下、リポジトリ操作に近い位置へ置く。「確認環境」（ビューではなくpane）はここではなく画面側で並べる。
  */
 export const sidebarCodeReviewNavViews: NavView[] = labelNavViews.filter((view) =>
   ["code-review"].includes(view.id),
@@ -216,7 +192,7 @@ export const sidebarCodeReviewNavViews: NavView[] = labelNavViews.filter((view) 
 
 /**
  * スマホのIssue一覧で選べるビュー（#1645）。並びは進捗順（未着手→実行中→本番反映待ち）を
- * 先に、要対応（ユーザーの確認待ち→ユーザーの作業待ち）・参考（質問→コードレビュー）を
+ * 先に、要対応（ユーザーの確認待ち→ユーザーの作業待ち）・参考（コードレビュー）を
  * 後ろにまとめる（#2736。左メニュー`sidebarIssueNavViews`の進捗順と揃えつつ、対応が必要な
  * ものを見失わないよう要対応の2つを間に挟む）。
  *
@@ -231,7 +207,6 @@ export const mobileListNavViews: NavView[] = [
   "release-pending",
   "check-user",
   "manual-step",
-  "question",
   "code-review",
 ]
   .map((id) => navViews.find((view) => view.id === id))

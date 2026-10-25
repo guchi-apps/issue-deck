@@ -185,9 +185,9 @@ export const SESSION_REAP_REASONS = [
   "HANDOFF_NO_PR",
   /** `11.local`を付けたまま最終PRを作り終え、待機している（#4880） */
   "LOCAL_PR_OPEN",
-  /** 横断質問セッションで、質問Issueがcloseされた（#1454） */
+  /** 手作業セッションで、手作業Issueがcloseされた（名前は横断質問セッション・#1454の名残。#5051） */
   "QUESTION_CLOSED",
-  /** 横断質問セッションが放置されている（#1648） */
+  /** 手作業セッションが放置されている（名前は横断質問セッション・#1648の名残。#5051） */
   "QUESTION_IDLE",
   /** worktreeが削除されている（#2422） */
   "WORKTREE_GONE",

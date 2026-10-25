@@ -30,6 +30,12 @@ export const REMOTE_SESSION_MAX_PER_HOST = 3;
 export const REMOTE_SESSION_ISSUE_NUMBER = 0;
 
 /**
+ * リモートセッション画面を開くときに、選んでおくリポジトリを渡すクエリ（#5047）。
+ * Issue詳細の「リモートセッションで聞く」が付け、画面は開いた時点の値だけを読む
+ */
+export const REMOTE_SESSION_REPOSITORY_PARAM = "rsrepo";
+
+/**
  * tmuxのセッション名。**`<リポジトリ名>-remote-<8文字>`**で、実装セッションの`-issue-<番号>`の
  * 規約から外す（外さないと引き上げ・停滞検知・自動再開の対象に混ざる）。pollerの
  * `REMOTE_SESSION_NAME_PATTERN`と同じ形。

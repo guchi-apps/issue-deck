@@ -10,8 +10,6 @@ export type CreateCommentInput = {
   repo: string;
   number: number;
   body: string;
-  /** 明示的な質問操作のみ既存ホストへ配送する。 */
-  askQuestion?: boolean;
 };
 
 export type UpdateCommentInput = {
@@ -45,7 +43,7 @@ async function postJson(
   url: string,
   method: "POST" | "PATCH",
   input: unknown,
-): Promise<{ comment: IssueComment; warning?: string }> {
+): Promise<{ comment: IssueComment }> {
   const res = await fetch(url, {
     method,
     headers: { "Content-Type": "application/json" },
@@ -55,7 +53,7 @@ async function postJson(
     const data: { error?: string; message?: string } = await res.json().catch(() => ({}));
     throw new Error(errorMessageForResponse(res.status, data.error, data.message));
   }
-  const data: { comment: IssueComment; warning?: string } = await res.json();
+  const data: { comment: IssueComment } = await res.json();
   return data;
 }
 
@@ -63,13 +61,12 @@ export function useIssueCommentMutations() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  async function createComment(input: CreateCommentInput): Promise<(IssueComment & { deliveryWarning?: string }) | null> {
+  async function createComment(input: CreateCommentInput): Promise<IssueComment | null> {
     setIsSubmitting(true);
     setError(null);
     try {
       const result = await postJson("/api/issues/comments", "POST", input);
-      if (result.warning) setError(result.warning);
-      return { ...result.comment, ...(result.warning ? { deliveryWarning: result.warning } : {}) };
+      return result.comment;
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
       return null;

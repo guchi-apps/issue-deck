@@ -29,7 +29,6 @@ function makeHost(overrides: Partial<DispatchHostView> = {}): DispatchHostView {
     lastSeenAt: NOW.toISOString(),
     sessionControlCapable: true,
     instructionCapable: true,
-    crossRepoQuestionCapable: true,
     manualStepCapable: null,
     manualStepAbortCapable: null,
     manualStepValuesCapable: null,
@@ -288,7 +287,7 @@ describe("DispatchQueueButton の行の内容", () => {
   });
 
   // QUEUEDのときは状態ラベルがどちらも「順番待ち」になり、状態だけでは見分けられない
-  it("種別チップで起動と横断質問を見分けられる", async () => {
+  it("種別チップで起動と手作業セッションを見分けられる", async () => {
     await openWith(
       [
         makeJob({ id: "job-1", status: "QUEUED", finishedAt: null, issueNumber: 1601 }),
@@ -297,7 +296,7 @@ describe("DispatchQueueButton の行の内容", () => {
           status: "QUEUED",
           finishedAt: null,
           issueNumber: 1602,
-          kind: "CROSS_REPO_QUESTION",
+          kind: "MANUAL_STEP_SESSION",
           createdAt: "2026-08-15T13:00:00.000Z",
         }),
       ],
@@ -305,7 +304,7 @@ describe("DispatchQueueButton の行の内容", () => {
     );
 
     expect(screen.getByText("実装")).toBeDefined();
-    expect(screen.getByText("横断質問")).toBeDefined();
+    expect(screen.getByText("手作業セッション")).toBeDefined();
   });
 });
 

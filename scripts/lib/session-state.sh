@@ -459,7 +459,7 @@ session_state_clear_codex_archived() {
   return 0
 }
 
-# そのセッションの種別（`implementation`・`question`・`manual-step`など）。記述子の`kind`。
+# そのセッションの種別（`implementation`・`manual-step`など）。記述子の`kind`。
 # **古い記述子・記述子が無い場合は`implementation`**（`session_state_write_descriptor`と同じ扱い）。
 session_state_session_kind() {
   local session="$1" file kind
@@ -471,12 +471,12 @@ session_state_session_kind() {
   printf '%s' "${kind:-implementation}"
 }
 
-# 横断質問セッション（`kind=question`）のClaude CodeのsessionIdを控え、畳んだ後の復旧で
-# `claude --resume <id>`へ渡すための宛先（#3033）。
+# 手作業セッション（`kind=manual-step`）のClaude CodeのsessionIdを控え、畳んだ後の復旧で
+# `claude --resume <id>`へ渡すための宛先（#4231。横断質問セッション〈#3033・#5051で撤去〉から引き継いだ）。
 #
-# 質問セッションのcwdは質問Issueごとではなくリポジトリごとに固定されている（#1529）ため、
-# `--continue`（「そのcwdで最後に動いた会話」）だと別の質問の会話を拾う（#1648）。tmuxセッション名は
-# 質問Issueごとに一定なので、これをキーにsessionIdを控えれば、cwdが共有でも同じ質問の会話へ戻せる
+# 手作業セッションのcwdはIssueごとではなくリポジトリごとに固定されているため、
+# `--continue`（「そのcwdで最後に動いた会話」）だと別のIssueの会話を拾う。tmuxセッション名は
+# Issueごとに一定なので、これをキーにsessionIdを控えれば、cwdが共有でも同じIssueの会話へ戻せる
 # （Codexの`.codex-thread`と同じ手口）。**書くのは`session-notify.sh`の`SessionStart`だけ。**
 # `session_state_remove`では消さない（畳んだ後にも要るため）。新しい会話で起こすときは
 # ランチャーが`session_state_clear_claude_session`で先に消す。
@@ -601,7 +601,7 @@ session_state_write_file() {
 # 起動時の記述子を書く。`reapable`が1のセッションだけが自動回収の対象になる。
 #
 # `kind`（第6引数・省略時は`implementation`）は回収の判定を分けるためのもの（#1454）。
-# 横断質問セッション（`question`）はworktreeを持たないため、実装セッション向けの
+# 手作業セッション（`manual-step`）はworktreeを持たないため、実装セッション向けの
 # 「worktreeがcleanでpush済み」という条件を当てるとどれにも当たらず、永久に残ってしまう。
 # **古い記述子には`kind`が無い**（読む側は空を`implementation`として扱う）。
 #

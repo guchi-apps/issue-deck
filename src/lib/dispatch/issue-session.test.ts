@@ -226,16 +226,6 @@ describe("summarizeIssueSession", () => {
       expect(describeSessionRecovery(session({ state: "FAILED", exitStatus: 1 }))).not.toBeNull();
     });
 
-    // #3033。worktreeもラベルも無く、戻れるかはホストが控えたsessionId次第なので言い切らない
-    it("横断質問セッションでは、記録が無ければ新しい会話になることを添える", () => {
-      const recovery = describeSessionRecovery(session({ state: "GONE" }), {
-        isCrossRepoQuestion: true,
-      });
-      expect(recovery?.detail).toContain("前回の会話の続き");
-      expect(recovery?.detail).toContain("記録が残っていない場合");
-      expect(recovery?.detail).not.toContain("11.local");
-    });
-
     // #4231。cwdが手作業間で共有されるため、戻れるかはホストが控えたsessionId次第
     it("手作業セッションでは、記録が無ければ新しい会話になることを添える", () => {
       const recovery = describeSessionRecovery(session({ state: "GONE" }), { isManualStep: true });
@@ -244,10 +234,8 @@ describe("summarizeIssueSession", () => {
       expect(recovery?.detail).not.toContain("11.local");
     });
 
-    it("横断質問セッションでも動いているものには出さない", () => {
-      expect(
-        describeSessionRecovery(session({ state: "ALIVE" }), { isCrossRepoQuestion: true }),
-      ).toBeNull();
+    it("手作業セッションでも動いているものには出さない", () => {
+      expect(describeSessionRecovery(session({ state: "ALIVE" }), { isManualStep: true })).toBeNull();
     });
   });
 
@@ -470,7 +458,7 @@ describe("describeSessionReap", () => {
     ).toBeNull();
   });
 
-  it("放置で畳まれる質問セッションには、復旧で会話の続きへ戻れる旨を出す（#3033）", () => {
+  it("放置で畳まれる手作業セッションには、復旧で会話の続きへ戻れる旨を出す（#4231）", () => {
     const notice = describeSessionReap(
       session({ reapAt: "2026-08-16T12:10:00.000Z", reapReason: "QUESTION_IDLE" }),
       NOW,
@@ -479,12 +467,14 @@ describe("describeSessionReap", () => {
     expect(notice?.detail).not.toContain("worktree");
   });
 
-  it("Issueが閉じられて畳まれる質問セッションには、新しく質問する旨を出す", () => {
+  // 横断質問の撤去（#5051）後は「質問する」の入口が無いので、聞き直す案内を出さない
+  it("Issueが閉じられて畳まれる手作業セッションには、復旧も質問も案内しない", () => {
     const notice = describeSessionReap(
       session({ reapAt: "2026-08-16T12:10:00.000Z", reapReason: "QUESTION_CLOSED" }),
       NOW,
     );
-    expect(notice?.detail).toContain("新しく質問してください");
+    expect(notice?.detail).toContain("手作業Issueがcloseされているため");
+    expect(notice?.detail).not.toContain("質問");
     expect(notice?.detail).not.toContain("セッションを復旧");
     expect(notice?.detail).not.toContain("worktree");
   });
@@ -498,8 +488,6 @@ describe("describeSessionReap", () => {
     // 起動し直すとworktreeを作り直す経路になり、会話は引き継がれない（run-issue-session.sh）
     expect(notice?.detail).toContain("引き継ぎません");
     expect(notice?.detail).not.toContain("worktreeは残る");
-    // 質問セッション向けの案内（「質問する」から聞き直す）とは別物
-    expect(notice?.detail).not.toContain("新しく質問してください");
   });
 
   it("生きていないセッションには出さない", () => {

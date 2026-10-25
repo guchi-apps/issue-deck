@@ -26,6 +26,8 @@ enum UniversalLink {
         case "pull-requests":
             guard let id = isID(value("pr")) else { return nil }
             return "/dashboard?pane=pull-requests&pr=\(id)&mscreen=pull-requests"
+        case "release-history":
+            return "/dashboard?pane=releases&mscreen=release-history"
         default:
             return nil
         }
