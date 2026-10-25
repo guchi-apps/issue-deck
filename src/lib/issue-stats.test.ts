@@ -612,25 +612,11 @@ describe("time-dependent stats", () => {
       ]);
     });
 
-    it("view=questionは質問Issue（新旧どちらの接頭辞も）のみ返す（#1514）", () => {
-      const issues = [
-        makeIssue({ id: "1", title: "[質問] このリポジトリの構成を教えて" }),
-        makeIssue({ id: "2", title: "質問: 旧形式のタイトル" }),
-        makeIssue({ id: "3", title: "通常のIssue" }),
-        // タイトルの途中に現れるだけのものは質問ではない
-        makeIssue({ id: "4", title: "設計の質問: をどう扱うか" }),
-      ];
-      expect(filterIssuesByView(issues, "question", null).map((issue) => issue.id)).toEqual([
-        "1",
-        "2",
-      ]);
-    });
-
     it("質問Issueは進捗によらずnot-started・in-progressから除外される（#1514）", () => {
       const issues = [
         makeIssue({ id: "1", title: "[質問] 未着手のまま残る質問" }),
         makeIssue({ id: "2", title: "通常のIssue" }),
-        // 回答待ちの質問Issueも「実行中」ではなく「質問」に出す（#978の特例より優先する）
+        // 回答待ちの質問Issueも「実行中」には出さない（#978の特例より優先する）
         makeIssue({
           id: "3",
           title: "[質問] 回答待ちの質問",
@@ -651,10 +637,6 @@ describe("time-dependent stats", () => {
       ]);
       expect(filterIssuesByView(issues, "in-progress", null).map((issue) => issue.id)).toEqual([
         "4",
-      ]);
-      expect(filterIssuesByView(issues, "question", null).map((issue) => issue.id)).toEqual([
-        "1",
-        "3",
       ]);
     });
 
@@ -761,7 +743,6 @@ describe("time-dependent stats", () => {
         "recently-added": 1,
         "check-user": 1,
         "manual-step": 0,
-        question: 0,
         "code-review": 0,
         "not-started": 1,
         "in-progress": 0,
@@ -855,22 +836,6 @@ describe("time-dependent stats", () => {
       expect(computeNavCountsForFilters(issues, listFilters, null).all).toBe(2);
     });
 
-    // 未確認だけを数えると、読み終えた質問しか無いときに「質問は無い」と読めてしまう（#2070）
-    it("質問は一覧に並ぶ件数（確認済み・回答待ちも含む）を数える", () => {
-      const issues = [
-        makeIssue({ id: "1", title: "[質問] 未確認のもの", hasUnreadComments: true }),
-        makeIssue({ id: "2", title: "[質問] 確認済みのもの", hasUnreadComments: false }),
-        makeIssue({
-          id: "3",
-          title: "[質問] 回答待ちのもの",
-          hasUnreadComments: true,
-          qaAnswerPendingAt: "2026-01-09T00:00:00.000Z",
-        }),
-      ];
-
-      expect(computeNavCountsForFilters(issues, listFilters, null).question).toBe(3);
-    });
-
     it("状態の絞り込みを適用した件数を返す（close済みを含めない）", () => {
       const issues = [
         makeIssue({ id: "1" }),
@@ -935,8 +900,8 @@ describe("time-dependent stats", () => {
       assignee: "me",
     };
 
-    it("確認待ち・作業待ち・質問では条件を落とし、状態はビューの既定へ戻す", () => {
-      for (const view of ["check-user", "manual-step", "question"] as const) {
+    it("確認待ち・作業待ち・コードレビューでは条件を落とし、状態はビューの既定へ戻す", () => {
+      for (const view of ["check-user", "manual-step", "code-review"] as const) {
         expect(resolveFiltersForView(filters, view)).toEqual({
           q: "",
           // キーワードを外すビューでは、AI検索の絞り込み（#1788）も一緒に外す
@@ -980,13 +945,6 @@ describe("time-dependent stats", () => {
         repositoryFullName: "owner/b",
         labels: [{ name: "71.manual-step", color: "blue", description: null }],
       }),
-      // 「質問」の件数は一覧に並ぶ件数（#2070）
-      makeIssue({
-        id: "4",
-        repositoryFullName: "owner/b",
-        title: "[質問] これは何ですか",
-        hasUnreadComments: true,
-      }),
     ];
     const filters = {
       q: "",
@@ -996,11 +954,10 @@ describe("time-dependent stats", () => {
       assignee: null,
     };
 
-    it("リポジトリを絞っても確認待ち・作業待ち・質問の件数は変わらない", () => {
+    it("リポジトリを絞っても確認待ち・作業待ちの件数は変わらない", () => {
       const counts = computeNavCountsForFilters(issues, filters, null);
       expect(counts["check-user"]).toBe(2);
       expect(counts["manual-step"]).toBe(1);
-      expect(counts.question).toBe(1);
     });
 
     it("それ以外のビューは従来どおり絞り込まれる", () => {

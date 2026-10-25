@@ -28,13 +28,11 @@ import { useDispatchState } from "@/hooks/use-dispatch-state";
 import { usePullToRefresh } from "@/hooks/use-pull-to-refresh";
 import { summarizeRemoteSessionNav } from "@/lib/dispatch/remote-session-rules";
 import type { ManualStepAttention } from "@/lib/manual-step-attention";
-import { resolveQuestionNavSignals } from "@/lib/question-attention";
 import {
   navViewIcons,
   sidebarAttentionNavViews,
   sidebarCodeReviewNavViews,
   sidebarIssueNavViews,
-  sidebarQuestionNavViews,
   PREVIEW_NAV_VISIBLE,
 } from "@/lib/nav-views";
 import type { PullRequestNavCounts } from "@/lib/pull-request-list";
@@ -58,16 +56,6 @@ type MobileHomeScreenProps = {
   navCounts: Record<NavViewId, number>;
   /** 「ユーザーの作業待ち」の内訳（#1690）。いま実行できるものがあるときだけ強調する */
   manualStepAttention: ManualStepAttention;
-  /**
-   * 未確認（回答が届いていて未読）の質問の件数（#2070）。**行に出す数字は`navCounts`から
-   * 引き、これは使わない**——オレンジの丸を点けるかどうかと、吹き出しの内訳だけに使う。
-   */
-  unconfirmedQuestionCount: number;
-  /**
-   * 回答待ち（質問を投げてまだ回答が届いていない）の質問の件数（#2309）。**「質問」の行の
-   * スピナーを回すかどうかと、吹き出しの内訳に使う。行に出す数字はこれまでどおり`navCounts`。**
-   */
-  waitingQuestionCount: number;
   /** PRビューごとの件数（#1389）。nullのビューは件数を出さない */
   pullRequestNavCounts: PullRequestNavCounts;
   /**
@@ -169,8 +157,6 @@ export function MobileHomeScreen(props: Omit<MobileHomeScreenProps, "onRefresh" 
 export function MobileHomeScreenView({
   navCounts,
   manualStepAttention,
-  unconfirmedQuestionCount,
-  waitingQuestionCount,
   pullRequestNavCounts,
   mergePendingAttention,
   onSelectQuickView,
@@ -210,8 +196,6 @@ export function MobileHomeScreenView({
     navCounts,
     checkUserCount,
     manualStepAttention,
-    unconfirmedQuestionCount,
-    waitingQuestionCount,
     pullRequestNavCounts,
     mergePendingAttention,
     previewRunning,
@@ -430,7 +414,7 @@ const HOME_TILE_GROUPS: { id: HomeTileGroupId; label: string }[] = [
  * 出なくなることはない（PCと同じ並びに揃える約束は#3650で外した）。
  */
 const HOME_TILE_LAYOUT: Record<HomeTileGroupId, string[]> = {
-  attention: ["check-user", "manual-step", "pr:completed", "question"],
+  attention: ["check-user", "manual-step", "pr:completed"],
   progress: ["not-started", "nightly-run", "in-progress", "pr:in-progress", "release-pending", "pr:release"],
   list: ["all", "pr:all", "repos", "code-review", "remote-sessions", "ideas", "ios-extensions", "preview"],
 };
@@ -459,8 +443,6 @@ type BuildHomeTilesInput = {
   navCounts: Record<NavViewId, number>;
   checkUserCount: number;
   manualStepAttention: ManualStepAttention;
-  unconfirmedQuestionCount: number;
-  waitingQuestionCount: number;
   pullRequestNavCounts: PullRequestNavCounts;
   mergePendingAttention: MergePendingAttention | null;
   previewRunning: boolean;
@@ -507,22 +489,15 @@ function buildHomeTiles(input: BuildHomeTilesInput): HomeTile[] {
     });
   }
 
-  // 質問・コードレビューは合図を行ごとに決める（#2325・PCと同じ`resolveQuestionNavSignals`）
-  for (const view of [...sidebarQuestionNavViews, ...sidebarCodeReviewNavViews]) {
-    const signals = resolveQuestionNavSignals(view.id, {
-      total: input.navCounts.question,
-      unconfirmed: input.unconfirmedQuestionCount,
-      waiting: input.waitingQuestionCount,
-    });
+  // コードレビューには合図を出さない（#2325・PCと同じ）。並んでいた「質問」は#5047で廃止した
+  for (const view of sidebarCodeReviewNavViews) {
     tiles.push({
       key: view.id,
       label: view.label,
       icon: navViewIcons[view.id],
-      // 件数は一覧に並ぶ数（＝開いている質問の総数）に揃える（#2070・PCと同じ）
       count: input.navCounts[view.id],
-      emphasis: signals.attention ? "attention" : "none",
-      busy: signals.busy,
-      title: signals.title,
+      emphasis: "none",
+      busy: false,
       onClick: () => input.onSelectQuickView(view.id),
     });
   }

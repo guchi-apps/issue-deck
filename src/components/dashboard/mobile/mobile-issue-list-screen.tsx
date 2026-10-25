@@ -34,7 +34,6 @@ import {
   type ManualStepReadinessMap,
 } from "@/lib/manual-step-attention";
 import { formatCheckUserListCount } from "@/lib/check-user-attention";
-import { formatQuestionListCount } from "@/lib/question-attention";
 import {
   findActiveIssueSnooze,
   isSnoozeEnabledForList,
@@ -233,7 +232,6 @@ export function MobileIssueListScreen({
     (view === "manual-step" && prerequisiteReadiness
       ? formatManualStepListCount(listedIssues, prerequisiteReadiness, snoozedCount)
       : null) ??
-    (view === "question" ? formatQuestionListCount(listedIssues, listedCount, snoozedCount) : null) ??
     formatCheckUserListCount(listedCount, checkUserRunningCount, snoozedCount) ??
     `${listedCount}件`;
   const displayNavCounts = useMemo(() => {

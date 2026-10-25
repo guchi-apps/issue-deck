@@ -634,7 +634,7 @@ describe("CommentThread 承認カードの表示位置（#1639）", () => {
  * #1903。ローカルセッションが担当しているIssueでは、「承認」「修正」を押しても走っている
  * セッションには届かず、投稿される`@claude`コメントが無人実行を起こして「`11.local`が
  * 付いているため対応しません」という案内を足すだけだった。ここでできることの名前に
- * 置き換える（コメント／質問する／確認待ちを外す／取り下げ）。
+ * 置き換える（コメント／リモートセッションで聞く／確認待ちを外す／取り下げ）。
  */
 describe("CommentThread ローカルセッションが担当しているとき", () => {
   afterEach(() => {
@@ -644,10 +644,9 @@ describe("CommentThread ローカルセッションが担当しているとき",
   function renderLocal(
     props: {
       onComment?: (body: string) => void;
-      onAskClaude?: (question: string) => void;
+      onOpenRemoteSession?: () => void;
       onDismissCheckUser?: (text?: string) => void;
       mergeApprovalPending?: boolean;
-      canAskClaude?: boolean;
     } = {},
   ) {
     return render(
@@ -661,26 +660,26 @@ describe("CommentThread ローカルセッションが担当しているとき",
         approvalPending
         localSession
         sessionAlive
-        canAskClaude={props.canAskClaude ?? true}
         checkUserReason="input"
         localSessionNotice={<p>ここに書いた回答はセッションに届きません</p>}
         onApprove={async () => {}}
         onReject={async () => {}}
         onWithdraw={async () => {}}
         onComment={props.onComment ?? (async () => {})}
-        onAskClaude={props.onAskClaude ?? (async () => {})}
+        onOpenRemoteSession={props.onOpenRemoteSession ?? (() => {})}
         onDismissCheckUser={props.onDismissCheckUser ?? (async () => {})}
         mergeApprovalPending={props.mergeApprovalPending}
       />,
     );
   }
 
-  it("承認・修正を出さず、コメント／質問する／確認待ちを外すを出す", () => {
+  it("承認・修正を出さず、コメント／リモートセッションで聞く／確認待ちを外すを出す", () => {
     renderLocal();
     expect(screen.queryByRole("button", { name: "承認" })).toBeNull();
     expect(screen.queryByRole("button", { name: "修正" })).toBeNull();
     expect(screen.getByRole("button", { name: "コメント" })).not.toBeNull();
-    expect(screen.getByRole("button", { name: "質問する" })).not.toBeNull();
+    expect(screen.getByRole("button", { name: "リモートセッションで聞く" })).not.toBeNull();
+    expect(screen.queryByRole("button", { name: "質問する" })).toBeNull();
     expect(screen.getByRole("button", { name: "確認待ちを外す" })).not.toBeNull();
     expect(screen.getByRole("button", { name: "取り下げ" })).not.toBeNull();
   });
@@ -692,7 +691,14 @@ describe("CommentThread ローカルセッションが担当しているとき",
     ).not.toBeNull();
   });
 
-  it("入力があるときだけコメント・質問を押せる", () => {
+  it("リモートセッションで聞くは入力が無くても押せる（#5047）", () => {
+    const onOpenRemoteSession = vi.fn();
+    renderLocal({ onOpenRemoteSession });
+    fireEvent.click(screen.getByRole("button", { name: "リモートセッションで聞く" }));
+    expect(onOpenRemoteSession).toHaveBeenCalledTimes(1);
+  });
+
+  it("入力があるときだけコメントを押せる", () => {
     const onComment = vi.fn();
     renderLocal({ onComment });
     expect(screen.getByRole("button", { name: "コメント" })).toHaveProperty("disabled", true);

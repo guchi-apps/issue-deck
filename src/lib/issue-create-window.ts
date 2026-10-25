@@ -1,5 +1,3 @@
-import type { IssueDraftKind } from "@/hooks/use-issue-draft";
-
 /**
  * Issue作成画面を別ウィンドウ（`/issues/new`）で開くための受け渡し（#1728）。
  *
@@ -12,7 +10,6 @@ import type { IssueDraftKind } from "@/hooks/use-issue-draft";
  * 復元するかどうかを人が選ぶもの。こちらは移し替えの途中経過であり、選ばせるものではない。
  */
 export type IssueCreateHandoff = {
-  kind: IssueDraftKind;
   repositoryFullName: string;
   title: string;
   body: string;
@@ -68,7 +65,6 @@ export function parseIssueCreateHandoff(raw: string | null, now: number): IssueC
   if (typeof parsed !== "object" || parsed === null) return null;
   if (typeof parsed.savedAt !== "number" || now - parsed.savedAt > HANDOFF_MAX_AGE_MS) return null;
   return {
-    kind: parsed.kind === "question" ? "question" : "issue",
     repositoryFullName:
       typeof parsed.repositoryFullName === "string" ? parsed.repositoryFullName : "",
     title: typeof parsed.title === "string" ? parsed.title : "",

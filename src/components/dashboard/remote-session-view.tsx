@@ -1,6 +1,7 @@
 "use client";
 
 import { ExternalLink, Loader2, RotateCcw, Search, Star, TerminalSquare } from "lucide-react";
+import { useSearchParams } from "next/navigation";
 import { useMemo, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
@@ -14,6 +15,7 @@ import {
   ACTIVE_REMOTE_SESSION_STATUSES,
   describeRemoteSessionStatus,
   isRemoteSessionResumable,
+  REMOTE_SESSION_REPOSITORY_PARAM,
   type RemoteSessionState,
   type RemoteSessionView as RemoteSession,
 } from "@/lib/dispatch/remote-session-rules";
@@ -72,8 +74,14 @@ export function RemoteSessionView({
   const isDesktop = useMediaQuery("(min-width: 768px)");
   const remote = useRemoteSessions({ active });
   const [query, setQuery] = useState("");
-  const [selected, setSelected] = useState<string | null>(null);
-  const [sheetOpen, setSheetOpen] = useState(false);
+  // Issue詳細の「リモートセッションで聞く」（#5047）から開いたときは、そのリポジトリを選んでおく。
+  // 読むのは開いた時点だけで、あとは画面での選択に従う
+  const searchParams = useSearchParams();
+  const [requested] = useState(() => searchParams.get(REMOTE_SESSION_REPOSITORY_PARAM));
+  const [selected, setSelected] = useState<string | null>(requested);
+  // スマホは一覧と詳細シートが別なので、リポジトリを指定して開いたときは詳細シートまで開く
+  // （PCではシートを描かないので、この初期値は効かない）
+  const [sheetOpen, setSheetOpen] = useState(requested !== null);
 
   const runnable = useMemo(() => runnableRepositories(remote.state, repositories), [remote.state, repositories]);
   const sorted = useMemo(() => {

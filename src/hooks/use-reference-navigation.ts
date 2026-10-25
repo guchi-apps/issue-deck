@@ -3,6 +3,7 @@
 import { useCallback } from "react";
 
 import { useHistoryNavigation } from "@/hooks/use-history-navigation";
+import { REMOTE_SESSION_REPOSITORY_PARAM } from "@/lib/dispatch/remote-session-rules";
 
 /**
  * 画面内のIssue・PRリンクから対応する詳細へ遷移するためのURL更新（#1260）。
@@ -78,14 +79,20 @@ export function useReferenceNavigation() {
   /**
    * リモートセッション画面を開く（#4836）。実行状況のホストカードから、並んでいるセッションを
    * 終了・起動しに行く導線。PCは左メニューと同じ`pane`、スマホは`mscreen`へ切り替える
+   *
+   * `repositoryFullName`を渡すと、そのリポジトリを選んだ状態で開く（#5047。Issue詳細の
+   * 「リモートセッションで聞く」）。起動はせず、稼働中のセッションを開くか新しく起動するかは
+   * 画面で選ばせる
    */
-  const openRemoteSessions = useCallback(() => {
+  const openRemoteSessions = useCallback((repositoryFullName?: string) => {
     pushParams((params) => {
       // 左メニューの遷移（`selectRemoteSessionsPane`）と同じく、PRの選択状態だけを落とす
       params.delete("pr");
       params.delete("prmodal");
       params.set("pane", "remote-sessions");
       params.set("mscreen", "remote-sessions");
+      if (repositoryFullName) params.set(REMOTE_SESSION_REPOSITORY_PARAM, repositoryFullName);
+      else params.delete(REMOTE_SESSION_REPOSITORY_PARAM);
     });
   }, [pushParams]);
 

@@ -5,9 +5,8 @@ import {
   Bot,
   ChevronDown,
   Loader2,
-  MessageCircleQuestion,
-  Plus,
   SquareArrowOutUpRight,
+  TerminalSquare,
 } from "lucide-react";
 
 import { ApiErrorMessage } from "@/components/dashboard/api-error-message";
@@ -43,15 +42,12 @@ import {
   resolveInitialIssueDraft,
   useIssueDraftAutosave,
   type IssueDraft,
-  type IssueDraftKind,
 } from "@/hooks/use-issue-draft";
-import { useIssueCommentMutations } from "@/hooks/use-issue-comment-mutations";
 import { useIssueMutations } from "@/hooks/use-issue-mutations";
 import { useIssueRepoMeta } from "@/hooks/use-issue-repo-meta";
 import { useIssueSuggest } from "@/hooks/use-issue-suggest";
 import { usePostCreateDestination } from "@/hooks/use-post-create-destination";
 import type { ClaudeLocalModelSetting, CodexModelSetting, DefaultDispatchAgent } from "@/lib/app-settings";
-import { askClaudeCommentBody, buildAskRepoQuestionTitle } from "@/lib/github/ask-claude";
 import { composeIssueBody } from "@/lib/github/followup-issue";
 import {
   isSelectableLabelName,
@@ -98,35 +94,9 @@ export function mergeSuggestedLabels(prev: string[], suggested: string[]): strin
 }
 
 /**
- * 種別を切り替えたときに残すリポジトリを決める（#1641）。
- *
- * **質問は`claude-issue-dispatch.yml`が導入済みのリポジトリでしか成立しない**（回答するのが
- * GitHub Actionsのmode=askのため）。Issueへ戻すときは絞り込みが無いので、選択をそのまま残す。
- *
- * **質問で選べない値だったときは、代わりを入れずに未選択へ戻す**（#1884）。以前は導入済みの
- * 先頭1件を入れていたが、リポジトリを人が決める形にした以上、種別を押しただけで選んでいない
- * リポジトリが入る経路は残せない（入った印を出す手立ても無くなった）。
+ * 「内容から質問のようです」の行を出しているか（#1890）。質問の廃止（#5047）後は、
+ * 種別を切り替える代わりにリモートセッションで聞くよう案内する。
  */
-export function resolveKindRepository(
-  kind: IssueDraftKind,
-  repositories: ConnectedRepository[],
-  current: string,
-): string {
-  if (kind === "issue" || current === "") return current;
-  const askable = repositories.filter((repo) => repo.dispatchRunnable);
-  return askable.some((repo) => repo.fullName === current) ? current : "";
-}
-
-/**
- * 「内容から質問のようです」の行の状態（#1890）。`switched`だけが、戻すときの行き先として
- * 切り替える前のリポジトリを持つ。**質問では選べないリポジトリが未選択へ戻される**
- * （`resolveKindRepository`）ため、`fullName`だけでなく「人が選んだ値か」も一緒に覚えておく
- * ——戻したときに`表示中のリポジトリ`バッジの出方まで元へ揃える。
- */
-type QuestionHint =
-  | { phase: "suggested" }
-  | { phase: "switched"; previousRepository: { fullName: string; picked: boolean } };
-
 const DEFAULT_ASSIGNEE = "m-guchi";
 
 /**
@@ -281,6 +251,12 @@ type CreateIssueDialogProps = {
    * （#2953）ので、選ぶものが無い。
    */
   onNavigateToIssue?: (issue: Issue) => void;
+  /**
+   * 内容が質問だと判定されたときの「リモートセッションで聞く」（#5047）。リポジトリを選んで
+   * いればそれを渡す。別ウィンドウ（`/issues/new`）では遷移先の画面が無いため渡さず、
+   * そのときは案内の文だけを出す
+   */
+  onOpenRemoteSession?: (repositoryFullName?: string) => void;
   /** 出し方（#1728）。既定はダイアログ */
   presentation?: CreateIssuePresentation;
   /**
@@ -302,19 +278,15 @@ type CreateIssueDialogProps = {
 };
 
 /**
- * Issueの作成と、単一リポジトリへの質問（#691）を1つのダイアログにまとめたもの（#1641）。
+ * Issueを作成するダイアログ。
  *
- * **本文・画像添付・ラベル選択はどちらの種別でも同じもの**で、種別によって変わるのは
- * タイトル（質問は質問文から機械生成）・担当者の有無・作成後の動きだけ。質問側が独自の
- * `Textarea`を持っていたせいで、質問には画像を貼れず`#123`のIssue補完も効かなかった。
- *
- * **横断質問（#1454）はここに含めない。** 回答するのがGitHub ActionsではなくサブPCの質問
- * セッションで、リポジトリの絞り込み条件も実行先の選択も別物になるため。
- * 横断質問の入口（専用ダイアログ）は#4991で廃止した。
+ * #1641〜#5047の間は単一リポジトリへの質問（#691）も種別「質問」としてここに同居していたが、
+ * 質問機能は#5047で廃止した。聞きたいだけの内容は、リモートセッション（`remote-session-view.tsx`）で
+ * Claude Codeと対話して聞く。内容が質問のようだと判定されたときは、そちらへ案内する（`questionHint`）。
  *
  * ## 1画面（#1884）
  *
- * 種別・リポジトリ・内容・タイトル・ラベル・担当者を**すべて1画面に並べる**。#1605で入れた
+ * リポジトリ・内容・タイトル・ラベル・担当者を**すべて1画面に並べる**。#1605で入れた
  * 2ステップ（内容だけを書く`input` → 推定結果を確かめる`confirm`）は廃止した。
  *
  * **自動で決まるのはタイトルとラベルだけ。** 「作成」「作成+実装開始」を押すと、タイトルか
@@ -348,6 +320,7 @@ export function CreateIssueDialog({
   onCreated,
   onNightlyRunQueued,
   onNavigateToIssue,
+  onOpenRemoteSession,
   presentation = "dialog",
   initialHandoff = null,
   cancelLabel,
@@ -360,15 +333,6 @@ export function CreateIssueDialog({
   const isWindow = presentation === "window";
   const Chrome = isWindow ? WINDOW_CHROME : DIALOG_CHROME;
   const { createIssue, isSubmitting: isCreatingIssue, error, setError } = useIssueMutations();
-  const {
-    createComment,
-    isSubmitting: isCreatingComment,
-    error: commentError,
-    setError: setCommentError,
-  } = useIssueCommentMutations();
-
-  const pendingQuestionIssue = useRef<Issue | null>(null);
-  const [kind, setKind] = useState<IssueDraftKind>("issue");
   /**
    * 画面に出ている値のうち、Claudeが入れたまま人が触っていないもの（#1605）。
    * `自動`バッジを出す対象で、ユーザーが直した時点でその項目は外れる。
@@ -384,20 +348,18 @@ export function CreateIssueDialog({
    */
   const [labelSuggestionMissed, setLabelSuggestionMissed] = useState(false);
   /**
-   * 内容が質問だと判定されたときに、種別の下へ出す行（#1890）。
+   * 内容が質問だと判定されたときに、フォームの先頭へ出す行（#1890・#5047）。
    *
-   * - `suggested` … 判定しただけの状態。**種別もリポジトリも変えていない。** 押さなければ従来どおりIssueとして作られる
-   * - `switched` … 「質問に切り替える」を押した後。戻したときの行き先として、押す前のリポジトリを持つ
-   *
-   * **判定で種別を勝手に変えない**のが要点。#1641が本文からの自動判定を見送ったのは、誤判定が
-   * 押した本人から見えないまま実装フローに乗るためで、提案にとどめればその状態は作れない。
+   * 判定しただけで、**作成はいったん止める**（押さなければ従来どおりIssueとして作られる）。
+   * 質問のつもりの内容が実装Issueとして無人実行に乗るのを、押した本人が気付かないまま
+   * 進めないため。聞きたいだけならリモートセッションへ案内する。
    */
-  const [questionHint, setQuestionHint] = useState<QuestionHint | null>(null);
+  const [questionHint, setQuestionHint] = useState(false);
   /**
    * 提案を出したときに、そこまで画面を寄せるための参照（#1890）。
    *
-   * **判定を起こすのはフッターの「作成」「作成+実装開始」（#2773）で、提案を出す種別欄は
-   * フォームの先頭にある。** ダイアログは本文だけがスクロールする（見出しとフッターは固定・
+   * **判定を起こすのはフッターの「作成」「作成+実装開始」（#2773）で、提案はフォームの
+   * 先頭に出る。** ダイアログは本文だけがスクロールする（見出しとフッターは固定・
    * #3123）ため、項目が多いときやスマホ幅では、押した時点で種別欄は画面外にある。
    * 提案が見えないまま作成まで進めると、#1641が避けたかった「押した本人から見えない」に戻る。
    * `block: "nearest"`なので、すでに見えているときは動かない。
@@ -456,14 +418,8 @@ export function CreateIssueDialog({
     () => groupRepositoriesByWorkflowStatus(repositories),
     [repositories],
   );
-  const isQuestion = kind === "question";
-  /**
-   * 質問では`claude-issue-dispatch.yml`が導入済みのリポジトリしか選べない（回答するのが
-   * GitHub Actionsのmode=askのため）。未導入のグループごと選択肢から落とす。
-   */
-  const selectableUnregisteredRepositories = isQuestion ? [] : unregisteredRepositories;
   const hasSelectableRepository =
-    registeredRepositories.length + selectableUnregisteredRepositories.length > 0;
+    registeredRepositories.length + unregisteredRepositories.length > 0;
   // 「作成+実装開始」で作成したIssueの実行先を選ばせるための情報（#1323）。判定の材料は
   // Issue詳細画面（issue-detail.tsx）と同じで、リポジトリ情報が無い場合は塞がない側に倒す
   const startTargetRepository = startTargetIssue
@@ -481,7 +437,7 @@ export function CreateIssueDialog({
   } = useIssueSuggest();
   // タイトルが空のまま作成系ボタンが押されたときの自動判定（#2773）もこの状態に含める。
   // 判定中も「作成中...」の表示・ボタンの無効化がそのまま効く
-  const isSubmitting = isCreatingIssue || isCreatingComment || isSuggesting;
+  const isSubmitting = isCreatingIssue || isSuggesting;
   /** AI判定（自動判定・「付け直す」共通）を実行できるか。材料（本文）と付け先（リポジトリのラベル一覧）が要る */
   const canSuggest =
     Boolean(body.trim()) && Boolean(repositoryFullName) && !isMetaLoading && !isSuggesting;
@@ -513,13 +469,11 @@ export function CreateIssueDialog({
           defaultTitle,
           defaultBody,
         }));
-    pendingQuestionIssue.current = null;
-    setKind(draft.kind);
     // 移してきた値は「人が書いたもの」として扱う。`自動`の出どころは移す前の画面に残っており、
     // ここで復元すると、直したはずの項目まで自動と書かれかねない
     setAutoFilled({ title: false, labels: false });
     setLabelSuggestionMissed(false);
-    setQuestionHint(null);
+    setQuestionHint(false);
     setRepositoryFullName(draft.repositoryFullName);
     // 移してきたリポジトリは、移す前の画面で人が選んだものかどうかまでは分からない。
     // 触っていない扱いにすると`表示中のリポジトリ`が出るが、`defaultRepositoryFullName`も
@@ -532,7 +486,6 @@ export function CreateIssueDialog({
     setSelectedLabels(draft.selectedLabels);
     setIsImageUploading(false);
     setError(null);
-    setCommentError(null);
     setPopOutBlocked(false);
     // 引き継ぎ（bodyPrefix）は本文の入力欄を空のまま始めるため、保存済み下書きの提示は止めない
     // （#1322）。閉じてしまった引き継ぎ作成の入力を復元でき、復元しても接頭辞は消えない。
@@ -551,13 +504,11 @@ export function CreateIssueDialog({
     initialHandoff,
     continueRepositoryFullName,
     setError,
-    setCommentError,
   ]);
 
   // 担当者は画面の状態として持たない（#1929）。下書きにも入れない——開いて何も書かずに
   // 閉じただけの下書きが「空ではない」と判定され、次に開いたとき「復元する」が出てしまう
   useIssueDraftAutosave(open, {
-    kind,
     repositoryFullName,
     title,
     body,
@@ -567,43 +518,9 @@ export function CreateIssueDialog({
 
   // 提案が出たら、押した人の視線がある場所からでも見えるところまで寄せる（#1890）
   useEffect(() => {
-    if (questionHint?.phase !== "suggested") return;
+    if (!questionHint) return;
     questionHintRef.current?.scrollIntoView({ block: "nearest" });
-  }, [questionHint?.phase]);
-
-  /**
-   * 種別を切り替える。質問で選べないリポジトリを選んでいた場合は未選択へ戻す（#1641・#1884）。
-   * 戻した後は選ばせる側なので、「人が選んだ」印は降ろす。
-   */
-  function selectKind(next: IssueDraftKind) {
-    const resolved = resolveKindRepository(next, repositories, repositoryFullName);
-    setKind(next);
-    setRepositoryFullName(resolved);
-    if (resolved !== repositoryFullName) setHasPickedRepository(false);
-    // 種別を人が決めた時点で提案は役目を終える（#1890）。切り替え・戻すの各ボタンは、
-    // これを呼んだあとで自分の状態を立て直す
-    setQuestionHint(null);
-  }
-
-  /** 提案の「質問に切り替える」（#1890）。戻す先として、切り替える前のリポジトリを覚えておく */
-  function handleSwitchToQuestion() {
-    const previousRepository = { fullName: repositoryFullName, picked: hasPickedRepository };
-    selectKind("question");
-    setQuestionHint({ phase: "switched", previousRepository });
-  }
-
-  /**
-   * 提案の「Issueに戻す」（#1890）。種別を戻すだけでは、質問で選べず未選択になった
-   * リポジトリが空のまま残るため、押す前の値を入れ直す。
-   */
-  function handleRevertToIssue() {
-    const previous = questionHint?.phase === "switched" ? questionHint.previousRepository : null;
-    selectKind("issue");
-    if (previous) {
-      setRepositoryFullName(previous.fullName);
-      setHasPickedRepository(previous.picked);
-    }
-  }
+  }, [questionHint]);
 
   /**
    * 書いている内容ごと別ウィンドウへ移す（#1728）。
@@ -613,7 +530,6 @@ export function CreateIssueDialog({
    */
   function handlePopOut() {
     const opened = openIssueCreateWindow({
-      kind,
       repositoryFullName,
       title,
       body,
@@ -642,22 +558,15 @@ export function CreateIssueDialog({
 
   function handleRestoreDraft() {
     if (!restorableDraft) return;
-    // 下書きは書いていたときの種別ごと戻す（質問の書きかけを復元してIssueとして作らない）
-    setKind(restorableDraft.kind);
     // **書いていたときに選んでいたリポジトリを優先する**（#2354）。以前は開いていた画面の
     // リポジトリが優先されており、別のリポジトリで書いた下書きを復元すると、中身だけが
     // 別のリポジトリへ入った状態になっていた。連携が外れて選択肢に無い値は、欄が空に見えるのに
     // 値だけ残るのを避けるため開いていた画面の値へ落とす
-    const draftRepository = repositories.some(
+    const restoredRepository = repositories.some(
       (repo) => repo.fullName === restorableDraft.repositoryFullName,
     )
       ? restorableDraft.repositoryFullName
       : (defaultRepositoryFullName ?? "");
-    const restoredRepository = resolveKindRepository(
-      restorableDraft.kind,
-      repositories,
-      draftRepository,
-    );
     setRepositoryFullName(restoredRepository);
     // 書いていたときに入っていた値は本人が決めたものとして扱う（#1733）
     setHasPickedRepository(restoredRepository !== "");
@@ -670,15 +579,23 @@ export function CreateIssueDialog({
     setRestorableDraft(null);
     setAutoFilled({ title: false, labels: false });
     setLabelSuggestionMissed(false);
-    setQuestionHint(null);
+    setQuestionHint(false);
+  }
+
+  /**
+   * 提案の「リモートセッションで聞く」（#5047）。書いていた内容は下書きに残るので、閉じてから
+   * 選んでいたリポジトリでリモートセッション画面を開く（起動はそちらで選ぶ）
+   */
+  function handleOpenRemoteSession() {
+    if (!onOpenRemoteSession) return;
+    closeDialog();
+    onOpenRemoteSession(repositoryFullName || undefined);
   }
 
   function resetForm() {
-    pendingQuestionIssue.current = null;
-    setKind("issue");
     setAutoFilled({ title: false, labels: false });
     setLabelSuggestionMissed(false);
-    setQuestionHint(null);
+    setQuestionHint(false);
     setRepositoryFullName("");
     setHasPickedRepository(false);
     setTitle("");
@@ -710,8 +627,8 @@ export function CreateIssueDialog({
    *
    * 失敗しても作成は止めない——値が空のまま自分で書ける状態が残る。
    *
-   * 判定結果が「質問のようです」だった場合は種別を変えず提案（`questionHint`）だけを出す
-   * （#1890）。**ここで自動的にIssueへ進めると、質問のつもりの内容が実装Issueとして
+   * 判定結果が「質問のようです」だった場合は提案（`questionHint`）を出して作成を止める
+   * （#1890・#5047）。**ここで自動的にIssueへ進めると、質問のつもりの内容が実装Issueとして
    * 無人実行に乗ってしまう取り返しの付きにくい間違いになる**ため、呼び出し元には
    * 「続けてはいけない」ことをnullで伝える。
    */
@@ -732,7 +649,7 @@ export function CreateIssueDialog({
     setAutoFilled({ title: !preserveTitle, labels: result.labels.length > 0 });
     setLabelSuggestionMissed(result.labels.length === 0);
     if (!preserveTitle && result.kind === "question") {
-      setQuestionHint({ phase: "suggested" });
+      setQuestionHint(true);
       return null;
     }
     return { title: resolvedTitle, labels: mergedLabels };
@@ -811,10 +728,6 @@ export function CreateIssueDialog({
   }
 
   async function handleSubmit() {
-    if (isQuestion) {
-      await handleAskQuestion();
-      return;
-    }
     if (!repositoryFullName) return;
     const resolved = await ensureTitleAndLabels();
     if (!resolved) return;
@@ -833,49 +746,6 @@ export function CreateIssueDialog({
       if (!isWindow) closeDialog();
       askOrApplyPostCreateDestination(issue);
     }
-  }
-
-  /**
-   * 種別「質問」での送信（#691の「リポジトリに質問する」をここへ統合したもの・#1641）。
-   *
-   * Issueを1件作り、続けてGitHub Actions（mode=ask）を起こす質問コメントを投稿する。
-   * **タイトルは質問文から機械的に作る**（`[質問] `接頭辞。Claudeは使わない）。この接頭辞が
-   * 質問Issueかどうかの唯一の判定材料で、質問ビューとワンボタンクローズがこれを見ている。
-   */
-  async function handleAskQuestion() {
-    if (!repositoryFullName || !body.trim()) return;
-    const pending = pendingQuestionIssue.current?.repositoryFullName === repositoryFullName ? pendingQuestionIssue.current : null;
-    const issue = pending ?? await createIssue({
-      repositoryFullName,
-      title: buildAskRepoQuestionTitle(body),
-      body: composeIssueBody(effectiveBodyPrefix, body),
-      labels: selectedLabels,
-      assignee: null,
-    });
-    if (!issue) return;
-
-    pendingQuestionIssue.current = issue;
-    const [owner, repo] = issue.repositoryFullName.split("/");
-    const comment = await createComment({
-      owner,
-      repo,
-      number: issue.number,
-      body: askClaudeCommentBody(body),
-      askQuestion: true,
-    });
-    if (!comment || comment.deliveryWarning) {
-      setCommentError(comment?.deliveryWarning ?? `質問Issue #${issue.number} は作成済みですが、質問を送信できませんでした。ホストの状態を確認して再送してください。`);
-      return;
-    }
-
-    resetForm();
-    clearIssueDraft();
-    // 別ウィンドウでは閉じずに「続けて作成」するため（#2953）、ここでは閉じない
-    if (!isWindow) closeDialog();
-    onCreated(comment ? { ...issue, commentCount: issue.commentCount + 1 } : issue);
-    // 質問もIssueを1件作る以上、行き先の扱いは作成と同じにする（#2862）。ここだけ必ず詳細へ
-    // 移動させると、記憶した行き先と食い違う
-    askOrApplyPostCreateDestination(issue);
   }
 
   /**
@@ -914,8 +784,7 @@ export function CreateIssueDialog({
   }
 
   /**
-   * Cmd/Ctrl+Enterでの確定（#1884）。フッターの主ボタンが常に「作成」（質問は「質問する」）
-   * なので、そのまま`handleSubmit`を呼べばよい（#2773でタイトル空時の分岐を廃止）。
+   * Cmd/Ctrl+Enterでの確定（#1884）。フッターの「作成」と同じ動きなので、そのまま`handleSubmit`を呼べばよい（#2773でタイトル空時の分岐を廃止）。
    */
   function handleKeyDown(e: React.KeyboardEvent) {
     if (e.key !== "Enter" || !(e.metaKey || e.ctrlKey)) return;
@@ -924,20 +793,17 @@ export function CreateIssueDialog({
   }
 
   /**
-   * 見出し（#1929）。**Issueのときは説明文を画面に出さない。** 「内容を書いて作成します」は
-   * 画面を見れば分かることをスマホで2行使って書いていた。質問は作成後の動き（回答が
-   * コメントで返るまで待つ）が画面から読めないため、そちらだけ残す。
+   * 見出し（#1929）。**説明文は画面に出さない。** 「内容を書いて作成します」は
+   * 画面を見れば分かることをスマホで2行使って書いていた。
    *
    * 消すのは見た目だけで、要素は`sr-only`で残す——`DialogContent`の説明として読み上げに
    * 使われており、無くすとRadixが警告を出す。
    */
   const header = (
     <Chrome.Header>
-      <Chrome.Title>{isQuestion ? "リポジトリに質問する" : "新しいIssueを作成"}</Chrome.Title>
-      <Chrome.Description className={isQuestion ? undefined : "sr-only"}>
-        {isQuestion
-          ? "質問内容でIssueを自動作成し、Claudeに質問します。回答はコメントとして返るまで数十秒〜数分かかります。"
-          : "内容を書いて作成します。タイトル・ラベルが空欄なら、作成時に自動で決まります。"}
+      <Chrome.Title>新しいIssueを作成</Chrome.Title>
+      <Chrome.Description className="sr-only">
+        内容を書いて作成します。タイトル・ラベルが空欄なら、作成時に自動で決まります。
       </Chrome.Description>
     </Chrome.Header>
   );
@@ -956,44 +822,10 @@ export function CreateIssueDialog({
       {/* 項目の間隔は`gap-3`（#1929）。スマホで一画面に収めるための詰めで、
           1項目あたり4pxでも6項目ぶん積まれると見出しの説明文1行ぶんに相当する */}
       <div className="flex flex-col gap-3">
-        {/* 種別（#1641）。**本文の内容で勝手に切り替えない。** 誤判定は押した本人から
-            見えないまま、質問のつもりの本文が実装Issueとして無人実行に乗る（逆もある）
-            という取り返しの付きにくい間違いになるため、決めるのは押した人にする。
-            判定して「質問に切り替えますか」と提案するところまでは行う（下の`questionHint`・#1890）
-
-            見出しとボタンは同じ行に置く（#1929）。選択肢が2つで横幅が余っており、
-            見出しだけで1行使う理由が無い */}
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
-          <Label>種別</Label>
-          <div className="flex gap-1.5">
-            <Button
-              type="button"
-              variant={isQuestion ? "outline" : "default"}
-              className="h-9 px-3 text-xs"
-              aria-pressed={!isQuestion}
-              onClick={() => selectKind("issue")}
-            >
-              <Plus />
-              Issue
-            </Button>
-            <Button
-              type="button"
-              variant={isQuestion ? "default" : "outline"}
-              className="h-9 px-3 text-xs"
-              aria-pressed={isQuestion}
-              onClick={() => selectKind("question")}
-            >
-              <MessageCircleQuestion />
-              質問
-            </Button>
-          </div>
-        </div>
-
-        {/* 内容が質問だと判定されたときの提案（#1890）。**種別のすぐ下に置く。**
-            提案しているのは種別の変更で、押した結果が変わるのも真上のボタンなので、
-            離して置くと何が切り替わったのかが読めない。色は質問コメント
-            （comment-thread.tsx）と揃えて青にし、画面をまたいで「青い囲み＝質問」で読めるようにする */}
-        {questionHint?.phase === "suggested" && (
+        {/* 内容が質問だと判定されたときの提案（#1890）。質問の種別は#5047で廃止したので、
+            切り替える代わりにリモートセッションで聞くよう案内する。色は過去の質問コメント
+            （comment-thread.tsx）と揃えて青にする */}
+        {questionHint && (
           <div
             ref={questionHintRef}
             className="flex flex-col gap-2 rounded-md border border-blue-500/40 bg-blue-500/10 px-3 py-2.5"
@@ -1001,29 +833,20 @@ export function CreateIssueDialog({
             <div className="flex flex-col gap-1">
               <span className="text-sm font-medium">内容から質問のようです</span>
               <p className="text-xs text-muted-foreground">
-                「質問」にすると、コードは変更されず回答コメントだけが返ります。Issueのままにすると、
-                これまでどおり実装の対象になります。
+                Issueにすると実装の対象になります。聞きたいだけなら、リモートセッションでClaude Codeに聞いてください。
               </p>
             </div>
             <div className="flex flex-wrap gap-2">
-              <Button size="xs" onClick={handleSwitchToQuestion}>
-                質問に切り替える
-              </Button>
-              <Button variant="outline" size="xs" onClick={() => setQuestionHint(null)}>
+              {onOpenRemoteSession && (
+                <Button size="xs" onClick={handleOpenRemoteSession}>
+                  <TerminalSquare />
+                  リモートセッションで聞く
+                </Button>
+              )}
+              <Button variant="outline" size="xs" onClick={() => setQuestionHint(false)}>
                 Issueのままにする
               </Button>
             </div>
-          </div>
-        )}
-
-        {/* 切り替えた直後だけ出す（#1890）。種別の見た目も変わっているが、押した操作を
-            1タップで取り消せる口をその場に残す */}
-        {questionHint?.phase === "switched" && (
-          <div className="flex items-center justify-between gap-2 rounded-md border border-border bg-muted/50 px-3 py-2 text-sm">
-            <span className="text-muted-foreground">質問に切り替えました。</span>
-            <Button variant="outline" size="xs" onClick={handleRevertToIssue}>
-              Issueに戻す
-            </Button>
           </div>
         )}
 
@@ -1054,42 +877,18 @@ export function CreateIssueDialog({
               >
                 <RepositorySelectItems
                   registered={registeredRepositories}
-                  unregistered={selectableUnregisteredRepositories}
+                  unregistered={unregisteredRepositories}
                 />
               </SelectContent>
             </Select>
           ) : (
-            <p className="text-sm text-muted-foreground">
-              {isQuestion
-                ? "claude-issue-dispatch.ymlが導入されているリポジトリがありません。"
-                : "連携しているリポジトリがありません。"}
-            </p>
-          )}
-          {/* 補足文は質問のときだけ出す（#1929）。「どのリポジトリの話かを選んでください」は
-              選択欄の`リポジトリを選択`と同じことしか言っておらず、`表示中のリポジトリ`の説明も
-              バッジの文字がそのまま説明になっている。質問は**選択肢が減っている理由**という
-              画面から読めないことを書いているため残す */}
-          {hasSelectableRepository && isQuestion && (
-            <p className="text-xs text-muted-foreground">
-              回答するのはGitHub Actionsのため、claude-issue-dispatch.yml導入済みのリポジトリだけ選べます。
-            </p>
+            <p className="text-sm text-muted-foreground">連携しているリポジトリがありません。</p>
           )}
         </div>
 
         {/* タイトルはリポジトリと内容の間に置く（#1929）。**「どこへ」→「何を」→「詳しく」の
             順に並べる。** 内容の下にあると、付与で埋まったタイトルを確かめるのに書き終えた本文を
             越えて下へ探しに行くことになり、スマホでは本文の長さぶんだけ離れる */}
-        {isQuestion ? (
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="create-issue-question-title">タイトル（自動）</Label>
-            <p
-              id="create-issue-question-title"
-              className="rounded-md border border-input px-3 py-2 text-sm break-all text-muted-foreground"
-            >
-              {body.trim() ? buildAskRepoQuestionTitle(body) : "質問内容から自動で作られます"}
-            </p>
-          </div>
-        ) : (
           <div className="flex flex-col gap-1.5">
             <div className="flex items-center gap-1.5">
               <Label htmlFor="create-issue-title">タイトル</Label>
@@ -1106,11 +905,7 @@ export function CreateIssueDialog({
               className="md:text-sm"
             />
           </div>
-        )}
 
-        {/* 本文の入力欄は種別で変えない（#1641）。質問でも画像の貼り付け・ドラッグ&ドロップと
-            `#123`のIssue補完が使えるようにするのがこの統合の主目的で、以前の質問ダイアログは
-            素のTextareaだったためどちらも使えなかった */}
         <div className="flex flex-col gap-1.5">
           {/* 「音声入力を整理」は見出しの右隣に置く（#3068）。入力欄の下の行は画像の操作だけにする。
               整形の失敗メッセージはボタンの下に出て行が伸びるので、見出しは上端にそろえる。
@@ -1119,7 +914,7 @@ export function CreateIssueDialog({
               抽出ボタンの文言は`sm`未満で「画像から抽出」（約110px）に縮めている */}
           <div className="flex flex-wrap items-start gap-x-2 gap-y-1">
             <Label htmlFor="create-issue-body" className="h-8 md:h-6">
-              {isQuestion ? "質問内容" : "内容"}
+              内容
             </Label>
             <BodyCleanupButton value={body} onCleaned={setBody} disabled={isSubmitting} />
             {/* 書き込み済みの画像から変更内容を読み取って本文の末尾へ足す（#3243）。状態の文は
@@ -1145,7 +940,7 @@ export function CreateIssueDialog({
             issueSuggestions={issueSuggestions}
             onUploadingChange={setIsImageUploading}
             repositoryFullName={repositoryFullName}
-            placeholder={isQuestion ? "質問内容を入力してください" : "何をしたいかを書いてください"}
+            placeholder="何をしたいかを書いてください"
             // 高さは固定（#3123）。文字が増えても欄は伸びず、欄の中でスクロールする。以前は
             // `Textarea`既定の`field-sizing-content max-h-64`で最大256pxまで伸び、スマホで
             // ダイアログが1画面を超えていた。スマホの文字は16pxのまま（iOSが拡大するため・
@@ -1183,17 +978,15 @@ export function CreateIssueDialog({
             {/* 付け直す口（#1884・#2773）。タイトルが空でも押せる——作成前に判定結果だけ
                 その場で確かめたい場合に使う。専用の付与ボタンは無いため、押した結果は
                 常にこの1つの口に集まる */}
-            {!isQuestion && (
-              <Button
-                variant="outline"
-                size="xs"
-                disabled={!canSuggest}
-                onClick={handleGenerateSuggestion}
-              >
-                {isSuggesting ? <Loader2 className="animate-spin" /> : <Bot />}
-                付け直す
-              </Button>
-            )}
+            <Button
+              variant="outline"
+              size="xs"
+              disabled={!canSuggest}
+              onClick={handleGenerateSuggestion}
+            >
+              {isSuggesting ? <Loader2 className="animate-spin" /> : <Bot />}
+              付け直す
+            </Button>
             {selectedLabels.filter(isSelectableLabelName).map((name) => {
               const label = labels.find((l) => l.name === name);
               return (
@@ -1231,8 +1024,7 @@ export function CreateIssueDialog({
             毎回そのまま作成していた。**値は画面の状態として持たず、作成時に定数を送る。**
             以前は`/api/issues/meta`が返した割り当て可能ユーザーに`m-guchi`が居たときだけ
             入る初期値だったため、欄を消すと取得の失敗・遅延がそのまま「担当者なしのIssue」に
-            なり、画面からは気づけなくなる。別の人に割り当てたい場合はIssue詳細かGitHub側で変える。
-            質問Issueにはもともと担当者を付けない（人が引き取る作業ではなく、Claudeが答えて終わる） */}
+            なり、画面からは気づけなくなる。別の人に割り当てたい場合はIssue詳細かGitHub側で変える。 */}
 
         {/* 別ウィンドウを開けなかったときだけ出す（#1728）。押しても何も起きないと、
             ボタンが壊れているのか自分の環境の設定なのかが分からない */}
@@ -1242,7 +1034,7 @@ export function CreateIssueDialog({
           </p>
         )}
 
-        <ApiErrorMessage message={error ?? commentError} />
+        <ApiErrorMessage message={error} />
       </div>
     </>
   );
@@ -1261,43 +1053,33 @@ export function CreateIssueDialog({
       </Button>
       {/* 「タイトル・ラベルを付与」の専用ボタンは廃止（#2773）。タイトルが空のまま押すと、
           `handleSubmit`/`handleCreateAndStart`が送信前に自動で判定してから作成する */}
-      {/* 主導線は「作成+実装開始」なので、そちらを強調色にする（#4086）。質問モードは
-          このボタンだけが出るため強調色のままにする */}
+      {/* 主導線は「作成+実装開始」なので、そちらを強調色にする（#4086） */}
       <Button
-        variant={isQuestion ? "default" : "secondary"}
+        variant="secondary"
         className="flex-1 sm:flex-none"
         onClick={handleSubmit}
         disabled={
           isSubmitting ||
           !repositoryFullName ||
           isImageUploading ||
-          (isQuestion ? !body.trim() : !title.trim() && !body.trim())
+          (!title.trim() && !body.trim())
         }
       >
-        {isQuestion
-          ? isSubmitting
-            ? "送信中..."
-            : "質問する"
-          : isSubmitting
-            ? "作成中..."
-            : "作成"}
+        {isSubmitting ? "作成中..." : "作成"}
       </Button>
-      {/* 質問は実装の対象ではないため「作成+実装開始」を出さない（#1641）。
-          Actionsが使えないリポジトリでもこのボタンは塞がない（#1262と同じ判断・#1323）。
+      {/* Actionsが使えないリポジトリでもこのボタンは塞がない（#1262と同じ判断・#1323）。
           実行先の選択がこの先のダイアログにある以上、押せないとサブPCでの起動まで塞がる。
           理由はダイアログのGitHub Actionsの選択肢の説明として出す。
           タイトルが空でも押せる（#2773）——押すと送信前に自動でタイトル・ラベルを判定する */}
-      {!isQuestion && (
-        <Button
-          className="flex-1 sm:flex-none"
-          onClick={handleCreateAndStart}
-          disabled={
-            isSubmitting || !repositoryFullName || isImageUploading || (!title.trim() && !body.trim())
-          }
-        >
-          {isSubmitting ? "作成中..." : "作成+実装開始"}
-        </Button>
-      )}
+      <Button
+        className="flex-1 sm:flex-none"
+        onClick={handleCreateAndStart}
+        disabled={
+          isSubmitting || !repositoryFullName || isImageUploading || (!title.trim() && !body.trim())
+        }
+      >
+        {isSubmitting ? "作成中..." : "作成+実装開始"}
+      </Button>
     </Chrome.Footer>
   );
 
