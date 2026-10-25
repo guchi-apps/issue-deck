@@ -17,6 +17,11 @@ GH = os.environ.get("RELEASE_REVIEW_GH", "gh")
 ALLOWED_OWNERS = {o for o in os.environ.get("RELEASE_REVIEW_ALLOWED_OWNERS", "guchi-apps").split(",") if o}
 JUDGE_VERSION = 2  # 判定器の版。変えると指紋が変わり、影響する未確認が再評価される
 MAX_REFS, MAX_FILES, MAX_FILE_BYTES, MAX_BODY = 8, 30, 40000, 3000
+MAX_RC_PRS = 20  # RCが含む実装PRの本文を読む上限
+PR_MERGE_RE = re.compile(r"^Merge pull request #(\d+) from ")
+PR_SQUASH_RE = re.compile(r"\(#(\d+)\)\s*$")
+REF_SOURCE = {}  # 参照 -> 発見元（コミット/追加行 or 実装PR本文）。出典をmanifestへ残す
+PR_SOURCES = []  # 本文を読んだRC内の実装PR（番号・マージSHA）
 REPO = r"[A-Za-z0-9][A-Za-z0-9._-]*"
 REF_RE = re.compile(rf"\b([A-Za-z0-9-]+)/({REPO})#(\d+)\b")
 URL_RE = re.compile(rf"https://github\.com/([A-Za-z0-9-]+)/({REPO})/(?:issues|pull)/(\d+)\b")
@@ -51,7 +56,55 @@ def api_json(path):
         return None, "通信失敗"
 
 
-def extract_refs(worktree, base, head):
+def rc_pull_numbers(worktree, base, head):
+    """base..headのコミット件名から、RCが含む同repoの実装PR番号を取る（マージコミット・squash）。"""
+    try:
+        out = subprocess.check_output(["git", "-C", str(worktree), "log", "--format=%H %s", f"{base}..{head}"],
+                                      stderr=subprocess.DEVNULL, timeout=90).decode("utf-8", "replace")
+    except (OSError, subprocess.SubprocessError):
+        return {}
+    found = {}
+    for line in out.splitlines():
+        sha, _, subject = line.partition(" ")
+        m = PR_MERGE_RE.match(subject) or PR_SQUASH_RE.search(subject)
+        if m:
+            found.setdefault(int(m.group(1)), sha)
+    return found
+
+
+def rc_pull_refs(worktree, full_name, base, head):
+    """RCに含まれる実装PRの本文にある明示的な参照だけを依存候補にする。本文中のURLは再帰的に巡回しない。"""
+    owner, _, repo = full_name.partition("/")
+    if owner not in ALLOWED_OWNERS:
+        return []
+    refs = []
+    for number, commit in list(rc_pull_numbers(worktree, base, head).items())[:MAX_RC_PRS]:
+        pr, _ = api_json(f"repos/{owner}/{repo}/pulls/{number}")
+        if not pr:
+            continue
+        # コミット件名の(#N)が別PRを指していないか、PRのマージコミットがRCの範囲にあることで確かめる
+        merge_sha = pr.get("merge_commit_sha")
+        if not pr.get("merged_at") or not merge_sha or merge_sha != commit and not _in_range(worktree, base, head, merge_sha):
+            continue
+        PR_SOURCES.append({"pull": f"{full_name}#{number}", "mergeSha": merge_sha})
+        for rx in (REF_RE, URL_RE):
+            for o, r, n in rx.findall(pr.get("body") or ""):
+                key = (o, r, int(n))
+                if key not in refs:
+                    refs.append(key)
+                    REF_SOURCE.setdefault(key, f"{full_name}#{number}（RCの実装PR本文・マージSHA {merge_sha}）")
+    return refs
+
+
+def _in_range(worktree, base, head, sha):
+    try:
+        out = subprocess.check_output(["git", "-C", str(worktree), "rev-list", f"{base}..{head}"], stderr=subprocess.DEVNULL, timeout=90)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return sha in out.decode().split()
+
+
+def extract_refs(worktree, base, head, full_name=None):
     texts = []
     for args in (["log", "--format=%B", f"{base}..{head}"], ["diff", "--unified=0", f"{base}...{head}"]):
         try:
@@ -69,6 +122,11 @@ def extract_refs(worktree, base, head):
                 key = (owner, repo, int(num))
                 if key not in found:
                     found.append(key)
+                    REF_SOURCE.setdefault(key, "RCのコミットメッセージ/追加行")
+    if full_name:
+        for key in rc_pull_refs(worktree, full_name, base, head):
+            if key not in found:
+                found.append(key)
     return found
 
 
@@ -164,7 +222,7 @@ def fetch_files(owner, repo, names, sha, outdir):
 
 
 def resolve(owner, repo, number, outdir):
-    record = {"repository": f"{owner}/{repo}", "number": number}
+    record = {"repository": f"{owner}/{repo}", "number": number, "discoveredFrom": REF_SOURCE.get((owner, repo, number))}
     if owner not in ALLOWED_OWNERS:
         record.update(classification="資料未取得", error="許可された管理対象外のため取得しない")
         return record
@@ -193,10 +251,10 @@ def resolve(owner, repo, number, outdir):
 def prepare(worktree, full_name, base, head, output):
     output = Path(output)
     output.mkdir(parents=True, exist_ok=True)
-    refs = [r for r in extract_refs(worktree, base, head) if f"{r[0]}/{r[1]}" != full_name.lower()]
+    refs = [r for r in extract_refs(worktree, base, head, full_name) if f"{r[0]}/{r[1]}" != full_name.lower()]
     omitted = max(0, len(refs) - MAX_REFS)
     records = [resolve(*r, output) for r in refs[:MAX_REFS]]
-    manifest = {"target": full_name, "resolved": records, "omittedRefs": omitted, "judgeVersion": JUDGE_VERSION,
+    manifest = {"target": full_name, "resolved": records, "rcPulls": PR_SOURCES, "omittedRefs": omitted, "judgeVersion": JUDGE_VERSION,
                 "fetchedAt": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
                 "sharedTokens": "値は取得していない。登録の有無・利用先は今回の取得では照会していない（未確認）。登録されていないことが確認済みという意味ではないため、"
                                 "資格情報の新規発行を前提にせず、実設定の確認が要る項目は『実設定は未確認』として分類する"}

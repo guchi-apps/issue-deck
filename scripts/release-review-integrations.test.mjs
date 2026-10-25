@@ -159,3 +159,48 @@ it("共有トークンの指紋は最終利用日時・並び順では変わら�
   expect(gen(JSON.stringify([a, { ...b, consumers: ["z"] }]))).not.toBe(base0);
   expect(gen("null")).not.toBe(base0);
 });
+// #5037: RC-8（aide #698 → yoteiflow#1354）。依存参照はRCのコミット/追加行ではなく実装PR本文にだけある
+function rcWithPull(subject) {
+  git("commit", "-q", "--amend", "-m", subject);
+  head = git("rev-parse", "HEAD");
+  return head;
+}
+const pullRoutes = (merge, body) => ({
+  "repos/guchi-apps/aide/pulls/698": { merged_at: "2026-10-20", merge_commit_sha: merge, body },
+  "repos/guchi-apps/yoteiflow/issues/1354": { title: "DaySpan", state: "closed", closed_at: "2026-10-18", body: "endDate" },
+  "repos/guchi-apps/yoteiflow/pulls?state=all": [{ number: 1357 }],
+  "repos/guchi-apps/yoteiflow/pulls/1357/files": [],
+  "repos/guchi-apps/yoteiflow/pulls/1357": { merged_at: "2026-10-18", merge_commit_sha: SHA, base: { ref: "main" }, head: { ref: "issue-1354" } },
+  "repos/guchi-apps/yoteiflow/compare/": { status: "behind" },
+  "repos/guchi-apps/yoteiflow/actions/runs": { workflow_runs: [] },
+});
+it("RCの実装PR本文にある依存参照を発見元付きで解決する", () => {
+  const sha = rcWithPull("Merge pull request #698 from guchi-apps/issue-696");
+  writeFake(pullRoutes(sha, "依存: guchi-apps/yoteiflow#1354\n無関係: https://evil.example/a/b/issues/1 と other-org/z#3"));
+  run();
+  const m = JSON.parse(readFileSync(path.join(out, "manifest.json"), "utf8"));
+  const r = m.resolved.find((x) => x.repository === "guchi-apps/yoteiflow");
+  expect(r.number).toBe(1354);
+  expect(r.discoveredFrom).toContain("guchi-apps/aide#698");
+  expect(r.pulls[0].number).toBe(1357);
+  expect(m.rcPulls[0].mergeSha).toBe(sha);
+  expect(m.resolved.find((x) => x.repository === "other-org/z").classification).toBe("資料未取得");
+  expect(readFileSync(path.join(dir, "calls.log"), "utf8")).not.toContain("evil");
+});
+it("RCの範囲に無いマージSHAを持つPR（コミット件名の番号違い）の本文は採用しない", () => {
+  rcWithPull("Merge pull request #698 from guchi-apps/issue-696");
+  writeFake(pullRoutes("d".repeat(40), "依存: guchi-apps/yoteiflow#1354"));
+  expect(run()).toBe("");
+});
+it("PR本文の参照も上限と許可リストに従い、変更のない再実行は同じ指紋", () => {
+  const sha = rcWithPull("feat (#698)");
+  const many = Array.from({ length: 12 }, (_, i) => `guchi-apps/yoteiflow#${2000 + i}`).join(" ");
+  writeFake(pullRoutes(sha, many));
+  run();
+  const m = JSON.parse(readFileSync(path.join(out, "manifest.json"), "utf8"));
+  expect(m.resolved.length).toBe(8);
+  expect(m.omittedRefs).toBe(4);
+  const fp = readFileSync(path.join(out, "fingerprint"), "utf8");
+  run();
+  expect(readFileSync(path.join(out, "fingerprint"), "utf8")).toBe(fp);
+});
