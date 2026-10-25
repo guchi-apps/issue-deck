@@ -575,14 +575,14 @@ lifecycleスクリプト（`scripts/version-changelog.mjs`）が`src/lib/changel
 issue-deck自身には届かない**ため、サブPCのpollerが叩く巡回
 （`POST /api/repositories/release-push-sweep`）が新しいリリースを見つけて通知を出す。
 当初（#2725）はPush通知、#4791でSlackへの投稿に替え、**#4994からはDiscordのチャンネルへWebhookで
-埋め込み（タイトル・リポジトリ・バージョン・更新内容・各種リンク・公開時刻）を投稿する。**
+埋め込み（更新内容・各種リンク・公開時刻）を投稿する。**
 投稿先は環境変数`DISCORD_RELEASE_WEBHOOK_URL`（Discordのチャンネル設定「連携サービス」で発行した
-Webhook URL。**URL自体が資格情報**なので`.env.local`・1Passwordにだけ置く）。未設定ならGitHubも
+Webhook URL。**フォーラムチャンネル**で発行する（#5031）。リリースごとに投稿が1件立ち、タイトルは`owner/repo タグ`。**URL自体が資格情報**なので`.env.local`・1Passwordにだけ置く）。未設定ならGitHubも
 叩かず何も送らない。**本番への配布経路**（#5007）は`.github/secrets-manifest.tsv`（`op://apps/issue-deck/discord-release-webhook-url`）
 →`scripts/sync-github-secrets.sh`→`deploy.yml`のenv転送と.env書き出しで、デプロイのたびに.envが
 作り直されるため、VPSの.envを手で書き換えても次のデプロイで消える。Slack時代の`SLACK_BOT_TOKEN`は
 この経路に載っていなかった。**Webhookを1Passwordへ登録して同期するまでは通知が止まる**ので、公開前に
-登録を済ませる。メンションは解決させない（更新内容の`@everyone`で鳴らさない）。
+登録を済ませる。**URLの差し替えとコードのマージはどちらが先でもよい**（`postWebhookMessage`が400のとき`thread_name`を外して1回送り直す）。共有トークン警告も同じURLで、タイトルは「共有トークン警告 <トークン名>」。メンションは解決させない（更新内容の`@everyone`で鳴らさない）。
 「アプリを開く」はGitHubリポジトリの`homepage`があるときだけ出す。**Signalyへの通知はそのまま残す。**
 チャンネル宛のため、ユーザーごとのリポジトリ非表示・ミュート設定は効かない。
 

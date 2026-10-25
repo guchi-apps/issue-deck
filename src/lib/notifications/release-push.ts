@@ -190,16 +190,16 @@ export function releaseBranchScreenUrl(
   return `${origin}/dashboard?pane=flow&mscreen=flow`;
 }
 
-/** Discordの`content`（通知のプレビュー・埋め込みを描画できない場面の代替）。 */
-export function buildReleaseDiscordText(release: PublishedRelease): string {
-  return `リリースしました: ${release.repositoryFullName} ${release.tagName}`;
+/** フォーラムの投稿タイトル（#5031）。リポジトリとバージョンはここに載せ、本文では繰り返さない */
+export function buildReleaseThreadName(release: PublishedRelease): string {
+  return `${release.repositoryFullName} ${release.tagName}`;
 }
 
 /** 埋め込みの左帯の色（緑） */
 const RELEASE_EMBED_COLOR = 0x2ecc71;
 
 /**
- * リリース完了のDiscord埋め込み。タイトル・リポジトリとバージョン・更新内容・リンク・公開時刻の順。
+ * リリース完了のDiscord埋め込み（フォーラム投稿の本文。#5031）。更新内容・リンク・公開時刻の順。
  * **アプリのリンクは`homepage`がある場合だけ出す。**
  */
 export function buildReleaseDiscordEmbed(
@@ -211,15 +211,11 @@ export function buildReleaseDiscordEmbed(
   if (extras.appUrl) links.push(`[アプリを開く](${extras.appUrl})`);
   links.push(`[リリースノート](${extras.releaseUrl})`);
   return {
-    title: "リリースしました",
+    title: "リリースノートを開く",
     url: extras.releaseUrl,
     color: RELEASE_EMBED_COLOR,
     description: release.notes || RELEASE_PUSH_EMPTY_BODY,
-    fields: [
-      { name: "リポジトリ", value: release.repositoryFullName, inline: true },
-      { name: "バージョン", value: `\`${release.tagName}\``, inline: true },
-      { name: "リンク", value: links.join(" ・ ") },
-    ],
+    fields: [{ name: "リンク", value: links.join(" ・ ") }],
     ...(extras.publishedAt
       ? { timestamp: extras.publishedAt.toISOString(), footer: { text: `公開 ${formatJst(extras.publishedAt)}` } }
       : {}),
@@ -371,7 +367,7 @@ export async function runReleasePushSweep(
         ),
       };
       await postWebhookMessage(target.webhookUrl, {
-        content: buildReleaseDiscordText(published),
+        threadName: buildReleaseThreadName(published),
         embeds: [
           buildReleaseDiscordEmbed(published, {
             publishedAt,

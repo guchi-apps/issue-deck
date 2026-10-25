@@ -70,7 +70,7 @@ export async function notifyUnexpectedSharedTokenConsumer(
     await postWebhookMessage(
       target.webhookUrl,
       {
-        content: "⚠️ 共有トークンを想定外の利用元が取得しました",
+        threadName: `共有トークン警告 ${token.name}`,
         embeds: [
           {
             title: "想定外の利用元による共有トークンの取得",

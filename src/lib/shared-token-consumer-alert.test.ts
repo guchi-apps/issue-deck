@@ -65,6 +65,7 @@ describe("notifyUnexpectedSharedTokenConsumer", () => {
     expect(url).toBe(WEBHOOK);
     const body = JSON.parse(init.body as string);
     expect(body.allowed_mentions).toEqual({ parse: [] });
+    expect(body.thread_name).toBe("共有トークン警告 MYROOM_INTERNAL_BILLS_WRITE_API_KEY");
     expect(body.embeds[0].fields.map((field: { name: string }) => field.name)).toEqual(["トークン", "利用元", "時刻"]);
     expect(body.embeds[0].fields[0].value).toBe("MYROOM_INTERNAL_BILLS_WRITE_API_KEY");
     expect(body.embeds[0].fields[1].value).toBe("Hermes-Agent");
