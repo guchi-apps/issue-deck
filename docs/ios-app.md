@@ -122,6 +122,16 @@
 
 この変更は`ios/`に及ぶため、TestFlightの再配布後に実機で確認する。
 
+## HTTPSリンクをアプリで開く（Universal Links。#5035）
+
+Discord等に貼った`https://issuedeck.gucchii.com/dashboard?issue=<id>&mscreen=issue-detail&missue=<id>`（Issue詳細）と`/dashboard?pane=pull-requests&pr=<id>&mscreen=pull-requests`（PR詳細）を、インストール済みのアプリで開く。未インストール・PCは同じURLのWeb版が開く。`issuedeck://`の認証・共有・ウィジェット用経路は別で、触れていない。
+
+- **AASA**: `/.well-known/apple-app-site-association`と`/apple-app-site-association`（`src/app/`のルートハンドラ）。内容の正は`src/lib/ios-universal-links.ts`で、`/dashboard`＋`mscreen`が`issue-detail`／`pull-requests`のときだけ対象にする。`src/proxy.ts`のmatcherから除外してあり、認証もリダイレクトも掛からない
+- **アプリ**: `IssueDeck.entitlements`の`applinks:issuedeck.gucchii.com`。受け取ったURLは`UniversalLink.swift`がホスト・パス・数字のIDを検証し、**IDからパスを組み立て直して**WebViewへ渡す（任意のパス・クエリは通さない）
+- **未ログイン**: `middleware.ts`が`callbackUrl`にクエリも含めるので、ログイン後に元の詳細へ戻る。`toSafeRedirectPath`が内部パス以外を弾く
+- **公開プレビュー**: 同じ`/dashboard?…&mscreen=`形式に載せれば同じ詳細へ遷移できる
+- **署名**: Associated Domainsはプロビジョニングプロファイルにcapabilityが要る。自動署名で通るかは配布ビルドと実機で確認する
+
 ## 更新と配布
 
 **Webだけの更新とiOSバイナリの更新を区別する。**
