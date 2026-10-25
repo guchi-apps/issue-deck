@@ -19,7 +19,6 @@ import {
 import {
   enqueueCodeReviewJob,
   enqueueCodexPairingJob,
-  enqueueCrossRepoQuestionJob,
   enqueueDispatchJob,
   enqueueManualStepAbortJob,
   enqueueManualStepJob,
@@ -113,10 +112,7 @@ export async function GET() {
  * `kind`（#1332）を省略すると従来どおりの起動ジョブ。`interrupt`・`kill`・`instruction`（#1012）は
  * 既に立っているセッションへの操作で、**同じ経路に載せる**（受信経路・認証・状態報告を増やさないため）。
  * `instruction`のときは本文（`instruction`）が要り、`parseSessionInstruction`を通らなければ400。
- * `question`（#1294）は種別としては存在するが、**まだここでは受け付けない**（実行するpollerが
- * 無い段階で積めるようにすると、`QUEUED`のまま誰も取りに来ないジョブが残る。開けるのはStep 3）。
- * `cross_repo_question`（#1454）は受け付ける。こちらはpoller側の実行（`start-cross-repo-question.sh`）と
- * 対応の申告（`crossRepoQuestion`）が揃っており、申告のあるホストにしか払い出さない。
+ * かつての`question`（#1294）・`cross_repo_question`（#1454）は撤去した（#5051）。未知の種別として400を返す。
  * `manual_step`（#1828）も受け付ける。**画面から届いたコマンド文字列は照合にしか使わず**、
  * 実行するのはサーバーが手作業Issueの本文から抽出し直したもの。
  * `plan_review`（#1855）も受け付ける。**こちらの主経路は自動起動**（計画コメントの投稿を契機に
@@ -210,36 +206,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "invalid_request" }, { status: 400 });
   }
 
-  // 質問ジョブ（#1294）を積む経路はまだ無い（種別と保存の形だけを先に入れている）。
-  // 受け口をここで開けると、実行するpollerが無いまま`QUEUED`のジョブだけが積まれる
-  if (kind === "QUESTION") {
-    return NextResponse.json({ error: "invalid_request" }, { status: 400 });
-  }
-
-  // 横断質問（#1454）。**起動ジョブとは判定が違う**（記録先リポジトリがサブPCにcloneされて
-  // いる必要は無く、代わりに参照できるリポジトリが1件以上あることとpollerの対応を見る）ため、
-  // `enqueueDispatchJob`とは別の関数へ振る
-  if (kind === "CROSS_REPO_QUESTION") {
-    const questionResult = await enqueueCrossRepoQuestionJob({
-      repositoryFullName: target.repositoryFullName,
-      issueNumber: target.issueNumber,
-      hostName,
-      requestedByUserId: userId,
-    });
-    if (!questionResult.ok) {
-      const status = questionResult.rejection === "already_queued" ? 409 : 400;
-      return NextResponse.json(
-        { error: questionResult.rejection, message: questionResult.message },
-        { status, headers: { "Cache-Control": "no-store" } },
-      );
-    }
-    return NextResponse.json(
-      { ok: true, job: questionResult.job },
-      { headers: { "Cache-Control": "no-store" } },
-    );
-  }
-
-  // 手作業セッション（#2771）。横断質問と同じく`enqueueDispatchJob`とは別の判定（対象が手作業Issueで
+  // 手作業セッション（#2771）。`enqueueDispatchJob`とは別の判定（対象が手作業Issueで
   // あること・pollerの対応・同じIssueのセッションが動いていないこと）を通す
   if (kind === "MANUAL_STEP_SESSION") {
     // 省略は従来どおりClaude Code。指定されたエージェントに対応しないモデルは、意図しない

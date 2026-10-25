@@ -815,7 +815,7 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   指で引けないPCは`MergePendingPullRequests`の見出しに置いた「更新」から同じ`refreshFromPull`を
   呼ぶ。
 - **Issue詳細の「いま何が起きているか」と補助情報は、PC・スマホで同じ部品を使う**（#1577・#1646）。
-  進捗ステップ・積んだジョブ・セッションの様子・横断質問・回答待ち・実行のキャンセルは
+  進捗ステップ・積んだジョブ・セッションの様子・回答待ち・実行のキャンセルは
   [`issue-status-card.tsx`](../src/components/dashboard/issue-status-card.tsx)へ、
   対応PR・子Issue・プロパティは
   [`issue-detail-section.tsx`](../src/components/dashboard/issue-detail-section.tsx)の
@@ -1020,10 +1020,10 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
     [`lib/question-attention.ts`](../src/lib/question-attention.ts)）。`[質問] `タイトルのIssueは
     進捗のビューから除外したまま（`excludeQuestions`）「すべてのIssue」に並び、一覧の行の
     「回答待ち」「未確認」、コメントの質問・回答バッジ、「回答を確認してクローズ」は出し続ける
-  - **残っているもの**: 質問への回答に使うジョブ種別`QUESTION`・`CROSS_REPO_QUESTION`、
-    `DispatchHost.crossRepoQuestionCapable`、`scripts/start-cross-repo-question.sh`とpollerの実行側。
-    撤去はマイグレーションとpollerの版数の整合が要るため別Issueで行う。入口が無くなっただけで、
-    すでに積まれたジョブは従来どおり処理される
+  - **バックエンドも#5051で撤去した**: ジョブ種別`QUESTION`・`CROSS_REPO_QUESTION`（過去の行も
+    マイグレーションで削除）、`DispatchHost.crossRepoQuestionCapable`、`scripts/start-cross-repo-question.sh`と
+    pollerの実行側（poller版数42）。経緯は[multi-agent/subpc-dispatch.md](multi-agent/subpc-dispatch.md)
+    「質問機能は撤去した」
 - **そのダイアログは1画面で、項目はすべて最初から見えている**（#1884）。リポジトリ・内容・
   タイトル・ラベル・担当者が縦に並ぶだけで、ステップも「次へ」も無い。#1605で入れた2ステップ
   （内容だけを書く`input` → 推定結果を確かめる`confirm`）と、そこに足された本文テンプレート
@@ -1245,7 +1245,7 @@ export function POST(request: NextRequest) {
     メタは`Open`・作成者・更新（相対時刻）だけで、**担当者と日付はプロパティパネルに置く**（重複を作らない）。
     スマホのヘッダー・概要カード（`MobileIssueSummaryCard`）は以前からこの形。
   - **実行状況カード**（[`issue-status-card.tsx`](../src/components/dashboard/issue-status-card.tsx)）は
-    進捗ステップ・積んだジョブ・セッション・横断質問・Claudeの回答待ち・実行キャンセルを1枚に集める。
+    進捗ステップ・積んだジョブ・セッション・Claudeの回答待ち・実行キャンセルを1枚に集める。
     **どれも無いIssueではカードごと描かない**ので、判定は各子コンポーネントと同じ関数
     （`getWorkflowStepIndex`・`findDispatchJobForIssue`・`findCrossRepoQuestionJobForIssue`など）を使う。
     片方だけ条件が変わると空の枠が残る。
@@ -3552,18 +3552,9 @@ export function POST(request: NextRequest) {
   `lib/dispatch/installation-token.ts`に寄せてある。
   `23.preview-required`のセッションは開発サーバーを`tailscale serve`でtailnetへ出し、そのURLも
   同じ経路で報告する（#1265。**出すのはFQDNのみ。serveはHostヘッダーで振り分けるため生IPは404**）。
-  **複数リポジトリ横断の質問もこのキューで流す**（#1454。`kind`は`CROSS_REPO_QUESTION`）。
-  Actionsは1リポジトリしかチェックアウトしないため横断できず、サブPC限定の導線になる。
-  質問Issueは記録先リポジトリ（既定は名前が`question`のもの）に普通のIssueとして作り、
-  ランチャー（`scripts/start-cross-repo-question.sh`）は**質問用のworktreeを作らず**、実行できる
-  全リポジトリを`--add-dir`で読み取り用に渡す（書き込み系ツールは`--disallowedTools`で封じる）。
-  **渡すのは本体チェックアウトではなく`origin/develop`のスナップショット**（#1583。
-  `scripts/lib/question-refs.sh`が起動時に`fetch`し、`.questions/_refs/<owner>-<repo>`の
-  detached worktreeを合わせる）。本体チェックアウトを更新する仕組みがどこにも無く、実測で
-  最大29コミット遅れのコードを根拠に答えていたため。**本体の作業ツリーには触れず**、
-  用意できなかったリポジトリだけ本体へ落として遅れコミット数を参照一覧に出す。
-  回答は既存の`QA_ANSWER_MARKER`付きコメントで返るので、「回答待ち」の表示とワンボタンクローズが
-  そのまま働く。
+  かつては複数リポジトリ横断の質問（#1454。`kind`は`CROSS_REPO_QUESTION`）もこのキューで流していたが、
+  #5051で撤去した。読み取り用のスナップショット（`scripts/lib/question-refs.sh`）は計画レビュー・
+  コードレビューが引き継いでいる。
   **計画の関門（G1）のセッションも同じキューで流す**（#1855。`kind`は`PLAN_REVIEW`）。
   積むのは人ではなく**計画コメントの投稿**（`lib/dispatch/session-plan.ts`の`postSessionPlan`）で、
   この種別だけが自動で積まれる。画面（Issue詳細の承認カード）の「計画をレビュー」は補助の入口
@@ -3617,10 +3608,10 @@ export function POST(request: NextRequest) {
   「あと何分で畳むか」を状態ファイル（`.reap`）へ残し、pollerが`DispatchSession.reapAt`として
   運ぶ**（#1817。画面の文言は`lib/dispatch/issue-session.ts`の`describeSessionReap`。
   **判定を画面側へ写さない**——worktreeがcleanか・push済みかはホストにしか無く、写すと必ずずれて
-  終わらないセッションに終了予告が出る）。**横断質問セッションは
-  質問IssueがOPENのままでも放置で畳む**（#1648。猶予は`QUESTION_SESSION_IDLE_MINUTES`。手作業セッションは専用の`MANUAL_STEP_SESSION_IDLE_MINUTES`〈既定720〉で、#4973。
-  こちらはcwdが質問Issue間で共有されるため`--continue`ではなく、質問Issueごとに控えたsessionIdで
-  `--resume`する。#3033）。設計は
+  終わらないセッションに終了予告が出る）。**手作業セッションは
+  手作業IssueがOPENのままでも放置で畳む**（#1648・#4973。猶予は`MANUAL_STEP_SESSION_IDLE_MINUTES`〈既定720〉。
+  cwdがIssue間で共有されるため`--continue`ではなく、Issueごとに控えたsessionIdで
+  `--resume`する。#3033・#4231）。設計は
   [multi-agent/local-quick-start.md](multi-agent/local-quick-start.md)。
 - **Pull Requestを人の指示で作るリポジトリは、PRができるまで畳まない**（#2499）。一覧は
   `scripts/local-repo-pr-policy.conf`、判定は`scripts/lib/pr-policy.sh`で、**起動プロンプトを
@@ -3704,7 +3695,7 @@ export function POST(request: NextRequest) {
 - **計画レビューのセッションは`<リポジトリ名>-plan-review-<番号>`で、実装セッションの
   `-issue-`規約から外す**（#1855）。pollerのセッション報告・本数の計上・停止／終了の突き合わせは
   すべて`-issue-`に依存しており、混ぜると計画レビューを実装セッションと取り違えて畳む。
-  読むのは対象リポジトリの`origin/develop`のスナップショット（横断質問と同じ
+  読むのは対象リポジトリの`origin/develop`のスナップショット（コードレビューと同じ
   `scripts/lib/question-refs.sh`）で、**本体チェックアウトを占有しない**（G2の`gh pr checkout`と
   衝突しないため）。フックは付けない（`Stop`フックがそのIssueの`00.check-user`＝計画の承認待ちを
   外してしまうため）。積むのは`21.plan-required`が付いた計画だけ。
@@ -3780,9 +3771,8 @@ export function POST(request: NextRequest) {
   **HEADがリモート追跡ブランチのどれかに含まれているか**で行う（#1583）。`origin/develop`の
   祖先であることを条件にしていた頃は、本体チェックアウトが`main`に乗っているだけで
   同期コピーが丸ごと無効化されていた（`main`のマージコミットは`develop`に含まれないため）。
-  入口の`start-issue.sh`とpollerは作業ツリーのままだが、**横断質問のランチャーだけは
-  同期コピーから自分を実行し直す**（#1583。pollerが本体の`scripts/`を直接起動するため、
-  ランチャーの修正が人の`git pull`まで効かなかった）。経路の表は
+  入口の`start-issue.sh`とpollerは作業ツリーのままだった（同期コピーから自分を実行し直していた
+  横断質問のランチャー・#1583は#5051で撤去した）。経路の表は
   [multi-agent/session-notify.md](multi-agent/session-notify.md)。
 - **ディスパッチの画面側（#1180）は`GET /api/dispatch`1本だけを見る。** 起動先の選択・選べない
   理由・積んだ後の状態表示が、この応答（ホストの申告・未完了ジョブ・直近24時間の終了ジョブ・

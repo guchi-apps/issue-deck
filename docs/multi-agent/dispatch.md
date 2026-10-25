@@ -193,8 +193,7 @@ Claudeに聞く）と**サブPCで実行する**（ローカルセッション�
   ためで、ルール（`70.needs-decision`付き・「起点: #<質問Issue番号>」を明記・目安3件まで・起票しても
   実装はしない）は計画提示ステップ（#735）に揃えてある。本文は
   [.github/prompts/question.md](../../.github/prompts/question.md)。ローカルの横断質問セッション
-  （[subpc-dispatch.md](subpc-dispatch.md)）も同じルールで、あちらは`--disallowedTools`側で
-  `Edit,Write,NotebookEdit`を封じている
+  （#5051で撤去）も同じルールで、`--disallowedTools`側で`Edit,Write,NotebookEdit`を封じていた
 - **実装ステップ**: `--allowedTools "Edit,Write,Read,Bash(git:*),Bash(gh:*),Bash(pnpm:*),Bash(npx:*),Bash(curl:*)"`。
   `--dangerously-skip-permissions`等の全許可フラグは使わず、必要なツール・コマンドプレフィックスのみを
   明示的に許可する方針（Phase1〜4から継続）。

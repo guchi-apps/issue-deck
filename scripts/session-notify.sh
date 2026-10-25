@@ -324,8 +324,9 @@ record_codex_thread() {
   return 0
 }
 
-# 横断質問・手作業セッション（Claude Code）のsessionIdを残す（#3033・#4231）。畳んだ後の復旧が`claude --resume <id>`で
-# **同じ質問の会話**へ戻るための宛先。**cwdが共有されるセッション（質問・手作業）以外では何もしない**（実装セッションは
+# 手作業セッション（Claude Code）のsessionIdを残す（#4231。横断質問セッション〈#3033・#5051で撤去〉から引き継いだ）。
+# 畳んだ後の復旧が`claude --resume <id>`で**同じIssueの会話**へ戻るための宛先。**cwdが共有される手作業セッション
+# 以外では何もしない**（実装セッションは
 # worktreeごとに`--continue`で戻せるため、ファイルを増やす理由が無い）。`record_codex_thread`と同じく
 # `jq`も`python3`も起こさない。
 record_claude_question_session() {
@@ -335,7 +336,7 @@ record_claude_question_session() {
   [[ "$(session_state_agent_kind "$NOTIFY_TMUX_SESSION")" == "claude" ]] || return 0
   local kind
   kind="$(session_state_session_kind "$NOTIFY_TMUX_SESSION")"
-  [[ "$kind" == "question" || "$kind" == "manual-step" ]] || return 0
+  [[ "$kind" == "manual-step" ]] || return 0
   [[ "$HOOK_JSON" =~ \"session_id\"[[:space:]]*:[[:space:]]*\"([0-9a-fA-F-]{36})\" ]] || return 0
   session_state_write_claude_session "$NOTIFY_TMUX_SESSION" "${BASH_REMATCH[1]}" || true
   return 0

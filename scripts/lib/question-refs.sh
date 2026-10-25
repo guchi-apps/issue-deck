@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
-# 横断質問セッション（#1454）が読むコードを`origin/develop`のスナップショットにする（#1583）。
+# 読み取り専用のセッションが読むコードを`origin/develop`のスナップショットにする（#1583）。
 #
-# `scripts/start-cross-repo-question.sh` から source する。このファイル自体は実行しない。
+# `scripts/start-plan-review.sh`・`scripts/start-code-review.sh` から source する。このファイル自体は
+# 実行しない。もとは横断質問セッション（#1454。#5051で撤去）のために作ったもので、名前と下の
+# 経緯の記述はその名残。
 #
 # ## なぜ必要か
 #

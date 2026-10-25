@@ -5,14 +5,12 @@ import type { DispatchSessionView } from "@/lib/dispatch/session-state";
 import {
   ACTIVE_DISPATCH_JOB_STATUSES,
   buildDispatchActiveKey,
-  describeCrossRepoQuestionRejection,
   describeDispatchEnqueueRejection,
   describeDispatchJobKind,
   describeDispatchJobStatus,
   describeSessionControlRejection,
   DISPATCH_HOST_ONLINE_WINDOW_MS,
   findBlockingSession,
-  findCrossRepoQuestionJobForIssue,
   findDispatchJobForIssue,
   findSessionControlJobForIssue,
   isActiveDispatchJobStatus,
@@ -34,8 +32,6 @@ import {
   parseDispatchReportStatus,
   parseDispatchTarget,
   parseSessionInstruction,
-  resolveCrossRepoQuestionRejection,
-  resolveDefaultCrossRepoQuestionHost,
   resolveDefaultPlanReviewHost,
   resolvePlanReviewRejection,
   describePlanReviewRejection,
@@ -621,29 +617,21 @@ describe("describeDispatchJobStatus", () => {
     expect(skipped.tone).not.toBe("error");
     expect(skipped.label).toBe("起動済みのため見送り");
   });
-
-  // 質問ジョブのsucceededは「回答コメントが投稿された」までを指す（#1294）。起動ジョブとは
-  // 寿命の意味が違うため、「起動しました」では何が終わったのか分からない
-  it("質問ジョブは「起動しました」ではなく「回答しました」と書く", () => {
-    expect(describeDispatchJobStatus("SUCCEEDED", "QUESTION").label).toBe("回答しました");
-    expect(describeDispatchJobStatus("RUNNING", "QUESTION").label).toBe("回答中");
-    expect(describeDispatchJobStatus("FAILED", "QUESTION").tone).toBe("error");
-  });
 });
 
 /** #1519。実行キューの行に出す種別チップの文言 */
 describe("describeDispatchJobKind", () => {
-  // 状態ラベルだけでは、QUEUEDのときに起動と横断質問がどちらも「順番待ち」になり区別が付かない
-  it("順番待ちの起動と横断質問を種別で見分けられる", () => {
+  // 状態ラベルだけでは、QUEUEDのときに起動と計画レビューがどちらも「順番待ち」になり区別が付かない
+  it("順番待ちの起動と計画レビューを種別で見分けられる", () => {
     expect(describeDispatchJobStatus("QUEUED", "LAUNCH").label).toBe(
-      describeDispatchJobStatus("QUEUED", "CROSS_REPO_QUESTION").label,
+      describeDispatchJobStatus("QUEUED", "PLAN_REVIEW").label,
     );
     expect(describeDispatchJobKind("LAUNCH")).toBe("実装");
-    expect(describeDispatchJobKind("CROSS_REPO_QUESTION")).toBe("横断質問");
+    expect(describeDispatchJobKind("PLAN_REVIEW")).toBe("計画レビュー");
     expect(describeDispatchJobKind("MANUAL_STEP_SESSION")).toBe("手作業セッション");
   });
 
-  // 手作業セッション（#2771）は横断質問と同じく「セッションが立った」までが成功
+  // 手作業セッション（#2771）は「セッションが立った」までが成功
   it("手作業セッションの状態は起動の言葉で出す", () => {
     expect(describeDispatchJobStatus("RUNNING", "MANUAL_STEP_SESSION").label).toBe(
       "手作業セッションを起動中",
@@ -667,9 +655,8 @@ describe("describeDispatchJobKind", () => {
       "LAUNCH",
       "INTERRUPT",
       "KILL",
-      "QUESTION",
       "INSTRUCTION",
-      "CROSS_REPO_QUESTION",
+      "MANUAL_STEP_SESSION",
     ];
     for (const kind of kinds) {
       expect(describeDispatchJobKind(kind).length).toBeGreaterThan(0);
@@ -702,7 +689,7 @@ describe("isCancelableDispatchJobStatus", () => {
 describe("isSessionReportedJobKind", () => {
   it("`-issue-`の規約でセッションを立てる種別だけを含む", () => {
     expect(isSessionReportedJobKind("LAUNCH")).toBe(true);
-    expect(isSessionReportedJobKind("CROSS_REPO_QUESTION")).toBe(true);
+    expect(isSessionReportedJobKind("MANUAL_STEP_SESSION")).toBe(true);
     expect(isSessionReportedJobKind("PLAN_REVIEW")).toBe(false);
     expect(isSessionReportedJobKind("CODE_REVIEW")).toBe(false);
   });
@@ -782,13 +769,6 @@ describe("findDispatchJobForIssue", () => {
     expect(findSessionControlJobForIssue(jobs, "guchi-apps/issue-deck", 1180)?.id).toBe("control");
   });
 
-  // 質問は実装中に割り込んで聞くための機能なので、拾うと質問した瞬間に実装の起動が塞がる（#1294）
-  it("質問ジョブはどちらの側も拾わない", () => {
-    const jobs = [job({ id: "question", kind: "QUESTION" })];
-    expect(findDispatchJobForIssue(jobs, "guchi-apps/issue-deck", 1180)).toBeNull();
-    expect(findSessionControlJobForIssue(jobs, "guchi-apps/issue-deck", 1180)).toBeNull();
-  });
-
   it("制御ジョブの側は起動ジョブを拾わない", () => {
     const jobs = [job({ id: "launch", kind: "LAUNCH" })];
     expect(findSessionControlJobForIssue(jobs, "guchi-apps/issue-deck", 1180)).toBeNull();
@@ -823,12 +803,13 @@ describe("セッションの操作（#1332）", () => {
       expect(parseDispatchJobKind("manual_step_session")).toBe("MANUAL_STEP_SESSION");
     });
 
-    it("停止・終了・質問・追加指示を受け入れ、それ以外は弾く", () => {
+    it("停止・終了・追加指示を受け入れ、それ以外は弾く", () => {
       expect(parseDispatchJobKind("interrupt")).toBe("INTERRUPT");
       expect(parseDispatchJobKind("kill")).toBe("KILL");
-      // 種別としては読めるが、積む受け口（POST /api/dispatch）はまだ開いていない（#1294）
-      expect(parseDispatchJobKind("question")).toBe("QUESTION");
       expect(parseDispatchJobKind("instruction")).toBe("INSTRUCTION");
+      // 質問ジョブ（#1294・#1454）は撤去した（#5051）。古い画面から届いても積まない
+      expect(parseDispatchJobKind("question")).toBeNull();
+      expect(parseDispatchJobKind("cross_repo_question")).toBeNull();
       expect(parseDispatchJobKind("INTERRUPT")).toBeNull();
       expect(parseDispatchJobKind("restart")).toBeNull();
       expect(parseDispatchJobKind(1)).toBeNull();
@@ -887,11 +868,6 @@ describe("セッションの操作（#1332）", () => {
       expect(buildDispatchActiveKey("guchi-apps/issue-deck", 1012, "INSTRUCTION")).toBe(
         "instruction:guchi-apps/issue-deck#1012",
       );
-    });
-
-    // キーを取ると、実装ジョブが走っているIssueに質問を積めなくなる（#1294）
-    it("質問ジョブはキーを取らない", () => {
-      expect(buildDispatchActiveKey("guchi-apps/issue-deck", 1294, "QUESTION")).toBeNull();
     });
   });
 
@@ -1104,199 +1080,6 @@ describe("セッションの操作（#1332）", () => {
 });
 
 /**
- * #1454。**起動ジョブ（`resolveDispatchTargetRejection`）とは判定が違う。** 横断質問セッションは
- * worktreeを作らず、記録先リポジトリへは`gh issue comment`で書くだけなので、記録先が
- * サブPCにcloneされている必要が無い。代わりに「参照できるリポジトリが1件以上あるか」を見る。
- */
-describe("横断質問（#1454）", () => {
-  function host(
-    overrides: Partial<
-      Pick<DispatchHostView, "online" | "crossRepoQuestionCapable" | "repositories">
-    > = {},
-  ): Pick<DispatchHostView, "online" | "crossRepoQuestionCapable" | "repositories"> {
-    return {
-      online: true,
-      crossRepoQuestionCapable: true,
-      repositories: ["guchi-apps/issue-deck", "guchi-apps/ops-dashboard"],
-      ...overrides,
-    };
-  }
-
-  function hostView(overrides: Partial<DispatchHostView> = {}): DispatchHostView {
-    return {
-      name: "subpc",
-      repositories: ["guchi-apps/issue-deck"],
-      contractVersion: 1,
-      online: true,
-      lastSeenAt: "2026-08-15T00:00:00Z",
-      sessionControlCapable: true,
-      instructionCapable: true,
-      crossRepoQuestionCapable: true,
-      manualStepCapable: null,
-      manualStepAbortCapable: null,
-      manualStepValuesCapable: null,
-      manualStepVpsCapable: null,
-      planReviewCapable: null,
-      codeReviewCapable: null,
-      codexCapable: null,
-      codexRemoteControlCapable: null,
-      manualStepSessionCapable: null,
-      chatCodexCapable: null,
-      selfUpdateCapable: null,
-      previewCapable: null,
-      rebootCapable: null,
-      reboot: null,
-      previewRepositories: null,
-      preview: null,
-      maxSessions: 12,
-      liveSessions: 0,
-      metrics: null,
-      launchHold: null,
-      checkout: null,
-      ...overrides,
-    };
-  }
-
-  it("種別として受け付ける", () => {
-    expect(parseDispatchJobKind("cross_repo_question")).toBe("CROSS_REPO_QUESTION");
-  });
-
-  // 実装ジョブと名前空間を分ける（実装中のIssueへも質問を積めるように）
-  it("activeKeyは専用の名前空間を持つ", () => {
-    expect(buildDispatchActiveKey("guchi-apps/question", 12, "CROSS_REPO_QUESTION")).toBe(
-      "cross_repo_question:guchi-apps/question#12",
-    );
-  });
-
-  // 起動ジョブと寿命の意味が同じ（succeededは「セッションが立った」まで）ことを文言で示す
-  it("succeededは「起動しました」と読める文言にする", () => {
-    expect(describeDispatchJobStatus("SUCCEEDED", "CROSS_REPO_QUESTION")).toEqual({
-      label: "質問セッションを起動しました",
-      tone: "success",
-    });
-  });
-
-  it("条件が揃っていれば押せる", () => {
-    expect(
-      resolveCrossRepoQuestionRejection({ host: host(), hasActiveJob: false, blockingSession: null }),
-    ).toBeNull();
-  });
-
-  it("記録先がそのホストで実行できるかは問わない", () => {
-    // 申告に`question`リポジトリが無くても押せる（cloneが要らないため）
-    expect(
-      resolveCrossRepoQuestionRejection({
-        host: host({ repositories: ["guchi-apps/issue-deck"] }),
-        hasActiveJob: false,
-        blockingSession: null,
-      }),
-    ).toBeNull();
-  });
-
-  it("参照できるリポジトリが1つも無ければ押せない", () => {
-    expect(
-      resolveCrossRepoQuestionRejection({
-        host: host({ repositories: [] }),
-        hasActiveJob: false,
-        blockingSession: null,
-      }),
-    ).toBe("no_runnable_repositories");
-  });
-
-  // 未申告（古いpoller）は「できない」側へ倒す。配ると未知の種別として失敗し、質問が失われる
-  it("申告していないpollerには押せない", () => {
-    expect(
-      resolveCrossRepoQuestionRejection({
-        host: host({ crossRepoQuestionCapable: null }),
-        hasActiveJob: false,
-        blockingSession: null,
-      }),
-    ).toBe("cross_repo_question_unsupported");
-  });
-
-  it("応答していないホストには押せない", () => {
-    expect(
-      resolveCrossRepoQuestionRejection({
-        host: host({ online: false }),
-        hasActiveJob: false,
-        blockingSession: null,
-      }),
-    ).toBe("host_offline");
-  });
-
-  it("既に動いているセッションがあれば押せない", () => {
-    expect(
-      resolveCrossRepoQuestionRejection({
-        host: host(),
-        hasActiveJob: false,
-        blockingSession: { host: "subpc", tmuxSessionName: "question-issue-12" },
-      }),
-    ).toBe("session_alive");
-  });
-
-  it("理由には何をすれば押せるようになるかを書く", () => {
-    expect(
-      describeCrossRepoQuestionRejection("cross_repo_question_unsupported", { hostName: "subpc" }),
-    ).toContain("更新してから");
-  });
-
-  it("既定の起動先は選べるホストの先頭", () => {
-    expect(
-      resolveDefaultCrossRepoQuestionHost([
-        hostView({ name: "old-host", crossRepoQuestionCapable: null }),
-        hostView({ name: "subpc" }),
-      ]),
-    ).toBe("subpc");
-  });
-
-  it("選べるホストが無ければnull（GitHub Actionsへのフォールバックは無い）", () => {
-    expect(
-      resolveDefaultCrossRepoQuestionHost([hostView({ crossRepoQuestionCapable: false })]),
-    ).toBeNull();
-  });
-
-  // 起動ジョブの未完了判定に混ざると、質問を積んだ瞬間に実装の起動が押せなくなる
-  it("起動ジョブとは別に取り出す", () => {
-    const jobs: DispatchJobView[] = [
-      {
-        id: "question-1",
-        repositoryFullName: "guchi-apps/question",
-        issueNumber: 12,
-        issueTitle: null,
-        issueId: null,
-        targetHost: "subpc",
-        agent: "claude",
-        claudeModel: null,
-        kind: "CROSS_REPO_QUESTION",
-        status: "QUEUED",
-        message: null,
-        instruction: null,
-        recovery: false,
-        command: null,
-        placeholderValues: null,
-        resolvedCommand: null,
-        manualStepLine: null,
-        manualStepRunTarget: "subpc",
-        targetJobId: null,
-        previewAction: null,
-        exitCode: null,
-        commandOutput: null,
-        codexPairingCode: null,
-        codexPairingExpiresAt: null,
-        tmuxSessionName: null,
-        queuePriority: 0,
-        createdAt: "2026-08-15T00:00:00Z",
-        claimedAt: null,
-        startedAt: null,
-        finishedAt: null,
-      },
-    ];
-    expect(findCrossRepoQuestionJobForIssue(jobs, "guchi-apps/question", 12)?.id).toBe("question-1");
-    expect(findDispatchJobForIssue(jobs, "guchi-apps/question", 12)).toBeNull();
-  });
-});
-
-/**
  * 計画の関門（G1・#1855）。**計画コメントの投稿を契機に自動で積まれる**ジョブなので、
  * 「動いているセッションでは弾かない」ことがこの種別の要点になる。
  */
@@ -1322,7 +1105,6 @@ describe("計画レビュー（PLAN_REVIEW）", () => {
       lastSeenAt: "2026-08-17T00:00:00Z",
       sessionControlCapable: true,
       instructionCapable: true,
-      crossRepoQuestionCapable: true,
       manualStepCapable: true,
       manualStepAbortCapable: null,
       manualStepValuesCapable: null,
@@ -1725,7 +1507,6 @@ describe("コードレビュー（CODE_REVIEW）", () => {
       lastSeenAt: "2026-08-22T00:00:00Z",
       sessionControlCapable: true,
       instructionCapable: true,
-      crossRepoQuestionCapable: true,
       manualStepCapable: true,
       manualStepAbortCapable: null,
       manualStepValuesCapable: null,
@@ -2172,7 +1953,6 @@ describe("エージェントの選択（#2505）", () => {
       lastSeenAt: "2026-08-14T00:00:00Z",
       sessionControlCapable: true,
       instructionCapable: true,
-      crossRepoQuestionCapable: true,
       manualStepCapable: null,
       manualStepAbortCapable: null,
       manualStepValuesCapable: null,

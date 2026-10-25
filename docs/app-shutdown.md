@@ -34,7 +34,7 @@
 成立していなかった**ことが分かり、削除の影響がゼロだと確定できた。
 
 - 他アプリのコードから対象アプリのホスト名・トークン名で横断検索する
-  （調べ方は[multi-repo-changes.md](multi-repo-changes.md)の横断質問）
+  （調べ方は[multi-repo-changes.md](multi-repo-changes.md)「1. 影響範囲を横断して調べる」）
 - 各アプリの`.github/secrets-manifest.tsv`と`.env.example`に対象アプリ向けの変数が無いかを見る
 - 見つかった依存は「配線されているか」ではなく「**実際にデータを取れているか**」まで確かめる
 

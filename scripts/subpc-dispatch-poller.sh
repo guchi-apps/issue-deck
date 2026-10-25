@@ -36,14 +36,11 @@
 #   （`resume_interrupted_sessions`。送るのは固定の1行だけで、経路は`INSTRUCTION`と同じ
 #   3段階プロトコル。CLAUDE.mdの`send-keys`禁止に対する3つ目の例外にあたる）
 #
-# 立てるセッションにも2種類ある（#1454）。
+# 立てるセッションにもいくつか種類がある（#1454）。
 #
 #   LAUNCH              … 実装セッション。scripts/start-local-session.sh 経由でworktreeを作る
 #   MANUAL_STEP_SESSION … 手作業Issueを対話しながら実施するセッション（#2771）。worktreeを作らず、
 #                         セッション名は実装セッションと同じ（scripts/start-manual-step-session.sh）
-#   CROSS_REPO_QUESTION … 複数リポジトリ横断の質問セッション。worktreeを作らず、このホストが
-#                         実行できる全リポジトリを読み取り用に参照させる
-#                         （scripts/start-cross-repo-question.sh）
 #   PLAN_REVIEW         … 計画の関門（G1・#1218）のセッション。計画コメントの投稿を契機に
 #                         **自動で積まれる**（#1855）。対象リポジトリの origin/develop の
 #                         スナップショットを読み、指摘をIssueコメントへ投稿して終わる
@@ -186,7 +183,10 @@ set -euo pipefail
 #     `start-remote-session.sh`で起動・終了する。生きているものはホスト申告の`remoteSessions`で送る（#4743）。
 # 41: 終了したリモートセッションを同じ名前で起動し直すと、ランチャーが同じworktreeパスの転記を見つけて
 #     `claude --continue`で会話ごと再開する（#4874）。issue-deckはこの版数以上のホストにだけ「再開」を配る。
-DISPATCH_POLLER_VERSION="41"
+# 42: 横断質問（`CROSS_REPO_QUESTION`）の実行と申告（`crossRepoQuestion`）を撤去する（#5051）。
+#     issue-deckは#5051以降この種別を配らず、古い版の申告も読まないので、どちらの組み合わせでも
+#     ジョブの取得・報告は変わらない。
+DISPATCH_POLLER_VERSION="42"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -266,9 +266,6 @@ source "$SCRIPT_DIR/lib/codex-usage.sh"
 source "$SCRIPT_DIR/lib/agent-cli.sh"
 
 LAUNCHER="$SCRIPT_DIR/start-local-session.sh"
-# 複数リポジトリ横断の質問セッション（#1454）。**実装セッションとは別のランチャー**で、
-# worktreeを作らず、このホストが実行できる全リポジトリを読み取り用に参照させる。
-QUESTION_LAUNCHER="$SCRIPT_DIR/start-cross-repo-question.sh"
 # 手作業Issueを対話しながら実施するセッション（#2771）。**代行実行（`MANUAL_STEP`）とは別**で、
 # worktreeを作らずにtmuxセッションを1本立て、本文の手順を止まるところまで流す（#2830）。
 MANUAL_STEP_SESSION_LAUNCHER="$SCRIPT_DIR/start-manual-step-session.sh"
@@ -282,7 +279,7 @@ REMOTE_SESSION_URL_WAIT_SECONDS="${ISSUE_DECK_REMOTE_SESSION_URL_WAIT:-90}"
 # 手作業の代行実行（#1828）。**pollerとは別のcgroupで走らせる**（poller自身を再起動する手順が
 # あるため。理由はスクリプト冒頭のコメントを参照）。
 MANUAL_STEP_RUNNER="$SCRIPT_DIR/run-manual-step.sh"
-# 計画の関門（G1・#1218）のセッション（#1855）。**実装セッションとも横断質問とも別のランチャー**で、
+# 計画の関門（G1・#1218）のセッション（#1855）。**実装セッションとも手作業セッションとも別のランチャー**で、
 # worktreeを作らず、対象リポジトリの`origin/develop`のスナップショットを読んで指摘を投稿する。
 PLAN_REVIEW_LAUNCHER="$SCRIPT_DIR/start-plan-review.sh"
 CODE_REVIEW_LAUNCHER="$SCRIPT_DIR/start-code-review.sh"
@@ -771,19 +768,9 @@ count_code_review_sessions() {
     sort -u | grep -c . || true
 }
 
-# 横断質問セッション（#1454）を起こせるか。**ランチャーが手元にあるかで判定する。**
+# 手作業セッション（#2771）を起こせるか。**ランチャーが手元にあるかで判定する。**
 # 申告した種別のジョブは実行できなければならないため、`true`固定にはしない（pollerだけ
-# 新しくしてランチャーが同期されていない、という状態がありうる）。
-cross_repo_question_capable() {
-  if [[ -f "$QUESTION_LAUNCHER" ]]; then
-    printf 'true'
-  else
-    printf 'false'
-  fi
-}
-
-# 手作業セッション（#2771）を起こせるか。**ランチャーが手元にあるかで判定する**
-# （`cross_repo_question_capable`と同じ）。申告しないと画面の「セッションを起動」が押せず、
+# 新しくしてランチャーが同期されていない、という状態がありうる）。申告しないと画面の「セッションを起動」が押せず、
 # 押せない理由に「pollerが対応していない」と出る。
 manual_step_session_capable() {
   if [[ -f "$MANUAL_STEP_SESSION_LAUNCHER" ]]; then
@@ -983,7 +970,7 @@ refresh_manual_step_vps_capable() {
 }
 
 # 計画レビュー（G1・#1855）のセッションを起こせるか。**ランチャーが手元にあるかで判定する**
-# （`cross_repo_question_capable`と同じ）。
+# （`manual_step_session_capable`と同じ）。
 #
 # ここを`true`固定にしないことの意味は、この種別ではとりわけ大きい。計画レビューのジョブは
 # **計画コメントの投稿を契機に自動で積まれる**ため、ランチャーが無いまま申告すると、
@@ -1542,7 +1529,6 @@ announce() {
     --arg agentVersion "$DISPATCH_POLLER_VERSION" \
     --argjson maxSessions "$SESSION_CAP_REPORTED" \
     --argjson liveSessions "$live_sessions" \
-    --argjson crossRepoQuestion "$(cross_repo_question_capable)" \
     --argjson manualStep "$(manual_step_capable)" \
     --argjson manualStepAbort "$(manual_step_abort_capable)" \
     --argjson manualStepValues "$(manual_step_values_capable)" \
@@ -1571,7 +1557,7 @@ announce() {
     --argjson launchHold "${LAUNCH_HOLD_JSON:-null}" \
     --argjson checkout "${checkout:-null}" \
     --argjson planReviewSessions "$plan_review_sessions" \
-    '{host: $host, repositories: $repositories, contractVersion: $contractVersion, agentVersion: $agentVersion, sessionControl: true, instruction: true, stashInput: true, crossRepoQuestion: $crossRepoQuestion, manualStep: $manualStep, manualStepAbort: $manualStepAbort, manualStepValues: $manualStepValues, manualStepVps: $manualStepVps, manualStepSession: $manualStepSession, planReview: $planReview, planReviewAgent: $planReviewAgent, codeReview: $codeReview, prReview: $prReview, releaseVerifyRedact: $releaseVerify, releaseReviewRedact: $releaseReview, chatCodex: $chatCodex, reviewFix: $reviewFix, codex: $codex, codexRemoteControl: $codexRemoteControl, selfUpdate: $selfUpdate, reboot: $reboot, rebootState: $rebootState, preview: $preview, previewState: $previewState, previewRepositories: $previewRepositories, maxSessions: $maxSessions, liveSessions: $liveSessions, metrics: $metrics, launchHold: $launchHold, checkout: $checkout, planReviewSessions: $planReviewSessions, remoteSession: $remoteSession, remoteSessions: $remoteSessions, remoteSessionsIdleEnded: $remoteSessionsIdleEnded}')"
+    '{host: $host, repositories: $repositories, contractVersion: $contractVersion, agentVersion: $agentVersion, sessionControl: true, instruction: true, stashInput: true, manualStep: $manualStep, manualStepAbort: $manualStepAbort, manualStepValues: $manualStepValues, manualStepVps: $manualStepVps, manualStepSession: $manualStepSession, planReview: $planReview, planReviewAgent: $planReviewAgent, codeReview: $codeReview, prReview: $prReview, releaseVerifyRedact: $releaseVerify, releaseReviewRedact: $releaseReview, chatCodex: $chatCodex, reviewFix: $reviewFix, codex: $codex, codexRemoteControl: $codexRemoteControl, selfUpdate: $selfUpdate, reboot: $reboot, rebootState: $rebootState, preview: $preview, previewState: $previewState, previewRepositories: $previewRepositories, maxSessions: $maxSessions, liveSessions: $liveSessions, metrics: $metrics, launchHold: $launchHold, checkout: $checkout, planReviewSessions: $planReviewSessions, remoteSession: $remoteSession, remoteSessions: $remoteSessions, remoteSessionsIdleEnded: $remoteSessionsIdleEnded}')"
 
   if ! api_call POST /api/dispatch/hosts "$payload"; then
     report_api_failure "ホストの申告に失敗しました"
@@ -2523,7 +2509,7 @@ ensure_tmux_server_scope() {
 #
 # **まず状態ファイル（`lib/session-state.sh`の記述子）の`repository=`を見る。** 起動した
 # ランチャー自身が書いた値なので、名前から推測するより確実で、`local-repos.conf`に載っていない
-# リポジトリでも取れる。横断質問セッション（#1454）の記録先`guchi-apps/question`は
+# リポジトリでも取れる。横断質問セッション（#1454・#5051で撤去）の記録先`guchi-apps/question`は
 # **cloneも`local-repos.conf`への記載も要らない設計**（docs/multi-agent/subpc-dispatch.md
 # 「記録先リポジトリはcloneされていなくてよい」）のため、対応表だけを見ていると質問セッションが
 # まるごと報告から落ち、#1465の「まだ開始していません」も一度も働かなかった（#1537）。
@@ -3261,7 +3247,7 @@ resume_interrupted_sessions() {
 
   while IFS= read -r session_name; do
     [[ -n "$session_name" ]] || continue
-    # 実装セッションだけを対象にする。計画レビュー・横断質問はフックの状態ファイルを持たず
+    # 実装セッションだけを対象にする。計画レビュー・コードレビューはフックの状態ファイルを持たず
     # （名前が`-issue-`の規約から外れている）、段1で必ず弾かれる。
     [[ "$session_name" =~ ^(.+)-issue-([1-9][0-9]*)$ ]] || continue
     repo_name="${BASH_REMATCH[1]}"
@@ -4351,20 +4337,6 @@ run_job() {
     return 0
   fi
 
-  # 横断質問セッション（#1454）。**`local_repo_check`は通さない。** 記録先リポジトリの
-  # cloneは要らず（worktreeを作らず、記録先へは`gh issue comment`で書くだけ）、参照するのは
-  # このホストが実行できる全リポジトリのため。1件も無い場合はランチャー側が理由を出して落ちる。
-  if [[ "$kind" == "CROSS_REPO_QUESTION" ]]; then
-    if [[ ! -f "$QUESTION_LAUNCHER" ]]; then
-      report_job "$job_id" failed "横断質問のランチャーがありません（$QUESTION_LAUNCHER）。"
-      return 0
-    fi
-    launch_and_report "$job_id" "$(expected_session_name "$repo" "$issue_number")" \
-      "横断質問セッションを起動しています" \
-      bash "$QUESTION_LAUNCHER" "$owner" "$repo" "$issue_number"
-    return 0
-  fi
-
   # 手作業セッション（#2771）。**`local_repo_check`は通さない。** worktreeを作らず、cwdは本体
   # チェックアウト（無ければ固定ディレクトリ）で、cloneが無くてもランチャーが動く。セッション名は
   # 実装セッションと同じ規約（`<repo>-issue-<番号>`）なので、重複起動の判定もそのまま効く。
@@ -4601,7 +4573,7 @@ prepare_handoff_launch() {
 
 # 重複起動を確かめてからランチャーを走らせ、tmuxセッションの増分で成否を報告する。
 #
-# **セッションを立てる種別（`LAUNCH`・`CROSS_REPO_QUESTION`・`PLAN_REVIEW`・`MANUAL_STEP_SESSION`）で
+# **セッションを立てる種別（`LAUNCH`・`PLAN_REVIEW`・`MANUAL_STEP_SESSION`）で
 # 共有する。**
 # 違うのは走らせるコマンドと期待するセッション名だけで、重複防止・`running`の報告・差分による
 # 成否判定・失敗時の出力の返し方はまったく同じ。分けて持つと、片方だけ直したときに挙動がずれる。

@@ -132,7 +132,6 @@ vi.mock("@/lib/dispatch/session-escalation", () => ({
 const {
   claimDispatchJobs,
   dismissDispatchJob,
-  enqueueCrossRepoQuestionJob,
   enqueueDispatchJob,
   enqueueManualStepAbortJob,
   enqueueManualStepJob,
@@ -161,8 +160,6 @@ function host(overrides: Record<string, unknown> = {}) {
     // セッションの操作（#1332）に対応したpoller
     sessionControlCapable: true,
     instructionCapable: true,
-    // 横断質問（#1454）に対応したpoller
-    crossRepoQuestionCapable: true,
     manualStepCapable: null,
     manualStepAbortCapable: null,
     // 計画レビュー（#1855）に対応したpoller
@@ -777,76 +774,6 @@ describe("enqueueSessionControlJob", () => {
  * 重くないうえ、起動待ちの後ろに並ばせると止めたいときほど待たされる。
  */
 /**
- * #1454。**起動ジョブとは判定が違う。** 記録先リポジトリがサブPCにcloneされている必要は無く
- * （worktreeを作らず、記録先へは`gh issue comment`で書くだけ）、代わりに参照できるリポジトリが
- * 1件以上あることとpollerの対応を見る。
- */
-describe("enqueueCrossRepoQuestionJob", () => {
-  const QUESTION_REPOSITORY = "guchi-apps/question";
-
-  async function enqueueQuestion() {
-    return enqueueCrossRepoQuestionJob({
-      repositoryFullName: QUESTION_REPOSITORY,
-      issueNumber: 12,
-      hostName: "subpc",
-      requestedByUserId: null,
-      now: NOW,
-    });
-  }
-
-  it("記録先がサブPCにcloneされていなくても積める", async () => {
-    // 申告に載っているのはissue-deckだけ＝`question`リポジトリはcloneされていない
-    const result = await enqueueQuestion();
-    expect(result.ok).toBe(true);
-    expect(dispatchJobCreate).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({
-          kind: "CROSS_REPO_QUESTION",
-          repositoryFullName: QUESTION_REPOSITORY,
-          // 実装ジョブとは名前空間を分ける（実装中のIssueへも質問を積めるように）
-          activeKey: "cross_repo_question:guchi-apps/question#12",
-        }),
-      }),
-    );
-  });
-
-  it("横断質問に対応していないpollerへは積まない", async () => {
-    dispatchHostFindUnique.mockResolvedValue(host({ crossRepoQuestionCapable: null }));
-    const result = await enqueueQuestion();
-    expect(result.ok).toBe(false);
-    if (result.ok) return;
-    expect(result.rejection).toBe("cross_repo_question_unsupported");
-    expect(dispatchJobCreate).not.toHaveBeenCalled();
-  });
-
-  it("参照できるリポジトリが1つも無ければ積まない", async () => {
-    dispatchHostFindUnique.mockResolvedValue(host({ repositories: "[]" }));
-    const result = await enqueueQuestion();
-    expect(result.ok).toBe(false);
-    if (result.ok) return;
-    expect(result.rejection).toBe("no_runnable_repositories");
-  });
-
-  it("同じ質問Issueのセッションが動いていれば積まない", async () => {
-    dispatchSessionFindFirst.mockResolvedValue(
-      aliveSession({ repositoryFullName: QUESTION_REPOSITORY, issueNumber: 12 }),
-    );
-    const result = await enqueueQuestion();
-    expect(result.ok).toBe(false);
-    if (result.ok) return;
-    expect(result.rejection).toBe("session_alive");
-  });
-
-  it("申告が届いていないホストには積まない", async () => {
-    dispatchHostFindUnique.mockResolvedValue(null);
-    const result = await enqueueQuestion();
-    expect(result.ok).toBe(false);
-    if (result.ok) return;
-    expect(result.rejection).toBe("host_unknown");
-  });
-});
-
-/**
  * 計画の関門（G1・#1855）。**計画コメントの投稿を契機に自動で積まれる**ため、
  * 「実装セッションが動いていても積める」ことがこの種別の要点。
  */
@@ -914,7 +841,7 @@ describe("enqueuePlanReviewJob", () => {
     expect(dispatchJobCreate).not.toHaveBeenCalled();
   });
 
-  // 横断質問と違い、対象リポジトリのコードを読むのでcloneが要る
+  // 対象リポジトリのコードを読むのでcloneが要る
   it("そのホストで実行できないリポジトリには積まない", async () => {
     dispatchHostFindUnique.mockResolvedValue(host({ repositories: "[]" }));
 
@@ -1152,7 +1079,7 @@ describe("claimDispatchJobs の制御ジョブ", () => {
 
     const kinds = claimedKinds();
     expect(kinds.length).toBeGreaterThan(0);
-    // 引きに行くのはセッションを立てる種別（#1454で横断質問が加わった）だけで、制御ジョブは無い
+    // 引きに行くのはセッションを立てる種別だけで、制御ジョブは無い
     for (const kind of kinds) {
       const list =
         typeof kind === "object" && kind !== null && "in" in kind
@@ -1199,7 +1126,7 @@ describe("claimDispatchJobs の制御ジョブ", () => {
     const kinds = claimedKinds();
     expect(kinds).toContainEqual(expect.objectContaining({ in: expect.arrayContaining(["REBOOT"]) }));
     expect(kinds).not.toContainEqual({
-      in: ["LAUNCH", "CROSS_REPO_QUESTION", "PLAN_REVIEW", "CODE_REVIEW"],
+      in: ["LAUNCH", "PLAN_REVIEW", "CODE_REVIEW"],
     });
   });
 
@@ -1267,7 +1194,7 @@ describe("claimDispatchJobs の制御ジョブ", () => {
     await claimDispatchJobs({ hostName: "subpc", maxJobs: 1, now: NOW });
 
     expect(claimedKinds()).toContainEqual({
-      in: ["LAUNCH", "CROSS_REPO_QUESTION", "PLAN_REVIEW", "CODE_REVIEW"],
+      in: ["LAUNCH", "PLAN_REVIEW", "CODE_REVIEW"],
     });
   });
 
@@ -1289,7 +1216,7 @@ describe("claimDispatchJobs の制御ジョブ", () => {
   });
 
   // 枠を消費させると、停止を1回押しただけで次の起動が詰まる
-  // 数えるのはセッションを立てるジョブ（起動・横断質問。#1454）だけで、制御ジョブは枠を消費しない
+  // 数えるのはセッションを立てるジョブ（起動・計画レビューなど）だけで、制御ジョブは枠を消費しない
   it("枠の計算に数えるのはセッションを立てるジョブだけ", async () => {
     dispatchJobFindMany.mockResolvedValue([]);
     await claimDispatchJobs({ hostName: "subpc", maxJobs: 1, now: NOW });
@@ -1297,22 +1224,22 @@ describe("claimDispatchJobs の制御ジョブ", () => {
     expect(dispatchJobCount).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({
-          kind: { in: ["LAUNCH", "CROSS_REPO_QUESTION", "PLAN_REVIEW", "CODE_REVIEW", "MANUAL_STEP_SESSION", "REVIEW_FIX"] },
+          kind: { in: ["LAUNCH", "PLAN_REVIEW", "CODE_REVIEW", "MANUAL_STEP_SESSION", "REVIEW_FIX"] },
         }),
       }),
     );
   });
 
-  // #1454。**申告したホストにだけ配る。** 古いpollerは未知の種別として失敗で返すため、
-  // 配ると質問が必ず失われる
-  it("横断質問は申告したホストにだけ払い出す", async () => {
+  // **申告したホストにだけ配る。** 古いpollerは未知の種別として失敗で返すため、
+  // 配ると押した起動が必ず失われる。横断質問（#1454）は撤去したので、申告があっても配らない（#5051）
+  it("セッションを立てる種別は申告したホストにだけ払い出す", async () => {
     dispatchJobFindMany.mockResolvedValue([]);
     await claimDispatchJobs({ hostName: "subpc", maxJobs: 1, now: NOW });
     expect(dispatchJobFindMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({
           status: "QUEUED",
-          kind: { in: ["LAUNCH", "CROSS_REPO_QUESTION", "PLAN_REVIEW", "CODE_REVIEW"] },
+          kind: { in: ["LAUNCH", "PLAN_REVIEW", "CODE_REVIEW"] },
         }),
       }),
     );
@@ -1321,10 +1248,10 @@ describe("claimDispatchJobs の制御ジョブ", () => {
     dispatchJobFindMany.mockResolvedValue([]);
     dispatchJobCount.mockResolvedValue(0);
     appSettingFindUnique.mockResolvedValue({ id: 1, dispatchConcurrency: 2 });
-    // 横断質問も計画レビューもコードレビューも申告していない古いpoller
+    // 計画レビューもコードレビューも申告していない古いpoller
     // （#1855・#698で同じ向きの申告が増えた）
     dispatchHostFindUnique.mockResolvedValue(
-      host({ crossRepoQuestionCapable: null, planReviewCapable: null, codeReviewCapable: null }),
+      host({ planReviewCapable: null, codeReviewCapable: null }),
     );
     await claimDispatchJobs({ hostName: "subpc", maxJobs: 1, now: NOW });
     expect(dispatchJobFindMany).toHaveBeenCalledWith(
@@ -1365,7 +1292,7 @@ describe("claimDispatchJobs の制御ジョブ", () => {
     it("空き本数を送ってきたpollerには、起動枠へ計画レビューを混ぜない", async () => {
       setupPlanReviewQueue();
       await claimDispatchJobs({ hostName: "subpc", maxJobs: 1, planReviewMaxJobs: 0, now: NOW });
-      expect(claimedKinds()).toContainEqual({ in: ["LAUNCH", "CROSS_REPO_QUESTION", "CODE_REVIEW"] });
+      expect(claimedKinds()).toContainEqual({ in: ["LAUNCH", "CODE_REVIEW"] });
       expect(claimedKinds()).not.toContain("PLAN_REVIEW");
     });
 
@@ -1409,7 +1336,7 @@ describe("claimDispatchJobs の制御ジョブ", () => {
     });
   });
 
-  // 手作業セッション（#2771）も横断質問と同じく、申告したホストにだけ配る（古いpollerは
+  // 手作業セッション（#2771）も、申告したホストにだけ配る（古いpollerは
   // 未知の種別として`failed`で返し、押した起動が失われる）
   it("手作業セッションは申告したホストにだけ払い出す", async () => {
     dispatchJobFindMany.mockResolvedValue([]);
@@ -1420,7 +1347,7 @@ describe("claimDispatchJobs の制御ジョブ", () => {
         where: expect.objectContaining({
           status: "QUEUED",
           kind: {
-            in: ["LAUNCH", "CROSS_REPO_QUESTION", "PLAN_REVIEW", "CODE_REVIEW", "MANUAL_STEP_SESSION"],
+            in: ["LAUNCH", "PLAN_REVIEW", "CODE_REVIEW", "MANUAL_STEP_SESSION"],
           },
         }),
       }),
@@ -1442,27 +1369,11 @@ describe("claimDispatchJobs の制御ジョブ", () => {
             JSON.stringify(kinds),
         )?.orderBy;
 
-    expect(orderByFor(["LAUNCH", "CROSS_REPO_QUESTION", "PLAN_REVIEW", "CODE_REVIEW"])).toEqual([
+    expect(orderByFor(["LAUNCH", "PLAN_REVIEW", "CODE_REVIEW"])).toEqual([
       { queuePriority: "desc" },
       { createdAt: "asc" },
     ]);
     expect(orderByFor(["INTERRUPT", "KILL", "INSTRUCTION"])).toEqual({ createdAt: "asc" });
-  });
-
-  // #1294。現行のpollerは未知の種別を「未知のジョブ種別です」として失敗で返すため、
-  // 実行側が来ていない段階で配ると質問が必ず失敗として残る（払い出しはStep 3で開ける）
-  it("質問ジョブは払い出さない", async () => {
-    dispatchJobFindMany.mockResolvedValue([]);
-    await claimDispatchJobs({ hostName: "subpc", maxJobs: 1, now: NOW });
-
-    const claimQueries = dispatchJobFindMany.mock.calls
-      .map((call) => (call[0]?.where ?? {}) as Record<string, unknown>)
-      .filter((where) => where.targetHost !== undefined);
-    for (const where of claimQueries) {
-      const kind = where.kind as { in?: string[] } | string | undefined;
-      const kinds = typeof kind === "object" && kind?.in ? kind.in : [kind];
-      expect(kinds).not.toContain("QUESTION");
-    }
   });
 });
 
@@ -1613,9 +1524,9 @@ describe("expireStaleDispatchJobs の起動ジョブ救済", () => {
     );
   });
 
-  // 横断質問（#1454）は`expected_session_name`で立つため、実装セッションと同じ規約で報告される
-  it("横断質問は、報告されたセッションで救済する", async () => {
-    dispatchJobFindMany.mockResolvedValue([staleLaunchJob({ kind: "CROSS_REPO_QUESTION" })]);
+  // 手作業セッション（#2771）は`expected_session_name`で立つため、実装セッションと同じ規約で報告される
+  it("手作業セッションは、報告されたセッションで救済する", async () => {
+    dispatchJobFindMany.mockResolvedValue([staleLaunchJob({ kind: "MANUAL_STEP_SESSION" })]);
     dispatchSessionFindMany.mockResolvedValue([
       {
         host: "subpc",
@@ -1847,11 +1758,11 @@ describe("prioritizeDispatchJob", () => {
     expect(dispatchJobUpdateMany).not.toHaveBeenCalled();
   });
 
-  // 横断質問セッションは起動ジョブと同じ枠で走るので、順番がある
-  it("横断質問ジョブは上げられる", async () => {
+  // 手作業セッションは起動ジョブと同じ枠で走るので、順番がある
+  it("手作業セッションのジョブは上げられる", async () => {
     dispatchJobFindUnique
-      .mockResolvedValueOnce(queuedJob({ kind: "CROSS_REPO_QUESTION" }))
-      .mockResolvedValueOnce(queuedJob({ kind: "CROSS_REPO_QUESTION", queuePriority: 1 }));
+      .mockResolvedValueOnce(queuedJob({ kind: "MANUAL_STEP_SESSION" }))
+      .mockResolvedValueOnce(queuedJob({ kind: "MANUAL_STEP_SESSION", queuePriority: 1 }));
     dispatchJobUpdateMany.mockResolvedValue({ count: 1 });
 
     const result = await prioritizeDispatchJob({ jobId: "job-1" });
@@ -2743,7 +2654,7 @@ describe("claimDispatchJobs の代行実行", () => {
     expect(dispatchJobCount).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({
-          kind: { in: ["LAUNCH", "CROSS_REPO_QUESTION", "PLAN_REVIEW", "CODE_REVIEW", "MANUAL_STEP_SESSION", "REVIEW_FIX"] },
+          kind: { in: ["LAUNCH", "PLAN_REVIEW", "CODE_REVIEW", "MANUAL_STEP_SESSION", "REVIEW_FIX"] },
         }),
       }),
     );

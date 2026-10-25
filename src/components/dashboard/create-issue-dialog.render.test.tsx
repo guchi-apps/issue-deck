@@ -107,7 +107,6 @@ function makeHost(): DispatchHostView {
     lastSeenAt: "2026-08-14T00:00:00Z",
     sessionControlCapable: true,
     instructionCapable: true,
-    crossRepoQuestionCapable: true,
     manualStepCapable: null,
     manualStepAbortCapable: null,
     manualStepValuesCapable: null,

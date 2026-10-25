@@ -7,7 +7,7 @@
 #   scripts/reap-sessions.sh --dry-run          判定だけ表示し、何も畳まない
 #   scripts/reap-sessions.sh --idle-minutes 90  猶予（分）を指定する（0で回収を行わない）
 #   scripts/reap-sessions.sh --handoff-idle-minutes 60   引き渡し済みの猶予を指定する
-#   scripts/reap-sessions.sh --question-idle-minutes 45  質問セッションの放置の猶予を指定する
+#   scripts/reap-sessions.sh --manual-step-idle-minutes 120  手作業セッションの放置の猶予を指定する
 #
 # 環境変数:
 #   SESSION_IDLE_MINUTES          最後の`Stop`からこの分数が経つまで畳まない（既定5・0で無効）。
@@ -20,9 +20,9 @@
 #   SESSION_LOCAL_PR_IDLE_MINUTES `11.local`を付けたまま最終PRを作り終えたセッション専用の猶予
 #                                 （既定15・0でこの経路だけ無効＝従来どおり`11.local`が付いている
 #                                 間は残す）。外し忘れの拾い上げで、畳んだら`11.local`も外す（#4880）
-#   QUESTION_SESSION_IDLE_MINUTES 横断質問セッション（kind=question）専用の猶予（既定30・
-#                                 0でこの経路だけ無効＝従来どおり質問IssueがCLOSEDになるまで
-#                                 残す）。**質問IssueがOPENのままでも畳む**（#1648）
+#   MANUAL_STEP_SESSION_IDLE_MINUTES 手作業セッション（kind=manual-step）専用の猶予（既定720・
+#                                 0でこの経路だけ無効＝手作業IssueがCLOSEDになるまで残す）。
+#                                 **手作業IssueがOPENのままでも畳む**（#4973）
 #   ISSUE_DECK_SESSION_STATE_DIR  状態ファイルの置き場（既定は ~/.local/state/issue-deck/sessions）
 #
 # ## なぜ要るか
@@ -82,17 +82,14 @@ IDLE_MINUTES="${SESSION_IDLE_MINUTES:-5}"
 # **共通猶予（IDLE_MINUTES）とは独立で、この経路ではこちらだけを見る**（#1649）。以前は共通猶予を
 # 通過したうえでさらにこの値を見るAND判定で、実効が max(IDLE, HANDOFF) になっており、既定の
 # 60/30では30が一度も効いていなかった（「CLOSED・マージ済みより長めに取る」という段差は成立して
-# いなかった）。横断質問セッション（QUESTION_SESSION_IDLE_MINUTES）と同じ置き換え方式に揃える。
+# いなかった）。手作業セッション（MANUAL_STEP_SESSION_IDLE_MINUTES）と同じ置き換え方式に揃える。
 # 0でこの経路だけを無効にできる。
 HANDOFF_IDLE_MINUTES="${SESSION_HANDOFF_IDLE_MINUTES:-5}"
-# 横断質問セッション（`kind=question`）専用の猶予（#1648）。**質問IssueがOPENのままでも畳む。**
-# 追い質問を送らないまま忘れられたセッションは、質問Issueを閉じる人がいない限り永久に残り、
-# 本数の上限（DISPATCH_MAX_SESSIONS・#1361）を1本ずつ埋める。実装セッションと違って
-# worktreeもコミットも持たないため、畳んでも失うのは会話の文脈だけで、取り返しがつく。
-# 0でこの経路だけを無効にできる（従来どおりCLOSEDになるまで残す）。
-QUESTION_IDLE_MINUTES="${QUESTION_SESSION_IDLE_MINUTES:-30}"
-# 手作業セッション（`kind=manual-step`）専用の猶予（#4973）。以前は質問セッションの30分を共用して
-# いたが、手作業は人の操作や外部設定の完了を待つ間が長く、調査・実行の途中で30分放置されただけで
+# 手作業セッション（`kind=manual-step`）専用の猶予（#4973）。**手作業IssueがOPENのままでも畳む。**
+# 放置されたセッションは、Issueを閉じる人がいない限り永久に残り、本数の上限
+# （DISPATCH_MAX_SESSIONS・#1361）を1本ずつ埋める。worktreeもコミットも持たないため、畳んでも
+# 失うのは会話の文脈だけで、取り返しがつく。以前は横断質問セッション（#1648・#5051で撤去）の30分を
+# 共用していたが、手作業は人の操作や外部設定の完了を待つ間が長く、調査・実行の途中で30分放置されただけで
 # 畳まれていた。計画・質問の画面待ち（12時間）に揃える。0にすると放置では畳まず、手作業Issueが
 # CLOSEDになるまで残す。
 MANUAL_STEP_IDLE_MINUTES="${MANUAL_STEP_SESSION_IDLE_MINUTES:-720}"
@@ -118,16 +115,12 @@ while [[ $# -gt 0 ]]; do
       HANDOFF_IDLE_MINUTES="${2:-}"
       shift 2 || true
       ;;
-    --question-idle-minutes)
-      QUESTION_IDLE_MINUTES="${2:-}"
-      shift 2 || true
-      ;;
     --manual-step-idle-minutes)
       MANUAL_STEP_IDLE_MINUTES="${2:-}"
       shift 2 || true
       ;;
     *)
-      echo "Usage: scripts/reap-sessions.sh [--dry-run] [--idle-minutes <分>] [--handoff-idle-minutes <分>] [--question-idle-minutes <分>] [--manual-step-idle-minutes <分>]" >&2
+      echo "Usage: scripts/reap-sessions.sh [--dry-run] [--idle-minutes <分>] [--handoff-idle-minutes <分>] [--manual-step-idle-minutes <分>]" >&2
       exit 1
       ;;
   esac
@@ -145,10 +138,6 @@ if [[ ! "$HANDOFF_IDLE_MINUTES" =~ ^[0-9]+$ ]]; then
 fi
 if [[ ! "$LOCAL_PR_IDLE_MINUTES" =~ ^[0-9]+$ ]]; then
   echo "Error: 11.local付きで最終PRを作ったセッションの猶予は0以上の整数（分）で指定してください: $LOCAL_PR_IDLE_MINUTES" >&2
-  exit 1
-fi
-if [[ ! "$QUESTION_IDLE_MINUTES" =~ ^[0-9]+$ ]]; then
-  echo "Error: 質問セッションの猶予は0以上の整数（分）で指定してください: $QUESTION_IDLE_MINUTES" >&2
   exit 1
 fi
 if [[ ! "$MANUAL_STEP_IDLE_MINUTES" =~ ^[0-9]+$ ]]; then
@@ -176,7 +165,6 @@ fi
 NOW="$(date +%s)"
 IDLE_SECONDS=$((IDLE_MINUTES * 60))
 HANDOFF_IDLE_SECONDS=$((HANDOFF_IDLE_MINUTES * 60))
-QUESTION_IDLE_SECONDS=$((QUESTION_IDLE_MINUTES * 60))
 MANUAL_STEP_IDLE_SECONDS=$((MANUAL_STEP_IDLE_MINUTES * 60))
 LOCAL_PR_IDLE_SECONDS=$((LOCAL_PR_IDLE_MINUTES * 60))
 CHECKED=0
@@ -225,7 +213,7 @@ hold_until_reap() {
 }
 
 # 実際に畳む。**必ずログに残す。** 無人実行では「なぜセッションが消えたのか」がここにしか残らない。
-# 判定は呼び出し元が済ませてある（実装セッションと横断質問セッションで条件が違うため。#1454）。
+# 判定は呼び出し元が済ませてある（実装セッションと手作業セッションで条件が違うため。#1454）。
 fold_session() {
   local session="$1" repository="$2" issue_number="$3" reason="$4" restart_hint="${5:-}"
   FOLDED=0
@@ -332,19 +320,14 @@ reap_one() {
   # 猶予。**`Stop`＝作業完了ではない。** レビュー結果待ちで止まっているセッションも、追加指示を
   # 受けて再開するセッションも`Stop`を出すため、ここで時間を置く。
   #
-  # 横断質問セッションだけ別の値を使う（#1648）。質問には「終わった」と分かる事実（PR・マージ）が
-  # 無く、放置されたぶんがそのまま本数の上限（#1361）を埋めるため、実装セッションより短く取る。
-  # `QUESTION_SESSION_IDLE_MINUTES=0`はこの経路を無効にする指定なので、そのときは従来どおり
-  # 共通の猶予で判定する（下の質問ブロックがCLOSEDのときだけ畳む）。
+  # 手作業セッションだけ別の値を使う（#4973）。手作業には「終わった」と分かる事実（PR・マージ）が
+  # 無く、放置されたぶんがそのまま本数の上限（#1361）を埋める。
+  # `MANUAL_STEP_SESSION_IDLE_MINUTES=0`はこの経路を無効にする指定なので、そのときは従来どおり
+  # 共通の猶予で判定する（下の手作業ブロックがCLOSEDのときだけ畳む）。
   idle_minutes="$IDLE_MINUTES"
   idle_seconds="$IDLE_SECONDS"
-  # 手作業セッションは質問より長い専用の値を使う（#4973）。
-  local kind_idle_minutes="$QUESTION_IDLE_MINUTES" kind_idle_seconds="$QUESTION_IDLE_SECONDS"
-  if [[ "$kind" == "manual-step" ]]; then
-    kind_idle_minutes="$MANUAL_STEP_IDLE_MINUTES"
-    kind_idle_seconds="$MANUAL_STEP_IDLE_SECONDS"
-  fi
-  if [[ ("$kind" == "question" || "$kind" == "manual-step") && "$kind_idle_minutes" -gt 0 ]]; then
+  local kind_idle_minutes="$MANUAL_STEP_IDLE_MINUTES" kind_idle_seconds="$MANUAL_STEP_IDLE_SECONDS"
+  if [[ "$kind" == "manual-step" && "$kind_idle_minutes" -gt 0 ]]; then
     idle_minutes="$kind_idle_minutes"
     idle_seconds="$kind_idle_seconds"
   fi
@@ -355,24 +338,16 @@ reap_one() {
   # `HANDOFF_IDLE_MINUTES`。#1649）ので、どの経路で畳むかが決まってから、その経路の猶予と
   # 突き合わせる（下の各経路の`hold_until_reap`）。
 
-  # --- 横断質問セッション（#1454）はここで決める ---
-  # **worktreeを持たず、コミットもpushもしない**（読み取り専用で、成果物は質問Issueへ投稿した
-  # 回答コメントだけ）。実装セッション向けの「worktreeがcleanでpush済み」を当てると必ず
-  # 「確認できない」に落ちて永久に残るため、質問Issueの状態と放置の猶予だけで決める。
-  # 手作業セッション（#2771・`kind=manual-step`）も質問セッションと同じ条件で畳む。worktreeも
-  # コミットも持たず、失うのは会話の文脈だけ（起こし直せば本文のチェックから続きが分かる）。
-  # 文言だけを分ける（畳んだ理由が画面に出るため、「質問Issue」と書くと読み違える）
-  if [[ "$kind" == "question" || "$kind" == "manual-step" ]]; then
-    local issue_label restart_hint restart_hint_idle
-    if [[ "$kind" == "manual-step" ]]; then
-      issue_label="手作業Issue"
-      restart_hint="続ける場合は、issue-deckの「AIセッションで進める」から起動し直してください（本文のチェックから続きます）。"
-      restart_hint_idle="$restart_hint"
-    else
-      issue_label="質問Issue"
-      restart_hint="もう一度聞く場合は、issue-deckの「質問する」から起動し直してください。"
-      restart_hint_idle="続きを聞く場合は、終了した行の「セッションを復旧」で会話の続きへ戻れます（「質問する」から新しく質問しても構いません）。"
-    fi
+  # --- 手作業セッション（#2771・`kind=manual-step`）はここで決める ---
+  # **worktreeを持たず、コミットもpushもしない**。実装セッション向けの「worktreeがcleanでpush済み」を
+  # 当てると必ず「確認できない」に落ちて永久に残るため、手作業Issueの状態と放置の猶予だけで決める。
+  # 失うのは会話の文脈だけ（起こし直せば本文のチェックから続きが分かる）。
+  # 理由コード`QUESTION_CLOSED`・`QUESTION_IDLE`は横断質問セッション（#1454・#5051で撤去）の名残で、
+  # issue-deck側が読む値なので名前を変えていない
+  if [[ "$kind" == "manual-step" ]]; then
+    local issue_label="手作業Issue" restart_hint restart_hint_idle
+    restart_hint="続ける場合は、issue-deckの「AIセッションで進める」から起動し直してください（本文のチェックから続きます）。"
+    restart_hint_idle="$restart_hint"
     if ! issue_state="$(gh issue view "$issue_number" --repo "$repository" \
       --json state --jq '.state' 2>/dev/null)"; then
       hold "$session" "${issue_label}の状態を取得できない（$repository #$issue_number）"
@@ -395,9 +370,9 @@ reap_one() {
       hold "$session" "${issue_label} #$issue_number がまだOPEN（閉じると畳みます）"
       return 0
     fi
-    # **OPENでも畳む**（#1648）。追い質問はこのセッションへ追加指示として送れる（#1012）が、
+    # **OPENでも畳む**（#1648・#4973）。追加の指示はこのセッションへ送れる（#1012）が、
     # 送られないまま忘れられると、${issue_label}を閉じる人がいない限り永久に残る。畳んでも失うのは
-    # 会話の文脈だけ（worktreeもコミットも持たない）で、回答コメントは${issue_label}に残っている。
+    # 会話の文脈だけ（worktreeもコミットも持たない）で、進み具合は${issue_label}の本文に残っている。
     # 今すぐ畳みたいときは、画面のセッション表示の「終了」を押せば猶予を待たずに済む。
     if [[ "$idle_for" -lt "$idle_seconds" ]]; then
       hold_until_reap "$session" "$((event_at + idle_seconds))" "QUESTION_IDLE" \
@@ -415,7 +390,7 @@ reap_one() {
   # 変更も未pushのコミットも、置き場ごと消えている（畳むのはtmuxセッションで、ファイルは
   # 何も消さない）。ここを期限もリトライも無い`hold`にしていたため、Issueの移送・取り下げで
   # worktreeを先に消したセッションが**永久に残っていた**（自分が動いているセッションは自分では
-  # kill できないので、消した本人も畳めない）。質問セッションを畳む判断（#1454）と同じ理屈で、
+  # kill できないので、消した本人も畳めない）。手作業セッションを畳む判断（#4973）と同じ理屈で、
   # 失うものが定義上無い側へ倒す。
   #
   # **GitHub側の状態（`11.local`・Issue・PR）は見ずにここで決める。** worktreeが無い以上この
@@ -681,4 +656,4 @@ while IFS= read -r session_name; do
   reap_one "$session_name"
 done < <(tmux list-sessions -F '#{session_name}' 2>/dev/null || true)
 
-echo "セッションを確認しました: $CHECKED 件（回収対象 $CANDIDATES 件・畳んだ $REAPED 件・猶予 ${IDLE_MINUTES}分・引き渡し済み ${HANDOFF_IDLE_MINUTES}分・11.local付きPR ${LOCAL_PR_IDLE_MINUTES}分・質問 ${QUESTION_IDLE_MINUTES}分・手作業 ${MANUAL_STEP_IDLE_MINUTES}分）"
+echo "セッションを確認しました: $CHECKED 件（回収対象 $CANDIDATES 件・畳んだ $REAPED 件・猶予 ${IDLE_MINUTES}分・引き渡し済み ${HANDOFF_IDLE_MINUTES}分・11.local付きPR ${LOCAL_PR_IDLE_MINUTES}分・手作業 ${MANUAL_STEP_IDLE_MINUTES}分）"

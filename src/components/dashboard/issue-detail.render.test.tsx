@@ -521,7 +521,6 @@ describe("GitHub Actionsが走っているIssueの起動ボタン（#2032）", (
     lastSeenAt: "2026-08-20T00:00:00.000Z",
     sessionControlCapable: true,
     instructionCapable: true,
-    crossRepoQuestionCapable: true,
     manualStepCapable: true,
     manualStepAbortCapable: null,
     manualStepValuesCapable: null,
