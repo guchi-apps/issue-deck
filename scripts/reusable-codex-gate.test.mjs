@@ -35,7 +35,19 @@ function extractRunScript(stepName) {
     if (line.trim() !== "" && line.search(/\S/) < indent) break;
     body.push(line.slice(indent));
   }
-  return body.join("\n");
+  return `${workflowEnvExports()}\n${body.join("\n")}`;
+}
+
+/** ワークフロー直下の`env:`（CODEX_TRUSTED_COMMENTS_JQなど）を、ステップのシェルへ引き継ぐ（#5004） */
+function workflowEnvExports() {
+  const match = workflowYaml.match(/^env:\n((?:[ ]+.*\n|\n)+)/m);
+  if (!match) return "";
+  return match[1]
+    .split("\n")
+    .map((line) => line.match(/^\s+([A-Z_]+): '(.*)'\s*$/))
+    .filter(Boolean)
+    .map(([, key, value]) => `export ${key}='${value}'`)
+    .join("\n");
 }
 
 const HEAD = "a".repeat(40);
