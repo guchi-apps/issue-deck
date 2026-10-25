@@ -147,7 +147,22 @@ export function DependencyWaitPanel({
         </ul>
       )}
 
+      {wait.status === "RESUME_FAILED" && classifyInstructionSkip(wait.failureReason).kind === "unsent_input" && (
+        <p data-testid="dependency-wait-unsent-input" className="rounded-md bg-amber-500/10 px-2 py-1 text-xs font-medium text-amber-700 ring-1 ring-inset ring-amber-500/30 dark:text-amber-300">
+          セッションの入力欄に未送信の文字が残っているため、再開の指示を送れていません。
+        </p>
+      )}
+
       <p className="text-xs text-muted-foreground">次に起きること: {notice.nextStep}</p>
+
+      {wait.status === "RESUME_FAILED" && wait.nextAutoRetryAt && (
+        <p className="text-xs text-muted-foreground">
+          次の自動再試行:{" "}
+          <time dateTime={wait.nextAutoRetryAt} title={formatDateTimeFull(wait.nextAutoRetryAt)}>
+            {formatDateTime(wait.nextAutoRetryAt)}
+          </time>
+        </p>
+      )}
 
       {wait.lastError && (
         <p className="text-xs text-destructive">依存先の状態を取得できませんでした: {wait.lastError}</p>

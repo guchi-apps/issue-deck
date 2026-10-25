@@ -9,6 +9,8 @@
  * 反映された・人による検証が済んだ、は別の条件で、前者が成立しても後者を満たしたとはみなさない。
  */
 
+import { classifyInstructionSkip } from "@/lib/dispatch/input-stash";
+
 export const DEPENDENCY_WAIT_CONDITIONS = ["closed", "merged", "released", "verified"] as const;
 export type DependencyWaitCondition = (typeof DEPENDENCY_WAIT_CONDITIONS)[number];
 
@@ -45,6 +47,34 @@ export function parseDependencyWaitStatus(value: unknown): DependencyWaitStatus 
 /** 待ちが続いている（`activeKey`を持つ）状態。RESUMED・CANCELLEDで終わる */
 export function isActiveDependencyWaitStatus(status: DependencyWaitStatus): boolean {
   return status !== "RESUMED" && status !== "CANCELLED";
+}
+
+/**
+ * 一時的な理由で見送られた再開を、巡回が自動で再試行するまでの間隔（#5005）。要素数が上限回数。
+ * 失敗した時刻（`resumeFailedAt`）から数え、n回目の再試行は`[n-1]`だけ空ける。
+ */
+export const DEPENDENCY_RESUME_AUTO_RETRY_DELAYS_MS = [2, 5, 15].map((m) => m * 60 * 1000);
+
+/**
+ * 時間が経てば解けうる失敗か。**未送信入力**（人が送るか消せば解ける）と**作業中**だけを対象にする。
+ * 承認待ち・状態不明・セッション終了・退避失敗は自動では解けない（または入力欄の保護に関わる）ので、
+ * 従来どおり人の「作業を再開」を待つ。理由文は`describeInstructionJobFailure`が組み立てたもの。
+ */
+export function isTransientResumeFailure(failureReason: string | null | undefined): boolean {
+  if (!failureReason?.startsWith("再開の指示は見送られました")) return false;
+  const kind = classifyInstructionSkip(failureReason).kind;
+  return kind === "unsent_input" || kind === "busy";
+}
+
+/** 次の自動再試行の時刻。対象外・使い切り・失敗時刻が無い記録は`null` */
+export function nextDependencyResumeRetryAt(row: {
+  failureReason: string | null;
+  autoRetryCount: number;
+  resumeFailedAt: Date | null;
+}): Date | null {
+  if (!row.resumeFailedAt || !isTransientResumeFailure(row.failureReason)) return null;
+  const delay = DEPENDENCY_RESUME_AUTO_RETRY_DELAYS_MS[row.autoRetryCount];
+  return delay === undefined ? null : new Date(row.resumeFailedAt.getTime() + delay);
 }
 
 export type DependencyRef = {
@@ -292,6 +322,9 @@ export type DependencyWaitView = {
   resumeRequestedAt: string | null;
   resumeSentAt: string | null;
   resumedAt: string | null;
+  /** 一時的な失敗からの自動再試行の回数と、次に試す時刻（#5005。予定が無ければ`null`） */
+  autoRetryCount?: number;
+  nextAutoRetryAt?: string | null;
   /** 再開条件を見直した履歴（#4570）。見直していなければ空 */
   conditionHistory?: DependencyConditionRevision[];
 };
@@ -385,13 +418,28 @@ export function describeDependencyWait(view: DependencyWaitView): DependencyWait
         tone: "done",
         nextStep: "依存待ちは解消しました。",
       };
-    case "RESUME_FAILED":
+    case "RESUME_FAILED": {
+      const reason = view.failureReason ?? "理由を取得できませんでした";
+      const unsentInput = classifyInstructionSkip(view.failureReason).kind === "unsent_input";
+      if (view.nextAutoRetryAt) {
+        const left = DEPENDENCY_RESUME_AUTO_RETRY_DELAYS_MS.length - (view.autoRetryCount ?? 0);
+        return {
+          shortLabel: "再開に失敗・自動で再試行",
+          label: "再開を見送りました（自動で再試行します）",
+          tone: "attention",
+          nextStep: `${reason}。少し待って自動で再試行します（残り${left}回）。${
+            unsentInput ? "入力欄の文字を送信するか消すと、次の再試行で再開します。" : ""
+          }すぐに再開するなら「作業を再開」を押してください。`,
+        };
+      }
+      const exhausted = isTransientResumeFailure(view.failureReason) && (view.autoRetryCount ?? 0) > 0;
       return {
         shortLabel: "再開に失敗",
-        label: "再開に失敗しました",
+        label: exhausted ? "再開に失敗しました（自動の再試行を使い切りました）" : "再開に失敗しました",
         tone: "attention",
-        nextStep: `${view.failureReason ?? "理由を取得できませんでした"}。「作業を再開」で再試行できます。`,
+        nextStep: `${reason}。「作業を再開」で再試行できます。`,
       };
+    }
     case "CANCELLED":
       return {
         shortLabel: "待機を解除",
