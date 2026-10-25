@@ -118,6 +118,20 @@ export function checkConsistency() {
     problems.push("AppConfig.baseURL が本番URLではありません（開発用のまま？）");
   }
 
+  // Universal Links（#5035）。AASAのアプリIDと対象ホストが、アプリのチーム・Bundle ID・ドメインと揃う
+  const ul = read("src/lib/ios-universal-links.ts");
+  const appId = `${ul.match(/IOS_TEAM_ID = "([^"]+)"/)?.[1]}.${ul.match(/IOS_BUNDLE_ID = "([^"]+)"/)?.[1]}`;
+  const team = pbxproj.match(/DEVELOPMENT_TEAM = ([A-Z0-9]+);/)?.[1];
+  if (appId !== `${team}.com.gucchii.issuedeck`) {
+    problems.push(`AASAのアプリID(${appId})がチーム/Bundle IDと一致しません`);
+  }
+  const host = new URL(swiftBase ?? "").host;
+  if (!read("ios/Config/IssueDeck.entitlements").includes(`<string>applinks:${host}</string>`)) {
+    problems.push(`IssueDeck.entitlements に applinks:${host} がありません`);
+  }
+  read("src/app/.well-known/apple-app-site-association/route.ts");
+  read("ios/IssueDeck/UniversalLink.swift");
+
   return problems;
 }
 
