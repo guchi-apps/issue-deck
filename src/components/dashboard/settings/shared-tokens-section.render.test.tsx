@@ -9,6 +9,7 @@ const deleteSharedToken = vi.fn().mockResolvedValue(true);
 const mutations = {
   createSharedToken: vi.fn().mockResolvedValue({ generatedValue: "generated-once" }),
   revealSharedToken: vi.fn().mockResolvedValue(null),
+  updateExpectedConsumers: vi.fn().mockResolvedValue(true),
   deleteSharedToken,
   isSubmitting: false,
   error: null,
@@ -23,6 +24,7 @@ const token: SharedToken = {
   name: "EXTERNAL_API_TOKEN",
   description: null,
   sourceReference: null,
+  expectedConsumers: [],
   createdAt: "2026-10-01T00:00:00.000Z",
   updatedAt: "2026-10-01T00:00:00.000Z",
   lastUsedAt: null,
@@ -76,5 +78,29 @@ describe("SharedTokensSection", () => {
     expect((await screen.findByLabelText("自動生成した値") as HTMLInputElement).value).toBe("generated-once");
     fireEvent.click(screen.getByRole("button", { name: "閉じる" }));
     expect(screen.queryByLabelText("自動生成した値")).toBeNull();
+  });
+
+  it("想定される利用元に無い利用元を「想定外」と表示する（#4998）", () => {
+    render(
+      <SharedTokensSection
+        data={[{ ...token, consumers: ["aide", "hermes-agent"], expectedConsumers: ["aide", "myroom"] }]}
+        isLoading={false}
+        error={null}
+        onChanged={vi.fn()}
+      />,
+    );
+    expect(screen.getByText("想定外: hermes-agent")).toBeTruthy();
+    expect(screen.queryByText("想定外: aide")).toBeNull();
+  });
+
+  it("想定される利用元を編集すると正規化した配列で保存する", async () => {
+    const onChanged = vi.fn();
+    render(<SharedTokensSection data={[token]} isLoading={false} error={null} onChanged={onChanged} />);
+    expect(screen.getByText("未設定（想定外の取得を通知しません）")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "EXTERNAL_API_TOKENの想定される利用元を編集" }));
+    fireEvent.change(screen.getByLabelText(/想定される利用元（カンマ区切り/), { target: { value: "Aide, myroom" } });
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+    await waitFor(() => expect(mutations.updateExpectedConsumers).toHaveBeenCalledWith("t1", ["aide", "myroom"]));
+    await waitFor(() => expect(onChanged).toHaveBeenCalled());
   });
 });

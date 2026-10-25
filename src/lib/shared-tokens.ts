@@ -7,6 +7,8 @@ export const SHARED_TOKEN_VALUE_MAX_LENGTH = 16_384;
 export const SHARED_TOKEN_DESCRIPTION_MAX_LENGTH = 1_000;
 export const SHARED_TOKEN_SOURCE_REFERENCE_MAX_LENGTH = 500;
 export const SHARED_TOKEN_CONSUMER_MAX_LENGTH = 100;
+/** 1トークンに登録できる想定利用元の数 */
+export const SHARED_TOKEN_EXPECTED_CONSUMERS_MAX = 20;
 
 /** 一覧の表示に要る利用記録の要約（利用元ごとの最終利用日時）。全行は読まない（#4165） */
 export type SharedTokenUsageSummary = Pick<SharedTokenUsage, "consumer" | "usedAt">;
@@ -66,6 +68,31 @@ export function canWriteSharedToken(name: string, consumer: string): boolean {
   return !writers || writers.includes(consumer.toLowerCase());
 }
 
+/**
+ * 想定利用元の入力（配列、またはカンマ・空白区切りの文字列）を、小文字・重複なしの配列へ正規化する（#4998）。
+ * 不正なら undefined。空配列は「未設定（検知の対象外）」を意味する。
+ */
+export function parseExpectedConsumers(value: unknown): string[] | undefined {
+  const items = typeof value === "string" ? value.split(/[\s,、]+/) : Array.isArray(value) ? value : null;
+  if (!items || !items.every((item) => typeof item === "string")) return undefined;
+  const consumers = [...new Set(items.map((item) => item.trim().toLowerCase()).filter(Boolean))];
+  if (consumers.length > SHARED_TOKEN_EXPECTED_CONSUMERS_MAX) return undefined;
+  return consumers.every((consumer) => consumer.length <= SHARED_TOKEN_CONSUMER_MAX_LENGTH) ? consumers : undefined;
+}
+
+/** DBのJSON列から想定利用元を読む。壊れた値・未設定は空配列（検知の対象外）として扱う */
+export function readExpectedConsumers(value: unknown): string[] {
+  return parseExpectedConsumers(value ?? []) ?? [];
+}
+
+/**
+ * 想定外の利用元か（#4998）。想定利用元が未設定のトークンは段階的に広げる前提で検知しない。
+ * 利用元は自己申告なので大文字小文字の違いは同じ利用元として扱う。
+ */
+export function isUnexpectedConsumer(expectedConsumers: readonly string[], consumer: string): boolean {
+  return expectedConsumers.length > 0 && !expectedConsumers.includes(consumer.trim().toLowerCase());
+}
+
 export function toSharedToken(row: SharedTokenWithUsages): SharedToken {
   const usages = [...row.usages].sort((a, b) => b.usedAt.getTime() - a.usedAt.getTime());
   return {
@@ -73,6 +100,7 @@ export function toSharedToken(row: SharedTokenWithUsages): SharedToken {
     name: row.name,
     description: row.description,
     sourceReference: row.sourceReference,
+    expectedConsumers: readExpectedConsumers(row.expectedConsumers),
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
     lastUsedAt: usages[0]?.usedAt.toISOString() ?? null,

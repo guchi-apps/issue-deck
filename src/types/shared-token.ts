@@ -3,6 +3,8 @@ export type SharedToken = {
   name: string;
   description: string | null;
   sourceReference: string | null;
+  /** 想定される利用元（小文字）。空なら想定外の利用元の検知を行わない（#4998） */
+  expectedConsumers: string[];
   createdAt: string;
   updatedAt: string;
   lastUsedAt: string | null;

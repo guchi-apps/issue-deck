@@ -20,6 +20,8 @@ import { Label } from "@/components/ui/label";
 import { useSharedTokenMutations } from "@/hooks/use-shared-tokens";
 import { formatDateTimeFull } from "@/lib/format-date-time";
 import {
+  isUnexpectedConsumer,
+  parseExpectedConsumers,
   SHARED_TOKEN_DESCRIPTION_MAX_LENGTH,
   SHARED_TOKEN_NAME_MAX_LENGTH,
   SHARED_TOKEN_SOURCE_REFERENCE_MAX_LENGTH,
@@ -39,8 +41,14 @@ export function SharedTokensSection({
   error,
   onChanged,
 }: SharedTokensSectionProps) {
-  const { createSharedToken, revealSharedToken, deleteSharedToken, isSubmitting, error: mutationError } =
-    useSharedTokenMutations();
+  const {
+    createSharedToken,
+    revealSharedToken,
+    updateExpectedConsumers,
+    deleteSharedToken,
+    isSubmitting,
+    error: mutationError,
+  } = useSharedTokenMutations();
   const [name, setName] = useState("");
   const [value, setValue] = useState("");
   const [description, setDescription] = useState("");
@@ -50,6 +58,9 @@ export function SharedTokensSection({
   // 自動生成した値は作成直後の1回だけ表示する（#4121）。
   const [created, setCreated] = useState<{ name: string; value: string } | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<SharedToken | null>(null);
+  // 想定される利用元の編集中の入力（#4998）
+  const [editingConsumers, setEditingConsumers] = useState<{ id: string; text: string } | null>(null);
+  const [consumersError, setConsumersError] = useState<string | null>(null);
 
   async function handleAdd() {
     const trimmedName = name.trim();
@@ -81,6 +92,20 @@ export function SharedTokensSection({
     }
     const tokenValue = await revealSharedToken(id);
     if (tokenValue !== null) setRevealed((current) => ({ ...current, [id]: tokenValue }));
+  }
+
+  async function handleSaveExpectedConsumers() {
+    if (!editingConsumers) return;
+    const expectedConsumers = parseExpectedConsumers(editingConsumers.text);
+    if (!expectedConsumers) {
+      setConsumersError("利用元の数か名前の長さが上限を超えています");
+      return;
+    }
+    const ok = await updateExpectedConsumers(editingConsumers.id, expectedConsumers);
+    if (!ok) return;
+    setConsumersError(null);
+    setEditingConsumers(null);
+    onChanged();
   }
 
   async function handleDelete(id: string) {
@@ -140,10 +165,62 @@ export function SharedTokensSection({
                 <Badge variant={token.lastUsedAt ? "secondary" : "outline"}>
                   {token.lastUsedAt ? `最終利用: ${formatDateTimeFull(token.lastUsedAt)}` : "未使用"}
                 </Badge>
-                {token.consumers.map((consumer) => (
-                  <Badge key={consumer} variant="outline">{consumer}</Badge>
-                ))}
+                {token.consumers.map((consumer) =>
+                  isUnexpectedConsumer(token.expectedConsumers, consumer) ? (
+                    <Badge key={consumer} variant="destructive" title="想定される利用元に含まれていません">
+                      想定外: {consumer}
+                    </Badge>
+                  ) : (
+                    <Badge key={consumer} variant="outline">{consumer}</Badge>
+                  ),
+                )}
               </div>
+              {editingConsumers?.id === token.id ? (
+                <div className="flex flex-col gap-1.5">
+                  <Label htmlFor={`shared-token-expected-${token.id}`} className="text-xs">
+                    想定される利用元（カンマ区切り。空欄で未設定に戻す）
+                  </Label>
+                  <div className="flex gap-2">
+                    <Input
+                      id={`shared-token-expected-${token.id}`}
+                      placeholder="例: aide, myroom"
+                      value={editingConsumers.text}
+                      onChange={(event) => setEditingConsumers({ id: token.id, text: event.target.value })}
+                    />
+                    <Button type="button" size="sm" className="shrink-0" disabled={isSubmitting} onClick={() => void handleSaveExpectedConsumers()}>
+                      保存
+                    </Button>
+                    <Button type="button" variant="outline" size="sm" className="shrink-0" disabled={isSubmitting} onClick={() => { setEditingConsumers(null); setConsumersError(null); }}>
+                      取消
+                    </Button>
+                  </div>
+                  {consumersError && <p className="text-xs text-destructive">{consumersError}</p>}
+                </div>
+              ) : (
+                <div className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
+                  <span>想定される利用元:</span>
+                  {token.expectedConsumers.length > 0 ? (
+                    token.expectedConsumers.map((consumer) => (
+                      <Badge key={consumer} variant="secondary">{consumer}</Badge>
+                    ))
+                  ) : (
+                    <span>未設定（想定外の取得を通知しません）</span>
+                  )}
+                  <Button
+                    type="button"
+                    variant="link"
+                    size="sm"
+                    className="h-auto p-0 text-xs"
+                    aria-label={`${token.name}の想定される利用元を編集`}
+                    onClick={() => {
+                      setConsumersError(null);
+                      setEditingConsumers({ id: token.id, text: token.expectedConsumers.join(", ") });
+                    }}
+                  >
+                    {token.expectedConsumers.length > 0 ? "編集" : "設定"}
+                  </Button>
+                </div>
+              )}
               {token.sourceReference && (
                 <p className="break-all text-xs text-muted-foreground">移行元: {token.sourceReference}</p>
               )}
@@ -189,7 +266,7 @@ export function SharedTokensSection({
         </div>
       )}
       <p className="text-xs text-muted-foreground">
-        値は空欄のまま登録すると自動生成します。1Passwordなど外部で決まった値を移すときだけ入力してください。値は暗号化して保存され、一覧・利用履歴・エラーには表示されません。
+        値は空欄のまま登録すると自動生成します。1Passwordなど外部で決まった値を移すときだけ入力してください。値は暗号化して保存され、一覧・利用履歴・エラーには表示されません。想定される利用元を設定したトークンは、それ以外の利用元が取得するとDiscordへ通知します（同じ組は24時間に1回）。利用元は自己申告のため、取得を止める仕組みではありません。
       </p>
 
       <AlertDialog open={deleteTarget !== null} onOpenChange={(open) => !open && !isSubmitting && setDeleteTarget(null)}>

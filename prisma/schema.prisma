@@ -751,9 +751,25 @@ model SharedToken {
   encryptedValue  String             @db.Text
   description     String?            @db.Text
   sourceReference String?            @db.VarChar(500)
+  // 想定される利用元（小文字の文字列配列）。null・空なら検知の対象外。GETで想定外の利用元が
+  // 取得したらDiscordへ通知する（#4998。利用元は自己申告なので検知であって制限ではない）
+  expectedConsumers Json?
   createdAt       DateTime           @default(now())
   updatedAt       DateTime           @updatedAt
   usages          SharedTokenUsage[]
+  consumerAlerts  SharedTokenConsumerAlert[]
+}
+
+// 想定外の利用元を通知した記録（#4998）。同じトークン×利用元の組を一定時間に1回へ絞る。
+model SharedTokenConsumerAlert {
+  id             String   @id @default(cuid())
+  sharedTokenId  String
+  consumer       String   @db.VarChar(100)
+  lastNotifiedAt DateTime
+
+  sharedToken SharedToken @relation(fields: [sharedTokenId], references: [id], onDelete: Cascade)
+
+  @@unique([sharedTokenId, consumer])
 }
 
 // 外部アプリ・AIエージェントが共有トークンを取得または登録した記録。
