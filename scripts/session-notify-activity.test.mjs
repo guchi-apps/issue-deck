@@ -104,8 +104,8 @@ function runHook(hookJson) {
 /**
  * 転記（JSONL）を作ってパスを返す（#2844）。
  *
- * 判定は**行単位の文字列一致**（`"type":"tool_use"` と拒否の決まり文句の、最後の出現位置の
- * 前後関係）なので、テストもレコードの最小形だけを置く。
+ * 判定はJSONLのレコード単位（本物の`assistant`／`user`レコードのtool_useと拒否の決まり文句の
+ * 前後関係。#5011）なので、テストもレコードの最小形だけを置く。
  */
 function writeTranscript(lines) {
   const file = path.join(workDir, `transcript-${received.length}-${Math.random()}.jsonl`);
@@ -305,6 +305,86 @@ describe("session-notify.sh の様子の報告", () => {
     expect(escalations()).toEqual([]);
     expect(activityReports()).toHaveLength(1);
     expect(activityReports()[0].body).toMatchObject({ activity: "responded" });
+  });
+
+  // #5011（guchi-apps/morrow#614）。Claude Code 2.1.3xxの転記は拒否の直後に`api-request-blob`
+  // （直前のassistant発言の複製で、tool_useを含む）を書く。行の文字列一致だとこれを
+  // 「ツールが走った」と読み、拒否されただけのセッションを素通りさせていた。
+  describe("転記の新しい形と、少しだけ確認して諦めた形（#5011）", () => {
+    const apiRequestBlob = JSON.stringify({
+      type: "api-request-blob",
+      message: { role: "assistant", content: [{ type: "tool_use", name: "Bash", input: {} }] },
+    });
+    const sidechainToolUse = JSON.stringify({ ...JSON.parse(toolUse), isSidechain: true });
+    const humanPrompt = JSON.stringify({
+      type: "user",
+      message: { role: "user", content: "続けてください" },
+    });
+    // 残作業として「完了報告」に触れる形も、morrow#614の最終応答どおりに含める
+    const gaveUpMessage =
+      "変更は実装しましたが、コミット・push・PR作成は権限判定に拒否されたので実行していません。\n\nPR作成後に、完了報告のIssueコメントも残っています。";
+
+    it("api-request-blob・サブエージェント内のtool_useは、拒否のあとに走ったツールとして数えない", async () => {
+      const transcript = writeTranscript([toolUse, classifierDenial, apiRequestBlob, sidechainToolUse, assistantText]);
+
+      await runHook({ hook_event_name: "Stop", session_id: "sess-1", transcript_path: transcript });
+
+      expect(escalations()).toHaveLength(1);
+      expect(escalations()[0].body).toMatchObject({ reason: "classifier_blocked" });
+    });
+
+    it("拒否のあと確認を1回だけして、拒否に触れて終えた応答は引き上げる", async () => {
+      const transcript = writeTranscript([toolUse, classifierDenial, apiRequestBlob, toolUse, assistantText]);
+
+      await runHook({
+        hook_event_name: "Stop",
+        session_id: "sess-1",
+        transcript_path: transcript,
+        last_assistant_message: gaveUpMessage,
+      });
+
+      expect(escalations()).toHaveLength(1);
+      expect(escalations()[0].body).toMatchObject({ reason: "classifier_blocked" });
+    });
+
+    it("拒否に触れていても、PRのURLを含む完了報告なら対象外", async () => {
+      const transcript = writeTranscript([toolUse, classifierDenial, toolUse, assistantText]);
+
+      await runHook({
+        hook_event_name: "Stop",
+        session_id: "sess-1",
+        transcript_path: transcript,
+        last_assistant_message: `一度拒否されましたが、分けて実行しました。https://github.com/guchi-apps/issue-deck/pull/1 ${gaveUpMessage}`,
+      });
+
+      expect(escalations()).toEqual([]);
+    });
+
+    it("拒否のあと何件もツールを呼んで作業を続けていれば対象外", async () => {
+      const transcript = writeTranscript([toolUse, classifierDenial, toolUse, toolUse, toolUse, assistantText]);
+
+      await runHook({
+        hook_event_name: "Stop",
+        session_id: "sess-1",
+        transcript_path: transcript,
+        last_assistant_message: gaveUpMessage,
+      });
+
+      expect(escalations()).toEqual([]);
+    });
+
+    it("拒否が人の入力より前（前のターン）なら対象外", async () => {
+      const transcript = writeTranscript([toolUse, classifierDenial, humanPrompt, toolUse, assistantText]);
+
+      await runHook({
+        hook_event_name: "Stop",
+        session_id: "sess-1",
+        transcript_path: transcript,
+        last_assistant_message: gaveUpMessage,
+      });
+
+      expect(escalations()).toEqual([]);
+    });
   });
 
   // `Stop`はターンごとに飛ぶので、印が無いと拒否が続くあいだIssueコメントが増え続ける。

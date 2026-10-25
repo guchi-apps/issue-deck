@@ -1017,17 +1017,80 @@ CLASSIFIER_DENIAL_MARKER = "denied by the Claude Code auto mode classifier"
 CLASSIFIER_BLOCK_TAIL_BYTES = 256 * 1024
 
 
-def classifier_blocked_at_end(transcript):
-    """クラシファイアの拒否のあと、一度もツールが走らないまま応答が終わっているか（#2844）。
+# 拒否のあとに少しだけツールを呼んで諦めた形（#5011）の判定に使う。拒否後のtool_useがこの件数
+# 以下で、最終応答が拒否・権限に触れているなら「迂回できていない」とみなす。
+CLASSIFIER_GAVE_UP_MAX_TOOL_USES = 2
+CLASSIFIER_GAVE_UP_WORDS = (
+    "拒否", "権限", "許可", "ブロック", "denied", "blocked", "classifier", "permission",
+)
+# 完了の印。`QUESTION_DONE_MARKERS`の「完了報告」は使わない——諦めた応答は「完了報告のIssue
+# コメントも残っています」のように残作業として書くため（morrow#614の最終応答がそうだった）。
+CLASSIFIER_DONE_MARKERS = ("/pull/", "PRを作成しました", "PRを作りました")
 
-    転記の末尾を**行単位**で見て、次の2つの最後の出現位置を比べる。
 
-      A: `"type":"tool_use"` を含む行（＝実際にツールを呼び出した）
-      B: クラシファイアの拒否の決まり文句を含む行（＝tool_resultとして拒否が返った）
+def _transcript_content(record):
+    message = record.get("message")
+    if not isinstance(message, dict):
+        return None
+    return message.get("content")
 
-    Bの方が後ろにあれば「拒否されたきり何も動いていない」。**Aの方が後ろなら対象外**で、
-    自力で別の手段へ迂回した場合も、`AskUserQuestion`（それ自体が人へ届く）へ進んだ場合も、
-    拒否の後ろにtool_useが来るのでここで落ちる。
+
+def _is_human_prompt(record):
+    """人が入力した発言か（tool_resultでもメタ情報でもないuserレコード）。"""
+    if record.get("type") != "user" or record.get("isMeta"):
+        return False
+    content = _transcript_content(record)
+    if isinstance(content, str):
+        return bool(content.strip())
+    if isinstance(content, list):
+        return not any(isinstance(item, dict) and item.get("type") == "tool_result" for item in content)
+    return False
+
+
+def _is_classifier_denial(record):
+    if record.get("type") != "user":
+        return False
+    content = _transcript_content(record)
+    if not isinstance(content, list):
+        return False
+    for item in content:
+        if not isinstance(item, dict) or item.get("type") != "tool_result":
+            continue
+        result = item.get("content")
+        text = result if isinstance(result, str) else json.dumps(result, ensure_ascii=False)
+        if CLASSIFIER_DENIAL_MARKER in text:
+            return True
+    return False
+
+
+def _tool_use_count(record):
+    if record.get("type") != "assistant":
+        return 0
+    content = _transcript_content(record)
+    if not isinstance(content, list):
+        return 0
+    return sum(1 for item in content if isinstance(item, dict) and item.get("type") == "tool_use")
+
+
+def classifier_blocked_at_end(transcript, last_message=None):
+    """クラシファイアの拒否のあと、迂回できないまま応答が終わっているか（#2844・#5011）。
+
+    転記の末尾をJSONLとしてレコード単位で読み、**本物の`assistant`／`user`レコードだけ**を見る。
+    Claude Code 2.1.3xxの転記には`api-request-blob`（直前のassistant発言の複製で、tool_useを含む）
+    が拒否の直後に書かれるため、行の文字列一致で`"type":"tool_use"`を探す以前の判定は、
+    拒否されただけでも「ツールが走った」と読んで素通りしていた（#5011・guchi-apps/morrow#614）。
+    `isSidechain`（サブエージェントの内側）も数えない。
+
+    次のどちらかなら真。
+
+      - 最後の拒否のあと、一度もツールが呼ばれていない
+      - 最後の拒否が最後の人の入力より後にあり、そのあとのtool_useが
+        `CLASSIFIER_GAVE_UP_MAX_TOOL_USES`件以下で、最終応答（`last_message`）が拒否・権限に
+        触れている。morrow#614では拒否のあと`git status`を1回だけ叩き、「権限判定に拒否された
+        ので実行していません」で終えていた。PRのURLなど完了の印があれば対象外
+
+    自力で別の手段へ迂回して作業を続けた場合や、`AskUserQuestion`（それ自体が人へ届く）へ
+    進んだ場合は、上のどちらにも当たらないので落ちる。
 
     判定材料はClaude Codeの転記フォーマットという内部仕様なので、**読めなければ「止まって
     いない」を返す**（＝これまでどおり応答終了として報告するだけ）。
@@ -1044,14 +1107,38 @@ def classifier_blocked_at_end(transcript):
     except Exception:
         return False
 
-    last_tool_use = -1
     last_denial = -1
-    for index, line in enumerate(lines):
-        if '"type":"tool_use"' in line or '"type": "tool_use"' in line:
-            last_tool_use = index
-        if CLASSIFIER_DENIAL_MARKER in line:
+    last_human = -1
+    records = []
+    for line in lines:
+        try:
+            record = json.loads(line)
+        except Exception:
+            continue
+        if not isinstance(record, dict) or record.get("isSidechain"):
+            continue
+        if record.get("type") not in ("assistant", "user"):
+            continue
+        index = len(records)
+        records.append(record)
+        if _is_classifier_denial(record):
             last_denial = index
-    return last_denial >= 0 and last_denial > last_tool_use
+        elif _is_human_prompt(record):
+            last_human = index
+    if last_denial < 0:
+        return False
+
+    tool_uses_after = sum(_tool_use_count(record) for record in records[last_denial + 1:])
+    if tool_uses_after == 0:
+        return True
+    if last_denial < last_human or tool_uses_after > CLASSIFIER_GAVE_UP_MAX_TOOL_USES:
+        return False
+    if not isinstance(last_message, str) or not last_message.strip():
+        return False
+    if any(marker in last_message for marker in CLASSIFIER_DONE_MARKERS):
+        return False
+    lowered = last_message.lower()
+    return any(word in lowered for word in CLASSIFIER_GAVE_UP_WORDS)
 
 
 # 応答の最終段落が「人に判断を求める問いかけ」で終わっているかを見る語（#3447）。
@@ -1655,7 +1742,9 @@ if event == "Stop":
         and repo_slug
         and issue_number.isdigit()
         and tmux_session
-        and classifier_blocked_at_end(hook.get("transcript_path") or "")
+        and classifier_blocked_at_end(
+            hook.get("transcript_path") or "", hook.get("last_assistant_message")
+        )
     ):
         print("interrupted", "classifier_blocked")
         print(json.dumps({

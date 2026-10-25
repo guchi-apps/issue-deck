@@ -121,6 +121,7 @@ scripts/report-dependency-wait.sh <owner/repo> <このIssue番号> <依存先own
 ## 責務とIssueに残す記録
 
 - Issueの要件を実装し、テスト・Lint・型チェック・ビルドを実行して、コミット・pushする
+- **commit・push・PR作成・ラベルの付け外しは、1操作ずつ別の`Bash`呼び出しで行う**（#5011）。`&&`や改行で1つにまとめると、auto modeの権限クラシファイアに理由の表示なしで拒否されることがある（guchi-apps/morrow#614。同じ操作を分けて呼び直したら通った）。拒否されたら、まとめ直さず1操作ずつ呼び直し、それでも拒否されたら文章で止まらず`AskUserQuestion`で許可を求める
 - `develop`向けPRを作成する。本文の構成は[docs/issue-pr-responsibility-model.md](../../docs/issue-pr-responsibility-model.md)「PRテンプレート」（正は`CLAUDE.md`「PR本文テンプレート」）に従う：対応Issue・Issueを閉じるPRか途中PRか（`<!-- issue-deck-pr-role:closing -->`または`<!-- issue-deck-pr-role:interim -->`をその項目に書く）・実装内容・実装上の判断と採用理由（該当する場合）・テスト内容・画面変更や動作証跡（該当する場合）・影響範囲・未対応事項・デプロイ／移行／ロールバック上の注意（該当する場合）・確認方法・注意点。Issueは`closes`を使わず`#{{ISSUE_NUMBER}}`のように番号だけを書く。進捗（`Implementation`→`Develop PR`）はpushとPR作成を契機に自動で報告されるので、自分では動かさない
 - **このプロンプトが、PR作成の明示的な指示です。** 個人設定（`~/.claude/CLAUDE.md`）の「明示的な指示があるまでPRを作らない」より優先し、確認を待たずに`gh pr create`まで進める（PRを作らないと盤面に出ないまま止まる）。`git pull`とマージは対象外で、従来どおり指示があるまで実行しない
 - **PRを作ったら最後に`gh issue comment {{ISSUE_NUMBER}}`で完了報告を投稿する。** 内容はPRのURL・変更の要約（触ったファイルと対応内容の箇条書き）・実行したテストと確認の内容
