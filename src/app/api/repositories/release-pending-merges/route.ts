@@ -29,6 +29,7 @@ import {
   resolvePullRequestReleaseVerification,
   type ReleaseVerificationBadgeInfo,
 } from "@/lib/release-candidate-status";
+import { loadPublishApprovedPullRequests } from "@/lib/release-publish-approval-run";
 import { fetchReleaseChecks, releaseChecksKey } from "@/lib/pull-request-release-checks";
 
 export type ReleasePendingMerge = {
@@ -185,6 +186,12 @@ async function handleGET() {
                 ).get(releaseChecksKey(repository.fullName, releasePr.number)) ?? null,
             })
           : null;
+        // 公開承認済みなら、マージ待ちとして数えない（#5064）
+        const publishApproved = releasePr
+          ? (await loadPublishApprovedPullRequests(repository.fullName, [
+              { number: releasePr.number, baseSha: releasePr.base?.sha ?? null, headSha: releasePr.head.sha },
+            ])).has(releasePr.number)
+          : false;
         const bumpJudgementPending = isMergeJudgementPending(bumpCheck?.mergeJudgement);
 
         // `release_pending`（developだけbump済みでdevelop→mainのPRが未作成）は判定しない。
@@ -204,6 +211,7 @@ async function handleGET() {
                 ciState: releaseCiState,
                 mergeJudgementPending: releaseJudgementPending,
                 verification: releaseVerification ? releaseVerificationBlock(releaseVerification) : null,
+                publishApproved,
               }
             : null,
           releasePending: false,
