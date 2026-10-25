@@ -203,6 +203,11 @@ on:
         type: string
         default: ""
 
+env:
+  # Codexの判定印を読むコメントの絞り込み条件。サブPCがユーザー本人のトークンで投稿するため
+  # 書き込み権限のある投稿者(OWNER/MEMBER/COLLABORATOR)に限る。読む箇所はすべてこれを使う(#4969・#5004)
+  CODEX_TRUSTED_COMMENTS_JQ: '.[] | select(.author_association | IN("OWNER", "MEMBER", "COLLABORATOR")) | .body'
+
 jobs:
   identify-issue:
     if: github.event.pull_request.draft == false
@@ -984,7 +989,7 @@ jobs:
           # (OWNER/MEMBER/COLLABORATOR)のコメントだけを読む。外部ユーザーが書いた偽の判定印で
           # 依頼を省かせないため(#4969)
           if gh api --paginate "repos/${GH_REPO}/issues/${PR_NUMBER}/comments" \
-            --jq '.[] | select(.author_association == "OWNER" or .author_association == "MEMBER" or .author_association == "COLLABORATOR") | .body' \
+            --jq "$CODEX_TRUSTED_COMMENTS_JQ" \
             | grep -qE "issue-deck-codex-review-verdict:(lgtm|needs-check|changes-requested) sha=${HEAD_SHA}"; then
             echo "このHEADのCodexレビュー結果が既にPRにあるため、依頼しません。"
             echo "requested=true" >> "$GITHUB_OUTPUT"
@@ -1215,7 +1220,7 @@ jobs:
           fi
           # 判定印は書き込み権限のある投稿者のコメントだけから読む(外部ユーザーが偽の判定印を書けるため。#4969)
           MARKER_VERDICT="$(gh api --paginate "repos/${GH_REPO}/issues/${PR_NUMBER}/comments" \
-            --jq '.[] | select(.author_association == "OWNER" or .author_association == "MEMBER" or .author_association == "COLLABORATOR") | .body' 2>/dev/null \
+            --jq "$CODEX_TRUSTED_COMMENTS_JQ" 2>/dev/null \
             | grep -oE "issue-deck-codex-review-verdict:(lgtm|needs-check|changes-requested) sha=${HEAD_SHA}" \
             | tail -n 1 | sed -E 's/^.*verdict:([a-z-]+) sha=.*$/\1/' || true)"
           if [ -z "$APP_BASE_URL" ] || [ -z "$PROGRESS_REPORT_SECRET" ]; then
@@ -1330,9 +1335,9 @@ jobs:
             CODEX_VERDICT="${CODEX_VERDICT_INPUT:-}"
             [ -z "$CODEX_VERDICT" ] || [ "${CODEX_VERDICT_SOURCE:-}" != "job" ] || CODEX_VERDICT_FROM_JOB=true
             if [ -z "$CODEX_VERDICT" ]; then
-              # 投稿者がBotのコメントだけを読む(外部ユーザーが偽の判定マーカーを書けるため。#4952)
+              # 書き込み権限のある投稿者のコメントだけを読む(外部ユーザーが偽の判定マーカーを書けるため。#4952・#5004)
               CODEX_VERDICT="$(gh api --paginate "repos/${GH_REPO}/issues/${PR_NUMBER}/comments" \
-                --jq '.[] | select(.user.type == "Bot") | .body' \
+                --jq "$CODEX_TRUSTED_COMMENTS_JQ" \
                 | grep -oE "issue-deck-codex-review-verdict:(lgtm|needs-check|changes-requested) sha=${HEAD_SHA}" \
                 | tail -n 1 \
                 | sed -E 's/^.*verdict:([a-z-]+) sha=.*$/\1/' || true)"
@@ -1689,7 +1694,7 @@ jobs:
               if [ -z "$FOUND" ]; then
                 # 書き込み権限のある投稿者のコメントだけを読む(#4969)
                 FOUND="$(gh api --paginate "repos/${GH_REPO}/issues/${PR_NUMBER}/comments" \
-                  --jq '.[] | select(.author_association == "OWNER" or .author_association == "MEMBER" or .author_association == "COLLABORATOR") | .body' \
+                  --jq "$CODEX_TRUSTED_COMMENTS_JQ" \
                   | grep -oE "issue-deck-codex-review-verdict:(lgtm|needs-check|changes-requested) sha=${HEAD_SHA}" \
                   | tail -n 1 \
                   | sed -E 's/^.*verdict:([a-z-]+) sha=.*$/\1/' || true)"
