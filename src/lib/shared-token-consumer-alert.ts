@@ -1,5 +1,5 @@
 import { db } from "@/lib/db";
-import { loadReleaseDiscordTarget, postWebhookMessage } from "@/lib/discord/webhook";
+import { loadSharedTokenAlertDiscordTarget, postWebhookMessage } from "@/lib/discord/webhook";
 import { isUniqueConstraintError } from "@/lib/prisma-error";
 import { isUnexpectedConsumer, readExpectedConsumers } from "@/lib/shared-tokens";
 
@@ -14,7 +14,7 @@ import { isUnexpectedConsumer, readExpectedConsumers } from "@/lib/shared-tokens
  * - 本文はトークン名・利用元・時刻だけで、値は含めない
  * - 同じトークン×利用元の組は`SHARED_TOKEN_ALERT_INTERVAL_MS`に1回だけ鳴らす。記録はDBに置き、
  *   再起動・複数プロセスでも重複しないよう、条件付き更新で「鳴らす権利」を1つだけ取る
- * - 投稿先はリリース通知と同じ`DISCORD_RELEASE_WEBHOOK_URL`（専用のシークレットを増やさない）
+ * - 投稿先は専用の`DISCORD_SHARED_TOKEN_ALERT_WEBHOOK_URL`。未設定ならリリース通知の`DISCORD_RELEASE_WEBHOOK_URL`へ退避する
  */
 
 export const SHARED_TOKEN_ALERT_INTERVAL_MS = 24 * 60 * 60 * 1000;
@@ -60,7 +60,7 @@ export async function notifyUnexpectedSharedTokenConsumer(
   }: { now?: Date; env?: Record<string, string | undefined>; fetchImpl?: typeof fetch } = {},
 ): Promise<SharedTokenAlertResult> {
   if (!isUnexpectedConsumer(readExpectedConsumers(token.expectedConsumers), rawConsumer)) return "expected";
-  const target = loadReleaseDiscordTarget(env);
+  const target = loadSharedTokenAlertDiscordTarget(env);
   if (!target) return "not_configured";
 
   const consumer = rawConsumer.trim().toLowerCase();
