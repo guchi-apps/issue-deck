@@ -262,6 +262,28 @@ describe("runReleasePushSweep", () => {
     expect(vi.mocked(postWebhookMessage).mock.calls[0][1].threadName).toBeUndefined();
   });
 
+  it("iOSアプリのリポジトリは`homepage`ではなく起動用URL（Universal Link）を出す（#5049）", async () => {
+    stubDb({
+      repositories: [{ ...REPOSITORY, fullName: "guchi-apps/yoteiflow", name: "yoteiflow" }],
+      recordedTagName: "v4.74.0",
+    });
+
+    await runReleasePushSweep({ now: NOW });
+
+    const links = vi.mocked(postWebhookMessage).mock.calls[0][1].embeds?.[0].fields?.[0].value ?? "";
+    expect(links).toContain("[アプリを開く（iOSアプリ）](https://dayspan.gucchii.com/calendar)");
+    expect(fetchRepositoryHomepage).not.toHaveBeenCalled();
+  });
+
+  it("起動用URLを持たないリポジトリは従来どおり`homepage`を出す", async () => {
+    stubDb({ repositories: [REPOSITORY], recordedTagName: "v4.74.0" });
+
+    await runReleasePushSweep({ now: NOW });
+
+    const links = vi.mocked(postWebhookMessage).mock.calls[0][1].embeds?.[0].fields?.[0].value ?? "";
+    expect(links).toContain("[アプリを開く（iOSアプリ）](https://app.example.test)");
+  });
+
   it("初めて見るリポジトリは鳴らさずタグだけ記録する", async () => {
     const { create } = stubDb({ repositories: [REPOSITORY] });
 

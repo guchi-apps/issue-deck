@@ -47,4 +47,13 @@ describe("getWebviewIosRepository", () => {
     expect(repo?.command).toContain("cd ~/apps/issue-deck");
     expect(repo?.command).toContain("open ios/IssueDeck.xcodeproj");
   });
+
+  it("リリース通知の起動用URLは各アプリの本番ドメイン上のHTTPS（#5049）", () => {
+    expect(getWebviewIosRepository("guchi-apps/yoteiflow")?.launchUrl).toBe("https://dayspan.gucchii.com/calendar");
+    for (const name of ["kurashio", "yoteiflow", "aide", "morrow"]) {
+      expect(getWebviewIosRepository(`guchi-apps/${name}`)?.launchUrl).toMatch(/^https:\/\/[a-z-]+\.gucchii\.com\//);
+    }
+    // issue-deck自身は「リリース画面を開く」がアプリで開くので持たない
+    expect(getWebviewIosRepository("guchi-apps/issue-deck")?.launchUrl).toBeUndefined();
+  });
 });
