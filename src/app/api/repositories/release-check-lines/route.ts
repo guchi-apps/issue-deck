@@ -4,6 +4,7 @@ import { getCurrentUser } from "@/lib/auth-user";
 import { db } from "@/lib/db";
 import { getInstallationToken } from "@/lib/github/app-auth";
 import { fetchReleaseBodyByTag, fetchUserCanWriteRepo, updateReleaseBody } from "@/lib/github/release-body-api";
+import { previewModeGuard } from "@/lib/preview-mode";
 import { applyReleaseBodyTaskToggle, parseReleaseBodyTasks } from "@/lib/release-body-tasks";
 
 /**
@@ -58,6 +59,9 @@ async function parseBody(request: NextRequest): Promise<ParsedBody | null> {
 }
 
 async function handle(request: NextRequest, checked: boolean) {
+  const guard = previewModeGuard();
+  if (guard) return guard;
+
   const user = await getCurrentUser();
   if (!user) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
