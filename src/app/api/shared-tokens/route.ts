@@ -1,9 +1,10 @@
-import { NextResponse, type NextRequest } from "next/server";
+import { after, NextResponse, type NextRequest } from "next/server";
 
 import { authorizeSharedTokenApi, authorizeProtectedSharedTokenWrite } from "@/lib/shared-token-auth";
 import { decryptSecret, encryptSecret } from "@/lib/crypto/secret-cipher";
 import { db } from "@/lib/db";
 import { isUniqueConstraintError } from "@/lib/prisma-error";
+import { notifyUnexpectedSharedTokenConsumer } from "@/lib/shared-token-consumer-alert";
 import { generateSharedTokenValue } from "@/lib/shared-token-generate";
 import { canWriteSharedToken, parseSharedTokenConsumer, parseSharedTokenInput } from "@/lib/shared-tokens";
 
@@ -38,6 +39,12 @@ export async function GET(request: NextRequest) {
   if (!row) return NextResponse.json({ error: "not_found" }, { status: 404 });
 
   await db.sharedTokenUsage.create({ data: { sharedTokenId: row.id, consumer, action: "read" } });
+  // 想定外の利用元ならDiscordへ知らせる（#4998）。応答を遅らせず、失敗しても取得は成功させる
+  after(() =>
+    notifyUnexpectedSharedTokenConsumer(row, consumer).catch((error: unknown) =>
+      console.warn("[shared-token-alert] 判定に失敗しました", error instanceof Error ? error.message : error),
+    ),
+  );
   return NextResponse.json({ name: row.name, value: decryptSecret(row.encryptedValue) });
 }
 

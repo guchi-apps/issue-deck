@@ -33,6 +33,21 @@ curl -fsS "$ISSUE_DECK_URL/api/shared-tokens?name=EXAMPLE_TOKEN" \
   -H "X-Shared-Token-Consumer: example-app"
 ```
 
+## 想定外の利用元の検知（#4998）
+
+`X-Shared-Token-Consumer`は自己申告で、`SHARED_TOKEN_API_SECRET`を持つ者はトークン名さえ分かれば
+登録済みのどのトークンも取得できる。そこでトークンごとに**想定される利用元**を設定画面から登録し、
+`GET`のたびに利用元と突き合わせて、**想定外ならDiscordへ通知する**（`src/lib/shared-token-consumer-alert.ts`）。
+
+- 想定される利用元が**未設定のトークンは検知しない**。書込専用トークンなど重要なものから設定して段階的に広げる。
+  設定画面では未設定のトークンに「未設定（想定外の取得を通知しません）」と出し、利用元の一覧で想定外のものを「想定外:」付きで表示する
+- 突き合わせは大文字小文字を区別しない。登録値は小文字へ正規化して`SharedToken.expectedConsumers`（JSON配列）に持つ
+- 通知はトークン名・利用元・時刻だけで、**値は含めない**。投稿先はリリース通知と同じ`DISCORD_RELEASE_WEBHOOK_URL`（未設定なら何もしない）
+- **同じトークン×利用元の組は24時間に1回だけ**通知する。記録は`SharedTokenConsumerAlert`に置き、条件付き更新で鳴らす権利を1つだけ取るので、
+  複数プロセス・再起動でも重複しない。投稿に失敗したら記録を戻し、次の取得で鳴らし直す
+- 通知は応答の後（`after()`）に送り、失敗しても取得の応答は変わらない
+- **事後の検知であって、取得は止めない。** 想定内の名前を名乗られると検知できない（名乗りと鍵の結びつけ・読み取り許可リストは別途検討）
+
 ## 登録
 
 `POST /api/shared-tokens`は`name`を必須とし、任意で`value`・`description`と移行元の

@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  isUnexpectedConsumer,
+  parseExpectedConsumers,
   parseSharedTokenConsumer,
   parseSharedTokenInput,
   toSharedToken,
@@ -52,6 +54,7 @@ describe("共有トークンの表示用変換", () => {
       encryptedValue: "encrypted-secret-value",
       description: null,
       sourceReference: null,
+      expectedConsumers: ["aide", "myroom"],
       createdAt: new Date("2026-09-01T00:00:00Z"),
       updatedAt: new Date("2026-09-01T00:00:00Z"),
       usages: [
@@ -67,6 +70,7 @@ describe("共有トークンの表示用変換", () => {
       name: "EXAMPLE_TOKEN",
       description: null,
       sourceReference: null,
+      expectedConsumers: ["aide", "myroom"],
       createdAt: "2026-09-01T00:00:00.000Z",
       updatedAt: "2026-09-01T00:00:00.000Z",
       lastUsedAt: "2026-09-02T00:00:00.000Z",
@@ -78,5 +82,26 @@ describe("共有トークンの表示用変換", () => {
   it("利用元の入力を検証する", () => {
     expect(parseSharedTokenConsumer("  aide ")).toBe("aide");
     expect(parseSharedTokenConsumer(" ")).toBeNull();
+  });
+});
+
+describe("想定される利用元（#4998）", () => {
+  it("配列・カンマ区切りの入力を小文字・重複なしへ正規化する", () => {
+    expect(parseExpectedConsumers(["Aide", " myroom ", "aide"])).toEqual(["aide", "myroom"]);
+    expect(parseExpectedConsumers("aide, MyRoom、hermes")).toEqual(["aide", "myroom", "hermes"]);
+    expect(parseExpectedConsumers("  ")).toEqual([]);
+  });
+
+  it("数・長さの上限と型を検証する", () => {
+    expect(parseExpectedConsumers([1])).toBeUndefined();
+    expect(parseExpectedConsumers(null)).toBeUndefined();
+    expect(parseExpectedConsumers(["x".repeat(101)])).toBeUndefined();
+    expect(parseExpectedConsumers(Array.from({ length: 21 }, (_, i) => `app-${i}`))).toBeUndefined();
+  });
+
+  it("未設定のトークンは検知せず、設定済みなら大文字小文字を無視して突き合わせる", () => {
+    expect(isUnexpectedConsumer([], "hermes-agent")).toBe(false);
+    expect(isUnexpectedConsumer(["aide", "myroom"], "AIDE")).toBe(false);
+    expect(isUnexpectedConsumer(["aide", "myroom"], "hermes-agent")).toBe(true);
   });
 });
