@@ -10,21 +10,22 @@ import {
 
 /**
  * Issue IDから、カードに載せる3項目だけを引く。未存在・不正は`null`（呼び出し側は
- * 存在の有無が分からない汎用カードを返す）。**selectでこの3項目以外は読まない。**
+ * 存在の有無が分からない汎用カードを返す）。**公開リポジトリに限る（非公開は`null`）。selectはこの3項目と公開判定のみ。**
  */
 export async function loadIssueShareCard(id: string): Promise<ShareCardInfo | null> {
   if (!isValidIssueId(id)) return null;
   const issue = await db.issue
     .findUnique({
       where: { githubIssueId: BigInt(id) },
-      select: { number: true, repository: { select: { fullName: true } } },
+      select: { number: true, repository: { select: { fullName: true, private: true } } },
     })
     .catch(() => null);
-  if (!issue) return null;
+  // 匿名で届くので、非公開リポジトリは存在しないものとして扱う（名称・番号を開示しない）
+  if (!issue || issue.repository.private) return null;
   return { kind: "issue", repositoryFullName: issue.repository.fullName, number: issue.number };
 }
 
-/** PRはDBに無いので、登録済みリポジトリに限って受け付ける（GitHub APIは呼ばない） */
+/** PRはDBに無いので、登録済みの公開リポジトリに限って受け付ける（GitHub APIは呼ばない） */
 export async function loadPullRequestShareCard(
   owner: string,
   repo: string,
@@ -34,7 +35,7 @@ export async function loadPullRequestShareCard(
     return null;
   }
   const repository = await db.repository
-    .findFirst({ where: { fullName: `${owner}/${repo}` }, select: { fullName: true } })
+    .findFirst({ where: { fullName: `${owner}/${repo}`, private: false }, select: { fullName: true } })
     .catch(() => null);
   if (!repository) return null;
   return { kind: "pr", repositoryFullName: repository.fullName, number: Number(number) };

@@ -11,13 +11,17 @@ beforeEach(() => vi.clearAllMocks());
 
 describe("loadIssueShareCard", () => {
   it("リポジトリ名と番号だけを返し、DBからもその3項目しか読まない", async () => {
-    mocks.issue.mockResolvedValue({ number: 1366, repository: { fullName: "guchi-apps/yoteiflow" } });
+    mocks.issue.mockResolvedValue({ number: 1366, repository: { fullName: "guchi-apps/yoteiflow", private: false } });
     expect(await loadIssueShareCard("6022306920")).toEqual({
       kind: "issue",
       repositoryFullName: "guchi-apps/yoteiflow",
       number: 1366,
     });
-    expect(mocks.issue.mock.calls[0][0].select).toEqual({ number: true, repository: { select: { fullName: true } } });
+    expect(mocks.issue.mock.calls[0][0].select).toEqual({ number: true, repository: { select: { fullName: true, private: true } } });
+  });
+  it("非公開リポジトリのIssueはnull", async () => {
+    mocks.issue.mockResolvedValue({ number: 1, repository: { fullName: "o/secret", private: true } });
+    expect(await loadIssueShareCard("1")).toBeNull();
   });
   it("不正ID・未存在・DBエラーはnull", async () => {
     expect(await loadIssueShareCard("abc")).toBeNull();
@@ -37,6 +41,7 @@ describe("loadPullRequestShareCard", () => {
       repositoryFullName: "guchi-apps/issue-deck",
       number: 5036,
     });
+    expect(mocks.repo.mock.calls[0][0].where).toEqual({ fullName: "guchi-apps/issue-deck", private: false });
     mocks.repo.mockResolvedValue(null);
     expect(await loadPullRequestShareCard("x", "y", "1")).toBeNull();
   });

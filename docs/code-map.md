@@ -4709,8 +4709,8 @@ Discordに貼るURLは従来の`/dashboard?issue=…`・`?pr=…`のまま（#50
 リンクプレビューのクローラーは未ログインで`/login`へ転送されるため、[../src/proxy.ts](../src/proxy.ts)が
 **`updateSession`より前**に、クローラーUA＋`/dashboard`＋妥当な`issue=`/`pr=`のときだけ`/share/...`へrewriteする。
 
-- `src/lib/share-card.ts`: UA判定・クエリ検証・`/share`パスの組み立て（純関数）。`share-card-server.ts`がDBから**リポジトリ名・種別・番号の3つだけ**を引く（selectで他は読まない）
+- `src/lib/share-card.ts`: UA判定・クエリ検証・`/share`パスの組み立て（純関数）。`share-card-server.ts`がDBから**リポジトリ名・種別・番号の3つだけ**を引く（selectはこの3つと公開判定の`private`のみ）
 - `src/app/share/issue/[id]`・`share/pr/[owner]/[repo]/[number]`: OGメタ（`page.tsx`）とカード画像（`opengraph-image.tsx`。描画は`share-card-image.tsx`）。人が直接開くと`ShareRedirect`が`/dashboard?...`へ移す
 - `/share`は`publicPaths`に入れてある（ログイン不要）。**タイトル・本文・状態・担当者はメタにも画像にも出さない**。未存在・不正IDは存在を示さない汎用カード（200）
-- 非公開リポジトリのリポジトリ名も、登録済みならIDを知る匿名の相手に見える（仕様）。IssueのIDは列挙できる
+- **公開リポジトリ（`Repository.private=false`）のIssue・PRだけがカードになる**（#5054）。非公開リポジトリは、未存在・不正IDと同じ汎用カードを返し、リポジトリ名・番号を匿名の相手へ開示しない（IssueのIDは列挙できるため）。非公開リポジトリのリンクはプレビューが出ない
 - Discordはカードを長くキャッシュする。更新を確かめるときはURLに`&v=<任意>`を付ける
