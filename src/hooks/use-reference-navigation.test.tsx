@@ -71,11 +71,48 @@ describe("useReferenceNavigation", () => {
     expect(urlOf(push.mock.calls[0])).not.toContain("prview=");
   });
 
-  it("PR一覧の中でPRを開くときは、今の状態別ビューを保つ（#4239）", () => {
-    const { result } = renderNavigation("pane=pull-requests&prview=running&pr=owner%2Frepo%2312");
+  // 本番リリース↔通常PRのように種類をまたぐと、今のビューのままでは左の一覧に出ない。
+  // ビューを落とせば、画面側が開いたPRの載るビューを選ぶ（#5024）
+  it("PR一覧の中のリンクでPRを開くときも、状態別ビューを落とす（#5024）", () => {
+    const { result } = renderNavigation("pane=pull-requests&prview=release&pr=owner%2Frepo%2312");
 
     act(() => result.current.openPullRequest("owner/repo#34"));
 
-    expect(urlOf(push.mock.calls[0])).toContain("prview=running");
+    expect(urlOf(push.mock.calls[0])).not.toContain("prview=");
+  });
+
+  it("resetListを渡すと、一覧の絞り込みを既定へ戻してIssueを開く（#5024）", () => {
+    const { result } = renderNavigation(
+      "view=check-user&state=closed&q=foo&labels=bug&assignee=me&repos=owner%2Frepo&sort=updated",
+    );
+
+    act(() => result.current.openIssue("123", { resetList: { includeClosed: false } }));
+
+    const url = urlOf(push.mock.calls[0]);
+    for (const key of ["view=", "state=", "q=", "labels=", "assignee=", "repos="]) {
+      expect(url).not.toContain(key);
+    }
+    expect(url).toContain("sort=updated");
+    expect(url).toContain("issue=123");
+  });
+
+  it("閉じたIssueを一覧の外から開くときは、状態を「すべて」にする（#5024）", () => {
+    const { result } = renderNavigation("view=check-user");
+
+    act(() => result.current.openIssue("123", { resetList: { includeClosed: true } }));
+
+    const url = urlOf(push.mock.calls[0]);
+    expect(url).not.toContain("view=");
+    expect(url).toContain("state=all");
+  });
+
+  it("resetListを渡さなければ、今の絞り込みを保つ", () => {
+    const { result } = renderNavigation("view=check-user&q=foo");
+
+    act(() => result.current.openIssue("123"));
+
+    const url = urlOf(push.mock.calls[0]);
+    expect(url).toContain("view=check-user");
+    expect(url).toContain("q=foo");
   });
 });

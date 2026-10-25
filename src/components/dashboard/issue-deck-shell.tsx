@@ -182,6 +182,7 @@ import {
   checkUserIssueKeys,
   computePullRequestNavCounts,
   filterPullRequestsByView,
+  resolvePullRequestViewFor,
   pullRequestsAwaitingUserMerge,
   isIssueAwaitingMerge,
   mergePendingIssueKeys,
@@ -193,7 +194,7 @@ import {
 } from "@/lib/pull-request-list";
 import type { Issue } from "@/types/issue";
 
-import type { PullRequestSummary } from "@/types/pull-request";
+import type { PullRequestSummary, PullRequestViewId } from "@/types/pull-request";
 import type { ConnectedRepository } from "@/types/repository";
 import type { CurrentUser } from "@/types/user";
 
@@ -256,6 +257,7 @@ export function IssueDeckShell({
 }: IssueDeckShellProps) {
   const {
     filters,
+    isPullRequestViewExplicit,
     setFilter,
     setFilters,
     selectView,
@@ -1037,8 +1039,9 @@ export function IssueDeckShell({
   }, issuesFetchedAt);
 
   function handleSelectCheckUserToastIssue(issue: Issue) {
-    // PC・スマホのどちらの現在地も1回のURL更新で詳細画面へ進める（#192・#1396）。
-    selectIssue(issue);
+    // PC・スマホのどちらの現在地も1回のURL更新で詳細画面へ進める（#192・#1396）。PCで
+    // PR・ブランチ画面を見ている間に押しても右にIssue詳細が出るよう、`pane`を落とす経路で開く（#5024）
+    openIssueFromLink(issue.id);
   }
 
   function handleDismissCheckUserToast(id: string) {
@@ -1402,9 +1405,29 @@ export function IssueDeckShell({
     ],
   );
 
+  const pullRequestDetail = usePullRequestDetail(filters.pr);
+
+  // 一覧・左メニュー・見出しに使うPRのビュー（#5024）。一覧の外から開いた経路（ブランチ画面・
+  // 通知・本文中のリンク・プッシュ通知のURL）は`prview`を持たないので、開いたPRが載るビューを
+  // 選ぶ。既定の`all`のままだと、本番リリースPRは一覧から外してある（#4542）ため左に出ない。
+  // 材料はリポジトリ絞り込み前の一覧、無ければ詳細APIの結果（マージ済みなど一覧外のPR）。
+  const effectivePullRequestView = useMemo<PullRequestViewId>(() => {
+    if (isPullRequestViewExplicit || !filters.pr) return filters.prview;
+    const opened =
+      crossRepositoryPullRequests.find((pullRequest) => pullRequest.id === filters.pr) ??
+      (pullRequestDetail.detail?.id === filters.pr ? pullRequestDetail.detail.summary : null);
+    return opened ? resolvePullRequestViewFor(opened) : filters.prview;
+  }, [
+    isPullRequestViewExplicit,
+    filters.pr,
+    filters.prview,
+    crossRepositoryPullRequests,
+    pullRequestDetail.detail,
+  ]);
+
   const filteredPullRequests = useMemo(
-    () => filterPullRequestsByView(visiblePullRequests, filters.prview),
-    [visiblePullRequests, filters.prview],
+    () => filterPullRequestsByView(visiblePullRequests, effectivePullRequestView),
+    [visiblePullRequests, effectivePullRequestView],
   );
 
   // 左メニュー「Pull Request」セクションの件数（#1389）。取得前に0を出さないよう、
@@ -1629,7 +1652,7 @@ export function IssueDeckShell({
         (item) => item.repositoryFullName === repository.fullName && item.number === issueNumber,
       );
       if (issue) {
-        openIssueUrl(issue.id);
+        openIssueFromLink(issue.id);
         return;
       }
       window.open(`https://github.com/${repository.fullName}/issues/${issueNumber}`, "_blank", "noopener");
@@ -1687,8 +1710,6 @@ export function IssueDeckShell({
       prerequisiteReadiness,
     ],
   );
-
-  const pullRequestDetail = usePullRequestDetail(filters.pr);
 
   // 詳細を開いているPR（#1087）。ヘッダーの材料を一覧と詳細のどちらから採るかは
   // `resolvePullRequestHeader`（#1578・#2149。確認待ちのモーダルと共用する）。
@@ -1796,17 +1817,36 @@ export function IssueDeckShell({
           item.number === reference.number,
       );
       if (issue) {
-        openIssueUrl(issue.id);
+        openIssueFromLink(issue.id);
         return;
       }
     }
     openPullRequestUrl(buildPullRequestId(reference.repositoryFullName, reference.number));
   }
 
+  /**
+   * 一覧の外（通知・本文中のリンク・使用量の明細など）からIssueを開く（#5024）。
+   *
+   * 開くIssueが今の左の一覧に含まれなければ、一覧の絞り込みを「すべて」へ戻してから開く。
+   * 含まれていれば今の絞り込みを保つ（一覧の行を押したのと同じ）。function宣言にしてあるのは、
+   * `filteredIssues`より前に定義した関数（`handleIosExtensionIssueCreated`など）からも呼ぶため。
+   */
+  function openIssueFromLink(issueId: string) {
+    if (filteredIssues.some((issue) => issue.id === issueId)) {
+      openIssueUrl(issueId);
+      return;
+    }
+    const issue = allIssues.find((item) => item.id === issueId);
+    openIssueUrl(
+      issueId,
+      issue ? { resetList: { includeClosed: issue.state === "closed" } } : undefined,
+    );
+  }
+
   /** ヘッダーの通知ベル（#1614）の項目を押したときの遷移 */
   function openNotificationTarget(target: NotificationTarget) {
     if (target.kind === "issue") {
-      openIssueUrl(target.issueId);
+      openIssueFromLink(target.issueId);
       return;
     }
     if (target.kind === "pull-request") {
@@ -2036,7 +2076,7 @@ export function IssueDeckShell({
           remoteSessionRepositories={remoteSessionRepositories}
           onOpenNotificationTarget={openNotificationTarget}
           /* 実行キューの行のタイトルからIssue詳細を開く（#1625） */
-          onOpenIssue={openIssueUrl}
+          onOpenIssue={openIssueFromLink}
           onOpenCheckUserView={() => selectView("check-user")}
           onOpenFlow={selectFlowPane}
           isSidebarCollapsed={isSidebarCollapsed}
@@ -2215,7 +2255,7 @@ export function IssueDeckShell({
                   />
                 ) : (
                   <MobilePullRequestsScreen
-                    view={filters.prview}
+                    view={effectivePullRequestView}
                     navCounts={pullRequestNavCounts}
                     mergePendingAttention={mergePendingAttention}
                     origin={mobileScreen.origin}
@@ -2454,7 +2494,7 @@ export function IssueDeckShell({
                 activeView={filters.view}
                 onSelectView={selectView}
                 activePane={filters.pane}
-                activePullRequestView={filters.prview}
+                activePullRequestView={effectivePullRequestView}
                 onSelectPullRequestView={selectPullRequestView}
                 onSelectFlow={selectFlowPane}
                 onSelectPreview={selectPreviewPane}
@@ -2614,8 +2654,8 @@ export function IssueDeckShell({
                揃えている（#1058・#1087） */
             <>
               <PullRequestList
-                view={filters.prview}
-                heading={getPullRequestView(filters.prview).pcLabel}
+                view={effectivePullRequestView}
+                heading={getPullRequestView(effectivePullRequestView).pcLabel}
                 pullRequests={filteredPullRequests}
                 failedRepositories={openPullRequests.failedRepositories}
                 fetchedAt={openPullRequests.fetchedAt}

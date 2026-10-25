@@ -27,12 +27,12 @@ export function useReferenceNavigation() {
   const openPullRequest = useCallback(
     (pullRequestId: string) => {
       pushParams((params) => {
-        // PR一覧の外（Issue詳細など）から開くときは、前に見ていた状態別ビュー（「実行中」など）を
-        // 引き継がない。マージ待ちのPRが一覧に出ず、開いたPRが見つからなくなるため既定の
-        // 「すべてのPR」へ戻す。PR一覧の中でのリンクは今のビューを保つ。
-        if (params.get("pane") !== "pull-requests" && params.get("mscreen") !== "pull-requests") {
-          params.delete("prview");
-        }
+        // 前に見ていた状態別ビュー（「実行中」など）を引き継がない。開いたPRが一覧に出なく
+        // なるため。ビューを落とすと、画面側が開いたPRの載るビュー（本番リリースPRなら
+        // 「PR：本番リリース」、それ以外は「PR一覧」）を選ぶ（#5024。`resolvePullRequestViewFor`）。
+        // PR一覧の中のリンクも同じ扱いにする——本番リリース↔通常PRのように種類をまたぐと、
+        // 今のビューのままでは左の一覧に出ない。一覧の行を押す操作はここを通らずビューを保つ。
+        params.delete("prview");
         params.set("pane", "pull-requests");
         params.set("pr", pullRequestId);
         params.set("mscreen", "pull-requests");
@@ -47,10 +47,21 @@ export function useReferenceNavigation() {
   /**
    * Issue詳細を開く。PRペインを開いていればIssueへ戻し、スマホはIssue詳細画面へ進める。
    * 戻り先の文脈（`mrepo`＝リポジトリ別一覧）はリンク経由では引き継がないため落とす。
+   *
+   * `resetList`を渡すと、PCの左の一覧の絞り込み（ビュー・状態・検索・ラベル・担当・リポジトリ）を
+   * 既定の「すべて」へ戻す（#5024）。開くIssueが今の一覧に含まれないときに呼び出し側が渡す——
+   * 戻さないと右に詳細が出ても左の一覧とメニューの選択が別のものを指したままになる。
+   * `includeClosed`は閉じたIssueを開くときで、状態を「すべて」にする（既定は「open」）。
    */
   const openIssue = useCallback(
-    (issueId: string) => {
+    (issueId: string, options?: { resetList?: { includeClosed: boolean } }) => {
       pushParams((params) => {
+        if (options?.resetList) {
+          for (const key of ["view", "state", "q", "labels", "assignee", "repos"]) {
+            params.delete(key);
+          }
+          if (options.resetList.includeClosed) params.set("state", "all");
+        }
         params.delete("pane");
         params.delete("pr");
         // 重ねて開いていたPR詳細は畳む（#2149。`openPullRequest`と同じ理由）

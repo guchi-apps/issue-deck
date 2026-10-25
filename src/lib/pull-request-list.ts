@@ -226,6 +226,21 @@ export function filterPullRequestsByView(
   });
 }
 
+/**
+ * 一覧の外（ブランチ画面・通知・本文中のリンク）からPRを開いたときに、左の一覧に使うビュー（#5024）。
+ *
+ * 本番リリースPRは`all`から外してある（#4542）ため、既定の`all`のまま開くと左の一覧に出ない。
+ * それ以外は`all`にすれば必ず載る（`in-progress`/`completed`は時間で入れ替わり、共通知識PRは
+ * どちらにも出ないため、`all`より狭いビューは選ばない）。
+ */
+export function resolvePullRequestViewFor(pullRequest: {
+  baseRef: string;
+  headRef: string;
+  kind: PullRequestKind;
+}): PullRequestViewId {
+  return isProductionReleasePullRequest(pullRequest) ? "release" : "all";
+}
+
 function isMergeCompleted(pullRequest: PullRequestSummary): boolean {
   return (
     !pullRequest.draft &&
