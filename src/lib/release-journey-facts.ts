@@ -53,6 +53,9 @@ async function buildFacts(rows: CandidateRow[], options: { keyWithoutPullRequest
     const updatedAt = [row.updatedAt, approvalRow?.updatedAt, run?.updatedAt, finalization?.updatedAt, ...row.revisions.map((r) => r.updatedAt)]
       .filter((d): d is Date => d instanceof Date)
       .reduce((a, b) => (a > b ? a : b));
+    const appliedRevisions = row.revisions.filter((r) => r.status === "applied");
+    const latestApplied = appliedRevisions.at(-1) ?? null;
+    const finalHeadSha = finalization?.status === "applied" ? finalization.finalHeadSha : null;
     const facts: ReleaseRcFacts = {
       sequence: row.sequence,
       phase: row.phase,
@@ -76,6 +79,12 @@ async function buildFacts(rows: CandidateRow[], options: { keyWithoutPullRequest
         : null,
       productionStopLabel: stopReason ? PRODUCTION_STOP_TEXT[stopReason].label : null,
       predecessor: predecessor ? { sequence: predecessor.sequence, cancelReason: predecessor.cancelReason } : null,
+      importedPrs: appliedRevisions.flatMap((r) =>
+        (Array.isArray(r.importedPrs) ? (r.importedPrs as { number?: unknown }[]) : []).flatMap((p) =>
+          typeof p.number === "number" ? [{ number: p.number, revision: r.revision }] : [],
+        ),
+      ),
+      currentHeadShas: [latestApplied?.headSha, finalHeadSha].filter((sha): sha is string => !!sha),
       updatedAt: updatedAt.toISOString(),
     };
     // 候補はrevisionごとに物理PRが変わりうる（バンプ前後・置換）。どのPR番号からも同じ候補へ引けるようにする
