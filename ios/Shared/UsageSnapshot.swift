@@ -4,6 +4,8 @@ import Foundation
 /// （`src/lib/widget-usage.ts` の `WidgetUsageResponse`）。時刻はすべてepoch ms
 struct UsageSnapshot: Codable, Equatable {
     var claude: UsageWindow?
+    /// Claudeの5時間枠。古いキャッシュ・旧サーバーには無い
+    var claudeFiveHour: UsageWindow?
     var chatgpt: UsageWindow?
     var generatedAt: Double
 }

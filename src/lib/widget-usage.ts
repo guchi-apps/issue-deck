@@ -20,6 +20,8 @@ export type WidgetUsageWindow = {
 
 export type WidgetUsageResponse = {
   claude: WidgetUsageWindow | null;
+  /** Claudeの5時間枠。グラフだけで描くため、週間枠と同じ形で返す */
+  claudeFiveHour: WidgetUsageWindow | null;
   chatgpt: WidgetUsageWindow | null;
   generatedAt: number;
 };
@@ -39,7 +41,23 @@ export function toClaudeWidgetWindow(
   usage: { windows: readonly ClaudeUsageWindow[]; fetchedAt: number } | null,
   nowMs: number,
 ): WidgetUsageWindow | null {
-  const weekly = usage?.windows.find((window) => window.key === "7d");
+  return pickClaudeWindow(usage, "7d", nowMs);
+}
+
+/** Claudeの取得結果から5時間枠を取り出す。5時間枠かリセット時刻が無ければnull */
+export function toClaudeFiveHourWidgetWindow(
+  usage: { windows: readonly ClaudeUsageWindow[]; fetchedAt: number } | null,
+  nowMs: number,
+): WidgetUsageWindow | null {
+  return pickClaudeWindow(usage, "5h", nowMs);
+}
+
+function pickClaudeWindow(
+  usage: { windows: readonly ClaudeUsageWindow[]; fetchedAt: number } | null,
+  key: string,
+  nowMs: number,
+): WidgetUsageWindow | null {
+  const weekly = usage?.windows.find((window) => window.key === key);
   if (!usage || !weekly || weekly.resetsAt === null) return null;
   const resetsAt = weekly.resetsAt * 1000;
   return {
