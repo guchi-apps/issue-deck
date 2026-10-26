@@ -84,6 +84,11 @@ export function buildDashboardPath(kind: ShareKind, id: string): string {
   return `/dashboard?${q.toString()}`;
 }
 
+/** 詳細画面の「リンクをコピー」（#5091）が貼り付けるURL。`origin`はコピーした画面のものを渡す */
+export function buildDashboardUrl(origin: string, kind: ShareKind, id: string): string {
+  return `${origin}${buildDashboardPath(kind, id)}`;
+}
+
 /** 種別と番号の表示（`Issue #1366`・`PR #5036`） */
 export function formatShareLabel(kind: ShareKind, number: number): string {
   return `${kind === "issue" ? "Issue" : "PR"} #${number}`;
