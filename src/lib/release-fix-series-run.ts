@@ -448,12 +448,13 @@ async function notifyStop(
   rows: ReleaseFixSeries[],
   status: ReleaseFixStatus,
   reason: string,
+  needsUser: boolean,
 ): Promise<void> {
   for (const row of rows) {
     // 利用者の手が要る止まり方だけ、Issueへ理由を残して札を付ける（Push通知が鳴る）
     const body = `リリース候補 #${row.releasePrNumber} の修正系列が「${RELEASE_FIX_STATUS_LABEL[status]}」になりました。\n\n${reason}\n\n${STOP_COMMENT_MARKER}`;
     await createComment(ctx.owner, ctx.repo, row.issueNumber, ctx.token, { body }).catch(() => undefined);
-    if (status !== "superseded") {
+    if (status !== "superseded" && needsUser) {
       await addIssueLabels(ctx.owner, ctx.repo, row.issueNumber, ctx.token, CHECK_USER_LABELS).catch(() => undefined);
     }
   }
@@ -471,6 +472,8 @@ async function stopRows(
   ids: string[],
   status: "stopped" | "superseded" | "awaiting_decision",
   reason: string,
+  // false: 理由はIssueへ残すが、確認待ちラベルは付けない（利用者の判断が済んでいて、続きの操作が要らない停止）
+  needsUser = true,
 ): Promise<number> {
   // すでに同じ状態・理由なら何もしない（巡回のたびにコメントを重ねない）
   const rows = await db.releaseFixSeries.findMany({ where: { id: { in: ids } } });
@@ -480,7 +483,7 @@ async function stopRows(
     where: { id: { in: fresh.map((row) => row.id) } },
     data: { status, stopReason: reason, ...(status === "awaiting_decision" ? {} : { activeKey: null }) },
   });
-  await notifyStop(ctx, fresh, status, reason);
+  await notifyStop(ctx, fresh, status, reason, needsUser);
   // 操作履歴（#4359）。判断待ち・停止・元候補の取消／置換を系列ごとに残す（同じ状態・理由は`dedupeKey`で1件）
   const kind = status === "awaiting_decision" ? "decision_waiting" : status === "superseded" ? "superseded" : "stopped";
   for (const row of fresh) {
@@ -594,7 +597,7 @@ async function stopSeriesDecidedNonFix(
     if (items.length > 0 && items.every((item) => findingIdsOfSeriesItem(item).some((id) => nonFix.has(id)))) ids.add(row.id);
   }
   if (ids.size === 0) return { ids, changed: 0 };
-  return { ids, changed: await stopRows(ctx, [...ids], "stopped", DECIDED_NON_FIX_REASON) };
+  return { ids, changed: await stopRows(ctx, [...ids], "stopped", DECIDED_NON_FIX_REASON, false) };
 }
 
 async function sweepGroup(repositoryFullName: string, releasePrNumber: number, rows: ReleaseFixSeries[]): Promise<{ rebuilt: boolean; changed: number }> {
@@ -1104,7 +1107,7 @@ async function continueAfterReverification(
   const findingIndexes =
     followUp.sourceKind === "review_finding" ? selectAutoFixIndexes(section.findings, section.decisions ?? null) : section.findings.map((_, index) => index);
   if (followUp.sourceKind === "review_finding" && findingIndexes.length === 0) {
-    return stopRows(ctx, [row.id], "stopped", DECIDED_NON_FIX_REASON);
+    return stopRows(ctx, [row.id], "stopped", DECIDED_NON_FIX_REASON, false);
   }
   const result = await createReleaseFixSeries({
     userId: row.createdByUserId,

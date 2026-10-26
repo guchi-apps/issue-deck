@@ -50,10 +50,10 @@ describe("getWebviewIosRepository", () => {
 
   it("リリース通知の起動用URLは各アプリの本番ドメイン上のHTTPS（#5049）", () => {
     expect(getWebviewIosRepository("guchi-apps/yoteiflow")?.launchUrl).toBe("https://dayspan.gucchii.com/calendar");
-    for (const name of ["kurashio", "yoteiflow", "aide", "morrow"]) {
+    for (const name of ["kurashio", "yoteiflow", "aide", "morrow", "issue-deck"]) {
       expect(getWebviewIosRepository(`guchi-apps/${name}`)?.launchUrl).toMatch(/^https:\/\/[a-z-]+\.gucchii\.com\//);
     }
-    // issue-deck自身は「リリース画面を開く」がアプリで開くので持たない
-    expect(getWebviewIosRepository("guchi-apps/issue-deck")?.launchUrl).toBeUndefined();
+    // issue-deck自身もトップページを持つ（通知の「リリースノート」をやめて「アプリを開く」にした。#5063）
+    expect(getWebviewIosRepository("guchi-apps/issue-deck")?.launchUrl).toBe("https://issuedeck.gucchii.com/");
   });
 });

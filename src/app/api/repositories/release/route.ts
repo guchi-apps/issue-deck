@@ -31,6 +31,7 @@ import { releaseWorkflowExists } from "@/lib/github/release-workflow-cache";
 import { fetchRepairWorkflowAvailability } from "@/lib/github/repair-workflow-cache";
 import { previewModeGuard } from "@/lib/preview-mode";
 import { isReleaseHeadRef } from "@/lib/pull-request-list";
+import { loadPublishApprovedPullRequests } from "@/lib/release-publish-approval-run";
 import { loadReleaseVerificationSummary } from "@/lib/release-verification-load";
 import type { ReleaseVerificationSummary } from "@/lib/release-verification-summary";
 import { isBumpKind } from "@/lib/semver-bump";
@@ -175,6 +176,13 @@ async function handleGET(request: NextRequest) {
       }
     }
 
+    // 公開承認済みなら、mainへのマージは自動で進む（#5064）。人が押す番として見せない
+    const publishApproved = releasePr
+      ? (await loadPublishApprovedPullRequests(`${owner}/${repo}`, [
+          { number: releasePr.number, baseSha: releasePr.base?.sha ?? null, headSha: releasePr.head.sha },
+        ])).has(releasePr.number)
+      : false;
+
     // 進捗の論理段階を版数とオープン中PRから判定する（このAPI以外に状態は持たない）。
     // - bump_pr_open:   バンプPRがオープン中（CI・developマージ待ち）
     // - release_pr_open: develop→mainのPRがオープン中（mainマージ待ち＝人手）
@@ -234,6 +242,7 @@ async function handleGET(request: NextRequest) {
             ),
             mergeJudgement: releaseState?.mergeJudgement ?? MERGE_JUDGEMENT_UNKNOWN,
             verification,
+            publishApproved,
           }
         : null,
       otherPullRequests,

@@ -3,10 +3,17 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getClaudeApiUsageSummary, resetClaudeApiUsage } from "@/lib/claude/api-usage";
 import { callClaudeMessages, getAppAiToken } from "@/lib/claude/request";
 
-const { findUnique } = vi.hoisted(() => ({ findUnique: vi.fn() }));
+const { findUnique, runAppAiOnCodex } = vi.hoisted(() => ({ findUnique: vi.fn(), runAppAiOnCodex: vi.fn() }));
 
 vi.mock("@/lib/db", () => ({
   db: { appSetting: { findUnique } },
+}));
+
+// Codex経路の中身（ジョブ投入・待ち）は app-ai-codex.test.ts で確かめる。ここでは振り分けだけを見る
+vi.mock("@/lib/claude/app-ai-codex", () => ({
+  CODEX_APP_AI_TOKEN: "codex-cli",
+  CODEX_EXCLUDED_FEATURES: new Set(["plan_usage", "chat_investigation"]),
+  runAppAiOnCodex,
 }));
 
 const NOW = new Date(2026, 7, 4, 12, 0, 0).getTime();
@@ -25,6 +32,7 @@ describe("callClaudeMessages", () => {
       appAiModelReasoning: "claude-haiku-4-5",
     });
     resetClaudeApiUsage();
+    runAppAiOnCodex.mockReset();
     vi.useFakeTimers();
     vi.setSystemTime(NOW);
   });
@@ -227,37 +235,65 @@ describe("callClaudeMessages", () => {
     expect(JSON.parse(String(fetchMock.mock.calls[1][1].body)).model).toBe("claude-haiku-4-5");
   });
 
-  it("GPT系が選ばれていてもOpenAI APIへは送らず、Claude系の既定モデルで実行する（#4147）", async () => {
+  it("GPT系が選ばれた機能はサブPCのCodex CLIで実行し、Claude APIにもOpenAI APIにもリクエストしない（#5067）", async () => {
     findUnique.mockResolvedValue({ appAiModel: "gpt-6-luna", appAiModelReasoning: "gpt-5.6-terra" });
     process.env.OPENAI_API_KEY = "openai-test-token";
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValue(jsonResponse({ content: [{ type: "text", text: "ok" }] }));
+    const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
+    runAppAiOnCodex.mockResolvedValue({ text: "要約です", model: "codex-cli/gpt-6-luna" });
 
-    await callClaudeMessages({
+    const summary = await callClaudeMessages({
       feature: "comment_summary",
-      token: "anthropic-token",
-      body: { max_tokens: 16, messages: [] },
+      token: "codex-cli",
+      body: { max_tokens: 16, messages: [{ role: "user", content: "要約して" }] },
     });
     await callClaudeMessages({
       feature: "new_app_consult",
-      token: "anthropic-token",
+      token: "codex-cli",
+      timeoutMs: 5_000,
       body: { max_tokens: 16, messages: [] },
     });
 
-    for (const call of fetchMock.mock.calls as [string, RequestInit][]) {
-      expect(call[0]).toBe("https://api.anthropic.com/v1/messages");
-      expect((call[1].headers as Record<string, string>).Authorization).toBe("Bearer anthropic-token");
-    }
-    expect(JSON.parse(String(fetchMock.mock.calls[0][1].body)).model).toBe("claude-haiku-4-5");
-    expect(JSON.parse(String(fetchMock.mock.calls[1][1].body)).model).toBe("claude-sonnet-5-5");
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(summary.response.ok).toBe(true);
+    expect(summary.json?.content?.[0]?.text).toBe("要約です");
+    expect(summary.json?.model).toBe("codex-cli/gpt-6-luna");
+    expect(runAppAiOnCodex.mock.calls[0][0]).toMatchObject({ feature: "comment_summary", model: "gpt-6-luna" });
+    expect(runAppAiOnCodex.mock.calls[1][0]).toMatchObject({ feature: "new_app_consult", model: "gpt-5.6-terra", timeoutMs: 5_000 });
+    // Claude系の使用量としては数えない（Codex側の記録は受け口が`codex-cli/<model>`で行う）
+    expect(getClaudeApiUsageSummary(NOW).totalLast24h.calls).toBe(0);
   });
 
-  it("GPT系が選ばれていてもアプリ内AIの認証情報はClaudeのOAuthトークンを返す", async () => {
+  it("Codex経路の失敗はそのまま投げ、Claudeへは戻さない（#5067）", async () => {
     findUnique.mockResolvedValue({ appAiModel: "gpt-6-luna" });
-    process.env.OPENAI_API_KEY = "openai-test-token";
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    runAppAiOnCodex.mockRejectedValue(new Error("Codex CLIで実行できませんでした: サブPCのCodex CLIがログインしていません"));
+
+    await expect(
+      callClaudeMessages({ feature: "issue_search", token: "codex-cli", body: { max_tokens: 16, messages: [] } }),
+    ).rejects.toThrow("ログインしていません");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("プラン枠の取得はGPT系を選んでいてもClaude系の既定モデルで実行する", async () => {
+    findUnique.mockResolvedValue({ appAiModel: "gpt-6-luna" });
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ content: [] }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await callClaudeMessages({ feature: "plan_usage", token: "anthropic-token", body: { max_tokens: 1, messages: [] } });
+
+    expect(runAppAiOnCodex).not.toHaveBeenCalled();
+    expect(JSON.parse(String(fetchMock.mock.calls[0][1].body)).model).toBe("claude-haiku-4-5");
+  });
+
+  it("Codex経路ではClaudeのOAuthトークンを前提にせず目印を返し、Claude系ではOAuthトークンを返す", async () => {
+    findUnique.mockResolvedValue({ appAiModel: "gpt-6-luna", appAiModelReasoning: "claude-sonnet-5-5" });
+    delete process.env.CLAUDE_CODE_OAUTH_TOKEN;
+    await expect(getAppAiToken("comment_summary")).resolves.toBe("codex-cli");
+    await expect(getAppAiToken("manual_step_fix")).resolves.toBeNull();
     process.env.CLAUDE_CODE_OAUTH_TOKEN = "oauth-token";
-    await expect(getAppAiToken("comment_summary")).resolves.toBe("oauth-token");
+    await expect(getAppAiToken("manual_step_fix")).resolves.toBe("oauth-token");
+    await expect(getAppAiToken("plan_usage")).resolves.toBe("oauth-token");
   });
 });

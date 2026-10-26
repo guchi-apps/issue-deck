@@ -224,7 +224,10 @@ export function resolveReleaseProgressTrack({
         }
       }
 
-      if (mergeTarget === "main") drafts.merge = { state: "user", status: releaseMergeTargetLabel("main"), title: null };
+      if (candidate.releaseChecks?.publishApproved) {
+        // 公開承認済みは、条件が揃えばシステムがmainへマージする。人が押す番にしない（#5064）
+        drafts.merge = { state: "running", status: "自動でmainへマージ待ち", title: "公開承認済みです。条件が揃うと自動でmainへマージします。操作は不要です" };
+      } else if (mergeTarget === "main") drafts.merge = { state: "user", status: releaseMergeTargetLabel("main"), title: null };
     }
 
     // いま動いている工程は工程バッジの文言・実行中かどうかで上書きする（失敗は上書きしない）

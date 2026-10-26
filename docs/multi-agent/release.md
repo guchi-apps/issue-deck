@@ -583,7 +583,7 @@ Webhook URL。**テキストチャンネル**で発行する（#5046。#5031の�
 作り直されるため、VPSの.envを手で書き換えても次のデプロイで消える。Slack時代の`SLACK_BOT_TOKEN`は
 この経路に載っていなかった。**Webhookを1Passwordへ登録して同期するまでは通知が止まる**ので、公開前に
 登録を済ませる。**URLの差し替えとコードのマージはどちらが先でもよい**（`postWebhookMessage`が400のとき`thread_name`を外して1回送り直す）。共有トークン警告も同じURLで、タイトルは「共有トークン警告 <トークン名>」。メンションは解決させない（更新内容の`@everyone`で鳴らさない）。
-埋め込みには「リリース画面を開く」（issue-deckのリリース履歴画面。`/dashboard?pane=releases&mscreen=release-history`。iOSアプリではUniversal Linkでアプリが開く）と、「アプリを開く」を出す。後者のURLは、WebView型のiOSアプリ（`webview-ios-repos`）なら`launchUrl`（各アプリのUniversal Linkの対象パス上のURL。#5049）、それ以外はGitHubリポジトリの`homepage`で、どちらも無ければ出さない。iOSアプリには「（iOSアプリ）」と添える。**URLスキームではなくUniversal Linksに揃えたのは、DiscordがカスタムURLスキームを押せるリンクにしないためと、アプリ未導入・AASA未配信でもブラウザで開けて壊れないため**。アプリで開くかどうかは各アプリのAASAの配信で決まり、通知側は変わらない（2026-10時点で有効なのはyoteiflowの`/calendar`だけ。kurashio#843・morrow#619・aide#701で対応中）。**Signalyへの通知はそのまま残す。**
+埋め込みには「リリース画面を開く」（issue-deckのリリース履歴画面。`/dashboard?pane=releases&mscreen=release-history`。iOSアプリではUniversal Linkでアプリが開く）と、「アプリを開く」（更新されたアプリ・サイトのトップページ）を出す。**GitHubのリリースページへの「リリースノート」リンクは出さない**（#5063。カードのタイトルのリンク先だけがリリースページ）。「アプリを開く」のURLは、WebView型のiOSアプリ（`webview-ios-repos`）なら`launchUrl`（各アプリのUniversal Linkの対象パス上のURL。#5049）、それ以外はGitHubリポジトリの`homepage`で、どちらも無ければ出さない（issue-deck自身も`launchUrl`としてトップページ`https://issuedeck.gucchii.com/`を持つ）。iOSアプリには「（iOSアプリ）」と添える。**URLスキームではなくUniversal Linksに揃えたのは、DiscordがカスタムURLスキームを押せるリンクにしないためと、アプリ未導入・AASA未配信でもブラウザで開けて壊れないため**。アプリで開くかどうかは各アプリのAASAの配信で決まり、通知側は変わらない（2026-10時点で有効なのはyoteiflowの`/calendar`だけ。kurashio#843・morrow#619・aide#701で対応中）。**Signalyへの通知はそのまま残す。**
 チャンネル宛のため、ユーザーごとのリポジトリ非表示・ミュート設定は効かない。
 
 - 見ているのは各リポジトリの`releases/latest`（draftとprereleaseを除く）で、**記録した

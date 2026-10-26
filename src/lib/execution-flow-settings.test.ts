@@ -62,14 +62,21 @@ describe("resolveExecutionFlows", () => {
 describe("原因診断の実行基盤表示（#4143）", () => {
   const find = (flows: ReturnType<typeof resolveExecutionFlows>, name: string) => flows.find((flow) => flow.name === name)!;
 
-  it("GPT系はチャット調査だけCodex CLI、新規アプリ相談はClaude固定と明示する（#4147）", () => {
-    const flows = resolveExecutionFlows({ ...settings, appAiModelReasoning: "gpt-5.6-terra" });
-    expect(find(flows, "原因診断（チャット調査）")).toEqual(
-      expect.objectContaining({ location: "サブPC", agent: "Codex CLI（ChatGPTサブスク）" }),
-    );
-    expect(find(flows, "新規アプリ相談・手作業の修正提案・全体レビューの判断の推奨")).toEqual(
-      expect.objectContaining({ location: "IssueDeckサーバー", agent: "Anthropic API（Claude固定）" }),
-    );
+  it("GPT系はアプリ内AIの各機能をサブPCのCodex CLIで実行すると表示する（#5067）", () => {
+    const flows = resolveExecutionFlows({ ...settings, appAiModel: "gpt-6-luna", appAiModelReasoning: "gpt-5.6-terra", modelPickEngine: "app-ai" });
+    for (const name of [
+      "原因診断（チャット調査）",
+      "新規アプリ相談・手作業の修正提案・全体レビューの判断の推奨",
+      "要約・検索・文章整理・Issue作成補助・手作業アシスタント",
+    ]) {
+      expect(find(flows, name)).toEqual(expect.objectContaining({ location: "サブPC", agent: "Codex CLI（ChatGPTサブスク）" }));
+    }
+    const routine = find(flows, "要約・検索・文章整理・Issue作成補助・手作業アシスタント");
+    expect(routine.model).toContain("GPT-6 Luna");
+    // 画像入力もCodexで動くこと（#5068）と、Claudeへ戻さないことを明記する
+    expect(routine.note).toContain("画像からの変更内容の抽出も、画像をサブPCへ渡してCodex CLIで読み取ります");
+    expect(routine.note).toContain("Claudeへは切り替えません");
+    expect(find(flows, "おまかせのモデル選択・Issueラベル判定").note).toContain("ルール");
   });
 
   it("Claude系はどちらもAnthropic API", () => {
@@ -113,7 +120,7 @@ describe("resolveProviderFlowRows", () => {
     );
     const appAi = rows.find((row) => row.step === "アプリ内AI")!.entries;
     expect(appAi[1]).toEqual(expect.objectContaining({ agent: "Codex CLI（ChatGPTサブスク）", binding: "provider" }));
-    expect(appAi[2]).toEqual(expect.objectContaining({ agent: "Anthropic API（Claude固定）", binding: "provider" }));
+    expect(appAi[2]).toEqual(expect.objectContaining({ agent: "Codex CLI（ChatGPTサブスク）", binding: "provider" }));
   });
 
   it("個別設定した項目はプロバイダーを切り替えても変わらない", () => {

@@ -18,6 +18,10 @@
 # issue-deckの調査ループが組み立てたもの。ブリッジの設定（URL・シークレット）は0600の一時ファイルで
 # 渡し、コマンドラインや環境変数には置かない（`ps`で見えるため）。
 #
+# **画像は一時ディレクトリにだけ置く**（#5068）。アプリ内AIの画像付きの依頼は、プロンプトと一緒に受け取った
+# 画像を0600で`WORK_DIR`へ書き出して`--image`で添付し、終了時に`WORK_DIR`ごと消す。取得には`images=1`を
+# 付け、画像を受け取れるスクリプトだと名乗る（付けない古いスクリプトには、サーバーが画像付きの依頼を渡さない）。
+#
 # **ステップごとの再起動はしない。** 配信待ち・CLI起動・AI処理・ツール取得の内訳は終了時に`timing`として
 # 報告し、サーバーがジョブのメッセージへ残す（実行状況・診断で見られる）。
 #
@@ -96,7 +100,7 @@ if ! grep -qi 'chatgpt' <<<"$login_status"; then
   exit 0
 fi
 
-code="$(chat_api GET "/api/dispatch/chat-turn?jobId=$JOB_ID&host=$(jq -rn --arg h "$HOST_NAME_VALUE" '$h|@uri')" || true)"
+code="$(chat_api GET "/api/dispatch/chat-turn?jobId=$JOB_ID&host=$(jq -rn --arg h "$HOST_NAME_VALUE" '$h|@uri')&images=1" || true)"
 if [[ "$code" != "200" ]]; then
   # 待つ側が既に諦めた（取り消し済み）などで受け取れない。報告先も無いので終える
   echo "プロンプトを受け取れませんでした（HTTP $code）。" >&2
@@ -111,9 +115,36 @@ if [[ ! "$model" =~ ^gpt-[a-z0-9.-]+$ || ! -s "$WORK_DIR/prompt.md" ]]; then
   exit 0
 fi
 
+# 画像（アプリ内AIの画像付きの依頼だけ）を書き出す。`--image`は値を複数取るので`=`で1つずつ渡し、
+# 後ろの位置引数（`-`）を画像と取り違えさせない
+image_args=()
+image_count="$(jq '.images // [] | length' "$WORK_DIR/response.json")"
+if [[ "$image_count" -gt 0 ]]; then
+  mkdir -m 700 "$WORK_DIR/images"
+  for ((i = 0; i < image_count; i++)); do
+    case "$(jq -r ".images[$i].mediaType // \"\"" "$WORK_DIR/response.json")" in
+      image/png) ext=png ;;
+      image/jpeg) ext=jpg ;;
+      image/gif) ext=gif ;;
+      image/webp) ext=webp ;;
+      *)
+        report failed codex_error
+        exit 0
+        ;;
+    esac
+    image_file="$WORK_DIR/images/$i.$ext"
+    if ! (umask 077 && jq -r ".images[$i].data" "$WORK_DIR/response.json" | base64 -d >"$image_file") ||
+      [[ ! -s "$image_file" ]]; then
+      report failed codex_error
+      exit 0
+    fi
+    image_args+=("--image=$image_file")
+  done
+fi
+
 # セッション型: 読み取りツールをMCPブリッジで渡す（ステップごとにCLIを起こし直さない）。
 # 古いサーバーが`mode`を返さないときは、従来どおりツール無しの1回実行（最終回答だけ）になる
-codex_args=(exec --json --skip-git-repo-check --sandbox read-only --ephemeral
+codex_args=(exec --json --skip-git-repo-check --sandbox read-only --ephemeral "${image_args[@]}"
   -m "$model" --output-schema "$WORK_DIR/schema.json" --output-last-message "$WORK_DIR/out.json"
   -C "$WORK_DIR/cwd")
 if [[ "$mode" == "session" ]]; then

@@ -1,7 +1,5 @@
 import {
-  APP_AI_MODEL_DEFAULT,
   APP_AI_MODEL_OPTIONS,
-  APP_AI_MODEL_REASONING_DEFAULT,
   CODEX_MODEL_DEFAULT,
   appAiProvider,
   parseAppAiModel,
@@ -88,27 +86,20 @@ function planReviewModel(settings: ExecutionFlowSettings, agent: PlanReviewAgent
     : describeCodexModel(settings.planReviewCodexModel);
 }
 
-/** この入口の機能はGPT系を選んでもOpenAI APIを使わず、Claude系で実行する（#4147）。 */
+/**
+ * アプリ内AIはGPT系を選ぶとサブPCのCodex CLI（ChatGPTサブスク枠）で動く（#4143・#5067）。
+ * OpenAI API（従量課金）は使わず、Codexが失敗してもClaudeへは戻さない。
+ */
 function appAiAgent(model: AppAiModel) {
-  return appAiProvider(model) === "openai" ? "Anthropic API（Claude固定）" : "Anthropic API";
-}
-
-function appAiClaudeFixedModelLabel(model: AppAiModel, reasoning: boolean) {
-  return appAiModelLabel(
-    appAiProvider(model) === "openai"
-      ? reasoning ? APP_AI_MODEL_REASONING_DEFAULT : APP_AI_MODEL_DEFAULT
-      : model,
-  );
-}
-
-const CLAUDE_FIXED_NOTE =
-  "GPT系を選んでいてもOpenAI API（従量課金）は使わず、Claude系の既定モデルで実行します。";
-
-/** チャット調査はGPT系ならサブPCのCodex CLI（サブスク枠）で動く（#4143）。主系プロバイダーは見ない。 */
-function chatInvestigationAgent(model: AppAiModel) {
   return appAiProvider(model) === "openai" ? "Codex CLI（ChatGPTサブスク）" : "Anthropic API";
 }
 
+function appAiLocation(model: AppAiModel) {
+  return appAiProvider(model) === "openai" ? "サブPC" : "IssueDeckサーバー";
+}
+
+const CODEX_APP_AI_NOTE =
+  "GPT系はOpenAI APIを使わず、サブPCのCodex CLI（ChatGPTサブスク枠）で実行します。Codexが使えないときはエラーを表示し、Claudeへは切り替えません。";
 /**
  * 画面専用の文言を各フォームへ散らさず、保存前の値から現在の実効設定を組み立てる。
  * Actions の修復系はモデル入力を受け取らないため、CLI の既定と明示して推測表示を避ける。
@@ -185,25 +176,31 @@ export function resolveExecutionFlows(settings: ExecutionFlowSettings): Executio
       model: describeCodexModel(workflowCodexModel), source: "PRレビュー・修復設定", setting: workflowCodexModel === "auto" ? "デフォルト継承" : describeCodexModel(workflowCodexModel), reasoningEffort: workflowCodexReasoningEffort === "default" ? "デフォルト継承" : workflowCodexReasoningEffort, sourceId: "workflow-model-settings", note: "Codexで実装したIssueのレビュー指摘を、サブPCのChatGPT購読認証で修正します。APIキーは不要です。",
     },
     {
-      group: "アプリ内AI", name: "要約・検索・文章整理・手作業アシスタント", location: "IssueDeckサーバー",
-      agent: appAiAgent(settings.appAiModel), model: appAiClaudeFixedModelLabel(settings.appAiModel, false), source: "アプリ内AI設定", sourceId: "app-ai-settings",
-      note: appAiProvider(settings.appAiModel) === "openai" ? CLAUDE_FIXED_NOTE : undefined,
+      group: "アプリ内AI", name: "要約・検索・文章整理・Issue作成補助・手作業アシスタント", location: appAiLocation(settings.appAiModel),
+      agent: appAiAgent(settings.appAiModel), model: appAiModelLabel(settings.appAiModel), source: "アプリ内AI設定", sourceId: "app-ai-settings",
+      note: appAiProvider(settings.appAiModel) === "openai"
+        ? `${CODEX_APP_AI_NOTE}画像からの変更内容の抽出も、画像をサブPCへ渡してCodex CLIで読み取ります（画像は処理が終われば消えます）。`
+        : undefined,
     },
     {
-      group: "アプリ内AI", name: "原因診断（チャット調査）",
-      location: appAiProvider(settings.appAiModelReasoning) === "openai" ? "サブPC" : "IssueDeckサーバー",
-      agent: chatInvestigationAgent(settings.appAiModelReasoning), model: appAiModelLabel(settings.appAiModelReasoning), source: "アプリ内AI（推論）設定", sourceId: "app-ai-settings",
+      group: "アプリ内AI", name: "原因診断（チャット調査）", location: appAiLocation(settings.appAiModelReasoning),
+      agent: appAiAgent(settings.appAiModelReasoning), model: appAiModelLabel(settings.appAiModelReasoning), source: "アプリ内AI（推論）設定", sourceId: "app-ai-settings",
       note: appAiProvider(settings.appAiModelReasoning) === "openai" ? "GPT系はOpenAI APIを使わず、サブPCのCodex CLI（ChatGPTサブスク枠）で実行します。" : undefined,
     },
     {
-      group: "アプリ内AI", name: "新規アプリ相談・手作業の修正提案・全体レビューの判断の推奨", location: "IssueDeckサーバー",
-      agent: appAiAgent(settings.appAiModelReasoning), model: appAiClaudeFixedModelLabel(settings.appAiModelReasoning, true), source: "アプリ内AI（推論）設定", sourceId: "app-ai-settings",
-      note: appAiProvider(settings.appAiModelReasoning) === "openai" ? CLAUDE_FIXED_NOTE : undefined,
+      group: "アプリ内AI", name: "新規アプリ相談・手作業の修正提案・全体レビューの判断の推奨", location: appAiLocation(settings.appAiModelReasoning),
+      agent: appAiAgent(settings.appAiModelReasoning), model: appAiModelLabel(settings.appAiModelReasoning), source: "アプリ内AI（推論）設定", sourceId: "app-ai-settings",
+      note: appAiProvider(settings.appAiModelReasoning) === "openai" ? CODEX_APP_AI_NOTE : undefined,
     },
     {
-      group: "判定", name: "おまかせのモデル選択・Issueラベル判定", location: settings.modelPickEngine === "jev" ? "TypeSafe" : "IssueDeckサーバー",
-      agent: settings.modelPickEngine === "jev" ? "Jev" : appAiAgent(settings.appAiModel), model: settings.modelPickEngine === "jev" ? "Jev（候補から判定）" : appAiClaudeFixedModelLabel(settings.appAiModel, false),
-      source: "判定に使うAI設定", sourceId: "model-pick-settings", note: settings.modelPickEngine === "jev" ? "Jevが利用できない場合はアプリ内AIで判定します。" : appAiProvider(settings.appAiModel) === "openai" ? CLAUDE_FIXED_NOTE : undefined,
+      group: "判定", name: "おまかせのモデル選択・Issueラベル判定", location: settings.modelPickEngine === "jev" ? "TypeSafe" : appAiLocation(settings.appAiModel),
+      agent: settings.modelPickEngine === "jev" ? "Jev" : appAiAgent(settings.appAiModel), model: settings.modelPickEngine === "jev" ? "Jev（候補から判定）" : appAiModelLabel(settings.appAiModel),
+      source: "判定に使うAI設定", sourceId: "model-pick-settings",
+      note: settings.modelPickEngine === "jev"
+        ? "Jevが利用できない場合はアプリ内AIで判定します。"
+        : appAiProvider(settings.appAiModel) === "openai"
+          ? "GPT系ではラベル判定をCodex CLIで行います。モデル選択は起動を待たせないよう、Codexを呼ばずにルール（Issueの内容から規則で選ぶ）で判定します。"
+          : undefined,
     },
   ];
 }
@@ -394,7 +391,7 @@ export function resolveProviderFlowRows(
     {
       step: "アプリ内AI",
       entries: [
-        entry(find("要約・検索・文章整理・手作業アシスタント"), overrides.appAiModel ? "override" : "provider", "要約・検索・文章整理"),
+        entry(find("要約・検索・文章整理・Issue作成補助・手作業アシスタント"), overrides.appAiModel ? "override" : "provider", "要約・検索・文章整理"),
         entry(find("原因診断（チャット調査）"), overrides.appAiModelReasoning ? "override" : "provider", "原因診断（チャット）"),
         entry(find("新規アプリ相談・手作業の修正提案・全体レビューの判断の推奨"), overrides.appAiModelReasoning ? "override" : "provider", "新規アプリ相談・修正提案・判断の推奨"),
       ],

@@ -179,7 +179,7 @@ export type ReleaseCardExtras = {
   publishedAt: Date | null;
   /** アプリ本体のURL（iOSアプリの起動用URL〈#5049〉、無ければGitHubリポジトリの`homepage`）。どちらも無ければnull */
   appUrl: string | null;
-  /** GitHubのリリースページ */
+  /** GitHubのリリースページ。カードのタイトルのリンク先にだけ使う（リンク欄には出さない。#5063） */
   releaseUrl: string;
   /** WebViewでiOSアプリを包んでいるリポジトリか（#5046）。アプリのリンクに印を付ける */
   iosApp?: boolean;
@@ -215,7 +215,6 @@ export function buildReleaseDiscordEmbed(
 ): DiscordEmbed {
   const links = [`[リリース画面を開く](${releaseScreen})`];
   if (extras.appUrl) links.push(`[アプリを開く${extras.iosApp ? "（iOSアプリ）" : ""}](${extras.appUrl})`);
-  links.push(`[リリースノート](${extras.releaseUrl})`);
   return {
     title: buildReleaseEmbedTitle(release),
     url: extras.releaseUrl,

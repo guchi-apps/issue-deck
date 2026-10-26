@@ -76,6 +76,8 @@ export type PullRequestReleaseChecks = {
   aiReviewStage?: ReviewEvidenceStage;
   /** 修正系列の進み具合（#4972）。修正対応中・停止の表示に使う。系列が無い・検証結果に任せるときは省略 */
   fix?: ReleaseCandidateFix | null;
+  /** 公開承認済みで、mainへは自動でマージされる（#5064）。「人が押す番」にしない */
+  publishApproved?: boolean;
 };
 
 export type PullRequestSummary = {

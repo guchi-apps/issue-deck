@@ -251,27 +251,30 @@ export async function runReleaseMergePushSweep(
         : await fetchRefCheckState(repository.ownerLogin, repository.name, releasePr.head.ref, token);
       // 統合検証・全体レビューが進行中・問題ありの間は鳴らさない（#4390）。判定が揃ってから
       // 「mainへマージ待ち」として1回だけ鳴る（送った記録は鳴らした時点で残る）
+      const releaseChecks =
+        (
+          await fetchReleaseChecks([
+            {
+              repositoryFullName: repository.fullName,
+              number: releasePr.number,
+              baseRef: releasePr.base?.ref ?? MAIN_BRANCH,
+              headRef: releasePr.head.ref,
+              baseSha: releasePr.base?.sha ?? null,
+              headSha: releasePr.head.sha,
+            },
+          ])
+        ).get(releaseChecksKey(repository.fullName, releasePr.number)) ?? null;
       const verification = resolvePullRequestReleaseVerification({
         baseRef: releasePr.base?.ref ?? MAIN_BRANCH,
         headRef: releasePr.head.ref,
-        releaseChecks:
-          (
-            await fetchReleaseChecks([
-              {
-                repositoryFullName: repository.fullName,
-                number: releasePr.number,
-                baseRef: releasePr.base?.ref ?? MAIN_BRANCH,
-                headRef: releasePr.head.ref,
-                baseSha: releasePr.base?.sha ?? null,
-                headSha: releasePr.head.sha,
-              },
-            ])
-          ).get(releaseChecksKey(repository.fullName, releasePr.number)) ?? null,
+        releaseChecks,
       });
       const waiting = isWaitingUserMerge({
         ciState: check.ciState,
         mergeJudgementPending: isMergeJudgementPending(check.mergeJudgement),
         verification: releaseVerificationBlock(verification),
+        // 公開承認済みは自動でマージされるため鳴らさない（#5064）
+        publishApproved: releaseChecks?.publishApproved === true,
       });
       if (!waiting) continue;
 

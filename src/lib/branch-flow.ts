@@ -287,6 +287,8 @@ export function isReleaseAutoProgressing(
     (pullRequest) =>
       pullRequest?.ciState === "pending" ||
       isMergeJudgementPending(pullRequest?.mergeJudgement) ||
+      // 公開承認済みは、mainへのマージを含めて待てば進む（#5064）
+      pullRequest?.releaseChecks?.publishApproved === true ||
       // 統合検証・全体レビューの実行中・待機中も、待てば進む（#4390）
       (pullRequest !== null && resolvePullRequestReleaseVerification(pullRequest).progress !== null),
   );
@@ -334,6 +336,8 @@ function isWaitingUserMerge(pullRequest: PullRequestSummary | null): boolean {
   if (isMergeJudgementPending(pullRequest.mergeJudgement)) return false;
   // リリース候補は、統合検証・全体レビューが進行中・問題ありのあいだ「マージ待ち」にしない（#4390）
   if (!isReleaseCandidateClear(resolvePullRequestReleaseVerification(pullRequest))) return false;
+  // 公開承認済みの候補は、条件が揃えばシステムがmainへマージする（#5064）
+  if (pullRequest.releaseChecks?.publishApproved) return false;
   return pullRequest.ciState !== "pending" && pullRequest.ciState !== "failure";
 }
 

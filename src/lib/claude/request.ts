@@ -9,14 +9,20 @@ import {
   type AppAiModel,
   resolveAppAiModel,
 } from "@/lib/app-settings";
+import {
+  CODEX_APP_AI_TOKEN,
+  CODEX_EXCLUDED_FEATURES,
+  runAppAiOnCodex,
+} from "@/lib/claude/app-ai-codex";
 import { db } from "@/lib/db";
 
 /**
  * アプリ内AIからAnthropic APIを呼ぶ唯一の入口（#2347・#2568）。
  *
- * **OpenAI API（従量課金）は呼ばない**（#4147）。設定でGPT系を選んでいても、この入口を通る機能は
- * Claude系（サブスク枠のOAuth）の既定モデルで実行する。GPT系をサブスク枠（Codex CLI）で動かせるのは
- * チャット調査だけ（#4143）。どの機能がClaude固定かは設定画面の実行フロー（`execution-flow-settings.ts`）に表示する
+ * **OpenAI API（従量課金）は呼ばない**（#4147）。設定でGPT系を選んだ機能は、サブPCのログイン済み
+ * Codex CLI（ChatGPTサブスク枠）で実行する（#5067。`app-ai-codex.ts`）。Codex経路の失敗は
+ * `AppAiCodexError`として投げ、Claudeへは戻さない。Codexへ回さない機能（`CODEX_EXCLUDED_FEATURES`）だけは
+ * 従来どおりClaude系の既定モデルで実行する。機能ごとの実行先は設定画面の実行フロー（`execution-flow-settings.ts`）に表示する
  *
  * 以前は`lib/claude/`の各機能がそれぞれ`fetch`を書いており、エンドポイント・ヘッダ・
  * ベータ指定が9か所に写っていた。消費量を数えるには**すべての呼び出しが1か所を通る**必要が
@@ -127,31 +133,45 @@ const REASONING_FEATURES = new Set<ClaudeApiFeature>([
   "release_review_recommend",
 ]);
 
-async function getAppAiModel(feature: ClaudeApiFeature): Promise<AppAiModel> {
+/** 保存済みの設定から、その機能に選ばれているモデル（GPT系もそのまま）を読む */
+async function getSelectedAppAiModel(feature: ClaudeApiFeature): Promise<AppAiModel> {
+  const reasoning = REASONING_FEATURES.has(feature);
   try {
     const setting = await db.appSetting.findUnique({
       where: { id: 1 },
       select: { appAiModel: true, appAiModelReasoning: true, aiExecutionProvider: true },
     });
-    const reasoning = REASONING_FEATURES.has(feature);
-    const model = reasoning
+    return reasoning
       ? resolveAppAiModel(setting?.appAiModelReasoning, setting?.aiExecutionProvider, true)
       : resolveAppAiModel(setting?.appAiModel, setting?.aiExecutionProvider);
-    return claudeModelFor(model, reasoning);
   } catch {
-    return resolveAppAiModel(undefined, undefined, REASONING_FEATURES.has(feature));
+    return resolveAppAiModel(undefined, undefined, reasoning);
   }
 }
 
-/** GPT系が選ばれていても、OpenAI APIへは送らずClaude系の既定モデルへ固定する（#4147）。 */
-function claudeModelFor(model: AppAiModel, reasoning: boolean): AppAiModel {
-  if (appAiProvider(model) === "anthropic") return model;
-  return reasoning ? APP_AI_MODEL_REASONING_DEFAULT : APP_AI_MODEL_DEFAULT;
+/** 実際の実行先。GPT系が選ばれた機能はCodex CLI、それ以外はAnthropic API（#5067） */
+export type AppAiRoute = { runtime: "codex"; model: AppAiModel } | { runtime: "claude"; model: AppAiModel };
+
+export function routeAppAi(feature: ClaudeApiFeature, selected: AppAiModel): AppAiRoute {
+  if (appAiProvider(selected) === "anthropic") return { runtime: "claude", model: selected };
+  if (CODEX_EXCLUDED_FEATURES.has(feature)) {
+    // Codexへ回さない機能は、OpenAI APIへは送らずClaude系の既定モデルへ固定する（#4147）
+    return { runtime: "claude", model: REASONING_FEATURES.has(feature) ? APP_AI_MODEL_REASONING_DEFAULT : APP_AI_MODEL_DEFAULT };
+  }
+  return { runtime: "codex", model: selected };
 }
 
-/** アプリ内AIの認証情報（Claudeのサブスク枠OAuth）を返す。 */
+async function resolveAppAiRoute(feature: ClaudeApiFeature): Promise<AppAiRoute> {
+  return routeAppAi(feature, await getSelectedAppAiModel(feature));
+}
+
+/**
+ * アプリ内AIの認証情報を返す。Codex経路ではClaudeのOAuthトークンを前提にしない（#5067）ので、
+ * 呼び出し元の「未設定なら501」を通す目印（`CODEX_APP_AI_TOKEN`）を返す
+ */
 export async function getAppAiToken(feature: ClaudeApiFeature): Promise<string | null> {
-  void feature; // 認証情報は機能によらず共通。呼び出し側のシグネチャを保つ
+  const route = await resolveAppAiRoute(feature);
+  if (route.runtime === "codex") return CODEX_APP_AI_TOKEN;
   return process.env.CLAUDE_CODE_OAUTH_TOKEN ?? null;
 }
 
@@ -174,7 +194,19 @@ export async function callClaudeMessages<T extends ClaudeMessagesResponse = Clau
     timeoutMs?: number;
   },
 ): Promise<ClaudeMessagesResult<T>> {
-  const model = await getAppAiModel(options.feature);
+  const route = await resolveAppAiRoute(options.feature);
+  if (route.runtime === "codex") {
+    // 失敗は`AppAiCodexError`として投げる（Claudeへは戻さない）。使用量は受け口が`codex-cli/<model>`で記録する
+    const result = await runAppAiOnCodex({
+      feature: options.feature,
+      model: route.model,
+      body: options.body,
+      timeoutMs: options.timeoutMs,
+    });
+    const json = { content: [{ type: "text", text: result.text }], stop_reason: "end_turn", model: result.model };
+    return { response: new Response(null, { status: 200 }), json: json as T, error: null };
+  }
+  const model = route.model;
   const response = await fetch(`${ANTHROPIC_API}/v1/messages`, {
     method: "POST",
     headers: {

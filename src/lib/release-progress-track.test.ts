@@ -173,4 +173,26 @@ describe("resolveReleaseProgressTrack", () => {
     });
     expect(failed?.headline).toMatchObject({ label: "再デプロイも失敗", tone: "failed" });
   });
+
+  it("公開承認済みの候補は、マージ待ちを人が押す番（user）でなく自動進行（running）で出す（#5064）", () => {
+    const approved = candidate({ releaseChecks: { ...PASSED, publishApproved: true } });
+    const track = resolveReleaseProgressTrack({
+      bumpPullRequest: null,
+      candidatePullRequest: approved,
+      mergeTarget: null,
+      deploy: null,
+    });
+    const merge = track?.steps.find((step) => step.key === "merge");
+    expect(merge).toMatchObject({ state: "running", status: "自動でmainへマージ待ち" });
+    expect(track?.headline?.tone).toBe("running");
+
+    // 承認が無ければ従来どおり人が押す番
+    const plain = resolveReleaseProgressTrack({
+      bumpPullRequest: null,
+      candidatePullRequest: candidate(),
+      mergeTarget: "main",
+      deploy: null,
+    });
+    expect(plain?.steps.find((step) => step.key === "merge")?.state).toBe("user");
+  });
 });

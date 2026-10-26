@@ -282,6 +282,23 @@ describe("summarizeReleaseStatus", () => {
     ).toBe("action_required");
   });
 
+  it("公開承認済みのリリースPRはaction_requiredにせず、自動で進むものとして扱う（#5064）", () => {
+    expect(
+      summarizeReleaseStatus(
+        summaryInput({
+          releasePullRequest: { ciState: "success", mergeJudgementPending: false, publishApproved: true },
+        }),
+      ),
+    ).toBe("progressing");
+    expect(
+      summarizeReleaseStatus(
+        summaryInput({
+          releasePullRequest: { ciState: "success", mergeJudgementPending: false, publishApproved: false },
+        }),
+      ),
+    ).toBe("action_required");
+  });
+
   /**
    * CI通過後にClaudeのレビュー・マージ可否の判定が走っている窓（#2326）。判定のcheck-runは
    * CI状態の集約から外してある（#1799）ため`ciState`は`success`になる。そのあいだ画面の

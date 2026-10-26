@@ -101,7 +101,7 @@ POST /api/chat/[id] → 発言とChatRun（running）を保存してすぐ返す
 - **失敗は原因ごとに分けて返す**（`describeUnavailable`の`codex_*`）。サブPC未接続（オフライン・30秒受け取られない）／pollerが未対応／Codex未ログイン／**APIキーでのログイン**（従量課金になるため使わない）／利用枠の上限／時間切れ／応答不正／Codexで動かせないモデル。ログイン状態は実行のたびに`codex login status`で確かめる
 - **OpenAI APIの残高切れ（`credit_balance_exhausted`・`insufficient_quota`）は`api_credit_exhausted`として通常の429と分ける。** 待っても回復しないので「しばらく待って再試行」とは案内しない
 - **モデル**は設定の調査用モデル（`appAiModelReasoning`）、無ければCodexの既定（Terra）。`-m`へ渡すのは`CODEX_LOCAL_MODEL_VALUES`の4つだけで、Claude系は最初からこの経路へ来ない（#4143）。
-- **棚卸し（#4143）→ Claude固定（#4147）**: `callClaudeMessages`を通る機能（`new_app_consult`・`manual_step_fix`、`appAiModel`を使う要約・検索・ラベル判定ほか）は、全て画面操作や巡回からの同期HTTP呼び出しで、画像入力・構造化出力もあるためCodex CLIへは移さない。代わりに**GPT系が選ばれていてもOpenAI API（従量課金）へは送らず、Claude系の既定モデル（通常はHaiku、判断系はSonnet）で実行する**（`src/lib/claude/request.ts`の`claudeModelFor`）。設定画面の実行フローには「Anthropic API（Claude固定）」と注記を出す。GPT系をサブスク枠で動かせるのはチャット調査だけ
+- **棚卸し（#4143）→ Claude固定（#4147）→ 定型処理もCodexへ（#5067）**: #4147では`callClaudeMessages`を通る機能をClaude系の既定モデルへ固定していたが、Claude停止中の代替にならないため#5067で見直した。いまは**GPT系を選んだ機能は共通入口からこの`CHAT_TURN`経路（単発・ツール無し）でCodex CLIへ回り**、OpenAI APIへもClaudeへも流さない。機能ごとの実行先・対象外・Claude停止時の可否は[app-ai-codex.md](app-ai-codex.md)を正とする
 - **利用状況には`codex-cli/<モデル>`として計上する**（単価は付けない）。OpenAI APIの`gpt-*`と混ざらない。回答待ちの行（`ChatRun.provider`・`model`・`failureKind`）にも実際の実行先が残る
 - **チャットからコードは変わらない。** `CHAT_TURN`は読み取り専用のサンドボックス・空の作業ディレクトリ・リポジトリのパスを渡さない形で走り、worktree・PR・セッションを作らない。ジョブは実行状況の一覧に出さない（`listDispatchState`で除外）
 - **pollerの版数33から。** 更新前のpollerは`chatCodex`を申告しないため配られず、チャットには「pollerが未対応」と出る（設定のフリート運用から「更新して再起動」）
