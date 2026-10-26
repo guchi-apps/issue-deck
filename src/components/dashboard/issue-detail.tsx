@@ -7,6 +7,7 @@ import {
   FilePlus2,
   Loader2,
   Clock,
+  Link2,
   MoreHorizontal,
   Pencil,
   Play,
@@ -83,6 +84,7 @@ import {
   resolveIssueImplementationAgent,
   summarizeIssueSession,
 } from "@/lib/dispatch/issue-session";
+import { buildDashboardUrl } from "@/lib/share-card";
 import { SnoozeMenu } from "@/components/dashboard/snooze-menu";
 import { SnoozedItemNotice } from "@/components/dashboard/snoozed-item-notice";
 import { Button } from "@/components/ui/button";
@@ -355,6 +357,7 @@ export function IssueDetail({
   }, [planRequestId, reloadArtifacts]);
   const [isPropertiesOpen, setIsPropertiesOpen] = useState(false);
   const [isMoreMenuOpen, setIsMoreMenuOpen] = useState(false);
+  const [isLinkCopied, setIsLinkCopied] = useState(false);
   const [isImageUploading, setIsImageUploading] = useState(false);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const targetCommentRef = useRef<HTMLLIElement>(null);
@@ -931,6 +934,26 @@ export function IssueDetail({
                   >
                     <FilePlus2 className="size-3.5" />
                     引き継いでIssueを作成
+                  </DropdownMenuItem>
+                  {/* このIssueの詳細をIssueDeck内で開くリンク（#5091）。コピー結果を見せるためメニューは閉じない */}
+                  <DropdownMenuItem
+                    className="whitespace-nowrap text-xs"
+                    onSelect={async (event) => {
+                      event.preventDefault();
+                      try {
+                        await navigator.clipboard.writeText(
+                          buildDashboardUrl(window.location.origin, "issue", String(issue.id)),
+                        );
+                      } catch {
+                        // コピーできていないのに成功表示を出さない
+                        return;
+                      }
+                      setIsLinkCopied(true);
+                      window.setTimeout(() => setIsLinkCopied(false), 1500);
+                    }}
+                  >
+                    <Link2 className="size-3.5" />
+                    {isLinkCopied ? "コピーしました" : "リンクをコピー"}
                   </DropdownMenuItem>
                   <DropdownMenuItem className="whitespace-nowrap text-xs" onSelect={() => onEdit(issue)}>
                     <Pencil className="size-3.5" />

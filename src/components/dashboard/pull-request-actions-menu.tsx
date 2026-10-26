@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { MoreHorizontal, Pencil, XCircle } from "lucide-react";
+import { Link2, MoreHorizontal, Pencil, XCircle } from "lucide-react";
 
 import { ApiErrorMessage } from "@/components/dashboard/api-error-message";
 import { EditPullRequestDialog } from "@/components/dashboard/edit-pull-request-dialog";
@@ -25,6 +25,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { usePullRequestMergeMutation } from "@/hooks/use-pull-request-merge-mutation";
+import { buildDashboardUrl } from "@/lib/share-card";
 import type { PullRequestSummary } from "@/types/pull-request";
 
 type PullRequestActionsMenuProps = {
@@ -63,6 +64,7 @@ export function PullRequestActionsMenu({
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [isCloseConfirmOpen, setIsCloseConfirmOpen] = useState(false);
   const closable = canClosePullRequest(pullRequest);
+  const [isLinkCopied, setIsLinkCopied] = useState(false);
 
   async function runClose() {
     const [owner, repo] = pullRequest.repositoryFullName.split("/");
@@ -82,6 +84,25 @@ export function PullRequestActionsMenu({
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-fit min-w-0">
+          {/* このPRの詳細をIssueDeck内で開くリンク（#5091） */}
+          <DropdownMenuItem
+            className="whitespace-nowrap text-xs"
+            onSelect={async (event) => {
+              event.preventDefault();
+              try {
+                await navigator.clipboard.writeText(
+                  buildDashboardUrl(window.location.origin, "pr", pullRequest.id),
+                );
+              } catch {
+                return;
+              }
+              setIsLinkCopied(true);
+              window.setTimeout(() => setIsLinkCopied(false), 1500);
+            }}
+          >
+            <Link2 className="size-3.5" />
+            {isLinkCopied ? "コピーしました" : "リンクをコピー"}
+          </DropdownMenuItem>
           <DropdownMenuItem
             className="whitespace-nowrap text-xs"
             disabled={body === null}

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildDashboardPath,
+  buildDashboardUrl,
   buildShareMeta,
   formatShareLabel,
   isLinkPreviewBot,
@@ -57,5 +58,13 @@ describe("buildDashboardPath", () => {
       "/dashboard?issue=6022306920&mscreen=issue-detail&missue=6022306920",
     );
     expect(buildDashboardPath("pr", "a/b#3")).toBe("/dashboard?pane=pull-requests&pr=a%2Fb%233&mscreen=pull-requests");
+  });
+});
+
+describe("buildDashboardUrl", () => {
+  it("originを前置した絶対URLを返す", () => {
+    expect(buildDashboardUrl("https://issuedeck.example", "issue", "1")).toBe(
+      "https://issuedeck.example/dashboard?issue=1&mscreen=issue-detail&missue=1",
+    );
   });
 });
