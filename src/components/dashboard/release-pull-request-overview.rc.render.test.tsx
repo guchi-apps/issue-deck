@@ -145,28 +145,33 @@ describe("ReleasePullRequestOverview の新方式候補の工程（#4635）", ()
     await waitFor(() => expect(screen.getByTestId("release-fix-summary").textContent).toContain("公開準備へ進めます"));
     expect(screen.queryByText("本番公開へ進む")).toBeNull();
     expect(screen.queryByTestId("release-fix-auto")).toBeNull();
-    expect(screen.getByTestId("release-publish-blocked").textContent).toContain("公開準備");
+    // 公開できない理由は先頭の工程（#5076）が出すので、手動の公開操作の理由文は重ねない
+    expect(screen.getByTestId("release-pull-request-journey")).toBeTruthy();
+    expect(screen.queryByTestId("release-publish-blocked")).toBeNull();
   });
 
   it("候補の状況を取得できていない間は公開操作を出さない", async () => {
     rcOverview = null;
     render(<ReleasePullRequestOverview pullRequest={makePullRequest(false)} onMerged={vi.fn()} />);
-    await waitFor(() => expect(screen.getByTestId("release-publish-pending")).toBeTruthy());
-    expect(screen.queryByText("本番公開へ進む")).toBeNull();
+    // 候補の記録が無い間は、工程の承認以降を取得不能として出し、公開操作は出さない（#5076）
+    await waitFor(() => expect(screen.getByTestId("release-pull-request-journey")).toBeTruthy());
+    expect(screen.queryByText(/本番公開へ進む/)).toBeNull();
   });
 
   it("承認待ちでもドラフトのままなら出さない", async () => {
     rcOverview = { caller: { supported: true, reasonLabel: null } as never, candidate: candidate("awaiting_approval", "awaiting_approval"), legacy: null,
       finalization: finalization() };
     render(<ReleasePullRequestOverview pullRequest={makePullRequest(true)} onMerged={vi.fn()} />);
-    await waitFor(() => expect(screen.getByTestId("release-publish-blocked").textContent).toContain("ドラフト"));
-    expect(screen.queryByText("本番公開へ進む")).toBeNull();
+    await waitFor(() => expect(screen.getByTestId("release-pull-request-journey")).toBeTruthy());
+    expect(screen.queryByText(/本番公開へ進む/)).toBeNull();
   });
 
   it("公開準備が済み、ドラフトでなく最終headと一致するときだけ出す", async () => {
     rcOverview = { caller: { supported: true, reasonLabel: null } as never, candidate: candidate("awaiting_approval", "awaiting_approval"), legacy: null,
       finalization: finalization() };
     render(<ReleasePullRequestOverview pullRequest={makePullRequest(false)} onMerged={vi.fn()} />);
-    await waitFor(() => expect(screen.getByText("本番公開へ進む")).toBeTruthy());
+    // 承認を経ない手動の公開は、主操作でなく「その他の操作」に置く（#5076・計画レビュー判断1-A）
+    await waitFor(() => expect(screen.getByText("承認せずに本番公開へ進む")).toBeTruthy());
+    expect(screen.getByText("承認せずに本番公開へ進む").closest("details")).toBeTruthy();
   });
 });

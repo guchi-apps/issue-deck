@@ -28,6 +28,8 @@ import {
 } from "@/lib/github/release-api";
 import type { IosPrecheckSummary } from "@/lib/github/ios-precheck";
 import { isReleasePullRequest } from "@/lib/release-merge-gate";
+import { DEVELOP_SYNC_BRANCH_PREFIX } from "@/lib/release-develop-sync";
+import { developSyncAutoMergeOutlook } from "@/lib/release-develop-sync-run";
 import { fetchRepairWorkflowAvailability } from "@/lib/github/repair-workflow-cache";
 import { fetchReleaseChecks, releaseChecksKey } from "@/lib/pull-request-release-checks";
 import { checkUserIssueKey, fetchCheckUserIssueReasons } from "@/lib/pull-request-check-user";
@@ -247,6 +249,12 @@ export async function fetchPullRequestListForUser(
   for (const pullRequest of allPullRequests) {
     pullRequest.releaseChecks =
       releaseChecks.get(releaseChecksKey(pullRequest.repositoryFullName, pullRequest.number)) ?? null;
+  }
+
+  // 本番公開後のdevelop同期PRへの巡回の自動マージ判定（#5081）。プロセス内の記録を読むだけ
+  for (const pullRequest of allPullRequests) {
+    if (pullRequest.state !== "open" || pullRequest.baseRef !== "develop" || !pullRequest.headRef.startsWith(DEVELOP_SYNC_BRANCH_PREFIX)) continue;
+    pullRequest.developSyncAutoMerge = developSyncAutoMergeOutlook(pullRequest.repositoryFullName, pullRequest.number, pullRequest.headSha);
   }
 
   // リリース候補PRのiOS事前検証（#4602）。通常PRには引かず、候補（リポジトリごとに高々1本）だけ

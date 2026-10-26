@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   decideDevelopSync,
+  decideDevelopSyncAutoMerge,
   developSyncBranchName,
   developSyncCreateError,
   developSyncMarker,
@@ -84,6 +85,61 @@ describe("decideDevelopSync", () => {
   it("取得できなければ判定不能（同期済みと推定しない）", () => {
     const status = decideDevelopSync({ kind: "unreadable", reason: "developの先端を取得できませんでした" });
     expect(status).toMatchObject({ state: "unknown", detail: "unreadable", canCreate: false });
+  });
+});
+
+describe("decideDevelopSyncAutoMerge（#4669・#5081）", () => {
+  const ready = (over: Parameters<typeof pr>[0] = {}) =>
+    pr({ headSha: MAIN, body: "", labels: [], reviewSettled: true, ...over });
+  const main = (files = ["package.json", "src/a.ts"]) => ({ sha: MAIN, files });
+  const WORKFLOW = ".github/workflows/collection-daily.yml";
+
+  it("条件を満たせばHEADを指定してマージする", () => {
+    expect(decideDevelopSyncAutoMerge(ready(), main())).toEqual({ ok: true, headSha: MAIN });
+  });
+
+  it("条件の成立待ち（巡回が待つ）と人の対応が要る停止を分ける", () => {
+    expect(decideDevelopSyncAutoMerge(ready({ ciState: "pending" }), main())).toMatchObject({ ok: false, waiting: true });
+    expect(decideDevelopSyncAutoMerge(ready({ mergeable: null }), main())).toMatchObject({ ok: false, waiting: true });
+    expect(decideDevelopSyncAutoMerge(ready({ reviewSettled: false }), main())).toMatchObject({ ok: false, waiting: true });
+    expect(decideDevelopSyncAutoMerge(ready({ ciState: "failure" }), main())).toMatchObject({ ok: false, waiting: false });
+    expect(decideDevelopSyncAutoMerge(ready({ mergeable: false }), main())).toMatchObject({ ok: false, waiting: false });
+    expect(decideDevelopSyncAutoMerge(ready({ labels: ["22.merge-confirm-required"] }), main())).toMatchObject({ ok: false, waiting: false });
+    expect(decideDevelopSyncAutoMerge(ready({ headSha: "h".repeat(40) }), main())).toMatchObject({ ok: false, waiting: false });
+    expect(decideDevelopSyncAutoMerge(ready({ mainSha: "c".repeat(40), headSha: "c".repeat(40) }), main())).toMatchObject({ ok: false, waiting: false });
+  });
+
+  it("ワークフローを含むときは、今のmainと一致する公開の記録と、そのマージでの変更を要求する", () => {
+    const files = ["package.json", WORKFLOW];
+    expect(decideDevelopSyncAutoMerge(ready(), main(files))).toMatchObject({ ok: false, waiting: false });
+    expect(decideDevelopSyncAutoMerge(ready(), main(files), { publishedMergeSha: "c".repeat(40), mergeChangedFiles: files })).toMatchObject({
+      ok: false,
+      waiting: false,
+    });
+    expect(decideDevelopSyncAutoMerge(ready(), main(files), { publishedMergeSha: MAIN, mergeChangedFiles: ["package.json"] })).toMatchObject({
+      ok: false,
+      waiting: false,
+    });
+    expect(decideDevelopSyncAutoMerge(ready(), main(files), { publishedMergeSha: MAIN, mergeChangedFiles: null })).toMatchObject({ ok: false, waiting: false });
+    expect(decideDevelopSyncAutoMerge(ready(), main(files), { publishedMergeSha: MAIN, mergeChangedFiles: files })).toEqual({ ok: true, headSha: MAIN });
+  });
+
+  it("証跡があっても、CI・レビュー・確認ラベルの保護は緩めない", () => {
+    const files = ["package.json", WORKFLOW];
+    const evidence = { publishedMergeSha: MAIN, mergeChangedFiles: files };
+    expect(decideDevelopSyncAutoMerge(ready({ ciState: "failure" }), main(files), evidence).ok).toBe(false);
+    expect(decideDevelopSyncAutoMerge(ready({ labels: ["00.check-user"] }), main(files), evidence).ok).toBe(false);
+    expect(decideDevelopSyncAutoMerge(ready({ headSha: "h".repeat(40) }), main(files), evidence).ok).toBe(false);
+  });
+
+  it("同期状態では、人の対応が要る停止を「人の確認が必要」として理由と次の操作を出す", () => {
+    const held = decideDevelopSync(observed({ openPullRequest: ready({ labels: ["00.check-user"] }) }));
+    expect(held).toMatchObject({ state: "unsynced", detail: "merge_held", label: "同期PRは人の確認が必要です" });
+    expect(held.reason).toContain("00.check-user");
+    expect(held.nextAction).toContain("マージコミットでマージ");
+    const auto = decideDevelopSync(observed({ openPullRequest: ready({ reviewSettled: false }) }));
+    expect(auto).toMatchObject({ detail: "awaiting_merge", label: "同期PRの自動マージ待ちです" });
+    expect(auto.nextAction).toContain("操作は不要です");
   });
 });
 

@@ -1,5 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 
+import { loadReleaseRcFacts } from "@/lib/release-journey-facts";
+import type { ReleaseRcFacts } from "@/types/pull-request";
 import { requireUserId } from "@/lib/auth-user";
 import { db } from "@/lib/db";
 import { getInstallationToken } from "@/lib/github/app-auth";
@@ -98,7 +100,21 @@ export async function GET(request: NextRequest) {
       overview.candidate && ["deploying", "verifying_production", "completed"].includes(overview.candidate.status.status)
         ? decideDevelopSync(await observeDevelopSync(ctx))
         : null;
-    return NextResponse.json({ ...overview, finalization, developSync }, { headers: { "Cache-Control": "no-store" } });
+    // 工程の表示（#5076）の入力。PR一覧の`releaseChecks.rc`と同じ記録を、操作後・進行中の取り直しで新しくする
+    let journeyFacts: ReleaseRcFacts | null = null;
+    let journeyFactsUnavailable = false;
+    if (pullRequestNumber !== undefined) {
+      try {
+        journeyFacts = (await loadReleaseRcFacts([{ repositoryFullName: repository.fullName, number: pullRequestNumber }])).get(`${repository.fullName}#${pullRequestNumber}`) ?? null;
+      } catch (error) {
+        console.error("[GET /api/repositories/release/rc] release candidate facts failed", error);
+        journeyFactsUnavailable = true;
+      }
+    }
+    return NextResponse.json(
+      { ...overview, finalization, developSync, journeyFacts, journeyFactsUnavailable },
+      { headers: { "Cache-Control": "no-store" } },
+    );
   } catch (error) {
     console.error(`[GET /api/repositories/release/rc] ${owner}/${repo}:`, error);
     return NextResponse.json({ error: "github_api_error", message: githubApiErrorMessage(error) }, { status: 502 });

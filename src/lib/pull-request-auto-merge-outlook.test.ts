@@ -10,6 +10,7 @@ import {
   isSystemBranch,
 } from "@/lib/pull-request-auto-merge-outlook";
 import { derivePrimaryState } from "@/lib/pull-request-primary-state";
+import { requiresUserMerge } from "@/lib/pull-request-list";
 import type { PullRequestSummary } from "@/types/pull-request";
 
 function pr(overrides: Partial<PullRequestSummary> = {}): PullRequestSummary {
@@ -137,6 +138,34 @@ describe("derivePrimaryState と自動マージの見込み", () => {
     expect(derivePrimaryState(pr({ kind: "other", headRef: "release-sync/main-1", linkedIssueNumber: null })).label).toBe(
       "マージ可能",
     );
+  });
+});
+
+describe("本番公開後のdevelop同期PR（#5081）", () => {
+  const sync = (developSyncAutoMerge: { status: "auto" | "held"; reason: string } | null) =>
+    pr({ kind: "other", headRef: "release-sync/main-1", linkedIssueNumber: null, developSyncAutoMerge });
+
+  it("巡回が自動でマージする判定なら「自動マージ待ち」で、人のマージ待ちに数えない", () => {
+    const pullRequest = sync({ status: "auto", reason: "自動レビューの判定を待っています" });
+    expect(deriveAutoMergeOutlook(pullRequest)?.kind).toBe("expected");
+    const primary = derivePrimaryState(pullRequest);
+    expect(primary.label).toBe("自動マージ待ち");
+    expect(primary.needsAction).toBe(false);
+    expect(requiresUserMerge(pullRequest)).toBe(false);
+  });
+
+  it("人の対応が要る停止は「手動マージ待ち」で理由を出し、ユーザーのマージ待ちに数える", () => {
+    const pullRequest = sync({ status: "held", reason: "人の確認ラベル（00.check-user）が付いています" });
+    expect(deriveAutoMergeOutlook(pullRequest)?.kind).toBe("manual");
+    const primary = derivePrimaryState(pullRequest);
+    expect(primary.label).toBe("手動マージ待ち");
+    expect(primary.reason).toContain("00.check-user");
+    expect(primary.needsAction).toBe(true);
+    expect(requiresUserMerge(pullRequest)).toBe(true);
+  });
+
+  it("巡回の判定が無ければ従来どおり対象外", () => {
+    expect(deriveAutoMergeOutlook(sync(null))?.kind).toBe("excluded");
   });
 });
 

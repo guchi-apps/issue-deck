@@ -89,7 +89,9 @@ export function MobileReposScreen({
         ciState: releaseStatus.pendingMerge?.ciState ?? null,
         verification: releaseStatus.verification ?? null,
       });
-      if (badge) map.set(releaseStatus.repoFullName, badge);
+      // 新方式の候補は工程の見出し（「公開承認待ち」など。#5076）を出し、「mainへマージ待ち」と言わない
+      const actionLabel = badge?.tone === "action" ? releaseStatus.pendingMerge?.actionLabel : null;
+      if (badge) map.set(releaseStatus.repoFullName, actionLabel ? { ...badge, label: actionLabel } : badge);
     });
     return map;
   }, [releaseStatuses]);

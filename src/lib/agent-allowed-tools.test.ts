@@ -161,4 +161,64 @@ describe("agent_allowed_tools", () => {
       expect(dropped).toEqual(rules);
     });
   });
+
+  describe("PRを自動で作る実装セッションだけの規則（#5082）", () => {
+    function prAllowedTools(...args: string[]): string[] {
+      return execFileSync(
+        "bash",
+        ["-c", 'set -u; source "$0"; agent_pr_allowed_tools "$@"', SCRIPT_PATH, ...args],
+        { encoding: "utf-8" },
+      ).split(",");
+    }
+
+    const prRules = prAllowedTools("guchi-apps/vps", "/home/guchi/apps/issue-deck/scripts");
+
+    it("指示ファイルが求めるPR作成と、範囲を絞ったsecretの同期を許可する", () => {
+      expect(prRules).toEqual([
+        "Bash(gh pr create:*)",
+        "Bash(.github/scripts/sync-github-secrets.sh --only:*)",
+        "Bash(scripts/sync-github-secrets.sh --only:*)",
+        "Bash(scripts/provision-secret.sh --repo guchi-apps/vps:*)",
+        "Bash(/home/guchi/apps/issue-deck/scripts/provision-secret.sh --repo guchi-apps/vps:*)",
+      ]);
+    });
+
+    it("基本の規則には入らない（レビュー・統合セッションへは渡らない）", () => {
+      for (const rule of prRules) {
+        expect(rules).not.toContain(rule);
+      }
+    });
+
+    it("マージ・push・キーを絞らない同期・他リポジトリのsecretは通さない", () => {
+      const forbidden = [
+        "gh pr merge",
+        "git push",
+        "gh secret set FOO",
+        "scripts/sync-github-secrets.sh",
+        ".github/scripts/sync-github-secrets.sh --dry-run",
+        "scripts/provision-secret.sh --repo guchi-apps/issue-deck --key FOO",
+        "/home/guchi/apps/issue-deck/scripts/provision-secret.sh --repo guchi-apps/aide --key FOO",
+      ];
+      for (const command of forbidden) {
+        const matched = prRules.filter((rule) => {
+          const inner = rule.replace(/^Bash\(/, "").replace(/:\*\)$/, "");
+          return command === inner || command.startsWith(`${inner} `);
+        });
+        expect(matched, `${command} を通す規則がある: ${matched.join(", ")}`).toEqual([]);
+      }
+    });
+
+    it("リポジトリ名・スクリプトの場所が規則を割る・広げる形なら、その規則を足さない", () => {
+      const base = prRules.slice(0, 3);
+      expect(prAllowedTools()).toEqual(base);
+      expect(prAllowedTools("guchi-apps/*", "/home/guchi/apps/issue-deck/scripts")).toEqual(base);
+      expect(prAllowedTools("guchi-apps/a,b", "/x")).toEqual(base);
+      expect(prAllowedTools("guchi-apps/vps", "scripts")).toEqual(prRules.slice(0, 4));
+      expect(prAllowedTools("guchi-apps/vps", "/tmp/a b/scripts")).toEqual(prRules.slice(0, 4));
+      // 末尾の`/`は落とす。
+      expect(prAllowedTools("guchi-apps/vps", "/home/guchi/apps/issue-deck/scripts/")).toEqual(
+        prRules,
+      );
+    });
+  });
 });

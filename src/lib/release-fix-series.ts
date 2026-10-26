@@ -562,8 +562,23 @@ export type ReverificationFollowUp =
   | { action: "continue"; sourceKind: ReleaseFixSourceKind }
   /** 実行障害の疑い。コードの不具合と断定せず、起案せずに再実行（既存の機構）を待つ */
   | { action: "wait_rerun"; reason: string }
+  /** 指摘0件の未確認範囲を、統合検証の結果で再評価できる（#5077）。系列は止めず、既存の再評価へつなぐ */
+  | { action: "reevaluate_review" }
   /** 本人の判断・操作が要る。理由は具体的に書く */
   | { action: "human"; reason: string };
+
+/**
+ * 指摘0件の全体レビューが未確認範囲で止まったときの停止理由の書き出し（#5077）。この理由で止まった系列は、
+ * 巡回が再評価の進み具合を見直して、解消していれば自動で戻す。
+ */
+export const UNVERIFIED_REVIEW_STOP_PREFIX = "全体レビューに未確認範囲が残っています";
+
+/** #5077より前の巡回が、指摘0件の`needs_check`を一律に止めたときの理由の書き出し。同じく再評価して戻す */
+export const LEGACY_UNREADABLE_REVIEW_STOP_PREFIX = "全体レビューが確認を求めていますが、起案できる指摘が読み取れません";
+
+export function isUnverifiedReviewStopReason(reason: string | null | undefined): boolean {
+  return reason != null && (reason.startsWith(UNVERIFIED_REVIEW_STOP_PREFIX) || reason.startsWith(LEGACY_UNREADABLE_REVIEW_STOP_PREFIX));
+}
 
 type ReverificationSectionInput = {
   state: string;
@@ -584,6 +599,8 @@ type ReverificationSectionInput = {
 export function decideReverificationFollowUp(input: {
   integration: ReverificationSectionInput;
   aiReview: ReverificationSectionInput;
+  /** 指摘0件の`needs_check`の段階（`describeUnverifiedReview`）。未確認範囲でなければnull */
+  aiReviewUnverified?: { stage: "reevaluating" | "settled"; detail: string | null } | null;
 }): ReverificationFollowUp {
   const { integration, aiReview } = input;
   if (aiReview.state === "needs_check" && aiReview.findingCount > 0) {
@@ -603,6 +620,15 @@ export function decideReverificationFollowUp(input: {
   }
   if (aiReview.state === "failed") {
     return { action: "wait_rerun", reason: "全体レビューが実行障害で完了していません。修正Issueは作らず再実行を待ちます" };
+  }
+  const unverified = input.aiReviewUnverified;
+  if (unverified?.stage === "reevaluating") return { action: "reevaluate_review" };
+  if (unverified) {
+    // 指摘は無く、再評価でも残った未確認範囲。範囲と必要な操作を示して人へ渡す（合格にはしない）
+    return {
+      action: "human",
+      reason: `${UNVERIFIED_REVIEW_STOP_PREFIX}（指摘は0件）${unverified.detail ? `：${unverified.detail}` : ""}。統合検証の結果でも解消しませんでした。範囲を確認し、問題なければ判断を記録し、直すものがあれば画面から修正Issueを起案してください`,
+    };
   }
   return {
     action: "human",

@@ -17,6 +17,7 @@ import {
   isLegacyReverificationStopReason,
   isRcImportFailureReason,
   isRebuildFailureReason,
+  isUnverifiedReviewStopReason,
   rcImportFailureReason,
   REBUILD_FAILURE_REASONS,
   releaseFixStepIndex,
@@ -332,6 +333,43 @@ describe("decideReverificationFollowUp（#4478）", () => {
   it("判別できない失敗・指摘が読めない確認要求は本人へ", () => {
     expect(decideReverificationFollowUp({ integration: sec("failed"), aiReview: sec("passed") }).action).toBe("human");
     expect(decideReverificationFollowUp({ integration: sec("passed"), aiReview: sec("needs_check") }).action).toBe("human");
+  });
+});
+
+describe("decideReverificationFollowUp: 指摘0件の未確認範囲（#5077）", () => {
+  const sec = (state: string) => ({ state, reason: null, summary: null, findingCount: 0 });
+  it("再評価待ちの間は止めず、既存の再評価へつなぐ", () => {
+    expect(
+      decideReverificationFollowUp({
+        integration: sec("passed"),
+        aiReview: sec("needs_check"),
+        aiReviewUnverified: { stage: "reevaluating", detail: null },
+      }),
+    ).toEqual({ action: "reevaluate_review" });
+  });
+  it("再評価でも残った未確認範囲は、範囲を示して人へ渡す（合格にしない）", () => {
+    const result = decideReverificationFollowUp({
+      integration: sec("passed"),
+      aiReview: sec("needs_check"),
+      aiReviewUnverified: { stage: "settled", detail: "本番環境の実機確認" },
+    });
+    expect(result.action).toBe("human");
+    expect(result.action === "human" && result.reason).toContain("本番環境の実機確認");
+    expect(result.action === "human" && isUnverifiedReviewStopReason(result.reason)).toBe(true);
+  });
+  it("統合検証の失敗が優先され、未確認範囲では上書きしない", () => {
+    expect(
+      decideReverificationFollowUp({
+        integration: { ...sec("failed"), reason: "テストが failed" },
+        aiReview: sec("needs_check"),
+        aiReviewUnverified: { stage: "reevaluating", detail: null },
+      }),
+    ).toEqual({ action: "continue", sourceKind: "integration_failure" });
+  });
+  it("旧い巡回の停止理由も再評価の対象として判別する", () => {
+    expect(isUnverifiedReviewStopReason("全体レビューが確認を求めていますが、起案できる指摘が読み取れません。レビュー結果を")).toBe(true);
+    expect(isUnverifiedReviewStopReason("統合検証の失敗が判別できません")).toBe(false);
+    expect(isUnverifiedReviewStopReason(null)).toBe(false);
   });
 });
 

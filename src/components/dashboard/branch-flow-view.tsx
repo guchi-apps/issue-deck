@@ -14,8 +14,7 @@ import {
 import { createPortal } from "react-dom";
 import { isReleaseCandidateHeadRef, isLegacyReleaseCandidateHeadRef, rcSequenceOf } from "@/lib/release-branch";
 import { decidePublishForPullRequest, ReleasePublishAction } from "@/components/dashboard/release-publish-action";
-import { ReleaseProgressTrackInline, ReleaseProgressTrackLabeled, type LabeledTrackStep } from "@/components/dashboard/release-progress-track";
-import { describePublishSteps, type PublishStep, type PublishStepsView } from "@/lib/release-publish-steps";
+import { JourneyMoreActions, ReleaseJourneyInline, ReleaseJourneyNow, ReleaseJourneySteps } from "@/components/dashboard/release-journey";
 import { useReleaseRc } from "@/hooks/use-release-rc";
 import type { BranchFlowHistoryStatus } from "@/hooks/use-branch-flow-history";
 import {
@@ -106,9 +105,10 @@ import {
   type AutoRefreshIntervalMs,
 } from "@/lib/auto-refresh";
 import { describeBranchFlow } from "@/lib/branch-flow-guidance";
+import { selectBranchViewRepositories, type BranchViewMode } from "@/lib/branch-view-visibility";
 import { readTriggeredAt, useTriggerPending } from "@/hooks/use-trigger-pending";
 import { resolveReleaseStageBadges, type ReleaseStageBadge } from "@/lib/release-stage-badges";
-import { resolveReleaseProgressTrack, type ReleaseTrack } from "@/lib/release-progress-track";
+import { isReleaseJourneyNeedingUser, resolveReleaseJourney, type ReleaseJourney } from "@/lib/release-journey";
 import { resolvePullRequestHealth, type PullRequestHealthDisposition } from "@/lib/pull-request-health";
 import {
   DEVELOP_BRANCH,
@@ -121,6 +121,7 @@ import {
   splitLanesByReleaseFreeze,
   isClosedLane,
   unreleasedSummary,
+  resolveReleaseMergeTarget,
   type BranchFlow,
 } from "@/lib/branch-flow";
 import {
@@ -130,7 +131,6 @@ import {
 } from "@/lib/release-candidate-status";
 import { formatMonthDay, formatMonthDayTime, formatTimeOfDay } from "@/lib/format-date-time";
 import { formatRelativeDate } from "@/lib/format-relative-date";
-import { releaseMergeTargetLabel } from "@/lib/github/release-button-status";
 import { getProgressStatusDef } from "@/lib/issue-progress";
 import {
   canMergeFromDeck,
@@ -160,6 +160,11 @@ import type { PullRequestSummary } from "@/types/pull-request";
 
 type BranchFlowViewProps = {
   flow: BranchFlow;
+  /**
+   * ブランチ画面でのリポジトリ表示の設定（#5087。リポジトリのフルネーム→モード）。未指定・未設定は
+   * 常に表示。**絞るのは並べるときだけ**で、取得・一括リリースの対象は`flow`の全件のまま
+   */
+  branchViewModes?: Record<string, BranchViewMode>;
   fetchedAt: string | null;
   isLoading: boolean;
   /**
@@ -1293,18 +1298,9 @@ function ReleaseGroupStatePill({
     // まだPRが無い状態なので、そもそもCIも判定も走っていない
     return <ReleaseProgressPill label="本番未反映" spinning={false} />;
   }
-  const track = releaseGroupTrackOf(group);
-  if (track) {
-    // 畳んだ行と同じ進行バー（#4930）。区切りの失敗に表れない検証の問題だけはピルで残す
-    return (
-      <>
-        <ReleaseProgressTrackInline track={track} />
-        {verificationShown?.problem && !track.steps.some((step) => step.state === "failed") && (
-          <ReleaseCandidateVerificationPills verification={verificationShown} />
-        )}
-      </>
-    );
-  }
+  // 畳んだ行と同じ工程（#5076）。検証の問題・取得不能も工程の区切りとして出る
+  const journey = releaseGroupJourneyOf(group);
+  if (journey) return <ReleaseJourneyInline journey={journey} />;
   const stages = resolveReleaseStageBadges({
     bumpPullRequest: group.bumpPullRequest,
     candidatePullRequest: group.pullRequest,
@@ -1318,15 +1314,14 @@ function ReleaseGroupStatePill({
 }
 
 /**
- * 未リリースの束の進行バー（#4930）。マージ待ちは束の見出しと同じ`releaseGroupStateOf`で決める。
- * デプロイは束がまだmainへ入っていないので渡さない
+ * 未リリースの束の工程（#5076）。人のマージ待ちは畳んだ行と同じ`resolveReleaseMergeTarget`で決める
+ * （承認済みの候補を人の番にしない#5064の判定を含む）。デプロイは束がまだmainへ入っていないので渡さない
  */
-function releaseGroupTrackOf(group: BranchFlowReleaseGroup): ReleaseTrack | null {
-  const { waitingUserMerge } = releaseGroupStateOf(group, null);
-  return resolveReleaseProgressTrack({
+function releaseGroupJourneyOf(group: BranchFlowReleaseGroup): ReleaseJourney | null {
+  return resolveReleaseJourney({
     bumpPullRequest: group.bumpPullRequest,
     candidatePullRequest: group.pullRequest,
-    mergeTarget: waitingUserMerge ? "main" : null,
+    mergeTarget: resolveReleaseMergeTarget(group.pullRequest, group.bumpPullRequest),
     deploy: null,
   });
 }
@@ -1624,62 +1619,6 @@ function ReleaseGroupNote({ lanes, released }: { lanes: BranchFlowLane[]; releas
   );
 }
 
-/** 公開承認のある候補の段階ピル（#4814）。進行中は紫で回し、完了は緑、人の操作が要る停止・失効は赤 */
-function PublishStepsPill({ pill }: { pill: PublishStepsView["pill"] }) {
-  if (pill.tone === "run") return <ReleaseProgressPill label={pill.label} spinning />;
-  return (
-    <span
-      className={cn(
-        "inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ring-1 ring-inset",
-        pill.tone === "ok"
-          ? "bg-green-500/10 text-green-700 ring-green-500/60 dark:text-green-400"
-          : "bg-red-500/10 text-destructive ring-red-500/60",
-      )}
-      data-testid="next-release-publish-pill"
-    >
-      <span aria-hidden="true" className="text-[10px] leading-none">
-        {pill.tone === "ok" ? "✓" : "■"}
-      </span>
-      {pill.label}
-    </span>
-  );
-}
-
-/** 承認→バンプ→mainへのマージ→本番反映→稼働確認→完了のどこにいるか（#4814）。mainへのマージは時刻を添える */
-// 段階の見た目は進行バー（#4930）にそろえる。止まった段は赤、進行中は紫
-const PUBLISH_STEP_TRACK_STATE: Record<PublishStep["state"], LabeledTrackStep["state"]> = {
-  done: "done",
-  current: "running",
-  stopped: "failed",
-  todo: "todo",
-};
-
-function PublishStepsLine({ steps }: { steps: PublishStep[] }) {
-  return (
-    <ReleaseProgressTrackLabeled
-      ariaLabel="公開の段階"
-      testId="next-release-publish-steps"
-      steps={steps.map((step) => ({
-        key: step.key,
-        label: step.label,
-        state: PUBLISH_STEP_TRACK_STATE[step.state],
-        sub: step.at ? formatMonthDayTime(step.at) : null,
-      }))}
-    />
-  );
-}
-
-/** 公開承認の無い候補の段階（#4930）。進行バーの区切りに工程名と、動いている工程の文言を添える */
-function ReleaseTrackLine({ track }: { track: ReleaseTrack }) {
-  return (
-    <ReleaseProgressTrackLabeled
-      ariaLabel={`本番リリースの工程 ${track.done}/${track.total}`}
-      testId="next-release-track"
-      steps={track.steps.map((step) => ({ key: step.key, label: step.label, state: step.state, sub: step.status }))}
-    />
-  );
-}
-
 /**
  * 開いたリポジトリの先頭に出す「次のリリース」（#4428）。**本番稼働中の版と次のバージョン**を
  * 並べて識別し、その下に次の候補の状態・理由・主操作・現在の検証を置く。流れ図（上流→下流）の並びは
@@ -1723,28 +1662,17 @@ function NextReleaseCard({
     if (navigation) navigation.openReference(reference);
     else window.open(pullRequest.htmlUrl, "_blank", "noopener,noreferrer");
   }
-  const { verificationShown } = group ? releaseGroupStateOf(group, null) : { verificationShown: null };
   // この版に乗る変更に残っている手作業。実データのレーンにぶら下がっているものだけを出す
   const manualSteps = (group?.lanes ?? [])
     .flatMap((lane) => lane.manualSteps.filter((step) => step.state === "open"))
     .filter((step, index, all) => all.findIndex((other) => other.number === step.number) === index);
 
-  // 新方式の候補（`release-rc/<番号>`）。工程（公開準備・ドラフト）は候補の記録から読み、推測しない（#4635）
+  // 新方式の候補（`release-rc/<番号>`）。公開できるかはサーバーのマージAPIと同じ判定（#4635）
   const rcSequence = pullRequest ? rcSequenceOf(pullRequest.headRef) : null;
   const rc = useReleaseRc(repository.repositoryFullName, pullRequest?.number ?? 0, rcSequence !== null);
   const publishDecision = pullRequest ? decidePublishForPullRequest(pullRequest, rc.overview) : undefined;
-  // 公開承認のある候補は、承認の記録から段階を出す（#4814）。検証の要確認（判断済みを含む）を失敗に見せない
-  const publishSteps =
-    rcSequence !== null
-      ? describePublishSteps({
-          approval: rc.overview?.finalization?.approval ?? null,
-          finalization: rc.overview?.finalization?.current ?? null,
-        })
-      : null;
-  // 公開承認の無い候補は、畳んだ行と同じ進行バーを工程名つきで出す（#4930）
-  const groupTrack = group && !publishSteps ? releaseGroupTrackOf(group) : null;
-  // 承認がある間も、本当に人の手が要る検証の問題（未判断の指摘・失敗）は従来どおり赤で出す
-  const verificationReasonShown = publishSteps ? (verificationShown?.problem ? verificationShown : null) : verificationShown;
+  // 工程は畳んだ行・PR一覧と同じもの（#5076）。作成中（PRがまだ無い）・マージ後の候補も含む
+  const journey = repository.summary.releaseJourney;
 
   const versionText = group
     ? group.version
@@ -1754,6 +1682,26 @@ function NextReleaseCard({
         : "未作成"
     : "なし";
 
+  const pullRequestLink = pullRequest ? (
+    <GithubReferenceLink
+      href={pullRequest.htmlUrl}
+      reference={{ repositoryFullName: pullRequest.repositoryFullName, number: pullRequest.number, kind: "pull" }}
+      className="text-primary hover:underline"
+    >
+      {journey?.headline?.key === "approve" && journey.owner === "user" ? `本番PR #${pullRequest.number} で公開承認する` : `本番PR #${pullRequest.number} の詳細`}
+    </GithubReferenceLink>
+  ) : null;
+  // 主操作は1つ。旧方式の候補は人がmainへマージする。新方式の候補の手動マージ（承認を経ない公開）は
+  // 「その他の操作」へ下げる（#5076。主操作は公開承認で、本番PRの詳細から押す）
+  const manualPublish =
+    pullRequest && journey && !journey.legacy && publishDecision?.ok ? (
+      <ReleasePublishAction pullRequest={pullRequest} decision={publishDecision} onMerged={() => onMerged(pullRequest)} variant="outline" label="承認せずに本番公開へ進む" />
+    ) : null;
+  const primaryPublish =
+    pullRequest && (!journey || journey.legacy) ? (
+      <ReleasePublishAction pullRequest={pullRequest} decision={publishDecision} onMerged={() => onMerged(pullRequest)} hideVerifyHint className="shrink-0" />
+    ) : null;
+
   return (
     <section
       aria-label="次のリリース"
@@ -1762,7 +1710,7 @@ function NextReleaseCard({
     >
       <p className="text-xs font-semibold tracking-wide text-primary">次のリリース</p>
 
-      {/* 1. 現在のリリース候補・状態・次の操作（#4635）。本番版・履歴より先に出す */}
+      {/* 1. 現在のリリース候補・工程・いま・担当・次（#4635・#5076）。本番版・履歴より先に出す */}
       <div
         className={cn(
           "flex flex-col gap-1.5 rounded-md border-2 border-primary/60 px-2.5 py-2",
@@ -1771,78 +1719,58 @@ function NextReleaseCard({
         data-testid="next-release-candidate"
         onClick={openPullRequestFromCard}
       >
-        <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+        <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-1">
           <span className="text-sm font-semibold">
-            {rcSequence !== null ? `RC-${rcSequence}` : group ? "現在のリリース候補" : "リリース候補"}
+            {journey?.candidateLabel ?? (rcSequence !== null ? `RC-${rcSequence}` : group ? "現在のリリース候補" : "リリース候補")}
           </span>
           <span className="font-semibold">{versionText}</span>
-          {publishSteps ? (
-            <>
-              <PublishStepsPill pill={publishSteps.pill} />
-              {verificationShown?.problem && <ReleaseCandidateVerificationPills verification={verificationShown} />}
-            </>
-          ) : groupTrack ? (
-            // 進行はすぐ下の工程名付きのバーが出す。区切りの失敗に表れない検証の問題だけピルで残す
-            verificationShown?.problem &&
-            !groupTrack.steps.some((step) => step.state === "failed") && (
-              <ReleaseCandidateVerificationPills verification={verificationShown} />
-            )
-          ) : (
-            group && <ReleaseGroupStatePill group={group} deviceBuild={null} />
+          {journey && (
+            <span className="text-[11px] tabular-nums text-muted-foreground">
+              {journey.done}/{journey.total}
+            </span>
           )}
+          {!journey && group && <ReleaseGroupStatePill group={group} deviceBuild={null} />}
         </div>
-        {publishSteps && <PublishStepsLine steps={publishSteps.steps} />}
-        {!publishSteps && groupTrack && <ReleaseTrackLine track={groupTrack} />}
-        <p className="min-w-0 break-words text-muted-foreground">
-          {pullRequest ? (
-            <GithubReferenceLink
-              href={pullRequest.htmlUrl}
-              reference={{ repositoryFullName: pullRequest.repositoryFullName, number: pullRequest.number, kind: "pull" }}
-              className="text-primary hover:underline"
-            >
-              本番PR #{pullRequest.number} の詳細
-            </GithubReferenceLink>
-          ) : group?.bumpPullRequest ? (
-            "バージョン更新のPRを処理中"
-          ) : group ? null : (
-            repository.branchesLoaded && repository.release.comparison ? "次に公開する変更はありません" : "ブランチ状況を取得後に、公開する変更を確認できます"
-          )}
-        </p>
-        {publishSteps?.note && (
-          <p
-            className={cn("min-w-0 break-words text-xs", publishSteps.pill.tone === "bad" ? "text-destructive" : "text-muted-foreground")}
-            data-testid="next-release-publish-note"
-          >
-            {publishSteps.note}
+        {journey && <ReleaseJourneySteps journey={journey} />}
+        {journey ? (
+          <ReleaseJourneyNow
+            journey={journey}
+            action={primaryPublish}
+            link={pullRequestLink}
+            more={
+              <JourneyMoreActions count={manualPublish ? 1 : 0}>
+                {manualPublish}
+              </JourneyMoreActions>
+            }
+          />
+        ) : (
+          <p className="min-w-0 break-words text-muted-foreground">
+            {pullRequestLink ??
+              (group?.bumpPullRequest
+                ? "バージョン更新のPRを処理中"
+                : group
+                  ? null
+                  : repository.branchesLoaded && repository.release.comparison
+                    ? "次に公開する変更はありません"
+                    : "ブランチ状況を取得後に、公開する変更を確認できます")}
           </p>
         )}
-        {verificationReasonShown && (
-          <ReleaseCandidateVerificationReason verification={verificationReasonShown} pullRequest={pullRequest} />
+        {(releaseButton || manualSteps.length > 0) && (
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
+            {releaseButton}
+            {manualSteps.map((step) => (
+              <GithubReferenceLink
+                key={step.number}
+                href={`https://github.com/${repository.repositoryFullName}/issues/${step.number}`}
+                reference={{ repositoryFullName: repository.repositoryFullName, number: step.number, kind: "issue" }}
+                className="inline-flex items-center gap-1 text-amber-700 hover:underline dark:text-amber-400"
+              >
+                <Wrench className="size-3" aria-hidden="true" />
+                手作業 #{step.number}
+              </GithubReferenceLink>
+            ))}
+          </div>
         )}
-        <div className="flex min-w-0 flex-wrap items-center gap-2">
-          {/* 自動公開が進んでいる間は、公開操作の代わりに上の段階と補足を出す。止まった・失効したときは従来の操作へ戻す */}
-          {pullRequest && publishSteps?.pill.tone !== "run" && publishSteps?.pill.tone !== "ok" ? (
-            <ReleasePublishAction
-              pullRequest={pullRequest}
-              decision={publishDecision}
-              onMerged={() => onMerged(pullRequest)}
-              hideVerifyHint
-              className="shrink-0"
-            />
-          ) : null}
-          {releaseButton}
-          {manualSteps.map((step) => (
-            <GithubReferenceLink
-              key={step.number}
-              href={`https://github.com/${repository.repositoryFullName}/issues/${step.number}`}
-              reference={{ repositoryFullName: repository.repositoryFullName, number: step.number, kind: "issue" }}
-              className="inline-flex items-center gap-1 text-amber-700 hover:underline dark:text-amber-400"
-            >
-              <Wrench className="size-3" aria-hidden="true" />
-              手作業 #{step.number}
-            </GithubReferenceLink>
-          ))}
-        </div>
       </div>
 
       {/* 2. 候補の検証結果 */}
@@ -2566,6 +2494,7 @@ function RepositorySummaryRow({
     verification !== null ||
     hasPullRequestHealthChips(summary.pullRequestHealth) ||
     summary.releaseInProgress ||
+    summary.releaseJourney !== null ||
     releaseLaunching ||
     iosDistribution.running ||
     deploy !== null);
@@ -2718,45 +2647,23 @@ function RepositorySummaryRow({
       {/* 問題と進行状況を並べる（#4015）。CI失敗だけでなく、レビュー要修正・コンフリクト・
           自動修正中なども開かずに分かる。成功状態は出さず、記号と文字を常時表示してホバー不要にする */}
       <PullRequestHealthSummaryChips summary={summary.pullRequestHealth} />
-      {summary.releaseInProgress ? (
-        // 人が押す番になったら紫（自動で進む）から琥珀（手が要る）へ変える（#2038）。
-        // 回るアイコンの有無だけが手掛かりだったころは、一覧を流し見して自分の番の
-        // リポジトリを見つけられなかった。文言は展開したときの見出しと同じものを使う。
-        // Xcodeで実機へ反映するリポジトリ（#3468）は画面でマージしないので、見出しと同じ
-        // 「実機未反映」を出す
-        repository.deviceBuild ? (
-          <AttentionPill>{repository.deviceBuild.pendingLabel}</AttentionPill>
-        ) : summary.releaseTrack ? (
-          // 工程を固定の6区切りで並べ、どこまで済んだかを出す（#4930）。工程ピルとマージ待ちのピルはここへ統合した
-          <>
-            <ReleaseProgressTrackInline track={summary.releaseTrack} />
-            {/* 検証の状態を取得できないなど、区切りの失敗に表れない問題だけは従来のピルで残す */}
-            {verification?.problem && !summary.releaseTrack.steps.some((step) => step.state === "failed") && (
-              <ReleaseCandidateVerificationPills verification={verification} />
-            )}
-          </>
-        ) : summary.releaseMergeTarget ? (
-          <AttentionPill>{releaseMergeTargetLabel(summary.releaseMergeTarget)}</AttentionPill>
-        ) : (
-          <>
-            {/* 検証の問題は工程バッジと併記する（#4390・#4602） */}
-            {verification && <ReleaseCandidateVerificationPills verification={verification} />}
-            <ReleaseStagePills stages={summary.releaseStages} fallback={!verification?.problem} />
-          </>
-        )
+      {repository.deviceBuild && summary.releaseInProgress ? (
+        // Xcodeで実機へ反映するリポジトリ（#3468）は画面でマージしないので、見出しと同じ「実機未反映」を出す
+        <AttentionPill>{repository.deviceBuild.pendingLabel}</AttentionPill>
+      ) : summary.releaseJourney && !repository.deviceBuild ? (
+        // 本番リリースの工程（#5076）。作成中・検証・公開承認・自動公開・本番反映・稼働確認を同じ7区切りで出す。
+        // 人の番は琥珀、自動で進む工程は紫で、開かなくても「誰が何を待っているか」が分かる
+        <ReleaseJourneyInline journey={summary.releaseJourney} />
       ) : releaseLaunching ? (
         // 起動からバンプPRが現れるまでは、開いたときのボタン（「リリース起動中…」）にしか
-        // 出ていなかった（#1955）。バンプPRが現れれば上の「リリース中」へ引き継がれる
+        // 出ていなかった（#1955）。バンプPRが現れれば上の工程へ引き継がれる
         <ReleaseProgressPill label="リリース起動中" spinning={false} note="workflowの起動待ち" />
-      ) : (
-        // マージ後、リリースのデプロイが進行中・失敗のあいだは最後の区切り（本番反映）が引き継ぐ（#4930）
-        !repository.deviceBuild && summary.releaseTrack && <ReleaseProgressTrackInline track={summary.releaseTrack} />
-      )}
+      ) : null}
       {/* マージ後もデプロイが終わるまでは本番へ出ていない。開かなくても分かるようにする（#1579） */}
       {/* TestFlightへの配布が走っている間だけ（#3806）。Webのデプロイとは別の行為なので別のピルにする */}
       {iosDistribution.running && <IosDistributingBadge />}
-      {/* 進行バーが本番反映を出しているときは、同じ状態のピルを重ねない */}
-      {!(summary.releaseTrack && !summary.releaseInProgress && !releaseLaunching && !repository.deviceBuild) && (
+      {/* 工程が本番反映を出しているときは、同じ状態のピルを重ねない */}
+      {!(summary.releaseJourney && !summary.releaseInProgress && !repository.deviceBuild) && (
         <DeployStateBadge deploy={deploy} compact linkToRun={false} />
       )}
       {guidance.attention && <AttentionGuidance next={guidance.next} isOpen={isOpen} showSelectionMarker={showSelectionMarker} />}
@@ -2923,10 +2830,33 @@ function needsAttention(repository: BranchFlowRepository): boolean {
     // 自動修正が走っている問題は「待てば進むもの」側へ回る（`pullRequestHealth.autoCount`）。
     // 直している最中でない問題だけを手が要るものに数え、同じリポジトリを両方へ重ねない（#4015）
     summary.pullRequestHealth.humanCount > 0 ||
-    summary.releaseMergeTarget !== null ||
-    // 検証の失敗・要確認・設定不足・取得不能は手が要る。実行中・待機中だけなら待てば進む（#4390）
-    candidateVerificationOf(repository)?.problem != null ||
+    // 本番リリースは工程の担当が人のときだけ数える（#5076）。畳んだ行・カード・PR一覧と同じ判定。
+    // 公開承認済みで自動公開を待つ候補（#5064）・検証の実行中は数えず、公開承認・失効・失敗・停止は数える。
+    // Xcodeで実機へ反映するリポジトリ（#3468）は工程を出さないので、従来のマージ待ちで数える
+    (repository.deviceBuild ? summary.releaseMergeTarget !== null : isReleaseJourneyNeedingUser(summary.releaseJourney)) ||
     summary.deploy?.kind === "failure"
+  );
+}
+
+/**
+ * 「動きがある時だけ表示」（#5087）で、ブランチ画面で今見るべき状態があるか。
+ *
+ * 手が要るもの・待てば進むもの（`needsAttention`・`isProgressing`）に加えて、進行中のレーン・
+ * 着手済みのIssue・リリースの進行・未完了の手作業・デプロイの進行または失敗を数える。
+ * **数えないもの**: 過去の履歴（未リリース分・クローズ済み）、未着手（Ready）のopen Issueだけ。
+ * main直行型とdevelop型は同じ集計（`summary`）を読むので、同じ関数で判定する。
+ */
+function hasBranchActivity(repository: BranchFlowRepository): boolean {
+  const { summary } = repository;
+  return (
+    needsAttention(repository) ||
+    isProgressing(repository) ||
+    summary.activeLaneCount > 0 ||
+    summary.startedIssueCount > 0 ||
+    summary.releaseInProgress ||
+    summary.releaseJourney !== null ||
+    summary.openManualStepCount > 0 ||
+    (summary.deploy !== null && summary.deploy.kind !== "success")
   );
 }
 
@@ -2956,7 +2886,9 @@ function isProgressing(repository: BranchFlowRepository): boolean {
     summary.deploy.kind !== "success" &&
     summary.deploy.kind !== "failure";
   return (
-    (summary.releaseInProgress && summary.releaseMergeTarget === null) ||
+    (repository.deviceBuild
+      ? summary.releaseInProgress && summary.releaseMergeTarget === null
+      : summary.releaseJourney?.owner === "auto") ||
     deploying ||
     summary.pullRequestHealth.autoCount > 0
   );
@@ -3033,6 +2965,7 @@ function RepositoryDetailHeader({ repository }: { repository: BranchFlowReposito
  */
 export function BranchFlowView({
   flow,
+  branchViewModes,
   fetchedAt,
   isLoading,
   isRefreshing,
@@ -3078,7 +3011,9 @@ export function BranchFlowView({
 
   const [openRepositories, setOpenRepositories] = useState<Set<string>>(new Set());
   const [showClosed, setShowClosed] = useState(false);
-  const attentionRepositories = flow.repositories.filter(needsAttention);
+  // 設定で隠したリポジトリを一時的に並べる（#5087）。設定は変えず、端末のこの画面にだけ効く
+  const [showBranchViewHidden, setShowBranchViewHidden] = useState(false);
+
   // 一括リリース（#2770）の対象。個別の「リリースする」ボタンと同じ判定（`canTriggerRelease`）を
   // 通ったものだけで、この画面が既に持っているデータから絞り込む——新規のGitHub API問い合わせは
   // 増やさない。0件なら`ReleaseBulkButton`がボタンごと出さない。
@@ -3114,10 +3049,6 @@ export function BranchFlowView({
   // 呼べるようにする登録先（#2770）。`useTriggerPending`はリポジトリごとに1インスタンスだけを
   // 持つ設計（#1955）のため、ヘッダー側から直接は呼べない。
   const releaseMarkTriggeredRegistry = useRef<Map<string, () => void>>(new Map());
-  // 手が要るものに数えたリポジトリは除く（#2038）。同じ行を2つの件数へ二重に数えない
-  const progressingRepositories = flow.repositories.filter(
-    (repository) => !needsAttention(repository) && isProgressing(repository),
-  );
 
   // 引っ張って更新（#1958）。タッチを受けるのはスクロール領域を包む枠で、スクロール位置は
   // 中のスクロール領域から見る（Issue一覧＝`issue-list.tsx`と同じ組み方）。
@@ -3141,6 +3072,33 @@ export function BranchFlowView({
   // その間に「動きなし」が出てから件数へ変わっていた。`fetchedAt`は取り直し中も残るので、
   // 2回目以降の更新で「読み込み中」へ戻ることはない
   const rowsLoaded = (mergedPullRequestsLoaded && fetchedAt !== null) || error !== null;
+
+  // ブランチ画面でのリポジトリ表示（#5087）。**並べるときだけ**絞り、`flow.repositories`の全件は
+  // 一括リリースの対象・進捗の取得に使ったまま。動きの有無を言い切れないもの（取得に失敗した・
+  // 行の数がまだ揃っていない）は並べ、重要な行を「動きなし」と断定して消さない。
+  // 左メニューで選んだリポジトリは設定にかかわらず並べる（選んだのに出ない状態を作らない）
+  const expandedSet = new Set(expandedRepositoryFullNames);
+  const branchViewSelection = selectBranchViewRepositories(flow.repositories, {
+    modeOf: (repository) =>
+      expandedSet.has(repository.repositoryFullName)
+        ? "always"
+        : (branchViewModes?.[repository.repositoryFullName] ?? "always"),
+    hasActivity: hasBranchActivity,
+    isUnknown: (repository) =>
+      !rowsLoaded || failedRepositories.includes(repository.repositoryFullName),
+    showAll: false,
+  });
+  const branchViewHiddenCount = branchViewSelection.hidden.length;
+  // 一時表示で並べるときは、設定で省いたものを後ろへ分けて並べる
+  const shownRepositories = showBranchViewHidden
+    ? [...branchViewSelection.visible, ...branchViewSelection.hidden]
+    : branchViewSelection.visible;
+  // 件数は画面に並ぶ対象と一致させる（絞った後の集合から数える）
+  const attentionRepositories = shownRepositories.filter(needsAttention);
+  // 手が要るものに数えたリポジトリは除く（#2038）。同じ行を2つの件数へ二重に数えない
+  const progressingRepositories = shownRepositories.filter(
+    (repository) => !needsAttention(repository) && isProgressing(repository),
+  );
 
   // **手が要るリポジトリを初回に自動で開くのはやめた**（#1932）。#1510・#1711では
   // CI失敗・マージ待ち・リリース中のリポジトリを開いた直後に展開していたが、そのぶん
@@ -3195,10 +3153,10 @@ export function BranchFlowView({
   }
 
   const allOpen =
-    flow.repositories.length > 0 && openRepositories.size === flow.repositories.length;
+    shownRepositories.length > 0 && openRepositories.size === shownRepositories.length;
   // 覚えている選択が今の一覧に無い（非表示にした・まだ読み込めていない）こともある
   const selectedRepository =
-    flow.repositories.find(
+    shownRepositories.find(
       (repository) => repository.repositoryFullName === selectedRepositoryFullName,
     ) ?? null;
 
@@ -3223,7 +3181,15 @@ export function BranchFlowView({
               ブランチ
             </h1>
             <p className="truncate text-xs text-muted-foreground">
-              <span>{flow.repositories.length}リポジトリ</span>
+              <span>{shownRepositories.length}リポジトリ</span>
+              {/* 設定（ブランチ画面）で省いている件数。全体非表示（設定の「全体に表示」）とは別で、
+                  左メニューの「すべて表示する」（Issue一覧の絞り込み）とも関係しない */}
+              {branchViewHiddenCount > 0 && !showBranchViewHidden && (
+                <span>{` ・ 設定で${branchViewHiddenCount}件を省略中`}</span>
+              )}
+              {showBranchViewHidden && branchViewHiddenCount > 0 && (
+                <span>{` ・ うち${branchViewHiddenCount}件は設定で省略しているものを一時表示中`}</span>
+              )}
               {/* 絞り込みではなく展開で効かせていることを画面に出す（#1750）。
                   出さないと「リポジトリを選んだのに件数が減らない」ようにしか見えない。
                   **2ペインでは同時に1件しか出せないので言い方を変える**（#2157）。
@@ -3280,11 +3246,27 @@ export function BranchFlowView({
               setOpenRepositories(
                 allOpen
                   ? new Set()
-                  : new Set(flow.repositories.map((repo) => repo.repositoryFullName)),
+                  : new Set(shownRepositories.map((repo) => repo.repositoryFullName)),
               )
             }
           >
             {allOpen ? "すべて閉じる" : "すべて開く"}
+          </Button>
+        )}
+        {/* 設定（ブランチ画面）で省いているリポジトリを探すための一時表示（#5087）。設定は変えない。
+            全体に非表示のリポジトリはここでも出ない */}
+        {branchViewHiddenCount > 0 && (
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-8 shrink-0"
+            aria-pressed={showBranchViewHidden}
+            title="ブランチ画面の設定で省いているリポジトリを、この画面だけ一時的に並べます（設定は変わりません）"
+            onClick={() => setShowBranchViewHidden((prev) => !prev)}
+          >
+            {showBranchViewHidden
+              ? "省略していたものを隠す"
+              : `省略中の${branchViewHiddenCount}件を一時表示`}
           </Button>
         )}
         <Button
@@ -3389,7 +3371,14 @@ export function BranchFlowView({
             </p>
           )}
 
-          {flow.repositories.map((repository) => (
+          {!error && flow.repositories.length > 0 && shownRepositories.length === 0 && (
+            <p className="px-4 py-8 text-center text-sm text-muted-foreground">
+              ブランチ画面に並べるリポジトリがありません（{branchViewHiddenCount}件は設定で省略しています）。
+              上の「一時表示」で確認できます。
+            </p>
+          )}
+
+          {shownRepositories.map((repository) => (
             <RepositorySection
               key={repository.repositoryFullName}
               repository={repository}

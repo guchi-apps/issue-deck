@@ -1,10 +1,10 @@
 import type { ReleaseMergeTarget } from "@/lib/github/release-button-status";
 import type { ReleaseCandidateVerification } from "@/lib/release-candidate-status";
 import type { ReleaseStageBadge } from "@/lib/release-stage-badges";
-import type { ReleaseTrack } from "@/lib/release-progress-track";
+import type { ReleaseJourney } from "@/lib/release-journey";
 import type { PullRequestHealthSummary } from "@/lib/pull-request-health";
 import type { ProgressStatusKey } from "@/lib/issue-progress";
-import type { PullRequestKind, PullRequestSummary } from "@/types/pull-request";
+import type { PullRequestKind, PullRequestSummary, ReleaseRcFacts } from "@/types/pull-request";
 
 /**
  * 未リリースの変更を「マージコミット単位」で数えた内訳（#2333）。
@@ -133,6 +133,11 @@ export type RepositoryBranchStatus = {
    * 版を補う。記録が無ければnull。古い応答には無い
    */
   releasedVersion?: string | null;
+  /**
+   * 開いたPRに載らない新方式の候補（作成を受け付けてPRができるまで・mainへマージした後の本番反映と稼働確認。#5076）。
+   * 該当が無ければnull。古い応答には無い
+   */
+  releaseRc?: { prNumber: number | null; facts: ReleaseRcFacts } | null;
 };
 
 /**
@@ -486,10 +491,10 @@ export type BranchFlowRepositorySummary = {
   /** 本番リリース工程の実行中バッジ（#4602）。畳んだ行・見出しが同じ値を読む */
   releaseStages: ReleaseStageBadge[];
   /**
-   * 本番リリースの進行バー（#4930）。工程を固定の6区切りで並べ、どこまで済んだかを畳んだ行に出す。
-   * リリースが動いていない（開いたバンプPR・候補PRが無く、リリースのデプロイも進行中・失敗でない）ときはnull
+   * 本番リリースの工程（#5076。#4930の進行バーを置き換え）。7区切りの工程・いま・担当・次を畳んだ行・カード・件数が共有する。
+   * リリースが動いていない（開いたバンプPR・候補PR・PRに載らない候補が無く、リリースのデプロイも進行中・失敗でない）ときはnull
    */
-  releaseTrack: ReleaseTrack | null;
+  releaseJourney: ReleaseJourney | null;
   /**
    * 実行ボタンを押したがまだブランチが無いIssueの件数（#1704・#2386）。畳んだ1行に再生マークの丸の
    * アイコンと数字だけで出す（#1886・#3163。言葉は`title`と`aria-label`が持つ）。

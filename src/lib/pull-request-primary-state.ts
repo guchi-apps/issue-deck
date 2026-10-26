@@ -9,6 +9,7 @@ import {
   requiresUserMerge,
 } from "@/lib/pull-request-list";
 import type { ReleaseCheckCells } from "@/lib/release-candidate-checks";
+import { resolvePullRequestJourney, type JourneyTone } from "@/lib/release-journey";
 import type { UnmetRequiredCheck } from "@/lib/github/required-checks";
 import type { PullRequestSummary } from "@/types/pull-request";
 
@@ -32,6 +33,7 @@ export type PrimaryStateKind =
   | "ci-running"
   | "judging"
   | "merge-held"
+  | "release-step"
   | "required-check"
   | "mergeable"
   | "unknown";
@@ -51,6 +53,16 @@ export type PrimaryState = {
   needsAction: boolean;
   /** 起動できる自動修正の種類（実際に起動できるものだけ） */
   repairKinds: RepairKind[];
+};
+
+/** 工程の見出しの色から、一覧の代表状態の色へ（失敗＝赤・人の番と取得不能＝琥珀・自動＝紫） */
+const JOURNEY_PRIMARY_TONE: Record<JourneyTone, PrimaryStateTone> = {
+  failed: "bad",
+  user: "warn",
+  unknown: "warn",
+  fixing: "run",
+  running: "run",
+  waiting: "run",
 };
 
 const MARK: Record<PrimaryStateTone, string> = { ok: "●", bad: "■", warn: "▲", run: "◷", muted: "–" };
@@ -132,6 +144,16 @@ export function derivePrimaryState(pullRequest: PullRequestSummary): PrimaryStat
       repairKinds,
     });
   }
+  // 新方式のリリース候補は、ブランチ画面と同じ工程（#5076）の「いま」を出す。CIの失敗・検証・公開承認・
+  // 承認後の自動公開を工程の言葉で区別し、承認後も「人のマージ待ち」に見せない
+  const journey = resolvePullRequestJourney(pullRequest);
+  if (journey?.headline) {
+    const tone = JOURNEY_PRIMARY_TONE[journey.headline.tone];
+    return state("release-step", journey.headline.label, tone, journey.next ?? journey.headline.label, {
+      needsAction: journey.owner === "user",
+      repairKinds: journey.headline.tone === "failed" ? repairKinds : [],
+    });
+  }
   if (pullRequest.ciState === "failure") {
     return state("ci-failed", "CI失敗", "bad", "CIが失敗しています。原因を直してから進めます", {
       needsAction: true,
@@ -186,6 +208,10 @@ export function derivePrimaryState(pullRequest: PullRequestSummary): PrimaryStat
   const outlook = deriveAutoMergeOutlook(pullRequest);
   if (outlook?.kind === "manual") {
     return state("mergeable", "手動マージ待ち", "warn", `自動マージされません: ${outlook.reason}`, { needsAction: true });
+  }
+  // 巡回が自動でマージするdevelop同期PR（#5081）は、人のマージ待ちに見せない
+  if (outlook?.kind === "expected" && pullRequest.developSyncAutoMerge) {
+    return state("mergeable", "自動マージ待ち", "ok", outlook.reason);
   }
   return state(
     "mergeable",

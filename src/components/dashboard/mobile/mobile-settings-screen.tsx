@@ -44,6 +44,7 @@ import type {
   PlanReviewAgent,
   AiExecutionProvider,
 } from "@/lib/app-settings";
+import type { BranchViewMode } from "@/lib/branch-view-visibility";
 import type { ConnectedRepository } from "@/types/repository";
 import type { ReviewGateIssueDraft } from "@/lib/review-gate-issue-draft";
 import type { CurrentUser } from "@/types/user";
@@ -76,9 +77,13 @@ type MobileSettingsScreenProps = {
   modelPickEngine: ModelPickEngine;
   dispatchConcurrency: number;
   repositories: ConnectedRepository[];
-  onSetRepositoryHidden: (repository: ConnectedRepository, hidden: boolean) => void;
+  onSetRepositoryHidden: (repository: ConnectedRepository, hidden: boolean) => boolean | void | Promise<boolean | void>;
   onSetRepositoriesHidden: (repositories: ConnectedRepository[], hidden: boolean) => void;
-  onSetRepositoryIssueCreationExcluded: (repository: ConnectedRepository, excluded: boolean) => void;
+  onSetRepositoryIssueCreationExcluded: (repository: ConnectedRepository, excluded: boolean) => boolean | void | Promise<boolean | void>;
+  onSetRepositoryBranchViewMode: (
+    repository: ConnectedRepository,
+    mode: BranchViewMode,
+  ) => boolean | void | Promise<boolean | void>;
   onUpdated: (values: AppSettingsValues) => void;
   onDraftReviewGateIssue?: (draft: ReviewGateIssueDraft) => void;
   creatableRepositoryNames?: readonly string[];
@@ -116,6 +121,7 @@ export function MobileSettingsScreen({
   onSetRepositoryHidden,
   onSetRepositoriesHidden,
   onSetRepositoryIssueCreationExcluded,
+  onSetRepositoryBranchViewMode,
   onUpdated,
   onDraftReviewGateIssue,
   creatableRepositoryNames,
@@ -236,7 +242,7 @@ export function MobileSettingsScreen({
           </div>
         )}
         {section === "notification" && <NotificationSettingsSection />}
-        {section === "repositories" && <RepositoryVisibilitySection repositories={repositories} onSetRepositoryHidden={onSetRepositoryHidden} onSetRepositoriesHidden={onSetRepositoriesHidden} onSetRepositoryIssueCreationExcluded={onSetRepositoryIssueCreationExcluded} />}
+        {section === "repositories" && <RepositoryVisibilitySection repositories={repositories} onSetRepositoryHidden={onSetRepositoryHidden} onSetRepositoriesHidden={onSetRepositoriesHidden} onSetRepositoryIssueCreationExcluded={onSetRepositoryIssueCreationExcluded} onSetRepositoryBranchViewMode={onSetRepositoryBranchViewMode} layout="accordion" />}
         {section === "ai-models" && <AiModelSettingsSection {...settingsProps} />}
         {section === "execution" && <ExecutionControlSettingsSection {...settingsProps} />}
         {section === "automation" && <AutomationSettingsSection {...settingsProps} />}

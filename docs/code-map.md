@@ -503,6 +503,12 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   [`lib/repository-visibility.ts`](../src/lib/repository-visibility.ts)へ寄せる。
   **非表示はIssue一覧・各ビューの件数・通知にも効く**（#2279。#367以来「効かない」ままだった
   範囲を揃えた。効く範囲の一覧と、どこで除いているかは下の「非表示にしたリポジトリ〜」を参照）。
+  **この区分の行は3項目（全体に表示・Issue作成・ブランチ画面）で、どれも同じ分割ボタン**（#5087。
+  行全体のクリックでは何も変わらない。スマホはアコーディオン）。**「ブランチ画面」（`BranchViewRepository`、
+  `lib/branch-view-visibility.ts`）は全体非表示と独立で、ブランチ画面の並びだけを変える**——絞るのは
+  `BranchFlowView`が取得済みの一覧に対して行い、`/api/branch-flow`の取得と一括リリースの対象は
+  狭めない。「動きがある時だけ表示」は取得失敗・読み込み中なら表示側に倒し、左メニューで選んだ
+  リポジトリは設定にかかわらず並べる。
 - **設定画面は「開いた区分のぶんだけ」読み込む**（#2022）。以前は設定を開いた時点で5本
   （レート制限・API使用量・Claude使用量・GitHubの障害状況・PAT一覧。#3827で使用量系は設定から外した）が走り、さらに
   「フリート運用」を開くと共有ワークフローのタグ照会と同期履歴が走っていた。今は
@@ -4700,8 +4706,10 @@ Discordに貼るURLは従来の`/dashboard?issue=…`・`?pr=…`のまま（#50
 リンクプレビューのクローラーは未ログインで`/login`へ転送されるため、[../src/proxy.ts](../src/proxy.ts)が
 **`updateSession`より前**に、クローラーUA＋`/dashboard`＋妥当な`issue=`/`pr=`のときだけ`/share/...`へrewriteする。
 
-- `src/lib/share-card.ts`: UA判定・クエリ検証・`/share`パスの組み立て（純関数）。`share-card-server.ts`がDBから**リポジトリ名・種別・番号の3つだけ**を引く（selectはこの3つと公開判定の`private`のみ）
+- `src/lib/share-card.ts`: UA判定・クエリ検証・`/share`パスの組み立て（純関数）。`share-card-server.ts`がDBから**リポジトリ名・種別・番号**と、Issueのみ**タイトル・GitHub上の作成日時**（#5090）を引く（selectはこれらと公開判定の`private`のみ。本文は読まない）
 - `src/app/share/issue/[id]`・`share/pr/[owner]/[repo]/[number]`: OGメタ（`page.tsx`）とカード画像（`opengraph-image.tsx`。描画は`share-card-image.tsx`）。人が直接開くと`ShareRedirect`が`/dashboard?...`へ移す
-- `/share`は`publicPaths`に入れてある（ログイン不要）。**タイトル・本文・状態・担当者はメタにも画像にも出さない**。未存在・不正IDは存在を示さない汎用カード（200）
+- `/share`は`publicPaths`に入れてある（ログイン不要）。**本文・状態・担当者・コメント数はメタにも画像にも出さない**（タイトルと作成日は公開Issueに限って出す。#5090）。未存在・不正IDは存在を示さない汎用カード（200）
+- カード画像（`next/og`のsatori）の既定フォントは日本語を持たない。`share-card-font.ts`が、画面用に入っている`@fontsource/murecho`のwoff（unicode-range別の分割。satoriはwoff2を読めない）から描く文字を含む分割だけを読む。**分割は1つずつ別名で登録して`fontFamily`に並べる**（同名だとsatoriは名前ごとに1つしか太さを合わせず、太字が効かない）。`lineClamp`に`overflow: hidden`を併用すると末尾の「…」が切れる
+- カード画像のルートは`force-dynamic`。既定だと初回の結果がキャッシュされ、公開→非公開へ切り替えた後も古い画像を返し得る
 - **公開リポジトリ（`Repository.private=false`）のIssue・PRだけがカードになる**（#5054）。非公開リポジトリは、未存在・不正IDと同じ汎用カードを返し、リポジトリ名・番号を匿名の相手へ開示しない（IssueのIDは列挙できるため）。非公開リポジトリのリンクはプレビューが出ない
 - Discordはカードを長くキャッシュする。更新を確かめるときはURLに`&v=<任意>`を付ける

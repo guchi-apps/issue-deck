@@ -6,6 +6,7 @@ import {
   createBranchRef,
   createPullRequest,
   fetchBranchHeadSha,
+  fetchCommitSummary,
   fetchFileTextAtRef,
   fetchMainHeadSha,
   fetchOpenPullRequestsForBase,
@@ -15,12 +16,14 @@ import {
 } from "@/lib/github/release-api";
 import {
   decideDevelopSync,
-  decideDevelopSyncAutoMerge,
   developSyncBranchName,
   developSyncMarker,
+  developSyncNeedsPublishEvidence,
   isDevelopSyncHeadRef,
   parseDevelopSyncMarker,
+  type DevelopSyncAutoMergeDecision,
   type DevelopSyncObservation,
+  type DevelopSyncPublishEvidence,
   type DevelopSyncPullRequest,
   type DevelopSyncStatus,
 } from "@/lib/release-develop-sync";
@@ -87,6 +90,24 @@ async function findSquashCoveredSync(ctx: Context, mainSha: string): Promise<num
   return null;
 }
 
+/**
+ * 今のmainがRCの公開経路で本番へ出たことの証跡を集める（#5081）。記録は候補PRを本番mainへマージした
+ * `ReleaseProductionCheck.mergeSha`で、IssueDeckの公開（公開承認つきの自動マージか人のマージ）でしか作られない。
+ * 直接push・復旧PR・旧方式のリリースでできたmainには記録が無く、証跡なしになる
+ */
+async function collectPublishEvidence(ctx: Context, mainSha: string): Promise<DevelopSyncPublishEvidence> {
+  const check = await db.releaseProductionCheck.findFirst({ where: { repositoryFullName: fullNameOf(ctx), mergeSha: mainSha }, select: { mergeSha: true } });
+  if (!check) return { publishedMergeSha: null, mergeChangedFiles: null };
+  // そのマージで変わったファイル = マージ前のmain（第1親）から公開のマージまでの差分
+  const mergeChangedFiles = await (async () => {
+    const parent = (await fetchCommitSummary(ctx.owner, ctx.repo, mainSha, ctx.token)).parents[0];
+    if (!parent) return null;
+    const diff = await compareBranches(ctx.owner, ctx.repo, parent, mainSha, ctx.token);
+    return diff?.files ? diff.files.map((f) => f.filename) : null;
+  })().catch(() => null);
+  return { publishedMergeSha: check.mergeSha, mergeChangedFiles };
+}
+
 /** 実際のGit履歴から同期の状況を観測する。**取得できなかったものは同期済みと推定せず`unreadable`にする** */
 export async function observeDevelopSync(ctx: Context): Promise<DevelopSyncObservation> {
   let mainSha: string | null;
@@ -123,7 +144,10 @@ export async function observeDevelopSync(ctx: Context): Promise<DevelopSyncObser
   try {
     const squashCoveredBy = await findSquashCoveredSync(ctx, mainSha);
     if (squashCoveredBy !== null) return { ...observed, squashCoveredBy };
-    return { ...observed, openPullRequest: await findOpenSyncPullRequest(ctx) };
+    const openPullRequest = await findOpenSyncPullRequest(ctx);
+    const publishEvidence =
+      openPullRequest !== null && developSyncNeedsPublishEvidence(mainOnlyFiles) ? await collectPublishEvidence(ctx, mainSha) : null;
+    return { ...observed, openPullRequest, publishEvidence };
   } catch (error) {
     return { kind: "unreadable", reason: `同期PRの状況を取得できませんでした（${errorMessage(error)}）` };
   }
@@ -161,11 +185,42 @@ async function createSyncPullRequest(ctx: Context, mainSha: string, files: strin
 }
 
 /**
- * 条件を満たす同期PRをマージコミットでマージする（#4669）。マージしたときだけtrue。**例外を投げない**。
- * 条件の判定は純関数`decideDevelopSyncAutoMerge`。HEADのSHAを渡すので、判定後の追いコミットは巻き込まない
+ * 同期PRへの直近の自動マージ判定（#5081）。PR一覧・詳細が「自動マージ待ち」と「人の確認が必要」を分けるのに使う。
+ * DBには残さず（`createFailures`と同じ）、再起動後は次の確認まで無い。HEADが変われば使わない
  */
-async function autoMergeSyncPullRequest(ctx: Context, pr: DevelopSyncPullRequest, main: { sha: string; files: string[] }): Promise<boolean> {
-  const decision = decideDevelopSyncAutoMerge(pr, main);
+const autoMergeDecisions = new Map<string, { number: number; headSha: string | null; decision: DevelopSyncAutoMergeDecision }>();
+
+function rememberAutoMergeDecision(fullName: string, status: DevelopSyncStatus): void {
+  const pr = status.pullRequest;
+  if (status.state !== "unsynced" || pr === null || status.autoMerge === null) {
+    autoMergeDecisions.delete(fullName);
+    return;
+  }
+  autoMergeDecisions.set(fullName, { number: pr.number, headSha: pr.headSha ?? null, decision: status.autoMerge });
+}
+
+/**
+ * 同期PRへの直近の判定。`auto`は巡回が自動でマージする（待機中を含む）、`held`は人の対応が要る。
+ * 判定が無い・PR番号かHEADが違うときはnull（一覧は従来の表示にする）
+ */
+export function developSyncAutoMergeOutlook(
+  repositoryFullName: string,
+  pullRequestNumber: number,
+  headSha: string,
+): { status: "auto" | "held"; reason: string } | null {
+  const entry = autoMergeDecisions.get(repositoryFullName);
+  if (!entry || entry.number !== pullRequestNumber || entry.headSha !== headSha) return null;
+  const { decision } = entry;
+  if (decision.ok) return { status: "auto", reason: "条件を満たしています。次の巡回でdevelopへ自動でマージします" };
+  return decision.waiting ? { status: "auto", reason: decision.reason } : { status: "held", reason: decision.reason };
+}
+
+/**
+ * 条件を満たす同期PRをマージコミットでマージする（#4669）。マージしたときだけtrue。**例外を投げない**。
+ * 条件の判定は純関数`decideDevelopSyncAutoMerge`（`decideDevelopSync`が`autoMerge`に入れる）。
+ * HEADのSHAを渡すので、判定後の追いコミットは巻き込まない
+ */
+async function autoMergeSyncPullRequest(ctx: Context, pr: DevelopSyncPullRequest, decision: DevelopSyncAutoMergeDecision): Promise<boolean> {
   if (!decision.ok) return false;
   try {
     await mergePullRequest(ctx.owner, ctx.repo, pr.number, ctx.token, decision.headSha);
@@ -186,10 +241,13 @@ export async function ensureDevelopSync(ctx: Context, options: { autoMerge?: boo
   try {
     const observation = await observeDevelopSync(ctx);
     const status = decideDevelopSync(observation);
+    rememberAutoMergeDecision(fullName, status);
     if (observation.kind !== "observed" || status.state !== "unsynced") return status;
     if (observation.openPullRequest !== null) {
-      if (options.autoMerge && (await autoMergeSyncPullRequest(ctx, observation.openPullRequest, { sha: observation.mainSha, files: observation.mainOnlyFiles }))) {
-        return decideDevelopSync(await observeDevelopSync(ctx));
+      if (options.autoMerge && status.autoMerge && (await autoMergeSyncPullRequest(ctx, observation.openPullRequest, status.autoMerge))) {
+        const merged = decideDevelopSync(await observeDevelopSync(ctx));
+        rememberAutoMergeDecision(fullName, merged);
+        return merged;
       }
       return status;
     }
@@ -201,7 +259,9 @@ export async function ensureDevelopSync(ctx: Context, options: { autoMerge?: boo
       // 同時に別の巡回が作った（同じhead→baseの422）場合は、取り直したときに開いている同期PRとして見つかる
       createFailures.set(fullName, { mainSha: observation.mainSha, message: errorMessage(error) });
     }
-    return decideDevelopSync(await observeDevelopSync(ctx));
+    const created = decideDevelopSync(await observeDevelopSync(ctx));
+    rememberAutoMergeDecision(fullName, created);
+    return created;
   } catch (error) {
     console.error("[release-develop-sync] 同期を確認できませんでした", fullName, error);
     return decideDevelopSync({ kind: "unreadable", reason: `同期を確認できませんでした（${errorMessage(error)}）` });
@@ -242,4 +302,5 @@ export async function runDevelopSyncSweep(now = Date.now()): Promise<{ checked: 
 export function resetDevelopSyncStateForTest(): void {
   createFailures.clear();
   lastSweptAt.clear();
+  autoMergeDecisions.clear();
 }

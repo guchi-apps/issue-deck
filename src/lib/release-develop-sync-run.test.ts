@@ -14,12 +14,15 @@ const mocks = vi.hoisted(() => ({
   fileText: vi.fn(async () => null as string | null),
   candidateFindMany: vi.fn(),
   repositoryFindFirst: vi.fn(),
+  productionCheckFindFirst: vi.fn(async () => null as { mergeSha: string } | null),
+  commitSummary: vi.fn(),
 }));
 
 vi.mock("@/lib/db", () => ({
   db: {
     releaseCandidate: { findMany: mocks.candidateFindMany },
     repository: { findFirst: mocks.repositoryFindFirst },
+    releaseProductionCheck: { findFirst: mocks.productionCheckFindFirst },
   },
 }));
 vi.mock("@/lib/github/app-auth", () => ({ getInstallationToken: vi.fn(async () => "t") }));
@@ -29,6 +32,7 @@ vi.mock("@/lib/github/release-api", () => ({
   createBranchRef: mocks.createRef,
   createPullRequest: mocks.createPr,
   fetchBranchHeadSha: mocks.branchHead,
+  fetchCommitSummary: mocks.commitSummary,
   fetchFileTextAtRef: mocks.fileText,
   fetchMainHeadSha: mocks.mainHead,
   fetchOpenPullRequestsForBase: mocks.openPrs,
@@ -38,7 +42,13 @@ vi.mock("@/lib/github/release-api", () => ({
 }));
 
 import { developSyncMarker } from "@/lib/release-develop-sync";
-import { ensureDevelopSync, observeDevelopSync, resetDevelopSyncStateForTest, runDevelopSyncSweep } from "@/lib/release-develop-sync-run";
+import {
+  developSyncAutoMergeOutlook,
+  ensureDevelopSync,
+  observeDevelopSync,
+  resetDevelopSyncStateForTest,
+  runDevelopSyncSweep,
+} from "@/lib/release-develop-sync-run";
 
 const ctx = { owner: "o", repo: "r", token: "t" };
 const MAIN = "a".repeat(40);
@@ -59,6 +69,7 @@ beforeEach(() => {
   mocks.createRef.mockResolvedValue("created");
   mocks.createPr.mockResolvedValue({ number: 70, html_url: "u" });
   mocks.merge.mockResolvedValue({ sha: "m" });
+  mocks.productionCheckFindFirst.mockResolvedValue(null);
 });
 
 describe("observeDevelopSync", () => {
@@ -188,6 +199,64 @@ describe("同期PRの自動マージ（#4669）", () => {
     mocks.compare.mockResolvedValue({ ...diverged, files: files(["package.json", ".github/workflows/ci.yml"]) });
     await ensureDevelopSync(ctx, { autoMerge: true });
     expect(mocks.merge).not.toHaveBeenCalled();
+  });
+
+  describe("ワークフローを含む同期PR（#5081）", () => {
+    const PARENT = "d".repeat(40);
+    const withWorkflow = { ...diverged, files: files(["package.json", ".github/workflows/collection-daily.yml"]) };
+    beforeEach(() => {
+      openSync();
+      mocks.ciState.mockResolvedValue({ ciState: "success", mergeable: true, mergeJudgement: settled });
+      mocks.commitSummary.mockResolvedValue({ message: "Merge", parents: [PARENT, "e".repeat(40)] });
+      // develop...main は差分あり、親...main（公開のマージで変わったファイル）は呼び出しの引数で分ける
+      mocks.compare.mockImplementation(async (_o: string, _r: string, base: string) =>
+        base === PARENT ? { aheadBy: 1, behindBy: 0, changedFiles: 2, lastCommitAt: null, files: files(["package.json", ".github/workflows/collection-daily.yml"]) } : withWorkflow,
+      );
+    });
+
+    it("今のmainがRCの公開で本番へマージした記録と一致し、ワークフローがそのマージで変わったものならマージする", async () => {
+      mocks.productionCheckFindFirst.mockResolvedValue({ mergeSha: MAIN });
+      await ensureDevelopSync(ctx, { autoMerge: true });
+      expect(mocks.productionCheckFindFirst).toHaveBeenCalledWith(expect.objectContaining({ where: { repositoryFullName: "o/r", mergeSha: MAIN } }));
+      expect(mocks.merge).toHaveBeenCalledWith("o", "r", 70, "t", MAIN);
+    });
+
+    it("公開の記録が無いmainは人へ回し、理由を一覧へ渡す", async () => {
+      const status = await ensureDevelopSync(ctx, { autoMerge: true });
+      expect(mocks.merge).not.toHaveBeenCalled();
+      expect(status).toMatchObject({ detail: "merge_held", label: "同期PRは人の確認が必要です" });
+      expect(status.reason).toContain("記録と一致しません");
+      expect(developSyncAutoMergeOutlook("o/r", 70, MAIN)).toMatchObject({ status: "held" });
+      // HEADが違えば使わない
+      expect(developSyncAutoMergeOutlook("o/r", 70, "f".repeat(40))).toBeNull();
+    });
+
+    it("今回の公開で変わっていないワークフロー（以前から未同期）は人へ回す", async () => {
+      mocks.productionCheckFindFirst.mockResolvedValue({ mergeSha: MAIN });
+      mocks.compare.mockImplementation(async (_o: string, _r: string, base: string) =>
+        base === PARENT ? { aheadBy: 1, behindBy: 0, changedFiles: 1, lastCommitAt: null, files: files(["package.json"]) } : withWorkflow,
+      );
+      const status = await ensureDevelopSync(ctx, { autoMerge: true });
+      expect(mocks.merge).not.toHaveBeenCalled();
+      expect(status.reason).toContain("以前から未同期");
+    });
+
+    it("公開のマージで変わったファイルを取れないときはマージせず、理由付きで人へ回す", async () => {
+      mocks.productionCheckFindFirst.mockResolvedValue({ mergeSha: MAIN });
+      mocks.commitSummary.mockRejectedValue(new Error("502"));
+      const status = await ensureDevelopSync(ctx, { autoMerge: true });
+      expect(mocks.merge).not.toHaveBeenCalled();
+      expect(status.detail).toBe("merge_held");
+      expect(status.reason).toContain("照合できません");
+      expect(developSyncAutoMergeOutlook("o/r", 70, MAIN)).toMatchObject({ status: "held" });
+    });
+
+    it("ワークフローを含まない同期PRでは記録を引かない", async () => {
+      mocks.compare.mockResolvedValue(diverged);
+      await ensureDevelopSync(ctx, { autoMerge: true });
+      expect(mocks.productionCheckFindFirst).not.toHaveBeenCalled();
+      expect(mocks.merge).toHaveBeenCalled();
+    });
   });
 
   it("人の確認ラベルがある・旧head=mainの同期PRはマージしない。マージ失敗でも例外にしない", async () => {

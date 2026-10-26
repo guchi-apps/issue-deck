@@ -98,6 +98,22 @@ describe("PullRequestActionsMenu", () => {
     vi.unstubAllGlobals();
   });
 
+  it("「リンクをコピー」でIssueDeck内のPR詳細を開くURLをコピーする（#5091）", async () => {
+    const writeText = vi.fn(async () => {});
+    vi.stubGlobal("navigator", { clipboard: { writeText } });
+    renderMenu(makePullRequest());
+    openMenu();
+
+    fireEvent.click(screen.getByRole("menuitem", { name: "リンクをコピー" }));
+
+    await waitFor(() =>
+      expect(writeText).toHaveBeenCalledWith(
+        `${window.location.origin}/dashboard?pane=pull-requests&pr=guchi-apps%2Fissue-deck%233170&mscreen=pull-requests`,
+      ),
+    );
+    await waitFor(() => expect(screen.getByRole("menuitem", { name: "コピーしました" })).toBeTruthy());
+  });
+
   it("OpenのPRでは「編集」と「クローズする」を出す", () => {
     renderMenu(makePullRequest());
     openMenu();

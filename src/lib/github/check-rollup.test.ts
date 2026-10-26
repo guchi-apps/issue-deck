@@ -380,6 +380,23 @@ describe("fetchCheckRollup", () => {
    * Claudeのレビューが終わったか（#2150）。判定全体（`mergeJudgement.state`）とは別の軸で、
    * `claude-review`ジョブのcheck-runだけを見る。
    */
+  // PR詳細の「止まった原因」が直近の判定の時刻とログを出すために使う（#5080）
+  it("完了した`auto-merge`ジョブのURLと完了時刻を返し、未完了なら省く", async () => {
+    const nodes = [
+      checkRun("COMPLETED", "SUCCESS", "claude-review-develop.yml", "claude-review"),
+      { ...checkRun("COMPLETED", "SUCCESS", "claude-review-develop.yml", "auto-merge"), completedAt: "2026-10-26T12:40:00Z" },
+    ];
+    stubGraphql(rollupResponse({ state: "SUCCESS", contexts: { totalCount: nodes.length, nodes } }));
+    expect((await fetchCheckRollup("owner", "repo", "develop", "token"))?.mergeJudgement.autoMergeRun).toEqual({
+      url: "https://github.com/owner/repo/actions/runs/1/job/auto-merge",
+      completedAt: "2026-10-26T12:40:00Z",
+    });
+
+    const queued = [checkRun("QUEUED", null, "claude-review-develop.yml", "auto-merge")];
+    stubGraphql(rollupResponse({ state: "PENDING", contexts: { totalCount: queued.length, nodes: queued } }));
+    expect((await fetchCheckRollup("owner", "repo", "develop", "token"))?.mergeJudgement.autoMergeRun).toBeUndefined();
+  });
+
   describe("aiReview", () => {
     async function aiReviewOf(nodes: unknown[]) {
       stubGraphql(

@@ -171,6 +171,11 @@ export type MergeJudgement = {
    * 走ったときは最後の結果で決める。マージ待ちの「自動マージされません」の理由に使う。省略は「無し」
    */
   failedJobs?: string[];
+  /**
+   * 最後に完了した`auto-merge`ジョブ（#5080）。PR詳細の「止まった原因」が、直近の判定の時刻と
+   * ログへのリンクを出すために使う。同じ1回のGraphQLの応答から読む。完了したものが無ければ省略
+   */
+  autoMergeRun?: { url: string | null; completedAt: string | null };
 };
 
 /** 判定のcheck-runを1件も見られなかったときの値。従来どおり画面からマージできる側へ倒す */
@@ -593,9 +598,17 @@ function toMergeJudgement(nodes: RollupContextNode[]): MergeJudgement {
   if (judgementChecks.length === 0) return MERGE_JUDGEMENT_UNKNOWN;
 
   const aiReview = toAiReview(judgementChecks);
-  // 失敗が無ければ省く（省略は「無し」と同じ扱い）
+  // 失敗・完了した`auto-merge`が無ければ省く（省略は「無し」と同じ扱い）
   const failed = failedJudgementJobs(judgementChecks);
-  const failedJobs = failed.length > 0 ? { failedJobs: failed } : {};
+  const autoMerge = judgementChecks.findLast(
+    (node) => jobNameOf(node) === "auto-merge" && checkRunPhaseOf(node) === "completed",
+  );
+  const failedJobs = {
+    ...(failed.length > 0 ? { failedJobs: failed } : {}),
+    ...(autoMerge
+      ? { autoMergeRun: { url: autoMerge.detailsUrl ?? null, completedAt: autoMerge.completedAt ?? null } }
+      : {}),
+  };
   const pendingChecks = judgementChecks.filter((node) => checkRunPhaseOf(node) !== "completed");
   if (pendingChecks.length === 0) return { state: "settled", step: null, runUrl: null, aiReview, ...failedJobs };
 

@@ -9,6 +9,7 @@ import { deployWorkflowExists } from "@/lib/github/deploy-workflow-cache";
 import { releaseWorkflowExists } from "@/lib/github/release-workflow-cache";
 import { ACTIVE_ISSUE_PROGRESS_STATUSES, issueBranchName } from "@/lib/branch-flow";
 import { getProgressStatusDef } from "@/lib/issue-progress";
+import { loadDetachedRcFacts } from "@/lib/release-journey-facts";
 import type { BranchFlowResponse, RepositoryBranchStatus } from "@/types/branch-flow";
 
 export function GET() {
@@ -102,6 +103,13 @@ async function handleGET() {
     repositories.map((repository) => repository.fullName),
   );
 
+  // 開いたPRに載らない候補（作成中・マージ後）の記録（#5076）。PR一覧の`releaseChecks`と同じ形で渡し、
+  // ブランチ画面が同じ工程として追う。読めなければ載せない（開いた候補PRの工程は`releaseChecks`から出る）
+  const detachedByRepository = await loadDetachedRcFacts(repositories.map((repository) => repository.fullName)).catch((error) => {
+    console.error("[GET /api/branch-flow] release candidate lookup failed", error);
+    return new Map<string, never>();
+  });
+
   const results = await Promise.all(
     repositories.map(async (repository): Promise<RepositoryBranchStatus | null> => {
       const checkedBranches = branchesByRepositoryId.get(repository.id) ?? [];
@@ -141,6 +149,7 @@ async function handleGET() {
           mainHead: lookup.mainHead,
           developHeadOid: lookup.developHeadOid,
           releasedVersion: releasedVersionByRepository.get(repository.fullName) ?? null,
+          releaseRc: detachedByRepository.get(repository.fullName) ?? null,
         };
       } catch (error) {
         // 1リポジトリの取得失敗で画面全体を落とさない。取れなかったことだけを返す。

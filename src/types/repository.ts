@@ -1,3 +1,5 @@
+import type { BranchViewMode } from "@/lib/branch-view-visibility";
+
 export type ConnectedRepository = {
   id: string;
   name: string;
@@ -27,6 +29,11 @@ export type ConnectedRepository = {
    * `hidden`とは独立の設定で、左メニュー・Issue一覧などには影響しない。
    */
   excludedFromIssueCreation: boolean;
+  /**
+   * ブランチ画面での表示（#5087）。`hidden`・`excludedFromIssueCreation`とは独立で、
+   * ブランチ画面の並べ方だけを変える。未設定・未指定は`always`（従来どおり常に表示）。
+   */
+  branchViewMode?: BranchViewMode;
   /**
    * リリース後の動作確認の対象に選んでいるか（#2930）。**いつから対象かを持つ**——
    * nullなら対象外で、日時が入っていればその時刻より**後**に公開されたリリースにだけ

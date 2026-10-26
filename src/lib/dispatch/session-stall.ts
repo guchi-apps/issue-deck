@@ -239,3 +239,11 @@ export function isSessionStallRecoveryBody(
 ): boolean {
   return STALL_NOTICES[reason].presets.some((preset) => preset.body === body);
 }
+
+/**
+ * 原因ごとの見出し（#5080）。PR詳細の「止まった原因」が、引き上げコメントから読んだ原因を
+ * 停滞パネルと同じ言葉で出すために使う（文面の正をここ1か所に保つ）。
+ */
+export function sessionStallTitle(reason: SessionInterruptedReason): string {
+  return STALL_NOTICES[reason].title;
+}

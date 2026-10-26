@@ -21,6 +21,8 @@ import {
 } from "@/lib/notifications/push";
 import { isMergeJudgementPending, isReleaseHeadRef } from "@/lib/pull-request-list";
 import { fetchReleaseChecks, releaseChecksKey } from "@/lib/pull-request-release-checks";
+import { isRcReleaseCandidateHeadRef } from "@/lib/release-branch";
+import { isReleaseJourneyNeedingUser, resolveReleaseJourney } from "@/lib/release-journey";
 import { releaseVerificationBlock, resolvePullRequestReleaseVerification } from "@/lib/release-candidate-status";
 
 /**
@@ -96,6 +98,8 @@ export type PendingReleaseMerge = {
   pullRequestNumber: number;
   pullRequestTitle: string;
   ciState: CiState;
+  /** 新方式の候補で人に求める操作の文言（#5076。工程の見出し）。あれば「mainへマージ待ち」の代わりに出す */
+  actionLabel?: string | null;
 };
 
 /**
@@ -114,7 +118,7 @@ export function buildReleaseMergePushPayload(
   const repositoryName =
     pending.repositoryFullName.split("/")[1] ?? pending.repositoryFullName;
   const state =
-    pending.ciState === "failure" ? "チェック失敗" : releaseMergeTargetLabel("main");
+    pending.actionLabel ?? (pending.ciState === "failure" ? "チェック失敗" : releaseMergeTargetLabel("main"));
   const pullRequestId = buildPullRequestId(pending.repositoryFullName, pending.pullRequestNumber);
   return {
     title: `${repositoryName} ・ ${state}`,
@@ -269,12 +273,34 @@ export async function runReleaseMergePushSweep(
         headRef: releasePr.head.ref,
         releaseChecks,
       });
+      // 新方式の候補は、画面・通知ベルと同じ工程（#5076）の担当で決める。公開承認待ち・失効・停止で鳴らし、
+      // 承認後の自動公開では鳴らさない
+      const journey = isRcReleaseCandidateHeadRef(releasePr.head.ref)
+        ? resolveReleaseJourney({
+            bumpPullRequest: null,
+            candidatePullRequest: {
+              state: "open",
+              merged: false,
+              draft: releasePr.draft === true,
+              baseRef: releasePr.base?.ref ?? MAIN_BRANCH,
+              headRef: releasePr.head.ref,
+              ciState: check.ciState,
+              ciChecks: [],
+              mergeJudgement: check.mergeJudgement,
+              releaseChecks,
+              iosPrecheck: null,
+            },
+            mergeTarget: null,
+            deploy: null,
+          })
+        : null;
       const waiting = isWaitingUserMerge({
         ciState: check.ciState,
         mergeJudgementPending: isMergeJudgementPending(check.mergeJudgement),
         verification: releaseVerificationBlock(verification),
         // 公開承認済みは自動でマージされるため鳴らさない（#5064）
         publishApproved: releaseChecks?.publishApproved === true,
+        ...(journey ? { journeyNeedsUser: isReleaseJourneyNeedingUser(journey) } : {}),
       });
       if (!waiting) continue;
 
@@ -283,6 +309,7 @@ export async function runReleaseMergePushSweep(
         pullRequestNumber: releasePr.number,
         pullRequestTitle: releasePr.title,
         ciState: check.ciState,
+        actionLabel: journey?.headline?.label ?? null,
       };
       result.pending.push(pending);
 

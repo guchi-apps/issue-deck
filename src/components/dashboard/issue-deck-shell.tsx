@@ -173,6 +173,7 @@ import {
   computeManualStepAttention,
 } from "@/lib/manual-step-attention";
 import { countMergePendingAttention } from "@/lib/merge-pending-attention";
+import type { BranchViewMode } from "@/lib/branch-view-visibility";
 import { selectVisibleIssues } from "@/lib/repository-visibility";
 import { buildReleaseCheckIndex, countUncheckedReleases } from "@/lib/release-check";
 import { selectVisibleReleaseHistory } from "@/lib/release-history";
@@ -1648,6 +1649,16 @@ export function IssueDeckShell({
   );
   const deployStatus = useDeployStatus(isFlowPaneActive, latestReleaseMergedAt);
 
+  // ブランチ画面でのリポジトリ表示（#5087）。絞り込みは`BranchFlowView`が取得済みの一覧に対して
+  // 行うので、ここでは設定値をリポジトリ名で引けるようにするだけ（取得・一括リリースの対象は変えない）
+  const branchViewModes = useMemo(
+    () =>
+      Object.fromEntries(
+        repositories.map((repo) => [repo.fullName, repo.branchViewMode ?? "always"]),
+      ) as Record<string, BranchViewMode>,
+    [repositories],
+  );
+
   // Issue・ブランチ・PRを1本の流れへ束ねたモデル（#1455）。PRとIssueは既存の取得結果を
   // そのまま使い、新しくGitHubへ問い合わせるのはブランチ状況だけにしている。
   const branchFlow = useMemo(
@@ -1879,7 +1890,7 @@ export function IssueDeckShell({
     }
   }
 
-  async function handleSetRepositoryHidden(repository: ConnectedRepository, hidden: boolean) {
+  async function handleSetRepositoryHidden(repository: ConnectedRepository, hidden: boolean): Promise<boolean> {
     setRepositories((prev) =>
       prev.map((repo) => (repo.id === repository.id ? { ...repo, hidden } : repo)),
     );
@@ -1891,11 +1902,13 @@ export function IssueDeckShell({
         body: JSON.stringify({ repositoryId: repository.id }),
       });
       if (!response.ok) throw new Error("failed to update hidden repository");
+      return true;
     } catch (error) {
       console.error("[issue-deck-shell] failed to update hidden repository", error);
       setRepositories((prev) =>
         prev.map((repo) => (repo.id === repository.id ? { ...repo, hidden: !hidden } : repo)),
       );
+      return false;
     }
   }
 
@@ -1955,7 +1968,7 @@ export function IssueDeckShell({
   async function handleSetRepositoryIssueCreationExcluded(
     repository: ConnectedRepository,
     excluded: boolean,
-  ) {
+  ): Promise<boolean> {
     setRepositories((prev) =>
       prev.map((repo) =>
         repo.id === repository.id ? { ...repo, excludedFromIssueCreation: excluded } : repo,
@@ -1969,6 +1982,7 @@ export function IssueDeckShell({
         body: JSON.stringify({ repositoryId: repository.id }),
       });
       if (!response.ok) throw new Error("failed to update issue-creation-excluded repository");
+      return true;
     } catch (error) {
       console.error(
         "[issue-deck-shell] failed to update issue-creation-excluded repository",
@@ -1979,6 +1993,40 @@ export function IssueDeckShell({
           repo.id === repository.id ? { ...repo, excludedFromIssueCreation: !excluded } : repo,
         ),
       );
+      return false;
+    }
+  }
+
+  /**
+   * ブランチ画面でのリポジトリ表示（#5087）。`hidden`・`excludedFromIssueCreation`とは独立で、
+   * ブランチ画面の並べ方だけを変える。失敗したら元の値へ戻し、呼び出し側が理由を出せるよう
+   * falseを返す。
+   */
+  async function handleSetRepositoryBranchViewMode(
+    repository: ConnectedRepository,
+    mode: BranchViewMode,
+  ): Promise<boolean> {
+    const previous = repository.branchViewMode ?? "always";
+    setRepositories((prev) =>
+      prev.map((repo) => (repo.id === repository.id ? { ...repo, branchViewMode: mode } : repo)),
+    );
+
+    try {
+      const response = await fetch("/api/repositories/branch-view", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ repositoryId: repository.id, mode }),
+      });
+      if (!response.ok) throw new Error("failed to update branch view mode");
+      return true;
+    } catch (error) {
+      console.error("[issue-deck-shell] failed to update branch view mode", error);
+      setRepositories((prev) =>
+        prev.map((repo) =>
+          repo.id === repository.id ? { ...repo, branchViewMode: previous } : repo,
+        ),
+      );
+      return false;
     }
   }
 
@@ -2178,6 +2226,7 @@ export function IssueDeckShell({
               {mobileScreen.kind === "flow" && (
                 <MobileFlowScreen
                   flow={branchFlow}
+                  branchViewModes={branchViewModes}
                   fetchedAt={branchFlowStatus.fetchedAt}
                   isLoading={branchFlowStatus.isLoading || openPullRequests.isLoading}
                   isRefreshing={branchFlowStatus.isRefreshing || openPullRequests.isRefreshing}
@@ -2348,6 +2397,7 @@ export function IssueDeckShell({
                     onSetRepositoryHidden={handleSetRepositoryHidden}
                     onSetRepositoriesHidden={handleSetRepositoriesHidden}
                     onSetRepositoryIssueCreationExcluded={handleSetRepositoryIssueCreationExcluded}
+                    onSetRepositoryBranchViewMode={handleSetRepositoryBranchViewMode}
                     onUpdated={handleAppSettingsUpdated}
                     onDraftReviewGateIssue={openReviewGateIssueDialog}
                     creatableRepositoryNames={creatableRepositoryNames}
@@ -2590,6 +2640,7 @@ export function IssueDeckShell({
                IssueやPRを選ぶとそれぞれのペインへ遷移する */
             <BranchFlowView
               flow={branchFlow}
+              branchViewModes={branchViewModes}
               fetchedAt={branchFlowStatus.fetchedAt}
               isLoading={branchFlowStatus.isLoading || openPullRequests.isLoading}
               /* 自動更新のぶんも回す（#1767）。ブランチ状況とPR一覧のどちらかが飛んでいれば回る */
@@ -2909,6 +2960,7 @@ export function IssueDeckShell({
           onSetRepositoryHidden={handleSetRepositoryHidden}
           onSetRepositoriesHidden={handleSetRepositoriesHidden}
           onSetRepositoryIssueCreationExcluded={handleSetRepositoryIssueCreationExcluded}
+                    onSetRepositoryBranchViewMode={handleSetRepositoryBranchViewMode}
           onUpdated={handleAppSettingsUpdated}
           onDraftReviewGateIssue={openReviewGateIssueDialog}
           creatableRepositoryNames={creatableRepositoryNames}

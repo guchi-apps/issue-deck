@@ -48,6 +48,9 @@ import {
   defaultVerifyConditions,
   isLegacyReverificationStopReason,
   isRcImportFailureReason,
+  isUnverifiedReviewStopReason,
+  UNVERIFIED_REVIEW_STOP_PREFIX,
+  LEGACY_UNREADABLE_REVIEW_STOP_PREFIX,
   isRebuildFailureReason,
   NOTHING_TO_ADD_REASON,
   RC_IMPORT_FAILURE_PREFIX,
@@ -78,6 +81,8 @@ import { rebuildReleaseCandidate } from "@/lib/release-rebuild-run";
 import { requestSelectiveRebuild } from "@/lib/release-rebuild-selection-run";
 import { releaseCallerSupportsSelection } from "@/lib/github/release-api";
 import { loadReleaseVerificationSummary } from "@/lib/release-verification-load";
+import { describeUnverifiedReview, reevaluationKeepsWaiting } from "@/lib/release-completion";
+import { reevaluateReleaseReviewIfReady } from "@/lib/dispatch/release-review-reevaluate";
 import { nonFixFindingIds, selectAutoFixIndexes } from "@/lib/release-review-decision";
 import { loadNonFixFindingIds } from "@/lib/release-review-decision-store";
 import { findingIdsOfSeriesItem, splitSeriesItemFile } from "@/lib/release-review-context";
@@ -1097,9 +1102,42 @@ async function continueAfterReverification(
     aiReview: summary.aiReview.decisions?.cleared
       ? { state: "passed", reason: null, summary: summary.aiReview.summary, findingCount: 0 }
       : { state: summary.aiReview.state, reason: summary.aiReview.reason, summary: summary.aiReview.summary, findingCount: summary.aiReview.findings.length },
+    aiReviewUnverified: summary.aiReview.decisions?.cleared
+      ? null
+      : describeUnverifiedReview({
+          state: summary.aiReview.state,
+          findingCount: summary.aiReview.findings.length,
+          stage: summary.aiReview.stage,
+          unverifiedScope: summary.aiReview.unverifiedScope ?? null,
+        }),
   });
   // 実行障害はコードの不具合と断定せず、Issue・PRを作らない。確認待ちにもしない（再実行は既存の機構が行う）
   if (followUp.action === "wait_rerun") return 0;
+  // 指摘0件の未確認範囲は、統合検証の結果で再評価できる間は止めず、既存の再評価へつなぐ（#5077）。重複は再評価側の印とジョブが止める
+  if (followUp.action === "reevaluate_review") {
+    const outcome = await reevaluateReleaseReviewIfReady({
+      repoFullName: row.repositoryFullName,
+      prNumber: row.successorPrNumber ?? successor.number,
+      baseSha: current.baseSha,
+      headSha: current.headSha,
+    }).catch((error: unknown) => {
+      console.error("[release-fix-series] 全体レビューの再評価を積めませんでした", row.id, error);
+      return { action: "skipped" as const, reason: "no_host" as const };
+    });
+    if (reevaluationKeepsWaiting(outcome)) return 0;
+    const unverified = describeUnverifiedReview({
+      state: summary.aiReview.state,
+      findingCount: 0,
+      stage: summary.aiReview.stage,
+      unverifiedScope: summary.aiReview.unverifiedScope ?? null,
+    });
+    return stopRows(
+      ctx,
+      [row.id],
+      "stopped",
+      `${UNVERIFIED_REVIEW_STOP_PREFIX}（指摘は0件）${unverified?.detail ? `：${unverified.detail}` : ""}。再評価を起動できませんでした。候補の画面から全体レビューの再評価・再実行を行ってください`,
+    );
+  }
   if (followUp.action === "human") return stopRows(ctx, [row.id], "stopped", followUp.reason);
 
   const section = followUp.sourceKind === "review_finding" ? summary.aiReview : summary.integration;
@@ -1189,6 +1227,12 @@ export async function runReleaseFixSweep(options: { hostName?: string | null } =
         { status: "stopped", successorPrNumber: { not: null }, stopReason: { contains: "修正の反復が上限（" } },
         // 新方式の候補への取り込みで止めた系列は、取り込みのrevisionが後から適用されたら再検証へ戻す（#4895）
         { status: "stopped", rebuildClaimedAt: { not: null }, stopReason: { startsWith: RC_IMPORT_FAILURE_PREFIX } },
+        // 指摘0件の未確認範囲で止めた系列は、再評価が進んで解消していれば戻す（#5077）
+        {
+          status: "stopped",
+          successorPrNumber: { not: null },
+          OR: [{ stopReason: { startsWith: UNVERIFIED_REVIEW_STOP_PREFIX } }, { stopReason: { startsWith: LEGACY_UNREADABLE_REVIEW_STOP_PREFIX } }],
+        },
       ],
     },
     orderBy: { createdAt: "asc" },
@@ -1205,7 +1249,8 @@ export async function runReleaseFixSweep(options: { hostName?: string | null } =
       (row.status === "stopped" &&
         (isLegacyReverificationStopReason(row.stopReason) ||
           isLegacyGenerationLimitStopReason(row.stopReason) ||
-          isRcImportFailureReason(row.stopReason)))
+          isRcImportFailureReason(row.stopReason) ||
+          isUnverifiedReviewStopReason(row.stopReason)))
     ) {
       successors.push(row);
       continue;

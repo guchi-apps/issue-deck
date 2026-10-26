@@ -76,6 +76,19 @@ describe("buildSessionInterruptedCommentBody", () => {
   it("reasonを省略するとAPIエラーの文言になる（#1971からの後方互換）", () => {
     expect(body).toContain("APIエラーで中断したまま止まっています");
   });
+
+  // PR詳細の「止まった原因」が文言に頼らず種別を読むためのマーカー（#5080）
+  it("原因の種別をマーカーとして残す", () => {
+    expect(body).toContain("<!-- issue-deck:stall-reason:api_error -->");
+    const blocked = buildSessionInterruptedCommentBody({
+      hostName: "subpc",
+      tmuxSessionName: "issue-deck-issue-2280",
+      detail: null,
+      remoteControlUrl: null,
+      reason: "classifier_blocked",
+    });
+    expect(blocked).toContain("<!-- supervisor:session-interrupted -->\n<!-- issue-deck:stall-reason:classifier_blocked -->");
+  });
 });
 
 /**

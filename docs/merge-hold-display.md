@@ -25,3 +25,13 @@
 - 依頼済みは、依頼コメントの印`<!-- issue-deck-chat-fix-request:<key> sha=<HEAD> -->`を`GET /api/pull-requests/detail`が`reviewResponse.currentFixRequest`として返して判定する（要修正・要確認のレビュー判定が付いたopenなPRでだけIssueコメントを1回読む）。HEADが進めば前の依頼は「現在の依頼」ではなくなり、新しいHEADのCI・再レビューの結果で判断する。
 - **紐づくIssueに`11.local`が付いていると、dispatchは`@claude`に反応しない。** 画面は依頼ボタンの代わりに理由と「Issueを開く」を出し、サーバー（`requestPullRequestFix`）も`local_session`で拒否する。**Issueがclosedのときも同じ**で、dispatchは`ISSUE_CLOSED`で黙って`skip`するため、`issue_closed`で拒否して「修正Issueを起案」を出す（計画レビューの指摘）。`issue-<番号>`以外のブランチは依頼先が無いため「修正Issueを起案」を出す。
 - 「修正せずにマージへ進む」は上の確認画面（`PullRequestMergeReviewGate`）を必ず通る。マージ確認・必須チェック・本人の判断は省略しない。
+
+## 自動マージが止まった直接原因（#5080）
+
+帯（`AutoMergeOutlookNotice`）は理由ラベルの固定文言しか出せず、`01.check-blocked`は「作業が止まっています」にしかならない。なぜ止まったかはIssueコメント（セッションの引き上げなど）にだけ残っていたため、PR詳細の帯の直下に「止まった原因」カード（`PullRequestStopCauseNotice`）を出す。
+
+- 対象は、帯が対応Issueの`00.check-user`を理由に挙げているPR（`shouldResolveStopCause`）。理由が`01.check-merge`のときは既存の「自動マージされなかった理由」（#4088）が理由コメントを出すので除く。`GET /api/pull-requests/detail`が対象PRでだけ対応Issueのtimelineを1回読み、`stopCause`として返す。
+- 原因の判定は純関数`resolveStopCause`（`src/lib/pull-request-stop-cause.ts`）。**最後の`00.check-user`付与の10分前から（前回の解除より後）にある、issue-deckが固定の形で書く記録だけ**を採る。対象は`supervisor:session-interrupted`（種別は`<!-- issue-deck:stall-reason:<reason> -->`、無い旧コメントは1行目の固定文言）・`session-failed`・`session-not-started`と、理由ラベルそのものが原因を表す`01.check-plan`／`input`／`answered`。見出しは停滞パネルと同じ`sessionStallTitle`から引く。
+- 自由文のエージェントコメントは読まない。記録が無い・違う原因が複数ある・取得できないときは「直接原因を確認できません」として、付与直前のコメント・Issue・判定ログへのリンクだけを出す。
+- timelineの最後の`00.check-user`操作が解除なら、DBのラベルキャッシュより新しい情報としてカードを出さない。画面側も、いまのsummaryで`shouldResolveStopCause`を満たさなくなった（ラベル解除・マージ）時点で出さない。
+- 直近の判定は、`MergeJudgement.autoMergeRun`（最後に完了した`auto-merge`ジョブのURL・完了時刻。同じGraphQLから読む）。ジョブログの本文は読まない。判定・マージの条件は変えない。

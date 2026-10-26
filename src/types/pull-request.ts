@@ -11,6 +11,7 @@ import type { PullRequestAutoRepairSummary } from "@/lib/github/pull-request-aut
 import type { PullRequestRepairRunSummary } from "@/lib/github/pull-request-repair-run";
 import type { PullRequestReviewVerdict } from "@/lib/github/pull-request-review-verdict";
 import type { PullRequestRole } from "@/lib/github/pull-request-role";
+import type { PullRequestStopCause } from "@/lib/pull-request-stop-cause";
 import type { CiState } from "@/lib/github/release-api";
 import type { ReleaseVerification } from "@/lib/github/release-verification";
 import type { UnmetRequiredCheck } from "@/lib/github/required-checks";
@@ -78,6 +79,54 @@ export type PullRequestReleaseChecks = {
   fix?: ReleaseCandidateFix | null;
   /** 公開承認済みで、mainへは自動でマージされる（#5064）。「人が押す番」にしない */
   publishApproved?: boolean;
+  /**
+   * 新方式の候補（`release-rc/<番号>`）の記録（#5076）。工程の表示（`resolveReleaseJourney`）の入力。
+   * 旧方式・候補の記録が無いPRはnull。読めなかったときは`unavailableParts`に`rc`が入る
+   */
+  rc?: ReleaseRcFacts | null;
+  /**
+   * 読めなかった補助の情報（#5076）。読めなかった項目が支える工程は、済み・まだに倒さず「取得不能」にする。
+   * 検証記録そのものが読めないときは従来どおり`unavailable`
+   */
+  unavailableParts?: ReleaseFactsPart[];
+};
+
+/** `releaseChecks`のうち、読めないことがある補助の情報（#5076） */
+export type ReleaseFactsPart = "reviewStage" | "fix" | "rc";
+
+/**
+ * 新方式のリリース候補1件の記録（#5076）。DBだけから作り、PR一覧・ブランチ画面が同じ値を読む。
+ * 状態の語は記録のまま（`phase`は`RcPhase`、承認の`progress`は`PublishProgressStage`）で、解釈は`release-journey.ts`が持つ
+ */
+export type ReleaseRcFacts = {
+  sequence: number;
+  phase: string;
+  /** 未完了の更新要求（作成・修正の取り込みなど）。無ければnull */
+  pendingRevision: { revision: number; reason: string } | null;
+  /** 最新の公開承認。無ければnull（承認の記録が無い候補） */
+  approval: {
+    status: string;
+    progress: string;
+    approvedAt: string;
+    revision: number;
+    /** 失効・取消の理由（利用者向けの文）。有効ならnull */
+    invalidMessage: string | null;
+    /** 自動公開の系列の状態。系列が無ければnull */
+    runStatus: string | null;
+    runActive: boolean;
+    /** mainへのマージ条件を待っている理由（系列が`merging`の間だけ） */
+    waitMessage: string | null;
+    waitStalled: boolean;
+    stopMessage: string | null;
+  } | null;
+  /** 最新の公開準備（正式バンプ・最終検証）。無ければnull */
+  finalization: { status: string; failureReason: string | null; updatedAt: string } | null;
+  /** 稼働確認が止まった理由の短い名前。止まっていなければnull */
+  productionStopLabel: string | null;
+  /** 直前に取り消された候補（作り直しの元）。この候補の進捗には数えない */
+  predecessor: { sequence: number; cancelReason: string | null } | null;
+  /** 記録の最終更新（ISO8601） */
+  updatedAt: string;
 };
 
 export type PullRequestSummary = {
@@ -216,6 +265,11 @@ export type PullRequestSummary = {
    * 同じ扱い。ブランチ画面の「再検証待ち」「停止（理由）」の材料。
    */
   autoRepair?: PullRequestAutoRepairSummary | null;
+  /**
+   * 本番公開後のdevelop同期PR（`release-sync/*`）への、巡回の直近の自動マージ判定（#5081）。`auto`は巡回が
+   * 自動でマージする（条件の成立待ちを含む）、`held`は人の対応が要る。判定がまだ無い・HEADが変わったときは無い
+   */
+  developSyncAutoMerge?: { status: "auto" | "held"; reason: string } | null;
   /**
    * 現在のHEADに対する、エージェント別（Codex等）のAIレビュー（`PR_REVIEW`ジョブ。#4024）。
    * ジョブが無ければ無い。**一覧だけが載せる**ので省略可能。Claudeのレビューは`reviewVerdict`・
@@ -475,6 +529,11 @@ export type PullRequestDetail = {
    * Issueに紐づくopenなPRでだけ入る。それ以外・古い応答では省略またはnull。
    */
   reviewResponse?: PullRequestReviewResponseContext | null;
+  /**
+   * 対応Issueの`00.check-user`で自動マージが止まっているときの直接原因（#5080）。理由が`merge`以外の
+   * 確認待ちで止まっているopenなPRでだけ入り、それ以外・古い応答では省略またはnull。
+   */
+  stopCause?: PullRequestStopCause | null;
 };
 
 export type PullRequestReviewResponseContext = {

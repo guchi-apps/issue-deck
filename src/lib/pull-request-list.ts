@@ -4,6 +4,7 @@ import type {
   MergeJudgement,
   MergeJudgementStep,
 } from "@/lib/github/check-rollup";
+import { isReleaseJourneyNeedingUser, resolvePullRequestJourney } from "@/lib/release-journey";
 import {
   needsReviewAttention,
   type PullRequestReviewVerdict,
@@ -382,7 +383,14 @@ export function canMergeFromDeck(pullRequest: PullRequestSummary): boolean {
 export function requiresUserMerge(pullRequest: PullRequestSummary): boolean {
   if (pullRequest.state !== "open" || pullRequest.merged || pullRequest.draft) return false;
   if (pullRequest.autoMergeEnabled) return false;
-  if (pullRequest.kind === "release") return true;
+  if (pullRequest.kind === "release") {
+    // 新方式の候補は、工程の担当が人のときだけ（#5076。公開承認待ち・失効・停止は数え、承認後の自動公開・検証中は数えない）。
+    // ブランチ画面・件数APIと同じ判定。旧方式は従来どおり人がmainへマージする
+    const journey = resolvePullRequestJourney(pullRequest);
+    return journey ? isReleaseJourneyNeedingUser(journey) : true;
+  }
+  // 本番公開後のdevelop同期PRは巡回が自動でマージする。止まって人の対応が要るときだけ数える（#5081）
+  if (pullRequest.developSyncAutoMerge?.status === "held") return true;
   if (pullRequest.kind !== "issue") return false;
   if (pullRequest.linkedIssueCheckReason !== null) {
     return pullRequest.linkedIssueCheckReason === "merge";
