@@ -123,7 +123,11 @@ export function decideReservationRelease(input: {
 // ---------------------------------------------------------------------------
 // 差分の分類と、検証の引継ぎ
 
-export type ChangedFileCategory = "version" | "changelog" | "ios_version" | "dependency" | "other";
+/**
+ * `asset_version`は、パスでは決まらない。差分が「アセット参照URLの`?v=`が予約済みの正式版へ変わっただけ」と
+ * patchで確かめたファイルにだけ付ける（#5101）。`categorizeChangedFile`は返さない
+ */
+export type ChangedFileCategory = "version" | "changelog" | "ios_version" | "asset_version" | "dependency" | "other";
 
 export type FinalizePathRules = {
   /** `version-file`（既定package.json）。その階層のロックファイルも版の書き換えとして扱う */
@@ -170,6 +174,34 @@ export function isIosVersionLinesOnlyPatch(patch: string | null | undefined, exp
   });
 }
 
+const CACHE_QUERY = /\?v=(\d+\.\d+\.\d+)(?![\w.])/g;
+
+/**
+ * patchが、アセット参照URLのキャッシュ用クエリ`?v=<旧版>`→`?v=<予約済みの正式版>`の書き換えだけか（#5101）。
+ * 削除行と追加行が同数で対になり、`?v=x.y.z`を同じ印に置き換えた残りが完全に一致し、削除側は予約版以外、
+ * 追加側は全て予約版のときだけtrue。patchが無い（巨大差分）・追加/削除だけ・他の変更を含む場合はfalse
+ */
+export function isCacheQueryOnlyPatch(patch: string | null | undefined, expectedVersion: string): boolean {
+  if (!patch) return false;
+  const removed: string[] = [];
+  const added: string[] = [];
+  for (const line of patch.split("\n")) {
+    if (line.startsWith("@@") || line.startsWith("\\") || line === "") continue;
+    const sign = line[0];
+    if (sign !== "+" && sign !== "-") continue;
+    (sign === "-" ? removed : added).push(line.slice(1));
+  }
+  if (removed.length === 0 || removed.length !== added.length) return false;
+  return removed.every((before, i) => {
+    const after = added[i];
+    const olds = [...before.matchAll(CACHE_QUERY)].map((m) => m[1]);
+    const news = [...after.matchAll(CACHE_QUERY)].map((m) => m[1]);
+    if (olds.length === 0 || olds.length !== news.length) return false;
+    if (olds.some((v) => v === expectedVersion) || news.some((v) => v !== expectedVersion)) return false;
+    return before.replace(CACHE_QUERY, "?v=#") === after.replace(CACHE_QUERY, "?v=#");
+  });
+}
+
 export type BumpDiffSummary = {
   /** `versionLinesOnly`: `ios_version`のファイルで、差分が版番号の行の書き換えだけ（公開承認の範囲内。#4753） */
   files: { path: string; category: ChangedFileCategory; versionLinesOnly?: boolean }[];
@@ -179,9 +211,15 @@ export type BumpDiffSummary = {
   touchesBeyondVersion: boolean;
 };
 
-export function summarizeBumpDiff(paths: readonly string[], rules: FinalizePathRules, versionLinesOnlyPaths: ReadonlySet<string> = new Set()): BumpDiffSummary {
+export function summarizeBumpDiff(
+  paths: readonly string[],
+  rules: FinalizePathRules,
+  versionLinesOnlyPaths: ReadonlySet<string> = new Set(),
+  cacheQueryOnlyPaths: ReadonlySet<string> = new Set(),
+): BumpDiffSummary {
   const files = [...new Set(paths)].sort().map((path) => {
     const category = categorizeChangedFile(path, rules);
+    if (category === "other" && cacheQueryOnlyPaths.has(path)) return { path, category: "asset_version" as const };
     return category === "ios_version" && versionLinesOnlyPaths.has(path) ? { path, category, versionLinesOnly: true } : { path, category };
   });
   return {
@@ -445,7 +483,10 @@ export function decideFinalizeReport(input: {
   const versionLinesOnly = new Set(
     observation.changedFiles.filter((path) => categorizeChangedFile(path, input.rules) === "ios_version" && isIosVersionLinesOnlyPatch(observation.patches?.[path], input.expectedVersion!)),
   );
-  const diff = summarizeBumpDiff(observation.changedFiles, input.rules, versionLinesOnly);
+  const cacheQueryOnly = new Set(
+    observation.changedFiles.filter((path) => categorizeChangedFile(path, input.rules) === "other" && isCacheQueryOnlyPatch(observation.patches?.[path], input.expectedVersion!)),
+  );
+  const diff = summarizeBumpDiff(observation.changedFiles, input.rules, versionLinesOnly, cacheQueryOnly);
   const bumped = isBumpedToReservation({ headVersion: observation.headVersion, mainVersion: observation.mainVersion, reservedVersion: input.expectedVersion });
   // 候補の元のdevelopが既に正式版へ上がっていた場合（自動判定の結果と一致）は、版ファイルが変わらなくてよい（#4798）。
   // リリースノートなど版以外だけが変わったコミットでも、headの版がmainより新しく予約どおりなら確定する
