@@ -9,6 +9,7 @@ import {
   FilePlus2,
   Loader2,
   Clock,
+  Link2,
   MoreHorizontal,
   Pencil,
   Play,
@@ -31,6 +32,7 @@ import {
   IssueSubIssuesSection,
 } from "@/components/dashboard/issue-detail-layout";
 import { resolveIssueDetailAttentionFromState } from "@/lib/issue-attention-state";
+import { buildDashboardUrl } from "@/lib/share-card";
 import { IssueAttentionLine } from "@/components/dashboard/issue-attention-line";
 import { IssueStatusCard } from "@/components/dashboard/issue-status-card";
 import { isPlanReviewPending, resolvePendingPlanReview } from "@/lib/github/plan-review";
@@ -307,6 +309,7 @@ export function MobileIssueDetail({
   // 保留を選んだ時点で操作メニューも閉じる（#2458）。「いまは実施しない」はメニューを
   // 開いたまま選択肢を出すため、開閉をここで持たないと選び終えても開きっぱなしになる
   const [isMoreMenuOpen, setIsMoreMenuOpen] = useState(false);
+  const [isLinkCopied, setIsLinkCopied] = useState(false);
   const canMove = moveDestinationRepositories(repositories, issue.repositoryFullName).length > 0;
   // 「いまは実施しない」（#2398）。判定はPCの詳細・一覧と同じ`findActiveIssueSnooze`
   const snoozeTarget: SnoozeTarget | null = snoozes
@@ -838,6 +841,27 @@ export function MobileIssueDetail({
             >
               <FilePlus2 className="size-3.5" />
               引き継いでIssueを作成
+            </DropdownMenuItem>
+            {/* PC側と同じ項目（#5091・#5097）。スマホは別コンポーネントのため#5092では抜けていた。
+                コピー結果を見せるためメニューは閉じない */}
+            <DropdownMenuItem
+              className="whitespace-nowrap text-xs"
+              onSelect={async (event) => {
+                event.preventDefault();
+                try {
+                  await navigator.clipboard.writeText(
+                    buildDashboardUrl(window.location.origin, "issue", String(issue.id)),
+                  );
+                } catch {
+                  // コピーできていないのに成功表示を出さない
+                  return;
+                }
+                setIsLinkCopied(true);
+                window.setTimeout(() => setIsLinkCopied(false), 1500);
+              }}
+            >
+              <Link2 className="size-3.5" />
+              {isLinkCopied ? "コピーしました" : "リンクをコピー"}
             </DropdownMenuItem>
             <DropdownMenuItem className="whitespace-nowrap text-xs" onSelect={() => onEdit(issue)}>
               <Pencil className="size-3.5" />
