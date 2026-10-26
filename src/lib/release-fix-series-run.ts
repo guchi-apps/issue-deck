@@ -83,7 +83,7 @@ import { releaseCallerSupportsSelection } from "@/lib/github/release-api";
 import { loadReleaseVerificationSummary } from "@/lib/release-verification-load";
 import { describeUnverifiedReview, reevaluationKeepsWaiting } from "@/lib/release-completion";
 import { reevaluateReleaseReviewIfReady } from "@/lib/dispatch/release-review-reevaluate";
-import { nonFixFindingIds, selectAutoFixIndexes } from "@/lib/release-review-decision";
+import { fixNowFindingIds, nonFixFindingIds, selectAutoFixIndexes } from "@/lib/release-review-decision";
 import { loadNonFixFindingIds } from "@/lib/release-review-decision-store";
 import { findingIdsOfSeriesItem, splitSeriesItemFile } from "@/lib/release-review-context";
 import type { ReleaseVerificationSection } from "@/lib/release-verification-summary";
@@ -266,8 +266,16 @@ function itemsFromSection(input: CreateReleaseFixInput): { items: ReleaseFixDraf
   if (input.sourceKind === "review_finding") {
     // ユーザーが修正しないと判断した指摘（公開後対応・見送り・不採用。#4657）は、選ばれても起案しない
     const nonFix = nonFixFindingIds(input.section.decisions ?? null);
+    // 添字が指摘の件数以上なら改善提案を指す。提案は「今回直す」の判断が有効なものだけ起案できる（#5102。
+    // 提案を止める指摘へ変換せず、判断が無い・古い提案は選ばれても起案しない）
+    const fixNow = fixNowFindingIds(input.section.decisions ?? null);
+    const findingCount = input.section.findings.length;
     const chosen = [...new Set(input.findingIndexes)]
-      .map((index) => input.section.findings[index])
+      .flatMap((index) => {
+        if (index < findingCount) return [input.section.findings[index]];
+        const suggestion = input.section.suggestions[index - findingCount];
+        return suggestion?.id && fixNow.has(suggestion.id) ? [suggestion] : [];
+      })
       .filter((finding) => finding !== undefined && !(finding.id && nonFix.has(finding.id)));
     if (chosen.length === 0) return null;
     return { items: chosen.map(itemFromFinding), keys: chosen.map(reviewFindingKey) };

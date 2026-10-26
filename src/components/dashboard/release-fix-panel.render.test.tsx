@@ -2,7 +2,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { ReleaseFixInternalReview, ReleaseFixOverviewPanel, ReleaseFixStartButton } from "@/components/dashboard/release-fix-panel";
+import { ReleaseFixCreate, ReleaseFixInternalReview, ReleaseFixOverviewPanel, ReleaseFixStartButton } from "@/components/dashboard/release-fix-panel";
 import { ReleaseFixStartContext } from "@/components/dashboard/release-fix-start-context";
 import type { ReleaseVerificationSummary } from "@/lib/release-verification-summary";
 
@@ -234,5 +234,47 @@ describe("ReleaseFixInternalReview（#4410）", () => {
   it("内部確認を求めない系列には何も出さない", () => {
     const { container } = render(<ReleaseFixInternalReview current={{ ...seriesRow, internal: null, continuedFromParent: false } as never} />);
     expect(container.textContent).toBe("");
+  });
+});
+
+describe("ReleaseFixCreate: 改善提案から起案（#5102）", () => {
+  const sha = { baseSha: "a".repeat(40), headSha: "b".repeat(40) };
+  const suggestion = (id: string, title: string) => ({ id, title, severity: "low" }) as never;
+
+  it("指摘0件・提案1件（今回直す）でも起案でき、提案の添字（指摘件数以降）を送る", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ outcome: "created", series: seriesRow }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    render(
+      <ReleaseFixCreate
+        repositoryFullName="o/r"
+        pullRequestNumber={719}
+        target={sha}
+        sourceKind="review_finding"
+        findings={[suggestion("R-1", "バックアップ設定が未確認")]}
+        excludedFindingIds={[]}
+        suggestionsFrom={0}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /修正Issueを作成/ }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    const body = JSON.parse((fetchMock.mock.calls[0] as unknown as [string, { body: string }])[1].body);
+    expect(body).toMatchObject({ sourceKind: "review_finding", findingIndexes: [0] });
+  });
+
+  it("「今回直す」でない提案は一覧に出さず、既定でも選ばない", () => {
+    render(
+      <ReleaseFixCreate
+        repositoryFullName="o/r"
+        pullRequestNumber={719}
+        target={sha}
+        sourceKind="review_finding"
+        findings={[suggestion("R-1", "直す提案"), suggestion("R-2", "判断前の提案")]}
+        excludedFindingIds={["R-2"]}
+        suggestionsFrom={0}
+      />,
+    );
+    expect(screen.getByText(/直す提案/)).toBeTruthy();
+    expect(screen.queryByText(/判断前の提案/)).toBeNull();
+    expect(screen.getAllByRole("checkbox")[0]).toHaveProperty("checked", true);
   });
 });

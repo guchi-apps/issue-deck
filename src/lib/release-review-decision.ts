@@ -280,7 +280,18 @@ export function nonFixFindingIds(decisions: ReleaseReviewDecisionSummary | null)
   return ids;
 }
 
-export type DecisionInputError = { field: string; message: string };
+/** 指摘IDのうち、有効な「今回直す」の判断が付いているもの（改善提案を修正Issueの起案対象にする条件。#5102） */
+export function fixNowFindingIds(decisions: ReleaseReviewDecisionSummary | null): Set<string> {
+  const ids = new Set<string>();
+  for (const view of Object.values(decisions?.byFinding ?? {})) {
+    if (!view.current || view.stale || view.current.decision !== "fix_now") continue;
+    ids.add(view.findingId);
+    for (const alias of view.aliasIds ?? []) ids.add(alias);
+  }
+  return ids;
+}
+
+export type DecisionInputError ={ field: string; message: string };
 
 /** 保存前の入力検証。種別ごとに必須の項目がある（理由はすべての判断で必須） */
 export function validateDecisionInput(input: {
