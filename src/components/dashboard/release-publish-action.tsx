@@ -38,6 +38,7 @@ export function ReleasePublishAction({
   onMerged,
   variant = "default",
   hideVerifyHint = false,
+  label = "本番公開へ進む",
   className,
 }: {
   pullRequest: PullRequestSummary;
@@ -50,11 +51,13 @@ export function ReleasePublishAction({
    * 同じ状況を示すので、重ねて書かない
    */
   hideVerifyHint?: boolean;
+  /** ボタンの文言。新方式の候補で「その他の操作」へ下げるときは、承認を経ないことを文言で示す（#5076） */
+  label?: string;
   className?: string;
 }) {
   if (decision === undefined) {
     return canMergeFromDeck(pullRequest) ? (
-      <PullRequestMergeButton pullRequest={pullRequest} onMerged={onMerged} variant={variant} label="本番公開へ進む" className={className} />
+      <PullRequestMergeButton pullRequest={pullRequest} onMerged={onMerged} variant={variant} label={label} className={className} />
     ) : null;
   }
   if (decision === null) {
@@ -73,6 +76,6 @@ export function ReleasePublishAction({
     );
   }
   return canMergeFromDeck(pullRequest) ? (
-    <PullRequestMergeButton pullRequest={pullRequest} onMerged={onMerged} variant={variant} label="本番公開へ進む" className={className} />
+    <PullRequestMergeButton pullRequest={pullRequest} onMerged={onMerged} variant={variant} label={label} className={className} />
   ) : null;
 }

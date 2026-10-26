@@ -174,7 +174,8 @@ function buildReleaseNotifications(
           group: "release",
           tone: badge.tone === "error" ? "error" : "action",
           title,
-          badgeLabel: badge.label,
+          // 新方式の候補は工程の見出し（「公開承認待ち」など。#5076）を出し、「mainへマージ待ち」と言わない
+          badgeLabel: pendingMerge?.actionLabel ?? badge.label,
           repositoryFullName: releaseStatus.repoFullName,
           since: null,
           // マージ待ちはPR詳細（マージボタンとCI状態がある）へ、PRを伴わない実行の失敗は

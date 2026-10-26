@@ -1,6 +1,7 @@
 import { db } from "@/lib/db";
 import { loadPublishApprovedPullRequests } from "@/lib/release-publish-approval-run";
 import { loadReleaseCandidateFixes } from "@/lib/release-candidate-fix";
+import { loadReleaseRcFacts } from "@/lib/release-journey-facts";
 import { describeIntegrationSetupGap, getReleaseVerificationConfig } from "@/lib/release-verification-config";
 import { parseInheritanceEvidence } from "@/lib/release-finalize";
 import { loadInheritedRecords } from "@/lib/release-verification";
@@ -14,7 +15,7 @@ import {
   viewReleaseVerifications,
   type ReleaseVerificationView,
 } from "@/lib/release-merge-gate";
-import type { PullRequestReleaseCheckState, PullRequestReleaseChecks } from "@/types/pull-request";
+import type { PullRequestReleaseCheckState, PullRequestReleaseChecks, ReleaseFactsPart, ReleaseRcFacts } from "@/types/pull-request";
 
 /**
  * PR一覧のリリースPRに出す、統合検証・全体レビューの状態（#4349）。
@@ -59,12 +60,13 @@ export function releaseChecksKey(repositoryFullName: string, number: number): st
   return `${repositoryFullName}#${number}`;
 }
 
-function stageOrUndefined(compute: () => ReleaseVerificationSummary): ReleaseVerificationSummary | undefined {
+/** 全体レビューの段階を出す。出せなければ`failed`（読めなかったことを工程の表示へ伝える。#5076） */
+function stageOrFailed(compute: () => ReleaseVerificationSummary): { summary: ReleaseVerificationSummary | undefined; failed: boolean } {
   try {
-    return compute();
+    return { summary: compute(), failed: false };
   } catch (error) {
     console.error("[fetchReleaseChecks] 全体レビューの段階を出せませんでした:", error);
-    return undefined;
+    return { summary: undefined, failed: true };
   }
 }
 
@@ -131,7 +133,9 @@ export async function fetchReleaseChecks(
   if (releases.length === 0) return result;
   try {
     const where = { OR: releases.map((t) => ({ repoFullName: t.repositoryFullName, prNumber: t.number })) };
-    const [rows, runningJobs, activeJobs, finalizations, fixes] = await Promise.all([
+    let fixFailed = false;
+    let rcFailed = false;
+    const [rows, runningJobs, activeJobs, finalizations, fixes, rcFacts] = await Promise.all([
       db.releaseVerification.findMany({ where, orderBy: { updatedAt: "desc" } }),
       db.dispatchJob.findMany({
         where: {
@@ -159,9 +163,17 @@ export async function fetchReleaseChecks(
         select: { repositoryFullName: true, prNumber: true, status: true, finalHeadSha: true, handoffEvidence: true, updatedAt: true },
       }),
       // 修正系列の進み具合（#4972）。補助の情報なので、読めなくても検証の状態は返す
+      // 読めなかったら「修正なし」と取り違えないよう印を残す（#5076）
       loadReleaseCandidateFixes(releases).catch((error) => {
         console.error("[fetchReleaseChecks] 修正系列を読めませんでした:", error);
+        fixFailed = true;
         return new Map<string, import("@/lib/release-fix-series").ReleaseCandidateFix>();
+      }),
+      // 新方式の候補の記録（#5076）。工程の表示の入力。読めなければ承認以降の工程を「取得不能」にする
+      loadReleaseRcFacts(releases).catch((error) => {
+        console.error("[fetchReleaseChecks] リリース候補の記録を読めませんでした:", error);
+        rcFailed = true;
+        return new Map<string, ReleaseRcFacts>();
       }),
     ]);
     const approvedByRepo = new Map<string, Set<number>>();
@@ -202,7 +214,7 @@ export async function fetchReleaseChecks(
         );
       // 全体レビューの段階（#4664）。リリース画面の要約と同じ関数で出し、一覧と詳細で食い違わせない。
       // 補助の情報なので、出せなくても検証の状態そのもの（取得不能にはしない）は返す
-      const reviewSummary = stageOrUndefined(() => {
+      const { summary: reviewSummary, failed: stageFailed } = stageOrFailed(() => {
         const detailRows = rows.flatMap((row) => {
           const kind = parseReleaseVerificationKind(row.kind);
           const state = parseReleaseVerificationState(row.state);
@@ -220,11 +232,19 @@ export async function fetchReleaseChecks(
           ? (await attachReleaseReviewDecisions(target.repositoryFullName, target.number, current, reviewSummary)).aiReview
               .stage
           : reviewSummary?.aiReview.stage;
-      result.set(releaseChecksKey(target.repositoryFullName, target.number), {
+      const key = releaseChecksKey(target.repositoryFullName, target.number);
+      const unavailableParts: ReleaseFactsPart[] = [
+        ...(stageFailed ? (["reviewStage"] as const) : []),
+        ...(fixFailed ? (["fix"] as const) : []),
+        ...(rcFailed ? (["rc"] as const) : []),
+      ];
+      result.set(key, {
         ...summarizeReleaseChecks(current, records),
+        rc: rcFacts.get(key) ?? null,
+        ...(unavailableParts.length > 0 ? { unavailableParts } : {}),
         aiReviewStage,
         publishApproved: approvedByRepo.get(target.repositoryFullName)?.has(target.number) === true,
-        fix: fixes.get(releaseChecksKey(target.repositoryFullName, target.number)) ?? null,
+        fix: fixes.get(key) ?? null,
         enforced: getReleaseVerificationConfig(target.repositoryFullName).enforced,
         started: {
           aiReview: jobs.some((job) => job.kind === "RELEASE_REVIEW") || recordedRunning("ai_review"),

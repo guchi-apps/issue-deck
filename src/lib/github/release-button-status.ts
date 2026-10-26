@@ -41,6 +41,11 @@ export type PendingMergePullRequestState = {
   verification?: ReleaseVerificationBlock | null;
   /** 公開承認済みで、mainへは自動でマージされる（#5064）。人が押す番ではない */
   publishApproved?: boolean;
+  /**
+   * 新方式の候補で、工程（#5076。`resolveReleaseJourney`）から見て人の番か。渡されたらCI・承認の個別判定より
+   * これを使う（公開承認待ち・承認の失効・自動公開の停止を人の番、承認後の自動公開を待てば進むとして数える）
+   */
+  journeyNeedsUser?: boolean;
 };
 
 /**
@@ -135,6 +140,8 @@ export function isWaitingUserMerge(pullRequest: PendingMergePullRequestState | n
   if (pullRequest === null) return false;
   // 統合検証・全体レビューが進行中・問題ありのあいだは「人が押す番」と言わない（#4390）
   if (pullRequest.verification) return false;
+  // 新方式の候補は工程の担当で決める（#5076。画面の工程・件数と同じ判定）
+  if (pullRequest.journeyNeedsUser !== undefined) return pullRequest.journeyNeedsUser;
   // 公開承認済みの候補は、条件が揃えばシステムがmainへマージする（#5064）
   if (pullRequest.publishApproved) return false;
   return pullRequest.ciState !== "pending" && !pullRequest.mergeJudgementPending;

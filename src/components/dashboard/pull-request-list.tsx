@@ -13,6 +13,7 @@ import {
 } from "@/components/dashboard/pull-request-badges";
 import { PullRequestMergeHoldNotice } from "@/components/dashboard/pull-request-merge-hold";
 import { PullRequestChecksStrip } from "@/components/dashboard/pull-request-checks-strip";
+import { ReleaseJourneyInline } from "@/components/dashboard/release-journey";
 import { PullToRefreshIndicator } from "@/components/dashboard/pull-to-refresh-indicator";
 import { UserAvatar } from "@/components/dashboard/user-avatar";
 import { usePullToRefresh } from "@/hooks/use-pull-to-refresh";
@@ -22,6 +23,7 @@ import { formatRelativeDate } from "@/lib/format-relative-date";
 import { groupPullRequestsByRepository } from "@/lib/pull-request-list";
 import { derivePrimaryState, type PrimaryStateTone } from "@/lib/pull-request-primary-state";
 import { getPullRequestView } from "@/lib/pull-request-views";
+import { resolvePullRequestJourney } from "@/lib/release-journey";
 import { getRepoColor } from "@/lib/repo-color";
 import { cn } from "@/lib/utils";
 import type { PullRequestSummary, PullRequestViewId } from "@/types/pull-request";
@@ -97,6 +99,8 @@ function PullRequestCard({
 }) {
   const kindLabel = pullRequestKindLabel(pullRequest.kind);
   const primary = derivePrimaryState(pullRequest);
+  // 新方式のリリース候補は、ブランチ画面と同じ工程のバーを出す（#5076）
+  const journey = pullRequest.state === "open" ? resolvePullRequestJourney(pullRequest) : null;
 
   return (
     <li
@@ -140,7 +144,8 @@ function PullRequestCard({
         <RepairRunBadge run={pullRequest.repairRun} compact />
         <span className="min-w-0 flex-1 basis-40 text-xs text-muted-foreground">{primary.reason}</span>
       </div>
-      <PullRequestMergeHoldNotice pullRequest={pullRequest} />
+      {/* 新方式のリリース候補は工程が「誰が何を待っているか」を出すので、「人がマージします」の保留表示は重ねない */}
+      {journey ? <ReleaseJourneyInline journey={journey} /> : <PullRequestMergeHoldNotice pullRequest={pullRequest} />}
 
       {/* PR詳細・ブランチ画面と同じ6チェック（#4366）。一覧では2グループに分け、候補の版・PR番号を見出しに添える */}
       <PullRequestChecksStrip
