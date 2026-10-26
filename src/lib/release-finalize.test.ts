@@ -19,6 +19,7 @@ import {
   parseFinalizeCallerSupport,
   readVersionFromText,
   isIosVersionLinesOnlyPatch,
+  isCacheQueryOnlyPatch,
   summarizeBumpDiff,
 } from "@/lib/release-finalize";
 
@@ -438,5 +439,41 @@ describe("isIosVersionLinesOnlyPatch", () => {
     const diff = summarizeBumpDiff(["package.json", "ios/A.xcodeproj/project.pbxproj", "ios/Info.plist"], RULES, new Set(["ios/A.xcodeproj/project.pbxproj"]));
     expect(diff.files.find((f) => f.path.endsWith("project.pbxproj"))?.versionLinesOnly).toBe(true);
     expect(diff.files.find((f) => f.path.endsWith("Info.plist"))?.versionLinesOnly).toBeUndefined();
+  });
+});
+
+describe("isCacheQueryOnlyPatch（#5101）", () => {
+  const tag = (v: string) => `<script src="app.js?v=${v}"></script>`;
+  const patch = (...lines: string[]) => ["@@ -1,3 +1,3 @@", " <html>", ...lines].join("\n");
+
+  it("?v=が旧版から予約済みの正式版へ変わっただけなら真", () => {
+    expect(isCacheQueryOnlyPatch(patch(`-${tag("3.2.5")}`, `+${tag("3.2.6")}`), "3.2.6")).toBe(true);
+  });
+  it("1行に複数の?v=があっても全て予約版なら真", () => {
+    expect(isCacheQueryOnlyPatch(patch('-<a href="a.css?v=3.2.5"><b src="b.js?v=3.2.5">', '+<a href="a.css?v=3.2.6"><b src="b.js?v=3.2.6">'), "3.2.6")).toBe(true);
+  });
+  it("別の版への変更は偽", () => {
+    expect(isCacheQueryOnlyPatch(patch(`-${tag("3.2.5")}`, `+${tag("3.2.7")}`), "3.2.6")).toBe(false);
+  });
+  it("?v=以外も変わっていれば偽", () => {
+    expect(isCacheQueryOnlyPatch(patch(`-${tag("3.2.5")}`, `+${tag("3.2.6").replace("app.js", "evil.js")}`), "3.2.6")).toBe(false);
+  });
+  it("行の追加だけ・削除だけは偽", () => {
+    expect(isCacheQueryOnlyPatch(patch(`+${tag("3.2.6")}`), "3.2.6")).toBe(false);
+    expect(isCacheQueryOnlyPatch(patch(`-${tag("3.2.5")}`), "3.2.6")).toBe(false);
+  });
+  it("?v=を含まない行の書き換えやpatchなしは偽", () => {
+    expect(isCacheQueryOnlyPatch(patch("-const a = 1;", "+const a = 2;"), "3.2.6")).toBe(false);
+    expect(isCacheQueryOnlyPatch(undefined, "3.2.6")).toBe(false);
+  });
+  it("旧版が既に予約版と同じ行（実体が変わらない）は偽", () => {
+    expect(isCacheQueryOnlyPatch(patch(`-${tag("3.2.6")}`, `+${tag("3.2.6")}`), "3.2.6")).toBe(false);
+  });
+  it("summarizeBumpDiffは確かめたotherのファイルにだけasset_versionを付け、検証の引継ぎは再実行のまま", () => {
+    const diff = summarizeBumpDiff(["package.json", "frontend/index.html", "frontend/app.js"], RULES, new Set(), new Set(["frontend/index.html"]));
+    expect(diff.files.find((f) => f.path === "frontend/index.html")?.category).toBe("asset_version");
+    expect(diff.files.find((f) => f.path === "frontend/app.js")?.category).toBe("other");
+    const d = decideInheritedVerification({ kind: "integration", before: { state: "passed", baseSha: BASE, headSha: PRE }, currentBaseSha: BASE, diff });
+    expect(d.action).toBe("rerun");
   });
 });

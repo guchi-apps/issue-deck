@@ -73,6 +73,8 @@ export function filesBeyondApproval(files: readonly { path: string; category: st
     .filter((f) => !(PUBLISH_APPROVAL_ALLOWED_CATEGORIES as readonly string[]).includes(f.category))
     // iOS設定は、差分が版番号の行の書き換えだけと確かめたものに限り範囲内（#4753）。分類だけでは許可しない
     .filter((f) => !(f.category === "ios_version" && f.versionLinesOnly === true))
+    // アセット参照の`?v=`だけを予約済みの正式版へ変えたと確かめたもの（`asset_version`）も範囲内（#5101）。パスだけでは許可しない
+    .filter((f) => f.category !== "asset_version")
     .map((f) => f.path);
 }
 
