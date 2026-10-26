@@ -265,6 +265,11 @@ export type PullRequestSummary = {
    */
   autoRepair?: PullRequestAutoRepairSummary | null;
   /**
+   * 本番公開後のdevelop同期PR（`release-sync/*`）への、巡回の直近の自動マージ判定（#5081）。`auto`は巡回が
+   * 自動でマージする（条件の成立待ちを含む）、`held`は人の対応が要る。判定がまだ無い・HEADが変わったときは無い
+   */
+  developSyncAutoMerge?: { status: "auto" | "held"; reason: string } | null;
+  /**
    * 現在のHEADに対する、エージェント別（Codex等）のAIレビュー（`PR_REVIEW`ジョブ。#4024）。
    * ジョブが無ければ無い。**一覧だけが載せる**ので省略可能。Claudeのレビューは`reviewVerdict`・
    * `mergeJudgement`から読むためここには入らない。

@@ -209,6 +209,10 @@ export function derivePrimaryState(pullRequest: PullRequestSummary): PrimaryStat
   if (outlook?.kind === "manual") {
     return state("mergeable", "手動マージ待ち", "warn", `自動マージされません: ${outlook.reason}`, { needsAction: true });
   }
+  // 巡回が自動でマージするdevelop同期PR（#5081）は、人のマージ待ちに見せない
+  if (outlook?.kind === "expected" && pullRequest.developSyncAutoMerge) {
+    return state("mergeable", "自動マージ待ち", "ok", outlook.reason);
+  }
   return state(
     "mergeable",
     "マージ可能",

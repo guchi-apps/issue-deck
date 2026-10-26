@@ -29,6 +29,8 @@ import { fetchUnmetRequiredChecks } from "@/lib/github/required-checks";
 import { checkUserIssueKey, fetchCheckUserIssueReasons } from "@/lib/pull-request-check-user";
 import { resolveMergeCheckReasons, type MergeCheckReasons } from "@/lib/merge-check-reasons";
 import { extractLinkedIssueNumber, requiresUserMerge } from "@/lib/pull-request-list";
+import { DEVELOP_SYNC_BRANCH_PREFIX } from "@/lib/release-develop-sync";
+import { developSyncAutoMergeOutlook } from "@/lib/release-develop-sync-run";
 import type { PullRequestDetail, PullRequestReviewResponseContext } from "@/types/pull-request";
 
 export function GET(request: NextRequest) {
@@ -163,6 +165,10 @@ async function handleGET(request: NextRequest) {
         },
       );
     summary.iosPrecheck = iosPrecheck;
+    // 本番公開後のdevelop同期PRへの巡回の自動マージ判定（#5081）
+    if (summary.state === "open" && summary.baseRef === "develop" && summary.headRef.startsWith(DEVELOP_SYNC_BRANCH_PREFIX)) {
+      summary.developSyncAutoMerge = developSyncAutoMergeOutlook(repository.fullName, number, summary.headSha);
+    }
 
     // ユーザーのマージが必要な理由（#4088）。必要なPRでだけ、対応Issueのコメントを1回読む。
     let userMergeReasons: MergeCheckReasons | null = null;

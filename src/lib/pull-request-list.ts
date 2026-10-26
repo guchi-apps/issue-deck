@@ -389,6 +389,8 @@ export function requiresUserMerge(pullRequest: PullRequestSummary): boolean {
     const journey = resolvePullRequestJourney(pullRequest);
     return journey ? isReleaseJourneyNeedingUser(journey) : true;
   }
+  // 本番公開後のdevelop同期PRは巡回が自動でマージする。止まって人の対応が要るときだけ数える（#5081）
+  if (pullRequest.developSyncAutoMerge?.status === "held") return true;
   if (pullRequest.kind !== "issue") return false;
   if (pullRequest.linkedIssueCheckReason !== null) {
     return pullRequest.linkedIssueCheckReason === "merge";

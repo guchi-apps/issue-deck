@@ -60,39 +60,83 @@ export type DevelopSyncPullRequest = {
 const HOLD_LABELS = ["00.check-user", "22.merge-confirm-required"];
 
 /**
+ * 公開の証跡がある場合にだけ自動マージするファイル。ワークフローはdevelop向けのClaude自動レビューが
+ * 走らないため、RCの公開経路を通ったことを記録で確かめる（#5081）。
+ * コード・版ファイル（リポジトリごとに違う）は、HEADがmainの先端そのもので中身は公開済みなので止めない（#4731）
+ */
+const PUBLISH_EVIDENCE_FILE_PATTERNS = [/^\.github\/workflows\//];
+
+const needsPublishEvidence = (file: string) => PUBLISH_EVIDENCE_FILE_PATTERNS.some((re) => re.test(file));
+
+/** 自動マージに公開の証跡が要る変更を含むか（含むときだけ観測側が証跡を集める） */
+export function developSyncNeedsPublishEvidence(files: string[]): boolean {
+  return files.some(needsPublishEvidence);
+}
+
+/**
+ * 今のmainがRCの公開経路で本番へ出たことの証跡（#5081）。ワークフローを含む同期PRでだけ集める。
+ * - `publishedMergeSha`: 候補PRを本番mainへマージした記録（`ReleaseProductionCheck.mergeSha`）のうち、
+ *   今のmainの先端と一致するもの。記録が無ければnull
+ * - `mergeChangedFiles`: そのマージで変わったファイル（親コミット…マージの比較）。取得できなければnull
+ */
+export type DevelopSyncPublishEvidence = {
+  publishedMergeSha: string | null;
+  mergeChangedFiles: string[] | null;
+};
+
+/**
+ * 自動マージの判定。止めるときの`waiting`は、条件が揃うのを巡回が待っている（CI実行中・レビュー判定中など）か、
+ * 人の対応が要るか（false）を表す。画面はこれで「自動マージ待ち」と「人の確認が必要」を分ける
+ */
+export type DevelopSyncAutoMergeDecision = { ok: true; headSha: string } | { ok: false; reason: string; waiting: boolean };
+
+const wait = (reason: string): DevelopSyncAutoMergeDecision => ({ ok: false, reason, waiting: true });
+const hold = (reason: string): DevelopSyncAutoMergeDecision => ({ ok: false, reason, waiting: false });
+
+/**
  * 同期PRを自動でマージしてよいか（#4669）。**止める側へ倒す**: 次のすべてを満たすときだけ`ok`。
  * - head が専用ブランチ（`release-sync/*`）。#4641以前のhead=mainの同期PRは対象外
+ * - PRのHEADが元のmainそのもので、今のmainに追いついている（追いコミット・競合解消・mainの更新が無い）
  * - 競合が無く（mergeable=true）、CIが成功
  * - 自動レビューが終わっていて、要修正・要確認の判定が現在のHEADに残っていない
  * - 人の確認ラベルが付いていない
+ * - ワークフローを含むなら、今のmainがRCの公開で本番へマージした記録と一致し、mainにだけあるワークフローが
+ *   すべてそのマージで変わったものである（#5081。以前から未同期のワークフローや、記録の無いmainは人へ回す）
  * マージ操作は呼び出し側がこのHEADのSHAを渡して行う（追いコミットを巻き込まない）
  */
-/**
- * 自動マージを止める変更ファイル。ワークフローだけは人へ回す（Claudeの自動レビューが走らないため）。
- * 同期PRはHEADがmainの先端そのもので中身は公開済みなので、コード・版ファイル（リポジトリごとに違う）は止めない（#4731）
- */
-const HOLD_FILE_PATTERNS = [/^\.github\/workflows\//];
-
 export function decideDevelopSyncAutoMerge(
   pr: DevelopSyncPullRequest,
   /** 今のmainの先端と、mainにだけある変更ファイル（同期PRの中身の範囲確認に使う） */
   main: { sha: string; files: string[] },
-): { ok: true; headSha: string } | { ok: false; reason: string } {
-  if (!pr.headRef.startsWith(DEVELOP_SYNC_BRANCH_PREFIX)) return { ok: false, reason: "専用ブランチの同期PRではありません" };
-  if (!pr.headSha) return { ok: false, reason: "PRのHEADを取得できていません" };
+  evidence: DevelopSyncPublishEvidence | null = null,
+): DevelopSyncAutoMergeDecision {
+  if (!pr.headRef.startsWith(DEVELOP_SYNC_BRANCH_PREFIX)) return hold("専用ブランチの同期PRではありません");
+  if (!pr.headSha) return wait("PRのHEADを取得できていません");
   // PRのHEADが元のmainそのもの（追いコミット・競合解消が無い）で、今のmainに追いついている場合だけ。
-  // 中身は`main.files`と一致するので、人へ回すファイル（ワークフロー）を含むかを見る
-  if (pr.mainSha !== main.sha || pr.headSha !== pr.mainSha) return { ok: false, reason: "PRのHEADがmainの先端と一致しません（追いコミットか、mainが進んでいます）" };
-  const heldFile = main.files.find((f) => HOLD_FILE_PATTERNS.some((re) => re.test(f)));
-  if (heldFile) return { ok: false, reason: `人の確認が要るファイルを含みます（${heldFile}）` };
-  if (main.files.length === 0) return { ok: false, reason: "差分がありません" };
-  if (pr.mergeable !== true) return { ok: false, reason: "マージ可否が確定していないか競合しています" };
-  if (pr.ciState !== "success") return { ok: false, reason: "CIが成功していません" };
-  if (pr.reviewSettled !== true) return { ok: false, reason: "自動レビューの判定が終わっていません" };
+  // 中身は`main.files`と一致するので、証跡が要るファイル（ワークフロー）を含むかを見る
+  if (pr.mainSha !== main.sha || pr.headSha !== pr.mainSha) return hold("PRのHEADがmainの先端と一致しません（追いコミットか、mainが進んでいます）");
+  if (main.files.length === 0) return hold("差分がありません");
+  if (pr.mergeable === null) return wait("GitHubがマージ可否を計算中です");
+  if (pr.mergeable !== true) return hold("developと競合しています");
+  if (pr.ciState === "pending") return wait("CIの完了を待っています");
+  if (pr.ciState !== "success") return hold(pr.ciState === "failure" ? "CIが失敗しています" : "CIの状態を取得できません");
+  if (pr.reviewSettled !== true) return wait("自動レビューの判定を待っています");
   const held = (pr.labels ?? []).find((l) => HOLD_LABELS.includes(l));
-  if (held) return { ok: false, reason: `人の確認ラベル（${held}）が付いています` };
+  if (held) return hold(`人の確認ラベル（${held}）が付いています`);
   const guard = evaluateReviewMergeGuard({ body: pr.body, headSha: pr.headSha, acknowledgeReviewSha: undefined });
-  if (guard.status !== "ok") return { ok: false, reason: `自動レビューが${guard.reviewLabel}と判定しています` };
+  if (guard.status !== "ok") return hold(`自動レビューが${guard.reviewLabel}と判定しています`);
+  const evidenceFiles = main.files.filter(needsPublishEvidence);
+  if (evidenceFiles.length > 0) {
+    const listed = filesSummary(evidenceFiles);
+    if (evidence?.publishedMergeSha !== main.sha) {
+      return hold(`ワークフローの変更（${listed}）を含み、今のmainがリリース候補の公開で本番へマージした記録と一致しません`);
+    }
+    if (evidence.mergeChangedFiles === null) return wait("公開のマージで変わったファイルを取得できていません");
+    const outside = evidenceFiles.filter((f) => !evidence.mergeChangedFiles!.includes(f));
+    if (outside.length > 0) {
+      return hold(`今回の公開で変わっていないワークフローの変更（${filesSummary(outside)}）を含みます（以前から未同期の変更です）`);
+    }
+  }
   return { ok: true, headSha: pr.headSha };
 }
 
@@ -112,6 +156,8 @@ export type DevelopSyncObservation =
       openPullRequest: DevelopSyncPullRequest | null;
       /** 今のmainに対して同期PRを作れなかった直近の理由（無ければnull） */
       createFailure: string | null;
+      /** ワークフローを含む同期PRを自動マージするための公開の証跡（#5081）。集めていなければnull */
+      publishEvidence?: DevelopSyncPublishEvidence | null;
     };
 
 export type DevelopSyncDetail =
@@ -124,6 +170,7 @@ export type DevelopSyncDetail =
   | "ci_failure"
   | "ci_pending"
   | "awaiting_merge"
+  | "merge_held"
   | "unreadable";
 
 export type DevelopSyncStatus = {
@@ -140,6 +187,8 @@ export type DevelopSyncStatus = {
   /** mainにだけある変更ファイル（画面には先頭の数件だけ出す） */
   mainOnlyFiles: string[];
   pullRequest: DevelopSyncPullRequest | null;
+  /** 開いている同期PRへの自動マージの判定（#5081）。同期PRが無ければnull */
+  autoMerge: DevelopSyncAutoMergeDecision | null;
 };
 
 const short = (sha: string) => sha.slice(0, 7);
@@ -162,6 +211,7 @@ export function decideDevelopSync(observation: DevelopSyncObservation): DevelopS
       developSha: null,
       mainOnlyFiles: [],
       pullRequest: null,
+      autoMerge: null,
     };
   }
   const base = {
@@ -169,6 +219,13 @@ export function decideDevelopSync(observation: DevelopSyncObservation): DevelopS
     developSha: observation.developSha,
     mainOnlyFiles: observation.mainOnlyFiles,
     pullRequest: observation.openPullRequest,
+    autoMerge: observation.openPullRequest
+      ? decideDevelopSyncAutoMerge(
+          observation.openPullRequest,
+          { sha: observation.mainSha, files: observation.mainOnlyFiles },
+          observation.publishEvidence ?? null,
+        )
+      : null,
   };
   const synced = (detail: DevelopSyncDetail, reason: string): DevelopSyncStatus => ({
     ...base,
@@ -227,11 +284,22 @@ export function decideDevelopSync(observation: DevelopSyncObservation): DevelopS
   if (pr.ciState === "pending") {
     return unsynced("ci_pending", "同期PRのCIを実行中です", `${files}。${prLabel} のCIの完了を待っています${stale}`, `CIの完了後に ${prLabel} をマージしてください`);
   }
+  // 巡回が自動でマージできない理由が確定しているときは、人の対応が要る停止として理由と次の操作を出す（#5081）
+  const autoMerge = base.autoMerge;
+  if (autoMerge && !autoMerge.ok && !autoMerge.waiting) {
+    return unsynced(
+      "merge_held",
+      "同期PRは人の確認が必要です",
+      `${files}。${prLabel} は自動でマージされません: ${autoMerge.reason}${stale}`,
+      `${prLabel} の内容を確認し、問題なければマージコミットでマージしてください`,
+    );
+  }
+  const waitingFor = autoMerge && !autoMerge.ok ? `（${autoMerge.reason}）` : "";
   return unsynced(
     "awaiting_merge",
-    "同期PRのマージ待ちです",
-    `${files}。${prLabel} がマージされるのを待っています${stale}`,
-    `巡回が条件（CI成功・競合なし・自動レビュー完了）を確かめて自動でマージします。マージされないときは ${prLabel} をマージコミットでマージしてください`,
+    "同期PRの自動マージ待ちです",
+    `${files}。${prLabel} は巡回が自動でマージします${waitingFor}${stale}`,
+    `操作は不要です。巡回（約5分ごと）が条件（CI成功・競合なし・自動レビュー完了）を確かめて ${prLabel} を自動でマージします`,
   );
 }
 
