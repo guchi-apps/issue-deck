@@ -183,6 +183,7 @@ export function ReleaseFixCreate({
   sourceKind,
   findings,
   excludedFindingIds,
+  suggestionsFrom,
   onDone,
 }: {
   repositoryFullName: string;
@@ -192,6 +193,8 @@ export function ReleaseFixCreate({
   findings?: ReleaseReviewFinding[];
   /** ユーザーが修正しないと判断した指摘ID（#4657）。選べず、既定でも選ばない（サーバーも起案しない） */
   excludedFindingIds?: readonly string[];
+  /** `findings`のうち、この添字以降は改善提案（#5102）。「今回直す」と判断した提案だけを表示し、選べるようにする */
+  suggestionsFrom?: number;
   onDone?: () => void;
 }) {
   const excluded = (finding: ReleaseReviewFinding) => Boolean(finding.id && excludedFindingIds?.includes(finding.id));
@@ -260,7 +263,10 @@ export function ReleaseFixCreate({
       <p className="font-medium">修正Issueを作成（このリリースへの修正として追跡します）</p>
       {sourceKind === "review_finding" && findings && findings.length > 1 && (
         <ul className="flex flex-col gap-0.5">
-          {findings.map((finding, index) => (
+          {findings.map((finding, index) => {
+            const isSuggestion = suggestionsFrom !== undefined && index >= suggestionsFrom;
+            if (isSuggestion && excluded(finding)) return null;
+            return (
             <li key={`${finding.title}-${index}`}>
               <label className="flex items-start gap-1.5">
                 <input
@@ -275,16 +281,22 @@ export function ReleaseFixCreate({
                   className="mt-0.5"
                 />
                 <span className="min-w-0 break-words">
-                  [{SEVERITY_LABEL[finding.severity] ?? "中"}] {finding.title}
+                  [{isSuggestion ? "改善提案・今回直す" : (SEVERITY_LABEL[finding.severity] ?? "中")}] {finding.title}
                   {excluded(finding) && <span className="text-muted-foreground">（修正しない判断済み）</span>}
                 </span>
               </label>
             </li>
-          ))}
+            );
+          })}
         </ul>
       )}
       {sourceKind === "review_finding" && findings && findings.length > 1 && (
         <p className="text-muted-foreground">選んだ指摘は1件の修正Issueにまとめます（共通の原因は分けません）。</p>
+      )}
+      {suggestionsFrom !== undefined && findings && findings.length > suggestionsFrom && (
+        <p className="text-muted-foreground">
+          「今回直す」と判断した改善提案も修正Issueにできます。提案は止める指摘にはならず、直しただけで検証合格・公開済みにもなりません。修正をdevelopへ入れて候補を作り直すと、統合検証と全体レビューがやり直されます。
+        </p>
       )}
       <label className="flex items-center gap-1.5">
         <input type="checkbox" checked={needsDecision} onChange={(event) => setNeedsDecision(event.target.checked)} />

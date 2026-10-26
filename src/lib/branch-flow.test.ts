@@ -482,7 +482,7 @@ describe("buildBranchFlow", () => {
     expect(quiet.activeLanes).toEqual([]);
     expect(quiet.releaseGroups).toEqual([]);
     expect(quiet.summary).toEqual({
-      pullRequestHealth: { counts: EMPTY_HEALTH_COUNTS, humanCount: 0, autoCount: 0 },
+      pullRequestHealth: { counts: EMPTY_HEALTH_COUNTS, humanCount: 0, failingHumanCount: 0, autoCount: 0 },
       activeLaneCount: 0,
       hasCiFailure: false,
       openManualStepCount: 0,
@@ -1921,7 +1921,7 @@ describe("サマリー行の集計", () => {
 
     expect(flow.repositories[0].summary).toEqual({
       // 通常PRのCI失敗は本番リリース工程の集計に入らない（#4540）
-      pullRequestHealth: { counts: EMPTY_HEALTH_COUNTS, humanCount: 0, autoCount: 0 },
+      pullRequestHealth: { counts: EMPTY_HEALTH_COUNTS, humanCount: 0, failingHumanCount: 0, autoCount: 0 },
       activeLaneCount: 2,
       hasCiFailure: true,
       openManualStepCount: 0,
@@ -2608,6 +2608,54 @@ describe("リリースPR凍結後の変更の有無（hasChangesAfterReleaseFree
     const released = splitLanesByReleaseCandidate({ ...group, mergedAt: "2026-08-16T00:00:00Z" });
     expect(released.waiting).toEqual([]);
     expect(released.included).toHaveLength(2);
+  });
+
+  describe("RCへ後から取り込んだ修正PR（#5103。AIDE#719/#721）", () => {
+    const merged = ["2026-08-15T01:00:00Z", "2026-08-15T03:00:00Z"];
+    // 凍結後にマージされたPRは番号201。headShaはテストのリリースPRの既定値に合わせる
+    const withRc = (rc: unknown, headSha?: string) => {
+      const group = unreleasedGroup(merged);
+      const release = group.pullRequest!;
+      return {
+        ...group,
+        pullRequest: {
+          ...release,
+          ...(headSha ? { headSha } : {}),
+          releaseChecks: { aiReview: "not_run", integration: "not_run", rc },
+        } as typeof release,
+      };
+    };
+    const rcFacts = (extra: Record<string, unknown>) => ({ sequence: 10, phase: "open", ...extra });
+
+    it("適用済みrevisionで取り込まれ、現行headと一致する修正PRは候補に入る", () => {
+      const group = unreleasedGroup(merged);
+      const head = group.pullRequest!.headSha;
+      const result = splitLanesByReleaseCandidate(
+        withRc(rcFacts({ importedPrs: [{ number: 201, revision: 2 }], currentHeadShas: [head] })),
+      );
+      expect(result.included.map((lane) => lane.branchName)).toEqual(["issue-200", "issue-201"]);
+      expect(result.waiting).toEqual([]);
+    });
+
+    it("記録の先端が候補PRの現在のheadと違う（古い記録）なら断定せず次回対象のまま", () => {
+      const result = splitLanesByReleaseCandidate(
+        withRc(rcFacts({ importedPrs: [{ number: 201, revision: 2 }], currentHeadShas: ["old-head"] })),
+      );
+      expect(result.waiting.map((lane) => lane.branchName)).toEqual(["issue-201"]);
+    });
+
+    it("別のPRだけを取り込んだ場合、取り込んでいない凍結後PRは次回対象に残る", () => {
+      const group = unreleasedGroup(merged);
+      const result = splitLanesByReleaseCandidate(
+        withRc(rcFacts({ importedPrs: [{ number: 999, revision: 2 }], currentHeadShas: [group.pullRequest!.headSha] })),
+      );
+      expect(result.waiting.map((lane) => lane.branchName)).toEqual(["issue-201"]);
+    });
+
+    it("記録が無い・取り込み一覧が無いときは従来どおり凍結時刻だけで分ける", () => {
+      expect(splitLanesByReleaseCandidate(withRc(null)).waiting).toHaveLength(1);
+      expect(splitLanesByReleaseCandidate(withRc(rcFacts({}))).waiting).toHaveLength(1);
+    });
   });
 });
 

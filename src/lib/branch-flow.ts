@@ -1149,6 +1149,16 @@ export function hasChangesAfterReleaseFreeze(
 }
 
 /**
+ * 候補PRへ適用済みのrevisionで取り込まれた作業PRの番号（#5103）。**証拠が取れなければ空**
+ * （記録が無い・読めない・候補PRの現在のheadが記録の先端と違う＝古い記録のときは断定しない）
+ */
+function importedPullRequestNumbers(release: PullRequestSummary): Set<number> {
+  const rc = release.releaseChecks?.rc;
+  if (!rc?.importedPrs || !rc.currentHeadShas?.includes(release.headSha)) return new Set();
+  return new Set(rc.importedPrs.map((pr) => pr.number));
+}
+
+/**
  * 未リリースの束のレーンを、リリースPRの凍結の前後で分ける（#3664）。
  *
  * 凍結後にdevelopへ入った作業（`afterFreeze`）はそのリリースに含まれず次のリリースへ回るので、
@@ -1164,11 +1174,23 @@ export function splitLanesByReleaseFreeze(
     return { afterFreeze: [], included: group.lanes };
   }
   const frozenAt = new Date(group.frozenAt ?? releaseContentFrozenAt(release)).getTime();
+  const imported = importedPullRequestNumbers(release);
   const afterFreeze: BranchFlowLane[] = [];
   const included: BranchFlowLane[] = [];
   for (const lane of group.lanes) {
     const latest = laneMergedAts([lane]).at(-1);
-    (latest !== undefined && new Date(latest).getTime() > frozenAt ? afterFreeze : included).push(lane);
+    const late =
+      latest !== undefined &&
+      new Date(latest).getTime() > frozenAt &&
+      // 凍結後にマージされたPRが全て適用済みrevisionで取り込まれていれば、候補に入っている（#5103）
+      !lane.pullRequests.every(
+        (pullRequest) =>
+          !pullRequest.merged ||
+          pullRequest.mergedAt === null ||
+          new Date(pullRequest.mergedAt).getTime() <= frozenAt ||
+          imported.has(pullRequest.number),
+      );
+    (late ? afterFreeze : included).push(lane);
   }
   return { afterFreeze, included };
 }

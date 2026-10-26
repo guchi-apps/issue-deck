@@ -1,7 +1,16 @@
 import type { BranchFlowRepository } from "@/types/branch-flow";
 import type { ReleaseCandidateVerification } from "@/lib/release-candidate-status";
 
-export type BranchFlowGuidance = { state: string; next: string; attention: boolean; loading?: boolean };
+/**
+ * 手が要るときの内訳（#5099）。`approval`＝公開・マージを進めてよいかの承認、`decision`＝要確認など問題の扱いの判断、
+ * `problem`＝失敗・問題による停止（赤）、`other`＝取得失敗・残作業など。導線の見た目にだけ使い、`attention`の判定は変えない
+ */
+export type BranchFlowGuidanceKind = "approval" | "decision" | "problem" | "other";
+
+export type BranchFlowGuidance = { state: string; next: string; attention: boolean; kind: BranchFlowGuidanceKind; loading?: boolean };
+
+/** 赤のPR健全性カテゴリ（`pull-request-health-chips.tsx`の`bad`）。`failingHumanCount`が無い古い集計の代わりに見る */
+const FAILING_CATEGORIES = ["ci-failed", "review-changes-requested", "conflict", "review-failed", "repair-stopped"] as const;
 
 /** 表示専用。承認・マージ可否は既存のサーバー側判定を使う。 */
 export function describeBranchFlow(
@@ -14,10 +23,15 @@ export function describeBranchFlow(
   },
 ): BranchFlowGuidance {
   const { summary } = repository;
-  const result = (state: string, next: string, attention = false) => ({ state, next, attention });
+  const result = (state: string, next: string, attention = false, kind: BranchFlowGuidanceKind = "other"): BranchFlowGuidance => ({
+    state,
+    next,
+    attention,
+    kind,
+  });
   // 既知の失敗を、同時に走っている処理で覆わない。
   if (summary.deploy?.kind === "failure") {
-    return result("デプロイ失敗", "復旧方法を確認", true);
+    return result("デプロイ失敗", "復旧方法を確認", true, "problem");
   }
   if (options.branchesFailed) {
     return result("状態未取得", "取得状況を確認", true);
@@ -27,13 +41,21 @@ export function describeBranchFlow(
     return { ...result("状態未取得", "取得状況を確認"), loading: true };
   }
   if (options.verification?.problem) {
-    return result(options.verification.problem.label, "必要な対応を確認", true);
+    const { kind } = options.verification.problem;
+    return result(
+      options.verification.problem.label,
+      "必要な対応を確認",
+      true,
+      kind === "needs_check" ? "decision" : kind === "unavailable" ? "other" : "problem",
+    );
   }
   if (summary.pullRequestHealth.humanCount > 0) {
-    return result("対応が必要", "問題のPRを確認", true);
+    const health = summary.pullRequestHealth;
+    const failing = health.failingHumanCount ?? FAILING_CATEGORIES.reduce((sum, category) => sum + health.counts[category], 0);
+    return result("対応が必要", "問題のPRを確認", true, failing > 0 ? "problem" : "decision");
   }
   if (summary.releaseMergeTarget) {
-    return result("操作待ち", "公開手順を確認", true);
+    return result("操作待ち", "公開手順を確認", true, "approval");
   }
   if (summary.deploy?.kind === "running" || summary.deploy?.kind === "waiting") {
     return result("本番反映中", "進捗を見る");

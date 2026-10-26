@@ -294,3 +294,39 @@ describe("resolveReleaseJourney（新方式の候補・#5076）", () => {
     expect(journey?.owner).toBe("none");
   });
 });
+
+describe("人の番の内訳（承認／判断・#5099）", () => {
+  it("公開承認待ちは承認", () => {
+    const journey = run({ candidatePullRequest: rcCandidate(facts()) });
+    expect(journey).toMatchObject({ owner: "user", attention: "approval" });
+  });
+
+  it("旧方式の本番PRのmainマージ待ちも承認", () => {
+    expect(run({ candidatePullRequest: legacyCandidate(), mergeTarget: "main" })?.attention).toBe("approval");
+  });
+
+  it("RC検証の要確認は判断（担当は公開承認と同じく人）", () => {
+    const journey = run({
+      candidatePullRequest: rcCandidate(facts(), {
+        aiReview: "needs_check",
+        aiReviewStage: { kind: "needs_check", autoReevaluated: false, items: ["findings"], cleared: false },
+      }),
+    });
+    expect(journey?.headline).toMatchObject({ key: "verify", tone: "user" });
+    expect(journey).toMatchObject({ owner: "user", attention: "decision" });
+    expect(isReleaseJourneyNeedingUser(journey)).toBe(true);
+  });
+
+  it("自動修正中・失敗は人の番の内訳を持たない（修正中を確認待ちに、失敗を承認待ちに見せない）", () => {
+    const fixing = run({
+      candidatePullRequest: rcCandidate(facts(), {
+        aiReview: "needs_check",
+        fix: { status: "fix_in_progress", issueNumber: 5101, sourceKind: "review_finding", stalled: false, reason: null },
+      }),
+    });
+    expect(fixing).toMatchObject({ owner: "auto", attention: null });
+    const failed = run({ candidatePullRequest: rcCandidate(facts(), { integration: "failed" }) });
+    expect(failed?.headline?.tone).toBe("failed");
+    expect(failed).toMatchObject({ owner: "user", attention: null });
+  });
+});

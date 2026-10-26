@@ -125,6 +125,14 @@ export type ReleaseRcFacts = {
   productionStopLabel: string | null;
   /** 直前に取り消された候補（作り直しの元）。この候補の進捗には数えない */
   predecessor: { sequence: number; cancelReason: string | null } | null;
+  /**
+   * 適用済みのrevisionで候補へ取り込んだ作業PR（#5103）。初回の凍結後に取り込んだ修正をブランチ画面の
+   * 「リリース候補」へ数えるための証拠。要求しただけ・適用失敗のrevisionは含めない。
+   * `currentHeadShas`は、この記録が支える候補PRの先端（最新の適用済みrevisionのheadと、公開準備後の最終head）。
+   * 候補PRの現在のheadがこれに無ければ、記録は古いので使わない
+   */
+  importedPrs?: { number: number; revision: number }[];
+  currentHeadShas?: string[];
   /** 記録の最終更新（ISO8601） */
   updatedAt: string;
 };

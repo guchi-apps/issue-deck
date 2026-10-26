@@ -72,6 +72,26 @@ describe("decidePublishApprovalValidity", () => {
     expect(result).toMatchObject({ valid: false, reason: "unexpected_changes", diff: ["ios/IssueDeck.xcodeproj/project.pbxproj"] });
   });
 
+  it("アセット参照の?v=だけを確かめた差分（Signaly #360相当）は失効させず、確かめていない同種のファイルは失効", () => {
+    const run = (files: { path: string; category: string }[]) =>
+      decidePublishApprovalValidity({
+        approval,
+        now,
+        candidatePhase: "awaiting_approval",
+        finalizations: [bump({ files })],
+        observed: { headSha: POST, mainSha: BASE },
+      });
+    expect(
+      run([
+        { path: "version.json", category: "version" },
+        { path: "frontend/changelog.js", category: "changelog" },
+        { path: "frontend/index.html", category: "asset_version" },
+        { path: "frontend/sw.js", category: "asset_version" },
+      ]),
+    ).toMatchObject({ valid: true });
+    expect(run([{ path: "frontend/index.html", category: "other" }])).toMatchObject({ valid: false, reason: "unexpected_changes", diff: ["frontend/index.html"] });
+  });
+
   it("承認した後の候補の更新・置換（範囲外のhead）は失効", () => {
     const result = decidePublishApprovalValidity({ approval, now, candidatePhase: "review", finalizations: [bump()], observed: { headSha: "d".repeat(40), mainSha: BASE } });
     expect(result).toMatchObject({ valid: false, reason: "candidate_changed" });

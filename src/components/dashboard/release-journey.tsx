@@ -1,8 +1,10 @@
-import { Loader2 } from "lucide-react";
+import { CircleHelp, Loader2, Stamp } from "lucide-react";
 import type React from "react";
 import { formatMonthDayTime } from "@/lib/format-date-time";
 import {
   JOURNEY_STATE_TEXT,
+  journeyAttentionOf,
+  type JourneyAttention,
   type JourneyOwner,
   type JourneyState,
   type JourneyTone,
@@ -15,6 +17,9 @@ import { cn } from "@/lib/utils";
  *
  * 色と形の約束: 緑＝済み、紫＝自動で動いている、紫の点線＝自動で始まる、琥珀＝あなたの番、青緑の斜線＝修正中、
  * 赤＝直す必要がある、灰の斜線＋点線の枠＝取得不能（推測しない）、点線の枠＝対象外（分母から外す）。
+ *
+ * あなたの番は2つに描き分ける（#5099）。**琥珀の塗り＋はんこ＝承認**（進めてよいかを決める）、
+ * **薄い琥珀＋破線の枠＋「？」＝判断**（検証で見つかった問題をどう扱うかを決める）。色が同じでも形・記号・文言で分かる。
  */
 const SEGMENT_CLASS: Record<JourneyState, string> = {
   done: "bg-green-600 dark:bg-green-500",
@@ -47,10 +52,26 @@ const LABEL_CLASS: Record<JourneyState, string> = {
 
 const OWNER_TEXT: Record<Exclude<JourneyOwner, "none">, string> = { auto: "自動", user: "あなた" };
 
-function ToneIcon({ tone }: { tone: JourneyState }) {
+export const ATTENTION_TEXT: Record<JourneyAttention, string> = { approval: "承認", decision: "判断" };
+
+/** 判断の区切りは薄い琥珀＋破線の枠。承認は`SEGMENT_CLASS.user`の塗り */
+const DECISION_SEGMENT_CLASS = "bg-amber-500/25 outline-1 -outline-offset-1 outline-dashed outline-amber-500";
+
+function segmentClass(step: { key: ReleaseJourney["steps"][number]["key"]; state: JourneyState }): string {
+  return step.state === "user" && journeyAttentionOf(step.key) === "decision" ? DECISION_SEGMENT_CLASS : SEGMENT_CLASS[step.state];
+}
+
+/** 人の番の記号。承認＝はんこ、判断＝？ */
+export function AttentionIcon({ attention, className }: { attention: JourneyAttention; className?: string }) {
+  const Icon = attention === "approval" ? Stamp : CircleHelp;
+  return <Icon className={cn("size-3 shrink-0", className)} aria-hidden="true" />;
+}
+
+function ToneIcon({ tone, attention = "approval" }: { tone: JourneyState; attention?: JourneyAttention | null }) {
+  if (tone === "user") return <AttentionIcon attention={attention ?? "approval"} />;
   if (tone === "running") return <Loader2 className="size-3 shrink-0 animate-spin motion-reduce:animate-none" aria-hidden="true" />;
   if (tone === "waiting") return <span className="size-3 shrink-0 rounded-full border-2 border-dotted border-current" aria-hidden="true" />;
-  const mark: Partial<Record<JourneyState, string>> = { user: "●", failed: "■", fixing: "✎", unknown: "?", done: "✓", skipped: "–" };
+  const mark: Partial<Record<JourneyState, string>> = { failed: "■", fixing: "✎", unknown: "?", done: "✓", skipped: "–" };
   return (
     <span aria-hidden="true" className="shrink-0 text-[10px] leading-none">
       {mark[tone] ?? "○"}
@@ -60,23 +81,31 @@ function ToneIcon({ tone }: { tone: JourneyState }) {
 
 function describe(journey: ReleaseJourney): string {
   const head = journey.headline ? `：${journey.headline.label}` : "";
-  const owner = journey.owner === "none" ? "" : `（担当: ${OWNER_TEXT[journey.owner]}）`;
+  const owner =
+    journey.owner === "none" ? "" : `（担当: ${OWNER_TEXT[journey.owner]}${journey.attention ? `・${ATTENTION_TEXT[journey.attention]}` : ""}）`;
   return `本番リリース${journey.candidateLabel ? ` ${journey.candidateLabel}` : ""} ${journey.done}/${journey.total}${head}${owner}`;
 }
 
-export function JourneyOwnerChip({ owner }: { owner: JourneyOwner }) {
+export function JourneyOwnerChip({ owner, attention = null }: { owner: JourneyOwner; attention?: JourneyAttention | null }) {
   if (owner === "none") return null;
   return (
     <span
       className={cn(
-        "inline-flex shrink-0 items-center rounded-full border px-1.5 text-[10.5px] leading-4 whitespace-nowrap",
-        owner === "user"
-          ? "border-amber-500 bg-amber-500/10 font-semibold text-amber-700 dark:text-amber-400"
-          : "border-purple-500/50 text-purple-700 dark:text-purple-300",
+        "inline-flex shrink-0 items-center gap-0.5 rounded-full border px-1.5 text-[10.5px] leading-4 whitespace-nowrap",
+        owner === "auto"
+          ? "border-purple-500/50 text-purple-700 dark:text-purple-300"
+          : attention === "approval"
+            ? "border-amber-500 bg-amber-500 font-semibold text-amber-950"
+            : attention === "decision"
+              ? "border-dashed border-amber-500 bg-amber-500/10 font-semibold text-amber-700 dark:text-amber-400"
+              : "border-amber-500 bg-amber-500/10 font-semibold text-amber-700 dark:text-amber-400",
       )}
       data-testid="release-journey-owner"
+      data-attention={attention ?? undefined}
     >
+      {attention && <AttentionIcon attention={attention} className="size-2.5" />}
       担当: {OWNER_TEXT[owner]}
+      {attention && `・${ATTENTION_TEXT[attention]}`}
     </span>
   );
 }
@@ -90,7 +119,7 @@ function Segments({ journey, className }: { journey: ReleaseJourney; className?:
       aria-hidden="true"
     >
       {journey.steps.map((step) => (
-        <span key={step.key} className={cn("h-1.5 rounded-sm", SEGMENT_CLASS[step.state])} title={`${step.label}: ${JOURNEY_STATE_TEXT[step.state]}`} />
+        <span key={step.key} className={cn("h-1.5 rounded-sm", segmentClass(step))} title={`${step.label}: ${JOURNEY_STATE_TEXT[step.state]}`} />
       ))}
     </span>
   );
@@ -113,11 +142,11 @@ export function ReleaseJourneyInline({ journey, showCandidate = true }: { journe
       <Segments journey={journey} className="w-28 sm:w-[168px]" />
       {headline && (
         <span className={cn("inline-flex min-w-0 items-center gap-1", TONE_CLASS[headline.tone])}>
-          <ToneIcon tone={headline.tone} />
+          <ToneIcon tone={headline.tone} attention={journey.attention} />
           <span className="truncate">{headline.label}</span>
         </span>
       )}
-      <JourneyOwnerChip owner={journey.owner} />
+      <JourneyOwnerChip owner={journey.owner} attention={journey.attention} />
       <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground">
         {journey.done}/{journey.total}
       </span>
@@ -146,7 +175,7 @@ export function ReleaseJourneySteps({ journey }: { journey: ReleaseJourney }) {
               aria-current={step.state !== "done" && step.state !== "todo" && step.state !== "skipped" ? "step" : undefined}
               title={step.title ?? undefined}
             >
-              <span className={cn("h-1.5 rounded-sm", SEGMENT_CLASS[step.state])} aria-hidden="true" />
+              <span className={cn("h-1.5 rounded-sm", segmentClass(step))} aria-hidden="true" />
               <span className={cn("truncate text-[10.5px] leading-tight", LABEL_CLASS[step.state])} aria-hidden="true">
                 {step.state === "done" && "✓ "}
                 {step.label}
@@ -166,10 +195,15 @@ export function ReleaseJourneySteps({ journey }: { journey: ReleaseJourney }) {
           {journey.checks.map((check) => (
             <span
               key={check.key}
-              className={cn("inline-flex min-w-0 items-center gap-1 rounded-full border bg-muted/40 px-2", LABEL_CLASS[check.state])}
+              className={cn(
+                "inline-flex min-w-0 items-center gap-1 rounded-full border bg-muted/40 px-2",
+                LABEL_CLASS[check.state],
+                check.state === "user" && "border-dashed border-amber-500 bg-amber-500/10",
+              )}
               title={check.title ?? undefined}
             >
-              <ToneIcon tone={check.state} />
+              {/* RC検証の内訳の人の番は要確認（判断）だけ */}
+              <ToneIcon tone={check.state} attention="decision" />
               <span className="truncate">{check.state === "done" || check.state === "todo" || check.state === "skipped" ? `${check.label}${check.state === "skipped" ? " 対象外" : ""}` : (check.status ?? check.label)}</span>
             </span>
           ))}
@@ -217,7 +251,7 @@ export function ReleaseJourneyNow({
           {headline ? (
             <span className={cn("inline-flex min-w-0 items-start gap-1 break-words", TONE_CLASS[headline.tone])}>
               <span className="pt-[3px]">
-                <ToneIcon tone={headline.tone} />
+                <ToneIcon tone={headline.tone} attention={journey.attention} />
               </span>
               <span>{headline.label}</span>
             </span>
@@ -230,7 +264,7 @@ export function ReleaseJourneyNow({
           )}
         </dd>
         <dt className="text-muted-foreground">担当</dt>
-        <dd>{journey.owner === "none" ? <span className="text-muted-foreground">—</span> : <JourneyOwnerChip owner={journey.owner} />}</dd>
+        <dd>{journey.owner === "none" ? <span className="text-muted-foreground">—</span> : <JourneyOwnerChip owner={journey.owner} attention={journey.attention} />}</dd>
         {journey.next && (
           <>
             <dt className="text-muted-foreground">次</dt>
