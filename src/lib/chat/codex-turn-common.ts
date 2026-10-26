@@ -25,6 +25,8 @@ export const CHAT_TURN_ERROR_KINDS = [
   "timeout",
   "bad_output",
   "codex_error",
+  // 画像付きの依頼を、画像の受け渡しに未対応の古い`run-chat-codex.sh`が取りに来た（受け口が書く。#5068）
+  "image_host_outdated",
 ] as const;
 export type ChatTurnErrorKind = (typeof CHAT_TURN_ERROR_KINDS)[number];
 

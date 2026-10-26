@@ -815,7 +815,7 @@ export function ExecutionSettingsSection({
             Issueとコメントの要約、類似Issue検索、本文整理、Issue作成補助、デプロイ失敗の原因分析に使います。
             定型処理が中心のため、通常はHaikuが適しています。GPT系を選ぶとサブPCのログイン済みCodex CLI（ChatGPTサブスク枠）で実行し、
             Claudeが使えないときの代わりになります。OpenAI API（従量課金）は使わず、Codexが使えないときはエラーを表示してClaudeへは切り替えません。
-            画像からの変更内容の抽出はCodex未対応で、モデルの自動選択はルールで判定します。
+            画像からの変更内容の抽出も、画像をサブPCへ渡してCodex CLIで読み取ります（画像は処理が終われば消えます）。モデルの自動選択はルールで判定します。
           </InfoHint>
         </div>
         <Select value={appAiModel} onValueChange={(value) => setAppAiModel(value as AppAiModel)}>

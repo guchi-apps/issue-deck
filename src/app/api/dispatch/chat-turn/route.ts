@@ -21,7 +21,7 @@ function authorize(request: NextRequest) {
 
 const JOB_ID = /^[a-z0-9]{8,32}$/;
 
-/** プロンプトを受け取る（`?jobId=…&host=…`） */
+/** プロンプトを受け取る（`?jobId=…&host=…`。画像を受け取れるスクリプトは`&images=1`を付ける。#5068） */
 export async function GET(request: NextRequest) {
   const denied = authorize(request);
   if (denied) return denied;
@@ -29,7 +29,8 @@ export async function GET(request: NextRequest) {
   const host = parseDispatchHostName(request.nextUrl.searchParams.get("host"));
   if (!JOB_ID.test(jobId) || !host) return json({ error: "invalid_request" }, { status: 400 });
 
-  const result = await fetchChatTurnRequest({ jobId, host });
+  const acceptsImages = request.nextUrl.searchParams.get("images") === "1";
+  const result = await fetchChatTurnRequest({ jobId, host, acceptsImages });
   if (!result.ok) return json({ error: result.error }, { status: result.status });
   return json(result.body);
 }

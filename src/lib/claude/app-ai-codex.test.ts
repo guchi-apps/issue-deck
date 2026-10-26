@@ -70,6 +70,7 @@ vi.mock("@/lib/db", () => ({
 import {
   AppAiCodexError,
   buildAppAiCodexPrompt,
+  findAppAiCodexImages,
   normalizeCodexSchema,
   readCodexOutput,
   runAppAiOnCodex,
@@ -102,7 +103,7 @@ beforeEach(() => {
 
 describe("Claude Messagesの本文をCodexの依頼へ変える（#5067）", () => {
   it("自由文の機能は{text}1欄のスキーマで包み、systemと会話をテキストへ畳む", () => {
-    const request = toCodexRequest("gpt-6-luna", {
+    const { request } = toCodexRequest("gpt-6-luna", {
       system: [{ type: "text", text: "役割" }],
       messages: [{ role: "user", content: [{ type: "text", text: "本文" }] }],
     });
@@ -114,7 +115,7 @@ describe("Claude Messagesの本文をCodexの依頼へ変える（#5067）", () 
   });
 
   it("json_schemaの構造化出力はそのスキーマをCodexの制約（全項目required・追加項目なし）へ寄せて渡す", () => {
-    const request = toCodexRequest("gpt-6-luna", {
+    const { request } = toCodexRequest("gpt-6-luna", {
       messages: [],
       output_config: {
         format: {
@@ -141,12 +142,41 @@ describe("Claude Messagesの本文をCodexの依頼へ変える（#5067）", () 
     expect(normalized.properties.d.anyOf[0]).toMatchObject({ required: ["x"], additionalProperties: false });
   });
 
-  it("画像を含む本文は送る前に image_unsupported で断る", () => {
-    expect(() =>
-      toCodexRequest("gpt-6-luna", {
-        messages: [{ role: "user", content: [{ type: "image", source: { type: "base64", data: "AAAA" } }, { type: "text", text: "読んで" }] }],
-      }),
-    ).toThrow(AppAiCodexError);
+  it("画像は目印へ置き換えて分け、依頼には枚数だけを残す（#5068）", () => {
+    const { request, images } = toCodexRequest("gpt-6-luna", {
+      messages: [
+        {
+          role: "user",
+          content: [
+            { type: "text", text: "（画像1の元画像）" },
+            { type: "image", source: { type: "base64", media_type: "image/png", data: "AAAA" } },
+            { type: "image", source: { type: "base64", media_type: "image/jpeg", data: "BBBB" } },
+            { type: "text", text: "読んで" },
+          ],
+        },
+      ],
+    });
+    expect(images).toEqual([
+      { mediaType: "image/png", data: "AAAA" },
+      { mediaType: "image/jpeg", data: "BBBB" },
+    ]);
+    expect(request.imageCount).toBe(2);
+    expect(request.messages[0].content).toBe("（画像1の元画像）\n\n［添付画像1］\n\n［添付画像2］\n\n読んで");
+    // DBへ書く依頼に画像の本体は入れない
+    expect(JSON.stringify(request)).not.toContain("AAAA");
+    expect(buildAppAiCodexPrompt(request)).toContain("画像を2枚添付している");
+  });
+
+  it("PDFなどの文書・base64でない画像は送る前に document_unsupported で断る", () => {
+    for (const block of [
+      { type: "document", source: { type: "base64", media_type: "application/pdf", data: "AAAA" } },
+      { type: "image", source: { type: "url", url: "https://example.com/a.png" } },
+      { type: "image", source: { type: "base64", media_type: "image/svg+xml", data: "AAAA" } },
+    ]) {
+      expect(() => toCodexRequest("gpt-6-luna", { messages: [{ role: "user", content: [block] }] })).toThrow(
+        expect.objectContaining({ kind: "document_unsupported" }),
+      );
+    }
   });
 
   it("受け取った出力は包みを外し、JSONでない・text欄が無い出力は bad_output にする", () => {
@@ -225,16 +255,53 @@ describe("CHAT_TURNジョブでサブPCのCodex CLIへ投げる（#5067）", () 
     expect(state.jobs.size).toBe(0);
   });
 
-  it("画像入力・モデル自動選択はジョブを積まずに対応外として断る", async () => {
+  it("画像付きの依頼は、実行中だけ画像をメモリに持ち、終われば消す（#5068）", async () => {
+    let seen: unknown = null;
+    state.onPoll = (jobId, run) => {
+      const job = state.jobs.get(jobId);
+      if (job && run && job.status === "QUEUED") {
+        job.status = "RUNNING";
+        seen = findAppAiCodexImages(run.id);
+        run.stepResult = JSON.stringify({ text: '{"items":["「保存」を削除する（×印）"],"unreadable":false}' });
+      }
+    };
+    const body = {
+      messages: [
+        {
+          role: "user",
+          content: [
+            { type: "image", source: { type: "base64", media_type: "image/png", data: "AAAA" } },
+            { type: "text", text: "読んで" },
+          ],
+        },
+      ],
+    };
+    const result = await runAppAiOnCodex({ feature: "issue_image_extract", model: "gpt-6-luna", body, sleep, clock });
+    expect(result.model).toBe("codex-cli/gpt-6-luna");
+    expect(seen).toEqual([{ mediaType: "image/png", data: "AAAA" }]);
+    expect(findAppAiCodexImages("run1")).toBeNull();
+    expect(state.deletedRuns).toEqual(["run1"]);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("古いサブPCが画像付きの依頼を断られたら、チェックアウトの更新を促して止まる（#5068）", async () => {
+    state.onPoll = (_jobId, run) => {
+      if (run) run.stepError = "image_host_outdated";
+    };
+    const promise = runAppAiOnCodex({ feature: "issue_image_extract", model: "gpt-6-luna", body: summaryBody, sleep, clock });
+    await expect(promise).rejects.toThrow(/サブPCのチェックアウトを更新してください.*Claudeへは切り替えていません/);
+  });
+
+  it("文書入力・モデル自動選択はジョブを積まずに対応外として断る", async () => {
     await expectKind(
       runAppAiOnCodex({
         feature: "issue_image_extract",
         model: "gpt-6-luna",
-        body: { messages: [{ role: "user", content: [{ type: "image", source: {} }] }] },
+        body: { messages: [{ role: "user", content: [{ type: "document", source: {} }] }] },
         sleep,
         clock,
       }),
-      "image_unsupported",
+      "document_unsupported",
     );
     await expectKind(runAppAiOnCodex({ feature: "model_pick", model: "gpt-6-luna", body: summaryBody, sleep, clock }), "feature_unsupported");
     expect(state.jobs.size).toBe(0);

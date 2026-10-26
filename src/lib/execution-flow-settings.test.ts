@@ -73,8 +73,8 @@ describe("原因診断の実行基盤表示（#4143）", () => {
     }
     const routine = find(flows, "要約・検索・文章整理・Issue作成補助・手作業アシスタント");
     expect(routine.model).toContain("GPT-6 Luna");
-    // 対象外（画像入力）と、Claudeへ戻さないことを明記する
-    expect(routine.note).toContain("画像からの変更内容の抽出はCodex未対応");
+    // 画像入力もCodexで動くこと（#5068）と、Claudeへ戻さないことを明記する
+    expect(routine.note).toContain("画像からの変更内容の抽出も、画像をサブPCへ渡してCodex CLIで読み取ります");
     expect(routine.note).toContain("Claudeへは切り替えません");
     expect(find(flows, "おまかせのモデル選択・Issueラベル判定").note).toContain("ルール");
   });

@@ -179,7 +179,7 @@ export function resolveExecutionFlows(settings: ExecutionFlowSettings): Executio
       group: "アプリ内AI", name: "要約・検索・文章整理・Issue作成補助・手作業アシスタント", location: appAiLocation(settings.appAiModel),
       agent: appAiAgent(settings.appAiModel), model: appAiModelLabel(settings.appAiModel), source: "アプリ内AI設定", sourceId: "app-ai-settings",
       note: appAiProvider(settings.appAiModel) === "openai"
-        ? `${CODEX_APP_AI_NOTE}画像からの変更内容の抽出はCodex未対応のため、実行するとエラーになります（Claude系を選ぶと使えます）。`
+        ? `${CODEX_APP_AI_NOTE}画像からの変更内容の抽出も、画像をサブPCへ渡してCodex CLIで読み取ります（画像は処理が終われば消えます）。`
         : undefined,
     },
     {
