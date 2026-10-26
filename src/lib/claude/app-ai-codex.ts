@@ -21,7 +21,11 @@ import { notifyDispatchHostWake } from "@/lib/dispatch/wake-notify";
  *
  * **Claude APIもOpenAI APIも呼ばない。** 受け渡しはチャット調査と同じ`CHAT_TURN`ジョブと
  * `scripts/run-chat-codex.sh`（スキーマ付きの単発実行）を使い、プロンプトと結果は`AppAiCodexRun`に置く。
- * サブPC側のスクリプトは変えていない（`mode`を付けない単発実行は#4109から対応済み）。
+ * サブPC側は`mode`を付けない単発実行（#4109から対応済み）で、画像があるときだけ`--image`で添付する（#5068）。
+ *
+ * **画像はDBに書かない**（#5068）。待っているこのプロセスのメモリ（実行IDごとのMap）に置き、サブPCが
+ * `GET /api/dispatch/chat-turn`で取りに来たときだけ渡す。実行が終われば必ず消す。チャット調査のセッション
+ * （`findChatCodexSession`）と同じく、待ち手と受け口が同じプロセスにいる前提。
  *
  * 失敗は`AppAiCodexError`として投げ、**どの失敗でもClaudeへ戻さない**。呼び出し元の`catch`が
  * `error.message`をそのまま画面へ返すので、原因（オフライン・未ログイン・枠超過など）が利用者に見える。
@@ -43,7 +47,7 @@ export type AppAiCodexErrorKind =
   | "unsupported_host"
   | "unsupported_model"
   | "not_claimed"
-  | "image_unsupported"
+  | "document_unsupported"
   | "feature_unsupported";
 
 export class AppAiCodexError extends Error {
@@ -62,7 +66,8 @@ export function describeAppAiCodexError(kind: AppAiCodexErrorKind): string {
     unsupported_host: "サブPCのpollerがCodex実行に未対応です（サブPCのチェックアウトを更新してください）",
     unsupported_model: "選んだモデルはCodex CLIで動かせません",
     not_claimed: "サブPCがジョブを受け取りませんでした",
-    image_unsupported: "画像を含む処理はCodex経路に未対応です。Claudeへ切り替えて実行してください",
+    document_unsupported: "PDFなどの文書を含む処理はCodex経路に未対応です。Claudeへ切り替えて実行してください",
+    image_host_outdated: "サブPCのチェックアウトが画像の受け渡しに未対応です（サブPCのチェックアウトを更新してください）",
     feature_unsupported: "この機能はCodex経路に未対応です",
     not_logged_in: "サブPCのCodex CLIがログインしていません（`codex login`でChatGPTにログインしてください）",
     api_key_auth: "サブPCのCodex CLIがAPIキーでログインしています（従量課金になるため使いません）",
@@ -96,14 +101,43 @@ const TEXT_WRAPPER_SCHEMA = {
   additionalProperties: false,
 } as const;
 
-type ContentBlock = { type?: unknown; text?: unknown } & Record<string, unknown>;
+type ContentBlock = { type?: unknown; text?: unknown; source?: unknown } & Record<string, unknown>;
 
-function blocksToText(content: unknown): string {
+/** サブPCへ渡す画像。`codex exec --image`で添付する順に並べる */
+export type AppAiCodexImage = { mediaType: string; data: string };
+
+/** `--image`で渡せる形式。`image-extract.ts`が送る形式（png・jpeg・gif・webp）と揃える */
+const CODEX_IMAGE_MEDIA_TYPES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
+
+/** 画像ブロックを、何枚目かの目印へ置き換える。添付は会話に出てきた順 */
+export function codexImageMarker(index: number): string {
+  return `［添付画像${index + 1}］`;
+}
+
+function toCodexImage(block: ContentBlock): AppAiCodexImage {
+  const source = block.source as { type?: unknown; media_type?: unknown; data?: unknown } | undefined;
+  if (
+    source?.type !== "base64" ||
+    typeof source.media_type !== "string" ||
+    !CODEX_IMAGE_MEDIA_TYPES.has(source.media_type) ||
+    typeof source.data !== "string" ||
+    source.data === ""
+  ) {
+    throw new AppAiCodexError("document_unsupported");
+  }
+  return { mediaType: source.media_type, data: source.data };
+}
+
+function blocksToText(content: unknown, images: AppAiCodexImage[]): string {
   if (typeof content === "string") return content;
   if (!Array.isArray(content)) return "";
   return (content as ContentBlock[])
     .map((block) => {
-      if (block?.type === "image" || block?.type === "document") throw new AppAiCodexError("image_unsupported");
+      if (block?.type === "document") throw new AppAiCodexError("document_unsupported");
+      if (block?.type === "image") {
+        images.push(toCodexImage(block));
+        return codexImageMarker(images.length - 1);
+      }
       return typeof block?.text === "string" ? block.text : "";
     })
     .filter((text) => text !== "")
@@ -148,31 +182,56 @@ function allowNull(schema: unknown): unknown {
 export type AppAiCodexRequest = ChatTurnRequest & {
   /** 自由文の機能を`{text}`で包んだか（受け取った後に外す） */
   textWrapped: boolean;
+  /** 添付する画像の枚数。画像そのものはDBへ書かず、`AppAiCodexImage`としてメモリに持つ（#5068） */
+  imageCount?: number;
 };
 
-/** Claude Messages APIの本文を、Codexへ渡す形へ変える。画像を含むものは送る前に断る */
-export function toCodexRequest(model: string, body: Record<string, unknown>): AppAiCodexRequest {
-  const system = blocksToText(body.system);
+/**
+ * Claude Messages APIの本文を、Codexへ渡す形へ変える。画像は目印へ置き換えて`images`へ分け、
+ * PDFなどの文書・base64以外の画像は送る前に断る
+ */
+export function toCodexRequest(
+  model: string,
+  body: Record<string, unknown>,
+): { request: AppAiCodexRequest; images: AppAiCodexImage[] } {
+  const images: AppAiCodexImage[] = [];
+  const system = blocksToText(body.system, images);
   const rawMessages = Array.isArray(body.messages) ? (body.messages as { role?: unknown; content?: unknown }[]) : [];
   const messages = rawMessages.map((m) => ({
     role: m.role === "assistant" ? ("assistant" as const) : ("user" as const),
-    content: blocksToText(m.content),
+    content: blocksToText(m.content, images),
   }));
   const format = (body.output_config as { format?: { type?: unknown; schema?: unknown } } | undefined)?.format;
   const structured = format?.type === "json_schema" && format.schema !== undefined;
   return {
-    model,
-    system,
-    messages,
-    schema: structured ? normalizeCodexSchema(format.schema) : TEXT_WRAPPER_SCHEMA,
-    textWrapped: !structured,
+    request: {
+      model,
+      system,
+      messages,
+      schema: structured ? normalizeCodexSchema(format.schema) : TEXT_WRAPPER_SCHEMA,
+      textWrapped: !structured,
+      imageCount: images.length,
+    },
+    images,
   };
+}
+
+/** 実行中の画像。キーは`AppAiCodexRun.id`。開発時の再読み込みで消えないよう`globalThis`に置く */
+const pendingImages: Map<string, AppAiCodexImage[]> =
+  ((globalThis as { __issueDeckAppAiCodexImages?: Map<string, AppAiCodexImage[]> }).__issueDeckAppAiCodexImages ??=
+    new Map());
+
+/** 受け口（`codex-turn-report.ts`）が、サブPCへ渡す画像を引く。実行が終わっていれば`null` */
+export function findAppAiCodexImages(runId: string): AppAiCodexImage[] | null {
+  return pendingImages.get(runId) ?? null;
 }
 
 /**
  * Codexへ渡すプロンプト。チャット調査用（`buildCodexPrompt`）とは約束が違う（ツールの指定も無い）ので分ける
  */
-export function buildAppAiCodexPrompt(request: Pick<AppAiCodexRequest, "system" | "messages" | "textWrapped">): string {
+export function buildAppAiCodexPrompt(
+  request: Pick<AppAiCodexRequest, "system" | "messages" | "textWrapped" | "imageCount">,
+): string {
   const turns = request.messages
     .map((m) => `<${m.role}>\n${m.content}\n</${m.role}>`)
     .join("\n\n");
@@ -180,6 +239,9 @@ export function buildAppAiCodexPrompt(request: Pick<AppAiCodexRequest, "system" 
     request.system,
     "# 実行環境の約束",
     "- あなたはファイルを読まず、シェルのコマンドも実行しない。必要な情報は下の会話にあるものだけを使う",
+    request.imageCount
+      ? `- このメッセージには画像を${request.imageCount}枚添付している。会話中の${codexImageMarker(0)}は添付した1枚目の画像を指す（以降も同じ順）`
+      : "",
     request.textWrapped
       ? "- 依頼への回答（依頼が指定する書式のまま）を、JSONオブジェクトの text 欄に文字列として入れて返す。text 以外の欄は作らない"
       : "- 出力は指定されたJSONスキーマに合う1つのJSONオブジェクトだけ",
@@ -209,7 +271,11 @@ export function parseStoredAppAiRequest(value: unknown): AppAiCodexRequest | nul
   if (!value || typeof value !== "object") return null;
   const v = value as Partial<AppAiCodexRequest>;
   if (typeof v.model !== "string" || typeof v.system !== "string" || !Array.isArray(v.messages)) return null;
-  return { ...(v as AppAiCodexRequest), textWrapped: v.textWrapped === true };
+  return {
+    ...(v as AppAiCodexRequest),
+    textWrapped: v.textWrapped === true,
+    imageCount: typeof v.imageCount === "number" && v.imageCount > 0 ? v.imageCount : 0,
+  };
 }
 
 type Sleep = (ms: number) => Promise<void>;
@@ -240,7 +306,7 @@ export async function runAppAiOnCodex(params: {
 
   if (CODEX_UNSUPPORTED_FEATURES.has(params.feature)) throw new AppAiCodexError("feature_unsupported");
   if (!isCodexCliModel(params.model)) throw new AppAiCodexError("unsupported_model");
-  const request = toCodexRequest(params.model, params.body);
+  const { request, images } = toCodexRequest(params.model, params.body);
 
   const host = await pickChatCodexHost();
   if (!host.ok) throw new AppAiCodexError(host.reason.startsWith("Codex(offline)") ? "offline" : "unsupported_host");
@@ -256,6 +322,7 @@ export async function runAppAiOnCodex(params: {
       stepRequest: JSON.parse(JSON.stringify(request)) as Prisma.InputJsonValue,
     },
   });
+  if (images.length > 0) pendingImages.set(run.id, images);
   try {
     const job = await db.dispatchJob.create({
       data: {
@@ -275,6 +342,7 @@ export async function runAppAiOnCodex(params: {
     const output = await waitForRun({ runId: run.id, jobId: job.id, timeoutMs, sleep, clock });
     return { text: readCodexOutput(output, request.textWrapped), model: `${CODEX_CLI_PROVIDER}/${params.model}` };
   } finally {
+    pendingImages.delete(run.id);
     await db.appAiCodexRun.delete({ where: { id: run.id } }).catch(() => undefined);
   }
 }

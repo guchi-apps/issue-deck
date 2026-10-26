@@ -7,7 +7,12 @@ import {
   recordCodexChatUsage,
   type ChatTurnRequest,
 } from "@/lib/chat/investigation/codex-model";
-import { buildAppAiCodexPrompt, parseStoredAppAiRequest, type AppAiCodexRequest } from "@/lib/claude/app-ai-codex";
+import {
+  buildAppAiCodexPrompt,
+  findAppAiCodexImages,
+  parseStoredAppAiRequest,
+  type AppAiCodexRequest,
+} from "@/lib/claude/app-ai-codex";
 import type { ClaudeApiFeature } from "@/lib/claude/api-usage";
 import { db } from "@/lib/db";
 import { reportDispatchJob } from "@/lib/dispatch/jobs";
@@ -70,11 +75,38 @@ function parseStoredRequest(value: unknown): ChatTurnRequest | null {
   return v as ChatTurnRequest;
 }
 
-/** pollerへ渡すプロンプト。受け取った時点でジョブを`RUNNING`にする */
-export async function fetchChatTurnRequest(params: { jobId: string; host: string }) {
+/**
+ * pollerへ渡すプロンプト。受け取った時点でジョブを`RUNNING`にする。
+ *
+ * 画像付きのアプリ内AI（#5068）は、画像を受け取れるスクリプト（`acceptsImages`＝`images=1`付きの取得）にだけ渡す。
+ * 古いスクリプトは画像を読まずに答えてしまうので、その場で失敗を書いてジョブを閉じ、待ち手を即座に止める
+ */
+export async function fetchChatTurnRequest(params: { jobId: string; host: string; acceptsImages?: boolean }) {
   const found = await findChatTurn(params.jobId, params.host);
   if (!found.ok) return found;
   if (!found.request) return { ok: false as const, status: 409, error: "request_missing" };
+  let images: { mediaType: string; data: string }[] = [];
+  if (found.source === "app_ai" && found.request.imageCount) {
+    if (!params.acceptsImages) {
+      await db.appAiCodexRun.updateMany({
+        where: { id: found.runId, currentJobId: params.jobId },
+        data: { stepError: "image_host_outdated", status: "failed", stepRequest: Prisma.DbNull },
+      });
+      await reportDispatchJob({
+        jobId: params.jobId,
+        hostName: params.host,
+        status: "failed",
+        message: "サブPCのチェックアウトが画像の受け渡しに未対応です（image_host_outdated）",
+      });
+      return { ok: false as const, status: 409, error: "images_unsupported" };
+    }
+    // 待ち手のプロセスが持つ画像。再起動などで無ければ、渡す相手（待ち手）もいない
+    const pending = findAppAiCodexImages(found.runId);
+    if (!pending || pending.length !== found.request.imageCount) {
+      return { ok: false as const, status: 409, error: "request_missing" };
+    }
+    images = pending;
+  }
   const session = findChatCodexSession(params.jobId);
   if (session && session.metrics.fetchedAt === null) session.metrics.fetchedAt = Date.now();
   await reportDispatchJob({
@@ -87,7 +119,14 @@ export async function fetchChatTurnRequest(params: { jobId: string; host: string
     // 単発実行（`mode`無し）。MCPブリッジもツールも使わない
     return {
       ok: true as const,
-      body: { model: found.request.model, prompt: buildAppAiCodexPrompt(found.request), schema: found.request.schema, mode: null, tools: [] },
+      body: {
+        model: found.request.model,
+        prompt: buildAppAiCodexPrompt(found.request),
+        schema: found.request.schema,
+        mode: null,
+        tools: [],
+        images,
+      },
     };
   }
   return {

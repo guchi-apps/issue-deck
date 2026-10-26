@@ -133,4 +133,42 @@ describe("アプリ内AIの単発実行（#5067）", () => {
     const result = await runChatTurnTool({ jobId: "job1", host: "subpc", name: "get_issue", args: {} });
     expect(result).toMatchObject({ ok: false, status: 409, error: "session_missing" });
   });
+  describe("画像付きの依頼（#5068）", () => {
+    const images = () =>
+      ((globalThis as { __issueDeckAppAiCodexImages?: Map<string, unknown> }).__issueDeckAppAiCodexImages ??= new Map());
+
+    beforeEach(() => {
+      state.appRun = {
+        id: "app1",
+        feature: "issue_image_extract",
+        stepRequest: { ...appRequest, imageCount: 1 },
+        currentJobId: "job1",
+        status: "running",
+      };
+      images().set("app1", [{ mediaType: "image/png", data: "AAAA" }]);
+    });
+
+    it("画像を受け取れるスクリプトには、待ち手のメモリから画像を渡す", async () => {
+      const result = await fetchChatTurnRequest({ jobId: "job1", host: "subpc", acceptsImages: true });
+      expect(result.ok && result.body.images).toEqual([{ mediaType: "image/png", data: "AAAA" }]);
+      expect(result.ok && result.body.prompt).toContain("画像を1枚添付している");
+      expect(state.reports[0]?.status).toBe("running");
+    });
+
+    it("古いスクリプトには渡さず、待ち手へ image_host_outdated を書いてジョブを閉じる", async () => {
+      const result = await fetchChatTurnRequest({ jobId: "job1", host: "subpc" });
+      expect(result).toMatchObject({ ok: false, status: 409, error: "images_unsupported" });
+      expect(state.appRun).toMatchObject({ stepError: "image_host_outdated", status: "failed" });
+      expect(state.reports.map((r) => r.status)).toEqual(["failed"]);
+    });
+
+    it("待ち手のメモリに画像が無ければ（再起動など）渡さない", async () => {
+      images().delete("app1");
+      expect(await fetchChatTurnRequest({ jobId: "job1", host: "subpc", acceptsImages: true })).toMatchObject({
+        ok: false,
+        error: "request_missing",
+      });
+      expect(state.reports).toHaveLength(0);
+    });
+  });
 });
