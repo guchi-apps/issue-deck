@@ -482,7 +482,7 @@ describe("buildBranchFlow", () => {
     expect(quiet.activeLanes).toEqual([]);
     expect(quiet.releaseGroups).toEqual([]);
     expect(quiet.summary).toEqual({
-      pullRequestHealth: { counts: EMPTY_HEALTH_COUNTS, humanCount: 0, autoCount: 0 },
+      pullRequestHealth: { counts: EMPTY_HEALTH_COUNTS, humanCount: 0, failingHumanCount: 0, autoCount: 0 },
       activeLaneCount: 0,
       hasCiFailure: false,
       openManualStepCount: 0,
@@ -1921,7 +1921,7 @@ describe("サマリー行の集計", () => {
 
     expect(flow.repositories[0].summary).toEqual({
       // 通常PRのCI失敗は本番リリース工程の集計に入らない（#4540）
-      pullRequestHealth: { counts: EMPTY_HEALTH_COUNTS, humanCount: 0, autoCount: 0 },
+      pullRequestHealth: { counts: EMPTY_HEALTH_COUNTS, humanCount: 0, failingHumanCount: 0, autoCount: 0 },
       activeLaneCount: 2,
       hasCiFailure: true,
       openManualStepCount: 0,

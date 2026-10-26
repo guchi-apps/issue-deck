@@ -24,6 +24,7 @@ import {
   ChevronRight,
   CircleAlert,
   CircleDashed,
+  CircleHelp,
   CirclePlay,
   CircleCheckBig,
   Clock,
@@ -36,6 +37,8 @@ import {
   Play,
   RefreshCw,
   Rocket,
+  Square,
+  Stamp,
   TriangleAlert,
   Wrench,
   type LucideIcon,
@@ -104,7 +107,7 @@ import {
   describeRefreshButtonHint,
   type AutoRefreshIntervalMs,
 } from "@/lib/auto-refresh";
-import { describeBranchFlow } from "@/lib/branch-flow-guidance";
+import { describeBranchFlow, type BranchFlowGuidanceKind } from "@/lib/branch-flow-guidance";
 import { selectBranchViewRepositories, type BranchViewMode } from "@/lib/branch-view-visibility";
 import { readTriggeredAt, useTriggerPending } from "@/hooks/use-trigger-pending";
 import { resolveReleaseStageBadges, type ReleaseStageBadge } from "@/lib/release-stage-badges";
@@ -341,7 +344,9 @@ function LaneStatusBadge({
   const failing = status === "open" && pullRequests.some((pullRequest) => resolvePullRequestHealth(pullRequest).failing);
   const label =
     disposition === "human"
-      ? "要対応"
+      ? failing
+        ? "要対応"
+        : "要判断"
       : disposition === "auto"
         ? "検証・修正中"
         : LANE_STATUS_LABEL[status];
@@ -350,11 +355,12 @@ function LaneStatusBadge({
     <span
       className={cn(
         "shrink-0 rounded-full px-2 py-0.5 text-xs ring-1 ring-inset",
-        // 琥珀は人の確認待ち、赤は問題を抱えた状態、紫は検証・修正の実行中（#4293）
+        // 琥珀は人の確認待ち、赤は問題を抱えた状態、紫は検証・修正の実行中（#4293）。
+        // 人の判断待ちは破線の枠＋「？」で、公開承認（琥珀の塗り）と見分ける（#5099）
         disposition === "human"
           ? failing
             ? "bg-destructive/10 text-destructive ring-destructive/60"
-            : "bg-amber-500/15 text-amber-700 ring-amber-500 dark:text-amber-400"
+            : "inline-flex items-center gap-0.5 bg-amber-500/10 text-amber-700 ring-0 outline-1 -outline-offset-1 outline-dashed outline-amber-500 dark:text-amber-400"
           : disposition === "auto"
             ? "bg-violet-500/10 text-violet-700 ring-violet-500/60 dark:text-violet-300"
             : status === "open"
@@ -362,6 +368,7 @@ function LaneStatusBadge({
               : "bg-muted text-muted-foreground ring-border",
       )}
     >
+      {disposition === "human" && !failing && <CircleHelp className="size-3 shrink-0" aria-hidden="true" />}
       {label}
     </span>
   );
@@ -2666,14 +2673,14 @@ function RepositorySummaryRow({
       {!(summary.releaseJourney && !summary.releaseInProgress && !repository.deviceBuild) && (
         <DeployStateBadge deploy={deploy} compact linkToRun={false} />
       )}
-      {guidance.attention && <AttentionGuidance next={guidance.next} isOpen={isOpen} showSelectionMarker={showSelectionMarker} />}
+      {guidance.attention && <AttentionGuidance next={guidance.next} kind={guidance.kind} isOpen={isOpen} showSelectionMarker={showSelectionMarker} />}
       </span>
       )}
       {/* 手が要らないときの状態文言（未リリース・開発中など）と導線は出さない（#4848）。
           状態は1行目の件数が表しており、行全体を押せば開くので、2行目は手が要るときだけ使う */}
       {loaded && !hasBadges && guidance.attention && (
         <span className="flex w-full items-center text-xs">
-          <AttentionGuidance next={guidance.next} isOpen={isOpen} showSelectionMarker={showSelectionMarker} />
+          <AttentionGuidance next={guidance.next} kind={guidance.kind} isOpen={isOpen} showSelectionMarker={showSelectionMarker} />
         </span>
       )}
       {/* **PRのマージ待ちは畳んだ行にもヘッダー件数にも出さない**（#2172・#4540）。通常PRの
@@ -2682,20 +2689,51 @@ function RepositorySummaryRow({
   );
 }
 
+/**
+ * 導線の見た目（#5099）。琥珀の塗り＋はんこ＝承認、薄い琥珀＋破線＋「？」＝判断、赤＝失敗・停止。
+ * 色だけに頼らず、記号と頭の1語（「承認」「判断」）でも分かるようにする
+ */
+const GUIDANCE_STYLE: Record<BranchFlowGuidanceKind, { className: string; icon: LucideIcon; prefix: string | null }> = {
+  approval: { className: "border border-amber-500 bg-amber-500 text-amber-950", icon: Stamp, prefix: "承認" },
+  decision: {
+    className: "border border-dashed border-amber-500 bg-amber-500/10 text-amber-700 dark:text-amber-400",
+    icon: CircleHelp,
+    prefix: "判断",
+  },
+  problem: { className: "border border-destructive/60 bg-destructive/10 text-destructive", icon: Square, prefix: null },
+  other: { className: "border border-transparent bg-amber-500/10 text-amber-700 dark:text-amber-400", icon: CircleAlert, prefix: null },
+};
+
 /** 畳んだ行の2行目に出す「手が要る」ときの導線（#4848） */
 function AttentionGuidance({
   next,
+  kind,
   isOpen,
   showSelectionMarker,
 }: {
   next: string;
+  kind: BranchFlowGuidanceKind;
   isOpen: boolean;
   showSelectionMarker: boolean;
 }) {
+  const style = GUIDANCE_STYLE[kind];
+  const Icon = style.icon;
   return (
-    <span className="ml-auto inline-flex items-center gap-1 rounded-md bg-amber-500/10 px-2 py-1 text-xs font-medium text-amber-700 dark:text-amber-400">
-      <CircleAlert className="size-3.5" aria-hidden="true" />
-      {isOpen ? (showSelectionMarker ? "表示中" : "閉じる") : next}<ChevronRight className={cn("size-3", isOpen && !showSelectionMarker && "rotate-90")} aria-hidden="true" />
+    <span
+      className={cn("ml-auto inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium", style.className)}
+      data-testid="branch-flow-guidance"
+      data-kind={kind}
+    >
+      <Icon className={cn("size-3.5", kind === "problem" && "fill-current")} aria-hidden="true" />
+      {isOpen ? (
+        showSelectionMarker ? "表示中" : "閉じる"
+      ) : (
+        <>
+          {style.prefix && <span className="font-semibold">{style.prefix}:</span>}
+          {next}
+        </>
+      )}
+      <ChevronRight className={cn("size-3", isOpen && !showSelectionMarker && "rotate-90")} aria-hidden="true" />
     </span>
   );
 }

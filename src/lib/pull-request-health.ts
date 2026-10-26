@@ -509,6 +509,11 @@ export type PullRequestHealthSummary = {
   counts: PullRequestHealthCounts;
   /** 人の対応が要るopen PR数 */
   humanCount: number;
+  /**
+   * `humanCount`のうち、失敗・要修正・問題による停止（赤）を抱えたPR数（#5099）。残りは要確認など人の判断待ち。
+   * 導線を赤にするか判断の形にするかの表示にだけ使う。この項目が無い古い集計では未定義
+   */
+  failingHumanCount?: number;
   /** 待てば進む（自動修正中・再検証待ち・CI／レビュー実行中）open PR数。`humanCount`とは重ならない */
   autoCount: number;
 };
@@ -519,6 +524,7 @@ export function summarizePullRequestHealth(
 ): PullRequestHealthSummary {
   const counts: PullRequestHealthCounts = { ...EMPTY_HEALTH_COUNTS };
   let humanCount = 0;
+  let failingHumanCount = 0;
   let autoCount = 0;
   const seen = new Set<string>();
   for (const pullRequest of pullRequests) {
@@ -526,8 +532,10 @@ export function summarizePullRequestHealth(
     seen.add(pullRequest.id);
     const health = resolvePullRequestHealth(pullRequest);
     for (const category of health.categories) counts[category] += 1;
-    if (health.disposition === "human") humanCount += 1;
-    else if (health.disposition === "auto") autoCount += 1;
+    if (health.disposition === "human") {
+      humanCount += 1;
+      if (health.failing) failingHumanCount += 1;
+    } else if (health.disposition === "auto") autoCount += 1;
   }
-  return { counts, humanCount, autoCount };
+  return { counts, humanCount, failingHumanCount, autoCount };
 }
