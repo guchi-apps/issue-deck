@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   assessDecision,
   assessDecisionBase,
+  fixNowFindingIds,
   nonFixFindingIds,
   selectAutoFixIndexes,
   summarizeReleaseReviewDecisions,
@@ -237,5 +238,27 @@ describe("validateDecisionInput", () => {
     expect(
       validateDecisionInput({ ...base, decision: "post_release", followUp: { kind: "existing", number: 4651 }, timing: "公開直後" }),
     ).toBeNull();
+  });
+});
+
+describe("fixNowFindingIds（改善提案の起案対象。#5102）", () => {
+  const sug = { id: "R-24b32c", title: "バックアップ設定が未確認", severity: "low", blocking: false } as DecisionTargetFinding;
+  const run = (decision: ReleaseReviewDecisionRecord["decision"], baseSha = BASE) =>
+    summarizeReleaseReviewDecisions({
+      records: [record({ findingId: sug.id, decision, blocking: false, severity: "low", baseSha: BASE })],
+      findings: [],
+      suggestions: [sug],
+      current: { baseSha },
+      state: "needs_check",
+      unverifiedScope: null,
+    });
+
+  it("指摘0件・提案1件でも、有効な「今回直す」の提案IDを返す", () => {
+    expect([...fixNowFindingIds(run("fix_now"))]).toEqual([sug.id]);
+  });
+  it("公開後対応・見送り、または前提（base）が変わった判断は含めない", () => {
+    expect(fixNowFindingIds(run("post_release")).size).toBe(0);
+    expect(fixNowFindingIds(run("defer")).size).toBe(0);
+    expect(fixNowFindingIds(run("fix_now", "c".repeat(40))).size).toBe(0);
   });
 });

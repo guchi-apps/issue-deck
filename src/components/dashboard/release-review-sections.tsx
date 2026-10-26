@@ -21,7 +21,7 @@ import {
   useReleaseReviewRecommendations,
 } from "@/components/dashboard/release-review-decision";
 import { ReleaseGuidancePanel } from "@/components/dashboard/release-guidance-panel";
-import { nonFixFindingIds } from "@/lib/release-review-decision";
+import { fixNowFindingIds, nonFixFindingIds } from "@/lib/release-review-decision";
 import { useReleaseChanges, type UseReleaseChangesResult } from "@/hooks/use-release-changes";
 import { useReferenceNavigation } from "@/hooks/use-reference-navigation";
 import { useReleaseVerification } from "@/hooks/use-release-verification";
@@ -705,6 +705,14 @@ function AiReviewSection({
   // 判断済み（修正しない）の指摘は、修正Issueの起案から外す（#4657）
   const nonFixIds = [...nonFixFindingIds(decisions)];
   const fixable = section.findings.filter((f) => !(f.id && nonFixIds.includes(f.id)));
+  // 「今回直す」と判断した改善提案も起案の対象にする（#5102）。止める指摘へは変換せず、添字は指摘の後ろに続ける
+  const fixNowIds = [...fixNowFindingIds(decisions)];
+  const fixNowSuggestions = section.suggestions.filter((s) => s.id && fixNowIds.includes(s.id));
+  const fixCandidates = [...section.findings, ...section.suggestions];
+  const fixExcludedIds = [
+    ...nonFixIds,
+    ...section.suggestions.flatMap((s) => (s.id && !fixNowIds.includes(s.id) ? [s.id] : [])),
+  ];
   const decisionText = decisions
     ? decisions.cleared
       ? "・すべて判断済み（修正しない）"
@@ -988,14 +996,18 @@ function AiReviewSection({
               <ReleaseRebuildButton repositoryFullName={repositoryFullName} />
             </div>
           )}
-          {fixable.length > 0 && !executionFailed && pullRequestNumber !== undefined && target && (
+          {(fixable.length > 0 || fixNowSuggestions.length > 0) &&
+            !executionFailed &&
+            pullRequestNumber !== undefined &&
+            target && (
             <ReleaseFixCreate
               repositoryFullName={repositoryFullName}
               pullRequestNumber={pullRequestNumber}
               target={target}
               sourceKind="review_finding"
-              findings={section.findings}
-              excludedFindingIds={nonFixIds}
+              findings={fixCandidates}
+              excludedFindingIds={fixExcludedIds}
+              suggestionsFrom={section.findings.length}
               onDone={onFixCreated}
             />
           )}
