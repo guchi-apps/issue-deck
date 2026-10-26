@@ -21,6 +21,7 @@ import {
   resolveAppAiModel,
 } from "@/lib/app-settings";
 import { getCurrentUser } from "@/lib/auth-user";
+import { isBranchViewMode, type BranchViewMode } from "@/lib/branch-view-visibility";
 import { db } from "@/lib/db";
 import { listDispatchRunnableRepositories } from "@/lib/dispatch/runnable-repositories";
 import { getIssuesForUser } from "@/lib/issues-for-user";
@@ -37,6 +38,7 @@ export default async function DashboardPage() {
     hiddenRepositoryRows,
     favoriteRepositoryRows,
     issueCreationExcludedRepositoryRows,
+    branchViewRepositoryRows,
     releaseCheckTargetRows,
     issues,
     dispatchRunnableRepositories,
@@ -60,6 +62,10 @@ export default async function DashboardPage() {
           where: { userId: currentUser.id },
           select: { repositoryId: true },
         }),
+        db.branchViewRepository.findMany({
+          where: { userId: currentUser.id },
+          select: { repositoryId: true, mode: true },
+        }),
         // リリース後の動作確認の対象リポジトリ（#2930）。**他の3つと同じくここで読む**——
         // リリース履歴APIの応答へ相乗りさせると、対象の選択欄が「全リポジトリぶんのGitHub APIを
         // 叩く重い取得」が返るまで全部オフに見える。値は真偽ではなく**いつから対象か**で、
@@ -74,7 +80,7 @@ export default async function DashboardPage() {
         // 非対応の印が出てしまう
         listDispatchRunnableRepositories(),
       ])
-    : [[], null, [], [], [], [], [], new Set<string>()];
+    : [[], null, [], [], [], [], [], [], new Set<string>()];
 
   const appSetting = appSettingRow as
     | ({ claudeLocalModel?: string } & Awaited<ReturnType<typeof db.appSetting.findUnique>>)
@@ -119,6 +125,10 @@ export default async function DashboardPage() {
   const issueCreationExcludedRepositoryIds = new Set(
     issueCreationExcludedRepositoryRows.map((row) => row.repositoryId),
   );
+  const branchViewModeByRepositoryId = new Map<string, BranchViewMode>();
+  for (const row of branchViewRepositoryRows) {
+    if (isBranchViewMode(row.mode)) branchViewModeByRepositoryId.set(row.repositoryId, row.mode);
+  }
   const releaseCheckSinceByRepositoryId = new Map(
     releaseCheckTargetRows.map((row) => [row.repositoryId, row.createdAt.toISOString()]),
   );
@@ -142,6 +152,7 @@ export default async function DashboardPage() {
         hidden: hiddenRepositoryIds.has(repo.id),
         favorite: favoriteRepositoryIds.has(repo.id),
         excludedFromIssueCreation: issueCreationExcludedRepositoryIds.has(repo.id),
+        branchViewMode: branchViewModeByRepositoryId.get(repo.id) ?? "always",
         releaseCheckSince: releaseCheckSinceByRepositoryId.get(repo.id) ?? null,
       }))}
       issues={issues}

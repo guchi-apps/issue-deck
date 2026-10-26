@@ -35,6 +35,7 @@ model User {
   pushMutedKinds                    PushMutedKind[]
   snoozedItems                      SnoozedItem[]
   issueCreationExcludedRepositories IssueCreationExcludedRepository[]
+  branchViewRepositories            BranchViewRepository[]
   shareTokens                       ShareToken[]
   releaseCheckTargets               ReleaseCheckTarget[]
   releaseChecks                     ReleaseCheck[]
@@ -122,6 +123,7 @@ model Repository {
   favoritedBy             FavoriteRepository[]
   snoozedItems            SnoozedItem[]
   issueCreationExcludedBy IssueCreationExcludedRepository[]
+  branchViewBy            BranchViewRepository[]
   releaseCheckTargetedBy  ReleaseCheckTarget[]
   releaseChecks           ReleaseCheck[]
   releaseCheckLines       ReleaseCheckLine[]
@@ -163,6 +165,25 @@ model FavoriteRepository {
 // ユーザーごとに「Issueを作成」ダイアログのリポジトリ選択欄から除外したリポジトリ（#2760）。
 // `HiddenRepository`と違い、左メニュー・Issue一覧などには影響しない
 // （Issue作成の選択肢だけを絞るための独立した設定）。
+// ブランチ画面でのリポジトリ表示（#5087）。ユーザー×リポジトリごと。`HiddenRepository`（全体非表示）・
+// `IssueCreationExcludedRepository`とは独立で、一覧の見せ方だけを変える。
+// 行が無い＝常に表示。mode: "active"（動きがある時だけ表示）／"never"（表示しない）。"always"は行を持たない
+model BranchViewRepository {
+  id           String @id @default(cuid())
+  userId       String
+  repositoryId String
+  mode         String
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  repository Repository @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, repositoryId])
+  @@index([repositoryId])
+}
+
 model IssueCreationExcludedRepository {
   id           String @id @default(cuid())
   userId       String

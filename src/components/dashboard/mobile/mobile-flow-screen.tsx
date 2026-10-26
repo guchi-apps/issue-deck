@@ -7,10 +7,13 @@ import type { IosFixIssueOrigin } from "@/components/dashboard/ios-release-group
 import type { IosDistributionFixIssueDraft } from "@/lib/ios-distribution-failure";
 import type { AutoRefreshIntervalMs } from "@/lib/auto-refresh";
 import type { BranchFlow } from "@/lib/branch-flow";
+import type { BranchViewMode } from "@/lib/branch-view-visibility";
 import type { PullRequestSummary } from "@/types/pull-request";
 
 type MobileFlowScreenProps = {
   flow: BranchFlow;
+  /** ブランチ画面でのリポジトリ表示（#5087）。`BranchFlowView`へそのまま渡す */
+  branchViewModes?: Record<string, BranchViewMode>;
   fetchedAt: string | null;
   isLoading: boolean;
   /** 自動更新も含めて取得中か（#1767）。`BranchFlowView`へそのまま渡す */
@@ -45,6 +48,7 @@ type MobileFlowScreenProps = {
  */
 export function MobileFlowScreen({
   flow,
+  branchViewModes,
   fetchedAt,
   isLoading,
   isRefreshing,
@@ -62,6 +66,7 @@ export function MobileFlowScreen({
   return (
     <BranchFlowView
       flow={flow}
+      branchViewModes={branchViewModes}
       fetchedAt={fetchedAt}
       isLoading={isLoading}
       isRefreshing={isRefreshing}

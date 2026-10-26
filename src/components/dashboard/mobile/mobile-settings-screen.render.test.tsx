@@ -99,6 +99,7 @@ function renderScreen() {
       onSetRepositoryHidden={onSetRepositoryHidden}
       onSetRepositoriesHidden={onSetRepositoriesHidden}
       onSetRepositoryIssueCreationExcluded={vi.fn()}
+      onSetRepositoryBranchViewMode={vi.fn()}
       onUpdated={vi.fn()}
     />,
   );
@@ -184,6 +185,7 @@ describe("MobileSettingsScreen", () => {
         onSetRepositoryHidden={onSetRepositoryHidden}
         onSetRepositoriesHidden={onSetRepositoriesHidden}
         onSetRepositoryIssueCreationExcluded={vi.fn()}
+      onSetRepositoryBranchViewMode={vi.fn()}
         onUpdated={vi.fn()}
       />,
     );
@@ -199,7 +201,13 @@ describe("MobileSettingsScreen", () => {
 
     expect(screen.getByText(/1件中/).textContent).toBe("1件中1件を表示中");
 
-    fireEvent.click(screen.getAllByRole("checkbox")[0]);
+    // 閉じている行は現在の状態を文章で見せ、行を開くまで編集の部品は出ない（#5087）
+    expect(screen.getByText(/全体に表示 ・ Issue作成: 候補 ・ ブランチ画面: 常に表示/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "非表示" })).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: /issue-deck/ }));
+    expect(onSetRepositoryHidden).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "非表示" }));
     expect(onSetRepositoryHidden).toHaveBeenCalledWith(repositories[0], true);
   });
 });

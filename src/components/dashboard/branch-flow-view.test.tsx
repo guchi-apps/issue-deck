@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { BranchFlowView, type BranchFlowReleaseHistory } from "@/components/dashboard/branch-flow-view";
 import { buildBranchFlow, type BranchFlowIssueSource } from "@/lib/branch-flow";
+import type { BranchViewMode } from "@/lib/branch-view-visibility";
 import { AI_REVIEW_NONE } from "@/lib/github/check-rollup";
 import type { RepositoryBranchStatus, RepositoryDeployStatus } from "@/types/branch-flow";
 import type { PullRequestSummary } from "@/types/pull-request";
@@ -133,6 +134,9 @@ function renderFlow(input: {
   refreshIconOnly?: boolean;
   /** 「過去のリリース」の追加取得（#4844）。渡さなければ取り足しの導線は出ない */
   releaseHistory?: BranchFlowReleaseHistory;
+  /** ブランチ画面でのリポジトリ表示（#5087） */
+  branchViewModes?: Record<string, BranchViewMode>;
+  expandedRepositoryFullNames?: string[];
 }) {
   const flow = buildBranchFlow({
     repositories: input.repositories ?? [{ fullName: REPO, private: false }],
@@ -160,6 +164,8 @@ function renderFlow(input: {
       onPullToRefresh={input.onPullToRefresh}
       refreshIconOnly={input.refreshIconOnly}
       releaseHistory={input.releaseHistory}
+      branchViewModes={input.branchViewModes}
+      expandedRepositoryFullNames={input.expandedRepositoryFullNames}
     />,
   );
 }
@@ -3058,5 +3064,127 @@ describe("ブランチ画面の情報配置 (#4683)", () => {
     expect(screen.queryByText("公開する変更を見る")).toBeNull();
     openRepository();
     expect(screen.getByText("ブランチ状況を取得後に、公開する変更を確認できます")).toBeTruthy();
+  });
+});
+
+describe("ブランチ画面でのリポジトリ表示（#5087）", () => {
+  const REPO2 = "guchi-apps/docs";
+  const REPO2_SHORT = "docs";
+  const TWO = [
+    { fullName: REPO, private: false },
+    { fullName: REPO2, private: false },
+  ];
+
+  afterEach(() => {
+    cleanup();
+    window.localStorage.clear();
+    vi.restoreAllMocks();
+  });
+
+  it("未設定は常に表示（従来どおり）", () => {
+    renderFlow({ repositories: TWO });
+    expect(screen.getByText(REPO_SHORT)).toBeTruthy();
+    expect(screen.getByText(REPO2_SHORT)).toBeTruthy();
+    expect(screen.queryByText(/一時表示/)).toBeNull();
+  });
+
+  it("「動きがある時だけ表示」で動きが無ければ省き、件数と一時表示の導線を出す", () => {
+    renderFlow({ repositories: TWO, branchViewModes: { [REPO2]: "active" } });
+
+    expect(screen.getByText(REPO_SHORT)).toBeTruthy();
+    expect(screen.queryByText(REPO2_SHORT)).toBeNull();
+    expect(screen.getByText(/1リポジトリ/)).toBeTruthy();
+    expect(screen.getByText(/設定で1件を省略中/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "省略中の1件を一時表示" })).toBeTruthy();
+  });
+
+  it("「動きがある時だけ表示」でも進行中のレーンがあれば表示する", () => {
+    renderFlow({
+      repositories: TWO,
+      branchViewModes: { [REPO2]: "active" },
+      pullRequests: [
+        makePullRequest({ number: 7, repositoryFullName: REPO2, id: `${REPO2}#7`, headRef: "issue-7" }),
+      ],
+      branchStatuses: [
+        branchStatus({ repositoryFullName: REPO2, checkedBranches: ["main", "develop", "issue-7"], existingBranches: ["main", "develop", "issue-7"] }),
+      ],
+    });
+    expect(screen.getByText(REPO2_SHORT)).toBeTruthy();
+    expect(screen.queryByText(/設定で.*件を省略中/)).toBeNull();
+  });
+
+  it("「表示しない」は、動きがあっても並べない", () => {
+    renderFlow({
+      repositories: TWO,
+      branchViewModes: { [REPO2]: "never" },
+      pullRequests: [
+        makePullRequest({ number: 7, repositoryFullName: REPO2, id: `${REPO2}#7`, headRef: "issue-7" }),
+      ],
+    });
+    expect(screen.queryByText(REPO2_SHORT)).toBeNull();
+  });
+
+  it("一時表示で省いたリポジトリを後ろへ並べ、もう一度押すと元に戻る（設定は変えない）", () => {
+    renderFlow({ repositories: TWO, branchViewModes: { [REPO2]: "never" } });
+
+    fireEvent.click(screen.getByRole("button", { name: "省略中の1件を一時表示" }));
+    expect(screen.getByText(REPO2_SHORT)).toBeTruthy();
+    expect(screen.getByText(/設定で省略しているものを一時表示中/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "省略していたものを隠す" }).getAttribute("aria-pressed")).toBe("true");
+
+    fireEvent.click(screen.getByRole("button", { name: "省略していたものを隠す" }));
+    expect(screen.queryByText(REPO2_SHORT)).toBeNull();
+  });
+
+  it("取得に失敗したリポジトリは「動きなし」と断定せず表示する", () => {
+    renderFlow({
+      repositories: TWO,
+      branchViewModes: { [REPO2]: "active" },
+      failedRepositories: [REPO2],
+    });
+    expect(screen.getByText(REPO2_SHORT)).toBeTruthy();
+  });
+
+  it("行の数が揃う前（読み込み中）は省かない", () => {
+    renderFlow({ repositories: TWO, branchViewModes: { [REPO2]: "active" }, fetchedAt: null });
+    expect(screen.getByText(REPO2_SHORT)).toBeTruthy();
+  });
+
+  it("左メニューで選んだリポジトリは、設定にかかわらず並べる", () => {
+    renderFlow({
+      repositories: TWO,
+      branchViewModes: { [REPO2]: "never" },
+      expandedRepositoryFullNames: [REPO2],
+    });
+    expect(screen.getByText(REPO2_SHORT)).toBeTruthy();
+  });
+
+  it("全件を省いたときは、その旨と一時表示の導線を出す", () => {
+    renderFlow({
+      repositories: TWO,
+      branchViewModes: { [REPO]: "never", [REPO2]: "never" },
+    });
+    expect(screen.getByText(/ブランチ画面に並べるリポジトリがありません（2件は設定で省略しています）/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "省略中の2件を一時表示" })).toBeTruthy();
+  });
+
+  it("省いたリポジトリも一括リリースの対象のまま", () => {
+    renderFlow({
+      repositories: TWO,
+      branchViewModes: { [REPO2]: "never" },
+      branchStatuses: [
+        branchStatus({
+          developVsMain: { aheadBy: 3, behindBy: 0, sameContent: false, units: null },
+          hasReleaseWorkflow: true,
+        }),
+        branchStatus({
+          repositoryFullName: REPO2,
+          developVsMain: { aheadBy: 1, behindBy: 0, sameContent: false, units: null },
+          hasReleaseWorkflow: true,
+        }),
+      ],
+    });
+    expect(screen.queryByText(REPO2_SHORT)).toBeNull();
+    expect(screen.getByText("未リリース2件をまとめてリリース")).toBeTruthy();
   });
 });
