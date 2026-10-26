@@ -637,6 +637,20 @@ if [[ -n "$DEV_PORT" && "$DEV_PORT" != "0" ]]; then
   SESSION_EXTRA_READ_FILES+=("$DEV_LOG")
 fi
 SESSION_ALLOWED_TOOLS="$(agent_allowed_tools "${SESSION_EXTRA_READ_FILES[@]}")"
+
+# PR作成の明示指示（#3752）を渡すかどうか。**PRを自動で作るリポジトリの実装セッションだけ**で、
+# 手作業はPRを作らず、`guchi-apps/ideas`のような人の指示で作るリポジトリではプロンプト本文と
+# 矛盾する。tmuxを挟むと環境変数は届かないため、ここで自分で判定する。
+SEND_PR_INSTRUCTION=0
+if [[ "${ISSUE_DECK_SESSION_KIND:-implementation}" == "implementation" ]] &&
+  ! pr_policy_is_manual "$(current_repo_slug)"; then
+  SEND_PR_INSTRUCTION=1
+  # 指示ファイルとシステムプロンプトで明示していても、クラシファイアは`gh pr create`と
+  # secretの同期を拒否した（#5082）。同じ条件のセッションにだけ規則として渡す
+  # （中身と範囲の絞り方は`lib/agent-allowed-tools.sh`の`agent_pr_allowed_tools`）。
+  SESSION_ALLOWED_TOOLS+=",$(agent_pr_allowed_tools "$(current_repo_slug)" "$SCRIPT_DIR")"
+fi
+
 if [[ "$AGENT_KIND" == "claude" ]]; then
   CLAUDE_EXTRA_ARGS+=(--allowedTools "$SESSION_ALLOWED_TOOLS")
   # **何を無条件に通したかを起動ログに残す**（`--disallowedTools`側と揃える）。承認プロンプトが
@@ -655,16 +669,9 @@ if [[ "$AGENT_KIND" == "claude" ]]; then
 fi
 
 # PR作成の明示指示（#3752）。個人設定の「明示的な指示があるまでPRを作らない」に負けて、PRを
-# 作らないまま止まるのを防ぐ。**実装セッションで、PRを自動で作るリポジトリのときだけ**付ける。
-# 手作業はPRを作らず、`guchi-apps/ideas`のような人の指示で作るリポジトリでは
-# プロンプト本文と矛盾する。tmuxを挟むと環境変数は届かないため、ここで自分で判定する。
-SEND_PR_INSTRUCTION=0
-if [[ "${ISSUE_DECK_SESSION_KIND:-implementation}" == "implementation" ]] &&
-  ! pr_policy_is_manual "$(current_repo_slug)"; then
-  SEND_PR_INSTRUCTION=1
-  if [[ "$AGENT_KIND" == "claude" ]]; then
-    append_pr_system_prompt "#$ISSUE_NUMBER: "
-  fi
+# 作らないまま止まるのを防ぐ。付けるかどうか（`SEND_PR_INSTRUCTION`）は上の許可規則の箇所で判定済み。
+if [[ "$SEND_PR_INSTRUCTION" == "1" && "$AGENT_KIND" == "claude" ]]; then
+  append_pr_system_prompt "#$ISSUE_NUMBER: "
 fi
 
 # セッション名（プロンプトボックス・`/resume`の一覧・ターミナルのタイトルに出る）。

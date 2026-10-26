@@ -38,6 +38,9 @@
 #   - `gh api`（POST・DELETEを同じ規則で通してしまうため、読み取り用途でも入れない）
 #   - `rm`・`sudo`・`ssh`・`op`・`sed -i`のような書き換え系
 #
+# **例外は`agent_pr_allowed_tools`（#5082）。** PRを自動で作る実装セッションに限り、
+# 指示ファイルが明示的に求める`gh pr create`と、範囲を絞ったsecretの同期だけを別に足す。
+#
 # **ファイルを読むための`Bash`の規則はここに入れない。** `cat`・`head`・`grep`のような規則は、
 # `cat > file`のように出力をリダイレクトする書き込みまで前方一致で拾いうる。読む・探すのは
 # `Read`・`Grep`・`Glob`を使う方針（各実装プロンプトの「調査は往復を減らす形で行う」）で、
@@ -155,6 +158,62 @@ agent_allowed_tools() {
       rules+=("Read(/$extra_read)")
     fi
   done
+
+  local IFS=,
+  printf '%s' "${rules[*]}"
+}
+
+# PRを自動で作る実装セッションにだけ足す許可規則をカンマ区切りで1行に出す（#5082）。
+#
+# ## なぜ上の`agent_allowed_tools`と分けるか
+#
+# 実装セッションの指示ファイルは「このプロンプトがPR作成の明示的な指示」「マニフェストへキーを
+# 足したら1Passwordへの登録とGitHubへの同期まで済ませる」と書き、`--append-system-prompt`でも
+# 同じ趣旨を渡している（#3752）。それでも**auto modeのクラシファイアは`gh pr create`を
+# `External System Writes`、secretの同期を`Secret-Store Writes`として拒否した**
+# （guchi-apps/vps#319。1操作ずつ別のBash呼び出しにしても拒否されたので、結合が原因ではない）。
+# 指示どおりの操作が拒否のたびに人待ちになるので、規則として渡して判断を通さない。
+#
+# 上の「入れないもの」を覆すのではなく、**範囲を「PRを自動で作る実装セッション」に絞る**。
+# レビュー・統合セッション、手作業セッション、PRを人の指示で作るリポジトリ（`pr-policy.sh`）
+# には渡さない（呼び出し元の`run-issue-session.sh`が`append_pr_system_prompt`と同じ条件で判定する）。
+#
+# ## 何を入れるか
+#
+#   - `gh pr create`——PRを作るだけで、マージは後段（自動レビュー・自動マージ不可カテゴリ）が持つ。
+#     `gh pr merge`・`git push`は引き続き入れない
+#   - `provision-secret.sh --repo <このセッションのリポジトリ>`——**`--repo`まで前方一致させ、
+#     他リポジトリのsecretには届かせない。** 絶対パス（汎用ランチャーのプロンプトが
+#     `{{ISSUE_DECK_SCRIPTS_DIR}}`を絶対パスへ直して示す形）と、issue-deck自身のプロンプトが示す
+#     `scripts/`からの相対パスの両方
+#   - `sync-github-secrets.sh --only`——**`--only`で対象キーを絞った同期だけ。** マニフェスト全体の
+#     同期は値の上書き範囲が広すぎるので通さない。実体はリポジトリごとにあり、置き場所が
+#     `.github/scripts/`（配布先）と`scripts/`（issue-deck）で違うため両方を書く
+#
+# 相対パスの規則は**作業ツリーのスクリプトをそのまま走らせる**（セッション自身が書き換えうる）。
+# ただし`pnpm test`の規則も同じ性質を持っており、ここで新たに開く穴ではない。
+#
+# 引数:
+#   $1  このセッションのリポジトリ（`owner/repo`）。形式が違えば`provision-secret.sh`の規則を足さない
+#   $2  issue-deckのスクリプトの絶対パス（`run-issue-session.sh`の`SCRIPT_DIR`）。省略可
+agent_pr_allowed_tools() {
+  local repo_slug="${1:-}"
+  local scripts_dir="${2:-}"
+  scripts_dir="${scripts_dir%/}"
+  local rules=(
+    "Bash(gh pr create:*)"
+    "Bash(.github/scripts/sync-github-secrets.sh --only:*)"
+    "Bash(scripts/sync-github-secrets.sh --only:*)"
+  )
+
+  # `owner/repo`以外（空・空白やカンマ・グロブ入り）は黙って落とす。理由は上の`Read`規則と同じで、
+  # 規則が割れたり広がったりするより、承認プロンプトが1件出るほうが安全。
+  if [[ "$repo_slug" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]; then
+    rules+=("Bash(scripts/provision-secret.sh --repo $repo_slug:*)")
+    if [[ "$scripts_dir" == /* && "$scripts_dir" != *[[:space:],*]* ]]; then
+      rules+=("Bash($scripts_dir/provision-secret.sh --repo $repo_slug:*)")
+    fi
+  fi
 
   local IFS=,
   printf '%s' "${rules[*]}"
