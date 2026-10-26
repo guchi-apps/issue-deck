@@ -566,11 +566,9 @@ function ApprovalBox({
         {BUMP_POLICY_LABEL[approval.bumpPolicy] ?? approval.bumpPolicy} · 有効期限 {formatDateTime(approval.expiresAt)}
       </p>
       {note && <p className="break-words">{note}</p>}
-      {approval.status === "invalidated" && (
-        <p className="break-words text-destructive" role="alert">
-          {approval.invalidMessage}
-          {approval.invalidDiff.length > 0 && <> 変わったファイル: {approval.invalidDiff.join("、")}</>}。古い承認では公開しません。内容を確かめて、改めて承認してください。
-        </p>
+      {/* 失効の理由は本番PR詳細の先頭（工程の「いま」。#5076）に1回だけ出す。ここは理由の根拠になった差分だけを残す */}
+      {approval.status === "invalidated" && approval.invalidDiff.length > 0 && (
+        <p className="break-words text-muted-foreground">失効の原因になった変更: {approval.invalidDiff.join("、")}</p>
       )}
       {reason && approval.status === "active" && (
         <p className="break-words text-destructive" role="alert" data-testid="release-rc-approval-stop">
@@ -832,7 +830,12 @@ export function ReleaseRcFinalizePanel({
   const plannedKind = bumpKind === "auto" ? null : bumpKind;
   const reusing = approval?.status === "active";
   return (
-    <section aria-label="公開準備" className="flex flex-col gap-3 rounded-[10px] border bg-card p-3.5 pb-20 sm:pb-3.5" data-testid="release-rc-finalize">
+    <section
+      id="release-rc-finalize"
+      aria-label="公開準備"
+      className="flex scroll-mt-4 flex-col gap-3 rounded-[10px] border bg-card p-3.5 pb-20 sm:pb-3.5"
+      data-testid="release-rc-finalize"
+    >
       <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
         <h3 className="text-sm font-semibold">公開準備</h3>
         {current && <StateChip tone={current.status === "failed" || current.status === "expired" ? "bad" : current.status === "applied" ? "ok" : "run"}>{current.statusLabel}</StateChip>}
@@ -950,7 +953,7 @@ export function ReleaseRcFinalizePanel({
         <div className="flex flex-col gap-2 rounded-lg border border-amber-500/60 p-3" data-testid="release-rc-legacy-approval">
           <p className="text-[12px]">
             {approval
-              ? "前の公開承認は使えません（失効・取り消し）。現在の内容を確かめて承認し直すと、最終検証の合格後に自動で本番公開します。"
+              ? "現在の内容を確かめて承認し直すと、最終検証の合格後に自動で本番公開します。"
               : "この候補は公開準備が済んでいますが、公開承認の記録がありません（以前の画面で公開準備を始めた候補です）。内容を確かめて1回だけ承認すると、最終検証の合格後に自動で本番公開します。"}
           </p>
           {pending?.kind === "approve" ? (
@@ -958,7 +961,7 @@ export function ReleaseRcFinalizePanel({
           ) : (
             <div>
               <Button size="sm" onClick={() => openConfirm("approve")} disabled={pending !== null}>
-                公開の承認内容を確認する
+                {approval ? "公開承認をやり直す" : "公開の承認内容を確認する"}
               </Button>
             </div>
           )}

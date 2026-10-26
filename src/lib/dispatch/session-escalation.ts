@@ -28,6 +28,15 @@ const SESSION_NOT_STARTED_MARKER = "<!-- supervisor:session-not-started -->";
 /** APIエラーで中断したまま止まっていることを知らせたマーカー（#1971） */
 const SESSION_INTERRUPTED_MARKER = "<!-- supervisor:session-interrupted -->";
 
+/**
+ * 引き上げの原因の種別を、本文の文言に頼らず読めるようにするマーカー（#5080）。PR詳細の
+ * 「止まった原因」が読む（`pull-request-stop-cause.ts`）。`SESSION_INTERRUPTED_MARKER`とは
+ * 別の行に置き、そちらの完全一致で判定している既存の読み手（`comment-source.ts`）を崩さない。
+ */
+export function sessionStallReasonMarker(reason: SessionInterruptedReason): string {
+  return `<!-- issue-deck:stall-reason:${reason} -->`;
+}
+
 export function buildSessionFailedCommentBody(params: {
   hostName: string;
   tmuxSessionName: string;
@@ -364,6 +373,7 @@ export function buildSessionInterruptedCommentBody(params: {
     "決めたこと自体が合図なので、画面の承認ボタンか`gh issue edit`で外してください）。",
     "",
     SESSION_INTERRUPTED_MARKER,
+    sessionStallReasonMarker(reason),
   );
   return lines.join("\n");
 }

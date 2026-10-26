@@ -4,10 +4,11 @@ import { requireUserId } from "@/lib/auth-user";
 import { db } from "@/lib/db";
 import { withGithubApiFeature } from "@/lib/github/api-usage";
 import { getInstallationToken } from "@/lib/github/app-auth";
+import type { CheckUserReason } from "@/lib/github/approval-labels";
 import { fetchPullRequestRollups, MERGE_JUDGEMENT_UNKNOWN, pullRequestRollupKey } from "@/lib/github/check-rollup";
 import type { IosPrecheckSummary } from "@/lib/github/ios-precheck";
 import { mapComment } from "@/lib/github/issue-mapper";
-import { fetchCommentsForIssue } from "@/lib/github/issues-api";
+import { fetchCommentsForIssue, fetchIssueTimeline } from "@/lib/github/issues-api";
 import { githubApiErrorMessage } from "@/lib/github/network-error";
 import { buildPullRequestEvents } from "@/lib/github/pull-request-events";
 import { findCurrentFixRequest, findInterruptedFixRequest } from "@/lib/github/pull-request-fix-request-service";
@@ -18,6 +19,8 @@ import {
 } from "@/lib/github/pull-request-repair-run";
 import { needsReviewAttention, parsePullRequestReviewVerdict } from "@/lib/github/pull-request-review-verdict";
 import { toPullRequestSummary } from "@/lib/github/pull-request-summary";
+import { fetchReleaseChecks, releaseChecksKey } from "@/lib/pull-request-release-checks";
+import { isReleasePullRequest } from "@/lib/release-merge-gate";
 import {
   fetchPullRequest,
   fetchPullRequestReviewComments,
@@ -31,6 +34,12 @@ import { resolveMergeCheckReasons, type MergeCheckReasons } from "@/lib/merge-ch
 import { extractLinkedIssueNumber, requiresUserMerge } from "@/lib/pull-request-list";
 import { DEVELOP_SYNC_BRANCH_PREFIX } from "@/lib/release-develop-sync";
 import { developSyncAutoMergeOutlook } from "@/lib/release-develop-sync-run";
+import {
+  resolveStopCause,
+  shouldResolveStopCause,
+  type PullRequestStopCause,
+  type StopCauseTimelineEvent,
+} from "@/lib/pull-request-stop-cause";
 import type { PullRequestDetail, PullRequestReviewResponseContext } from "@/types/pull-request";
 
 export function GET(request: NextRequest) {
@@ -170,6 +179,24 @@ async function handleGET(request: NextRequest) {
       summary.developSyncAutoMerge = developSyncAutoMergeOutlook(repository.fullName, number, summary.headSha);
     }
 
+    // リリース候補の検証・候補の記録（#5076）。一覧・ブランチ画面と同じ`fetchReleaseChecks`をDBから引き、
+    // 詳細の工程と`requiresUserMerge`が一覧と同じ入力で決まるようにする（GitHub APIは増えない）
+    if (summary.state === "open" && isReleasePullRequest(summary)) {
+      summary.releaseChecks =
+        (
+          await fetchReleaseChecks([
+            {
+              repositoryFullName: repository.fullName,
+              number,
+              baseRef: pullRequest.base.ref,
+              headRef: pullRequest.head.ref,
+              headSha: pullRequest.head.sha,
+              baseSha: pullRequest.base.sha ?? null,
+            },
+          ])
+        ).get(releaseChecksKey(repository.fullName, number)) ?? null;
+    }
+
     // ユーザーのマージが必要な理由（#4088）。必要なPRでだけ、対応Issueのコメントを1回読む。
     let userMergeReasons: MergeCheckReasons | null = null;
     if (requiresUserMerge(summary)) {
@@ -203,6 +230,19 @@ async function handleGET(request: NextRequest) {
       });
     }
 
+    // 対応Issueの`00.check-user`で止まっているときの直接原因（#5080）。対象のPRでだけtimelineを1回読む
+    const stopCause =
+      linkedIssueNumber !== null && shouldResolveStopCause(summary)
+        ? await resolvePullRequestStopCause({
+            owner,
+            repo,
+            issueNumber: linkedIssueNumber,
+            checkReason: summary.linkedIssueCheckReason,
+            judgement: summary.mergeJudgement.autoMergeRun ?? null,
+            token,
+          })
+        : null;
+
     const detail: PullRequestDetail = {
       id: `${repository.fullName}#${number}`,
       summary,
@@ -215,6 +255,7 @@ async function handleGET(request: NextRequest) {
       fetchedAt: new Date().toISOString(),
       userMergeReasons,
       reviewResponse,
+      stopCause,
     };
     return NextResponse.json(detail);
   } catch (error) {
@@ -283,6 +324,43 @@ async function resolveReviewResponseContext(params: {
       currentFixRequest: null,
       interruptedFixRequest: null,
       fetchFailed: true,
+    };
+  }
+}
+
+/**
+ * 止まった原因を対応Issueのtimelineから決める（#5080）。**読めなければ`fetch-failed`にする**——
+ * 取れなかったことを「原因なし」や推測で埋めない。timelineの最後が`00.check-user`の解除なら、
+ * キャッシュより新しい情報としてラベルは外れていると読み、nullを返す（カードを出さない）。
+ */
+async function resolvePullRequestStopCause(params: {
+  owner: string;
+  repo: string;
+  issueNumber: number;
+  checkReason: CheckUserReason | null;
+  judgement: PullRequestStopCause["judgement"];
+  token: string;
+}): Promise<PullRequestStopCause | null> {
+  const base = {
+    issueNumber: params.issueNumber,
+    issueUrl: `https://github.com/${params.owner}/${params.repo}/issues/${params.issueNumber}`,
+    judgement: params.judgement,
+  };
+  try {
+    const timeline = await fetchIssueTimeline<StopCauseTimelineEvent>(
+      params.owner,
+      params.repo,
+      params.issueNumber,
+      params.token,
+    );
+    const resolved = resolveStopCause({ timeline, checkReason: params.checkReason });
+    return resolved === null ? null : { ...base, ...resolved };
+  } catch (error) {
+    console.error(`[GET /api/pull-requests/detail] stop-cause lookup ${params.owner}/${params.repo}#${params.issueNumber}:`, error);
+    return {
+      ...base,
+      labeledAt: null,
+      cause: { status: "unidentified", why: "fetch-failed", investigate: [] },
     };
   }
 }

@@ -30,6 +30,7 @@ import { PullRequestUpdateBranchButton } from "@/components/dashboard/pull-reque
 import { PullRequestCiRerunButtons } from "@/components/dashboard/pull-request-ci-rerun-buttons";
 import { PullRequestMergeButton } from "@/components/dashboard/pull-request-merge-button";
 import { PullRequestMergeHoldNotice } from "@/components/dashboard/pull-request-merge-hold";
+import { PullRequestStopCauseNotice } from "@/components/dashboard/pull-request-stop-cause";
 import { PullRequestRepairButtons } from "@/components/dashboard/pull-request-repair-buttons";
 import { PullRequestBackupCi } from "@/components/dashboard/pull-request-backup-ci";
 import { PullRequestReviewFindings } from "@/components/dashboard/pull-request-review-findings";
@@ -54,6 +55,7 @@ import { selectPullRequestReviewComment } from "@/lib/github/pull-request-review
 import { repairKindsFor } from "@/lib/github/pull-request-repair";
 import { parseReleaseVerification, type ReleaseVerificationRow } from "@/lib/github/release-verification";
 import { canMergeFromDeck, isMergeWaitingForChecks, requiresUserMerge } from "@/lib/pull-request-list";
+import { shouldResolveStopCause } from "@/lib/pull-request-stop-cause";
 import { derivePrimaryState, type PrimaryStateTone } from "@/lib/pull-request-primary-state";
 import { applyReviewAction, deriveReviewAction } from "@/lib/pull-request-review-action";
 import { cn } from "@/lib/utils";
@@ -315,6 +317,12 @@ export function PullRequestDetail({
   // 指摘への対応・修正が残っている間は「マージする」を主操作にせず、マージの説明は詳細へ畳む
   const reviewUnresolved = reviewAction.kind === "respond" || reviewAction.kind === "requested" || reviewAction.kind === "repairing";
   const reviewRespond = reviewAction.kind === "respond" ? reviewAction : null;
+  // 止まった原因（#5080）。詳細の取得時点の値なので、一覧の更新でラベルが外れた・マージされたと
+  // 分かった時点で出さない（`shouldResolveStopCause`はいまのsummaryで判定する）
+  const stopCauseNotice =
+    currentDetail?.stopCause && shouldResolveStopCause(pullRequest) ? (
+      <PullRequestStopCauseNotice stopCause={currentDetail.stopCause} repositoryFullName={pullRequest.repositoryFullName} />
+    ) : null;
   const activeTab: DetailTab = tabState?.pullRequestId === pullRequest.id ? tabState.tab : "overview";
   const selectTab = (tab: DetailTab) => setTabState({ pullRequestId: pullRequest.id, tab });
   const isDevelopOpen = pullRequest.baseRef === "develop" && pullRequest.state === "open" && !pullRequest.merged;
@@ -488,6 +496,7 @@ export function PullRequestDetail({
                     指摘への対応・判断が済むまでは、マージを主操作にしていません。修正せずにマージする場合も、マージ確認の画面で指摘を確かめてから進みます。
                   </p>
                   <PullRequestMergeHoldNotice pullRequest={pullRequest} />
+                  {stopCauseNotice}
                   {requiresUserMerge(pullRequest) && <UserMergeRequiredBadge />}
                   {requiresUserMerge(pullRequest) && currentDetail?.userMergeReasons && (
                     <MergeCheckReasonNotice reasons={currentDetail.userMergeReasons} />
@@ -497,6 +506,8 @@ export function PullRequestDetail({
             ) : (
               <>
                 <PullRequestMergeHoldNotice pullRequest={pullRequest} />
+                {/* 自動マージが止まった直接原因と次の操作（#5080） */}
+                {stopCauseNotice}
 
                 {requiresUserMerge(pullRequest) && <UserMergeRequiredBadge />}
                 {/* ユーザーのマージが必要な理由（#4088）。押す前に読めるようにする */}
