@@ -19,10 +19,13 @@ import type { PullRequestSummary } from "@/types/pull-request";
  * 状態の見た目。**色だけに頼らず、記号と文字を常に出す**（スマホはホバーできない）。
  * 色の意味は全画面で揃える（#4293）: 琥珀＝人の承認・確認・操作待ち、赤＝失敗・要修正・問題による停止、
  * 紫＝実行中、灰＝実行待ち・未確認・意図的な停止、緑＝成功・完了。
+ *
+ * 琥珀（`wait`）はPRでは要確認など**問題の扱いの判断**なので、破線の枠にする（#5099）。公開承認（工程の琥珀の塗り＋はんこ）と
+ * 同じ画面に並んでも、形で見分けられるようにする。
  */
 const TONE_CLASS: Record<PullRequestHealthTone, string> = {
   bad: "border-destructive/60 bg-destructive/10 text-destructive",
-  wait: "border-amber-500/60 bg-amber-500/10 text-amber-700 dark:text-amber-400",
+  wait: "border-dashed border-amber-500 bg-amber-500/10 text-amber-700 dark:text-amber-400",
   run: "border-violet-500/60 bg-violet-500/10 text-violet-700 dark:text-violet-300",
   ok: "border-emerald-600/40 bg-emerald-600/10 text-emerald-700 dark:text-emerald-400",
   idle: "border-border bg-muted/40 text-muted-foreground",

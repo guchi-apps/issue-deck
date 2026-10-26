@@ -264,4 +264,12 @@ describe("summarizePullRequestHealth（#4015）", () => {
     expect(summary.humanCount).toBe(1);
     expect(summary.autoCount).toBe(2);
   });
+  it("人の番のうち、失敗を抱えたPRと要確認だけのPRを分けて数える（#5099）", () => {
+    const summary = summarizePullRequestHealth([
+      pr({ id: "a#1", ciState: "failure" }),
+      pr({ id: "a#2", ...withReview("passed", "needs-check") }),
+    ]);
+    expect(summary.humanCount).toBe(2);
+    expect(summary.failingHumanCount).toBe(1);
+  });
 });

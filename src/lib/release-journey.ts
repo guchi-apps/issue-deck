@@ -44,6 +44,11 @@ export type JourneyState =
 
 export type JourneyTone = Exclude<JourneyState, "done" | "todo" | "skipped">;
 export type JourneyOwner = "auto" | "user" | "none";
+/**
+ * 人の番の内訳（#5099）。`approval`＝進めてよいかを決める（公開承認・本番PRのマージ・バンプPRのマージ）、
+ * `decision`＝検証で見つかった問題をどう扱うかを決める（RC検証・最終検証の要確認）。表示だけに使い、判定・件数は変えない
+ */
+export type JourneyAttention = "approval" | "decision";
 
 export type JourneyStep = {
   key: JourneyStepKey;
@@ -78,6 +83,8 @@ export type ReleaseJourney = {
   headline: { key: JourneyStepKey; label: string; tone: JourneyTone; title: string | null } | null;
   /** いまの担当。人の番・失敗は`user`、自動で進むものは`auto`、取得不能・何も動いていないときは`none` */
   owner: JourneyOwner;
+  /** 見出しが人の番（`user`）のときの内訳。それ以外はnull */
+  attention: JourneyAttention | null;
   /** 次に起きること・必要な操作（1文） */
   next: string | null;
   /** 見出しに選ばれなかった、動いている・止まっている工程の文言（並行して進むものを隠さない） */
@@ -452,6 +459,7 @@ export function resolveReleaseJourney({
     total: steps.filter((step) => step.state !== "skipped").length,
     headline,
     owner: ownerOf(headline?.tone ?? null),
+    attention: headline?.tone === "user" ? journeyAttentionOf(headline.key) : null,
     next: headline ? nextOf(headline.key, headline.tone, legacy, approval?.status ?? null) : null,
     // RC検証の中で並行して進む・止まっている検証も隠さない（区切りの見出しに選ばれたもの以外）
     others: [
@@ -484,6 +492,11 @@ function ownerOf(tone: JourneyTone | null): JourneyOwner {
   if (tone === "user" || tone === "failed") return "user";
   if (tone === "running" || tone === "waiting" || tone === "fixing") return "auto";
   return "none";
+}
+
+/** 人の番の工程から、承認か判断かを決める。検証の区切りの人の番は要確認（問題の扱いの判断）だけ */
+export function journeyAttentionOf(key: JourneyStepKey): JourneyAttention {
+  return key === "verify" || key === "final" ? "decision" : "approval";
 }
 
 /** いまの工程から、次に起きること・必要な操作を1文で */

@@ -46,3 +46,33 @@ describe("ブランチの現在地と次の操作", () => {
     expect(describeBranchFlow(fixture(), options).state).toBe("公開前の変更なし");
   });
 });
+
+describe("手が要るときの内訳（#5099）", () => {
+  const counts = (overrides: Record<string, number>) => ({ ...fixture().summary.pullRequestHealth.counts, ...overrides });
+  it("本番PRのマージ待ち（公開手順）は承認", () => {
+    const repo = fixture(); repo.summary.releaseMergeTarget = "main";
+    expect(describeBranchFlow(repo, options)).toMatchObject({ attention: true, kind: "approval", next: "公開手順を確認" });
+  });
+  it("レビュー要確認だけのPRは判断、失敗を抱えたPRがあれば赤", () => {
+    const repo = fixture();
+    repo.summary.pullRequestHealth = { counts: counts({ "review-needs-check": 1 }), humanCount: 1, failingHumanCount: 0, autoCount: 0 };
+    expect(describeBranchFlow(repo, options)).toMatchObject({ attention: true, kind: "decision" });
+    repo.summary.pullRequestHealth = { counts: counts({ "ci-failed": 1 }), humanCount: 1, failingHumanCount: 1, autoCount: 0 };
+    expect(describeBranchFlow(repo, options).kind).toBe("problem");
+  });
+  it("失敗件数を持たない古い集計は、赤のカテゴリの件数で決める", () => {
+    const repo = fixture();
+    repo.summary.pullRequestHealth = { counts: counts({ conflict: 1 }), humanCount: 1, autoCount: 0 };
+    expect(describeBranchFlow(repo, options).kind).toBe("problem");
+  });
+  it("RC検証の要確認は判断、失敗は赤", () => {
+    const needsCheck = { problem: { kind: "needs_check" as const, label: "検証要確認", reasons: [] }, progress: null, detail: null };
+    expect(describeBranchFlow(fixture(), { ...options, verification: needsCheck }).kind).toBe("decision");
+    const failed = { problem: { kind: "fix_stalled" as const, label: "修正が停止中", reasons: [] }, progress: null, detail: null };
+    expect(describeBranchFlow(fixture(), { ...options, verification: failed }).kind).toBe("problem");
+  });
+  it("デプロイ失敗の導線は承認待ちと同じ見た目にしない", () => {
+    const repo = fixture(); repo.summary.deploy = { kind: "failure", htmlUrl: null, runId: null, manual: false, autoRetried: false };
+    expect(describeBranchFlow(repo, options).kind).toBe("problem");
+  });
+});
