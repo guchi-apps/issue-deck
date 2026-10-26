@@ -1,5 +1,6 @@
 "use client";
 
+import type { ReleaseRcFacts } from "@/types/pull-request";
 import { useCallback, useEffect, useState } from "react";
 
 import type { DevelopSyncStatus } from "@/lib/release-develop-sync";
@@ -10,7 +11,14 @@ import type { RcOverview } from "@/lib/release-rc-run";
  * 候補の状況に、公開準備（#4496）の状況と、本番反映以降のdevelop同期（#4641）の状況を足したもの。
  * どちらも無い応答（旧い応答）でも読める
  */
-export type RcOverviewWithFinalization = RcOverview & { finalization?: RcFinalizationOverview | null; developSync?: DevelopSyncStatus | null };
+export type RcOverviewWithFinalization = RcOverview & {
+  finalization?: RcFinalizationOverview | null;
+  developSync?: DevelopSyncStatus | null;
+  /** 工程の表示（#5076）の入力。PR一覧の`releaseChecks.rc`と同じ記録。古い応答には無い */
+  journeyFacts?: ReleaseRcFacts | null;
+  /** 上の記録を読めなかった */
+  journeyFactsUnavailable?: boolean;
+};
 
 const ACTIVE_POLL_MS = 10_000;
 const RETRY_POLL_MS = 30_000;

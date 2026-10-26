@@ -534,7 +534,10 @@ export function isReleaseJourneyNeedingUser(journey: ReleaseJourney | null): boo
  * PR1本（PR一覧・PR詳細）から出す工程。**新方式の候補（`release-rc/<番号>`）だけ**を対象にし、それ以外はnull
  * （旧方式の人のマージ待ちは従来の`deriveMergeHold`が出す）。ブランチ画面の畳んだ行と同じ候補の記録（`releaseChecks.rc`）を読む
  */
-export function resolvePullRequestJourney(pullRequest: JourneyPullRequest): ReleaseJourney | null {
+export function resolvePullRequestJourney(
+  pullRequest: JourneyPullRequest,
+  snapshot: { failed: boolean } | null = null,
+): ReleaseJourney | null {
   if (!isRcReleaseCandidateHeadRef(pullRequest.headRef)) return null;
-  return resolveReleaseJourney({ bumpPullRequest: null, candidatePullRequest: pullRequest, mergeTarget: null, deploy: null });
+  return resolveReleaseJourney({ bumpPullRequest: null, candidatePullRequest: pullRequest, mergeTarget: null, deploy: null, snapshot });
 }

@@ -802,11 +802,14 @@ export function ReleaseFixSummary({
   state,
   showPhases = false,
   extraAction,
+  completionAsSecondary = false,
   className,
 }: {
   state: ReleaseFixOverviewState;
   /** 修正の工程を出すか（本番PR詳細。修正の記録があるときだけ実際に出る） */
   showPhases?: boolean;
+  /** 「修正を自動で続ける」を「その他の操作」へ下げるか（#5076。いまの主な次の手が修正でないとき） */
+  completionAsSecondary?: boolean;
   /** 修正の操作が無いときに置く主操作（本番PR詳細の「本番公開へ進む」） */
   extraAction?: ReactNode;
   className?: string;
@@ -834,6 +837,7 @@ export function ReleaseFixSummary({
         target={state.target}
         canStart={overview.tone === "bad" || current !== null}
         rcCandidate={state.rcCandidate}
+        startAsSecondary={completionAsSecondary}
       />
       {error && <p className="text-destructive">{error}</p>}
       {overview.action.kind !== "none" ? <ReleaseFixPrimaryAction state={state} /> : extraAction}
