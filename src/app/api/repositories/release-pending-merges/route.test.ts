@@ -70,12 +70,24 @@ vi.mock("@/lib/github/release-workflow-cache", () => ({
 import { GET } from "@/app/api/repositories/release-pending-merges/route";
 import { MERGE_JUDGEMENT_UNKNOWN, type MergeJudgement } from "@/lib/github/check-rollup";
 import type { CiState, RefCheckState } from "@/lib/github/release-api";
-import type { PullRequestReleaseChecks } from "@/types/pull-request";
+import type { PullRequestReleaseChecks, ReleaseRcFacts } from "@/types/pull-request";
 
 /** リリースPR #12の検証状態を返す`fetchReleaseChecks`の実装（#4390） */
 function releaseChecksOf(checks: PullRequestReleaseChecks) {
   return async () => new Map([["owner/repo-a#12", checks]]);
 }
+
+/** 検証中（review）の新方式の候補の記録（#5076） */
+const RC_REVIEW: ReleaseRcFacts = {
+  sequence: 11,
+  phase: "review",
+  pendingRevision: null,
+  approval: null,
+  finalization: null,
+  productionStopLabel: null,
+  predecessor: null,
+  updatedAt: "2026-10-26T12:00:00.000Z",
+};
 
 const CHECKS_PASSED: PullRequestReleaseChecks = {
   aiReview: "passed",
@@ -186,6 +198,7 @@ describe("GET /api/repositories/release-pending-merges", () => {
           pullRequestUrl: "https://github.com/owner/repo-a/pull/12",
           pullRequestTitle: "release",
           ciState: "success",
+          actionLabel: null,
         },
       },
     ]);
@@ -215,6 +228,7 @@ describe("GET /api/repositories/release-pending-merges", () => {
           pullRequestUrl: "https://github.com/owner/repo-a/pull/12",
           pullRequestTitle: "release",
           ciState: "failure",
+          actionLabel: null,
         },
       },
     ]);
@@ -230,6 +244,8 @@ describe("GET /api/repositories/release-pending-merges", () => {
     );
     // 正式バンプ前の候補では`version-tag-check`が落ちている。読めば「チェック失敗」になる
     fetchRefCheckState.mockResolvedValue(checkState("failure"));
+    // 検証に合格した新方式の候補は、工程（#5076）で公開承認があなたの番になる
+    fetchReleaseChecks.mockImplementation(releaseChecksOf({ ...CHECKS_PASSED, rc: RC_REVIEW }));
 
     const response = await GET();
     const json = await response.json();
@@ -239,9 +255,42 @@ describe("GET /api/repositories/release-pending-merges", () => {
       expect.objectContaining({
         repoFullName: "owner/repo-a",
         status: "action_required",
-        pendingMerge: expect.objectContaining({ mergeTarget: "main", ciState: "unknown" }),
+        pendingMerge: expect.objectContaining({ mergeTarget: "main", ciState: "unknown", actionLabel: "公開承認待ち" }),
       }),
     ]);
+  });
+
+  it("公開承認済みで自動公開を待つ新方式の候補は、人の番として数えない（#5076）", async () => {
+    fetchOpenPullRequestsForBase.mockImplementation(
+      openPullRequestsFor({ repo: "repo-a", base: "main", pullRequest: { ...RELEASE_PR, head: { ref: "release-rc/11" } } }),
+    );
+    fetchRefCheckState.mockResolvedValue(checkState("success"));
+    fetchReleaseChecks.mockImplementation(
+      releaseChecksOf({
+        ...CHECKS_PASSED,
+        publishApproved: true,
+        rc: {
+          ...RC_REVIEW,
+          phase: "awaiting_approval",
+          approval: {
+            status: "active",
+            progress: "auto_publish",
+            approvedAt: "2026-10-26T12:00:00.000Z",
+            revision: 1,
+            invalidMessage: null,
+            runStatus: "merging",
+            runActive: true,
+            waitMessage: null,
+            waitStalled: false,
+            stopMessage: null,
+          },
+        },
+      }),
+    );
+
+    const json = await (await GET()).json();
+
+    expect(json.releaseStatuses[0]?.pendingMerge ?? null).toBeNull();
   });
 
   it("draftのバンプPRもチェックを読まない（#4916）", async () => {
@@ -382,6 +431,7 @@ describe("GET /api/repositories/release-pending-merges", () => {
           pullRequestUrl: "https://github.com/owner/repo-a/pull/34",
           pullRequestTitle: "release/v1.2.3",
           ciState: "success",
+          actionLabel: null,
         },
       },
     ]);
@@ -522,6 +572,7 @@ describe("GET /api/repositories/release-pending-merges", () => {
           pullRequestUrl: "https://github.com/owner/repo-b/pull/3",
           pullRequestTitle: "release",
           ciState: "success",
+          actionLabel: null,
         },
       },
     ]);

@@ -19,6 +19,11 @@ export type ReleasePendingMerge = {
   pullRequestTitle: string;
   /** マージ対象PRのCI状態。`failure`は「マージ待ち」ではなく修正が要ることを示す（#1059） */
   ciState: CiState;
+  /**
+   * 新方式の候補で人に求める操作の文言（#5076。工程の見出し。「公開承認待ち」「公開承認が失効」など）。
+   * 「mainへマージ待ち」の代わりに出す。旧方式・古い応答では省略
+   */
+  actionLabel?: string | null;
 };
 
 /** `/api/repositories/release-pending-merges`が返すリポジトリ1件ぶんのリリース状況（#1117） */

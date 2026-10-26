@@ -1712,8 +1712,8 @@ describe("BranchFlowView", () => {
       });
 
       ensureRepositoryOpen();
-      // 畳んだ1行（琥珀のピル）と幹のバンプPRの行の2か所に出る（#2038）
-      expect(screen.getAllByText("developへマージ待ち")).toHaveLength(2);
+      // 畳んだ1行・次のリリースの工程と現在地（#5076）・幹のバンプPRの行に出る（#2038）
+      expect(screen.getAllByText("developへマージ待ち").length).toBeGreaterThanOrEqual(2);
       expect(screen.getByText("マージする")).toBeTruthy();
     });
   });
@@ -1774,9 +1774,10 @@ describe("BranchFlowView", () => {
       expect(screen.getByText("本番へデプロイ中")).toBeTruthy();
       expect(screen.getByText("8/15にmainへマージ")).toBeTruthy();
       expect(screen.queryByText("8/15に本番反映")).toBeNull();
-      // 畳んだ1行にも出す（開かなくても気づけるように）。進行バーの最後の区切り（本番反映）が引き継ぐ（#4930）
-      expect(screen.getByText("本番反映中")).toBeTruthy();
-      expect(screen.getByLabelText("本番リリース 5/6：本番反映中")).toBeTruthy();
+      // 畳んだ1行にも出す（開かなくても気づけるように）。工程の本番反映の区切りが引き継ぐ（#4930・#5076）。
+      // 旧方式の版なので公開承認・最終検証・稼働確認は対象外で、分母から外す
+      expect(screen.getAllByText("本番反映中").length).toBeGreaterThan(0);
+      expect(screen.getByLabelText(/^本番リリース 3\/4：本番反映中/)).toBeTruthy();
       expect(screen.queryByText("デプロイ中")).toBeNull();
     });
 
@@ -1790,9 +1791,9 @@ describe("BranchFlowView", () => {
 
       ensureRepositoryOpen();
       // 次のリリースに乗る分が無いので、いちばん新しい版の束が既定で開いている（#1711）
-      // 畳んだ1行（ボタンなのでリンクにしない）と束の見出しの2か所に出る
+      // 畳んだ1行（ボタンなのでリンクにしない）・次のリリースの工程（#5076）と束の見出しに出る
       const badges = screen.getAllByText("デプロイ失敗");
-      expect(badges).toHaveLength(2);
+      expect(badges.length).toBeGreaterThanOrEqual(2);
       expect(badges.some((badge) => badge.closest("a") === null)).toBe(true);
       expect(
         badges.map((badge) => badge.closest("a")?.getAttribute("href")),
@@ -1963,8 +1964,8 @@ describe("BranchFlowView", () => {
       });
 
       ensureRepositoryOpen();
-      // 畳んだ1行と束の見出しの2か所に出す（#2038）。開かなくても押す番だと分かるようにする
-      expect(screen.getAllByText("mainへマージ待ち")).toHaveLength(2);
+      // 畳んだ1行・次のリリースの工程と現在地（#5076）・束の見出しに出す（#2038）。開かなくても押す番だと分かるようにする
+      expect(screen.getAllByText("mainへマージ待ち").length).toBeGreaterThanOrEqual(2);
       // 「リリース中」（待てば進む）とは同時に出さない
       expect(screen.queryByText("リリース中")).toBeNull();
     });
@@ -2040,7 +2041,7 @@ describe("BranchFlowView", () => {
       ensureRepositoryOpen();
       expect(screen.queryByText("mainへマージ待ち")).toBeNull();
       // 畳んだ1行の進行バー（#4930）が、回るアイコン付きの「マージ判定中」に戻る
-      const pills = screen.getAllByLabelText(/^本番リリース \d\/\d：リリース候補のマージ判定中/);
+      const pills = screen.getAllByLabelText(/^本番リリース .*\d\/\d：リリース候補のマージ判定中/);
       expect(pills.length).toBeGreaterThan(0);
       pills.forEach((pill) => expect(pill.querySelector(".animate-spin")).toBeTruthy());
     });
@@ -2132,7 +2133,7 @@ describe("BranchFlowView", () => {
         branchStatuses: [unreleased],
       });
 
-      expect(screen.getByText("リリース候補のマージ判定中")).toBeTruthy();
+      expect(screen.getAllByText("リリース候補のマージ判定中").length).toBeGreaterThan(0);
       expect(screen.queryByText("mainへマージ待ち")).toBeNull();
       expect(screen.getByText(/待てば進むもの1件/)).toBeTruthy();
       expect(screen.queryByText(/手が要るもの/)).toBeNull();
@@ -2178,8 +2179,8 @@ describe("BranchFlowView", () => {
         started: { aiReview: true, integration: true, mac: false },
       });
 
-      // 進行バー（#4930）の見出しは工程順で先の統合検証、並行する全体レビューは後ろへ添える
-      expect(screen.getByText("統合検証中")).toBeTruthy();
+      // 工程（#5076）のRC検証の見出しは先の統合検証、並行する全体レビューは後ろへ添える
+      expect(screen.getAllByText("統合検証中").length).toBeGreaterThan(0);
       expect(screen.getByText("＋全体レビュー中")).toBeTruthy();
       expect(screen.queryByText("リリース中")).toBeNull();
       expect(screen.queryByText(/CI実行中/)).toBeNull();

@@ -31,6 +31,8 @@ import {
 } from "@/lib/release-candidate-status";
 import { loadPublishApprovedPullRequests } from "@/lib/release-publish-approval-run";
 import { fetchReleaseChecks, releaseChecksKey } from "@/lib/pull-request-release-checks";
+import { isRcReleaseCandidateHeadRef } from "@/lib/release-branch";
+import { isReleaseJourneyNeedingUser, resolveReleaseJourney } from "@/lib/release-journey";
 
 export type ReleasePendingMerge = {
   mergeTarget: ReleaseMergeTarget;
@@ -42,6 +44,8 @@ export type ReleasePendingMerge = {
    * 画面へ出し、「マージすればよい」と「CIが落ちていて直す必要がある」を区別するため（#1059）。
    */
   ciState: CiState;
+  /** 新方式の候補で人に求める操作の文言（#5076。工程の見出し）。旧方式はnull */
+  actionLabel: string | null;
 };
 
 /**
@@ -166,26 +170,50 @@ async function handleGET() {
         const releaseJudgementPending = isMergeJudgementPending(releaseCheck?.mergeJudgement);
         // 統合検証・全体レビューの状態（#4390）。ブランチ画面と同じ`fetchReleaseChecks`をDBから引く
         // （GitHub APIは増えない）。読めなければ「取得不能」になり、マージ待ちとは数えない
+        const releaseChecks = releasePr
+          ? ((
+              await fetchReleaseChecks([
+                {
+                  repositoryFullName: repository.fullName,
+                  number: releasePr.number,
+                  baseRef: releasePr.base?.ref ?? "main",
+                  headRef: releasePr.head.ref,
+                  baseSha: releasePr.base?.sha ?? null,
+                  headSha: releasePr.head.sha,
+                },
+              ])
+            ).get(releaseChecksKey(repository.fullName, releasePr.number)) ?? null)
+          : null;
         const releaseVerification = releasePr
           ? resolvePullRequestReleaseVerification({
               // `fetchOpenPullRequestsForBase(..., "main")`で引いたPRなのでbaseはmain
               baseRef: releasePr.base?.ref ?? "main",
               headRef: releasePr.head.ref,
-              releaseChecks:
-                (
-                  await fetchReleaseChecks([
-                    {
-                      repositoryFullName: repository.fullName,
-                      number: releasePr.number,
-                      baseRef: releasePr.base?.ref ?? "main",
-                      headRef: releasePr.head.ref,
-                      baseSha: releasePr.base?.sha ?? null,
-                      headSha: releasePr.head.sha,
-                    },
-                  ])
-                ).get(releaseChecksKey(repository.fullName, releasePr.number)) ?? null,
+              releaseChecks,
             })
           : null;
+        // 新方式の候補は、ブランチ画面・PR一覧と同じ工程（#5076）で人の番かを決める。公開承認待ち・失効・
+        // 自動公開の停止は数え、承認後の自動公開は数えない。文言も「mainへマージ待ち」でなく工程の見出しを使う
+        const journey =
+          releasePr && isRcReleaseCandidateHeadRef(releasePr.head.ref) && releaseCheck
+            ? resolveReleaseJourney({
+                bumpPullRequest: null,
+                candidatePullRequest: {
+                  state: "open",
+                  merged: false,
+                  draft: releasePr.draft === true,
+                  baseRef: releasePr.base?.ref ?? "main",
+                  headRef: releasePr.head.ref,
+                  ciState: releaseCheck.ciState,
+                  ciChecks: [],
+                  mergeJudgement: releaseCheck.mergeJudgement,
+                  releaseChecks,
+                  iosPrecheck: null,
+                },
+                mergeTarget: null,
+                deploy: null,
+              })
+            : null;
         // 公開承認済みなら、マージ待ちとして数えない（#5064）
         const publishApproved = releasePr
           ? (await loadPublishApprovedPullRequests(repository.fullName, [
@@ -212,6 +240,7 @@ async function handleGET() {
                 mergeJudgementPending: releaseJudgementPending,
                 verification: releaseVerification ? releaseVerificationBlock(releaseVerification) : null,
                 publishApproved,
+                ...(journey ? { journeyNeedsUser: isReleaseJourneyNeedingUser(journey) } : {}),
               }
             : null,
           releasePending: false,
@@ -233,6 +262,7 @@ async function handleGET() {
             pullRequestUrl: releasePr.html_url,
             pullRequestTitle: releasePr.title,
             ciState: releaseCiState,
+            actionLabel: journey?.headline?.label ?? null,
           };
         } else if (bumpPr && bumpCiState !== null && bumpWaiting) {
           // developへのマージ待ち（バンプPRがCI通過後も残っている＝auto-merge滞留）を検出する。
@@ -242,6 +272,7 @@ async function handleGET() {
             pullRequestUrl: bumpPr.html_url,
             pullRequestTitle: bumpPr.title,
             ciState: bumpCiState,
+            actionLabel: null,
           };
         }
 
