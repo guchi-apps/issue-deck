@@ -4700,8 +4700,10 @@ Discordに貼るURLは従来の`/dashboard?issue=…`・`?pr=…`のまま（#50
 リンクプレビューのクローラーは未ログインで`/login`へ転送されるため、[../src/proxy.ts](../src/proxy.ts)が
 **`updateSession`より前**に、クローラーUA＋`/dashboard`＋妥当な`issue=`/`pr=`のときだけ`/share/...`へrewriteする。
 
-- `src/lib/share-card.ts`: UA判定・クエリ検証・`/share`パスの組み立て（純関数）。`share-card-server.ts`がDBから**リポジトリ名・種別・番号の3つだけ**を引く（selectはこの3つと公開判定の`private`のみ）
+- `src/lib/share-card.ts`: UA判定・クエリ検証・`/share`パスの組み立て（純関数）。`share-card-server.ts`がDBから**リポジトリ名・種別・番号**と、Issueのみ**タイトル・GitHub上の作成日時**（#5090）を引く（selectはこれらと公開判定の`private`のみ。本文は読まない）
 - `src/app/share/issue/[id]`・`share/pr/[owner]/[repo]/[number]`: OGメタ（`page.tsx`）とカード画像（`opengraph-image.tsx`。描画は`share-card-image.tsx`）。人が直接開くと`ShareRedirect`が`/dashboard?...`へ移す
-- `/share`は`publicPaths`に入れてある（ログイン不要）。**タイトル・本文・状態・担当者はメタにも画像にも出さない**。未存在・不正IDは存在を示さない汎用カード（200）
+- `/share`は`publicPaths`に入れてある（ログイン不要）。**本文・状態・担当者・コメント数はメタにも画像にも出さない**（タイトルと作成日は公開Issueに限って出す。#5090）。未存在・不正IDは存在を示さない汎用カード（200）
+- カード画像（`next/og`のsatori）の既定フォントは日本語を持たない。`share-card-font.ts`が、画面用に入っている`@fontsource/murecho`のwoff（unicode-range別の分割。satoriはwoff2を読めない）から描く文字を含む分割だけを読む。**分割は1つずつ別名で登録して`fontFamily`に並べる**（同名だとsatoriは名前ごとに1つしか太さを合わせず、太字が効かない）。`lineClamp`に`overflow: hidden`を併用すると末尾の「…」が切れる
+- カード画像のルートは`force-dynamic`。既定だと初回の結果がキャッシュされ、公開→非公開へ切り替えた後も古い画像を返し得る
 - **公開リポジトリ（`Repository.private=false`）のIssue・PRだけがカードになる**（#5054）。非公開リポジトリは、未存在・不正IDと同じ汎用カードを返し、リポジトリ名・番号を匿名の相手へ開示しない（IssueのIDは列挙できるため）。非公開リポジトリのリンクはプレビューが出ない
 - Discordはカードを長くキャッシュする。更新を確かめるときはURLに`&v=<任意>`を付ける
