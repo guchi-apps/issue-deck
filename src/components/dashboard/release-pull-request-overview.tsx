@@ -10,6 +10,7 @@ import { ReleaseDevelopSyncNotice } from "@/components/dashboard/release-develop
 import { ReleaseRcIdentity, ReleaseRcLegacyNotice, ReleaseRcRevisionHistory } from "@/components/dashboard/release-rc-identity";
 
 import { decidePublishForPullRequest, ReleasePublishAction } from "@/components/dashboard/release-publish-action";
+import { JourneyMoreActions, ReleaseJourneyNow, ReleaseJourneySteps } from "@/components/dashboard/release-journey";
 import {
   ReleaseContentsList,
   ReleaseFixHistory,
@@ -24,6 +25,7 @@ import { useReleaseChanges } from "@/hooks/use-release-changes";
 import { useReleaseVerification } from "@/hooks/use-release-verification";
 import { buildMergeChecks, cellsFromSummary, type MergeCheckItem, type MergeCheckTone } from "@/lib/pull-request-merge-checks";
 import { buildReleaseCheckCells, describeCandidateTarget } from "@/lib/release-candidate-checks";
+import { resolvePullRequestJourney } from "@/lib/release-journey";
 import { cn } from "@/lib/utils";
 import type { PullRequestSummary } from "@/types/pull-request";
 
@@ -181,6 +183,28 @@ export function ReleasePullRequestOverview({
     headRef,
   });
   const { openPullRequest } = useReferenceNavigation();
+  // 工程はPR一覧と同じ入力（`releaseChecks`）から作る（#5076）。候補の記録だけは、操作後・進行中に取り直す
+  // 候補の状況（`useReleaseRc`）の新しい値で置き換え、承認の直後に古い「公開承認待ち」が残らないようにする
+  const journey = resolvePullRequestJourney(
+    rc.overview && pullRequest.releaseChecks
+      ? {
+          ...pullRequest,
+          releaseChecks: {
+            ...pullRequest.releaseChecks,
+            rc: rc.overview.journeyFacts !== undefined ? rc.overview.journeyFacts : (pullRequest.releaseChecks.rc ?? null),
+            unavailableParts: [
+              ...(pullRequest.releaseChecks.unavailableParts ?? []).filter((part) => part !== "rc"),
+              ...(rc.overview.journeyFactsUnavailable ? (["rc"] as const) : []),
+            ],
+          },
+        }
+      : pullRequest,
+    rc.error ? { failed: true } : null,
+  );
+  const manualPublish =
+    journey && publishDecision?.ok ? (
+      <ReleasePublishAction pullRequest={pullRequest} decision={publishDecision} onMerged={onMerged} variant="outline" label="承認せずに本番公開へ進む" />
+    ) : null;
   const reload = () => setReloadToken((n) => n + 1);
 
   return (
@@ -197,14 +221,44 @@ export function ReleasePullRequestOverview({
         <ReleaseRcLegacyNotice overview={rc.overview} legacy={legacy} repositoryFullName={repositoryFullName} onChanged={rc.reload} />
       )}
 
-      <section aria-label="現在の状態と次の操作" className="rounded-[10px] border bg-card p-3.5 text-sm">
+      <section aria-label="現在の状態と次の操作" className="flex flex-col gap-3 rounded-[10px] border bg-card p-3.5 text-sm">
+        {/* 新方式の候補は、ブランチ画面・PR一覧と同じ工程と「いま・担当・次」を先頭に出す（#5076）。主操作は1つで、
+            承認を経ない手動の公開は「その他の操作」へ下げる（承認そのもののボタンは下の「公開準備」にある） */}
+        {journey && (
+          <div className="flex flex-col gap-2 text-xs" data-testid="release-pull-request-journey">
+            <ReleaseJourneySteps journey={journey} />
+            <ReleaseJourneyNow
+              journey={journey}
+              action={
+                <button type="button" className="text-[11px] text-muted-foreground underline underline-offset-2 hover:text-foreground" onClick={reload}>
+                  状態を取り直す
+                </button>
+              }
+              link={
+                journey.headline?.key === "approve" && journey.owner === "user" && rc.overview?.finalization ? (
+                  <a href="#release-rc-finalize" className="text-primary hover:underline">
+                    下の「公開準備」で{journey.headline.label === "公開承認待ち" ? "公開承認する" : "承認し直す"} ↓
+                  </a>
+                ) : null
+              }
+              more={
+                <JourneyMoreActions count={manualPublish ? 1 : 0}>
+                  {manualPublish}
+                </JourneyMoreActions>
+              }
+            />
+          </div>
+        )}
         <ReleaseFixSummary
           state={state}
           showPhases
+          completionAsSecondary={journey !== null && !(journey.headline?.key === "verify" && journey.owner === "user")}
           extraAction={
-            <div className="pt-1">
-              <ReleasePublishAction pullRequest={pullRequest} decision={publishDecision} onMerged={onMerged} />
-            </div>
+            journey ? null : (
+              <div className="pt-1">
+                <ReleasePublishAction pullRequest={pullRequest} decision={publishDecision} onMerged={onMerged} />
+              </div>
+            )
           }
         />
       </section>

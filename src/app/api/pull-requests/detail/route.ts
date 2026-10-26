@@ -19,6 +19,8 @@ import {
 } from "@/lib/github/pull-request-repair-run";
 import { needsReviewAttention, parsePullRequestReviewVerdict } from "@/lib/github/pull-request-review-verdict";
 import { toPullRequestSummary } from "@/lib/github/pull-request-summary";
+import { fetchReleaseChecks, releaseChecksKey } from "@/lib/pull-request-release-checks";
+import { isReleasePullRequest } from "@/lib/release-merge-gate";
 import {
   fetchPullRequest,
   fetchPullRequestReviewComments,
@@ -170,6 +172,23 @@ async function handleGET(request: NextRequest) {
         },
       );
     summary.iosPrecheck = iosPrecheck;
+    // リリース候補の検証・候補の記録（#5076）。一覧・ブランチ画面と同じ`fetchReleaseChecks`をDBから引き、
+    // 詳細の工程と`requiresUserMerge`が一覧と同じ入力で決まるようにする（GitHub APIは増えない）
+    if (summary.state === "open" && isReleasePullRequest(summary)) {
+      summary.releaseChecks =
+        (
+          await fetchReleaseChecks([
+            {
+              repositoryFullName: repository.fullName,
+              number,
+              baseRef: pullRequest.base.ref,
+              headRef: pullRequest.head.ref,
+              headSha: pullRequest.head.sha,
+              baseSha: pullRequest.base.sha ?? null,
+            },
+          ])
+        ).get(releaseChecksKey(repository.fullName, number)) ?? null;
+    }
 
     // ユーザーのマージが必要な理由（#4088）。必要なPRでだけ、対応Issueのコメントを1回読む。
     let userMergeReasons: MergeCheckReasons | null = null;

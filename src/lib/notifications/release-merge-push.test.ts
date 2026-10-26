@@ -171,11 +171,47 @@ describe("runReleaseMergePushSweep", () => {
       mergeJudgement: MERGE_JUDGEMENT_UNKNOWN,
     });
 
+    // 検証に合格した新方式の候補は、工程（#5076）で公開承認があなたの番になる
+    vi.mocked(fetchReleaseChecks).mockResolvedValueOnce(
+      new Map([
+        [
+          "guchi-apps/issue-deck#1308",
+          {
+            aiReview: "passed",
+            integration: "passed",
+            enforced: false,
+            rc: {
+              sequence: 11,
+              phase: "review",
+              pendingRevision: null,
+              approval: null,
+              finalization: null,
+              productionStopLabel: null,
+              predecessor: null,
+              updatedAt: "2026-10-26T12:00:00.000Z",
+            },
+          },
+        ],
+      ]),
+    );
+
     const result = await runReleaseMergePushSweep({ now: NOW });
 
     expect(fetchRefCheckState).not.toHaveBeenCalled();
     expect(result.pending).toHaveLength(1);
     expect(result.pending[0]?.ciState).toBe("unknown");
+    expect(result.pending[0]?.actionLabel).toBe("公開承認待ち");
+  });
+
+  it("新方式の候補の記録が無い・読めないときは、推測で鳴らさない（#5076）", async () => {
+    stubDb({ repositories: [REPOSITORY] });
+    vi.mocked(fetchOpenPullRequestsForBase).mockResolvedValue([
+      { number: 1308, title: "リリース候補 RC-11", head: { ref: "release-rc/11" }, draft: true },
+    ] as never);
+
+    const result = await runReleaseMergePushSweep({ now: NOW });
+
+    expect(result.pending).toHaveLength(0);
   });
 
   it("自動マージ可否の判定中は鳴らさない（#2326。画面が我慢している最中に鳴らさない）", async () => {

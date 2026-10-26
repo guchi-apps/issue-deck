@@ -73,6 +73,11 @@ type Props = {
    * 範囲の選択に違いが無い。範囲を選ばせず、本番公開は公開承認で行うと示す（#4981）
    */
   rcCandidate?: boolean;
+  /**
+   * 開始ボタンを「その他の操作」へ下げるか（#5076）。新方式の候補で、いまの主な次の手が修正ではない
+   * （公開承認・自動公開・本番反映など）ときに使う。主操作を1つに保つため
+   */
+  startAsSecondary?: boolean;
 };
 
 /**
@@ -83,7 +88,7 @@ type Props = {
  * 本番マージ・デプロイ・稼働確認）ごとの再操作は求めない。押す前に**どこまで自動で進めるか**を選ばせ、
  * 本番へのマージは開始者が選んだ系列だけにする。
  */
-export function ReleaseCompletionPanel({ runState, repositoryFullName, pullRequestNumber, target, canStart, rcCandidate = false }: Props) {
+export function ReleaseCompletionPanel({ runState, repositoryFullName, pullRequestNumber, target, canStart, rcCandidate = false, startAsSecondary = false }: Props) {
   const [owner, repo] = repositoryFullName.split("/");
   const own = useReleaseCompletionRun(repositoryFullName, pullRequestNumber, !runState);
   const { run: shownRun, setRun: setShownRun } = runState ?? own;
@@ -136,31 +141,41 @@ export function ReleaseCompletionPanel({ runState, repositoryFullName, pullReque
   const shown = shownRun ?? null;
   const loaded = shownRun !== undefined;
   const showStart = loaded && canStart && !shown?.active;
+  const startControl = (
+    <div className="flex flex-col gap-1">
+      <Button
+        size="sm"
+        variant={startAsSecondary ? "outline" : "default"}
+        className="min-h-11 w-fit gap-1 px-4 text-sm"
+        onClick={() => {
+          // 新方式は範囲に違いが無いので、選ばせずに`until_ready`で始める
+          setScope(rcCandidate ? RELEASE_COMPLETION_SCOPE_READY : null);
+          setConfirmOpen(true);
+        }}
+        disabled={busy !== null}
+      >
+        {busy === "start" ? <Loader2 className="size-3 animate-spin" aria-hidden="true" /> : <Rocket className="size-3" aria-hidden="true" />}
+        修正を自動で続ける
+      </Button>
+      <p className="text-muted-foreground" data-testid="release-completion-hint">
+        修正Issueの作成から修正・取り込み・再検証までを、指摘が残る限り自動で繰り返します。使わない場合は、修正を1世代ずつ手で進めます。
+      </p>
+    </div>
+  );
   if (!shown && !showStart && !error) return null;
 
   return (
     <div className="flex flex-col gap-1.5" data-testid="release-completion">
       {shown && <RunCard run={shown} busy={busy} onStop={() => void stop()} rcCandidate={rcCandidate} />}
-      {showStart && (
-        <div className="flex flex-col gap-1">
-          <Button
-            size="sm"
-            className="min-h-11 w-fit gap-1 px-4 text-sm"
-            onClick={() => {
-              // 新方式は範囲に違いが無いので、選ばせずに`until_ready`で始める
-              setScope(rcCandidate ? RELEASE_COMPLETION_SCOPE_READY : null);
-              setConfirmOpen(true);
-            }}
-            disabled={busy !== null}
-          >
-            {busy === "start" ? <Loader2 className="size-3 animate-spin" aria-hidden="true" /> : <Rocket className="size-3" aria-hidden="true" />}
-            修正を自動で続ける
-          </Button>
-          <p className="text-muted-foreground" data-testid="release-completion-hint">
-            修正Issueの作成から修正・取り込み・再検証までを、指摘が残る限り自動で繰り返します。使わない場合は、修正を1世代ずつ手で進めます。
-          </p>
-        </div>
-      )}
+      {showStart &&
+        (startAsSecondary ? (
+          <details className="text-xs" data-testid="release-completion-secondary">
+            <summary className="cursor-pointer text-muted-foreground hover:text-foreground">その他の操作（修正を自動で続ける）</summary>
+            <div className="mt-1.5">{startControl}</div>
+          </details>
+        ) : (
+          startControl
+        ))}
       {error && (
         <p role="alert" className="text-destructive">
           {error}
@@ -291,6 +306,8 @@ function RunCard({ run, busy, onStop, rcCandidate }: { run: ReleaseCompletionRun
           </button>
         )}
       </p>
+      {/* 新方式の候補は、ページ先頭の工程（#5076）が同じ進行を出すので、この系列だけの段は出さない */}
+      {!rcCandidate && (
       <ol className="grid grid-cols-3 gap-1 sm:grid-cols-6" aria-label="リリースの進行状況">
         {RELEASE_COMPLETION_STAGES.map((label, index) => (
           <li
@@ -311,6 +328,7 @@ function RunCard({ run, busy, onStop, rcCandidate }: { run: ReleaseCompletionRun
           </li>
         ))}
       </ol>
+      )}
       <p className="break-words leading-relaxed" data-testid="release-completion-note">
         {progressNote(run, rcCandidate)}
       </p>
