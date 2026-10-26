@@ -1,5 +1,6 @@
 import { CHECK_USER_LABEL, type CheckUserReason } from "@/lib/github/approval-labels";
 import { sessionStallTitle } from "@/lib/dispatch/session-stall";
+import type { ConflictCheckUserTimelineEvent } from "@/lib/github/conflict-check-user-clear";
 import { deriveMergeHold } from "@/lib/pull-request-merge-hold";
 import type { PullRequestSummary } from "@/types/pull-request";
 import {
@@ -21,16 +22,15 @@ import {
  * （阻止条件は対応Issueの`00.check-user`で、それはこれまでどおり`requiresUserMerge`等が読む）。
  */
 
-/** GitHubの`/issues/{number}/timeline`のうち、この判定が読むフィールド */
-export type StopCauseTimelineEvent = {
-  event?: string;
+/**
+ * GitHubの`/issues/{number}/timeline`のうち、この判定が読むフィールド。コンフリクト解消の確認待ち
+ * 解除（`conflict-check-user-clear.ts`）と同じ型に、記録の時刻とURLを足したもの。付与時刻は
+ * DBの`checkUserLabeledAt`（同期した時刻）ではなく、timelineの並びと時刻から読む（#4931と同じ理由）
+ */
+export type StopCauseTimelineEvent = ConflictCheckUserTimelineEvent & {
   created_at?: string;
-  /** `commented`の本文 */
-  body?: string | null;
   /** `commented`のURL */
   html_url?: string;
-  /** `labeled`・`unlabeled`のラベル */
-  label?: { name: string } | null;
 };
 
 export type StopCauseLink = { label: string; url: string };
