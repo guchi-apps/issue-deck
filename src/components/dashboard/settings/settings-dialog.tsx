@@ -44,6 +44,7 @@ import type {
   PlanReviewAgent,
   AiExecutionProvider,
 } from "@/lib/app-settings";
+import type { BranchViewMode } from "@/lib/branch-view-visibility";
 import type { ConnectedRepository } from "@/types/repository";
 import type { ReviewGateIssueDraft } from "@/lib/review-gate-issue-draft";
 import type { CurrentUser } from "@/types/user";
@@ -73,9 +74,13 @@ type SettingsDialogProps = {
   modelPickEngine: ModelPickEngine;
   dispatchConcurrency: number;
   repositories: ConnectedRepository[];
-  onSetRepositoryHidden: (repository: ConnectedRepository, hidden: boolean) => void;
+  onSetRepositoryHidden: (repository: ConnectedRepository, hidden: boolean) => boolean | void | Promise<boolean | void>;
   onSetRepositoriesHidden: (repositories: ConnectedRepository[], hidden: boolean) => void;
-  onSetRepositoryIssueCreationExcluded: (repository: ConnectedRepository, excluded: boolean) => void;
+  onSetRepositoryIssueCreationExcluded: (repository: ConnectedRepository, excluded: boolean) => boolean | void | Promise<boolean | void>;
+  onSetRepositoryBranchViewMode: (
+    repository: ConnectedRepository,
+    mode: BranchViewMode,
+  ) => boolean | void | Promise<boolean | void>;
   onUpdated: (values: AppSettingsValues) => void;
   onDraftReviewGateIssue?: (draft: ReviewGateIssueDraft) => void;
   creatableRepositoryNames?: readonly string[];
@@ -116,6 +121,7 @@ export function SettingsDialog({
   onSetRepositoryHidden,
   onSetRepositoriesHidden,
   onSetRepositoryIssueCreationExcluded,
+  onSetRepositoryBranchViewMode,
   onUpdated,
   onDraftReviewGateIssue,
   creatableRepositoryNames,
@@ -229,7 +235,7 @@ export function SettingsDialog({
                 </div>
               )}
               {section === "notification" && <NotificationSettingsSection />}
-              {section === "repositories" && <RepositoryVisibilitySection repositories={repositories} onSetRepositoryHidden={onSetRepositoryHidden} onSetRepositoriesHidden={onSetRepositoriesHidden} onSetRepositoryIssueCreationExcluded={onSetRepositoryIssueCreationExcluded} />}
+              {section === "repositories" && <RepositoryVisibilitySection repositories={repositories} onSetRepositoryHidden={onSetRepositoryHidden} onSetRepositoriesHidden={onSetRepositoriesHidden} onSetRepositoryIssueCreationExcluded={onSetRepositoryIssueCreationExcluded} onSetRepositoryBranchViewMode={onSetRepositoryBranchViewMode} />}
               {/* 3区分は切替時もマウントを維持し、保存前のフォーム入力を失わない。 */}
               <div hidden={section !== "ai-models"}><AiModelSettingsSection {...settingsProps} /></div>
               <div hidden={section !== "execution"}><ExecutionControlSettingsSection {...settingsProps} /></div>

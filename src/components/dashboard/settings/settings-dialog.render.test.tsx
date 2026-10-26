@@ -73,6 +73,7 @@ const onUpdated = vi.fn();
 const onSetRepositoryHidden = vi.fn();
 const onSetRepositoriesHidden = vi.fn();
 const onSetRepositoryIssueCreationExcluded = vi.fn();
+const onSetRepositoryBranchViewMode = vi.fn();
 
 const repositories = [
   {
@@ -130,6 +131,7 @@ function renderDialog() {
       onSetRepositoryHidden={onSetRepositoryHidden}
       onSetRepositoriesHidden={onSetRepositoriesHidden}
       onSetRepositoryIssueCreationExcluded={onSetRepositoryIssueCreationExcluded}
+      onSetRepositoryBranchViewMode={onSetRepositoryBranchViewMode}
       onUpdated={onUpdated}
     />,
   );
@@ -324,7 +326,8 @@ describe("SettingsDialog", () => {
         codexModel="auto" appAiModel="claude-haiku-4-5" appAiModelReasoning="claude-sonnet-5-5"
         modelPickEngine="app-ai" dispatchConcurrency={2} repositories={repositories}
         onSetRepositoryHidden={onSetRepositoryHidden} onSetRepositoriesHidden={onSetRepositoriesHidden}
-        onSetRepositoryIssueCreationExcluded={onSetRepositoryIssueCreationExcluded} onUpdated={onUpdated}
+        onSetRepositoryIssueCreationExcluded={onSetRepositoryIssueCreationExcluded}
+      onSetRepositoryBranchViewMode={onSetRepositoryBranchViewMode} onUpdated={onUpdated}
       />,
     );
 
@@ -358,37 +361,68 @@ describe("SettingsDialog", () => {
     expect(onUpdated.mock.calls.at(-1)?.[0].appAiModel).toBe("claude-haiku-4-5");
   });
 
-  it("リポジトリの区分でチェックを外すと、そのリポジトリを非表示にする（#3983）", () => {
+  it("リポジトリの区分は「全体に表示」の分割ボタンで非表示にする（#3983・#5087）", () => {
     renderDialog();
 
     fireEvent.click(screen.getByRole("button", { name: /^リポジトリ$/ }));
 
-    expect(screen.getByText(/2件中/).textContent).toBe("2件中1件を表示中");
+    expect(screen.getByText(/2件中/).textContent).toContain("2件中1件を表示中");
 
-    const checkboxes = screen.getAllByRole("checkbox");
-    // チェックが入っている＝表示中。1件目（issue-deck）は表示、2件目（car-care）は非表示。
-    expect(checkboxes[0].getAttribute("aria-checked")).toBe("true");
-    expect(checkboxes[1].getAttribute("aria-checked")).toBe("false");
+    const issueDeck = screen.getByRole("group", { name: "issue-deckを全体に表示" });
+    const carCare = screen.getByRole("group", { name: "car-careを全体に表示" });
+    // 現在値は押された状態（aria-pressed）で示す。1件目は表示、2件目は非表示
+    expect(within(issueDeck).getByRole("button", { name: "表示" }).getAttribute("aria-pressed")).toBe("true");
+    expect(within(carCare).getByRole("button", { name: "非表示" }).getAttribute("aria-pressed")).toBe("true");
 
-    fireEvent.click(checkboxes[0]);
+    fireEvent.click(within(issueDeck).getByRole("button", { name: "非表示" }));
     expect(onSetRepositoryHidden).toHaveBeenCalledWith(repositories[0], true);
   });
 
-  it("リポジトリの区分は行のどこを押しても切り替わり、二重に切り替わらない（#3983）", () => {
+  it("リポジトリの区分は行のどこを押しても何も変わらない（#5087）", () => {
     renderDialog();
 
     fireEvent.click(screen.getByRole("button", { name: /^リポジトリ$/ }));
 
-    // チェックボックスそのものではなくリポジトリ名を押す
     fireEvent.click(screen.getByText("issue-deck"));
-    expect(onSetRepositoryHidden).toHaveBeenCalledTimes(1);
-    expect(onSetRepositoryHidden).toHaveBeenCalledWith(repositories[0], true);
+    expect(onSetRepositoryHidden).not.toHaveBeenCalled();
+    expect(onSetRepositoryIssueCreationExcluded).not.toHaveBeenCalled();
+    expect(onSetRepositoryBranchViewMode).not.toHaveBeenCalled();
+  });
 
-    // チェックボックスを押したときも1回だけ（行のクリックへ伝播させない）
-    onSetRepositoryHidden.mockClear();
-    fireEvent.click(screen.getAllByRole("checkbox")[1]);
-    expect(onSetRepositoryHidden).toHaveBeenCalledTimes(1);
-    expect(onSetRepositoryHidden).toHaveBeenCalledWith(repositories[1], false);
+  it("ブランチ画面の設定を変えても、全体表示やIssue作成は動かない（#5087）", () => {
+    renderDialog();
+
+    fireEvent.click(screen.getByRole("button", { name: /^リポジトリ$/ }));
+
+    const group = screen.getByRole("group", { name: "issue-deckのブランチ画面での表示" });
+    fireEvent.click(within(group).getByRole("button", { name: "動きがある時だけ" }));
+    expect(onSetRepositoryBranchViewMode).toHaveBeenCalledWith(repositories[0], "active");
+    expect(onSetRepositoryHidden).not.toHaveBeenCalled();
+    expect(onSetRepositoryIssueCreationExcluded).not.toHaveBeenCalled();
+  });
+
+  it("全体に非表示の行は、Issue作成とブランチ画面の部品が非活性になる（#5087）", () => {
+    renderDialog();
+
+    fireEvent.click(screen.getByRole("button", { name: /^リポジトリ$/ }));
+
+    const branch = screen.getByRole("group", { name: "car-careのブランチ画面での表示" });
+    expect((within(branch).getByRole("button", { name: "表示しない" }) as HTMLButtonElement).disabled).toBe(true);
+    const creation = screen.getByRole("group", { name: "car-careをIssue作成の選択肢に含める" });
+    expect((within(creation).getByRole("button", { name: "除外" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("保存に失敗したら、行の下に理由を出す（#5087）", async () => {
+    onSetRepositoryBranchViewMode.mockResolvedValueOnce(false);
+    renderDialog();
+
+    fireEvent.click(screen.getByRole("button", { name: /^リポジトリ$/ }));
+
+    const group = screen.getByRole("group", { name: "issue-deckのブランチ画面での表示" });
+    fireEvent.click(within(group).getByRole("button", { name: "表示しない" }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toContain("issue-deckの「ブランチ画面」を保存できませんでした");
   });
 
   it("リポジトリの区分の一括操作は、状態が変わる行だけを渡す（#3983）", () => {
@@ -403,17 +437,15 @@ describe("SettingsDialog", () => {
     expect(onSetRepositoriesHidden).toHaveBeenCalledWith([repositories[0]], true);
   });
 
-  it("リポジトリの区分の「作成候補」を外すと、Issue作成の選択肢からだけ除外する（#2760）", () => {
+  it("リポジトリの区分の「Issue作成」を除外にすると、Issue作成の選択肢からだけ除外する（#2760・#5087）", () => {
     renderDialog();
 
     fireEvent.click(screen.getByRole("button", { name: /^リポジトリ$/ }));
 
-    // 非表示（car-care）には出さず、表示中（issue-deck）にだけ「作成候補」を出す
-    const switches = screen.getAllByRole("switch");
-    expect(switches).toHaveLength(1);
-
-    fireEvent.click(switches[0]);
+    const group = screen.getByRole("group", { name: "issue-deckをIssue作成の選択肢に含める" });
+    fireEvent.click(within(group).getByRole("button", { name: "除外" }));
     expect(onSetRepositoryIssueCreationExcluded).toHaveBeenCalledWith(repositories[0], true);
+    expect(onSetRepositoryHidden).not.toHaveBeenCalled();
   });
 
   it("システム状態の区分ではGitHubの障害状況だけを出す（使用量はStatusHubへ移した）", () => {

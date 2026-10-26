@@ -105,6 +105,7 @@ import {
   type AutoRefreshIntervalMs,
 } from "@/lib/auto-refresh";
 import { describeBranchFlow } from "@/lib/branch-flow-guidance";
+import { selectBranchViewRepositories, type BranchViewMode } from "@/lib/branch-view-visibility";
 import { readTriggeredAt, useTriggerPending } from "@/hooks/use-trigger-pending";
 import { resolveReleaseStageBadges, type ReleaseStageBadge } from "@/lib/release-stage-badges";
 import { isReleaseJourneyNeedingUser, resolveReleaseJourney, type ReleaseJourney } from "@/lib/release-journey";
@@ -159,6 +160,11 @@ import type { PullRequestSummary } from "@/types/pull-request";
 
 type BranchFlowViewProps = {
   flow: BranchFlow;
+  /**
+   * ブランチ画面でのリポジトリ表示の設定（#5087。リポジトリのフルネーム→モード）。未指定・未設定は
+   * 常に表示。**絞るのは並べるときだけ**で、取得・一括リリースの対象は`flow`の全件のまま
+   */
+  branchViewModes?: Record<string, BranchViewMode>;
   fetchedAt: string | null;
   isLoading: boolean;
   /**
@@ -2833,6 +2839,28 @@ function needsAttention(repository: BranchFlowRepository): boolean {
 }
 
 /**
+ * 「動きがある時だけ表示」（#5087）で、ブランチ画面で今見るべき状態があるか。
+ *
+ * 手が要るもの・待てば進むもの（`needsAttention`・`isProgressing`）に加えて、進行中のレーン・
+ * 着手済みのIssue・リリースの進行・未完了の手作業・デプロイの進行または失敗を数える。
+ * **数えないもの**: 過去の履歴（未リリース分・クローズ済み）、未着手（Ready）のopen Issueだけ。
+ * main直行型とdevelop型は同じ集計（`summary`）を読むので、同じ関数で判定する。
+ */
+function hasBranchActivity(repository: BranchFlowRepository): boolean {
+  const { summary } = repository;
+  return (
+    needsAttention(repository) ||
+    isProgressing(repository) ||
+    summary.activeLaneCount > 0 ||
+    summary.startedIssueCount > 0 ||
+    summary.releaseInProgress ||
+    summary.releaseJourney !== null ||
+    summary.openManualStepCount > 0 ||
+    (summary.deploy !== null && summary.deploy.kind !== "success")
+  );
+}
+
+/**
  * 開いているリリース候補の検証状態のうち、画面へ出すもの（#4390）。問題なし・候補なしならnull。
  * Xcodeで実機へ反映するリポジトリ（#3468）は画面からマージしないので出さない（従来の#4357と同じ範囲）
  */
@@ -2937,6 +2965,7 @@ function RepositoryDetailHeader({ repository }: { repository: BranchFlowReposito
  */
 export function BranchFlowView({
   flow,
+  branchViewModes,
   fetchedAt,
   isLoading,
   isRefreshing,
@@ -2982,7 +3011,9 @@ export function BranchFlowView({
 
   const [openRepositories, setOpenRepositories] = useState<Set<string>>(new Set());
   const [showClosed, setShowClosed] = useState(false);
-  const attentionRepositories = flow.repositories.filter(needsAttention);
+  // 設定で隠したリポジトリを一時的に並べる（#5087）。設定は変えず、端末のこの画面にだけ効く
+  const [showBranchViewHidden, setShowBranchViewHidden] = useState(false);
+
   // 一括リリース（#2770）の対象。個別の「リリースする」ボタンと同じ判定（`canTriggerRelease`）を
   // 通ったものだけで、この画面が既に持っているデータから絞り込む——新規のGitHub API問い合わせは
   // 増やさない。0件なら`ReleaseBulkButton`がボタンごと出さない。
@@ -3018,10 +3049,6 @@ export function BranchFlowView({
   // 呼べるようにする登録先（#2770）。`useTriggerPending`はリポジトリごとに1インスタンスだけを
   // 持つ設計（#1955）のため、ヘッダー側から直接は呼べない。
   const releaseMarkTriggeredRegistry = useRef<Map<string, () => void>>(new Map());
-  // 手が要るものに数えたリポジトリは除く（#2038）。同じ行を2つの件数へ二重に数えない
-  const progressingRepositories = flow.repositories.filter(
-    (repository) => !needsAttention(repository) && isProgressing(repository),
-  );
 
   // 引っ張って更新（#1958）。タッチを受けるのはスクロール領域を包む枠で、スクロール位置は
   // 中のスクロール領域から見る（Issue一覧＝`issue-list.tsx`と同じ組み方）。
@@ -3045,6 +3072,33 @@ export function BranchFlowView({
   // その間に「動きなし」が出てから件数へ変わっていた。`fetchedAt`は取り直し中も残るので、
   // 2回目以降の更新で「読み込み中」へ戻ることはない
   const rowsLoaded = (mergedPullRequestsLoaded && fetchedAt !== null) || error !== null;
+
+  // ブランチ画面でのリポジトリ表示（#5087）。**並べるときだけ**絞り、`flow.repositories`の全件は
+  // 一括リリースの対象・進捗の取得に使ったまま。動きの有無を言い切れないもの（取得に失敗した・
+  // 行の数がまだ揃っていない）は並べ、重要な行を「動きなし」と断定して消さない。
+  // 左メニューで選んだリポジトリは設定にかかわらず並べる（選んだのに出ない状態を作らない）
+  const expandedSet = new Set(expandedRepositoryFullNames);
+  const branchViewSelection = selectBranchViewRepositories(flow.repositories, {
+    modeOf: (repository) =>
+      expandedSet.has(repository.repositoryFullName)
+        ? "always"
+        : (branchViewModes?.[repository.repositoryFullName] ?? "always"),
+    hasActivity: hasBranchActivity,
+    isUnknown: (repository) =>
+      !rowsLoaded || failedRepositories.includes(repository.repositoryFullName),
+    showAll: false,
+  });
+  const branchViewHiddenCount = branchViewSelection.hidden.length;
+  // 一時表示で並べるときは、設定で省いたものを後ろへ分けて並べる
+  const shownRepositories = showBranchViewHidden
+    ? [...branchViewSelection.visible, ...branchViewSelection.hidden]
+    : branchViewSelection.visible;
+  // 件数は画面に並ぶ対象と一致させる（絞った後の集合から数える）
+  const attentionRepositories = shownRepositories.filter(needsAttention);
+  // 手が要るものに数えたリポジトリは除く（#2038）。同じ行を2つの件数へ二重に数えない
+  const progressingRepositories = shownRepositories.filter(
+    (repository) => !needsAttention(repository) && isProgressing(repository),
+  );
 
   // **手が要るリポジトリを初回に自動で開くのはやめた**（#1932）。#1510・#1711では
   // CI失敗・マージ待ち・リリース中のリポジトリを開いた直後に展開していたが、そのぶん
@@ -3099,10 +3153,10 @@ export function BranchFlowView({
   }
 
   const allOpen =
-    flow.repositories.length > 0 && openRepositories.size === flow.repositories.length;
+    shownRepositories.length > 0 && openRepositories.size === shownRepositories.length;
   // 覚えている選択が今の一覧に無い（非表示にした・まだ読み込めていない）こともある
   const selectedRepository =
-    flow.repositories.find(
+    shownRepositories.find(
       (repository) => repository.repositoryFullName === selectedRepositoryFullName,
     ) ?? null;
 
@@ -3127,7 +3181,15 @@ export function BranchFlowView({
               ブランチ
             </h1>
             <p className="truncate text-xs text-muted-foreground">
-              <span>{flow.repositories.length}リポジトリ</span>
+              <span>{shownRepositories.length}リポジトリ</span>
+              {/* 設定（ブランチ画面）で省いている件数。全体非表示（設定の「全体に表示」）とは別で、
+                  左メニューの「すべて表示する」（Issue一覧の絞り込み）とも関係しない */}
+              {branchViewHiddenCount > 0 && !showBranchViewHidden && (
+                <span>{` ・ 設定で${branchViewHiddenCount}件を省略中`}</span>
+              )}
+              {showBranchViewHidden && branchViewHiddenCount > 0 && (
+                <span>{` ・ うち${branchViewHiddenCount}件は設定で省略しているものを一時表示中`}</span>
+              )}
               {/* 絞り込みではなく展開で効かせていることを画面に出す（#1750）。
                   出さないと「リポジトリを選んだのに件数が減らない」ようにしか見えない。
                   **2ペインでは同時に1件しか出せないので言い方を変える**（#2157）。
@@ -3184,11 +3246,27 @@ export function BranchFlowView({
               setOpenRepositories(
                 allOpen
                   ? new Set()
-                  : new Set(flow.repositories.map((repo) => repo.repositoryFullName)),
+                  : new Set(shownRepositories.map((repo) => repo.repositoryFullName)),
               )
             }
           >
             {allOpen ? "すべて閉じる" : "すべて開く"}
+          </Button>
+        )}
+        {/* 設定（ブランチ画面）で省いているリポジトリを探すための一時表示（#5087）。設定は変えない。
+            全体に非表示のリポジトリはここでも出ない */}
+        {branchViewHiddenCount > 0 && (
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-8 shrink-0"
+            aria-pressed={showBranchViewHidden}
+            title="ブランチ画面の設定で省いているリポジトリを、この画面だけ一時的に並べます（設定は変わりません）"
+            onClick={() => setShowBranchViewHidden((prev) => !prev)}
+          >
+            {showBranchViewHidden
+              ? "省略していたものを隠す"
+              : `省略中の${branchViewHiddenCount}件を一時表示`}
           </Button>
         )}
         <Button
@@ -3293,7 +3371,14 @@ export function BranchFlowView({
             </p>
           )}
 
-          {flow.repositories.map((repository) => (
+          {!error && flow.repositories.length > 0 && shownRepositories.length === 0 && (
+            <p className="px-4 py-8 text-center text-sm text-muted-foreground">
+              ブランチ画面に並べるリポジトリがありません（{branchViewHiddenCount}件は設定で省略しています）。
+              上の「一時表示」で確認できます。
+            </p>
+          )}
+
+          {shownRepositories.map((repository) => (
             <RepositorySection
               key={repository.repositoryFullName}
               repository={repository}
