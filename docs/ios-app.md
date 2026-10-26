@@ -81,7 +81,7 @@
 
 ## ロック画面ウィジェット（#4890）
 
-ロック画面の横長（2マス。`accessoryRectangular`）に、ClaudeとChatGPT（Codex）の**週間枠**を2本のバーで出す（`ios/UsageWidget/`。Bundle ID `com.gucchii.issuedeck.UsageWidget`）。読み方はWeb版「AI使用量」のメーター（`usage-meter.tsx`）と同じで、塗り＝使用率、縦の目盛り＝週の経過、目盛りを越えた分（時間より速く使っている分）は斜線。ロック画面は白の濃淡だけで描かれるため、色分けはしない。
+ロック画面の横長（2マス。`accessoryRectangular`）に、ClaudeとChatGPT（Codex）の**週間枠**を2本のバーで出す（Claudeは週間バーの上に**5時間枠**のバーも足す。グラフのみで文字は出さない。`claudeFiveHour`）（`ios/UsageWidget/`。Bundle ID `com.gucchii.issuedeck.UsageWidget`）。読み方はWeb版「AI使用量」のメーター（`usage-meter.tsx`）と同じで、塗り＝使用率、縦の目盛り＝週の経過、目盛りを越えた分（時間より速く使っている分）は斜線。ロック画面は白の濃淡だけで描かれるため、色分けはしない。
 
 | 項目 | 方針 |
 | --- | --- |

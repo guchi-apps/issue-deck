@@ -5,13 +5,14 @@ import { getCodexUsage } from "@/lib/dispatch/codex-usage";
 import { authenticateShareToken } from "@/lib/share-token/auth";
 import {
   isClaudeFiveHourWindowActive,
+  toClaudeFiveHourWidgetWindow,
   toClaudeWidgetWindow,
   toCodexWidgetWindow,
   type WidgetUsageResponse,
 } from "@/lib/widget-usage";
 
 /**
- * iOSロック画面ウィジェット（#4890）が読む、ClaudeとChatGPT（Codex）の週間枠。**共有トークンで呼ぶ。**
+ * iOSロック画面ウィジェット（#4890）が読む、ClaudeとChatGPT（Codex）の週間枠と、Claudeの5時間枠。**共有トークンで呼ぶ。**
  * ウィジェットはアプリのログインCookieを持たないため、共有メニュー（#4298）と同じトークンを使う。
  *
  * Claudeの値は探り（推論1回）でしか取れず、送信が5時間枠を開始する。ウィジェットの更新だけで
@@ -26,6 +27,7 @@ export async function GET(request: NextRequest) {
 
   const body: WidgetUsageResponse = {
     claude: toClaudeWidgetWindow(claude, now),
+    claudeFiveHour: toClaudeFiveHourWidgetWindow(claude, now),
     chatgpt: toCodexWidgetWindow(chatgpt),
     generatedAt: now,
   };

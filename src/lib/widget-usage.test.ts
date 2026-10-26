@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { ClaudeUsageWindow } from "@/lib/claude/usage";
 import type { CodexUsage } from "@/lib/dispatch/codex-usage";
 
-import { isClaudeFiveHourWindowActive, toClaudeWidgetWindow, toCodexWidgetWindow } from "./widget-usage";
+import { isClaudeFiveHourWindowActive, toClaudeFiveHourWidgetWindow, toClaudeWidgetWindow, toCodexWidgetWindow } from "./widget-usage";
 
 const NOW = Date.parse("2026-10-19T00:00:00Z");
 const WEEK_MS = 7 * 24 * 60 * 60_000;
@@ -53,6 +53,25 @@ describe("toClaudeWidgetWindow", () => {
     expect(toClaudeWidgetWindow(null, NOW)).toBeNull();
     expect(toClaudeWidgetWindow({ windows: [claudeWindow("5h", NOW + 1000)], fetchedAt: NOW }, NOW)).toBeNull();
     expect(toClaudeWidgetWindow({ windows: [claudeWindow("7d", null)], fetchedAt: NOW }, NOW)).toBeNull();
+  });
+});
+
+describe("toClaudeFiveHourWidgetWindow", () => {
+  it("5時間枠をepoch msへ直して返す", () => {
+    const usage = { windows: [claudeWindow("5h", NOW + 3_600_000, 12), claudeWindow("7d", NOW + 86_400_000)], fetchedAt: NOW - 1000 };
+    expect(toClaudeFiveHourWidgetWindow(usage, NOW)).toEqual({
+      usedPercent: 12,
+      resetsAt: NOW + 3_600_000,
+      durationMs: 5 * 60 * 60_000,
+      fetchedAt: NOW - 1000,
+      expired: false,
+    });
+  });
+
+  it("5時間枠なし・リセット時刻なしはnull", () => {
+    expect(toClaudeFiveHourWidgetWindow(null, NOW)).toBeNull();
+    expect(toClaudeFiveHourWidgetWindow({ windows: [claudeWindow("7d", NOW + 1000)], fetchedAt: NOW }, NOW)).toBeNull();
+    expect(toClaudeFiveHourWidgetWindow({ windows: [claudeWindow("5h", null)], fetchedAt: NOW }, NOW)).toBeNull();
   });
 });
 
