@@ -120,7 +120,7 @@ describe("decideDevelopSyncAutoMerge（#4669・#5081）", () => {
       ok: false,
       waiting: false,
     });
-    expect(decideDevelopSyncAutoMerge(ready(), main(files), { publishedMergeSha: MAIN, mergeChangedFiles: null })).toMatchObject({ ok: false, waiting: true });
+    expect(decideDevelopSyncAutoMerge(ready(), main(files), { publishedMergeSha: MAIN, mergeChangedFiles: null })).toMatchObject({ ok: false, waiting: false });
     expect(decideDevelopSyncAutoMerge(ready(), main(files), { publishedMergeSha: MAIN, mergeChangedFiles: files })).toEqual({ ok: true, headSha: MAIN });
   });
 

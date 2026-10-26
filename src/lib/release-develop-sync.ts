@@ -131,7 +131,8 @@ export function decideDevelopSyncAutoMerge(
     if (evidence?.publishedMergeSha !== main.sha) {
       return hold(`ワークフローの変更（${listed}）を含み、今のmainがリリース候補の公開で本番へマージした記録と一致しません`);
     }
-    if (evidence.mergeChangedFiles === null) return wait("公開のマージで変わったファイルを取得できていません");
+    // 照合できないものは自動マージ側へ倒さず、理由付きで人へ回す（次の巡回で取れれば自動マージへ戻る）
+    if (evidence.mergeChangedFiles === null) return hold("公開のマージで変わったファイルを取得できず、ワークフローの変更を照合できません");
     const outside = evidenceFiles.filter((f) => !evidence.mergeChangedFiles!.includes(f));
     if (outside.length > 0) {
       return hold(`今回の公開で変わっていないワークフローの変更（${filesSummary(outside)}）を含みます（以前から未同期の変更です）`);

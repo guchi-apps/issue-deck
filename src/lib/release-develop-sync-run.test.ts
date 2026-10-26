@@ -241,13 +241,14 @@ describe("同期PRの自動マージ（#4669）", () => {
       expect(status.reason).toContain("以前から未同期");
     });
 
-    it("公開のマージで変わったファイルを取れないときはマージせず、待機として扱う", async () => {
+    it("公開のマージで変わったファイルを取れないときはマージせず、理由付きで人へ回す", async () => {
       mocks.productionCheckFindFirst.mockResolvedValue({ mergeSha: MAIN });
       mocks.commitSummary.mockRejectedValue(new Error("502"));
       const status = await ensureDevelopSync(ctx, { autoMerge: true });
       expect(mocks.merge).not.toHaveBeenCalled();
-      expect(status.detail).toBe("awaiting_merge");
-      expect(developSyncAutoMergeOutlook("o/r", 70, MAIN)).toMatchObject({ status: "auto" });
+      expect(status.detail).toBe("merge_held");
+      expect(status.reason).toContain("照合できません");
+      expect(developSyncAutoMergeOutlook("o/r", 70, MAIN)).toMatchObject({ status: "held" });
     });
 
     it("ワークフローを含まない同期PRでは記録を引かない", async () => {
