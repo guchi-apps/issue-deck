@@ -291,6 +291,46 @@ describe("PullRequestDetail", () => {
     expect(screen.queryByText("自動マージされなかった理由")).toBeNull();
   });
 
+  it("対応Issueの確認待ちで止まったPRには、止まった原因と次の操作を出す（#5080）", () => {
+    const stopCause = {
+      issueNumber: 641,
+      issueUrl: "https://github.com/guchi-apps/morrow/issues/641",
+      labeledAt: "2026-10-26T12:32:00Z",
+      judgement: { url: "https://github.com/guchi-apps/morrow/actions/runs/1/job/2", completedAt: "2026-10-26T12:40:00Z" },
+      cause: {
+        status: "identified" as const,
+        title: "コマンドが拒否されたまま応答を終えています",
+        actions: ["別の手段で進めるよう指示します"],
+        sourceLabel: "セッション引き上げコメント",
+        sourceUrl: "https://github.com/guchi-apps/morrow/issues/641#issuecomment-1",
+        sourceAt: "2026-10-26T12:31:59Z",
+        stallPanel: true,
+      },
+    };
+    const blocked = makePullRequest({ linkedIssueNumber: 641, linkedIssueCheckUser: true, linkedIssueCheckReason: "blocked" });
+    renderDetail({ pullRequest: blocked, detail: makeDetail({ summary: blocked, stopCause }) });
+    const card = screen.getByTestId("merge-stop-cause");
+    expect(card.textContent).toContain("コマンドが拒否されたまま応答を終えています");
+    expect(card.textContent).toContain("別の手段で進めるよう指示します");
+    expect(card.textContent).toContain("レビュー・CIの成功とは別の条件");
+    cleanup();
+
+    // ラベルが外れた（一覧の更新で分かった）後は、取得済みの原因を出し続けない
+    const cleared = makePullRequest({ linkedIssueNumber: 641 });
+    renderDetail({ pullRequest: cleared, detail: makeDetail({ summary: cleared, stopCause }) });
+    expect(screen.queryByTestId("merge-stop-cause")).toBeNull();
+    cleanup();
+
+    renderDetail({
+      pullRequest: blocked,
+      detail: makeDetail({
+        summary: blocked,
+        stopCause: { ...stopCause, cause: { status: "unidentified", why: "fetch-failed", investigate: [] } },
+      }),
+    });
+    expect(screen.getByTestId("merge-stop-cause").textContent).toContain("直接原因を確認できません");
+  });
+
   it("CI・レビューの状態を四角い操作表示で出す（#3319）", () => {
     renderDetail({
       pullRequest: makePullRequest({
