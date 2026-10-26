@@ -32,6 +32,8 @@ import { fetchUnmetRequiredChecks } from "@/lib/github/required-checks";
 import { checkUserIssueKey, fetchCheckUserIssueReasons } from "@/lib/pull-request-check-user";
 import { resolveMergeCheckReasons, type MergeCheckReasons } from "@/lib/merge-check-reasons";
 import { extractLinkedIssueNumber, requiresUserMerge } from "@/lib/pull-request-list";
+import { DEVELOP_SYNC_BRANCH_PREFIX } from "@/lib/release-develop-sync";
+import { developSyncAutoMergeOutlook } from "@/lib/release-develop-sync-run";
 import {
   resolveStopCause,
   shouldResolveStopCause,
@@ -172,6 +174,11 @@ async function handleGET(request: NextRequest) {
         },
       );
     summary.iosPrecheck = iosPrecheck;
+    // 本番公開後のdevelop同期PRへの巡回の自動マージ判定（#5081）
+    if (summary.state === "open" && summary.baseRef === "develop" && summary.headRef.startsWith(DEVELOP_SYNC_BRANCH_PREFIX)) {
+      summary.developSyncAutoMerge = developSyncAutoMergeOutlook(repository.fullName, number, summary.headSha);
+    }
+
     // リリース候補の検証・候補の記録（#5076）。一覧・ブランチ画面と同じ`fetchReleaseChecks`をDBから引き、
     // 詳細の工程と`requiresUserMerge`が一覧と同じ入力で決まるようにする（GitHub APIは増えない）
     if (summary.state === "open" && isReleasePullRequest(summary)) {

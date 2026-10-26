@@ -48,6 +48,13 @@ export function deriveAutoMergeOutlook(pullRequest: PullRequestSummary): AutoMer
   if (pullRequest.autoMergeEnabled) {
     return outlook("scheduled", "必須チェックが通るとdevelopへ自動でマージされます（操作は不要です）");
   }
+  // 本番公開後のdevelop同期PRは、巡回の判定があればそれを出す（#5081）。無ければ従来どおり対象外
+  const sync = pullRequest.developSyncAutoMerge;
+  if (sync) {
+    return sync.status === "auto"
+      ? outlook("expected", `本番公開後のdevelop同期PRです。巡回が条件を確かめて自動でマージします（操作は不要です）: ${sync.reason}`)
+      : outlook("manual", `本番公開後のdevelop同期PRです。${sync.reason}。内容を確認し、問題なければマージコミットでマージします`);
+  }
   if (pullRequest.kind === "version-bump" || isSystemBranch(pullRequest.headRef)) {
     return outlook("excluded", "リリース・配布用のPRです。リリースの流れの中で専用の経路がマージします");
   }
