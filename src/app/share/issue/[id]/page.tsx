@@ -1,10 +1,13 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 
 import { ShareRedirect } from "@/components/share-redirect";
 import { buildDashboardPath, buildShareMeta } from "@/lib/share-card";
 import { getShareOrigin, loadIssueShareCard } from "@/lib/share-card-server";
 
 type Props = { params: Promise<{ id: string }> };
+
+// Discordは`theme-color`を埋め込みの左の色帯に使う。ルートの明暗2色ではなくIssueの緑1色にする（#5090）
+export const viewport: Viewport = { themeColor: "#1baf7a" };
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { id } = await params;

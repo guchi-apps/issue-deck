@@ -3,8 +3,10 @@ import { describe, expect, it } from "vitest";
 import {
   buildDashboardPath,
   buildShareMeta,
+  formatShareCreatedAt,
   formatShareLabel,
   isLinkPreviewBot,
+  normalizeShareTitle,
   resolveSharePath,
 } from "./share-card";
 
@@ -43,11 +45,56 @@ describe("メタ情報", () => {
     expect(meta.title).toBe("guchi-apps/yoteiflow Issue #1366");
     expect(Object.keys(meta).sort()).toEqual(["description", "title"]);
   });
+  it("公開Issueはタイトルを見出しに、リポジトリ名・番号・作成日を説明に出す", () => {
+    const meta = buildShareMeta(
+      {
+        kind: "issue",
+        repositoryFullName: "guchi-apps/issue-deck",
+        number: 5090,
+        title: "Issueリンクの\nプレビュー",
+        createdAt: new Date("2026-10-25T16:30:00Z"),
+      },
+      "issue",
+    );
+    expect(meta).toEqual({
+      title: "Issueリンクの プレビュー",
+      description: "guchi-apps/issue-deck · Issue #5090 · 2026年10月26日 作成",
+    });
+  });
+  it("長いタイトルは100文字で切る", () => {
+    const meta = buildShareMeta(
+      { kind: "issue", repositoryFullName: "o/r", number: 1, title: "あ".repeat(300) },
+      "issue",
+    );
+    expect(Array.from(meta.title)).toHaveLength(100);
+    expect(meta.title.endsWith("…")).toBe(true);
+    expect(meta.description).toBe("o/r · Issue #1");
+  });
   it("未存在は存在を示さない汎用の文言", () => {
     expect(buildShareMeta(null, "pr")).toEqual({ title: "IssueDeck", description: "IssueDeck の PR" });
   });
   it("種別の表示", () => {
     expect(formatShareLabel("pr", 5036)).toBe("PR #5036");
+  });
+});
+
+describe("normalizeShareTitle", () => {
+  it("改行・タブ・制御文字・連続空白を空白1つへ寄せる", () => {
+    expect(normalizeShareTitle("  a\r\n\tb\u0000\u2028c   d ", 50)).toBe("a b c d");
+  });
+  it("コードポイント単位で切り、サロゲートペアを壊さない", () => {
+    expect(normalizeShareTitle("😀😀😀😀", 3)).toBe("😀😀…");
+    expect(normalizeShareTitle("abc", 3)).toBe("abc");
+  });
+  it("HTMLの特殊文字はそのまま文字として残す（エスケープは描画側に任せる）", () => {
+    expect(normalizeShareTitle(`<script>&"'`, 50)).toBe(`<script>&"'`);
+  });
+});
+
+describe("formatShareCreatedAt", () => {
+  it("日本時間の日付にする（UTCで前日でも日本の日付）", () => {
+    expect(formatShareCreatedAt(new Date("2026-10-25T15:00:00Z"))).toBe("2026年10月26日 作成");
+    expect(formatShareCreatedAt(new Date("2026-10-25T14:59:59Z"))).toBe("2026年10月25日 作成");
   });
 });
 
