@@ -25,7 +25,7 @@ function renderEmphasis(text: string) {
  * 該当カテゴリの強調が入る（#2062）。そのまま描くと記号が生で出るため、この2つだけを解釈する。
  * **Markdown全体は解釈しない** — ここに来るのは箇条書き1行ぶんの文で、見出しやリンクは入らない。
  */
-function InlineReasonText({ text }: { text: string }) {
+export function InlineReasonText({ text }: { text: string }) {
   return (
     <>
       {text.split(/`([^`]+)`/).map((part, index) =>

@@ -11,6 +11,7 @@ import type { PullRequestAutoRepairSummary } from "@/lib/github/pull-request-aut
 import type { PullRequestRepairRunSummary } from "@/lib/github/pull-request-repair-run";
 import type { PullRequestReviewVerdict } from "@/lib/github/pull-request-review-verdict";
 import type { PullRequestRole } from "@/lib/github/pull-request-role";
+import type { PullRequestStopCause } from "@/lib/pull-request-stop-cause";
 import type { CiState } from "@/lib/github/release-api";
 import type { ReleaseVerification } from "@/lib/github/release-verification";
 import type { UnmetRequiredCheck } from "@/lib/github/required-checks";
@@ -523,6 +524,11 @@ export type PullRequestDetail = {
    * Issueに紐づくopenなPRでだけ入る。それ以外・古い応答では省略またはnull。
    */
   reviewResponse?: PullRequestReviewResponseContext | null;
+  /**
+   * 対応Issueの`00.check-user`で自動マージが止まっているときの直接原因（#5080）。理由が`merge`以外の
+   * 確認待ちで止まっているopenなPRでだけ入り、それ以外・古い応答では省略またはnull。
+   */
+  stopCause?: PullRequestStopCause | null;
 };
 
 export type PullRequestReviewResponseContext = {
