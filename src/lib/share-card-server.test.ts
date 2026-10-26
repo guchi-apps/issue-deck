@@ -10,17 +10,35 @@ import { loadIssueShareCard, loadPullRequestShareCard } from "./share-card-serve
 beforeEach(() => vi.clearAllMocks());
 
 describe("loadIssueShareCard", () => {
-  it("リポジトリ名と番号だけを返し、DBからもその3項目しか読まない", async () => {
-    mocks.issue.mockResolvedValue({ number: 1366, repository: { fullName: "guchi-apps/yoteiflow", private: false } });
+  it("リポジトリ名・番号・タイトル・GitHub上の作成日時だけを返し、本文などはDBから読まない", async () => {
+    const createdAt = new Date("2026-10-25T16:30:00Z");
+    mocks.issue.mockResolvedValue({
+      number: 1366,
+      title: "予定の重複を検出する",
+      githubCreatedAt: createdAt,
+      repository: { fullName: "guchi-apps/yoteiflow", private: false },
+    });
     expect(await loadIssueShareCard("6022306920")).toEqual({
       kind: "issue",
       repositoryFullName: "guchi-apps/yoteiflow",
       number: 1366,
+      title: "予定の重複を検出する",
+      createdAt,
     });
-    expect(mocks.issue.mock.calls[0][0].select).toEqual({ number: true, repository: { select: { fullName: true, private: true } } });
+    expect(mocks.issue.mock.calls[0][0].select).toEqual({
+      number: true,
+      title: true,
+      githubCreatedAt: true,
+      repository: { select: { fullName: true, private: true } },
+    });
   });
   it("非公開リポジトリのIssueはnull", async () => {
-    mocks.issue.mockResolvedValue({ number: 1, repository: { fullName: "o/secret", private: true } });
+    mocks.issue.mockResolvedValue({
+      number: 1,
+      title: "秘密",
+      githubCreatedAt: new Date(),
+      repository: { fullName: "o/secret", private: true },
+    });
     expect(await loadIssueShareCard("1")).toBeNull();
   });
   it("不正ID・未存在・DBエラーはnull", async () => {

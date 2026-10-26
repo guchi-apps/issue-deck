@@ -5,8 +5,8 @@
  * `/dashboard`だけを対象にする）。リンクプレビューのクローラーが取りに来たときだけ、
  * `src/proxy.ts`が`/share/...`（ログイン不要のOGメタ・カード画像）へrewriteする。
  *
- * **カードに載せてよいのはリポジトリ名・種別・番号の3つだけ**。タイトル・本文・状態・担当者は
- * ここで扱う型にそもそも持たせない。
+ * **カードに載せてよいのはリポジトリ名・種別・番号と、公開IssueのタイトルとGitHub上の作成日だけ**
+ * （タイトル・作成日は#5090で追加）。本文・状態・担当者・コメント数はここで扱う型にそもそも持たせない。
  */
 import { parsePullRequestId } from "@/lib/github-reference";
 
@@ -17,6 +17,10 @@ export type ShareCardInfo = {
   kind: ShareKind;
   repositoryFullName: string;
   number: number;
+  /** 公開Issueのみ。PRはDBに無いため持たない */
+  title?: string;
+  /** GitHub上の作成日時（同期日時ではない）。公開Issueのみ */
+  createdAt?: Date;
 };
 
 // リンクプレビューを取りに来る代表的なクローラー。人のブラウザは含めない
@@ -94,14 +98,45 @@ export function formatShareLabel(kind: ShareKind, number: number): string {
   return `${kind === "issue" ? "Issue" : "PR"} #${number}`;
 }
 
-/** メタタグ用の文言。カードと同じ3項目だけで組み立てる */
+// 画像は3行で省略表示するが、描く文字ぶんのフォントを読むため長さ自体も抑える
+export const SHARE_TITLE_IMAGE_MAX = 120;
+const SHARE_TITLE_META_MAX = 100;
+
+/**
+ * タイトルを1行の表示用へ整える。改行・タブ・制御文字・連続空白は空白1つへ寄せ、
+ * `max`文字（コードポイント単位）を超えたら末尾を「…」にする。
+ */
+export function normalizeShareTitle(title: string, max: number): string {
+  const flat = title.replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029\s]+/gu, " ").trim();
+  const chars = Array.from(flat);
+  return chars.length > max ? `${chars.slice(0, max - 1).join("").trimEnd()}…` : flat;
+}
+
+/** 作成日の表示（日本時間の日付。例: `2026年10月26日 作成`） */
+export function formatShareCreatedAt(date: Date): string {
+  const parts = new Intl.DateTimeFormat("ja-JP", {
+    timeZone: "Asia/Tokyo",
+    year: "numeric",
+    month: "numeric",
+    day: "numeric",
+  }).formatToParts(date);
+  const get = (type: string) => parts.find((p) => p.type === type)?.value ?? "";
+  return `${get("year")}年${get("month")}月${get("day")}日 作成`;
+}
+
+/** メタタグ用の文言。カードと同じ項目だけで組み立てる */
 export function buildShareMeta(info: ShareCardInfo | null, kind: ShareKind) {
   if (!info) {
     return { title: "IssueDeck", description: kind === "issue" ? "IssueDeck の Issue" : "IssueDeck の PR" };
   }
   const label = formatShareLabel(info.kind, info.number);
-  return {
-    title: `${info.repositoryFullName} ${label}`,
-    description: `IssueDeck で ${label} を開く`,
-  };
+  const title = info.title ? normalizeShareTitle(info.title, SHARE_TITLE_META_MAX) : "";
+  if (!title) {
+    return {
+      title: `${info.repositoryFullName} ${label}`,
+      description: `IssueDeck で ${label} を開く`,
+    };
+  }
+  const created = info.createdAt ? ` · ${formatShareCreatedAt(info.createdAt)}` : "";
+  return { title, description: `${info.repositoryFullName} · ${label}${created}` };
 }
