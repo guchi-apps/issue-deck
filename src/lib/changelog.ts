@@ -42,6 +42,18 @@ export type ChangelogEntry = {
  */
 export const APP_CHANGELOG: ChangelogEntry[] = [
   {
+    version: "8.85.0",
+    date: "2026-10-28",
+    changes: [
+      "iPhoneのロック画面ウィジェットで、Claudeの5時間枠の使用状況をグラフで確認できるようになりました。",
+    ],
+    usage: [
+      "1. iPhoneのロック画面を長押しして編集を開き、ウィジェット欄でissue-deckの使用状況ウィジェットを追加する。",
+      "2. ロック画面に戻り、ウィジェットを表示する。",
+      "3. 5時間枠の使用状況がグラフで表示されていれば成功。",
+    ],
+  },
+  {
     version: "8.84.0",
     date: "2026-10-27",
     changes: [
