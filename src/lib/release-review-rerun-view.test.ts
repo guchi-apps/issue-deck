@@ -101,3 +101,30 @@ describe("describeReviewRerun", () => {
     expect(view.kind === "ready" && view.ops).toBeNull();
   });
 });
+
+describe("pollerの更新後の自動再評価（#5111）", () => {
+  const needsCheck = (over: Partial<ReleaseVerificationSection> = {}) =>
+    section({ state: "needs_check", updatedAt: "2026-10-16T06:00:00Z", ...over });
+
+  it("開始予定・自動で開始しない理由を出し、手動の再実行は押せるまま残す", () => {
+    const scheduled = describeReviewRerun(needsCheck({ opsAutoReevaluation: { action: "rerun" } }), integration("passed"));
+    expect(scheduled).toMatchObject({ kind: "ready", opsAuto: { status: "scheduled" } });
+    const blocked = describeReviewRerun(
+      needsCheck({ opsAutoReevaluation: { action: "none", reason: "ops_unknown" } }),
+      integration("passed"),
+    );
+    expect(blocked).toMatchObject({ kind: "ready", opsAuto: { status: "blocked" } });
+    expect(blocked.kind !== "none" && blocked.opsAuto?.text).toContain("全体レビューを再実行");
+    expect(
+      describeReviewRerun(needsCheck({ opsAutoReevaluation: { action: "none", reason: "not_waiting_ops" } }), integration("passed")),
+    ).toMatchObject({ opsAuto: null });
+  });
+
+  it("自動再評価の実行中は待ちにする", () => {
+    const view = describeReviewRerun(
+      needsCheck({ stage: { kind: "reevaluating", trigger: "ops" } }),
+      integration("passed"),
+    );
+    expect(view).toMatchObject({ kind: "wait", buttonLabel: "全体レビューを再実行（自動再評価中）" });
+  });
+});

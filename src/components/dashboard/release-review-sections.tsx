@@ -579,6 +579,14 @@ function ReviewRerunPanel({
         ))}
       </dl>
       {view.ops && <ReviewOpsNotice ops={view.ops} repositoryFullName={repositoryFullName} />}
+      {view.opsAuto && (
+        // pollerの更新後の自動再評価（#5111）。開始予定か、自動で開始しない理由を出す
+        <p className="break-words" data-testid="review-rerun-ops-auto">
+          <span className="text-muted-foreground">自動再評価: </span>
+          <span aria-hidden>{view.opsAuto.status === "scheduled" ? "◔ " : "△ "}</span>
+          {view.opsAuto.text}
+        </p>
+      )}
       <ReviewRerunButton
         repositoryFullName={repositoryFullName}
         pullRequestNumber={pullRequestNumber}

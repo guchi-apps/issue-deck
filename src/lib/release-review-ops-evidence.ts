@@ -151,7 +151,7 @@ function describeHost(host: ReleaseOpsHostFact, withCandidate: boolean): string 
 
 // 自動更新（#4118）の有効・無効はDBに残っていないので、ここでは決め打ちしない
 const UPDATE_ACTION =
-  "実行状況パネルの対象ホストで「更新して再起動」を押し、完了を確認してから全体レビューを再実行してください（自動更新が有効なホストは、次の巡回で自動的に更新・再起動されます）。";
+  "実行状況パネルの対象ホストで「更新して再起動」を押してください（自動更新が有効なホストは、次の巡回で自動的に更新・再起動されます）。更新後に候補を含む版で動き出したことを確認できると、未確認の項目を自動で再評価します。";
 
 /**
  * 要求と事実を照らして、運用状態の案内を作る。要求が無ければ`null`（案内しない）
@@ -221,7 +221,7 @@ export function assessReleaseOps(
         headline: "サブPCのpollerは、この候補を含むコードで動いています（更新済み）",
         hosts: hostNames,
         facts: [deliveredFact, ...facts],
-        nextAction: "更新は済んでいます。全体レビューを再実行すると、この事実を踏まえて未確認の項目を再評価します。",
+        nextAction: "更新は済んでいます。この事実を踏まえて未確認の項目を自動で再評価します（自動で開始できないときは理由を表示します。「全体レビューを再実行」でもやり直せます）。",
       };
     }
     if (stale.length > 0) {
@@ -254,7 +254,7 @@ export function assessReleaseOps(
       headline: "サブPCのpollerは、統合検証・全体レビューに必要な機能を申告しています（更新済み）",
       hosts: capable.map((h) => h.name),
       facts: ["この候補はpollerのコードを変えません（pollerはissue-deckのリポジトリにあります）", ...facts],
-      nextAction: "サブPCの更新は不要です。全体レビューを再実行すると、この事実を踏まえて未確認の項目を再評価します。",
+      nextAction: "サブPCの更新は不要です。この事実を踏まえて未確認の項目を自動で再評価します（自動で開始できないときは理由を表示します。「全体レビューを再実行」でもやり直せます）。",
     };
   }
   return {

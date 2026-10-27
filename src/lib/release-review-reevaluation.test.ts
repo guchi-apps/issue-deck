@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 
+import type { ReleaseOpsAssessment, ReleaseOpsHostFact } from "./release-review-ops-evidence";
 import {
   applyReviewDecisionsToStage,
+  decideOpsReevaluation,
   decideReviewReevaluation,
   describeReviewEvidenceStage,
   describeReviewStageLabel,
@@ -324,5 +326,91 @@ describe("applyReviewDecisionsToStage（#4814）", () => {
     const withOps = { ...stage, items: ["findings" as const, "ops" as const] };
     expect(applyReviewDecisionsToStage(withOps, { cleared: true })).toBe(withOps);
     expect(applyReviewDecisionsToStage({ kind: "complete" }, { cleared: true })).toEqual({ kind: "complete" });
+  });
+});
+
+describe("decideOpsReevaluation（#5111）", () => {
+  const updated = { status: "updated" } as ReleaseOpsAssessment;
+  const host = (name: string, startedCommit: string, over: Partial<ReleaseOpsHostFact> = {}): ReleaseOpsHostFact => ({
+    name,
+    online: true,
+    startedCommit,
+    commit: startedCommit,
+    releaseVerifyCapable: true,
+    releaseReviewCapable: true,
+    lastSelfUpdateAt: null,
+    includesCandidate: true,
+    ...over,
+  });
+  const base = {
+    repositoryFullName: "guchi-apps/issue-deck",
+    review: {
+      state: "needs_check",
+      hasDiagnostic: false,
+      waitsForOps: true,
+      dependsOnEvidence: false,
+      hostFacts: { host: "subpc", startedCommit: "c1" },
+      opsMarker: null,
+    },
+    jobActive: false,
+    assessment: updated,
+    hosts: [host("subpc", "c2")],
+    verifyHost: null,
+  };
+
+  it("複数ホストでは、事実の変わった適格なホストを名前順で1つ選ぶ", () => {
+    expect(
+      decideOpsReevaluation({
+        ...base,
+        hosts: [host("zeta", "c9"), host("subpc", "c1"), host("alpha", "c3", { releaseReviewCapable: false })],
+      }),
+    ).toEqual({ action: "rerun", host: "zeta", hostFact: "zeta@c9" });
+  });
+
+  it("他リポジトリは起動時コミットの照合ではなく、申告した能力で適格を決める", () => {
+    expect(
+      decideOpsReevaluation({
+        ...base,
+        repositoryFullName: "guchi-apps/aide",
+        hosts: [host("subpc", "c2", { includesCandidate: null })],
+      }).action,
+    ).toBe("rerun");
+  });
+
+  it("要確認でない・実行失敗の診断がある結果は対象外", () => {
+    expect(decideOpsReevaluation({ ...base, review: { ...base.review, state: "passed" } })).toEqual({
+      action: "none",
+      reason: "not_waiting_ops",
+    });
+    expect(decideOpsReevaluation({ ...base, review: { ...base.review, hasDiagnostic: true } })).toEqual({
+      action: "none",
+      reason: "execution_failed",
+    });
+  });
+});
+
+describe("pollerの更新を契機にした段階（#5111）", () => {
+  const marker = { hostFact: "subpc@c2", requestedAt: t("06:00").toISOString() };
+  it("積んだ後は「poller更新を受けて再評価中」", () => {
+    const stage = describeReviewEvidenceStage(
+      review({ state: "waiting", checks: null, unverifiedScope: null, opsReevaluation: marker }),
+      { state: "passed", updatedAt: t("05:25").toISOString() },
+    );
+    expect(stage).toEqual({ kind: "reevaluating", trigger: "ops" });
+    expect(describeReviewStageLabel(stage)).toBe("poller更新を受けて再評価中");
+  });
+
+  it("同じ事実で出た結果は「自動再評価済み」として残る項目を出す", () => {
+    const stage = describeReviewEvidenceStage(
+      review({
+        state: "needs_check",
+        checks: [{ status: "unconfirmed", evidence: "src/a.tsを読み切れていない" }],
+        unverifiedScope: null,
+        opsReevaluation: marker,
+        hostFacts: { host: "subpc", startedCommit: "c2" },
+      }),
+      { state: "passed", updatedAt: t("05:25").toISOString() },
+    );
+    expect(stage).toMatchObject({ kind: "needs_check", autoReevaluated: true });
   });
 });
