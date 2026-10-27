@@ -10,18 +10,30 @@ const verificationUpdateMany = vi.fn();
 const jobFindFirst = vi.fn();
 const revisionFindFirst = vi.fn();
 const rerun = vi.fn();
+const hostFindMany = vi.fn();
+const repositoryFindFirst = vi.fn();
+const loadOpsContext = vi.fn();
 
 vi.mock("@/lib/db", () => ({
   db: {
     releaseVerification: { findFirst: verificationFindFirst, findMany: verificationFindMany, updateMany: verificationUpdateMany },
     dispatchJob: { findFirst: jobFindFirst },
+    dispatchHost: { findMany: hostFindMany },
+    repository: { findFirst: repositoryFindFirst },
     releaseCandidateRevision: { findFirst: revisionFindFirst },
   },
 }));
 vi.mock("@/lib/dispatch/release-review-jobs", () => ({ rerunReleaseReviewJob: rerun }));
+vi.mock("@/lib/github/app-auth", () => ({ getInstallationToken: vi.fn().mockResolvedValue("token") }));
+vi.mock("@/lib/release-verification-load", () => ({ loadReleaseOpsContext: loadOpsContext }));
 
-const { reevaluateReleaseReviewIfReady, resetReleaseReviewReevaluationSweepForTest, sweepReleaseReviewReevaluation } =
-  await import("./release-review-reevaluate");
+const {
+  explainOpsReevaluation,
+  reevaluateReleaseReviewForOps,
+  reevaluateReleaseReviewIfReady,
+  resetReleaseReviewReevaluationSweepForTest,
+  sweepReleaseReviewReevaluation,
+} = await import("./release-review-reevaluate");
 
 const target = { repoFullName: "guchi-apps/issue-deck", prNumber: 4663, baseSha: BASE, headSha: HEAD };
 
@@ -142,7 +154,145 @@ describe("sweepReleaseReviewReevaluation", () => {
     verificationFindMany.mockResolvedValue([{ repoFullName: target.repoFullName, prNumber: 4663, baseSha: BASE, headSha: HEAD }]);
     await sweepReleaseReviewReevaluation(t("05:30"));
     await sweepReleaseReviewReevaluation(t("05:30"));
-    expect(verificationFindMany).toHaveBeenCalledTimes(1);
+    // 統合検証契機と運用契機（#5111）の2本を1回の巡回で読む。2回目は両方とも間引く
+    expect(verificationFindMany).toHaveBeenCalledTimes(2);
     expect(rerun).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("pollerの更新を契機にした自動再評価（#5111）", () => {
+  const C1 = "1".repeat(40);
+  const C2 = "2".repeat(40);
+  /** pollerの再起動を要求する未確認だけが残った要確認。実行時のホストは起動時コミットC1 */
+  const opsReview = (extra: Record<string, unknown> = {}) => ({
+    state: "needs_check",
+    unverifiedScope: null,
+    findings: {
+      review: { checks: [{ status: "unconfirmed", evidence: "サブPCのpollerの再起動が未確認" }] },
+      hostFacts: { host: "subpc", startedCommit: C1 },
+      ...extra,
+    },
+    updatedAt: t("05:24"),
+  });
+  const host = (over: Record<string, unknown> = {}) => ({
+    name: "subpc",
+    online: true,
+    startedCommit: C2,
+    commit: C2,
+    releaseVerifyCapable: true,
+    releaseReviewCapable: true,
+    lastSelfUpdateAt: null,
+    includesCandidate: true,
+    ...over,
+  });
+  const context = (hosts = [host()], changedFiles: string[] | null = ["scripts/dispatch-poller.sh"]) => ({
+    repositoryFullName: target.repoFullName,
+    changedFiles,
+    hosts,
+  });
+
+  beforeEach(() => {
+    repositoryFindFirst.mockResolvedValue({ installation: { installationId: 1 } });
+    loadOpsContext.mockResolvedValue(context());
+  });
+
+  it("起動時コミットが変わり候補を含む版で動いていれば、そのホストで、印を付けて1回積む", async () => {
+    setup({ review: opsReview(), reviewJob: null });
+    const now = t("06:00");
+    expect(await reevaluateReleaseReviewForOps(target, now)).toEqual({ action: "rerun", host: "subpc", hostFact: `subpc@${C2}` });
+    expect(rerun).toHaveBeenCalledWith(target, now, {
+      requiredHost: "subpc",
+      recordNoHost: false,
+      opsReevaluation: { hostFact: `subpc@${C2}`, requestedAt: now.toISOString() },
+    });
+  });
+
+  it("同じホストの事実で実行済み・同じ事実で積み済みなら積まない（heartbeatの反復で繰り返さない）", async () => {
+    setup({ review: opsReview({ hostFacts: { host: "subpc", startedCommit: C2 } }), reviewJob: null });
+    expect(await reevaluateReleaseReviewForOps(target)).toEqual({ action: "none", reason: "same_host_facts" });
+    setup({ review: opsReview({ opsReevaluation: { hostFact: `subpc@${C2}`, requestedAt: t("05:50").toISOString() } }), reviewJob: null });
+    expect(await reevaluateReleaseReviewForOps(target)).toEqual({ action: "none", reason: "already_reevaluated" });
+    expect(rerun).not.toHaveBeenCalled();
+  });
+
+  it("事実の記録が無い旧結果は、更新済みなら1回だけ再照合する", async () => {
+    setup({ review: opsReview({ hostFacts: undefined }), reviewJob: null });
+    expect((await reevaluateReleaseReviewForOps(target)).action).toBe("rerun");
+  });
+
+  it("更新が不要・旧版のまま・オフライン・取得失敗では積まない", async () => {
+    setup({ review: opsReview(), reviewJob: null });
+    loadOpsContext.mockResolvedValueOnce(context([host()], ["src/app/page.tsx"]));
+    expect(await reevaluateReleaseReviewForOps(target)).toEqual({ action: "none", reason: "ops_not_needed" });
+    loadOpsContext.mockResolvedValueOnce(context([host({ includesCandidate: false })]));
+    expect(await reevaluateReleaseReviewForOps(target)).toEqual({ action: "none", reason: "ops_needed" });
+    loadOpsContext.mockResolvedValueOnce(context([host({ online: false, includesCandidate: null })]));
+    expect(await reevaluateReleaseReviewForOps(target)).toEqual({ action: "none", reason: "ops_unknown" });
+    loadOpsContext.mockRejectedValueOnce(new Error("network"));
+    expect(await reevaluateReleaseReviewForOps(target)).toEqual({ action: "none", reason: "ops_unknown" });
+    expect(rerun).not.toHaveBeenCalled();
+  });
+
+  it("未確認がコードの読み残しだけなら運用待ちではない", async () => {
+    setup({
+      review: { ...opsReview(), findings: { review: { checks: [{ status: "unconfirmed", evidence: "src/a.tsを読み切れていない" }] } } },
+      reviewJob: null,
+    });
+    expect(await reevaluateReleaseReviewForOps(target)).toEqual({ action: "none", reason: "not_waiting_ops" });
+    expect(loadOpsContext).not.toHaveBeenCalled();
+  });
+
+  it("候補の取消・公開済み・SHA変更後は旧結果で積まない", async () => {
+    setup({ review: opsReview(), reviewJob: null });
+    revisionFindFirst.mockResolvedValue({ candidate: { activeKey: null } });
+    expect(await reevaluateReleaseReviewForOps(target)).toEqual({ action: "skipped", reason: "not_current" });
+    expect(rerun).not.toHaveBeenCalled();
+  });
+
+  it("ジョブの実行中は積まない（重複申告・手動再実行と競合しない）", async () => {
+    setup({ review: opsReview(), reviewJob: { status: "RUNNING", createdAt: t("05:50") } });
+    expect(await reevaluateReleaseReviewForOps(target)).toEqual({ action: "none", reason: "review_active" });
+  });
+
+  it("証跡にも依存するなら、統合検証のホストが更新済みのときだけ積む", async () => {
+    const review = opsReview();
+    review.findings.review.checks.push({ status: "unconfirmed", evidence: "統合検証の結果待ち" });
+    setup({ review, reviewJob: null, verifyJob: { targetHost: "other" } });
+    expect(await reevaluateReleaseReviewForOps(target)).toEqual({ action: "none", reason: "verify_host_not_updated" });
+  });
+
+  it("画面用の説明も同じ判定を使う", async () => {
+    setup({ review: opsReview(), reviewJob: null });
+    expect(await explainOpsReevaluation(target, context([host({ includesCandidate: false })]))).toEqual({
+      action: "none",
+      reason: "ops_needed",
+    });
+  });
+
+  it("自動で積んだ再評価が報告なしで終わったら、手動の再実行へ戻す", async () => {
+    setup({
+      review: { state: "waiting", unverifiedScope: null, findings: { opsReevaluation: { hostFact: `subpc@${C2}`, requestedAt: t("06:00").toISOString() } }, updatedAt: t("06:00") },
+      reviewJob: { status: "CANCELED", createdAt: t("06:00"), startedAt: null, finishedAt: t("06:10") },
+    });
+    expect((await reevaluateReleaseReviewIfReady(target)).action).toBe("fail_stalled");
+  });
+
+  it("巡回: 起動時コミットが変わったときだけ稼働情報を読み、同じ事実では10分間照合し直さない", async () => {
+    setup({ review: opsReview(), reviewJob: null });
+    resetReleaseReviewReevaluationSweepForTest();
+    const row = { repoFullName: target.repoFullName, prNumber: 4663, baseSha: BASE, headSha: HEAD, ...opsReview() };
+    verificationFindMany.mockImplementation(({ where }) => Promise.resolve(where.state === "needs_check" ? [row] : []));
+    const declared = { name: "subpc", lastSeenAt: t("06:00"), repositories: JSON.stringify([target.repoFullName]), releaseReviewCapable: true };
+    // 実行時と同じ起動時コミット（heartbeatの反復だけ）
+    hostFindMany.mockResolvedValue([{ ...declared, checkoutStartedCommit: C1 }]);
+    await sweepReleaseReviewReevaluation(t("06:00"));
+    expect(loadOpsContext).not.toHaveBeenCalled();
+    // 更新・再起動で起動時コミットが変わった
+    hostFindMany.mockResolvedValue([{ ...declared, checkoutStartedCommit: C2, lastSeenAt: t("06:02") }]);
+    rerun.mockResolvedValue({ ok: false, rejection: "no_host" });
+    await sweepReleaseReviewReevaluation(t("06:02"));
+    expect(loadOpsContext).toHaveBeenCalledTimes(1);
+    await sweepReleaseReviewReevaluation(t("06:04"));
+    expect(loadOpsContext).toHaveBeenCalledTimes(1);
   });
 });

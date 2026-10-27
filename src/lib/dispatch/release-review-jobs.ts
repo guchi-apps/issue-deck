@@ -15,7 +15,12 @@ import {
 } from "@/lib/release-review-assignee";
 import { normalizeReleaseReviewDiagnostic } from "@/lib/release-review-diagnostic";
 import { loadReleaseReviewContext } from "@/lib/release-review-context-load";
-import { readAutoReevaluation, type ReviewAutoReevaluation } from "@/lib/release-review-reevaluation";
+import {
+  readAutoReevaluation,
+  readOpsReevaluation,
+  type ReviewAutoReevaluation,
+  type ReviewOpsReevaluation,
+} from "@/lib/release-review-reevaluation";
 import { normalizeReleaseReview } from "@/lib/release-review-result";
 import {
   recordReleaseVerificationResult,
@@ -84,12 +89,18 @@ async function pickReleaseReviewHost(
 export async function rerunReleaseReviewJob(
   target: ReleaseVerificationTarget,
   now: Date = new Date(),
-  /** 自動再評価（#4664）のとき、その印と積み方。印は結果の記録にも引き継ぎ、同じ証跡で繰り返さない */
-  options: ReleaseReviewRequestOptions & { autoReevaluation?: ReviewAutoReevaluation } = {},
+  /**
+   * 自動再評価（統合検証の完了#4664・pollerの更新#5111）のとき、その印と積み方。印は結果の記録にも引き継ぎ、
+   * 同じ証跡・同じホストの事実で繰り返さない
+   */
+  options: ReleaseReviewRequestOptions & {
+    autoReevaluation?: ReviewAutoReevaluation;
+    opsReevaluation?: ReviewOpsReevaluation;
+  } = {},
 ): Promise<RequestReleaseReviewResult> {
   const before = await db.releaseVerification.findFirst({
     where: { ...target, kind: "ai_review" },
-    select: { state: true, summary: true, unverifiedScope: true, updatedAt: true },
+    select: { state: true, summary: true, unverifiedScope: true, updatedAt: true, findings: true },
   });
   const result = await requestReleaseReviewJob(target, now, options);
   if (result.ok && result.outcome === "queued") {
@@ -103,15 +114,22 @@ export async function rerunReleaseReviewJob(
             summary: before.summary?.slice(0, 600) ?? null,
           }
         : null;
+    // 自動の再評価は、もう一方の契機の印を残す（消すと、その契機で同じ事実のまま積み直してしまう）。
+    // 人の再実行は従来どおり印を持ち越さない
+    const automatic = options.autoReevaluation !== undefined || options.opsReevaluation !== undefined;
+    const autoReevaluation =
+      options.autoReevaluation ?? (automatic ? readAutoReevaluation(before?.findings) : null);
+    const opsReevaluation = options.opsReevaluation ?? (automatic ? readOpsReevaluation(before?.findings) : null);
     await db.releaseVerification.updateMany({
       where: { ...target, kind: "ai_review" },
       data: {
         state: "waiting",
         findings:
-          previousRun || options.autoReevaluation
+          previousRun || autoReevaluation || opsReevaluation
             ? {
                 ...(previousRun ? { previousRun } : {}),
-                ...(options.autoReevaluation ? { autoReevaluation: options.autoReevaluation } : {}),
+                ...(autoReevaluation ? { autoReevaluation } : {}),
+                ...(opsReevaluation ? { opsReevaluation } : {}),
               }
             : Prisma.DbNull,
         message: null,
@@ -222,10 +240,29 @@ async function loadCarriedFindings(target: ReleaseVerificationTarget): Promise<R
   if (typeof findings !== "object" || findings === null || Array.isArray(findings)) return {};
   const previous = (findings as Record<string, unknown>).previousRun;
   const marker = readAutoReevaluation(findings);
+  const opsMarker = readOpsReevaluation(findings);
   return {
     ...(typeof previous === "object" && previous !== null && !Array.isArray(previous) ? { previousRun: previous } : {}),
     ...(marker ? { autoReevaluation: marker } : {}),
+    ...(opsMarker ? { opsReevaluation: opsMarker } : {}),
   };
+}
+
+/**
+ * 結果を出したホストと、その時点の起動時コミット（#5111）。報告してきたpollerがそのジョブを実行したので、
+ * いまのホストの申告がそのまま実行時の事実になる。読めなければ記録しない（旧結果と同じ「事実不明」）
+ */
+async function loadReportingHostFacts(job: {
+  claimedByHost?: string | null;
+  targetHost?: string | null;
+}): Promise<{ hostFacts: { host: string; startedCommit: string | null } } | Record<string, never>> {
+  const host = job.claimedByHost ?? job.targetHost ?? null;
+  if (!host) return {};
+  const row = await db.dispatchHost
+    .findUnique({ where: { name: host }, select: { checkoutStartedCommit: true } })
+    .catch(() => null);
+  if (!row) return {};
+  return { hostFacts: { host, startedCommit: row.checkoutStartedCommit ?? null } };
 }
 
 /**
@@ -242,6 +279,8 @@ export async function applyReleaseReviewReport(
     agent?: string | null;
     claudeModel?: string | null;
     codexModel?: string | null;
+    claimedByHost?: string | null;
+    targetHost?: string | null;
   },
   status: "succeeded" | "failed" | "skipped",
   message: string | null,
@@ -262,12 +301,19 @@ export async function applyReleaseReviewReport(
   const keepPrevious = await loadCarriedFindings(target);
   if (normalized) {
     const raw = (body ?? {}) as Record<string, unknown>;
+    const hostFacts = await loadReportingHostFacts(job);
     return recordReleaseVerificationResult(target, {
       kind: "ai_review",
       state: normalized.state,
       agent,
       summary: normalized.summary,
-      findings: { ...normalized.detail, targetBaseSha: target.baseSha, targetHeadSha: target.headSha, ...keepPrevious },
+      findings: {
+        ...normalized.detail,
+        targetBaseSha: target.baseSha,
+        targetHeadSha: target.headSha,
+        ...keepPrevious,
+        ...hostFacts,
+      },
       unverifiedScope: normalized.unverifiedScope,
       message: typeof raw.message === "string" ? raw.message.slice(0, 5000) : message,
     });

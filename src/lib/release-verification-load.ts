@@ -7,6 +7,7 @@ import {
 } from "@/lib/dispatch/dispatch-job";
 import { compareBranches } from "@/lib/github/branches-api";
 import type { ReleaseVerificationKind } from "@/lib/release-merge-gate";
+import { explainOpsReevaluation } from "@/lib/dispatch/release-review-reevaluate";
 import { describeReleaseReviewAssignee, resolveReleaseReviewAssignee } from "@/lib/release-review-assignee";
 import { listReleaseMacRows } from "@/lib/release-mac-verification";
 import { loadReleaseReviewDecisionSummary } from "@/lib/release-review-decision-store";
@@ -56,7 +57,7 @@ export async function loadReleaseVerificationSummary(
     progress: await loadReleaseVerificationProgress(repoFullName, prNumber, current),
   });
   const decided = await attachReleaseReviewDecisions(repoFullName, prNumber, current, summary);
-  const withOps = await attachReleaseOpsContext(repoFullName, current, decided, options.token);
+  const withOps = await attachReleaseOpsContext(repoFullName, prNumber, current, decided, options.token);
   // 修正系列の進み具合（#4972）。読めなくても検証の要約そのものは返す
   const fix = await loadReleaseCandidateFixes([{ repositoryFullName: repoFullName, number: prNumber }])
     .then((map) => map.get(`${repoFullName}#${prNumber}`) ?? null)
@@ -71,6 +72,7 @@ export async function loadReleaseVerificationSummary(
  */
 async function attachReleaseOpsContext(
   repoFullName: string,
+  prNumber: number,
   current: { baseSha: string; headSha: string },
   summary: ReleaseVerificationSummary,
   token: string | undefined,
@@ -83,13 +85,20 @@ async function attachReleaseOpsContext(
   } catch (error) {
     console.error(`[release-verification] 運用状態を読めませんでした ${repoFullName}:`, error);
   }
-  return { ...summary, aiReview: { ...aiReview, opsContext } };
+  // pollerの更新後に自動で再評価できるか・できない理由（#5111）。読めなくても運用状態の案内は出す
+  const opsAutoReevaluation = await explainOpsReevaluation({ repoFullName, prNumber, ...current }, opsContext)
+    .then((decision) =>
+      decision.action === "rerun" ? ({ action: "rerun" } as const) : { action: "none" as const, reason: decision.reason },
+    )
+    .catch(() => null);
+  return { ...summary, aiReview: { ...aiReview, opsContext, opsAutoReevaluation } };
 }
 
 /** compareは最大300ファイルまでしか返さない。上限に達したら一覧は不完全なので使わない */
 const COMPARE_FILE_LIMIT = 300;
 
-async function loadReleaseOpsContext(
+/** 運用状態の照合に使う稼働情報。画面の要約と、pollerの更新後の自動再評価（#5111）の巡回が共有する */
+export async function loadReleaseOpsContext(
   repoFullName: string,
   current: { baseSha: string; headSha: string },
   token: string | undefined,

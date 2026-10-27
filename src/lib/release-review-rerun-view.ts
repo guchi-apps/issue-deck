@@ -4,6 +4,7 @@ import {
   opsRequestTexts,
   type ReleaseOpsAssessment,
 } from "@/lib/release-review-ops-evidence";
+import { OPS_REEVALUATION_SKIP_TEXT } from "@/lib/release-review-reevaluation";
 import type { ReleaseVerificationSection } from "@/lib/release-verification-summary";
 
 /**
@@ -30,6 +31,11 @@ export type ReviewRerunView =
       prerequisites: ReviewRerunPrerequisite[];
       /** レビューがpollerの更新・再起動を要求したときの照合結果。要求が無ければnull */
       ops: ReleaseOpsAssessment | null;
+      /**
+       * pollerの更新後の自動再評価（#5111）の状況。開始予定か、自動で開始しない理由。
+       * 運用待ちでない・判定を読めなかったときはnull
+       */
+      opsAuto?: { status: "scheduled" | "blocked"; text: string } | null;
     };
 
 const INTEGRATION_TEXT: Record<string, string> = {
@@ -106,8 +112,20 @@ export function describeReviewRerun(
     });
   }
 
+  const opsAuto = describeOpsAuto(aiReview.opsAutoReevaluation);
+
   // 自動再評価（#4664）。統合検証が完了すると、証跡に依存する項目だけをサーバーが自動で再評価する
   const stage = aiReview.stage;
+  if (stage?.kind === "reevaluating" && stage.trigger === "ops") {
+    return {
+      kind: "wait",
+      lead: "サブPCのpollerが候補を含む版で動き出したため、運用状態に依存する項目を自動で再評価しています（開始待ちを含む）。確認済みの結果は再利用します。手動の操作は不要です。",
+      buttonLabel: "全体レビューを再実行（自動再評価中）",
+      prerequisites,
+      ops,
+      opsAuto: null,
+    };
+  }
   if (stage?.kind === "reevaluating") {
     return {
       kind: "wait",
@@ -127,6 +145,7 @@ export function describeReviewRerun(
       buttonLabel: "全体レビューを再実行（検証完了後）",
       prerequisites,
       ops,
+      opsAuto,
     };
   }
   const autoReevaluated = stage?.kind === "needs_check" && stage.autoReevaluated;
@@ -142,5 +161,23 @@ export function describeReviewRerun(
     buttonLabel: evidenceNewer ? "全体レビューを再実行（証跡を更新）" : "全体レビューを再実行",
     prerequisites,
     ops,
+    opsAuto,
+  };
+}
+
+function describeOpsAuto(
+  decision: ReleaseVerificationSection["opsAutoReevaluation"],
+): { status: "scheduled" | "blocked"; text: string } | null {
+  if (!decision) return null;
+  if (decision.action === "rerun") {
+    return {
+      status: "scheduled",
+      text: "サブPCは更新済みです。次の巡回（1分程度）で、運用状態に依存する項目を自動で再評価します。",
+    };
+  }
+  if (decision.reason === "not_waiting_ops") return null;
+  return {
+    status: "blocked",
+    text: `${OPS_REEVALUATION_SKIP_TEXT[decision.reason]}必要なら「全体レビューを再実行」で手動でやり直せます。`,
   };
 }
