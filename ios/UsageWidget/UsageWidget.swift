@@ -20,7 +20,7 @@ struct SubscriptionUsageWidget: Widget {
                 .widgetURL(UsageWidgetView.openURL)
         }
         .configurationDisplayName("サブスク枠")
-        .description("ClaudeとChatGPTの週間枠が、週の経過に対してどこまで進んでいるかを表示します")
+        .description("ClaudeとChatGPTの週間枠（Claudeは5時間枠も）が、経過に対してどこまで進んでいるかを表示します")
         .supportedFamilies([.accessoryRectangular])
     }
 }
@@ -47,6 +47,8 @@ struct UsageProvider: TimelineProvider {
     static let sample = UsageSnapshot(
         claude: UsageWindow(usedPercent: 38, resetsAt: (Date().timeIntervalSince1970 + 3 * 86_400) * 1000,
                             durationMs: 7 * 86_400_000, fetchedAt: Date().timeIntervalSince1970 * 1000, expired: false),
+        claudeFiveHour: UsageWindow(usedPercent: 55, resetsAt: (Date().timeIntervalSince1970 + 2 * 3_600) * 1000,
+                                    durationMs: 5 * 3_600_000, fetchedAt: Date().timeIntervalSince1970 * 1000, expired: false),
         chatgpt: UsageWindow(usedPercent: 21, resetsAt: (Date().timeIntervalSince1970 + 5 * 86_400) * 1000,
                              durationMs: 7 * 86_400_000, fetchedAt: Date().timeIntervalSince1970 * 1000, expired: false),
         generatedAt: Date().timeIntervalSince1970 * 1000
@@ -106,7 +108,7 @@ struct UsageWidgetView: View {
         switch entry.state {
         case .loaded(let snapshot):
             VStack(alignment: .leading, spacing: 6) {
-                UsageRow(name: "Claude", window: snapshot.claude, now: entry.date)
+                UsageRow(name: "Claude", window: snapshot.claude, fiveHour: snapshot.claudeFiveHour, now: entry.date)
                 UsageRow(name: "ChatGPT", window: snapshot.chatgpt, now: entry.date)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
@@ -129,6 +131,8 @@ struct UsageWidgetView: View {
 struct UsageRow: View {
     let name: String
     let window: UsageWindow?
+    /// 指定があれば、週間バーの上に5時間枠のバー（グラフだけ）を足す
+    var fiveHour: UsageWindow?
     let now: Date
 
     /// リセット後・未取得は使用率が分からない
@@ -149,6 +153,11 @@ struct UsageRow: View {
                     .font(.system(size: 12, weight: .bold))
                     .monospacedDigit()
             }
+            if let fiveHour {
+                let live = fiveHour.expired ? nil : fiveHour.usedPercent
+                PaceBar(used: live, elapsed: fiveHour.expired ? nil : fiveHour.elapsedPercent(at: now), height: 9)
+                    .opacity(fiveHour.isStale(at: now) ? 0.5 : 1)
+            }
             PaceBar(used: used, elapsed: window?.elapsedPercent(at: now))
         }
         .lineLimit(1)
@@ -159,8 +168,9 @@ struct UsageRow: View {
 
     private var accessibilityText: String {
         guard let window, let used else { return "\(name) 週間枠 取得できていません" }
+        let five = fiveHour.flatMap { $0.expired ? nil : "5時間枠 使用\(Int($0.usedPercent.rounded()))% " } ?? ""
         let elapsed = Int(window.elapsedPercent(at: now).rounded())
-        return "\(name) 週間枠 使用\(Int(used.rounded()))% 経過\(elapsed)% \(window.resetText(at: now) ?? "")でリセット"
+        return "\(name) \(five)週間枠 使用\(Int(used.rounded()))% 経過\(elapsed)% \(window.resetText(at: now) ?? "")でリセット"
     }
 }
 
@@ -168,10 +178,11 @@ struct UsageRow: View {
 struct PaceBar: View {
     let used: Double?
     let elapsed: Double?
+    var height: CGFloat = 13
 
     var body: some View {
         Canvas { context, size in
-            let bar = CGRect(x: 0, y: 3, width: size.width, height: size.height - 6)
+            let bar = CGRect(x: 0, y: 2, width: size.width, height: size.height - 4)
             let track = Path(roundedRect: bar, cornerRadius: bar.height / 2)
             context.fill(track, with: .color(.primary.opacity(0.25)))
 
@@ -206,6 +217,6 @@ struct PaceBar: View {
                              with: .color(.primary))
             }
         }
-        .frame(height: 13)
+        .frame(height: height)
     }
 }
