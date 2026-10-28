@@ -82,6 +82,8 @@ vi.mock("@/lib/db", () => {
   return { db };
 });
 
+vi.mock("@/lib/github/report-progress", () => ({ reportProgressStatus: vi.fn() }));
+
 vi.mock("@/lib/execution-plan/register", async (orig) => {
   const actual = await orig<typeof import("@/lib/execution-plan/register")>();
   return { ...actual, getPlanView: vi.fn() };
