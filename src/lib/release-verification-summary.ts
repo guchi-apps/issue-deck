@@ -21,8 +21,13 @@ import type { ReleaseVerificationProgress } from "@/lib/release-verification-pro
 import {
   describeReviewEvidenceStage,
   readAutoReevaluation,
+  readHostFacts,
+  readOpsReevaluation,
+  type OpsReevaluationSkipReason,
   type ReviewAutoReevaluation,
   type ReviewEvidenceStage,
+  type ReviewHostFacts,
+  type ReviewOpsReevaluation,
 } from "@/lib/release-review-reevaluation";
 
 /**
@@ -87,6 +92,15 @@ export type ReleaseVerificationSection = {
   unverifiedScope?: string | null;
   /** 自動再評価の印（#4664。全体レビューだけ）。無ければnull */
   autoReevaluation?: ReviewAutoReevaluation | null;
+  /** pollerの更新を契機にした自動再評価の印（#5111。全体レビューだけ）。無ければnull */
+  opsReevaluation?: ReviewOpsReevaluation | null;
+  /** 結果を出したホストと起動時コミット（#5111。全体レビューだけ）。記録の無い旧結果はnull */
+  hostFacts?: ReviewHostFacts | null;
+  /**
+   * 運用待ちの全体レビューを、pollerの更新を契機に自動で再評価できるか（#5111）。`opsContext`を読んだとき
+   * （運用待ちの要確認）だけ添える。`reason`は自動で開始しない理由
+   */
+  opsAutoReevaluation?: { action: "rerun" } | { action: "none"; reason: OpsReevaluationSkipReason } | null;
   /** 統合検証の完了まで開始を待たせているか（#4763。全体レビューだけ） */
   awaitingIntegration?: boolean;
   /**
@@ -183,6 +197,8 @@ export function reviewStageOf(
       reason: aiReview.reason,
       summary: aiReview.summary,
       autoReevaluation: aiReview.autoReevaluation ?? null,
+      opsReevaluation: aiReview.opsReevaluation ?? null,
+      hostFacts: aiReview.hostFacts ?? null,
       executionFailed: aiReview.diagnostic !== null,
       awaitingIntegration: aiReview.awaitingIntegration ?? false,
     },
@@ -236,6 +252,8 @@ export function summarizeReleaseVerification(input: {
       decisions: null,
       unverifiedScope: row?.unverifiedScope ?? null,
       autoReevaluation: kind === "ai_review" ? readAutoReevaluation(row?.findings) : null,
+      opsReevaluation: kind === "ai_review" ? readOpsReevaluation(row?.findings) : null,
+      hostFacts: kind === "ai_review" ? readHostFacts(row?.findings) : null,
       awaitingIntegration: kind === "ai_review" && state === "waiting" && readAwaitingIntegration(row?.findings) !== null,
     };
   };

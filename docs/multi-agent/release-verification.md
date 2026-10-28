@@ -221,7 +221,25 @@ PC（リリースPR詳細）・スマホ（リリースシート）・**本番�
   - この段階を使う表示は、上部バッジ（`release-stage-badges.ts`）、候補の状態（`release-candidate-status.ts`・`deriveRcStatus`）、本番PR詳細の概要帯（`release-fix-overview.ts`）、全体レビュー欄、バンプ後の再検証（`describeReverifyItems`）。
   - 統合検証が完了した後は「統合検証中」と出さない。
   - 検証詳細は、段階が待ち・確認中の間もポーリングを続け、段階の変化で一覧を取り直す。
-  - poller更新の必要性の根拠表示は#4665で扱う。ここでは、更新の要求を再評価の開始条件にしていない。
+  - poller更新の必要性の根拠表示は#4665で扱う。ここでは、更新の要求を再評価の開始条件にしていない（pollerの更新を契機にした再評価は次の節）。
+
+### pollerの更新後の自動再評価（#5111）
+
+上の自動再評価は統合検証の完了を契機にするため、全体レビューが「pollerの更新・再起動の未確認」（運用待ち）で要確認になると、サブPCが更新された後も人が「全体レビューを再実行」を押す必要があった。**ホストの稼働事実（起動時コミット）が変わり、運用待ちが解消したと照合できたら、同じ対象を1回だけ自動で再評価する。** 再評価そのものは#4799のランナー（ホスト指紋が変わった運用依存の結果だけ捨てる）が行い、確認済みの結果・指摘・判断はそのまま引き継がれる。
+
+- **判定は純関数`decideOpsReevaluation`（`src/lib/release-review-reevaluation.ts`）だけが持つ。** 積むのは次がすべて揃ったとき。
+  - 記録が`needs_check`で実行失敗の診断が無く、未確認が更新・再起動を**要求**し（`findOpsRequest`）、かつランナーがホストの事実で見直す対象（`reviewDependsOnHost`）。コードの読み残し・判断待ち・証跡待ちだけの要確認は対象外。
+  - 同じ対象の全体レビュージョブが待機中・実行中でない。
+  - 稼働情報との照合（`assessReleaseOps`。#4665）が`updated`。`not_needed`（候補にサブPCへ届く変更が無い）・`needed`（旧版のまま）・`unknown`（オフライン・未申告・取得失敗）では積まない。
+  - 更新済みで全体レビューを実行できるホストがある。統合検証の証跡にも依存する結果は、統合検証を実行したホストに限る。
+  - そのホストの事実（`<ホスト名>@<起動時コミット>`。`hostFactKey`）が、レビューの実行時の事実（`findings.hostFacts`）とも、前回積んだ印（`findings.opsReevaluation`）とも違う。
+- **レビューの実行時の事実は、結果の報告時にサーバーが記録する**（`applyReleaseReviewReport`が、ジョブを取得したホストの`checkoutStartedCommit`を`findings.hostFacts`へ）。チェックアウトの現在のHEADは含めない（ランナーの`runner_host_fingerprint`と同じ）。記録の無い旧結果は「事実が違う」として1回だけ照合し直す（既に更新済みでも旧結果が残る場合の再照合経路）。
+- **契機はpollerの`claim`ごとの巡回だけ**（`sweepReleaseReviewReevaluation`に相乗り。1分に1回まで・直近14日・20件まで）。**DBだけで「実行時・前回の印と違うホストの事実がある」対象を先に絞り**、その対象にだけ稼働情報（issue-deck自身の候補はGitHubのcompare）を読む。同じ対象・同じ事実の照合は10分に1回まで。heartbeatの反復や「最新」表示では起動時コミットが変わらないので積まない。ホストの申告（`/api/dispatch/hosts`）では判定しない——申告の頻度でGitHub APIを呼ぶことになるため。
+- **重複・無限ループを止めるのは**、ジョブの`activeKey`・印`opsReevaluation`（同じ事実で1回）・結果に記録される`hostFacts`（再評価後の結果は同じ事実なので再び積まない）。自動の再評価は他方の契機の印を残す（`rerunReleaseReviewJob`）。人の再実行は従来どおり印を持ち越さない。
+- **候補の取消・公開済み・SHAの変更後は積まない**（`isCurrentReleaseReviewTarget`。#4664と共用）。積めなければ`ai_review`へ失敗を記録しない（`recordNoHost: false`）。
+- **報告なしで終わったときは**、#4664と同じ`fail_stalled`で`failed`へ戻し、手動の再実行へ戻す（`decideReviewReevaluation`が両方の印を見る）。
+- **更新の事実だけで合格・公開・修正Issueの作成はしない。** 結果はレビューが出し直す。
+- **画面**: 全体レビュー欄の「次の操作」（PC・スマホの同じ部品）に「自動再評価: 開始予定／自動で開始しない理由」を出す（`explainOpsReevaluation`→`aiReview.opsAutoReevaluation`→`describeReviewRerun`の`opsAuto`）。積んだ後の段階は「poller更新を受けて再評価中」（`reevaluating`の`trigger: "ops"`）、同じ事実で出た結果は「自動再評価済み・対応／判断が必要」。手動の「全体レビューを再実行」は回復手段として残す。
 
 ### 検証証跡のAIレビューへの受け渡しと失敗種別の区別（#4616）
 

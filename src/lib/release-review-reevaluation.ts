@@ -1,4 +1,9 @@
-import { findOpsRequest } from "@/lib/release-review-ops-evidence";
+import {
+  POLLER_REPOSITORY,
+  findOpsRequest,
+  type ReleaseOpsAssessment,
+  type ReleaseOpsHostFact,
+} from "@/lib/release-review-ops-evidence";
 
 /**
  * 統合検証の完了後に、全体レビューの「証跡に依存する未確認」を自動で再評価する判定（#4664）と、
@@ -26,6 +31,44 @@ export function readAutoReevaluation(findings: unknown): ReviewAutoReevaluation 
   const r = raw as Record<string, unknown>;
   if (typeof r.integrationAt !== "string" || typeof r.requestedAt !== "string") return null;
   return { integrationAt: r.integrationAt, requestedAt: r.requestedAt };
+}
+
+/**
+ * 記録の`findings.hostFacts`。全体レビューを実行したホストと、その時点の起動時コミット（#5111）。
+ * 結果の報告時にサーバーが記録する。ランナーの`runner_host_fingerprint`と同じく、チェックアウトの現在のHEADは含めない
+ */
+export type ReviewHostFacts = { host: string; startedCommit: string | null };
+
+/** 記録の`findings.opsReevaluation`。pollerの稼働事実（`hostFact`）ごとに1回だけ自動で積んだ印（#5111） */
+export type ReviewOpsReevaluation = {
+  /** 再評価の契機にしたホストの事実（`hostFactKey`） */
+  hostFact: string;
+  /** 積んだ時刻（ISO） */
+  requestedAt: string;
+};
+
+export function hostFactKey(host: string, startedCommit: string | null): string {
+  return `${host}@${startedCommit ?? ""}`;
+}
+
+function readObject(findings: unknown, key: string): Record<string, unknown> | null {
+  const raw =
+    typeof findings === "object" && findings !== null && !Array.isArray(findings)
+      ? (findings as Record<string, unknown>)[key]
+      : null;
+  return typeof raw === "object" && raw !== null && !Array.isArray(raw) ? (raw as Record<string, unknown>) : null;
+}
+
+export function readHostFacts(findings: unknown): ReviewHostFacts | null {
+  const r = readObject(findings, "hostFacts");
+  if (!r || typeof r.host !== "string") return null;
+  return { host: r.host, startedCommit: typeof r.startedCommit === "string" ? r.startedCommit : null };
+}
+
+export function readOpsReevaluation(findings: unknown): ReviewOpsReevaluation | null {
+  const r = readObject(findings, "opsReevaluation");
+  if (!r || typeof r.hostFact !== "string" || typeof r.requestedAt !== "string") return null;
+  return { hostFact: r.hostFact, requestedAt: r.requestedAt };
 }
 
 /**
@@ -104,6 +147,8 @@ export type ReviewReevaluationInput = {
     hasDiagnostic: boolean;
     dependsOnEvidence: boolean;
     marker: ReviewAutoReevaluation | null;
+    /** pollerの稼働事実の変化で自動で積んだ印（#5111）。停滞の判定にだけ使う */
+    opsMarker?: ReviewOpsReevaluation | null;
     updatedAt: Date;
   };
   integration: { state: string; updatedAt: Date } | null;
@@ -131,12 +176,12 @@ export function decideReviewReevaluation(input: ReviewReevaluationInput): Review
 
   if (review.state === "waiting" || review.state === "running") {
     if (jobActive) return { action: "none", reason: "review_active" };
-    // 自動で積んだのに、ジョブが結果を報告せずに終わった
-    if (
-      review.marker &&
-      lastReviewJob !== null &&
-      lastReviewJob.createdAt.getTime() >= Date.parse(review.marker.requestedAt) - 1000
-    ) {
+    // 自動で積んだのに、ジョブが結果を報告せずに終わった（統合検証・pollerの更新のどちらを契機にしたものでも）
+    const requestedAt = Math.max(
+      review.marker ? Date.parse(review.marker.requestedAt) : Number.NEGATIVE_INFINITY,
+      review.opsMarker ? Date.parse(review.opsMarker.requestedAt) : Number.NEGATIVE_INFINITY,
+    );
+    if (lastReviewJob !== null && Number.isFinite(requestedAt) && lastReviewJob.createdAt.getTime() >= requestedAt - 1000) {
       return {
         action: "fail_stalled",
         message: `全体レビューの自動再評価が完了しませんでした（ジョブ: ${lastReviewJob.status}）。「全体レビューを再実行」でやり直してください。`,
@@ -169,6 +214,98 @@ export function decideReviewReevaluation(input: ReviewReevaluationInput): Review
   return { action: "rerun", integrationAt };
 }
 
+export type OpsReevaluationSkipReason =
+  /** 運用待ち（poller更新・再起動の未確認）の要確認ではない。案内も出さない */
+  | "not_waiting_ops"
+  | "execution_failed"
+  | "review_active"
+  | "ops_not_needed"
+  | "ops_needed"
+  | "ops_unknown"
+  | "verify_host_not_updated"
+  | "no_eligible_host"
+  | "same_host_facts"
+  | "already_reevaluated";
+
+export type OpsReevaluationDecision =
+  | { action: "rerun"; host: string; hostFact: string }
+  | { action: "none"; reason: OpsReevaluationSkipReason };
+
+/** 自動で開始しない理由の説明（画面用）。`not_waiting_ops`は案内しない */
+export const OPS_REEVALUATION_SKIP_TEXT: Record<OpsReevaluationSkipReason, string> = {
+  not_waiting_ops: "",
+  execution_failed: "全体レビューを最後まで実行できていないため、自動では再評価しません。",
+  review_active: "全体レビューを実行中です。終わるまで自動の再評価は積みません。",
+  ops_not_needed: "この候補はサブPCの更新が不要なため、pollerの更新を契機には再評価しません。",
+  ops_needed: "サブPCのpollerが候補を含む版で動き出すのを待っています。更新・再起動を確認すると自動で再評価します。",
+  ops_unknown: "サブPCの稼働状態（オンラインか・起動時のコミット）を確認できないため、自動では開始しません。",
+  verify_host_not_updated:
+    "統合検証の証跡を持つサブPCが、更新済み・全体レビュー対応・オンラインのいずれかを満たさないため、自動では開始しません。",
+  no_eligible_host: "更新済みで全体レビューを実行できるサブPCが無いため、自動では開始しません。",
+  same_host_facts: "このレビューは、いま稼働しているpollerの版で実行済みです。同じ事実では結果が変わらないため、自動では再実行しません。",
+  already_reevaluated: "いま稼働しているpollerの版で自動再評価済みです。残っている項目は対応・判断が必要です。",
+};
+
+export type OpsReevaluationInput = {
+  repositoryFullName: string;
+  review: {
+    /** 記録の状態（読み替える前） */
+    state: string;
+    hasDiagnostic: boolean;
+    /** 未確認がpollerの更新・再起動の要求を含み（`findOpsRequest`）、ランナーがホストの事実で見直す対象か（`reviewDependsOnHost`） */
+    waitsForOps: boolean;
+    /** 統合検証の証跡にも依存するか。依存するなら証跡を持つホストでしか再評価できない */
+    dependsOnEvidence: boolean;
+    hostFacts: ReviewHostFacts | null;
+    opsMarker: ReviewOpsReevaluation | null;
+  };
+  /** 同じ対象の全体レビュージョブが待機中・実行中か */
+  jobActive: boolean;
+  /** 稼働情報と照らした運用状態（`assessReleaseOps`）。照合できなければnull */
+  assessment: ReleaseOpsAssessment | null;
+  hosts: readonly ReleaseOpsHostFact[];
+  /** 統合検証を実行したホスト（証跡に依存するときの実行先）。分からなければnull */
+  verifyHost: string | null;
+};
+
+/**
+ * pollerの稼働事実の変化を契機に、運用待ちの全体レビューを自動で再評価するか（#5111）。積むのは
+ * 「運用待ちの要確認」「照合で更新済み（`updated`）」「更新済みで全体レビューを実行できるホストがある」
+ * 「そのホストの事実（起動時コミット）がレビューの実行時と違う」「同じ事実でまだ積んでいない」が揃ったときだけ。
+ * heartbeatの反復や「最新」表示では事実が変わらないので積まない。結果の記録に事実が無い旧結果は、事実が違うものとして1回だけ積む
+ */
+export function decideOpsReevaluation(input: OpsReevaluationInput): OpsReevaluationDecision {
+  const { review, assessment } = input;
+  if (review.state !== "needs_check" || !review.waitsForOps) return { action: "none", reason: "not_waiting_ops" };
+  if (review.hasDiagnostic) return { action: "none", reason: "execution_failed" };
+  if (input.jobActive) return { action: "none", reason: "review_active" };
+  if (!assessment || assessment.status === "unknown") return { action: "none", reason: "ops_unknown" };
+  if (assessment.status === "not_needed") return { action: "none", reason: "ops_not_needed" };
+  if (assessment.status === "needed") return { action: "none", reason: "ops_needed" };
+
+  const isPollerRepo = input.repositoryFullName === POLLER_REPOSITORY;
+  let eligible = input.hosts
+    .filter(
+      (h) =>
+        h.online &&
+        h.releaseReviewCapable &&
+        (isPollerRepo ? h.includesCandidate === true : h.releaseVerifyCapable),
+    )
+    .sort((a, b) => a.name.localeCompare(b.name));
+  if (review.dependsOnEvidence) {
+    eligible = eligible.filter((h) => h.name === input.verifyHost);
+    if (eligible.length === 0) return { action: "none", reason: "verify_host_not_updated" };
+  }
+  if (eligible.length === 0) return { action: "none", reason: "no_eligible_host" };
+
+  const saved = review.hostFacts ? hostFactKey(review.hostFacts.host, review.hostFacts.startedCommit) : null;
+  const fresh = eligible.find((h) => hostFactKey(h.name, h.startedCommit) !== saved);
+  if (!fresh) return { action: "none", reason: "same_host_facts" };
+  const hostFact = hostFactKey(fresh.name, fresh.startedCommit);
+  if (review.opsMarker?.hostFact === hostFact) return { action: "none", reason: "already_reevaluated" };
+  return { action: "rerun", host: fresh.name, hostFact };
+}
+
 /** 全体レビューの残件の種類（要確認の内訳） */
 export type ReviewOpenItemKind =
   /** リリースを止める指摘（実装の対応・ユーザーの判断が要る） */
@@ -197,8 +334,11 @@ export type ReviewEvidenceStage =
   | { kind: "reviewing" }
   /** コード確認は済み、実行結果の証跡（統合検証）を待っている */
   | { kind: "integration_waiting" }
-  /** 統合検証の完了を受けて、証跡に依存する項目を再評価している（開始待ちを含む） */
-  | { kind: "reevaluating" }
+  /**
+   * 統合検証の完了を受けて、証跡に依存する項目を再評価している（開始待ちを含む）。
+   * `trigger: "ops"`はpollerの更新（稼働事実の変化）を契機にした再評価（#5111）
+   */
+  | { kind: "reevaluating"; trigger?: "ops" }
   | { kind: "complete" }
   | {
       kind: "needs_check";
@@ -241,6 +381,7 @@ export const REVIEW_DECIDED_LABEL = "判断済み（公開後対応）";
 export function describeReviewStageLabel(stage: ReviewEvidenceStage): string {
   if (stage.kind === "needs_check" && stage.cleared) return REVIEW_DECIDED_LABEL;
   if (stage.kind === "needs_check" && stage.autoReevaluated) return "自動再評価済み・対応／判断が必要";
+  if (stage.kind === "reevaluating" && stage.trigger === "ops") return "poller更新を受けて再評価中";
   return REVIEW_STAGE_LABEL[stage.kind];
 }
 
@@ -259,6 +400,10 @@ export type ReviewStageInput = {
   executionFailed: boolean;
   /** 統合検証の完了まで開始を待たせている印がある（#4763。`findings.awaitingIntegration`） */
   awaitingIntegration?: boolean;
+  /** pollerの稼働事実の変化で自動で積んだ印（#5111） */
+  opsReevaluation?: ReviewOpsReevaluation | null;
+  /** 結果を出したホストの事実（#5111）。印と同じ事実なら、その再評価の結果 */
+  hostFacts?: ReviewHostFacts | null;
 };
 
 /**
@@ -280,7 +425,12 @@ export function describeReviewEvidenceStage(
 
   // 統合検証の完了まで開始を待たせている（#4763）。統合検証が終わった後は、開始されるまで「全体レビュー中」として出す
   if (review.state === "waiting" && review.awaitingIntegration && integrationPending) return { kind: "awaiting_integration" };
+  const opsMarker = review.opsReevaluation ?? null;
   if (review.state === "waiting" || review.state === "running") {
+    // 後から積んだ方の契機を出す
+    if (opsMarker && (marker === null || Date.parse(opsMarker.requestedAt) >= Date.parse(marker.requestedAt))) {
+      return { kind: "reevaluating", trigger: "ops" };
+    }
     return marker !== null && integrationFinished ? { kind: "reevaluating" } : { kind: "reviewing" };
   }
   if (review.state === "failed" && (review.executionFailed || (review.findingsCount === 0 && review.checks === null))) {
@@ -325,7 +475,11 @@ export function describeReviewEvidenceStage(
     items.push("check_unconfirmed");
   }
   if (review.openFiles > 0) items.push("code_unread");
-  return { kind: "needs_check", autoReevaluated: markerCurrent, items };
+  const opsReevaluated =
+    opsMarker !== null &&
+    review.hostFacts != null &&
+    opsMarker.hostFact === hostFactKey(review.hostFacts.host, review.hostFacts.startedCommit);
+  return { kind: "needs_check", autoReevaluated: markerCurrent || opsReevaluated, items };
 }
 
 /**
