@@ -689,6 +689,14 @@ describe("mergePendingIssueKeys（#3650）", () => {
     expect(has(15)).toBe(false);
   });
 
+  // 理由ラベルが`merge`でなくても、マージ待ちに出ているPRの対応Issueは外す（#5122）
+  it("理由ラベルがblockedでも、マージ待ちのPRの対応Issueを含める", () => {
+    const keys = mergePendingIssueKeys([
+      pullRequest({ number: 301, linkedIssueNumber: 21, ciState: "success", linkedIssueCheckReason: "blocked" }),
+    ]);
+    expect(isIssueAwaitingMerge({ repositoryFullName: "guchi-apps/issue-deck", number: 21 }, keys)).toBe(true);
+  });
+
   // 判定より先にマージされた「事後の確認」は開いているPRが無いので、外さず確認待ちに残す
   it("マージ済みPRの対応Issueは含めない", () => {
     const keys = mergePendingIssueKeys([

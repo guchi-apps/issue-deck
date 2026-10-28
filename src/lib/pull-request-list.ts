@@ -451,6 +451,9 @@ export function isLinkedIssueListed(
  *
  * **失敗しているPR（CI失敗・コンフリクト・要修正レビュー）の対応Issueも外す**（#4963）。
  * 失敗は「マージ待ち」に出るので、確認待ちに残すと同じ案件が2か所に出る。母集団は
+ * **理由ラベルが`merge`以外でも、「マージ待ち」に出ていて人のマージだけが残るPRの対応Issueは
+ * 外す**（#5122。`01.check-blocked`が付いたIssueが両方に出ていた）。自動マージ有効・ドラフト・
+ * レビュー要確認は対象外。母集団は
  * 「マージ待ち」ビューに実際に出るPR（`filterPullRequestsByView`の`completed`）に限り、
  * そこに出ないPR（CI実行中・ドラフト・リリース等）の対応Issueは確認待ちに残す。
  *
@@ -459,12 +462,22 @@ export function isLinkedIssueListed(
  */
 export function mergePendingIssueKeys(pullRequests: PullRequestSummary[]): ReadonlySet<string> {
   const keys = new Set<string>();
-  const failed = new Set(
-    filterPullRequestsByView(pullRequests, "completed").filter(isFailedPullRequest),
+  const completed = filterPullRequestsByView(pullRequests, "completed");
+  const failed = new Set(completed.filter(isFailedPullRequest));
+  // 「マージ待ち」に出ていて、あとは人のマージだけが残っているPR。対応Issueに付いた理由ラベルが
+  // `merge`でなくても（`01.check-blocked`など）、同じ案件を確認待ちとマージ待ちの両方へ出さない（#5122）
+  const mergeWaiting = new Set(
+    completed.filter(
+      (pullRequest) =>
+        pullRequest.kind === "issue" &&
+        !pullRequest.draft &&
+        !pullRequest.autoMergeEnabled &&
+        pullRequest.reviewVerdict?.reviewKind !== "needs-check",
+    ),
   );
   for (const pullRequest of pullRequests) {
     if (pullRequest.linkedIssueNumber === null) continue;
-    if (!requiresUserMerge(pullRequest) && !failed.has(pullRequest)) continue;
+    if (!requiresUserMerge(pullRequest) && !failed.has(pullRequest) && !mergeWaiting.has(pullRequest)) continue;
     keys.add(`${pullRequest.repositoryFullName}#${pullRequest.linkedIssueNumber}`);
   }
   return keys;
