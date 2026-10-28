@@ -59,6 +59,8 @@ vi.mock("@/lib/dispatch/installation-token", () => ({ resolveInstallationToken: 
 const createComment = vi.fn(async () => ({}));
 vi.mock("@/lib/github/issues-api", () => ({ createComment: () => createComment(), fetchIssueState: vi.fn() }));
 vi.mock("@/lib/github/pull-requests-api", () => ({ fetchPullRequest: vi.fn() }));
+const reportProgress = vi.fn(async (..._args: unknown[]) => ({ applied: true }));
+vi.mock("@/lib/github/report-progress", () => ({ reportProgressStatus: (...a: unknown[]) => reportProgress(...a) }));
 vi.mock("@/lib/dispatch/check-user-labels", () => ({ addCheckUserWithReason: vi.fn(async () => []) }));
 
 import {
@@ -91,6 +93,7 @@ beforeEach(() => {
   seq = 0;
   enqueue.mockReset();
   createComment.mockClear();
+  reportProgress.mockClear();
   vi.mocked(addCheckUserWithReason).mockClear();
   findSession.mockReset();
   findSession.mockResolvedValue({ host: "subpc", state: "ALIVE", activity: "RESPONDED", activityAt: null });
@@ -120,6 +123,21 @@ describe("registerDependencyWait", () => {
     const view = await register(["closed", "released"], closed);
     expect(view.status).toBe("NEEDS_CONFIRM");
     expect(enqueue).not.toHaveBeenCalled();
+  });
+
+  it("登録すると、計画・実装中の進捗を未着手へ戻す（他の段は動かさない）", async () => {
+    await register(["closed"], open);
+    expect(reportProgress).toHaveBeenCalledWith({
+      ...target,
+      status: "ready",
+      onlyFrom: ["planning", "implementation"],
+    });
+  });
+
+  it("進捗の報告が失敗しても保留の登録は成功する", async () => {
+    reportProgress.mockRejectedValueOnce(new Error("boom"));
+    const view = await register(["closed"], open);
+    expect(view.status).toBe("WAITING");
   });
 
   it("同じIssueの二重登録は1行にまとめる", async () => {
