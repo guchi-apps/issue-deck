@@ -171,7 +171,11 @@ describe("agent_allowed_tools", () => {
       ).split(",");
     }
 
-    const prRules = prAllowedTools("guchi-apps/vps", "/home/guchi/apps/issue-deck/scripts");
+    const prRules = prAllowedTools(
+      "guchi-apps/vps",
+      "/home/guchi/apps/issue-deck/scripts",
+      "319",
+    );
 
     it("指示ファイルが求めるPR作成と、範囲を絞ったsecretの同期を許可する", () => {
       expect(prRules).toEqual([
@@ -180,7 +184,17 @@ describe("agent_allowed_tools", () => {
         "Bash(scripts/sync-github-secrets.sh --only:*)",
         "Bash(scripts/provision-secret.sh --repo guchi-apps/vps:*)",
         "Bash(/home/guchi/apps/issue-deck/scripts/provision-secret.sh --repo guchi-apps/vps:*)",
+        "Bash(gh issue edit 319 --remove-label 11.local)",
+        "Bash(gh issue edit 319 --repo guchi-apps/vps --remove-label 11.local)",
       ]);
+    });
+
+    it("11.localの解除は担当Issueの1コマンドだけを完全一致で許可する（#5117）", () => {
+      const labelRules = prRules.filter((rule) => rule.startsWith("Bash(gh issue edit"));
+      // 前方一致（`:*`）にすると、後ろに`--add-label`などを足したコマンドまで通る。
+      for (const rule of labelRules) {
+        expect(rule.endsWith(":*)")).toBe(false);
+      }
     });
 
     it("基本の規則には入らない（レビュー・統合セッションへは渡らない）", () => {
@@ -198,14 +212,36 @@ describe("agent_allowed_tools", () => {
         ".github/scripts/sync-github-secrets.sh --dry-run",
         "scripts/provision-secret.sh --repo guchi-apps/issue-deck --key FOO",
         "/home/guchi/apps/issue-deck/scripts/provision-secret.sh --repo guchi-apps/aide --key FOO",
+        "gh issue edit 319 --add-label 11.local",
+        "gh issue edit 320 --remove-label 11.local",
+        "gh issue edit 319 --repo guchi-apps/aide --remove-label 11.local",
+        "gh issue close 319",
       ];
       for (const command of forbidden) {
         const matched = prRules.filter((rule) => {
-          const inner = rule.replace(/^Bash\(/, "").replace(/:\*\)$/, "");
-          return command === inner || command.startsWith(`${inner} `);
+          const prefix = rule.endsWith(":*)");
+          const inner = rule.replace(/^Bash\(/, "").replace(/:\*\)$/, "").replace(/\)$/, "");
+          return command === inner || (prefix && command.startsWith(`${inner} `));
         });
         expect(matched, `${command} を通す規則がある: ${matched.join(", ")}`).toEqual([]);
       }
+    });
+
+    it("Issue番号が数字でなければ11.local解除の規則を足さない", () => {
+      const withoutIssue = prRules.slice(0, 5);
+      expect(prAllowedTools("guchi-apps/vps", "/home/guchi/apps/issue-deck/scripts")).toEqual(
+        withoutIssue,
+      );
+      for (const bad of ["", "0", "12 --add-label x", "1,2", "*"]) {
+        expect(
+          prAllowedTools("guchi-apps/vps", "/home/guchi/apps/issue-deck/scripts", bad),
+        ).toEqual(withoutIssue);
+      }
+      // リポジトリ名が不正なら`--repo`付きの形だけを落とす。
+      expect(prAllowedTools("guchi-apps/*", "/x", "319")).toEqual([
+        ...prRules.slice(0, 3),
+        "Bash(gh issue edit 319 --remove-label 11.local)",
+      ]);
     });
 
     it("リポジトリ名・スクリプトの場所が規則を割る・広げる形なら、その規則を足さない", () => {
@@ -217,7 +253,7 @@ describe("agent_allowed_tools", () => {
       expect(prAllowedTools("guchi-apps/vps", "/tmp/a b/scripts")).toEqual(prRules.slice(0, 4));
       // 末尾の`/`は落とす。
       expect(prAllowedTools("guchi-apps/vps", "/home/guchi/apps/issue-deck/scripts/")).toEqual(
-        prRules,
+        prRules.slice(0, 5),
       );
     });
   });

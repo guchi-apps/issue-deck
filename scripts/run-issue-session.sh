@@ -646,9 +646,9 @@ if [[ "${ISSUE_DECK_SESSION_KIND:-implementation}" == "implementation" ]] &&
   ! pr_policy_is_manual "$(current_repo_slug)"; then
   SEND_PR_INSTRUCTION=1
   # 指示ファイルとシステムプロンプトで明示していても、クラシファイアは`gh pr create`と
-  # secretの同期を拒否した（#5082）。同じ条件のセッションにだけ規則として渡す
+  # secretの同期（#5082）、担当Issueの`11.local`の解除（#5117）を拒否した。同じ条件のセッションにだけ規則として渡す
   # （中身と範囲の絞り方は`lib/agent-allowed-tools.sh`の`agent_pr_allowed_tools`）。
-  SESSION_ALLOWED_TOOLS+=",$(agent_pr_allowed_tools "$(current_repo_slug)" "$SCRIPT_DIR")"
+  SESSION_ALLOWED_TOOLS+=",$(agent_pr_allowed_tools "$(current_repo_slug)" "$SCRIPT_DIR" "$ISSUE_NUMBER")"
 fi
 
 if [[ "$AGENT_KIND" == "claude" ]]; then

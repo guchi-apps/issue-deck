@@ -38,8 +38,9 @@
 #   - `gh api`（POST・DELETEを同じ規則で通してしまうため、読み取り用途でも入れない）
 #   - `rm`・`sudo`・`ssh`・`op`・`sed -i`のような書き換え系
 #
-# **例外は`agent_pr_allowed_tools`（#5082）。** PRを自動で作る実装セッションに限り、
-# 指示ファイルが明示的に求める`gh pr create`と、範囲を絞ったsecretの同期だけを別に足す。
+# **例外は`agent_pr_allowed_tools`（#5082・#5117）。** PRを自動で作る実装セッションに限り、
+# 指示ファイルが明示的に求める`gh pr create`・範囲を絞ったsecretの同期・担当Issueの`11.local`の
+# 解除だけを別に足す。
 #
 # **ファイルを読むための`Bash`の規則はここに入れない。** `cat`・`head`・`grep`のような規則は、
 # `cat > file`のように出力をリダイレクトする書き込みまで前方一致で拾いうる。読む・探すのは
@@ -189,6 +190,13 @@ agent_allowed_tools() {
 #   - `sync-github-secrets.sh --only`——**`--only`で対象キーを絞った同期だけ。** マニフェスト全体の
 #     同期は値の上書き範囲が広すぎるので通さない。実体はリポジトリごとにあり、置き場所が
 #     `.github/scripts/`（配布先）と`scripts/`（issue-deck）で違うため両方を書く
+#   - `gh issue edit <担当番号> [--repo <このセッションのリポジトリ>] --remove-label 11.local`（#5117）
+#     ——指示ファイルが「PRを作ったら`11.local`を外す」と求めるのに、クラシファイアが
+#     `dangerous`として拒否した（guchi-apps/yoteiflow#1457）。外し損ねると無人実行がそのIssueへ
+#     一切追加対応できない。**`:*`を付けない完全一致の規則にする。** 前方一致にすると
+#     `--remove-label 11.local --add-label …`のように他のラベル操作まで通ってしまう。
+#     他のIssue・他のラベル・`--add-label`は引き続きクラシファイアに判断させる。指示ファイルは
+#     この形のままの1コマンドを示している（`--repo`の有無は起動経路で違うので両方を書く）
 #
 # 相対パスの規則は**作業ツリーのスクリプトをそのまま走らせる**（セッション自身が書き換えうる）。
 # ただし`pnpm test`の規則も同じ性質を持っており、ここで新たに開く穴ではない。
@@ -196,9 +204,11 @@ agent_allowed_tools() {
 # 引数:
 #   $1  このセッションのリポジトリ（`owner/repo`）。形式が違えば`provision-secret.sh`の規則を足さない
 #   $2  issue-deckのスクリプトの絶対パス（`run-issue-session.sh`の`SCRIPT_DIR`）。省略可
+#   $3  担当Issueの番号。数字でなければ`11.local`解除の規則を足さない。省略可
 agent_pr_allowed_tools() {
   local repo_slug="${1:-}"
   local scripts_dir="${2:-}"
+  local issue_number="${3:-}"
   scripts_dir="${scripts_dir%/}"
   local rules=(
     "Bash(gh pr create:*)"
@@ -212,6 +222,14 @@ agent_pr_allowed_tools() {
     rules+=("Bash(scripts/provision-secret.sh --repo $repo_slug:*)")
     if [[ "$scripts_dir" == /* && "$scripts_dir" != *[[:space:],*]* ]]; then
       rules+=("Bash($scripts_dir/provision-secret.sh --repo $repo_slug:*)")
+    fi
+  fi
+
+  # 担当Issueの`11.local`を外す1コマンドだけ（#5117）。完全一致なので`:*`を付けない。
+  if [[ "$issue_number" =~ ^[1-9][0-9]*$ ]]; then
+    rules+=("Bash(gh issue edit $issue_number --remove-label 11.local)")
+    if [[ "$repo_slug" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]; then
+      rules+=("Bash(gh issue edit $issue_number --repo $repo_slug --remove-label 11.local)")
     fi
   fi
 
