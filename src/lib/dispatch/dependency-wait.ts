@@ -385,7 +385,7 @@ export function describeDependencyWait(view: DependencyWaitView): DependencyWait
         label: "依存待ち",
         tone: "pending",
         nextStep: remainingText
-          ? `残りの条件: ${remainingText}。成立すると自動で実装を再開します。操作は不要です。`
+          ? `残りの条件: ${remainingText}。進捗は未着手へ戻しています。成立すると自動で実装を再開します。操作は不要です。`
           : "条件を確認中です。成立すると自動で実装を再開します。",
       };
     case "NEEDS_CONFIRM":
