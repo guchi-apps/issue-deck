@@ -1,4 +1,4 @@
-import { BadgeCheck, Bot, CircleDashed, CircleSlash, Hand, Hourglass, Search, TriangleAlert } from "lucide-react";
+import { BadgeCheck, Bot, ChevronRight, CircleDashed, CircleSlash, Hand, Hourglass, Search, TriangleAlert } from "lucide-react";
 
 import {
   countAchievedCriteria,
@@ -143,6 +143,7 @@ export function IssueWorkSummary({
   className?: string;
 }) {
   const source = parseIssueWorkSummary(body);
+  const { achieved, total } = countAchievedCriteria(source, false);
   const showStatus = status === "dependency_wait";
   if (!source.purpose && source.criteria.length === 0 && !showStatus) return null;
   return (
@@ -157,7 +158,22 @@ export function IssueWorkSummary({
           {blockingMessage && <p className="mt-1 text-xs text-muted-foreground">{blockingMessage}</p>}
         </div>
       )}
-      <WorkPurposeAndCriteria body={body} verificationPassed={false} idPrefix={idPrefix} />
+      <details className="group" data-testid="work-summary-accordion">
+        <summary className="flex min-h-7 cursor-pointer list-none items-center gap-2 text-[13px] font-bold [&::-webkit-details-marker]:hidden">
+          <ChevronRight
+            className="size-3.5 shrink-0 text-muted-foreground transition-transform group-open:rotate-90"
+            aria-hidden
+          />
+          <span>目的・完了条件</span>
+          {total > 0 && <span className="font-semibold text-muted-foreground tabular-nums">（{achieved}/{total}）</span>}
+        </summary>
+        {source.purpose && (
+          <p className="mt-0.5 truncate pl-[22px] text-xs text-muted-foreground group-open:hidden">{source.purpose}</p>
+        )}
+        <div className="mt-2">
+          <WorkPurposeAndCriteria body={body} verificationPassed={false} idPrefix={idPrefix} />
+        </div>
+      </details>
     </section>
   );
 }
