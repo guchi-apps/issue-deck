@@ -42,6 +42,11 @@ export function describeBranchFlow(
   }
   if (options.verification?.problem) {
     const { kind } = options.verification.problem;
+    // 工程が自動で進んでいる間の再検証待ち・未実施は、失敗ではなく待てば進む状態。赤にしない（#5126）。
+    // 本当に止まれば工程の担当が人に変わるので、そのときは従来どおり赤になる
+    if (summary.releaseJourney?.owner === "auto" && (kind === "invalidated" || kind === "not_run")) {
+      return result(options.verification.problem.label, "進捗を見る", true, "other");
+    }
     return result(
       options.verification.problem.label,
       "必要な対応を確認",
