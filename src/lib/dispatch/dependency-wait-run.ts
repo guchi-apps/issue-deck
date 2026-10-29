@@ -38,6 +38,7 @@ import { GithubApiError } from "@/lib/github/github-api-error";
 import { createComment, fetchIssueState } from "@/lib/github/issues-api";
 import { fetchPullRequest } from "@/lib/github/pull-requests-api";
 import { GITHUB_API, githubFetch } from "@/lib/github/request";
+import { reportProgressStatus } from "@/lib/github/report-progress";
 import { parseRepositoryFullName } from "@/lib/local-session";
 
 /** 巡回で同じ待ちを評価し直す最短間隔。GitHub APIの消費を抑え、重なった巡回を弾く */
@@ -254,6 +255,24 @@ async function notifyOnce(
 }
 
 /**
+ * 待ちの出入りに合わせて進捗を動かす（#5118）。前提が未達で保留したIssueは盤面で作業中に
+ * 見えるため、登録で`Ready`へ戻し、再開が確認できたら`Implementation`へ進める。
+ * `onlyFrom`で他の段（`Develop PR`以降など）は動かさず、**失敗しても待ちの処理は止めない**。
+ */
+async function reportWaitProgress(
+  repositoryFullName: string,
+  issueNumber: number,
+  status: "ready" | "implementation",
+  onlyFrom: ("planning" | "implementation" | "ready")[],
+): Promise<void> {
+  try {
+    await reportProgressStatus({ repositoryFullName, issueNumber, status, onlyFrom });
+  } catch (error) {
+    console.error(`[dependency-wait] 進捗を${status}へ動かせませんでした（${repositoryFullName}#${issueNumber}）`, error);
+  }
+}
+
+/**
  * セッション自身（または画面）からの待機登録。**登録時にも現在の依存状態を確認し**、成立済みの
  * 条件を古い情報で待ち続けない。同じIssueで待ちが続いているなら内容を更新する（二重登録しない）。
  */
@@ -299,6 +318,10 @@ export async function registerDependencyWait(
           activeKey,
         },
       });
+  await reportWaitProgress(params.repositoryFullName, params.issueNumber, "ready", [
+    "planning",
+    "implementation",
+  ]);
   const advanced = await advanceDependencyWait(row.id, { manual: false }, deps);
   return advanced ?? toDependencyWaitView(row);
 }
@@ -604,6 +627,7 @@ async function trackSent(row: SessionDependencyWait, now: Date): Promise<Session
   ) {
     const result = await updateObservedWait(row, { status: "RESUMED", resumedAt: now, activeKey: null });
     if (!result.applied || result.row.status !== "RESUMED") return result.row;
+    await reportWaitProgress(row.repositoryFullName, row.issueNumber, "implementation", ["ready"]);
     await notifyOnce(result.row, "resumed", () =>
       postIssueComment(
         row.repositoryFullName,
