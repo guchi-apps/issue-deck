@@ -605,7 +605,6 @@ export function PullRequestDetail({
               pullRequest={pullRequest}
               reviewUrl={review?.htmlUrl ?? pullRequest.mergeJudgement.aiReview.runUrl ?? pullRequest.htmlUrl}
               onRefresh={onRefresh}
-              onRequested={onRefresh}
               onMerged={onMerged}
               onDraftFixIssue={onDraftFixIssue}
               className="mb-3"

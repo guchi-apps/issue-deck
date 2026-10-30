@@ -107,7 +107,7 @@ describe("deriveReviewAction", () => {
       verdict: "needs-check",
       bodyAvailable: true,
       autoRepair: false,
-      request: { available: true, issueNumber: 4421 },
+      request: { available: false, alternative: "open-issue" },
     });
     if (action.kind !== "respond") throw new Error("unreachable");
     expect(action.concerns).toHaveLength(3);
@@ -122,13 +122,13 @@ describe("deriveReviewAction", () => {
     expect(action).toMatchObject({ kind: "respond", autoRepair: true, autoRepairUnavailable: null });
   });
 
-  it("要修正でもワークフローが未配布なら、理由を出して方針付きの依頼へ回す", () => {
+  it("要修正でもワークフローが未配布なら、理由を出し、廃止済みの依頼へはフォールバックしない", () => {
     const action = deriveReviewAction({
       pullRequest: pr({ reviewVerdict: verdict("changes-requested"), repairWorkflowAvailability: { review: "missing" } }),
       review: review(),
       context: context(),
     });
-    expect(action).toMatchObject({ kind: "respond", autoRepair: false, request: { available: true } });
+    expect(action).toMatchObject({ kind: "respond", autoRepair: false, request: { available: false, alternative: "open-issue" } });
     if (action.kind !== "respond") throw new Error("unreachable");
     expect(action.autoRepairUnavailable).toContain("未配布");
   });
