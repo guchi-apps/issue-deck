@@ -37,6 +37,7 @@ import {
   findCheckUserWaitReasons,
   hasDevelopMergedNotice,
   hasStrandedNotice,
+  importingRevisionHeads,
   isResidualAlreadyInBase,
   needsStrandedCheck,
   progressSweepIntervalMinutes,
@@ -99,6 +100,18 @@ import { extractManualStepReferences } from "@/lib/manual-step-prerequisites";
  * - **判定は`issue-<番号>`ブランチの直近マージ済みPRのheadが`main`の祖先か**
  *   （`compare/main...head`の`aheadBy === 0`）だけ。祖先なら`done`を報告する
  *   （Issueは既にcloseされているため`close`は行わない）
+ *
+ * ## リリース候補（`release-rc/<番号>`）経由のリリース（#5133）
+ *
+ * **新方式の候補がmainへマージされたとき、含まれるIssueを`Done`へ進めてcloseするのはこの巡回だけ。**
+ * `reusable-issue-labels.yml`の`main-pr-merged`はheadが`develop`・`release-main/v*`のPRにしか
+ * 発火しない（候補PRの本文には`## 対象issue`も無い）。候補に固定されたPRはdevelopのマージコミットが
+ * そのままmainの祖先になるので、下の2経路の祖先判定で拾える。
+ *
+ * 祖先判定で拾えないのは、**候補へ後から取り込んだ修正PR**（リリース候補の修正Issue）。候補ブランチへ
+ * 別コミットとして当てられるため、develop側のheadはmainの祖先にならない。そこで`aheadBy !== 0`の
+ * ときだけ、候補の取り込み記録（`ReleaseCandidateRevision.importedPrs`）からそのPRを取り込んだ
+ * revisionを探し、そのheadがmainの祖先かを確かめる（`isImportedIntoCandidateInMain`）。
  *
  * ## openなIssueのclose漏れ回収（#2715）
  *
@@ -695,8 +708,22 @@ async function sweepClosedIssue(params: {
   const compareWithMain = mergedPullRequest
     ? await compareBranches(ownerLogin, name, MAIN_BRANCH, mergedPullRequest.headSha, token)
     : null;
+  const importedCandidateInMain =
+    merged && compareWithMain && compareWithMain.aheadBy !== 0
+      ? await isImportedIntoCandidateInMain({
+          repositoryFullName: params.repositoryFullName,
+          ownerLogin,
+          name,
+          prNumber: merged.number,
+          token,
+        })
+      : false;
 
-  const decision = decideClosedStrandedIssue({ mergedPullRequest, compareWithMain });
+  const decision = decideClosedStrandedIssue({
+    mergedPullRequest,
+    compareWithMain,
+    importedCandidateInMain,
+  });
   if (decision.action === "skip") {
     countSkip(decision.reason);
     return null;
@@ -724,6 +751,54 @@ async function sweepClosedIssue(params: {
   });
 
   return { repositoryFullName: params.repositoryFullName, issueNumber, kind: "closed_advanced" };
+}
+
+/**
+ * 候補の取り込み履歴（`ReleaseCandidateRevision.importedPrs`）の中で、新しいものから何件まで見るか（#5133）。
+ * 取り込みはリポジトリごとに数十件の規模で、巡回の対象Issueぶんだけ引く
+ */
+const IMPORTING_REVISION_LOOKUP_LIMIT = 100;
+
+/**
+ * そのPRを取り込んだリリース候補のrevisionが、すでに`main`の祖先になっているか（#5133）。
+ *
+ * リリース候補の修正Issueは、修正PRがdevelopへマージされたあと候補ブランチ（`release-rc/<番号>`）へ
+ * 別コミットとして当てられ、候補ごとmainへ出る。中身が同じでもdevelop側のPRのheadはmainの祖先に
+ * ならないため、`compare/main...head`だけでは本番反映を判定できない。そこで**候補の記録で取り込みを
+ * 確かめたうえで、取り込んだrevisionのheadがmainの祖先か**を見る（公開準備のバンプはrevisionの
+ * headに積むので、マージされていれば祖先になる。中止した候補のrevisionは祖先にならない）。
+ *
+ * 呼ぶのは`compare/main...head`の`aheadBy !== 0`のときだけで、DBで取り込みが見つからなければ
+ * GitHubへは問い合わせない（平常時の消費は増えない）。確かめられなかったものは`false`。
+ */
+async function isImportedIntoCandidateInMain(params: {
+  repositoryFullName: string;
+  ownerLogin: string;
+  name: string;
+  prNumber: number;
+  token: string;
+}): Promise<boolean> {
+  const revisions = await db.releaseCandidateRevision.findMany({
+    where: {
+      status: "applied",
+      headSha: { not: null },
+      candidate: { repositoryFullName: params.repositoryFullName },
+    },
+    orderBy: { createdAt: "desc" },
+    take: IMPORTING_REVISION_LOOKUP_LIMIT,
+    select: { headSha: true, importedPrs: true },
+  });
+  for (const head of importingRevisionHeads(revisions, params.prNumber)) {
+    const compared = await compareBranches(
+      params.ownerLogin,
+      params.name,
+      MAIN_BRANCH,
+      head,
+      params.token,
+    );
+    if (compared && compared.aheadBy === 0) return true;
+  }
+  return false;
 }
 
 /** 生きているローカルセッションが担当しているIssueの`<repo>#<番号>`（#2715） */
@@ -777,6 +852,7 @@ async function sweepMergedOpenIssue(params: {
   // `Done`は「本番反映済み」の定義そのものなので、確かめるための問い合わせを一切行わない。
   let mergedPullRequest: MergedOpenFacts["mergedPullRequest"] = null;
   let compareWithMain: MergedOpenFacts["compareWithMain"] = null;
+  let importedCandidateInMain = false;
   if (status !== "done") {
     const branch = `issue-${issueNumber}`;
     const closed = await fetchPullRequestsForHead(
@@ -795,9 +871,23 @@ async function sweepMergedOpenIssue(params: {
     compareWithMain = mergedPullRequest
       ? await compareBranches(ownerLogin, name, MAIN_BRANCH, mergedPullRequest.headSha, token)
       : null;
+    if (merged && compareWithMain && compareWithMain.aheadBy !== 0) {
+      importedCandidateInMain = await isImportedIntoCandidateInMain({
+        repositoryFullName,
+        ownerLogin,
+        name,
+        prNumber: merged.number,
+        token,
+      });
+    }
   }
 
-  const decision = decideMergedOpenIssue({ status, mergedPullRequest, compareWithMain });
+  const decision = decideMergedOpenIssue({
+    status,
+    mergedPullRequest,
+    compareWithMain,
+    importedCandidateInMain,
+  });
   if (decision.action === "skip") {
     countSkip(decision.reason);
     return null;

@@ -550,6 +550,11 @@ export type ClosedStrandedFacts = {
   mergedPullRequest: { url: string; headSha: string } | null;
   /** `main...headSha`の二点比較。取得できなければ`null` */
   compareWithMain: { aheadBy: number } | null;
+  /**
+   * そのPRを取り込んだリリース候補のrevisionが`main`の祖先になっているか（#5133）。
+   * `aheadBy !== 0`のときだけIO側が確かめる。省略時は`false`
+   */
+  importedCandidateInMain?: boolean;
 };
 
 export type ClosedStrandedSkipReason =
@@ -574,6 +579,11 @@ export type ClosedStrandedDecision =
  * 意味になる。developへのマージは常にマージコミット方式（`gh pr merge --merge`）を使うため、
  * PRのhead SHA自体がdevelopのマージコミットの親であり、develop→mainも同じ方式なので
  * このSHAがmainの祖先かどうかで「本番へ出たか」を正確に判定できる。
+ *
+ * **例外はリリース候補（`release-rc/<番号>`）へ取り込まれた修正PR**（#5133）。候補の修正Issueの
+ * PRはdevelopへマージされたあと、候補ブランチへ別コミット（`cherry-pick`）として当てられて
+ * mainへ出る。中身は同じでもdevelop側のheadはmainの祖先にならないため、`aheadBy !== 0`でも
+ * 「そのPRを取り込んだ候補のrevisionがmainの祖先か」（`importedCandidateInMain`）で本番反映を認める。
  */
 export function decideClosedStrandedIssue(facts: ClosedStrandedFacts): ClosedStrandedDecision {
   const merged = facts.mergedPullRequest;
@@ -582,9 +592,39 @@ export function decideClosedStrandedIssue(facts: ClosedStrandedFacts): ClosedStr
   const compare = facts.compareWithMain;
   if (!compare) return { action: "skip", reason: "closed_compare_unavailable" };
 
-  if (compare.aheadBy !== 0) return { action: "skip", reason: "closed_not_in_main_yet" };
+  if (compare.aheadBy !== 0 && !facts.importedCandidateInMain) {
+    return { action: "skip", reason: "closed_not_in_main_yet" };
+  }
 
   return { action: "advance_done", pullRequestUrl: merged.url };
+}
+
+/** 1つのPRについて確かめる、取り込んだ候補revisionのheadの上限（#5133）。比較のRESTを増やしすぎない */
+export const MAX_IMPORTING_REVISION_HEADS = 3;
+
+/**
+ * リリース候補の適用済みrevisionのうち、指定したPRを取り込んだもののheadを返す（#5133）。
+ *
+ * `revisions`は新しい順に渡す。`importedPrs`は`[{ number, title, mergeSha, related }]`のJSON。
+ * 同じheadは1回だけ・最大`MAX_IMPORTING_REVISION_HEADS`件に絞る（候補を作り直して後継が
+ * 取り込み直した場合も、新しいものから確かめれば足りる）。
+ */
+export function importingRevisionHeads(
+  revisions: readonly { headSha: string | null; importedPrs: unknown }[],
+  prNumber: number,
+): string[] {
+  const heads: string[] = [];
+  for (const revision of revisions) {
+    if (!revision.headSha || heads.includes(revision.headSha)) continue;
+    const imported = Array.isArray(revision.importedPrs) ? revision.importedPrs : [];
+    const hit = imported.some(
+      (pr) => (pr as { number?: unknown } | null)?.number === prNumber,
+    );
+    if (!hit) continue;
+    heads.push(revision.headSha);
+    if (heads.length >= MAX_IMPORTING_REVISION_HEADS) break;
+  }
+  return heads;
 }
 
 /** closedなIssueの取り残しをdoneへ回収したことを伝えるコメント本文（#2690） */
@@ -623,6 +663,8 @@ export type MergedOpenFacts = {
   mergedPullRequest: { url: string; headSha: string } | null;
   /** `main...headSha`の二点比較。取得できなければ`null`。`status`が`done`なら参照しない */
   compareWithMain: { aheadBy: number } | null;
+  /** `ClosedStrandedFacts["importedCandidateInMain"]`と同じ（#5133）。省略時は`false` */
+  importedCandidateInMain?: boolean;
 };
 
 export type MergedOpenSkipReason =
@@ -681,7 +723,9 @@ export function decideMergedOpenIssue(facts: MergedOpenFacts): MergedOpenDecisio
   const compare = facts.compareWithMain;
   if (!compare) return { action: "skip", reason: "open_compare_unavailable" };
 
-  if (compare.aheadBy !== 0) return { action: "skip", reason: "open_not_in_main_yet" };
+  if (compare.aheadBy !== 0 && !facts.importedCandidateInMain) {
+    return { action: "skip", reason: "open_not_in_main_yet" };
+  }
 
   return { action: "close", pullRequestUrl: merged.url, reportDone: true };
 }
