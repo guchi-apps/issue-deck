@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   decideDevelopSync,
   decideDevelopSyncAutoMerge,
+  DEVELOP_SYNC_ARMED_REASON,
   developSyncBranchName,
   developSyncCreateError,
   developSyncMarker,
@@ -130,6 +131,31 @@ describe("decideDevelopSyncAutoMerge（#4669・#5081）", () => {
     expect(decideDevelopSyncAutoMerge(ready({ ciState: "failure" }), main(files), evidence).ok).toBe(false);
     expect(decideDevelopSyncAutoMerge(ready({ labels: ["00.check-user"] }), main(files), evidence).ok).toBe(false);
     expect(decideDevelopSyncAutoMerge(ready({ headSha: "h".repeat(40) }), main(files), evidence).ok).toBe(false);
+  });
+
+  it("残りがCIだけでレビューも終わっていれば、GitHubのオートマージへ任せるHEADを返す（#5146）", () => {
+    expect(decideDevelopSyncAutoMerge(ready({ ciState: "pending", reviewSettled: false, reviewDone: true }), main())).toEqual({
+      ok: false,
+      waiting: true,
+      reason: DEVELOP_SYNC_ARMED_REASON,
+      armHeadSha: MAIN,
+    });
+    // レビューが終わっていない・マージ可否が未確定なら任せない
+    expect(decideDevelopSyncAutoMerge(ready({ ciState: "pending", reviewDone: false }), main())).not.toHaveProperty("armHeadSha");
+    expect(decideDevelopSyncAutoMerge(ready({ ciState: "pending", reviewDone: true, mergeable: null }), main())).not.toHaveProperty("armHeadSha");
+    // CIの実行中でも、人の対応が要る理由が確定していれば任せず人へ回す
+    for (const over of [{ labels: ["00.check-user"] }, { headSha: "h".repeat(40) }]) {
+      expect(decideDevelopSyncAutoMerge(ready({ ciState: "pending", reviewDone: true, ...over }), main())).toMatchObject({ ok: false, waiting: false });
+    }
+    expect(decideDevelopSyncAutoMerge(ready({ ciState: "pending", reviewDone: true }), main(["package.json", WORKFLOW]))).toMatchObject({
+      ok: false,
+      waiting: false,
+    });
+    const armed = decideDevelopSync(observed({ openPullRequest: ready({ ciState: "pending", reviewDone: true }) }));
+    expect(armed).toMatchObject({ detail: "ci_pending", nextAction: "操作は不要です" });
+    expect(armed.reason).toContain("オートマージ");
+    const heldWhilePending = decideDevelopSync(observed({ openPullRequest: ready({ ciState: "pending", labels: ["00.check-user"] }) }));
+    expect(heldWhilePending.detail).toBe("merge_held");
   });
 
   it("同期状態では、人の対応が要る停止を「人の確認が必要」として理由と次の操作を出す", () => {
