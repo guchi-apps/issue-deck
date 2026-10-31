@@ -42,6 +42,14 @@ export type ChangelogEntry = {
  */
 export const APP_CHANGELOG: ChangelogEntry[] = [
   {
+    version: "8.86.2",
+    date: "2026-10-31",
+    changes: [
+      "レビューで要確認・要修正になったPRの画面に、すでに廃止された「AIに修正を依頼」の操作が出ないようにしました。",
+      "リリースが自動で進んでいる間の「再検証待ち」「未実施」が、赤い「必要な対応を確認」として表示されないようになりました。",
+    ],
+  },
+  {
     version: "8.86.1",
     date: "2026-10-29",
     changes: [
