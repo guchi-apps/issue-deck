@@ -5,6 +5,7 @@ const issueFindMany = vi.fn();
 const issueFindFirst = vi.fn();
 const issueCount = vi.fn();
 const dispatchSessionFindMany = vi.fn();
+const releaseCandidateRevisionFindMany = vi.fn();
 const getInstallationToken = vi.fn();
 const fetchProjectItems = vi.fn();
 const fetchPullRequestsForHead = vi.fn();
@@ -44,6 +45,11 @@ vi.mock("@/lib/db", () => ({
     dispatchSession: {
       get findMany() {
         return dispatchSessionFindMany;
+      },
+    },
+    releaseCandidateRevision: {
+      get findMany() {
+        return releaseCandidateRevisionFindMany;
       },
     },
   },
@@ -237,6 +243,7 @@ describe("runProgressSweep", () => {
     repositoryFindMany.mockResolvedValue([REPO]);
     issueFindMany.mockImplementation(issueRowsFor({}));
     dispatchSessionFindMany.mockResolvedValue([]);
+    releaseCandidateRevisionFindMany.mockResolvedValue([]);
     getInstallationToken.mockResolvedValue("token");
     fetchProjectItems.mockResolvedValue([projectItem()]);
     fetchPullRequestsForHead.mockImplementation(pullRequestsForHead([mergedPullRequest()]));
@@ -799,6 +806,58 @@ describe("runProgressSweep", () => {
       expect(createComment).not.toHaveBeenCalled();
     });
 
+    it("候補へ取り込まれた修正PRは、取り込んだrevisionがmainの祖先ならdoneを報告する（#5133）", async () => {
+      fetchPullRequestsForHead.mockImplementation(
+        pullRequestsForHead([mergedPullRequest({ number: 800 })]),
+      );
+      releaseCandidateRevisionFindMany.mockResolvedValue([
+        { headSha: "rc-head", importedPrs: [{ number: 800, title: "修正" }] },
+      ]);
+      compareBranches.mockImplementation(async (_o, _r, _base, head: string) =>
+        head === "rc-head"
+          ? { aheadBy: 0, changedFiles: null, lastCommitAt: null }
+          : { aheadBy: 1, changedFiles: 1, lastCommitAt: null },
+      );
+
+      const result = await runProgressSweep({ now: NOW });
+
+      expect(releaseCandidateRevisionFindMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            status: "applied",
+            candidate: { repositoryFullName: "guchi-apps/issue-deck" },
+          }),
+        }),
+      );
+      expect(compareBranches).toHaveBeenCalledWith("guchi-apps", "issue-deck", "main", "rc-head", "token");
+      expect(result.actions).toContainEqual({
+        repositoryFullName: "guchi-apps/issue-deck",
+        issueNumber: 3000,
+        kind: "closed_advanced",
+      });
+    });
+
+    it("取り込んだ候補がまだmainへ入っていなければ見送る（#5133）", async () => {
+      fetchPullRequestsForHead.mockImplementation(
+        pullRequestsForHead([mergedPullRequest({ number: 800 })]),
+      );
+      releaseCandidateRevisionFindMany.mockResolvedValue([
+        { headSha: "rc-head", importedPrs: [{ number: 800 }] },
+      ]);
+      compareBranches.mockResolvedValue({ aheadBy: 1, changedFiles: 1, lastCommitAt: null });
+
+      const result = await runProgressSweep({ now: NOW });
+
+      expect(result.skipped).toMatchObject({ closed_not_in_main_yet: 1 });
+      expect(reportProgressStatus).not.toHaveBeenCalled();
+    });
+
+    it("mainの祖先ならリリース候補の記録を引かない", async () => {
+      await runProgressSweep({ now: NOW });
+
+      expect(releaseCandidateRevisionFindMany).not.toHaveBeenCalled();
+    });
+
     it("developへのマージ済みPRが無ければ見送り、mainとの比較もしない", async () => {
       fetchPullRequestsForHead.mockImplementation(pullRequestsForHead([]));
 
@@ -918,6 +977,33 @@ describe("runProgressSweep", () => {
       expect(result.skipped).toMatchObject({ open_not_in_main_yet: 1 });
       expect(updateIssue).not.toHaveBeenCalled();
       expect(createComment).not.toHaveBeenCalled();
+    });
+
+    it("候補へ取り込まれた修正PRは、候補がmainへ入っていればdoneを報告してcloseする（#5133）", async () => {
+      fetchPullRequestsForHead.mockImplementation(
+        pullRequestsForHead([mergedPullRequest({ number: 733 })]),
+      );
+      releaseCandidateRevisionFindMany.mockResolvedValue([
+        { headSha: "other", importedPrs: [{ number: 734 }] },
+        { headSha: "rc-head", importedPrs: [{ number: 733 }] },
+      ]);
+      compareBranches.mockImplementation(async (_o, _r, _base, head: string) =>
+        head === "rc-head"
+          ? { aheadBy: 0, changedFiles: null, lastCommitAt: null }
+          : { aheadBy: 1, changedFiles: 1, lastCommitAt: null },
+      );
+
+      const result = await runProgressSweep({ now: NOW });
+
+      expect(compareBranches).not.toHaveBeenCalledWith("guchi-apps", "issue-deck", "main", "other", "token");
+      expect(reportProgressStatus).toHaveBeenCalledWith(
+        expect.objectContaining({ issueNumber: 2700, status: "done" }),
+      );
+      expect(result.actions).toContainEqual({
+        repositoryFullName: "guchi-apps/issue-deck",
+        issueNumber: 2700,
+        kind: "open_closed",
+      });
     });
 
     it("人がreopenしたIssueは閉じ直さない", async () => {

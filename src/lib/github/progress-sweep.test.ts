@@ -13,7 +13,9 @@ import {
   findCheckUserWaitReasons,
   hasDevelopMergedNotice,
   hasUnresolvedFollowups,
+  importingRevisionHeads,
   isResidualAlreadyInBase,
+  MAX_IMPORTING_REVISION_HEADS,
   residualLookupPaths,
   hasStrandedNotice,
   isManualStepTitle,
@@ -356,6 +358,60 @@ describe("decideClosedStrandedIssue", () => {
       pullRequestUrl: MERGED.url,
     });
   });
+
+  it("祖先でなくても、取り込んだ候補がmainへ入っていればdoneへ進める（#5133）", () => {
+    expect(
+      decideClosedStrandedIssue(
+        closedFacts({ compareWithMain: { aheadBy: 1 }, importedCandidateInMain: true }),
+      ),
+    ).toEqual({ action: "advance_done", pullRequestUrl: MERGED.url });
+  });
+
+  it("候補の取り込みがあっても、mainとの比較が取れなければ見送る", () => {
+    expect(
+      decideClosedStrandedIssue(
+        closedFacts({ compareWithMain: null, importedCandidateInMain: true }),
+      ),
+    ).toEqual({ action: "skip", reason: "closed_compare_unavailable" });
+  });
+});
+
+describe("importingRevisionHeads", () => {
+  it("指定PRを取り込んだrevisionのheadだけを、渡した順に重複なく返す", () => {
+    expect(
+      importingRevisionHeads(
+        [
+          { headSha: "c3", importedPrs: [{ number: 800, title: "修正" }] },
+          { headSha: "c2", importedPrs: [{ number: 801 }] },
+          { headSha: "c3", importedPrs: [{ number: 800 }] },
+          { headSha: null, importedPrs: [{ number: 800 }] },
+          { headSha: "c1", importedPrs: [{ number: 799 }, { number: 800 }] },
+        ],
+        800,
+      ),
+    ).toEqual(["c3", "c1"]);
+  });
+
+  it("JSONが配列でない・番号が無い行は無視する", () => {
+    expect(
+      importingRevisionHeads(
+        [
+          { headSha: "a", importedPrs: null },
+          { headSha: "b", importedPrs: { number: 800 } },
+          { headSha: "c", importedPrs: [null, { number: "800" }] },
+        ],
+        800,
+      ),
+    ).toEqual([]);
+  });
+
+  it("上限件数で打ち切る", () => {
+    const revisions = Array.from({ length: MAX_IMPORTING_REVISION_HEADS + 2 }, (_, i) => ({
+      headSha: `h${i}`,
+      importedPrs: [{ number: 1 }],
+    }));
+    expect(importingRevisionHeads(revisions, 1)).toHaveLength(MAX_IMPORTING_REVISION_HEADS);
+  });
 });
 
 describe("buildClosedStrandedRecoveredComment", () => {
@@ -413,6 +469,14 @@ describe("decideMergedOpenIssue", () => {
       action: "skip",
       reason: "open_not_in_main_yet",
     });
+  });
+
+  it("祖先でなくても、取り込んだ候補がmainへ入っていればdoneを報告してcloseする（#5133）", () => {
+    expect(
+      decideMergedOpenIssue(
+        openFacts({ compareWithMain: { aheadBy: 2 }, importedCandidateInMain: true }),
+      ),
+    ).toEqual({ action: "close", pullRequestUrl: MERGED.url, reportDone: true });
   });
 
   it("developへのマージ済みPRが無ければ見送る", () => {
