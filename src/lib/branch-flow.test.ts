@@ -970,6 +970,50 @@ describe("バージョンごとの束（releaseGroups）", () => {
   });
 });
 
+describe("新方式のリリース候補の束の版（#5154）", () => {
+  const rc = (number: number, mergedAt: string, title = `リリース候補 RC-${number}`) =>
+    releasePullRequest({ number, title, state: "closed", merged: true, mergedAt });
+  const lane = (number: number, mergedAt: string) =>
+    pullRequest({ number, headRef: `issue-${number}`, linkedIssueNumber: number, state: "closed", merged: true, mergedAt });
+  const pullRequests = [
+    rc(30, "2026-08-10T12:00:00Z"),
+    rc(31, "2026-08-14T12:00:00Z"),
+    rc(32, "2026-08-18T12:00:00Z"),
+    // 旧方式。タイトルの版が記録より優先される
+    rc(29, "2026-08-05T12:00:00Z", "v3.0.0をmainへリリースする"),
+    lane(101, "2026-08-04T00:00:00Z"),
+    lane(102, "2026-08-09T00:00:00Z"),
+    lane(103, "2026-08-13T00:00:00Z"),
+    lane(104, "2026-08-17T00:00:00Z"),
+  ];
+  const versions = (status: Partial<RepositoryBranchStatus>) =>
+    build({ pullRequests, branchStatuses: [branchStatus(status)] }).repositories[0].releaseGroups.map((g) => g.version);
+
+  it("タイトルに版が無い束は、PR番号の記録で補う", () => {
+    expect(versions({ releasedVersionByPr: { 30: "4.1.0", 31: "4.2.0", 32: "4.3.0", 29: "9.9.9" } })).toEqual([
+      "4.3.0",
+      "4.2.0",
+      "4.1.0",
+      "3.0.0",
+    ]);
+  });
+
+  it("記録から引けない古い束はnullのまま（最新版を流用しない）", () => {
+    expect(versions({ releasedVersion: "4.3.0", releasedVersionByPr: { 31: "4.2.0" } })).toEqual([
+      "4.3.0",
+      "4.2.0",
+      null,
+      "3.0.0",
+    ]);
+  });
+
+  it("最新の束だけは記録が無くても直近に公開した版で補う（resolveLatestVersionと同じ結果）", () => {
+    const flow = build({ pullRequests, branchStatuses: [branchStatus({ releasedVersion: "4.3.0" })] });
+    expect(flow.repositories[0].releaseGroups[0].version).toBe("4.3.0");
+    expect(flow.repositories[0].release.latestVersion).toBe("4.3.0");
+  });
+});
+
 describe("mainへ直接マージされた作業の束（#2911）", () => {
   // guchi-apps/vpsの実状態（2026-09-08時点）を写したもの。
   // developは2026-09-06のバージョンバンプで止まり、以降の作業PRはすべてbase=mainで入っている。
