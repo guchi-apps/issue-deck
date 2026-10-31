@@ -1190,7 +1190,6 @@ scripts/sync-github-secrets.sh --manifest .github/org-secrets-manifest.tsv
 |---|---|---|
 | `SERVER_HOST`・`SERVER_SSH_PORT` | 15 | secret |
 | `SERVER_USERNAME` | 14 | secret |
-| `SERVER_SSH_PRIVATE_KEY` | 13 | secret |
 | `SHARED_DB_HOST`・`SHARED_DB_PORT`・`SHARED_DB_USER`・`SHARED_DB_PASSWORD` | 9 | secret |
 | `SHARED_DB_MIGRATE_USER`・`SHARED_DB_MIGRATE_PASSWORD` | 5 | secret |
 | `SUPABASE_PROJECT_URL`・`SUPABASE_PUBLISHABLE_KEY` | 8 | variable（公開値） |
@@ -1369,7 +1368,13 @@ op://apps/githubaction-sshkey/PRIVATE_KEY                       ← 1リポジ�
 `?ssh-format=openssh` の有無で取得される形式が変わる。organizationへ寄せる際、多数派かつ
 issue-deckで実績のある **openssh 付きに統一**した。
 
-### `SERVER_SSH_PRIVATE_KEY`はアプリ単位の鍵へ段階移行する予定（#3158）
+### `SERVER_SSH_PRIVATE_KEY`はアプリ単位の鍵へ移行して撤去した（#3158・#4759・guchi-apps/vps#325）
+
+**移行は完了し、organization共通の`SERVER_SSH_PRIVATE_KEY`は撤去した。** 各アプリは自分専用の鍵
+（repository secret `SSH_PRIVATE_KEY`）でVPSの`app-deploy-gate`へ入り、`upload`・`env`・`deploy`の3語だけを
+送る（#4759）。vpsのドリフト検知は読み取り専用の鍵（`VPS_DRIFT_READ_SSH_PRIVATE_KEY`。forced command
+`vps-drift-read`）へ移した（guchi-apps/vps#321）。**新しいアプリ・ワークフローで`SERVER_SSH_PRIVATE_KEY`を
+参照しないこと**（secretが無いので空文字になり、SSHが鍵なしで失敗する）。以下は移行前の経緯。
 
 guchi-apps/vps#255で、VPS rootへの入口（`sudo vps-apply`）は`vps-ci`専用鍵と`authorized_keys`の
 `command=`（forced command。`vps-ssh-gate.sh`が実装例）で絞った。一方`SERVER_SSH_PRIVATE_KEY`は
