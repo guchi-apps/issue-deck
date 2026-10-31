@@ -323,6 +323,44 @@ export async function markPullRequestReadyForReview(nodeId: string, token: strin
   }
 }
 
+const ENABLE_AUTO_MERGE = `
+mutation($id: ID!, $headOid: GitObjectID!) {
+  enablePullRequestAutoMerge(input: { pullRequestId: $id, mergeMethod: MERGE, expectedHeadOid: $headOid }) {
+    pullRequest { autoMergeRequest { enabledAt } }
+  }
+}`;
+
+const DISABLE_AUTO_MERGE = `
+mutation($id: ID!) {
+  disablePullRequestAutoMerge(input: { pullRequestId: $id }) {
+    pullRequest { autoMergeRequest { enabledAt } }
+  }
+}`;
+
+/**
+ * GitHubのAuto-merge（マージコミット）を有効にする（#5146）。必須チェックが通った時点でGitHubがマージする。
+ * `expectedHeadOid`を渡すので、判定した後に追いコミットが入っていれば有効化自体が失敗する。
+ * リポジトリの`allow_auto_merge`が無効・必須チェックが無い（既にマージ可能）ときもGitHubが拒むため、
+ * 呼び出し側は失敗を前提にする
+ */
+export async function enablePullRequestAutoMerge(nodeId: string, expectedHeadSha: string, token: string): Promise<void> {
+  const data = await githubGraphql<{
+    enablePullRequestAutoMerge: { pullRequest: { autoMergeRequest: { enabledAt: string } | null } } | null;
+  }>(token, ENABLE_AUTO_MERGE, { id: nodeId, headOid: expectedHeadSha }, "enablePullRequestAutoMerge", {
+    permissionHint: "（GitHub AppのPull requestsとContentsの書き込み権限が必要です）",
+  });
+  if (!data.enablePullRequestAutoMerge?.pullRequest.autoMergeRequest) {
+    throw new GithubApiError(502, "enablePullRequestAutoMerge did not enable auto-merge");
+  }
+}
+
+/** GitHubのAuto-mergeを解除する（#5146） */
+export async function disablePullRequestAutoMerge(nodeId: string, token: string): Promise<void> {
+  await githubGraphql<{ disablePullRequestAutoMerge: unknown }>(token, DISABLE_AUTO_MERGE, { id: nodeId }, "disablePullRequestAutoMerge", {
+    permissionHint: "（GitHub AppのPull requestsの書き込み権限が必要です）",
+  });
+}
+
 /**
  * PRのheadブランチへ、最新のbaseを取り込む（`PUT /pulls/{n}/update-branch`。#4626）。
  *
