@@ -331,7 +331,10 @@ describe("decideReverificationFollowUp（#4478）", () => {
     expect(decideReverificationFollowUp({ integration: sec("passed"), aiReview: sec("failed") }).action).toBe("wait_rerun");
   });
   it("判別できない失敗・指摘が読めない確認要求は本人へ", () => {
-    expect(decideReverificationFollowUp({ integration: sec("failed"), aiReview: sec("passed") }).action).toBe("human");
+    const integrationUnknown = decideReverificationFollowUp({ integration: sec("failed"), aiReview: sec("passed") });
+    expect(integrationUnknown.action).toBe("human");
+    // 統合検証の失敗は修正Issueで判断する停止のまま（#5130）
+    expect(integrationUnknown.action === "human" && integrationUnknown.target).toBeUndefined();
     expect(decideReverificationFollowUp({ integration: sec("passed"), aiReview: sec("needs_check") }).action).toBe("human");
   });
 });
@@ -354,6 +357,8 @@ describe("decideReverificationFollowUp: 指摘0件の未確認範囲（#5077）"
       aiReviewUnverified: { stage: "settled", detail: "本番環境の実機確認" },
     });
     expect(result.action).toBe("human");
+    // 確認する対象はリリース候補で、修正Issueではない（#5130）
+    expect(result.action === "human" && result.target).toBe("candidate");
     expect(result.action === "human" && result.reason).toContain("本番環境の実機確認");
     expect(result.action === "human" && isUnverifiedReviewStopReason(result.reason)).toBe(true);
   });

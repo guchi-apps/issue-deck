@@ -48,9 +48,18 @@ describe("getWebviewIosRepository", () => {
     expect(repo?.command).toContain("open ios/IssueDeck.xcodeproj");
   });
 
+  it("work-relayもWebView型のiOSアプリを持つリポジトリとして返す（#5140）", () => {
+    const repo = getWebviewIosRepository("guchi-apps/work-relay");
+    expect(repo?.appLabel).toBe("work-relay");
+    expect(repo?.xcodeProjectPath).toBe("ios/WorkRelay.xcodeproj");
+    expect(repo?.command).toContain("cd ~/apps/work-relay");
+    expect(repo?.command).toContain("open ios/WorkRelay.xcodeproj");
+    expect(repo?.launchUrl).toBe("https://research-desk.gucchii.com/");
+  });
+
   it("リリース通知の起動用URLは各アプリの本番ドメイン上のHTTPS（#5049）", () => {
     expect(getWebviewIosRepository("guchi-apps/yoteiflow")?.launchUrl).toBe("https://dayspan.gucchii.com/calendar");
-    for (const name of ["kurashio", "yoteiflow", "aide", "morrow", "issue-deck"]) {
+    for (const name of ["kurashio", "yoteiflow", "aide", "morrow", "issue-deck", "work-relay"]) {
       expect(getWebviewIosRepository(`guchi-apps/${name}`)?.launchUrl).toMatch(/^https:\/\/[a-z-]+\.gucchii\.com\//);
     }
     // issue-deck自身もトップページを持つ（通知の「リリースノート」をやめて「アプリを開く」にした。#5063）

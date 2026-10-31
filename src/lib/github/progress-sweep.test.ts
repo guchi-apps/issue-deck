@@ -5,7 +5,10 @@ import {
   buildDevelopMergedComment,
   buildMergedOpenClosedComment,
   buildStrandedComment,
+  buildPartialInMainComment,
   decideClosedStrandedIssue,
+  decideContentInMain,
+  hasPartialInMainNotice,
   decideMergedOpenIssue,
   decidePostMergeCheckUser,
   decideProgressSweep,
@@ -13,7 +16,9 @@ import {
   findCheckUserWaitReasons,
   hasDevelopMergedNotice,
   hasUnresolvedFollowups,
+  importingRevisionHeads,
   isResidualAlreadyInBase,
+  MAX_IMPORTING_REVISION_HEADS,
   residualLookupPaths,
   hasStrandedNotice,
   isManualStepTitle,
@@ -356,6 +361,60 @@ describe("decideClosedStrandedIssue", () => {
       pullRequestUrl: MERGED.url,
     });
   });
+
+  it("祖先でなくても、取り込んだ候補がmainへ入っていればdoneへ進める（#5133）", () => {
+    expect(
+      decideClosedStrandedIssue(
+        closedFacts({ compareWithMain: { aheadBy: 1 }, importedCandidateInMain: true }),
+      ),
+    ).toEqual({ action: "advance_done", pullRequestUrl: MERGED.url });
+  });
+
+  it("候補の取り込みがあっても、mainとの比較が取れなければ見送る", () => {
+    expect(
+      decideClosedStrandedIssue(
+        closedFacts({ compareWithMain: null, importedCandidateInMain: true }),
+      ),
+    ).toEqual({ action: "skip", reason: "closed_compare_unavailable" });
+  });
+});
+
+describe("importingRevisionHeads", () => {
+  it("指定PRを取り込んだrevisionのheadだけを、渡した順に重複なく返す", () => {
+    expect(
+      importingRevisionHeads(
+        [
+          { headSha: "c3", importedPrs: [{ number: 800, title: "修正" }] },
+          { headSha: "c2", importedPrs: [{ number: 801 }] },
+          { headSha: "c3", importedPrs: [{ number: 800 }] },
+          { headSha: null, importedPrs: [{ number: 800 }] },
+          { headSha: "c1", importedPrs: [{ number: 799 }, { number: 800 }] },
+        ],
+        800,
+      ),
+    ).toEqual(["c3", "c1"]);
+  });
+
+  it("JSONが配列でない・番号が無い行は無視する", () => {
+    expect(
+      importingRevisionHeads(
+        [
+          { headSha: "a", importedPrs: null },
+          { headSha: "b", importedPrs: { number: 800 } },
+          { headSha: "c", importedPrs: [null, { number: "800" }] },
+        ],
+        800,
+      ),
+    ).toEqual([]);
+  });
+
+  it("上限件数で打ち切る", () => {
+    const revisions = Array.from({ length: MAX_IMPORTING_REVISION_HEADS + 2 }, (_, i) => ({
+      headSha: `h${i}`,
+      importedPrs: [{ number: 1 }],
+    }));
+    expect(importingRevisionHeads(revisions, 1)).toHaveLength(MAX_IMPORTING_REVISION_HEADS);
+  });
 });
 
 describe("buildClosedStrandedRecoveredComment", () => {
@@ -413,6 +472,14 @@ describe("decideMergedOpenIssue", () => {
       action: "skip",
       reason: "open_not_in_main_yet",
     });
+  });
+
+  it("祖先でなくても、取り込んだ候補がmainへ入っていればdoneを報告してcloseする（#5133）", () => {
+    expect(
+      decideMergedOpenIssue(
+        openFacts({ compareWithMain: { aheadBy: 2 }, importedCandidateInMain: true }),
+      ),
+    ).toEqual({ action: "close", pullRequestUrl: MERGED.url, reportDone: true });
   });
 
   it("developへのマージ済みPRが無ければ見送る", () => {
@@ -651,5 +718,134 @@ describe("decidePostMergeCheckUser（#4070）", () => {
         reasons: ["open_sub_issues"],
       }),
     ).toEqual({ action: "clear" });
+  });
+});
+
+describe("中身が同じ別コミットがmainにある（#5141）", () => {
+  const files = [
+    { filename: "a.ts", status: "modified" },
+    { filename: "b.ts", status: "added" },
+  ];
+  const head = new Map<string, string | null>([
+    ["a.ts", "h-a"],
+    ["b.ts", "h-b"],
+  ]);
+
+  it("すべてのファイルでmainの内容がPR先端と一致すれば all", () => {
+    expect(decideContentInMain(files, head, new Map(head))).toBe("all");
+  });
+
+  it("developにしか無い変更（mainは古い内容）は none", () => {
+    const main = new Map<string, string | null>([
+      ["a.ts", "old-a"],
+      ["b.ts", null],
+    ]);
+    expect(decideContentInMain(files, head, main)).toBe("none");
+  });
+
+  it("一部だけ一致すれば partial", () => {
+    const main = new Map<string, string | null>([
+      ["a.ts", "h-a"],
+      ["b.ts", "other"],
+    ]);
+    expect(decideContentInMain(files, head, main)).toBe("partial");
+  });
+
+  it("削除は、mainにも無ければ一致", () => {
+    const removed = [{ filename: "c.ts", status: "removed" }];
+    expect(
+      decideContentInMain(removed, new Map([["c.ts", null]]), new Map([["c.ts", null]])),
+    ).toBe("all");
+    expect(
+      decideContentInMain(removed, new Map([["c.ts", null]]), new Map([["c.ts", "x"]])),
+    ).toBe("none");
+  });
+
+  it("リネームは元のパスがmainに残っていれば一致としない", () => {
+    const renamed = [{ filename: "n.ts", status: "renamed", previous_filename: "o.ts" }];
+    const headBlobs = new Map<string, string | null>([
+      ["n.ts", "h"],
+      ["o.ts", null],
+    ]);
+    expect(
+      decideContentInMain(renamed, headBlobs, new Map([["n.ts", "h"], ["o.ts", null]])),
+    ).toBe("all");
+    expect(
+      decideContentInMain(renamed, headBlobs, new Map([["n.ts", "h"], ["o.ts", "left"]])),
+    ).toBe("none");
+  });
+
+  it("取得できなかった・一覧が空・パスが欠けていれば unknown", () => {
+    expect(decideContentInMain(null, head, head)).toBe("unknown");
+    expect(decideContentInMain([], head, head)).toBe("unknown");
+    expect(decideContentInMain(files, null, head)).toBe("unknown");
+    expect(decideContentInMain(files, head, null)).toBe("unknown");
+    expect(decideContentInMain(files, head, new Map([["a.ts", "h-a"]]))).toBe("unknown");
+  });
+
+  describe("closedの判定", () => {
+    const base = { mergedPullRequest: MERGED, compareWithMain: { aheadBy: 2 } };
+    it("all ならdoneへ進める", () => {
+      expect(decideClosedStrandedIssue({ ...base, contentInMain: "all" })).toEqual({
+        action: "advance_done",
+        pullRequestUrl: MERGED.url,
+      });
+    });
+    it("partial は進めず人へ渡す", () => {
+      expect(decideClosedStrandedIssue({ ...base, contentInMain: "partial" })).toEqual({
+        action: "notify_partial",
+        pullRequestUrl: MERGED.url,
+        pullRequestHeadSha: MERGED.headSha,
+      });
+    });
+    it("none・unknown・未確認は進めない（developにしか無いIssue）", () => {
+      for (const contentInMain of ["none", "unknown", undefined] as const) {
+        expect(decideClosedStrandedIssue({ ...base, contentInMain })).toEqual({
+          action: "skip",
+          reason: "closed_not_in_main_yet",
+        });
+      }
+    });
+  });
+
+  describe("openの判定", () => {
+    const base = {
+      status: "develop" as const,
+      mergedPullRequest: MERGED,
+      compareWithMain: { aheadBy: 2 },
+    };
+    it("all ならdoneを報告してcloseする", () => {
+      expect(decideMergedOpenIssue({ ...base, contentInMain: "all" })).toEqual({
+        action: "close",
+        pullRequestUrl: MERGED.url,
+        reportDone: true,
+      });
+    });
+    it("partial は人へ渡す", () => {
+      expect(decideMergedOpenIssue({ ...base, contentInMain: "partial" })).toEqual({
+        action: "notify_partial",
+        pullRequestUrl: MERGED.url,
+        pullRequestHeadSha: MERGED.headSha,
+      });
+    });
+    it("none・unknown は見送る", () => {
+      for (const contentInMain of ["none", "unknown", undefined] as const) {
+        expect(decideMergedOpenIssue({ ...base, contentInMain })).toEqual({
+          action: "skip",
+          reason: "open_not_in_main_yet",
+        });
+      }
+    });
+  });
+
+  it("通知は同じ先端について1回だけ", () => {
+    const body = buildPartialInMainComment({
+      issueNumber: 7,
+      pullRequestUrl: MERGED.url,
+      pullRequestHeadSha: "abc",
+    });
+    expect(hasPartialInMainNotice([body], 7, "abc")).toBe(true);
+    expect(hasPartialInMainNotice([body], 7, "def")).toBe(false);
+    expect(hasPartialInMainNotice([body], 8, "abc")).toBe(false);
   });
 });

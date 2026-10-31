@@ -815,6 +815,7 @@ export function ReleaseFixSummary({
   showPhases = false,
   extraAction,
   completionAsSecondary = false,
+  primaryAsSecondary = false,
   className,
 }: {
   state: ReleaseFixOverviewState;
@@ -822,6 +823,11 @@ export function ReleaseFixSummary({
   showPhases?: boolean;
   /** 「修正を自動で続ける」を「その他の操作」へ下げるか（#5076。いまの主な次の手が修正でないとき） */
   completionAsSecondary?: boolean;
+  /**
+   * 修正の主操作（修正Issueの作成など）を「その他の操作」へ下げるか（#5138）。「次の操作」に指摘の一括判定と
+   * 「おまかせで公開承認まで進める」が出ている間は、そちらを主操作にして1つに保つ
+   */
+  primaryAsSecondary?: boolean;
   /** 修正の操作が無いときに置く主操作（本番PR詳細の「本番公開へ進む」） */
   extraAction?: ReactNode;
   className?: string;
@@ -852,7 +858,18 @@ export function ReleaseFixSummary({
         startAsSecondary={completionAsSecondary}
       />
       {error && <p className="text-destructive">{error}</p>}
-      {overview.action.kind !== "none" ? <ReleaseFixPrimaryAction state={state} /> : extraAction}
+      {overview.action.kind === "none" ? (
+        extraAction
+      ) : primaryAsSecondary ? (
+        <details className="text-xs" data-testid="release-fix-primary-secondary">
+          <summary className="cursor-pointer text-muted-foreground hover:text-foreground">その他の操作（修正を1世代ずつ手で進める）</summary>
+          <div className="mt-1.5">
+            <ReleaseFixPrimaryAction state={state} />
+          </div>
+        </details>
+      ) : (
+        <ReleaseFixPrimaryAction state={state} />
+      )}
     </div>
   );
 }

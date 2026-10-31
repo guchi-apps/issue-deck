@@ -354,6 +354,10 @@ export type GithubApiPullRequest = {
    * 通知側もそれに揃えるのに使う（#4916）
    */
   draft?: boolean;
+  /** GraphQLのNode ID。同期PRのAuto-mergeの有効化・解除（#5146）に使う */
+  node_id?: string;
+  /** Auto-mergeが有効ならオブジェクト、無効ならnull（#5146）。誰が有効にしたかを`enabled_by`で見る */
+  auto_merge?: { enabled_by?: { login?: string; type?: string } | null } | null;
 };
 
 /**

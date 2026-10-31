@@ -68,11 +68,12 @@ vi.mock("@/lib/github/app-auth", () => ({ getInstallationToken: vi.fn(async () =
 const fetchPullRequest = vi.fn();
 vi.mock("@/lib/github/actions-api", () => ({ fetchPullRequest: (...a: unknown[]) => fetchPullRequest(...a) }));
 const createComment = vi.fn(async () => ({}));
+const addIssueLabels = vi.fn(async () => [] as string[]);
 const createIssue = vi.fn(async () => ({ number: 999 }));
 const fetchIssueStateOrThrow = vi.fn();
 vi.mock("@/lib/github/issues-api", () => ({
   fetchIssueStateOrThrow: (...a: unknown[]) => fetchIssueStateOrThrow(...a),
-  addIssueLabels: vi.fn(async () => []),
+  addIssueLabels: (...a: unknown[]) => (addIssueLabels as (...x: unknown[]) => unknown)(...a),
   createComment: (...a: unknown[]) => (createComment as (...x: unknown[]) => unknown)(...a),
   createIssue: (...a: unknown[]) => (createIssue as (...x: unknown[]) => unknown)(...a),
   fetchIssueState: vi.fn(async () => "open"),
@@ -491,3 +492,85 @@ describe("新方式の候補への取り込みで止めた系列（#4895）", ()
   });
 });
 
+
+describe("指摘0件の全体レビュー未確認は、修正Issueの確認待ちにしない（#5130）", () => {
+  const unverifiedSummary = () => ({
+    integration: section("passed"),
+    aiReview: { ...section("needs_check"), stage: { kind: "needs_check", items: [] }, unverifiedScope: "本番環境の設定と疎通" },
+  });
+  const commentTargets = () => createComment.mock.calls.map((call) => (call as unknown[])[2]);
+
+  beforeEach(() => {
+    loadSummary.mockResolvedValue(unverifiedSummary());
+  });
+
+  it("系列は止めるが、修正Issueに札を付けず、理由と次の操作をリリース候補のPRへ残す", async () => {
+    await runReleaseFixSweep({ hostName: "subpc" });
+    expect(state.rows).toHaveLength(1);
+    expect(state.rows[0]).toMatchObject({ status: "stopped", activeKey: null });
+    expect(String(state.rows[0].stopReason)).toContain("本番環境の設定と疎通");
+    expect(String(state.rows[0].stopReason)).toContain("リリース候補の画面");
+    expect(addIssueLabels).not.toHaveBeenCalled();
+    expect(commentTargets()).toEqual([11]);
+    // 合格扱いにしない（readyへ進めない）
+    expect(state.rows[0].status).not.toBe("ready");
+    // 止まる前は札を付けていないので、外しにも行かない
+    expect(removeLabels).not.toHaveBeenCalled();
+  });
+
+  it("2回目の巡回では何もしない（コメント・札・ラベル解除を重ねない）", async () => {
+    await runReleaseFixSweep({ hostName: "subpc" });
+    vi.clearAllMocks();
+    loadSummary.mockResolvedValue(unverifiedSummary());
+    await runReleaseFixSweep({ hostName: "subpc" });
+    expect(createComment).not.toHaveBeenCalled();
+    expect(addIssueLabels).not.toHaveBeenCalled();
+    expect(removeLabels).not.toHaveBeenCalled();
+    expect(state.rows[0].status).toBe("stopped");
+  });
+
+  it("旧い巡回が確認待ちを付けて止めていた系列は、候補側の停止へ移すときに札を外す（1回だけ）", async () => {
+    state.rows[0].status = "stopped";
+    state.rows[0].activeKey = null;
+    state.rows[0].stopReason =
+      "全体レビューに未確認範囲が残っています（指摘は0件）：本番環境の設定と疎通。統合検証の結果でも解消しませんでした。範囲を確認し、問題なければ判断を記録し、直すものがあれば画面から修正Issueを起案してください";
+    await runReleaseFixSweep({ hostName: "subpc" });
+    expect(removeLabels).toHaveBeenCalledTimes(1);
+    expect(removeLabels).toHaveBeenCalledWith("o", "r", 100, "t");
+    expect(addIssueLabels).not.toHaveBeenCalled();
+    await runReleaseFixSweep({ hostName: "subpc" });
+    expect(removeLabels).toHaveBeenCalledTimes(1);
+  });
+
+  it("判別できない統合検証の失敗など、修正Issueで判断が要る停止は従来どおり札を付ける", async () => {
+    loadSummary.mockResolvedValue({ integration: section("failed"), aiReview: section("passed") });
+    await runReleaseFixSweep({ hostName: "subpc" });
+    expect(state.rows[0].status).toBe("stopped");
+    expect(addIssueLabels).toHaveBeenCalledWith("o", "r", 100, "t", ["00.check-user", "01.check-blocked"]);
+    expect(commentTargets()).toEqual([100]);
+  });
+});
+
+describe("候補更新で系列が置き換わるとき、系列が付けた確認待ちを外す（#5130）", () => {
+  it("止まっていた系列が候補の更新で`superseded`になったら、札を外す", async () => {
+    state.rows[0].status = "stopped";
+    state.rows[0].activeKey = null;
+    state.rows[0].stopReason = "全体レビューに未確認範囲が残っています（指摘は0件）。統合検証の結果でも解消しませんでした";
+    fetchPullRequest.mockResolvedValue({ number: 11, state: "open", base: { sha: "b1", ref: "main" }, head: { sha: "h2", ref: "release-main/v1.0.1" } });
+    await runReleaseFixSweep({ hostName: "subpc" });
+    expect(state.rows[0].status).toBe("superseded");
+    expect(removeLabels).toHaveBeenCalledTimes(1);
+    expect(removeLabels).toHaveBeenCalledWith("o", "r", 100, "t");
+    expect(addIssueLabels).not.toHaveBeenCalled();
+    // 終端なので次の巡回では触れない
+    await runReleaseFixSweep({ hostName: "subpc" });
+    expect(removeLabels).toHaveBeenCalledTimes(1);
+  });
+
+  it("札を付けていない（再検証中の）系列が置き換わっても、ラベルは外しに行かない", async () => {
+    fetchPullRequest.mockResolvedValue({ number: 11, state: "open", base: { sha: "b1", ref: "main" }, head: { sha: "h2", ref: "release-main/v1.0.1" } });
+    await runReleaseFixSweep({ hostName: "subpc" });
+    expect(state.rows[0].status).toBe("superseded");
+    expect(removeLabels).not.toHaveBeenCalled();
+  });
+});

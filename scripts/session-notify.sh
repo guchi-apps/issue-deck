@@ -537,21 +537,48 @@ except Exception:
     sys.exit(0)
 if not isinstance(hook, dict) or hook.get("hook_event_name") != "PostToolUse":
     sys.exit(0)
-if hook.get("tool_name") != "Artifact":
-    sys.exit(0)
-
+tool_name = hook.get("tool_name")
 tool_input = hook.get("tool_input")
 if not isinstance(tool_input, dict):
     sys.exit(0)
-# `Artifact`は公開以外（list / read / comments / upload_asset …）にも使う。**公開だけを拾う。**
-# 既定（省略時）が公開なので、Noneと空文字も通す
-if tool_input.get("action") not in (None, "", "publish"):
+
+# **公開の経路は3つある**（#5144）。Claude Code本体がセッションの途中で組み込みの`Artifact`を
+# MCPサーバー`claude-artifacts`のツールへ差し替えることがあり（issue-deckの設定ではない）、
+# 差し替え後は`publish_files`（ファイルから）か`publish_version`（本文を直接）で公開される。
+# `Artifact`しか見ていなかったあいだ、差し替わったセッションではカードが黙って出なかった。
+html = None
+if tool_name == "Artifact":
+    # `Artifact`は公開以外（list / read / comments / upload_asset …）にも使う。**公開だけを拾う。**
+    # 既定（省略時）が公開なので、Noneと空文字も通す
+    if tool_input.get("action") not in (None, "", "publish"):
+        sys.exit(0)
+    # **Artifactタイプ（Design＝キャンバス等）からの作成は取り込まない**（#2984）。`type_url`を渡す
+    # 公開は「型から新しいアーティファクトの器を作る」呼び出しで、見た目の原本はここに無い。
+    if tool_input.get("type_url"):
+        sys.exit(0)
+    source_path = tool_input.get("file_path")
+elif tool_name == "mcp__claude-artifacts__publish_files":
+    # 配信パス`index.html`のエントリだけが見た目の原本。CSS・画像などの付属ファイルは見ない。
+    # `slug`付きの更新で`index.html`を含まない（付属ファイルだけ差し替えた）ときは取り込まない
+    source_path = None
+    files = tool_input.get("files")
+    for entry in files if isinstance(files, list) else []:
+        if isinstance(entry, dict) and str(entry.get("as") or "").strip().lstrip("/") == "index.html":
+            source_path = entry.get("path")
+            break
+elif tool_name == "mcp__claude-artifacts__publish_version":
+    # 原本のファイルが無く、本文が引数で届く。`sourcePath`は受け側で見出しの最後の代替にしか
+    # 使わないので合成値を入れる（見出しは`<title>`→`title`引数の順で先に決まる）
+    content = tool_input.get("content")
+    if not isinstance(content, str) or not content.strip():
+        sys.exit(0)
+    if len(content.encode("utf-8")) > LIMIT:
+        sys.exit(0)
+    html = content
+    source_path = "mcp:publish_version"  # 公開先のIDは応答を読んだあとで足す
+else:
     sys.exit(0)
-# **Artifactタイプ（Design＝キャンバス等）からの作成は取り込まない**（#2984）。`type_url`を渡す
-# 公開は「型から新しいアーティファクトの器を作る」呼び出しで、見た目の原本はここに無い。
-if tool_input.get("type_url"):
-    sys.exit(0)
-source_path = tool_input.get("file_path")
+
 if not isinstance(source_path, str) or not source_path.strip():
     sys.exit(0)
 source_path = source_path.strip()
@@ -561,20 +588,20 @@ source_path = source_path.strip()
 # `project/*.dc.html`に分かれており、1枚のHTMLとしては取り出せない。
 # **キャンバスを解釈しにいかない**——目次の形式はclaude.ai側の都合で変わるうえ、
 # 見た目案は1枚の自己完結HTMLで出す約束にしてある（起動プロンプトに明記）。
-if not source_path.lower().endswith((".html", ".htm")):
-    sys.exit(0)
-
-try:
-    with open(source_path, "rb") as handle:
-        raw = handle.read(LIMIT + 1)
-except OSError:
-    sys.exit(0)
-if not raw or len(raw) > LIMIT:
-    sys.exit(0)
-try:
-    html = raw.decode("utf-8")
-except UnicodeDecodeError:
-    sys.exit(0)
+if html is None:
+    if not source_path.lower().endswith((".html", ".htm")):
+        sys.exit(0)
+    try:
+        with open(source_path, "rb") as handle:
+            raw = handle.read(LIMIT + 1)
+    except OSError:
+        sys.exit(0)
+    if not raw or len(raw) > LIMIT:
+        sys.exit(0)
+    try:
+        html = raw.decode("utf-8")
+    except UnicodeDecodeError:
+        sys.exit(0)
 
 # 公開したURLはツールの応答から拾う。**取れなくても送る**——見た目を出すのに要るのはHTMLの
 # 原本だけで、URLはclaude.aiで開き直すための逃げ道にすぎない
@@ -595,6 +622,14 @@ found = re.search(
 
 def text(value):
     return value.strip() if isinstance(value, str) and value.strip() else None
+
+
+# `sourcePath`は受け側で再公開の同一判定（上書き先）に使う。固定値だと同じIssueで別々に
+# 公開したアーティファクトが1枚に潰れるので、公開先のID（応答のURL→`slug`の順）を足す
+if source_path == "mcp:publish_version":
+    key = found.group(0).rsplit("/", 1)[-1] if found else text(tool_input.get("slug"))
+    if key:
+        source_path = "mcp:publish_version:" + key
 
 
 sys.stdout.write(
@@ -635,7 +670,8 @@ PY
 
 # python3を起こす価値があるかの前捌き（`NOTIFY_PLAN_BASE_SHA`と同じ扱い）。
 # 外れてもpython側が同じ判定で落とすので、結果は変わらない。
-if [[ "$HOOK_JSON" == *'"tool_name"'*'"Artifact"'* ]]; then
+if [[ "$HOOK_JSON" == *'"tool_name"'*'"Artifact"'* ||
+  "$HOOK_JSON" == *'"tool_name"'*'"mcp__claude-artifacts__publish_'* ]]; then
   report_artifact_to_issue_deck
 fi
 
@@ -747,6 +783,26 @@ if not guarded():
     sys.exit(0)
 
 
+# 判定の正は`src/lib/artifact-document.ts`の`ARTIFACT_URL_PATTERN`（取り込み側の正規表現と同じ）
+ARTIFACT_URL = re.compile(
+    r"https://claude\.ai/(?:code/artifact|public/artifacts|artifact)/"
+    r"(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[A-Za-z0-9]{16,32})"
+)
+
+
+def mcp_html_publish(name, given):
+    """Claude Code本体が`Artifact`を差し替えたあとのMCP経由の公開か（#5144）。"""
+    if name == "mcp__claude-artifacts__publish_version":
+        return isinstance(given.get("content"), str) and bool(given["content"].strip())
+    if name == "mcp__claude-artifacts__publish_files":
+        files = given.get("files")
+        return any(
+            isinstance(entry, dict) and str(entry.get("as") or "").strip().lstrip("/") == "index.html"
+            for entry in (files if isinstance(files, list) else [])
+        )
+    return False
+
+
 def satisfied_gates():
     """同じworktreeの転記から、計画の承認とアーティファクトの公開を探す。"""
     found = set()
@@ -755,7 +811,7 @@ def satisfied_gates():
         return found
     files = sorted(glob.glob(os.path.join(os.path.dirname(transcript), "*.jsonl")), key=os.path.getmtime, reverse=True)
     for path in files[:30]:
-        plan_ids, artifact_ids = set(), set()
+        plan_ids, artifact_ids, mcp_artifact_ids = set(), set(), set()
         try:
             handle = open(path, encoding="utf-8", errors="replace")
         except OSError:
@@ -763,7 +819,13 @@ def satisfied_gates():
         with handle:
             for line in handle:
                 # 該当しそうな行だけを解析する（転記は数MBになる）
-                if "plan_mode_exit" not in line and "ExitPlanMode" not in line and "Artifact" not in line and "tool_result" not in line:
+                if (
+                    "plan_mode_exit" not in line
+                    and "ExitPlanMode" not in line
+                    and "Artifact" not in line
+                    and "claude-artifacts" not in line
+                    and "tool_result" not in line
+                ):
                     continue
                 try:
                     record = json.loads(line)
@@ -790,10 +852,18 @@ def satisfied_gates():
                             and str(given.get("file_path") or "").lower().endswith((".html", ".htm"))
                         ):
                             artifact_ids.add(block.get("id"))
+                        elif mcp_html_publish(name, given):
+                            mcp_artifact_ids.add(block.get("id"))
                     elif block.get("type") == "tool_result" and not block.get("is_error"):
                         if block.get("tool_use_id") in plan_ids:
                             found.add("plan")
                         if block.get("tool_use_id") in artifact_ids:
+                            found.add("artifact")
+                        # MCPの失敗は`is_error`を立てずに本文だけで返ることがあるので、
+                        # 公開先のURLが応答に出ているときだけ公開できたとみなす
+                        if block.get("tool_use_id") in mcp_artifact_ids and ARTIFACT_URL.search(
+                            json.dumps(block.get("content"), ensure_ascii=False)
+                        ):
                             found.add("artifact")
         if found >= set(gates):
             break

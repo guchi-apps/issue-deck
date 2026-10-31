@@ -10,6 +10,8 @@ const mocks = vi.hoisted(() => ({
   createRef: vi.fn(),
   createPr: vi.fn(),
   merge: vi.fn(),
+  enableAutoMerge: vi.fn(),
+  disableAutoMerge: vi.fn(),
   callerText: vi.fn(async () => null as string | null),
   fileText: vi.fn(async () => null as string | null),
   candidateFindMany: vi.fn(),
@@ -26,7 +28,11 @@ vi.mock("@/lib/db", () => ({
   },
 }));
 vi.mock("@/lib/github/app-auth", () => ({ getInstallationToken: vi.fn(async () => "t") }));
-vi.mock("@/lib/github/actions-api", () => ({ mergePullRequest: mocks.merge }));
+vi.mock("@/lib/github/actions-api", () => ({
+  mergePullRequest: mocks.merge,
+  enablePullRequestAutoMerge: mocks.enableAutoMerge,
+  disablePullRequestAutoMerge: mocks.disableAutoMerge,
+}));
 vi.mock("@/lib/github/branches-api", () => ({ compareBranches: mocks.compare }));
 vi.mock("@/lib/github/release-api", () => ({
   createBranchRef: mocks.createRef,
@@ -256,6 +262,71 @@ describe("同期PRの自動マージ（#4669）", () => {
       await ensureDevelopSync(ctx, { autoMerge: true });
       expect(mocks.productionCheckFindFirst).not.toHaveBeenCalled();
       expect(mocks.merge).toHaveBeenCalled();
+    });
+  });
+
+  describe("GitHubのオートマージ（#5146）", () => {
+    const reviewDoneCiRunning = { ...settled, state: "pending", step: "wait-for-ci" };
+    const syncPr = (over: Record<string, unknown> = {}) => ({
+      number: 70,
+      node_id: "PR_70",
+      head: { ref: "release-sync/main-aaaaaaaaaaaa", sha: MAIN },
+      body: developSyncMarker(MAIN),
+      labels: [],
+      html_url: "u70",
+      auto_merge: null,
+      ...over,
+    });
+
+    it("CIの実行中でレビューが終わっていれば、HEADを指定してオートマージを有効にする（巡回では直接マージしない）", async () => {
+      mocks.openPrs.mockResolvedValue([syncPr()]);
+      mocks.ciState.mockResolvedValue({ ciState: "pending", mergeable: true, mergeJudgement: reviewDoneCiRunning });
+      const status = await ensureDevelopSync(ctx, { autoMerge: true });
+      expect(mocks.enableAutoMerge).toHaveBeenCalledWith("PR_70", MAIN, "t");
+      expect(mocks.merge).not.toHaveBeenCalled();
+      expect(status.detail).toBe("ci_pending");
+      expect(developSyncAutoMergeOutlook("o/r", 70, MAIN)).toMatchObject({ status: "auto" });
+    });
+
+    it("有効化済み・巡回以外（画面の観測）では有効にせず、失敗しても例外にしない", async () => {
+      mocks.ciState.mockResolvedValue({ ciState: "pending", mergeable: true, mergeJudgement: reviewDoneCiRunning });
+      mocks.openPrs.mockResolvedValue([syncPr({ auto_merge: { enabled_by: { login: "issue-deck[bot]", type: "Bot" } } })]);
+      await ensureDevelopSync(ctx, { autoMerge: true });
+      mocks.openPrs.mockResolvedValue([syncPr()]);
+      await ensureDevelopSync(ctx);
+      expect(mocks.enableAutoMerge).not.toHaveBeenCalled();
+      mocks.enableAutoMerge.mockRejectedValueOnce(new Error("auto-merge is not allowed"));
+      expect(await ensureDevelopSync(ctx, { autoMerge: true })).toMatchObject({ state: "unsynced" });
+    });
+
+    it("レビューが終わっていない・判定ジョブが落ちているなら有効にしない", async () => {
+      mocks.openPrs.mockResolvedValue([syncPr()]);
+      mocks.ciState.mockResolvedValue({ ciState: "pending", mergeable: true, mergeJudgement: { ...reviewDoneCiRunning, aiReview: { state: "pending", runUrl: null } } });
+      await ensureDevelopSync(ctx, { autoMerge: true });
+      mocks.ciState.mockResolvedValue({ ciState: "pending", mergeable: true, mergeJudgement: { ...reviewDoneCiRunning, failedJobs: ["review-provider"] } });
+      await ensureDevelopSync(ctx, { autoMerge: true });
+      expect(mocks.enableAutoMerge).not.toHaveBeenCalled();
+    });
+
+    it("人の対応が要る判定に変わったら、IssueDeckが有効にしたものだけ解除する", async () => {
+      mocks.ciState.mockResolvedValue({ ciState: "pending", mergeable: true, mergeJudgement: reviewDoneCiRunning });
+      mocks.openPrs.mockResolvedValue([syncPr({ labels: [{ name: "00.check-user" }], auto_merge: { enabled_by: { login: "issue-deck[bot]", type: "Bot" } } })]);
+      expect(await ensureDevelopSync(ctx, { autoMerge: true })).toMatchObject({ detail: "merge_held" });
+      expect(mocks.disableAutoMerge).toHaveBeenCalledWith("PR_70", "t");
+      mocks.disableAutoMerge.mockClear();
+      mocks.openPrs.mockResolvedValue([syncPr({ labels: [{ name: "00.check-user" }], auto_merge: { enabled_by: { login: "someone", type: "User" } } })]);
+      await ensureDevelopSync(ctx, { autoMerge: true });
+      expect(mocks.disableAutoMerge).not.toHaveBeenCalled();
+    });
+
+    it("追いコミットでHEADがmainの先端と食い違ったら解除し、解除に失敗しても次の巡回でやり直す", async () => {
+      mocks.ciState.mockResolvedValue({ ciState: "pending", mergeable: true, mergeJudgement: reviewDoneCiRunning });
+      mocks.openPrs.mockResolvedValue([syncPr({ head: { ref: "release-sync/main-aaaaaaaaaaaa", sha: "h".repeat(40) }, auto_merge: { enabled_by: { type: "Bot" } } })]);
+      mocks.disableAutoMerge.mockRejectedValueOnce(new Error("502"));
+      await ensureDevelopSync(ctx, { autoMerge: true });
+      await ensureDevelopSync(ctx, { autoMerge: true });
+      expect(mocks.disableAutoMerge).toHaveBeenCalledTimes(2);
+      expect(mocks.enableAutoMerge).not.toHaveBeenCalled();
     });
   });
 

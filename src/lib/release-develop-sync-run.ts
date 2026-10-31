@@ -1,5 +1,5 @@
 import { db } from "@/lib/db";
-import { mergePullRequest } from "@/lib/github/actions-api";
+import { disablePullRequestAutoMerge, enablePullRequestAutoMerge, mergePullRequest } from "@/lib/github/actions-api";
 import { getInstallationToken } from "@/lib/github/app-auth";
 import { compareBranches } from "@/lib/github/branches-api";
 import {
@@ -63,6 +63,14 @@ async function findOpenSyncPullRequest(ctx: Context): Promise<DevelopSyncPullReq
     labels: ((pr as { labels?: { name?: string }[] }).labels ?? []).map((l) => l.name ?? ""),
     // 判定が出揃い（settled）、Claudeのレビューが実行済み・または不要（skipped）のときだけ
     reviewSettled: judgement?.state === "settled" && (judgement.aiReview.state === "passed" || judgement.aiReview.state === "skipped"),
+    // Claudeのレビュー自体の完了（#5146）。判定ジョブが落ちていれば任せない
+    reviewDone:
+      judgement !== undefined &&
+      (judgement.aiReview.state === "passed" || judgement.aiReview.state === "skipped") &&
+      (judgement.failedJobs ?? []).length === 0,
+    nodeId: pr.node_id,
+    autoMergeEnabled: pr.auto_merge != null,
+    autoMergeEnabledByBot: pr.auto_merge?.enabled_by?.type === "Bot",
     number: pr.number,
     url: pr.html_url,
     headRef: pr.head.ref,
@@ -233,6 +241,29 @@ async function autoMergeSyncPullRequest(ctx: Context, pr: DevelopSyncPullRequest
 }
 
 /**
+ * GitHubのAuto-mergeを判定に合わせる（#5146）。**例外を投げない**。
+ * - 残りがCIだけ（`armHeadSha`）なら有効にする。CIの合格と同時にGitHubがマージするので、巡回の間隔を待たない。
+ *   有効にできない（リポジトリの`allow_auto_merge`が無効・必須チェックが無いなど）ときは従来どおり、CIの合格後に
+ *   巡回が直接マージする
+ * - 人の対応が要る判定（ラベル・追いコミット・mainの前進・競合・レビュー判定など）に変わったら解除する。
+ *   **人以外（IssueDeck）が有効にしたものだけを解除する**（人が自分で有効にしたものは人の判断として残す）
+ */
+async function syncGithubAutoMerge(ctx: Context, pr: DevelopSyncPullRequest, decision: DevelopSyncAutoMergeDecision): Promise<void> {
+  if (decision.ok || !pr.nodeId) return;
+  try {
+    if (decision.armHeadSha && !pr.autoMergeEnabled) {
+      await enablePullRequestAutoMerge(pr.nodeId, decision.armHeadSha, ctx.token);
+      console.info("[release-develop-sync] 同期PRのオートマージを有効にしました", fullNameOf(ctx), pr.number);
+    } else if (!decision.waiting && pr.autoMergeEnabled && pr.autoMergeEnabledByBot) {
+      await disablePullRequestAutoMerge(pr.nodeId, ctx.token);
+      console.info("[release-develop-sync] 同期PRのオートマージを解除しました", fullNameOf(ctx), pr.number, decision.reason);
+    }
+  } catch (error) {
+    console.error("[release-develop-sync] 同期PRのオートマージを切り替えられませんでした", fullNameOf(ctx), pr.number, error);
+  }
+}
+
+/**
  * 同期を確かめ、未同期で同期PRが無ければ作る。**例外を投げない**（呼び出し元の公開処理・巡回を止めない）。
  * 同じmainへの同期PRはブランチ名が同じなので、巡回が重なっても1本にしかならない
  */
@@ -244,10 +275,13 @@ export async function ensureDevelopSync(ctx: Context, options: { autoMerge?: boo
     rememberAutoMergeDecision(fullName, status);
     if (observation.kind !== "observed" || status.state !== "unsynced") return status;
     if (observation.openPullRequest !== null) {
-      if (options.autoMerge && status.autoMerge && (await autoMergeSyncPullRequest(ctx, observation.openPullRequest, status.autoMerge))) {
-        const merged = decideDevelopSync(await observeDevelopSync(ctx));
-        rememberAutoMergeDecision(fullName, merged);
-        return merged;
+      if (options.autoMerge && status.autoMerge) {
+        if (await autoMergeSyncPullRequest(ctx, observation.openPullRequest, status.autoMerge)) {
+          const merged = decideDevelopSync(await observeDevelopSync(ctx));
+          rememberAutoMergeDecision(fullName, merged);
+          return merged;
+        }
+        await syncGithubAutoMerge(ctx, observation.openPullRequest, status.autoMerge);
       }
       return status;
     }

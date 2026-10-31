@@ -279,6 +279,11 @@ export type PullRequestSummary = {
    */
   developSyncAutoMerge?: { status: "auto" | "held"; reason: string } | null;
   /**
+   * 対応Issueが、いま動いている「修正を自動で続ける」（リリース完了系列）の修正Issueのとき、その系列が見ている候補（#5138）。
+   * 系列が止まって付けた確認待ちが残っていても、動いている間は人の確認待ちとして見せない。一覧だけが載せる
+   */
+  releaseAutoFix?: { candidatePrNumber: number } | null;
+  /**
    * 現在のHEADに対する、エージェント別（Codex等）のAIレビュー（`PR_REVIEW`ジョブ。#4024）。
    * ジョブが無ければ無い。**一覧だけが載せる**ので省略可能。Claudeのレビューは`reviewVerdict`・
    * `mergeJudgement`から読むためここには入らない。
