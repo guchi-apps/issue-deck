@@ -13,6 +13,7 @@ const fetchPullRequest = vi.fn();
 const fetchBranchHeadSha = vi.fn();
 const compareBranches = vi.fn();
 const fetchBlobShasAtRef = vi.fn();
+const fetchPullRequestFiles = vi.fn();
 const closePullRequest = vi.fn();
 const fetchCommentsForIssue = vi.fn();
 const createComment = vi.fn();
@@ -74,6 +75,10 @@ vi.mock("@/lib/github/pull-requests-api", () => ({
   get fetchPullRequest() {
     return fetchPullRequest;
   },
+  get fetchPullRequestFiles() {
+    return fetchPullRequestFiles;
+  },
+  PULL_REQUEST_FILES_PER_PAGE: 100,
 }));
 
 vi.mock("@/lib/github/branches-api", () => ({
@@ -130,7 +135,11 @@ vi.mock("@/lib/github/report-progress", () => ({
   },
 }));
 
-import { resetProgressSweepIntervalForTest, runProgressSweep } from "./progress-sweep-run";
+import {
+  resetContentCheckCacheForTest,
+  resetProgressSweepIntervalForTest,
+  runProgressSweep,
+} from "./progress-sweep-run";
 
 const NOW = new Date("2026-08-25T12:00:00Z");
 
@@ -236,6 +245,8 @@ describe("runProgressSweep", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     resetProgressSweepIntervalForTest();
+    resetContentCheckCacheForTest();
+    fetchPullRequestFiles.mockResolvedValue([]);
     delete process.env.PROGRESS_SWEEP_INTERVAL_MINUTES;
     process.env.PROJECT_V2_OWNER = "guchi-apps";
     process.env.PROJECT_V2_NUMBER = "1";
@@ -1053,6 +1064,125 @@ describe("runProgressSweep", () => {
       expect(result.skipped).toMatchObject({ action_failed: 1 });
       expect(createComment).not.toHaveBeenCalled();
       expect(result.actions).toEqual([]);
+    });
+  });
+
+  describe("中身が同じ別コミットがmainにある（#5141）", () => {
+    function blobs(map: Record<string, string | null>) {
+      return new Map(Object.entries(map));
+    }
+    function mockBlobs(head: Record<string, string | null>, main: Record<string, string | null>) {
+      fetchBlobShasAtRef.mockImplementation(async (_o, _r, ref: string) =>
+        blobs(ref === "main" ? main : head),
+      );
+    }
+
+    beforeEach(() => {
+      fetchProjectItems.mockResolvedValue([
+        {
+          itemId: "item-closed",
+          repositoryDatabaseId: 555,
+          issueNumber: 322,
+          issueOpen: false,
+          status: "Release",
+        },
+        {
+          itemId: "item-open",
+          repositoryDatabaseId: 555,
+          issueNumber: 799,
+          issueOpen: true,
+          status: "Develop",
+        },
+      ]);
+      compareBranches.mockResolvedValue({ aheadBy: 2, changedFiles: 2, lastCommitAt: null });
+      fetchBranchHeadSha.mockResolvedValue("main-sha");
+      fetchPullRequestsForHead.mockImplementation(
+        pullRequestsForHead([mergedPullRequest({ number: 900 })]),
+      );
+      fetchPullRequestFiles.mockResolvedValue([
+        { filename: "a.ts", status: "modified" },
+        { filename: "b.ts", status: "added" },
+      ]);
+      reportProgressStatus.mockResolvedValue({ applied: true, from: "Develop", to: "Done" });
+    });
+
+    it("全ファイルがmainと一致すれば、closedはdoneへ・openはdoneにしてcloseする", async () => {
+      mockBlobs({ "a.ts": "x", "b.ts": "y" }, { "a.ts": "x", "b.ts": "y" });
+
+      const result = await runProgressSweep({ now: NOW });
+
+      expect(result.actions).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ issueNumber: 322, kind: "content_in_main_recovered" }),
+          expect.objectContaining({ issueNumber: 799, kind: "content_in_main_recovered" }),
+        ]),
+      );
+      expect(reportProgressStatus).toHaveBeenCalledWith(
+        expect.objectContaining({ issueNumber: 322, status: "done" }),
+      );
+      expect(updateIssue).toHaveBeenCalledWith("guchi-apps", "issue-deck", 799, "token", {
+        state: "closed",
+        state_reason: "completed",
+      });
+    });
+
+    it("developにしか無いIssue（mainは古い内容）は進めない", async () => {
+      mockBlobs({ "a.ts": "x", "b.ts": "y" }, { "a.ts": "old", "b.ts": null });
+
+      const result = await runProgressSweep({ now: NOW });
+
+      expect(reportProgressStatus).not.toHaveBeenCalled();
+      expect(updateIssue).not.toHaveBeenCalled();
+      expect(addCheckUserWithReason).not.toHaveBeenCalled();
+      expect(result.skipped).toMatchObject({ closed_not_in_main_yet: 1, open_not_in_main_yet: 1 });
+    });
+
+    it("mainとPR先端が前回と同じなら、2回目の巡回はファイルを引き直さない", async () => {
+      mockBlobs({ "a.ts": "x", "b.ts": "y" }, { "a.ts": "old", "b.ts": null });
+      await runProgressSweep({ now: NOW });
+      const calls = fetchPullRequestFiles.mock.calls.length;
+
+      await runProgressSweep({ now: NOW, force: true });
+
+      expect(fetchPullRequestFiles.mock.calls.length).toBe(calls);
+    });
+
+    it("一部だけ一致なら進めず、00.check-user＋01.check-blockedで通知し、重ねない", async () => {
+      mockBlobs({ "a.ts": "x", "b.ts": "y" }, { "a.ts": "x", "b.ts": "other" });
+
+      const result = await runProgressSweep({ now: NOW });
+
+      expect(reportProgressStatus).not.toHaveBeenCalled();
+      expect(updateIssue).not.toHaveBeenCalled();
+      expect(addCheckUserWithReason).toHaveBeenCalledWith(
+        "guchi-apps",
+        "issue-deck",
+        322,
+        "token",
+        "blocked",
+      );
+      expect(result.actions).toContainEqual(
+        expect.objectContaining({ issueNumber: 322, kind: "partial_in_main_notified" }),
+      );
+
+      // 同じ先端の通知が既にあれば何もしない
+      const markers = createComment.mock.calls.map((call) => ({ body: call[4].body }));
+      createComment.mockClear();
+      addCheckUserWithReason.mockClear();
+      resetContentCheckCacheForTest();
+      fetchCommentsForIssue.mockResolvedValue(markers);
+      await runProgressSweep({ now: NOW, force: true });
+      expect(createComment).not.toHaveBeenCalled();
+      expect(addCheckUserWithReason).not.toHaveBeenCalled();
+    });
+
+    it("確かめられなければ（blob取得失敗）進めない", async () => {
+      fetchBlobShasAtRef.mockResolvedValue(null);
+
+      await runProgressSweep({ now: NOW });
+
+      expect(reportProgressStatus).not.toHaveBeenCalled();
+      expect(addCheckUserWithReason).not.toHaveBeenCalled();
     });
   });
 });
