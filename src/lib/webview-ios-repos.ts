@@ -118,7 +118,25 @@ const ISSUE_DECK: WebviewIosRepository = {
   launchUrl: "https://issuedeck.gucchii.com/",
 };
 
+/** work-relay（ワークリレー）。ios/配下のWorkRelayをsubpc→Mac経由でTestFlightへ配布する（#5140）。Mac miniのチェックアウトは`~/apps/work-relay` */
+const WORK_RELAY: WebviewIosRepository = {
+  appLabel: "work-relay",
+  xcodeProjectPath: "ios/WorkRelay.xcodeproj",
+  command:
+    "cd ~/apps/work-relay &&\ngit status --short &&\ngit switch develop &&\ngit pull --ff-only origin develop &&\nopen ios/WorkRelay.xcodeproj",
+  setupReferences: [
+    { label: "work-relay#317（iOSアプリ化）", url: "https://github.com/guchi-apps/work-relay/issues/317" },
+    {
+      label: "ios/README.md",
+      url: "https://github.com/guchi-apps/work-relay/blob/develop/ios/README.md",
+    },
+  ],
+  // Associated Domains（AASA）は使わない（ios/README.md）。ブラウザで開く
+  launchUrl: "https://research-desk.gucchii.com/",
+};
+
 const WEBVIEW_IOS_REPOSITORIES: Readonly<Record<string, WebviewIosRepository>> = {
+  "guchi-apps/work-relay": WORK_RELAY,
   "guchi-apps/kurashio": KURASHIO,
   "guchi-apps/myroom": KURASHIO,
   "guchi-apps/yoteiflow": YOTEIFLOW,
