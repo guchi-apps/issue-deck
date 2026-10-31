@@ -795,7 +795,7 @@ async function evaluateAndMerge(run: RunRow, ctx: Ctx, now: Date, observation: O
     mergeCommitSha: merged.sha,
     token: ctx.token,
   }).catch((error: unknown) => console.error("[release-completion] デプロイの見張りを置けませんでした", run.id, error));
-  await notify(run, ctx, `リリース候補 #${run.candidatePrNumber} を本番mainへマージしました（リリース完了系列の許可範囲内・HEAD \`${run.candidateHeadSha.slice(0, 7)}\`）。デプロイと稼働中の版を確認します。`, false);
+  await notify(run, ctx, `リリース候補 #${run.candidatePrNumber} を本番mainへマージしました（リリース完了系列の許可範囲内・HEAD \`${run.candidateHeadSha.slice(0, 7)}\`）。デプロイと稼働中の版を確認します。`, "info");
   return { action: "merged", detail: merged.sha ?? undefined };
 }
 
@@ -836,7 +836,7 @@ async function advanceRelease(run: RunRow, ctx: Ctx, now: Date): Promise<ActionR
         data: { status: "completed", activeKey: null, completedAt: now, releaseRunId: BigInt(decision.run.id), releaseRunUrl: decision.run.htmlUrl },
       });
       if (updated.count === 1) {
-        await notify(run, ctx, `リリースが完了しました。デプロイが成功し、稼働中の版が \`${run.mergeSha.slice(0, 7)}\` と一致しています。\n\n- デプロイ: ${decision.run.htmlUrl}`, false);
+        await notify(run, ctx, `リリースが完了しました。デプロイが成功し、稼働中の版が \`${run.mergeSha.slice(0, 7)}\` と一致しています。\n\n- デプロイ: ${decision.run.htmlUrl}`, "info");
         await clearStopLabels(run, ctx);
       }
       return updated.count === 1 ? { action: "completed", detail: decision.run.htmlUrl } : null;
@@ -882,7 +882,7 @@ async function handOffDeployFailure(run: RunRow, ctx: Ctx, failedRunId: number):
     data: { status: "deploy_recovery", deployRecoverySeriesId: started.series.id, note: null },
   });
   if (updated.count === 1) {
-    await notify(run, ctx, "本番デプロイが再実行も失敗しました。同じ系列のまま、本番復旧（原因の調査・修正・稼働確認）へ引き継ぎます。", false);
+    await notify(run, ctx, "本番デプロイが再実行も失敗しました。同じ系列のまま、本番復旧（原因の調査・修正・稼働確認）へ引き継ぎます。", "info");
   }
   return updated.count === 1 ? { action: "deploy_recovery", detail: started.series.id } : null;
 }
@@ -943,7 +943,10 @@ async function handOff(run: RunRow, ctx: Ctx, reason: ReleaseCompletionStopReaso
   });
   if (updated.count !== 1) return null;
   if (run.publishApprovalId) await settlePublishApprovalOnStop(run.publishApprovalId, reason, new Date());
-  await notify(run, ctx, `${run.publishApprovalId ? "自動公開" : "リリース完了系列"}を止めました。${releaseCompletionStopMessage(reason, detail ?? null) ?? ""}`, true);
+  // 指摘0件の全体レビュー未確認だけで止まったとき、確認する対象はリリース候補で、修正Issueではない（#5130）。
+  // 理由は候補のPRへ残し、修正Issueに確認待ちを付けない（ゲートは`decideReleaseCompletion`がそのまま止めている）
+  const audience = reason === "review_unverified" ? "candidate" : "user";
+  await notify(run, ctx, `${run.publishApprovalId ? "自動公開" : "リリース完了系列"}を止めました。${releaseCompletionStopMessage(reason, detail ?? null) ?? ""}`, audience);
   return { action: `stop:${reason}`, detail };
 }
 
@@ -974,18 +977,24 @@ async function clearStopLabels(run: RunRow, ctx: Ctx): Promise<void> {
   }
 }
 
-async function notify(run: RunRow, ctx: Ctx, message: string, needsUser: boolean): Promise<void> {
+/**
+ * 通知の宛先。"user": 最新の修正Issue（無ければ候補のPR）へ理由を残し、確認待ちを付ける。
+ * "info": 同じ宛先へ知らせるだけ。"candidate": 確認する対象が候補そのもの（#5130）で、候補のPRへ残し、修正Issueには札を付けない
+ */
+type NotifyAudience = "user" | "info" | "candidate";
+
+async function notify(run: RunRow, ctx: Ctx, message: string, audience: NotifyAudience): Promise<void> {
   const latest = await db.releaseFixSeries.findFirst({
     where: { repositoryFullName: run.repositoryFullName, releasePrNumber: { in: numbers(run.candidatePrNumbers) } },
     orderBy: { createdAt: "desc" },
     select: { issueNumber: true },
   });
-  const target = latest?.issueNumber ?? run.candidatePrNumber;
+  const target = audience !== "candidate" ? (latest?.issueNumber ?? run.candidatePrNumber) : run.candidatePrNumber;
   const body = [message, "", `- リリース候補: #${run.candidatePrNumber}`, "", MARKER, "<!-- issue-deck-agent:guide -->"].join("\n");
   await createComment(ctx.owner, ctx.repo, target, ctx.token, { body }).catch((error: unknown) =>
     console.error("[release-completion] コメントに失敗しました", run.id, error),
   );
-  if (needsUser && latest) {
+  if (audience === "user" && latest) {
     await addIssueLabels(ctx.owner, ctx.repo, latest.issueNumber, ctx.token, CHECK_USER_LABELS).catch(() => undefined);
   }
 }

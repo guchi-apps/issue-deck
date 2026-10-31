@@ -355,6 +355,46 @@ describe("runReleaseCompletionSweep", () => {
     expect(runs[0]).toMatchObject({ status: "stopped", activeKey: null });
   });
 
+  describe("指摘0件の全体レビュー未確認で止まったとき（#5130）", () => {
+    const unverified = () => ({
+      aiReview: { ...section("needs_check"), stage: { kind: "needs_check", items: [] }, unverifiedScope: "本番環境の設定と疎通" },
+      integration: section("passed"),
+      mac: { state: "not_applicable" },
+    });
+    const targets = () => createComment.mock.calls.map((call) => (call as unknown[])[2]);
+
+    beforeEach(() => {
+      // 修正PRは取り込み済み（系列は後継候補で合格扱いにならず止まった）
+      fixSeries.push({ id: "s1", repositoryFullName: "o/r", releasePrNumber: 10, successorPrNumber: null, status: "ready", issueNumber: 100, createdAt: now });
+    });
+
+    it("修正Issueに確認待ちを付けず、理由をリリース候補のPRへ残す。合格扱いにはしない", async () => {
+      await start();
+      loadReleaseVerificationSummary.mockResolvedValue(unverified());
+      await runReleaseCompletionSweep({ hostName: "subpc", now });
+      expect(runs[0]).toMatchObject({ status: "needs_attention", stopReason: "review_unverified", activeKey: null });
+      expect(String(runs[0].stopDetail)).toContain("本番環境の設定と疎通");
+      expect(mergePullRequest).not.toHaveBeenCalled();
+      expect(createReleaseFixSeries).not.toHaveBeenCalled();
+      expect(addIssueLabels).not.toHaveBeenCalled();
+      expect(targets()).toEqual([10]);
+      // 止まった系列は巡回の対象外。2回目で札もコメントも重ねない
+      await runReleaseCompletionSweep({ hostName: "subpc", now: later(1) });
+      expect(addIssueLabels).not.toHaveBeenCalled();
+      expect(targets()).toEqual([10]);
+    });
+
+    it("別理由の停止（mainが進んだ）は、従来どおり修正Issueへ確認待ちを付ける", async () => {
+      await start();
+      loadReleaseVerificationSummary.mockResolvedValue(summary("passed", "passed"));
+      fetchMainHeadSha.mockResolvedValue("base2");
+      await runReleaseCompletionSweep({ hostName: "subpc", now });
+      expect(runs[0]).toMatchObject({ stopReason: "base_changed" });
+      expect(addIssueLabels).toHaveBeenCalledWith("o", "r", 100, "token", ["00.check-user", "01.check-blocked"]);
+      expect(targets()).toEqual([100]);
+    });
+  });
+
   it("未導入リポジトリの統合検証失敗は設定不足として止め、修正を起案しない", async () => {
     await start();
     loadReleaseVerificationSummary.mockResolvedValue(summary("passed", "failed"));
