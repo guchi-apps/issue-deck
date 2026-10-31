@@ -54,12 +54,6 @@ export type DevelopSyncPullRequest = {
   labels?: string[];
   /** 自動レビュー（`claude-review-develop.yml`）の判定が出揃い、レビューが実行済み・または不要で終わっているか */
   reviewSettled?: boolean;
-  /**
-   * Claudeのレビュー（`claude-review`ジョブ）自体が実行済み・または不要で終わっているか（#5146）。
-   * 判定全体（`reviewSettled`）はCIの完了を待つ`wait-for-ci`・`auto-merge`まで終わらないと立たないため、
-   * CIの実行中にGitHubのAuto-mergeを有効にしてよいかはこちらで見る
-   */
-  reviewDone?: boolean;
   /** GraphQLのNode ID。Auto-mergeの有効化・解除に使う（#5146） */
   nodeId?: string;
   /** GitHubのAuto-mergeが有効か。`autoMergeEnabledByBot`はIssueDeck（GitHub App）など人以外が有効にしたか（#5146） */
@@ -98,16 +92,11 @@ export type DevelopSyncPublishEvidence = {
 /**
  * 自動マージの判定。止めるときの`waiting`は、条件が揃うのを巡回が待っている（CI実行中・レビュー判定中など）か、
  * 人の対応が要るか（false）を表す。画面はこれで「自動マージ待ち」と「人の確認が必要」を分ける。
- * `armHeadSha`は、残りがCIの完了だけで、GitHubのAuto-merge（必須チェックの合格でマージ）に任せてよいときの
- * HEAD（#5146）。巡回はこのSHAを`expectedHeadOid`にしてAuto-mergeを有効にする
  */
-export type DevelopSyncAutoMergeDecision = { ok: true; headSha: string } | { ok: false; reason: string; waiting: boolean; armHeadSha?: string };
+export type DevelopSyncAutoMergeDecision = { ok: true; headSha: string } | { ok: false; reason: string; waiting: boolean };
 
 const wait = (reason: string): DevelopSyncAutoMergeDecision => ({ ok: false, reason, waiting: true });
 const hold = (reason: string): DevelopSyncAutoMergeDecision => ({ ok: false, reason, waiting: false });
-
-/** Auto-mergeに任せる（または任せている）ときの理由。画面の「自動マージ待ち」に出す */
-export const DEVELOP_SYNC_ARMED_REASON = "CIの完了を待っています。合格するとGitHubのオートマージがマージします";
 
 /**
  * 同期PRを自動でマージしてよいか（#4669）。**止める側へ倒す**: 次のすべてを満たすときだけ`ok`。
@@ -119,8 +108,7 @@ export const DEVELOP_SYNC_ARMED_REASON = "CIの完了を待っています。合
  * - ワークフローを含むなら、今のmainがRCの公開で本番へマージした記録と一致し、mainにだけあるワークフローが
  *   すべてそのマージで変わったものである（#5081。以前から未同期のワークフローや、記録の無いmainは人へ回す）
  * マージ操作は呼び出し側がこのHEADのSHAを渡して行う（追いコミットを巻き込まない）。
- * CI以外がすべて揃い、Claudeのレビューも終わっていてCIだけが実行中なら`armHeadSha`を返し、
- * 呼び出し側がGitHubのAuto-mergeを有効にする（#5146。巡回の間隔を待たずにCIの合格と同時にマージされる）
+ * GitHubのAuto-mergeには任せない（#5151）。IssueDeckはAuto-mergeを有効にせず、CIの合格後に巡回が直接マージする
  */
 export function decideDevelopSyncAutoMerge(
   pr: DevelopSyncPullRequest,
@@ -156,8 +144,9 @@ export function decideDevelopSyncAutoMerge(
     }
   }
   if (pr.ciState === "pending") {
-    // 残りがCIだけなら、合格と同時にマージされるようGitHubのAuto-mergeへ任せる（#5146）
-    return pr.reviewDone === true ? { ok: false, reason: DEVELOP_SYNC_ARMED_REASON, waiting: true, armHeadSha: pr.headSha } : wait("CIの完了を待っています");
+    // GitHubのAuto-mergeへは任せない（#5151）。有効化後に付いた確認ラベルを即時に反映できず、
+    // 次の巡回までにCIが通るとラベルを無視してマージされるため。CIの合格後に巡回が直接マージする
+    return wait("CIの完了を待っています");
   }
   if (pr.ciState !== "success") return hold(pr.ciState === "failure" ? "CIが失敗しています" : "CIの状態を取得できません");
   if (pr.reviewSettled !== true) return wait("自動レビューの判定を待っています");
@@ -317,14 +306,6 @@ export function decideDevelopSync(observation: DevelopSyncObservation): DevelopS
     );
   }
   if (pr.ciState === "pending") {
-    if (autoMerge && !autoMerge.ok && autoMerge.armHeadSha) {
-      return unsynced(
-        "ci_pending",
-        "同期PRのCIを実行中です",
-        `${files}。${prLabel} のCIの完了を待っています。合格するとGitHubのオートマージがマージします${stale}`,
-        "操作は不要です",
-      );
-    }
     return unsynced("ci_pending", "同期PRのCIを実行中です", `${files}。${prLabel} のCIの完了を待っています${stale}`, `CIの完了後に ${prLabel} をマージしてください`);
   }
   const waitingFor = autoMerge && !autoMerge.ok ? `（${autoMerge.reason}）` : "";
@@ -332,7 +313,7 @@ export function decideDevelopSync(observation: DevelopSyncObservation): DevelopS
     "awaiting_merge",
     "同期PRの自動マージ待ちです",
     `${files}。${prLabel} は巡回が自動でマージします${waitingFor}${stale}`,
-    `操作は不要です。巡回（約5分ごと）が条件（CI成功・競合なし・自動レビュー完了）を確かめて ${prLabel} を自動でマージします（CIの実行中に条件が揃えば、GitHubのオートマージが合格と同時にマージします）`,
+    `操作は不要です。巡回（約5分ごと）が条件（CI成功・競合なし・自動レビュー完了）を確かめて ${prLabel} を自動でマージします`,
   );
 }
 

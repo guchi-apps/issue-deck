@@ -278,33 +278,20 @@ describe("同期PRの自動マージ（#4669）", () => {
       ...over,
     });
 
-    it("CIの実行中でレビューが終わっていれば、HEADを指定してオートマージを有効にする（巡回では直接マージしない）", async () => {
+    it("CIの実行中は、レビューが終わっていてもオートマージを有効にせず、巡回でも直接マージしない（#5151）", async () => {
       mocks.openPrs.mockResolvedValue([syncPr()]);
       mocks.ciState.mockResolvedValue({ ciState: "pending", mergeable: true, mergeJudgement: reviewDoneCiRunning });
       const status = await ensureDevelopSync(ctx, { autoMerge: true });
-      expect(mocks.enableAutoMerge).toHaveBeenCalledWith("PR_70", MAIN, "t");
+      expect(mocks.enableAutoMerge).not.toHaveBeenCalled();
       expect(mocks.merge).not.toHaveBeenCalled();
       expect(status.detail).toBe("ci_pending");
-      expect(developSyncAutoMergeOutlook("o/r", 70, MAIN)).toMatchObject({ status: "auto" });
     });
 
-    it("有効化済み・巡回以外（画面の観測）では有効にせず、失敗しても例外にしない", async () => {
+    it("以前の版が有効にしたオートマージがCIの実行中に残っていれば、確認ラベルが無くても解除する（#5151）", async () => {
       mocks.ciState.mockResolvedValue({ ciState: "pending", mergeable: true, mergeJudgement: reviewDoneCiRunning });
       mocks.openPrs.mockResolvedValue([syncPr({ auto_merge: { enabled_by: { login: "issue-deck[bot]", type: "Bot" } } })]);
       await ensureDevelopSync(ctx, { autoMerge: true });
-      mocks.openPrs.mockResolvedValue([syncPr()]);
-      await ensureDevelopSync(ctx);
-      expect(mocks.enableAutoMerge).not.toHaveBeenCalled();
-      mocks.enableAutoMerge.mockRejectedValueOnce(new Error("auto-merge is not allowed"));
-      expect(await ensureDevelopSync(ctx, { autoMerge: true })).toMatchObject({ state: "unsynced" });
-    });
-
-    it("レビューが終わっていない・判定ジョブが落ちているなら有効にしない", async () => {
-      mocks.openPrs.mockResolvedValue([syncPr()]);
-      mocks.ciState.mockResolvedValue({ ciState: "pending", mergeable: true, mergeJudgement: { ...reviewDoneCiRunning, aiReview: { state: "pending", runUrl: null } } });
-      await ensureDevelopSync(ctx, { autoMerge: true });
-      mocks.ciState.mockResolvedValue({ ciState: "pending", mergeable: true, mergeJudgement: { ...reviewDoneCiRunning, failedJobs: ["review-provider"] } });
-      await ensureDevelopSync(ctx, { autoMerge: true });
+      expect(mocks.disableAutoMerge).toHaveBeenCalledWith("PR_70", "t");
       expect(mocks.enableAutoMerge).not.toHaveBeenCalled();
     });
 
