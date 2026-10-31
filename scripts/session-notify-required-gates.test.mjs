@@ -168,6 +168,41 @@ describe("計画・デザイン提示の関門（#4944）", () => {
     expect(result.permissionDecisionReason).toContain("25.artifact-required");
   });
 
+  // Claude Code本体が組み込みの`Artifact`をMCPサーバー`claude-artifacts`のツールへ差し替えた
+  // セッションでも、公開を提示済みとして数える（#5144）
+  it("MCP経由（publish_files・publish_version）の公開も提示済みにする", async () => {
+    const viaFiles = writeTranscript("current.jsonl", [
+      toolUse("toolu_mcp", "mcp__claude-artifacts__publish_files", {
+        title: "案",
+        files: [
+          { as: "css/site.css", path: "/tmp/scratch/site.css" },
+          { as: "index.html", path: "/tmp/scratch/design.html" },
+        ],
+      }),
+      toolResult("toolu_mcp", [{ type: "text", text: '{"url":"https://claude.ai/artifact/XxWDfT8h7LawipKxDoz8nd"}' }]),
+      ...planApproved,
+    ]);
+    expect(denial(await runHook("Edit", { file_path: path.join(worktree, "a.ts") }, { transcript: viaFiles }))).toBeNull();
+
+    const viaContent = writeTranscript("current.jsonl", [
+      toolUse("toolu_mcp", "mcp__claude-artifacts__publish_version", { title: "案", content: "<!DOCTYPE html><p>x</p>" }),
+      toolResult("toolu_mcp", "Published https://claude.ai/code/artifact/0f8b2c4e-1a2b-4c3d-8e9f-0a1b2c3d4e5f"),
+    ]);
+    const stdout = await runHook("Edit", { file_path: path.join(worktree, "a.ts") }, { gates: "artifact", transcript: viaContent });
+    expect(denial(stdout)).toBeNull();
+  });
+
+  it("MCPの応答にURLが無い（is_errorを立てない失敗）ときは提示済みにしない", async () => {
+    const transcript = writeTranscript("current.jsonl", [
+      toolUse("toolu_mcp", "mcp__claude-artifacts__publish_version", { title: "案", content: "<!DOCTYPE html>" }),
+      toolResult("toolu_mcp", [{ type: "text", text: "conflict: base_version is not live" }]),
+      toolUse("toolu_mcp2", "mcp__claude-artifacts__publish_files", { files: [{ as: "css/a.css", path: "/tmp/a.css" }] }),
+      toolResult("toolu_mcp2", "https://claude.ai/artifact/XxWDfT8h7LawipKxDoz8nd"),
+    ]);
+    const stdout = await runHook("Edit", { file_path: path.join(worktree, "a.ts") }, { gates: "artifact", transcript });
+    expect(denial(stdout).permissionDecisionReason).toContain("25.artifact-required");
+  });
+
   it("計画だけ承認済みなら、アーティファクトの理由だけで拒否する", async () => {
     const transcript = writeTranscript("current.jsonl", planApproved);
     const result = denial(await runHook("Edit", { file_path: path.join(worktree, "a.ts") }, { transcript }));
