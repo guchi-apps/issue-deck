@@ -564,8 +564,12 @@ export type ReverificationFollowUp =
   | { action: "wait_rerun"; reason: string }
   /** 指摘0件の未確認範囲を、統合検証の結果で再評価できる（#5077）。系列は止めず、既存の再評価へつなぐ */
   | { action: "reevaluate_review" }
-  /** 本人の判断・操作が要る。理由は具体的に書く */
-  | { action: "human"; reason: string };
+  /**
+   * 本人の判断・操作が要る。理由は具体的に書く。
+   * `target: "candidate"`は、確認すべき対象が修正Issueではなくリリース候補であること（#5130）。
+   * 指摘0件の全体レビュー未確認だけが残った場合で、修正Issueに確認待ちを付けず、候補側へ理由と次の操作を示す
+   */
+  | { action: "human"; reason: string; target?: "candidate" };
 
 /**
  * 指摘0件の全体レビューが未確認範囲で止まったときの停止理由の書き出し（#5077）。この理由で止まった系列は、
@@ -624,15 +628,18 @@ export function decideReverificationFollowUp(input: {
   const unverified = input.aiReviewUnverified;
   if (unverified?.stage === "reevaluating") return { action: "reevaluate_review" };
   if (unverified) {
-    // 指摘は無く、再評価でも残った未確認範囲。範囲と必要な操作を示して人へ渡す（合格にはしない）
+    // 指摘は無く、再評価でも残った未確認範囲。範囲と必要な操作を示して人へ渡す（合格にはしない）。
+    // 確認する対象はリリース候補なので、修正Issueの確認待ちにはしない（#5130）
     return {
       action: "human",
-      reason: `${UNVERIFIED_REVIEW_STOP_PREFIX}（指摘は0件）${unverified.detail ? `：${unverified.detail}` : ""}。統合検証の結果でも解消しませんでした。範囲を確認し、問題なければ判断を記録し、直すものがあれば画面から修正Issueを起案してください`,
+      target: "candidate",
+      reason: `${UNVERIFIED_REVIEW_STOP_PREFIX}（指摘は0件）${unverified.detail ? `：${unverified.detail}` : ""}。統合検証の結果でも解消しませんでした。リリース候補の画面で範囲を確認し、問題なければ判断を記録し、直すものがあれば候補の画面から修正Issueを起案してください`,
     };
   }
   return {
     action: "human",
-    reason: "全体レビューが確認を求めていますが、起案できる指摘が読み取れません。レビュー結果を確認し、必要なら画面から修正Issueを起案してください",
+    target: "candidate",
+    reason: "全体レビューが確認を求めていますが、起案できる指摘が読み取れません。リリース候補の画面でレビュー結果を確認し、必要なら候補の画面から修正Issueを起案してください",
   };
 }
 
