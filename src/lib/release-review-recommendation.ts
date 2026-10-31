@@ -239,12 +239,17 @@ export function oneTapBlocker(rec: ReleaseReviewRecommendation): string | null {
   return `${label[invalid.field] ?? invalid.field}をAIが用意できませんでした。「別の判断を選ぶ」から入力して保存してください`;
 }
 
-export type ReasonSource = "ai" | "ai_edited" | "manual";
+/**
+ * 理由の出どころ。`fallback`は一括確定（#5138）で、AIの推奨を使えなかった止める指摘を安全側の「今回直す」として
+ * 確定したときの固定文（`RELEASE_REVIEW_BULK_FALLBACK_REASON`）。手入力とは区別して残す
+ */
+export type ReasonSource = "ai" | "ai_edited" | "manual" | "fallback";
 
 export const REASON_SOURCE_LABEL: Record<ReasonSource, string> = {
   ai: "AIの理由案のまま",
   ai_edited: "AIの理由案を編集",
   manual: "手入力",
+  fallback: "一括確定・推奨なしのため安全側",
 };
 
 /** 保存する理由の出どころ。推奨が無ければ手入力、理由案と同じならAI案のまま */
@@ -271,7 +276,7 @@ export function describeAdoption(record: {
 }
 
 export function parseReasonSource(value: unknown): ReasonSource | null {
-  return value === "ai" || value === "ai_edited" || value === "manual" ? value : null;
+  return value === "ai" || value === "ai_edited" || value === "manual" || value === "fallback" ? value : null;
 }
 
 /** DBの`drafts`列（JSON）を読む。形が違えばnull */

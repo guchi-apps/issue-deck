@@ -287,6 +287,9 @@ export async function startReleaseCompletionRun(params: {
         costLimitUsd: RELEASE_COMPLETION_COST_LIMIT_USD,
       },
     });
+    // 同じ候補で前の系列が止まって付けた確認待ちを外す（#5138）。押し直した時点で人の確認は済んでいて、
+    // 外さないと動いている間もブランチ一覧の修正PRに「ユーザー確認待ち」が出続ける
+    await clearStopLabels(created, { owner: params.owner, repo: params.repo, token: params.token });
     return { ok: true, run: await toReleaseCompletionRunView(created), created: true };
   } catch (error) {
     if (!isUniqueConstraintError(error)) throw error;
@@ -558,10 +561,12 @@ async function applyDecision(
       const status = decision.status;
       const note = decision.note === undefined ? run.note : decision.note;
       if ((status && status !== run.status) || note !== run.note) {
-        await db.releaseCompletionRun.updateMany({
+        const updated = await db.releaseCompletionRun.updateMany({
           where: { id: run.id, status: run.status },
           data: { ...(status ? { status } : {}), note },
         });
+        // 公開承認待ちへ進んだら、人の番は修正Issueではなく候補の公開承認になる。止まったときの確認待ちを残さない（#5138）
+        if (updated.count === 1 && status === "awaiting_approval" && run.status !== "awaiting_approval") await clearStopLabels(run, ctx);
         return status && status !== run.status ? { action: `transition:${status}` } : null;
       }
       return null;
@@ -951,9 +956,9 @@ async function handOff(run: RunRow, ctx: Ctx, reason: ReleaseCompletionStopReaso
 }
 
 /**
- * 完了したとき、この候補の系列が過去に止めて付けた確認待ちラベルを修正Issueから外す。人が再開した時点で
- * 確認待ちは解消しているため。外すのは、同じ候補で系列が止まった記録（stopReason）があるときだけ
- * （止まらず完了した場合や、人が別の理由で付けた札には触れない）。
+ * この候補の系列が過去に止めて付けた確認待ちラベルを修正Issueから外す。人が再開した時点で確認待ちは解消しているため。
+ * 呼ぶのは完了・本番復旧の完了のほか、系列の開始（押し直し）と公開承認待ちへの遷移（#5138）。外すのは、同じ候補で
+ * 系列が止まった記録（stopReason）があるときだけ（止まらず進んだ場合や、人が別の理由で付けた札には触れない）。
  */
 async function clearStopLabels(run: RunRow, ctx: Ctx): Promise<void> {
   try {

@@ -2,26 +2,12 @@ import { NextResponse, type NextRequest } from "next/server";
 
 import { requireUserId } from "@/lib/auth-user";
 import { db } from "@/lib/db";
-import { fetchPullRequest } from "@/lib/github/actions-api";
 import { withGithubApiFeature } from "@/lib/github/api-usage";
 import { getInstallationToken } from "@/lib/github/app-auth";
-import { createComment, createIssue, fetchIssueStateOrThrow } from "@/lib/github/issues-api";
 import { githubApiErrorMessage } from "@/lib/github/network-error";
 import { previewModeGuard } from "@/lib/preview-mode";
-import { isReleasePullRequest } from "@/lib/release-merge-gate";
-import {
-  parseReleaseReviewDecisionAction,
-  RELEASE_REVIEW_DECISION_LABEL,
-  validateDecisionInput,
-} from "@/lib/release-review-decision";
-import {
-  releaseDecisionScopeKey,
-  resolveReleaseDecisionChain,
-  saveReleaseReviewDecision,
-} from "@/lib/release-review-decision-store";
-import { classifyReasonSource } from "@/lib/release-review-recommendation";
-import { findUsableRecommendation } from "@/lib/release-review-recommendation-store";
-import { loadReleaseVerificationSummary } from "@/lib/release-verification-load";
+import { parseReleaseReviewDecisionAction, validateDecisionInput } from "@/lib/release-review-decision";
+import { applyReleaseReviewDecision, countActiveReviewFixSeries, loadDecisionContext } from "@/lib/release-review-decision-apply";
 
 /**
  * 全体レビューの指摘1件に、ユーザーの判断（今回直す／公開後に対応する／今回は見送る／採用しない／撤回）を
@@ -106,121 +92,15 @@ async function handlePOST(request: NextRequest) {
 
   try {
     const token = await getInstallationToken(repository.installation.installationId);
-    const pr = await fetchPullRequest(owner, repo, pullRequestNumber, token);
-    if (!pr.base || !pr.head.ref || !isReleasePullRequest({ baseRef: pr.base.ref, headRef: pr.head.ref })) {
-      return NextResponse.json({ error: "not_release_pull_request" }, { status: 404 });
-    }
-    if ((pr as { state?: string }).state === "closed" || pr.base.sha !== expectedBase || pr.head.sha !== expectedHead) {
-      return NextResponse.json({ error: "release_pr_changed", message: "リリース候補が更新されました。画面を更新してから判断してください" }, { status: 409 });
-    }
-    const current = { baseSha: pr.base.sha, headSha: pr.head.sha };
-    const summary = await loadReleaseVerificationSummary(repoFullName, pullRequestNumber, current);
-    const section = summary.aiReview;
-    const blockingFinding = section.findings.find((f) => f.id === findingId);
-    const finding = blockingFinding ?? section.suggestions.find((f) => f.id === findingId);
-    if (!finding || (section.state !== "needs_check" && section.state !== "passed")) {
-      return NextResponse.json(
-        { error: "finding_not_current", message: "この指摘は今の全体レビューの結果にありません。画面を更新してください" },
-        { status: 409 },
-      );
-    }
-
-    // 競合を先に確かめる。公開後対応のIssueを作ってから競合で保存できない、という順を避ける
-    const view = section.decisions?.byFinding[findingId];
-    const latest = view?.history.at(-1) ?? null;
-    if ((latest?.id ?? null) !== expectedDecisionId) {
-      return NextResponse.json(
-        { error: "decision_conflict", message: "ほかの操作でこの指摘の判断が更新されました。最新の判断を確認してから保存してください", latest },
-        { status: 409 },
-      );
-    }
-    const chain = await resolveReleaseDecisionChain(repoFullName, pullRequestNumber);
-    const scopeKey = releaseDecisionScopeKey(repoFullName, chain);
-    // 判断の根拠にした推奨。今の対象・同じ指摘のものでなければ、古い推奨で保存しない（Issueを作る前に確かめる）
-    const recommendation = recommendationId
-      ? await findUsableRecommendation(recommendationId, { scopeKey, findingId, ...current })
-      : null;
-    if (recommendationId && !recommendation) {
-      return NextResponse.json(
-        { error: "recommendation_stale", message: "AIの推奨が今の対象のものではありません。画面を更新して推奨を確認し直してください" },
-        { status: 409 },
-      );
-    }
-
-    // 公開後対応の関連Issue。既存の番号は存在を確かめ、新規作成はユーザーが明示したときだけ
-    let followUp: { repo: string; number: number } | null = null;
-    if (input.followUp?.kind === "existing") {
-      const state = await fetchIssueStateOrThrow(owner, repo, input.followUp.number, token);
-      if (!state) return NextResponse.json({ error: "invalid_decision", field: "followUp", message: `#${input.followUp.number} が見つかりません` }, { status: 400 });
-      followUp = { repo: repoFullName, number: input.followUp.number };
-    } else if (input.followUp?.kind === "create") {
-      const created = await createIssue(owner, repo, token, {
-        title: input.followUp.title,
-        body: [
-          "## 目的",
-          `リリース候補 #${pullRequestNumber} の全体レビューの指摘 ${findingId}「${finding.title}」を、本番公開後の作業として対応する。`,
-          "",
-          "## 背景",
-          `全体レビューの指摘に対して、ユーザーが「公開後に対応する」と判断した（実施時期: ${input.timing}）。`,
-          "",
-          `判断の理由: ${input.reason}`,
-          "",
-          "## 関連",
-          `- リリース候補: #${pullRequestNumber}`,
-        ].join("\n"),
-      });
-      followUp = { repo: repoFullName, number: created.number };
-    }
-
-    const saved = await saveReleaseReviewDecision({
-      scopeKey,
-      repoFullName,
-      findingId,
-      aliasIds: view?.aliasIds ?? [],
-      expectedDecisionId,
-      decision,
-      reason: input.reason,
-      impact: decision === "defer" ? input.impact : null,
-      scope: decision === "defer" ? input.scope : null,
-      followUp,
-      timing: decision === "post_release" ? input.timing : null,
-      prNumber: pullRequestNumber,
-      headRef: pr.head.ref,
-      baseSha: current.baseSha,
-      headSha: current.headSha,
-      severity: finding.severity,
-      blocking: Boolean(blockingFinding),
-      findingTitle: finding.title,
-      userId,
-      recommendation: recommendation
-        ? { id: recommendation.id, decision: recommendation.recommended, reason: recommendation.drafts[recommendation.recommended].reason }
-        : null,
-      reasonSource: classifyReasonSource(recommendation, decision, input.reason),
-    });
-    if (!saved.ok) {
-      return NextResponse.json(
-        { error: saved.error, message: "ほかの操作でこの指摘の判断が更新されました。最新の判断を確認してから保存してください", latest: saved.latest },
-        { status: 409 },
-      );
-    }
-    // 既存のIssueへ関連付けたときは、どの指摘を受け持つのかを残す（失敗しても判断は保存済み）
-    if (input.followUp?.kind === "existing" && followUp) {
-      await createComment(owner, repo, followUp.number, token, {
-        body: `リリース候補 #${pullRequestNumber} の全体レビューの指摘 ${findingId}「${finding.title}」を、このIssueで公開後に対応すると判断しました（${RELEASE_REVIEW_DECISION_LABEL[decision]}・実施時期: ${input.timing}）。\n\n判断の理由: ${input.reason}\n\n<!-- issue-deck:release-review-decision -->`,
-      }).catch((error: unknown) => console.error("[review-decisions] follow-up comment failed", error));
-    }
-    const activeSeries = await db.releaseFixSeries.count({
-      where: {
-        repositoryFullName: repoFullName,
-        releasePrNumber: { in: chain },
-        sourceKind: "review_finding",
-        status: { in: ["issue_created", "fix_in_progress", "fix_merged", "awaiting_decision", "rebuilding", "reverifying"] },
-      },
-    });
+    const loaded = await loadDecisionContext({ owner, repo, token, pullRequestNumber, expectedBase, expectedHead, userId });
+    if (!loaded.ok) return NextResponse.json(loaded.body, { status: loaded.status });
+    const applied = await applyReleaseReviewDecision(loaded.ctx, { ...input, findingId, expectedDecisionId, recommendationId });
+    if (!applied.ok) return NextResponse.json(applied.body, { status: applied.status });
+    const activeSeries = await countActiveReviewFixSeries(loaded.ctx);
     return NextResponse.json(
       {
         ok: true,
-        decision: saved.record,
+        decision: applied.record,
         // 稼働中の修正系列がある場合、実行中のセッション・取り込み済みの修正PRは止まらない。今後の追加修正・候補更新だけが判断に従う
         activeFixSeries: activeSeries,
       },

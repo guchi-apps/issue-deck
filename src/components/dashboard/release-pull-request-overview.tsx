@@ -18,6 +18,7 @@ import {
   useReleaseFixOverview,
 } from "@/components/dashboard/release-fix-panel";
 import { ReleaseReviewSections } from "@/components/dashboard/release-review-sections";
+import { ReleaseAutoProceedPanel, shouldShowAutoProceed } from "@/components/dashboard/release-auto-proceed-panel";
 import { useNow } from "@/hooks/use-now";
 import { useReferenceNavigation } from "@/hooks/use-reference-navigation";
 import { useReleaseCandidates } from "@/hooks/use-release-candidates";
@@ -206,6 +207,9 @@ export function ReleasePullRequestOverview({
       <ReleasePublishAction pullRequest={pullRequest} decision={publishDecision} onMerged={onMerged} variant="outline" label="承認せずに本番公開へ進む" />
     ) : null;
   const reload = () => setReloadToken((n) => n + 1);
+  // 未判断の止める指摘があれば、判定表と「おまかせで公開承認まで進める」を次の操作にする（#5138。新方式の候補だけ）
+  const autoProceed =
+    rcCandidate !== null && !state.previousResults && verification !== null && shouldShowAutoProceed(verification, state.completionRun?.active ?? false);
 
   return (
     <div className="-mx-4 flex flex-col gap-3 border-b px-4 py-4 text-xs" data-testid="release-pull-request-overview">
@@ -249,10 +253,21 @@ export function ReleasePullRequestOverview({
             />
           </div>
         )}
+        {autoProceed && verification && (
+          <ReleaseAutoProceedPanel
+            repositoryFullName={repositoryFullName}
+            pullRequestNumber={number}
+            verification={verification}
+            onRunStarted={state.setCompletionRun}
+            onReload={reload}
+            manualHref="#release-candidate-verification"
+          />
+        )}
         <ReleaseFixSummary
           state={state}
           showPhases
-          completionAsSecondary={journey !== null && !(journey.headline?.key === "verify" && journey.owner === "user")}
+          primaryAsSecondary={autoProceed}
+          completionAsSecondary={autoProceed || (journey !== null && !(journey.headline?.key === "verify" && journey.owner === "user"))}
           extraAction={
             journey ? null : (
               <div className="pt-1">
@@ -274,7 +289,7 @@ export function ReleasePullRequestOverview({
         <ReleaseDevelopSyncNotice repositoryFullName={repositoryFullName} sync={rc.overview.developSync} onChanged={rc.reload} />
       )}
 
-      <section aria-label="現在候補の検証" className="flex flex-col gap-2 rounded-[10px] border bg-card p-3.5">
+      <section id="release-candidate-verification" aria-label="現在候補の検証" className="flex scroll-mt-4 flex-col gap-2 rounded-[10px] border bg-card p-3.5">
         <h3 className="text-sm font-semibold">現在候補の検証</h3>
         {state.previousResults ? (
           // 修正後の候補が未作成・取得中の間は、旧候補の成功や指摘を現在値として代用しない（#4428）

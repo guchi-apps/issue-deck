@@ -1,7 +1,7 @@
 import type { RepairKind } from "@/lib/github/pull-request-repair";
 import { repairKindsFor } from "@/lib/github/pull-request-repair";
 import { resolveReviewVerdictFreshness } from "@/lib/github/review-verdict-freshness";
-import { deriveAutoMergeOutlook } from "@/lib/pull-request-auto-merge-outlook";
+import { deriveAutoMergeOutlook, releaseAutoFixReason } from "@/lib/pull-request-auto-merge-outlook";
 import { deriveMergeHold } from "@/lib/pull-request-merge-hold";
 import {
   CI_STATE_LABEL,
@@ -195,6 +195,10 @@ export function derivePrimaryState(pullRequest: PullRequestSummary): PrimaryStat
     return requiredCheckState(unmet);
   }
   const hold = deriveMergeHold(pullRequest);
+  // 「修正を自動で続ける」の修正PR（#5138）。系列が止まったときの確認待ちが残っていても、動いている間は人の番に見せない
+  if (pullRequest.releaseAutoFix && hold.status === "held" && hold.reasons.every((reason) => reason.kind === "check-user")) {
+    return state("mergeable", "自動修正中", "ok", releaseAutoFixReason(pullRequest.releaseAutoFix.candidatePrNumber));
+  }
   if (hold.status === "held") {
     return state("merge-held", "マージ前の確認", "warn", hold.reasons.map((reason) => reason.text).join(" / "), {
       needsAction: requiresUserMerge(pullRequest),
