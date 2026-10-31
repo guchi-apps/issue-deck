@@ -116,7 +116,9 @@ describe("アーティファクトの原本の取り込み（#2154・#5144）", 
     expect(artifactLine(stdout)).toBeNull();
   });
 
-  it("publish_versionは本文をそのまま送り、sourcePathには合成値を入れる", async () => {
+  // `sourcePath`は受け側で上書き先を決めるので、別々のアーティファクトが1枚に潰れないよう
+  // 公開先のIDを含める（応答のURL→`slug`の順）
+  it("publish_versionは本文をそのまま送り、sourcePathには公開先のIDを含む合成値を入れる", async () => {
     const line = artifactLine(
       await runHook(
         "mcp__claude-artifacts__publish_version",
@@ -124,8 +126,17 @@ describe("アーティファクトの原本の取り込み（#2154・#5144）", 
         `Published https://claude.ai/artifact/${URL_ID}`,
       ),
     );
-    expect(line).toContain('"sourcePath": "mcp:publish_version"');
+    expect(line).toContain(`"sourcePath": "mcp:publish_version:${URL_ID}"`);
     expect(line).toContain('"title": "画面案"');
+
+    const bySlug = artifactLine(
+      await runHook(
+        "mcp__claude-artifacts__publish_version",
+        { slug: "slug-1", base_version: "v", content: "<!DOCTYPE html><p>本文</p>" },
+        "published",
+      ),
+    );
+    expect(bySlug).toContain('"sourcePath": "mcp:publish_version:slug-1"');
   });
 
   it("公開以外のclaude-artifactsのツールは送らない", async () => {

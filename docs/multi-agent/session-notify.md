@@ -1026,7 +1026,7 @@ Remote Controlの接続とclaude.aiコネクタ（Claude Docs・Notion・Slack�
 | --- | --- | --- |
 | `Artifact` | `file_path`の`.html` | `file_path` |
 | `mcp__claude-artifacts__publish_files` | `files`のうち`as`が`index.html`のエントリの`path`（付属ファイルは見ない。index.htmlを含まない更新は取り込まない） | その`path` |
-| `mcp__claude-artifacts__publish_version` | 引数の`content`（ファイルが無い） | 合成値`mcp:publish_version`（見出しは`<title>`→`title`引数で先に決まる） |
+| `mcp__claude-artifacts__publish_version` | 引数の`content`（ファイルが無い） | 合成値`mcp:publish_version:<公開先のID>`（IDは応答のURL→`slug`の順。固定値だと再公開の上書き判定で別々のアーティファクトが1枚に潰れる。見出しは`<title>`→`title`引数で先に決まる） |
 
 - `Artifact`しか見ていなかったあいだ、差し替わったセッションでは(1)カードが出ない、
   (2)`25.artifact-required`の関門（#4944）が公開済みでも実装を止める、(3)一覧に「アーティファクト

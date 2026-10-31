@@ -575,7 +575,7 @@ elif tool_name == "mcp__claude-artifacts__publish_version":
     if len(content.encode("utf-8")) > LIMIT:
         sys.exit(0)
     html = content
-    source_path = "mcp:publish_version"
+    source_path = "mcp:publish_version"  # 公開先のIDは応答を読んだあとで足す
 else:
     sys.exit(0)
 
@@ -622,6 +622,14 @@ found = re.search(
 
 def text(value):
     return value.strip() if isinstance(value, str) and value.strip() else None
+
+
+# `sourcePath`は受け側で再公開の同一判定（上書き先）に使う。固定値だと同じIssueで別々に
+# 公開したアーティファクトが1枚に潰れるので、公開先のID（応答のURL→`slug`の順）を足す
+if source_path == "mcp:publish_version":
+    key = found.group(0).rsplit("/", 1)[-1] if found else text(tool_input.get("slug"))
+    if key:
+        source_path = "mcp:publish_version:" + key
 
 
 sys.stdout.write(
