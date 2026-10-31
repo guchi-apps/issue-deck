@@ -1047,6 +1047,38 @@ Issueを除外するため、以後どのリリースの一括遷移にも二度
 `main-pr-merged`が対象0件で成功して終わる構造そのものは残るので、この巡回は最後の受け皿として
 扱う。
 
+### リリース候補（`release-rc/<番号>`）経由のリリースは巡回が`Done`へ進める（#5133）
+
+新方式のリリース候補（#4495）は、headが`release-rc/<番号>`のPRとしてmainへマージされる。
+`reusable-issue-labels.yml`の`main-pr-merged`・`main-pr-in-progress`は、headが`develop`か
+`release-main/v*`のPRにしか発火しない。候補PRの本文にも`## 対象issue`は無い。**候補経由で
+mainへ出たIssueを`Done`へ進めてcloseしているのは、上の2つの巡回だけ**。
+2026-10-19の`release-rc/15`で出たissue-deck#4852も、巡回の
+`open_closed`で閉じられている。
+
+候補に固定されたPR（`frozenPrs`）は、developのマージコミットがそのままmainの祖先になる。
+そのため従来の祖先判定で拾える。拾えなかったのは**候補へ後から取り込んだ修正PR**
+（リリース候補の修正Issue。#4317）。修正PRはdevelopへマージされたあと、候補ブランチへ
+`cherry-pick -m 1`の別コミット（件名は`Merge pull request #N …`のまま、親は1つ）として当たる。
+中身が同じでも、develop側のheadはmainの祖先にならない。2026-10-31時点で
+work-relay#322・asset-manager#799・aide#732がこの形で`Develop`に残っていた。
+
+- **`aheadBy !== 0`のときだけ、候補の取り込み記録を見る。** `ReleaseCandidateRevision`の
+  適用済み（`applied`）の行から、`importedPrs`にそのPR番号を持つものを探す
+  （`importingRevisionHeads`）。見つかったrevisionの`headSha`が`main`の祖先なら本番反映とみなす
+  （`isImportedIntoCandidateInMain`）。公開準備のバンプはrevisionのheadに積むため、候補が
+  マージされていれば祖先になる。中止した候補のrevisionは祖先にならない
+- **内容の同一性（blobの一致・patch-id）では判定しない。** 修正ブランチはdevelopから切るので、
+  三点比較にはdevelopにしかない別PRの変更も混ざる（asset-manager#798がその例）。取り込み記録の
+  ほうが確実で、GitHubへの問い合わせも記録が見つかったときの`compare`だけで済む
+- 対象は`Develop`・`Release`のopen／closed両方の経路（`decideMergedOpenIssue`・
+  `decideClosedStrandedIssue`の`importedCandidateInMain`）
+
+**同じIssueの最新PRが判定の単位なのは変わらない。** issue-deck#4525は`release-rc/15`で途中PRが
+すべてmainへ入っていた。それでも10-31に新しい途中PR（#5132）がdevelopへ入っており、最新PRで見ると
+「developにしか無い」が正しい。それまでの期間はローカルセッションが残っていたため、
+`open_session_alive`で見送られていたとみられる。
+
 ## 参考リンク
 
 - GitHub Docs: [Using the API to manage Projects](https://docs.github.com/en/issues/planning-and-tracking-with-projects/automating-your-project/using-the-api-to-manage-projects)

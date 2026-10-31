@@ -49,6 +49,9 @@ describe("session_step_classify（ツール名から）", () => {
     ["Grep", "EXPLORING"],
     ["WebFetch", "EXPLORING"],
     ["Artifact", "ARTIFACT"],
+    // Claude Code本体が`Artifact`をMCPへ差し替えたセッション（#5144）
+    ["mcp__claude-artifacts__publish_files", "ARTIFACT"],
+    ["mcp__claude-artifacts__publish_version", "ARTIFACT"],
   ])("%s → %s", (tool, expected) => {
     expect(classify(tool)).toBe(expected);
   });
@@ -58,6 +61,8 @@ describe("session_step_classify（ツール名から）", () => {
   it("知らないツールでは何も返さない", () => {
     expect(classify("AskUserQuestion")).toBe("NONE");
     expect(classify("mcp__something__do")).toBe("NONE");
+    // 公開以外のclaude-artifactsのツール（読み取り・一覧）は公開中にしない
+    expect(classify("mcp__claude-artifacts__read_artifact")).toBe("NONE");
   });
 });
 

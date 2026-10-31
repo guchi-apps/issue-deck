@@ -1,5 +1,5 @@
 import { db } from "@/lib/db";
-import { mergePullRequest } from "@/lib/github/actions-api";
+import { disablePullRequestAutoMerge, mergePullRequest } from "@/lib/github/actions-api";
 import { getInstallationToken } from "@/lib/github/app-auth";
 import { compareBranches } from "@/lib/github/branches-api";
 import {
@@ -63,6 +63,9 @@ async function findOpenSyncPullRequest(ctx: Context): Promise<DevelopSyncPullReq
     labels: ((pr as { labels?: { name?: string }[] }).labels ?? []).map((l) => l.name ?? ""),
     // 判定が出揃い（settled）、Claudeのレビューが実行済み・または不要（skipped）のときだけ
     reviewSettled: judgement?.state === "settled" && (judgement.aiReview.state === "passed" || judgement.aiReview.state === "skipped"),
+    nodeId: pr.node_id,
+    autoMergeEnabled: pr.auto_merge != null,
+    autoMergeEnabledByBot: pr.auto_merge?.enabled_by?.type === "Bot",
     number: pr.number,
     url: pr.html_url,
     headRef: pr.head.ref,
@@ -233,6 +236,24 @@ async function autoMergeSyncPullRequest(ctx: Context, pr: DevelopSyncPullRequest
 }
 
 /**
+ * IssueDeck（GitHub App）が有効にしたGitHubのAuto-mergeを解除する（#5151）。**例外を投げない**。
+ * #5146ではCIの実行中にAuto-mergeを有効にしていたが、有効化後に付いた確認ラベル（`00.check-user`・
+ * `22.merge-confirm-required`）をWebhookで受けて即時に解除する経路が無く、次の巡回までにCIが通るとラベルを
+ * 無視してマージされるため、今は有効にしない。**既に有効になっているものを巡回が見つけたら、`ok`でない限り解除する**
+ * （`ok`のときは巡回が直接マージする）。人が自分で有効にしたものは人の判断として残す
+ */
+async function syncGithubAutoMerge(ctx: Context, pr: DevelopSyncPullRequest, decision: DevelopSyncAutoMergeDecision): Promise<void> {
+  if (decision.ok || !pr.nodeId) return;
+  if (!pr.autoMergeEnabled || !pr.autoMergeEnabledByBot) return;
+  try {
+    await disablePullRequestAutoMerge(pr.nodeId, ctx.token);
+    console.info("[release-develop-sync] 同期PRのオートマージを解除しました", fullNameOf(ctx), pr.number, decision.reason);
+  } catch (error) {
+    console.error("[release-develop-sync] 同期PRのオートマージを解除できませんでした", fullNameOf(ctx), pr.number, error);
+  }
+}
+
+/**
  * 同期を確かめ、未同期で同期PRが無ければ作る。**例外を投げない**（呼び出し元の公開処理・巡回を止めない）。
  * 同じmainへの同期PRはブランチ名が同じなので、巡回が重なっても1本にしかならない
  */
@@ -244,10 +265,13 @@ export async function ensureDevelopSync(ctx: Context, options: { autoMerge?: boo
     rememberAutoMergeDecision(fullName, status);
     if (observation.kind !== "observed" || status.state !== "unsynced") return status;
     if (observation.openPullRequest !== null) {
-      if (options.autoMerge && status.autoMerge && (await autoMergeSyncPullRequest(ctx, observation.openPullRequest, status.autoMerge))) {
-        const merged = decideDevelopSync(await observeDevelopSync(ctx));
-        rememberAutoMergeDecision(fullName, merged);
-        return merged;
+      if (options.autoMerge && status.autoMerge) {
+        if (await autoMergeSyncPullRequest(ctx, observation.openPullRequest, status.autoMerge)) {
+          const merged = decideDevelopSync(await observeDevelopSync(ctx));
+          rememberAutoMergeDecision(fullName, merged);
+          return merged;
+        }
+        await syncGithubAutoMerge(ctx, observation.openPullRequest, status.autoMerge);
       }
       return status;
     }

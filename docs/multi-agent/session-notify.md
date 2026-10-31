@@ -603,7 +603,7 @@ poller の巡回（trapを通らなかった場合）  → POST /api/dispatch/se
 | `PreToolUse` | `tool_name` が `AskUserQuestion` | 質問（#2189） | 質問を送り、画面の回答を待つ |
 | `PermissionRequest` | — | 承認ダイアログを出す直前（#2971） | **送らない**（何の許可かをホスト側の`.permission`へ控える。後述） |
 | `PostToolUse` | 状態ファイルの最後のイベントが `permission_prompt`、かつ許可を求めたツールそのもの（#2971） | 人が答えて作業へ戻った（#1357） | 様子（`working`）＋`00.check-user`を解く |
-| `PostToolUse` | `tool_name` が `Artifact`（公開のとき） | アーティファクトを公開した（#2154） | HTMLの原本を送る（後述） |
+| `PostToolUse` | `tool_name` が `Artifact`・`mcp__claude-artifacts__publish_files`・`publish_version`（公開のとき。#5144） | アーティファクトを公開した（#2154） | HTMLの原本を送る（後述） |
 | `PreToolUse` / `PostToolUse` | すべて | いま何をしているか（#2705） | **送らない**（ホスト側の`.step`へ書き、pollerが運ぶ。後述） |
 | `SessionStart` | — | Claude Codeが開始した（#1465） | **送らない**（ホスト側の印を消すだけ。後述。Codexではここで`codex queue`の宛先を残し、スレッドに`<リポジトリ名> #<Issue番号>`の名前を付ける。#2519・#2540） |
 | （フックではない） | pollerが合成する `SessionInterrupted` | APIエラーで中断（#1971）／ツール呼び出しが実行されないまま停滞（#2655） | Issueコメント＋`00.check-user`＋`01.check-blocked`（#2280。後述） |
@@ -925,7 +925,7 @@ guchi-apps/yoteiflow#1321では両ラベルが起動前から付いていたの�
   コミットの時点で止まる）
 
 提示済みの判定は**同じworktreeの転記すべて**から、`ExitPlanMode`の成功結果（または
-`plan_mode_exit`）と、HTMLを公開した`Artifact`の成功結果を探す。再開・引き継ぎで転記が新しくなっても、
+`plan_mode_exit`）と、HTMLを公開した`Artifact`（またはMCPの`claude-artifacts`。#5144）の成功結果を探す。再開・引き継ぎで転記が新しくなっても、
 端末・Remote Controlで承認した計画が効く（どちらもIssueには記録が残らない）。拒否する直前に限り
 Issueのラベルを引き直し、外れていれば通す——判定が外れたときに人が解く手段はラベルを外すこと。
 
@@ -1005,11 +1005,37 @@ Issueのラベルを引き直し、外れていれば通す——判定が外れ
     **判定の正は`src/lib/artifact-document.ts`の`ARTIFACT_URL_PATTERN`**で、フック側の
     正規表現はそれと同じ形を拾う。変えるときは両方そろえる
 - **同じファイルパスへの再公開は上書き**（claude.aiでも同じURLになる）。履歴は持たない
+- **MCPサーバー`claude-artifacts`経由の公開も同じく取り込む**（#5144。次節）
 - 出るのは**近似**。claude.aiが公開時に足しているmermaidの描画とランタイム機能
   （`window.claude.*`）は再現しない。その断りは画面（プレビューの下辺）に出している
 - 中身はエージェントが書いた任意のHTML・JSなので、**配信時のCSPと画面のiframeの両方で
   `sandbox`し、`allow-same-origin`は付けない**（付けるとissue-deckのCookie・localStorageへ
   手が届く）
+
+### 公開ツールは途中でMCP（`claude-artifacts`）に差し替わることがある（#5144）
+
+**組み込みの`Artifact`が、セッションの途中でMCPサーバー`claude-artifacts`のツールに置き換わる
+ことがある。** issue-deckの設定ではなくClaude Code本体の挙動で、リポジトリ・`~/.claude/settings.json`・
+`.mcp.json`のどこにも`claude-artifacts`は無い。2.1.316の転記では、起動時は`Artifact`があり、
+Remote Controlの接続とclaude.aiコネクタ（Claude Docs・Notion・Slackなど）の読み込みと同時に
+「Replaced in this session by the tools of the MCP server 'claude-artifacts'」という通知が出て
+`Artifact`が消えた（転記で見え始めたのは2026-10-30から）。差し替えの条件は公開文書に無く、
+組み込みへ戻す設定も見つかっていないので、**両方の形を受ける。**
+
+| ツール | 原本の取り方 | `sourcePath` |
+| --- | --- | --- |
+| `Artifact` | `file_path`の`.html` | `file_path` |
+| `mcp__claude-artifacts__publish_files` | `files`のうち`as`が`index.html`のエントリの`path`（付属ファイルは見ない。index.htmlを含まない更新は取り込まない） | その`path` |
+| `mcp__claude-artifacts__publish_version` | 引数の`content`（ファイルが無い） | 合成値`mcp:publish_version:<公開先のID>`（IDは応答のURL→`slug`の順。固定値だと再公開の上書き判定で別々のアーティファクトが1枚に潰れる。見出しは`<title>`→`title`引数で先に決まる） |
+
+- `Artifact`しか見ていなかったあいだ、差し替わったセッションでは(1)カードが出ない、
+  (2)`25.artifact-required`の関門（#4944）が公開済みでも実装を止める、(3)一覧に「アーティファクト
+  公開中」が出ない、の3つが黙って起きていた
+- **関門の判定では、MCP経由に限り応答にclaude.aiのアーティファクトURLがあることも条件にする。**
+  MCPの失敗は`is_error`を立てずに本文だけで返ることがあり、`is_error`だけでは失敗を公開済みと数える
+- `mcp__claude-artifacts__*`のうち公開以外（`read_artifact`・`list_artifacts`など）は拾わない
+- 境界は`scripts/session-notify-artifact.test.mjs`・`scripts/session-notify-required-gates.test.mjs`・
+  `scripts/session-step.test.mjs`が固定している
 
 ### 計画の承認前は、計画ファイル経由で差し替える（#2200）
 

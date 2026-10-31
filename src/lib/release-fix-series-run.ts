@@ -456,18 +456,31 @@ async function repositoryToken(repositoryFullName: string): Promise<{ token: str
   return { token: await getInstallationToken(repository.installation.installationId), owner, repo };
 }
 
+/**
+ * 停止の知らせ方。`true`は修正Issueへ理由を残して確認待ちの札を付ける（利用者の手が要る）。
+ * `false`は理由だけ修正Issueへ残す（判断が済んでいて、続きの操作が要らない）。
+ * `"candidate"`は、確認すべき対象が修正Issueではなくリリース候補である停止（#5130。指摘0件の全体レビュー未確認）。
+ * 理由は候補のPRへ残し、修正Issueには札を付けない
+ */
+type StopAudience = boolean | "candidate";
+
 async function notifyStop(
   ctx: { owner: string; repo: string; token: string },
   rows: ReleaseFixSeries[],
   status: ReleaseFixStatus,
   reason: string,
-  needsUser: boolean,
+  audience: StopAudience,
 ): Promise<void> {
   for (const row of rows) {
-    // 利用者の手が要る止まり方だけ、Issueへ理由を残して札を付ける（Push通知が鳴る）
-    const body = `リリース候補 #${row.releasePrNumber} の修正系列が「${RELEASE_FIX_STATUS_LABEL[status]}」になりました。\n\n${reason}\n\n${STOP_COMMENT_MARKER}`;
-    await createComment(ctx.owner, ctx.repo, row.issueNumber, ctx.token, { body }).catch(() => undefined);
-    if (status !== "superseded" && needsUser) {
+    const onCandidate = audience === "candidate";
+    const target = onCandidate ? (row.successorPrNumber ?? row.releasePrNumber) : row.issueNumber;
+    const lead = onCandidate
+      ? `修正Issue #${row.issueNumber} の修正系列が、このリリース候補の確認待ちで「${RELEASE_FIX_STATUS_LABEL[status]}」になりました。修正Issue側での対応は不要です。`
+      : `リリース候補 #${row.releasePrNumber} の修正系列が「${RELEASE_FIX_STATUS_LABEL[status]}」になりました。`;
+    const body = `${lead}\n\n${reason}\n\n${STOP_COMMENT_MARKER}`;
+    await createComment(ctx.owner, ctx.repo, target, ctx.token, { body }).catch(() => undefined);
+    // 利用者の手が要る止まり方だけ、修正Issueへ札を付ける（Push通知が鳴る）
+    if (status !== "superseded" && audience === true) {
       await addIssueLabels(ctx.owner, ctx.repo, row.issueNumber, ctx.token, CHECK_USER_LABELS).catch(() => undefined);
     }
   }
@@ -485,8 +498,8 @@ async function stopRows(
   ids: string[],
   status: "stopped" | "superseded" | "awaiting_decision",
   reason: string,
-  // false: 理由はIssueへ残すが、確認待ちラベルは付けない（利用者の判断が済んでいて、続きの操作が要らない停止）
-  needsUser = true,
+  // 知らせ方（`StopAudience`）。false・"candidate"は修正Issueへ確認待ちラベルを付けない
+  audience: StopAudience = true,
 ): Promise<number> {
   // すでに同じ状態・理由なら何もしない（巡回のたびにコメントを重ねない）
   const rows = await db.releaseFixSeries.findMany({ where: { id: { in: ids } } });
@@ -496,7 +509,14 @@ async function stopRows(
     where: { id: { in: fresh.map((row) => row.id) } },
     data: { status, stopReason: reason, ...(status === "awaiting_decision" ? {} : { activeKey: null }) },
   });
-  await notifyStop(ctx, fresh, status, reason, needsUser);
+  await notifyStop(ctx, fresh, status, reason, audience);
+  // 止まっていた系列が、利用者の手の要らない止まり方（置き換え・候補側の確認待ち・判断済み）へ移るなら、
+  // 以前の停止でこの系列が付けた確認待ちを外す（#5130）。他理由の札は`removeCheckUserWithReason`のガードが残す
+  if (status === "superseded" || audience !== true) {
+    for (const row of fresh) {
+      if (row.status === "stopped" || row.status === "awaiting_decision") await resolveStopLabels(ctx, row.issueNumber);
+    }
+  }
   // 操作履歴（#4359）。判断待ち・停止・元候補の取消／置換を系列ごとに残す（同じ状態・理由は`dedupeKey`で1件）
   const kind = status === "awaiting_decision" ? "decision_waiting" : status === "superseded" ? "superseded" : "stopped";
   for (const row of fresh) {
@@ -1144,9 +1164,13 @@ async function continueAfterReverification(
       [row.id],
       "stopped",
       `${UNVERIFIED_REVIEW_STOP_PREFIX}（指摘は0件）${unverified?.detail ? `：${unverified.detail}` : ""}。再評価を起動できませんでした。候補の画面から全体レビューの再評価・再実行を行ってください`,
+      // 確認する対象はリリース候補。修正Issueの確認待ちにしない（#5130）
+      "candidate",
     );
   }
-  if (followUp.action === "human") return stopRows(ctx, [row.id], "stopped", followUp.reason);
+  if (followUp.action === "human") {
+    return stopRows(ctx, [row.id], "stopped", followUp.reason, followUp.target === "candidate" ? "candidate" : true);
+  }
 
   const section = followUp.sourceKind === "review_finding" ? summary.aiReview : summary.integration;
   // 次世代で自動に直すのは「今回直す」と未判断の指摘だけ（見送り・不採用・公開後対応を再び採用しない。#4657）

@@ -4,13 +4,13 @@
 配布状況の正はcallerファイル（[supported-repositories.md](supported-repositories.md)の注記と同じ）。
 配り方の一般論は [multi-repo-changes.md](multi-repo-changes.md)。
 
-## 現在の到達点（2026-10-19 更新）
+## 現在の到達点（2026-10-31 更新）
 
 | 前提 | 状態 | 影響 |
 |---|---|---|
 | #4521・#4522・#4523・#4524 | **`main`へ反映済み**（#4723・#4734・#4737・#4749）。タグ`workflows/v54`はこれらすべてを含む（`git merge-base --is-ancestor`で確認） | 新仕様のタグを配れる |
 | guchi-apps/docs#226 | PR #236はマージ済み、Issueはclosed。`standards/work-issues.md`・`agent-rules/implementation.md`・`agent-rules/review.md`が追加された | Actions（`.shared-context/`）・ローカル（`~/apps/_docs`）が読む索引に載っている。ローカルの`_docs`チェックアウトは`git pull`していないため古く、反映確認は実セッションで行う（後述） |
-| 参照タグの配布 | `claude-review-develop.yml`・`release-develop-to-main.yml`は**導入済み全リポジトリが`workflows/v54`**（再調査の手順で確認。`db-console`・`morrow`の`v52`はコメント内の記述で、実際の`uses:`は`v54`。当初の「混在」の指摘は誤検出） | 参照更新は完了 |
+| 参照タグの配布（2026-10-31再確認） | **導入済み15リポジトリ全てが`workflows/v55`**（`workflows/v54`の後に切られた最新タグ。再調査の手順で確認、未配布・取り残しなし。issue-deckはローカルパス参照）。以下は2026-10-19時点の記録: `claude-review-develop.yml`・`release-develop-to-main.yml`は**導入済み全リポジトリが`workflows/v54`**（再調査の手順で確認。`db-console`・`morrow`の`v52`はコメント内の記述で、実際の`uses:`は`v54`。当初の「混在」の指摘は誤検出） | 参照更新は完了 |
 
 ## 対象の全体像（guchi-apps の非アーカイブ 27 リポジトリ）
 

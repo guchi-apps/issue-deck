@@ -27,6 +27,10 @@ import { fetchProjectItems } from "@/lib/github/projects-api";
 import {
   buildClosedStrandedRecoveredComment,
   buildDevelopMergedComment,
+  buildPartialInMainComment,
+  contentLookupPaths,
+  decideContentInMain,
+  hasPartialInMainNotice,
   buildMergedOpenClosedComment,
   buildStrandedComment,
   decideClosedStrandedIssue,
@@ -37,17 +41,23 @@ import {
   findCheckUserWaitReasons,
   hasDevelopMergedNotice,
   hasStrandedNotice,
+  importingRevisionHeads,
   isResidualAlreadyInBase,
   needsStrandedCheck,
   progressSweepIntervalMinutes,
   residualLookupPaths,
   type ClosedStrandedSkipReason,
+  type ContentInMain,
   type MergedOpenFacts,
   type MergedOpenSkipReason,
   type ProgressSweepCompare,
   type ProgressSweepSkipReason,
 } from "@/lib/github/progress-sweep";
-import { fetchPullRequestsForHead } from "@/lib/github/pull-requests-api";
+import {
+  PULL_REQUEST_FILES_PER_PAGE,
+  fetchPullRequestFiles,
+  fetchPullRequestsForHead,
+} from "@/lib/github/pull-requests-api";
 import { reportProgressStatus } from "@/lib/github/report-progress";
 import { matchProjectStatus, type ProgressStatusKey } from "@/lib/issue-progress";
 import { extractManualStepReferences } from "@/lib/manual-step-prerequisites";
@@ -100,6 +110,29 @@ import { extractManualStepReferences } from "@/lib/manual-step-prerequisites";
  *   （`compare/main...head`の`aheadBy === 0`）だけ。祖先なら`done`を報告する
  *   （Issueは既にcloseされているため`close`は行わない）
  *
+ * ## リリース候補（`release-rc/<番号>`）経由のリリース（#5133）
+ *
+ * **新方式の候補がmainへマージされたとき、含まれるIssueを`Done`へ進めてcloseするのはこの巡回だけ。**
+ * `reusable-issue-labels.yml`の`main-pr-merged`はheadが`develop`・`release-main/v*`のPRにしか
+ * 発火しない（候補PRの本文には`## 対象issue`も無い）。候補に固定されたPRはdevelopのマージコミットが
+ * そのままmainの祖先になるので、下の2経路の祖先判定で拾える。
+ *
+ * 祖先判定で拾えないのは、**候補へ後から取り込んだ修正PR**（リリース候補の修正Issue）。候補ブランチへ
+ * 別コミットとして当てられるため、develop側のheadはmainの祖先にならない。そこで`aheadBy !== 0`の
+ * ときだけ、候補の取り込み記録（`ReleaseCandidateRevision.importedPrs`）からそのPRを取り込んだ
+ * revisionを探し、そのheadがmainの祖先かを確かめる（`isImportedIntoCandidateInMain`）。
+ *
+ * ## 中身が同じ別コミットがmainにある場合（#5141）
+ *
+ * 候補ブランチ側に別コミットとして入った修正PRは、developのheadがmainの祖先にならず、候補の
+ * 取り込み記録でも拾えないことがある（work-relay#322・asset-manager#799・aide#732）。
+ * `aheadBy !== 0`で候補経由でもないときだけ、PRの変更ファイルについて**PR先端とmain先端の
+ * blobが一致するか**を見る（`checkContentInMain`）。全部一致なら回収、一部だけなら進めずに
+ * `00.check-user`＋`01.check-blocked`で人へ渡し、1つも一致しなければ（developにしかない
+ * Issue）何もしない。mainとPR先端が前回と同じなら問い合わせない。回収した件は
+ * `content_in_main_recovered`として返し、ログにも出す——**0でない状態が続くなら原因側
+ * （#5133）の取りこぼし**。
+ *
  * ## openなIssueのclose漏れ回収（#2715）
  *
  * #2690では「openなIssueは対象にしない。`Develop`には次のリリースを待っているだけの正常な
@@ -132,6 +165,10 @@ export type ProgressSweepAction = {
     | "closed_advanced"
     /** 本番反映済みなのにopenのまま残っていたIssueをcloseした（#2715） */
     | "open_closed"
+    /** 中身が同じ別コミットが`main`にあったので`Done`へ回収した（#5141）。0でない状態が続くなら原因側の取りこぼし */
+    | "content_in_main_recovered"
+    /** 変更の一部だけが`main`にあり、判定できないので人へ渡した（#5141） */
+    | "partial_in_main_notified"
     /** 全指摘が対応済みのコードレビューIssueをcloseした（#3216） */
     | "code_review_closed";
 };
@@ -695,11 +732,51 @@ async function sweepClosedIssue(params: {
   const compareWithMain = mergedPullRequest
     ? await compareBranches(ownerLogin, name, MAIN_BRANCH, mergedPullRequest.headSha, token)
     : null;
+  const importedCandidateInMain =
+    merged && compareWithMain && compareWithMain.aheadBy !== 0
+      ? await isImportedIntoCandidateInMain({
+          repositoryFullName: params.repositoryFullName,
+          ownerLogin,
+          name,
+          prNumber: merged.number,
+          token,
+        })
+      : false;
 
-  const decision = decideClosedStrandedIssue({ mergedPullRequest, compareWithMain });
+  const contentInMain =
+    merged && compareWithMain && compareWithMain.aheadBy !== 0 && !importedCandidateInMain
+      ? await checkContentInMain({
+          repositoryFullName: params.repositoryFullName,
+          ownerLogin,
+          name,
+          issueNumber,
+          prNumber: merged.number,
+          prHeadSha: merged.head.sha,
+          token,
+        })
+      : undefined;
+
+  const decision = decideClosedStrandedIssue({
+    mergedPullRequest,
+    compareWithMain,
+    importedCandidateInMain,
+    contentInMain,
+  });
   if (decision.action === "skip") {
     countSkip(decision.reason);
     return null;
+  }
+  if (decision.action === "notify_partial") {
+    return notifyPartialInMain({
+      repositoryFullName: params.repositoryFullName,
+      ownerLogin,
+      name,
+      issueNumber,
+      token,
+      pullRequestUrl: decision.pullRequestUrl,
+      pullRequestHeadSha: decision.pullRequestHeadSha,
+      countSkip,
+    });
   }
 
   const reported = await reportProgressStatus({
@@ -723,7 +800,65 @@ async function sweepClosedIssue(params: {
     body: buildClosedStrandedRecoveredComment(decision.pullRequestUrl),
   });
 
+  if (contentInMain === "all" && !importedCandidateInMain) {
+    console.warn(
+      `[progress-sweep] ${params.repositoryFullName}#${issueNumber}（closed）を中身の一致で回収しました（原因側の取りこぼしの可能性）`,
+    );
+    return {
+      repositoryFullName: params.repositoryFullName,
+      issueNumber,
+      kind: "content_in_main_recovered",
+    };
+  }
   return { repositoryFullName: params.repositoryFullName, issueNumber, kind: "closed_advanced" };
+}
+
+/**
+ * 候補の取り込み履歴（`ReleaseCandidateRevision.importedPrs`）の中で、新しいものから何件まで見るか（#5133）。
+ * 取り込みはリポジトリごとに数十件の規模で、巡回の対象Issueぶんだけ引く
+ */
+const IMPORTING_REVISION_LOOKUP_LIMIT = 100;
+
+/**
+ * そのPRを取り込んだリリース候補のrevisionが、すでに`main`の祖先になっているか（#5133）。
+ *
+ * リリース候補の修正Issueは、修正PRがdevelopへマージされたあと候補ブランチ（`release-rc/<番号>`）へ
+ * 別コミットとして当てられ、候補ごとmainへ出る。中身が同じでもdevelop側のPRのheadはmainの祖先に
+ * ならないため、`compare/main...head`だけでは本番反映を判定できない。そこで**候補の記録で取り込みを
+ * 確かめたうえで、取り込んだrevisionのheadがmainの祖先か**を見る（公開準備のバンプはrevisionの
+ * headに積むので、マージされていれば祖先になる。中止した候補のrevisionは祖先にならない）。
+ *
+ * 呼ぶのは`compare/main...head`の`aheadBy !== 0`のときだけで、DBで取り込みが見つからなければ
+ * GitHubへは問い合わせない（平常時の消費は増えない）。確かめられなかったものは`false`。
+ */
+async function isImportedIntoCandidateInMain(params: {
+  repositoryFullName: string;
+  ownerLogin: string;
+  name: string;
+  prNumber: number;
+  token: string;
+}): Promise<boolean> {
+  const revisions = await db.releaseCandidateRevision.findMany({
+    where: {
+      status: "applied",
+      headSha: { not: null },
+      candidate: { repositoryFullName: params.repositoryFullName },
+    },
+    orderBy: { createdAt: "desc" },
+    take: IMPORTING_REVISION_LOOKUP_LIMIT,
+    select: { headSha: true, importedPrs: true },
+  });
+  for (const head of importingRevisionHeads(revisions, params.prNumber)) {
+    const compared = await compareBranches(
+      params.ownerLogin,
+      params.name,
+      MAIN_BRANCH,
+      head,
+      params.token,
+    );
+    if (compared && compared.aheadBy === 0) return true;
+  }
+  return false;
 }
 
 /** 生きているローカルセッションが担当しているIssueの`<repo>#<番号>`（#2715） */
@@ -777,6 +912,8 @@ async function sweepMergedOpenIssue(params: {
   // `Done`は「本番反映済み」の定義そのものなので、確かめるための問い合わせを一切行わない。
   let mergedPullRequest: MergedOpenFacts["mergedPullRequest"] = null;
   let compareWithMain: MergedOpenFacts["compareWithMain"] = null;
+  let importedCandidateInMain = false;
+  let contentInMain: ContentInMain | undefined;
   if (status !== "done") {
     const branch = `issue-${issueNumber}`;
     const closed = await fetchPullRequestsForHead(
@@ -795,12 +932,50 @@ async function sweepMergedOpenIssue(params: {
     compareWithMain = mergedPullRequest
       ? await compareBranches(ownerLogin, name, MAIN_BRANCH, mergedPullRequest.headSha, token)
       : null;
+    if (merged && compareWithMain && compareWithMain.aheadBy !== 0) {
+      importedCandidateInMain = await isImportedIntoCandidateInMain({
+        repositoryFullName,
+        ownerLogin,
+        name,
+        prNumber: merged.number,
+        token,
+      });
+      if (!importedCandidateInMain) {
+        contentInMain = await checkContentInMain({
+          repositoryFullName,
+          ownerLogin,
+          name,
+          issueNumber,
+          prNumber: merged.number,
+          prHeadSha: merged.head.sha,
+          token,
+        });
+      }
+    }
   }
 
-  const decision = decideMergedOpenIssue({ status, mergedPullRequest, compareWithMain });
+  const decision = decideMergedOpenIssue({
+    status,
+    mergedPullRequest,
+    compareWithMain,
+    importedCandidateInMain,
+    contentInMain,
+  });
   if (decision.action === "skip") {
     countSkip(decision.reason);
     return null;
+  }
+  if (decision.action === "notify_partial") {
+    return notifyPartialInMain({
+      repositoryFullName,
+      ownerLogin,
+      name,
+      issueNumber,
+      token,
+      pullRequestUrl: decision.pullRequestUrl,
+      pullRequestHeadSha: decision.pullRequestHeadSha,
+      countSkip,
+    });
   }
 
   const reopened = await hasReopenedEvent(ownerLogin, name, issueNumber, token);
@@ -854,7 +1029,100 @@ async function sweepMergedOpenIssue(params: {
     }),
   });
 
+  if (contentInMain === "all" && !importedCandidateInMain) {
+    console.warn(
+      `[progress-sweep] ${repositoryFullName}#${issueNumber}を中身の一致で回収しました（原因側の取りこぼしの可能性）`,
+    );
+    return { repositoryFullName, issueNumber, kind: "content_in_main_recovered" };
+  }
   return { repositoryFullName, issueNumber, kind: "open_closed" };
+}
+
+/**
+ * 判定済みの結果を覚える（#5141）。キーは`<repo>#<番号>`、値は`<mainの先端>:<PRの先端>`と結果。
+ * `main`もPRの先端も変わらなければ結果は変わらないので、次の巡回ではGitHubへ問い合わせない。
+ * プロセス内にしか持たない（再起動で忘れても1回余分に引くだけ）。
+ */
+const contentCheckCache = new Map<string, string>();
+
+/** テスト用 */
+export function resetContentCheckCacheForTest(): void {
+  contentCheckCache.clear();
+}
+
+/**
+ * PRの変更が別コミットとして`main`に入っているかを確かめる（#5141）。
+ *
+ * リリース候補の修正PRは候補ブランチへ別コミットとして当てられ、developのheadが`main`の
+ * 祖先にならない。呼ぶのは`compare/main...head`が`aheadBy !== 0`で候補経由でもなかった
+ * Issueだけ（developにしか無いIssueが主）。`main`の先端とPRの先端が前回と同じなら
+ * 問い合わせずに`none`を返す。確かめられなかったものは`unknown`（キャッシュしない）。
+ */
+async function checkContentInMain(params: {
+  repositoryFullName: string;
+  ownerLogin: string;
+  name: string;
+  issueNumber: number;
+  prNumber: number;
+  prHeadSha: string;
+  token: string;
+}): Promise<ContentInMain> {
+  const { ownerLogin, name, token } = params;
+  const key = `${params.repositoryFullName}#${params.issueNumber}`;
+  try {
+    const mainSha = await fetchBranchHeadSha(ownerLogin, name, MAIN_BRANCH, token);
+    if (!mainSha) return "unknown";
+    const stamp = `${mainSha}:${params.prHeadSha}`;
+    if (contentCheckCache.get(key) === stamp) return "none";
+
+    const files = await fetchPullRequestFiles(ownerLogin, name, params.prNumber, token);
+    // 1ページに収まらないPRは全ファイルを見られないので判定しない
+    if (files.length >= PULL_REQUEST_FILES_PER_PAGE) return "unknown";
+    const paths = contentLookupPaths(files);
+    const headBlobs = await fetchBlobShasAtRef(ownerLogin, name, params.prHeadSha, paths, token);
+    const mainBlobs = await fetchBlobShasAtRef(ownerLogin, name, MAIN_BRANCH, paths, token);
+    const result = decideContentInMain(files, headBlobs, mainBlobs);
+    if (result === "none" || result === "partial") contentCheckCache.set(key, stamp);
+    return result;
+  } catch (error) {
+    console.warn(`[progress-sweep] ${key}の中身の一致確認:`, error);
+    return "unknown";
+  }
+}
+
+/** 変更の一部だけが`main`にあるIssueを、進めずに`00.check-user`＋`01.check-blocked`で人へ渡す（#5141） */
+async function notifyPartialInMain(params: {
+  repositoryFullName: string;
+  ownerLogin: string;
+  name: string;
+  issueNumber: number;
+  token: string;
+  pullRequestUrl: string;
+  pullRequestHeadSha: string;
+  countSkip: (reason: keyof ProgressSweepResult["skipped"]) => void;
+}): Promise<ProgressSweepAction | null> {
+  const { ownerLogin, name, issueNumber, token } = params;
+  // 書くと決めてから既存コメントを読む（冪等のため）
+  const bodies = (await fetchCommentsForIssue(ownerLogin, name, issueNumber, token)).map(
+    (comment) => comment.body ?? "",
+  );
+  if (hasPartialInMainNotice(bodies, issueNumber, params.pullRequestHeadSha)) {
+    params.countSkip("already_notified");
+    return null;
+  }
+  await addCheckUserWithReason(ownerLogin, name, issueNumber, token, "blocked");
+  await createComment(ownerLogin, name, issueNumber, token, {
+    body: buildPartialInMainComment({
+      issueNumber,
+      pullRequestUrl: params.pullRequestUrl,
+      pullRequestHeadSha: params.pullRequestHeadSha,
+    }),
+  });
+  return {
+    repositoryFullName: params.repositoryFullName,
+    issueNumber,
+    kind: "partial_in_main_notified",
+  };
 }
 
 /**

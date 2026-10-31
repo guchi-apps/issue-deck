@@ -6,6 +6,7 @@ import { useReleaseRc } from "@/hooks/use-release-rc";
 import { ReleaseBlockNotice } from "@/components/dashboard/release-block-notice";
 import { useReleaseStartMode } from "@/hooks/use-release-start-mode";
 import { ReleaseRcNextStep } from "@/components/dashboard/release-rc-next-step";
+import { ConnectedReleaseAutoProceedPanel } from "@/components/dashboard/release-auto-proceed-panel";
 import { ReleaseRcFinalizePanel } from "@/components/dashboard/release-rc-finalize";
 import { ReleaseRcVerificationEvidence } from "@/components/dashboard/release-rc-evidence";
 import { ReleaseRcIdentity, ReleaseRcLegacyNotice } from "@/components/dashboard/release-rc-identity";
@@ -135,6 +136,13 @@ export function MobileReleaseSheet({
             <div className="flex flex-col gap-3">
               {rcCandidate && <ReleaseRcIdentity candidate={rcCandidate} />}
               {rcCandidate && <ReleaseRcNextStep candidate={rcCandidate} />}
+              {/* 未判断の止める指摘があるときの一括判定と「おまかせで公開承認まで進める」（#5138） */}
+              {rcCandidate && releaseStatus.phase === "release_pr_open" && releaseStatus.releasePullRequest && (
+                <ConnectedReleaseAutoProceedPanel
+                  repositoryFullName={repository.fullName}
+                  pullRequestNumber={releaseStatus.releasePullRequest.number}
+                />
+              )}
               {rcCandidate && rc.overview?.finalization && (
                 <ReleaseRcFinalizePanel
                   candidate={rcCandidate}

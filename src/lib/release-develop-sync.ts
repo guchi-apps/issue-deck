@@ -54,6 +54,11 @@ export type DevelopSyncPullRequest = {
   labels?: string[];
   /** 自動レビュー（`claude-review-develop.yml`）の判定が出揃い、レビューが実行済み・または不要で終わっているか */
   reviewSettled?: boolean;
+  /** GraphQLのNode ID。Auto-mergeの有効化・解除に使う（#5146） */
+  nodeId?: string;
+  /** GitHubのAuto-mergeが有効か。`autoMergeEnabledByBot`はIssueDeck（GitHub App）など人以外が有効にしたか（#5146） */
+  autoMergeEnabled?: boolean;
+  autoMergeEnabledByBot?: boolean;
 };
 
 /** 自動マージを止める人の確認ラベル（`22.merge-confirm-required`・`00.check-user`） */
@@ -86,7 +91,7 @@ export type DevelopSyncPublishEvidence = {
 
 /**
  * 自動マージの判定。止めるときの`waiting`は、条件が揃うのを巡回が待っている（CI実行中・レビュー判定中など）か、
- * 人の対応が要るか（false）を表す。画面はこれで「自動マージ待ち」と「人の確認が必要」を分ける
+ * 人の対応が要るか（false）を表す。画面はこれで「自動マージ待ち」と「人の確認が必要」を分ける。
  */
 export type DevelopSyncAutoMergeDecision = { ok: true; headSha: string } | { ok: false; reason: string; waiting: boolean };
 
@@ -102,7 +107,8 @@ const hold = (reason: string): DevelopSyncAutoMergeDecision => ({ ok: false, rea
  * - 人の確認ラベルが付いていない
  * - ワークフローを含むなら、今のmainがRCの公開で本番へマージした記録と一致し、mainにだけあるワークフローが
  *   すべてそのマージで変わったものである（#5081。以前から未同期のワークフローや、記録の無いmainは人へ回す）
- * マージ操作は呼び出し側がこのHEADのSHAを渡して行う（追いコミットを巻き込まない）
+ * マージ操作は呼び出し側がこのHEADのSHAを渡して行う（追いコミットを巻き込まない）。
+ * GitHubのAuto-mergeには任せない（#5151）。IssueDeckはAuto-mergeを有効にせず、CIの合格後に巡回が直接マージする
  */
 export function decideDevelopSyncAutoMerge(
   pr: DevelopSyncPullRequest,
@@ -118,9 +124,8 @@ export function decideDevelopSyncAutoMerge(
   if (main.files.length === 0) return hold("差分がありません");
   if (pr.mergeable === null) return wait("GitHubがマージ可否を計算中です");
   if (pr.mergeable !== true) return hold("developと競合しています");
-  if (pr.ciState === "pending") return wait("CIの完了を待っています");
-  if (pr.ciState !== "success") return hold(pr.ciState === "failure" ? "CIが失敗しています" : "CIの状態を取得できません");
-  if (pr.reviewSettled !== true) return wait("自動レビューの判定を待っています");
+  // 人の確認・レビュー・公開証跡の条件はCIの結果より先に見る。CIの実行中にAuto-mergeを任せてよいかを
+  // 決めるため（#5146。CIが通った時点でGitHubがマージするので、それまでに揃っていなければ任せない）
   const held = (pr.labels ?? []).find((l) => HOLD_LABELS.includes(l));
   if (held) return hold(`人の確認ラベル（${held}）が付いています`);
   const guard = evaluateReviewMergeGuard({ body: pr.body, headSha: pr.headSha, acknowledgeReviewSha: undefined });
@@ -138,6 +143,13 @@ export function decideDevelopSyncAutoMerge(
       return hold(`今回の公開で変わっていないワークフローの変更（${filesSummary(outside)}）を含みます（以前から未同期の変更です）`);
     }
   }
+  if (pr.ciState === "pending") {
+    // GitHubのAuto-mergeへは任せない（#5151）。有効化後に付いた確認ラベルを即時に反映できず、
+    // 次の巡回までにCIが通るとラベルを無視してマージされるため。CIの合格後に巡回が直接マージする
+    return wait("CIの完了を待っています");
+  }
+  if (pr.ciState !== "success") return hold(pr.ciState === "failure" ? "CIが失敗しています" : "CIの状態を取得できません");
+  if (pr.reviewSettled !== true) return wait("自動レビューの判定を待っています");
   return { ok: true, headSha: pr.headSha };
 }
 
@@ -282,10 +294,8 @@ export function decideDevelopSync(observation: DevelopSyncObservation): DevelopS
   if (pr.ciState === "failure") {
     return unsynced("ci_failure", "同期PRのCIが失敗しています", `${files}。${prLabel} のCIが失敗しています${stale}`, `${prLabel} のCIの失敗を確認し、同期ブランチで修正してください`);
   }
-  if (pr.ciState === "pending") {
-    return unsynced("ci_pending", "同期PRのCIを実行中です", `${files}。${prLabel} のCIの完了を待っています${stale}`, `CIの完了後に ${prLabel} をマージしてください`);
-  }
-  // 巡回が自動でマージできない理由が確定しているときは、人の対応が要る停止として理由と次の操作を出す（#5081）
+  // 巡回が自動でマージできない理由が確定しているときは、人の対応が要る停止として理由と次の操作を出す（#5081）。
+  // CIの実行中でも先に出す（Auto-mergeに任せない理由が確定しているため。#5146）
   const autoMerge = base.autoMerge;
   if (autoMerge && !autoMerge.ok && !autoMerge.waiting) {
     return unsynced(
@@ -294,6 +304,9 @@ export function decideDevelopSync(observation: DevelopSyncObservation): DevelopS
       `${files}。${prLabel} は自動でマージされません: ${autoMerge.reason}${stale}`,
       `${prLabel} の内容を確認し、問題なければマージコミットでマージしてください`,
     );
+  }
+  if (pr.ciState === "pending") {
+    return unsynced("ci_pending", "同期PRのCIを実行中です", `${files}。${prLabel} のCIの完了を待っています${stale}`, `CIの完了後に ${prLabel} をマージしてください`);
   }
   const waitingFor = autoMerge && !autoMerge.ok ? `（${autoMerge.reason}）` : "";
   return unsynced(

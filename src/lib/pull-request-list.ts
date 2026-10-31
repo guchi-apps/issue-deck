@@ -392,6 +392,8 @@ export function requiresUserMerge(pullRequest: PullRequestSummary): boolean {
   // 本番公開後のdevelop同期PRは巡回が自動でマージする。止まって人の対応が要るときだけ数える（#5081）
   if (pullRequest.developSyncAutoMerge?.status === "held") return true;
   if (pullRequest.kind !== "issue") return false;
+  // 「修正を自動で続ける」の修正PRは、系列が動いている間は人の番ではない（#5138）
+  if (pullRequest.releaseAutoFix) return false;
   if (pullRequest.linkedIssueCheckReason !== null) {
     return pullRequest.linkedIssueCheckReason === "merge";
   }

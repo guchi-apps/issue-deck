@@ -550,6 +550,16 @@ export type ClosedStrandedFacts = {
   mergedPullRequest: { url: string; headSha: string } | null;
   /** `main...headSha`の二点比較。取得できなければ`null` */
   compareWithMain: { aheadBy: number } | null;
+  /**
+   * そのPRを取り込んだリリース候補のrevisionが`main`の祖先になっているか（#5133）。
+   * `aheadBy !== 0`のときだけIO側が確かめる。省略時は`false`
+   */
+  importedCandidateInMain?: boolean;
+  /**
+   * PRの変更が、別コミットとして`main`に入っているか（#5141）。`aheadBy !== 0`で候補経由でも
+   * ないときだけIO側が確かめる。省略時は`unknown`（確かめていない・確かめられなかった）
+   */
+  contentInMain?: ContentInMain;
 };
 
 export type ClosedStrandedSkipReason =
@@ -563,6 +573,8 @@ export type ClosedStrandedSkipReason =
 export type ClosedStrandedDecision =
   /** `done`を報告する。Issueは既にcloseされているため`close`は行わない */
   | { action: "advance_done"; pullRequestUrl: string }
+  /** 変更の一部だけが`main`にある。進めずに`00.check-user`＋`01.check-blocked`で人へ渡す（#5141） */
+  | { action: "notify_partial"; pullRequestUrl: string; pullRequestHeadSha: string }
   | { action: "skip"; reason: ClosedStrandedSkipReason };
 
 /**
@@ -574,6 +586,11 @@ export type ClosedStrandedDecision =
  * 意味になる。developへのマージは常にマージコミット方式（`gh pr merge --merge`）を使うため、
  * PRのhead SHA自体がdevelopのマージコミットの親であり、develop→mainも同じ方式なので
  * このSHAがmainの祖先かどうかで「本番へ出たか」を正確に判定できる。
+ *
+ * **例外はリリース候補（`release-rc/<番号>`）へ取り込まれた修正PR**（#5133）。候補の修正Issueの
+ * PRはdevelopへマージされたあと、候補ブランチへ別コミット（`cherry-pick`）として当てられて
+ * mainへ出る。中身は同じでもdevelop側のheadはmainの祖先にならないため、`aheadBy !== 0`でも
+ * 「そのPRを取り込んだ候補のrevisionがmainの祖先か」（`importedCandidateInMain`）で本番反映を認める。
  */
 export function decideClosedStrandedIssue(facts: ClosedStrandedFacts): ClosedStrandedDecision {
   const merged = facts.mergedPullRequest;
@@ -582,9 +599,49 @@ export function decideClosedStrandedIssue(facts: ClosedStrandedFacts): ClosedStr
   const compare = facts.compareWithMain;
   if (!compare) return { action: "skip", reason: "closed_compare_unavailable" };
 
-  if (compare.aheadBy !== 0) return { action: "skip", reason: "closed_not_in_main_yet" };
+  if (compare.aheadBy !== 0 && !facts.importedCandidateInMain) {
+    if (facts.contentInMain === "all") {
+      return { action: "advance_done", pullRequestUrl: merged.url };
+    }
+    if (facts.contentInMain === "partial") {
+      return {
+        action: "notify_partial",
+        pullRequestUrl: merged.url,
+        pullRequestHeadSha: merged.headSha,
+      };
+    }
+    return { action: "skip", reason: "closed_not_in_main_yet" };
+  }
 
   return { action: "advance_done", pullRequestUrl: merged.url };
+}
+
+/** 1つのPRについて確かめる、取り込んだ候補revisionのheadの上限（#5133）。比較のRESTを増やしすぎない */
+export const MAX_IMPORTING_REVISION_HEADS = 3;
+
+/**
+ * リリース候補の適用済みrevisionのうち、指定したPRを取り込んだもののheadを返す（#5133）。
+ *
+ * `revisions`は新しい順に渡す。`importedPrs`は`[{ number, title, mergeSha, related }]`のJSON。
+ * 同じheadは1回だけ・最大`MAX_IMPORTING_REVISION_HEADS`件に絞る（候補を作り直して後継が
+ * 取り込み直した場合も、新しいものから確かめれば足りる）。
+ */
+export function importingRevisionHeads(
+  revisions: readonly { headSha: string | null; importedPrs: unknown }[],
+  prNumber: number,
+): string[] {
+  const heads: string[] = [];
+  for (const revision of revisions) {
+    if (!revision.headSha || heads.includes(revision.headSha)) continue;
+    const imported = Array.isArray(revision.importedPrs) ? revision.importedPrs : [];
+    const hit = imported.some(
+      (pr) => (pr as { number?: unknown } | null)?.number === prNumber,
+    );
+    if (!hit) continue;
+    heads.push(revision.headSha);
+    if (heads.length >= MAX_IMPORTING_REVISION_HEADS) break;
+  }
+  return heads;
 }
 
 /** closedなIssueの取り残しをdoneへ回収したことを伝えるコメント本文（#2690） */
@@ -623,6 +680,10 @@ export type MergedOpenFacts = {
   mergedPullRequest: { url: string; headSha: string } | null;
   /** `main...headSha`の二点比較。取得できなければ`null`。`status`が`done`なら参照しない */
   compareWithMain: { aheadBy: number } | null;
+  /** `ClosedStrandedFacts["importedCandidateInMain"]`と同じ（#5133）。省略時は`false` */
+  importedCandidateInMain?: boolean;
+  /** `ClosedStrandedFacts["contentInMain"]`と同じ（#5141） */
+  contentInMain?: ContentInMain;
 };
 
 export type MergedOpenSkipReason =
@@ -648,6 +709,8 @@ export type MergedOpenSkipReason =
 export type MergedOpenDecision =
   /** closeしてよい。`reportDone`なら`done`の報告を先に行う */
   | { action: "close"; pullRequestUrl: string | null; reportDone: boolean }
+  /** 変更の一部だけが`main`にある。進めずに人へ渡す（#5141） */
+  | { action: "notify_partial"; pullRequestUrl: string; pullRequestHeadSha: string }
   | { action: "skip"; reason: MergedOpenSkipReason };
 
 /**
@@ -681,7 +744,19 @@ export function decideMergedOpenIssue(facts: MergedOpenFacts): MergedOpenDecisio
   const compare = facts.compareWithMain;
   if (!compare) return { action: "skip", reason: "open_compare_unavailable" };
 
-  if (compare.aheadBy !== 0) return { action: "skip", reason: "open_not_in_main_yet" };
+  if (compare.aheadBy !== 0 && !facts.importedCandidateInMain) {
+    if (facts.contentInMain === "all") {
+      return { action: "close", pullRequestUrl: merged.url, reportDone: true };
+    }
+    if (facts.contentInMain === "partial") {
+      return {
+        action: "notify_partial",
+        pullRequestUrl: merged.url,
+        pullRequestHeadSha: merged.headSha,
+      };
+    }
+    return { action: "skip", reason: "open_not_in_main_yet" };
+  }
 
   return { action: "close", pullRequestUrl: merged.url, reportDone: true };
 }
@@ -700,5 +775,89 @@ export function buildMergedOpenClosedComment(params: {
     "リリース時のcloseが行われないまま残っていたため、定期巡回が回収しました。",
     "",
     COMMENT_SOURCE_MARKER,
+  ].join("\n");
+}
+
+/**
+ * PRの変更が、別コミットとして`main`に入っているか（#5141）。
+ *
+ * - `all` … PRが変えたすべてのファイルで、`main`の内容がPR先端と一致する（入っている）
+ * - `partial` … 一部のファイルだけ一致する。自信が持てないので人へ渡す
+ * - `none` … 1つも一致しない（正しく反映待ち。developにしかないIssueはこの形）
+ * - `unknown` … 確かめられなかった。次の巡回で再判定する
+ */
+export type ContentInMain = "all" | "partial" | "none" | "unknown";
+
+/**
+ * リリース候補の修正PRは候補ブランチへ別コミットとして当てられるため、developのheadが`main`の
+ * 祖先にならない（work-relay#322・asset-manager#799・aide#732）。祖先で判定できないので、
+ * **PRが変えたファイルごとに、PR先端のblobと`main`先端のblobが一致するか**で見る。
+ *
+ * @param files PRの変更ファイル（`fetchPullRequestFiles`）。取得できなければ`null`
+ * @param headBlobs PR先端での各パスのblob SHA（無ければ`null`）。取得できなければ`null`
+ * @param mainBlobs `main`先端での各パスのblob SHA。取得できなければ`null`
+ */
+export function decideContentInMain(
+  files: readonly { filename: string; status: string; previous_filename?: string }[] | null,
+  headBlobs: ReadonlyMap<string, string | null> | null,
+  mainBlobs: ReadonlyMap<string, string | null> | null,
+): ContentInMain {
+  if (!files || files.length === 0 || !headBlobs || !mainBlobs) return "unknown";
+  let matched = 0;
+  for (const file of files) {
+    if (!headBlobs.has(file.filename) || !mainBlobs.has(file.filename)) return "unknown";
+    const head = headBlobs.get(file.filename) ?? null;
+    const main = mainBlobs.get(file.filename) ?? null;
+    let same = head === main;
+    if (same && file.status === "renamed" && file.previous_filename) {
+      if (!mainBlobs.has(file.previous_filename)) return "unknown";
+      same = (mainBlobs.get(file.previous_filename) ?? null) === null;
+    }
+    if (same) matched += 1;
+  }
+  if (matched === files.length) return "all";
+  return matched === 0 ? "none" : "partial";
+}
+
+/** `decideContentInMain`のためにPR先端・`main`で引くパス（リネーム元を含む） */
+export function contentLookupPaths(
+  files: readonly { filename: string; previous_filename?: string }[],
+): string[] {
+  const paths = new Set<string>();
+  for (const file of files) {
+    paths.add(file.filename);
+    if (file.previous_filename) paths.add(file.previous_filename);
+  }
+  return [...paths];
+}
+
+/** 一部だけ`main`にあるIssueの通知を、同じ先端について繰り返さないためのマーカー（#5141） */
+export function partialInMainMarker(issueNumber: number, pullRequestHeadSha: string): string {
+  return `<!-- issue-deck-progress-sweep:partial-in-main issue=${issueNumber} head=${pullRequestHeadSha} -->`;
+}
+
+export function hasPartialInMainNotice(
+  commentBodies: readonly string[],
+  issueNumber: number,
+  pullRequestHeadSha: string,
+): boolean {
+  const marker = partialInMainMarker(issueNumber, pullRequestHeadSha);
+  return commentBodies.some((body) => body.includes(marker));
+}
+
+export function buildPartialInMainComment(params: {
+  issueNumber: number;
+  pullRequestUrl: string;
+  pullRequestHeadSha: string;
+}): string {
+  return [
+    "⚠️ 本番（`main`）への反映を判定できませんでした。進捗は動かしていません。",
+    "",
+    `${params.pullRequestUrl} が変更したファイルのうち、一部だけが\`main\`に同じ内容で入っています（残りは\`main\`と内容が異なります）。リリース候補の修正として別コミットで入った可能性がありますが、一部が未反映の可能性も残るため、定期巡回では判断しませんでした。`,
+    "",
+    "反映済みなら進捗を Done へ進めてcloseし、未反映なら次のリリースを待ってください。",
+    "",
+    COMMENT_SOURCE_MARKER,
+    partialInMainMarker(params.issueNumber, params.pullRequestHeadSha),
   ].join("\n");
 }

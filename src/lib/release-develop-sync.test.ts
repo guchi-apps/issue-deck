@@ -132,6 +132,23 @@ describe("decideDevelopSyncAutoMerge（#4669・#5081）", () => {
     expect(decideDevelopSyncAutoMerge(ready({ headSha: "h".repeat(40) }), main(files), evidence).ok).toBe(false);
   });
 
+  it("CIの実行中はGitHubのオートマージへ任せず待つ。人の対応が要る理由が確定していれば人へ回す（#5151）", () => {
+    expect(decideDevelopSyncAutoMerge(ready({ ciState: "pending", reviewSettled: false }), main())).toEqual({
+      ok: false,
+      waiting: true,
+      reason: "CIの完了を待っています",
+    });
+    for (const over of [{ labels: ["00.check-user"] }, { headSha: "h".repeat(40) }]) {
+      expect(decideDevelopSyncAutoMerge(ready({ ciState: "pending", ...over }), main())).toMatchObject({ ok: false, waiting: false });
+    }
+    expect(decideDevelopSyncAutoMerge(ready({ ciState: "pending" }), main(["package.json", WORKFLOW]))).toMatchObject({ ok: false, waiting: false });
+    const pending = decideDevelopSync(observed({ openPullRequest: ready({ ciState: "pending" }) }));
+    expect(pending.detail).toBe("ci_pending");
+    expect(pending.reason).not.toContain("オートマージ");
+    const heldWhilePending = decideDevelopSync(observed({ openPullRequest: ready({ ciState: "pending", labels: ["00.check-user"] }) }));
+    expect(heldWhilePending.detail).toBe("merge_held");
+  });
+
   it("同期状態では、人の対応が要る停止を「人の確認が必要」として理由と次の操作を出す", () => {
     const held = decideDevelopSync(observed({ openPullRequest: ready({ labels: ["00.check-user"] }) }));
     expect(held).toMatchObject({ state: "unsynced", detail: "merge_held", label: "同期PRは人の確認が必要です" });
