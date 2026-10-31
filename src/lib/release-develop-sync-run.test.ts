@@ -318,6 +318,16 @@ describe("同期PRの自動マージ（#4669）", () => {
       await ensureDevelopSync(ctx, { autoMerge: true });
       expect(mocks.disableAutoMerge).not.toHaveBeenCalled();
     });
+
+    it("追いコミットでHEADがmainの先端と食い違ったら解除し、解除に失敗しても次の巡回でやり直す", async () => {
+      mocks.ciState.mockResolvedValue({ ciState: "pending", mergeable: true, mergeJudgement: reviewDoneCiRunning });
+      mocks.openPrs.mockResolvedValue([syncPr({ head: { ref: "release-sync/main-aaaaaaaaaaaa", sha: "h".repeat(40) }, auto_merge: { enabled_by: { type: "Bot" } } })]);
+      mocks.disableAutoMerge.mockRejectedValueOnce(new Error("502"));
+      await ensureDevelopSync(ctx, { autoMerge: true });
+      await ensureDevelopSync(ctx, { autoMerge: true });
+      expect(mocks.disableAutoMerge).toHaveBeenCalledTimes(2);
+      expect(mocks.enableAutoMerge).not.toHaveBeenCalled();
+    });
   });
 
   it("人の確認ラベルがある・旧head=mainの同期PRはマージしない。マージ失敗でも例外にしない", async () => {
