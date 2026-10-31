@@ -19,8 +19,8 @@ import type { PullRequestReviewResponseContext, PullRequestSummary } from "@/typ
  * - `repairing` … 自動修正が走っている。操作は不要
  * - `stale` … 判定が前のHEADのもの。新しいHEADの再レビューを待つ（古い指摘を現在の指摘として扱わない）
  * - `requested` … 現在のHEADへ修正を依頼済み。pushされるとCI・再レビューが走る。操作は不要
- * - `respond` … 利用者が対応を選ぶ。要修正で自動修正が使えれば`autoRepair`、方針付きの依頼が
- *   送れなければ`request.available=false`と理由・代わりの操作を返す（ボタンも案内も無い状態にしない）
+ * - `respond` … 利用者が対応を選ぶ。要修正で自動修正が使えれば`autoRepair`、自由文の依頼は廃止済みのため
+ *   `request.available=false`と理由・代わりの操作を返す（ボタンも案内も無い状態にしない）
  */
 export type ReviewAction =
   | { kind: "none" }
@@ -47,9 +47,16 @@ export type ReviewAction =
 
 export type ReviewAttentionKind = "changes-requested" | "needs-check";
 
-export type ReviewFixRequestAvailability =
-  | { available: true; issueNumber: number | null }
-  | { available: false; reason: string; alternative: "draft-fix-issue" | "open-issue" };
+/**
+ * 自由文の修正依頼（Actions経由）は#4680で廃止した。サーバーの`requestPullRequestFix`は常に拒否するため、
+ * 画面にも実行できるかのような依頼ボタンは出さず、理由と実際に使える次の操作（Issue詳細のホストセッション・
+ * 修正Issueの起案）だけを返す。
+ */
+export type ReviewFixRequestAvailability = {
+  available: false;
+  reason: string;
+  alternative: "draft-fix-issue" | "open-issue";
+};
 
 const ISSUE_BRANCH_PATTERN = /^issue-(\d+)$/;
 
@@ -151,7 +158,11 @@ function resolveRequestAvailability(
       alternative: "open-issue",
     };
   }
-  return { available: true, issueNumber };
+  return {
+    available: false,
+    reason: `PRへの自由文の修正依頼（Actions経由）は廃止しました。Issue #${issueNumber} の詳細からホストセッションを開き、指摘を伝えて修正を依頼してください。`,
+    alternative: "open-issue",
+  };
 }
 
 /**

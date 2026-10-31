@@ -438,8 +438,10 @@ describe("PullRequestDetail", () => {
 
     fireEvent.click(respond);
     const panel = within(screen.getByTestId("pull-request-review-response"));
-    expect(panel.getByRole("button", { name: "AIに修正を依頼" })).toBeTruthy();
-    expect(panel.getByRole("textbox", { name: "修正の方針（任意）" })).toBeTruthy();
+    // 廃止済みの自由文修正依頼は、押すと必ず拒否されるため出さない（#5127）
+    expect(panel.queryByRole("button", { name: "AIに修正を依頼" })).toBeNull();
+    expect(panel.queryByRole("textbox", { name: "修正の方針（任意）" })).toBeNull();
+    expect(panel.getByText(/ホストセッションを開き/)).toBeTruthy();
     expect(panel.getByRole("button", { name: "マージ確認へ進む" })).toBeTruthy();
   });
 

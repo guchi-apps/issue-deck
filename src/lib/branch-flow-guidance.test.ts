@@ -71,6 +71,16 @@ describe("手が要るときの内訳（#5099）", () => {
     const failed = { problem: { kind: "fix_stalled" as const, label: "修正が停止中", reasons: [] }, progress: null, detail: null };
     expect(describeBranchFlow(fixture(), { ...options, verification: failed }).kind).toBe("problem");
   });
+  it("工程が自動の間の再検証待ち・未実施は赤にせず、失敗や人の番は赤のまま（#5126）", () => {
+    const verificationOf = (kind: "invalidated" | "not_run" | "failed") => ({ problem: { kind, label: "x", reasons: [] }, progress: null, detail: null });
+    const repo = fixture();
+    (repo.summary as { releaseJourney: unknown }).releaseJourney = { owner: "auto" };
+    expect(describeBranchFlow(repo, { ...options, verification: verificationOf("invalidated") })).toMatchObject({ kind: "other", next: "進捗を見る", attention: true });
+    expect(describeBranchFlow(repo, { ...options, verification: verificationOf("not_run") }).kind).toBe("other");
+    expect(describeBranchFlow(repo, { ...options, verification: verificationOf("failed") }).kind).toBe("problem");
+    (repo.summary as { releaseJourney: unknown }).releaseJourney = { owner: "user" };
+    expect(describeBranchFlow(repo, { ...options, verification: verificationOf("invalidated") }).kind).toBe("problem");
+  });
   it("デプロイ失敗の導線は承認待ちと同じ見た目にしない", () => {
     const repo = fixture(); repo.summary.deploy = { kind: "failure", htmlUrl: null, runId: null, manual: false, autoRetried: false };
     expect(describeBranchFlow(repo, options).kind).toBe("problem");
