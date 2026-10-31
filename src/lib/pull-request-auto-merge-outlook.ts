@@ -31,6 +31,10 @@ function outlook(kind: AutoMergeOutlookKind, reason: string): AutoMergeOutlook {
   return { kind, label: LABEL[kind], reason };
 }
 
+export function releaseAutoFixReason(candidatePrNumber: number): string {
+  return `自動修正中（リリース候補 #${candidatePrNumber} の修正を自動で続けています）。人の確認待ちではありません。止まったときだけ確認待ちになります`;
+}
+
 /**
  * マージ待ちのPRが自動マージされるかを、一覧・詳細が既に持っている値から導く（#4952）。
  *
@@ -75,6 +79,12 @@ export function deriveAutoMergeOutlook(pullRequest: PullRequestSummary): AutoMer
     return outlook("expected", "CIと自動マージの判定が終わり、止める理由が出なければ自動マージを予約します");
   }
   const hold = deriveMergeHold(pullRequest);
+  // 「修正を自動で続ける」が動いている間、系列が止まったときに付けた確認待ちが残っていても人の番ではない（#5138）。
+  // 系列は再開・公開承認待ちへの遷移で印を外す。レビューの要修正など、確認待ち以外の理由はそのまま出す
+  const autoFix = pullRequest.releaseAutoFix;
+  if (autoFix && hold.status === "held" && hold.reasons.every((reason) => reason.kind === "check-user")) {
+    return outlook("expected", releaseAutoFixReason(autoFix.candidatePrNumber));
+  }
   if (hold.status === "held") {
     return outlook("manual", hold.reasons.map((reason) => reason.text).join(" / "));
   }

@@ -222,6 +222,20 @@ describe("startReleaseCompletionRun", () => {
     expect(other).toMatchObject({ ok: false, error: "run_active" });
   });
 
+  it("同じ候補で前の系列が止まっていれば、押し直した時点で修正Issueの確認待ちを外す（#5138）", async () => {
+    fixSeries.push({ id: "s1", repositoryFullName: "o/r", releasePrNumber: 10, successorPrNumber: null, status: "issue_created", issueNumber: 100, createdAt: now });
+    runs.push({ id: "old", repositoryFullName: "o/r", candidatePrNumber: 10, candidatePrNumbers: [10], status: "needs_attention", activeKey: null, stopReason: "fix_stopped" });
+    expect(await start("until_ready")).toMatchObject({ ok: true, created: true });
+    expect(removeIssueLabel).toHaveBeenCalledWith("o", "r", 100, "t", "00.check-user");
+    expect(removeIssueLabel).toHaveBeenCalledWith("o", "r", 100, "t", "01.check-blocked");
+  });
+
+  it("前の系列が止まっていなければ、開始時にラベルへ触れない", async () => {
+    fixSeries.push({ id: "s1", repositoryFullName: "o/r", releasePrNumber: 10, successorPrNumber: null, status: "issue_created", issueNumber: 100, createdAt: now });
+    await start("until_ready");
+    expect(removeIssueLabel).not.toHaveBeenCalled();
+  });
+
   it("画面で見ていたSHAと今の候補が違えば始めない", async () => {
     const result = await startReleaseCompletionRun({
       owner: "o",

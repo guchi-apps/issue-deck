@@ -127,6 +127,26 @@ export type RecommendationsState = {
 };
 
 /**
+ * 同じ要求を同時に出した部品どうしで、推奨APIへの通信を1本にまとめる（#5138）。本番PR詳細では「次の操作」の判定表と
+ * 「リリースの検証」の指摘一覧が同時に推奨を読む。APIは保存済みが無い指摘だけAIに作らせるが、同時に届くと両方が作るため
+ */
+const inflightRecommendations = new Map<string, Promise<{ res: Response; body: Record<string, unknown> }>>();
+
+function fetchRecommendationsShared(request: string, payload: Record<string, unknown>) {
+  const existing = inflightRecommendations.get(request);
+  if (existing) return existing;
+  const promise = fetch("/api/repositories/release/review-recommendations", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  })
+    .then(async (res) => ({ res, body: ((await res.json().catch(() => ({}))) ?? {}) as Record<string, unknown> }))
+    .finally(() => inflightRecommendations.delete(request));
+  inflightRecommendations.set(request, promise);
+  return promise;
+}
+
+/**
  * 未判断（と前提が変わった判断）の指摘についてAIの推奨をまとめて取得する（#4676）。サーバーは対象ごとに
  * 保存済みの推奨を返し、無い指摘だけAIに作らせる。判断を保存して対象の指摘が減っても、残りは保存済みを返すだけ
  */
@@ -159,25 +179,21 @@ export function useReleaseReviewRecommendations(input: {
     if (!key || !request || !target || pullRequestNumber === undefined) return;
     let cancelled = false;
     const [owner, repo] = repositoryFullName.split("/");
-    fetch("/api/repositories/release/review-recommendations", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ owner, repo, pullRequestNumber, baseSha: target.baseSha, headSha: target.headSha, retry: retryTick > 0 }),
-    })
-      .then(async (res) => {
-        const body = await res.json().catch(() => ({}));
+    fetchRecommendationsShared(request, { owner, repo, pullRequestNumber, baseSha: target.baseSha, headSha: target.headSha, retry: retryTick > 0 })
+      .then(({ res, body }) => {
         if (cancelled) return;
         if (!res.ok) {
+          const serverMessage = typeof body.message === "string" ? body.message : null;
           const message =
             res.status === 403
               ? "この環境ではAIの推奨を取得できません"
               : res.status === 409
-                ? (body.message ?? "リリース候補が更新されました。画面を更新してください")
-                : (body.message ?? `AIの推奨を取得できませんでした (${res.status})`);
+                ? (serverMessage ?? "リリース候補が更新されました。画面を更新してください")
+                : (serverMessage ?? `AIの推奨を取得できませんでした (${res.status})`);
           setState({ key, request, view: null, error: message });
           return;
         }
-        setState({ key, request, view: body as ReleaseReviewRecommendationsView, error: null });
+        setState({ key, request, view: body as unknown as ReleaseReviewRecommendationsView, error: null });
       })
       .catch(() => {
         if (!cancelled) setState({ key, request, view: null, error: "AIの推奨を取得できませんでした（通信に失敗しました）" });

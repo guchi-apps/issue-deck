@@ -97,6 +97,31 @@ describe("deriveAutoMergeOutlook", () => {
     expect(outlook?.reason).toContain("マージ前の確認待ち");
   });
 
+  it("「修正を自動で続ける」が動いている修正PRは、残った確認待ちを人の番として出さない（#5138）", () => {
+    const pullRequest = pr({ linkedIssueCheckUser: true, linkedIssueCheckReason: "blocked", releaseAutoFix: { candidatePrNumber: 5160 } });
+    const outlook = deriveAutoMergeOutlook(pullRequest);
+    expect(outlook?.kind).toBe("expected");
+    expect(outlook?.reason).toContain("自動修正中（リリース候補 #5160");
+    expect(outlook?.reason).not.toContain("ユーザー確認待ち");
+    expect(requiresUserMerge(pullRequest)).toBe(false);
+    const primary = derivePrimaryState(pullRequest);
+    expect(primary.label).toBe("自動修正中");
+    expect(primary.needsAction).toBe(false);
+  });
+
+  it("系列が動いていても、レビューの要修正など確認待ち以外の理由はそのまま出す", () => {
+    const outlook = deriveAutoMergeOutlook(
+      pr({
+        linkedIssueCheckUser: true,
+        linkedIssueCheckReason: "blocked",
+        releaseAutoFix: { candidatePrNumber: 5160 },
+        reviewVerdict: { reviewKind: "changes-requested", reviewedSha: null } as PullRequestSummary["reviewVerdict"],
+      }),
+    );
+    expect(outlook?.kind).toBe("manual");
+    expect(outlook?.reason).toContain("レビューが要修正です");
+  });
+
   it("判定の記録が無ければ、されません", () => {
     const outlook = deriveAutoMergeOutlook(
       pr({ mergeJudgement: { state: "unknown", step: null, runUrl: null, aiReview: AI_REVIEW_NONE } }),

@@ -30,6 +30,7 @@ import type { IosPrecheckSummary } from "@/lib/github/ios-precheck";
 import { isReleasePullRequest } from "@/lib/release-merge-gate";
 import { DEVELOP_SYNC_BRANCH_PREFIX } from "@/lib/release-develop-sync";
 import { developSyncAutoMergeOutlook } from "@/lib/release-develop-sync-run";
+import { fetchReleaseAutoFixIssues, releaseAutoFixKey } from "@/lib/release-auto-fix-pull-requests";
 import { fetchRepairWorkflowAvailability } from "@/lib/github/repair-workflow-cache";
 import { fetchReleaseChecks, releaseChecksKey } from "@/lib/pull-request-release-checks";
 import { checkUserIssueKey, fetchCheckUserIssueReasons } from "@/lib/pull-request-check-user";
@@ -255,6 +256,18 @@ export async function fetchPullRequestListForUser(
   for (const pullRequest of allPullRequests) {
     if (pullRequest.state !== "open" || pullRequest.baseRef !== "develop" || !pullRequest.headRef.startsWith(DEVELOP_SYNC_BRANCH_PREFIX)) continue;
     pullRequest.developSyncAutoMerge = developSyncAutoMergeOutlook(pullRequest.repositoryFullName, pullRequest.number, pullRequest.headSha);
+  }
+
+  // 「修正を自動で続ける」が動いている修正Issueの修正PR（#5138）。DBを引くだけ
+  const autoFixIssues = await fetchReleaseAutoFixIssues(
+    allPullRequests.filter((pullRequest) => pullRequest.state === "open" && pullRequest.linkedIssueNumber !== null).map((pullRequest) => pullRequest.repositoryFullName),
+  ).catch((error: unknown) => {
+    console.error("[pull-request-list] 修正の自動継続の取得に失敗しました", error);
+    return new Map<string, { candidatePrNumber: number }>();
+  });
+  for (const pullRequest of allPullRequests) {
+    if (pullRequest.state !== "open" || pullRequest.linkedIssueNumber === null) continue;
+    pullRequest.releaseAutoFix = autoFixIssues.get(releaseAutoFixKey(pullRequest.repositoryFullName, pullRequest.linkedIssueNumber)) ?? null;
   }
 
   // リリース候補PRのiOS事前検証（#4602）。通常PRには引かず、候補（リポジトリごとに高々1本）だけ

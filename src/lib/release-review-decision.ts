@@ -66,7 +66,7 @@ export type ReleaseReviewDecisionRecord = {
   /** 判断時に表示していたAIの推奨（#4676）。推奨が無かった・#4676より前の判断はnull */
   recommendation?: { decision: ReleaseReviewDecisionKind; reason: string } | null;
   /** 理由の出どころ（`ai`＝AIの理由案のまま／`ai_edited`／`manual`）。#4676より前の判断はnull */
-  reasonSource?: "ai" | "ai_edited" | "manual" | null;
+  reasonSource?: "ai" | "ai_edited" | "manual" | "fallback" | null;
 };
 
 /** 判断の対象になる指摘（AIの原判定のうち、判断の有効性を決めるのに要るところだけ） */
