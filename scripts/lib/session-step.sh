@@ -130,7 +130,9 @@ session_step_classify() {
     Read | Grep | Glob | WebFetch | WebSearch | Agent | Task | Explore)
       printf 'EXPLORING'
       ;;
-    Artifact)
+    # Claude Code本体がセッションの途中で`Artifact`をMCPサーバー`claude-artifacts`の
+    # ツールへ差し替えることがある（#5144）。公開の2つだけを拾う
+    Artifact | mcp__claude-artifacts__publish_files | mcp__claude-artifacts__publish_version)
       printf 'ARTIFACT'
       ;;
     Bash | BashOutput)
