@@ -103,6 +103,11 @@ async function handleGET() {
     repositories.map((repository) => repository.fullName),
   );
 
+  // 過去のリリースの版（#5154）。PR番号→版。取れなくても版無しで出せるので失敗は握りつぶす
+  const releasedVersionByPrByRepository = await loadReleasedVersionsByPr(
+    repositories.map((repository) => repository.fullName),
+  );
+
   // 開いたPRに載らない候補（作成中・マージ後）の記録（#5076）。PR一覧の`releaseChecks`と同じ形で渡し、
   // ブランチ画面が同じ工程として追う。読めなければ載せない（開いた候補PRの工程は`releaseChecks`から出る）
   const detachedByRepository = await loadDetachedRcFacts(repositories.map((repository) => repository.fullName)).catch((error) => {
@@ -149,6 +154,7 @@ async function handleGET() {
           mainHead: lookup.mainHead,
           developHeadOid: lookup.developHeadOid,
           releasedVersion: releasedVersionByRepository.get(repository.fullName) ?? null,
+          releasedVersionByPr: releasedVersionByPrByRepository.get(repository.fullName),
           releaseRc: detachedByRepository.get(repository.fullName) ?? null,
         };
       } catch (error) {
@@ -182,6 +188,42 @@ async function loadReleasedVersions(repositoryFullNames: string[]): Promise<Map<
     }
   } catch (error) {
     console.error("[GET /api/branch-flow] released version lookup failed", error);
+  }
+  return byRepository;
+}
+
+/**
+ * リポジトリごとに、公開した版をリリースPR番号で引く表を返す（#5154）。
+ * 対応は「`applied`の公開準備（finalization）のPR番号」と「その予約版が`consumed`」の一致に限る。
+ * 取消候補のように公開準備を経ずに`consumed`になった版や、`superseded`/`failed`/`expired`の行は使わない
+ * （引けないPRは見出しが「リリース済み」のまま）。
+ */
+async function loadReleasedVersionsByPr(
+  repositoryFullNames: string[],
+): Promise<Map<string, Record<number, string>>> {
+  const byRepository = new Map<string, Record<number, string>>();
+  try {
+    const [consumed, finalizations] = await Promise.all([
+      db.releaseVersionReservation.findMany({
+        where: { repositoryFullName: { in: repositoryFullNames }, status: "consumed" },
+        select: { repositoryFullName: true, version: true },
+      }),
+      db.releaseCandidateFinalization.findMany({
+        where: { repositoryFullName: { in: repositoryFullNames }, status: "applied", reservedVersion: { not: null } },
+        orderBy: { createdAt: "asc" },
+        select: { repositoryFullName: true, prNumber: true, reservedVersion: true },
+      }),
+    ]);
+    const consumedKeys = new Set(consumed.map((row) => `${row.repositoryFullName}\u0000${row.version}`));
+    for (const row of finalizations) {
+      if (row.reservedVersion === null) continue;
+      if (!consumedKeys.has(`${row.repositoryFullName}\u0000${row.reservedVersion}`)) continue;
+      const table = byRepository.get(row.repositoryFullName) ?? {};
+      table[row.prNumber] = row.reservedVersion;
+      byRepository.set(row.repositoryFullName, table);
+    }
+  } catch (error) {
+    console.error("[GET /api/branch-flow] released version by PR lookup failed", error);
   }
   return byRepository;
 }
