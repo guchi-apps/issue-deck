@@ -1143,6 +1143,7 @@ done
 | `guchi-apps/issue-deck` | v2 | ○ |
 | `guchi-apps/dayspan` | —（※） | ○ |
 | `guchi-apps/shopping-list` | —（※） | **運用終了**（#2435。サブPCのチェックアウト・worktreeと`~/.config/issue-deck/local-repos.conf`の行は残るが、アーカイブ後はIssueが読み取り専用になり起動する対象が無い。ポート帯7000は[scripts/local-repo-ports.conf](../scripts/local-repo-ports.conf)にコメント化して予約したまま残す） |
+| `guchi-apps/stockly` | — | **運用終了**（#5157。起点は guchi-apps/stockly#158。サブPCのチェックアウト・worktreeは残るため、ポート帯28000は[scripts/local-repo-ports.conf](../scripts/local-repo-ports.conf)にコメント化して予約したまま残す） |
 | `guchi-apps/meisai-lab` | — | ○ |
 | `guchi-apps/car-care` | — | ○ |
 | `guchi-apps/subscription-lists` | — | **運用終了**（#3293。サブPCのチェックアウト・worktreeと`~/.config/issue-deck/local-repos.conf`の行は残るが、アーカイブ後はIssueが読み取り専用になり起動する対象が無い。ポート帯12000は[scripts/local-repo-ports.conf](../scripts/local-repo-ports.conf)にコメント化して予約したまま残す） |
