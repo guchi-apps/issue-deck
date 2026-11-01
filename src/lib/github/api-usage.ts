@@ -91,6 +91,8 @@ export const GITHUB_API_FEATURES = [
   // PR詳細の「最新のbaseを取り込む」「CIを再実行」（#4626）。押したときだけ消費する。
   { key: "pull_request_update_branch", label: "PRへの最新baseの取り込み" },
   { key: "pull_request_ci_rerun", label: "PRのCI再実行" },
+  // PR詳細の「AIレビューを再実行」（#5158）。押したときだけ消費する。
+  { key: "pull_request_review_rerun", label: "PRのAIレビュー再実行" },
   { key: "pull_request_review_ack", label: "レビュー指摘の確認済み記録" },
   { key: "pull_request_repair", label: "PRの自動修復の起動" },
   // PR詳細の対応パネル（#4482）。レビュー指摘への修正を紐づくIssueへ依頼したときだけ消費する。

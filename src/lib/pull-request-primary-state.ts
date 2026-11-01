@@ -179,7 +179,7 @@ export function derivePrimaryState(pullRequest: PullRequestSummary): PrimaryStat
     );
   }
   if (review === "needs-check") {
-    return state("review-findings", "レビュー要確認", "warn", "自動レビューが判断の要る指摘を挙げています。指摘を読み、AIへの修正依頼かこのままマージするかを選びます", {
+    return state("review-findings", "レビュー要確認", "warn", "自動レビューが、人の確認が要る点を挙げています（不具合の指摘ではありません）。内容を確かめ、このままマージするか修正するかを選びます", {
       needsAction: true,
       repairKinds,
     });
