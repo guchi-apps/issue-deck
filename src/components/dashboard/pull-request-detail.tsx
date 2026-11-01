@@ -2,7 +2,7 @@
 
 import { useState, type CSSProperties } from "react";
 import { isReleaseCandidateHeadRef } from "@/lib/release-branch";
-import { ExternalLink, MessageSquareText, RefreshCw, Wrench } from "lucide-react";
+import { CheckCircle2, ExternalLink, MessageSquareText, RefreshCw, Wrench } from "lucide-react";
 import { showsPullRequestFixIssueButton } from "@/lib/github/pull-request-release-fix-issue";
 
 import { DeployFailureAlert } from "@/components/dashboard/deploy-failure-alert";
@@ -641,7 +641,23 @@ export function PullRequestDetail({
               className="mb-3"
             />
             {/* CI・AIレビューの状況は縦並びのアコーディオン（#5171）。行の見出しに状態を常に出し、押すと内訳が開く */}
-            <div className="min-w-0 divide-y overflow-hidden rounded-md border" data-testid="pull-request-checks-accordion">
+            {/* CI行・AIレビュー行がどちらも無いと、このタブが空白になり「指摘が無い」のか「読み込めていない」のか分からない（#5187） */}
+            {!showsCiRow &&
+              !(pullRequest.mergeJudgement.aiReview?.state && pullRequest.mergeJudgement.aiReview.state !== "none") && (
+                <div
+                  className="flex items-center gap-2 rounded-md border bg-muted/30 px-3 py-3 text-sm"
+                  data-testid="pull-request-no-findings"
+                >
+                  <CheckCircle2 aria-hidden className="size-4 shrink-0 text-emerald-600" />
+                  <div>
+                    <p className="font-medium">指摘はありません</p>
+                    <p className="text-xs text-muted-foreground">
+                      CI・レビューの対象外のため、対応が必要な指摘はありません。
+                    </p>
+                  </div>
+                </div>
+              )}
+            <div className="min-w-0 divide-y overflow-hidden rounded-md border empty:hidden" data-testid="pull-request-checks-accordion">
               {showsCiRow && (
                 <div>
                   <CiStatusButton
