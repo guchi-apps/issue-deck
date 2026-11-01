@@ -364,7 +364,13 @@ export function IosReleaseGroupPanel({
     // この版の実行（失敗・完了の時刻と、失敗時の段階・理由を読む）。実行中は版を問わず走っているもの
     const versionRun =
       state.kind === "running" ? data.runs.find((run) => run.status !== "completed") : data.runs.find((run) => run.headSha === sha);
-    const headline = describeIosDistributionHeadline(state, versionRun?.stages ?? null);
+    const headline = describeIosDistributionHeadline(
+      state,
+      versionRun?.stages ?? null,
+      data.latestDeliveredBuild
+        ? { buildNumber: data.latestDeliveredBuild.buildNumber, version: data.latestDeliveredBuild.version ?? null }
+        : null,
+    );
     const tone = SUMMARY_TONE_CLASS[headline.tone];
     const reason = state.kind === "failed" ? versionRun?.notes[0] : undefined;
     const finishedAt =
