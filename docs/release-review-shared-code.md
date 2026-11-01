@@ -22,6 +22,19 @@
 - 取得失敗は「権限不足」「通信失敗」「資料未取得（許可外・PR無し）」に分類して残す。スクリプトが予期せず異常終了しても空資料にせず、「取得不能」の資料と指紋をレビュー入力へ残す。「実設定不足」「実コードの欠陥」はAIが資料を読んで分類する。
 - 指紋（SHA・状態・デプロイ・失敗分類・判定器の版`JUDGE_VERSION`。取得日時は除く）を既存の証跡指紋へ連結する。連携先の証跡があるときは、旧文言を含む全ての未確認が指紋の変化で再評価され、確認済みだけが再利用される（`INTEGRATION_EVIDENCE_ACTIVE`）。指紋が同じなら再利用する。
 
+# 明示参照の無い既存APIの受信口（#5192）
+
+別repoの既存APIを呼ぶ候補には、受信口の実装を指す`owner/repo#番号`が無いことがある（work-relay PR #388のAIDE `POST /api/news-mail/send`。実装はaide#257だが候補は#744しか参照しない）。参照からは受信口のコードに届かないため、`scripts/release-review-integrations.py`の`discover_contracts`が次の**コードと対応表だけ**から特定する。
+
+- **発見の根拠**: 候補が変更したソース（テスト・ドキュメントは除く）の1ファイルが、(1) `.github/secrets-manifest.tsv`で`op://apps/<app>/base-url`（`*-base-url`・`api-url`も可）を指す環境変数を読み、(2) `${式}/api/x`・`式 + "/api/x"`・`new URL("/api/x", 式)`の形で固定パスを足していること。PR本文・コメント・`.md`の記述は発見の材料にしない。提供側は候補と同じowner（許可リスト内）に限り、コード中のURL文字列は辿らない。動的なパス（`/api/x/${id}`）は対象外。`SOURCE`列が提供側の`op://`を指さないリポジトリでは発見されない（取り違えるより取りこぼす側に倒している）。
+- **取り違えの防止**: 受信口はファイルベースのルート（`src/app/api/x/route.ts`。ルートグループは無視）か、入口ファイル（`src/server.ts`など）にある**完全一致のパス文字列**だけを根拠にする。入口ファイルからは受信口の直後の数行に現れるimportだけを処理本体とし、別パスの分岐の処理は載せない。1ファイルが複数の提供側を読むときは呼び先を決めつけず取得もしない。
+- **取得**: 処理本体から相対importを深さ2・1受信口14ファイルまで（型だけのimportは除く）。受信口は最大6件。省略は`omittedFiles`・`omittedContracts`へ残す。秘密値の行・ファイルの除外は#4975と同じ。
+- **2つの時点**: `codeAtDeployCandidate`は最新のデプロイworkflow成功runのSHA（無ければmainの先端で、`deployCandidate.kind`にデプロイ済みと言えないことを書く）。`codeAtImplementation`は処理本体のファイルを最初に追加したコミットを含むPRのマージSHA。どちらも稼働SHAの確認ではない。
+- **失敗の扱い**: 権限不足・通信失敗・受信口が見つからない（`資料未取得`）を`classification`に残し、コードは載せない。AIには適合とも欠陥ともしないよう指示する。実送信と稼働SHAは別の証拠が無ければ未確認のまま。
+- **再評価**: `apiContracts`は証跡の指紋に入り、`JUDGE_VERSION`も上げてある。poller更新後に全体レビューを再実行すると、保存済みの未確認は指紋の不一致で捨てられて再評価され、確認済みだけが再利用される。指摘0件でも未確認があれば合格にならない条件は変えていない。
+
+実走（2026-11-01、work-relay PR #388 base `6d42f6a7` / head `ed2e1858`）: `guchi-apps/aide#744`の資料に加えて`/api/news-mail/send`を発見元`src/app/api/news-mail/send/route.ts:69`・`AIDE_NEWS_MAIL_URL`で特定し、デプロイ候補`aa55e4bd`と実装時点`76bd2a35`（PR #258）の両方で`src/server.ts`（301行目）・`src/api/news-mail.ts`・`src/api/secret.ts`・`src/core/connectors/news-mail/send.ts`・`idempotency.ts`などを取得した。全体レビューAIによるRC #388自体の再評価は、poller更新後の再実行で行う。
+
 ## 適用範囲（2026-10-24時点）
 
 共通ランナー（`run-release-review.sh`）とcallerの参照タグは同一で、共通修正だけで全管理対象に適用される。callerは`reusable-release-develop-to-main.yml@workflows/v54`を参照する15リポジトリ（aide・asset-manager・car-care・clip-hive・db-console・kurashio・meisai-lab・morrow・pi0w・signaly・solitaire・status-hub・stockly・work-relay・yoteiflow）で、独立のrelease-review実装は見つかっていない。このため子Issueは起案していない（個別修正が必要と分かったrepoだけ起案する）。タグの参照が同じでも、実行ホスト（サブPC）のrunnerは「更新して再起動」で更新するまで旧版のまま。
