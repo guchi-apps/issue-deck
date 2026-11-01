@@ -332,7 +332,13 @@ export function PullRequestDetail({
     !pullRequest.merged &&
     pullRequest.kind !== "release" &&
     pullRequest.kind !== "version-bump";
-  const findingsNeedAttention = primary.kind === "ci-failed" || primary.kind === "review-findings";
+  // 指摘タブの印（#5158）。CI失敗・要修正は赤、要確認（人の確認待ち）は不具合ではないので赤を出さず別の色にする
+  const findingsAttention: "bad" | "check" | null =
+    primary.kind === "ci-failed" || (primary.kind === "review-findings" && primary.tone === "bad")
+      ? "bad"
+      : primary.kind === "review-findings" && primary.tone === "warn"
+        ? "check"
+        : null;
   // 上部の「指摘に対応する」。指摘タブを開いてレビュー本文も開き、対応パネルの位置まで移動する
   const openReviewResponse = () => {
     selectTab("findings");
@@ -589,8 +595,11 @@ export function PullRequestDetail({
               )}
             >
               {DETAIL_TAB_LABEL[tab]}
-              {tab === "findings" && findingsNeedAttention && (
+              {tab === "findings" && findingsAttention === "bad" && (
                 <span aria-label="対応が必要" className="size-2 rounded-full bg-destructive" />
+              )}
+              {tab === "findings" && findingsAttention === "check" && (
+                <span aria-label="確認が必要" className="size-2 rounded-full bg-sky-500" />
               )}
             </button>
           ))}
