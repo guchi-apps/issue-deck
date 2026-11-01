@@ -26,6 +26,7 @@ import {
   fetchPullRequest,
   fetchPullRequestReviewComments,
   fetchPullRequestReviews,
+  settlePullRequestMergeable,
 } from "@/lib/github/pull-requests-api";
 import { fetchRefCheckState } from "@/lib/github/release-api";
 import { fetchRepairWorkflowAvailability } from "@/lib/github/repair-workflow-cache";
@@ -86,7 +87,11 @@ async function handleGET(request: NextRequest) {
   try {
     const token = await getInstallationToken(repository.installation.installationId);
     const [pullRequest, comments, reviews, reviewComments] = await Promise.all([
-      fetchPullRequest(owner, repo, number, token),
+      // マージ可否が未判定なら短く取り直す（#5178）。詳細はポーリングしないため、初回のnullを
+      // そのまま返すと「競合: 確認中」が再読み込みまで残る
+      fetchPullRequest(owner, repo, number, token).then((first) =>
+        settlePullRequestMergeable(first, () => fetchPullRequest(owner, repo, number, token)),
+      ),
       // PRの会話コメントはissueコメントと同じエンドポイントで取れる（GitHubではPRもissue）。
       fetchCommentsForIssue(owner, repo, number, token),
       fetchPullRequestReviews(owner, repo, number, token),

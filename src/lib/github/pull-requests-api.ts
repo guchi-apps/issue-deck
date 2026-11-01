@@ -177,6 +177,31 @@ export async function fetchPullRequest(
 }
 
 /**
+ * openなPRの`mergeable`が未判定（null）の間だけ、短い間隔で取り直す（#5178）。
+ *
+ * GitHubは単体取得を契機に非同期でマージ可否を計算するため、headが変わった直後の初回応答は
+ * nullになりやすい。PR詳細は自動ポーリングしないので、そのまま返すと「競合: 確認中」が
+ * 再読み込みまで残る。判定済み・closed・マージ済みなら取り直さない（API消費は増えない）。
+ * 取り直しても判定が出なければ、最後の応答（null）をそのまま返す。成功とは推測しない。
+ */
+export async function settlePullRequestMergeable<T extends { state: string; merged?: boolean; mergeable: boolean | null }>(
+  first: T,
+  refetch: () => Promise<T>,
+  options: { attempts?: number; delayMs?: number; sleep?: (ms: number) => Promise<void> } = {},
+): Promise<T> {
+  const attempts = options.attempts ?? 2;
+  const delayMs = options.delayMs ?? 1_000;
+  const sleep = options.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+  let current = first;
+  for (let i = 0; i < attempts; i++) {
+    if (current.state !== "open" || current.merged === true || current.mergeable !== null) return current;
+    await sleep(delayMs);
+    current = await refetch();
+  }
+  return current;
+}
+
+/**
  * レビュー（Approve・変更要求・コメントの送信単位）。issue-deckの無人実行は`gh pr comment`で
  * 会話コメントを投稿するため大半のPRでは空配列になるが、人手のレビューを取りこぼさないよう取得する。
  */

@@ -70,7 +70,9 @@ function ReleaseCandidateChecks({ pullRequest }: { pullRequest: PullRequestSumma
     nowMs: now ?? 0,
   });
   // リリースPR自身にはCI・コードレビューが無く常に未実施になるため出さない（#4859）
-  const checks = buildMergeChecks({ ...cellsFromSummary(pullRequest), release }).filter((c) => c.key !== "ci" && c.key !== "code");
+  const checks = buildMergeChecks({ ...cellsFromSummary(pullRequest), release })
+    .filter((c) => c.key !== "ci" && c.key !== "code")
+    .map(withPublishNoteOnPendingConflict);
   const open = checks.find((check) => check.key === openKey) ?? null;
   // 自分自身が候補として見つからないとき、別の候補（古い候補など）の結果を現在値として出さない
   const candidateIsSelf = release.candidate?.number === pullRequest.number;
@@ -93,6 +95,19 @@ function ReleaseCandidateChecks({ pullRequest }: { pullRequest: PullRequestSumma
       {open && <CheckDetail check={candidateIsSelf || !open.common ? open : unavailable(open)} />}
     </div>
   );
+}
+
+/** 競合が判定中のときに出す、公開承認との関係（#5178） */
+export const PENDING_CONFLICT_PUBLISH_NOTE =
+  "GitHubが競合を計算中です。成功とは扱いませんが、公開承認は押せます。本番mainへのマージ直前にGitHubの判定を取り直し、判定が出るまで待ちます（競合ありなら止まります）";
+
+/**
+ * 競合が「確認中」のとき、公開承認へ進んでよいかが分かる理由文に差し替える（#5178）。
+ * 承認後のマージは`decideCompletionMerge`が判定中なら待ち、競合ありなら止めるため、承認自体は止めない
+ */
+function withPublishNoteOnPendingConflict(check: MergeCheckItem): MergeCheckItem {
+  if (check.key !== "conflict" || check.state !== "確認中") return check;
+  return { ...check, reason: PENDING_CONFLICT_PUBLISH_NOTE };
 }
 
 /** 候補の取得結果にこのPRが無いときの共通結果。成功・失敗のどちらとも扱わない */
