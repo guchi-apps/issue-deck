@@ -55,6 +55,7 @@ import { formatDateTime, formatDateTimeFull } from "@/lib/format-date-time";
 import { formatRelativeDate } from "@/lib/format-relative-date";
 import { sessionUsageModelLabel } from "@/lib/session-usage-view";
 import { cn } from "@/lib/utils";
+import { ALIGN_CLASS, type Align } from "@/lib/align-class";
 
 /**
  * 起動したセッションの様子を出す（#1264）と、そこから止める（#1332）。
@@ -129,7 +130,7 @@ export function IssueSessionStatus({
   /** 画面で1回だけ取ったディスパッチの状態（#1262）。停止・終了もこの経路で積む */
   dispatch: DispatchStateHandle;
   /** 横並びのツールバー（PC）では右寄せ、縦積み（スマホ）では左寄せ */
-  align?: "start" | "end";
+  align?: Align;
   /**
    * このセッションを立てた起動ジョブ（#1676）。**渡されたときは、その行をここへ畳む。**
    *
@@ -321,7 +322,9 @@ export function IssueSessionStatus({
     <div
       className={cn(
         "flex w-full flex-col gap-1",
-        align === "end" ? "items-end" : "items-start",
+        ALIGN_CLASS[align].items,
+        // PC幅では状態の行と出口の行を同じ行へ並べ、横幅を使う（#5165）
+        align === "responsive" && "md:flex-row md:flex-wrap md:items-center md:gap-x-3",
       )}
     >
       {/* 畳んだ1行（#1676）。起動ジョブの行（「サブPCで起動しました」）はここへ畳んでいる。
@@ -329,7 +332,8 @@ export function IssueSessionStatus({
       <div
         className={cn(
           "flex w-full flex-wrap items-center gap-x-2 gap-y-1",
-          align === "end" ? "justify-end" : "justify-start",
+          ALIGN_CLASS[align].justify,
+          align === "responsive" && "md:w-auto",
         )}
       >
         <span
@@ -405,7 +409,7 @@ export function IssueSessionStatus({
         <p
           className={cn(
             "w-full break-words text-xs text-muted-foreground",
-            align === "end" ? "text-right" : "text-left",
+            ALIGN_CLASS[align].text,
           )}
         >
           {summary.detail}
@@ -437,7 +441,7 @@ export function IssueSessionStatus({
         <p
           className={cn(
             "w-full break-words text-xs text-muted-foreground",
-            align === "end" ? "text-right" : "text-left",
+            ALIGN_CLASS[align].text,
           )}
         >
           {reapNotice.detail}
@@ -450,7 +454,8 @@ export function IssueSessionStatus({
         <div
           className={cn(
             "flex w-full flex-wrap gap-2",
-            align === "end" ? "justify-end" : "justify-start",
+            ALIGN_CLASS[align].justify,
+            align === "responsive" && "md:w-auto",
           )}
         >
           {sessionOpenTarget && (
@@ -531,7 +536,7 @@ export function IssueSessionStatus({
           id={controlsId}
           className={cn(
             "flex w-full flex-col gap-1",
-            align === "end" ? "items-end" : "items-start",
+            ALIGN_CLASS[align].items,
             // 出口（アプリで開く・アプリで答える）と操作を線で分ける（#3108）。出口の行が無いときは
             // すぐ上が状態のピルなので、線は引かない
             hasExitRow && "mt-1 border-t pt-2.5",
@@ -542,7 +547,7 @@ export function IssueSessionStatus({
           <div
             className={cn(
               "flex w-full flex-nowrap gap-2",
-              align === "end" ? "justify-end" : "justify-start",
+              ALIGN_CLASS[align].justify,
             )}
           >
             {showInterrupt && (
@@ -651,7 +656,7 @@ export function IssueSessionStatus({
               <p
                 className={cn(
                   "w-full break-words text-xs text-muted-foreground",
-                  align === "end" ? "text-right" : "text-left",
+                  ALIGN_CLASS[align].text,
                 )}
               >
                 {describeSessionControlRejection(instructionRejection, {
@@ -666,7 +671,7 @@ export function IssueSessionStatus({
             <p
               className={cn(
                 "w-full break-words text-xs text-muted-foreground",
-                align === "end" ? "text-right" : "text-left",
+                ALIGN_CLASS[align].text,
               )}
             >
               {describeSessionControlRejection(killRejection, {
@@ -681,7 +686,7 @@ export function IssueSessionStatus({
             <div
               className={cn(
                 "flex w-full flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground",
-                align === "end" ? "justify-end" : "justify-start",
+                ALIGN_CLASS[align].justify,
               )}
             >
               {launchJob && (
@@ -705,7 +710,7 @@ export function IssueSessionStatus({
         <p
           className={cn(
             "w-full break-words text-xs",
-            align === "end" ? "text-right" : "text-left",
+            ALIGN_CLASS[align].text,
             describeDispatchJobStatus(controlJob.status, controlJob.kind).tone === "error"
               ? "text-destructive"
               : "text-muted-foreground",
@@ -725,7 +730,7 @@ export function IssueSessionStatus({
         <p
           className={cn(
             "w-full break-words text-xs text-muted-foreground",
-            align === "end" ? "text-right" : "text-left",
+            ALIGN_CLASS[align].text,
           )}
         >
           {controlJob.message}
@@ -735,7 +740,7 @@ export function IssueSessionStatus({
         <p
           className={cn(
             "w-full break-words text-xs text-destructive",
-            align === "end" ? "text-right" : "text-left",
+            ALIGN_CLASS[align].text,
           )}
         >
           {controlError}

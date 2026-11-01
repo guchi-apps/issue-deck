@@ -14,6 +14,7 @@ import {
 import type { DispatchHostView, DispatchJobView } from "@/lib/dispatch/dispatch-job";
 import { formatDispatchHostName } from "@/lib/dispatch/host-label";
 import { cn } from "@/lib/utils";
+import { ALIGN_CLASS, type Align } from "@/lib/align-class";
 
 /**
  * CodexのRemote Control相当（#2524）。ペアリングコードを発行するボタンと、出てきたコード。
@@ -68,7 +69,7 @@ export function CodexPairingControl({
   ) => Promise<{ ok: true } | { ok: false; message: string }>;
   /** どこに置いているか。**文言とボタンの大きさだけが変わる**（送るものは同じ） */
   context?: CodexPairingContext;
-  align?: "start" | "end";
+  align?: Align;
   /**
    * エージェント行に置く小さい接続ボタン（#3228）。結果はボタンの下に表示する。
    * 横幅が狭く説明文が数行に折り返して行を押し広げるため、「どこへ繋がるか」の説明文は出さない（#3238）。
@@ -132,7 +133,6 @@ export function CodexPairingControl({
   }
 
   const compact = context === "host";
-  const alignEnd = align === "end";
 
   return (
     <div
@@ -141,7 +141,7 @@ export function CodexPairingControl({
         // ホストのカードでは従来の見た目を変えない（#2524のまま）。Issueの画面では
         // 隣の「Claude Codeアプリで開く」と同じ幅で並べる
         inline ? "w-[108px] shrink-0" : compact ? "mt-1.5" : "w-full",
-        alignEnd ? "items-end" : "items-start",
+        ALIGN_CLASS[align].items,
         className,
       )}
     >
@@ -188,7 +188,7 @@ export function CodexPairingControl({
         <span
           className={cn(
             "text-[11px]",
-            alignEnd ? "text-right" : "text-left",
+            ALIGN_CLASS[align].text,
             TONE_CLASS[notice.tone],
           )}
         >
@@ -202,7 +202,7 @@ export function CodexPairingControl({
         <span
           className={cn(
             "text-[11px] text-muted-foreground",
-            alignEnd ? "text-right" : "text-left",
+            ALIGN_CLASS[align].text,
           )}
         >
           {pairingHint(context, hostName)}

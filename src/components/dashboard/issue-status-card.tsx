@@ -214,7 +214,7 @@ export function IssueStatusCard({
             <IssueSessionStatus
               session={issueSession}
               dispatch={dispatch}
-              align="end"
+              align="responsive"
               launchJob={foldedLaunchJob}
               hideControls
             />
@@ -229,7 +229,7 @@ export function IssueStatusCard({
               dispatch={dispatch}
               actionsRun={workflowRun}
               onIssueUpdated={onIssueUpdated}
-              align="end"
+              align="responsive"
               onHandoff={handoffInMenu ? () => setHandoffOpen(true) : undefined}
             />
           )}
@@ -239,7 +239,7 @@ export function IssueStatusCard({
               「別のAIを選んで起動し直す」導線を2つ並べない）。生きているセッションには
               復旧の導線が無いので、従来どおりボタンを出す */}
           {issueSession && handoff && (
-            <div className="flex w-full justify-end">
+            <div className="flex w-full justify-end md:justify-start">
               <SessionHandoffButton
                 issue={issue}
                 session={issueSession}
@@ -255,7 +255,7 @@ export function IssueStatusCard({
             </div>
           )}
           {localOnly && (
-            <div className="flex w-full flex-wrap items-center justify-end gap-x-2 gap-y-1 text-xs">
+            <div className="flex w-full flex-wrap items-center justify-end gap-x-2 gap-y-1 text-xs md:justify-start">
               <span className="inline-flex w-fit items-center gap-1 rounded-full bg-muted px-2 py-0.5 font-medium text-muted-foreground ring-1 ring-inset ring-border">
                 <Server className="size-3.5" />
                 ローカルで対応中
@@ -265,9 +265,9 @@ export function IssueStatusCard({
               </span>
             </div>
           )}
-          <CodeReviewJobStatus issue={issue} dispatch={dispatch} align="end" />
+          <CodeReviewJobStatus issue={issue} dispatch={dispatch} align="responsive" />
           {(qaAnswerPending || hasCancelableRun) && (
-            <div className="flex flex-wrap items-center justify-end gap-2">
+            <div className="flex flex-wrap items-center justify-end gap-2 md:justify-start">
               {qaAnswerPending && (
                 <span className="inline-flex min-h-11 w-fit items-center gap-1.5 rounded-full bg-blue-500/15 px-3 py-1 text-xs font-medium text-blue-600 ring-1 ring-inset ring-blue-500 md:min-h-0 md:px-2.5 dark:text-blue-400">
                   {/* 待っているのは処理なのでアイコンを回す（#2309）。一覧の行・コメント欄の

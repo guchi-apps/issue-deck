@@ -40,6 +40,7 @@ import type { DispatchSessionView } from "@/lib/dispatch/session-state";
 import { isManualStepIssue } from "@/lib/github/approval-labels";
 import { parseRepositoryFullName } from "@/lib/local-session";
 import { cn } from "@/lib/utils";
+import { ALIGN_CLASS, type Align } from "@/lib/align-class";
 import type { Issue } from "@/types/issue";
 
 /** エージェントの表示名（メニューの見出し用）。`describeDispatchAgent`は起動ダイアログの
@@ -90,7 +91,7 @@ export function SessionRecoveryButton({
   actionsRun?: { status: string } | null;
   onIssueUpdated: (issue: Issue) => void;
   /** 横並びのツールバー（PC）では右寄せ、縦積み（スマホ）では左寄せ */
-  align?: "start" | "end";
+  align?: Align;
   /**
    * 「要約を引き継いで別のAIで続ける」（#3496）を開く。**渡されたときだけメニューへ項目を出す**（#3516）。
    * 別のAIを選んで起動し直す導線を、終了したセッションの行では復旧メニューの1つにまとめる。
@@ -211,7 +212,7 @@ export function SessionRecoveryButton({
     <div
       className={cn(
         "flex w-full flex-col gap-1",
-        align === "end" ? "items-end" : "items-start",
+        ALIGN_CLASS[align].items,
       )}
     >
       {/* スマホ（主な用途）では幅いっぱいにして押しやすくし、PCの列では文字幅に収める */}
