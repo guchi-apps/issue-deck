@@ -109,13 +109,6 @@ export type WorkflowTagStatus = {
    */
   outdatedSharedFiles: string[];
   /**
-   * リリース通知のenv（`SIGNALY_RELEASE_WEBHOOK_URL`）が入っていないワークフロー（#2421）。
-   * 判定は`missingReleaseWebhookWorkflows`。空なら不足なし。
-   *
-   * **配布物の更新と同じPRが運ぶ**ため、同じ軸として扱う（`sharedFilePropagationTargets`）。
-   */
-  missingReleaseWebhookWorkflows: string[];
-  /**
    * そのうち、配布先のコピーにしか無い記述を持つもの（上書きで消える）。**配布の対象からは
    * 外さず、画面とPR本文で目印にする**——独自の変更があるリポジトリこそ修正が届いていない。
    */
@@ -167,6 +160,8 @@ export function evaluateWorkflowTags(
     /** 配布先の内容。パス → 本文（置かれていなければ欠けるか`null`） */
     target?: Record<string, string | null>;
     pullRequest?: WorkflowTagPullRequest | null;
+    /** 配布物の定義。省略時は`SHARED_FILE_SPECS`（テストで差し替える） */
+    specs?: readonly SharedFileSpec[];
   } = {},
 ): WorkflowTagStatus {
   const latestVersion = latest === null ? null : parseWorkflowTagVersion(latest);
@@ -179,7 +174,11 @@ export function evaluateWorkflowTags(
 
   const mismatched = refs.some((ref) => ref.promptsRef !== null && ref.promptsRef !== ref.uses);
 
-  const shared = compareSharedFiles(sharedFiles.source ?? {}, sharedFiles.target ?? {});
+  const shared = compareSharedFiles(
+    sharedFiles.source ?? {},
+    sharedFiles.target ?? {},
+    sharedFiles.specs,
+  );
 
   return {
     fullName,
@@ -192,7 +191,6 @@ export function evaluateWorkflowTags(
     repairPullRequest: repair.pullRequest ?? null,
     outdatedSharedFiles: shared.outdated,
     customizedSharedFiles: shared.customized,
-    missingReleaseWebhookWorkflows: missingReleaseWebhookWorkflows(repair.contents ?? {}),
     sharedFilePullRequest: sharedFiles.pullRequest ?? null,
   };
 }
@@ -561,8 +559,8 @@ export function canStartRepairPropagation(run: PropagationRun | null): Propagati
  * `ci.yml`・`deploy.yml`から使っている（＝壊れればこのリポジトリのCIで先に分かる）ことも、
  * 実物を正にする根拠になる。
  *
- * 配布元と配布先でパスは同じ。`.github/scripts/signaly-notify.sh`は各リポジトリの
- * `.github/scripts/`へコピーして使う運用のため、コピー先も同じ位置になる。
+ * 配布元と配布先でパスは同じ。各リポジトリの`.github/scripts/`へコピーして使う運用の
+ * スクリプトを想定しており、コピー先も同じ位置になる。
  */
 export type SharedFileSpec = {
   /** 配布元（issue-deckの`main`）・配布先とも同じパス */
@@ -574,84 +572,25 @@ export type SharedFileSpec = {
 /**
  * 配布するファイル（#2240）。
  *
- * `signaly-notify.sh`は#2237・#2239で「通知が届かなくても`exit 0`で返す」形に直したが、
- * **各リポジトリの`.github/scripts/`へコピーして使う運用**のため、issue-deckを直しただけでは
- * 行き渡らない。直っていないリポジトリでは、Signalyが止まっている間にデプロイすると
- * **デプロイは成功しているのにrunだけが赤い**状態が残る。
- *
- * ここへ足すときは`.github/workflows/propagate-shared-files.yml`の許可リストも同じ内容にする
+ * **現在、配布物は無い。** 唯一の配布物だった通知スクリプトはSignaly廃止（#5180）で配布をやめた。
+ * 仕組みそのもの（画面・ワークフロー・配布スクリプト）は、次に配布物ができたときのために
+ * 残してある。足すときは`.github/workflows/propagate-shared-files.yml`と
+ * `.github/scripts/propagate-shared-files.sh`の許可リストも同じ内容にする
  * （食い違うと、画面から配ろうとしたファイルがワークフロー側で弾かれる）。
  */
-export const SHARED_FILE_SPECS: readonly SharedFileSpec[] = [
-  {
-    path: ".github/scripts/signaly-notify.sh",
-    label: "Signaly通知スクリプト",
-  },
-];
+export const SHARED_FILE_SPECS: readonly SharedFileSpec[] = [];
 
 /** パスから画面に出す説明を引く。未知のパスはそのまま返す */
-export function sharedFileLabel(path: string): string {
-  return SHARED_FILE_SPECS.find((spec) => spec.path === path)?.label ?? path;
+export function sharedFileLabel(
+  path: string,
+  specs: readonly SharedFileSpec[] = SHARED_FILE_SPECS,
+): string {
+  return specs.find((spec) => spec.path === path)?.label ?? path;
 }
 
-/**
- * 配布PRが運ぶもの1件ぶんの説明（#2421）。配布物のパスか、envを足すワークフロー名。
- *
- * 同じ配布PRが2種類のものを運ぶため、画面では1つの並びとして出す
- * （`sharedFilePropagationWork`の各要素をこれに通す）。
- */
+/** 配布PRが運ぶもの1件ぶんの説明。配布物のパスを画面向けの説明に変える */
 export function sharedFilePropagationLabel(item: string): string {
-  if (RELEASE_WEBHOOK_WORKFLOWS.some((file) => file === item)) {
-    return `${item}のリリース通知env`;
-  }
   return sharedFileLabel(item);
-}
-
-/**
- * リリース通知のenvを足す先のワークフロー（#2391・#2421）。
- *
- * `SIGNALY_RELEASE_WEBHOOK_URL`はGitHub Actionsのsecretなので、ワークフローが`env:`へ
- * 渡さないと通知スクリプトから読めない。**スクリプトの配布と同じPRが1行を運ぶ**
- * （`.github/scripts/propagate-shared-files.sh`）。
- */
-const RELEASE_WEBHOOK_WORKFLOWS = ["deploy.yml", "release.yml"] as const;
-
-/** 足すenvの名前。**スクリプト側の`RELEASE_ENV_LINE`と同じ名前**にする */
-const RELEASE_WEBHOOK_ENV = "SIGNALY_RELEASE_WEBHOOK_URL";
-
-/**
- * リリース通知のステップを持つか。
- *
- * 見分けるアンカーは`NOTIFY_KIND:`の値が`リリース`である行で、
- * **`.github/scripts/propagate-shared-files.sh`の挿入条件と同じ**にする（片方だけ緩めると、
- * 画面には「不足」と出るのに配布PRが何も足さない、という行き止まりになる）。
- *
- * コロンの後の空白は幅を問わず、行末のCRは無視する。桁揃えしているリポジトリ
- * （`guchi-apps/signaly`）と改行がCRLFのリポジトリ（`guchi-apps/asset-manager`）があるため。
- */
-function hasReleaseNotifyStep(source: string): boolean {
-  return source
-    .split("\n")
-    .some((line) => /^[ \t]*NOTIFY_KIND:[ \t]+リリース[ \t]*\r?$/.test(line));
-}
-
-/**
- * リリース通知のenvが入っていないワークフローを返す（#2421）。
- *
- * **リリース通知を出していないリポジトリは対象にしない。** アンカーの無いファイルへ足しても
- * 読む側がいない（`vps`・`subpc`・`aide`が該当する）。
- *
- * **画面の「配布が必要」判定を通知スクリプトの中身だけで決めていたのが漏れの原因**だった。
- * スクリプトが既に最新のリポジトリは対象に挙がらず、この1行だけが未適用の状態は画面から
- * 見えないまま残っていた（`asset-manager`・`signaly`の2件）。
- */
-export function missingReleaseWebhookWorkflows(contents: Record<string, string>): string[] {
-  return RELEASE_WEBHOOK_WORKFLOWS.filter((file) => {
-    const source = contents[file];
-    if (typeof source !== "string") return false;
-    if (!hasReleaseNotifyStep(source)) return false;
-    return !source.includes(RELEASE_WEBHOOK_ENV);
-  });
 }
 
 /** 語の切り出し。識別子・変数名・コマンド名を拾う（日本語のコメントは語として数えない） */
@@ -688,9 +627,8 @@ export type SharedFileComparison = {
 /**
  * 配布元（issue-deckの`main`）と配布先の内容を突き合わせる（#2240）。
  *
- * **配布先に置かれていないファイルは対象にしない。** `signaly-notify.sh`を呼ぶのは
- * `ci.yml`・`deploy.yml`側のステップなので、スクリプトだけを新規に置いても誰も呼ばない。
- * 呼び出し側ごと入れるのは「そのリポジトリにCI・デプロイ通知を導入する」作業で、
+ * **配布先に置かれていないファイルは対象にしない。** 配布物を呼ぶのは配布先のワークフロー側の
+ * ステップなので、スクリプトだけを新規に置いても誰も呼ばない。呼び出し側ごと入れるのは
  * 機械的な配布とは別物（callerの新規配布＝`propagate-repair-workflows`が受け持つ範囲とも違う）。
  *
  * **配布元が読めないファイルも対象にしない。** 中身が分からないまま「違う」と判定すると、
@@ -699,11 +637,12 @@ export type SharedFileComparison = {
 export function compareSharedFiles(
   source: Record<string, string | null>,
   target: Record<string, string | null>,
+  specs: readonly SharedFileSpec[] = SHARED_FILE_SPECS,
 ): SharedFileComparison {
   const outdated: string[] = [];
   const customized: string[] = [];
 
-  for (const spec of SHARED_FILE_SPECS) {
+  for (const spec of specs) {
     const sourceText = source[spec.path];
     const targetText = target[spec.path];
     if (typeof sourceText !== "string" || typeof targetText !== "string") continue;
@@ -743,7 +682,7 @@ export function findSharedFilePullRequest(
  * （`repairPropagationWorkflows`と同じ理由）。
  */
 export function sharedFilePropagationWork(status: WorkflowTagStatus): string[] {
-  return [...status.outdatedSharedFiles, ...status.missingReleaseWebhookWorkflows];
+  return [...status.outdatedSharedFiles];
 }
 
 /**
@@ -751,10 +690,6 @@ export function sharedFilePropagationWork(status: WorkflowTagStatus): string[] {
  *
  * 画面のボタンの件数とワークフローへ渡す対象は、必ずこの関数で揃える
  * （`propagationTargets`・`repairPropagationTargets`と同じ理由）。
- *
- * **配布物が最新でも、リリース通知のenvが欠けていれば対象にする**（#2421）。この1行は
- * 同じ配布PRが運ぶのに、判定を配布物の中身だけで決めていたため、`asset-manager`・`signaly`の
- * 2件が画面に出ないまま残っていた。
  */
 export function sharedFilePropagationTargets(statuses: WorkflowTagStatus[]): WorkflowTagStatus[] {
   return statuses.filter(

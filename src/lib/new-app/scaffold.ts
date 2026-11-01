@@ -9,7 +9,7 @@
  * Next.jsサーバーからは読めない（`deploy.yml`の`tar`を参照）。
  *
  * **issue-deck自身が実物を持っているファイルは、写しを作らずそのまま配る**
- * （`.github/scripts/signaly-notify.sh`など）。写しを置くと「実物を直したのに配られるのは
+ * （`.github/scripts/discord-alert.sh`など）。写しを置くと「実物を直したのに配られるのは
  * 古い写し」という食い違いが起こる（#2240で共有スクリプトの配布に同じ方針を採った）。
  * 実物を読むのは`lib/github/scaffold-api.ts`で、ここは**どれを配るかの宣言だけ**を持つ。
  *
@@ -75,7 +75,6 @@ function isNextKind(spec: NewAppSpec): boolean {
 export function scaffoldCopies(spec: NewAppSpec): ScaffoldCopy[] {
   const profile = newAppKindProfile(spec.kind);
   const copies: ScaffoldCopy[] = [
-    { source: ".github/scripts/signaly-notify.sh", path: ".github/scripts/signaly-notify.sh", executable: true },
     { source: ".github/scripts/discord-alert.sh", path: ".github/scripts/discord-alert.sh", executable: true },
     {
       source: "scripts/generate-workflow-env-block.sh",
@@ -230,8 +229,6 @@ function secretsManifest(spec: NewAppSpec): string {
   }
   rows.push(
     `# --- ${spec.repositoryName}固有 ---`,
-    "# TARGET_DIRはサーバー上のパス。単体では資格情報でないがVPSへの攻撃面になるためsecret。",
-    `TARGET_DIR\trepo\tsecret\tTARGET_DIR\t${item}/target-dir`,
   );
   if (profile.usesDatabase) {
     rows.push(`DB_NAME\trepo\tsecret\tDB_NAME\t${item}/db-name`);
@@ -239,15 +236,6 @@ function secretsManifest(spec: NewAppSpec): string {
   if (spec.auth === "supabase-google") {
     rows.push(`ALLOWED_GOOGLE_EMAILS\trepo\tsecret\tALLOWED_GOOGLE_EMAILS\t${item}/allowed-google-emails`);
   }
-  rows.push(
-    "#",
-    "# --- CI・デプロイ通知（organizationの共通値。#2255） ---",
-    "# 全リポジトリのCI・デプロイ結果を1つのチャンネルへ集約するため、値はorganizationに1つだけ",
-    "# ある。**repository secretを作ると同名のorganization secretを覆い隠す**ので inherit のままにする。",
-    "SIGNALY_WEBHOOK_URL\tinherit\tsecret\tSIGNALY_WEBHOOK_URL\t-",
-    "# リリース通知だけは別チャンネルへ分ける（guchi-apps/issue-deck#2391）。これも共通値。",
-    "SIGNALY_RELEASE_WEBHOOK_URL\tinherit\tsecret\tSIGNALY_RELEASE_WEBHOOK_URL\t-",
-  );
 
   return `# ${spec.repositoryName}のデプロイに必要な値を、GitHub側のどこから取るかを定めた対応表
 # （guchi-apps/issue-deck#1307）。
@@ -422,14 +410,6 @@ function envExample(spec: NewAppSpec): string {
       "DB_NAME=",
     );
   }
-  blocks.push(
-    "",
-    "# CI/デプロイ通知",
-    "SIGNALY_WEBHOOK_URL=",
-    "",
-    "# リリース通知（別チャンネル。未設定ならCI/デプロイと同じチャンネルへ送る）",
-    "SIGNALY_RELEASE_WEBHOOK_URL=",
-  );
   return `${blocks.join("\n")}\n`;
 }
 

@@ -138,7 +138,7 @@
 | リポジトリごとのActions secretsの登録 | `OP_SERVICE_ACCOUNT_TOKEN`・`CLAUDE_CODE_OAUTH_TOKEN`・`WORKFLOW_PAT`はorganizationに`visibility=all`で登録済み |
 | VPSへSSHしての置き場作成・`CREATE DATABASE`・`pm2 start`・certbot | `guchi-apps/vps`の「アプリをプロビジョニングする」ワークフローが実機の`scripts/provision-app.sh`を叩く（`guchi-apps/vps#132`） |
 | 2つの再同期（リポジトリ・Issue） | 立ち上げ自身が実行する（#2248・`lib/new-app/resync.ts`） |
-| Signalyのチャンネル作成とWebhook URLの登録 | `SIGNALY_WEBHOOK_URL`をorganization secretへ寄せた（#2255） |
+| Signalyのチャンネル作成とWebhook URLの登録 | Signalyを廃止したため通知自体が無い（#5180） |
 
 **手順は外しても、確認は残す。** ワイルドカードのAレコードと共通secretは`## 完了の確認方法`の
 コマンドとしてサブPCの手作業Issueへ移した（`sharedSecretCheck`・`wildcardDnsCheck`）。
@@ -276,7 +276,7 @@
 ### 1Passwordのアイテムは、コマンドで投入する（#2249）
 
 **フィールド名の羅列を手作業Issueに書かない。** `aide-bot`の立ち上げでは
-「`db-name = app_aide_bot / ci-webhook-url（Signaly）/ target-dir = /apps/aide-bot`」という
+「`db-name = app_aide_bot / ci-webhook-url / target-dir = /apps/aide-bot`」という
 羅列を書いていたため、値が未登録のまま初回の本番デプロイが走り
 `DB_NAME: DB_NAME is required` で失敗した（`guchi-apps/aide-bot#4`→`#8`）。
 
@@ -288,10 +288,8 @@
 
 - **機械的に定まる値**（`target-dir`・`db-name`・`allowed-google-emails`）は**サブPCの手作業
   Issue**の1手順として出す。代行実行の条件を満たしているので、画面のボタンで流せる。
-- **SignalyのWebhook URLはここで扱わない。** organization secretへ寄せたため（#2255）、
-  ブラウザの手作業Issueにチャンネル作成・登録の手順は残さない。スクリプト自体は
-  引き続き`--ci-webhook-url`オプションを持つが（他アプリの値を後から直すときなどに使う）、
-  立ち上げのコマンドからは渡さない。
+- **通知用のWebhook URLはここで扱わない。** Signalyを廃止したため（#5180）、通知先の登録手順は無く、
+  スクリプトの`--ci-webhook-url`オプションも削除した。
 - **`provision-secret.sh`（#1874）とは役割が違う。** あちらはマニフェストに行がある**1キー**を
   発行して本番へ反映するまでを通すもので、アイテムがまだ無い立ち上げでは使えない。こちらは
   **アイテムの新規作成と複数フィールドの一括投入**で、デプロイは起こさない。
@@ -343,7 +341,7 @@ callerを置いてしまえば、初期化Issueも最初から無人実行で回
   入らず、実行中のNext.jsサーバーからは読めない。TypeScriptのモジュールにしてビルド成果物へ
   入れている。
 - **issue-deck自身が実物を持っているファイルは、写しを作らず`main`からそのまま配る**
-  （`.github/scripts/signaly-notify.sh`・`scripts/update-env-file.sh`・
+  （`.github/scripts/discord-alert.sh`・`scripts/update-env-file.sh`・
   `scripts/construct-database-url.sh`・`scripts/sync-github-secrets.sh`・
   `scripts/generate-workflow-env-block.sh`・`scripts/version-changelog.mjs`）。写しを置くと
   「実物を直したのに配られるのは古い写し」という食い違いが起こる（#2240で共有スクリプトの

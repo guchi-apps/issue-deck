@@ -83,8 +83,7 @@ export async function fetchPackageVersion(
 /**
  * リリース通知の本文を持つファイル（#2725）。
  *
- * `reusable-release-develop-to-main.yml`がバージョンbumpのたびに書き出し、Signalyへの
- * リリース通知（`.github/scripts/signaly-notify.sh`）が読むのと同じファイル。**更新履歴画面を
+ * `reusable-release-develop-to-main.yml`がバージョンbumpのたびに書き出すファイル。**更新履歴画面を
  * 持たないアプリでも変更内容が載る唯一の置き場**なので、Push通知もここを読む（#2391）。
  */
 export const RELEASE_NOTES_FILE = ".github/release-notes.md";

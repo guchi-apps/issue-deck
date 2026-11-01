@@ -37,7 +37,7 @@
 
 ### 自動配布の流れ
 
-`Deploy to Production`（main）成功 → `ios-testflight-trigger.yml` が `ios-testflight.yml` を起動 → 判定（`ios/scripts/ios-changes.mjs`）→ 署名・アーカイブ・書き出し・アップロード → 処理待ち・内部グループへ配布（`ios/scripts/asc-api.mjs`）→ 印のタグ `ios-testflight/<ビルド番号>` ＋ Signaly通知。
+`Deploy to Production`（main）成功 → `ios-testflight-trigger.yml` が `ios-testflight.yml` を起動 → 判定（`ios/scripts/ios-changes.mjs`）→ 署名・アーカイブ・書き出し・アップロード → 処理待ち・内部グループへ配布（`ios/scripts/asc-api.mjs`）→ 印のタグ `ios-testflight/<ビルド番号>` 。
 
 - **配るのは `ios/IssueDeck/`・`ios/IssueDeck.xcodeproj/` に実質的な変更があるときだけ**（README・scripts・版番号の行だけの差分は数えない）。Webだけの更新ではビルドしない。比べる相手は最後に配布し終えたタグ。タグが無い初回は必ず配る
 - 判定だけ見たいときは Actions →「iOS TestFlight」→ Run workflow で `dry_run` にチェック。sha を指定すればそのコミット（main上のもの）を配る

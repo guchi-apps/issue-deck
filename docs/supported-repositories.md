@@ -924,91 +924,17 @@ done
 **この表は手動記録なので、正は各リポジトリの`.github/workflows/`と画面の「未配布」欄。**
 配布PRをマージしたら、画面の欄から消えたことを確認したうえでこの表も直す。
 
-## `.github/scripts/signaly-notify.sh`の配布状況（#2240）
+## 共有スクリプトの配布状況（#2240）
 
 **ワークフローではないが、同じ画面の同じパネルから配る**（設定＞フリート運用＞共有ワークフローの
-バージョン ＞「共有スクリプト」）。各リポジトリの`.github/scripts/`へコピーして使う運用のため、
-issue-deckを直しても自動では行き渡らない。
+バージョン ＞「共有スクリプト」）。各リポジトリの`.github/scripts/`へコピーして使う運用の
+スクリプトは、issue-deckを直しても自動では行き渡らないため、この仕組みで配る。
 
-2026-08-28時点で同じスクリプトを持つのは次の16リポジトリで、**全件がissue-deckの`main`と
-同一の内容**（blobのSHAが一致。#2391のリリース本文と#2237・#2239の`exit 0`を含む）。
-
-`clip-hive` / `aide-bot` / `signaly` / `meisai-lab` / `dayspan` / `asset-manager` /
-`car-care` / `myroom` / `aide` / `ops-dashboard` /
-`solitaire` / `portfolio` / `db-console` / `subpc` / `trainroute`
-
-**`shopping-list`も同じ内容を持っていたが、運用終了（#2435）で配布対象から外した。`trainroute`も
-同様に運用終了（#2882）で配布対象から外した。`subscription-lists`も同様に運用終了（#3293）で
-配布対象から外した。**
-
-**`guchi-apps/subpc`だけは独自の変更がある。** そのリポジトリだけの`NOTIFY_NOTE`（反映は成功
-したが再起動などの操作が残っていることを通知へ足す）が入っており、配布は中身をそのまま上書き
-するため消える。画面の行に「独自の変更あり」が出て、消える記述は配布PRの本文に書き出されるので、
-**マージ前に取り込むかどうかを判断すること。**
-
-**この表は手動記録なので、正は各リポジトリの`.github/scripts/`と画面の「未更新」欄。**
-判定・配布の仕組みは[multi-agent/auto-repair.md](multi-agent/auto-repair.md)
-「ワークフロー以外の配布物を配る」を参照。
-
-### 配布PRは`deploy.yml`・`release.yml`への1行追加も運ぶ（#2391）
-
-リリース通知の分離（`SIGNALY_RELEASE_WEBHOOK_URL`）は、**スクリプトを配るだけでは効かない。**
-GitHub Actionsのsecretはワークフローが`env:`へ渡さないとスクリプトから読めないためで、
-配布先の`deploy.yml`・`release.yml`にも1行が要る。しかしこの2つはリポジトリごとに中身が違い、
-既存の配布経路（丸ごとコピー・固定の置換・新規追加）はどれも部分編集ができない。
-
-そこで`.github/scripts/propagate-shared-files.sh`が、スクリプトのコピーに加えて
-**`NOTIFY_KIND: リリース`の行の隣へ1行足す**（既に入っていれば何もしない）。同じ配布PRに
-含まれるので、押すボタンは今までどおり1つ。
-
-- **アンカーは全リポジトリにあるが、書き方は揃っていない**（#2421）。`NOTIFY_KIND: リリース`
-  という**文字列との一致**で見ていたときは2件が黙って外れ、配布PRは作られるのにこの1行だけが
-  入らない状態が続いた。突き合わせは**コロンの後の空白の幅を問わず、行末のCRを無視する**形にし、
-  足す行の行末も元の行に合わせる（CRLFのファイルへLFの行だけを混ぜない）
-  - `guchi-apps/signaly` … 値を桁揃えしていて`NOTIFY_KIND:     リリース`
-  - `guchi-apps/asset-manager` … 改行がCRLFで、行末に`\r`が残る（#2330の`claude-ci-fix.yml`と同じ性質）
-- **画面の「配布が必要」判定はこの1行の有無も見る**（#2421）。以前は通知スクリプトの中身しか
-  見ておらず、スクリプトが既に最新のリポジトリは対象に挙がらないため、**この1行だけが未適用の
-  状態は画面から見えなかった**。いまは`missingReleaseWebhookWorkflows`（`src/lib/workflow-tags.ts`）が
-  `deploy.yml`・`release.yml`を見て、欠けていれば「共有スクリプト」の未更新欄へ
-  `deploy.ymlのリリース通知env`として出す。**判定の条件は配布スクリプト側の挿入条件と同じにする**
-  ——片方だけ緩めると、画面には不足と出るのに配布PRが何も足さない行き止まりになる
-- 配るファイルが無く**この1行だけ**が対象のときは、配布ワークフローへ渡す`files`が空配列になる。
-  `propagate-shared-files.yml`の入力検証はそれを通す
-
-```bash
-# リリース通知のenvが入っているか（未適用のリポジトリだけが出る）
-# **grepは -aE で引く。** CRLFのリポジトリがあり、値を桁揃えしているリポジトリもある
-for r in clip-hive aide-bot signaly meisai-lab dayspan asset-manager car-care \
-         myroom aide ops-dashboard solitaire db-console subpc; do
-  br="$(gh api "repos/guchi-apps/$r" --jq .default_branch)"
-  for f in deploy release; do
-    body="$(gh api "repos/guchi-apps/$r/contents/.github/workflows/$f.yml?ref=$br" --jq .content 2>/dev/null | base64 -d)"
-    printf '%s' "$body" | grep -qaE 'NOTIFY_KIND:[[:space:]]+リリース' || continue
-    printf '%s' "$body" | grep -qa 'SIGNALY_RELEASE_WEBHOOK_URL' || echo "$r: $f.yml 未適用"
-  done
-done
-```
-
-2026-08-28に#2429で`asset-manager`・`signaly`へ配布し（`guchi-apps/asset-manager#267`・
-`guchi-apps/signaly#225`）、**リリース通知ステップを持つ全リポジトリへ行き渡った**。
-`aide`にはこの時点で`notify-release`ステップがあり、1行も適用済み（2026-08-27時点の
-「ステップ自体が無い」という記述は古かった）。`vps`・`subpc`はリリース通知を出していない。
-
-```bash
-# 配布状況の確認（issue-deckのmainと同じ内容かどうか）
-gh api "repos/guchi-apps/issue-deck/contents/.github/scripts/signaly-notify.sh?ref=main" \
-  --jq .content | base64 -d > /tmp/signaly-notify-source.sh
-for r in clip-hive aide-bot signaly meisai-lab dayspan asset-manager car-care \
-         myroom aide ops-dashboard solitaire db-console subpc; do
-  br="$(gh api "repos/guchi-apps/$r" --jq .default_branch)"
-  gh api "repos/guchi-apps/$r/contents/.github/scripts/signaly-notify.sh?ref=$br" --jq .content \
-    2>/dev/null | base64 -d > /tmp/signaly-notify-target.sh \
-    || { echo "$r: 未配置"; continue; }
-  cmp -s /tmp/signaly-notify-source.sh /tmp/signaly-notify-target.sh \
-    && echo "$r: 最新" || echo "$r: 未更新"
-done
-```
+**現在、配布物は無い。** 唯一の配布物だった通知スクリプト`signaly-notify.sh`（と、配布PRが運んでいた
+`deploy.yml`・`release.yml`へのリリース通知env 1行）は、Signalyの廃止（起点: guchi-apps/docs#261）に
+伴い配布をやめて削除した（#5180）。各アプリに残っている写しの撤去は、各リポジトリのIssueで行う。
+配布の仕組み自体は次に配布物ができたときのために残してあり、判定・配布は
+[multi-agent/auto-repair.md](multi-agent/auto-repair.md)「ワークフロー以外の配布物を配る」を参照。
 
 ## `version-tag-check.yml`の配布状況
 

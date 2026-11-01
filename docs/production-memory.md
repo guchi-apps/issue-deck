@@ -8,7 +8,7 @@
 
 VPS側のリポジトリ（`guchi-apps/vps`）の`scripts/pm2-monitor.sh`がcronで**5分ごと**に動き、
 `pm2 jlist`の`restart_time`を前回値（`/var/lib/vps-monitor/pm2-restarts`）と比較している。
-増えていればSignalyへ「⚠️ PM2再起動検知: issue-deck」を送る。つまり通知が5分おきに届く状態は、
+増えていれば「⚠️ PM2再起動検知: issue-deck」を通知する（かつての通知先Signalyは廃止した。#5180）。つまり通知が5分おきに届く状態は、
 **issue-deckのプロセスが5分に1回以上落ちて再起動している**ことを意味する。
 
 デプロイ（`.github/workflows/deploy.yml`→VPSの`app-deploy-gate`。#4804）は`pm2 delete` → `pm2 start`で入れ替えるため

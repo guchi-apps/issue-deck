@@ -174,7 +174,6 @@ describe("buildInitIssueBody", () => {
   const SCAFFOLD = {
     paths: [
       ".env.example",
-      ".github/scripts/signaly-notify.sh",
       ".github/secrets-manifest.tsv",
       ".github/workflows/ci.yml",
       ".github/workflows/issue-labels.yml",
@@ -649,7 +648,7 @@ describe("buildBrowserManualIssueBody（GitHub Appの追加だけ・#2246）", (
     expect(body).not.toContain("Issueを再同期");
   });
 
-  it("SignalyのWebhook URLはorganization secretから来るため、チャンネル作成・登録を求めない（#2255）", () => {
+  it("Signalyの通知スクリプトやWebhook URLの登録を求めない（#5180）", () => {
     expect(body).not.toContain("Signaly");
     expect(body).not.toContain("provision-app-secrets.sh");
     expect(body).not.toContain("--ci-webhook-url");

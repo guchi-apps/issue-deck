@@ -179,6 +179,8 @@ describe("deploy.yml（#2247。aide-botで踏んだ2件を雛形の側で潰す�
     const manifest = content(spec(), ".github/secrets-manifest.tsv");
     expect(manifest).toContain("SSH_PRIVATE_KEY\trepo\tsecret\tSSH_PRIVATE_KEY\top://apps/kakei-report/deploy-ssh-key");
     expect(manifest).not.toContain("SERVER_SSH_PRIVATE_KEY");
+    // 置き場はgateが固定するので、配置先のsecret（TARGET_DIR）も持たない
+    expect(manifest).not.toContain("TARGET_DIR");
   });
 
   it("配布するのは next.config.mjs で、旧名の next.config.ts は含めない（#3223）", () => {
@@ -257,18 +259,14 @@ describe(".github/secrets-manifest.tsv", () => {
     );
     expect(keys).not.toContain("DB_NAME");
     expect(keys).not.toContain("ALLOWED_GOOGLE_EMAILS");
-    expect(keys).toContain("SIGNALY_WEBHOOK_URL");
   });
 
-  // 通知の宛先は、ワークフロー（scaffold-workflows.ts）とマニフェスト・.env.example
-  // （このファイル）の両方に要る。片方だけ足すと、新規アプリだけリリース通知が
-  // 分離されない状態で立ち上がる（#2391）。
-  it("リリース通知用のWebhookも、マニフェスト・.env.example・deploy.ymlの3か所に出す", () => {
-    expect(rows(spec()).map((row) => row[0])).toContain("SIGNALY_RELEASE_WEBHOOK_URL");
-    expect(content(spec(), ".env.example")).toContain("SIGNALY_RELEASE_WEBHOOK_URL=");
-    expect(content(spec(), ".github/workflows/deploy.yml")).toContain(
-      "SIGNALY_RELEASE_WEBHOOK_URL: ${{ secrets.SIGNALY_RELEASE_WEBHOOK_URL }}",
-    );
+  it("Signalyの通知スクリプト・webhookはマニフェスト・.env.example・ワークフローに出さない（#5180）", () => {
+    expect(rows(spec()).map((row) => row[0]).join(" ")).not.toMatch(/SIGNALY/);
+    expect(content(spec(), ".env.example")).not.toMatch(/SIGNALY/i);
+    for (const workflow of ["ci.yml", "deploy.yml"]) {
+      expect(content(spec(), `.github/workflows/${workflow}`)).not.toMatch(/signaly/i);
+    }
   });
 });
 
@@ -333,7 +331,7 @@ describe("scaffoldCopies（issue-deckの実物をそのまま配る）", () => {
     const paths = scaffoldCopies(spec()).map((copy) => copy.path);
     expect(paths).toContain("scripts/update-env-file.sh");
     expect(paths).toContain("scripts/construct-database-url.sh");
-    expect(paths).toContain(".github/scripts/signaly-notify.sh");
+    expect(paths).not.toContain(".github/scripts/signaly-notify.sh");
     expect(paths).toContain(".github/scripts/discord-alert.sh");
   });
 
