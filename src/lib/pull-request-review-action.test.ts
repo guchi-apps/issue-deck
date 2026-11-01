@@ -113,6 +113,16 @@ describe("deriveReviewAction", () => {
     expect(action.concerns).toHaveLength(3);
   });
 
+  it("対応済みの記録があれば、未対応扱いをやめて acknowledged を返す（#5159）", () => {
+    const action = deriveReviewAction({
+      pullRequest: pr(),
+      review: review(),
+      context: context(),
+      acknowledgement: { sha: "abc", recordedBy: "guchi" },
+    });
+    expect(action).toEqual({ kind: "acknowledged", verdict: "needs-check", recordedBy: "guchi" });
+  });
+
   it("要修正で自動修正ワークフローがあれば、既存の自動修正を主操作にできる", () => {
     const action = deriveReviewAction({
       pullRequest: pr({ reviewVerdict: verdict("changes-requested") }),
@@ -190,6 +200,16 @@ describe("applyReviewAction", () => {
       createdAt: "",
     });
     expect(requested).toMatchObject({ kind: "review-findings", label: "修正を依頼済み", tone: "run", needsAction: false });
+  });
+
+  it("対応済みの記録は代表状態を「記録済み（操作不要）」にする（#5159）", () => {
+    const pullRequest = pr();
+    const acknowledged = applyReviewAction(derivePrimaryState(pullRequest), {
+      kind: "acknowledged",
+      verdict: "needs-check",
+      recordedBy: "guchi",
+    });
+    expect(acknowledged).toMatchObject({ kind: "review-findings", tone: "ok", needsAction: false, repairKinds: [] });
   });
 
   it("対応待ちのときは代表状態を変えない", () => {

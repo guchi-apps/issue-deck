@@ -13,6 +13,7 @@ import { githubApiErrorMessage } from "@/lib/github/network-error";
 import { buildPullRequestEvents } from "@/lib/github/pull-request-events";
 import { findCurrentFixRequest, findInterruptedFixRequest } from "@/lib/github/pull-request-fix-request-service";
 import { repairKindsFor } from "@/lib/github/pull-request-repair";
+import { currentAcknowledgement } from "@/lib/github/review-acknowledgement";
 import {
   fetchActivePullRequestRepairRun,
   visibleRepairRun,
@@ -230,6 +231,21 @@ async function handleGET(request: NextRequest) {
       });
     }
 
+    // 現在のレビュー判定への「確認済み・対応済み」の記録（#5159）。PRのコメントから読むので、
+    // 紐づくIssueが無いPRでも出せる。信頼するのはApp botの投稿だけ（`currentAcknowledgement`）
+    const ackSha = summary.reviewVerdict?.reviewedSha ?? null;
+    const reviewAcknowledgement =
+      summary.state === "open" && !summary.merged && ackSha && needsReviewAttention(summary.reviewVerdict!.reviewKind)
+        ? currentAcknowledgement(
+            comments.map((comment) => ({
+              body: comment.body,
+              author: { login: comment.user?.login ?? "", type: comment.user?.type },
+            })),
+            ackSha,
+            process.env.NEXT_PUBLIC_GITHUB_APP_SLUG,
+          )
+        : null;
+
     // 対応Issueの`00.check-user`で止まっているときの直接原因（#5080）。対象のPRでだけtimelineを1回読む
     const stopCause =
       linkedIssueNumber !== null && shouldResolveStopCause(summary)
@@ -255,6 +271,7 @@ async function handleGET(request: NextRequest) {
       fetchedAt: new Date().toISOString(),
       userMergeReasons,
       reviewResponse,
+      reviewAcknowledgement,
       stopCause,
     };
     return NextResponse.json(detail);
