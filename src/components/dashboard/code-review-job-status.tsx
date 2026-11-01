@@ -4,6 +4,7 @@ import { DispatchJobStatus } from "@/components/dashboard/dispatch-job-status";
 import type { DispatchStateHandle } from "@/hooks/use-dispatch-state";
 import { findCodeReviewJobForIssue } from "@/lib/dispatch/dispatch-job";
 import { describeDispatchJobWaitReason } from "@/lib/dispatch/queue-summary";
+import type { Align } from "@/lib/align-class";
 import type { Issue } from "@/types/issue";
 
 /**
@@ -24,7 +25,7 @@ export function CodeReviewJobStatus({
 }: {
   issue: Pick<Issue, "repositoryFullName" | "number">;
   dispatch: DispatchStateHandle;
-  align?: "start" | "end";
+  align?: Align;
 }) {
   const job = findCodeReviewJobForIssue(dispatch.jobs, issue.repositoryFullName, issue.number);
   if (!job || job.status === "SUCCEEDED") return null;

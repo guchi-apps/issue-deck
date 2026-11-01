@@ -16,6 +16,7 @@ import {
 import { formatDispatchHostName } from "@/lib/dispatch/host-label";
 import { formatDateTime, formatDateTimeFull } from "@/lib/format-date-time";
 import { cn } from "@/lib/utils";
+import { ALIGN_CLASS, type Align } from "@/lib/align-class";
 
 /**
  * サブPCへ積んだジョブの状態表示（#1180）。
@@ -70,7 +71,7 @@ export function DispatchJobStatus({
   onCancel: () => void;
   isSubmitting: boolean;
   /** 横並びのツールバー（PC）では右寄せ、縦積みの詳細画面（スマホ）では左寄せ */
-  align?: "start" | "end";
+  align?: Align;
   /**
    * 順番待ちのまま進まない理由（#1394）。**「順番待ち」だけでは、正常に上限で待っているのか
    * pollerが落ちているのかが区別できない。** 判定は`describeDispatchJobWaitReason`が持つ。
@@ -83,7 +84,7 @@ export function DispatchJobStatus({
   const { label, tone } = describeDispatchJobStatus(job.status, job.kind);
   // 状態ごとに「いつの話か」を示す時刻は変わる。終わっていれば終了時刻、動いていれば開始時刻
   const timestamp = job.finishedAt ?? job.startedAt ?? job.createdAt;
-  const textAlign = align === "end" ? "text-right" : "text-left";
+  const textAlign = ALIGN_CLASS[align].text;
   // 起動できたセッションの中身を見る唯一の手掛かり（Actions UIに相当するものが無い）。
   // 行として常時出す代わりに、ピルのクリックでコピーさせる（#1468）
   const attachCommand =
@@ -120,7 +121,7 @@ export function DispatchJobStatus({
     <div
       className={cn(
         "flex w-full flex-wrap items-center gap-x-2 gap-y-1 text-xs",
-        align === "end" ? "justify-end" : "justify-start",
+        ALIGN_CLASS[align].justify,
       )}
     >
       {attachCommand ? (
