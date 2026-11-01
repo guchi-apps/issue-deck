@@ -554,6 +554,12 @@ export type PullRequestReviewResponseContext = {
   issueNumber: number;
   /** そのIssueがローカルセッションで対応中（11.local）か。dispatchが反応しないため依頼を送れない */
   linkedIssueLocal: boolean;
+  /**
+   * `linkedIssueLocal`のとき、そのIssueで生きている（`ALIVE`の）ローカルセッションがあるか（#5160）。
+   * `false`なら11.localは作業を終えたセッションの外し忘れとみなし、外す案内を出す。
+   * 確かめられなかった・11.localが無い・古い応答ではnullまたは省略
+   */
+  linkedIssueSessionAlive?: boolean | null;
   /** そのIssueがクローズ済みか。dispatchは閉じたIssueへの`@claude`をskipするため依頼を送れない */
   linkedIssueClosed?: boolean;
   /** 現在のHEADに対して既に出ている修正依頼。無ければnull */

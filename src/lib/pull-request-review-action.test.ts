@@ -167,6 +167,27 @@ describe("deriveReviewAction", () => {
     expect(
       deriveReviewAction({ pullRequest: pr(), review: review(), context: context({ linkedIssueLocal: true }) }),
     ).toMatchObject({ kind: "respond", request: { available: false, alternative: "open-issue" } });
+    // 生きているセッションが無い11.localは外し忘れとして外す案内を出す（#5160）
+    const leftover = deriveReviewAction({
+      pullRequest: pr(),
+      review: review(),
+      context: context({ linkedIssueLocal: true, linkedIssueSessionAlive: false }),
+    });
+    expect(leftover).toMatchObject({ kind: "respond", request: { available: false, alternative: "open-issue" } });
+    if (leftover.kind !== "respond") throw new Error("unreachable");
+    expect(leftover.request.reason).toContain("11.localを外し");
+    expect(leftover.request.reason).not.toContain("実行されません");
+    // セッションが動いている・確かめられなかったときは「対応中」の案内のまま
+    for (const linkedIssueSessionAlive of [true, null, undefined]) {
+      const active = deriveReviewAction({
+        pullRequest: pr(),
+        review: review(),
+        context: context({ linkedIssueLocal: true, linkedIssueSessionAlive }),
+      });
+      if (active.kind !== "respond") throw new Error("unreachable");
+      expect(active.request.reason).toContain("対応中");
+      expect(active.request.reason).not.toContain("11.localを外し");
+    }
     // closedのIssueへの@claudeはdispatchがskipする（計画レビューの指摘）
     expect(
       deriveReviewAction({ pullRequest: pr(), review: review(), context: context({ linkedIssueClosed: true }) }),
