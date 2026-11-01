@@ -31,8 +31,11 @@ export function PullRequestMergeReview({
   htmlUrl,
   headSha,
   isReviewing = false,
+  acknowledgement = null,
   className,
 }: {
+  /** 「対応済み」の記録（#5159）。あれば判定の直下に出し、記録者と取り消し方を読めるようにする */
+  acknowledgement?: { recordedBy: string | null } | null;
   /** そのPRの判定。記録が無ければnull */
   verdict: PullRequestReviewVerdict | null;
   /** レビューコメントを読みに行く先（PRのURL）。渡さない画面では導線を出さない */
@@ -82,6 +85,15 @@ export function PullRequestMergeReview({
               headSha={headSha}
               isReviewing={isReviewing}
             />
+            {acknowledgement && (
+              <div className="flex items-center gap-2.5" data-testid="merge-review-acknowledgement">
+                <dt className="w-28 shrink-0 text-muted-foreground">対応済みの記録</dt>
+                <dd className="min-w-0 text-emerald-700 dark:text-emerald-400">
+                  ✅ 記録済み{acknowledgement.recordedBy ? `（記録: ${acknowledgement.recordedBy}）` : ""}
+                  <span className="text-muted-foreground">。取り消しはPR詳細の指摘から</span>
+                </dd>
+              </div>
+            )}
             <div className="flex items-center gap-2.5">
               <dt className="w-28 shrink-0 text-muted-foreground">機械的リスク判定</dt>
               <dd className="min-w-0">

@@ -542,11 +542,23 @@ export type PullRequestDetail = {
    * Issueに紐づくopenなPRでだけ入る。それ以外・古い応答では省略またはnull。
    */
   reviewResponse?: PullRequestReviewResponseContext | null;
+  /** 現在のレビュー判定への「確認済み・対応済み」の記録（#5159）。無ければnull・古い応答では省略 */
+  reviewAcknowledgement?: PullRequestReviewAcknowledgement | null;
   /**
    * 対応Issueの`00.check-user`で自動マージが止まっているときの直接原因（#5080）。理由が`merge`以外の
    * 確認待ちで止まっているopenなPRでだけ入り、それ以外・古い応答では省略またはnull。
    */
   stopCause?: PullRequestStopCause | null;
+};
+
+/**
+ * 現在のレビュー判定に対する「確認済み・対応済み」の記録（#5159）。PR単位で、レビューしたshaに紐付く。
+ * 追いコミットで再レビューされると別のshaになり、前の記録は効かなくなる。
+ */
+export type PullRequestReviewAcknowledgement = {
+  sha: string;
+  /** 記録した人のGitHubログイン。取得できなければnull */
+  recordedBy: string | null;
 };
 
 export type PullRequestReviewResponseContext = {

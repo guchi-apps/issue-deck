@@ -1,6 +1,7 @@
 "use client";
 
-import { ExternalLink, RefreshCw, Wrench } from "lucide-react";
+import { useState } from "react";
+import { Check, ExternalLink, RefreshCw, Undo2, Wrench } from "lucide-react";
 
 import { GithubReferenceLink } from "@/components/dashboard/github-reference-link";
 import { PullRequestMergeButton } from "@/components/dashboard/pull-request-merge-button";
@@ -35,6 +36,8 @@ export function PullRequestReviewResponse({
   onRefresh,
   onMerged,
   onDraftFixIssue,
+  onAcknowledge,
+  onRevokeAcknowledgement,
   className,
 }: {
   action: ReviewAction;
@@ -44,6 +47,10 @@ export function PullRequestReviewResponse({
   onRefresh: () => void;
   onMerged: () => void;
   onDraftFixIssue?: (pullRequest: PullRequestSummary) => void;
+  /** 「対応済みとして記録」（#5159）。PR単位。渡さない画面では記録の導線を出さない */
+  onAcknowledge?: (reason: string) => Promise<void>;
+  /** 記録の取り消し（#5159） */
+  onRevokeAcknowledgement?: () => Promise<void>;
   className?: string;
 }) {
   if (action.kind === "none") return null;
@@ -62,6 +69,39 @@ export function PullRequestReviewResponse({
         {action.reviewedSha ? `（${action.reviewedSha.slice(0, 7)}）` : ""}に対するものです。最新HEADの
         再レビューを待っています（操作は不要です）。下の本文は前のHEADの指摘として読めます。
       </StatusPanel>
+    );
+  }
+  if (action.kind === "acknowledged") {
+    return (
+      <section
+        id={REVIEW_RESPONSE_ANCHOR_ID}
+        aria-label="指摘への対応"
+        data-testid="pull-request-review-response"
+        data-tone="ok"
+        className={cn(
+          "flex scroll-mt-14 flex-col gap-2 rounded-lg border border-emerald-500/40 bg-emerald-50 p-3 dark:bg-emerald-950/30",
+          className,
+        )}
+      >
+        <h3 className="text-sm font-bold text-emerald-700 dark:text-emerald-400">
+          <span aria-hidden="true">●</span> 指摘は対応済みと記録されています
+        </h3>
+        <p className="text-xs text-muted-foreground">
+          {action.recordedBy ? `${action.recordedBy}が` : ""}
+          {action.verdict === "needs-check" ? "要確認" : "要修正"}の指摘を、人が対応して解消した（または対応しないと判断した）と記録しました。理由はPRのコメントに残っています。新しいコミットで再レビューされると、この記録は引き継がれません。
+        </p>
+        <div className="flex flex-wrap items-center gap-2">
+          {canMergeFromDeck(pullRequest) && (
+            <PullRequestMergeButton
+              pullRequest={pullRequest}
+              onMerged={onMerged}
+              label="マージ確認へ進む"
+              reviewAcknowledgement={{ recordedBy: action.recordedBy }}
+            />
+          )}
+          {onRevokeAcknowledgement && <RevokeButton onRevoke={onRevokeAcknowledgement} />}
+        </div>
+      </section>
     );
   }
   if (action.kind === "requested") {
@@ -223,7 +263,80 @@ export function PullRequestReviewResponse({
       </Option>
 
       {!needsCheck && mergeOption}
+
+      {onAcknowledge && <AcknowledgeOption onAcknowledge={onAcknowledge} />}
     </section>
+  );
+}
+
+/** 指摘をPR単位で「対応済み」と記録する（#5159）。コードでは直せない指摘を人が対応して解消した場合や、対応しないと判断した場合 */
+function AcknowledgeOption({ onAcknowledge }: { onAcknowledge: (reason: string) => Promise<void> }) {
+  const [reason, setReason] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const submit = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      await onAcknowledge(reason);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "記録できませんでした");
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Option title="人が対応して解消した／対応しないと判断した（対応済みとして記録）">
+      <p className="text-xs text-muted-foreground">
+        secretの同期・外部サービスの設定など、コードでは直せない指摘を人が片付けた場合や、読んで対応しないと決めた場合。PR単位で記録し、リリースPRの検証結果にも同じ記録が効きます。追いコミットで再レビューされると記録は引き継がれません。
+      </p>
+      <textarea
+        value={reason}
+        onChange={(event) => setReason(event.target.value)}
+        maxLength={500}
+        rows={2}
+        aria-label="対応済みとして記録する理由"
+        placeholder="理由（例: secretを同期して解消した）"
+        className="w-full rounded-md border bg-background p-2 text-xs"
+      />
+      <div className="flex flex-wrap items-center gap-2">
+        <Button size="sm" variant="outline" className="h-9 text-xs" disabled={busy} onClick={() => void submit()}>
+          <Check className="size-3.5" />
+          {busy ? "記録中…" : "対応済みとして記録"}
+        </Button>
+        {error && <span role="alert" className="text-xs text-destructive">{error}</span>}
+      </div>
+    </Option>
+  );
+}
+
+function RevokeButton({ onRevoke }: { onRevoke: () => Promise<void> }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  return (
+    <>
+      <Button
+        size="sm"
+        variant="outline"
+        className="h-9 text-xs"
+        disabled={busy}
+        onClick={async () => {
+          setBusy(true);
+          setError(null);
+          try {
+            await onRevoke();
+          } catch (e) {
+            setError(e instanceof Error ? e.message : "取り消せませんでした");
+          } finally {
+            setBusy(false);
+          }
+        }}
+      >
+        <Undo2 className="size-3.5" />
+        {busy ? "取り消し中…" : "記録を取り消す"}
+      </Button>
+      {error && <span role="alert" className="text-xs text-destructive">{error}</span>}
+    </>
   );
 }
 

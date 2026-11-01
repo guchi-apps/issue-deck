@@ -7,7 +7,11 @@ import {
 } from "@/lib/github/pull-request-repair";
 import { resolveReviewVerdictFreshness } from "@/lib/github/review-verdict-freshness";
 import type { PrimaryState } from "@/lib/pull-request-primary-state";
-import type { PullRequestReviewResponseContext, PullRequestSummary } from "@/types/pull-request";
+import type {
+  PullRequestReviewAcknowledgement,
+  PullRequestReviewResponseContext,
+  PullRequestSummary,
+} from "@/types/pull-request";
 
 /**
  * 自動レビューが要修正・要確認と判定したPRで、利用者が次に何を押せばよいか（#4482）。
@@ -18,6 +22,7 @@ import type { PullRequestReviewResponseContext, PullRequestSummary } from "@/typ
  * - `none` … 対応する指摘が無い（LGTM・省略・判定なし・閉じたPR・ドラフト）
  * - `repairing` … 自動修正が走っている。操作は不要
  * - `stale` … 判定が前のHEADのもの。新しいHEADの再レビューを待つ（古い指摘を現在の指摘として扱わない）
+ * - `acknowledged` … 人が「対応済み」と記録済み（#5159）。未対応扱いをやめ、取り消すまでマージ確認へ進める
  * - `requested` … 現在のHEADへ修正を依頼済み。pushされるとCI・再レビューが走る。操作は不要
  * - `respond` … 利用者が対応を選ぶ。要修正で自動修正が使えれば`autoRepair`、自由文の依頼は廃止済みのため
  *   `request.available=false`と理由・代わりの操作を返す（ボタンも案内も無い状態にしない）
@@ -26,6 +31,7 @@ export type ReviewAction =
   | { kind: "none" }
   | { kind: "repairing" }
   | { kind: "stale"; verdict: ReviewAttentionKind; reviewedSha: string | null }
+  | { kind: "acknowledged"; verdict: ReviewAttentionKind; recordedBy: string | null }
   | { kind: "requested"; verdict: ReviewAttentionKind; commentUrl: string | null; createdAt: string }
   | {
       kind: "respond";
@@ -90,8 +96,10 @@ export function deriveReviewAction(params: {
   review: PullRequestReviewCommentContent | null;
   /** PR詳細APIの`reviewResponse`。読み込む前・古い応答ではundefined */
   context: PullRequestReviewResponseContext | null | undefined;
+  /** PR詳細APIの`reviewAcknowledgement`（#5159）。記録が無い・読み込む前はnull/undefined */
+  acknowledgement?: PullRequestReviewAcknowledgement | null;
 }): ReviewAction {
-  const { pullRequest, review, context } = params;
+  const { pullRequest, review, context, acknowledgement } = params;
   const verdict = pullRequest.reviewVerdict?.reviewKind;
   if (pullRequest.merged || pullRequest.state !== "open" || pullRequest.draft) return { kind: "none" };
   if (verdict !== "changes-requested" && verdict !== "needs-check") return { kind: "none" };
@@ -100,6 +108,10 @@ export function deriveReviewAction(params: {
   const reviewedSha = pullRequest.reviewVerdict?.reviewedSha ?? null;
   if (resolveReviewVerdictFreshness({ reviewedSha, headSha: pullRequest.headSha }) === "stale") {
     return { kind: "stale", verdict, reviewedSha };
+  }
+
+  if (acknowledgement) {
+    return { kind: "acknowledged", verdict, recordedBy: acknowledgement.recordedBy };
   }
 
   if (context?.currentFixRequest) {
@@ -180,6 +192,17 @@ function resolveRequestAvailability(
  * ——新しいHEADのCI・再レビューの結果が出るまでは「修正を依頼済み」で待つ。
  */
 export function applyReviewAction(primary: PrimaryState, action: ReviewAction): PrimaryState {
+  if (primary.kind === "review-findings" && action.kind === "acknowledged") {
+    return {
+      ...primary,
+      label: "指摘は対応済みと記録済み",
+      tone: "ok",
+      mark: "●",
+      reason: `自動レビューの指摘を${action.recordedBy ? `${action.recordedBy}が` : ""}対応済みと記録しました。新しいコミットで再レビューされると記録は引き継がれません`,
+      needsAction: false,
+      repairKinds: [],
+    };
+  }
   if (primary.kind !== "review-findings" || action.kind !== "requested") return primary;
   return {
     ...primary,
