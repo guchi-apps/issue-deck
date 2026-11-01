@@ -87,44 +87,55 @@ export function CiStateBadge({ ciState }: { ciState: CiState | null | undefined 
 }
 
 /**
- * PR詳細でCIの内訳を開くための表示。丸いバッジとは役割が違い、押せることを形でも示す。
+ * PR詳細の指摘タブで、CIの内訳を開くアコーディオン行の見出し（#5171）。
  * 一覧などの読み取り専用の場所は`CiStateBadge`を使い続ける（#3319）。
+ *
+ * `ciState`が無い（まだ取得できていない）ときも行は出し、再実行へ辿り着けるようにする。
+ * 親が行の枠（`divide-y`の入れ物）を持つ前提で、行そのものは枠を持たず幅いっぱいに広がる。
  */
 export function CiStatusButton({
   ciState,
   expanded,
   onClick,
+  summary,
 }: {
   ciState: CiState | null | undefined;
   expanded?: boolean;
   onClick?: () => void;
+  summary?: string | null;
 }) {
-  if (!ciState) return null;
-
-  const className = cn(
-    "inline-flex min-h-7 shrink-0 items-center gap-1 rounded-sm border px-2 py-0.5 text-xs font-medium",
+  const label = ciState ? CI_STATE_LABEL[ciState] : "CI状態は未取得";
+  const tone = cn(
     ciState === "pending"
-      ? "border-primary/60 bg-primary/10 text-primary"
+      ? "text-primary"
       : ciState === "failure"
-        ? "border-destructive/60 bg-destructive/10 text-destructive"
-        : "border-border bg-background text-muted-foreground",
+        ? "text-destructive"
+        : "text-foreground",
   );
+  const content = (
+    <>
+      <span className={cn("shrink-0 font-semibold", tone)}>{label}</span>
+      {summary && <span className="min-w-0 flex-1 truncate text-[11px] font-normal text-muted-foreground">{summary}</span>}
+      {onClick && (
+        <span className="ml-auto shrink-0 text-muted-foreground">
+          {expanded ? <ChevronDown className="size-4" aria-hidden="true" /> : <ChevronRight className="size-4" aria-hidden="true" />}
+        </span>
+      )}
+    </>
+  );
+  const rowClass = "flex min-h-11 w-full items-center gap-2 px-3 py-2 text-left text-xs";
 
-  if (!onClick) return <span className={className}>{CI_STATE_LABEL[ciState]}</span>;
+  if (!onClick) return <div className={rowClass}>{content}</div>;
 
   return (
     <button
       type="button"
       onClick={onClick}
       aria-expanded={expanded}
-      className={cn(
-        className,
-        "transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-      )}
+      className={cn(rowClass, "transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring")}
       title={expanded ? "CIの内訳を閉じる" : "CIの内訳を開く"}
     >
-      {CI_STATE_LABEL[ciState]}
-      {expanded ? <ChevronDown className="size-3" aria-hidden="true" /> : <ChevronRight className="size-3" aria-hidden="true" />}
+      {content}
     </button>
   );
 }
@@ -382,7 +393,7 @@ export function AiReviewBadge({ aiReview }: { aiReview: AiReview | null | undefi
 }
 
 /**
- * PR詳細で自動レビューの本文を開くための表示。CIと同じ四角い操作表示に揃える（#3319）。
+ * PR詳細で自動レビューの本文を開くアコーディオン行の見出し。CIの行と同じ見た目に揃える（#3319・#5171）。
  * `none`だけは、ワークフローが無いのか起動前なのかを区別できないため出さない。
  *
  * **文言・色はジョブの成否だけでなく、PR本文の検証結果（`reviewVerdict`）も見る**（#3373）。
@@ -411,20 +422,26 @@ export function AiReviewStatusButton({
       type="button"
       onClick={onClick}
       aria-expanded={expanded}
-      className={cn(
-        "inline-flex min-h-7 shrink-0 items-center gap-1 rounded-sm border px-2 py-0.5 text-xs font-medium transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-        state === "pending"
-          ? "border-primary/60 bg-primary/10 text-primary"
-          : verdictState === "failed" || verdictState === "changes-requested"
-            ? "border-destructive/60 bg-destructive/10 text-destructive"
-            : verdictState === "needs-check"
-              ? "border-amber-500/60 bg-amber-500/10 text-amber-700 dark:text-amber-400"
-              : "border-border bg-background text-muted-foreground",
-      )}
+      className="flex min-h-11 w-full items-center gap-2 px-3 py-2 text-left text-xs transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
       title={expanded ? "レビューの詳細を閉じる" : "レビューの詳細を開く"}
     >
-      {label}
-      {expanded ? <ChevronDown className="size-3" aria-hidden="true" /> : <ChevronRight className="size-3" aria-hidden="true" />}
+      <span
+        className={cn(
+          "shrink-0 font-semibold",
+          state === "pending"
+            ? "text-primary"
+            : verdictState === "failed" || verdictState === "changes-requested"
+              ? "text-destructive"
+              : verdictState === "needs-check"
+                ? "text-amber-700 dark:text-amber-400"
+                : "text-foreground",
+        )}
+      >
+        {label}
+      </span>
+      <span className="ml-auto shrink-0 text-muted-foreground">
+        {expanded ? <ChevronDown className="size-4" aria-hidden="true" /> : <ChevronRight className="size-4" aria-hidden="true" />}
+      </span>
     </button>
   );
 }
