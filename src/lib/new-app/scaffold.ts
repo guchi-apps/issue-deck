@@ -230,8 +230,6 @@ function secretsManifest(spec: NewAppSpec): string {
   }
   rows.push(
     `# --- ${spec.repositoryName}固有 ---`,
-    "# TARGET_DIRはサーバー上のパス。単体では資格情報でないがVPSへの攻撃面になるためsecret。",
-    `TARGET_DIR\trepo\tsecret\tTARGET_DIR\t${item}/target-dir`,
   );
   if (profile.usesDatabase) {
     rows.push(`DB_NAME\trepo\tsecret\tDB_NAME\t${item}/db-name`);

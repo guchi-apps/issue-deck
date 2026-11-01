@@ -179,6 +179,8 @@ describe("deploy.yml（#2247。aide-botで踏んだ2件を雛形の側で潰す�
     const manifest = content(spec(), ".github/secrets-manifest.tsv");
     expect(manifest).toContain("SSH_PRIVATE_KEY\trepo\tsecret\tSSH_PRIVATE_KEY\top://apps/kakei-report/deploy-ssh-key");
     expect(manifest).not.toContain("SERVER_SSH_PRIVATE_KEY");
+    // 置き場はgateが固定するので、配置先のsecret（TARGET_DIR）も持たない
+    expect(manifest).not.toContain("TARGET_DIR");
   });
 
   it("配布するのは next.config.mjs で、旧名の next.config.ts は含めない（#3223）", () => {
