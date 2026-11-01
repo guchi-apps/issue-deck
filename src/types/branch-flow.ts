@@ -134,6 +134,12 @@ export type RepositoryBranchStatus = {
    */
   releasedVersion?: string | null;
   /**
+   * 新方式のリリース候補で公開した版を、リリースPR番号で引く記録（#5154）。候補PRのタイトルは版を含まないため、
+   * 過去のリリースの見出しを「v4.34.0」にするのに使う。引けないPRは載らない（見出しは「リリース済み」のまま）。
+   * 古い応答には無い
+   */
+  releasedVersionByPr?: Record<number, string>;
+  /**
    * 開いたPRに載らない新方式の候補（作成を受け付けてPRができるまで・mainへマージした後の本番反映と稼働確認。#5076）。
    * 該当が無ければnull。古い応答には無い
    */

@@ -50,6 +50,8 @@ type PullRequestMergeButtonProps = {
    * ボタンの下へ折り返して出す（詳細ペイン）。`inline`はボタンの横に見出し1行だけ（一覧の行など）
    */
   failureLayout?: "inline" | "block";
+  /** 「対応済み」の記録（#5159）。マージ確認のコードレビュー欄に出す */
+  reviewAcknowledgement?: { recordedBy: string | null } | null;
 };
 
 /**
@@ -99,6 +101,7 @@ export function PullRequestMergeButton({
   label = "マージする",
   buttonClassName,
   failureLayout = "inline",
+  reviewAcknowledgement = null,
 }: PullRequestMergeButtonProps) {
   const { mergePullRequest, isSubmitting, error, failure, reviewConfirmation, clearReviewConfirmation } =
     usePullRequestMergeMutation();
@@ -219,6 +222,7 @@ export function PullRequestMergeButton({
                 htmlUrl={pullRequest.htmlUrl}
                 headSha={pullRequest.headSha}
                 isReviewing={judgementPending}
+                acknowledgement={reviewAcknowledgement}
               />
               <PullRequestMergeReviewGate
                 pullRequest={pullRequest}
@@ -241,6 +245,7 @@ export function PullRequestMergeButton({
                 htmlUrl={pullRequest.htmlUrl}
                 headSha={pullRequest.headSha}
                 isReviewing={judgementPending}
+                acknowledgement={reviewAcknowledgement}
               />
             )}
             {failure ? <PullRequestMergeFailure failure={failure} /> : <ApiErrorMessage message={error} />}

@@ -601,6 +601,13 @@ mainマージが即本番反映になるこの2件ではむしろ望ましい。
 判断・前提・配り方は上記「`claude-review-develop.yml`の配布状況」の「`vps`・`subpc`（#2103）」を
 参照（作業は guchi-apps/vps#108・guchi-apps/subpc#45）。
 
+> **その後`develop`は畳まれ（guchi-apps/vps#229・guchi-apps/subpc#86）、`claude-review-develop.yml`の
+> callerも無くなった。** 現在の`vps`・`subpc`は`issue-<番号>`→`main`のPRを人がマージする
+> main単線運用で、レビューが入らない状態だった（#5164）。`develop`を戻すのではなく、main直行向けの
+> `claude-review-main.yml`（`enable-auto-merge: false`。[cross-repo-setup-guide.md](cross-repo-setup-guide.md)
+> 「`develop`を持たないリポジトリ（main直行）」）を置く方針で、作業は guchi-apps/vps#329・
+> guchi-apps/subpc#152。上の`#2103`の記述は`develop`があった時期のもの。
+
 > **ローカル起動（サブPC）は#1741で対応済み。** 配布の軸が違うので混同しない——リリース
 > フローはGitHub Actions側の話で、こちらは「issue-deckの画面の『サブPCで開始』が押せるか」。
 > 無人実行を入れていない2件でも、**この2件のIssueはサブPCのローカルセッションで回せる**
@@ -1143,6 +1150,7 @@ done
 | `guchi-apps/issue-deck` | v2 | ○ |
 | `guchi-apps/dayspan` | —（※） | ○ |
 | `guchi-apps/shopping-list` | —（※） | **運用終了**（#2435。サブPCのチェックアウト・worktreeと`~/.config/issue-deck/local-repos.conf`の行は残るが、アーカイブ後はIssueが読み取り専用になり起動する対象が無い。ポート帯7000は[scripts/local-repo-ports.conf](../scripts/local-repo-ports.conf)にコメント化して予約したまま残す） |
+| `guchi-apps/stockly` | — | **運用終了**（#5157。起点は guchi-apps/stockly#158。サブPCのチェックアウト・worktreeは残るため、ポート帯28000は[scripts/local-repo-ports.conf](../scripts/local-repo-ports.conf)にコメント化して予約したまま残す） |
 | `guchi-apps/meisai-lab` | — | ○ |
 | `guchi-apps/car-care` | — | ○ |
 | `guchi-apps/subscription-lists` | — | **運用終了**（#3293。サブPCのチェックアウト・worktreeと`~/.config/issue-deck/local-repos.conf`の行は残るが、アーカイブ後はIssueが読み取り専用になり起動する対象が無い。ポート帯12000は[scripts/local-repo-ports.conf](../scripts/local-repo-ports.conf)にコメント化して予約したまま残す） |

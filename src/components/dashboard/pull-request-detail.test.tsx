@@ -124,6 +124,8 @@ function mockDeployStatus(status: PullRequestDeployStatus | null = null) {
 describe("PullRequestDetail", () => {
   beforeEach(() => {
     mockDeployStatus();
+    // 「指摘に対応する」は次のフレームで対応パネルへスクロールする。jsdomには無いので空にする
+    Element.prototype.scrollIntoView = () => {};
   });
 
   afterEach(() => {
@@ -443,6 +445,49 @@ describe("PullRequestDetail", () => {
     expect(panel.queryByRole("textbox", { name: "修正の方針（任意）" })).toBeNull();
     expect(panel.getByText(/ホストセッションを開き/)).toBeTruthy();
     expect(panel.getByRole("button", { name: "マージ確認へ進む" })).toBeTruthy();
+    // 要確認は不具合ではない（#5158）。赤い印・「対応を選んでください」を出さず、人の確認待ちとして出す
+    expect(screen.queryByLabelText("対応が必要")).toBeNull();
+    expect(screen.getByLabelText("確認が必要")).toBeTruthy();
+    expect(panel.getByText("人の確認を待っています")).toBeTruthy();
+    expect(panel.queryByText("この指摘への対応を選んでください")).toBeNull();
+    // コードを変えずに前提を解消したときのため、現在のコミットのままAIレビューを再実行できる
+    expect(panel.getByRole("button", { name: "AIレビューを再実行" })).toBeTruthy();
+  });
+
+  it("AIレビューを再実行すると、現在のHEADを添えて依頼し、依頼済みを出す（#5158）", async () => {
+    const headSha = "1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b";
+    const pullRequest = makePullRequest({
+      mergeable: true,
+      headSha,
+      reviewVerdict: {
+        reviewKind: "needs-check",
+        reviewLabel: "要確認",
+        riskKind: "none",
+        riskLabel: "",
+        riskReasons: [],
+        confirmLabel: null,
+        reviewedSha: headSha,
+      },
+    });
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ ok: true, runId: 1 }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    renderDetail({
+      pullRequest,
+      detail: makeDetail({
+        summary: pullRequest,
+        reviewResponse: { issueNumber: 1087, linkedIssueLocal: false, currentFixRequest: null, fetchFailed: false },
+      }),
+    });
+    openTab("指摘");
+    const panel = within(screen.getByTestId("pull-request-review-response"));
+    fireEvent.click(panel.getByRole("button", { name: "AIレビューを再実行" }));
+    await waitFor(() => expect(panel.getByText(/再実行を依頼しました/)).toBeTruthy());
+    const call = fetchMock.mock.calls.find((c) => String((c as unknown[])[0]) === "/api/pull-requests/review-rerun") as
+      | [string, RequestInit]
+      | undefined;
+    expect(call).toBeTruthy();
+    expect(JSON.parse(String(call![1].body))).toMatchObject({ number: pullRequest.number, headSha });
+    expect(panel.getByRole("button", { name: "AIレビューを再実行" })).toHaveProperty("disabled", true);
   });
 
   it("修正を依頼済みのときは「修正を依頼済み」で、依頼ボタンを出さない", () => {

@@ -1773,6 +1773,7 @@ develop運用のリポジトリと同一でよい（`on: pull_request: branches:
 
   `workflows/vN` は、この入力を含むリリース済みの同一タグへ置き換える。別途対象言語のCIを
   `main`向けPRで実行し、そのジョブをブランチ保護の必須チェックへ設定する。
+  `vps`・`subpc`も`develop`を畳んだためこの形で入れる（#5164）。
 - **`release-develop-to-main.yml`は入れない。** マージがそのまま反映であり、リリースという段が無い
 - **`claude-ci-fix.yml`もそのまま置ける**（`workflows/v40`以降、#3356）。`reusable-claude-ci-fix.yml`の
   `detect`ジョブが`base.ref`に`develop`と`main`の両方を許容するため、caller自体はdevelop運用の

@@ -530,7 +530,11 @@ function buildRepository({
   const issueByNumber = new Map(issues.map((issue) => [issue.number, issue]));
   // 番号はIssueとPRで共通。PR一覧に実在する番号は、Issueキャッシュに無い限りIssueとして扱わない（#4529）
   const pullRequestByNumber = new Map(pullRequests.map((pullRequest) => [pullRequest.number, pullRequest]));
-  const releases = collectReleases(pullRequests);
+  const releases = collectReleases(
+    pullRequests,
+    branchStatus?.releasedVersionByPr ?? null,
+    branchStatus?.releasedVersion ?? null,
+  );
   const manualStepsByIssue = collectManualSteps(issues);
   // developとmainの差分から実際に確認できた「まだ本番へ出ていないブランチ」（#2661）。
   // タイムスタンプ頼みの`resolveReleaseState`より優先して使う。
@@ -886,17 +890,29 @@ export function resolveLatestVersion(
   return latest.version ?? releasedVersion;
 }
 
-function collectReleases(pullRequests: PullRequestSummary[]): MergedRelease[] {
-  return pullRequests
+/**
+ * 本番へ出たリリースPRの一覧（古い順）。版はPRタイトルから取り、取れないとき（新方式のリリース候補
+ * `リリース候補 RC-23`。#5154）は公開時の記録（PR番号→版）で補う。それでも無い**最新の1件だけ**は、
+ * 従来どおり直近に公開した版（`releasedVersion`）で補う。古い束へは流用しない（ずれた版を出すより出さない）
+ */
+function collectReleases(
+  pullRequests: PullRequestSummary[],
+  versionByPr: Record<number, string> | null = null,
+  latestReleasedVersion: string | null = null,
+): MergedRelease[] {
+  const releases = pullRequests
     .filter((pullRequest) => pullRequest.kind === "release" && pullRequest.mergedAt !== null)
     .map((pullRequest) => ({
       mergedAt: new Date(pullRequest.mergedAt as string).getTime(),
       frozenAt: new Date(releaseContentFrozenAt(pullRequest)).getTime(),
-      version: releaseVersionFromTitle(pullRequest.title),
+      version: releaseVersionFromTitle(pullRequest.title) ?? versionByPr?.[pullRequest.number] ?? null,
       pullRequestNumber: pullRequest.number,
       pullRequest,
     }))
     .sort((a, b) => a.mergedAt - b.mergedAt);
+  const latest = releases.at(-1);
+  if (latest !== undefined && latest.version === null) latest.version = latestReleasedVersion;
+  return releases;
 }
 
 /**

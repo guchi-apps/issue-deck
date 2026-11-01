@@ -13,6 +13,7 @@ import { githubApiErrorMessage } from "@/lib/github/network-error";
 import { buildPullRequestEvents } from "@/lib/github/pull-request-events";
 import { findCurrentFixRequest, findInterruptedFixRequest } from "@/lib/github/pull-request-fix-request-service";
 import { repairKindsFor } from "@/lib/github/pull-request-repair";
+import { currentAcknowledgement } from "@/lib/github/review-acknowledgement";
 import {
   fetchActivePullRequestRepairRun,
   visibleRepairRun,
@@ -222,6 +223,7 @@ async function handleGET(request: NextRequest) {
     ) {
       reviewResponse = await resolveReviewResponseContext({
         repositoryId: repository.id,
+        repositoryFullName: `${owner}/${repo}`,
         owner,
         repo,
         issueNumber: linkedIssueNumber,
@@ -229,6 +231,21 @@ async function handleGET(request: NextRequest) {
         token,
       });
     }
+
+    // 現在のレビュー判定への「確認済み・対応済み」の記録（#5159）。PRのコメントから読むので、
+    // 紐づくIssueが無いPRでも出せる。信頼するのはApp botの投稿だけ（`currentAcknowledgement`）
+    const ackSha = summary.reviewVerdict?.reviewedSha ?? null;
+    const reviewAcknowledgement =
+      summary.state === "open" && !summary.merged && ackSha && needsReviewAttention(summary.reviewVerdict!.reviewKind)
+        ? currentAcknowledgement(
+            comments.map((comment) => ({
+              body: comment.body,
+              author: { login: comment.user?.login ?? "", type: comment.user?.type },
+            })),
+            ackSha,
+            process.env.NEXT_PUBLIC_GITHUB_APP_SLUG,
+          )
+        : null;
 
     // 対応Issueの`00.check-user`で止まっているときの直接原因（#5080）。対象のPRでだけtimelineを1回読む
     const stopCause =
@@ -255,6 +272,7 @@ async function handleGET(request: NextRequest) {
       fetchedAt: new Date().toISOString(),
       userMergeReasons,
       reviewResponse,
+      reviewAcknowledgement,
       stopCause,
     };
     return NextResponse.json(detail);
@@ -291,6 +309,7 @@ async function fetchIosPrecheck(
  */
 async function resolveReviewResponseContext(params: {
   repositoryId: string;
+  repositoryFullName: string;
   owner: string;
   repo: string;
   issueNumber: number;
@@ -305,11 +324,24 @@ async function resolveReviewResponseContext(params: {
     .catch(() => null);
   const local = (issue?.labels.length ?? 0) > 0;
   const closed = issue?.state === "CLOSED";
+  // 11.localが残っていても、作業を終えたセッションの外し忘れ（再開で付け直された等）がある（#5160）。
+  // 生きているセッションが無ければ「対応中」とは言わず、外す案内に切り替えるために引く。
+  // 読めなければnull（分からない）にして、従来どおりの「対応中」の文言に倒す
+  const sessionAlive = local
+    ? await db.dispatchSession
+        .findFirst({
+          where: { repositoryFullName: params.repositoryFullName, issueNumber: params.issueNumber, state: "ALIVE" },
+          select: { id: true },
+        })
+        .then((row) => row !== null)
+        .catch(() => null)
+    : null;
   try {
     const comments = await fetchCommentsForIssue(params.owner, params.repo, params.issueNumber, params.token);
     return {
       issueNumber: params.issueNumber,
       linkedIssueLocal: local,
+      linkedIssueSessionAlive: sessionAlive,
       linkedIssueClosed: closed,
       currentFixRequest: findCurrentFixRequest(comments, params.headSha),
       interruptedFixRequest: findInterruptedFixRequest(comments, params.headSha),
@@ -320,6 +352,7 @@ async function resolveReviewResponseContext(params: {
     return {
       issueNumber: params.issueNumber,
       linkedIssueLocal: local,
+      linkedIssueSessionAlive: sessionAlive,
       linkedIssueClosed: closed,
       currentFixRequest: null,
       interruptedFixRequest: null,

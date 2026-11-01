@@ -542,6 +542,8 @@ export type PullRequestDetail = {
    * Issueに紐づくopenなPRでだけ入る。それ以外・古い応答では省略またはnull。
    */
   reviewResponse?: PullRequestReviewResponseContext | null;
+  /** 現在のレビュー判定への「確認済み・対応済み」の記録（#5159）。無ければnull・古い応答では省略 */
+  reviewAcknowledgement?: PullRequestReviewAcknowledgement | null;
   /**
    * 対応Issueの`00.check-user`で自動マージが止まっているときの直接原因（#5080）。理由が`merge`以外の
    * 確認待ちで止まっているopenなPRでだけ入り、それ以外・古い応答では省略またはnull。
@@ -549,11 +551,27 @@ export type PullRequestDetail = {
   stopCause?: PullRequestStopCause | null;
 };
 
+/**
+ * 現在のレビュー判定に対する「確認済み・対応済み」の記録（#5159）。PR単位で、レビューしたshaに紐付く。
+ * 追いコミットで再レビューされると別のshaになり、前の記録は効かなくなる。
+ */
+export type PullRequestReviewAcknowledgement = {
+  sha: string;
+  /** 記録した人のGitHubログイン。取得できなければnull */
+  recordedBy: string | null;
+};
+
 export type PullRequestReviewResponseContext = {
   /** 依頼を渡す先のIssue */
   issueNumber: number;
   /** そのIssueがローカルセッションで対応中（11.local）か。dispatchが反応しないため依頼を送れない */
   linkedIssueLocal: boolean;
+  /**
+   * `linkedIssueLocal`のとき、そのIssueで生きている（`ALIVE`の）ローカルセッションがあるか（#5160）。
+   * `false`なら11.localは作業を終えたセッションの外し忘れとみなし、外す案内を出す。
+   * 確かめられなかった・11.localが無い・古い応答ではnullまたは省略
+   */
+  linkedIssueSessionAlive?: boolean | null;
   /** そのIssueがクローズ済みか。dispatchは閉じたIssueへの`@claude`をskipするため依頼を送れない */
   linkedIssueClosed?: boolean;
   /** 現在のHEADに対して既に出ている修正依頼。無ければnull */

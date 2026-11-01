@@ -66,7 +66,7 @@ export function buildAckComment(params: {
   const reason = sanitizeAckReason(params.reason);
   return [
     `<!-- ${REVIEW_ACK_MARKER_PREFIX} sha=${params.sha} by=${params.recordedBy} -->`,
-    `自動レビューの指摘（${VERDICT_LABEL[params.verdict]}）を確認し、**対応しない**と記録しました（記録: @${params.recordedBy}）。`,
+    `自動レビューの指摘（${VERDICT_LABEL[params.verdict]}）を確認し、**対応済み（人が対応して解消した、または対応しない）**と記録しました（記録: @${params.recordedBy}）。`,
     "",
     `理由: ${reason || "（未記入）"}`,
     "",
@@ -78,7 +78,7 @@ export function buildAckComment(params: {
 export function buildRevokeComment(params: { sha: string; revokedBy: string }): string {
   return [
     `<!-- ${REVIEW_ACK_MARKER_PREFIX}-revoke sha=${params.sha} -->`,
-    `「対応しない」の記録を取り消しました（取り消し: @${params.revokedBy}）。`,
+    `「対応済み」の記録を取り消しました（取り消し: @${params.revokedBy}）。`,
   ].join("\n");
 }
 

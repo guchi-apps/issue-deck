@@ -265,6 +265,19 @@ export function PullRequestDetail({
   const verification = parseReleaseVerification(currentDetail?.body);
   // 検証結果の行の「確認済み・対応しない」の記録・取り消し（#3739）。develop向けPRへ記録を残し、
   // このリリースPR本文の該当行も書き換える（本文は作成時に1回しか書かれないため）。
+  const postReviewAck = async (body: Record<string, unknown>) => {
+    const [owner, repo] = pullRequest.repositoryFullName.split("/");
+    const response = await fetch("/api/pull-requests/review-ack", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ owner, repo, ...body }),
+    });
+    if (!response.ok) {
+      const payload: { message?: string; error?: string } = await response.json().catch(() => ({}));
+      throw new Error(payload.message ?? payload.error ?? "記録できませんでした");
+    }
+    onRefresh();
+  };
   const sendReviewAck = async (
     row: ReleaseVerificationRow,
     action: "acknowledge" | "revoke",
@@ -273,26 +286,17 @@ export function PullRequestDetail({
     if (row.pullRequestNumber === null) {
       throw new Error("対応するdevelop向けPRが見つからないため記録できません");
     }
-    const [owner, repo] = pullRequest.repositoryFullName.split("/");
-    const response = await fetch("/api/pull-requests/review-ack", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        owner,
-        repo,
-        number: row.pullRequestNumber,
-        issueNumber: row.issueNumber,
-        releasePullRequestNumber: pullRequest.number,
-        action,
-        reason,
-      }),
+    await postReviewAck({
+      number: row.pullRequestNumber,
+      issueNumber: row.issueNumber,
+      releasePullRequestNumber: pullRequest.number,
+      action,
+      reason,
     });
-    if (!response.ok) {
-      const payload: { message?: string; error?: string } = await response.json().catch(() => ({}));
-      throw new Error(payload.message ?? payload.error ?? "記録できませんでした");
-    }
-    onRefresh();
   };
+  // develop向けPR自身の対応パネルからの記録・取り消し（#5159）。PR単位で、リリースPR本文の書き換えは伴わない
+  const sendPullRequestAck = (number: number, action: "acknowledge" | "revoke", reason?: string) =>
+    postReviewAck({ number, action, reason });
   // CIの内訳は、チェック一覧を行の元にし、`ciRunId`は現在ステップと見込み時間を足すためだけに使う。
   // 一覧の再取得でチェックが一時的に空になっても、CIの操作表示そのものは読み取り専用へ戻さない。
   const showsCiBadge = !pullRequest.merged && pullRequest.state === "open" && !pullRequest.draft;
@@ -312,7 +316,12 @@ export function PullRequestDetail({
     : null;
 
   // レビュー指摘への対応（#4482）。上部と指摘タブの対応パネルは、同じこの結果から作る
-  const reviewAction = deriveReviewAction({ pullRequest, review, context: currentDetail?.reviewResponse });
+  const reviewAction = deriveReviewAction({
+    pullRequest,
+    review,
+    context: currentDetail?.reviewResponse,
+    acknowledgement: currentDetail?.reviewAcknowledgement,
+  });
   const primary = applyReviewAction(derivePrimaryState(pullRequest), reviewAction);
   // 指摘への対応・修正が残っている間は「マージする」を主操作にせず、マージの説明は詳細へ畳む
   const reviewUnresolved = reviewAction.kind === "respond" || reviewAction.kind === "requested" || reviewAction.kind === "repairing";
@@ -332,7 +341,13 @@ export function PullRequestDetail({
     !pullRequest.merged &&
     pullRequest.kind !== "release" &&
     pullRequest.kind !== "version-bump";
-  const findingsNeedAttention = primary.kind === "ci-failed" || primary.kind === "review-findings";
+  // 指摘タブの印（#5158）。CI失敗・要修正は赤、要確認（人の確認待ち）は不具合ではないので赤を出さず別の色にする
+  const findingsAttention: "bad" | "check" | null =
+    primary.kind === "ci-failed" || (primary.kind === "review-findings" && primary.tone === "bad")
+      ? "bad"
+      : primary.kind === "review-findings" && primary.tone === "warn"
+        ? "check"
+        : null;
   // 上部の「指摘に対応する」。指摘タブを開いてレビュー本文も開き、対応パネルの位置まで移動する
   const openReviewResponse = () => {
     selectTab("findings");
@@ -468,6 +483,7 @@ export function PullRequestDetail({
                     buttonClassName="h-9 text-xs"
                     // 詳細ペインでは、マージを拒まれた理由をボタンの下へ全文で出す（#4878）
                     failureLayout="block"
+                    reviewAcknowledgement={reviewAction.kind === "acknowledged" ? { recordedBy: reviewAction.recordedBy } : null}
                     // CI・レビュー・判定の完了待ちのあいだは押してよい状態に見せないため強調しない（#4783）
                     variant={repairKinds.length === 0 && !reviewUnresolved && !isMergeWaitingForChecks(pullRequest) ? "default" : "outline"}
                   />
@@ -589,8 +605,11 @@ export function PullRequestDetail({
               )}
             >
               {DETAIL_TAB_LABEL[tab]}
-              {tab === "findings" && findingsNeedAttention && (
+              {tab === "findings" && findingsAttention === "bad" && (
                 <span aria-label="対応が必要" className="size-2 rounded-full bg-destructive" />
+              )}
+              {tab === "findings" && findingsAttention === "check" && (
+                <span aria-label="確認が必要" className="size-2 rounded-full bg-sky-500" />
               )}
             </button>
           ))}
@@ -607,6 +626,14 @@ export function PullRequestDetail({
               onRefresh={onRefresh}
               onMerged={onMerged}
               onDraftFixIssue={onDraftFixIssue}
+              onAcknowledge={
+                pullRequest.kind === "release"
+                  ? undefined
+                  : (reason) => sendPullRequestAck(pullRequest.number, "acknowledge", reason)
+              }
+              onRevokeAcknowledgement={
+                pullRequest.kind === "release" ? undefined : () => sendPullRequestAck(pullRequest.number, "revoke")
+              }
               className="mb-3"
             />
             <div className="flex min-w-0 flex-wrap items-center gap-2">
