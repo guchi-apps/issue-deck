@@ -151,10 +151,19 @@ function resolveRequestAvailability(
       alternative: "draft-fix-issue",
     };
   }
+  // 11.localは作業を終えたあとも残ることがある（セッションの再開で付け直された等。#5160）。
+  // 生きているセッションが無いと確かめられたときは「対応中」と言わず、外し忘れとして外す案内を出す
+  if (context?.linkedIssueLocal && context.linkedIssueSessionAlive === false) {
+    return {
+      available: false,
+      reason: `Issue #${issueNumber} に11.local（ローカルで対応中）が残っていますが、動いているローカルセッションはありません。作業を終えたセッションの外し忘れの可能性があります。Issue詳細のラベルから11.localを外し、ホストセッションを開いて指摘を伝えてください。`,
+      alternative: "open-issue",
+    };
+  }
   if (context?.linkedIssueLocal) {
     return {
       available: false,
-      reason: `Issue #${issueNumber} はローカルセッションで対応中（11.local）のため、ここからの依頼は実行されません。Issue詳細から実行中のセッションへ修正を依頼してください。`,
+      reason: `Issue #${issueNumber} はローカルセッションで対応中（11.local）です。Issue詳細から実行中のセッションへ指摘を伝えて修正を依頼してください。`,
       alternative: "open-issue",
     };
   }

@@ -222,6 +222,7 @@ async function handleGET(request: NextRequest) {
     ) {
       reviewResponse = await resolveReviewResponseContext({
         repositoryId: repository.id,
+        repositoryFullName: `${owner}/${repo}`,
         owner,
         repo,
         issueNumber: linkedIssueNumber,
@@ -291,6 +292,7 @@ async function fetchIosPrecheck(
  */
 async function resolveReviewResponseContext(params: {
   repositoryId: string;
+  repositoryFullName: string;
   owner: string;
   repo: string;
   issueNumber: number;
@@ -305,11 +307,24 @@ async function resolveReviewResponseContext(params: {
     .catch(() => null);
   const local = (issue?.labels.length ?? 0) > 0;
   const closed = issue?.state === "CLOSED";
+  // 11.localが残っていても、作業を終えたセッションの外し忘れ（再開で付け直された等）がある（#5160）。
+  // 生きているセッションが無ければ「対応中」とは言わず、外す案内に切り替えるために引く。
+  // 読めなければnull（分からない）にして、従来どおりの「対応中」の文言に倒す
+  const sessionAlive = local
+    ? await db.dispatchSession
+        .findFirst({
+          where: { repositoryFullName: params.repositoryFullName, issueNumber: params.issueNumber, state: "ALIVE" },
+          select: { id: true },
+        })
+        .then((row) => row !== null)
+        .catch(() => null)
+    : null;
   try {
     const comments = await fetchCommentsForIssue(params.owner, params.repo, params.issueNumber, params.token);
     return {
       issueNumber: params.issueNumber,
       linkedIssueLocal: local,
+      linkedIssueSessionAlive: sessionAlive,
       linkedIssueClosed: closed,
       currentFixRequest: findCurrentFixRequest(comments, params.headSha),
       interruptedFixRequest: findInterruptedFixRequest(comments, params.headSha),
@@ -320,6 +335,7 @@ async function resolveReviewResponseContext(params: {
     return {
       issueNumber: params.issueNumber,
       linkedIssueLocal: local,
+      linkedIssueSessionAlive: sessionAlive,
       linkedIssueClosed: closed,
       currentFixRequest: null,
       interruptedFixRequest: null,
