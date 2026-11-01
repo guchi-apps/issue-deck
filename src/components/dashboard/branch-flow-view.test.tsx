@@ -1297,11 +1297,12 @@ describe("BranchFlowView", () => {
       expect(screen.getByText("リリース候補を作成して検証しますか？")).toBeTruthy();
       expect(await screen.findByText("#1460 本番へ出したい変更")).toBeTruthy();
       expect(screen.getByText(/今回反映する内容/)).toBeTruthy();
-      expect(screen.getByText("関連Issue #1456")).toBeTruthy();
+      // 一覧は1PR1行に絞る（#5163）。関連Issue・機械的リスクの理由は出さない
+      expect(screen.queryByText("関連Issue #1456")).toBeNull();
       // PRごとのレビュー判定（#4245）。取得できなかったPRは「記録なし」と区別して出す
       expect(screen.getAllByText("要確認").length).toBeGreaterThan(0);
-      expect(screen.getByText("・認証・認可に関わる変更")).toBeTruthy();
-      expect(screen.getByText(/レビューを取得できませんでした/)).toBeTruthy();
+      expect(screen.queryByText("・認証・認可に関わる変更")).toBeNull();
+      expect(screen.getByText("取得不可")).toBeTruthy();
     });
 
     it("反映内容の取得に失敗したときは0件とせず失敗を出す（#4201）", async () => {
