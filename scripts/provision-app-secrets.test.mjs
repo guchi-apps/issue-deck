@@ -28,7 +28,6 @@ const MANIFEST = [
   "TARGET_DIR\trepo\tsecret\tTARGET_DIR\top://apps/kakei-report/target-dir",
   "DB_NAME\trepo\tsecret\tDB_NAME\top://apps/kakei-report/db-name",
   "ALLOWED_GOOGLE_EMAILS\trepo\tsecret\tALLOWED_GOOGLE_EMAILS\top://apps/kakei-report/allowed-google-emails",
-  "SIGNALY_WEBHOOK_URL\trepo\tsecret\tSIGNALY_WEBHOOK_URL\top://apps/kakei-report/ci-webhook-url",
   "",
 ].join("\n");
 
@@ -196,10 +195,9 @@ describe("provision-app-secrets.sh", () => {
     expect(secrets).toHaveLength(2);
     expect(secrets.join("\n")).toContain("TARGET_DIR --repo guchi-apps/kakei-report");
     expect(secrets.join("\n")).toContain("DB_NAME --repo guchi-apps/kakei-report");
-    // 値を入れていない ALLOWED_GOOGLE_EMAILS / SIGNALY_WEBHOOK_URL は送らない
+    // 値を入れていない ALLOWED_GOOGLE_EMAILS は送らない
     // （空のまま送ると同期がFAILで返り、入った値まで失敗に見える）
     expect(secrets.join("\n")).not.toContain("ALLOWED_GOOGLE_EMAILS");
-    expect(secrets.join("\n")).not.toContain("SIGNALY_WEBHOOK_URL");
     expect(result.stdout).toContain("総数: 2件");
   });
 
@@ -213,8 +211,8 @@ describe("provision-app-secrets.sh", () => {
         "guchi-apps/kakei-report",
         "--db-name",
         "app_kakei_report",
-        "--ci-webhook-url",
-        "https://signaly.gucchii.com/webhook/xxxx",
+        "--allowed-emails",
+        "person@example.com",
       ],
       { STUB_ITEM_EXISTS: "1" },
     );
@@ -222,12 +220,12 @@ describe("provision-app-secrets.sh", () => {
     expect(result.code).toBe(0);
     const edit = recorded().find((line) => line.startsWith("op item edit"));
     expect(edit).toBeDefined();
-    expect(edit).toContain("通知.ci-webhook-url[url]=");
+    expect(edit).toContain("認証.allowed-google-emails[text]=");
     expect(edit).not.toContain("target-dir");
     expect(edit).not.toContain("db-name");
     // 既に入っている値も同期の対象には残す（GitHub側だけ欠けている場合に埋まる）
     const secrets = recorded().filter((line) => line.startsWith("gh secret set"));
-    expect(secrets.join("\n")).toContain("SIGNALY_WEBHOOK_URL");
+    expect(secrets.join("\n")).toContain("ALLOWED_GOOGLE_EMAILS");
     expect(secrets.join("\n")).toContain("TARGET_DIR");
   });
 
@@ -276,13 +274,10 @@ describe("provision-app-secrets.sh", () => {
       "guchi-apps/kakei-report",
       "--allowed-emails",
       "secret-person@example.com",
-      "--ci-webhook-url",
-      "https://signaly.gucchii.com/webhook/secret-token",
     ]);
 
     const output = `${result.stdout}\n${result.stderr}`;
     expect(output).not.toContain("secret-person@example.com");
-    expect(output).not.toContain("secret-token");
     expect(output).toContain("allowed-google-emails（text）: 25文字");
   });
 

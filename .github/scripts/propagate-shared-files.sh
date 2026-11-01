@@ -2,17 +2,18 @@
 # 1リポジトリぶんの「共有スクリプトを最新版へ更新するPR」を作る（#2240）。
 #
 # propagate-shared-files.yml から1リポジトリずつ呼ばれる。配るのは
-# `.github/scripts/signaly-notify.sh` のような**ワークフロー以外の配布物**で、
+# `.github/scripts/` 配下のスクリプトのような**ワークフロー以外の配布物**で、
+# （現在、配布物は無い。許可リストは空。Signaly廃止。#5180）
 # **どれを配るかは呼び出し元（issue-deckの画面）が決めて渡す**（ここで再検知すると画面の
 # 表示と実際の対象がずれる。propagate-repair-workflows.sh と同じ方針）。
 #
 # **caller配布（propagate-repair-workflows.sh）との違いは3つ。**
 #   1. 配布元は `.github/templates/` の雛形ではなく**issue-deck自身の実物**。中身をそのまま
 #      配るので雛形を置くと二重管理になり、実物を直したのに古い写しが配られる事故になる。
-#      issue-deck自身が同じスクリプトを ci.yml・deploy.yml から使っているため、壊れれば
+#      issue-deck自身が同じスクリプトをワークフローから使っているため、壊れれば
 #      このリポジトリのCIで先に分かる。
-#   2. 配るのは**既に置いてあるリポジトリだけ**。signaly-notify.sh を呼ぶのは ci.yml・
-#      deploy.yml 側のステップなので、スクリプトだけ新規に置いても誰も呼ばない。
+#   2. 配るのは**既に置いてあるリポジトリだけ**。配布物を呼ぶのは配布先のワークフロー側の
+#      ステップなので、スクリプトだけ新規に置いても誰も呼ばない。
 #   3. 判定が「有るか無いか」ではなく**中身が同じか**。同じならスキップする（毎回PRを作らない）。
 #
 # **配布先の独自の変更は消えうる。** 実際 guchi-apps/subpc のコピーには、そのリポジトリだけの
@@ -24,17 +25,12 @@
 # （run_url= ・curl -fsS \ など）が全リポジトリで引っかかり、本当に独自の変更がある subpc を
 # 見分けられなかった（実測で16件中16件が該当）。
 #
-# **配布物のコピーに加えて、ワークフローへの1行追加も相乗りさせている**（#2391）。
-# `deploy.yml`・`release.yml` のリリース通知ステップへ `SIGNALY_RELEASE_WEBHOOK_URL` を足す
-# （詳細は下の該当箇所のコメント）。丸ごと配れないファイルへ**アンカー行の隣に1行足すだけ**の
-# 編集をする例外で、ここを増やすときは「リポジトリごとの中身に依存しない」ことを確かめること。
-#
 # **このスクリプトは1リポジトリの失敗で全体を止めない前提で書かれている。** 呼び出し元が
 # 戻り値を見て件数を数えるため、失敗時は非0で返すこと。
 set -uo pipefail
 
 REPO="$1"        # owner/repo
-FILES="$2"       # 配るパス（空白区切り。例: ".github/scripts/signaly-notify.sh"）
+FILES="$2"       # 配るパス（空白区切り）
 SOURCE_REPO="$3" # 配布元（guchi-apps/issue-deck）
 
 # 配布元はこのリポジトリ（issue-deck）のチェックアウトそのもの
@@ -42,7 +38,7 @@ SOURCE_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 
 # 配れるパスの許可リスト。**src/lib/workflow-tags.ts の SHARED_FILE_SPECS と同じ内容**にする
 # （食い違うと、画面から配ろうとしたファイルがここで黙ってスキップされる）。
-ALLOWED_FILES=".github/scripts/signaly-notify.sh"
+ALLOWED_FILES=""
 
 fail() {
   echo "  $1" >&2
@@ -131,73 +127,6 @@ done
 
 UPDATED="${UPDATED# }"
 
-# ── リリース通知を専用チャンネルへ向けるenvを、配布先のワークフローへ足す（#2391）───────
-#
-# **スクリプトだけでは分離できない。** GitHub Actionsのsecretはワークフローが`env:`へ
-# 渡さないとスクリプトから読めないため、配布先の`deploy.yml`・`release.yml`にも1行が要る。
-# 配布の仕組みはどれも「丸ごとコピー」「固定の置換」「新規追加」しかできず、リポジトリごとに
-# 中身が違う`deploy.yml`は丸ごと配れない。そこで**アンカー行の隣へ1行足すだけ**の編集を、
-# 通知スクリプトの配布PRに相乗りさせる。
-#
-# アンカーは`NOTIFY_KIND:`の値が`リリース`の行（リリース通知のステップは全リポジトリで
-# この行を持つ）。**既に入っていれば何もしない**ので、配布を何度実行しても増えない。
-#
-# **突き合わせは行の完全一致で行わない**（#2421）。`NOTIFY_KIND: リリース`という文字列との
-# 一致で見ていたときは、次の2件が黙って外れ、**配布PRは作られるのにこの1行だけが入らない**
-# 状態が続いた。画面の「配布が必要」判定は通知スクリプトの中身しか見ないため、外れても
-# 表示には出ない。
-#
-#   - `guchi-apps/signaly` … 値を桁揃えしていて`NOTIFY_KIND:     リリース`（コロンの後が複数スペース）
-#   - `guchi-apps/asset-manager` … 改行がCRLFで、行末に`\r`が残る
-#
-# そこでコロンの後の空白は幅を問わず、行末のCRは取り除いてから値を比べる。**足す行の行末も
-# 元の行に合わせる**（CRLFのファイルへLFの行だけを混ぜない）。
-RELEASE_ENV_LINE='SIGNALY_RELEASE_WEBHOOK_URL: ${{ secrets.SIGNALY_RELEASE_WEBHOOK_URL }}'
-PATCHED=""
-for WF in .github/workflows/deploy.yml .github/workflows/release.yml; do
-  [ -f "$WF" ] || continue
-  if grep -q 'SIGNALY_RELEASE_WEBHOOK_URL' "$WF"; then
-    echo "  $WF には既にリリース用のwebhookが入っています。スキップします"
-    continue
-  fi
-
-  awk -v insert="$RELEASE_ENV_LINE" '
-    {
-      trimmed = $0
-      eol = ""
-      if (trimmed ~ /\r$/) { eol = "\r"; sub(/\r$/, "", trimmed) }
-      sub(/[ \t]+$/, "", trimmed)
-      match(trimmed, /^[ \t]*/)
-      indent = substr(trimmed, 1, RLENGTH)
-      body = substr(trimmed, RLENGTH + 1)
-      if (index(body, "NOTIFY_KIND:") == 1) {
-        value = substr(body, length("NOTIFY_KIND:") + 1)
-        sub(/^[ \t]+/, "", value)
-        if (value == "リリース") printf "%s%s%s\n", indent, insert, eol
-      }
-      print $0
-    }
-  ' "$WF" > "$WF.tmp" || fail "$WF を書き換えられません"
-
-  # **アンカーが無ければ何も変わらない。** 変わっていないファイルをPATCHEDへ入れると、
-  # PR本文が足していない行を足したと書くことになる
-  if cmp -s "$WF" "$WF.tmp"; then
-    rm -f "$WF.tmp"
-    continue
-  fi
-
-  mv "$WF.tmp" "$WF" || fail "$WF の更新に失敗しました"
-
-  PATCHED="$PATCHED $WF"
-done
-PATCHED="${PATCHED# }"
-
-if [ -n "$PATCHED" ]; then
-  RELEASE_NOTE="$(printf 'リリース通知を専用チャンネルへ向ける`SIGNALY_RELEASE_WEBHOOK_URL`を足した: %s\n\n**organization secretが未登録のあいだも通知は消えない。** 空が渡ると、スクリプトが\nこれまでのCI・デプロイ用チャンネルへ送る。' "$PATCHED")"
-else
-  RELEASE_NOTE="リリース通知のワークフローに足すものはなかった（既に入っているか、このリポジトリはリリース通知を出していない）。"
-fi
-
 if [ -z "$(git status --porcelain)" ]; then
   echo "  更新するファイルがありません。スキップします"
   exit 0
@@ -215,7 +144,7 @@ BRANCH="shared-files"
 git checkout --quiet -b "$BRANCH" || fail "ブランチを作成できません"
 git add -A
 
-COMMIT_MESSAGE="$(printf '共有スクリプトを最新版へ更新する\n\n各リポジトリの .github/scripts/ へコピーして使っているスクリプトを、配布元\n（%s）の内容へそろえる。コピー運用のため、配布元を直しても\n各リポジトリへは自動では行き渡らない。\n\n更新: %s\nワークフロー: %s\n' "$SOURCE_REPO" "${UPDATED:-（なし）}" "${PATCHED:-（なし）}")"
+COMMIT_MESSAGE="$(printf '共有スクリプトを最新版へ更新する\n\n各リポジトリの .github/scripts/ へコピーして使っているスクリプトを、配布元\n（%s）の内容へそろえる。コピー運用のため、配布元を直しても\n各リポジトリへは自動では行き渡らない。\n\n更新: %s\n' "$SOURCE_REPO" "${UPDATED:-（なし）}")"
 git commit --quiet -m "$COMMIT_MESSAGE" || fail "コミットに失敗しました"
 
 # ブランチ名が固定のため、前回マージされずに閉じたPRの残骸が残っていることがある。
@@ -230,8 +159,8 @@ if ! git push --quiet -u origin "$BRANCH"; then
     || fail "pushに失敗しました"
 fi
 
-PR_BODY="$(printf '## 実装内容\n\n各リポジトリの `.github/scripts/` へコピーして使っているスクリプトを、配布元（%s）の\n内容へそろえた。**コピー運用のため、配布元を直しても各リポジトリへは自動では行き渡らない。**\n\n更新: %s\n\n`signaly-notify.sh` を含む場合、今回そろえる主な変更は\n**「リリース通知をCI・デプロイと別のチャンネルへ分け、本文に変更内容を載せる」**\n（%s#2391）。あわせて、通知が届かなくても `exit 0` で返す（#2237・#2239）。\n\n## リリース通知のチャンネル分離\n\n%s\n\n## 上書きで消える記述\n\n%s\n\n## 確認方法\n\n- このPRのCIが成功すること\n- マージ後、次のデプロイ・CIでSignalyへ通知が届くこと（届かない場合も run が緑のままで、\n  ログに `::warning::Signalyへの通知に失敗しました` が出ること）\n- 次のリリースの通知が「リリース」チャンネルへ届き、本文に変更内容が出ること\n\n## 注意点\n\n- **呼び出し側のステップには `continue-on-error: true` を付けておく。** スクリプトは常に0で\n  返すが、付けておくと将来スクリプト自体が落ちたときもrunを赤くしない\n- **自動マージしない。** 配布先の独自の変更を上書きしうるため、内容を確認して手でマージする\n\n---\n\n%s の画面から一括作成されたPRです（対応Issueは作成していない）。\n' \
-  "$SOURCE_REPO" "${UPDATED:-（なし）}" "$SOURCE_REPO" "$RELEASE_NOTE" "$LOST_NOTE" "$SOURCE_REPO")"
+PR_BODY="$(printf '## 実装内容\n\n各リポジトリの `.github/scripts/` へコピーして使っているスクリプトを、配布元（%s）の\n内容へそろえた。**コピー運用のため、配布元を直しても各リポジトリへは自動では行き渡らない。**\n\n更新: %s\n\n## 上書きで消える記述\n\n%s\n\n## 確認方法\n\n- このPRのCIが成功すること\n\n## 注意点\n\n- **自動マージしない。** 配布先の独自の変更を上書きしうるため、内容を確認して手でマージする\n\n---\n\n%s の画面から一括作成されたPRです（対応Issueは作成していない）。\n' \
+  "$SOURCE_REPO" "${UPDATED:-（なし）}" "$LOST_NOTE" "$SOURCE_REPO")"
 
 PR_URL="$(gh pr create --repo "$REPO" --base "$DEFAULT_BRANCH" --head "$BRANCH" \
   --title "共有スクリプトを最新版へ更新する" \

@@ -94,13 +94,13 @@ describe("SecretsSyncSection", () => {
           ...repository().latestRun!,
           status: "FAILED",
           failedCount: 1,
-          failedKeys: ["SIGNALY_WEBHOOK_URL"],
+          failedKeys: ["DISPATCH_SECRET"],
         },
       }),
     ]);
     render(<SecretsSyncSection open />);
 
-    expect(await screen.findByText("失敗: SIGNALY_WEBHOOK_URL")).toBeTruthy();
+    expect(await screen.findByText("失敗: DISPATCH_SECRET")).toBeTruthy();
   });
 
   it("同期処理が始まる前に落ちた失敗（件数が全て0）はmessageを出す", async () => {
@@ -169,7 +169,7 @@ describe("SecretsSyncSection", () => {
           ...repository().latestRun!,
           syncedCount: 2,
           skippedCount: 1,
-          syncedKeys: ["DB_NAME", "SIGNALY_WEBHOOK_URL"],
+          syncedKeys: ["DB_NAME", "DISPATCH_SECRET"],
           skippedKeys: ["WORKFLOW_PAT"],
         },
       }),
@@ -183,7 +183,7 @@ describe("SecretsSyncSection", () => {
     fireEvent.click(screen.getByRole("button", { name: /内訳/ }));
 
     expect(screen.getByText("DB_NAME")).toBeTruthy();
-    expect(screen.getByText("SIGNALY_WEBHOOK_URL")).toBeTruthy();
+    expect(screen.getByText("DISPATCH_SECRET")).toBeTruthy();
     expect(screen.getByText("WORKFLOW_PAT")).toBeTruthy();
     // 値も値の長さも出していないことを、断り書きとしても示す
     expect(screen.getByText(/保存しているのは項目名だけです/)).toBeTruthy();
@@ -196,19 +196,19 @@ describe("SecretsSyncSection", () => {
           ...repository().latestRun!,
           status: "FAILED",
           failedCount: 1,
-          failedKeys: ["SIGNALY_WEBHOOK_URL"],
+          failedKeys: ["DISPATCH_SECRET"],
           syncedKeys: ["DB_NAME"],
         },
       }),
     ]);
     render(<SecretsSyncSection open />);
 
-    expect(await screen.findByText("失敗: SIGNALY_WEBHOOK_URL")).toBeTruthy();
+    expect(await screen.findByText("失敗: DISPATCH_SECRET")).toBeTruthy();
 
     fireEvent.click(screen.getByRole("button", { name: /内訳/ }));
 
-    expect(screen.queryByText("失敗: SIGNALY_WEBHOOK_URL")).toBeNull();
-    expect(screen.getByText("SIGNALY_WEBHOOK_URL")).toBeTruthy();
+    expect(screen.queryByText("失敗: DISPATCH_SECRET")).toBeNull();
+    expect(screen.getByText("DISPATCH_SECRET")).toBeTruthy();
     // 「失敗 1」は行の件数と内訳の見出しの2か所に出る（項目名の重複とは別）
     expect(screen.getAllByText("失敗 1")).toHaveLength(2);
   });

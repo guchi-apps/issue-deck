@@ -1,10 +1,24 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 const repositoryFindMany = vi.fn();
 const getInstallationToken = vi.fn();
 const githubFetch = vi.fn();
 
 const repositoryFindFirst = vi.fn();
+
+import { SHARED_FILE_SPECS, type SharedFileSpec } from "@/lib/workflow-tags";
+
+/**
+ * 現在、配布物は無い（`SHARED_FILE_SPECS`は空。#5180）ので、配布の仕組みを確かめるあいだだけ
+ * テスト用の定義を足す。
+ */
+const TEST_SPEC: SharedFileSpec = { path: ".github/scripts/example.sh", label: "例のスクリプト" };
+beforeAll(() => {
+  (SHARED_FILE_SPECS as SharedFileSpec[]).push(TEST_SPEC);
+});
+afterAll(() => {
+  (SHARED_FILE_SPECS as SharedFileSpec[]).splice(0);
+});
 
 vi.mock("@/lib/db", () => ({
   db: {
@@ -826,7 +840,7 @@ describe("共有ファイルの検知（#2240）", () => {
     const overview = await collectWorkflowTags("user-1");
 
     expect(overview.repositories[0]?.outdatedSharedFiles).toEqual([
-      ".github/scripts/signaly-notify.sh",
+      ".github/scripts/example.sh",
     ]);
   });
 
@@ -872,7 +886,7 @@ describe("共有ファイルの検知（#2240）", () => {
     await collectWorkflowTags("user-1");
 
     const sourceCall = graphqlCalls().find((call) => "shared0" in call.variables);
-    expect(sourceCall?.variables.shared0).toBe("main:.github/scripts/signaly-notify.sh");
+    expect(sourceCall?.variables.shared0).toBe("main:.github/scripts/example.sh");
   });
 
   it("配布先はデフォルトブランチから読む", async () => {
@@ -881,7 +895,7 @@ describe("共有ファイルの検知（#2240）", () => {
     await collectWorkflowTags("user-1");
 
     const treeCall = graphqlCalls().find((call) => "shared0_0" in call.variables);
-    expect(treeCall?.variables.shared0_0).toBe("develop:.github/scripts/signaly-notify.sh");
+    expect(treeCall?.variables.shared0_0).toBe("develop:.github/scripts/example.sh");
   });
 });
 
@@ -917,7 +931,7 @@ describe("dispatchSharedFilePropagation", () => {
     expect(result).toMatchObject({
       dispatched: true,
       targets: [
-        { repository: "guchi-apps/car-care", files: [".github/scripts/signaly-notify.sh"] },
+        { repository: "guchi-apps/car-care", files: [".github/scripts/example.sh"] },
       ],
     });
 

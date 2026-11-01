@@ -5,7 +5,7 @@
 #           → GitHubのsecretへ同期 → repo secretの件数を確かめる
 #
 # **なぜ要るか。** 新規アプリの立ち上げ（#2188）が起票する手作業Issueは、1Passwordの登録を
-# `db-name = app_aide_bot / ci-webhook-url（Signaly）/ target-dir = /apps/aide-bot` という
+# `db-name = app_aide_bot / ci-webhook-url / target-dir = /apps/aide-bot` という
 # **フィールド名の羅列**で書いていた。実行できるコマンドになっていないため未登録のまま初回の
 # 本番デプロイが走り、`DB_NAME: DB_NAME is required` で失敗した（`guchi-apps/aide-bot#4`）。
 # 立ち上げが決めた値のうち機械的に定まるもの（配置先・DB名・許可メール）は、人が読み替えずに
@@ -18,13 +18,11 @@
 # 値を1件だけ差し替える・発行し直すときは、従来どおり `provision-secret.sh` を使う。
 #
 # **何度実行してもよい。** 既に値があるフィールドは触らない（`--force` で上書き）。実行の順序を
-# 気にせず、Signalyのwebhook URLだけを後から足すこともできる。
+# 気にせず、足りないフィールドだけを後から足すこともできる。
 #
 # 使い方:
 #   scripts/provision-app-secrets.sh --repo guchi-apps/kakei-report --db-name app_kakei_report
 #   scripts/provision-app-secrets.sh --repo guchi-apps/kakei-report --copy-allowed-emails
-#   scripts/provision-app-secrets.sh --repo guchi-apps/kakei-report \
-#     --ci-webhook-url 'https://signaly.gucchii.com/webhook/xxxx'
 #
 # オプション:
 #   --repo <owner/repo>       対象リポジトリ（必須）
@@ -36,7 +34,6 @@
 #   --allowed-emails <値>     ログインを許可するGoogleアカウント（カンマ区切り）
 #   --copy-allowed-emails     許可メールを既定のコピー元（下記）から写す
 #   --allowed-emails-from <op://…>  コピー元を指定して写す
-#   --ci-webhook-url <URL>    SignalyのWebhook URL（人がチャンネルを作ってから渡す）
 #   --ref <ブランチ>          マニフェストを読むブランチ（既定 develop）
 #   --no-sync                 1Passwordへ入れるだけで、GitHubへは同期しない
 #   --dry-run                 何もせず、何をするかだけ出す
@@ -75,7 +72,6 @@ ALLOWED_EMAILS_FROM=""
 # 正になる。** 参照を1か所に置くのは、立ち上げが起票するIssueの本文へ焼き込むと、コピー元の
 # アイテム名が変わったときに過去のIssueごと直せなくなるため
 DEFAULT_ALLOWED_EMAILS_FROM="op://apps/dayspan/allowed-google-emails"
-CI_WEBHOOK_URL=""
 REF="develop"
 SYNC=true
 DRY_RUN=false
@@ -93,14 +89,13 @@ while [[ $# -gt 0 ]]; do
     --allowed-emails) ALLOWED_EMAILS="$2"; shift 2 ;;
     --copy-allowed-emails) ALLOWED_EMAILS_FROM="$DEFAULT_ALLOWED_EMAILS_FROM"; shift ;;
     --allowed-emails-from) ALLOWED_EMAILS_FROM="$2"; shift 2 ;;
-    --ci-webhook-url) CI_WEBHOOK_URL="$2"; shift 2 ;;
     --ref) REF="$2"; shift 2 ;;
     --no-sync) SYNC=false; shift ;;
     --dry-run) DRY_RUN=true; shift ;;
     # 確かめるだけ。1Passwordへの書き込みもGitHubへの同期も行わない
     --check) CHECK=true; shift ;;
     --force) FORCE=true; shift ;;
-    -h|--help) sed -n '2,51p' "${BASH_SOURCE[0]}"; exit 0 ;;
+    -h|--help) sed -n '2,49p' "${BASH_SOURCE[0]}"; exit 0 ;;
     *) echo "unknown option: $1" >&2; exit 1 ;;
   esac
 done
@@ -162,7 +157,6 @@ fi
 # 型は `email` ではなく `text`。許可メールはカンマ区切りで複数入ることがあり、
 # `email` 型では1件しか入らない
 [[ -z "$ALLOWED_EMAILS" ]] || add_field "allowed-google-emails" "認証" "text" "$ALLOWED_EMAILS"
-[[ -z "$CI_WEBHOOK_URL" ]] || add_field "ci-webhook-url" "通知" "url" "$CI_WEBHOOK_URL"
 
 ((${#FIELD_NAMES[@]} > 0)) || { echo "投入する値がありません" >&2; exit 1; }
 

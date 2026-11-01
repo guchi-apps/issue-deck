@@ -1,6 +1,6 @@
 # GitHub Actionsの異常通知（Discord）
 
-Signaly廃止（#5057）の代替経路。**失敗・明確な異常だけ**をDiscordへ送り、成功・通常リリース・通常収集・キャンセルは送らない。
+Signalyの通知を廃止した（#5057・#5180）後に残る異常通知の経路。**失敗・明確な異常だけ**をDiscordへ送り、成功・通常リリース・通常収集・キャンセルは送らない。
 
 ## 仕組み
 
@@ -12,7 +12,7 @@ Signaly廃止（#5057）の代替経路。**失敗・明確な異常だけ**をD
 
 ## 現在の段階（併走）
 
-issue-deck自身の `ci.yml`・`deploy.yml`・`release.yml`・`ios-testflight.yml` と、新規アプリの生成物（`scaffold-workflows.ts`）には、Signalyの通知ステップの**後ろ**にDiscordのステップを足した。Signalyの撤去は、Discordへの実到達（模擬の失敗と実メッセージの読み戻し）を確認してから行う。
+issue-deck自身の `ci.yml`・`deploy.yml`・`release.yml`・`ios-testflight.yml` と、新規アプリの生成物（`scaffold-workflows.ts`）にDiscordのステップがある。併走していたSignalyの通知ステップ・`signaly-notify.sh`・`SIGNALY_*` のsecret参照は撤去した（#5180。代替の通知先は用意しない）。
 
 `DISCORD_ALERT_WEBHOOK_URL` が未登録の間は警告を出して0で返す。マニフェストへの行追加は、1Passwordへの登録と同期が済んでから行う。
 
@@ -20,4 +20,3 @@ issue-deck自身の `ci.yml`・`deploy.yml`・`release.yml`・`ios-testflight.ym
 
 - webhookの発行・登録（外部サービスの値）と、実到達の確認
 - 他リポジトリへの展開（リポジトリごとにIssue。`propagate-shared-files`は既存ファイルにしか配らないため、初回の導入は別途）
-- 全リポジトリで到達を確認した後の、Signaly用ステップ・`signaly-notify.sh`・`SIGNALY_*` シークレット参照の撤去

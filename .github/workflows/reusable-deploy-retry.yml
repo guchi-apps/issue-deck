@@ -5,7 +5,7 @@ name: Reusable deploy retry
 #
 # **なぜ要るか。** mainへ入った後のデプロイ失敗を自動で拾う仕組みが無かった。自動修復
 # （`claude-ci-fix.yml`）が働くのはmainへ入る前のPR段階までで、デプロイが落ちたときに
-# 起きるのはSignalyへの通知と画面の「デプロイ失敗」表示だけ。復旧は人が「本番へ再デプロイ」を
+# 起きるのは画面の「デプロイ失敗」表示だけ。復旧は人が「本番へ再デプロイ」を
 # 押すまで始まらない（`src/lib/deploy-request.ts`）。SSH断・ネットワーク・アプリの起動待ちの
 # ような一時的な失敗まで、人が気づくまで本番が古いままになっていた。
 #
@@ -51,7 +51,7 @@ on:
   workflow_call:
     inputs:
       app-name:
-        description: "Signalyの通知に出すアプリ名（既定: リポジトリ名）"
+        description: "使われない（互換のために残した入力。かつてSignalyの通知に出すアプリ名だった。#5180）"
         required: false
         type: string
         default: ""
@@ -87,15 +87,9 @@ jobs:
       # `gh run rerun` に要る
       actions: write
       contents: read
-    env:
-      SIGNALY_WEBHOOK_URL: ${{ secrets.SIGNALY_WEBHOOK_URL }}
 
     steps:
-      - name: Checkout code
-        # 通知スクリプト（.github/scripts/signaly-notify.sh）を使うためだけのcheckout。
-        # 判定と再実行はGitHub APIだけで済むので、コードそのものは要らない。
-        uses: actions/checkout@v4
-
+      # 判定と再実行はGitHub APIだけで済むので、コードのcheckoutは要らない。
       - name: 再実行してよい失敗かを判定する
         id: judge
         env:
@@ -182,37 +176,3 @@ jobs:
           # 失敗ジョブに`needs`で連なるジョブ（`release`・`notify`）は一緒に流れるので、
           # 成功したときの通知とGitHub Releaseの作成も従来どおり行われる。
           gh run rerun "$RUN_ID" --failed --repo "$TARGET_REPOSITORY"
-
-      # **1Passwordからの補完（`.github/actions/load-secrets`）は通さない。** 1Passwordの
-      # サービスアカウントには日次レート制限があり、使い切るとフリート全体のデプロイが止まる
-      # （#1302）。デプロイ失敗のたびに読みに行く価値は無く、`SIGNALY_WEBHOOK_URL`が
-      # GitHub側に無いリポジトリでは通知が出ないだけで済む（再実行そのものは先のステップで
-      # 終わっている）。
-      - name: Signaly に通知
-        if: steps.judge.outputs.retry == 'true'
-        # 通知の失敗で再実行の成否を塗り替えない。Signalyが止まっていると通知だけが落ちる
-        # （#2237。スクリプト側も0で返すが、古いコピーを置いたリポジトリのためにここでも守る）。
-        continue-on-error: true
-        env:
-          SIGNALY_WEBHOOK_URL: ${{ env.SIGNALY_WEBHOOK_URL }}
-          NOTIFY_APP: ${{ inputs.app-name != '' && inputs.app-name || github.event.repository.name }}
-          NOTIFY_KIND: デプロイ
-          # `success|failure|cancelled`以外はそのまま見出しに出る（ℹ️・青）。
-          # **失敗の通知に続けてこれが出ることに意味がある**——失敗しか通知されないと、
-          # 人は自分で押しに行くしかないと読んでしまう（#2072と同じ問題）。
-          NOTIFY_STATUS: 自動で再実行中
-          # リンク先は**再実行したデプロイのrun**にする（このワークフロー自身のrunではない）。
-          # 押した先で見たいのは失敗したログと、そこから再開する様子のため。
-          NOTIFY_RUN_URL: ${{ github.event.workflow_run.html_url }}
-        run: |
-          set -euo pipefail
-
-          # 通知スクリプトは各リポジトリの`.github/scripts/`にコピーして使う運用のため、
-          # 置いていないリポジトリがありうる。**無くてもジョブは落とさない**——再実行は
-          # 既に済んでおり、通知が出ないことと再実行できないことは重さが違う。
-          if [ ! -f .github/scripts/signaly-notify.sh ]; then
-            echo "::warning::.github/scripts/signaly-notify.sh がありません。通知をスキップします"
-            exit 0
-          fi
-
-          bash .github/scripts/signaly-notify.sh

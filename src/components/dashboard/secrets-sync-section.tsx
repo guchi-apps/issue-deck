@@ -218,7 +218,7 @@ export function SecretsSyncSection({ open }: { open: boolean }) {
           id="secrets-sync-only"
           value={only}
           onChange={(e) => setOnly(e.target.value)}
-          placeholder="SIGNALY_WEBHOOK_URL,DB_NAME"
+          placeholder="DISPATCH_SECRET,DB_NAME"
           aria-invalid={!onlyIsValid}
         />
       </div>

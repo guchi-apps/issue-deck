@@ -107,7 +107,7 @@ case "$DEPLOY_WORKFLOW" in
   *'"'*) fail "デプロイワークフロー名に\"が含まれています: $DEPLOY_WORKFLOW" ;;
 esac
 
-# Signalyの通知に出すアプリ名。リポジトリ名をそのまま使う（deploy.ymlのNOTIFY_APPと揃う）
+# deploy-retry callerの`app-name`に渡すアプリ名。リポジトリ名をそのまま使う
 APP_NAME="${REPO#*/}"
 
 # 生成したcallerに、雛形の置換し損ないが残っていないかを確かめる（#2330）。

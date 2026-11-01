@@ -3352,11 +3352,9 @@ export function POST(request: NextRequest) {
     「人が動かないと止まるもの」で、片方だけ止めたい理由が出ていないため。
 - **リリース（本番反映）の完了はDiscordのチャンネルへ埋め込みで届く**（#2725でPush通知として導入し、#4791でSlack投稿へ、#4994でDiscord Webhook投稿へ、#5031でフォーラム投稿へ替え、#5046でテキストチャンネル宛て〈`thread_name`なし。リリース画面リンク付き〉に戻した。投稿は`lib/discord/webhook.ts`の`postWebhookMessage`、投稿先は同ファイルの`loadReleaseDiscordTarget`（`DISCORD_RELEASE_WEBHOOK_URL`）。以下のPush・購読・ミュートに関する記述は#4791より前の経緯で、送り先以外の検知・記録の仕組みは今も同じ。
   [`lib/notifications/release-push.ts`](../src/lib/notifications/release-push.ts)）。
-  リリース通知はSignalyへのwebhook（`deploy.yml`の`notify-release`が
-  `.github/scripts/signaly-notify.sh`を呼ぶ）にしか流れておらず、**フリート全体のリリースを
-  画面で扱っているissue-deck自身のPWAには届かなかった。** 巡回で新しいリリースを見つけ、
-  確認待ち・本番マージ待ち・デプロイ起動漏れと同じ経路に載せる。**Signalyへの通知は
-  そのまま残す**（宛先が1つ増えるだけ）。
+  かつてリリース通知は別アプリ（Signaly）へのwebhookにしか流れておらず、**フリート全体の
+  リリースを画面で扱っているissue-deck自身のPWAには届かなかった。** 巡回で新しいリリースを
+  見つけ、確認待ち・本番マージ待ち・デプロイ起動漏れと同じ経路に載せる。Signalyは廃止した（#5180）。
   - **判定はGitHub Releaseそのものを見る**（`fetchLatestRelease`。issue-deckがReleaseのAPIを
     呼ぶのはここだけで、他は全部PRとworkflow runを見ている）。「本番へ出た版」を一意に指す
     値はタグしか無く、`releases/latest`は**draftとprereleaseを除く**ので欲しい絞り込みが
@@ -3370,9 +3368,9 @@ export function POST(request: NextRequest) {
   - **既存3種と違い「報せるだけ」の通知なので、鳴らし直しを持たない。** 代わりに
     `RELEASE_PUSH_SWEEP_INTERVAL_MINUTES=0`で丸ごと止められるようにしてある。種別ごとの
     ON/OFFのUIはまだ無い（設定は購読の有無だけ）。
-  - **本文はSignalyと同じ`.github/release-notes.md`を読む**（`parseReleaseNotes`）。
-    **見出し`# vX.Y.Z`がタグと一致したときだけ載せる**のも`signaly-notify.sh`と同じで、
-    リリースの流れの外でファイルが取り残されたとき、**古い文面を新しいバージョンの通知へ
+  - **本文は`.github/release-notes.md`を読む**（`parseReleaseNotes`）。
+    **見出し`# vX.Y.Z`がタグと一致したときだけ載せる**。
+    これはリリースの流れの外でファイルが取り残されたとき、**古い文面を新しいバージョンの通知へ
     貼るほうが本文が無いことより悪い**ため。取得に失敗しても通知そのものは出す。
   - `POST /api/dispatch/claim`へ相乗りさせない理由・専用の受け口
     （`POST /api/repositories/release-push-sweep`）を持つ理由は#2376と同じ。
@@ -4300,7 +4298,7 @@ pnpm test:unit   # vitestのみ
   だった。`develop`を切る前にGit Data API（blob → tree → commit → ref）で1コミット置くので、
   初期化Issueも最初から無人実行で回せる。**雛形の正はissue-deck内**（`.github/templates/`は
   本番の配布物に入らず実行時に読めないため、TypeScriptのモジュールで持つ）。**issue-deck自身が
-  実物を持つファイルは写しを作らず`main`からそのまま配る**（`signaly-notify.sh`など）。
+  実物を持つファイルは写しを作らず`main`からそのまま配る**（`discord-alert.sh`など）。
 - **ポートとホスト名は`guchi-apps/vps`の実物から決める。** READMEの2つの表（アプリ一覧・
   予約済みポート）と、vhostの`ServerName`／`ServerAlias`。**READMEの散文の「空きは〜」と
   vhostのファイル名は読まない**——どちらも実態とずれる（`wordpress.conf`の`ServerName`は

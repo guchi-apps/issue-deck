@@ -348,10 +348,6 @@ jobs:
     runs-on: ubuntu-latest
     needs: [tag, build, deploy]
     if: always()
-    # GitHub側の値はここで明示的に渡す。複合アクションのステップはジョブの env: を
-    # 引き継ぐが、呼び出しステップの env: は引き継がない。
-    env:
-      SIGNALY_WEBHOOK_URL: ${{ secrets.SIGNALY_WEBHOOK_URL }}
 
     steps:
       - name: Checkout code
@@ -372,29 +368,6 @@ jobs:
           fi
           echo "result=$result" >> "$GITHUB_OUTPUT"
 
-      - name: 不足分を1Passwordから補う
-        # 通知のためだけのステップなので、ここが落ちてもrunは落とさない
-        # （1Passwordのレート制限でリリースPRのCIが赤くなった実績がある。#1302・#2237）。
-        continue-on-error: true
-        uses: ./.github/actions/load-secrets
-        with:
-          only: SIGNALY_WEBHOOK_URL
-          # issue-deckは#1302・#1308で1Password依存を外しており、このsecretは存在しない。
-          # 空が渡るとアクションは1Passwordを一切触らない。他リポジトリでは値が入るため、
-          # GitHub側の投入が済むまで1Passwordから補われる（#1307の段階的な移行のため）。
-          op-token: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
-
-      - name: Signaly に通知
-        # 通知はデプロイの成否そのものではない。ここが失敗してもrun全体を落とさない
-        # （Signalyが止まっている間のmainマージでデプロイ成功のrunが赤くなった。#2237）。
-        continue-on-error: true
-        env:
-          SIGNALY_WEBHOOK_URL: ${{ env.SIGNALY_WEBHOOK_URL }}
-          NOTIFY_APP: issue-deck
-          NOTIFY_KIND: デプロイ
-          NOTIFY_STATUS: ${{ steps.status.outputs.result }}
-        run: bash .github/scripts/signaly-notify.sh
-
       - name: Discord に異常を通知
         # 失敗・異常だけ送る（成功・キャンセルはスクリプトが送らない）。結果は改変せず、
         # 通知の失敗でrunを落とさない（#5057）。
@@ -411,40 +384,10 @@ jobs:
     runs-on: ubuntu-latest
     needs: [tag, deploy, release]
     if: always() && needs.release.result != 'skipped'
-    # GitHub側の値はここで明示的に渡す。複合アクションのステップはジョブの env: を
-    # 引き継ぐが、呼び出しステップの env: は引き継がない。
-    env:
-      SIGNALY_WEBHOOK_URL: ${{ secrets.SIGNALY_WEBHOOK_URL }}
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-
-      - name: 不足分を1Passwordから補う
-        # 通知のためだけのステップなので、ここが落ちてもrunは落とさない
-        # （1Passwordのレート制限でリリースPRのCIが赤くなった実績がある。#1302・#2237）。
-        continue-on-error: true
-        uses: ./.github/actions/load-secrets
-        with:
-          only: SIGNALY_WEBHOOK_URL
-          # issue-deckは#1302・#1308で1Password依存を外しており、このsecretは存在しない。
-          # 空が渡るとアクションは1Passwordを一切触らない。他リポジトリでは値が入るため、
-          # GitHub側の投入が済むまで1Passwordから補われる（#1307の段階的な移行のため）。
-          op-token: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
-
-      - name: Signaly に通知
-        # 通知が届かないことでリリース済みのrunを赤くしない（#2237）。
-        continue-on-error: true
-        env:
-          SIGNALY_WEBHOOK_URL: ${{ env.SIGNALY_WEBHOOK_URL }}
-          # リリースだけはCI・デプロイと別のチャンネルへ送る（#2391）。未登録のあいだは
-          # 空が渡り、スクリプトが従来のチャンネルへフォールバックする。
-          SIGNALY_RELEASE_WEBHOOK_URL: ${{ secrets.SIGNALY_RELEASE_WEBHOOK_URL }}
-          NOTIFY_STATUS: ${{ needs.release.result }}
-          NOTIFY_APP: issue-deck
-          NOTIFY_KIND: リリース
-          NOTIFY_VERSION: ${{ needs.tag.outputs.tag }}
-        run: bash .github/scripts/signaly-notify.sh
 
       - name: Discord に異常を通知
         # 失敗・異常だけ送る（成功・キャンセルはスクリプトが送らない）。結果は改変せず、

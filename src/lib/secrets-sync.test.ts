@@ -40,7 +40,7 @@ describe("normalizeOnlyKeys", () => {
   });
 
   it("前後の空白を落とし、大文字へ揃える", () => {
-    expect(normalizeOnlyKeys(" signaly_webhook_url , port ")).toBe("SIGNALY_WEBHOOK_URL,PORT");
+    expect(normalizeOnlyKeys(" dispatch_secret , port ")).toBe("DISPATCH_SECRET,PORT");
   });
 
   it("同じKEYを2回書いても1回ぶんにする（日次枠を無駄に消費しないため）", () => {
@@ -115,14 +115,14 @@ describe("describeSecretsSyncResult", () => {
 
   it("失敗があれば項目名だけを添える", () => {
     const result = describeSecretsSyncResult(
-      run({ status: "FAILED", failedCount: 2, failedKeys: ["SIGNALY_WEBHOOK_URL", "DB_NAME"] }),
+      run({ status: "FAILED", failedCount: 2, failedKeys: ["DISPATCH_SECRET", "DB_NAME"] }),
     );
     expect(result).toEqual({
       kind: "counts",
       synced: 26,
       skipped: 2,
       failed: 2,
-      failedKeys: ["SIGNALY_WEBHOOK_URL", "DB_NAME"],
+      failedKeys: ["DISPATCH_SECRET", "DB_NAME"],
     });
   });
 

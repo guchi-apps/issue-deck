@@ -100,26 +100,18 @@ function vpsProvisionCommand(spec: NewAppSpec): string {
 /**
  * シークレット投入コマンド。**フィールド名の羅列にせず、そのまま貼れる1コマンドで出す**（#2249）。
  *
- * `aide-bot`の立ち上げでは「`db-name = app_aide_bot / ci-webhook-url（Signaly）/ target-dir = …`」
+ * `aide-bot`の立ち上げでは「`db-name = app_aide_bot / ci-webhook-url / target-dir = …`」
  * という羅列を手作業Issueに書いていたため、値が未登録のまま初回の本番デプロイが走り
  * `DB_NAME: DB_NAME is required` で失敗した（`guchi-apps/aide-bot#4`→`#8`）。
  *
- * 機械的に定まる値（配置先・DB名・許可メール）と、人がSignalyで作らないと決まらない
- * webhook URLとで**呼び分ける**。スクリプトは何度実行してもよい作りなので、順序は問わない。
+ * 機械的に定まる値（配置先・DB名・許可メール）を渡す。スクリプトは何度実行してもよい作りなので、
+ * 順序は問わない。
  */
-function provisionCommand(
-  spec: NewAppSpec,
-  ciWebhookUrl: string | null,
-  options: { check?: boolean } = {},
-): string {
+function provisionCommand(spec: NewAppSpec, options: { check?: boolean } = {}): string {
   const args = [`--repo ${repositoryFullName(spec)}`];
-  if (ciWebhookUrl === null) {
-    if (spec.databaseName) args.push(`--db-name ${spec.databaseName}`);
-    // 許可メールは既存アプリの値をコピーする（コピー元はスクリプト側に持たせている）
-    if (spec.auth !== "none") args.push("--copy-allowed-emails");
-  } else {
-    args.push(`--ci-webhook-url '${ciWebhookUrl}'`);
-  }
+  if (spec.databaseName) args.push(`--db-name ${spec.databaseName}`);
+  // 許可メールは既存アプリの値をコピーする（コピー元はスクリプト側に持たせている）
+  if (spec.auth !== "none") args.push("--copy-allowed-emails");
   // 確認用は同じ引数に`--check`を足すだけにする（#2256）。投入と確認で対象のフィールドが
   // ずれると、「入っていない値を確かめていない」という一番まずい形になる
   if (options.check) args.push("--check");
@@ -663,7 +655,7 @@ ${scaffold.workflowTag ? `共有ワークフローの参照タグは \`${scaffol
 - [ ] 1Passwordの値をGitHubのsecretへ同期する（マニフェストをpushした後、そのブランチを指定して実行する）
 
   \`\`\`bash
-  ${provisionCommand(spec, null)} \\
+  ${provisionCommand(spec)} \\
     --ref <このIssueのブランチ>
   \`\`\`
 `;
@@ -730,7 +722,7 @@ ${alreadyThere}
 
 - [ ] アプリの雛形を作る（${profile.label}）${nextConfigTask}${authTasks}
 - [ ] バージョン管理を \`package.json\` の \`version\` に載せる${packageManagerTask}${buildApprovalTask}
-- [ ] \`.env.local.example\`（ローカル開発の記入例）を作る${has(".env.example") ? "" : "。あわせて \`.env.example\`（変数名のみ）も作る"}${ciTasks}${secretTasks}${has(".github/scripts/signaly-notify.sh") ? "" : "\n- [ ] \`.github/scripts/signaly-notify.sh\` を置く（CI・デプロイ通知の \`SIGNALY_WEBHOOK_URL\` はorganization secretから来るため、Signalyのチャンネル作成も \`op://\` 参照の追加も要らない）"}
+- [ ] \`.env.local.example\`（ローカル開発の記入例）を作る${has(".env.example") ? "" : "。あわせて \`.env.example\`（変数名のみ）も作る"}${ciTasks}${secretTasks}
 - [ ] \`main\` のBranch protectionを設定する${has("deploy/ecosystem.config.js") || spec.port === null ? "" : `\n- [ ] \`deploy/ecosystem.config.js\` を作る（ポート \`${spec.port}\`）`}${dbTasks}${pwaTasks}${appearance}
 ${multiAgent}
 ## 参考
@@ -816,7 +808,7 @@ SSHも同じ理由で、無人実行からは確かめられません。
 - [ ] \`develop\` → \`main\` のリリースPRを、**\`release-develop-to-main.yml\` から作る**
       （issue-deckの画面のリリースボタン、または \`gh workflow run release-develop-to-main.yml --repo ${repo} -f bump_kind=auto\`）
 - [ ] **人がマージする**（\`develop\` → \`main\` は自動マージ不可カテゴリ）
-- [ ] \`deploy.yml\` の成功と、Signalyへのデプロイ結果の通知を確認する
+- [ ] \`deploy.yml\` の成功を確認する
 
 **2回目以降も同じ経路を使ってください。** \`deploy.yml\` の tag ジョブは \`package.json\` の
 \`version\` から \`v<version>\` のタグを作るため、**この初回デプロイの時点で最初のタグが
@@ -1116,7 +1108,7 @@ export function buildSubpcManualIssueBody(spec: NewAppSpec, refs: NewAppIssueRef
 - [ ] （サブPC）1Passwordのアイテムを作り、機械的に定まる値を投入する
 
   \`\`\`bash
-  ${provisionCommand(spec, null)}
+  ${provisionCommand(spec)}
   \`\`\``,
     verification: `**手順ごとに1つずつ確かめます**（#2256）。上から順に流し、すべてが成功すれば完了です。
 
@@ -1147,7 +1139,7 @@ export function buildSubpcManualIssueBody(spec: NewAppSpec, refs: NewAppIssueRef
 - 1Passwordのアイテムに値が入っている
 
   \`\`\`bash
-  ${provisionCommand(spec, null, { check: true })}
+  ${provisionCommand(spec, { check: true })}
   \`\`\`
 
   「すべて値が入っています」が出れば完了です。**未登録が1つでもあれば終了コード1で終わります**（\`aide-bot\` では投入が未実施のままIssueがcloseされ、初回デプロイが \`DB_NAME is required\` で落ちました）。
