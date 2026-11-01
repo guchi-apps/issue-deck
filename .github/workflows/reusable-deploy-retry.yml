@@ -94,6 +94,7 @@ jobs:
         id: judge
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
           TARGET_REPOSITORY: ${{ github.event.workflow_run.repository.full_name }}
           RUN_ID: ${{ github.event.workflow_run.id }}
           RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
