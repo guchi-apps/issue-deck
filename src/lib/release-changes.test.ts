@@ -4,6 +4,7 @@ import {
   tallyReleaseReviews,
   toReleaseChangeCi,
   toReleaseChanges,
+  withFixedBy,
   withMergeChecks,
   withReleaseReviews,
 } from "@/lib/release-changes";
@@ -98,5 +99,49 @@ describe("withMergeChecks（#4305）", () => {
     expect(toReleaseChangeCi("expected").state).toBe("pending");
     expect(toReleaseChangeCi("error").state).toBe("failure");
     expect(toReleaseChangeCi(null).state).toBe("none");
+  });
+});
+
+describe("withFixedBy（#5175）", () => {
+  const pr = (number: number, isVersionBump = false) => ({
+    number,
+    title: `PR${number}`,
+    issueNumber: null,
+    isVersionBump,
+    review: null,
+    prHeadSha: null,
+    reviewUnavailable: false,
+  });
+  const series = (over: Partial<Parameters<typeof withFixedBy>[1][number]> = {}) => ({
+    status: "fix_merged",
+    sourceKind: "review_finding",
+    issueNumber: 354,
+    fixPrNumber: 355,
+    fixPrMergedAt: new Date("2026-01-01"),
+    relatedPullRequests: [352],
+    ...over,
+  });
+  const run = (rows: Parameters<typeof withFixedBy>[1], list = [pr(355), pr(352)]) =>
+    withFixedBy(list, rows).find((p) => p.number === 352)?.fixedBy;
+
+  it("条件を満たすと元PRに修正PRを付ける", () => {
+    expect(run([series()])).toEqual({ fixPrNumber: 355, fixIssueNumber: 354 });
+  });
+  it.each([
+    ["stopped", { status: "stopped" }],
+    ["superseded", { status: "superseded" }],
+    ["統合検証の系列", { sourceKind: "integration_failure" }],
+    ["修正PRが未マージ", { fixPrMergedAt: null }],
+    ["修正PR番号なし", { fixPrNumber: null }],
+    ["関連PRが空", { relatedPullRequests: [] }],
+  ])("%sは付けない", (_label, over) => {
+    expect(run([series(over)])).toBeUndefined();
+  });
+  it("修正PRが一覧に無ければ付けない", () => {
+    expect(run([series()], [pr(352)])).toBeUndefined();
+  });
+  it("修正PR自身とバンプPRには付けない", () => {
+    const result = withFixedBy([pr(355), pr(352, true)], [series({ relatedPullRequests: [355, 352] })]);
+    expect(result.every((p) => p.fixedBy === undefined)).toBe(true);
   });
 });

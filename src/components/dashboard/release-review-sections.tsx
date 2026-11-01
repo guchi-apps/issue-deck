@@ -1266,6 +1266,9 @@ function IndividualList({
           <>
             <span className="w-12 shrink-0 font-mono text-[11px] text-muted-foreground tabular-nums">#{pr.number}</span>
             <span className="min-w-0 flex-1 truncate">{pr.title}</span>
+            {pr.fixedBy && (
+              <span className="shrink-0 text-[11px] text-muted-foreground">修正PR #{pr.fixedBy.fixPrNumber} 取り込み済み</span>
+            )}
             {pr.reviewUnavailable ? (
               <span className="shrink-0 text-[11px] font-bold text-destructive">取得不可</span>
             ) : kind ? (
@@ -1351,8 +1354,12 @@ function IndividualReviewSection({
 
   const reviewable = data.pullRequests.filter((pr) => !pr.isVersionBump);
   const bumps = data.pullRequests.length - reviewable.length;
-  const pick = (kind: ReviewVerdictKind) =>
-    reviewable.filter((pr) => !pr.reviewUnavailable && (pr.review?.reviewKind ?? "unknown") === kind).map((pr) => `#${pr.number}`);
+  const pickPrs = (kind: ReviewVerdictKind) =>
+    reviewable.filter((pr) => !pr.reviewUnavailable && (pr.review?.reviewKind ?? "unknown") === kind);
+  // 修正PRが取り込まれたものは「（修正PR取り込み済み）」を添える（判定・件数は変えない。#5175）
+  const pick = (kind: ReviewVerdictKind) => pickPrs(kind).map((pr) => `#${pr.number}${pr.fixedBy ? "（修正PR取り込み済み）" : ""}`);
+  const hasOpen = (kind: ReviewVerdictKind) => pickPrs(kind).some((pr) => !pr.fixedBy);
+  const reasonToneValue: Tone = hasOpen("changes-requested") ? "bad" : hasOpen("needs-check") ? "warn" : "muted";
   const reasons = [
     [pick("changes-requested"), "が要修正"],
     [pick("needs-check"), "が要確認"],
@@ -1395,7 +1402,7 @@ function IndividualReviewSection({
         </>
       }
       reason={reason}
-      reasonTone={tally.changesRequested > 0 ? "bad" : "warn"}
+      reasonTone={reasonToneValue}
     >
       {renderList ? (
         renderList(data, context)
