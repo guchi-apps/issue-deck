@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# GitHub Actions の異常だけをDiscordへ送る通知スクリプト（Signaly廃止の代替経路。#5057）
+# GitHub Actions の異常だけをDiscordへ送る通知スクリプト（#5057）
 #
 # 方針: **失敗・明確な異常だけ送る。** 成功・通常リリース・通常収集・キャンセルは送らない。
 # リリース完了のDiscord通知はissue-deck側の別経路が持つため、ここでは重複させない。

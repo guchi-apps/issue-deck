@@ -45,8 +45,7 @@ issue-deckの画面のボタン（アプリ設定 → 共有ワークフロー�
 |---|---|---|---|
 | 共有ワークフローの**中身**（`reusable-*.yml`） | issue-deckで直す → `workflows/vN`タグを切る → 画面から一括配布PR（既定で自動マージ） | **あり** | [cross-repo-setup-guide.md](cross-repo-setup-guide.md)「画面から一括でタグ更新PRを作る」 |
 | callerの`on:`・`with:` | 手。**タグ配布は書き換えない**ため、issue-deck側でトリガーを変えたら全callerを横断確認する | なし | [supported-repositories.md](supported-repositories.md)「タグが記録しないもの」（#1366） |
-| `.github/scripts/`の共有スクリプト | issue-deckで直す → 画面から一括配布PR（丸ごとコピー。自動マージしない） | **あり** | [supported-repositories.md](supported-repositories.md)「`signaly-notify.sh`の配布状況」（#2240） |
-| 各リポジトリの`deploy.yml`・`release.yml`への**アンカー行の隣に1行足すだけ**の編集 | 上の共有スクリプト配布PRに相乗りさせる。**リポジトリごとの中身に依存しない編集に限る** | **あり** | [supported-repositories.md](supported-repositories.md)「配布PRは`deploy.yml`・`release.yml`への1行追加も運ぶ」（#2391） |
+| `.github/scripts/`の共有スクリプト | issue-deckで直す → 画面から一括配布PR（丸ごとコピー。自動マージしない） | **あり** | [supported-repositories.md](supported-repositories.md)「共有スクリプトの配布状況」（#2240。現在、配布物は無い） |
 | callerの新規追加（`release-develop-to-main.yml`等） | 手。配布は既存ファイルの置換だけで、callerの新規追加はしない | なし | [supported-repositories.md](supported-repositories.md)の各「配布状況」 |
 | ラベル体系 | issue-deckの`scripts/sync-labels.sh`で全リポジトリへ流す（正本は`.github/labels.json`。新規リポジトリは画面の「新規アプリを立ち上げる」が作成時に写す） | 新規のみ（既存は手で`apply`） | [label-scheme.md](label-scheme.md)・[cross-repo-setup-guide.md](cross-repo-setup-guide.md)「2. ラベル体系」 |
 | Secrets・variables | リポジトリごと。共通値はorganizationへ寄せる | 一部 | [cross-repo-setup-guide.md](cross-repo-setup-guide.md)「4. Secrets」 |

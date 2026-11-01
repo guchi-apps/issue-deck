@@ -15,7 +15,7 @@ name: Reusable release develop to main
 # npm version を使う理由は「バージョンを書き換えること」ではなく「"version" lifecycle
 # スクリプトを起動すること」で、これが更新履歴フック（RELEASE_CHANGELOG）と使い方フック
 # （RELEASE_USAGE・#1729）の土台になっている。
-# ルートに package.json が無いリポジトリ（myroom・signaly）ではそのままでは使えない。
+# ルートに package.json が無いリポジトリ（myroom など）ではそのままでは使えない。
 #
 # 元の設計（状態はversionフィールドだけから判定する・バンプPRはauto-merge・develop→mainの
 # マージは人間が行う）はそのまま維持している。
@@ -1164,8 +1164,8 @@ jobs:
           fi
 
           # **リリース通知の本文に載せる変更内容を、リポジトリの中へ置く**（#2391）。
-          # リリース通知（各リポジトリの`deploy.yml`の`notify-release`）が読むのはここで、
-          # `.github/scripts/signaly-notify.sh`がバンプ後のチェックアウトから拾う。
+          # リリース通知（issue-deckのリリースPush通知。`src/lib/notifications/release-push.ts`）が
+          # 読むのはここで、バンプ後のチェックアウトから拾う。
           #
           # **更新履歴ファイルとは別に持つ。** `RELEASE_CHANGELOG`を受け取る"version"
           # lifecycleスクリプトを持つのはフリート16リポジトリ中7件しかなく、残りでは

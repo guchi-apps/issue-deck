@@ -108,7 +108,7 @@ export function resolveUnreleasedDeployState(
 /**
  * `.github/release-notes.md`から、その版の説明を取り出す。
  *
- * 照合は`parseReleaseNotes`（`notifications/release-push.ts`）・`signaly-notify.sh`と同じで、
+ * 照合は`parseReleaseNotes`（`notifications/release-push.ts`）と同じで、
  * **見出し`# v1.2.3`がその版と一致したときだけ使う。** 文面が生成されなかったリリースでは
  * ファイルが更新されず前の版の文面が残る（v8.34.1のファイルは見出しがv8.34.0のまま）ため、
  * 一致を見ないと前の版の説明をこの版のものとして出してしまう。

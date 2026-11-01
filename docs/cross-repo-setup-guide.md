@@ -96,7 +96,7 @@ gh api "repos/$REPO/contents/.github/workflows/ci.yml" -q .content | base64 -d |
 | `release-develop-to-main.yml` | develop→mainのバージョンbump PR・リリースPR作成を自動化する（`workflow_dispatch`と、バージョンファイルへのpush）。**トリガー定義のみ**を持ち、本体は`reusable-release-develop-to-main.yml`を`uses:`で呼ぶ（#1181） | **コピーではなく薄いcallerを置く。** バージョン管理方式の差は`with:`の`version-file`・`version-query`・`bump-command`で指定する（下記「リリースワークフローのバージョン管理方式」） |
 | `version-tag-check.yml` | `main`宛のPRの時点で、**mainへ入るまで露見しないデプロイの失敗**を落とす（#1367・#2135）。リリースタグの重複と、`deploy.yml`の設定漏れの2ジョブ。**トリガー定義のみ**を持ち、本体は`reusable-version-tag-check.yml`を`uses:`で呼ぶ | **コピーではなく薄いcallerを置く。** バージョン管理方式の差は`with:`の`version-file`・`version-query`で、タグの接頭辞は`tag-prefix`で指定する（既定は`package.json`・`.version`・`v`）。**トリガーを`develop`へ広げないこと**（featureブランチのバージョンは直前のリリースのままでタグが必ず存在するため、developへの全PRが赤くなる） |
 | `reusable-version-tag-check.yml` | 上記のジョブ本体（`on: workflow_call`）。`version-tag-check`（タグの重複）と`deploy-config-check`（`deploy.yml`の設定漏れ。#2135）の2ジョブ。**検査を増やすときはこのファイルへジョブを足す**——callerを配り直さずに参照タグの更新だけで全リポジトリへ届く。**ファイル名は改名しない**（14リポジトリのcallerが名指ししており、改名するとタグを上げた瞬間に全リポジトリのmain宛PRが startup_failure になる） | **対象リポジトリへコピーしない。** issue-deck側の1つを共有する |
-| `deploy-retry.yml` | 本番デプロイ（`deploy.yml`）が一時的な失敗（SSH断・ネットワーク・アプリの起動待ち等）で落ちたとき、1回だけ自動で再実行する（#2134）。**トリガー定義のみ**を持ち、本体は`reusable-deploy-retry.yml`を`uses:`で呼ぶ | **コピーではなく薄いcallerを置く。** `workflow_run`の`workflows:`には**そのリポジトリの`deploy.yml`の`name:`**を書く（issue-deckは`Deploy to Production`）。Signalyの通知に出す名前は`app-name`で指定する。**`deploy.yml`のジョブ名が`build`・`deploy`と違う場合は`retryable-jobs`を渡して合わせる**（合っていないジョブだけが失敗したときは安全側に倒れて再実行しない）。導入は任意。**`vps`・`subpc`は実機のインフラ設定を流すため、入れるかを個別に判断する** |
+| `deploy-retry.yml` | 本番デプロイ（`deploy.yml`）が一時的な失敗（SSH断・ネットワーク・アプリの起動待ち等）で落ちたとき、1回だけ自動で再実行する（#2134）。**トリガー定義のみ**を持ち、本体は`reusable-deploy-retry.yml`を`uses:`で呼ぶ | **コピーではなく薄いcallerを置く。** `workflow_run`の`workflows:`には**そのリポジトリの`deploy.yml`の`name:`**を書く（issue-deckは`Deploy to Production`）。`app-name`は互換のために残した入力で、使われない（#5180）。**`deploy.yml`のジョブ名が`build`・`deploy`と違う場合は`retryable-jobs`を渡して合わせる**（合っていないジョブだけが失敗したときは安全側に倒れて再実行しない）。導入は任意。**`vps`・`subpc`は実機のインフラ設定を流すため、入れるかを個別に判断する** |
 | `reusable-deploy-retry.yml` | 上記のジョブ本体（`on: workflow_call`）。`deploy-retry`ジョブ1つ | **対象リポジトリへコピーしない。** issue-deck側の1つを共有する |
 
 各ワークフローの改変ポイントの詳細・実例（`m-guchi/shopping-list`を対象にしたケーススタディ）は
@@ -543,7 +543,7 @@ CLAUDE.mdに**無いことを明記**しておかないと、エージェント�
 | `ios-testflight-trigger.yml` | 本番デプロイ（Deploy to Production）の成功を受けて`ios-testflight.yml`を起動する薄い起動役（#591） | issue-deck固有（iOSアプリを持つリポジトリのみ）。不要 |
 | `ios-testflight.yml` | iOSアプリ本体の更新が要るリリースだけ、TestFlightの内部テストグループへ自動配布する（#591・#3846）。App Store Connect APIキーとして`ASC_KEY_ID`・`ASC_ISSUER_ID`・`ASC_KEY_P8`のSecretsを使う（未登録でもWebのデプロイは失敗せず、iOS配布のジョブだけが止まる） | issue-deck固有（iOSアプリを持つリポジトリのみ）。不要 |
 | `propagate-workflow-tag.yml` | 共有ワークフローの参照タグ（`uses:`・`prompts-ref`）を、展開済みの他リポジトリへ配るPRを作成する（`workflow_dispatch`）。issue-deck画面（設定ダイアログ）から起動される（#1173） | issue-deck固有（配布元としての役割）。対象リポジトリ側には何もコピーしない。不要 |
-| `propagate-shared-files.yml` | ワークフロー以外の配布物（`.github/scripts/signaly-notify.sh`等、`.github/scripts/`配下にコピーして使うファイル）を、配布元（issue-deck）の内容へそろえるPRを配布先ごとに作成する（`workflow_dispatch`）。issue-deck画面（設定＞フリート運用＞共有ワークフローのバージョン「共有スクリプト」欄）から起動される（#2240） | issue-deck固有（配布元としての役割）。対象リポジトリ側には何もコピーしない。不要 |
+| `propagate-shared-files.yml` | ワークフロー以外の配布物（`.github/scripts/`配下にコピーして使うファイル。現在、配布物は無い）を、配布元（issue-deck）の内容へそろえるPRを配布先ごとに作成する（`workflow_dispatch`）。issue-deck画面（設定＞フリート運用＞共有ワークフローのバージョン「共有スクリプト」欄）から起動される（#2240） | issue-deck固有（配布元としての役割）。対象リポジトリ側には何もコピーしない。不要 |
 | `propagate-backup-ci.yml` | 選んだ1リポジトリへバックアップCI（CircleCI）の導入・更新PRを作成する（`workflow_dispatch`、入力は`repository`）。配るのは`.circleci/config.yml`・`scripts/ci/run-required-checks.mjs`（配布元の実物）と、対象のci.ymlから生成する`ci/required-checks.json`。自動マージしない。issue-deck画面（設定＞フリート運用＞バックアップCI（CircleCI）の展開）から起動される（#4308） | issue-deck固有（配布元としての役割）。対象リポジトリ側には何もコピーしない。不要 |
 | `sync-secrets.yml` | 1Password（値の正）から、そのリポジトリのGitHub secret / variableへ値を同期する（`workflow_dispatch`）。本体は`reusable-sync-secrets.yml`で、ここは薄いcaller。issue-deck画面（設定ダイアログ → シークレットの同期）から起動される（#1309） | **展開する。** 下記「シークレット同期を画面のボタンから起こす」を参照 |
 | `reusable-sync-secrets.yml` | 上記の本体（`workflow_call`）。`scripts/sync-github-secrets.sh`をそのまま実行し、結果（件数と、同期・スキップ・失敗した項目名だけ）をissue-deckへ報告する（#1309・#2022） | 配布元としてissue-deckに置く。対象リポジトリはcallerから`@workflows/vN`で参照する |
@@ -1121,7 +1121,7 @@ issue-deckにはこの他に`51.improvement`・`65.docs`等、Issueの分類目�
     # GitHub側の値は**ジョブの env: で明示的に**渡す。複合アクションのステップはジョブの
     # env: を引き継ぐが、呼び出しステップの env: は引き継がない。
     env:
-      SIGNALY_WEBHOOK_URL: ${{ secrets.SIGNALY_WEBHOOK_URL }}
+      DISPATCH_SECRET: ${{ secrets.DISPATCH_SECRET }}
     steps:
       - name: Checkout code           # ローカルパスのアクションのため先にcheckoutが要る
         uses: actions/checkout@v4
@@ -1130,7 +1130,7 @@ issue-deckにはこの他に`51.improvement`・`65.docs`等、Issueの分類目�
         uses: ./.github/actions/load-secrets
         with:
           # only を省略するとマニフェストの全項目が対象
-          only: SIGNALY_WEBHOOK_URL
+          only: DISPATCH_SECRET
           # 空を渡すと1Passwordを一切触らない
           op-token: ${{ secrets.OP_SERVICE_ACCOUNT_TOKEN }}
 ```
@@ -1193,45 +1193,18 @@ scripts/sync-github-secrets.sh --manifest .github/org-secrets-manifest.tsv
 | `SHARED_DB_HOST`・`SHARED_DB_PORT`・`SHARED_DB_USER`・`SHARED_DB_PASSWORD` | 9 | secret |
 | `SHARED_DB_MIGRATE_USER`・`SHARED_DB_MIGRATE_PASSWORD` | 5 | secret |
 | `SUPABASE_PROJECT_URL`・`SUPABASE_PUBLISHABLE_KEY` | 8 | variable（公開値） |
-| `SIGNALY_WEBHOOK_URL` | 17 | secret（#2255） |
-| `SIGNALY_LOGIN_WEBHOOK_URL` | 8 | secret（#2286） |
 
 1リポジトリでしか使わない値（実測115件）は各リポジトリのrepository secretに置く。
 
-`SIGNALY_WEBHOOK_URL`（CI・デプロイ通知）だけは事情が違い、**参照している`op://`はリポジトリごとに
-別だった**（`op://apps/<アプリ>/ci-webhook-url`）。通知先もアプリごとの別チャンネルだったが、
-リポジトリを増やすたびにSignalyでのチャンネル作成・1Passwordへの登録・repository secretの投入が
-必要で、**新規リポジトリの設定の手間がそのまま増え続けていた**。そこで#2255で
-「全リポジトリのCI・デプロイ結果を1つのチャンネルへ集約する」ことにし、issue-deckの既存の
-CIチャンネルを共通チャンネルとして流用してorganizationへ寄せた。
-
-**repository secretは同名のorganization secretを覆い隠す。** そのため各リポジトリでは、
-マニフェストを`scope=inherit`へ変えたうえで**repository secretを削除する**まで従来の
-チャンネルへ飛び続ける。逆に言えば、リポジトリ単位で好きな順に移行できる。
-
-#### リリース通知だけは別チャンネルへ分ける（#2391）
-
-**集約の単位は「用途」であって「アプリ」ではない。** CI・デプロイは1日に何十件も流れるため、
-月に数回のリリースがその中に埋もれ、しかも通知に載るのはバージョン番号だけだった。そこで
-**リリース（`NOTIFY_KIND: リリース`）だけを別チャンネルへ分け、本文に変更内容を載せる**。
-CI・デプロイの通知先は変えない。
-
-| 用途 | organization secret | 値の正 |
-|---|---|---|
-| CI・デプロイ | `SIGNALY_WEBHOOK_URL` | `op://apps/Notify/ci-webhook-url` |
-| **リリース** | `SIGNALY_RELEASE_WEBHOOK_URL` | `op://apps/Notify/release-webhook-url` |
-| ログイン | `SIGNALY_LOGIN_WEBHOOK_URL` | `op://apps/Notify/login-webhook-url` |
-
-**未登録でも通知は消えない。** `.github/scripts/signaly-notify.sh` は
-`SIGNALY_RELEASE_WEBHOOK_URL` が空ならCI・デプロイのチャンネルへ送る。ログイン通知の集約と
-違って「organization secretを先に作る」順序の制約が無く、secretの登録・スクリプトの配布・
-ワークフローの1行追加をどの順で進めてもよい。
+**Signalyの通知用secret（`SIGNALY_WEBHOOK_URL`・`SIGNALY_RELEASE_WEBHOOK_URL`・
+`SIGNALY_LOGIN_WEBHOOK_URL`）は廃止した**（起点: guchi-apps/docs#261、#5180）。マニフェストからも
+外してあり、各アプリでの撤去は各リポジトリのIssueで行う。organization secret自体と1Passwordの
+アイテムは、全リポジトリの撤去が済んだ後にまとめて削除する。
 
 **issue-deck本体のリリース完了通知（Discord）は別系統。** 本番アプリが実行時に読む
 `DISCORD_RELEASE_WEBHOOK_URL` は、`.github/secrets-manifest.tsv` の
 `repo` スコープsecret（値の正は `op://apps/issue-deck/discord-release-webhook-url`）に登録し、
-`deploy.yml` が本番の `.env` へ書き出す（#5007）。上の `SIGNALY_*` の集約とは別で、
-フリートの他リポジトリには配らない。
+`deploy.yml` が本番の `.env` へ書き出す（#5007）。フリートの他リポジトリには配らない。
 
 共有トークンの警告（`SharedToken`の利用元不一致など）の投稿先も同じ系統で、専用の
 `DISCORD_SHARED_TOKEN_ALERT_WEBHOOK_URL` を `repo` スコープsecretに登録し、`deploy.yml` が
@@ -1239,8 +1212,7 @@ CI・デプロイの通知先は変えない。
 
 **GitHub Actionsの異常通知（Discord）も別系統。** `.github/scripts/discord-alert.sh` が読む
 `DISCORD_ALERT_WEBHOOK_URL` は、ジョブの失敗・明確な異常だけを送るwebhookのsecretで、
-`ci.yml`・`deploy.yml`・`release.yml`・`ios-testflight.yml` が参照する（#5057。Signaly廃止の第1段で、
-Signalyの通知と併走する）。未登録の間は警告を出して通知を送らず、ジョブ結果は変えない。
+`ci.yml`・`deploy.yml`・`release.yml`・`ios-testflight.yml` が参照する（#5057）。未登録の間は警告を出して通知を送らず、ジョブ結果は変えない。
 マニフェストへの行追加は1Passwordへの登録と同期が済んでから行う。詳細は[discord-alerts.md](discord-alerts.md)。
 
 **変更内容の出どころは `.github/release-notes.md`。** 共有ワークフロー
@@ -1248,92 +1220,9 @@ Signalyの通知と併走する）。未登録の間は警告を出して通知�
 （`RELEASE_CHANGELOG`・`RELEASE_USAGE`）をこのファイルへ書き出してバンプPRに含める。
 **各アプリの更新履歴ファイルとは別に持つ**——`RELEASE_CHANGELOG` を受け取る `"version"`
 lifecycleスクリプトを持つのはフリート16リポジトリ中7件しかなく、残りでは生成された文面が
-バンプPR本文にしか残らないため。通知スクリプトは**先頭の見出し `# v<バージョン>` が
-`NOTIFY_VERSION` と一致したときだけ**本文に載せる（古い文面を新しいリリースの通知へ貼るより、
-本文なしで送るほうがまし）。
-
-各リポジトリへ行き渡らせる手順は
-[supported-repositories.md](supported-repositories.md)「`.github/scripts/signaly-notify.sh`の配布状況」を参照。
-
-#### ログイン通知も同じ形で集約する（#2286）
-
-ログイン通知（`LOGIN_WEBHOOK_URL`）もCI・デプロイ通知と同じ理由で1本のチャンネルへ集約する
-（guchi-apps/signaly#192）。どのアプリへのログインかは、チャンネルではなく通知の
-`notifications.source` で見分ける。organization上の名前は `SIGNALY_LOGIN_WEBHOOK_URL`、
-値の正は `op://apps/Notify/login-webhook-url`。
-
-**organization secretを先に作り、各リポジトリの`inherit`化はその後。** organization secretが
-無いうちにマニフェストだけ`inherit`へ変えると、デプロイが空値を`.env`へ書き、ログイン通知が
-**エラーを出さずに止まる**。
-
-CI・デプロイ通知と違い、**repository secret側の名前がリポジトリごとに割れている**。
-organization項目と同名（`SIGNALY_LOGIN_WEBHOOK_URL`）のものだけが覆い隠すため、
-`inherit`へ切り替える前にリポジトリごとに実際の名前を確認する。
-
-```bash
-gh api repos/guchi-apps/<repo>/actions/secrets --jq '.secrets[].name' | grep -i login
-```
-
-| repository secretの名前 | リポジトリ | org項目を覆い隠すか |
-|---|---|---|
-| `SIGNALY_LOGIN_WEBHOOK_URL` | asset-manager・clip-hive・meisai-lab・ops-dashboard・subscription-lists・portfolio | **覆い隠す**（削除が要る） |
-| `LOGIN_WEBHOOK_URL` | signaly | 覆い隠さない |
-| `SIGNALY_WEBHOOK_LOGIN_URL`（綴り違い） | car-care | 覆い隠さない |
-
-（2026-08-25時点。いずれも`inherit`化とあわせて削除する）
-
-#### 各リポジトリの移行手順（#2287）
-
-対象は8リポジトリ（`asset-manager`・`portfolio`・`ops-dashboard`・`meisai-lab`・`car-care`・
-`clip-hive`・`subscription-lists`・`signaly`）。リポジトリごとに次の順で行う。
-
-1. **通知のペイロードへ `source` を足す。** これが先。詳細は下の「`source` を足すのが先」を参照
-2. `.github/secrets-manifest.tsv` を `inherit` へ切り替える。**環境変数名（KEY列）も
-   `SIGNALY_LOGIN_WEBHOOK_URL` へ揃える**（`signaly` の `LOGIN_WEBHOOK_URL`・`car-care` の
-   `SIGNALY_WEBHOOK_LOGIN_URL` はこの機会に改名する）
-
-   ```
-   SIGNALY_LOGIN_WEBHOOK_URL	inherit	secret	SIGNALY_LOGIN_WEBHOOK_URL	-
-   ```
-
-3. `deploy.yml` の `secrets.*` 参照と `.env` テンプレート・`.env.example` の名前も同じ名前へ揃える
-4. repository secretを削除する（1〜3が`main`まで出た後）
-5. 1Passwordのアプリアイテムから `login-webhook-url` フィールドを削除する
-
-4と5はSecretsの変更にあたるため、エージェントは実施せず`71.manual-step`のIssueへ切り出す。
-1〜3はリポジトリごとに子Issueへ切り出す（#2287のサブIssue）。
-
-**切り替わる時点はリポジトリで違う。** repository secretの名前がorganization項目と同名の6
-リポジトリは、手順4（削除）まで従来のチャンネルへ飛び続ける。名前が違う`signaly`・`car-care`は
-**手順2〜3が本番へ出た時点で切り替わる**ため、`source` の追加を同じPRに入れておく必要がある。
-
-#### `source` を足すのが先
-
-**共通チャンネルのURLを直接叩き始めた瞬間に、送信元の情報が消える。** 今はチャンネル統合
-（merge）で旧チャンネルIDが `channel_aliases` に残っており、Signalyが別名から送信元を補って
-いる（`channel_aliases.source`）。organization secretへ寄せると別名を経由しなくなるため、
-この救済が効かなくなる。
-
-`signaly` の `backend/login_notify.py` はペイロードに `source` を持っているが、**他アプリの
-Next.js側（`src/lib/signaly.ts` 等）は Discord 形式の `embeds` か `content` だけで、`source` も
-`username` も `App` フィールドも持たない**（2026-08-25時点で7アプリすべて）。
-
-```ts
-body: JSON.stringify({
-  source: APP_NAME,   // ← 追加
-  embeds: [{ title: `🔐 ${APP_NAME} にログイン`, color: 5763719, fields }],
-})
-```
-
-Signalyの送信元の判定は `X-Signaly-Source` ヘッダー → `?source=` クエリ → ペイロードの
-`source` → `fields` の `App`／`Repository` → Discord形式の `username` の順。**HTTPヘッダーは
-ASCIIしか運べない**ため、日本語のアプリ名を渡すならヘッダーではなくペイロードの `source` を
-使う（guchi-apps/signaly の `CLAUDE.md`「通知チャンネルと送信元（source）」）。
-
-**`source` の値はリポジトリ名に揃える**（`asset-manager`・`car-care` など）。CI・デプロイ通知は
-embedの `Repository` フィールド（`guchi-apps/<repo>`）の末尾を送信元にするため（signalyの
-`backend/webhook.py` の `_source_from_fields`）、ログイン通知も同じ形にしておくと共通チャンネルの
-一覧で表記が揃う。
+バンプPR本文にしか残らないため。issue-deckのリリース完了通知（Discord）は**先頭の見出し
+`# v<バージョン>` がタグと一致したときだけ**本文に載せる（古い文面を新しいリリースの通知へ
+貼るより、本文なしで送るほうがまし）。
 
 #### 環境変数名がリポジトリごとに違っても吸収できる
 
@@ -1422,7 +1311,7 @@ guchi-apps/aide     AIDE_DAYSPAN_TOKEN  op://apps/dayspan/internal-api-key   ←
 「Research Desk側の`INTERNAL_API_KEY`と同じ値にする」と、人が手で揃える前提が書かれていた）。
 
 **organization secretへは寄せない。** 上の「共通値はorganizationへ寄せる」が対象にしているのは
-フリート全体で使う接続情報（`SERVER_*`・`SHARED_DB_*`・`SIGNALY_*`）で、2アプリの間だけで使う
+フリート全体で使う接続情報（`SERVER_*`・`SHARED_DB_*`）で、2アプリの間だけで使う
 認証値をorganizationへ置くと、関係の無いリポジトリのワークフローからも読めてしまう。
 **repository secretのまま、参照先だけを1か所にする**（GitHub側の名前は両者で違ってよい）。
 
@@ -1487,7 +1376,7 @@ GitHubへ移した。GitHub側のsecret/variableにはレート制限が無い�
 | Secret（DB） | `DB_USER`・`DB_PASSWORD`・`DB_HOST`・`DB_PORT`・`DB_NAME`・`MIGRATE_DB_USER`・`MIGRATE_DB_PASSWORD` |
 | Secret（アプリ） | `SUPABASE_SERVICE_ROLE_KEY`・`SUPABASE_MANAGEMENT_API_TOKEN`・`APP_GITHUB_APP_PRIVATE_KEY_BASE64`・`APP_GITHUB_WEBHOOK_SECRET`・`APP_GITHUB_USER_TOKEN_ENCRYPTION_KEY`・`APP_GITHUB_OAUTH_CLIENT_ID`・`APP_GITHUB_OAUTH_CLIENT_SECRET`・`OPENAI_API_KEY`・`TYPESAFE_API_KEY`・`AIDE_SUMMARY_USER_LOGIN`・`DISPATCH_SECRET`・`IMAGE_UPLOAD_SECRET`・`VAPID_PUBLIC_KEY`・`VAPID_PRIVATE_KEY`・`VAPID_SUBJECT` |
 | Variable（公開されても害が無い値） | `NEXT_PUBLIC_SUPABASE_URL`・`NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`・`NEXT_PUBLIC_GITHUB_APP_SLUG`・`APP_GITHUB_APP_ID`・`PORT` |
-| organization secretを継承（repo側に作らない） | `CLAUDE_CODE_OAUTH_TOKEN`・`PROGRESS_REPORT_SECRET`・`SIGNALY_WEBHOOK_URL`（#2255） |
+| organization secretを継承（repo側に作らない） | `CLAUDE_CODE_OAUTH_TOKEN`・`PROGRESS_REPORT_SECRET` |
 
 **Push通知のVAPID鍵（`VAPID_*`。#838）は、公開鍵もsecretに置く。** Web Pushの「公開鍵」は
 ブラウザへ配る値で秘密ではないが、issue-deckはPUBLICでActionsのログが誰でも読めるため、

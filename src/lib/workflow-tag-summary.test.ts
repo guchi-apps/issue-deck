@@ -15,7 +15,6 @@ function status(fullName: string, overrides: Partial<WorkflowTagStatus> = {}): W
     brokenRepairWorkflows: [],
     repairPullRequest: null,
     outdatedSharedFiles: [],
-    missingReleaseWebhookWorkflows: [],
     customizedSharedFiles: [],
     sharedFilePullRequest: null,
     ...overrides,
@@ -80,7 +79,7 @@ describe("summarizeWorkflowTags", () => {
     const repo = status("a/one", {
       outdated: true,
       missingRepairWorkflows: ["claude-ci-fix.yml"],
-      outdatedSharedFiles: [".github/scripts/signaly-notify.sh"],
+      outdatedSharedFiles: [".github/scripts/example.sh"],
     });
     expect(
       labels({ overview: overview({ repositories: [repo, status("a/two", { outdated: true })] }), failed: false }),

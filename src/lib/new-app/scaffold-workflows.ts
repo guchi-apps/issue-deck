@@ -339,14 +339,6 @@ jobs:
     if: always()
     runs-on: ubuntu-latest
 
-    # GitHub側の値をここで明示的に渡す。以前は実行のたびに1Passwordから読んで
-    # いたが、サービスアカウントの日次レート制限を使い切ってフリート全体の
-    # デプロイが止まった（guchi-apps/issue-deck#1302）。
-    #
-    # このブロックは scripts/generate-workflow-env-block.sh で生成する（guchi-apps/issue-deck#1307）。
-    env:
-      SIGNALY_WEBHOOK_URL: \${{ secrets.SIGNALY_WEBHOOK_URL }}
-
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -376,19 +368,6 @@ jobs:
           else
             echo "should_notify=false" >> "$GITHUB_OUTPUT"
           fi
-
-      - name: Signaly に通知
-        if: steps.status.outputs.should_notify == 'true'
-        # 通知はCIやデプロイの合否そのものではない。ここが失敗してもrun全体を
-        # 落とさない（guchi-apps/issue-deck#1302）。
-        continue-on-error: true
-        env:
-          SIGNALY_WEBHOOK_URL: \${{ env.SIGNALY_WEBHOOK_URL }}
-          NOTIFY_APP: ${spec.repositoryName}
-          NOTIFY_KIND: CI
-          NOTIFY_STATUS: \${{ steps.status.outputs.result }}
-          NOTIFY_JOB: \${{ steps.status.outputs.jobs }}
-        run: bash .github/scripts/signaly-notify.sh
 
       - name: Discord に異常を通知
         # 失敗・異常だけ送る（成功・キャンセルはスクリプトが送らない。guchi-apps/issue-deck#5057）。
@@ -442,7 +421,6 @@ export function deployWorkflow(spec: NewAppSpec): string {
           "      ALLOWED_GOOGLE_EMAILS: ${{ secrets.ALLOWED_GOOGLE_EMAILS }}",
         ]
       : []),
-    "      SIGNALY_WEBHOOK_URL: ${{ secrets.SIGNALY_WEBHOOK_URL }}",
   ].join("\n");
 
   const secretsEnvComment = `    # GitHub側の値をここで明示的に渡す。以前は実行のたびに1Passwordから読んで
@@ -721,9 +699,6 @@ ${gatePrintf}
     needs: [tag, build, deploy]
     if: always()
 
-    env:
-      SIGNALY_WEBHOOK_URL: \${{ secrets.SIGNALY_WEBHOOK_URL }}
-
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -743,17 +718,6 @@ ${gatePrintf}
           fi
           echo "result=$result" >> "$GITHUB_OUTPUT"
 
-      - name: Signaly に通知
-        # 通知はCIやデプロイの合否そのものではない。ここが失敗してもrun全体を
-        # 落とさない（guchi-apps/issue-deck#1302）。
-        continue-on-error: true
-        env:
-          SIGNALY_WEBHOOK_URL: \${{ env.SIGNALY_WEBHOOK_URL }}
-          NOTIFY_APP: ${spec.repositoryName}
-          NOTIFY_KIND: デプロイ
-          NOTIFY_STATUS: \${{ steps.status.outputs.result }}
-        run: bash .github/scripts/signaly-notify.sh
-
       - name: Discord に異常を通知
         # 失敗・異常だけ送る（成功・キャンセルはスクリプトが送らない。guchi-apps/issue-deck#5057）。
         if: always()
@@ -770,25 +734,9 @@ ${gatePrintf}
     needs: [tag, deploy, release]
     if: always() && needs.release.result != 'skipped'
 
-    env:
-      SIGNALY_WEBHOOK_URL: \${{ secrets.SIGNALY_WEBHOOK_URL }}
-
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-
-      - name: Signaly に通知
-        continue-on-error: true
-        env:
-          SIGNALY_WEBHOOK_URL: \${{ env.SIGNALY_WEBHOOK_URL }}
-          # リリースだけはCI・デプロイと別のチャンネルへ送る（guchi-apps/issue-deck#2391）。
-          # 未登録なら空が渡り、スクリプトが従来のチャンネルへフォールバックする。
-          SIGNALY_RELEASE_WEBHOOK_URL: \${{ secrets.SIGNALY_RELEASE_WEBHOOK_URL }}
-          NOTIFY_STATUS: \${{ needs.release.result }}
-          NOTIFY_APP: ${spec.repositoryName}
-          NOTIFY_KIND: リリース
-          NOTIFY_VERSION: \${{ needs.tag.outputs.tag }}
-        run: bash .github/scripts/signaly-notify.sh
 
       - name: Discord に異常を通知
         # 失敗・異常だけ送る（成功・キャンセルはスクリプトが送らない。guchi-apps/issue-deck#5057）。

@@ -1,10 +1,27 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { WorkflowTagStatusSection } from "@/components/dashboard/workflow-tag-status";
 import { invalidateWorkflowTags } from "@/lib/workflow-tags-store";
-import type { PropagationRun, SourceAhead, WorkflowTagStatus } from "@/lib/workflow-tags";
+import {
+  SHARED_FILE_SPECS,
+  type PropagationRun,
+  type SharedFileSpec,
+  type SourceAhead,
+  type WorkflowTagStatus,
+} from "@/lib/workflow-tags";
+
+// 現在、配布物は無い（`SHARED_FILE_SPECS`は空。#5180）ので、画面の表示を確かめるあいだだけ足す
+beforeAll(() => {
+  (SHARED_FILE_SPECS as SharedFileSpec[]).push({
+    path: ".github/scripts/example.sh",
+    label: "例のスクリプト",
+  });
+});
+afterAll(() => {
+  (SHARED_FILE_SPECS as SharedFileSpec[]).splice(0);
+});
 
 /**
  * 「共有ワークフローのバージョン」パネルの表示と、連続押下の防止（#1602）。
@@ -26,7 +43,6 @@ function status(overrides: Partial<WorkflowTagStatus> = {}): WorkflowTagStatus {
     brokenRepairWorkflows: [],
     repairPullRequest: null,
     outdatedSharedFiles: [],
-    missingReleaseWebhookWorkflows: [],
     customizedSharedFiles: [],
     sharedFilePullRequest: null,
     ...overrides,
@@ -54,7 +70,7 @@ function mockFetch(overview: {
             targets: [
               {
                 repository: "guchi-apps/aide",
-                files: [".github/scripts/signaly-notify.sh"],
+                files: [".github/scripts/example.sh"],
               },
             ],
           }),
@@ -526,8 +542,8 @@ describe("不足しているワークフローの配布（#1948・#1475）", () 
           fullName: "guchi-apps/subpc",
           outdated: false,
           refs: [{ file: "issue-labels.yml", uses: "workflows/v19", promptsRef: "workflows/v19" }],
-          outdatedSharedFiles: [".github/scripts/signaly-notify.sh"],
-          customizedSharedFiles: [".github/scripts/signaly-notify.sh"],
+          outdatedSharedFiles: [".github/scripts/example.sh"],
+          customizedSharedFiles: [".github/scripts/example.sh"],
         }),
       ],
       propagation: null,
@@ -535,7 +551,7 @@ describe("不足しているワークフローの配布（#1948・#1475）", () 
     render(<WorkflowTagStatusSection open />);
 
     expect(await screen.findByText("未更新（1）")).toBeTruthy();
-    expect(screen.getByText(/Signaly通知スクリプト/)).toBeTruthy();
+    expect(screen.getByText(/例のスクリプト/)).toBeTruthy();
     expect(screen.getByText(/独自の変更あり/)).toBeTruthy();
     expect(
       screen.getByRole("button", { name: /1件の共有スクリプトを更新する/ }),
@@ -550,7 +566,7 @@ describe("不足しているワークフローの配布（#1948・#1475）", () 
           fullName: "guchi-apps/aide",
           outdated: false,
           refs: [{ file: "issue-labels.yml", uses: "workflows/v19", promptsRef: "workflows/v19" }],
-          outdatedSharedFiles: [".github/scripts/signaly-notify.sh"],
+          outdatedSharedFiles: [".github/scripts/example.sh"],
         }),
       ],
       propagation: null,
@@ -577,7 +593,7 @@ describe("不足しているワークフローの配布（#1948・#1475）", () 
           fullName: "guchi-apps/aide",
           outdated: false,
           refs: [{ file: "issue-labels.yml", uses: "workflows/v19", promptsRef: "workflows/v19" }],
-          outdatedSharedFiles: [".github/scripts/signaly-notify.sh"],
+          outdatedSharedFiles: [".github/scripts/example.sh"],
           sharedFilePullRequest: { number: 33, url: "https://github.com/guchi-apps/aide/pull/33" },
         }),
       ],

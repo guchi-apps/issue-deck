@@ -151,7 +151,7 @@ rm -rf "<TARGET_DIR>"
 
 - 1Passwordの`apps`ボールトのアイテムは**削除ではなくアーカイブへ移す**
   （`op item delete "<アイテム名>" --vault apps --archive`。共有知識`inventory/README.md`）
-- 立ち上げが投入するのは`target-dir`・`db-name`・`allowed-google-emails`・`ci-webhook-url`の4つ
+- 立ち上げが投入するのは`target-dir`・`db-name`・`allowed-google-emails`の3つ
   （[`scripts/provision-app-secrets.sh`](../scripts/provision-app-secrets.sh)）。アプリ独自に足した
   フィールドは`.github/secrets-manifest.tsv`で確認する
 - **他アプリのアイテムに、終了するアプリ向けのフィールドが混じっていることがある**

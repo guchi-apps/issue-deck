@@ -16,14 +16,13 @@ import {
 /**
  * リリース（本番反映）の完了のPush通知（#2725）。
  *
- * **これまでリリース通知はSignalyへのwebhookにしか流れていなかった**
- * （`.github/scripts/signaly-notify.sh`を`deploy.yml`の`notify-release`が呼ぶ）。
+ * **かつてリリース通知は別アプリ（Signaly）へのwebhookにしか流れていなかった**。
  * issue-deckはフリート全体のリリースを画面で扱っているのに、**出たことだけは別のアプリで
- * 受け取る**という形になっていたため、#2725でPush通知を足した。
+ * 受け取る**という形になっていたため、#2725でPush通知を足した。Signalyは廃止した（#5180）。
  *
  * **#4791からは宛先がPushではなくSlackのチャンネルになり、#4994でDiscordに替えた**
  * （プッシュ通知はしない）。埋め込み（embed）のカードをWebhookで投稿する。検知・重複防止・
- * 巡回の仕組みはそのままで、送り先だけが違う。**Signalyへの通知はそのまま残す**。
+ * 巡回の仕組みはそのままで、送り先だけが違う。
  *
  * ## 既存3種と違い、これは「報せるだけ」の通知
  *
@@ -67,12 +66,11 @@ const DEFAULT_ISSUE_DECK_BASE_URL = "https://issuedeck.gucchii.com";
 /**
  * 通知本文の最大文字数。
  *
- * Signalyは1500文字まで載せるが、あちらは通知一覧の画面を持つ。OSの通知は数行しか
- * 見えないので、**先頭だけを見せて続きはアプリで読ませる**。
+ * 通知で見えるのは数行しかないので、**先頭だけを見せて続きはアプリで読ませる**。
  */
 export const RELEASE_PUSH_BODY_LIMIT = 300;
 
-/** 更新内容を載せられなかったときの本文。**理由は区別しない**（`signaly-notify.sh`と同じ文面） */
+/** 更新内容を載せられなかったときの本文。**理由は区別しない** */
 export const RELEASE_PUSH_EMPTY_BODY = "今回のリリースでは、表示できる更新内容がありません。";
 
 /** 巡回の間隔（分）。環境変数が読めない・数値でない場合は既定値。0以下は「巡回しない」 */
@@ -134,14 +132,13 @@ export function decideReleasePush(params: {
 /**
  * `.github/release-notes.md`から、そのバージョンの更新内容を取り出す（純粋関数）。
  *
- * 判定は`.github/scripts/signaly-notify.sh`の`read_release_notes`と同じにする——
  * 先頭のHTMLコメント（「手で編集しない」の断り書き）を捨て、最初の見出し`# v1.2.3`が
  * 期待するバージョンと一致したときだけ本文を返す。**照合できなければ空を返す。**
  * リリースの流れの外でファイルが取り残されたとき、**古い文面を新しいバージョンの通知へ
  * 貼ってしまうほうが、本文が無いことより悪い**ため。
  *
- * **Signalyと違い、「使い方」（`RELEASE_USAGE`）は落とす。** OSの通知に見えるのは数行で、
- * 手順を並べると肝心の「何が変わったか」が押し出される。手順はアプリの更新履歴とSignalyで
+ * **「使い方」（`RELEASE_USAGE`）は落とす。** 通知に見えるのは数行で、
+ * 手順を並べると肝心の「何が変わったか」が押し出される。手順はアプリの更新履歴で
  * 読めばよい（`reusable-release-develop-to-main.yml`が`**使い方**`の行を境に書き出す）。
  */
 export function parseReleaseNotes(raw: string | null, tagName: string): string {

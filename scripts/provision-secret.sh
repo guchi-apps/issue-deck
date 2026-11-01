@@ -20,7 +20,7 @@
 #   # アプリ間で共有する値は、利用側のマニフェストのSOURCEを提供側の op:// にして同期だけ行う（#2624）
 #   scripts/provision-secret.sh --repo guchi-apps/aide --key AIDE_OPS_DASHBOARD_TOKEN --sync-only
 #   # 1Passwordへ値を入れ済みで、同期だけを行う（organizationの共通値）
-#   scripts/provision-secret.sh --repo guchi-apps/issue-deck --key SIGNALY_RELEASE_WEBHOOK_URL \
+#   scripts/provision-secret.sh --repo guchi-apps/issue-deck --key <KEY> \
 #     --manifest .github/org-secrets-manifest.tsv --sync-only
 #
 # オプション:
