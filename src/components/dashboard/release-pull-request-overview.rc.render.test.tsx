@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { RcOverviewWithFinalization } from "@/hooks/use-release-rc";
-import { ReleasePullRequestOverview } from "@/components/dashboard/release-pull-request-overview";
+import { PENDING_CONFLICT_PUBLISH_NOTE, ReleasePullRequestOverview } from "@/components/dashboard/release-pull-request-overview";
 import { AI_REVIEW_NONE } from "@/lib/github/check-rollup";
 import type { ReleaseVerificationSummary } from "@/lib/release-verification-summary";
 import type { PullRequestSummary } from "@/types/pull-request";
@@ -173,5 +173,23 @@ describe("ReleasePullRequestOverview の新方式候補の工程（#4635）", ()
     // 承認を経ない手動の公開は、主操作でなく「その他の操作」に置く（#5076・計画レビュー判断1-A）
     await waitFor(() => expect(screen.getByText("承認せずに本番公開へ進む")).toBeTruthy());
     expect(screen.getByText("承認せずに本番公開へ進む").closest("details")).toBeTruthy();
+  });
+
+  it("競合がGitHubの判定中でも公開操作は止めず、競合の詳細でマージ直前に待つことを案内する（#5178）", async () => {
+    rcOverview = { caller: { supported: true, reasonLabel: null } as never, candidate: candidate("awaiting_approval", "awaiting_approval"), legacy: null,
+      finalization: finalization() };
+    render(<ReleasePullRequestOverview pullRequest={{ ...makePullRequest(false), mergeable: null }} onMerged={vi.fn()} />);
+    await waitFor(() => expect(screen.getByText("承認せずに本番公開へ進む")).toBeTruthy());
+    const conflict = screen.getByRole("button", { name: "コンフリクト: 確認中" });
+    fireEvent.click(conflict);
+    expect(screen.getByRole("group", { name: "コンフリクトの詳細" }).textContent).toContain(PENDING_CONFLICT_PUBLISH_NOTE);
+  });
+
+  it("競合の判定が出ていれば理由文は差し替えない", async () => {
+    rcOverview = { caller: { supported: true, reasonLabel: null } as never, candidate: candidate("awaiting_approval", "awaiting_approval"), legacy: null,
+      finalization: finalization() };
+    render(<ReleasePullRequestOverview pullRequest={{ ...makePullRequest(false), mergeable: false }} onMerged={vi.fn()} />);
+    fireEvent.click(await screen.findByRole("button", { name: "コンフリクト: あり" }));
+    expect(screen.getByRole("group", { name: "コンフリクトの詳細" }).textContent).not.toContain(PENDING_CONFLICT_PUBLISH_NOTE);
   });
 });

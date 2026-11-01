@@ -695,6 +695,11 @@ export type ReleaseChangePullRequest = {
    * ダイアログ）だけに付く。無ければ未取得で、他の画面の応答・コストは変わらない
    */
   mergeChecks?: { ci: ReleaseChangeCiCheck };
+  /**
+   * このPRを指摘の対象にした修正系列の修正PRが、同じ一覧へ取り込まれている（#5175）。
+   * **個別判定の解消を断定する根拠ではない**（全体レビュー指摘の関連PRの紐づきだけ）ので、判定・件数は変えず補足にだけ使う
+   */
+  fixedBy?: { fixPrNumber: number; fixIssueNumber: number };
 };
 
 /** PR番号を特定できなかったコミット */

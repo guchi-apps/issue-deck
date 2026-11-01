@@ -16,8 +16,10 @@ import { fetchPullRequestRollups, pullRequestRollupKey } from "@/lib/github/chec
 import {
   toReleaseChanges,
   toReleaseChangeCi,
+  withFixedBy,
   withMergeChecks,
   withReleaseReviews,
+  type ReleaseFixSeriesRow,
 } from "@/lib/release-changes";
 import type {
   ReleaseChangeCiCheck,
@@ -61,6 +63,31 @@ async function fetchPullRequestBodies(
     }),
   );
   return bodies;
+}
+
+/** 一覧のPRを修正PRに持つ修正系列を引く（#5175）。`items[].pullRequests`を平らにして渡す */
+async function fetchFixSeriesRows(repositoryFullName: string, fixPrCandidates: readonly number[]): Promise<ReleaseFixSeriesRow[]> {
+  if (fixPrCandidates.length === 0) return [];
+  const rows = await db.releaseFixSeries.findMany({
+    where: { repositoryFullName, fixPrNumber: { in: [...fixPrCandidates] }, fixPrMergedAt: { not: null } },
+    select: { status: true, sourceKind: true, issueNumber: true, fixPrNumber: true, fixPrMergedAt: true, items: true },
+  });
+  return rows.map((row) => ({
+    status: row.status,
+    sourceKind: row.sourceKind,
+    issueNumber: row.issueNumber,
+    fixPrNumber: row.fixPrNumber,
+    fixPrMergedAt: row.fixPrMergedAt,
+    relatedPullRequests: relatedPullRequestsOf(row.items),
+  }));
+}
+
+function relatedPullRequestsOf(items: unknown): number[] {
+  if (!Array.isArray(items)) return [];
+  return items.flatMap((item) => {
+    const list = (item as { pullRequests?: unknown } | null)?.pullRequests;
+    return Array.isArray(list) ? list.filter((n): n is number => Number.isInteger(n)) : [];
+  });
 }
 
 /**
@@ -158,7 +185,10 @@ async function handleGET(request: NextRequest) {
       pullRequests.filter((pr) => !pr.isVersionBump).map((pr) => pr.number),
       token,
     );
-    const reviewed = withReleaseReviews(pullRequests, bodies);
+    const reviewed = withFixedBy(
+      withReleaseReviews(pullRequests, bodies),
+      await fetchFixSeriesRows(`${owner}/${repo}`, pullRequests.map((pr) => pr.number)).catch(() => []),
+    );
     let withChecks = reviewed;
     if (includeMergeChecks) {
       const checks = await fetchMergeChecks(owner, repo, reviewed, token);

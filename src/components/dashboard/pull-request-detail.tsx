@@ -218,6 +218,8 @@ export function PullRequestDetail({
   // CIの内訳（#2777）。**開いたPRのidで持つ**——真偽値だけで持つと、PRを切り替えたときに
   // 前のPRで開いた状態が引き継がれ、別のPRの内訳が開いたまま出る。
   const [ciDetailPullRequestId, setCiDetailPullRequestId] = useState<string | null>(null);
+  // CI再実行を依頼して実行中の間、閉じた行のサマリへ出す（#5171）
+  const [ciRerunPending, setCiRerunPending] = useState(false);
   // レビュー本文もCIと同じく、開いたPRのidで状態を持つ。PRを切り替えたときに前の本文を
   // 誤って残さないため（#3319）。
   const [reviewDetailPullRequestId, setReviewDetailPullRequestId] = useState<string | null>(null);
@@ -341,6 +343,8 @@ export function PullRequestDetail({
     !pullRequest.merged &&
     pullRequest.kind !== "release" &&
     pullRequest.kind !== "version-bump";
+  // CI行は、再実行と同じ条件でも出す（`ciState`が未取得でも再実行・案内へ辿り着けるように。#5171）
+  const showsCiRow = showsCiBadge && (Boolean(pullRequest.ciState) || canUpdateBranch);
   // 指摘タブの印（#5158）。CI失敗・要修正は赤、要確認（人の確認待ち）は不具合ではないので赤を出さず別の色にする
   const findingsAttention: "bad" | "check" | null =
     primary.kind === "ci-failed" || (primary.kind === "review-findings" && primary.tone === "bad")
@@ -636,59 +640,70 @@ export function PullRequestDetail({
               }
               className="mb-3"
             />
-            <div className="flex min-w-0 flex-wrap items-center gap-2">
-              {pullRequest.merged ? null : pullRequest.state === "closed" ? null : pullRequest.draft ? null : (
-                <CiStatusButton
-                  ciState={pullRequest.ciState}
-                  expanded={ciDetailOpen}
-                  onClick={() => setCiDetailPullRequestId(ciDetailOpen ? null : pullRequest.id)}
-                />
+            {/* CI・AIレビューの状況は縦並びのアコーディオン（#5171）。行の見出しに状態を常に出し、押すと内訳が開く */}
+            <div className="min-w-0 divide-y overflow-hidden rounded-md border" data-testid="pull-request-checks-accordion">
+              {showsCiRow && (
+                <div>
+                  <CiStatusButton
+                    ciState={pullRequest.ciState}
+                    expanded={ciDetailOpen}
+                    onClick={() => setCiDetailPullRequestId(ciDetailOpen ? null : pullRequest.id)}
+                    summary={ciRerunPending ? "再実行を依頼済み" : null}
+                  />
+                  <div className="space-y-3 border-t bg-muted/30 px-3 py-3" hidden={!ciDetailOpen}>
+                    {/* CIのジョブ単位の内訳（#2777）。押したときだけ取得する */}
+                    {ciDetailOpen && (
+                      <WorkflowRunProgressPanel
+                        repositoryFullName={pullRequest.repositoryFullName}
+                        runId={ciRunId}
+                        open={ciDetailOpen}
+                        title="CIの内訳"
+                        checks={ciChecks}
+                      />
+                    )}
+                    {/* 再実行の状態・run取得は閉じても失わないよう、常にマウントして隠す */}
+                    {canUpdateBranch && !pullRequest.draft && (
+                      <PullRequestCiRerunButtons
+                        pullRequest={pullRequest}
+                        onPendingRequestChange={setCiRerunPending}
+                        onChanged={() => {
+                          onRefresh();
+                          onUpdated?.();
+                        }}
+                      />
+                    )}
+                  </div>
+                </div>
               )}
               {/* CIとは別の軸のレビュー状態（#3319）。実行中・省略・失敗・完了を同じ操作表示で出す */}
-              <AiReviewStatusButton
-                aiReview={pullRequest.mergeJudgement.aiReview}
-                reviewVerdict={pullRequest.reviewVerdict}
-                expanded={reviewDetailOpen}
-                onClick={() => setReviewDetailPullRequestId(reviewDetailOpen ? null : pullRequest.id)}
-              />
+              {pullRequest.mergeJudgement.aiReview?.state && pullRequest.mergeJudgement.aiReview.state !== "none" && (
+                <div>
+                  <AiReviewStatusButton
+                    aiReview={pullRequest.mergeJudgement.aiReview}
+                    reviewVerdict={pullRequest.reviewVerdict}
+                    expanded={reviewDetailOpen}
+                    onClick={() => setReviewDetailPullRequestId(reviewDetailOpen ? null : pullRequest.id)}
+                  />
+                  {reviewDetailOpen && (
+                    <div className="border-t bg-muted/30 px-3 py-3">
+                      <PullRequestReviewFindings
+                        review={review}
+                        pullRequestNumber={pullRequest.number}
+                        pullRequestUrl={pullRequest.htmlUrl}
+                        reviewRunUrl={pullRequest.mergeJudgement.aiReview.runUrl}
+                        repair={{
+                          repositoryFullName: pullRequest.repositoryFullName,
+                          kinds: repairKinds,
+                          availability: pullRequest.repairWorkflowAvailability,
+                          runningKind: pullRequest.repairRun?.kind ?? null,
+                        }}
+                        responseAnchorId={reviewAction.kind === "none" ? undefined : REVIEW_RESPONSE_ANCHOR_ID}
+                      />
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
-
-            {canUpdateBranch && !pullRequest.draft && (
-              <PullRequestCiRerunButtons
-                pullRequest={pullRequest}
-                onChanged={() => {
-                  onRefresh();
-                  onUpdated?.();
-                }}
-              />
-            )}
-
-            {/* CIのジョブ単位の内訳（#2777）。押したときだけ取得する */}
-            {ciDetailOpen && (
-              <WorkflowRunProgressPanel
-                repositoryFullName={pullRequest.repositoryFullName}
-                runId={ciRunId}
-                open={ciDetailOpen}
-                title="CIの内訳"
-                checks={ciChecks}
-              />
-            )}
-
-            {reviewDetailOpen && (
-              <PullRequestReviewFindings
-                review={review}
-                pullRequestNumber={pullRequest.number}
-                pullRequestUrl={pullRequest.htmlUrl}
-                reviewRunUrl={pullRequest.mergeJudgement.aiReview.runUrl}
-                repair={{
-                  repositoryFullName: pullRequest.repositoryFullName,
-                  kinds: repairKinds,
-                  availability: pullRequest.repairWorkflowAvailability,
-                  runningKind: pullRequest.repairRun?.kind ?? null,
-                }}
-                responseAnchorId={reviewAction.kind === "none" ? undefined : REVIEW_RESPONSE_ANCHOR_ID}
-              />
-            )}
           </section>
         )}
 

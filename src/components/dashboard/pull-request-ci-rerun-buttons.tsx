@@ -17,9 +17,12 @@ import type { PullRequestSummary } from "@/types/pull-request";
 export function PullRequestCiRerunButtons({
   pullRequest,
   onChanged,
+  onPendingRequestChange,
 }: {
   pullRequest: PullRequestSummary;
   onChanged: () => void;
+  /** 再実行の依頼後、まだ実行中の間だけtrue。閉じたアコーディオン行のサマリに出すため親へ知らせる（#5171） */
+  onPendingRequestChange?: (pending: boolean) => void;
 }) {
   const [runs, setRuns] = useState<CiRerunRun[] | null>(null);
   const [busy, setBusy] = useState<CiRerunScope | null>(null);
@@ -83,21 +86,30 @@ export function PullRequestCiRerunButtons({
 
   const running = runs?.some((r) => r.status !== "completed") ?? false;
   const disabled = busy !== null || running;
+  const pendingRequest = requested && running;
+
+  useEffect(() => {
+    onPendingRequestChange?.(pendingRequest);
+    return () => onPendingRequestChange?.(false);
+  }, [pendingRequest, onPendingRequestChange]);
 
   return (
     <div className="flex min-w-0 flex-col items-start gap-1" data-testid="pull-request-ci-rerun">
+      <p className="text-[11px] font-semibold text-muted-foreground">
+        CIを再実行（現在のコミット {pullRequest.headSha.slice(0, 7)}）
+      </p>
       <div className="flex flex-wrap items-center gap-2">
         <Button size="sm" variant="outline" className="h-8 text-xs" disabled={disabled} onClick={() => run("failed")}>
           {busy === "failed" ? <Loader2 className="size-3.5 animate-spin" /> : <RotateCw className="size-3.5" />}
-          失敗分を再実行
+          失敗したCIを再実行
         </Button>
         <Button size="sm" variant="outline" className="h-8 text-xs" disabled={disabled} onClick={() => run("all")}>
           {busy === "all" ? <Loader2 className="size-3.5 animate-spin" /> : <RotateCw className="size-3.5" />}
-          全体を再実行
+          CIをすべて再実行
         </Button>
       </div>
       <p className="text-[11px] text-muted-foreground">
-        対象: 現在のコミット（{pullRequest.headSha.slice(0, 7)}）のCI。AIレビューは再実行しません。
+        {running ? "実行中は押せません。" : ""}AIレビューは再実行されません。
       </p>
       {runs && runs.length === 0 && (
         <p className="text-[11px] text-muted-foreground">
@@ -113,7 +125,7 @@ export function PullRequestCiRerunButtons({
           ))}
         </ul>
       )}
-      {requested && running && (
+      {pendingRequest && (
         <p role="status" className="text-[11px] text-muted-foreground">
           再実行を依頼しました。完了するまで以前の結果は現在の結果として扱われません。
         </p>

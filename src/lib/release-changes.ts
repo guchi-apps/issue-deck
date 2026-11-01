@@ -93,6 +93,45 @@ export function tallyReleaseReviews(
   };
 }
 
+/** 修正系列のうち、取り込み済みの判定に使う列 */
+export type ReleaseFixSeriesRow = {
+  status: string;
+  sourceKind: string;
+  issueNumber: number;
+  fixPrNumber: number | null;
+  fixPrMergedAt: Date | null;
+  /** `items[].pullRequests`（全体レビュー指摘の関連PR）を展開したもの */
+  relatedPullRequests: readonly number[];
+};
+
+/**
+ * 各PRへ、修正系列の修正PRが同じ一覧に取り込まれていることを付ける（#5175）。
+ *
+ * 条件: 全体レビュー指摘の系列（`review_finding`）・`stopped`/`superseded`でない・修正PRがマージ済み・
+ * 修正PRが**同じ一覧に含まれる**・元PRが指摘の関連PRに含まれる。元PRの判定自体は変えない。
+ */
+export function withFixedBy(
+  pullRequests: readonly ReleaseChangePullRequest[],
+  series: readonly ReleaseFixSeriesRow[],
+): ReleaseChangePullRequest[] {
+  const inList = new Set(pullRequests.map((pr) => pr.number));
+  const usable = series.filter(
+    (s) =>
+      s.sourceKind === "review_finding" &&
+      s.status !== "stopped" &&
+      s.status !== "superseded" &&
+      s.fixPrNumber !== null &&
+      s.fixPrMergedAt !== null &&
+      inList.has(s.fixPrNumber),
+  );
+  return pullRequests.map((pr) => {
+    if (pr.isVersionBump) return pr;
+    const found = usable.find((s) => s.fixPrNumber !== pr.number && s.relatedPullRequests.includes(pr.number));
+    if (!found || found.fixPrNumber === null) return pr;
+    return { ...pr, fixedBy: { fixPrNumber: found.fixPrNumber, fixIssueNumber: found.issueNumber } };
+  });
+}
+
 /** GitHubのチェック集約（`statusCheckRollup.state`）を5チェックのCIの記録へ写す。無ければ`none` */
 export function toReleaseChangeCi(rollupState: string | null | undefined): ReleaseChangeCiCheck {
   switch (rollupState) {

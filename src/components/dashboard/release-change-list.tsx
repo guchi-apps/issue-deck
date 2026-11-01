@@ -118,6 +118,9 @@ function ReleaseChangeListContent({
             >
               #{pr.number} {pr.title}
             </GithubReferenceLink>
+            {pr.fixedBy && (
+              <span className="text-muted-foreground">修正PR #{pr.fixedBy.fixPrNumber} 取り込み済み</span>
+            )}
             <ReleaseChangeReview pr={pr} />
           </li>
         ))}

@@ -1191,6 +1191,8 @@ RCから本番公開へ進む確認は**公開準備の開始の1回だけ**に�
 - **既存候補の移行**: 承認の記録が無い公開準備済みの候補は「公開準備済み」から承認を推定せず、パネルで1回だけ承認を求める（`action=approve`。対象はバンプ後のheadとそのbase）
 - **表示**: パネルの工程は「公開承認」（承認済み・失効・承認が必要）、承認欄は`describePublishProgress`の「最終検証中／自動公開待ち／自動公開が停止（理由）／本番反映中／稼働確認中」。承認済みの候補の段階表示は「本番承認待ち」ではなく「自動公開待ち」（`deriveRcStatus`の`publishApproved`）
 - 共有workflowの配布・callerの変更は不要（`finalize_request`の受け渡しは既存のまま）
+- **競合（GitHubの`mergeable`）が「確認中」でも公開承認は止めない**（#5178）。承認後の本番mainへのマージは`decideCompletionMerge`がマージ直前に取り直した候補で判定し、`null`（GitHubが計算中）なら`mergeable_unknown`で待ち、`false`なら止める。本番PR詳細「現在候補の検証」の競合セルは、確認中のとき理由欄でこの関係を案内する。競合の確認自体は残す（base SHA一致の検査は候補作成後のmainの前進しか捕まえず、本番復旧PRのようにdevelopを経由せずmainへ入った変更との競合はGitHubの判定でしか分からないため）
+- PR詳細API（`/api/pull-requests/detail`）は、openなPRの`mergeable`が未判定なら1秒おきに最大2回取り直してから返す（`settlePullRequestMergeable`）。GitHubは単体取得を契機に非同期で計算するため初回はnullになりやすく、詳細はポーリングしないので「確認中」が再読み込みまで残っていた
 
 ### 全体レビューは公開の必須条件ではない（#4807）
 
