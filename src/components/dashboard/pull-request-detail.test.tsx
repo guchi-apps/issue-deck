@@ -333,6 +333,13 @@ describe("PullRequestDetail", () => {
     expect(screen.getByTestId("merge-stop-cause").textContent).toContain("直接原因を確認できません");
   });
 
+  // #5187: CI行もレビュー行も無いPRで、指摘タブが空白にならず「指摘なし」を出す
+  it("CI・レビューの行が無いときは、指摘タブに「指摘はありません」を出す", () => {
+    renderDetail({ pullRequest: makePullRequest({ state: "closed", merged: true }) });
+    openTab("指摘");
+    expect(screen.getByTestId("pull-request-no-findings").textContent).toContain("指摘はありません");
+  });
+
   it("CI・レビューの状態を四角い操作表示で出す（#3319）", () => {
     renderDetail({
       pullRequest: makePullRequest({

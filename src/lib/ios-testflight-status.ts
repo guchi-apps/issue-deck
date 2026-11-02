@@ -172,6 +172,21 @@ export function latestDeliveredBuild(refs: readonly string[]): { tag: string; bu
 }
 
 /**
+ * 最後に配布したビルドと、そのビルドを配布したコミットに付いている版タグ（`v1.3.2`）を返す（#5189）。
+ * 「配布なし」の版でも、iOSがどの版まで配布済みかを示すために使う。版タグを引けなければ`version`はnull。
+ */
+export function latestDeliveredBuildWithVersion(
+  deliveredRefs: readonly { ref: string; sha: string }[],
+  versionRefs: readonly { ref: string; sha: string }[],
+): { tag: string; buildNumber: number; version: string | null } | null {
+  const latest = latestDeliveredBuild(deliveredRefs.map((item) => item.ref));
+  if (latest === null) return null;
+  const sha = deliveredRefs.find((item) => item.ref.replace(/^refs\/tags\//, "") === latest.tag)?.sha;
+  const versionRef = sha ? versionRefs.find((item) => item.sha === sha) : undefined;
+  return { ...latest, version: versionRef ? versionRef.ref.replace(/^refs\/tags\//, "") : null };
+}
+
+/**
  * `matching-refs`の結果（タグ名とそのタグが指すコミット）から、指定コミットへ配布済みのビルド番号を返す（#3644）。
  * 配布のworkflowは配布し終えたときだけ、対象コミットへ軽量タグ`ios-testflight/<ビルド番号>`を付ける。
  * run の`head_sha`は起動時のmain先端で束のコミットとは限らないため、配布済みの判定はrunではなくタグから引く。
@@ -347,6 +362,12 @@ export type IosDistributionHeadline = {
   notDistributed?: boolean;
 };
 
+/** 「配布なし」の見出しに添える最終配布。配布履歴が無ければ空（#5189） */
+function describeLastDelivered(last: { buildNumber: number; version: string | null } | null): string {
+  if (last === null) return "";
+  return ` ・ 最終配布 ${last.version ? `${last.version}（#${last.buildNumber}）` : `#${last.buildNumber}`}`;
+}
+
 function syntheticStages(stateOf: (key: IosStageKey) => IosStageState): IosStageStatus[] {
   return IOS_STAGES.map(({ key, label }) => ({ key, label, state: stateOf(key), startedAt: null, completedAt: null }));
 }
@@ -360,6 +381,7 @@ function syntheticStages(stateOf: (key: IosStageKey) => IosStageState): IosStage
 export function describeIosDistributionHeadline(
   state: IosReleasePanelState,
   runStages: readonly IosStageStatus[] | null,
+  lastDelivered: { buildNumber: number; version: string | null } | null = null,
 ): IosDistributionHeadline {
   switch (state.kind) {
     case "failed":
@@ -386,7 +408,7 @@ export function describeIosDistributionHeadline(
     case "not-needed":
       return {
         tone: "idle",
-        text: "配布なし（iOS更新不要）",
+        text: `配布なし（iOS更新不要）${describeLastDelivered(lastDelivered)}`,
         stages: syntheticStages((key) => (key === "detect" ? "success" : "skipped")),
         notDistributed: true,
       };

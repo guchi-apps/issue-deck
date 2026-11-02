@@ -23,7 +23,7 @@ export type IosTestflightResponse =
   | { available: false }
   | {
       available: true;
-      latestDeliveredBuild: { tag: string; buildNumber: number } | null;
+      latestDeliveredBuild: { tag: string; buildNumber: number; version?: string | null } | null;
       runs: IosTestflightRun[];
       /** 開いている追跡Issue（自動起票または画面から起票したもの。#3784）。無ければnull */
       trackedIssue?: { number: number; htmlUrl: string } | null;

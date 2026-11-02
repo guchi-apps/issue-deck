@@ -104,7 +104,9 @@ export function IosTestflightStatus({ owner, repo }: { owner: string; repo: stri
           <p>
             最後にTestFlightへ配布したビルド：
             <span className="font-medium">
-              {data.latestDeliveredBuild ? `#${data.latestDeliveredBuild.buildNumber}` : "記録なし"}
+              {data.latestDeliveredBuild
+                ? `#${data.latestDeliveredBuild.buildNumber}${data.latestDeliveredBuild.version ? `（${data.latestDeliveredBuild.version}）` : ""}`
+                : "記録なし"}
             </span>
           </p>
           {data.runs.length === 0 ? (

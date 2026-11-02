@@ -14,6 +14,7 @@ import {
   toWebDeployState,
   judgeIosRun,
   latestDeliveredBuild,
+  latestDeliveredBuildWithVersion,
   summarizeIosStages,
   toStageState,
   type IosReleasePanelInput,
@@ -316,6 +317,13 @@ describe("describeIosDistributionHeadline（#4907）", () => {
     expect(delivered.notDistributed).toBeUndefined();
   });
 
+  it("配布なしの見出しに最終配布の版とビルド番号を添える（#5189）", () => {
+    const withVersion = describeIosDistributionHeadline({ kind: "not-needed" }, null, { buildNumber: 58, version: "v1.3.2" });
+    expect(withVersion.text).toBe("配布なし（iOS更新不要） ・ 最終配布 v1.3.2（#58）");
+    const noVersion = describeIosDistributionHeadline({ kind: "not-needed" }, null, { buildNumber: 58, version: null });
+    expect(noVersion.text).toBe("配布なし（iOS更新不要） ・ 最終配布 #58");
+  });
+
   it("未配布・Web待ちはバーを出さない", () => {
     expect(describeIosDistributionHeadline({ kind: "ready" }, null)).toEqual({ tone: "idle", text: "iOS未配布", stages: null });
     expect(describeIosDistributionHeadline({ kind: "awaiting-web", failed: false }, null).stages).toBeNull();
@@ -325,5 +333,29 @@ describe("describeIosDistributionHeadline（#4907）", () => {
     expect(isIosDistributionFailed({ kind: "failed", failedStage: null })).toBe(true);
     expect(isIosDistributionFailed({ kind: "running", stages: [] })).toBe(false);
     expect(isIosDistributionFailed(null)).toBe(false);
+  });
+});
+
+describe("latestDeliveredBuildWithVersion", () => {
+  const delivered = [
+    { ref: "refs/tags/ios-testflight/57", sha: "aaa" },
+    { ref: "refs/tags/ios-testflight/58", sha: "bbb" },
+  ];
+
+  it("最新の配布ビルドと同じコミットの版タグを返す", () => {
+    const versions = [
+      { ref: "refs/tags/v1.3.1", sha: "aaa" },
+      { ref: "refs/tags/v1.3.2", sha: "bbb" },
+    ];
+    expect(latestDeliveredBuildWithVersion(delivered, versions)).toEqual({
+      tag: "ios-testflight/58",
+      buildNumber: 58,
+      version: "v1.3.2",
+    });
+  });
+
+  it("版タグが引けなければversionはnull、配布履歴が無ければnull", () => {
+    expect(latestDeliveredBuildWithVersion(delivered, [])?.version).toBeNull();
+    expect(latestDeliveredBuildWithVersion([], [])).toBeNull();
   });
 });

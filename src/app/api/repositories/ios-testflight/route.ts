@@ -19,7 +19,7 @@ import {
   IOS_TESTFLIGHT_TAG_PREFIX,
   IOS_TESTFLIGHT_WORKFLOW_FILE,
   judgeIosRun,
-  latestDeliveredBuild,
+  latestDeliveredBuildWithVersion,
   summarizeIosStages,
   toWebDeployState,
 } from "@/lib/ios-testflight-status";
@@ -107,12 +107,13 @@ async function handleGET(request: NextRequest) {
     const token = await getInstallationToken(repository.installation.installationId);
     const base = `${GITHUB_API}/repos/${owner}/${repo}`;
 
-    const [runsBody, tagRefs] = await Promise.all([
+    const [runsBody, tagRefs, versionTagRefs] = await Promise.all([
       getJson<{ workflow_runs: RunItem[] }>(
         `${base}/actions/workflows/${IOS_TESTFLIGHT_WORKFLOW_FILE}/runs?per_page=${RUN_LIMIT}`,
         token,
       ),
       getJson<TagRef[]>(`${base}/git/matching-refs/tags/${IOS_TESTFLIGHT_TAG_PREFIX}`, token),
+      getJson<TagRef[]>(`${base}/git/matching-refs/tags/v`, token),
     ]);
 
     // ワークフローがまだ無いリポジトリ（kurashio#591の反映前）は「未導入」として返す
@@ -120,7 +121,8 @@ async function handleGET(request: NextRequest) {
       return NextResponse.json({ available: false });
     }
 
-    const latestBuild = latestDeliveredBuild((tagRefs ?? []).map((r) => r.ref));
+    const toShaRefs = (refs: TagRef[] | null) => (refs ?? []).map((r) => ({ ref: r.ref, sha: r.object?.sha ?? "" }));
+    const latestBuild = latestDeliveredBuildWithVersion(toShaRefs(tagRefs), toShaRefs(versionTagRefs));
 
     // 束（リリースPR）の指定があれば、mergeコミットがmain先端か・Webの本番デプロイが済んだかを調べる。
     // 先端でない束はrunと対応づけられない（`head_sha`は起動時のmain先端）ので、runのジョブは取らない
