@@ -657,7 +657,7 @@ export function PullRequestDetail({
                   </div>
                 </div>
               )}
-            <div className="min-w-0 divide-y overflow-hidden rounded-md border empty:hidden" data-testid="pull-request-checks-accordion">
+            <div className="-mx-4 -mb-3 min-w-0 divide-y overflow-hidden border-t empty:hidden" data-testid="pull-request-checks-accordion">
               {showsCiRow && (
                 <div>
                   <CiStatusButton
@@ -666,7 +666,7 @@ export function PullRequestDetail({
                     onClick={() => setCiDetailPullRequestId(ciDetailOpen ? null : pullRequest.id)}
                     summary={ciRerunPending ? "再実行を依頼済み" : null}
                   />
-                  <div className="space-y-3 border-t bg-muted/30 px-3 py-3" hidden={!ciDetailOpen}>
+                  <div className="space-y-3 border-t px-4 py-3 pl-8" hidden={!ciDetailOpen}>
                     {/* CIのジョブ単位の内訳（#2777）。押したときだけ取得する */}
                     {ciDetailOpen && (
                       <WorkflowRunProgressPanel
@@ -701,7 +701,7 @@ export function PullRequestDetail({
                     onClick={() => setReviewDetailPullRequestId(reviewDetailOpen ? null : pullRequest.id)}
                   />
                   {reviewDetailOpen && (
-                    <div className="border-t bg-muted/30 px-3 py-3">
+                    <div className="border-t px-4 py-3 pl-8">
                       <PullRequestReviewFindings
                         review={review}
                         pullRequestNumber={pullRequest.number}
