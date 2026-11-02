@@ -42,6 +42,14 @@ export type ChangelogEntry = {
  */
 export const APP_CHANGELOG: ChangelogEntry[] = [
   {
+    version: "8.88.3",
+    date: "2026-11-02",
+    changes: [
+      "PR詳細の指摘タブで、CI・レビューの行が無いときに「指摘はありません」と表示されるようになりました。",
+      "iOS配布が「配布なし」の場合も、最後に配布した版とビルド番号が表示されるようになりました。",
+    ],
+  },
+  {
     version: "8.88.1",
     date: "2026-11-01",
     changes: [
