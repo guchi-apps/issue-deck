@@ -4,7 +4,6 @@ import { useEffect, useState } from "react";
 import {
   Bot,
   BotOff,
-  ChevronDown,
   ChevronRight,
   Clock,
   GitMerge,
@@ -86,6 +85,16 @@ export function CiStateBadge({ ciState }: { ciState: CiState | null | undefined 
   );
 }
 
+/** 変更ファイルタブの見出し（`pull-request-file-list.tsx`）と同じ、左端のシェブロン。開くと下向きに回る（#5194） */
+function AccordionChevron({ expanded }: { expanded: boolean }) {
+  return (
+    <ChevronRight
+      aria-hidden
+      className={cn("size-3.5 shrink-0 text-muted-foreground transition-transform", expanded && "rotate-90")}
+    />
+  );
+}
+
 /**
  * PR詳細の指摘タブで、CIの内訳を開くアコーディオン行の見出し（#5171）。
  * 一覧などの読み取り専用の場所は`CiStateBadge`を使い続ける（#3319）。
@@ -114,16 +123,12 @@ export function CiStatusButton({
   );
   const content = (
     <>
+      {onClick && <AccordionChevron expanded={!!expanded} />}
       <span className={cn("shrink-0 font-semibold", tone)}>{label}</span>
-      {summary && <span className="min-w-0 flex-1 truncate text-[11px] font-normal text-muted-foreground">{summary}</span>}
-      {onClick && (
-        <span className="ml-auto shrink-0 text-muted-foreground">
-          {expanded ? <ChevronDown className="size-4" aria-hidden="true" /> : <ChevronRight className="size-4" aria-hidden="true" />}
-        </span>
-      )}
+      {summary && <span className="ml-auto min-w-0 truncate text-[11px] font-normal text-muted-foreground">{summary}</span>}
     </>
   );
-  const rowClass = "flex min-h-11 w-full items-center gap-2 px-3 py-2 text-left text-xs";
+  const rowClass = "flex min-h-11 w-full min-w-0 items-center gap-2 bg-muted/50 px-4 py-2 text-left text-xs";
 
   if (!onClick) return <div className={rowClass}>{content}</div>;
 
@@ -132,7 +137,7 @@ export function CiStatusButton({
       type="button"
       onClick={onClick}
       aria-expanded={expanded}
-      className={cn(rowClass, "transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring")}
+      className={cn(rowClass, "transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring")}
       title={expanded ? "CIの内訳を閉じる" : "CIの内訳を開く"}
     >
       {content}
@@ -422,9 +427,10 @@ export function AiReviewStatusButton({
       type="button"
       onClick={onClick}
       aria-expanded={expanded}
-      className="flex min-h-11 w-full items-center gap-2 px-3 py-2 text-left text-xs transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+      className="flex min-h-11 w-full min-w-0 items-center gap-2 bg-muted/50 px-4 py-2 text-left text-xs transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
       title={expanded ? "レビューの詳細を閉じる" : "レビューの詳細を開く"}
     >
+      <AccordionChevron expanded={expanded} />
       <span
         className={cn(
           "shrink-0 font-semibold",
@@ -438,9 +444,6 @@ export function AiReviewStatusButton({
         )}
       >
         {label}
-      </span>
-      <span className="ml-auto shrink-0 text-muted-foreground">
-        {expanded ? <ChevronDown className="size-4" aria-hidden="true" /> : <ChevronRight className="size-4" aria-hidden="true" />}
       </span>
     </button>
   );

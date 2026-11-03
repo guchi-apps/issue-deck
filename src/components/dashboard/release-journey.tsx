@@ -146,11 +146,12 @@ export function ReleaseJourneyInline({ journey, showCandidate = true }: { journe
           <span className="truncate">{headline.label}</span>
         </span>
       )}
-      <JourneyOwnerChip owner={journey.owner} attention={journey.attention} />
+      {/* 自動担当のバッジは出さず、その幅を工程名に回す（#5197）。人の操作待ち（あなた）だけ残す */}
+      {journey.owner !== "auto" && <JourneyOwnerChip owner={journey.owner} attention={journey.attention} />}
       <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground">
         {journey.done}/{journey.total}
       </span>
-      {journey.others.length > 0 && <span className="min-w-0 truncate text-[11px] text-muted-foreground">＋{journey.others.join("・")}</span>}
+      {journey.others.length > 0 && <span className="min-w-0 shrink-[8] truncate text-[11px] text-muted-foreground">＋{journey.others.join("・")}</span>}
     </span>
   );
 }

@@ -308,20 +308,13 @@ describe("describeIosDistributionHeadline（#4907）", () => {
 
   it("配布済み・更新不要は結果から段階を組み立てる", () => {
     const delivered = describeIosDistributionHeadline({ kind: "delivered", buildNumber: 142 }, null);
-    expect(delivered.text).toBe("TestFlightへ配布済み #142");
+    expect(delivered.text).toBe("配布済み #142");
     expect(delivered.stages?.every((s) => s.state === "success")).toBe(true);
     const notNeeded = describeIosDistributionHeadline({ kind: "not-needed" }, null);
     expect(notNeeded.stages?.map((s) => s.state)).toEqual(["success", "skipped", "skipped", "skipped", "skipped", "skipped"]);
-    expect(notNeeded.text).toBe("配布なし（iOS更新不要）");
+    expect(notNeeded.text).toBe("配布なし");
     expect(notNeeded.notDistributed).toBe(true);
     expect(delivered.notDistributed).toBeUndefined();
-  });
-
-  it("配布なしの見出しに最終配布の版とビルド番号を添える（#5189）", () => {
-    const withVersion = describeIosDistributionHeadline({ kind: "not-needed" }, null, { buildNumber: 58, version: "v1.3.2" });
-    expect(withVersion.text).toBe("配布なし（iOS更新不要） ・ 最終配布 v1.3.2（#58）");
-    const noVersion = describeIosDistributionHeadline({ kind: "not-needed" }, null, { buildNumber: 58, version: null });
-    expect(noVersion.text).toBe("配布なし（iOS更新不要） ・ 最終配布 #58");
   });
 
   it("未配布・Web待ちはバーを出さない", () => {

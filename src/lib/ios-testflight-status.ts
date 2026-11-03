@@ -362,12 +362,6 @@ export type IosDistributionHeadline = {
   notDistributed?: boolean;
 };
 
-/** 「配布なし」の見出しに添える最終配布。配布履歴が無ければ空（#5189） */
-function describeLastDelivered(last: { buildNumber: number; version: string | null } | null): string {
-  if (last === null) return "";
-  return ` ・ 最終配布 ${last.version ? `${last.version}（#${last.buildNumber}）` : `#${last.buildNumber}`}`;
-}
-
 function syntheticStages(stateOf: (key: IosStageKey) => IosStageState): IosStageStatus[] {
   return IOS_STAGES.map(({ key, label }) => ({ key, label, state: stateOf(key), startedAt: null, completedAt: null }));
 }
@@ -381,7 +375,7 @@ function syntheticStages(stateOf: (key: IosStageKey) => IosStageState): IosStage
 export function describeIosDistributionHeadline(
   state: IosReleasePanelState,
   runStages: readonly IosStageStatus[] | null,
-  lastDelivered: { buildNumber: number; version: string | null } | null = null,
+  _lastDelivered: { buildNumber: number; version: string | null } | null = null,
 ): IosDistributionHeadline {
   switch (state.kind) {
     case "failed":
@@ -395,20 +389,20 @@ export function describeIosDistributionHeadline(
       const current = index >= 0 ? state.stages[index] : undefined;
       return {
         tone: "run",
-        text: current ? `配布中：${current.label}（${index + 1}/${state.stages.length}）` : "TestFlightへ配布中",
+        text: current ? `配布中：${current.label}（${index + 1}/${state.stages.length}）` : "配布中",
         stages: state.stages,
       };
     }
     case "delivered":
       return {
         tone: "ok",
-        text: `TestFlightへ配布済み${state.buildNumber !== null ? ` #${state.buildNumber}` : ""}`,
+        text: `配布済み${state.buildNumber !== null ? ` #${state.buildNumber}` : ""}`,
         stages: syntheticStages(() => "success"),
       };
     case "not-needed":
       return {
         tone: "idle",
-        text: `配布なし（iOS更新不要）${describeLastDelivered(lastDelivered)}`,
+        text: "配布なし",
         stages: syntheticStages((key) => (key === "detect" ? "success" : "skipped")),
         notDistributed: true,
       };

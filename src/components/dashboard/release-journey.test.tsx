@@ -64,4 +64,14 @@ describe("工程の人の番の描き分け（#5099）", () => {
     );
     expect(screen.getByTestId("release-journey-owner").textContent).toBe("担当: 自動");
   });
+
+  it("一覧の行では自動担当のバッジを出さず、工程名を出す（#5197）", () => {
+    render(
+      <ReleaseJourneyInline
+        journey={journey("verify", { headline: { key: "verify", label: "統合確認中", tone: "fixing", title: null }, owner: "auto" })}
+      />,
+    );
+    expect(screen.queryByTestId("release-journey-owner")).toBeNull();
+    expect(screen.getByText("統合確認中")).toBeTruthy();
+  });
 });
