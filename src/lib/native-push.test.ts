@@ -40,3 +40,11 @@ describe("isNativeApp", () => {
     expect(isNativeApp("Mozilla/5.0 Safari/605.1.15")).toBe(false);
   });
 });
+
+describe("nativePushBridge（バッジ）", () => {
+  it("ブリッジが無い環境では失敗として返る（古いビルドと同じ扱い）", async () => {
+    const { nativePushBridge } = await import("@/lib/native-push");
+    await expect(nativePushBridge.setBadge(3)).rejects.toThrow();
+    await expect(nativePushBridge.badgeStatus()).rejects.toThrow();
+  });
+});

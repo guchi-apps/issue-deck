@@ -2,6 +2,7 @@ import Combine
 import Network
 import SwiftUI
 import UIKit
+import UserNotifications
 import WebKit
 
 /// Web版を開く WKWebView と、その読み込み状態を持つ。
@@ -423,6 +424,8 @@ extension WebViewModel: WKScriptMessageHandlerWithReply {
         let reply = ReplyBox(replyHandler)
         // `body`（`[String: Any]`）は`Task`へ持ち込まず、ここで値だけ取り出す
         let tags = (body["tags"] as? [Any])?.compactMap { $0 as? String } ?? []
+        let badgeCount = (body["count"] as? NSNumber)?.intValue ?? 0
+        let badgeEnabled = (body["enabled"] as? Bool) ?? true
         Task { @MainActor in
             switch action {
             case "status":
@@ -450,10 +453,31 @@ extension WebViewModel: WKScriptMessageHandlerWithReply {
             case "removeDelivered":
                 await PushCenter.shared.removeDelivered(tags: tags)
                 reply.send(nil)
+            case "setBadge":
+                await PushCenter.shared.updateBadge(count: badgeCount)
+                reply.send(nil)
+            case "setBadgeEnabled":
+                await PushCenter.shared.setBadgeEnabled(badgeEnabled)
+                reply.send(await self.badgeStatus())
+            case "badgeStatus":
+                reply.send(await self.badgeStatus())
             default:
                 reply.fail("unsupported")
             }
         }
+    }
+
+    /// バッジ欄の状態（#5203）。`permission`はバッジ表示の許可（"authorized" / "denied" / "notDetermined"）
+    @MainActor
+    private func badgeStatus() async -> [String: Any] {
+        let settings = await UNUserNotificationCenter.current().notificationSettings()
+        let permission: String
+        switch (settings.authorizationStatus, settings.badgeSetting) {
+        case (.notDetermined, _): permission = "notDetermined"
+        case (.denied, _), (_, .disabled): permission = "denied"
+        default: permission = "authorized"
+        }
+        return ["enabled": PushCenter.shared.isBadgeEnabled, "permission": permission]
     }
 
     @MainActor

@@ -31,6 +31,33 @@ final class PushCenter {
     /// 最後に受け取ったトークン。オフのまま再起動してもサーバーの登録を解除し直せるよう残す
     var knownToken: String? { deviceToken ?? UserDefaults.standard.string(forKey: Self.lastTokenKey) }
 
+    private static let badgeEnabledKey = "appBadgeEnabled"
+    /// Webから最後に受け取った件数。スイッチを切り替えたとき、次の通知を待たずに反映し直すために持つ
+    private var lastBadgeCount = 0
+
+    /// アプリアイコンのバッジを出すか（この端末だけの設定。既定オン。#5203）。通知の受信設定とは独立
+    var isBadgeEnabled: Bool {
+        get { UserDefaults.standard.object(forKey: Self.badgeEnabledKey) as? Bool ?? true }
+        set { UserDefaults.standard.set(newValue, forKey: Self.badgeEnabledKey) }
+    }
+
+    /// Webが数えた確認待ち件数を受け取り、設定がオンならバッジへ出す。オフなら常に消す
+    func updateBadge(count: Int) async {
+        lastBadgeCount = max(0, count)
+        await applyBadge()
+    }
+
+    func setBadgeEnabled(_ enabled: Bool) async {
+        isBadgeEnabled = enabled
+        await applyBadge()
+    }
+
+    private func applyBadge() async {
+        let value = isBadgeEnabled ? lastBadgeCount : 0
+        // 許可が無いと失敗する。画面側は`permission`で案内するので、ここでは握る
+        try? await UNUserNotificationCenter.current().setBadgeCount(value)
+    }
+
     private var tokenWaiters: [CheckedContinuation<String?, Never>] = []
 
     /// 許可を求め、許可されたらAPNsへ登録する。拒否済み・受信オフなら何もしない（設定アプリで変える）
