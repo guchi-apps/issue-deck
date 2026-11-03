@@ -42,6 +42,15 @@ export type ChangelogEntry = {
  */
 export const APP_CHANGELOG: ChangelogEntry[] = [
   {
+    version: "8.88.4",
+    date: "2026-11-03",
+    changes: [
+      "iOS配布の一覧・詳細画面の表示を見やすく整理しました。",
+      "ブランチ画面の行から自動担当バッジを外し、工程名を優先して表示するようにしました。",
+      "PR詳細の指摘タブにあるCI・レビュー行の見出しを、変更ファイルタブと同じ帯見出しに揃えました。",
+    ],
+  },
+  {
     version: "8.88.3",
     date: "2026-11-02",
     changes: [
