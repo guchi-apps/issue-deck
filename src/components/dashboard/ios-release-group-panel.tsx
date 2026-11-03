@@ -411,7 +411,12 @@ export function IosReleaseGroupPanel({
               {headline.text}
             </span>
             <span className="shrink-0 text-muted-foreground">
-              {[version ? `v${version}` : null, finishedAt ? formatMonthDayTime(finishedAt) : null]
+              {[
+                state.kind === "not-needed" && data.latestDeliveredBuild?.version
+                  ? `v${data.latestDeliveredBuild.version.replace(/^v/, "")}`
+                  : version
+                    ? `v${version}`
+                    : null, finishedAt ? formatMonthDayTime(finishedAt) : null]
                 .filter(Boolean)
                 .join(" ・ ")}
             </span>

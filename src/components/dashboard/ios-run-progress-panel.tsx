@@ -174,7 +174,7 @@ export function IosRunProgressPanel({
           <StageRow key={stage.key} stage={stage} now={now} />
         ))}
       </ul>
-      {run.notes.length > 0 && (
+      {summary.failed && run.notes.length > 0 && (
         <ul className="list-disc border-t px-3 py-1.5 pl-7 text-[11px] text-muted-foreground">
           {run.notes.map((note) => (
             <li key={note} className="break-words">
