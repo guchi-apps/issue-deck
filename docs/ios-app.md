@@ -120,6 +120,10 @@
 | 拒否済み | OSの許可は変えず、「iPhoneの設定を開く」だけを出す。前面復帰時にSwiftが`issue-deck:native-push-refresh`を投げ、状態を取り直す |
 | テスト通知 | `POST /api/notifications/test`に`endpointKey`を渡すと、その端末だけに送る（省略時は従来どおり全購読） |
 
+### アプリアイコンのバッジ（#5203）
+
+WKWebViewには`navigator.setAppBadge`が無いため、`AppBadgeSync`（PWA用・#3433。ホーム＋ブランチ＋リリースの合計）はアプリ内では`issueDeckPush`の`setBadge`で件数をSwiftへ渡し、`UNUserNotificationCenter.setBadgeCount`で表示する。表示のオン・オフは設定 > 通知の「アプリアイコンのバッジ」（`use-native-badge.ts`。`badgeStatus`／`setBadgeEnabled`）で、`UserDefaults`の`appBadgeEnabled`（既定オン・端末ごと・通知の受信設定とは独立）。**Webは件数を常に送り、オフのときの消去はSwift側が持つ**（オンに戻した瞬間に最後の件数を出せる）。バッジの許可が無いときは画面に「iPhoneの設定を開く」を出す。更新はWebViewが動いている間だけで、バックグラウンドの更新（APNsの`aps.badge`）は対象外。操作を持たない古いビルドでは呼び出しが失敗するので握りつぶす。
+
 この変更は`ios/`に及ぶため、TestFlightの再配布後に実機で確認する。
 
 ## HTTPSリンクをアプリで開く（Universal Links。#5035）

@@ -39,8 +39,14 @@ export type NativePushState =
   /** 端末トークンはあるのにサーバーに行が無い（送信時の失効で消えた）。登録し直しが要る */
   | "expired";
 
+/** アプリアイコンのバッジ欄の状態（#5203）。`permission`はバッジ表示の許可 */
+export type NativeBadgeStatus = {
+  enabled: boolean;
+  permission: NativePushPermission;
+};
+
 type NativePushHandler = {
-  postMessage(message: { action: string; tags?: string[] }): Promise<unknown>;
+  postMessage(message: { action: string; tags?: string[]; count?: number; enabled?: boolean }): Promise<unknown>;
 };
 
 type WebKitWindow = Window & {
@@ -57,8 +63,17 @@ function handler(): NativePushHandler | null {
 }
 
 async function call<T>(
-  action: "status" | "enable" | "disable" | "openSettings" | "deliveredTags" | "removeDelivered",
-  extra: { tags?: string[] } = {},
+  action:
+    | "status"
+    | "enable"
+    | "disable"
+    | "openSettings"
+    | "deliveredTags"
+    | "removeDelivered"
+    | "setBadge"
+    | "setBadgeEnabled"
+    | "badgeStatus",
+  extra: { tags?: string[]; count?: number; enabled?: boolean } = {},
 ): Promise<T> {
   const target = handler();
   if (!target) throw new Error("アプリ本体と通信できませんでした。アプリを更新してください");
@@ -77,6 +92,10 @@ export const nativePushBridge = {
   deliveredTags: () => call<string[]>("deliveredTags"),
   /** 指定したタグの通知を通知センターから消す（#4921） */
   removeDelivered: (tags: string[]) => call<void>("removeDelivered", { tags }),
+  /** アイコンのバッジへ件数を渡す（#5203）。設定がオフならSwift側が消す。古いビルドは失敗する */
+  setBadge: (count: number) => call<void>("setBadge", { count }),
+  setBadgeEnabled: (enabled: boolean) => call<NativeBadgeStatus>("setBadgeEnabled", { enabled }),
+  badgeStatus: () => call<NativeBadgeStatus>("badgeStatus"),
 };
 
 /**
