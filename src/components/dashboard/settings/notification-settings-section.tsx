@@ -4,6 +4,7 @@ import { Bell, Laptop, Send, Smartphone } from "lucide-react";
 import { useSyncExternalStore } from "react";
 
 import { Button } from "@/components/ui/button";
+import { useNativeBadge } from "@/hooks/use-native-badge";
 import { useNativePush } from "@/hooks/use-native-push";
 import { usePushKindPreferences } from "@/hooks/use-push-kind-preferences";
 import { usePushSubscription } from "@/hooks/use-push-subscription";
@@ -349,7 +350,59 @@ function NativePushSettings() {
         {error && <p className="text-xs text-destructive">{error}</p>}
       </div>
 
+      <AppBadgeSettings openSettings={openSettings} />
+
       <PushKindPreferences />
+    </div>
+  );
+}
+
+/** iOSアプリのアイコンのバッジ（確認待ち件数）のオン・オフ。この端末だけに効く（#5203） */
+function AppBadgeSettings({ openSettings }: { openSettings: () => void }) {
+  const { status, error, setEnabled } = useNativeBadge();
+  const isOn = status?.enabled === true;
+
+  return (
+    <div className="flex flex-col gap-1.5">
+      <p className="text-sm font-medium">アプリアイコンのバッジ</p>
+      <div className="flex flex-col gap-2 rounded-lg border p-3">
+        <div className="flex items-center gap-2.5">
+          <div className="min-w-0">
+            <p className="text-sm">確認待ちの件数を表示</p>
+            <p className="text-xs text-muted-foreground">
+              ホーム画面のアイコンに、確認待ち・マージ待ち・リリース未確認の合計を出します。この端末だけに効きます。
+            </p>
+          </div>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={isOn}
+            aria-label="アプリアイコンのバッジ"
+            disabled={status === null}
+            onClick={() => void setEnabled(!isOn)}
+            className={`relative ml-auto h-[22px] w-[38px] shrink-0 rounded-full transition-colors disabled:opacity-50 ${
+              isOn ? "bg-emerald-600" : "bg-muted-foreground/40"
+            }`}
+          >
+            <span
+              className={`absolute top-[2px] size-[18px] rounded-full bg-white transition-all ${
+                isOn ? "left-[18px]" : "left-[2px]"
+              }`}
+            />
+          </button>
+        </div>
+        {isOn && status?.permission === "denied" && (
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="text-xs text-amber-700 dark:text-amber-400">
+              iPhoneの設定でバッジが許可されていないため、オンでも表示されません。
+            </p>
+            <Button variant="outline" onClick={openSettings}>
+              iPhoneの設定を開く
+            </Button>
+          </div>
+        )}
+        {error && <p className="text-xs text-destructive">{error}</p>}
+      </div>
     </div>
   );
 }
