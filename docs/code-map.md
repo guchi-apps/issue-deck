@@ -2416,6 +2416,7 @@ export function POST(request: NextRequest) {
     `MergeJudgement.reviewProgress`（`check-rollup.ts`。待ち行列・実行中・完了・停止）で、`aiReview`は
     `claude-review`の結果の軸なので別に持つ。完了・停止は待っても新しい判定が出ないため人の番にし、
     「AIレビューを再実行」を出す
+  - **レビューが実行されないまま止まったPRは代表状態`review-not-run`（レビュー未実施）で出す**（#5212）。`toReviewProgress`が前段のジョブの取り残し・失敗から`mergeJudgement.reviewStopped`を作り（設計どおりの省略には付けない）、取り残されたジョブ（runは完了・ジョブは未着手。`isAbandonedCheckRun`）は判定の待ちから外す。いまのコミットの判定があれば、そちらを優先する（`isReviewNotRun`）
   - **古い要修正に「PRを自動修正」を出さない**（#5210。`repairKindsFor`に`headSha`を渡す）。
     `reusable-claude-review-fix.yml`は先頭コミットの`sha=`を持つ判定コメントしか読まないので、押しても
     修正済みの指摘を直し直すことはなく、何もせず終わる
@@ -4347,6 +4348,26 @@ GitHubが自動生成した「マージ済みPRタイトルの箇条書き＋Ful
 **`softprops/action-gh-release`のバージョンアップ等でGitHubの自動生成フォーマットが変われば、
 この抽出は静かに効かなくなる**（例外にはならず、単に箇条書きが0件になる）。
 
+### 一覧を先に出し、iOS配布の状況は後から重ねる（#5214）
+
+**iOS配布runの一覧は1回約1MB・約2.5〜3.3秒で、リリース履歴の取得で最も重い。** 条件付きGETでも
+304が返るまで約2秒かかるため（ETagで減るのはレート制限の消費とJSONの処理だけ）、応答から切り離した。
+
+- `GET /api/repositories/release-history`はReleaseとタグだけを返し、画面はこの応答で一覧を描く
+- 続けて`GET /api/repositories/release-history/ios-status`を呼び、`applyIosReleaseStatuses`で重ねる。
+  取得中は状況の無いカードに「iOS配布を確認中」を出し、取り直しの間は前回の状況を残す
+- run一覧はワークフロー未導入（404）だけを空として扱い、他の失敗は「取得できなかった」と出す
+  （空にすると全部の版に「iOS自動配布なし」が付く）
+- 確認対象リポジトリの2ページ目以降は並列に取る（`fetchReleasesBackTo`）。基準時刻はリポジトリを
+  対象に加えた時刻なので、**未確認が無くても対象に加えて日が経つほど5ページまで伸びる**
+
+### 表示しないPRタイトル（#5214）
+
+`extractReleaseHighlights`は、バージョンバンプ（`vXをmainへリリースする`など）・develop同期
+（`release-develop-sync-run.ts`の`…の公開をdevelopへ同期する`）・リリース候補（`リリース候補 RC-N`）の
+行を外す。**表示だけを変え、本文のタスクリストは書き換えない。** 判定はタイトルの完全一致なので、
+生成側の文面を変えるときはここの正規表現も揃える。
+
 ### GitHub Releaseが無い版は、タグから補って修正版へ紐付ける（#4003）
 
 `deploy.yml`の`release`ジョブは`needs: [tag, deploy]`なので、**タグを打った後に本番デプロイが
@@ -4696,7 +4717,7 @@ Webhookで取り込む。運用・移行・ロールバックは[backup-ci.md](b
 
 サブPCの`scripts/vps-memory-probe.mjs`（純粋な部分は`scripts/lib/vps-memory-probe-core.mjs`）がSSH経由でVPSの`/proc`を読み、`POST /api/integrations/vps-memory/samples`で`VpsMemorySample`へ保存する。AIDE向けの読み取りは`GET /api/integrations/vps-memory`。検証・区間分け・保存は`lib/vps-memory/`、認証は`lib/vps-memory/auth.ts`。設定・取得できる項目・保存期間は[vps-memory-probe.md](vps-memory-probe.md)。
 - **通常PRの詳細に「最新のbaseを取り込む」と「CIを再実行」がある（#4626）。** どちらもPC・スマホ共通の`PullRequestDetail`に置き、リリースPR・バージョンバンプPR・クローズ済みには出さない。`POST /api/pull-requests/update-branch`は操作の直前にPRを取り直し、`decideUpdateBranch`（[`lib/pull-request-update-branch.ts`](../src/lib/pull-request-update-branch.ts)）でopen・head SHA一致・フォーク・競合を確かめてから、`expected_head_sha`付きで`PUT /pulls/{n}/update-branch`（headへbaseをマージ。force pushなし）を呼ぶ。取り込みで生まれた新しいheadへ`synchronize`でCI・レビューが起動するので、自動マージ判定は既存のまま。`mergeable_state`の`behind`は詳細だけが`mergeableState`として載せ、待機理由を出す。`POST /api/pull-requests/ci-rerun`は`decideCiRerun`（[`lib/pull-request-ci-rerun.ts`](../src/lib/pull-request-ci-rerun.ts)）で、**現在のheadの`pull_request`イベントのCI runだけ**（AIレビュー・デプロイ・リリース系のworkflowと古いSHAのrunは除く）を、失敗分（`rerun-failed-jobs`）か全体（`rerun`）で再実行する。実行中・実行記録なし・head変更は409。headに実行記録が無いときの強制起動は行わず、取り込みで新headを作る案内を出す。`GET`は画面に対象workflow・状態・SHAを見せる。
-- **PR詳細の対応パネルに「AIレビューを再実行」がある（#5158）。** secretの同期など、コードを変えずに指摘の前提を解消したときに使う。`POST /api/pull-requests/review-rerun`は操作の直前にPRを取り直し、`decideReviewRerun`（[`lib/pull-request-review-rerun.ts`](../src/lib/pull-request-review-rerun.ts)）でopen・develop向け・head SHA一致を確かめ、**現在のheadの`claude-review-develop.yml`（`pull_request`イベント）の最新run**を`rerun`する。実行中・実行記録なし（ローカルのレビューで判定されたPRなど）は409。PRのclose→reopenで起動し直す`restartReviewAtSameHead`は、他のワークフローや通知まで動かしreopen失敗でPRが閉じたまま残りうるため、画面の操作には使わない。同じパネルは**要確認（人の確認待ち）と要修正（不具合）を色・文言・並びで分ける**（要確認は空色の枠でマージ確認を先頭に置き、指摘タブの印も赤ではなく空色）。
+- **PR詳細の対応パネルに「AIレビューを再実行」がある（#5158）。** secretの同期など、コードを変えずに指摘の前提を解消したときに使う。`POST /api/pull-requests/review-rerun`は操作の直前にPRを取り直し、`decideReviewRerun`（[`lib/pull-request-review-rerun.ts`](../src/lib/pull-request-review-rerun.ts)）でopen・develop向け・head SHA一致を確かめ、**現在のheadの`claude-review-develop.yml`（`pull_request`イベント）の最新run**を`rerun`する。実行中・実行記録なし（ローカルのレビューで判定されたPRなど）は409。PRのclose→reopenで起動し直す`restartReviewAtSameHead`は、他のワークフローや通知まで動かしreopen失敗でPRが閉じたまま残りうるため、画面の操作には使わない。**GitHubが再実行を`cannot be retried`の403で拒んだときだけ**（ジョブが`queued`のまま取り残されたrun。#5212）、取り直したPRを`decideReviewRestart`で確かめて、下書き→レビュー可能の往復で`ready_for_review`のrunを起こす。権限不足の403とは`isWorkflowRunRetryRefused`で分ける。実行機待ちで取り残されたPRは、巡回`runReviewStallRescueSweep`（[`lib/github/pull-request-review-stall-rescue.ts`](../src/lib/github/pull-request-review-stall-rescue.ts)。#5215）が同じ手順（`rerunPullRequestReview`）で1回やり直し、直らなければPushで知らせる。同じパネルは**要確認（人の確認待ち）と要修正（不具合）を色・文言・並びで分ける**（要確認は空色の枠でマージ確認を先頭に置き、指摘タブの印も赤ではなく空色）。
 
 ## 全体レビュー・修正の外部エージェント向けAPI／MCP（#4588）
 

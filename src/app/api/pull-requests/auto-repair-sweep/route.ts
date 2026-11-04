@@ -3,8 +3,10 @@ import { NextResponse, type NextRequest } from "next/server";
 import { requireUserId } from "@/lib/auth-user";
 import { db } from "@/lib/db";
 import { authorizeDispatch } from "@/lib/dispatch/dispatch-auth";
+import { withGithubApiFeature } from "@/lib/github/api-usage";
 import { runReviewHandoffRescueSweep } from "@/lib/github/pull-request-review-handoff-rescue";
 import { runPullRequestAutoRepairSweep } from "@/lib/github/pull-request-auto-repair-sweep";
+import { runReviewStallRescueSweep } from "@/lib/github/pull-request-review-stall-rescue";
 import { previewModeGuard } from "@/lib/preview-mode";
 
 /** サブPCのpollerが自動修復系列を進めるための内部入口。 */
@@ -20,7 +22,12 @@ export async function POST(request: NextRequest) {
       console.error("[POST /api/pull-requests/auto-repair-sweep] handoffの拾い直しに失敗:", error);
       return null;
     });
-    return NextResponse.json({ ok: true, ...(await runPullRequestAutoRepairSweep()), rescued: rescue?.started.length ?? 0 }, { headers: { "Cache-Control": "no-store" } });
+    // 実行機待ちで取り残された自動レビューのやり直しと通知（#5215）。これも失敗しても系列の巡回は止めない。
+    const stall = await withGithubApiFeature("review_stall_rescue", () => runReviewStallRescueSweep()).catch((error: unknown) => {
+      console.error("[POST /api/pull-requests/auto-repair-sweep] 取り残されたレビューの巡回に失敗:", error);
+      return null;
+    });
+    return NextResponse.json({ ok: true, ...(await runPullRequestAutoRepairSweep()), rescued: rescue?.started.length ?? 0, reviewStallRetried: stall?.retried.length ?? 0, reviewStallNotified: stall?.notified.length ?? 0 }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     console.error("[POST /api/pull-requests/auto-repair-sweep]", error);
     return NextResponse.json({ error: "sweep_failed" }, { status: 500 });

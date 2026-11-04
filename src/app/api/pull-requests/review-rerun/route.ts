@@ -2,13 +2,11 @@ import { NextResponse, type NextRequest } from "next/server";
 
 import { requireUserId } from "@/lib/auth-user";
 import { db } from "@/lib/db";
-import { fetchWorkflowRunsForHead, rerunWorkflowRun } from "@/lib/github/actions-api";
 import { withGithubApiFeature } from "@/lib/github/api-usage";
 import { getInstallationToken } from "@/lib/github/app-auth";
 import { GithubApiError } from "@/lib/github/issues-api";
-import { fetchPullRequest } from "@/lib/github/pull-requests-api";
+import { rerunPullRequestReview } from "@/lib/github/pull-request-review-rerun-run";
 import { previewModeGuard } from "@/lib/preview-mode";
-import { decideReviewRerun } from "@/lib/pull-request-review-rerun";
 
 export function POST(request: NextRequest) {
   const guard = previewModeGuard();
@@ -51,25 +49,9 @@ async function handlePOST(request: NextRequest) {
 
   try {
     const token = await getInstallationToken(repository.installation.installationId);
-    const current = await fetchPullRequest(owner, repo, number, token);
-    const runs = (await fetchWorkflowRunsForHead(owner, repo, current.head.sha, token)).map((run) => ({
-      id: run.id,
-      name: run.name,
-      path: run.path,
-      status: run.status ?? "unknown",
-      conclusion: run.conclusion,
-      headSha: run.head_sha,
-      event: run.event,
-      htmlUrl: run.html_url,
-    }));
-    const decision = decideReviewRerun(
-      { state: current.state, merged: current.merged, baseRef: current.base.ref, headSha: current.head.sha },
-      headSha,
-      runs,
-    );
-    if (decision.action === "reject") return NextResponse.json({ error: decision.code }, { status: 409 });
-    await rerunWorkflowRun(owner, repo, decision.runId, false, token);
-    return NextResponse.json({ ok: true, runId: decision.runId });
+    const outcome = await rerunPullRequestReview({ owner, repo, number, headSha, token });
+    if (outcome.ok) return NextResponse.json(outcome);
+    return NextResponse.json({ error: outcome.code }, { status: outcome.kind === "rejected" ? 409 : 502 });
   } catch (error) {
     if (error instanceof GithubApiError && error.status === 404) {
       return NextResponse.json({ error: "not_found" }, { status: 404 });

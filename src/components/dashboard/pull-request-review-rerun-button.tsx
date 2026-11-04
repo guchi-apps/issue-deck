@@ -10,6 +10,7 @@ import type { PullRequestSummary } from "@/types/pull-request";
 /**
  * 「AIレビューを再実行」（#5158）。現在のコミットのAIレビューをやり直す。
  * secretの同期・外部設定など、コードを変えずに指摘の前提を解消したときに使う。
+ * GitHubが再実行を拒むrunでは、サーバーがPRを下書き経由で戻して新しいレビューを起動する（#5212）。
  * 依頼後は判定が更新されるまで「依頼済み」を出し、押せる状態に戻さない（連打はサーバーも409で止める）。
  */
 export function PullRequestReviewRerunButton({
@@ -21,6 +22,7 @@ export function PullRequestReviewRerunButton({
 }) {
   const [busy, setBusy] = useState(false);
   const [requestedSha, setRequestedSha] = useState<string | null>(null);
+  const [restarted, setRestarted] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const inFlight = useRef(false);
   const requested = requestedSha === pullRequest.headSha;
@@ -40,8 +42,12 @@ export function PullRequestReviewRerunButton({
       if (!response.ok) {
         const payload: { error?: string } = await response.json().catch(() => ({}));
         setError(reviewRerunErrorMessage(payload.error));
+        // 下書きのまま残ったときは、一覧を取り直して「レビュー可能にする」を出す
+        if (payload.error === "ready_failed") onChanged();
         return;
       }
+      const payload: { method?: string } = await response.json().catch(() => ({}));
+      setRestarted(payload.method === "restart");
       setRequestedSha(pullRequest.headSha);
       onChanged();
     } catch {
@@ -59,11 +65,13 @@ export function PullRequestReviewRerunButton({
         AIレビューを再実行
       </Button>
       <p className="text-[11px] text-muted-foreground">
-        対象: 現在のコミット（{pullRequest.headSha.slice(0, 7)}）のAIレビュー。コードは変わりません。
+        対象: 現在のコミット（{pullRequest.headSha.slice(0, 7)}）のAIレビュー。コードは変わりません。GitHubが再実行を受け付けないときは、PRを一度下書きへ戻してすぐレビュー可能に戻し、新しいレビューを起動します。
       </p>
       {requested && (
         <p role="status" className="text-[11px] text-muted-foreground">
-          再実行を依頼しました。数分で判定が更新されます（「更新」で最新の状態を取り直せます）。
+          {restarted
+            ? "GitHubがこの実行の再実行を受け付けなかったため、PRを一度下書きへ戻してレビュー可能に戻し、新しいレビューを起動しました。数分で判定が更新されます。"
+            : "再実行を依頼しました。数分で判定が更新されます（「更新」で最新の状態を取り直せます）。"}
         </p>
       )}
       {error && (

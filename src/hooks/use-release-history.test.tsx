@@ -83,3 +83,63 @@ describe("useReleaseHistory（#3797）", () => {
     expect(result.current.error).toBe("保存に失敗しました (500)");
   });
 });
+
+describe("useReleaseHistory のiOS配布の状況（#5214）", () => {
+  const release = {
+    repoFullName: "o/a",
+    tagName: "v1.0.0",
+    name: "v1.0.0",
+    htmlUrl: "https://example.com",
+    publishedAt: "2026-11-04T00:00:00Z",
+    body: null,
+  };
+
+  function stubListAndIos() {
+    const ios: { resolve: (res: unknown) => void }[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((url: string) => {
+        if (url === "/api/repositories/release-history") {
+          return Promise.resolve({ ok: true, json: async () => ({ ...emptyResponse, entries: [release] }) });
+        }
+        return new Promise((resolve) => ios.push({ resolve }));
+      }),
+    );
+    return ios;
+  }
+
+  it("一覧はiOSの応答を待たずに出し、届いたら重ねる", async () => {
+    const ios = stubListAndIos();
+    const { result } = renderHook(() => useReleaseHistory(true));
+
+    await waitFor(() => expect(result.current.entries).toHaveLength(1));
+    expect(result.current.isLoading).toBe(false);
+    expect(result.current.iosStatusLoading).toBe(true);
+    expect(result.current.entries?.[0].iosDeliveredBuild).toBeUndefined();
+
+    await act(async () =>
+      ios[0].resolve({
+        ok: true,
+        json: async () => ({
+          statuses: [{ repoFullName: "o/a", delivered: { "v1.0.0": 12 }, failed: {}, hasActiveRun: false }],
+          failedRepositories: [],
+        }),
+      }),
+    );
+    expect(result.current.iosStatusLoading).toBe(false);
+    expect(result.current.iosStatusError).toBeNull();
+    expect(result.current.entries?.[0].iosDeliveredBuild).toBe(12);
+  });
+
+  it("iOSの取得に失敗しても一覧は残り、案内だけを出す", async () => {
+    const ios = stubListAndIos();
+    const { result } = renderHook(() => useReleaseHistory(true));
+    await waitFor(() => expect(ios).toHaveLength(1));
+
+    await act(async () => ios[0].resolve({ ok: false, status: 500, json: async () => ({}) }));
+    expect(result.current.entries).toHaveLength(1);
+    expect(result.current.error).toBeNull();
+    expect(result.current.iosStatusLoading).toBe(false);
+    expect(result.current.iosStatusError).toContain("iOS配布の状況");
+  });
+});

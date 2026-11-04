@@ -399,6 +399,88 @@ describe("fetchCheckRollup", () => {
     expect((await fetchCheckRollup("owner", "repo", "develop", "token"))?.mergeJudgement.autoMergeRun).toBeUndefined();
   });
 
+  describe("reviewStopped（#5212）", () => {
+    const FILE = "claude-review-develop.yml";
+    const inSuite = (node: ReturnType<typeof checkRun>, status: string) => ({
+      ...node,
+      checkSuite: { ...node.checkSuite, status },
+    });
+    const skipped = (job: string) => inSuite(checkRun("COMPLETED", "SKIPPED", FILE, job), "COMPLETED");
+    async function judgementOf(nodes: unknown[]) {
+      stubGraphql(rollupResponse({ state: "FAILURE", contexts: { totalCount: nodes.length, nodes } }));
+      return (await fetchCheckRollup("owner", "repo", "develop", "token"))?.mergeJudgement;
+    }
+
+    it("runが終わって実行機待ちで残ったジョブは未実施にし、判定中で塞がない（asset-manager#826の形）", async () => {
+      const judgement = await judgementOf([
+        inSuite(checkRun("COMPLETED", "SUCCESS", FILE, "risk-check"), "COMPLETED"),
+        inSuite(checkRun("QUEUED", null, FILE, "review-provider"), "COMPLETED"),
+        skipped("claude-review"),
+        skipped("codex-review"),
+        skipped("auto-merge"),
+      ]);
+      expect(judgement).toMatchObject({
+        state: "settled",
+        reviewProgress: "stalled",
+        reviewStopped: { job: "review-provider", reason: "stalled" },
+        aiReview: { state: "failed" },
+      });
+    });
+
+    it("前段のジョブが失敗してレビューが走らなければ未実施", async () => {
+      const judgement = await judgementOf([
+        inSuite(checkRun("COMPLETED", "FAILURE", FILE, "review-provider"), "COMPLETED"),
+        skipped("claude-review"),
+      ]);
+      expect(judgement).toMatchObject({ reviewProgress: "not-run", reviewStopped: { job: "review-provider", reason: "failed" } });
+    });
+
+    it("差分が小さくて省略されたPRは未実施にしない", async () => {
+      const judgement = await judgementOf([
+        inSuite(checkRun("COMPLETED", "SUCCESS", FILE, "risk-check"), "COMPLETED"),
+        skipped("review-provider"),
+        skipped("claude-review"),
+        inSuite(checkRun("COMPLETED", "SUCCESS", FILE, "auto-merge"), "COMPLETED"),
+      ]);
+      expect(judgement?.reviewStopped).toBeUndefined();
+      expect(judgement?.aiReview.state).toBe("skipped");
+    });
+
+    it("レビューが実行された後のジョブの失敗は未実施にしない", async () => {
+      const judgement = await judgementOf([
+        inSuite(checkRun("COMPLETED", "SUCCESS", FILE, "claude-review"), "COMPLETED"),
+        inSuite(checkRun("COMPLETED", "FAILURE", FILE, "review-provider"), "COMPLETED"),
+      ]);
+      expect(judgement?.reviewStopped).toBeUndefined();
+    });
+
+    it("やり直しのrunが動いている間は、古いrunの取り残しを原因にせず判定中にする", async () => {
+      const judgement = await judgementOf([
+        inSuite(checkRun("QUEUED", null, FILE, "review-provider"), "COMPLETED"),
+        inSuite(checkRun("IN_PROGRESS", null, FILE, "risk-check"), "IN_PROGRESS"),
+      ]);
+      expect(judgement).toMatchObject({ state: "pending", reviewProgress: "queued" });
+      expect(judgement?.reviewStopped).toBeUndefined();
+    });
+
+    it("やり直しが通れば、古いrunの取り残しは順序によらず残らない", async () => {
+      const newer = inSuite(checkRun("COMPLETED", "SUCCESS", FILE, "review-provider"), "COMPLETED");
+      const stuck = inSuite(checkRun("QUEUED", null, FILE, "review-provider"), "COMPLETED");
+      const review = inSuite(checkRun("COMPLETED", "SUCCESS", FILE, "claude-review"), "COMPLETED");
+      for (const nodes of [[stuck, newer, review], [newer, stuck, review]]) {
+        const judgement = await judgementOf(nodes);
+        expect(judgement).toMatchObject({ state: "settled", reviewProgress: "completed", aiReview: { state: "passed" } });
+        expect(judgement?.reviewStopped).toBeUndefined();
+      }
+    });
+
+    it("動き始めた後の矛盾（IN_PROGRESS＋suite完了）は従来どおり判定中のまま", async () => {
+      const judgement = await judgementOf([inSuite(checkRun("IN_PROGRESS", null, FILE, "review-provider"), "COMPLETED")]);
+      expect(judgement).toMatchObject({ state: "pending", step: "state-mismatch" });
+      expect(judgement?.reviewStopped).toBeUndefined();
+    });
+  });
+
   describe("reviewProgress（#5210）", () => {
     async function progressOf(nodes: unknown[]) {
       stubGraphql(rollupResponse({ state: "PENDING", contexts: { totalCount: nodes.length, nodes } }));

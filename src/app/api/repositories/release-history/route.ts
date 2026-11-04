@@ -4,19 +4,8 @@ import { requireUserId } from "@/lib/auth-user";
 import { db } from "@/lib/db";
 import { withGithubApiFeature } from "@/lib/github/api-usage";
 import { getInstallationToken } from "@/lib/github/app-auth";
-import { fetchWorkflowRunJobs } from "@/lib/github/actions-api";
-import { fetchReleasesBackTo, fetchTagRefs, type ReleaseHistoryItem } from "@/lib/github/release-api";
-import { GITHUB_API, githubFetch } from "@/lib/github/request";
+import { fetchReleasesBackTo, type ReleaseHistoryItem } from "@/lib/github/release-api";
 import { appendUnreleasedVersions } from "@/lib/github/unreleased-versions";
-import {
-  IOS_TESTFLIGHT_TAG_PREFIX,
-  IOS_TESTFLIGHT_WORKFLOW_FILE,
-  iosDeliveryForReleases,
-  iosFailuresForReleases,
-  judgeIosRun,
-  summarizeIosStages,
-} from "@/lib/ios-testflight-status";
-import { getWebviewIosRepository } from "@/lib/webview-ios-repos";
 import {
   hasReachedReleaseCheckSince,
   type ReleaseCheckLineRecord,
@@ -118,63 +107,8 @@ async function handleGET() {
           hasReachedReleaseCheckSince,
         );
         // GitHub Releaseが無い版（本番デプロイの失敗など）をタグから補い、修正版と紐付ける（#4003）
-        const withUnreleased = await appendUnreleasedVersions(
-          repository.ownerLogin,
-          repository.name,
-          token,
-          releases,
-        );
-        // TestFlight配布対象のリポジトリだけ、配布済みのビルド番号を付ける（#3800）
-        if (getWebviewIosRepository(repository.fullName) === null || releases.length === 0) {
-          return withUnreleased;
-        }
-        const [versionRefs, deliveredRefs, iosRuns] = await Promise.all([
-          fetchTagRefs(repository.ownerLogin, repository.name, token, "v"),
-          fetchTagRefs(repository.ownerLogin, repository.name, token, IOS_TESTFLIGHT_TAG_PREFIX),
-          fetchIosTestflightRuns(repository.ownerLogin, repository.name, token),
-        ]);
-        const delivered = iosDeliveryForReleases(
-          releases.map((release) => release.tagName),
-          versionRefs,
-          deliveredRefs,
-        );
-        const releaseShas = new Set(
-          versionRefs
-            .filter((ref) => releases.some((release) => release.tagName === ref.ref.replace(/^refs\/tags\//, "")))
-            .map((ref) => ref.sha),
-        );
-        // run一覧は新しい順。リリースごとの最新runが失敗しているときだけ、段階名を取る。
-        const latestRunsBySha = new Map<string, (typeof iosRuns)[number]>();
-        for (const run of iosRuns) {
-          if (run.status === "completed" && !latestRunsBySha.has(run.headSha) && releaseShas.has(run.headSha)) {
-            latestRunsBySha.set(run.headSha, run);
-          }
-        }
-        const failureStages = await Promise.all(
-          [...latestRunsBySha.values()].map(async (run) => {
-            if (["success", "neutral", "skipped", null].includes(run.conclusion)) return { ...run, failedStage: null };
-            try {
-              const jobs = await fetchWorkflowRunJobs(repository.ownerLogin, repository.name, run.id, token);
-              const verdict = judgeIosRun(run, summarizeIosStages(jobs));
-              return { ...run, failedStage: verdict.kind === "failed" ? verdict.failedStage : null };
-            } catch {
-              return { ...run, failedStage: null };
-            }
-          }),
-        );
-        const failures = iosFailuresForReleases(releases.map((release) => release.tagName), versionRefs, failureStages);
-        const hasActiveRun = iosRuns.some((run) => run.status !== "completed");
-        return withUnreleased.map((release) => {
-          const build = delivered.get(release.tagName);
-          // 成功を示す配布済みタグがある版は、過去の失敗runより成功を優先する。
-          if (build !== undefined) return { ...release, iosDeliveredBuild: build };
-          const failedStage = failures.get(release.tagName);
-          if (failedStage !== undefined) return { ...release, iosFailureStage: failedStage };
-          // 配布済みでも失敗でもない版は「自動配布なし」として示す（更新不要と判定された版を含む）。
-          // runのhead_shaは版のコミットと一致しないため、版とは突き合わせず、
-          // 配布が実行中のリポジトリでは途中の版を誤ってなしと示さないよう出さない。
-          return hasActiveRun ? release : { ...release, iosNotDistributed: true };
-        });
+        // iOS配布の状況はここで待たない。1回約1MB・約3秒かかるため、`release-history/ios-status`で後から重ねる（#5214）
+        return await appendUnreleasedVersions(repository.ownerLogin, repository.name, token, releases);
       } catch (error) {
         // 1リポジトリの取得失敗で他リポジトリの表示まで巻き込まない（`release-pending-merges`と同じ）。
         console.error(`[GET /api/repositories/release-history] ${repository.fullName}:`, error);
@@ -190,30 +124,6 @@ async function handleGET() {
     // 項目ごとの確認状態はGitHub Release本文のタスクリストが正（#4374）。取得のたびに本文から組み直す
     checkLineRecords: buildCheckLineRecordsFromBodies(entries, legacyCheckLineRecords),
   });
-}
-
-type IosTestflightRun = {
-  id: number;
-  headSha: string;
-  status: string;
-  conclusion: string | null;
-};
-
-/** リリースのコミットと照合するiOS配布runを新しい順に取る。ワークフロー未導入は空配列へ縮退する。 */
-async function fetchIosTestflightRuns(owner: string, repo: string, token: string): Promise<IosTestflightRun[]> {
-  const res = await githubFetch(
-    `${GITHUB_API}/repos/${owner}/${repo}/actions/workflows/${IOS_TESTFLIGHT_WORKFLOW_FILE}/runs?per_page=100`,
-    token,
-  );
-  if (!res.ok) return [];
-  const body: {
-    workflow_runs?: Array<{ id?: number; head_sha?: string; status?: string; conclusion?: string | null }>;
-  } = await res.json().catch(() => ({}));
-  return (body.workflow_runs ?? []).flatMap((run) =>
-    typeof run.id === "number" && typeof run.head_sha === "string" && typeof run.status === "string"
-      ? [{ id: run.id, headSha: run.head_sha, status: run.status, conclusion: run.conclusion ?? null }]
-      : [],
-  );
 }
 
 /** 新方式の候補が公開した版へ、元の候補（RC-n・revision・物理PR）を付ける（#4597）。取れなければ付けない */

@@ -1,6 +1,6 @@
 import { CI_GATE_CONTEXT } from "@/lib/backup-ci/state";
 import { githubGraphql } from "@/lib/github/graphql";
-import type { ReviewRunProgress } from "@/lib/github/review-verdict-freshness";
+import type { ReviewRunProgress, ReviewStopped } from "@/lib/github/review-verdict-freshness";
 import {
   IOS_PRECHECK_COMMIT_FIELDS,
   IOS_PRECHECK_COMMIT_WINDOW,
@@ -173,6 +173,11 @@ export type MergeJudgement = {
    * 判定ワークフローのcheck-runが1件も無ければ省略
    */
   reviewProgress?: ReviewRunProgress;
+  /**
+   * レビューが実行されないまま止まった原因のジョブ（#5212）。省略は「止まっていない」。
+   * 差分が小さくて省略された（設計どおりの）PRには付かない
+   */
+  reviewStopped?: ReviewStopped;
   /**
    * 失敗で終わった判定ジョブの名前（`review-provider`・`auto-merge`など。#4952）。同じジョブが複数回
    * 走ったときは最後の結果で決める。マージ待ちの「自動マージされません」の理由に使う。省略は「無し」
@@ -507,6 +512,26 @@ export function checkRunPhaseOf(node: RollupContextNode): CheckRunPhase {
   return "running";
 }
 
+/**
+ * runは終わったのに、始まらないまま取り残されたcheck-runか（#5212）。
+ *
+ * asset-manager#826では`review-provider`が`status: QUEUED`・結論なし・`completedAt`なしのまま、
+ * check-suiteだけが`COMPLETED`で終わった。待っても動かないので、**判定の待ちからは外す**（外さないと
+ * 画面のマージボタンが「判定中」のまま永久に押せない）。
+ *
+ * ジョブ自体を終わった扱いにはしない（結論が無いものは成功にも失敗にもしない。#4049）。`IN_PROGRESS`の
+ * ものは動き始めた後の矛盾なので対象にせず、従来どおり判定中のまま取り直す。再実行が始まるとcheck-suiteは
+ * 未完了へ戻るので、ここから外れる。
+ */
+export function isAbandonedCheckRun(node: RollupContextNode): boolean {
+  return (
+    checkRunPhaseOf(node) === "mismatch" &&
+    !node.conclusion &&
+    !node.completedAt &&
+    (node.status ?? "").toLowerCase() !== "in_progress"
+  );
+}
+
 /** `checkRunPhaseOf`で終わったと確かめられたものは`completed`、それ以外は元の`status`（小文字） */
 function normalizedCheckRunStatus(node: RollupContextNode): string {
   return checkRunPhaseOf(node) === "completed" ? "completed" : (node.status ?? "").toLowerCase();
@@ -608,8 +633,10 @@ function toMergeJudgement(nodes: RollupContextNode[]): MergeJudgement {
   );
   if (judgementChecks.length === 0) return MERGE_JUDGEMENT_UNKNOWN;
 
-  const aiReview = toAiReview(judgementChecks);
-  const reviewProgress = toReviewProgress(judgementChecks);
+  const { progress: reviewProgress, stopped: reviewStopped } = toReviewProgress(judgementChecks);
+  // 走れなかった`skipped`を「レビュー省略」（設計どおり）として見せない（#5212）
+  const baseAiReview = toAiReview(judgementChecks);
+  const aiReview: AiReview = reviewStopped && baseAiReview.state === "skipped" ? { ...baseAiReview, state: "failed" } : baseAiReview;
   // 失敗・完了した`auto-merge`が無ければ省く（省略は「無し」と同じ扱い）
   const failed = failedJudgementJobs(judgementChecks);
   const autoMerge = judgementChecks.findLast(
@@ -617,12 +644,15 @@ function toMergeJudgement(nodes: RollupContextNode[]): MergeJudgement {
   );
   const failedJobs = {
     reviewProgress,
+    ...(reviewStopped ? { reviewStopped } : {}),
     ...(failed.length > 0 ? { failedJobs: failed } : {}),
     ...(autoMerge
       ? { autoMergeRun: { url: autoMerge.detailsUrl ?? null, completedAt: autoMerge.completedAt ?? null } }
       : {}),
   };
-  const pendingChecks = judgementChecks.filter((node) => checkRunPhaseOf(node) !== "completed");
+  const pendingChecks = judgementChecks.filter(
+    (node) => checkRunPhaseOf(node) !== "completed" && !isAbandonedCheckRun(node),
+  );
   if (pendingChecks.length === 0) return { state: "settled", step: null, runUrl: null, aiReview, ...failedJobs };
 
   // 本当に動いているものが1件でもあれば、そちらを待っているものとして名乗らせる（#4049）。
@@ -650,6 +680,11 @@ function toMergeJudgement(nodes: RollupContextNode[]): MergeJudgement {
 
 const FAILED_CONCLUSIONS = new Set(["failure", "timed_out", "startup_failure", "action_required"]);
 
+/** レビューの前段のジョブ（#5212）。これが止まると`claude-review`等は`skipped`になる */
+const REVIEW_PREREQUISITE_JOBS: ReadonlySet<string> = new Set(["risk-check", "review-provider"]);
+/** 前段が「実行できなかった」とみなす結論。`cancelled`は手で止めた場合で、やはりレビューは走らない */
+const REVIEW_STOPPING_CONCLUSIONS = new Set([...FAILED_CONCLUSIONS, "cancelled"]);
+
 /** 判定ジョブのうち、最後の実行が失敗で終わったものの名前（#4952）。並びはcheck-runの順 */
 function failedJudgementJobs(judgementChecks: RollupContextNode[]): string[] {
   const latest = new Map<string, RollupContextNode>();
@@ -665,21 +700,60 @@ function failedJudgementJobs(judgementChecks: RollupContextNode[]): string[] {
  * **実行中を最優先にする。** `running`（`checkRunPhaseOf`）は「終わった根拠が無い」だけで、
  * `in_progress`のものだけが本当に動いている。残りは始まっていない（待ち行列）。
  * 実行担当のジョブがまだ現れておらず判定が動いているなら、これから始まる側に置く。
+ *
+ * **レビューが走らずに止まったものも見分ける（#5212）。** 実行担当が動いておらず、前段のジョブか
+ * 実行担当が取り残された・失敗したなら`stopped`を返す。やり直しのrunが動いている間は古いrunの取り残しを
+ * 原因にしない。GraphQLの並びは時刻順とは限らない（#826の実データで確認）ため、取り残されたものより
+ * 他の実行を優先し、再実行で置き換えられた失敗は`dropSupersededCheckRuns`で除く。
  */
-function toReviewProgress(judgementChecks: RollupContextNode[]): ReviewRunProgress {
+function toReviewProgress(judgementChecks: RollupContextNode[]): {
+  progress: ReviewRunProgress;
+  stopped: ReviewStopped | null;
+} {
+  const checks = dropSupersededCheckRuns(judgementChecks);
   const latest = new Map<string, RollupContextNode>();
-  for (const node of judgementChecks) {
+  for (const node of checks) {
     const job = jobNameOf(node);
-    if (REVIEW_PROGRESS_JOBS.has(job)) latest.set(job, node);
+    if (!REVIEW_PROGRESS_JOBS.has(job) && !REVIEW_PREREQUISITE_JOBS.has(job)) continue;
+    if (latest.has(job) && isAbandonedCheckRun(node)) continue;
+    latest.set(job, node);
   }
-  const nodes = [...latest.values()];
+  const nodes = [...latest.entries()].filter(([job]) => REVIEW_PROGRESS_JOBS.has(job)).map(([, node]) => node);
   const unfinished = nodes.filter((node) => checkRunPhaseOf(node) === "running");
-  if (unfinished.some((node) => (node.status ?? "").toLowerCase() === "in_progress")) return "running";
-  if (unfinished.length > 0) return "queued";
-  if (nodes.some((node) => checkRunPhaseOf(node) === "mismatch")) return "stalled";
+  if (unfinished.some((node) => (node.status ?? "").toLowerCase() === "in_progress")) {
+    return { progress: "running", stopped: null };
+  }
+  if (unfinished.length > 0) return { progress: "queued", stopped: null };
+
+  const executorRan = [...latest.entries()].some(([job, node]) => {
+    if (!REVIEW_EXECUTOR_JOBS.has(job) || isAbandonedCheckRun(node)) return false;
+    const conclusion = (node.conclusion ?? "").toLowerCase();
+    return conclusion !== "skipped" && conclusion !== "neutral";
+  });
+  if (!executorRan) {
+    const blocked = [...latest.entries()].find(
+      ([, node]) =>
+        isAbandonedCheckRun(node) ||
+        (checkRunPhaseOf(node) === "completed" && REVIEW_STOPPING_CONCLUSIONS.has((node.conclusion ?? "").toLowerCase())),
+    );
+    if (blocked) {
+      // 同じrunの残りのジョブ、またはやり直しのrunが動いている間は結論を出さない
+      if (checks.some((node) => checkRunPhaseOf(node) === "running")) return { progress: "queued", stopped: null };
+      const [job, node] = blocked;
+      const stalled = isAbandonedCheckRun(node);
+      return {
+        progress: stalled ? "stalled" : "not-run",
+        stopped: { job, reason: stalled ? "stalled" : "failed", url: node.detailsUrl ?? null },
+      };
+    }
+  }
+
+  if (nodes.some((node) => checkRunPhaseOf(node) === "mismatch")) return { progress: "stalled", stopped: null };
   const hasExecutor = [...latest.keys()].some((job) => REVIEW_EXECUTOR_JOBS.has(job));
-  if (!hasExecutor && judgementChecks.some((node) => checkRunPhaseOf(node) !== "completed")) return "queued";
-  return "completed";
+  if (!hasExecutor && judgementChecks.some((node) => checkRunPhaseOf(node) !== "completed")) {
+    return { progress: "queued", stopped: null };
+  }
+  return { progress: "completed", stopped: null };
 }
 
 /**

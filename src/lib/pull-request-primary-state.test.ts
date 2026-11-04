@@ -6,6 +6,8 @@ import {
   describeReleaseCandidate,
   releaseVersionFromRef,
 } from "@/lib/pull-request-primary-state";
+import { deriveAutoMergeOutlook } from "@/lib/pull-request-auto-merge-outlook";
+import { mergeWarnings } from "@/lib/pull-request-list";
 import { buildReleaseCheckCells } from "@/lib/release-candidate-checks";
 import type { PullRequestSummary } from "@/types/pull-request";
 
@@ -176,5 +178,57 @@ describe("describeReleaseCandidate", () => {
   it("版をブランチ名から取り出す", () => {
     expect(releaseVersionFromRef("release-main/v8.54.0")).toBe("v8.54.0");
     expect(releaseVersionFromRef("issue-1")).toBeNull();
+  });
+});
+
+describe("レビュー未実施（#5212）", () => {
+  const OLD_SHA = "9f8e7d6c5b4a39281706f5e4d3c2b1a098765432";
+  const verdict = (reviewKind: "changes-requested" | "ok", reviewedSha: string) => ({
+    reviewKind,
+    reviewLabel: "要修正",
+    riskKind: "none" as const,
+    riskLabel: "該当なし",
+    riskReasons: [],
+    confirmLabel: null,
+    reviewedSha,
+  });
+  const stoppedPr = (reviewVerdict: PullRequestSummary["reviewVerdict"]) =>
+    pr({
+      headSha: SHA,
+      ciState: "success",
+      reviewVerdict,
+      mergeJudgement: {
+        state: "settled",
+        step: null,
+        runUrl: null,
+        aiReview: { state: "failed", runUrl: null },
+        reviewProgress: "stalled",
+        reviewStopped: { job: "review-provider", reason: "stalled", url: null },
+      },
+    });
+
+  it("古い要修正・古いLGTM・判定なしのどれでも未実施を人の番として出す", () => {
+    for (const reviewVerdict of [verdict("changes-requested", OLD_SHA), verdict("ok", OLD_SHA), null]) {
+      expect(derivePrimaryState(stoppedPr(reviewVerdict))).toMatchObject({
+        kind: "review-not-run",
+        label: "レビュー未実施",
+        tone: "warn",
+        needsAction: true,
+      });
+    }
+  });
+
+  it("いまのコミットの判定があれば、その判定を優先する", () => {
+    expect(derivePrimaryState(stoppedPr(verdict("changes-requested", SHA)))).toMatchObject({ kind: "review-findings" });
+  });
+
+  it("マージ確認で、レビューを通っていないことを警告する", () => {
+    expect(mergeWarnings(stoppedPr(null)).join("")).toContain("自動レビューを通っていません");
+    expect(mergeWarnings(stoppedPr(verdict("ok", SHA))).join("")).not.toContain("自動レビューを通っていません");
+  });
+
+  it("画面の操作を示す見込みを出す", () => {
+    expect(deriveAutoMergeOutlook(stoppedPr(null))).toMatchObject({ kind: "manual" });
+    expect(deriveAutoMergeOutlook(stoppedPr(null))?.reason).toContain("AIレビューを再実行");
   });
 });

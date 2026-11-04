@@ -323,6 +323,28 @@ export async function markPullRequestReadyForReview(nodeId: string, token: strin
   }
 }
 
+const CONVERT_TO_DRAFT = `
+mutation($id: ID!) {
+  convertPullRequestToDraft(input: { pullRequestId: $id }) {
+    pullRequest { isDraft }
+  }
+}`;
+
+/**
+ * PRを下書きへ戻す（#5212）。再実行を断られたレビューを`ready_for_review`で起動し直すためだけに使う。
+ * 戻せたかを`isDraft`の戻り値で確かめる。
+ */
+export async function convertPullRequestToDraft(nodeId: string, token: string): Promise<void> {
+  const data = await githubGraphql<{
+    convertPullRequestToDraft: { pullRequest: { isDraft: boolean } } | null;
+  }>(token, CONVERT_TO_DRAFT, { id: nodeId }, "convertPullRequestToDraft", {
+    permissionHint: "（GitHub AppのPull requestsの書き込み権限が必要です）",
+  });
+  if (data.convertPullRequestToDraft?.pullRequest.isDraft !== true) {
+    throw new GithubApiError(502, "convertPullRequestToDraft did not set draft state");
+  }
+}
+
 const ENABLE_AUTO_MERGE = `
 mutation($id: ID!, $headOid: GitObjectID!) {
   enablePullRequestAutoMerge(input: { pullRequestId: $id, mergeMethod: MERGE, expectedHeadOid: $headOid }) {
