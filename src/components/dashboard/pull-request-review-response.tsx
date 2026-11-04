@@ -9,7 +9,7 @@ import { PullRequestRepairButtons } from "@/components/dashboard/pull-request-re
 import { PullRequestReviewRerunButton } from "@/components/dashboard/pull-request-review-rerun-button";
 import { Button } from "@/components/ui/button";
 import { formatRelativeDate } from "@/lib/format-relative-date";
-import { reviewProgressLabel, reviewRerunNeeded } from "@/lib/github/review-verdict-freshness";
+import { reviewProgressLabel, reviewRerunNeeded, reviewStoppedReason } from "@/lib/github/review-verdict-freshness";
 import { canMergeFromDeck } from "@/lib/pull-request-list";
 import type { ReviewAction } from "@/lib/pull-request-review-action";
 import { cn } from "@/lib/utils";
@@ -61,6 +61,38 @@ export function PullRequestReviewResponse({
       <StatusPanel className={className} tone="run" title="◷ 自動修正が実行中です">
         完了するとCI・再レビューが自動で走ります。結果がそろうまで操作は不要です。
       </StatusPanel>
+    );
+  }
+  if (action.kind === "not-run") {
+    return (
+      <section
+        id={REVIEW_RESPONSE_ANCHOR_ID}
+        aria-label="指摘への対応"
+        data-testid="pull-request-review-response"
+        data-tone="not-run"
+        className={cn(
+          "flex scroll-mt-14 flex-col gap-2 rounded-lg border border-amber-500/60 bg-amber-50 p-3 dark:bg-amber-950/30",
+          className,
+        )}
+      >
+        <h3 className="text-sm font-bold text-amber-800 dark:text-amber-300">
+          <span aria-hidden="true">▲</span> このコミットのレビューは実施されていません
+        </h3>
+        <p className="text-xs text-muted-foreground">
+          {reviewStoppedReason(action.stopped)}。
+          {action.verdict &&
+            `下に残っている${action.verdict === "needs-check" ? "要確認" : "要修正"}の判定は前のコミット${action.reviewedSha ? `（${action.reviewedSha.slice(0, 7)}）` : ""}に対するものです。`}
+        </p>
+        <Option title="レビューをやり直す">
+          <PullRequestReviewRerunButton pullRequest={pullRequest} onChanged={onRefresh} />
+        </Option>
+        {canMergeFromDeck(pullRequest) && (
+          <Option title="レビューなしでマージへ進む">
+            <p className="text-xs text-muted-foreground">マージ確認の画面で、レビューを通っていないことを確かめてから進みます。</p>
+            <PullRequestMergeButton pullRequest={pullRequest} onMerged={onMerged} label="マージ確認へ進む" />
+          </Option>
+        )}
+      </section>
     );
   }
   if (action.kind === "stale") {

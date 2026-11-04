@@ -5,7 +5,12 @@ import {
   repairKindsFor,
   repairUnavailableNotices,
 } from "@/lib/github/pull-request-repair";
-import { resolveReviewVerdictFreshness, type ReviewRunProgress } from "@/lib/github/review-verdict-freshness";
+import {
+  isReviewNotRun,
+  resolveReviewVerdictFreshness,
+  type ReviewRunProgress,
+  type ReviewStopped,
+} from "@/lib/github/review-verdict-freshness";
 import type { PrimaryState } from "@/lib/pull-request-primary-state";
 import type {
   PullRequestReviewAcknowledgement,
@@ -21,6 +26,7 @@ import type {
  *
  * - `none` … 対応する指摘が無い（LGTM・省略・判定なし・閉じたPR・ドラフト）
  * - `repairing` … 自動修正が走っている。操作は不要
+ * - `not-run` … いまのコミットのレビューが実行されないまま止まった（#5212）。以前の判定が無くても出す
  * - `stale` … 判定が前のHEADのもの。新しいHEADの再レビューを待つ（古い指摘を現在の指摘として扱わない）
  * - `acknowledged` … 人が「対応済み」と記録済み（#5159）。未対応扱いをやめ、取り消すまでマージ確認へ進める
  * - `requested` … 現在のHEADへ修正を依頼済み。pushされるとCI・再レビューが走る。操作は不要
@@ -30,6 +36,7 @@ import type {
 export type ReviewAction =
   | { kind: "none" }
   | { kind: "repairing" }
+  | { kind: "not-run"; verdict: ReviewAttentionKind | null; reviewedSha: string | null; stopped: ReviewStopped }
   | { kind: "stale"; verdict: ReviewAttentionKind; reviewedSha: string | null; progress: ReviewRunProgress | null }
   | { kind: "acknowledged"; verdict: ReviewAttentionKind; recordedBy: string | null }
   | { kind: "requested"; verdict: ReviewAttentionKind; commentUrl: string | null; createdAt: string }
@@ -102,22 +109,28 @@ export function deriveReviewAction(params: {
   const { pullRequest, review, context, acknowledgement } = params;
   const verdict = pullRequest.reviewVerdict?.reviewKind;
   if (pullRequest.merged || pullRequest.state !== "open" || pullRequest.draft) return { kind: "none" };
-  if (verdict !== "changes-requested" && verdict !== "needs-check") return { kind: "none" };
+  const attention = verdict === "changes-requested" || verdict === "needs-check" ? verdict : null;
+  const reviewedSha = pullRequest.reviewVerdict?.reviewedSha ?? null;
+  const stopped = pullRequest.mergeJudgement.reviewStopped;
+  // 修復中はpushで新しいレビューが起きるので、未実施より修復中を優先する
+  if (!pullRequest.repairRun && stopped && isReviewNotRun({ reviewStopped: stopped, reviewedSha, headSha: pullRequest.headSha })) {
+    return { kind: "not-run", verdict: attention, reviewedSha, stopped };
+  }
+  if (attention === null) return { kind: "none" };
   if (pullRequest.repairRun) return { kind: "repairing" };
 
-  const reviewedSha = pullRequest.reviewVerdict?.reviewedSha ?? null;
   if (resolveReviewVerdictFreshness({ reviewedSha, headSha: pullRequest.headSha }) === "stale") {
-    return { kind: "stale", verdict, reviewedSha, progress: pullRequest.mergeJudgement.reviewProgress ?? null };
+    return { kind: "stale", verdict: attention, reviewedSha, progress: pullRequest.mergeJudgement.reviewProgress ?? null };
   }
 
   if (acknowledgement) {
-    return { kind: "acknowledged", verdict, recordedBy: acknowledgement.recordedBy };
+    return { kind: "acknowledged", verdict: attention, recordedBy: acknowledgement.recordedBy };
   }
 
   if (context?.currentFixRequest) {
     return {
       kind: "requested",
-      verdict,
+      verdict: attention,
       commentUrl: context.currentFixRequest.commentUrl,
       createdAt: context.currentFixRequest.createdAt,
     };
@@ -130,7 +143,7 @@ export function deriveReviewAction(params: {
   const bodyAvailable = review !== null && !review.isStale;
   return {
     kind: "respond",
-    verdict,
+    verdict: attention,
     concerns: bodyAvailable ? summarizeReviewConcerns(review.body) : [],
     bodyAvailable,
     autoRepair: reviewRepair && !reviewWorkflowMissing,

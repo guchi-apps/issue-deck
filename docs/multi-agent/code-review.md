@@ -456,6 +456,12 @@ ClaudeならActionsのClaudeレビュー、CodexならサブPCの既存PR_REVIEW
 推測でClaudeへ倒さずreview-providerを失敗させ、自動マージを止めてPRへ理由を残す。
 Issueを持たないPRのみ従来の共通設定を参照する。低リスクのレビュー省略は維持する。
 
+review-providerが実行機に割り当てられないまま`queued`で取り残され、runだけが`failure`で終わることがある
+（asset-manager#826）。このときfallbackも含め後続は全て`skipped`になり、ワークフロー自身は検知できない。
+GitHubもこのrunの再実行を`403 This workflow run cannot be retried`で断るため（`rerun-failed-jobs`で確認）、
+PR画面は「レビュー未実施」と出し、「AIレビューを再実行」が下書き→レビュー可能の往復で新しいrunを起こす（#5212）。
+callerの`on.pull_request.types`に`ready_for_review`が要る（配布している雛形には入っている）。
+
 - サブPCのセッション報告時に`ImplementationRun`へ担当と`firstSeenAt`を保存する。
   `NOT_STARTED`は対象外。セッション回収後も記録を残す。生存報告の時刻は優先順位に使わない。
   Codexのthread情報が後着した場合は同じ開始記録の担当を補正する。

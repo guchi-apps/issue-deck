@@ -42,8 +42,54 @@ export type ReviewVerdictFreshnessNotice = {
  * - `running` … 実行中
  * - `completed` … ジョブは終わった。**判定が書かれたとは限らない**（鮮度は別に見る）
  * - `stalled` … runは終わったのにジョブが未完了のまま残っている。待っても進まない
+ * - `not-run` … レビューの前段のジョブが失敗し、レビュー自体が走らないまま終わった（#5212）
  */
-export type ReviewRunProgress = "queued" | "running" | "completed" | "stalled";
+export type ReviewRunProgress = "queued" | "running" | "completed" | "stalled" | "not-run";
+
+/**
+ * レビューが実行されないまま判定ワークフローが止まった原因のジョブ（#5212）。
+ *
+ * `claude-review`の`skipped`には「差分が小さいので省略した」（設計どおり）と「前段が止まって
+ * 走れなかった」の2つの意味があり、結論だけでは区別できない。前段のジョブの状態から後者だけを取り出す。
+ */
+export type ReviewStopped = {
+  /** 止まったジョブの名前（`review-provider`など） */
+  job: string;
+  /** `stalled`＝実行機に割り当てられないまま終わった・`failed`＝失敗した */
+  reason: "stalled" | "failed";
+  /** そのジョブの実行ログのURL。取れなければnull */
+  url: string | null;
+};
+
+const REVIEW_STOPPED_JOB_LABEL: Readonly<Record<string, string>> = {
+  "review-provider": "レビュー担当を決めるジョブ（review-provider）",
+  "risk-check": "リスクを判定するジョブ（risk-check）",
+  "claude-review": "レビューのジョブ（claude-review）",
+  "codex-review": "レビューのジョブ（codex-review）",
+};
+
+/** レビューが走らなかった理由の1文。代表状態・マージ確認・見込みで同じ言葉を使う */
+export function reviewStoppedReason(stopped: ReviewStopped): string {
+  const job = REVIEW_STOPPED_JOB_LABEL[stopped.job] ?? `ジョブ（${stopped.job}）`;
+  return stopped.reason === "stalled"
+    ? `${job}が実行機に割り当てられないまま、実行が終わりました。待っても進みません`
+    : `${job}が失敗し、レビューが実行されませんでした`;
+}
+
+/**
+ * いまのコミットのレビューが実施されていないか（#5212）。原因のジョブが分かっていて、かつ
+ * いまのコミットに対する判定が残っていないとき。同じコミットの判定があれば、それは有効な判定として扱う。
+ */
+export function isReviewNotRun(params: {
+  reviewStopped: ReviewStopped | null | undefined;
+  reviewedSha: string | null | undefined;
+  headSha: string | null | undefined;
+}): boolean {
+  return (
+    Boolean(params.reviewStopped) &&
+    resolveReviewVerdictFreshness({ reviewedSha: params.reviewedSha, headSha: params.headSha }) !== "current"
+  );
+}
 
 /** 再レビューの進み具合の短い文言。`null`はheadにレビューのrunが1件も見えていない */
 export function reviewProgressLabel(progress: ReviewRunProgress | null | undefined): string {
@@ -56,6 +102,8 @@ export function reviewProgressLabel(progress: ReviewRunProgress | null | undefin
       return "完了（最新のコミットへの判定は記録されていません）";
     case "stalled":
       return "停止（実行が終わったのにレビューのジョブが完了していません）";
+    case "not-run":
+      return "未実施（前段のジョブが失敗し、レビューは実行されていません）";
     default:
       return "開始を確認できていません";
   }
@@ -72,6 +120,8 @@ export function staleVerdictLabel(progress: ReviewRunProgress | null | undefined
       return "古い判定（新しい判定なし）";
     case "stalled":
       return "古い判定（再レビュー停止）";
+    case "not-run":
+      return "古い判定（再レビュー未実施）";
     default:
       return "古い判定（再レビュー未開始）";
   }
@@ -79,7 +129,7 @@ export function staleVerdictLabel(progress: ReviewRunProgress | null | undefined
 
 /** 待っていても新しい判定が出ないと分かっているか。人が再実行するかを判断する状態 */
 export function reviewRerunNeeded(progress: ReviewRunProgress | null | undefined): boolean {
-  return progress === "completed" || progress === "stalled";
+  return progress === "completed" || progress === "stalled" || progress === "not-run";
 }
 
 /** 画面に出すコミットの短縮形。GitHubの表示と同じ7桁 */

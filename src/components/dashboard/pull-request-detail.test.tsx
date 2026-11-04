@@ -223,6 +223,42 @@ describe("PullRequestDetail", () => {
     expect(band.queryByRole("button", { name: "指摘に対応する" })).toBeNull();
   });
 
+  it("レビューが走らず止まったPRは未実施として出し、やり直しとログを示す（#5212）", () => {
+    renderDetail({
+      pullRequest: makePullRequest({
+        ciState: "success",
+        mergeable: true,
+        reviewVerdict: {
+          reviewKind: "changes-requested",
+          reviewLabel: "要修正",
+          riskKind: "none",
+          riskLabel: "該当なし",
+          riskReasons: [],
+          confirmLabel: null,
+          reviewedSha: "a2629e66184490e62e1fea8dde290fd74f1b4021",
+        },
+        mergeJudgement: {
+          state: "settled",
+          step: null,
+          runUrl: null,
+          aiReview: { state: "failed", runUrl: null },
+          reviewProgress: "stalled",
+          reviewStopped: { job: "review-provider", reason: "stalled", url: "https://github.com/o/r/actions/runs/1/job/2" },
+        },
+      }),
+    });
+    const band = within(screen.getByTestId("pull-request-primary-action"));
+    expect(band.getByText(/レビュー未実施/)).toBeTruthy();
+    expect(band.getByRole("button", { name: /AIレビューを再実行/ })).toBeTruthy();
+    expect(band.getByRole("link", { name: /実行ログを開く/ }).getAttribute("href")).toContain("/actions/runs/1");
+    expect(band.queryByRole("button", { name: /指摘に対応する/ })).toBeNull();
+    openTab("指摘");
+    const panel = within(screen.getByTestId("pull-request-review-response"));
+    expect(panel.getByText(/このコミットのレビューは実施されていません/)).toBeTruthy();
+    expect(panel.getByRole("button", { name: /AIレビューを再実行/ })).toBeTruthy();
+    expect(panel.getByRole("button", { name: /マージ確認へ進む/ })).toBeTruthy();
+  });
+
   it("最新のコミットの判定には判定したコミットを添える（#5210）", () => {
     renderDetail({
       pullRequest: makePullRequest({

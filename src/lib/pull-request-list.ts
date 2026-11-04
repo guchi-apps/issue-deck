@@ -9,7 +9,7 @@ import {
   needsReviewAttention,
   type PullRequestReviewVerdict,
 } from "@/lib/github/pull-request-review-verdict";
-import { resolveReviewVerdictFreshness } from "@/lib/github/review-verdict-freshness";
+import { isReviewNotRun, resolveReviewVerdictFreshness, reviewStoppedReason } from "@/lib/github/review-verdict-freshness";
 import { isPromotionPullRequest } from "@/lib/knowledge-promotion-pr";
 import type { CiState } from "@/lib/github/release-api";
 import { findActiveSnooze, type SnoozeMap } from "@/lib/snooze";
@@ -885,6 +885,14 @@ export function mergeWarnings(pullRequest: PullRequestSummary): string[] {
         ? `自動レビューが「${pullRequest.reviewVerdict.reviewLabel}」と判定していました（この判定の後にコミットが積まれています）。`
         : `自動レビューが「${pullRequest.reviewVerdict.reviewLabel}」と判定しています。`,
     );
+  }
+  // レビューが走らないまま止まったPRは、レビューを通っていないことを確かめてからマージする（#5212）
+  const reviewStopped = pullRequest.mergeJudgement.reviewStopped;
+  if (
+    reviewStopped &&
+    isReviewNotRun({ reviewStopped, reviewedSha: pullRequest.reviewVerdict?.reviewedSha, headSha: pullRequest.headSha })
+  ) {
+    warnings.push(`最新のコミットは自動レビューを通っていません。${reviewStoppedReason(reviewStopped)}。`);
   }
   return warnings;
 }

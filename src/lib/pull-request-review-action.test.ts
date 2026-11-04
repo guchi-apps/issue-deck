@@ -241,3 +241,24 @@ describe("applyReviewAction", () => {
     expect(primary).toMatchObject({ kind: "review-findings", label: "レビュー要確認", needsAction: true });
   });
 });
+
+describe("レビュー未実施（#5212）", () => {
+  const stopped = { job: "review-provider", reason: "stalled" as const, url: null };
+  const judgement = {
+    state: "settled" as const,
+    step: null,
+    runUrl: null,
+    aiReview: AI_REVIEW_NONE,
+    reviewStopped: stopped,
+  };
+  const derive = (overrides: Partial<PullRequestSummary>) =>
+    deriveReviewAction({ pullRequest: pr({ headSha: SHA, mergeJudgement: judgement, ...overrides }), review: null, context: null });
+
+  it("判定が無いPRにも未実施の操作を出す", () => {
+    expect(derive({ reviewVerdict: null })).toEqual({ kind: "not-run", verdict: null, reviewedSha: null, stopped });
+  });
+
+  it("修復中は、pushで新しいレビューが起きるので未実施にしない", () => {
+    expect(derive({ reviewVerdict: null, repairRun: {} as PullRequestSummary["repairRun"] })).toEqual({ kind: "none" });
+  });
+});
