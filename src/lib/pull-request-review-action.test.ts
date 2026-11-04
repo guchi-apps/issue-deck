@@ -160,7 +160,7 @@ describe("deriveReviewAction", () => {
     ).toMatchObject({ kind: "requested", commentUrl: "https://x" });
     expect(
       deriveReviewAction({ pullRequest: pr({ reviewVerdict: verdict("needs-check", OLD_SHA) }), review: review(), context: context() }),
-    ).toMatchObject({ kind: "stale", reviewedSha: OLD_SHA });
+    ).toMatchObject({ kind: "stale", reviewedSha: OLD_SHA, progress: null });
   });
 
   it("本文の取得前・取得失敗では、要点を出さずに本文が無いことを返す", () => {

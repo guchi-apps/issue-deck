@@ -9,6 +9,7 @@ import { PullRequestRepairButtons } from "@/components/dashboard/pull-request-re
 import { PullRequestReviewRerunButton } from "@/components/dashboard/pull-request-review-rerun-button";
 import { Button } from "@/components/ui/button";
 import { formatRelativeDate } from "@/lib/format-relative-date";
+import { reviewProgressLabel, reviewRerunNeeded } from "@/lib/github/review-verdict-freshness";
 import { canMergeFromDeck } from "@/lib/pull-request-list";
 import type { ReviewAction } from "@/lib/pull-request-review-action";
 import { cn } from "@/lib/utils";
@@ -64,10 +65,23 @@ export function PullRequestReviewResponse({
   }
   if (action.kind === "stale") {
     return (
-      <StatusPanel className={className} tone="run" title="◷ 再レビュー待ち">
-        {action.verdict === "needs-check" ? "要確認" : "要修正"}の判定は前のHEAD
-        {action.reviewedSha ? `（${action.reviewedSha.slice(0, 7)}）` : ""}に対するものです。最新HEADの
-        再レビューを待っています（操作は不要です）。下の本文は前のHEADの指摘として読めます。
+      <StatusPanel
+        className={className}
+        tone="run"
+        title="◷ 古い判定です（修正前のコミット）"
+        actions={
+          reviewRerunNeeded(action.progress) ? (
+            <PullRequestReviewRerunButton pullRequest={pullRequest} onChanged={onRefresh} />
+          ) : null
+        }
+      >
+        {action.verdict === "needs-check" ? "要確認" : "要修正"}の判定は前のコミット
+        {action.reviewedSha ? `（${action.reviewedSha.slice(0, 7)}）` : ""}に対するものです（最新 {pullRequest.headSha.slice(0, 7)}）。
+        再レビュー: {reviewProgressLabel(action.progress)}。
+        {reviewRerunNeeded(action.progress)
+          ? "待っても新しい判定は出ないため、AIレビューを再実行してください。"
+          : "結果が出るまで操作は不要です。"}
+        下の本文は前のコミットの指摘として読めます。
       </StatusPanel>
     );
   }
@@ -353,11 +367,13 @@ function StatusPanel({
   title,
   tone,
   children,
+  actions,
   className,
 }: {
   title: string;
   tone: "run";
   children: React.ReactNode;
+  actions?: React.ReactNode;
   className?: string;
 }) {
   return (
@@ -373,6 +389,7 @@ function StatusPanel({
     >
       <h3 className="text-sm font-bold text-blue-700 dark:text-blue-400">{title}</h3>
       <p>{children}</p>
+      {actions && <div className="mt-1 flex flex-wrap items-center gap-2">{actions}</div>}
     </section>
   );
 }

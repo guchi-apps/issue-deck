@@ -112,6 +112,7 @@ export async function loadStatus(user: ChatUser, ref: ResolvedRef): Promise<Stat
               ciState: ci.ciState,
               baseRef: pullRequest.base.ref,
               headRef: pullRequest.head.ref,
+              headSha: pullRequest.head.sha,
               reviewVerdict: verdict,
             },
             ci.mergeable,

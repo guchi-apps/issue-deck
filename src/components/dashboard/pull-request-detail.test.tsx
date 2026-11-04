@@ -190,6 +190,60 @@ describe("PullRequestDetail", () => {
     expect(screen.queryByRole("button", { name: "マージする" })).toBeNull();
   });
 
+  it("先頭より前のコミットの要修正は古い判定として出し、自動修正を出さない（#5210）", () => {
+    renderDetail({
+      pullRequest: makePullRequest({
+        ciState: "success",
+        mergeable: true,
+        reviewVerdict: {
+          reviewKind: "changes-requested",
+          reviewLabel: "要修正",
+          riskKind: "none",
+          riskLabel: "該当なし",
+          riskReasons: [],
+          confirmLabel: null,
+          reviewedSha: "a2629e66184490e62e1fea8dde290fd74f1b4021",
+        },
+        mergeJudgement: {
+          state: "pending",
+          step: null,
+          runUrl: null,
+          aiReview: { state: "skipped", runUrl: null },
+          reviewProgress: "queued",
+        },
+      }),
+    });
+    const band = within(screen.getByTestId("pull-request-primary-action"));
+    expect(band.getByText(/古い判定（再レビュー待ち）/)).toBeTruthy();
+    expect(band.queryByText("レビュー指摘")).toBeNull();
+    expect(screen.getByTestId("pull-request-primary-action").textContent).toContain("a2629e6");
+    expect(screen.getByTestId("pull-request-primary-action").textContent).toContain("1a2b3c4");
+    expect(screen.getByTestId("pull-request-primary-action").textContent).toContain("待ち行列");
+    expect(band.queryByRole("button", { name: "PRを自動修正" })).toBeNull();
+    expect(band.queryByRole("button", { name: "指摘に対応する" })).toBeNull();
+  });
+
+  it("最新のコミットの判定には判定したコミットを添える（#5210）", () => {
+    renderDetail({
+      pullRequest: makePullRequest({
+        ciState: "success",
+        mergeable: true,
+        reviewVerdict: {
+          reviewKind: "changes-requested",
+          reviewLabel: "要修正",
+          riskKind: "none",
+          riskLabel: "該当なし",
+          riskReasons: [],
+          confirmLabel: null,
+          reviewedSha: "1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0b",
+        },
+      }),
+    });
+    const band = screen.getByTestId("pull-request-primary-action").textContent;
+    expect(band).toContain("レビュー指摘");
+    expect(band).toContain("最新のコミット 1a2b3c4");
+  });
+
   // 一覧から主操作を詳細へ集約した（#4427）。一覧にあった修復ボタンの条件はここで確かめる。
   it("マージできるPRには主操作の帯にマージボタンを出し、状態と理由を添える（#4427）", () => {
     renderDetail({ pullRequest: makePullRequest({ ciState: "success", mergeable: true }) });

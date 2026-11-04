@@ -1,5 +1,8 @@
 import type { IosPrecheckPhase, IosPrecheckSummary } from "@/lib/github/ios-precheck";
-import { resolveReviewVerdictFreshness } from "@/lib/github/review-verdict-freshness";
+import {
+  buildReviewVerdictFreshnessNotice,
+  resolveReviewVerdictFreshness,
+} from "@/lib/github/review-verdict-freshness";
 import type { CiState } from "@/lib/github/release-api";
 import {
   describeCandidateTarget,
@@ -178,29 +181,42 @@ export function cellsFromSummary(pullRequest: PullRequestSummary): {
   conflict: PerPullRequestCell;
 } {
   const aiReview = pullRequest.mergeJudgement?.aiReview;
+  const reviewProgress = pullRequest.mergeJudgement?.reviewProgress;
   const verdict = pullRequest.reviewVerdict;
+  const freshness = resolveReviewVerdictFreshness({ reviewedSha: verdict?.reviewedSha, headSha: pullRequest.headSha });
+  // どのコミットへの判定かは、新旧どちらの判定でも詳細に出す（#5210）
+  const codeTarget = verdict?.reviewedSha
+    ? `このPRのAIレビュー（判定したコミット ${shortSha(verdict.reviewedSha)}・PRの先頭 ${shortSha(pullRequest.headSha)}）`
+    : CODE_TARGET;
   let code: PerPullRequestCell;
-  if (aiReview?.state === "pending") {
-    code = codeCellFrom("pending", "AIレビューを実行中です");
+  if (verdict && freshness === "stale") {
+    // 古い判定は実行中のあいだも「古い」と言う。実行中とだけ出すと、何の結果を待っているのかが読めない
+    const notice = buildReviewVerdictFreshnessNotice({
+      freshness,
+      reviewedSha: verdict.reviewedSha,
+      headSha: pullRequest.headSha,
+      reviewProgress: reviewProgress ?? (aiReview?.state === "pending" ? "running" : undefined),
+    });
+    code = {
+      ...codeCellFrom("unknown", null),
+      mark: "⟳",
+      state: "古い判定",
+      tone: "muted",
+      reason: notice ? notice.parts.map((part) => part.text).join("") : null,
+    };
+  } else if (aiReview?.state === "pending") {
+    code =
+      reviewProgress === "queued"
+        ? { ...codeCellFrom("pending", "AIレビューは待ち行列に入っていて、まだ始まっていません"), state: "待機中" }
+        : codeCellFrom("pending", "AIレビューを実行中です");
   } else {
     const resolved = resolveAiReviewVerdictState(aiReview, verdict);
-    if (resolved === null) {
-      code = codeCellFrom("unknown", null);
-    } else if (
-      verdict &&
-      resolveReviewVerdictFreshness({ reviewedSha: verdict.reviewedSha, headSha: pullRequest.headSha }) === "stale"
-    ) {
-      code = {
-        ...codeCellFrom("unknown", null),
-        mark: "⟳",
-        state: "無効",
-        tone: "warn",
-        reason: "判定の後にPRのheadが変わったため、今の内容に対する判定ではありません",
-      };
-    } else {
-      code = codeCellFrom(resolved, resolved === "ok" ? null : (verdict?.reviewLabel ?? AI_REVIEW_VERDICT_LABEL[resolved]));
-    }
+    code =
+      resolved === null
+        ? codeCellFrom("unknown", null)
+        : codeCellFrom(resolved, resolved === "ok" ? null : (verdict?.reviewLabel ?? AI_REVIEW_VERDICT_LABEL[resolved]));
   }
+  code = { ...code, target: codeTarget };
 
   const closed = pullRequest.merged || pullRequest.state === "closed";
   const conflictBase = {

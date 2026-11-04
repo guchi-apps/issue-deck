@@ -24,6 +24,11 @@ import {
 } from "@/lib/github/pull-request-repair";
 import type { PullRequestRepairRunSummary } from "@/lib/github/pull-request-repair-run";
 import type { PullRequestReviewVerdict } from "@/lib/github/pull-request-review-verdict";
+import {
+  resolveReviewVerdictFreshness,
+  staleVerdictLabel,
+  type ReviewRunProgress,
+} from "@/lib/github/review-verdict-freshness";
 import type { CiState } from "@/lib/github/release-api";
 import {
   AI_REVIEW_SETTLED_LABEL,
@@ -408,20 +413,33 @@ export function AiReviewBadge({ aiReview }: { aiReview: AiReview | null | undefi
 export function AiReviewStatusButton({
   aiReview,
   reviewVerdict,
+  headSha,
+  reviewProgress,
   expanded,
   onClick,
 }: {
   aiReview: AiReview | null | undefined;
   reviewVerdict?: PullRequestReviewVerdict | null;
+  /** PRの先頭。判定が古いときに要修正の赤で出さないために受け取る（#5210） */
+  headSha?: string | null;
+  reviewProgress?: ReviewRunProgress | null;
   expanded: boolean;
   onClick: () => void;
 }) {
   const state = aiReview?.state;
   if (!state || state === "none") return null;
 
-  const verdictState = resolveAiReviewVerdictState(aiReview, reviewVerdict);
-  const label =
-    state === "pending" ? "レビュー実施中" : AI_REVIEW_VERDICT_LABEL[verdictState ?? "ok"];
+  const stale =
+    Boolean(reviewVerdict) &&
+    resolveReviewVerdictFreshness({ reviewedSha: reviewVerdict?.reviewedSha, headSha }) === "stale";
+  const verdictState = stale ? null : resolveAiReviewVerdictState(aiReview, reviewVerdict);
+  const label = stale
+    ? staleVerdictLabel(reviewProgress ?? (state === "pending" ? "running" : null))
+    : state === "pending"
+      ? reviewProgress === "queued"
+        ? "レビュー待ち行列"
+        : "レビュー実施中"
+      : AI_REVIEW_VERDICT_LABEL[verdictState ?? "ok"];
   return (
     <button
       type="button"
@@ -434,7 +452,9 @@ export function AiReviewStatusButton({
       <span
         className={cn(
           "shrink-0 font-semibold",
-          state === "pending"
+          stale
+            ? "text-muted-foreground"
+            : state === "pending"
             ? "text-primary"
             : verdictState === "failed" || verdictState === "changes-requested"
               ? "text-destructive"

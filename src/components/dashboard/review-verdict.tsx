@@ -1,5 +1,6 @@
 import {
   buildReviewVerdictFreshnessNotice,
+  type ReviewRunProgress,
   type ReviewVerdictFreshness,
 } from "@/lib/github/review-verdict-freshness";
 import type { ReviewVerdictKind } from "@/lib/github/release-verification";
@@ -81,6 +82,8 @@ export function ReviewVerdictFreshnessNote({
   reviewedSha,
   headSha,
   isReviewing = false,
+  reviewProgress,
+  prefix,
   className,
 }: {
   freshness: ReviewVerdictFreshness;
@@ -92,6 +95,10 @@ export function ReviewVerdictFreshnessNote({
    * 待てば更新されるのか、待っても変わらないのかを書き分けるために受け取る。
    */
   isReviewing?: boolean;
+  /** 再レビューの進み具合（#5210）。分かる画面では「走っていません」と言い切らずこれを出す */
+  reviewProgress?: ReviewRunProgress | null;
+  /** 1行の頭に置く語（どの判定の話か）。PR詳細の上部で使う */
+  prefix?: string;
   className?: string;
 }) {
   const notice = buildReviewVerdictFreshnessNotice({
@@ -99,6 +106,7 @@ export function ReviewVerdictFreshnessNote({
     reviewedSha,
     headSha,
     isReviewing,
+    reviewProgress,
   });
   if (!notice) return null;
 
@@ -117,6 +125,7 @@ export function ReviewVerdictFreshnessNote({
         {isStale ? REVIEW_MARK["needs-check"] : REVIEW_MARK.ok}
       </span>
       <span className="min-w-0">
+        {prefix && <span className="font-medium">{prefix}: </span>}
         {notice.parts.map((part, index) =>
           part.mono ? (
             <code key={index} className="font-mono">

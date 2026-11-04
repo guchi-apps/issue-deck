@@ -57,11 +57,13 @@ export function pickInternalGroup(groups, name) {
   );
 }
 
-/** API経由の自動署名が作った Development 証明書（名前が「Created via API」）だけを選ぶ。
- *  Mac の Xcode が作った自分用の証明書（名前が違う）・Distribution証明書は選ばない。 */
+/** API経由の自動署名が作った Development 証明書（表示名が「Created via API」）だけを選ぶ。
+ *  Mac の Xcode が作った自分用の証明書（表示名が利用者の名前）・Distribution証明書は選ばない。
+ *  API の `name` は種別の接頭辞付き（「Apple Development: Created via API」）で、素の名前は `displayName` にある。
+ *  `name` を完全一致で見ていたため1件も選ばれず、上限に達したまま署名が失敗した（#5208）。 */
 export function pickApiCreatedDevCertificates(certs) {
   return certs.filter(
-    (c) => /DEVELOPMENT$/.test(c.attributes?.certificateType ?? "") && c.attributes?.name === "Created via API"
+    (c) => /DEVELOPMENT$/.test(c.attributes?.certificateType ?? "") && c.attributes?.displayName === "Created via API"
   );
 }
 
@@ -190,7 +192,7 @@ async function waitAndAssign(client, { version, build, bundleId, groupName }) {
 
 /** 使い捨てランナーでは秘密鍵が残らず、アーカイブのたびに Development 証明書が Apple 側へ溜まって上限に達する（#966・#975）。
  *  署名の前後に呼び、API作成の Development 証明書をRevokeする。 */
-async function revokeApiDevCerts(client, { dryRun }) {
+export async function revokeApiDevCerts(client, { dryRun }) {
   const certs = (await client.request("GET", "/v1/certificates?limit=200")).data ?? [];
   const targets = pickApiCreatedDevCertificates(certs);
   console.log(`証明書 ${certs.length} 件のうち、API作成の Development 証明書は ${targets.length} 件`);
@@ -199,8 +201,14 @@ async function revokeApiDevCerts(client, { dryRun }) {
       console.log(`  （dry-run）${c.id} を失効させます`);
       continue;
     }
-    await client.request("DELETE", `/v1/certificates/${c.id}`);
-    console.log(`  ${c.id} を失効させました`);
+    try {
+      await client.request("DELETE", `/v1/certificates/${c.id}`);
+      console.log(`  ${c.id} を失効させました`);
+    } catch (e) {
+      // 証明書の枠はTeam共用で、他アプリの配布も同じ掃除をする。一覧から削除までの間に先を越されたら失効済みとして扱う
+      if (!/HTTP 404/.test(String(e.message))) throw e;
+      console.log(`  ${c.id} は既に失効済みです`);
+    }
   }
 }
 

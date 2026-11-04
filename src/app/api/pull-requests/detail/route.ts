@@ -139,6 +139,7 @@ async function handleGET(request: NextRequest) {
           ciState,
           baseRef: pullRequest.base.ref,
           headRef: pullRequest.head.ref,
+          headSha: pullRequest.head.sha,
           reviewVerdict: parsePullRequestReviewVerdict(pullRequest.body),
         },
         pullRequest.mergeable,

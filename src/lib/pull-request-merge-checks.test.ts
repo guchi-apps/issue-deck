@@ -190,13 +190,40 @@ describe("PRの概要（PR詳細・一覧・ブランチ）から作るセル", 
     expect(cellsFromSummary(summary({ ciState: "unknown" })).ci.state).toBe("取得不可");
   });
 
-  it("レビュー実行中・省略・記録なしを区別し、headが進んだ判定は無効にする", () => {
+  it("レビュー実行中・省略・記録なしを区別し、headが進んだ判定は古い判定にする", () => {
     expect(cellsFromSummary(summary({ mergeJudgement: { aiReview: { state: "pending" } } })).code.state).toBe("実行中");
     expect(cellsFromSummary(summary({ mergeJudgement: { aiReview: { state: "none" } } })).code.state).toBe("未実施");
     const stale = cellsFromSummary(
       summary({ reviewVerdict: { reviewKind: "ok", reviewLabel: "", reviewedSha: "old" }, headSha: "new" }),
     );
-    expect(stale.code).toMatchObject({ state: "無効", tone: "warn" });
+    expect(stale.code).toMatchObject({ state: "古い判定", tone: "muted" });
+  });
+
+  it("判定したコミットと再レビューの進み具合を出す（#5210）", () => {
+    const stale = cellsFromSummary(
+      summary({
+        reviewVerdict: { reviewKind: "changes-requested", reviewLabel: "要修正", reviewedSha: "a2629e66184490" },
+        headSha: "d4da57c5ddcd13",
+        mergeJudgement: { aiReview: { state: "skipped" }, reviewProgress: "queued" },
+      }),
+    );
+    expect(stale.code.state).toBe("古い判定");
+    expect(stale.code.target).toContain("a2629e6");
+    expect(stale.code.target).toContain("d4da57c");
+    expect(stale.code.reason).toContain("待ち行列");
+    const current = cellsFromSummary(
+      summary({
+        reviewVerdict: { reviewKind: "changes-requested", reviewLabel: "要修正", reviewedSha: "d4da57c5ddcd13" },
+        headSha: "d4da57c5ddcd13",
+        mergeJudgement: { aiReview: { state: "passed" } },
+      }),
+    );
+    expect(current.code.state).toBe("要修正");
+    expect(current.code.target).toContain("d4da57c");
+    // 待ち行列の新しいレビューは「実行中」と言わない
+    expect(
+      cellsFromSummary(summary({ mergeJudgement: { aiReview: { state: "pending" }, reviewProgress: "queued" } })).code.state,
+    ).toBe("待機中");
   });
 
   it("ciCellのnoneは成功扱いにしない", () => {

@@ -34,6 +34,54 @@ export type ReviewVerdictFreshnessNotice = {
   parts: ReviewVerdictFreshnessPart[];
 };
 
+/**
+ * 再レビュー（判定ワークフローのレビュー系ジョブ）の進み具合（#5210）。headのcheck-runから読むので、
+ * 古いコミットのrunは混ざらない。
+ *
+ * - `queued` … 始まっていない（待ち行列・前段のジョブ待ち）
+ * - `running` … 実行中
+ * - `completed` … ジョブは終わった。**判定が書かれたとは限らない**（鮮度は別に見る）
+ * - `stalled` … runは終わったのにジョブが未完了のまま残っている。待っても進まない
+ */
+export type ReviewRunProgress = "queued" | "running" | "completed" | "stalled";
+
+/** 再レビューの進み具合の短い文言。`null`はheadにレビューのrunが1件も見えていない */
+export function reviewProgressLabel(progress: ReviewRunProgress | null | undefined): string {
+  switch (progress) {
+    case "queued":
+      return "待ち行列（まだ始まっていません）";
+    case "running":
+      return "実行中";
+    case "completed":
+      return "完了（最新のコミットへの判定は記録されていません）";
+    case "stalled":
+      return "停止（実行が終わったのにレビューのジョブが完了していません）";
+    default:
+      return "開始を確認できていません";
+  }
+}
+
+/** 古い判定を指す短い名前。代表状態・コードの行・レビューの行で同じ言葉を使う */
+export function staleVerdictLabel(progress: ReviewRunProgress | null | undefined): string {
+  switch (progress) {
+    case "queued":
+      return "古い判定（再レビュー待ち）";
+    case "running":
+      return "古い判定（再レビュー中）";
+    case "completed":
+      return "古い判定（新しい判定なし）";
+    case "stalled":
+      return "古い判定（再レビュー停止）";
+    default:
+      return "古い判定（再レビュー未開始）";
+  }
+}
+
+/** 待っていても新しい判定が出ないと分かっているか。人が再実行するかを判断する状態 */
+export function reviewRerunNeeded(progress: ReviewRunProgress | null | undefined): boolean {
+  return progress === "completed" || progress === "stalled";
+}
+
 /** 画面に出すコミットの短縮形。GitHubの表示と同じ7桁 */
 export function shortSha(sha: string): string {
   return sha.slice(0, 7);
@@ -66,8 +114,10 @@ export function buildReviewVerdictFreshnessNotice(params: {
   reviewedSha: string | null | undefined;
   headSha?: string | null;
   isReviewing?: boolean;
+  /** 再レビューの進み具合（#5210）。分かるときは`isReviewing`より優先する */
+  reviewProgress?: ReviewRunProgress | null;
 }): ReviewVerdictFreshnessNotice | null {
-  const { freshness, reviewedSha, headSha, isReviewing = false } = params;
+  const { freshness, reviewedSha, headSha, isReviewing = false, reviewProgress } = params;
   if (freshness === "unknown" || !reviewedSha) return null;
 
   if (freshness === "current") {
@@ -93,9 +143,11 @@ export function buildReviewVerdictFreshnessNotice(params: {
   // 同じ画面が「Claudeがレビュー中」とも言っている。走っていないときに同じ文を出すと、
   // 待っても変わらない判定を待たせることになる
   parts.push({
-    text: isReviewing
-      ? "）。いま最新のコミットをレビューし直しています。"
-      : "）。指摘が既に直っている可能性がありますが、修正後の再レビューは走っていません。",
+    text: reviewProgress
+      ? `）。指摘が既に直っている可能性があります。再レビュー: ${reviewProgressLabel(reviewProgress)}。`
+      : isReviewing
+        ? "）。いま最新のコミットをレビューし直しています。"
+        : "）。指摘が既に直っている可能性がありますが、修正後の再レビューは走っていません。",
   });
   return { freshness, parts };
 }
