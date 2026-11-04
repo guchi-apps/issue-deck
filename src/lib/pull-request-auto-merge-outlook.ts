@@ -1,3 +1,4 @@
+import { isReviewNotRun, reviewStoppedReason } from "@/lib/github/review-verdict-freshness";
 import { deriveMergeHold } from "@/lib/pull-request-merge-hold";
 import { isSystemBranch } from "@/lib/system-branch";
 import type { PullRequestSummary } from "@/types/pull-request";
@@ -63,9 +64,13 @@ export function deriveAutoMergeOutlook(pullRequest: PullRequestSummary): AutoMer
     return outlook("excluded", "リリース・配布用のPRです。リリースの流れの中で専用の経路がマージします");
   }
 
+  const stopped = pullRequest.mergeJudgement.reviewStopped;
+  if (stopped && isReviewNotRun({ reviewStopped: stopped, reviewedSha: pullRequest.reviewVerdict?.reviewedSha, headSha: pullRequest.headSha })) {
+    return outlook("manual", `${reviewStoppedReason(stopped)}。PR詳細の「AIレビューを再実行」でやり直せます`);
+  }
   const failed = pullRequest.mergeJudgement.failedJobs ?? [];
   if (failed.includes("review-provider")) {
-    return outlook("manual", "レビュー担当を決めるジョブが失敗し、レビューと自動マージが止まっています。判定ログからジョブを再実行できます");
+    return outlook("manual", "レビュー担当を決めるジョブが失敗し、レビューと自動マージが止まっています。PR詳細の「AIレビューを再実行」でやり直せます");
   }
   if (failed.includes("claude-review") || failed.includes("codex-review")) {
     return outlook("manual", "自動レビューが失敗したため、自動マージされません。内容を確認してマージします");

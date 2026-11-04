@@ -28,6 +28,8 @@ import {
   resolveReviewVerdictFreshness,
   staleVerdictLabel,
   type ReviewRunProgress,
+  isReviewNotRun,
+  type ReviewStopped,
 } from "@/lib/github/review-verdict-freshness";
 import type { CiState } from "@/lib/github/release-api";
 import {
@@ -415,6 +417,7 @@ export function AiReviewStatusButton({
   reviewVerdict,
   headSha,
   reviewProgress,
+  reviewStopped,
   expanded,
   onClick,
 }: {
@@ -423,6 +426,8 @@ export function AiReviewStatusButton({
   /** PRの先頭。判定が古いときに要修正の赤で出さないために受け取る（#5210） */
   headSha?: string | null;
   reviewProgress?: ReviewRunProgress | null;
+  /** レビューが走らないまま止まった原因（#5212）。あれば「レビュー未実施」と出す */
+  reviewStopped?: ReviewStopped | null;
   expanded: boolean;
   onClick: () => void;
 }) {
@@ -433,7 +438,10 @@ export function AiReviewStatusButton({
     Boolean(reviewVerdict) &&
     resolveReviewVerdictFreshness({ reviewedSha: reviewVerdict?.reviewedSha, headSha }) === "stale";
   const verdictState = stale ? null : resolveAiReviewVerdictState(aiReview, reviewVerdict);
-  const label = stale
+  const notRun = isReviewNotRun({ reviewStopped, reviewedSha: reviewVerdict?.reviewedSha, headSha });
+  const label = notRun
+    ? "レビュー未実施"
+    : stale
     ? staleVerdictLabel(reviewProgress ?? (state === "pending" ? "running" : null))
     : state === "pending"
       ? reviewProgress === "queued"
@@ -452,7 +460,9 @@ export function AiReviewStatusButton({
       <span
         className={cn(
           "shrink-0 font-semibold",
-          stale
+          notRun
+            ? "text-amber-700 dark:text-amber-400"
+            : stale
             ? "text-muted-foreground"
             : state === "pending"
             ? "text-primary"

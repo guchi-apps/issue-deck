@@ -1,9 +1,11 @@
 import type { RepairKind } from "@/lib/github/pull-request-repair";
 import { repairKindsFor } from "@/lib/github/pull-request-repair";
 import {
+  isReviewNotRun,
   resolveReviewVerdictFreshness,
   reviewProgressLabel,
   reviewRerunNeeded,
+  reviewStoppedReason,
   shortSha,
   staleVerdictLabel,
 } from "@/lib/github/review-verdict-freshness";
@@ -36,6 +38,7 @@ export type PrimaryStateKind =
   | "conflict"
   | "ci-failed"
   | "review-findings"
+  | "review-not-run"
   | "review-stale"
   | "ci-running"
   | "judging"
@@ -131,6 +134,23 @@ function currentReviewKind(pullRequest: PullRequestSummary): "changes-requested"
 }
 
 /**
+ * いまのコミットの自動レビューが、実行されないまま止まったとき（#5212）。以前の判定があっても無くても出す。
+ * 待っても進まないので人の番にし、ここでだけ「判定中」「マージ可能」へ素通りさせない。
+ */
+function reviewNotRunState(pullRequest: PullRequestSummary): PrimaryState | null {
+  const stopped = pullRequest.mergeJudgement.reviewStopped;
+  const reviewedSha = pullRequest.reviewVerdict?.reviewedSha;
+  if (!stopped || !isReviewNotRun({ reviewStopped: stopped, reviewedSha, headSha: pullRequest.headSha })) return null;
+  return state(
+    "review-not-run",
+    "レビュー未実施",
+    "warn",
+    `最新のコミット ${shortSha(pullRequest.headSha)} は自動レビューを通っていません。${reviewStoppedReason(stopped)}`,
+    { needsAction: true },
+  );
+}
+
+/**
  * 要修正・要確認の判定が、いまのheadより前のコミットのものだったとき（#5210）。
  *
  * 判定中やマージ可能へ素通りさせると、指摘が直ったのか再レビューを待っているのかが読めない。
@@ -191,6 +211,8 @@ export function derivePrimaryState(pullRequest: PullRequestSummary): PrimaryStat
       repairKinds,
     });
   }
+  const reviewNotRun = reviewNotRunState(pullRequest);
+  if (reviewNotRun) return reviewNotRun;
   const staleReview = staleReviewState(pullRequest);
   if (staleReview) return staleReview;
   const review = currentReviewKind(pullRequest);

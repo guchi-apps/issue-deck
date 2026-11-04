@@ -329,7 +329,11 @@ export function PullRequestDetail({
   });
   const primary = applyReviewAction(derivePrimaryState(pullRequest), reviewAction);
   // 指摘への対応・修正が残っている間は「マージする」を主操作にせず、マージの説明は詳細へ畳む
-  const reviewUnresolved = reviewAction.kind === "respond" || reviewAction.kind === "requested" || reviewAction.kind === "repairing";
+  const reviewUnresolved =
+    reviewAction.kind === "respond" ||
+    reviewAction.kind === "requested" ||
+    reviewAction.kind === "repairing" ||
+    reviewAction.kind === "not-run";
   const reviewRespond = reviewAction.kind === "respond" ? reviewAction : null;
   const showsReviewCommit =
     pullRequest.state === "open" &&
@@ -474,8 +478,20 @@ export function PullRequestDetail({
                   availability={pullRequest.repairWorkflowAvailability}
                   runningKind={pullRequest.repairRun?.kind ?? null}
                 />
-                {reviewAction.kind === "stale" && reviewRerunNeeded(reviewAction.progress) && (
+                {(reviewAction.kind === "not-run" ||
+                  (reviewAction.kind === "stale" && reviewRerunNeeded(reviewAction.progress))) && (
                   <PullRequestReviewRerunButton pullRequest={pullRequest} onChanged={onRefresh} />
+                )}
+                {reviewAction.kind === "not-run" && reviewAction.stopped.url && (
+                  <a
+                    href={reviewAction.stopped.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex h-9 items-center gap-1 text-xs text-foreground hover:underline"
+                  >
+                    実行ログを開く
+                    <ExternalLink aria-hidden className="size-3" />
+                  </a>
                 )}
                 {reviewRespond && (
                   <Button
@@ -726,6 +742,7 @@ export function PullRequestDetail({
                     reviewVerdict={pullRequest.reviewVerdict}
                     headSha={pullRequest.headSha}
                     reviewProgress={pullRequest.mergeJudgement.reviewProgress}
+                    reviewStopped={pullRequest.mergeJudgement.reviewStopped}
                     expanded={reviewDetailOpen}
                     onClick={() => setReviewDetailPullRequestId(reviewDetailOpen ? null : pullRequest.id)}
                   />

@@ -10,6 +10,11 @@
  * 画面から人が押す操作としては、既存のrunの再実行のほうが影響が小さい。
  *
  * 対象は現在のHEADのrunに限る。古いSHAのrunを再実行して、現在のPRがレビュー済みに見えることを避ける。
+ *
+ * **GitHubがrunの再実行を拒むことがある（#5212）。** ジョブが`queued`のまま取り残されたrunは
+ * `403 This workflow run cannot be retried`で断られる（asset-manager#826。`rerun-failed-jobs`で確認）。
+ * その場合だけ、PRを下書きへ戻してすぐレビュー可能へ戻し、`ready_for_review`で新しいrunを起こす。
+ * close→reopenと違ってPRが閉じず、`closed`で動く後片付けも走らない。CIは`ready_for_review`では走り直さない。
  */
 import type { CiRerunRun } from "@/lib/pull-request-ci-rerun";
 
@@ -47,6 +52,31 @@ export function decideReviewRerun(
   return { action: "rerun", runId: latest.id };
 }
 
+/** GitHubがrunの再実行そのものを拒んだ403か。権限不足の403（`Resource not accessible`）とは分ける */
+export function isWorkflowRunRetryRefused(status: number, message: string): boolean {
+  return status === 403 && /cannot be retried|unable to retry/i.test(message);
+}
+
+export type ReviewRestartDecision =
+  | { action: "restart"; nodeId: string }
+  | { action: "reject"; code: "pull_request_not_open" | "not_develop" | "head_changed" | "draft" | "restart_failed" };
+
+/**
+ * 下書き経由でレビューを起動してよいか（#5212）。下書きへ戻す操作はPRの状態を変えるので、再実行を
+ * 断られた後に**取り直したPR**で確かめる。元から下書きのPRは、ここで触ると意図せず公開してしまう。
+ */
+export function decideReviewRestart(
+  current: { state: string; merged: boolean; draft: boolean; baseRef: string; headSha: string; nodeId: string | null | undefined },
+  requestedHeadSha: string,
+): ReviewRestartDecision {
+  if (current.merged || current.state !== "open") return { action: "reject", code: "pull_request_not_open" };
+  if (current.baseRef !== "develop") return { action: "reject", code: "not_develop" };
+  if (current.headSha !== requestedHeadSha) return { action: "reject", code: "head_changed" };
+  if (current.draft) return { action: "reject", code: "draft" };
+  if (!current.nodeId) return { action: "reject", code: "restart_failed" };
+  return { action: "restart", nodeId: current.nodeId };
+}
+
 export function reviewRerunErrorMessage(code: string | undefined): string {
   switch (code) {
     case "pull_request_not_open":
@@ -59,6 +89,12 @@ export function reviewRerunErrorMessage(code: string | undefined): string {
       return "現在のコミットに対するAIレビューの実行記録がありません。ローカルのレビューで判定されたPRは、GitHubから再レビューを依頼してください。";
     case "in_progress":
       return "AIレビューが実行中です。完了すると判定が更新されます。";
+    case "draft":
+      return "このPRは下書きです。「レビュー可能にする」を押すとレビューが始まります。";
+    case "restart_failed":
+      return "GitHubが再実行を受け付けず、新しいレビューも起動できませんでした。PRの状態は変わっていません。少し待ってからもう一度押してください。";
+    case "ready_failed":
+      return "PRを下書きへ戻しましたが、レビュー可能に戻せませんでした。PRは下書きのままです。「レビュー可能にする」を押すとレビューが始まります。";
     case "permission_denied":
       return "GitHub AppにActionsの書き込み権限がありません。権限を付与するか、GitHubで開いて再実行してください。";
     case "not_found":

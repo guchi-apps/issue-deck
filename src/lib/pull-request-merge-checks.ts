@@ -2,6 +2,8 @@ import type { IosPrecheckPhase, IosPrecheckSummary } from "@/lib/github/ios-prec
 import {
   buildReviewVerdictFreshnessNotice,
   resolveReviewVerdictFreshness,
+  isReviewNotRun,
+  reviewStoppedReason,
 } from "@/lib/github/review-verdict-freshness";
 import type { CiState } from "@/lib/github/release-api";
 import {
@@ -189,7 +191,11 @@ export function cellsFromSummary(pullRequest: PullRequestSummary): {
     ? `このPRのAIレビュー（判定したコミット ${shortSha(verdict.reviewedSha)}・PRの先頭 ${shortSha(pullRequest.headSha)}）`
     : CODE_TARGET;
   let code: PerPullRequestCell;
-  if (verdict && freshness === "stale") {
+  const stopped = pullRequest.mergeJudgement?.reviewStopped;
+  if (stopped && isReviewNotRun({ reviewStopped: stopped, reviewedSha: verdict?.reviewedSha, headSha: pullRequest.headSha })) {
+    // レビューが走らずに止まった（#5212）。「省略」「古い判定」で済ませず、未実施と言う
+    code = { ...codeCellFrom("unknown", null), mark: "▲", state: "未実施", tone: "warn", reason: reviewStoppedReason(stopped) };
+  } else if (verdict && freshness === "stale") {
     // 古い判定は実行中のあいだも「古い」と言う。実行中とだけ出すと、何の結果を待っているのかが読めない
     const notice = buildReviewVerdictFreshnessNotice({
       freshness,
