@@ -188,6 +188,7 @@ describe("fetchCheckRollup", () => {
       ciRunId: 1,
       ciChecks: expect.any(Array),
       mergeJudgement: {
+        reviewProgress: "queued",
         state: "pending",
         step: null,
         runUrl: "https://github.com/owner/repo/actions/runs/1/job/job",
@@ -321,6 +322,7 @@ describe("fetchCheckRollup", () => {
       ciRunId: 1,
       ciChecks: expect.any(Array),
       mergeJudgement: {
+        reviewProgress: "queued",
         state: "pending",
         step: null,
         runUrl: "https://github.com/owner/repo/actions/runs/1/job/job",
@@ -349,7 +351,7 @@ describe("fetchCheckRollup", () => {
         { status: "completed", conclusion: "success" },
         { status: "completed", conclusion: "skipped" },
       ],
-      mergeJudgement: { state: "settled", step: null, runUrl: null, aiReview: AI_REVIEW_NONE },
+      mergeJudgement: { state: "settled", step: null, runUrl: null, aiReview: AI_REVIEW_NONE, reviewProgress: "completed" },
       ciRunId: 1,
       ciChecks: expect.any(Array),
     });
@@ -395,6 +397,38 @@ describe("fetchCheckRollup", () => {
     const queued = [checkRun("QUEUED", null, "claude-review-develop.yml", "auto-merge")];
     stubGraphql(rollupResponse({ state: "PENDING", contexts: { totalCount: queued.length, nodes: queued } }));
     expect((await fetchCheckRollup("owner", "repo", "develop", "token"))?.mergeJudgement.autoMergeRun).toBeUndefined();
+  });
+
+  describe("reviewProgress（#5210）", () => {
+    async function progressOf(nodes: unknown[]) {
+      stubGraphql(rollupResponse({ state: "PENDING", contexts: { totalCount: nodes.length, nodes } }));
+      const rollup = await fetchCheckRollup("owner", "repo", "develop", "token");
+      return rollup?.mergeJudgement.reviewProgress;
+    }
+    const review = (status: string, conclusion: string | null, job: string) =>
+      checkRun(status, conclusion, "claude-review-develop.yml", job);
+
+    it("始まっていないレビューは待ち行列、動いていれば実行中、終われば完了", async () => {
+      expect(await progressOf([review("QUEUED", null, "review-provider")])).toBe("queued");
+      expect(await progressOf([review("COMPLETED", "SUCCESS", "review-provider"), review("IN_PROGRESS", null, "claude-review")])).toBe("running");
+      expect(await progressOf([review("COMPLETED", "SUCCESS", "review-provider"), review("COMPLETED", "SUCCESS", "claude-review")])).toBe("completed");
+    });
+
+    it("レビュー担当のジョブがまだ無く判定が動いていれば待ち行列", async () => {
+      expect(await progressOf([review("IN_PROGRESS", null, "wait-for-ci")])).toBe("queued");
+    });
+
+    it("runが終わったのに未完了のまま残ったジョブは停止として出す（asset-manager#826の形）", async () => {
+      const stuck = {
+        ...review("QUEUED", null, "review-provider"),
+        checkSuite: { status: "COMPLETED", workflowRun: { workflow: { resourcePath: "/owner/repo/actions/workflows/claude-review-develop.yml" } } },
+      };
+      expect(await progressOf([stuck, review("COMPLETED", "SKIPPED", "claude-review")])).toBe("stalled");
+    });
+
+    it("判定ワークフローが無ければ省略する", async () => {
+      expect(await progressOf([checkRun("COMPLETED", "SUCCESS", "ci.yml")])).toBeUndefined();
+    });
   });
 
   describe("aiReview", () => {
@@ -522,6 +556,7 @@ describe("fetchCheckRollup", () => {
     const rollup = await fetchCheckRollup("owner", "repo", "develop", "token");
     expect(rollup?.mergeJudgement).toEqual({
       state: "pending",
+      reviewProgress: "running",
       step: "claude-review",
       runUrl: "https://github.com/owner/repo/actions/runs/1/job/claude-review",
       aiReview: {

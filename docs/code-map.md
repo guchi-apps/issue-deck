@@ -2412,6 +2412,16 @@ export function POST(request: NextRequest) {
   判定はPR本文に残る一方でコミットは進むため、指摘を直してから次のレビューが終わるまでのあいだ、
   PR詳細の帯は前回の「要修正」をそのまま出していた（修正前の話なのか、直したうえでまだ直って
   いないのかが読めない）。**判定時点のコミットを判定と一緒に残し、PRのheadと突き合わせて1行添える。**
+  - **古い要修正・要確認は代表状態`review-stale`で出し、再レビューの進み具合を添える**（#5210）。進み具合は
+    `MergeJudgement.reviewProgress`（`check-rollup.ts`。待ち行列・実行中・完了・停止）で、`aiReview`は
+    `claude-review`の結果の軸なので別に持つ。完了・停止は待っても新しい判定が出ないため人の番にし、
+    「AIレビューを再実行」を出す
+  - **古い要修正に「PRを自動修正」を出さない**（#5210。`repairKindsFor`に`headSha`を渡す）。
+    `reusable-claude-review-fix.yml`は先頭コミットの`sha=`を持つ判定コメントしか読まないので、押しても
+    修正済みの指摘を直し直すことはなく、何もせず終わる
+  - **PR詳細は自動更新しない。先頭コミットの変化は一覧の取り直しで拾う**（#5210）。一覧を止めていると
+    `headSha`が開いた時点のまま固まり、push後も修正前の判定が「最新」に見える。重ね表示（`prmodal`）でも
+    一覧を回し、PRペインの詳細はビューの絞り込み前の一覧（`crossRepositoryPullRequests`）から引く
   - 記録先は検証結果の**節の中の1行**（`<!-- issue-deck-verification:sha=<head SHA> -->`）。
     書くのは`reusable-claude-review-develop.yml`とローカルのレビュー・統合エージェント
     （`scripts/prompts/review-agent.md`）で、**`sha=`の有無も`scripts/check-review-verdict-marker.sh`が

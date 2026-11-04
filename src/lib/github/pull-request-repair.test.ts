@@ -101,6 +101,21 @@ describe("canRepairFromDeck", () => {
 });
 
 describe("repairKindsFor", () => {
+  it("判定が先頭より前のコミットのものなら、レビュー修正を出さない（#5210）", () => {
+    const pullRequest = {
+      state: "open" as const,
+      draft: false,
+      ciState: "success" as const,
+      baseRef: "develop",
+      headRef: "issue-1",
+    };
+    const reviewVerdict = { reviewKind: "changes-requested", reviewedSha: "aaa" };
+    expect(repairKindsFor({ ...pullRequest, reviewVerdict, headSha: "bbb" }, true)).toEqual([]);
+    expect(repairKindsFor({ ...pullRequest, reviewVerdict, headSha: "aaa" }, true)).toEqual(["review"]);
+    // 判定のコミットが読めないときは「古い」と決めつけない
+    expect(repairKindsFor({ ...pullRequest, reviewVerdict: { reviewKind: "changes-requested", reviewedSha: null }, headSha: "bbb" }, true)).toEqual(["review"]);
+  });
+
   const open = { state: "open", draft: false } as const;
 
   it("CI失敗のみならCIの1種類", () => {

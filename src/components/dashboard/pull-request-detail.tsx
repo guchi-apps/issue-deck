@@ -32,6 +32,8 @@ import { PullRequestMergeButton } from "@/components/dashboard/pull-request-merg
 import { PullRequestMergeHoldNotice } from "@/components/dashboard/pull-request-merge-hold";
 import { PullRequestStopCauseNotice } from "@/components/dashboard/pull-request-stop-cause";
 import { PullRequestRepairButtons } from "@/components/dashboard/pull-request-repair-buttons";
+import { PullRequestReviewRerunButton } from "@/components/dashboard/pull-request-review-rerun-button";
+import { ReviewVerdictFreshnessNote } from "@/components/dashboard/review-verdict";
 import { PullRequestBackupCi } from "@/components/dashboard/pull-request-backup-ci";
 import { PullRequestReviewFindings } from "@/components/dashboard/pull-request-review-findings";
 import {
@@ -56,6 +58,7 @@ import { repairKindsFor } from "@/lib/github/pull-request-repair";
 import { parseReleaseVerification, type ReleaseVerificationRow } from "@/lib/github/release-verification";
 import { canMergeFromDeck, isMergeWaitingForChecks, requiresUserMerge } from "@/lib/pull-request-list";
 import { shouldResolveStopCause } from "@/lib/pull-request-stop-cause";
+import { resolveReviewVerdictFreshness, reviewRerunNeeded } from "@/lib/github/review-verdict-freshness";
 import { derivePrimaryState, type PrimaryStateTone } from "@/lib/pull-request-primary-state";
 import { applyReviewAction, deriveReviewAction } from "@/lib/pull-request-review-action";
 import { cn } from "@/lib/utils";
@@ -328,6 +331,13 @@ export function PullRequestDetail({
   // 指摘への対応・修正が残っている間は「マージする」を主操作にせず、マージの説明は詳細へ畳む
   const reviewUnresolved = reviewAction.kind === "respond" || reviewAction.kind === "requested" || reviewAction.kind === "repairing";
   const reviewRespond = reviewAction.kind === "respond" ? reviewAction : null;
+  const showsReviewCommit =
+    pullRequest.state === "open" &&
+    !pullRequest.merged &&
+    !pullRequest.draft &&
+    pullRequest.reviewVerdict !== null &&
+    pullRequest.reviewVerdict.reviewKind !== "skipped" &&
+    pullRequest.reviewVerdict.reviewKind !== "unknown";
   // 止まった原因（#5080）。詳細の取得時点の値なので、一覧の更新でラベルが外れた・マージされたと
   // 分かった時点で出さない（`shouldResolveStopCause`はいまのsummaryで判定する）
   const stopCauseNotice =
@@ -430,6 +440,20 @@ export function PullRequestDetail({
                   <span aria-hidden="true">{primary.mark}</span> {primary.label}
                 </p>
                 <p className="text-xs text-muted-foreground">{primary.reason}</p>
+                {/* どのコミットへの判定かを、新旧どちらでも上部に出す（#5210）。記録が無ければ何も出さない */}
+                {showsReviewCommit && pullRequest.reviewVerdict && (
+                  <ReviewVerdictFreshnessNote
+                    className="mt-1"
+                    prefix={`自動レビュー「${pullRequest.reviewVerdict.reviewLabel}」`}
+                    freshness={resolveReviewVerdictFreshness({
+                      reviewedSha: pullRequest.reviewVerdict.reviewedSha,
+                      headSha: pullRequest.headSha,
+                    })}
+                    reviewedSha={pullRequest.reviewVerdict.reviewedSha}
+                    headSha={pullRequest.headSha}
+                    reviewProgress={pullRequest.mergeJudgement.reviewProgress}
+                  />
+                )}
                 {reviewRespond && reviewRespond.concerns.length > 0 && (
                   <ul aria-label="レビューの指摘の要点" className="mt-1 list-disc pl-4 text-xs">
                     {reviewRespond.concerns.map((concern) => (
@@ -450,6 +474,9 @@ export function PullRequestDetail({
                   availability={pullRequest.repairWorkflowAvailability}
                   runningKind={pullRequest.repairRun?.kind ?? null}
                 />
+                {reviewAction.kind === "stale" && reviewRerunNeeded(reviewAction.progress) && (
+                  <PullRequestReviewRerunButton pullRequest={pullRequest} onChanged={onRefresh} />
+                )}
                 {reviewRespond && (
                   <Button
                     size="sm"
@@ -697,6 +724,8 @@ export function PullRequestDetail({
                   <AiReviewStatusButton
                     aiReview={pullRequest.mergeJudgement.aiReview}
                     reviewVerdict={pullRequest.reviewVerdict}
+                    headSha={pullRequest.headSha}
+                    reviewProgress={pullRequest.mergeJudgement.reviewProgress}
                     expanded={reviewDetailOpen}
                     onClick={() => setReviewDetailPullRequestId(reviewDetailOpen ? null : pullRequest.id)}
                   />
@@ -707,6 +736,8 @@ export function PullRequestDetail({
                         pullRequestNumber={pullRequest.number}
                         pullRequestUrl={pullRequest.htmlUrl}
                         reviewRunUrl={pullRequest.mergeJudgement.aiReview.runUrl}
+                        headSha={pullRequest.headSha}
+                        reviewProgress={pullRequest.mergeJudgement.reviewProgress}
                         repair={{
                           repositoryFullName: pullRequest.repositoryFullName,
                           kinds: repairKinds,

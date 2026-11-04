@@ -9,6 +9,7 @@ import { PullRequestRepairButtons } from "@/components/dashboard/pull-request-re
 import type { RepairKind, RepairWorkflowAvailability } from "@/lib/github/pull-request-repair";
 import { formatRelativeDate } from "@/lib/format-relative-date";
 import type { PullRequestReviewCommentContent } from "@/lib/github/pull-request-review-comment";
+import type { ReviewRunProgress } from "@/lib/github/review-verdict-freshness";
 import { cn } from "@/lib/utils";
 
 /**
@@ -30,6 +31,8 @@ export function PullRequestReviewFindings({
   pullRequestNumber,
   pullRequestUrl,
   reviewRunUrl,
+  headSha,
+  reviewProgress,
   repair,
   responseAnchorId,
   className,
@@ -42,6 +45,9 @@ export function PullRequestReviewFindings({
   pullRequestUrl?: string;
   /** レビューが実行中・失敗などで、コメント本文より先に実行状況を確認したいときの行き先 */
   reviewRunUrl?: string | null;
+  /** PRの先頭と再レビューの進み具合（#5210）。古いレビューの注意書きに添える */
+  headSha?: string | null;
+  reviewProgress?: ReviewRunProgress | null;
   /**
    * 同じPRへ修正を依頼する操作（PR詳細上部の「PRを自動修正」と同じ処理。#4318）。
    * スマホで上部の操作を探さなくて済むよう、指摘の読める場所にも置く。省略時は案内文だけ出す。
@@ -99,6 +105,8 @@ export function PullRequestReviewFindings({
               className="rounded-none border-b px-3 py-2 ring-0"
               freshness="stale"
               reviewedSha={review.reviewedSha}
+              headSha={headSha}
+              reviewProgress={reviewProgress}
             />
           )}
 
