@@ -1,3 +1,4 @@
+import { resolveReviewVerdictFreshness } from "@/lib/github/review-verdict-freshness";
 import type { CiState } from "@/lib/github/release-api";
 
 /**
@@ -114,7 +115,9 @@ export function repairKindsFor(
     /** 渡さない呼び出し元（リリース進捗など）では`review`を出さない */
     baseRef?: string;
     headRef?: string;
-    reviewVerdict?: { reviewKind: string } | null;
+    reviewVerdict?: { reviewKind: string; reviewedSha?: string | null } | null;
+    /** PRの先頭。判定が古いかどうかの突き合わせに使う（#5210） */
+    headSha?: string | null;
   },
   mergeable: boolean | null | undefined,
 ): RepairKind[] {
@@ -123,10 +126,15 @@ export function repairKindsFor(
   const kinds: RepairKind[] = [];
   if (mergeable === false) kinds.push("conflict");
   if (pullRequest.ciState === "failure") kinds.push("ci");
-  // 自動レビューが「要修正」と判定したPR（#3363）。判定の後にコミットが積まれていても出す——
-  // 押した先のワークフローが最新のレビューを読み直し、直っていれば何もせずに終わるため
+  // 自動レビューが「要修正」と判定したPR（#3363）。**判定の後にコミットが積まれていたら出さない**（#5210）——
+  // `reusable-claude-review-fix.yml`は先頭コミットの判定コメントしか読まないため、古い指摘の二重修正には
+  // ならない代わりに何もせず終わる。押しても何も起きないボタンを、再レビュー待ちの画面に残さない
   if (
     pullRequest.reviewVerdict?.reviewKind === "changes-requested" &&
+    resolveReviewVerdictFreshness({
+      reviewedSha: pullRequest.reviewVerdict.reviewedSha,
+      headSha: pullRequest.headSha,
+    }) !== "stale" &&
     pullRequest.baseRef !== undefined &&
     pullRequest.headRef !== undefined &&
     supportsRepairKind({ number: 0, baseRef: pullRequest.baseRef, headRef: pullRequest.headRef }, "review")

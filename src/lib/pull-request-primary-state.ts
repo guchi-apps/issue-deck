@@ -1,6 +1,12 @@
 import type { RepairKind } from "@/lib/github/pull-request-repair";
 import { repairKindsFor } from "@/lib/github/pull-request-repair";
-import { resolveReviewVerdictFreshness } from "@/lib/github/review-verdict-freshness";
+import {
+  resolveReviewVerdictFreshness,
+  reviewProgressLabel,
+  reviewRerunNeeded,
+  shortSha,
+  staleVerdictLabel,
+} from "@/lib/github/review-verdict-freshness";
 import { deriveAutoMergeOutlook, releaseAutoFixReason } from "@/lib/pull-request-auto-merge-outlook";
 import { deriveMergeHold } from "@/lib/pull-request-merge-hold";
 import {
@@ -30,6 +36,7 @@ export type PrimaryStateKind =
   | "conflict"
   | "ci-failed"
   | "review-findings"
+  | "review-stale"
   | "ci-running"
   | "judging"
   | "merge-held"
@@ -123,6 +130,30 @@ function currentReviewKind(pullRequest: PullRequestSummary): "changes-requested"
     : null;
 }
 
+/**
+ * 要修正・要確認の判定が、いまのheadより前のコミットのものだったとき（#5210）。
+ *
+ * 判定中やマージ可能へ素通りさせると、指摘が直ったのか再レビューを待っているのかが読めない。
+ * 待てば進むのは待ち行列・実行中だけで、終わったのに新しい判定が無い・止まっている場合は人の番にする。
+ */
+function staleReviewState(pullRequest: PullRequestSummary): PrimaryState | null {
+  const verdict = pullRequest.reviewVerdict;
+  if (!verdict || (verdict.reviewKind !== "changes-requested" && verdict.reviewKind !== "needs-check")) return null;
+  if (resolveReviewVerdictFreshness({ reviewedSha: verdict.reviewedSha, headSha: pullRequest.headSha }) !== "stale") {
+    return null;
+  }
+  const progress = pullRequest.mergeJudgement.reviewProgress;
+  const kindLabel = verdict.reviewKind === "changes-requested" ? "要修正" : "要確認";
+  const moving = progress === "queued" || progress === "running";
+  return state(
+    "review-stale",
+    staleVerdictLabel(progress),
+    moving ? "run" : "warn",
+    `${kindLabel}の判定は修正前のコミット ${shortSha(verdict.reviewedSha ?? "")} に対するものです（最新 ${shortSha(pullRequest.headSha)}）。再レビュー: ${reviewProgressLabel(progress)}`,
+    { needsAction: reviewRerunNeeded(progress) },
+  );
+}
+
 export function derivePrimaryState(pullRequest: PullRequestSummary): PrimaryState {
   if (pullRequest.merged) return state("merged", "マージ済み", "muted", "このPRはマージされています");
   if (pullRequest.state === "closed") return state("closed", "クローズ済み", "muted", "マージされずに閉じられています");
@@ -160,6 +191,8 @@ export function derivePrimaryState(pullRequest: PullRequestSummary): PrimaryStat
       repairKinds,
     });
   }
+  const staleReview = staleReviewState(pullRequest);
+  if (staleReview) return staleReview;
   const review = currentReviewKind(pullRequest);
   if (review === "changes-requested") {
     return state("review-findings", "レビュー指摘", "bad", "自動レビューが要修正と判定しています。指摘を同じPRで直してから進めます", {

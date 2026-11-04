@@ -1,5 +1,6 @@
 import { CI_GATE_CONTEXT } from "@/lib/backup-ci/state";
 import { githubGraphql } from "@/lib/github/graphql";
+import type { ReviewRunProgress } from "@/lib/github/review-verdict-freshness";
 import {
   IOS_PRECHECK_COMMIT_FIELDS,
   IOS_PRECHECK_COMMIT_WINDOW,
@@ -167,6 +168,12 @@ export type MergeJudgement = {
    */
   aiReview: AiReview;
   /**
+   * レビュー系ジョブの進み具合（#5210）。`aiReview`は`claude-review`の結果の軸で、待ち行列と実行中を
+   * 区別しない。古い判定が出ているときに「待てば更新されるのか」を出すために持つ。
+   * 判定ワークフローのcheck-runが1件も無ければ省略
+   */
+  reviewProgress?: ReviewRunProgress;
+  /**
    * 失敗で終わった判定ジョブの名前（`review-provider`・`auto-merge`など。#4952）。同じジョブが複数回
    * 走ったときは最後の結果で決める。マージ待ちの「自動マージされません」の理由に使う。省略は「無し」
    */
@@ -225,6 +232,10 @@ const JUDGEMENT_STEP_BY_JOB: Record<string, MergeJudgementStep> = {
  * やり直すわけではないため、「レビューが終わったか」の材料にはならない。
  */
 const AI_REVIEW_JOB = "claude-review";
+
+/** 実際にレビューを行うジョブ（#5210）。`review-provider`はその前段 */
+const REVIEW_EXECUTOR_JOBS: ReadonlySet<string> = new Set([AI_REVIEW_JOB, "codex-review"]);
+const REVIEW_PROGRESS_JOBS: ReadonlySet<string> = new Set([...REVIEW_EXECUTOR_JOBS, "review-provider"]);
 
 /**
  * 未完了のジョブが複数あるときに、先に来る方を「いま待っているもの」として名乗らせる順（#2059）。
@@ -598,12 +609,14 @@ function toMergeJudgement(nodes: RollupContextNode[]): MergeJudgement {
   if (judgementChecks.length === 0) return MERGE_JUDGEMENT_UNKNOWN;
 
   const aiReview = toAiReview(judgementChecks);
+  const reviewProgress = toReviewProgress(judgementChecks);
   // 失敗・完了した`auto-merge`が無ければ省く（省略は「無し」と同じ扱い）
   const failed = failedJudgementJobs(judgementChecks);
   const autoMerge = judgementChecks.findLast(
     (node) => jobNameOf(node) === "auto-merge" && checkRunPhaseOf(node) === "completed",
   );
   const failedJobs = {
+    reviewProgress,
     ...(failed.length > 0 ? { failedJobs: failed } : {}),
     ...(autoMerge
       ? { autoMergeRun: { url: autoMerge.detailsUrl ?? null, completedAt: autoMerge.completedAt ?? null } }
@@ -644,6 +657,29 @@ function failedJudgementJobs(judgementChecks: RollupContextNode[]): string[] {
   return [...latest.entries()]
     .filter(([, node]) => checkRunPhaseOf(node) === "completed" && FAILED_CONCLUSIONS.has((node.conclusion ?? "").toLowerCase()))
     .map(([job]) => job);
+}
+
+/**
+ * レビュー系ジョブの進み具合を決める（#5210）。同じジョブが複数回走ったときは最後のものを見る。
+ *
+ * **実行中を最優先にする。** `running`（`checkRunPhaseOf`）は「終わった根拠が無い」だけで、
+ * `in_progress`のものだけが本当に動いている。残りは始まっていない（待ち行列）。
+ * 実行担当のジョブがまだ現れておらず判定が動いているなら、これから始まる側に置く。
+ */
+function toReviewProgress(judgementChecks: RollupContextNode[]): ReviewRunProgress {
+  const latest = new Map<string, RollupContextNode>();
+  for (const node of judgementChecks) {
+    const job = jobNameOf(node);
+    if (REVIEW_PROGRESS_JOBS.has(job)) latest.set(job, node);
+  }
+  const nodes = [...latest.values()];
+  const unfinished = nodes.filter((node) => checkRunPhaseOf(node) === "running");
+  if (unfinished.some((node) => (node.status ?? "").toLowerCase() === "in_progress")) return "running";
+  if (unfinished.length > 0) return "queued";
+  if (nodes.some((node) => checkRunPhaseOf(node) === "mismatch")) return "stalled";
+  const hasExecutor = [...latest.keys()].some((job) => REVIEW_EXECUTOR_JOBS.has(job));
+  if (!hasExecutor && judgementChecks.some((node) => checkRunPhaseOf(node) !== "completed")) return "queued";
+  return "completed";
 }
 
 /**

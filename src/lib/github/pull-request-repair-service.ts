@@ -124,6 +124,7 @@ async function evaluate(
       ciState: currentState.ciState,
       baseRef: pullRequest.base.ref,
       headRef: pullRequest.head.ref,
+      headSha: pullRequest.head.sha,
       reviewVerdict: parsePullRequestReviewVerdict(pullRequest.body),
     },
     currentState.mergeable,

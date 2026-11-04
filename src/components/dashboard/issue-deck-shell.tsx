@@ -880,7 +880,10 @@ export function IssueDeckShell({
   // （`use-auto-refresh.ts`）。
   // 保留中の確認待ちトーストがある間も自動更新する（#1709）。CIが確定したかどうかは
   // PR一覧の`ciState`でしか分からないため、取り直さないと保留を解けない。
-  const autoRefreshPullRequests = isPullRequestPaneActive || pendingCheckUserToasts.length > 0;
+  // 重ね表示のPR詳細（`prmodal`）も一覧の取り直しで先頭コミットの変化を拾う。詳細は自動更新しないため、
+  // 止めたままだとpush後も修正前の判定が「最新」に見え続ける（#5210）
+  const autoRefreshPullRequests =
+    isPullRequestPaneActive || pendingCheckUserToasts.length > 0 || filters.prmodal !== null;
   /**
    * Issue一覧に「PR待ち」の行（`Develop PR`・`Release`）が並んでいるか（#2816）。
    *
@@ -1702,11 +1705,13 @@ export function IssueDeckShell({
     () =>
       resolvePullRequestHeader(
         filters.pr,
-        filteredPullRequests,
+        // 表示中のビューから外れているPRでも一覧の新しい値を使う（#5210）。絞り込み後から探すと、
+        // 詳細を開いた時点の値で固まり、push後も修正前の判定が「最新」に見え続ける
+        crossRepositoryPullRequests,
         openPullRequests.fetchedAt,
         pullRequestDetail.detail,
       ),
-    [filteredPullRequests, filters.pr, openPullRequests.fetchedAt, pullRequestDetail.detail],
+    [crossRepositoryPullRequests, filters.pr, openPullRequests.fetchedAt, pullRequestDetail.detail],
   );
 
   // 「ユーザーの確認待ち」に並ぶマージ待ちPRを、その場に重ねて開く（#2149）。**PR一覧画面へ

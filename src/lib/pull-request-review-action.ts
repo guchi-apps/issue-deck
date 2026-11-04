@@ -5,7 +5,7 @@ import {
   repairKindsFor,
   repairUnavailableNotices,
 } from "@/lib/github/pull-request-repair";
-import { resolveReviewVerdictFreshness } from "@/lib/github/review-verdict-freshness";
+import { resolveReviewVerdictFreshness, type ReviewRunProgress } from "@/lib/github/review-verdict-freshness";
 import type { PrimaryState } from "@/lib/pull-request-primary-state";
 import type {
   PullRequestReviewAcknowledgement,
@@ -30,7 +30,7 @@ import type {
 export type ReviewAction =
   | { kind: "none" }
   | { kind: "repairing" }
-  | { kind: "stale"; verdict: ReviewAttentionKind; reviewedSha: string | null }
+  | { kind: "stale"; verdict: ReviewAttentionKind; reviewedSha: string | null; progress: ReviewRunProgress | null }
   | { kind: "acknowledged"; verdict: ReviewAttentionKind; recordedBy: string | null }
   | { kind: "requested"; verdict: ReviewAttentionKind; commentUrl: string | null; createdAt: string }
   | {
@@ -107,7 +107,7 @@ export function deriveReviewAction(params: {
 
   const reviewedSha = pullRequest.reviewVerdict?.reviewedSha ?? null;
   if (resolveReviewVerdictFreshness({ reviewedSha, headSha: pullRequest.headSha }) === "stale") {
-    return { kind: "stale", verdict, reviewedSha };
+    return { kind: "stale", verdict, reviewedSha, progress: pullRequest.mergeJudgement.reviewProgress ?? null };
   }
 
   if (acknowledgement) {

@@ -107,9 +107,29 @@ describe("derivePrimaryState", () => {
 
   it("古いheadのレビュー指摘を現在の指摘として出さない", () => {
     const state = derivePrimaryState(pr({ reviewVerdict: verdict("changes-requested", "f".repeat(40)) }));
-    // 既存のマージ保留（積まれたコミットを明示する）は残るが、「レビュー指摘」とは言わない
-    expect(state.kind).not.toBe("review-findings");
-    expect(state.reason).toContain("コミットが積まれています");
+    expect(state.kind).toBe("review-stale");
+    expect(state.reason).toContain("fffffff");
+    expect(state.reason).toContain(SHA.slice(0, 7));
+  });
+
+  it("古い判定は再レビューの進み具合で、待てばよいか人の番かを分ける（#5210）", () => {
+    const judgement = (reviewProgress: "queued" | "running" | "completed" | "stalled") =>
+      pr({
+        reviewVerdict: verdict("changes-requested", "f".repeat(40)),
+        mergeJudgement: { state: "settled", step: null, runUrl: null, aiReview: AI_REVIEW_NONE, reviewProgress },
+      });
+    expect(derivePrimaryState(judgement("queued"))).toMatchObject({
+      label: "古い判定（再レビュー待ち）",
+      tone: "run",
+      needsAction: false,
+    });
+    expect(derivePrimaryState(judgement("running"))).toMatchObject({ label: "古い判定（再レビュー中）", needsAction: false });
+    expect(derivePrimaryState(judgement("completed"))).toMatchObject({ tone: "warn", needsAction: true });
+    expect(derivePrimaryState(judgement("stalled"))).toMatchObject({ tone: "warn", needsAction: true });
+  });
+
+  it("最新のコミットの要修正はレビュー指摘のまま", () => {
+    expect(derivePrimaryState(pr({ reviewVerdict: verdict("changes-requested") })).label).toBe("レビュー指摘");
   });
 
   it("読めない値を成功へ倒さない", () => {
