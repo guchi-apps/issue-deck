@@ -292,6 +292,24 @@ describe("ReleaseHistoryPanel のiOS配布バッジ（#3800）", () => {
     expect(screen.getByText(/TestFlight配布済み #318/)).toBeTruthy();
   });
 
+  it("取得中はiOS対応リポジトリの状況が無い版にだけ「確認中」を出す（#5214）", () => {
+    renderPanel({
+      iosStatusLoading: true,
+      entries: [
+        entry({ repoFullName: "guchi-apps/issue-deck", tagName: "v4.79.0" }),
+        entry({ repoFullName: "guchi-apps/issue-deck", tagName: "v4.78.0", iosDeliveredBuild: 318 }),
+        entry({ repoFullName: "guchi-apps/car-care", tagName: "v1.0.0" }),
+      ],
+    });
+    showAllReleases();
+    expect(screen.getAllByText("iOS配布を確認中")).toHaveLength(1);
+  });
+
+  it("iOS配布の状況を取れなかったときは案内を1行出す（#5214）", () => {
+    renderPanel({ entries: [entry({})], iosStatusError: "iOS配布の状況を取得できませんでした。" });
+    expect(screen.getByText("iOS配布の状況を取得できませんでした。")).toBeTruthy();
+  });
+
   it("iOSに自動配布されなかったリリースに「iOS自動配布なし」を出す", () => {
     renderPanel({
       entries: [

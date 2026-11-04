@@ -2175,6 +2175,8 @@ export function IssueDeckShell({
                   entries={visibleReleaseHistoryEntries}
                   isLoading={releaseHistory.isLoading}
                   error={releaseHistory.error}
+                  iosStatusLoading={releaseHistory.iosStatusLoading}
+                  iosStatusError={releaseHistory.iosStatusError}
                   onRefresh={releaseHistory.refresh}
                   checkTargets={releaseCheckTargets}
                   checkRecords={releaseHistory.checkRecords}
@@ -2615,6 +2617,8 @@ export function IssueDeckShell({
                   entries={visibleReleaseHistoryEntries}
                   isLoading={releaseHistory.isLoading}
                   error={releaseHistory.error}
+                  iosStatusLoading={releaseHistory.iosStatusLoading}
+                  iosStatusError={releaseHistory.iosStatusError}
                   onRefresh={releaseHistory.refresh}
                   checkTargets={releaseCheckTargets}
                   checkRecords={releaseHistory.checkRecords}

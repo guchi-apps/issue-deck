@@ -38,6 +38,7 @@ import {
 } from "@/lib/release-recovery";
 import { getRepoColor } from "@/lib/repo-color";
 import { cn } from "@/lib/utils";
+import { getWebviewIosRepository } from "@/lib/webview-ios-repos";
 
 /** 対象リポジトリの選択欄に出す1件 */
 export type ReleaseCheckRepositoryOption = {
@@ -64,6 +65,8 @@ export function ReleaseHistoryPanel({
   entries,
   isLoading,
   error,
+  iosStatusLoading = false,
+  iosStatusError = null,
   onRefresh,
   checkTargets,
   checkRecords,
@@ -79,6 +82,10 @@ export function ReleaseHistoryPanel({
   entries: ReleaseHistoryItem[] | null;
   isLoading: boolean;
   error: string | null;
+  /** iOS配布の状況を取得中か。一覧より遅れて届く間、対象のカードに「確認中」を出す（#5214） */
+  iosStatusLoading?: boolean;
+  /** iOS配布の状況を取れなかったときの案内（#5214） */
+  iosStatusError?: string | null;
   onRefresh: () => void;
   /** 動作確認の対象に選んだリポジトリ（#2930） */
   checkTargets: ReleaseCheckTargetSummary[];
@@ -215,6 +222,7 @@ export function ReleaseHistoryPanel({
       </header>
 
       {error && <p className="text-xs text-destructive">{error}</p>}
+      {iosStatusError && <p className="text-[11px] text-muted-foreground">{iosStatusError}</p>}
 
       {isLoading && !entries && (
         <div className="flex flex-col gap-2">
@@ -260,6 +268,7 @@ export function ReleaseHistoryPanel({
                     key={`${entry.repoFullName}-${entry.tagName}`}
                     entry={entry}
                     status={resolveReleaseCheckStatus(entry, checkIndex)}
+                    iosStatusLoading={iosStatusLoading}
                     /*
                       「対象外」の印は、**対象を1つでも選んでいて、かつそのリポジトリ自体を
                       選んでいないとき**にだけ出す。既定はどれも対象外なので、無条件に出すと
@@ -369,6 +378,7 @@ function CheckTargetPicker({
 function ReleaseHistoryCard({
   entry,
   status,
+  iosStatusLoading,
   outOfScopeReason,
   onToggleChecked,
   checkLineIndex,
@@ -378,6 +388,7 @@ function ReleaseHistoryCard({
 }: {
   entry: ReleaseHistoryItem;
   status: ReleaseCheckStatus;
+  iosStatusLoading: boolean;
   /** `not_targeted`のときだけ「対象外」の印を出す（nullなら何も出さない） */
   outOfScopeReason: "not_targeted" | null;
   onToggleChecked: (
@@ -397,6 +408,13 @@ function ReleaseHistoryCard({
   const repoName = entry.repoFullName.split("/")[1] ?? entry.repoFullName;
   const { lines } = extractReleaseHighlights(entry.body, Number.POSITIVE_INFINITY);
   const target = { repoFullName: entry.repoFullName, tagName: entry.tagName };
+  // 取り直しの間は前回の状況が重なっているので、まだ状況の無い版にだけ出す
+  const iosChecking =
+    iosStatusLoading &&
+    getWebviewIosRepository(entry.repoFullName) !== null &&
+    entry.iosDeliveredBuild === undefined &&
+    entry.iosFailureStage === undefined &&
+    entry.iosNotDistributed === undefined;
 
   return (
     <li
@@ -433,6 +451,12 @@ function ReleaseHistoryCard({
           </span>
         )}
         {entry.deployState !== undefined && <DeployStateBadge state={entry.deployState} />}
+        {iosChecking && (
+          <span className="inline-flex items-center gap-1 rounded-full border border-dashed px-1.5 py-px text-[10.5px] text-muted-foreground">
+            <Loader2 className="size-2.5 animate-spin" aria-hidden />
+            iOS配布を確認中
+          </span>
+        )}
         {entry.iosDeliveredBuild !== undefined && (
           <span
             className="inline-flex items-center gap-1 rounded-full border border-emerald-500/50 bg-emerald-50 px-1.5 py-px text-[10.5px] font-bold text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300"

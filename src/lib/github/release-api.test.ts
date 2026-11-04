@@ -218,7 +218,29 @@ describe("fetchReleasesBackTo（#2951で`api/repositories/release-history`から
     const result = await fetchReleasesBackTo("o", "r", "token", sinceMs, hasReachedSince);
 
     expect(result).toHaveLength(22);
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    // 2ページ目以降は並列に取るので、届かなかった場合に備えて上限まで問い合わせる（#5214）
+    expect(fetchMock).toHaveBeenCalledTimes(5);
+  });
+
+  it("基準へ届いたページより後の結果は含めない（#5214）", async () => {
+    const sinceMs = Date.now() - 25 * 86_400_000;
+    stubReleasePages(Array.from({ length: 3 }, (_, page) => Array.from({ length: 20 }, (_, i) => page * 20 + i)));
+
+    const result = await fetchReleasesBackTo("o", "r", "token", sinceMs, hasReachedSince);
+
+    expect(result).toHaveLength(40);
+    expect(result.map((entry) => entry.tagName).slice(0, 2)).toEqual(["v0", "v1"]);
+    expect(result.at(-1)?.tagName).toBe("v39");
+  });
+
+  it("1ページ目で基準へ届いていれば、残りのページを問い合わせない", async () => {
+    const sinceMs = Date.now() - 10 * 86_400_000;
+    const fetchMock = stubReleasePages([Array.from({ length: 20 }, (_, i) => i)]);
+
+    const result = await fetchReleasesBackTo("o", "r", "token", sinceMs, hasReachedSince);
+
+    expect(result).toHaveLength(20);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it("上限ページ数（5）に達したら打ち切る", async () => {

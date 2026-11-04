@@ -299,19 +299,20 @@ export async function fetchReleasesBackTo(
   if (sinceMs === undefined || first.length < RELEASE_HISTORY_PER_REPOSITORY_LIMIT) return first;
 
   const collected = [...first];
-  for (let page = 2; page <= RELEASE_HISTORY_MAX_PAGES_FOR_CHECK_TARGET; page += 1) {
-    // 一覧は公開日時の新しい順なので、末尾が基準より古ければその先はすべて対象外。
-    if (hasReachedSince(collected, sinceMs)) break;
-    const next = await fetchRecentReleases(
-      owner,
-      repo,
-      token,
-      RELEASE_HISTORY_PER_REPOSITORY_LIMIT,
-      page,
-    );
+  if (hasReachedSince(collected, sinceMs)) return collected;
+
+  // 残りのページは並列に取る（#5214）。順に取ると1ページ約0.5秒が積み上がり、確認対象の
+  // リポジトリが一覧全体を待たせる。余分に取ったページもETagで次回からは消費しない。
+  const pages = await Promise.all(
+    Array.from({ length: RELEASE_HISTORY_MAX_PAGES_FOR_CHECK_TARGET - 1 }, (_, index) =>
+      fetchRecentReleases(owner, repo, token, RELEASE_HISTORY_PER_REPOSITORY_LIMIT, index + 2),
+    ),
+  );
+  // 結果は順に取ったときと同じにする。一覧は公開日時の新しい順なので、基準へ届いたページで打ち切る
+  for (const next of pages) {
     if (next.length === 0) break;
     collected.push(...next);
-    if (next.length < RELEASE_HISTORY_PER_REPOSITORY_LIMIT) break;
+    if (next.length < RELEASE_HISTORY_PER_REPOSITORY_LIMIT || hasReachedSince(collected, sinceMs)) break;
   }
   return collected;
 }
