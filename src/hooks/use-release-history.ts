@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import type { ReleaseHistoryItem } from "@/lib/github/release-api";
 import {
@@ -14,12 +14,20 @@ import {
   type ReleaseLineToggleTarget,
   type ReleaseCheckRecord,
 } from "@/lib/release-check";
+import { applyIosReleaseStatuses, type IosReleaseStatus } from "@/lib/release-history";
 
 type ReleaseHistoryResponse = {
   entries: ReleaseHistoryItem[];
   checkRecords?: ReleaseCheckRecord[];
   checkLineRecords?: ReleaseCheckLineRecord[];
 };
+
+type IosStatusResponse = {
+  statuses?: IosReleaseStatus[];
+  failedRepositories?: string[];
+};
+
+const IOS_STATUS_ERROR = "iOS配布の状況を取得できませんでした。更新ボタンでもう一度取得できます。";
 
 type CheckTarget = { repoFullName: string; tagName: string };
 type CheckLineTarget = ReleaseLineToggleTarget;
@@ -55,6 +63,10 @@ type UseReleaseHistoryResult = {
   checkLineRecords: ReleaseCheckLineRecord[];
   isLoading: boolean;
   error: string | null;
+  /** iOS配布の状況を取得中か（一覧より遅れて届く。#5214） */
+  iosStatusLoading: boolean;
+  /** iOS配布の状況を取れなかったときの案内（#5214） */
+  iosStatusError: string | null;
   refresh: () => void;
   /** 1件のリリースを確認済み／未確認へ切り替える */
   setReleaseChecked: (
@@ -87,9 +99,15 @@ type UseReleaseHistoryResult = {
  * いない。押した操作を`pending*Ref`に持ち、応答へ上乗せしてから状態へ入れる。失敗時の
  * 巻き戻しも、押した時点の記録全体ではなく失敗した1件だけを逆向きに戻す（連続して押した
  * 他の項目まで戻さない）。
+ *
+ * **iOS配布の状況は一覧を出してから取る**（#5214）。run一覧の取得が最も重いため、一覧の応答から
+ * 切り離して後から`entries`へ重ねる。取り直しの間は前回の状況を残し、バッジを点滅させない。
  */
 export function useReleaseHistory(enabled: boolean): UseReleaseHistoryResult {
-  const [entries, setEntries] = useState<ReleaseHistoryItem[] | null>(null);
+  const [listedEntries, setListedEntries] = useState<ReleaseHistoryItem[] | null>(null);
+  const [iosStatuses, setIosStatuses] = useState<IosReleaseStatus[]>([]);
+  const [iosStatusLoading, setIosStatusLoading] = useState(false);
+  const [iosStatusError, setIosStatusError] = useState<string | null>(null);
   const [checkRecords, setCheckRecords] = useState<ReleaseCheckRecord[]>([]);
   const [checkLineRecords, setCheckLineRecords] = useState<ReleaseCheckLineRecord[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -112,6 +130,8 @@ export function useReleaseHistory(enabled: boolean): UseReleaseHistoryResult {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setIsLoading(true);
     setError(null);
+    setIosStatusLoading(false);
+    setIosStatusError(null);
     const fetchStartSeq = ++seqRef.current;
 
     fetch("/api/repositories/release-history", { signal: controller.signal })
@@ -121,7 +141,7 @@ export function useReleaseHistory(enabled: boolean): UseReleaseHistoryResult {
       })
       .then((json) => {
         if (cancelled) return;
-        setEntries(json.entries);
+        setListedEntries(json.entries);
         // 取得を始める前に保存が済んでいた操作は応答に入っているので手放す
         for (const [key, toggle] of pendingChecksRef.current) {
           if (!isReleaseToggleUnsettled(toggle, fetchStartSeq)) pendingChecksRef.current.delete(key);
@@ -135,6 +155,31 @@ export function useReleaseHistory(enabled: boolean): UseReleaseHistoryResult {
         setCheckLineRecords(
           overlayReleaseCheckLineToggles(json.checkLineRecords ?? [], pendingLinesRef.current.values()),
         );
+
+        // 一覧の表示を待たせないよう、ここでは待たずに取りに行く
+        setIosStatusLoading(true);
+        void fetch("/api/repositories/release-history/ios-status", { signal: controller.signal })
+          .then(async (res) => {
+            if (!res.ok) throw new Error(`取得に失敗しました (${res.status})`);
+            return (await res.json()) as IosStatusResponse;
+          })
+          .then((ios) => {
+            if (cancelled) return;
+            const failed = new Set(ios.failedRepositories ?? []);
+            // 取れなかったリポジトリは前回の状況を残す
+            setIosStatuses((prev) => [
+              ...prev.filter((status) => failed.has(status.repoFullName)),
+              ...(ios.statuses ?? []),
+            ]);
+            setIosStatusError(failed.size > 0 ? IOS_STATUS_ERROR : null);
+          })
+          .catch(() => {
+            if (cancelled || controller.signal.aborted) return;
+            setIosStatusError(IOS_STATUS_ERROR);
+          })
+          .finally(() => {
+            if (!cancelled) setIosStatusLoading(false);
+          });
       })
       .catch((err) => {
         if (cancelled || controller.signal.aborted) return;
@@ -149,6 +194,11 @@ export function useReleaseHistory(enabled: boolean): UseReleaseHistoryResult {
       controller.abort();
     };
   }, [enabled, reloadKey]);
+
+  const entries = useMemo(
+    () => (listedEntries ? applyIosReleaseStatuses(listedEntries, iosStatuses) : null),
+    [listedEntries, iosStatuses],
+  );
 
   const setReleaseChecked = useCallback(async (target: CheckTarget, checked: boolean) => {
     const key = checkKey(target);
@@ -208,6 +258,8 @@ export function useReleaseHistory(enabled: boolean): UseReleaseHistoryResult {
     checkLineRecords,
     isLoading,
     error,
+    iosStatusLoading,
+    iosStatusError,
     refresh,
     setReleaseChecked,
     setReleaseLineChecked,

@@ -44,6 +44,41 @@ export function selectVisibleReleaseHistory(
 }
 
 /**
+ * 1リポジトリぶんのiOS配布の状況（#5214）。一覧より遅れて届くので、`entries`とは別に持って重ねる。
+ * 版の判定は`lib/github/ios-release-status.ts`。
+ */
+export type IosReleaseStatus = {
+  repoFullName: string;
+  /** 版 → TestFlightへ配布済みのビルド番号 */
+  delivered: Record<string, number>;
+  /** 版 → 配布が失敗した段階（`null`は段階を特定できなかった失敗） */
+  failed: Record<string, string | null>;
+  /** 配布が実行中か。実行中は途中の版を「自動配布なし」と示さない */
+  hasActiveRun: boolean;
+};
+
+/**
+ * iOS配布の状況をリリース履歴へ重ねる。状況の届いていないリポジトリの版はそのまま返す。
+ * 配布済みタグがある版は、過去の失敗runより成功を優先する。
+ */
+export function applyIosReleaseStatuses(
+  entries: readonly ReleaseHistoryItem[],
+  statuses: readonly IosReleaseStatus[],
+): ReleaseHistoryItem[] {
+  if (statuses.length === 0) return [...entries];
+  const byRepository = new Map(statuses.map((status) => [status.repoFullName, status]));
+  return entries.map((entry) => {
+    const status = byRepository.get(entry.repoFullName);
+    if (!status) return entry;
+    const build = status.delivered[entry.tagName];
+    if (build !== undefined) return { ...entry, iosDeliveredBuild: build };
+    const failedStage = status.failed[entry.tagName];
+    if (failedStage !== undefined) return { ...entry, iosFailureStage: failedStage };
+    return status.hasActiveRun ? entry : { ...entry, iosNotDistributed: true };
+  });
+}
+
+/**
  * バージョンバンプだけを行うPRのタイトル。`reusable-release-develop-to-main.yml`が作る
  * 「v${NEW_VERSION}をリリースする」（release/vX.Y.Z→develop）と
  * 「v${DEV_VERSION}をmainへリリースする」（develop→main）の2パターンに一致する（#2807）。
@@ -52,6 +87,21 @@ export function selectVisibleReleaseHistory(
  * ハイライトの抽出時点で取り除く。
  */
 const VERSION_BUMP_TITLE = /^v\d+(?:\.\d+){2}を(?:mainへ)?リリースする$/;
+
+/**
+ * 公開した版をdevelopへ戻す同期PRのタイトル（`release-develop-sync-run.ts`の`createSyncPullRequest`。
+ * 版を読めなかったときは`main <SHA>`だけになる）。mainの内容を戻すだけで、その回の変更ではない（#5214）。
+ */
+const DEVELOP_SYNC_TITLE = /^(?:v\S+（main [0-9a-f]+）|main [0-9a-f]+)の公開をdevelopへ同期する$/;
+
+/** 新方式で版を上げて本番へ出すPRのタイトル（`リリース候補 RC-41`）。旧方式の「vX.Y.Zをmainへリリースする」にあたる（#5214） */
+const RELEASE_CANDIDATE_TITLE = /^リリース候補 RC-\d+$/;
+
+/**
+ * リリース履歴に出さないPRタイトル。**表示から外すだけで、Release本文は書き換えない**
+ * （本文のタスクリストは行チェックの正で、GitHub側ではそのまま見える。#4374）。
+ */
+const HIDDEN_RELEASE_LINE_TITLES = [VERSION_BUMP_TITLE, DEVELOP_SYNC_TITLE, RELEASE_CANDIDATE_TITLE];
 
 /** 抽出した箇条書き1行。`key`は#2982の行チェックが識別子として使う（下記コメント参照） */
 export type ReleaseHighlightLine = {
@@ -74,7 +124,7 @@ export type ReleaseHighlightLine = {
  * 生の本文は`## What's Changed`の見出しと`**Full Changelog**: <compare URL>`を含み、
  * そのまま出すと「タイムラインで何がリリースされたか」を一目で追えない。**箇条書きの行
  * （`* タイトル by @user in owner/repo#123`）だけを拾い、`by @user in ...`を落として
- * タイトルだけに縮め、バージョンバンプだけのPRタイトルは除く。**
+ * タイトルだけに縮め、バージョンバンプ・develop同期・リリース候補のPRタイトルは除く。**
  *
  * `max`件を超えるぶんは`moreCount`に残す（画面側は「ほかN件」として出す）。
  */
@@ -89,7 +139,7 @@ export function extractReleaseHighlights(
   const bulletLines = parseReleaseBodyTasks(body)
     .filter((task) => !task.carried)
     .map((task) => ({ text: task.text, key: task.key }))
-    .filter((item) => !VERSION_BUMP_TITLE.test(item.text))
+    .filter((item) => !HIDDEN_RELEASE_LINE_TITLES.some((title) => title.test(item.text)))
     // 同じPRが本文へ複数回載ることがある（#4287。8.47.0では同じ4件が2回並んだ）。
     // 先に出たものを残し、同じ`key`の行は捨てる
     .filter((item, index, all) => all.findIndex((other) => other.key === item.key) === index);

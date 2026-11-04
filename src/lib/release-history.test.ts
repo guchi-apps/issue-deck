@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { ReleaseHistoryItem } from "@/lib/github/release-api";
 import {
+  applyIosReleaseStatuses,
   extractReleaseHighlights,
   groupReleaseHistoryByJstDate,
   mergeReleaseHistory,
@@ -67,6 +68,30 @@ describe("extractReleaseHighlights", () => {
     const result = extractReleaseHighlights(body, 10);
     expect(result.lines.map((line) => line.text)).toEqual(["機能A", "機能B"]);
     expect(result.moreCount).toBe(0);
+  });
+
+  it("develop同期とリリース候補のPRは出さない（#5214。v8.89.0の本文）", () => {
+    const body = [
+      "## What's Changed",
+      "- [ ] v8.88.4（main 615411c）の公開をdevelopへ同期する by @issue-deck[bot] in https://github.com/guchi-apps/issue-deck/pull/5204",
+      "- [ ] main 615411cの公開をdevelopへ同期する by @issue-deck[bot] in https://github.com/guchi-apps/issue-deck/pull/5203",
+      "- [ ] iOSアプリのアイコンバッジと設定画面のオン・オフを追加する #5203 by @m-guchi in https://github.com/guchi-apps/issue-deck/pull/5205",
+      "- [ ] リリース候補 RC-41 by @issue-deck[bot] in https://github.com/guchi-apps/issue-deck/pull/5206",
+    ].join("\n");
+    expect(extractReleaseHighlights(body, 10).lines.map((line) => line.text)).toEqual([
+      "iOSアプリのアイコンバッジと設定画面のオン・オフを追加する #5203",
+    ]);
+  });
+
+  it("同期やリリース候補を題材にした通常のPRは残す（#5214）", () => {
+    const titles = [
+      "同期PRのGitHubオートマージを有効にしない #5151",
+      "develop同期PRを、CIの実行中にGitHubのオートマージへ任せる",
+      "リリース候補の修正対応中・停止をブランチ画面に表示する #4972",
+      "RCへ後から取り込んだ修正PRをブランチ画面のリリース候補に表示する #5103",
+    ];
+    const body = titles.map((title, index) => `* ${title} by @u in https://github.com/o/r/pull/${index + 1}`).join("\n");
+    expect(extractReleaseHighlights(body, 10).lines.map((line) => line.text)).toEqual(titles);
   });
 
   it("自動生成された箇条書きから、by @user in ... を落としてタイトルだけにする", () => {
@@ -158,5 +183,50 @@ describe("groupReleaseHistoryByJstDate", () => {
     expect(groups.map((group) => group.dateKey)).toEqual(["2026-09-02", "2026-09-01"]);
     expect(groups[0].entries.map((entry) => entry.repoFullName)).toEqual(["a", "b"]);
     expect(groups[1].entries.map((entry) => entry.repoFullName)).toEqual(["c"]);
+  });
+});
+
+describe("applyIosReleaseStatuses（#5214）", () => {
+  const entry = (repoFullName: string, tagName: string): ReleaseHistoryItem => ({
+    repoFullName,
+    tagName,
+    name: tagName,
+    htmlUrl: `https://example.com/${tagName}`,
+    publishedAt: "2026-11-04T00:00:00Z",
+    body: null,
+  });
+
+  it("配布済み・失敗・自動配布なしを版ごとに重ね、成功を失敗より優先する", () => {
+    const result = applyIosReleaseStatuses(
+      [entry("o/a", "v3"), entry("o/a", "v2"), entry("o/a", "v1"), entry("o/a", "v0")],
+      [
+        {
+          repoFullName: "o/a",
+          delivered: { v3: 10, v0: 7 },
+          failed: { v2: "アップロード", v1: null, v0: "ビルド" },
+          hasActiveRun: false,
+        },
+      ],
+    );
+    expect(result[0].iosDeliveredBuild).toBe(10);
+    expect(result[1].iosFailureStage).toBe("アップロード");
+    expect(result[2].iosFailureStage).toBeNull();
+    expect(result[3].iosDeliveredBuild).toBe(7);
+    expect(result[3].iosFailureStage).toBeUndefined();
+  });
+
+  it("配布が実行中のリポジトリでは「自動配布なし」を付けない", () => {
+    const status = { repoFullName: "o/a", delivered: {}, failed: {} };
+    expect(applyIosReleaseStatuses([entry("o/a", "v1")], [{ ...status, hasActiveRun: true }])[0].iosNotDistributed).toBeUndefined();
+    expect(applyIosReleaseStatuses([entry("o/a", "v1")], [{ ...status, hasActiveRun: false }])[0].iosNotDistributed).toBe(true);
+  });
+
+  it("状況の届いていないリポジトリの版はそのまま返す", () => {
+    const original = entry("o/b", "v1");
+    const result = applyIosReleaseStatuses(
+      [original],
+      [{ repoFullName: "o/a", delivered: {}, failed: {}, hasActiveRun: false }],
+    );
+    expect(result[0]).toBe(original);
   });
 });

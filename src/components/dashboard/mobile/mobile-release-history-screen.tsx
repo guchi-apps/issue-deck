@@ -28,6 +28,8 @@ export function MobileReleaseHistoryScreen({
   entries,
   isLoading,
   error,
+  iosStatusLoading,
+  iosStatusError,
   onRefresh,
   checkTargets,
   checkRecords,
@@ -41,6 +43,8 @@ export function MobileReleaseHistoryScreen({
   entries: ReleaseHistoryItem[] | null;
   isLoading: boolean;
   error: string | null;
+  iosStatusLoading: boolean;
+  iosStatusError: string | null;
   onRefresh: () => void;
   checkTargets: ReleaseCheckTargetSummary[];
   checkRecords: ReleaseCheckRecord[];
@@ -67,6 +71,8 @@ export function MobileReleaseHistoryScreen({
           entries={entries}
           isLoading={isLoading}
           error={error}
+          iosStatusLoading={iosStatusLoading}
+          iosStatusError={iosStatusError}
           onRefresh={onRefresh}
           checkTargets={checkTargets}
           checkRecords={checkRecords}
