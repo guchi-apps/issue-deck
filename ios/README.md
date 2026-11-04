@@ -42,7 +42,7 @@
 - **配るのは `ios/IssueDeck/`・`ios/IssueDeck.xcodeproj/` に実質的な変更があるときだけ**（README・scripts・版番号の行だけの差分は数えない）。Webだけの更新ではビルドしない。比べる相手は最後に配布し終えたタグ。タグが無い初回は必ず配る
 - 判定だけ見たいときは Actions →「iOS TestFlight」→ Run workflow で `dry_run` にチェック。sha を指定すればそのコミット（main上のもの）を配る
 - iOSの失敗はWebのデプロイとは別のrunで赤くなる（Webの本番反映は済んでいる）。失敗した run は「Re-run failed jobs」か同じ shaで手動実行し直す（アップロード済みのビルドは二重に上げない）
-- ビルド番号は `run_number*100+run_attempt`。署名はクラウド署名（APIキー＋`-allowProvisioningUpdates`）。使い捨てランナーで作られた Development 証明書は署名の前後で失効させる（溜まると上限に達する）
+- ビルド番号は `run_number*100+run_attempt`。署名はクラウド署名（APIキー＋`-allowProvisioningUpdates`）。使い捨てランナーで作られた Development 証明書は署名の前後で失効させる（溜まると上限に達する）。対象は表示名（APIの `displayName`）が「Created via API」のものだけで、`name` は「Apple Development: Created via API」のように種別の接頭辞が付くので判定に使わない（#5208）。実行ログの「証明書 N 件のうち、API作成の Development 証明書は M 件」で M が 0 のまま N が増え続けていたら掃除が効いていない
 - CIの書き出しは `ios/scripts/ExportOptions.plist`（`destination=export`。IPAを書き出してから `altool` で上げる）。手動経路は `ios/ExportOptions.plist`（`destination=upload`）
 - `develop`→`main` のPRには、`ios/` に配布物の変更があると `ios-rebuild-notice.yml` がコメントで知らせる
 - 内部グループが複数あるときは repository variable `TESTFLIGHT_GROUP` にグループ名を入れる
