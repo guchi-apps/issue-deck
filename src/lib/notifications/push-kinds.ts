@@ -5,7 +5,7 @@
  * OFFは`PushMutedKind`の行で表す（行があればOFF）。既定は全ON。
  */
 
-export const PUSH_KINDS = ["check-user", "release-merge", "release", "deploy-launch"] as const;
+export const PUSH_KINDS = ["check-user", "release-merge", "release", "deploy-launch", "review-stalled"] as const;
 
 export type PushKind = (typeof PUSH_KINDS)[number];
 
@@ -25,6 +25,10 @@ export const PUSH_KIND_LABELS: Record<PushKind, { title: string; description: st
   "deploy-launch": {
     title: "デプロイ起動漏れ",
     description: "mainへのマージ後にデプロイが起動しなかったとき",
+  },
+  "review-stalled": {
+    title: "自動レビューの停止",
+    description: "実行機待ちで止まった自動レビューが、自動でやり直しても直らなかったとき",
   },
 };
 

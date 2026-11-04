@@ -460,6 +460,12 @@ review-providerが実行機に割り当てられないまま`queued`で取り残
 （asset-manager#826）。このときfallbackも含め後続は全て`skipped`になり、ワークフロー自身は検知できない。
 GitHubもこのrunの再実行を`403 This workflow run cannot be retried`で断るため（`rerun-failed-jobs`で確認）、
 PR画面は「レビュー未実施」と出し、「AIレビューを再実行」が下書き→レビュー可能の往復で新しいrunを起こす（#5212）。
+
+**人が画面を開かなくても、巡回が同じやり直しを1回だけ行い、直らなければPushで知らせる（#5215）。** pollerが毎巡呼ぶ`POST /api/pull-requests/auto-repair-sweep`に相乗りし（間隔は3分。pollerの変更は要らない）、判定は純関数`decideReviewStallRescue`（`src/lib/github/pull-request-review-stall-rescue.ts`）が持つ。
+
+- **対象は`reviewStopped.reason === "stalled"`だけ。** ジョブが失敗した・手で止めた（`failed`）は原因の確認が先で、やり直しても同じ結果になりやすいので触らない。いまのコミットの判定が既にあるPR（`isReviewNotRun`が偽）・下書き・develop向け以外も対象外
+- **上限は同じコミットで1回、1つのPRで計3回**（`PullRequestReviewStallRescue`）。やり直す前に記録を更新して席を取るので、途中で落ちても再度は起動しない。やり直しの手順は画面の「AIレビューを再実行」と共通（`rerunPullRequestReview`）で、下書きへ戻す往復はGitHubが再実行を断ったときだけ
+- **やり直しから10分経っても止まったまま、または上限に達していれば、そのコミットにつき1回だけPushする**（通知の種類`review-stalled`。設定画面でOFFにできる）。やり直しの失敗も同じ経路で通知に流れる。レビュー可能へ戻せずPRが下書きに残ったときは、巡回の対象から外れるのでその場で知らせる
 callerの`on.pull_request.types`に`ready_for_review`が要る（配布している雛形には入っている）。
 
 - サブPCのセッション報告時に`ImplementationRun`へ担当と`firstSeenAt`を保存する。

@@ -1932,6 +1932,28 @@ model PullRequestAutoRepairLoop {
   @@index([status])
 }
 
+/// 実行機待ちで取り残された自動レビューの、無人のやり直しと通知の記録（#5215）。
+///
+/// 持つのは**上限の判定に要る回数と、鳴らしたHEAD**だけで、止まっているかどうかの正はGitHubのcheck-run。
+/// 新しいコミットで`headAttempts`は数え直すが、`totalAttempts`はPRが開いている間は戻さない。
+/// マージ・クローズされたPRの行は次の巡回が消す。
+model PullRequestReviewStallRescue {
+  id                 String    @id @default(cuid())
+  repositoryFullName String
+  pullRequestNumber  Int
+  /// `headAttempts`が指すコミット
+  headSha            String
+  headAttempts       Int       @default(0)
+  totalAttempts      Int       @default(0)
+  lastAttemptAt      DateTime?
+  /// 通知済みのコミット。同じコミットで鳴らし直さないための鍵
+  notifiedHeadSha    String?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  @@unique([repositoryFullName, pullRequestNumber], map: "PullRequestReviewStallRescue_repo_pr_key")
+}
+
 /// 本番デプロイ失敗を起点にした復旧系列（#3998）。デプロイ失敗の帯の「AIに修正を依頼」で1件できる。
 ///
 /// **1回の失敗（repo・環境・run・attempt）につき1行。** 同じ失敗の連打は同じ行を返す。
