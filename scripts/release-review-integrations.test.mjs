@@ -280,7 +280,7 @@ it("明示参照が無くても、呼び出しとマニフェストから受信�
   expect(prompt).toContain("実行も巡回もしません");
   expect(readFileSync(path.join(out, "fingerprint"), "utf8")).not.toBe("");
   // 判定器の版が上がっているので、#5192より前に保存された結果の指紋とは一致しない
-  expect(m.judgeVersion).toBe(3);
+  expect(m.judgeVersion).toBe(4);
 });
 it("本文・コメント・ドキュメントの記述や、別ファイルに分かれた環境変数とパスからは受信口を発見しない", () => {
   candidate({
@@ -390,4 +390,41 @@ it("入口ファイルで処理本体を特定できないときは、入口のi
   const cur = JSON.parse(readFileSync(path.join(out, "manifest.json"), "utf8")).apiContracts[0].codeAtDeployCandidate;
   expect(cur.handlerResolved).toBe(false);
   expect(cur.files.map((f) => f.path)).toEqual(["src/server.ts"]);
+});
+it("設定した連携先のmain固定SHAのコードと型定義を渡し、develop止まりと資料不足を区別する（#5223）", () => {
+  const MAIN = "d".repeat(40);
+  const cfg = path.join(dir, "links.json");
+  writeFileSync(cfg, JSON.stringify({ "guchi-apps/aide": [{ provider: "guchi-apps/kurashio", reason: "r", triggers: ["a"], patterns: ["src/core/**"], types: ["src/core/types.ts"] }] }));
+  writeFake({
+    "repos/guchi-apps/kurashio/commits/main": { sha: MAIN },
+    [`repos/guchi-apps/kurashio/git/trees/${MAIN}`]: { tree: [{ path: "src/core/x.ts", type: "blob" }, { path: "src/core/types.ts", type: "blob" }, { path: "src/other.ts", type: "blob" }] },
+    [`repos/guchi-apps/kurashio/contents/src/core/x.ts?ref=${MAIN}`]: "export const f = 1;\n",
+    [`repos/guchi-apps/kurashio/contents/src/core/types.ts?ref=${MAIN}`]: "export type T = number | null;\n",
+    "repos/guchi-apps/kurashio/compare/main...develop": { ahead_by: 2, files: [{ filename: "src/core/y.ts" }, { filename: "docs/z.md" }] },
+  });
+  execFileSync("python3", ["scripts/release-review-integrations.py", repo, "guchi-apps/aide", base, head, out],
+    { encoding: "utf8", env: { ...process.env, RELEASE_REVIEW_GH: fake, RELEASE_REVIEW_LINKS: cfg } });
+  const m = JSON.parse(readFileSync(path.join(out, "manifest.json"), "utf8"));
+  const l = m.linkedRepos[0];
+  expect(l.pinned.headSha).toBe(MAIN);
+  expect(l.code.files.map((f) => f.path)).toEqual(["src/core/x.ts"]);
+  expect(l.developOnly.files).toEqual(["src/core/y.ts"]);
+  expect(m.apiContracts.some((c) => c.path === "(型定義)" && c.codeAtDeployCandidate.files[0].path === "src/core/types.ts")).toBe(true);
+  // トリガーに一致しない変更では取得しない
+  writeFileSync(cfg, JSON.stringify({ "guchi-apps/aide": [{ provider: "guchi-apps/kurashio", triggers: ["zzz/**"], patterns: ["src/**"] }] }));
+  execFileSync("python3", ["scripts/release-review-integrations.py", repo, "guchi-apps/aide", base, head, path.join(dir, "out2")],
+    { encoding: "utf8", env: { ...process.env, RELEASE_REVIEW_GH: fake, RELEASE_REVIEW_LINKS: cfg } });
+  expect(JSON.parse(readFileSync(path.join(dir, "out2", "manifest.json"), "utf8")).linkedRepos).toEqual([]);
+});
+it("連携先mainに対象コードが無いときは不整合ではなく資料不足として理由と足すものを残す（#5223）", () => {
+  const MAIN = "e".repeat(40);
+  const cfg = path.join(dir, "links.json");
+  writeFileSync(cfg, JSON.stringify({ "guchi-apps/aide": [{ provider: "guchi-apps/kurashio", patterns: ["src/core/**"] }] }));
+  writeFake({ "repos/guchi-apps/kurashio/commits/main": { sha: MAIN }, [`repos/guchi-apps/kurashio/git/trees/${MAIN}`]: { tree: [] } });
+  const outText = execFileSync("python3", ["scripts/release-review-integrations.py", repo, "guchi-apps/aide", base, head, out],
+    { encoding: "utf8", env: { ...process.env, RELEASE_REVIEW_GH: fake, RELEASE_REVIEW_LINKS: cfg } });
+  const l = JSON.parse(readFileSync(path.join(out, "manifest.json"), "utf8")).linkedRepos[0];
+  expect(l.classification).toBe("資料未取得");
+  expect(l.missing).toContain("release-review-links.json");
+  expect(outText).toContain("資料不足であって不整合の疑いではありません");
 });
