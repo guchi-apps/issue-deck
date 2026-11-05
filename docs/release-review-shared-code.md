@@ -35,6 +35,18 @@
 
 実走（2026-11-01、work-relay PR #388 base `6d42f6a7` / head `ed2e1858`）: `guchi-apps/aide#744`の資料に加えて`/api/news-mail/send`を発見元`src/app/api/news-mail/send/route.ts:69`・`AIDE_NEWS_MAIL_URL`で特定し、デプロイ候補`aa55e4bd`と実装時点`76bd2a35`（PR #258）の両方で`src/server.ts`（301行目）・`src/api/news-mail.ts`・`src/api/secret.ts`・`src/core/connectors/news-mail/send.ts`・`idempotency.ts`などを取得した。全体レビューAIによるRC #388自体の再評価は、poller更新後の再実行で行う。
 
+# 設定で指定する連携先リポジトリの固定版（#5223）
+
+アプリ間連携で、候補に連携先への参照もマニフェストの対応付けも無いと、連携先のコードがレビューに渡らず「確認項目が未確認」になる（asset-manager #838がAIDEのmoney APIの`calcFlag`を解釈する変更で、AIDE側の実装が資料に無かった）。
+
+`scripts/release-review-links.json`に「対象リポジトリ → 連携先（`provider`）・取得するパス（`patterns`）・型定義（`types`）・取得の条件（`triggers`。候補の変更ファイルに一致したときだけ）」を書くと、`release-review-integrations.py`が連携先の**本番mainの先端SHA**で次を取得する。
+
+- `linkedRepos[].code`: `patterns`に一致するコード（上限20件。省略は`omittedFiles`）。`types`は`typeDefinitions`と`apiContracts`（`path: "(型定義)"`）にも載せる
+- `linkedRepos[].developOnly`: 連携先の`main...develop`の差分のうち対象パスにあるもの。空でなければ「対応がdevelop止まりでmainに無い」疑いとして指摘する（`checked: false`は比較できず未確認）
+- 取得できないとき（mainに対象コードが無い・通信失敗・権限不足）は`classification`と`missing`に理由と足すものを残す。プロンプトは**「資料不足」と「不整合の疑い」を別に報告**し、資料不足には足す設定を添えるよう指示する
+
+取得は適合の証拠ではなく、稼働SHAの確認でもない。設定は連携先が増えるたびに足す（新しい連携先を足す変更と同じPRで行う）。`JUDGE_VERSION`を4へ上げたため、保存済みの未確認は指紋の不一致で再評価される。実行ホストの更新（「更新して再起動」）後に効く。
+
 ## 適用範囲（2026-10-24時点）
 
 共通ランナー（`run-release-review.sh`）とcallerの参照タグは同一で、共通修正だけで全管理対象に適用される。callerは`reusable-release-develop-to-main.yml@workflows/v54`を参照する15リポジトリ（aide・asset-manager・car-care・clip-hive・db-console・kurashio・meisai-lab・morrow・pi0w・signaly・solitaire・status-hub・stockly・work-relay・yoteiflow）で、独立のrelease-review実装は見つかっていない。このため子Issueは起案していない（個別修正が必要と分かったrepoだけ起案する）。タグの参照が同じでも、実行ホスト（サブPC）のrunnerは「更新して再起動」で更新するまで旧版のまま。

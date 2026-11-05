@@ -1,0 +1,21 @@
+{
+  "_comment": "全体レビューへ連携先リポジトリの固定版（本番mainの先端SHA）を渡す設定（#5223）。キーは対象リポジトリ。triggersは候補の変更ファイルに一致したときだけ取得する条件、patternsは連携先から取得するパス（*は1階層、**は階層をまたぐ）、typesは連携先の型定義（apiContractsとして渡す）。",
+  "guchi-apps/asset-manager": [
+    {
+      "provider": "guchi-apps/aide",
+      "reason": "AIDEのmoney API（Zaim連携。calcFlagなどの値の意味）を呼ぶ",
+      "triggers": ["lib/ledger-sources/**"],
+      "patterns": ["src/core/connectors/zaim/**", "src/core/views/money-*.ts"],
+      "types": ["src/core/connectors/zaim/types.ts"]
+    }
+  ],
+  "guchi-apps/kurashio": [
+    {
+      "provider": "guchi-apps/aide",
+      "reason": "AIDE経由で光熱費・電力データを連携する",
+      "triggers": ["src/**/aide*/**", "src/**/*aide*.ts"],
+      "patterns": ["src/core/connectors/kepco/**", "src/core/connectors/utility*/**"],
+      "types": []
+    }
+  ]
+}
