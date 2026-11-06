@@ -29,7 +29,8 @@ export function GET(request: Request) {
  * 次に画面を開いたときは`release-history/cached`がそれを即座に返す。
  *
  * `repositories`はこの応答が受け持ったリポジトリ（取得に失敗したものは含めない）。画面は
- * ここに含まれるリポジトリの分だけを差し替え、失敗したリポジトリは前回の値を残す。
+ * ここに含まれるリポジトリの分だけを差し替え、失敗したリポジトリは前回の値を残す。失敗したリポジトリは
+ * `failedRepositories`で明示する（最新を取れていないものを最新として確認させないため）。
  */
 async function handleGET(request: Request) {
   const userId = await requireUserId();
@@ -42,7 +43,13 @@ async function handleGET(request: Request) {
   const allRepositories = await findReleaseHistoryRepositories(userId);
 
   if (allRepositories.length === 0) {
-    return NextResponse.json({ repositories: [], entries: [], checkRecords: [], checkLineRecords: [] });
+    return NextResponse.json({
+      repositories: [],
+      failedRepositories: [],
+      entries: [],
+      checkRecords: [],
+      checkLineRecords: [],
+    });
   }
 
   const { checkSinceMsByFullName, checkRecords, legacyCheckLineRecords } = await loadReleaseCheckMaterials(
@@ -109,6 +116,10 @@ async function handleGET(request: Request) {
   return NextResponse.json(
     {
       repositories: succeeded.map((row) => row.fullName),
+      // 取得に失敗したリポジトリ。画面は確認対象にこれが残る間、最新とみなさず確認操作をロックする
+      failedRepositories: repositories
+        .map((repository) => repository.fullName)
+        .filter((fullName) => !succeeded.some((row) => row.fullName === fullName)),
       entries,
       checkRecords,
       // 項目ごとの確認状態はGitHub Release本文のタスクリストが正（#4374）。取得のたびに本文から組み直す
