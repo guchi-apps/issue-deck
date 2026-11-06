@@ -13,6 +13,7 @@ import type {
   ReleaseCheckTargetSummary,
   ReleaseLineToggleTarget,
 } from "@/lib/release-check";
+import type { ReleaseHistoryFreshness } from "@/lib/release-history-cache";
 
 /**
  * スマホの「リリース履歴」画面（#2726）。
@@ -30,6 +31,8 @@ export function MobileReleaseHistoryScreen({
   error,
   iosStatusLoading,
   iosStatusError,
+  freshness,
+  fetchedAt,
   onRefresh,
   checkTargets,
   checkRecords,
@@ -45,6 +48,9 @@ export function MobileReleaseHistoryScreen({
   error: string | null;
   iosStatusLoading: boolean;
   iosStatusError: string | null;
+  /** 一覧の鮮度（#5230） */
+  freshness: ReleaseHistoryFreshness;
+  fetchedAt: string | null;
   onRefresh: () => void;
   checkTargets: ReleaseCheckTargetSummary[];
   checkRecords: ReleaseCheckRecord[];
@@ -73,6 +79,8 @@ export function MobileReleaseHistoryScreen({
           error={error}
           iosStatusLoading={iosStatusLoading}
           iosStatusError={iosStatusError}
+          freshness={freshness}
+          fetchedAt={fetchedAt}
           onRefresh={onRefresh}
           checkTargets={checkTargets}
           checkRecords={checkRecords}

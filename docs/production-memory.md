@@ -388,3 +388,13 @@ PRのマージだけでは検証完了としない。デプロイ後に次を記
 
 run一覧の本文はヒープに残さず、必要な項目だけを覚える（`lib/github/ios-release-status.ts`）。
 本番での応答時間は未計測で、反映後に一覧と`ios-status`の両方を確かめる。
+
+## リリース履歴の先出し表示と段階取得（#5230）
+
+画面を開いてから一覧が出るまで、全リポジトリのGitHub取得（`fetchReleasesBackTo`＋`appendUnreleasedVersions`）を待ち切っていた。次の2つで、開いた直後に出るようにした。
+
+- **前回の取得結果を先に出す。** `release-history`が取得できたリポジトリぶんを`ReleaseHistoryCache`（リポジトリごとに1行。正はGitHubで、ここは写し）へ残し、`release-history/cached`（GitHubを呼ばない）がそれを返す。写しはユーザーに依らないため、読むときは本体と同じ母集団（`findReleaseHistoryRepositories`）に絞る。確認の記録（`ReleaseCheck`）は写さず毎回DBから読む
+- **最新は2本に分けて並行して取る。** `?scope=targets`（動作確認の対象にしたリポジトリ）と`?scope=others`。初期表示の「未確認のリリース」は確認対象からしか出ないため、1本目が届いた時点で初期表示は最新になる。画面は応答の`repositories`に含まれるリポジトリの分だけを差し替え（`mergeReleaseHistoryByRepository`）、取得に失敗したリポジトリは前回の値を残す。失敗した確認対象（応答の`failedRepositories`）が残る間は最新とみなさず`stale`のまま確認操作をロックする（#5234）
+- 前回の値を出している間（`freshness: "stale"`）は確認のボタン・チェックを押させない（項目チェックの正はGitHub本文で、古い本文に対して押させないため）
+
+遅さの内訳は手元で測れない（worktreeの開発DBには接続先が無い）。各scopeの応答に`Server-Timing`（`github`・`total`）を付け、`[GET /api/repositories/release-history] scope=... total=...ms slowest=...`のログに遅いリポジトリ上位3件を出しているので、本番ではそれで分割の効果と遅いリポジトリを確かめる。

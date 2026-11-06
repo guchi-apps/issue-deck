@@ -127,6 +127,7 @@ model Repository {
   releaseCheckTargetedBy  ReleaseCheckTarget[]
   releaseChecks           ReleaseCheck[]
   releaseCheckLines       ReleaseCheckLine[]
+  releaseHistoryCache     ReleaseHistoryCache?
 
   @@unique([installationId, fullName])
   @@index([installationId])
@@ -311,6 +312,28 @@ model ReleaseCheckLine {
 
   @@unique([userId, repositoryId, tagName, lineKey])
   @@index([repositoryId])
+}
+
+// リリース履歴（#2726）の前回の取得結果（#5230）。リポジトリごとに1行。
+//
+// **正はGitHub Releaseで、ここは表示を早めるための写し。** 画面を開いた直後に
+// これを出し、最新の取得（`GET /api/repositories/release-history?scope=...`）が
+// 届いたリポジトリから差し替える。取得に失敗したリポジトリは前回の値を残す。
+// 確認の記録（`ReleaseCheck`）はここに含めず毎回DBから読む。
+//
+// ユーザーに依らない共有の写しなので、読む側は必ずユーザーの接続先へ絞ってから読む
+// （`release-history/cached/route.ts`）。
+model ReleaseHistoryCache {
+  id           String @id @default(cuid())
+  repositoryId String @unique
+  /**
+   * `ReleaseHistoryItem[]`（`appendUnreleasedVersions`まで済ませた、そのリポジトリの一覧）
+   */
+  entries      Json
+
+  fetchedAt DateTime @default(now())
+
+  repository Repository @relation(fields: [repositoryId], references: [id], onDelete: Cascade)
 }
 
 // --- Issueキャッシュ（M6: Webhookで差分反映） ---

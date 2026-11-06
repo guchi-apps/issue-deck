@@ -15,17 +15,31 @@ import {
   type ReleaseCheckRecord,
 } from "@/lib/release-check";
 import { applyIosReleaseStatuses, type IosReleaseStatus } from "@/lib/release-history";
+import {
+  mergeReleaseHistoryByRepository,
+  type ReleaseHistoryFreshness,
+  type ReleaseHistoryState,
+} from "@/lib/release-history-cache";
 
 type ReleaseHistoryResponse = {
+  /** この応答が受け持ったリポジトリ（#5230）。ここに含まれる分だけを差し替える */
+  repositories?: string[];
+  /** この応答の母集団のうち取得に失敗したリポジトリ。残っている間は最新とみなさない */
+  failedRepositories?: string[];
   entries: ReleaseHistoryItem[];
   checkRecords?: ReleaseCheckRecord[];
   checkLineRecords?: ReleaseCheckLineRecord[];
+  /** 取得した時刻。前回の取得結果では最も古いリポジトリの時刻（#5230） */
+  fetchedAt?: string | null;
 };
 
 type IosStatusResponse = {
   statuses?: IosReleaseStatus[];
   failedRepositories?: string[];
 };
+
+const RELEASE_FETCH_PARTIAL_ERROR =
+  "一部のリポジトリのリリース履歴を取得できませんでした。取得できるまで確認操作はできません。更新ボタンでもう一度取得できます。";
 
 const IOS_STATUS_ERROR = "iOS配布の状況を取得できませんでした。更新ボタンでもう一度取得できます。";
 
@@ -55,6 +69,23 @@ function lineSaveErrorMessage(code: string | undefined, status: number): string 
   }
 }
 
+/**
+ * 段階ごとの応答を重ねる元（#5230）にも行チェックの切り替えを入れておく。入れないと、別のリポジトリの
+ * 応答が届いたときにこのリポジトリの行が合成元の古い値へ戻る（保存済みの切り替えは上乗せの対象から外れるため）
+ */
+function applyLineToggleToHistory(
+  historyRef: { current: ReleaseHistoryState | null },
+  target: CheckLineTarget,
+  checked: boolean,
+) {
+  const current = historyRef.current;
+  if (!current) return;
+  historyRef.current = {
+    ...current,
+    checkLineRecords: applyReleaseCheckLineToggle(current.checkLineRecords, target, checked),
+  };
+}
+
 type UseReleaseHistoryResult = {
   entries: ReleaseHistoryItem[] | null;
   /** 確認済みの記録（#2930） */
@@ -62,6 +93,13 @@ type UseReleaseHistoryResult = {
   /** 箇条書き行ごとの確認記録（#2982） */
   checkLineRecords: ReleaseCheckLineRecord[];
   isLoading: boolean;
+  /**
+   * 一覧の鮮度（#5230）。`stale`の間は前回の取得結果を出しているだけなので、項目チェックを押させない。
+   * `partial`は確認対象のリポジトリだけ最新
+   */
+  freshness: ReleaseHistoryFreshness;
+  /** 出している一覧を取得した時刻（ISO文字列）。まだ何も無ければnull */
+  fetchedAt: string | null;
   error: string | null;
   /** iOS配布の状況を取得中か（一覧より遅れて届く。#5214） */
   iosStatusLoading: boolean;
@@ -100,6 +138,12 @@ type UseReleaseHistoryResult = {
  * 巻き戻しも、押した時点の記録全体ではなく失敗した1件だけを逆向きに戻す（連続して押した
  * 他の項目まで戻さない）。
  *
+ * **前回の取得結果を先に出し、最新は2段で重ねる**（#5230）。開いた直後は`release-history/cached`
+ * （GitHubを呼ばない）を出し、最新は確認対象のリポジトリ（`scope=targets`）とそれ以外
+ * （`scope=others`）を並行して取る。初期表示の「未確認のリリース」は確認対象からしか出ないため、
+ * `targets`が届いた時点で初期表示は最新になる。応答はそれぞれが受け持ったリポジトリの分だけを
+ * 差し替える（`mergeReleaseHistoryByRepository`）。
+ *
  * **iOS配布の状況は一覧を出してから取る**（#5214）。run一覧の取得が最も重いため、一覧の応答から
  * 切り離して後から`entries`へ重ねる。取り直しの間は前回の状況を残し、バッジを点滅させない。
  */
@@ -113,6 +157,10 @@ export function useReleaseHistory(enabled: boolean): UseReleaseHistoryResult {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
+  const [freshness, setFreshness] = useState<ReleaseHistoryFreshness>("stale");
+  const [fetchedAt, setFetchedAt] = useState<string | null>(null);
+  // 段階ごとの応答を重ねる元（#5230）。描画用の状態とは別に持ち、応答の到着順に依らず最新から合成する
+  const historyRef = useRef<ReleaseHistoryState | null>(null);
 
   // 取得の開始と保存の完了に振る通し番号。応答へ上乗せが要るかの判定に使う
   const seqRef = useRef(0);
@@ -134,60 +182,128 @@ export function useReleaseHistory(enabled: boolean): UseReleaseHistoryResult {
     setIosStatusError(null);
     const fetchStartSeq = ++seqRef.current;
 
-    fetch("/api/repositories/release-history", { signal: controller.signal })
-      .then(async (res) => {
+    // 前回の取得結果は、まだ何も出していないときだけ取りに行く（#5230）。取り直し（更新ボタン）では
+    // 手元の一覧のほうが新しいので使わない
+    const wantCached = historyRef.current === null;
+    let freshApplied = false;
+    let targetsDone = false;
+    let othersDone = false;
+
+    function apply(json: ReleaseHistoryResponse) {
+      // 取得を始める前に保存が済んでいた操作は応答に入っているので手放す
+      for (const [key, toggle] of pendingChecksRef.current) {
+        if (!isReleaseToggleUnsettled(toggle, fetchStartSeq)) pendingChecksRef.current.delete(key);
+      }
+      for (const [key, toggle] of pendingLinesRef.current) {
+        if (!isReleaseToggleUnsettled(toggle, fetchStartSeq)) pendingLinesRef.current.delete(key);
+      }
+      // 受け持ったリポジトリの分だけ差し替える。`repositories`が無い応答（旧形式）は全体の差し替え
+      const next = json.repositories
+        ? mergeReleaseHistoryByRepository(historyRef.current, {
+            repositories: json.repositories,
+            entries: json.entries,
+            checkLineRecords: json.checkLineRecords ?? [],
+          })
+        : { entries: json.entries, checkLineRecords: json.checkLineRecords ?? [] };
+      historyRef.current = next;
+      setListedEntries(next.entries);
+      setCheckRecords(overlayReleaseCheckToggles(json.checkRecords ?? [], pendingChecksRef.current.values()));
+      setCheckLineRecords(
+        overlayReleaseCheckLineToggles(next.checkLineRecords, pendingLinesRef.current.values()),
+      );
+      if (json.fetchedAt) setFetchedAt(json.fetchedAt);
+    }
+
+    function getJson(url: string): Promise<ReleaseHistoryResponse> {
+      return fetch(url, { signal: controller.signal }).then(async (res) => {
         if (!res.ok) throw new Error(`取得に失敗しました (${res.status})`);
         return (await res.json()) as ReleaseHistoryResponse;
-      })
+      });
+    }
+
+    function onFailed(err: unknown) {
+      if (cancelled || controller.signal.aborted) return;
+      setError(err instanceof Error ? err.message : String(err));
+    }
+
+    if (wantCached) {
+      getJson("/api/repositories/release-history/cached")
+        .then((json) => {
+          // 最新が先に届いていれば、前回の値で上書きしない
+          if (cancelled || freshApplied || !json.fetchedAt) return;
+          apply(json);
+          setFreshness("stale");
+        })
+        // 前回の値が取れなくても最新を待てばよいので、案内は出さない
+        .catch(() => {});
+    }
+
+    function settle() {
+      setFreshness(targetsDone ? (othersDone ? "fresh" : "partial") : "stale");
+    }
+
+    const targets = getJson("/api/repositories/release-history?scope=targets")
       .then((json) => {
         if (cancelled) return;
-        setListedEntries(json.entries);
-        // 取得を始める前に保存が済んでいた操作は応答に入っているので手放す
-        for (const [key, toggle] of pendingChecksRef.current) {
-          if (!isReleaseToggleUnsettled(toggle, fetchStartSeq)) pendingChecksRef.current.delete(key);
+        freshApplied = true;
+        apply(json);
+        // 失敗した確認対象が残る間は前回の値のままなので、staleを保ち確認操作をロックする
+        const failed = json.failedRepositories ?? [];
+        if (failed.length > 0) {
+          setError(RELEASE_FETCH_PARTIAL_ERROR);
+          // 取り直しの失敗で、直前のfreshのまま確認操作が通らないようにする
+          setFreshness("stale");
+          return;
         }
-        for (const [key, toggle] of pendingLinesRef.current) {
-          if (!isReleaseToggleUnsettled(toggle, fetchStartSeq)) pendingLinesRef.current.delete(key);
-        }
-        setCheckRecords(
-          overlayReleaseCheckToggles(json.checkRecords ?? [], pendingChecksRef.current.values()),
-        );
-        setCheckLineRecords(
-          overlayReleaseCheckLineToggles(json.checkLineRecords ?? [], pendingLinesRef.current.values()),
-        );
-
-        // 一覧の表示を待たせないよう、ここでは待たずに取りに行く
-        setIosStatusLoading(true);
-        void fetch("/api/repositories/release-history/ios-status", { signal: controller.signal })
-          .then(async (res) => {
-            if (!res.ok) throw new Error(`取得に失敗しました (${res.status})`);
-            return (await res.json()) as IosStatusResponse;
-          })
-          .then((ios) => {
-            if (cancelled) return;
-            const failed = new Set(ios.failedRepositories ?? []);
-            // 取れなかったリポジトリは前回の状況を残す
-            setIosStatuses((prev) => [
-              ...prev.filter((status) => failed.has(status.repoFullName)),
-              ...(ios.statuses ?? []),
-            ]);
-            setIosStatusError(failed.size > 0 ? IOS_STATUS_ERROR : null);
-          })
-          .catch(() => {
-            if (cancelled || controller.signal.aborted) return;
-            setIosStatusError(IOS_STATUS_ERROR);
-          })
-          .finally(() => {
-            if (!cancelled) setIosStatusLoading(false);
-          });
+        targetsDone = true;
+        settle();
       })
       .catch((err) => {
-        if (cancelled || controller.signal.aborted) return;
-        setError(err instanceof Error ? err.message : String(err));
-      })
-      .finally(() => {
-        if (!cancelled) setIsLoading(false);
+        onFailed(err);
+        if (!cancelled) setFreshness("stale");
       });
+    const others = getJson("/api/repositories/release-history?scope=others")
+      .then((json) => {
+        if (cancelled) return;
+        freshApplied = true;
+        othersDone = true;
+        apply(json);
+        if ((json.failedRepositories ?? []).length > 0) setError(RELEASE_FETCH_PARTIAL_ERROR);
+        // 確認対象がまだなら、一覧は前回の値の混ざったままなので押せる状態にしない
+        if (targetsDone) settle();
+      })
+      .catch(onFailed);
+
+    void Promise.all([targets, others]).then(() => {
+      if (cancelled) return;
+      setIsLoading(false);
+      if (!targetsDone && !othersDone) return;
+
+      // 一覧の表示を待たせないよう、一覧が揃ってから取りに行く
+      setIosStatusLoading(true);
+      void fetch("/api/repositories/release-history/ios-status", { signal: controller.signal })
+        .then(async (res) => {
+          if (!res.ok) throw new Error(`取得に失敗しました (${res.status})`);
+          return (await res.json()) as IosStatusResponse;
+        })
+        .then((ios) => {
+          if (cancelled) return;
+          const failed = new Set(ios.failedRepositories ?? []);
+          // 取れなかったリポジトリは前回の状況を残す
+          setIosStatuses((prev) => [
+            ...prev.filter((status) => failed.has(status.repoFullName)),
+            ...(ios.statuses ?? []),
+          ]);
+          setIosStatusError(failed.size > 0 ? IOS_STATUS_ERROR : null);
+        })
+        .catch(() => {
+          if (cancelled || controller.signal.aborted) return;
+          setIosStatusError(IOS_STATUS_ERROR);
+        })
+        .finally(() => {
+          if (!cancelled) setIosStatusLoading(false);
+        });
+    });
 
     return () => {
       cancelled = true;
@@ -229,6 +345,7 @@ export function useReleaseHistory(enabled: boolean): UseReleaseHistoryResult {
     const toggle: PendingReleaseToggle<CheckLineTarget> = { target, checked, settledSeq: null };
     pendingLinesRef.current.set(key, toggle);
     setCheckLineRecords((prev) => applyReleaseCheckLineToggle(prev, target, checked));
+    applyLineToggleToHistory(historyRef, target, checked);
     setError(null);
 
     try {
@@ -246,6 +363,7 @@ export function useReleaseHistory(enabled: boolean): UseReleaseHistoryResult {
       if (pendingLinesRef.current.get(key) !== toggle) return;
       pendingLinesRef.current.delete(key);
       setCheckLineRecords((prev) => applyReleaseCheckLineToggle(prev, target, !checked));
+      applyLineToggleToHistory(historyRef, target, !checked);
       setError(err instanceof Error ? err.message : String(err));
       // GitHub本文が正なので、失敗したときは本文の最新状態を取り直して画面を揃える（同時編集の反映）
       refresh();
@@ -257,6 +375,8 @@ export function useReleaseHistory(enabled: boolean): UseReleaseHistoryResult {
     checkRecords,
     checkLineRecords,
     isLoading,
+    freshness,
+    fetchedAt,
     error,
     iosStatusLoading,
     iosStatusError,
