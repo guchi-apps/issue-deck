@@ -310,7 +310,7 @@ export function ReleaseAutoProceedPanel({ repositoryFullName, pullRequestNumber,
 
       {recommendations.error && (
         <p className="text-xs text-amber-700 dark:text-amber-400">
-          {recommendations.error}。推奨の無い止める指摘は「今回直す」で確定します。
+          {recommendations.error}。予約中のときは自動では進めず解除します。表を確かめて押すと、推奨の無い止める指摘は「今回直す」で確定します。
           <button type="button" className="ml-1 underline underline-offset-2" onClick={recommendations.retry}>
             推奨を取り直す
           </button>
