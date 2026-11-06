@@ -24,6 +24,8 @@ import {
 type ReleaseHistoryResponse = {
   /** この応答が受け持ったリポジトリ（#5230）。ここに含まれる分だけを差し替える */
   repositories?: string[];
+  /** この応答の母集団のうち取得に失敗したリポジトリ。残っている間は最新とみなさない */
+  failedRepositories?: string[];
   entries: ReleaseHistoryItem[];
   checkRecords?: ReleaseCheckRecord[];
   checkLineRecords?: ReleaseCheckLineRecord[];
@@ -35,6 +37,9 @@ type IosStatusResponse = {
   statuses?: IosReleaseStatus[];
   failedRepositories?: string[];
 };
+
+const RELEASE_FETCH_PARTIAL_ERROR =
+  "一部のリポジトリのリリース履歴を取得できませんでした。取得できるまで確認操作はできません。更新ボタンでもう一度取得できます。";
 
 const IOS_STATUS_ERROR = "iOS配布の状況を取得できませんでした。更新ボタンでもう一度取得できます。";
 
@@ -241,17 +246,29 @@ export function useReleaseHistory(enabled: boolean): UseReleaseHistoryResult {
       .then((json) => {
         if (cancelled) return;
         freshApplied = true;
-        targetsDone = true;
         apply(json);
+        // 失敗した確認対象が残る間は前回の値のままなので、staleを保ち確認操作をロックする
+        const failed = json.failedRepositories ?? [];
+        if (failed.length > 0) {
+          setError(RELEASE_FETCH_PARTIAL_ERROR);
+          // 取り直しの失敗で、直前のfreshのまま確認操作が通らないようにする
+          setFreshness("stale");
+          return;
+        }
+        targetsDone = true;
         settle();
       })
-      .catch(onFailed);
+      .catch((err) => {
+        onFailed(err);
+        if (!cancelled) setFreshness("stale");
+      });
     const others = getJson("/api/repositories/release-history?scope=others")
       .then((json) => {
         if (cancelled) return;
         freshApplied = true;
         othersDone = true;
         apply(json);
+        if ((json.failedRepositories ?? []).length > 0) setError(RELEASE_FETCH_PARTIAL_ERROR);
         // 確認対象がまだなら、一覧は前回の値の混ざったままなので押せる状態にしない
         if (targetsDone) settle();
       })
