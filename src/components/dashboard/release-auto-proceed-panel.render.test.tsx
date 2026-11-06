@@ -2,7 +2,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { ReleaseAutoProceedPanel, shouldShowAutoProceed } from "@/components/dashboard/release-auto-proceed-panel";
+import { decideArmedAction, ReleaseAutoProceedPanel, shouldShowAutoProceed } from "@/components/dashboard/release-auto-proceed-panel";
 import type { ReleaseVerificationSummary } from "@/lib/release-verification-summary";
 
 const BASE = "a".repeat(40);
@@ -135,5 +135,88 @@ describe("ReleaseAutoProceedPanel（#5138）", () => {
     fireEvent.click(screen.getByTestId("release-auto-proceed-start"));
     await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("1件の判定を確定できませんでした"));
     expect(calls.some((c) => c.url === "/api/repositories/release/completion")).toBe(false);
+  });
+});
+
+describe("おまかせの事前予約（#5229）", () => {
+  beforeEach(() => vi.unstubAllGlobals());
+  afterEach(cleanup);
+
+  const armedTarget = { baseSha: BASE, headSha: HEAD, findingIds: "R-0000aa,R-0000bb" };
+  const base = { armed: armedTarget, target: { baseSha: BASE, headSha: HEAD }, findingIds: "R-0000aa,R-0000bb", loading: false, error: null, hasView: true, fallbackCount: 0 };
+
+  it("発火条件: 取得が完了し、対象が一致し、フォールバックが0件のときだけ進める", () => {
+    expect(decideArmedAction(base)).toEqual({ action: "fire" });
+    expect(decideArmedAction({ ...base, loading: true })).toEqual({ action: "wait" });
+    expect(decideArmedAction({ ...base, hasView: false })).toEqual({ action: "wait" });
+    expect(decideArmedAction({ ...base, error: "失敗" })).toEqual({ action: "cancel", reason: "error" });
+    expect(decideArmedAction({ ...base, fallbackCount: 1 })).toEqual({ action: "cancel", reason: "fallback" });
+    expect(decideArmedAction({ ...base, target: { baseSha: BASE, headSha: "c".repeat(40) } })).toEqual({ action: "cancel", reason: "target_changed" });
+    expect(decideArmedAction({ ...base, findingIds: "R-0000aa" })).toEqual({ action: "cancel", reason: "target_changed" });
+  });
+
+  function gatedFetch(recBody: unknown) {
+    const calls: Call[] = [];
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        calls.push({ url, body: init?.body ? JSON.parse(String(init.body)) : {} });
+        if (url.endsWith("/review-recommendations")) {
+          await gate;
+          return new Response(JSON.stringify(recBody), { status: 200 });
+        }
+        if (url.endsWith("/bulk")) return new Response(JSON.stringify({ ok: true, failed: 0, results: [] }), { status: 200 });
+        if (url.endsWith("/completion")) return new Response(JSON.stringify({ run: { id: "r1", active: true } }), { status: 200 });
+        return new Response("{}", { status: 404 });
+      }),
+    );
+    return { calls, release };
+  }
+
+  const fullRecommendations = {
+    ...recommendations,
+    byFinding: {
+      ...recommendations.byFinding,
+      "R-0000bb": { ...recommendations.byFinding["R-0000aa"], id: "rec2", findingId: "R-0000bb", recommended: "fix_now" },
+    },
+  };
+
+  it("取得中に押すと予約中になり、推奨が全件そろったら自動で確定・開始する（1回だけ）", async () => {
+    const { calls, release } = gatedFetch(fullRecommendations);
+    const onRunStarted = vi.fn();
+    render(<ReleaseAutoProceedPanel repositoryFullName="guchi-apps/issue-deck" pullRequestNumber={5160} verification={verification()} onReload={vi.fn()} onRunStarted={onRunStarted} />);
+    const button = screen.getByTestId("release-auto-proceed-start") as HTMLButtonElement;
+    expect(button.disabled).toBe(false);
+    fireEvent.click(button);
+    expect(screen.getByText(/予約中/)).toBeTruthy();
+    expect(calls.some((c) => c.url.endsWith("/bulk"))).toBe(false);
+    release();
+    await waitFor(() => expect(onRunStarted).toHaveBeenCalled());
+    expect(calls.filter((c) => c.url.endsWith("/bulk"))).toHaveLength(1);
+    expect(calls.filter((c) => c.url === "/api/repositories/release/completion")).toHaveLength(1);
+  });
+
+  it("推奨が無い指摘があれば、自動では進めず予約を解除する", async () => {
+    const { calls, release } = gatedFetch(recommendations);
+    render(<ReleaseAutoProceedPanel repositoryFullName="guchi-apps/issue-deck" pullRequestNumber={5160} verification={verification()} onReload={vi.fn()} />);
+    fireEvent.click(screen.getByTestId("release-auto-proceed-start"));
+    release();
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("予約を解除しました"));
+    expect(calls.some((c) => c.url.endsWith("/bulk"))).toBe(false);
+    expect((screen.getByTestId("release-auto-proceed-start") as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it("予約を取り消すと、推奨が届いても進めない", async () => {
+    const { calls, release } = gatedFetch(fullRecommendations);
+    render(<ReleaseAutoProceedPanel repositoryFullName="guchi-apps/issue-deck" pullRequestNumber={5160} verification={verification()} onReload={vi.fn()} />);
+    fireEvent.click(screen.getByTestId("release-auto-proceed-start"));
+    fireEvent.click(screen.getByTestId("release-auto-proceed-cancel"));
+    release();
+    await waitFor(() => expect(screen.getByText("今回の変更で悪化しない")).toBeTruthy());
+    expect(calls.some((c) => c.url.endsWith("/bulk"))).toBe(false);
   });
 });

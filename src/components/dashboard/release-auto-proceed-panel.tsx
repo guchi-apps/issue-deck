@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Loader2, Rocket } from "lucide-react";
 
 import { useReleaseCompletionRun } from "@/components/dashboard/release-completion-panel";
@@ -49,6 +49,45 @@ export function shouldShowAutoProceed(verification: ReleaseVerificationSummary |
   return review.state === "needs_check" && (review.decisions?.counts.undecidedBlocking ?? 0) > 0;
 }
 
+/** 予約を押した時点の対象。推奨が届いた後に、同じ対象・同じ指摘の表かを確かめるために控える（#5229） */
+export type ArmedTarget = { baseSha: string; headSha: string; findingIds: string };
+
+export type ArmedDecision =
+  | { action: "wait" }
+  | { action: "fire" }
+  | { action: "cancel"; reason: "target_changed" | "error" | "fallback" };
+
+/**
+ * 予約中のパネルが、いま何をするか（#5229）。**「推奨が届いた」ではなく、取得が完了し、今の表が予約時の対象と一致し、
+ * フォールバック（推奨なし・必須項目不足）が0件のときだけ`fire`する。** 再取得中は前回の結果が残るため`loading`も見る。
+ * 1件でもフォールバックがあれば、人が表を見ないまま「あなたの判断」として記録しないよう予約を解除する。
+ */
+export function decideArmedAction(input: {
+  armed: ArmedTarget;
+  target: { baseSha: string; headSha: string } | null;
+  findingIds: string;
+  loading: boolean;
+  error: string | null;
+  hasView: boolean;
+  fallbackCount: number;
+}): ArmedDecision {
+  const { armed, target } = input;
+  if (!target || target.baseSha !== armed.baseSha || target.headSha !== armed.headSha || input.findingIds !== armed.findingIds) {
+    return { action: "cancel", reason: "target_changed" };
+  }
+  if (input.loading) return { action: "wait" };
+  if (input.error) return { action: "cancel", reason: "error" };
+  if (!input.hasView) return { action: "wait" };
+  if (input.fallbackCount > 0) return { action: "cancel", reason: "fallback" };
+  return { action: "fire" };
+}
+
+const ARMED_CANCEL_MESSAGE = {
+  target_changed: "リリース候補か指摘が更新されたため、予約を解除しました。表を確かめて押し直してください。",
+  error: "AIの推奨を取得できなかったため、予約を解除しました。推奨を取り直すか、表を確かめて押し直してください。",
+  fallback: "推奨が無い指摘があるため、自動では進めず予約を解除しました。表の判定を確かめてから押してください。",
+} as const;
+
 type Props = {
   repositoryFullName: string;
   pullRequestNumber: number;
@@ -91,6 +130,11 @@ export function ReleaseAutoProceedPanel({ repositoryFullName, pullRequestNumber,
   };
   const counts = countBulkDecisions(rows.map(choiceOf));
   const loadingRecommendations = recommendations.loading && !recommendations.view;
+  // 予約（#5229）。画面の中だけの状態で、閉じる・再読込すると消える
+  const [armed, setArmed] = useState<ArmedTarget | null>(null);
+  // 自動実行は1回だけ。再描画・再取得で`proceed()`が2回走らないようにする
+  const firedRef = useRef(false);
+  const findingIdsKey = rows.map((row) => row.findingId).join(",");
 
   async function proceed() {
     if (!target || rows.length === 0) return;
@@ -155,6 +199,43 @@ export function ReleaseAutoProceedPanel({ repositoryFullName, pullRequestNumber,
     }
   }
 
+  useEffect(() => {
+    if (!armed || firedRef.current || busy) return;
+    const decision = decideArmedAction({
+      armed,
+      target: target ?? null,
+      findingIds: findingIdsKey,
+      loading: recommendations.loading,
+      error: recommendations.error,
+      hasView: recommendations.view !== null,
+      fallbackCount: rows.filter((row) => row.fallback !== null).length,
+    });
+    if (decision.action === "wait") return;
+    // 予約の解除と結果表示は、推奨の取得結果（外部の非同期状態）に反応して行う
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setArmed(null);
+    if (decision.action === "cancel") {
+      setOutcome({ tone: "error", message: ARMED_CANCEL_MESSAGE[decision.reason] });
+      return;
+    }
+    firedRef.current = true;
+    void proceed();
+    // proceedは今の描画の表と判定を読む。予約中は判定をロックしているので、発火条件の判定時点と同じ内容
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [armed, busy, recommendations.loading, recommendations.error, recommendations.view, findingIdsKey, target]);
+
+  function onStartClick() {
+    if (!target || busy || armed) return;
+    if (!loadingRecommendations) {
+      void proceed();
+      return;
+    }
+    // 推奨の取得中は予約する。届いたら自動で始める
+    firedRef.current = false;
+    setOutcome(null);
+    setArmed({ baseSha: target.baseSha, headSha: target.headSha, findingIds: findingIdsKey });
+  }
+
   if (rows.length === 0) {
     return outcome ? <OutcomeNote outcome={outcome} className={className} /> : null;
   }
@@ -175,16 +256,24 @@ export function ReleaseAutoProceedPanel({ repositoryFullName, pullRequestNumber,
         <div className="flex flex-col gap-1 @2xl:items-end">
           <Button
             className="min-h-11 w-full gap-1.5 px-4 text-sm font-bold @2xl:w-fit"
-            onClick={() => void proceed()}
-            disabled={busy || loadingRecommendations || !target}
+            variant={armed ? "outline" : "default"}
+            onClick={onStartClick}
+            disabled={busy || armed !== null || !target}
             data-testid="release-auto-proceed-start"
           >
-            {busy ? <Loader2 className="size-4 animate-spin" aria-hidden="true" /> : <Rocket className="size-4" aria-hidden="true" />}
-            おまかせで公開承認まで進める
+            {busy || armed ? <Loader2 className="size-4 animate-spin" aria-hidden="true" /> : <Rocket className="size-4" aria-hidden="true" />}
+            {armed ? "予約中：推奨が届いたら自動で進めます" : "おまかせで公開承認まで進める"}
           </Button>
+          {armed && (
+            <Button variant="ghost" size="sm" onClick={() => setArmed(null)} data-testid="release-auto-proceed-cancel">
+              予約を取り消す
+            </Button>
+          )}
           <p className="text-xs text-muted-foreground @2xl:text-right">
-            {loadingRecommendations
-              ? "AIの推奨を取得しています…"
+            {armed
+              ? "推奨が届き次第、表の判定を確定して修正を始めます。この画面を閉じると予約は消えます"
+              : loadingRecommendations
+              ? "AIの推奨を取得しています…押しておくと、推奨が届いたら自動で始めます"
               : counts.fix_now > 0
                 ? `今回直す${counts.fix_now}件を修正 → 再検証 → 公開承認の画面で止まります`
                 : "判定を確定し、公開承認の画面へ進めます"}
@@ -214,14 +303,14 @@ export function ReleaseAutoProceedPanel({ repositoryFullName, pullRequestNumber,
             choice={choiceOf(row)}
             loading={loadingRecommendations}
             onChange={(kind) => setOverrides((current) => ({ ...current, [row.findingId]: kind }))}
-            disabled={busy}
+            disabled={busy || armed !== null}
           />
         ))}
       </ul>
 
       {recommendations.error && (
         <p className="text-xs text-amber-700 dark:text-amber-400">
-          {recommendations.error}。推奨の無い止める指摘は「今回直す」で確定します。
+          {recommendations.error}。予約中のときは自動では進めず解除します。表を確かめて押すと、推奨の無い止める指摘は「今回直す」で確定します。
           <button type="button" className="ml-1 underline underline-offset-2" onClick={recommendations.retry}>
             推奨を取り直す
           </button>
