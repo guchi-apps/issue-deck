@@ -2703,6 +2703,86 @@ describe("リリースPR凍結後の変更の有無（hasChangesAfterReleaseFree
   });
 });
 
+describe("本番反映中のRCに入った作業の振り分け（#5227）", () => {
+  const NOW_MS = new Date("2026-08-15T10:05:00Z").getTime();
+  function buildDeploying(deployRun: { status: string; conclusion: string | null }) {
+    return build({
+      pullRequests: [
+        releasePullRequest({
+          number: 178,
+          title: "v3.8.5をmainへリリースする",
+          state: "closed",
+          merged: true,
+          createdAt: "2026-08-10T00:00:00Z",
+          mergedAt: "2026-08-10T01:00:00Z",
+        }),
+        releasePullRequest({
+          number: 183,
+          title: "v3.8.6をmainへリリースする",
+          state: "closed",
+          merged: true,
+          headRef: "release-main/v3.8.6",
+          createdAt: "2026-08-15T02:00:00Z",
+          mergedAt: "2026-08-15T10:00:00Z",
+        }),
+        // 凍結前にマージされた作業と、凍結後にマージされた作業
+        ...["2026-08-15T01:00:00Z", "2026-08-15T03:00:00Z"].map((mergedAt, index) =>
+          pullRequest({
+            number: 200 + index,
+            headRef: `issue-${200 + index}`,
+            linkedIssueNumber: 200 + index,
+            state: "closed",
+            merged: true,
+            mergedAt,
+          }),
+        ),
+      ],
+      branchStatuses: [
+        branchStatus({
+          developVsMain: {
+            aheadBy: 2,
+            behindBy: 0,
+            sameContent: false,
+            units: { mergedHeadRefs: ["issue-200", "issue-201"] } as never,
+          },
+          hasDeployWorkflow: true,
+        }),
+      ],
+      deployStatuses: [
+        {
+          repositoryFullName: REPO,
+          deployRun: {
+            id: 1,
+            htmlUrl: "https://github.com/x/actions/runs/1",
+            createdAt: "2026-08-15T10:00:30Z",
+            event: "push",
+            runAttempt: 1,
+            ...deployRun,
+          } as BranchFlowDeployRun,
+        },
+      ],
+      now: NOW_MS,
+    }).repositories[0].releaseGroups[0];
+  }
+
+  it("デプロイ中のRCに入った作業は「リリース候補」、凍結後の作業は「developへ反映済み」", () => {
+    const group = buildDeploying({ status: "in_progress", conclusion: null });
+    expect(group.pullRequest).toBeNull();
+    expect(group.deployingCandidate?.number).toBe(183);
+    const { included, waiting } = splitLanesByReleaseCandidate(group);
+    expect(included.map((lane) => lane.branchName)).toEqual(["issue-200"]);
+    expect(waiting.map((lane) => lane.branchName)).toEqual(["issue-201"]);
+    // 作り直しの判定には使わない
+    expect(hasChangesAfterReleaseFreeze(group)).toBe(false);
+  });
+
+  it("デプロイが成功したあとは候補扱いをやめ、全て「developへ反映済み」へ戻る", () => {
+    const group = buildDeploying({ status: "completed", conclusion: "success" });
+    expect(group.deployingCandidate).toBeUndefined();
+    expect(splitLanesByReleaseCandidate(group).included).toEqual([]);
+  });
+});
+
 describe("リリース画面の追跡情報（#4748）", () => {
   const blocking = [
     {

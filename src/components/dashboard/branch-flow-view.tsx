@@ -2295,7 +2295,7 @@ function ReleaseGroupHeaderWithLanes({
     ? { included: frozenIncluded, waiting: afterFreeze }
     : splitLanesByReleaseCandidate(group);
   const released = group.mergedAt !== null;
-  const hasCandidate = released || group.pullRequest !== null || !!deviceBuild;
+  const hasCandidate = released || group.pullRequest !== null || !!group.deployingCandidate || !!deviceBuild;
 
   const header = (
     <ReleaseGroupHeader
@@ -2366,7 +2366,7 @@ function ReleaseGroupHeaderWithLanes({
               <GitMerge className="mr-1.5 inline size-4 align-[-2px] text-violet-600 dark:text-violet-400" aria-hidden />
               developへ反映済み
               <span className="ml-2 text-xs font-normal text-muted-foreground">
-                {waiting.length}件{hasCandidate ? "（次のリリースへ回ります）" : ""}
+                {waiting.length}件{hasCandidate ? "（今回のリリースには入りません・次のリリースへ回ります）" : ""}
               </span>
             </summary>
             <ul className="relative">
