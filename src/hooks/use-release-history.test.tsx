@@ -209,6 +209,25 @@ describe("useReleaseHistory の段階取得（#5230）", () => {
     expect(result.current.entries?.map((e) => e.tagName)).toEqual(["v1.0.0"]);
   });
 
+  it("fresh後の取り直しで確認対象が失敗したらstaleへ戻り、解消すればfreshへ復帰する（#5234）", async () => {
+    const { respond } = stubFetch();
+    const { result } = renderHook(() => useReleaseHistory(true));
+    await respond(TARGETS, { ...emptyResponse, repositories: ["o/a"], entries: [release("o/a", "v1.0.0")] });
+    await respond(OTHERS, { ...emptyResponse, repositories: [] });
+    expect(result.current.freshness).toBe("fresh");
+
+    act(() => result.current.refresh());
+    await respond(TARGETS, { ...emptyResponse, repositories: [], failedRepositories: ["o/a"] }, 1);
+    await respond(OTHERS, { ...emptyResponse, repositories: [] }, 1);
+    expect(result.current.freshness).toBe("stale");
+
+    act(() => result.current.refresh());
+    await respond(TARGETS, { ...emptyResponse, repositories: ["o/a"], entries: [release("o/a", "v1.0.1")] }, 2);
+    await respond(OTHERS, { ...emptyResponse, repositories: [] }, 2);
+    expect(result.current.freshness).toBe("fresh");
+    expect(result.current.error).toBeNull();
+  });
+
   it("取り直し（更新ボタン）では前回の取得結果を取りに行かない", async () => {
     const { respond, count } = stubFetch();
     const { result } = renderHook(() => useReleaseHistory(true));

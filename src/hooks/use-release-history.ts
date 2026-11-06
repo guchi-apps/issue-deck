@@ -251,12 +251,17 @@ export function useReleaseHistory(enabled: boolean): UseReleaseHistoryResult {
         const failed = json.failedRepositories ?? [];
         if (failed.length > 0) {
           setError(RELEASE_FETCH_PARTIAL_ERROR);
+          // 取り直しの失敗で、直前のfreshのまま確認操作が通らないようにする
+          setFreshness("stale");
           return;
         }
         targetsDone = true;
         settle();
       })
-      .catch(onFailed);
+      .catch((err) => {
+        onFailed(err);
+        if (!cancelled) setFreshness("stale");
+      });
     const others = getJson("/api/repositories/release-history?scope=others")
       .then((json) => {
         if (cancelled) return;
