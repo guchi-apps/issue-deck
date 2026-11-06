@@ -412,6 +412,12 @@ export type BranchFlowReleaseGroup = {
    * 未指定にする。
    */
   frozenAt?: string;
+  /**
+   * mainへマージ済みで本番デプロイが終わっていない新方式のRC（#5227）。**未リリースの束にだけ入り、
+   * openなリリースPRが無いときに限る。** 「リリース候補」への振り分け（`splitLanesByReleaseCandidate`）
+   * だけが凍結基準として読む。`pullRequest`ではないので、作り直し・検証表示の判定には影響しない
+   */
+  deployingCandidate?: PullRequestSummary;
   /** mainへ入った日時（ISO8601）。**nullなら未リリース**（進行中またはこれから） */
   mergedAt: string | null;
   /**

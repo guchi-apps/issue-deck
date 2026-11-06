@@ -1042,6 +1042,18 @@ function groupLanesByRelease({
     }
   }
 
+  // openなリリースPRが無く、最新のリリースPRが新方式のRCで本番デプロイが終わっていない間は、
+  // そのRCに入った作業を「リリース候補」へ数える（#5227）
+  const latestRelease = releases.at(-1)?.pullRequest ?? null;
+  const deployingCandidate =
+    openReleasePullRequest === null &&
+    latestRelease !== null &&
+    isReleaseCandidateHeadRef(latestRelease.headRef) &&
+    deployState !== null &&
+    deployState.kind !== "success"
+      ? latestRelease
+      : null;
+
   const releaseGroups: BranchFlowReleaseGroup[] = [];
   if (
     pendingLanes.length > 0 ||
@@ -1061,6 +1073,7 @@ function groupLanesByRelease({
         pullRequest: openReleasePullRequest,
         bumpPullRequest: openBumpPullRequest,
         frozenAt: mergedBumpPullRequestCreatedAt(pullRequests, openReleasePullRequest),
+        ...(deployingCandidate ? { deployingCandidate } : {}),
         mergedAt: null,
         // まだmainへ入っていない束にデプロイの状態は無い
         deploy: null,
@@ -1185,15 +1198,22 @@ function importedPullRequestNumbers(release: PullRequestSummary): Set<number> {
 export function splitLanesByReleaseFreeze(
   group: Pick<BranchFlowReleaseGroup, "pullRequest" | "lanes" | "frozenAt">,
 ): { afterFreeze: BranchFlowLane[]; included: BranchFlowLane[] } {
-  const release = group.pullRequest;
+  return splitLanesByFreezeOf(group.pullRequest, group.frozenAt, group.lanes);
+}
+
+function splitLanesByFreezeOf(
+  release: PullRequestSummary | null,
+  groupFrozenAt: string | undefined,
+  groupLanes: BranchFlowLane[],
+): { afterFreeze: BranchFlowLane[]; included: BranchFlowLane[] } {
   if (release === null || !isReleaseCandidateHeadRef(release.headRef)) {
-    return { afterFreeze: [], included: group.lanes };
+    return { afterFreeze: [], included: groupLanes };
   }
-  const frozenAt = new Date(group.frozenAt ?? releaseContentFrozenAt(release)).getTime();
+  const frozenAt = new Date(groupFrozenAt ?? releaseContentFrozenAt(release)).getTime();
   const imported = importedPullRequestNumbers(release);
   const afterFreeze: BranchFlowLane[] = [];
   const included: BranchFlowLane[] = [];
-  for (const lane of group.lanes) {
+  for (const lane of groupLanes) {
     const latest = laneMergedAts([lane]).at(-1);
     const late =
       latest !== undefined &&
@@ -1219,10 +1239,19 @@ export function splitLanesByReleaseFreeze(
  * - 未リリースでリリースPRがある束: 凍結の前後で分ける（`splitLanesByReleaseFreeze`。凍結後のレーンが`waiting`）
  */
 export function splitLanesByReleaseCandidate(
-  group: Pick<BranchFlowReleaseGroup, "pullRequest" | "lanes" | "frozenAt" | "mergedAt">,
+  group: Pick<BranchFlowReleaseGroup, "pullRequest" | "lanes" | "frozenAt" | "mergedAt"> &
+    Partial<Pick<BranchFlowReleaseGroup, "deployingCandidate">>,
 ): { included: BranchFlowLane[]; waiting: BranchFlowLane[] } {
   if (group.mergedAt !== null) return { included: group.lanes, waiting: [] };
-  if (group.pullRequest === null) return { included: [], waiting: group.lanes };
+  if (group.pullRequest === null) {
+    // 本番反映中のRC（mainへマージ済み・デプロイ未完了）に入った作業はまだ`pending`のままなので、
+    // その候補の凍結基準で分ける（#5227）。`pullRequest`は渡していないので、他の判定には影響しない
+    if (group.deployingCandidate) {
+      const { afterFreeze, included } = splitLanesByFreezeOf(group.deployingCandidate, undefined, group.lanes);
+      return { included, waiting: afterFreeze };
+    }
+    return { included: [], waiting: group.lanes };
+  }
   const { afterFreeze, included } = splitLanesByReleaseFreeze(group);
   return { included, waiting: afterFreeze };
 }
