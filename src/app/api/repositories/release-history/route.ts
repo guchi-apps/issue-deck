@@ -1,87 +1,57 @@
 import { NextResponse } from "next/server";
 
 import { requireUserId } from "@/lib/auth-user";
-import { db } from "@/lib/db";
 import { withGithubApiFeature } from "@/lib/github/api-usage";
 import { getInstallationToken } from "@/lib/github/app-auth";
 import { fetchReleasesBackTo, type ReleaseHistoryItem } from "@/lib/github/release-api";
 import { appendUnreleasedVersions } from "@/lib/github/unreleased-versions";
-import {
-  hasReachedReleaseCheckSince,
-  type ReleaseCheckLineRecord,
-  type ReleaseCheckRecord,
-} from "@/lib/release-check";
+import { hasReachedReleaseCheckSince } from "@/lib/release-check";
 import { buildCheckLineRecordsFromBodies } from "@/lib/release-body-tasks";
 import { mergeReleaseHistory } from "@/lib/release-history";
+import { isInReleaseHistoryScope, parseReleaseHistoryScope } from "@/lib/release-history-cache";
+import {
+  attachReleaseCandidates,
+  findReleaseHistoryRepositories,
+  loadReleaseCheckMaterials,
+  saveReleaseHistoryCache,
+} from "@/lib/release-history-server";
 
-export function GET() {
-  return withGithubApiFeature("release_history", handleGET);
+export function GET(request: Request) {
+  return withGithubApiFeature("release_history", () => handleGET(request));
 }
 
-async function handleGET() {
+/**
+ * リリース履歴の最新をGitHubから取る。
+ *
+ * `?scope=targets|others`で母集団を「動作確認の対象にしたリポジトリ」と「それ以外」に分けられる（#5230）。
+ * 画面は2本を並行して呼び、初期表示（未確認のリリース）に要る`targets`を先に描く。scopeを付けなければ
+ * 従来どおり全部を返す。取得できたリポジトリぶんは前回の取得結果（`ReleaseHistoryCache`）として残し、
+ * 次に画面を開いたときは`release-history/cached`がそれを即座に返す。
+ *
+ * `repositories`はこの応答が受け持ったリポジトリ（取得に失敗したものは含めない）。画面は
+ * ここに含まれるリポジトリの分だけを差し替え、失敗したリポジトリは前回の値を残す。
+ */
+async function handleGET(request: Request) {
   const userId = await requireUserId();
   if (!userId) {
     return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   }
 
-  // 母集団は「ブランチ」画面・リリース状況の取得（`release-pending-merges/route.ts`）と揃え、
-  // アーカイブ済みを除いたユーザーの接続先すべてにする。**非表示リポジトリも含める**——
-  // 除くのは`selectVisibleReleaseHistory`でクライアント側が行う（`release-activity.ts`と同じ方針）。
-  const repositories = await db.repository.findMany({
-    where: {
-      archived: false,
-      installation: { userInstallations: { some: { userId } } },
-    },
-    orderBy: { fullName: "asc" },
-    include: { installation: true },
-  });
+  const startedAt = performance.now();
+  const scope = parseReleaseHistoryScope(new URL(request.url).searchParams.get("scope"));
+  const allRepositories = await findReleaseHistoryRepositories(userId);
 
-  if (repositories.length === 0) {
-    return NextResponse.json({ entries: [], checkTargets: [], checkRecords: [], checkLineRecords: [] });
+  if (allRepositories.length === 0) {
+    return NextResponse.json({ repositories: [], entries: [], checkRecords: [], checkLineRecords: [] });
   }
 
-  // 動作確認のフラグ（#2930）の材料。**状態へ畳まずそのまま返す**——判定は
-  // `lib/release-check.ts`の純粋関数が行い、画面は「確認済みにする」を押した直後も
-  // 同じ関数で描き直す（サーバーの応答を待たない楽観的更新のため）。
-  // 箇条書き行ごとの確認記録（#2982）も同じ材料の一つとして返す。
-  const [checkTargetRows, checkRecordRows, checkLineRecordRows] = await Promise.all([
-    db.releaseCheckTarget.findMany({
-      where: { userId },
-      select: { createdAt: true, repository: { select: { fullName: true } } },
-    }),
-    db.releaseCheck.findMany({
-      where: { userId },
-      select: { tagName: true, checkedAt: true, repository: { select: { fullName: true } } },
-    }),
-    // 旧記録（ユーザーごとのDB。#4374）。確認状態の正はGitHub Release本文のタスクリストで、
-    // ここはまだタスクリストになっていない行のフォールバックにだけ使う。複数ユーザーぶんは
-    // 和集合（誰かが確認していれば確認済み）で、`buildCheckLineRecordsFromBodies`が畳む
-    db.releaseCheckLine.findMany({
-      where: { repositoryId: { in: repositories.map((repository) => repository.id) } },
-      select: {
-        tagName: true,
-        lineKey: true,
-        checkedAt: true,
-        repository: { select: { fullName: true } },
-      },
-    }),
-  ]);
-
-  // repoFullName → 対象に加えた時刻（この時点まで遡って取る）
-  const checkSinceMsByFullName = new Map(
-    checkTargetRows.map((row) => [row.repository.fullName, row.createdAt.getTime()]),
+  const { checkSinceMsByFullName, checkRecords, legacyCheckLineRecords } = await loadReleaseCheckMaterials(
+    userId,
+    allRepositories.map((repository) => repository.id),
   );
-  const checkRecords: ReleaseCheckRecord[] = checkRecordRows.map((row) => ({
-    repoFullName: row.repository.fullName,
-    tagName: row.tagName,
-    checkedAt: row.checkedAt.toISOString(),
-  }));
-  const legacyCheckLineRecords: ReleaseCheckLineRecord[] = checkLineRecordRows.map((row) => ({
-    repoFullName: row.repository.fullName,
-    tagName: row.tagName,
-    lineKey: row.lineKey,
-    checkedAt: row.checkedAt.toISOString(),
-  }));
+  const repositories = allRepositories.filter((repository) =>
+    isInReleaseHistoryScope(scope, checkSinceMsByFullName.has(repository.fullName)),
+  );
 
   // 同一installationのリポジトリ間でトークン取得を使い回す（`release-pending-merges`と同じ）。
   const tokenPromises = new Map<number, Promise<string>>();
@@ -94,8 +64,10 @@ async function handleGET() {
     return token;
   }
 
+  const durations: { fullName: string; ms: number }[] = [];
   const perRepository = await Promise.all(
-    repositories.map(async (repository): Promise<ReleaseHistoryItem[]> => {
+    repositories.map(async (repository): Promise<{ repositoryId: string; fullName: string; entries: ReleaseHistoryItem[] } | null> => {
+      const repoStartedAt = performance.now();
       try {
         const token = await tokenFor(repository.installation.installationId);
         const sinceMs = checkSinceMsByFullName.get(repository.fullName);
@@ -108,55 +80,41 @@ async function handleGET() {
         );
         // GitHub Releaseが無い版（本番デプロイの失敗など）をタグから補い、修正版と紐付ける（#4003）
         // iOS配布の状況はここで待たない。1回約1MB・約3秒かかるため、`release-history/ios-status`で後から重ねる（#5214）
-        return await appendUnreleasedVersions(repository.ownerLogin, repository.name, token, releases);
+        const entries = await appendUnreleasedVersions(repository.ownerLogin, repository.name, token, releases);
+        return { repositoryId: repository.id, fullName: repository.fullName, entries };
       } catch (error) {
         // 1リポジトリの取得失敗で他リポジトリの表示まで巻き込まない（`release-pending-merges`と同じ）。
+        // 受け持ちからも外し、画面には前回の値を残させる
         console.error(`[GET /api/repositories/release-history] ${repository.fullName}:`, error);
-        return [];
+        return null;
+      } finally {
+        durations.push({ fullName: repository.fullName, ms: Math.round(performance.now() - repoStartedAt) });
       }
     }),
   );
+  const succeeded = perRepository.filter((row) => row !== null);
+  const githubMs = Math.round(performance.now() - startedAt);
 
-  const entries = await attachReleaseCandidates(mergeReleaseHistory(perRepository));
-  return NextResponse.json({
-    entries,
-    checkRecords,
-    // 項目ごとの確認状態はGitHub Release本文のタスクリストが正（#4374）。取得のたびに本文から組み直す
-    checkLineRecords: buildCheckLineRecordsFromBodies(entries, legacyCheckLineRecords),
-  });
-}
+  await saveReleaseHistoryCache(succeeded);
 
-/** 新方式の候補が公開した版へ、元の候補（RC-n・revision・物理PR）を付ける（#4597）。取れなければ付けない */
-async function attachReleaseCandidates(entries: ReleaseHistoryItem[]): Promise<ReleaseHistoryItem[]> {
-  if (entries.length === 0) return entries;
-  try {
-    const rows = await db.releaseVersionReservation.findMany({
-      where: { repositoryFullName: { in: [...new Set(entries.map((entry) => entry.repoFullName))] }, status: "consumed" },
-      select: {
-        repositoryFullName: true,
-        version: true,
-        consumedTag: true,
-        candidate: {
-          select: {
-            sequence: true,
-            currentRevision: true,
-            revisions: { where: { prNumber: { not: null } }, orderBy: { revision: "desc" }, take: 1, select: { prNumber: true } },
-          },
-        },
-      },
-    });
-    const byTag = new Map<string, (typeof rows)[number]>();
-    for (const row of rows) byTag.set(`${row.repositoryFullName} ${row.consumedTag ?? `v${row.version}`}`, row);
-    return entries.map((entry) => {
-      const row = byTag.get(`${entry.repoFullName} ${entry.tagName}`);
-      if (!row) return entry;
-      return {
-        ...entry,
-        releaseCandidate: { sequence: row.candidate.sequence, revision: row.candidate.currentRevision, prNumber: row.candidate.revisions[0]?.prNumber ?? null },
-      };
-    });
-  } catch (error) {
-    console.error("[GET /api/repositories/release-history] candidate lookup failed", error);
-    return entries;
-  }
+  const entries = await attachReleaseCandidates(mergeReleaseHistory(succeeded.map((row) => row.entries)));
+  const totalMs = Math.round(performance.now() - startedAt);
+
+  // どのリポジトリが遅いかを本番で見られるようにする（#5230。手元の開発DBには接続先が無く測れない）
+  const slowest = [...durations].sort((a, b) => b.ms - a.ms).slice(0, 3);
+  console.info(
+    `[GET /api/repositories/release-history] scope=${scope} repos=${repositories.length} total=${totalMs}ms slowest=${slowest.map((d) => `${d.fullName}:${d.ms}ms`).join(",")}`,
+  );
+
+  return NextResponse.json(
+    {
+      repositories: succeeded.map((row) => row.fullName),
+      entries,
+      checkRecords,
+      // 項目ごとの確認状態はGitHub Release本文のタスクリストが正（#4374）。取得のたびに本文から組み直す
+      checkLineRecords: buildCheckLineRecordsFromBodies(entries, legacyCheckLineRecords),
+      fetchedAt: new Date().toISOString(),
+    },
+    { headers: { "Server-Timing": `github;dur=${githubMs}, total;dur=${totalMs}` } },
+  );
 }

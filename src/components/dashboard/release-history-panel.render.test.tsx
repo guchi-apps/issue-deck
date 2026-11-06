@@ -413,3 +413,25 @@ describe("ReleaseHistoryPanel の候補への導線（#4597）", () => {
     expect(screen.queryByTestId("release-history-candidate-link")).toBeNull();
   });
 });
+
+describe("ReleaseHistoryPanel の前回の取得結果の表示（#5230）", () => {
+  it("前回の取得結果を出している間は帯を出し、確認のボタンとチェックを押させない", () => {
+    renderPanel({ freshness: "stale", fetchedAt: "2026-11-06T05:32:00.000Z", isLoading: true });
+    expect(screen.getByRole("status").textContent).toContain("前回取得");
+    expect((screen.getByRole("button", { name: "確認済みにする" }) as HTMLButtonElement).disabled).toBe(true);
+    const checkbox = screen.getByRole("checkbox", { name: "「修正を依頼する導線を足す」を確認済みにする（参考）" });
+    expect(checkbox.hasAttribute("disabled")).toBe(true);
+  });
+
+  it("確認対象が最新になったら押せるようになり、その他を取得中だと案内する", () => {
+    renderPanel({ freshness: "partial", fetchedAt: "2026-11-06T05:35:00.000Z", isLoading: true });
+    expect(screen.getByRole("status").textContent).toContain("確認対象のリポジトリは最新です");
+    expect((screen.getByRole("button", { name: "確認済みにする" }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it("すべて最新なら帯を出さず、取得時刻だけを出す", () => {
+    renderPanel({ freshness: "fresh", fetchedAt: "2026-11-06T05:35:00.000Z" });
+    expect(screen.queryByRole("status")).toBeNull();
+    expect(screen.getByText(/最新（.*取得）/)).toBeTruthy();
+  });
+});
