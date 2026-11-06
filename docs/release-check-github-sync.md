@@ -5,6 +5,7 @@
 ## 読み書きの流れ
 
 - 読み取り: `GET /api/repositories/release-history`が、取得したRelease本文から確認記録を組み立てる（`lib/release-body-tasks.ts`の`buildCheckLineRecordsFromBodies`）。GitHub側での変更は、画面の更新ボタン（再取得）で反映される。リリース一覧はETagで再検証するため、古い本文は残らない。
+- 画面を開いた直後は前回の取得結果（`ReleaseHistoryCache`。#5230）を出し、最新が届くまで項目チェックを押せなくする。写しの本文で押すと、GitHub側で変わった行を古い状態から書き換えかねないため。
 - 書き込み: `POST/DELETE /api/repositories/release-check-lines`が、書く直前に本文を取り直し、**該当行の先頭（`* ` → `- [x] `）だけ**を書き換えて`PATCH /releases/{id}`する。書いた後にもう一度読み、意図した状態になっていなければ`conflict`を返す（画面は「保存済み」にせず、本文を取り直す）。
 - 行の識別子は、PRの参照（`... in <URL>`）か、取り出せない手書きの行では本文そのもの。並び順・文言変更・他の行の編集に影響されない。同じ参照の行が複数あれば同じ項目として揃える。
 - 失敗版から引き継いだ項目は、**本番へ反映された修正版のRelease本文**の`### vX.Y.Zから引き継いだ変更`の節へ、行末に`<!-- issue-deck:key=... -->`を付けて初回のチェック時に書き足す。失敗版（Releaseが無い版）は同期済みとして扱わない。

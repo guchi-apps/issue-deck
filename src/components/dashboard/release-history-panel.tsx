@@ -1,7 +1,7 @@
 "use client";
 
 import { Check, CircleAlert, ExternalLink, Loader2, RefreshCw, Settings2, Smartphone } from "lucide-react";
-import { useMemo, useState } from "react";
+import { createContext, useContext, useMemo, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -36,9 +36,16 @@ import {
   type ReleaseNotesSnapshot,
   type UnreleasedDeployState,
 } from "@/lib/release-recovery";
+import type { ReleaseHistoryFreshness } from "@/lib/release-history-cache";
 import { getRepoColor } from "@/lib/repo-color";
 import { cn } from "@/lib/utils";
 import { getWebviewIosRepository } from "@/lib/webview-ios-repos";
+
+/**
+ * 前回の取得結果だけを出している間（#5230）、確認のチェック・ボタンを押させない。
+ * カードの部品は入れ子が深いので、propsで配らず文脈で渡す
+ */
+const ChecksLockedContext = createContext(false);
 
 /** 対象リポジトリの選択欄に出す1件 */
 export type ReleaseCheckRepositoryOption = {
@@ -67,6 +74,8 @@ export function ReleaseHistoryPanel({
   error,
   iosStatusLoading = false,
   iosStatusError = null,
+  freshness = "fresh",
+  fetchedAt = null,
   onRefresh,
   checkTargets,
   checkRecords,
@@ -86,6 +95,13 @@ export function ReleaseHistoryPanel({
   iosStatusLoading?: boolean;
   /** iOS配布の状況を取れなかったときの案内（#5214） */
   iosStatusError?: string | null;
+  /**
+   * 一覧の鮮度（#5230）。`stale`の間は前回の取得結果を出しているだけなので、確認のチェックを押させない。
+   * 省略時は`fresh`（従来どおり）
+   */
+  freshness?: ReleaseHistoryFreshness;
+  /** 出している一覧を取得した時刻（ISO文字列） */
+  fetchedAt?: string | null;
   onRefresh: () => void;
   /** 動作確認の対象に選んだリポジトリ（#2930） */
   checkTargets: ReleaseCheckTargetSummary[];
@@ -224,6 +240,15 @@ export function ReleaseHistoryPanel({
       {error && <p className="text-xs text-destructive">{error}</p>}
       {iosStatusError && <p className="text-[11px] text-muted-foreground">{iosStatusError}</p>}
 
+      {entries && (
+        <FreshnessNotice
+          freshness={freshness}
+          fetchedAt={fetchedAt}
+          isLoading={isLoading}
+          compact={compact}
+        />
+      )}
+
       {isLoading && !entries && (
         <div className="flex flex-col gap-2">
           <Skeleton className="h-20 w-full" />
@@ -253,6 +278,7 @@ export function ReleaseHistoryPanel({
       )}
 
       {groups.length > 0 && (
+        <ChecksLockedContext.Provider value={freshness === "stale"}>
         <div className="flex flex-col gap-5">
           {groups.map((group) => (
             <section key={group.dateKey}>
@@ -293,8 +319,60 @@ export function ReleaseHistoryPanel({
             </section>
           ))}
         </div>
+        </ChecksLockedContext.Provider>
       )}
     </div>
+  );
+}
+
+/**
+ * 一覧の鮮度の案内（#5230）。前回の取得結果を出している間と、確認対象以外がまだ届いていない間だけ
+ * 目立たせ、すべて最新になったら取得時刻を控えめに出す
+ */
+function FreshnessNotice({
+  freshness,
+  fetchedAt,
+  isLoading,
+  compact,
+}: {
+  freshness: ReleaseHistoryFreshness;
+  fetchedAt: string | null;
+  isLoading: boolean;
+  compact: boolean;
+}) {
+  if (freshness === "fresh") {
+    if (!fetchedAt || isLoading) return null;
+    return <p className="text-[10.5px] text-muted-foreground">最新（{formatDateTime(fetchedAt)} 取得）</p>;
+  }
+
+  const spinner = isLoading ? <Loader2 className="size-3 shrink-0 animate-spin" aria-hidden /> : null;
+  const tone = "flex items-start gap-1.5 rounded-md border border-sky-300 bg-sky-50 px-2.5 py-1.5 text-[11px] leading-relaxed text-sky-800 dark:border-sky-800 dark:bg-sky-950/40 dark:text-sky-300";
+
+  if (freshness === "partial") {
+    return (
+      <p className={tone} role="status">
+        {spinner}
+        <span>
+          確認対象のリポジトリは最新です。
+          {isLoading ? "その他のリポジトリ（「確認済みも表示」で出るもの）を取得中です。" : "その他のリポジトリは最新を取得できませんでした。"}
+        </span>
+      </p>
+    );
+  }
+
+  const when = fetchedAt ? formatDateTime(fetchedAt) : null;
+  return (
+    <p className={tone} role="status">
+      {spinner}
+      <span>
+        <span className="font-semibold">{when ? `前回取得（${when}）の内容を表示しています。` : "前回取得の内容を表示しています。"}</span>
+        {isLoading
+          ? compact
+            ? "最新を取得中のため、チェックは押せません。"
+            : "最新を取得中です。取得が終わるまでチェックは押せません。"
+          : "最新を取得できませんでした。更新ボタンでもう一度取得できます。"}
+      </span>
+    </p>
   );
 }
 
@@ -405,6 +483,7 @@ function ReleaseHistoryCard({
   /** 失敗版・修正版の相手のカードへ移る（#4003） */
   onJumpToRelease: (target: { repoFullName: string; tagName: string }) => void;
 }) {
+  const checksLocked = useContext(ChecksLockedContext);
   const repoName = entry.repoFullName.split("/")[1] ?? entry.repoFullName;
   const { lines } = extractReleaseHighlights(entry.body, Number.POSITIVE_INFINITY);
   const target = { repoFullName: entry.repoFullName, tagName: entry.tagName };
@@ -571,6 +650,7 @@ function ReleaseHistoryCard({
             variant="outline"
             className="ml-auto h-6 shrink-0 gap-1 border-amber-500/50 px-2 text-[11px] font-semibold text-amber-700 hover:bg-amber-50 dark:text-amber-300 dark:hover:bg-amber-950/40"
             onClick={() => onToggleChecked(target, true)}
+            disabled={checksLocked}
           >
             <Check className="size-3" aria-hidden />
             確認済みにする
@@ -588,7 +668,8 @@ function ReleaseHistoryCard({
             <button
               type="button"
               onClick={() => onToggleChecked(target, false)}
-              className="shrink-0 text-[11px] font-medium text-muted-foreground underline underline-offset-2 hover:text-foreground"
+              disabled={checksLocked}
+              className="shrink-0 text-[11px] font-medium text-muted-foreground underline underline-offset-2 hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
             >
               未確認に戻す
             </button>
@@ -699,6 +780,7 @@ function ReleaseNotesView({
     onToggle: (target: ReleaseLineToggleTarget, checked: boolean) => void;
   };
 }) {
+  const checksLocked = useContext(ChecksLockedContext);
   if (!notes || notes.status === "unavailable") {
     return (
       <p className="mt-1.5 rounded border border-dashed px-2 py-1 text-[11px] text-muted-foreground">
@@ -730,6 +812,7 @@ function ReleaseNotesView({
                 checked={lineChecked}
                 aria-label={`「${change}」を確認済みにする（参考）`}
                 onCheckedChange={(next) => check.onToggle(lineTarget, next === true)}
+                disabled={checksLocked}
                 className="mt-0.5 size-3.5 shrink-0"
               />
               <span className={cn(lineChecked && "text-muted-foreground line-through")}>{change}</span>
@@ -773,6 +856,7 @@ function ReleaseLineList({
     onToggle: (target: ReleaseLineToggleTarget, checked: boolean) => void;
   };
 }) {
+  const checksLocked = useContext(ChecksLockedContext);
   return (
     <div className="mt-1.5">
       {heading && <p className="mb-0.5 text-[10.5px] font-semibold text-muted-foreground">{heading}</p>}
@@ -798,6 +882,7 @@ function ReleaseLineList({
                     checked={lineChecked}
                     aria-label={`「${line.text}」を確認済みにする（参考）`}
                     onCheckedChange={(next) => check.onToggle(lineTarget, next === true)}
+                    disabled={checksLocked}
                     className="mt-0.5 size-3.5 shrink-0"
                   />
                 ) : (
