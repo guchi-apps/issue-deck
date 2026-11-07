@@ -130,6 +130,10 @@ lock_owner_alive() {
   [[ "$pid" =~ ^[0-9]+$ ]] && kill -0 "$pid" 2>/dev/null
 }
 
+lock_dir_mtime() {
+  stat -c %Y "$LOCK_DIR" 2>/dev/null || stat -f %m "$LOCK_DIR" 2>/dev/null || date +%s
+}
+
 acquire_lock() {
   local dir="$1" waited=0
   while :; do
@@ -138,11 +142,15 @@ acquire_lock() {
       return 0
     fi
     # 持ち主が死んでいる（Macの再起動・強制終了）ロックだけを外す。持ち主の生死はPIDで見る
+    # ownerファイルが未作成の間は「取得中」で、持ち主がいないわけではない（mkdirの成功から
+    # ownerの書き込みまでの隙間。負荷が高いと1秒を超えうる）。取得中は30秒待ってから外す
     if [ -d "$LOCK_DIR" ] && ! lock_owner_alive; then
-      sleep 1
-      if ! lock_owner_alive; then
-        rm -rf "$LOCK_DIR"
-        continue
+      if [ -s "$LOCK_DIR/owner" ] || [ "$(( $(date +%s) - $(lock_dir_mtime) ))" -ge 30 ]; then
+        sleep 1
+        if ! lock_owner_alive; then
+          rm -rf "$LOCK_DIR"
+          continue
+        fi
       fi
     fi
     if [ -f "$dir/cancel" ]; then return 2; fi
