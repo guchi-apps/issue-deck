@@ -710,7 +710,8 @@ REPO_SLUG="$(current_repo_slug)"
 
 # Codexが見た目案をIssueDeck配下へ登録するための接続情報（#2597）。**共有シークレットは
 # プロンプト本文・Issueコメント・標準出力へ書かない。** 子プロセスの環境変数としてだけ渡し、
-# `scripts/lib/codex-artifact.sh`が登録時にAuthorizationヘッダーへ設定する。
+# `scripts/lib/issue-artifact.sh`（旧名`codex-artifact.sh`）が登録時にAuthorizationヘッダーへ設定する。
+# Claude Codeのセッションへは渡さない（スクリプトがdispatch.envから自分で読む。#5237）。
 if [[ "$AGENT_KIND" == "codex" ]]; then
   ISSUE_DECK_ARTIFACT_API_URL="$(dispatch_env_value APP_BASE_URL)"
   if [[ -n "$ISSUE_DECK_ARTIFACT_API_URL" ]]; then

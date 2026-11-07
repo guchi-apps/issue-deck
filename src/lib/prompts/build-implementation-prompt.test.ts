@@ -51,3 +51,21 @@ describe("buildImplementationPrompt の親子Issue", () => {
     expect(build([])).toContain("(親子関係のあるIssueはありません)");
   });
 });
+
+describe("buildImplementationPrompt の見た目案（#5237）", () => {
+  it("ラベルの有無によらず、claude.aiではなくissue-artifact.shでIssueDeckへ登録させる", () => {
+    for (const labels of [[{ name: "50.feature" }], [{ name: "25.artifact-required" }]]) {
+      const prompt = buildImplementationPrompt({
+        repositoryFullName: "guchi-apps/morrow",
+        issueNumber: 10,
+        title: "見た目",
+        body: "本文",
+        labels,
+        comments: [],
+      });
+      expect(prompt).toContain("`~/apps/issue-deck/scripts/lib/issue-artifact.sh <HTMLファイル>`");
+      expect(prompt).not.toContain("codex-artifact.sh");
+      expect(prompt).not.toContain("`file_path`に指定して公開");
+    }
+  });
+});

@@ -128,6 +128,20 @@ describe("実装プロンプトの生成", () => {
     }
   });
 
+  // #5237: claude.aiのアーティファクトは上限に掛かったため、Claude Code・CodexともIssueDeckへ直接登録する
+  it("エージェント・ラベルによらず、見た目案はissue-artifact.shで登録しclaude.aiへ公開しないよう書く", () => {
+    for (const agent of ["claude", "codex"]) {
+      for (const labels of [[], ["25.artifact-required"]]) {
+        for (const prompt of [render(agent, labels), renderGeneric(agent, labels)]) {
+          expect(prompt).toContain(`\`${scriptsDir}/lib/issue-artifact.sh <HTMLファイル>\``);
+          expect(prompt).toContain("#5237");
+          expect(prompt).not.toContain("codex-artifact.sh");
+          expect(prompt).not.toContain("`file_path`に指定して公開");
+        }
+      }
+    }
+  });
+
   it("Codexでは計画を`submit-plan.sh`で出すよう書く", () => {
     const prompt = render("codex");
     expect(prompt).toContain(`\`${scriptsDir}/submit-plan.sh <計画ファイル>\`を実行してください`);
