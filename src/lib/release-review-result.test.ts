@@ -61,6 +61,32 @@ describe("normalizeReleaseReview", () => {
     expect(r?.detail.review?.legacy).toBe(true);
   });
 
+  it("ランナーが版を補った結果は旧ランナー扱いにせず、項目が揃っていれば未確認範囲なし", () => {
+    const r = normalizeReleaseReview({ ...fullChecks(), checklistVersionStamped: true, summary: "問題なし", ...coverageOf(10) });
+    expect(r?.unverifiedScope).toBeNull();
+    expect(r?.detail.review?.legacy).toBe(false);
+  });
+
+  it("版を補った結果で項目別の記録が無ければ、旧ランナーとは違う文言の未確認範囲になる", () => {
+    const r = normalizeReleaseReview({
+      state: "passed",
+      checklistVersion: RELEASE_REVIEW_CHECKLIST_VERSION,
+      checklistVersionStamped: true,
+      ...coverageOf(10),
+    });
+    expect(r?.unverifiedScope).not.toContain("旧ランナー");
+    expect(r?.unverifiedScope).toContain("ランナーが補った");
+  });
+
+  it("版を補った結果でも、フラグ無しの指摘は従来どおり止める指摘（降格しない）", () => {
+    const r = normalizeReleaseReview({
+      ...fullChecks(),
+      checklistVersionStamped: true,
+      findings: [{ severity: "high", title: "設定漏れ", detail: "env", file: "a.ts", pullRequests: [3] }],
+    });
+    expect(r?.state).toBe("needs_check");
+  });
+
   it("旧ランナー（版なし）の指摘はフラグが無くても従来どおり止める指摘（needs_check）", () => {
     const r = normalizeReleaseReview({
       state: "passed",

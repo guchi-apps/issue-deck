@@ -686,7 +686,9 @@ merge_batch_results() {
   expected_json="$(cut -f1 "$batch_dir"/b*.files 2>/dev/null | jq -Rsc 'split("\n") | map(select(. != "")) | group_by(.) | map({key: .[0], value: length}) | from_entries')"
   runner_json="$(jq -sc '.' "$batch_dir/runner.entries" 2>/dev/null || printf '[]')"
   idxs_json="$(printf '%s\n' "${batch_idxs[@]:-}" | jq -Rsc 'split("\n") | map(select(. != "") | tonumber)')"
-  [[ ${#all_results[@]} -gt 0 ]] || { printf '{"state":"passed","targetFiles":%s,"fileReviews":%s,"inputFiles":0,"batches":%d,"pendingBatches":%d,"reusedBatches":0,"rerunBatches":0}' "$targets_json" "$runner_json" "$batch_count" "$pending"; return 0; }
+  [[ ${#all_results[@]} -gt 0 ]] || { jq -nc --argjson targets "$targets_json" --argjson fr "$runner_json" --argjson b "$batch_count" --argjson p "$pending" --arg v "$checklist_version" \
+    '"'"'{state: "passed", targetFiles: $targets, fileReviews: $fr, inputFiles: 0, batches: $b, pendingBatches: $p, reusedBatches: 0, rerunBatches: 0}
+      + (if $v == "" then {} else {checklistVersion: ($v | tonumber), checklistVersionStamped: true} end)'"'"'; return 0; }
   # 補完の結果は、聞き直したファイルの分だけを使う
   if [[ -s "$batch_dir/rsup.json" && -s "$batch_dir/rsup.asked" ]]; then
     sup_json="$(jq -c --arg wt "$WORKTREE" --rawfile asked "$batch_dir/rsup.asked" "$JQ_NPATH"'
@@ -731,6 +733,7 @@ merge_batch_results() {
       state: (if any($rs[]; .state == "needs_check") or any($rs[], {findings: $supFindings}; (.findings // []) | any(.blocking == true)) then "needs_check" else "passed" end),
       summary: ([ $rs | to_entries[] | . as $e | ($e.value.summary // "") | select(. != "") | "[\(if $e.key < $nb then "バッチ\($idxs[$e.key])" else "相互作用の確認" end)] \(.[0:1500])" ] | join("\n") | .[0:19000]),
       checklistVersion: ([ $rs[] | .checklistVersion // empty ] | first),
+      checklistVersionStamped: (if any($rs[]; .checklistVersionStamped == true) then true else null end),
       checks: (
         [ $rs[] | (.checks // [])[] | select(type == "object") | .id ] | unique | map(
           . as $id
@@ -810,6 +813,22 @@ batch_progress_message() {
 # run_batch_job <バッチ番号> <作業ディレクトリ>: 1バッチを確認し、結果を`r<N>.json`へ保存する（#4769）。
 # 並列に起動されるため、親の状態（変数・`finish`・共通の出力ファイル）には触れない。成否は作業ディレクトリの
 # `rc`（0＝保存済み）と、失敗時の`message`・`diag`へ書き、報告は親がまとめて行う
+# stamp_checklist_version <結果JSONのファイル>: AIが`checklistVersion`を返さなかった結果に、ランナーが渡した確認項目の版を補う（#5241）。
+# 版の欠落をサーバーが「旧ランナーの結果」と誤判定しないため。AIが返していればそのまま、補ったときだけ
+# `checklistVersionStamped: true`の印を付ける（サーバーは止める指摘の判定を従来どおり保守側に倒す）。
+# サーバーから版を取れていない（空）ときは何もしない。保存点（バッチ・相互作用・補完）すべてから呼ぶ
+stamp_checklist_version() {
+  local f="$1" tmp
+  [[ -n "$checklist_version" && -s "$f" ]] || return 0
+  tmp="$f.stamp"
+  if jq -c --argjson v "$checklist_version" \
+    'if (.checklistVersion | type) == "number" then . else . + {checklistVersion: $v, checklistVersionStamped: true} end' "$f" >"$tmp" 2>/dev/null && [[ -s "$tmp" ]]; then
+    mv "$tmp" "$f"
+  else
+    rm -f "$tmp"
+  fi
+}
+
 run_batch_job() {
   local idx="$1" jd="$2" result_file="$batch_dir/r${idx}.json" rc=0 cause excerpt
   # どこで終わっても`rc`を残す（親は`rc`の有無で終了を判定する。#4785）
@@ -861,6 +880,7 @@ run_batch_job() {
   # 指紋を先に書く（結果だけが残り指紋の無い状態は、証跡に依存する結果なら再評価に倒れる）
   printf '%s' "$evidence_fp" >"${result_file%.json}.fp"
   printf '%s' "$host_fp" >"${result_file%.json}.hfp"
+  stamp_checklist_version "$result_file.tmp"
   mv "$result_file.tmp" "$result_file"
   printf '0' >"$jd/rc"
 }
@@ -1162,6 +1182,7 @@ main() {
         rc=1
       fi
       if ((rc == 0)) && extract_result_json "$output_file" >"$sup_file.tmp" && [[ -s "$sup_file.tmp" ]]; then
+        stamp_checklist_version "$sup_file.tmp"
         mv "$sup_file.tmp" "$sup_file"
         cp "$batch_dir/sup.files" "$batch_dir/rsup.asked"
         printf '%s' "$evidence_fp" >"${sup_file%.json}.fp"
@@ -1206,6 +1227,7 @@ main() {
         "$(diag_payload parse_failed "" "$output_file" finalize)"
       return 0
     fi
+    stamp_checklist_version "$int_file.tmp"
     mv "$int_file.tmp" "$int_file"
     printf '%s' "$evidence_fp" >"${int_file%.json}.fp"
     printf '%s' "$host_fp" >"${int_file%.json}.hfp"
