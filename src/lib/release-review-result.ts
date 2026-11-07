@@ -455,6 +455,8 @@ export function normalizeReleaseReview(
   // 確認項目の版を報告しない結果は旧ランナー。止める指摘の判定も従来どおりにする
   const reportedVersion = nonNegativeInt(raw.checklistVersion);
   const legacy = reportedVersion === null;
+  // ランナーが版を補った結果（AIは版を返していない。#5241）。旧ランナーとは区別するが、止める指摘の判定は保守側（legacyと同じ）に倒す
+  const stamped = !legacy && raw.checklistVersionStamped === true;
   const targetList = Array.isArray(raw.targetFiles)
     ? raw.targetFiles.map((f) => str(f, 300)).filter((f): f is string => f !== null)
     : [];
@@ -484,7 +486,7 @@ export function normalizeReleaseReview(
     const { blocking, demotedReason } = decideFindingBlocking({
       requested: r.blocking,
       severity: finding.severity,
-      legacy,
+      legacy: legacy || stamped,
       security: finding.checkId === RELEASE_REVIEW_SECURITY_CHECK_ID,
       file: finding.file,
       impact: finding.impact,
@@ -613,7 +615,7 @@ export function normalizeReleaseReview(
   else if (!versionOk) unverified.push(`確認項目の版が一致しません（結果v${reportedVersion}・現在v${RELEASE_REVIEW_CHECKLIST_VERSION}）`);
   else {
     const open = describeUnconfirmedChecks(checks);
-    if (open) unverified.push(open);
+    if (open) unverified.push(stamped ? `${open}（AIが確認項目の版を報告せず、ランナーが補った結果です）` : open);
   }
   const unchecked = resolutions.filter((r) => r.status === "not_checked");
   if (unchecked.length > 0) unverified.push(`前回の指摘${unchecked.map((r) => r.id).join("・")}の解消を確認できていません`);
