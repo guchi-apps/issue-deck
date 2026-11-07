@@ -175,7 +175,7 @@ Codexに同じ仕組みが無いため、**issue-deckの画面側の連携が一
 | AI使用量のフェーズ内訳（計画・調査・実装・検証・仕上げ） | ○ | ○（#3169。下の「フェーズの内訳も同じ5行へ割る」） |
 | APIエラーで中断したセッションの自動再開 | ○ | ○（`task_complete.error`を検知して`codex queue`で再開。#3178） |
 | ターンが閉じないまま止まったセッションの自動再開 | ○（ツール呼び出しの空振り。#2896） | ○（`task_started`のまま閉じない形を検知して`codex queue`で再開。#3174。**現象そのものが違う**——下の「ターンの取りこぼし」） |
-| アーティファクトの取り込み（#2154） | ○（`Artifact`のフック） | **×**（Claude Code固有のツール。`scripts/lib/codex-artifact.sh`で手動登録する） |
+| 見た目案のアーティファクト（#2154・#5237） | ○（`scripts/lib/issue-artifact.sh`で登録。`Artifact`ツールで公開したときもフックで取り込む） | ○（同じ`scripts/lib/issue-artifact.sh`で登録する。旧名`codex-artifact.sh`も使える） |
 | 追加指示を送る（#1012） | ○（`send-keys`の3段階プロトコル） | ○（`codex queue`。#2519。**信頼確認に答えるまでは送れない**） |
 | Remote Control | ○（Issueごとのリンク） | **△**（画面の「Codexに繋ぐ」でペアリングコードを発行する。ホストのカードとIssueの両方から押せるが、繋がるのはホスト単位。繋いだ先では`<リポジトリ名> #<番号>`の名前で見分ける。#2524・#2537・#2540） |
 | 前回の会話の引き継ぎ | ○（`--continue`） | ○（`codex resume <session_id>`。#2520） |
@@ -211,10 +211,14 @@ Codexに同じ仕組みが無いため、**issue-deckの画面側の連携が一
 
 Codex CLIにはClaude Codeの`Artifact`ツールが無いため、画面デザインをローカルHTTPサーバーの
 `localhost` URLで公開すると、サブPC上のURLを別端末から開けない。Issue専用セッションでは
-`scripts/lib/codex-artifact.sh <HTMLファイル>`を使う。このコマンドはHTMLを既存の
-`POST /api/dispatch/sessions/artifact`へ登録し、ログインが必要な
+`scripts/lib/issue-artifact.sh <HTMLファイル>`を使う（旧名`codex-artifact.sh`はラッパーとして残してある）。
+このコマンドはHTMLを既存の`POST /api/dispatch/sessions/artifact`へ登録し、ログインが必要な
 `https://issuedeck.gucchii.com/artifacts/<id>`を返す。計画コメントにはlocalhost URLではなく、
 返されたIssueDeck URLを記載する。
+
+**#5237からはClaude Codeのセッションも同じコマンドを使う**（claude.aiのアーティファクトが
+見た目案のたびに増えて上限に掛かったため。詳細は
+[session-notify.md](session-notify.md)「見た目案はclaude.aiを通さずissue-deckへ登録する」）。
 
 **そのぶんIssueコメントに残す記録が重要になる。** 端末だけで完結させると、画面からは何も起きて
 いないように見える。この点は`scripts/prompts/codex-supplement.md`でエージェント自身にも伝えている。

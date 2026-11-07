@@ -83,6 +83,10 @@ describe("session_step_classify（Bashのコマンドから）", () => {
     ["git commit -m 'fix'", "COMMITTING"],
     ["git push -u origin issue-2705", "PUSHING"],
     ["gh pr create --fill", "PR"],
+    // 見た目案の登録（#5237）。旧名も同じに扱う
+    ["scripts/lib/issue-artifact.sh /tmp/design.html", "ARTIFACT"],
+    ["/home/u/apps/issue-deck/scripts/lib/issue-artifact.sh a.html --issue 12", "ARTIFACT"],
+    ["scripts/lib/codex-artifact.sh a.html", "ARTIFACT"],
     ["gh issue comment 2705 --body x", "ISSUE"],
     ["gh issue view 2705 --comments", "EXPLORING"],
     ["git log --oneline -5", "EXPLORING"],

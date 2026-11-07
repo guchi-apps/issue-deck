@@ -914,7 +914,13 @@ Claude Codeのアーティファクト（claude.aiにホストされる自己完
   - **計画本文にURLを載せるときは、差し替えがあり得ることも一緒に書く。** 定型文は
     `アーティファクト: <URL>（計画のやり取りで見た目が変わった場合は、承認後・コードを書く前に
     同じURLへ差し替えます）`。断りが無いと、承認済みの計画コメントに古い版のURLだけが残る。
-- **見た目案はDesignタイプ（キャンバス）で作らない**（#2984）。`Artifact`ツールの説明が
+- **見た目案はclaude.aiの`Artifact`ツールで公開せず、`scripts/lib/issue-artifact.sh`でissue-deckへ
+  登録する**（#5237）。claude.aiのアーティファクトはアカウントに上限があり、見た目案のたびに
+  1件ずつ増えて上限に掛かった。`25.artifact-required`の関門（`session-notify.sh`）は、この
+  コマンドが成功してIssueDeckのURLを返した実行を「公開済み」と数える。理由と仕組みは
+  [session-notify.md](session-notify.md)「見た目案はclaude.aiを通さずissue-deckへ登録する」
+- **見た目案はDesignタイプ（キャンバス）で作らない**（#2984。下の記述は`Artifact`ツールで
+  公開していた頃のもので、#5237以降は`Artifact`ツール自体を使わない）。`Artifact`ツールの説明が
   「デザインを作るなら最初に`action: "quickstart"`を呼ぶ」と勧めるため、放っておくと
   `intent: "design"`のArtifactタイプ（キャンバス）が選ばれる。**そこから公開すると`file_path`が
   キャンバスの目次（`project/canvas.json`）になり**、issue-deckのカードには

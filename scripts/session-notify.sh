@@ -803,6 +803,12 @@ def mcp_html_publish(name, given):
     return False
 
 
+# 登録スクリプト（#5237。旧名`codex-artifact.sh`も）の実行と、成功したときに返すIssueDeckのURL。
+# **claude.aiの`Artifact`を使わず見た目案を出す正規の経路**なので、公開と同じに数える
+ISSUE_ARTIFACT_COMMAND = re.compile(r"(^|[\s/])(issue|codex)-artifact\.sh(\s|$)")
+ISSUE_ARTIFACT_URL = re.compile(r"https?://[^\s\"']+/artifacts/[A-Za-z0-9_-]+")
+
+
 def satisfied_gates():
     """同じworktreeの転記から、計画の承認とアーティファクトの公開を探す。"""
     found = set()
@@ -811,7 +817,7 @@ def satisfied_gates():
         return found
     files = sorted(glob.glob(os.path.join(os.path.dirname(transcript), "*.jsonl")), key=os.path.getmtime, reverse=True)
     for path in files[:30]:
-        plan_ids, artifact_ids, mcp_artifact_ids = set(), set(), set()
+        plan_ids, artifact_ids, mcp_artifact_ids, script_artifact_ids = set(), set(), set(), set()
         try:
             handle = open(path, encoding="utf-8", errors="replace")
         except OSError:
@@ -824,6 +830,7 @@ def satisfied_gates():
                     and "ExitPlanMode" not in line
                     and "Artifact" not in line
                     and "claude-artifacts" not in line
+                    and "-artifact.sh" not in line
                     and "tool_result" not in line
                 ):
                     continue
@@ -854,6 +861,8 @@ def satisfied_gates():
                             artifact_ids.add(block.get("id"))
                         elif mcp_html_publish(name, given):
                             mcp_artifact_ids.add(block.get("id"))
+                        elif name == "Bash" and ISSUE_ARTIFACT_COMMAND.search(str(given.get("command") or "")):
+                            script_artifact_ids.add(block.get("id"))
                     elif block.get("type") == "tool_result" and not block.get("is_error"):
                         if block.get("tool_use_id") in plan_ids:
                             found.add("plan")
@@ -862,6 +871,12 @@ def satisfied_gates():
                         # MCPの失敗は`is_error`を立てずに本文だけで返ることがあるので、
                         # 公開先のURLが応答に出ているときだけ公開できたとみなす
                         if block.get("tool_use_id") in mcp_artifact_ids and ARTIFACT_URL.search(
+                            json.dumps(block.get("content"), ensure_ascii=False)
+                        ):
+                            found.add("artifact")
+                        # 登録スクリプトは失敗すると非0で終わる（`is_error`）。念のため、
+                        # 登録できたときにだけ出るIssueDeckのURLまで確かめる
+                        if block.get("tool_use_id") in script_artifact_ids and ISSUE_ARTIFACT_URL.search(
                             json.dumps(block.get("content"), ensure_ascii=False)
                         ):
                             found.add("artifact")
@@ -895,7 +910,8 @@ reasons = []
 if "artifact" in missing:
     reasons.append(
         "このIssueには`25.artifact-required`（デザインを提示）が付いていますが、見た目のアーティファクトをまだ公開していません。"
-        "コードを書き始める前に、1枚の自己完結HTML（worktree外か`.html`ファイル）を書いて`Artifact`ツールで公開してください。"
+        "コードを書き始める前に、1枚の自己完結HTML（worktree外か`.html`ファイル）を書き、"
+        "`scripts/lib/issue-artifact.sh <HTMLファイル>`でIssueDeckへ登録してください（claude.aiの`Artifact`ツールは使いません。#5237）。"
     )
 if "plan" in missing:
     reasons.append(

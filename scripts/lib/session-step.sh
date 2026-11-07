@@ -53,6 +53,13 @@ session_step_from_bash_command() {
   # 大文字小文字は無視する（`PNPM Lint`のような書き方でも同じに扱う）
   local lower="${command,,}"
 
+  # 見た目案の登録（#5237）。Claude Code・Codexとも、claude.aiの`Artifact`ではなくこのスクリプトで
+  # IssueDeckへ登録する。旧名`codex-artifact.sh`（#2597）も同じに扱う
+  if [[ "$lower" =~ (^|[[:space:]/])(issue|codex)-artifact\.sh([[:space:]]|$) ]]; then
+    printf 'ARTIFACT'
+    return 0
+  fi
+
   # 書き込む操作（GitHub）
   if [[ "$lower" =~ (^|[[:space:]])gh[[:space:]]+pr[[:space:]]+(create|edit|comment|merge|ready|close|reopen)([[:space:]]|$) ]]; then
     printf 'PR'

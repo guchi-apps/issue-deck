@@ -191,6 +191,11 @@ describe("session_codex_step_sync（#3213）", () => {
     expect(sync()?.step).toBe("ARTIFACT");
   });
 
+  it("issue-artifact.shもARTIFACT（#5237）", () => {
+    writeTranscript([cmdCall("2026-09-20T05:00:10.000Z", "scripts/lib/issue-artifact.sh a.html")]);
+    expect(sync()?.step).toBe("ARTIFACT");
+  });
+
   it("本文に`custom_tool_call`という語が出るだけのレコードは呼び出しとして数えない", () => {
     writeTranscript([
       cmdCall("2026-09-20T05:00:10.000Z", "pnpm lint"),

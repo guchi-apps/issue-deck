@@ -974,6 +974,34 @@ Issueのラベルを引き直し、外れていれば通す——判定が外れ
 - 境界は`src/lib/dispatch/session-stall.test.ts`と
   `src/components/dashboard/session-stall-panel.test.tsx`が固定している
 
+## 見た目案はclaude.aiを通さずissue-deckへ登録する（#5237）
+
+**claude.aiのアーティファクトはアカウントに上限がある。** 実装セッションが見た目案を出すたびに
+`Artifact`ツールで公開していたため、ほぼ見た目案だけで200件を超えて上限に掛かった。一方で
+issue-deckは下の#2154の仕組みでHTMLの原本を受け取り、自分のオリジンから表示しているので、
+**表示に要るのは原本だけで、claude.aiを通す必要が無い。**
+
+- 起動プロンプト（`build-implementation-prompt.ts`・`start-issue.sh`・`generic-start-issue.sh`）は、
+  Claude Code・Codexとも`scripts/lib/issue-artifact.sh <HTMLファイル>`で登録させ、`Artifact`
+  ツールを使わせない。Codexは元からこの経路（#2597）で、旧名`codex-artifact.sh`はラッパーとして残す
+- **登録先はcwdのgitから決める**（ブランチ`issue-<番号>`とremote。`--repo`・`--issue`で上書き可）。
+  他リポジトリのセッションはissue-deckのスクリプトを絶対パスで呼ぶため、スクリプトの置き場所では
+  なく呼び出し元のcwdを見る
+- **`DISPATCH_SECRET`をセッションの環境変数へ広げない。** スクリプトが実行時に
+  `~/.config/issue-deck/dispatch.env`から読む（`fetch-issue-images.sh`と同じ形）。Codex向けに
+  `run-issue-session.sh`が渡している`ISSUE_DECK_ARTIFACT_*`は互換のため先に読む
+- **本文は標準入力で`curl`へ渡す。** 引数に載せると1引数128KiB（`MAX_ARG_STRLEN`）を超えた時点で
+  起動できない（旧`codex-artifact.sh`は引数で渡していた）
+- `25.artifact-required`の関門は、このコマンドの`Bash`実行が**エラーでなく、出力にIssueDeckの
+  `/artifacts/<id>`のURLがある**ときだけ公開済みと数える
+- 同じファイルパスで再実行すると、同じカード（同じURL）が差し替わる
+- **既存のclaude.ai上のアーティファクトは消しても、issue-deckのカードは残る。** 原本は
+  `uploads/artifacts/`にあり、消えるのはカードの「claude.aiで開く」リンクだけ。削除は
+  claude.aiのギャラリーから手で行う（`Artifact`の削除は1件ずつ人の確認が要り、セッションからは
+  一括で消せない）
+- Claude Code本体は自発的な`Artifact`公開を促すので、プロンプトの禁止だけでは漏れうる。漏れても
+  下の#2154のフックで従来どおりカードは出る（害はclaude.aiの枠を1件使うことだけ）
+
 ## 公開したアーティファクトはissue-deckへ取り込む（#2154）
 
 **claude.aiのアーティファクトページはiframeに入らない。** `https://claude.ai/code/artifact/<id>`は

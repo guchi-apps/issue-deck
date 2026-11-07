@@ -203,6 +203,42 @@ describe("計画・デザイン提示の関門（#4944）", () => {
     expect(denial(stdout).permissionDecisionReason).toContain("25.artifact-required");
   });
 
+  // claude.aiを通さずIssueDeckへ直接登録する経路（#5237）。旧名`codex-artifact.sh`も数える
+  it("登録スクリプトの成功した実行も提示済みにする", async () => {
+    for (const command of [
+      "scripts/lib/issue-artifact.sh /tmp/scratch/design.html",
+      "/home/u/apps/issue-deck/scripts/lib/codex-artifact.sh design.html",
+    ]) {
+      const transcript = writeTranscript("current.jsonl", [
+        toolUse("toolu_sh", "Bash", { command }),
+        toolResult("toolu_sh", "https://issuedeck.gucchii.com/artifacts/cmabc123xyz"),
+      ]);
+      const stdout = await runHook("Edit", { file_path: path.join(worktree, "a.ts") }, { gates: "artifact", transcript });
+      expect(denial(stdout)).toBeNull();
+    }
+  });
+
+  it("登録スクリプトが失敗した・URLを返さなかったときは提示済みにしない", async () => {
+    const transcript = writeTranscript("current.jsonl", [
+      toolUse("toolu_sh", "Bash", { command: "scripts/lib/issue-artifact.sh /tmp/d.html" }),
+      toolResult("toolu_sh", "エラー: IssueDeckへアーティファクトを登録できませんでした。", true),
+      toolUse("toolu_sh2", "Bash", { command: "scripts/lib/issue-artifact.sh --help" }),
+      toolResult("toolu_sh2", "Usage: scripts/lib/issue-artifact.sh <HTMLファイル>"),
+      // 別のコマンドの出力にURLが出ても数えない
+      toolUse("toolu_cat", "Bash", { command: "cat notes.md" }),
+      toolResult("toolu_cat", "https://issuedeck.gucchii.com/artifacts/cmabc123xyz"),
+    ]);
+    const stdout = await runHook("Edit", { file_path: path.join(worktree, "a.ts") }, { gates: "artifact", transcript });
+    const result = denial(stdout);
+    expect(result.permissionDecisionReason).toContain("25.artifact-required");
+    expect(result.permissionDecisionReason).toContain("issue-artifact.sh");
+  });
+
+  it("登録スクリプトの実行そのものは止めない", async () => {
+    const stdout = await runHook("Bash", { command: "scripts/lib/issue-artifact.sh /tmp/scratch/design.html" });
+    expect(denial(stdout)).toBeNull();
+  });
+
   it("計画だけ承認済みなら、アーティファクトの理由だけで拒否する", async () => {
     const transcript = writeTranscript("current.jsonl", planApproved);
     const result = denial(await runHook("Edit", { file_path: path.join(worktree, "a.ts") }, { transcript }));

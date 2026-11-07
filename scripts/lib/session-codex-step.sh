@@ -52,10 +52,8 @@ session_codex_step_from_command() {
   local command="${1:-}"
   case "$command" in
     *submit-plan.sh* | *submit-question.sh*) return 1 ;;
-    *codex-artifact.sh*)
-      printf 'ARTIFACT'
-      return 0
-      ;;
+    # 見た目案の登録（`issue-artifact.sh`・旧名`codex-artifact.sh`）は
+    # `session_step_from_bash_command`が`ARTIFACT`に分類する（#5237でClaude Codeと共用にした）
   esac
   session_step_from_bash_command "$command"
 }
