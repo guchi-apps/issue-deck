@@ -42,6 +42,13 @@ export type ChangelogEntry = {
  */
 export const APP_CHANGELOG: ChangelogEntry[] = [
   {
+    version: "8.92.1",
+    date: "2026-11-07",
+    changes: [
+      "確認対象の取得に失敗したリポジトリが残っている間は、履歴を最新として扱わず、確認操作をロックするようにしました。",
+    ],
+  },
+  {
     version: "8.92.0",
     date: "2026-11-07",
     changes: [
