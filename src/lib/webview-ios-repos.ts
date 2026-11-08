@@ -135,6 +135,22 @@ const WORK_RELAY: WebviewIosRepository = {
   launchUrl: "https://research-desk.gucchii.com/",
 };
 
+/** asset-manager。ios/配下のAssetManagerをTestFlightへ自動配信する（asset-manager#1106・#1115）。Mac miniのチェックアウトは`~/apps/asset-manager` */
+const ASSET_MANAGER: WebviewIosRepository = {
+  appLabel: "asset-manager",
+  xcodeProjectPath: "ios/AssetManager.xcodeproj",
+  command:
+    "cd ~/apps/asset-manager &&\ngit status --short &&\ngit switch develop &&\ngit pull --ff-only origin develop &&\nopen ios/AssetManager.xcodeproj",
+  setupReferences: [
+    {
+      label: "ios/README.md",
+      url: "https://github.com/guchi-apps/asset-manager/blob/develop/ios/README.md",
+    },
+  ],
+  // Associated Domains（AASA）は使わない（ios/README.md）。ブラウザで開く
+  launchUrl: "https://asset.gucchii.com/",
+};
+
 const WEBVIEW_IOS_REPOSITORIES: Readonly<Record<string, WebviewIosRepository>> = {
   "guchi-apps/work-relay": WORK_RELAY,
   "guchi-apps/kurashio": KURASHIO,
@@ -143,6 +159,7 @@ const WEBVIEW_IOS_REPOSITORIES: Readonly<Record<string, WebviewIosRepository>> =
   "guchi-apps/aide": AIDE,
   "guchi-apps/morrow": MORROW,
   "guchi-apps/issue-deck": ISSUE_DECK,
+  "guchi-apps/asset-manager": ASSET_MANAGER,
 };
 
 export function getWebviewIosRepository(repositoryFullName: string): WebviewIosRepository | null {
