@@ -1,11 +1,10 @@
 #!/usr/bin/env node
-// 必須検査の正本（ci/required-checks.json）と、それを実行する2つのCI設定がずれていないかを検査する（#4065）。
+// 必須検査の正本（ci/required-checks.json）と、それを実行するci.ymlがずれていないかを検査する（#4065）。
 //
 // - .github/workflows/ci.yml: 定義の各グループに同名のジョブがあり、そのジョブが
 //   `run-required-checks.mjs --group <グループ名>` を呼んでいること。定義に無いジョブは
 //   通知・情報提供だけのもの（INFORMATIONAL_JOBS）に限ること（必須検査を定義の外へ書くと、
-//   バックアップCIでは実行されないまま「同等」と扱われるため）
-// - .circleci/config.yml: `run-required-checks.mjs --all` で全グループを実行していること
+//   定義に基づく検査から漏れるため）
 // - 各検査の `run` が参照するスクリプトが実在すること
 //
 // 使い方: node scripts/ci/check-ci-definition-sync.mjs
@@ -51,7 +50,7 @@ export function referencedScripts(run) {
   return [...run.matchAll(/(?:^|\s)((?:scripts|\.github)\/[\w./-]+\.(?:sh|mjs|js))/g)].map((m) => m[1]);
 }
 
-export function checkSync({ manifest, ciYaml, circleYaml, exists }) {
+export function checkSync({ manifest, ciYaml, exists }) {
   const errors = [];
   const groups = Object.keys(manifest.groups ?? {});
   if (groups.length === 0) errors.push("required-checks.json にグループがありません");
@@ -76,12 +75,6 @@ export function checkSync({ manifest, ciYaml, circleYaml, exists }) {
     }
   }
 
-  if (circleYaml == null) {
-    errors.push(".circleci/config.yml がありません");
-  } else if (!/run-required-checks\.mjs[^\n]*--all/.test(circleYaml)) {
-    errors.push(".circleci/config.yml が run-required-checks.mjs --all を実行していません");
-  }
-
   for (const group of groups) {
     for (const check of manifest.groups[group].checks ?? []) {
       for (const script of referencedScripts(check.run ?? "")) {
@@ -97,14 +90,13 @@ function main() {
   const errors = checkSync({
     manifest: JSON.parse(read("ci/required-checks.json") ?? "{}"),
     ciYaml: read(".github/workflows/ci.yml") ?? "",
-    circleYaml: read(".circleci/config.yml"),
     exists: (p) => existsSync(path.join(ROOT, p)),
   });
   if (errors.length > 0) {
     for (const error of errors) console.error(`NG: ${error}`);
     return 1;
   }
-  console.log("OK: ci.yml・.circleci/config.yml が必須検査の定義と一致しています");
+  console.log("OK: ci.yml が必須検査の定義と一致しています");
   return 0;
 }
 
