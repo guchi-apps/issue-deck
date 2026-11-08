@@ -3,7 +3,6 @@ import { Prisma } from "@prisma/client";
 import type { ClaudeApiFeature } from "@/lib/claude/api-usage";
 import {
   abandonChatTurnJob,
-  CHAT_TURN_CLAIM_WAIT_MS,
   CODEX_CLI_PROVIDER,
   isCodexCliModel,
   parseChatTurnErrorKind,
@@ -38,6 +37,13 @@ export const CODEX_APP_AI_TOKEN = "codex-cli";
 export const APP_AI_CODEX_DEFAULT_TIMEOUT_MS = 180_000;
 
 const POLL_INTERVAL_MS = 1_000;
+/**
+ * サブPCがジョブを受け取るまでの待ち（#5268）。チャット調査（`CHAT_TURN_CLAIM_WAIT_MS`＝30秒）より長くする。
+ * pollerは重い巡回の途中にも軽い巡回を挟むが、起動ジョブの実行中（1件10秒以上）などは取得が空くため、
+ * 30秒では「サブPCがジョブを受け取りませんでした」で失敗していた（本番のAI推奨の失敗はすべてこれだった）。
+ * 受け取られないまま待つだけなので、延ばしても利用枠は消費しない
+ */
+export const APP_AI_CODEX_CLAIM_WAIT_MS = 60_000;
 /** 再起動などで待ち手を失った行を消す目安 */
 const STALE_RUN_MS = 60 * 60 * 1000;
 
@@ -339,7 +345,14 @@ export async function runAppAiOnCodex(params: {
     });
     await db.appAiCodexRun.update({ where: { id: run.id }, data: { currentJobId: job.id } });
     notifyDispatchHostWake(job.targetHost);
-    const output = await waitForRun({ runId: run.id, jobId: job.id, timeoutMs, sleep, clock });
+    const output = await waitForRun({
+      runId: run.id,
+      jobId: job.id,
+      timeoutMs,
+      claimWaitMs: Math.min(APP_AI_CODEX_CLAIM_WAIT_MS, timeoutMs),
+      sleep,
+      clock,
+    });
     return { text: readCodexOutput(output, request.textWrapped), model: `${CODEX_CLI_PROVIDER}/${params.model}` };
   } finally {
     pendingImages.delete(run.id);
@@ -351,6 +364,8 @@ async function waitForRun(params: {
   runId: string;
   jobId: string;
   timeoutMs: number;
+  /** `QUEUED`のまま受け取られないときに諦めるまでの時間 */
+  claimWaitMs: number;
   sleep: Sleep;
   clock: () => number;
 }): Promise<string> {
@@ -370,7 +385,7 @@ async function waitForRun(params: {
     if (job.status === "TIMEOUT") throw new AppAiCodexError("not_claimed");
     if (["FAILED", "SKIPPED", "CANCELED"].includes(job.status)) throw new AppAiCodexError("codex_error");
     const elapsed = params.clock() - startedAt;
-    if (job.status === "QUEUED" && elapsed >= CHAT_TURN_CLAIM_WAIT_MS) {
+    if (job.status === "QUEUED" && elapsed >= params.claimWaitMs) {
       await abandonChatTurnJob(params.jobId, "サブPCに受け取られませんでした");
       throw new AppAiCodexError("not_claimed");
     }

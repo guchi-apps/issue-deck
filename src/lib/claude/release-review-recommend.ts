@@ -12,8 +12,12 @@ import {
  * 判断の保存はユーザーが確定したときに判断APIが行う（他のAI下書き生成と同じ立場）。
  */
 
-/** 画面の表示中に呼ぶため、待ち続けない */
-const RECOMMEND_TIMEOUT_MS = 90_000;
+/**
+ * 画面の表示中に呼ぶため、待ち続けない。Codex経路では、サブPCが受け取るまでの待ち（最大60秒）と
+ * 実行（実測で指摘2件30秒前後）の両方が入るので、90秒では受け取りが遅れた回に足りなかった（#5268）。
+ * 本番のApacheは`Timeout 300`のため、この長さなら画面への応答は途中で切られない
+ */
+export const RECOMMEND_TIMEOUT_MS = 150_000;
 
 type AnthropicMessageResponse = { content?: { type: string; text?: string }[]; model?: string };
 

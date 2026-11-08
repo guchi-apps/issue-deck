@@ -17,6 +17,7 @@ vi.mock("@/lib/db", () => ({
 
 import { findUsableRecommendation, loadOrGenerateRecommendations } from "@/lib/release-review-recommendation-store";
 import type { RecommendationTarget } from "@/lib/release-review-recommendation";
+import { describeAppAiCodexError } from "@/lib/claude/app-ai-codex";
 
 const key = { scopeKey: "o/r#10", baseSha: "base", headSha: "head" };
 const draft = (reason: string) => ({ reason, impact: "影響", scope: "範囲", timing: "公開直後", followUpTitle: "題" });
@@ -88,6 +89,21 @@ describe("loadOrGenerateRecommendations", () => {
     expect(view.failures["R-1"]).toBe("時間切れ");
     await loadOrGenerateRecommendations({ key, repoFullName: "o/r", prNumber: 11, targets: [target("R-1")], retry: true, generate });
     expect(generate).toHaveBeenCalledTimes(1);
+  });
+
+  it("サブPCが受け取らなかった・時間切れの失敗は、次に開いたときに自動で作り直す（#5268）", async () => {
+    for (const kind of ["not_claimed", "timeout"] as const) {
+      findMany.mockResolvedValue([row("R-1", { status: "failed", recommended: null, error: describeAppAiCodexError(kind) })]);
+      const generate = vi.fn(async (batch: RecommendationTarget[]) => generated(batch.map((t) => t.id)));
+      const view = await loadOrGenerateRecommendations({ key, repoFullName: "o/r", prNumber: 11, targets: [target("R-1")], retry: false, generate });
+      expect(generate).toHaveBeenCalledTimes(1);
+      expect(view.byFinding["R-1"].recommended).toBe("defer");
+    }
+    // 受け渡しでなくAI側の失敗（未ログインなど）は固定したまま
+    findMany.mockResolvedValue([row("R-1", { status: "failed", recommended: null, error: describeAppAiCodexError("not_logged_in") })]);
+    const generate = vi.fn();
+    await loadOrGenerateRecommendations({ key, repoFullName: "o/r", prNumber: 11, targets: [target("R-1")], retry: false, generate });
+    expect(generate).not.toHaveBeenCalled();
   });
 
   it("AIが失敗したら束の指摘を失敗として保存し、推奨にしない", async () => {

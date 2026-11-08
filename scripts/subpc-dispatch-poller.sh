@@ -4754,16 +4754,19 @@ run_once() {
   # **claimより先に行う。** サブPCは並行3本が上限（#1177・載せ替え後の実測は#1812）で、
   # 掴んだままの開発サーバーがあると新しいジョブを取っても起こせない。取りに行く前に空けておく。
   reap_dev_servers
+  claim_out_of_band_between_sweeps
 
   # 作業が終わったセッションそのものを畳む（#1256）。**開発サーバーの回収の後に行う。**
   # 畳めば`run-issue-session.sh`のtrapが開発サーバーも止めるが、trapを通れなかったぶんは
   # 次の巡で孤児として回収される。
   reap_sessions
+  claim_out_of_band_between_sweeps
 
   # マージ済みworktreeを掃除する（#1716）。**セッションの回収の後に行う。** 直前に畳んだ
   # セッションのworktreeを、同じ巡でそのまま消せる（セッションが動いている間は消えない）。
   # 毎巡ではなく WORKTREE_CLEANUP_INTERVAL_MINUTES の間隔でだけ実際に走る。
   reap_worktrees
+  claim_out_of_band_between_sweeps
 
   # リモートセッション（#4743）のうち、tmuxが無くなったもののworktreeを片付ける。作業が残って
   # いるものは消さない（判定はランチャー）。数本しか無いので毎巡でよい
@@ -4772,16 +4775,19 @@ run_once() {
     reap_idle_remote_sessions || true
     timeout 120 bash "$REMOTE_SESSION_LAUNCHER" --sweep </dev/null || true
   fi
+  claim_out_of_band_between_sweeps
 
   # 掃除で消えなかったworktreeの`node_modules`をハードリンクへまとめる（#2124）。
   # **掃除の後に行う。** 消えるworktreeを走査しても無駄になる。既定は1日1回で、
   # 走査自体は別プロセスへ出すのでこの巡は待たない。
   reap_node_modules_duplicates
+  claim_out_of_band_between_sweeps
 
   # 起動済みセッションの状態を報告する（#1217）。**claimより先に行う**。
   # ここで失敗しても続けるが、先に出しておくと「取りに行く前の状態」が残り、
   # 起動が失敗したときの前後関係が読める。
   report_sessions
+  claim_out_of_band_between_sweeps
 
   if [[ "$ANNOUNCE_ONLY" -eq 1 ]]; then
     return 0
@@ -4793,61 +4799,83 @@ run_once() {
     # 終わったCodexセッションをリモート一覧から外し、デーモンを見張る（#3357）。**dry-runでは
     # 呼ばない**（スレッドのアーカイブとデーモンの起動という副作用があるため）
     tidy_codex_remote_control
+    claim_out_of_band_between_sweeps
     sweep_pull_request_conflicts
+    claim_out_of_band_between_sweeps
     sweep_pull_request_auto_repairs
+    claim_out_of_band_between_sweeps
     # 本番復旧系列（#3998）。**dry-runでは呼ばない**（Issueの起票と実装の起動という副作用があるため）。
     sweep_deploy_recoveries
+    claim_out_of_band_between_sweeps
     # リリース候補の修正系列（#4317）。**dry-runでは呼ばない**（候補の作り直しという外向きの副作用があるため）。
     sweep_release_fix_series
+    claim_out_of_band_between_sweeps
     # 実装セッションの依存待ち（#4321）。**dry-runでは呼ばない**（セッションへの再開指示と
     # Issueコメントという外向きの副作用があるため）。
     sweep_dependency_waits
+    claim_out_of_band_between_sweeps
     # 親Issueの自動実行（#4536）。**dry-runでは呼ばない**（子の実装セッションを起動する副作用があるため）。
     sweep_parent_runs
+    claim_out_of_band_between_sweeps
     sweep_codex_pull_request_reviews
+    claim_out_of_band_between_sweeps
     sweep_rebuild_history
+    claim_out_of_band_between_sweeps
     # iOS配布失敗の巡回検知（#3745）。**dry-runでは呼ばない**（Issueの起票という外向きの副作用があるため）。
     sweep_ios_distribution_failures
+    claim_out_of_band_between_sweeps
     # デプロイ起動漏れの巡回検知と起動し直し（#2703）。**dry-runでは呼ばない**
     # （本番デプロイの起動という外向きの副作用があるため）。
     sweep_deploy_launches
+    claim_out_of_band_between_sweeps
     # 共通知識の反映PRの自動マージ（#3645）。**dry-runでは呼ばない**（共有知識リポジトリへの
     # マージという外向きの副作用があるため）。
     sweep_knowledge_promotions
+    claim_out_of_band_between_sweeps
     # 進捗の取り残しの巡回回収（#2294）。**dry-runでは呼ばない**（進捗の書き換えと
     # コメント投稿という外向きの副作用があるため）。
     sweep_progress
+    claim_out_of_band_between_sweeps
     # 本番マージ待ちの巡回通知（#2376）。**dry-runでは呼ばない**（Push通知という
     # 外向きの副作用があるため）。
     sweep_release_merges
+    claim_out_of_band_between_sweeps
     # リリース完了の巡回通知（#2725）。**dry-runでは呼ばない**（Push通知という
     # 外向きの副作用があるため）。
     sweep_releases
+    claim_out_of_band_between_sweeps
     # 添付画像の参照の巡回収集と後始末（#2475）。**dry-runでは呼ばない**（ファイルの
     # 移動・削除という取り消しの効かない副作用があるため）。
     sweep_uploaded_images
+    claim_out_of_band_between_sweeps
     # ローカルセッションのトークン使用量を報告する（#2504）。**dry-runでは呼ばない**
     # （画面に出る記録が増えるため）。毎巡ではなく SESSION_USAGE_INTERVAL_MINUTES の
     # 間隔でだけ実際に走る。
     report_session_usage
+    claim_out_of_band_between_sweeps
     # 動いているセッションだけの報告（#3135）。速い巡回が無効（`DISPATCH_FAST_POLL_INTERVAL_SECONDS=0`）
     # でもここで回る（その場合の刻みは重い巡回の間隔になる）。
     report_live_session_usage
+    claim_out_of_band_between_sweeps
     # Codexのプラン枠も同じ間隔で報告する（#2535）。Claudeの転記が無いホストでも独立して動く。
     report_codex_usage
+    claim_out_of_band_between_sweeps
   fi
 
   # APIエラー（529等）で中断したセッションを再開する（#1971）。**回収と報告の後に行う。**
   # 畳まれたセッションへ送りに行かず、報告には再開前の状態が残る（前後関係が読める）。
   resume_interrupted_sessions
+  claim_out_of_band_between_sweeps
 
   # ツールを呼び出したつもりでテキストに書いただけで、実際には呼ばれていないまま止まった
   # セッションを送り直し、駄目なら引き上げる（#2655・#2896）。同じ理由で回収・報告の後に行う。
   recover_tool_call_stalled_sessions
+  claim_out_of_band_between_sweeps
 
   # Codexのターンが開始したまま閉じず、更新が止まったセッションを送り直し、駄目なら
   # 引き上げる（#3174）。同じ理由で回収・報告の後に行う。
   recover_codex_turn_stalled_sessions
+  claim_out_of_band_between_sweeps
 
   # セッションが上限に達している間は起動ジョブを取りに行かない（#1361）。
   # **回収より前ではなく、回収の後に見る。** 直前の reap_sessions で空いたぶんを反映させたい。
@@ -4939,8 +4967,14 @@ run_once() {
 #
 # **`curl`自身の`--show-error`もここでは捨てる。** issue-deckはデプロイのたびに落ちるので、
 # 繋がらない数十秒のあいだ`Failed to connect`が10倍の勢いで積まれる。
+#
+# **引数`--no-exec`は重い巡回の途中から呼ぶとき用**（#5268）。自己更新ジョブを受け取っても
+# ここでは入れ替えず、`SELF_UPDATE_EXEC_PENDING`を立てたまま`run_once`の完了後に任せる
+# （途中で`exec`すると、その巡の報告・起動が届かないまま消える。`maybe_auto_self_update`と同じ理由）。
+LAST_OUT_OF_BAND_CLAIM_AT=0
 claim_out_of_band() {
   local payload jobs_json job_count job
+  LAST_OUT_OF_BAND_CLAIM_AT="$(date +%s)"
   payload="$(jq -n --arg host "$HOST_NAME" '{host: $host, maxJobs: 0, fast: true}')"
   api_call POST /api/dispatch/claim "$payload" 2>/dev/null || return 0
 
@@ -4953,8 +4987,25 @@ claim_out_of_band() {
     [[ -n "$job" ]] || continue
     run_job "$job"
   done < <(printf '%s' "$jobs_json" | jq -c '.jobs[]')
-  exec_pending_self_update
+  [[ "${1:-}" == "--no-exec" ]] || exec_pending_self_update
   return 0
+}
+
+# 重い巡回（`run_once`）の巡回処理の合間に挟む軽い巡回（#5268）。
+#
+# 重い巡回は約20個の巡回処理を直列に回し、1周に平均40秒前後・長いと数分かかる。その間は
+# `wait_between_polls`の軽い巡回が止まるため、アプリ内AIのCodex実行（`CHAT_TURN`）が
+# 受け取り待ちの上限（issue-deck側で30〜60秒）を過ぎて「サブPCがジョブを受け取りませんでした」
+# になっていた（本番のAI推奨の失敗はすべてこれだった）。
+#
+# **前回の軽い巡回から`FAST_POLL_INTERVAL`秒以上空いたときだけ取りに行く**ので、待ち時間中と
+# 同じ頻度に収まる。取りに行くのは枠外ジョブだけ（`claim_out_of_band`と同じ）で、自己更新の
+# 入れ替えは`run_once`の完了後に任せる（`--no-exec`）。`--once`・申告だけ・軽い巡回の無効化では
+# 何もしない（どれも待ち時間の軽い巡回を持たない経路で、振る舞いを変えない）。
+claim_out_of_band_between_sweeps() {
+  [[ "$FAST_POLL_INTERVAL" -gt 0 && "$ANNOUNCE_ONLY" -eq 0 && "$ONCE" -eq 0 ]] || return 0
+  (( $(date +%s) - LAST_OUT_OF_BAND_CLAIM_AT >= FAST_POLL_INTERVAL )) || return 0
+  claim_out_of_band --no-exec
 }
 
 # --- 即時通知（#4200） --------------------------------------------------------------
@@ -5012,7 +5063,13 @@ wait_between_polls() {
       step="$FAST_POLL_INTERVAL"
     fi
     if sleep_or_wake "$step"; then
-      # 即時通知（#4200）を受けた。待ちを打ち切って、呼び出し元の重い巡回（`run_once`）を前倒しで回す
+      # 即時通知（#4200）を受けた。待ちを打ち切って、呼び出し元の重い巡回（`run_once`）を前倒しで回す。
+      # **その前に枠外ジョブを1回だけ取りに行く**（#5268）。`run_once`の取得は巡回処理を全部
+      # 回した最後なので、通知の主（アプリ内AIの`CHAT_TURN`など）が数十秒待たされ、受け取り待ちの
+      # 上限を過ぎていた。取得に失敗しても重い巡回はそのまま回す（`claim_out_of_band`は失敗で0を返す）
+      if [[ "$FAST_POLL_INTERVAL" -gt 0 && "$ANNOUNCE_ONLY" -eq 0 ]]; then
+        claim_out_of_band
+      fi
       return 0
     fi
     remaining=$((remaining - step))
@@ -5058,6 +5115,10 @@ while [[ "$SHUTDOWN" -eq 0 ]]; do
   run_once || true
   LAST_RUN_ONCE_END="$(date +%s)"
   [[ "$SHUTDOWN" -eq 0 ]] || break
+  # 巡回処理の合間の軽い巡回（#5268）が自己更新ジョブを受け取ると、入れ替えは保留されたまま
+  # `run_once`を抜ける（最後の取得が「ジョブなし」で戻ると、そこでも入れ替えない）。巡が完全に
+  # 終わったここで行う
+  exec_pending_self_update
   # **`run_once`の直後に置く**（#4118）。`wait_between_polls`の中でもclaimが走るため、そこに
   # 入れるとジョブを掴んだまま入れ替わる
   maybe_auto_self_update
