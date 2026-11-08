@@ -34,7 +34,6 @@ import { PullRequestStopCauseNotice } from "@/components/dashboard/pull-request-
 import { PullRequestRepairButtons } from "@/components/dashboard/pull-request-repair-buttons";
 import { PullRequestReviewRerunButton } from "@/components/dashboard/pull-request-review-rerun-button";
 import { ReviewVerdictFreshnessNote } from "@/components/dashboard/review-verdict";
-import { PullRequestBackupCi } from "@/components/dashboard/pull-request-backup-ci";
 import { PullRequestReviewFindings } from "@/components/dashboard/pull-request-review-findings";
 import {
   PullRequestReviewResponse,
@@ -843,17 +842,6 @@ export function PullRequestDetail({
               )}
             </section>
 
-            {/* GitHub Actions障害時のバックアップCI（#4065）。補足なのでここへ置く。
-                develop向けの未マージPRだけ。CIが現在の阻害要因のときは上の主操作に理由を出している */}
-            {isDevelopOpen && (
-              <PullRequestBackupCi
-                repositoryFullName={pullRequest.repositoryFullName}
-                prNumber={pullRequest.number}
-                headSha={pullRequest.headSha}
-                headRef={pullRequest.headRef}
-                actionsChecks={ciChecks}
-              />
-            )}
           </>
         )}
 

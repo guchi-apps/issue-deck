@@ -16,7 +16,6 @@ jobs:
     steps:
       - run: echo hi
 `;
-const circleYaml = "node /tmp/trusted/run-required-checks.mjs --all \\\n";
 
 describe("check-ci-definition-sync", () => {
   it("ジョブを取り出す", () => {
@@ -24,24 +23,22 @@ describe("check-ci-definition-sync", () => {
   });
 
   it("一致していればエラーなし", () => {
-    expect(checkSync({ manifest, ciYaml, circleYaml, exists: () => true })).toEqual([]);
+    expect(checkSync({ manifest, ciYaml, exists: () => true })).toEqual([]);
   });
 
   it("定義の外に検査ジョブを足すと落ちる", () => {
     const yaml = `${ciYaml}  extra-check:\n    steps:\n      - run: pnpm x\n`;
-    expect(checkSync({ manifest, ciYaml: yaml, circleYaml, exists: () => true }).join()).toContain("extra-check");
+    expect(checkSync({ manifest, ciYaml: yaml, exists: () => true }).join()).toContain("extra-check");
   });
 
-  it("ジョブがランナーを呼ばない・CircleCIが全グループを走らせないと落ちる", () => {
+  it("ジョブがランナーを呼ばないと落ちる", () => {
     const yaml = ciYaml.replace("--group lint-and-build", "--group other");
-    expect(checkSync({ manifest, ciYaml: yaml, circleYaml, exists: () => true }).length).toBe(1);
-    expect(checkSync({ manifest, ciYaml, circleYaml: "node x.mjs", exists: () => true }).length).toBe(1);
-    expect(checkSync({ manifest, ciYaml, circleYaml: null, exists: () => true }).length).toBe(1);
+    expect(checkSync({ manifest, ciYaml: yaml, exists: () => true }).length).toBe(1);
   });
 
   it("参照先のスクリプトが無いと落ちる", () => {
     const m = { schemaVersion: 1, groups: { "lint-and-build": { checks: [{ id: "x", run: "scripts/missing.sh" }] } } };
-    expect(checkSync({ manifest: m, ciYaml, circleYaml, exists: () => false }).join()).toContain("scripts/missing.sh");
+    expect(checkSync({ manifest: m, ciYaml, exists: () => false }).join()).toContain("scripts/missing.sh");
   });
 });
 

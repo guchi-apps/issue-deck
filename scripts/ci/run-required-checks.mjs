@@ -2,8 +2,7 @@
 // develop向けPRの必須検査を、正本（ci/required-checks.json）どおりに実行する（#4065）。
 //
 // GitHub Actions（.github/workflows/ci.yml）はジョブごとに `--group <ジョブ名>` で、
-// バックアップCI（.circleci/config.yml）は `--all` で呼ぶ。検査の中身を1か所に置くことで、
-// 「Actionsでは落ちるがCircleCIでは通る」差が生まれないようにする。
+// 検査の中身を1か所に置くことで、ジョブごとの定義のずれを防ぐ。
 //
 // 1つが失敗しても残りは実行し（内訳を全部出すため）、最後に1件でも失敗があれば終了コード1で
 // 終わる。`--result <path>`を付けると、検査ごとの結果と定義のダイジェスト（sha256）をJSONで
@@ -24,7 +23,7 @@ import { fileURLToPath } from "node:url";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 
-/** 定義ファイルの生バイトのsha256。issue-deck側（src/lib/backup-ci/definition.ts）と同じ計算 */
+/** 定義ファイルの生バイトのsha256。検査結果の突き合わせ用 */
 export function digestDefinition(raw) {
   return `sha256:${createHash("sha256").update(raw).digest("hex")}`;
 }
@@ -136,8 +135,7 @@ function main() {
       // 検査したコミットの親。バックアップCIはbaseへheadを--no-ffでマージした結果を検査するので
       // [base, head] になる（GitHubのマージ結果の検証と同じ対象。headだけの検査で代用しない）
       testedParents: (git(["rev-parse", "HEAD^@"]) ?? "").split("\n").filter(Boolean),
-      // バックアップCIは要求されたhead/baseをここへ渡す（.circleci/config.yml）。issue-deckは
-      // 起動時に記録したSHAと一致しなければ採用しない
+      // 外部から要求されたhead/baseをここへ渡せる（#4065の名残。未指定ならnull）
       requestedHeadSha: process.env.REQUIRED_CHECKS_HEAD_SHA || null,
       requestedBaseSha: process.env.REQUIRED_CHECKS_BASE_SHA || null,
       runRequestId: process.env.REQUIRED_CHECKS_RUN_REQUEST_ID || null,

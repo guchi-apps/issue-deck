@@ -1,4 +1,3 @@
-import { CI_GATE_CONTEXT } from "@/lib/backup-ci/state";
 import { githubGraphql } from "@/lib/github/graphql";
 import type { ReviewRunProgress, ReviewStopped } from "@/lib/github/review-verdict-freshness";
 import {
@@ -430,7 +429,7 @@ export type RollupContextNode = {
   completedAt?: string | null;
   /** StatusContext（外部CIのcommit status）。`SUCCESS` / `PENDING` / `FAILURE`など */
   state?: string | null;
-  /** StatusContext。`issue-deck/ci-gate`のような名前（#4065） */
+  /** StatusContext。commit statusの名前 */
   context?: string | null;
   /** CheckRun。GitHub Actions発なら`/owner/repo/actions/workflows/ci.yml`が入る（#1799） */
   checkSuite?: {
@@ -558,11 +557,6 @@ function workflowFileOf(node: RollupContextNode): string | null {
 }
 
 /** CI状態の集約に数えるチェックか（#1799）。ワークフローが分からないものは数える */
-/** 共通チェック（#4065）のcommit status。issue-deck自身のGitHub Appが発行する */
-function findCiGateNode(nodes: RollupContextNode[]): RollupContextNode | null {
-  return nodes.find((node) => node.__typename === "StatusContext" && node.context === CI_GATE_CONTEXT && node.state) ?? null;
-}
-
 /**
  * iOS事前検証（#4138）のcommit statusか。**CI状態の集約には数えない**（#4140）。
  *
@@ -943,19 +937,14 @@ function toCheckRollup(rollup: RollupNode | null | undefined): CheckRollup {
       ciChecks: [],
     };
   }
-  // 共通チェック（`issue-deck/ci-gate`・#4065）があれば、CIの合否はそれだけで決める。バックアップCIで
-  // 合格したPRは、止まったままのActionsのジョブが残っていても「実行中」に見せない。Actionsの内訳は
-  // そのまま並べる（どちらで検査したかを区別できるように、元の履歴を消さない）
-  const contextNodes = rollup.contexts.nodes.filter((node) => !isIosPrecheckNode(node));
-  const gateNode = findCiGateNode(contextNodes);
-  const otherNodes = gateNode ? contextNodes.filter((node) => node !== gateNode) : contextNodes;
+  const otherNodes = rollup.contexts.nodes.filter((node) => !isIosPrecheckNode(node));
+  const contextNodes = otherNodes;
   const ciNodes = dropSupersededCheckRuns(otherNodes.filter(isCiCheck));
   const ciChecks = toRollupChecks(ciNodes);
   const countedNodes = ciChecks.length > 0 ? ciNodes : otherNodes;
-  const gateCheck = gateNode ? toRollupCheck(gateNode) : null;
   return {
     state,
-    checks: gateCheck ? [gateCheck] : ciChecks.length > 0 ? ciChecks : toRollupChecks(contextNodes),
+    checks: ciChecks.length > 0 ? ciChecks : toRollupChecks(contextNodes),
     mergeJudgement: toMergeJudgement(rollup.contexts.nodes),
     ciRunId: toCiRunId(countedNodes),
     ciChecks: toRollupCiChecks(countedNodes),

@@ -1,5 +1,5 @@
 {
-  "$comment": "develop向けPRの必須検査の正本（#4065）。GitHub Actions（.github/workflows/ci.yml）とバックアップCI（.circleci/config.yml）の両方が scripts/ci/run-required-checks.mjs 経由でこの定義を実行する。検査を足すときはここへ足し、ワークフロー側へ直接ステップを書かない（両者がずれると、片方でだけ通る変更が生まれる）。groups のキーは ci.yml のジョブ名と一致させる（lint-and-build はブランチ保護の必須チェック名）。通知・情報提供だけのジョブ（workflow-drift-notice・notify）はここへ入れない。",
+  "$comment": "develop向けPRの必須検査の正本（#4065）。GitHub Actions（.github/workflows/ci.yml）が scripts/ci/run-required-checks.mjs 経由でこの定義を実行する。検査を足すときはここへ足し、ワークフロー側へ直接ステップを書かない。groups のキーは ci.yml のジョブ名と一致させる（lint-and-build はブランチ保護の必須チェック名）。通知・情報提供だけのジョブ（workflow-drift-notice・notify）はここへ入れない。",
   "schemaVersion": 1,
   "runtime": {
     "node": "24",
