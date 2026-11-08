@@ -2416,7 +2416,7 @@ export function POST(request: NextRequest) {
     `MergeJudgement.reviewProgress`（`check-rollup.ts`。待ち行列・実行中・完了・停止）で、`aiReview`は
     `claude-review`の結果の軸なので別に持つ。完了・停止は待っても新しい判定が出ないため人の番にし、
     「AIレビューを再実行」を出す
-  - **レビューが実行されないまま止まったPRは代表状態`review-not-run`（レビュー未実施）で出す**（#5212）。`toReviewProgress`が前段のジョブの取り残し・失敗から`mergeJudgement.reviewStopped`を作り（設計どおりの省略には付けない）、取り残されたジョブ（runは完了・ジョブは未着手。`isAbandonedCheckRun`）は判定の待ちから外す。いまのコミットの判定があれば、そちらを優先する（`isReviewNotRun`）
+  - **レビューが実行されないまま止まったPRは代表状態`review-not-run`（レビュー未実施）で出す**（#5212）。`toReviewProgress`が前段のジョブの取り残し・失敗から`mergeJudgement.reviewStopped`を作り（設計どおりの省略には付けない）、取り残されたジョブ（runは完了・ジョブは未着手。`isAbandonedCheckRun`）は判定の待ちから外す。いまのコミットの判定があれば、そちらを優先する（`isReviewNotRun`）。**レビュー本体（`claude-review`・`codex-review`）が走ったうえで失敗した場合も同じ`reviewStopped`（`reason: "failed"`）を作る**（#5261）。判定も本文も残らず「マージする」以外に操作が無かったため。画面では`isReviewExecutorFailure`で見分けて「レビュー失敗」と呼び（コード欄は「■ 失敗」のまま理由付き）、操作は未実施と同じ「AIレビューを再実行」・実行ログ・マージ確認を出す。巡回の自動やり直し（#5215）は`stalled`だけが対象なので、本体の失敗は自動では再実行しない
   - **古い要修正に「PRを自動修正」を出さない**（#5210。`repairKindsFor`に`headSha`を渡す）。
     `reusable-claude-review-fix.yml`は先頭コミットの`sha=`を持つ判定コメントしか読まないので、押しても
     修正済みの指摘を直し直すことはなく、何もせず終わる

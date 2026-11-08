@@ -9,7 +9,12 @@ import { PullRequestRepairButtons } from "@/components/dashboard/pull-request-re
 import { PullRequestReviewRerunButton } from "@/components/dashboard/pull-request-review-rerun-button";
 import { Button } from "@/components/ui/button";
 import { formatRelativeDate } from "@/lib/format-relative-date";
-import { reviewProgressLabel, reviewRerunNeeded, reviewStoppedReason } from "@/lib/github/review-verdict-freshness";
+import {
+  isReviewExecutorFailure,
+  reviewProgressLabel,
+  reviewRerunNeeded,
+  reviewStoppedReason,
+} from "@/lib/github/review-verdict-freshness";
 import { canMergeFromDeck } from "@/lib/pull-request-list";
 import type { ReviewAction } from "@/lib/pull-request-review-action";
 import { cn } from "@/lib/utils";
@@ -64,6 +69,8 @@ export function PullRequestReviewResponse({
     );
   }
   if (action.kind === "not-run") {
+    // レビュー本体が途中で落ちた（#5261）か、前段が止まって走らなかった（#5212）かで見出しを分ける
+    const executorFailed = isReviewExecutorFailure(action.stopped);
     return (
       <section
         id={REVIEW_RESPONSE_ANCHOR_ID}
@@ -76,15 +83,28 @@ export function PullRequestReviewResponse({
         )}
       >
         <h3 className="text-sm font-bold text-amber-800 dark:text-amber-300">
-          <span aria-hidden="true">▲</span> このコミットのレビューは実施されていません
+          <span aria-hidden="true">▲</span>{" "}
+          {executorFailed ? "このコミットのレビューは失敗しました" : "このコミットのレビューは実施されていません"}
         </h3>
         <p className="text-xs text-muted-foreground">
           {reviewStoppedReason(action.stopped)}。
+          {executorFailed && "一時的な失敗のことが多いため、まずは再実行してください。続けて失敗するなら実行ログで原因を確かめてください。"}
           {action.verdict &&
             `下に残っている${action.verdict === "needs-check" ? "要確認" : "要修正"}の判定は前のコミット${action.reviewedSha ? `（${action.reviewedSha.slice(0, 7)}）` : ""}に対するものです。`}
         </p>
         <Option title="レビューをやり直す">
           <PullRequestReviewRerunButton pullRequest={pullRequest} onChanged={onRefresh} />
+          {action.stopped.url && (
+            <a
+              href={action.stopped.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1 text-xs text-foreground hover:underline"
+            >
+              実行ログを開く
+              <ExternalLink aria-hidden className="size-3" />
+            </a>
+          )}
         </Option>
         {canMergeFromDeck(pullRequest) && (
           <Option title="レビューなしでマージへ進む">

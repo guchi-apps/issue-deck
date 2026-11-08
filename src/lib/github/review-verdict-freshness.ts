@@ -42,7 +42,8 @@ export type ReviewVerdictFreshnessNotice = {
  * - `running` … 実行中
  * - `completed` … ジョブは終わった。**判定が書かれたとは限らない**（鮮度は別に見る）
  * - `stalled` … runは終わったのにジョブが未完了のまま残っている。待っても進まない
- * - `not-run` … レビューの前段のジョブが失敗し、レビュー自体が走らないまま終わった（#5212）
+ * - `not-run` … レビューの前段のジョブが失敗し、レビュー自体が走らないまま終わった（#5212）。
+ *   レビュー本体のジョブが途中で失敗し、判定が出ないまま終わった場合も含む（#5261）
  */
 export type ReviewRunProgress = "queued" | "running" | "completed" | "stalled" | "not-run";
 
@@ -68,12 +69,23 @@ const REVIEW_STOPPED_JOB_LABEL: Readonly<Record<string, string>> = {
   "codex-review": "レビューのジョブ（codex-review）",
 };
 
+/** レビューを実際に行うジョブ。前段（`risk-check`・`review-provider`）と分ける */
+const REVIEW_EXECUTOR_JOBS: ReadonlySet<string> = new Set(["claude-review", "codex-review"]);
+
+/**
+ * レビュー本体のジョブが走ったうえで失敗したか（#5261）。前段が止まってレビューが走らなかった
+ * （「未実施」）のと区別し、画面では「レビュー失敗」と呼ぶ。
+ */
+export function isReviewExecutorFailure(stopped: ReviewStopped | null | undefined): boolean {
+  return stopped?.reason === "failed" && REVIEW_EXECUTOR_JOBS.has(stopped.job);
+}
+
 /** レビューが走らなかった理由の1文。代表状態・マージ確認・見込みで同じ言葉を使う */
 export function reviewStoppedReason(stopped: ReviewStopped): string {
   const job = REVIEW_STOPPED_JOB_LABEL[stopped.job] ?? `ジョブ（${stopped.job}）`;
-  return stopped.reason === "stalled"
-    ? `${job}が実行機に割り当てられないまま、実行が終わりました。待っても進みません`
-    : `${job}が失敗し、レビューが実行されませんでした`;
+  if (stopped.reason === "stalled") return `${job}が実行機に割り当てられないまま、実行が終わりました。待っても進みません`;
+  if (isReviewExecutorFailure(stopped)) return `${job}が途中で失敗し、判定が出ませんでした`;
+  return `${job}が失敗し、レビューが実行されませんでした`;
 }
 
 /**
@@ -103,7 +115,7 @@ export function reviewProgressLabel(progress: ReviewRunProgress | null | undefin
     case "stalled":
       return "停止（実行が終わったのにレビューのジョブが完了していません）";
     case "not-run":
-      return "未実施（前段のジョブが失敗し、レビューは実行されていません）";
+      return "未実施（ジョブが失敗し、新しい判定は出ていません）";
     default:
       return "開始を確認できていません";
   }

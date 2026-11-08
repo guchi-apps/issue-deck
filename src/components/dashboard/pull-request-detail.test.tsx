@@ -259,6 +259,36 @@ describe("PullRequestDetail", () => {
     expect(panel.getByRole("button", { name: /マージ確認へ進む/ })).toBeTruthy();
   });
 
+  // レビュー本体が途中で落ちると、以前は「マージする」以外に押せるものが無かった（asset-manager#1196）
+  it("レビューのジョブが失敗したPRはレビュー失敗として出し、再実行とログを示す（#5261）", () => {
+    renderDetail({
+      pullRequest: makePullRequest({
+        ciState: "success",
+        mergeable: true,
+        reviewVerdict: null,
+        mergeJudgement: {
+          state: "settled",
+          step: null,
+          runUrl: null,
+          aiReview: { state: "failed", runUrl: null },
+          reviewProgress: "not-run",
+          reviewStopped: { job: "claude-review", reason: "failed", url: "https://github.com/o/r/actions/runs/9/job/3" },
+        },
+      }),
+    });
+    const band = within(screen.getByTestId("pull-request-primary-action"));
+    expect(band.getByText(/レビュー失敗/)).toBeTruthy();
+    expect(band.getByRole("button", { name: /AIレビューを再実行/ })).toBeTruthy();
+    expect(band.getByRole("link", { name: /実行ログを開く/ }).getAttribute("href")).toContain("/actions/runs/9");
+    openTab("指摘");
+    const panel = within(screen.getByTestId("pull-request-review-response"));
+    expect(panel.getByText(/このコミットのレビューは失敗しました/)).toBeTruthy();
+    expect(panel.getByText(/途中で失敗し、判定が出ませんでした/)).toBeTruthy();
+    expect(panel.getByRole("button", { name: /AIレビューを再実行/ })).toBeTruthy();
+    expect(panel.getByRole("link", { name: /実行ログを開く/ }).getAttribute("href")).toContain("/actions/runs/9");
+    expect(panel.getByRole("button", { name: /マージ確認へ進む/ })).toBeTruthy();
+  });
+
   it("最新のコミットの判定には判定したコミットを添える（#5210）", () => {
     renderDetail({
       pullRequest: makePullRequest({

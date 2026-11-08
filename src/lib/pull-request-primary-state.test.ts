@@ -218,6 +218,23 @@ describe("レビュー未実施（#5212）", () => {
     }
   });
 
+  it("レビュー本体が途中で失敗したら「レビュー失敗」として人の番にする（#5261）", () => {
+    const failed = stoppedPr(null);
+    failed.mergeJudgement = {
+      ...failed.mergeJudgement,
+      reviewProgress: "not-run",
+      reviewStopped: { job: "claude-review", reason: "failed", url: null },
+    };
+    expect(derivePrimaryState(failed)).toMatchObject({
+      kind: "review-not-run",
+      label: "レビュー失敗",
+      tone: "warn",
+      needsAction: true,
+    });
+    expect(derivePrimaryState(failed).reason).toContain("途中で失敗し、判定が出ませんでした");
+    expect(deriveAutoMergeOutlook(failed)?.reason).toContain("AIレビューを再実行");
+  });
+
   it("いまのコミットの判定があれば、その判定を優先する", () => {
     expect(derivePrimaryState(stoppedPr(verdict("changes-requested", SHA)))).toMatchObject({ kind: "review-findings" });
   });
