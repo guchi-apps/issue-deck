@@ -20,6 +20,7 @@ import {
   ReviewDecisionSummaryPanel,
   useReleaseReviewRecommendations,
 } from "@/components/dashboard/release-review-decision";
+import { ReviewNoteControl } from "@/components/dashboard/release-review-note";
 import { ReleaseGuidancePanel } from "@/components/dashboard/release-guidance-panel";
 import { fixNowFindingIds, nonFixFindingIds } from "@/lib/release-review-decision";
 import { useReleaseChanges, type UseReleaseChangesResult } from "@/hooks/use-release-changes";
@@ -897,7 +898,25 @@ function AiReviewSection({
               {section.previousRun.unverifiedScope ? `未確認範囲あり（${section.previousRun.unverifiedScope}）` : section.previousRun.state}
             </p>
           )}
-          <ReviewContractPanel section={section} />
+          <ReviewContractPanel
+            section={section}
+            note={
+              section.notes && pullRequestNumber !== undefined && target
+                ? { repositoryFullName, pullRequestNumber, target, onSaved: onReload }
+                : null
+            }
+          />
+          {section.notes && pullRequestNumber !== undefined && target && (
+            <ReviewNoteControl
+              repositoryFullName={repositoryFullName}
+              pullRequestNumber={pullRequestNumber}
+              target={target}
+              noteTarget={{ kind: "overall" }}
+              notes={section.notes}
+              label="候補全体"
+              onSaved={onReload}
+            />
+          )}
           {section.summary && <p className="whitespace-pre-wrap">{section.summary}</p>}
           {decisions && (section.findings.length > 0 || section.suggestions.length > 0 || decisions.detached.length > 0) && (
             <ReviewDecisionSummaryPanel decisions={decisions} />
@@ -1025,7 +1044,14 @@ function AiReviewSection({
   );
 }
 
-function ReviewContractPanel({ section }: { section: ReleaseVerificationSection }) {
+function ReviewContractPanel({
+  section,
+  note,
+}: {
+  section: ReleaseVerificationSection;
+  /** 未確認の項目に判断メモを書く入力（#5252）。結果が出ていない・読めないときはnull */
+  note: { repositoryFullName: string; pullRequestNumber: number; target: { baseSha: string; headSha: string }; onSaved?: () => void } | null;
+}) {
   const review = section.review;
   if (!review) return null;
   const kind = describeReviewKind(review);
@@ -1084,6 +1110,14 @@ function ReviewContractPanel({ section }: { section: ReleaseVerificationSection 
                   {view.source && <span className="ml-1 text-muted-foreground">（{view.source}）</span>}
                 </span>
                 {view.evidence && <span className="whitespace-pre-wrap break-words text-muted-foreground">{view.evidence}</span>}
+                {note && check.status === "unconfirmed" && (
+                  <ReviewNoteControl
+                    {...note}
+                    noteTarget={{ kind: "check", checkId: check.id }}
+                    notes={section.notes}
+                    label={view.label}
+                  />
+                )}
               </li>
             );
           })}
