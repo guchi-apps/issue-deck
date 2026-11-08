@@ -151,7 +151,7 @@ export function SettingsDialog({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
-        className="h-[min(40rem,calc(100%-2rem))] grid-rows-[auto_1fr] gap-0 overflow-x-hidden overflow-y-hidden p-0 sm:max-w-3xl"
+        className="h-[min(46rem,calc(100%-2rem))] grid-rows-[auto_1fr] gap-0 overflow-x-hidden overflow-y-hidden p-0 sm:max-w-5xl"
         onOpenAutoFocus={(e) => e.preventDefault()}
       >
         <DialogHeader className="border-b px-4 py-3">
