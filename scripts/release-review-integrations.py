@@ -15,10 +15,11 @@ from pathlib import Path, PurePosixPath
 import re
 import subprocess
 import sys
+import urllib.parse
 
 GH = os.environ.get("RELEASE_REVIEW_GH", "gh")
 ALLOWED_OWNERS = {o for o in os.environ.get("RELEASE_REVIEW_ALLOWED_OWNERS", "guchi-apps").split(",") if o}
-JUDGE_VERSION = 4  # 判定器の版。変えると指紋が変わり、影響する未確認が再評価される
+JUDGE_VERSION = 5  # 判定器の版。変えると指紋が変わり、影響する未確認が再評価される
 MAX_REFS, MAX_FILES, MAX_FILE_BYTES, MAX_BODY = 8, 30, 40000, 3000
 MAX_RC_PRS = 20  # RCが含む実装PRの本文を読む上限
 PR_MERGE_RE = re.compile(r"^Merge pull request #(\d+) from ")
@@ -33,6 +34,8 @@ MAX_SCAN_FILES, MAX_SCAN_BYTES = 300, 400_000
 MANIFEST_PATH = ".github/secrets-manifest.tsv"
 LINKS_PATH = os.environ.get("RELEASE_REVIEW_LINKS") or str(Path(__file__).with_name("release-review-links.json"))
 MAX_LINK_FILES = 20  # 設定で指した連携先ファイルの取得上限（#5223）
+MAX_PRESENCE_FILES = 120  # 連携先の実在確認（#5253）で本文を読むファイルの上限。超えたら断定せず未確認に倒す
+MAX_PRESENCE_ISSUES = 5
 # 呼び先の根拠にするのはマニフェストのSOURCEが提供側アプリのベースURLを指す行だけ（値は読まない）
 MANIFEST_BASE_URL_RE = re.compile(rf"^op://apps/({REPO})/(?:[a-z0-9-]+-)?(?:base|api)-url$")
 SCAN_SUFFIX_RE = re.compile(r"\.(ts|tsx|js|jsx|mjs|cjs|py)$")
@@ -389,6 +392,7 @@ def linked_repos(worktree, full_name, base, head, outdir):
         types = [x for x in paths if any(r.search(x) for r in typ)]
         omitted = code[MAX_LINK_FILES:]
         if not code and not types:
+            entry["counterpart"] = counterpart_for_links(p_owner, p_repo, pin, tree, pat + typ, link)
             entry.update(classification="資料未取得", error="設定のパスに一致するファイルがmainの固定SHAに無い",
                          missing="連携先mainに対象コードが無い。連携先が未リリース（developのみ）か、設定のpatternsが古い可能性がある。"
                                  "不整合の疑いと断定せず、scripts/release-review-links.jsonのpatterns確認か連携先のリリース状況の確認を求める")
@@ -409,6 +413,21 @@ def linked_repos(worktree, full_name, base, head, outdir):
                                     "note": "対象パスにmain未反映のdevelop変更がある。呼び出し側が先に本番へ出ると契約がずれる恐れ" if ahead else "対象パスにmain未反映の変更は無い"}
         results.append(entry)
     return results
+
+
+def counterpart_for_links(owner, repo, main_sha, main_tree, patterns, link):
+    """設定のパスに一致するコードがmain・developのどちらにも無いときだけ`not_implemented`にする（#5253）。mainの一覧が打ち切りなら断定しない。"""
+    if main_tree.get("truncated"):
+        return {"status": "unknown", "reason": "mainのファイル一覧が打ち切られ、存在の有無を断定できない"}
+    dev_snap, err = branch_snapshot(owner, repo, "develop")
+    if dev_snap is None:
+        return {"status": "unknown", "reason": err}
+    dev_hits = sorted(n for n in dev_snap["blobs"] if any(r.search(n) for r in patterns))
+    if dev_hits:
+        return {"status": "develop_only", "main": {"sha": main_sha, "present": False}, "develop": {"sha": dev_snap["sha"], "present": True, "files": dev_hits[:10]}}
+    out = {"status": "not_implemented", "main": {"sha": main_sha, "present": False}, "develop": {"sha": dev_snap["sha"], "present": False}}
+    out["registeredIssues"] = related_issues(owner, repo, [t for t in (link.get("identifiers") or []) if isinstance(t, str)])
+    return out
 
 
 def resolve_import(spec, importer, paths):
@@ -485,7 +504,7 @@ def trace_route(owner, repo, sha, api_path, outdir):
         if failures:
             return {"sha": sha, "found": False, "classification": failures[0], "error": "入口ファイルを取得できない"}
         reason = "ファイル一覧が打ち切られ未確認" if tree.get("truncated") else "この固定SHAに受信口が見つからない（欠陥か探索漏れかは未判定）"
-        return {"sha": sha, "found": False, "classification": "資料未取得", "error": reason}
+        return {"sha": sha, "found": False, "classification": "資料未取得", "error": reason, "notFound": not tree.get("truncated")}
     names, omitted = list(route["roots"]), []
     # 処理本体を特定できなかった入口ファイルのimportは追わない（無関係な処理を資料に載せない）
     frontier = [] if route.get("handlerResolved") is False else [r for r in route["roots"] if r != route["entry"] or r == route["handler"]]
@@ -538,6 +557,93 @@ def deploy_candidate(owner, repo):
     return None, err or e or "通信失敗"
 
 
+def branch_snapshot(owner, repo, branch, sha=None):
+    """連携先ブランチの（固定SHA, blobパス一覧, サイズ）。取得できない・打ち切りは(None, 理由)。develop不在も理由として返す。"""
+    if sha is None:
+        head, err = api_json(f"repos/{owner}/{repo}/commits/{branch}")
+        if not head or not head.get("sha"):
+            return None, f"{branch}の先端を取得できない（{err or 'ブランチ不在'}）"
+        sha = head["sha"]
+    tree, err = api_json(f"repos/{owner}/{repo}/git/trees/{sha}?recursive=1")
+    if tree is None:
+        return None, f"{branch}のファイル一覧を取得できない（{err}）"
+    if tree.get("truncated"):
+        return None, f"{branch}のファイル一覧が打ち切られ、存在の有無を断定できない"
+    blobs = {t["path"]: t.get("size") or 0 for t in tree.get("tree", []) if t.get("type") == "blob"}
+    return {"sha": sha, "blobs": blobs}, ""
+
+
+def path_mentioned(api_path, name, body):
+    """受信パスらしき記述が、ファイル名か本文にあるか。プレフィックス付きルーターを見逃さないよう、末尾の語まで緩めて一致させる。"""
+    tail = re.sub(r"^/api", "", api_path)
+    last = api_path.rstrip("/").rsplit("/", 1)[-1]
+    if f"/{last}/" in f"/{name}" or PurePosixPath(name).stem == last:
+        return True
+    if body is None:
+        return False
+    if re.search(re.escape(api_path) + r"(?![A-Za-z0-9_-])", body) or (tail and re.search(re.escape(tail) + r"(?![A-Za-z0-9_-])", body)):
+        return True
+    return bool(re.search(r"[\"'`]/?" + re.escape(last) + r"[\"'`/?]", body))
+
+
+def api_path_present(owner, repo, snap, api_path):
+    """(あるか, 理由)。Trueは疑わしきも含む。Falseは全候補ファイルを読んで記述が無いときだけ。読み切れなければNone。"""
+    names = [n for n, size in snap["blobs"].items()
+             if SCAN_SUFFIX_RE.search(n) and not SCAN_EXCLUDE_RE.search(n) and not SECRET_NAME.search(n) and size <= MAX_SCAN_BYTES]
+    if any(path_mentioned(api_path, n, None) for n in snap["blobs"]):
+        return True, "ファイル名が一致する"
+    if len(names) > MAX_PRESENCE_FILES:
+        return None, f"読むべきファイルが{len(names)}件あり上限{MAX_PRESENCE_FILES}件を超えるため断定できない"
+    for n in names:
+        ok, body, _e = read_raw(owner, repo, snap["sha"], n)
+        if not ok:
+            return None, "ファイルの取得に失敗し、存在の有無を断定できない"
+        if path_mentioned(api_path, n, body):
+            return True, f"{n}に記述がある"
+    return False, f"対象{len(names)}ファイルに記述が無い"
+
+
+def related_issues(owner, repo, terms):
+    """相手側に、実装時の要件が登録済みかを探す。open/closedを区別して返す（Issueの状態は実装の有無の根拠にしない）。"""
+    found, seen = [], set()
+    for term in terms[:3]:
+        q = urllib.parse.quote(f'"{term}" repo:{owner}/{repo} in:title,body')
+        data, _ = api_json(f"search/issues?q={q}&per_page={MAX_PRESENCE_ISSUES}")
+        for it in (data or {}).get("items", []):
+            if it.get("number") not in seen and len(found) < MAX_PRESENCE_ISSUES:
+                seen.add(it.get("number"))
+                found.append({"number": it.get("number"), "title": (it.get("title") or "")[:120], "state": it.get("state"),
+                              "isPull": "pull_request" in it})
+    return found
+
+
+def judge_counterpart(owner, repo, main_sha, present_in_main, present_in_develop):
+    """mainとdevelopの実在から分類する。どちらかがNone（断定不能）ならNone＝従来どおり未確認。"""
+    if present_in_main is None or present_in_develop is None:
+        return None
+    if present_in_main:
+        return "on_main"
+    return "develop_only" if present_in_develop else "not_implemented"
+
+
+def counterpart_for_path(owner, repo, main_sha, api_path):
+    """受信パスについて、連携先のmain（固定SHA）とdevelopに実装があるかを分類する（#5253）。"""
+    main_snap, e1 = branch_snapshot(owner, repo, "main", main_sha)
+    dev_snap, e2 = branch_snapshot(owner, repo, "develop")
+    if main_snap is None or dev_snap is None:
+        return {"status": "unknown", "reason": e1 or e2}
+    in_main, why_main = api_path_present(owner, repo, main_snap, api_path)
+    in_dev, why_dev = api_path_present(owner, repo, dev_snap, api_path)
+    status = judge_counterpart(owner, repo, main_sha, in_main, in_dev)
+    if status is None:
+        return {"status": "unknown", "reason": why_main if in_main is None else why_dev}
+    out = {"status": status, "main": {"sha": main_snap["sha"], "present": in_main, "basis": why_main},
+           "develop": {"sha": dev_snap["sha"], "present": in_dev, "basis": why_dev}}
+    if status == "not_implemented":
+        out["registeredIssues"] = related_issues(owner, repo, [api_path])
+    return out
+
+
 def resolve_contract(contract, outdir):
     owner, _, repo = contract["provider"].partition("/")
     pin, err = deploy_candidate(owner, repo)
@@ -549,7 +655,11 @@ def resolve_contract(contract, outdir):
     contract["codeAtDeployCandidate"] = current
     if not current["found"]:
         contract.update(classification=current["classification"], error=current["error"])
+        # 入口ファイルの取得失敗・打ち切りが無く「受信口が見つからない」ときだけ、develop/mainの実在を確かめる
+        if current.get("notFound"):
+            contract["counterpart"] = counterpart_for_path(owner, repo, pin["sha"], contract["path"])
         return contract
+    contract["counterpart"] = {"status": "on_main", "note": "デプロイ候補時点のmainに受信口がある"}
     impl = implementation_point(owner, repo, pin["sha"], current["handler"])
     if impl is None:
         contract["codeAtImplementation"] = {"note": "受信処理を追加したコミットを特定できない"}
@@ -632,6 +742,11 @@ def prepare(worktree, full_name, base, head, output):
               "`developOnly.files`が空でなければ、連携先の対応がmainに未反映（develop止まり）の疑いとして指摘します。"
               "`classification`や`missing`があるものは**資料不足であって不整合の疑いではありません**。"
               "『資料不足』と『不整合の疑い』を別の見出しで報告し、資料不足には確認に足すもの（設定のpatterns・連携先のリリース状況など）を必ず添えてください。")
+    if any((x.get("counterpart") or {}).get("status") in ("not_implemented", "develop_only") for x in [*contracts, *linked]):
+        print("`counterpart`は、ランナーが連携先の`main`（固定SHA）と`develop`の実物を機械的に確かめた分類です（Issueのopen/closedは根拠にしていません）。"
+              "`status`が`not_implemented`（どちらのブランチにも無い）の連携先は、公開しても相手側から呼ばれず影響が無いため、**その連携先を理由に確認項目を`unconfirmed`にせず**、"
+              "該当項目は`not_applicable`（根拠に『相手側未実装』と分類の出典を書く）にして、`counterpartNotes`へ注記を1件ずつ書きます（`registeredIssues`があれば番号・題名・状態を添え、無ければ『要件の登録先Issueなし』と書く）。"
+              "`develop_only`（developにだけある）・`on_main`（mainにもある）・`unknown`・`counterpart`が無いものは従来どおりで、実コードを読んで判定し、読めなければ未確認です。")
     print(json.dumps(manifest, ensure_ascii=False, sort_keys=True))
 
 

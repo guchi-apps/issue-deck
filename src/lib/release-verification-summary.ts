@@ -1,3 +1,4 @@
+import type { ReleaseReviewNotes } from "@/lib/release-review-note";
 import type { ReleaseCandidateFix } from "@/lib/release-fix-series";
 import {
   evaluateReleaseMergeGate,
@@ -65,6 +66,8 @@ export type ReleaseVerificationSection = {
   suggestions: ReleaseReviewFinding[];
   /** 確認契約の記録（確認項目の版・初回／再レビュー・項目別の結果・前回指摘の解消）。無ければnull */
   review: ReleaseReviewMeta | null;
+  /** 連携先が未実装と確かめられた注記（#5253）。未確認範囲ではなくゲートを止めない。旧結果では空 */
+  counterpartNotes: string[];
   affectedPullRequests: number[];
   affectedFiles: string[];
   reviewedFiles: number | null;
@@ -88,6 +91,8 @@ export type ReleaseVerificationSection = {
    * 判断で`state`を書き換えない。読み出していない・読めなかったときはnull
    */
   decisions?: ReleaseReviewDecisionSummary | null;
+  /** 未確認項目・候補全体への判断メモ（#5252。全体レビューだけ）。記録と表示だけで、判定・ゲートは読まない。読めなかったときはnull */
+  notes?: ReleaseReviewNotes | null;
   /** 記録された未確認範囲そのもの（判断で解除してよいかの判定に使う）。無ければnull */
   unverifiedScope?: string | null;
   /** 自動再評価の印（#4664。全体レビューだけ）。無ければnull */
@@ -164,6 +169,7 @@ function readDetail(findings: unknown) {
       typeof raw.review === "object" && raw.review !== null && !Array.isArray(raw.review)
         ? (raw.review as ReleaseReviewMeta)
         : null,
+    counterpartNotes: list(raw.counterpartNotes).filter((n): n is string => typeof n === "string"),
     affectedPullRequests: list(raw.affectedPullRequests).filter((n): n is number => typeof n === "number"),
     affectedFiles: list(raw.affectedFiles).filter((f): f is string => typeof f === "string"),
     reviewedFiles: int(raw.reviewedFiles),
@@ -250,6 +256,7 @@ export function summarizeReleaseVerification(input: {
       diagnostic: state === "failed" ? readReleaseReviewDiagnostic(row?.findings, current) : null,
       previousRun: readPreviousRun(row?.findings),
       decisions: null,
+      notes: null,
       unverifiedScope: row?.unverifiedScope ?? null,
       autoReevaluation: kind === "ai_review" ? readAutoReevaluation(row?.findings) : null,
       opsReevaluation: kind === "ai_review" ? readOpsReevaluation(row?.findings) : null,

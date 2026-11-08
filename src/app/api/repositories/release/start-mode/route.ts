@@ -3,7 +3,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { requireUserId } from "@/lib/auth-user";
 import { db } from "@/lib/db";
 import { getInstallationToken } from "@/lib/github/app-auth";
-import { fetchReleaseCallerText } from "@/lib/github/release-api";
+import { fetchReleaseCaller } from "@/lib/github/release-api";
 import { decideDevelopSync } from "@/lib/release-develop-sync";
 import { observeDevelopSync } from "@/lib/release-develop-sync-run";
 import { reconcileActiveRcPublication } from "@/lib/release-rc-reconcile";
@@ -41,7 +41,10 @@ export async function GET(request: NextRequest) {
       const [owner, repo] = fullName.split("/");
       try {
         const token = await getInstallationToken(row.installation.installationId);
-        const mode: ReleaseStartMode = decideReleaseStartMode(await fetchReleaseCallerText(owner, repo, token));
+        const caller = await fetchReleaseCaller(owner, repo, token);
+        // callerのファイルが無いリポジトリはリリース対象ではない。「読めない」エラーとは区別する（#5250）
+        if (caller.kind === "missing") return [fullName, { mode: "legacy", reason: "caller_without_input", label: "developにリリースworkflow（release-develop-to-main.yml）が無いため、候補の作成は使えません" }];
+        const mode: ReleaseStartMode = decideReleaseStartMode(caller.kind === "found" ? caller.text : null, caller.kind === "error" ? caller.status : undefined);
         if (mode.mode !== "candidate") return [fullName, mode];
         let successorOf: RcBlockSummary | undefined;
         // 新規開始を妨げる既存候補を起動前に返す（#4628）。確認できなければ「候補なし」とは扱わない

@@ -1,4 +1,3 @@
-import { CI_GATE_CONTEXT } from "@/lib/backup-ci/state";
 import { githubGraphql } from "@/lib/github/graphql";
 import type { ReviewRunProgress, ReviewStopped } from "@/lib/github/review-verdict-freshness";
 import {
@@ -430,7 +429,7 @@ export type RollupContextNode = {
   completedAt?: string | null;
   /** StatusContext（外部CIのcommit status）。`SUCCESS` / `PENDING` / `FAILURE`など */
   state?: string | null;
-  /** StatusContext。`issue-deck/ci-gate`のような名前（#4065） */
+  /** StatusContext。commit statusの名前 */
   context?: string | null;
   /** CheckRun。GitHub Actions発なら`/owner/repo/actions/workflows/ci.yml`が入る（#1799） */
   checkSuite?: {
@@ -558,11 +557,6 @@ function workflowFileOf(node: RollupContextNode): string | null {
 }
 
 /** CI状態の集約に数えるチェックか（#1799）。ワークフローが分からないものは数える */
-/** 共通チェック（#4065）のcommit status。issue-deck自身のGitHub Appが発行する */
-function findCiGateNode(nodes: RollupContextNode[]): RollupContextNode | null {
-  return nodes.find((node) => node.__typename === "StatusContext" && node.context === CI_GATE_CONTEXT && node.state) ?? null;
-}
-
 /**
  * iOS事前検証（#4138）のcommit statusか。**CI状態の集約には数えない**（#4140）。
  *
@@ -702,7 +696,8 @@ function failedJudgementJobs(judgementChecks: RollupContextNode[]): string[] {
  * 実行担当のジョブがまだ現れておらず判定が動いているなら、これから始まる側に置く。
  *
  * **レビューが走らずに止まったものも見分ける（#5212）。** 実行担当が動いておらず、前段のジョブか
- * 実行担当が取り残された・失敗したなら`stopped`を返す。やり直しのrunが動いている間は古いrunの取り残しを
+ * 実行担当が取り残された・失敗したなら`stopped`を返す。実行担当が走ったうえで落ちた場合も、判定が
+ * 残らないので`stopped`を返す（#5261）。やり直しのrunが動いている間は古いrunの取り残しを
  * 原因にしない。GraphQLの並びは時刻順とは限らない（#826の実データで確認）ため、取り残されたものより
  * 他の実行を優先し、再実行で置き換えられた失敗は`dropSupersededCheckRuns`で除く。
  */
@@ -746,6 +741,22 @@ function toReviewProgress(judgementChecks: RollupContextNode[]): {
         stopped: { job, reason: stalled ? "stalled" : "failed", url: node.detailsUrl ?? null },
       };
     }
+  }
+
+  // レビュー本体が走ったが途中で落ちた（#5261）。判定も本文も残らないため、前段の失敗と同じく
+  // 「止まった」として返し、画面から再実行できるようにする。別の実行担当が成功していれば止まっていない
+  const executors = [...latest.entries()].filter(([job, node]) => REVIEW_EXECUTOR_JOBS.has(job) && !isAbandonedCheckRun(node));
+  const failedExecutor = executors.find(
+    ([, node]) =>
+      checkRunPhaseOf(node) === "completed" && REVIEW_STOPPING_CONCLUSIONS.has((node.conclusion ?? "").toLowerCase()),
+  );
+  const executorSucceeded = executors.some(
+    ([, node]) => checkRunPhaseOf(node) === "completed" && (node.conclusion ?? "").toLowerCase() === "success",
+  );
+  if (failedExecutor && !executorSucceeded) {
+    if (checks.some((node) => checkRunPhaseOf(node) === "running")) return { progress: "queued", stopped: null };
+    const [job, node] = failedExecutor;
+    return { progress: "not-run", stopped: { job, reason: "failed", url: node.detailsUrl ?? null } };
   }
 
   if (nodes.some((node) => checkRunPhaseOf(node) === "mismatch")) return { progress: "stalled", stopped: null };
@@ -943,19 +954,14 @@ function toCheckRollup(rollup: RollupNode | null | undefined): CheckRollup {
       ciChecks: [],
     };
   }
-  // 共通チェック（`issue-deck/ci-gate`・#4065）があれば、CIの合否はそれだけで決める。バックアップCIで
-  // 合格したPRは、止まったままのActionsのジョブが残っていても「実行中」に見せない。Actionsの内訳は
-  // そのまま並べる（どちらで検査したかを区別できるように、元の履歴を消さない）
-  const contextNodes = rollup.contexts.nodes.filter((node) => !isIosPrecheckNode(node));
-  const gateNode = findCiGateNode(contextNodes);
-  const otherNodes = gateNode ? contextNodes.filter((node) => node !== gateNode) : contextNodes;
+  const otherNodes = rollup.contexts.nodes.filter((node) => !isIosPrecheckNode(node));
+  const contextNodes = otherNodes;
   const ciNodes = dropSupersededCheckRuns(otherNodes.filter(isCiCheck));
   const ciChecks = toRollupChecks(ciNodes);
   const countedNodes = ciChecks.length > 0 ? ciNodes : otherNodes;
-  const gateCheck = gateNode ? toRollupCheck(gateNode) : null;
   return {
     state,
-    checks: gateCheck ? [gateCheck] : ciChecks.length > 0 ? ciChecks : toRollupChecks(contextNodes),
+    checks: ciChecks.length > 0 ? ciChecks : toRollupChecks(contextNodes),
     mergeJudgement: toMergeJudgement(rollup.contexts.nodes),
     ciRunId: toCiRunId(countedNodes),
     ciChecks: toRollupCiChecks(countedNodes),

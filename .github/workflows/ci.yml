@@ -41,8 +41,8 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      # 検査の中身は ci/required-checks.json が正本（#4065）。バックアップCI（.circleci/config.yml）も
-      # 同じ定義を実行するため、ここへ直接ステップを足さない。
+      # 検査の中身は ci/required-checks.json が正本（#4065）。
+      # ここへ直接ステップを足さない。
       - name: 必須検査（lint-and-build）
         run: node scripts/ci/run-required-checks.mjs --group lint-and-build
 

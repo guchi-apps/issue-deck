@@ -100,44 +100,6 @@ describe("fetchCheckRollup", () => {
     });
   });
 
-  it("共通チェック（issue-deck/ci-gate）があれば、止まったActionsが残っていてもそれだけで合否を決め、Actionsの内訳は残す（#4065）", async () => {
-    stubGraphql(
-      rollupResponse({
-        state: "PENDING",
-        contexts: {
-          totalCount: 2,
-          nodes: [
-            checkRun("QUEUED", null, "ci.yml", "lint-and-build"),
-            { __typename: "StatusContext", context: "issue-deck/ci-gate", state: "SUCCESS" },
-          ],
-        },
-      }),
-    );
-
-    const rollup = await fetchCheckRollup("owner", "repo", "develop", "token");
-    expect(rollup?.checks).toEqual([{ status: "completed", conclusion: "success" }]);
-    expect(rollup?.ciChecks).toHaveLength(1);
-    expect(rollup?.ciChecks[0]).toMatchObject({ name: "lint-and-build", status: "queued" });
-  });
-
-  it("共通チェックが失敗なら、Actionsが成功していても失敗（都合のよい成功だけを採用しない）", async () => {
-    stubGraphql(
-      rollupResponse({
-        state: "FAILURE",
-        contexts: {
-          totalCount: 2,
-          nodes: [
-            checkRun("COMPLETED", "SUCCESS", "ci.yml", "lint-and-build"),
-            { __typename: "StatusContext", context: "issue-deck/ci-gate", state: "FAILURE" },
-          ],
-        },
-      }),
-    );
-
-    const rollup = await fetchCheckRollup("owner", "repo", "develop", "token");
-    expect(rollup?.checks).toEqual([{ status: "completed", conclusion: "failure" }]);
-  });
-
   it("commit status（StatusContext）はcheck-runの形へ寄せる", async () => {
     stubGraphql(
       rollupResponse({
@@ -433,6 +395,41 @@ describe("fetchCheckRollup", () => {
         skipped("claude-review"),
       ]);
       expect(judgement).toMatchObject({ reviewProgress: "not-run", reviewStopped: { job: "review-provider", reason: "failed" } });
+    });
+
+    // レビュー本体が途中で落ちると、判定も本文も残らない（asset-manager#1196の形。#5261）
+    it("レビュー本体のジョブが失敗したら、止まった原因として返す", async () => {
+      const judgement = await judgementOf([
+        inSuite(checkRun("COMPLETED", "SUCCESS", FILE, "risk-check"), "COMPLETED"),
+        inSuite(checkRun("COMPLETED", "SUCCESS", FILE, "review-provider"), "COMPLETED"),
+        inSuite(checkRun("COMPLETED", "FAILURE", FILE, "claude-review"), "COMPLETED"),
+        skipped("codex-review"),
+        inSuite(checkRun("COMPLETED", "SUCCESS", FILE, "claude-review-fallback"), "COMPLETED"),
+        skipped("auto-merge"),
+      ]);
+      expect(judgement).toMatchObject({
+        state: "settled",
+        reviewProgress: "not-run",
+        reviewStopped: { job: "claude-review", reason: "failed", url: "https://github.com/owner/repo/actions/runs/1/job/claude-review" },
+        aiReview: { state: "failed" },
+      });
+    });
+
+    it("レビュー本体の失敗でも、同じrunの残りが動いている間は結論を出さない", async () => {
+      const judgement = await judgementOf([
+        inSuite(checkRun("COMPLETED", "FAILURE", FILE, "claude-review"), "IN_PROGRESS"),
+        inSuite(checkRun("IN_PROGRESS", null, FILE, "claude-review-fallback"), "IN_PROGRESS"),
+      ]);
+      expect(judgement).toMatchObject({ state: "pending", reviewProgress: "queued" });
+      expect(judgement?.reviewStopped).toBeUndefined();
+    });
+
+    it("別の実行担当が成功していれば、片方の失敗を止まった原因にしない", async () => {
+      const judgement = await judgementOf([
+        inSuite(checkRun("COMPLETED", "FAILURE", FILE, "claude-review"), "COMPLETED"),
+        inSuite(checkRun("COMPLETED", "SUCCESS", FILE, "codex-review"), "COMPLETED"),
+      ]);
+      expect(judgement?.reviewStopped).toBeUndefined();
     });
 
     it("差分が小さくて省略されたPRは未実施にしない", async () => {

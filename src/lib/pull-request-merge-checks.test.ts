@@ -177,6 +177,17 @@ describe("PRの概要（PR詳細・一覧・ブランチ）から作るセル", 
       ...overrides,
     }) as unknown as PullRequestSummary;
 
+  it("レビュー本体の失敗は「失敗」のまま理由を付け、前段の失敗は「未実施」にする（#5261）", () => {
+    const stopped = (job: string) =>
+      summary({ mergeJudgement: { aiReview: { state: "failed" }, reviewStopped: { job, reason: "failed", url: null } } });
+    expect(cellsFromSummary(stopped("claude-review")).code).toMatchObject({
+      state: "失敗",
+      tone: "bad",
+      reason: "レビューのジョブ（claude-review）が途中で失敗し、判定が出ませんでした",
+    });
+    expect(cellsFromSummary(stopped("review-provider")).code).toMatchObject({ state: "未実施", tone: "warn" });
+  });
+
   it("コンフリクトの有無・確認中を区別する", () => {
     expect(cellsFromSummary(summary()).conflict.state).toBe("なし");
     expect(cellsFromSummary(summary({ mergeable: false })).conflict).toMatchObject({ state: "あり", tone: "bad" });

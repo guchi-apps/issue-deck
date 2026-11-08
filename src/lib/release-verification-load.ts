@@ -1,3 +1,4 @@
+import { loadReleaseReviewNotes } from "@/lib/release-review-note-store";
 import { loadReleaseCandidateFixes } from "@/lib/release-candidate-fix";
 import { db } from "@/lib/db";
 import {
@@ -193,6 +194,10 @@ export async function attachReleaseReviewDecisions(
     });
     // 止める指摘がすべて非修正の判断済みなら、段階にも反映する（#4814。合否は変えない）
     aiReview.stage = applyReviewDecisionsToStage(aiReview.stage, aiReview.decisions);
+  }
+  // 判断メモ（#5252）。記録と表示だけなので、判定・段階には何も反映しない
+  if (aiReview.state === "needs_check" || aiReview.state === "passed") {
+    aiReview.notes = await loadReleaseReviewNotes(repoFullName, prNumber);
   }
   return { ...summary, aiReview };
 }

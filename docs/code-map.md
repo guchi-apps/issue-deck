@@ -2416,7 +2416,7 @@ export function POST(request: NextRequest) {
     `MergeJudgement.reviewProgress`（`check-rollup.ts`。待ち行列・実行中・完了・停止）で、`aiReview`は
     `claude-review`の結果の軸なので別に持つ。完了・停止は待っても新しい判定が出ないため人の番にし、
     「AIレビューを再実行」を出す
-  - **レビューが実行されないまま止まったPRは代表状態`review-not-run`（レビュー未実施）で出す**（#5212）。`toReviewProgress`が前段のジョブの取り残し・失敗から`mergeJudgement.reviewStopped`を作り（設計どおりの省略には付けない）、取り残されたジョブ（runは完了・ジョブは未着手。`isAbandonedCheckRun`）は判定の待ちから外す。いまのコミットの判定があれば、そちらを優先する（`isReviewNotRun`）
+  - **レビューが実行されないまま止まったPRは代表状態`review-not-run`（レビュー未実施）で出す**（#5212）。`toReviewProgress`が前段のジョブの取り残し・失敗から`mergeJudgement.reviewStopped`を作り（設計どおりの省略には付けない）、取り残されたジョブ（runは完了・ジョブは未着手。`isAbandonedCheckRun`）は判定の待ちから外す。いまのコミットの判定があれば、そちらを優先する（`isReviewNotRun`）。**レビュー本体（`claude-review`・`codex-review`）が走ったうえで失敗した場合も同じ`reviewStopped`（`reason: "failed"`）を作る**（#5261）。判定も本文も残らず「マージする」以外に操作が無かったため。画面では`isReviewExecutorFailure`で見分けて「レビュー失敗」と呼び（コード欄は「■ 失敗」のまま理由付き）、操作は未実施と同じ「AIレビューを再実行」・実行ログ・マージ確認を出す。巡回の自動やり直し（#5215）は`stalled`だけが対象なので、本体の失敗は自動では再実行しない
   - **古い要修正に「PRを自動修正」を出さない**（#5210。`repairKindsFor`に`headSha`を渡す）。
     `reusable-claude-review-fix.yml`は先頭コミットの`sha=`を持つ判定コメントしか読まないので、押しても
     修正済みの指摘を直し直すことはなく、何もせず終わる
@@ -4673,21 +4673,12 @@ Claude Code・Codex CLIそれぞれの新規実行の一時停止（`AppSetting.
 片方で解決できない項目はもう片方から補う（#1306）。供給元が揃っているかは
 `.github/workflows/load-secrets-check.yml`を`workflow_dispatch`で実行すると確認できる。
 
-## バックアップCI（#4065）
+## 必須検査の正本（#4065）
 
-GitHub Actions障害時に、PR詳細からCircleCIを直接起動してdevelop向けPRの必須検査を続ける。
-**必須検査の正本は[`ci/required-checks.json`](../ci/required-checks.json)**で、`ci.yml`もCircleCIも
+**必須検査の正本は[`ci/required-checks.json`](../ci/required-checks.json)**で、`ci.yml`は
 `scripts/ci/run-required-checks.mjs`経由でこれを実行する（ci.ymlへ直接ステップを足すと
-`scripts/ci/check-ci-definition-sync.mjs`が落とす）。サーバー側は`src/lib/backup-ci/`、結果は
-`BackupCiRun`に記録し、合否は共通チェック`issue-deck/ci-gate`（commit status）として出す。
-`check-rollup.ts`は共通チェックがあればそれだけでCI状態を決める。
-**共通チェックの発行は`gate-service.ts`の`syncPullRequestCiGate`だけが行う**（#4113）。通常時のActions
-（ci.ymlの必須ジョブ）とバックアップCIの両方の最新の試行から、最後に始まった方を採用し（判定は`gate.ts`）、
-採用した経路は`CiGateState`に残す。Actionsの結果はpollerの巡回（`sweepCiGateMirror`）と`workflow_run`の
-Webhookで取り込む。運用・移行・ロールバックは[backup-ci.md](backup-ci.md)。 他リポジトリへの展開（#4308）は`src/lib/backup-ci/rollout.ts`・`rollout-service.ts`・`/api/backup-ci/rollout`・`.github/scripts/propagate-backup-ci.sh`（[backup-ci.md](backup-ci.md) 9章）。
-バックアップCIの合格を採用したPRは、Actionsを経由せずにissue-deckがサブPCのCodexレビュー（`PR_REVIEW`）を
-積み、LGTMならdevelopへマージする（#4114。判定は`merge.ts`、実行と巡回は`merge-service.ts`の
-`sweepBackupCiMerges`。進み具合は`BackupCiRun.mergeStatus`）。
+`scripts/ci/check-ci-definition-sync.mjs`が落とす）。CircleCIによるバックアップCIと共通チェック
+`issue-deck/ci-gate`は#5254で廃止した。
 
 ## 一覧の行に出す親子関係（#3469）
 

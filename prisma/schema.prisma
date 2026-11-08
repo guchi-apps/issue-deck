@@ -2513,118 +2513,6 @@ model ImplementationRun {
   @@index([repositoryFullName, issueNumber, startedAt])
 }
 
-/// GitHub Actions障害時のバックアップCI（#4065）のリポジトリ別設定。
-/// **行が無い・`enabled`が偽のリポジトリでは、バックアップCIを起動できない**（明示的に有効化したものだけ）。
-/// CircleCIのAPIトークンとWebhookの署名鍵はここに置かず、環境変数（`CIRCLECI_API_TOKEN`・`CIRCLECI_WEBHOOK_SECRET`）から読む
-model BackupCiSetting {
-  repositoryFullName    String   @id
-  enabled               Boolean  @default(false)
-  /// `circleci/<org-id>/<project-id>`（GitHub App連携）のようなプロジェクトスラッグ
-  circleciProjectSlug   String?
-  /// APIからの起動に使うパイプライン定義のID（CircleCIのProject Settings > Pipelines）
-  circleciDefinitionId  String?
-  /// 通常時（バックアップCIを起動していないPR）も、GitHub Actionsの必須ジョブの結果を共通チェック
-  /// `issue-deck/ci-gate`へ写す（#4113）。**必須チェックを共通チェックへ移したあとは外さない**
-  mirrorActionsToCiGate Boolean  @default(false)
-  updatedByUserId       String?
-  createdAt             DateTime @default(now())
-  updatedAt             DateTime @updatedAt
-}
-
-/// バックアップCIの実行要求1回（#4065）。**PRのhead/baseと実際に検査したコミット、検査定義の版を
-/// 起動側（issue-deck）が記録し、完了時にこの記録と突き合わせた結果だけを合格として採用する。**
-model BackupCiRun {
-  id                     String    @id @default(cuid())
-  repositoryFullName     String
-  prNumber               Int
-  headRef                String
-  baseRef                String
-  headSha                String
-  baseSha                String
-  /// 同じPRでの試行番号（1始まり）
-  attempt                Int
-  provider               String    @default("circleci")
-  /// `BackupCiRunStatus`。解釈はアプリ側（src/lib/backup-ci/state.ts）に寄せる
-  status                 String
-  /// 未完了の間だけ`repositoryFullName#prNumber`を入れる。**同じPRで実行要求を2本同時に採用しない**
-  activeKey              String?   @unique
-  startedByUserId        String
-  /// 起動時に読んだbaseの検査定義のダイジェスト。結果のダイジェストがこれと違えば採用しない
-  definitionDigest       String?
-  resultDigest           String?
-  /// 実際に検査したコミット（baseへheadをマージした結果）とその親
-  testedSha              String?
-  testedParents          String?
-  externalPipelineId     String?   @unique
-  externalPipelineNumber Int?
-  externalWorkflowId     String?
-  externalJobNumber      Int?
-  logUrl                 String?   @db.Text
-  /// 検査ごとの結果（JSON配列）
-  checksJson             String?   @db.Text
-  statusReason           String?   @db.Text
-  /// 最後に共通チェック（issue-deck/ci-gate）へ出した状態
-  gateState              String?
-  /// 合格後のdevelopへのマージの進み具合（#4114。`BackupCiMergeStatus`、解釈は src/lib/backup-ci/merge.ts）。
-  /// Actionsが止まっていても、サブPCのレビュー（`PR_REVIEW`）を積み、条件を満たせばissue-deckがマージする
-  mergeStatus            String?
-  mergeReason            String?   @db.Text
-  /// このマージ判定のために積んだ（または相乗りした）`PR_REVIEW`のDispatchJob
-  reviewJobId            String?
-  /// マージAPIが失敗した回数。上限で諦めて人へ渡す
-  mergeAttempts          Int       @default(0)
-  mergeCommitSha         String?
-  mergeDecidedAt         DateTime?
-  requestedAt            DateTime  @default(now())
-  triggeredAt            DateTime?
-  completedAt            DateTime?
-  lastReconciledAt       DateTime?
-  createdAt              DateTime  @default(now())
-  updatedAt              DateTime  @updatedAt
-
-  @@unique([repositoryFullName, prNumber, attempt])
-  @@index([status])
-  @@index([status, mergeStatus])
-}
-
-/// PRごとに、共通チェック（issue-deck/ci-gate）へどちらの経路（GitHub Actions／バックアップCI）の
-/// 結果を採用したかの記録（#4113）。**最後に始まった試行の結果だけを採用し、遅れて届いた古い試行で
-/// 巻き戻さない**ための基準になる。判定は src/lib/backup-ci/gate.ts
-model CiGateState {
-  id                 String    @id @default(cuid())
-  repositoryFullName String
-  prNumber           Int
-  headSha            String
-  baseSha            String
-  /// `actions` | `backup`
-  source             String
-  /// 採用した試行（Actionsは`<run id>:<attempt>`、バックアップCIは`BackupCiRun.id`）。未開始ならnull
-  sourceRef          String?
-  /// 採用した試行の開始時刻。これより前に始まった同じ経路の試行では置き換えない
-  sourceStartedAt    DateTime?
-  /// 共通チェックの状態（success / failure / pending / error）
-  state              String
-  description        String    @db.Text
-  targetUrl          String?   @db.Text
-  /// 最後にGitHubへ発行できた`<source>:<state>:<baseSha>`。失敗時は`publish_failed:<code>`
-  publishedState     String?
-  lastEvaluatedAt    DateTime
-  createdAt          DateTime  @default(now())
-  updatedAt          DateTime  @updatedAt
-
-  @@unique([repositoryFullName, prNumber])
-  @@index([lastEvaluatedAt])
-}
-
-/// CircleCIの完了Webhookの受信記録（#4065）。**同じイベントIDを2回処理しない**ための台帳
-model CircleciWebhookDelivery {
-  eventId    String   @id
-  type       String
-  receivedAt DateTime @default(now())
-
-  @@index([receivedAt])
-}
-
 /// Push通知の種類ごとのOFF設定（#4159）。**行があればその種類はOFF**で、行が無ければON
 /// （既定は全部ON。後から種類を足しても既存ユーザーの挙動が変わらない）。
 /// ユーザー単位で、端末（購読）ごとではない。`kind`は`src/lib/notifications/push-kinds.ts`の値。
@@ -2773,6 +2661,29 @@ model ReleaseReviewDecision {
 
   @@unique([scopeKey, findingId, sequence], map: "ReleaseReviewDecision_sequence_key")
   @@index([scopeKey])
+}
+
+// 全体レビューの未確認項目・候補全体への判断メモ（#5252）。**記録と表示だけ**で、AIの判定・ゲートの合否・公開承認は
+// 読まない。追記専用で、候補系列（`scopeKey`は`ReleaseReviewDecision`と同じ）の履歴として残す
+model ReleaseReviewNote {
+  id           String  @id @default(cuid())
+  scopeKey     String  @db.VarChar(191)
+  repoFullName String  @db.VarChar(191)
+  // `check`（未確認の確認項目。`checkId`が入る）/ `overall`（候補全体）
+  targetKind   String  @db.VarChar(16)
+  checkId      String? @db.VarChar(64)
+  body         String  @db.Text
+  // 後続の対応先（自由記述。例: `guchi-apps/morrow#683`）
+  followUp     String? @db.VarChar(300)
+  // 書いたときの対象
+  prNumber     Int
+  baseSha      String  @db.VarChar(64)
+  headSha      String  @db.VarChar(64)
+  authorUserId String  @db.VarChar(40)
+
+  createdAt DateTime @default(now())
+
+  @@index([scopeKey, createdAt])
 }
 
 // 全体レビューの指摘ごとのAIの推奨判断と理由案（#4676）。**推奨は判断ではない。** ユーザーが確定するまで

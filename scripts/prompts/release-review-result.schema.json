@@ -1,13 +1,14 @@
 {
   "type": "object",
   "additionalProperties": false,
-  "required": ["state", "summary", "checklistVersion", "checks", "unverifiedScope", "fileReviews", "findings", "affectedPullRequests", "affectedFiles", "previousFindings", "recheckScope"],
+  "required": ["state", "summary", "checklistVersion", "checks", "unverifiedScope", "counterpartNotes", "fileReviews", "findings", "affectedPullRequests", "affectedFiles", "previousFindings", "recheckScope"],
   "properties": {
     "state": {"type": "string", "enum": ["passed", "needs_check", "failed"]},
     "summary": {"type": "string"},
     "checklistVersion": {"type": "integer"},
     "unverifiedScope": {"type": ["string", "null"]},
     "recheckScope": {"type": ["string", "null"]},
+    "counterpartNotes": {"type": "array", "items": {"type": "string"}},
     "affectedPullRequests": {"type": "array", "items": {"type": "integer"}},
     "affectedFiles": {"type": "array", "items": {"type": "string"}},
     "checks": {

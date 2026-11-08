@@ -44,6 +44,7 @@ export const IOS_EXTENSION_REPOSITORY_NAMES = [
   "guchi-apps/morrow",
   "guchi-apps/issue-deck",
   "guchi-apps/work-relay",
+  "guchi-apps/asset-manager",
 ] as const;
 
 /** 走査するSwiftファイルのパス。拡張が置かれる名前だけに絞り、取得するBlobの数を抑える */

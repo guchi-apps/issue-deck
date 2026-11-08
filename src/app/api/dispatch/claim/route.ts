@@ -1,8 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
 
-import { sweepCiGateMirror } from "@/lib/backup-ci/gate-service";
-import { sweepBackupCiMerges } from "@/lib/backup-ci/merge-service";
-import { sweepBackupCiRuns } from "@/lib/backup-ci/service";
 import { keepClaudeWindowOpen } from "@/lib/claude-window-keepalive-run";
 import { authorizeDispatch } from "@/lib/dispatch/dispatch-auth";
 import { parseDispatchHostName } from "@/lib/dispatch/dispatch-job";
@@ -153,28 +150,6 @@ export async function POST(request: NextRequest) {
       await sweepCheckUserPushNotifications();
     } catch (error) {
       console.error("[POST /api/dispatch/claim] 確認待ちのPush通知を送れませんでした:", error);
-    }
-    // バックアップCI（#4065）の結果回収。Webhookの取りこぼし・issue-deckの再起動で止まった実行を
-    // CircleCI APIで照合して進める。**GitHub Actionsが止まっていても回る経路**としてここに置く
-    try {
-      await sweepBackupCiRuns();
-    } catch (error) {
-      console.error("[POST /api/dispatch/claim] バックアップCIの照合に失敗しました:", error);
-    }
-    // 通常時のActionsの結果を共通チェック`issue-deck/ci-gate`へ写す（#4113）。developの必須チェックが
-    // 共通チェックへ移ったあとは、**ここが止まるとdevelopへのマージが止まる**（docs/backup-ci.md 5章）
-    try {
-      await sweepCiGateMirror();
-    } catch (error) {
-      console.error("[POST /api/dispatch/claim] 共通チェックの写しに失敗しました:", error);
-    }
-    // バックアップCIが合格したPRへサブPCのレビューを積み、条件を満たせばdevelopへマージする（#4114）。
-    // 共通チェックの決定の後に置き、同じ回で採用されたばかりの合格も拾う。積んだ`PR_REVIEW`は、
-    // 下の`claimDispatchJobs`で同じ回に受け取られうる
-    try {
-      await sweepBackupCiMerges();
-    } catch (error) {
-      console.error("[POST /api/dispatch/claim] バックアップCI合格後のマージ判定に失敗しました:", error);
     }
     // 統合検証の完了まで待たせた全体レビュー（#4763）の開始の再照合。報告の反映に失敗した・統合検証を積めなかった対象を拾う。
     // 積んだ`RELEASE_REVIEW`は、下の`claimDispatchJobs`で同じ回に受け取られうる
