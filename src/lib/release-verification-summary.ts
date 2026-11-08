@@ -1,3 +1,4 @@
+import type { ReleaseReviewNotes } from "@/lib/release-review-note";
 import type { ReleaseCandidateFix } from "@/lib/release-fix-series";
 import {
   evaluateReleaseMergeGate,
@@ -88,6 +89,8 @@ export type ReleaseVerificationSection = {
    * 判断で`state`を書き換えない。読み出していない・読めなかったときはnull
    */
   decisions?: ReleaseReviewDecisionSummary | null;
+  /** 未確認項目・候補全体への判断メモ（#5252。全体レビューだけ）。記録と表示だけで、判定・ゲートは読まない。読めなかったときはnull */
+  notes?: ReleaseReviewNotes | null;
   /** 記録された未確認範囲そのもの（判断で解除してよいかの判定に使う）。無ければnull */
   unverifiedScope?: string | null;
   /** 自動再評価の印（#4664。全体レビューだけ）。無ければnull */
@@ -250,6 +253,7 @@ export function summarizeReleaseVerification(input: {
       diagnostic: state === "failed" ? readReleaseReviewDiagnostic(row?.findings, current) : null,
       previousRun: readPreviousRun(row?.findings),
       decisions: null,
+      notes: null,
       unverifiedScope: row?.unverifiedScope ?? null,
       autoReevaluation: kind === "ai_review" ? readAutoReevaluation(row?.findings) : null,
       opsReevaluation: kind === "ai_review" ? readOpsReevaluation(row?.findings) : null,

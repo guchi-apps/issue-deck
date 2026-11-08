@@ -2775,6 +2775,29 @@ model ReleaseReviewDecision {
   @@index([scopeKey])
 }
 
+// 全体レビューの未確認項目・候補全体への判断メモ（#5252）。**記録と表示だけ**で、AIの判定・ゲートの合否・公開承認は
+// 読まない。追記専用で、候補系列（`scopeKey`は`ReleaseReviewDecision`と同じ）の履歴として残す
+model ReleaseReviewNote {
+  id           String  @id @default(cuid())
+  scopeKey     String  @db.VarChar(191)
+  repoFullName String  @db.VarChar(191)
+  // `check`（未確認の確認項目。`checkId`が入る）/ `overall`（候補全体）
+  targetKind   String  @db.VarChar(16)
+  checkId      String? @db.VarChar(64)
+  body         String  @db.Text
+  // 後続の対応先（自由記述。例: `guchi-apps/morrow#683`）
+  followUp     String? @db.VarChar(300)
+  // 書いたときの対象
+  prNumber     Int
+  baseSha      String  @db.VarChar(64)
+  headSha      String  @db.VarChar(64)
+  authorUserId String  @db.VarChar(40)
+
+  createdAt DateTime @default(now())
+
+  @@index([scopeKey, createdAt])
+}
+
 // 全体レビューの指摘ごとのAIの推奨判断と理由案（#4676）。**推奨は判断ではない。** ユーザーが確定するまで
 // `ReleaseReviewDecision`へは何も書かない。対象（base・head）ごとに1行で、対象が変わった推奨は新しい対象へ使わない。
 // 取得に失敗した指摘も`status=failed`で残し、画面を開くたびにAIを呼び直さない（再取得はユーザーの操作だけ）
