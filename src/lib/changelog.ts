@@ -42,6 +42,18 @@ export type ChangelogEntry = {
  */
 export const APP_CHANGELOG: ChangelogEntry[] = [
   {
+    version: "8.92.3",
+    date: "2026-11-08",
+    changes: [
+      "設定画面のダイアログが大きくなり、内容を見やすくなりました。",
+    ],
+    usage: [
+      "1. 画面の設定を開く。",
+      "2. 以前より広く表示された設定ダイアログを確認する。",
+      "成功の目安: 設定ダイアログが以前より横にも縦にも大きく表示され、内容が見やすくなっている。",
+    ],
+  },
+  {
     version: "8.92.1",
     date: "2026-11-07",
     changes: [
