@@ -38,9 +38,10 @@ export type ReleaseStartMode =
 export const START_MODE_LEGACY_LABEL =
   "新方式（候補の作成・検証）に未対応です。caller（.github/workflows/release-develop-to-main.yml）へ`candidate_request`・`finalize_request`のinputと受け渡しを足し、共有ワークフローの参照タグを最新へ更新してください。更新するまで通常開始は止まります（旧方式では起動しません）";
 
-export function decideReleaseStartMode(callerText: string | null): ReleaseStartMode {
+export function decideReleaseStartMode(callerText: string | null, errorStatus?: number | null): ReleaseStartMode {
   if (callerText === null) {
-    return { mode: "unknown", label: "リリースworkflowのcallerを読めず、新方式に対応しているか判定できません" };
+    const cause = errorStatus ? `（GitHub APIが${errorStatus}を返しました）` : errorStatus === null ? "（GitHubへ接続できませんでした）" : "";
+    return { mode: "unknown", label: `リリースworkflowのcallerを読めず、新方式に対応しているか判定できません${cause}` };
   }
   if (!parseRcCallerSupport(callerText).supported) {
     return { mode: "legacy", reason: "caller_without_input", label: START_MODE_LEGACY_LABEL };

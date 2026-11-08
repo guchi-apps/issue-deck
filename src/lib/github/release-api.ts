@@ -486,14 +486,32 @@ export async function releaseCallerSupportsSelection(owner: string, repo: string
   return /^\s+rebuild_selection:/m.test(text) && text.includes("rebuild-selection:");
 }
 
+export type ReleaseCallerFetch =
+  | { kind: "found"; text: string }
+  /** developにcallerのファイルが無い（404）。権限や通信の失敗とは区別する（#5250） */
+  | { kind: "missing" }
+  | { kind: "error"; status: number | null };
+
+/** developにあるリリースworkflowのcallerの取得結果。「無い」と「読めなかった」を分ける（#5250） */
+export async function fetchReleaseCaller(owner: string, repo: string, token: string): Promise<ReleaseCallerFetch> {
+  const url = `${GITHUB_API}/repos/${owner}/${repo}/contents/.github/workflows/${RELEASE_WORKFLOW_FILE}?ref=develop`;
+  let res: Response;
+  try {
+    res = await githubFetch(url, token);
+  } catch {
+    return { kind: "error", status: null };
+  }
+  if (res.status === 404) return { kind: "missing" };
+  if (!res.ok) return { kind: "error", status: res.status };
+  const data: { content?: string; encoding?: string } = await res.json().catch(() => ({}));
+  if (!data.content) return { kind: "error", status: res.status };
+  return { kind: "found", text: Buffer.from(data.content, data.encoding === "base64" ? "base64" : "utf-8").toString("utf-8") };
+}
+
 /** developにあるリリースworkflowのcallerの本文（#4495の対応判定用）。読めなければnull */
 export async function fetchReleaseCallerText(owner: string, repo: string, token: string): Promise<string | null> {
-  const url = `${GITHUB_API}/repos/${owner}/${repo}/contents/.github/workflows/${RELEASE_WORKFLOW_FILE}?ref=develop`;
-  const res = await githubFetch(url, token);
-  if (!res.ok) return null;
-  const data: { content?: string; encoding?: string } = await res.json().catch(() => ({}));
-  if (!data.content) return null;
-  return Buffer.from(data.content, data.encoding === "base64" ? "base64" : "utf-8").toString("utf-8");
+  const result = await fetchReleaseCaller(owner, repo, token);
+  return result.kind === "found" ? result.text : null;
 }
 
 /** ブランチの先端SHA。無ければnull */
