@@ -766,6 +766,7 @@ function AiReviewSection({
     Boolean(section.summary) ||
     section.findings.length > 0 ||
     section.suggestions.length > 0 ||
+    section.counterpartNotes.length > 0 ||
     section.review !== null ||
     section.totalFiles !== null ||
     needsFix ||
@@ -969,6 +970,20 @@ function AiReviewSection({
                 </li>
               ))}
             </ul>
+          )}
+          {section.counterpartNotes.length > 0 && (
+            <div className="flex flex-col gap-1">
+              <span className="text-muted-foreground">
+                相手側未実装の注記 {section.counterpartNotes.length}件（連携先のdevelop・mainに該当実装が無いことを確かめ済みです。未確認ではなくリリースは止めません）
+              </span>
+              <ul className="flex flex-col gap-1">
+                {section.counterpartNotes.map((note, index) => (
+                  <li key={`${note}-${index}`} className="whitespace-pre-wrap rounded bg-muted/30 px-2 py-1 text-muted-foreground">
+                    {note}
+                  </li>
+                ))}
+              </ul>
+            </div>
           )}
           {section.suggestions.length > 0 && (
             <div className="flex flex-col gap-1">

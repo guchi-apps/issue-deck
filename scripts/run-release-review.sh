@@ -418,6 +418,7 @@ integration_coverage_text() {
 `checks`は確認項目すべてについて、リリース全体の観点で出力します。`fileReviews`は空配列で構いません（ファイル別の実績はバッチごとに記録済み）。
 バッチごとの指摘はこちらで集約するため、ここでは**バッチをまたぐ新しい指摘だけ**を`findings`へ出します。
 `unverifiedScope`は**リリース全体として最後に残る未確認範囲だけ**を書きます（無ければ`null`）。この値がバッチごとの「未確認範囲」に置き換わります。
+`counterpartNotes`は、連携先の`counterpart.status`が`not_implemented`のものだけを注記として出します（無ければ空配列。バッチの注記はこちらで集約します）。
 バッチの時点で書かれた「他のバッチ・相互作用は未確認」は、全バッチとこの確認が済んだので書き写しません。バッチの未確認範囲のうち、他のバッチ・この確認・実行ホストの稼働情報で解消したものも落とし、解消できなかったものだけを理由とともに残します。
 RULES
 }
@@ -763,6 +764,7 @@ merge_batch_results() {
       # 解消・残存を判断したもので、バッチの時点の「他のバッチは未確認」を持ち越さない
       unverifiedScope: ((if ($ir | length) > 0 then [ $ir[] | .unverifiedScope // empty ] else [ $rs[] | .unverifiedScope // empty ] end)
         | map(tostring | select(test("\\S"))) | join(" / ") | if . == "" then null else .[0:1900] end),
+      counterpartNotes: ([ ($rs[], $ir[]) | (.counterpartNotes // [])[] | tostring ] | unique | .[0:20]),
       findings: ([ ($rs[] | (.findings // [])[]), $supFindings[] ] | uniq_by_key | .[0:50]),
       affectedPullRequests: ([ $rs[] | (.affectedPullRequests // [])[] ] | unique),
       affectedFiles: ([ $rs[] | (.affectedFiles // [])[] ] | unique | .[0:200]),

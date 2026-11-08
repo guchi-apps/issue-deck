@@ -48,6 +48,19 @@ const rereviewContext = (over: Partial<ReleaseReviewNormalizeContext> = {}): Rel
 });
 
 describe("normalizeReleaseReview", () => {
+  it("相手側未実装の注記は未確認範囲に入れず、ゲートを止めない。旧結果（項目なし）は空配列（#5253）", () => {
+    const note = "morrow: /api/auth は develop・main のどちらにも無い（登録済みIssue: morrow#683 open）";
+    const r = normalizeReleaseReview({
+      ...fullChecks({ checks: allChecks({ auth_boundary: { status: "not_applicable", evidence: "相手側未実装" } }) }),
+      summary: "問題なし",
+      counterpartNotes: [note, "", 3],
+      ...coverageOf(10),
+    });
+    expect(r).toMatchObject({ state: "passed", unverifiedScope: null });
+    expect(r?.detail.counterpartNotes).toEqual([note]);
+    expect(normalizeReleaseReview({ ...fullChecks(), summary: "問題なし", ...coverageOf(10) })?.detail.counterpartNotes).toEqual([]);
+  });
+
   it("指摘も未確認範囲も無ければpassed", () => {
     const r = normalizeReleaseReview({ ...fullChecks(), summary: "問題なし", ...coverageOf(10) });
     expect(r).toMatchObject({ state: "passed", unverifiedScope: null });

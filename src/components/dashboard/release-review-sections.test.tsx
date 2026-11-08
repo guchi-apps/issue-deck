@@ -28,6 +28,7 @@ function section(overrides: Partial<ReleaseVerificationSection> = {}): ReleaseVe
     updatedAt: null,
     findings: [],
     suggestions: [],
+    counterpartNotes: [],
     review: null,
     affectedPullRequests: [],
     affectedFiles: [],
@@ -132,6 +133,23 @@ describe("ReleaseReviewSections", () => {
     expect(titles).toEqual(["今必要な対応", "全体レビュー", "統合検証", "個別PRレビュー"]);
   });
 
+  it("相手側未実装の注記は未確認ではなく注記として別枠に出す（#5253）", () => {
+    render(
+      <ReleaseReviewSections
+        repositoryFullName="guchi-apps/aide"
+        headRef={HEAD}
+        pullRequestNumber={808}
+        verification={summary({
+          aiReview: section({ state: "passed", counterpartNotes: ["morrow: /api/auth は develop・main に無い（morrow#683 open）"] }),
+        })}
+        verificationError={null}
+        changes={loadedChanges([])}
+      />,
+    );
+    const ai = row("全体レビュー");
+    expect(within(ai).getByText(/相手側未実装の注記 1件/)).toBeTruthy();
+    expect(within(ai).getByText(/morrow#683 open/)).toBeTruthy();
+  });
   it("未実施を問題なしと出さず、担当予定を出す。表示のみのリポジトリはその旨を出す", () => {
     renderSections(summary());
     expect(within(row("全体レビュー")).getByText("未実施")).toBeTruthy();

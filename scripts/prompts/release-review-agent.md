@@ -22,6 +22,10 @@
 
 変更前からある問題、推測だけの指摘、好みの問題は止める指摘にしません（挙げるなら止めない提案にします）。指摘は再現または問題になる理由と、対象ファイルを添えてください。
 
+## 連携先が未実装のとき（相手側未実装）
+
+連携先の資料に`counterpart.status`が付いている場合、それはランナーが連携先の`main`と`develop`の実物を機械的に確かめた結果です（Issueのopen/closedは根拠にしていません）。**`not_implemented`（どちらにも無い）の連携先は、公開しても相手側から呼ばれず影響が無い**ので、それを理由に確認項目を`unconfirmed`にしません。該当項目は`not_applicable`にして根拠へ「相手側未実装（`counterpart`の出典）」と書き、`counterpartNotes`へ注記を1件ずつ書きます（`registeredIssues`があれば番号・題名・状態を添え、無ければ「要件の登録先Issueなし」と書く）。`develop_only`・`on_main`・`unknown`、または`counterpart`が無いものは従来どおり実コードを読んで判定し、読めなければ未確認です。**この扱いは`not_implemented`に限り、推測で広げません。**
+
 ## 指摘の区別（止める・止めない）
 
 {{BLOCKING_POLICY}}
@@ -63,6 +67,7 @@ CLIから出力schemaが指定されている場合はコードブロックや�
     { "id": "確認項目のID", "status": "confirmed|not_applicable|unconfirmed", "evidence": "根拠（未確認なら理由）"{{CHECK_SOURCE_HINT}} }
   ],
   "unverifiedScope": "確認できなかった範囲と次の対応（無ければ省略）",
+  "counterpartNotes": ["連携先が未実装（develop・mainに無い）と資料に分類されたものの注記。無ければ空配列"],
   "fileReviews": [
     { "file": "パス", "status": "reviewed|unreadable", "evidence": "読んだ箇所・確認した内容（unreadableなら理由）" }
   ],
