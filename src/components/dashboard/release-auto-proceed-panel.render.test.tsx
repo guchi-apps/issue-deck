@@ -123,6 +123,20 @@ describe("ReleaseAutoProceedPanel（#5138）", () => {
     expect(onReload).toHaveBeenCalled();
   });
 
+  it("推奨を作れなかった指摘には理由を出し、取り直せる（#5268）", async () => {
+    const reason = "Codex CLIで実行できませんでした: サブPCがジョブを受け取りませんでした（Claudeへは切り替えていません）";
+    const calls = mockFetch({
+      "/api/repositories/release/review-recommendations": { body: { ...recommendations, failures: { "R-0000bb": reason } } },
+    });
+    render(<ReleaseAutoProceedPanel repositoryFullName="guchi-apps/issue-deck" pullRequestNumber={5160} verification={verification()} onReload={vi.fn()} />);
+    await waitFor(() => expect(screen.getByText(`推奨を作れませんでした（${reason}）。「今回直す」で入れています`)).toBeTruthy());
+    const missing = screen.getByTestId("release-auto-proceed-missing");
+    fireEvent.click(screen.getByRole("button", { name: "推奨を取り直す" }));
+    await waitFor(() => expect(calls.filter((c) => c.url.endsWith("/review-recommendations")).length).toBe(2));
+    expect(calls.at(-1)?.body.retry).toBe(true);
+    expect(missing).toBeTruthy();
+  });
+
   it("一部の判定を確定できなければ、自動修正は始めない", async () => {
     const calls = mockFetch({
       "/api/repositories/release/review-recommendations": { body: recommendations },

@@ -130,6 +130,9 @@ export function ReleaseAutoProceedPanel({ repositoryFullName, pullRequestNumber,
   };
   const counts = countBulkDecisions(rows.map(choiceOf));
   const loadingRecommendations = recommendations.loading && !recommendations.view;
+  // 指摘ごとの取得失敗の理由（#5268）。表に「推奨を作れませんでした」だけを出すと、原因も取り直し方も分からなかった
+  const failures = recommendations.view?.failures ?? {};
+  const missingRecommendations = !loadingRecommendations && !recommendations.error && rows.some((row) => row.fallback === "no_recommendation");
   // 予約（#5229）。画面の中だけの状態で、閉じる・再読込すると消える
   const [armed, setArmed] = useState<ArmedTarget | null>(null);
   // 自動実行は1回だけ。再描画・再取得で`proceed()`が2回走らないようにする
@@ -302,6 +305,7 @@ export function ReleaseAutoProceedPanel({ repositoryFullName, pullRequestNumber,
             row={row}
             choice={choiceOf(row)}
             loading={loadingRecommendations}
+            failure={failures[row.findingId] ?? null}
             onChange={(kind) => setOverrides((current) => ({ ...current, [row.findingId]: kind }))}
             disabled={busy || armed !== null}
           />
@@ -312,6 +316,19 @@ export function ReleaseAutoProceedPanel({ repositoryFullName, pullRequestNumber,
         <p className="text-xs text-amber-700 dark:text-amber-400">
           {recommendations.error}。予約中のときは自動では進めず解除します。表を確かめて押すと、推奨の無い止める指摘は「今回直す」で確定します。
           <button type="button" className="ml-1 underline underline-offset-2" onClick={recommendations.retry}>
+            推奨を取り直す
+          </button>
+        </p>
+      )}
+      {missingRecommendations && (
+        <p className="text-xs text-amber-700 dark:text-amber-400" data-testid="release-auto-proceed-missing">
+          AIの推奨を作れなかった指摘があります。
+          <button
+            type="button"
+            className="ml-1 underline underline-offset-2"
+            onClick={recommendations.retry}
+            disabled={recommendations.loading || busy || armed !== null}
+          >
             推奨を取り直す
           </button>
         </p>
@@ -328,12 +345,15 @@ function DecisionRow({
   row,
   choice,
   loading,
+  failure,
   onChange,
   disabled,
 }: {
   row: BulkDecisionRow;
   choice: ReleaseReviewDecisionKind;
   loading: boolean;
+  /** 推奨を作れなかった理由（サーバーが指摘ごとに返したもの） */
+  failure: string | null;
   onChange: (kind: ReleaseReviewDecisionKind) => void;
   disabled: boolean;
 }) {
@@ -377,7 +397,7 @@ function DecisionRow({
           : reason
             ? reason
             : row.fallback === "no_recommendation"
-              ? "推奨を作れませんでした。「今回直す」で入れています"
+              ? `推奨を作れませんでした${failure ? `（${failure}）` : ""}。「今回直す」で入れています`
               : "推奨の必須項目が揃っていないため、「今回直す」で入れています"}
       </p>
     </li>

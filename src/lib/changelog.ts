@@ -42,6 +42,14 @@ export type ChangelogEntry = {
  */
 export const APP_CHANGELOG: ChangelogEntry[] = [
   {
+    version: "8.93.1",
+    date: "2026-11-09",
+    changes: [
+      "本番リリースレビューのAI推奨が、サブPCがジョブを受け取れない場合に失敗する問題を修正しました。",
+      "共有トークンが未登録の環境でも、画像アップロードがエラー（503）にならないよう修正しました。",
+    ],
+  },
+  {
     version: "8.93.0",
     date: "2026-11-08",
     changes: [
