@@ -256,6 +256,7 @@ jobs:
           # (あちらは全リポジトリのActionsから参照できるorganization secretのため)
           DISPATCH_SECRET: ${{ secrets.DISPATCH_SECRET }}
           # 画像アップロードAPIのBearer認証(#3507)。上の2つとは別の値にする
+          IMAGE_UPLOAD_SECRET: ${{ secrets.IMAGE_UPLOAD_SECRET }}
           # Push通知(#838)のVAPID鍵。3つ揃っていなければPush通知の機能だけが無効になる
           # (未設定でもデプロイは通り、他の機能には影響しない)。
           # 公開鍵も含めてsecretにする: このリポジトリはPUBLICでActionsのログが誰でも読めるため、
@@ -277,7 +278,7 @@ jobs:
             NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY SUPABASE_SERVICE_ROLE_KEY \
             SUPABASE_MANAGEMENT_API_TOKEN GITHUB_APP_ID GITHUB_APP_PRIVATE_KEY_BASE64 \
             NEXT_PUBLIC_GITHUB_APP_SLUG GITHUB_WEBHOOK_SECRET PROJECT_V2_OWNER PROJECT_V2_NUMBER \
-            PROGRESS_REPORT_SECRET DISPATCH_SECRET VAPID_PUBLIC_KEY \
+            PROGRESS_REPORT_SECRET DISPATCH_SECRET IMAGE_UPLOAD_SECRET VAPID_PUBLIC_KEY \
             VAPID_PRIVATE_KEY VAPID_SUBJECT GITHUB_USER_TOKEN_ENCRYPTION_KEY SHARED_TOKEN_API_SECRET \
             SHARED_TOKEN_WRITE_SECRET GITHUB_OAUTH_CLIENT_ID GITHUB_OAUTH_CLIENT_SECRET \
             CLAUDE_CODE_OAUTH_TOKEN OPENAI_API_KEY TYPESAFE_API_KEY AIDE_SUMMARY_USER_LOGIN \
@@ -311,6 +312,7 @@ jobs:
             printf '%s\n' "PROJECT_V2_NUMBER=${PROJECT_V2_NUMBER}"
             printf '%s\n' "PROGRESS_REPORT_SECRET=${PROGRESS_REPORT_SECRET}"
             printf '%s\n' "DISPATCH_SECRET=${DISPATCH_SECRET}"
+            printf '%s\n' "IMAGE_UPLOAD_SECRET=${IMAGE_UPLOAD_SECRET}"
             printf '%s\n' "VAPID_PUBLIC_KEY=${VAPID_PUBLIC_KEY}"
             printf '%s\n' "VAPID_PRIVATE_KEY=${VAPID_PRIVATE_KEY}"
             printf '%s\n' "VAPID_SUBJECT=${VAPID_SUBJECT}"
