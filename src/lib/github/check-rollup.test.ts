@@ -397,6 +397,41 @@ describe("fetchCheckRollup", () => {
       expect(judgement).toMatchObject({ reviewProgress: "not-run", reviewStopped: { job: "review-provider", reason: "failed" } });
     });
 
+    // レビュー本体が途中で落ちると、判定も本文も残らない（asset-manager#1196の形。#5261）
+    it("レビュー本体のジョブが失敗したら、止まった原因として返す", async () => {
+      const judgement = await judgementOf([
+        inSuite(checkRun("COMPLETED", "SUCCESS", FILE, "risk-check"), "COMPLETED"),
+        inSuite(checkRun("COMPLETED", "SUCCESS", FILE, "review-provider"), "COMPLETED"),
+        inSuite(checkRun("COMPLETED", "FAILURE", FILE, "claude-review"), "COMPLETED"),
+        skipped("codex-review"),
+        inSuite(checkRun("COMPLETED", "SUCCESS", FILE, "claude-review-fallback"), "COMPLETED"),
+        skipped("auto-merge"),
+      ]);
+      expect(judgement).toMatchObject({
+        state: "settled",
+        reviewProgress: "not-run",
+        reviewStopped: { job: "claude-review", reason: "failed", url: "https://github.com/owner/repo/actions/runs/1/job/claude-review" },
+        aiReview: { state: "failed" },
+      });
+    });
+
+    it("レビュー本体の失敗でも、同じrunの残りが動いている間は結論を出さない", async () => {
+      const judgement = await judgementOf([
+        inSuite(checkRun("COMPLETED", "FAILURE", FILE, "claude-review"), "IN_PROGRESS"),
+        inSuite(checkRun("IN_PROGRESS", null, FILE, "claude-review-fallback"), "IN_PROGRESS"),
+      ]);
+      expect(judgement).toMatchObject({ state: "pending", reviewProgress: "queued" });
+      expect(judgement?.reviewStopped).toBeUndefined();
+    });
+
+    it("別の実行担当が成功していれば、片方の失敗を止まった原因にしない", async () => {
+      const judgement = await judgementOf([
+        inSuite(checkRun("COMPLETED", "FAILURE", FILE, "claude-review"), "COMPLETED"),
+        inSuite(checkRun("COMPLETED", "SUCCESS", FILE, "codex-review"), "COMPLETED"),
+      ]);
+      expect(judgement?.reviewStopped).toBeUndefined();
+    });
+
     it("差分が小さくて省略されたPRは未実施にしない", async () => {
       const judgement = await judgementOf([
         inSuite(checkRun("COMPLETED", "SUCCESS", FILE, "risk-check"), "COMPLETED"),

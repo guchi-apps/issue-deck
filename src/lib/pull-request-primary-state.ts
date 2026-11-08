@@ -1,6 +1,7 @@
 import type { RepairKind } from "@/lib/github/pull-request-repair";
 import { repairKindsFor } from "@/lib/github/pull-request-repair";
 import {
+  isReviewExecutorFailure,
   isReviewNotRun,
   resolveReviewVerdictFreshness,
   reviewProgressLabel,
@@ -143,7 +144,8 @@ function reviewNotRunState(pullRequest: PullRequestSummary): PrimaryState | null
   if (!stopped || !isReviewNotRun({ reviewStopped: stopped, reviewedSha, headSha: pullRequest.headSha })) return null;
   return state(
     "review-not-run",
-    "レビュー未実施",
+    // レビュー本体が途中で落ちた場合は「失敗」と呼ぶ（#5261）。操作（再実行）は未実施と同じ
+    isReviewExecutorFailure(stopped) ? "レビュー失敗" : "レビュー未実施",
     "warn",
     `最新のコミット ${shortSha(pullRequest.headSha)} は自動レビューを通っていません。${reviewStoppedReason(stopped)}`,
     { needsAction: true },
