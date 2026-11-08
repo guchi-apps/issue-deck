@@ -1,5 +1,6 @@
 import type { Prisma } from "@prisma/client";
 
+import { describeAppAiCodexError } from "@/lib/claude/app-ai-codex";
 import { db } from "@/lib/db";
 import { isUniqueConstraintError } from "@/lib/prisma-error";
 import { parseReleaseReviewDecisionAction } from "@/lib/release-review-decision";
@@ -14,10 +15,25 @@ import {
 /**
  * 全体レビューの指摘ごとのAIの推奨（#4676）の読み書き。**推奨は対象（base・head）ごと**に1行で、
  * 対象が変わったら作り直す（古い対象の推奨を新しい対象へ使わない）。AIの原判定（重大度・止めるか）が
- * 変わった指摘も作り直す。取得に失敗した指摘は`failed`で残し、画面を開くたびにAIを呼び直さない。
+ * 変わった指摘も作り直す。取得に失敗した指摘は`failed`で残し、画面を開くたびにAIを呼び直さない
+ * （サブPCが受け取らなかった・時間切れの一時的な失敗だけは、次に開いたときに作り直す。#5268）。
  */
 
 type RecommendationRow = Prisma.ReleaseReviewRecommendationGetPayload<object>;
+
+/**
+ * 次に画面を開いたときに自動で作り直す失敗（#5268）。サブPCがジョブを受け取らなかった・時間切れは
+ * AIの出力ではなく受け渡しの一時的な失敗で、記録に固定すると「推奨を作れませんでした」が出続けていた
+ * （本番の失敗はすべて受け取りなしだった）。AIの出力を読めなかった・未ログインなどは固定したままにする
+ */
+const TRANSIENT_FAILURES: ReadonlySet<string> = new Set([
+  describeAppAiCodexError("not_claimed"),
+  describeAppAiCodexError("timeout"),
+]);
+
+export function isTransientRecommendationFailure(error: string | null): boolean {
+  return error !== null && TRANSIENT_FAILURES.has(error);
+}
 
 export type RecommendationTargetKey = { scopeKey: string; baseSha: string; headSha: string };
 
@@ -89,7 +105,7 @@ export async function loadOrGenerateRecommendations(input: {
         continue;
       }
     }
-    if (row && sameJudgement && row.status === "failed" && !input.retry) {
+    if (row && sameJudgement && row.status === "failed" && !input.retry && !isTransientRecommendationFailure(row.error)) {
       view.failures[target.id] = row.error ?? "AIの推奨を取得できませんでした";
       continue;
     }

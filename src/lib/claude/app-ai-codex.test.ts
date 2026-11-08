@@ -67,7 +67,9 @@ vi.mock("@/lib/db", () => ({
   },
 }));
 
+import { CHAT_TURN_CLAIM_WAIT_MS } from "@/lib/chat/codex-turn-common";
 import {
+  APP_AI_CODEX_CLAIM_WAIT_MS,
   AppAiCodexError,
   buildAppAiCodexPrompt,
   findAppAiCodexImages,
@@ -242,6 +244,29 @@ describe("CHAT_TURNジョブでサブPCのCodex CLIへ投げる（#5067）", () 
   it("サブPCが受け取らなければ not_claimed で取り消す", async () => {
     await expectKind(runAppAiOnCodex({ feature: "issue_suggest", model: "gpt-6-luna", body: summaryBody, sleep, clock }), "not_claimed");
     expect(state.jobs.get("job1")?.status).toBe("CANCELED");
+  });
+
+  it("受け取り待ちはチャット調査の30秒より長く、45秒後に受け取られても結果を返す（#5268）", async () => {
+    const startedAt = clockNow;
+    state.onPoll = (jobId, run) => {
+      const job = state.jobs.get(jobId);
+      if (job && run && job.status === "QUEUED" && clockNow - startedAt >= 45_000) {
+        job.status = "RUNNING";
+        run.stepResult = '{"text":"受け取りました"}';
+      }
+    };
+    const result = await runAppAiOnCodex({ feature: "release_review_recommend", model: "gpt-6-luna", body: summaryBody, sleep, clock });
+    expect(result.text).toBe("受け取りました");
+    expect(APP_AI_CODEX_CLAIM_WAIT_MS).toBeGreaterThan(CHAT_TURN_CLAIM_WAIT_MS);
+  });
+
+  it("受け取り待ちは全体の上限を超えない", async () => {
+    const startedAt = clockNow;
+    await expectKind(
+      runAppAiOnCodex({ feature: "issue_suggest", model: "gpt-6-luna", body: summaryBody, timeoutMs: 20_000, sleep, clock }),
+      "not_claimed",
+    );
+    expect(clockNow - startedAt).toBeLessThan(APP_AI_CODEX_CLAIM_WAIT_MS);
   });
 
   it("サブPCがオフライン・pollerが未対応なら、ジョブを積まずに区別して断る", async () => {
