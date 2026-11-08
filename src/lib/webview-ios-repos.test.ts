@@ -57,9 +57,18 @@ describe("getWebviewIosRepository", () => {
     expect(repo?.launchUrl).toBe("https://research-desk.gucchii.com/");
   });
 
+  it("asset-managerもWebView型のiOSアプリを持つリポジトリとして返す（#5259）", () => {
+    const repo = getWebviewIosRepository("guchi-apps/asset-manager");
+    expect(repo?.appLabel).toBe("asset-manager");
+    expect(repo?.xcodeProjectPath).toBe("ios/AssetManager.xcodeproj");
+    expect(repo?.command).toContain("cd ~/apps/asset-manager");
+    expect(repo?.command).toContain("open ios/AssetManager.xcodeproj");
+    expect(repo?.launchUrl).toBe("https://asset.gucchii.com/");
+  });
+
   it("リリース通知の起動用URLは各アプリの本番ドメイン上のHTTPS（#5049）", () => {
     expect(getWebviewIosRepository("guchi-apps/yoteiflow")?.launchUrl).toBe("https://dayspan.gucchii.com/calendar");
-    for (const name of ["kurashio", "yoteiflow", "aide", "morrow", "issue-deck", "work-relay"]) {
+    for (const name of ["kurashio", "yoteiflow", "aide", "morrow", "issue-deck", "work-relay", "asset-manager"]) {
       expect(getWebviewIosRepository(`guchi-apps/${name}`)?.launchUrl).toMatch(/^https:\/\/[a-z-]+\.gucchii\.com\//);
     }
     // issue-deck自身もトップページを持つ（通知の「リリースノート」をやめて「アプリを開く」にした。#5063）
