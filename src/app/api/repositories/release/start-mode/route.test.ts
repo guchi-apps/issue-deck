@@ -4,7 +4,7 @@ const mocks = vi.hoisted(() => ({ user: vi.fn(), repos: vi.fn(), reconcile: vi.f
 vi.mock("@/lib/auth-user", () => ({ requireUserId: mocks.user }));
 vi.mock("@/lib/db", () => ({ db: { repository: { findMany: mocks.repos } } }));
 vi.mock("@/lib/github/app-auth", () => ({ getInstallationToken: vi.fn(async () => "t") }));
-vi.mock("@/lib/github/release-api", () => ({ fetchReleaseCallerText: vi.fn(async () => "caller") }));
+vi.mock("@/lib/github/release-api", () => ({ fetchReleaseCaller: vi.fn(async () => ({ kind: "found", text: "caller" })) }));
 vi.mock("@/lib/release-start-mode", () => ({ decideReleaseStartMode: () => ({ mode: "candidate" }) }));
 vi.mock("@/lib/release-rc-reconcile", () => ({ reconcileActiveRcPublication: mocks.reconcile }));
 vi.mock("@/lib/release-rc-run", () => ({ loadRcBlock: mocks.block }));
