@@ -280,7 +280,7 @@ it("明示参照が無くても、呼び出しとマニフェストから受信�
   expect(prompt).toContain("実行も巡回もしません");
   expect(readFileSync(path.join(out, "fingerprint"), "utf8")).not.toBe("");
   // 判定器の版が上がっているので、#5192より前に保存された結果の指紋とは一致しない
-  expect(m.judgeVersion).toBe(4);
+  expect(m.judgeVersion).toBe(5);
 });
 it("本文・コメント・ドキュメントの記述や、別ファイルに分かれた環境変数とパスからは受信口を発見しない", () => {
   candidate({
@@ -427,4 +427,56 @@ it("連携先mainに対象コードが無いときは不整合ではなく資料
   expect(l.classification).toBe("資料未取得");
   expect(l.missing).toContain("release-review-links.json");
   expect(outText).toContain("資料不足であって不整合の疑いではありません");
+});
+
+// #5253: 連携先に実装が無いときは、未確認ではなく「相手側未実装」の分類にする
+const DEV5253 = "4".repeat(40);
+const counterpartRoutes = ({ main = {}, develop = {}, devTree = true, issues = [] } = {}) => ({
+  [`${AIDE}/actions/runs`]: { workflow_runs: [{ name: "Deploy to Production", path: ".github/workflows/deploy.yml", head_sha: LIVE5192 }] },
+  [`${AIDE}/commits/develop`]: devTree ? { sha: DEV5253 } : "{}",
+  [`${AIDE}/git/trees/${LIVE5192}`]: blobs(Object.keys(main)),
+  [`${AIDE}/git/trees/${DEV5253}`]: blobs(Object.keys(develop)),
+  ...Object.fromEntries(Object.entries(main).map(([n, b]) => [`${AIDE}/contents/${n}?ref=${LIVE5192}`, b])),
+  ...Object.fromEntries(Object.entries(develop).map(([n, b]) => [`${AIDE}/contents/${n}?ref=${DEV5253}`, b])),
+  "search/issues": { items: issues },
+});
+const counterpart = () => {
+  candidate({ "src/app/api/news-mail/send/route.ts": CALLER, ".github/secrets-manifest.tsv": MANIFEST });
+  runAs();
+  return JSON.parse(readFileSync(path.join(out, "manifest.json"), "utf8")).apiContracts[0];
+};
+it("連携先のmainにもdevelopにも受信口が無ければ『相手側未実装』と分類し、登録済みIssueを添える（#5253）", () => {
+  writeFake(counterpartRoutes({ main: { "src/server.ts": "x\n" }, develop: { "src/server.ts": "x\n" }, issues: [{ number: 683, title: "認可を実装", state: "open" }] }));
+  const c = counterpart();
+  expect(c.counterpart.status).toBe("not_implemented");
+  expect(c.counterpart.registeredIssues).toEqual([{ number: 683, title: "認可を実装", state: "open", isPull: false }]);
+  expect(c.classification).toBe("資料未取得");
+});
+it("developにだけ受信口があれば『developのみ』で、従来どおり止める分類のまま（#5253）", () => {
+  writeFake(counterpartRoutes({ main: { "src/server.ts": "x\n" }, develop: { "src/server.ts": "x\n", "src/api/send.ts": "route('/send')\n" } }));
+  expect(counterpart().counterpart.status).toBe("develop_only");
+});
+it("プレフィックス付きルーターで実装済みなら『相手側未実装』にしない（#5253）", () => {
+  const router = { "src/server.ts": "x\n", "src/routes/mail.ts": "router.post('/send', handler)\n" };
+  writeFake(counterpartRoutes({ main: router, develop: router }));
+  expect(counterpart().counterpart.status).toBe("on_main");
+});
+it("developが無い・読み切れない場合は断定せず『unknown』にする（#5253）", () => {
+  writeFake(counterpartRoutes({ main: { "src/server.ts": "x\n" }, develop: {}, devTree: false }));
+  const c = counterpart();
+  expect(c.counterpart.status).toBe("unknown");
+});
+it("連携先の設定パスがmain・developの両方に無ければ未実装、developにあれば『developのみ』（#5253）", () => {
+  const MAIN = "e".repeat(40);
+  const cfg = path.join(dir, "links.json");
+  writeFileSync(cfg, JSON.stringify({ "guchi-apps/aide": [{ provider: "guchi-apps/kurashio", patterns: ["src/core/**"] }] }));
+  const KR = "repos/guchi-apps/kurashio";
+  const go = (devPaths) => {
+    writeFake({ [`${KR}/commits/main`]: { sha: MAIN }, [`${KR}/git/trees/${MAIN}`]: blobs([]), [`${KR}/commits/develop`]: { sha: DEV5253 }, [`${KR}/git/trees/${DEV5253}`]: blobs(devPaths), "search/issues": { items: [] } });
+    execFileSync("python3", ["scripts/release-review-integrations.py", repo, "guchi-apps/aide", base, head, out],
+      { encoding: "utf8", env: { ...process.env, RELEASE_REVIEW_GH: fake, RELEASE_REVIEW_LINKS: cfg } });
+    return JSON.parse(readFileSync(path.join(out, "manifest.json"), "utf8")).linkedRepos[0];
+  };
+  expect(go([]).counterpart.status).toBe("not_implemented");
+  expect(go(["src/core/a.ts"]).counterpart.status).toBe("develop_only");
 });

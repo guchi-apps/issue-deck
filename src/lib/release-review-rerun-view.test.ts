@@ -14,6 +14,7 @@ function section(overrides: Partial<ReleaseVerificationSection> = {}): ReleaseVe
     updatedAt: null,
     findings: [],
     suggestions: [],
+    counterpartNotes: [],
     review: null,
     affectedPullRequests: [],
     affectedFiles: [],

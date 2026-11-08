@@ -65,6 +65,8 @@ export type ReleaseVerificationSection = {
   suggestions: ReleaseReviewFinding[];
   /** 確認契約の記録（確認項目の版・初回／再レビュー・項目別の結果・前回指摘の解消）。無ければnull */
   review: ReleaseReviewMeta | null;
+  /** 連携先が未実装と確かめられた注記（#5253）。未確認範囲ではなくゲートを止めない。旧結果では空 */
+  counterpartNotes: string[];
   affectedPullRequests: number[];
   affectedFiles: string[];
   reviewedFiles: number | null;
@@ -164,6 +166,7 @@ function readDetail(findings: unknown) {
       typeof raw.review === "object" && raw.review !== null && !Array.isArray(raw.review)
         ? (raw.review as ReleaseReviewMeta)
         : null,
+    counterpartNotes: list(raw.counterpartNotes).filter((n): n is string => typeof n === "string"),
     affectedPullRequests: list(raw.affectedPullRequests).filter((n): n is number => typeof n === "number"),
     affectedFiles: list(raw.affectedFiles).filter((f): f is string => typeof f === "string"),
     reviewedFiles: int(raw.reviewedFiles),

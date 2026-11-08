@@ -67,3 +67,13 @@
 実走確認: RC-5以外の例として、別repoの`guchi-apps/issue-deck#4969`（PR #4971）を参照する擬似候補で取得を実走し、状態・マージSHA・develop取り込み・デプロイ未検出・変更ファイル4件が取得できた。
 
 未対応: 実行ホストへの配布と、AIDE→kurashioの実走（ホスト更新はaide#683側でユーザーが選択済みのため、二重操作しない）。
+
+# 連携先が未実装のときは、未確認ではなく注記として扱う（#5253）
+
+「資料に無いから確認できない」と「相手側にまだ存在しないから確認する対象が無い」は、どちらも未確認になり、後者は人が連携先のリポジトリを調べるまで区別できなかった（aide RC-25のauth_boundary。morrow#683が計画段階）。`scripts/release-review-integrations.py`が連携先の`develop`と`main`の実物を確かめ、`counterpart.status`を付ける。
+
+- `not_implemented`: どちらのブランチにも無い。確認項目を`unconfirmed`にせず`not_applicable`にし、結果の`counterpartNotes`へ注記する（画面の「相手側未実装の注記」。未確認範囲には入らずゲートを止めない）。`registeredIssues`に、相手側へ要件が登録済みのIssue（番号・題名・状態）を添える
+- `develop_only`（developにだけある）・`on_main`（mainにもある）: 従来どおり実コードを読んで判定し、読めなければ未確認
+- `unknown`: ブランチ不在・先端の取得失敗・ファイル一覧の打ち切り・読むファイルの上限超過・通信失敗。断定せず従来の資料未取得
+- 根拠: `apiContracts`は受信パス（末尾の語まで緩めた一致）がツリー全体の本文・ファイル名に無いこと、`linkedRepos`は設定のpatternsに一致するコードが両ブランチに無いこと。偽陽性（実装済みを未実装と誤る）がゲートを通す方向に働くため、疑わしいものは`not_implemented`にしない。連携先の対応状況はIssueのopen/closedではなくブランチの実物で確かめる
+- `release-review-links.json`の各連携先に任意の`identifiers`（API パス・環境変数名）を書くと、`registeredIssues`の検索に使われる

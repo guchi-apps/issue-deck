@@ -196,6 +196,11 @@ export type ReleaseReviewDetail = {
   suggestions: ReleaseReviewFinding[];
   /** 確認契約の記録。旧形式の結果では`legacy`のメタが入る */
   review: ReleaseReviewMeta | null;
+  /**
+   * 連携先が未実装（develop・mainのどちらにも無い）と機械的に確かめられた注記（#5253）。未確認範囲には含めず、ゲートを止めない。
+   * 旧ランナー・保存済みの旧記録には無いので空配列として読む
+   */
+  counterpartNotes: string[];
   affectedPullRequests: number[];
   affectedFiles: string[];
   /** 根拠つきで確認済みと判断できたファイル数。入力へ載せた数ではない。実績を確かめられない旧結果ではnull */
@@ -346,6 +351,14 @@ function parseFinding(value: unknown): ParsedFinding | null {
   if (checkId && RELEASE_REVIEW_CHECK_ITEM_IDS.includes(checkId)) finding.checkId = checkId;
   // 止めるかどうかは、確認項目の版・前回の記録・対象ファイルを見て`decideFindingBlocking`で決める（#4765）
   return { finding, previousId: str(raw.previousId, 32), raw };
+}
+
+function counterpartNotes(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((n) => str(n, 600))
+    .filter((n): n is string => n !== null)
+    .slice(0, 20);
 }
 
 function pick<T extends string>(value: unknown, allowed: readonly T[], fallback: T): T {
@@ -644,6 +657,7 @@ export function normalizeReleaseReview(
       findings: blockingFindings,
       suggestions,
       review,
+      counterpartNotes: counterpartNotes(raw.counterpartNotes),
       affectedPullRequests: [
         ...new Set([...prNumbers(raw.affectedPullRequests), ...blockingFindings.flatMap((f) => f.pullRequests)]),
       ],
