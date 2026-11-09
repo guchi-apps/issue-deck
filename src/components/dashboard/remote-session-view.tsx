@@ -4,6 +4,7 @@ import { ExternalLink, Loader2, RotateCcw, Search, Star, TerminalSquare } from "
 import { useSearchParams } from "next/navigation";
 import { useMemo, useState } from "react";
 
+import { RemoteSessionActiveList } from "@/components/dashboard/remote-session-active-list";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -63,6 +64,7 @@ export function RemoteSessionView({
   active = true,
   onBack,
   hideHeader = false,
+  pinActiveList = false,
 }: {
   /** 一覧に並べるリポジトリ（アーカイブ済み・非表示は呼び出し側で除く） */
   repositories: ConnectedRepository[];
@@ -70,6 +72,8 @@ export function RemoteSessionView({
   onBack?: () => void;
   /** モーダル（#4835）では見出しをダイアログ側が持つため出さない */
   hideHeader?: boolean;
+  /** 起動中のセッションを最下部に固定して出し、終了できるようにする（#5277） */
+  pinActiveList?: boolean;
 }) {
   const isDesktop = useMediaQuery("(min-width: 768px)");
   const remote = useRemoteSessions({ active });
@@ -198,6 +202,14 @@ export function RemoteSessionView({
         </div>
         {isDesktop && <div className="min-w-0 flex-1 overflow-y-auto p-5">{detail}</div>}
       </div>
+
+      {pinActiveList && (
+        <RemoteSessionActiveList
+          sessions={remote.state?.sessions ?? []}
+          onStop={(id) => void remote.stop(id)}
+          className="max-h-40 shrink-0 overflow-y-auto border-t pt-2"
+        />
+      )}
 
       {!isDesktop && (
         <Sheet open={sheetOpen} onOpenChange={setSheetOpen}>

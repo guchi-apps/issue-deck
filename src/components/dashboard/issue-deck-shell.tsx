@@ -50,7 +50,6 @@ import { MobileNightlyRunScreen } from "@/components/dashboard/mobile/mobile-nig
 import { MobileReleaseHistoryScreen } from "@/components/dashboard/mobile/mobile-release-history-screen";
 import { PreviewPanel } from "@/components/dashboard/preview-panel";
 import { NightlyRunPanel } from "@/components/dashboard/nightly-run-panel";
-import { RemoteSessionActiveList } from "@/components/dashboard/remote-session-active-list";
 import { RemoteSessionView } from "@/components/dashboard/remote-session-view";
 import { IdeasPanel } from "@/components/dashboard/ideas-panel";
 import { IosExtensionsPanel } from "@/components/dashboard/ios-extensions-panel";
@@ -2493,12 +2492,11 @@ export function IssueDeckShell({
               <Dialog open={remoteSessionModalOpen} onOpenChange={setRemoteSessionModalOpen}>
                 <DialogContent className="flex h-[min(46rem,calc(100%-2rem))] max-w-[calc(100%-2rem)] flex-col gap-3 p-4 sm:max-w-5xl">
                   <DialogTitle className="sr-only">リモートセッション</DialogTitle>
-                  {/* 起動中のセッションを最上部に出し、1タップでClaude Codeアプリへ移れるようにする（#4991） */}
-                  <RemoteSessionActiveList sessions={dispatch.remoteSessions} className="max-h-40 shrink-0 overflow-y-auto pr-8" />
                   <RemoteSessionView
                     repositories={remoteSessionRepositories}
                     active={remoteSessionModalOpen}
                     hideHeader
+                    pinActiveList
                   />
                 </DialogContent>
               </Dialog>
