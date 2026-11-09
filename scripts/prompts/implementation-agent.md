@@ -121,6 +121,7 @@ scripts/report-dependency-wait.sh <owner/repo> <このIssue番号> <依存先own
 ## 責務とIssueに残す記録
 
 - Issueの要件を実装し、テスト・Lint・型チェック・ビルドを実行して、コミット・pushする
+- **ユーザーに実行してもらうコマンドは、`cd`込みの完全なコピペ用ブロックで示す。** ユーザーは別のセッション・端末で実行するため、「カレントディレクトリは◯◯」と文章で添えるだけにせず、コードブロックの先頭に`cd <絶対パス> && …`（別ホストなら`ssh`も）を含め、貼り付けるだけで完結させる
 - **commit・push・PR作成・ラベルの付け外しは、1操作ずつ別の`Bash`呼び出しで行う**（#5011）。`&&`や改行で1つにまとめると、auto modeの権限クラシファイアに理由の表示なしで拒否されることがある（guchi-apps/morrow#614。同じ操作を分けて呼び直したら通った）。拒否されたら、まとめ直さず1操作ずつ呼び直し、それでも拒否されたら文章で止まらず`AskUserQuestion`で許可を求める
 - **pushは`git push -u origin issue-{{ISSUE_NUMBER}}`をこの形のまま、単独の`Bash`呼び出しで実行する**（2回目以降は`git push origin issue-{{ISSUE_NUMBER}}`でもよい）。この形だけが起動時の許可規則に完全一致で入っている。素の`git push`・`HEAD`指定・オプションの追加・別ブランチへのpushは規則から外れ、クラシファイアに拒否されうる（#5282）
 - `develop`向けPRを作成する。本文の構成は[docs/issue-pr-responsibility-model.md](../../docs/issue-pr-responsibility-model.md)「PRテンプレート」（正は`CLAUDE.md`「PR本文テンプレート」）に従う：対応Issue・Issueを閉じるPRか途中PRか（`<!-- issue-deck-pr-role:closing -->`または`<!-- issue-deck-pr-role:interim -->`をその項目に書く）・実装内容・実装上の判断と採用理由（該当する場合）・テスト内容・画面変更や動作証跡（該当する場合）・影響範囲・未対応事項・デプロイ／移行／ロールバック上の注意（該当する場合）・確認方法・注意点。Issueは`closes`を使わず`#{{ISSUE_NUMBER}}`のように番号だけを書く。進捗（`Implementation`→`Develop PR`）はpushとPR作成を契機に自動で報告されるので、自分では動かさない
