@@ -40,7 +40,8 @@
 #
 # **例外は`agent_pr_allowed_tools`（#5082・#5117）。** PRを自動で作る実装セッションに限り、
 # 指示ファイルが明示的に求める`gh pr create`・範囲を絞ったsecretの同期・担当Issueの`11.local`の
-# 解除だけを別に足す。
+# 解除だけを別に足す。同じ条件のセッションには、担当ブランチへの`git push`（完全一致の数形だけ）を
+# `agent_push_allowed_tools`で足す（#5282）。
 #
 # **ファイルを読むための`Bash`の規則はここに入れない。** `cat`・`head`・`grep`のような規則は、
 # `cat > file`のように出力をリダイレクトする書き込みまで前方一致で拾いうる。読む・探すのは
@@ -233,6 +234,52 @@ agent_pr_allowed_tools() {
     fi
   fi
 
+  local IFS=,
+  printf '%s' "${rules[*]}"
+}
+
+# PRを自動で作る実装セッションにだけ足す、担当ブランチへの`git push`の規則を出す（#5282）。
+#
+# ## なぜ要るか
+#
+# 指示ファイルは「コミット・pushする」と求めるのに、auto modeのクラシファイアは
+# `git push -u origin issue-<番号>`を拒否することが多かった（guchi-apps/morrow#852では2回連続。
+# 1操作ずつ別のBash呼び出しにしていても起きる）。拒否のたびに`AskUserQuestion`で人待ちになり、
+# PRまで進まない。`gh pr create`（#5082）・`11.local`の解除（#5117）と同じく、規則として渡して
+# 判断を通さない。
+#
+# ## 何を入れるか
+#
+# **担当ブランチ`issue-<番号>`をoriginへpushする3形だけを、`:*`を付けない完全一致で入れる。**
+#
+#   - `git push origin issue-<番号>`
+#   - `git push -u origin issue-<番号>`
+#   - `git push --set-upstream origin issue-<番号>`
+#
+# 前方一致（`Bash(git push:*)`）にすると`git push origin develop`・`--force`・`+issue-<番号>`
+# まで通る。素の`git push`（upstream任せ）は押し先がその時点のブランチ次第で、規則から範囲を
+# 決められないので入れない。どちらも従来どおりクラシファイアに判断させる。
+#
+# **起動時の作業ツリーのブランチが`issue-<番号>`と一致するときだけ足す。** 規則がmain・developを
+# 指すことは無い。pushはブランチへ載せるだけで、マージはPR必須・自動レビュー・自動マージ不可
+# カテゴリの後段が持つ。
+#
+# 渡す条件は`agent_pr_allowed_tools`と同じ（呼び出し元の`run-issue-session.sh`）。PRを人の指示で
+# 作るリポジトリ・レビュー・統合／手作業セッションには渡さない。
+#
+# 引数:
+#   $1  担当Issueの番号。数字でなければ何も出さない
+#   $2  起動時の作業ツリーのブランチ名。`issue-$1`でなければ何も出さない
+agent_push_allowed_tools() {
+  local issue_number="${1:-}"
+  local branch="${2:-}"
+  [[ "$issue_number" =~ ^[1-9][0-9]*$ ]] || return 0
+  [[ "$branch" == "issue-$issue_number" ]] || return 0
+  local rules=(
+    "Bash(git push origin $branch)"
+    "Bash(git push -u origin $branch)"
+    "Bash(git push --set-upstream origin $branch)"
+  )
   local IFS=,
   printf '%s' "${rules[*]}"
 }
