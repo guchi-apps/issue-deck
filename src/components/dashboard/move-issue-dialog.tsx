@@ -80,7 +80,16 @@ export function MoveIssueDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="min-h-[26rem] overflow-hidden">
+      <DialogContent
+        className="min-h-[26rem] overflow-hidden"
+        onEscapeKeyDown={(event) => {
+          // 選択画面の表示中のEscはダイアログを閉じず、元の画面へ戻す
+          if (view === "pick") {
+            event.preventDefault();
+            setView("main");
+          }
+        }}
+      >
         {/* 選択画面（右からスライド）が開いている間、元の画面は少し左へ寄ってフェードする（#5275） */}
         <div
           className={cn(
