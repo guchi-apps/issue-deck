@@ -15,8 +15,8 @@ import { summarizeRemoteSessionNav } from "@/lib/dispatch/remote-session-rules";
 import type { ConnectedRepository } from "@/types/repository";
 
 /**
- * PCのトップバーに置くリモートセッションのアイコン（#4991）。押すと上段に起動中のセッション
- * （1クリックでClaude Codeアプリへ）、下段に新しく起動するリポジトリの一覧を出す。
+ * PCのトップバーに置くリモートセッションのアイコン（#4991）。押すと下段に起動中のセッション（終了もできる）
+ * （1クリックでClaude Codeアプリへ）、上段に新しく起動するリポジトリの一覧を出す。
  * 一覧の全画面表示（再開・終了）は左メニューの「リモートセッション」が持つ。
  */
 export function RemoteSessionPopover({ repositories }: { repositories: ConnectedRepository[] }) {
@@ -79,7 +79,6 @@ function PopoverBody({
 
   return (
     <div className="flex flex-col gap-3">
-      <RemoteSessionActiveList sessions={remote.state?.sessions ?? sessions} />
       <section className="flex flex-col gap-1.5" aria-label="新しく起動する">
         <h3 className="px-1 text-xs font-semibold text-muted-foreground">新しく起動する</h3>
         <Input
@@ -109,6 +108,11 @@ function PopoverBody({
         )}
         {remote.error && <p className="px-1 text-xs text-destructive">{remote.error}</p>}
       </section>
+      <RemoteSessionActiveList
+        sessions={remote.state?.sessions ?? sessions}
+        onStop={(id) => void remote.stop(id)}
+        className="border-t pt-2"
+      />
       <Button
         variant="outline"
         size="sm"

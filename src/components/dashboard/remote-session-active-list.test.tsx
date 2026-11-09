@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   RemoteSessionActiveList,
@@ -50,5 +50,17 @@ describe("RemoteSessionActiveList", () => {
   it("起動中が無ければその旨を出す", () => {
     render(<RemoteSessionActiveList sessions={[]} />);
     expect(screen.getByText("起動中のセッションはありません。")).toBeTruthy();
+  });
+
+  it("onStopを渡すと終了ボタンが出て、押すとセッションIDで呼ばれる", () => {
+    const onStop = vi.fn();
+    render(<RemoteSessionActiveList sessions={[session({ id: "a" })]} onStop={onStop} />);
+    fireEvent.click(screen.getByRole("button", { name: /終了/ }));
+    expect(onStop).toHaveBeenCalledWith("a");
+  });
+
+  it("onStopが無ければ終了ボタンを出さない", () => {
+    render(<RemoteSessionActiveList sessions={[session({ id: "a" })]} />);
+    expect(screen.queryByRole("button", { name: /終了/ })).toBeNull();
   });
 });
