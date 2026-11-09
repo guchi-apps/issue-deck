@@ -26,9 +26,12 @@ export function selectActiveRemoteSessions(sessions: readonly RemoteSessionView[
 export function RemoteSessionActiveList({
   sessions,
   className,
+  onStop,
 }: {
   sessions: readonly RemoteSessionView[];
   className?: string;
+  /** 渡されたときだけ各行に「終了」を出す（#5277） */
+  onStop?: (id: string) => void;
 }) {
   const active = selectActiveRemoteSessions(sessions);
   return (
@@ -62,6 +65,16 @@ export function RemoteSessionActiveList({
                   {formatDispatchHostName(session.host)}・{formatRelativeDate(session.createdAt)}に起動
                 </p>
               </div>
+              {onStop && (
+                <button
+                  type="button"
+                  onClick={() => onStop(session.id)}
+                  aria-label={`${session.repositoryFullName.split("/")[1]}のセッションを終了`}
+                  className="shrink-0 rounded-md border border-destructive/60 px-3 py-1.5 text-xs font-semibold text-destructive hover:bg-destructive/10"
+                >
+                  終了
+                </button>
+              )}
               {session.remoteControlUrl ? (
                 <a
                   href={session.remoteControlUrl}

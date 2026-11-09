@@ -482,3 +482,25 @@ describe("MentionTextarea の文字サイズ", () => {
     expect(textarea.classList.contains("text-sm")).toBe(false);
   });
 });
+
+describe("MentionTextarea の画像選択の accept（#5274）", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  const acceptOf = (container: HTMLElement) =>
+    (container.querySelector('input[type="file"]') as HTMLInputElement).accept;
+
+  it("タッチ端末では写真系だけを受け付け、SVGを含めない", async () => {
+    vi.stubGlobal("matchMedia", (query: string) => ({ matches: query === "(pointer: coarse)" }));
+    const { container } = render(<Harness />);
+    await waitFor(() => expect(acceptOf(container)).not.toContain("svg"));
+    expect(acceptOf(container)).toBe("image/png,image/jpeg,image/gif,image/webp");
+  });
+
+  it("PCではSVGも受け付ける", () => {
+    vi.stubGlobal("matchMedia", () => ({ matches: false }));
+    const { container } = render(<Harness />);
+    expect(acceptOf(container)).toContain("image/svg+xml");
+  });
+});

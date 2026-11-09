@@ -4,6 +4,7 @@ import {
   useEffect,
   useRef,
   useState,
+  useSyncExternalStore,
   type ChangeEvent,
   type ClipboardEvent,
   type ComponentProps,
@@ -57,6 +58,21 @@ const SVG_CHECKER_STYLE = {
 const MENTION_SUGGESTIONS = ["claude"];
 const MAX_ISSUE_SUGGESTIONS = 8;
 const ACCEPTED_IMAGE_TYPES = ["image/png", "image/jpeg", "image/gif", "image/webp", "image/svg+xml"];
+// タッチ端末では写真だけを受け付ける（#5274）。SVGのような写真でない形式が`accept`に
+// 入っていると、iOSは「フォトライブラリ／写真を撮る／ファイルを選択」のシートを先に出す。
+// 写真系に絞ると、アイコンを押してすぐライブラリから選べる。PCは従来どおりSVGも選べる
+const TOUCH_ACCEPTED_IMAGE_TYPES = ACCEPTED_IMAGE_TYPES.filter((type) => type !== "image/svg+xml");
+
+function getCoarsePointer(): boolean {
+  return typeof window.matchMedia === "function" && window.matchMedia("(pointer: coarse)").matches;
+}
+
+function subscribeCoarsePointer(onChange: () => void): () => void {
+  if (typeof window.matchMedia !== "function") return () => {};
+  const mql = window.matchMedia("(pointer: coarse)");
+  mql.addEventListener?.("change", onChange);
+  return () => mql.removeEventListener?.("change", onChange);
+}
 
 type Trigger = {
   type: "mention" | "issue";
@@ -112,6 +128,9 @@ export function MentionTextarea({
 }: MentionTextareaProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  // サーバー描画では従来の値にし、クライアントでタッチ端末なら絞る（ハイドレーション差異を避ける）
+  const isCoarsePointer = useSyncExternalStore(subscribeCoarsePointer, getCoarsePointer, () => false);
+  const acceptTypes = isCoarsePointer ? TOUCH_ACCEPTED_IMAGE_TYPES : ACCEPTED_IMAGE_TYPES;
   const [trigger, setTrigger] = useState<Trigger | null>(null);
   const [activeIndex, setActiveIndex] = useState(0);
   const [uploads, setUploads] = useState<{ id: number; name: string }[]>([]);
@@ -411,7 +430,7 @@ export function MentionTextarea({
         <input
           ref={fileInputRef}
           type="file"
-          accept={ACCEPTED_IMAGE_TYPES.join(",")}
+          accept={acceptTypes.join(",")}
           multiple
           className="hidden"
           onChange={handleFileInputChange}
