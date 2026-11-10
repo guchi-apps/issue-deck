@@ -18,6 +18,7 @@ import {
   toDeployRecoverySeriesView,
 } from "@/lib/deploy-recovery-series-run";
 import { enqueueDispatchJob } from "@/lib/dispatch/jobs";
+import { rerunReleaseReviewJob } from "@/lib/dispatch/release-review-jobs";
 import { reevaluateReleaseReviewIfReady } from "@/lib/dispatch/release-review-reevaluate";
 import { fetchPullRequest, fetchWorkflowRunJobs, mergePullRequest } from "@/lib/github/actions-api";
 import { getInstallationToken } from "@/lib/github/app-auth";
@@ -48,6 +49,7 @@ import {
   describeUnverifiedReview,
   reevaluationKeepsWaiting,
   UNVERIFIED_REEVALUATING_NOTE,
+  REVIEW_AUTO_RERUN_NOTE,
   type CompletionCheckState,
   type CompletionFinalizationSnapshot,
   type CompletionChecks,
@@ -500,12 +502,29 @@ async function observeCandidate(run: RunRow, ctx: Ctx): Promise<Observation> {
     pull && isRcReleaseCandidateHeadRef(pull.head.ref)
       ? await loadFinalizationSnapshot(run.repositoryFullName, run.candidatePrNumber).catch(() => null)
       : null;
+  // 全体レビューの実行障害を自動で1回だけやり直せるか（#5311）。同じ対象のレビュージョブの件数で数え、DBの列は増やさない
+  const reviewJobCount =
+    summary && candidate && summary.aiReview.state === "failed" && summary.aiReview.findings.length === 0
+      ? await (async () =>
+          db.dispatchJob.count({
+            where: {
+              kind: "RELEASE_REVIEW",
+              repositoryFullName: run.repositoryFullName,
+              prNumber: candidate.number,
+              baseSha: candidate.baseSha,
+              headSha: candidate.headSha,
+            },
+          }))().catch(() => null)
+      : null;
   return {
     candidate,
     pull,
     series,
     checks: summary
-      ? waiveAiReviewCheck(toCompletionChecks(summary, run.repositoryFullName), isAiReviewWaivedFor(finalization, candidate?.headSha ?? ""))
+      ? waiveAiReviewCheck(
+          { ...toCompletionChecks(summary, run.repositoryFullName), aiReviewAutoRerunAvailable: reviewJobCount !== null && reviewJobCount <= 1 },
+          isAiReviewWaivedFor(finalization, candidate?.headSha ?? ""),
+        )
       : null,
     summary,
     // 新方式なのに記録が無い（取得できない）ときも「公開準備が済んでいない」として扱う（旧方式と見なして進めない）
@@ -590,6 +609,8 @@ async function applyDecision(
     }
     case "reevaluate_review":
       return reevaluateUnverifiedReview(run, ctx, observation);
+    case "rerun_review":
+      return rerunFailedReview(run, ctx, observation);
     case "dispatch_fix":
       return dispatchFix(run, decision.seriesId, decision.issueNumber, ctx, hostName, now);
     case "create_fix":
@@ -938,6 +959,31 @@ async function reevaluateUnverifiedReview(run: RunRow, ctx: Ctx, observation: Ob
     });
   }
   return outcome.action === "rerun" ? { action: "reevaluate_review" } : null;
+}
+
+/**
+ * 全体レビューの実行障害を、同じ対象で1回だけ自動で再実行する（#5311）。積めなければ従来どおり実行障害として止める。
+ * 再実行の結果が出るまでは`checking`で待ち、2回目も失敗すれば`decideReleaseCompletion`が止める
+ */
+async function rerunFailedReview(run: RunRow, ctx: Ctx, observation: Observation): Promise<ActionResult> {
+  const candidate = observation.candidate;
+  if (!candidate) return null;
+  const result = await rerunReleaseReviewJob(
+    { repoFullName: run.repositoryFullName, prNumber: candidate.number, baseSha: candidate.baseSha, headSha: candidate.headSha },
+    new Date(),
+    { recordNoHost: false },
+  ).catch((error: unknown) => {
+    console.error("[release-completion] 全体レビューの再実行を積めませんでした", run.id, error);
+    return null;
+  });
+  if (!result || !result.ok) return handOff(run, ctx, "execution_failure");
+  if (run.status !== "checking" || run.note !== REVIEW_AUTO_RERUN_NOTE) {
+    await db.releaseCompletionRun.updateMany({
+      where: { id: run.id, status: run.status },
+      data: { status: "checking", note: REVIEW_AUTO_RERUN_NOTE },
+    });
+  }
+  return result.outcome === "queued" ? { action: "rerun_review" } : null;
 }
 
 /** 止めて人へ渡す。系列を終端にし、理由を修正Issue（無ければ候補のPR）へ残す */

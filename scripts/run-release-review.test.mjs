@@ -200,6 +200,48 @@ describe("run-release-review.sh（#4615）", { timeout: 30_000 }, () => {
     expect(rerun.result.pendingBatches).toBe(0);
   });
 
+  describe("差分の取得（#5311）", () => {
+    // 実のgitを包み、`diff --name-only`だけを失敗（GIT_DIFF_FAIL）または空の成功（GIT_DIFF_EMPTY）にする
+    const wrapGit = () => {
+      const realGit = execFileSync("bash", ["-c", "command -v git"], { encoding: "utf8" }).trim();
+      writeFileSync(
+        path.join(dir, "bin", "git"),
+        `#!/usr/bin/env bash
+if [[ " $* " == *" diff --name-only "* ]]; then
+  [[ -n "\${GIT_DIFF_FAIL:-}" ]] && { echo "fatal: simulated diff failure" >&2; exit 128; }
+  [[ -n "\${GIT_DIFF_EMPTY:-}" ]] && exit 0
+fi
+exec "${realGit}" "$@"
+`,
+      );
+      chmodSync(path.join(dir, "bin", "git"), 0o755);
+    };
+
+    it("差分の取得に失敗したら、差分なしの合格にせず対象を取得できなかった失敗として報告する", () => {
+      wrapGit();
+      const { status, result } = runReview({ GIT_DIFF_FAIL: "1" });
+      expect(status).toBe("failed");
+      expect(result.diagnostic).toMatchObject({ cause: "target_missing", stage: "diff" });
+      expect(result.diagnostic.excerpt).toContain("simulated diff failure");
+      expect(result).not.toHaveProperty("totalFiles");
+    });
+
+    it("コミットがファイルを変更しているのに差分が0件なら、合格にせず失敗として報告する", () => {
+      wrapGit();
+      const { status, result } = runReview({ GIT_DIFF_EMPTY: "1" });
+      expect(status).toBe("failed");
+      expect(result.diagnostic).toMatchObject({ cause: "target_missing", stage: "diff" });
+      expect(result).not.toHaveProperty("totalFiles");
+    });
+
+    it("本当に差分が無いときだけ、従来どおり差分なしとして報告する", () => {
+      head = base;
+      const { status, result } = runReview();
+      expect(status).toBe("succeeded");
+      expect(result).toMatchObject({ state: "passed", totalFiles: 0 });
+    });
+  });
+
   it("候補のSHAが変わったら、旧SHAの保存済みの結果は使わない", () => {
     runReview({ ISSUE_DECK_RELEASE_REVIEW_MAX_BATCHES_PER_RUN: "2" });
     const oldDir = batchDirs()[0];

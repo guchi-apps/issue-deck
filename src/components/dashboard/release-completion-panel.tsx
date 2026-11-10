@@ -146,7 +146,7 @@ export function ReleaseCompletionPanel({ runState, repositoryFullName, pullReque
       <Button
         size="sm"
         variant={startAsSecondary ? "outline" : "default"}
-        className="min-h-11 w-fit gap-1 px-4 text-sm"
+        className="min-h-11 w-fit gap-1 px-4 text-[13px]"
         onClick={() => {
           // 新方式は範囲に違いが無いので、選ばせずに`until_ready`で始める
           setScope(rcCandidate ? RELEASE_COMPLETION_SCOPE_READY : null);
