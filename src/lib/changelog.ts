@@ -42,6 +42,13 @@ export type ChangelogEntry = {
  */
 export const APP_CHANGELOG: ChangelogEntry[] = [
   {
+    version: "8.94.1",
+    date: "2026-11-10",
+    changes: [
+      "リモートセッションのポップオーバーを開いたとき、検索欄に自動でカーソルが入らなくなりました。",
+    ],
+  },
+  {
     version: "8.94.0",
     date: "2026-11-09",
     changes: [
