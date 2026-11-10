@@ -4,6 +4,7 @@ import { useState } from "react";
 
 import type { FineGrainedTokenInput } from "@/types/fine-grained-token";
 
+import { clientErrorMessage } from "@/lib/client-error-message";
 export function useFineGrainedTokenMutations() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -23,7 +24,7 @@ export function useFineGrainedTokenMutations() {
       }
       return true;
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(clientErrorMessage(err));
       return false;
     } finally {
       setIsSubmitting(false);
@@ -38,7 +39,7 @@ export function useFineGrainedTokenMutations() {
       if (!res.ok) throw new Error(`削除に失敗しました (${res.status})`);
       return true;
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(clientErrorMessage(err));
       return false;
     } finally {
       setIsSubmitting(false);

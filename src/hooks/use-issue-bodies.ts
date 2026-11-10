@@ -1,5 +1,6 @@
 "use client";
 
+import { fetchWithRetry } from "@/lib/client-error-message";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import type { Issue } from "@/types/issue";
@@ -136,7 +137,7 @@ function isFresh(entry: LoadedBody | undefined, issue: Issue): entry is LoadedBo
 
 async function fetchIssueBody(issueId: string): Promise<LoadedBody | null> {
   try {
-    const res = await fetch(`/api/issues/body?id=${encodeURIComponent(issueId)}`);
+    const res = await fetchWithRetry(`/api/issues/body?id=${encodeURIComponent(issueId)}`);
     if (!res.ok) return null;
     const data = (await res.json()) as { body?: unknown; updatedAt?: unknown };
     if (typeof data.body !== "string" || typeof data.updatedAt !== "string") return null;

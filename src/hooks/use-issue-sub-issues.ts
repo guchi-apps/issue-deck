@@ -1,5 +1,6 @@
 "use client";
 
+import { fetchWithRetry } from "@/lib/client-error-message";
 import { useEffect, useState } from "react";
 
 import type { Issue, SubIssueRelations } from "@/types/issue";
@@ -38,7 +39,7 @@ export function useIssueSubIssues(issue: Issue | null): UseIssueSubIssuesResult 
 
     setIsLoading(true);
 
-    fetch(`/api/issues/sub-issues?owner=${owner}&repo=${repo}&number=${issueNumber}`, {
+    fetchWithRetry(`/api/issues/sub-issues?owner=${owner}&repo=${repo}&number=${issueNumber}`, {
       signal: controller.signal,
     })
       .then(async (res) => {

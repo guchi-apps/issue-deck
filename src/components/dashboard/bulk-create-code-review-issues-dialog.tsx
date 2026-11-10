@@ -28,6 +28,7 @@ import { pickBulkReserveHost } from "@/lib/nightly-run";
 import { cn } from "@/lib/utils";
 import type { Issue } from "@/types/issue";
 
+import { clientErrorMessage } from "@/lib/client-error-message";
 type BulkCreateCodeReviewIssuesDialogProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -72,7 +73,7 @@ async function reserveOnNextWindow(params: {
     const json = (await res.json().catch(() => ({}))) as { message?: string };
     return json.message ?? `予約実行に積めませんでした (${res.status})`;
   } catch (err) {
-    return err instanceof Error ? err.message : String(err);
+    return clientErrorMessage(err);
   }
 }
 

@@ -20,6 +20,7 @@ import { PREP_OVERRIDE_CONFIRM_TEXT, type ReleasePrepState } from "@/lib/release
 import { releaseBlockShortLabel } from "@/components/dashboard/release-block-notice";
 import { fetchReleaseStartModes, requestReleaseBulk, type ReleaseStartModes } from "@/lib/release-request";
 
+import { clientErrorMessage } from "@/lib/client-error-message";
 export type ReleaseBulkTarget = {
   repositoryFullName: string;
   /** 確認ダイアログに出す未リリースの件数表示（`formatUnreleasedSummary`の結果） */
@@ -104,7 +105,7 @@ export function ReleaseBulkButton({
         );
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(clientErrorMessage(err));
     } finally {
       setIsTriggering(false);
     }

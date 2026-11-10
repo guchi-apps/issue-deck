@@ -23,6 +23,7 @@ import type { RemoteSessionView } from "@/lib/dispatch/remote-session-rules";
 import type { DispatchSessionView } from "@/lib/dispatch/session-state";
 import type { ManualStepRunView } from "@/lib/manual-step-run-view";
 
+import { clientErrorMessage } from "@/lib/client-error-message";
 /**
  * サブPCへのディスパッチ（#1179）の状態を画面から見るためのフック（#1180）。
  *
@@ -345,7 +346,7 @@ export function useDispatchState(enabled: boolean) {
         markChanged();
         return true;
       } catch (err) {
-        setError(err instanceof Error ? err.message : String(err));
+        setError(clientErrorMessage(err));
         return false;
       } finally {
         setIsSubmitting(false);
@@ -392,7 +393,7 @@ export function useDispatchState(enabled: boolean) {
         markChanged();
         return { ok: true };
       } catch (err) {
-        return { ok: false, message: err instanceof Error ? err.message : String(err) };
+        return { ok: false, message: clientErrorMessage(err) };
       } finally {
         setIsSubmitting(false);
       }
@@ -435,7 +436,7 @@ export function useDispatchState(enabled: boolean) {
         markChanged();
         return { ok: true };
       } catch (err) {
-        return { ok: false, message: err instanceof Error ? err.message : String(err) };
+        return { ok: false, message: clientErrorMessage(err) };
       } finally {
         setIsSubmitting(false);
       }
@@ -476,7 +477,7 @@ export function useDispatchState(enabled: boolean) {
         refresh();
         return { ok: true };
       } catch (err) {
-        return { ok: false, message: err instanceof Error ? err.message : String(err) };
+        return { ok: false, message: clientErrorMessage(err) };
       } finally {
         setIsSubmitting(false);
       }
@@ -528,7 +529,7 @@ export function useDispatchState(enabled: boolean) {
         markChanged();
         return { ok: true };
       } catch (err) {
-        return { ok: false, message: err instanceof Error ? err.message : String(err) };
+        return { ok: false, message: clientErrorMessage(err) };
       } finally {
         setIsSubmitting(false);
       }
@@ -575,7 +576,7 @@ export function useDispatchState(enabled: boolean) {
         markChanged();
         return { ok: true };
       } catch (err) {
-        return { ok: false, message: err instanceof Error ? err.message : String(err) };
+        return { ok: false, message: clientErrorMessage(err) };
       } finally {
         setIsSubmitting(false);
       }
@@ -613,7 +614,7 @@ export function useDispatchState(enabled: boolean) {
         markChanged();
         return { ok: true };
       } catch (err) {
-        return { ok: false, message: err instanceof Error ? err.message : String(err) };
+        return { ok: false, message: clientErrorMessage(err) };
       } finally {
         setIsSubmitting(false);
       }
@@ -646,7 +647,7 @@ export function useDispatchState(enabled: boolean) {
         markChanged();
         return { ok: true };
       } catch (err) {
-        return { ok: false, message: err instanceof Error ? err.message : String(err) };
+        return { ok: false, message: clientErrorMessage(err) };
       } finally {
         setIsSubmitting(false);
       }
@@ -678,7 +679,7 @@ export function useDispatchState(enabled: boolean) {
         markChanged();
         return { ok: true };
       } catch (err) {
-        return { ok: false, message: err instanceof Error ? err.message : String(err) };
+        return { ok: false, message: clientErrorMessage(err) };
       } finally {
         setIsSubmitting(false);
       }
@@ -710,7 +711,7 @@ export function useDispatchState(enabled: boolean) {
         markChanged();
         return { ok: true };
       } catch (err) {
-        return { ok: false, message: err instanceof Error ? err.message : String(err) };
+        return { ok: false, message: clientErrorMessage(err) };
       }
     },
     [markChanged],
@@ -741,7 +742,7 @@ export function useDispatchState(enabled: boolean) {
         markChanged();
         return { ok: true };
       } catch (err) {
-        return { ok: false, message: err instanceof Error ? err.message : String(err) };
+        return { ok: false, message: clientErrorMessage(err) };
       } finally {
         setIsSubmitting(false);
       }
@@ -783,7 +784,7 @@ export function useDispatchState(enabled: boolean) {
         markChanged();
         return { ok: true };
       } catch (err) {
-        return { ok: false, message: err instanceof Error ? err.message : String(err) };
+        return { ok: false, message: clientErrorMessage(err) };
       } finally {
         setIsSubmitting(false);
       }
@@ -843,7 +844,7 @@ export function useDispatchState(enabled: boolean) {
         markChanged();
         return { ok: true, run: json.run };
       } catch (err) {
-        return { ok: false, message: err instanceof Error ? err.message : String(err) };
+        return { ok: false, message: clientErrorMessage(err) };
       } finally {
         setIsSubmitting(false);
       }
@@ -862,7 +863,7 @@ export function useDispatchState(enabled: boolean) {
       markChanged();
       return true;
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(clientErrorMessage(err));
       return false;
     } finally {
       setIsSubmitting(false);
@@ -889,7 +890,7 @@ export function useDispatchState(enabled: boolean) {
       markChanged();
       return true;
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(clientErrorMessage(err));
       return false;
     } finally {
       setIsSubmitting(false);
@@ -932,7 +933,7 @@ export function useDispatchState(enabled: boolean) {
       markChanged();
       return true;
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(clientErrorMessage(err));
       return false;
     } finally {
       setIsSubmitting(false);
@@ -966,7 +967,7 @@ export function useDispatchState(enabled: boolean) {
         markChanged();
         return { ok: true };
       } catch (err) {
-        return { ok: false, message: err instanceof Error ? err.message : String(err) };
+        return { ok: false, message: clientErrorMessage(err) };
       } finally {
         setIsSubmitting(false);
       }
@@ -998,7 +999,7 @@ export function useDispatchState(enabled: boolean) {
         markChanged();
         return { ok: true };
       } catch (err) {
-        return { ok: false, message: err instanceof Error ? err.message : String(err) };
+        return { ok: false, message: clientErrorMessage(err) };
       } finally {
         setIsSubmitting(false);
       }
@@ -1030,7 +1031,7 @@ export function useDispatchState(enabled: boolean) {
         refresh();
         return { ok: true };
       } catch (err) {
-        return { ok: false, message: err instanceof Error ? err.message : String(err) };
+        return { ok: false, message: clientErrorMessage(err) };
       } finally {
         setIsSubmitting(false);
       }
@@ -1069,7 +1070,7 @@ export function useDispatchState(enabled: boolean) {
         refresh();
         return { ok: true, resumed: json.resumed, failed: json.failed };
       } catch (err) {
-        return { ok: false, message: err instanceof Error ? err.message : String(err) };
+        return { ok: false, message: clientErrorMessage(err) };
       } finally {
         setIsSubmitting(false);
       }
@@ -1111,7 +1112,7 @@ export function useDispatchState(enabled: boolean) {
         markChanged();
         return { ok: true, wait: json.wait };
       } catch (err) {
-        return { ok: false, message: err instanceof Error ? err.message : String(err) };
+        return { ok: false, message: clientErrorMessage(err) };
       } finally {
         setIsSubmitting(false);
       }

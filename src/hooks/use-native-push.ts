@@ -12,6 +12,7 @@ import {
 import { pushEndpointKeyInBrowser } from "@/lib/push-client";
 import { notifyPushSubscriptionChanged } from "@/lib/push-subscription-change";
 
+import { clientErrorMessage } from "@/lib/client-error-message";
 /**
  * iOSアプリ内の「この端末」の通知状態と、オン・オフ操作（#4275）。
  * Web Pushの`usePushSubscription`の代わりに通知欄が使う。`enabled`がfalseなら何もしない。
@@ -41,7 +42,7 @@ export function useNativePush(enabled: boolean) {
     } catch (err) {
       // 取得に失敗した状態をオンやオフと断定しない。直前の表示は「確認中」へ戻す
       setServerEndpointKeys(null);
-      setLoadError(err instanceof Error ? err.message : String(err));
+      setLoadError(clientErrorMessage(err));
     }
   }, []);
 
@@ -75,7 +76,7 @@ export function useNativePush(enabled: boolean) {
         }
         notifyPushSubscriptionChanged();
       } catch (err) {
-        setError(err instanceof Error ? err.message : String(err));
+        setError(clientErrorMessage(err));
       } finally {
         submittingRef.current = false;
         setIsSubmitting(false);

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState, type Dispatch, type SetStateA
 
 import type { Issue, IssueComment } from "@/types/issue";
 
+import { clientErrorMessage, fetchWithRetry } from "@/lib/client-error-message";
 type UseIssueCommentsResult = {
   comments: IssueComment[];
   isLoading: boolean;
@@ -42,7 +43,7 @@ export function useIssueComments(issue: Issue | null): UseIssueCommentsResult {
     setIsLoading(true);
     setError(null);
 
-    fetch(`/api/issues/comments?owner=${owner}&repo=${repo}&number=${issueNumber}`, {
+    fetchWithRetry(`/api/issues/comments?owner=${owner}&repo=${repo}&number=${issueNumber}`, {
       signal: controller.signal,
     })
       .then(async (res) => {
@@ -55,7 +56,7 @@ export function useIssueComments(issue: Issue | null): UseIssueCommentsResult {
       })
       .catch((err: unknown) => {
         if (err instanceof DOMException && err.name === "AbortError") return;
-        setError(err instanceof Error ? err.message : String(err));
+        setError(clientErrorMessage(err));
       })
       .finally(() => setIsLoading(false));
 
@@ -92,7 +93,7 @@ export function useIssueComments(issue: Issue | null): UseIssueCommentsResult {
     const [owner, repo] = repositoryFullName.split("/");
     const controller = new AbortController();
 
-    fetch(`/api/issues/comments?owner=${owner}&repo=${repo}&number=${issueNumber}`, {
+    fetchWithRetry(`/api/issues/comments?owner=${owner}&repo=${repo}&number=${issueNumber}`, {
       signal: controller.signal,
     })
       .then(async (res) => {
@@ -109,7 +110,7 @@ export function useIssueComments(issue: Issue | null): UseIssueCommentsResult {
   const refresh = useCallback(() => {
     if (!repositoryFullName || issueNumber === null) return;
     const [owner, repo] = repositoryFullName.split("/");
-    fetch(`/api/issues/comments?owner=${owner}&repo=${repo}&number=${issueNumber}`)
+    fetchWithRetry(`/api/issues/comments?owner=${owner}&repo=${repo}&number=${issueNumber}`)
       .then(async (res) => {
         if (!res.ok) return;
         const data: { comments: IssueComment[] } = await res.json();

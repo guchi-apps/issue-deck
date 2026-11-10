@@ -5,6 +5,7 @@ import { useCallback, useEffect, useState } from "react";
 import { fetchWithTimeout } from "@/lib/fetch-with-timeout";
 import type { SecretSyncRunView } from "@/lib/secrets-sync";
 
+import { clientErrorMessage } from "@/lib/client-error-message";
 export type SecretsSyncRepository = {
   fullName: string;
   latestRun: SecretSyncRunView | null;
@@ -45,7 +46,7 @@ export function useSecretsSync(enabled: boolean) {
           setError(null);
         }
       } catch (err) {
-        if (!cancelled) setError(err instanceof Error ? err.message : String(err));
+        if (!cancelled) setError(clientErrorMessage(err));
       } finally {
         if (!cancelled) setIsLoading(false);
       }

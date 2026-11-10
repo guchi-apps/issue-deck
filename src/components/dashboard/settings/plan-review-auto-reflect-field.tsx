@@ -11,6 +11,7 @@ import {
 } from "@/lib/app-settings";
 import { InfoHint } from "@/components/dashboard/settings/info-hint";
 
+import { clientErrorMessage } from "@/lib/client-error-message";
 type Values = { enabled: boolean; maxRounds: number };
 
 /**
@@ -54,7 +55,7 @@ export function PlanReviewAutoReflectField() {
       if (!res.ok) throw new Error(`リクエストに失敗しました (${res.status})`);
     } catch (err) {
       setValues(previous);
-      setError(err instanceof Error ? err.message : String(err));
+      setError(clientErrorMessage(err));
     }
   }
 

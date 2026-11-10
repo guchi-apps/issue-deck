@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 
+import { clientErrorMessage } from "@/lib/client-error-message";
 export function useRepositorySync() {
   const [isSyncing, setIsSyncing] = useState(false);
 
@@ -23,7 +24,7 @@ export function useRepositorySync() {
       }
       window.location.reload();
     } catch (err) {
-      alert(err instanceof Error ? err.message : String(err));
+      alert(clientErrorMessage(err));
       setIsSyncing(false);
     }
   }

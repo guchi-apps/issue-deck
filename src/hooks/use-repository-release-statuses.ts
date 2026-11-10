@@ -10,6 +10,7 @@ import type {
 } from "@/lib/github/release-button-status";
 import type { ReleaseVerificationBadgeInfo } from "@/lib/release-candidate-status";
 
+import { clientErrorMessage } from "@/lib/client-error-message";
 export type { ReleaseMergeTarget };
 
 export type ReleasePendingMerge = {
@@ -89,7 +90,7 @@ export function useRepositoryReleaseStatuses(enabled: boolean, options: Options 
       if (mountedRef.current) setData(json.releaseStatuses);
       return json.releaseStatuses;
     } catch (err) {
-      if (mountedRef.current) setError(err instanceof Error ? err.message : String(err));
+      if (mountedRef.current) setError(clientErrorMessage(err));
       return null;
     } finally {
       if (mountedRef.current) setIsLoading(false);

@@ -21,6 +21,7 @@ import {
   type DeployRecoveryCandidatesResult,
 } from "@/lib/deploy-recovery";
 
+import { clientErrorMessage } from "@/lib/client-error-message";
 type DeployRecoveryDialogProps = {
   repositoryFullName: string;
   block?: boolean;
@@ -46,7 +47,7 @@ export function DeployRecoveryDialog({ repositoryFullName, block = false }: Depl
     try {
       setCandidatesResult(await fetchDeployRecoveryCandidates(repositoryFullName));
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : String(reason));
+      setError(clientErrorMessage(reason));
     } finally {
       setLoading(false);
     }
@@ -66,7 +67,7 @@ export function DeployRecoveryDialog({ repositoryFullName, block = false }: Depl
       const result = await requestDeployRecovery(repositoryFullName, selected);
       setCreatedUrl(result.url);
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : String(reason));
+      setError(clientErrorMessage(reason));
     } finally {
       setSubmitting(false);
     }

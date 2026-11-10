@@ -4,6 +4,7 @@ import { useCallback, useState } from "react";
 
 import type { Issue } from "@/types/issue";
 
+import { clientErrorMessage } from "@/lib/client-error-message";
 /** 候補Issueと応答の突き合わせに使うキー。プロンプトにも同じ形で載る（#1788） */
 export function buildIssueSearchKey(issue: Issue): string {
   return `${issue.repositoryFullName}#${issue.number}`;
@@ -56,7 +57,7 @@ export function useIssueAiSearch() {
         // 返ってくるのはキー（owner/repo#番号）なので、絞り込みで使うIssueのidへ戻す
         return candidates.filter((issue) => keys.has(buildIssueSearchKey(issue))).map((issue) => issue.id);
       } catch (err) {
-        setError(err instanceof Error ? err.message : String(err));
+        setError(clientErrorMessage(err));
         return null;
       } finally {
         setIsSearching(false);

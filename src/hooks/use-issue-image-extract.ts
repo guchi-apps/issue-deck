@@ -4,6 +4,7 @@ import { useCallback, useState } from "react";
 
 import type { ImageExtractResult } from "@/lib/image-extract-format";
 
+import { clientErrorMessage } from "@/lib/client-error-message";
 export function useIssueImageExtract() {
   const [isExtracting, setIsExtracting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -30,7 +31,7 @@ export function useIssueImageExtract() {
       }
       return (await res.json()) as ImageExtractResult;
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(clientErrorMessage(err));
       return null;
     } finally {
       setIsExtracting(false);

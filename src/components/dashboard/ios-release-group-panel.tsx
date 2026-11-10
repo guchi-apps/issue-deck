@@ -28,6 +28,7 @@ import {
 } from "@/lib/ios-testflight-status";
 import { cn } from "@/lib/utils";
 
+import { clientErrorMessage } from "@/lib/client-error-message";
 const DISPATCH_ERROR: Record<IosDispatchBlock | string, string> = {
   not_merged: "このリリースはまだmainへマージされていません。",
   not_main_tip: "このリリースはmainの先端ではないため、ここからは配布できません。",
@@ -178,7 +179,7 @@ export function IosReleaseGroupPanel({
       setLaunchedAt(Date.now());
       refresh();
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : String(err));
+      setActionError(clientErrorMessage(err));
     } finally {
       setSubmitting(false);
     }

@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 
 import type { ReleaseVerificationSummary } from "@/lib/release-verification-summary";
 
+import { clientErrorMessage } from "@/lib/client-error-message";
 const ACTIVE_POLL_MS = 5_000;
 const RETRY_POLL_MS = 15_000;
 
@@ -55,7 +56,7 @@ export function useReleaseVerification(
         }
       } catch (err) {
         if (err instanceof DOMException && err.name === "AbortError") return;
-        setFailure({ key, message: err instanceof Error ? err.message : String(err) });
+        setFailure({ key, message: clientErrorMessage(err) });
         delay = RETRY_POLL_MS;
       }
       if (delay !== null && !controller.signal.aborted) timer = setTimeout(load, delay);

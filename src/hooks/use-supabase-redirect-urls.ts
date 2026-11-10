@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 
+import { clientErrorMessage } from "@/lib/client-error-message";
 /**
  * Supabase Redirect URLsの取得・操作（#3568）。`use-shared-tokens.ts`と同じ形。
  *
@@ -37,7 +38,7 @@ export function useSupabaseRedirectUrls(enabled: boolean) {
         if (!cancelled && json) setData(json.redirectUrls);
       })
       .catch((err) => {
-        if (!cancelled) setError(err instanceof Error ? err.message : String(err));
+        if (!cancelled) setError(clientErrorMessage(err));
       })
       .finally(() => {
         if (!cancelled) setIsLoading(false);
@@ -76,7 +77,7 @@ export function useSupabaseRedirectUrlMutations() {
       if (!res.ok) throw new Error(messageForStatus(res.status, "登録に失敗しました"));
       return true;
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(clientErrorMessage(err));
       return false;
     } finally {
       setIsSubmitting(false);
@@ -95,7 +96,7 @@ export function useSupabaseRedirectUrlMutations() {
       if (!res.ok) throw new Error(messageForStatus(res.status, "更新に失敗しました"));
       return true;
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(clientErrorMessage(err));
       return false;
     } finally {
       setIsSubmitting(false);
@@ -114,7 +115,7 @@ export function useSupabaseRedirectUrlMutations() {
       if (!res.ok) throw new Error(messageForStatus(res.status, "削除に失敗しました"));
       return true;
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(clientErrorMessage(err));
       return false;
     } finally {
       setIsSubmitting(false);

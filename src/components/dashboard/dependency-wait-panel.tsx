@@ -30,6 +30,7 @@ import { classifyInstructionSkip } from "@/lib/dispatch/input-stash";
 import { formatDateTime, formatDateTimeFull } from "@/lib/format-date-time";
 import { cn } from "@/lib/utils";
 
+import { clientErrorMessage } from "@/lib/client-error-message";
 /**
  * 実装セッションの依存待ち（#4321）の表示と、スマホからもできる再確認・再開。
  *
@@ -355,7 +356,7 @@ export function LegacyHoldNotice({
       setCandidate(null);
       dispatch.refresh();
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : String(error));
+      setMessage(clientErrorMessage(error));
     }
   }
 

@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 
+import { clientErrorMessage } from "@/lib/client-error-message";
 export type CancelWorkflowRunInput = {
   owner: string;
   repo: string;
@@ -39,7 +40,7 @@ export function useWorkflowRunMutations() {
       }
       return true;
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(clientErrorMessage(err));
       return false;
     } finally {
       setIsSubmitting(false);

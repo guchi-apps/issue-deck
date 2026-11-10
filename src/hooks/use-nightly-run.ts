@@ -5,6 +5,7 @@ import { useCallback, useEffect, useState } from "react";
 import { fetchWithTimeout } from "@/lib/fetch-with-timeout";
 import type { NightlyRunState, ScheduledRunSettings } from "@/lib/nightly-run";
 
+import { clientErrorMessage } from "@/lib/client-error-message";
 /** 画面を開いているあいだの取り直しの間隔。夜の起動は30秒ごとの巡回で進むので、それに揃える */
 const ACTIVE_REFRESH_INTERVAL_MS = 30_000;
 /** 画面を開いていないあいだの取り直しの間隔（左メニューの件数のため） */
@@ -46,7 +47,7 @@ export function useNightlyRun(active: boolean) {
           setError(null);
         }
       } catch (err) {
-        if (!cancelled) setError(err instanceof Error ? err.message : String(err));
+        if (!cancelled) setError(clientErrorMessage(err));
       } finally {
         if (!cancelled) {
           setIsLoading(false);
@@ -89,7 +90,7 @@ export function useNightlyRun(active: boolean) {
         refresh();
         return true;
       } catch (err) {
-        setError(err instanceof Error ? err.message : String(err));
+        setError(clientErrorMessage(err));
         return false;
       } finally {
         setIsSubmitting(false);
@@ -123,7 +124,7 @@ export function useNightlyRun(active: boolean) {
         refresh();
         return true;
       } catch (err) {
-        setError(err instanceof Error ? err.message : String(err));
+        setError(clientErrorMessage(err));
         return false;
       } finally {
         setIsSubmitting(false);

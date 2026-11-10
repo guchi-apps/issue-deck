@@ -1,5 +1,6 @@
 "use client";
 
+import { fetchWithRetry } from "@/lib/client-error-message";
 import { useEffect, useState } from "react";
 
 import type { IssueLabel } from "@/types/issue";
@@ -28,7 +29,7 @@ export function useIssueRepoMeta(repositoryFullName: string | null): UseIssueRep
 
     setIsLoading(true);
 
-    fetch(`/api/issues/meta?owner=${owner}&repo=${repo}`, { signal: controller.signal })
+    fetchWithRetry(`/api/issues/meta?owner=${owner}&repo=${repo}`, { signal: controller.signal })
       .then(async (res) => {
         if (!res.ok) throw new Error(`リポジトリ情報の取得に失敗しました (${res.status})`);
         const data: { labels: IssueLabel[]; assignees: string[] } = await res.json();
