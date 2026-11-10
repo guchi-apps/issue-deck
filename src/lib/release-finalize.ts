@@ -373,7 +373,7 @@ export type FinalizeStartInput = {
   contract: { candidateId: string; revision: number; prNumber: number; baseSha: string; headSha: string; requiresAiReviewWaiver?: boolean } | null;
   phase: string;
   /** 候補の先端・mainの先端（GitHubから取り直した現在） */
-  observed: { prHeadSha: string; prBaseSha: string; mainSha: string | null } | null;
+  observed: { prHeadSha: string; prBaseSha: string; mainSha: string | null; mergeable: boolean | null } | null;
   /** 未完了の公開準備があるか */
   hasPending: boolean;
   /** 画面で見ていた候補のhead（押した時点の先端） */
@@ -391,8 +391,18 @@ export type FinalizeStartDecision =
     }
   | {
       ok: false;
-      error: "not_ready" | "wrong_phase" | "candidate_changed" | "main_advanced" | "in_progress" | "unobserved" | "ai_review_waiver_required";
+      error: "not_ready" | "wrong_phase" | "candidate_changed" | "main_advanced" | "in_progress" | "unobserved" | "ai_review_waiver_required" | ConflictBlockError;
     };
+
+/** 公開承認を作る前に、競合の判定が済んでいて競合が無いことを求める（#5305） */
+export type ConflictBlockError = "conflict_pending" | "conflict_detected";
+
+/** GitHubの`mergeable`（null=判定中・false=競合あり）から、公開承認を止める理由を返す。止めなければnull */
+export function decideConflictBlock(mergeable: boolean | null): ConflictBlockError | null {
+  if (mergeable === null) return "conflict_pending";
+  if (mergeable === false) return "conflict_detected";
+  return null;
+}
 
 export const FINALIZE_START_ERROR_LABEL: Record<Exclude<FinalizeStartDecision, { ok: true }>["error"], string> = {
   not_ready: "全体レビュー・統合検証に合格していないため、公開準備を始められません",
@@ -402,6 +412,8 @@ export const FINALIZE_START_ERROR_LABEL: Record<Exclude<FinalizeStartDecision, {
   in_progress: "公開準備が進行中です",
   unobserved: "候補の現在の状態を取得できませんでした",
   ai_review_waiver_required: "全体レビューが合格していません。結果を確かめ、承知で進むことを明示してから押してください",
+  conflict_pending: "GitHubが競合を確認中です。判定が出るまで公開承認は押せません。少し待ってから状態を取り直してください",
+  conflict_detected: "候補のPRがmainと競合しています。競合を解消してから公開承認してください",
 };
 
 /**
@@ -420,6 +432,8 @@ export function decideFinalizeStart(input: FinalizeStartInput): FinalizeStartDec
   if (input.observed.prBaseSha !== input.contract.baseSha || input.observed.mainSha !== input.contract.baseSha) {
     return { ok: false, error: "main_advanced" };
   }
+  const conflict = decideConflictBlock(input.observed.mergeable);
+  if (conflict) return { ok: false, error: conflict };
   const aiReviewWaived = input.contract.requiresAiReviewWaiver === true;
   if (aiReviewWaived && input.waiveAiReview !== true) return { ok: false, error: "ai_review_waiver_required" };
   return { ok: true, contract: input.contract, aiReviewWaived };

@@ -80,7 +80,10 @@ vi.mock("@/lib/github/release-api", () => ({
   isAncestorCommit: mocks.isAncestor,
 }));
 vi.mock("@/lib/release-develop-sync-run", () => ({ ensureDevelopSync: mocks.ensureSync }));
-vi.mock("@/lib/github/pull-requests-api", () => ({ fetchPullRequest: mocks.fetchPr }));
+vi.mock("@/lib/github/pull-requests-api", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/github/pull-requests-api")>()),
+  fetchPullRequest: mocks.fetchPr,
+}));
 vi.mock("@/lib/github/actions-api", () => ({ markPullRequestReadyForReview: vi.fn() }));
 vi.mock("@/lib/github/app-auth", () => ({ getInstallationToken: vi.fn(async () => "t") }));
 vi.mock("@/lib/release-production-verification-run", () => ({
@@ -134,6 +137,7 @@ beforeEach(() => {
   mocks.loadRcOverview.mockResolvedValue(overview());
   mocks.observePr.mockResolvedValue({ number: 10, state: "open", head: { sha: PRE, ref: "release-rc/3" }, base: { sha: BASE } });
   mocks.mainHead.mockResolvedValue(BASE);
+  mocks.fetchPr.mockResolvedValue({ number: 10, state: "open", mergeable: true, merged: false, draft: false, head: { sha: PRE }, base: { sha: BASE } });
   mocks.fileText.mockResolvedValue('{"version":"2.13.4"}');
   mocks.tagRefs.mockResolvedValue([]);
   mocks.prepareApproval.mockResolvedValue({ kind: "create", data: {} });
@@ -195,6 +199,15 @@ describe("requestRcFinalize", () => {
     const sent = JSON.parse(mocks.dispatch.mock.calls[0][3] as string);
     expect(sent).toMatchObject({ baseHeadSha: PRE, bumpKind: "minor", version: "2.14.0", requestKey: "reqkey0001", sequence: 3 });
   });
+
+  it("競合が判定中・競合ありなら、版の予約・段階の変更・workflowの起動をしない（#5305）", async () => {
+    mocks.fetchPr.mockResolvedValue({ number: 10, state: "open", mergeable: null, merged: false, head: { sha: PRE }, base: { sha: BASE } });
+    expect(await requestRcFinalize({ ...input, requestKey: "reqkey0090" })).toMatchObject({ ok: false, error: "conflict_pending" });
+    mocks.fetchPr.mockResolvedValue({ number: 10, state: "open", mergeable: false, merged: false, head: { sha: PRE }, base: { sha: BASE } });
+    expect(await requestRcFinalize({ ...input, requestKey: "reqkey0091" })).toMatchObject({ ok: false, error: "conflict_detected" });
+    expect(mocks.candUpdateMany).not.toHaveBeenCalled();
+    expect(mocks.dispatch).not.toHaveBeenCalled();
+  }, 10000);
 
   it("自動判定の再試行でも、未消費の自予約があればその版・上げ幅へ固定する", async () => {
     mocks.resFindMany.mockResolvedValue([{ id: "r1", version: "2.14.0", candidateId: "c1", status: "reserved" }]);

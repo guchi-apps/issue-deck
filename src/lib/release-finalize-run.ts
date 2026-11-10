@@ -4,7 +4,7 @@ import { requestReleaseVerifyJob } from "@/lib/dispatch/release-verify-jobs";
 import { decideDeployRecoveryRelease } from "@/lib/deploy-recovery-series";
 import { markPullRequestReadyForReview } from "@/lib/github/actions-api";
 import { getInstallationToken } from "@/lib/github/app-auth";
-import { fetchPullRequest } from "@/lib/github/pull-requests-api";
+import { fetchPullRequest, settlePullRequestMergeable } from "@/lib/github/pull-requests-api";
 import {
   dispatchReleaseFinalizeWorkflow,
   fetchCompareChangedFiles,
@@ -36,6 +36,7 @@ import {
   FINALIZE_START_ERROR_LABEL,
   FINALIZE_STATUS_LABEL,
   isFinalizePendingExpired,
+  decideConflictBlock,
   parseFinalizeCallerSupport,
   parseInheritanceEvidence,
   readVersionFromText,
@@ -279,6 +280,20 @@ export type FinalizeMutationResult =
   | { ok: true; finalizationId: string; existing: boolean; approvalId?: string }
   | { ok: false; error: FinalizeMutationError; message?: string };
 
+/**
+ * 候補PRの競合の有無（`mergeable`）。一覧取得（`observeCandidatePullRequest`）は値を持たないため、単体取得し、
+ * 未判定なら短く取り直す（#5305）。取得できなければundefined（呼び出し側は観測できないものとして拒否する）
+ */
+async function observeCandidateMergeable(ctx: Context, prNumber: number): Promise<boolean | null | undefined> {
+  try {
+    const get = () => fetchPullRequest(ctx.owner, ctx.repo, prNumber, ctx.token);
+    const settled = await settlePullRequestMergeable(await get(), get);
+    return settled.mergeable ?? null;
+  } catch {
+    return undefined;
+  }
+}
+
 async function existingByRequestKey(requestKey: string): Promise<FinalizeMutationResult | null> {
   const row = await db.releaseCandidateFinalization.findUnique({ where: { requestKey } });
   return row ? { ok: true, finalizationId: row.id, existing: true } : null;
@@ -331,10 +346,11 @@ export async function requestRcFinalize(
     observeCandidatePullRequest(ctx, candidate.sequence).catch(() => null),
     fetchMainHeadSha(ctx.owner, ctx.repo, ctx.token).catch(() => null),
   ]);
+  const mergeable = pr ? await observeCandidateMergeable(ctx, pr.number) : undefined;
   const decision: FinalizeStartDecision = decideFinalizeStart({
     contract: candidate.finalizeContract,
     phase: candidate.phase,
-    observed: pr && pr.base ? { prHeadSha: pr.head.sha, prBaseSha: pr.base.sha, mainSha } : null,
+    observed: pr && pr.base && mergeable !== undefined ? { prHeadSha: pr.head.sha, prBaseSha: pr.base.sha, mainSha, mergeable } : null,
     hasPending: pending !== null,
     expectedHeadSha: input.expectedHeadSha,
     waiveAiReview: input.waiveAiReview === true,
@@ -501,6 +517,11 @@ export async function approveRcPublish(
   if (!found || !mainSha) return { ok: false, error: "pull_request_unobserved", message: "候補のPR・mainの状態を取得できませんでした" };
   if (found.head.sha !== latest.finalHeadSha) return { ok: false, error: "candidate_changed" };
   if (mainSha !== latest.finalBaseSha) return { ok: false, error: "main_advanced" };
+  // 競合の判定が済み、競合が無いときだけ新しい承認を作る（既存承認の再開は上で通している。#5305）
+  const mergeable = await observeCandidateMergeable(ctx, found.number);
+  if (mergeable === undefined) return { ok: false, error: "pull_request_unobserved", message: "候補のPRの競合状態を取得できませんでした" };
+  const conflict = decideConflictBlock(mergeable);
+  if (conflict) return { ok: false, error: conflict };
 
   const prepared = await preparePublishApproval({
     repositoryFullName: fullNameOf(ctx),
