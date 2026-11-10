@@ -139,6 +139,12 @@ function describeNextWindowTarget(
   return `いまの5時間枠の残りが${lead}を切ってから${where}で起動します（いまは起動しません）。${tail}`;
 }
 
+/** 「実装を開始」ダイアログに出さないオプション（#5291） */
+const HIDDEN_OPTION_KEYS: readonly StartImplementationOptionKey[] = [
+  "mergeConfirmRequired",
+  "previewRequired",
+];
+
 /** 予約実行では選べないオプション（承認・確認を待つ人がいない）。判定の正は`NIGHTLY_RUN_BLOCKING_LABELS` */
 const NIGHTLY_UNAVAILABLE_OPTION_KEYS: readonly StartImplementationOptionKey[] = [
   "artifactRequired",
@@ -537,7 +543,7 @@ export function StartImplementationDialog({
   /** 同じ理由で、ダイアログでONにしたままでも積めない（積む前にラベルとして付くため） */
   const nightlyOptionRejection =
     isScheduledTarget && NIGHTLY_UNAVAILABLE_OPTION_KEYS.some((key) => options[key])
-      ? `「デザインを提示」「開発環境を起動」をONにしたままでは${scheduledKindName}に積めません（承認・確認を待つ人がいない）`
+      ? `「デザインを提示」をONにしたままでは${scheduledKindName}に積めません（承認・確認を待つ人がいない）`
       : null;
 
   const targetHostName =
@@ -642,7 +648,11 @@ export function StartImplementationDialog({
     isAutoPick: modelChoice === AUTO_PICK,
     effectiveModel,
   });
-  const visibleOptions = START_IMPLEMENTATION_OPTIONS;
+  // 「マージ前に確認」「開発環境を起動」は画面から外した（#5291）。ラベル定義と、既にラベルが付いている
+  // Issueの状態（オプションの初期値）は残す
+  const visibleOptions = START_IMPLEMENTATION_OPTIONS.filter(
+    (option) => !HIDDEN_OPTION_KEYS.includes(option.key),
+  );
 
   /**
    * 実行先のタイル（#1623）。**選べない理由の判定と文言は従来どおりAPI側と同じものを使う。**
