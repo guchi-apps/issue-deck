@@ -396,8 +396,7 @@ export function CreateIssueDialog({
    * `startTargetIssue`と同じく、表示するIssueと開閉状態を兼ねている。
    */
   const [postCreateIssue, setPostCreateIssue] = useState<Issue | null>(null);
-  const { setting: postCreateSetting, setSetting: setPostCreateSetting } =
-    usePostCreateDestination();
+  const { setting: postCreateSetting } = usePostCreateDestination();
   /**
    * 「続けて作成」（#2932）で開き直したときに引き継ぐリポジトリ。**入っている間は、
    * 呼び出し元のプリフィル（`defaultTitle`・`defaultBody`・`bodyPrefix`）を使わない。**
@@ -1183,9 +1182,8 @@ export function CreateIssueDialog({
       {postCreateIssue && (
         <PostCreateNavigationDialog
           issue={postCreateIssue}
-          onSelect={(destination, remember) => {
+          onSelect={(destination) => {
             setPostCreateIssue(null);
-            if (remember) setPostCreateSetting(destination);
             applyPostCreateDestination(postCreateIssue, destination);
           }}
           onDismiss={() => setPostCreateIssue(null)}

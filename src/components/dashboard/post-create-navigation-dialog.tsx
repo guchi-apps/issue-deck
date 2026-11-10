@@ -1,9 +1,7 @@
 "use client";
 
-import { useState } from "react";
 import { FilePlus2, FileText, Undo2, type LucideIcon } from "lucide-react";
 
-import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
   DialogContent,
@@ -18,9 +16,9 @@ import type { Issue } from "@/types/issue";
 type PostCreateNavigationDialogProps = {
   /** 作成できたIssue。何を作ったのかを確かめてから選べるよう、番号とタイトルを出す */
   issue: Issue;
-  /** タイルを押したとき。`remember`は「次回からこの画面を出さない」が入っているか */
-  onSelect: (destination: PostCreateDestination, remember: boolean) => void;
-  /** ×・Escape・背景クリックで閉じたとき。選ばずに閉じたので、記憶もせず何も起こさない */
+  /** タイルを押したとき */
+  onSelect: (destination: PostCreateDestination) => void;
+  /** ×・Escape・背景クリックで閉じたとき。選ばずに閉じたので、何も起こさない */
   onDismiss: () => void;
 };
 
@@ -32,10 +30,9 @@ type PostCreateNavigationDialogProps = {
  *
  * **タイルは選択ではなく実行**（押した瞬間に進む）。選んでから決定ボタンを押す形にすると、
  * 今までゼロだった操作が2回に増える。「次回からこの画面を出さない」を入れてから押すと、
- * その押した方が端末ごとの既定として残る（`usePostCreateDestination`）。
- *
- * **閉じただけのときは何も記憶しない。** ×・Escapeは「まだ決めていない」であって、
- * 「元の画面に戻るを既定にする」ではない。
+ * **この画面からは記憶させない**（#5292）。以前は「次回からこの画面を出さない」チェックで
+ * 押した方を既定にできたが、うっかり入れると以降ずっと選択画面が出なくなるため外した。
+ * 既定を決めたい人は設定 > 表示から明示的に選ぶ（`usePostCreateDestination`）。
  *
  * 「続けて作成」（#2932）は、**押した瞬間に同じリポジトリの空の作成フォームが開き直る**。
  * まとめて起票するときに、1件ごとに一覧へ戻ってリポジトリを選び直す往復をなくすためのもので、
@@ -46,7 +43,6 @@ export function PostCreateNavigationDialog({
   onSelect,
   onDismiss,
 }: PostCreateNavigationDialogProps) {
-  const [remember, setRemember] = useState(false);
   const repositoryName = issue.repositoryFullName.split("/")[1] ?? issue.repositoryFullName;
 
   return (
@@ -77,33 +73,21 @@ export function PostCreateNavigationDialog({
             icon={FileText}
             name="Issueを開く"
             description="作ったIssueの詳細へ"
-            onSelect={() => onSelect("detail", remember)}
+            onSelect={() => onSelect("detail")}
           />
           <DestinationTile
             icon={FilePlus2}
             name="続けて作成"
             description="同じリポジトリでもう1件"
-            onSelect={() => onSelect("another", remember)}
+            onSelect={() => onSelect("another")}
           />
           <DestinationTile
             icon={Undo2}
             name="元の画面に戻る"
             description="開いていた一覧のまま"
-            onSelect={() => onSelect("stay", remember)}
+            onSelect={() => onSelect("stay")}
           />
         </div>
-
-        <label className="flex items-start gap-2 text-xs text-muted-foreground">
-          <Checkbox
-            checked={remember}
-            onCheckedChange={(checked) => setRemember(checked === true)}
-            className="mt-0.5 shrink-0"
-          />
-          <span>
-            次回からこの画面を出さず、いま押した方へ進む
-            <span className="block text-[11px]">設定 &gt; 表示 で、いつでも選び直せます。</span>
-          </span>
-        </label>
       </DialogContent>
     </Dialog>
   );

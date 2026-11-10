@@ -401,7 +401,8 @@ describe("CreateIssueDialog の「次に開く画面」", () => {
    * 記憶したときは選択画面を挟まないぶん、ダイアログが`open`のまま開き直る。
    * 初期化のeffectが走らない経路なので、リポジトリが残ることを別に見ておく（#2932）
    */
-  it("「続けて作成」を記憶させると、選択画面を出さずに次のフォームが開いたままになる", async () => {
+  it("「続けて作成」を設定しておくと、選択画面を出さずに次のフォームが開いたままになる", async () => {
+    window.localStorage.setItem("issue-deck:post-create-destination", JSON.stringify("another"));
     render(
       <Harness
         onCreated={vi.fn()}
@@ -413,10 +414,6 @@ describe("CreateIssueDialog の「次に開く画面」", () => {
     pickRepository(REPOSITORY_FULL_NAME);
     fireEvent.change(screen.getByLabelText("タイトル"), { target: { value: "1件目" } });
     fireEvent.click(screen.getByRole("button", { name: "作成" }));
-
-    await screen.findByText("Issueを作成しました");
-    fireEvent.click(screen.getByRole("checkbox"));
-    fireEvent.click(screen.getByRole("button", { name: /続けて作成/ }));
 
     const title = (await screen.findByLabelText("タイトル")) as HTMLInputElement;
     fireEvent.change(title, { target: { value: "2件目" } });
@@ -440,26 +437,15 @@ describe("CreateIssueDialog の「次に開く画面」", () => {
     });
   });
 
-  it("行き先を記憶させると、次の作成では選択画面を出さずにそのまま進む", async () => {
+  it("設定で行き先を選んでおくと、選択画面を出さずにそのまま進む", async () => {
+    window.localStorage.setItem("issue-deck:post-create-destination", JSON.stringify("detail"));
     const onNavigateToIssue = vi.fn();
-    const { unmount } = render(
-      <Harness onCreated={vi.fn()} onNavigateToIssue={onNavigateToIssue} />,
-    );
+    render(<Harness onCreated={vi.fn()} onNavigateToIssue={onNavigateToIssue} />);
 
     fireEvent.change(screen.getByLabelText("タイトル"), { target: { value: "テスト" } });
     fireEvent.click(screen.getByRole("button", { name: "作成" }));
 
-    await screen.findByText("Issueを作成しました");
-    fireEvent.click(screen.getByRole("checkbox"));
-    fireEvent.click(screen.getByRole("button", { name: /Issueを開く/ }));
     await waitFor(() => expect(onNavigateToIssue).toHaveBeenCalledTimes(1));
-    unmount();
-
-    render(<Harness onCreated={vi.fn()} onNavigateToIssue={onNavigateToIssue} />);
-    fireEvent.change(screen.getByLabelText("タイトル"), { target: { value: "テスト2" } });
-    fireEvent.click(screen.getByRole("button", { name: "作成" }));
-
-    await waitFor(() => expect(onNavigateToIssue).toHaveBeenCalledTimes(2));
     expect(screen.queryByText("Issueを作成しました")).toBeNull();
   });
 
