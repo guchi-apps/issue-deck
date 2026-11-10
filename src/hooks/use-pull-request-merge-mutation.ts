@@ -4,6 +4,7 @@ import { useState } from "react";
 
 import type { MergeFailure } from "@/lib/github/merge-failure";
 
+import { clientErrorMessage } from "@/lib/client-error-message";
 export type MergePullRequestInput = {
   owner: string;
   repo: string;
@@ -70,7 +71,7 @@ export function usePullRequestMergeMutation() {
       }
       return true;
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(clientErrorMessage(err));
       return false;
     } finally {
       setIsSubmitting(false);
@@ -93,7 +94,7 @@ export function usePullRequestMergeMutation() {
       }
       return true;
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(clientErrorMessage(err));
       return false;
     } finally {
       setIsSubmitting(false);

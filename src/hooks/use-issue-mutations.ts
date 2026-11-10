@@ -5,6 +5,7 @@ import { useRef, useState } from "react";
 import { GITHUB_REAUTH_REQUIRED_MESSAGE } from "@/lib/github/reauth-message";
 import type { Issue } from "@/types/issue";
 
+import { clientErrorMessage, isNetworkFailure } from "@/lib/client-error-message";
 export type CreateIssueInput = {
   repositoryFullName: string;
   title: string;
@@ -87,14 +88,15 @@ export function useIssueMutations() {
       if (createAttemptRef.current?.fingerprint !== fingerprint) {
         createAttemptRef.current = { fingerprint, key: newIdempotencyKey() };
       }
-      const issue = await postJson("/api/issues", "POST", {
-        ...input,
-        idempotencyKey: createAttemptRef.current.key,
-      });
+      const body = { ...input, idempotencyKey: createAttemptRef.current.key };
+      // 冪等キーが同じなので、通信失敗（応答不明）からの1回の再送で二重作成にならない。
+      const issue = await postJson("/api/issues", "POST", body).catch((err: unknown) =>
+        isNetworkFailure(err) ? postJson("/api/issues", "POST", body) : Promise.reject(err),
+      );
       createAttemptRef.current = null;
       return issue;
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(clientErrorMessage(err));
       return null;
     } finally {
       setIsSubmitting(false);
@@ -107,7 +109,7 @@ export function useIssueMutations() {
     try {
       return await postJson("/api/issues", "PATCH", input);
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(clientErrorMessage(err));
       return null;
     } finally {
       setIsSubmitting(false);
@@ -120,7 +122,7 @@ export function useIssueMutations() {
     try {
       return await postJson("/api/issues/transfer", "POST", input);
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(clientErrorMessage(err));
       return null;
     } finally {
       setIsSubmitting(false);
@@ -142,7 +144,7 @@ export function useIssueMutations() {
       }
       return true;
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(clientErrorMessage(err));
       return false;
     } finally {
       setIsSubmitting(false);

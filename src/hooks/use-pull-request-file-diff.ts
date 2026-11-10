@@ -5,6 +5,7 @@ import { useCallback, useEffect, useState } from "react";
 import { parsePullRequestId } from "@/lib/github-reference";
 import type { PullRequestFileDiffResponse } from "@/types/pull-request";
 
+import { clientErrorMessage, fetchWithRetry } from "@/lib/client-error-message";
 type UsePullRequestFileDiffResult = {
   /** 差分本文。GitHubが省略した場合はnull、未取得はundefined */
   patch: string | null | undefined;
@@ -59,7 +60,7 @@ export function usePullRequestFileDiff(
           number: String(parsed.number),
           path,
         });
-        const res = await fetch(`/api/pull-requests/file-diff?${params.toString()}`, {
+        const res = await fetchWithRetry(`/api/pull-requests/file-diff?${params.toString()}`, {
           signal: controller.signal,
         });
         if (!res.ok) {
@@ -76,7 +77,7 @@ export function usePullRequestFileDiff(
       } catch (err) {
         if (err instanceof DOMException && err.name === "AbortError") return;
         if (cancelled) return;
-        setFailure({ key, message: err instanceof Error ? err.message : String(err) });
+        setFailure({ key, message: clientErrorMessage(err) });
       } finally {
         if (!cancelled) setLoadingKey(null);
       }

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 
 import type { Issue } from "@/types/issue";
 
+import { clientErrorMessage, fetchWithRetry } from "@/lib/client-error-message";
 export type CommentSummaryState = {
   summary: string;
   generatedAt: string;
@@ -37,7 +38,7 @@ export function useIssueCommentSummaries(issue: Issue | null) {
     const [owner, repo] = repositoryFullName.split("/");
     const controller = new AbortController();
 
-    fetch(`/api/issues/comments/summary?owner=${owner}&repo=${repo}&number=${issueNumber}`, {
+    fetchWithRetry(`/api/issues/comments/summary?owner=${owner}&repo=${repo}&number=${issueNumber}`, {
       signal: controller.signal,
     })
       .then(async (res) => {
@@ -90,7 +91,7 @@ export function useIssueCommentSummaries(issue: Issue | null) {
           [data.commentId]: { summary: data.summary, generatedAt: data.generatedAt },
         }));
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
+        const message = clientErrorMessage(err);
         setErrors((prev) => ({ ...prev, [commentId]: message }));
       } finally {
         setGeneratingIds((prev) => {

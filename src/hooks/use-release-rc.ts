@@ -7,6 +7,7 @@ import type { DevelopSyncStatus } from "@/lib/release-develop-sync";
 import type { RcFinalizationOverview } from "@/lib/release-finalize-run";
 import type { RcOverview } from "@/lib/release-rc-run";
 
+import { clientErrorMessage } from "@/lib/client-error-message";
 /**
  * 候補の状況に、公開準備（#4496）の状況と、本番反映以降のdevelop同期（#4641）の状況を足したもの。
  * どちらも無い応答（旧い応答）でも読める
@@ -70,7 +71,7 @@ export function useReleaseRc(
         if (body.candidate && ACTIVE_STATUSES.has(body.candidate.status.status)) delay = ACTIVE_POLL_MS;
       } catch (err) {
         if (err instanceof DOMException && err.name === "AbortError") return;
-        setFailure({ key, message: err instanceof Error ? err.message : String(err) });
+        setFailure({ key, message: clientErrorMessage(err) });
         delay = RETRY_POLL_MS;
       }
       if (delay !== null && !controller.signal.aborted) timer = setTimeout(load, delay);

@@ -15,6 +15,7 @@ import {
 } from "@/lib/app-settings";
 import { InfoHint } from "@/components/dashboard/settings/info-hint";
 
+import { clientErrorMessage } from "@/lib/client-error-message";
 type Saved = { days: number; prCount: number };
 
 /**
@@ -64,7 +65,7 @@ export function CodeReviewRecommendField() {
       if (!res.ok) throw new Error(`リクエストに失敗しました (${res.status})`);
       setSaved(await res.json());
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(clientErrorMessage(err));
     } finally {
       setSaving(false);
     }

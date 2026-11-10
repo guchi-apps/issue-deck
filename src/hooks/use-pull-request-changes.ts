@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { parsePullRequestId } from "@/lib/github-reference";
 import type { PullRequestChange, PullRequestChangeListResponse } from "@/types/pull-request";
 
+import { clientErrorMessage, fetchWithRetry } from "@/lib/client-error-message";
 export type UsePullRequestChangesResult = {
   changes: PullRequestChange[] | null;
   /** 取得できたコミット数（打ち切っている場合は上限値） */
@@ -63,7 +64,7 @@ export function usePullRequestChanges(
       try {
         const [owner, repo] = parsed.repositoryFullName.split("/");
         const params = new URLSearchParams({ owner, repo, number: String(parsed.number) });
-        const res = await fetch(`/api/pull-requests/changes?${params.toString()}`, {
+        const res = await fetchWithRetry(`/api/pull-requests/changes?${params.toString()}`, {
           signal: controller.signal,
         });
         if (!res.ok) {
@@ -86,7 +87,7 @@ export function usePullRequestChanges(
       } catch (err) {
         if (err instanceof DOMException && err.name === "AbortError") return;
         if (cancelled) return;
-        setFailure({ key, message: err instanceof Error ? err.message : String(err) });
+        setFailure({ key, message: clientErrorMessage(err) });
       } finally {
         if (!cancelled) setLoadingKey(null);
       }

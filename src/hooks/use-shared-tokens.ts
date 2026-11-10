@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 
 import type { SharedToken, SharedTokenInput } from "@/types/shared-token";
 
+import { clientErrorMessage } from "@/lib/client-error-message";
 export function useSharedTokens(enabled: boolean) {
   const [data, setData] = useState<SharedToken[] | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -26,7 +27,7 @@ export function useSharedTokens(enabled: boolean) {
         if (!cancelled) setData(json.sharedTokens);
       })
       .catch((err) => {
-        if (!cancelled) setError(err instanceof Error ? err.message : String(err));
+        if (!cancelled) setError(clientErrorMessage(err));
       })
       .finally(() => {
         if (!cancelled) setIsLoading(false);
@@ -62,7 +63,7 @@ export function useSharedTokenMutations() {
       const json = (await res.json()) as { generatedValue?: string };
       return { generatedValue: json.generatedValue ?? null };
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(clientErrorMessage(err));
       return undefined;
     } finally {
       setIsSubmitting(false);
@@ -77,7 +78,7 @@ export function useSharedTokenMutations() {
       const json = (await res.json()) as { value: string };
       return json.value;
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(clientErrorMessage(err));
       return null;
     }
   }
@@ -97,7 +98,7 @@ export function useSharedTokenMutations() {
       }
       return true;
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(clientErrorMessage(err));
       return false;
     } finally {
       setIsSubmitting(false);
@@ -112,7 +113,7 @@ export function useSharedTokenMutations() {
       if (!res.ok) throw new Error(`削除に失敗しました (${res.status})`);
       return true;
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(clientErrorMessage(err));
       return false;
     } finally {
       setIsSubmitting(false);

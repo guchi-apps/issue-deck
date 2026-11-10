@@ -20,6 +20,7 @@ import { productionKindNotice } from "@/lib/release-production-stop";
 import type { ReleaseStartMode } from "@/lib/release-start-mode";
 import { cn } from "@/lib/utils";
 
+import { clientErrorMessage } from "@/lib/client-error-message";
 /**
  * リリース開始前に出す、既存候補・取得状態の案内（#4628）。PCの個別ボタン・スマホのシート・一括の確認が
  * 同じ判定（`ReleaseStartMode`）を同じ表示で出す。**候補がないものとは扱わない**: 取得中・取得失敗は
@@ -143,7 +144,7 @@ function BlockDetail({
       setConfirming(false);
       onChanged();
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(clientErrorMessage(err));
       // 状態が変わっていた場合に備えて、表示を取り直す
       onChanged();
     } finally {
@@ -157,7 +158,7 @@ function BlockDetail({
     try {
       await requestRcProductionRecheck(repositoryFullName, block.candidateId);
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(clientErrorMessage(err));
     } finally {
       setBusy(false);
       onChanged();

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 
 import type { FineGrainedToken } from "@/types/fine-grained-token";
 
+import { clientErrorMessage } from "@/lib/client-error-message";
 export function useFineGrainedTokens(enabled: boolean) {
   const [data, setData] = useState<FineGrainedToken[] | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -29,7 +30,7 @@ export function useFineGrainedTokens(enabled: boolean) {
         if (!cancelled) setData(json.fineGrainedTokens);
       })
       .catch((err) => {
-        if (!cancelled) setError(err instanceof Error ? err.message : String(err));
+        if (!cancelled) setError(clientErrorMessage(err));
       })
       .finally(() => {
         if (!cancelled) setIsLoading(false);

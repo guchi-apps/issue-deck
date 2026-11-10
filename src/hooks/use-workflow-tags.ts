@@ -10,6 +10,7 @@ import {
 } from "@/lib/workflow-tags-store";
 import { isPropagationRunning } from "@/lib/workflow-tags";
 
+import { clientErrorMessage } from "@/lib/client-error-message";
 /** 配布ワークフローが動いている間の再取得間隔。PRの作成は1リポジトリあたり数秒〜数十秒 */
 const RUNNING_POLL_INTERVAL_MS = 10_000;
 
@@ -100,7 +101,7 @@ export function useWorkflowTags(enabled: boolean) {
           setAwaiting(false);
         }
       } catch (err) {
-        if (!cancelled) setError(err instanceof Error ? err.message : String(err));
+        if (!cancelled) setError(clientErrorMessage(err));
       } finally {
         if (!cancelled) setIsLoading(false);
       }

@@ -132,7 +132,7 @@ describe("RC取り込みパネル：失敗後の再送（#4986）", () => {
     render(<RcImportPanel repositoryFullName="o/r" pullRequestNumber={5} />);
     fireEvent.click(await screen.findByRole("checkbox", { name: /#684/ }));
     fireEvent.click(screen.getByRole("button", { name: "選んだ1件を取り込む" }));
-    await screen.findByText(/Failed to fetch/);
+    await screen.findByText(/通信に失敗しました/);
     fireEvent.click(screen.getByRole("button", { name: "選んだ1件を取り込む" }));
     await screen.findByText(/取り込みを依頼しました/);
     const keys = fetchMock.mock.calls.filter(([, i]) => i?.method === "POST").map(([, i]) => JSON.parse(i.body as string).requestKey);

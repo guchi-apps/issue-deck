@@ -17,6 +17,7 @@ import { fetchFinalizeBumpReason, requestRcProductionRecheck } from "@/lib/relea
 import { cn } from "@/lib/utils";
 import { BUMP_KIND_CRITERIA, BUMP_KINDS, nextVersion, type BumpKind } from "@/lib/semver-bump";
 
+import { clientErrorMessage } from "@/lib/client-error-message";
 /**
  * 公開準備（正式バンプ。#4496）のパネル。本番PR詳細の候補の帯の下に出す。
  *
@@ -230,7 +231,7 @@ function VersionBox({
       .then((text) => setReason({ status: "loaded", reason: text }))
       .catch((err) => {
         loadedKey.current = null;
-        setReason({ status: "error", message: err instanceof Error ? err.message : String(err) });
+        setReason({ status: "error", message: clientErrorMessage(err) });
       });
   }, [open, finalization, version, reasonKey, repositoryFullName]);
 
@@ -833,7 +834,7 @@ export function ReleaseRcFinalizePanel({
     try {
       await requestRcProductionRecheck(repositoryFullName, candidate.id);
     } catch (err) {
-      setMessage(err instanceof Error ? err.message : String(err));
+      setMessage(clientErrorMessage(err));
     } finally {
       setBusy(false);
       onChanged();

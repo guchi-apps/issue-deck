@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 
 import type { ClaudeUsage } from "@/lib/claude/usage";
 
+import { clientErrorMessage } from "@/lib/client-error-message";
 export {
   CLAUDE_LOW_REMAINING_PERCENT,
   hasClaudeLowRemainingQuota,
@@ -41,7 +42,7 @@ export function useClaudeUsage(enabled: boolean) {
         if (!cancelled && json) setData(json);
       })
       .catch((err) => {
-        if (!cancelled) setError(err instanceof Error ? err.message : String(err));
+        if (!cancelled) setError(clientErrorMessage(err));
       })
       .finally(() => {
         if (!cancelled) setIsLoading(false);

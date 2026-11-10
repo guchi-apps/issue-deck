@@ -11,6 +11,7 @@ import type {
   SessionUsageSummary,
 } from "@/lib/session-usage-view";
 
+import { clientErrorMessage } from "@/lib/client-error-message";
 export type SessionUsageResponse = SessionUsageSummary & {
   /**
    * 5時間枠の実測換算レート（#2988）。求まらなければnull。**集計の応答が持つのは、取得済みの
@@ -122,7 +123,7 @@ export function useSessionUsage(
       })
       .catch((err) => {
         if (cancelled || controller.signal.aborted) return;
-        setError(err instanceof Error ? err.message : String(err));
+        setError(clientErrorMessage(err));
       })
       .finally(() => {
         if (!cancelled) setIsLoading(false);
@@ -156,7 +157,7 @@ export function useSessionUsage(
       })
       .catch((err) => {
         if (cancelled || controller.signal.aborted) return;
-        setPlanError(err instanceof Error ? err.message : String(err));
+        setPlanError(clientErrorMessage(err));
       });
 
     return () => {

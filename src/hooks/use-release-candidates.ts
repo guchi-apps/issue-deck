@@ -4,6 +4,7 @@ import { useCallback, useSyncExternalStore } from "react";
 
 import type { ReleaseCandidate, ReleaseCandidatesSource } from "@/lib/release-candidate-checks";
 
+import { clientErrorMessage } from "@/lib/client-error-message";
 const ACTIVE_POLL_MS = 5_000;
 const IDLE_POLL_MS = 60_000;
 const RETRY_POLL_MS = 15_000;
@@ -47,7 +48,7 @@ async function load(repositoryFullName: string, entry: Entry) {
     if (isActive(body.candidates)) delay = ACTIVE_POLL_MS;
   } catch (err) {
     if (err instanceof DOMException && err.name === "AbortError") return;
-    publish(entry, { status: "error", message: err instanceof Error ? err.message : String(err) });
+    publish(entry, { status: "error", message: clientErrorMessage(err) });
     delay = RETRY_POLL_MS;
   }
   if (!signal.aborted) entry.timer = setTimeout(() => void load(repositoryFullName, entry), delay);

@@ -9,6 +9,7 @@ import type { ReleaseVerificationSummary } from "@/lib/release-verification-summ
 import { releaseErrorMessage, requestReleaseStart } from "@/lib/release-request";
 import type { BumpKind } from "@/lib/semver-bump";
 
+import { clientErrorMessage } from "@/lib/client-error-message";
 /** CIの集約状態。`unknown`は権限不足やチェック未検出で判定できないことを表す */
 export type CiState = "pending" | "success" | "failure" | "unknown";
 
@@ -182,7 +183,7 @@ export function useReleaseStatus(
         return json as ReleaseStatus;
       } catch (err) {
         // ポーリング中の一時的な失敗で既存の表示を消さないよう、初回のみエラーを表面化する。
-        if (!cancelled && initial) setError(err instanceof Error ? err.message : String(err));
+        if (!cancelled && initial) setError(clientErrorMessage(err));
         return null;
       } finally {
         if (!cancelled && initial) setIsLoading(false);
@@ -251,7 +252,7 @@ export function useReleaseStatus(
       setReloadKey((k) => k + 1);
       return true;
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(clientErrorMessage(err));
       return false;
     } finally {
       setIsTriggering(false);

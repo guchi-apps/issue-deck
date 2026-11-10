@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 
 import type { KnowledgeBoardData } from "@/lib/knowledge-board";
 
+import { clientErrorMessage } from "@/lib/client-error-message";
 type UseKnowledgeBoardResult = {
   data: KnowledgeBoardData | null;
   isLoading: boolean;
@@ -51,7 +52,7 @@ export function useKnowledgeBoard(enabled: boolean): UseKnowledgeBoardResult {
       })
       .catch((err) => {
         if (cancelled || controller.signal.aborted) return;
-        setError(err instanceof Error ? err.message : String(err));
+        setError(clientErrorMessage(err));
       })
       .finally(() => {
         if (!cancelled) setIsLoading(false);

@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 
+import { clientErrorMessage } from "@/lib/client-error-message";
 export type RepairPullRequestInput = {
   owner: string;
   repo: string;
@@ -43,7 +44,7 @@ export function usePullRequestRepairMutation() {
       }
       return true;
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(clientErrorMessage(err));
       return false;
     } finally {
       setIsSubmitting(false);

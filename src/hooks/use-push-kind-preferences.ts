@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 
 import type { PushKind } from "@/lib/notifications/push-kinds";
 
+import { clientErrorMessage } from "@/lib/client-error-message";
 /**
  * Push通知の種類ごとのON/OFF（#4159）を読み書きするフック。ユーザー単位で、端末をまたいで効く。
  * 切り替えは先に画面へ反映し、保存に失敗したら元へ戻してエラーを出す。
@@ -22,7 +23,7 @@ export function usePushKindPreferences(enabled: boolean) {
         const json = (await res.json()) as { enabled: Record<PushKind, boolean> };
         if (!cancelled) setValue(json.enabled);
       } catch (err) {
-        if (!cancelled) setError(err instanceof Error ? err.message : String(err));
+        if (!cancelled) setError(clientErrorMessage(err));
       }
     })();
     return () => {
@@ -44,7 +45,7 @@ export function usePushKindPreferences(enabled: boolean) {
       setValue(json.enabled);
     } catch (err) {
       setValue((current) => (current ? { ...current, [kind]: !next } : current));
-      setError(err instanceof Error ? err.message : String(err));
+      setError(clientErrorMessage(err));
     }
   }, []);
 

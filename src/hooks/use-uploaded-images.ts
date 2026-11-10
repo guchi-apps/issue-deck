@@ -10,6 +10,7 @@ import type {
   UploadedImageSummary,
 } from "@/types/uploaded-image";
 
+import { clientErrorMessage } from "@/lib/client-error-message";
 /**
  * アップロード済み画像の一覧・容量・削除（#2462・#2475）。
  *
@@ -51,7 +52,7 @@ export function useUploadedImages() {
         setCleanup(json.cleanup);
       })
       .catch((err) => {
-        if (!cancelled) setError(err instanceof Error ? err.message : String(err));
+        if (!cancelled) setError(clientErrorMessage(err));
       })
       .finally(() => {
         if (!cancelled) setIsLoading(false);
@@ -74,7 +75,7 @@ export function useUploadedImages() {
       setReloadKey((key) => key + 1);
       return true;
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(clientErrorMessage(err));
       return false;
     } finally {
       setDeletingFilename(null);
@@ -97,7 +98,7 @@ export function useUploadedImages() {
         setReloadKey((key) => key + 1);
         return json.count;
       } catch (err) {
-        setError(err instanceof Error ? err.message : String(err));
+        setError(clientErrorMessage(err));
         return null;
       } finally {
         setIsBusy(false);
@@ -128,7 +129,7 @@ export function useUploadedImages() {
         setReloadKey((key) => key + 1);
         return true;
       } catch (err) {
-        setError(err instanceof Error ? err.message : String(err));
+        setError(clientErrorMessage(err));
         setReloadKey((key) => key + 1);
         return false;
       } finally {

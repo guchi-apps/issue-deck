@@ -9,6 +9,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { fetchRcImportOptions, requestRcImport, type RcImportOptionsResponse } from "@/lib/release-request";
 import { cn } from "@/lib/utils";
 
+import { clientErrorMessage } from "@/lib/client-error-message";
 /**
  * 新方式の候補へ、developへマージ済みの既存PRを選んで取り込む（#4986）。
  *
@@ -44,7 +45,7 @@ export function RcImportPanel({
       setApproved(new Set());
       requestKey.current = null;
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(clientErrorMessage(err));
     } finally {
       setLoading(false);
     }
@@ -57,7 +58,7 @@ export function RcImportPanel({
         if (!cancelled) setData(loaded);
       })
       .catch((err: unknown) => {
-        if (!cancelled) setError(err instanceof Error ? err.message : String(err));
+        if (!cancelled) setError(clientErrorMessage(err));
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -110,7 +111,7 @@ export function RcImportPanel({
     } catch (err) {
       // 通信自体の失敗（応答を受け取れなかった）だけ同じ要求キーで再送できる。サーバーが拒否・失敗を返したら新しい要求にする
       if (!(err instanceof TypeError)) requestKey.current = null;
-      setError(err instanceof Error ? err.message : String(err));
+      setError(clientErrorMessage(err));
     } finally {
       setSubmitting(false);
     }

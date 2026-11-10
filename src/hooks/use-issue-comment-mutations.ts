@@ -5,6 +5,7 @@ import { useState } from "react";
 import { GITHUB_REAUTH_REQUIRED_MESSAGE } from "@/lib/github/reauth-message";
 import type { IssueComment } from "@/types/issue";
 
+import { clientErrorMessage } from "@/lib/client-error-message";
 export type CreateCommentInput = {
   owner: string;
   repo: string;
@@ -68,7 +69,7 @@ export function useIssueCommentMutations() {
       const result = await postJson("/api/issues/comments", "POST", input);
       return result.comment;
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(clientErrorMessage(err));
       return null;
     } finally {
       setIsSubmitting(false);
@@ -81,7 +82,7 @@ export function useIssueCommentMutations() {
     try {
       return (await postJson("/api/issues/comments", "PATCH", input)).comment;
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(clientErrorMessage(err));
       return null;
     } finally {
       setIsSubmitting(false);
@@ -104,7 +105,7 @@ export function useIssueCommentMutations() {
       }
       return true;
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(clientErrorMessage(err));
       return false;
     } finally {
       setIsSubmitting(false);

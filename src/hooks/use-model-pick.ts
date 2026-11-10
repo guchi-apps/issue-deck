@@ -4,6 +4,7 @@ import { useCallback, useRef, useState } from "react";
 
 import type { ModelPickAgent, ModelPickResult } from "@/lib/claude/model-pick";
 
+import { clientErrorMessage } from "@/lib/client-error-message";
 /**
  * 「実装を開始」ダイアログの「おまかせ」（#2723）。**押したときだけ呼ぶ。**
  *
@@ -64,7 +65,7 @@ export function useModelPick(agent: ModelPickAgent = "claude") {
         setResult(data);
         return data;
       } catch (err: unknown) {
-        setError(err instanceof Error ? err.message : String(err));
+        setError(clientErrorMessage(err));
         return null;
       } finally {
         setIsPicking(false);

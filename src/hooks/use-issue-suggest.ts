@@ -4,6 +4,7 @@ import { useCallback, useState } from "react";
 
 import type { IssueSuggestLabelInput, IssueSuggestResult } from "@/lib/claude/issue-suggest";
 
+import { clientErrorMessage } from "@/lib/client-error-message";
 export function useIssueSuggest() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -31,7 +32,7 @@ export function useIssueSuggest() {
         }
         return (await res.json()) as IssueSuggestResult;
       } catch (err) {
-        setError(err instanceof Error ? err.message : String(err));
+        setError(clientErrorMessage(err));
         return null;
       } finally {
         setIsGenerating(false);

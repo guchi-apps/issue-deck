@@ -21,6 +21,7 @@ import {
   type ReleaseHistoryState,
 } from "@/lib/release-history-cache";
 
+import { clientErrorMessage } from "@/lib/client-error-message";
 type ReleaseHistoryResponse = {
   /** この応答が受け持ったリポジトリ（#5230）。ここに含まれる分だけを差し替える */
   repositories?: string[];
@@ -223,7 +224,7 @@ export function useReleaseHistory(enabled: boolean): UseReleaseHistoryResult {
 
     function onFailed(err: unknown) {
       if (cancelled || controller.signal.aborted) return;
-      setError(err instanceof Error ? err.message : String(err));
+      setError(clientErrorMessage(err));
     }
 
     if (wantCached) {
@@ -336,7 +337,7 @@ export function useReleaseHistory(enabled: boolean): UseReleaseHistoryResult {
       if (pendingChecksRef.current.get(key) !== toggle) return;
       pendingChecksRef.current.delete(key);
       setCheckRecords((prev) => applyReleaseCheckToggle(prev, target, !checked));
-      setError(err instanceof Error ? err.message : String(err));
+      setError(clientErrorMessage(err));
     }
   }, []);
 
@@ -364,7 +365,7 @@ export function useReleaseHistory(enabled: boolean): UseReleaseHistoryResult {
       pendingLinesRef.current.delete(key);
       setCheckLineRecords((prev) => applyReleaseCheckLineToggle(prev, target, !checked));
       applyLineToggleToHistory(historyRef, target, !checked);
-      setError(err instanceof Error ? err.message : String(err));
+      setError(clientErrorMessage(err));
       // GitHub本文が正なので、失敗したときは本文の最新状態を取り直して画面を揃える（同時編集の反映）
       refresh();
     }
