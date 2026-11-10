@@ -960,7 +960,7 @@ export function ReleaseRcFinalizePanel({
     <section
       id="release-rc-finalize"
       aria-label="公開準備"
-      className="flex scroll-mt-4 flex-col gap-3 rounded-[10px] border bg-card p-3.5 pb-20 sm:pb-3.5"
+      className="flex scroll-mt-4 flex-col gap-3 rounded-[10px] border bg-card p-3.5"
       data-testid="release-rc-finalize"
     >
       <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
