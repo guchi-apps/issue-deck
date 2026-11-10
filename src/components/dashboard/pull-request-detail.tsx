@@ -58,7 +58,7 @@ import { parseReleaseVerification, type ReleaseVerificationRow } from "@/lib/git
 import { canMergeFromDeck, isMergeWaitingForChecks, requiresUserMerge } from "@/lib/pull-request-list";
 import { shouldResolveStopCause } from "@/lib/pull-request-stop-cause";
 import { resolveReviewVerdictFreshness, reviewRerunNeeded } from "@/lib/github/review-verdict-freshness";
-import { derivePrimaryState, type PrimaryStateTone } from "@/lib/pull-request-primary-state";
+import { derivePrimaryState, describeUnmetRequiredChecks, type PrimaryStateTone } from "@/lib/pull-request-primary-state";
 import { applyReviewAction, deriveReviewAction } from "@/lib/pull-request-review-action";
 import { cn } from "@/lib/utils";
 import type {
@@ -706,7 +706,14 @@ export function PullRequestDetail({
                     ciState={pullRequest.ciState}
                     expanded={ciDetailOpen}
                     onClick={() => setCiDetailPullRequestId(ciDetailOpen ? null : pullRequest.id)}
-                    summary={ciRerunPending ? "再実行を依頼済み" : null}
+                    summary={
+                      ciRerunPending
+                        ? "再実行を依頼済み"
+                        : // CIが通っても必須チェックが未成功ならマージできない。「CI通過」だけで完了に見せない（#5298）
+                          pullRequest.ciState === "success" && (pullRequest.unmetRequiredChecks?.length ?? 0) > 0
+                          ? `必須チェック待ち: ${describeUnmetRequiredChecks(pullRequest.unmetRequiredChecks ?? [])}`
+                          : null
+                    }
                   />
                   <div className="space-y-3 border-t px-4 py-3 pl-8" hidden={!ciDetailOpen}>
                     {/* CIのジョブ単位の内訳（#2777）。押したときだけ取得する */}

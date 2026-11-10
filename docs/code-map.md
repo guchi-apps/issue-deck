@@ -4680,6 +4680,21 @@ Claude Code・Codex CLIそれぞれの新規実行の一時停止（`AppSetting.
 `scripts/ci/check-ci-definition-sync.mjs`が落とす）。CircleCIによるバックアップCIと共通チェック
 `issue-deck/ci-gate`は#5254で廃止した。
 
+**GitHub側の必須チェックは、ルールセット（`protect develop`）とclassicのブランチ保護の2か所に置けて、
+両方が同時に効く**（#5298）。#5257はルールセットだけを`lint-and-build`へ戻し、classic保護に
+`issue-deck/ci-gate`が残ったため、発行元の無いステータスを待ってdevelop向けPRが全件`blocked`になった。
+必須チェックを変えるときは両方を読み、両方を直す。
+
+```bash
+gh api repos/guchi-apps/issue-deck/rules/branches/develop --jq '[.[]|select(.type=="required_status_checks")|.parameters.required_status_checks[].context]'
+gh api repos/guchi-apps/issue-deck/branches/develop --jq '.protection.required_status_checks.contexts'
+```
+
+画面側では、CI状態（`ciState`）は必須のcommit statusを数えない。PR詳細は`blocked`のときだけ
+`fetchUnmetRequiredChecks`（`src/lib/github/required-checks.ts`）で未成功の必須チェックを引き、代表状態
+（「必須チェック待ち」）とチェック行の「CI」（`cellsFromSummary`の「必須待ち」）・指摘タブのCI行の要約に重ねる。
+PR一覧は引かないため、一覧の「CI」は実CIの結果のまま。
+
 ## 一覧の行に出す親子関係（#3469）
 
 - 一覧の行は`Issue.hierarchy`（`src/types/issue.ts`）で親Issue／子Issueのバッジを出す。材料はGitHubのIssue payload（REST・Webhook）に載る`sub_issues_summary`と`parent_issue_url`で、`sync-issues.ts`が`Issue`テーブルの`subIssuesTotal`・`subIssuesCompleted`・`parentIssueUrl`へ保存し、`issue-mapper.ts`が`lib/issue-hierarchy.ts`の`buildIssueHierarchy`で写す。判定と文言は`resolveIssueHierarchyBadges`
