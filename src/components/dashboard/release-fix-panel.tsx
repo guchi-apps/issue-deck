@@ -858,13 +858,13 @@ export function ReleaseFixSummary({
             {overview.headline}
           </p>
           {/* 停止・判断の理由は現在の操作に必要なので、行数で切らない（#4428） */}
-          {overview.detail && <p className="break-words text-muted-foreground">{overview.detail}</p>}
+          {overview.detail && <p className="break-words text-xs text-muted-foreground">{overview.detail}</p>}
           {overview.autoProgress && <p className="text-muted-foreground" data-testid="release-fix-auto">操作は不要です。自動で進みます。</p>}
           {overview.checksLine && <p className="break-words text-muted-foreground">{overview.checksLine}</p>}
         </>
       )}
       {/* 要約を隠すときも、停止・判断の理由は残す（#5290） */}
-      {hideSummary && overview.detail && <p className="break-words text-muted-foreground">{overview.detail}</p>}
+      {hideSummary && overview.detail && <p className="break-words text-xs text-muted-foreground">{overview.detail}</p>}
       {showPhases && current && current.status !== "superseded" && <ReleaseFixPhases current={current} className="mt-0.5" />}
       {current && current.status !== "superseded" && <ReleaseFixInternalReview current={current} repositoryFullName={state.repositoryFullName} onChanged={state.reload} />}
       <ReleaseCompletionPanel
