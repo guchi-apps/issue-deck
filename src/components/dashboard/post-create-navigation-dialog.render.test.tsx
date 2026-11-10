@@ -61,7 +61,7 @@ describe("PostCreateNavigationDialog（#2862）", () => {
     );
 
     fireEvent.click(screen.getByRole("button", { name: /Issueを開く/ }));
-    expect(onSelect).toHaveBeenCalledWith("detail", false);
+    expect(onSelect).toHaveBeenCalledWith("detail");
   });
 
   it("「元の画面に戻る」も同じ形で渡す", () => {
@@ -71,7 +71,7 @@ describe("PostCreateNavigationDialog（#2862）", () => {
     );
 
     fireEvent.click(screen.getByRole("button", { name: /元の画面に戻る/ }));
-    expect(onSelect).toHaveBeenCalledWith("stay", false);
+    expect(onSelect).toHaveBeenCalledWith("stay");
   });
 
   /** #2932。まとめて起票するときに、一覧へ戻ってリポジトリを選び直す往復をなくす */
@@ -82,29 +82,25 @@ describe("PostCreateNavigationDialog（#2862）", () => {
     );
 
     fireEvent.click(screen.getByRole("button", { name: /続けて作成/ }));
-    expect(onSelect).toHaveBeenCalledWith("another", false);
+    expect(onSelect).toHaveBeenCalledWith("another");
   });
 
-  it("「次回からこの画面を出さない」を入れてから押すと、記憶する指示も一緒に渡す", () => {
-    const onSelect = vi.fn();
+  it("記憶用のチェックボックスは出さない（#5292）", () => {
     render(
-      <PostCreateNavigationDialog issue={makeIssue()} onSelect={onSelect} onDismiss={() => {}} />,
+      <PostCreateNavigationDialog issue={makeIssue()} onSelect={() => {}} onDismiss={() => {}} />,
     );
 
-    fireEvent.click(screen.getByRole("checkbox"));
-    fireEvent.click(screen.getByRole("button", { name: /元の画面に戻る/ }));
-    expect(onSelect).toHaveBeenCalledWith("stay", true);
+    expect(screen.queryByRole("checkbox")).toBeNull();
   });
 
   /** ×・Escapeは「まだ決めていない」であって、行き先を選んだことにはしない */
-  it("選ばずに閉じたときは記憶も遷移もしない", () => {
+  it("選ばずに閉じたときは遷移しない", () => {
     const onSelect = vi.fn();
     const onDismiss = vi.fn();
     render(
       <PostCreateNavigationDialog issue={makeIssue()} onSelect={onSelect} onDismiss={onDismiss} />,
     );
 
-    fireEvent.click(screen.getByRole("checkbox"));
     fireEvent.keyDown(document.body, { key: "Escape" });
 
     expect(onDismiss).toHaveBeenCalled();
