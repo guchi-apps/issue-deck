@@ -624,7 +624,10 @@ export function normalizeReleaseReview(
   } else if (!coverage && totalFiles !== null) {
     unverified.push("ファイル別の確認実績がありません（旧ランナーの結果。確認済みの件数は不明です）");
   }
-  if (legacy) unverified.push("項目別の確認記録がありません（旧ランナーの結果。サブPCのpollerを更新して再実行してください）");
+  // 差分0件の結果は、どの版のランナーも確認項目を持たない。pollerの更新を案内せず、取得の失敗を疑って再実行を求める（#5311）
+  if (legacy && totalFiles === 0) {
+    unverified.push("差分を0件と報告した結果です（差分の取得に失敗した可能性があります。全体レビューを再実行してください）");
+  } else if (legacy) unverified.push("項目別の確認記録がありません（旧ランナーの結果。サブPCのpollerを更新して再実行してください）");
   else if (!versionOk) unverified.push(`確認項目の版が一致しません（結果v${reportedVersion}・現在v${RELEASE_REVIEW_CHECKLIST_VERSION}）`);
   else {
     const open = describeUnconfirmedChecks(checks);

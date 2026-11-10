@@ -196,6 +196,20 @@ describe("decideReleaseCompletion", () => {
     expect(decision).toEqual({ action: "stop", reason: "execution_failure" });
   });
 
+  it("全体レビューの実行障害は、同じ対象で1回だけ自動で再実行し、使い切ったら止める（#5311）", () => {
+    const decide = (checks: CompletionChecks, overrides: Partial<ReleaseCompletionState> = {}) =>
+      decideReleaseCompletion(run(overrides), { now, candidate: openCandidate, series: null, checks });
+    expect(decide({ ...passed, aiReview: "failed", aiReviewAutoRerunAvailable: true })).toEqual({ action: "rerun_review" });
+    // 公開承認の系列でも、再実行はコードを変えないので同じく1回だけ行う
+    expect(decide({ ...passed, aiReview: "failed", aiReviewAutoRerunAvailable: true }, { fromPublishApproval: true })).toEqual({ action: "rerun_review" });
+    expect(decide({ ...passed, aiReview: "failed", aiReviewAutoRerunAvailable: false })).toEqual({ action: "stop", reason: "execution_failure" });
+    // 指摘があるなら起案、統合検証も問題なら統合検証の扱いを優先する
+    expect(decide({ ...passed, aiReview: "failed", findingCount: 1, aiReviewAutoRerunAvailable: true })).toEqual({ action: "create_fix", sourceKind: "review_finding" });
+    expect(
+      decide({ ...passed, aiReview: "failed", integration: "failed", integrationFailureKind: "code", aiReviewAutoRerunAvailable: true }),
+    ).toEqual({ action: "create_fix", sourceKind: "integration_failure" });
+  });
+
   it("未実施・実行中・古い結果・Macの未記録は合格にしない", () => {
     for (const checks of [
       { ...passed, integration: "not_run" as const },

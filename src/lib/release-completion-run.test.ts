@@ -99,6 +99,7 @@ vi.mock("@/lib/db", () => ({
     sessionUsage: { aggregate: vi.fn(async () => ({ _sum: { costUsd: 0 } })) },
     repository: { findFirst: vi.fn(async () => ({ installation: { installationId: 1 } })) },
     appSetting: { findUnique: vi.fn(async () => null) },
+    dispatchJob: { count: (...args: unknown[]) => countDispatchJobs(...args) },
   },
 }));
 vi.mock("@/lib/github/app-auth", () => ({ getInstallationToken: vi.fn(async () => "token") }));
@@ -126,6 +127,9 @@ vi.mock("@/lib/github/issues-api", () => ({
   addIssueLabels: (...args: unknown[]) => addIssueLabels(...(args as [])),
   removeIssueLabel: (...args: unknown[]) => removeIssueLabel(...(args as [])),
 }));
+const countDispatchJobs = vi.fn();
+const rerunReleaseReviewJob = vi.fn();
+vi.mock("@/lib/dispatch/release-review-jobs", () => ({ rerunReleaseReviewJob: (...args: unknown[]) => rerunReleaseReviewJob(...args) }));
 const enqueueDispatchJob = vi.fn();
 vi.mock("@/lib/dispatch/jobs", () => ({ enqueueDispatchJob: (...args: unknown[]) => enqueueDispatchJob(...args) }));
 
@@ -202,6 +206,8 @@ beforeEach(() => {
   fetchPullRequestCiState.mockResolvedValue({ ciState: "success", mergeable: true });
   enqueueDispatchJob.mockResolvedValue({ ok: true, job: { id: "j1" } });
   mergePullRequest.mockResolvedValue({ sha: "merge1" });
+  countDispatchJobs.mockResolvedValue(1);
+  rerunReleaseReviewJob.mockResolvedValue({ ok: true, outcome: "queued", job: { id: "rj" } });
 });
 
 describe("startReleaseCompletionRun", () => {
@@ -407,6 +413,34 @@ describe("runReleaseCompletionSweep", () => {
       expect(addIssueLabels).toHaveBeenCalledWith("o", "r", 100, "token", ["00.check-user", "01.check-blocked"]);
       expect(targets()).toEqual([100]);
     });
+  });
+
+  it("全体レビューの実行障害は同じ対象で1回だけ自動で再実行し、2回目も失敗したら止める（#5311）", async () => {
+    await start();
+    loadReleaseVerificationSummary.mockResolvedValue(summary("failed", "passed"));
+    await runReleaseCompletionSweep({ hostName: "subpc", now });
+    expect(rerunReleaseReviewJob).toHaveBeenCalledWith(
+      { repoFullName: "o/r", prNumber: 10, baseSha: "base1", headSha: "head1" },
+      expect.any(Date),
+      { recordNoHost: false },
+    );
+    expect(createReleaseFixSeries).not.toHaveBeenCalled();
+    expect(runs[0]).toMatchObject({ status: "checking", activeKey: "o/r" });
+
+    // 再実行のジョブが積まれて2件になった後も失敗なら、従来どおり実行障害として人へ渡す
+    countDispatchJobs.mockResolvedValue(2);
+    rerunReleaseReviewJob.mockClear();
+    await runReleaseCompletionSweep({ hostName: "subpc", now: later(1) });
+    expect(rerunReleaseReviewJob).not.toHaveBeenCalled();
+    expect(runs[0]).toMatchObject({ status: "needs_attention", stopReason: "execution_failure", activeKey: null });
+  });
+
+  it("全体レビューの再実行を積めなければ、実行障害として止める（#5311）", async () => {
+    await start();
+    loadReleaseVerificationSummary.mockResolvedValue(summary("failed", "passed"));
+    rerunReleaseReviewJob.mockResolvedValue({ ok: false, rejection: "no_host", message: "x" });
+    await runReleaseCompletionSweep({ hostName: "subpc", now });
+    expect(runs[0]).toMatchObject({ status: "needs_attention", stopReason: "execution_failure" });
   });
 
   it("未導入リポジトリの統合検証失敗は設定不足として止め、修正を起案しない", async () => {

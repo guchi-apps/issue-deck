@@ -953,13 +953,40 @@ main() {
   # **入力へ載せることは確認の実績ではない。** 容量を超えた分は次のバッチで確認し、省略・黙った除外はしない
   release_progress_set diff 1 "リリースの差分を取得しています"
   review_report running ""
-  mapfile -t files < <(git -C "$WORKTREE" diff --name-only "$base_sha...$head_sha")
+  # 差分の取得失敗を「差分なし・合格」に化けさせない（#5311）。プロセス置換では`git diff`の失敗が拾えず、
+  # 空の一覧が「差分がありません」として合格になり、サーバーには版の無い（旧ランナー扱いの）結果として届いていた
+  local diff_list diff_err
+  diff_list="$(mktemp "${TMPDIR:-/tmp}/issue-deck-release-review-diff.XXXXXX")"
+  diff_err="$(mktemp "${TMPDIR:-/tmp}/issue-deck-release-review-differr.XXXXXX")"
+  if ! git -C "$WORKTREE" diff --name-only "$base_sha...$head_sha" >"$diff_list" 2>"$diff_err"; then
+    finish failed "リリースの差分を取得できませんでした（base ${base_sha:0:7} / head ${head_sha:0:7}）" \
+      "$(diag_payload target_missing "" "$diff_err" diff)"
+    rm -f "$diff_list" "$diff_err"
+    return 0
+  fi
+  mapfile -t files <"$diff_list"
   total_files="${#files[@]}"
   if ((total_files == 0)); then
+    # 本当に差が無いのか、取得に失敗して空に見えているだけかを、コミットが変更したファイルで確かめる。
+    # 変更を持つコミットがあるのに差分0件なら、確認していない対象を合格にしないよう失敗として報告する
+    local changed_by_commits="unknown"
+    if git -C "$WORKTREE" log --no-merges --name-only --format= "$base_sha..$head_sha" >"$diff_list" 2>>"$diff_err"; then
+      changed_by_commits="$(grep -c . "$diff_list" || true)"
+    fi
+    if [[ "$changed_by_commits" != "0" ]]; then
+      printf 'git diff --name-only %s...%s returned no files, but commits in %s..%s change files (%s).\n' \
+        "${base_sha:0:7}" "${head_sha:0:7}" "${base_sha:0:7}" "${head_sha:0:7}" "${changed_by_commits:-unknown}" >>"$diff_err"
+      finish failed "リリースの差分が0件と判定されましたが、対象のコミットはファイルを変更しています。差分を正しく取得できていないため、レビューを完了できませんでした" \
+        "$(diag_payload target_missing "" "$diff_err" diff)"
+      rm -f "$diff_list" "$diff_err"
+      return 0
+    fi
+    rm -f "$diff_list" "$diff_err"
     finish succeeded "差分がありません" \
       "$(jq -nc '{state: "passed", summary: "mainとの差分がありません", findings: [], totalFiles: 0, reviewedFiles: 0, targetFiles: [], fileReviews: [], inputFiles: 0}')"
     return 0
   fi
+  rm -f "$diff_list" "$diff_err"
   batch_dir="$WORK_ROOT/${repo}-${pr_number}-${base_sha:0:12}-${head_sha:0:12}-${DIFF_BUDGET_BYTES}.batches"
   mkdir -p "$batch_dir"
   touch "$batch_dir"
