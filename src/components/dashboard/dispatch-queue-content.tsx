@@ -115,8 +115,8 @@ export function DispatchQueueContent({
       <QueueRefreshRow dispatch={dispatch} />
 
       {/*
-        エージェントの一括操作（#2994）。Claude Code・Codex CLIそれぞれの一括停止・新規実行の
-        一時停止トグル。**ホストの様子より上に置く**——暴走に気付いてまず止めたいのはここで、
+        エージェントの一括操作（#2994）。Claude Code・Codex CLIそれぞれの状態カード（横2列）。
+        押すと開く詳細ダイアログに一括停止・新規実行の一時停止トグルがある（#5293）。**ホストの様子より上に置く**——暴走に気付いてまず止めたいのはここで、
         個々のホストの余力を見るのはその次
       */}
       <AgentBulkControlPanel dispatch={dispatch} />

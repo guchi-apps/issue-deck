@@ -1,6 +1,6 @@
 "use client";
 
-import { Play, Square } from "lucide-react";
+import { ChevronRight, Play, Square } from "lucide-react";
 import { useState } from "react";
 
 import {
@@ -13,6 +13,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import type { DispatchStateHandle } from "@/hooks/use-dispatch-state";
 import { AGENT_BASE_COLORS } from "@/lib/agent-model-color";
 import { AGENT_RESUME_INSTRUCTION, selectStoppedSessions } from "@/lib/dispatch/agent-resume";
@@ -24,6 +25,9 @@ import { cn } from "@/lib/utils";
 /**
  * エージェント（Claude Code・Codex CLI）ごとに、実行中セッションの一括停止と新規実行の
  * 一時停止トグルを1行にまとめて出す（#2994）。
+ *
+ * **一覧は状態の表示だけで、操作は押して開く詳細ダイアログにある**（#5293）。ClaudeとCodexは
+ * 横2列のカードで、トグルと停止/再開はダイアログの中。誤タップを減らし、狭い画面でも幅を取らない。
  *
  * **押すのは人。** トグルをOFFにする操作が「動いているセッションへ中断を送る」と
  * 「新規実行をブロックする」を1回で兼ねる——個別の「止める」ボタンは置かない。送るのは
@@ -49,8 +53,8 @@ export function AgentBulkControlPanel({ dispatch }: { dispatch: DispatchStateHan
 
   return (
     <div className="flex flex-col gap-1.5">
-      <p className="text-xs text-muted-foreground">エージェントを一括操作</p>
-      <div className="flex flex-col gap-1.5">
+      <p className="text-xs text-muted-foreground">エージェント（押すと停止・再開などの操作を開きます）</p>
+      <div className="grid grid-cols-2 gap-1.5">
         {DISPATCH_AGENTS.map((agent) => (
           <AgentBulkControlRow key={agent} agent={agent} dispatch={dispatch} />
         ))}
@@ -66,6 +70,7 @@ function AgentBulkControlRow({
   agent: DispatchAgent;
   dispatch: DispatchStateHandle;
 }) {
+  const [detailOpen, setDetailOpen] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [resumeConfirming, setResumeConfirming] = useState(false);
   // 停止の失敗は押した場所に出す（`issue-session-status.tsx`の`controlError`と同じ扱い）
@@ -125,18 +130,30 @@ function AgentBulkControlRow({
     }
   }
 
+  const dot = (
+    // 代表色（#3075）。実行状況の●・AI使用量画面と同じ色相で、ここは濃淡を付けない
+    <span
+      aria-hidden
+      className="size-2 shrink-0 rounded-full ring-1 ring-black/10 dark:ring-white/30"
+      style={{ backgroundColor: AGENT_BASE_COLORS[agent] }}
+    />
+  );
+
   return (
-    <div className="flex flex-col gap-1.5 rounded-lg border bg-background p-2">
-      <div className="flex items-center gap-1 sm:gap-2">
-        {/* 代表色（#3075）。実行状況の●・AI使用量画面と同じ色相で、ここは濃淡を付けない */}
-        <span
-          aria-hidden
-          className="size-2 shrink-0 rounded-full ring-1 ring-black/10 dark:ring-white/30"
-          style={{ backgroundColor: AGENT_BASE_COLORS[agent] }}
-        />
-        {/* 狭い幅でも同じ行に収めるため、ここは折り返さず、停止操作側の文言を小さい幅ではアイコンにする。 */}
-        <div className="flex min-w-0 flex-nowrap items-center gap-1 sm:gap-x-2">
-          <span className="text-sm font-semibold whitespace-nowrap">{describeDispatchAgent(agent)}</span>
+    <>
+      {/* 一覧は状態の表示だけ。操作は押して開く詳細ダイアログへ置く（#5293） */}
+      <button
+        type="button"
+        aria-label={`${describeDispatchAgent(agent)}の詳細を開く`}
+        onClick={() => setDetailOpen(true)}
+        className="flex min-w-0 flex-col gap-1.5 rounded-lg border bg-background p-2 text-left hover:bg-muted/50"
+      >
+        <span className="flex items-center gap-1.5">
+          {dot}
+          <span className="min-w-0 truncate text-sm font-semibold">{describeDispatchAgent(agent)}</span>
+          <ChevronRight className="ml-auto size-4 shrink-0 text-muted-foreground" aria-hidden />
+        </span>
+        <span className="flex flex-wrap items-center gap-1">
           {aliveSessions.length > 0 && (
             <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-medium whitespace-nowrap text-primary">
               実行中
@@ -154,54 +171,91 @@ function AgentBulkControlRow({
               停止中（{pauseReason === "usage_limit" ? "自動" : "手動"}）
             </span>
           )}
-        </div>
-        <div className="ml-auto flex shrink-0 items-center gap-1.5 sm:gap-2.5">
-          {running ? (
-            <button
-              type="button"
-              aria-label={`${describeDispatchAgent(agent)}を停止`}
-              disabled={dispatch.isSubmitting}
-              onClick={() => setConfirming(true)}
-              className="inline-flex h-[26px] items-center gap-1 rounded-md border border-red-500/50 px-1.5 text-xs font-bold text-red-600 disabled:opacity-50 sm:pr-2.5 sm:pl-2 dark:text-red-400"
-            >
-              <Square className="size-3 fill-current" aria-hidden />
-              <span className="hidden sm:inline">停止</span>
-            </button>
-          ) : (
-            <button
-              type="button"
-              aria-label={`${describeDispatchAgent(agent)}を再開`}
-              disabled={dispatch.isSubmitting}
-              onClick={() => setResumeConfirming(true)}
-              className="inline-flex h-[26px] items-center gap-1 rounded-md border border-emerald-500/50 px-1.5 text-xs font-bold text-emerald-700 disabled:opacity-50 sm:pr-2.5 sm:pl-2 dark:text-emerald-400"
-            >
-              <Play className="size-3 fill-current" aria-hidden />
-              <span className="hidden sm:inline">再開</span>
-            </button>
+          {aliveSessions.length === 0 && !pauseReason && (
+            <span className="rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium whitespace-nowrap text-muted-foreground">
+              待機
+            </span>
           )}
-          <button
-            type="button"
-            role="switch"
-            aria-checked={running}
-            aria-label={`${describeDispatchAgent(agent)}の実行状態`}
-            title={running ? "稼働中（押すと停止します）" : "停止中（押すと新規実行のブロックだけ解除します。止めたセッションは「再開」から）"}
-            disabled={dispatch.isSubmitting}
-            onClick={() => (running ? setConfirming(true) : void turnOn())}
-            className={cn(
-              "inline-flex h-[19px] w-[34px] shrink-0 items-center rounded-full transition-colors disabled:opacity-50",
-              running ? "bg-emerald-600" : "bg-muted-foreground/30",
-            )}
-          >
-            <span
+        </span>
+      </button>
+
+      <Dialog open={detailOpen} onOpenChange={setDetailOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              {dot}
+              {describeDispatchAgent(agent)}
+            </DialogTitle>
+            <DialogDescription>
+              動いているセッション {aliveSessions.length}件・新規実行は{running ? "稼働中" : "停止中"}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex items-center gap-2">
+            <span className="text-sm">新規実行</span>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={running}
+              aria-label={`${describeDispatchAgent(agent)}の実行状態`}
+              title={running ? "稼働中（押すと停止します）" : "停止中（押すと新規実行のブロックだけ解除します。止めたセッションは「再開」から）"}
+              disabled={dispatch.isSubmitting}
+              onClick={() => (running ? setConfirming(true) : void turnOn())}
               className={cn(
-                "size-[15px] rounded-full bg-white shadow transition-transform",
-                running ? "translate-x-[17px]" : "translate-x-0.5",
+                "ml-auto inline-flex h-[19px] w-[34px] shrink-0 items-center rounded-full transition-colors disabled:opacity-50",
+                running ? "bg-emerald-600" : "bg-muted-foreground/30",
               )}
-            />
-          </button>
-        </div>
-      </div>
-      {error && <p className="text-xs text-destructive">{error}</p>}
+            >
+              <span
+                className={cn(
+                  "size-[15px] rounded-full bg-white shadow transition-transform",
+                  running ? "translate-x-[17px]" : "translate-x-0.5",
+                )}
+              />
+            </button>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-sm">
+              {running ? "動いているセッションを一括で中断" : "一括停止したセッションを再開"}
+            </span>
+            <div className="ml-auto">
+              {running ? (
+                <button
+                  type="button"
+                  aria-label={`${describeDispatchAgent(agent)}を停止`}
+                  disabled={dispatch.isSubmitting}
+                  onClick={() => setConfirming(true)}
+                  className="inline-flex h-[26px] items-center gap-1 rounded-md border border-red-500/50 px-2.5 text-xs font-bold text-red-600 disabled:opacity-50 dark:text-red-400"
+                >
+                  <Square className="size-3 fill-current" aria-hidden />
+                  停止
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  aria-label={`${describeDispatchAgent(agent)}を再開`}
+                  disabled={dispatch.isSubmitting}
+                  onClick={() => setResumeConfirming(true)}
+                  className="inline-flex h-[26px] items-center gap-1 rounded-md border border-emerald-500/50 px-2.5 text-xs font-bold text-emerald-700 disabled:opacity-50 dark:text-emerald-400"
+                >
+                  <Play className="size-3 fill-current" aria-hidden />
+                  再開
+                </button>
+              )}
+            </div>
+          </div>
+          {aliveSessions.length > 0 && (
+            <ul className="list-disc pl-4 text-xs text-muted-foreground">
+              {aliveSessions.map((session) => (
+                <li key={`${session.host}:${session.tmuxSessionName}`}>
+                  {session.repositoryFullName}#{session.issueNumber}
+                </li>
+              ))}
+            </ul>
+          )}
+          {error && <p className="text-xs text-destructive">{error}</p>}
+        </DialogContent>
+      </Dialog>
+
 
       <AlertDialog open={confirming} onOpenChange={setConfirming}>
         <AlertDialogContent>
@@ -286,6 +340,6 @@ function AgentBulkControlRow({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </div>
+    </>
   );
 }

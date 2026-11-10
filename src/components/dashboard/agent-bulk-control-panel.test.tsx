@@ -93,6 +93,10 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+function openDetail(name: string) {
+  fireEvent.click(screen.getByRole("button", { name: `${name}の詳細を開く` }));
+}
+
 describe("AgentBulkControlPanel", () => {
   it("申告しているサブPCが無ければ何も出さない", () => {
     const { container } = render(<AgentBulkControlPanel dispatch={makeDispatch({ hosts: [] })} />);
@@ -146,8 +150,8 @@ describe("AgentBulkControlPanel", () => {
       />,
     );
 
-    const toggles = screen.getAllByRole("switch");
-    fireEvent.click(toggles[0]);
+    openDetail("Claude Code");
+    fireEvent.click(await screen.findByRole("switch"));
 
     const confirmButton = await screen.findByRole("button", { name: "停止する" });
     fireEvent.click(confirmButton);
@@ -174,8 +178,8 @@ describe("AgentBulkControlPanel", () => {
       />,
     );
 
-    const toggles = screen.getAllByRole("switch");
-    fireEvent.click(toggles[0]);
+    openDetail("Claude Code");
+    fireEvent.click(await screen.findByRole("switch"));
 
     await waitFor(() => {
       expect(setAgentDispatchPaused).toHaveBeenCalledWith({ agent: "claude", paused: false });
@@ -183,14 +187,25 @@ describe("AgentBulkControlPanel", () => {
     expect(screen.queryByRole("button", { name: "停止する" })).toBeNull();
   });
 
-  it("稼働中は「停止」ボタン、停止中は「再開」ボタンを出す", () => {
+  it("稼働中は「停止」ボタン、停止中は「再開」ボタンを詳細ダイアログに出す", () => {
     render(
       <AgentBulkControlPanel
         dispatch={makeDispatch({ agentPause: { claude: null, codex: "manual" } })}
       />,
     );
+    // 一覧には操作を出さない（#5293）
+    expect(screen.queryByRole("switch")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Claude Codeを停止" })).toBeNull();
+    openDetail("Claude Code");
     expect(screen.getByRole("button", { name: "Claude Codeを停止" })).not.toBeNull();
     expect(screen.queryByRole("button", { name: "Claude Codeを再開" })).toBeNull();
+    cleanup();
+    render(
+      <AgentBulkControlPanel
+        dispatch={makeDispatch({ agentPause: { claude: null, codex: "manual" } })}
+      />,
+    );
+    openDetail("Codex CLI");
     expect(screen.getByRole("button", { name: "Codex CLIを再開" })).not.toBeNull();
     expect(screen.queryByRole("button", { name: "Codex CLIを停止" })).toBeNull();
   });
@@ -205,7 +220,8 @@ describe("AgentBulkControlPanel", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Claude Codeを停止" }));
+    openDetail("Claude Code");
+    fireEvent.click(await screen.findByRole("button", { name: "Claude Codeを停止" }));
     expect(setAgentDispatchPaused).not.toHaveBeenCalled();
     fireEvent.click(await screen.findByRole("button", { name: "停止する" }));
 
@@ -226,7 +242,8 @@ describe("AgentBulkControlPanel", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Claude Codeを再開" }));
+    openDetail("Claude Code");
+    fireEvent.click(await screen.findByRole("button", { name: "Claude Codeを再開" }));
     expect(resumeAgentSessions).not.toHaveBeenCalled();
     fireEvent.click(await screen.findByRole("button", { name: "再開する" }));
 
@@ -261,7 +278,8 @@ describe("AgentBulkControlPanel", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Claude Codeを再開" }));
+    openDetail("Claude Code");
+    fireEvent.click(await screen.findByRole("button", { name: "Claude Codeを再開" }));
     expect(await screen.findByText("再開の対象（1件）")).not.toBeNull();
     // 押す前に、送る固定の1行の全文が出ている
     expect(screen.getByText(AGENT_RESUME_INSTRUCTION)).not.toBeNull();
@@ -280,7 +298,8 @@ describe("AgentBulkControlPanel", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Claude Codeを再開" }));
+    openDetail("Claude Code");
+    fireEvent.click(await screen.findByRole("button", { name: "Claude Codeを再開" }));
     fireEvent.click(await screen.findByRole("button", { name: "再開する" }));
 
     expect(await screen.findByText("サブPCがオフラインです")).not.toBeNull();
