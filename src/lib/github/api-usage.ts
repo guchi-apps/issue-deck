@@ -108,6 +108,8 @@ export const GITHUB_API_FEATURES = [
   { key: "deploy_failure_sweep", label: "デプロイ失敗の巡回検知" },
   // iOS配布失敗の巡回検知（#3745）。対象は`webview-ios-repos.ts`のリポジトリだけで、最新runのRESTはETagが効く。
   { key: "ios_distribution_failure_sweep", label: "iOS配布失敗の巡回検知" },
+  // 必須チェックのずれの巡回検知（#5313）。1時間に1回、REST数本。
+  { key: "required_checks_drift_sweep", label: "必須チェックのずれの巡回検知" },
   // developへのマージ後に取り残された進捗の巡回回収（#2294）。GitHub Actionsの
   // `develop-merge-sweep`・`manual-step-label`をここへ移した。対象Issueの
   // PR一覧はETagが効くので、実際に消費するのは進める・通知するときだけ。

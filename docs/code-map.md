@@ -4705,6 +4705,15 @@ gh api -X PATCH repos/guchi-apps/issue-deck/branches/develop/protection/required
 コピペ用ブロックにしてIssueコメントへ残す）。ルールセット側は同じ制約を受けない。更新後は上の
 2つの読み取りコマンドを打ち直し、両方に発行元のあるチェックだけが残っていることを確かめる。
 
+**ずれは巡回で自動検知する**（#5313）。pollerが`POST /api/repositories/required-checks-drift-sweep`を呼び
+（間隔は`REQUIRED_CHECKS_DRIFT_SWEEP_INTERVAL_MINUTES`・既定60分・0で停止）、issue-deckのdevelop・mainについて
+ルールセットとclassic保護の必須チェックを取得して、(1)片方にしか無い項目、(2)`ci/required-checks.json`のグループ名・
+ワークフローのジョブ名・コードが発行するcommit status（`CODE_PUBLISHED_CONTEXTS`）のどれにも無い項目を見つける。
+あれば`00.check-user`＋`01.check-blocked`付きのIssueを1件起票し（本文の署名が同じなら更新せず、解消したら自動でクローズ）、
+**修正はしない**。判定は[`src/lib/required-checks-drift.ts`](../src/lib/required-checks-drift.ts)、取得・通知は
+[`src/lib/github/required-checks-drift-run.ts`](../src/lib/github/required-checks-drift-run.ts)。発行元を取得できないときは
+全項目を誤報しないよう巡回を失敗として止める。
+
 **必須チェックを変えるPRの確認項目**: PR本文の「確認方法」に、次の1行を入れてチェックする。
 
 - [ ] ルールセットとclassic保護の2か所の必須チェックを読み、どちらにも発行元の無いチェックが残っていないことを確認した（classic側の更新が要る場合は、ユーザーへ依頼するコメントを残した）

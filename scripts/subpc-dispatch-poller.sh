@@ -1882,6 +1882,25 @@ sweep_ios_distribution_failures() {
   return 0
 }
 
+# --- 必須チェックのずれの巡回検知 ------------------------------------------------
+# ルールセットとclassic保護の必須チェックのずれ・発行元のない項目を、issue-deckに巡回して
+# 見つけさせ、Issueで通知させる（#5313）。**pollerがやるのは「呼ぶ」ことだけ**。間隔・判断はサーバー側。
+sweep_required_checks_drift() {
+  if ! api_call POST /api/repositories/required-checks-drift-sweep '{}'; then
+    case "$API_RESPONSE_STATUS" in
+      404|000) return 0 ;;
+      *) report_api_failure "必須チェックのずれの巡回検知に失敗しました" ;;
+    esac
+    return 0
+  fi
+  local action issue
+  action="$(printf '%s' "$API_RESPONSE_BODY" | jq -r '.action // "none"' 2>/dev/null || echo none)"
+  [[ "$action" == "none" ]] && return 0
+  issue="$(printf '%s' "$API_RESPONSE_BODY" | jq -r '.issueNumber // ""' 2>/dev/null || true)"
+  echo "必須チェックのずれのIssueを${action}しました: #${issue}"
+  return 0
+}
+
 # --- デプロイ起動漏れの巡回検知と起動し直し ------------------------------------
 # mainへマージしたのに本番デプロイ（`deploy.yml`）が起動していないものをissue-deckに巡回して
 # 見つけさせ、`main`から起動し直させる（#2703）。
@@ -4823,6 +4842,7 @@ run_once() {
     claim_out_of_band_between_sweeps
     # iOS配布失敗の巡回検知（#3745）。**dry-runでは呼ばない**（Issueの起票という外向きの副作用があるため）。
     sweep_ios_distribution_failures
+    sweep_required_checks_drift
     claim_out_of_band_between_sweeps
     # デプロイ起動漏れの巡回検知と起動し直し（#2703）。**dry-runでは呼ばない**
     # （本番デプロイの起動という外向きの副作用があるため）。
