@@ -12,8 +12,6 @@ import type { ClaudeUsage } from "@/lib/claude/usage";
 import type { CodexUsage } from "@/lib/dispatch/codex-usage";
 import {
   ARTIFACT_REQUIRED_LABEL,
-  MERGE_CONFIRM_REQUIRED_LABEL,
-  PREVIEW_REQUIRED_LABEL,
 } from "@/lib/github/start-implementation";
 import type { Issue, IssueComment } from "@/types/issue";
 
@@ -1063,7 +1061,8 @@ describe("StartImplementationDialog", () => {
       renderDialog({ includeDispatchTargets: true });
 
       expect(screen.queryByRole("checkbox", { name: /スクリーンショットが必要/ })).toBeNull();
-      expect(screen.queryByRole("checkbox", { name: /開発環境を起動/ })).not.toBeNull();
+      expect(screen.queryByRole("checkbox", { name: /開発環境を起動/ })).toBeNull();
+      expect(screen.queryByRole("checkbox", { name: /マージ前に確認/ })).toBeNull();
     });
 
     it("新機能のIssueでは「計画を立案」にチェックが入った状態で開き、そのままラベルが付く", async () => {
@@ -1188,7 +1187,7 @@ describe("StartImplementationDialog", () => {
 
       fireEvent.click(screen.getByRole("radio", { name: "次の5時間枠" }));
 
-      expect(screen.getAllByText(/では選べません/)).toHaveLength(2);
+      expect(screen.getAllByText(/では選べません/)).toHaveLength(1);
     });
   });
 
@@ -1264,23 +1263,23 @@ describe("StartImplementationDialog", () => {
 
       expect(screen.queryByText("オプションを押すとONになり、ここに内容が出ます。")).toBeNull();
 
-      const chip = screen.getByRole("checkbox", { name: /開発環境を起動/ });
+      const chip = screen.getByRole("checkbox", { name: /デザインを提示/ });
       fireEvent.click(chip);
 
       // 説明は本文には出さず、チップのtitle（hover・長押し）にだけ残す
-      expect(screen.queryByText(/PR作成前に開発サーバーを起動し/)).toBeNull();
-      expect(chip.getAttribute("title")).toMatch(/PR作成前に開発サーバーを起動し/);
+      expect(screen.queryByText(/コードを書き始める前に見た目を/)).toBeNull();
+      expect(chip.getAttribute("title")).toMatch(/コードを書き始める前に見た目を/);
       clickStart();
 
       await waitFor(() => expect(updateIssue).toHaveBeenCalled());
-      expect(updateIssue.mock.calls[0][0].labels).toContain(PREVIEW_REQUIRED_LABEL);
+      expect(updateIssue.mock.calls[0][0].labels).toContain(ARTIFACT_REQUIRED_LABEL);
     });
 
     it("もう一度押すとOFFに戻り、ラベルも付けない", async () => {
       dispatchState.hosts = [makeHost()];
       renderDialog({ includeDispatchTargets: true });
 
-      const chip = screen.getByRole("checkbox", { name: /マージ前に確認/ });
+      const chip = screen.getByRole("checkbox", { name: /デザインを提示/ });
       fireEvent.click(chip);
       expect(chip.getAttribute("aria-checked")).toBe("true");
       fireEvent.click(chip);
@@ -1289,7 +1288,7 @@ describe("StartImplementationDialog", () => {
       clickStart();
 
       await waitFor(() => expect(enqueue).toHaveBeenCalledTimes(1));
-      expect(updateIssue.mock.calls[0][0].labels).not.toContain(MERGE_CONFIRM_REQUIRED_LABEL);
+      expect(updateIssue.mock.calls[0][0].labels).not.toContain(ARTIFACT_REQUIRED_LABEL);
     });
 
     // 選んだオプションどおりにラベルが付き、その内容で実行されるようにする（#2884）
@@ -1297,11 +1296,11 @@ describe("StartImplementationDialog", () => {
       renderDialog({
         includeDispatchTargets: true,
         issue: makeIssue({
-          labels: [{ name: MERGE_CONFIRM_REQUIRED_LABEL, color: "d93f0b" }] as Issue["labels"],
+          labels: [{ name: ARTIFACT_REQUIRED_LABEL, color: "d93f0b" }] as Issue["labels"],
         }),
       });
 
-      const chip = screen.getByRole("checkbox", { name: /マージ前に確認/ });
+      const chip = screen.getByRole("checkbox", { name: /デザインを提示/ });
       expect(chip.getAttribute("aria-checked")).toBe("true");
       fireEvent.click(chip);
       expect(chip.getAttribute("aria-checked")).toBe("false");
@@ -1309,7 +1308,7 @@ describe("StartImplementationDialog", () => {
       clickStart();
 
       await waitFor(() => expect(updateIssue).toHaveBeenCalled());
-      expect(updateIssue.mock.calls[0][0].labels).not.toContain(MERGE_CONFIRM_REQUIRED_LABEL);
+      expect(updateIssue.mock.calls[0][0].labels).not.toContain(ARTIFACT_REQUIRED_LABEL);
     });
   });
 
