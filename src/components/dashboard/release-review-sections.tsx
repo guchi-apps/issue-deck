@@ -1501,6 +1501,7 @@ export function ReleaseReviewSections({
   onOpenPullRequest,
   extraRows,
   hideOverview = false,
+  hideGuidance = false,
   previousResults: previousResultsProp,
   className,
 }: {
@@ -1523,6 +1524,11 @@ export function ReleaseReviewSections({
    * 別の位置へ並べるため、ここでは検証の区分だけを出す。そのとき修正前の結果かどうかは`previousResults`で受け取る
    */
   hideOverview?: boolean;
+  /**
+   * 「今必要な対応」と、表示のみである旨の注記を出さない（#5290）。本番PR詳細は「いま・担当・次」と
+   * 「次の操作」が同じ内容を持つため
+   */
+  hideGuidance?: boolean;
   previousResults?: boolean;
   className?: string;
 }) {
@@ -1586,7 +1592,7 @@ export function ReleaseReviewSections({
           headRef={headRef}
         />
       )}
-      {verification && !verificationError && !previousResults && <ReleaseGuidancePanel verification={verification} onOpenReview={() => openSection("全体レビュー")} onOpenIntegration={() => openSection("統合検証")} />}
+      {verification && !verificationError && !previousResults && !hideGuidance && <ReleaseGuidancePanel verification={verification} onOpenReview={() => openSection("全体レビュー")} onOpenIntegration={() => openSection("統合検証")} />}
       {gate && !previousResults && (
         <p className={cn("flex items-center gap-1.5 border-b px-3 py-1.5 text-xs font-bold", TONE_CLASS[gate.tone])}>
           <span aria-hidden="true" className="text-[10px]">
@@ -1684,7 +1690,7 @@ export function ReleaseReviewSections({
           最新の状態を取得できませんでした（{verificationError}）。表示は最後に取得できた時点のものです
         </p>
       )}
-      {verification && (
+      {verification && !(hideGuidance && !verification.enforced) && (
         <div className="border-t px-3 py-1.5 text-[10.5px] text-muted-foreground">
           {verification.enforced ? (
             verification.blockers.length > 0 && (

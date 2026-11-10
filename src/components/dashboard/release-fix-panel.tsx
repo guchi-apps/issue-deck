@@ -816,6 +816,8 @@ export function ReleaseFixSummary({
   extraAction,
   completionAsSecondary = false,
   primaryAsSecondary = false,
+  hideSummary = false,
+  hideFixEntry = false,
   className,
 }: {
   state: ReleaseFixOverviewState;
@@ -828,6 +830,17 @@ export function ReleaseFixSummary({
    * 「おまかせで公開承認まで進める」が出ている間は、そちらを主操作にして1つに保つ
    */
   primaryAsSecondary?: boolean;
+  /**
+   * 状態ラベル・見出し・検証の要約を出さない（#5290。停止・判断の理由は残す）。新方式の候補の本番PR詳細では、
+   * 同じ内容を工程の「いま・担当・次」と「現在候補の検証」が持つため
+   */
+  hideSummary?: boolean;
+  /**
+   * 「修正を自動で続ける」の開始と修正の主操作（修正Issueの作成など）を出さない（#5290）。
+   * 「おまかせで公開承認まで進める」が同じ系列を始め、「自分で1件ずつ判断する」が同じ指摘へ案内している間に使う。
+   * 動いている系列・修正の表示は残す
+   */
+  hideFixEntry?: boolean;
   /** 修正の操作が無いときに置く主操作（本番PR詳細の「本番公開へ進む」） */
   extraAction?: ReactNode;
   className?: string;
@@ -835,17 +848,23 @@ export function ReleaseFixSummary({
   const { overview, current, error } = state;
   return (
     <div className={cn("flex flex-col gap-1.5", className)} data-testid="release-fix-summary">
-      <span className={cn("w-fit rounded px-1.5 py-0.5 text-[11px] font-bold", TONE_PILL[overview.tone])}>
-        <span aria-hidden="true">{TONE_MARK[overview.tone]} </span>
-        {overview.pill}
-      </span>
-      <p className="break-words text-[13.5px] font-semibold" data-testid="release-fix-headline">
-        {overview.headline}
-      </p>
-      {/* 停止・判断の理由は現在の操作に必要なので、行数で切らない（#4428） */}
-      {overview.detail && <p className="break-words text-muted-foreground">{overview.detail}</p>}
-      {overview.autoProgress && <p className="text-muted-foreground" data-testid="release-fix-auto">操作は不要です。自動で進みます。</p>}
-      {overview.checksLine && <p className="break-words text-muted-foreground">{overview.checksLine}</p>}
+      {!hideSummary && (
+        <>
+          <span className={cn("w-fit rounded px-1.5 py-0.5 text-[11px] font-bold", TONE_PILL[overview.tone])}>
+            <span aria-hidden="true">{TONE_MARK[overview.tone]} </span>
+            {overview.pill}
+          </span>
+          <p className="break-words text-[13.5px] font-semibold" data-testid="release-fix-headline">
+            {overview.headline}
+          </p>
+          {/* 停止・判断の理由は現在の操作に必要なので、行数で切らない（#4428） */}
+          {overview.detail && <p className="break-words text-muted-foreground">{overview.detail}</p>}
+          {overview.autoProgress && <p className="text-muted-foreground" data-testid="release-fix-auto">操作は不要です。自動で進みます。</p>}
+          {overview.checksLine && <p className="break-words text-muted-foreground">{overview.checksLine}</p>}
+        </>
+      )}
+      {/* 要約を隠すときも、停止・判断の理由は残す（#5290） */}
+      {hideSummary && overview.detail && <p className="break-words text-muted-foreground">{overview.detail}</p>}
       {showPhases && current && current.status !== "superseded" && <ReleaseFixPhases current={current} className="mt-0.5" />}
       {current && current.status !== "superseded" && <ReleaseFixInternalReview current={current} repositoryFullName={state.repositoryFullName} onChanged={state.reload} />}
       <ReleaseCompletionPanel
@@ -853,14 +872,14 @@ export function ReleaseFixSummary({
         repositoryFullName={state.repositoryFullName}
         pullRequestNumber={state.pullRequestNumber}
         target={state.target}
-        canStart={overview.tone === "bad" || current !== null}
+        canStart={!hideFixEntry && (overview.tone === "bad" || current !== null)}
         rcCandidate={state.rcCandidate}
         startAsSecondary={completionAsSecondary}
       />
       {error && <p className="text-destructive">{error}</p>}
       {overview.action.kind === "none" ? (
         extraAction
-      ) : primaryAsSecondary ? (
+      ) : hideFixEntry ? null : primaryAsSecondary ? (
         <details className="text-xs" data-testid="release-fix-primary-secondary">
           <summary className="cursor-pointer text-muted-foreground hover:text-foreground">その他の操作（修正を1世代ずつ手で進める）</summary>
           <div className="mt-1.5">

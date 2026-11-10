@@ -35,13 +35,6 @@ const SEVERITY_TONE = {
   low: "bg-muted text-muted-foreground",
 } as const;
 
-const TALLY_LABEL: Record<ReleaseReviewDecisionKind, string> = {
-  fix_now: "今回直す（自動で修正）",
-  post_release: "公開後に対応する（Issueを起票）",
-  defer: "今回は見送る",
-  reject: "指摘を採用しない",
-};
-
 /** パネルを出すか。未判断の止める指摘があり、修正の自動継続が動いていないときだけ */
 export function shouldShowAutoProceed(verification: ReleaseVerificationSummary | null, runActive: boolean): boolean {
   if (!verification || runActive) return false;
@@ -289,15 +282,6 @@ export function ReleaseAutoProceedPanel({ repositoryFullName, pullRequestNumber,
         </div>
       </div>
 
-      <dl className="grid grid-cols-2 gap-2 @2xl:grid-cols-4" data-testid="release-auto-proceed-tally">
-        {(Object.keys(TALLY_LABEL) as ReleaseReviewDecisionKind[]).map((kind) => (
-          <div key={kind} className="flex flex-col rounded-md border px-2.5 py-1.5">
-            <dt className="order-2 text-xs text-muted-foreground">{TALLY_LABEL[kind]}</dt>
-            <dd className="order-1 text-lg font-bold tabular-nums">{counts[kind]}</dd>
-          </div>
-        ))}
-      </dl>
-
       <ul className="flex flex-col divide-y" aria-label="指摘ごとの判定">
         {rows.map((row) => (
           <DecisionRow
@@ -314,7 +298,7 @@ export function ReleaseAutoProceedPanel({ repositoryFullName, pullRequestNumber,
 
       {recommendations.error && (
         <p className="text-xs text-amber-700 dark:text-amber-400">
-          {recommendations.error}。予約中のときは自動では進めず解除します。表を確かめて押すと、推奨の無い止める指摘は「今回直す」で確定します。
+          {recommendations.error}。表を確かめて押すと、推奨の無い指摘は「今回直す」で確定します。
           <button type="button" className="ml-1 underline underline-offset-2" onClick={recommendations.retry}>
             推奨を取り直す
           </button>
@@ -333,9 +317,7 @@ export function ReleaseAutoProceedPanel({ repositoryFullName, pullRequestNumber,
           </button>
         </p>
       )}
-      <p className="text-[11px] text-muted-foreground">
-        押すと、この表の判定をあなたの判断として記録します（AIの推奨どおりか、推奨が無かったかも残します）。公開承認はこの操作では行いません。
-      </p>
+      <p className="text-[11px] text-muted-foreground">押すと、表の判定をあなたの判断として記録します（公開承認はしません）。</p>
       {outcome && <OutcomeNote outcome={outcome} />}
     </section>
   );

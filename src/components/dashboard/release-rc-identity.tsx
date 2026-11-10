@@ -33,8 +33,11 @@ const CHIP = "inline-flex items-center whitespace-nowrap rounded-full px-2 py-px
 
 const short = (sha: string | null) => (sha ? sha.slice(0, 7) : "—");
 
-/** 見出し下の1行。候補ID・revision・状態・正式版が未確定であること */
-export function ReleaseRcIdentity({ candidate }: { candidate: RcCandidateView }) {
+/**
+ * 見出し下の1行。候補ID・revision・状態・正式版が未確定であること。
+ * `compact`は本番PR詳細用（#5290）。状態の理由は直下の「いま・担当・次」が持つので、補足文と理由を出さない
+ */
+export function ReleaseRcIdentity({ candidate, compact = false }: { candidate: RcCandidateView; compact?: boolean }) {
   const current = candidate.revisions.find((r) => r.revision === candidate.currentRevision) ?? null;
   return (
     <div className="flex flex-col gap-1" data-testid="release-rc-identity">
@@ -44,12 +47,12 @@ export function ReleaseRcIdentity({ candidate }: { candidate: RcCandidateView })
           <span className={cn(CHIP, "bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-300")}>revision {candidate.currentRevision}</span>
         )}
         <span className={cn(CHIP, STATUS_TONE[candidate.status.status])}>{candidate.status.label}</span>
-        <span className="text-[11.5px] text-muted-foreground">正式版は公開準備で確定します</span>
+        {!compact && <span className="text-[11.5px] text-muted-foreground">正式版は公開準備で確定します</span>}
       </div>
       <p className="break-words font-mono text-[11.5px] text-muted-foreground">
         {candidate.branch} → main · base {short(current?.baseSha ?? null)} · head {short(current?.headSha ?? null)}
       </p>
-      <p className="text-[11.5px] text-muted-foreground">{candidate.status.reason}</p>
+      {!compact && <p className="text-[11.5px] text-muted-foreground">{candidate.status.reason}</p>}
       {candidate.status.attention && (
         <p className="text-[11.5px] text-destructive" role="alert">
           {candidate.status.attention}

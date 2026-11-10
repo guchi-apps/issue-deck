@@ -226,6 +226,24 @@ describe("ReleaseRcFinalizePanel", () => {
     expect(screen.getByText("全体レビューの結果を承知で本番公開へ進む（公開承認）").closest("button")!.className).not.toContain("bg-orange-600");
   });
 
+  it("公開準備が始まるまでは、版・公開までの流れ・公開結果を出さない（#5290）", () => {
+    render(<ReleaseRcFinalizePanel candidate={candidate()} finalization={overview()} repositoryFullName="o/r" onChanged={vi.fn()} deferUntilStarted />);
+    expect(screen.getByText("本番公開へ進む（公開承認）")).toBeTruthy();
+    expect(screen.queryByRole("list", { name: "公開までの流れ" })).toBeNull();
+    expect(screen.queryByText("公開結果（Webと配布は別）")).toBeNull();
+  });
+
+  it("開始操作だけの形は、開始できる候補にだけボタンを出す（#5290）", () => {
+    const { container } = render(
+      <ReleaseRcFinalizePanel candidate={candidate({ phase: "preparing", finalizeContract: null })} finalization={overview()} repositoryFullName="o/r" onChanged={vi.fn()} variant="action" />,
+    );
+    expect(container.textContent).toBe("");
+    cleanup();
+    render(<ReleaseRcFinalizePanel candidate={candidate()} finalization={overview()} repositoryFullName="o/r" onChanged={vi.fn()} variant="action" />);
+    expect(screen.getByTestId("release-rc-finalize-action").textContent).toContain("本番公開へ進む（公開承認）");
+    expect(screen.queryByRole("region", { name: "公開準備" })).toBeNull();
+  });
+
   it("押した時点の候補のheadと要求キーを送る", async () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ ok: true }) });
     vi.stubGlobal("fetch", fetchMock);
