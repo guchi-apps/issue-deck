@@ -1552,7 +1552,10 @@ function ReleaseGroupHeader({
         )}
 
         {/* マージ導線は見出し側（`ReleaseMergeButton`）が持つので、この行には渡さない */}
-        {group.pullRequest && <PullRequestLine pullRequest={group.pullRequest} showStatus />}
+        {/* 「次のリリース」カードが状態を持つ束は、番号・タイトルとドラフトの印だけにする（#5303）。
+            CI・レビュー・6チェック・共通結果の対象はRC詳細（本番PR詳細）で見る */}
+        {group.pullRequest && <PullRequestLine pullRequest={group.pullRequest} showStatus={!summarizedInCard} />}
+        {group.pullRequest?.draft && summarizedInCard && <PullRequestMetaBadge>ドラフト</PullRequestMetaBadge>}
         {/* 全体レビュー・統合検証の進捗（#4357）。PRのCI・レビューとは別枠で、開いている
             リリース候補（凍結ブランチ）にだけ出す */}
         {!summarizedInCard &&
@@ -1654,7 +1657,6 @@ function NextReleaseCard({
   deployButton?: React.ReactNode;
   onMerged: (pullRequest: PullRequestSummary) => void;
 }) {
-  const refreshFlow = useContext(BranchFlowRefreshContext);
   const navigation = useGithubReferenceNavigation();
   const pullRequest = group?.pullRequest && group.pullRequest.state === "open" ? group.pullRequest : null;
 
@@ -1780,33 +1782,24 @@ function NextReleaseCard({
         )}
       </div>
 
-      {/* 2. 候補の検証結果 */}
-      {pullRequest && isReleaseCandidateHeadRef(pullRequest.headRef) && (
-        <ReleaseVerificationBrief
-          repositoryFullName={repository.repositoryFullName}
-          pullRequestNumber={pullRequest.number}
-          headRef={pullRequest.headRef}
-          onStatusChanged={refreshFlow ?? undefined}
-        />
-      )}
+      {/* 候補の検証の詳細（全体レビュー・統合検証・再実行）は、ここへ出さずRC詳細（本番PR詳細）で見る（#5303）。
+          検証の要点はRC検証のピルと「いま・担当・次」が伝える */}
 
-      {/* 3. 現在の本番版（補足）。次のリリースで反映・反映待ちの件数は下の一覧と重なるため出さない（#4830）。
+      {/* 現在の本番版は1行にする（#5303）。次のリリースで反映・反映待ちの件数は下の一覧と重なるため出さない（#4830）。
           iOS配布の対象なら、その版の配布状況を隣へ並べる（#4907。過去のリリースを開かなくても見えるように）。
           幅が狭いと縦に積む */}
       <div className="flex min-w-0 flex-col gap-2 @2xl:flex-row @2xl:items-start">
-      <dl className="min-w-0 @2xl:flex-1">
-        <div className="min-w-0 rounded-md border px-2.5 py-1.5">
-          <dt className="text-muted-foreground">mainへ反映済みの版</dt>
-          <dd className="flex flex-wrap items-center gap-x-1.5 text-sm font-semibold">
-            {repository.release.latestVersion ? `v${repository.release.latestVersion}` : "版情報なし"}
-          </dd>
-          {/* デプロイの成否は見出しの行・失敗の帯が出すので、ここではmainへ入った日だけを添える */}
-          {latestReleaseMergedAt && (
-            <dd className="text-muted-foreground">{formatMonthDayTime(latestReleaseMergedAt)} にリリース</dd>
-          )}
-          {deployButton && <dd className="mt-1">{deployButton}</dd>}
-        </div>
-      </dl>
+      <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 rounded-md border px-2.5 py-1.5 @2xl:flex-1">
+        <span className="text-muted-foreground">mainへ反映済み</span>
+        <span className="text-sm font-semibold">
+          {repository.release.latestVersion ? `v${repository.release.latestVersion}` : "版情報なし"}
+        </span>
+        {/* デプロイの成否は見出しの行・失敗の帯が出すので、ここではmainへ入った日だけを添える */}
+        {latestReleaseMergedAt && (
+          <span className="text-muted-foreground">{formatMonthDayTime(latestReleaseMergedAt)}</span>
+        )}
+        {deployButton && <span className="ml-auto">{deployButton}</span>}
+      </div>
       {iosRelease && (
         <IosReleaseGroupPanel
           owner={repository.repositoryFullName.split("/")[0]}
