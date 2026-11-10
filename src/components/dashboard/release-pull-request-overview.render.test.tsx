@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ReleasePullRequestOverview } from "@/components/dashboard/release-pull-request-overview";
@@ -123,7 +123,9 @@ describe("ReleasePullRequestOverview（#4428）", () => {
     expect(sections.slice(0, 3)).toEqual(["現在の状態と次の操作", "現在候補の検証", "今必要な対応"]);
     expect(sections.indexOf("今回リリースする変更")).toBeGreaterThan(sections.indexOf("今必要な対応"));
     // 6チェックはこのPR自身を候補として読む
-    expect(screen.getByTestId("release-candidate-checks").textContent).toContain("候補PR #768");
+    // 対象の行は出さず（#5290）、項目を開いた詳細の判定対象で示す
+    fireEvent.click(within(screen.getByTestId("release-candidate-checks")).getAllByRole("button")[1]);
+    expect(screen.getByRole("group", { name: /の詳細$/ }).textContent).toContain("#768");
     // リリースPRにはCI・コードレビューが無いため出さず、Macは「iOS」と表示する（#4859）
     const checks = screen.getByTestId("release-candidate-checks").textContent ?? "";
     expect(checks).not.toMatch(/CI|コード/);

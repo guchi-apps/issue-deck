@@ -157,7 +157,7 @@ export function ReleaseJourneyInline({ journey, showCandidate = true }: { journe
 }
 
 /** 区切りごとに工程名を添えたバーと、RC検証の内訳・作り直しの注記 */
-export function ReleaseJourneySteps({ journey }: { journey: ReleaseJourney }) {
+export function ReleaseJourneySteps({ journey, hideChecks = false }: { journey: ReleaseJourney; /** RC検証の内訳を出さない（下に検証の項目がある本番PR詳細。#5290） */ hideChecks?: boolean }) {
   return (
     <div className="flex min-w-0 flex-col gap-1.5">
       <ol
@@ -190,7 +190,7 @@ export function ReleaseJourneySteps({ journey }: { journey: ReleaseJourney }) {
           );
         })}
       </ol>
-      {journey.checks && (
+      {journey.checks && !hideChecks && (
         <p className="flex min-w-0 flex-wrap items-center gap-1.5 text-[11px]" data-testid="release-journey-checks">
           <span className="text-muted-foreground">RC検証:</span>
           {journey.checks.map((check) => (
