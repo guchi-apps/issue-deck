@@ -675,7 +675,7 @@ describe("BranchFlowView", () => {
       // 「次のリリース」カードには件数の2マスを出さない（#4830）
       expect(screen.queryByText("次のリリースで反映")).toBeNull();
       expect(screen.queryByText("反映待ち/実装中のPR")).toBeNull();
-      expect(screen.getByText("mainへ反映済みの版")).toBeTruthy();
+      expect(screen.getByText("mainへ反映済み")).toBeTruthy();
     });
 
     it("既定は次のリリースの束だけを出し、リリース済みはアコーディオンで開く（#1586）", () => {
