@@ -41,7 +41,12 @@ export function RemoteSessionPopover({ repositories }: { repositories: Connected
           )}
         </button>
       </PopoverTrigger>
-      <PopoverContent align="end" className="max-h-[75vh] w-[28rem] max-w-[calc(100vw-2rem)] overflow-y-auto">
+      <PopoverContent
+        align="end"
+        className="max-h-[75vh] w-[28rem] max-w-[calc(100vw-2rem)] overflow-y-auto"
+        // 開いた直後に検索欄へフォーカスが当たるとスマホでキーボードが勝手に出るため止める（#5285）
+        onOpenAutoFocus={(event) => event.preventDefault()}
+      >
         <PopoverBody
           sessions={dispatch.remoteSessions}
           repositories={repositories}
