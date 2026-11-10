@@ -2038,8 +2038,8 @@ settings」と案内する）ため、これでブレが無くなる。**この�
 （実装セッションで、`pr-policy.sh`がPRを人の指示で作るリポジトリと判定しないとき）でだけ足す。
 レビュー・統合セッションと手作業セッションには渡らない。
 
-- `gh pr create`——マージは後段（自動レビュー・自動マージ不可カテゴリ）が持つ。`gh pr merge`・
-  `git push`は入れない
+- `gh pr create`——マージは後段（自動レビュー・自動マージ不可カテゴリ）が持つ。`gh pr merge`は
+  入れない。`git push`はこの関数には入れず、下の`agent_push_allowed_tools`で担当ブランチの形だけを足す
 - `provision-secret.sh --repo <このセッションのリポジトリ>`——`--repo`まで前方一致させ、他リポジトリの
   secretには届かせない。絶対パス（汎用ランチャーのプロンプトの形）と`scripts/`からの相対パス
   （issue-deck自身のプロンプトの形）の両方
@@ -2056,6 +2056,24 @@ PR作成を契機にissue-deck側で`11.local`を自動で外す案（#5117の�
 あとも同じセッションでレビュー指摘への対応を続けることがあり、「ローカルで作業を続けている間は
 付けたままにする」運用との境目をサーバー側からは判定できないため。拒否されたまま止まった
 セッションは、#5011の引き上げ（`00.check-user`＋Issueコメント）が拾う。
+
+#### 担当ブランチへの`git push`も完全一致の規則で渡す（#5282）
+
+指示ファイルは「コミット・pushする」と求めるのに、クラシファイアは`git push -u origin issue-<番号>`を
+拒否することが多かった（guchi-apps/morrow#852では2回連続。1操作ずつ別のBash呼び出しでも起きる）。
+拒否のたびに`AskUserQuestion`で人待ちになり、PRまで進まない。
+
+そこで**別の関数`agent_push_allowed_tools`**が、担当ブランチをoriginへpushする3形
+（`git push origin issue-<番号>`・`-u`・`--set-upstream`）だけを**`:*`を付けない完全一致**で返す。
+渡す条件は`agent_pr_allowed_tools`と同じで、加えて**起動時の作業ツリーのブランチが`issue-<番号>`と
+一致するときだけ**足す（規則がmain・developを指すことは無い）。前方一致の`Bash(git push:*)`は
+`develop`へのpushや`--force`まで通すので採らない。素の`git push`（upstream任せ）も、押し先が
+その時点のブランチ次第で規則から範囲を決められないので入れない。指示ファイルは
+`git push -u origin issue-<番号>`をこの形のまま単独の`Bash`呼び出しで実行させる。
+
+使い捨てのbareリポジトリ相手に`claude -p --permission-mode default`で実測し、規則なしでは
+`git push -u origin issue-852`が拒否され、規則ありでは通り、規則ありでも`git push --force origin issue-852`は
+拒否されることを確かめた。
 
 #### 起動時に読むworktree外のファイルは`Read`規則で渡す（#2778）
 

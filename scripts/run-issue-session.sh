@@ -649,6 +649,12 @@ if [[ "${ISSUE_DECK_SESSION_KIND:-implementation}" == "implementation" ]] &&
   # secretの同期（#5082）、担当Issueの`11.local`の解除（#5117）を拒否した。同じ条件のセッションにだけ規則として渡す
   # （中身と範囲の絞り方は`lib/agent-allowed-tools.sh`の`agent_pr_allowed_tools`）。
   SESSION_ALLOWED_TOOLS+=",$(agent_pr_allowed_tools "$(current_repo_slug)" "$SCRIPT_DIR" "$ISSUE_NUMBER")"
+  # 担当ブランチへの`git push`も同じ条件のセッションにだけ渡す（#5282）。作業ツリーのブランチが
+  # `issue-<番号>`でなければ関数が何も返さないので、規則がmain・developを指すことは無い。
+  SESSION_PUSH_ALLOWED_TOOLS="$(agent_push_allowed_tools "$ISSUE_NUMBER" "$(git branch --show-current 2>/dev/null || true)")"
+  if [[ -n "$SESSION_PUSH_ALLOWED_TOOLS" ]]; then
+    SESSION_ALLOWED_TOOLS+=",$SESSION_PUSH_ALLOWED_TOOLS"
+  fi
 fi
 
 if [[ "$AGENT_KIND" == "claude" ]]; then

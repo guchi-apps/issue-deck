@@ -257,4 +257,70 @@ describe("agent_allowed_tools", () => {
       );
     });
   });
+
+  describe("担当ブランチへのpushだけの規則（#5282）", () => {
+    function pushAllowedTools(...args: string[]): string {
+      return execFileSync(
+        "bash",
+        ["-c", 'set -u; source "$0"; agent_push_allowed_tools "$@"', SCRIPT_PATH, ...args],
+        { encoding: "utf-8" },
+      );
+    }
+
+    const pushRules = pushAllowedTools("852", "issue-852").split(",");
+
+    it("担当ブランチをoriginへpushする3形だけを完全一致で許可する", () => {
+      expect(pushRules).toEqual([
+        "Bash(git push origin issue-852)",
+        "Bash(git push -u origin issue-852)",
+        "Bash(git push --set-upstream origin issue-852)",
+      ]);
+      // 前方一致（`:*`）にすると`--force`や別ブランチの指定まで通る。
+      for (const rule of pushRules) {
+        expect(rule.endsWith(":*)")).toBe(false);
+      }
+    });
+
+    it("基本の規則には入らない（レビュー・統合セッションへは渡らない）", () => {
+      for (const rule of pushRules) {
+        expect(rules).not.toContain(rule);
+      }
+    });
+
+    it("force・別ブランチ・他Issue・upstream任せのpushは通さない", () => {
+      const forbidden = [
+        "git push",
+        "git push origin develop",
+        "git push origin main",
+        "git push -f origin issue-852",
+        "git push --force origin issue-852",
+        "git push origin +issue-852",
+        "git push origin issue-852:develop",
+        "git push origin HEAD",
+        "git push origin issue-853",
+        "git push -u origin issue-852 --force",
+      ];
+      for (const command of forbidden) {
+        const inners = pushRules.map((rule) => rule.replace(/^Bash\(/, "").replace(/\)$/, ""));
+        expect(inners, `${command} を通す規則がある`).not.toContain(command);
+      }
+    });
+
+    it("ブランチが担当Issueのものでなければ何も足さない", () => {
+      for (const [issue, branch] of [
+        ["852", "develop"],
+        ["852", "main"],
+        ["852", "issue-853"],
+        ["852", "issue-8520"],
+        ["852", ""],
+        ["", "issue-"],
+        ["0", "issue-0"],
+        ["1,2", "issue-1,2"],
+        ["*", "issue-*"],
+      ]) {
+        expect(pushAllowedTools(issue, branch), `${issue} ${branch}`).toBe("");
+      }
+      expect(pushAllowedTools()).toBe("");
+    });
+  });
 });
