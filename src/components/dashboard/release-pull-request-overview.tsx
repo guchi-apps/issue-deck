@@ -5,7 +5,7 @@ import { isRcReleaseCandidateHeadRef, isReleaseCandidateHeadRef } from "@/lib/re
 import { useReleaseRc } from "@/hooks/use-release-rc";
 import { ReleaseRcVerificationEvidence } from "@/components/dashboard/release-rc-evidence";
 import { ReleaseRcFinalizePanel } from "@/components/dashboard/release-rc-finalize";
-import { ReleaseRcCancel } from "@/components/dashboard/release-rc-cancel";
+import { canShowRcCancel, ReleaseRcCancel } from "@/components/dashboard/release-rc-cancel";
 import { ReleaseDevelopSyncNotice } from "@/components/dashboard/release-develop-sync";
 import { ReleaseRcIdentity, ReleaseRcLegacyNotice, ReleaseRcRevisionHistory } from "@/components/dashboard/release-rc-identity";
 
@@ -25,7 +25,7 @@ import { useReleaseCandidates } from "@/hooks/use-release-candidates";
 import { useReleaseChanges } from "@/hooks/use-release-changes";
 import { useReleaseVerification } from "@/hooks/use-release-verification";
 import { buildMergeChecks, cellsFromSummary, type MergeCheckItem, type MergeCheckTone } from "@/lib/pull-request-merge-checks";
-import { buildReleaseCheckCells, describeCandidateTarget } from "@/lib/release-candidate-checks";
+import { buildReleaseCheckCells } from "@/lib/release-candidate-checks";
 import { resolvePullRequestJourney } from "@/lib/release-journey";
 import { cn } from "@/lib/utils";
 import type { PullRequestSummary } from "@/types/pull-request";
@@ -89,9 +89,6 @@ function ReleaseCandidateChecks({ pullRequest }: { pullRequest: PullRequestSumma
           />
         ))}
       </div>
-      {release.candidate && candidateIsSelf && (
-        <p className="mt-1 text-xs text-muted-foreground">共通結果の対象: {describeCandidateTarget(release.candidate)}</p>
-      )}
       {open && <CheckDetail check={candidateIsSelf || !open.common ? open : unavailable(open)} />}
     </div>
   );
@@ -225,12 +222,24 @@ export function ReleasePullRequestOverview({
   // 未判断の止める指摘があれば、判定表と「おまかせで公開承認まで進める」を次の操作にする（#5138。新方式の候補だけ）
   const autoProceed =
     rcCandidate !== null && !state.previousResults && verification !== null && shouldShowAutoProceed(verification, state.completionRun?.active ?? false);
+  // 新方式の候補で工程が出ている間は、状態・次の手を「いま・担当・次」に一本化する（#5290）
+  const unified = rcCandidate !== null && journey !== null;
+  const finalization = rc.overview?.finalization ?? null;
+  // 全体レビューが合格していない候補の「結果を承知で公開へ進む」は、主操作ではないので「その他の操作」へ置く（#5290）
+  const waiverStart =
+    unified && finalization !== null && rcCandidate.phase === "review" && rcCandidate.finalizeContract?.requiresAiReviewWaiver === true &&
+    finalization.caller.supported &&
+    // 公開準備の失敗で戻った候補は、その理由を公開準備の欄で見せるため従来どおりに出す
+    finalization.current === null &&
+    finalization.approval == null;
+  const cancelInMore = unified && canShowRcCancel(rcCandidate);
+  const moreCount = (manualPublish ? 1 : 0) + (waiverStart ? 1 : 0) + (cancelInMore ? 1 : 0);
 
   return (
     <div className="-mx-4 flex flex-col gap-3 border-b px-4 py-4 text-xs" data-testid="release-pull-request-overview">
       {/* 正式タイトルとリポジトリ名は共通詳細の見出しが持つ（#4463）。ここはブランチ情報だけを出す */}
       {rcCandidate ? (
-        <ReleaseRcIdentity candidate={rcCandidate} />
+        <ReleaseRcIdentity candidate={rcCandidate} compact={journey !== null} />
       ) : (
         <p className="break-words text-xs text-muted-foreground">
           {headRef} → {pullRequest.baseRef}
@@ -245,7 +254,7 @@ export function ReleasePullRequestOverview({
             承認を経ない手動の公開は「その他の操作」へ下げる（承認そのもののボタンは下の「公開準備」にある） */}
         {journey && (
           <div className="flex flex-col gap-2 text-xs" data-testid="release-pull-request-journey">
-            <ReleaseJourneySteps journey={journey} />
+            <ReleaseJourneySteps journey={journey} hideChecks={rcCandidate !== null} />
             <ReleaseJourneyNow
               journey={journey}
               action={
@@ -261,8 +270,18 @@ export function ReleasePullRequestOverview({
                 ) : null
               }
               more={
-                <JourneyMoreActions count={manualPublish ? 1 : 0}>
+                <JourneyMoreActions count={moreCount}>
+                  {waiverStart && finalization && (
+                    <ReleaseRcFinalizePanel
+                      candidate={rcCandidate}
+                      finalization={finalization}
+                      repositoryFullName={repositoryFullName}
+                      onChanged={rc.reload}
+                      variant="action"
+                    />
+                  )}
                   {manualPublish}
+                  {cancelInMore && <ReleaseRcCancel candidate={rcCandidate} repositoryFullName={repositoryFullName} onChanged={rc.reload} inline />}
                 </JourneyMoreActions>
               }
             />
@@ -282,6 +301,8 @@ export function ReleasePullRequestOverview({
           state={state}
           showPhases
           primaryAsSecondary={autoProceed}
+          hideSummary={unified}
+          hideFixEntry={unified && autoProceed}
           completionAsSecondary={autoProceed || (journey !== null && !(journey.headline?.key === "verify" && journey.owner === "user"))}
           extraAction={
             journey ? null : (
@@ -294,12 +315,19 @@ export function ReleasePullRequestOverview({
       </section>
 
       {/* 公開準備は状態と主操作の直後に置く（合格後の主操作は「公開準備へ進む」。#4635） */}
-      {rcCandidate && rc.overview?.finalization && (
-        <ReleaseRcFinalizePanel candidate={rcCandidate} finalization={rc.overview.finalization} repositoryFullName={repositoryFullName} onChanged={rc.reload} />
+      {/* 結果を承知で進む開始だけの間は「その他の操作」に置いたので、ここには出さない（#5290） */}
+      {rcCandidate && finalization && !waiverStart && (
+        <ReleaseRcFinalizePanel
+          candidate={rcCandidate}
+          finalization={finalization}
+          repositoryFullName={repositoryFullName}
+          onChanged={rc.reload}
+          deferUntilStarted={unified}
+        />
       )}
 
       {/* 公開後のdevelop同期は、本番公開の結果とは別の欄として出す（#4641） */}
-      {rcCandidate && <ReleaseRcCancel candidate={rcCandidate} repositoryFullName={repositoryFullName} onChanged={rc.reload} />}
+      {rcCandidate && !cancelInMore && <ReleaseRcCancel candidate={rcCandidate} repositoryFullName={repositoryFullName} onChanged={rc.reload} />}
       {rcCandidate && rc.overview?.developSync && (
         <ReleaseDevelopSyncNotice repositoryFullName={repositoryFullName} sync={rc.overview.developSync} onChanged={rc.reload} />
       )}
@@ -324,10 +352,12 @@ export function ReleasePullRequestOverview({
           onReload={reload}
           onOpenPullRequest={(n) => openPullRequest(`${repositoryFullName}#${n}`)}
           hideOverview
+          hideGuidance={unified}
           previousResults={state.previousResults}
         />
-        {rcCandidate && (
-          <ReleaseRcVerificationEvidence candidate={rcCandidate} finalization={rc.overview?.finalization?.current ?? null} />
+        {/* バンプ前の対象は見出しのbase/headと同じなので、バンプ後の記録ができてから出す（#5290） */}
+        {rcCandidate && finalization?.current?.status === "applied" && (
+          <ReleaseRcVerificationEvidence candidate={rcCandidate} finalization={finalization.current} />
         )}
       </section>
 
@@ -336,7 +366,8 @@ export function ReleasePullRequestOverview({
       </section>
 
       {/* 並びは 状態と次の操作 → 候補共通検証 → 公開対象 → 履歴（#4560） */}
-      {rcCandidate && <ReleaseRcRevisionHistory candidate={rcCandidate} />}
+      {/* 最初のrevisionだけの間は見出しの内容と同じなので出さない（#5290） */}
+      {rcCandidate && rcCandidate.revisions.length > 1 && <ReleaseRcRevisionHistory candidate={rcCandidate} />}
 
       {state.list && state.list.length > 0 && (
         <section aria-label="修正の履歴" className="overflow-hidden rounded-[10px] border bg-card">

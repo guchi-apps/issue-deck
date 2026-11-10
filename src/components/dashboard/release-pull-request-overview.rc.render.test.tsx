@@ -142,12 +142,46 @@ describe("ReleasePullRequestOverview の新方式候補の工程（#4635）", ()
   it("合格してもドラフト・公開準備前は「本番公開へ進む」を出さず、公開準備へ案内する", async () => {
     rcOverview = { caller: { supported: true, reasonLabel: null } as never, candidate: candidate("review", "ready_to_prepare"), legacy: null };
     render(<ReleasePullRequestOverview pullRequest={makePullRequest(true)} onMerged={vi.fn()} />);
-    await waitFor(() => expect(screen.getByTestId("release-fix-summary").textContent).toContain("公開準備へ進めます"));
+    await waitFor(() => expect(screen.getByTestId("release-pull-request-journey")).toBeTruthy());
+    // 状態の見出しは工程の「いま・担当・次」が持つので、要約帯には重ねない（#5290）
+    expect(screen.queryByTestId("release-fix-headline")).toBeNull();
     expect(screen.queryByText("本番公開へ進む")).toBeNull();
     expect(screen.queryByTestId("release-fix-auto")).toBeNull();
     // 公開できない理由は先頭の工程（#5076）が出すので、手動の公開操作の理由文は重ねない
     expect(screen.getByTestId("release-pull-request-journey")).toBeTruthy();
     expect(screen.queryByTestId("release-publish-blocked")).toBeNull();
+  });
+
+  it("要修正の候補は状態と操作を1か所へ寄せ、重複した表示を出さない（#5290）", async () => {
+    verification = makeVerification(section("needs_check"));
+    const needsFix = {
+      ...(candidate("review", "needs_fix") as object),
+      revisions: [{ revision: 3, status: "applied", reason: "initial", reasonLabel: "初回", importedPrs: [], baseSha: "a".repeat(40), headSha: "b".repeat(40), runUrl: null, failureReason: null, createdAt: "2026-10-12T00:00:00Z" }],
+      finalizeContract: { candidateId: "c1", sequence: 12, revision: 3, prNumber: 768, baseSha: "a".repeat(40), headSha: "b".repeat(40), frozenDevelopSha: "a".repeat(40), includedPrs: [], requiresAiReviewWaiver: true },
+    };
+    rcOverview = {
+      caller: { supported: true, reasonLabel: null } as never,
+      candidate: needsFix as never,
+      legacy: null,
+      finalization: { caller: { supported: true, reasonLabel: null }, mainVersion: "1.0.0", checks: null, history: [], current: null, approval: null } as never,
+    };
+    render(<ReleasePullRequestOverview pullRequest={makePullRequest(true)} onMerged={vi.fn()} />);
+    await waitFor(() => expect(screen.getByTestId("release-pull-request-journey")).toBeTruthy());
+    // 結果を承知で進む開始と候補の取り消しは「その他の操作」にまとめ、公開準備の欄は出さない
+    const more = screen.getByTestId("release-journey-more");
+    expect(more.textContent).toContain("全体レビューの結果を承知で本番公開へ進む（公開承認）");
+    expect(more.textContent).toContain("候補を取り消して作り直す");
+    expect(screen.queryByTestId("release-rc-finalize")).toBeNull();
+    expect(screen.queryByRole("region", { name: "候補の作り直し" })).toBeNull();
+    // 重複していた表示
+    expect(screen.queryByText("正式版は公開準備で確定します")).toBeNull();
+    expect(screen.queryByTestId("release-journey-checks")).toBeNull();
+    expect(screen.queryByTestId("release-fix-headline")).toBeNull();
+    expect(screen.queryByTestId("release-guidance")).toBeNull();
+    expect(screen.queryByText(/共通結果の対象/)).toBeNull();
+    expect(screen.queryByText("公開結果（Webと配布は別）")).toBeNull();
+    expect(screen.queryByTestId("release-rc-evidence")).toBeNull();
+    expect(screen.queryByRole("region", { name: "候補の改訂履歴" })).toBeNull();
   });
 
   it("候補の状況を取得できていない間は公開操作を出さない", async () => {

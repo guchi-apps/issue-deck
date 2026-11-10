@@ -673,11 +673,23 @@ export function ReleaseRcFinalizePanel({
   finalization,
   repositoryFullName,
   onChanged,
+  variant = "full",
+  deferUntilStarted = false,
 }: {
   candidate: RcCandidateView;
   finalization: RcFinalizationOverview;
   repositoryFullName: string;
   onChanged: () => void;
+  /**
+   * `action`は公開準備の開始（公開承認）の操作だけを枠なしで出す（#5290）。本番PR詳細で、全体レビューが
+   * 合格していない候補の「結果を承知で公開へ進む」を「その他の操作」へ置くときに使う。開始できなければ何も出さない
+   */
+  variant?: "full" | "action";
+  /**
+   * 公開準備が始まるまで（`review`段階）は、版・公開までの流れ・公開結果を出さない（#5290）。
+   * 工程は本番PR詳細の先頭の工程バーが持ち、版と公開結果はまだ決まっていないため
+   */
+  deferUntilStarted?: boolean;
 }) {
   const [bumpKind, setBumpKind] = useState<BumpKind | "auto">("auto");
   // 上げ幅は既定の自動判定で足りるため、手動で選ぶ欄はリンクを押したときだけ開く（#4858）
@@ -829,6 +841,120 @@ export function ReleaseRcFinalizePanel({
   };
   const plannedKind = bumpKind === "auto" ? null : bumpKind;
   const reusing = approval?.status === "active";
+  const beforeStart = deferUntilStarted && candidate.phase === "review";
+  const startBox = canStart && (
+    <div className={cn("flex flex-col gap-2", variant === "full" && "rounded-lg border p-3", variant === "full" && contract!.requiresAiReviewWaiver && "border-amber-500/60")}>
+      {contract!.requiresAiReviewWaiver ? (
+        <p className="text-[12px]" data-testid="release-rc-ai-review-waiver-note">
+          {variant === "action" ? (
+            <>全体レビューは公開の必須条件ではありません。結果を承知で進めると、全体レビューでは止まらず、最終検証（バンプ後のCI・統合検証）に合格したら自動で本番公開します。</>
+          ) : (
+            <>
+              revision {contract!.revision} は統合検証に合格していますが、全体レビューが合格していません（{candidate.status.reason}）。
+              全体レビューは公開の必須条件ではないため、結果を確かめたうえで承知して進めれば公開できます。進めると、全体レビューの指摘・失敗・未完了では止まらず、
+              最終検証（バンプ後のCI・統合検証）に合格したら自動で本番公開します。
+            </>
+          )}
+        </p>
+      ) : (
+        <p className="text-[12px]">revision {contract!.revision} が全体レビュー・統合検証に合格しています。</p>
+      )}
+      {pending?.kind === "start" ? (
+        <PendingButton pending={pending} />
+      ) : (
+        <div>
+          <Button
+            size="sm"
+            variant={contract!.requiresAiReviewWaiver ? "outline" : "default"}
+            className={cn("h-auto max-w-full whitespace-normal py-1.5 text-left", !contract!.requiresAiReviewWaiver && PRODUCTION_MERGE_FILLED)}
+            onClick={() => openConfirm("start")}
+            disabled={pending !== null}
+          >
+            {reusing
+              ? "公開準備をやり直す（承認済み）"
+              : contract!.requiresAiReviewWaiver
+                ? "全体レビューの結果を承知で本番公開へ進む（公開承認）"
+                : "本番公開へ進む（公開承認）"}
+          </Button>
+        </div>
+      )}
+      {pending?.kind === "start" ? null : bumpOpen ? (
+        <fieldset className="flex flex-col gap-1.5" data-testid="release-rc-bump-kind">
+          <legend className="mb-1.5 text-[11.5px] text-muted-foreground">上げ幅</legend>
+          <div className="inline-flex flex-wrap self-start overflow-hidden rounded-md border">
+            {BUMP_KIND_OPTIONS.map((option) => (
+              <label
+                key={option.value}
+                className={cn(
+                  "cursor-pointer border-r px-3 py-1 text-[12px] last:border-r-0 focus-within:outline focus-within:outline-2 focus-within:outline-ring",
+                  bumpKind === option.value && "bg-muted font-semibold",
+                )}
+              >
+                <input
+                  type="radio"
+                  name="finalize-bump-kind"
+                  className="sr-only"
+                  value={option.value}
+                  checked={bumpKind === option.value}
+                  onChange={() => setBumpKind(option.value)}
+                  disabled={busy}
+                />
+                {option.label}
+              </label>
+            ))}
+          </div>
+          <p className="text-[11.5px] text-muted-foreground">{bumpKind === "auto" ? "最終公開差分から自動で判定します" : BUMP_KIND_CRITERIA[bumpKind]}</p>
+        </fieldset>
+      ) : (
+        <button
+          type="button"
+          className="self-start text-[11.5px] text-muted-foreground underline underline-offset-2 hover:text-foreground"
+          onClick={() => setBumpOpen(true)}
+        >
+          手動で上げ幅を設定する
+        </button>
+      )}
+    </div>
+  );
+  const confirmDialog = confirmKind && (
+    <ApprovalDialog
+      open={dialogOpen}
+      onOpenChange={setDialogOpen}
+      kind={confirmKind}
+      pending={pending}
+      message={message}
+      repositoryFullName={repositoryFullName}
+      candidate={candidate}
+      target={
+        confirmKind === "start"
+          ? contract
+          : current
+            ? { revision: candidate.currentRevision, baseSha: current.finalBaseSha ?? "", headSha: current.finalHeadSha ?? "" }
+            : null
+      }
+      bumpPolicy={confirmKind === "start" ? bumpKind : (current?.bumpKind ?? "auto")}
+      reusing={confirmKind === "start" && reusing}
+      requiresWaiver={confirmKind === "start" && contract?.requiresAiReviewWaiver === true}
+      waiveAiReview={waiveAiReview}
+      onWaiveAiReviewChange={setWaiveAiReview}
+      onSubmit={() => void (confirmKind === "start" ? start() : approveLegacy())}
+    />
+  );
+  const messageLine = message && (
+    <p className="text-[11.5px] text-destructive" role="alert">
+      {message}
+    </p>
+  );
+  if (variant === "action") {
+    if (!canStart) return null;
+    return (
+      <div className="flex min-w-0 flex-col gap-1.5" data-testid="release-rc-finalize-action">
+        {startBox}
+        {confirmDialog}
+        {messageLine}
+      </div>
+    );
+  }
   return (
     <section
       id="release-rc-finalize"
@@ -842,7 +968,7 @@ export function ReleaseRcFinalizePanel({
         <span className="text-[11.5px] text-muted-foreground">合格した候補だけを、公開の直前に正式バンプします</span>
       </div>
 
-      <VersionBox finalization={current && current.status !== "superseded" ? current : null} plannedKind={plannedKind} mainVersion={finalization.mainVersion} repositoryFullName={repositoryFullName} />
+      {!beforeStart && <VersionBox finalization={current && current.status !== "superseded" ? current : null} plannedKind={plannedKind} mainVersion={finalization.mainVersion} repositoryFullName={repositoryFullName} />}
 
       {approval && <ApprovalBox approval={approval} busy={busy} canResume={canResume} onRevoke={revoke} onResume={resume} />}
 
@@ -881,74 +1007,7 @@ export function ReleaseRcFinalizePanel({
         </p>
       )}
 
-      {canStart && (
-        <div className={cn("flex flex-col gap-2 rounded-lg border p-3", contract!.requiresAiReviewWaiver && "border-amber-500/60")}>
-          {contract!.requiresAiReviewWaiver ? (
-            <p className="text-[12px]" data-testid="release-rc-ai-review-waiver-note">
-              revision {contract!.revision} は統合検証に合格していますが、全体レビューが合格していません（{candidate.status.reason}）。
-              全体レビューは公開の必須条件ではないため、結果を確かめたうえで承知して進めれば公開できます。進めると、全体レビューの指摘・失敗・未完了では止まらず、
-              最終検証（バンプ後のCI・統合検証）に合格したら自動で本番公開します。
-            </p>
-          ) : (
-            <p className="text-[12px]">revision {contract!.revision} が全体レビュー・統合検証に合格しています。</p>
-          )}
-          {pending?.kind === "start" ? (
-            <PendingButton pending={pending} />
-          ) : (
-            <div>
-              <Button
-                size="sm"
-                variant={contract!.requiresAiReviewWaiver ? "outline" : "default"}
-                className={cn("h-auto max-w-full whitespace-normal py-1.5 text-left", !contract!.requiresAiReviewWaiver && PRODUCTION_MERGE_FILLED)}
-                onClick={() => openConfirm("start")}
-                disabled={pending !== null}
-              >
-                {reusing
-                  ? "公開準備をやり直す（承認済み）"
-                  : contract!.requiresAiReviewWaiver
-                    ? "全体レビューの結果を承知で本番公開へ進む（公開承認）"
-                    : "本番公開へ進む（公開承認）"}
-              </Button>
-            </div>
-          )}
-          {pending?.kind === "start" ? null : bumpOpen ? (
-            <fieldset className="flex flex-col gap-1.5" data-testid="release-rc-bump-kind">
-              <legend className="mb-1.5 text-[11.5px] text-muted-foreground">上げ幅</legend>
-              <div className="inline-flex flex-wrap self-start overflow-hidden rounded-md border">
-                {BUMP_KIND_OPTIONS.map((option) => (
-                  <label
-                    key={option.value}
-                    className={cn(
-                      "cursor-pointer border-r px-3 py-1 text-[12px] last:border-r-0 focus-within:outline focus-within:outline-2 focus-within:outline-ring",
-                      bumpKind === option.value && "bg-muted font-semibold",
-                    )}
-                  >
-                    <input
-                      type="radio"
-                      name="finalize-bump-kind"
-                      className="sr-only"
-                      value={option.value}
-                      checked={bumpKind === option.value}
-                      onChange={() => setBumpKind(option.value)}
-                      disabled={busy}
-                    />
-                    {option.label}
-                  </label>
-                ))}
-              </div>
-              <p className="text-[11.5px] text-muted-foreground">{bumpKind === "auto" ? "最終公開差分から自動で判定します" : BUMP_KIND_CRITERIA[bumpKind]}</p>
-            </fieldset>
-          ) : (
-            <button
-              type="button"
-              className="self-start text-[11.5px] text-muted-foreground underline underline-offset-2 hover:text-foreground"
-              onClick={() => setBumpOpen(true)}
-            >
-              手動で上げ幅を設定する
-            </button>
-          )}
-        </div>
-      )}
+      {startBox}
       {needsLegacyApproval && current && (
         <div className="flex flex-col gap-2 rounded-lg border border-amber-500/60 p-3" data-testid="release-rc-legacy-approval">
           <p className="text-[12px]">
@@ -967,39 +1026,13 @@ export function ReleaseRcFinalizePanel({
           )}
         </div>
       )}
-      {confirmKind && (
-        <ApprovalDialog
-          open={dialogOpen}
-          onOpenChange={setDialogOpen}
-          kind={confirmKind}
-          pending={pending}
-          message={message}
-          repositoryFullName={repositoryFullName}
-          candidate={candidate}
-          target={
-            confirmKind === "start"
-              ? contract
-              : current
-                ? { revision: candidate.currentRevision, baseSha: current.finalBaseSha ?? "", headSha: current.finalHeadSha ?? "" }
-                : null
-          }
-          bumpPolicy={confirmKind === "start" ? bumpKind : (current?.bumpKind ?? "auto")}
-          reusing={confirmKind === "start" && reusing}
-          requiresWaiver={confirmKind === "start" && contract?.requiresAiReviewWaiver === true}
-          waiveAiReview={waiveAiReview}
-          onWaiveAiReviewChange={setWaiveAiReview}
-          onSubmit={() => void (confirmKind === "start" ? start() : approveLegacy())}
-        />
-      )}
+      {confirmDialog}
       {!finalization.caller.supported && contract !== null && candidate.phase === "review" && (
         <p className="text-[11.5px] text-muted-foreground">{finalization.caller.reasonLabel}</p>
       )}
-      {message && (
-        <p className="text-[11.5px] text-destructive" role="alert">
-          {message}
-        </p>
-      )}
+      {messageLine}
 
+      {!beforeStart && (
       <ol className="flex flex-col rounded-lg border" aria-label="公開までの流れ">
         {steps.map((step) => (
           <li key={step.label} className="grid grid-cols-[1fr_auto] items-start gap-x-2.5 border-t px-3 py-2 first:border-t-0">
@@ -1020,6 +1053,7 @@ export function ReleaseRcFinalizePanel({
           </li>
         ))}
       </ol>
+      )}
 
       {current && current.status === "applied" && <EvidenceTable finalization={current} checks={finalization.checks} />}
 
@@ -1033,6 +1067,7 @@ export function ReleaseRcFinalizePanel({
         />
       )}
 
+      {!beforeStart && (
       <div className="rounded-lg border">
         <h4 className="border-b px-3 py-2 text-[12.5px] font-semibold">公開結果（Webと配布は別）</h4>
         <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 px-3 py-2 text-[12px]">
@@ -1055,6 +1090,7 @@ export function ReleaseRcFinalizePanel({
           <dd className="text-muted-foreground">Web本番とは別の結果として確認します。build番号は正式版と別の番号で、ここには混ぜません。</dd>
         </dl>
       </div>
+      )}
     </section>
   );
 }

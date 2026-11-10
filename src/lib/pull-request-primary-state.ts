@@ -103,17 +103,25 @@ const REQUIRED_CHECK_STATE_LABEL: Record<UnmetRequiredCheck["state"], string> = 
 };
 
 /**
- * 必須チェック（ルールセット・ブランチ保護）が未成功のPR（#4884）。CI・競合が緑でもGitHubはマージを
- * 拒むため「マージ可能」にしない。待っているチェック名と状態（commit statusならdescription）を理由に出す。
- * 失敗が1件でもあれば人の対応が要る。待機中・未実行だけなら、走るのを待つ状態として出す。
+ * 未成功の必須チェックを「名前（状態: description）」の形で並べる。代表状態とPR詳細のCI表示（#5298）が
+ * 同じ文面で出すために1か所へ置く。
  */
-function requiredCheckState(unmet: UnmetRequiredCheck[]): PrimaryState {
-  const detail = unmet
+export function describeUnmetRequiredChecks(unmet: readonly UnmetRequiredCheck[]): string {
+  return unmet
     .map((check) => {
       const base = `${check.name}（${REQUIRED_CHECK_STATE_LABEL[check.state]}`;
       return check.description ? `${base}: ${check.description}）` : `${base}）`;
     })
     .join("、");
+}
+
+/**
+ * 必須チェック（ルールセット・ブランチ保護）が未成功のPR（#4884）。CI・競合が緑でもGitHubはマージを
+ * 拒むため「マージ可能」にしない。待っているチェック名と状態（commit statusならdescription）を理由に出す。
+ * 失敗が1件でもあれば人の対応が要る。待機中・未実行だけなら、走るのを待つ状態として出す。
+ */
+function requiredCheckState(unmet: UnmetRequiredCheck[]): PrimaryState {
+  const detail = describeUnmetRequiredChecks(unmet);
   if (unmet.some((check) => check.state === "failure")) {
     return state("required-check", "必須チェック失敗", "bad", `必須チェックが成功していないため、GitHubがマージを拒みます: ${detail}`, {
       needsAction: true,

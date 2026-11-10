@@ -4619,7 +4619,7 @@ Claude Code・Codex CLIそれぞれの新規実行の一時停止（`AppSetting.
   したがって**自動一時停止のあとで動いているセッションを止めるには、Issue詳細の個別「停止」ボタン
   （`issue-session-status.tsx`・#1332）を使う**。こちらはエージェント単位の一時停止の状態に
   関わらず、セッションごとに固定のC-cを積む
-- **「停止」「再開」ボタン（#3045）。** トグルの左に、稼働中は「停止」・停止中は「再開」を出し、
+- **「停止」「再開」ボタン（#3045）。** 一覧は横2列のエージェントカード（状態表示のみ）で、カードを押して開く詳細ダイアログ（#5293）の中に、トグルと、稼働中は「停止」・停止中は「再開」を出し、
   どちらも確認ダイアログを挟む（`agent-bulk-control-panel.tsx`）。「停止」はトグルをOFFにするのと
   同じ処理。**「再開」は新規実行のブロック解除に加えて、一括停止で止まったセッションへ固定の1行を送る**
   （`POST /api/dispatch/agent-resume`・`agent-resume-run.ts`）。止まったセッションの判定は
@@ -4679,6 +4679,21 @@ Claude Code・Codex CLIそれぞれの新規実行の一時停止（`AppSetting.
 `scripts/ci/run-required-checks.mjs`経由でこれを実行する（ci.ymlへ直接ステップを足すと
 `scripts/ci/check-ci-definition-sync.mjs`が落とす）。CircleCIによるバックアップCIと共通チェック
 `issue-deck/ci-gate`は#5254で廃止した。
+
+**GitHub側の必須チェックは、ルールセット（`protect develop`）とclassicのブランチ保護の2か所に置けて、
+両方が同時に効く**（#5298）。#5257はルールセットだけを`lint-and-build`へ戻し、classic保護に
+`issue-deck/ci-gate`が残ったため、発行元の無いステータスを待ってdevelop向けPRが全件`blocked`になった。
+必須チェックを変えるときは両方を読み、両方を直す。
+
+```bash
+gh api repos/guchi-apps/issue-deck/rules/branches/develop --jq '[.[]|select(.type=="required_status_checks")|.parameters.required_status_checks[].context]'
+gh api repos/guchi-apps/issue-deck/branches/develop --jq '.protection.required_status_checks.contexts'
+```
+
+画面側では、CI状態（`ciState`）は必須のcommit statusを数えない。PR詳細は`blocked`のときだけ
+`fetchUnmetRequiredChecks`（`src/lib/github/required-checks.ts`）で未成功の必須チェックを引き、代表状態
+（「必須チェック待ち」）とチェック行の「CI」（`cellsFromSummary`の「必須待ち」）・指摘タブのCI行の要約に重ねる。
+PR一覧は引かないため、一覧の「CI」は実CIの結果のまま。
 
 ## 一覧の行に出す親子関係（#3469）
 

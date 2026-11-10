@@ -7,6 +7,7 @@ import {
   reviewStoppedReason,
 } from "@/lib/github/review-verdict-freshness";
 import type { CiState } from "@/lib/github/release-api";
+import { describeUnmetRequiredChecks } from "@/lib/pull-request-primary-state";
 import {
   describeCandidateTarget,
   type ReleaseCheckCell,
@@ -245,8 +246,24 @@ export function cellsFromSummary(pullRequest: PullRequestSummary): {
     ? { ...ciCell("unknown"), mark: "⊘", state: "対象外", tone: "muted", reason: "クローズ済み・マージ済みのPRです" }
     : pullRequest.draft
       ? { ...ciCell(pullRequest.ciState), ...(pullRequest.ciState === "unknown" ? { state: "未実施", mark: "–", tone: "muted" as const, reason: "ドラフトのためCIは未実行です" } : {}) }
-      : ciCell(pullRequest.ciState);
+      : withRequiredChecks(ciCell(pullRequest.ciState), pullRequest);
   return { ci, code, conflict };
+}
+
+/**
+ * CIは成功でも、必須チェック（ルールセット・ブランチ保護）が成功していなければ「成功」と出さない（#5298）。
+ * CI状態は必須のcommit status（`issue-deck/ci-gate`など）を数えないため、それだけを見ると
+ * 未報告の必須チェックを待っているPRでも「CI 成功」と出ていた。CI状態そのもの（代表状態・自動修復の判定）は変えず、
+ * 表示のセルだけに重ねる。必須チェックはPR詳細の取得時（`blocked`のとき）だけ引くため、一覧では効かない。
+ */
+function withRequiredChecks(cell: PerPullRequestCell, pullRequest: PullRequestSummary): PerPullRequestCell {
+  const unmet = pullRequest.unmetRequiredChecks ?? [];
+  if (pullRequest.ciState !== "success" || unmet.length === 0) return cell;
+  const detail = describeUnmetRequiredChecks(unmet);
+  if (unmet.some((check) => check.state === "failure")) {
+    return { ...cell, mark: "■", state: "失敗", tone: "bad", reason: `CIは成功していますが、必須チェックが成功していません: ${detail}` };
+  }
+  return { ...cell, mark: "◷", state: "必須待ち", tone: "run", reason: `CIは成功していますが、必須チェックの結果を待っています: ${detail}` };
 }
 
 const shortSha = (sha: string) => sha.slice(0, 7);

@@ -201,6 +201,27 @@ describe("PRの概要（PR詳細・一覧・ブランチ）から作るセル", 
     expect(cellsFromSummary(summary({ ciState: "unknown" })).ci.state).toBe("取得不可");
   });
 
+  it("CIが成功でも必須チェックが未成功なら「成功」と出さない（#5298）", () => {
+    const missing = cellsFromSummary(
+      summary({ unmetRequiredChecks: [{ name: "issue-deck/ci-gate", state: "missing", description: null }] }),
+    ).ci;
+    expect(missing).toMatchObject({ state: "必須待ち", tone: "run" });
+    expect(missing.reason).toContain("issue-deck/ci-gate（未実行）");
+    const failed = cellsFromSummary(
+      summary({ unmetRequiredChecks: [{ name: "ios-precheck", state: "failure", description: "ビルド失敗" }] }),
+    ).ci;
+    expect(failed).toMatchObject({ state: "失敗", tone: "bad" });
+    expect(failed.reason).toContain("ios-precheck（失敗: ビルド失敗）");
+    expect(cellsFromSummary(summary({ unmetRequiredChecks: [] })).ci.state).toBe("成功");
+    expect(cellsFromSummary(summary({ unmetRequiredChecks: null })).ci.state).toBe("成功");
+    // CI自体が失敗・実行中なら、その状態を優先する
+    expect(
+      cellsFromSummary(
+        summary({ ciState: "pending", unmetRequiredChecks: [{ name: "x", state: "missing", description: null }] }),
+      ).ci.state,
+    ).toBe("実行中");
+  });
+
   it("レビュー実行中・省略・記録なしを区別し、headが進んだ判定は古い判定にする", () => {
     expect(cellsFromSummary(summary({ mergeJudgement: { aiReview: { state: "pending" } } })).code.state).toBe("実行中");
     expect(cellsFromSummary(summary({ mergeJudgement: { aiReview: { state: "none" } } })).code.state).toBe("未実施");
