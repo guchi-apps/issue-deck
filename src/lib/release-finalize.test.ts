@@ -8,7 +8,9 @@ import {
   decideFinalizeFailureHandling,
   decideFinalizeReadiness,
   decideFinalizeReport,
+  decideConflictBlock,
   decideFinalizeStart,
+  FINALIZE_START_ERROR_LABEL,
   decideInheritedVerification,
   decideMergedCandidate,
   decideReservationRelease,
@@ -232,7 +234,7 @@ describe("decideFinalizeStart", () => {
   const input = {
     contract,
     phase: "review",
-    observed: { prHeadSha: PRE, prBaseSha: BASE, mainSha: BASE },
+    observed: { prHeadSha: PRE, prBaseSha: BASE, mainSha: BASE, mergeable: true as boolean | null },
     hasPending: false,
     expectedHeadSha: PRE,
   };
@@ -258,6 +260,13 @@ describe("decideFinalizeStart", () => {
   });
   it("観測できなければ始めない", () => {
     expect(decideFinalizeStart({ ...input, observed: null })).toEqual({ ok: false, error: "unobserved" });
+  });
+  it("競合が判定中・競合ありのときは始めない（#5305）", () => {
+    expect(decideFinalizeStart({ ...input, observed: { ...input.observed, mergeable: null } })).toEqual({ ok: false, error: "conflict_pending" });
+    expect(decideFinalizeStart({ ...input, observed: { ...input.observed, mergeable: false } })).toEqual({ ok: false, error: "conflict_detected" });
+    expect(decideConflictBlock(true)).toBeNull();
+    expect(FINALIZE_START_ERROR_LABEL.conflict_pending).toContain("確認中");
+    expect(FINALIZE_START_ERROR_LABEL.conflict_detected).toContain("競合");
   });
 });
 
