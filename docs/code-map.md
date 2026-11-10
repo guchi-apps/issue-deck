@@ -4690,6 +4690,25 @@ gh api repos/guchi-apps/issue-deck/rules/branches/develop --jq '[.[]|select(.typ
 gh api repos/guchi-apps/issue-deck/branches/develop --jq '.protection.required_status_checks.contexts'
 ```
 
+classic側を直す更新コマンドは次のとおり（`contexts[]`に残したいチェック名を並べる。空にするなら
+`-f 'contexts[]'`だけを渡す。#5298では`issue-deck/ci-gate`を除くためにこれで空にした）。
+
+```bash
+# 空にする（実績のあるコマンド）
+gh api -X PATCH repos/guchi-apps/issue-deck/branches/develop/protection/required_status_checks -F strict=false -f 'contexts[]'
+# 特定のチェックだけにする
+gh api -X PATCH repos/guchi-apps/issue-deck/branches/develop/protection/required_status_checks -F strict=false -f 'contexts[]=lint-and-build'
+```
+
+**classic保護の更新は、エージェントが実行できない。** エージェント実行環境の分類器が「CI Bypass」
+として拒否するため、**ユーザーが実行する手順として書く**（実行してもらうコマンドは`cd`込みの
+コピペ用ブロックにしてIssueコメントへ残す）。ルールセット側は同じ制約を受けない。更新後は上の
+2つの読み取りコマンドを打ち直し、両方に発行元のあるチェックだけが残っていることを確かめる。
+
+**必須チェックを変えるPRの確認項目**: PR本文の「確認方法」に、次の1行を入れてチェックする。
+
+- [ ] ルールセットとclassic保護の2か所の必須チェックを読み、どちらにも発行元の無いチェックが残っていないことを確認した（classic側の更新が要る場合は、ユーザーへ依頼するコメントを残した）
+
 画面側では、CI状態（`ciState`）は必須のcommit statusを数えない。PR詳細は`blocked`のときだけ
 `fetchUnmetRequiredChecks`（`src/lib/github/required-checks.ts`）で未成功の必須チェックを引き、代表状態
 （「必須チェック待ち」）とチェック行の「CI」（`cellsFromSummary`の「必須待ち」）・指摘タブのCI行の要約に重ねる。
