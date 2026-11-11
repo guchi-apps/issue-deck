@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   fetchOpenPullRequests: vi.fn(),
   fetchPullRequestRollups: vi.fn(),
   rerunPullRequestReview: vi.fn(),
+  rerunPullRequestAutoMerge: vi.fn(),
   sendPushNotification: vi.fn(),
 }));
 
@@ -31,6 +32,7 @@ vi.mock("@/lib/github/check-rollup", () => ({
   pullRequestRollupKey: (owner: string, repo: string, number: number) => `${owner}/${repo}#${number}`,
 }));
 vi.mock("@/lib/github/pull-request-review-rerun-run", () => ({ rerunPullRequestReview: mocks.rerunPullRequestReview }));
+vi.mock("@/lib/github/pull-request-auto-merge-rerun", () => ({ rerunPullRequestAutoMerge: mocks.rerunPullRequestAutoMerge }));
 vi.mock("@/lib/github/pull-requests-api", () => ({ fetchOpenPullRequests: mocks.fetchOpenPullRequests }));
 vi.mock("@/lib/notifications/push", () => ({ sendPushNotification: mocks.sendPushNotification }));
 
@@ -39,6 +41,7 @@ import {
   REVIEW_STALL_NOTIFY_GRACE_MS,
   buildReviewStallPushPayload,
   decideReviewStallRescue,
+  resetReviewStallRescueIntervalForTest,
   runReviewStallRescueSweep,
   type ReviewStallInput,
 } from "@/lib/github/pull-request-review-stall-rescue";
@@ -181,5 +184,47 @@ describe("runReviewStallRescueSweep", () => {
     const result = await runReviewStallRescueSweep({ now: new Date(now.getTime() + 1000) });
     expect(result.swept).toBe(false);
     expect(mocks.repositoryFindMany).not.toHaveBeenCalled();
+  });
+
+  /** #5326。予約したまま止まった自動マージを、`auto-merge`ジョブの再実行で拾い直す */
+  describe("予約したまま止まった自動マージ", () => {
+    const judgedAt = new Date(now.getTime() - 11 * 60 * 1000).toISOString();
+    const stuckRollup = {
+      rollup: { state: "success", mergeJudgement: { state: "settled", autoMergeRun: { url: null, completedAt: judgedAt } } },
+    };
+
+    beforeEach(() => {
+      resetReviewStallRescueIntervalForTest();
+      mocks.fetchOpenPullRequests.mockResolvedValue([{ ...pullRequest, auto_merge: { merge_method: "merge" } }]);
+      mocks.fetchPullRequestRollups.mockResolvedValue(new Map([["o/r#5", stuckRollup]]));
+      mocks.rerunPullRequestAutoMerge.mockResolvedValue({ ok: true, runId: 1, jobId: 2 });
+    });
+
+    it("同じHEADでは1回だけ、auto-mergeジョブをやり直す", async () => {
+      const first = await runReviewStallRescueSweep({ force: true, now });
+      expect(mocks.rerunPullRequestAutoMerge).toHaveBeenCalledWith(
+        expect.objectContaining({ owner: "o", repo: "r", number: 5, headSha: "abc" }),
+      );
+      expect(first.autoMergeRerun).toEqual([{ repositoryFullName: "o/r", pullRequestNumber: 5 }]);
+      expect(mocks.rerunPullRequestReview).not.toHaveBeenCalled();
+
+      const second = await runReviewStallRescueSweep({ force: true, now });
+      expect(mocks.rerunPullRequestAutoMerge).toHaveBeenCalledTimes(1);
+      expect(second.autoMergeRerun).toEqual([]);
+    });
+
+    it("予約していないPRには触らない", async () => {
+      mocks.fetchOpenPullRequests.mockResolvedValue([{ ...pullRequest, auto_merge: null }]);
+      await runReviewStallRescueSweep({ force: true, now });
+      expect(mocks.rerunPullRequestAutoMerge).not.toHaveBeenCalled();
+    });
+
+    it("やり直しが例外で落ちても巡回を止めない", async () => {
+      mocks.rerunPullRequestAutoMerge.mockRejectedValue(new Error("boom"));
+      const error = vi.spyOn(console, "error").mockImplementation(() => {});
+      const result = await runReviewStallRescueSweep({ force: true, now });
+      expect(result).toMatchObject({ swept: true, autoMergeRerun: [] });
+      error.mockRestore();
+    });
   });
 });

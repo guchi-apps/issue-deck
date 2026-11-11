@@ -4,6 +4,8 @@ import {
 } from "@/lib/dispatch/check-user-labels";
 import { resolveInstallationToken } from "@/lib/dispatch/installation-token";
 import { createComment } from "@/lib/github/issues-api";
+import { rerunPullRequestAutoMerge } from "@/lib/github/pull-request-auto-merge-rerun";
+import { fetchPullRequestsForHead } from "@/lib/github/pull-requests-api";
 import { parseRepositoryFullName } from "@/lib/local-session";
 import type { SessionInterruptedReason } from "@/lib/dispatch/session-state";
 
@@ -369,8 +371,8 @@ export function buildSessionInterruptedCommentBody(params: {
   }
   lines.push(
     "",
-    "端末・Remote Controlから続けた場合、この`00.check-user`は自動では外れません（人が続け方を",
-    "決めたこと自体が合図なので、画面の承認ボタンか`gh issue edit`で外してください）。",
+    "端末・Remote Controlから続けた場合も、セッションが動き出せばこの`00.check-user`は自動で",
+    "外れます（#5326）。動き出す前にPRが作られていた場合は、そのPRの自動マージの判定もやり直します。",
     "",
     SESSION_INTERRUPTED_MARKER,
     sessionStallReasonMarker(reason),
@@ -410,8 +412,8 @@ export function buildSessionRecoveryCommentBody(params: {
  * 画面から送った固定文面が**実際に届いた**ので、`00.check-user`を理由ラベルごと外す
  * （#2886・#2919）。
  *
- * **押したこと自体が「人が続け方を決めた」合図**なので、引き上げコメントが言っていた
- * 「セッションが動き出してもこの`00.check-user`は自動では外れません」の条件はここで満たされる。
+ * **押したこと自体が「人が続け方を決めた」合図**なので、セッションが動き出すのを待たずに
+ * ここで外す（動き出した時点でも`resolveInterruptedSession`が外す。#5326）。
  * 画面から答えた回は承認プロンプトが出ずフックの合図が飛ばないため、外さないと押したのに
  * 「確認が必要です」の印が居座る（`resolveSessionPlanCheckUser`と同じ理由。#2341）。
  *
@@ -500,5 +502,74 @@ export async function escalateInterruptedSession(params: {
       error,
     );
     return false;
+  }
+}
+
+/**
+ * 停滞の引き上げを受けたセッションが動き出したので、引き上げが付けた`00.check-user`＋
+ * `01.check-blocked`を外す（#5326）。呼ぶのは`hasSessionLeftStall`が真になった報告だけ。
+ *
+ * **これまでは端末・Remote Controlから続けても外れなかった。** セッションはそのまま実装を
+ * 終えてPRを作り、`auto-merge`が対応Issueの`00.check-user`を見て自動マージを見送るため、
+ * 人がマージするかdevelopへ入るまで止まっていた（#5322・#5324・#5263）。動き出したこと
+ * 自体が「人が続け方を決めた」合図で、`resolveNotStartedSession`（#1465）と同じ立場になる。
+ *
+ * - **外すのは理由が`blocked`のときだけ**（`onlyReasons`）。動き出した報告と同じ回に計画・質問の
+ *   `00.check-user`が付くことがあり、`01.check-merge`はレビュー経路の札なので触らない
+ * - 外したときに`issue-<番号>`のopenなdevelop向けPRがあれば、現在のHEADのレビューrunの
+ *   `auto-merge`ジョブだけを再実行する。PRが先に作られていると、`auto-merge`は「確認待ち」で
+ *   見送ったまま終わっており、ラベルを外しても走り直す契機が無い（計画レビュー G1-1）
+ *
+ * **失敗しても例外を投げない**（`resolveNotStartedSession`と同じ）。
+ */
+export async function resolveInterruptedSession(params: {
+  repositoryFullName: string;
+  issueNumber: number;
+}): Promise<{ removed: boolean; rerunPullRequest: number | null }> {
+  const none = { removed: false, rerunPullRequest: null };
+  const parsed = parseRepositoryFullName(params.repositoryFullName);
+  if (!parsed) return none;
+
+  let token: string | null;
+  let removed: boolean;
+  try {
+    token = await resolveInstallationToken(params.repositoryFullName);
+    if (!token) return none;
+    removed = await removeCheckUserWithReason(parsed.owner, parsed.repo, params.issueNumber, token, {
+      onlyReasons: ["blocked"],
+    });
+  } catch (error) {
+    console.error(
+      `[dispatch] 停滞の引き上げの00.check-userを外せませんでした（${params.repositoryFullName}#${params.issueNumber}）`,
+      error,
+    );
+    return none;
+  }
+  if (!removed) return none;
+
+  try {
+    const pullRequests = await fetchPullRequestsForHead(
+      parsed.owner,
+      parsed.repo,
+      "develop",
+      `issue-${params.issueNumber}`,
+      "open",
+      token,
+    );
+    const pullRequest = pullRequests[0];
+    if (!pullRequest) return { removed, rerunPullRequest: null };
+    const outcome = await rerunPullRequestAutoMerge({
+      owner: parsed.owner,
+      repo: parsed.repo,
+      number: pullRequest.number,
+      token,
+    });
+    return { removed, rerunPullRequest: outcome.ok ? pullRequest.number : null };
+  } catch (error) {
+    console.error(
+      `[dispatch] 停滞から動き出したIssueのPRの自動マージ判定をやり直せませんでした（${params.repositoryFullName}#${params.issueNumber}）`,
+      error,
+    );
+    return { removed, rerunPullRequest: null };
   }
 }

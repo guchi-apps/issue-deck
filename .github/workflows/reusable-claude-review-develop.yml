@@ -56,6 +56,7 @@ name: Reusable Claude Code Review (develop向けPR)
 #   (ラベルは毎回再付与する)。実装エージェントが同一PRへ連続してpushする間、同内容の確認要求
 #   コメントが繰り返し投稿され、作業中なのか確認待ちなのか紛らわしくなる問題を防ぐため(#594)。
 #   そのうえで、対応Issueに00.check-userが付いていなければ gh pr merge --auto --merge を実行する。
+#   予約が受け付けられ、マージ可否が確定してマージできる状態なら、直接マージして後押しする(#5326)。
 #   付与をこの最後のジョブまで遅らせているのは、risk-checkの時点で付けると、そのあとに走る
 #   claude-review(数分)のcheck-runが残ったままユーザーへ通知が飛び、issue-deckの画面では
 #   「CI実行中」としてマージボタンが押せない時間が続くため(#1406)。**同じ理由で、
@@ -1837,6 +1838,7 @@ jobs:
           WAITING_FOR_CODEX: ${{ steps.hold.outputs.waiting }}
           HOLD_BLOCKED: ${{ steps.hold.outputs.blocked }}
           HEAD_REF: ${{ github.head_ref }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           # 対応Issueを持たないPRも、システムブランチ以外は自動マージの対象にする(#4952)。
           # 一覧はholdステップと同じ(src/lib/system-branch.tsと対)
@@ -1877,8 +1879,47 @@ jobs:
             exit 0
           fi
 
+          # ここから下は「マージしてよい」と決まった後の実行方法だけで、判定は上で終わっている。
           echo "自動マージ不可カテゴリに該当しないため、auto-mergeを有効化します。"
-          gh pr merge "$PR_NUMBER" --auto --merge
+          # 判定したHEADと違うコミットはマージしない(--match-head-commit)
+          if ! gh pr merge "$PR_NUMBER" --auto --merge --match-head-commit "$HEAD_SHA"; then
+            # 再実行時など既に予約済みなら、それで目的は果たしている(失敗扱いにすると
+            # auto-merge-fallbackが確認待ちを付けてしまう)
+            if [ "$(gh pr view "$PR_NUMBER" --json autoMergeRequest --jq '.autoMergeRequest != null')" != "true" ]; then
+              exit 1
+            fi
+            echo "auto-mergeは既に予約済みです。"
+          fi
+
+          # 予約(--auto)が受け付けられても、必須チェックが成功済みなのにGitHubがマージを起こさず、
+          # 別のPRのマージなどで再評価されるまで15分〜8時間止まることがあった(#5326。#5287・#5306)。
+          # マージ可否(mergeStateStatus)は非同期に計算されUNKNOWNの間が出るので、確定を最大60秒待ち、
+          # 予約したまま開いていてマージできる状態なら、ここで直接マージして後押しする。
+          # **予約が受け付けられた後にだけ行う。** 予約は必須チェックの保護が無いリポジトリでは
+          # 拒まれ(fallbackで人へ回る)、wait-for-ciはCIの失敗でも先へ進むため、先に直接マージすると
+          # 保護の無いリポジトリでCIが落ちたPRまでマージしてしまう。必須チェックが通っていなければ
+          # mergeStateStatusはBLOCKEDになり、ここでは何もしない。
+          # ここで拾えなかったPRは、IssueDeckの巡回がこのジョブだけを再実行して拾い直す。
+          for _ in $(seq 1 12); do
+            PR_STATE="$(gh pr view "$PR_NUMBER" --json state,mergeStateStatus,autoMergeRequest \
+              --jq '[.state, .mergeStateStatus, (.autoMergeRequest != null | tostring)] | join(" ")' 2>/dev/null || echo "OPEN UNKNOWN true")"
+            read -r STATE MERGE_STATE AUTO_MERGE <<< "$PR_STATE"
+            if [ "$STATE" != "OPEN" ]; then
+              echo "PRは既に${STATE}です。"
+              exit 0
+            fi
+            [ "$MERGE_STATE" = "UNKNOWN" ] || break
+            sleep 5
+          done
+          echo "予約後の状態: mergeStateStatus=${MERGE_STATE} autoMerge=${AUTO_MERGE}"
+          if [ "$AUTO_MERGE" = "true" ]; then
+            case "$MERGE_STATE" in
+              CLEAN|UNSTABLE|HAS_HOOKS)
+                gh pr merge "$PR_NUMBER" --merge --match-head-commit "$HEAD_SHA" \
+                  || echo "直接マージできませんでした。auto-mergeの予約のまま残します。"
+                ;;
+            esac
+          fi
 
   auto-merge-fallback:
     needs: [identify-issue, risk-check, auto-merge]

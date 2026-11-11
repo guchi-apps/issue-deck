@@ -11,6 +11,7 @@ const deleteMany = vi.fn();
 const escalateFailedSession = vi.fn();
 const escalateNotStartedSession = vi.fn();
 const resolveNotStartedSession = vi.fn();
+const resolveInterruptedSession = vi.fn();
 const postSessionWrapupComment = vi.fn();
 // 実際に動いているモデルの引き当て（#2723）
 const sessionUsageFindMany = vi.fn();
@@ -58,6 +59,9 @@ vi.mock("@/lib/dispatch/session-escalation", () => ({
   get resolveNotStartedSession() {
     return resolveNotStartedSession;
   },
+  get resolveInterruptedSession() {
+    return resolveInterruptedSession;
+  },
 }));
 
 vi.mock("@/lib/dispatch/session-wrapup", () => ({
@@ -70,6 +74,7 @@ const {
   clearDispatchSessionWaitingTool,
   listDispatchSessions,
   markDispatchSessionEnded,
+  recordDispatchSessionActivity,
   reportDispatchSessions,
 } = await import("./sessions");
 
@@ -111,6 +116,7 @@ beforeEach(() => {
   escalateFailedSession.mockResolvedValue(true);
   escalateNotStartedSession.mockResolvedValue(true);
   resolveNotStartedSession.mockResolvedValue(true);
+  resolveInterruptedSession.mockResolvedValue({ removed: true, rerunPullRequest: null });
   postSessionWrapupComment.mockResolvedValue(false);
   sessionUsageFindMany.mockResolvedValue([]);
   upsert.mockImplementation(async ({ create, update }) => ({ ...existingRow(), ...create, ...update }));
@@ -579,6 +585,81 @@ describe("reportDispatchSessions", () => {
     await reportDispatchSessions({ hostName: "subpc", sessions: [], now: NOW });
 
     expect(findMany).toHaveBeenNthCalledWith(1, { where: { host: "subpc" } });
+  });
+});
+
+/**
+ * #5326。停滞の引き上げ（`00.check-user`＋`01.check-blocked`）を受けたセッションが、端末・Remote
+ * Controlから続けて動き出したら、引き上げの確認待ちを外す。残ると自動マージが止まっていた。
+ */
+describe("停滞から動き出したセッションの確認待ちを外す", () => {
+  const INTERRUPTED_AT = new Date("2026-08-14T11:50:00.000Z");
+  const stalledRow = existingRow({
+    interruptedReason: "api_error",
+    interruptedAt: INTERRUPTED_AT,
+    activity: "WORKING",
+    activityAt: new Date("2026-08-14T11:40:00.000Z"),
+  });
+
+  beforeEach(() => {
+    upsert.mockImplementation(async ({ update }) => ({ ...stalledRow, ...update }));
+  });
+
+  it("pollerのステップ報告が引き上げを追い越したら外す", async () => {
+    findMany.mockResolvedValueOnce([stalledRow]).mockResolvedValueOnce([]);
+
+    await reportDispatchSessions({
+      hostName: "subpc",
+      sessions: [report({ step: "EDITING", stepAt: NOW.toISOString(), stepSeenAt: NOW.toISOString() })],
+      now: NOW,
+    });
+
+    expect(resolveInterruptedSession).toHaveBeenCalledWith({
+      repositoryFullName: "guchi-apps/issue-deck",
+      issueNumber: 1217,
+    });
+  });
+
+  it("まだ動いていない巡では外さない", async () => {
+    findMany.mockResolvedValueOnce([stalledRow]).mockResolvedValueOnce([]);
+
+    await reportDispatchSessions({ hostName: "subpc", sessions: [report()], now: NOW });
+
+    expect(resolveInterruptedSession).not.toHaveBeenCalled();
+  });
+
+  it("フックの様子の報告で動き出したら外す", async () => {
+    updateMany.mockResolvedValue({ count: 1 });
+    findMany
+      .mockResolvedValueOnce([stalledRow])
+      .mockResolvedValueOnce([{ ...stalledRow, activity: "WORKING", activityAt: NOW }]);
+
+    await recordDispatchSessionActivity({
+      repositoryFullName: "guchi-apps/issue-deck",
+      issueNumber: 1217,
+      activity: "WORKING",
+      now: NOW,
+    });
+
+    expect(resolveInterruptedSession).toHaveBeenCalledWith({
+      repositoryFullName: "guchi-apps/issue-deck",
+      issueNumber: 1217,
+    });
+  });
+
+  it("停滞していない行では、前後を読み直さない", async () => {
+    updateMany.mockResolvedValue({ count: 1 });
+    findMany.mockResolvedValueOnce([]);
+
+    await recordDispatchSessionActivity({
+      repositoryFullName: "guchi-apps/issue-deck",
+      issueNumber: 1217,
+      activity: "WORKING",
+      now: NOW,
+    });
+
+    expect(findMany).toHaveBeenCalledTimes(1);
+    expect(resolveInterruptedSession).not.toHaveBeenCalled();
   });
 });
 

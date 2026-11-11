@@ -24,8 +24,10 @@ import {
 import {
   escalateFailedSession,
   escalateNotStartedSession,
+  resolveInterruptedSession,
   resolveNotStartedSession,
 } from "@/lib/dispatch/session-escalation";
+import { describeSessionStall, hasSessionLeftStall } from "@/lib/dispatch/session-stall";
 import { postSessionWrapupComment } from "@/lib/dispatch/session-wrapup";
 
 /**
@@ -126,6 +128,20 @@ export async function recordDispatchSessionActivity(params: {
   now?: Date;
 }): Promise<{ updated: number }> {
   const now = params.now ?? new Date();
+  // 停滞の引き上げを受けた行が、この報告で動き出すかを見るために前の値を控える（#5326）。
+  // 様子を書かない報告（URLだけ）では停滞は解けないので読まない
+  const stalledBefore = params.activity
+    ? (
+        await db.dispatchSession.findMany({
+          where: {
+            repositoryFullName: params.repositoryFullName,
+            issueNumber: params.issueNumber,
+            state: "ALIVE",
+            interruptedAt: { not: null },
+          },
+        })
+      ).filter((row) => describeSessionStall(toSessionView(row)) !== null)
+    : [];
   const result = await db.dispatchSession.updateMany({
     where: {
       repositoryFullName: params.repositoryFullName,
@@ -146,6 +162,21 @@ export async function recordDispatchSessionActivity(params: {
       ...(params.previewUrl ? { previewUrl: params.previewUrl } : {}),
     },
   });
+  if (stalledBefore.length > 0) {
+    const after = await db.dispatchSession.findMany({
+      where: { id: { in: stalledBefore.map((row) => row.id) } },
+    });
+    const left = after.some((row) => {
+      const before = stalledBefore.find((candidate) => candidate.id === row.id);
+      return hasSessionLeftStall(before ? toSessionView(before) : null, toSessionView(row));
+    });
+    if (left) {
+      await resolveInterruptedSession({
+        repositoryFullName: params.repositoryFullName,
+        issueNumber: params.issueNumber,
+      });
+    }
+  }
   return { updated: result.count };
 }
 
@@ -357,6 +388,8 @@ export async function reportDispatchSessions(params: {
   // DBの更新を終えてからまとめて処理する
   const notStarted: { repositoryFullName: string; issueNumber: number; session: string }[] = [];
   const notStartedResolved: { repositoryFullName: string; issueNumber: number }[] = [];
+  // 停滞の引き上げから動き出したセッション（#5326）。引き上げのラベルを外す
+  const stallResolved: { repositoryFullName: string; issueNumber: number }[] = [];
 
   for (const report of params.sessions) {
     reportedNames.add(report.tmuxSessionName);
@@ -501,6 +534,14 @@ export async function reportDispatchSessions(params: {
         ...(report.remoteControlUrl ? { remoteControlUrl: report.remoteControlUrl } : {}),
       },
     });
+
+    // 停滞の引き上げを受けていた行が、この巡のステップの報告で動き出した（#5326）
+    if (hasSessionLeftStall(previous ? toSessionView(previous) : null, toSessionView(stored))) {
+      stallResolved.push({
+        repositoryFullName: stored.repositoryFullName,
+        issueNumber: stored.issueNumber,
+      });
+    }
 
     // セッション行は回収されるため、開始時の担当だけは別に残す（#4037）。
     // NOT_STARTEDは実行前の確認待ちなので担当の切替とは扱わない。
@@ -688,6 +729,9 @@ export async function reportDispatchSessions(params: {
       repositoryFullName: target.repositoryFullName,
       issueNumber: target.issueNumber,
     });
+  }
+  for (const target of stallResolved) {
+    await resolveInterruptedSession(target);
   }
 
   const saved = await db.dispatchSession.findMany({

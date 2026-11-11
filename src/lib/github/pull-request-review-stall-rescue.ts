@@ -1,6 +1,7 @@
 import { db } from "@/lib/db";
 import { getInstallationToken } from "@/lib/github/app-auth";
 import { fetchPullRequestRollups, pullRequestRollupKey } from "@/lib/github/check-rollup";
+import { rerunPullRequestAutoMerge } from "@/lib/github/pull-request-auto-merge-rerun";
 import { rerunPullRequestReview } from "@/lib/github/pull-request-review-rerun-run";
 import { parsePullRequestReviewVerdict } from "@/lib/github/pull-request-review-verdict";
 import { fetchOpenPullRequests } from "@/lib/github/pull-requests-api";
@@ -8,6 +9,7 @@ import { isReviewNotRun, type ReviewStopped } from "@/lib/github/review-verdict-
 import { buildPullRequestId } from "@/lib/github-reference";
 import { sendPushNotification, type PushNotificationPayload } from "@/lib/notifications/push";
 import { notMutedWhere } from "@/lib/notifications/push-kinds";
+import { decideAutoMergeStuckRescue } from "@/lib/pull-request-auto-merge-stuck";
 
 /**
  * 実行機待ちで取り残された自動レビューを巡回で見つけ、1回だけやり直し、直らなければPushで知らせる（#5215）。
@@ -98,13 +100,24 @@ export type ReviewStallSweepResult = {
   swept: boolean;
   retried: ReviewStallTarget[];
   notified: ReviewStallTarget[];
+  /** 予約したまま止まった自動マージの判定をやり直したPR（#5326） */
+  autoMergeRerun: ReviewStallTarget[];
 };
 
 let lastSweptAt: number | null = null;
 
+/**
+ * 予約したまま止まった自動マージを、そのHEADで既にやり直したか（#5326）。**メモリだけに持つ。**
+ * 再起動で忘れても、やり直しは判定をもう一度通すだけ（マージ・ラベルの判断はワークフローが
+ * 読み直す）なので、HEADごとに1回が崩れても害は無い。表を足すほどの重さではない。
+ */
+const autoMergeAttempts = new Set<string>();
+const AUTO_MERGE_ATTEMPTS_LIMIT = 1000;
+
 /** テスト用。プロセスをまたがないので本番では呼ばない */
 export function resetReviewStallRescueIntervalForTest(): void {
   lastSweptAt = null;
+  autoMergeAttempts.clear();
 }
 
 /**
@@ -168,7 +181,7 @@ async function notifyOnce(
 
 export async function runReviewStallRescueSweep(options: { force?: boolean; now?: Date } = {}): Promise<ReviewStallSweepResult> {
   const now = options.now ?? new Date();
-  const result: ReviewStallSweepResult = { swept: false, retried: [], notified: [] };
+  const result: ReviewStallSweepResult = { swept: false, retried: [], notified: [], autoMergeRerun: [] };
   if (!options.force && lastSweptAt !== null && now.getTime() - lastSweptAt < REVIEW_STALL_SWEEP_INTERVAL_MS) return result;
   lastSweptAt = now.getTime();
   result.swept = true;
@@ -190,10 +203,47 @@ export async function runReviewStallRescueSweep(options: { force?: boolean; now?
         token,
       );
       for (const pullRequest of candidates) {
-        const reviewStopped = rollups.get(pullRequestRollupKey(repository.ownerLogin, repository.name, pullRequest.number))?.rollup?.mergeJudgement.reviewStopped;
-        if (reviewStopped?.reason !== "stalled") continue;
-
+        const rollup = rollups.get(pullRequestRollupKey(repository.ownerLogin, repository.name, pullRequest.number))?.rollup;
+        const reviewStopped = rollup?.mergeJudgement.reviewStopped;
         const target = { repositoryFullName: repository.fullName, pullRequestNumber: pullRequest.number };
+        if (reviewStopped?.reason !== "stalled") {
+          // レビューが止まっていないPRのうち、自動マージを予約したまま止まったもの（#5326）
+          const attemptKey = `${target.repositoryFullName}#${target.pullRequestNumber}@${pullRequest.head.sha}`;
+          const stuck = decideAutoMergeStuckRescue({
+            now,
+            pullRequest: {
+              draft: pullRequest.draft,
+              baseRef: pullRequest.base.ref,
+              headSha: pullRequest.head.sha,
+              autoMergeEnabled: pullRequest.auto_merge !== null && pullRequest.auto_merge !== undefined,
+            },
+            rollupState: rollup?.state ?? null,
+            mergeJudgement: rollup?.mergeJudgement,
+            alreadyAttempted: autoMergeAttempts.has(attemptKey),
+          });
+          if (stuck.action !== "rerun") continue;
+          if (autoMergeAttempts.size >= AUTO_MERGE_ATTEMPTS_LIMIT) autoMergeAttempts.clear();
+          // 起動の前に数える（落ちても同じHEADで繰り返さない）
+          autoMergeAttempts.add(attemptKey);
+          try {
+            const outcome = await rerunPullRequestAutoMerge({
+              owner: repository.ownerLogin,
+              repo: repository.name,
+              number: pullRequest.number,
+              headSha: pullRequest.head.sha,
+              token,
+            });
+            if (outcome.ok) {
+              result.autoMergeRerun.push(target);
+            } else {
+              console.warn(`[review-stall-rescue] ${target.repositoryFullName}#${target.pullRequestNumber} の自動マージ判定をやり直せませんでした: ${outcome.code}`);
+            }
+          } catch (error) {
+            console.error(`[review-stall-rescue] ${target.repositoryFullName}#${target.pullRequestNumber} 自動マージ判定のやり直し:`, error);
+          }
+          continue;
+        }
+
         try {
           const record = await db.pullRequestReviewStallRescue.findUnique({
             where: { repositoryFullName_pullRequestNumber: target },
