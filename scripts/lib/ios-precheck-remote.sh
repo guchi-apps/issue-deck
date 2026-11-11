@@ -123,10 +123,24 @@ read_state() {
 
 # ---------------------------------------------------------------------------
 # ロック（Mac単位で1件ずつ）
+#
+# `$LOCK_DIR`をmkdirできたジョブが持ち主で、中の`owner`に`pid=`と`job=`を書く。
+# 持ち主が死んだ（Macの再起動・強制終了）ロックだけを回収する。回収の判定は次の2つを守る（#5319）:
+#
+# - **1秒あけた2回の観測で、`owner`の中身が同じで、かつどちらも死んでいるときだけ外す。**
+#   以前は2回目を「今の持ち主が生きているか」だけで見ていたため、待っている1秒の間に
+#   古いロックが外れ、別のジョブがmkdirした直後（`owner`を書く前）だと、新しい持ち主の
+#   ロックを「持ち主不在」として消し、2件が同時に走りえた
+# - **外すときはmvで退避してから、退避したものが観測したロックと同じかを確かめる。**
+#   rm -rfを直接打つと、確認とrmの間に入れ替わったロックまで消すため
 # ---------------------------------------------------------------------------
-lock_owner_alive() {
+lock_owner_content() {
+  cat "$LOCK_DIR/owner" 2>/dev/null
+}
+
+lock_owner_alive_in() {
   local pid
-  pid="$(sed -n 's/^pid=//p' "$LOCK_DIR/owner" 2>/dev/null | head -n 1)"
+  pid="$(printf '%s\n' "${1-}" | sed -n 's/^pid=//p' | head -n 1)"
   [[ "$pid" =~ ^[0-9]+$ ]] && kill -0 "$pid" 2>/dev/null
 }
 
@@ -134,23 +148,75 @@ lock_dir_mtime() {
   stat -c %Y "$LOCK_DIR" 2>/dev/null || stat -f %m "$LOCK_DIR" 2>/dev/null || date +%s
 }
 
+# 観測した`owner`の中身から、そのロックが回収してよい状態かを返す
+# - `owner`がある: 書かれたPIDが死んでいる
+# - `owner`が空・未作成: mkdirからownerの書き込みまでの「取得中」なので、30秒経つまでは外さない
+#   （負荷が高いと1秒を超えうる）
+lock_looks_stale() {
+  local owner="${1-}"
+  [ -d "$LOCK_DIR" ] || return 1
+  if [ -n "$owner" ]; then
+    ! lock_owner_alive_in "$owner"
+  else
+    [ "$(($(date +%s) - $(lock_dir_mtime)))" -ge 30 ]
+  fi
+}
+
+# ロックの出入りをworker.log（workerの標準エラー）へ1行ずつ残す（#5319）。
+# 競合が起きたときに、どのジョブがいつ・どの分岐で取ったか・外したかを後から辿るため。
+# macOSの`date`は`%N`を持たないので、ミリ秒はperl（run_stepで必須）から取る
+lock_log_time() {
+  perl -MPOSIX=strftime -MTime::HiRes=time -e \
+    'my $t = time; printf "%s.%03dZ", strftime("%Y-%m-%dT%H:%M:%S", gmtime($t)), ($t - int($t)) * 1000' \
+    2>/dev/null || now_iso
+}
+
+lock_log() {
+  local owner
+  owner="$(lock_owner_content | tr '\n' ' ')"
+  printf '[ios-precheck lock] %s job=%s pid=%s %s (owner: %s)\n' \
+    "$(lock_log_time)" "${J_ID-}" "$$" "$*" "${owner:-none}" >&2
+}
+
+# 観測したロック（中身が`$1`）を外す。外せたら0
+reclaim_lock() {
+  local observed="${1-}" stale moved
+  stale="$LOCK_DIR.stale.$$.$(date +%s)"
+  mv "$LOCK_DIR" "$stale" 2>/dev/null || return 1
+  moved="$(cat "$stale/owner" 2>/dev/null)"
+  if [ "$moved" != "$observed" ]; then
+    # 確認とmvの間に別のジョブのロックへ入れ替わっていた。空いていれば元へ戻す
+    lock_log "reclaim: moved a different lock (moved owner: $(printf '%s' "$moved" | tr '\n' ' ')); restoring"
+    if ! [ -e "$LOCK_DIR" ] && mv "$stale" "$LOCK_DIR" 2>/dev/null; then
+      return 1
+    fi
+    # 戻せないなら退避先は消さずに残す（調べるときの手掛かり）。回収はしなかった扱いにする
+    lock_log "reclaim: could not restore the moved lock (left at $stale)"
+    return 1
+  fi
+  rm -rf "$stale"
+  return 0
+}
+
 acquire_lock() {
-  local dir="$1" waited=0
+  local dir="$1" waited=0 observed
   while :; do
     if mkdir "$LOCK_DIR" 2>/dev/null; then
       printf 'pid=%s\njob=%s\n' "$$" "$J_ID" >"$LOCK_DIR/owner"
+      lock_log "acquired (waited ${waited}s)"
       return 0
     fi
-    # 持ち主が死んでいる（Macの再起動・強制終了）ロックだけを外す。持ち主の生死はPIDで見る
-    # ownerファイルが未作成の間は「取得中」で、持ち主がいないわけではない（mkdirの成功から
-    # ownerの書き込みまでの隙間。負荷が高いと1秒を超えうる）。取得中は30秒待ってから外す
-    if [ -d "$LOCK_DIR" ] && ! lock_owner_alive; then
-      if [ -s "$LOCK_DIR/owner" ] || [ "$(( $(date +%s) - $(lock_dir_mtime) ))" -ge 30 ]; then
-        sleep 1
-        if ! lock_owner_alive; then
-          rm -rf "$LOCK_DIR"
+    observed="$(lock_owner_content)"
+    if lock_looks_stale "$observed"; then
+      lock_log "owner looks dead; recheck in 1s"
+      sleep 1
+      if [ "$(lock_owner_content)" = "$observed" ] && lock_looks_stale "$observed"; then
+        if reclaim_lock "$observed"; then
+          lock_log "reclaimed the lock of a dead owner (was: $(printf '%s' "$observed" | tr '\n' ' '))"
           continue
         fi
+      else
+        lock_log "recheck: the lock changed or its owner is alive; keep waiting"
       fi
     fi
     if [ -f "$dir/cancel" ]; then return 2; fi
@@ -160,10 +226,16 @@ acquire_lock() {
   done
 }
 
+# 自分がロックの持ち主のままか
+lock_held() {
+  [ "$(sed -n 's/^job=//p' "$LOCK_DIR/owner" 2>/dev/null | head -n 1)" = "$J_ID" ]
+}
+
 release_lock() {
-  local job
-  job="$(sed -n 's/^job=//p' "$LOCK_DIR/owner" 2>/dev/null | head -n 1)"
-  [ "$job" = "$J_ID" ] && rm -rf "$LOCK_DIR"
+  if lock_held; then
+    lock_log "released"
+    rm -rf "$LOCK_DIR"
+  fi
 }
 
 # ---------------------------------------------------------------------------
@@ -341,6 +413,9 @@ cmd_worker() {
   [ -n "$J_TEST_PLAN" ] && test_plan_args=(-testPlan "$J_TEST_PLAN")
   local run_tests=0
   if [ "$J_KIND" = "test" ] && [ "$J_TESTS" != "none" ]; then run_tests=1; fi
+
+  # 取ったロックがビルドの直前まで自分のものかを記録する（#5319。外れていたら原因を辿れるように）
+  lock_held || lock_log "WARNING: lost the lock before build"
 
   # ビルド
   S_STATE="building"

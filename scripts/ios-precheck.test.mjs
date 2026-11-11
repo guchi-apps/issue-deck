@@ -14,7 +14,7 @@
 // - commit statusは成功・失敗をMacの結果からだけ出し、接続不可はpendingのままにする
 
 import { execFile, execFileSync } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -184,6 +184,18 @@ function ghCalls() {
 function xcodeCalls() {
   const file = path.join(work, "xcodebuild-calls.log");
   return existsSync(file) ? readFileSync(file, "utf8").trim().split("\n") : [];
+}
+
+/** Mac側の全ジョブのworker.logをつなげて返す（失敗時の手掛かり用） */
+function workerLogs() {
+  const jobs = path.join(work, "mac-home", ".issue-deck", "ios-precheck", "jobs");
+  if (!existsSync(jobs)) return "(jobs directory not found)";
+  return readdirSync(jobs)
+    .map((id) => {
+      const file = path.join(jobs, id, "worker.log");
+      return `----- ${id}/worker.log -----\n${existsSync(file) ? readFileSync(file, "utf8") : "(none)"}`;
+    })
+    .join("\n");
 }
 
 describe("ios-precheck.sh run", { timeout: 40_000 }, () => {
@@ -363,11 +375,39 @@ describe("ios-precheck.sh run", { timeout: 40_000 }, () => {
     expect(a.json.verifiedSha).toBe(shaA);
     expect(b.json.verifiedSha).toBe(shaB);
     // start/endが交互に並ぶ（重なっていない）
-    const events = xcodeCalls()
+    const calls = xcodeCalls();
+    const events = calls
       .map((l) => l.split(" "))
       .sort((x, y) => Number(x[0]) - Number(y[0]))
       .map((p) => p[2]);
-    expect(events).toEqual(["start", "end", "start", "end"]);
+    // CIで断続的に重なった（#5244・#5319）。失敗したときに原因を辿れるよう、xcodebuildの呼び出しと
+    // 両ジョブのworker.log（ロックの取得・回収・解放の記録）を失敗メッセージへ載せる
+    expect(events, `xcodebuild:\n${calls.join("\n")}\n${workerLogs()}`).toEqual(["start", "end", "start", "end"]);
+  });
+
+  it("持ち主が死んだロックは回収して実行し、回収したことをworker.logへ残す", async () => {
+    const lock = path.join(work, "mac-home", ".issue-deck", "ios-precheck", "lock");
+    mkdirSync(lock, { recursive: true });
+    // 存在しないPID（pid_maxより大きい）
+    writeFileSync(path.join(lock, "owner"), "pid=99999999\njob=dead-job\n");
+    const { code, json } = await run(["run"]);
+    expect(code).toBe(0);
+    expect(json.state).toBe("succeeded");
+    expect(workerLogs()).toContain("reclaimed the lock of a dead owner");
+    expect(existsSync(lock)).toBe(false);
+  });
+
+  it.each([
+    ["持ち主が生きているロック", `pid=${process.pid}\njob=alive-job\n`],
+    ["ownerを書く前（取得中）のロック", null],
+  ])("%sは外さずにキュー待ちのまま待つ", async (_label, owner) => {
+    const lock = path.join(work, "mac-home", ".issue-deck", "ios-precheck", "lock");
+    mkdirSync(lock, { recursive: true });
+    if (owner !== null) writeFileSync(path.join(lock, "owner"), owner);
+    const { json } = await run(["run"], { IOS_PRECHECK_QUEUE_TIMEOUT: "0" });
+    expect(json).toMatchObject({ state: "waiting", waitingReason: "queue_timeout" });
+    expect(existsSync(lock)).toBe(true);
+    expect(xcodeCalls()).toEqual([]);
   });
 
   it("--no-waitで依頼だけして、status --job --waitで再接続して結果を受け取れる", async () => {
