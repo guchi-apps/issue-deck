@@ -29,6 +29,7 @@ import {
 import type { BumpKind } from "@/lib/semver-bump";
 import { cn } from "@/lib/utils";
 
+import { clientErrorMessage } from "@/lib/client-error-message";
 type ReleaseRebuildButtonProps = {
   repositoryFullName: string;
   /** 本番に出ている版（mainの版）。上げ幅の選択肢に目安を出すのに使う */
@@ -106,7 +107,7 @@ export function ReleaseRebuildButton({
       setInfo(loaded);
       setSelected(new Set(loaded.selection?.defaultSelected ?? []));
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(clientErrorMessage(err));
     } finally {
       setLoading(false);
     }
@@ -135,7 +136,7 @@ export function ReleaseRebuildButton({
       setOpen(false);
       onTriggered?.();
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(clientErrorMessage(err));
     } finally {
       setSubmitting(false);
     }
@@ -150,7 +151,7 @@ export function ReleaseRebuildButton({
       setRecovery(await requestRcFixRecovery(repositoryFullName, rcPullRequest.number));
       onTriggered?.();
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(clientErrorMessage(err));
     } finally {
       setSubmitting(false);
     }

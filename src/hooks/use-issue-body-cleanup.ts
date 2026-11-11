@@ -4,6 +4,7 @@ import { useCallback, useState } from "react";
 
 import type { IssueBodyCleanupResult } from "@/lib/claude/issue-body-cleanup";
 
+import { clientErrorMessage } from "@/lib/client-error-message";
 export function useIssueBodyCleanup() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -30,7 +31,7 @@ export function useIssueBodyCleanup() {
       }
       return (await res.json()) as IssueBodyCleanupResult;
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(clientErrorMessage(err));
       return null;
     } finally {
       setIsGenerating(false);

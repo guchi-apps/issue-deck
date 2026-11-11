@@ -29,6 +29,7 @@ import {
   type SecretSyncRunView,
 } from "@/lib/secrets-sync";
 
+import { clientErrorMessage } from "@/lib/client-error-message";
 /**
  * 1Password → GitHub のシークレット同期を画面から起こす（#1309）。
  *
@@ -185,7 +186,7 @@ export function SecretsSyncSection({ open }: { open: boolean }) {
       setConfirmTarget(null);
       reload();
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : String(err));
+      setActionError(clientErrorMessage(err));
     } finally {
       setSubmitting(null);
     }

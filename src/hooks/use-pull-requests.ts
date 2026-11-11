@@ -11,6 +11,7 @@ import type {
   PullRequestSummary,
 } from "@/types/pull-request";
 
+import { clientErrorMessage } from "@/lib/client-error-message";
 type UsePullRequestsResult = {
   pullRequests: PullRequestSummary[];
   /** 取得に失敗したリポジトリのfullName（部分的な欠落を画面に出すため） */
@@ -185,7 +186,7 @@ export function usePullRequests(
       } catch (err) {
         if (err instanceof DOMException && err.name === "AbortError") return;
         if (cancelled || kind === "background") return;
-        setError(err instanceof Error ? err.message : String(err));
+        setError(clientErrorMessage(err));
       } finally {
         if (!cancelled) {
           setIsRefreshing(false);

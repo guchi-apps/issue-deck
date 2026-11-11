@@ -32,6 +32,7 @@ import {
   type WorkflowTagStatus as Status,
 } from "@/lib/workflow-tags";
 
+import { clientErrorMessage } from "@/lib/client-error-message";
 /**
  * 各リポジトリが参照している共有ワークフローのタグを一覧し、更新を起こす（#985・#1173）。
  *
@@ -355,7 +356,7 @@ export function WorkflowTagStatusView({ tags }: { tags: WorkflowTagsState }) {
         reload();
       }
     } catch (err) {
-      setPropagateError(err instanceof Error ? err.message : String(err));
+      setPropagateError(clientErrorMessage(err));
     } finally {
       setIsDispatching(false);
     }
@@ -393,7 +394,7 @@ export function WorkflowTagStatusView({ tags }: { tags: WorkflowTagsState }) {
         reload();
       }
     } catch (err) {
-      setRepairError(err instanceof Error ? err.message : String(err));
+      setRepairError(clientErrorMessage(err));
     } finally {
       setIsRepairDispatching(false);
     }
@@ -430,7 +431,7 @@ export function WorkflowTagStatusView({ tags }: { tags: WorkflowTagsState }) {
         reload();
       }
     } catch (err) {
-      setSharedFileError(err instanceof Error ? err.message : String(err));
+      setSharedFileError(clientErrorMessage(err));
     } finally {
       setIsSharedFileDispatching(false);
     }

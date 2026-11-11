@@ -16,6 +16,7 @@ import {
 } from "@/lib/github/code-review";
 import type { Issue, IssueComment } from "@/types/issue";
 
+import { clientErrorMessage } from "@/lib/client-error-message";
 export type CodeReviewRunState = {
   report: CodeReviewReport | null;
   runStatus: CodeReviewRunStatus;
@@ -88,7 +89,7 @@ export function useCodeReviewRun(
         setRerunError(data.message ?? data.error ?? `再実行を積めませんでした（HTTP ${res.status}）`);
       }
     } catch (error) {
-      setRerunError(error instanceof Error ? error.message : String(error));
+      setRerunError(clientErrorMessage(error));
     } finally {
       setIsRerunning(false);
       reload();

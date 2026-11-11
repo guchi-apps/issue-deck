@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 
 import type { ReleaseChangeListResponse } from "@/types/pull-request";
 
+import { clientErrorMessage } from "@/lib/client-error-message";
 export type UseReleaseChangesResult = {
   data: ReleaseChangeListResponse | null;
   isLoading: boolean;
@@ -59,7 +60,7 @@ export function useReleaseChanges(
         setLoaded({ key, data });
       } catch (err) {
         if (err instanceof DOMException && err.name === "AbortError") return;
-        setFailure({ key, message: err instanceof Error ? err.message : String(err) });
+        setFailure({ key, message: clientErrorMessage(err) });
       }
     })();
 

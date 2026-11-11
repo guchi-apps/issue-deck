@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 
+import { clientErrorMessage } from "@/lib/client-error-message";
 // POST /api/sync/issues の失敗（#1141）。kindで由来が違う。
 type SyncError = {
   kind: "repository" | "projects-v2";
@@ -49,7 +50,7 @@ export function useIssueSync() {
       }
       window.location.reload();
     } catch (err) {
-      alert(err instanceof Error ? err.message : String(err));
+      alert(clientErrorMessage(err));
       setIsSyncing(false);
     }
   }

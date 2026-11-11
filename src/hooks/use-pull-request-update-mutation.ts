@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 
+import { clientErrorMessage } from "@/lib/client-error-message";
 export type UpdatePullRequestInput = {
   owner: string;
   repo: string;
@@ -34,7 +35,7 @@ export function usePullRequestUpdateMutation() {
       }
       return true;
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(clientErrorMessage(err));
       return false;
     } finally {
       setIsSubmitting(false);

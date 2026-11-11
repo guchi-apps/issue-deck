@@ -6,6 +6,7 @@ import {
   type ProgressReportFailureReason,
 } from "@/lib/progress-report-message";
 
+import { clientErrorMessage } from "@/lib/client-error-message";
 /**
  * 進捗の書き込み結果。**`setProgressStatus`は決してthrowしない**ため、
  * 失敗を知りたい呼び出し側はこの戻り値を見る。
@@ -68,7 +69,7 @@ export function useProgressStatusMutation() {
       return { ok: true, applied: data.applied === true, reason: data.reason ?? null };
     } catch (error) {
       console.error("[useProgressStatusMutation] failed to set project status", error);
-      return { ok: false, message: error instanceof Error ? error.message : String(error) };
+      return { ok: false, message: clientErrorMessage(error) };
     }
   }
 

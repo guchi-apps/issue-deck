@@ -5,6 +5,7 @@ import { useCallback, useEffect, useState } from "react";
 import { parsePullRequestId } from "@/lib/github-reference";
 import type { PullRequestDetail } from "@/types/pull-request";
 
+import { clientErrorMessage, fetchWithRetry } from "@/lib/client-error-message";
 type UsePullRequestDetailResult = {
   detail: PullRequestDetail | null;
   isLoading: boolean;
@@ -51,7 +52,7 @@ export function usePullRequestDetail(pullRequestId: string | null): UsePullReque
           repo,
           number: String(parsed.number),
         });
-        const res = await fetch(`/api/pull-requests/detail?${params.toString()}`, {
+        const res = await fetchWithRetry(`/api/pull-requests/detail?${params.toString()}`, {
           signal: controller.signal,
         });
         if (!res.ok) {
@@ -70,7 +71,7 @@ export function usePullRequestDetail(pullRequestId: string | null): UsePullReque
       } catch (err) {
         if (err instanceof DOMException && err.name === "AbortError") return;
         if (cancelled) return;
-        setError(err instanceof Error ? err.message : String(err));
+        setError(clientErrorMessage(err));
       } finally {
         if (!cancelled) setIsLoading(false);
       }

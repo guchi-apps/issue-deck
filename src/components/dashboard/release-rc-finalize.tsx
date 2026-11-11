@@ -8,7 +8,7 @@ import { ProductionVerificationBox } from "@/components/dashboard/release-rc-pro
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { formatDateTime, formatMonthDayTime } from "@/lib/format-date-time";
-import { FINALIZE_STATUS_LABEL, FINALIZE_START_ERROR_LABEL, REVERIFY_PHASE_LABEL, type ReverifyPhase } from "@/lib/release-finalize";
+import { decideConflictBlock, FINALIZE_STATUS_LABEL, FINALIZE_START_ERROR_LABEL, REVERIFY_PHASE_LABEL, type ReverifyPhase } from "@/lib/release-finalize";
 import type { RcFinalizationOverview, RcFinalizationView } from "@/lib/release-finalize-run";
 import type { PublishApprovalView } from "@/lib/release-publish-approval-run";
 import type { RcCandidateView } from "@/lib/release-rc-run";
@@ -17,6 +17,7 @@ import { fetchFinalizeBumpReason, requestRcProductionRecheck } from "@/lib/relea
 import { cn } from "@/lib/utils";
 import { BUMP_KIND_CRITERIA, BUMP_KINDS, nextVersion, type BumpKind } from "@/lib/semver-bump";
 
+import { clientErrorMessage } from "@/lib/client-error-message";
 /**
  * 公開準備（正式バンプ。#4496）のパネル。本番PR詳細の候補の帯の下に出す。
  *
@@ -230,7 +231,7 @@ function VersionBox({
       .then((text) => setReason({ status: "loaded", reason: text }))
       .catch((err) => {
         loadedKey.current = null;
-        setReason({ status: "error", message: err instanceof Error ? err.message : String(err) });
+        setReason({ status: "error", message: clientErrorMessage(err) });
       });
   }, [open, finalization, version, reasonKey, repositoryFullName]);
 
@@ -675,6 +676,7 @@ export function ReleaseRcFinalizePanel({
   onChanged,
   variant = "full",
   deferUntilStarted = false,
+  mergeable = null,
 }: {
   candidate: RcCandidateView;
   finalization: RcFinalizationOverview;
@@ -690,6 +692,11 @@ export function ReleaseRcFinalizePanel({
    * 工程は本番PR詳細の先頭の工程バーが持ち、版と公開結果はまだ決まっていないため
    */
   deferUntilStarted?: boolean;
+  /**
+   * 候補PRのコンフリクトの有無（GitHubの`mergeable`。#5305）。nullは判定中・未取得で、判定が出るまで公開承認を押せない。
+   * falseは競合あり。サーバーも同じ判定で受け付けない
+   */
+  mergeable?: boolean | null;
 }) {
   const [bumpKind, setBumpKind] = useState<BumpKind | "auto">("auto");
   // 上げ幅は既定の自動判定で足りるため、手動で選ぶ欄はリンクを押したときだけ開く（#4858）
@@ -833,7 +840,7 @@ export function ReleaseRcFinalizePanel({
     try {
       await requestRcProductionRecheck(repositoryFullName, candidate.id);
     } catch (err) {
-      setMessage(err instanceof Error ? err.message : String(err));
+      setMessage(clientErrorMessage(err));
     } finally {
       setBusy(false);
       onChanged();
@@ -841,6 +848,12 @@ export function ReleaseRcFinalizePanel({
   };
   const plannedKind = bumpKind === "auto" ? null : bumpKind;
   const reusing = approval?.status === "active";
+  const conflictBlock = decideConflictBlock(mergeable);
+  const conflictNote = conflictBlock && (
+    <p className="text-[12px] text-amber-700 dark:text-amber-400" role="status" data-testid="release-rc-conflict-block">
+      {FINALIZE_START_ERROR_LABEL[conflictBlock]}
+    </p>
+  );
   const beforeStart = deferUntilStarted && candidate.phase === "review";
   const startBox = canStart && (
     <div className={cn("flex flex-col gap-2", variant === "full" && "rounded-lg border p-3", variant === "full" && contract!.requiresAiReviewWaiver && "border-amber-500/60")}>
@@ -859,6 +872,7 @@ export function ReleaseRcFinalizePanel({
       ) : (
         <p className="text-[12px]">revision {contract!.revision} が全体レビュー・統合検証に合格しています。</p>
       )}
+      {conflictNote}
       {pending?.kind === "start" ? (
         <PendingButton pending={pending} />
       ) : (
@@ -868,7 +882,7 @@ export function ReleaseRcFinalizePanel({
             variant={contract!.requiresAiReviewWaiver ? "outline" : "default"}
             className={cn("h-auto max-w-full whitespace-normal py-1.5 text-left", !contract!.requiresAiReviewWaiver && PRODUCTION_MERGE_FILLED)}
             onClick={() => openConfirm("start")}
-            disabled={pending !== null}
+            disabled={pending !== null || conflictBlock !== null}
           >
             {reusing
               ? "公開準備をやり直す（承認済み）"
@@ -959,7 +973,7 @@ export function ReleaseRcFinalizePanel({
     <section
       id="release-rc-finalize"
       aria-label="公開準備"
-      className="flex scroll-mt-4 flex-col gap-3 rounded-[10px] border bg-card p-3.5 pb-20 sm:pb-3.5"
+      className="flex scroll-mt-4 flex-col gap-3 rounded-[10px] border bg-card p-3.5"
       data-testid="release-rc-finalize"
     >
       <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
@@ -1015,11 +1029,12 @@ export function ReleaseRcFinalizePanel({
               ? "現在の内容を確かめて承認し直すと、最終検証の合格後に自動で本番公開します。"
               : "この候補は公開準備が済んでいますが、公開承認の記録がありません（以前の画面で公開準備を始めた候補です）。内容を確かめて1回だけ承認すると、最終検証の合格後に自動で本番公開します。"}
           </p>
+          {conflictNote}
           {pending?.kind === "approve" ? (
             <PendingButton pending={pending} />
           ) : (
             <div>
-              <Button size="sm" onClick={() => openConfirm("approve")} disabled={pending !== null}>
+              <Button size="sm" onClick={() => openConfirm("approve")} disabled={pending !== null || conflictBlock !== null}>
                 {approval ? "公開承認をやり直す" : "公開の承認内容を確認する"}
               </Button>
             </div>

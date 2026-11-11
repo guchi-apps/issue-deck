@@ -98,6 +98,7 @@ import {
 import { cn } from "@/lib/utils";
 import type { Issue, IssueComment, SubIssueRelations } from "@/types/issue";
 
+import { clientErrorMessage } from "@/lib/client-error-message";
 /**
  * 実行先（#1263）。**起動する2つと、貼り付けるための2つがある。**
  *
@@ -984,7 +985,7 @@ export function StartImplementationDialog({
       onNightlyRunQueued?.();
       handleOpenChange(false);
     } catch (err) {
-      setNightlyError(err instanceof Error ? err.message : String(err));
+      setNightlyError(clientErrorMessage(err));
       setStartedTarget(null);
     } finally {
       setIsQueuingNightly(false);

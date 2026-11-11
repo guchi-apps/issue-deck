@@ -22,6 +22,7 @@ import { requestDeploy } from "@/lib/deploy-request";
 import { cn } from "@/lib/utils";
 import { formatMonthDay, formatTimeOfDay } from "@/lib/format-date-time";
 
+import { clientErrorMessage } from "@/lib/client-error-message";
 type RepositoryDeployButtonProps = {
   repositoryFullName: string;
   /** いま本番へ出ている版（`4.14.0`）。分からなければnull */
@@ -84,7 +85,7 @@ export function RepositoryDeployButton({
       setConfirmOpen(false);
       onTriggered?.();
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(clientErrorMessage(err));
     } finally {
       setIsTriggering(false);
     }

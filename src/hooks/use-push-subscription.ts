@@ -13,6 +13,7 @@ import {
 } from "@/lib/push-client";
 import { notifyPushSubscriptionChanged } from "@/lib/push-subscription-change";
 
+import { clientErrorMessage } from "@/lib/client-error-message";
 /**
  * Push通知（#838）の購読を、設定画面から登録・解除するためのフック。
  *
@@ -76,7 +77,7 @@ export function usePushSubscription(enabled: boolean) {
         setPublicKey(json.publicKey);
         setSubscriptions(json.subscriptions);
       } catch (err) {
-        if (!cancelled) setError(err instanceof Error ? err.message : String(err));
+        if (!cancelled) setError(clientErrorMessage(err));
       }
 
       // この端末が既に購読しているかは、サーバーではなくブラウザに聞く
@@ -153,7 +154,7 @@ export function usePushSubscription(enabled: boolean) {
       notifyPushSubscriptionChanged();
       refetch();
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(clientErrorMessage(err));
     } finally {
       setIsSubmitting(false);
     }
@@ -181,7 +182,7 @@ export function usePushSubscription(enabled: boolean) {
       notifyPushSubscriptionChanged();
       refetch();
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(clientErrorMessage(err));
     } finally {
       setIsSubmitting(false);
     }
@@ -204,7 +205,7 @@ export function usePushSubscription(enabled: boolean) {
         notifyPushSubscriptionChanged();
         refetch();
       } catch (err) {
-        setError(err instanceof Error ? err.message : String(err));
+        setError(clientErrorMessage(err));
       } finally {
         setIsSubmitting(false);
       }
@@ -237,7 +238,7 @@ export function usePushSubscription(enabled: boolean) {
         setMessage("送り先がありませんでした。もう一度登録してください");
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(clientErrorMessage(err));
     } finally {
       setIsSubmitting(false);
     }

@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 
 import type { CodexUsage } from "@/lib/dispatch/codex-usage";
 
+import { clientErrorMessage } from "@/lib/client-error-message";
 export function useCodexUsage(enabled: boolean) {
   const [data, setData] = useState<CodexUsage | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -31,7 +32,7 @@ export function useCodexUsage(enabled: boolean) {
         if (!cancelled && json) setData(json);
       })
       .catch((cause) => {
-        if (!cancelled) setError(cause instanceof Error ? cause.message : String(cause));
+        if (!cancelled) setError(clientErrorMessage(cause));
       })
       .finally(() => {
         if (!cancelled) setIsLoading(false);

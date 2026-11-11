@@ -16,6 +16,7 @@ import type {
   PlanReviewAgentSetting,
 } from "@/lib/app-settings";
 
+import { clientErrorMessage } from "@/lib/client-error-message";
 export function useAppSettingsMutations() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -34,7 +35,7 @@ export function useAppSettingsMutations() {
       }
       return true;
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(clientErrorMessage(err));
       return false;
     } finally {
       setIsSubmitting(false);
@@ -73,7 +74,7 @@ export function useAppSettingsMutations() {
       if (!res.ok) throw new Error(`リクエストに失敗しました (${res.status})`);
       return true;
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(clientErrorMessage(err));
       return false;
     } finally {
       setIsSubmitting(false);
@@ -96,7 +97,7 @@ export function useAppSettingsMutations() {
       }
       return true;
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(clientErrorMessage(err));
       return false;
     } finally {
       setIsSubmitting(false);

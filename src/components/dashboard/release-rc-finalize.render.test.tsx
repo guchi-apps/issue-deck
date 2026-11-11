@@ -155,7 +155,7 @@ describe("ReleaseRcFinalizePanel", () => {
       status: { status: "needs_fix", label: "修正が必要", reason: "検証で指摘・失敗が出ています", attention: null, aiReviewWaivable: true },
       finalizeContract: { ...base.finalizeContract!, requiresAiReviewWaiver: true },
     });
-    render(<ReleaseRcFinalizePanel candidate={waivable} finalization={overview()} repositoryFullName="o/r" onChanged={onChanged} />);
+    render(<ReleaseRcFinalizePanel mergeable candidate={waivable} finalization={overview()} repositoryFullName="o/r" onChanged={onChanged} />);
     expect(screen.getByTestId("release-rc-ai-review-waiver-note").textContent).toContain("全体レビューは公開の必須条件ではない");
     fireEvent.click(screen.getByText("全体レビューの結果を承知で本番公開へ進む（公開承認）"));
     const submit = screen.getByText("公開を承認して進める").closest("button")!;
@@ -169,8 +169,20 @@ describe("ReleaseRcFinalizePanel", () => {
     vi.unstubAllGlobals();
   });
 
+  it("競合が判定中・競合ありの間は公開承認を押せず、理由を出す（#5305）", () => {
+    const { rerender } = render(<ReleaseRcFinalizePanel mergeable={null} candidate={candidate()} finalization={overview()} repositoryFullName="o/r" onChanged={vi.fn()} />);
+    expect(screen.getByTestId("release-rc-conflict-block").textContent).toContain("確認中");
+    expect(screen.getByRole("button", { name: "本番公開へ進む（公開承認）" })).toHaveProperty("disabled", true);
+    rerender(<ReleaseRcFinalizePanel mergeable={false} candidate={candidate()} finalization={overview()} repositoryFullName="o/r" onChanged={vi.fn()} />);
+    expect(screen.getByTestId("release-rc-conflict-block").textContent).toContain("競合");
+    expect(screen.getByRole("button", { name: "本番公開へ進む（公開承認）" })).toHaveProperty("disabled", true);
+    rerender(<ReleaseRcFinalizePanel mergeable candidate={candidate()} finalization={overview()} repositoryFullName="o/r" onChanged={vi.fn()} />);
+    expect(screen.queryByTestId("release-rc-conflict-block")).toBeNull();
+    expect(screen.getByRole("button", { name: "本番公開へ進む（公開承認）" })).toHaveProperty("disabled", false);
+  });
+
   it("合格した候補では、予定の版を確定済みとして出さずに公開準備を始められる", () => {
-    render(<ReleaseRcFinalizePanel candidate={candidate()} finalization={overview()} repositoryFullName="o/r" onChanged={vi.fn()} />);
+    render(<ReleaseRcFinalizePanel mergeable candidate={candidate()} finalization={overview()} repositoryFullName="o/r" onChanged={vi.fn()} />);
     expect(screen.getByText("未確定")).toBeTruthy();
     // 確定前の見込みカード（「検証中の予定」）は出さず、「次のバージョン」1枚にまとめる（#4937）
     expect(screen.queryByText("検証中の予定（見込み）")).toBeNull();
@@ -190,7 +202,7 @@ describe("ReleaseRcFinalizePanel", () => {
   it("確定した版は「次のバージョン」に上げ幅と版の変化を文で出し、押すと判定理由をモーダルで出す（#4937）", async () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ reason: "新機能としてXXXを追加したためminorと判定しました。" }) });
     vi.stubGlobal("fetch", fetchMock);
-    render(<ReleaseRcFinalizePanel candidate={candidate({ phase: "preparing" })} finalization={overview({ current: view() })} repositoryFullName="o/r" onChanged={vi.fn()} />);
+    render(<ReleaseRcFinalizePanel mergeable candidate={candidate({ phase: "preparing" })} finalization={overview({ current: view() })} repositoryFullName="o/r" onChanged={vi.fn()} />);
     const card = screen.getByTestId("release-rc-next-version");
     expect(card.textContent).toContain("v2.14.0");
     expect(card.textContent).toContain("予約済み");
@@ -205,7 +217,7 @@ describe("ReleaseRcFinalizePanel", () => {
 
   it("判定理由のコメントが見つからなくても、上げ幅と基準はモーダルに出す（#4937）", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: async () => ({ reason: null }) }));
-    render(<ReleaseRcFinalizePanel candidate={candidate({ phase: "preparing" })} finalization={overview({ current: view({ bumpKind: "patch", version: "2.13.1" }) })} repositoryFullName="o/r" onChanged={vi.fn()} />);
+    render(<ReleaseRcFinalizePanel mergeable candidate={candidate({ phase: "preparing" })} finalization={overview({ current: view({ bumpKind: "patch", version: "2.13.1" }) })} repositoryFullName="o/r" onChanged={vi.fn()} />);
     fireEvent.click(screen.getByTestId("release-rc-next-version"));
     await waitFor(() => expect(screen.getByText("判定理由の記録が見つかりませんでした")).toBeTruthy());
     expect(screen.getByText(/バグ修正・リファクタリング/)).toBeTruthy();
@@ -213,7 +225,7 @@ describe("ReleaseRcFinalizePanel", () => {
   });
 
   it("合格した候補では公開ボタンをオレンジで出し、説明は1文にとどめる（#4858）", () => {
-    render(<ReleaseRcFinalizePanel candidate={candidate()} finalization={overview()} repositoryFullName="o/r" onChanged={vi.fn()} />);
+    render(<ReleaseRcFinalizePanel mergeable candidate={candidate()} finalization={overview()} repositoryFullName="o/r" onChanged={vi.fn()} />);
     expect(screen.getByText("本番公開へ進む（公開承認）").closest("button")!.className).toContain("bg-orange-600");
     expect(screen.getByText("revision 3 が全体レビュー・統合検証に合格しています。")).toBeTruthy();
     expect(screen.queryByText(/版ファイルと更新履歴だけを変更するコミットを候補へ積み/)).toBeNull();
@@ -222,12 +234,12 @@ describe("ReleaseRcFinalizePanel", () => {
   it("全体レビューを承知で進む候補の公開ボタンは、オレンジにしない（#4807）", () => {
     const base = candidate();
     const waivable = candidate({ finalizeContract: { ...base.finalizeContract!, requiresAiReviewWaiver: true } });
-    render(<ReleaseRcFinalizePanel candidate={waivable} finalization={overview()} repositoryFullName="o/r" onChanged={vi.fn()} />);
+    render(<ReleaseRcFinalizePanel mergeable candidate={waivable} finalization={overview()} repositoryFullName="o/r" onChanged={vi.fn()} />);
     expect(screen.getByText("全体レビューの結果を承知で本番公開へ進む（公開承認）").closest("button")!.className).not.toContain("bg-orange-600");
   });
 
   it("公開準備が始まるまでは、版・公開までの流れ・公開結果を出さない（#5290）", () => {
-    render(<ReleaseRcFinalizePanel candidate={candidate()} finalization={overview()} repositoryFullName="o/r" onChanged={vi.fn()} deferUntilStarted />);
+    render(<ReleaseRcFinalizePanel mergeable candidate={candidate()} finalization={overview()} repositoryFullName="o/r" onChanged={vi.fn()} deferUntilStarted />);
     expect(screen.getByText("本番公開へ進む（公開承認）")).toBeTruthy();
     expect(screen.queryByRole("list", { name: "公開までの流れ" })).toBeNull();
     expect(screen.queryByText("公開結果（Webと配布は別）")).toBeNull();
@@ -235,11 +247,11 @@ describe("ReleaseRcFinalizePanel", () => {
 
   it("開始操作だけの形は、開始できる候補にだけボタンを出す（#5290）", () => {
     const { container } = render(
-      <ReleaseRcFinalizePanel candidate={candidate({ phase: "preparing", finalizeContract: null })} finalization={overview()} repositoryFullName="o/r" onChanged={vi.fn()} variant="action" />,
+      <ReleaseRcFinalizePanel mergeable candidate={candidate({ phase: "preparing", finalizeContract: null })} finalization={overview()} repositoryFullName="o/r" onChanged={vi.fn()} variant="action" />,
     );
     expect(container.textContent).toBe("");
     cleanup();
-    render(<ReleaseRcFinalizePanel candidate={candidate()} finalization={overview()} repositoryFullName="o/r" onChanged={vi.fn()} variant="action" />);
+    render(<ReleaseRcFinalizePanel mergeable candidate={candidate()} finalization={overview()} repositoryFullName="o/r" onChanged={vi.fn()} variant="action" />);
     expect(screen.getByTestId("release-rc-finalize-action").textContent).toContain("本番公開へ進む（公開承認）");
     expect(screen.queryByRole("region", { name: "公開準備" })).toBeNull();
   });
@@ -248,7 +260,7 @@ describe("ReleaseRcFinalizePanel", () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ ok: true }) });
     vi.stubGlobal("fetch", fetchMock);
     const onChanged = vi.fn();
-    render(<ReleaseRcFinalizePanel candidate={candidate()} finalization={overview()} repositoryFullName="o/r" onChanged={onChanged} />);
+    render(<ReleaseRcFinalizePanel mergeable candidate={candidate()} finalization={overview()} repositoryFullName="o/r" onChanged={onChanged} />);
     fireEvent.click(screen.getByText("本番公開へ進む（公開承認）"));
     // 承認する前に、自動で本番公開することと承認の範囲を全部見せる
     const confirm = screen.getByTestId("release-rc-approval-confirm").textContent ?? "";
@@ -269,7 +281,7 @@ describe("ReleaseRcFinalizePanel", () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ ok: true }) });
     vi.stubGlobal("fetch", fetchMock);
     const onChanged = vi.fn();
-    const { rerender } = render(<ReleaseRcFinalizePanel candidate={candidate()} finalization={overview()} repositoryFullName="o/r" onChanged={onChanged} />);
+    const { rerender } = render(<ReleaseRcFinalizePanel mergeable candidate={candidate()} finalization={overview()} repositoryFullName="o/r" onChanged={onChanged} />);
     fireEvent.click(screen.getByText("本番公開へ進む（公開承認）"));
     const dialog = screen.getByTestId("release-rc-approval-dialog");
     expect(dialog.getAttribute("role")).toBe("dialog");
@@ -279,7 +291,7 @@ describe("ReleaseRcFinalizePanel", () => {
     expect(onChanged).toHaveBeenCalledTimes(1);
 
     // 取り直した状況がまだ`review`のままなら、モーダルは開いたまま
-    rerender(<ReleaseRcFinalizePanel candidate={candidate()} finalization={overview()} repositoryFullName="o/r" onChanged={onChanged} />);
+    rerender(<ReleaseRcFinalizePanel mergeable candidate={candidate()} finalization={overview()} repositoryFullName="o/r" onChanged={onChanged} />);
     expect(screen.getByTestId("release-rc-approval-dialog")).toBeTruthy();
 
     // 閉じても送信中の表示が残り、「本番公開へ進む」は出さない
@@ -291,7 +303,7 @@ describe("ReleaseRcFinalizePanel", () => {
 
     // 公開準備へ進んだ状況が届いたら、送信中の表示を片付ける
     rerender(
-      <ReleaseRcFinalizePanel
+      <ReleaseRcFinalizePanel mergeable
         candidate={candidate({ phase: "preparing", finalizeContract: null })}
         finalization={overview({ approval: approval() })}
         repositoryFullName="o/r"
@@ -306,12 +318,12 @@ describe("ReleaseRcFinalizePanel", () => {
   it("反映を確かめたらモーダルを自動で閉じる（#4917）", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, json: async () => ({ ok: true }) }));
     const onChanged = vi.fn();
-    const { rerender } = render(<ReleaseRcFinalizePanel candidate={candidate()} finalization={overview()} repositoryFullName="o/r" onChanged={onChanged} />);
+    const { rerender } = render(<ReleaseRcFinalizePanel mergeable candidate={candidate()} finalization={overview()} repositoryFullName="o/r" onChanged={onChanged} />);
     fireEvent.click(screen.getByText("本番公開へ進む（公開承認）"));
     fireEvent.click(screen.getByText("公開を承認して進める"));
     await waitFor(() => expect(screen.getByTestId("release-rc-approval-dialog").textContent).toContain("公開承認を受け付けました"));
     rerender(
-      <ReleaseRcFinalizePanel
+      <ReleaseRcFinalizePanel mergeable
         candidate={candidate({ phase: "preparing", finalizeContract: null })}
         finalization={overview({ approval: approval() })}
         repositoryFullName="o/r"
@@ -325,7 +337,7 @@ describe("ReleaseRcFinalizePanel", () => {
   it("送信が拒否されたらモーダルを閉じずに理由を出し、やり直せる（#4917）", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: false, status: 409, json: async () => ({ ok: false, error: "run_active" }) }));
     const onChanged = vi.fn();
-    render(<ReleaseRcFinalizePanel candidate={candidate()} finalization={overview()} repositoryFullName="o/r" onChanged={onChanged} />);
+    render(<ReleaseRcFinalizePanel mergeable candidate={candidate()} finalization={overview()} repositoryFullName="o/r" onChanged={onChanged} />);
     fireEvent.click(screen.getByText("本番公開へ進む（公開承認）"));
     fireEvent.click(screen.getByText("公開を承認して進める"));
     await waitFor(() => expect(screen.getByTestId("release-rc-approval-dialog").textContent).toContain("別の完了系列が進行中です"));
@@ -336,7 +348,7 @@ describe("ReleaseRcFinalizePanel", () => {
 
   it("バンプ後は確定した版・引継ぎと再検証の別・元のheadを出す", () => {
     render(
-      <ReleaseRcFinalizePanel
+      <ReleaseRcFinalizePanel mergeable
         candidate={candidate({ phase: "preparing", finalizeContract: null })}
         finalization={overview({ current: view() })}
         repositoryFullName="o/r"
@@ -354,7 +366,7 @@ describe("ReleaseRcFinalizePanel", () => {
 
   it("済んだ状態のバッジにはチェック、実行中のバッジには回転するアイコンを文字の前に出す（#4918）", () => {
     render(
-      <ReleaseRcFinalizePanel
+      <ReleaseRcFinalizePanel mergeable
         candidate={candidate({ phase: "preparing", finalizeContract: null })}
         finalization={overview({ current: view({ status: "requested", statusLabel: "バンプ中", finalHeadSha: null, appliedAt: null }) })}
         repositoryFullName="o/r"
@@ -372,7 +384,7 @@ describe("ReleaseRcFinalizePanel", () => {
     vi.stubGlobal("fetch", fetchMock);
     const onChanged = vi.fn();
     render(
-      <ReleaseRcFinalizePanel
+      <ReleaseRcFinalizePanel mergeable
         candidate={candidate({ phase: "awaiting_approval", finalizeContract: null })}
         finalization={overview({ current: view() })}
         repositoryFullName="o/r"
@@ -389,7 +401,7 @@ describe("ReleaseRcFinalizePanel", () => {
 
   it("承認済みの候補は承認の内容・取消を出し、承認を求め直さない", () => {
     render(
-      <ReleaseRcFinalizePanel
+      <ReleaseRcFinalizePanel mergeable
         candidate={candidate({ phase: "preparing", finalizeContract: null })}
         finalization={overview({ current: view(), approval: approval() })}
         repositoryFullName="o/r"
@@ -404,7 +416,7 @@ describe("ReleaseRcFinalizePanel", () => {
 
   it("自動公開が止まったら理由と再開を出す", () => {
     render(
-      <ReleaseRcFinalizePanel
+      <ReleaseRcFinalizePanel mergeable
         candidate={candidate({ phase: "awaiting_approval", finalizeContract: null })}
         finalization={overview({
           current: view(),
@@ -424,7 +436,7 @@ describe("ReleaseRcFinalizePanel", () => {
 
   it("公開前の失敗は修正工程へ戻し、版は増やさないと伝える", () => {
     render(
-      <ReleaseRcFinalizePanel
+      <ReleaseRcFinalizePanel mergeable
         candidate={candidate({ finalizeContract: null })}
         finalization={overview({ current: view({ status: "failed", statusLabel: "失敗", failureReason: "バンプ後の最終検証が失敗したため" }) })}
         repositoryFullName="o/r"
@@ -436,7 +448,7 @@ describe("ReleaseRcFinalizePanel", () => {
 
   it("関係の無い段階・記録の無い候補ではパネルを出さない", () => {
     const { container } = render(
-      <ReleaseRcFinalizePanel candidate={candidate({ finalizeContract: null })} finalization={overview()} repositoryFullName="o/r" onChanged={vi.fn()} />,
+      <ReleaseRcFinalizePanel mergeable candidate={candidate({ finalizeContract: null })} finalization={overview()} repositoryFullName="o/r" onChanged={vi.fn()} />,
     );
     expect(container.firstChild).toBeNull();
   });

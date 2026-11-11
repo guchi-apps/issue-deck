@@ -26,6 +26,7 @@ import { newRequestKey, ReleaseBlockedError, requestReleaseStart } from "@/lib/r
 import type { BumpKind } from "@/lib/semver-bump";
 import type { ReleaseBlockedReason } from "@/types/branch-flow";
 
+import { clientErrorMessage } from "@/lib/client-error-message";
 /**
  * 押せないときにボタンへ添える文言（#2711）。**「押せない」と「操作が無い」を区別させる**ため、
  * ボタンを消さずに理由だけを添える。
@@ -144,7 +145,7 @@ export function RepositoryReleaseButton({
         setBlockOverride(err.block);
         setConfirmOpen(false);
       } else {
-        setError(err instanceof Error ? err.message : String(err));
+        setError(clientErrorMessage(err));
       }
     } finally {
       setIsTriggering(false);

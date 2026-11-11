@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 
 import type { GithubStatusSummary } from "@/lib/github/status";
 
+import { clientErrorMessage } from "@/lib/client-error-message";
 export function useGithubStatus(enabled: boolean) {
   const [data, setData] = useState<GithubStatusSummary | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -28,7 +29,7 @@ export function useGithubStatus(enabled: boolean) {
         if (!cancelled) setData(json);
       })
       .catch((err) => {
-        if (!cancelled) setError(err instanceof Error ? err.message : String(err));
+        if (!cancelled) setError(clientErrorMessage(err));
       })
       .finally(() => {
         if (!cancelled) setIsLoading(false);

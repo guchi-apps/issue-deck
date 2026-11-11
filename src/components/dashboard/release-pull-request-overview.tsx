@@ -94,13 +94,12 @@ function ReleaseCandidateChecks({ pullRequest }: { pullRequest: PullRequestSumma
   );
 }
 
-/** 競合が判定中のときに出す、公開承認との関係（#5178） */
+/** 競合が判定中のときに出す、公開承認との関係（#5178・#5305で「押せる」から「判定が出るまで押せない」へ変更） */
 export const PENDING_CONFLICT_PUBLISH_NOTE =
-  "GitHubが競合を計算中です。成功とは扱いませんが、公開承認は押せます。本番mainへのマージ直前にGitHubの判定を取り直し、判定が出るまで待ちます（競合ありなら止まります）";
+  "GitHubが競合を計算中です。成功とは扱わず、判定が出るまで公開承認は押せません（判定が出れば自動で押せるようになります）";
 
 /**
- * 競合が「確認中」のとき、公開承認へ進んでよいかが分かる理由文に差し替える（#5178）。
- * 承認後のマージは`decideCompletionMerge`が判定中なら待ち、競合ありなら止めるため、承認自体は止めない
+ * 競合が「確認中」のとき、公開承認が判定待ちで押せないことが分かる理由文に差し替える（#5178・#5305）
  */
 function withPublishNoteOnPendingConflict(check: MergeCheckItem): MergeCheckItem {
   if (check.key !== "conflict" || check.state !== "確認中") return check;
@@ -277,6 +276,7 @@ export function ReleasePullRequestOverview({
                       finalization={finalization}
                       repositoryFullName={repositoryFullName}
                       onChanged={rc.reload}
+                      mergeable={pullRequest.mergeable}
                       variant="action"
                     />
                   )}
@@ -322,6 +322,7 @@ export function ReleasePullRequestOverview({
           finalization={finalization}
           repositoryFullName={repositoryFullName}
           onChanged={rc.reload}
+          mergeable={pullRequest.mergeable}
           deferUntilStarted={unified}
         />
       )}

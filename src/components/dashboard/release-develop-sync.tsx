@@ -7,6 +7,7 @@ import type { DevelopSyncStatus } from "@/lib/release-develop-sync";
 import { requestDevelopSync } from "@/lib/release-request";
 import { cn } from "@/lib/utils";
 
+import { clientErrorMessage } from "@/lib/client-error-message";
 /**
  * 公開内容のdevelopへの同期（#4641）。**本番公開の結果とは別の欄**として、同期状態・同期PR・止まっている理由・
  * 次の操作を出す。同期できていないことを本番公開の失敗とは表示しない。PCの個別ボタン・スマホのシート
@@ -48,7 +49,7 @@ export function ReleaseDevelopSyncNotice({
     try {
       await requestDevelopSync(repositoryFullName);
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      setError(clientErrorMessage(err));
     } finally {
       setBusy(false);
       onChanged();
