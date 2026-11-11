@@ -127,6 +127,10 @@ vi.mock("@/lib/github/issues-api", () => ({
   addIssueLabels: (...args: unknown[]) => addIssueLabels(...(args as [])),
   removeIssueLabel: (...args: unknown[]) => removeIssueLabel(...(args as [])),
 }));
+const sendReleaseCompletionStopPush = vi.fn(async () => undefined);
+vi.mock("@/lib/notifications/release-completion-stop-push", () => ({
+  sendReleaseCompletionStopPush: (...args: unknown[]) => sendReleaseCompletionStopPush(...(args as [])),
+}));
 const countDispatchJobs = vi.fn();
 const rerunReleaseReviewJob = vi.fn();
 vi.mock("@/lib/dispatch/release-review-jobs", () => ({ rerunReleaseReviewJob: (...args: unknown[]) => rerunReleaseReviewJob(...args) }));
@@ -398,20 +402,27 @@ describe("runReleaseCompletionSweep", () => {
       expect(createReleaseFixSeries).not.toHaveBeenCalled();
       expect(addIssueLabels).not.toHaveBeenCalled();
       expect(targets()).toEqual([10]);
+      expect(sendReleaseCompletionStopPush).toHaveBeenCalledTimes(1);
       // 止まった系列は巡回の対象外。2回目で札もコメントも重ねない
       await runReleaseCompletionSweep({ hostName: "subpc", now: later(1) });
       expect(addIssueLabels).not.toHaveBeenCalled();
       expect(targets()).toEqual([10]);
     });
 
-    it("別理由の停止（mainが進んだ）は、従来どおり修正Issueへ確認待ちを付ける", async () => {
+    it("別理由の停止（mainが進んだ）も、修正Issueへ確認待ちを付けず候補のPRへ残してPushを鳴らす（#5325）", async () => {
       await start();
       loadReleaseVerificationSummary.mockResolvedValue(summary("passed", "passed"));
       fetchMainHeadSha.mockResolvedValue("base2");
       await runReleaseCompletionSweep({ hostName: "subpc", now });
       expect(runs[0]).toMatchObject({ stopReason: "base_changed" });
-      expect(addIssueLabels).toHaveBeenCalledWith("o", "r", 100, "token", ["00.check-user", "01.check-blocked"]);
-      expect(targets()).toEqual([100]);
+      expect(addIssueLabels).not.toHaveBeenCalled();
+      expect(targets()).toEqual([10]);
+      expect(((createComment.mock.calls[0] as unknown[])[4] as { body: string }).body).toContain("直近の修正Issue: #100");
+      expect(sendReleaseCompletionStopPush).toHaveBeenCalledTimes(1);
+      expect((sendReleaseCompletionStopPush.mock.calls[0] as unknown[])[0]).toMatchObject({ repositoryFullName: "o/r", pullRequestNumber: 10, publish: false });
+      // 止まった系列は巡回の対象外。2回目で鳴らし直さない
+      await runReleaseCompletionSweep({ hostName: "subpc", now: later(1) });
+      expect(sendReleaseCompletionStopPush).toHaveBeenCalledTimes(1);
     });
   });
 

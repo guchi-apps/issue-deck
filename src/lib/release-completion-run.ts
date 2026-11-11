@@ -26,6 +26,7 @@ import { recordDeployLaunchWatch } from "@/lib/github/deploy-launch-watch";
 import { addIssueLabels, createComment, removeIssueLabel } from "@/lib/github/issues-api";
 import { LOCAL_LABEL_NAME } from "@/lib/github/project-status-dispatch";
 import { fetchMainHeadSha, fetchPullRequestCiState, type GithubApiPullRequest } from "@/lib/github/release-api";
+import { sendReleaseCompletionStopPush } from "@/lib/notifications/release-completion-stop-push";
 import { isUniqueConstraintError } from "@/lib/prisma-error";
 import { loadFinalizationSnapshot, reconcileRcFinalization } from "@/lib/release-finalize-run";
 import { isRcReleaseCandidateHeadRef } from "@/lib/release-branch";
@@ -986,23 +987,33 @@ async function rerunFailedReview(run: RunRow, ctx: Ctx, observation: Observation
   return result.outcome === "queued" ? { action: "rerun_review" } : null;
 }
 
-/** 止めて人へ渡す。系列を終端にし、理由を修正Issue（無ければ候補のPR）へ残す */
+/**
+ * 止めて人へ渡す。系列を終端にし、理由をリリース候補のPRへ残してPush通知を送る。
+ *
+ * 確認する対象（停止の理由・再開や取り消しの操作）はリリース候補の画面にあるため、修正Issueへは
+ * `00.check-user`を付けない（#5130・#5325）。付けると「ユーザーの確認待ち」に修正Issueが並ぶうえ、
+ * 開いても候補側の操作へ辿り直す必要がある。札の代わりにPushを直接鳴らす（`sendReleaseCompletionStopPush`）
+ */
 async function handOff(run: RunRow, ctx: Ctx, reason: ReleaseCompletionStopReason, detail?: string): Promise<ActionResult> {
   const updated = await db.releaseCompletionRun.updateMany({
     where: { id: run.id, status: run.status },
     data: { status: "needs_attention", activeKey: null, stopReason: reason, stopDetail: detail ?? null },
   });
   if (updated.count !== 1) return null;
-  if (run.publishApprovalId) await settlePublishApprovalOnStop(run.publishApprovalId, reason, new Date());
-  // 指摘0件の全体レビュー未確認だけで止まったとき、確認する対象はリリース候補で、修正Issueではない（#5130）。
-  // 理由は候補のPRへ残し、修正Issueに確認待ちを付けない（ゲートは`decideReleaseCompletion`がそのまま止めている）
-  const audience = reason === "review_unverified" ? "candidate" : "user";
-  await notify(run, ctx, `${run.publishApprovalId ? "自動公開" : "リリース完了系列"}を止めました。${releaseCompletionStopMessage(reason, detail ?? null) ?? ""}`, audience);
+  const now = new Date();
+  if (run.publishApprovalId) await settlePublishApprovalOnStop(run.publishApprovalId, reason, now);
+  const stopMessage = releaseCompletionStopMessage(reason, detail ?? null);
+  await notify(run, ctx, `${run.publishApprovalId ? "自動公開" : "リリース完了系列"}を止めました。${stopMessage ?? ""}`, "stop");
+  await sendReleaseCompletionStopPush(
+    { repositoryFullName: run.repositoryFullName, pullRequestNumber: run.candidatePrNumber, publish: Boolean(run.publishApprovalId), reason: stopMessage },
+    now,
+  );
   return { action: `stop:${reason}`, detail };
 }
 
 /**
- * この候補の系列が過去に止めて付けた確認待ちラベルを修正Issueから外す。人が再開した時点で確認待ちは解消しているため。
+ * この候補の系列が過去に止めて付けた確認待ちラベルを修正Issueから外す（#5325より前の停止は修正Issueへ札を付けていた。
+ * いまの停止は付けないが、それ以前に付いた札を残さないため外し続ける）。人が再開した時点で確認待ちは解消しているため。
  * 呼ぶのは完了・本番復旧の完了のほか、系列の開始（押し直し）と公開承認待ちへの遷移（#5138）。外すのは、同じ候補で
  * 系列が止まった記録（stopReason）があるときだけ（止まらず進んだ場合や、人が別の理由で付けた札には触れない）。
  */
@@ -1029,10 +1040,11 @@ async function clearStopLabels(run: RunRow, ctx: Ctx): Promise<void> {
 }
 
 /**
- * 通知の宛先。"user": 最新の修正Issue（無ければ候補のPR）へ理由を残し、確認待ちを付ける。
- * "info": 同じ宛先へ知らせるだけ。"candidate": 確認する対象が候補そのもの（#5130）で、候補のPRへ残し、修正Issueには札を付けない
+ * 通知の宛先。"info": 最新の修正Issue（無ければ候補のPR）へ知らせるだけ。
+ * "stop": 人の判断が要る停止。確認する対象は候補そのもので、候補のPR（系列が追っている最新の番号）へ残す。
+ * 修正Issueには札もコメントも付けない（#5130・#5325）。候補が閉じられていてもコメントは残せる
  */
-type NotifyAudience = "user" | "info" | "candidate";
+type NotifyAudience = "info" | "stop";
 
 async function notify(run: RunRow, ctx: Ctx, message: string, audience: NotifyAudience): Promise<void> {
   const latest = await db.releaseFixSeries.findFirst({
@@ -1040,12 +1052,15 @@ async function notify(run: RunRow, ctx: Ctx, message: string, audience: NotifyAu
     orderBy: { createdAt: "desc" },
     select: { issueNumber: true },
   });
-  const target = audience !== "candidate" ? (latest?.issueNumber ?? run.candidatePrNumber) : run.candidatePrNumber;
-  const body = [message, "", `- リリース候補: #${run.candidatePrNumber}`, "", MARKER, "<!-- issue-deck-agent:guide -->"].join("\n");
+  const onCandidate = audience === "stop";
+  const target = onCandidate ? run.candidatePrNumber : (latest?.issueNumber ?? run.candidatePrNumber);
+  const reference = onCandidate
+    ? latest
+      ? [`- 直近の修正Issue: #${latest.issueNumber}（修正Issue側での対応は不要です）`]
+      : []
+    : [`- リリース候補: #${run.candidatePrNumber}`];
+  const body = [message, "", ...reference, ...(reference.length > 0 ? [""] : []), MARKER, "<!-- issue-deck-agent:guide -->"].join("\n");
   await createComment(ctx.owner, ctx.repo, target, ctx.token, { body }).catch((error: unknown) =>
     console.error("[release-completion] コメントに失敗しました", run.id, error),
   );
-  if (audience === "user" && latest) {
-    await addIssueLabels(ctx.owner, ctx.repo, latest.issueNumber, ctx.token, CHECK_USER_LABELS).catch(() => undefined);
-  }
 }
