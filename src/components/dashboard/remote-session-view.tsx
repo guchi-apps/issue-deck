@@ -421,7 +421,10 @@ function LaunchProgress({
   if (launch.gaveUp) {
     return (
       <div className="rounded-md bg-amber-500/10 p-3 text-sm">
-        <p>Claude CodeアプリのURLがまだ取れていません。取れると下の一覧の「開く」が押せるようになります。</p>
+        <p>
+          Claude CodeアプリのURLがまだ取れていません。取れると下の一覧の「開く」が押せるようになります。
+          しばらく待っても押せないときは、一覧の「終了」で畳んでから起動し直してください。
+        </p>
         <Button size="sm" variant="ghost" className="mt-1 -ml-2" onClick={onDismiss}>
           閉じる
         </Button>

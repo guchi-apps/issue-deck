@@ -274,8 +274,11 @@ REMOTE_SESSION_LAUNCHER="$SCRIPT_DIR/start-remote-session.sh"
 # 1ホストで同時に動かせるリモートセッションの本数。issue-deckの`REMOTE_SESSION_MAX_PER_HOST`と揃える。
 # Issueの実装枠（`DISPATCH_MAX_SESSIONS`）とは別に数える（セッション名が`-issue-`の規約から外れるため）
 REMOTE_SESSION_MAX="${ISSUE_DECK_REMOTE_SESSION_MAX:-3}"
-# 起動してからRemote ControlのURLが`~/.claude/sessions/<pid>.json`に出るまで待つ秒数
-REMOTE_SESSION_URL_WAIT_SECONDS="${ISSUE_DECK_REMOTE_SESSION_URL_WAIT:-90}"
+# 起動してからRemote ControlのURLが`~/.claude/sessions/<pid>.json`に出るまで、1回の起動で待つ秒数
+REMOTE_SESSION_URL_WAIT_SECONDS="${ISSUE_DECK_REMOTE_SESSION_URL_WAIT:-30}"
+# URLが出ないときに起こし直す回数（#5318）。Remote Controlの登録が起動時に失敗すると（APIの
+# 529など）Claude Codeは再試行せず、そのセッションはURLを持たないまま動き続ける
+REMOTE_SESSION_URL_RETRIES="${ISSUE_DECK_REMOTE_SESSION_URL_RETRIES:-2}"
 # 手作業の代行実行（#1828）。**pollerとは別のcgroupで走らせる**（poller自身を再起動する手順が
 # あるため。理由はスクリプト冒頭のコメントを参照）。
 MANUAL_STEP_RUNNER="$SCRIPT_DIR/run-manual-step.sh"
@@ -4603,8 +4606,8 @@ prepare_handoff_launch() {
 #   $1 ジョブID / $2 期待するtmuxセッション名 / $3 `running`として画面へ出す文言
 #   $4以降 実行するコマンド
 # リモートセッション（#4743）の起動・終了。**起動はURLが取れるまで待ってから成功を返す**
-# （画面はURLが届いた時点でClaude Codeアプリへ移動する）。取れなくても起動自体は成功として返し、
-# URLは次巡以降のホスト申告（`remoteSessions`）で届ける。
+# （画面はURLが届いた時点でClaude Codeアプリへ移動する）。取れなければ起こし直し（#5318）、
+# それでも取れなくても起動自体は成功として返し、URLは次巡以降のホスト申告（`remoteSessions`）で届ける。
 run_remote_session_job() {
   local job_id="$1" kind="$2" owner="$3" repo="$4" session="$5" model="$6"
 
@@ -4663,17 +4666,38 @@ run_remote_session_job() {
     return 0
   fi
 
-  local url="" waited=0
-  while (( waited < REMOTE_SESSION_URL_WAIT_SECONDS )); do
-    url="$(session_transcript_remote_control_url "$session" 2>/dev/null || true)"
+  # URLが出なければ同じ名前で起こし直す（#5318）。Remote Controlの登録は起動時に1回だけで、
+  # 失敗したセッションは待っても`bridgeSessionId`が出ない（転記に`bridge-session`行も残らない）。
+  # 起こし直しは`tmux kill-session`だけにしてworktreeは残す。ランチャーは会話のある転記だけを
+  # `--continue`で続けるので、URLが無く誰も話しかけていないセッションはまっさらに起き直る
+  local url="" waited attempt=0
+  while :; do
+    waited=0
+    while (( waited < REMOTE_SESSION_URL_WAIT_SECONDS )); do
+      url="$(session_transcript_remote_control_url "$session" 2>/dev/null || true)"
+      [[ -n "$url" ]] && break
+      # 起動直後にClaude Codeが落ちた（未ログイン・設定の誤りなど）。最後の出力を理由として返す
+      if ! tmux has-session -t "=$session" 2>/dev/null; then
+        report_job "$job_id" failed "Claude Codeが起動直後に終了しました。サブPCで claude を一度起動して状態を確認してください。"
+        return 0
+      fi
+      sleep 3
+      waited=$((waited + 3))
+    done
     [[ -n "$url" ]] && break
-    # 起動直後にClaude Codeが落ちた（未ログイン・設定の誤りなど）。最後の出力を理由として返す
-    if ! tmux has-session -t "=$session" 2>/dev/null; then
-      report_job "$job_id" failed "Claude Codeが起動直後に終了しました。サブPCで claude を一度起動して状態を確認してください。"
+    (( attempt < REMOTE_SESSION_URL_RETRIES )) || break
+    attempt=$((attempt + 1))
+    echo "  リモートセッション $session のURLが${REMOTE_SESSION_URL_WAIT_SECONDS}秒で出ないため起こし直します（${attempt}/${REMOTE_SESSION_URL_RETRIES}回目）"
+    report_job "$job_id" running "Claude CodeアプリのURLが取れないため、起こし直しています（${attempt}/${REMOTE_SESSION_URL_RETRIES}回目）"
+    tmux kill-session -t "=$session" 2>/dev/null || true
+    set +e
+    output="$("${launch_env[@]}" timeout "$LAUNCH_TIMEOUT" bash "$REMOTE_SESSION_LAUNCHER" "$owner" "$repo" "$session" </dev/null 2>&1)"
+    status=$?
+    set -e
+    if [[ "$status" -ne 0 ]] || ! tmux has-session -t "=$session" 2>/dev/null; then
+      report_job "$job_id" failed "起こし直せませんでした（終了コード $status）: $(printf '%s' "$output" | tail -c 1500)"
       return 0
     fi
-    sleep 3
-    waited=$((waited + 3))
   done
 
   local extra=""

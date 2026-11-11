@@ -8,10 +8,10 @@ import type { RemoteSessionState, RemoteSessionView } from "@/lib/dispatch/remot
 const LAUNCHING_POLL_MS = 3_000;
 const IDLE_POLL_MS = 15_000;
 /**
- * 起動してからURLを待つ上限。pollerはURLが出るまで最大90秒待ってから報告するため、それに
- * 受け渡しの余裕を足す。過ぎたら自動移動はやめ、一覧の「開く」に任せる
+ * 起動してからURLを待つ上限。pollerはURLが出るまで1回30秒待ち、出なければ2回まで起こし直す
+ * （#5318）ため、それに起こし直しと受け渡しの余裕を足す。過ぎたら自動移動はやめ、一覧の「開く」に任せる
  */
-const AUTO_OPEN_TIMEOUT_MS = 150_000;
+const AUTO_OPEN_TIMEOUT_MS = 180_000;
 
 export type RemoteSessionLaunch = {
   sessionId: string;
