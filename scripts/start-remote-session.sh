@@ -87,11 +87,21 @@ worktree_is_disposable() {
 }
 
 # そのworktreeパスに続けられる会話（転記）が残っているか。残っていれば0
+#
+# **転記があるだけでは会話とみなさない**（#5318）。Claude Codeは話しかけられないまま終了しても
+# タイトル・権限モードなどだけの転記を書く。URLが取れずに起こし直したセッションや、使われずに
+# 無操作で畳まれたセッションがそれに当たり、`--continue`で続ける会話が無い。ユーザーの発話
+# （`"type":"user"`の行）を持つ転記があるときだけ続ける
 has_conversation_for() {
   local projects_dir="${CLAUDE_PROJECTS_DIR:-$HOME/.claude/projects}"
   # Claude Codeは作業ディレクトリの英数字以外を`-`に置き換えた名前で転記を置く
   local slug="${1//[^A-Za-z0-9]/-}"
-  compgen -G "$projects_dir/$slug/*.jsonl" >/dev/null
+  local file
+  for file in "$projects_dir/$slug"/*.jsonl; do
+    [[ -f "$file" ]] || continue
+    grep -q '"type":"user"' "$file" 2>/dev/null && return 0
+  done
+  return 1
 }
 
 remove_worktree() {

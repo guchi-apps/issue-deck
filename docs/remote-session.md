@@ -28,14 +28,25 @@ Claude Codeアプリへ移動する**。会話そのものはIssueDeckではな�
          └ scripts/start-remote-session.sh <owner> <repo> <セッション名>
               既定ブランチの最新から detached の worktree を作る（~/apps/<repo>-worktrees/remote-<8文字>）
               tmux で claude --remote-control <セッション名> --permission-mode <auto> を起こす
-         └ ~/.claude/sessions/<pid>.json の bridgeSessionId からURLを組み立てる（最大90秒待つ）
+         └ ~/.claude/sessions/<pid>.json の bridgeSessionId からURLを組み立てる（1回30秒待つ）
+         └ 出なければ tmux だけ畳んで同じ名前で起こし直す（既定2回まで。#5318）
        POST /api/dispatch/report（succeeded・remoteControlUrl）→ RemoteSession（running・URL）
 画面 → GET /api/remote-sessions を3秒おきに読み、URLが届いたらそのURLへ移動する
 ```
 
 - **URLが取れなくても起動は成功として返す。** URLは非公開仕様のファイルから取るbest-effortで、
   取れなかった巡はホスト申告（`POST /api/dispatch/hosts`の`remoteSessions`）が後から届ける。画面は
-  150秒待って届かなければ自動移動をやめ、一覧の「開く」が押せるようになるのを待つ
+  180秒待って届かなければ自動移動をやめ、一覧の「開く」が押せるようになるのを待つ
+- **URLが出ないセッションは起こし直す**（#5318）。Remote Controlの登録は起動時の1回だけで、
+  そこで失敗すると（APIの529が続いていた時間帯に実際に起きた）Claude Codeは再試行しない。
+  そのセッションは`~/.claude/sessions/<pid>.json`に`bridgeSessionId`が出ず、転記にも`bridge-session`行が
+  残らないまま動き続けるので、待っても「開く」は押せるようにならない。pollerは1回の起動で
+  `ISSUE_DECK_REMOTE_SESSION_URL_WAIT`（既定30秒）待ち、出なければ`tmux kill-session`だけでセッションを
+  畳んで（worktreeは残す）ランチャーを呼び直す。回数は`ISSUE_DECK_REMOTE_SESSION_URL_RETRIES`（既定2）。
+  登録が通れば数秒で出るため、1回の待ちは短くしてある
+- **`--continue`で続けるのは、ユーザーの発話がある転記だけ**（#5318）。Claude Codeは話しかけられないまま
+  終了しても、タイトル・権限モードだけの転記を書く。転記の有無だけで判定すると、起こし直しや
+  使われないまま無操作で畳まれたセッションの再開が、続ける会話の無い`--continue`になる
 - **終了**は`DELETE /api/remote-sessions?id=`が`REMOTE_SESSION_KILL`を積み、pollerが
   `start-remote-session.sh --kill`でtmuxを畳んでworktreeを片付ける
 - tmuxを直接閉じた・Claude Codeが終了した・ホストを再起動したものは、ホスト申告に出てこなくなって

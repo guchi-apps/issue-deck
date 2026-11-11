@@ -457,7 +457,7 @@ export async function applyRemoteSessionJobReport(params: {
 /**
  * ホスト申告の`remoteSessions`で生存を突き合わせる。
  *
- * - 申告にあるもの … `running`にし、URLが届いていれば更新する（起動時に90秒で取れなかったURLも
+ * - 申告にあるもの … `running`にし、URLが届いていれば更新する（起動時に取れなかったURLも
  *   ここで拾う）
  * - 申告に無い`running` … 最後に見えてから猶予を過ぎたら`ended`（tmuxで直接閉じた・ホストの再起動）
  * - `starting` … 起動ジョブの結果を待つので触らない
