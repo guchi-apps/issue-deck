@@ -102,16 +102,22 @@ export async function removeCheckUserWithReason(
    * `01.check-merge`も外してよいか（#2919）。**既定は`false`＝#1905のガードそのまま。**
    * 真を渡せるのは、マージ待ちの「修正を依頼する」を人が押したことが起点になっている
    * 経路だけ（`resolveFixedInstructionCheckUser`）。
+   *
+   * `onlyReasons`（#5326）を渡すと、**いま付いている理由がそのどれかのときだけ**外す。理由ラベルが
+   * 無い・読めないときも外さない（既定の「読めなければ外す」とは逆）。停滞の引き上げが付けた
+   * `01.check-blocked`を、セッションが動き出したことだけを根拠に外す経路が使う——同じ報告の
+   * 中で計画・質問の`00.check-user`が付いた直後に、それを巻き添えにしないため。
    */
-  options: { allowMergeReason?: boolean } = {},
-): Promise<void> {
-  if (!(await isRemovableBySession(owner, repo, issueNumber, token, options))) return;
+  options: { allowMergeReason?: boolean; onlyReasons?: readonly CheckUserReason[] } = {},
+): Promise<boolean> {
+  if (!(await isRemovableBySession(owner, repo, issueNumber, token, options))) return false;
 
   const remaining = await removeIssueLabel(owner, repo, issueNumber, token, CHECK_USER_LABEL);
-  if (remaining === null) return;
+  if (remaining === null) return false;
   for (const name of remaining.filter(isCheckUserReasonLabel)) {
     await removeIssueLabel(owner, repo, issueNumber, token, name);
   }
+  return true;
 }
 
 /**
@@ -126,7 +132,7 @@ async function isRemovableBySession(
   repo: string,
   issueNumber: number,
   token: string,
-  options: { allowMergeReason?: boolean } = {},
+  options: { allowMergeReason?: boolean; onlyReasons?: readonly CheckUserReason[] } = {},
 ): Promise<boolean> {
   let names: string[];
   try {
@@ -136,10 +142,11 @@ async function isRemovableBySession(
       `[dispatch] ラベルを取得できませんでした（${owner}/${repo}#${issueNumber}）`,
       error,
     );
-    return true;
+    return options.onlyReasons === undefined;
   }
-  return isFixedInstructionRemovableCheckUserReason(
-    checkUserReason(names.map((name) => ({ name }))),
-    options,
-  );
+  const reason = checkUserReason(names.map((name) => ({ name })));
+  if (options.onlyReasons !== undefined) {
+    return names.includes(CHECK_USER_LABEL) && reason !== null && options.onlyReasons.includes(reason);
+  }
+  return isFixedInstructionRemovableCheckUserReason(reason, options);
 }

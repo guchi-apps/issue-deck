@@ -58,7 +58,7 @@ describe("buildSessionInterruptedCommentBody", () => {
 
   // 中断は「答えれば済む」ものではないので、`Stop`で勝手に外れない旨まで書く
   it("00.check-userが自動では外れないことを書く", () => {
-    expect(body).toContain("自動では外れません");
+    expect(body).toContain("セッションが動き出せばこの`00.check-user`は自動で");
   });
 
   it("省略できる項目が無くても本文が壊れない", () => {
@@ -126,7 +126,7 @@ describe("buildSessionInterruptedCommentBody（reason: tool_call_stall）", () =
   it("続きを人が引き取るための出口は共通のまま出す", () => {
     expect(body).toContain("tmux attach -t research-desk-issue-41");
     expect(body).toContain("https://claude.ai/code/session_01XYZ");
-    expect(body).toContain("自動では外れません");
+    expect(body).toContain("セッションが動き出せばこの`00.check-user`は自動で");
   });
 });
 
@@ -165,7 +165,7 @@ describe("buildSessionInterruptedCommentBody（reason: classifier_blocked）", (
   it("続きを人が引き取るための出口は共通のまま出す", () => {
     expect(body).toContain("tmux attach -t aide-issue-253");
     expect(body).toContain("https://claude.ai/code/session_01ABC");
-    expect(body).toContain("自動では外れません");
+    expect(body).toContain("セッションが動き出せばこの`00.check-user`は自動で");
   });
 });
 
@@ -218,6 +218,6 @@ describe("buildSessionInterruptedCommentBody（reason: turn_stall・#3174）", (
 
   it("続きを人が引き取るための出口は共通のまま出す", () => {
     expect(body).toContain("tmux attach -t issue-deck-issue-3174");
-    expect(body).toContain("自動では外れません");
+    expect(body).toContain("セッションが動き出せばこの`00.check-user`は自動で");
   });
 });
