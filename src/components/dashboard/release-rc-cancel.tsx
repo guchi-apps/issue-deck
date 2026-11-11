@@ -6,13 +6,10 @@ import { canCancelRc, classifyRcBlock, parseRcPhase } from "@/lib/release-rc";
 import { requestReleaseCandidateCancel } from "@/lib/release-request";
 import type { RcCandidateView } from "@/lib/release-rc-run";
 
-/** 候補を取り消せる段階・状態か（作り直しが要る検証中の候補と、公開前の候補だけ） */
+/** 候補を取り消せる段階か。mainへのマージ前（`canCancelRc`）ならいつでも出す（#5323） */
 export function canShowRcCancel(candidate: RcCandidateView): boolean {
   const phase = parseRcPhase(candidate.phase);
-  if (!phase || !canCancelRc(phase)) return false;
-  const reviewNeedsRestart = phase === "review" && ["needs_fix", "fixing"].includes(candidate.status.status);
-  const beforePublication = phase === "preparing" || phase === "awaiting_approval";
-  return reviewNeedsRestart || beforePublication;
+  return phase !== null && canCancelRc(phase);
 }
 
 /** 失敗・記録不一致の候補を正規に終了し、新しい候補へ進む出口（#4696）。 */
@@ -29,7 +26,7 @@ export function ReleaseRcCancel({ candidate, repositoryFullName, onChanged, inli
   if (!phase || !canShowRcCancel(candidate)) return null;
 
   const cancel = async () => {
-    if (!window.confirm(`${repositoryFullName}の${candidate.label}を取り消しますか？履歴・検証結果は残り、公開はしません。取り消した後、ブランチ画面から修正を含む新しい候補を作成してください。`)) return;
+    if (!window.confirm(`${repositoryFullName}の${candidate.label}を取り消しますか？履歴・検証結果は残り、公開はしません。取り込むPRを変えたいときも、取り消した後にブランチ画面から新しい候補を作成してください。`)) return;
     setBusy(true);
     setError(null);
     try {

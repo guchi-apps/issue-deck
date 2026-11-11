@@ -363,7 +363,7 @@ export function ReleasePullRequestOverview({
       </section>
 
       <section aria-label="今回リリースする変更" className="rounded-[10px] border bg-card p-3.5">
-        <ReleaseContentsList state={state} />
+        <ReleaseContentsList state={state} rcPhase={rcCandidate?.phase ?? null} onRcChanged={rc.reload} />
       </section>
 
       {/* 並びは 状態と次の操作 → 候補共通検証 → 公開対象 → 履歴（#4560） */}

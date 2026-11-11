@@ -3,6 +3,7 @@
 import { ExternalLink, Loader2 } from "lucide-react";
 import { useCallback, useContext, useEffect, useState, type ReactNode } from "react";
 
+import { RcImportPanel } from "@/components/dashboard/release-rc-import-panel";
 import { ReleaseCompletionPanel, useReleaseCompletionRun } from "@/components/dashboard/release-completion-panel";
 import type { ReleaseCompletionRunView } from "@/lib/release-completion-run";
 import { ReleaseFixStartContext } from "@/components/dashboard/release-fix-start-context";
@@ -894,8 +895,20 @@ export function ReleaseFixSummary({
 }
 
 /** 「今回リリースする変更」。元から含む・今回の修正で追加・今回は含めないを分け、不明なものは不明と出す */
-export function ReleaseContentsList({ state, className }: { state: ReleaseFixOverviewState; className?: string }) {
+export function ReleaseContentsList({
+  state,
+  className,
+  rcPhase = null,
+  onRcChanged,
+}: {
+  state: ReleaseFixOverviewState;
+  className?: string;
+  /** 新方式の候補の段階。取り込みの入口（`review`）と案内（公開準備以降）の出し分けに使う（#5323） */
+  rcPhase?: string | null;
+  onRcChanged?: () => void;
+}) {
   const { contents, repositoryFullName } = state;
+  const [importOpen, setImportOpen] = useState(false);
   const prUrl = (n: number) => issueUrl(repositoryFullName, n, "pull");
   return (
     <div className={cn("flex flex-col gap-1", className)} data-testid="release-contents">
@@ -932,6 +945,21 @@ export function ReleaseContentsList({ state, className }: { state: ReleaseFixOve
           )}
           {contents.truncated && (
             <p className="text-amber-800 dark:text-amber-300">一覧は先頭だけです。残りはGitHubのリリースPRで確認してください（全件ではありません）</p>
+          )}
+          {state.rcCandidate && rcPhase === "review" && (
+            <details className="mt-1" data-testid="release-contents-import" onToggle={(e) => setImportOpen(e.currentTarget.open)}>
+              <summary className="w-fit cursor-pointer text-primary hover:underline">＋ 取り込むPRを追加</summary>
+              {importOpen && (
+                <div className="mt-1.5">
+                  <RcImportPanel repositoryFullName={repositoryFullName} pullRequestNumber={state.pullRequestNumber} onImported={onRcChanged} />
+                </div>
+              )}
+            </details>
+          )}
+          {state.rcCandidate && (rcPhase === "preparing" || rcPhase === "awaiting_approval") && (
+            <p className="text-muted-foreground" data-testid="release-contents-locked">
+              公開準備以降は取り込むPRを追加できません。変えるときは候補を取り消して、新しい候補を作り直してください。
+            </p>
           )}
           {contents.excluded.length > 0 && (
             <p className="break-words text-muted-foreground">
