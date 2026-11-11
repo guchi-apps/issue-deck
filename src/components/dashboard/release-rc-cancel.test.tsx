@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
-import { ReleaseRcCancel } from "./release-rc-cancel";
+import { canShowRcCancel, ReleaseRcCancel } from "./release-rc-cancel";
 import type { RcCandidateView } from "@/lib/release-rc-run";
 
 const candidate = { id: "rc1", sequence: 1, label: "RC-1", phase: "review", prNumber: 12,
@@ -48,12 +48,18 @@ it.each(["preparing", "awaiting_approval"])("%sでは確認後にその段階を
   expect(JSON.parse(fetch.mock.calls[0][1].body).expectedPhase).toBe(phase);
 });
 
-it("検証中・合格候補には取消操作を出さない", () => {
+it("公開準備可能な候補にも取消操作を出す（#5323）", () => {
   render(<ReleaseRcCancel candidate={{ ...candidate, status: { ...candidate.status, status: "ready_to_prepare" } }} repositoryFullName="o/r" onChanged={() => {}} />);
-  expect(screen.queryByRole("button")).toBeNull();
+  expect(screen.getByRole("button")).toBeTruthy();
 });
 
 it("修正系列が残るreview候補にも正規の取消操作を出す", () => {
   render(<ReleaseRcCancel candidate={{ ...candidate, status: { ...candidate.status, status: "fixing" } }} repositoryFullName="o/r" onChanged={() => {}} />);
   expect(screen.getByRole("button", { name: "候補を取り消して作り直す" })).toBeTruthy();
+});
+
+it("mainマージ前の段階ならいつでも取消を出し、マージ後は出さない（#5323）", () => {
+  const at = (phase: string, status = "verifying") => ({ ...candidate, phase, status: { status, label: "" } }) as RcCandidateView;
+  for (const phase of ["creating", "review", "preparing", "awaiting_approval"]) expect(canShowRcCancel(at(phase))).toBe(true);
+  for (const phase of ["deploying", "verifying_production", "completed", "cancelled"]) expect(canShowRcCancel(at(phase))).toBe(false);
 });
