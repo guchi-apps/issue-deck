@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { describeSessionStall, isSessionStallRecoveryBody } from "@/lib/dispatch/session-stall";
+import { describeSessionStall, hasSessionLeftStall, isSessionStallRecoveryBody } from "@/lib/dispatch/session-stall";
 import { parseSessionInstruction } from "@/lib/dispatch/dispatch-job";
 import {
   SESSION_INTERRUPTED_REASONS,
@@ -126,5 +126,44 @@ describe("固定文面", () => {
     expect(isSessionStallRecoveryBody("tool_call_stall", preset!.body)).toBe(false);
     // 任意の本文は「追加指示」の担当
     expect(isSessionStallRecoveryBody("api_error", "進めて")).toBe(false);
+  });
+});
+
+/**
+ * #5326。引き上げを受けたセッションが動き出した遷移でだけ、引き上げの確認待ちを外す。
+ * 端末・Remote Controlから続けたセッションの`00.check-user`が残り、自動マージを止めていた。
+ */
+describe("hasSessionLeftStall", () => {
+  const AFTER = "2026-09-07T10:01:00.000Z";
+
+  it("停滞していた行のツール実行（stepSeenAt）が引き上げを追い越したら真", () => {
+    expect(hasSessionLeftStall(session(), session({ stepSeenAt: AFTER }))).toBe(true);
+  });
+
+  it("停滞していた行の様子（Stop・承認待ち）が引き上げを追い越したら真", () => {
+    expect(hasSessionLeftStall(session(), session({ activity: "WORKING", activityAt: AFTER }))).toBe(true);
+  });
+
+  it("既に動き出していた行の報告では真にならない（1回の引き上げにつき1回）", () => {
+    const moved = session({ stepSeenAt: AFTER });
+    expect(hasSessionLeftStall(moved, session({ stepSeenAt: "2026-09-07T10:02:00.000Z" }))).toBe(false);
+  });
+
+  it("引き上げと同時に送られる入力待ち（許可のツールなし）は動き出しに数えない", () => {
+    expect(
+      hasSessionLeftStall(session(), session({ activity: "WAITING_INPUT", activityAt: AFTER })),
+    ).toBe(false);
+  });
+
+  it("立ち上がり直した行・終わった行・前の値が無い行では真にならない", () => {
+    expect(hasSessionLeftStall(session(), session({ interruptedReason: null, interruptedAt: null }))).toBe(false);
+    expect(hasSessionLeftStall(session(), session({ state: "GONE", stepSeenAt: AFTER }))).toBe(false);
+    expect(hasSessionLeftStall(null, session({ stepSeenAt: AFTER }))).toBe(false);
+  });
+
+  it("別の引き上げ（interruptedAtが違う）へ置き換わった報告は動き出しではない", () => {
+    expect(
+      hasSessionLeftStall(session(), session({ interruptedAt: AFTER, stepSeenAt: AFTER })),
+    ).toBe(false);
   });
 });

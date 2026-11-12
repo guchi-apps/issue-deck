@@ -1,10 +1,10 @@
 import {
   convertPullRequestToDraft,
-  fetchWorkflowRunsForHead,
   markPullRequestReadyForReview,
   rerunWorkflowRun,
 } from "@/lib/github/actions-api";
 import { GithubApiError } from "@/lib/github/issues-api";
+import { fetchReviewRunsForHead } from "@/lib/github/pull-request-auto-merge-rerun";
 import { fetchPullRequest } from "@/lib/github/pull-requests-api";
 import { decideReviewRerun, decideReviewRestart, isWorkflowRunRetryRefused } from "@/lib/pull-request-review-rerun";
 
@@ -77,16 +77,7 @@ export async function rerunPullRequestReview(params: {
 }): Promise<ReviewRerunOutcome> {
   const { owner, repo, number, headSha, token } = params;
   const current = await fetchPullRequest(owner, repo, number, token);
-  const runs = (await fetchWorkflowRunsForHead(owner, repo, current.head.sha, token)).map((run) => ({
-    id: run.id,
-    name: run.name,
-    path: run.path,
-    status: run.status ?? "unknown",
-    conclusion: run.conclusion,
-    headSha: run.head_sha,
-    event: run.event,
-    htmlUrl: run.html_url,
-  }));
+  const runs = await fetchReviewRunsForHead(owner, repo, current.head.sha, token);
   const decision = decideReviewRerun(
     { state: current.state, merged: current.merged, baseRef: current.base.ref, headSha: current.head.sha },
     headSha,

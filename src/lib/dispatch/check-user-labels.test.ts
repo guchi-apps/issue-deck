@@ -211,4 +211,46 @@ describe("removeCheckUserWithReason", () => {
     ]);
     error.mockRestore();
   });
+
+  describe("onlyReasons（#5326。停滞の引き上げを、動き出したことだけを根拠に外す）", () => {
+    it("理由が挙げたもの（01.check-blocked）なら外し、外したことを返す", async () => {
+      fetchIssueLabelNames.mockResolvedValue(["00.check-user", "01.check-blocked"]);
+      removeIssueLabel.mockResolvedValueOnce(["01.check-blocked"]);
+
+      const removed = await removeCheckUserWithReason("guchi-apps", "issue-deck", 13, "token", {
+        onlyReasons: ["blocked"],
+      });
+
+      expect(removed).toBe(true);
+      expect(removeIssueLabel.mock.calls.map((call) => call[4])).toEqual([
+        "00.check-user",
+        "01.check-blocked",
+      ]);
+    });
+
+    it("同じ報告で付いた計画・質問の確認待ちは巻き添えにしない", async () => {
+      for (const reason of ["01.check-plan", "01.check-input", "01.check-merge"]) {
+        fetchIssueLabelNames.mockResolvedValue(["00.check-user", reason]);
+        const removed = await removeCheckUserWithReason("guchi-apps", "issue-deck", 14, "token", {
+          onlyReasons: ["blocked"],
+        });
+        expect(removed).toBe(false);
+      }
+      expect(removeIssueLabel).not.toHaveBeenCalled();
+    });
+
+    it("理由ラベルが無い・00.check-userが無い・読めないときは外さない（既定とは逆に倒す）", async () => {
+      const error = vi.spyOn(console, "error").mockImplementation(() => {});
+      fetchIssueLabelNames.mockResolvedValueOnce(["00.check-user"]);
+      fetchIssueLabelNames.mockResolvedValueOnce(["01.check-blocked"]);
+      fetchIssueLabelNames.mockRejectedValueOnce(new Error("boom"));
+      for (let i = 0; i < 3; i++) {
+        expect(
+          await removeCheckUserWithReason("guchi-apps", "issue-deck", 15, "token", { onlyReasons: ["blocked"] }),
+        ).toBe(false);
+      }
+      expect(removeIssueLabel).not.toHaveBeenCalled();
+      error.mockRestore();
+    });
+  });
 });

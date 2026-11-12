@@ -226,6 +226,27 @@ export function describeSessionStall(session: DispatchSessionView): SessionStall
 }
 
 /**
+ * 停滞していたセッションが、この報告で動き出したか（#5326）。
+ *
+ * 引き上げ（`escalateInterruptedSession`）は`00.check-user`＋`01.check-blocked`を付けるが、
+ * 端末・Remote Controlから続けた場合はそれを外す実行体がいなかった。セッションはそのまま実装を
+ * 終えてPRを作り、`auto-merge`が「確認待ち」を見て自動マージを見送っていた（#5322・#5324）。
+ *
+ * 判定は`describeSessionStall`の追い越しそのもの。**同じ引き上げ（`interruptedAt`が同じ）の
+ * 行の前後**で、停滞→停滞でない、に変わったときだけ真を返す。立ち上がり直した行
+ * （`interruptedAt`が捨てられる）や、終わった行（`ALIVE`でない）は「動き出した」ではない。
+ * 前後で一度しか真にならないので、報告のたびにラベルを読みに行くことはない。
+ */
+export function hasSessionLeftStall(
+  before: DispatchSessionView | null,
+  after: DispatchSessionView,
+): boolean {
+  if (before === null || after.state !== "ALIVE") return false;
+  if (before.interruptedAt === null || before.interruptedAt !== after.interruptedAt) return false;
+  return describeSessionStall(before) !== null && describeSessionStall(after) === null;
+}
+
+/**
  * 押された文面が、その原因の固定文面として用意したもののどれかか（#2886）。
  *
  * **受け口（`POST /api/dispatch/session-recovery`）が押された本文を検証するために使う。**

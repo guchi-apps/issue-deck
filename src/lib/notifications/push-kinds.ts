@@ -16,7 +16,7 @@ export const PUSH_KIND_LABELS: Record<PushKind, { title: string; description: st
   },
   "release-merge": {
     title: "本番マージ待ち",
-    description: "develop→mainのリリースPRが人のマージ待ちで残っているとき",
+    description: "develop→mainのリリースPRが人のマージ待ちで残っているとき・リリース完了系列（自動公開）が止まったとき",
   },
   release: {
     title: "リリース完了",

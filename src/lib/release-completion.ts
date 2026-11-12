@@ -149,7 +149,15 @@ export type CompletionChecks = {
    * 省略時は`settled`として扱う
    */
   aiReviewUnverified?: { stage: "reevaluating" | "settled"; detail: string | null } | null;
+  /**
+   * 同じ対象（PR・base・head）の全体レビューを、この系列が自動でやり直してよいか（#5311）。同じ対象のレビュージョブが
+   * まだ1件だけのときtrue。実行障害（指摘0件の`failed`）で止める前に1回だけ再実行し、2回目も失敗したら止める。省略時はfalse
+   */
+  aiReviewAutoRerunAvailable?: boolean;
 };
+
+/** 全体レビューの実行障害を自動で再実行したときの注記（#5311） */
+export const REVIEW_AUTO_RERUN_NOTE = "全体レビューが実行障害で完了しなかったため、自動で1回再実行しています";
 
 /**
  * マージゲートの要確認が、ユーザーの判断で解除できるものだけか（#4657）。**全体レビューの要確認（止める指摘）だけ**が
@@ -250,6 +258,8 @@ export type ReleaseCompletionDecision =
   | { action: "evaluate_merge" }
   /** 全体レビューの未確認範囲を、統合検証の結果で再評価する（#4768。積むのは`reevaluateReleaseReviewIfReady`） */
   | { action: "reevaluate_review" }
+  /** 全体レビューの実行障害（指摘0件の`failed`）を、同じ対象で1回だけ自動で再実行する（#5311。積むのは`rerunReleaseReviewJob`） */
+  | { action: "rerun_review" }
   | { action: "begin_release"; mergeSha: string }
   | { action: "stop"; reason: ReleaseCompletionStopReason; detail?: string };
 
@@ -377,6 +387,11 @@ export function decideReleaseCompletion(
   const aiProblem = problem(checks.aiReview) && !clearedByDecision && !unverifiedOnly;
   if (aiProblem || problem(checks.integration)) {
     if (problem(checks.integration) && checks.integrationSetupGap) return { action: "stop", reason: "setup_missing" };
+    // 全体レビューの実行障害（指摘0件の失敗）は、コードの指摘でも人の判断事項でもない。止める前に同じ対象で1回だけ
+    // 自動で再実行する（#5311）。統合検証も問題なら、そちらの扱い（起案・停止）を優先する
+    if (checks.aiReview === "failed" && checks.findingCount === 0 && !problem(checks.integration) && checks.aiReviewAutoRerunAvailable === true) {
+      return { action: "rerun_review" };
+    }
     if (approvalRun) {
       // 公開承認は修正の実行指示ではない。失敗・未判断の指摘は理由を示して止め、採否は#4657の判断で解除する
       if (!problem(checks.integration) && checks.aiReview === "needs_check" && checks.findingCount > 0) {

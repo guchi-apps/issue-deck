@@ -297,7 +297,28 @@ auto modeのクラシファイアが`gh workflow run deploy.yml --ref main`を�
 | ユーザーがPRに修正を依頼した | 画面の「修正を依頼する」ボタン（`requestPrFixCommentBody`の前に`labelsAfterRejection`。#409） |
 | ユーザーが開発環境を確認して承認／修正を依頼した | 上と同じ承認・修正ボタン。ローカルセッションでは`AskUserQuestion`に答えた時点で`PostToolUse`フックが外す |
 | Issueがcloseされた | issue-deckの`upsertIssueRow`（`clearLabelsOnIssueClose`。#2178）と`reusable-issue-labels.yml`の`cleanup-on-close`（#464）の両方。後述「closeで外れるラベルはissue-deck側でも外す」 |
+| 停滞の引き上げ（APIエラー・クラシファイア拒否など）の後、セッションが動き出した | フック・pollerの報告が引き上げの時刻を追い越した遷移で`resolveInterruptedSession`が外す（#5326）。**外すのは理由が`01.check-blocked`のときだけ**（同じ報告で付いた計画・質問の確認待ちや`01.check-merge`は外さない）。外したときに`issue-<番号>`のopenなdevelop向けPRがあれば、レビューrunの`auto-merge`ジョブだけを再実行する。後述「停滞から動き出したら、引き上げの確認待ちを外す」 |
 | ユーザーが起動確認に答え、Claude Codeが開始した | pollerの次の報告（最大1分）を受けて`resolveNotStartedSession`が外す（#1465）。**この経路だけは印がホストではなくDBの直前の値**（`activity === "NOT_STARTED"`）で、それを立てたのがこの経路しか無いことが「自分で付けた」の根拠になる |
+
+### 停滞から動き出したら、引き上げの確認待ちを外す（#5326）
+
+APIエラーでの中断（#1971）・クラシファイアの拒否（#2844）などの引き上げは、`00.check-user`＋
+`01.check-blocked`を付ける。以前は「端末・Remote Controlから続けた場合は自動では外れない」設計で、
+人が続け方を指示してセッションが実装を終えPRを作っても、ラベルが残ったままだった。
+`claude-review-develop.yml`の`auto-merge`は対応Issueの`00.check-user`を見て自動マージを見送るため、
+**画面には「自動マージされません（ユーザー確認待ち：作業が止まっています）」が出たまま**、人が
+マージするかdevelopへ入るまで止まっていた（#5322・#5324・#5263）。
+
+- **合図は「セッションが動き出したこと」**。停滞パネルが消える条件（`describeSessionStall`。
+  `activityAt`・`stepSeenAt`が`interruptedAt`を追い越す）と同じで、停滞→停滞でないに変わった
+  報告の1回だけ`hasSessionLeftStall`が真になる。動き出したこと自体が「人が続け方を決めた」合図で、
+  起動確認（`resolveNotStartedSession`。#1465）と同じ立場
+- **外すのは理由が`01.check-blocked`のときだけ**（`removeCheckUserWithReason`の`onlyReasons`）。
+  同じ報告の中で計画・質問の`00.check-user`が付くことがあり、それを巻き添えにしないため。
+  理由ラベルが無い・読めないときも外さない
+- **PRが先に作られていたら、`auto-merge`ジョブだけを再実行する。** `auto-merge`は「確認待ち」で
+  見送ったまま終わっており、ラベルを外しても走り直す契機が無い。再実行されたジョブがラベルを
+  読み直して判定する（判定とマージ操作はワークフローが持ったまま）
 
 ### マージ時に外しそこねた`00.check-user`は巡回が外す（#2335）
 
@@ -2197,6 +2218,7 @@ Issue本文からClaude（`claude-haiku-4-5`）がタイトルとラベルを推
   - **レビューはCI結果を判定材料にしない。** 並行実行では`gh pr checks`が実行中を返すのが普通なので、`.github/prompts/review-develop.md`には「実行中ならその旨だけ書き、完了を待たない」と書いてある。CI失敗の修正は`claude-ci-fix.yml`の担当
   - **画面のピルは判定側を優先して出す。** `wait-for-ci`と`claude-review`が同時に走るため、実行順で選ぶとレビュー中でも「CIの完了待ち」と出てしまう。CIの進み具合は隣のCI状態のピルが既に出しているので、`JUDGEMENT_STEP_ORDER`（`src/lib/github/check-rollup.ts`）は`risk-check` → `claude-review` → `wait-for-ci` → `auto-merge`の順にしてある
 - **`00.check-user`を両判定共通の「マージ保留」シグナルとして使う**: `auto-merge`ジョブは上記の反映を済ませたうえで、対応Issueに`00.check-user`が付いていないことだけを確認して`gh pr merge --auto --merge`（Auto-merge機能。リポジトリ設定で有効化済み）を実行する。判定ロジックとマージ可否判断を疎結合に保つことで、判定方法を追加・変更してもマージ側のロジックは変えずに済む。必須ステータスチェック（`develop`の`lint-and-build`）待ちのポーリングは自前実装せず、GitHub Auto-merge機能に任せる。
+- **予約したまま止まったPRの後押し（#5326）**: 予約が受け付けられても、必須チェックが成功済みなのにGitHubがマージを起こさず、別のPRのマージなどで再評価されるまで15分〜8時間止まることがあった（#5287・#5306など。原因はGitHub側で特定できていない）。そこで`auto-merge`は予約の後にマージ可否（`mergeStateStatus`）の確定を最大60秒待ち、予約したまま開いていてマージできる状態（`CLEAN`・`UNSTABLE`・`HAS_HOOKS`）なら`--match-head-commit`付きで直接マージする。**予約より先には行わない**——`wait-for-ci`はCIの失敗でも先へ進み、予約は必須チェックの保護が無いリポジトリでは拒まれて人へ回るので、先に直接マージすると保護の無いリポジトリでCIが落ちたPRまでマージしてしまう。ここで拾えなかったPR（判定から10分以上、予約済み・チェック成功のまま開いているもの）は、issue-deckのレビュー取り残し巡回（`pull-request-review-stall-rescue.ts`）がHEADごとに1回だけ`auto-merge`ジョブを再実行する（判定は`src/lib/pull-request-auto-merge-stuck.ts`）。issue-deck自身は直接マージしない。
 - **手動マージ時の`00.check-user`除去**: `00.check-user`が付いたPRは自動マージがスキップされ、人間がPRリンクから手動マージする運用になる。このマージ操作自体が確認完了を意味するため、`.github/workflows/issue-labels.yml`の`develop-pr-merged`・`main-pr-merged`・`main-direct-merged`の各ジョブとissue-deck側の巡回は、状態遷移とあわせて`00.check-user`も除去する（#266・#1901・#2294）。
 - **判定経路を持たないリポジトリではPR作成時に付ける（#1470）**: 上の判定は**すべて`claude-review-develop.yml`（caller）を持つリポジトリでしか走らない**。callerが無いリポジトリでは`risk-check`も`auto-merge`も一度も起動せず、自動マージされないのに`00.check-user`も付かないため、develop向けPRが誰にも気付かれないまま開いたまま残る。実測（2026-08-15）では、callerを持つのは`issue-deck`・`dayspan`・`shopping-list`の3つだけで、**他12リポジトリに判定されないままのdevelop向けPRが13本**あった（配布状況は[docs/supported-repositories.md](../supported-repositories.md)「`claude-review-develop.yml`の配布状況」）。そのため`reusable-issue-labels.yml`の`develop-pr-opened`ジョブ（展開済みの全リポジトリが呼ぶ唯一の共通経路）が、PR作成時に`.github/workflows/claude-review-develop.yml`の有無を`gh api`で確認し、**無ければその場で`00.check-user`を付ける**。理由はPR作成通知コメントの末尾に1行足す形で伝える（コメントを増やさないため）。
   - **経路を持つリポジトリでは何もしない。** ここで付けると`auto-merge`ジョブが「`00.check-user`が付いている」と読んで自動マージを常にスキップしてしまう。将来callerを配ったリポジトリでは、この保険は自動的に発火しなくなる

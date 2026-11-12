@@ -248,7 +248,7 @@ export function ReleasePullRequestOverview({
         <ReleaseRcLegacyNotice overview={rc.overview} legacy={legacy} repositoryFullName={repositoryFullName} onChanged={rc.reload} />
       )}
 
-      <section aria-label="現在の状態と次の操作" className="flex flex-col gap-3 rounded-[10px] border bg-card p-3.5 text-sm">
+      <section aria-label="現在の状態と次の操作" className="flex flex-col gap-3 rounded-[10px] border bg-card p-3.5 text-xs">
         {/* 新方式の候補は、ブランチ画面・PR一覧と同じ工程と「いま・担当・次」を先頭に出す（#5076）。主操作は1つで、
             承認を経ない手動の公開は「その他の操作」へ下げる（承認そのもののボタンは下の「公開準備」にある） */}
         {journey && (
@@ -363,7 +363,7 @@ export function ReleasePullRequestOverview({
       </section>
 
       <section aria-label="今回リリースする変更" className="rounded-[10px] border bg-card p-3.5">
-        <ReleaseContentsList state={state} />
+        <ReleaseContentsList state={state} rcPhase={rcCandidate?.phase ?? null} onRcChanged={rc.reload} />
       </section>
 
       {/* 並びは 状態と次の操作 → 候補共通検証 → 公開対象 → 履歴（#4560） */}

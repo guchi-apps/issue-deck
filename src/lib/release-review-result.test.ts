@@ -74,6 +74,13 @@ describe("normalizeReleaseReview", () => {
     expect(r?.detail.review?.legacy).toBe(true);
   });
 
+  it("差分0件と報告された版なしの結果は、pollerの更新ではなく再実行を案内する（#5311）", () => {
+    const r = normalizeReleaseReview({ state: "passed", summary: "mainとの差分がありません", totalFiles: 0, reviewedFiles: 0, targetFiles: [], fileReviews: [] });
+    expect(r?.state).toBe("passed");
+    expect(r?.unverifiedScope).toContain("差分を0件と報告した結果です");
+    expect(r?.unverifiedScope).not.toContain("pollerを更新");
+  });
+
   it("ランナーが版を補った結果は旧ランナー扱いにせず、項目が揃っていれば未確認範囲なし", () => {
     const r = normalizeReleaseReview({ ...fullChecks(), checklistVersionStamped: true, summary: "問題なし", ...coverageOf(10) });
     expect(r?.unverifiedScope).toBeNull();
