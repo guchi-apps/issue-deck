@@ -7,6 +7,7 @@ import {
   legacyReleaseVersionOf,
   rcSequenceOf,
 } from "@/lib/release-branch";
+import { decideRcDispatchRun, type RcDispatchRun } from "@/lib/release-rc";
 import { classifyPullRequest } from "@/lib/pull-request-list";
 import { evaluateReleaseMergeGate, isReleasePullRequest, type ReleaseVerificationRecord } from "@/lib/release-merge-gate";
 import {
@@ -415,3 +416,35 @@ describe("decideRcLaggedAdoption（#4895）", () => {
   });
 });
 
+
+describe("decideRcDispatchRun（#5330）", () => {
+  const requestedAt = new Date("2026-11-11T20:45:00Z");
+  const run = (over: Partial<RcDispatchRun>): RcDispatchRun => ({
+    id: 1, status: "completed", conclusion: "startup_failure", htmlUrl: "https://github.com/o/r/actions/runs/1", createdAt: "2026-11-11T20:45:05Z", ...over,
+  });
+  const at = (min: number) => new Date(requestedAt.getTime() + min * 60_000);
+
+  it("startup_failureで終わったrunは失敗にし、理由とrun URLを返す", () => {
+    const d = decideRcDispatchRun({ requestedAt, now: at(2), runs: [run({})] });
+    expect(d).toEqual({ kind: "failed", reason: "リリースworkflowを起動できませんでした（startup_failure）", runUrl: "https://github.com/o/r/actions/runs/1" });
+  });
+  it("failure・cancelledも失敗にする", () => {
+    expect(decideRcDispatchRun({ requestedAt, now: at(2), runs: [run({ conclusion: "failure" })] }).kind).toBe("failed");
+    expect(decideRcDispatchRun({ requestedAt, now: at(2), runs: [run({ conclusion: "cancelled" })] }).kind).toBe("failed");
+  });
+  it("成功・実行中のrunが1件でもあれば失敗にしない", () => {
+    expect(decideRcDispatchRun({ requestedAt, now: at(2), runs: [run({}), run({ id: 2, conclusion: "success" })] }).kind).toBe("none");
+    expect(decideRcDispatchRun({ requestedAt, now: at(2), runs: [run({ id: 2, status: "in_progress", conclusion: null })] }).kind).toBe("none");
+  });
+  it("dispatch前のrunは対象にしない", () => {
+    expect(decideRcDispatchRun({ requestedAt, now: at(2), runs: [run({ createdAt: "2026-11-11T20:00:00Z" })] }).kind).toBe("none");
+  });
+  it("runが見つからなければ何もしない", () => {
+    expect(decideRcDispatchRun({ requestedAt, now: at(30), runs: [] }).kind).toBe("none");
+  });
+  it("queuedが10分未満なら何もせず、10分以上で起動待ちにする", () => {
+    const queued = run({ status: "queued", conclusion: null });
+    expect(decideRcDispatchRun({ requestedAt, now: at(9), runs: [queued] }).kind).toBe("none");
+    expect(decideRcDispatchRun({ requestedAt, now: at(11), runs: [queued] })).toEqual({ kind: "queued_stale", runUrl: queued.htmlUrl });
+  });
+});

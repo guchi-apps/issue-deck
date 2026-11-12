@@ -102,7 +102,8 @@ export type ReleaseRcFacts = {
   sequence: number;
   phase: string;
   /** 未完了の更新要求（作成・修正の取り込みなど）。無ければnull */
-  pendingRevision: { revision: number; reason: string } | null;
+  /** `queuedRunUrl`は、dispatchしたrunがGitHub Actionsで起動待ちのまま一定時間たっているときのrunのURL（#5330） */
+  pendingRevision: { revision: number; reason: string; queuedRunUrl?: string | null } | null;
   /** 最新の公開承認。無ければnull（承認の記録が無い候補） */
   approval: {
     status: string;
