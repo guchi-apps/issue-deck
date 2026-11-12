@@ -358,7 +358,9 @@ export function resolveReleaseJourney({
     // 作成
     if (bump) d.create = bumpDraft(bump, mergeTarget);
     else if (rc && (rc.phase === "creating" || rc.pendingRevision?.reason === "initial" || rc.pendingRevision?.reason === "migration")) {
-      d.create = draft("running", `${rcLabelOf(rc)}を作成中（受付済み）`, "候補ブランチとPRを作っています。操作は不要です");
+      d.create = rc.pendingRevision?.queuedRunUrl
+        ? draft("running", `${rcLabelOf(rc)}の作成はGitHub Actionsの起動待ち`, "GitHub Actionsでリリースworkflowが始まっていません。始まれば自動で進みます")
+        : draft("running", `${rcLabelOf(rc)}を作成中（受付済み）`, "候補ブランチとPRを作っています。操作は不要です");
     } else d.create = draft("done");
 
     // RC検証（公開準備に入った後は、検証は最終検証の区切りで見る）
@@ -370,7 +372,9 @@ export function resolveReleaseJourney({
       const lead = checks.find((c) => c.state === state && c.status !== null) ?? null;
       d.verify = draft(state, lead?.status ?? null, lead?.title ?? null);
       if (rc?.pendingRevision && rc.pendingRevision.reason !== "initial" && rc.pendingRevision.reason !== "migration") {
-        d.verify = draft("fixing", `修正を候補へ取り込み中（revision ${rc.pendingRevision.revision}）`, "取り込みが終わると再検証します。操作は不要です");
+        d.verify = rc.pendingRevision.queuedRunUrl
+          ? draft("fixing", `修正の取り込みはGitHub Actionsの起動待ち（revision ${rc.pendingRevision.revision}）`, "GitHub Actionsでリリースworkflowが始まっていません。始まれば自動で進みます")
+          : draft("fixing", `修正を候補へ取り込み中（revision ${rc.pendingRevision.revision}）`, "取り込みが終わると再検証します。操作は不要です");
       }
     }
 

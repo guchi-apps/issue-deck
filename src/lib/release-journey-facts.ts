@@ -59,7 +59,7 @@ async function buildFacts(rows: CandidateRow[], options: { keyWithoutPullRequest
     const facts: ReleaseRcFacts = {
       sequence: row.sequence,
       phase: row.phase,
-      pendingRevision: pending ? { revision: pending.revision, reason: pending.reason } : null,
+      pendingRevision: pending ? { revision: pending.revision, reason: pending.reason, queuedRunUrl: pending.runUrl } : null,
       approval: approval
         ? {
             status: approval.status,
