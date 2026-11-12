@@ -4,7 +4,9 @@
  *
  * #5257はルールセットだけを直し、classic側に廃止済みの`issue-deck/ci-gate`が残ったまま
  * develop向けPRが全件`blocked`になった。必須チェックは2か所に置けて両方が効くので、
- * 片方にしか無い項目と、どのワークフロー・コードも発行しない項目を、詰まる前に見つける。
+ * どのワークフロー・コードも発行しない項目を、詰まる前に見つける。
+ * **発行元のある項目が片側にしか無いだけなら検知しない**（#5335。ルールセットとclassic保護のどちらか
+ * 一方で効いていればPRは詰まらないため、置き場所の差は通知しない）。
  *
  * この関数群は純関数だけ。取得・通知は`required-checks-drift-run.ts`が持つ。
  * **検知と通知までで、自動修正はしない**（classic保護の更新は人が行う）。
@@ -25,8 +27,6 @@ export type RequiredCheckSources = {
 };
 
 export type RequiredCheckFinding =
-  | { kind: "only_in_ruleset"; name: string }
-  | { kind: "only_in_classic"; name: string }
   | { kind: "no_publisher"; name: string; where: ("ruleset" | "classic")[] };
 
 /** ワークフローYAMLから、ジョブID・ジョブの`name:`を発行元の候補として拾う（`jobs:`直下のみ） */
@@ -77,26 +77,18 @@ export function detectRequiredCheckDrift(
   const findings: RequiredCheckFinding[] = [];
   const all = [...new Set([...ruleset, ...classic])].sort();
   for (const name of all) {
-    const inRuleset = ruleset.has(name);
-    const inClassic = classic.has(name);
-    if (!publishers.has(name)) {
-      findings.push({
-        kind: "no_publisher",
-        name,
-        where: [...(inRuleset ? (["ruleset"] as const) : []), ...(inClassic ? (["classic"] as const) : [])],
-      });
-      continue;
-    }
-    if (inRuleset && !inClassic) findings.push({ kind: "only_in_ruleset", name });
-    if (inClassic && !inRuleset) findings.push({ kind: "only_in_classic", name });
+    if (publishers.has(name)) continue;
+    findings.push({
+      kind: "no_publisher",
+      name,
+      where: [...(ruleset.has(name) ? (["ruleset"] as const) : []), ...(classic.has(name) ? (["classic"] as const) : [])],
+    });
   }
   return findings;
 }
 
 const KIND_LABEL: Record<RequiredCheckFinding["kind"], string> = {
   no_publisher: "発行元がない（必須のままだとPRが永久に待機する）",
-  only_in_ruleset: "ルールセットにだけある（classic保護に無い）",
-  only_in_classic: "classic保護にだけある（ルールセットに無い）",
 };
 
 export function findingsSignature(branch: string, findings: RequiredCheckFinding[]): string {
@@ -113,8 +105,8 @@ export function buildDriftIssueBody(input: {
   signature: string;
 }): string {
   const lines: string[] = [
-    `issue-deckの定期巡回が、\`${input.repositoryFullName}\`の必須チェックでずれを検知しました（#5313）。`,
-    "ルールセットとclassicブランチ保護の両方に必須チェックを置けて、両方が効きます。どちらかにだけ残った項目や、`ci/required-checks.json`・ワークフロー・コードのどれも発行しない項目があると、PRが`blocked`のまま進みません（#5298）。",
+    `issue-deckの定期巡回が、\`${input.repositoryFullName}\`の必須チェックで発行元のない項目を検知しました（#5313）。`,
+    "ルールセットとclassicブランチ保護の両方に必須チェックを置けて、両方が効きます。`ci/required-checks.json`・ワークフロー・コードのどれも発行しない項目が残っていると、PRが`blocked`のまま進みません（#5298）。",
     "",
   ];
   for (const { branch, findings } of input.byBranch) {
