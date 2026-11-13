@@ -765,17 +765,17 @@ export async function fetchReleaseDispatchRuns(
   repo: string,
   token: string,
   since: Date,
-): Promise<{ id: number; status: string; conclusion: string | null; htmlUrl: string; createdAt: string }[]> {
+): Promise<{ id: number; status: string; conclusion: string | null; htmlUrl: string; createdAt: string; displayTitle: string | null }[]> {
   const url = `${GITHUB_API}/repos/${owner}/${repo}/actions/workflows/${RELEASE_WORKFLOW_FILE}/runs?event=workflow_dispatch&per_page=20`;
   const res = await githubFetch(url, token);
   if (!res.ok) {
     const detail = await res.text().catch(() => "");
     throw new GithubApiError(res.status, `GitHub API request failed: ${res.status} ${url} ${detail}`);
   }
-  const data: { workflow_runs?: Array<{ id: number; status: string; conclusion: string | null; html_url: string; created_at: string }> } = await res.json();
+  const data: { workflow_runs?: Array<{ id: number; status: string; conclusion: string | null; html_url: string; created_at: string; display_title?: string | null }> } = await res.json();
   return (data.workflow_runs ?? [])
     .filter((r) => Date.parse(r.created_at) >= since.getTime() - 60_000)
-    .map((r) => ({ id: r.id, status: r.status, conclusion: r.conclusion ?? null, htmlUrl: r.html_url, createdAt: r.created_at }));
+    .map((r) => ({ id: r.id, status: r.status, conclusion: r.conclusion ?? null, htmlUrl: r.html_url, createdAt: r.created_at, displayTitle: r.display_title ?? null }));
 }
 
 /**
