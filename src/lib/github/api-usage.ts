@@ -34,6 +34,8 @@ export const GITHUB_API_FEATURES = [
   // ようになった。過去の集計と分断しないようキーは据え置き、ラベルだけ実態に合わせている。
   { key: "release_pending_merges", label: "リリース状況の一括確認" },
   { key: "release_history", label: "リリース履歴の取得" },
+  // リリース開始方式の判定（#5367）。ブランチ画面・スマホから複数リポジトリぶんを一斉に呼ぶため分けて数える
+  { key: "release_start_mode", label: "リリース開始方式の判定" },
   // リリース画面のiOS（TestFlight）配布結果（#3626）。**リリース画面を開いている間だけ**、
   // runの一覧・jobs・判定ジョブの注釈・配布済みタグの4リクエストを消費する
   { key: "ios_testflight", label: "iOS配布結果の取得" },
@@ -333,6 +335,8 @@ export function loadPersistedBuckets(persisted: ClosedGithubApiUsageBucket[], no
 export type GithubApiUsageEndpoint = {
   endpoint: string;
   currentHour: number;
+  /** 直近60分（ローリング）。バケットが5分刻みのため、5分未満の誤差を含む */
+  last60min: number;
   last24h: number;
 };
 
@@ -340,6 +344,7 @@ export type GithubApiUsageFeature = {
   key: GithubApiFeature;
   label: string;
   currentHour: number;
+  last60min: number;
   last24h: number;
   /** 呼び出し数の多い順 */
   endpoints: GithubApiUsageEndpoint[];
@@ -355,6 +360,7 @@ export type GithubApiUsageSummary = {
   /** 現在の1時間ウィンドウ（正時起点）の開始時刻(epoch ms) */
   currentHourStartedAt: number;
   totalCurrentHour: number;
+  totalLast60min: number;
   totalLast24h: number;
   /** 直近24時間の呼び出し数が多い順 */
   features: GithubApiUsageFeature[];
@@ -365,14 +371,16 @@ export function getGithubApiUsageSummary(now: number = Date.now()): GithubApiUsa
   pruneBuckets(now);
 
   const currentHourStartedAt = currentHourStartAt(now);
-  const totals = new Map<string, { currentHour: number; last24h: number }>();
+  const rollingStart = bucketStartAt(now - HOUR_MS);
+  const totals = new Map<string, { currentHour: number; last60min: number; last24h: number }>();
 
   for (const bucket of state.buckets) {
     // バケットの開始時刻が現在の正時起点1時間ウィンドウ内なら数える（ローリング60分ではない）
     const withinCurrentHour = bucket.startedAt >= currentHourStartedAt;
     for (const [key, count] of bucket.counts) {
-      const total = totals.get(key) ?? { currentHour: 0, last24h: 0 };
+      const total = totals.get(key) ?? { currentHour: 0, last60min: 0, last24h: 0 };
       total.last24h += count;
+      if (bucket.startedAt >= rollingStart) total.last60min += count;
       if (withinCurrentHour) total.currentHour += count;
       totals.set(key, total);
     }
@@ -386,26 +394,29 @@ export function getGithubApiUsageSummary(now: number = Date.now()): GithubApiUsa
       key: feature,
       label: FEATURE_LABELS.get(feature) ?? feature,
       currentHour: 0,
+      last60min: 0,
       last24h: 0,
       endpoints: [],
     };
     entry.currentHour += total.currentHour;
+    entry.last60min += total.last60min;
     entry.last24h += total.last24h;
-    entry.endpoints.push({ endpoint, currentHour: total.currentHour, last24h: total.last24h });
+    entry.endpoints.push({ endpoint, currentHour: total.currentHour, last60min: total.last60min, last24h: total.last24h });
     byFeature.set(feature, entry);
   }
 
   const features = [...byFeature.values()]
     .map((feature) => ({
       ...feature,
-      endpoints: feature.endpoints.sort((a, b) => b.last24h - a.last24h),
+      endpoints: feature.endpoints.sort((a, b) => b.last60min - a.last60min || b.last24h - a.last24h),
     }))
-    .sort((a, b) => b.last24h - a.last24h);
+    .sort((a, b) => b.last60min - a.last60min || b.last24h - a.last24h);
 
   return {
     measuringSince: state.buckets[0]?.startedAt ?? now,
     currentHourStartedAt,
     totalCurrentHour: features.reduce((sum, feature) => sum + feature.currentHour, 0),
+    totalLast60min: features.reduce((sum, feature) => sum + feature.last60min, 0),
     totalLast24h: features.reduce((sum, feature) => sum + feature.last24h, 0),
     features,
   };

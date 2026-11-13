@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 
 import { requireUserId } from "@/lib/auth-user";
 import { db } from "@/lib/db";
+import { withGithubApiFeature } from "@/lib/github/api-usage";
 import { getInstallationToken } from "@/lib/github/app-auth";
 import { fetchReleaseCaller } from "@/lib/github/release-api";
 import { decideDevelopSync } from "@/lib/release-develop-sync";
@@ -19,7 +20,11 @@ import { decideReleaseStartMode, type ReleaseStartMode } from "@/lib/release-sta
  * `?repos=owner/a,owner/b`。権限の無いリポジトリ・取得に失敗したリポジトリは`unknown`にする
  * （応答全体を失敗にせず、旧方式を黙って起動させない）。**何も起動しない。**
  */
-export async function GET(request: NextRequest) {
+export function GET(request: NextRequest) {
+  return withGithubApiFeature("release_start_mode", () => handleGET(request));
+}
+
+async function handleGET(request: NextRequest) {
   const userId = await requireUserId();
   if (!userId) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const repos = [
