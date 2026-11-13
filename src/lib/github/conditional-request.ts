@@ -25,9 +25,10 @@ type CacheEntry = { etag: string; body: unknown };
 /**
  * キャッシュの上限件数。check-runsのURLはhead SHAごとに増えるため、放っておくと
  * 際限なく溜まる。PR一覧1巡ぶん（リポジトリ数×2 + open PR数）を何十回ぶんか保持できれば
- * 足りるので、余裕を見てこの値にする。
+ * 足りるので、余裕を見てこの値にする。#5373でリリース系のPR一覧（base別）・`package.json`・
+ * ブランチ先端を載せ、リポジトリ数×4件ほどが常駐するようになったため、500から引き上げた。
  */
-const MAX_ENTRIES = 500;
+const MAX_ENTRIES = 800;
 
 const cache = new Map<string, CacheEntry>();
 

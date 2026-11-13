@@ -585,6 +585,19 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   （`API`のレート制限・呼び出し回数と`ACTIONS`の実行時間。#2212）はStatusHubで扱うため、表示・取得フック・
   専用GET API・Actions課金の取得（`actions-billing.ts`）ごと削除した。呼び出し回数の記録（`lib/github/api-usage.ts`）と
   `GET /api/github/rate-limit/apps`は残る。
+- **GitHub App（REST）の消費の内訳は`GET /api/github/api-usage`で見る**（#5367・#5373）。機能×エンドポイント別の
+  計測（`features`）に加え、`rateLimits`にGitHubが数えたインストール単位の実消費（`used`）と、同じ窓に入る
+  計測ぶん（`measuredInWindow`）・その差（`unmeasuredInWindow`）を返す。**消費源は3系統**ある——
+  (1)画面のポーリング、(2)サブPCのpollerが叩く巡回（`*-sweep`。サーバー内に巡回タイマーは無い）、
+  (3)各リポジトリのGitHub Actionsが`actions/create-github-app-token`で同じApp（`WORKFLOW_APP_ID`）の
+  トークンを発行して使う分。**(3)はプロセス内の計測に載らない**ので、`unmeasuredInWindow`が大きければ
+  Actions側を疑う。
+  - **ETagの条件付きGET（`conditional-request.ts`）を通る取得は、304を計上しない**——GitHubも304を
+    レート制限に数えないため、計測は「呼び出し回数」ではなく「枠を消費した回数」になる。取得をETagへ
+    寄せた前後で`last60min`を比べると、減った分は呼び出しの削減ではなく304になった分として読む。
+    #5373でリリース系のPR一覧（`fetchOpenPullRequestsForBase`）・`package.json`の版（`fetchPackageVersion`）・
+    ブランチ先端（`fetchBranchHeadSha`）をETagへ寄せた。三点比較（`compareBranches`）は応答にファイル差分を
+    含み大きく、プロセス内キャッシュへ常駐させると本番のメモリを圧迫するため寄せていない
   障害状況カードの右上には、`GET /api/github/status`が返す`fetchedAt`を「取得 10/3 13:15」の形で出す。
   カードはPC・スマホ共通の`settings/status-section.tsx`が組み立てる。
 - **issue-deck自身が投げたAI API呼び出しは、機能別に計上している（画面には出さない）**（#2347）。
