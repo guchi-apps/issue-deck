@@ -473,7 +473,7 @@ async function findLegacyCandidate(ctx: Context): Promise<RcLegacyCandidate | nu
 async function observeDispatchRun(ctx: Context, candidate: CandidateRow, pending: CandidateRow["revisions"][number]): Promise<boolean> {
   try {
     const runs = await fetchReleaseDispatchRuns(ctx.owner, ctx.repo, ctx.token, pending.createdAt);
-    const decision = decideRcDispatchRun({ requestedAt: pending.createdAt, now: new Date(), runs });
+    const decision = decideRcDispatchRun({ requestedAt: pending.createdAt, now: new Date(), requestKey: pending.requestKey, runs });
     if (decision.kind === "failed") {
       await failRevision(candidate, pending.id, decision.reason, decision.runUrl);
       return true;
