@@ -1033,7 +1033,8 @@ async function advanceProduction(ctx: Context, candidate: CandidateRow, row: Fin
   };
   if (observed.decision.verified) {
     // deployするrepoでは、対象コミットの最新のdeployが成功していることも確かめる（従来の本番反映の判定）
-    const release = observed.kind === "source_publish_only" || observed.kind === "unknown"
+    // 公開停止中（#5353）は実機が無いので、deployの成否を追わずに完了する
+    const release = observed.kind === "source_publish_only" || observed.kind === "unknown" || observed.decision.method === "publication_suspended"
       ? null
       : decideDeployRecoveryRelease(
           { releaseSha: mergeSha, releaseStartedAt: new Date(pull.merged_at), releaseAttempts: 0, lastFailureKey: null },

@@ -7,6 +7,8 @@ import {
   isRegisteredForReleaseVerification,
   RELEASE_VERIFICATION_EXCLUSIONS,
   RELEASE_VERIFICATION_REPOS,
+  describeProductionSuspension,
+  RELEASE_PRODUCTION_SUSPENSIONS,
 } from "@/lib/release-verification-config";
 
 describe("導入台帳の宣言", () => {
@@ -70,5 +72,19 @@ describe("公開Piリポジトリのリリース検証", () => {
     expect(config.integrationCommands).toEqual([
       "python3 -m venv .venv && . .venv/bin/activate && python -m pip install -r requirements-ci.txt && bash scripts/verify.sh",
     ]);
+  });
+});
+
+describe("公開停止の台帳（#5353）", () => {
+  it("公開停止中のリポジトリは理由を返し、公開中のリポジトリはnullを返す", () => {
+    expect(describeProductionSuspension("guchi-apps/solitaire")).toContain("公開停止中");
+    expect(describeProductionSuspension("guchi-apps/issue-deck")).toBeNull();
+  });
+
+  it("公開停止しても統合検証の対象からは外さない（検証の対象外とは別の宣言）", () => {
+    for (const repo of Object.keys(RELEASE_PRODUCTION_SUSPENSIONS)) {
+      expect(RELEASE_VERIFICATION_EXCLUSIONS[repo], repo).toBeUndefined();
+      expect(RELEASE_PRODUCTION_SUSPENSIONS[repo].trim().length, repo).toBeGreaterThan(0);
+    }
   });
 });

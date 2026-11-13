@@ -124,7 +124,7 @@ import {
   splitLanesByReleaseCandidate,
   splitLanesByReleaseFreeze,
   isClosedLane,
-  unreleasedSummary,
+  repositoryUnreleasedSummary,
   resolveReleaseMergeTarget,
   type BranchFlow,
 } from "@/lib/branch-flow";
@@ -1952,7 +1952,7 @@ function ReleaseFlowGraph({
   // **`comparison.aheadBy`をそのまま出さない**（#2316・#2333）。中身の差分がゼロのまま残る
   // コミットを数えず（#2316）、残りもマージコミット単位＝PR単位の「件」で数える（#2333）
   // ための判定を、3か所で共有する。
-  const unreleased = unreleasedSummary(repository.release.comparison);
+  const unreleased = repositoryUnreleasedSummary(repository);
   // いちばん新しく本番へ出た版がmainへ入った時刻（#2020）。再デプロイの確認ダイアログで
   // 「いま本番に出ているもの」を示すのに使う。束は新しい順なので先頭から最初の1件でよい。
   const latestReleaseMergedAt =
@@ -2472,7 +2472,7 @@ function RepositorySummaryRow({
   onToggle: () => void;
 }) {
   const { summary } = repository;
-  const unreleased = unreleasedSummary(repository.release.comparison);
+  const unreleased = repositoryUnreleasedSummary(repository);
   // 「リリースする」を押してからバンプPRが現れるまでの間も、進んでいることをこの行に出す（#1955）。
   // **押せる状態（`canTriggerRelease`）のときだけ**にして、リリースが終わった後も10分間
   // localStorageに残る起動時刻で古いピルが出るのを防ぐ（ボタンの出し方と同じ条件）。
@@ -2631,6 +2631,12 @@ function RepositorySummaryRow({
           count={unreleased.count}
           className="text-purple-600 dark:text-purple-400"
         />
+      )}
+      {/* 公開停止中（#5353）。未リリース件数の代わりに出し、本番へ出さない理由を行で分かるようにする */}
+      {repository.productionSuspension !== null && (
+        <span className="shrink-0 text-xs text-muted-foreground" title={repository.productionSuspension}>
+          公開停止中
+        </span>
       )}
       {branchesFailed && (
         <span className="shrink-0 text-xs text-muted-foreground">ブランチ状況を取得できず</span>
@@ -2867,8 +2873,10 @@ function needsAttention(repository: BranchFlowRepository): boolean {
     // 本番リリースは工程の担当が人のときだけ数える（#5076）。畳んだ行・カード・PR一覧と同じ判定。
     // 公開承認済みで自動公開を待つ候補（#5064）・検証の実行中は数えず、公開承認・失効・失敗・停止は数える。
     // Xcodeで実機へ反映するリポジトリ（#3468）は工程を出さないので、従来のマージ待ちで数える
-    (repository.deviceBuild ? summary.releaseMergeTarget !== null : isReleaseJourneyNeedingUser(summary.releaseJourney)) ||
-    summary.deploy?.kind === "failure"
+    // 公開停止中（#5353）は本番が無いので、リリース工程・デプロイ失敗を手が要るものに数えない
+    (repository.productionSuspension === null &&
+      ((repository.deviceBuild ? summary.releaseMergeTarget !== null : isReleaseJourneyNeedingUser(summary.releaseJourney)) ||
+        summary.deploy?.kind === "failure"))
   );
 }
 
@@ -2936,7 +2944,7 @@ function isProgressing(repository: BranchFlowRepository): boolean {
  * `owner/`を落としているフル名と、開いたときに毎回目で追う数（未リリース・進行中）を置く。
  */
 function RepositoryDetailHeader({ repository }: { repository: BranchFlowRepository }) {
-  const unreleased = unreleasedSummary(repository.release.comparison);
+  const unreleased = repositoryUnreleasedSummary(repository);
 
   return (
     <div className="flex shrink-0 items-center gap-2 border-b px-4 py-2">
@@ -3077,7 +3085,7 @@ export function BranchFlowView({
     )
     .map((repository) => ({
       repositoryFullName: repository.repositoryFullName,
-      unreleasedLabel: formatUnreleasedSummary(unreleasedSummary(repository.release.comparison)),
+      unreleasedLabel: formatUnreleasedSummary(repositoryUnreleasedSummary(repository)),
     }));
   // 一括リリースが起動できたリポジトリぶん、各`RepositorySection`の`markTriggered`を
   // 呼べるようにする登録先（#2770）。`useTriggerPending`はリポジトリごとに1インスタンスだけを
