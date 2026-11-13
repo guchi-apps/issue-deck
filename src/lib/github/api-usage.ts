@@ -422,6 +422,22 @@ export function getGithubApiUsageSummary(now: number = Date.now()): GithubApiUsa
   };
 }
 
+/**
+ * `sinceMs`以降に計上した呼び出しの合計（全用途）。GitHubのレート制限の窓（リセット時刻の1時間前から）と
+ * 突き合わせるのに使う（#5373）。バケットが5分刻みのため、`sinceMs`を含むバケットは丸ごと数える
+ * （最大5分ぶん多めに出る）。
+ */
+export function countGithubApiCallsSince(sinceMs: number, now: number = Date.now()): number {
+  pruneBuckets(now);
+  const from = bucketStartAt(sinceMs);
+  let total = 0;
+  for (const bucket of state.buckets) {
+    if (bucket.startedAt < from) continue;
+    for (const count of bucket.counts.values()) total += count;
+  }
+  return total;
+}
+
 /** テスト用に計測結果・`onBucketClosed`のリスナー登録を空にする */
 export function resetGithubApiUsage(): void {
   state.buckets = [];

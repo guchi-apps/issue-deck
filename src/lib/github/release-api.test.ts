@@ -3,6 +3,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { clearConditionalRequestCache } from "@/lib/github/conditional-request";
 import {
   fetchBaseAdvanceChangedFiles,
+  fetchOpenPullRequestsForBase,
+  fetchPackageVersion,
   fetchReleasesBackTo,
   fetchRefCiState,
   resolveCiStateFromCheckRuns,
@@ -280,5 +282,49 @@ describe("fetchBaseAdvanceChangedFiles（#4766）", () => {
   it("mainが書き換えられた（判断時のbaseが祖先でない）ときはnull", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => jsonResponse(200, { status: "diverged", files: [{ filename: "a.ts" }] })));
     expect(await fetchBaseAdvanceChangedFiles("o", "r", "b0", "b1", "t")).toBeNull();
+  });
+});
+
+describe("ETagの条件付きGET（#5373）", () => {
+  afterEach(() => {
+    clearConditionalRequestCache();
+    vi.unstubAllGlobals();
+  });
+
+  function etagResponse(status: number, body: unknown, etag: string | null) {
+    return { ...jsonResponse(status, body), headers: { get: (name: string) => (name.toLowerCase() === "etag" ? etag : null) } };
+  }
+
+  it("PR一覧は2回目にIf-None-Matchを付け、304ならキャッシュした一覧を返す", async () => {
+    const pulls = [{ number: 1, head: { ref: "release/v1.0.0" } }];
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(etagResponse(200, pulls, '"abc"'))
+      .mockResolvedValueOnce(etagResponse(304, null, '"abc"'));
+    vi.stubGlobal("fetch", fetchMock);
+
+    expect(await fetchOpenPullRequestsForBase("o", "r", "develop", "t")).toEqual(pulls);
+    expect(await fetchOpenPullRequestsForBase("o", "r", "develop", "t")).toEqual(pulls);
+    expect(fetchMock.mock.calls[1][1].headers["If-None-Match"]).toBe('"abc"');
+  });
+
+  it("package.jsonは404でnull、それ以外の失敗は例外にする", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(etagResponse(404, {}, null)));
+    expect(await fetchPackageVersion("o", "r", "main", "t")).toBeNull();
+
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(etagResponse(500, {}, null)));
+    await expect(fetchPackageVersion("o", "r", "main", "t")).rejects.toThrow("500");
+  });
+
+  it("package.jsonは304でもキャッシュした本文から版を返す", async () => {
+    const content = Buffer.from(JSON.stringify({ version: "1.2.3" })).toString("base64");
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(etagResponse(200, { content, encoding: "base64" }, '"v"'))
+      .mockResolvedValueOnce(etagResponse(304, null, '"v"'));
+    vi.stubGlobal("fetch", fetchMock);
+
+    expect(await fetchPackageVersion("o", "r", "main", "t")).toBe("1.2.3");
+    expect(await fetchPackageVersion("o", "r", "main", "t")).toBe("1.2.3");
   });
 });

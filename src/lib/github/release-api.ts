@@ -61,7 +61,12 @@ export function fetchReleaseWorkflowExists(
   return fetchWorkflowExists(owner, repo, RELEASE_WORKFLOW_FILE, token);
 }
 
-/** 指定ブランチの`package.json`の`version`フィールドを取得する。ファイルが無ければnull */
+/**
+ * 指定ブランチの`package.json`の`version`フィールドを取得する。ファイルが無ければnull。
+ *
+ * **ETagの条件付きGETで取る**（#5373）。リリース進捗（スマホの10〜60秒ポーリング）が
+ * main・developの2本を毎回引いており、版が変わらない間も枠を消費していた。304は計上されない。
+ */
 export async function fetchPackageVersion(
   owner: string,
   repo: string,
@@ -69,13 +74,12 @@ export async function fetchPackageVersion(
   token: string,
 ): Promise<string | null> {
   const url = `${GITHUB_API}/repos/${owner}/${repo}/contents/package.json?ref=${encodeURIComponent(ref)}`;
-  const res = await githubFetch(url, token);
-  if (res.status === 404) return null;
-  if (!res.ok) {
-    const detail = await res.text().catch(() => "");
-    throw new GithubApiError(res.status, `GitHub API request failed: ${res.status} ${url} ${detail}`);
+  const result = await githubFetchJsonWithEtag<{ content: string; encoding: string }>(url, token);
+  if (!result.ok) {
+    if (result.status === 404) return null;
+    throw new GithubApiError(result.status, `GitHub API request failed: ${result.status} ${url} ${result.detail}`);
   }
-  const data: { content: string; encoding: string } = await res.json();
+  const data = result.data;
   const raw = Buffer.from(data.content, data.encoding === "base64" ? "base64" : "utf-8").toString("utf-8");
   const parsed: { version?: string } = JSON.parse(raw);
   return parsed.version ?? null;
@@ -427,7 +431,13 @@ export async function deleteBranch(
   }
 }
 
-/** 指定ブランチをbaseとするopenなPull Requestの一覧を取得する */
+/**
+ * 指定ブランチをbaseとするopenなPull Requestの一覧を取得する。
+ *
+ * **ETagの条件付きGETで取る**（#5373）。リリース状況の一括確認（全リポジトリ×develop・main）・
+ * リリース進捗・本番マージ待ちの巡回が繰り返し引くため、PRが動かない間は304で枠を消費しない。
+ * **返す配列はキャッシュと同じ実体なので、呼び出し側で書き換えない**（`githubFetchJsonWithEtag`）。
+ */
 export async function fetchOpenPullRequestsForBase(
   owner: string,
   repo: string,
@@ -435,12 +445,11 @@ export async function fetchOpenPullRequestsForBase(
   token: string,
 ): Promise<GithubApiPullRequest[]> {
   const url = `${GITHUB_API}/repos/${owner}/${repo}/pulls?base=${encodeURIComponent(base)}&state=open&per_page=30`;
-  const res = await githubFetch(url, token);
-  if (!res.ok) {
-    const detail = await res.text().catch(() => "");
-    throw new GithubApiError(res.status, `GitHub API request failed: ${res.status} ${url} ${detail}`);
+  const result = await githubFetchJsonWithEtag<GithubApiPullRequest[]>(url, token);
+  if (!result.ok) {
+    throw new GithubApiError(result.status, `GitHub API request failed: ${result.status} ${url} ${result.detail}`);
   }
-  return res.json();
+  return result.data;
 }
 
 /** 指定ブランチをbaseとする閉じたPull Requestを、更新の新しい順に最大30件（#4641。マージ済みの同期PRを探す） */

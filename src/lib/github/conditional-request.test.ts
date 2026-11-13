@@ -122,16 +122,16 @@ describe("githubFetchJsonWithEtag（#1531）", () => {
   });
 
   it("上限を超えたら参照が古いものから捨てる（check-runsのURLはSHAごとに増えるため）", async () => {
-    // 上限は500件。501件入れると最初の1件が落ち、直後に参照した1件は残る。
+    // 上限は800件（#5373で500から引き上げ）。801件入れると最初の1件が落ち、直後に参照した1件は残る。
     stubFetch([{ status: 200, etag: '"e"', body: null }]);
 
-    for (let i = 0; i < 501; i += 1) {
+    for (let i = 0; i < 801; i += 1) {
       await githubFetchJsonWithEtag(`https://api.github.com/n${i}`, "token");
     }
 
     const { sentHeaders } = stubFetch([{ status: 304 }, { status: 304 }]);
     await githubFetchJsonWithEtag("https://api.github.com/n0", "token");
-    await githubFetchJsonWithEtag("https://api.github.com/n500", "token");
+    await githubFetchJsonWithEtag("https://api.github.com/n800", "token");
 
     expect(sentHeaders[0]["If-None-Match"]).toBeUndefined();
     expect(sentHeaders[1]["If-None-Match"]).toBe('"e"');
