@@ -12,6 +12,7 @@ const KEYS: JourneyStepKey[] = ["create", "verify", "approve", "final", "merge",
 function journey(key: JourneyStepKey, overrides: Partial<ReleaseJourney>): ReleaseJourney {
   return {
     candidateLabel: "RC-21",
+    cancelTarget: null,
     legacy: false,
     steps: KEYS.map((k) => ({ key: k, label: k, state: k === key ? "user" : "todo", status: null, title: null, at: null })),
     done: 0,

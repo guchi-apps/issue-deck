@@ -1,6 +1,7 @@
 import { releaseMergeTargetLabel, type ReleaseMergeTarget } from "@/lib/github/release-button-status";
 import { isRcReleaseCandidateHeadRef, legacyReleaseVersionOf, rcSequenceOf } from "@/lib/release-branch";
 import { resolvePullRequestReleaseVerification } from "@/lib/release-candidate-status";
+import { canCancelRc, parseRcPhase, type RcPhase } from "@/lib/release-rc";
 import { isReleasePullRequest } from "@/lib/release-merge-gate";
 import { resolveReleaseStageBadges, type ReleaseStageBadge } from "@/lib/release-stage-badges";
 import type { BranchFlowDeployState } from "@/types/branch-flow";
@@ -73,6 +74,8 @@ export type JourneyCheck = {
 export type ReleaseJourney = {
   /** 候補の名前（`RC-13`・旧方式は`v1.17.13`）。分からなければnull */
   candidateLabel: string | null;
+  /** mainマージ前の候補を取り消すための宛先（#5331）。作成中（PRなし）も含む。取り消せなければnull */
+  cancelTarget: { candidateId: string; phase: RcPhase } | null;
   legacy: boolean;
   steps: JourneyStep[];
   /** 済みの区切りの数（取得不能・対象外は数えない） */
@@ -457,6 +460,7 @@ export function resolveReleaseJourney({
   const headline = first ? { key: first.key, label: first.status, tone: first.state, title: first.title } : null;
   return {
     candidateLabel: rc ? rcLabelOf(rc) : candidate ? candidateLabelOf(candidate.headRef) : null,
+    cancelTarget: cancelTargetOf(rc, stale),
     legacy,
     steps,
     done: steps.filter((step) => step.state === "done").length,
@@ -480,6 +484,12 @@ export function resolveReleaseJourney({
     updatedAt: rc?.updatedAt ?? null,
     stale,
   };
+}
+
+function cancelTargetOf(rc: ReleaseRcFacts | null, stale: boolean): { candidateId: string; phase: RcPhase } | null {
+  if (!rc?.candidateId || stale) return null;
+  const phase = parseRcPhase(rc.phase);
+  return phase !== null && canCancelRc(phase) ? { candidateId: rc.candidateId, phase } : null;
 }
 
 function rcLabelOf(rc: ReleaseRcFacts): string {

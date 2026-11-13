@@ -35,6 +35,19 @@ describe("ReleaseBlockNotice（#4628）", () => {
     expect(screen.queryByRole("button", { name: /管理記録を終了/ })).toBeNull();
   });
 
+  it("進行中の候補（PRなしの作成中を含む）は、確認を通して取り消せる（expectedPhaseを送る。#5331）", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ ok: true }) });
+    vi.stubGlobal("fetch", fetchMock);
+    const creating = classifyRcBlock({ candidateId: "c3", sequence: 3, prNumber: null, phase: "creating", status: "creating", statusLabel: "作成中（受付済み）" });
+    const onChanged = vi.fn();
+    render(<ReleaseBlockNotice repositoryFullName="o/r" startMode={blocked(creating)} onChanged={onChanged} />);
+    fireEvent.click(screen.getByRole("button", { name: "候補を取り消す…" }));
+    fireEvent.click(await screen.findByRole("button", { name: "取り消す" }));
+    await waitFor(() => expect(onChanged).toHaveBeenCalled());
+    const body = JSON.parse(String(fetchMock.mock.calls[0][1].body));
+    expect(body).toMatchObject({ action: "cancel", candidateId: "c3", expectedPhase: "creating" });
+  });
+
   it("状態不整合は事実・未確認事項を示し、確認を通した明示操作で終了する（expectedPhaseを送る）", async () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ ok: true }) });
     vi.stubGlobal("fetch", fetchMock);
