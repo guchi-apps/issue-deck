@@ -11,6 +11,7 @@ import {
 } from "@/lib/github/check-rollup";
 import type { IosPrecheckSummary } from "@/lib/github/ios-precheck";
 import { githubFetchJsonWithEtag } from "@/lib/github/conditional-request";
+import { classifyGithubForbidden, describeGithubStatus } from "@/lib/github/forbidden-cause";
 import { GithubApiError } from "@/lib/github/github-api-error";
 import { GITHUB_API, githubFetch } from "@/lib/github/request";
 import {
@@ -490,7 +491,7 @@ export type ReleaseCallerFetch =
   | { kind: "found"; text: string }
   /** developにcallerのファイルが無い（404）。権限や通信の失敗とは区別する（#5250） */
   | { kind: "missing" }
-  | { kind: "error"; status: number | null };
+  | { kind: "error"; status: number | null; /** 403・429の原因（#5366） */ cause?: string };
 
 /** developにあるリリースworkflowのcallerの取得結果。「無い」と「読めなかった」を分ける（#5250） */
 export async function fetchReleaseCaller(owner: string, repo: string, token: string): Promise<ReleaseCallerFetch> {
@@ -502,7 +503,16 @@ export async function fetchReleaseCaller(owner: string, repo: string, token: str
     return { kind: "error", status: null };
   }
   if (res.status === 404) return { kind: "missing" };
-  if (!res.ok) return { kind: "error", status: res.status };
+  if (!res.ok) {
+    if (res.status !== 403 && res.status !== 429) return { kind: "error", status: res.status };
+    const body = await res.text().catch(() => "");
+    const cause = classifyGithubForbidden(body, {
+      rateLimitRemaining: res.headers.get("x-ratelimit-remaining"),
+      rateLimitReset: res.headers.get("x-ratelimit-reset"),
+      retryAfter: res.headers.get("retry-after"),
+    });
+    return { kind: "error", status: res.status, cause: describeGithubStatus(res.status, cause) };
+  }
   const data: { content?: string; encoding?: string } = await res.json().catch(() => ({}));
   if (!data.content) return { kind: "error", status: res.status };
   return { kind: "found", text: Buffer.from(data.content, data.encoding === "base64" ? "base64" : "utf-8").toString("utf-8") };

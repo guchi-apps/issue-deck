@@ -44,7 +44,7 @@ export async function GET(request: NextRequest) {
         const caller = await fetchReleaseCaller(owner, repo, token);
         // callerのファイルが無いリポジトリはリリース対象ではない。「読めない」エラーとは区別する（#5250）
         if (caller.kind === "missing") return [fullName, { mode: "legacy", reason: "caller_without_input", label: "developにリリースworkflow（release-develop-to-main.yml）が無いため、候補の作成は使えません" }];
-        const mode: ReleaseStartMode = decideReleaseStartMode(caller.kind === "found" ? caller.text : null, caller.kind === "error" ? caller.status : undefined);
+        const mode: ReleaseStartMode = decideReleaseStartMode(caller.kind === "found" ? caller.text : null, caller.kind === "error" ? caller.status : undefined, caller.kind === "error" ? caller.cause : undefined);
         if (mode.mode !== "candidate") return [fullName, mode];
         let successorOf: RcBlockSummary | undefined;
         // 新規開始を妨げる既存候補を起動前に返す（#4628）。確認できなければ「候補なし」とは扱わない

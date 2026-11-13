@@ -1,4 +1,5 @@
 import { recordGithubApiCall } from "@/lib/github/api-usage";
+import { classifyGithubForbidden, extractGithubMessage } from "@/lib/github/forbidden-cause";
 import { networkErrorCode } from "@/lib/github/network-error";
 
 export const GITHUB_API = "https://api.github.com";
@@ -30,6 +31,29 @@ function delay(ms: number): Promise<void> {
 }
 
 /**
+ * 403・429の原因をサーバーログへ残す（#5366）。本文は`clone()`から読むので呼び出し側の読み取りに影響しない。
+ * トークンは出さない（URLと本文のmessage、レート制限のヘッダだけ）。
+ */
+async function logForbidden(res: Response, method: string, url: string): Promise<void> {
+  try {
+    const body = await res.clone().text();
+    const headers = {
+      rateLimitRemaining: res.headers.get("x-ratelimit-remaining"),
+      rateLimitReset: res.headers.get("x-ratelimit-reset"),
+      retryAfter: res.headers.get("retry-after"),
+      requestId: res.headers.get("x-github-request-id"),
+    };
+    const cause = classifyGithubForbidden(body, headers);
+    console.warn(
+      `[githubFetch] ${res.status} ${method} ${url} cause=${cause.kind} message=${JSON.stringify(extractGithubMessage(body).slice(0, 300))} ` +
+        `ratelimit-remaining=${headers.rateLimitRemaining ?? "-"} ratelimit-reset=${headers.rateLimitReset ?? "-"} retry-after=${headers.retryAfter ?? "-"} request-id=${headers.requestId ?? "-"}`,
+    );
+  } catch {
+    // ログのために本来の処理を止めない
+  }
+}
+
+/**
  * GitHub APIへのリクエストを行う共通関数。
  * 認証ヘッダの付与に加えて、用途別の使用量計測（api-usage）をここに集約する。
  * GitHub API呼び出しは必ずこの関数を経由させること（計測漏れを防ぐため）。
@@ -55,7 +79,7 @@ export async function githubFetch(
 
   for (let attempt = 1; ; attempt += 1) {
     try {
-      return await fetch(url, {
+      const res = await fetch(url, {
         method,
         headers: {
           ...extraHeaders,
@@ -65,6 +89,8 @@ export async function githubFetch(
         },
         body: body === undefined ? undefined : JSON.stringify(body),
       });
+      if (res.status === 403 || res.status === 429) await logForbidden(res, method, url);
+      return res;
     } catch (error) {
       const code = networkErrorCode(error);
       if (!code || attempt >= maxAttempts) throw error;
