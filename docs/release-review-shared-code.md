@@ -77,3 +77,14 @@
 - `unknown`: ブランチ不在・先端の取得失敗・ファイル一覧の打ち切り・読むファイルの上限超過・通信失敗。断定せず従来の資料未取得
 - 根拠: `apiContracts`は受信パス（末尾の語まで緩めた一致）がツリー全体の本文・ファイル名に無いこと、`linkedRepos`は設定のpatternsに一致するコードが両ブランチに無いこと。偽陽性（実装済みを未実装と誤る）がゲートを通す方向に働くため、疑わしいものは`not_implemented`にしない。連携先の対応状況はIssueのopen/closedではなくブランチの実物で確かめる
 - `release-review-links.json`の各連携先に任意の`identifiers`（API パス・環境変数名）を書くと、`registeredIssues`の検索に使われる
+
+# 登録済みSecretsは名前で機械照合し、未確認で止めない（#5342）
+
+新しいシークレット・環境変数を足すリリースで、「本番のSecrets／VPS .envへ同期済みか確認できない」が未確認として残り、指摘ゼロでも`needs_check`で止まっていた（aide RC-34）。`scripts/release-review-integrations.py`が、差分で`.github/secrets-manifest.tsv`に加わったキーを、GitHubのSecrets／Variablesの**名前だけ**で照合し、`manifest.json`の`secretRegistrations`へ`registered`・`missing`・`unknown`を残す。
+
+- `registered`: 確認項目を`confirmed`にし、未確認範囲に含めない
+- `missing`: 止める指摘にする
+- `unknown`（権限不足・通信失敗で一覧が取れない）: 断定せず従来どおり未確認
+- 値が空でないこと・相手側のトークンと一致することは名前では確かめられない。未確認で止めず、公開後の疎通確認へ回す提案として残す
+- `scope=inherit`は組織の一覧、それ以外はリポジトリの一覧と照合する。値は取得しない。VPSの`.env`は照合対象外
+- 登録状況は指紋に含まれるため、登録後の再実行で自動的に再評価される
