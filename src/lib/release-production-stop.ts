@@ -83,6 +83,7 @@ export const PRODUCTION_COMPLETION_TEXT: Partial<Record<ProductionVerificationMe
   manual_attestation: "確かめた内容の記録（人の確認）で完了にしました",
   source_publish: "対象コミットのソースを公開しました（タグとReleaseを確認）。実機への配備はこの確認の対象外で、未確認です",
   successor: "この候補を含む後続の版が本番で稼働していることを、後続のデプロイの照合で確かめました",
+  publication_suspended: "このリポジトリは公開を停止しているため、稼働確認の対象外として完了しました（本番は存在しません）",
 };
 
 export type ProductionStopInput = {

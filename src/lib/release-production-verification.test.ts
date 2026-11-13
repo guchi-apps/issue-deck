@@ -74,6 +74,15 @@ describe("decideProductionEvidence", () => {
     });
   });
 
+  // #5353。本番が無いので、deployの失敗・未起動・照合の有無・方式の判定不能に関わらず対象外で完了する
+  it("公開停止中は、deployの成否・種類に関わらず対象外として完了する", () => {
+    const suspendedReason = "公開停止中（guchi-apps/solitaire#214）";
+    for (const kind of ["deploy_version_check", "deploy_without_version_check", "source_publish_only", "unknown"] as const) {
+      expect(decideProductionEvidence({ ...base, kind, deploySucceeded: false, suspendedReason })).toEqual({ verified: true, method: "publication_suspended" });
+    }
+    expect(decideProductionEvidence({ ...base, suspendedReason: null })).toEqual({ verified: false, reason: "no_evidence" });
+  });
+
   it("deploy.ymlの照合が通ればその方式で完了にする", () => {
     expect(decideProductionEvidence({ ...base, kind: "deploy_version_check", versionCheckPassed: true })).toEqual({ verified: true, method: "deploy_version_check" });
   });

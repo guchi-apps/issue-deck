@@ -57,6 +57,24 @@ export const RELEASE_VERIFICATION_EXCLUSIONS: Readonly<Record<string, string>> =
   "guchi-apps/wifi-speed": "個人用スクリプト。リリース経路が無い",
 };
 
+/**
+ * 公開を停止したリポジトリと根拠（#5353）。**本番（稼働中のアプリ）が存在しない**ことの宣言。
+ *
+ * - 候補の稼働確認は`publication_suspended`（対象外）で完了する。deployの成否は問わない（実機が無い）
+ * - 未リリース件数・まとめてリリース・手が要る件数から外し、リリースを開始させない（出す先が無い）
+ * - 統合検証・全体レビューの対象からは外さない（`RELEASE_VERIFICATION_EXCLUSIONS`とは別。コードは残っている）
+ *
+ * **再公開するときはここから行を消す。** 消した後の候補からは従来どおり稼働確認を求める
+ */
+export const RELEASE_PRODUCTION_SUSPENSIONS: Readonly<Record<string, string>> = {
+  "guchi-apps/solitaire": "公開停止中（guchi-apps/solitaire#214）。VPSの配置を撤去済み（guchi-apps/vps#337・#339）",
+};
+
+/** 公開停止中ならその理由。公開中なら`null` */
+export function describeProductionSuspension(repoFullName: string): string | null {
+  return RELEASE_PRODUCTION_SUSPENSIONS[repoFullName] ?? null;
+}
+
 const NPM_CI = "npm ci";
 const PYTHON_VENV = "python3 -m venv .venv && . .venv/bin/activate && python -m pip install --upgrade pip";
 

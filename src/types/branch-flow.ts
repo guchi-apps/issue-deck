@@ -573,6 +573,7 @@ export type ReleaseBlockedReason =
   | "release-in-progress"
   | "nothing-to-release"
   | "deploy-failed"
+  | "production-suspended"
   | "release-preparing"
   | "preparation-failed"
   | "preparation-unknown";
@@ -631,6 +632,11 @@ export type BranchFlowRepository = {
    * 手動上書きを選ぶボタンへ切り替える（#3912）。
    */
   releaseBlockedReason: ReleaseBlockedReason | null;
+  /**
+   * 公開停止中ならその理由（#5353。`RELEASE_PRODUCTION_SUSPENSIONS`）。公開中ならnull。
+   * 本番が無いので、未リリース件数・まとめてリリース・手が要る件数に数えない
+   */
+  productionSuspension: string | null;
   /**
    * いま「本番へ再デプロイ」を押してよいか（#2020）。`deploy.yml`があり、デプロイが
    * 動いていない（`summary.deploy`が`waiting`・`running`でない）場合だけtrue。
