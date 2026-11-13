@@ -2490,7 +2490,11 @@ export function IssueDeckShell({
               )}
 
               <Dialog open={remoteSessionModalOpen} onOpenChange={setRemoteSessionModalOpen}>
-                <DialogContent className="flex h-[min(46rem,calc(100%-2rem))] max-w-[calc(100%-2rem)] flex-col gap-3 p-4 sm:max-w-5xl">
+                <DialogContent
+                  className="flex h-[min(46rem,calc(100%-2rem))] max-w-[calc(100%-2rem)] flex-col gap-3 p-4 sm:max-w-5xl"
+                  // 開いた直後に検索欄へフォーカスが当たるとスマホでキーボードが勝手に出るため止める（#5345）
+                  onOpenAutoFocus={(event) => event.preventDefault()}
+                >
                   <DialogTitle className="sr-only">リモートセッション</DialogTitle>
                   <RemoteSessionView
                     repositories={remoteSessionRepositories}

@@ -19,6 +19,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=scripts/lib/local-repo-resolve.sh
 source "$SCRIPT_DIR/lib/local-repo-resolve.sh"
+# shellcheck source=scripts/lib/clone-lock.sh
+source "$SCRIPT_DIR/lib/clone-lock.sh"
 # shellcheck source=scripts/lib/review-usage.sh
 source "$SCRIPT_DIR/lib/review-usage.sh"
 # shellcheck source=scripts/lib/release-progress.sh
@@ -211,7 +213,7 @@ cleanup() {
   [[ -n "$ERR_FILE" ]] && rm -f "$ERR_FILE"
   [[ -n "${part_dir:-}" ]] && rm -rf "$part_dir"
   if [[ -n "$WORKTREE" && -n "$LOCAL_PATH" ]]; then
-    git -C "$LOCAL_PATH" worktree remove --force "$WORKTREE" >/dev/null 2>&1 || rm -rf "$WORKTREE"
+    clone_lock_run "$LOCAL_PATH" git -C "$LOCAL_PATH" worktree remove --force "$WORKTREE" >/dev/null 2>&1 || rm -rf "$WORKTREE"
   fi
   release_progress_cleanup
 }
@@ -937,47 +939,33 @@ main() {
   mkdir -p "$WORK_ROOT"
   WORKTREE="$WORK_ROOT/${repo}-${pr_number}-${head_sha:0:12}"
   rm -rf "$WORKTREE"
-  git -C "$LOCAL_PATH" worktree prune >/dev/null 2>&1 || true
-  # 一過性の失敗（並行実行との衝突・ネットワーク等）で止まらないよう、取得と作業ツリーの作成は数回やり直す（#5350）
-  local max_tries="${RELEASE_REVIEW_RETRY_MAX:-3}" try prep_log prep_err commits_ok=0
-  prep_log="$(mktemp "${TMPDIR:-/tmp}/issue-deck-release-review-prep.XXXXXX")"
+  # クローンを変更する操作は、統合検証と並行しても衝突しないようクローン単位のロックで直列化し、
+  # 失敗の証拠（stderr）を握りつぶさず診断へ載せる（#5349）
+  local prep_err
   prep_err="$(mktemp "${TMPDIR:-/tmp}/issue-deck-release-review-preperr.XXXXXX")"
-  for ((try = 1; try <= max_tries; try++)); do
-    : >"$prep_err"
-    git -C "$LOCAL_PATH" fetch --quiet origin main "$head_sha" 2>"$prep_err" ||
-      git -C "$LOCAL_PATH" fetch --quiet origin 2>>"$prep_err" || true
-    if git -C "$LOCAL_PATH" cat-file -e "${base_sha}^{commit}" 2>>"$prep_err" &&
-      git -C "$LOCAL_PATH" cat-file -e "${head_sha}^{commit}" 2>>"$prep_err"; then
-      commits_ok=1
-      break
-    fi
-    retry_note "$prep_log" "fetch" "$try" "$max_tries" "$prep_err"
-    ((try < max_tries)) && retry_sleep
-  done
-  if ((commits_ok == 0)); then
+  prepare_clone() {
+    git -C "$LOCAL_PATH" worktree prune 2>>"$prep_err" || true
+    git -C "$LOCAL_PATH" fetch --quiet origin main "$head_sha" 2>>"$prep_err" ||
+      git -C "$LOCAL_PATH" fetch --quiet origin 2>>"$prep_err" ||
+      echo "warning: git fetch に失敗しました" >>"$prep_err"
+    git -C "$LOCAL_PATH" cat-file -e "${base_sha}^{commit}" 2>>"$prep_err" &&
+      git -C "$LOCAL_PATH" cat-file -e "${head_sha}^{commit}" 2>>"$prep_err" || return 10
+    git_retry 3 git -C "$LOCAL_PATH" worktree add --detach "$WORKTREE" "$head_sha" >/dev/null 2>>"$prep_err" || return 11
+  }
+  local prep_rc=0
+  clone_lock_run "$LOCAL_PATH" prepare_clone || prep_rc=$?
+  if ((prep_rc == 10)); then
     finish failed "対象のコミットを取得できません（base ${base_sha:0:7} / head ${head_sha:0:7}）" \
-      "$(diag_payload target_missing "" "$prep_log" prepare)"
-    rm -f "$prep_log" "$prep_err"
+      "$(diag_payload target_missing "" "$prep_err" prepare)"
+    rm -f "$prep_err"
+    return 0
+  elif ((prep_rc != 0)); then
+    finish failed "レビュー用の作業ディレクトリを作成できませんでした（head ${head_sha:0:7}）" \
+      "$(diag_payload target_missing "" "$prep_err" prepare)"
+    rm -f "$prep_err"
     return 0
   fi
-  local wt_ok=0
-  for ((try = 1; try <= max_tries; try++)); do
-    rm -rf "$WORKTREE"
-    git -C "$LOCAL_PATH" worktree prune >/dev/null 2>&1 || true
-    if git -C "$LOCAL_PATH" worktree add --detach "$WORKTREE" "$head_sha" >/dev/null 2>"$prep_err"; then
-      wt_ok=1
-      break
-    fi
-    retry_note "$prep_log" "worktree add" "$try" "$max_tries" "$prep_err"
-    ((try < max_tries)) && retry_sleep
-  done
-  if ((wt_ok == 0)); then
-    finish failed "レビュー用の作業ツリーを作成できません（head ${head_sha:0:7}）" \
-      "$(diag_payload target_missing "" "$prep_log" prepare)"
-    rm -f "$prep_log" "$prep_err"
-    return 0
-  fi
-  rm -f "$prep_log" "$prep_err"
+  rm -f "$prep_err"
 
   # AIのネットワーク権限を増やさず、候補が参照する固定タグの共有コードを先に用意する（#4690）。
   local dependency_dir
@@ -999,7 +987,7 @@ main() {
   review_report running ""
   # 差分の取得失敗を「差分なし・合格」に化けさせない（#5311）。プロセス置換では`git diff`の失敗が拾えず、
   # 空の一覧が「差分がありません」として合格になり、サーバーには版の無い（旧ランナー扱いの）結果として届いていた
-  local diff_list diff_err
+  local diff_list diff_err try max_tries="${RELEASE_REVIEW_RETRY_MAX:-3}"
   diff_list="$(mktemp "${TMPDIR:-/tmp}/issue-deck-release-review-diff.XXXXXX")"
   diff_err="$(mktemp "${TMPDIR:-/tmp}/issue-deck-release-review-differr.XXXXXX")"
   # 取得失敗と「差分0件だがコミットはファイルを変更している」は、一過性の可能性があるので数回やり直す（#5350）。
