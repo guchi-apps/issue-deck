@@ -59,8 +59,18 @@ export function useReleasePreparation(repositoryFullName: string, enabled = true
     if (!enabled) return;
     // eslint-disable-next-line react-hooks/set-state-in-effect -- 取得結果の反映（同期的なsetStateではない）
     void reload();
-    const timer = setInterval(() => void reload(), 60_000);
-    return () => clearInterval(timer);
+    // 裏に回っているタブでは取りに行かない（#5367）。前面へ戻ったときに取り直す
+    const timer = setInterval(() => {
+      if (!document.hidden) void reload();
+    }, 60_000);
+    const onVisible = () => {
+      if (!document.hidden) void reload();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      clearInterval(timer);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
   }, [enabled, reload]);
 
   const current = loaded?.repositoryFullName === repositoryFullName ? loaded : null;

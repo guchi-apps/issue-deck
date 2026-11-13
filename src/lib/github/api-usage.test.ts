@@ -67,9 +67,20 @@ describe("githubApiUsage", () => {
     ]);
     expect(summary.features[0].label).toBe("一覧の実行状況ポーリング");
     expect(summary.features[0].endpoints).toEqual([
-      { endpoint: "/repos/{owner}/{repo}/actions/runs/{n}", currentHour: 2, last24h: 2 },
-      { endpoint: "/repos/{owner}/{repo}/issues/{n}/comments", currentHour: 1, last24h: 1 },
+      { endpoint: "/repos/{owner}/{repo}/actions/runs/{n}", currentHour: 2, last60min: 2, last24h: 2 },
+      { endpoint: "/repos/{owner}/{repo}/issues/{n}/comments", currentHour: 1, last60min: 1, last24h: 1 },
     ]);
+  });
+
+  it("直近60分（ローリング）は正時をまたいでも直前の60分を数える", () => {
+    recordGithubApiCall(RUN_URL, { feature: "sync", now: NOW - 30 * 60_000 });
+    recordGithubApiCall(RUN_URL, { feature: "sync", now: NOW - 3 * 60 * 60_000 });
+    recordGithubApiCall(RUN_URL, { feature: "sync", now: NOW });
+
+    const summary = getGithubApiUsageSummary(NOW);
+
+    expect(summary.totalLast60min).toBe(2);
+    expect(summary.totalLast24h).toBe(3);
   });
 
   it("現在の正時より前の呼び出しは直近1時間（正時起点）に含めず、24時間には含める", () => {
