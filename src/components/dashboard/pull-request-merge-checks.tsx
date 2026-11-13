@@ -74,7 +74,9 @@ export function PullRequestMergeChecks({
     ? "text-xs leading-4 sm:text-sm sm:leading-5"
     : releaseRow
       ? "text-[10px] leading-3 sm:text-sm sm:leading-5"
-      : "text-sm leading-5";
+      : grouped
+        ? "text-xs leading-4 sm:text-sm sm:leading-5"
+        : "text-sm leading-5";
 
   const renderButton = (check: MergeCheckItem) => (
     <div key={check.key} className="min-w-0">
@@ -92,13 +94,13 @@ export function PullRequestMergeChecks({
           className={cn(
             textSize,
             "text-muted-foreground",
-            ownRow && "whitespace-nowrap",
+            (ownRow || grouped) && "whitespace-nowrap",
             !grouped && check.common && "font-bold text-foreground",
           )}
         >
           {grouped || releaseRow ? check.shortLabel.replace("〔共通〕", "") : check.shortLabel}
         </span>
-        <span className={cn(textSize, "font-bold", ownRow && "whitespace-nowrap", TONE_TEXT[check.tone])}>
+        <span className={cn(textSize, "font-bold", (ownRow || grouped) && "whitespace-nowrap", TONE_TEXT[check.tone])}>
           <span aria-hidden="true">{check.mark}</span> {check.state}
         </span>
       </button>
@@ -117,21 +119,22 @@ export function PullRequestMergeChecks({
       {ownOnly ? (
         <div className={ownRow ? "grid grid-cols-4" : "grid grid-cols-3"}>{own.map(renderButton)}</div>
       ) : grouped ? (
-        <div className="grid grid-cols-1 gap-x-3 gap-y-1 sm:grid-cols-2">
-          <section aria-label="このPRのチェック" className="min-w-0">
-            <h3 className="px-1 text-sm leading-5 font-semibold text-muted-foreground">
+        // スマホ幅（sm未満）は見出しを省き、競合・全体・統合・iOSを4列1行に流し込む（#5374）
+        <div className="grid grid-cols-4 gap-x-3 gap-y-1 sm:grid-cols-2">
+          <section aria-label="このPRのチェック" className="contents min-w-0 sm:block">
+            <h3 className="hidden px-1 text-sm leading-5 font-semibold text-muted-foreground sm:block">
               このPR<span className="font-normal">（競合）</span>
             </h3>
-            <div className="grid grid-cols-3">{own.map(renderButton)}</div>
+            <div className="contents sm:grid sm:grid-cols-3">{own.map(renderButton)}</div>
           </section>
-          <section aria-label="リリース候補のチェック" className="min-w-0">
-            <h3 className="px-1 text-sm leading-5 font-semibold text-muted-foreground">
+          <section aria-label="リリース候補のチェック" className="contents min-w-0 sm:block">
+            <h3 className="hidden px-1 text-sm leading-5 font-semibold text-muted-foreground sm:block">
               リリース候補
               <span className="font-normal">
                 {candidateLabel ? `（${candidateLabel}）` : "（全体・統合・iOS）"}
               </span>
             </h3>
-            <div className="grid grid-cols-3">{common.map(renderButton)}</div>
+            <div className="contents sm:grid sm:grid-cols-3">{common.map(renderButton)}</div>
           </section>
         </div>
       ) : (
