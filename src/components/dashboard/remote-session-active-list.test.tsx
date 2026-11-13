@@ -52,11 +52,23 @@ describe("RemoteSessionActiveList", () => {
     expect(screen.getByText("起動中のセッションはありません。")).toBeTruthy();
   });
 
-  it("onStopを渡すと終了ボタンが出て、押すとセッションIDで呼ばれる", () => {
+  it("onStopを渡すと終了ボタンが出て、確認ダイアログで「終了する」を押すとセッションIDで呼ばれる（#5346）", () => {
     const onStop = vi.fn();
     render(<RemoteSessionActiveList sessions={[session({ id: "a" })]} onStop={onStop} />);
     fireEvent.click(screen.getByRole("button", { name: /終了/ }));
+    expect(onStop).not.toHaveBeenCalled();
+    expect(screen.getByText("稼働中のセッションを終了しますか？")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "終了する" }));
+    expect(onStop).toHaveBeenCalledTimes(1);
     expect(onStop).toHaveBeenCalledWith("a");
+  });
+
+  it("確認ダイアログでキャンセルすると終了しない（#5346）", () => {
+    const onStop = vi.fn();
+    render(<RemoteSessionActiveList sessions={[session({ id: "a" })]} onStop={onStop} />);
+    fireEvent.click(screen.getByRole("button", { name: /終了/ }));
+    fireEvent.click(screen.getByRole("button", { name: "キャンセル" }));
+    expect(onStop).not.toHaveBeenCalled();
   });
 
   it("onStopが無ければ終了ボタンを出さない", () => {
