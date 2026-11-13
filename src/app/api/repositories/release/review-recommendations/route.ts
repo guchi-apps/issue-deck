@@ -1,8 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 
 import { requireUserId } from "@/lib/auth-user";
-import { generateReleaseReviewRecommendations } from "@/lib/claude/release-review-recommend";
-import { getAppAiToken } from "@/lib/claude/request";
 import { db } from "@/lib/db";
 import { fetchPullRequest } from "@/lib/github/actions-api";
 import { withGithubApiFeature } from "@/lib/github/api-usage";
@@ -10,10 +8,7 @@ import { getInstallationToken } from "@/lib/github/app-auth";
 import { githubApiErrorMessage } from "@/lib/github/network-error";
 import { previewModeGuard } from "@/lib/preview-mode";
 import { isReleasePullRequest } from "@/lib/release-merge-gate";
-import { releaseDecisionScopeKey, resolveReleaseDecisionChain } from "@/lib/release-review-decision-store";
-import type { RecommendationTarget } from "@/lib/release-review-recommendation";
-import { loadOrGenerateRecommendations } from "@/lib/release-review-recommendation-store";
-import { loadReleaseVerificationSummary } from "@/lib/release-verification-load";
+import { generateRecommendationsForTarget } from "@/lib/release-review-recommendation-prefetch";
 
 /**
  * 全体レビューの指摘ごとのAIの推奨判断と理由案（#4676）を返す。保存済みが無い指摘はこの場でAIに作らせる。
@@ -63,37 +58,7 @@ async function handlePOST(request: NextRequest) {
       return NextResponse.json({ error: "release_pr_changed", message: "リリース候補が更新されました。画面を更新してください" }, { status: 409 });
     }
     const current = { baseSha: pr.base.sha, headSha: pr.head.sha };
-    const summary = await loadReleaseVerificationSummary(repoFullName, pullRequestNumber, current);
-    const section = summary.aiReview;
-    if (section.state !== "needs_check" && section.state !== "passed") {
-      return NextResponse.json({ status: "ready", byFinding: {}, failures: {} }, { headers: { "Cache-Control": "no-store" } });
-    }
-    const targets: RecommendationTarget[] = [];
-    for (const [list, blocking] of [[section.findings, true], [section.suggestions, false]] as const) {
-      for (const f of list) {
-        if (!f.id) continue;
-        const view = section.decisions?.byFinding[f.id];
-        if (view?.current && !view.stale) continue;
-        targets.push({
-          ...f,
-          id: f.id,
-          blocking,
-          previousDecision: view?.current && view.stale ? { decision: view.current.decision, reason: view.current.reason, stale: view.stale } : null,
-        });
-      }
-    }
-    const chain = await resolveReleaseDecisionChain(repoFullName, pullRequestNumber);
-    const aiToken = await getAppAiToken("release_review_recommend");
-    const view = await loadOrGenerateRecommendations({
-      key: { scopeKey: releaseDecisionScopeKey(repoFullName, chain), ...current },
-      repoFullName,
-      prNumber: pullRequestNumber,
-      targets,
-      retry,
-      generate: aiToken
-        ? (batch) => generateReleaseReviewRecommendations(aiToken, { repoFullName, prNumber: pullRequestNumber, findings: batch })
-        : null,
-    });
+    const view = await generateRecommendationsForTarget({ repoFullName, prNumber: pullRequestNumber, current, retry });
     return NextResponse.json(view, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     console.error(`[POST /api/repositories/release/review-recommendations] ${repoFullName}#${pullRequestNumber}:`, error);
