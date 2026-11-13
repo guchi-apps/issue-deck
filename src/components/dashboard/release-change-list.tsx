@@ -152,7 +152,7 @@ export function ReleaseChangeList(props: ReleaseChangeListProps) {
     <section
       aria-label="今回反映する内容"
       tabIndex={0}
-      className="h-[min(16rem,28dvh)] shrink-0 overflow-y-auto rounded-md border p-2"
+      className="h-[min(40rem,55dvh)] shrink-0 overflow-y-auto rounded-md border p-2"
     >
       <ReleaseChangeListContent {...props} />
     </section>
