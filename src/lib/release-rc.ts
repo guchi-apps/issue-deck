@@ -119,6 +119,62 @@ export function isRcRevisionPendingExpired(row: { status: string; createdAt: Dat
   return row.status === "requested" && now.getTime() - row.createdAt.getTime() >= RC_REVISION_TTL_MS;
 }
 
+/** dispatchしたrunが`queued`のまま、画面を「GitHub Actionsの起動待ち」へ切り替えるまでの時間（#5330） */
+export const RC_RUN_QUEUED_STALE_MS = 10 * 60 * 1000;
+
+/** dispatch後のworkflow runの観測（`workflow_dispatch`イベントのものだけを渡す） */
+export type RcDispatchRun = {
+  id: number;
+  status: string;
+  conclusion: string | null;
+  htmlUrl: string;
+  createdAt: string;
+  /** runの表示名（`run-name`）。候補のrequestKeyを含む場合だけ、そのrunをこの更新要求のものと対応付けられる */
+  displayTitle?: string | null;
+};
+
+/** runが「起動しなかった・失敗した・取り消された」ことを表す結論 */
+const RC_RUN_FAILED_CONCLUSIONS = ["startup_failure", "failure", "cancelled", "timed_out"];
+
+export type RcDispatchRunDecision =
+  /** 判断できない・普通に進行中。何もしない */
+  | { kind: "none" }
+  /** 起動できなかった・失敗した。2時間を待たずにrevisionを失敗にしてよい */
+  | { kind: "failed"; reason: string; runUrl: string }
+  /** 起動待ちのまま一定時間たった。画面の表示だけを切り替える（記録は失効させない） */
+  | { kind: "queued_stale"; runUrl: string };
+
+/**
+ * dispatchした後のrunから、更新要求の状態を判定する純関数（#5330）。
+ * runの入力（`candidate_request`など）はGitHub APIから取れないため、同じworkflowの別の手動リリース
+ * （bump_kind・rebuild_selection・finalize_requestなど）のrunと時刻だけでは区別できない。
+ * **別runの失敗をこの更新要求の失敗にしないため、runの表示名に`requestKey`が含まれるもの
+ * （dispatch時刻の少し前以降）だけを対象にする。** 対応付けられるrunが無ければ何もしない
+ * （既存の候補ブランチ照合・workflow報告・期限切れの判定に委ねる）。
+ * （現状のworkflowには`run-name`が無いため対応付けできるrunは無く、`run-name`にrequestKeyを入れるまで早期検知は働かない）
+ * 対象のrunが全て失敗系で終わっているときだけ失敗にする
+ * （1件でも成功・実行中・起動待ちがあれば何もしない。遅れて届く報告は`decideRcReport`が既存の判定で扱う）
+ */
+export function decideRcDispatchRun(input: { requestedAt: Date; now: Date; requestKey: string; runs: RcDispatchRun[] }): RcDispatchRunDecision {
+  // 時計のずれを吸収するため、dispatchの少し前に作られたrunまで候補に入れる
+  const since = input.requestedAt.getTime() - 60_000;
+  const runs = input.runs.filter(
+    (r) => Date.parse(r.createdAt) >= since && input.requestKey !== "" && (r.displayTitle ?? "").includes(input.requestKey),
+  );
+  if (runs.length === 0) return { kind: "none" };
+  const failed = (r: RcDispatchRun) => r.status === "completed" && r.conclusion !== null && RC_RUN_FAILED_CONCLUSIONS.includes(r.conclusion);
+  if (runs.every(failed)) {
+    const latest = runs.reduce((a, b) => (Date.parse(b.createdAt) > Date.parse(a.createdAt) ? b : a));
+    return { kind: "failed", reason: `リリースworkflowを起動できませんでした（${latest.conclusion}）`, runUrl: latest.htmlUrl };
+  }
+  const queued = runs.filter((r) => r.status === "queued" || r.status === "waiting" || r.status === "pending");
+  if (queued.length === runs.length) {
+    const oldest = queued.reduce((a, b) => (Date.parse(b.createdAt) < Date.parse(a.createdAt) ? b : a));
+    if (input.now.getTime() - Date.parse(oldest.createdAt) >= RC_RUN_QUEUED_STALE_MS) return { kind: "queued_stale", runUrl: oldest.htmlUrl };
+  }
+  return { kind: "none" };
+}
+
 /** 現在の物理PRの観測（GitHubから取り直した値）。PRが見つからなければnull */
 export type RcPullRequestObservation = {
   number: number;

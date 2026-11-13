@@ -14,6 +14,7 @@ import {
   fetchPullRequestForRebuild,
   fetchPullRequestsByHead,
   fetchReleaseCallerText,
+  fetchReleaseDispatchRuns,
   fetchReleaseRebuildCandidate,
   isAncestorCommit,
 } from "@/lib/github/release-api";
@@ -38,6 +39,7 @@ import {
   classifyRcBlock,
   parseRcCallerSupport,
   parseRcPhase,
+  decideRcDispatchRun,
   RC_CALLER_REASON_LABEL,
   RC_NOT_UPDATED_REASON,
   RC_REVISION_REASON_LABEL,
@@ -463,6 +465,30 @@ async function findLegacyCandidate(ctx: Context): Promise<RcLegacyCandidate | nu
   return { prNumber: pr.number, version: legacyReleaseVersionOf(pr.head.ref), headSha: pr.head.sha, migratable };
 }
 
+/**
+ * 未完了の更新のdispatchしたrunを観測する（#5330）。失敗系で終わっていれば2時間を待たずに失敗にし、
+ * 起動待ちが続いていれば`runUrl`へ印を残す（画面が「GitHub Actionsの起動待ち」と出す。記録は失効させない）。
+ * 印は起動待ちでなくなれば外す。観測できなければ何も変えない。状態（status）が変わったらtrue
+ */
+async function observeDispatchRun(ctx: Context, candidate: CandidateRow, pending: CandidateRow["revisions"][number]): Promise<boolean> {
+  try {
+    const runs = await fetchReleaseDispatchRuns(ctx.owner, ctx.repo, ctx.token, pending.createdAt);
+    const decision = decideRcDispatchRun({ requestedAt: pending.createdAt, now: new Date(), requestKey: pending.requestKey, runs });
+    if (decision.kind === "failed") {
+      await failRevision(candidate, pending.id, decision.reason, decision.runUrl);
+      return true;
+    }
+    const mark = decision.kind === "queued_stale" ? decision.runUrl : null;
+    if (mark !== pending.runUrl) {
+      await db.releaseCandidateRevision.updateMany({ where: { id: pending.id, status: "requested" }, data: { runUrl: mark } });
+      return true;
+    }
+  } catch (error) {
+    console.error("[release-rc] dispatch run observation failed", candidate.repositoryFullName, error);
+  }
+  return false;
+}
+
 /** 期限切れの失効と、未完了の更新の照合。状態が変わったらtrue */
 async function reconcilePending(ctx: Context, row: CandidateRow): Promise<boolean> {
   const now = new Date();
@@ -471,6 +497,8 @@ async function reconcilePending(ctx: Context, row: CandidateRow): Promise<boolea
   if (pending) {
     const result = await reconcileRevision({ ctx, candidate: row, revisionId: pending.id }).catch(() => "waiting" as const);
     changed = changed || result === "applied" || result === "failed";
+    // 結果が見えないままのとき、dispatchしたrunの状態を見る（起動失敗・キュー滞留。#5330）
+    if (result === "waiting") changed = (await observeDispatchRun(ctx, row, pending)) || changed;
   } else {
     const adopted = await adoptLaggedRevision(ctx, row).catch((error: unknown) => {
       console.error("[release-rc] lagged revision adoption failed", row.repositoryFullName, error);
@@ -1150,6 +1178,13 @@ export async function recordRcReport(input: {
   const candidate = await loadCandidateRow({ id: revision.candidateId });
   if (!candidate || candidate.repositoryFullName !== input.repositoryFullName) return { ok: false, reason: "unknown_request" };
   const runUrl = input.runId !== null ? `https://github.com/${input.repositoryFullName}/actions/runs/${input.runId}` : null;
+  // 取消後に遅れて走ったworkflowが候補ブランチ・PRを作ったとき、そのPRを開いたまま残さない（#5331）
+  if (candidate.phase === "cancelled" && revision.status === "expired") {
+    await closeLateCandidatePullRequest(repository, candidate).catch((error: unknown) => {
+      console.error("[release-rc] closing late candidate pull request failed", input.repositoryFullName, error);
+    });
+    return { ok: true, outcome: "ignored" };
+  }
   if (revision.status !== "requested") return { ok: true, outcome: "ignored" };
   if (input.outcome === "failed") {
     await failRevision(candidate, revision.id, input.reason?.trim() || "リリースworkflowが候補の作成・更新に失敗しました", runUrl);
@@ -1158,6 +1193,24 @@ export async function recordRcReport(input: {
   const token = await getInstallationToken(repository.installation.installationId);
   const ctx: Context = { owner: repository.ownerLogin, repo: repository.name, token };
   return { ok: true, outcome: await reconcileRevision({ ctx, candidate, revisionId: revision.id, runUrl }) };
+}
+
+/**
+ * 取り消した候補のブランチに、遅れて作られた開いたPRがあれば、理由をコメントして閉じる（#5331）。
+ * 新しい候補は別の番号・別のブランチなので、閉じても作成を妨げない
+ */
+export async function closeLateCandidatePullRequest(
+  repository: { ownerLogin: string; name: string; installation: { installationId: number } },
+  candidate: Pick<CandidateRow, "sequence" | "cancelReason">,
+): Promise<boolean> {
+  const ctx: Context = { owner: repository.ownerLogin, repo: repository.name, token: await getInstallationToken(repository.installation.installationId) };
+  const pr = await observeCandidatePullRequest(ctx, candidate.sequence);
+  if (!pr || pr.state !== "open") return false;
+  await createComment(ctx.owner, ctx.repo, pr.number, ctx.token, {
+    body: `リリース候補 ${rcLabel(candidate.sequence)} は取り消し済みのため、遅れて作られたこのPRを閉じます。${candidate.cancelReason ? `\n\n取消の理由: ${candidate.cancelReason.slice(0, 500)}` : ""}`,
+  });
+  await closePullRequest(ctx.owner, ctx.repo, pr.number, ctx.token);
+  return true;
 }
 
 /** 候補PR（新方式）に対応する、取り込みを受け付ける段階の候補。無ければnull（修正系列の接続用） */

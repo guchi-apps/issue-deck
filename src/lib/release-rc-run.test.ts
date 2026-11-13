@@ -32,6 +32,8 @@ const mocks = vi.hoisted(() => ({
   reservationUpdate: vi.fn(),
   versionAtMerge: vi.fn(() => null as string | null),
   ensureSync: vi.fn(),
+  closePr: vi.fn(),
+  comment: vi.fn(),
 }));
 
 vi.mock("@/lib/db", () => {
@@ -79,8 +81,8 @@ vi.mock("@/lib/github/release-api", () => ({
 }));
 vi.mock("@/lib/release-develop-sync-run", () => ({ ensureDevelopSync: mocks.ensureSync }));
 vi.mock("@/lib/github/app-auth", () => ({ getInstallationToken: vi.fn(async () => "t") }));
-vi.mock("@/lib/github/actions-api", () => ({ closePullRequest: vi.fn() }));
-vi.mock("@/lib/github/issues-api", () => ({ createComment: vi.fn() }));
+vi.mock("@/lib/github/actions-api", () => ({ closePullRequest: mocks.closePr }));
+vi.mock("@/lib/github/issues-api", () => ({ createComment: mocks.comment }));
 vi.mock("@/lib/release-finalize", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/release-finalize")>()),
   parseFinalizeCallerSupport: () => ({ supported: true, versionFile: "package.json", versionQuery: "version", bumpCommand: false }),
@@ -358,6 +360,25 @@ describe("recordRcReport", () => {
     const result = await recordRcReport({ repositoryFullName: "o/r", requestKey: "key-000002", outcome: "applied", runId: 5, reason: null });
     expect(result).toEqual({ ok: true, outcome: "ignored" });
     expect(mocks.revisionUpdateMany).not.toHaveBeenCalled();
+  });
+
+  it("取消後に遅れて届いた報告では、候補ブランチの開いたPRを理由付きで閉じる（#5331）", async () => {
+    mocks.revisionFindUnique.mockResolvedValue({ id: "r0", candidateId: "c1", status: "expired" });
+    mocks.candidateFindUnique.mockResolvedValue(candidateRow({ phase: "cancelled", activeKey: null, cancelReason: "起動失敗のため" }));
+    mocks.prsByHead.mockResolvedValue([{ number: 77, state: "open", head: { sha: HEAD1, ref: "release-rc/3" }, base: { sha: "b".repeat(40) } }]);
+    const result = await recordRcReport({ repositoryFullName: "o/r", requestKey: "key-000009", outcome: "applied", runId: 5, reason: null });
+    expect(result).toEqual({ ok: true, outcome: "ignored" });
+    expect(mocks.comment).toHaveBeenCalledWith("o", "r", 77, "t", expect.objectContaining({ body: expect.stringContaining("起動失敗のため") }));
+    expect(mocks.closePr).toHaveBeenCalledWith("o", "r", 77, "t");
+    expect(mocks.revisionUpdateMany).not.toHaveBeenCalled();
+  });
+
+  it("取消後の報告でPRが無い・既に閉じていれば何も閉じない", async () => {
+    mocks.revisionFindUnique.mockResolvedValue({ id: "r0", candidateId: "c1", status: "expired" });
+    mocks.candidateFindUnique.mockResolvedValue(candidateRow({ phase: "cancelled", activeKey: null }));
+    mocks.prsByHead.mockResolvedValue([{ number: 77, state: "closed", head: { sha: HEAD1, ref: "release-rc/3" }, base: { sha: "b".repeat(40) } }]);
+    await recordRcReport({ repositoryFullName: "o/r", requestKey: "key-000009", outcome: "applied", runId: 5, reason: null });
+    expect(mocks.closePr).not.toHaveBeenCalled();
   });
 
   it("更新の失敗は記録するが、現在のrevisionと候補は残す", async () => {

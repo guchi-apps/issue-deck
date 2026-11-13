@@ -295,6 +295,23 @@ describe("resolveReleaseJourney（新方式の候補・#5076）", () => {
   });
 });
 
+describe("取消の宛先（cancelTarget・#5331）", () => {
+  it("作成中（PRなし）を含め、mainマージ前の段階では取り消せる", () => {
+    for (const phase of ["creating", "review", "preparing", "awaiting_approval"]) {
+      const journey = run({ detached: facts({ phase, candidateId: "c1" }) });
+      expect(journey?.cancelTarget).toEqual({ candidateId: "c1", phase });
+    }
+  });
+
+  it("mainマージ以降・候補IDが無い・画面が古いときは出さない", () => {
+    for (const phase of ["deploying", "verifying_production", "completed"]) {
+      expect(run({ detached: facts({ phase, candidateId: "c1" }) })?.cancelTarget).toBeNull();
+    }
+    expect(run({ detached: facts({ phase: "creating" }) })?.cancelTarget).toBeNull();
+    expect(run({ detached: facts({ phase: "creating", candidateId: "c1" }), snapshot: { failed: true } })?.cancelTarget).toBeNull();
+  });
+});
+
 describe("人の番の内訳（承認／判断・#5099）", () => {
   it("公開承認待ちは承認", () => {
     const journey = run({ candidatePullRequest: rcCandidate(facts()) });

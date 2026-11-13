@@ -1018,6 +1018,7 @@ main起点の`deploy-recovery/*`ブランチへ取り込む。**`merges`APIは�
 - workflowの報告（`POST /api/dispatch/release-rc`）は要求キーと結果の種別しか信じず、候補ブランチをGitHubから取り直して照合する。**報告が届かなくても、画面の読み込み（`GET /api/repositories/release/rc`）で同じ照合をして取り込む**。2時間結果が無ければ`expired`にしてやり直せるようにする
 - **候補の先端はPRのheadではなく候補ブランチのrefから読む**（#4895）。PRのheadはpushから数十秒遅れて反映されるため、報告を受けた時点でPRのheadがまだ直前のままだと「候補ブランチが更新されていません」で失敗にしてしまい、ブランチだけが進んで記録が取り残されていた（morrowのRC-2）。未更新は報告が届いた後でも失敗にせず待ち、届かなければ期限で失効させる。以前この理由で失敗扱いにした版は、workflowが適用を報告していて（`runUrl`あり）候補ブランチが直前のheadから早送りで進み、後から別の版が積まれていない場合に限り、その先端で取り込み直す（`decideRcLaggedAdoption`）
 - **取消はmainへのマージ前ならいつでも画面から押せる**（`canShowRcCancel`は`canCancelRc`と同じ判定。#5323）。取り込むPRの追加は`review`段階だけ、「今回リリースする変更」の「＋ 取り込むPRを追加」（`RcImportPanel`）から行う。取り込み済みPRを外す・公開準備以降に変える場合は、取り消して新しい候補を作る（候補ブランチは早送りでしか積まない）
+- **取消の入口はPR詳細のほかに2か所ある**（#5331）。ブランチ画面の「次のリリース」カードの「その他の操作」（`ReleaseJourneyCancel`。宛先は`ReleaseJourney.cancelTarget`で、`ReleaseRcFacts.candidateId`から作る。作成中でPRが無くても出る）と、リリース開始の案内（`ReleaseBlockNotice`。PC・モバイルシート共通）の進行中表示。どちらも`requestReleaseCandidateCancel`（`expectedPhase`付き）を使う。**取消後に遅れて走ったworkflowが候補ブランチ・PRを作った場合**は、その報告（`recordRcReport`）で候補が`cancelled`かつrevisionが`expired`のとき、開いたPRへ理由をコメントして閉じる（報告が届かない場合は閉じない。巡回での全件照合はしない）
 - 更新に失敗しても`currentRevision`は進めない。元のrevision・選択・承認は残る。取消は段階を`cancelled`にし、候補PRは理由を書いて閉じる（ブランチと記録は残す）
 
 ### 取り込みの承認範囲

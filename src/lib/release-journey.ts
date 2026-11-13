@@ -1,6 +1,7 @@
 import { releaseMergeTargetLabel, type ReleaseMergeTarget } from "@/lib/github/release-button-status";
 import { isRcReleaseCandidateHeadRef, legacyReleaseVersionOf, rcSequenceOf } from "@/lib/release-branch";
 import { resolvePullRequestReleaseVerification } from "@/lib/release-candidate-status";
+import { canCancelRc, parseRcPhase, type RcPhase } from "@/lib/release-rc";
 import { isReleasePullRequest } from "@/lib/release-merge-gate";
 import { resolveReleaseStageBadges, type ReleaseStageBadge } from "@/lib/release-stage-badges";
 import type { BranchFlowDeployState } from "@/types/branch-flow";
@@ -73,6 +74,8 @@ export type JourneyCheck = {
 export type ReleaseJourney = {
   /** 候補の名前（`RC-13`・旧方式は`v1.17.13`）。分からなければnull */
   candidateLabel: string | null;
+  /** mainマージ前の候補を取り消すための宛先（#5331）。作成中（PRなし）も含む。取り消せなければnull */
+  cancelTarget: { candidateId: string; phase: RcPhase } | null;
   legacy: boolean;
   steps: JourneyStep[];
   /** 済みの区切りの数（取得不能・対象外は数えない） */
@@ -358,7 +361,9 @@ export function resolveReleaseJourney({
     // 作成
     if (bump) d.create = bumpDraft(bump, mergeTarget);
     else if (rc && (rc.phase === "creating" || rc.pendingRevision?.reason === "initial" || rc.pendingRevision?.reason === "migration")) {
-      d.create = draft("running", `${rcLabelOf(rc)}を作成中（受付済み）`, "候補ブランチとPRを作っています。操作は不要です");
+      d.create = rc.pendingRevision?.queuedRunUrl
+        ? draft("running", `${rcLabelOf(rc)}の作成はGitHub Actionsの起動待ち`, "GitHub Actionsでリリースworkflowが始まっていません。始まれば自動で進みます")
+        : draft("running", `${rcLabelOf(rc)}を作成中（受付済み）`, "候補ブランチとPRを作っています。操作は不要です");
     } else d.create = draft("done");
 
     // RC検証（公開準備に入った後は、検証は最終検証の区切りで見る）
@@ -370,7 +375,9 @@ export function resolveReleaseJourney({
       const lead = checks.find((c) => c.state === state && c.status !== null) ?? null;
       d.verify = draft(state, lead?.status ?? null, lead?.title ?? null);
       if (rc?.pendingRevision && rc.pendingRevision.reason !== "initial" && rc.pendingRevision.reason !== "migration") {
-        d.verify = draft("fixing", `修正を候補へ取り込み中（revision ${rc.pendingRevision.revision}）`, "取り込みが終わると再検証します。操作は不要です");
+        d.verify = rc.pendingRevision.queuedRunUrl
+          ? draft("fixing", `修正の取り込みはGitHub Actionsの起動待ち（revision ${rc.pendingRevision.revision}）`, "GitHub Actionsでリリースworkflowが始まっていません。始まれば自動で進みます")
+          : draft("fixing", `修正を候補へ取り込み中（revision ${rc.pendingRevision.revision}）`, "取り込みが終わると再検証します。操作は不要です");
       }
     }
 
@@ -453,6 +460,7 @@ export function resolveReleaseJourney({
   const headline = first ? { key: first.key, label: first.status, tone: first.state, title: first.title } : null;
   return {
     candidateLabel: rc ? rcLabelOf(rc) : candidate ? candidateLabelOf(candidate.headRef) : null,
+    cancelTarget: cancelTargetOf(rc, stale),
     legacy,
     steps,
     done: steps.filter((step) => step.state === "done").length,
@@ -476,6 +484,12 @@ export function resolveReleaseJourney({
     updatedAt: rc?.updatedAt ?? null,
     stale,
   };
+}
+
+function cancelTargetOf(rc: ReleaseRcFacts | null, stale: boolean): { candidateId: string; phase: RcPhase } | null {
+  if (!rc?.candidateId || stale) return null;
+  const phase = parseRcPhase(rc.phase);
+  return phase !== null && canCancelRc(phase) ? { candidateId: rc.candidateId, phase } : null;
 }
 
 function rcLabelOf(rc: ReleaseRcFacts): string {

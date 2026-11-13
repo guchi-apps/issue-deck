@@ -37,13 +37,9 @@ describe("detectRequiredCheckDrift", () => {
       detectRequiredCheckDrift({ ruleset: ["lint-and-build"], classic: ["lint-and-build", "issue-deck/ci-gate"] }, publishers),
     ).toEqual([{ kind: "no_publisher", name: "issue-deck/ci-gate", where: ["classic"] }]);
   });
-  it("発行元はあるが片側にしか無い項目はずれとして出る", () => {
-    expect(detectRequiredCheckDrift({ ruleset: ["docs-sync-check"], classic: [] }, publishers)).toEqual([
-      { kind: "only_in_ruleset", name: "docs-sync-check" },
-    ]);
-    expect(detectRequiredCheckDrift({ ruleset: [], classic: ["other"] }, publishers)).toEqual([
-      { kind: "only_in_classic", name: "other" },
-    ]);
+  it("発行元はあるが片側にしか無い項目は出さない（#5335）", () => {
+    expect(detectRequiredCheckDrift({ ruleset: ["docs-sync-check"], classic: [] }, publishers)).toEqual([]);
+    expect(detectRequiredCheckDrift({ ruleset: [], classic: ["lint-and-build"] }, publishers)).toEqual([]);
   });
   it("コードが発行するcommit statusは発行元ありとして扱う", () => {
     expect(detectRequiredCheckDrift({ ruleset: ["issue-deck/ios-precheck"], classic: ["issue-deck/ios-precheck"] }, publishers)).toEqual([]);
