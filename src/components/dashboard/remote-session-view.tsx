@@ -5,6 +5,7 @@ import { useSearchParams } from "next/navigation";
 import { useMemo, useState } from "react";
 
 import { RemoteSessionActiveList } from "@/components/dashboard/remote-session-active-list";
+import { RemoteSessionStopDialog } from "@/components/dashboard/remote-session-stop-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -251,6 +252,8 @@ function RepositoryDetail({
   onDismissLaunch: () => void;
   compact: boolean;
 }) {
+  // 「終了」は確認ダイアログを通してから実行する（#5346）
+  const [stopTarget, setStopTarget] = useState<RemoteSession | null>(null);
   const host = state?.hosts.find((item) => item.remoteSessionCapable && item.repositories.includes(repository.fullName)) ?? null;
   const launching = launch !== null && !launch.gaveUp;
   const launchedSession = launch ? sessions.find((session) => session.id === launch.sessionId) ?? null : null;
@@ -332,7 +335,7 @@ function RepositoryDetail({
                     </Button>
                   )}
                   {isActive(session) && (
-                    <Button size="sm" variant="outline" disabled={session.stopping} onClick={() => onStop(session.id)}>
+                    <Button size="sm" variant="outline" disabled={session.stopping} onClick={() => setStopTarget(session)}>
                       終了
                     </Button>
                   )}
@@ -394,6 +397,14 @@ function RepositoryDetail({
       <p className="text-xs text-muted-foreground">
         セッションはIssueに紐づかず、終了するか一定時間（既定3時間）操作が無くなるまでサブPCに残ります。終了すると、作業が残っていない作業用ディレクトリは片付けます。終了したセッションは7日間「再開」から会話の続きとして起動し直せます。
       </p>
+      <RemoteSessionStopDialog
+        session={stopTarget}
+        onCancel={() => setStopTarget(null)}
+        onConfirm={(id) => {
+          setStopTarget(null);
+          onStop(id);
+        }}
+      />
     </div>
   );
 }
