@@ -19,6 +19,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=scripts/lib/local-repo-resolve.sh
 source "$SCRIPT_DIR/lib/local-repo-resolve.sh"
+# shellcheck source=scripts/lib/clone-lock.sh
+source "$SCRIPT_DIR/lib/clone-lock.sh"
 # shellcheck source=scripts/lib/review-usage.sh
 source "$SCRIPT_DIR/lib/review-usage.sh"
 # shellcheck source=scripts/lib/release-progress.sh
@@ -211,7 +213,7 @@ cleanup() {
   [[ -n "$ERR_FILE" ]] && rm -f "$ERR_FILE"
   [[ -n "${part_dir:-}" ]] && rm -rf "$part_dir"
   if [[ -n "$WORKTREE" && -n "$LOCAL_PATH" ]]; then
-    git -C "$LOCAL_PATH" worktree remove --force "$WORKTREE" >/dev/null 2>&1 || rm -rf "$WORKTREE"
+    clone_lock_run "$LOCAL_PATH" git -C "$LOCAL_PATH" worktree remove --force "$WORKTREE" >/dev/null 2>&1 || rm -rf "$WORKTREE"
   fi
   release_progress_cleanup
 }
@@ -924,16 +926,33 @@ main() {
   mkdir -p "$WORK_ROOT"
   WORKTREE="$WORK_ROOT/${repo}-${pr_number}-${head_sha:0:12}"
   rm -rf "$WORKTREE"
-  git -C "$LOCAL_PATH" worktree prune >/dev/null 2>&1 || true
-  git -C "$LOCAL_PATH" fetch --quiet origin main "$head_sha" 2>/dev/null ||
-    git -C "$LOCAL_PATH" fetch --quiet origin 2>/dev/null || true
-  git -C "$LOCAL_PATH" cat-file -e "${base_sha}^{commit}" 2>/dev/null &&
-    git -C "$LOCAL_PATH" cat-file -e "${head_sha}^{commit}" 2>/dev/null || {
-    finish failed "対象のコミットを取得できません（base ${base_sha:0:7} / head ${head_sha:0:7}）" \
-      "$(diag_payload target_missing "" "" prepare)"
-    return 0
+  # クローンを変更する操作は、統合検証と並行しても衝突しないようクローン単位のロックで直列化し、
+  # 失敗の証拠（stderr）を握りつぶさず診断へ載せる（#5349）
+  local prep_err
+  prep_err="$(mktemp "${TMPDIR:-/tmp}/issue-deck-release-review-preperr.XXXXXX")"
+  prepare_clone() {
+    git -C "$LOCAL_PATH" worktree prune 2>>"$prep_err" || true
+    git -C "$LOCAL_PATH" fetch --quiet origin main "$head_sha" 2>>"$prep_err" ||
+      git -C "$LOCAL_PATH" fetch --quiet origin 2>>"$prep_err" ||
+      echo "warning: git fetch に失敗しました" >>"$prep_err"
+    git -C "$LOCAL_PATH" cat-file -e "${base_sha}^{commit}" 2>>"$prep_err" &&
+      git -C "$LOCAL_PATH" cat-file -e "${head_sha}^{commit}" 2>>"$prep_err" || return 10
+    git_retry 3 git -C "$LOCAL_PATH" worktree add --detach "$WORKTREE" "$head_sha" >/dev/null 2>>"$prep_err" || return 11
   }
-  git -C "$LOCAL_PATH" worktree add --detach "$WORKTREE" "$head_sha" >/dev/null 2>&1
+  local prep_rc=0
+  clone_lock_run "$LOCAL_PATH" prepare_clone || prep_rc=$?
+  if ((prep_rc == 10)); then
+    finish failed "対象のコミットを取得できません（base ${base_sha:0:7} / head ${head_sha:0:7}）" \
+      "$(diag_payload target_missing "" "$prep_err" prepare)"
+    rm -f "$prep_err"
+    return 0
+  elif ((prep_rc != 0)); then
+    finish failed "レビュー用の作業ディレクトリを作成できませんでした（head ${head_sha:0:7}）" \
+      "$(diag_payload target_missing "" "$prep_err" prepare)"
+    rm -f "$prep_err"
+    return 0
+  fi
+  rm -f "$prep_err"
 
   # AIのネットワーク権限を増やさず、候補が参照する固定タグの共有コードを先に用意する（#4690）。
   local dependency_dir
@@ -958,7 +977,7 @@ main() {
   local diff_list diff_err
   diff_list="$(mktemp "${TMPDIR:-/tmp}/issue-deck-release-review-diff.XXXXXX")"
   diff_err="$(mktemp "${TMPDIR:-/tmp}/issue-deck-release-review-differr.XXXXXX")"
-  if ! git -C "$WORKTREE" diff --name-only "$base_sha...$head_sha" >"$diff_list" 2>"$diff_err"; then
+  if ! git_retry 3 git -C "$WORKTREE" diff --name-only "$base_sha...$head_sha" >"$diff_list" 2>"$diff_err"; then
     finish failed "リリースの差分を取得できませんでした（base ${base_sha:0:7} / head ${head_sha:0:7}）" \
       "$(diag_payload target_missing "" "$diff_err" diff)"
     rm -f "$diff_list" "$diff_err"

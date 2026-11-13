@@ -16,6 +16,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=scripts/lib/local-repo-resolve.sh
 source "$SCRIPT_DIR/lib/local-repo-resolve.sh"
+# shellcheck source=scripts/lib/clone-lock.sh
+source "$SCRIPT_DIR/lib/clone-lock.sh"
 # shellcheck source=scripts/lib/review-usage.sh
 source "$SCRIPT_DIR/lib/review-usage.sh"
 # shellcheck source=scripts/lib/release-progress.sh
@@ -104,7 +106,7 @@ cleanup() {
     finish failed "統合検証の実行中に失敗しました（終了コード ${code}）。サブPCのtmuxセッション ${TMUX_SESSION_NAME:-不明}を確認してください。"
   fi
   if [[ -n "$WORKTREE" && -n "$LOCAL_PATH" ]]; then
-    git -C "$LOCAL_PATH" worktree remove --force "$WORKTREE" >/dev/null 2>&1 || rm -rf "$WORKTREE"
+    clone_lock_run "$LOCAL_PATH" git -C "$LOCAL_PATH" worktree remove --force "$WORKTREE" >/dev/null 2>&1 || rm -rf "$WORKTREE"
   fi
   # ロックは所有者（自分のPID）のときだけ削除する
   [[ -n "$LOCK_DIR" && "$(cat "$LOCK_DIR/pid" 2>/dev/null || true)" == "$$" ]] && rm -rf "$LOCK_DIR"
@@ -173,8 +175,7 @@ main() {
   LOCAL_PATH="$(local_repo_resolve_path "$full_name")"
   mkdir -p "$WORK_ROOT"
   local worktree_path="$WORK_ROOT/${repo}-${pr_number}-${head_sha:0:12}"
-  git -C "$LOCAL_PATH" fetch --quiet origin main "$head_sha" 2>/dev/null ||
-    git -C "$LOCAL_PATH" fetch --quiet origin 2>/dev/null || true
+  clone_lock_run "$LOCAL_PATH" bash -c 'git -C "$1" fetch --quiet origin main "$2" 2>/dev/null || git -C "$1" fetch --quiet origin 2>/dev/null || true' _ "$LOCAL_PATH" "$head_sha"
   git -C "$LOCAL_PATH" cat-file -e "${base_sha}^{commit}" 2>/dev/null &&
     git -C "$LOCAL_PATH" cat-file -e "${head_sha}^{commit}" 2>/dev/null || {
     finish failed "対象のコミットを取得できません（base ${base_sha:0:7} / head ${head_sha:0:7}）"
@@ -216,13 +217,13 @@ main() {
   # worktreeはロック取得後にだけ作り直す（二重起動した側が、実行中の検証のworktreeを消さないため）
   WORKTREE="$worktree_path"
   rm -rf "$WORKTREE"
-  git -C "$LOCAL_PATH" worktree prune >/dev/null 2>&1 || true
+  clone_lock_run "$LOCAL_PATH" git -C "$LOCAL_PATH" worktree prune >/dev/null 2>&1 || true
   evidence_init "$full_name" "$pr_number" "$base_sha" "$head_sha"
 
   # 統合状態: mainの先端（base）へリリースのheadをマージする。競合はそのまま失敗として返す
   release_progress_set merge 1 "mainの先端へリリースを統合しています"
   release_verify_report running ""
-  git -C "$LOCAL_PATH" worktree add --detach "$WORKTREE" "$base_sha" >/dev/null 2>&1
+  git_retry 3 clone_lock_run "$LOCAL_PATH" git -C "$LOCAL_PATH" worktree add --detach "$WORKTREE" "$base_sha" >/dev/null 2>&1
   if ! git -C "$WORKTREE" -c user.name="Claude Code" -c user.email="claude-code@example.com" \
     merge --no-edit "$head_sha" >/dev/null 2>&1; then
     local conflicts
