@@ -889,6 +889,19 @@ run_batch_job() {
   printf '0' >"$jd/rc"
 }
 
+# retry_note <ログファイル> <工程> <試行> <最大> [stderrファイル]: 一過性の失敗でやり直した事実を診断の抜粋へ残す（#5350）
+# 原因の特定を妨げないよう、各試行のstderrをそのまま残す
+retry_note() {
+  local log="$1" what="$2" n="$3" max="$4" errf="${5:-}"
+  {
+    printf '[retry %s/%s] %s failed\n' "$n" "$max" "$what"
+    [[ -n "$errf" && -s "$errf" ]] && tail -n 5 "$errf"
+  } >>"$log" 2>/dev/null || true
+  printf 'release-review: %s failed (attempt %s/%s)\n' "$what" "$n" "$max" >&2
+}
+
+retry_sleep() { sleep "${RELEASE_REVIEW_RETRY_DELAY:-2}"; }
+
 main() {
   local owner="$1" repo="$2" pr_number="$3" base_sha="$4" head_sha="$5"
   JOB_ID="$6"
@@ -974,32 +987,45 @@ main() {
   review_report running ""
   # 差分の取得失敗を「差分なし・合格」に化けさせない（#5311）。プロセス置換では`git diff`の失敗が拾えず、
   # 空の一覧が「差分がありません」として合格になり、サーバーには版の無い（旧ランナー扱いの）結果として届いていた
-  local diff_list diff_err
+  local diff_list diff_err try max_tries="${RELEASE_REVIEW_RETRY_MAX:-3}"
   diff_list="$(mktemp "${TMPDIR:-/tmp}/issue-deck-release-review-diff.XXXXXX")"
   diff_err="$(mktemp "${TMPDIR:-/tmp}/issue-deck-release-review-differr.XXXXXX")"
-  if ! git_retry 3 git -C "$WORKTREE" diff --name-only "$base_sha...$head_sha" >"$diff_list" 2>"$diff_err"; then
-    finish failed "リリースの差分を取得できませんでした（base ${base_sha:0:7} / head ${head_sha:0:7}）" \
-      "$(diag_payload target_missing "" "$diff_err" diff)"
+  # 取得失敗と「差分0件だがコミットはファイルを変更している」は、一過性の可能性があるので数回やり直す（#5350）。
+  # 本当に差が無い（変更を持つコミットが無い）ときは、やり直さず従来どおり合格にする
+  local diff_state="failed" changed_by_commits="unknown" diff_fail_msg=""
+  for ((try = 1; try <= max_tries; try++)); do
+    diff_state="failed"
+    if git -C "$WORKTREE" diff --name-only "$base_sha...$head_sha" >"$diff_list" 2>"$diff_err.cur"; then
+      mapfile -t files <"$diff_list"
+      total_files="${#files[@]}"
+      if ((total_files > 0)); then
+        diff_state="ok"
+        break
+      fi
+      changed_by_commits="unknown"
+      if git -C "$WORKTREE" log --no-merges --name-only --format= "$base_sha..$head_sha" >"$diff_list" 2>>"$diff_err.cur"; then
+        changed_by_commits="$(grep -c . "$diff_list" || true)"
+      fi
+      if [[ "$changed_by_commits" == "0" ]]; then
+        diff_state="empty"
+        break
+      fi
+      printf 'git diff --name-only %s...%s returned no files, but commits in %s..%s change files (%s).\n' \
+        "${base_sha:0:7}" "${head_sha:0:7}" "${base_sha:0:7}" "${head_sha:0:7}" "${changed_by_commits:-unknown}" >>"$diff_err.cur"
+      diff_fail_msg="リリースの差分が0件と判定されましたが、対象のコミットはファイルを変更しています。差分を正しく取得できていないため、レビューを完了できませんでした"
+    else
+      diff_fail_msg="リリースの差分を取得できませんでした（base ${base_sha:0:7} / head ${head_sha:0:7}）"
+    fi
+    retry_note "$diff_err" "git diff --name-only" "$try" "$max_tries" "$diff_err.cur"
+    ((try < max_tries)) && retry_sleep
+  done
+  rm -f "$diff_err.cur"
+  if [[ "$diff_state" == "failed" ]]; then
+    finish failed "$diff_fail_msg" "$(diag_payload target_missing "" "$diff_err" diff)"
     rm -f "$diff_list" "$diff_err"
     return 0
   fi
-  mapfile -t files <"$diff_list"
-  total_files="${#files[@]}"
-  if ((total_files == 0)); then
-    # 本当に差が無いのか、取得に失敗して空に見えているだけかを、コミットが変更したファイルで確かめる。
-    # 変更を持つコミットがあるのに差分0件なら、確認していない対象を合格にしないよう失敗として報告する
-    local changed_by_commits="unknown"
-    if git -C "$WORKTREE" log --no-merges --name-only --format= "$base_sha..$head_sha" >"$diff_list" 2>>"$diff_err"; then
-      changed_by_commits="$(grep -c . "$diff_list" || true)"
-    fi
-    if [[ "$changed_by_commits" != "0" ]]; then
-      printf 'git diff --name-only %s...%s returned no files, but commits in %s..%s change files (%s).\n' \
-        "${base_sha:0:7}" "${head_sha:0:7}" "${base_sha:0:7}" "${head_sha:0:7}" "${changed_by_commits:-unknown}" >>"$diff_err"
-      finish failed "リリースの差分が0件と判定されましたが、対象のコミットはファイルを変更しています。差分を正しく取得できていないため、レビューを完了できませんでした" \
-        "$(diag_payload target_missing "" "$diff_err" diff)"
-      rm -f "$diff_list" "$diff_err"
-      return 0
-    fi
+  if [[ "$diff_state" == "empty" ]]; then
     rm -f "$diff_list" "$diff_err"
     finish succeeded "差分がありません" \
       "$(jq -nc '{state: "passed", summary: "mainとの差分がありません", findings: [], totalFiles: 0, reviewedFiles: 0, targetFiles: [], fileReviews: [], inputFiles: 0}')"
