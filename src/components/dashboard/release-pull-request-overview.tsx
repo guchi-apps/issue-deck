@@ -18,7 +18,7 @@ import {
   useReleaseFixOverview,
 } from "@/components/dashboard/release-fix-panel";
 import { ReleaseReviewSections } from "@/components/dashboard/release-review-sections";
-import { ReleaseAutoProceedPanel, shouldShowAutoProceed } from "@/components/dashboard/release-auto-proceed-panel";
+import { decideAutoProceedMode, ReleaseAutoProceedPanel } from "@/components/dashboard/release-auto-proceed-panel";
 import { useNow } from "@/hooks/use-now";
 import { useReferenceNavigation } from "@/hooks/use-reference-navigation";
 import { useReleaseCandidates } from "@/hooks/use-release-candidates";
@@ -27,6 +27,7 @@ import { useReleaseVerification } from "@/hooks/use-release-verification";
 import { buildMergeChecks, cellsFromSummary, type MergeCheckItem, type MergeCheckTone } from "@/lib/pull-request-merge-checks";
 import { buildReleaseCheckCells } from "@/lib/release-candidate-checks";
 import { resolvePullRequestJourney } from "@/lib/release-journey";
+import { PENDING_CONFLICT_PUBLISH_NOTE } from "@/lib/release-finalize";
 import { cn } from "@/lib/utils";
 import type { PullRequestSummary } from "@/types/pull-request";
 
@@ -94,9 +95,7 @@ function ReleaseCandidateChecks({ pullRequest }: { pullRequest: PullRequestSumma
   );
 }
 
-/** 競合が判定中のときに出す、公開承認との関係（#5178・#5305で「押せる」から「判定が出るまで押せない」へ変更） */
-export const PENDING_CONFLICT_PUBLISH_NOTE =
-  "GitHubが競合を計算中です。成功とは扱わず、判定が出るまで公開承認は押せません（判定が出れば自動で押せるようになります）";
+export { PENDING_CONFLICT_PUBLISH_NOTE };
 
 /**
  * 競合が「確認中」のとき、公開承認が判定待ちで押せないことが分かる理由文に差し替える（#5178・#5305）
@@ -218,9 +217,13 @@ export function ReleasePullRequestOverview({
       <ReleasePublishAction pullRequest={pullRequest} decision={publishDecision} onMerged={onMerged} variant="outline" label="承認せずに本番公開へ進む" />
     ) : null;
   const reload = () => setReloadToken((n) => n + 1);
-  // 未判断の止める指摘があれば、判定表と「おまかせで公開承認まで進める」を次の操作にする（#5138。新方式の候補だけ）
-  const autoProceed =
-    rcCandidate !== null && !state.previousResults && verification !== null && shouldShowAutoProceed(verification, state.completionRun?.active ?? false);
+  // 新方式の候補では、修正の自動継続の入口を「おまかせで公開承認まで進める」1つにする（#5138・#5369）。
+  // 自動修正で解消できない要確認（指摘0件）のときは、ボタンでなく再実行・判断への案内を出す
+  const autoProceedMode =
+    rcCandidate !== null && !state.previousResults && verification !== null
+      ? decideAutoProceedMode(verification, state.completionRun?.active ?? false)
+      : null;
+  const autoProceed = autoProceedMode === "table" || autoProceedMode === "start";
   // 新方式の候補で工程が出ている間は、状態・次の手を「いま・担当・次」に一本化する（#5290）
   const unified = rcCandidate !== null && journey !== null;
   const finalization = rc.overview?.finalization ?? null;
@@ -287,7 +290,7 @@ export function ReleasePullRequestOverview({
             />
           </div>
         )}
-        {autoProceed && verification && (
+        {autoProceedMode !== null && verification && (
           <ReleaseAutoProceedPanel
             repositoryFullName={repositoryFullName}
             pullRequestNumber={number}

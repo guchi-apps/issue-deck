@@ -873,7 +873,8 @@ export function ReleaseFixSummary({
         repositoryFullName={state.repositoryFullName}
         pullRequestNumber={state.pullRequestNumber}
         target={state.target}
-        canStart={!hideFixEntry && (overview.tone === "bad" || current !== null)}
+        // 新方式の候補は、開始の入口を「おまかせで公開承認まで進める」1つにする（#5369）。系列の表示・停止は残す
+        canStart={!hideFixEntry && !state.rcCandidate && (overview.tone === "bad" || current !== null)}
         rcCandidate={state.rcCandidate}
         startAsSecondary={completionAsSecondary}
       />

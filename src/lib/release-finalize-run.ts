@@ -517,7 +517,8 @@ export async function approveRcPublish(
   if (!found || !mainSha) return { ok: false, error: "pull_request_unobserved", message: "候補のPR・mainの状態を取得できませんでした" };
   if (found.head.sha !== latest.finalHeadSha) return { ok: false, error: "candidate_changed" };
   if (mainSha !== latest.finalBaseSha) return { ok: false, error: "main_advanced" };
-  // 競合の判定が済み、競合が無いときだけ新しい承認を作る（既存承認の再開は上で通している。#5305）
+  // 競合ありと確定しているときは新しい承認を作らない（既存承認の再開は上で通している。#5305）。
+  // 判定中は通す。本番マージの直前に`decideCompletionMerge`が取り直して確定を待つ（#5361）
   const mergeable = await observeCandidateMergeable(ctx, found.number);
   if (mergeable === undefined) return { ok: false, error: "pull_request_unobserved", message: "候補のPRの競合状態を取得できませんでした" };
   const conflict = decideConflictBlock(mergeable);

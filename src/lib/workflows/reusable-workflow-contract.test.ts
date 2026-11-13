@@ -114,7 +114,9 @@ describe("再利用可能ワークフローの契約", () => {
     const source = read("reusable-claude-review-develop.yml");
 
     expect(workflowInput(source, "enable-auto-merge")).toEqual({ type: "boolean", default: "true" });
-    expect(source).toMatch(/auto-merge:[\s\S]*?&& inputs\.enable-auto-merge/);
-    expect(source).toMatch(/auto-merge-fallback:[\s\S]*?needs\.auto-merge\.result == 'failure'/);
+    // マージの予約だけを入力で止める。ジョブごと止めると判定がPR本文へ記録されず、画面が「未実施」になる（#5362）
+    expect(source).toMatch(/- name: 自動マージ可否を判定して実行する\n\s+if: \$\{\{ inputs\.enable-auto-merge \}\}/);
+    expect(source).toMatch(/- name: 検証結果をPR本文へ記録する\n\s+if: always\(\) && needs\.identify-issue\.outputs\.number != ''/);
+    expect(source).toMatch(/auto-merge-fallback:[\s\S]*?inputs\.enable-auto-merge && needs\.auto-merge\.result == 'failure'/);
   });
 });

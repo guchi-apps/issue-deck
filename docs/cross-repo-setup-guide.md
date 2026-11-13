@@ -1629,6 +1629,9 @@ develop運用のリポジトリと同一でよい（`on: pull_request: branches:
 - **レビューを入れる場合はmain向けの専用callerを置く。** `claude-review-develop.yml` は
   `branches: [develop]` 固定のため、base が`main`のPRは判定されない。main直行の運用では
   `enable-auto-merge: false` を必ず指定し、レビュー結果を確認して人がマージする。
+  `false`でも判定の反映と「検証結果をPR本文へ記録する」ステップは動き、PR本文の`## 検証結果`
+  が画面の「コード」欄になる（マージの予約だけを止める。#5362。`workflows/v56`以前では
+  `auto-merge`ジョブごと止まり、レビュー済みでも「コード 未実施」と表示された）。
 
   ```yaml
   name: Claude Code Review (main向けPR)

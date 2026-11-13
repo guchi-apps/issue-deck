@@ -607,6 +607,11 @@ mainマージが即本番反映になるこの2件ではむしろ望ましい。
 > `claude-review-main.yml`（`enable-auto-merge: false`。[cross-repo-setup-guide.md](cross-repo-setup-guide.md)
 > 「`develop`を持たないリポジトリ（main直行）」）を置く方針で、作業は guchi-apps/vps#329・
 > guchi-apps/subpc#152。上の`#2103`の記述は`develop`があった時期のもの。
+>
+> **`claude-review-main.yml`導入後も、`workflows/v56`以前ではPR本文に判定が記録されず「コード 未実施」と
+> 表示された**（#5362。記録ステップが`enable-auto-merge: false`でskipされる`auto-merge`ジョブにあったため。
+> レビュー自体は走っていた）。以降は`false`でも記録され、マージの予約だけが止まる。配布先へはタグを
+> 切って配るまで届かない。
 
 > **ローカル起動（サブPC）は#1741で対応済み。** 配布の軸が違うので混同しない——リリース
 > フローはGitHub Actions側の話で、こちらは「issue-deckの画面の『サブPCで開始』が押せるか」。

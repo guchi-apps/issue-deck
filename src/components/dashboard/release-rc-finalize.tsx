@@ -8,7 +8,7 @@ import { ProductionVerificationBox } from "@/components/dashboard/release-rc-pro
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { formatDateTime, formatMonthDayTime } from "@/lib/format-date-time";
-import { decideConflictBlock, FINALIZE_STATUS_LABEL, FINALIZE_START_ERROR_LABEL, REVERIFY_PHASE_LABEL, type ReverifyPhase } from "@/lib/release-finalize";
+import { decideConflictBlock, FINALIZE_STATUS_LABEL, PENDING_CONFLICT_PUBLISH_NOTE, FINALIZE_START_ERROR_LABEL, REVERIFY_PHASE_LABEL, type ReverifyPhase } from "@/lib/release-finalize";
 import type { RcFinalizationOverview, RcFinalizationView } from "@/lib/release-finalize-run";
 import type { PublishApprovalView } from "@/lib/release-publish-approval-run";
 import type { RcCandidateView } from "@/lib/release-rc-run";
@@ -693,8 +693,8 @@ export function ReleaseRcFinalizePanel({
    */
   deferUntilStarted?: boolean;
   /**
-   * 候補PRのコンフリクトの有無（GitHubの`mergeable`。#5305）。nullは判定中・未取得で、判定が出るまで公開承認を押せない。
-   * falseは競合あり。サーバーも同じ判定で受け付けない
+   * 候補PRのコンフリクトの有無（GitHubの`mergeable`。#5305）。falseは競合ありで公開承認を押せない（サーバーも同じ判定で受け付けない）。
+   * nullは判定中・未取得で、押せる。本番マージの直前に取り直し、判定が出るまで待ってからマージする（#5361）
    */
   mergeable?: boolean | null;
 }) {
@@ -849,10 +849,16 @@ export function ReleaseRcFinalizePanel({
   const plannedKind = bumpKind === "auto" ? null : bumpKind;
   const reusing = approval?.status === "active";
   const conflictBlock = decideConflictBlock(mergeable);
-  const conflictNote = conflictBlock && (
+  const conflictNote = conflictBlock ? (
     <p className="text-[12px] text-amber-700 dark:text-amber-400" role="status" data-testid="release-rc-conflict-block">
       {FINALIZE_START_ERROR_LABEL[conflictBlock]}
     </p>
+  ) : (
+    mergeable === null && (
+      <p className="text-[12px] text-muted-foreground" data-testid="release-rc-conflict-pending">
+        {PENDING_CONFLICT_PUBLISH_NOTE}
+      </p>
+    )
   );
   const beforeStart = deferUntilStarted && candidate.phase === "review";
   const startBox = canStart && (

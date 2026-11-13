@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 
 import { requireUserId } from "@/lib/auth-user";
 import { db } from "@/lib/db";
+import { withGithubApiFeature } from "@/lib/github/api-usage";
 import { getInstallationToken } from "@/lib/github/app-auth";
 import { fetchReleaseCaller } from "@/lib/github/release-api";
 import { decideDevelopSync } from "@/lib/release-develop-sync";
@@ -19,7 +20,11 @@ import { decideReleaseStartMode, type ReleaseStartMode } from "@/lib/release-sta
  * `?repos=owner/a,owner/b`。権限の無いリポジトリ・取得に失敗したリポジトリは`unknown`にする
  * （応答全体を失敗にせず、旧方式を黙って起動させない）。**何も起動しない。**
  */
-export async function GET(request: NextRequest) {
+export function GET(request: NextRequest) {
+  return withGithubApiFeature("release_start_mode", () => handleGET(request));
+}
+
+async function handleGET(request: NextRequest) {
   const userId = await requireUserId();
   if (!userId) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const repos = [
@@ -44,7 +49,7 @@ export async function GET(request: NextRequest) {
         const caller = await fetchReleaseCaller(owner, repo, token);
         // callerのファイルが無いリポジトリはリリース対象ではない。「読めない」エラーとは区別する（#5250）
         if (caller.kind === "missing") return [fullName, { mode: "legacy", reason: "caller_without_input", label: "developにリリースworkflow（release-develop-to-main.yml）が無いため、候補の作成は使えません" }];
-        const mode: ReleaseStartMode = decideReleaseStartMode(caller.kind === "found" ? caller.text : null, caller.kind === "error" ? caller.status : undefined);
+        const mode: ReleaseStartMode = decideReleaseStartMode(caller.kind === "found" ? caller.text : null, caller.kind === "error" ? caller.status : undefined, caller.kind === "error" ? caller.cause : undefined);
         if (mode.mode !== "candidate") return [fullName, mode];
         let successorOf: RcBlockSummary | undefined;
         // 新規開始を妨げる既存候補を起動前に返す（#4628）。確認できなければ「候補なし」とは扱わない
