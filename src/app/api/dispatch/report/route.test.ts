@@ -26,6 +26,7 @@ vi.mock("@/lib/dispatch/pr-review-jobs", () => ({
   },
 }));
 
+vi.mock("@/lib/release-review-recommendation-prefetch", () => ({ prefetchReleaseReviewRecommendations: vi.fn() }));
 vi.mock("@/lib/manual-step-run", () => ({ advanceManualStepRun: vi.fn() }));
 vi.mock("@/lib/manual-step-verification-patrol", () => ({
   advanceManualStepVerificationCheck: vi.fn(),

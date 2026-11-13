@@ -17,6 +17,7 @@ import { reevaluateReleaseReviewSafely } from "@/lib/dispatch/release-review-ree
 import { startDeferredReleaseReviewSafely } from "@/lib/dispatch/release-review-start";
 import { resumePrReviewMerge } from "@/lib/dispatch/pr-review-jobs";
 import { resolveFixedInstructionCheckUser } from "@/lib/dispatch/session-escalation";
+import { prefetchReleaseReviewRecommendations } from "@/lib/release-review-recommendation-prefetch";
 import { MANUAL_STEP_OUTPUT_MAX_LENGTH } from "@/lib/manual-step-command";
 import { advanceManualStepRun } from "@/lib/manual-step-run";
 import {
@@ -171,7 +172,14 @@ export async function POST(request: NextRequest) {
   // リリース全体のAIレビュー（#4238）の結果を、ジョブの対象（PR・base・head）の記録へ反映する
   if (result.job.kind === "RELEASE_REVIEW" && status !== "running") {
     try {
-      await applyReleaseReviewReport(result.job, status, message, payload?.releaseReview);
+      const recorded = await applyReleaseReviewReport(result.job, status, message, payload?.releaseReview);
+      // 画面を開く前にAIの推奨を作っておく（#5357）。生成は長いので報告の応答は待たせない（失敗は関数内で記録する）
+      if (recorded && status === "succeeded" && result.job.prNumber != null && result.job.baseSha && result.job.headSha) {
+        void prefetchReleaseReviewRecommendations(result.job.repositoryFullName, result.job.prNumber, {
+          baseSha: result.job.baseSha,
+          headSha: result.job.headSha,
+        });
+      }
     } catch (error) {
       console.error(`[POST /api/dispatch/report] 全体レビューの結果を記録できませんでした ${jobId}:`, error);
     }
