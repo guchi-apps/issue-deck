@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { requireUserId } from "@/lib/auth-user";
 import { withGithubApiFeature } from "@/lib/github/api-usage";
 import { getInstallationToken } from "@/lib/github/app-auth";
+import { describeGithubError } from "@/lib/github/forbidden-cause";
 import { fetchReleasesBackTo, type ReleaseHistoryItem } from "@/lib/github/release-api";
 import { appendUnreleasedVersions } from "@/lib/github/unreleased-versions";
 import { hasReachedReleaseCheckSince } from "@/lib/release-check";
@@ -72,6 +73,7 @@ async function handleGET(request: Request) {
   }
 
   const durations: { fullName: string; ms: number }[] = [];
+  const failedReasons: Record<string, string> = {};
   const perRepository = await Promise.all(
     repositories.map(async (repository): Promise<{ repositoryId: string; fullName: string; entries: ReleaseHistoryItem[] } | null> => {
       const repoStartedAt = performance.now();
@@ -93,6 +95,7 @@ async function handleGET(request: Request) {
         // 1リポジトリの取得失敗で他リポジトリの表示まで巻き込まない（`release-pending-merges`と同じ）。
         // 受け持ちからも外し、画面には前回の値を残させる
         console.error(`[GET /api/repositories/release-history] ${repository.fullName}:`, error);
+        failedReasons[repository.fullName] = describeGithubError(error) ?? "";
         return null;
       } finally {
         durations.push({ fullName: repository.fullName, ms: Math.round(performance.now() - repoStartedAt) });
@@ -117,6 +120,7 @@ async function handleGET(request: Request) {
     {
       repositories: succeeded.map((row) => row.fullName),
       // 取得に失敗したリポジトリ。画面は確認対象にこれが残る間、最新とみなさず確認操作をロックする
+      failedReasons: Object.fromEntries(Object.entries(failedReasons).filter(([, reason]) => reason)),
       failedRepositories: repositories
         .map((repository) => repository.fullName)
         .filter((fullName) => !succeeded.some((row) => row.fullName === fullName)),

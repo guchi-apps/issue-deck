@@ -27,6 +27,8 @@ type ReleaseHistoryResponse = {
   repositories?: string[];
   /** この応答の母集団のうち取得に失敗したリポジトリ。残っている間は最新とみなさない */
   failedRepositories?: string[];
+  /** 失敗の原因（403の分類など。#5366） */
+  failedReasons?: Record<string, string>;
   entries: ReleaseHistoryItem[];
   checkRecords?: ReleaseCheckRecord[];
   checkLineRecords?: ReleaseCheckLineRecord[];
@@ -37,12 +39,19 @@ type ReleaseHistoryResponse = {
 type IosStatusResponse = {
   statuses?: IosReleaseStatus[];
   failedRepositories?: string[];
+  failedReasons?: Record<string, string>;
 };
 
 const RELEASE_FETCH_PARTIAL_ERROR =
   "一部のリポジトリのリリース履歴を取得できませんでした。取得できるまで確認操作はできません。更新ボタンでもう一度取得できます。";
 
 const IOS_STATUS_ERROR = "iOS配布の状況を取得できませんでした。更新ボタンでもう一度取得できます。";
+
+/** 失敗したリポジトリの原因（#5366）を案内文へ添える。原因が無ければ案内文のまま */
+function withReasons(message: string, reasons: Record<string, string> | undefined): string {
+  const lines = Object.entries(reasons ?? {}).map(([repo, reason]) => `${repo}: ${reason}`);
+  return lines.length > 0 ? `${message}（${lines.join(" / ")}）` : message;
+}
 
 type CheckTarget = { repoFullName: string; tagName: string };
 type CheckLineTarget = ReleaseLineToggleTarget;
@@ -251,7 +260,7 @@ export function useReleaseHistory(enabled: boolean): UseReleaseHistoryResult {
         // 失敗した確認対象が残る間は前回の値のままなので、staleを保ち確認操作をロックする
         const failed = json.failedRepositories ?? [];
         if (failed.length > 0) {
-          setError(RELEASE_FETCH_PARTIAL_ERROR);
+          setError(withReasons(RELEASE_FETCH_PARTIAL_ERROR, json.failedReasons));
           // 取り直しの失敗で、直前のfreshのまま確認操作が通らないようにする
           setFreshness("stale");
           return;
@@ -269,7 +278,7 @@ export function useReleaseHistory(enabled: boolean): UseReleaseHistoryResult {
         freshApplied = true;
         othersDone = true;
         apply(json);
-        if ((json.failedRepositories ?? []).length > 0) setError(RELEASE_FETCH_PARTIAL_ERROR);
+        if ((json.failedRepositories ?? []).length > 0) setError(withReasons(RELEASE_FETCH_PARTIAL_ERROR, json.failedReasons));
         // 確認対象がまだなら、一覧は前回の値の混ざったままなので押せる状態にしない
         if (targetsDone) settle();
       })
@@ -295,7 +304,7 @@ export function useReleaseHistory(enabled: boolean): UseReleaseHistoryResult {
             ...prev.filter((status) => failed.has(status.repoFullName)),
             ...(ios.statuses ?? []),
           ]);
-          setIosStatusError(failed.size > 0 ? IOS_STATUS_ERROR : null);
+          setIosStatusError(failed.size > 0 ? withReasons(IOS_STATUS_ERROR, ios.failedReasons) : null);
         })
         .catch(() => {
           if (cancelled || controller.signal.aborted) return;

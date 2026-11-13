@@ -1,3 +1,4 @@
+import { describeGithubError } from "@/lib/github/forbidden-cause";
 import { NextResponse } from "next/server";
 
 import { requireUserId } from "@/lib/auth-user";
@@ -56,6 +57,7 @@ async function handleGET() {
   }
 
   const failedRepositories: string[] = [];
+  const failedReasons: Record<string, string> = {};
   const results = await Promise.all(
     repositories.map(async (repository): Promise<IosReleaseStatus | null> => {
       try {
@@ -77,6 +79,8 @@ async function handleGET() {
       } catch (error) {
         console.error(`[GET /api/repositories/release-history/ios-status] ${repository.fullName}:`, error);
         failedRepositories.push(repository.fullName);
+        const reason = describeGithubError(error);
+        if (reason) failedReasons[repository.fullName] = reason;
         return null;
       }
     }),
@@ -85,5 +89,6 @@ async function handleGET() {
   return NextResponse.json({
     statuses: results.filter((status): status is IosReleaseStatus => status !== null),
     failedRepositories,
+    failedReasons,
   });
 }
