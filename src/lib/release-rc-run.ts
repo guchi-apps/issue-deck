@@ -1178,6 +1178,13 @@ export async function recordRcReport(input: {
   const candidate = await loadCandidateRow({ id: revision.candidateId });
   if (!candidate || candidate.repositoryFullName !== input.repositoryFullName) return { ok: false, reason: "unknown_request" };
   const runUrl = input.runId !== null ? `https://github.com/${input.repositoryFullName}/actions/runs/${input.runId}` : null;
+  // 取消後に遅れて走ったworkflowが候補ブランチ・PRを作ったとき、そのPRを開いたまま残さない（#5331）
+  if (candidate.phase === "cancelled" && revision.status === "expired") {
+    await closeLateCandidatePullRequest(repository, candidate).catch((error: unknown) => {
+      console.error("[release-rc] closing late candidate pull request failed", input.repositoryFullName, error);
+    });
+    return { ok: true, outcome: "ignored" };
+  }
   if (revision.status !== "requested") return { ok: true, outcome: "ignored" };
   if (input.outcome === "failed") {
     await failRevision(candidate, revision.id, input.reason?.trim() || "リリースworkflowが候補の作成・更新に失敗しました", runUrl);
@@ -1186,6 +1193,24 @@ export async function recordRcReport(input: {
   const token = await getInstallationToken(repository.installation.installationId);
   const ctx: Context = { owner: repository.ownerLogin, repo: repository.name, token };
   return { ok: true, outcome: await reconcileRevision({ ctx, candidate, revisionId: revision.id, runUrl }) };
+}
+
+/**
+ * 取り消した候補のブランチに、遅れて作られた開いたPRがあれば、理由をコメントして閉じる（#5331）。
+ * 新しい候補は別の番号・別のブランチなので、閉じても作成を妨げない
+ */
+export async function closeLateCandidatePullRequest(
+  repository: { ownerLogin: string; name: string; installation: { installationId: number } },
+  candidate: Pick<CandidateRow, "sequence" | "cancelReason">,
+): Promise<boolean> {
+  const ctx: Context = { owner: repository.ownerLogin, repo: repository.name, token: await getInstallationToken(repository.installation.installationId) };
+  const pr = await observeCandidatePullRequest(ctx, candidate.sequence);
+  if (!pr || pr.state !== "open") return false;
+  await createComment(ctx.owner, ctx.repo, pr.number, ctx.token, {
+    body: `リリース候補 ${rcLabel(candidate.sequence)} は取り消し済みのため、遅れて作られたこのPRを閉じます。${candidate.cancelReason ? `\n\n取消の理由: ${candidate.cancelReason.slice(0, 500)}` : ""}`,
+  });
+  await closePullRequest(ctx.owner, ctx.repo, pr.number, ctx.token);
+  return true;
 }
 
 /** 候補PR（新方式）に対応する、取り込みを受け付ける段階の候補。無ければnull（修正系列の接続用） */

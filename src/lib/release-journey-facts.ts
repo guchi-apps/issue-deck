@@ -57,6 +57,7 @@ async function buildFacts(rows: CandidateRow[], options: { keyWithoutPullRequest
     const latestApplied = appliedRevisions.at(-1) ?? null;
     const finalHeadSha = finalization?.status === "applied" ? finalization.finalHeadSha : null;
     const facts: ReleaseRcFacts = {
+      candidateId: row.id,
       sequence: row.sequence,
       phase: row.phase,
       pendingRevision: pending ? { revision: pending.revision, reason: pending.reason, queuedRunUrl: pending.runUrl } : null,

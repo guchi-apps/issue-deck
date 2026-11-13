@@ -15,6 +15,7 @@ import { createPortal } from "react-dom";
 import { isReleaseCandidateHeadRef, isLegacyReleaseCandidateHeadRef, rcSequenceOf } from "@/lib/release-branch";
 import { decidePublishForPullRequest, ReleasePublishAction } from "@/components/dashboard/release-publish-action";
 import { JourneyMoreActions, ReleaseJourneyInline, ReleaseJourneyNow, ReleaseJourneySteps } from "@/components/dashboard/release-journey";
+import { ReleaseJourneyCancel } from "@/components/dashboard/release-journey-cancel";
 import { useReleaseRc } from "@/hooks/use-release-rc";
 import type { BranchFlowHistoryStatus } from "@/hooks/use-branch-flow-history";
 import {
@@ -1658,6 +1659,7 @@ function NextReleaseCard({
   onMerged: (pullRequest: PullRequestSummary) => void;
 }) {
   const navigation = useGithubReferenceNavigation();
+  const refreshFlow = useContext(BranchFlowRefreshContext);
   const pullRequest = group?.pullRequest && group.pullRequest.state === "open" ? group.pullRequest : null;
 
   // カード全体を押すと本番PRへ移動する（#4721）。内側の操作（公開ボタン・リンク・検証の開閉）や
@@ -1747,8 +1749,9 @@ function NextReleaseCard({
             action={primaryPublish}
             link={pullRequestLink}
             more={
-              <JourneyMoreActions count={manualPublish ? 1 : 0}>
+              <JourneyMoreActions count={(manualPublish ? 1 : 0) + (journey.cancelTarget ? 1 : 0)}>
                 {manualPublish}
+                <ReleaseJourneyCancel journey={journey} repositoryFullName={repository.repositoryFullName} onChanged={() => refreshFlow?.()} />
               </JourneyMoreActions>
             }
           />

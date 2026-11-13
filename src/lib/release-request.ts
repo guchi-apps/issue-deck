@@ -236,7 +236,7 @@ export async function requestDevelopSync(repoFullName: string): Promise<DevelopS
  * 既存候補の管理記録を終了する（`POST /api/repositories/release/rc` action=cancel。#4628）。
  * `expectedPhase`は画面で見ていた段階で、変わっていればサーバーが取り消さない。履歴・公開済みコードは残る
  */
-export async function requestReleaseCandidateCancel(repoFullName: string, block: RcBlockSummary, reason: string): Promise<void> {
+export async function requestReleaseCandidateCancel(repoFullName: string, block: Pick<RcBlockSummary, "candidateId" | "phase">, reason: string): Promise<void> {
   const [owner, repo] = repoFullName.split("/");
   const res = await fetch("/api/repositories/release/rc", {
     method: "POST",

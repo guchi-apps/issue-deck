@@ -139,7 +139,7 @@ function BlockDetail({
       await requestReleaseCandidateCancel(
         repositoryFullName,
         block,
-        inconsistent ? "状態不整合（PRはマージ済みだが管理記録が残っていた）のため、画面から終了" : "リリース開始画面から終了",
+        inconsistent ? "状態不整合（PRはマージ済みだが管理記録が残っていた）のため、画面から終了" : "進行中の候補を、リリース開始画面から取消",
       );
       setConfirming(false);
       onChanged();
@@ -237,6 +237,11 @@ function BlockDetail({
             <Button size="sm" variant="outline" className="h-7 px-2 text-xs" onClick={onChanged}>
               状態を再確認
             </Button>
+            {block.cancellable && (
+              <Button size="sm" variant="outline" className="h-7 px-2 text-xs text-destructive" onClick={() => setConfirming(true)}>
+                候補を取り消す…
+              </Button>
+            )}
           </>
         )}
       </div>
@@ -249,10 +254,12 @@ function BlockDetail({
       <AlertDialog open={confirming} onOpenChange={(open) => !busy && setConfirming(open)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>{block.label} の管理記録を終了しますか？</AlertDialogTitle>
+            <AlertDialogTitle>{block.label} {inconsistent ? "の管理記録を終了しますか？" : "を取り消しますか？"}</AlertDialogTitle>
             <AlertDialogDescription>
               {repositoryFullName}の{block.label}（{block.prNumber === null ? "PRなし" : `PR #${block.prNumber}`}）を「中止」にして、新しい候補を開始できるようにします。
-              履歴・検証結果・公開済みコードは消えません。PRがマージ済みの場合、マージ時点の版は消費済みとして残し、developへの同期の追跡も保ちます。
+              履歴・検証結果・公開済みコードは消えません。{inconsistent
+                ? "PRがマージ済みの場合、マージ時点の版は消費済みとして残し、developへの同期の追跡も保ちます。"
+                : "公開はしません。作成中に取り消した場合、遅れて作られた候補PRは閉じます。"}
               検証合格や公開完了とは記録しません。
             </AlertDialogDescription>
           </AlertDialogHeader>
@@ -270,7 +277,7 @@ function BlockDetail({
                 void cancel();
               }}
             >
-              {busy ? "終了しています…" : "管理記録を終了する"}
+              {busy ? (inconsistent ? "終了しています…" : "取り消しています…") : inconsistent ? "管理記録を終了する" : "取り消す"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
