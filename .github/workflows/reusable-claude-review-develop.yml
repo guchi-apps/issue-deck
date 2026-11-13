@@ -1133,7 +1133,6 @@ jobs:
     # supersededになった古い実行がauto-mergeを有効化してしまう。
     if: >-
       !cancelled()
-      && inputs.enable-auto-merge
       && github.event.pull_request.draft == false
       && needs.identify-issue.result == 'success'
       && needs.risk-check.result == 'success'
@@ -1828,7 +1827,11 @@ jobs:
       # develop-pr-mergedジョブが発火しないことがある(Issue #112)。GITHUB_TOKEN以外の
       # トークン（GitHub Appのインストールトークン。未登録時はWORKFLOW_PAT）で有効化する
       # ことでこの制約を回避する。
+      # enable-auto-merge: false(main直行)でもこのジョブは走らせる。判定の反映と
+      # 「検証結果をPR本文へ記録する」ステップがこのジョブにあり、止めると画面が
+      # 「コード 未実施」と表示してしまうため(#5362)。マージの予約だけをここで止める
       - name: 自動マージ可否を判定して実行する
+        if: ${{ inputs.enable-auto-merge }}
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token || secrets.WORKFLOW_PAT }}
           GH_REPO: ${{ github.repository }}
@@ -1923,7 +1926,9 @@ jobs:
 
   auto-merge-fallback:
     needs: [identify-issue, risk-check, auto-merge]
-    if: always() && needs.auto-merge.result == 'failure'
+    # マージを予約しないリポジトリ(enable-auto-merge: false)では「自動マージが失敗した」と
+    # 通知しても意味が通らないため対象外にする(#5362)
+    if: always() && inputs.enable-auto-merge && needs.auto-merge.result == 'failure'
     runs-on: ubuntu-latest
     permissions:
       pull-requests: write
