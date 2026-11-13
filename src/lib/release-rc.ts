@@ -151,6 +151,7 @@ export type RcDispatchRunDecision =
  * **別runの失敗をこの更新要求の失敗にしないため、runの表示名に`requestKey`が含まれるもの
  * （dispatch時刻の少し前以降）だけを対象にする。** 対応付けられるrunが無ければ何もしない
  * （既存の候補ブランチ照合・workflow報告・期限切れの判定に委ねる）。
+ * （現状のworkflowには`run-name`が無いため対応付けできるrunは無く、`run-name`にrequestKeyを入れるまで早期検知は働かない）
  * 対象のrunが全て失敗系で終わっているときだけ失敗にする
  * （1件でも成功・実行中・起動待ちがあれば何もしない。遅れて届く報告は`decideRcReport`が既存の判定で扱う）
  */
