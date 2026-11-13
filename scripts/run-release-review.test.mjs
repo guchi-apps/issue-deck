@@ -101,6 +101,7 @@ main o r 7 ${base} ${head} 1 claude opus x
       PATH: `${dir}/bin:${process.env.PATH}`,
       ISSUE_DECK_RELEASE_REVIEW_ROOT: path.join(dir, "work"),
       ISSUE_DECK_RELEASE_REVIEW_DIFF_BUDGET_BYTES: "20000",
+      RELEASE_REVIEW_RETRY_DELAY: "0",
       ...env,
     },
     encoding: "utf8",
@@ -207,7 +208,15 @@ describe("run-release-review.sh（#4615）", { timeout: 30_000 }, () => {
       writeFileSync(
         path.join(dir, "bin", "git"),
         `#!/usr/bin/env bash
+# 1回目だけ失敗させる指定（*_ONCE）。印のファイルが無いときだけ失敗し、印を残す
+once() { [[ -n "\${!1:-}" && ! -e "\${!1}.done" ]] && { : >"\${!1}.done"; return 0; }; return 1; }
+if [[ " $* " == *" worktree add "* ]]; then
+  [[ -n "\${GIT_WT_FAIL:-}" ]] && { echo "fatal: simulated worktree failure" >&2; exit 128; }
+  once GIT_WT_FAIL_ONCE && { echo "fatal: simulated worktree failure once" >&2; exit 128; }
+fi
 if [[ " $* " == *" diff --name-only "* ]]; then
+  once GIT_DIFF_FAIL_ONCE && { echo "fatal: simulated diff failure once" >&2; exit 128; }
+  once GIT_DIFF_EMPTY_ONCE && exit 0
   [[ -n "\${GIT_DIFF_FAIL:-}" ]] && { echo "fatal: simulated diff failure" >&2; exit 128; }
   [[ -n "\${GIT_DIFF_EMPTY:-}" ]] && exit 0
 fi
@@ -232,6 +241,42 @@ exec "${realGit}" "$@"
       expect(status).toBe("failed");
       expect(result.diagnostic).toMatchObject({ cause: "target_missing", stage: "diff" });
       expect(result).not.toHaveProperty("totalFiles");
+    });
+
+    it("差分の取得が1回だけ失敗しても、やり直して完走する（#5350）", () => {
+      wrapGit();
+      const { status } = runReview({ GIT_DIFF_FAIL_ONCE: path.join(dir, "once-diff") });
+      expect(status).toBe("succeeded");
+    });
+
+    it("差分が1回だけ0件に見えても、やり直して完走する（#5350）", () => {
+      wrapGit();
+      const { status, result } = runReview({ GIT_DIFF_EMPTY_ONCE: path.join(dir, "once-empty") });
+      expect(status).toBe("succeeded");
+      expect(result.totalFiles).toBeGreaterThan(0);
+    });
+
+    it("作業ツリーの作成が1回だけ失敗しても、やり直して完走する（#5350）", () => {
+      wrapGit();
+      const { status } = runReview({ GIT_WT_FAIL_ONCE: path.join(dir, "once-wt") });
+      expect(status).toBe("succeeded");
+    });
+
+    it("作業ツリーの作成が全回失敗したら、target_missingで失敗として報告し、やり直した回数を残す（#5350）", () => {
+      wrapGit();
+      const { status, result } = runReview({ GIT_WT_FAIL: "1" });
+      expect(status).toBe("failed");
+      expect(result.diagnostic).toMatchObject({ cause: "target_missing", stage: "prepare" });
+      expect(result.diagnostic.excerpt).toContain("[retry 3/3]");
+      expect(result.diagnostic.excerpt).toContain("simulated worktree failure");
+    });
+
+    it("差分の取得が全回失敗したら、やり直した回数をexcerptへ残して失敗にする（#5350）", () => {
+      wrapGit();
+      const { status, result } = runReview({ GIT_DIFF_FAIL: "1" });
+      expect(status).toBe("failed");
+      expect(result.diagnostic.excerpt).toContain("[retry 1/3]");
+      expect(result.diagnostic.excerpt).toContain("[retry 3/3]");
     });
 
     it("本当に差分が無いときだけ、従来どおり差分なしとして報告する", () => {
