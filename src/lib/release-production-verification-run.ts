@@ -6,6 +6,7 @@ import { fetchDeployRunsForSha, fetchWorkflowRunsForSha, hasVersionVerification 
 import { fetchFileTextAtRef } from "@/lib/github/release-api";
 import { GITHUB_API, githubFetch } from "@/lib/github/request";
 import { fetchPublicHttps } from "@/lib/public-http-fetch";
+import { describeProductionSuspension } from "@/lib/release-verification-config";
 import {
   canAttestProduction,
   classifyProductionTarget,
@@ -117,7 +118,9 @@ export async function observeProduction(ctx: Context, input: { candidateId: stri
     Object.assign(evidence, { deployRunUrl: latest?.htmlUrl ?? null, probe });
   }
 
-  const decision = decideProductionEvidence({ kind, deploySucceeded: succeeded(latest), versionCheckPassed, probe, attested, sourcePublish });
+  const suspendedReason = describeProductionSuspension(fullNameOf(ctx));
+  if (suspendedReason) evidence.suspendedReason = suspendedReason;
+  const decision = decideProductionEvidence({ kind, deploySucceeded: succeeded(latest), versionCheckPassed, probe, attested, sourcePublish, suspendedReason });
   const data = {
     repositoryFullName: fullNameOf(ctx),
     mergeSha,

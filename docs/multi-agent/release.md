@@ -1278,6 +1278,19 @@ mainへ出した候補は、稼働版の証拠が揃うまで「稼働確認中�
 - 開始判定は、developの方式が照合付きでなければ「公開後は公開URLの照合か人の確認が要る」ことを開始前に出す（`productionKindNotice`。開始自体は止めない）
 - 新規アプリの雛形は`src/app/api/app-version/route.ts`と、gateへの`APP_COMMIT_SHA`の受け渡しを持つ。**照合はVPSのgate側（guchi-apps/vps#298）の対応待ち**なので、雛形の`deploy.yml`は照合を名乗らない（照合していないのに照合付きと判定されないよう`scaffold.test.ts`で固定している）。**共有workflowの参照タグを上げても、各repoの`deploy.yml`やAPIは配られない**ので、repoごとにIssueを立てて直す（car-careはguchi-apps/car-care#257）
 
+### 公開を停止したリポジトリ（#5353）
+
+アプリの公開をやめてVPSから撤去したリポジトリには本番が無い。それでも候補は「稼働確認が停止（証拠未設定）」で止まったまま`activeKey`を占有し、「担当: あなた」・手が要る件数・未リリース件数・まとめてリリースの対象にも残り続ける。そこで**公開停止を台帳`RELEASE_PRODUCTION_SUSPENSIONS`（`src/lib/release-verification-config.ts`。リポジトリ→根拠）で宣言する**。正はコードで、DB・画面の設定は持たない（導入台帳#4365と同じ方針）。
+
+- **稼働確認は対象外として完了する。** `decideProductionEvidence`が種類・deployの成否より先に判定し、方式`publication_suspended`（「公開停止中（稼働確認の対象外）」）を返す。`advanceProduction`はdeployの追跡（`decideDeployRecoveryRelease`）も飛ばす。実機が無いので、deploy.ymlの失敗・未起動で止めても直す先が無いため。根拠は証拠の`suspendedReason`に残る。止まっていた候補は、台帳を含む版が本番（issue-deck）へ出た後、候補の画面を開いたとき（`GET /api/repositories/release/rc`が本番反映の進行を1巡進める）に完了し、`activeKey`も空く
+- **リリースを開始させない。** `canTriggerRelease`をfalseにし、押せない理由は`production-suspended`（ボタンは「公開停止中」）。まとめてリリースの対象から外れる
+- **ブランチ画面の集計から外す。** 未リリース件数は0件として扱い（`repositoryUnreleasedSummary`）、畳んだ行には「公開停止中」と出す。手が要る件数（`needsAttention`）には、リリース工程とデプロイ失敗を数えない。PRの問題（`pullRequestHealth`）は従来どおり数える
+- **統合検証・全体レビューの対象からは外さない。** `RELEASE_VERIFICATION_EXCLUSIONS`（アーカイブ・リリース経路が無いrepo）とは別の宣言にしている。公開を停止していてもコードとテストは残っており、対象外にすると統合検証まで`not_applicable`で通ってしまうため
+- **ブランチ画面の「表示しない」（#5087）では代わりにならない。** 並べ方を変えるだけで、一括リリースの対象（`flow.repositories`）と止まった候補の`activeKey`は残る
+- 宣言する前の候補は、既存の「人の確認」でも完了できる（deployが成功し、公開URLが未登録か読めないとき。`mismatch`のときだけ確定できない）
+
+**再公開するとき**は、台帳から行を消すPRをdevelopへ入れ、本番（issue-deck）へ反映する。消した後に作る候補からは、従来どおり稼働確認を求める（照合付きの`deploy.yml`か、公開URL・人の確認）。台帳が効いている間に`publication_suspended`で完了した候補の記録はそのまま残す。アプリ側の`deploy.yml`をVPSへ配る形へ戻すことと、`guchi-apps/vps`での配置の作り直しは、それぞれのリポジトリで行う。
+
 ### 二重実行しない
 
 要求キーのユニーク制約・同じ候補への未完了を1本に絞る`pendingKey`・段階と状態の条件付き更新・早送りのみのpush・版の予約のユニーク制約・同じheadでバンプ済みなら何もしない、で重ねる。workflowの途中失敗・再起動・報告の重複・画面の二重押しで、バンプ・マージ・タグ・deployは二重に実行されない。

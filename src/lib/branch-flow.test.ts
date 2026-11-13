@@ -16,6 +16,7 @@ import {
   latestReleaseMergedAtByRepository,
   orderRepositoriesBySelection,
   resolveIssueTracking,
+  repositoryUnreleasedSummary,
   unreleasedSummary,
   type BranchFlowIssueSource,
 } from "@/lib/branch-flow";
@@ -1506,6 +1507,28 @@ describe("リリース起動の可否（canTriggerRelease）", () => {
 
   it("未リリースの変更があり、リリースPRもバンプPRも無ければ押せる", () => {
     expect(buildRelease({}).canTriggerRelease).toBe(true);
+  });
+
+  // #5353。本番が無いので、一括リリースの対象・未リリース件数から外す
+  it("公開停止中のリポジトリは押せず、未リリースを0件として扱う", () => {
+    const repository = buildBranchFlow({
+      repositories: [{ fullName: "guchi-apps/solitaire", private: false }],
+      pullRequests: [],
+      issues: [],
+      branchStatuses: [
+        branchStatus({
+          repositoryFullName: "guchi-apps/solitaire",
+          developVsMain: { aheadBy: 3, behindBy: 0, sameContent: false, units: null },
+          hasReleaseWorkflow: true,
+        }),
+      ],
+    }).repositories[0];
+    expect(repository.productionSuspension).toContain("公開停止中");
+    expect(repository.canTriggerRelease).toBe(false);
+    expect(repository.releaseBlockedReason).toBe("production-suspended");
+    expect(repositoryUnreleasedSummary(repository).count).toBe(0);
+    expect(buildRelease({}).productionSuspension).toBeNull();
+    expect(repositoryUnreleasedSummary(buildRelease({})).count).toBe(3);
   });
 
   // #4599。本番マージから20分未満でも、時刻だけを理由に手動開始を止めない

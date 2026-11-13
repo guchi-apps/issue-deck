@@ -226,6 +226,8 @@ function candidate(files, message = "機能追加") {
 }
 const runAs = (fullName = "guchi-apps/work-relay") => execFileSync("python3", ["scripts/release-review-integrations.py", repo, fullName, base, head, out],
   { encoding: "utf8", env: { ...process.env, RELEASE_REVIEW_GH: fake } });
+// Secrets名の照合（#5342）だけは行うので、連携先の取得（actions/secrets・variables以外）が無いことを確かめる
+const fetchedCalls = () => (existsSync(path.join(dir, "calls.log")) ? readFileSync(path.join(dir, "calls.log"), "utf8").split("\n").filter((l) => l && !/\/actions\/(secrets|variables)/.test(l)) : []);
 const blobs = (names) => ({ tree: names.map((p) => ({ path: p, type: "blob" })) });
 const SERVER = `import { handleNewsMailSend } from "./api/news-mail.ts";
 import { handleOther } from "./api/other.ts";
@@ -293,8 +295,8 @@ it("本文・コメント・ドキュメントの記述や、別ファイルに�
     ".github/secrets-manifest.tsv": MANIFEST,
   }, "AIDEの /api/news-mail/send を使う");
   writeFake({});
-  expect(runAs()).toBe("");
-  expect(existsSync(path.join(dir, "calls.log"))).toBe(false);
+  expect(runAs()).not.toContain("`apiContracts`");
+  expect(fetchedCalls()).toEqual([]);
 });
 it("マニフェストが無い候補・許可外のowner・自分自身を指す行では取得しない", () => {
   candidate({ "src/a.ts": CALLER });
@@ -302,8 +304,8 @@ it("マニフェストが無い候補・許可外のowner・自分自身を指�
   expect(runAs()).toBe("");
   candidate({ "src/a.ts": CALLER, ".github/secrets-manifest.tsv": MANIFEST });
   expect(runAs("other-org/work-relay")).toBe("");
-  expect(runAs("guchi-apps/aide")).toBe("");
-  expect(existsSync(path.join(dir, "calls.log"))).toBe(false);
+  expect(runAs("guchi-apps/aide")).not.toContain("`apiContracts`");
+  expect(fetchedCalls()).toEqual([]);
 });
 it("1ファイルが複数の提供側を読むときは、呼び先を決めつけず取得もしない", () => {
   candidate({ "src/a.ts": `${CALLER}const o = process.env.OTHER_URL;\n`, ".github/secrets-manifest.tsv": MANIFEST });
@@ -312,7 +314,7 @@ it("1ファイルが複数の提供側を読むときは、呼び先を決めつ
   const c = JSON.parse(readFileSync(path.join(out, "manifest.json"), "utf8")).apiContracts[0];
   expect(c.classification).toBe("資料未取得");
   expect(c.providers).toEqual(["guchi-apps/aide", "guchi-apps/kurashio"]);
-  expect(existsSync(path.join(dir, "calls.log"))).toBe(false);
+  expect(fetchedCalls()).toEqual([]);
 });
 it("受信口が無いパスは前方一致で別の処理を載せず、資料未取得として残す", () => {
   candidate({ "src/a.ts": CALLER.replace("/api/news-mail/send", "/api/news-mail"), ".github/secrets-manifest.tsv": MANIFEST });
@@ -479,4 +481,23 @@ it("連携先の設定パスがmain・developの両方に無ければ未実装�
   };
   expect(go([]).counterpart.status).toBe("not_implemented");
   expect(go(["src/core/a.ts"]).counterpart.status).toBe("develop_only");
+});
+it("差分で増えたマニフェストのキーを、Secrets／Variablesの名前だけで照合する（#5342）", () => {
+  const M = "A_TOKEN\trepo\tsecret\tA_TOKEN\top://apps/x/a\nB_TOKEN\trepo\tsecret\tB_TOKEN\top://apps/x/b\nC_TO\trepo\tvar\tC_TO\top://apps/x/c\n";
+  candidate({ ".github/secrets-manifest.tsv": M });
+  writeFake({
+    "repos/guchi-apps/work-relay/actions/secrets": { secrets: [{ name: "A_TOKEN" }] },
+    "repos/guchi-apps/work-relay/actions/variables": { variables: [{ name: "C_TO" }] },
+  });
+  const prompt = runAs();
+  const s = JSON.parse(readFileSync(path.join(out, "manifest.json"), "utf8")).secretRegistrations;
+  expect(s.map((x) => [x.key, x.status])).toEqual([["A_TOKEN", "registered"], ["B_TOKEN", "missing"], ["C_TO", "registered"]]);
+  expect(prompt).toContain("secretRegistrations");
+});
+it("Secretsの一覧を取得できないときは断定せず『unknown』にする（#5342）", () => {
+  candidate({ ".github/secrets-manifest.tsv": "A_TOKEN\trepo\tsecret\tA_TOKEN\top://apps/x/a\n" });
+  writeFake({});
+  runAs();
+  const s = JSON.parse(readFileSync(path.join(out, "manifest.json"), "utf8")).secretRegistrations;
+  expect(s).toEqual([{ key: "A_TOKEN", ghName: "A_TOKEN", kind: "secret", scope: "repo", status: "unknown" }]);
 });

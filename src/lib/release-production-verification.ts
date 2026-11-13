@@ -9,6 +9,8 @@
  * - `manual_attestation`: 人が確かめた内容を書いて確定する。外部照合が**旧版を返している間は確定できない**
  * - `source_publish`: deploy.ymlを持たずソースをReleaseで配るrepo（pi0w）。**ソース公開までを完了とし、実機配備は扱わない**
  * - `successor`: 照合の無い版の候補を、照合付きで稼働を確かめた後続の版（この候補を祖先に持つ）で確かめた（#4712）
+ * - `publication_suspended`: 公開を停止したrepo（`RELEASE_PRODUCTION_SUSPENSIONS`）。本番が無いので稼働確認は対象外（#5353）。
+ *   **deployの成否を問わない**（実機が無く、deploy.ymlの失敗・未起動で止めても直す先が無い）
  *
  * **HTTP 200・マージ済みだけでは完了にしない**（#4007・#4673）。deployするrepoでは、どの方式でも
  * 対象コミットのdeployが成功していることを前提にする。
@@ -26,7 +28,7 @@ export const PRODUCTION_TARGET_LABEL: Record<ProductionTargetKind, string> = {
   unknown: "本番反映の方式を判定できない",
 };
 
-export const PRODUCTION_VERIFICATION_METHODS = ["deploy_version_check", "public_version_url", "manual_attestation", "source_publish", "successor"] as const;
+export const PRODUCTION_VERIFICATION_METHODS = ["deploy_version_check", "public_version_url", "manual_attestation", "source_publish", "successor", "publication_suspended"] as const;
 export type ProductionVerificationMethod = (typeof PRODUCTION_VERIFICATION_METHODS)[number];
 
 export const PRODUCTION_METHOD_LABEL: Record<ProductionVerificationMethod, string> = {
@@ -35,6 +37,7 @@ export const PRODUCTION_METHOD_LABEL: Record<ProductionVerificationMethod, strin
   manual_attestation: "人による確認",
   source_publish: "ソース公開（Release資産）",
   successor: "後続の版の稼働SHA照合",
+  publication_suspended: "公開停止中（稼働確認の対象外）",
 };
 
 export const PRODUCTION_WAIT_REASONS = [
@@ -125,12 +128,16 @@ export type ProductionEvidenceInput = {
   attested: boolean;
   /** ソース配布の観測（`source_publish_only`のみ） */
   sourcePublish: { runSucceeded: boolean; releasePublished: boolean } | null;
+  /** 公開停止中ならその理由（`describeProductionSuspension`）。公開中なら`null`/省略 */
+  suspendedReason?: string | null;
 };
 
 export type ProductionEvidenceDecision = { verified: true; method: ProductionVerificationMethod } | { verified: false; reason: ProductionWaitReason };
 
 /** 稼働版の証拠が揃ったか。揃ったときは採用した方式を返す（判断はここだけで持つ） */
 export function decideProductionEvidence(input: ProductionEvidenceInput): ProductionEvidenceDecision {
+  // 公開停止中は本番が無い。種類・deployの成否より先に決める（#5353）
+  if (input.suspendedReason) return { verified: true, method: "publication_suspended" };
   if (input.kind === "source_publish_only") {
     return input.sourcePublish?.runSucceeded && input.sourcePublish.releasePublished
       ? { verified: true, method: "source_publish" }

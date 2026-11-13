@@ -1,7 +1,9 @@
 "use client";
 
 import { ExternalLink } from "lucide-react";
+import { useState } from "react";
 
+import { RemoteSessionStopDialog } from "@/components/dashboard/remote-session-stop-dialog";
 import { Badge } from "@/components/ui/badge";
 import { formatDispatchHostName } from "@/lib/dispatch/host-label";
 import {
@@ -34,6 +36,8 @@ export function RemoteSessionActiveList({
   onStop?: (id: string) => void;
 }) {
   const active = selectActiveRemoteSessions(sessions);
+  // 「終了」は確認ダイアログを通してから実行する（#5346）
+  const [stopTarget, setStopTarget] = useState<RemoteSessionView | null>(null);
   return (
     <section className={cn("flex flex-col gap-1.5", className)} aria-label="起動中のリモートセッション">
       <h3 className="px-1 text-xs font-semibold text-muted-foreground">起動中のセッション（{active.length}）</h3>
@@ -68,7 +72,7 @@ export function RemoteSessionActiveList({
               {onStop && (
                 <button
                   type="button"
-                  onClick={() => onStop(session.id)}
+                  onClick={() => setStopTarget(session)}
                   aria-label={`${session.repositoryFullName.split("/")[1]}のセッションを終了`}
                   className="shrink-0 rounded-md border border-destructive/60 px-3 py-1.5 text-xs font-semibold text-destructive hover:bg-destructive/10"
                 >
@@ -91,6 +95,16 @@ export function RemoteSessionActiveList({
             </li>
           ))}
         </ul>
+      )}
+      {onStop && (
+        <RemoteSessionStopDialog
+          session={stopTarget}
+          onCancel={() => setStopTarget(null)}
+          onConfirm={(id) => {
+            setStopTarget(null);
+            onStop(id);
+          }}
+        />
       )}
     </section>
   );

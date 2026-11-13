@@ -101,6 +101,7 @@ main o r 7 ${base} ${head} 1 claude opus x
       PATH: `${dir}/bin:${process.env.PATH}`,
       ISSUE_DECK_RELEASE_REVIEW_ROOT: path.join(dir, "work"),
       ISSUE_DECK_RELEASE_REVIEW_DIFF_BUDGET_BYTES: "20000",
+      RELEASE_REVIEW_RETRY_DELAY: "0",
       ...env,
     },
     encoding: "utf8",
@@ -200,6 +201,19 @@ describe("run-release-review.sh（#4615）", { timeout: 30_000 }, () => {
     expect(rerun.result.pendingBatches).toBe(0);
   });
 
+  it("クローンを変更する操作はクローン単位のロックで直列化され、同時に走らない（#5349）", () => {
+    const script = `
+      source "${path.join(process.cwd(), "scripts/lib/clone-lock.sh")}"
+      out="${path.join(dir, "lock-order")}"; : > "$out"
+      op() { echo "start $1" >>"$out"; sleep 0.5; echo "end $1" >>"$out"; }
+      clone_lock_run "${path.join(dir, "repo")}" op a & clone_lock_run "${path.join(dir, "repo")}" op b & wait
+    `;
+    execFileSync("bash", ["-c", script]);
+    const lines = readFileSync(path.join(dir, "lock-order"), "utf8").trim().split("\n");
+    expect(lines[0].replace("start", "end")).toBe(lines[1]);
+    expect(lines[2].replace("start", "end")).toBe(lines[3]);
+  });
+
   describe("差分の取得（#5311）", () => {
     // 実のgitを包み、`diff --name-only`だけを失敗（GIT_DIFF_FAIL）または空の成功（GIT_DIFF_EMPTY）にする
     const wrapGit = () => {
@@ -207,7 +221,15 @@ describe("run-release-review.sh（#4615）", { timeout: 30_000 }, () => {
       writeFileSync(
         path.join(dir, "bin", "git"),
         `#!/usr/bin/env bash
+# 1回目だけ失敗させる指定（*_ONCE）。印のファイルが無いときだけ失敗し、印を残す
+once() { [[ -n "\${!1:-}" && ! -e "\${!1}.done" ]] && { : >"\${!1}.done"; return 0; }; return 1; }
+if [[ " $* " == *" worktree add "* && -n "\${GIT_WORKTREE_ADD_FAIL:-}" ]]; then
+  echo "fatal: simulated worktree add failure" >&2; exit 128
+fi
 if [[ " $* " == *" diff --name-only "* ]]; then
+  if [[ -n "\${GIT_DIFF_FAIL_ONCE:-}" && ! -e "\$GIT_DIFF_FAIL_ONCE" ]]; then
+    : > "\$GIT_DIFF_FAIL_ONCE"; echo "fatal: transient" >&2; exit 128
+  fi
   [[ -n "\${GIT_DIFF_FAIL:-}" ]] && { echo "fatal: simulated diff failure" >&2; exit 128; }
   [[ -n "\${GIT_DIFF_EMPTY:-}" ]] && exit 0
 fi
@@ -226,12 +248,54 @@ exec "${realGit}" "$@"
       expect(result).not.toHaveProperty("totalFiles");
     });
 
+    it("worktree作成に失敗したら、差分の失敗と区別して準備工程の失敗とし、stderrの抜粋を診断へ載せる（#5349）", () => {
+      wrapGit();
+      const { status, result } = runReview({ GIT_WORKTREE_ADD_FAIL: "1", GIT_RETRY_SLEEP_SECONDS: "0" });
+      expect(status).toBe("failed");
+      expect(result.diagnostic).toMatchObject({ cause: "target_missing", stage: "prepare" });
+      expect(result.diagnostic.excerpt).toContain("simulated worktree add failure");
+      expect(result).not.toHaveProperty("totalFiles");
+    });
+
+    it("差分取得が一過性で失敗しても、再試行で成功すれば続行する（#5349）", () => {
+      wrapGit();
+      const { status } = runReview({ GIT_DIFF_FAIL_ONCE: path.join(dir, "diff-once"), GIT_RETRY_SLEEP_SECONDS: "0" });
+      expect(status).toBe("succeeded");
+    });
+
     it("コミットがファイルを変更しているのに差分が0件なら、合格にせず失敗として報告する", () => {
       wrapGit();
       const { status, result } = runReview({ GIT_DIFF_EMPTY: "1" });
       expect(status).toBe("failed");
       expect(result.diagnostic).toMatchObject({ cause: "target_missing", stage: "diff" });
       expect(result).not.toHaveProperty("totalFiles");
+    });
+
+    it("差分の取得が1回だけ失敗しても、やり直して完走する（#5350）", () => {
+      wrapGit();
+      const { status } = runReview({ GIT_DIFF_FAIL_ONCE: path.join(dir, "once-diff") });
+      expect(status).toBe("succeeded");
+    });
+
+    it("差分が1回だけ0件に見えても、やり直して完走する（#5350）", () => {
+      wrapGit();
+      const { status, result } = runReview({ GIT_DIFF_EMPTY_ONCE: path.join(dir, "once-empty") });
+      expect(status).toBe("succeeded");
+      expect(result.totalFiles).toBeGreaterThan(0);
+    });
+
+    it("作業ツリーの作成が1回だけ失敗しても、やり直して完走する（#5350）", () => {
+      wrapGit();
+      const { status } = runReview({ GIT_WT_FAIL_ONCE: path.join(dir, "once-wt") });
+      expect(status).toBe("succeeded");
+    });
+
+    it("差分の取得が全回失敗したら、やり直した回数をexcerptへ残して失敗にする（#5350）", () => {
+      wrapGit();
+      const { status, result } = runReview({ GIT_DIFF_FAIL: "1" });
+      expect(status).toBe("failed");
+      expect(result.diagnostic.excerpt).toContain("[retry 1/3]");
+      expect(result.diagnostic.excerpt).toContain("[retry 3/3]");
     });
 
     it("本当に差分が無いときだけ、従来どおり差分なしとして報告する", () => {

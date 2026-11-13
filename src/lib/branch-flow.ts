@@ -15,6 +15,7 @@ import {
 import { resolveReleaseStageBadges } from "@/lib/release-stage-badges";
 import { resolveReleaseJourney } from "@/lib/release-journey";
 import { summarizePullRequestHealth, type PullRequestHealthSummary } from "@/lib/pull-request-health";
+import { describeProductionSuspension } from "@/lib/release-verification-config";
 import {
   isReleaseCandidateClear,
   resolvePullRequestReleaseVerification,
@@ -254,6 +255,18 @@ export function unreleasedSummary(
 }
 
 /**
+ * 画面に出す未リリースの件数。**公開停止中（#5353）は0件**にする——出す先の本番が無く、
+ * 「未リリース」と数え続けると手を動かす必要があるように読めるため
+ */
+export function repositoryUnreleasedSummary(repository: {
+  release: { comparison: BranchComparison | null };
+  productionSuspension: string | null;
+}): UnreleasedSummary {
+  if (repository.productionSuspension !== null) return { count: 0, unit: "コミット", versionBumpCount: 0 };
+  return unreleasedSummary(repository.release.comparison);
+}
+
+/**
  * `unreleasedSummary`を「5件（+バージョンバンプ1件）」の形にする（#2333）。
  * 「未リリース 」のような前置きは呼び出し側が付ける。0件のときは空文字。
  */
@@ -465,15 +478,19 @@ export function resolveReleaseBlockedReason({
   releasePullRequest,
   bumpPullRequest,
   deployState,
+  productionSuspended = false,
 }: {
   branchStatus: RepositoryBranchStatus | null;
   releasePullRequest: PullRequestSummary | null;
   bumpPullRequest: PullRequestSummary | null;
   deployState: BranchFlowDeployState | null;
+  /** 公開停止中（#5353）。出す先の本番が無いのでリリースを開始させない */
+  productionSuspended?: boolean;
 }): ReleaseBlockedReason | null {
   if (branchStatus === null) return "branches-unloaded";
   if (!branchStatus.hasReleaseWorkflow) return "no-workflow";
   if (releasePullRequest !== null || bumpPullRequest !== null) return "release-in-progress";
+  if (productionSuspended) return "production-suspended";
   if (unreleasedCommitCount(branchStatus.developVsMain) === 0) return "nothing-to-release";
   if (deployState?.kind === "failure") return "deploy-failed";
   return null;
@@ -659,6 +676,8 @@ function buildRepository({
   // いてもリリース用workflowを持たないリポジトリでボタンが出て、押すとdispatchが404になった。
   // ブランチ状況を取得できていないリポジトリでは判定できないためfalse（＝出さない）。
   const canRelease = branchStatus?.hasReleaseWorkflow ?? false;
+  // 公開停止中（#5353）は本番が無い。一括リリースの対象・未リリース件数から外すため、押させない
+  const productionSuspension = describeProductionSuspension(repository.fullName);
 
   return {
     repositoryFullName: repository.fullName,
@@ -680,6 +699,7 @@ function buildRepository({
       releasePullRequest === null &&
       bumpPullRequest === null &&
       deployState?.kind !== "failure" &&
+      productionSuspension === null &&
       unreleasedCommitCount(branchStatus?.developVsMain) > 0,
     // 押せないときも「なぜ押せないか」を画面へ渡す（#2711）。ボタンごと消すと、
     // 「次のリリース（本番未反映）」の束から本番へ出す手段が画面のどこにも無くなる。
@@ -688,7 +708,9 @@ function buildRepository({
       releasePullRequest,
       bumpPullRequest,
       deployState,
+      productionSuspended: productionSuspension !== null,
     }),
+    productionSuspension,
     // 「本番へ再デプロイ」（#2020）。**リリースの可否とは条件が別物**——`main`をそのまま
     // 出し直すだけなので、未リリースの変更があってもなくても押してよい。
     // デプロイが動いている間だけ押させない（`deploy.yml`の`concurrency`は
