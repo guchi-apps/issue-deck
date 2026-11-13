@@ -394,15 +394,27 @@ export type FinalizeStartDecision =
       error: "not_ready" | "wrong_phase" | "candidate_changed" | "main_advanced" | "in_progress" | "unobserved" | "ai_review_waiver_required" | ConflictBlockError;
     };
 
-/** 公開承認を作る前に、競合の判定が済んでいて競合が無いことを求める（#5305） */
-export type ConflictBlockError = "conflict_pending" | "conflict_detected";
+/** 公開承認を作る前に、競合ありと確定していないことを求める（#5305・#5361） */
+export type ConflictBlockError = "conflict_detected";
 
-/** GitHubの`mergeable`（null=判定中・false=競合あり）から、公開承認を止める理由を返す。止めなければnull */
+/**
+ * GitHubの`mergeable`（null=判定中・false=競合あり）から、公開承認を止める理由を返す。止めなければnull。
+ * **判定中（null）では止めない**（#5361）。統合検証がmain先端(baseSha)へheadを実際にマージして合格しており、
+ * 承認時にmain・headが検証時と一致することも確かめている。さらに本番マージの直前に`decideCompletionMerge`が
+ * `mergeable`を取り直し、競合ありなら停止・判定中なら判定が出るまで待つため、承認の時点で待たせても安全性は増えない。
+ * 競合ありと確定しているときだけ、早めに知らせるために止める
+ */
 export function decideConflictBlock(mergeable: boolean | null): ConflictBlockError | null {
-  if (mergeable === null) return "conflict_pending";
   if (mergeable === false) return "conflict_detected";
   return null;
 }
+
+/**
+ * 競合が判定中のときに出す、公開承認との関係（#5178・#5305・#5361）。統合検証がmainへのマージを検証済みのため、
+ * 判定中でも公開承認は押せる。競合の確定は本番マージの直前に取り直して待つ
+ */
+export const PENDING_CONFLICT_PUBLISH_NOTE =
+  "GitHubが競合を計算中です。統合検証でmainへのマージは確認済みのため公開承認は押せます。本番へマージする直前に競合を取り直し、判定が出るまで待ってからマージします（競合があれば止まります）";
 
 export const FINALIZE_START_ERROR_LABEL: Record<Exclude<FinalizeStartDecision, { ok: true }>["error"], string> = {
   not_ready: "全体レビュー・統合検証に合格していないため、公開準備を始められません",
@@ -412,7 +424,6 @@ export const FINALIZE_START_ERROR_LABEL: Record<Exclude<FinalizeStartDecision, {
   in_progress: "公開準備が進行中です",
   unobserved: "候補の現在の状態を取得できませんでした",
   ai_review_waiver_required: "全体レビューが合格していません。結果を確かめ、承知で進むことを明示してから押してください",
-  conflict_pending: "GitHubが競合を確認中です。判定が出るまで公開承認は押せません。少し待ってから状態を取り直してください",
   conflict_detected: "候補のPRがmainと競合しています。競合を解消してから公開承認してください",
 };
 

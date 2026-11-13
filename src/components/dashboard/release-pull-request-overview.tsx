@@ -27,6 +27,7 @@ import { useReleaseVerification } from "@/hooks/use-release-verification";
 import { buildMergeChecks, cellsFromSummary, type MergeCheckItem, type MergeCheckTone } from "@/lib/pull-request-merge-checks";
 import { buildReleaseCheckCells } from "@/lib/release-candidate-checks";
 import { resolvePullRequestJourney } from "@/lib/release-journey";
+import { PENDING_CONFLICT_PUBLISH_NOTE } from "@/lib/release-finalize";
 import { cn } from "@/lib/utils";
 import type { PullRequestSummary } from "@/types/pull-request";
 
@@ -94,9 +95,7 @@ function ReleaseCandidateChecks({ pullRequest }: { pullRequest: PullRequestSumma
   );
 }
 
-/** 競合が判定中のときに出す、公開承認との関係（#5178・#5305で「押せる」から「判定が出るまで押せない」へ変更） */
-export const PENDING_CONFLICT_PUBLISH_NOTE =
-  "GitHubが競合を計算中です。成功とは扱わず、判定が出るまで公開承認は押せません（判定が出れば自動で押せるようになります）";
+export { PENDING_CONFLICT_PUBLISH_NOTE };
 
 /**
  * 競合が「確認中」のとき、公開承認が判定待ちで押せないことが分かる理由文に差し替える（#5178・#5305）

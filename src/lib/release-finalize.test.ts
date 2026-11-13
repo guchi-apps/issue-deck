@@ -261,11 +261,11 @@ describe("decideFinalizeStart", () => {
   it("観測できなければ始めない", () => {
     expect(decideFinalizeStart({ ...input, observed: null })).toEqual({ ok: false, error: "unobserved" });
   });
-  it("競合が判定中・競合ありのときは始めない（#5305）", () => {
-    expect(decideFinalizeStart({ ...input, observed: { ...input.observed, mergeable: null } })).toEqual({ ok: false, error: "conflict_pending" });
+  it("競合ありのときは始めない（#5305）。判定中は止めず、マージ直前の判定に任せる（#5361）", () => {
+    expect(decideFinalizeStart({ ...input, observed: { ...input.observed, mergeable: null } })).toMatchObject({ ok: true });
     expect(decideFinalizeStart({ ...input, observed: { ...input.observed, mergeable: false } })).toEqual({ ok: false, error: "conflict_detected" });
     expect(decideConflictBlock(true)).toBeNull();
-    expect(FINALIZE_START_ERROR_LABEL.conflict_pending).toContain("確認中");
+    expect(decideConflictBlock(null)).toBeNull();
     expect(FINALIZE_START_ERROR_LABEL.conflict_detected).toContain("競合");
   });
 });

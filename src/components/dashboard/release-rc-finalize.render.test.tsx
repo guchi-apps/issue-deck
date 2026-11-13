@@ -169,10 +169,11 @@ describe("ReleaseRcFinalizePanel", () => {
     vi.unstubAllGlobals();
   });
 
-  it("競合が判定中・競合ありの間は公開承認を押せず、理由を出す（#5305）", () => {
+  it("競合ありの間は公開承認を押せず理由を出す（#5305）。判定中は押せ、マージ直前に確かめる旨を出す（#5361）", () => {
     const { rerender } = render(<ReleaseRcFinalizePanel mergeable={null} candidate={candidate()} finalization={overview()} repositoryFullName="o/r" onChanged={vi.fn()} />);
-    expect(screen.getByTestId("release-rc-conflict-block").textContent).toContain("確認中");
-    expect(screen.getByRole("button", { name: "本番公開へ進む（公開承認）" })).toHaveProperty("disabled", true);
+    expect(screen.queryByTestId("release-rc-conflict-block")).toBeNull();
+    expect(screen.getByTestId("release-rc-conflict-pending").textContent).toContain("直前");
+    expect(screen.getByRole("button", { name: "本番公開へ進む（公開承認）" })).toHaveProperty("disabled", false);
     rerender(<ReleaseRcFinalizePanel mergeable={false} candidate={candidate()} finalization={overview()} repositoryFullName="o/r" onChanged={vi.fn()} />);
     expect(screen.getByTestId("release-rc-conflict-block").textContent).toContain("競合");
     expect(screen.getByRole("button", { name: "本番公開へ進む（公開承認）" })).toHaveProperty("disabled", true);

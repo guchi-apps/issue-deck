@@ -200,9 +200,7 @@ describe("requestRcFinalize", () => {
     expect(sent).toMatchObject({ baseHeadSha: PRE, bumpKind: "minor", version: "2.14.0", requestKey: "reqkey0001", sequence: 3 });
   });
 
-  it("競合が判定中・競合ありなら、版の予約・段階の変更・workflowの起動をしない（#5305）", async () => {
-    mocks.fetchPr.mockResolvedValue({ number: 10, state: "open", mergeable: null, merged: false, head: { sha: PRE }, base: { sha: BASE } });
-    expect(await requestRcFinalize({ ...input, requestKey: "reqkey0090" })).toMatchObject({ ok: false, error: "conflict_pending" });
+  it("競合ありなら、版の予約・段階の変更・workflowの起動をしない（#5305）", async () => {
     mocks.fetchPr.mockResolvedValue({ number: 10, state: "open", mergeable: false, merged: false, head: { sha: PRE }, base: { sha: BASE } });
     expect(await requestRcFinalize({ ...input, requestKey: "reqkey0091" })).toMatchObject({ ok: false, error: "conflict_detected" });
     expect(mocks.candUpdateMany).not.toHaveBeenCalled();
