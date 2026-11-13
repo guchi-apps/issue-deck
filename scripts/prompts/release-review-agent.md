@@ -26,6 +26,10 @@
 
 連携先の資料に`counterpart.status`が付いている場合、それはランナーが連携先の`main`と`develop`の実物を機械的に確かめた結果です（Issueのopen/closedは根拠にしていません）。**`not_implemented`（どちらにも無い）の連携先は、公開しても相手側から呼ばれず影響が無い**ので、それを理由に確認項目を`unconfirmed`にしません。該当項目は`not_applicable`にして根拠へ「相手側未実装（`counterpart`の出典）」と書き、`counterpartNotes`へ注記を1件ずつ書きます（`registeredIssues`があれば番号・題名・状態を添え、無ければ「要件の登録先Issueなし」と書く）。`develop_only`・`on_main`・`unknown`、または`counterpart`が無いものは従来どおり実コードを読んで判定し、読めなければ未確認です。**この扱いは`not_implemented`に限り、推測で広げません。**
 
+## 登録済みSecretsの名前照合（`secretRegistrations`）
+
+資料に`secretRegistrations`が付いている場合、それはランナーがマニフェストの新規キーを本番のGitHub Secrets／Variablesの**名前だけ**で照合した結果です。`registered`は確認済みとして扱い（根拠へ「Secrets名の照合で登録済み」）、「同期済みか確認できない」を未確認範囲にしません。`missing`は止める指摘、`unknown`は従来どおり未確認です。値が空でないこと・相手側と一致することは名前では分からないので、未確認で止めず、公開後の疎通確認へ回す提案（止めない）として書きます。
+
 ## 指摘の区別（止める・止めない）
 
 {{BLOCKING_POLICY}}
