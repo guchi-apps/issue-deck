@@ -35,11 +35,32 @@ const SEVERITY_TONE = {
   low: "bg-muted text-muted-foreground",
 } as const;
 
-/** パネルを出すか。未判断の止める指摘があり、修正の自動継続が動いていないときだけ */
-export function shouldShowAutoProceed(verification: ReleaseVerificationSummary | null, runActive: boolean): boolean {
-  if (!verification || runActive) return false;
+/**
+ * 「次の操作」パネルの出し方（#5369）。新方式の候補では、修正の自動継続の入口をこのパネル1つにまとめ、
+ * 旧「修正を自動で続ける」の開始ボタンは出さない。
+ *
+ * - `table`: 未判断の止める指摘がある。判定表を見せ、一括確定してから系列を始める（#5138）
+ * - `start`: 判断済みで「今回直す」指摘が残る、または統合検証が失敗した。表なしで系列を始める
+ * - `unresolvable`: 指摘0件で、再評価を終えても全体レビューの要確認だけが残った。直すコードが無く、系列を
+ *   始めても同じ理由で止まるため、ボタンを出さずに再実行・判断の欄へ案内する
+ * - `null`: 出さない（系列が動いている・直すものが無い・全体レビューの実行中や再評価中）
+ */
+export type AutoProceedMode = "table" | "start" | "unresolvable";
+
+export function decideAutoProceedMode(verification: ReleaseVerificationSummary | null, runActive: boolean): AutoProceedMode | null {
+  if (!verification || runActive) return null;
   const review = verification.aiReview;
-  return review.state === "needs_check" && (review.decisions?.counts.undecidedBlocking ?? 0) > 0;
+  const counts = review.decisions?.counts;
+  if (review.state === "needs_check" && (counts?.undecidedBlocking ?? 0) > 0) return "table";
+  if (verification.integration.state === "failed") return "start";
+  if (review.state === "needs_check" && (counts?.fixNow ?? 0) > 0) return "start";
+  if (review.state === "needs_check" && review.findings.length === 0 && review.stage?.kind === "needs_check") return "unresolvable";
+  return null;
+}
+
+/** パネルを出すか。修正の自動継続が動いておらず、出し方が決まるときだけ */
+export function shouldShowAutoProceed(verification: ReleaseVerificationSummary | null, runActive: boolean): boolean {
+  return decideAutoProceedMode(verification, runActive) !== null;
 }
 
 /** 予約を押した時点の対象。推奨が届いた後に、同じ対象・同じ指摘の表かを確かめるために控える（#5229） */
@@ -133,44 +154,47 @@ export function ReleaseAutoProceedPanel({ repositoryFullName, pullRequestNumber,
   const findingIdsKey = rows.map((row) => row.findingId).join(",");
 
   async function proceed() {
-    if (!target || rows.length === 0) return;
+    if (!target) return;
+    const withTable = rows.length > 0;
     setBusy(true);
     setOutcome(null);
     const [owner, repo] = repositoryFullName.split("/");
     try {
-      const items = rows.map((row) => toBulkDecisionItem(row, choiceOf(row))).filter((item) => item !== null);
-      const saved = await fetch("/api/repositories/release/review-decisions/bulk", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ owner, repo, pullRequestNumber, baseSha: target.baseSha, headSha: target.headSha, items }),
-      });
-      const savedBody = (await saved.json().catch(() => ({}))) as {
-        ok?: boolean;
-        message?: string;
-        results?: { findingId: string; ok: boolean; message?: string | null }[];
-      };
-      if (!saved.ok) {
-        setOutcome({
-          tone: "error",
-          message:
-            saved.status === 409
-              ? `${savedBody.message ?? "リリース候補が更新されました。"}画面を取り直してから押し直してください。`
-              : saved.status === 401 || saved.status === 403
-                ? "判定を確定する権限がありません。ログインし直してください。"
-                : (savedBody.message ?? `判定を確定できませんでした (${saved.status})。`),
+      if (withTable) {
+        const items = rows.map((row) => toBulkDecisionItem(row, choiceOf(row))).filter((item) => item !== null);
+        const saved = await fetch("/api/repositories/release/review-decisions/bulk", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ owner, repo, pullRequestNumber, baseSha: target.baseSha, headSha: target.headSha, items }),
         });
-        onReload();
-        return;
-      }
-      const failed = (savedBody.results ?? []).filter((r) => !r.ok);
-      if (failed.length > 0) {
-        // 確定できた分は残る。失敗した指摘だけが未判断のまま表に残るので、自動修正は始めない
-        setOutcome({
-          tone: "error",
-          message: `${failed.length}件の判定を確定できませんでした（${failed.map((f) => `${f.findingId}: ${f.message ?? "失敗"}`).join(" / ")}）。残った指摘を確かめて押し直してください。`,
-        });
-        onReload();
-        return;
+        const savedBody = (await saved.json().catch(() => ({}))) as {
+          ok?: boolean;
+          message?: string;
+          results?: { findingId: string; ok: boolean; message?: string | null }[];
+        };
+        if (!saved.ok) {
+          setOutcome({
+            tone: "error",
+            message:
+              saved.status === 409
+                ? `${savedBody.message ?? "リリース候補が更新されました。"}画面を取り直してから押し直してください。`
+                : saved.status === 401 || saved.status === 403
+                  ? "判定を確定する権限がありません。ログインし直してください。"
+                  : (savedBody.message ?? `判定を確定できませんでした (${saved.status})。`),
+          });
+          onReload();
+          return;
+        }
+        const failed = (savedBody.results ?? []).filter((r) => !r.ok);
+        if (failed.length > 0) {
+          // 確定できた分は残る。失敗した指摘だけが未判断のまま表に残るので、自動修正は始めない
+          setOutcome({
+            tone: "error",
+            message: `${failed.length}件の判定を確定できませんでした（${failed.map((f) => `${f.findingId}: ${f.message ?? "失敗"}`).join(" / ")}）。残った指摘を確かめて押し直してください。`,
+          });
+          onReload();
+          return;
+        }
       }
       const started = await fetch("/api/repositories/release/completion", {
         method: "POST",
@@ -179,13 +203,22 @@ export function ReleaseAutoProceedPanel({ repositoryFullName, pullRequestNumber,
       });
       const startedBody = (await started.json().catch(() => null)) as { run?: ReleaseCompletionRunView; error?: string } | null;
       if (startedBody?.run) onRunStarted?.(startedBody.run);
+      const decided = withTable ? "判定を確定し、" : "";
       if (started.ok) {
-        setOutcome({ tone: "ok", message: "判定を確定し、自動で修正を始めました。チェックがすべて通ると公開承認の画面で止まります。" });
+        setOutcome({ tone: "ok", message: `${decided}自動で修正を始めました。チェックがすべて通ると公開承認の画面で止まります。` });
       } else if (startedBody?.error === "nothing_to_recover") {
         // 全件を修正しない判断にした・ほかに失敗が無い。直すものが無いので、そのまま公開準備へ進める
-        setOutcome({ tone: "ok", message: "判定を確定しました。直す指摘は無いため、そのまま公開準備（公開承認）へ進めます。" });
+        setOutcome({
+          tone: "ok",
+          message: withTable ? "判定を確定しました。直す指摘は無いため、そのまま公開準備（公開承認）へ進めます。" : "直すものは見つかりませんでした。画面を取り直して状態を確かめてください。",
+        });
       } else {
-        setOutcome({ tone: "error", message: `判定は確定しましたが、自動修正を始められませんでした（${startErrorText(startedBody?.error)}）。` });
+        setOutcome({
+          tone: "error",
+          message: withTable
+            ? `判定は確定しましたが、自動修正を始められませんでした（${startErrorText(startedBody?.error)}）。`
+            : `自動修正を始められませんでした（${startErrorText(startedBody?.error)}）。`,
+        });
       }
       onReload();
     } catch {
@@ -232,8 +265,58 @@ export function ReleaseAutoProceedPanel({ repositoryFullName, pullRequestNumber,
     setArmed({ baseSha: target.baseSha, headSha: target.headSha, findingIds: findingIdsKey });
   }
 
-  if (rows.length === 0) {
+  const mode = decideAutoProceedMode(verification, false);
+  if (mode === "unresolvable") {
+    return (
+      <section
+        aria-label="次の操作"
+        className={cn("flex flex-col gap-1.5 rounded-[10px] border-[1.5px] border-amber-600/70 bg-amber-500/5 p-3.5 text-sm", className)}
+        data-testid="release-auto-proceed-unresolvable"
+      >
+        <span className="text-xs text-muted-foreground">次の操作</span>
+        <h3 className="text-[15px] font-semibold text-balance">自動修正では解消できません</h3>
+        <p className="break-words text-xs text-muted-foreground">
+          指摘は0件で、全体レビューが確認しきれなかった項目だけが残っています。直すコードが無いため、修正を続けても同じ理由で止まります。全体レビューを再実行するか、内容を確かめて判断してください。
+        </p>
+        {manualHref && (
+          <Button asChild className="min-h-11 w-full gap-1.5 px-4 text-sm font-bold sm:w-fit">
+            <a href={manualHref} data-testid="release-auto-proceed-unresolvable-link">
+              下の「現在候補の検証」で再実行・判断する ↓
+            </a>
+          </Button>
+        )}
+      </section>
+    );
+  }
+  if (mode === null || (mode === "table" && rows.length === 0)) {
     return outcome ? <OutcomeNote outcome={outcome} className={className} /> : null;
+  }
+  if (mode === "start") {
+    return (
+      <section
+        aria-label="次の操作"
+        className={cn("@container flex flex-col gap-1.5 rounded-[10px] border-[1.5px] border-foreground/70 bg-card p-3.5 text-sm", className)}
+        data-testid="release-auto-proceed"
+      >
+        <span className="text-xs text-muted-foreground">次の操作</span>
+        <h3 className="text-[15px] font-semibold text-balance">
+          {verification.integration.state === "failed" ? "統合検証の失敗を自動で修正し、公開承認まで進めます" : "「今回直す」指摘を自動で修正し、公開承認まで進めます"}
+        </h3>
+        <Button
+          className="min-h-11 w-full gap-1.5 px-4 text-sm font-bold sm:w-fit"
+          onClick={() => void proceed()}
+          disabled={busy || !target}
+          data-testid="release-auto-proceed-start"
+        >
+          {busy ? <Loader2 className="size-4 animate-spin" aria-hidden="true" /> : <Rocket className="size-4" aria-hidden="true" />}
+          おまかせで公開承認まで進める
+        </Button>
+        <p className="text-xs text-muted-foreground">
+          修正Issueの作成から修正・取り込み・再検証までを、チェックがすべて通るまで自動で繰り返します。公開承認はあなたが押します。
+        </p>
+        {outcome && <OutcomeNote outcome={outcome} />}
+      </section>
+    );
   }
 
   return (
@@ -407,7 +490,7 @@ function startErrorText(error: string | undefined): string {
     case "not_release_pull_request":
       return "このPRはリリース候補ではありません";
     default:
-      return "時間をおいて「修正を自動で続ける」を押してください";
+      return "時間をおいて「おまかせで公開承認まで進める」を押してください";
   }
 }
 

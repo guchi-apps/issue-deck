@@ -2,7 +2,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { decideArmedAction, ReleaseAutoProceedPanel, shouldShowAutoProceed } from "@/components/dashboard/release-auto-proceed-panel";
+import { decideArmedAction, decideAutoProceedMode, ReleaseAutoProceedPanel, shouldShowAutoProceed } from "@/components/dashboard/release-auto-proceed-panel";
 import type { ReleaseVerificationSummary } from "@/lib/release-verification-summary";
 
 const BASE = "a".repeat(40);
@@ -86,6 +86,71 @@ describe("ReleaseAutoProceedPanel（#5138）", () => {
     expect(shouldShowAutoProceed(verification(), false)).toBe(true);
     expect(shouldShowAutoProceed(verification(), true)).toBe(false);
     expect(shouldShowAutoProceed(null, false)).toBe(false);
+  });
+
+  describe("出し方の判定（#5369）", () => {
+    const counts = { undecidedBlocking: 0, fixNow: 0, postRelease: 0, deferred: 0, rejected: 0, stale: 0 };
+    const make = (input: { integration?: string; review?: string; findings?: number; fixNow?: number; stage?: string }) => {
+      const base = verification();
+      return {
+        ...base,
+        integration: { state: input.integration ?? "passed" },
+        aiReview: {
+          ...base.aiReview,
+          state: input.review ?? "needs_check",
+          findings: base.aiReview.findings.slice(0, input.findings ?? 0),
+          decisions: { ...base.aiReview.decisions, counts: { ...counts, fixNow: input.fixNow ?? 0 } },
+          stage: { kind: input.stage ?? "needs_check", autoReevaluated: true, items: [] },
+        },
+      } as unknown as ReleaseVerificationSummary;
+    };
+
+    it("未判断の止める指摘があれば表を出す", () => {
+      expect(decideAutoProceedMode(verification(), false)).toBe("table");
+    });
+
+    it("統合検証の失敗・判断済みの「今回直す」は、表なしで始めるボタンを出す", () => {
+      expect(decideAutoProceedMode(make({ integration: "failed", review: "passed" }), false)).toBe("start");
+      expect(decideAutoProceedMode(make({ findings: 1, fixNow: 1 }), false)).toBe("start");
+    });
+
+    it("指摘0件で再評価後も要確認が残ったときは、自動修正で解消できない案内にする", () => {
+      expect(decideAutoProceedMode(make({}), false)).toBe("unresolvable");
+      // 再評価中は案内しない（系列・再評価が進めるため）
+      expect(decideAutoProceedMode(make({ stage: "reevaluating" }), false)).toBeNull();
+    });
+
+    it("合格・直さない判断だけ・系列の進行中は出さない", () => {
+      expect(decideAutoProceedMode(make({ review: "passed" }), false)).toBeNull();
+      expect(decideAutoProceedMode(make({ findings: 1 }), false)).toBeNull();
+      expect(decideAutoProceedMode(make({ integration: "failed" }), true)).toBeNull();
+    });
+
+    it("案内では自動修正のボタンを出さず、検証の欄へ誘導する", () => {
+      render(
+        <ReleaseAutoProceedPanel
+          repositoryFullName="o/r"
+          pullRequestNumber={7}
+          verification={make({})}
+          onReload={vi.fn()}
+          manualHref="#release-candidate-verification"
+        />,
+      );
+      expect(screen.getByTestId("release-auto-proceed-unresolvable")).toBeTruthy();
+      expect(screen.queryByTestId("release-auto-proceed-start")).toBeNull();
+      expect(screen.getByTestId("release-auto-proceed-unresolvable-link").getAttribute("href")).toBe("#release-candidate-verification");
+    });
+
+    it("表なしのボタンは判定を確定せず、修正の自動継続だけを始める", async () => {
+      const calls = mockFetch({ "/api/repositories/release/completion": { body: { run: { id: "r1", active: true } } } });
+      render(
+        <ReleaseAutoProceedPanel repositoryFullName="o/r" pullRequestNumber={7} verification={make({ integration: "failed", review: "passed" })} onReload={vi.fn()} />,
+      );
+      fireEvent.click(screen.getByTestId("release-auto-proceed-start"));
+      await waitFor(() => expect(calls.some((c) => c.url === "/api/repositories/release/completion")).toBe(true));
+      expect(calls.some((c) => c.url === "/api/repositories/release/review-decisions/bulk")).toBe(false);
+      expect(calls.find((c) => c.url === "/api/repositories/release/completion")?.body).toMatchObject({ scope: "until_ready", baseSha: BASE, headSha: HEAD });
+    });
   });
 
   it("推奨と安全側の判定を表に並べ、押すと一括確定してから修正の自動継続を始める", async () => {
