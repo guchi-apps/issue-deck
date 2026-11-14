@@ -1,6 +1,6 @@
 "use client";
 
-import { ExternalLink, Lightbulb, Loader2, RefreshCw, Rocket, Trash2 } from "lucide-react";
+import { ExternalLink, Lightbulb, RefreshCw, Rocket, Trash2 } from "lucide-react";
 import { useState } from "react";
 
 import { MarkdownBody } from "@/components/dashboard/markdown-body";
@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
 import { useIdeas, type IdeaSummary } from "@/hooks/use-ideas";
 
 const IDEAS_URL = "https://github.com/guchi-apps/ideas/tree/main/ideas";
@@ -64,7 +65,18 @@ export function IdeasPanel({
 
       {error && <p role="alert" className="rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">{error}</p>}
       {isLoading && ideas.length === 0 ? (
-        <div className="flex flex-1 items-center justify-center gap-2 text-sm text-muted-foreground"><Loader2 className="animate-spin" />構想を読み込んでいます…</div>
+        <div role="status" aria-busy="true" aria-label="構想を読み込んでいます" className="grid gap-3 lg:grid-cols-2">
+          {[0, 1, 2, 3].map((i) => (
+            <div key={i} className="flex flex-col gap-3 rounded-xl border bg-card p-4 shadow-sm">
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex-1 space-y-1.5"><Skeleton className="h-4 w-2/3" /><Skeleton className="h-3 w-1/3" /></div>
+                <Skeleton className="h-5 w-12 rounded-full" />
+              </div>
+              <div className="space-y-1.5"><Skeleton className="h-4 w-full" /><Skeleton className="h-4 w-full" /><Skeleton className="h-4 w-3/4" /></div>
+              <Skeleton className="h-4 w-20" />
+            </div>
+          ))}
+        </div>
       ) : ideas.length === 0 ? (
         <div className="flex flex-1 flex-col items-center justify-center rounded-xl border border-dashed p-10 text-center">
           <Lightbulb className="mb-3 size-8 text-muted-foreground" />
