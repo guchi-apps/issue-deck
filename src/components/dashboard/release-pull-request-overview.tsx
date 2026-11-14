@@ -29,6 +29,7 @@ import { buildReleaseCheckCells } from "@/lib/release-candidate-checks";
 import { resolvePullRequestJourney } from "@/lib/release-journey";
 import { PENDING_CONFLICT_PUBLISH_NOTE } from "@/lib/release-finalize";
 import { cn } from "@/lib/utils";
+import { Skeleton } from "@/components/ui/skeleton";
 import type { PullRequestSummary } from "@/types/pull-request";
 
 /**
@@ -112,7 +113,7 @@ function unavailable(check: MergeCheckItem): MergeCheckItem {
     mark: "–",
     state: "取得中",
     tone: "muted",
-    reason: "このリリースPRの検証結果をまだ取得できていません。別の候補の結果は使いません",
+    reason: "このPRの検証結果は取得中です（別の候補の結果は使いません）",
     evidence: null,
   };
 }
@@ -180,6 +181,8 @@ export function ReleasePullRequestOverview({
   const rc = useReleaseRc(repositoryFullName, number, true, reloadToken);
   const rcCandidate = isRcReleaseCandidateHeadRef(headRef) ? (rc.overview?.candidate ?? null) : null;
   const legacy = rc.overview?.legacy?.prNumber === number ? rc.overview.legacy : null;
+  // 新方式の候補のブランチなのに、候補の取得結果がまだ届いていない間（失敗は含めない）
+  const rcPending = isRcReleaseCandidateHeadRef(headRef) && rc.overview === null && rc.error === null;
   // 公開できる工程か（#4635）。サーバーのマージAPIと同じ判定。旧方式はundefined、取得前はnull（推測で公開可にしない）
   const publishDecision = decidePublishForPullRequest(pullRequest, rc.overview);
   const publishBlock = publishDecision && !publishDecision.ok ? { next: publishDecision.next, message: publishDecision.message } : null;
@@ -242,6 +245,11 @@ export function ReleasePullRequestOverview({
       {/* 正式タイトルとリポジトリ名は共通詳細の見出しが持つ（#4463）。ここはブランチ情報だけを出す */}
       {rcCandidate ? (
         <ReleaseRcIdentity candidate={rcCandidate} compact={journey !== null} />
+      ) : rcPending ? (
+        <div className="flex flex-col gap-1" data-testid="release-rc-identity-skeleton" aria-busy="true">
+          <Skeleton className="h-5 w-40" />
+          <Skeleton className="h-3.5 w-3/4" />
+        </div>
       ) : (
         <p className="break-words text-xs text-muted-foreground">
           {headRef} → {pullRequest.baseRef}
@@ -330,6 +338,16 @@ export function ReleasePullRequestOverview({
         />
       )}
 
+      {/* 取得前は、取得後に挿入される公開準備の欄と同じ高さの枠を先に置き、下の欄が跳ねないようにする（#5403） */}
+      {rcPending && (
+        <section aria-label="公開準備を読み込み中" aria-busy="true" className="flex flex-col gap-2 rounded-[10px] border bg-card p-3.5" data-testid="release-rc-finalize-skeleton">
+          <Skeleton className="h-4 w-24" />
+          <Skeleton className="h-3 w-3/4" />
+          <Skeleton className="h-14 w-full" />
+          <Skeleton className="h-8 w-48" />
+        </section>
+      )}
+
       {/* 公開後のdevelop同期は、本番公開の結果とは別の欄として出す（#4641） */}
       {rcCandidate && !cancelInMore && <ReleaseRcCancel candidate={rcCandidate} repositoryFullName={repositoryFullName} onChanged={rc.reload} />}
       {rcCandidate && rc.overview?.developSync && (
@@ -341,7 +359,7 @@ export function ReleasePullRequestOverview({
         {state.previousResults ? (
           // 修正後の候補が未作成・取得中の間は、旧候補の成功や指摘を現在値として代用しない（#4428）
           <p className="text-muted-foreground">
-            修正を反映したリリース候補はまだできていません。修正前の結果は下の「修正前のリリース・検証履歴」にあります（現在の結果ではありません）。
+            修正を反映したリリース候補はまだできていません（修正前の結果は下の履歴にあります）。
           </p>
         ) : (
           <ReleaseCandidateChecks pullRequest={pullRequest} />
