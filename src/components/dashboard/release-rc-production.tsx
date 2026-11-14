@@ -99,7 +99,7 @@ export function ProductionVerificationBox({
         <dd className="break-words">
           {production.methodLabel
             ? `${production.methodLabel}で確認済み${production.verifiedAt ? `（${formatMonthDayTime(production.verifiedAt)}）` : ""}`
-            : (production.waitingLabel ?? "確認中")}
+            : (production.waitingLabel ?? "本番の稼働確認の結果待ち")}
         </dd>
         {sourceOnly && (
           <>
