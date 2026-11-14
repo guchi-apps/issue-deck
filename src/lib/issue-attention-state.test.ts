@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   resolveIssueAttention,
+  resolveIssueDetailAttention,
   resolveSessionAttentionFlags,
   type IssueAttentionInput,
 } from "@/lib/issue-attention-state";
@@ -108,5 +109,27 @@ describe("応答終了・停止中の区別（#4562）", () => {
     expect(resolveIssueAttention({ ...base, dependencyWaitLabel: "#1", responded: true })?.kind).toBe(
       "dependency",
     );
+  });
+});
+
+describe("resolveIssueDetailAttention: 実行状況の取得前（#5417）", () => {
+  const base = {
+    issue: { state: "open", projectStatus: "Planning" },
+    session: null,
+    permissionPending: false,
+    planDecisionPending: false,
+    questionAnswerPending: false,
+    mergeApprovalPending: false,
+    reserved: false,
+  };
+  it("取得前の保留では「計画レビュー作成中」を出さない", () => {
+    expect(
+      resolveIssueDetailAttention({ ...base, planReviewCreating: true, stateLoaded: false }),
+    ).toBeNull();
+  });
+  it("取得後に実際に作成中なら出す", () => {
+    expect(
+      resolveIssueDetailAttention({ ...base, planReviewCreating: true, stateLoaded: true })?.kind,
+    ).toBe("plan-review-creating");
   });
 });
