@@ -616,6 +616,8 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
     一覧系はETag済みで、変化が無ければ枠を消費しない。**素のGETで対象件数に比例するもの（進捗巡回と
     20秒ポーリング）が、削減の候補になる。** Actionsで定期起動するのは`claude-conflict-resolve.yml`の
     15分cronだけで、検出は`github.token`で行うため、App枠を使うのは衝突があるときに限られる。
+    削減に手を入れる前に、本番の`GET /api/github/api-usage`で`features`の上位（`last60min`）と
+    `rateLimits[].unmeasuredInWindow`を見て、表の推定が実測と合っているかを確かめる（#5382）。
   障害状況カードの右上には、`GET /api/github/status`が返す`fetchedAt`を「取得 10/3 13:15」の形で出す。
   カードはPC・スマホ共通の`settings/status-section.tsx`が組み立てる。
 - **issue-deck自身が投げたAI API呼び出しは、機能別に計上している（画面には出さない）**（#2347）。
