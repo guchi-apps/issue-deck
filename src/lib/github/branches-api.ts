@@ -5,6 +5,7 @@ import {
   resolveMainInclusion,
   type PullRequestInclusion,
 } from "@/lib/github/main-inclusion";
+import { githubFetchJsonWithEtag } from "@/lib/github/conditional-request";
 import { GITHUB_API, githubFetch } from "@/lib/github/request";
 import { isVersionBumpHeadRef } from "@/lib/pull-request-list";
 import type { BranchComparison, BranchHead, UnreleasedUnits } from "@/types/branch-flow";
@@ -377,14 +378,14 @@ export async function fetchBranchHeadSha(
     .split("/")
     .map(encodeURIComponent)
     .join("/")}`;
-  const res = await githubFetch(url, token);
-  if (res.status === 404) return null;
-  if (!res.ok) {
-    const detail = await res.text().catch(() => "");
-    throw new GithubApiError(res.status, `GitHub API request failed: ${res.status} ${url} ${detail}`);
+  // ETagの条件付きGET（#5373）。巡回が同じブランチを繰り返し確かめるため、先端が動かない間は304で枠を消費しない
+  const result = await githubFetchJsonWithEtag<{ object?: { sha?: unknown } } | null>(url, token);
+  if (!result.ok) {
+    if (result.status === 404) return null;
+    throw new GithubApiError(result.status, `GitHub API request failed: ${result.status} ${url} ${result.detail}`);
   }
-  const body: { object?: { sha?: unknown } } = await res.json().catch(() => ({}));
-  return typeof body.object?.sha === "string" ? body.object.sha : null;
+  const sha = result.data?.object?.sha;
+  return typeof sha === "string" ? sha : null;
 }
 
 /** `compareBranches`の結果。`develop...issue-<番号>`の三点比較から取れるものだけを持つ */

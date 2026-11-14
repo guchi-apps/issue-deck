@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
+  countGithubApiCallsSince,
   getGithubApiUsageSummary,
   loadPersistedBuckets,
   onBucketClosed,
@@ -252,5 +253,23 @@ describe("loadPersistedBuckets", () => {
     );
 
     expect(getGithubApiUsageSummary(NOW).totalLast24h).toBe(0);
+  });
+});
+
+describe("countGithubApiCallsSince", () => {
+  beforeEach(() => {
+    resetGithubApiUsage();
+  });
+
+  it("指定時刻を含む5分バケット以降の呼び出しを全用途で数える", () => {
+    recordGithubApiCall(COMMENTS_URL, { feature: "issue_comments", now: NOW - 70 * 60_000 });
+    recordGithubApiCall(COMMENTS_URL, { feature: "issue_comments", now: NOW - 30 * 60_000 });
+    recordGithubApiCall(COMMENTS_URL, { feature: "release_status", now: NOW - 10 * 60_000 });
+    recordGithubApiCall(COMMENTS_URL, { feature: "release_status", now: NOW });
+
+    expect(countGithubApiCallsSince(NOW - 60 * 60_000, NOW)).toBe(3);
+    // 窓の開始が5分バケットの途中でも、そのバケットは丸ごと数える
+    expect(countGithubApiCallsSince(NOW - 32 * 60_000, NOW)).toBe(3);
+    expect(countGithubApiCallsSince(NOW + 60_000, NOW)).toBe(1);
   });
 });
