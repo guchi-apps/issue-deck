@@ -7,6 +7,7 @@ import {
   enqueueRemoteSessionResume,
   listRemoteSessions,
 } from "@/lib/dispatch/remote-session";
+import { normalizeRemoteSessionInitialPrompt } from "@/lib/dispatch/remote-session-rules";
 import { findRepositoryByFullName } from "@/lib/github/issue-create-service";
 import { parseRepositoryFullName } from "@/lib/local-session";
 import { previewModeGuard } from "@/lib/preview-mode";
@@ -30,7 +31,8 @@ export async function GET() {
 }
 
 /**
- * 起動する。本文は`{ repositoryFullName: "owner/repo" }`。
+ * 起動する。本文は`{ repositoryFullName: "owner/repo", initialPrompt?: string }`。
+ * `initialPrompt`は起動直後にClaude Codeへ渡す最初の指示（#5405。新規起動だけ。再開では渡さない）。
  * 終了したセッションを会話ごと再開する（#4874）ときは`{ resumeId: "<RemoteSessionのid>" }`
  */
 export async function POST(request: NextRequest) {
@@ -54,6 +56,14 @@ export async function POST(request: NextRequest) {
       : null;
   if (!repository) return NextResponse.json({ error: "invalid_request" }, { status: 400 });
 
+  const initialPrompt = normalizeRemoteSessionInitialPrompt(payload?.initialPrompt);
+  if (initialPrompt === "invalid") {
+    return NextResponse.json(
+      { error: "invalid_request", message: "最初の指示が長すぎるか、使えない文字を含んでいます。" },
+      { status: 400, headers: NO_STORE },
+    );
+  }
+
   const fullName = `${repository.owner}/${repository.repo}`;
   // 利用者がインストール連携しているリポジトリだけを起動できる
   if (!(await findRepositoryByFullName(userId, fullName))) {
@@ -63,6 +73,7 @@ export async function POST(request: NextRequest) {
   const result = await enqueueRemoteSession({
     repositoryFullName: fullName,
     requestedByUserId: userId,
+    initialPrompt,
   });
   if (!result.ok) {
     return NextResponse.json(

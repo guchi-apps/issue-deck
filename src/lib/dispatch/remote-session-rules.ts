@@ -65,7 +65,9 @@ export type RemoteSessionRejection =
   | "repository_not_runnable"
   | "limit_reached"
   /** 再開（#4874）に対応していないpoller。起動の判定（`resolveRemoteSessionRejection`）では返さない */
-  | "resume_unsupported";
+  | "resume_unsupported"
+  /** 最初の指示（#5405）に対応していないpoller。指示つきの起動のときだけ、呼び出し側が判定する */
+  | "initial_prompt_unsupported";
 
 /** 判定に要るホストの情報 */
 export type RemoteSessionHostInfo = {
@@ -76,6 +78,8 @@ export type RemoteSessionHostInfo = {
   activeCount: number;
   /** 終了したセッションを会話ごと再開できるpollerか（#4874。`supportsRemoteSessionResume`） */
   resumeCapable: boolean;
+  /** 起動時の最初の指示を渡せるpollerか（#5405。`supportsRemoteSessionInitialPrompt`） */
+  initialPromptCapable: boolean;
 };
 
 /**
@@ -109,6 +113,8 @@ export function describeRemoteSessionRejection(rejection: RemoteSessionRejection
       return `同時に動かせるリモートセッションは${REMOTE_SESSION_MAX_PER_HOST}本までです。使っていないセッションを終了してください。`;
     case "resume_unsupported":
       return "サブPCのpollerがセッションの再開に対応していません。設定の実行環境から「更新して再起動」を押してください。";
+    case "initial_prompt_unsupported":
+      return "サブPCのpollerが最初の指示の事前入力に対応していません。設定の実行環境から「更新して再起動」を押すか、指示を空にして起動してください。";
   }
 }
 
@@ -123,6 +129,36 @@ export const REMOTE_SESSION_RESUME_MIN_AGENT_VERSION = 41;
 export function supportsRemoteSessionResume(agentVersion: string | null | undefined): boolean {
   if (!agentVersion || !/^\d+$/.test(agentVersion)) return false;
   return Number(agentVersion) >= REMOTE_SESSION_RESUME_MIN_AGENT_VERSION;
+}
+
+/**
+ * 起動時の最初の指示（#5405）に対応したpollerの版数。古いpollerは`initialPrompt`を黙って無視し、
+ * 指示が渡らないまま起動してしまうため、指示つきの起動だけ申告された版数で配り分ける。
+ */
+export const REMOTE_SESSION_INITIAL_PROMPT_MIN_AGENT_VERSION = 43;
+
+/** 最初の指示の上限文字数（#5405）。環境変数で渡すため、`execve`の上限（128KiB）に十分収まる大きさにする */
+export const REMOTE_SESSION_INITIAL_PROMPT_MAX_LENGTH = 20_000;
+
+/** ホスト申告の`agentVersion`が最初の指示に対応しているか */
+export function supportsRemoteSessionInitialPrompt(agentVersion: string | null | undefined): boolean {
+  if (!agentVersion || !/^\d+$/.test(agentVersion)) return false;
+  return Number(agentVersion) >= REMOTE_SESSION_INITIAL_PROMPT_MIN_AGENT_VERSION;
+}
+
+/**
+ * 画面・APIから届いた最初の指示を正規化する（#5405）。前後の空白を除き、空なら`null`（指示なし）。
+ * 文字列でない・上限超過は`"invalid"`。
+ */
+export function normalizeRemoteSessionInitialPrompt(value: unknown): string | null | "invalid" {
+  if (value === undefined || value === null) return null;
+  if (typeof value !== "string") return "invalid";
+  // NULは環境変数に載らず、tmuxへ渡す文字列も壊すため弾く
+  if (value.includes("\0")) return "invalid";
+  const trimmed = value.trim();
+  if (trimmed === "") return null;
+  if (trimmed.length > REMOTE_SESSION_INITIAL_PROMPT_MAX_LENGTH) return "invalid";
+  return trimmed;
 }
 
 /**

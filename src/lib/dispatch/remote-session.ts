@@ -16,6 +16,7 @@ import {
   parseRemoteSessionStatus,
   pickRemoteSessionHost,
   resolveRemoteSessionRejection,
+  supportsRemoteSessionInitialPrompt,
   supportsRemoteSessionResume,
   type RemoteSessionHostInfo,
   type RemoteSessionRejection,
@@ -72,6 +73,7 @@ function toHostInfo(host: DispatchHost, activeCount: number, now: Date): RemoteS
     repositories: parseDispatchHostRepositories(host.repositories),
     activeCount,
     resumeCapable: supportsRemoteSessionResume(host.agentVersion),
+    initialPromptCapable: supportsRemoteSessionInitialPrompt(host.agentVersion),
   };
 }
 
@@ -227,6 +229,8 @@ export type EnqueueRemoteSessionResult =
 export async function enqueueRemoteSession(params: {
   repositoryFullName: string;
   requestedByUserId: string | null;
+  /** 起動直後にClaude Codeへ渡す最初の指示（#5405）。`normalizeRemoteSessionInitialPrompt`を通した値 */
+  initialPrompt?: string | null;
   now?: Date;
 }): Promise<EnqueueRemoteSessionResult> {
   const now = params.now ?? new Date();
@@ -239,12 +243,19 @@ export async function enqueueRemoteSession(params: {
     return { ok: false, rejection: reason, message: describeRemoteSessionRejection(reason) };
   }
 
+  const initialPrompt = params.initialPrompt ?? null;
+  if (initialPrompt !== null && !host.initialPromptCapable) {
+    const reason = "initial_prompt_unsupported";
+    return { ok: false, rejection: reason, message: describeRemoteSessionRejection(reason) };
+  }
+
   const tmuxSessionName = buildRemoteSessionName(params.repositoryFullName);
   const session = await db.$transaction(async (tx) => {
     const job = await tx.dispatchJob.create({
       data: {
         repositoryFullName: params.repositoryFullName,
         issueNumber: REMOTE_SESSION_ISSUE_NUMBER,
+        initialPrompt,
         targetHost: host.name,
         kind: "REMOTE_SESSION",
         status: "QUEUED",

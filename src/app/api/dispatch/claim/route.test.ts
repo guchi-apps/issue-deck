@@ -3,6 +3,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const claimDispatchJobs = vi.fn();
 const sweepCheckUserPushNotifications = vi.fn();
 const appSettingFindUnique = vi.fn();
+const jobFindMany = vi.fn();
+const jobUpdateMany = vi.fn();
 
 vi.mock("@/lib/dispatch/jobs", () => ({
   get claimDispatchJobs() {
@@ -21,6 +23,14 @@ vi.mock("@/lib/db", () => ({
     appSetting: {
       get findUnique() {
         return appSettingFindUnique;
+      },
+    },
+    dispatchJob: {
+      get findMany() {
+        return jobFindMany;
+      },
+      get updateMany() {
+        return jobUpdateMany;
       },
     },
   },
@@ -42,6 +52,8 @@ beforeEach(() => {
   claimDispatchJobs.mockResolvedValue([]);
   sweepCheckUserPushNotifications.mockResolvedValue(undefined);
   appSettingFindUnique.mockResolvedValue({ claudeLocalModel: "sonnet", codexModel: "auto" });
+  jobFindMany.mockResolvedValue([]);
+  jobUpdateMany.mockResolvedValue({ count: 0 });
 });
 
 describe("POST /api/dispatch/claim", () => {
@@ -219,5 +231,31 @@ describe("POST /api/dispatch/claim", () => {
     const res = await POST(postRequest({ host: "subpc", maxJobs: 1 }));
 
     expect((await res.json()).jobs[0].codexModel).toBe("gpt-6-luna");
+  });
+});
+
+describe("POST /api/dispatch/claim のリモートセッションの最初の指示（#5405）", () => {
+  it("REMOTE_SESSIONジョブにだけ指示を付け、払い出した直後に列を空にする", async () => {
+    claimDispatchJobs.mockResolvedValue([
+      { id: "j1", kind: "REMOTE_SESSION" },
+      { id: "j2", kind: "REMOTE_SESSION" },
+      { id: "j3", kind: "LAUNCH" },
+    ]);
+    jobFindMany.mockResolvedValue([{ id: "j1", initialPrompt: "調べて" }]);
+    const res = await POST(postRequest({ host: "subpc", maxJobs: 3 }));
+    const body = await res.json();
+    expect(body.jobs.find((job: { id: string }) => job.id === "j1").initialPrompt).toBe("調べて");
+    expect(body.jobs.find((job: { id: string }) => job.id === "j2")).not.toHaveProperty("initialPrompt");
+    expect(body.jobs.find((job: { id: string }) => job.id === "j3")).not.toHaveProperty("initialPrompt");
+    // 引くのはREMOTE_SESSIONのidだけ
+    expect(jobFindMany.mock.calls[0][0].where.id).toEqual({ in: ["j1", "j2"] });
+    expect(jobUpdateMany).toHaveBeenCalledWith({ where: { id: { in: ["j1"] } }, data: { initialPrompt: null } });
+  });
+
+  it("指示を持つジョブが無ければ列を触らない", async () => {
+    claimDispatchJobs.mockResolvedValue([{ id: "j3", kind: "LAUNCH" }]);
+    await POST(postRequest({ host: "subpc", maxJobs: 1 }));
+    expect(jobFindMany).not.toHaveBeenCalled();
+    expect(jobUpdateMany).not.toHaveBeenCalled();
   });
 });

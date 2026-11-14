@@ -118,7 +118,7 @@ export function useRemoteSessions(params: { active: boolean; onReady?: (url: str
   }, [active, refresh, waiting]);
 
   const start = useCallback(
-    async (repositoryFullName: string) => {
+    async (repositoryFullName: string, initialPrompt?: string): Promise<boolean> => {
       closeTab();
       tabRef.current = openPlaceholderTab();
       setPending(true);
@@ -127,7 +127,7 @@ export function useRemoteSessions(params: { active: boolean; onReady?: (url: str
         const response = await fetch("/api/remote-sessions", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ repositoryFullName }),
+          body: JSON.stringify({ repositoryFullName, ...(initialPrompt ? { initialPrompt } : {}) }),
         });
         const body = (await response.json().catch(() => null)) as
           | { session?: RemoteSessionView; message?: string }
@@ -135,10 +135,11 @@ export function useRemoteSessions(params: { active: boolean; onReady?: (url: str
         if (!response.ok || !body?.session) {
           setError(body?.message ?? "リモートセッションを起動できませんでした。");
           closeTab();
-          return;
+          return false;
         }
         updateLaunch({ sessionId: body.session.id, repositoryFullName, startedAt: Date.now(), gaveUp: false });
         await refresh();
+        return true;
       } finally {
         setPending(false);
       }
