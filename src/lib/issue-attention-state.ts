@@ -243,6 +243,13 @@ export function resolveIssueDetailAttention(params: {
   mergeApprovalPending: boolean;
   /** 計画レビューを作成中か（`isPlanReviewAttentionHeld`の結果。一覧の`creating`と同じ集合） */
   planReviewCreating: boolean;
+  /**
+   * 実行状況（ジョブ・セッション）の取得が済んでいるか（#5417）。未取得の間の`planReviewCreating`は
+   * 「橙を出さないための保留」にすぎず、実際にレビューを作成中とは限らない。
+   * 計画承認待ちの詳細を開いた直後に「計画レビュー作成中」が一瞬出るのを防ぐため、未取得なら何も出さない。
+   * 省略時は取得済みとして扱う。
+   */
+  stateLoaded?: boolean;
   dependencyWaitLabel?: string | null;
   /** `resolveSessionAttentionFlags`の結果（#4562） */
   stalled?: boolean;
@@ -253,6 +260,7 @@ export function resolveIssueDetailAttention(params: {
   queueLabel?: string | null;
 }): IssueAttention | null {
   const planReviewCreating = params.planReviewCreating;
+  if (planReviewCreating && params.stateLoaded === false) return null;
   return resolveIssueAttention({
     permissionPending: params.permissionPending,
     questionPending: params.questionAnswerPending,
@@ -286,9 +294,11 @@ export function resolveIssueDetailAttentionFromState(params: {
   questionAnswerPending: boolean;
   mergeApprovalPending: boolean;
   planReviewCreating: boolean;
+  stateLoaded?: boolean;
   reserved: boolean;
 }): IssueAttention | null {
   return resolveIssueDetailAttention({
+    stateLoaded: params.stateLoaded,
     issue: params.issue,
     session: params.session,
     permissionPending: params.session ? describeSessionPermission(params.session) !== null : false,
