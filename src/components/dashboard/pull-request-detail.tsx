@@ -476,6 +476,8 @@ export function PullRequestDetail({
                   kinds={repairKinds}
                   availability={pullRequest.repairWorkflowAvailability}
                   runningKind={pullRequest.repairRun?.kind ?? null}
+                  // 隣の「最新のbaseを取り込む」「マージ」と同じ高さにそろえる（#5388）
+                  buttonClassName="h-9 text-xs"
                 />
                 {(reviewAction.kind === "not-run" ||
                   (reviewAction.kind === "stale" && reviewRerunNeeded(reviewAction.progress))) && (
