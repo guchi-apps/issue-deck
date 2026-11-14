@@ -6,6 +6,7 @@ import { getInstallationToken } from "@/lib/github/app-auth";
 import { fetchReleaseBodyByTag, fetchUserCanWriteRepo, updateReleaseBody } from "@/lib/github/release-body-api";
 import { runSerialized } from "@/lib/keyed-serial";
 import { previewModeGuard } from "@/lib/preview-mode";
+import { patchReleaseHistoryCacheBody } from "@/lib/release-history-server";
 import { applyReleaseBodyTaskToggle, parseReleaseBodyTasks } from "@/lib/release-body-tasks";
 
 /**
@@ -79,7 +80,7 @@ async function handle(request: NextRequest, checked: boolean) {
       fullName: body.repoFullName,
       installation: { userInstallations: { some: { userId } } },
     },
-    select: { ownerLogin: true, name: true, installation: { select: { installationId: true } } },
+    select: { id: true, ownerLogin: true, name: true, installation: { select: { installationId: true } } },
   });
   if (!repository) {
     return NextResponse.json({ error: "not_found" }, { status: 404 });
@@ -144,6 +145,8 @@ async function handle(request: NextRequest, checked: boolean) {
         if (lineStates.length === 0 || lineStates.some((task) => task.checked !== checked)) {
           return NextResponse.json({ error: "conflict" }, { status: 409 });
         }
+        // 写し（リリース履歴の正。#5392）の本文も、確認した最新の本文へ揃える
+        await patchReleaseHistoryCacheBody(repository.id, body.tagName, verified.release.body);
       }
 
       return NextResponse.json({ ok: true, source: "github", checkedAt: new Date().toISOString() });

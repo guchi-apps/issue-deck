@@ -177,7 +177,13 @@ export function useReleaseHistory(enabled: boolean): UseReleaseHistoryResult {
   const pendingChecksRef = useRef(new Map<string, PendingReleaseToggle<CheckTarget>>());
   const pendingLinesRef = useRef(new Map<string, PendingReleaseToggle<CheckLineTarget>>());
 
-  const refresh = useCallback(() => setReloadKey((prev) => prev + 1), []);
+  // 更新ボタン・保存の競合後の取り直しは、写しを使わず全件をGitHubから取り直す（#5392）。
+  // 画面を開いただけの取得は、サーバーが鮮度内の写しを返す
+  const forceRefreshRef = useRef(false);
+  const refresh = useCallback(() => {
+    forceRefreshRef.current = true;
+    setReloadKey((prev) => prev + 1);
+  }, []);
 
   useEffect(() => {
     if (!enabled) return;
@@ -195,6 +201,8 @@ export function useReleaseHistory(enabled: boolean): UseReleaseHistoryResult {
     // 前回の取得結果は、まだ何も出していないときだけ取りに行く（#5230）。取り直し（更新ボタン）では
     // 手元の一覧のほうが新しいので使わない
     const wantCached = historyRef.current === null;
+    const refreshParam = forceRefreshRef.current ? "&refresh=1" : "";
+    forceRefreshRef.current = false;
     let freshApplied = false;
     let targetsDone = false;
     let othersDone = false;
@@ -252,7 +260,7 @@ export function useReleaseHistory(enabled: boolean): UseReleaseHistoryResult {
       setFreshness(targetsDone ? (othersDone ? "fresh" : "partial") : "stale");
     }
 
-    const targets = getJson("/api/repositories/release-history?scope=targets")
+    const targets = getJson(`/api/repositories/release-history?scope=targets${refreshParam}`)
       .then((json) => {
         if (cancelled) return;
         freshApplied = true;
@@ -272,7 +280,7 @@ export function useReleaseHistory(enabled: boolean): UseReleaseHistoryResult {
         onFailed(err);
         if (!cancelled) setFreshness("stale");
       });
-    const others = getJson("/api/repositories/release-history?scope=others")
+    const others = getJson(`/api/repositories/release-history?scope=others${refreshParam}`)
       .then((json) => {
         if (cancelled) return;
         freshApplied = true;

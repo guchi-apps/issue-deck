@@ -18,7 +18,15 @@ vi.mock("@/lib/db", () => ({
       get findMany() {
         return releaseCheckTargetFindMany;
       },
+      // 写しの再取得の深さ（全ユーザーの最小`createdAt`。#5392）
+      groupBy: async () => [],
     },
+    // 写しが無い状態（常にGitHubから取り直す）。写しを使う経路は`release-history-server.test.ts`で見る
+    releaseHistoryCache: {
+      findMany: async () => [],
+      upsert: (args: unknown) => args,
+    },
+    $transaction: async (ops: unknown[]) => ops,
     releaseCheck: {
       get findMany() {
         return releaseCheckFindMany;
@@ -42,6 +50,10 @@ vi.mock("@/lib/github/release-api", async (importOriginal) => {
     },
   };
 });
+
+vi.mock("@/lib/github/unreleased-versions", () => ({
+  appendUnreleasedVersions: async (_owner: string, _repo: string, _token: string, releases: unknown[]) => releases,
+}));
 
 import { GET } from "@/app/api/repositories/release-history/unchecked-count/route";
 

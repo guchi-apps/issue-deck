@@ -393,6 +393,7 @@ run一覧の本文はヒープに残さず、必要な項目だけを覚える�
 
 画面を開いてから一覧が出るまで、全リポジトリのGitHub取得（`fetchReleasesBackTo`＋`appendUnreleasedVersions`）を待ち切っていた。次の2つで、開いた直後に出るようにした。
 
+- **（#5392）写しを正とし、鮮度（15分）内はGitHubを呼ばない。** `release-history`・`unchecked-count`は`loadReleaseHistoryFromCache`を通り、無い・古い・`?refresh=1`のリポジトリだけ取り直す。Webhook`release`と項目チェック保存でも写しを更新する（詳細は`docs/release-check-github-sync.md`）。
 - **前回の取得結果を先に出す。** `release-history`が取得できたリポジトリぶんを`ReleaseHistoryCache`（リポジトリごとに1行。正はGitHubで、ここは写し）へ残し、`release-history/cached`（GitHubを呼ばない）がそれを返す。写しはユーザーに依らないため、読むときは本体と同じ母集団（`findReleaseHistoryRepositories`）に絞る。確認の記録（`ReleaseCheck`）は写さず毎回DBから読む
 - **最新は2本に分けて並行して取る。** `?scope=targets`（動作確認の対象にしたリポジトリ）と`?scope=others`。初期表示の「未確認のリリース」は確認対象からしか出ないため、1本目が届いた時点で初期表示は最新になる。画面は応答の`repositories`に含まれるリポジトリの分だけを差し替え（`mergeReleaseHistoryByRepository`）、取得に失敗したリポジトリは前回の値を残す。失敗した確認対象（応答の`failedRepositories`）が残る間は最新とみなさず`stale`のまま確認操作をロックする（#5234）
 - 前回の値を出している間（`freshness: "stale"`）は確認のボタン・チェックを押させない（項目チェックの正はGitHub本文で、古い本文に対して押させないため）

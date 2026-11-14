@@ -7,6 +7,9 @@ import { useReleaseHistory } from "@/hooks/use-release-history";
 const CACHED = "/api/repositories/release-history/cached";
 const TARGETS = "/api/repositories/release-history?scope=targets";
 const OTHERS = "/api/repositories/release-history?scope=others";
+// 更新ボタン・保存の競合後の取り直しは、写しを使わず取り直すため`&refresh=1`が付く（#5392）
+const TARGETS_REFRESH = `${TARGETS}&refresh=1`;
+const OTHERS_REFRESH = `${OTHERS}&refresh=1`;
 const IOS = "/api/repositories/release-history/ios-status";
 
 type Deferred = { resolve: (res: unknown) => void };
@@ -59,15 +62,15 @@ describe("useReleaseHistory（#3797）", () => {
 
     // 画面を開き直した等で取り直しが走っている間に押す
     act(() => result.current.refresh());
-    await waitFor(() => expect(count(TARGETS)).toBe(2));
+    await waitFor(() => expect(count(TARGETS_REFRESH)).toBe(1));
     await act(async () => {
       await result.current.setReleaseChecked(target, true);
       await result.current.setReleaseLineChecked(lineTarget, true);
     });
 
     // 応答はDBを読んだ時点（押す前）の記録
-    await respond(OTHERS, { ...emptyResponse, repositories: [] }, 1);
-    await respond(TARGETS, { ...emptyResponse, repositories: ["o/a"] }, 1);
+    await respond(OTHERS_REFRESH, { ...emptyResponse, repositories: [] });
+    await respond(TARGETS_REFRESH, { ...emptyResponse, repositories: ["o/a"] });
 
     expect(result.current.checkRecords.map((r) => r.tagName)).toEqual(["v1.0.0"]);
     expect(result.current.checkLineRecords.map((r) => r.lineKey)).toEqual(["#12"]);
@@ -84,8 +87,8 @@ describe("useReleaseHistory（#3797）", () => {
 
     // 別の端末で未確認へ戻された後の取り直し
     act(() => result.current.refresh());
-    await waitFor(() => expect(count(TARGETS)).toBe(2));
-    await respond(TARGETS, { ...emptyResponse, repositories: [] }, 1);
+    await waitFor(() => expect(count(TARGETS_REFRESH)).toBe(1));
+    await respond(TARGETS_REFRESH, { ...emptyResponse, repositories: [] });
 
     expect(result.current.checkRecords).toEqual([]);
   });
@@ -100,8 +103,8 @@ describe("useReleaseHistory（#3797）", () => {
     });
 
     act(() => result.current.refresh());
-    await waitFor(() => expect(count(OTHERS)).toBe(2));
-    await respond(OTHERS, { ...emptyResponse, repositories: ["o/b"] }, 1);
+    await waitFor(() => expect(count(OTHERS_REFRESH)).toBe(1));
+    await respond(OTHERS_REFRESH, { ...emptyResponse, repositories: ["o/b"] });
 
     expect(result.current.checkLineRecords.map((r) => r.lineKey)).toEqual(["#12"]);
   });
@@ -217,13 +220,13 @@ describe("useReleaseHistory の段階取得（#5230）", () => {
     expect(result.current.freshness).toBe("fresh");
 
     act(() => result.current.refresh());
-    await respond(TARGETS, { ...emptyResponse, repositories: [], failedRepositories: ["o/a"] }, 1);
-    await respond(OTHERS, { ...emptyResponse, repositories: [] }, 1);
+    await respond(TARGETS_REFRESH, { ...emptyResponse, repositories: [], failedRepositories: ["o/a"] });
+    await respond(OTHERS_REFRESH, { ...emptyResponse, repositories: [] });
     expect(result.current.freshness).toBe("stale");
 
     act(() => result.current.refresh());
-    await respond(TARGETS, { ...emptyResponse, repositories: ["o/a"], entries: [release("o/a", "v1.0.1")] }, 2);
-    await respond(OTHERS, { ...emptyResponse, repositories: [] }, 2);
+    await respond(TARGETS_REFRESH, { ...emptyResponse, repositories: ["o/a"], entries: [release("o/a", "v1.0.1")] }, 1);
+    await respond(OTHERS_REFRESH, { ...emptyResponse, repositories: [] }, 1);
     expect(result.current.freshness).toBe("fresh");
     expect(result.current.error).toBeNull();
   });
@@ -236,7 +239,7 @@ describe("useReleaseHistory の段階取得（#5230）", () => {
     expect(count(CACHED)).toBe(1);
 
     act(() => result.current.refresh());
-    await waitFor(() => expect(count(TARGETS)).toBe(2));
+    await waitFor(() => expect(count(TARGETS_REFRESH)).toBe(1));
     expect(count(CACHED)).toBe(1);
     expect(result.current.freshness).toBe("fresh");
   });

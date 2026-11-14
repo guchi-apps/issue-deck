@@ -1,7 +1,14 @@
 
 import { db } from "@/lib/db";
-import type { ReleaseHistoryItem } from "@/lib/github/release-api";
-import type { ReleaseCheckLineRecord, ReleaseCheckRecord } from "@/lib/release-check";
+import { getInstallationToken } from "@/lib/github/app-auth";
+import { describeGithubError } from "@/lib/github/forbidden-cause";
+import { fetchReleasesBackTo, type ReleaseHistoryItem } from "@/lib/github/release-api";
+import { appendUnreleasedVersions } from "@/lib/github/unreleased-versions";
+import {
+  hasReachedReleaseCheckSince,
+  type ReleaseCheckLineRecord,
+  type ReleaseCheckRecord,
+} from "@/lib/release-check";
 
 /**
  * リリース履歴（#2726）の母集団。「ブランチ」画面・リリース状況の取得（`release-pending-merges/route.ts`）と揃え、
@@ -136,5 +143,203 @@ export async function saveReleaseHistoryCache(
     );
   } catch (error) {
     console.error("[release-history] cache save failed", error);
+  }
+}
+
+/**
+ * 写しを正として返す期間（#5392）。これを過ぎたリポジトリだけ、読むときにGitHubから取り直す。
+ * Webhook（`release`イベント）と本文更新の書き戻しで多くは鮮度内に保たれるが、タグだけの版
+ * （Releaseが無い失敗版）は`release`イベントで変化を受けられないため、この期間が最大の遅れになる。
+ */
+export const RELEASE_HISTORY_CACHE_TTL_MS = 15 * 60 * 1000;
+
+export function isReleaseHistoryCacheFresh(
+  fetchedAt: Date,
+  nowMs: number,
+  ttlMs: number = RELEASE_HISTORY_CACHE_TTL_MS,
+): boolean {
+  return nowMs - fetchedAt.getTime() < ttlMs;
+}
+
+/**
+ * リポジトリごとの、遡って取る基準時刻（全ユーザーの`ReleaseCheckTarget.createdAt`の最小値）。
+ * 写しはユーザーに依らない共有のもので、取得時のユーザーを持たないWebhook・TTLの再取得でも
+ * 確認対象の過去の未確認リリースが写しから消えないよう、最も古い対象に合わせて取る。
+ * 確認対象が無いリポジトリは載らず、従来どおり1ページだけ取る。
+ */
+export async function findMinCheckSinceMsByRepositoryId(
+  repositoryIds: readonly string[],
+): Promise<Map<string, number>> {
+  const ranges = await findCheckTargetRangeByRepositoryId(repositoryIds);
+  return new Map([...ranges].map(([id, range]) => [id, range.minMs]));
+}
+
+/** 確認対象の追加時刻の範囲。`maxMs`は最後に対象へ加えられた時刻 */
+async function findCheckTargetRangeByRepositoryId(
+  repositoryIds: readonly string[],
+): Promise<Map<string, { minMs: number; maxMs: number }>> {
+  if (repositoryIds.length === 0) return new Map();
+  const rows = await db.releaseCheckTarget.groupBy({
+    by: ["repositoryId"],
+    where: { repositoryId: { in: [...repositoryIds] } },
+    _min: { createdAt: true },
+    _max: { createdAt: true },
+  });
+  const result = new Map<string, { minMs: number; maxMs: number }>();
+  for (const row of rows) {
+    if (row._min.createdAt && row._max.createdAt) {
+      result.set(row.repositoryId, { minMs: row._min.createdAt.getTime(), maxMs: row._max.createdAt.getTime() });
+    }
+  }
+  return result;
+}
+
+export type ReleaseHistoryRepository = {
+  id: string;
+  fullName: string;
+  ownerLogin: string;
+  name: string;
+  installation: { installationId: number };
+};
+
+/**
+ * 1リポジトリのリリース履歴をGitHubから取り直して写しへ保存する。失敗したら例外を投げる
+ * （写しは前回のまま残る）。画面の取得・Webhookが同じこの経路を通り、取得の深さを1か所で決める。
+ */
+export async function refreshReleaseHistoryForRepository(
+  repository: ReleaseHistoryRepository,
+  token: string,
+  sinceMs?: number,
+): Promise<ReleaseHistoryItem[]> {
+  const resolvedSinceMs =
+    sinceMs !== undefined ? sinceMs : (await findMinCheckSinceMsByRepositoryId([repository.id])).get(repository.id);
+  const releases = await fetchReleasesBackTo(
+    repository.ownerLogin,
+    repository.name,
+    token,
+    resolvedSinceMs,
+    hasReachedReleaseCheckSince,
+  );
+  // GitHub Releaseが無い版（本番デプロイの失敗など）をタグから補い、修正版と紐付ける（#4003）
+  // iOS配布の状況はここで待たない（`release-history/ios-status`で後から重ねる。#5214）
+  const entries = await appendUnreleasedVersions(repository.ownerLogin, repository.name, token, releases);
+  await saveReleaseHistoryCache([{ repositoryId: repository.id, entries }]);
+  return entries;
+}
+
+export type LoadedReleaseHistory = {
+  repositoryId: string;
+  fullName: string;
+  entries: ReleaseHistoryItem[];
+  /** GitHubから取り直したか（falseは写しをそのまま返した） */
+  refreshed: boolean;
+};
+
+/**
+ * 写しを正としてリポジトリぶんの履歴を返す（#5392）。写しが無い・鮮度（TTL）を過ぎた・`refresh`の
+ * リポジトリだけGitHubから取り直す。取り直しに失敗したリポジトリは`failed`へ入れ、前回の値は返さない
+ * （画面は前回の値を残してロックする）。
+ */
+export async function loadReleaseHistoryFromCache(
+  repositories: readonly ReleaseHistoryRepository[],
+  options: { refresh: boolean; nowMs?: number },
+): Promise<{
+  loaded: LoadedReleaseHistory[];
+  failed: { repositoryId: string; fullName: string; reason: string }[];
+  durations: { fullName: string; ms: number }[];
+}> {
+  const nowMs = options.nowMs ?? Date.now();
+  const [caches, targetRanges] = await Promise.all([
+    db.releaseHistoryCache.findMany({
+      where: { repositoryId: { in: repositories.map((repository) => repository.id) } },
+      select: { repositoryId: true, entries: true, fetchedAt: true },
+    }),
+    findCheckTargetRangeByRepositoryId(repositories.map((repository) => repository.id)),
+  ]);
+  const cacheByRepositoryId = new Map(caches.map((cache) => [cache.repositoryId, cache]));
+
+  // 同一installationのリポジトリ間でトークン取得を使い回す
+  const tokenPromises = new Map<number, Promise<string>>();
+  function tokenFor(installationId: number): Promise<string> {
+    let token = tokenPromises.get(installationId);
+    if (!token) {
+      token = getInstallationToken(installationId);
+      tokenPromises.set(installationId, token);
+    }
+    return token;
+  }
+
+  const durations: { fullName: string; ms: number }[] = [];
+  const failed: { repositoryId: string; fullName: string; reason: string }[] = [];
+  const results = await Promise.all(
+    repositories.map(async (repository): Promise<LoadedReleaseHistory | null> => {
+      const cache = cacheByRepositoryId.get(repository.id);
+      // 写しの取得より後に確認対象へ加えられたリポジトリは、写しの深さが足りるか分からない（深さは記録していない）
+      // ので取り直す。対象追加の直後に1回だけ起きる
+      const addedAfterFetch = (targetRanges.get(repository.id)?.maxMs ?? 0) > (cache?.fetchedAt.getTime() ?? 0);
+      if (
+        !options.refresh &&
+        cache &&
+        Array.isArray(cache.entries) &&
+        !addedAfterFetch &&
+        isReleaseHistoryCacheFresh(cache.fetchedAt, nowMs)
+      ) {
+        return {
+          repositoryId: repository.id,
+          fullName: repository.fullName,
+          entries: cache.entries as unknown as ReleaseHistoryItem[],
+          refreshed: false,
+        };
+      }
+      const startedAt = performance.now();
+      try {
+        const token = await tokenFor(repository.installation.installationId);
+        const entries = await refreshReleaseHistoryForRepository(
+          repository,
+          token,
+          targetRanges.get(repository.id)?.minMs,
+        );
+        return { repositoryId: repository.id, fullName: repository.fullName, entries, refreshed: true };
+      } catch (error) {
+        // 1リポジトリの取得失敗で他リポジトリの表示まで巻き込まない
+        console.error(`[release-history] ${repository.fullName}:`, error);
+        failed.push({
+          repositoryId: repository.id,
+          fullName: repository.fullName,
+          reason: describeGithubError(error) ?? "",
+        });
+        return null;
+      } finally {
+        durations.push({ fullName: repository.fullName, ms: Math.round(performance.now() - startedAt) });
+      }
+    }),
+  );
+  return { loaded: results.filter((row) => row !== null), failed, durations };
+}
+
+/**
+ * Release本文を書き換えたあと、写しの該当版の本文だけを差し替える（#5392）。確認状態の正は
+ * Release本文のタスクリスト（#4374）で、写しが古い本文のままだと、鮮度内の再表示で押した
+ * チェックが戻って見える。GitHubは呼ばない。写しが無ければ何もしない。失敗しても応答は止めない。
+ */
+export async function patchReleaseHistoryCacheBody(
+  repositoryId: string,
+  tagName: string,
+  body: string | null,
+): Promise<void> {
+  try {
+    const cache = await db.releaseHistoryCache.findUnique({
+      where: { repositoryId },
+      select: { entries: true },
+    });
+    if (!cache || !Array.isArray(cache.entries)) return;
+    const entries = cache.entries as unknown as ReleaseHistoryItem[];
+    if (!entries.some((entry) => entry.tagName === tagName)) return;
+    await db.releaseHistoryCache.update({
+      where: { repositoryId },
+      data: { entries: entries.map((entry) => (entry.tagName === tagName ? { ...entry, body } : entry)) as object[] },
+    });
+  } catch (error) {
+    console.error("[release-history] cache body patch failed", error);
   }
 }

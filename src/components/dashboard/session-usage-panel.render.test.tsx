@@ -1057,3 +1057,47 @@ describe("SessionUsagePanel", () => {
     });
   });
 });
+
+describe("SessionUsagePanel: GitHub REST枠（#5391）", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("GitHub REST枠を出し、更新ボタンで再取得する。取得に失敗してもプラン枠は残る", async () => {
+    const payload = {
+      measuringSince: 0,
+      currentHourStartedAt: 0,
+      totalCurrentHour: 0,
+      totalLast60min: 0,
+      totalLast24h: 0,
+      features: [],
+      rateLimits: [
+        {
+          accountLogin: "guchi-apps",
+          used: 1580,
+          limit: 5000,
+          remaining: 3420,
+          reset: Date.now() / 1000 + 1800,
+          windowStartedAt: 0,
+          measuredInWindow: 10,
+          unmeasuredInWindow: 5,
+        },
+      ],
+    };
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify(payload), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderPanel(response([entry()]));
+    expect(await screen.findByText(/3,420 \/ 5,000/)).toBeTruthy();
+    expect(screen.getByText("Claude プラン枠")).toBeTruthy();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByTitle("更新"));
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+  });
+
+  it("取得に失敗したときはエラーを1行出し、プラン枠を壊さない", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("{}", { status: 500 })));
+    renderPanel(response([entry()]));
+    expect(await screen.findByText("取得に失敗しました (500)")).toBeTruthy();
+    expect(screen.getByText("Codex プラン枠")).toBeTruthy();
+  });
+});
