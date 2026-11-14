@@ -1,6 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { lookupBranchRefs, mergedHeadRefFromHeadline } from "@/lib/github/branches-api";
+import {
+  clearShaCompareMemoForTest,
+  compareBranches,
+  lookupBranchRefs,
+  mergedHeadRefFromHeadline,
+} from "@/lib/github/branches-api";
 
 type GraphqlRequest = { query: string; variables: Record<string, unknown> };
 
@@ -404,5 +409,51 @@ describe("lookupBranchRefs: 選択適用でmainへ入ったPR（#4528）", () =>
     expect(result.developVsMain?.units?.includedInMain).toEqual([
       { prNumber: 4511, headRef: "fix/a", evidence: "cherry-pick" },
     ]);
+  });
+});
+
+describe("compareBranches のSHA同士の比較（#5382）", () => {
+  const SHA_A = "a".repeat(40);
+  const SHA_B = "b".repeat(40);
+
+  function stubCompare() {
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      headers: new Headers(),
+      json: async () => ({
+        ahead_by: 1,
+        behind_by: 0,
+        files: [{ filename: "a.ts", status: "modified", sha: "c".repeat(40) }],
+        commits: [],
+      }),
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    return fetchMock;
+  }
+
+  it("同じSHAの組は2回目からGitHubへ取りに行かない", async () => {
+    clearShaCompareMemoForTest();
+    const fetchMock = stubCompare();
+
+    const first = await compareBranches("guchi-apps", "issue-deck", SHA_A, SHA_B, "token");
+    const second = await compareBranches("guchi-apps", "issue-deck", SHA_A, SHA_B, "token");
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(second).toEqual(first);
+    // 呼び出し側が書き換えてもメモへ残らない
+    second?.files?.push({ filename: "x", status: "added", sha: null, previousFilename: null });
+    const third = await compareBranches("guchi-apps", "issue-deck", SHA_A, SHA_B, "token");
+    expect(third?.files).toHaveLength(1);
+  });
+
+  it("ブランチ名を含む比較は先端が動くので毎回取りに行く", async () => {
+    clearShaCompareMemoForTest();
+    const fetchMock = stubCompare();
+
+    await compareBranches("guchi-apps", "issue-deck", "develop", SHA_B, "token");
+    await compareBranches("guchi-apps", "issue-deck", "develop", SHA_B, "token");
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 });

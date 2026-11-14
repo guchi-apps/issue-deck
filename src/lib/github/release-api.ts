@@ -11,6 +11,7 @@ import {
 } from "@/lib/github/check-rollup";
 import type { IosPrecheckSummary } from "@/lib/github/ios-precheck";
 import { githubFetchJsonWithEtag } from "@/lib/github/conditional-request";
+import { ImmutableMemo, isCommitSha } from "@/lib/github/immutable-memo";
 import { classifyGithubForbidden, describeGithubStatus } from "@/lib/github/forbidden-cause";
 import { GithubApiError } from "@/lib/github/github-api-error";
 import { GITHUB_API, githubFetch } from "@/lib/github/request";
@@ -535,14 +536,17 @@ export async function fetchReleaseCallerText(owner: string, repo: string, token:
 
 /** ブランチの先端SHA。無ければnull */
 export async function fetchBranchHeadSha(owner: string, repo: string, branch: string, token: string): Promise<string | null> {
-  const res = await githubFetch(`${GITHUB_API}/repos/${owner}/${repo}/git/ref/heads/${branch}`, token);
-  if (res.status === 404) return null;
-  if (!res.ok) {
-    const detail = await res.text().catch(() => "");
-    throw new GithubApiError(res.status, `GitHub API request failed: ${res.status} ${branch} ${detail}`);
+  // ETagの条件付きGET（#5382）。developとmainの同期確認が全リポジトリを数分おきに確かめるため、
+  // 先端が動かない間は304で枠を消費しない
+  const result = await githubFetchJsonWithEtag<{ object?: { sha?: string } } | null>(
+    `${GITHUB_API}/repos/${owner}/${repo}/git/ref/heads/${branch}`,
+    token,
+  );
+  if (!result.ok) {
+    if (result.status === 404) return null;
+    throw new GithubApiError(result.status, `GitHub API request failed: ${result.status} ${branch} ${result.detail}`);
   }
-  const data: { object?: { sha?: string } } = await res.json().catch(() => ({}));
-  return data.object?.sha ?? null;
+  return result.data?.object?.sha ?? null;
 }
 
 /** コミットのメッセージと親（#4495。旧方式の候補の先端が版上げのコミットかを確かめる） */
@@ -599,13 +603,14 @@ export async function fetchPullRequestForRebuild(
   token: string,
 ): Promise<GithubApiMergedPullRequest | null> {
   const url = `${GITHUB_API}/repos/${owner}/${repo}/pulls/${number}`;
-  const res = await githubFetch(url, token);
-  if (res.status === 404) return null;
-  if (!res.ok) {
-    const detail = await res.text().catch(() => "");
-    throw new GithubApiError(res.status, `GitHub API request failed: ${res.status} ${url} ${detail}`);
+  // ETagの条件付きGET（#5382）。修正系列の巡回が候補内の全PRを毎回確かめるため、変化の無いPR（大半はマージ済み）は304で枠を消費しない
+  const result = await githubFetchJsonWithEtag<GithubApiMergedPullRequest>(url, token);
+  if (!result.ok) {
+    if (result.status === 404) return null;
+    throw new GithubApiError(result.status, `GitHub API request failed: ${result.status} ${url} ${result.detail}`);
   }
-  return res.json();
+  // 本文はキャッシュと同じ実体なので、呼び出し側が書き換えても残らないよう写す
+  return structuredClone(result.data);
 }
 
 /** `ancestor`が`descendant`の祖先（または同一）か。compareの`status`で判定する */
@@ -617,13 +622,26 @@ export async function isAncestorCommit(
   token: string,
 ): Promise<boolean> {
   const url = `${GITHUB_API}/repos/${owner}/${repo}/compare/${ancestor}...${descendant}?per_page=1`;
+  // SHA同士の祖先関係は変わらない（#5382。修正系列の巡回が同じ組を毎回確かめていた）
+  const memoizable = isCommitSha(ancestor) && isCommitSha(descendant);
+  const memoized = memoizable ? ancestryMemo.get(url) : undefined;
+  if (memoized !== undefined) return memoized;
   const res = await githubFetch(url, token);
   if (!res.ok) {
     const detail = await res.text().catch(() => "");
     throw new GithubApiError(res.status, `GitHub API request failed: ${res.status} ${url} ${detail}`);
   }
   const data: { status?: string } = await res.json();
-  return data.status === "ahead" || data.status === "identical";
+  const isAncestor = data.status === "ahead" || data.status === "identical";
+  if (memoizable) ancestryMemo.set(url, isAncestor);
+  return isAncestor;
+}
+
+const ancestryMemo = new ImmutableMemo<boolean>(500);
+
+/** テスト用: SHA同士の祖先関係のメモを空にする */
+export function clearAncestryMemoForTest(): void {
+  ancestryMemo.clear();
 }
 
 /** 修正PR（develop向け）の取得結果。マージ・クローズの判定に使う（#4317） */
@@ -1222,10 +1240,13 @@ export async function dispatchIosTestflightWorkflow(
 
 /** mainブランチの先端のコミットSHA。取れなければnull（#3644） */
 export async function fetchMainHeadSha(owner: string, repo: string, token: string): Promise<string | null> {
-  const res = await githubFetch(`${GITHUB_API}/repos/${owner}/${repo}/git/ref/heads/main`, token);
-  if (!res.ok) return null;
-  const data: { object?: { sha?: string } } = await res.json().catch(() => ({}));
-  return data.object?.sha ?? null;
+  // ETagの条件付きGET（#5382）。`fetchBranchHeadSha`と同じURLなのでキャッシュも共有する
+  const result = await githubFetchJsonWithEtag<{ object?: { sha?: string } } | null>(
+    `${GITHUB_API}/repos/${owner}/${repo}/git/ref/heads/main`,
+    token,
+  );
+  if (!result.ok) return null;
+  return result.data?.object?.sha ?? null;
 }
 
 /** PRのマージ状態とmergeコミットのSHA。取れなければnull（#3644） */
@@ -1235,11 +1256,13 @@ export async function fetchPullMergeInfo(
   token: string,
   pullNumber: number,
 ): Promise<{ merged: boolean; mergeCommitSha: string | null; baseRef: string } | null> {
-  const res = await githubFetch(`${GITHUB_API}/repos/${owner}/${repo}/pulls/${pullNumber}`, token);
-  if (!res.ok) return null;
-  const data: { merged?: boolean; merge_commit_sha?: string | null; base?: { ref?: string } } = await res
-    .json()
-    .catch(() => ({}));
+  // ETagの条件付きGET（#5382）。作り直し履歴の巡回がマージ済みのリリースPRを毎回確かめるため、304で枠を消費しない
+  const result = await githubFetchJsonWithEtag<{ merged?: boolean; merge_commit_sha?: string | null; base?: { ref?: string } } | null>(
+    `${GITHUB_API}/repos/${owner}/${repo}/pulls/${pullNumber}`,
+    token,
+  );
+  if (!result.ok) return null;
+  const data = result.data ?? {};
   return {
     merged: data.merged === true,
     mergeCommitSha: data.merge_commit_sha ?? null,

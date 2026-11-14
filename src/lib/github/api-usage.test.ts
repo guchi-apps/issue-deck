@@ -38,6 +38,20 @@ describe("toEndpointLabel", () => {
     ).toBe("/repos/{owner}/{repo}/actions/workflows/deploy.yml/runs");
   });
 
+  it("compareの比較対象とリリースのタグは1行にまとめる（#5382）", () => {
+    expect(
+      toEndpointLabel(
+        "https://api.github.com/repos/m-guchi/issue-deck/compare/73df31b9c202f09a127086e6565c9d899c65690e...main?per_page=1",
+      ),
+    ).toBe("/repos/{owner}/{repo}/compare/{base}...{head}");
+    expect(toEndpointLabel("https://api.github.com/repos/m-guchi/issue-deck/compare/develop...issue-12")).toBe(
+      "/repos/{owner}/{repo}/compare/{base}...{head}",
+    );
+    expect(toEndpointLabel("https://api.github.com/repos/m-guchi/issue-deck/releases/tags/v8.35.0")).toBe(
+      "/repos/{owner}/{repo}/releases/tags/{tag}",
+    );
+  });
+
   it("repos配下でないパスはそのまま扱う", () => {
     expect(toEndpointLabel("https://api.github.com/rate_limit")).toBe("/rate_limit");
     expect(toEndpointLabel("https://api.github.com/installation/repositories?per_page=100&page=1")).toBe(

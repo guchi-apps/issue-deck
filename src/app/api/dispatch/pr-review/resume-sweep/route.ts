@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 
 import { authorizeDispatch } from "@/lib/dispatch/dispatch-auth";
+import { withGithubApiFeature } from "@/lib/github/api-usage";
 import { sweepPrReviewResumes } from "@/lib/dispatch/pr-review-jobs";
 import { previewModeGuard } from "@/lib/preview-mode";
 
@@ -19,7 +20,7 @@ export async function POST(request: NextRequest) {
   if (auth === "unauthorized") return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   try {
     return NextResponse.json(
-      { ok: true, ...(await sweepPrReviewResumes()) },
+      { ok: true, ...(await withGithubApiFeature("pr_review_resume_sweep", () => sweepPrReviewResumes())) },
       { headers: { "Cache-Control": "no-store" } },
     );
   } catch (error) {

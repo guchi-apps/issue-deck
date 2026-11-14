@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 
 import { runDeployRecoverySweep } from "@/lib/deploy-recovery-series-run";
 import { authorizeDispatch } from "@/lib/dispatch/dispatch-auth";
+import { withGithubApiFeature } from "@/lib/github/api-usage";
 import { previewModeGuard } from "@/lib/preview-mode";
 import { runReleaseCompletionSweep } from "@/lib/release-completion-run";
 import { runDevelopSyncSweep } from "@/lib/release-develop-sync-run";
@@ -24,13 +25,13 @@ export async function POST(request: NextRequest) {
   const hostName = typeof payload?.host === "string" ? payload.host : "";
   if (!hostName) return NextResponse.json({ error: "invalid_request" }, { status: 400 });
   try {
-    const recovery = await runDeployRecoverySweep({ hostName });
+    const recovery = await withGithubApiFeature("deploy_recovery_sweep", () => runDeployRecoverySweep({ hostName }));
     // 片方の障害で他方を止めない
-    const completion = await runReleaseCompletionSweep({ hostName }).catch((error: unknown) => {
+    const completion = await withGithubApiFeature("release_completion_sweep", () => runReleaseCompletionSweep({ hostName })).catch((error: unknown) => {
       console.error("[POST /api/repositories/deploy-recovery-series/sweep] release completion", error);
       return null;
     });
-    const developSync = await runDevelopSyncSweep().catch((error: unknown) => {
+    const developSync = await withGithubApiFeature("develop_sync_sweep", () => runDevelopSyncSweep()).catch((error: unknown) => {
       console.error("[POST /api/repositories/deploy-recovery-series/sweep] develop sync", error);
       return null;
     });

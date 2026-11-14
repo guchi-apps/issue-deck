@@ -122,6 +122,18 @@ export const GITHUB_API_FEATURES = [
   // 実行機待ちで取り残された自動レビューの巡回検知（#5215）。develop向けのopen PRがあるリポジトリ
   // ごとにGraphQLが1回。やり直すときだけrunの取得・再実行などが増える。
   { key: "review_stall_rescue", label: "取り残された自動レビューの巡回検知" },
+  // 以下はpollerが巡回ごとに叩くのに機能キーが無く、`other`へ混ざっていた経路（#5382）。
+  // 本番の実測で`other`が全体の約半分を占め、どの巡回が出しているのかを切り分けられなかったため分けた
+  { key: "release_fix_sweep", label: "リリース候補の修正系列の巡回" },
+  { key: "deploy_recovery_sweep", label: "本番復旧系列の巡回" },
+  { key: "release_completion_sweep", label: "リリース完了系列の巡回" },
+  { key: "develop_sync_sweep", label: "本番公開後のdevelop同期の巡回" },
+  { key: "rebuild_history_sweep", label: "リリース作り直し履歴の掃除" },
+  { key: "dependency_wait_sweep", label: "依存待ちの巡回" },
+  { key: "parent_run_sweep", label: "親Issueの子の起動の巡回" },
+  { key: "pr_review_resume_sweep", label: "PRレビュー後のマージ判定の再開" },
+  // リリース画面の候補表示（10秒ポーリング）。画面を開いている間だけ消費する
+  { key: "release_rc", label: "リリース候補の状況の取得" },
   // mainへマージしたのにデプロイが起動していないものの巡回検知と起動し直し（#2703）。
   // **見張っているマージがある間だけ**消費する（見張り1件につき直近runの一覧をREST 1回）。
   // 見張りはマージ後の猶予（既定90秒）で畳まれるので、mainへのマージ1回につき3〜4回で終わる。
@@ -265,6 +277,10 @@ export function toEndpointLabel(url: string): string {
     if (segments[0] === "repos" && index === 2) return "{repo}";
     if (/^\d+$/.test(segment)) return "{n}";
     if (/^[0-9a-f]{40}$/i.test(segment)) return "{sha}";
+    // `compare/{base}...{head}`・`releases/tags/{tag}`は組・タグごとに別の行へ割れ、
+    // 上位を見ても合計が分からなくなる（#5382の実測で同じ経路のcompareが十数行に散った）
+    if (segments[index - 1] === "compare" && segment.includes("...")) return "{base}...{head}";
+    if (segments[index - 2] === "releases" && segments[index - 1] === "tags") return "{tag}";
     return segment;
   });
 
