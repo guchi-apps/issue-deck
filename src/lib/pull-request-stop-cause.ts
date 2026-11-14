@@ -91,6 +91,7 @@ const LEGACY_REASON_LEADS: readonly [string, SessionInterruptedReason][] = [
   ["文章での問いかけで応答を終えています", "question_asked"],
   ["クラシファイアにコマンドを拒否されたまま", "classifier_blocked"],
   ["ターンを完了しないまま止まっています", "turn_stall"],
+  ["Claude Codeのログインが切れ", "login_expired"],
   ["APIエラーで中断したまま止まっています", "api_error"],
 ];
 
@@ -103,6 +104,10 @@ const STALL_ACTIONS: Record<SessionInterruptedReason, string[]> = {
   ],
   question_asked: ["セッションの末尾の問いかけを端末かRemote Controlで確かめ、回答を送ります"],
   plan_not_presented: ["Issue詳細の停滞パネルから、計画を提示するよう送ります（承認は提示後に行います）"],
+  login_expired: [
+    "サブPCで`claude`を開いて`/login`を実行します（ブラウザでの認証は人が行います）",
+    "ログインが直ったら、Issue詳細の停滞パネルから続けるよう送ります",
+  ],
   classifier_blocked: [
     "拒否されたコマンドを端末で許可するか、人が代わりに実行するか、別の手段で進めるよう指示します（「進めて」だけでは解けません）",
   ],

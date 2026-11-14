@@ -243,6 +243,10 @@ source "$SCRIPT_DIR/lib/codex-thread-name.sh"
 # 落ちたままにしない（#3357）。
 # shellcheck source=scripts/lib/codex-thread-archive.sh
 source "$SCRIPT_DIR/lib/codex-thread-archive.sh"
+# サブPCのClaude Codeのログイン切れの検知（#5320）。切れている間は新規起動を見送り、
+# ホストごとに1回だけissue-deckへ引き上げる（scripts/login-expiry.test.mjs）。
+# shellcheck source=scripts/lib/login-expiry.sh
+source "$SCRIPT_DIR/lib/login-expiry.sh"
 # メモリ・SWAPの逼迫で起動を見送るかの判定（#2095）。**判定だけを別に持つ**のは、
 # 壊れると「起動が永久に止まる」か「逼迫しても止まらない」のどちらかになる境界で、
 # 実機を用意せずに確かめられるようにしておきたいため（scripts/launch-hold.test.mjs）。
@@ -3313,6 +3317,47 @@ resume_interrupted_sessions() {
   return 0
 }
 
+# --- Claude Codeのログイン切れ（#5320）------------------------------------------------
+# 判定は`lib/login-expiry.sh`。**新しいセッションの起動を見送り（`LOGIN_EXPIRY_MESSAGE`）、
+# ホストごとに1回だけ**、最初に止まったセッションのIssueへ引き上げる（Issueコメント＋
+# `00.check-user`＋`01.check-blocked`。issue-deckのPush通知が人へ届く）。止まっている
+# セッションの一覧は`detail`へ添える。固定文面の自動再開は送らない（`session-resume.sh`が除外）。
+#
+# **ログインが直ったら（`/login`で資格情報が書き直されたら）**、止まったままのセッションは
+# 数えなくなりホールドが解ける。見送っていた起動ジョブはQUEUEDのまま残っており、そのまま流れる。
+# 復旧後に止まっていたセッションへ自動で送ることはしない（`/login`は人の操作で、続けるかどうかも
+# 人が決める。画面の停滞パネルのボタンから固定の1行を送れる）。
+LOGIN_EXPIRY_MESSAGE=""
+check_login_expiry() {
+  local first repo_name issue_number full_name detail count
+  LOGIN_EXPIRY_MESSAGE=""
+  login_expiry_scan < <(tmux list-sessions -F '#{session_name}' 2>/dev/null || true)
+  count="${#LOGIN_EXPIRED_SESSIONS[@]}"
+  if [[ "$count" -eq 0 ]]; then
+    # 直った（または止まっているものが無くなった）。次に切れたときにまた1回通知できるよう印を消す
+    if login_expiry_notified; then
+      echo "Claude Codeのログイン切れの検知が解けました。新しいセッションの起動を再開します。"
+      [[ "$DRY_RUN" -eq 1 ]] || login_expiry_clear
+    fi
+    return 0
+  fi
+
+  LOGIN_EXPIRY_MESSAGE="サブPCのClaude Codeのログインが切れているため、起動ジョブは取りに行きません（止まっているセッション ${count} 本。サブPCで /login してください）。"
+  login_expiry_notified && return 0
+  [[ "$DRY_RUN" -eq 0 ]] || return 0
+
+  first="${LOGIN_EXPIRED_SESSIONS[0]}"
+  [[ "$first" =~ ^(.+)-issue-([1-9][0-9]*)$ ]] || return 0
+  repo_name="${BASH_REMATCH[1]}"
+  issue_number="${BASH_REMATCH[2]}"
+  full_name="$(resolve_session_repository "$first" "$repo_name" || true)"
+  detail="サブPCで\`/login\`してください。ログインが切れている間は新しいセッションの起動を見送ります。止まっているセッション（${count}本）: $(printf '%s, ' "${LOGIN_EXPIRED_SESSIONS[@]:0:10}" | sed 's/, $//')"
+  echo "$LOGIN_EXPIRY_MESSAGE"
+  notify_session_interrupted "$first" "$repo_name" "$issue_number" "${full_name:-}" "$detail" login_expired
+  login_expiry_record_notified
+  return 0
+}
+
 # --- ツール呼び出しが実行されないまま止まったセッションの自動復旧（#2655・#2896）--------
 # 判定は`lib/session-tool-call-stall.sh`。**固定文面を上限（既定2回）まで自動で送り、それでも
 # 直らなければissue-deckへ1度だけ引き上げる**——APIエラー再開（#1971）とまったく同じ形で、
@@ -4916,6 +4961,9 @@ run_once() {
   recover_tool_call_stalled_sessions
   claim_out_of_band_between_sweeps
 
+  # Claude Codeのログイン切れを検知し、切れている間は新規起動を見送る（#5320）。
+  check_login_expiry
+
   # Codexのターンが開始したまま閉じず、更新が止まったセッションを送り直し、駄目なら
   # 引き上げる（#3174）。同じ理由で回収・報告の後に行う。
   recover_codex_turn_stalled_sessions
@@ -4948,6 +4996,11 @@ run_once() {
   claim_plan_reviews="$(plan_review_slots)"
   if [[ -n "$LAUNCH_HOLD_MESSAGE" ]]; then
     echo "$LAUNCH_HOLD_MESSAGE"
+    claim_max_jobs=0
+    claim_plan_reviews=0
+  elif [[ -n "$LOGIN_EXPIRY_MESSAGE" ]]; then
+    # 起動してもすぐ同じエラーで止まる（計画レビューも同じ）。見送った起動はQUEUEDのまま残る
+    echo "$LOGIN_EXPIRY_MESSAGE"
     claim_max_jobs=0
     claim_plan_reviews=0
   elif [[ "$live_sessions" -ge "$MAX_SESSIONS" ]]; then

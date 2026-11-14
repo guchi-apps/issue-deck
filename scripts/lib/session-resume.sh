@@ -63,6 +63,12 @@ session_resume_transcript_interrupted() {
     grep -E '"type":"(assistant|user|queue-operation)|"type":"(event_msg|response_item)"' | tail -1 || true)"
   [[ -n "$last" ]] || return 1
   if printf '%s' "$last" | grep -q '"isApiErrorMessage":true'; then
+    # **ログイン切れ（`authentication_failed`）は再開の対象にしない**（#5320）。固定の1行を
+    # 送っても同じエラーで止まるだけで、上限まで空振りしてから引き上げることになる。
+    # 検知と引き上げは`lib/login-expiry.sh`が持つ。
+    if printf '%s' "$last" | grep -qE '"error":"authentication_failed"|Please run /login'; then
+      return 1
+    fi
     return 0
   fi
   # Codexのエラーは`event_msg`の`task_complete`へ`error`として保存される。通常の
