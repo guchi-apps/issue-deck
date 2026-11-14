@@ -3,6 +3,7 @@
 import { ExternalLink, Loader2 } from "lucide-react";
 import { useCallback, useContext, useEffect, useState, type ReactNode } from "react";
 
+import { Skeleton } from "@/components/ui/skeleton";
 import { RcImportPanel } from "@/components/dashboard/release-rc-import-panel";
 import { ReleaseCompletionPanel, useReleaseCompletionRun } from "@/components/dashboard/release-completion-panel";
 import type { ReleaseCompletionRunView } from "@/lib/release-completion-run";
@@ -151,7 +152,7 @@ export function ReleaseFixStartButton({
             {syncState === "waiting" && <Loader2 className="mr-2 inline size-3.5 animate-spin motion-reduce:animate-none" aria-hidden />}
             {syncState === "waiting" ? "Issueを取り込み中…" : "Issueの取り込み待ち"}
           </>
-        ) : busy ? "確認中…" : started ? "進捗を見る" : error ? "もう一度開始" : "修正を開始"}
+        ) : busy ? "Issueの状態を確認中…" : started ? "進捗を見る" : error ? "もう一度開始" : "修正を開始"}
       </button>
       {syncState === "timeout" && (
         <button
@@ -752,7 +753,7 @@ export function ReleaseFixInternalReview({
                 : "bg-sky-100 text-sky-900 dark:bg-sky-950 dark:text-sky-300",
           )}
         >
-          {pause ? (pause.autoResumable ? "一時停止（再開可）" : "一時停止") : internal.stopReason ? "要判断" : internal.gate.complete ? "完了（PR作成可）" : "確認中"}
+          {pause ? (pause.autoResumable ? "一時停止（再開可）" : "一時停止") : internal.stopReason ? "要判断" : internal.gate.complete ? "完了（PR作成可）" : "検証・レビューの結果待ち"}
         </span>
         <span className="text-muted-foreground">
           修正Issue #{current.issueNumber}
@@ -914,7 +915,13 @@ export function ReleaseContentsList({
   return (
     <div className={cn("flex flex-col gap-1", className)} data-testid="release-contents">
       <p className="font-semibold">今回リリースする変更</p>
-      {contents.kind === "loading" && <p className="text-muted-foreground">取得中です…</p>}
+      {contents.kind === "loading" && (
+        <div className="flex flex-col gap-1" aria-busy="true" data-testid="release-contents-loading">
+          <p className="text-muted-foreground">リリースPRに含まれる変更を取得中です…</p>
+          <Skeleton className="h-4 w-full" />
+          <Skeleton className="h-4 w-5/6" />
+        </div>
+      )}
       {contents.kind === "error" && (
         <p className="text-destructive">変更の一覧を取得できません（{contents.message}）。変更なしとは扱いません</p>
       )}
