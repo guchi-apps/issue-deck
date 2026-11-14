@@ -414,7 +414,7 @@ export function decideConflictBlock(mergeable: boolean | null): ConflictBlockErr
  * 判定中でも公開承認は押せる。競合の確定は本番マージの直前に取り直して待つ
  */
 export const PENDING_CONFLICT_PUBLISH_NOTE =
-  "GitHubが競合を計算中です。統合検証でmainへのマージは確認済みのため公開承認は押せます。本番へマージする直前に競合を取り直し、判定が出るまで待ってからマージします（競合があれば止まります）";
+  "競合を判定中です。公開承認は押せます（本番へマージする直前に競合を取り直します）";
 
 export const FINALIZE_START_ERROR_LABEL: Record<Exclude<FinalizeStartDecision, { ok: true }>["error"], string> = {
   not_ready: "全体レビュー・統合検証に合格していないため、公開準備を始められません",
