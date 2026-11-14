@@ -61,6 +61,26 @@ describe("normalizeReleaseReview", () => {
     expect(normalizeReleaseReview({ ...fullChecks(), summary: "問題なし", ...coverageOf(10) })?.detail.counterpartNotes).toEqual([]);
   });
 
+  it("他リポジトリが理由の未確認を構造化して残し、確認済みになった項目のものは落とす（#5378）", () => {
+    const r = normalizeReleaseReview({
+      ...fullChecks({
+        checks: allChecks({ pr_interaction: { status: "unconfirmed", evidence: "利用側AIDEのMCPが資料に無い" } }),
+      }),
+      summary: "要確認",
+      unverifiedScope: "AIDEの利用側",
+      crossRepoUnverified: [
+        { repository: "guchi-apps/aide", checkId: "pr_interaction", usage: "MCPが読む", reason: "削除の影響" },
+        { repository: "guchi-apps/aide", checkId: "auth_boundary", usage: "", reason: "確認済みの項目" },
+        { repository: "not a repo", checkId: null, usage: "", reason: "" },
+      ],
+      ...coverageOf(10),
+    });
+    expect(r?.detail.crossRepoUnverified).toEqual([
+      { repository: "guchi-apps/aide", checkId: "pr_interaction", usage: "MCPが読む", reason: "削除の影響" },
+    ]);
+    expect(normalizeReleaseReview({ ...fullChecks(), summary: "問題なし", ...coverageOf(10) })?.detail.crossRepoUnverified).toEqual([]);
+  });
+
   it("指摘も未確認範囲も無ければpassed", () => {
     const r = normalizeReleaseReview({ ...fullChecks(), summary: "問題なし", ...coverageOf(10) });
     expect(r).toMatchObject({ state: "passed", unverifiedScope: null });

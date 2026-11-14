@@ -409,7 +409,16 @@ def load_links(full_name):
     except (OSError, ValueError):
         return []
     links = data.get(full_name) if isinstance(data, dict) else None
-    return [l for l in links or [] if isinstance(l, dict) and l.get("provider") and l.get("patterns")]
+    return [l for l in links or [] if isinstance(l, dict) and link_repo(l) and l.get("patterns")]
+
+
+def link_repo(link):
+    """設定の相手リポジトリと向き。`provider`は候補が呼ぶ側、`consumer`は候補のAPI・DBを読む利用側（#5378）。"""
+    if isinstance(link.get("provider"), str) and link["provider"]:
+        return link["provider"], "provider"
+    if isinstance(link.get("consumer"), str) and link["consumer"]:
+        return link["consumer"], "consumer"
+    return None
 
 
 def linked_repos(worktree, full_name, base, head, outdir):
@@ -428,8 +437,11 @@ def linked_repos(worktree, full_name, base, head, outdir):
         trig = [glob_re(t) for t in link.get("triggers") or []]
         if trig and not any(r.search(n) for r in trig for n in changed):
             continue
-        p_owner, _, p_repo = link["provider"].partition("/")
-        entry = {"provider": link["provider"], "reason": link.get("reason"), "configuredIn": "scripts/release-review-links.json"}
+        other, role = link_repo(link)
+        p_owner, _, p_repo = other.partition("/")
+        entry = {role: other, "reason": link.get("reason"), "configuredIn": "scripts/release-review-links.json"}
+        if role == "consumer":  # 呼び先の連携は従来の形のまま（指紋を変えて再評価を起こさない）
+            entry["role"] = role
         if p_owner not in ALLOWED_OWNERS or not p_repo:
             entry.update(classification="資料未取得", error="許可された管理対象外のため取得しない")
             results.append(entry)
@@ -772,7 +784,8 @@ def prepare(worktree, full_name, base, head, output):
     linked = linked_repos(worktree, full_name, base, head, output)
     # 連携先の型定義はapiContractsにも載せる（呼び出し側が読む値の型の根拠。#5223）
     contracts += [{"provider": l["provider"], "path": "(型定義)", "codeAtDeployCandidate": l["typeDefinitions"],
-                   "deployCandidate": {"kind": "連携先mainの先端（設定指定。稼働SHAは未確認）", **l["pinned"]}} for l in linked if l.get("typeDefinitions")]
+                   "deployCandidate": {"kind": "連携先mainの先端（設定指定。稼働SHAは未確認）", **l["pinned"]}}
+                  for l in linked if l.get("typeDefinitions") and l.get("provider")]
     secrets = secret_registrations(worktree, full_name, base, head)
     manifest = {"target": full_name, "resolved": records, "apiContracts": contracts, "linkedRepos": linked, "secretRegistrations": secrets, "omittedContracts": max(0, len(discovered) - MAX_CONTRACTS),
                 "rcPulls": PR_SOURCES, "omittedRefs": omitted, "judgeVersion": JUDGE_VERSION,
@@ -806,6 +819,11 @@ def prepare(worktree, full_name, base, head, output):
               "`developOnly.files`が空でなければ、連携先の対応がmainに未反映（develop止まり）の疑いとして指摘します。"
               "`classification`や`missing`があるものは**資料不足であって不整合の疑いではありません**。"
               "『資料不足』と『不整合の疑い』を別の見出しで報告し、資料不足には確認に足すもの（設定のpatterns・連携先のリリース状況など）を必ず添えてください。")
+    if any(l.get("role") == "consumer" for l in linked):
+        print("`role`が`consumer`の`linkedRepos`は、**この候補のAPI・DBを読む利用側**のリポジトリです（`consumer`が利用側、`reason`が利用の内容）。"
+              "候補が項目・形・意味を変えた（削除・改名・型変更・必須化など）APIについて、利用側の`code`・`typeDefinitions`がその項目を読んで壊れるかを実コードで判定してください。"
+              "壊れる（実行時エラー・誤表示・誤った値で処理が進む）なら`pr_interaction`の指摘にします。値をそのまま返すだけで壊れず、型・説明の食い違いだけが残るなら止めない提案にし、"
+              "`pr_interaction`は根拠（読んだ利用側のファイル）を添えて`confirmed`にします。")
     if any((x.get("counterpart") or {}).get("status") in ("not_implemented", "develop_only") for x in [*contracts, *linked]):
         print("`counterpart`は、ランナーが連携先の`main`（固定SHA）と`develop`の実物を機械的に確かめた分類です（Issueのopen/closedは根拠にしていません）。"
               "`status`が`not_implemented`（どちらのブランチにも無い）の連携先は、公開しても相手側から呼ばれず影響が無いため、**その連携先を理由に確認項目を`unconfirmed`にせず**、"

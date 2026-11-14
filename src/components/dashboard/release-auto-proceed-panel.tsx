@@ -16,6 +16,8 @@ import {
   type BulkDecisionRow,
 } from "@/lib/release-review-bulk";
 import { RELEASE_REVIEW_DECISION_LABEL, type ReleaseReviewDecisionKind } from "@/lib/release-review-decision";
+import type { CrossRepoIssueDraft } from "@/lib/release-review-cross-repo";
+import { describeUnresolvableCause } from "@/lib/release-review-guidance";
 import type { ReleaseVerificationSummary } from "@/lib/release-verification-summary";
 import { cn } from "@/lib/utils";
 
@@ -42,7 +44,8 @@ const SEVERITY_TONE = {
  * - `table`: 未判断の止める指摘がある。判定表を見せ、一括確定してから系列を始める（#5138）
  * - `start`: 判断済みで「今回直す」指摘が残る、または統合検証が失敗した。表なしで系列を始める
  * - `unresolvable`: 指摘0件で、再評価を終えても全体レビューの要確認だけが残った。直すコードが無く、系列を
- *   始めても同じ理由で止まるため、ボタンを出さずに再実行・判断の欄へ案内する
+ *   始めても同じ理由で止まるため、ボタンを出さずに再実行・判断の欄へ案内する。文言は原因別に出し分け、
+ *   他リポジトリが原因なら利用側への確認Issueの下書きを出す（#5378。`describeUnresolvableCause`）
  * - `null`: 出さない（系列が動いている・直すものが無い・全体レビューの実行中や再評価中）
  */
 export type AutoProceedMode = "table" | "start" | "unresolvable";
@@ -267,21 +270,29 @@ export function ReleaseAutoProceedPanel({ repositoryFullName, pullRequestNumber,
 
   const mode = decideAutoProceedMode(verification, false);
   if (mode === "unresolvable") {
+    // 原因別に出し分ける（#5378）。他リポジトリが原因なら、利用側への確認Issueの下書きを出す
+    const cause = describeUnresolvableCause(verification, { repositoryFullName, pullRequestNumber });
     return (
       <section
         aria-label="次の操作"
         className={cn("flex flex-col gap-1.5 rounded-[10px] border-[1.5px] border-amber-600/70 bg-amber-500/5 p-3.5 text-sm", className)}
         data-testid="release-auto-proceed-unresolvable"
+        data-cause={cause.kind}
       >
         <span className="text-xs text-muted-foreground">次の操作</span>
-        <h3 className="text-[15px] font-semibold text-balance">自動修正では解消できません</h3>
-        <p className="break-words text-xs text-muted-foreground">
-          指摘は0件で、全体レビューが確認しきれなかった項目だけが残っています。直すコードが無いため、修正を続けても同じ理由で止まります。全体レビューを再実行するか、内容を確かめて判断してください。
-        </p>
+        <h3 className="text-[15px] font-semibold text-balance">{cause.title}</h3>
+        <p className="break-words text-xs text-muted-foreground">{cause.description}</p>
+        {cause.drafts.length > 0 && (
+          <ul className="flex flex-col gap-2" aria-label="利用側リポジトリへの確認Issueの下書き">
+            {cause.drafts.map((draft) => (
+              <CrossRepoDraftItem key={draft.repository} draft={draft} />
+            ))}
+          </ul>
+        )}
         {manualHref && (
-          <Button asChild className="min-h-11 w-full gap-1.5 px-4 text-sm font-bold sm:w-fit">
+          <Button asChild variant={cause.drafts.length > 0 ? "outline" : "default"} className="min-h-11 w-full gap-1.5 px-4 text-sm font-bold sm:w-fit">
             <a href={manualHref} data-testid="release-auto-proceed-unresolvable-link">
-              下の「現在候補の検証」で再実行・判断する ↓
+              {cause.kind === "cross_repo" ? "下の「現在候補の検証」で判断メモを残す ↓" : "下の「現在候補の検証」で再実行・判断する ↓"}
             </a>
           </Button>
         )}
@@ -465,6 +476,30 @@ function DecisionRow({
               ? `推奨を作れませんでした${failure ? `（${failure}）` : ""}。「今回直す」で入れています`
               : "推奨の必須項目が揃っていないため、「今回直す」で入れています"}
       </p>
+    </li>
+  );
+}
+
+function CrossRepoDraftItem({ draft }: { draft: CrossRepoIssueDraft }) {
+  return (
+    <li className="flex flex-col gap-1.5 rounded-md border bg-card p-2.5" data-testid="release-auto-proceed-cross-repo-draft">
+      <span className="break-all text-xs font-semibold">{draft.repository}</span>
+      <details className="text-xs">
+        <summary className="cursor-pointer text-muted-foreground">下書きを見る: {draft.title}</summary>
+        <pre className="mt-1 max-h-60 overflow-auto whitespace-pre-wrap break-words rounded bg-muted/40 p-2 text-[11px]">{draft.body}</pre>
+      </details>
+      <div className="flex flex-col gap-1.5 sm:flex-row">
+        <Button asChild variant="outline" size="sm" className="min-h-9">
+          <a href={draft.searchUrl} target="_blank" rel="noreferrer">
+            既存のIssueを探す
+          </a>
+        </Button>
+        <Button asChild size="sm" className="min-h-9">
+          <a href={draft.newIssueUrl} target="_blank" rel="noreferrer" data-testid="release-auto-proceed-cross-repo-create">
+            下書きでIssueを起こす（GitHub）
+          </a>
+        </Button>
+      </div>
     </li>
   );
 }

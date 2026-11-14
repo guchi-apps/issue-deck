@@ -33,6 +33,7 @@ import { describeReleaseReviewDiagnostic } from "@/lib/release-review-diagnostic
 import { POLLER_EXPLANATION, type ReleaseOpsAssessment } from "@/lib/release-review-ops-evidence";
 import { describeIntegrationResume } from "@/lib/release-integration-rerun-view";
 import { describeReviewRerun, type ReviewRerunView } from "@/lib/release-review-rerun-view";
+import { checkItemLabel } from "@/lib/release-review-checklist";
 import { describeReviewStageLabel, REVIEW_OPEN_ITEM_LABEL } from "@/lib/release-review-reevaluation";
 import {
   formatReleaseElapsed,
@@ -767,6 +768,7 @@ function AiReviewSection({
     section.findings.length > 0 ||
     section.suggestions.length > 0 ||
     section.counterpartNotes.length > 0 ||
+    (section.crossRepoUnverified?.length ?? 0) > 0 ||
     section.review !== null ||
     section.totalFiles !== null ||
     needsFix ||
@@ -980,6 +982,25 @@ function AiReviewSection({
                 {section.counterpartNotes.map((note, index) => (
                   <li key={`${note}-${index}`} className="whitespace-pre-wrap rounded bg-muted/30 px-2 py-1 text-muted-foreground">
                     {note}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {(section.crossRepoUnverified?.length ?? 0) > 0 && (
+            <div className="flex flex-col gap-1" data-testid="release-review-cross-repo">
+              <span className="text-muted-foreground">
+                他リポジトリの確認が必要な項目 {section.crossRepoUnverified?.length}件（利用側・呼び先のコードが資料に無く、再実行では解消しません）
+              </span>
+              <ul className="flex flex-col gap-1">
+                {section.crossRepoUnverified?.map((item, index) => (
+                  <li key={`${item.repository}-${item.checkId ?? ""}-${index}`} className="flex flex-col gap-0.5 rounded bg-muted/30 px-2 py-1 text-muted-foreground">
+                    <span className="break-all font-medium text-foreground">
+                      {item.repository}
+                      {item.checkId ? `（${checkItemLabel(item.checkId)}）` : ""}
+                    </span>
+                    {item.usage && <span className="whitespace-pre-wrap break-words">利用箇所: {item.usage}</span>}
+                    {item.reason && <span className="whitespace-pre-wrap break-words">未確認: {item.reason}</span>}
                   </li>
                 ))}
               </ul>

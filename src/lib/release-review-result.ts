@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 
 import type { ReleaseVerificationState } from "@/lib/release-merge-gate";
+import { normalizeCrossRepoUnverified, type ReleaseReviewCrossRepoItem } from "@/lib/release-review-cross-repo";
 import {
   RELEASE_REVIEW_CHECKLIST_VERSION,
   RELEASE_REVIEW_CHECK_ITEM_IDS,
@@ -201,6 +202,11 @@ export type ReleaseReviewDetail = {
    * 旧ランナー・保存済みの旧記録には無いので空配列として読む
    */
   counterpartNotes: string[];
+  /**
+   * 別リポジトリのコードが無くて確認できなかった未確認（#5378）。画面が原因を出し分け、利用側への確認Issueの下書きを出す。
+   * 判定・ゲートは変えない。旧ランナー・保存済みの旧記録には無いので空配列として読む
+   */
+  crossRepoUnverified: ReleaseReviewCrossRepoItem[];
   affectedPullRequests: number[];
   affectedFiles: string[];
   /** 根拠つきで確認済みと判断できたファイル数。入力へ載せた数ではない。実績を確かめられない旧結果ではnull */
@@ -661,6 +667,7 @@ export function normalizeReleaseReview(
       suggestions,
       review,
       counterpartNotes: counterpartNotes(raw.counterpartNotes),
+      crossRepoUnverified: normalizeCrossRepoUnverified(raw.crossRepoUnverified, checks),
       affectedPullRequests: [
         ...new Set([...prNumbers(raw.affectedPullRequests), ...blockingFindings.flatMap((f) => f.pullRequests)]),
       ],

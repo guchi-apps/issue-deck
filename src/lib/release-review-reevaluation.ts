@@ -322,6 +322,8 @@ export type ReviewOpenItemKind =
   | "review_unconfirmed"
   /** 証跡に依存しない未確認の確認項目（統合検証を待っても変わらない。#4767） */
   | "check_unconfirmed"
+  /** 別リポジトリ（利用側・呼び先）のコードが無くて確認できない（#5378。再実行・自動修正では変わらない） */
+  | "cross_repo"
   /** コードの未読範囲が残っている */
   | "code_unread";
 
@@ -372,6 +374,7 @@ export const REVIEW_OPEN_ITEM_LABEL: Record<ReviewOpenItemKind, string> = {
   evidence_waiting: "実行結果の証跡待ち",
   review_unconfirmed: "レビューの未確認事項（統合検証は成功）",
   check_unconfirmed: "証跡に依存しない未確認の確認項目",
+  cross_repo: "他リポジトリの確認が必要な項目",
   code_unread: "コードの未確認範囲",
 };
 
@@ -390,7 +393,7 @@ export type ReviewStageInput = {
   state: string;
   updatedAt: string | null;
   findingsCount: number;
-  checks: readonly { status: string; evidence?: string | null }[] | null;
+  checks: readonly { id?: string; status: string; evidence?: string | null }[] | null;
   openFiles: number;
   unverifiedScope: string | null;
   reason: string | null;
@@ -404,6 +407,8 @@ export type ReviewStageInput = {
   opsReevaluation?: ReviewOpsReevaluation | null;
   /** 結果を出したホストの事実（#5111）。印と同じ事実なら、その再評価の結果 */
   hostFacts?: ReviewHostFacts | null;
+  /** 別リポジトリのコードが無くて未確認にした項目（#5378）。`checkId`がnullのものは項目を特定できない */
+  crossRepoUnverified?: readonly { checkId: string | null }[];
 };
 
 /**
@@ -471,9 +476,18 @@ export function describeReviewEvidenceStage(
     else items.push("review_unconfirmed");
   }
   // 証跡にも運用作業にも当たらない未確認（読み切れなかった観点など）。再評価では変わらないので別に出す
-  if (unconfirmed.some((c) => !checkDependsOnEvidence(c) && !findOpsRequest([c.evidence ?? null]))) {
+  // 他リポジトリが理由と報告された項目は、そちらで出す（#5378）
+  const crossRepo = review.crossRepoUnverified ?? [];
+  const crossRepoChecks = new Set(crossRepo.flatMap((c) => (c.checkId ? [c.checkId] : [])));
+  if (
+    unconfirmed.some(
+      (c) =>
+        !checkDependsOnEvidence(c) && !findOpsRequest([c.evidence ?? null]) && !(c.id !== undefined && crossRepoChecks.has(c.id)),
+    )
+  ) {
     items.push("check_unconfirmed");
   }
+  if (crossRepo.length > 0) items.push("cross_repo");
   if (review.openFiles > 0) items.push("code_unread");
   const opsReevaluated =
     opsMarker !== null &&
