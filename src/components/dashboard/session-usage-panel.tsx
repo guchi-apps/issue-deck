@@ -1,6 +1,6 @@
 "use client";
 
-import { Fragment, memo, type CSSProperties, type ReactNode, useState } from "react";
+import { Fragment, memo, type CSSProperties, type ReactNode, useEffect, useRef, useState } from "react";
 import { ChevronRight, ExternalLink, Loader2, RefreshCw } from "lucide-react";
 
 import { ClaudeUsageCard } from "@/components/dashboard/claude-usage-card";
@@ -1905,8 +1905,15 @@ const PlanUsageSection = memo(function PlanUsageSection({
 });
 
 /** GitHub REST枠（#5391）。プラン枠と同じく期間の切り替えには連動しない。 */
-function GithubRestUsageSection() {
-  const { data, error, isLoading } = useGithubRestUsage();
+function GithubRestUsageSection({ refreshSignal }: { refreshSignal: number }) {
+  const { data, error, isLoading, refresh } = useGithubRestUsage();
+  // 更新ボタンが押されるたびに再取得する（初回マウント時は上のフックが取得済み）
+  const lastSignal = useRef(refreshSignal);
+  useEffect(() => {
+    if (lastSignal.current === refreshSignal) return;
+    lastSignal.current = refreshSignal;
+    refresh();
+  }, [refreshSignal, refresh]);
   return (
     <section className="rounded-lg border p-3">
       <p className="mb-1 text-xs font-semibold">GitHub REST（GitHub App）</p>
@@ -1931,6 +1938,8 @@ export function SessionUsagePanel({
   className,
 }: SessionUsagePanelProps) {
   const [visibleIssues, setVisibleIssues] = useState(VISIBLE_ISSUES_STEP);
+  // 更新ボタンの押下回数。GitHub REST枠の再取得の合図に使う（#5391）
+  const [refreshCount, setRefreshCount] = useState(0);
   // 日別・リポジトリ別・種別別を何で測るか（#4285）。集計期間の下のカードで切り替える
   const [basis, setBasis] = useState<UsageBasis>("cost");
   // 「リポジトリ別」の全件の表（#3423）。円グラフは3%以上＋その他なので、3%未満の金額はここで読む
@@ -1977,7 +1986,10 @@ export function SessionUsagePanel({
           variant="outline"
           size="icon"
           className="ml-auto size-7 shrink-0"
-          onClick={onRefresh}
+          onClick={() => {
+            setRefreshCount((count) => count + 1);
+            onRefresh();
+          }}
           title="更新"
         >
           {isLoading ? (
@@ -2013,7 +2025,7 @@ export function SessionUsagePanel({
         error={plan.error}
       />
 
-      <GithubRestUsageSection />
+      <GithubRestUsageSection refreshSignal={refreshCount} />
 
       {/* 期間の選択は**プラン枠の下**（#3257）。切り替わるのはこの下の集計だけで、プラン枠と
           実行中のセッションは期間に連動しない */}
