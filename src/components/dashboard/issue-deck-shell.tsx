@@ -2501,6 +2501,7 @@ export function IssueDeckShell({
                     active={remoteSessionModalOpen}
                     hideHeader
                     pinActiveList
+                    ignoreRequestedRepository
                   />
                 </DialogContent>
               </Dialog>
@@ -2568,7 +2569,12 @@ export function IssueDeckShell({
           {filters.pane === "remote-sessions" ? (
             <div className="hidden flex-1 overflow-hidden p-4 md:block">
               <div className="mx-auto h-full max-w-6xl">
-                <RemoteSessionView repositories={remoteSessionRepositories} active={filters.pane === "remote-sessions"} />
+                {/* スマホ幅では描かない（#5399）。この欄は`hidden`でもマウントされ、スマホ幅ではリポジトリの
+                    詳細を下端のシート（ポータル）で開くため、`pane`と`rsrepo`がURLに残っている間は
+                    スマホの画面へ戻った後もシートだけが画面の上に出続けていた */}
+                {!isMobileViewport && (
+                  <RemoteSessionView repositories={remoteSessionRepositories} active={filters.pane === "remote-sessions"} />
+                )}
               </div>
             </div>
           ) : filters.pane === "ios-extensions" ? (

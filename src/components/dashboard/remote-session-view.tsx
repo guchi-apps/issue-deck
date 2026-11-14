@@ -66,6 +66,7 @@ export function RemoteSessionView({
   onBack,
   hideHeader = false,
   pinActiveList = false,
+  ignoreRequestedRepository = false,
 }: {
   /** 一覧に並べるリポジトリ（アーカイブ済み・非表示は呼び出し側で除く） */
   repositories: ConnectedRepository[];
@@ -75,6 +76,11 @@ export function RemoteSessionView({
   hideHeader?: boolean;
   /** 起動中のセッションを最下部に固定して出し、終了できるようにする（#5277） */
   pinActiveList?: boolean;
+  /**
+   * URLの`rsrepo`（「リモートセッションで聞く」の指定）を読まない（#5399）。右下のボタンから開く
+   * モーダルは、URLに残った指定で詳細シートが勝手に開かないよう、指定に関わらず一覧から始める
+   */
+  ignoreRequestedRepository?: boolean;
 }) {
   const isDesktop = useMediaQuery("(min-width: 768px)");
   const remote = useRemoteSessions({ active });
@@ -82,7 +88,9 @@ export function RemoteSessionView({
   // Issue詳細の「リモートセッションで聞く」（#5047）から開いたときは、そのリポジトリを選んでおく。
   // 読むのは開いた時点だけで、あとは画面での選択に従う
   const searchParams = useSearchParams();
-  const [requested] = useState(() => searchParams.get(REMOTE_SESSION_REPOSITORY_PARAM));
+  const [requested] = useState(() =>
+    ignoreRequestedRepository ? null : searchParams.get(REMOTE_SESSION_REPOSITORY_PARAM),
+  );
   const [selected, setSelected] = useState<string | null>(requested);
   // スマホは一覧と詳細シートが別なので、リポジトリを指定して開いたときは詳細シートまで開く
   // （PCではシートを描かないので、この初期値は効かない）

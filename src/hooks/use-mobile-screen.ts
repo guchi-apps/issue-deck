@@ -6,6 +6,7 @@ import { useCallback, useMemo } from "react";
 import type { MobileBottomNavTab } from "@/components/dashboard/mobile-bottom-nav";
 import { useHistoryNavigation, type HistoryMode } from "@/hooks/use-history-navigation";
 import type { IssueSort, IssueStateFilter } from "@/hooks/use-issue-filters";
+import { REMOTE_SESSION_REPOSITORY_PARAM } from "@/lib/dispatch/remote-session-rules";
 import {
   getNavViewDefaultState,
   isNavViewId,
@@ -283,6 +284,12 @@ export function useMobileScreen(issues: Issue[], repositories: ConnectedReposito
         // ここで一律に消してよい（`use-issue-filters.ts`の`selectPullRequest`・
         // `use-reference-navigation.ts`の`openPullRequest`）。
         params.delete("pr");
+
+        // リモートセッション画面を開くときのリポジトリ指定（`rsrepo`。#5047）も落とす（#5399）。
+        // 開いた時点で一度だけ読むものなので、残すと後で開いたリモートセッション画面
+        // （ホームのメニュー・右下のボタン）でも、そのリポジトリの詳細シートが勝手に開く。
+        // 指定して開く経路（`use-reference-navigation.ts`の`openRemoteSessions`）はここを通らない
+        params.delete(REMOTE_SESSION_REPOSITORY_PARAM);
 
         if (next.repo) {
           params.set("mrepo", next.repo);

@@ -86,6 +86,18 @@ describe("useMobileScreen の履歴の積み方（#1396）", () => {
     expect(urlOf(push.mock.calls[0])).not.toContain("prmodal=");
   });
 
+  // リモートセッション画面のリポジトリ指定（`rsrepo`）が残ると、後でメニューや右下のボタンから
+  // 開いたリモートセッション画面で詳細シートが勝手に開く（#5399）。
+  it("画面遷移では、リモートセッション画面のリポジトリ指定も落とす", () => {
+    const { result } = renderMobileScreen(
+      "mscreen=remote-sessions&pane=remote-sessions&rsrepo=owner%2Frepo",
+    );
+
+    act(() => result.current.selectRemoteSessions());
+
+    expect(urlOf(push.mock.calls[0])).not.toContain("rsrepo=");
+  });
+
   it("絞り込みシート内の操作（silent）は履歴を積まない", () => {
     const { result } = renderMobileScreen("mscreen=issues");
 
