@@ -18,6 +18,7 @@ import { FleetRepositoryRow } from "@/components/dashboard/fleet-repository-row"
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { Skeleton } from "@/components/ui/skeleton";
 import { useWorkflowTags } from "@/hooks/use-workflow-tags";
 import {
   propagationTargets,
@@ -463,7 +464,16 @@ export function WorkflowTagStatusView({ tags }: { tags: WorkflowTagsState }) {
       {propagateError && <p className="text-sm text-destructive">{propagateError}</p>}
 
       {!error && isLoading && !overview && (
-        <p className="text-xs text-muted-foreground">読み込み中...</p>
+        <div className="flex flex-col gap-1.5" role="status" aria-label="読み込み中">
+          <div className="flex gap-1.5">
+            <Skeleton className="h-5 w-16" />
+            <Skeleton className="h-5 w-20" />
+            <Skeleton className="h-5 w-14" />
+          </div>
+          {Array.from({ length: 4 }, (_, i) => (
+            <Skeleton key={i} className="h-9 w-full" />
+          ))}
+        </div>
       )}
 
       {overview && !overview.latest && (

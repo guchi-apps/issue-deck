@@ -17,6 +17,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Skeleton } from "@/components/ui/skeleton";
 import { useNow } from "@/hooks/use-now";
 import { useSecretsSync, type SecretsSyncRepository } from "@/hooks/use-secrets-sync";
 import { formatRelativeDate } from "@/lib/format-relative-date";
@@ -225,7 +226,11 @@ export function SecretsSyncSection({ open }: { open: boolean }) {
       </div>
 
       {!error && isLoading && repositories.length === 0 && (
-        <p className="text-xs text-muted-foreground">読み込み中...</p>
+        <div className="flex flex-col gap-1.5" role="status" aria-label="読み込み中">
+          {Array.from({ length: 4 }, (_, i) => (
+            <Skeleton key={i} className="h-9 w-full" />
+          ))}
+        </div>
       )}
 
       {repositories.length === 0 && !isLoading ? (
