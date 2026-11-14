@@ -598,6 +598,24 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
     #5373でリリース系のPR一覧（`fetchOpenPullRequestsForBase`）・`package.json`の版（`fetchPackageVersion`）・
     ブランチ先端（`fetchBranchHeadSha`）をETagへ寄せた。三点比較（`compareBranches`）は応答にファイル差分を
     含み大きく、プロセス内キャッシュへ常駐させると本番のメモリを圧迫するため寄せていない
+  - **繰り返し呼ばれるREST取得の一覧**（#5380時点のコードから。量は26リポジトリでの推定で、正は上の
+    `features`の実測）。巡回の間隔はサーバー側の`lastSweptAt`（プロセス内）で間引くため、再起動直後は全巡回が即走る。
+
+    | 経路 | 間隔 | 何に比例するか | ETag |
+    |---|---|---|---|
+    | PR画面の一覧（`/api/pull-requests`。open・`scope=all`のclosed） | 10秒（Issue一覧のPR待ち行は60秒） | リポジトリ数 | あり（`fetchPullRequestPage`） |
+    | 衝突巡回・レビュー停滞／引き継ぎの救済（`conflict-sweep`・`auto-repair-sweep`内） | 5分・3分 | リポジトリ数 | あり（`fetchOpenPullRequests`） |
+    | リリース通知の巡回（`release-push-sweep`・`release-merge-push-sweep`） | 5分・10分 | リポジトリ数 | 大半あり（#5373でPR一覧も） |
+    | 進捗巡回（`progress-sweep-run.ts`） | 5分 | 盤面の対象Issue数（1件あたり数〜十数回） | ほぼ無し（`fetchPullRequestsForHead`・`compareBranches`・`fetchCommentsForIssue`は素のGET。`fetchBranchHeadSha`のみ） |
+    | Issue詳細のPR（`/api/issues/pull-requests`。CI実行中のみ） | 20秒 | 表示中のPR数（`fetchPullRequest`） | 無し |
+    | Issue一覧の実行中表示（`/api/issues/workflow-running`） | 20秒 | 実行中のIssue数（`fetchWorkflowRun`＋`fetchWorkflowRunJobs`） | 無し |
+    | Issue詳細のコメント再取得（`/api/issues/comments`） | 60秒 | 開いているIssue（ページング） | 無し |
+    | 自動修復ループ（`auto-repair-sweep`のrunning分） | 30秒 | 稼働中のループ数 | 無し |
+    | 稼働中の系列（本番復旧・リリース完了・修正系列・依存待ち・親run） | 30〜60秒 | 稼働中の系列数（普段は0） | 無し |
+
+    一覧系はETag済みで、変化が無ければ枠を消費しない。**素のGETで対象件数に比例するもの（進捗巡回と
+    20秒ポーリング）が、削減の候補になる。** Actionsで定期起動するのは`claude-conflict-resolve.yml`の
+    15分cronだけで、検出は`github.token`で行うため、App枠を使うのは衝突があるときに限られる。
   障害状況カードの右上には、`GET /api/github/status`が返す`fetchedAt`を「取得 10/3 13:15」の形で出す。
   カードはPC・スマホ共通の`settings/status-section.tsx`が組み立てる。
 - **issue-deck自身が投げたAI API呼び出しは、機能別に計上している（画面には出さない）**（#2347）。
