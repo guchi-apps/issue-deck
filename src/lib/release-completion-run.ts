@@ -28,7 +28,8 @@ import { LOCAL_LABEL_NAME } from "@/lib/github/project-status-dispatch";
 import { fetchMainHeadSha, fetchPullRequestCiState, type GithubApiPullRequest } from "@/lib/github/release-api";
 import { sendReleaseCompletionStopPush } from "@/lib/notifications/release-completion-stop-push";
 import { isUniqueConstraintError } from "@/lib/prisma-error";
-import { loadFinalizationSnapshot, reconcileRcFinalization } from "@/lib/release-finalize-run";
+import { loadFinalizationSnapshot } from "@/lib/release-finalize-run";
+import { reconcileRcUntilSettled } from "@/lib/release-rc-reconcile";
 import { isRcReleaseCandidateHeadRef } from "@/lib/release-branch";
 import {
   decideCompletionMerge,
@@ -420,7 +421,9 @@ async function advanceRun(run: RunRow, hostName: string, now: Date): Promise<Act
 async function reconcileRcForRun(run: RunRow, ctx: Ctx): Promise<void> {
   const snapshot = await loadFinalizationSnapshot(run.repositoryFullName, run.candidatePrNumber).catch(() => null);
   if (!snapshot) return;
-  await reconcileRcFinalization(ctx, snapshot.candidateId).catch((error: unknown) =>
+  // 段階が変わる限り続けて照合する（#5404）。1回だけだと、この巡回で候補が本番反映へ進んだだけのまま、
+  // 下の本番追跡がデプロイの成功を見て系列を閉じ、稼働確認を進める者がいなくなる
+  await reconcileRcUntilSettled(ctx, snapshot.candidateId).catch((error: unknown) =>
     console.error("[release-completion] 公開準備の進行を確認できませんでした", run.id, error),
   );
 }
