@@ -294,6 +294,11 @@ export const SESSION_INTERRUPTED_REASONS = [
    * **Codexのセッションでしか付かない**（Claude Codeの転記にこのマーカーは無い）
    */
   "turn_stall",
+  /**
+   * Claude Codeのログイン（OAuth）が期限切れで、API呼び出しが`authentication_failed`で止まった（#5320）。
+   * **サブPC全体の問題**で、`/login`は人がブラウザで認証する必要がある。固定文面を送っても直らない
+   */
+  "login_expired",
 ] as const;
 
 export type SessionInterruptedReason = (typeof SESSION_INTERRUPTED_REASONS)[number];

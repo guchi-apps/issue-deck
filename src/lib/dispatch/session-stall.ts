@@ -93,6 +93,9 @@ const TURN_STALL_BODY =
  * 計画ファイルを書いたまま提示せずに止まったときの復旧文面（#4562）。引き上げコメント
  * （`buildSessionInterruptedCommentBody`）のコードブロックと同じ1行。提示だけを求め、承認は促さない。
  */
+const LOGIN_EXPIRED_BODY =
+  "Claude Codeのログインをやり直しました。ログイン切れで中断したところから作業を続けてください。";
+
 const PLAN_NOT_PRESENTED_BODY =
   "書き終えた計画をExitPlanModeで提示してください。ほかのツールを並べず、文章だけで応答を終えないでください。";
 
@@ -167,6 +170,15 @@ const STALL_NOTICES: Record<SessionInterruptedReason, SessionStallNotice> = {
         body: PLAN_NOT_PRESENTED_BODY,
       },
     ],
+  },
+  login_expired: {
+    reason: "login_expired",
+    title: "サブPCのClaude Codeのログインが切れています",
+    detail: [
+      "`Login reached its time limit · Please run /login` で止まっています（転記の末尾が`authentication_failed`）。**サブPC全体の問題**で、ログインが切れている間は新しいセッションの起動も見送られます（見送った起動は消えず、ログインが直れば流れます）。",
+      "`/login`は人がブラウザで認証する必要があり、この画面の追加指示では直せません。サブPCのtmuxで`claude`を開いて`/login`を実行してから、下のボタンで続けるよう送ってください。ログインが切れたままでは送っても同じエラーで止まります。",
+    ],
+    presets: [{ label: "ログインし直したので続けるよう送る", body: LOGIN_EXPIRED_BODY }],
   },
   classifier_blocked: {
     reason: "classifier_blocked",

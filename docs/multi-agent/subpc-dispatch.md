@@ -480,6 +480,16 @@ Codexも#3178で同じ再開を行う。`SessionStart`で控えたスレッドUU
 なお、**そもそも打ち切られにくくする**ため、ランチャーは`CLAUDE_CODE_MAX_RETRIES=15`
 （Claude Code側の上限。既定は10）を渡してセッションを起こす（`scripts/run-issue-session.sh`）。
 
+### Claude Codeのログイン切れは、再送せず起動を止めて引き上げる（#5320）
+
+ログイン（OAuth）が切れると転記の末尾は`isApiErrorMessage: true`＋`"error":"authentication_failed"`（本文は`Login reached its time limit · Please run /login`）で終わる。2026-11-11には切れたまま無人で3セッションが起動され、起動から数秒で止まったが、誰も気付かなかった。`/login`は人がブラウザで認証する操作なので、固定文面の再送では直らない。判定は`scripts/lib/login-expiry.sh`（`scripts/login-expiry.test.mjs`）。
+
+- **再送しない**: `session_resume_transcript_interrupted`はログイン切れを対象外にする（APIの一時エラーと分ける。上限まで空振りしてから引き上げる、という形を無くす）
+- **新規起動を止める**: `check_login_expiry`が毎巡、ログイン切れで止まっているセッションを探し、1本でもあれば`maxJobs: 0`・`planReviewMaxJobs: 0`でclaimする（制御ジョブだけ受け取る）。見送った起動ジョブはQUEUEDのまま残る
+- **引き上げは1回**: ホストごとに、最初に止まったセッションのIssueへ`SessionInterrupted`（原因`login_expired`）を1回送る（Issueコメント＋`00.check-user`＋`01.check-blocked`＋Push通知）。止まっているセッションの一覧を`detail`へ添える。印は`~/.local/state/issue-deck/login-expired`
+- **直ったかどうか**は`~/.claude/.credentials.json`の更新時刻で見る。`/login`で書き直されると、それより古いエラーは数えなくなり、ホールドと印が自然に解ける。止まっていたセッションへの自動送信はしない（人が画面の停滞パネルのボタンから固定の1行を送る）
+- **限界**: 検知の入口は「ログイン切れで止まったセッションがtmuxに居る」ことで、起動が1本も無いサブPCでは検知しない。最初の1本が止まってから次の巡（数十秒）で検知する
+
 ### Codexのターンが閉じないまま止まったセッションの自動再開（#3174）
 
 APIエラー（上記）はターンが`task_complete`で閉じている形だが、Codexには**ターンの開始
