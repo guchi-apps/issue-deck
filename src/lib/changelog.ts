@@ -42,6 +42,14 @@ export type ChangelogEntry = {
  */
 export const APP_CHANGELOG: ChangelogEntry[] = [
   {
+    version: "8.100.0",
+    date: "2026-11-15",
+    changes: [
+      "サブPCのClaude Codeのログインが切れたとき、それを検知して新規の実行起動を止め、利用者へ知らせるようになりました。",
+      "スマホで戻る操作やボタンを押した後に、リモートセッションのシートが勝手に開いてしまう不具合を直しました。",
+    ],
+  },
+  {
     version: "8.99.0",
     date: "2026-11-14",
     changes: [

@@ -269,7 +269,12 @@ export function buildSessionInterruptedCommentBody(params: {
           ? [
               "⚠️ このIssueのCodexセッションが、ターンを完了しないまま止まっています。",
             ]
-          : ["⚠️ このIssueの実装セッションが、APIエラーで中断したまま止まっています。"];
+          : reason === "login_expired"
+            ? [
+                "🔑 サブPCのClaude Codeのログインが切れています（`Login reached its time limit · Please run /login`）。",
+                "このIssueの実装セッションがその影響で止まっています。",
+              ]
+            : ["⚠️ このIssueの実装セッションが、APIエラーで中断したまま止まっています。"];
   lines.push(
     "",
     `- ホスト: \`${params.hostName}\``,
@@ -332,6 +337,17 @@ export function buildSessionInterruptedCommentBody(params: {
       "- 端末の承認プロンプトで許可する（3回連続で拒否されると承認プロンプトへ昇格します）",
       "- 拒否されたコマンドを人が代わりに実行し、結果をセッションへ伝える",
       "- 別の手段で進めるよう指示する",
+    );
+  } else if (reason === "login_expired") {
+    lines.push(
+      "転記の末尾が`authentication_failed`で、**サブPCのログイン（OAuth）が期限切れ**です。同じホストの",
+      "セッションは全部同じ理由で止まるため、**この通知はホストごとに1回だけ**送っています",
+      "（#5320。`scripts/lib/login-expiry.sh`）。ログインが切れている間、pollerは新しいセッションの",
+      "起動を見送ります（見送った起動は消えず、ログインが直れば流れます）。固定文面の自動再開は",
+      "送りません（送っても直らないため）。",
+      "",
+      "1. サブPCのtmuxで`claude`を開き、`/login`を実行してブラウザで認証する（人の操作が必要です）",
+      "2. 止まっているセッションへ続けるよう送る（画面の停滞パネルのボタン、または端末）",
     );
   } else if (reason === "turn_stall") {
     lines.push(
