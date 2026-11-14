@@ -1,6 +1,7 @@
 "use client";
 
 import { Badge } from "@/components/ui/badge";
+import { Skeleton } from "@/components/ui/skeleton";
 import type { GithubStatusSummary } from "@/lib/github/status";
 
 type GithubStatusListProps = {
@@ -20,7 +21,16 @@ const COMPONENT_STATUS_LABELS: Record<string, string> = {
 export function GithubStatusList({ data, isLoading, error }: GithubStatusListProps) {
   return (
     <>
-      {isLoading && <p className="text-xs text-muted-foreground">読み込み中...</p>}
+      {isLoading && !data && (
+        <div className="flex flex-col gap-3" role="status" aria-label="読み込み中">
+          <Skeleton className="h-5 w-48" />
+          <div className="flex flex-col gap-1.5">
+            {Array.from({ length: 4 }, (_, i) => (
+              <Skeleton key={i} className="h-9 w-full" />
+            ))}
+          </div>
+        </div>
+      )}
       {error && <p className="text-xs text-destructive">{error}</p>}
       {data && (
         <div className="flex flex-col gap-3">
