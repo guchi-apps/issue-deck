@@ -42,6 +42,13 @@ export type ChangelogEntry = {
  */
 export const APP_CHANGELOG: ChangelogEntry[] = [
   {
+    version: "8.98.1",
+    date: "2026-11-14",
+    changes: [
+      "PR詳細画面の「PRを自動修正」ボタンの高さを、隣のボタンと同じに揃えました。",
+    ],
+  },
+  {
     version: "8.98.0",
     date: "2026-11-14",
     changes: [

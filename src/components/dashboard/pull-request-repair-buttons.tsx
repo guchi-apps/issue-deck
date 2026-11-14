@@ -64,6 +64,8 @@ type PullRequestRepairButtonsProps = {
    */
   guidance?: boolean;
   className?: string;
+  /** ボタン本体の高さ・文字サイズ。隣のボタンと高さをそろえたいとき（#5388）に指定する。既定は`h-7` */
+  buttonClassName?: string;
 };
 
 /**
@@ -89,6 +91,7 @@ export function PullRequestRepairButtons({
   runningKind = null,
   guidance = false,
   className,
+  buttonClassName,
 }: PullRequestRepairButtonsProps) {
   const { repairPullRequest, isSubmitting, error, setError } = usePullRequestRepairMutation();
   const [isConfirmOpen, setIsConfirmOpen] = useState(false);
@@ -151,7 +154,7 @@ export function PullRequestRepairButtons({
         <Button
           size="sm"
           variant="outline"
-          className="h-7 shrink-0"
+          className={cn("h-7 shrink-0", buttonClassName)}
           disabled={isSubmitting || hasUnavailableWorkflow || runningKind !== null}
           title={
             runningKind !== null
