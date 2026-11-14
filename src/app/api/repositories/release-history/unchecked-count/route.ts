@@ -3,14 +3,13 @@ import { NextResponse } from "next/server";
 import { requireUserId } from "@/lib/auth-user";
 import { db } from "@/lib/db";
 import { withGithubApiFeature } from "@/lib/github/api-usage";
-import { getInstallationToken } from "@/lib/github/app-auth";
-import { fetchReleasesBackTo, type ReleaseHistoryItem } from "@/lib/github/release-api";
+import type { ReleaseHistoryItem } from "@/lib/github/release-api";
 import {
   buildReleaseCheckIndex,
   countUncheckedReleases,
-  hasReachedReleaseCheckSince,
   type ReleaseCheckRecord,
 } from "@/lib/release-check";
+import { loadReleaseHistoryFromCache } from "@/lib/release-history-server";
 
 /**
  * 左メニュー「リリース履歴」行・スマホのフッター「リリース」タブに出す未確認件数（#2951）。
@@ -49,6 +48,7 @@ async function handleGET() {
       createdAt: true,
       repository: {
         select: {
+          id: true,
           fullName: true,
           ownerLogin: true,
           name: true,
@@ -77,38 +77,13 @@ async function handleGET() {
     checkRecords,
   );
 
-  // 同一installationのリポジトリ間でトークン取得を使い回す（`release-history`と同じ）。
-  const tokenPromises = new Map<number, Promise<string>>();
-  function tokenFor(installationId: number): Promise<string> {
-    let token = tokenPromises.get(installationId);
-    if (!token) {
-      token = getInstallationToken(installationId);
-      tokenPromises.set(installationId, token);
-    }
-    return token;
-  }
-
-  const perRepository = await Promise.all(
-    targetRows.map(async (row): Promise<ReleaseHistoryItem[]> => {
-      try {
-        const token = await tokenFor(row.repository.installation.installationId);
-        return await fetchReleasesBackTo(
-          row.repository.ownerLogin,
-          row.repository.name,
-          token,
-          row.createdAt.getTime(),
-          hasReachedReleaseCheckSince,
-        );
-      } catch (error) {
-        // 1リポジトリの取得失敗で他リポジトリの件数まで巻き込まない（`release-history`と同じ）。
-        console.error(
-          `[GET /api/repositories/release-history/unchecked-count] ${row.repository.fullName}:`,
-          error,
-        );
-        return [];
-      }
-    }),
+  // 写しが鮮度内ならGitHubを呼ばない（#5392）。常時ポーリングされるため、枠の消費を写しの更新時だけにする。
+  // 取り直しに失敗したリポジトリは件数に含めない（従来と同じ）
+  const { loaded } = await loadReleaseHistoryFromCache(
+    targetRows.map((row) => row.repository),
+    { refresh: false },
   );
+  const perRepository: ReleaseHistoryItem[][] = loaded.map((row) => row.entries);
 
   const count = countUncheckedReleases(perRepository.flat(), checkIndex);
   return NextResponse.json({ count });
