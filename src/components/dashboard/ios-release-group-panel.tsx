@@ -17,6 +17,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
 import { useIosTestflight } from "@/hooks/use-ios-testflight";
 import { formatMonthDayTime } from "@/lib/format-date-time";
 import { buildIosDistributionFixIssueDraft, type IosDistributionFixIssueDraft } from "@/lib/ios-distribution-failure";
@@ -145,6 +146,25 @@ export function IosReleaseGroupPanel({
       window.clearTimeout(stop);
     };
   }, [launchedAt, hasRun, refresh]);
+
+  // 取得前は何も出さず、取得後に大きなパネルが挿入されて下が押し下げられるため、枠だけ先に確保する（#5406）
+  if (!data && isLoading && !error) {
+    return (
+      <section
+        aria-label="iOS配布（取得中）"
+        aria-busy="true"
+        className={cn("flex min-w-0 flex-col gap-1.5 rounded-md border px-2.5 py-1.5 text-xs", className)}
+        data-testid="ios-distribution-skeleton"
+      >
+        <div className="flex items-center gap-2">
+          <Smartphone className="size-3.5 text-muted-foreground" aria-hidden="true" />
+          <span className="font-medium">iOS配布</span>
+          <span className="text-muted-foreground">TestFlightへの配布状況を取得中…</span>
+        </div>
+        <Skeleton className="h-3 w-full" />
+      </section>
+    );
+  }
 
   if (!data || !data.available || !release || !release.merged || release.sha === null) return null;
 

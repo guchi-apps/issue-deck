@@ -1,6 +1,6 @@
 "use client";
 
-import { ExternalLink, Loader2, Plus, RefreshCw, Smartphone } from "lucide-react";
+import { ExternalLink, Plus, RefreshCw, Smartphone } from "lucide-react";
 import { useState } from "react";
 
 import {
@@ -10,6 +10,7 @@ import {
 } from "@/components/dashboard/ios-extension-issue-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
 import { useIosExtensions } from "@/hooks/use-ios-extensions";
 import { IOS_EXTENSION_KIND_LABELS } from "@/lib/ios-extensions";
 import type { Issue } from "@/types/issue";
@@ -43,7 +44,24 @@ export function IosExtensionsPanel({ active = true, onBack, onIssueCreated, star
 
       {error && <p role="alert" className="rounded-lg border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">{error}</p>}
       {isLoading && repositories.length === 0 ? (
-        <div className="flex flex-1 items-center justify-center gap-2 text-sm text-muted-foreground"><Loader2 className="animate-spin" />iOS拡張を読み込んでいます…</div>
+        <div role="status" aria-busy="true" aria-label="iOS拡張を読み込んでいます" className="space-y-3">
+          {[0, 1].map((i) => (
+            <div key={i} className="rounded-xl border bg-card shadow-sm">
+              <div className="flex items-center justify-between gap-2 border-b px-4 py-2.5">
+                <Skeleton className="h-4 w-40" />
+                <Skeleton className="h-7 w-28" />
+              </div>
+              <div className="divide-y">
+                {[0, 1].map((j) => (
+                  <div key={j} className="flex items-center justify-between gap-2 px-4 py-2.5">
+                    <div className="flex-1 space-y-1.5"><Skeleton className="h-4 w-1/3" /><Skeleton className="h-3 w-2/3" /></div>
+                    <Skeleton className="h-7 w-20" />
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
       ) : repositories.length === 0 && !error ? (
         <div className="rounded-xl border border-dashed p-10 text-center text-sm text-muted-foreground">iOSアプリのリポジトリが接続されていません。</div>
       ) : (

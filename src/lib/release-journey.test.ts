@@ -287,6 +287,14 @@ describe("resolveReleaseJourney（新方式の候補・#5076）", () => {
     expect(stopped?.owner).toBe("user");
   });
 
+  it("デプロイが済んだのに段階が本番反映のままなら、稼働確認を自動の待ちとして出す（#5404）", () => {
+    const journey = run({ detached: facts({ phase: "deploying" }), deploy: deploy({ kind: "success" }) });
+    expect(states(journey)).toEqual(["done", "done", "done", "done", "done", "done", "waiting"]);
+    expect(journey?.headline).toMatchObject({ key: "prod", label: "稼働版の確認待ち", tone: "waiting" });
+    expect(journey?.owner).toBe("auto");
+    expect(journey?.next).toContain("操作は不要");
+  });
+
   it("画面の取得に失敗している間は、動いている工程を取得不能にする", () => {
     const journey = run({ detached: facts({ phase: "deploying" }), snapshot: { failed: true } });
     expect(journey?.steps.find((s) => s.key === "deploy")?.state).toBe("unknown");
