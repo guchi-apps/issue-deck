@@ -5,6 +5,8 @@ import { ChevronRight, ExternalLink, Loader2, RefreshCw } from "lucide-react";
 
 import { ClaudeUsageCard } from "@/components/dashboard/claude-usage-card";
 import { CodexUsageCard } from "@/components/dashboard/codex-usage-card";
+import { GithubRestUsageCard } from "@/components/dashboard/github-rest-usage-card";
+import { useGithubRestUsage } from "@/hooks/use-github-rest-usage";
 import { RepositoryUsageTable } from "@/components/dashboard/repository-usage-table";
 import { RepositoryPieChart } from "@/components/dashboard/repository-pie-chart";
 import { Button } from "@/components/ui/button";
@@ -1902,6 +1904,17 @@ const PlanUsageSection = memo(function PlanUsageSection({
   );
 });
 
+/** GitHub REST枠（#5391）。プラン枠と同じく期間の切り替えには連動しない。 */
+function GithubRestUsageSection() {
+  const { data, error, isLoading } = useGithubRestUsage();
+  return (
+    <section className="rounded-lg border p-3">
+      <p className="mb-1 text-xs font-semibold">GitHub REST（GitHub App）</p>
+      <GithubRestUsageCard data={data} isLoading={isLoading} error={error} />
+    </section>
+  );
+}
+
 /** 明細に出すIssueの件数。全部並べると30日で数百行になり、上位が読めなくなる */
 const VISIBLE_ISSUES_STEP = 20;
 
@@ -1999,6 +2012,8 @@ export function SessionUsagePanel({
         isLoading={plan.data === null && plan.error === null}
         error={plan.error}
       />
+
+      <GithubRestUsageSection />
 
       {/* 期間の選択は**プラン枠の下**（#3257）。切り替わるのはこの下の集計だけで、プラン枠と
           実行中のセッションは期間に連動しない */}
