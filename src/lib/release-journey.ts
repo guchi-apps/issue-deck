@@ -438,6 +438,8 @@ export function resolveReleaseJourney({
     if (rc && rank !== null) {
       if (rank === 4) d.deploy = rc.productionStopLabel ? draft("failed", `稼働確認が停止（${rc.productionStopLabel}）`) : liveDeploy ? deployDraft(liveDeploy) : draft("running", "本番反映中");
       else if (rank >= 5) d.deploy = draft("done");
+      // デプロイは済んだが、候補の段階がまだ本番反映のまま（#5404）。稼働確認は巡回が自動で進めるので「まだ」にせず待ちとして出す
+      if (rank === 4 && d.deploy.state === "done") d.prod = draft("waiting", "稼働版の確認待ち", "デプロイが成功しました。稼働中の版を自動で確かめて完了にします。操作は不要です");
       if (rank === 5) d.prod = rc.productionStopLabel ? draft("failed", `稼働確認が停止（${rc.productionStopLabel}）`) : draft("running", "稼働版を照合中");
       else if (rank >= 6) d.prod = draft("done");
     }

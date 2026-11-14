@@ -1,8 +1,23 @@
-import { beforeEach, expect, it, vi } from "vitest";
-const mocks = vi.hoisted(() => ({ load: vi.fn(), reconcile: vi.fn(), successor: vi.fn() }));
+import { beforeEach, describe, expect, it, vi } from "vitest";
+const mocks = vi.hoisted(() => ({
+  load: vi.fn(),
+  reconcile: vi.fn(),
+  successor: vi.fn(),
+  candidates: vi.fn(),
+  check: vi.fn(),
+  repository: vi.fn(),
+}));
 vi.mock("@/lib/release-rc-run", () => ({ loadCandidateRow: mocks.load }));
 vi.mock("@/lib/release-finalize-run", () => ({ reconcileRcFinalization: mocks.reconcile, reconcileSuccessorWaiting: mocks.successor }));
-import { reconcileActiveRcPublication } from "@/lib/release-rc-reconcile";
+vi.mock("@/lib/github/app-auth", () => ({ getInstallationToken: vi.fn(async () => "t") }));
+vi.mock("@/lib/db", () => ({
+  db: {
+    releaseCandidate: { findMany: mocks.candidates },
+    releaseProductionCheck: { findUnique: mocks.check },
+    repository: { findFirst: mocks.repository },
+  },
+}));
+import { reconcileActiveRcPublication, reconcileRcUntilSettled, runRcProductionSweep } from "@/lib/release-rc-reconcile";
 const ctx = { owner: "o", repo: "r", token: "t" };
 const row = (phase: string, activeKey: string | null = "o/r") => ({ id: "c1", phase, activeKey });
 beforeEach(() => vi.resetAllMocks());
@@ -43,4 +58,43 @@ it("後続の確認を待つ候補（#4712）を、候補の枠の照合より�
   await reconcileActiveRcPublication(ctx);
   expect(mocks.successor).toHaveBeenCalledWith(ctx);
   expect(mocks.reconcile).not.toHaveBeenCalled();
+});
+
+it("系列の照合も、段階が変わる限り続けて稼働確認まで進める（#5404）", async () => {
+  mocks.load.mockResolvedValueOnce(row("awaiting_approval")).mockResolvedValueOnce(row("deploying")).mockResolvedValueOnce(row("completed", null));
+  await reconcileRcUntilSettled(ctx, "c1");
+  expect(mocks.reconcile).toHaveBeenCalledTimes(2);
+});
+
+describe("本番反映中の候補の巡回（#5404）", () => {
+  const now = new Date("2026-11-14T05:00:00Z");
+  beforeEach(() => {
+    mocks.candidates.mockResolvedValue([{ id: "c1", repositoryFullName: "o/r" }]);
+    mocks.repository.mockResolvedValue({ installation: { installationId: 1 } });
+  });
+
+  it("完了系列が閉じた後も、取り残された候補を照合して完了まで進める", async () => {
+    mocks.check.mockResolvedValue({ lastObservedAt: new Date(now.getTime() - 5 * 60_000) });
+    mocks.load.mockResolvedValueOnce(row("deploying")).mockResolvedValueOnce(row("completed", null));
+    expect(await runRcProductionSweep({ now })).toEqual({ scanned: 1, reconciled: 1 });
+    expect(mocks.reconcile).toHaveBeenCalledWith({ owner: "o", repo: "r", token: "t" }, "c1");
+  });
+
+  it("直近に観測した候補は間引き、GitHubへ問い合わせない", async () => {
+    mocks.check.mockResolvedValue({ lastObservedAt: new Date(now.getTime() - 10_000) });
+    expect(await runRcProductionSweep({ now })).toEqual({ scanned: 1, reconciled: 0 });
+    expect(mocks.reconcile).not.toHaveBeenCalled();
+  });
+
+  it("1候補の失敗で巡回全体を落とさない", async () => {
+    mocks.candidates.mockResolvedValue([
+      { id: "c1", repositoryFullName: "o/r" },
+      { id: "c2", repositoryFullName: "o/s" },
+    ]);
+    mocks.check.mockResolvedValue(null);
+    mocks.load.mockImplementation(async ({ id }: { id: string }) => ({ id, phase: "deploying", activeKey: id === "c1" ? "o/r" : "o/s" }));
+    mocks.reconcile.mockRejectedValueOnce(new Error("GitHub unavailable"));
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    expect(await runRcProductionSweep({ now })).toEqual({ scanned: 2, reconciled: 1 });
+  });
 });

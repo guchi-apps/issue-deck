@@ -1257,6 +1257,8 @@ mainへ出した候補は、稼働版の証拠が揃うまで「稼働確認中�
 - 完了にした方式と証拠（run URL・照合した応答・Release URL・確認内容）は`ReleaseProductionCheck.method`・`evidence`に残し、書き換えない
 - 恒久的には、各repoのdeploy.ymlへ稼働SHAの照合を足せば従来の方式で自動的に完了する。その改修はrepoごとのIssueで行う（このIssueでは他repoを触らない）
 - リリース完了系列（#4480）・本番復旧系列（#4007）の追跡は従来の`hasVersionVerification`のままで、上の経路で候補が完了しても系列側は`version_unverified`で人へ渡ることがある
+- **稼働確認を進めるのは巡回で、系列の有無を問わない**（#5404）。pollerの`POST /api/repositories/deploy-recovery-series/sweep`に相乗りした`runRcProductionSweep`（`src/lib/release-rc-reconcile.ts`）が、枠（`activeKey`）を持つ`deploying`・`verifying_production`の候補を、候補ごとに60秒に1回（`ReleaseProductionCheck.lastObservedAt`で間引く）`advanceProduction`へ渡す。以前はリリース完了系列の巡回・画面の読み込み・開始方式の再確認しか呼ばず、系列は「候補の照合→本番追跡」を1巡に1回だけ行っていたため、同じ巡回で候補が`awaiting_approval`→`deploying`へ進んだだけのまま本番追跡がデプロイ成功を見て系列を閉じると、候補は`deploying`のまま誰にも進められなかった（Aide RC-35）。系列側の照合も段階が変わる限り最大3巡続ける（`reconcileRcUntilSettled`）
+- **稼働確認の区切りは省略しない。** 候補を`completed`にして次の候補の枠を空ける唯一の段で、deploy.ymlが稼働SHAを照合するrepoではデプロイ成功の直後に自動で済む。工程表示では、デプロイが成功して段階がまだ`deploying`の間は「稼働版の確認待ち」（自動の待ち）として出し、「まだ」にしない
 
 ### 稼働確認が止まったときの表示と、次の候補による確認（#4712）
 
