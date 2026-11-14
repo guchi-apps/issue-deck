@@ -1,3 +1,4 @@
+import { githubFetchJsonWithEtag } from "@/lib/github/conditional-request";
 import { GithubApiError } from "@/lib/github/github-api-error";
 import { githubGraphql } from "@/lib/github/graphql";
 import { GITHUB_API, githubFetch } from "@/lib/github/request";
@@ -168,12 +169,15 @@ export async function fetchPullRequest(
   token: string,
 ): Promise<GithubApiPullRequest> {
   const url = `${GITHUB_API}/repos/${owner}/${repo}/pulls/${number}`;
-  const res = await githubFetch(url, token);
-  if (!res.ok) {
-    const detail = await res.text().catch(() => "");
-    throw new GithubApiError(res.status, `GitHub API request failed: ${res.status} ${url} ${detail}`);
+  // ETagの条件付きGET（#5382）。20秒ポーリング（`/api/issues/pull-requests`）とリリース系の巡回が
+  // 同じPRを繰り返し取るため、変化の無い間は304で枠を消費しない。本番の実測では`GET pulls/{n}`が
+  // 1時間に約1,700回で最大だった。GitHubが「変わっていない」と答えたときだけキャッシュを返すので古くならない
+  const result = await githubFetchJsonWithEtag<GithubApiPullRequest>(url, token);
+  if (!result.ok) {
+    throw new GithubApiError(result.status, `GitHub API request failed: ${result.status} ${url} ${result.detail}`);
   }
-  return res.json();
+  // 本文はキャッシュと同じ実体なので、呼び出し側が書き換えても次の304に残らないよう写す
+  return structuredClone(result.data);
 }
 
 /**

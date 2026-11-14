@@ -598,6 +598,36 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
     #5373でリリース系のPR一覧（`fetchOpenPullRequestsForBase`）・`package.json`の版（`fetchPackageVersion`）・
     ブランチ先端（`fetchBranchHeadSha`）をETagへ寄せた。三点比較（`compareBranches`）は応答にファイル差分を
     含み大きく、プロセス内キャッシュへ常駐させると本番のメモリを圧迫するため寄せていない
+  - **繰り返し呼ばれるREST取得の一覧**（#5380時点のコードから。量は26リポジトリでの推定で、正は上の
+    `features`の実測）。巡回の間隔はサーバー側の`lastSweptAt`（プロセス内）で間引くため、再起動直後は全巡回が即走る。
+
+    | 経路 | 間隔 | 何に比例するか | ETag |
+    |---|---|---|---|
+    | PR画面の一覧（`/api/pull-requests`。open・`scope=all`のclosed） | 10秒（Issue一覧のPR待ち行は60秒） | リポジトリ数 | あり（`fetchPullRequestPage`） |
+    | 衝突巡回・レビュー停滞／引き継ぎの救済（`conflict-sweep`・`auto-repair-sweep`内） | 5分・3分 | リポジトリ数 | あり（`fetchOpenPullRequests`） |
+    | リリース通知の巡回（`release-push-sweep`・`release-merge-push-sweep`） | 5分・10分 | リポジトリ数 | 大半あり（#5373でPR一覧も） |
+    | 進捗巡回（`progress-sweep-run.ts`） | 5分 | 盤面の対象Issue数（1件あたり数〜十数回） | ほぼ無し（`fetchPullRequestsForHead`・`compareBranches`・`fetchCommentsForIssue`は素のGET。`fetchBranchHeadSha`のみ） |
+    | Issue詳細のPR（`/api/issues/pull-requests`。CI実行中のみ） | 20秒 | 表示中のPR数（`fetchPullRequest`） | あり（#5382で`actions-api`の`fetchPullRequest`をETag化） |
+    | Issue一覧の実行中表示（`/api/issues/workflow-running`） | 20秒 | 実行中のIssue数（`fetchWorkflowRun`＋`fetchWorkflowRunJobs`） | 無し |
+    | Issue詳細のコメント再取得（`/api/issues/comments`） | 60秒 | 開いているIssue（ページング） | 無し |
+    | 自動修復ループ（`auto-repair-sweep`のrunning分） | 30秒 | 稼働中のループ数 | 無し |
+    | 稼働中の系列（本番復旧・リリース完了・修正系列・依存待ち・親run） | 30〜60秒 | 稼働中の系列数（普段は0） | PR単体・ブランチ先端はあり（#5382）。SHA同士のcompareはプロセス内で覚える |
+    | 本番公開後のdevelop同期（`runDevelopSyncSweep`） | 5分 | 候補を一度でも持ったリポジトリ数 | ブランチ先端はあり（#5382）。`compare/{develop}...{main}`はSHA同士なので覚える |
+    | 作り直し履歴の掃除（`rebuild-history/sweep`） | 5分（#5382で間引き） | 履歴のあるリポジトリ数（iOSは直近のマージ済みリリースPR最大5件） | あり（#5382） |
+
+    一覧系はETag済みで、変化が無ければ枠を消費しない。**素のGETで対象件数に比例するもの（進捗巡回と
+    20秒ポーリング）が、削減の候補になる。** Actionsで定期起動するのは`claude-conflict-resolve.yml`の
+    15分cronだけで、検出は`github.token`で行うため、App枠を使うのは衝突があるときに限られる。
+    削減に手を入れる前に、本番の`GET /api/github/api-usage`で`features`の上位（`last60min`）と
+    `rateLimits[].unmeasuredInWindow`を見て、表の推定が実測と合っているかを確かめる（#5382）。
+  - **#5382の実測（本番・直近60分7,019回）では、最大は機能未分類の`other`（2,861回）だった。** 中身は
+    `GET pulls/{n}`が1,694回、`git/ref/heads/main`・`develop`が約200回ずつ、同じSHA組の`compare`の取り直し。
+    表の推定（進捗巡回・20秒ポーリング）ではなく、**pollerが叩く巡回ルート（`/api/repositories/*/sweep`・
+    `/api/dispatch/*/sweep`）が`withGithubApiFeature`で包まれておらず`other`へ混ざっていた**のが原因で、
+    発生源を切り分けられなかった。巡回ルートを新しく作るときは、必ず固有の機能キーで包む。
+    不変な取得（SHA同士の比較）は[`immutable-memo.ts`](../src/lib/github/immutable-memo.ts)で覚え、
+    変わりうる単体取得（PR・ブランチ先端）は`githubFetchJsonWithEtag`へ寄せる。後者の戻り値はキャッシュと同じ
+    実体なので、呼び出し側が書き換えうる関数（`fetchPullRequest`など）は`structuredClone`で写して返す。
   障害状況カードの右上には、`GET /api/github/status`が返す`fetchedAt`を「取得 10/3 13:15」の形で出す。
   カードはPC・スマホ共通の`settings/status-section.tsx`が組み立てる。
 - **issue-deck自身が投げたAI API呼び出しは、機能別に計上している（画面には出さない）**（#2347）。

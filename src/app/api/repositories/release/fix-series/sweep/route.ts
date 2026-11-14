@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 
 import { authorizeDispatch } from "@/lib/dispatch/dispatch-auth";
+import { withGithubApiFeature } from "@/lib/github/api-usage";
 import { previewModeGuard } from "@/lib/preview-mode";
 import { runReleaseFixSweep } from "@/lib/release-fix-series-run";
 
@@ -15,7 +16,7 @@ export async function POST(request: NextRequest) {
   const payload = await request.json().catch(() => null);
   const hostName = typeof payload?.host === "string" && payload.host !== "" ? payload.host : null;
   try {
-    return NextResponse.json({ ok: true, ...(await runReleaseFixSweep({ hostName })) }, { headers: { "Cache-Control": "no-store" } });
+    return NextResponse.json({ ok: true, ...(await withGithubApiFeature("release_fix_sweep", () => runReleaseFixSweep({ hostName }))) }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     console.error("[POST /api/repositories/release/fix-series/sweep]", error);
     return NextResponse.json({ error: "sweep_failed" }, { status: 500 });

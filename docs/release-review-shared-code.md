@@ -88,3 +88,15 @@
 - 値が空でないこと・相手側のトークンと一致することは名前では確かめられない。未確認で止めず、公開後の疎通確認へ回す提案として残す
 - `scope=inherit`は組織の一覧、それ以外はリポジトリの一覧と照合する。値は取得しない。VPSの`.env`は照合対象外
 - 登録状況は指紋に含まれるため、登録後の再実行で自動的に再評価される
+
+# 他リポジトリの利用側が原因の未確認を扱う（#5378）
+
+あるアプリのAPI・DBを別アプリが読む関係（AIDEのMCP `asset_manager_subscriptions`がAsset Managerの`GET /api/subscriptions`を読む、など）では、候補が項目を消す・変えると、全体レビューが利用側のコードを持たず「指摘0件・要確認（未確認）」で止まる（asset-manager RC-57、guchi-apps/asset-manager#1371）。直すコードが無いので自動修正の対象にならず、画面は「自動修正では解消できません」と出すだけで、人が利用側を読んで判断メモを書くしか進む道が無かった。
+
+- **利用関係の登録**: `scripts/release-review-links.json`の各エントリは、`provider`（対象が呼ぶ側。#5223）に加えて`consumer`（対象のAPI・DBを読む利用側）を書ける。`triggers`に一致する変更があると、利用側の本番main先端のコード（`patterns`）と型（`types`）を`linkedRepos`へ`role: "consumer"`付きで渡し、プロンプトは「候補が変えた項目を利用側が読んで壊れるか」を実コードで判定させる。利用側の型は呼び先の型定義（`apiContracts`）へは混ぜない。呼び先のエントリは指紋を変えないよう従来の形のまま（`role`を付けない）
+- **未確認の構造化**: 全体レビューは、別リポジトリのコードが無いことだけが理由の未確認を`crossRepoUnverified`（`repository`・`checkId`・`usage`・`reason`）として返す（schemaの必須項目）。サーバーは確認済み・非該当の項目を理由にしたものと`owner/repo`の形でないものを落として`findings.crossRepoUnverified`に保存する（`src/lib/release-review-cross-repo.ts`）。**判定・ゲートは変えない**——未確認範囲は従来どおり`unverifiedScope`が持つ
+- **段階の内訳**: `describeReviewEvidenceStage`は`cross_repo`（他リポジトリの確認が必要な項目）を出し、その確認項目を汎用の`check_unconfirmed`に数えない
+- **原因別の案内**: 指摘0件で止まったときの「次の操作」（`describeUnresolvableCause`）は、他リポジトリ・未読範囲・運用作業・統合検証・その他を出し分ける。他リポジトリだけが残るときは相手ごとに確認Issueの下書き（題名・本文を埋めたGitHubの新規Issue画面と、既存Issueの検索画面）を出す。**起票はissue-deckからは行わない**（相手リポジトリに同じ件があるかを人が確かめ、GitHubの画面で内容を見てから作る）
+- 利用側の未確認文に「連携先」「資料」の語が入ると、証跡待ち（`review_unconfirmed`）にも数えられる。未確認の確認項目がすべて他リポジトリが理由なら、案内は他リポジトリとして扱う
+
+各アプリのdocsへ「API項目を消すときは利用側を確認する」と書くのは応急処置で、恒久対策はこの登録と構造化で持つ。

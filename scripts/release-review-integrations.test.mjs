@@ -418,6 +418,28 @@ it("設定した連携先のmain固定SHAのコードと型定義を渡し、dev
     { encoding: "utf8", env: { ...process.env, RELEASE_REVIEW_GH: fake, RELEASE_REVIEW_LINKS: cfg } });
   expect(JSON.parse(readFileSync(path.join(dir, "out2", "manifest.json"), "utf8")).linkedRepos).toEqual([]);
 });
+it("利用側（consumer）の連携は利用側mainのコードを渡し、呼び先の型定義（apiContracts）には混ぜない（#5378）", () => {
+  const MAIN = "c".repeat(40);
+  const cfg = path.join(dir, "links.json");
+  writeFileSync(cfg, JSON.stringify({ "guchi-apps/aide": [{ consumer: "guchi-apps/kurashio", reason: "APIを読む", triggers: ["a"], patterns: ["src/mcp/**"], types: ["src/mcp/types.ts"] }] }));
+  writeFake({
+    "repos/guchi-apps/kurashio/commits/main": { sha: MAIN },
+    [`repos/guchi-apps/kurashio/git/trees/${MAIN}`]: { tree: [{ path: "src/mcp/tool.ts", type: "blob" }, { path: "src/mcp/types.ts", type: "blob" }] },
+    [`repos/guchi-apps/kurashio/contents/src/mcp/tool.ts?ref=${MAIN}`]: "export const tool = (b) => b.category;\n",
+    [`repos/guchi-apps/kurashio/contents/src/mcp/types.ts?ref=${MAIN}`]: "export type B = { category: string };\n",
+    "repos/guchi-apps/kurashio/compare/main...develop": { ahead_by: 0, files: [] },
+  });
+  const outText = execFileSync("python3", ["scripts/release-review-integrations.py", repo, "guchi-apps/aide", base, head, out],
+    { encoding: "utf8", env: { ...process.env, RELEASE_REVIEW_GH: fake, RELEASE_REVIEW_LINKS: cfg } });
+  const m = JSON.parse(readFileSync(path.join(out, "manifest.json"), "utf8"));
+  const l = m.linkedRepos[0];
+  expect(l).toMatchObject({ consumer: "guchi-apps/kurashio", role: "consumer", reason: "APIを読む" });
+  expect(l.provider).toBeUndefined();
+  expect(l.code.files.map((f) => f.path)).toEqual(["src/mcp/tool.ts"]);
+  expect(l.typeDefinitions.files.map((f) => f.path)).toEqual(["src/mcp/types.ts"]);
+  expect(m.apiContracts.some((c) => c.path === "(型定義)")).toBe(false);
+  expect(outText).toContain("この候補のAPI・DBを読む利用側");
+});
 it("連携先mainに対象コードが無いときは不整合ではなく資料不足として理由と足すものを残す（#5223）", () => {
   const MAIN = "e".repeat(40);
   const cfg = path.join(dir, "links.json");

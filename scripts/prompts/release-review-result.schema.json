@@ -1,7 +1,7 @@
 {
   "type": "object",
   "additionalProperties": false,
-  "required": ["state", "summary", "checklistVersion", "checks", "unverifiedScope", "counterpartNotes", "fileReviews", "findings", "affectedPullRequests", "affectedFiles", "previousFindings", "recheckScope"],
+  "required": ["state", "summary", "checklistVersion", "checks", "unverifiedScope", "counterpartNotes", "crossRepoUnverified", "fileReviews", "findings", "affectedPullRequests", "affectedFiles", "previousFindings", "recheckScope"],
   "properties": {
     "state": {"type": "string", "enum": ["passed", "needs_check", "failed"]},
     "summary": {"type": "string"},
@@ -9,6 +9,19 @@
     "unverifiedScope": {"type": ["string", "null"]},
     "recheckScope": {"type": ["string", "null"]},
     "counterpartNotes": {"type": "array", "items": {"type": "string"}},
+    "crossRepoUnverified": {
+      "type": "array",
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["repository", "checkId", "usage", "reason"],
+        "properties": {
+          "repository": {"type": "string"},
+          "checkId": {"type": ["string", "null"], "enum": ["pr_interaction", "auth_boundary", "host_compat", "config_migration", "state_consistency", "ui_truthfulness", null]},
+          "usage": {"type": "string"},
+          "reason": {"type": "string"}
+        }
+      }
+    },
     "affectedPullRequests": {"type": "array", "items": {"type": "integer"}},
     "affectedFiles": {"type": "array", "items": {"type": "string"}},
     "checks": {

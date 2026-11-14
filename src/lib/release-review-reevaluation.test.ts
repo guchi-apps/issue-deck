@@ -283,6 +283,31 @@ describe("describeReviewEvidenceStage", () => {
     expect(describeReviewStageLabel(stage)).toBe("自動再評価済み・対応／判断が必要");
   });
 
+  it("他リポジトリが理由の未確認は、その項目を汎用の未確認に数えず別の内訳で出す（#5378）", () => {
+    const stage = describeReviewEvidenceStage(
+      review({
+        checks: [{ id: "pr_interaction", status: "unconfirmed", evidence: "利用側のコードが資料に無い" }],
+        unverifiedScope: "AIDEの利用側",
+        crossRepoUnverified: [{ checkId: "pr_interaction" }],
+      }),
+      { state: "passed", updatedAt: null },
+    );
+    expect(stage).toEqual({ kind: "needs_check", autoReevaluated: false, items: ["cross_repo"] });
+    // 別の項目の未確認が残れば、そちらも出す
+    const mixed = describeReviewEvidenceStage(
+      review({
+        checks: [
+          { id: "pr_interaction", status: "unconfirmed", evidence: "利用側のコードが資料に無い" },
+          { id: "config_migration", status: "unconfirmed", evidence: "移行手順の記載を読み切れませんでした" },
+        ],
+        unverifiedScope: null,
+        crossRepoUnverified: [{ checkId: "pr_interaction" }],
+      }),
+      { state: "passed", updatedAt: null },
+    );
+    expect(mixed).toMatchObject({ items: ["check_unconfirmed", "cross_repo"] });
+  });
+
   it("証跡に依存しない未確認は、統合検証を待たせず別の内訳として出す（#4767）", () => {
     const stage = describeReviewEvidenceStage(
       review({ checks: [{ status: "unconfirmed", evidence: "移行手順の記載を読み切れませんでした" }], unverifiedScope: null }),

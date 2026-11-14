@@ -41,7 +41,8 @@ if grep -q "バッチをまたぐ相互作用の確認" <<<"$p"; then
   [[ -n "\${INT_CONFIRM:-}" ]] && c="$(UNCONF= UNCONF_FILE= checks 統合で確認)"
   echo '\`\`\`json'
   # INT_SCOPE: 相互作用の確認が報告する未確認範囲（#4799）
-  jq -nc --argjson c "$c" --arg u "\${INT_SCOPE:-}" '{state: "passed", summary: "統合", checklistVersion: 1, checks: $c, fileReviews: []} + (if $u == "" then {} else {unverifiedScope: $u} end)'
+  # INT_CROSS: 相互作用の確認が報告する他リポジトリの未確認（#5378。JSONの配列）
+  jq -nc --argjson c "$c" --arg u "\${INT_SCOPE:-}" --argjson cr "\${INT_CROSS:-null}" '{state: "passed", summary: "統合", checklistVersion: 1, checks: $c, fileReviews: []} + (if $u == "" then {} else {unverifiedScope: $u} end) + (if $cr == null then {} else {crossRepoUnverified: $cr} end)'
   echo '\`\`\`'
   exit 0
 fi
@@ -80,8 +81,8 @@ files="$(sed -n '/次のファイルの差分をこのバッチへ載せまし�
 echo '\`\`\`json'
 jq -nc --argjson c "$(checks バッチで確認 "$files")" --argjson f "$(printf '%s\\n' $files | jq -Rsc 'split("\\n") | map(select(. != ""))')" \\
   --arg omit "\${OMIT_FILE:-}" --arg empty "\${EMPTY_EV_FILE:-}" --arg dot "\${DOT_PATHS:-}" --argjson fd "$findings" \\
-  --arg scope "\${BATCH_SCOPE:-}" \\
-  '{state: "passed", summary: "batch", checklistVersion: 1, checks: $c, findings: $fd,
+  --arg scope "\${BATCH_SCOPE:-}" --argjson cr "\${BATCH_CROSS:-[]}" \\
+  '{state: "passed", summary: "batch", checklistVersion: 1, checks: $c, findings: $fd, crossRepoUnverified: $cr,
     fileReviews: ($f | map(select(. != $omit) | {file: ((if $dot == "" then "" else "./" end) + .), status: "reviewed", evidence: (if . == $empty then "" else "読んだ" end)}))}
     + (if $scope == "" then {} else {unverifiedScope: $scope} end)'
 echo '\`\`\`'
@@ -684,6 +685,21 @@ batch_progress_message 全体確認 claude opus 1 0 1 13 4 5; echo`,
       writeEvidence("passed", "2026-10-18T10:00:00Z");
       const kept = runReview({ ...env, BATCH_SCOPE: "バッチ1の未確認", INT_SCOPE: "外部APIの実応答は未確認" });
       expect(kept.result.unverifiedScope).toBe("外部APIの実応答は未確認");
+    });
+
+    it("他リポジトリの未確認は相互作用の確認の判断を正にし、無ければバッチの記載を重複なく集約する（#5378）", () => {
+      const { env } = setup();
+      writeEvidence("passed", "2026-10-18T10:00:00Z");
+      const item = { repository: "guchi-apps/aide", checkId: "pr_interaction", usage: "MCPが読む", reason: "削除の影響" };
+      const bad = { repository: "not a repo", checkId: null, usage: "", reason: "" };
+      const cleared = runReview({ ...env, BATCH_CROSS: JSON.stringify([item]), INT_CROSS: "[]" });
+      expect(cleared.result.crossRepoUnverified).toEqual([]);
+      // 相互作用の確認が項目自体を報告しない（schemaの無い実行）なら、バッチの記載を集約する。対象を変えて再利用を避ける
+      writeFileSync(path.join(dir, "repo", "file1.txt"), "changed\n");
+      git("commit", "-qam", "next");
+      head = git("rev-parse", "HEAD");
+      const batchOnly = runReview({ ...env, BATCH_CROSS: JSON.stringify([item, item, bad]) });
+      expect(batchOnly.result.crossRepoUnverified).toEqual([item]);
     });
 
     it("保存は件数の上限を超えた古いものから消す", () => {
