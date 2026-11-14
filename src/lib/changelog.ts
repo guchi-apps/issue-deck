@@ -42,6 +42,13 @@ export type ChangelogEntry = {
  */
 export const APP_CHANGELOG: ChangelogEntry[] = [
   {
+    version: "8.97.1",
+    date: "2026-11-14",
+    changes: [
+      "スマホ表示で、PRのチェック（競合・全体・統合・iOS）が横1行に並んで見やすくなりました。",
+    ],
+  },
+  {
     version: "8.97.0",
     date: "2026-11-14",
     changes: [
