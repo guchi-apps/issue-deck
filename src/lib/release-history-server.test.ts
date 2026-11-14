@@ -68,10 +68,23 @@ describe("loadReleaseHistoryFromCache", () => {
     expect(result.loaded[0]).toMatchObject({ fullName: "guchi-apps/a", refreshed: false, entries: [entry] });
   });
 
+  it("写しの取得より後に確認対象へ加えたリポジトリは鮮度内でも取り直す", async () => {
+    cacheFindMany.mockResolvedValue([{ repositoryId: "r1", entries: [entry], fetchedAt: new Date(NOW - 60_000) }]);
+    targetGroupBy.mockResolvedValue([
+      { repositoryId: "r1", _min: { createdAt: new Date(NOW - 10_000) }, _max: { createdAt: new Date(NOW - 10_000) } },
+    ]);
+    getInstallationToken.mockResolvedValue("t");
+    fetchReleasesBackTo.mockResolvedValue([entry]);
+
+    const result = await loadReleaseHistoryFromCache([repo], { refresh: false, nowMs: NOW });
+
+    expect(result.loaded[0].refreshed).toBe(true);
+  });
+
   it("写しが無い・古い・refreshならGitHubから取り直し、全ユーザーの最小sinceMsで取る", async () => {
     const min = new Date("2026-09-01T00:00:00Z");
     cacheFindMany.mockResolvedValue([{ repositoryId: "r1", entries: [entry], fetchedAt: new Date(NOW - 60_000) }]);
-    targetGroupBy.mockResolvedValue([{ repositoryId: "r1", _min: { createdAt: min } }]);
+    targetGroupBy.mockResolvedValue([{ repositoryId: "r1", _min: { createdAt: min }, _max: { createdAt: min } }]);
     getInstallationToken.mockResolvedValue("t");
     fetchReleasesBackTo.mockResolvedValue([{ ...entry, body: "new" }]);
 

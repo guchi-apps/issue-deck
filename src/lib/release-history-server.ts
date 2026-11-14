@@ -170,15 +170,26 @@ export function isReleaseHistoryCacheFresh(
 export async function findMinCheckSinceMsByRepositoryId(
   repositoryIds: readonly string[],
 ): Promise<Map<string, number>> {
+  const ranges = await findCheckTargetRangeByRepositoryId(repositoryIds);
+  return new Map([...ranges].map(([id, range]) => [id, range.minMs]));
+}
+
+/** 確認対象の追加時刻の範囲。`maxMs`は最後に対象へ加えられた時刻 */
+async function findCheckTargetRangeByRepositoryId(
+  repositoryIds: readonly string[],
+): Promise<Map<string, { minMs: number; maxMs: number }>> {
   if (repositoryIds.length === 0) return new Map();
   const rows = await db.releaseCheckTarget.groupBy({
     by: ["repositoryId"],
     where: { repositoryId: { in: [...repositoryIds] } },
     _min: { createdAt: true },
+    _max: { createdAt: true },
   });
-  const result = new Map<string, number>();
+  const result = new Map<string, { minMs: number; maxMs: number }>();
   for (const row of rows) {
-    if (row._min.createdAt) result.set(row.repositoryId, row._min.createdAt.getTime());
+    if (row._min.createdAt && row._max.createdAt) {
+      result.set(row.repositoryId, { minMs: row._min.createdAt.getTime(), maxMs: row._max.createdAt.getTime() });
+    }
   }
   return result;
 }
@@ -238,12 +249,12 @@ export async function loadReleaseHistoryFromCache(
   durations: { fullName: string; ms: number }[];
 }> {
   const nowMs = options.nowMs ?? Date.now();
-  const [caches, sinceByRepositoryId] = await Promise.all([
+  const [caches, targetRanges] = await Promise.all([
     db.releaseHistoryCache.findMany({
       where: { repositoryId: { in: repositories.map((repository) => repository.id) } },
       select: { repositoryId: true, entries: true, fetchedAt: true },
     }),
-    findMinCheckSinceMsByRepositoryId(repositories.map((repository) => repository.id)),
+    findCheckTargetRangeByRepositoryId(repositories.map((repository) => repository.id)),
   ]);
   const cacheByRepositoryId = new Map(caches.map((cache) => [cache.repositoryId, cache]));
 
@@ -263,7 +274,16 @@ export async function loadReleaseHistoryFromCache(
   const results = await Promise.all(
     repositories.map(async (repository): Promise<LoadedReleaseHistory | null> => {
       const cache = cacheByRepositoryId.get(repository.id);
-      if (!options.refresh && cache && Array.isArray(cache.entries) && isReleaseHistoryCacheFresh(cache.fetchedAt, nowMs)) {
+      // 写しの取得より後に確認対象へ加えられたリポジトリは、写しの深さが足りるか分からない（深さは記録していない）
+      // ので取り直す。対象追加の直後に1回だけ起きる
+      const addedAfterFetch = (targetRanges.get(repository.id)?.maxMs ?? 0) > (cache?.fetchedAt.getTime() ?? 0);
+      if (
+        !options.refresh &&
+        cache &&
+        Array.isArray(cache.entries) &&
+        !addedAfterFetch &&
+        isReleaseHistoryCacheFresh(cache.fetchedAt, nowMs)
+      ) {
         return {
           repositoryId: repository.id,
           fullName: repository.fullName,
@@ -277,7 +297,7 @@ export async function loadReleaseHistoryFromCache(
         const entries = await refreshReleaseHistoryForRepository(
           repository,
           token,
-          sinceByRepositoryId.get(repository.id),
+          targetRanges.get(repository.id)?.minMs,
         );
         return { repositoryId: repository.id, fullName: repository.fullName, entries, refreshed: true };
       } catch (error) {
