@@ -6,6 +6,7 @@ import {
   type PullRequestInclusion,
 } from "@/lib/github/main-inclusion";
 import { githubFetchJsonWithEtag } from "@/lib/github/conditional-request";
+import { ImmutableMemo, isCommitSha } from "@/lib/github/immutable-memo";
 import { GITHUB_API, githubFetch } from "@/lib/github/request";
 import { isVersionBumpHeadRef } from "@/lib/pull-request-list";
 import type { BranchComparison, BranchHead, UnreleasedUnits } from "@/types/branch-flow";
@@ -432,6 +433,24 @@ export async function compareBranches(
   token: string,
 ): Promise<BranchCompareResult | null> {
   const url = `${GITHUB_API}/repos/${owner}/${repo}/compare/${encodeURIComponent(base)}...${encodeURIComponent(head)}`;
+  // SHA同士の比較は結果が変わらない（#5382。developとmainの同期確認が同じ組を数分おきに取り直していた）
+  const memoizable = isCommitSha(base) && isCommitSha(head);
+  const memoized = memoizable ? shaCompareMemo.get(url) : undefined;
+  if (memoized) return { ...memoized, files: memoized.files ? memoized.files.map((file) => ({ ...file })) : null };
+  const result = await fetchCompareBranches(url, token);
+  if (memoizable && result) shaCompareMemo.set(url, { ...result, files: result.files ? result.files.map((file) => ({ ...file })) : null });
+  return result;
+}
+
+/** SHA同士の`compareBranches`の結果。ファイル名の一覧だけを持つので小さい */
+const shaCompareMemo = new ImmutableMemo<BranchCompareResult>(300);
+
+/** テスト用: SHA同士の比較のメモを空にする */
+export function clearShaCompareMemoForTest(): void {
+  shaCompareMemo.clear();
+}
+
+async function fetchCompareBranches(url: string, token: string): Promise<BranchCompareResult | null> {
   const res = await githubFetch(url, token);
   if (!res.ok) return null;
   const body: {

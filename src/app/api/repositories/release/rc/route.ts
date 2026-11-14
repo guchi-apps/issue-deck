@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 
+import { withGithubApiFeature } from "@/lib/github/api-usage";
 import { loadReleaseRcFacts } from "@/lib/release-journey-facts";
 import type { ReleaseRcFacts } from "@/types/pull-request";
 import { requireUserId } from "@/lib/auth-user";
@@ -68,7 +69,12 @@ function respond(result: RcMutationResult) {
   return NextResponse.json(result, { status: STATUS_BY_ERROR[result.error] ?? 409 });
 }
 
+/** リリース画面の10秒ポーリング（#5382で消費の内訳を分けて見られるよう機能キーを付けた） */
 export async function GET(request: NextRequest) {
+  return withGithubApiFeature("release_rc", () => handleGET(request));
+}
+
+async function handleGET(request: NextRequest) {
   const userId = await requireUserId();
   if (!userId) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   const owner = request.nextUrl.searchParams.get("owner");

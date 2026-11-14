@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 
 import { authorizeDispatch } from "@/lib/dispatch/dispatch-auth";
+import { withGithubApiFeature } from "@/lib/github/api-usage";
 import { runParentRunSweep } from "@/lib/parent-run/run";
 import { previewModeGuard } from "@/lib/preview-mode";
 
@@ -15,7 +16,7 @@ export async function POST(request: NextRequest) {
   if (auth === "not_configured") return NextResponse.json({ error: "not_configured" }, { status: 503 });
   if (auth === "unauthorized") return NextResponse.json({ error: "unauthorized" }, { status: 401 });
   try {
-    return NextResponse.json({ ok: true, ...(await runParentRunSweep()) }, { headers: { "Cache-Control": "no-store" } });
+    return NextResponse.json({ ok: true, ...(await withGithubApiFeature("parent_run_sweep", () => runParentRunSweep())) }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     console.error("[POST /api/dispatch/parent-run/sweep]", error);
     return NextResponse.json({ error: "sweep_failed" }, { status: 500 });
