@@ -141,6 +141,29 @@ describe("ReleaseAutoProceedPanel（#5138）", () => {
       expect(screen.getByTestId("release-auto-proceed-unresolvable-link").getAttribute("href")).toBe("#release-candidate-verification");
     });
 
+    it("他リポジトリが原因の未確認だけなら、原因を明示して利用側への確認Issueの下書きを出す（#5378）", () => {
+      const base = make({});
+      const v = {
+        ...base,
+        aiReview: {
+          ...base.aiReview,
+          stage: { kind: "needs_check", autoReevaluated: true, items: ["cross_repo"] },
+          crossRepoUnverified: [
+            { repository: "guchi-apps/aide", checkId: "pr_interaction", usage: "MCPがGET /api/subscriptionsを読む", reason: "category削除の影響を確認できない" },
+          ],
+        },
+      } as unknown as ReleaseVerificationSummary;
+      render(<ReleaseAutoProceedPanel repositoryFullName="guchi-apps/asset-manager" pullRequestNumber={1371} verification={v} onReload={vi.fn()} manualHref="#v" />);
+      const panel = screen.getByTestId("release-auto-proceed-unresolvable");
+      expect(panel.getAttribute("data-cause")).toBe("cross_repo");
+      expect(panel.textContent).toContain("他リポジトリの確認が必要です");
+      expect(panel.textContent).not.toContain("自動修正では解消できません");
+      const create = screen.getByTestId("release-auto-proceed-cross-repo-create").getAttribute("href") ?? "";
+      expect(create.startsWith("https://github.com/guchi-apps/aide/issues/new?")).toBe(true);
+      expect(new URL(create).searchParams.get("body")).toContain("guchi-apps/asset-manager#1371");
+      expect(screen.queryByTestId("release-auto-proceed-start")).toBeNull();
+    });
+
     it("表なしのボタンは判定を確定せず、修正の自動継続だけを始める", async () => {
       const calls = mockFetch({ "/api/repositories/release/completion": { body: { run: { id: "r1", active: true } } } });
       render(

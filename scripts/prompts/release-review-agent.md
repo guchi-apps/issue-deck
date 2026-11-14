@@ -26,6 +26,13 @@
 
 連携先の資料に`counterpart.status`が付いている場合、それはランナーが連携先の`main`と`develop`の実物を機械的に確かめた結果です（Issueのopen/closedは根拠にしていません）。**`not_implemented`（どちらにも無い）の連携先は、公開しても相手側から呼ばれず影響が無い**ので、それを理由に確認項目を`unconfirmed`にしません。該当項目は`not_applicable`にして根拠へ「相手側未実装（`counterpart`の出典）」と書き、`counterpartNotes`へ注記を1件ずつ書きます（`registeredIssues`があれば番号・題名・状態を添え、無ければ「要件の登録先Issueなし」と書く）。`develop_only`・`on_main`・`unknown`、または`counterpart`が無いものは従来どおり実コードを読んで判定し、読めなければ未確認です。**この扱いは`not_implemented`に限り、推測で広げません。**
 
+## 他リポジトリのコードが無くて確認できないとき（`crossRepoUnverified`）
+
+確認項目を`unconfirmed`にした理由が「**別リポジトリにある利用側・呼び先のコードが資料に無い**」（例: 候補がAPIの項目を消したが、そのAPIを読む別アプリの実装を読めない）だけのときは、`unverifiedScope`に書くのに加えて、`crossRepoUnverified`へ相手リポジトリごとに1件ずつ書きます。`repository`は`owner/repo`、`checkId`は未確認にした確認項目、`usage`は相手が何をどう使っているか（分かる範囲。例:「MCP `asset_manager_subscriptions` が`GET /api/subscriptions`を読む」）、`reason`は何を確かめられなかったか（例:「`category`・`summary.byCategory`の削除で壊れるかを利用側のコードで確認できない」）です。画面はこれを使って利用側リポジトリへの確認Issueの下書きを出します。
+
+- `owner/repo`を特定できないもの、資料の取得失敗・差分の読み切れなさなど**他リポジトリ以外が理由の未確認は書きません**（空配列）
+- 資料（`linkedRepos`）に相手のコードがあり読んで判定できたものは書きません。確認済みか指摘として扱います
+
 ## 登録済みSecretsの名前照合（`secretRegistrations`）
 
 資料に`secretRegistrations`が付いている場合、それはランナーがマニフェストの新規キーを本番のGitHub Secrets／Variablesの**名前だけ**で照合した結果です。`registered`は確認済みとして扱い（根拠へ「Secrets名の照合で登録済み」）、「同期済みか確認できない」を未確認範囲にしません。`missing`は止める指摘、`unknown`は従来どおり未確認です。値が空でないこと・相手側と一致することは名前では分からないので、未確認で止めず、公開後の疎通確認へ回す提案（止めない）として書きます。
@@ -72,6 +79,9 @@ CLIから出力schemaが指定されている場合はコードブロックや�
   ],
   "unverifiedScope": "確認できなかった範囲と次の対応（無ければ省略）",
   "counterpartNotes": ["連携先が未実装（develop・mainに無い）と資料に分類されたものの注記。無ければ空配列"],
+  "crossRepoUnverified": [
+    { "repository": "owner/repo", "checkId": "未確認にした確認項目のID（無ければnull）", "usage": "相手がどう使っているか", "reason": "確かめられなかったこと" }
+  ],
   "fileReviews": [
     { "file": "パス", "status": "reviewed|unreadable", "evidence": "読んだ箇所・確認した内容（unreadableなら理由）" }
   ],

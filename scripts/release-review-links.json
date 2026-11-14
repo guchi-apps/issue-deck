@@ -1,5 +1,5 @@
 {
-  "_comment": "全体レビューへ連携先リポジトリの固定版（本番mainの先端SHA）を渡す設定（#5223）。キーは対象リポジトリ。triggersは候補の変更ファイルに一致したときだけ取得する条件、patternsは連携先から取得するパス（*は1階層、**は階層をまたぐ）、typesは連携先の型定義（apiContractsとして渡す）。",
+  "_comment": "全体レビューへ連携先リポジトリの固定版（本番mainの先端SHA）を渡す設定（#5223）。キーは対象リポジトリ。providerは対象が呼ぶ側、consumerは対象のAPI・DBを読む利用側（#5378。項目を消す・変えるときの影響を確かめる）。triggersは候補の変更ファイルに一致したときだけ取得する条件、patternsは連携先から取得するパス（*は1階層、**は階層をまたぐ）、typesは連携先の型定義（providerではapiContractsとしても渡す）。",
   "guchi-apps/asset-manager": [
     {
       "provider": "guchi-apps/aide",
@@ -7,6 +7,13 @@
       "triggers": ["lib/ledger-sources/**"],
       "patterns": ["src/core/connectors/zaim/**", "src/core/views/money-*.ts"],
       "types": ["src/core/connectors/zaim/types.ts"]
+    },
+    {
+      "consumer": "guchi-apps/aide",
+      "reason": "AIDEのコネクタとMCPツール（asset_manager_*）がAsset ManagerのAPI（/api/subscriptions・/api/receipts/import・/api/salaries/agent）を読む",
+      "triggers": ["app/api/subscriptions/**", "app/api/receipts/import/**", "app/api/salaries/agent/**", "lib/subscription-*.ts", "docs/subscriptions.md"],
+      "patterns": ["src/core/connectors/asset-manager/index.ts", "src/core/connectors/asset-manager/salary-agent.ts", "src/mcp/tools/asset-manager.ts"],
+      "types": ["src/core/connectors/asset-manager/types.ts"]
     }
   ],
   "guchi-apps/kurashio": [

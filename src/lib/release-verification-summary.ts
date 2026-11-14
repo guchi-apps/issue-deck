@@ -16,6 +16,7 @@ import {
 import { readReleaseReviewDiagnostic, type ReleaseReviewDiagnostic } from "@/lib/release-review-diagnostic";
 import type { ReleaseReviewDecisionSummary } from "@/lib/release-review-decision";
 import type { ReleaseOpsContext } from "@/lib/release-review-ops-evidence";
+import { readCrossRepoUnverified, type ReleaseReviewCrossRepoItem } from "@/lib/release-review-cross-repo";
 import type { ReleaseReviewCoverage, ReleaseReviewFinding, ReleaseReviewMeta } from "@/lib/release-review-result";
 import { readAwaitingIntegration } from "@/lib/release-review-start";
 import type { ReleaseVerificationProgress } from "@/lib/release-verification-progress";
@@ -68,6 +69,11 @@ export type ReleaseVerificationSection = {
   review: ReleaseReviewMeta | null;
   /** 連携先が未実装と確かめられた注記（#5253）。未確認範囲ではなくゲートを止めない。旧結果では空 */
   counterpartNotes: string[];
+  /**
+   * 別リポジトリのコードが無くて確認できなかった未確認（#5378。全体レビューだけ）。原因の出し分けと利用側への
+   * 確認Issueの下書きに使う。旧結果・統合検証では空（省略時も空として読む）
+   */
+  crossRepoUnverified?: ReleaseReviewCrossRepoItem[];
   affectedPullRequests: number[];
   affectedFiles: string[];
   reviewedFiles: number | null;
@@ -170,6 +176,7 @@ function readDetail(findings: unknown) {
         ? (raw.review as ReleaseReviewMeta)
         : null,
     counterpartNotes: list(raw.counterpartNotes).filter((n): n is string => typeof n === "string"),
+    crossRepoUnverified: readCrossRepoUnverified(raw.crossRepoUnverified),
     affectedPullRequests: list(raw.affectedPullRequests).filter((n): n is number => typeof n === "number"),
     affectedFiles: list(raw.affectedFiles).filter((f): f is string => typeof f === "string"),
     reviewedFiles: int(raw.reviewedFiles),
@@ -207,6 +214,7 @@ export function reviewStageOf(
       hostFacts: aiReview.hostFacts ?? null,
       executionFailed: aiReview.diagnostic !== null,
       awaitingIntegration: aiReview.awaitingIntegration ?? false,
+      crossRepoUnverified: aiReview.crossRepoUnverified ?? [],
     },
     { state: integration.state, updatedAt: integration.updatedAt },
   );

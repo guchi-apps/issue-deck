@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { describeReleaseGuidance, prepareFixReason } from "./release-review-guidance";
+import { describeReleaseGuidance, describeUnresolvableCause, prepareFixReason } from "./release-review-guidance";
 import type { ReleaseVerificationSummary } from "./release-verification-summary";
 import type { ReleaseReviewFinding } from "./release-review-result";
 
@@ -34,5 +34,46 @@ describe("release guidance", () => {
     expect(prepareFixReason({ ...finding, evidence: null }, true)).toBeNull();
     expect(prepareFixReason({ ...finding, blockingReason: null }, true)).toBeNull();
     expect(prepareFixReason({ ...finding, impact: "x".repeat(5000) }, true)!.length).toBeLessThan(2000);
+  });
+  it("他リポジトリが原因の未確認は、汎用の未確認ではなく相手リポジトリを示す（#5378）", () => {
+    const rows = describeReleaseGuidance(summary({ state: "needs_check", unverifiedScope: "利用側未確認", crossRepoUnverified: [{ repository: "guchi-apps/aide", checkId: "pr_interaction", usage: "", reason: "" }] }));
+    expect(rows.map(r => r.title)).toEqual(["他リポジトリの確認が必要です（guchi-apps/aide）"]);
+    expect(rows[0].next).toContain("再実行・自動修正では解消しません");
+  });
+});
+
+describe("指摘0件で止まった原因の出し分け（#5378）", () => {
+  const source = { repositoryFullName: "guchi-apps/asset-manager", pullRequestNumber: 1371 };
+  const cross = [
+    { repository: "guchi-apps/aide", checkId: "pr_interaction", usage: "MCPが読む", reason: "削除の影響" },
+    { repository: "guchi-apps/aide", checkId: "ui_truthfulness", usage: "", reason: "説明文" },
+    { repository: "guchi-apps/kurashio", checkId: null, usage: "", reason: "" },
+  ];
+  const stage = (items: string[]) => ({ kind: "needs_check", autoReevaluated: true, items });
+  it("他リポジトリだけが残れば、相手ごとに1件の下書きを出す", () => {
+    const cause = describeUnresolvableCause(summary({ state: "needs_check", stage: stage(["cross_repo"]), crossRepoUnverified: cross }), source);
+    expect(cause.kind).toBe("cross_repo");
+    expect(cause.drafts.map(d => d.repository)).toEqual(["guchi-apps/aide", "guchi-apps/kurashio"]);
+    expect(cause.drafts[0].body).toContain("削除の影響");
+    expect(cause.drafts[0].body).toContain("説明文");
+    expect(cause.drafts[0].searchUrl).toContain("is%3Aopen");
+  });
+  it("他リポジトリ以外の未確認も残るときは、そちらを先に案内する", () => {
+    expect(describeUnresolvableCause(summary({ stage: stage(["cross_repo", "code_unread"]), crossRepoUnverified: cross }), source).kind).toBe("code_unread");
+    const other = describeUnresolvableCause(summary({ stage: stage(["cross_repo", "check_unconfirmed"]), crossRepoUnverified: cross }), source);
+    expect(other.kind).toBe("other");
+    expect(other.description).toContain("guchi-apps/aide");
+  });
+  it("未確認の項目がすべて他リポジトリが理由なら、証跡待ちの文言に数えられても他リポジトリとして案内する", () => {
+    const checks = [{ id: "pr_interaction", status: "unconfirmed", evidence: "連携先のコードが無い" }];
+    const v = (extra: object[]) => summary({ stage: stage(["review_unconfirmed", "cross_repo"]), crossRepoUnverified: cross, review: { checks: [...checks, ...extra] } });
+    expect(describeUnresolvableCause(v([]), source).kind).toBe("cross_repo");
+    expect(describeUnresolvableCause(v([{ id: "config_migration", status: "unconfirmed", evidence: "テスト未実施" }]), source).kind).toBe("other");
+  });
+  it("運用作業・統合検証・その他を出し分ける", () => {
+    expect(describeUnresolvableCause(summary({ stage: stage(["ops"]) }), source).kind).toBe("ops");
+    expect(describeUnresolvableCause(summary({ stage: stage(["review_unconfirmed", "evidence_waiting"]) }), source).kind).toBe("evidence");
+    const other = describeUnresolvableCause(summary({ stage: stage(["check_unconfirmed"]) }), source);
+    expect(other).toMatchObject({ kind: "other", title: "自動修正では解消できません", drafts: [] });
   });
 });

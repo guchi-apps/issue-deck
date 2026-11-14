@@ -421,6 +421,7 @@ integration_coverage_text() {
 バッチごとの指摘はこちらで集約するため、ここでは**バッチをまたぐ新しい指摘だけ**を`findings`へ出します。
 `unverifiedScope`は**リリース全体として最後に残る未確認範囲だけ**を書きます（無ければ`null`）。この値がバッチごとの「未確認範囲」に置き換わります。
 `counterpartNotes`は、連携先の`counterpart.status`が`not_implemented`のものだけを注記として出します（無ければ空配列。バッチの注記はこちらで集約します）。
+`crossRepoUnverified`は、全体の確認を終えても別リポジトリのコードが無くて確認できないものだけを書きます（無ければ空配列。バッチの記載はこちらで集約し、この確認で解消したものは落とします）。
 バッチの時点で書かれた「他のバッチ・相互作用は未確認」は、全バッチとこの確認が済んだので書き写しません。バッチの未確認範囲のうち、他のバッチ・この確認・実行ホストの稼働情報で解消したものも落とし、解消できなかったものだけを理由とともに残します。
 RULES
 }
@@ -767,6 +768,10 @@ merge_batch_results() {
       unverifiedScope: ((if ($ir | length) > 0 then [ $ir[] | .unverifiedScope // empty ] else [ $rs[] | .unverifiedScope // empty ] end)
         | map(tostring | select(test("\\S"))) | join(" / ") | if . == "" then null else .[0:1900] end),
       counterpartNotes: ([ ($rs[], $ir[]) | (.counterpartNotes // [])[] | tostring ] | unique | .[0:20]),
+      # 全バッチ後の確認が項目を報告していれば、その判断（解消・残存）を正にする。無ければバッチの記載を集約する（#5378）
+      crossRepoUnverified: ((if any($ir[]; has("crossRepoUnverified")) then [ $ir[] | (.crossRepoUnverified // [])[] ] else [ $rs[] | (.crossRepoUnverified // [])[] ] end)
+        | map(select(type == "object" and ((.repository // "") | tostring | test("^[A-Za-z0-9-]+/[A-Za-z0-9._-]+$"))))
+        | unique_by([.repository, .checkId]) | .[0:20]),
       findings: ([ ($rs[] | (.findings // [])[]), $supFindings[] ] | uniq_by_key | .[0:50]),
       affectedPullRequests: ([ $rs[] | (.affectedPullRequests // [])[] ] | unique),
       affectedFiles: ([ $rs[] | (.affectedFiles // [])[] ] | unique | .[0:200]),
