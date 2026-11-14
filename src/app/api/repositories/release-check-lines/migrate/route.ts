@@ -3,6 +3,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { getCurrentUser } from "@/lib/auth-user";
 import { db } from "@/lib/db";
 import { getInstallationToken } from "@/lib/github/app-auth";
+import { patchReleaseHistoryCacheBody } from "@/lib/release-history-server";
 import { fetchReleaseBodyByTag, fetchUserCanWriteRepo, updateReleaseBody } from "@/lib/github/release-body-api";
 import { previewModeGuard } from "@/lib/preview-mode";
 import { convertBulletsToTasks, parseReleaseBodyTasks } from "@/lib/release-body-tasks";
@@ -44,6 +45,7 @@ export async function POST(request: NextRequest) {
       lineKey: true,
       repository: {
         select: {
+          id: true,
           fullName: true,
           ownerLogin: true,
           name: true,
@@ -106,6 +108,8 @@ export async function POST(request: NextRequest) {
           results.push({ repoFullName: repo.fullName, tagName, status: updated.reason, converted: 0, unmigratable });
           continue;
         }
+        // 写し（リリース履歴の正。#5392）の本文も揃える
+        await patchReleaseHistoryCacheBody(repo.id, tagName, converted.body);
       }
       results.push({
         repoFullName: repo.fullName,

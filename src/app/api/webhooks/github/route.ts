@@ -19,6 +19,7 @@ import { fetchLocalStartScriptSupported } from "@/lib/github/local-session-suppo
 import { autoReflectPlanReview } from "@/lib/dispatch/plan-review-auto-reflect";
 import { markPlanReviewPosted } from "@/lib/dispatch/plan-review-posted";
 import { sweepCheckUserPushNotifications } from "@/lib/notifications/check-user-push";
+import { refreshReleaseHistoryForRepository } from "@/lib/release-history-server";
 import { recordRepositoryRename } from "@/lib/repository-alias";
 import { fetchClaudeWorkflowExists } from "@/lib/github/workflow-support";
 import type { AccountType } from "@prisma/client";
@@ -35,6 +36,37 @@ type InstallationPayload = {
   account: { id: number; login: string; type: string } | null;
   repository_selection: "all" | "selected";
 };
+
+/**
+ * Releaseの作成・編集・削除を受けて、そのリポジトリのリリース履歴の写しを取り直す（#5392）。
+ * 写しを正として画面へ返すため、Releaseの変化をここで取り込む。**失敗してもWebhookは成功で返す**
+ * （非2xxにするとGitHubが再送し、他の処理が二重に走る。写しはTTLで自然に取り直される）。
+ * タグだけの版（Releaseが無い失敗版）は`release`イベントでは変化を受けられない。
+ */
+async function handleReleaseEvent(payload: { action?: string; repository?: { full_name?: string } }) {
+  const fullName = payload.repository?.full_name;
+  if (!fullName) return;
+  if (!["published", "created", "edited", "deleted", "released", "prereleased", "unpublished"].includes(payload.action ?? "")) {
+    return;
+  }
+  try {
+    const repository = await db.repository.findFirst({
+      where: { fullName, archived: false },
+      select: {
+        id: true,
+        fullName: true,
+        ownerLogin: true,
+        name: true,
+        installation: { select: { installationId: true } },
+      },
+    });
+    if (!repository) return;
+    const token = await getInstallationToken(repository.installation.installationId);
+    await refreshReleaseHistoryForRepository(repository, token);
+  } catch (error) {
+    console.error("[webhooks/github] リリース履歴の写しを更新できませんでした", fullName, error);
+  }
+}
 
 function verifySignature(rawBody: string, signatureHeader: string | null, secret: string): boolean {
   if (!signatureHeader) return false;
@@ -495,6 +527,8 @@ async function handlePOST(request: NextRequest) {
       await handleInstallationEvent(payload);
     } else if (event === "projects_v2_item") {
       await handleProjectsV2ItemEvent(payload);
+    } else if (event === "release") {
+      await handleReleaseEvent(payload);
     }
   } catch (error) {
     // 非2xxを返すとGitHubが自動再送・手動redeliveryの対象にしてくれるため、

@@ -4,8 +4,10 @@
 
 ## 読み書きの流れ
 
-- 読み取り: `GET /api/repositories/release-history`が、取得したRelease本文から確認記録を組み立てる（`lib/release-body-tasks.ts`の`buildCheckLineRecordsFromBodies`）。GitHub側での変更は、画面の更新ボタン（再取得）で反映される。リリース一覧はETagで再検証するため、古い本文は残らない。
-- 画面を開いた直後は前回の取得結果（`ReleaseHistoryCache`。#5230）を出し、最新が届くまで項目チェックを押せなくする。写しの本文で押すと、GitHub側で変わった行を古い状態から書き換えかねないため。
+- 読み取り: `GET /api/repositories/release-history`が、**DBの写し（`ReleaseHistoryCache`）を正として**Release本文から確認記録を組み立てる（`lib/release-body-tasks.ts`の`buildCheckLineRecordsFromBodies`）。写しが鮮度（15分。`RELEASE_HISTORY_CACHE_TTL_MS`）内のリポジトリはGitHubを呼ばず、無い・古いもの・更新ボタン（`?refresh=1`）だけGitHubから取り直して保存する（#5392）。
+- 写しの更新契機: ①画面・TTL超過時の取り直し ②Webhook`release`イベント（GitHub Appが`release`を購読している場合）③項目チェック保存時（`patchReleaseHistoryCacheBody`が該当版の本文だけ差し替え）。取り直しの深さは全ユーザーの確認対象の最も古い時刻（`findMinCheckSinceMsByRepositoryId`）に合わせる。
+- **タグだけの版**（Releaseが無い失敗版）は`release`イベントで変化を受けられず、反映は最大15分遅れる（更新ボタンで即時）。
+- 画面を開いた直後は前回の取得結果（`release-history/cached`。#5230）を出し、最新（鮮度内の写しを含む）が届くまで項目チェックを押せなくする。写しの本文で押すと、GitHub側で変わった行を古い状態から書き換えかねないため。鮮度内の写しで押した場合も、書く直前に本文を取り直し競合を検出するので古い本文では上書きしない。
 - 書き込み: `POST/DELETE /api/repositories/release-check-lines`が、書く直前に本文を取り直し、**該当行の先頭（`* ` → `- [x] `）だけ**を書き換えて`PATCH /releases/{id}`する。書いた後にもう一度読み、意図した状態になっていなければ`conflict`を返す（画面は「保存済み」にせず、本文を取り直す）。
 - 行の識別子は、PRの参照（`... in <URL>`）か、取り出せない手書きの行では本文そのもの。並び順・文言変更・他の行の編集に影響されない。同じ参照の行が複数あれば同じ項目として揃える。
 - 失敗版から引き継いだ項目は、**本番へ反映された修正版のRelease本文**の`### vX.Y.Zから引き継いだ変更`の節へ、行末に`<!-- issue-deck:key=... -->`を付けて初回のチェック時に書き足す。失敗版（Releaseが無い版）は同期済みとして扱わない。
