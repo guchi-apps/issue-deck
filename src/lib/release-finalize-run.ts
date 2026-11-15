@@ -1155,6 +1155,7 @@ export async function loadFinalizationSnapshot(
   phase: string;
   applied: { preHeadSha: string; finalHeadSha: string; finalBaseSha: string } | null;
   latest: { status: string; failureReason: string | null } | null;
+  pending: { preHeadSha: string } | null;
   aiReviewWaiver: { preHeadSha: string; finalHeadSha: string | null } | null;
 } | null> {
   const resolvedId = await findCandidateIdByPullRequest(repositoryFullName, prNumber);
@@ -1171,6 +1172,8 @@ export async function loadFinalizationSnapshot(
   return {
     candidateId: revision.candidate.id,
     latest: newest ? { status: newest.status, failureReason: newest.failureReason } : null,
+    // バンプのpushから取り込みまでの間、完了系列が候補の変化として止めないため（#5424）
+    pending: newest && newest.status === "requested" ? { preHeadSha: newest.preHeadSha } : null,
     // 全体レビューを外した公開準備（#4807）。失敗・期限切れで修正工程へ戻ったものは、次の公開準備で明示し直す
     aiReviewWaiver:
       newest && newest.aiReviewWaived && (newest.status === "requested" || newest.status === "applied")

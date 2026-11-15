@@ -217,6 +217,11 @@ export type CompletionFinalizationSnapshot = {
   /** 最新の公開準備の状態と失敗理由（公開承認の系列が「公開準備が失敗した」を止める理由として出す）。無ければnull */
   latest?: { status: string; failureReason: string | null } | null;
   /**
+   * 進行中（`requested`）の公開準備のバンプ前head（#5424）。無ければnull。workflowがバンプをpushしてから
+   * 照合で`applied`になるまでの間、候補のheadが記録と違って見えても止めずに取り込みを待つために使う
+   */
+  pending?: { preHeadSha: string } | null;
+  /**
    * 人が全体レビューの結果を承知で進めた公開準備（#4807）の、バンプ前後のhead。無ければnull。
    * このheadの全体レビューは、自動公開の判定で止める条件にしない（統合検証・CI・Macは必須のまま）
    */
@@ -337,6 +342,11 @@ export function decideReleaseCompletion(
   }
   // 新方式の候補（#4495）は、修正系列の取り込みで同じPRのheadが進む。系列が新しいrevisionを後継として記録するまで待つ
   if (candidate.headSha !== run.candidateHeadSha && series && series.status === "rebuilding") return { action: "wait", status: "checking" };
+  // 記録したheadから始めた公開準備のバンプがpushされ、まだ取り込まれていない（#5424）。取り込まれれば上の
+  // `follow_successor`で追い、失敗・期限切れになれば`pending`が消えて下で止まる
+  if (candidate.headSha !== run.candidateHeadSha && observation.finalization?.pending?.preHeadSha === run.candidateHeadSha) {
+    return { action: "wait", status: "checking" };
+  }
   // 系列の外で候補が作り直された（同じ番号でHEADが動いた）。承認した内容と違うので追わない
   if (candidate.headSha !== run.candidateHeadSha) {
     return { action: "stop", reason: "candidate_changed", detail: candidate.headSha.slice(0, 7) };
