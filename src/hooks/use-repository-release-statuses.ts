@@ -36,6 +36,11 @@ export type RepositoryReleaseStatus = {
   /** 人のマージ操作を待っているPR。待っていなければnull */
   pendingMerge: ReleasePendingMerge | null;
   /**
+   * ブランチ画面ヘッダーの「手が要るもの」と同じ基準で、人が動く番か（#5423）。新方式の候補の
+   * 承認・判断待ち、旧方式のマージ待ち、デプロイ失敗。古い応答では省略される
+   */
+  needsUser?: boolean;
+  /**
    * リリース候補の統合検証・全体レビューの進行・問題（#4390）。あれば`pendingMerge`はnullで、
    * バッジはこちらの文言（「リリース検証中」「検証失敗」など）を出す。古い応答では省略される
    */

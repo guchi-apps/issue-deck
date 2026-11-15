@@ -231,6 +231,12 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   リポジトリだけで、`release-history`APIが`v*`タグと`ios-testflight/*`タグのコミットを突き合わせて
   `iosDeliveredBuild`を付ける（`iosDeliveryForReleases`）。**タグが無いリリースには何も出さない**——iOS更新が
   不要と判定された版は、成功でもタグを付けないため、タグ無し＝未配布とは言えない。
+- **フッターの「ブランチ」タブ・PC左メニューの「ブランチ」行には、人が動く番のリポジトリ数を橙のバッジで重ねる**（#5423）。
+  ブランチ画面ヘッダーの「手が要るもの」と同じ基準（新方式の候補の承認・判断待ち、旧方式のマージ待ち、デプロイ失敗）で、
+  `release-pending-merges`の応答の各リポジトリに足した`needsUser`を`release-needs-user.ts`の`countReleaseNeedsUser`が数える
+  （`notification-state.tsx`の`releaseNeedsUser`。新しい取得は増えない）。**通常PRのCI失敗等は数えない**
+  （ヘッダーも本番リリース工程のPRだけを数える）。0件・未取得は出さない。以前のマージ待ち本数（`releaseMergePending`）は
+  アプリアイコンのバッジ（`app-badge-count.ts`）だけが使い、ナビの表示は置き換えた。
 - **フッターの「ホーム」タブには、ユーザーの確認待ち件数を橙のバッジで重ねる**（#3080）。数字は
   ホームのメニュー・PCの左メニューの「ユーザーの確認待ち」と同じ（`navCounts["check-user"]`
   ＋ユーザーがマージするPR）で、`issue-deck-shell.tsx`から`checkUserCount`propで渡す

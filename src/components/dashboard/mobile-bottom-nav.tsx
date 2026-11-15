@@ -5,9 +5,9 @@ import { Gauge, GitBranch, History, Home } from "lucide-react";
 import { NotificationBadge } from "@/components/dashboard/notification-content";
 import { useNotificationState } from "@/components/dashboard/notification-state";
 import {
-  describeReleaseMergePending,
-  type ReleaseMergePendingCounts,
-} from "@/lib/release-merge-pending";
+  describeReleaseNeedsUser,
+  type ReleaseNeedsUserCounts,
+} from "@/lib/release-needs-user";
 import { cn } from "@/lib/utils";
 
 // タブのidは`mscreen`クエリの値そのもの（`selectTab`が`navigate({ screen: tab })`へ
@@ -54,10 +54,11 @@ type MobileBottomNavViewProps = {
   active?: MobileBottomNavTab | null;
   onSelect?: (tab: MobileBottomNavTab) => void;
   /**
-   * 「ブランチ」タブのアイコンに重ねる反映待ちの件数（#2055）。**`null`は未取得**で、
+   * 「ブランチ」タブのアイコンに重ねる、人が動く番のリポジトリ数（#5423。#2055の反映待ち本数から
+   * 置き換え。ブランチ画面ヘッダーの「手が要るもの」と同じ基準）。**`null`は未取得**で、
    * そのときは何も出さない（0を出すと「待っているものが無い」と読めてしまう）。
    */
-  mergePending?: ReleaseMergePendingCounts | null;
+  needsUser?: ReleaseNeedsUserCounts | null;
   /**
    * 「リリース」タブのアイコンに重ねる未確認件数（#2951）。**`null`・`0`は何も出さない**
    * （PCの左メニュー「リリース履歴」行と同じ材料）。
@@ -83,14 +84,14 @@ const CHECK_USER_BADGE_MAX = 99;
  * （`notification-state.tsx`。新しく`useRepositoryReleaseStatuses`を呼ぶと2本走る）。
  */
 export function MobileBottomNav(
-  props: Omit<MobileBottomNavViewProps, "mergePending" | "releaseUncheckedCount">,
+  props: Omit<MobileBottomNavViewProps, "needsUser" | "releaseUncheckedCount">,
 ) {
-  const { releaseMergePending, releaseUncheckedCount } = useNotificationState();
+  const { releaseNeedsUser, releaseUncheckedCount } = useNotificationState();
 
   return (
     <MobileBottomNavView
       {...props}
-      mergePending={releaseMergePending}
+      needsUser={releaseNeedsUser}
       releaseUncheckedCount={releaseUncheckedCount}
     />
   );
@@ -102,15 +103,15 @@ export function MobileBottomNav(
 export function MobileBottomNavView({
   active = "home",
   onSelect,
-  mergePending = null,
+  needsUser = null,
   releaseUncheckedCount = null,
   checkUserCount = null,
 }: MobileBottomNavViewProps) {
   // アイコンに重ねるのは合計だけ（#2055）。1枠に内訳2つは収まらず、収めるには
   // フッターを56px→68pxへ伸ばすことになる。内訳はタブを開いた「ブランチ」画面が持ち、
   // 開かずに読めるようにtitle・aria-labelへ入れる。
-  const pendingCount = mergePending?.total ?? 0;
-  const pendingLabel = describeReleaseMergePending(mergePending);
+  const pendingCount = needsUser?.total ?? 0;
+  const pendingLabel = `手が要るもの: ${describeReleaseNeedsUser(needsUser)}`;
   const uncheckedCount = releaseUncheckedCount ?? 0;
   const waitingCount = checkUserCount ?? 0;
 
@@ -162,7 +163,7 @@ export function MobileBottomNavView({
               {showsMergePendingBadge && (
                 <NotificationBadge
                   count={pendingCount}
-                  hasError={mergePending?.hasError ?? false}
+                  hasError={false}
                   className="-top-1.5 -right-2.5"
                 />
               )}
