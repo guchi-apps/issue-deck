@@ -42,6 +42,13 @@ export type ChangelogEntry = {
  */
 export const APP_CHANGELOG: ChangelogEntry[] = [
   {
+    version: "8.103.3",
+    date: "2026-11-15",
+    changes: [
+      "リリース候補を作った直後に、まだ承認の段階ではないのに「承認: 公開手順を確認」が表示されてしまう問題を直しました。",
+    ],
+  },
+  {
     version: "8.103.2",
     date: "2026-11-15",
     changes: [
