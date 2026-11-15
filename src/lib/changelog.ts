@@ -42,6 +42,13 @@ export type ChangelogEntry = {
  */
 export const APP_CHANGELOG: ChangelogEntry[] = [
   {
+    version: "8.103.2",
+    date: "2026-11-15",
+    changes: [
+      "ブランチ画面のヘッダーを「表示リポジトリを編集」と「更新」の2つのボタンにまとめ、見やすく整理しました。",
+    ],
+  },
+  {
     version: "8.103.1",
     date: "2026-11-15",
     changes: [
