@@ -142,6 +142,8 @@ import {
 } from "./progress-sweep-run";
 
 const NOW = new Date("2026-08-25T12:00:00Z");
+/** mainの先端（#5438。mainとの比較はこのSHAとのSHA同士で行う） */
+const MAIN_TIP_SHA = "0123456789abcdef0123456789abcdef01234567";
 
 const REPO = {
   id: "repo-issue-deck",
@@ -258,7 +260,10 @@ describe("runProgressSweep", () => {
     getInstallationToken.mockResolvedValue("token");
     fetchProjectItems.mockResolvedValue([projectItem()]);
     fetchPullRequestsForHead.mockImplementation(pullRequestsForHead([mergedPullRequest()]));
-    fetchBranchHeadSha.mockResolvedValue("aaa111");
+    // mainの先端は別のSHAにしておく（mainとの比較がSHA同士で行われることを確かめるため。#5438）
+    fetchBranchHeadSha.mockImplementation(async (_owner: string, _repo: string, branch: string) =>
+      branch === "main" ? MAIN_TIP_SHA : "aaa111",
+    );
     compareBranches.mockResolvedValue(null);
     fetchBlobShasAtRef.mockResolvedValue(null);
     issueFindFirst.mockResolvedValue(null);
@@ -782,7 +787,7 @@ describe("runProgressSweep", () => {
       expect(compareBranches).toHaveBeenCalledWith(
         "guchi-apps",
         "issue-deck",
-        "main",
+        MAIN_TIP_SHA,
         "aaa111",
         "token",
       );
@@ -840,7 +845,7 @@ describe("runProgressSweep", () => {
           }),
         }),
       );
-      expect(compareBranches).toHaveBeenCalledWith("guchi-apps", "issue-deck", "main", "rc-head", "token");
+      expect(compareBranches).toHaveBeenCalledWith("guchi-apps", "issue-deck", MAIN_TIP_SHA, "rc-head", "token");
       expect(result.actions).toContainEqual({
         repositoryFullName: "guchi-apps/issue-deck",
         issueNumber: 3000,
@@ -877,6 +882,15 @@ describe("runProgressSweep", () => {
       expect(result.skipped).toMatchObject({ closed_no_merged_pr: 1 });
       expect(compareBranches).not.toHaveBeenCalled();
       expect(reportProgressStatus).not.toHaveBeenCalled();
+    });
+
+    it("mainの先端を読めなければ、ブランチ名のまま比較する（#5438）", async () => {
+      fetchBranchHeadSha.mockRejectedValue(new Error("boom"));
+
+      const result = await runProgressSweep({ now: NOW });
+
+      expect(compareBranches).toHaveBeenCalledWith("guchi-apps", "issue-deck", "main", "aaa111", "token");
+      expect(result.actions).toHaveLength(1);
     });
 
     it("進捗の報告が反映されなければ通知もラベル除去も行わない", async () => {
@@ -916,7 +930,7 @@ describe("runProgressSweep", () => {
       expect(compareBranches).toHaveBeenCalledWith(
         "guchi-apps",
         "issue-deck",
-        "main",
+        MAIN_TIP_SHA,
         "aaa111",
         "token",
       );

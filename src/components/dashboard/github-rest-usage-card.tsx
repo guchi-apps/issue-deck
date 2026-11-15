@@ -18,6 +18,7 @@ type Props = {
 /**
  * GitHub App（REST）の使用量カード（#5391）。メーターはプラン枠と同じ`UsageMeter`。
  * 実消費（GitHubが数えた値）と、このサーバーの計測・用途別の内訳を並べる。
+ * 計測・内訳はRESTだけで数え、GraphQL（別の枠）は参考として1行に分けて出す（#5438）。
  */
 export function GithubRestUsageCard({ data, isLoading, error }: Props) {
   const now = useNow();
@@ -34,6 +35,8 @@ export function GithubRestUsageCard({ data, isLoading, error }: Props) {
 
   const limits = data.rateLimits;
   const features = data.features.filter((feature) => feature.last60min > 0).slice(0, VISIBLE_FEATURES);
+  // 古いサーバーの応答（#5438より前）には無い
+  const graphqlLast60min = data.totalGraphql?.last60min ?? 0;
 
   return (
     <div className="flex flex-col gap-2">
@@ -79,6 +82,11 @@ export function GithubRestUsageCard({ data, isLoading, error }: Props) {
             ))}
           </ul>
         </div>
+      )}
+      {graphqlLast60min > 0 && (
+        <p className="text-[10px] text-muted-foreground tabular-nums">
+          GraphQL（RESTとは別の枠・直近60分） {graphqlLast60min.toLocaleString()}件
+        </p>
       )}
     </div>
   );

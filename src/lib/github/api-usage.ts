@@ -357,13 +357,28 @@ export type GithubApiUsageEndpoint = {
   last24h: number;
 };
 
+/**
+ * GraphQL（`POST /graphql`）として計上した呼び出しのエンドポイント名（#5438）。
+ *
+ * `githubGraphql`も`githubFetch`を通るため同じ計測に載るが、GitHubのレート制限ではRESTの`core`とは
+ * **別の枠**（`graphql`）に数えられる。混ぜたままだとREST枠の内訳が実消費より大きく見え（#5438の実測で
+ * 計測6,706件に対しREST実消費は約4,134件）、`measuredInWindow`との突き合わせも狂うため分けて集計する。
+ */
+export const GRAPHQL_ENDPOINT = "/graphql";
+
+/** 集計の3つの窓 */
+export type GithubApiUsageCounts = { currentHour: number; last60min: number; last24h: number };
+
 export type GithubApiUsageFeature = {
   key: GithubApiFeature;
   label: string;
+  /** 以下3つはRESTだけの呼び出し数（GraphQLは`graphql`に分ける。#5438） */
   currentHour: number;
   last60min: number;
   last24h: number;
-  /** 呼び出し数の多い順 */
+  /** GraphQLの呼び出し数（RESTとは別の枠。参考値） */
+  graphql: GithubApiUsageCounts;
+  /** RESTのエンドポイント。呼び出し数の多い順（`/graphql`は含めない） */
   endpoints: GithubApiUsageEndpoint[];
 };
 
@@ -376,10 +391,13 @@ export type GithubApiUsageSummary = {
   measuringSince: number;
   /** 現在の1時間ウィンドウ（正時起点）の開始時刻(epoch ms) */
   currentHourStartedAt: number;
+  /** 以下3つはRESTだけの合計（#5438） */
   totalCurrentHour: number;
   totalLast60min: number;
   totalLast24h: number;
-  /** 直近24時間の呼び出し数が多い順 */
+  /** GraphQLの合計（RESTとは別の枠。参考値） */
+  totalGraphql: GithubApiUsageCounts;
+  /** RESTの直近60分の呼び出し数が多い順 */
   features: GithubApiUsageFeature[];
 };
 
@@ -413,12 +431,19 @@ export function getGithubApiUsageSummary(now: number = Date.now()): GithubApiUsa
       currentHour: 0,
       last60min: 0,
       last24h: 0,
+      graphql: { currentHour: 0, last60min: 0, last24h: 0 },
       endpoints: [],
     };
-    entry.currentHour += total.currentHour;
-    entry.last60min += total.last60min;
-    entry.last24h += total.last24h;
-    entry.endpoints.push({ endpoint, currentHour: total.currentHour, last60min: total.last60min, last24h: total.last24h });
+    if (endpoint === GRAPHQL_ENDPOINT) {
+      entry.graphql.currentHour += total.currentHour;
+      entry.graphql.last60min += total.last60min;
+      entry.graphql.last24h += total.last24h;
+    } else {
+      entry.currentHour += total.currentHour;
+      entry.last60min += total.last60min;
+      entry.last24h += total.last24h;
+      entry.endpoints.push({ endpoint, currentHour: total.currentHour, last60min: total.last60min, last24h: total.last24h });
+    }
     byFeature.set(feature, entry);
   }
 
@@ -427,20 +452,34 @@ export function getGithubApiUsageSummary(now: number = Date.now()): GithubApiUsa
       ...feature,
       endpoints: feature.endpoints.sort((a, b) => b.last60min - a.last60min || b.last24h - a.last24h),
     }))
-    .sort((a, b) => b.last60min - a.last60min || b.last24h - a.last24h);
+    .sort(
+      (a, b) =>
+        b.last60min - a.last60min ||
+        b.last24h - a.last24h ||
+        b.graphql.last60min - a.graphql.last60min ||
+        b.graphql.last24h - a.graphql.last24h,
+    );
+
+  const sum = (pick: (feature: GithubApiUsageFeature) => number) =>
+    features.reduce((total, feature) => total + pick(feature), 0);
 
   return {
     measuringSince: state.buckets[0]?.startedAt ?? now,
     currentHourStartedAt,
-    totalCurrentHour: features.reduce((sum, feature) => sum + feature.currentHour, 0),
-    totalLast60min: features.reduce((sum, feature) => sum + feature.last60min, 0),
-    totalLast24h: features.reduce((sum, feature) => sum + feature.last24h, 0),
+    totalCurrentHour: sum((feature) => feature.currentHour),
+    totalLast60min: sum((feature) => feature.last60min),
+    totalLast24h: sum((feature) => feature.last24h),
+    totalGraphql: {
+      currentHour: sum((feature) => feature.graphql.currentHour),
+      last60min: sum((feature) => feature.graphql.last60min),
+      last24h: sum((feature) => feature.graphql.last24h),
+    },
     features,
   };
 }
 
 /**
- * `sinceMs`以降に計上した呼び出しの合計（全用途）。GitHubのレート制限の窓（リセット時刻の1時間前から）と
+ * `sinceMs`以降に計上した**REST**の呼び出しの合計（全用途。GraphQLは別の枠なので数えない。#5438）。GitHubのレート制限の窓（リセット時刻の1時間前から）と
  * 突き合わせるのに使う（#5373）。バケットが5分刻みのため、`sinceMs`を含むバケットは丸ごと数える
  * （最大5分ぶん多めに出る）。
  */
@@ -450,7 +489,10 @@ export function countGithubApiCallsSince(sinceMs: number, now: number = Date.now
   let total = 0;
   for (const bucket of state.buckets) {
     if (bucket.startedAt < from) continue;
-    for (const count of bucket.counts.values()) total += count;
+    for (const [key, count] of bucket.counts) {
+      if (key.endsWith(`\t${GRAPHQL_ENDPOINT}`)) continue;
+      total += count;
+    }
   }
   return total;
 }
