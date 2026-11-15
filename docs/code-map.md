@@ -615,7 +615,7 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
     | PR画面の一覧（`/api/pull-requests`。open・`scope=all`のclosed） | 10秒（Issue一覧のPR待ち行は60秒） | リポジトリ数 | あり（`fetchPullRequestPage`） |
     | 衝突巡回・レビュー停滞／引き継ぎの救済（`conflict-sweep`・`auto-repair-sweep`内） | 5分・3分 | リポジトリ数 | あり（`fetchOpenPullRequests`） |
     | リリース通知の巡回（`release-push-sweep`・`release-merge-push-sweep`） | 5分・10分 | リポジトリ数 | 大半あり（#5373でPR一覧も） |
-    | 進捗巡回（`progress-sweep-run.ts`） | 5分 | 盤面の対象Issue数（1件あたり数〜十数回） | ほぼ無し（`fetchPullRequestsForHead`・`compareBranches`・`fetchCommentsForIssue`は素のGET。`fetchBranchHeadSha`のみ） |
+    | 進捗巡回（`progress-sweep-run.ts`） | 5分 | 盤面の対象Issue数（1件あたり数〜十数回） | `fetchPullRequestsForHead`・`fetchBranchHeadSha`はあり。`main`との比較は#5438で先端SHAとのSHA同士にしてメモ。`develop...issue-<番号>`の比較と`fetchCommentsForIssue`は素のGET |
     | Issue詳細のPR（`/api/issues/pull-requests`。CI実行中のみ） | 20秒 | 表示中のPR数（`fetchPullRequest`） | あり（#5382で`actions-api`の`fetchPullRequest`をETag化） |
     | Issue一覧の実行中表示（`/api/issues/workflow-running`） | 20秒 | 実行中のIssue数（`fetchWorkflowRun`＋`fetchWorkflowRunJobs`） | 無し |
     | Issue詳細のコメント再取得（`/api/issues/comments`） | 60秒 | 開いているIssue（ページング） | 無し |
@@ -637,6 +637,19 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
     不変な取得（SHA同士の比較）は[`immutable-memo.ts`](../src/lib/github/immutable-memo.ts)で覚え、
     変わりうる単体取得（PR・ブランチ先端）は`githubFetchJsonWithEtag`へ寄せる。後者の戻り値はキャッシュと同じ
     実体なので、呼び出し側が書き換えうる関数（`fetchPullRequest`など）は`structuredClone`で写して返す。
+  - **GraphQLは計測に載るが、REST枠の件数には数えない**（#5438）。`githubGraphql`も`githubFetch`を通るため
+    `/graphql`として計上されるが、GitHubのレート制限ではRESTの`core`とは別の枠（`graphql`）。以前は混ぜて
+    数えており、#5438の実測では「このサーバーの計測」6,706件に対しREST実消費は約4,134件だった（上位の
+    「ブランチ状況の取得」はほぼ全部、「進捗の取り残しの巡回回収」は約6割がGraphQL）。いまは`features[].last60min`・
+    `measuredInWindow`がRESTだけ、GraphQLは`features[].graphql`・`totalGraphql`に分けて返す。
+    **用途別の件数を減らす前に、それがRESTかGraphQLかを`endpoints`で確かめる**（`/graphql`は`endpoints`に出ない）
+  - **#5438の実測で実際にREST枠を最も使っていたのはiOS配布結果（`/api/repositories/ios-testflight`）**。
+    ブランチ画面の行が未配布の間60秒、内訳を開くと10秒で取り直し、1回に素のGETを約7本使っていた。
+    [`ios-testflight-fetch.ts`](../src/lib/github/ios-testflight-fetch.ts)でrun一覧を条件付きGET（使う項目だけを覚える）、
+    完了したrunのjobs・注釈とデプロイ成功（`fetchDeployRunForSha`）をメモにし、変化が無い間の取り直しは枠をほぼ消費しない。
+    ブランチ状況のmain反映判定（`resolveMainInclusion`のGraphQL 2本）も、main・develop先端とPR番号の組で覚える
+    （全PRを判定できたときだけ）。**進捗巡回の盤面全件読み（`fetchProjectItems`。約4,600件を100件ずつ）は
+    GraphQLで、5分ごとに約46回投げている**——GraphQL枠を圧迫し始めたら次の削減先になる
   障害状況カードの右上には、`GET /api/github/status`が返す`fetchedAt`を「取得 10/3 13:15」の形で出す。
   カードはPC・スマホ共通の`settings/status-section.tsx`が組み立てる。
 - **issue-deck自身が投げたAI API呼び出しは、機能別に計上している（画面には出さない）**（#2347）。
@@ -3160,6 +3173,8 @@ export function POST(request: NextRequest) {
   [`lib/github/progress-sweep-run.ts`](../src/lib/github/progress-sweep-run.ts)）。上の2本と同じ形で、
   pollerが1巡ごとに`POST /api/issues/progress-sweep`を叩き、間隔
   （`PROGRESS_SWEEP_INTERVAL_MINUTES`・既定5分・0で無効）はサーバー側が決める。
+  対象はDB（`Issue.projectStatus`・`state`）から選ぶ。盤面（Project）の全件読みは
+  `PROGRESS_SWEEP_BOARD_INTERVAL_MINUTES`（既定60分）に1回の安全網で、その巡回ではDBの分と和集合にする（#5440）。
   `Develop PR`・`Implementation`にいるopenなIssueについて、`issue-<番号>`→developのPRが
   マージ済みなら`Develop`へ進め、`00.check-user`と理由ラベルを外し、マージ完了を通知する。
   マージ済みPRの先端とブランチの先端が食い違う場合は`compare/develop...issue-<番号>`を引き、

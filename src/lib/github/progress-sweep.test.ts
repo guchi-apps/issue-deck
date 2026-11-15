@@ -23,7 +23,9 @@ import {
   hasStrandedNotice,
   isManualStepTitle,
   needsStrandedCheck,
+  progressSweepBoardIntervalMinutes,
   progressSweepIntervalMinutes,
+  PROGRESS_SWEEP_DEFAULT_BOARD_INTERVAL_MINUTES,
   PROGRESS_SWEEP_DEFAULT_INTERVAL_MINUTES,
   PROGRESS_SWEEP_STRANDED_GRACE_MINUTES,
   strandedCommentMarker,
@@ -192,6 +194,21 @@ describe("decideProgressSweep", () => {
     );
 
     expect(decision).toEqual({ action: "skip", reason: "compare_unavailable" });
+  });
+});
+
+describe("progressSweepBoardIntervalMinutes（#5440）", () => {
+  it("未設定・数値でない・負なら既定値（60分）", () => {
+    expect(PROGRESS_SWEEP_DEFAULT_BOARD_INTERVAL_MINUTES).toBe(60);
+    expect(progressSweepBoardIntervalMinutes(undefined)).toBe(60);
+    expect(progressSweepBoardIntervalMinutes("")).toBe(60);
+    expect(progressSweepBoardIntervalMinutes("abc")).toBe(60);
+    expect(progressSweepBoardIntervalMinutes("-1")).toBe(60);
+  });
+
+  it("0（毎巡読む）と指定した値を通す", () => {
+    expect(progressSweepBoardIntervalMinutes("0")).toBe(0);
+    expect(progressSweepBoardIntervalMinutes("30")).toBe(30);
   });
 });
 

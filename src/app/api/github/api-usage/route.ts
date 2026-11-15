@@ -18,6 +18,7 @@ const HOUR_MS = 60 * 60_000;
  * プロセス内の計測に載らない。GitHubの窓（`reset`の1時間前から）に入る計測ぶんを`measuredInWindow`、
  * `used`との差を`unmeasuredInWindow`として返す。計測はインストールを区別しないため、インストールが
  * 複数あるとそれぞれの`measuredInWindow`には他のインストールの呼び出しも混ざる（目安として読む）。
+ * `measuredInWindow`・`features`の件数はRESTだけで、GraphQLは別の枠なので`graphql`・`totalGraphql`へ分ける（#5438）。
  * `/rate_limit`自体は枠を消費しない。
  */
 export async function GET() {

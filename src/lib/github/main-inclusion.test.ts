@@ -3,7 +3,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const githubGraphql = vi.fn();
 vi.mock("@/lib/github/graphql", () => ({ githubGraphql: (...args: unknown[]) => githubGraphql(...args) }));
 
-import { classifyByBlobs, pickedPullRequestNumbers, resolveMainInclusion } from "@/lib/github/main-inclusion";
+import {
+  classifyByBlobs,
+  clearMainInclusionMemoForTest,
+  pickedPullRequestNumbers,
+  resolveMainInclusion,
+} from "@/lib/github/main-inclusion";
 
 const base = { owner: "o", repo: "r", token: "t", mainOid: "main", developOid: "dev", picked: new Set<number>() };
 
@@ -29,7 +34,10 @@ describe("classifyByBlobs", () => {
 });
 
 describe("resolveMainInclusion", () => {
-  beforeEach(() => githubGraphql.mockReset());
+  beforeEach(() => {
+    githubGraphql.mockReset();
+    clearMainInclusionMemoForTest();
+  });
 
   it("cherry-pick済みは照合せず反映済み。ファイル一致のPRは反映済み、不一致は未反映として残す", async () => {
     githubGraphql
@@ -54,5 +62,31 @@ describe("resolveMainInclusion", () => {
     expect((await resolveMainInclusion({ ...base, pullRequestNumbers: [1] })).get(1)?.state).toBe("unknown");
     githubGraphql.mockRejectedValueOnce(new Error("boom"));
     expect((await resolveMainInclusion({ ...base, pullRequestNumbers: [2] })).get(2)).toEqual({ state: "unknown", evidence: null });
+  });
+
+  it("同じmain・develop・PRの組は覚えて問い合わせない（#5438）", async () => {
+    githubGraphql
+      .mockResolvedValueOnce({ repository: { p0: { files: { totalCount: 1, nodes: [{ path: "a.ts" }] } } } })
+      .mockResolvedValueOnce({ repository: { m0: { oid: "x" }, d0: { oid: "x" } } });
+    const first = await resolveMainInclusion({ ...base, pullRequestNumbers: [7] });
+    const second = await resolveMainInclusion({ ...base, pullRequestNumbers: [7] });
+    expect(second).toEqual(first);
+    expect(second.get(7)).toEqual({ state: "included", evidence: "content" });
+    expect(githubGraphql).toHaveBeenCalledTimes(2);
+
+    // developが進めば別の組なので問い合わせ直す
+    githubGraphql.mockRejectedValueOnce(new Error("boom"));
+    await resolveMainInclusion({ ...base, developOid: "other-develop", pullRequestNumbers: [7] });
+    expect(githubGraphql).toHaveBeenCalledTimes(3);
+  });
+
+  it("不明（取得失敗）を含む結果は覚えず、次の呼び出しで問い合わせ直す", async () => {
+    githubGraphql.mockRejectedValueOnce(new Error("boom"));
+    expect((await resolveMainInclusion({ ...base, pullRequestNumbers: [8] })).get(8)?.state).toBe("unknown");
+    githubGraphql
+      .mockResolvedValueOnce({ repository: { p0: { files: { totalCount: 1, nodes: [{ path: "a.ts" }] } } } })
+      .mockResolvedValueOnce({ repository: { m0: { oid: "x" }, d0: { oid: "y" } } });
+    expect((await resolveMainInclusion({ ...base, pullRequestNumbers: [8] })).get(8)?.state).toBe("not-included");
+    expect(githubGraphql).toHaveBeenCalledTimes(3);
   });
 });

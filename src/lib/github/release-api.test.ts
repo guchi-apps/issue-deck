@@ -2,7 +2,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { clearConditionalRequestCache } from "@/lib/github/conditional-request";
 import {
+  clearSucceededDeployRunMemoForTest,
   fetchBaseAdvanceChangedFiles,
+  fetchDeployRunForSha,
   fetchOpenPullRequestsForBase,
   fetchPackageVersion,
   fetchReleasesBackTo,
@@ -326,5 +328,37 @@ describe("ETagの条件付きGET（#5373）", () => {
 
     expect(await fetchPackageVersion("o", "r", "main", "t")).toBe("1.2.3");
     expect(await fetchPackageVersion("o", "r", "main", "t")).toBe("1.2.3");
+  });
+});
+
+describe("fetchDeployRunForSha（#5438）", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    clearSucceededDeployRunMemoForTest();
+  });
+
+  it("成功したrunは覚えて取り直さない", async () => {
+    const fetchMock = vi.fn(async () =>
+      jsonResponse(200, { workflow_runs: [{ status: "completed", conclusion: "success" }] }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    expect(await fetchDeployRunForSha("o", "r", "t", "sha1")).toEqual({ status: "completed", conclusion: "success" });
+    expect(await fetchDeployRunForSha("o", "r", "t", "sha1")).toEqual({ status: "completed", conclusion: "success" });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("失敗・実行中のrunは再実行で変わるので毎回取り直す", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(jsonResponse(200, { workflow_runs: [{ status: "completed", conclusion: "failure" }] }))
+      .mockResolvedValueOnce(jsonResponse(200, { workflow_runs: [{ status: "in_progress", conclusion: null }] }))
+      .mockResolvedValueOnce(jsonResponse(200, { workflow_runs: [{ status: "completed", conclusion: "success" }] }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    expect((await fetchDeployRunForSha("o", "r", "t", "sha2"))?.conclusion).toBe("failure");
+    expect((await fetchDeployRunForSha("o", "r", "t", "sha2"))?.status).toBe("in_progress");
+    expect((await fetchDeployRunForSha("o", "r", "t", "sha2"))?.conclusion).toBe("success");
+    expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 });

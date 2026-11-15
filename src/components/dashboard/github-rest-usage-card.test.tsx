@@ -56,6 +56,12 @@ describe("GithubRestUsageCard", () => {
     expect(screen.getByText("x: 使用量を取得できませんでした")).toBeTruthy();
   });
 
+  it("GraphQLは別の枠として1行に分けて出す（#5438）", () => {
+    const data = { ...withLimit(3420), totalGraphql: { currentHour: 0, last60min: 2572, last24h: 0 } };
+    render(<GithubRestUsageCard data={data} isLoading={false} error={null} />);
+    expect(screen.getByText(/GraphQL（RESTとは別の枠・直近60分） 2,572件/)).toBeTruthy();
+  });
+
   it("エラーを表示する", () => {
     render(<GithubRestUsageCard data={null} isLoading={false} error="取得に失敗しました (500)" />);
     expect(screen.getByText("取得に失敗しました (500)")).toBeTruthy();

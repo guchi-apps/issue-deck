@@ -44,6 +44,7 @@ import {
   importingRevisionHeads,
   isResidualAlreadyInBase,
   needsStrandedCheck,
+  progressSweepBoardIntervalMinutes,
   progressSweepIntervalMinutes,
   residualLookupPaths,
   type ClosedStrandedSkipReason,
@@ -59,7 +60,11 @@ import {
   fetchPullRequestsForHead,
 } from "@/lib/github/pull-requests-api";
 import { reportProgressStatus } from "@/lib/github/report-progress";
-import { matchProjectStatus, type ProgressStatusKey } from "@/lib/issue-progress";
+import {
+  getProgressStatusDef,
+  matchProjectStatus,
+  type ProgressStatusKey,
+} from "@/lib/issue-progress";
 import { extractManualStepReferences } from "@/lib/manual-step-prerequisites";
 
 /**
@@ -81,7 +86,14 @@ import { extractManualStepReferences } from "@/lib/manual-step-prerequisites";
  * PR一覧・Issue同期・CI状態と共有）を使う。共有枠を食い潰すと巻き添えで他の機能が落ちるため
  * （`docs/code-map.md`「条件付きGET」）、平常時にほとんど消費しない形にしてある。
  *
- * - installationごとにProjectのアイテム一覧（GraphQL）を1回
+ * - **対象選びは毎巡issue-deckのDB**（`Issue.projectStatus`・`state`）で行う（#5440）。DBは
+ *   `projects_v2_item`のWebhookと`reportProgressStatus`で盤面に追随している
+ * - **Projectのアイテム一覧（GraphQL）は`PROGRESS_SWEEP_BOARD_INTERVAL_MINUTES`（既定60分）に1回だけ**、
+ *   installationごとに読む。盤面は約4,600件で1回読むとGraphQLが約46回出るため、5分ごとに読むと
+ *   これだけで約550回/時になっていた。読んだ巡回ではDBの分との和集合を対象にし、Webhookの
+ *   取りこぼしでDBがずれたIssueを拾う安全網にする。**読んだ結果は巡回をまたいで使わない**——
+ *   `Done`のclose・closedの`done`報告は候補の進捗とopen/closedだけを根拠に進むので、
+ *   古いスナップショットで判断すると、その間にreopen・差し戻されたIssueを閉じうる
  * - `Develop PR`・`Implementation`にいるopenなIssueぶんだけREST 1回（そのブランチの
  *   クローズ済みPR）。**ETagの条件付きGETを通すので、状況が変わらない間は304になり
  *   レート制限を消費しない**——ジョブだったときの`gh pr list`には無かった性質
@@ -186,6 +198,8 @@ export type ProgressSweepResult = {
   closedCandidates: number;
   /** `Develop`・`Release`・`Done`にいて実際に見たopenなIssue数（#2715） */
   mergedOpenCandidates: number;
+  /** この巡回で盤面（Project）の全件を読んだか（#5440）。読まない巡回はDBだけで対象を選ぶ */
+  boardRead: boolean;
   /** 進めた・通知した・ラベルを付けたもの */
   actions: ProgressSweepAction[];
   /** 見送った理由ごとの件数 */
@@ -247,9 +261,16 @@ const STALE_CHECK_USER_STATUSES = ["Develop", "Release"];
  */
 let lastSweptAt: number | null = null;
 
+/**
+ * 最後に盤面を読み切った時刻（epoch ms。#5440）。`lastSweptAt`と同じくプロセス内にしか持たず、
+ * 再起動で忘れても起きるのは「1回余分に盤面を読む」だけ。**時刻だけを持ち、読んだ中身は持たない。**
+ */
+let lastBoardReadAt: number | null = null;
+
 /** テスト用。プロセスをまたがないので本番では呼ばない */
 export function resetProgressSweepIntervalForTest(): void {
   lastSweptAt = null;
+  lastBoardReadAt = null;
 }
 
 function emptyResult(overrides: Partial<ProgressSweepResult>): ProgressSweepResult {
@@ -260,6 +281,7 @@ function emptyResult(overrides: Partial<ProgressSweepResult>): ProgressSweepResu
     candidates: 0,
     closedCandidates: 0,
     mergedOpenCandidates: 0,
+    boardRead: false,
     actions: [],
     skipped: {},
     failedRepositories: [],
@@ -309,11 +331,14 @@ export async function runProgressSweep(
   const actions: ProgressSweepAction[] = [];
   const failedRepositories: string[] = [];
 
-  const { openCandidates, closedCandidates, mergedOpenCandidates } = await collectCandidates({
-    repositories,
-    tokenFor,
-    failedRepositories,
-  });
+  const { openCandidates, closedCandidates, mergedOpenCandidates, boardRead } =
+    await collectCandidates({
+      repositories,
+      tokenFor,
+      failedRepositories,
+      now,
+      forceBoardRead: options.force === true,
+    });
 
   for (const candidate of openCandidates) {
     try {
@@ -382,6 +407,7 @@ export async function runProgressSweep(
     candidates: openCandidates.length,
     closedCandidates: closedCandidates.length,
     mergedOpenCandidates: mergedOpenCandidates.length,
+    boardRead,
     actions,
     skipped,
     failedRepositories,
@@ -413,10 +439,29 @@ type CandidateGroups = {
   closedCandidates: Candidate[];
   /** `Develop`・`Release`・`Done`にいるopenなIssue（#2715）。判定に進捗そのものを使う */
   mergedOpenCandidates: (Candidate & { status: MergedOpenStatus })[];
+  /** この巡回で盤面を読んだか（#5440） */
+  boardRead: boolean;
 };
+
+/** 対象を振り分ける前の1件。DB・盤面のどちらから来ても同じ形にそろえる */
+type CandidateSource = {
+  repository: RepositoryRow;
+  issueNumber: number;
+  issueOpen: boolean;
+  status: ProgressStatusKey;
+};
+
+/** 進捗キーから盤面（とDBの`projectStatus`）に入っているStatus名を引く */
+function projectStatusNames(keys: readonly ProgressStatusKey[]): string[] {
+  return keys.map((key) => getProgressStatusDef(key).projectStatus);
+}
 
 /**
  * open向け・closed向け、両方の巡回対象を集める。
+ *
+ * **対象選びは毎巡issue-deckのDBで行い、盤面は間隔を空けて読む安全網にする**（#5440）。
+ * 盤面を読んだ巡回では、DBの分とその場で読んだ盤面の分の和集合を対象にする。同じIssueが
+ * 両方にあれば、読んだばかりの盤面の進捗・open/closedを採る（DBはWebhookの反映を待つ側のため）。
  *
  * **Projectのアイテム一覧はinstallationごとに1回だけ引く。** リポジトリごとに
  * `queryIssuesByProgressStatus`を呼ぶと、同じ盤面をリポジトリ数ぶん読み直すことになる
@@ -427,10 +472,15 @@ async function collectCandidates(params: {
   repositories: RepositoryRow[];
   tokenFor: (installationId: number, cacheKey: string) => Promise<string>;
   failedRepositories: string[];
+  now: Date;
+  /** 間隔に関係なく盤面を読む（画面からの手動実行） */
+  forceBoardRead: boolean;
 }): Promise<CandidateGroups> {
   const location = getProjectLocation();
   // Project連携が無効なら進捗そのものが無い。手作業ラベルの埋め直しだけを行う。
-  if (!location) return { openCandidates: [], closedCandidates: [], mergedOpenCandidates: [] };
+  if (!location) {
+    return { openCandidates: [], closedCandidates: [], mergedOpenCandidates: [], boardRead: false };
+  }
 
   const byInstallation = new Map<string, RepositoryRow[]>();
   for (const repository of params.repositories) {
@@ -439,6 +489,68 @@ async function collectCandidates(params: {
     byInstallation.set(repository.installation.id, rows);
   }
 
+  // `<repo>#<番号>`ごとに1件。挿入順（DB→盤面にしか無いもの）がそのまま巡回の順になる。
+  const sources = new Map<string, CandidateSource>();
+  for (const source of await collectFromDatabase(params.repositories)) {
+    sources.set(`${source.repository.fullName}#${source.issueNumber}`, source);
+  }
+
+  const boardIntervalMinutes = progressSweepBoardIntervalMinutes();
+  const boardDue =
+    params.forceBoardRead ||
+    lastBoardReadAt === null ||
+    params.now.getTime() - lastBoardReadAt >= boardIntervalMinutes * 60_000;
+
+  const tokens = new Map<string, string>();
+  let boardFailed = false;
+  for (const [installationKey, rows] of byInstallation) {
+    let token: string;
+    try {
+      token = await params.tokenFor(rows[0].installation.installationId, installationKey);
+    } catch (error) {
+      console.error(`[progress-sweep] installation ${installationKey} のトークン取得:`, error);
+      params.failedRepositories.push(...rows.map((row) => row.fullName));
+      boardFailed = true;
+      continue;
+    }
+    tokens.set(installationKey, token);
+    if (!boardDue) continue;
+
+    let items: Awaited<ReturnType<typeof fetchProjectItems>>;
+    try {
+      items = await fetchProjectItems(location.owner, location.number, token);
+    } catch (error) {
+      // 盤面が読めなくても、DBで選んだ分はそのまま巡回する。盤面は次の巡回で読み直す。
+      console.error(`[progress-sweep] installation ${installationKey} の盤面取得:`, error);
+      params.failedRepositories.push(...rows.map((row) => row.fullName));
+      boardFailed = true;
+      continue;
+    }
+
+    const byRepositoryId = new Map<number, RepositoryRow>(
+      rows.map((row) => [row.githubRepositoryId, row]),
+    );
+    const seenOnBoard = new Set<string>();
+    for (const item of items) {
+      const repository = byRepositoryId.get(item.repositoryDatabaseId);
+      if (!repository) continue;
+      const key = `${repository.fullName}#${item.issueNumber}`;
+      // 同じIssueが盤面に2つ載っていても、従来どおり先に出たほうだけを使う。
+      if (seenOnBoard.has(key)) continue;
+      seenOnBoard.add(key);
+      const status = item.status ? matchProjectStatus(item.status) : null;
+      if (!status) {
+        // 盤面ではStatusが無い（外された）なら、DBの古い進捗で巡回しない。
+        sources.delete(key);
+        continue;
+      }
+      sources.set(key, { repository, issueNumber: item.issueNumber, issueOpen: item.issueOpen, status });
+    }
+  }
+  // 読み切ったときだけ時刻を進める（読めなかったinstallationがあれば次の巡回で読み直す）。
+  const boardRead = boardDue && !boardFailed;
+  if (boardRead) lastBoardReadAt = params.now.getTime();
+
   const wantedOpen = new Set<ProgressStatusKey>(TARGET_STATUSES);
   const wantedClosed = new Set<ProgressStatusKey>(CLOSED_TARGET_STATUSES);
   const wantedMergedOpen = new Set<ProgressStatusKey>(MERGED_OPEN_TARGET_STATUSES);
@@ -446,59 +558,64 @@ async function collectCandidates(params: {
   const closedCandidates: Candidate[] = [];
   const mergedOpenCandidates: CandidateGroups["mergedOpenCandidates"] = [];
 
-  for (const [installationKey, rows] of byInstallation) {
-    let token: string;
-    let items: Awaited<ReturnType<typeof fetchProjectItems>>;
-    try {
-      token = await params.tokenFor(rows[0].installation.installationId, installationKey);
-      items = await fetchProjectItems(location.owner, location.number, token);
-    } catch (error) {
-      // このinstallationのぶんは丸ごと次の巡回へ回す（進捗の判断材料が無いため）。
-      console.error(`[progress-sweep] installation ${installationKey} の盤面取得:`, error);
-      params.failedRepositories.push(...rows.map((row) => row.fullName));
-      continue;
-    }
-
-    const byRepositoryId = new Map<number, RepositoryRow>(
-      rows.map((row) => [row.githubRepositoryId, row]),
-    );
-    const seenOpen = new Set<string>();
-    const seenClosed = new Set<string>();
-    const seenMergedOpen = new Set<string>();
-    for (const item of items) {
-      const repository = byRepositoryId.get(item.repositoryDatabaseId);
-      if (!repository) continue;
-      const status = item.status ? matchProjectStatus(item.status) : null;
-      if (!status) continue;
-      const key = `${repository.fullName}#${item.issueNumber}`;
-      const candidate: Candidate = {
-        repositoryFullName: repository.fullName,
-        ownerLogin: repository.ownerLogin,
-        name: repository.name,
-        issueNumber: item.issueNumber,
-        token,
-      };
-      if (item.issueOpen) {
-        // `Develop PR`・`Implementation`（進める側）と`Develop`・`Release`・`Done`
-        // （close漏れ側）は重ならないので、同じ走査で振り分けてよい。
-        if (wantedMergedOpen.has(status)) {
-          if (seenMergedOpen.has(key)) continue;
-          seenMergedOpen.add(key);
-          mergedOpenCandidates.push({ ...candidate, status: status as MergedOpenStatus });
-          continue;
-        }
-        if (!wantedOpen.has(status) || seenOpen.has(key)) continue;
-        seenOpen.add(key);
+  for (const source of sources.values()) {
+    const token = tokens.get(source.repository.installation.id);
+    if (!token) continue;
+    const candidate: Candidate = {
+      repositoryFullName: source.repository.fullName,
+      ownerLogin: source.repository.ownerLogin,
+      name: source.repository.name,
+      issueNumber: source.issueNumber,
+      token,
+    };
+    const { status } = source;
+    if (source.issueOpen) {
+      // `Develop PR`・`Implementation`（進める側）と`Develop`・`Release`・`Done`
+      // （close漏れ側）は重ならないので、同じ走査で振り分けてよい。
+      if (wantedMergedOpen.has(status)) {
+        mergedOpenCandidates.push({ ...candidate, status: status as MergedOpenStatus });
+      } else if (wantedOpen.has(status)) {
         openCandidates.push(candidate);
-      } else {
-        if (!wantedClosed.has(status) || seenClosed.has(key)) continue;
-        seenClosed.add(key);
-        closedCandidates.push(candidate);
       }
+    } else if (wantedClosed.has(status)) {
+      closedCandidates.push(candidate);
     }
   }
 
-  return { openCandidates, closedCandidates, mergedOpenCandidates };
+  return { openCandidates, closedCandidates, mergedOpenCandidates, boardRead };
+}
+
+/**
+ * 巡回の3経路が見る進捗にいるIssueを、issue-deckのDBから引く（#5440）。GitHub APIは消費しない。
+ * `projectStatus`は盤面のStatus名そのまま（`syncProjectStatuses`・Webhook・`reportProgressStatus`が書く）。
+ */
+async function collectFromDatabase(repositories: RepositoryRow[]): Promise<CandidateSource[]> {
+  const byId = new Map(repositories.map((repository) => [repository.id, repository]));
+  const rows = await db.issue.findMany({
+    where: {
+      repositoryId: { in: [...byId.keys()] },
+      OR: [
+        {
+          state: "OPEN",
+          projectStatus: {
+            in: projectStatusNames([...TARGET_STATUSES, ...MERGED_OPEN_TARGET_STATUSES]),
+          },
+        },
+        { state: "CLOSED", projectStatus: { in: projectStatusNames(CLOSED_TARGET_STATUSES) } },
+      ],
+    },
+    select: { repositoryId: true, number: true, state: true, projectStatus: true },
+    orderBy: [{ repositoryId: "asc" }, { number: "asc" }],
+  });
+
+  const sources: CandidateSource[] = [];
+  for (const row of rows ?? []) {
+    const repository = byId.get(row.repositoryId);
+    const status = row.projectStatus ? matchProjectStatus(row.projectStatus) : null;
+    if (!repository || !status) continue;
+    sources.push({ repository, issueNumber: row.number, issueOpen: row.state === "OPEN", status });
+  }
+  return sources;
 }
 
 /** 1つのIssueを見て、進める・通知する・見送るのいずれかを行う */
@@ -730,7 +847,7 @@ async function sweepClosedIssue(params: {
   const mergedPullRequest = merged ? { url: merged.html_url, headSha: merged.head.sha } : null;
 
   const compareWithMain = mergedPullRequest
-    ? await compareBranches(ownerLogin, name, MAIN_BRANCH, mergedPullRequest.headSha, token)
+    ? await compareAgainstMain(ownerLogin, name, mergedPullRequest.headSha, token)
     : null;
   const importedCandidateInMain =
     merged && compareWithMain && compareWithMain.aheadBy !== 0
@@ -849,16 +966,33 @@ async function isImportedIntoCandidateInMain(params: {
     select: { headSha: true, importedPrs: true },
   });
   for (const head of importingRevisionHeads(revisions, params.prNumber)) {
-    const compared = await compareBranches(
-      params.ownerLogin,
-      params.name,
-      MAIN_BRANCH,
-      head,
-      params.token,
-    );
+    const compared = await compareAgainstMain(params.ownerLogin, params.name, head, params.token);
     if (compared && compared.aheadBy === 0) return true;
   }
   return false;
+}
+
+/**
+ * `main...{head}`を三点比較する（#5438）。
+ *
+ * `main`をブランチ名のまま渡すと先端が動きうるため`compareBranches`のSHAメモに載らず、`Develop`・`Release`に
+ * 留まるIssueぶんを5分おきに毎回取り直していた（本番の実測で進捗巡回のRESTの大半）。先に`main`の先端SHAを
+ * 条件付きGET（先端が動かない間は304で枠を消費しない）で読み、SHA同士の比較にしてメモへ載せる。
+ * 先端を読めなかったときだけ、従来どおりブランチ名で比較する。
+ */
+async function compareAgainstMain(
+  owner: string,
+  repo: string,
+  head: string,
+  token: string,
+): Promise<Awaited<ReturnType<typeof compareBranches>>> {
+  let mainSha: string | null = null;
+  try {
+    mainSha = await fetchBranchHeadSha(owner, repo, MAIN_BRANCH, token);
+  } catch {
+    // 読めなくても比較自体は続ける（ブランチ名での比較に倒す）
+  }
+  return compareBranches(owner, repo, mainSha || MAIN_BRANCH, head, token);
 }
 
 /** 生きているローカルセッションが担当しているIssueの`<repo>#<番号>`（#2715） */
@@ -930,7 +1064,7 @@ async function sweepMergedOpenIssue(params: {
       .at(-1);
     mergedPullRequest = merged ? { url: merged.html_url, headSha: merged.head.sha } : null;
     compareWithMain = mergedPullRequest
-      ? await compareBranches(ownerLogin, name, MAIN_BRANCH, mergedPullRequest.headSha, token)
+      ? await compareAgainstMain(ownerLogin, name, mergedPullRequest.headSha, token)
       : null;
     if (merged && compareWithMain && compareWithMain.aheadBy !== 0) {
       importedCandidateInMain = await isImportedIntoCandidateInMain({

@@ -1,4 +1,5 @@
 import { githubGraphql } from "@/lib/github/graphql";
+import { ImmutableMemo } from "@/lib/github/immutable-memo";
 
 /**
  * developへマージ済みのPRが、mainへ実際に入っているかの判定（#4528）。
@@ -57,10 +58,42 @@ export function classifyByBlobs(
 type PullRequestFilesResult = Record<string, { files?: { totalCount?: number; nodes?: ({ path?: string } | null)[] | null } | null } | null>;
 
 /**
+ * 判定済みの結果（#5438）。キーは`owner/repo`・`mainOid`・`developOid`・PR番号列。コミットのOIDで固定した
+ * 判定なので結果は変わらず、ブランチ画面を開くたび・自動更新のたびにGraphQLを2本ずつ投げ直さずに済む。
+ * **全PRを`unknown`以外で判定できたときだけ覚える**（取得失敗の`unknown`を固定しないため）。
+ */
+const inclusionMemo = new ImmutableMemo<ReadonlyMap<number, PullRequestInclusion>>(100);
+
+/** テスト用 */
+export function clearMainInclusionMemoForTest(): void {
+  inclusionMemo.clear();
+}
+
+/**
  * 反映状態を調べる。`mainOid`・`developOid`はコミットのOID（同じ時点を見るために名前でなく固定する）。
  * 戻り値に無いPRは調べなかったもの（呼び出し側は未リリースのまま扱う）。
  */
 export async function resolveMainInclusion(input: {
+  owner: string;
+  repo: string;
+  token: string;
+  mainOid: string;
+  developOid: string;
+  pullRequestNumbers: readonly number[];
+  picked: ReadonlySet<number>;
+}): Promise<Map<number, PullRequestInclusion>> {
+  // `picked`はmainの履歴から作るので`mainOid`で決まり、キーに含めなくてよい
+  const key = `${input.owner}/${input.repo}:${input.mainOid}:${input.developOid}:${[...input.pullRequestNumbers].sort((a, b) => a - b).join(",")}`;
+  const memoized = inclusionMemo.get(key);
+  if (memoized) return new Map(memoized);
+  const result = await resolveMainInclusionUncached(input);
+  if ([...result.values()].every((inclusion) => inclusion.state !== "unknown")) {
+    inclusionMemo.set(key, new Map(result));
+  }
+  return result;
+}
+
+async function resolveMainInclusionUncached(input: {
   owner: string;
   repo: string;
   token: string;

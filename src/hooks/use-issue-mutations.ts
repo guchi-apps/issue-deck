@@ -48,6 +48,9 @@ function errorMessageForResponse(status: number, data: { error?: string; message
   if (data.error === "github_reauth_required") {
     return GITHUB_REAUTH_REQUIRED_MESSAGE;
   }
+  if (data.error === "not_found") {
+    return "このリポジトリにはIssueを作成できません（リポジトリが見つからないか、アクセス権がありません）";
+  }
   return data.error === "github_api_error" && data.message
     ? data.message
     : `リクエストに失敗しました (${status})`;
