@@ -127,7 +127,7 @@ describe("MobileBottomNavViewの確認待ちバッジ（#3080）", () => {
   it("ホームタブに確認待ち件数を出し、aria-labelで読める", () => {
     render(<MobileBottomNavView active="flow" onSelect={vi.fn()} checkUserCount={5} />);
 
-    const homeTab = screen.getByRole("button", { name: "ホーム（ユーザーの確認待ちが5件あります）" });
+    const homeTab = screen.getByRole("button", { name: "ホーム（要確認が5件あります）" });
     expect(homeTab.textContent).toContain("5");
     // 他のタブには付けない
     expect(screen.getByRole("button", { name: "ブランチ" }).textContent).toBe("ブランチ");
@@ -144,7 +144,7 @@ describe("MobileBottomNavViewの確認待ちバッジ（#3080）", () => {
   it("100件以上は99+に頭打ちにする", () => {
     render(<MobileBottomNavView active="home" onSelect={vi.fn()} checkUserCount={120} />);
 
-    const homeTab = screen.getByRole("button", { name: "ホーム（ユーザーの確認待ちが120件あります）" });
+    const homeTab = screen.getByRole("button", { name: "ホーム（要確認が120件あります）" });
     expect(homeTab.textContent).toContain("99+");
     expect(homeTab.textContent).not.toContain("120");
   });

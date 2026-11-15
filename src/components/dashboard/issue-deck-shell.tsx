@@ -172,6 +172,7 @@ import {
   computeManualStepAttention,
 } from "@/lib/manual-step-attention";
 import { countMergePendingAttention } from "@/lib/merge-pending-attention";
+import { computeMobileHomeBadgeCount } from "@/lib/mobile-home-badge";
 import type { BranchViewMode } from "@/lib/branch-view-visibility";
 import { selectVisibleIssues } from "@/lib/repository-visibility";
 import { buildReleaseCheckIndex, countUncheckedReleases } from "@/lib/release-check";
@@ -2513,11 +2514,12 @@ export function IssueDeckShell({
               checkUserPullRequestIds={checkUserPullRequestIds}
             />
 
-            {/* 「ホーム」タブの確認待ち件数（#3080）。ホームのメニュー・左メニューと同じ数え方 */}
+            {/* 「ホーム」タブの件数（#3080・#5434）。ホーム画面の「要確認」に出ている数と揃える。
+                左メニューの数え方（PRを足す）にすると、リリースPRを「ブランチ」と二重に数える */}
             <MobileBottomNav
               active={activeBottomNavTab}
               onSelect={selectTab}
-              checkUserCount={navCounts["check-user"] + checkUserPullRequestCount}
+              checkUserCount={computeMobileHomeBadgeCount(mobileCheckUserCount, mergePendingAttention)}
             />
           </div>
 

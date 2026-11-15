@@ -65,9 +65,11 @@ type MobileBottomNavViewProps = {
    */
   releaseUncheckedCount?: number | null;
   /**
-   * 「ホーム」タブのアイコンに重ねるユーザーの確認待ち件数（#3080）。ホームのメニュー・PCの
-   * 左メニューの「ユーザーの確認待ち」と同じ数（確認待ちIssue＋ユーザーがマージするPR）を
-   * `issue-deck-shell.tsx`から受け取る。**`null`・`0`は何も出さない**。
+   * 「ホーム」タブのアイコンに重ねる件数（#3080・#5434）。ホーム画面の「要確認」に出ている、
+   * 人が動く番のものの合計（確認待ちタイル＋マージ待ちのうち人の操作が要るもの。数え方は
+   * `computeMobileHomeBadgeCount`）を`issue-deck-shell.tsx`から受け取る。PCの左メニューの
+   * 「ユーザーの確認待ち」とは数え方が違う——リリースPRは「ブランチ」タブが受け持つ。
+   * **`null`・`0`は何も出さない**。
    */
   checkUserCount?: number | null;
 };
@@ -121,11 +123,11 @@ export function MobileBottomNavView({
         const showsMergePendingBadge = id === "flow" && pendingCount > 0;
         // 「リリース履歴」画面の「未確認」と同じ材料（#2951）。PCの左メニュー「リリース履歴」行と揃える
         const showsUncheckedBadge = id === "release-history" && uncheckedCount > 0;
-        // ホームのメニューの「ユーザーの確認待ち」と同じ数（#3080）。どの画面にいても見落とさないため
+        // ホーム画面の「要確認」と同じ数（#3080・#5434）。どの画面にいても見落とさないため
         const showsCheckUserBadge = id === "home" && waitingCount > 0;
         const showsBadge = showsMergePendingBadge || showsUncheckedBadge || showsCheckUserBadge;
         const badgeLabel = showsCheckUserBadge
-          ? `ユーザーの確認待ちが${waitingCount}件あります`
+          ? `要確認が${waitingCount}件あります`
           : showsMergePendingBadge
             ? pendingLabel
             : `未確認のリリースが${uncheckedCount}件あります`;
