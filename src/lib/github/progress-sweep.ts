@@ -461,6 +461,23 @@ export function progressSweepIntervalMinutes(
 }
 
 /**
+ * 盤面（Project）の全件読みの間隔（分）の既定値（#5440）。`PROGRESS_SWEEP_BOARD_INTERVAL_MINUTES`で変えられる。
+ * 対象選びは毎巡DB（`Issue.projectStatus`・`state`）で行い、盤面はDBのずれを拾う安全網として
+ * この間隔でだけ読む（盤面は約4,600件で、1回読むとGraphQLが約46回出る）。
+ */
+export const PROGRESS_SWEEP_DEFAULT_BOARD_INTERVAL_MINUTES = 60;
+
+/** 盤面の全件読みの間隔（分）。環境変数が読めない・数値でない・負の場合は既定値。**0は「毎巡読む」**（従来の挙動） */
+export function progressSweepBoardIntervalMinutes(
+  raw: string | undefined = process.env.PROGRESS_SWEEP_BOARD_INTERVAL_MINUTES,
+): number {
+  if (raw === undefined || raw.trim() === "") return PROGRESS_SWEEP_DEFAULT_BOARD_INTERVAL_MINUTES;
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value < 0) return PROGRESS_SWEEP_DEFAULT_BOARD_INTERVAL_MINUTES;
+  return value;
+}
+
+/**
  * 取り残しの通知が二重に積まれないようにする印。**先端のSHAを含める**ので、
  * 別のコミットがpushされれば改めて通知される。
  */

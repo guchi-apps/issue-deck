@@ -3173,6 +3173,8 @@ export function POST(request: NextRequest) {
   [`lib/github/progress-sweep-run.ts`](../src/lib/github/progress-sweep-run.ts)）。上の2本と同じ形で、
   pollerが1巡ごとに`POST /api/issues/progress-sweep`を叩き、間隔
   （`PROGRESS_SWEEP_INTERVAL_MINUTES`・既定5分・0で無効）はサーバー側が決める。
+  対象はDB（`Issue.projectStatus`・`state`）から選ぶ。盤面（Project）の全件読みは
+  `PROGRESS_SWEEP_BOARD_INTERVAL_MINUTES`（既定60分）に1回の安全網で、その巡回ではDBの分と和集合にする（#5440）。
   `Develop PR`・`Implementation`にいるopenなIssueについて、`issue-<番号>`→developのPRが
   マージ済みなら`Develop`へ進め、`00.check-user`と理由ラベルを外し、マージ完了を通知する。
   マージ済みPRの先端とブランチの先端が食い違う場合は`compare/develop...issue-<番号>`を引き、
