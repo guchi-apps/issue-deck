@@ -15,13 +15,11 @@ struct UsageWidgetBundle: WidgetBundle {
 struct SubscriptionUsageWidget: Widget {
     var body: some WidgetConfiguration {
         StaticConfiguration(kind: "SubscriptionUsage", provider: UsageProvider()) { entry in
-            UsageWidgetView(entry: entry)
-                .containerBackground(for: .widget) { Color.clear }
-                .widgetURL(UsageWidgetView.openURL)
+            UsageWidgetRoot(entry: entry)
         }
         .configurationDisplayName("サブスク枠")
         .description("ClaudeとChatGPTの週間枠（Claudeは5時間枠も）が、経過に対してどこまで進んでいるかを表示します")
-        .supportedFamilies([.accessoryRectangular])
+        .supportedFamilies([.accessoryRectangular, .systemSmall, .systemMedium, .systemLarge])
     }
 }
 
@@ -98,24 +96,49 @@ struct UsageProvider: TimelineProvider {
     }
 }
 
+/// ロック画面は透過、ホーム画面は端末の外観に合わせた背景
+struct UsageWidgetRoot: View {
+    let entry: UsageEntry
+    @Environment(\.widgetFamily) private var family
+
+    var body: some View {
+        UsageWidgetView(entry: entry)
+            .containerBackground(for: .widget) {
+                if family == .accessoryRectangular { Color.clear } else { Color(.systemBackground) }
+            }
+            .widgetURL(UsageWidgetView.openURL)
+    }
+}
+
 struct UsageWidgetView: View {
     /// タップでアプリの「AI使用量」を開く（`ios/IssueDeck/IssueDeckApp.swift`の`onOpenURL`が受ける）
     static let openURL = URL(string: "\(ShareConfig.appURLScheme)://usage")!
 
     let entry: UsageEntry
+    @Environment(\.widgetFamily) private var family
 
     var body: some View {
         switch entry.state {
         case .loaded(let snapshot):
+            if family == .accessoryRectangular {
+                lockScreen(snapshot)
+            } else {
+                HomeUsageView(snapshot: snapshot, now: entry.date, family: family)
+            }
+        case .needsLogin:
+            message("IssueDeckを開くと表示されます")
+        case .unavailable:
+            message("利用状況を取得できません")
+        }
+    }
+
+    private func lockScreen(_ snapshot: UsageSnapshot) -> some View {
+        Group {
             VStack(alignment: .leading, spacing: 6) {
                 UsageRow(name: "Claude", window: snapshot.claude, fiveHour: snapshot.claudeFiveHour, now: entry.date)
                 UsageRow(name: "ChatGPT", window: snapshot.chatgpt, now: entry.date)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
-        case .needsLogin:
-            message("IssueDeckを開くと表示されます")
-        case .unavailable:
-            message("利用状況を取得できません")
         }
     }
 
@@ -171,6 +194,111 @@ struct UsageRow: View {
         let five = fiveHour.flatMap { $0.expired ? nil : "5時間枠 使用\(Int($0.usedPercent.rounded()))% " } ?? ""
         let elapsed = Int(window.elapsedPercent(at: now).rounded())
         return "\(name) \(five)週間枠 使用\(Int(used.rounded()))% 経過\(elapsed)% \(window.resetText(at: now) ?? "")でリセット"
+    }
+}
+
+/// ホーム画面（小・中・大）の表示。ロック画面と同じバーの読み方で、サイズに応じて文字を足す
+struct HomeUsageView: View {
+    let snapshot: UsageSnapshot
+    let now: Date
+    let family: WidgetFamily
+
+    private var detailed: Bool { family != .systemSmall }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: family == .systemLarge ? 16 : 8) {
+            if family == .systemLarge {
+                HStack {
+                    Text("サブスク枠").font(.system(size: 15, weight: .semibold))
+                    Spacer()
+                    Text(now, style: .time).font(.system(size: 11)).foregroundStyle(.secondary)
+                }
+            }
+            if family == .systemLarge {
+                HomeRow(title: "Claude 5時間枠", window: snapshot.claudeFiveHour, now: now, detailed: true)
+                HomeRow(title: "Claude 週間枠", window: snapshot.claude, now: now, detailed: true)
+                HomeRow(title: "ChatGPT 週間枠", window: snapshot.chatgpt, now: now, detailed: true)
+                Spacer(minLength: 0)
+                Text("塗り＝使用率／縦線＝枠の経過／斜線＝時間より速く使った分／薄い表示＝古い値")
+                    .font(.system(size: 10)).foregroundStyle(.secondary)
+            } else {
+                HomeGroupRow(name: "Claude", week: snapshot.claude, five: snapshot.claudeFiveHour, now: now, detailed: detailed)
+                HomeGroupRow(name: "ChatGPT", week: snapshot.chatgpt, five: nil, now: now, detailed: detailed)
+            }
+        }
+        .lineLimit(1)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+}
+
+/// 小・中: 1サービス分（5時間枠があれば上に足す）
+struct HomeGroupRow: View {
+    let name: String
+    let week: UsageWindow?
+    let five: UsageWindow?
+    let now: Date
+    let detailed: Bool
+
+    private func used(_ w: UsageWindow?) -> Double? {
+        guard let w, !w.expired else { return nil }
+        return w.usedPercent
+    }
+    private func pct(_ w: UsageWindow?) -> String { used(w).map { "\(Int($0.rounded()))%" } ?? "—" }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(alignment: .firstTextBaseline, spacing: 4) {
+                Text(name).font(.system(size: 13, weight: .semibold))
+                if let five, detailed {
+                    Text("5時間枠 \(pct(five))" + (five.resetText(at: now).map { "・\($0)" } ?? ""))
+                        .font(.system(size: 10)).foregroundStyle(.secondary)
+                } else if let reset = week?.resetText(at: now) {
+                    Text(reset).font(.system(size: 10)).foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 0)
+                Text(detailed ? "週 \(pct(week))" : pct(week))
+                    .font(.system(size: 13, weight: .bold)).monospacedDigit()
+            }
+            if let five {
+                PaceBar(used: used(five), elapsed: five.expired ? nil : five.elapsedPercent(at: now), height: 13)
+                    .opacity(five.isStale(at: now) ? 0.5 : 1)
+            }
+            PaceBar(used: used(week), elapsed: week?.elapsedPercent(at: now), height: 13)
+                .opacity(week.map { $0.isStale(at: now) } ?? true ? 0.5 : 1)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(name) 週間枠 使用\(pct(week))")
+    }
+}
+
+/// 大: 1枠ごとに見出し・使用率・バー
+struct HomeRow: View {
+    let title: String
+    let window: UsageWindow?
+    let now: Date
+    let detailed: Bool
+
+    private var used: Double? {
+        guard let window, !window.expired else { return nil }
+        return window.usedPercent
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(alignment: .firstTextBaseline, spacing: 4) {
+                Text(title).font(.system(size: 13, weight: .semibold))
+                if let reset = window?.resetText(at: now) {
+                    Text(reset).font(.system(size: 10)).foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 0)
+                Text(used.map { "\(Int($0.rounded()))%" } ?? "—")
+                    .font(.system(size: 15, weight: .bold)).monospacedDigit()
+            }
+            PaceBar(used: used, elapsed: window.flatMap { $0.expired ? nil : $0.elapsedPercent(at: now) }, height: 16)
+        }
+        .opacity(window.map { $0.isStale(at: now) } ?? true ? 0.5 : 1)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(title) 使用\(used.map { "\(Int($0.rounded()))%" } ?? "不明")")
     }
 }
 
