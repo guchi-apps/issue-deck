@@ -40,7 +40,7 @@ worktreeやIssue専用ブランチの作成・checkout・ブランチの切り�
 
 ## Issue本文・コメントに画像が貼られている場合
 
-issue-deckから貼られた画像は`.../api/issues/images/<UUID>`形式のURLになっています。**この文面には
+issue-deckから貼られた画像は`.../api/issues/images/<UUID>.<拡張子>`形式（例: `….png`）のURLになっています。**この文面には
 画像そのものは含まれていません。** 計画の妥当性の判断が画像の内容に左右されると判断した場合は、
 次のコマンドで取得してから、出力されたパスを`Read`で開いてください。
 
@@ -48,9 +48,12 @@ issue-deckから貼られた画像は`.../api/issues/images/<UUID>`形式のURL�
 {{ISSUE_DECK_SCRIPTS_DIR}}/fetch-issue-images.sh "<画像URL>"
 ```
 
+**URLは拡張子まで含めて本文からそのまま渡してください**（拡張子を落としても取得はできますが、余分な問い合わせが増えます）。
+画像が複数あるときは、`gh issue view <番号> --json body,comments --jq '.body, .comments[].body' | <上のスクリプト> -`のように本文をまとめて渡すと、URLを書き写さずに全部取得できます。
+
 **画像の配信は認証が必要で、URLを`WebFetch`・`curl`で直接読んでも401になります**（#2967）。
-このスクリプトはサブPCの`~/.config/issue-deck/dispatch.env`にある鍵で取得します。鍵が無い環境で
-エラーになった場合は、画像を読めないものとして進めてください（鍵を探したり、別の方法で取得を
+このスクリプトはサブPCの`~/.config/issue-deck/dispatch.env`にある鍵で取得します。鍵が無い環境
+（`画像の取得先（APP_BASE_URL）か鍵（DISPATCH_SECRET）が見つかりません`と出る）だけは、画像を読めないものとして進めてください（鍵を探したり、別の方法で取得を
 試みたりしないでください）。
 
 ## 並行状況スナップショット（起動時点）
