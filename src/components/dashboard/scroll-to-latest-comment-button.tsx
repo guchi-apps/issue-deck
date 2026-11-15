@@ -5,7 +5,7 @@ import { type RefObject, useEffect, useState } from "react";
 import { ArrowDown } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import { computeScrollToLatestTarget, isAtScrollTarget } from "@/lib/scroll-to-latest";
+import { computeScrollTopToRevealTarget, isAtScrollTarget } from "@/lib/scroll-to-latest";
 import { cn } from "@/lib/utils";
 
 type ScrollToLatestCommentButtonProps = {
@@ -46,7 +46,7 @@ export function ScrollToLatestCommentButton({
     return () => container.removeEventListener("scroll", updateReachedTarget);
   }, [containerRef, targetRef]);
 
-  if (!visible) return null;
+  if (!visible || !hasUnread || reachedTarget) return null;
 
   function handleClick() {
     const container = containerRef.current;
@@ -54,16 +54,9 @@ export function ScrollToLatestCommentButton({
     if (!container || !target) return;
     const containerTop = container.getBoundingClientRect().top;
     const targetTop = target.getBoundingClientRect().top;
-    const top = computeScrollToLatestTarget({
-      containerScrollTop: container.scrollTop,
-      containerTop,
-      targetTop,
-      containerScrollHeight: container.scrollHeight,
-    });
+    const top = computeScrollTopToRevealTarget(container.scrollTop, containerTop, targetTop);
     container.scrollTo({ top, behavior: "smooth" });
   }
-
-  const label = hasUnread && !reachedTarget ? "未読コメントへ移動" : "コメント欄へ移動";
 
   return (
     <Button
@@ -74,7 +67,7 @@ export function ScrollToLatestCommentButton({
       className={cn("absolute z-10 rounded-full shadow-lg", className)}
     >
       <ArrowDown />
-      {label}
+      未読コメントへ移動
     </Button>
   );
 }
