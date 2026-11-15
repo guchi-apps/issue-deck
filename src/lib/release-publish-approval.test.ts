@@ -118,12 +118,38 @@ describe("decidePublishApprovalValidity", () => {
     expect(decidePublishApprovalValidity({ approval, now, candidatePhase: "preparing", finalizations: [], observed: null })).toBeNull();
   });
 
-  it("要求中・期限切れの公開準備はバンプ後の対応として扱わない", () => {
+  it("承認対象からの公開準備が取り込み前（要求中）の間は、バンプ後に見えるheadで失効させず保留する（#5424）", () => {
+    // workflowがバンプをpushした直後で、照合・報告がまだ`finalHeadSha`を記録していない
+    const pending = { ...bump({ status: "requested" }), finalBaseSha: null, finalHeadSha: null, files: [] };
+    expect(
+      decidePublishApprovalValidity({ approval, now, candidatePhase: "preparing", finalizations: [pending], observed: { headSha: POST, mainSha: BASE } }),
+    ).toBeNull();
+    // 取り込まれたら範囲内として有効
+    expect(
+      decidePublishApprovalValidity({ approval, now, candidatePhase: "preparing", finalizations: [bump()], observed: { headSha: POST, mainSha: BASE } }),
+    ).toEqual({ valid: true, finalHeadSha: POST });
+  });
+
+  it("別の対象から始めた要求中の公開準備では保留しない", () => {
+    const other = { ...bump({ status: "requested", preHeadSha: "d".repeat(40) }), finalBaseSha: null, finalHeadSha: null, files: [] };
+    const result = decidePublishApprovalValidity({ approval, now, candidatePhase: "preparing", finalizations: [other], observed: { headSha: POST, mainSha: BASE } });
+    expect(result).toMatchObject({ valid: false, reason: "candidate_changed" });
+  });
+
+  it("公開準備が期限切れ・失敗で終わったら、バンプ後に見えるheadは範囲外として失効", () => {
+    for (const status of ["expired", "failed"]) {
+      const ended = { ...bump({ status }), finalBaseSha: null, finalHeadSha: null, files: [] };
+      const result = decidePublishApprovalValidity({ approval, now, candidatePhase: "review", finalizations: [ended], observed: { headSha: POST, mainSha: BASE } });
+      expect(result).toMatchObject({ valid: false, reason: "candidate_changed" });
+    }
+  });
+
+  it("期限切れの公開準備は、headが記録されていてもバンプ後の対応として扱わない", () => {
     const result = decidePublishApprovalValidity({
       approval,
       now,
-      candidatePhase: "preparing",
-      finalizations: [bump({ status: "requested" })],
+      candidatePhase: "review",
+      finalizations: [bump({ status: "expired" })],
       observed: { headSha: POST, mainSha: BASE },
     });
     expect(result).toMatchObject({ valid: false, reason: "candidate_changed" });
