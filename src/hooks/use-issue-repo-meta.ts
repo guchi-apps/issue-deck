@@ -24,6 +24,8 @@ export function useIssueRepoMeta(repositoryFullName: string | null): UseIssueRep
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setLabels([]);
       setAssignees([]);
+      // 閉じている間に戻しておく。再オープン時に前回の完了を持ち越さない（#5448）
+      setIsLoaded(false);
       return;
     }
 
