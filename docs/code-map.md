@@ -282,6 +282,9 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
 - **親Issueの自動実行**（#4536）は[`lib/parent-run/`](../src/lib/parent-run/)。判定の純関数が`decide.ts`、DB・起動・巡回・操作が`run.ts`、
   受け口が`app/api/parent-runs/`（画面）と`app/api/dispatch/parent-run/sweep/`（poller）、画面が
   [`components/dashboard/parent-run-section.tsx`](../src/components/dashboard/parent-run-section.tsx)。仕様は[parent-run.md](parent-run.md)
+- **他リポジトリへの子Issueの起票と起動**（#5421）は[`lib/dispatch/cross-repo-filing.ts`](../src/lib/dispatch/cross-repo-filing.ts)（検証・重複判定・起票→紐付け→起動の順序）と
+  `cross-repo-filing-deps.ts`（GitHub・DB・`enqueueDispatchJob`の実体）。受け口は`POST /api/dispatch/cross-repo-issues`、
+  送り手は実装セッションの`scripts/report-cross-repo-issue.sh`。仕様は[multi-repo-changes.md](multi-repo-changes.md)
 
 - **Issueの代表状態と次の行動は`lib/issue-attention-state.ts`の`resolveIssueAttention`が1か所で決め**
   （#4425）、Issue一覧の行・PC詳細・スマホ詳細は`issue-attention-line.tsx`で同じ結果を描く。
