@@ -2254,6 +2254,53 @@ describe("リリースのマージ待ち（releaseMergeTarget）", () => {
   it("リリースが動いていなければnull", () => {
     expect(summaryOf([]).releaseMergeTarget).toBeNull();
   });
+
+  /**
+   * #5455: 新方式の候補（`release-rc/<番号>`）は公開承認の後にシステムがmainへマージする。作成直後（CIが未登録・
+   * 候補の記録がまだPRに紐づかない）にCIだけで「main」を立てると、畳んだ行に琥珀の「承認: 公開手順を確認」が出ていた
+   */
+  describe("新方式の候補は工程の担当が人のときだけ待ちにする（#5455）", () => {
+    const rcFacts = (overrides: Partial<NonNullable<NonNullable<PullRequestSummary["releaseChecks"]>["rc"]>> = {}) => ({
+      sequence: 72,
+      phase: "review",
+      pendingRevision: null,
+      approval: null,
+      finalization: null,
+      productionStopLabel: null,
+      predecessor: null,
+      updatedAt: "2026-11-15T11:55:00.000Z",
+      ...overrides,
+    });
+    const rcCandidate = (overrides: Partial<PullRequestSummary> = {}) =>
+      releasePullRequest({ headRef: "release-rc/72", title: "RC-72", ...overrides });
+    const passed = {
+      aiReview: "passed" as const,
+      integration: "passed" as const,
+      enforced: true,
+      started: { aiReview: false, integration: false, mac: false },
+      integrationSetupGap: null,
+    };
+
+    it("作成直後（CIが未登録・候補の記録がまだPRに紐づかない）は待ちにしない", () => {
+      const summary = summaryOf([rcCandidate({ ciState: "unknown", releaseChecks: { ...passed, rc: null } })]);
+      expect(summary.releaseMergeTarget).toBeNull();
+    });
+
+    it("候補の記録を読めない（取得不能）ときも待ちにしない", () => {
+      const summary = summaryOf([
+        rcCandidate({ ciState: "success", releaseChecks: { ...passed, rc: null, unavailableParts: ["rc"] } }),
+      ]);
+      expect(summary.releaseMergeTarget).toBeNull();
+    });
+
+    it("検証が揃って公開承認を待つ候補は従来どおり待ち（人の番）", () => {
+      const summary = summaryOf([
+        rcCandidate({ ciState: "success", releaseChecks: { ...passed, rc: rcFacts({ phase: "awaiting_approval" }) } }),
+      ]);
+      expect(summary.releaseJourney?.owner).toBe("user");
+      expect(summary.releaseMergeTarget).toBe("main");
+    });
+  });
 });
 
 describe("着手中のIssue（startedIssues。#2386）", () => {

@@ -330,7 +330,7 @@ export function resolveReleaseJourney({
   const candidate = candidatePullRequest?.state === "open" ? candidatePullRequest : null;
   const liveDeploy = deploy && !deploy.manual ? deploy : null;
   // 開いた候補があればその記録を、無ければPRに載らない候補（作成中・マージ後）の記録を使う
-  const rc = candidate ? (candidate.releaseChecks?.rc ?? null) : detached;
+  const rc = candidate ? (candidate.releaseChecks?.rc ?? creatingFallbackOf(candidate, detached)) : detached;
   const isRc = candidate ? isRcReleaseCandidateHeadRef(candidate.headRef) : rc !== null;
 
   if (!bump && !candidate && !rc && !(liveDeploy && liveDeploy.kind !== "success")) return null;
@@ -486,6 +486,18 @@ export function resolveReleaseJourney({
     updatedAt: rc?.updatedAt ?? null,
     stale,
   };
+}
+
+/**
+ * 候補PRは開いたが、候補記録のrevisionへPR番号がまだ書かれていない間（作成のworkflowが完了を報告するまで）の記録（#5455）。
+ * PR番号から記録を引けないこの窓を「承認の記録を取得できません」にせず、作成受付中の同じ番号の候補として扱う。
+ * 記録の読み込み自体が失敗したとき（`unavailableParts`の`rc`）は使わない（取得不能を作成中に見せない）
+ */
+function creatingFallbackOf(candidate: JourneyPullRequest, detached: ReleaseRcFacts | null): ReleaseRcFacts | null {
+  if (!detached || detached.phase !== "creating") return null;
+  if (candidate.releaseChecks?.unavailableParts?.includes("rc")) return null;
+  const sequence = rcSequenceOf(candidate.headRef);
+  return sequence !== null && sequence === detached.sequence ? detached : null;
 }
 
 function cancelTargetOf(rc: ReleaseRcFacts | null, stale: boolean): { candidateId: string; phase: RcPhase } | null {
