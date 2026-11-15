@@ -15,6 +15,7 @@ import {
 const NOW = new Date(2026, 7, 4, 12, 0, 0).getTime();
 const COMMENTS_URL = "https://api.github.com/repos/m-guchi/issue-deck/issues/123/comments?per_page=100";
 const RUN_URL = "https://api.github.com/repos/m-guchi/issue-deck/actions/runs/456";
+const GRAPHQL_URL = "https://api.github.com/graphql";
 
 describe("toEndpointLabel", () => {
   it("owner/repoと数値IDをプレースホルダに置き換える", () => {
@@ -285,5 +286,46 @@ describe("countGithubApiCallsSince", () => {
     // 窓の開始が5分バケットの途中でも、そのバケットは丸ごと数える
     expect(countGithubApiCallsSince(NOW - 32 * 60_000, NOW)).toBe(3);
     expect(countGithubApiCallsSince(NOW + 60_000, NOW)).toBe(1);
+  });
+
+  it("GraphQLはRESTとは別の枠なので数えない（#5438）", () => {
+    recordGithubApiCall(COMMENTS_URL, { feature: "branch_flow", now: NOW });
+    recordGithubApiCall(GRAPHQL_URL, { feature: "branch_flow", now: NOW });
+    recordGithubApiCall(GRAPHQL_URL, { feature: "progress_sweep", now: NOW });
+
+    expect(countGithubApiCallsSince(NOW - 60 * 60_000, NOW)).toBe(1);
+  });
+});
+
+describe("getGithubApiUsageSummary: GraphQLの分離（#5438）", () => {
+  beforeEach(() => {
+    resetGithubApiUsage();
+  });
+
+  it("用途ごとの件数・合計・エンドポイントはRESTだけで数え、GraphQLは別に返す", () => {
+    recordGithubApiCall(COMMENTS_URL, { feature: "branch_flow", now: NOW });
+    recordGithubApiCall(GRAPHQL_URL, { feature: "branch_flow", now: NOW });
+    recordGithubApiCall(GRAPHQL_URL, { feature: "branch_flow", now: NOW });
+
+    const summary = getGithubApiUsageSummary(NOW);
+    const feature = summary.features.find((item) => item.key === "branch_flow");
+    expect(feature?.last60min).toBe(1);
+    expect(feature?.graphql).toEqual({ currentHour: 2, last60min: 2, last24h: 2 });
+    expect(feature?.endpoints.map((endpoint) => endpoint.endpoint)).toEqual([
+      "/repos/{owner}/{repo}/issues/{n}/comments",
+    ]);
+    expect(summary.totalLast60min).toBe(1);
+    expect(summary.totalGraphql.last60min).toBe(2);
+  });
+
+  it("GraphQLしか使わない用途も一覧に残し、RESTの多い用途を先に並べる", () => {
+    recordGithubApiCall(GRAPHQL_URL, { feature: "progress_sweep", now: NOW });
+    recordGithubApiCall(GRAPHQL_URL, { feature: "progress_sweep", now: NOW });
+    recordGithubApiCall(COMMENTS_URL, { feature: "issue_comments", now: NOW });
+
+    const summary = getGithubApiUsageSummary(NOW);
+    expect(summary.features.map((item) => item.key)).toEqual(["issue_comments", "progress_sweep"]);
+    expect(summary.features[1].last60min).toBe(0);
+    expect(summary.features[1].graphql.last60min).toBe(2);
   });
 });

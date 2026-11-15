@@ -730,7 +730,7 @@ async function sweepClosedIssue(params: {
   const mergedPullRequest = merged ? { url: merged.html_url, headSha: merged.head.sha } : null;
 
   const compareWithMain = mergedPullRequest
-    ? await compareBranches(ownerLogin, name, MAIN_BRANCH, mergedPullRequest.headSha, token)
+    ? await compareAgainstMain(ownerLogin, name, mergedPullRequest.headSha, token)
     : null;
   const importedCandidateInMain =
     merged && compareWithMain && compareWithMain.aheadBy !== 0
@@ -849,16 +849,33 @@ async function isImportedIntoCandidateInMain(params: {
     select: { headSha: true, importedPrs: true },
   });
   for (const head of importingRevisionHeads(revisions, params.prNumber)) {
-    const compared = await compareBranches(
-      params.ownerLogin,
-      params.name,
-      MAIN_BRANCH,
-      head,
-      params.token,
-    );
+    const compared = await compareAgainstMain(params.ownerLogin, params.name, head, params.token);
     if (compared && compared.aheadBy === 0) return true;
   }
   return false;
+}
+
+/**
+ * `main...{head}`を三点比較する（#5438）。
+ *
+ * `main`をブランチ名のまま渡すと先端が動きうるため`compareBranches`のSHAメモに載らず、`Develop`・`Release`に
+ * 留まるIssueぶんを5分おきに毎回取り直していた（本番の実測で進捗巡回のRESTの大半）。先に`main`の先端SHAを
+ * 条件付きGET（先端が動かない間は304で枠を消費しない）で読み、SHA同士の比較にしてメモへ載せる。
+ * 先端を読めなかったときだけ、従来どおりブランチ名で比較する。
+ */
+async function compareAgainstMain(
+  owner: string,
+  repo: string,
+  head: string,
+  token: string,
+): Promise<Awaited<ReturnType<typeof compareBranches>>> {
+  let mainSha: string | null = null;
+  try {
+    mainSha = await fetchBranchHeadSha(owner, repo, MAIN_BRANCH, token);
+  } catch {
+    // 読めなくても比較自体は続ける（ブランチ名での比較に倒す）
+  }
+  return compareBranches(owner, repo, mainSha || MAIN_BRANCH, head, token);
 }
 
 /** 生きているローカルセッションが担当しているIssueの`<repo>#<番号>`（#2715） */
@@ -930,7 +947,7 @@ async function sweepMergedOpenIssue(params: {
       .at(-1);
     mergedPullRequest = merged ? { url: merged.html_url, headSha: merged.head.sha } : null;
     compareWithMain = mergedPullRequest
-      ? await compareBranches(ownerLogin, name, MAIN_BRANCH, mergedPullRequest.headSha, token)
+      ? await compareAgainstMain(ownerLogin, name, mergedPullRequest.headSha, token)
       : null;
     if (merged && compareWithMain && compareWithMain.aheadBy !== 0) {
       importedCandidateInMain = await isImportedIntoCandidateInMain({

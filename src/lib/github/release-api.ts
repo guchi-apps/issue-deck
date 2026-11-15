@@ -1275,6 +1275,9 @@ export async function fetchPullMergeInfo(
  * iOS配布の前提（そのコミットのWeb本番デプロイが済んでいること）を確かめる専用の取得で、
  * ETag付きの共有取得（`fetchLatestDeployWorkflowRun`）は`head_sha`を返さないため使わない。
  * runがまだ無い・取れないときはnull。
+ *
+ * **成功したrunだけを覚える**（#5438）。iOS配布結果の画面が数十秒おきに同じコミットを確かめ直すため。
+ * そのコミットのWebデプロイが一度成功した事実は後から変わらない。失敗・実行中は再実行で変わるので覚えない。
  */
 export async function fetchDeployRunForSha(
   owner: string,
@@ -1283,6 +1286,24 @@ export async function fetchDeployRunForSha(
   sha: string,
 ): Promise<{ status: string; conclusion: string | null } | null> {
   const url = `${GITHUB_API}/repos/${owner}/${repo}/actions/workflows/${DEPLOY_WORKFLOW_FILE}/runs?branch=main&head_sha=${encodeURIComponent(sha)}&per_page=1`;
+  if (succeededDeployRunMemo.get(url)) return { status: "completed", conclusion: "success" };
+  const run = await fetchDeployRunForShaUncached(url, token);
+  if (run?.status === "completed" && run.conclusion === "success") succeededDeployRunMemo.set(url, true);
+  return run;
+}
+
+/** 成功を確かめた`fetchDeployRunForSha`のURL */
+const succeededDeployRunMemo = new ImmutableMemo<true>(200);
+
+/** テスト用 */
+export function clearSucceededDeployRunMemoForTest(): void {
+  succeededDeployRunMemo.clear();
+}
+
+async function fetchDeployRunForShaUncached(
+  url: string,
+  token: string,
+): Promise<{ status: string; conclusion: string | null } | null> {
   const res = await githubFetch(url, token);
   if (!res.ok) return null;
   const data: { workflow_runs?: Array<{ status?: string; conclusion?: string | null }> } = await res
