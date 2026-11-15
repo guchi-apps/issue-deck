@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # issue-deckへ貼られた画像を、AIが読めるようにローカルへ保存する（#2967）。
 #
-# 画像の配信（`GET /api/issues/images/<UUID>`）は、URLが公開リポジトリのIssue本文に載るため
+# 画像の配信（`GET /api/issues/images/<UUID>.<拡張子>`）は、URLが公開リポジトリのIssue本文に載るため
 # **ログイン中の本人か共有シークレットを持つ呼び出し元にしか返さない。** AIはブラウザの
 # Cookieを持たないので、このスクリプトでシークレットを付けて取得し、保存先を`Read`で開く。
 #
@@ -31,14 +31,24 @@ Usage: fetch-issue-images.sh [--out <DIR>] <画像URL>...
        fetch-issue-images.sh [--out <DIR>] -   # 標準入力の文章から画像URLを拾う
 
 issue-deckの画像（.../api/issues/images/<UUID>.<拡張子>）を保存し、保存先のパスを1行ずつ出します。
+拡張子が欠けたURL（.../api/issues/images/<UUID>）も受け付け、配信側にある拡張子を探して取得します。
 保存したファイルはReadツールで開いてください。
-終了コード: 0=すべて保存（対象が0件も含む）、1=使い方・設定の誤り、2=取得に失敗したものがある
+終了コード: 0=すべて保存（対象が0件も含む）、1=使い方・設定の誤り、
+            2=取得に失敗したもの・画像URLらしいのに読み取れなかったものがある
 EOF
 }
 
 # `src/lib/uploaded-images.ts`の`UPLOADED_IMAGE_FILENAME_SOURCE`と同じ形。
 # ここで拾えないものは配信側でも404になるので、緩める必要は無い。
-FILENAME_PATTERN='[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.(png|jpg|gif|webp|svg)'
+#
+# **拡張子は省略されていても拾う**（#5425）。エージェントは本文のURLを写すときに`.png`を
+# 落とすことがあり（案内文の`.../images/<UUID>`に引きずられる）、拡張子必須のままだと
+# 「画像URLは見つかりませんでした」で終了コード0になり、画像を見ないまま作業が進んでいた。
+# 拡張子の無いものは、配信側が受け付ける拡張子（`EXTENSIONS`）を順に試して取得する。
+# 鍵を送る先は従来どおり`APP_BASE_URL`だけで、試すのはファイル名の末尾だけ。
+UUID_PATTERN='[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'
+EXTENSIONS=(png jpg webp gif svg)
+FILENAME_PATTERN="$UUID_PATTERN"'(\.(png|jpg|gif|webp|svg))?'
 
 sources=()
 while [[ $# -gt 0 ]]; do
@@ -90,27 +100,35 @@ for source in "${sources[@]}"; do
   fi
 done
 
-# `/api/issues/images/`の直後に来るファイル名だけを拾う（同じ画像が何度出ても1回にする）
+# `/api/issues/images/`の直後に来るファイル名だけを拾う（同じ画像が何度出ても1回にする）。
+# 拡張子付きと拡張子なしの同じUUIDが両方出たときは、拡張子付きだけを残す。
 mapfile -t filenames < <(
   printf '%s' "$text" |
     grep -oE "/api/issues/images/$FILENAME_PATTERN" |
     sed 's#^/api/issues/images/##' |
+    sort -u |
+    awk -F. '{ if ($2 != "") { print; seen[$1] = 1 } else bare[$1] = 1 }
+      END { for (u in bare) if (!(u in seen)) print u }' |
     sort -u || true
 )
 
 if [[ ${#filenames[@]} -eq 0 ]]; then
+  # **URLの一部が見えているのに拾えないときは失敗として返す**（#5425）。終了コード0で
+  # 「見つかりませんでした」と返すと、呼び出したエージェントは画像が無いものとして先へ進む。
+  if printf '%s' "$text" | grep -q "/api/issues/images/"; then
+    echo "Error: issue-deckの画像URLらしき文字列はありますが、ファイル名（<UUID>.<拡張子>）を読み取れませんでした。" >&2
+    echo "       本文に書かれているURLを省略せず、そのまま渡してください（例: gh issue view <番号> --json body,comments --jq '.body, .comments[].body' | $0 -）。" >&2
+    exit 2
+  fi
   echo "issue-deckの画像URLは見つかりませんでした。" >&2
   exit 0
 fi
 
 mkdir -p "$OUT_DIR"
-failed=0
-for filename in "${filenames[@]}"; do
-  dest="$OUT_DIR/$filename"
-  if [[ -s "$dest" ]]; then
-    printf '%s\n' "$dest"
-    continue
-  fi
+
+# 1枚取得して保存し、HTTPステータスを返す（200なら`$dest`へ置いてある）
+download() {
+  local filename="$1" dest="$2" status
   status="$(printf 'Authorization: Bearer %s\n' "$SECRET" |
     curl --silent --show-error --max-time 30 \
       --header @- \
@@ -119,9 +137,41 @@ for filename in "${filenames[@]}"; do
       "$BASE_URL/api/issues/images/$filename")" || status="000"
   if [[ "$status" == "200" ]]; then
     mv "$dest.part" "$dest"
-    printf '%s\n' "$dest"
   else
     rm -f "$dest.part"
+  fi
+  printf '%s' "$status"
+}
+
+failed=0
+for filename in "${filenames[@]}"; do
+  if [[ "$filename" == *.* ]]; then
+    candidates=("$filename")
+  else
+    candidates=()
+    for extension in "${EXTENSIONS[@]}"; do candidates+=("$filename.$extension"); done
+  fi
+
+  saved=""
+  status=""
+  for candidate in "${candidates[@]}"; do
+    dest="$OUT_DIR/$candidate"
+    if [[ -s "$dest" ]]; then
+      saved="$dest"
+      break
+    fi
+    status="$(download "$candidate" "$dest")"
+    if [[ "$status" == "200" ]]; then
+      saved="$dest"
+      break
+    fi
+    # 404（その拡張子では存在しない）だけ次の拡張子を試す。認証・通信の失敗は何度試しても同じ
+    [[ "$status" == "404" ]] || break
+  done
+
+  if [[ -n "$saved" ]]; then
+    printf '%s\n' "$saved"
+  else
     echo "Warning: $filename を取得できませんでした（HTTP $status）" >&2
     failed=1
   fi
