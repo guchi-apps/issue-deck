@@ -50,6 +50,8 @@ import type { ReviewGateIssueDraft } from "@/lib/review-gate-issue-draft";
 import type { CurrentUser } from "@/types/user";
 
 type SettingsDialogProps = {
+  /** 最初に開く区分（#5452）。開いたあとの切り替えには効かないので、変えるときは`key`で作り直す */
+  initialSection?: SettingsSectionKey;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   currentUser: CurrentUser | null;
@@ -94,6 +96,7 @@ type SettingsDialogProps = {
  * 区分の定義（`SETTINGS_SECTIONS`）はスマホの設定画面と共有している。
  */
 export function SettingsDialog({
+  initialSection,
   open,
   onOpenChange,
   currentUser,
@@ -126,7 +129,7 @@ export function SettingsDialog({
   onDraftReviewGateIssue,
   creatableRepositoryNames,
 }: SettingsDialogProps) {
-  const [section, setSection] = useState<SettingsSectionKey>(DEFAULT_SETTINGS_SECTION);
+  const [section, setSection] = useState<SettingsSectionKey>(initialSection ?? DEFAULT_SETTINGS_SECTION);
   // 使用量・レート制限は「状態」を開いているあいだだけ取りに行く（#2022）
   const data = useSettingsData(open);
 

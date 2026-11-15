@@ -11,6 +11,8 @@ import type { BranchViewMode } from "@/lib/branch-view-visibility";
 import type { PullRequestSummary } from "@/types/pull-request";
 
 type MobileFlowScreenProps = {
+  /** 「表示リポジトリを編集」（#5452）。`BranchFlowView`へそのまま渡す */
+  onEditBranchView?: () => void;
   flow: BranchFlow;
   /** ブランチ画面でのリポジトリ表示（#5087）。`BranchFlowView`へそのまま渡す */
   branchViewModes?: Record<string, BranchViewMode>;
@@ -61,6 +63,7 @@ export function MobileFlowScreen({
   onRefresh,
   onMerged,
   onDraftIosFixIssue,
+  onEditBranchView,
   releaseHistory,
 }: MobileFlowScreenProps) {
   return (
@@ -79,6 +82,7 @@ export function MobileFlowScreen({
       onRefresh={onRefresh}
       onMerged={onMerged}
       onDraftIosFixIssue={onDraftIosFixIssue}
+      onEditBranchView={onEditBranchView}
       releaseHistory={releaseHistory}
       /* 引っ張って更新（#1958）。ブランチ状況・PR一覧・デプロイ状況の取り直しをまとめて
          起こす`onRefresh`をそのまま渡す。**完了は待てない**（取り直しのきっかけを作る
