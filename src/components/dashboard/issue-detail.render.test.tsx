@@ -593,7 +593,7 @@ describe("GitHub Actionsが走っているIssueの起動ボタン（#2032）", (
 });
 
 /**
- * 「コメント欄へ移動」ボタン（ScrollToLatestCommentButton）は画面下端から`bottom-4`で
+ * 「未読コメントへ移動」ボタン（ScrollToLatestCommentButton。未読時のみ表示）は画面下端から`bottom-4`で
  * 浮いているため、スクロール領域の中身の下端にそのぶんの余白が無いと、最下部まで
  * スクロールしたときコメント入力欄の操作列へ重なる（#1793）。
  *
