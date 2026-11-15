@@ -398,8 +398,14 @@ export function StartImplementationDialog({
    * そのリポジトリに**定義されている**ラベル名（#1956）。アーティファクトの既定を当ててよいかの
    * 判定にだけ使う。開いている間だけ取りに行く（閉じているダイアログのために取得を増やさない）。
    */
-  const { labels: repositoryLabels } = useIssueRepoMeta(open ? issue.repositoryFullName : null);
+  const { labels: repositoryLabels, isLoading: isRepoMetaLoading, isLoaded: isRepoMetaLoaded } = useIssueRepoMeta(open ? issue.repositoryFullName : null);
   const repositoryLabelNames = repositoryLabels.map((label) => label.name);
+  /**
+   * 「計画を立案」と「デザインを提示」の既定は、ラベル一覧が届いてからでないと確定しない（#5448）。
+   * 届くまでに片方だけONに見えて後からもう片方が追いかけてONになるのを避け、両方を「判定中…」で
+   * 出して、届いた時点で同時に確定させる。取得の完了前は開始も押させない。
+   */
+  const isOptionDefaultsPending = open && (isRepoMetaLoading || isRepoMetaLoaded === false);
   const hasArtifactLabelDefinition = repositoryLabelNames.includes(ARTIFACT_REQUIRED_LABEL);
   const isSubmitting =
     isUpdatingIssue || dispatch.isSubmitting || isQueuingNightly;
@@ -1174,6 +1180,10 @@ export function StartImplementationDialog({
                           : option.description
                       }
                       checked={options[option.key]}
+                      pending={
+                        isOptionDefaultsPending &&
+                        (option.key === "planRequired" || option.key === "artifactRequired")
+                      }
                       disabled={nightlyUnavailable && !options[option.key]}
                       onToggle={() => toggleOption(option.key)}
                     />
@@ -1212,6 +1222,7 @@ export function StartImplementationDialog({
             disabled={
               isSubmitting ||
               isTargetPending ||
+              isOptionDefaultsPending ||
               // 「おまかせ」の判定が終わるまで押させない（#2723）。決まる前に押すと、
               // 選んだつもりのないモデルで立つ
               isPickPending ||
