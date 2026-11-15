@@ -42,6 +42,14 @@ export type ChangelogEntry = {
  */
 export const APP_CHANGELOG: ChangelogEntry[] = [
   {
+    version: "8.102.1",
+    date: "2026-11-15",
+    changes: [
+      "スマホのフッターにある「ホーム」のバッジの数が、ホーム画面に出ている要確認の数と一致するようになりました。",
+      "公開準備をやり直した候補で、再開した自動公開が公開承認ごと失効してしまう問題を直しました。",
+    ],
+  },
+  {
     version: "8.102.0",
     date: "2026-11-15",
     changes: [
