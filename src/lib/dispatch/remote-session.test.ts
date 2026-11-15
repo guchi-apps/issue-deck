@@ -8,6 +8,7 @@ const db = vi.hoisted(() => ({
     updateMany: vi.fn(),
     update: vi.fn(),
     groupBy: vi.fn(),
+    create: vi.fn(),
   },
   dispatchHost: { findMany: vi.fn(), findUnique: vi.fn() },
   repository: { findMany: vi.fn(), findFirst: vi.fn() },
@@ -18,6 +19,7 @@ vi.mock("@/lib/db", () => ({ db }));
 vi.mock("@/lib/dispatch/wake-notify", () => ({ notifyDispatchHostWake: vi.fn() }));
 
 import {
+  enqueueRemoteSession,
   enqueueRemoteSessionKill,
   enqueueRemoteSessionResume,
   listRemoteSessions,
@@ -211,5 +213,50 @@ describe("enqueueRemoteSessionResume（#4874）", () => {
     db.remoteSession.updateMany.mockResolvedValue({ count: 0 });
     const result = await enqueueRemoteSessionResume({ id: "s1", requestedByUserId: "u1", now });
     expect(result).toMatchObject({ ok: false, reason: "already_queued" });
+  });
+});
+
+describe("enqueueRemoteSession の最初の指示（#5405）", () => {
+  const now = new Date("2026-11-14T03:00:00Z");
+  const host = (agentVersion: string) => ({
+    name: "subpc",
+    lastSeenAt: now,
+    remoteSessionCapable: true,
+    agentVersion,
+    repositories: JSON.stringify(["me/app"]),
+  });
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    db.remoteSession.findMany.mockResolvedValue([]);
+    db.remoteSession.groupBy.mockResolvedValue([]);
+    db.dispatchHost.findMany.mockResolvedValue([host("43")]);
+    db.dispatchJob.create.mockResolvedValue({ id: "job1" });
+    db.remoteSession.create.mockResolvedValue({
+      id: "s1", repositoryFullName: "me/app", host: "subpc", tmuxSessionName: "app-remote-abcd1234",
+      status: "starting", remoteControlUrl: null, failureMessage: null, createdAt: now, lastSeenAt: null,
+    });
+    db.$transaction.mockImplementation((fn: (tx: typeof db) => unknown) => fn(db));
+  });
+
+  it("指示をジョブへ保存する", async () => {
+    const result = await enqueueRemoteSession({ repositoryFullName: "me/app", requestedByUserId: "u1", initialPrompt: "調べて", now });
+    expect(result.ok).toBe(true);
+    expect(db.dispatchJob.create.mock.calls[0][0].data.initialPrompt).toBe("調べて");
+  });
+
+  it("指示なしならnullを保存する", async () => {
+    await enqueueRemoteSession({ repositoryFullName: "me/app", requestedByUserId: "u1", now });
+    expect(db.dispatchJob.create.mock.calls[0][0].data.initialPrompt).toBeNull();
+  });
+
+  it("指示に対応していない古いpollerへは、指示つきの起動を配らない（黙って無視させない）", async () => {
+    db.dispatchHost.findMany.mockResolvedValue([host("42")]);
+    const result = await enqueueRemoteSession({ repositoryFullName: "me/app", requestedByUserId: "u1", initialPrompt: "調べて", now });
+    expect(result).toMatchObject({ ok: false, rejection: "initial_prompt_unsupported" });
+    expect(db.dispatchJob.create).not.toHaveBeenCalled();
+    // 指示なしなら古いpollerでも起動できる
+    const plain = await enqueueRemoteSession({ repositoryFullName: "me/app", requestedByUserId: "u1", now });
+    expect(plain.ok).toBe(true);
   });
 });

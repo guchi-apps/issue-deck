@@ -57,7 +57,22 @@ describe("/api/remote-sessions の認可", () => {
     expect(mocks.enqueueRemoteSession).toHaveBeenCalledWith({
       repositoryFullName: "me/app",
       requestedByUserId: "u1",
+      initialPrompt: null,
     });
+  });
+
+  it("POSTは最初の指示を正規化して渡し、上限超過は400（#5405）", async () => {
+    mocks.findRepositoryByFullName.mockResolvedValue({ id: "r1" });
+    mocks.enqueueRemoteSession.mockResolvedValue({ ok: true, session: { id: "s1" } });
+    const ok = await POST(post({ repositoryFullName: "me/app", initialPrompt: "  調べて " }));
+    expect(ok.status).toBe(201);
+    expect(mocks.enqueueRemoteSession).toHaveBeenCalledWith(expect.objectContaining({ initialPrompt: "調べて" }));
+    mocks.enqueueRemoteSession.mockClear();
+    const tooLong = await POST(post({ repositoryFullName: "me/app", initialPrompt: "a".repeat(20_001) }));
+    expect(tooLong.status).toBe(400);
+    const badType = await POST(post({ repositoryFullName: "me/app", initialPrompt: 5 }));
+    expect(badType.status).toBe(400);
+    expect(mocks.enqueueRemoteSession).not.toHaveBeenCalled();
   });
 
   it("DELETEは要求利用者のIDを終了処理へ渡し、他人のセッションはnot_found(404)になる", async () => {

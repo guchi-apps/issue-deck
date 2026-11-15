@@ -59,6 +59,30 @@ Claude Codeアプリへ移動する**。会話そのものはIssueDeckではな�
   終了しました。」を残す（画面の履歴に灰色で出る）。Claude Codeアプリで画面を開いているだけの状態は
   無操作とみなす
 
+### 起動時の最初の指示（#5405）
+
+起動画面の「最初の指示（任意）」（上限20,000字）に書いた文面を、セッションが立ち上がった直後に
+Claude Codeへ渡す。起動を待って入力しなくても、あとから結果だけ見に行ける。
+
+```text
+画面 → POST /api/remote-sessions { repositoryFullName, initialPrompt }
+  └ DispatchJob.initialPrompt（平文）に保存。poller版数43未満のホストへは配らず断る（黙って無視されるため）
+poller claim → POST /api/dispatch/claim が REMOTE_SESSION ジョブにだけ initialPrompt を付けて返し、列を null へ
+  └ run_remote_session_job → 環境変数 ISSUE_DECK_REMOTE_INITIAL_PROMPT → start-remote-session.sh
+       0600の一時ファイルへ書き、tmuxのコマンドが読んですぐ消す → claude … -- "<指示>"
+```
+
+- **画面向けの`DispatchJobView`（`toJobView`）には載せない。** claimの応答にだけ付ける。実行キューへ
+  平文の利用者入力を配らないため。払い出した時点で列を空にし、払い出し前に終わる経路（期限切れ・取り消し）
+  と報告の終端でも`initialPrompt: null`を書く
+- **指示つきの起動は、転記があっても`--continue`にしない。** 指示を渡すと転記にユーザーの発話が入り、
+  URLが取れず起こし直す（#5318）2回目が`--continue`になって指示が渡らなくなるため。捨てるセッションの
+  会話は利用者に見えないので、起こし直しで同じ指示を渡し直しても二重にはならない。pollerは起こし直しにも
+  同じ環境変数を渡す。**再開（`resumeId`）ジョブは指示を持たず**、従来どおり`--continue`で会話を続ける
+- 一時ファイルで渡すのは、tmuxのコマンド長（約16KB）を超えうるのと、`ps`へ出さないため
+- 指示にシークレットは書かない（欄の注記にも出す）。払い出し後にpollerが落ちた場合は指示が失われ、
+  失敗として画面に出るので入れ直す
+
 ### 「終了中」のまま終わらなかった不具合（#4871）
 
 「更新して再起動」（`SELF_UPDATE`）を実行したpollerは`exec`で新しいスクリプトへ入れ替わる。以前は

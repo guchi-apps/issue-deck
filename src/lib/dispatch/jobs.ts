@@ -606,6 +606,7 @@ export async function expireStaleDispatchJobs(now: Date = new Date()): Promise<n
             message: describeDispatchReportLost(launched),
             // **終わったら埋めた値を捨てる**（#2403。報告で終わる経路と同じ）
             placeholderValues: Prisma.DbNull,
+            initialPrompt: null,
           }
         : {
             status: "TIMEOUT",
@@ -616,6 +617,7 @@ export async function expireStaleDispatchJobs(now: Date = new Date()): Promise<n
                 ? describeDispatchControlTimeout()
                 : describeDispatchTimeout(job.status),
             placeholderValues: Prisma.DbNull,
+            initialPrompt: null,
           },
     });
     expired += result.count;
@@ -2128,6 +2130,7 @@ export async function reportDispatchJob(params: {
     data.finishedAt = now;
     data.activeKey = null;
     data.placeholderValues = Prisma.DbNull;
+    data.initialPrompt = null;
   } else if (reportStatus === "running") {
     data.status = "RUNNING";
     data.startedAt = job.startedAt ?? now;
@@ -2142,6 +2145,7 @@ export async function reportDispatchJob(params: {
     // **埋めた値は終わった時点で捨てる**（#2403）。トークン・キーが入りうるうえ、出力
     // （`commandOutput`）と違って後から原因を追う手掛かりにならないので、残す理由が無い
     data.placeholderValues = Prisma.DbNull;
+    data.initialPrompt = null;
   }
 
   // タイムアウトで既に終了扱いになったジョブへ遅れて報告が届くことがある。**上書きしない。**
@@ -2217,6 +2221,7 @@ export async function cancelDispatchJob(params: {
       message: "画面から取り消されました。",
       // **終わったら埋めた値を捨てる**（#2403。報告・失効と同じ）
       placeholderValues: Prisma.DbNull,
+      initialPrompt: null,
     },
   });
   if (result.count === 0) {

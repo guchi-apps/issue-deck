@@ -503,6 +503,7 @@ export function MobileIssueDetail({
     questionAnswerPending,
     mergeApprovalPending,
     planReviewCreating,
+    stateLoaded: dispatch.isLoaded,
     reserved: nightlyRunMark !== null,
   });
   // 自動マージされなかった理由（#1631）。対応PR一覧とコメント欄のマージ待ちカードへ同じ値を渡す

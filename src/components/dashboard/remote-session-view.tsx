@@ -11,11 +11,13 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { useMediaQuery } from "@/hooks/use-media-query";
+import { Textarea } from "@/components/ui/textarea";
 import { useRemoteSessions, type RemoteSessionLaunch } from "@/hooks/use-remote-sessions";
 import { formatDispatchHostName } from "@/lib/dispatch/host-label";
 import {
   ACTIVE_REMOTE_SESSION_STATUSES,
   describeRemoteSessionStatus,
+  REMOTE_SESSION_INITIAL_PROMPT_MAX_LENGTH,
   isRemoteSessionResumable,
   REMOTE_SESSION_REPOSITORY_PARAM,
   type RemoteSessionState,
@@ -164,13 +166,14 @@ export function RemoteSessionView({
 
   const detail = currentRepo ? (
     <RepositoryDetail
+      key={currentRepo.fullName}
       repository={currentRepo}
       state={remote.state}
       sessions={sessionsByRepo.get(currentRepo.fullName) ?? []}
       launch={remote.launch?.repositoryFullName === currentRepo.fullName ? remote.launch : null}
       pending={remote.pending}
       error={remote.error}
-      onStart={() => void remote.start(currentRepo.fullName)}
+      onStart={(initialPrompt) => remote.start(currentRepo.fullName, initialPrompt)}
       onResume={(session) => void remote.resume(session)}
       onStop={(id) => void remote.stop(id)}
       onDismissLaunch={remote.dismissLaunch}
@@ -254,7 +257,8 @@ function RepositoryDetail({
   launch: RemoteSessionLaunch | null;
   pending: boolean;
   error: string | null;
-  onStart: () => void;
+  /** 起動する。受け付けられたら`true`（指示欄を空に戻す） */
+  onStart: (initialPrompt: string) => Promise<boolean>;
   onResume: (session: RemoteSession) => void;
   onStop: (id: string) => void;
   onDismissLaunch: () => void;
@@ -262,6 +266,8 @@ function RepositoryDetail({
 }) {
   // 「終了」は確認ダイアログを通してから実行する（#5346）
   const [stopTarget, setStopTarget] = useState<RemoteSession | null>(null);
+  // 起動時に最初に渡す指示（#5405）。起動が受け付けられるまで保持し、失敗したら残して再試行できる
+  const [initialPrompt, setInitialPrompt] = useState("");
   const host = state?.hosts.find((item) => item.remoteSessionCapable && item.repositories.includes(repository.fullName)) ?? null;
   const launching = launch !== null && !launch.gaveUp;
   const launchedSession = launch ? sessions.find((session) => session.id === launch.sessionId) ?? null : null;
@@ -292,8 +298,33 @@ function RepositoryDetail({
       )}
 
       <div className="flex flex-col gap-3 rounded-lg border bg-background p-4">
+        <div className="flex flex-col gap-1.5">
+          <label htmlFor="remote-session-initial-prompt" className="text-sm font-medium">
+            最初の指示（任意）
+          </label>
+          <Textarea
+            id="remote-session-initial-prompt"
+            value={initialPrompt}
+            onChange={(event) => setInitialPrompt(event.target.value)}
+            maxLength={REMOTE_SESSION_INITIAL_PROMPT_MAX_LENGTH}
+            rows={compact ? 5 : 4}
+            disabled={pending || launching}
+            placeholder={compact ? "起動後すぐ渡す指示を入力。空なら何も送りません" : "例：docs/code-map.md を読んで、認証まわりの構成を要約して"}
+            className="min-h-20 resize-y text-base md:text-sm"
+          />
+          <div className="flex flex-wrap items-start justify-between gap-2 text-xs text-muted-foreground">
+            <span>起動直後に自動で送信されます。シークレットは書かないでください。</span>
+            <span className="tabular-nums">
+              {initialPrompt.length.toLocaleString()} / {REMOTE_SESSION_INITIAL_PROMPT_MAX_LENGTH.toLocaleString()}
+            </span>
+          </div>
+        </div>
         <div className="flex flex-wrap items-center gap-3">
-          <Button onClick={onStart} disabled={startDisabled} className={cn(compact && "w-full py-5")}>
+          <Button
+            onClick={() => void onStart(initialPrompt).then((accepted) => accepted && setInitialPrompt(""))}
+            disabled={startDisabled}
+            className={cn(compact && "w-full py-5")}
+          >
             {launching || pending ? <Loader2 className="size-4 animate-spin" /> : null}
             {launching || pending ? "起動中…" : "セッションを起動"}
           </Button>

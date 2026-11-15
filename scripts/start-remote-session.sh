@@ -45,6 +45,7 @@
 #   CLAUDE_PROJECTS_DIR                 転記の置き場（既定は ~/.claude/projects）
 #   ISSUE_DECK_CLAUDE_PERMISSION_MODE   claude の権限モード（既定は auto）
 #   ISSUE_DECK_CLAUDE_MODEL             claude の --model（未設定ならCLIの既定）
+#   ISSUE_DECK_REMOTE_INITIAL_PROMPT    起動直後にClaude Codeへ渡す最初の指示（#5405）。非空なら常に新しい会話
 #   ISSUE_DECK_REMOTE_SWEEP_MIN_AGE     --sweep で片付けるまでの猶予秒（既定600。起動直後を消さない）
 
 set -euo pipefail
@@ -253,8 +254,15 @@ if [[ ! -d "$WORKTREE_DIR" ]]; then
   git -C "$REPO_PATH" worktree add --quiet --detach "$WORKTREE_DIR" "$BASE_REF"
 fi
 
+# 最初の指示（#5405）。**非空なら転記を見ず、常に新しい会話（`--continue`なし）で起こす。**
+# 指示を渡すと転記にユーザーの発話が入るため、URLが取れずに起こし直す（#5318）と2回目が
+# `--continue`になり、指示が渡らなくなる。捨てるセッションの会話は利用者から見えないので、
+# 起こし直しで同じ指示を渡し直しても二重にはならない。再開（`--continue`）のジョブは指示を持たない
+INITIAL_PROMPT="${ISSUE_DECK_REMOTE_INITIAL_PROMPT:-}"
 RESUME=0
-has_conversation_for "$WORKTREE_DIR" && RESUME=1
+if [[ -z "$INITIAL_PROMPT" ]] && has_conversation_for "$WORKTREE_DIR"; then
+  RESUME=1
+fi
 
 PERMISSION_MODE="${ISSUE_DECK_CLAUDE_PERMISSION_MODE:-auto}"
 CLAUDE_ARGS=(--remote-control "$SESSION_NAME" --name "$SESSION_NAME" --permission-mode "$PERMISSION_MODE")
@@ -269,6 +277,14 @@ SESSION_CMD="cd $(printf '%q' "$WORKTREE_DIR") && exec claude"
 for arg in "${CLAUDE_ARGS[@]}"; do
   SESSION_CMD+=" $(printf '%q' "$arg")"
 done
+# `--`のあとの位置引数がClaude Codeの最初のプロンプトになる（先頭が`-`の文面をオプションと取り違えない）。
+# **指示そのものはコマンド文字列へ埋めず、0600の一時ファイルで渡す**。tmuxのコマンド長の上限
+# （約16KB）を超えうるうえ、`ps`にも出さないため。読んだらすぐ消す
+if [[ -n "$INITIAL_PROMPT" ]]; then
+  PROMPT_FILE="$(mktemp "${TMPDIR:-/tmp}/issue-deck-remote-prompt.XXXXXX")"
+  printf '%s' "$INITIAL_PROMPT" >"$PROMPT_FILE"
+  SESSION_CMD="_p=\$(cat $(printf '%q' "$PROMPT_FILE")); rm -f $(printf '%q' "$PROMPT_FILE"); $SESSION_CMD -- \"\$_p\""
+fi
 
 if ((RESUME)); then
   echo "tmuxセッション「$SESSION_NAME」で前回の会話を再開します（$FULL_NAME）..."
@@ -277,6 +293,7 @@ else
 fi
 if ! tmux new-session -d -s "$SESSION_NAME" -c "$WORKTREE_DIR" "bash -lc $(printf '%q' "$SESSION_CMD")"; then
   echo "Error: tmuxセッション「$SESSION_NAME」の起動に失敗しました。" >&2
+  [[ -n "${PROMPT_FILE:-}" ]] && rm -f "$PROMPT_FILE"
   remove_worktree "$WORKTREE_DIR"
   exit 1
 fi

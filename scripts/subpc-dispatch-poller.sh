@@ -186,7 +186,9 @@ set -euo pipefail
 # 42: 横断質問（`CROSS_REPO_QUESTION`）の実行と申告（`crossRepoQuestion`）を撤去する（#5051）。
 #     issue-deckは#5051以降この種別を配らず、古い版の申告も読まないので、どちらの組み合わせでも
 #     ジョブの取得・報告は変わらない。
-DISPATCH_POLLER_VERSION="42"
+# 43: リモートセッションの起動時に最初の指示（`initialPrompt`）を受け取り、ランチャーへ
+#     `ISSUE_DECK_REMOTE_INITIAL_PROMPT`で渡す（#5405）。issue-deckは指示つきの起動をこの版数以上のホストにだけ配る。
+DISPATCH_POLLER_VERSION="43"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -4339,7 +4341,8 @@ run_job() {
   # `local_session_validate_target`より手前に置く。tmux名はissue-deckが決めて`tmuxSessionName`で渡す
   if [[ "$kind" == "REMOTE_SESSION" || "$kind" == "REMOTE_SESSION_KILL" ]]; then
     run_remote_session_job "$job_id" "$kind" "$owner" "$repo" \
-      "$(printf '%s' "$job_json" | jq -r '.tmuxSessionName // ""')" "$claude_local_model"
+      "$(printf '%s' "$job_json" | jq -r '.tmuxSessionName // ""')" "$claude_local_model" \
+      "$(printf '%s' "$job_json" | jq -r '.initialPrompt // ""')"
     return 0
   fi
 
@@ -4654,7 +4657,7 @@ prepare_handoff_launch() {
 # （画面はURLが届いた時点でClaude Codeアプリへ移動する）。取れなければ起こし直し（#5318）、
 # それでも取れなくても起動自体は成功として返し、URLは次巡以降のホスト申告（`remoteSessions`）で届ける。
 run_remote_session_job() {
-  local job_id="$1" kind="$2" owner="$3" repo="$4" session="$5" model="$6"
+  local job_id="$1" kind="$2" owner="$3" repo="$4" session="$5" model="$6" initial_prompt="${7:-}"
 
   if [[ ! -f "$REMOTE_SESSION_LAUNCHER" ]]; then
     report_job "$job_id" failed "リモートセッションのランチャーがありません（$REMOTE_SESSION_LAUNCHER）。"
@@ -4701,6 +4704,11 @@ run_remote_session_job() {
   local -a launch_env=(env)
   if [[ -n "$model" && "$model" != "auto" ]]; then
     launch_env+=("ISSUE_DECK_CLAUDE_MODEL=$model")
+  fi
+  # 最初の指示（#5405）。ランチャーは非空のとき常に新しい会話として起こし、末尾の引数で渡す。
+  # URLが取れず起こし直す場合（下の再試行）も同じ値を渡すので、`launch_env`へ入れておく
+  if [[ -n "$initial_prompt" ]]; then
+    launch_env+=("ISSUE_DECK_REMOTE_INITIAL_PROMPT=$initial_prompt")
   fi
   set +e
   output="$("${launch_env[@]}" timeout "$LAUNCH_TIMEOUT" bash "$REMOTE_SESSION_LAUNCHER" "$owner" "$repo" "$session" </dev/null 2>&1)"

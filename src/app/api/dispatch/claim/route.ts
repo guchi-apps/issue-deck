@@ -184,6 +184,10 @@ export async function POST(request: NextRequest) {
   // Claudeの`claudeLocalModel`と同じ）。判定は「実装を開始」ダイアログが済ませて具体的なモデル名を
   // 積むので、ここへ届くのはダイアログを経由しない起動だけで、それらは判定せずTerraで立てる。
   const codexModel = parseCodexModel(setting?.codexModel) ?? CODEX_MODEL_DEFAULT;
+  // リモートセッションの最初の指示（#5405）。**画面向けの`DispatchJobView`には載せず、この応答にだけ付ける**
+  // （実行キューの表示へ平文の利用者入力を配らないため）。払い出した時点で列を空にするので、以降
+  // どの終端状態でも残らない。pollerは受け取った値をメモリで持ち、起こし直しにも使う
+  const initialPrompts = await takeRemoteSessionInitialPrompts(jobs);
   return NextResponse.json(
     {
       ok: true,
@@ -192,6 +196,7 @@ export async function POST(request: NextRequest) {
       // 指定が無いジョブ（従来の積み方・「設定に従う」）は設定の既定がそのまま載る。
       jobs: jobs.map((job) => ({
         ...job,
+        ...(initialPrompts.has(job.id) ? { initialPrompt: initialPrompts.get(job.id) } : {}),
         claudeLocalModel: job.claudeModel ?? claudeLocalModel,
         // Codexも同じ（#3192）。ジョブに指定があればそれを`codexModel`として載せ直すので、
         // pollerは従来どおりこのキーだけを読む。指定が無いジョブは設定の既定がそのまま載る
@@ -200,4 +205,27 @@ export async function POST(request: NextRequest) {
     },
     { headers: { "Cache-Control": "no-store" } },
   );
+}
+
+/**
+ * 払い出した`REMOTE_SESSION`ジョブの最初の指示を引き、列を空にして返す（#5405）。
+ * 指示が無いジョブは含めない。
+ */
+async function takeRemoteSessionInitialPrompts(
+  jobs: readonly { id: string; kind: string }[],
+): Promise<Map<string, string>> {
+  const ids = jobs.filter((job) => job.kind === "REMOTE_SESSION").map((job) => job.id);
+  const prompts = new Map<string, string>();
+  if (ids.length === 0) return prompts;
+  const rows = await db.dispatchJob.findMany({
+    where: { id: { in: ids }, initialPrompt: { not: null } },
+    select: { id: true, initialPrompt: true },
+  });
+  for (const row of rows) {
+    if (row.initialPrompt) prompts.set(row.id, row.initialPrompt);
+  }
+  if (prompts.size > 0) {
+    await db.dispatchJob.updateMany({ where: { id: { in: [...prompts.keys()] } }, data: { initialPrompt: null } });
+  }
+  return prompts;
 }

@@ -5,6 +5,9 @@ import {
   REMOTE_SESSION_MAX_PER_HOST,
   REMOTE_SESSION_NAME_PATTERN,
   buildRemoteSessionName,
+  normalizeRemoteSessionInitialPrompt,
+  REMOTE_SESSION_INITIAL_PROMPT_MAX_LENGTH,
+  supportsRemoteSessionInitialPrompt,
   isRemoteSessionResumable,
   parseIdleEndedRemoteSessions,
   parseReportedRemoteSessions,
@@ -24,6 +27,7 @@ const host = (overrides: Partial<RemoteSessionHostInfo> = {}): RemoteSessionHost
   repositories: ["guchi-apps/issue-deck"],
   activeCount: 0,
   resumeCapable: true,
+  initialPromptCapable: true,
   ...overrides,
 });
 
@@ -173,5 +177,27 @@ describe("summarizeRemoteSessionNav（#4948）", () => {
   it("0本は0、取得前はnull", () => {
     expect(summarizeRemoteSessionNav([], true)).toEqual({ count: 0, starting: false });
     expect(summarizeRemoteSessionNav([{ status: "running", stopping: false }], false)).toEqual({ count: null, starting: false });
+  });
+});
+
+describe("最初の指示（#5405）", () => {
+  it("前後の空白を除き、空・未指定は指示なし（null）", () => {
+    expect(normalizeRemoteSessionInitialPrompt("  調べて\n")).toBe("調べて");
+    expect(normalizeRemoteSessionInitialPrompt("   ")).toBeNull();
+    expect(normalizeRemoteSessionInitialPrompt(undefined)).toBeNull();
+    expect(normalizeRemoteSessionInitialPrompt(null)).toBeNull();
+  });
+
+  it("文字列でない・NULを含む・上限超過は不正", () => {
+    expect(normalizeRemoteSessionInitialPrompt(1)).toBe("invalid");
+    expect(normalizeRemoteSessionInitialPrompt("a\0b")).toBe("invalid");
+    expect(normalizeRemoteSessionInitialPrompt("a".repeat(REMOTE_SESSION_INITIAL_PROMPT_MAX_LENGTH))).not.toBe("invalid");
+    expect(normalizeRemoteSessionInitialPrompt("a".repeat(REMOTE_SESSION_INITIAL_PROMPT_MAX_LENGTH + 1))).toBe("invalid");
+  });
+
+  it("pollerの版数43以上だけが対応している", () => {
+    expect(supportsRemoteSessionInitialPrompt("42")).toBe(false);
+    expect(supportsRemoteSessionInitialPrompt("43")).toBe(true);
+    expect(supportsRemoteSessionInitialPrompt(null)).toBe(false);
   });
 });

@@ -1056,6 +1056,12 @@ model DispatchJob {
   // GitHubのIssueにも通知にもpollerのログにも出さない。さらに**ジョブが終わった時点で空にする**
   // ——出力と違い、後から確かめるための手掛かりとしての価値が無いため残す理由が無い。
   placeholderValues     Json?
+  // リモートセッションの起動時に最初のClaude Codeへ渡す指示（#5405。`REMOTE_SESSION`の新規起動だけ）。
+  //
+  // **平文の利用者入力で、シークレットが入りうる。** `placeholderValues`と同じく、**pollerへ払い出した
+  // 時点（claim）と、終わった時点（報告・失効・取り消し）で空にする**。画面向けの`DispatchJobView`へは
+  // 載せず、claimの応答にだけ付ける。nullは「指示なし」で、既存行はすべてnull。
+  initialPrompt         String?           @db.Text
   // 代行実行した手順の、本文中の行番号（#1828。`- [ ]`の行）。画面がジョブと手順を対応付ける。
   //
   // **チェックを付けるのはこの行ではなく画面側**（`hooks/use-issue-task-list.ts`）。ここに持つのは

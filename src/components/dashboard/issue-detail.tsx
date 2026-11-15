@@ -786,6 +786,7 @@ export function IssueDetail({
     questionAnswerPending,
     mergeApprovalPending,
     planReviewCreating: planReviewJobCreating,
+    stateLoaded: dispatch.isLoaded,
     reserved: nightlyRunMark !== null,
   });
   // 「起動コマンドをコピー」は、対象リポジトリがローカル起動プロトコルに適合しているときだけ
