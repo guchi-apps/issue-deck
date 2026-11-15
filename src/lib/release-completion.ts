@@ -214,6 +214,12 @@ export type CompletionFinalizationSnapshot = {
   phase: string;
   /** 適用済みの最新の公開準備。バンプ前headからバンプ後headへの対応だけを持つ */
   applied: { preHeadSha: string; finalHeadSha: string; finalBaseSha: string } | null;
+  /**
+   * バンプ後のheadを記録した公開準備の全件（古い順。#5435）。公開準備をやり直すと、バンプ済みのheadから始めた
+   * 2件目（バンプ前＝バンプ後）が最新になり、`applied`だけでは修正系列の後継（バンプ前のhead）からの繋がりが
+   * 辿れなくなる。省略時は`applied`の1件として扱う
+   */
+  bumps?: readonly CompletionBump[];
   /** 最新の公開準備の状態と失敗理由（公開承認の系列が「公開準備が失敗した」を止める理由として出す）。無ければnull */
   latest?: { status: string; failureReason: string | null } | null;
   /**
@@ -227,6 +233,33 @@ export type CompletionFinalizationSnapshot = {
    */
   aiReviewWaiver?: { preHeadSha: string; finalHeadSha: string | null } | null;
 };
+
+export type CompletionBump = { preHeadSha: string; finalHeadSha: string; finalBaseSha: string };
+
+/**
+ * `from`のheadから、記録した公開準備のバンプ（バンプ前→バンプ後）を辿って`to`へ届くか（#5435）。届けば`to`を
+ * バンプ後headとして記録したバンプを返す。`from === to`や、どのバンプでも繋がらないときはnull。
+ * 同じheadから始めた公開準備のやり直し（バンプ前＝バンプ後）は繋がりを変えないので辿らない
+ */
+export function followBumpChain(finalization: CompletionFinalizationSnapshot | null | undefined, from: string, to: string): CompletionBump | null {
+  if (!finalization || !from || from === to) return null;
+  const bumps = finalization.bumps ?? (finalization.applied ? [finalization.applied] : []);
+  const visited = new Set<string>([from]);
+  let frontier = [from];
+  while (frontier.length > 0) {
+    const next: string[] = [];
+    for (const head of frontier) {
+      for (const bump of bumps) {
+        if (bump.preHeadSha !== head || bump.finalHeadSha === head || visited.has(bump.finalHeadSha)) continue;
+        if (bump.finalHeadSha === to) return bump;
+        visited.add(bump.finalHeadSha);
+        next.push(bump.finalHeadSha);
+      }
+    }
+    frontier = next;
+  }
+  return null;
+}
 
 /**
  * 人が結果を承知で外した全体レビュー（#4807）を、系列の判断では「対象外」として扱う。指摘の起案・停止・待ちに
@@ -291,15 +324,12 @@ export function decideReleaseCompletion(
   if (candidate.number !== run.candidatePrNumber) return { action: "stop", reason: "candidate_changed" };
 
   // 公開準備のバンプで候補のheadが進んだ（#4496）。**記録したバンプ前headからバンプ後headへの更新だけ**を後継として追う
-  // （修正系列の`successorHeadSha`と同形）。無関係なhead変更・別のバンプは従来どおり下で`candidate_changed`として止める
-  const finalized = observation.finalization?.applied ?? null;
-  if (
-    finalized &&
-    candidate.headSha !== run.candidateHeadSha &&
-    candidate.headSha === finalized.finalHeadSha &&
-    finalized.preHeadSha === run.candidateHeadSha
-  ) {
-    return { action: "follow_successor", prNumber: candidate.number, headSha: finalized.finalHeadSha, baseSha: finalized.finalBaseSha };
+  // （修正系列の`successorHeadSha`と同形）。無関係なhead変更・別のバンプは従来どおり下で`candidate_changed`として止める。
+  // 公開準備をやり直した後も繋がりを失わないよう、最新の1件ではなく記録した全てのバンプを辿る（#5435）
+  const finalization = observation.finalization ?? null;
+  const bumpedTo = candidate.headSha !== run.candidateHeadSha ? followBumpChain(finalization, run.candidateHeadSha, candidate.headSha) : null;
+  if (bumpedTo) {
+    return { action: "follow_successor", prNumber: candidate.number, headSha: bumpedTo.finalHeadSha, baseSha: bumpedTo.finalBaseSha };
   }
 
   // 人（または系列）がこの候補をマージした。記録した内容のままなら本番反映の追跡へ進む
@@ -311,13 +341,14 @@ export function decideReleaseCompletion(
 
   const series = observation.series;
   // 修正系列の後継が、その後の公開準備のバンプで置き換わり、系列はもうバンプ後のheadを追っている（#4729）。
-  // 系列の記録はバンプ前のrevisionのまま残るので、これを後継として戻すと上の分岐と巡回ごとに往復する
+  // 系列の記録はバンプ前のrevisionのまま残るので、これを後継として戻すと上の分岐と巡回ごとに往復する。
+  // 公開準備をやり直す（バンプ済みのheadから2件目の公開準備が記録される）と、最新の1件だけでは繋がりが見えず、
+  // 再開のたびにバンプ前へ戻って次の巡回で`candidate_changed`として止まっていた（#5435）。記録した全てのバンプを辿る
   const successorBumped =
-    finalized !== null &&
     series !== null &&
     series.successorPrNumber === run.candidatePrNumber &&
-    series.successorHeadSha === finalized.preHeadSha &&
-    run.candidateHeadSha === finalized.finalHeadSha;
+    series.successorHeadSha !== null &&
+    followBumpChain(finalization, series.successorHeadSha, run.candidateHeadSha) !== null;
   // 修正系列が作り直した後継へ進む。作り直しで元の候補は閉じられるので、取消の判定より先に見る
   // 新方式の候補（#4495）は同じPRのrevisionが進むので、番号が同じでもheadが違えば後継として追う
   if (

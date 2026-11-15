@@ -418,6 +418,53 @@ describe("公開準備（正式バンプ。#4496）との接続", () => {
       });
       expect(decision).toEqual({ action: "follow_successor", prNumber: 10, headSha: "rev4", baseSha: "base1" });
     });
+
+    describe("バンプ後に公開準備をやり直した（#5435）", () => {
+      // 1回目の公開準備でrev2→rev3へバンプ。最終検証の失敗後にやり直した2回目は、バンプ済みのrev3から始まり
+      // rev3のまま適用される（バンプ前＝バンプ後）。最新の1件だけを見ると、修正系列の後継rev2との繋がりが消える
+      const redone = {
+        phase: "awaiting_approval",
+        applied: { preHeadSha: "rev3", finalHeadSha: "rev3", finalBaseSha: "base1" },
+        bumps: [
+          { preHeadSha: "rev2", finalHeadSha: "rev3", finalBaseSha: "base1" },
+          { preHeadSha: "rev3", finalHeadSha: "rev3", finalBaseSha: "base1" },
+        ],
+      };
+
+      it("再開で作り直した系列（rev3を記録）は、バンプ前の後継へ戻らず止まらない", () => {
+        let state = run({ candidateHeadSha: "rev3", fromPublishApproval: true });
+        const actions = [];
+        for (let i = 0; i < 3; i++) {
+          const decision = decideReleaseCompletion(state, { now, candidate: bumpedCandidate, series: fixed, checks: passed, finalization: redone });
+          actions.push(decision.action);
+          if (decision.action === "follow_successor") state = { ...state, candidateHeadSha: decision.headSha };
+        }
+        expect(actions).toEqual(["evaluate_merge", "evaluate_merge", "evaluate_merge"]);
+        expect(state.candidateHeadSha).toBe("rev3");
+      });
+
+      it("バンプ前のheadを記録した系列も、やり直し後の記録からバンプ後へ進める", () => {
+        const decision = decideReleaseCompletion(run({ candidateHeadSha: "rev2", fromPublishApproval: true }), {
+          now,
+          candidate: bumpedCandidate,
+          series: fixed,
+          checks: passed,
+          finalization: redone,
+        });
+        expect(decision).toEqual({ action: "follow_successor", prNumber: 10, headSha: "rev3", baseSha: "base1" });
+      });
+
+      it("記録に無いheadへの変更は、やり直し後も候補の変更として止める", () => {
+        const decision = decideReleaseCompletion(run({ candidateHeadSha: "rev3", fromPublishApproval: true }), {
+          now,
+          candidate: { ...openCandidate, headSha: "other" },
+          series: fixed,
+          checks: passed,
+          finalization: redone,
+        });
+        expect(decision).toMatchObject({ action: "stop", reason: "candidate_changed" });
+      });
+    });
   });
 
   it("旧方式の候補（公開準備なし）は従来どおり評価へ進む", () => {

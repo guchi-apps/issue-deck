@@ -1154,6 +1154,7 @@ export async function loadFinalizationSnapshot(
   candidateId: string;
   phase: string;
   applied: { preHeadSha: string; finalHeadSha: string; finalBaseSha: string } | null;
+  bumps: { preHeadSha: string; finalHeadSha: string; finalBaseSha: string }[];
   latest: { status: string; failureReason: string | null } | null;
   pending: { preHeadSha: string } | null;
   aiReviewWaiver: { preHeadSha: string; finalHeadSha: string | null } | null;
@@ -1164,10 +1165,14 @@ export async function loadFinalizationSnapshot(
   const revision = { candidate: resolved };
   // バンプ前→バンプ後の対応は、その後に最終検証が失敗して修正工程へ戻った公開準備でも事実として残る。
   // 完了系列が追いかけ損ねて止まらないよう、最終headが記録された最新の行を使う（公開できるかは段階で別に判定する）
-  const latest = await db.releaseCandidateFinalization.findFirst({
+  const finalized = await db.releaseCandidateFinalization.findMany({
     where: { candidateId: revision.candidate.id, finalHeadSha: { not: null } },
-    orderBy: { createdAt: "desc" },
+    orderBy: { createdAt: "asc" },
   });
+  const latest = finalized.at(-1) ?? null;
+  // 公開準備をやり直すと、バンプ済みのheadから始めた行（バンプ前＝バンプ後）が最新になる。修正系列の後継（バンプ前の
+  // head）からの繋がりを完了系列が辿れるよう、全件を渡す（#5435）
+  const bumps = finalized.flatMap((f) => (f.finalHeadSha && f.finalBaseSha ? [{ preHeadSha: f.preHeadSha, finalHeadSha: f.finalHeadSha, finalBaseSha: f.finalBaseSha }] : []));
   const newest = await db.releaseCandidateFinalization.findFirst({ where: { candidateId: revision.candidate.id }, orderBy: { createdAt: "desc" } });
   return {
     candidateId: revision.candidate.id,
@@ -1184,5 +1189,6 @@ export async function loadFinalizationSnapshot(
       latest && latest.finalHeadSha && latest.finalBaseSha
         ? { preHeadSha: latest.preHeadSha, finalHeadSha: latest.finalHeadSha, finalBaseSha: latest.finalBaseSha }
         : null,
+    bumps,
   };
 }
