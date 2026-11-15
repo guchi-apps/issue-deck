@@ -80,6 +80,8 @@ export type CrossRepoIssueDraft = {
   repository: string;
   title: string;
   body: string;
+  /** アプリ内で起票するときの本文。URLの長さの制約が無いので切り詰めない */
+  fullBody: string;
   /** 本文・題名を埋めたGitHubの新規Issue画面。起票は人が画面で確かめてから行う */
   newIssueUrl: string;
   /** 同じ件のopenなIssueを先に探すための検索画面（同じ手順を2か所に持たない） */
@@ -125,13 +127,15 @@ export function buildCrossRepoIssueDraft(input: {
     "",
     `- ${sourceRepository}#${pullRequestNumber}`,
   ];
-  const body = lines.join("\n").slice(0, MAX_DRAFT_BODY);
+  const fullBody = lines.join("\n");
+  const body = fullBody.slice(0, MAX_DRAFT_BODY);
   const base = `https://github.com/${repository}`;
   const keyword = `${sourceName} ${pullRequestNumber}`;
   return {
     repository,
     title,
     body,
+    fullBody,
     newIssueUrl: `${base}/issues/new?${new URLSearchParams({ title, body }).toString()}`,
     searchUrl: `${base}/issues?${new URLSearchParams({ q: `is:issue is:open ${keyword}` }).toString()}`,
   };

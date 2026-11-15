@@ -164,6 +164,26 @@ describe("ReleaseAutoProceedPanel（#5138）", () => {
       expect(screen.queryByTestId("release-auto-proceed-start")).toBeNull();
     });
 
+    it("下書きの確認欄から、アプリ内で他リポジトリへIssueを作成できる（#5443）", async () => {
+      const calls = mockFetch({ "/api/issues": { body: { issue: { number: 12, htmlUrl: "https://github.com/guchi-apps/aide/issues/12" } } } });
+      const base = make({});
+      const v = {
+        ...base,
+        aiReview: {
+          ...base.aiReview,
+          stage: { kind: "needs_check", autoReevaluated: true, items: ["cross_repo"] },
+          crossRepoUnverified: [{ repository: "guchi-apps/aide", checkId: "pr_interaction", usage: "", reason: "確認できない" }],
+        },
+      } as unknown as ReleaseVerificationSummary;
+      render(<ReleaseAutoProceedPanel repositoryFullName="guchi-apps/asset-manager" pullRequestNumber={1371} verification={v} onReload={vi.fn()} manualHref="#v" />);
+      fireEvent.click(screen.getByTestId("release-auto-proceed-cross-repo-open"));
+      fireEvent.click(screen.getByTestId("release-auto-proceed-cross-repo-submit"));
+      await waitFor(() => expect(screen.getByTestId("release-auto-proceed-cross-repo-created").textContent).toContain("guchi-apps/aide#12"));
+      const post = calls.find((c) => c.url === "/api/issues");
+      expect(post?.body).toMatchObject({ repositoryFullName: "guchi-apps/aide" });
+      expect(screen.queryByTestId("release-auto-proceed-cross-repo-submit")).toBeNull();
+    });
+
     it("表なしのボタンは判定を確定せず、修正の自動継続だけを始める", async () => {
       const calls = mockFetch({ "/api/repositories/release/completion": { body: { run: { id: "r1", active: true } } } });
       render(

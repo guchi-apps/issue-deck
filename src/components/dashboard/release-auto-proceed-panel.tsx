@@ -6,6 +6,7 @@ import { Loader2, Rocket } from "lucide-react";
 import { useReleaseCompletionRun } from "@/components/dashboard/release-completion-panel";
 import { useReleaseReviewRecommendations } from "@/components/dashboard/release-review-decision";
 import { Button } from "@/components/ui/button";
+import { useIssueMutations } from "@/hooks/use-issue-mutations";
 import { useReleaseVerification } from "@/hooks/use-release-verification";
 import { RELEASE_COMPLETION_SCOPE_READY } from "@/lib/release-completion";
 import type { ReleaseCompletionRunView } from "@/lib/release-completion-run";
@@ -481,25 +482,95 @@ function DecisionRow({
 }
 
 function CrossRepoDraftItem({ draft }: { draft: CrossRepoIssueDraft }) {
+  const { createIssue, isSubmitting, error } = useIssueMutations();
+  const [editing, setEditing] = useState(false);
+  const [title, setTitle] = useState(draft.title);
+  const [body, setBody] = useState(draft.fullBody);
+  const [created, setCreated] = useState<{ number: number; url: string } | null>(null);
+
+  async function submit() {
+    if (!title.trim() || isSubmitting) return;
+    // 同じ内容の再送には同じ冪等キーが使われるので、連打・再試行で二重に作らない
+    const issue = await createIssue({ repositoryFullName: draft.repository, title: title.trim(), body, labels: [], assignee: null });
+    if (issue) setCreated({ number: issue.number, url: issue.htmlUrl });
+  }
+
   return (
     <li className="flex flex-col gap-1.5 rounded-md border bg-card p-2.5" data-testid="release-auto-proceed-cross-repo-draft">
       <span className="break-all text-xs font-semibold">{draft.repository}</span>
-      <details className="text-xs">
-        <summary className="cursor-pointer text-muted-foreground">下書きを見る: {draft.title}</summary>
-        <pre className="mt-1 max-h-60 overflow-auto whitespace-pre-wrap break-words rounded bg-muted/40 p-2 text-[11px]">{draft.body}</pre>
-      </details>
-      <div className="flex flex-col gap-1.5 sm:flex-row">
-        <Button asChild variant="outline" size="sm" className="min-h-9">
-          <a href={draft.searchUrl} target="_blank" rel="noreferrer">
-            既存のIssueを探す
+      {created ? (
+        <p className="text-xs text-emerald-700 dark:text-emerald-400" role="status" data-testid="release-auto-proceed-cross-repo-created">
+          Issueを作成しました:{" "}
+          <a href={created.url} target="_blank" rel="noreferrer" className="underline underline-offset-2">
+            {draft.repository}#{created.number}
           </a>
-        </Button>
-        <Button asChild size="sm" className="min-h-9">
-          <a href={draft.newIssueUrl} target="_blank" rel="noreferrer" data-testid="release-auto-proceed-cross-repo-create">
-            下書きでIssueを起こす（GitHub）
+        </p>
+      ) : editing ? (
+        <div className="flex flex-col gap-1.5">
+          <label className="text-[11px] text-muted-foreground" htmlFor={`cross-title-${draft.repository}`}>
+            題名
+          </label>
+          <input
+            id={`cross-title-${draft.repository}`}
+            value={title}
+            onChange={(event) => setTitle(event.target.value)}
+            disabled={isSubmitting}
+            className="min-h-9 w-full rounded-md border bg-background px-2 text-xs"
+            data-testid="release-auto-proceed-cross-repo-title"
+          />
+          <label className="text-[11px] text-muted-foreground" htmlFor={`cross-body-${draft.repository}`}>
+            本文
+          </label>
+          <textarea
+            id={`cross-body-${draft.repository}`}
+            value={body}
+            onChange={(event) => setBody(event.target.value)}
+            disabled={isSubmitting}
+            rows={10}
+            className="w-full rounded-md border bg-background p-2 text-xs"
+          />
+          {error && (
+            <p role="alert" className="text-xs text-destructive" data-testid="release-auto-proceed-cross-repo-error">
+              {error}
+            </p>
+          )}
+          <div className="flex flex-col gap-1.5 sm:flex-row">
+            <Button size="sm" className="min-h-9" onClick={submit} disabled={isSubmitting || !title.trim()} data-testid="release-auto-proceed-cross-repo-submit">
+              {isSubmitting && <Loader2 className="mr-1 size-3.5 animate-spin" aria-hidden />}
+              {draft.repository}にIssueを作成する
+            </Button>
+            <Button variant="outline" size="sm" className="min-h-9" onClick={() => setEditing(false)} disabled={isSubmitting}>
+              キャンセル
+            </Button>
+          </div>
+        </div>
+      ) : (
+        <>
+          <details className="text-xs">
+            <summary className="cursor-pointer text-muted-foreground">下書きを見る: {draft.title}</summary>
+            <pre className="mt-1 max-h-60 overflow-auto whitespace-pre-wrap break-words rounded bg-muted/40 p-2 text-[11px]">{draft.body}</pre>
+          </details>
+          <div className="flex flex-col gap-1.5 sm:flex-row">
+            <Button asChild variant="outline" size="sm" className="min-h-9">
+              <a href={draft.searchUrl} target="_blank" rel="noreferrer">
+                既存のIssueを探す
+              </a>
+            </Button>
+            <Button size="sm" className="min-h-9" onClick={() => setEditing(true)} data-testid="release-auto-proceed-cross-repo-open">
+              内容を確認してIssueを作成
+            </Button>
+          </div>
+          <a
+            href={draft.newIssueUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="w-fit text-[11px] text-muted-foreground underline underline-offset-2"
+            data-testid="release-auto-proceed-cross-repo-create"
+          >
+            GitHubの画面で起こす
           </a>
-        </Button>
-      </div>
+        </>
+      )}
     </li>
   );
 }
