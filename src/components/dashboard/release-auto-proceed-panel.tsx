@@ -485,7 +485,7 @@ function CrossRepoDraftItem({ draft }: { draft: CrossRepoIssueDraft }) {
   const { createIssue, isSubmitting, error } = useIssueMutations();
   const [editing, setEditing] = useState(false);
   const [title, setTitle] = useState(draft.title);
-  const [body, setBody] = useState(draft.body);
+  const [body, setBody] = useState(draft.fullBody);
   const [created, setCreated] = useState<{ number: number; url: string } | null>(null);
 
   async function submit() {
