@@ -1861,7 +1861,6 @@ function OlderReleasesLoader({ status, onLoad }: { status: BranchFlowHistoryStat
  */
 function ReleaseFlowGraph({
   repository,
-  showClosed,
   mergedPullRequestsLoaded,
   releaseTriggerPending,
   deployTriggerPending,
@@ -1870,7 +1869,6 @@ function ReleaseFlowGraph({
   onMerged,
 }: {
   repository: BranchFlowRepository;
-  showClosed: boolean;
   mergedPullRequestsLoaded: boolean;
   /** すでに起動済みで、バンプPRが現れるのを待っている最中か（#1955） */
   releaseTriggerPending: boolean;
@@ -1887,10 +1885,8 @@ function ReleaseFlowGraph({
   const [releasedOpen, setReleasedOpen] = useState(false);
   // その中で出している版の数。直前の版だけを出し、「さらに表示」で1版ずつ過去へ続ける（#4830）
   const [releasedShownCount, setReleasedShownCount] = useState(1);
-  const activeLanes = showClosed
-    ? repository.activeLanes
-    : repository.activeLanes.filter((lane) => !isClosedLane(lane));
-  const hiddenClosedCount = repository.activeLanes.length - activeLanes.length;
+  // クローズ（未マージ）のレーンは常に隠す（#5452。以前は「クローズも表示」で出せた）
+  const activeLanes = repository.activeLanes.filter((lane) => !isClosedLane(lane));
 
   // 既定で出すのは**次のリリースに乗る分まで**（#1586）。本番へ出た版の束と、どの版で出たか
   // 特定できないレーンは、すでに済んだ変更なので「過去のリリース」アコーディオンへ
@@ -2212,12 +2208,6 @@ function ReleaseFlowGraph({
                     )}
                   </ul>
                 </details>
-              </li>
-            )}
-
-            {hiddenClosedCount > 0 && (
-              <li className="pt-2 pl-[3.35rem] text-xs text-muted-foreground max-sm:pl-[2.6rem]">
-                クローズ（未マージ）{hiddenClosedCount}件は隠しています
               </li>
             )}
 
@@ -2753,7 +2743,6 @@ function RepositorySection({
   branchesFailed,
   mergedPullRequestsLoaded,
   rowLoaded,
-  showClosed,
   isOpen,
   selectionMode = false,
   detailHost = null,
@@ -2766,7 +2755,6 @@ function RepositorySection({
   mergedPullRequestsLoaded: boolean;
   /** 畳んだ行の件数を出してよいか（#4913。`RepositorySummaryRow`の`loaded`） */
   rowLoaded: boolean;
-  showClosed: boolean;
   isOpen: boolean;
   /** 2ペイン表示か（#2157）。行の見た目（選択の縦棒）と中身の行き先が変わる */
   selectionMode?: boolean;
@@ -2790,7 +2778,6 @@ function RepositorySection({
   const graph = (
     <ReleaseFlowGraph
       repository={repository}
-      showClosed={showClosed}
       mergedPullRequestsLoaded={mergedPullRequestsLoaded}
       releaseTriggerPending={isPending}
       deployTriggerPending={deployTrigger.isPending}
@@ -3324,7 +3311,6 @@ export function BranchFlowView({
               branchesFailed={failedRepositories.includes(repository.repositoryFullName)}
               mergedPullRequestsLoaded={releasesLoaded}
               rowLoaded={rowsLoaded}
-              showClosed={false}
               isOpen={isRepositoryOpen(repository.repositoryFullName)}
               selectionMode={isSplit}
               detailHost={detailHost}
