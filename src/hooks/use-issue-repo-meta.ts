@@ -9,12 +9,15 @@ type UseIssueRepoMetaResult = {
   labels: IssueLabel[];
   assignees: string[];
   isLoading: boolean;
+  /** 取得が一度完了した（成功・失敗を問わない）。リポジトリが変わると`false`へ戻る（#5448） */
+  isLoaded: boolean;
 };
 
 export function useIssueRepoMeta(repositoryFullName: string | null): UseIssueRepoMetaResult {
   const [labels, setLabels] = useState<IssueLabel[]>([]);
   const [assignees, setAssignees] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [isLoaded, setIsLoaded] = useState(false);
 
   useEffect(() => {
     if (!repositoryFullName) {
@@ -28,6 +31,7 @@ export function useIssueRepoMeta(repositoryFullName: string | null): UseIssueRep
     const controller = new AbortController();
 
     setIsLoading(true);
+    setIsLoaded(false);
 
     fetchWithRetry(`/api/issues/meta?owner=${owner}&repo=${repo}`, { signal: controller.signal })
       .then(async (res) => {
@@ -41,10 +45,15 @@ export function useIssueRepoMeta(repositoryFullName: string | null): UseIssueRep
         setLabels([]);
         setAssignees([]);
       })
-      .finally(() => setIsLoading(false));
+      .finally(() => {
+        // 中断（リポジトリの切り替え・閉じた）では完了扱いにしない
+        if (controller.signal.aborted) return;
+        setIsLoading(false);
+        setIsLoaded(true);
+      });
 
     return () => controller.abort();
   }, [repositoryFullName]);
 
-  return { labels, assignees, isLoading };
+  return { labels, assignees, isLoading, isLoaded };
 }

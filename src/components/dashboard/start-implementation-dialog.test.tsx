@@ -55,12 +55,14 @@ const modelPickFetch = vi.fn();
 // リポジトリに定義されているラベル（#1956）。アーティファクトの既定を当ててよいかの判定に使う。
 // 既定は「25.artifact-requiredを配ってあるリポジトリ」とする
 let repositoryLabelNames: string[] = [ARTIFACT_REQUIRED_LABEL];
+let repoMetaLoading = false;
 
 vi.mock("@/hooks/use-issue-repo-meta", () => ({
   useIssueRepoMeta: () => ({
     labels: repositoryLabelNames.map((name) => ({ name, color: "ededed", description: null })),
     assignees: [],
-    isLoading: false,
+    isLoading: repoMetaLoading,
+    isLoaded: !repoMetaLoading,
   }),
 }));
 
@@ -244,6 +246,7 @@ describe("StartImplementationDialog", () => {
       error: null,
     };
     repositoryLabelNames = [ARTIFACT_REQUIRED_LABEL];
+    repoMetaLoading = false;
     claudeUsage = null;
     codexUsage = null;
     updateIssue.mockResolvedValue(makeIssue());
@@ -1011,6 +1014,19 @@ describe("StartImplementationDialog", () => {
 
     await waitFor(() => expect(enqueue).toHaveBeenCalledTimes(1));
     expect(updateIssue).not.toHaveBeenCalled();
+  });
+
+  it("ラベル一覧の取得中は計画・デザインの両方を「判定中…」で出し、開始も押せない（#5448）", () => {
+    dispatchState.hosts = [makeHost()];
+    repoMetaLoading = true;
+    renderDialog({ includeDispatchTargets: true });
+
+    expect(screen.getAllByText("判定中…")).toHaveLength(2);
+    const [plan, artifact] = screen.getAllByRole("checkbox");
+    expect(plan.getAttribute("aria-checked")).toBe("false");
+    expect((plan as HTMLButtonElement).disabled).toBe(true);
+    expect((artifact as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "開始する" }) as HTMLButtonElement).disabled).toBe(true);
   });
 
   it("オプションのラベルはサブPC経路でも起動前に付ける", async () => {
