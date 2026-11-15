@@ -192,12 +192,21 @@ function issueRowsFor(rows: {
   codeReviewFindings?: unknown[];
   /** 対象PRの`対象PR: #NN`マーカーで絞り込む修正Issue（#3353） */
   fixIssue?: unknown[];
+  /** 進捗巡回の対象選び（#5440）。`repositoryId`・`number`・`state`・`projectStatus`の行 */
+  progress?: unknown[];
 }) {
   return vi.fn(
     async (args: {
-      where?: { title?: { startsWith?: string; in?: unknown }; body?: { contains?: string } };
+      where?: {
+        title?: { startsWith?: string; in?: unknown };
+        body?: { contains?: string };
+        repositoryId?: unknown;
+      };
     }) => {
       if (args?.where?.body?.contains !== undefined) return rows.fixIssue ?? [];
+      if (args?.where?.repositoryId !== undefined && args.where.title === undefined) {
+        return rows.progress ?? [];
+      }
       const title = args?.where?.title;
       if (title === undefined) return rows.staleCheckUser ?? [];
       if (title.in !== undefined) return rows.codeReviewFindings ?? [];
@@ -566,6 +575,127 @@ describe("runProgressSweep", () => {
     expect(forced.swept).toBe(true);
   });
 
+  describe("対象選びはDB、盤面は間隔を空けた安全網（#5440）", () => {
+    const TEN_MINUTES_LATER = new Date(NOW.getTime() + 10 * 60_000);
+
+    function progressRow(number: number, projectStatus: string, state: "OPEN" | "CLOSED" = "OPEN") {
+      return { repositoryId: REPO.id, number, state, projectStatus };
+    }
+
+    afterEach(() => {
+      delete process.env.PROGRESS_SWEEP_BOARD_INTERVAL_MINUTES;
+    });
+
+    it("盤面を読まない巡回では、DBで選んだIssueだけを見る", async () => {
+      await runProgressSweep({ now: NOW });
+      fetchProjectItems.mockClear();
+      issueFindMany.mockImplementation(issueRowsFor({ progress: [progressRow(2294, "Develop PR")] }));
+
+      const result = await runProgressSweep({ now: TEN_MINUTES_LATER });
+
+      expect(fetchProjectItems).not.toHaveBeenCalled();
+      expect(result.boardRead).toBe(false);
+      expect(result.candidates).toBe(1);
+      expect(result.actions).toEqual([
+        { repositoryFullName: "guchi-apps/issue-deck", issueNumber: 2294, kind: "advanced" },
+      ]);
+      // 3経路の進捗とopen/closedで絞り込む
+      const where = issueFindMany.mock.calls
+        .map((call) => call[0]?.where)
+        .find((w) => w?.repositoryId !== undefined && w?.title === undefined);
+      expect(where).toEqual({
+        repositoryId: { in: [REPO.id] },
+        OR: [
+          {
+            state: "OPEN",
+            projectStatus: { in: ["Develop PR", "Implementation", "Develop", "Release", "Done"] },
+          },
+          { state: "CLOSED", projectStatus: { in: ["Develop", "Release"] } },
+        ],
+      });
+    });
+
+    it("間隔（既定60分）を過ぎた巡回では盤面を読み、DBに無いIssueも拾う", async () => {
+      await runProgressSweep({ now: NOW });
+      fetchProjectItems.mockClear();
+      issueFindMany.mockImplementation(issueRowsFor({ progress: [progressRow(10, "Develop", "CLOSED")] }));
+      fetchProjectItems.mockResolvedValue([projectItem({ issueNumber: 2294 })]);
+
+      const result = await runProgressSweep({ now: new Date(NOW.getTime() + 60 * 60_000) });
+
+      expect(fetchProjectItems).toHaveBeenCalledTimes(1);
+      expect(result.boardRead).toBe(true);
+      expect(result.candidates).toBe(1);
+      expect(result.closedCandidates).toBe(1);
+    });
+
+    it("forceなら間隔に関係なく盤面を読む", async () => {
+      await runProgressSweep({ now: NOW });
+      fetchProjectItems.mockClear();
+
+      const result = await runProgressSweep({ now: TEN_MINUTES_LATER, force: true });
+
+      expect(fetchProjectItems).toHaveBeenCalledTimes(1);
+      expect(result.boardRead).toBe(true);
+    });
+
+    it("PROGRESS_SWEEP_BOARD_INTERVAL_MINUTES=0 なら毎巡読む（従来の挙動）", async () => {
+      process.env.PROGRESS_SWEEP_BOARD_INTERVAL_MINUTES = "0";
+      await runProgressSweep({ now: NOW });
+      await runProgressSweep({ now: TEN_MINUTES_LATER });
+
+      expect(fetchProjectItems).toHaveBeenCalledTimes(2);
+    });
+
+    it("DBと盤面の両方にあるIssueは、読んだばかりの盤面の進捗・openを採る", async () => {
+      // DBでは`Done`のopen（close漏れ側）だが、盤面では`Develop PR`へ差し戻されている
+      issueFindMany.mockImplementation(issueRowsFor({ progress: [progressRow(2294, "Done")] }));
+      fetchProjectItems.mockResolvedValue([projectItem({ issueNumber: 2294, status: "Develop PR" })]);
+
+      const result = await runProgressSweep({ now: NOW });
+
+      expect(result.candidates).toBe(1);
+      expect(result.mergedOpenCandidates).toBe(0);
+      expect(updateIssue).not.toHaveBeenCalled();
+    });
+
+    it("盤面でreopenされていれば、DBがclosedのままでもclosed経路に回さない", async () => {
+      issueFindMany.mockImplementation(issueRowsFor({ progress: [progressRow(2294, "Develop", "CLOSED")] }));
+      fetchProjectItems.mockResolvedValue([projectItem({ issueNumber: 2294, status: "Develop", issueOpen: true })]);
+
+      const result = await runProgressSweep({ now: NOW });
+
+      expect(result.closedCandidates).toBe(0);
+      expect(result.mergedOpenCandidates).toBe(1);
+    });
+
+    it("盤面でStatusが外れていれば、DBの古い進捗で巡回しない", async () => {
+      issueFindMany.mockImplementation(issueRowsFor({ progress: [progressRow(2294, "Develop PR")] }));
+      fetchProjectItems.mockResolvedValue([projectItem({ issueNumber: 2294, status: null })]);
+
+      const result = await runProgressSweep({ now: NOW });
+
+      expect(result.candidates).toBe(0);
+      expect(fetchPullRequestsForHead).not.toHaveBeenCalled();
+    });
+
+    it("盤面が読めなくてもDBで選んだ分は巡回し、次の巡回で盤面を読み直す", async () => {
+      const error = vi.spyOn(console, "error").mockImplementation(() => {});
+      issueFindMany.mockImplementation(issueRowsFor({ progress: [progressRow(2294, "Develop PR")] }));
+      fetchProjectItems.mockRejectedValueOnce(new Error("502"));
+
+      const first = await runProgressSweep({ now: NOW });
+      expect(first.boardRead).toBe(false);
+      expect(first.failedRepositories).toEqual(["guchi-apps/issue-deck"]);
+      expect(first.candidates).toBe(1);
+
+      const second = await runProgressSweep({ now: TEN_MINUTES_LATER });
+      expect(second.boardRead).toBe(true);
+      expect(fetchProjectItems).toHaveBeenCalledTimes(2);
+      error.mockRestore();
+    });
+  });
+
   it("PROGRESS_SWEEP_INTERVAL_MINUTES=0 で止められる", async () => {
     process.env.PROGRESS_SWEEP_INTERVAL_MINUTES = "0";
 
@@ -624,7 +754,7 @@ describe("runProgressSweep", () => {
 
     await runProgressSweep({ now: NOW });
 
-    const where = issueFindMany.mock.calls.map((call) => call[0]?.where).find((w) => !w?.title);
+    const where = issueFindMany.mock.calls.map((call) => call[0]?.where).find((w) => !w?.title && w?.labels);
     expect(where).toMatchObject({
       state: "OPEN",
       labels: { some: { name: "00.check-user" } },
