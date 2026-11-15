@@ -137,6 +137,8 @@ function renderFlow(input: {
   /** ブランチ画面でのリポジトリ表示（#5087） */
   branchViewModes?: Record<string, BranchViewMode>;
   expandedRepositoryFullNames?: string[];
+  /** 「表示リポジトリを編集」（#5452） */
+  onEditBranchView?: () => void;
 }) {
   const flow = buildBranchFlow({
     repositories: input.repositories ?? [{ fullName: REPO, private: false }],
@@ -166,6 +168,7 @@ function renderFlow(input: {
       releaseHistory={input.releaseHistory}
       branchViewModes={input.branchViewModes}
       expandedRepositoryFullNames={input.expandedRepositoryFullNames}
+      onEditBranchView={input.onEditBranchView}
     />,
   );
 }
@@ -312,19 +315,21 @@ describe("BranchFlowView", () => {
       expect(screen.getByText("ブランチ状況を取得できず")).toBeTruthy();
     });
 
-    it("「すべて開く」で全リポジトリを開く", () => {
-      renderFlow({
-        pullRequests: [makePullRequest({ number: 1461, headRef: "issue-1454" })],
-        branchStatuses: [
-          branchStatus({ checkedBranches: ["issue-1454"], existingBranches: ["issue-1454"] }),
-        ],
-      });
+    it("ヘッダーのボタンは「表示リポジトリを編集」と「更新」だけ（#5452）", () => {
+      const onEditBranchView = vi.fn();
+      renderFlow({ onEditBranchView });
 
-      expect(screen.queryByText("issue-1454")).toBeNull();
-      fireEvent.click(screen.getByText("すべて開く"));
-      expect(screen.getByText("issue-1454")).toBeTruthy();
-      fireEvent.click(screen.getByText("すべて閉じる"));
-      expect(screen.queryByText("issue-1454")).toBeNull();
+      for (const removed of [/すべて開く/, /クローズも表示/, /一時表示/, /まとめてリリース/]) {
+        expect(screen.queryByText(removed)).toBeNull();
+      }
+      fireEvent.click(screen.getByRole("button", { name: "表示リポジトリを編集" }));
+      expect(onEditBranchView).toHaveBeenCalledTimes(1);
+      expect(screen.getByRole("button", { name: "更新" })).toBeTruthy();
+    });
+
+    it("編集の導線を渡していない画面では「表示リポジトリを編集」を出さない", () => {
+      renderFlow({});
+      expect(screen.queryByRole("button", { name: "表示リポジトリを編集" })).toBeNull();
     });
   });
 
@@ -452,7 +457,7 @@ describe("BranchFlowView", () => {
       fireEvent.click(screen.getByText(REPO_SHORT));
 
       expect(isInsideRow(REPO_SHORT, REPO_BRANCH)).toBe(true);
-      expect(screen.getByText("すべて開く")).toBeTruthy();
+      expect(screen.queryByText("すべて開く")).toBeNull();
     });
 
     it("分割を渡していない画面（スマホ）は、幅が足りても行の下に開く", () => {
@@ -2784,180 +2789,6 @@ describe("BranchFlowView の引っ張って更新（#1958）", () => {
   });
 });
 
-describe("一括リリース（#2770）", () => {
-  const REPO2 = "guchi-apps/other-app";
-  const REPO2_SHORT = "other-app";
-
-  afterEach(() => {
-    cleanup();
-    window.localStorage.clear();
-    vi.restoreAllMocks();
-  });
-
-  /** developがmainより進んでいて、リリース用workflowも持つ2リポジトリ（＝一括リリースの対象） */
-  function twoUnreleasedRepos() {
-    return {
-      repositories: [
-        { fullName: REPO, private: false },
-        { fullName: REPO2, private: false },
-      ],
-      branchStatuses: [
-        branchStatus({
-          developVsMain: { aheadBy: 3, behindBy: 0, sameContent: false, units: null },
-          hasReleaseWorkflow: true,
-        }),
-        branchStatus({
-          repositoryFullName: REPO2,
-          developVsMain: { aheadBy: 1, behindBy: 0, sameContent: false, units: null },
-          hasReleaseWorkflow: true,
-        }),
-      ],
-    };
-  }
-
-  it("対象が2件あるとき、まとめてリリースするボタンを出す", () => {
-    renderFlow(twoUnreleasedRepos());
-    expect(screen.getByText("未リリース2件をまとめてリリース")).toBeTruthy();
-  });
-
-  // 計画レビュー指摘1。起動してからバンプPRが現れてこの画面が取り直すまでの数十秒は
-  // canTriggerReleaseがtrueのまま残るため、端末に残る起動記録でも二重に除く
-  it("端末に起動記録が残っているリポジトリは対象から除く（二重dispatch防止）", () => {
-    window.localStorage.setItem(
-      `issue-deck:release-triggered-at:${REPO}`,
-      JSON.stringify(new Date().toISOString()),
-    );
-    renderFlow(twoUnreleasedRepos());
-
-    // REPOはこの端末で起動済み扱いのため対象から外れ、対象はREPO2の1件だけになる
-    expect(screen.getByText("未リリース1件をまとめてリリース")).toBeTruthy();
-    fireEvent.click(screen.getByText("未リリース1件をまとめてリリース"));
-    expect(screen.queryByText(REPO)).toBeNull();
-    expect(screen.getByText(REPO2)).toBeTruthy();
-  });
-
-  it("両方とも起動記録が残っていれば、ボタンごと出さない", () => {
-    window.localStorage.setItem(
-      `issue-deck:release-triggered-at:${REPO}`,
-      JSON.stringify(new Date().toISOString()),
-    );
-    window.localStorage.setItem(
-      `issue-deck:release-triggered-at:${REPO2}`,
-      JSON.stringify(new Date().toISOString()),
-    );
-    renderFlow(twoUnreleasedRepos());
-    expect(screen.queryByText(/まとめてリリース/)).toBeNull();
-  });
-
-  it("対象が無ければ出さない（デプロイするものが無い場合は実行しない、#2770）", () => {
-    renderFlow({
-      branchStatuses: [
-        branchStatus({
-          developVsMain: { aheadBy: 0, behindBy: 0, sameContent: false, units: null },
-          hasReleaseWorkflow: true,
-        }),
-      ],
-    });
-    expect(screen.queryByText(/まとめてリリース/)).toBeNull();
-  });
-
-  it("押すと対象一覧（リポジトリ名・未リリース件数）を確認ダイアログに出す", () => {
-    renderFlow(twoUnreleasedRepos());
-    fireEvent.click(screen.getByText("未リリース2件をまとめてリリース"));
-
-    expect(screen.getByText("2件のリポジトリでリリース候補を作成して検証しますか？")).toBeTruthy();
-    expect(screen.getByText(REPO)).toBeTruthy();
-    expect(screen.getByText(REPO2)).toBeTruthy();
-    expect(screen.getByText("3コミット")).toBeTruthy();
-    expect(screen.getByText("1コミット")).toBeTruthy();
-    // mainへの実マージは含まれないことを明記している
-    expect(screen.getByText(/未対応・判定できないリポジトリは起動しません/)).toBeTruthy();
-  });
-
-  // 計画レビュー指摘3。ブランチ状況を取得できなかったリポジトリは対象からも件数からも
-  // 黙って抜けるため、確認ダイアログでその旨を添える
-  it("ブランチ状況を取得できなかったリポジトリがあるとき、確認ダイアログにその旨を出す", () => {
-    renderFlow({ ...twoUnreleasedRepos(), failedRepositories: ["guchi-apps/unreachable"] });
-    fireEvent.click(screen.getByText("未リリース2件をまとめてリリース"));
-    expect(screen.getByText(/ブランチ状況を取得できていないリポジトリが1件あり/)).toBeTruthy();
-  });
-
-  it("取得に失敗したリポジトリが無ければ、その注記を出さない", () => {
-    renderFlow(twoUnreleasedRepos());
-    fireEvent.click(screen.getByText("未リリース2件をまとめてリリース"));
-    expect(screen.queryByText(/ブランチ状況を取得できていない/)).toBeNull();
-  });
-
-  it("起動すると対象ぶん候補を作り、成功した各リポジトリの個別ボタンも起動中表示になる", async () => {
-    mockFetchWithMode(
-      "candidate",
-      async () => new Response(JSON.stringify({ ok: true, candidateId: "c1", revision: 0, existing: false }), { status: 200 }),
-    );
-    renderFlow(twoUnreleasedRepos());
-    fireEvent.click(screen.getByText(REPO_SHORT));
-    fireEvent.click(screen.getByText(REPO2_SHORT));
-
-    fireEvent.click(screen.getByText("未リリース2件をまとめてリリース"));
-    await screen.findAllByText("候補を作成");
-    fireEvent.click(screen.getByText("起動する"));
-
-    await waitFor(() => expect(screen.getAllByText("リリース起動中…").length).toBe(2));
-    // 両方の個別ボタンが起動中へ切り替わる（畳んでいたリポジトリの節が持つmarkTriggeredを、
-    // ヘッダーのボタンからも呼べていることの確認。計画レビュー指摘3への対応）
-    expect(screen.queryByText("候補を作成して検証")).toBeNull();
-
-    const bodies = (globalThis.fetch as unknown as ReturnType<typeof vi.fn>).mock.calls
-      .filter((call: unknown[]) => call[0] === "/api/repositories/release/rc")
-      .map((call: unknown[]) => JSON.parse((call[1] as RequestInit).body as string));
-    expect(bodies).toHaveLength(2);
-    expect(bodies).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ owner: "guchi-apps", repo: "issue-deck", action: "create" }),
-        expect.objectContaining({ owner: "guchi-apps", repo: "other-app", action: "create" }),
-      ]),
-    );
-  });
-
-  it("新方式に未対応のリポジトリは、一括では旧方式を起動しない", async () => {
-    mockFetchWithMode("legacy", new Response(JSON.stringify({ ok: true }), { status: 200 }));
-    renderFlow(twoUnreleasedRepos());
-    fireEvent.click(screen.getByText("未リリース2件をまとめてリリース"));
-    await screen.findAllByText(/未対応（更新が必要）・起動しない/);
-    const action = screen.getByText("起動する").closest("button") as HTMLButtonElement;
-    expect(action.disabled).toBe(true);
-    const legacyCalls = (globalThis.fetch as unknown as ReturnType<typeof vi.fn>).mock.calls.filter(
-      (call: unknown[]) => call[0] === "/api/repositories/release",
-    );
-    expect(legacyCalls).toHaveLength(0);
-  });
-
-  it("一部の起動が失敗しても、成功した分は起動中表示になりエラーを添える", async () => {
-    let callCount = 0;
-    mockFetchWithMode("candidate", async () => {
-      callCount += 1;
-      if (callCount === 1) return new Response(JSON.stringify({ ok: true, candidateId: "c1", revision: 0, existing: false }), { status: 200 });
-      return new Response(
-        JSON.stringify({ error: "dispatch_failed", message: "起動できませんでした" }),
-        { status: 502 },
-      );
-    });
-    renderFlow(twoUnreleasedRepos());
-    fireEvent.click(screen.getByText(REPO_SHORT));
-    fireEvent.click(screen.getByText(REPO2_SHORT));
-
-    fireEvent.click(screen.getByText("未リリース2件をまとめてリリース"));
-    await screen.findAllByText("候補を作成");
-    fireEvent.click(screen.getByText("起動する"));
-
-    await screen.findByText("リリース起動中…");
-    // 成功した1件だけが起動中表示になり、失敗した側は「リリースする」のまま押し直せる
-    expect(screen.getAllByText("リリース起動中…").length).toBe(1);
-    expect(screen.getByText("候補を作成して検証")).toBeTruthy();
-    expect(screen.getByText(/1件の起動に失敗しました/)).toBeTruthy();
-  });
-});
-
-// #3468。mainにある版＝Xcodeで実機に入れた版、と運用で定義したリポジトリ
 describe("Xcodeで実機へ反映するリポジトリ（#3468）", () => {
   afterEach(() => {
     cleanup();
@@ -3089,14 +2920,13 @@ describe("ブランチ画面でのリポジトリ表示（#5087）", () => {
     expect(screen.queryByText(/一時表示/)).toBeNull();
   });
 
-  it("「動きがある時だけ表示」で動きが無ければ省き、件数と一時表示の導線を出す", () => {
+  it("「動きがある時だけ表示」で動きが無ければ省き、件数を出す", () => {
     renderFlow({ repositories: TWO, branchViewModes: { [REPO2]: "active" } });
 
     expect(screen.getByText(REPO_SHORT)).toBeTruthy();
     expect(screen.queryByText(REPO2_SHORT)).toBeNull();
     expect(screen.getByText(/1リポジトリ/)).toBeTruthy();
     expect(screen.getByText(/設定で1件を省略中/)).toBeTruthy();
-    expect(screen.getByRole("button", { name: "省略中の1件を一時表示" })).toBeTruthy();
   });
 
   it("「動きがある時だけ表示」でも進行中のレーンがあれば表示する", () => {
@@ -3125,18 +2955,6 @@ describe("ブランチ画面でのリポジトリ表示（#5087）", () => {
     expect(screen.queryByText(REPO2_SHORT)).toBeNull();
   });
 
-  it("一時表示で省いたリポジトリを後ろへ並べ、もう一度押すと元に戻る（設定は変えない）", () => {
-    renderFlow({ repositories: TWO, branchViewModes: { [REPO2]: "never" } });
-
-    fireEvent.click(screen.getByRole("button", { name: "省略中の1件を一時表示" }));
-    expect(screen.getByText(REPO2_SHORT)).toBeTruthy();
-    expect(screen.getByText(/設定で省略しているものを一時表示中/)).toBeTruthy();
-    expect(screen.getByRole("button", { name: "省略していたものを隠す" }).getAttribute("aria-pressed")).toBe("true");
-
-    fireEvent.click(screen.getByRole("button", { name: "省略していたものを隠す" }));
-    expect(screen.queryByText(REPO2_SHORT)).toBeNull();
-  });
-
   it("取得に失敗したリポジトリは「動きなし」と断定せず表示する", () => {
     renderFlow({
       repositories: TWO,
@@ -3160,32 +2978,11 @@ describe("ブランチ画面でのリポジトリ表示（#5087）", () => {
     expect(screen.getByText(REPO2_SHORT)).toBeTruthy();
   });
 
-  it("全件を省いたときは、その旨と一時表示の導線を出す", () => {
+  it("全件を省いたときは、その旨を出す", () => {
     renderFlow({
       repositories: TWO,
       branchViewModes: { [REPO]: "never", [REPO2]: "never" },
     });
     expect(screen.getByText(/ブランチ画面に並べるリポジトリがありません（2件は設定で省略しています）/)).toBeTruthy();
-    expect(screen.getByRole("button", { name: "省略中の2件を一時表示" })).toBeTruthy();
-  });
-
-  it("省いたリポジトリも一括リリースの対象のまま", () => {
-    renderFlow({
-      repositories: TWO,
-      branchViewModes: { [REPO2]: "never" },
-      branchStatuses: [
-        branchStatus({
-          developVsMain: { aheadBy: 3, behindBy: 0, sameContent: false, units: null },
-          hasReleaseWorkflow: true,
-        }),
-        branchStatus({
-          repositoryFullName: REPO2,
-          developVsMain: { aheadBy: 1, behindBy: 0, sameContent: false, units: null },
-          hasReleaseWorkflow: true,
-        }),
-      ],
-    });
-    expect(screen.queryByText(REPO2_SHORT)).toBeNull();
-    expect(screen.getByText("未リリース2件をまとめてリリース")).toBeTruthy();
   });
 });

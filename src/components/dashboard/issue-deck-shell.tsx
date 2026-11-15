@@ -13,6 +13,7 @@ import { CreateIssueDialog } from "@/components/dashboard/create-issue-dialog";
 import { BulkCreateCodeReviewIssuesDialog } from "@/components/dashboard/bulk-create-code-review-issues-dialog";
 import type { AppSettingsValues } from "@/components/dashboard/settings/execution-settings-section";
 import { SettingsDialog } from "@/components/dashboard/settings/settings-dialog";
+import type { SettingsSectionKey } from "@/components/dashboard/settings/settings-sections";
 import { EditIssueDialog } from "@/components/dashboard/edit-issue-dialog";
 import { StartImplementationDialog } from "@/components/dashboard/start-implementation-dialog";
 import { buildLocalSessionCommand, canStartLocalSession } from "@/lib/local-session";
@@ -363,6 +364,14 @@ export function IssueDeckShell({
     useState<ModelPickEngine>(initialModelPickEngine);
   const [dispatchConcurrency, setDispatchConcurrency] = useState(initialDispatchConcurrency);
   const [settingsDialogOpen, setSettingsDialogOpen] = useState(false);
+  // 設定を特定の区分から開く（#5452。ブランチ画面の「表示リポジトリを編集」）。区分は開いたときの
+  // 初期値にしか効かないため、`key`を変えて作り直す
+  const [settingsInitialSection, setSettingsInitialSection] = useState<SettingsSectionKey | undefined>(undefined);
+  const [settingsOpenCount, setSettingsOpenCount] = useState(0);
+  function prepareSettings(section?: SettingsSectionKey) {
+    setSettingsInitialSection(section);
+    setSettingsOpenCount((count) => count + 1);
+  }
 
   // PC（SettingsDialog）とスマホ（MobileSettingsScreen）のどちらから保存されても
   // 同じstateへ反映する（#1539）
@@ -2108,7 +2117,10 @@ export function IssueDeckShell({
           onOpenFlow={selectFlowPane}
           isSidebarCollapsed={isSidebarCollapsed}
           onToggleSidebar={() => setIsSidebarCollapsed((prev) => !prev)}
-          onOpenSettings={() => setSettingsDialogOpen(true)}
+          onOpenSettings={() => {
+            prepareSettings();
+            setSettingsDialogOpen(true);
+          }}
           /* パソコンでアプリとして起動するとブラウザの戻る矢印が無くなるため、ヘッダーに
              戻る導線を置く（#1771）。戻り先の判断はスマホと同じ`goBackOrFallback`。
              巻き戻せる履歴が無いときはボタンを押せないのでフォールバックは実際には走らないが、
@@ -2156,7 +2168,10 @@ export function IssueDeckShell({
                   favoriteRepositories={repositories.filter((repo) => repo.favorite)}
                   onSelectRepository={selectRepository}
                   onLaunchNewApp={() => setNewAppDialogOpen(true)}
-                  onOpenSettings={selectMobileSettings}
+                  onOpenSettings={() => {
+                    prepareSettings();
+                    selectMobileSettings();
+                  }}
                 />
               )}
 
@@ -2254,6 +2269,10 @@ export function IssueDeckShell({
                   }}
                   onMerged={handleBranchFlowMerged}
                   onDraftIosFixIssue={openIosFixIssueDialog}
+                  onEditBranchView={() => {
+                    prepareSettings("repositories");
+                    selectMobileSettings();
+                  }}
                   releaseHistory={branchFlowHistory}
                 />
               )}
@@ -2380,7 +2399,13 @@ export function IssueDeckShell({
                 >
                   <DialogTitle className="sr-only">設定</DialogTitle>
                   <MobileSettingsScreen
-                    onBack={goBack}
+                    key={settingsOpenCount}
+                    initialSection={settingsInitialSection}
+                    onBack={() => {
+                      // 次に別の入口から開いたとき、前回の区分で始まらないようにする
+                      setSettingsInitialSection(undefined);
+                      goBack();
+                    }}
                     currentUser={currentUser}
                     autoRetryLimit={autoRetryLimit}
                     aiExecutionProvider={aiExecutionProvider}
@@ -2687,6 +2712,11 @@ export function IssueDeckShell({
               }}
               onMerged={handleBranchFlowMerged}
               onDraftIosFixIssue={openIosFixIssueDialog}
+              /* 設定の「リポジトリ」を開く（#5452） */
+              onEditBranchView={() => {
+                prepareSettings("repositories");
+                setSettingsDialogOpen(true);
+              }}
               /* 「過去のリリース」の続きをGitHubから取り足す（#4844） */
               releaseHistory={branchFlowHistory}
               /* 左右2ペイン（#2157）。幅が足りるかどうかは`BranchFlowView`が実測して決める */
@@ -2956,8 +2986,13 @@ export function IssueDeckShell({
         />
         <NewAppDialog open={newAppDialogOpen} onOpenChange={setNewAppDialogOpen} />
         <SettingsDialog
+          key={settingsOpenCount}
+          initialSection={settingsInitialSection}
           open={settingsDialogOpen}
-          onOpenChange={setSettingsDialogOpen}
+          onOpenChange={(open) => {
+            if (!open) setSettingsInitialSection(undefined);
+            setSettingsDialogOpen(open);
+          }}
           currentUser={currentUser}
           autoRetryLimit={autoRetryLimit}
           aiExecutionProvider={aiExecutionProvider}

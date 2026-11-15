@@ -22,6 +22,7 @@ import {
   ArrowUpToLine,
   Check,
   ChevronDown,
+  Settings2,
   ChevronRight,
   CircleAlert,
   CircleDashed,
@@ -66,7 +67,6 @@ import { PullRequestMergeHoldNotice } from "@/components/dashboard/pull-request-
 import { PullToRefreshIndicator } from "@/components/dashboard/pull-to-refresh-indicator";
 import type { IosDistributionFixIssueDraft } from "@/lib/ios-distribution-failure";
 import { DeployFailureAlert } from "@/components/dashboard/deploy-failure-alert";
-import { ReleaseBulkButton } from "@/components/dashboard/release-bulk-button";
 import { RepositoryDeployButton } from "@/components/dashboard/repository-deploy-button";
 import { WorkflowRunProgressPanel } from "@/components/dashboard/workflow-run-progress-panel";
 import { RepositoryReleaseButton } from "@/components/dashboard/repository-release-button";
@@ -110,7 +110,7 @@ import {
 } from "@/lib/auto-refresh";
 import { describeBranchFlow, type BranchFlowGuidanceKind } from "@/lib/branch-flow-guidance";
 import { selectBranchViewRepositories, type BranchViewMode } from "@/lib/branch-view-visibility";
-import { readTriggeredAt, useTriggerPending } from "@/hooks/use-trigger-pending";
+import { useTriggerPending } from "@/hooks/use-trigger-pending";
 import { resolveReleaseStageBadges, type ReleaseStageBadge } from "@/lib/release-stage-badges";
 import { isReleaseJourneyNeedingUser, resolveReleaseJourney, type ReleaseJourney } from "@/lib/release-journey";
 import { resolvePullRequestHealth, type PullRequestHealthDisposition } from "@/lib/pull-request-health";
@@ -142,7 +142,6 @@ import {
   isMergeWaitingForChecks,
   requiresUserMerge,
 } from "@/lib/pull-request-list";
-import { isTriggerPending, RELEASE_TRIGGER_PENDING_MS } from "@/lib/trigger-pending-guard";
 import { getRepoColor } from "@/lib/repo-color";
 import { cn } from "@/lib/utils";
 import type {
@@ -234,6 +233,8 @@ type BranchFlowViewProps = {
    * （Issue一覧の`onPullToRefresh`と同じ扱い。#1893）。
    */
   onPullToRefresh?: () => Promise<unknown> | void;
+  /** 「表示リポジトリを編集」を押したとき（#5452）。設定の「リポジトリ」を開く。渡さなければボタンを出さない */
+  onEditBranchView?: () => void;
   /**
    * ヘッダーの更新ボタンを回転アイコンだけにするか（#1958）。スマホで渡す。
    *
@@ -1860,7 +1861,6 @@ function OlderReleasesLoader({ status, onLoad }: { status: BranchFlowHistoryStat
  */
 function ReleaseFlowGraph({
   repository,
-  showClosed,
   mergedPullRequestsLoaded,
   releaseTriggerPending,
   deployTriggerPending,
@@ -1869,7 +1869,6 @@ function ReleaseFlowGraph({
   onMerged,
 }: {
   repository: BranchFlowRepository;
-  showClosed: boolean;
   mergedPullRequestsLoaded: boolean;
   /** すでに起動済みで、バンプPRが現れるのを待っている最中か（#1955） */
   releaseTriggerPending: boolean;
@@ -1886,10 +1885,8 @@ function ReleaseFlowGraph({
   const [releasedOpen, setReleasedOpen] = useState(false);
   // その中で出している版の数。直前の版だけを出し、「さらに表示」で1版ずつ過去へ続ける（#4830）
   const [releasedShownCount, setReleasedShownCount] = useState(1);
-  const activeLanes = showClosed
-    ? repository.activeLanes
-    : repository.activeLanes.filter((lane) => !isClosedLane(lane));
-  const hiddenClosedCount = repository.activeLanes.length - activeLanes.length;
+  // クローズ（未マージ）のレーンは常に隠す（#5452。以前は「クローズも表示」で出せた）
+  const activeLanes = repository.activeLanes.filter((lane) => !isClosedLane(lane));
 
   // 既定で出すのは**次のリリースに乗る分まで**（#1586）。本番へ出た版の束と、どの版で出たか
   // 特定できないレーンは、すでに済んだ変更なので「過去のリリース」アコーディオンへ
@@ -2211,12 +2208,6 @@ function ReleaseFlowGraph({
                     )}
                   </ul>
                 </details>
-              </li>
-            )}
-
-            {hiddenClosedCount > 0 && (
-              <li className="pt-2 pl-[3.35rem] text-xs text-muted-foreground max-sm:pl-[2.6rem]">
-                クローズ（未マージ）{hiddenClosedCount}件は隠しています
               </li>
             )}
 
@@ -2752,21 +2743,18 @@ function RepositorySection({
   branchesFailed,
   mergedPullRequestsLoaded,
   rowLoaded,
-  showClosed,
   isOpen,
   selectionMode = false,
   detailHost = null,
   onToggle,
   onRefresh,
   onMerged,
-  releaseMarkTriggeredRegistry,
 }: {
   repository: BranchFlowRepository;
   branchesFailed: boolean;
   mergedPullRequestsLoaded: boolean;
   /** 畳んだ行の件数を出してよいか（#4913。`RepositorySummaryRow`の`loaded`） */
   rowLoaded: boolean;
-  showClosed: boolean;
   isOpen: boolean;
   /** 2ペイン表示か（#2157）。行の見た目（選択の縦棒）と中身の行き先が変わる */
   selectionMode?: boolean;
@@ -2783,33 +2771,13 @@ function RepositorySection({
   /** リリースworkflowを起こした後の取り直し */
   onRefresh: () => void;
   onMerged: (pullRequest: PullRequestSummary) => void;
-  /**
-   * 一括リリースボタン（#2770）が、このリポジトリぶんの`markTriggered`を呼べるようにする
-   * 登録先。`useTriggerPending`はリポジトリごとに1インスタンスだけをここで持つため
-   * （上のコメント参照）、一括ボタン側からは直接呼べない。ヘッダーとリポジトリの節は
-   * 同じ`BranchFlowView`の中にあるので、refのMapへ登録するだけで済ませる。
-   */
-  releaseMarkTriggeredRegistry?: RefObject<Map<string, () => void>>;
 }) {
   const { isPending, markTriggered } = useTriggerPending("release", repository.repositoryFullName);
   const deployTrigger = useTriggerPending("deploy", repository.repositoryFullName);
 
-  useEffect(() => {
-    const registry = releaseMarkTriggeredRegistry?.current;
-    registry?.set(repository.repositoryFullName, markTriggered);
-    return () => {
-      // 登録した本人のときだけ外す。unmount中に別のRepositorySectionが同じキーへ
-      // 登録し直している（並び替え等）ケースで、後勝ちの登録を消さないため
-      if (registry?.get(repository.repositoryFullName) === markTriggered) {
-        registry.delete(repository.repositoryFullName);
-      }
-    };
-  }, [releaseMarkTriggeredRegistry, repository.repositoryFullName, markTriggered]);
-
   const graph = (
     <ReleaseFlowGraph
       repository={repository}
-      showClosed={showClosed}
       mergedPullRequestsLoaded={mergedPullRequestsLoaded}
       releaseTriggerPending={isPending}
       deployTriggerPending={deployTrigger.isPending}
@@ -3022,6 +2990,7 @@ export function BranchFlowView({
   onMerged,
   onDraftIosFixIssue,
   onPullToRefresh,
+  onEditBranchView,
   refreshIconOnly = false,
   splitLayout = false,
   headerLeading,
@@ -3052,45 +3021,7 @@ export function BranchFlowView({
   >("issue-deck:branch-flow-selected-repository", null);
 
   const [openRepositories, setOpenRepositories] = useState<Set<string>>(new Set());
-  const [showClosed, setShowClosed] = useState(false);
-  // 設定で隠したリポジトリを一時的に並べる（#5087）。設定は変えず、端末のこの画面にだけ効く
-  const [showBranchViewHidden, setShowBranchViewHidden] = useState(false);
 
-  // 一括リリース（#2770）の対象。個別の「リリースする」ボタンと同じ判定（`canTriggerRelease`）を
-  // 通ったものだけで、この画面が既に持っているデータから絞り込む——新規のGitHub API問い合わせは
-  // 増やさない。0件なら`ReleaseBulkButton`がボタンごと出さない。
-  //
-  // **端末に残る起動記録（`readTriggeredAt`）でも二重に除く**（計画レビュー指摘1）。起動してから
-  // バンプPRが現れてこの画面が取り直すまでの数十秒は`canTriggerRelease`がtrueのまま残り、その間に
-  // もう一度押すと同じ対象へ二重にdispatchされる。個別ボタンは自分の`useTriggerPending`（同じ
-  // レンダーで`markTriggered`と`isPending`を共有する1インスタンス）でこれを防いでいるが、一括
-  // ボタンはヘッダーにあり同じ仕組みの外側になるため、対象の絞り込みそのものに同じ記録を混ぜる。
-  //
-  // 時刻は`useNow`から取る（描画中に`Date.now()`を呼ばないため。`useTriggerPending`と同じ理由）。
-  // ティックさせるのは対象になり得るリポジトリが1件以上あるときだけにして、動きの無い普段は
-  // このためだけの再描画を起こさない。マウント直後（`now === null`）は除外条件を掛けない
-  // ——`useTriggerPending`の`isPending`も同じ間はfalse（＝押せる）として振る舞うのと揃えている。
-  const hasReleasableRepository = flow.repositories.some((repository) => repository.canTriggerRelease);
-  const now = useNow(30_000, hasReleasableRepository);
-  const releaseBulkTargets = flow.repositories
-    .filter((repository) => repository.canTriggerRelease)
-    .filter(
-      (repository) =>
-        now === null ||
-        !isTriggerPending(
-          readTriggeredAt("release", repository.repositoryFullName),
-          now,
-          RELEASE_TRIGGER_PENDING_MS,
-        ),
-    )
-    .map((repository) => ({
-      repositoryFullName: repository.repositoryFullName,
-      unreleasedLabel: formatUnreleasedSummary(repositoryUnreleasedSummary(repository)),
-    }));
-  // 一括リリースが起動できたリポジトリぶん、各`RepositorySection`の`markTriggered`を
-  // 呼べるようにする登録先（#2770）。`useTriggerPending`はリポジトリごとに1インスタンスだけを
-  // 持つ設計（#1955）のため、ヘッダー側から直接は呼べない。
-  const releaseMarkTriggeredRegistry = useRef<Map<string, () => void>>(new Map());
 
   // 引っ張って更新（#1958）。タッチを受けるのはスクロール領域を包む枠で、スクロール位置は
   // 中のスクロール領域から見る（Issue一覧＝`issue-list.tsx`と同じ組み方）。
@@ -3131,10 +3062,7 @@ export function BranchFlowView({
     showAll: false,
   });
   const branchViewHiddenCount = branchViewSelection.hidden.length;
-  // 一時表示で並べるときは、設定で省いたものを後ろへ分けて並べる
-  const shownRepositories = showBranchViewHidden
-    ? [...branchViewSelection.visible, ...branchViewSelection.hidden]
-    : branchViewSelection.visible;
+  const shownRepositories = branchViewSelection.visible;
   // 件数は画面に並ぶ対象と一致させる（絞った後の集合から数える）
   const attentionRepositories = shownRepositories.filter(needsAttention);
   // 手が要るものに数えたリポジトリは除く（#2038）。同じ行を2つの件数へ二重に数えない
@@ -3194,8 +3122,6 @@ export function BranchFlowView({
     return isSplit ? selectedRepositoryFullName === fullName : openRepositories.has(fullName);
   }
 
-  const allOpen =
-    shownRepositories.length > 0 && openRepositories.size === shownRepositories.length;
   // 覚えている選択が今の一覧に無い（非表示にした・まだ読み込めていない）こともある
   const selectedRepository =
     shownRepositories.find(
@@ -3226,11 +3152,8 @@ export function BranchFlowView({
               <span>{shownRepositories.length}リポジトリ</span>
               {/* 設定（ブランチ画面）で省いている件数。全体非表示（設定の「全体に表示」）とは別で、
                   左メニューの「すべて表示する」（Issue一覧の絞り込み）とも関係しない */}
-              {branchViewHiddenCount > 0 && !showBranchViewHidden && (
+              {branchViewHiddenCount > 0 && (
                 <span>{` ・ 設定で${branchViewHiddenCount}件を省略中`}</span>
-              )}
-              {showBranchViewHidden && branchViewHiddenCount > 0 && (
-                <span>{` ・ うち${branchViewHiddenCount}件は設定で省略しているものを一時表示中`}</span>
               )}
               {/* 絞り込みではなく展開で効かせていることを画面に出す（#1750）。
                   出さないと「リポジトリを選んだのに件数が減らない」ようにしか見えない。
@@ -3266,63 +3189,24 @@ export function BranchFlowView({
           {/* 見出しと同じ段に置く（#1638）。実行状況はどの画面でも1段目の右端で揃える */}
           {headerActions}
         </div>
-        {/* 一括リリース（#2770）。対象0件ならボタンごと出ない。2ペインでも隠さない——
-            「すべて開く」と違い、押した結果が展開状態に影響しないため */}
-        <ReleaseBulkButton
-          targets={releaseBulkTargets}
-          unknownRepositoryCount={failedRepositories.length}
-          onTriggered={(succeededFullNames) => {
-            succeededFullNames.forEach((fullName) =>
-              releaseMarkTriggeredRegistry.current.get(fullName)?.(),
-            );
-            onRefresh();
-          }}
-        />
-        {/* 2ペインでは同時に1件しか出せないので出さない（#2157） */}
-        {!isSplit && (
+        {/* ヘッダーのボタンは「表示リポジトリを編集」と「更新」の2つだけ（#5452）。
+            ブランチ画面に並べるリポジトリは設定の「リポジトリ」で選ぶ */}
+        {onEditBranchView && (
           <Button
             size="sm"
-            variant="ghost"
+            variant="outline"
             className="h-8 shrink-0"
-            onClick={() =>
-              setOpenRepositories(
-                allOpen
-                  ? new Set()
-                  : new Set(shownRepositories.map((repo) => repo.repositoryFullName)),
-              )
-            }
+            title="ブランチ画面に並べるリポジトリを設定で選びます"
+            onClick={onEditBranchView}
           >
-            {allOpen ? "すべて閉じる" : "すべて開く"}
+            <Settings2 className="size-3.5" />
+            表示リポジトリを編集
           </Button>
         )}
-        {/* 設定（ブランチ画面）で省いているリポジトリを探すための一時表示（#5087）。設定は変えない。
-            全体に非表示のリポジトリはここでも出ない */}
-        {branchViewHiddenCount > 0 && (
-          <Button
-            size="sm"
-            variant="ghost"
-            className="h-8 shrink-0"
-            aria-pressed={showBranchViewHidden}
-            title="ブランチ画面の設定で省いているリポジトリを、この画面だけ一時的に並べます（設定は変わりません）"
-            onClick={() => setShowBranchViewHidden((prev) => !prev)}
-          >
-            {showBranchViewHidden
-              ? "省略していたものを隠す"
-              : `省略中の${branchViewHiddenCount}件を一時表示`}
-          </Button>
-        )}
-        <Button
-          size="sm"
-          variant="ghost"
-          className="h-8 shrink-0"
-          onClick={() => setShowClosed((prev) => !prev)}
-        >
-          {showClosed ? "クローズを隠す" : "クローズも表示"}
-        </Button>
         {/* 更新ボタンと自動更新のメニューを1つのまとまりとして並べる（#1767）。
-            ヘッダーは既に「すべて開く」「クローズも表示」で埋まっているため、
-            間隔の選択は独立したボタンにせず更新ボタンの右端へ付ける */}
-        <div className="flex shrink-0 items-center">
+            間隔の選択は独立したボタンにせず更新ボタンの右端へ付ける。
+            2つのボタンは1つの枠で囲む（#5452） */}
+        <div className="flex shrink-0 items-center rounded-md border">
           <Button
             size="sm"
             variant="ghost"
@@ -3416,7 +3300,7 @@ export function BranchFlowView({
           {!error && flow.repositories.length > 0 && shownRepositories.length === 0 && (
             <p className="px-4 py-8 text-center text-sm text-muted-foreground">
               ブランチ画面に並べるリポジトリがありません（{branchViewHiddenCount}件は設定で省略しています）。
-              上の「一時表示」で確認できます。
+              「表示リポジトリを編集」から表示するものを変えられます。
             </p>
           )}
 
@@ -3427,11 +3311,9 @@ export function BranchFlowView({
               branchesFailed={failedRepositories.includes(repository.repositoryFullName)}
               mergedPullRequestsLoaded={releasesLoaded}
               rowLoaded={rowsLoaded}
-              showClosed={showClosed}
               isOpen={isRepositoryOpen(repository.repositoryFullName)}
               selectionMode={isSplit}
               detailHost={detailHost}
-              releaseMarkTriggeredRegistry={releaseMarkTriggeredRegistry}
               onToggle={() => handleRowClick(repository.repositoryFullName)}
               onRefresh={onRefresh}
               onMerged={handleMerged}
