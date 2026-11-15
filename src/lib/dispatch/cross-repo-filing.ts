@@ -27,7 +27,7 @@ export type CrossRepoIssueRequest = {
 export type CrossRepoOrigin = { repository: string; issueNumber: number };
 
 export type CrossRepoLaunchOutcome =
-  | { status: "launched"; hostName: string; agent: string }
+  | { status: "launched"; hostName: string; agent: string; labelWarning?: string }
   | { status: "not_requested" }
   | { status: "skipped"; reason: string }
   | { status: "failed"; reason: string };
@@ -54,6 +54,8 @@ export type CrossRepoDeps = {
   /** 起点Issueを直近に起動したホスト・エージェント。無ければnull */
   findOriginLaunch(origin: CrossRepoOrigin): Promise<{ hostName: string; agent: string } | null>;
   launch(input: { repository: string; issueNumber: number; hostName: string; agent: string }): Promise<{ ok: true } | { ok: false; message: string }>;
+  /** 起動できた子へ`11.local`を付ける（無人実行との二重起動防止。「実装を開始」と同じく積めたときだけ） */
+  markLocal(repository: string, issueNumber: number): Promise<void>;
   comment(origin: CrossRepoOrigin, body: string): Promise<void>;
 };
 
@@ -126,7 +128,7 @@ export function renderChildBody(request: CrossRepoIssueRequest, origin: CrossRep
 function describeLaunch(launch: CrossRepoLaunchOutcome): string {
   switch (launch.status) {
     case "launched":
-      return `実装セッションを起動しました（${launch.hostName}・${launch.agent}）`;
+      return `実装セッションを起動しました（${launch.hostName}・${launch.agent}）${launch.labelWarning ? `。ただし${launch.labelWarning}` : ""}`;
     case "not_requested":
       return "起動はしていません（起票のみの依頼）";
     case "skipped":
@@ -159,7 +161,14 @@ async function launchChild(
   if (!origLaunch) return { status: "skipped", reason: "起点Issueの起動記録が無く、起動先のホストを決められません" };
   const result = await deps.launch({ repository: request.targetRepository, issueNumber: issue.number, ...origLaunch });
   if (!result.ok) return { status: "failed", reason: result.message };
-  return { status: "launched", ...origLaunch };
+  // 付与の失敗は起動を妨げない（セッション側の起動スクリプトも付ける。ラベルが遅れる方が軽い）
+  try {
+    await deps.markLocal(request.targetRepository, issue.number);
+    return { status: "launched", ...origLaunch };
+  } catch (error) {
+    console.error("[cross-repo-filing] 11.localを付けられませんでした", error);
+    return { status: "launched", ...origLaunch, labelWarning: "11.localを付けられませんでした" };
+  }
 }
 
 const inFlight = new Map<string, Promise<CrossRepoFilingResult>>();

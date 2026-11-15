@@ -3,7 +3,8 @@ import type { CrossRepoDeps, CrossRepoIssueRef, CrossRepoOrigin } from "@/lib/di
 import { readDispatchAgent } from "@/lib/dispatch/dispatch-job";
 import { enqueueDispatchJob } from "@/lib/dispatch/jobs";
 import { getInstallationToken } from "@/lib/github/app-auth";
-import { addSubIssue, createComment, createIssue, type GithubApiIssue } from "@/lib/github/issues-api";
+import { addIssueLabels, addSubIssue, createComment, createIssue, type GithubApiIssue } from "@/lib/github/issues-api";
+import { LOCAL_LABEL_NAME } from "@/lib/github/project-status-dispatch";
 import { fetchAllPages, fetchPagesUpTo } from "@/lib/github/pagination";
 import { GITHUB_API } from "@/lib/github/request";
 
@@ -83,6 +84,12 @@ export const defaultCrossRepoDeps: CrossRepoDeps = {
       requestedByUserId: null,
     });
     return result.ok ? { ok: true } : { ok: false, message: result.message };
+  },
+
+  async markLocal(repository, issueNumber) {
+    // 受け口にはユーザーが居ないので、GitHub Appのトークンで付ける（manual-step-filingのラベル付与と同じ）
+    const [owner, repo] = split(repository);
+    await addIssueLabels(owner, repo, issueNumber, await tokenFor(repository), [LOCAL_LABEL_NAME]);
   },
 
   async comment(origin, body) {

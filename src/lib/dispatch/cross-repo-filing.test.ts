@@ -45,6 +45,7 @@ function fakeDeps(overrides: Partial<CrossRepoDeps> = {}) {
     }),
     findOriginLaunch: vi.fn(async () => ({ hostName: "subpc", agent: "claude" })),
     launch: vi.fn(async () => ({ ok: true as const })),
+    markLocal: vi.fn(async () => undefined),
     comment: vi.fn(async (_o, body: string) => {
       comments.push(body);
     }),
@@ -110,11 +111,23 @@ describe("fileCrossRepoIssues", () => {
     expect(deps.addSubIssue).toHaveBeenCalledTimes(1);
   });
 
+  it("起動できた子に11.localを付け、付けられなくても起動は成功として扱う", async () => {
+    const { deps } = fakeDeps();
+    await fileCrossRepoIssues([request()], origin, deps);
+    expect(deps.markLocal).toHaveBeenCalledWith("guchi-apps/car-care", 1);
+
+    const failing = fakeDeps({ markLocal: vi.fn(async () => Promise.reject(new Error("403"))) });
+    const [result] = await fileCrossRepoIssues([request()], origin, failing.deps);
+    expect(result.launch).toMatchObject({ status: "launched", labelWarning: "11.localを付けられませんでした" });
+    expect(failing.comments[0]).toContain("11.localを付けられませんでした");
+  });
+
   it("起動を頼まれていなければ起動しない", async () => {
     const { deps } = fakeDeps();
     const [result] = await fileCrossRepoIssues([request({ launch: false })], origin, deps);
     expect(result.launch).toEqual({ status: "not_requested" });
     expect(deps.launch).not.toHaveBeenCalled();
+    expect(deps.markLocal).not.toHaveBeenCalled();
   });
 
   it("起点の起動記録が無ければ起動を見送り、画面からの起動を案内する", async () => {
