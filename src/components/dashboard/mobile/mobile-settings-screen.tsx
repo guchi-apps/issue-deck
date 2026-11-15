@@ -50,6 +50,8 @@ import type { ReviewGateIssueDraft } from "@/lib/review-gate-issue-draft";
 import type { CurrentUser } from "@/types/user";
 
 type MobileSettingsScreenProps = {
+  /** 最初に開く区分（#5452）。開いたあとの切り替えには効かないので、変えるときは`key`で作り直す */
+  initialSection?: SettingsSectionKey;
   /**
    * 設定の一覧から前の画面へ戻る（#1638）。フッターのタブから外し、ホームのヘッダーの
    * 歯車から開く画面になったため、区分の中だけでなくトップレベルにも戻る導線が要る。
@@ -95,6 +97,7 @@ type MobileSettingsScreenProps = {
  * 表示が食い違うことがない。器（全画面かダイアログか）だけがPCと違う。
  */
 export function MobileSettingsScreen({
+  initialSection,
   onBack,
   currentUser,
   autoRetryLimit,
@@ -126,7 +129,7 @@ export function MobileSettingsScreen({
   onDraftReviewGateIssue,
   creatableRepositoryNames,
 }: MobileSettingsScreenProps) {
-  const [section, setSection] = useState<SettingsSectionKey | null>(null);
+  const [section, setSection] = useState<SettingsSectionKey | null>(initialSection ?? null);
   // 使用量・レート制限は「状態」を開いているあいだだけ取りに行く（#2022）
   const data = useSettingsData(true);
 
