@@ -62,27 +62,28 @@ describe("MobileBottomNav（#1638でブランチと設定を入れ替え、#2631
   });
 });
 
-describe("MobileBottomNavViewの反映待ちバッジ（#2055）", () => {
-  it("ブランチタブに合計を出し、内訳はaria-labelで読める", () => {
+describe("MobileBottomNavViewの手が要る件数バッジ（#5423）", () => {
+  it("ブランチタブに件数を橙で出し、内訳はaria-labelで読める", () => {
     render(
       <MobileBottomNavView
         active="home"
         onSelect={vi.fn()}
-        mergePending={{ develop: 1, main: 2, total: 3, hasError: false, pullRequestIds: [] }}
+        needsUser={{ total: 3, deployFailed: 1 }}
       />,
     );
 
     const branchTab = screen.getByRole("button", {
-      name: "ブランチ（developへマージ待ち1件・mainへマージ待ち2件）",
+      name: "ブランチ（手が要るもの: 承認・判断・マージ待ち2件・デプロイ失敗1件）",
     });
     expect(branchTab.textContent).toContain("3");
+    expect(screen.getByText("3").className).toContain("bg-amber-500");
     // 他のタブには付けない
     expect(screen.getByRole("button", { name: "AI使用量" }).textContent).toBe("AI使用量");
   });
 
   it("未取得（null）・0件のときは数字を出さない", () => {
     const { rerender } = render(
-      <MobileBottomNavView active="home" onSelect={vi.fn()} mergePending={null} />,
+      <MobileBottomNavView active="home" onSelect={vi.fn()} needsUser={null} />,
     );
     expect(screen.getByRole("button", { name: "ブランチ" }).textContent).toBe("ブランチ");
 
@@ -90,24 +91,10 @@ describe("MobileBottomNavViewの反映待ちバッジ（#2055）", () => {
       <MobileBottomNavView
         active="home"
         onSelect={vi.fn()}
-        mergePending={{ develop: 0, main: 0, total: 0, hasError: false, pullRequestIds: [] }}
+        needsUser={{ total: 0, deployFailed: 0 }}
       />,
     );
     expect(screen.getByRole("button", { name: "ブランチ" }).textContent).toBe("ブランチ");
-  });
-
-  it("チェックが落ちているときはバッジを赤にする", () => {
-    render(
-      <MobileBottomNavView
-        active="home"
-        onSelect={vi.fn()}
-        mergePending={{ develop: 0, main: 1, total: 1, hasError: true, pullRequestIds: [] }}
-      />,
-    );
-
-    const badge = screen.getByText("1");
-    expect(badge.className).toContain("bg-destructive");
-    expect(badge.className).not.toContain("bg-amber-500");
   });
 });
 

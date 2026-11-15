@@ -36,6 +36,7 @@ import {
   selectVisibleReleaseStatuses,
   type ReleaseActivityCounts,
 } from "@/lib/release-activity";
+import { countReleaseNeedsUser, type ReleaseNeedsUserCounts } from "@/lib/release-needs-user";
 import {
   countReleaseMergePending,
   type ReleaseMergePendingCounts,
@@ -109,6 +110,12 @@ type NotificationState = {
    */
   releaseActivity: ReleaseActivityCounts | null;
   /**
+   * 人が動く番のリポジトリ数（#5423）。ブランチ画面ヘッダーの「手が要るもの」と同じ基準で、
+   * PCの左メニューとスマホのフッターの「ブランチ」のバッジに使う。**未取得はnull**。
+   * 左メニューで非表示にしたリポジトリは除く。
+   */
+  releaseNeedsUser: ReleaseNeedsUserCounts | null;
+  /**
    * 「確認を追う対象」に選んだリポジトリの、未確認のリリース件数（#2951・#2930）。
    * 左メニュー「リリース履歴」行とスマホのフッター「リリース」タブのバッジに使う。
    * **まだ取れていない間はnull**（0件と区別する）。
@@ -144,6 +151,7 @@ const EMPTY_STATE: NotificationState = {
   hasError: false,
   releaseMergePending: null,
   releaseActivity: null,
+  releaseNeedsUser: null,
   releaseUncheckedCount: null,
   refresh: () => {},
   isFetching: false,
@@ -356,6 +364,7 @@ export function NotificationProvider({
       hasError: hasErrorNotification(items),
       releaseMergePending: countReleaseMergePending(visibleReleaseStatuses),
       releaseActivity: countReleaseActivity(visibleReleaseStatuses),
+      releaseNeedsUser: countReleaseNeedsUser(visibleReleaseStatuses),
       releaseUncheckedCount,
       refresh: () => void refresh(),
       // PR一覧の取得は投げっぱなしなので、回転が止まる条件にこちらも入れる

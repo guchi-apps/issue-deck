@@ -192,6 +192,7 @@ describe("GET /api/repositories/release-pending-merges", () => {
         repoFullName: "owner/repo-a",
         status: "action_required",
         failedWorkflow: null,
+        needsUser: true,
         pendingMerge: {
           mergeTarget: "main",
           pullRequestNumber: 12,
@@ -222,6 +223,7 @@ describe("GET /api/repositories/release-pending-merges", () => {
         repoFullName: "owner/repo-a",
         status: "action_required",
         failedWorkflow: null,
+        needsUser: true,
         pendingMerge: {
           mergeTarget: "main",
           pullRequestNumber: 12,
@@ -323,6 +325,7 @@ describe("GET /api/repositories/release-pending-merges", () => {
         repoFullName: "owner/repo-a",
         status: "progressing",
         failedWorkflow: null,
+        needsUser: false,
         pendingMerge: null,
       },
     ]);
@@ -347,6 +350,7 @@ describe("GET /api/repositories/release-pending-merges", () => {
         repoFullName: "owner/repo-a",
         status: "progressing",
         failedWorkflow: null,
+        needsUser: false,
         pendingMerge: null,
       },
     ]);
@@ -372,6 +376,7 @@ describe("GET /api/repositories/release-pending-merges", () => {
         repoFullName: "owner/repo-a",
         status: "progressing",
         failedWorkflow: null,
+        needsUser: false,
         pendingMerge: null,
         verification: { block: "progressing", label: "リリース検証中", detail: "全体レビューの実行中です" },
       },
@@ -393,6 +398,7 @@ describe("GET /api/repositories/release-pending-merges", () => {
         repoFullName: "owner/repo-a",
         status: "action_required",
         failedWorkflow: null,
+        needsUser: false,
         pendingMerge: null,
         verification: { block: "problem", label: "検証の設定不足", detail: "統合検証: コマンド未設定" },
       },
@@ -425,6 +431,7 @@ describe("GET /api/repositories/release-pending-merges", () => {
         repoFullName: "owner/repo-a",
         status: "action_required",
         failedWorkflow: null,
+        needsUser: true,
         pendingMerge: {
           mergeTarget: "develop",
           pullRequestNumber: 34,
@@ -451,6 +458,7 @@ describe("GET /api/repositories/release-pending-merges", () => {
         repoFullName: "owner/repo-a",
         status: "progressing",
         failedWorkflow: null,
+        needsUser: false,
         pendingMerge: null,
       },
     ]);
@@ -469,6 +477,7 @@ describe("GET /api/repositories/release-pending-merges", () => {
         repoFullName: "owner/repo-a",
         status: "progressing",
         failedWorkflow: null,
+        needsUser: false,
         pendingMerge: null,
       },
     ]);
@@ -487,6 +496,7 @@ describe("GET /api/repositories/release-pending-merges", () => {
         repoFullName: "owner/repo-a",
         status: "error",
         failedWorkflow: "deploy",
+        needsUser: true,
         pendingMerge: null,
       },
     ]);
@@ -566,6 +576,7 @@ describe("GET /api/repositories/release-pending-merges", () => {
         repoFullName: "owner/repo-b",
         status: "action_required",
         failedWorkflow: null,
+        needsUser: true,
         pendingMerge: {
           mergeTarget: "main",
           pullRequestNumber: 3,

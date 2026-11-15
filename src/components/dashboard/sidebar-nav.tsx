@@ -55,6 +55,7 @@ import type { NavViewId } from "@/types/issue";
 import type { PullRequestViewId } from "@/types/pull-request";
 import type { ConnectedRepository } from "@/types/repository";
 import { Separator } from "@/components/ui/separator";
+import { describeReleaseNeedsUser, type ReleaseNeedsUserCounts } from "@/lib/release-needs-user";
 import { cn } from "@/lib/utils";
 
 type SidebarNavProps = {
@@ -116,6 +117,8 @@ type SidebarNavProps = {
    * 読めてしまう）。
    */
   releaseActivity: ReleaseActivityCounts | null;
+  /** 人が動く番のリポジトリ数（#5423）。「ブランチ」行の件数とオレンジの丸。nullは未取得 */
+  releaseNeedsUser?: ReleaseNeedsUserCounts | null;
   /**
    * 「確認を追う対象」に選んだリポジトリの、未確認のリリース件数（#2951）。「リリース履歴」行の
    * 件数とオレンジの丸に使う。**nullは未取得**で、そのときは件数を出さない。
@@ -152,14 +155,15 @@ type SidebarNavProps = {
  * 呼ぶと取得が2本走る。**
  */
 export function SidebarNav(
-  props: Omit<SidebarNavProps, "releaseActivity" | "releaseUncheckedCount">,
+  props: Omit<SidebarNavProps, "releaseActivity" | "releaseNeedsUser" | "releaseUncheckedCount">,
 ) {
-  const { releaseActivity, releaseUncheckedCount } = useNotificationState();
+  const { releaseActivity, releaseNeedsUser, releaseUncheckedCount } = useNotificationState();
 
   return (
     <SidebarNavView
       {...props}
       releaseActivity={releaseActivity}
+      releaseNeedsUser={releaseNeedsUser}
       releaseUncheckedCount={releaseUncheckedCount}
     />
   );
@@ -192,6 +196,7 @@ export function SidebarNavView({
   checkUserPullRequestCount,
   manualStepAttention,
   releaseActivity,
+  releaseNeedsUser = null,
   releaseUncheckedCount,
   pullRequestNavCounts,
   mergePendingAttention,
@@ -621,10 +626,14 @@ export function SidebarNavView({
             icon: GitBranch,
             active: activePane === "flow",
             onClick: onSelectFlow,
-            // 数えるのはリリース・デプロイが動いているリポジトリの数（#2167）。手作業は含めない
-            count: releaseActivity?.total ?? null,
-            emphasis: (releaseActivity?.actionRequired ?? 0) > 0 ? "attention" : "none",
-            title: describeReleaseActivity(releaseActivity),
+            // 数えるのは人が動く番のリポジトリ数（#5423。ブランチ画面ヘッダーの「手が要るもの」と同じ基準）。
+            // 動いているだけのリポジトリは数えず、手作業は含めない。0件は出さない
+            count: releaseNeedsUser && releaseNeedsUser.total > 0 ? releaseNeedsUser.total : null,
+            emphasis: "attention",
+            title:
+              releaseNeedsUser && releaseNeedsUser.total > 0
+                ? `手が要るもの: ${describeReleaseNeedsUser(releaseNeedsUser)}。${describeReleaseActivity(releaseActivity)}`
+                : describeReleaseActivity(releaseActivity),
           })}
           {PREVIEW_NAV_VISIBLE &&
             navRow({
