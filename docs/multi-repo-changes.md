@@ -8,10 +8,42 @@
 - 展開方式そのものの選択肢比較（調査）は [cross-repo-automation.md](cross-repo-automation.md)
 - 本ドキュメントは、**既に導入済みのリポジトリ群へ変更を横展開するとき**の進め方に絞る
 
-## 結論 — Issueを起点に他リポジトリへPRが自動作成されることはない
+## 実装中に他リポジトリの修正が要ると分かったら、セッションが起票と起動を依頼する（#5421）
 
-あるリポジトリでIssueを作っても、他のリポジトリにIssueもPRも作られない。**Issueを起点にした
-横展開の自動化は存在しない。**
+実装セッション（Claude Code・Codex）が「このIssueの目的を満たすには別のリポジトリにも修正が要る」と
+判断したら、自分では他リポジトリを触らず`gh issue create --repo`も打たず、
+`scripts/report-cross-repo-issue.sh`でissue-deckへ依頼する。issue-deck（`POST /api/dispatch/cross-repo-issues`・
+[src/lib/dispatch/cross-repo-filing.ts](../src/lib/dispatch/cross-repo-filing.ts)）が次を順に行う。
+
+1. 起票先へ子Issueを作る。本文に起点へのリンクと`<!-- issue-deck-cross-repo-key:起点#番号:key -->`を足し、
+   **同じkeyの再送は起票済みを再利用する**（起票先の直近300件の本文から探す）
+2. 起点IssueのGitHubサブIssueへ紐付ける（失敗は依頼全体の失敗。起点リポジトリのInstallation tokenで書く）
+3. **起点を直近に起動したホスト・エージェントで、子の実装セッションを起動する**（既存の`enqueueDispatchJob`）。
+   起点に起動記録が無い・ホストがオフライン・新規実行のブロック中などは起票だけで止め、理由を返す。積めたときだけ子へ`11.local`をGitHub Appのトークンで付ける（「実装を開始」と同じ。付与の失敗は起動を妨げず、コメントに残す）
+4. 起点Issueへ結果（子の番号・起動できたか）をコメントする
+
+- **自動起動を止めたいとき**は、実行状況パネルの新規実行のブロック（agent-pause）がそのまま効く。
+  依頼ごとに起票だけにするならスクリプトに`--no-launch`を付ける
+- **順序**: 子が起点の実装（developへのマージ）を前提にするなら`--wait-origin`。子の本文の`## 前提条件`に起点が入り、
+  起動した子セッションが依存待ち（#4321、[multi-agent/dependency-wait.md](multi-agent/dependency-wait.md)）で
+  自分で止まって自動再開する（待つ間もセッションは1本立つ）。起点が子を待つなら、起点セッションが
+  起票後に`report-dependency-wait.sh`で子を`merged`で待つ
+- **1回の依頼は1件、APIは5件まで。** 起点と同じリポジトリ・issue-deck未登録のリポジトリには起票しない。
+  対象が多い・依存が込み入っている規模は、親子Issueの実行計画（[execution-plan.md](execution-plan.md)）と
+  親の自動実行（[parent-run.md](parent-run.md)）を使う
+- 無人実行（GitHub Actions）には足していない。IssueのActions実装は#4680で廃止済みのため
+
+### #1722の「一括起票機能は作らない」を見直した理由
+
+#1722では「親リポジトリのローカルセッションが`gh`で手順3をそのまま実行できる」として作らなかった。
+しかし実際には、横展開が必要だと気付くのは**実装の途中のエージェント**で、`gh`で起票しても
+起動は人が画面から1件ずつ行う必要があり、Codexのセッションはサンドボックス内からGitHubへ書けない。
+画面のボタンではなく**セッションからの構造化された依頼**にしたので、#1722で懸念した二度押し・
+部分成功の画面表示は要らず、重複は安定キーのマーカーで吸収する。
+
+## 画面・手動での横展開 — 他リポジトリへPRが自動作成されることはない
+
+上記のセッションからの依頼を除けば、あるリポジトリでIssueを作っても、他のリポジトリにIssueもPRも作られない。
 
 自動でPRが作られる経路は**共有ワークフローの参照タグ配布1つだけ**で、これはIssueではなく
 issue-deckの画面のボタン（アプリ設定 → 共有ワークフローのバージョン）から`workflow_dispatch`で
@@ -50,7 +82,7 @@ issue-deckの画面のボタン（アプリ設定 → 共有ワークフロー�
 | ラベル体系 | issue-deckの`scripts/sync-labels.sh`で全リポジトリへ流す（正本は`.github/labels.json`。新規リポジトリは画面の「新規アプリを立ち上げる」が作成時に写す） | 新規のみ（既存は手で`apply`） | [label-scheme.md](label-scheme.md)・[cross-repo-setup-guide.md](cross-repo-setup-guide.md)「2. ラベル体系」 |
 | Secrets・variables | リポジトリごと。共通値はorganizationへ寄せる | 一部 | [cross-repo-setup-guide.md](cross-repo-setup-guide.md)「4. Secrets」 |
 | 全アプリ共通の知識（`CLAUDE.md`・運用ルール） | 知見メモ → `guchi-apps/docs`の格上げ判定エージェント → 共有知識リポジトリへのPR | 一部 | [shared-knowledge.md](shared-knowledge.md)「9. 共有知識更新フロー」 |
-| **アプリのコードそのもの**（同じ不具合が各アプリにある等） | **リポジトリごとにIssueを立てて個別に実装する。これ以外の手段は無い** | なし | 下記の手順 |
+| **アプリのコードそのもの**（同じ不具合が各アプリにある等） | **リポジトリごとにIssueを立てて個別に実装する。** 実装中に見つかったものはセッションが`report-cross-repo-issue.sh`で起票・起動を依頼できる（#5421） | 一部 | 上記と下記の手順 |
 
 ## アプリのコードを横展開する手順
 
@@ -105,7 +137,9 @@ gh api repos/guchi-apps/issue-deck/issues/<親番号>/sub_issues --method POST -
 片付いた**ときに使う。横展開で「このリポジトリには不要だった」と判断した場合は
 `94.Close: wontfix`のほうが実態に合う。
 
-## 一括起票機能は作らない（#1722）
+## 画面からの一括起票機能は作らない（#1722）
+
+実装セッションからの起票・起動の依頼は上記のとおり#5421で入れた。以下は画面のボタンで複数リポジトリへ同時に起票する案の記録で、こちらは引き続き作っていない。
 
 上記手順の1〜3のうち、**3（リポジトリごとの起票と紐付け）だけが定型作業**で、対象が14リポジトリ
 あると`gh issue create`と`sub_issues`の往復を14回繰り返すことになる。ここを画面のボタン1つにする

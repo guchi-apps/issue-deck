@@ -231,6 +231,12 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
   リポジトリだけで、`release-history`APIが`v*`タグと`ios-testflight/*`タグのコミットを突き合わせて
   `iosDeliveredBuild`を付ける（`iosDeliveryForReleases`）。**タグが無いリリースには何も出さない**——iOS更新が
   不要と判定された版は、成功でもタグを付けないため、タグ無し＝未配布とは言えない。
+- **フッターの「ブランチ」タブ・PC左メニューの「ブランチ」行には、人が動く番のリポジトリ数を橙のバッジで重ねる**（#5423）。
+  ブランチ画面ヘッダーの「手が要るもの」と同じ基準（新方式の候補の承認・判断待ち、旧方式のマージ待ち、デプロイ失敗）で、
+  `release-pending-merges`の応答の各リポジトリに足した`needsUser`を`release-needs-user.ts`の`countReleaseNeedsUser`が数える
+  （`notification-state.tsx`の`releaseNeedsUser`。新しい取得は増えない）。**通常PRのCI失敗等は数えない**
+  （ヘッダーも本番リリース工程のPRだけを数える）。0件・未取得は出さない。以前のマージ待ち本数（`releaseMergePending`）は
+  アプリアイコンのバッジ（`app-badge-count.ts`）だけが使い、ナビの表示は置き換えた。
 - **フッターの「ホーム」タブには、ユーザーの確認待ち件数を橙のバッジで重ねる**（#3080）。数字は
   ホームのメニュー・PCの左メニューの「ユーザーの確認待ち」と同じ（`navCounts["check-user"]`
   ＋ユーザーがマージするPR）で、`issue-deck-shell.tsx`から`checkUserCount`propで渡す
@@ -282,6 +288,9 @@ deploy/             PM2の ecosystem.config.js（メモリ設定の根拠は doc
 - **親Issueの自動実行**（#4536）は[`lib/parent-run/`](../src/lib/parent-run/)。判定の純関数が`decide.ts`、DB・起動・巡回・操作が`run.ts`、
   受け口が`app/api/parent-runs/`（画面）と`app/api/dispatch/parent-run/sweep/`（poller）、画面が
   [`components/dashboard/parent-run-section.tsx`](../src/components/dashboard/parent-run-section.tsx)。仕様は[parent-run.md](parent-run.md)
+- **他リポジトリへの子Issueの起票と起動**（#5421）は[`lib/dispatch/cross-repo-filing.ts`](../src/lib/dispatch/cross-repo-filing.ts)（検証・重複判定・起票→紐付け→起動の順序）と
+  `cross-repo-filing-deps.ts`（GitHub・DB・`enqueueDispatchJob`の実体）。受け口は`POST /api/dispatch/cross-repo-issues`、
+  送り手は実装セッションの`scripts/report-cross-repo-issue.sh`。仕様は[multi-repo-changes.md](multi-repo-changes.md)
 
 - **Issueの代表状態と次の行動は`lib/issue-attention-state.ts`の`resolveIssueAttention`が1か所で決め**
   （#4425）、Issue一覧の行・PC詳細・スマホ詳細は`issue-attention-line.tsx`で同じ結果を描く。
@@ -4077,6 +4086,10 @@ INSERTかUPDATEを選ぶため、同じキーへ同時に2本届くと**どち�
   `/tmp/issue-images/`へ落としておく（**鍵をClaudeの環境へ渡さないため**。Claudeには`curl`が
   許可されている）。スクリプトは**鍵を設定の`APP_BASE_URL`にしか送らず**、URLからはファイル名
   だけを取り出す（本文に紛れた別ホストのURLへ鍵を送らない）。
+  **拡張子の欠けたURL（`.../images/<UUID>`）も拾い、配信側が受け付ける拡張子を順に試して取得する**
+  （#5425。エージェントは本文のURLを写すときに`.png`を落とすことがあり、以前は「見つかりませんでした」
+  で終了コード0になって画像を見ないまま作業が進んでいた）。画像URLらしき文字列があるのにファイル名を
+  読み取れないときは終了コード2で失敗を返す。
 - `GET /api/issues/images`（一覧）・`DELETE /api/issues/images/[filename]`（削除）…
   **どちらもログイン必須**（#2462）。一覧はファイル名をまとめて明かし、削除は取り消せないため、
   配信と違ってシークレットでは通さない。ファイル名の検証は

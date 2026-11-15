@@ -265,6 +265,9 @@ export function buildPlanRevisionReason(revisionText: string): string {
     "```bash",
     "~/apps/issue-deck/scripts/fetch-issue-images.sh '<画像のURL>'",
     "```",
+    "",
+    // 拡張子を落として渡す取り違えが実際に起きていた（#5425）
+    "URLは拡張子（`.png`など）まで含めて、上の本文からそのまま渡してください。",
   ].join("\n");
 }
 

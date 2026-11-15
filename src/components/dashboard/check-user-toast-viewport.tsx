@@ -62,7 +62,7 @@ export function CheckUserToastViewport({
           </Toast>
         );
       })}
-      {/* スマホはボトムナビ（min-h-14）及び「コメント欄へ移動」ボタンと、PCも同ボタンと
+      {/* スマホはボトムナビ（min-h-14）及び「未読コメントへ移動」ボタンと、PCも同ボタンと
           重ならないよう底上げする */}
       <ToastViewport className="bottom-20 md:bottom-16" />
     </ToastProvider>

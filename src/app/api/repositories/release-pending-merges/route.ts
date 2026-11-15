@@ -57,6 +57,8 @@ export type RepositoryReleaseStatus = {
   status: ReleaseButtonStatus;
   /** `error`のとき、どちらの実行が失敗しているか */
   failedWorkflow: "deploy" | "release" | null;
+  /** 人が動く番か（#5423。ブランチ画面ヘッダーの「手が要るもの」と同じ基準） */
+  needsUser: boolean;
   /** 人のマージ操作を待っているPR。待っていなければnull */
   pendingMerge: ReleasePendingMerge | null;
   /** リリース候補の統合検証・全体レビューの進行・問題（#4390）。あれば`pendingMerge`はnull。無ければ省く */
@@ -276,10 +278,17 @@ async function handleGET() {
           };
         }
 
+        const failedWorkflow = resolveFailedReleaseWorkflow(summaryInput);
+        // ブランチ画面ヘッダーの「手が要るもの」と同じ基準（#5423）。新方式の候補は工程の担当で決め
+        // （検証の判断待ちは`pendingMerge`がnullでも数える）、旧方式はマージ待ちで数える。
+        // デプロイ失敗は人が見る番として数える
+        const needsUser = (journey ? isReleaseJourneyNeedingUser(journey) : pendingMerge !== null) || failedWorkflow === "deploy";
+
         return {
           repoFullName: repository.fullName,
           status,
-          failedWorkflow: resolveFailedReleaseWorkflow(summaryInput),
+          failedWorkflow,
+          needsUser,
           pendingMerge,
           verification:
             (releaseVerification && describeReleaseVerificationBadge(releaseVerification)) ?? undefined,

@@ -35,6 +35,7 @@ function renderSidebar(
     checkUserPullRequestCount = 0,
     manualStepAttention = NO_MANUAL_STEP,
     releaseActivity = null,
+    releaseNeedsUser = null,
     releaseUncheckedCount = null,
     mergePendingAttention = NO_MERGE_PENDING,
     ideasCount = null,
@@ -44,6 +45,7 @@ function renderSidebar(
     checkUserPullRequestCount?: number;
     manualStepAttention?: ManualStepAttention;
     releaseActivity?: ReleaseActivityCounts | null;
+    releaseNeedsUser?: { total: number; deployFailed: number } | null;
     releaseUncheckedCount?: number | null;
     mergePendingAttention?: MergePendingAttention | null;
     ideasCount?: number | null;
@@ -70,6 +72,7 @@ function renderSidebar(
       checkUserPullRequestCount={checkUserPullRequestCount}
       manualStepAttention={manualStepAttention}
       releaseActivity={releaseActivity}
+      releaseNeedsUser={releaseNeedsUser}
       releaseUncheckedCount={releaseUncheckedCount}
       pullRequestNavCounts={pullRequestNavCounts}
       mergePendingAttention={mergePendingAttention}
@@ -494,53 +497,26 @@ describe("SidebarNavの「ブランチ」行（#2167）", () => {
     expect(branchNavItem().textContent).toBe("ブランチ");
   });
 
-  it("リリース・デプロイが動いているプロジェクト数を出す", () => {
+  it("動いているだけのリポジトリは数えず、橙の丸も点けない（#5423）", () => {
     renderSidebar(NO_PR_COUNTS, NAV_COUNTS, {
       releaseActivity: activity({ progressing: 3 }),
+      releaseNeedsUser: { total: 0, deployFailed: 0 },
     });
 
-    expect(branchNavItem().textContent).toContain("3");
+    expect(branchNavItem().textContent).toBe("ブランチ");
   });
 
-  it("操作待ちが無ければ強調しない（待てば進むもので橙を点けない）", () => {
-    renderSidebar(NO_PR_COUNTS, NAV_COUNTS, {
-      releaseActivity: activity({ progressing: 3 }),
-    });
-
-    expect(branchNavItem().querySelector("span:last-child")?.className).not.toContain(
-      "bg-amber-500",
-    );
-  });
-
-  it("バンプPRのマージ待ちなど操作待ちがあればオレンジの丸にする", () => {
+  it("人が動く番のリポジトリ数を橙の丸で出し、内訳を吹き出しで補う（#5423）", () => {
     renderSidebar(NO_PR_COUNTS, NAV_COUNTS, {
       releaseActivity: activity({ progressing: 2, mergePending: 1 }),
+      releaseNeedsUser: { total: 3, deployFailed: 1 },
     });
 
-    // 出す数字は動いているプロジェクト数のままで、丸だけが操作待ちの合図（質問の行と同じ）
     expect(branchNavItem().textContent).toContain("3");
     expect(branchNavItem().querySelector("span:last-child")?.className).toContain("bg-amber-500");
-  });
-
-  it("数字と丸で意味が違うので、内訳を吹き出しで補う", () => {
-    renderSidebar(NO_PR_COUNTS, NAV_COUNTS, {
-      releaseActivity: activity({ progressing: 2, mergePending: 1 }),
-    });
-
     expect(branchNavItem().getAttribute("title")).toContain(
-      "リリース・デプロイが未完了のプロジェクト3件: 実行中2件・マージ待ち1件",
+      "手が要るもの: 承認・判断・マージ待ち2件・デプロイ失敗1件",
     );
-  });
-
-  // 失敗は人が直すまで進まないので、マージ待ちと同じく丸を点ける。ただし「実行中」とは
-  // 書き分ける（#2167のレビュー指摘）。
-  it("リリース・デプロイの失敗も操作待ちとして丸を点け、内訳では実行中と分ける", () => {
-    renderSidebar(NO_PR_COUNTS, NAV_COUNTS, {
-      releaseActivity: activity({ progressing: 1, failed: 1 }),
-    });
-
-    expect(branchNavItem().querySelector("span:last-child")?.className).toContain("bg-amber-500");
-    expect(branchNavItem().getAttribute("title")).toContain("実行中1件・失敗1件");
   });
 
   // 手作業は上の「ユーザーの作業待ち」が持つ別の項目（#2167）。
@@ -554,10 +530,7 @@ describe("SidebarNavの「ブランチ」行（#2167）", () => {
       },
     );
 
-    expect(branchNavItem().textContent).toContain("0");
-    expect(branchNavItem().querySelector("span:last-child")?.className).not.toContain(
-      "bg-amber-500",
-    );
+    expect(branchNavItem().textContent).toBe("ブランチ");
   });
 
   it("Providerの外では件数を出さない（未取得と同じ扱い）", () => {

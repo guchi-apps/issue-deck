@@ -87,6 +87,7 @@ export function filesBeyondApproval(files: readonly { path: string; category: st
  * - 現在の候補のheadが「承認したhead」か「範囲内のバンプ後head」のどちらでもなければ失効
  * - mainの先端が承認したbaseから進んでいれば失効（他の公開の先行も含む）
  * - 観測できないものは`valid`にも失効にもしない（呼び出し側が待つ）。`observed`がnullなら判定を保留する
+ * - 承認の対象から始めた公開準備が進行中（`requested`）の間に見えた範囲外のheadも、取り込みを待って保留する（#5424）
  */
 export function decidePublishApprovalValidity(input: {
   approval: PublishApprovalTarget;
@@ -121,6 +122,12 @@ export function decidePublishApprovalValidity(input: {
   if (input.observed === null) return null;
   const allowedHeads = new Set([approval.headSha, ...bumped.map((f) => f.finalHeadSha!)]);
   if (!allowedHeads.has(input.observed.headSha)) {
+    // 承認の対象から始めた公開準備がまだ取り込まれていない（#5424）。workflowがバンプをpushしてから照合・報告で
+    // `applied`になるまでの間は、バンプ後のheadが範囲外に見える。取り込み（`applied`）か失敗・期限切れ（失効）まで判定を保留する
+    const pending = input.finalizations.some(
+      (f) => f.status === "requested" && f.preHeadSha === approval.headSha && f.preBaseSha === approval.baseSha,
+    );
+    if (pending) return null;
     return invalid("candidate_changed", `${short(finalHeadSha ?? approval.headSha)} → ${short(input.observed.headSha)}`);
   }
   if (input.observed.mainSha !== approval.baseSha) {

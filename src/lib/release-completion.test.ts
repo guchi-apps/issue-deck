@@ -503,6 +503,23 @@ describe("公開承認（#4666）から始めた系列", () => {
     expect(decision).toMatchObject({ action: "wait", status: "checking" });
   });
 
+  it("バンプがpushされ取り込まれる前は、headの変化で止めず待つ（#5424）", () => {
+    const pushed = { ...openCandidate, headSha: "head2" };
+    const pendingBump = { ...preparing, pending: { preHeadSha: "head1" } };
+    expect(decideReleaseCompletion(approvalRun(), { now, candidate: pushed, series: null, checks: null, finalization: pendingBump })).toEqual({
+      action: "wait",
+      status: "checking",
+    });
+    // 別のheadから始めた公開準備・進行中の公開準備が無いときは、従来どおり候補の変化として止める
+    expect(
+      decideReleaseCompletion(approvalRun(), { now, candidate: pushed, series: null, checks: null, finalization: { ...preparing, pending: { preHeadSha: "head0" } } }),
+    ).toMatchObject({ action: "stop", reason: "candidate_changed" });
+    expect(decideReleaseCompletion(approvalRun(), { now, candidate: pushed, series: null, checks: null, finalization: preparing })).toMatchObject({
+      action: "stop",
+      reason: "candidate_changed",
+    });
+  });
+
   it("最終検証に合格したら、追加の承認なしでマージの判定へ進む", () => {
     const decision = decideReleaseCompletion(approvalRun({ candidateHeadSha: "head2" }), {
       now,
