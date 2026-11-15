@@ -1,5 +1,5 @@
 import { getDeviceBuildRepository } from "@/lib/device-build-repos";
-import { isReleaseCandidateHeadRef } from "@/lib/release-branch";
+import { isRcReleaseCandidateHeadRef, isReleaseCandidateHeadRef } from "@/lib/release-branch";
 import { CHECK_USER_LABEL, MANUAL_STEP_LABEL } from "@/lib/github/approval-labels";
 import type { ManualStepReadinessMap } from "@/lib/manual-step-attention";
 import { formatManualStepReference } from "@/lib/manual-step-prerequisites";
@@ -13,7 +13,7 @@ import {
   isMergeJudgementPending,
 } from "@/lib/pull-request-list";
 import { resolveReleaseStageBadges } from "@/lib/release-stage-badges";
-import { resolveReleaseJourney } from "@/lib/release-journey";
+import { isReleaseJourneyNeedingUser, resolveReleaseJourney, type ReleaseJourney } from "@/lib/release-journey";
 import { summarizePullRequestHealth, type PullRequestHealthSummary } from "@/lib/pull-request-health";
 import { describeProductionSuspension } from "@/lib/release-verification-config";
 import {
@@ -341,6 +341,25 @@ export function resolveReleaseMergeTarget(
 }
 
 /**
+ * 新方式の候補（`release-rc/<番号>`）の「mainへマージ待ち」を工程の担当で絞る（#5455）。
+ *
+ * 新方式の候補は人がmainへマージするのではなく、公開承認の後にシステムがマージする。CIだけで決める
+ * `isWaitingUserMerge`は、作成直後（CIが未登録の`unknown`・候補記録がまだPRに紐づかず工程が取得不能）にも
+ * 「main」を立て、畳んだ行に琥珀の「承認: 公開手順を確認」を出していた。通知ベル・Push通知
+ * （`release-button-status.ts`の`journeyNeedsUser`）と同じく、工程の担当が人のときだけ待ちにする。
+ * **絞るだけで足さない**（旧方式のリリースPR・バンプPRの判定は変えない）
+ */
+export function narrowRcMergeTarget(
+  target: ReleaseMergeTarget | null,
+  releasePullRequest: PullRequestSummary | null,
+  journey: ReleaseJourney | null,
+): ReleaseMergeTarget | null {
+  if (target !== "main" || releasePullRequest === null) return target;
+  if (!isRcReleaseCandidateHeadRef(releasePullRequest.headRef)) return target;
+  return isReleaseJourneyNeedingUser(journey) ? target : null;
+}
+
+/**
  * openで、CIが実行中でも失敗でもなく、自動マージ可否の判定も終わっている
  * （＝マージできる状態で止まっている）
  */
@@ -616,6 +635,14 @@ function buildRepository({
   );
   // 畳んだ行・ヘッダー件数の状態集計は本番リリース工程（バンプPR・リリースPR）だけを数える（#4540）。
   // 通常PRのCI・レビュー・コンフリクト・修正状態はPR一覧・PR詳細が持つ。
+  const baseMergeTarget = resolveReleaseMergeTarget(releasePullRequest, bumpPullRequest);
+  const releaseJourney = resolveReleaseJourney({
+    bumpPullRequest,
+    candidatePullRequest: releasePullRequest,
+    mergeTarget: baseMergeTarget,
+    deploy: deployState,
+    detached: branchStatus?.releaseRc?.facts ?? null,
+  });
   const summarizedPullRequests = [
     ...(releasePullRequest ? [releasePullRequest] : []),
     ...(bumpPullRequest ? [bumpPullRequest] : []),
@@ -647,7 +674,7 @@ function buildRepository({
     releaseAutoProgressing: isReleaseAutoProgressing(releasePullRequest, bumpPullRequest),
     // 人が押す番になったら、紫の「リリース中」から琥珀の「mainへマージ待ち」へ変える（#2038）。
     // 展開したときの見出しと同じ判定・同じ文言を、開かなくても読めるところまで引き上げる。
-    releaseMergeTarget: resolveReleaseMergeTarget(releasePullRequest, bumpPullRequest),
+    releaseMergeTarget: narrowRcMergeTarget(baseMergeTarget, releasePullRequest, releaseJourney),
     // 検証の進行・問題（#4390）。見出しと畳んだ1行・集計が同じ値を読む
     releaseVerification: releasePullRequest
       ? resolvePullRequestReleaseVerification(releasePullRequest)
@@ -656,13 +683,7 @@ function buildRepository({
       bumpPullRequest,
       candidatePullRequest: releasePullRequest,
     }),
-    releaseJourney: resolveReleaseJourney({
-      bumpPullRequest,
-      candidatePullRequest: releasePullRequest,
-      mergeTarget: resolveReleaseMergeTarget(releasePullRequest, bumpPullRequest),
-      deploy: deployState,
-      detached: branchStatus?.releaseRc?.facts ?? null,
-    }),
+    releaseJourney,
     // 畳んだ1行にアイコンと数字だけで出す（#1704・#1886）。手が要るものではないので、
     // 「手が要るもの◯件」の判定（`needsAttention`）には入れない。
     startedIssueCount: startedIssues.length,

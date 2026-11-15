@@ -277,6 +277,26 @@ describe("resolveReleaseJourney（新方式の候補・#5076）", () => {
     expect(journey?.done).toBe(2);
   });
 
+  it("候補PRは開いたがPR番号がまだ記録に無い間は、同じ番号の作成中の記録で「作成中」にする（#5455）", () => {
+    const creating = facts({ phase: "creating", pendingRevision: { revision: 1, reason: "initial" } });
+    const journey = run({ candidatePullRequest: rcCandidate(null, {}, { draft: true, ciState: "unknown" }), detached: creating });
+    expect(journey?.steps[0]).toMatchObject({ state: "running", status: "RC-13を作成中（受付済み）" });
+    expect(journey?.steps.find((s) => s.key === "approve")?.state).toBe("todo");
+    expect(journey?.owner).toBe("auto");
+    expect(isReleaseJourneyNeedingUser(journey)).toBe(false);
+  });
+
+  it("番号の違う作成中の記録・記録の読み込み失敗では、作成中にせず取得不能のまま（#5455）", () => {
+    const other = facts({ sequence: 14, phase: "creating" });
+    const mismatched = run({ candidatePullRequest: rcCandidate(null), detached: other });
+    expect(mismatched?.steps.find((s) => s.key === "approve")?.state).toBe("unknown");
+    const failed = run({ candidatePullRequest: rcCandidate(null, { unavailableParts: ["rc"] }), detached: facts({ phase: "creating" }) });
+    expect(failed?.steps.find((s) => s.key === "approve")?.state).toBe("unknown");
+    // 作成中でない記録（マージ後など）は開いた候補に流用しない
+    const deploying = run({ candidatePullRequest: rcCandidate(null), detached: facts({ phase: "deploying" }) });
+    expect(deploying?.steps.find((s) => s.key === "approve")?.state).toBe("unknown");
+  });
+
   it("マージ後の候補は、PRが閉じても同じ候補として本番反映・稼働確認を追う", () => {
     const deploying = run({ detached: facts({ phase: "deploying" }), deploy: deploy({ kind: "running" }) });
     expect(states(deploying)).toEqual(["done", "done", "done", "done", "done", "running", "todo"]);
