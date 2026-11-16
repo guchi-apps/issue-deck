@@ -89,6 +89,7 @@
 | Claudeの取り直し | 値は探り（推論1回）でしか取れず、**送信が5時間枠を開始する**。ウィジェットからの呼び出しでは、5時間枠が動いている間だけ取り直し（5分キャッシュ経由）、止まっている・値が無いときは最後に見た値を返す。サーバー再起動直後でまだ一度も取れていなければ「—」 |
 | 認証 | 共有メニューと同じ専用トークン（Keychain共有グループ）。アプリでログインしてページを開いていれば発行済み。無い・失効は「IssueDeckを開くと表示されます」。トークンが使えるようになった／使えなくなった時だけアプリがウィジェットを描き直させる |
 | 更新 | 30分おきを頼み（実際の間隔はiOSが決める）、その間も10分刻みのエントリで経過の目盛りを進める。通信できないときはApp Groupに置いた前回の値を出す。値が2時間以上古い・リセット時刻を過ぎた行は薄く出す |
+| ホーム画面（#5460） | 同じWidgetが`systemSmall`・`systemMedium`・`systemLarge`にも対応する（`HomeUsageView`）。バーの読み方はロック画面と同じ（背景は端末の外観に合わせる）。小はClaude（5時間＋週間）・ChatGPTのバーと使用率、中は5時間枠・週の使用率とリセットまでの文字を足し、大は5時間枠・Claude週間・ChatGPT週間の3段に凡例と更新時刻を出す。データ・認証・更新間隔はロック画面と共通 |
 | タップ | `issuedeck://usage`で「AI使用量」（`/dashboard?pane=usage&mscreen=usage`）を開く |
 
 署名: 拡張のApp ID（`com.gucchii.issuedeck.UsageWidget`）はDeveloperサイトで登録し、App Group（`group.com.gucchii.issuedeck`）を付けてある（#4899）。**クラウド署名（`-allowProvisioningUpdates`＋APIキー）はApp IDへApp Groupを割り当てられない**ため、拡張を足すときは共有メニュー（#4267）と同じく、リリース前に本人がDeveloperサイトで登録する。Keychain共有はApp ID側の設定が要らず、entitlementsの`keychain-access-groups`だけで通る。登録の有無はApp Store Connect APIの`GET /v1/bundleIds?filter[identifier]=…&include=bundleIdCapabilities`で読み取りのみで確かめられる（手順の例は#4899の「完了の確認方法」）。v8.71.0（build 701）でTestFlightへ配布し、実機で表示・タップ・見た目を確認済み（#4893）。
