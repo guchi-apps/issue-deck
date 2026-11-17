@@ -2751,6 +2751,12 @@ describe("リリースPR凍結後の変更の有無（hasChangesAfterReleaseFree
       insideCount: 9,
       hasCandidate: false,
     });
+    // 本番反映中の候補（リリースPRはmain済み）でも候補ありとして分ける
+    expect(
+      splitUnreleasedByReleaseCandidate(
+        repo({ ...group, pullRequest: null, deployingCandidate: group.pullRequest! }, 9),
+      ),
+    ).toEqual({ outsideCount: 1, insideCount: 8, hasCandidate: true });
     // 候補外は総数を超えない
     expect(splitUnreleasedByReleaseCandidate(repo(group, 0)).outsideCount).toBe(0);
     // 未リリースの束が無い
