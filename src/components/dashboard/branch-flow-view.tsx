@@ -67,6 +67,7 @@ import { PullRequestMergeHoldNotice } from "@/components/dashboard/pull-request-
 import { PullToRefreshIndicator } from "@/components/dashboard/pull-to-refresh-indicator";
 import type { IosDistributionFixIssueDraft } from "@/lib/ios-distribution-failure";
 import { DeployFailureAlert } from "@/components/dashboard/deploy-failure-alert";
+import { PreviewOpenButton } from "@/components/dashboard/preview-open-button";
 import { RepositoryDeployButton } from "@/components/dashboard/repository-deploy-button";
 import { WorkflowRunProgressPanel } from "@/components/dashboard/workflow-run-progress-panel";
 import { RepositoryReleaseButton } from "@/components/dashboard/repository-release-button";
@@ -2095,6 +2096,10 @@ function ReleaseFlowGraph({
             {legendSplit.hasCandidate && `（候補外 ${legendSplit.outsideCount}・候補 ${legendSplit.insideCount}）`}
           </span>
         )}
+        {/* developの最新を確認環境で開く（#5495）。起こせないリポジトリでは何も出ない */}
+        <span className="ml-auto">
+          <PreviewOpenButton repositoryFullName={repository.repositoryFullName} />
+        </span>
         {/* 「次のリリース」カードを出さないリポジトリ（Xcodeで実機へ反映するもの）だけは、
             従来どおりこの行に置く。カードを出す場合は「本番稼働中」カードの中にある（#4532）。
             失敗しているあいだは失敗の帯（#2236）が同じボタンを持つので出さない */}

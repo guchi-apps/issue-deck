@@ -22,6 +22,7 @@ import {
   buildPreviewRepositoryRows,
   describePreviewIdleStop,
   describePreviewJob,
+  describePreviewSeed,
   describePreviewRejection,
   selectHostWidePreviewRejection,
   selectPreviewJob,
@@ -260,6 +261,7 @@ function RunningPreview({
 
   const repoName = preview.repository.split("/")[1] ?? preview.repository;
   const idleStop = describePreviewIdleStop(preview);
+  const seedNote = describePreviewSeed(preview);
 
   return (
     <div className="overflow-hidden rounded-md border">
@@ -307,6 +309,17 @@ function RunningPreview({
         開けるのは見るための画面までです。ボタンからの書き込み（Issueの更新・マージなど）は
         塞いであり、データも開発用のものです。
       </p>
+
+      {seedNote && (
+        <p
+          className={cn(
+            "border-t px-3 py-2 text-[11px]",
+            preview.seed?.status === "failed" ? "text-destructive" : "text-muted-foreground",
+          )}
+        >
+          {seedNote}
+        </p>
+      )}
 
       <div className="flex flex-wrap items-center gap-2 border-t bg-muted/40 p-2">
         <Button

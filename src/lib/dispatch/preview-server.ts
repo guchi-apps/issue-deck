@@ -57,7 +57,31 @@ export type DispatchHostPreview = {
    * **`null`は「申告していない」**で、止まらないという意味ではない。
    */
   idleMinutes: number | null;
+  /**
+   * 起動時のダミーデータ投入の結果（#5495）。**`null`は「申告していない」**（古いpoller・
+   * 古いスクリプト）で、投入していないという意味ではない。
+   */
+  seed: DispatchHostPreviewSeed | null;
 };
+
+/** 起動時のダミーデータ投入の結果。`note`は画面へそのまま出す1行 */
+export type DispatchHostPreviewSeed = {
+  status: "seeded" | "skipped" | "failed";
+  note: string | null;
+};
+
+const SEED_STATUSES = ["seeded", "skipped", "failed"] as const;
+const SEED_NOTE_MAX_LENGTH = 200;
+
+function parsePreviewSeed(status: unknown, note: unknown): DispatchHostPreviewSeed | null {
+  if (typeof status !== "string") return null;
+  if (!(SEED_STATUSES as readonly string[]).includes(status)) return null;
+  const text = typeof note === "string" ? note.trim() : "";
+  return {
+    status: status as DispatchHostPreviewSeed["status"],
+    note: text ? text.slice(0, SEED_NOTE_MAX_LENGTH) : null,
+  };
+}
 
 /** gitのブランチ名として通る範囲へ絞る（申告は外から届くため、そのまま画面へ出さない） */
 const BRANCH_PATTERN = /^[A-Za-z0-9._/-]{1,191}$/;
@@ -113,6 +137,7 @@ export function parseDispatchHostPreview(value: unknown): DispatchHostPreview | 
     subject: subject ? subject.slice(0, SUBJECT_MAX_LENGTH) : null,
     startedAt: parseIsoDate(input.startedAt),
     idleMinutes: parsePositiveInt(input.idleMinutes, 24 * 60),
+    seed: parsePreviewSeed(input.seedStatus, input.seedNote),
   };
 }
 
@@ -338,4 +363,60 @@ export function describePreviewJob(
     return { tone: "done", text: job.message?.trim() || "完了しました。" };
   }
   return { tone: "error", text: job.message?.trim() || "失敗しました。" };
+}
+
+/**
+ * リポジトリ詳細の「developを開く」ボタンの状態（#5495）。**ワンタップで、起動が済んだら
+ * 同じ場所から開ける**ことが要点で、判定は画面とボタンのテストで同じ関数を使う。
+ *
+ * - `open`: このリポジトリの確認環境が動いている。URLがあれば`<a href>`で開く（`url`が
+ *   `null`のホストはスマホから開けないので、押せない理由として出す）
+ * - `starting`: 起動・更新のジョブが順番待ち・実行中。**準備できたら`open`へ切り替わる**
+ * - `start`: 押すと`kind: preview`を積む。別のリポジトリが動いていればそれが止まる
+ * - `blocked`: 押せない（理由は`describePreviewRejection`）
+ *
+ * **`window.open`は呼ばない。** 起動は非同期で、完了後にスクリプトが開くとスマホは
+ * ユーザー操作から外れたポップアップとしてブロックする。完了後に出る「開く」を人が押す。
+ */
+export type PreviewOpenState =
+  | { kind: "open"; url: string | null; commit: string | null }
+  | { kind: "starting"; message: string }
+  | { kind: "start"; replacing: string | null }
+  | { kind: "blocked"; reason: PreviewRejection };
+
+export function resolvePreviewOpenState(params: {
+  host: DispatchHostView | null;
+  repositoryFullName: string;
+  job: DispatchJobView | null;
+  now: Date;
+}): PreviewOpenState {
+  const { host, repositoryFullName, job, now } = params;
+  const jobRow = describePreviewJob(job, now);
+  const hasQueuedJob = jobRow?.tone === "running";
+  if (hasQueuedJob) return { kind: "starting", message: jobRow.text };
+  if (host?.preview?.repository === repositoryFullName) {
+    return { kind: "open", url: host.preview.url, commit: host.preview.commit };
+  }
+  const rejection = resolvePreviewRejection({
+    host,
+    repositoryFullName,
+    action: "start",
+    hasQueuedJob: false,
+  });
+  if (rejection !== null) return { kind: "blocked", reason: rejection };
+  return { kind: "start", replacing: host?.preview?.repository ?? null };
+}
+
+/** ダミーデータ投入の結果を画面の1行にする。申告が無ければ何も出さない */
+export function describePreviewSeed(preview: DispatchHostPreview): string | null {
+  const seed = preview.seed;
+  if (seed === null) return null;
+  if (seed.status === "seeded") {
+    return (
+      seed.note ??
+      "ダミーデータを投入しました（共有の開発用DBの初期データを元の値へ戻します）。ログイン画面の「開発用ダミーユーザーでログイン」から入れます。"
+    );
+  }
+  if (seed.status === "skipped") return seed.note ?? "ダミーデータは投入していません。";
+  return seed.note ?? "ダミーデータの投入に失敗しました。";
 }

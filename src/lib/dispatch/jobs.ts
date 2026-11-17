@@ -370,6 +370,12 @@ function toHostView(host: DispatchHost, now: Date): DispatchHostView {
             subject: host.previewSubject,
             startedAt: host.previewStartedAt?.toISOString() ?? null,
             idleMinutes: host.previewIdleMinutes,
+            seed:
+              host.previewSeedStatus === "seeded" ||
+              host.previewSeedStatus === "skipped" ||
+              host.previewSeedStatus === "failed"
+                ? { status: host.previewSeedStatus, note: host.previewSeedNote }
+                : null,
           },
     // Prismaの`String?`列にはJSON文字列として保存される。ホストから届いた配列を検証する
     // `parseDispatchPlanReviewSessions`へそのまま渡すと常に`null`になり、実行中の計画レビューが
@@ -2701,6 +2707,8 @@ export async function announceDispatchHost(params: {
     previewSubject: params.preview?.subject ?? null,
     previewStartedAt: toDate(params.preview?.startedAt),
     previewIdleMinutes: params.preview?.idleMinutes ?? null,
+    previewSeedStatus: params.preview?.seed?.status ?? null,
+    previewSeedNote: params.preview?.seed?.note ?? null,
     // 計画レビューの実体は tmux にあり、ここは毎巡の表示用の写し。前回値を残すと終了後も
     // 「計画レビュー中」が出続けるため、未申告・空配列とも毎回置き換える。
     planReviewSessions:

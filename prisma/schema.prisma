@@ -1427,6 +1427,8 @@ model DispatchHost {
   //   previewSubject       そのコミットの1行目
   //   previewStartedAt     起こした時刻
   //   previewIdleMinutes   何分アクセスが無ければ自動停止するか（`DEV_SERVER_IDLE_MINUTES`）
+  //   previewSeedStatus    起動時のダミーデータ投入の結果（seeded / skipped / failed。#5495）
+  //   previewSeedNote      その結果を画面へ出す1行
   previewRepository          String?
   previewBranch              String?
   previewPort                Int?
@@ -1435,6 +1437,8 @@ model DispatchHost {
   previewSubject             String?   @db.Text
   previewStartedAt           DateTime?
   previewIdleMinutes         Int?
+  previewSeedStatus          String?
+  previewSeedNote            String?   @db.Text
   // 稼働中の計画レビュー（G1）の対象一覧。実装セッションとは別名・別の上限で管理するため、
   // `DispatchSession`には混ぜず、pollerが毎巡送る画面表示用の写しとしてJSONで持つ。
   planReviewSessions         String?   @db.Text

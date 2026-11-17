@@ -176,10 +176,10 @@ export const sidebarAttentionNavViews: NavView[] = labelNavViews.filter((view) =
 );
 
 /**
- * 「確認環境」の入口（左メニュー・スマホのホーム）を出すか（#3647）。機能は廃止方向だが、後で
- * 使うかもしれないため、コード・API・画面本体は残して入口だけを隠している。戻すときはtrueにする。
+ * 「確認環境」の入口（左メニュー・スマホのホーム）を出すか。#3647で隠したが、#5495で
+ * 「リポジトリのdevelopをワンタップでtailnet経由で開く」ために復活させた。
  */
-export const PREVIEW_NAV_VISIBLE = false;
+export const PREVIEW_NAV_VISIBLE = true;
 
 /**
  * Pull Requestの枠と、リポジトリ（お気に入りを含む）の枠のあいだに置くビュー（#2674）。
