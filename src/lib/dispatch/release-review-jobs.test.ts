@@ -204,6 +204,29 @@ describe("rerunReleaseReviewJob", () => {
     expect(verificationUpdateMany.mock.calls[0][0].data.findings).toEqual({ autoReevaluation });
   });
 
+  it("開始待ちのまま進まない記録（#5480。waiting＋結果なしで終了したジョブ）からも、pollerが受け取るジョブを積む", async () => {
+    // 終了したジョブはactiveKeyを外しているので、activeKeyでの検索には当たらない
+    hostFindMany.mockResolvedValue([host()]);
+    jobCreate.mockResolvedValue({ id: "j3", targetHost: "subpc" });
+    verificationFindFirst.mockResolvedValue({
+      state: "waiting",
+      summary: null,
+      unverifiedScope: null,
+      updatedAt: new Date("2026-10-10T10:19:00Z"),
+      findings: { autoReevaluation: { integrationAt: "2026-10-10T07:00:00.000Z", requestedAt: "2026-10-10T07:01:00.000Z" } },
+    });
+    const result = await rerunReleaseReviewJob(target, NOW);
+    expect(result).toMatchObject({ ok: true, outcome: "queued" });
+    expect(jobCreate.mock.calls[0][0].data).toMatchObject({
+      kind: "RELEASE_REVIEW",
+      targetHost: "subpc",
+      activeKey: buildReleaseReviewActiveKey(target),
+    });
+    // 待機中の記録は結果ではないので、previousRunへ退避しない。人の再実行は自動再評価の印を持ち越さない
+    expect(verificationUpdateMany.mock.calls[0][0].data).toMatchObject({ state: "waiting" });
+    expect(verificationUpdateMany.mock.calls[0][0].data.findings).not.toHaveProperty("previousRun");
+  });
+
   it("実行中・待機中のジョブがあれば二重に積まず、記録も戻さない", async () => {
     jobFindFirst.mockResolvedValue({ id: "j0" });
     expect(await rerunReleaseReviewJob(target, NOW)).toMatchObject({ outcome: "already_queued" });

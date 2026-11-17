@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { describeReviewRerun } from "@/lib/release-review-rerun-view";
+import type { ReleaseVerificationProgress } from "@/lib/release-verification-progress";
 import type { ReleaseVerificationSection } from "@/lib/release-verification-summary";
 
 function section(overrides: Partial<ReleaseVerificationSection> = {}): ReleaseVerificationSection {
@@ -127,5 +128,86 @@ describe("pollerの更新後の自動再評価（#5111）", () => {
       integration("passed"),
     );
     expect(view).toMatchObject({ kind: "wait", buttonLabel: "全体レビューを再実行（自動再評価中）" });
+  });
+});
+
+describe("開始待ちのまま進まない全体レビュー（#5480）", () => {
+  const NOW = Date.parse("2026-11-17T10:33:00Z");
+  const job = (over: Partial<ReleaseVerificationProgress> = {}): ReleaseVerificationProgress => ({
+    jobStatus: "timeout",
+    host: "subpc",
+    hostOnline: true,
+    requestedAt: "2026-11-17T07:20:00Z",
+    claimedAt: "2026-11-17T07:20:30Z",
+    startedAt: "2026-11-17T07:21:00Z",
+    lastReportAt: "2026-11-17T07:31:00Z",
+    finishedAt: "2026-11-17T07:41:00Z",
+    message: "結果の報告がないまま期限を過ぎました",
+    steps: [],
+    currentIndex: null,
+    commandPosition: null,
+    command: null,
+    files: null,
+    agent: "claude:opus",
+    stalledAfterMs: 10 * 60_000,
+    ...over,
+  });
+
+  it("morrow #1028と同じ状態（waiting＋結果なしで終了したジョブ）なら再実行を出す", () => {
+    // 記録は`waiting`のまま、直前のジョブは完了報告が届かずに期限切れ。段階は「自動で再評価中」に見えていた
+    const review = section({
+      state: "waiting",
+      updatedAt: "2026-11-17T10:19:00Z",
+      progress: job(),
+      stage: { kind: "reevaluating" },
+    });
+    const view = describeReviewRerun(review, integration("passed", "2026-11-17T07:00:00Z"), NOW);
+    expect(view).toMatchObject({ kind: "ready", buttonLabel: "全体レビューを再実行", recovery: "interrupted" });
+    expect(view.kind !== "none" && view.lead).toContain("自動では始まらない");
+    expect(view.kind !== "none" && view.prerequisites[0]).toMatchObject({ label: "前回の実行", status: "missing" });
+  });
+
+  it("取り消し・失敗で終わったジョブも同じく回復できる", () => {
+    for (const jobStatus of ["canceled", "failed", "succeeded"] as const) {
+      const view = describeReviewRerun(section({ state: "waiting", progress: job({ jobStatus }) }), integration("passed"), NOW);
+      expect(view).toMatchObject({ kind: "ready", recovery: "interrupted" });
+    }
+  });
+
+  it("ジョブが無いまま10分以上待っていれば再実行を出し、依頼直後は出さない", () => {
+    const old = section({ state: "waiting", updatedAt: "2026-11-17T10:19:00Z" });
+    expect(describeReviewRerun(old, integration("passed"), NOW)).toMatchObject({ kind: "ready", recovery: "no_job" });
+    const fresh = section({ state: "waiting", updatedAt: "2026-11-17T10:30:00Z" });
+    expect(describeReviewRerun(fresh, integration("passed"), NOW)).toEqual({ kind: "none" });
+  });
+
+  it("ジョブが待機・実行中・応答なしなら出さない（ジョブは生きている）", () => {
+    for (const jobStatus of ["queued", "claimed", "running"] as const) {
+      const view = describeReviewRerun(
+        section({ state: "waiting", progress: job({ jobStatus, finishedAt: null, message: null }) }),
+        integration("passed"),
+        NOW,
+      );
+      expect(view).toEqual({ kind: "none" });
+    }
+  });
+
+  it("統合検証の完了待ちの印が付いた正規の待機には出さない（巡回が開始する）", () => {
+    const view = describeReviewRerun(
+      section({ state: "waiting", updatedAt: "2026-11-17T09:00:00Z", awaitingIntegration: true }),
+      integration("running"),
+      NOW,
+    );
+    expect(view).toEqual({ kind: "none" });
+  });
+
+  it("統合検証の結果待ちなら押せない待ちにし、自動では始まらないことを出す", () => {
+    const view = describeReviewRerun(section({ state: "waiting", progress: job() }), integration("running"), NOW);
+    expect(view).toMatchObject({ kind: "wait", recovery: "interrupted" });
+    expect(view.kind !== "none" && view.lead).toContain("自動では始まりません");
+  });
+
+  it("現在時刻を渡さない呼び出しでは従来どおり開始待ちに出さない", () => {
+    expect(describeReviewRerun(section({ state: "waiting", progress: job() }), integration("passed"))).toEqual({ kind: "none" });
   });
 });

@@ -643,12 +643,17 @@ function AiReviewSection({
   // 実行障害（レビューを最後まで行えなかった）は、コードへの指摘とは別の見た目にする（#4300）。
   // 「失敗」「不合格」と読ませず、レビュー未完了であることと工程・原因・次の操作を出す
   const executionFailed = section.state === "failed";
-  const rerunView = integration ? describeReviewRerun(section, integration) : ({ kind: "none" } as const);
+  const rerunView = integration ? describeReviewRerun(section, integration, nowMs) : ({ kind: "none" } as const);
+  // 開始待ちのまま進まない（#5480）ときは、「自動で再評価中」「統合検証待ち」の段階名で上書きしない（待っても進まないため）
+  const recovery = rerunView.kind !== "none" ? (rerunView.recovery ?? null) : null;
+  const stuck = recovery !== null;
   const diagnosticView = executionFailed ? describeReleaseReviewDiagnostic(section.diagnostic) : null;
   // 統合検証の証跡から見た共通の段階（#4664）。上部バッジ・本番確認と同じ名前を見出しに出す
   const stage = section.stage;
   const stageHead: SectionHead | null =
-    stage && (stage.kind === "integration_waiting" || stage.kind === "reevaluating" || stage.kind === "awaiting_integration")
+    stuck
+      ? null
+      : stage && (stage.kind === "integration_waiting" || stage.kind === "reevaluating" || stage.kind === "awaiting_integration")
       ? {
           ...baseHead,
           tone: "run",
@@ -679,6 +684,16 @@ function AiReviewSection({
         : null;
   const head: SectionHead = stageHead
     ? stageHead
+    : recovery === "no_job"
+      ? {
+          // ジョブが無いまま待っている（#5480）。「待機中」のままだと自動で始まるように読めるため、止まっていることを出す
+          ...baseHead,
+          tone: "warn",
+          mark: "▲",
+          label: "開始されていません",
+          detail: "実行のジョブが作られていません",
+          meta: [clock(section.updatedAt) ? `${clock(section.updatedAt)} から待機` : null].filter((v): v is string => Boolean(v)),
+        }
     : executionFailed && diagnosticView
       ? {
           ...baseHead,
