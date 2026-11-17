@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { classifyReleaseContents } from "@/lib/release-contents";
+import { classifyReleaseContents, importedRevisionByPr } from "@/lib/release-contents";
 import type { ReleaseChangePullRequest } from "@/types/pull-request";
 
 const pr = (number: number, isVersionBump = false): ReleaseChangePullRequest => ({
@@ -49,5 +49,37 @@ describe("classifyReleaseContents", () => {
     if (r.kind !== "ready") throw new Error("ready");
     expect(r.unknownCommits).toHaveLength(1);
     expect(r.truncated).toBe(true);
+  });
+});
+
+describe("新方式の候補の取り込み（#5469）", () => {
+  it("適用済みrevisionで取り込んだPRは「元から含む」でなく取り込みの区分にrevision付きで分ける", () => {
+    const r = classifyReleaseContents({
+      ...base,
+      changes: { pullRequests: [pr(1019), pr(1024), pr(1031)], unknownCommits: [], truncated: false },
+      importedPrs: [{ number: 1031, revision: 2 }],
+    });
+    if (r.kind !== "ready") throw new Error("ready");
+    expect(r.original.map((p) => p.number)).toEqual([1019, 1024]);
+    expect(r.added).toEqual([expect.objectContaining({ number: 1031, importedRevision: 2 })]);
+  });
+
+  it("前のリリースで取り込み済みとして外したPRを通す（差分に載っているものは除く）", () => {
+    const r = classifyReleaseContents({
+      ...base,
+      changes: { pullRequests: [pr(1016)], unknownCommits: [], truncated: false, releasedByPick: [1012, 1016, 1012] },
+    });
+    if (r.kind !== "ready") throw new Error("ready");
+    expect(r.releasedByPick).toEqual([1012]);
+  });
+
+  it("importedRevisionByPr: 適用済みのrevisionだけを古い順に見て、最初に取り込んだrevisionを返す", () => {
+    const map = importedRevisionByPr([
+      { revision: 3, status: "requested", importedPrs: [{ number: 7 }] },
+      { revision: 2, status: "applied", importedPrs: [{ number: 5 }] },
+      { revision: 4, status: "applied", importedPrs: [{ number: 5 }, { number: 6 }] },
+      { revision: 1, status: "applied", importedPrs: null },
+    ]);
+    expect([...map]).toEqual([[5, 2], [6, 4]]);
   });
 });

@@ -122,6 +122,7 @@ export function RcImportPanel({
       <p className="font-medium">既存のPRを選んで候補へ取り込む</p>
       <p className="text-muted-foreground">
         候補の先端 <code>{data.headSha.slice(0, 7)}</code>（revision {data.revision}）の後にdevelopへ入ったPRを、選んだものだけ足します。
+        取り込み済みのPRは選べません。
         取り込むと新しいrevisionになり、統合検証と全体レビューがやり直されます（旧結果では公開できません）。
       </p>
       {data.blocked && <p className="text-amber-700 dark:text-amber-400">{data.blocked}</p>}
@@ -131,6 +132,8 @@ export function RcImportPanel({
         <ul className="flex max-h-64 flex-col divide-y overflow-y-auto rounded-md border" aria-label="候補へ取り込めるPR">
           {options.map((o) => {
             const selectable = o.problem === null && data.blocked === null;
+            // 適用済みrevisionで取り込んだPR（#5469）。cherry-pickのため元のマージは候補の先端の後に見える
+            const imported = o.importedRevision != null;
             const id = `rc-import-${o.number}`;
             return (
               <li key={o.number} className={cn("flex min-w-0 items-start gap-2 p-2", !selectable && "opacity-70")}>
@@ -154,12 +157,21 @@ export function RcImportPanel({
                     {o.issueNumber !== null && <span>Issue #{o.issueNumber}</span>}
                     {o.relatedFix ? (
                       <span className="rounded bg-purple-500/10 px-1 text-purple-700 dark:text-purple-300">この候補の修正</span>
-                    ) : o.approved ? (
+                    ) : imported ? null : o.approved ? (
                       <span>承認済みの範囲外PR</span>
                     ) : (
                       <span className="text-amber-700 dark:text-amber-400">範囲外（取り込むには承認が必要）</span>
                     )}
-                    <span>{o.merged ? "developへマージ済み" : "developへ未マージ"}</span>
+                    {imported ? (
+                      <span
+                        className="rounded bg-emerald-500/10 px-1 text-emerald-700 dark:text-emerald-300"
+                        data-testid="release-rc-import-imported"
+                      >
+                        取り込み済み（revision {o.importedRevision}）
+                      </span>
+                    ) : (
+                      <span>{o.merged ? "developへマージ済み" : "developへ未マージ"}</span>
+                    )}
                     {o.mergeSha && <code>merge {o.mergeSha.slice(0, 7)}</code>}
                     <GithubReferenceLink href={o.url} className="hover:underline">
                       PRを開く

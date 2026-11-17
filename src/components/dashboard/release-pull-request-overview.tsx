@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Loader2, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { formatMonthDayTime, formatTimeOfDay } from "@/lib/format-date-time";
@@ -30,6 +30,7 @@ import { useReleaseVerification } from "@/hooks/use-release-verification";
 import { buildMergeChecks, cellsFromSummary, type MergeCheckItem, type MergeCheckTone } from "@/lib/pull-request-merge-checks";
 import { buildReleaseCheckCells } from "@/lib/release-candidate-checks";
 import { resolvePullRequestJourney } from "@/lib/release-journey";
+import { importedRevisionByPr } from "@/lib/release-contents";
 import { PENDING_CONFLICT_PUBLISH_NOTE } from "@/lib/release-finalize";
 import { cn } from "@/lib/utils";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -189,6 +190,11 @@ export function ReleasePullRequestOverview({
   // 公開できる工程か（#4635）。サーバーのマージAPIと同じ判定。旧方式はundefined、取得前はnull（推測で公開可にしない）
   const publishDecision = decidePublishForPullRequest(pullRequest, rc.overview);
   const publishBlock = publishDecision && !publishDecision.ok ? { next: publishDecision.next, message: publishDecision.message } : null;
+  // 候補へ取り込んだPR（#5469）。cherry-pickで足すので、差分に載っていても「元から含む」と分けて出す
+  const importedPrs = useMemo(
+    () => [...importedRevisionByPr(rcCandidate?.revisions ?? [])].map(([prNumber, revision]) => ({ number: prNumber, revision })),
+    [rcCandidate],
+  );
   const state = useReleaseFixOverview({
     repositoryFullName,
     pullRequestNumber: number,
@@ -198,6 +204,7 @@ export function ReleasePullRequestOverview({
     reloadToken,
     publishBlock,
     headRef,
+    importedPrs,
   });
   const { openPullRequest } = useReferenceNavigation();
   // 工程はPR一覧と同じ入力（`releaseChecks`）から作る（#5076）。候補の記録だけは、操作後・進行中に取り直す
