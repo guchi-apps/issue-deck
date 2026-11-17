@@ -4,6 +4,8 @@ import {
   buildReleaseVerificationProgress,
   formatReleaseElapsed,
   formatReleaseReviewAgent,
+  isLongReleaseWait,
+  isSupersededReleaseProgress,
   parseReleaseProgress,
   viewReleaseProgress,
   type ReleaseProgressJobSource,
@@ -160,5 +162,31 @@ describe("formatReleaseElapsed", () => {
     expect(formatReleaseElapsed(12_400)).toBe("12秒");
     expect(formatReleaseElapsed(245_000)).toBe("4分05秒");
     expect(formatReleaseElapsed(3_720_000)).toBe("1時間2分");
+  });
+});
+
+describe("isSupersededReleaseProgress（#5473）", () => {
+  const progressOf = (overrides: Partial<ReleaseProgressJobSource>) =>
+    buildReleaseVerificationProgress({ kind: "ai_review", job: job(overrides), hostOnline: true, stalledAfterMs: STALL });
+
+  it("記録が待機へ戻る前に終わったジョブは前回の実行とみなす", () => {
+    expect(isSupersededReleaseProgress(progressOf({ status: "FAILED", finishedAt: at(60) }), at(120).toISOString())).toBe(true);
+  });
+
+  it("記録の更新より後に終わったジョブ（結果が届かなかった）は前回扱いにしない", () => {
+    expect(isSupersededReleaseProgress(progressOf({ status: "SUCCEEDED", finishedAt: at(180) }), at(120).toISOString())).toBe(false);
+  });
+
+  it("動いているジョブ・記録の時刻が無いときは前回扱いにしない", () => {
+    expect(isSupersededReleaseProgress(progressOf({ status: "QUEUED" }), at(120).toISOString())).toBe(false);
+    expect(isSupersededReleaseProgress(progressOf({ status: "FAILED", finishedAt: at(60) }), null)).toBe(false);
+  });
+});
+
+describe("isLongReleaseWait", () => {
+  it("10分を超えた待機だけを長いとする", () => {
+    expect(isLongReleaseWait(10 * 60_000)).toBe(false);
+    expect(isLongReleaseWait(10 * 60_000 + 1)).toBe(true);
+    expect(isLongReleaseWait(null)).toBe(false);
   });
 });

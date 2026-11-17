@@ -1,7 +1,7 @@
 import { db } from "@/lib/db";
 import { requestReleaseReviewAfterIntegration } from "@/lib/dispatch/release-review-start";
 import { requestReleaseVerifyJob } from "@/lib/dispatch/release-verify-jobs";
-import { closePullRequest } from "@/lib/github/actions-api";
+import { closePullRequest, fetchWorkflowJobLogs, fetchWorkflowRunJobs } from "@/lib/github/actions-api";
 import { getInstallationToken } from "@/lib/github/app-auth";
 import { createComment } from "@/lib/github/issues-api";
 import {
@@ -43,6 +43,9 @@ import {
   RC_CALLER_REASON_LABEL,
   RC_NOT_UPDATED_REASON,
   RC_REVISION_REASON_LABEL,
+  RC_WORKFLOW_FAILED_NO_DETAIL_REASON,
+  RC_WORKFLOW_FAILED_REASON_PREFIX,
+  rcFailureReasonRefreshRunId,
   rcLabel,
   serializeRcWorkflowRequest,
   type RcBlockSummary,
@@ -53,6 +56,7 @@ import {
   type RcRevisionStatus,
   type RcStatusView,
 } from "@/lib/release-rc";
+import { extractErrorExcerpt, findFailedStep } from "@/lib/release-preparation";
 import { checkRebuildPullRequest, orderSelection, REBUILD_PR_PROBLEM_LABEL, type RebuildPullRequestProblem } from "@/lib/release-rebuild-selection";
 import {
   listReleaseVerificationDetails,
@@ -509,6 +513,44 @@ async function reconcilePending(ctx: Context, row: CandidateRow): Promise<boolea
   return changed;
 }
 
+/** 1回の読み込みで実行ログを取り直す失敗の上限（新しい順）。ログの取得は重いので、溜まった古い失敗で読み込みを遅くしない */
+const MAX_FAILURE_REASON_REFRESH = 2;
+
+/**
+ * workflowが汎用の理由（「理由は実行ログを確認してください」）で報告した失敗の理由を、実行ログの`##[error]`行
+ * （`::error::`の文面）へ置き換える（#5473）。workflowは自分のジョブのログを読めず、報告の時点ではジョブが
+ * 実行中でログも取れないため、画面の読み込みで取り直す。**runが終わっていなければ触らない**（次の読み込みで取る）。
+ * 終わっていてエラー行が無ければ「取り出せませんでした」に置き換え、同じrunへ問い合わせ直さない。変わったらtrue
+ */
+export async function refreshRcFailureReasons(ctx: Context, row: CandidateRow): Promise<boolean> {
+  const targets = [...row.revisions]
+    .sort((a, b) => b.revision - a.revision)
+    .flatMap((revision) => {
+      const runId = rcFailureReasonRefreshRunId(revision);
+      return runId === null ? [] : [{ revision, runId }];
+    })
+    .slice(0, MAX_FAILURE_REASON_REFRESH);
+  let changed = false;
+  for (const { revision, runId } of targets) {
+    try {
+      const jobs = await fetchWorkflowRunJobs(ctx.owner, ctx.repo, runId, ctx.token);
+      if (jobs.some((job) => job.status !== "completed")) continue;
+      const { jobName } = findFailedStep(jobs);
+      const job = jobs.find((j) => j.name === jobName);
+      const excerpt = job?.id ? extractErrorExcerpt(await fetchWorkflowJobLogs(ctx.owner, ctx.repo, job.id, ctx.token)) : null;
+      const reason = excerpt ?? RC_WORKFLOW_FAILED_NO_DETAIL_REASON;
+      const updated = await db.releaseCandidateRevision.updateMany({
+        where: { id: revision.id, status: "failed", failureReason: revision.failureReason },
+        data: { failureReason: reason.slice(0, 2000) },
+      });
+      changed = changed || updated.count > 0;
+    } catch (error) {
+      console.error("[release-rc] failure reason refresh failed", row.repositoryFullName, runId, error);
+    }
+  }
+  return changed;
+}
+
 /**
  * PR番号から候補を引く。revisionをまたぐ物理PR（バンプ前後・置換後）は`ReleaseCandidateRevision.prNumber`、
  * 旧方式（`release-main/vX.Y.Z`）から移行した候補の元PRは`migratedFromPrNumber`で同じ候補へ解決する（#4597）
@@ -546,6 +588,7 @@ export async function loadRcOverview(input: Context & { pullRequestNumber?: numb
   }
 
   if (row && (await reconcilePending(ctx, row))) row = await loadCandidateRow({ id: row.id });
+  if (row && (await refreshRcFailureReasons(ctx, row))) row = await loadCandidateRow({ id: row.id });
 
   return {
     caller,
@@ -1187,7 +1230,7 @@ export async function recordRcReport(input: {
   }
   if (revision.status !== "requested") return { ok: true, outcome: "ignored" };
   if (input.outcome === "failed") {
-    await failRevision(candidate, revision.id, input.reason?.trim() || "リリースworkflowが候補の作成・更新に失敗しました", runUrl);
+    await failRevision(candidate, revision.id, input.reason?.trim() || RC_WORKFLOW_FAILED_REASON_PREFIX, runUrl);
     return { ok: true, outcome: "failed" };
   }
   const token = await getInstallationToken(repository.installation.installationId);

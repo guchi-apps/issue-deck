@@ -7,7 +7,13 @@ import {
   legacyReleaseVersionOf,
   rcSequenceOf,
 } from "@/lib/release-branch";
-import { decideRcDispatchRun, type RcDispatchRun } from "@/lib/release-rc";
+import {
+  decideRcDispatchRun,
+  isRcRevisionFailureWithoutImpact,
+  RC_WORKFLOW_FAILED_NO_DETAIL_REASON,
+  rcFailureReasonRefreshRunId,
+  type RcDispatchRun,
+} from "@/lib/release-rc";
 import { classifyPullRequest } from "@/lib/pull-request-list";
 import { evaluateReleaseMergeGate, isReleasePullRequest, type ReleaseVerificationRecord } from "@/lib/release-merge-gate";
 import {
@@ -461,5 +467,37 @@ describe("decideRcDispatchRun（#5330）", () => {
     expect(decideRcDispatchRun({ requestedAt, requestKey: KEY, now: at(2), runs: [run({}), okOther] }).kind).toBe("failed");
     const okMine = run({ id: 8, conclusion: "success" });
     expect(decideRcDispatchRun({ requestedAt, requestKey: KEY, now: at(2), runs: [run({}), okMine] }).kind).toBe("none");
+  });
+});
+
+describe("isRcRevisionFailureWithoutImpact（#5473）", () => {
+  it("適用済みのrevisionがある候補の、失敗・期限切れの改訂は現在の候補に影響しない", () => {
+    expect(isRcRevisionFailureWithoutImpact({ revision: 3, status: "failed" }, 2)).toBe(true);
+    expect(isRcRevisionFailureWithoutImpact({ revision: 3, status: "expired" }, 2)).toBe(true);
+  });
+
+  it("適用済みのrevisionが無い候補の失敗は、影響のない失敗として扱わない", () => {
+    expect(isRcRevisionFailureWithoutImpact({ revision: 1, status: "failed" }, 0)).toBe(false);
+  });
+
+  it("作成中・適用済みは対象外", () => {
+    expect(isRcRevisionFailureWithoutImpact({ revision: 3, status: "requested" }, 2)).toBe(false);
+    expect(isRcRevisionFailureWithoutImpact({ revision: 2, status: "applied" }, 2)).toBe(false);
+  });
+});
+
+describe("rcFailureReasonRefreshRunId（#5473）", () => {
+  const url = "https://github.com/guchi-apps/morrow/actions/runs/44063664996";
+  const generic = "リリースworkflowが候補の作成・更新に失敗しました。理由は実行ログを確認してください";
+
+  it("汎用の理由のまま残っている失敗は、runの番号を返す", () => {
+    expect(rcFailureReasonRefreshRunId({ status: "failed", failureReason: generic, runUrl: url })).toBe(44063664996);
+  });
+
+  it("取り直し済み・取り出せなかった印・run不明・失敗以外は対象にしない", () => {
+    expect(rcFailureReasonRefreshRunId({ status: "failed", failureReason: "#1031 は元の候補 RC-50 に…", runUrl: url })).toBeNull();
+    expect(rcFailureReasonRefreshRunId({ status: "failed", failureReason: RC_WORKFLOW_FAILED_NO_DETAIL_REASON, runUrl: url })).toBeNull();
+    expect(rcFailureReasonRefreshRunId({ status: "failed", failureReason: generic, runUrl: null })).toBeNull();
+    expect(rcFailureReasonRefreshRunId({ status: "expired", failureReason: generic, runUrl: url })).toBeNull();
   });
 });

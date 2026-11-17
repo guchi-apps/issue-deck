@@ -269,6 +269,41 @@ export function viewReleaseProgress(progress: ReleaseVerificationProgress, nowMs
   }
 }
 
+/**
+ * 待機がこれより長いと「通常より長く待っています」と出す（#5473）。止まったと断定はしない。
+ * 実行中の「応答なし」（`stalledAfterMs`）と同じ10分にそろえる
+ */
+export const RELEASE_LONG_WAIT_MS = 10 * 60_000;
+
+export function isLongReleaseWait(elapsedMs: number | null, thresholdMs: number = RELEASE_LONG_WAIT_MS): boolean {
+  return elapsedMs !== null && elapsedMs > thresholdMs;
+}
+
+/**
+ * 終わったジョブが、記録が待機へ戻る**前**の実行か（#5473）。再実行・再評価で記録が`waiting`へ戻ったのに
+ * 新しいジョブがまだ無いとき、最新のジョブは前回の実行のもので、その終わり方を現在の状態として出さない。
+ * ジョブが記録の更新より後に終わった（結果の報告が届かなかった）ときは前回扱いにしない——それが現在の状態
+ */
+export function isSupersededReleaseProgress(progress: ReleaseVerificationProgress, recordUpdatedAt: string | null): boolean {
+  if (["queued", "claimed", "running"].includes(progress.jobStatus)) return false;
+  const finished = ms(progress.finishedAt) ?? ms(progress.requestedAt);
+  const updated = ms(recordUpdatedAt);
+  return finished !== null && updated !== null && finished < updated;
+}
+
+const ENDED_JOB_LABEL: Record<string, string> = {
+  succeeded: "完了",
+  failed: "失敗",
+  skipped: "見送り",
+  timeout: "時間切れ",
+  canceled: "取り消し",
+};
+
+/** 前回の実行の終わり方の短い名前（履歴の1行用） */
+export function describeEndedReleaseJob(progress: ReleaseVerificationProgress): string {
+  return ENDED_JOB_LABEL[progress.jobStatus] ?? "終了";
+}
+
 /** 「4分05秒」「1時間2分」。0秒未満は0秒 */
 export function formatReleaseElapsed(value: number): string {
   const total = Math.max(0, Math.floor(value / 1000));
