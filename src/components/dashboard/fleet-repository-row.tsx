@@ -56,7 +56,7 @@ export function FleetRepositoryRow({
         {result}
 
         {detail && (
-          <p className="basis-full border-l-2 border-destructive/40 pl-1.5 break-words text-destructive">
+          <p className="basis-full break-words text-destructive">
             {detail}
           </p>
         )}

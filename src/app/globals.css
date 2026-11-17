@@ -260,6 +260,7 @@
 
 span.progress-segment-live {
   background-color: color-mix(in oklch, currentColor 40%, transparent);
+  /* design-ok: いま進行中の区間を流れる動きで示す（単色にすると現在地の情報が消える） */
   background-image: linear-gradient(
     100deg,
     transparent 0,

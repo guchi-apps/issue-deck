@@ -287,7 +287,7 @@ export function PlanApprovalPanel({
             />
           </div>
           {!isExpanded && (
-            <div className="absolute inset-x-0 bottom-0 flex justify-center bg-gradient-to-b from-transparent to-muted pt-8 pb-2">
+            <div className="absolute inset-x-0 bottom-0 flex justify-center border-t bg-muted pt-2 pb-2">
               <Button variant="outline" size="sm" onClick={() => setIsExpanded(true)}>
                 <ChevronDown />
                 全文を表示

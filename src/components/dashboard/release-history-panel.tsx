@@ -935,7 +935,7 @@ function CarriedReleaseSection({
 }) {
   const { lines } = extractReleaseHighlights(carried.body, Number.POSITIVE_INFINITY);
   return (
-    <section className="mt-2 rounded border-l-2 border-red-500/40 pl-2">
+    <section className="mt-2 border-t pt-1.5">
       <p className="flex flex-wrap items-center gap-1.5 text-[10.5px] font-semibold text-muted-foreground">
         <JumpButton tagName={carried.tagName} onClick={() => onJumpToRelease({ repoFullName, tagName: carried.tagName })} />
         から引き継いだ変更
