@@ -223,7 +223,7 @@ describe("ReleaseFixInternalReview（#4410）", () => {
     expect(text).toContain("次の操作: 実行予算を追加して再開する");
     expect(text).toContain("担当: agent-a（応答なし）");
     expect(screen.getByTestId("release-fix-internal-resume").textContent).toBe("予算を追加して再開");
-    expect(screen.getByTestId("release-fix-internal-handover")).toBeTruthy();
+    expect(screen.queryByTestId("release-fix-internal-handover")).toBeNull();
   });
   it("実行環境の障害は入力欄を出さず、そのまま再開できる", () => {
     const env = { ...internal, pause: { kind: "environment", message: "障害", nextAction: "再開する", resumeNeed: "none", pausedAt: null, pausedSha: null, autoResumable: true }, stopReason: "障害" };

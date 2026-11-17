@@ -269,6 +269,20 @@ describe("requestRcImport", () => {
     expect(JSON.parse(mocks.dispatch.mock.calls[0][3])).toMatchObject({ mode: "import", baseHeadSha: HEAD1, prs: [{ number: 21 }] });
   });
 
+  it("適用済みrevisionで取り込んだPRは、元のマージが候補の祖先でなくても取り込み済みとして受け付けない（#5469）", async () => {
+    mocks.fixFindMany.mockResolvedValue([{ fixPrNumber: 21, status: "fix_merged" }]);
+    mocks.candidateFindUnique.mockImplementation(async ({ where }: { where: { id?: string } }) => (where.id ? candidateRow({
+        currentRevision: 2,
+        revisions: [
+          { ...candidateRow().revisions[0], headSha: "0".repeat(40) },
+          { id: "r2", revision: 2, reason: "fix_import", status: "applied", expectedHeadSha: "0".repeat(40), prNumber: 10, baseSha: "b".repeat(40), headSha: HEAD1, importedPrs: [{ number: 21, title: "PR21", mergeSha: "21".padEnd(40, "0"), related: true }], createdAt: new Date() },
+        ],
+      }) : null));
+    const result = await requestRcImport({ ...base, expectedHeadSha: HEAD1, selected: [{ number: 21 }] });
+    expect(result).toMatchObject({ ok: false, error: "invalid_selection", problems: [{ number: 21, problem: "already_included" }] });
+    expect(mocks.dispatch).not.toHaveBeenCalled();
+  });
+
   it("更新中は2本目を受け付けない", async () => {
     mocks.candidateFindUnique.mockImplementation(async ({ where }: { where: { id?: string } }) =>
       where.id
@@ -321,6 +335,24 @@ describe("loadRcImportOptions（#4986）", () => {
       [684, false, true],
       [686, true, false],
     ]);
+  });
+
+  it("適用済みrevisionで取り込んだ修正PRは、取り込み済み（revision）として選べない（#5469）", async () => {
+    mocks.fixFindMany.mockResolvedValue([{ fixPrNumber: 686, status: "fix_merged" }]);
+    mocks.candidateFindUnique.mockImplementation(async ({ where }: { where: { id?: string } }) =>
+      where.id
+        ? candidateRow({
+            currentRevision: 2,
+            revisions: [
+              { ...candidateRow().revisions[0], headSha: "0".repeat(40) },
+              { id: "r2", revision: 2, reason: "fix_import", status: "applied", expectedHeadSha: "0".repeat(40), prNumber: 10, baseSha: "b".repeat(40), headSha: HEAD1, importedPrs: [{ number: 686, title: "安全修正", mergeSha: "f".repeat(40), related: true }], createdAt: new Date() },
+            ],
+          })
+        : null,
+    );
+    const result = await loadRcImportOptions(ctx, "c1");
+    expect(result?.options.find((o) => o.number === 686)).toMatchObject({ problem: "already_included", importedRevision: 2, approvalRequired: false, problemLabel: null });
+    expect(result?.options.find((o) => o.number === 684)).toMatchObject({ problem: null, importedRevision: null });
   });
 
   it("未マージの修正系列PRは理由付きで選べない", async () => {

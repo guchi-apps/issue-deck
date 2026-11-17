@@ -609,11 +609,11 @@ export async function claimInternalSession(input: {
 }
 
 /** 担当の解放。世代番号を進め、解放した担当の遅延報告を弾く。作業内容・指摘・稼働時間は保持する */
-export async function releaseInternalSession(input: { repositoryFullName: string; issueNumber: number; actor: Actor; /** 利用者の操作（引き継ぎのための強制解放） */ force?: boolean }): Promise<{ ok: true; status: InternalStatusView } | InternalReportError> {
+export async function releaseInternalSession(input: { repositoryFullName: string; issueNumber: number; actor: Actor }): Promise<{ ok: true; status: InternalStatusView } | InternalReportError> {
   const series = await findActiveSeries(input.repositoryFullName, input.issueNumber);
   if (!series) return seriesNotFound(input.repositoryFullName, input.issueNumber);
   const session = await ensureSession(series);
-  const stale = input.force ? null : checkActor(session, input.actor);
+  const stale = checkActor(session, input.actor);
   if (stale) return stale;
   const now = new Date();
   const settled = await accrue(session, now);

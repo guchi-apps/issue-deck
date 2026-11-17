@@ -33,12 +33,28 @@ export function IssueArtifactPanel({
   artifacts,
   onReload,
   variant = "standalone",
+  isFailed = false,
 }: {
   artifacts: SessionArtifactView[];
   onReload: () => void;
   variant?: "standalone" | "section";
+  /** 取得に失敗した。空でも「未作成」とは限らないので、案内を出して再取得できるようにする（#5471） */
+  isFailed?: boolean;
 }) {
-  if (artifacts.length === 0) return null;
+  if (artifacts.length === 0) {
+    if (!isFailed || variant === "section") return null;
+    return (
+      <section role="alert" className="flex flex-col gap-1 rounded-xl border bg-card p-3 text-sm">
+        <strong className="font-semibold">アーティファクトを取得できませんでした</strong>
+        <span className="text-xs text-muted-foreground">
+          未作成ではない可能性があります。通信を確認して再読み込みしてください。
+        </span>
+        <button type="button" onClick={onReload} className="self-start text-xs underline">
+          再読み込み
+        </button>
+      </section>
+    );
+  }
 
   const list = (
     <ul className="flex flex-col gap-2">
