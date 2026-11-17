@@ -2980,9 +2980,10 @@ describe("ブランチ画面でのリポジトリ表示（#5087）", () => {
     expect(screen.getByText(REPO2_SHORT)).toBeTruthy();
   });
 
-  it("行の数が揃う前（読み込み中）は省かない", () => {
+  it("「動きがある時だけ表示」は行の数が揃う前（読み込み中）は出さず、省略件数にも数えない（#5494）", () => {
     renderFlow({ repositories: TWO, branchViewModes: { [REPO2]: "active" }, fetchedAt: null });
-    expect(screen.getByText(REPO2_SHORT)).toBeTruthy();
+    expect(screen.queryByText(REPO2_SHORT)).toBeNull();
+    expect(screen.queryByText(/設定で\d+件を省略中/)).toBeNull();
   });
 
   it("左メニューで選んだリポジトリは、設定にかかわらず並べる", () => {

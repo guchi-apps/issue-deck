@@ -8,11 +8,12 @@ import {
 
 type Repo = { name: string; mode: BranchViewMode; active: boolean; unknown: boolean };
 
-function select(repos: Repo[], showAll = false) {
+function select(repos: Repo[], showAll = false, isLoading = false) {
   return selectBranchViewRepositories(repos, {
     modeOf: (repo) => repo.mode,
     hasActivity: (repo) => repo.active,
     isUnknown: (repo) => repo.unknown,
+    isLoading,
     showAll,
   });
 }
@@ -35,8 +36,15 @@ describe("selectBranchViewRepositories（#5087）", () => {
     expect(select([repo("a", "active", false)]).visible).toHaveLength(0);
   });
 
-  it("active でも、動きの有無を判断できない（失敗・読み込み中）ときは並べる", () => {
+  it("active でも、動きの有無を判断できない（取得失敗）ときは並べる", () => {
     expect(select([repo("a", "active", false, true)]).visible).toHaveLength(1);
+    expect(select([repo("a", "active", false, true)], false, true).visible).toHaveLength(1);
+  });
+
+  it("active は読み込み中は並べず、読み込み後に動きがあれば並べる（#5494）", () => {
+    expect(select([repo("a", "active", true)], false, true).visible).toHaveLength(0);
+    expect(select([repo("a", "active", true)], false, false).visible).toHaveLength(1);
+    expect(select([repo("a", "always")], false, true).visible).toHaveLength(1);
   });
 
   it("never は動きがあっても並べない。unknown でも並べない", () => {
