@@ -694,6 +694,7 @@ jobs:
         # 呼び出し元リポジトリに存在しうる/しないファイルの場所を1箇所で決める（#960・#964）。
         env:
           PROMPTS_REF: ${{ inputs.prompts-ref }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
           set -euo pipefail
           if [ -n "$PROMPTS_REF" ]; then
@@ -719,6 +720,26 @@ jobs:
             USAGE=""
           fi
           echo "CLAUDE_USAGE_SCRIPT=$USAGE" >> "$GITHUB_ENV"
+
+          # デザイン観点で使うUIデザインの静的検出スクリプト（#5466）。**PR側のチェックアウトからは
+          # 実行しない**: このジョブはトークンを持っており、PRが書き換えたスクリプトがそのまま動いてしまう。
+          # prompts-ref指定時は信頼できるタグの版（.shared-prompts）、無指定（issue-deck自身）はPRのbaseの版を
+          # RUNNER_TEMPへ複製し、そのパスだけをallowedToolsで許可する。取れなければ空にして観点側でスキップさせる。
+          LINT_DIR="$RUNNER_TEMP/ui-design-lint"
+          LINT="$LINT_DIR/check-ui-design.mjs"
+          mkdir -p "$LINT_DIR"
+          if [ -n "$PROMPTS_REF" ]; then
+            cp "$ROOT/scripts/check-ui-design.mjs" "$LINT" 2>/dev/null || true
+          elif [ -n "$BASE_SHA" ]; then
+            git show "$BASE_SHA:scripts/check-ui-design.mjs" > "$LINT" 2>/dev/null || true
+          fi
+          if [ -s "$LINT" ]; then
+            echo "UI_LINT_SCRIPT=$LINT" >> "$GITHUB_ENV"
+          else
+            rm -f "$LINT"
+            echo "UI_LINT_SCRIPT=" >> "$GITHUB_ENV"
+            echo "UIデザインの静的検出スクリプトが取得できないため、デザイン観点では静的検出を使いません"
+          fi
 
       - name: 共有知識リポジトリの所有者とリポジトリ名を分解する
         # 次のトークン発行ステップのowner・repositoriesは別々の入力だが、ワークフローの式には
@@ -797,7 +818,7 @@ jobs:
           {
             echo 'PROMPT_REVIEW<<__ISSUE_DECK_PROMPT_EOF__'
             MERGE_POLICY="${MERGE_POLICY:-strict}" \
-              envsubst '${ISSUE_NUMBER} ${PR_NUMBER} ${REPOSITORY} ${HEAD_SHA} ${MERGE_POLICY}' < "$PROMPT_FILE"
+              envsubst '${ISSUE_NUMBER} ${PR_NUMBER} ${REPOSITORY} ${HEAD_SHA} ${MERGE_POLICY} ${UI_LINT_SCRIPT}' < "$PROMPT_FILE"
             echo '__ISSUE_DECK_PROMPT_EOF__'
           } >> "$GITHUB_ENV"
 
@@ -842,7 +863,7 @@ jobs:
           # develop向けPRにレビューのコメントは1件も無く、PR本文の`## 検証結果`は
           # `review=unavailable`（判定を取得できませんでした）、リリースPRの表も全行が
           # 「記録なし」になっていた。prompt modeのclaude-code-actionは結果を自分では投稿しない。
-          claude_args: '${{ steps.workflow_model.outputs.claude_args }} --allowedTools "Bash(gh issue view:*),Bash(gh issue comment:*),Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr checks:*),Read,Grep,Glob"'
+          claude_args: '${{ steps.workflow_model.outputs.claude_args }} --allowedTools "Bash(gh issue view:*),Bash(gh issue comment:*),Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr checks:*),Bash(node ${{ runner.temp }}/ui-design-lint/check-ui-design.mjs:*),Read,Grep,Glob"'
           prompt: ${{ env.PROMPT_REVIEW }}
 
       # レビュー結果がPRへ残らないまま終わるのを塞ぐ(#2488)。上でallowedToolsへ
