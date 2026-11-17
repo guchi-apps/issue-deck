@@ -25,6 +25,9 @@ const COLOR_BORDER = new RegExp(
 
 const EMOJI = /[\u{1F300}-\u{1FAFF}]|[\u2705\u274C\u274E\u26A0\u23F3\u2753\u2757\u2B50\u2728\u26A1\u2B55\u2B1B\u2B1C\u231B\u2614\u2615\u267B\u26D4]/u;
 
+/** 画面を描かないコード（JSXを含まない拡張子）。emoji-icon の対象から外す */
+const NON_UI_FILE = /\.(?:[cm]?ts|[cm]?js)$/;
+
 export const RULES = [
   {
     id: "side-border",
@@ -40,8 +43,10 @@ export const RULES = [
   {
     id: "emoji-icon",
     message: "絵文字をアイコン代わりに使っている。文字だけにするか、アプリのアイコンセットを使う",
-    // コメント行は見ない。✓ ✕ ★ → などのテキスト記号は含めず、絵文字として描かれるものだけを見る
-    test: (line) => !/^\s*(?:\/\/|\*|\/\*|\{\/\*)/.test(line) && EMOJI.test(line),
+    // コメント行は見ない。✓ ✕ ★ → などのテキスト記号は含めず、絵文字として描かれるものだけを見る。
+    // 画面を描くコード（.tsx/.jsx/.css/.html）だけが対象。.ts は GitHubコメント・Slack返信の文面や
+    // コードが読む判定マーカーで、画面の見た目ではなく、絵文字を直すと機能が壊れる（#5507）
+    test: (line, file) => !NON_UI_FILE.test(file) && !/^\s*(?:\/\/|\*|\/\*|\{\/\*)/.test(line) && EMOJI.test(line),
   },
   {
     id: "heavy-shadow",
@@ -63,7 +68,7 @@ export function scanText(text, file = "<text>") {
   const findings = [];
   lines.forEach((line, i) => {
     for (const rule of RULES) {
-      if (!rule.test(line)) continue;
+      if (!rule.test(line, file)) continue;
       const reason = exclusionReason(line) ?? (i > 0 ? exclusionReason(lines[i - 1]) : null);
       findings.push({
         file,
