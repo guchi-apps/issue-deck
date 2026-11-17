@@ -122,6 +122,7 @@ import {
   countOpenManualSteps,
   hasChangesAfterReleaseFreeze,
   splitLanesByReleaseCandidate,
+  splitUnreleasedByReleaseCandidate,
   splitLanesByReleaseFreeze,
   isClosedLane,
   repositoryUnreleasedSummary,
@@ -1979,6 +1980,7 @@ function ReleaseFlowGraph({
   // コミットを数えず（#2316）、残りもマージコミット単位＝PR単位の「件」で数える（#2333）
   // ための判定を、3か所で共有する。
   const unreleased = repositoryUnreleasedSummary(repository);
+  const legendSplit = splitUnreleasedByReleaseCandidate(repository);
   // いちばん新しく本番へ出た版がmainへ入った時刻（#2020）。再デプロイの確認ダイアログで
   // 「いま本番に出ているもの」を示すのに使う。束は新しい順なので先頭から最初の1件でよい。
   const latestReleaseMergedAt =
@@ -2117,7 +2119,10 @@ function ReleaseFlowGraph({
           {DEVELOP_BRANCH}
         </span>
         {unreleased.count > 0 && (
-          <span>未リリース {formatUnreleasedSummary(unreleased)}</span>
+          <span>
+            未リリース {formatUnreleasedSummary(unreleased)}
+            {legendSplit.hasCandidate && `（候補外 ${legendSplit.outsideCount}・候補 ${legendSplit.insideCount}）`}
+          </span>
         )}
         {/* 「次のリリース」カードを出さないリポジトリ（Xcodeで実機へ反映するもの）だけは、
             従来どおりこの行に置く。カードを出す場合は「本番稼働中」カードの中にある（#4532）。
@@ -2493,6 +2498,7 @@ function RepositorySummaryRow({
 }) {
   const { summary } = repository;
   const unreleased = repositoryUnreleasedSummary(repository);
+  const candidateSplit = splitUnreleasedByReleaseCandidate(repository);
   // 「リリースする」を押してからバンプPRが現れるまでの間も、進んでいることをこの行に出す（#1955）。
   // **押せる状態（`canTriggerRelease`）のときだけ**にして、リリースが終わった後も10分間
   // localStorageに残る起動時刻で古いピルが出るのを防ぐ（ボタンの出し方と同じ条件）。
@@ -2647,11 +2653,25 @@ function RepositorySummaryRow({
       {/* 未リリースは「リリース中」のピルと同じ紫にして、同じリリースの軸だと分かるようにする（#1886）。
           リリース候補・バンプPRが開いている間も出す（#4897）。新方式の候補は検証・公開承認待ちで
           長く開いたままになり、そのあいだ隠すと本番反映待ちの件数がほとんど見えなくなっていた */}
-      {unreleased.count > 0 && (
+      {/* 本番候補ができているときは、候補に入っていない件数（左・破線）と入っている件数（右）に分ける（#5489） */}
+      {unreleased.count > 0 && candidateSplit.hasCandidate && candidateSplit.outsideCount > 0 && (
+        <span
+          title={`本番候補に入っていない ${candidateSplit.outsideCount}件`}
+          aria-label={`本番候補に入っていない ${candidateSplit.outsideCount}件`}
+          className="flex shrink-0 items-center rounded-full border border-dashed border-purple-500 px-1.5 text-xs tabular-nums text-purple-600 dark:text-purple-400"
+        >
+          +{candidateSplit.outsideCount}
+        </span>
+      )}
+      {unreleased.count > 0 && (!candidateSplit.hasCandidate || candidateSplit.insideCount > 0) && (
         <SummaryCount
           icon={ArrowUpToLine}
-          label={`未リリース ${formatUnreleasedSummary(unreleased)}`}
-          count={unreleased.count}
+          label={
+            candidateSplit.hasCandidate
+              ? `本番候補に入っている ${candidateSplit.insideCount}件`
+              : `未リリース ${formatUnreleasedSummary(unreleased)}`
+          }
+          count={candidateSplit.hasCandidate ? candidateSplit.insideCount : unreleased.count}
           className="text-purple-600 dark:text-purple-400"
         />
       )}
@@ -2945,6 +2965,7 @@ function isProgressing(repository: BranchFlowRepository): boolean {
  */
 function RepositoryDetailHeader({ repository }: { repository: BranchFlowRepository }) {
   const unreleased = repositoryUnreleasedSummary(repository);
+  const candidateSplit = splitUnreleasedByReleaseCandidate(repository);
 
   return (
     <div className="flex shrink-0 items-center gap-2 border-b px-4 py-2">
@@ -2962,7 +2983,11 @@ function RepositoryDetailHeader({ repository }: { repository: BranchFlowReposito
             <span>リリース済みのバージョンなし</span>
           )}
           {unreleased.count > 0 && (
-            <span>{` ・ 未リリース ${formatUnreleasedSummary(unreleased)}`}</span>
+            <span>
+              {` ・ 未リリース ${formatUnreleasedSummary(unreleased)}`}
+              {candidateSplit.hasCandidate &&
+                `（候補外 ${candidateSplit.outsideCount}・候補 ${candidateSplit.insideCount}）`}
+            </span>
           )}
           {repository.summary.activeLaneCount > 0 && (
             <span>{` ・ 進行中 ${repository.summary.activeLaneCount}件`}</span>

@@ -1454,7 +1454,7 @@ describe("BranchFlowView", () => {
       expect(screen.getByText("本番公開へ進む")).toBeTruthy();
     });
 
-    it("openなリリースPRがあっても、畳んだ行に未リリースの件数を出す（#4897）", () => {
+    it("openなリリースPRがあっても、畳んだ行に本番反映待ちの件数を出す（#4897・#5489）", () => {
       renderFlow({
         pullRequests: [
           makeReleasePullRequest({
@@ -1466,7 +1466,8 @@ describe("BranchFlowView", () => {
         branchStatuses: [unreleased],
       });
 
-      expect(screen.getAllByLabelText("未リリース 3コミット").length).toBeGreaterThan(0);
+      // 候補ができているときは「本番候補に入っている」件数として出す（#5489）
+      expect(screen.getAllByLabelText("本番候補に入っている 3件").length).toBeGreaterThan(0);
     });
 
     it("押すと本番デプロイが走る旨の確認を挟む", () => {

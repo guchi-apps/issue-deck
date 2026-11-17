@@ -2893,6 +2893,8 @@ export function POST(request: NextRequest) {
   一致すれば`BranchComparison.sameContent`をtrueにして数を0へ倒す。
   **tree OIDが取れなかった場合はfalse（＝差分があるものとして扱う）へ倒す**——取得の失敗で
   リリースを止めないため。**凍結点（#2117の設計）は触っていない。**
+  **本番候補（リリースPR・本番反映中の候補）があるときは、畳んだ行の件数を「候補に入っていない（左・破線）／入っている（右）」へ分ける**
+  （#5489・`splitUnreleasedByReleaseCandidate`。振り分けは`splitLanesByReleaseCandidate`と同じ規則で、候補外は総数を超えない。候補が無いときは分けない）。
   **残った数はコミット数ではなく「マージコミット単位の件数」で出す**（#2333・`unreleasedSummary`）。
   通常マージ運用ではPR 1件のマージにつき作業ブランチ側のコミット（1個とは限らない）と
   マージコミットが両方`aheadBy`へ載るため、**コミット数は実質的な作業の件数より必ず多く出る**
