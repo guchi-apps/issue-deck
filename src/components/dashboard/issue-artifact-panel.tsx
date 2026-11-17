@@ -1,5 +1,7 @@
 "use client";
 
+import { useEffect } from "react";
+
 import {
   ExternalLink,
   Image as ImageIcon,
@@ -11,6 +13,12 @@ import {
 import { useArtifactPreview } from "@/components/dashboard/artifact-preview";
 import { IssueDetailSection } from "@/components/dashboard/issue-detail-section";
 import { ARTIFACT_IFRAME_SANDBOX } from "@/lib/artifact-document";
+import {
+  isArtifactUpdated,
+  markArtifactSeen,
+  recordArtifactBaseline,
+  useArtifactSeen,
+} from "@/lib/artifact-seen";
 import { artifactWindowPath, openArtifactWindow } from "@/lib/artifact-window";
 import type { SessionArtifactView } from "@/lib/dispatch/session-artifact";
 import { formatRelativeDate } from "@/lib/format-relative-date";
@@ -41,6 +49,18 @@ export function IssueArtifactPanel({
   /** 取得に失敗した。空でも「未作成」とは限らないので、案内を出して再取得できるようにする（#5471） */
   isFailed?: boolean;
 }) {
+  // **更新の強調は承認待ちの独立カードだけ**（#5483）。マージ済みなど承認待ちでない状態の
+  // `section`では出さない。基準の記録は`section`でも続けるので、承認待ちへ戻ったときに拾える。
+  // 取得に失敗したときは`artifacts`が空なので、基準は「取得成功かつ非空」のときだけ保存される
+  const seen = useArtifactSeen();
+  useEffect(() => {
+    recordArtifactBaseline(artifacts);
+  }, [artifacts]);
+  const highlight = variant === "standalone";
+  const updatedIds = new Set(
+    highlight ? artifacts.filter((a) => isArtifactUpdated(seen, a)).map((a) => a.id) : [],
+  );
+
   if (artifacts.length === 0) {
     if (!isFailed || variant === "section") return null;
     return (
@@ -62,6 +82,7 @@ export function IssueArtifactPanel({
         <ArtifactCard
           key={artifact.id}
           artifact={artifact}
+          updated={updatedIds.has(artifact.id)}
           // **サムネイルは新しい方から数件だけ**。1件が数百KBのHTMLをiframeで実際に開くので、
           // 上限（20件）まで並べると、Issueを開いただけでその全部を取りに行くことになる
           withThumbnail={index < THUMBNAIL_LIMIT}
@@ -101,14 +122,29 @@ export function IssueArtifactPanel({
     );
   }
 
+  const hasUpdate = updatedIds.size > 0;
   return (
-    <section className="flex flex-col gap-2 rounded-lg border p-3">
+    <section
+      className={`flex flex-col gap-2 rounded-lg border p-3 ${hasUpdate ? "border-amber-500/50" : ""}`}
+    >
       <div className="flex items-center gap-2">
-        <Palette className="size-4 shrink-0 text-muted-foreground" aria-hidden />
-        <h3 className="text-sm font-medium">アーティファクト</h3>
+        <Palette
+          className={`size-4 shrink-0 ${hasUpdate ? "text-amber-700 dark:text-amber-400" : "text-muted-foreground"}`}
+          aria-hidden
+        />
+        <h3
+          className={`text-sm font-medium ${hasUpdate ? "text-amber-700 dark:text-amber-400" : ""}`}
+        >
+          アーティファクト
+        </h3>
         <span className="rounded-full bg-muted px-1.5 py-0.5 text-xs text-muted-foreground tabular-nums">
           {artifacts.length}
         </span>
+        {hasUpdate && (
+          <span className="rounded-md bg-amber-500 px-2 py-0.5 text-xs font-bold text-amber-950">
+            更新あり {updatedIds.size}
+          </span>
+        )}
         <span className="ml-auto">{reloadButton}</span>
       </div>
       {list}
@@ -123,15 +159,22 @@ const THUMBNAIL_LIMIT = 6;
 function ArtifactCard({
   artifact,
   withThumbnail,
+  updated,
 }: {
   artifact: SessionArtifactView;
   withThumbnail: boolean;
+  /** 前回見た版から更新されている（承認待ちの独立カードのときだけtrue。#5483） */
+  updated: boolean;
 }) {
   const preview = useArtifactPreview();
   const open = () => preview?.open(artifact);
 
   return (
-    <li className="relative rounded-md border transition-colors hover:bg-accent/50">
+    <li
+      className={`relative rounded-md border transition-colors hover:bg-accent/50 ${
+        updated ? "border-amber-500/60 bg-amber-500/10 ring-2 ring-amber-500/25" : ""
+      }`}
+    >
       {/* カード全面を選択用のボタンにし、本文はその兄弟に置く（`issue-list.tsx`と同じ作り）。
           本文ごと`<button>`で包むと、中にclaude.aiへのリンクを置けない */}
       <button
@@ -146,6 +189,12 @@ function ArtifactCard({
           <p className="truncate text-sm font-medium">
             {artifact.favicon ? `${artifact.favicon} ` : ""}
             {artifact.title}
+            {updated && (
+              <span className="ml-1.5 inline-flex items-center rounded-md bg-amber-500 px-2 py-0 align-middle text-xs font-bold text-amber-950">
+                更新あり
+                <span className="sr-only">（前回確認から更新されています）</span>
+              </span>
+            )}
           </p>
           {artifact.description && (
             <p className="truncate text-xs text-muted-foreground">{artifact.description}</p>
@@ -180,6 +229,7 @@ function ArtifactCard({
               rel="noreferrer"
               aria-label={`${artifact.title} を別ウィンドウで開く`}
               onClick={(event) => {
+                markArtifactSeen(artifact);
                 // 修飾キー付き・左ボタン以外は「別で開きたい」意思表示なので、ブラウザに任せる
                 if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
                 if (event.button !== 0) return;
@@ -198,6 +248,7 @@ function ArtifactCard({
                 target="_blank"
                 rel="noreferrer"
                 aria-label={`${artifact.title} をclaude.aiで開く`}
+                onClick={() => markArtifactSeen(artifact)}
                 className="pointer-events-auto inline-flex items-center gap-1 rounded-md border px-2.5 py-1 text-xs text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
               >
                 claude.ai
