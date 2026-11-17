@@ -26,6 +26,12 @@ describe("checkRebuildPullRequest", () => {
   it("未マージは選べない（developのレビュー・マージを省かない）", () => {
     expect(checkRebuildPullRequest(facts({ mergedAt: null, mergeSha: null }))).toEqual({ ok: false, problem: "not_merged" });
   });
+  it("祖先ではなくても、過去のrevisionで取り込み済みなら選べない（#5476）", () => {
+    expect(checkRebuildPullRequest({ ...facts(), importedInOrigin: true })).toEqual({ ok: false, problem: "already_included" });
+  });
+  it("取り込み済みでも、未マージ・マージコミット変更の判定が先に出る", () => {
+    expect(checkRebuildPullRequest({ ...facts({ mergedAt: null, mergeSha: null }), importedInOrigin: true })).toEqual({ ok: false, problem: "not_merged" });
+  });
   it("既に元の候補に含まれていれば選べない", () => {
     expect(checkRebuildPullRequest(facts({}, true))).toEqual({ ok: false, problem: "already_included" });
   });

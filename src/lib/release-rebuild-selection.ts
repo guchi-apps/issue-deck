@@ -82,6 +82,11 @@ export type RebuildPullRequestFacts = {
   } | null;
   /** マージコミットが元の候補のheadの祖先か（＝既に候補に入っている） */
   includedInOrigin: boolean;
+  /**
+   * この候補の過去のrevisionで取り込み済みか（#5476）。取り込みはPRの差分を新しいコミットとして当てるため、
+   * 取り込み済みでもマージコミットは祖先にならない。候補が記録した`importedPrs`の番号で判定する
+   */
+  importedInOrigin?: boolean;
 };
 
 /** 1件のPRを、元の候補へ足せるかで判定する。`expectedMergeSha`は画面で選んだ時点のマージコミット */
@@ -95,7 +100,7 @@ export function checkRebuildPullRequest(
   if (pr.baseRef !== "develop") return { ok: false, problem: "not_develop" };
   if (!pr.mergedAt || !pr.mergeSha) return { ok: false, problem: "not_merged" };
   if (expectedMergeSha && expectedMergeSha !== pr.mergeSha) return { ok: false, problem: "sha_changed" };
-  if (facts.includedInOrigin) return { ok: false, problem: "already_included" };
+  if (facts.includedInOrigin || facts.importedInOrigin) return { ok: false, problem: "already_included" };
   return { ok: true, mergeSha: pr.mergeSha, title: pr.title };
 }
 
