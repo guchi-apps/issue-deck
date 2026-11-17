@@ -24,6 +24,10 @@ import { BodyCleanupButton } from "@/components/dashboard/body-cleanup-button";
 import { CommentThread } from "@/components/dashboard/comment-thread";
 import { DeleteIssueDialog } from "@/components/dashboard/delete-issue-dialog";
 import { IssueArtifactPanel } from "@/components/dashboard/issue-artifact-panel";
+import {
+  DetailLoadingCard,
+  resolveDetailLoading,
+} from "@/components/dashboard/detail-loading-placeholders";
 import { IssueDetailHeader, IssueDetailTitle } from "@/components/dashboard/issue-detail-header";
 import {
   IssueDetailLayout,
@@ -707,6 +711,15 @@ export function IssueDetail({
   // 計画承認待ちの間だけ（#2926）。アーティファクトの初期表示位置の出し分けに使う
   // （`checkUserGuidance`へ渡す同名の式と同じ判定）
   const planDecisionPending = planRequest?.status === "WAITING";
+  // 取得が終わるまで「出るはずの欄」の枠を出す（#5471）。該当なしと分かれば消える
+  const detailLoading = resolveDetailLoading({
+    labels: issue?.labels ?? [],
+    dispatchLoaded: dispatch.isLoaded,
+    planRequestPresent: Boolean(planRequest),
+    artifactsLoaded: isArtifactsLoaded,
+    commentsLoading: isLoading,
+    planReviewPresent: Boolean(pendingPlanReview),
+  });
   // 計画レビュー（G1）が作成中かどうか（#3565）。承認パネルへ表示するのと、
   // `PlanReviewButton`側の状態行が二重にならないよう隠すのとで同じ判定を使う。
   // **`pendingPlanReview`（指摘コメント）が届いた後はfalseにする**——`PlanApprovalPanel`側は
@@ -1157,7 +1170,7 @@ export function IssueDetail({
                   挟まないときは見た目の承認を質問で待つので、計画承認待ちと同じく**承認する場所の
                   すぐ上**へ独立カードを出す（判断材料を先に見せる。計画承認待ちでは下記の位置） */}
               {questionAnswerPending && !planDecisionPending && (
-                <IssueArtifactPanel artifacts={artifacts} onReload={reloadArtifacts} />
+                <IssueArtifactPanel artifacts={artifacts} isFailed={isArtifactsFailed} onReload={reloadArtifacts} />
               )}
 
               {/* 質問の回答（#2189）。**セッション表示のすぐ下**に置く——計画パネルよりも上
@@ -1185,8 +1198,13 @@ export function IssueDetail({
                   置き場所は対応PRの並びの上側（下記）で、ここに出すのは初めて見るときに見逃されない
                   ようにするための一時的な位置。畳めるセクションではなく独立したカード（#2190） */}
               {planDecisionPending && (
-                <IssueArtifactPanel artifacts={artifacts} onReload={reloadArtifacts} />
+                <IssueArtifactPanel artifacts={artifacts} isFailed={isArtifactsFailed} onReload={reloadArtifacts} />
               )}
+
+              {detailLoading.artifacts && <DetailLoadingCard label="アーティファクトを取得中…" tall />}
+
+              {detailLoading.plan && <DetailLoadingCard label="計画を確認中…" />}
+
 
               {/* 計画の承認・修正（#2061）。**セッション表示のすぐ下・対応PRより上**に置く。
                   待っている間セッションは止まっているので、このIssueで今いちばん急ぐ操作になる */}
@@ -1212,6 +1230,9 @@ export function IssueDetail({
                   />
                 </div>
               )}
+
+              {detailLoading.planReview && <DetailLoadingCard label="計画レビューを取得中…" />}
+
 
               {/* 無人実行の計画への計画レビュー（#3554）。計画承認パネルが出ない経路なので、同じ
                   位置（対応PRより上）へカードだけを出し、送るのは承認欄の「修正」と同じ`@claude`
@@ -1322,7 +1343,7 @@ export function IssueDetail({
                   上記（計画パネルの上）に出しているので、ここでは非承認待ちのときだけ出す。
                   承認材料としての役目は終えているので、対応PRと同じ畳めるセクション様式にする */}
               {!planDecisionPending && !questionAnswerPending && (
-                <IssueArtifactPanel artifacts={artifacts} onReload={reloadArtifacts} variant="section" />
+                <IssueArtifactPanel artifacts={artifacts} isFailed={isArtifactsFailed} onReload={reloadArtifacts} variant="section" />
               )}
               </>
             }

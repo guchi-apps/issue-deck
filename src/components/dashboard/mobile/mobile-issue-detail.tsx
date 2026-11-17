@@ -25,6 +25,10 @@ import { BodyCleanupButton } from "@/components/dashboard/body-cleanup-button";
 import { CommentThread } from "@/components/dashboard/comment-thread";
 import { DeleteIssueDialog } from "@/components/dashboard/delete-issue-dialog";
 import { IssueArtifactPanel } from "@/components/dashboard/issue-artifact-panel";
+import {
+  DetailLoadingCard,
+  resolveDetailLoading,
+} from "@/components/dashboard/detail-loading-placeholders";
 import { IssueAgentBadge } from "@/components/dashboard/issue-agent-badge";
 import {
   IssueDetailLayout,
@@ -420,6 +424,15 @@ export function MobileIssueDetail({
   }, [planRequest?.id, planReviewJob?.reviewPostedAt, refreshComments]);
   // 未反映の計画レビュー（#3554。PCの詳細と同じ）
   const pendingPlanReview = resolvePendingPlanReview(comments);
+  // 取得が終わるまで「出るはずの欄」の枠を出す（#5471）。該当なしと分かれば消える
+  const detailLoading = resolveDetailLoading({
+    labels: issue.labels,
+    dispatchLoaded: dispatch.isLoaded,
+    planRequestPresent: Boolean(planRequest),
+    artifactsLoaded: isArtifactsLoaded,
+    commentsLoading: isLoading,
+    planReviewPresent: Boolean(pendingPlanReview),
+  });
   // 計画レビューは計画の投稿から3〜6分で届く。開いたままでも「反映」ボタンが出るよう、
   // 承認待ちでレビュー未着のあいだだけ1分おきにコメントを取り直す（#3521）
   const awaitingPlanReview = planDecisionPending && !isPlanReviewPending(comments);
@@ -1133,7 +1146,7 @@ export function MobileIssueDetail({
                 どちらよりも上に置く（#2860でアーティファクトを計画の上へ移した後も変わらない） */}
             {/* 計画なしの質問待ちのアーティファクト（#3686）。PC版と同じく質問パネルのすぐ上へ出す */}
             {questionAnswerPending && !planDecisionPending && (
-              <IssueArtifactPanel artifacts={artifacts} onReload={reloadArtifacts} />
+              <IssueArtifactPanel artifacts={artifacts} isFailed={isArtifactsFailed} onReload={reloadArtifacts} />
             )}
 
             {questionRequest && (
@@ -1155,8 +1168,13 @@ export function MobileIssueDetail({
                 計画パネルのすぐ上に置く（#2190）。承認後の本来の置き場所は対応PRの並びの上側
                 （下記）で、ここに出すのは初めて見るときに見逃されないようにするための一時的な位置 */}
             {planDecisionPending && (
-              <IssueArtifactPanel artifacts={artifacts} onReload={reloadArtifacts} />
+              <IssueArtifactPanel artifacts={artifacts} isFailed={isArtifactsFailed} onReload={reloadArtifacts} />
             )}
+
+            {detailLoading.artifacts && <DetailLoadingCard label="アーティファクトを取得中…" tall />}
+
+            {detailLoading.plan && <DetailLoadingCard label="計画を確認中…" />}
+
 
             {/* 計画の承認・修正（#2061）。**セッション表示のすぐ下**に置く（PCの詳細と同じ位置）。
                 待っている間セッションは止まっているので、このIssueで今いちばん急ぐ操作になる */}
@@ -1179,6 +1197,9 @@ export function MobileIssueDetail({
                 />
               </div>
             )}
+
+            {detailLoading.planReview && <DetailLoadingCard label="計画レビューを取得中…" />}
+
 
             {/* 無人実行の計画への計画レビュー（#3554。PCの詳細と同じ条件・同じ送り先） */}
             {executionTarget.expectsActionsRun &&
@@ -1296,7 +1317,7 @@ export function MobileIssueDetail({
                 上記（計画パネルの上）に出しているので、ここでは非承認待ちのときだけ出す。
                 承認材料としての役目は終えているので、対応PRと同じ畳めるセクション様式にする */}
             {!planDecisionPending && !questionAnswerPending && (
-              <IssueArtifactPanel artifacts={artifacts} onReload={reloadArtifacts} variant="section" />
+              <IssueArtifactPanel artifacts={artifacts} isFailed={isArtifactsFailed} onReload={reloadArtifacts} variant="section" />
             )}
             </>
           }
