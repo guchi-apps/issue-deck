@@ -43,6 +43,35 @@ export function pickedPullRequestNumbers(
 }
 
 /**
+ * mainの直近の本流からcherry-pickで取り込まれたPR番号を集める（#5469。リリース内容の一覧で使う）。
+ * 見るのはブランチ画面（`branches-api.ts`）と同じ直近100件で、それより古い取り込みは拾わない。
+ * **取得に失敗したら空集合**（呼び出し側は何も外さず、従来どおり並べる）
+ */
+export async function fetchMainPickedPullRequestNumbers(owner: string, repo: string, token: string): Promise<Set<number>> {
+  try {
+    const data = await githubGraphql<{
+      repository: {
+        ref: { target: { history?: { nodes?: ({ messageHeadline?: string | null; parents?: { totalCount?: number | null } | null } | null)[] | null } | null } | null } | null;
+      } | null;
+    }>(
+      token,
+      `query($owner: String!, $name: String!) {
+  repository(owner: $owner, name: $name) {
+    ref(qualifiedName: "refs/heads/main") { target { ... on Commit { history(first: 100) { nodes { messageHeadline parents { totalCount } } } } } }
+  }
+}`,
+      { owner, name: repo },
+      "main picked pull requests",
+    );
+    const nodes = data.repository?.ref?.target?.history?.nodes ?? [];
+    return pickedPullRequestNumbers(nodes.flatMap((node) => (node ? [node] : [])));
+  } catch (error) {
+    console.warn(`[fetchMainPickedPullRequestNumbers] ${owner}/${repo}:`, error);
+    return new Set();
+  }
+}
+
+/**
  * PRが変更した各ファイルの、mainとdevelop先端のblob OIDから反映状態を決める（純関数）。
  * ファイルが取れていない（`null`）・0件のPRは確かめようがないので`unknown`。
  */

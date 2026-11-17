@@ -53,6 +53,41 @@ export function toReleaseChanges(commits: readonly PullRequestCommitSource[]): {
 }
 
 /**
+ * 前のリリースでmainへcherry-pickで取り込み済みのPRを、一覧から外す（#5469）。
+ *
+ * 新方式の候補は関連修正を`cherry-pick -m 1`で足すため、developの元のマージ（親2つ）はmainの祖先にならず、
+ * 次のリリースの範囲に残る。workflowはリリースPR本文からこれを外している（`RELEASED_BY_PICK`）ので、画面も揃える。
+ *
+ * - **入力コミットは間引かない。** `toReleaseChanges`の結果から外す（マージコミットはブランチ内コミットの
+ *   重複判定に使われるため、先に消すとそれらが個別の行として復活する）
+ * - 外すのは、範囲内のそのPRのマージが全て親2つ（developの元のマージ）で、`picked`（mainの本流にある
+ *   親1つの`Merge pull request #N`）に番号があるものだけ。候補自身のcherry-pick（親1つ）は外さない
+ * - 親の数が分からないコミットがあれば、そのPRは外さない（断定できないものは従来どおり並べる）
+ */
+export function withoutReleasedByPick(
+  pullRequests: readonly ReleaseChangePullRequest[],
+  commits: readonly { message: string; parentCount: number | null }[],
+  picked: ReadonlySet<number>,
+): { pullRequests: ReleaseChangePullRequest[]; releasedByPick: number[] } {
+  if (picked.size === 0) return { pullRequests: [...pullRequests], releasedByPick: [] };
+  const merges = new Map<number, (number | null)[]>();
+  for (const commit of commits) {
+    const match = /^Merge pull request #(\d+) from /.exec(commit.message.split("\n", 1)[0] ?? "");
+    if (!match) continue;
+    const number = Number(match[1]);
+    merges.set(number, [...(merges.get(number) ?? []), commit.parentCount]);
+  }
+  const released = new Set<number>();
+  for (const [number, parents] of merges) {
+    if (picked.has(number) && parents.every((count) => count !== null && count >= 2)) released.add(number);
+  }
+  return {
+    pullRequests: pullRequests.filter((pr) => pr.isVersionBump || !released.has(pr.number)),
+    releasedByPick: [...released].sort((a, b) => a - b),
+  };
+}
+
+/**
  * 各PRへ、取得したPR本文から読んだ判定を付ける（#4245）。
  *
  * `bodies`に無いPRは「本文を取得できなかった」として`reviewUnavailable`にする。**記録が無い
