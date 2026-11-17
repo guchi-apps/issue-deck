@@ -120,7 +120,6 @@ function renderFlow(input: {
   fetchedAt?: string | null;
   error?: string | null;
   isRefreshing?: boolean;
-  isLoading?: boolean;
   /** 自動更新の間隔（#1767）。既定は「自動更新しない」 */
   autoRefreshIntervalMs?: number | null;
   /** デプロイ状況だけが回っている間隔（#1797）。既定は回っていない */
@@ -154,7 +153,7 @@ function renderFlow(input: {
     <BranchFlowView
       flow={flow}
       fetchedAt={input.fetchedAt === undefined ? "2026-08-15T10:30:00Z" : input.fetchedAt}
-      isLoading={input.isLoading ?? false}
+      isLoading={false}
       isRefreshing={input.isRefreshing}
       error={input.error ?? null}
       failedRepositories={input.failedRepositories ?? []}
@@ -2705,20 +2704,6 @@ describe("BranchFlowView の自動更新（#1767）", () => {
     const refreshButton = screen.getByRole("button", { name: "更新" });
     expect(refreshButton.hasAttribute("disabled")).toBe(false);
     expect(refreshButton.querySelectorAll(".animate-spin").length).toBe(1);
-  });
-
-  it("画面を開いて取得している間は「最新の情報を取得中」を出し、行を薄くする（#5467）", () => {
-    renderFlow({ isLoading: true });
-
-    expect(screen.getByTestId("branch-flow-fetching").textContent).toContain("最新の情報を取得中");
-    expect(screen.getAllByRole("button", { expanded: false })[0].className).toContain("opacity-60");
-  });
-
-  it("取得が終われば「取得中」の表示は消える（自動更新のisRefreshingだけでは出さない）（#5467）", () => {
-    renderFlow({ isLoading: false, isRefreshing: true });
-
-    expect(screen.queryByTestId("branch-flow-fetching")).toBeNull();
-    expect(screen.queryByTestId("fetching-badge")).toBeNull();
   });
 
   it("取得していない間は更新アイコンを回さない", () => {

@@ -1183,29 +1183,6 @@ function ReleaseStagePills({ stages, fallback }: { stages: ReleaseStageBadge[]; 
  */
 const BranchFlowRefreshContext = createContext<(() => void) | null>(null);
 
-/**
- * 画面を開いた時・手動更新で最新の情報を取りに行っている間だけ真（#5467）。
- * 画面は前回取得した内容を先に出すため、取得が終わるまでの間は古い可能性があることを行・カードへ伝える。
- * 自動更新（バックグラウンド）では`isLoading`が立たないので、周期ごとに点滅することはない（#1767）。
- */
-const BranchFlowFetchingContext = createContext(false);
-
-/** 古い可能性がある内容に添える「取得中」の印（#5467） */
-function FetchingBadge({ className }: { className?: string }) {
-  return (
-    <span
-      className={cn(
-        "inline-flex shrink-0 items-center gap-1 rounded-full border border-primary/50 px-2 text-[11px] font-semibold text-primary",
-        className,
-      )}
-      data-testid="fetching-badge"
-    >
-      <Loader2 className="size-3 animate-spin motion-reduce:animate-none" aria-hidden="true" />
-      取得中
-    </span>
-  );
-}
-
 /** 「過去のリリース」の追加取得（#4844）。束の描画の途中に何段もあるため、propsではなくContextで届ける */
 const BranchFlowHistoryContext = createContext<BranchFlowReleaseHistory | null>(null);
 
@@ -1685,7 +1662,6 @@ function NextReleaseCard({
 }) {
   const navigation = useGithubReferenceNavigation();
   const refreshFlow = useContext(BranchFlowRefreshContext);
-  const isFetching = useContext(BranchFlowFetchingContext);
   const pullRequest = group?.pullRequest && group.pullRequest.state === "open" ? group.pullRequest : null;
 
   // カード全体を押すと本番PRへ移動する（#4721）。内側の操作（公開ボタン・リンク・検証の開閉）や
@@ -1745,18 +1721,13 @@ function NextReleaseCard({
       className="@container mb-3 flex flex-col gap-2.5 rounded-[10px] border bg-card p-3 text-xs"
       data-testid="next-release-card"
     >
-      <div className="flex items-center justify-between gap-2">
-        <p className="text-xs font-semibold tracking-wide text-primary">次のリリース</p>
-        {isFetching && <FetchingBadge />}
-      </div>
+      <p className="text-xs font-semibold tracking-wide text-primary">次のリリース</p>
 
       {/* 1. 現在のリリース候補・工程・いま・担当・次（#4635・#5076）。本番版・履歴より先に出す */}
       <div
         className={cn(
           "flex flex-col gap-1.5 rounded-md border-2 border-primary/60 px-2.5 py-2",
           pullRequest && "cursor-pointer hover:bg-muted/40",
-          // 取得が終わるまでは古い可能性がある内容として薄く出す（#5467）
-          isFetching && "opacity-60",
         )}
         data-testid="next-release-candidate"
         onClick={openPullRequestFromCard}
@@ -2541,7 +2512,6 @@ function RepositorySummaryRow({
   const guidance = describeBranchFlow(repository, {
     branchesFailed, releaseLaunching, verification, unreleasedCount: unreleased.count,
   });
-  const isFetching = useContext(BranchFlowFetchingContext);
 
   return (
     <button
@@ -2554,8 +2524,6 @@ function RepositorySummaryRow({
         // 2行目が無い行でも押しやすい高さを保つ（#4848。スマホは指で押すので少し高く）
         "flex min-h-[52px] w-full flex-col justify-center gap-1 border-b px-4 py-2 text-left hover:bg-accent/50 md:min-h-12",
         isOpen && "bg-muted/60",
-        // 取得が終わるまでは古い可能性がある内容として薄く出す（#5467）
-        isFetching && "opacity-60",
         // 枠線のぶん左padding を詰めて、選択中でない行と文字の位置を揃える
         showSelectionMarker && "border-l-2 border-l-transparent pl-3.5",
         showSelectionMarker && isOpen && "border-l-primary",
@@ -3188,7 +3156,6 @@ export function BranchFlowView({
   return (
     <IosFixIssueDraftContext.Provider value={onDraftIosFixIssue}>
     <BranchFlowRefreshContext.Provider value={onRefresh}>
-    <BranchFlowFetchingContext.Provider value={isLoading}>
     <BranchFlowHistoryContext.Provider value={releaseHistory ?? null}>
     <div ref={layoutRef} className={cn("flex flex-col overflow-hidden", className)} style={style}>
       {/*
@@ -3206,21 +3173,6 @@ export function BranchFlowView({
             >
               ブランチ
             </h1>
-            {/* 前回の内容が先に出ているあいだは、取得中であることを別の行で伝える（#5467）。
-                `<p>`は truncate で、スマホでは末尾が切れて見えなくなる */}
-            {isLoading && (
-              <p
-                role="status"
-                className="flex items-center gap-1 text-xs font-semibold text-primary"
-                data-testid="branch-flow-fetching"
-              >
-                <Loader2 className="size-3 shrink-0 animate-spin motion-reduce:animate-none" aria-hidden="true" />
-                最新の情報を取得中…
-                {fetchedAt && (
-                  <span className="font-normal text-muted-foreground">{`（${formatTimeOfDay(fetchedAt)}時点の内容を表示中）`}</span>
-                )}
-              </p>
-            )}
             <p className="truncate text-xs text-muted-foreground">
               <span>{shownRepositories.length}リポジトリ</span>
               {/* 設定（ブランチ画面）で省いている件数。全体非表示（設定の「全体に表示」）とは別で、
@@ -3423,7 +3375,6 @@ export function BranchFlowView({
       </div>
     </div>
     </BranchFlowHistoryContext.Provider>
-    </BranchFlowFetchingContext.Provider>
     </BranchFlowRefreshContext.Provider>
     </IosFixIssueDraftContext.Provider>
   );
